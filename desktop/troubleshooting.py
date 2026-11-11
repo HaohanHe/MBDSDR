@@ -90,7 +90,7 @@ NEXT_STEPS: Dict[str, str] = {
         "仍未出声就看「控制」面板的音量与静噪门限。"),
     "sample_rate_not_supported": (
         "在「控制」面板把「采样率」降到设备支持的档位（如 2.048 MS/s）；"
-        "调谐步进可在「设置」→「频谱与解码」的「调谐步进」`tuning_step_hz` 调整。"),
+        "调谐步进可在「设置」→「接收与频谱」的「调谐步进」`tuning_step_hz` 调整。"),
     "frequency_out_of_range": (
         "把频率改回设备标称范围：在「控制」面板直接输入，或按「频率 −1 格」"
         "逐步调；书签里的超范围频率也要一并改掉。"),
@@ -99,7 +99,7 @@ NEXT_STEPS: Dict[str, str] = {
         "驱动未装好前界面会如实显示无设备，不会伪造信号。"),
     "missing_dependency": (
         "把缺失的内置模块文件恢复到程序目录后重启；若只想先录音，在「设置」"
-        "→「存储与日志」把「录音目录」`record_dir` 指到可写目录再试。"),
+        "→「数据与操作」把「录音目录」`record_dir` 指到可写目录再试。"),
     "network_unreachable": (
         "检查网络或 DNS 后重试「更新卫星 TLE」；rtl_tcp 远端连不上时，在设备"
         "对话框选「远程 rtl_tcp 源」并填对方 IP 与端口。"),
@@ -107,10 +107,10 @@ NEXT_STEPS: Dict[str, str] = {
         "先确认网络/DNS 与系统代理可用，再重试「更新卫星 TLE」；远端 rtl_tcp 超时"
         "就在设备对话框选「远程 rtl_tcp 源」，确认对方 IP 与端口可达后再连。"),
     "disk_full": (
-        "清理磁盘后，在「设置」→「存储与日志」把「录音目录」`record_dir` 换到"
+        "清理磁盘后，在「设置」→「数据与操作」把「录音目录」`record_dir` 换到"
         "剩余空间更大的盘，再点「开始/停止录音」。"),
     "not_writable": (
-        "在「设置」→「存储与日志」把「录音目录」`record_dir` 指到有写权限的"
+        "在「设置」→「数据与操作」把「录音目录」`record_dir` 指到有写权限的"
         "位置（如 文档/MBDSDR），不要选 Program Files。"),
     "api_key_not_set": (
         "在「AI 助手」页签点「配置」填入模型 API Key（存到 ~/.mbdsdr/config.json，"

@@ -2,9 +2,13 @@
 """帮助条目「操作路径」核验器。
 
 帮助文案里的路径用「」标出控件/页签名、用 ``→`` 表示层级，例如
-``「设置」→「存储与日志」``、``「音频输出 → 输出设备」``。控件改名或面板
+``「设置」→「数据与操作」``、``「音频输出 → 输出设备」``。控件改名或面板
 搬家后，文案会变成假话，而用户照着做会一直找不到。本脚本把**每一段**
 拿去生产源码里找字符串字面量：找不到就报红，并给出条目 key。
+
+「设置」→「X」的 X 只认 ``settings_panel.PANEL_SECTIONS`` 里**真正渲染**的
+节名（源码 AST 解析，不 import Qt）；``config_schema.GROUP_ORDER`` 是 schema
+侧的数据分组，面板重排后两者不再等价，拿它验文案会假绿。
 
 只读 git 索引/工作区里的源码文本，不启动 Qt、不 import 桌面 UI。
 
@@ -15,6 +19,7 @@
 from __future__ import annotations
 
 import argparse
+import ast
 import os
 import re
 import subprocess
@@ -23,7 +28,6 @@ import sys
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(_ROOT, "desktop"))
 
-import config_schema  # noqa: E402
 import troubleshooting as ts  # noqa: E402
 
 #: 只查生产代码；tests/ 与 docs/ 里的同名不算「用户能看到」。
@@ -202,11 +206,46 @@ def check_mechanisms() -> list[str]:
     return problems
 
 
+def rendered_settings_sections() -> dict[str, tuple[str, ...]]:
+    """设置面板**真正渲染**的节标题 → 该节包含的设置键。
+
+    从 ``desktop/settings_panel.py`` 的 ``PANEL_SECTIONS`` 字面量解析（AST，
+    不 import Qt）。不能用 ``config_schema.GROUP_ORDER`` 代替：那是 schema 侧
+    的数据分组（导入/导出/文档用），面板已按用途重排成 6 节；拿 schema 分组
+    验文案，「存储与日志」这种已并入别页的旧名会假绿（P1-41 的根因）。
+    """
+    path = os.path.join(_ROOT, "desktop", "settings_panel.py")
+    with open(path, encoding="utf-8") as f:
+        tree = ast.parse(f.read())
+    value = None
+    for node in tree.body:
+        if isinstance(node, ast.AnnAssign):
+            target, rhs = node.target, node.value
+        elif isinstance(node, ast.Assign) and len(node.targets) == 1:
+            target, rhs = node.targets[0], node.value
+        else:
+            continue
+        if getattr(target, "id", "") == "PANEL_SECTIONS":
+            value = rhs
+            break
+    if value is None:
+        return {}
+    try:
+        data = ast.literal_eval(value)
+    except (ValueError, SyntaxError):
+        return {}
+    out: dict[str, tuple[str, ...]] = {}
+    for row in data:
+        if isinstance(row, (tuple, list)) and len(row) >= 3 and isinstance(row[0], str):
+            out[row[0]] = tuple(k for k in row[2] if isinstance(k, str))
+    return out
+
+
 def check_paths() -> list[str]:
     """返回所有问题；空列表 = 全绿。"""
     problems: list[str] = []
     cache: dict[str, bool] = {}
-    groups = set(config_schema.GROUP_ORDER)
+    groups = rendered_settings_sections()
     for key, text in _remedy_texts().items():
         for seg in segments_of(text):
             ok, why = _literal_ok(seg, cache)
@@ -214,7 +253,7 @@ def check_paths() -> list[str]:
                 problems.append(f"{key}: 界面词「{seg}」{why}")
         for group in re.findall(r"「设置」\s*→\s*「([^」]+)」", text):
             if group not in groups:
-                problems.append(f"{key}: 设置里没有「{group}」这一页")
+                problems.append(f"{key}: 设置面板里没有「{group}」这一节")
     return problems
 
 
@@ -222,7 +261,7 @@ def _markdown_table() -> str:
     rows = ["| code / 条目 | 路径分段（→ 链） | 结果 |",
             "| --- | --- | --- |"]
     cache: dict[str, bool] = {}
-    groups = set(config_schema.GROUP_ORDER)
+    groups = set(rendered_settings_sections())
     for key, text in _remedy_texts().items():
         segs = segments_of(text)
         bad = [s for s in segs if not _literal_ok(s, cache)[0]]

@@ -10,7 +10,8 @@
 「词 → 文件」映射表）：
   * 每个「」里的界面词，必须在生产源码里作为**字符串字面量**出现；
   * ``→`` 链的每一段单独成立（一段找不到就红）；
-  * 「设置 → X」的 X 必须真的是 ``config_schema.GROUP_ORDER`` 里的分组；
+  * 「设置 → X」的 X 必须真的是 ``settings_panel.PANEL_SECTIONS`` 里渲染的节，
+    不能用 schema 侧 ``GROUP_ORDER`` 顶替（面板重排后旧名会假绿）；
   * 文档第三节引用的渲染点行号必须仍落在渲染字面量上（防行号漂移）；
   * 文案承诺的操作结果（采样率整数倍、最短一帧等）必须有代码机制支撑。
 
@@ -27,7 +28,6 @@ sys.path.insert(0, _ROOT)
 sys.path.insert(0, os.path.join(_ROOT, "desktop"))
 sys.path.insert(0, os.path.join(_ROOT, "scripts"))
 
-import config_schema  # noqa: E402
 import troubleshooting as ts  # noqa: E402
 import check_help_paths as chp  # noqa: E402
 
@@ -47,16 +47,27 @@ def test_every_path_segment_is_a_real_ui_literal():
 
 
 def test_settings_path_depth_matches_real_groups():
-    """「设置」→「X」：X 必须是设置面板真实分页（GROUP_ORDER 成员）。"""
+    """「设置」→「X」：X 必须是设置面板真实渲染的节（PANEL_SECTIONS）。"""
     import re
 
-    groups = set(config_schema.GROUP_ORDER)
+    groups = set(chp.rendered_settings_sections())
+    assert groups, "解析不到 settings_panel.PANEL_SECTIONS"
     problems = []
     for key, text in _help_texts().items():
         for group in re.findall(r"「设置」\s*→\s*「([^」]+)」", text):
             if group not in groups:
-                problems.append(f"{key}: 设置里没有「{group}」这一页")
+                problems.append(f"{key}: 设置面板里没有「{group}」这一节")
     assert not problems, "\n".join(problems)
+
+
+def test_counterexample_stale_settings_page_turns_red(monkeypatch):
+    """反证：旧节名「存储与日志」只活在 schema 分组里，必须报红。"""
+    assert "存储与日志" not in chp.rendered_settings_sections()
+    monkeypatch.setitem(
+        ts.NEXT_STEPS, "disk_full",
+        "在「设置」→「存储与日志」把「录音目录」`record_dir` 换盘。")
+    problems = chp.check_paths()
+    assert any("存储与日志" in p for p in problems), problems
 
 
 def test_doc_render_points_still_exist():
