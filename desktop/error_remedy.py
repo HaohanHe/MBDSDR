@@ -75,10 +75,6 @@ _NO_ENTRY_BY_REASON: Dict[str, tuple] = {
         "playback_failed", "bad_parameter", "tx_source_deleted",
         "tx_source_failed", "already_exists",
     ),
-    "TLE 细项（限流/HTTP/解析）：过境面板与状态栏现在直接渲染 code + 原因 + 建议动作（`tle_fetch.failure_copy`）；帮助条目只覆盖精选码": (
-        "rate_limited", "http_4xx", "http_5xx", "network_other",
-        "parse_failure", "empty_response", "tle_unknown",
-    ),
     "回放标注（非故障）：回放面板在频率读数旁直接渲染「录制真实值 / 上报值」双值标注，不设帮助入口": (
         "freq_reported_only",
     ),

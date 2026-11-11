@@ -214,6 +214,18 @@ VISIBLE_BY_FAMILY: Dict[str, Tuple[str, ...]] = {
         "link_timeout", "link_refused", "link_half_open", "link_reset",
         "buffer_overflow",
     ),
+    # TLE 抓取族：状态栏 ``_on_tle_update_result`` 走
+    # ``tle_fetch.tle_refresh_status_text`` 渲染
+    # ``TLE 在线更新失败（{code}：{label}）：{reason}；建议：{action}``，
+    # 过境面板 ``new_spacetime_panel._compute_refresh`` 渲染
+    # ``未获取 TLE：{code}：{label} — {reason}；建议：{action}``——
+    # 两条通道都显示 code 字面量，用户会拿码来查帮助。
+    # 修法各不相同（限流等退避、4xx 换星、5xx 等服务端、解析失败换源），
+    # 因此逐码写在 CODE_NEXT_STEPS。
+    "TLE 抓取": (
+        "rate_limited", "http_4xx", "http_5xx", "network_other",
+        "parse_failure", "empty_response", "tle_unknown",
+    ),
 }
 
 #: 每个族一条「下一步」：必须点到具体控件名，禁止空话。
@@ -249,6 +261,9 @@ VISIBLE_NEXT_STEPS: Dict[str, str] = {
         "先在顶栏点「连接」重连；rtl_tcp 确认启动命令 `rtl_tcp -a <本机IP> -p <端口>` "
         "仍在跑、SpyServer 确认端口号；防火墙放行本机 IP。数据流中断但连接未断时"
         "先等两倍心跳（10s）看是否自动恢复，仍无数据再重连。"),
+    "TLE 抓取": (
+        "在「卫星跟踪」页签点「刷新星历」（等同「工具」→「更新卫星 TLE」）重试；"
+        "失败会带码与原因显示在状态栏，按码处理，别把失败当成星历已更新。"),
 }
 
 #: 解码结果族里原因码各异，「下一步」逐码写具体动作（族级一条盖不住：
@@ -286,6 +301,32 @@ CODE_NEXT_STEPS: Dict[str, str] = {
         "该模式只有文件级解码：点顶栏「回放」（Ctrl+Shift+R）载入已录制的 "
         ".iq/.wav 文件离线解码；要实时流式只能切到「ADS-B 航路」或「APRS "
         "数据包」面板用 adsb/rds 两种模式，其余模式走 `--decode-file` 命令行。"),
+    # ── TLE 抓取族：逐码与 tle_fetch.failure_copy 的 action 对齐 ──────
+    "rate_limited": (
+        "这是 TLE 源返回 429 限流，不是本机故障：等退避结束（首次约 1 分钟，"
+        "源给了 Retry-After 就按它延长）后再在「卫星跟踪」页签点「刷新星历」；"
+        "连续点只会继续被拒。"),
+    "http_4xx": (
+        "源拒绝了这次请求；若状态栏标签写着星历不存在，说明该 NORAD 编号在源里"
+        "没有数据，别反复重试——在「卫星跟踪」页签换一颗目录内的卫星，或等该对象"
+        "重新入源后再点「刷新星历」。"),
+    "http_5xx": (
+        "5xx 是 TLE 源服务端故障，不是本机问题：按退避时间（首次约 1 分钟，"
+        "逐次翻倍）等够后再在「卫星跟踪」页签点「刷新星历」；等待期间沿用缓存"
+        "星历，可以继续跟踪。"),
+    "network_other": (
+        "先在「卫星跟踪」页签点「刷新星历」重试；连续失败就换数据源——界面没有"
+        "切换 TLE 源的下拉框，换源只能把 .tle 文件放进 ~/.mbdsdr/tle/ 后重启程序。"),
+    "parse_failure": (
+        "响应体不是合法两行根数（数据损坏）：在「卫星跟踪」页签再点一次「刷新星历」；"
+        "仍失败就换源，把 .tle 文件放进 ~/.mbdsdr/tle/ 后重启程序。"),
+    "empty_response": (
+        "源返回空响应，多是被请求的 NORAD 编号在源里没有数据：在「卫星跟踪」页签"
+        "换一颗卫星后点「刷新星历」；整批都空时先等一会儿再试，不要连续重试。"),
+    "tle_unknown": (
+        "这次刷新没拿到可判定的失败原因（常见于离线模式或缺依赖）：先确认网络"
+        "可用，再在「卫星跟踪」页签点「刷新星历」复现一次；仍只有这个码就把状态栏"
+        "原文记下来反馈，别当成星历已过期。"),
 }
 
 #: 上述各族的扁平索引（测试与映射完整性检查用）

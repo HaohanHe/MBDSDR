@@ -86,6 +86,19 @@ def qtapp():
 def main_window(qtapp, isolated_profile):
     from main_window import MainWindow
     w = MainWindow()
+    # 设置页是惰性构建的：SettingsPanel 只在首次 showEvent 里调
+    # ``_ensure_ui_built()`` 建出四个分节标题与逐行控件。启动态（从未 show()）
+    # 的控件树里没有「接收与频谱」「数据与操作」「调谐步进」「选择目录…」，
+    # 扫描会把指向设置分节的帮助路径误判为「真窗口里找不到」。
+    #
+    # 修在检查侧而不让产品提前构建：检查不该依赖「某个面板恰好被显示过」，
+    # 也不该为一个文本断言去改设置面板的启动成本。这里显式物化，手法与
+    # tests/test_settings_schema.py 的 ``env`` fixture 一致（调补建入口，
+    # 不 show()——show 会让 reset_all(confirm=True) 弹出确认框）。
+    # 物化只建控件，不放宽断言：分节标题写错照样在 ``_text_index`` 里查不到。
+    panel = getattr(w, "settings_panel", None)
+    if panel is not None:
+        panel._ensure_ui_built()
     yield w
     try:
         w._disconnect()

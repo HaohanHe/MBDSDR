@@ -188,6 +188,11 @@ def failure_copy(kind: str, detail: str = "",
     elif kind == "parse_failure":
         label = "返回数据损坏/解析失败"
         action = catalog_suggestion(kind)
+    elif kind == "rate_limited":
+        # 目录里的建议是 "{retry_in} 秒后再试。"；抓取链路拿不到那个占位符的
+        # 实际秒数（退避由 Retry-After/策略决定），原样渲染等于把模板给用户看。
+        label = FAILURE_LABELS.get(kind, kind)
+        action = "等退避结束（首次约 1 分钟，源给了 Retry-After 就按它延长）后再重试。"
     else:
         spec = ERRORS.get(kind) or ERRORS["tle_unknown"]
         label = spec.meaning
