@@ -12484,8 +12484,14 @@ class MainWindow(QMainWindow):
             self._sat_tune_blocked_reason = ""
             try:
                 self._on_tune_sdr(float(tune_hz), self._sat_track_mode)
-            except Exception:
-                pass
+                self._sat_tune_failed_reason = ""
+            except Exception as exc:  # noqa: BLE001 - 必须留痕，不许静默
+                reason = f"{type(exc).__name__}: {exc}"
+                logger.debug("卫星跟踪调谐下发失败：%s", reason)
+                if reason != getattr(self, "_sat_tune_failed_reason", ""):
+                    self._sat_tune_failed_reason = reason
+                    self.statusBar().showMessage(
+                        f"调谐下发失败：{reason}", MSG_IMPORTANT)
         else:
             blocked = (
                 f"{tune_policy.get('label') or '星历不可用'}"
