@@ -201,16 +201,26 @@ module 级 `mw` 先于 function 级 autouse 实例化，`MainWindow()` 在隔离
 - `test_device_capability_probe`：**保留**。它的 autouse 是文件里唯一的隔离，且只覆盖
   function 级用例体，删掉会真的失去保护。
 
-## 8. 三次他线在途破坏（本进程内全绿 ≠ 跨进程无假红）
+## 8. 四次他线在途破坏（本进程内全绿 ≠ 跨进程无假红）
 
 | 时间（11-11） | 现象 | 影响 | 处置 |
 |---|---|---|---|
 | 约 22:20 | `settings_panel.SettingsPanel` 缺 `_restore_expanded_state`（AttributeError） | 两个 record 文件 8 error | 未干预，约 1 分钟后自愈 |
 | 约 22:26 | `tests/conftest.py` `NameError: _collects_qt_tests`（Qt 锁门控改名中，roadmap-64-70 在途） | 合并会话直接 INTERNALERROR，no tests ran | 未碰该文件，等其收尾后重跑 |
 | 约 22:31 | `desktop/main_window.py` `SyntaxError: expected 'except' or 'finally'`（卫星线在途） | 所有构造 MainWindow 的用例 2 error | 未干预，约 2 分钟后自愈 |
+| 22:48 之后（29 文件合并会话内） | `settings_panel.py` 的「调用」已写、「定义」未写：`refresh_font_scale_note` 只存在于工作区 +23 行，`git show HEAD:desktop/settings_panel.py` 0 命中 | 守门用例的子进程导入半成品 → `AttributeError`；报错里只有方法名，`tests/` 下 `git grep` 与 `--collect-only` 都找不到对应 nodeid | 未干预；复跑 `tests/test_planetarium_entry_visibility.py::test_overlay_avoids_ai_bar_only_on_intersection` 已 `1 passed`。不是产品红，已从「需他人接手」撤掉 |
 
-三条都不由隔离改动引起，但都说明：**守卫生效的前提是同一时刻只有一个进程在写真实配置**；
+四条都不由隔离改动引起，但都说明：**守卫生效的前提是同一时刻只有一个进程在写真实配置**；
 并发会话里出现的 `[mbdsdr-guard]` 可能来自别的进程，不能直接归给当前用例。
+
+第 4 例值得单独记一条普遍形式，因为它的形态和前三条不同：
+
+> **「调用」与「定义」分两次写盘 → 任何在此窗口内起子进程/导入模块的会话都会看到半成品。**
+> 所以在途破坏不只是「文件被改」，还包括「模块处于语法完整但契约不完整的中间态」。
+
+推论（判断这类红的形状）：报错落在**导入期或构造期**、且方法名在已提交代码里查无此物时，
+先怀疑工作区未提交的半成品，而不是被测逻辑；用 `git show HEAD:<path> | grep <符号>` 一步即可定性。
+反过来，若报错是断言失败而非 `AttributeError`/`SyntaxError`，才轮到怀疑尺子（`isVisible()` 在未 `show()` 的窗口上恒为 False 这类）。
 
 ## 9. 本次提交
 
