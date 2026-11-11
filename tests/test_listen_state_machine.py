@@ -24,7 +24,7 @@ def qtapp():
 
 
 @pytest.fixture(scope="module")
-def win(qtapp):
+def win(qtapp, isolated_profile):
     """module 共用 MainWindow：每例新建会累积挂起（本项目已知坑）。
 
     直接构造 MainWindow 会写用户真实 %APPDATA% 配置，所以隔离 HOME/
