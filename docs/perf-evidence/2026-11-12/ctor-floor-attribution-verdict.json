@@ -1,0 +1,104 @@
+{
+ "kind": "主窗 ctor 1573.6 vs 基线 1048.3 差 +525 的归因：地板是否被付了两次",
+ "date": "2026-11-12",
+ "question": "生产路径里 splash 的 drawText 已付过排版地板，ctor 里的 +525 是否又是它？（同进程先付地板再建主窗，看 ctor 是否回到 ~1048）",
+ "answer_short": "不是。先付地板后 ctor 回到 1078.6（基线 1048.3 +30.3），地板只付了一次；生产 ctor 的 +525 由「建树前已 setStyleSheet」的 ≈+360 与生产入口其余步骤的 ≈+135 组成。",
+ "head_tested": "88e458c8",
+ "snapshot": "git show 88e458c8:desktop/{main_window,module_panel,device_panel,bookmark_panel}.py → %TEMP%\\kilo\\ctorab_head_88e458c8；工作树 main_window.py 归卫星线，未使用",
+ "ruler": {
+  "qt_platform": "windows",
+  "QT_SCALE_FACTOR": "1",
+  "QT_ENABLE_HIGHDPI_SCALING": "0",
+  "font": "MiSans",
+  "pt": 10.0,
+  "profile": "每臂独立进程 + 独立临时 profile（QSettings Ini + layouts.json 空）"
+ },
+ "load_rule": "规则 10：父进程每个子 run 前 2 s 低负载门（python 进程总占比 <200%），子进程跑完再采一次；各 run 明细在各 JSON 的 load_gate_before_python_pct / load_after。",
+ "arms": {
+  "cold": {
+   "definition": "不预暖、不预应用主题（基线脚本口径）",
+   "ctor_ms": {"runs": [1364.7, 1325.9, 1282.8], "median": 1325.9},
+   "sky_total_ms": {"runs": [295.6, 368.9, 303.6], "median": 303.6},
+   "lineedit_max_ms": {"runs": [292.98, 365.65, 299.86], "median": 299.9},
+   "theme_calls_ms": [[160.6, 1.6, 1.0], [149.9, 1.8, 1.4], [147.5, 2.2, 1.2]]
+  },
+  "prewarm": {
+   "definition": "同一进程先用中文 QLabel 真上屏 paint 一次付掉地板，不预应用主题",
+   "ctor_ms": {"runs": [1108.4, 1077.5, 1078.6], "median": 1078.6},
+   "sky_total_ms": {"runs": [3.4, 3.1, 7.0], "median": 3.4},
+   "lineedit_max_ms": {"runs": [0.29, 0.22, 0.41], "median": 0.3},
+   "prewarm_cost_ms": {"runs": [527.5, 487.9, 500.7], "median": 500.7},
+   "prewarm_label_paint_ms": [455.6, 424.5, 437.1],
+   "theme_calls_ms": [[207.5, 1.4, 1.1], [231.3, 1.4, 1.2], [186.9, 1.2, 0.8]]
+  },
+  "preapply": {
+   "definition": "ctor 前只做 theme.apply(app)（生产 main.py:709-713 的一半），不预暖",
+   "ctor_ms": {"runs": [1689.5, 1750.1, 1686.9], "median": 1689.5},
+   "sky_total_ms": {"runs": [3.1, 3.3, 2.9], "median": 3.1},
+   "lineedit_max_ms": {"runs": [0.26, 0.2, 0.19], "median": 0.2},
+   "theme_calls_ms": [[0.9, 0.8, 0.8, 0.8], [1.0, 0.9, 0.9, 0.7], [1.1, 1.1, 1.0, 0.8]],
+   "note": "4 次里的第 1 次是入口 preapply 本身；ctor 内三次全是 early_return。"
+  },
+  "prod": {
+   "definition": "预暖 + 入口 theme.apply（生产入口顺序的最小复刻）",
+   "ctor_ms": {"runs": [1412.4, 1500.2, 1438.1], "median": 1438.1},
+   "sky_total_ms": {"runs": [7.3, 9.2, 3.5], "median": 7.3},
+   "lineedit_max_ms": {"runs": [0.37, 0.65, 0.41], "median": 0.4},
+   "prewarm_cost_ms": {"runs": [503.3, 506.3, 515.1], "median": 506.3},
+   "theme_calls_ms": [[1.4, 0.9, 0.8, 0.6], [1.1, 1.8, 0.8, 0.8], [0.8, 1.0, 0.9, 0.7]]
+  }
+ },
+ "decomposition": {
+  "floor_paid_once": {
+   "cold_to_prewarm_ms": 247.3,
+   "sky_drop_ms": 300.2,
+   "lineedit_outlier_drop_ms": 299.6,
+   "ctor_after_prewarm_ms": 1078.6,
+   "baseline_ctor_ms": 1048.3,
+   "delta_vs_baseline_ms": 30.3,
+   "verdict": "地板只付了一次：预暖后 sky 从 303.6 → 3.4、最慢 QLineEdit 从 299.9 → 0.3，ctor 回到基线的 +30 ms 内。ctor 里没有第二笔 384。"
+  },
+  "theme_preapply_cost": {
+   "preapply_minus_cold_ms": 363.6,
+   "prod_minus_prewarm_ms": 359.5,
+   "median_estimate_ms": 360.0,
+   "mechanism": "建树时 app 级 QSS 已生效 → 每个控件在构造期走 QStyleSheetStyle polish；cold 臂那一次批量全树 setStyleSheet（150–190 ms）被摊进约一千个控件的构造里，净增 ≈360。证据：preapply/prod 两臂 ctor 内 Theme.apply 全是 early_return（0.6–1.1 ms），所以这笔不在 setStyleSheet 里。",
+   "why_baseline_does_not_see_it": "基线脚本不预应用主题（本线 cold 臂同口径），第一次 setStyleSheet 落在 ctor 内。"
+  },
+  "production_residual": {
+   "production_ctor_ms": 1573.6,
+   "prod_arm_ctor_ms": 1438.1,
+   "residual_ms": 135.5,
+   "what_is_missing_in_prod_arm": "真实入口还做了：QSplashScreen 真上屏 + processEvents、_run_import_smoke（T1 里 1110.0 ms 的 import）、_startup_dependency_problems、l10n/设置加载、窗口图标。这些只复刻了「地板已付 + 主题已应用」两件事。",
+   "adds_up": "1078.6（地板已付） + 359.5（主题预应用） + 135.5（入口其余） = 1573.6"
+  }
+ },
+ "baseline_anchor_caveat": {
+  "finding": "2026-11-11 那份 1048.3 的脚本在同一进程里先跑 QFontDatabase.families() + QFontMetrics(app.font()).height()（first-tick-definitions.py:110/124），地板已被量具自己付掉。本线用同一 prelude、在内容与基线读数一致（惰性设置页）的提交 3c23faa2 上重跑 cold：ctor 893.5（856.4–898.1），sky 2.5，最慢 QLineEdit 0.2。",
+  "implication": "1048.3 不是「冷 ctor」，而是「度量已暖的 ctor」。拿它当分母去和生产 ctor（splash 已付地板）比，只在「地板都已付」这一点上对齐；剩余差异里含提交漂移与入口其余步骤，不能整笔记给某个控件。"
+ },
+ "answers": {
+  "q1_ctor_back_to_1048": "是：预暖臂 ctor 1078.6（基线 1048.3 +30.3）。+525 不是地板被付两次。",
+  "q2_if_still_1573": "prewarm 臂没有停在 1573，所以不触发「另一笔不明账」的盲拆；但生产口径的 1573.6 可复现为 1438.1（prod 臂）+135.5（入口其余），其中最大一笔是主题预应用的 ≈+360，可按类型继续拆（见 next）。",
+  "q3_sky_widget_net": "≈2.3 ms：本线 cold 臂 sky_total 与同 run 最慢 QLineEdit 的差为 2.6/3.3/3.7 ms，与卫星线 40b2d27b 的 345.6−343.3=2.3 一致。延后只转移不减少。"
+ },
+ "next": {
+  "target": "主题预应用的 ≈+360：按控件类型拆建树期 QSS polish 成本",
+  "method": "同进程、同快照，preapply 后给 QWidget.__init__ / QLabel.__init__ / QPushButton.__init__ / QComboBox.__init__ / QGroupBox.__init__ 计次与累计（不改 main_window.py，只 patch 类）；按累计 top-N 给账。",
+  "secondary": "入口其余 +135.5：分别加回 splash 上屏、_run_import_smoke、deps 探测，各测一臂。"
+ },
+ "scripts": [
+  "scripts/repro/2026-11-12-ctor-floor-prewarm-ab.py --runs 3 --rev 88e458c8",
+  "scripts/repro/2026-11-12-ctor-floor-prewarm-ab.py --runs 3 --arms preapply --rev 88e458c8 --out ctor-floor-preapply-only.json",
+  "scripts/repro/2026-11-12-ctor-floor-prewarm-ab.py --runs 3 --arms cold --rev 3c23faa2 --out ctor-floor-cold-at-lazy-settings.json",
+  "$env:MBDSDR_PRELUDE=families; python scripts/repro/2026-11-12-ctor-floor-prewarm-ab.py --runs 3 --arms cold --rev 3c23faa2 --out ctor-floor-cold-families-prelude.json"
+ ],
+ "sources": [
+  "docs/perf-evidence/2026-11-12/ctor-floor-prewarm-ab.json",
+  "docs/perf-evidence/2026-11-12/ctor-floor-preapply-only.json",
+  "docs/perf-evidence/2026-11-12/ctor-floor-cold-at-lazy-settings.json",
+  "docs/perf-evidence/2026-11-12/ctor-floor-cold-families-prelude.json",
+  "docs/perf-evidence/2026-11-12/splash-t1-t2.json",
+  "docs/perf-evidence/2026-11-11/first_tick_def_c_lazy_settings_ab.json"
+ ]
+}

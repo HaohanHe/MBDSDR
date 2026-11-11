@@ -1,0 +1,253 @@
+{
+ "kind": "ctor +525 归因：预暖排版地板后重建主窗（A cold / B prewarm / C prod）",
+ "date": "2026-11-12",
+ "head": "88e458c8",
+ "snapshot": "C:\\Users\\xxhzb\\AppData\\Local\\Temp\\kilo\\ctorab_head_88e458c8",
+ "reference": {
+  "baseline_ctor_1048_3": "docs/perf-evidence/2026-11-11/first_tick_def_c_lazy_settings_ab.json（旧 HEAD、无 splash、无预应用主题）",
+  "production_ctor_1573_6": "docs/perf-evidence/2026-11-12/splash-t1-t2.json（HEAD 88e458c8，生产入口，splash 已付地板）"
+ },
+ "arms": {
+  "preapply": {
+   "n": 3,
+   "ctor_ms": {
+    "runs": [
+     1689.5,
+     1750.1,
+     1686.9
+    ],
+    "median": 1689.5,
+    "min": 1686.9,
+    "max": 1750.1
+   },
+   "sky_total_ms": {
+    "runs": [
+     3.1,
+     3.3,
+     2.9
+    ],
+    "median": 3.1,
+    "min": 2.9,
+    "max": 3.3
+   },
+   "lineedit_count": {
+    "runs": [
+     13,
+     13,
+     13
+    ],
+    "median": 13,
+    "min": 13,
+    "max": 13
+   },
+   "lineedit_sum_ms": {
+    "runs": [
+     1.9,
+     1.7,
+     1.6
+    ],
+    "median": 1.7,
+    "min": 1.6,
+    "max": 1.9
+   },
+   "lineedit_max_ms": {
+    "runs": [
+     0.26,
+     0.2,
+     0.19
+    ],
+    "median": 0.2,
+    "min": 0.2,
+    "max": 0.3
+   },
+   "prewarm_ms": null,
+   "prewarm_label_paint_ms": null,
+   "preapply_ms": {
+    "runs": [
+     0.9,
+     1.0,
+     1.1
+    ],
+    "median": 1.0,
+    "min": 0.9,
+    "max": 1.1
+   },
+   "prelude_ms": null,
+   "theme_calls_last_run": [
+    1.1,
+    1.1,
+    1.0,
+    0.8
+   ],
+   "samples": [
+    {
+     "arm": "preapply",
+     "head": "88e458c8",
+     "mw_file": "C:\\Users\\xxhzb\\AppData\\Local\\Temp\\kilo\\ctorab_head_88e458c8\\main_window.py",
+     "prewarm_ms": null,
+     "prewarm_label_paint_ms": null,
+     "preapply_ms": 0.9,
+     "prelude_ms": null,
+     "ctor_ms": 1689.5,
+     "sky_ms": [
+      3.1
+     ],
+     "sky_total_ms": 3.1,
+     "theme_calls_ms": [
+      0.9,
+      0.8,
+      0.8,
+      0.8
+     ],
+     "lineedit_count": 13,
+     "lineedit_sum_ms": 1.9,
+     "lineedit_max_ms": 0.26,
+     "lineedit_top5": [
+      0.26,
+      0.2,
+      0.19,
+      0.19,
+      0.16
+     ],
+     "load_after": {
+      "sys_cpu_pct": 8.9,
+      "python_proc_count": 4,
+      "python_total_cpu_pct": 8.6,
+      "python_top": [
+       {
+        "pid": 32508,
+        "cpu_pct": 4.7
+       },
+       {
+        "pid": 32460,
+        "cpu_pct": 3.9
+       },
+       {
+        "pid": 9112,
+        "cpu_pct": 0.0
+       },
+       {
+        "pid": 37752,
+        "cpu_pct": 0.0
+       }
+      ],
+      "cpu_count": 12
+     },
+     "load_gate_before_python_pct": 5.5
+    },
+    {
+     "arm": "preapply",
+     "head": "88e458c8",
+     "mw_file": "C:\\Users\\xxhzb\\AppData\\Local\\Temp\\kilo\\ctorab_head_88e458c8\\main_window.py",
+     "prewarm_ms": null,
+     "prewarm_label_paint_ms": null,
+     "preapply_ms": 1.0,
+     "prelude_ms": null,
+     "ctor_ms": 1750.1,
+     "sky_ms": [
+      3.3
+     ],
+     "sky_total_ms": 3.3,
+     "theme_calls_ms": [
+      1.0,
+      0.9,
+      0.9,
+      0.7
+     ],
+     "lineedit_count": 13,
+     "lineedit_sum_ms": 1.7,
+     "lineedit_max_ms": 0.2,
+     "lineedit_top5": [
+      0.2,
+      0.2,
+      0.17,
+      0.17,
+      0.16
+     ],
+     "load_after": {
+      "sys_cpu_pct": 12.8,
+      "python_proc_count": 4,
+      "python_total_cpu_pct": 13.3,
+      "python_top": [
+       {
+        "pid": 32508,
+        "cpu_pct": 9.4
+       },
+       {
+        "pid": 25612,
+        "cpu_pct": 3.9
+       },
+       {
+        "pid": 9112,
+        "cpu_pct": 0.0
+       },
+       {
+        "pid": 37752,
+        "cpu_pct": 0.0
+       }
+      ],
+      "cpu_count": 12
+     },
+     "load_gate_before_python_pct": 5.5
+    },
+    {
+     "arm": "preapply",
+     "head": "88e458c8",
+     "mw_file": "C:\\Users\\xxhzb\\AppData\\Local\\Temp\\kilo\\ctorab_head_88e458c8\\main_window.py",
+     "prewarm_ms": null,
+     "prewarm_label_paint_ms": null,
+     "preapply_ms": 1.1,
+     "prelude_ms": null,
+     "ctor_ms": 1686.9,
+     "sky_ms": [
+      2.9
+     ],
+     "sky_total_ms": 2.9,
+     "theme_calls_ms": [
+      1.1,
+      1.1,
+      1.0,
+      0.8
+     ],
+     "lineedit_count": 13,
+     "lineedit_sum_ms": 1.6,
+     "lineedit_max_ms": 0.19,
+     "lineedit_top5": [
+      0.19,
+      0.19,
+      0.17,
+      0.15,
+      0.13
+     ],
+     "load_after": {
+      "sys_cpu_pct": 35.2,
+      "python_proc_count": 4,
+      "python_total_cpu_pct": 7.8,
+      "python_top": [
+       {
+        "pid": 32508,
+        "cpu_pct": 5.5
+       },
+       {
+        "pid": 37676,
+        "cpu_pct": 2.3
+       },
+       {
+        "pid": 9112,
+        "cpu_pct": 0.0
+       },
+       {
+        "pid": 37752,
+        "cpu_pct": 0.0
+       }
+      ],
+      "cpu_count": 12
+     },
+     "load_gate_before_python_pct": 3.9
+    }
+   ]
+  }
+ },
+ "prelude": null,
+ "load_rule": "每个 run 之前父进程采 2 s 低负载门（<200%），子进程跑完再采一次。"
+}

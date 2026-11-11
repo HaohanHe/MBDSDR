@@ -1,0 +1,736 @@
+{
+ "kind": "ctor +525 归因：预暖排版地板后重建主窗（A cold / B prewarm / C prod）",
+ "date": "2026-11-12",
+ "head": "88e458c8",
+ "snapshot": "C:\\Users\\xxhzb\\AppData\\Local\\Temp\\kilo\\ctorab_head_88e458c8",
+ "reference": {
+  "baseline_ctor_1048_3": "docs/perf-evidence/2026-11-11/first_tick_def_c_lazy_settings_ab.json（旧 HEAD、无 splash、无预应用主题）",
+  "production_ctor_1573_6": "docs/perf-evidence/2026-11-12/splash-t1-t2.json（HEAD 88e458c8，生产入口，splash 已付地板）"
+ },
+ "arms": {
+  "cold": {
+   "n": 3,
+   "ctor_ms": {
+    "runs": [
+     1364.7,
+     1325.9,
+     1282.8
+    ],
+    "median": 1325.9,
+    "min": 1282.8,
+    "max": 1364.7
+   },
+   "sky_total_ms": {
+    "runs": [
+     295.6,
+     368.9,
+     303.6
+    ],
+    "median": 303.6,
+    "min": 295.6,
+    "max": 368.9
+   },
+   "lineedit_count": {
+    "runs": [
+     13,
+     13,
+     13
+    ],
+    "median": 13,
+    "min": 13,
+    "max": 13
+   },
+   "lineedit_sum_ms": {
+    "runs": [
+     294.7,
+     366.9,
+     301.1
+    ],
+    "median": 301.1,
+    "min": 294.7,
+    "max": 366.9
+   },
+   "lineedit_max_ms": {
+    "runs": [
+     292.98,
+     365.65,
+     299.86
+    ],
+    "median": 299.9,
+    "min": 293.0,
+    "max": 365.6
+   },
+   "prewarm_ms": null,
+   "prewarm_label_paint_ms": null,
+   "preapply_ms": null,
+   "theme_calls_last_run": [
+    147.5,
+    2.2,
+    1.2
+   ],
+   "samples": [
+    {
+     "arm": "cold",
+     "head": "88e458c8",
+     "mw_file": "C:\\Users\\xxhzb\\AppData\\Local\\Temp\\kilo\\ctorab_head_88e458c8\\main_window.py",
+     "prewarm_ms": null,
+     "prewarm_label_paint_ms": null,
+     "preapply_ms": null,
+     "ctor_ms": 1364.7,
+     "sky_ms": [
+      295.6
+     ],
+     "sky_total_ms": 295.6,
+     "theme_calls_ms": [
+      160.6,
+      1.6,
+      1.0
+     ],
+     "lineedit_count": 13,
+     "lineedit_sum_ms": 294.7,
+     "lineedit_max_ms": 292.98,
+     "lineedit_top5": [
+      292.98,
+      0.42,
+      0.35,
+      0.12,
+      0.12
+     ],
+     "load_after": {
+      "sys_cpu_pct": 17.6,
+      "python_proc_count": 5,
+      "python_total_cpu_pct": 102.3,
+      "python_top": [
+       {
+        "pid": 35496,
+        "cpu_pct": 82.0
+       },
+       {
+        "pid": 29840,
+        "cpu_pct": 13.3
+       },
+       {
+        "pid": 32508,
+        "cpu_pct": 7.0
+       },
+       {
+        "pid": 26628,
+        "cpu_pct": 0.0
+       },
+       {
+        "pid": 37752,
+        "cpu_pct": 0.0
+       }
+      ],
+      "cpu_count": 12
+     },
+     "load_gate_before_python_pct": 114.1
+    },
+    {
+     "arm": "cold",
+     "head": "88e458c8",
+     "mw_file": "C:\\Users\\xxhzb\\AppData\\Local\\Temp\\kilo\\ctorab_head_88e458c8\\main_window.py",
+     "prewarm_ms": null,
+     "prewarm_label_paint_ms": null,
+     "preapply_ms": null,
+     "ctor_ms": 1325.9,
+     "sky_ms": [
+      368.9
+     ],
+     "sky_total_ms": 368.9,
+     "theme_calls_ms": [
+      149.9,
+      1.8,
+      1.4
+     ],
+     "lineedit_count": 13,
+     "lineedit_sum_ms": 366.9,
+     "lineedit_max_ms": 365.65,
+     "lineedit_top5": [
+      365.65,
+      0.17,
+      0.15,
+      0.11,
+      0.1
+     ],
+     "load_after": {
+      "sys_cpu_pct": 12.6,
+      "python_proc_count": 4,
+      "python_total_cpu_pct": 14.1,
+      "python_top": [
+       {
+        "pid": 23520,
+        "cpu_pct": 10.2
+       },
+       {
+        "pid": 32508,
+        "cpu_pct": 3.9
+       },
+       {
+        "pid": 26628,
+        "cpu_pct": 0.0
+       },
+       {
+        "pid": 37752,
+        "cpu_pct": 0.0
+       }
+      ],
+      "cpu_count": 12
+     },
+     "load_gate_before_python_pct": 7.0
+    },
+    {
+     "arm": "cold",
+     "head": "88e458c8",
+     "mw_file": "C:\\Users\\xxhzb\\AppData\\Local\\Temp\\kilo\\ctorab_head_88e458c8\\main_window.py",
+     "prewarm_ms": null,
+     "prewarm_label_paint_ms": null,
+     "preapply_ms": null,
+     "ctor_ms": 1282.8,
+     "sky_ms": [
+      303.6
+     ],
+     "sky_total_ms": 303.6,
+     "theme_calls_ms": [
+      147.5,
+      2.2,
+      1.2
+     ],
+     "lineedit_count": 13,
+     "lineedit_sum_ms": 301.1,
+     "lineedit_max_ms": 299.86,
+     "lineedit_top5": [
+      299.86,
+      0.18,
+      0.13,
+      0.12,
+      0.1
+     ],
+     "load_after": {
+      "sys_cpu_pct": 11.7,
+      "python_proc_count": 4,
+      "python_total_cpu_pct": 17.1,
+      "python_top": [
+       {
+        "pid": 28700,
+        "cpu_pct": 10.9
+       },
+       {
+        "pid": 32508,
+        "cpu_pct": 6.2
+       },
+       {
+        "pid": 26628,
+        "cpu_pct": 0.0
+       },
+       {
+        "pid": 37752,
+        "cpu_pct": 0.0
+       }
+      ],
+      "cpu_count": 12
+     },
+     "load_gate_before_python_pct": 3.9
+    }
+   ]
+  },
+  "prewarm": {
+   "n": 3,
+   "ctor_ms": {
+    "runs": [
+     1108.4,
+     1077.5,
+     1078.6
+    ],
+    "median": 1078.6,
+    "min": 1077.5,
+    "max": 1108.4
+   },
+   "sky_total_ms": {
+    "runs": [
+     3.4,
+     3.1,
+     7.0
+    ],
+    "median": 3.4,
+    "min": 3.1,
+    "max": 7.0
+   },
+   "lineedit_count": {
+    "runs": [
+     13,
+     13,
+     13
+    ],
+    "median": 13,
+    "min": 13,
+    "max": 13
+   },
+   "lineedit_sum_ms": {
+    "runs": [
+     1.8,
+     1.6,
+     2.3
+    ],
+    "median": 1.8,
+    "min": 1.6,
+    "max": 2.3
+   },
+   "lineedit_max_ms": {
+    "runs": [
+     0.29,
+     0.22,
+     0.41
+    ],
+    "median": 0.3,
+    "min": 0.2,
+    "max": 0.4
+   },
+   "prewarm_ms": {
+    "runs": [
+     527.5,
+     487.9,
+     500.7
+    ],
+    "median": 500.7,
+    "min": 487.9,
+    "max": 527.5
+   },
+   "prewarm_label_paint_ms": {
+    "runs": [
+     455.6,
+     424.5,
+     437.1
+    ],
+    "median": 437.1,
+    "min": 424.5,
+    "max": 455.6
+   },
+   "preapply_ms": null,
+   "theme_calls_last_run": [
+    186.9,
+    1.2,
+    0.8
+   ],
+   "samples": [
+    {
+     "arm": "prewarm",
+     "head": "88e458c8",
+     "mw_file": "C:\\Users\\xxhzb\\AppData\\Local\\Temp\\kilo\\ctorab_head_88e458c8\\main_window.py",
+     "prewarm_ms": 527.5,
+     "prewarm_label_paint_ms": 455.6,
+     "preapply_ms": null,
+     "ctor_ms": 1108.4,
+     "sky_ms": [
+      3.4
+     ],
+     "sky_total_ms": 3.4,
+     "theme_calls_ms": [
+      207.5,
+      1.4,
+      1.1
+     ],
+     "lineedit_count": 13,
+     "lineedit_sum_ms": 1.8,
+     "lineedit_max_ms": 0.29,
+     "lineedit_top5": [
+      0.29,
+      0.2,
+      0.19,
+      0.16,
+      0.15
+     ],
+     "load_after": {
+      "sys_cpu_pct": 20.1,
+      "python_proc_count": 5,
+      "python_total_cpu_pct": 109.4,
+      "python_top": [
+       {
+        "pid": 35496,
+        "cpu_pct": 92.2
+       },
+       {
+        "pid": 33736,
+        "cpu_pct": 12.5
+       },
+       {
+        "pid": 32508,
+        "cpu_pct": 4.7
+       },
+       {
+        "pid": 26628,
+        "cpu_pct": 0.0
+       },
+       {
+        "pid": 37752,
+        "cpu_pct": 0.0
+       }
+      ],
+      "cpu_count": 12
+     },
+     "load_gate_before_python_pct": 116.4
+    },
+    {
+     "arm": "prewarm",
+     "head": "88e458c8",
+     "mw_file": "C:\\Users\\xxhzb\\AppData\\Local\\Temp\\kilo\\ctorab_head_88e458c8\\main_window.py",
+     "prewarm_ms": 487.9,
+     "prewarm_label_paint_ms": 424.5,
+     "preapply_ms": null,
+     "ctor_ms": 1077.5,
+     "sky_ms": [
+      3.1
+     ],
+     "sky_total_ms": 3.1,
+     "theme_calls_ms": [
+      231.3,
+      1.4,
+      1.2
+     ],
+     "lineedit_count": 13,
+     "lineedit_sum_ms": 1.6,
+     "lineedit_max_ms": 0.22,
+     "lineedit_top5": [
+      0.22,
+      0.19,
+      0.16,
+      0.15,
+      0.13
+     ],
+     "load_after": {
+      "sys_cpu_pct": 24.8,
+      "python_proc_count": 4,
+      "python_total_cpu_pct": 16.4,
+      "python_top": [
+       {
+        "pid": 28372,
+        "cpu_pct": 10.2
+       },
+       {
+        "pid": 32508,
+        "cpu_pct": 6.2
+       },
+       {
+        "pid": 26628,
+        "cpu_pct": 0.0
+       },
+       {
+        "pid": 37752,
+        "cpu_pct": 0.0
+       }
+      ],
+      "cpu_count": 12
+     },
+     "load_gate_before_python_pct": 3.1
+    },
+    {
+     "arm": "prewarm",
+     "head": "88e458c8",
+     "mw_file": "C:\\Users\\xxhzb\\AppData\\Local\\Temp\\kilo\\ctorab_head_88e458c8\\main_window.py",
+     "prewarm_ms": 500.7,
+     "prewarm_label_paint_ms": 437.1,
+     "preapply_ms": null,
+     "ctor_ms": 1078.6,
+     "sky_ms": [
+      7.0
+     ],
+     "sky_total_ms": 7.0,
+     "theme_calls_ms": [
+      186.9,
+      1.2,
+      0.8
+     ],
+     "lineedit_count": 13,
+     "lineedit_sum_ms": 2.3,
+     "lineedit_max_ms": 0.41,
+     "lineedit_top5": [
+      0.41,
+      0.32,
+      0.3,
+      0.23,
+      0.23
+     ],
+     "load_after": {
+      "sys_cpu_pct": 17.5,
+      "python_proc_count": 4,
+      "python_total_cpu_pct": 16.4,
+      "python_top": [
+       {
+        "pid": 33996,
+        "cpu_pct": 11.7
+       },
+       {
+        "pid": 32508,
+        "cpu_pct": 4.7
+       },
+       {
+        "pid": 26628,
+        "cpu_pct": 0.0
+       },
+       {
+        "pid": 37752,
+        "cpu_pct": 0.0
+       }
+      ],
+      "cpu_count": 12
+     },
+     "load_gate_before_python_pct": 5.5
+    }
+   ]
+  },
+  "prod": {
+   "n": 3,
+   "ctor_ms": {
+    "runs": [
+     1412.4,
+     1500.2,
+     1438.1
+    ],
+    "median": 1438.1,
+    "min": 1412.4,
+    "max": 1500.2
+   },
+   "sky_total_ms": {
+    "runs": [
+     7.3,
+     9.2,
+     3.5
+    ],
+    "median": 7.3,
+    "min": 3.5,
+    "max": 9.2
+   },
+   "lineedit_count": {
+    "runs": [
+     13,
+     13,
+     13
+    ],
+    "median": 13,
+    "min": 13,
+    "max": 13
+   },
+   "lineedit_sum_ms": {
+    "runs": [
+     2.1,
+     2.2,
+     2.4
+    ],
+    "median": 2.2,
+    "min": 2.1,
+    "max": 2.4
+   },
+   "lineedit_max_ms": {
+    "runs": [
+     0.37,
+     0.65,
+     0.41
+    ],
+    "median": 0.4,
+    "min": 0.4,
+    "max": 0.7
+   },
+   "prewarm_ms": {
+    "runs": [
+     503.3,
+     506.3,
+     515.1
+    ],
+    "median": 506.3,
+    "min": 503.3,
+    "max": 515.1
+   },
+   "prewarm_label_paint_ms": {
+    "runs": [
+     439.8,
+     443.0,
+     449.9
+    ],
+    "median": 443.0,
+    "min": 439.8,
+    "max": 449.9
+   },
+   "preapply_ms": {
+    "runs": [
+     1.4,
+     1.1,
+     0.8
+    ],
+    "median": 1.1,
+    "min": 0.8,
+    "max": 1.4
+   },
+   "theme_calls_last_run": [
+    0.8,
+    1.0,
+    0.9,
+    0.7
+   ],
+   "samples": [
+    {
+     "arm": "prod",
+     "head": "88e458c8",
+     "mw_file": "C:\\Users\\xxhzb\\AppData\\Local\\Temp\\kilo\\ctorab_head_88e458c8\\main_window.py",
+     "prewarm_ms": 503.3,
+     "prewarm_label_paint_ms": 439.8,
+     "preapply_ms": 1.4,
+     "ctor_ms": 1412.4,
+     "sky_ms": [
+      7.3
+     ],
+     "sky_total_ms": 7.3,
+     "theme_calls_ms": [
+      1.4,
+      0.9,
+      0.8,
+      0.6
+     ],
+     "lineedit_count": 13,
+     "lineedit_sum_ms": 2.1,
+     "lineedit_max_ms": 0.37,
+     "lineedit_top5": [
+      0.37,
+      0.28,
+      0.23,
+      0.16,
+      0.15
+     ],
+     "load_after": {
+      "sys_cpu_pct": 8.7,
+      "python_proc_count": 4,
+      "python_total_cpu_pct": 4.7,
+      "python_top": [
+       {
+        "pid": 32508,
+        "cpu_pct": 4.7
+       },
+       {
+        "pid": 6316,
+        "cpu_pct": 0.0
+       },
+       {
+        "pid": 26628,
+        "cpu_pct": 0.0
+       },
+       {
+        "pid": 37752,
+        "cpu_pct": 0.0
+       }
+      ],
+      "cpu_count": 12
+     },
+     "load_gate_before_python_pct": 3.1
+    },
+    {
+     "arm": "prod",
+     "head": "88e458c8",
+     "mw_file": "C:\\Users\\xxhzb\\AppData\\Local\\Temp\\kilo\\ctorab_head_88e458c8\\main_window.py",
+     "prewarm_ms": 506.3,
+     "prewarm_label_paint_ms": 443.0,
+     "preapply_ms": 1.1,
+     "ctor_ms": 1500.2,
+     "sky_ms": [
+      9.2
+     ],
+     "sky_total_ms": 9.2,
+     "theme_calls_ms": [
+      1.1,
+      1.8,
+      0.8,
+      0.8
+     ],
+     "lineedit_count": 13,
+     "lineedit_sum_ms": 2.2,
+     "lineedit_max_ms": 0.65,
+     "lineedit_top5": [
+      0.65,
+      0.26,
+      0.18,
+      0.16,
+      0.14
+     ],
+     "load_after": {
+      "sys_cpu_pct": 18.6,
+      "python_proc_count": 4,
+      "python_total_cpu_pct": 9.4,
+      "python_top": [
+       {
+        "pid": 32508,
+        "cpu_pct": 4.7
+       },
+       {
+        "pid": 32912,
+        "cpu_pct": 4.7
+       },
+       {
+        "pid": 26628,
+        "cpu_pct": 0.0
+       },
+       {
+        "pid": 37752,
+        "cpu_pct": 0.0
+       }
+      ],
+      "cpu_count": 12
+     },
+     "load_gate_before_python_pct": 3.1
+    },
+    {
+     "arm": "prod",
+     "head": "88e458c8",
+     "mw_file": "C:\\Users\\xxhzb\\AppData\\Local\\Temp\\kilo\\ctorab_head_88e458c8\\main_window.py",
+     "prewarm_ms": 515.1,
+     "prewarm_label_paint_ms": 449.9,
+     "preapply_ms": 0.8,
+     "ctor_ms": 1438.1,
+     "sky_ms": [
+      3.5
+     ],
+     "sky_total_ms": 3.5,
+     "theme_calls_ms": [
+      0.8,
+      1.0,
+      0.9,
+      0.7
+     ],
+     "lineedit_count": 13,
+     "lineedit_sum_ms": 2.4,
+     "lineedit_max_ms": 0.41,
+     "lineedit_top5": [
+      0.41,
+      0.38,
+      0.22,
+      0.21,
+      0.17
+     ],
+     "load_after": {
+      "sys_cpu_pct": 13.4,
+      "python_proc_count": 4,
+      "python_total_cpu_pct": 4.7,
+      "python_top": [
+       {
+        "pid": 32508,
+        "cpu_pct": 4.7
+       },
+       {
+        "pid": 26628,
+        "cpu_pct": 0.0
+       },
+       {
+        "pid": 31600,
+        "cpu_pct": 0.0
+       },
+       {
+        "pid": 37752,
+        "cpu_pct": 0.0
+       }
+      ],
+      "cpu_count": 12
+     },
+     "load_gate_before_python_pct": 3.9
+    }
+   ]
+  }
+ },
+ "load_rule": "每个 run 之前父进程采 2 s 低负载门（<200%），子进程跑完再采一次。"
+}

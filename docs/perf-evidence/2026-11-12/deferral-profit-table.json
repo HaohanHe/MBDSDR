@@ -70,7 +70,8 @@
    "prewarm_cost_ms_median": 395.8,
    "note": "按 ledger 的 394.4 折算：字体度量 ≈391.9（99.4%），控件构造 ≈2.5（0.6%）。预暖本身要 395.8 ms，且发生在 ctor 之前，仍在定义 C 内——它不减少总量，只换支付者。"
   },
-  "first_frame_saving_ms": 0,
+  "first_frame_saving_ms": 2.3,
+  "first_frame_saving_note": "按卫星线 `40b2d27b`（已由 b650a0d3 回退，数据有效）：同一次 run 里 RFSkyView=345.6，而全部 13 个 QLineEdit 合计 343.3（p50 0.09，离群值≈343）——那一个离群 QLineEdit 就在 RFSkyView 里，天空自建净成本≈2.3 ms。本线 `ctor-floor-prewarm-ab.json` 的 cold 臂独立复现了这个结构：sky_total 295.6/368.9/303.6 对 le_max 293.0/365.7/299.9，差值 2.6/3.3/3.7 ms。所以「首帧净收益」从 0 修正为 ≈2.3（配对实验 ±50 ms 噪声分辨不了这个量级，符号随先后翻转）。",
   "first_frame_saving_evidence": {
    "method": "同进程只替换 `_create_sky_widget` 为同接口空 QWidget，交替跑 probe/stub（4 对，probe 先/stub 先各半），取对差",
    "pairs": [
@@ -155,7 +156,7 @@
   {
    "item": "_create_sky_widget / RFSkyView",
    "ledger_ms": 394.4,
-   "first_frame_saving_ms": 0,
+   "first_frame_saving_ms": 2.3,
    "paid_when_deferred": "首次切到星象仪页：创建 3.5 + 插入/显示 85.6 = 88.9 ms（中位；3 次 81.7–90.9）",
    "what_user_sees": "隔离 profile 下左栏第 0 页就是星象仪：延后 → 首帧左栏空白（违反首帧内容完整）；若持久化布局是频谱页 → 首帧无变化，首次切页卡 89 ms。"
   },
@@ -184,18 +185,18 @@
   "note": "不在用户点名的三块里，但按同一判据它是唯一确认可延后的一项。"
  },
  "arithmetic": {
-  "three_blocks_deferrable_total_ms": 0,
-  "1158.5_minus_total_ms": 1158.5,
-  "still_above_800_ms": 358.5,
-  "with_planetarium_page_ms": 1142.6,
-  "with_planetarium_page_above_800_ms": 342.6,
-  "conclusion": "只靠星象仪延后不达标，而且不是「差一点」：星象仪那 394.4 里 99.4% 是进程首次字体度量，延后后由首帧里下一个控件立刻付掉，配对实验的净节省是 0（median −7.8 ms，符号随先后顺序翻转）。其余不动也达标 = 假。"
+  "three_blocks_deferrable_total_ms": 2.3,
+  "1158.5_minus_total_ms": 1156.2,
+  "still_above_800_ms": 356.2,
+  "with_planetarium_page_ms": 1140.3,
+  "with_planetarium_page_above_800_ms": 340.3,
+  "conclusion": "只靠星象仪延后不达标，而且不是「差一点」：星象仪那 394.4 里 99.4% 是进程首次字体度量，延后只转移不减少——净收益只有天空自建的 ≈2.3 ms（卫星线 40b2d27b：RFSkyView 345.6 − 同 run 离群 QLineEdit 343.3；本线 cold 臂 295.6−293.0 / 368.9−365.7 / 303.6−299.9）。1158.5 − 2.3 = 1156.2，其余不动也达标 = 假。"
  },
  "next_block_if_continue": {
   "item": "右栏 _add_right_tab（20 次调用，inclusive 236.6 ms）",
   "why": "按新判据，右栏只有当前页在首帧被画出来，其余页签只是构造出来并 addTab，没进首帧。这是目前最大的一块「首帧不需要却建了」。",
   "upper_bound_ms": 236.6,
-  "arithmetic_after": "1142.6 − 236.6 = 906.0，仍高于 800 约 106 ms；所以还需再下一块，不能只靠右栏惰性化收口。",
+  "arithmetic_after": "1140.3 − 236.6 = 903.7，仍高于 800 约 104 ms；所以还需再下一块，不能只靠右栏惰性化收口。",
   "status": "只是线索（本批未拆；右栏各面板归属与惰性构建先例见 panels run5 / settings_panel 惰性化）"
  },
  "scripts": [
@@ -207,6 +208,7 @@
   "docs/perf-evidence/2026-11-12/deferral-profit-prewarm.json",
   "docs/perf-evidence/2026-11-12/deferral-profit-probe-head-prod.json",
   "docs/perf-evidence/2026-11-12/deferral-profit-stub-head-prod.json",
-  "docs/perf-evidence/2026-11-12/deferral-profit-paired-head.json"
+  "docs/perf-evidence/2026-11-12/deferral-profit-paired-head.json",
+  "docs/perf-evidence/2026-11-12/ctor-floor-prewarm-ab.json"
  ]
 }
