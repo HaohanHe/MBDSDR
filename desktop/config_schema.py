@@ -561,6 +561,18 @@ ALL_ITEMS: Tuple[SettingItem, ...] = (
                        "ide/planetarium（写入点 :2117/:2153）",
                 choices=(_e("ide", "ide"), _e("planetarium", "planetarium")),
                 exposed=False),
+    SettingItem(key="settings_expanded_groups", group="", kind="text", label="",
+                help="", default="",
+                source="W51（D-10 裁定）：设置面板 6 个用途分组的展开态，"
+                       "逗号分隔的分组标题；空/坏值/未知标题一律回落「只展开首组」"
+                       "（settings_panel.SettingsPanel._restore_expanded_state）",
+                exposed=False),
+    SettingItem(key="right_column_expanded_section", group="", kind="text",
+                label="", help="", default="",
+                source="区块 8（右栏手风琴）：右栏当前展开节的 id（稳定 id 取自 "
+                       "right_column.setTabData）；空串 = 未设置，坏值/未知 id 由"
+                       "消费方回落「只展开首节」，本键只负责持久化",
+                exposed=False),
     # 服务开关（既有面板，保留）
     SettingItem(key="rc_enabled", group="服务与远程访问", kind="bool",
                 label="启用远程控制（TCP）", default=False,
