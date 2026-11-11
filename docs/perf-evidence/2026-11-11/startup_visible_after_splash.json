@@ -1,0 +1,45 @@
+{
+  "runs": [
+    {
+      "run": 0,
+      "first_visible_ms": 4057.3,
+      "main_visible_ms": 7675.2,
+      "first_window": {
+        "title": "MBDSDR - AI 定义无线电",
+        "cls": "Qt6120QWindowIcon",
+        "w": 460,
+        "h": 260
+      },
+      "kill_ms": 87.7,
+      "exit": 1
+    },
+    {
+      "run": 1,
+      "first_visible_ms": 4569.4,
+      "main_visible_ms": 8475.2,
+      "first_window": {
+        "title": "MBDSDR - AI 定义无线电",
+        "cls": "Qt6120QWindowIcon",
+        "w": 460,
+        "h": 260
+      },
+      "kill_ms": 77.1,
+      "exit": 1
+    },
+    {
+      "run": 2,
+      "first_visible_ms": 3859.9,
+      "main_visible_ms": 7240.9,
+      "first_window": {
+        "title": "MBDSDR - AI 定义无线电",
+        "cls": "Qt6120QWindowIcon",
+        "w": 460,
+        "h": 260
+      },
+      "kill_ms": 65.1,
+      "exit": 1
+    }
+  ],
+  "first_visible_median_ms": 4057.3,
+  "main_visible_median_ms": 7675.2
+}
