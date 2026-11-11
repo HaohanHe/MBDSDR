@@ -136,6 +136,17 @@ class TestMessageLanding:
         assert "0 条报文" not in view["summary"]
         assert "静音" in view["detail"]
 
+    def test_signal_present_no_frame_has_label(self):
+        """「有信号但没解出」不再显示裸码。"""
+        view = format_decode_result("sdr_decode_acars", {
+            "mode": "acars", "ok": False, "status": "error",
+            "error_code": "signal_present_no_frame",
+            "error": "ACARS 输入有信号能量，但解出 0 帧：调制/前导与本模式不符。",
+            "output_kind": "messages", "num_messages": 0, "messages": [],
+        })
+        assert "有信号但未解出" in view["summary"]
+        assert "0 帧" in view["detail"]
+
     def test_no_output_says_no_output(self):
         view = format_decode_result("sdr_decode_x", {"mode": "x"})
         assert "本次解码无输出" in view["detail"]

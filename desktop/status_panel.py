@@ -197,6 +197,7 @@ DECODE_ERROR_LABELS = {
     "param_not_in_enum": "参数不在允许取值内",
     "preamble_not_found": "未找到前导/同步模板",
     "nothing_detected": "未检测到帧",
+    "signal_present_no_frame": "有信号但未解出（调制/前导不符）",
     "no_frame_recovered": "未能恢复完整帧",
     "truncated_frame": "帧被截断",
     "crc_failed": "校验失败（CRC/FCS）",

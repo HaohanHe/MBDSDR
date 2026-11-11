@@ -540,3 +540,14 @@ class TestOutcomeClassification:
         assert out["error_code"] == ""
         assert out["preamble_hits"] >= 1
         assert out["num_messages"] == 1
+
+    def test_signal_present_no_frame_is_registered_and_declared(self):
+        """该码此前只在路由里裸用：必须进 error_catalog，并在能力表声明。"""
+        from mbdsdr_ai.error_catalog import ERRORS, user_message
+
+        assert "signal_present_no_frame" in ERRORS
+        msg = user_message("signal_present_no_frame", mode="ACARS")
+        assert "有信号" in msg and "0 帧" in msg
+        for key in ("acars", "pocsag", "ais", "navtex"):
+            assert (dr.ERR_SIGNAL_PRESENT_NO_FRAME
+                    in dr.DIGITAL_MODE_CAPABILITIES[key].failure_codes), key

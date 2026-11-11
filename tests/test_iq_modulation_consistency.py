@@ -138,6 +138,7 @@ def test_fm_iq_into_am_acars_is_explicit_failure(tmp_path):
     assert out["ok"] is False
     assert out["error_code"] == dr.ERR_SIGNAL_PRESENT_NO_FRAME
     assert "0 帧" in out["error"]
+    assert "有信号" in out["error"]   # 目录文案，不是裸码
 
 
 def test_zero_iq_is_not_reported_as_signal_present(tmp_path):

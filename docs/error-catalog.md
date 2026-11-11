@@ -77,9 +77,10 @@ AI 层各自拼中文。守卫测试 `tests/test_error_catalog_guard.py` 校验�
 | `missing_sample` | decode | 缺少输入样本 | 输入样本不存在或为空：{path}（这是缺样本，不是解码失败）。 | 先录制或指定存在的样本文件后重试。 | 否 |
 | `no_frame_recovered` | decode | 未能恢复完整帧 | {mode} 未能恢复完整帧：{detail} | 补足样本或改善信噪比后重试。 | 否 |
 | `not_implemented` | decode | 能力未接线 | {mode} 的通用入口未接线（实现文件 {impl}）。 | 改用已接线入口或外部工具；不要宣称已完成解码。 | 否 |
-| `nothing_detected` | decode | 未检测到帧 | {mode} 未检测到帧：{detail} | 检查频点、增益与调制参数后重试。 | 否 |
+| `nothing_detected` | decode | 空结果（无信号） | {mode} 输入没有信号能量（静音/全零）：空结果，未检测到帧。 | 空结果不是解码失败：确认频点、天线与增益后重新录制，或换一段含信号的录音。 | 否 |
 | `ogn_decode_failed` | decode | OGN 报文解码失败 | OGN 报文解码失败：{detail} | 检查信号质量与增益后重试。 | 是 |
-| `preamble_not_found` | decode | 未找到前导 | {mode} 未找到前导/同步模板：{detail} | 确认频点与采样率正确、信号存在后重试。 | 否 |
+| `preamble_not_found` | decode | 未找到前导 | {mode} 未找到前导/同步模板：{detail} | 这是「有信号但输入约定不满足」，不是没有信号：确认解调方式（AM/NFM/音频）与协议前导（如 ACARS 需 SYN,SYN,SOH）后重新采集。 | 否 |
+| `signal_present_no_frame` | decode | 有信号但未解出 | {mode} 输入有信号能量，但解出 0 帧：调制/前导与本模式不符，或解码器未锁定。 | 这是「有信号但没解出」，既不是空结果也不是成功：先在「控制」页签核对调制方式、频偏与采样率，再确认协议前导（如 ACARS 需 SYN,SYN,SOH）后重试。 | 否 |
 | `sample_rate_mismatch` | decode | 采样率不满足整数倍约束 | {mode} 要求 {rule}，收到 fs={actual} Hz（按当前采样率取整为 sps={sps}，拒绝静默取整）。 | 按解码器要求的整数倍采样率重新录制或重采样后重试。 | 否 |
 | `schedule_failed` | decode | 云图排程失败 | 排程失败：{detail} | 检查时间与卫星参数后重试。 | 否 |
 | `truncated_frame` | decode | 帧被截断 | {mode} 帧被截断：{detail} | 延长采集时长后重试。 | 否 |

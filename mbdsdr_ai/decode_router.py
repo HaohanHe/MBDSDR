@@ -236,6 +236,7 @@ DIGITAL_MODE_CAPABILITIES: Dict[str, DigitalModeCapability] = {
         failure_codes=(
             ERR_UNSUPPORTED_FORMAT, "param_not_in_enum", ERR_INVALID_WAV,
             ERR_INSUFFICIENT_SAMPLES, ERR_DECODE_ERROR, ERR_NOTHING_DETECTED,
+            ERR_SIGNAL_PRESENT_NO_FRAME,
         ),
         # POCSAG 最短：前导 576 bit + 同步字 32 bit + 一个 16 码字批（544 bit）。
         min_duration_seconds=0.0,  # 按 baud 动态计算，见 _min_duration_seconds
@@ -259,7 +260,7 @@ DIGITAL_MODE_CAPABILITIES: Dict[str, DigitalModeCapability] = {
         failure_codes=(
             ERR_UNSUPPORTED_FORMAT, ERR_INSUFFICIENT_SAMPLES,
             ERR_DECODE_ERROR, ERR_NOTHING_DETECTED, ERR_PREAMBLE_NOT_FOUND,
-            ERR_INVALID_WAV,
+            ERR_INVALID_WAV, ERR_SIGNAL_PRESENT_NO_FRAME,
         ),
         # 最短 ACARS 报文：16 字符前导 + 16 字符最小数据体（8 bit/字符）。
         min_duration_seconds=0.2,
@@ -310,6 +311,7 @@ DIGITAL_MODE_CAPABILITIES: Dict[str, DigitalModeCapability] = {
         failure_codes=(
             ERR_UNSUPPORTED_FORMAT, ERR_SAMPLE_RATE_MISMATCH,
             ERR_INSUFFICIENT_SAMPLES, ERR_DECODE_ERROR, ERR_NOTHING_DETECTED,
+            ERR_SIGNAL_PRESENT_NO_FRAME,
         ),
         # 最短一帧：168 bit 报文 + 16 bit FCS + 16 bit 标志 = 200 bit。
         min_duration_seconds=200.0 / 9600.0,
@@ -332,6 +334,7 @@ DIGITAL_MODE_CAPABILITIES: Dict[str, DigitalModeCapability] = {
         failure_codes=(
             ERR_UNSUPPORTED_FORMAT, ERR_INSUFFICIENT_SAMPLES,
             ERR_DECODE_ERROR, ERR_NOTHING_DETECTED, ERR_INVALID_WAV,
+            ERR_SIGNAL_PRESENT_NO_FRAME,
         ),
         # 最短：16 定相字符 + 8 头 + 4 尾部字符，7 bit/字符 × 2 分集。
         min_duration_seconds=(16 + 8 + 4) * 7 * 2 / 100.0,
@@ -949,10 +952,9 @@ def _finalize_honest_status(result: Dict[str, Any],
                    "（ACARS 帧同步必需，缺失时状态机不会启动）")
         return
     result["error_code"] = ERR_SIGNAL_PRESENT_NO_FRAME
-    result["error"] = (
-        "输入有信号能量但解出 0 帧：调制/前导与本模式不符，"
-        "或解码器未锁定；不把 0 帧当作成功"
-    )
+    result["error"] = user_message(
+        "signal_present_no_frame",
+        mode=str(result.get("mode", "")).upper())
 
 
 def run_digital_mode(

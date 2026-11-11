@@ -177,13 +177,14 @@ VISIBLE_BY_FAMILY: Dict[str, Tuple[str, ...]] = {
         "invalid_vcdu", "decode_failed", "unknown_device", "doppler_failed",
         "ogn_decode_failed", "schedule_failed", "meta_failed", "bad_hex",
     ),
-    # 状态面板解码卡显式映射了这 14 个 code（DECODE_ERROR_LABELS）。
+    # 状态面板解码卡显式映射了这 15 个 code（DECODE_ERROR_LABELS）。
     "解码结果": (
         "unknown_mode", "missing_sample", "unsupported_format",
         "decode_error", "not_implemented",
         "crc_failed", "insufficient_samples", "invalid_input", "invalid_wav",
         "no_frame_recovered", "nothing_detected", "preamble_not_found",
         "sample_rate_mismatch", "truncated_frame",
+        "signal_present_no_frame",
     ),
     # 状态栏 message 通道：sdr_backend 设置 status.error = user_message(code)，
     # main_window._handle_backend_lost 显示「设备已断开：{message}」。
@@ -268,6 +269,9 @@ CODE_NEXT_STEPS: Dict[str, str] = {
     "preamble_not_found": (
         "在「控制」页签核对频点与采样率（ADS-B 需 fs=2 MS/s 或 4 MS/s），"
         "确认信号存在后再重试。"),
+    "signal_present_no_frame": (
+        "有信号但解不出：在「控制」页签核对调制方式与频偏，再确认协议前导"
+        "（ACARS 需 SYN,SYN,SOH）后重试；别把 0 帧当成解成功。"),
     "sample_rate_mismatch": (
         "在「控制」页签把采样率改成解码器要求的整数倍档位（如 ADS-B 用 "
         "2 MS/s 或 4 MS/s，即 1 MS/s 的整数倍）后重新录制，不要让它静默取整。"),
