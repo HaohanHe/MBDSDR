@@ -163,14 +163,15 @@ else
                           --group "$g" --total 2)"
                 [ -z "$files" ] && { report SKIP "pytest:tests[$g]" "分组为空"; continue; }
                 log="$LOG_DIR/pytest_tests_g${g}.log"
+                xml="$LOG_DIR/pytest_tests_g${g}.xml"
                 echo "       日志: $log  (tests 组 $g)"
                 # shellcheck disable=SC2086
                 if [ "$root_timeout" -gt 0 ] 2>/dev/null && command -v timeout >/dev/null 2>&1; then
                     QT_QPA_PLATFORM=offscreen timeout -k 20 "$root_timeout" \
-                        "$PYTHON_BIN" -m pytest -q $files >"$log" 2>&1
+                        "$PYTHON_BIN" -m pytest -q $files --junitxml="$xml" >"$log" 2>&1
                 else
                     QT_QPA_PLATFORM=offscreen \
-                        "$PYTHON_BIN" -m pytest -q $files >"$log" 2>&1
+                        "$PYTHON_BIN" -m pytest -q $files --junitxml="$xml" >"$log" 2>&1
                 fi
                 rc=$?
                 summary="$(grep -E 'passed|failed|error|no tests ran' "$log" | tail -1)"
@@ -181,19 +182,25 @@ else
                     124) report FAIL "pytest:tests[$g]" "墙钟超时 ${root_timeout}s（疑卡死用例，见日志）: $summary" ;;
                     *) report FAIL "pytest:tests[$g]" "$summary (rc=$rc)" ;;
                 esac
+                # 只读样本入口：失败时给一行 junitxml 绝对路径，供
+                # scripts/triage_failure.py 归因（不改判定、不影响退出码）。
+                if [ "$rc" -ne 0 ] && [ "$rc" -ne 5 ]; then
+                    echo "       junitxml: $xml"
+                fi
             done
             continue
         fi
         log="$LOG_DIR/pytest_$(echo "$d" | tr '/' '_').log"
+        xml="$LOG_DIR/pytest_$(echo "$d" | tr '/' '_').xml"
         echo "       日志: $log  ($d)"
         # exit codes: 0=全部通过  1=有用例失败  2=被中断  5=未收集到任何用例
         #            124=被外层 timeout 墙钟杀掉（卡死用例）
         if [ "$root_timeout" -gt 0 ] 2>/dev/null && command -v timeout >/dev/null 2>&1; then
             QT_QPA_PLATFORM=offscreen timeout -k 20 "$root_timeout" \
-                "$PYTHON_BIN" -m pytest -q "$ROOT/$d" >"$log" 2>&1
+                "$PYTHON_BIN" -m pytest -q "$ROOT/$d" --junitxml="$xml" >"$log" 2>&1
         else
             QT_QPA_PLATFORM=offscreen \
-                "$PYTHON_BIN" -m pytest -q "$ROOT/$d" >"$log" 2>&1
+                "$PYTHON_BIN" -m pytest -q "$ROOT/$d" --junitxml="$xml" >"$log" 2>&1
         fi
         rc=$?
         summary="$(grep -E 'passed|failed|error|no tests ran' "$log" | tail -1)"
@@ -204,6 +211,11 @@ else
             124) report FAIL "pytest:$d" "墙钟超时 ${root_timeout}s（疑卡死用例，见日志）: $summary" ;;
             *) report FAIL "pytest:$d" "$summary (rc=$rc)" ;;
         esac
+        # 只读样本入口：失败时给一行 junitxml 绝对路径，供
+        # scripts/triage_failure.py 归因（不改判定、不影响退出码）。
+        if [ "$rc" -ne 0 ] && [ "$rc" -ne 5 ]; then
+            echo "       junitxml: $xml"
+        fi
     done
 fi
 
