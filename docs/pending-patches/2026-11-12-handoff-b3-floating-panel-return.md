@@ -102,6 +102,13 @@ on_return=lambda k=key: self._return_panel(k)
   `deleteLater()` 后「C++ 已删、Python 还在」的窗口就出现了。
 - 所以方案 A 的 `release()` 要清 `_on_return`；否则修法对「未来写法」没有免疫力。
 
+**结论（2026-11-12 复核）**：`on_return` 捕获的是 `MainWindow + key`、**不含 panel**，
+因此「闭包还持有 panel」不成立；`deleteLater()` 当年失败更可能是
+`request_return` 栈帧与 `_return_panel` 的 `info` 字典尚未退出，
+而不是闭包持有了 panel。**原注释已否证**（见案卷
+`2026-11-11-case-0xc0000005.md` §2.9a）；是否改写那条注释，由当前持有
+`desktop/main_window.py` 的线决定，本单不代改。
+
 ## 5. 验收清单（改的时候照这条跑）
 
 1. `shiboken6.isValid(panel)` 在归位返回后为 `False`（方案 A），且
