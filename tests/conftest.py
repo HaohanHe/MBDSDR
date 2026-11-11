@@ -633,6 +633,38 @@ def real_config_snapshot(_real_config_guard_fixture):
     return _REAL_CONFIG_GUARD
 
 
+@pytest.fixture(scope="session", autouse=True)
+def _isolate_backing_config(tmp_path_factory):
+    """兜底隔离：不管用例有没有请求 isolated_profile，配置都写不到真实文件。
+
+    为什么需要兜底（2026-11-11 实测）：``MainWindow()`` 构造即
+    ``DesktopSettings.load()``，随后一次 ``set('touch_mode', 同值)`` 会把配置
+    置脏，500ms 防抖把**整份内容重写一遍**（size/sha256 不变、只有 mtime_ns
+    变）。二十多个 fixture 各自「记得」请求 isolated_profile 才不出事，等于
+    靠人记；只要有人在用例体里直接 ``MainWindow()`` 就漏。
+
+    这里只重定向 ``default_config_path()``（desktop_settings.json），不动
+    HOME/APPDATA/QSettings：
+      * HOME/APPDATA 是隔离手段的"大锤"，会话级改动会影响依赖真实 home 的
+        用例；
+      * QSettings 两参构造（``QSettings("MBDSDR", "Desktop")``）根本不吃
+        setPath，仍落 HKCU 注册表——那半由锁线统一清点，不在本装置里假装修好。
+
+    注意：pytest_configure 的守卫快照在**本 fixture 之前**取，所以守卫盯的
+    仍是用户真实文件；本 fixture 只保证写盘不落到那里。
+    """
+    import settings as settings_mod
+
+    root = tmp_path_factory.mktemp("realcfg")
+    target = str(root / "desktop_settings.json")
+    mp = pytest.MonkeyPatch()
+    mp.setattr(settings_mod, "default_config_path", lambda: target)
+    try:
+        yield root
+    finally:
+        mp.undo()
+
+
 @pytest.fixture(scope="module")
 def isolated_profile(tmp_path_factory):
     """把 HOME/USERPROFILE/APPDATA/LOCALAPPDATA/QSettings/layout_store 全部
