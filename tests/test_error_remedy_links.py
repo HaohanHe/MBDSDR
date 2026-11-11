@@ -130,6 +130,26 @@ def test_codes_without_entry_have_no_link(qapp):
     box.deleteLater()
 
 
+def test_decoder_not_streamable_remedy_is_actionable():
+    """P0-03 新增的 decoder_not_streamable 必须有可点的下一步。
+
+    AI 步骤卡失败时直接显示 ``错误 {code}``，用户看到码却无条目 = 看得见
+    的错没人解释。下一步必须点到真控件：顶栏「回放」、以及仅有的两个
+    流式入口面板「ADS-B 航路」「APRS 数据包」。
+    """
+    from troubleshooting import CODE_NEXT_STEPS, build_remedies, validate_remedies
+    code = "decoder_not_streamable"
+    remedy = error_remedy.remedy_for_code(code)
+    assert remedy is not None, "AI 步骤卡会显示该 code，却没有「怎么办」条目"
+    assert remedy.symptom == ERRORS[code].message
+    assert remedy.cause == ERRORS[code].meaning
+    assert remedy.next_step == CODE_NEXT_STEPS[code]
+    for ref in ("「回放」", "「ADS-B 航路」", "「APRS 数据包」"):
+        assert ref in remedy.next_step, f"下一步没点到 {ref}：{remedy.next_step}"
+    assert validate_remedies([remedy]) == []
+    assert any(r.code == code for r in build_remedies())
+
+
 def test_status_link_shows_and_opens_help_at_code(qapp, monkeypatch):
     from PySide6.QtWidgets import QStatusBar
     opened = []

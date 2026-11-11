@@ -137,6 +137,7 @@ ALIASES: Dict[str, Tuple[str, ...]] = {
     "not_writable": ("没有写权限", "权限不足", "写不进去"),
     "api_key_not_set": ("没配 Key", "模型不能用"),
     "empty_signal": ("静噪", "静噪太紧", "没声音", "信号太弱"),
+    "decoder_not_streamable": ("没有流式", "只能文件解码", "流式启动失败"),
 }
 
 #: 「桌面 UI 真会渲染 code 字面量或目录 message 原文」的目录错误码，按族共享
@@ -176,6 +177,9 @@ VISIBLE_BY_FAMILY: Dict[str, Tuple[str, ...]] = {
     "解码工具": (
         "invalid_vcdu", "decode_failed", "unknown_device", "doppler_failed",
         "ogn_decode_failed", "schedule_failed", "meta_failed", "bad_hex",
+        # P0-03 起 start_decoder 对流式入口缺失的模式返该码，AI 步骤卡会
+        # 显示 code 字面量（tool 失败路径），因此必须给「怎么办」。
+        "decoder_not_streamable",
     ),
     # 状态面板解码卡显式映射了这 15 个 code（DECODE_ERROR_LABELS）。
     "解码结果": (
@@ -277,6 +281,10 @@ CODE_NEXT_STEPS: Dict[str, str] = {
         "2 MS/s 或 4 MS/s，即 1 MS/s 的整数倍）后重新录制，不要让它静默取整。"),
     "truncated_frame": (
         "点「工具」菜单的「开始/停止录音」延长采集时长，保证覆盖完整的一帧后再重试。"),
+    "decoder_not_streamable": (
+        "该模式只有文件级解码：点顶栏「回放」（Ctrl+Shift+R）载入已录制的 "
+        ".iq/.wav 文件离线解码；要实时流式只能切到「ADS-B 航路」或「APRS "
+        "数据包」面板用 adsb/rds 两种模式，其余模式走 `--decode-file` 命令行。"),
 }
 
 #: 上述各族的扁平索引（测试与映射完整性检查用）
