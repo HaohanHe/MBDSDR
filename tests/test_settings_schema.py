@@ -1148,7 +1148,7 @@ def test_preview_import_does_not_write(env):
 
 
 def test_import_dialog_cancel_writes_nothing(env, monkeypatch):
-    """对话框必须先给预览、用户确认后才落盘；选「否」一个字段都不写。"""
+    """对话框必须先给预览、用户确认后才落盘；取消一个字段都不写。"""
     ds, host, panel, tmp_path = env
     ds.set("frequency_hz", 145_500_000.0)
 
@@ -1159,24 +1159,26 @@ def test_import_dialog_cancel_writes_nothing(env, monkeypatch):
     }), encoding="utf-8")
 
     seen = {}
+    real_dialog = settings_panel.ImportPreviewDialog
 
-    def _question(_parent, title, text, *args, **kwargs):
-        seen["title"], seen["text"] = title, text
-        return settings_panel.QMessageBox.No
+    class _CancelDialog(real_dialog):
+        def exec(self):
+            seen["body"] = self.body_text()
+            return settings_panel.QDialog.Rejected
 
     monkeypatch.setattr(
         settings_panel.QFileDialog, "getOpenFileName",
         staticmethod(lambda *a, **k: (str(path), "JSON (*.json)")))
-    monkeypatch.setattr(settings_panel.QMessageBox, "question",
-                        staticmethod(_question))
+    monkeypatch.setattr(settings_panel, "ImportPreviewDialog", _CancelDialog)
 
     panel._on_import_clicked()
 
-    # 预览内容确实展示给用户后才问确认
-    assert seen["title"] == "确认导入"
-    assert "将修改（旧值 → 新值）" in seen["text"]
-    assert "主题" not in seen["text"] and "theme" in seen["text"]
-    assert "文件里未提到的项保持现值" in seen["text"]
+    # 预览三段 + 不受影响段确实展示给用户后才等确认
+    for tag in ("【变化】", "【缺失】", "【清空】", "【不受影响】"):
+        assert tag in seen["body"]
+    assert "主题" not in seen["body"] and "theme" in seen["body"]
+    assert "保持现值" in seen["body"]
+    assert "observer_lat" in seen["body"] and "ai_temperature" in seen["body"]
     # 取消 → 未写盘，且明确告知
     assert ds.get("theme") == SCHEMA["theme"].default
     assert ds.get("frequency_hz") == 145_500_000.0
@@ -1805,3 +1807,95 @@ def test_startup_restores_immediate_items_without_perf_override(
         except Exception:  # noqa: BLE001 - 收尾失败不掩盖主断言
             pass
         w.close()
+
+
+# ---------------------------------------------------------------------------
+# 7. 导入预览：变化 / 缺失 / 清空 三段 + 「清空」逐项勾选
+# ---------------------------------------------------------------------------
+def test_import_preview_has_three_sections_and_unaffected_list(env):
+    """预览文本必须同时出现三段 + 观测站/AI 参数的「不受影响」点名。"""
+    ds, host, panel, tmp_path = env
+    path = tmp_path / "theme_only.json"
+    path.write_text(json.dumps({
+        "schema_version": CONFIG_SCHEMA_VERSION,
+        "settings": {"theme": "dark"},
+    }), encoding="utf-8")
+
+    res = panel.preview_import(str(path))
+    assert res.ok
+    text = settings_panel.format_import_preview(res)
+    assert f"将改 {len(res.changes)} 项，清空 {len(res.clears)} 项" in text
+    for tag in ("【变化】", "【缺失】", "【清空】", "【不受影响】"):
+        assert tag in text
+    for key in settings_panel.UNAFFECTED_IMPORT_KEYS:
+        assert key in text, f"{key} 必须显式标为不受影响"
+
+
+def test_import_theme_only_leaves_other_files_byte_identical(env):
+    """只导入 theme：观测站与 5 个 AI 参数一个都不动（磁盘字节比对）。"""
+    ds, host, panel, tmp_path = env
+    import settings_panel as sp_mod
+
+    ai_path = sp_mod.AI_CONFIG_PATH
+    gui_path = sp_mod.GUI_CONFIG_PATH
+    with open(gui_path, "w", encoding="utf-8") as f:
+        json.dump({"observer_lat": 31.2, "observer_lon": 121.5}, f)
+    host.set_observer_site(31.2, 121.5)
+    ds.set("frequency_hz", 145_500_000.0)
+    ds.flush()
+
+    ai_before = open(ai_path, "rb").read()
+    gui_before = open(gui_path, "rb").read()
+
+    path = tmp_path / "theme_only.json"
+    path.write_text(json.dumps({
+        "schema_version": CONFIG_SCHEMA_VERSION,
+        "settings": {"theme": "dark"},
+    }), encoding="utf-8")
+
+    res = panel.apply_import(panel.preview_import(str(path)))
+    assert [k for k, _o, _n in res.changes] == ["theme"]
+    assert "observer_lat" in res.absent and "ai_temperature" in res.absent
+
+    assert open(ai_path, "rb").read() == ai_before, "AI 参数被导入改了"
+    assert open(gui_path, "rb").read() == gui_before, "观测站坐标被导入改了"
+    assert ds.get("frequency_hz") == 145_500_000.0, "频点被导入改了"
+    assert ds.get("theme") == "dark"
+
+
+def test_import_clear_only_happens_for_checked_keys(env):
+    """「清空」默认不执行；用户勾了哪项才删哪项（不提供一键整体替换）。"""
+    ds, host, panel, tmp_path = env
+    import settings_panel as sp_mod
+
+    gui_path = sp_mod.GUI_CONFIG_PATH
+    with open(gui_path, "w", encoding="utf-8") as f:
+        json.dump({"observer_lat": 31.2, "observer_lon": 121.5}, f)
+    host.set_observer_site(31.2, 121.5)
+
+    path = tmp_path / "nulls.json"
+    path.write_text(json.dumps({
+        "schema_version": CONFIG_SCHEMA_VERSION,
+        "gui_config": {"observer_lat": None, "observer_lon": None},
+    }), encoding="utf-8")
+
+    preview = panel.preview_import(str(path))
+    assert preview.ok
+    assert sorted(k for k, _old in preview.clears) == ["observer_lat", "observer_lon"]
+
+    # 对话框默认全部不勾选 → 一项都不清（现值原样）
+    dlg = sp_mod.ImportPreviewDialog(None, preview)
+    assert dlg.selected_clear_keys() == []
+    res = panel.apply_import(preview, clear_keys=dlg.selected_clear_keys())
+    assert res.clears == []
+    assert (host._observer_lat, host._observer_lon) == (31.2, 121.5)
+
+    # 逐项勾选：只勾 observer_lat → 只执行这一项（清空任一坐标 = 整对清空，
+    # 是既有的成对语义；这里钉的是「没勾的项不产生任何动作」）
+    preview2 = panel.preview_import(str(path))
+    dlg2 = sp_mod.ImportPreviewDialog(None, preview2)
+    dlg2._clear_boxes[0][1].setChecked(True)
+    assert dlg2.selected_clear_keys() == ["observer_lat"]
+    res2 = panel.apply_import(preview2, clear_keys=dlg2.selected_clear_keys())
+    assert [k for k, _old in res2.clears] == ["observer_lat"]
+    assert host._observer_lat is None, "勾选的清空项必须真的清掉"

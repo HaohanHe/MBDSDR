@@ -27,7 +27,7 @@ from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
     QSizePolicy, QWidget, QVBoxLayout, QHBoxLayout, QGroupBox, QCheckBox, QSpinBox,
     QDoubleSpinBox, QComboBox, QLineEdit, QLabel, QFormLayout,
-    QPushButton, QToolButton, QMessageBox, QFileDialog,
+    QPushButton, QToolButton, QMessageBox, QFileDialog, QDialog, QTextEdit,
 )
 
 try:  # 右栏「分组标题 + 展开内容」的同款折叠节（唯一实现，不复制第二套）
@@ -125,6 +125,136 @@ _STARTUP_DEFERRED_KEYS = frozenset((
 
 # 面板内反馈时长沿用状态栏三档口径（docs/status-message-durations.md）。
 _MSG_NORMAL = 4000
+
+#: 导入预览里必须**显式声明「不受影响」**的键：观测站坐标 + 5 个 AI 采样参数。
+#: 这些项分属 gui_config / ai_config，是用户手工填过的现场信息；合并导入时
+#: 文件没提就保持现值，但光靠「缺失 N 项」太抽象，预览里单列一段点名。
+UNAFFECTED_IMPORT_KEYS: Tuple[str, ...] = (
+    "observer_lat", "observer_lon",
+    "ai_temperature", "ai_top_p", "ai_max_output_tokens",
+    "ai_max_context_tokens", "ai_timeout",
+)
+
+#: 预览文本里每段最多列多少条（超出只给条数，避免对话框撑爆）。
+_PREVIEW_MAX_LINES = 12
+
+
+def format_import_preview(res: ImportResult) -> str:
+    """把导入结果排成「变化 / 缺失 / 清空」三段 + 「不受影响」点名（纯函数）。
+
+    三段缺一不可：只看「将改 N 项」分不清是「文件没提」还是「文件要求清空」，
+    而这两者对用户的影响完全相反——前者保持现值，后者会删掉配置。
+    """
+    lines = [f"将改 {len(res.changes)} 项，清空 {len(res.clears)} 项"
+             f"（合并导入：文件没提到的项保持现值）"]
+
+    lines.append("")
+    lines.append(f"【变化】{len(res.changes)} 项（旧值 → 新值）")
+    if res.changes:
+        for key, old, new in res.changes[:_PREVIEW_MAX_LINES]:
+            lines.append(f"  {key}：{old!r} → {new!r}")
+        if len(res.changes) > _PREVIEW_MAX_LINES:
+            lines.append(f"  …其余 {len(res.changes) - _PREVIEW_MAX_LINES} 项")
+    else:
+        lines.append("  （无）")
+
+    lines.append("")
+    lines.append(f"【缺失】{len(res.absent)} 项：文件里没有，保持现值、不写盘")
+    if res.absent:
+        lines.append("  " + "、".join(res.absent[:_PREVIEW_MAX_LINES])
+                     + (f" …共 {len(res.absent)} 项"
+                        if len(res.absent) > _PREVIEW_MAX_LINES else ""))
+
+    unaffected = [k for k in UNAFFECTED_IMPORT_KEYS if k in res.absent]
+    lines.append("")
+    lines.append("【不受影响】观测站与 AI 采样参数")
+    if unaffected:
+        lines.append("  " + "、".join(unaffected) + "（文件未提供，保持现值）")
+    else:
+        lines.append("  本次文件提供了这些键：请看上方「变化」，未提供的不受影响")
+    provided = [k for k in UNAFFECTED_IMPORT_KEYS if k not in res.absent]
+    if provided and unaffected:
+        lines.append("  文件提供并已按规则处理：" + "、".join(provided))
+
+    lines.append("")
+    lines.append(f"【清空】{len(res.clears)} 项：只有勾选下面复选框的才会被清空")
+    if res.clears:
+        for key, old in res.clears[:_PREVIEW_MAX_LINES]:
+            lines.append(f"  {key}：{old!r} → 空")
+        if len(res.clears) > _PREVIEW_MAX_LINES:
+            lines.append(f"  …其余 {len(res.clears) - _PREVIEW_MAX_LINES} 项")
+    else:
+        lines.append("  （无）")
+
+    if res.unknown:
+        lines.append("")
+        lines.append("【忽略】未知字段：" + "、".join(res.unknown[:20]))
+    if res.rejected:
+        lines.append("")
+        lines.append("【拒绝】非法值，未写入：" + "；".join(
+            f"{k}={r}" for k, r in res.rejected[:20]))
+    if res.warnings:
+        lines.append("")
+        lines.append("提示：" + "；".join(res.warnings[:20]))
+    return "\n".join(lines)
+
+
+class ImportPreviewDialog(QDialog):
+    """导入预览对话框：三段差异 + 逐项「清空」复选，不提供一键整体替换。
+
+    默认行为是**合并**：变化项照写，清空项默认全部不勾选（=保持现值），
+    用户必须自己一个个勾。取消 = 一个字段都不写。
+    """
+
+    def __init__(self, parent=None, res: Optional[ImportResult] = None):
+        super().__init__(parent)
+        self.setWindowTitle("导入预览")
+        self.resize(720, 560)
+        self._res = res or ImportResult()
+        self._clear_boxes: List[Tuple[str, QCheckBox]] = []
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(10, 10, 10, 10)
+        root.setSpacing(8)
+
+        self.body = QTextEdit()
+        self.body.setReadOnly(True)
+        self.body.setPlainText(format_import_preview(self._res))
+        root.addWidget(self.body, 1)
+
+        if self._res.clears:
+            box = QGroupBox("要清空哪些项？（默认全部不勾选 = 保持现值）")
+            lay = QVBoxLayout(box)
+            hint = QLabel("勾选后这些项会被删成空值；不勾选的保持现值。"
+                          "没有「全部清空」按钮，请逐项确认。")
+            wrap_cn_label(hint)
+            hint.setObjectName("hintLabel")
+            lay.addWidget(hint)
+            for key, old in self._res.clears:
+                cb = QCheckBox(f"{key}（当前 {old!r}）→ 清空")
+                cb.setChecked(False)
+                lay.addWidget(cb)
+                self._clear_boxes.append((key, cb))
+            root.addWidget(box)
+
+        row = QHBoxLayout()
+        row.addStretch(1)
+        self.cancel_btn = QPushButton("取消（不写入）")
+        self.cancel_btn.clicked.connect(self.reject)
+        self.ok_btn = QPushButton("确认导入")
+        self.ok_btn.setDefault(True)
+        self.ok_btn.clicked.connect(self.accept)
+        row.addWidget(self.cancel_btn)
+        row.addWidget(self.ok_btn)
+        root.addLayout(row)
+
+    def body_text(self) -> str:
+        """当前展示给用户的完整预览文本（测试直接断言三段都在）。"""
+        return self.body.toPlainText()
+
+    def selected_clear_keys(self) -> List[str]:
+        """用户勾选的清空项（默认空列表 = 一项都不清）。"""
+        return [k for k, cb in self._clear_boxes if cb.isChecked()]
 
 
 class ServiceSettingsPanel(QWidget):
@@ -1356,10 +1486,22 @@ class SettingsPanel(QWidget):
         current = {item.key: self._current_value(item) for item in ALL_ITEMS}
         return parse_import(payload, current=current)
 
-    def apply_import(self, res: ImportResult) -> ImportResult:
-        """把已预览的合并结果写入各存储后端；非法/未知项早已被剔除。"""
+    def apply_import(self, res: ImportResult,
+                     clear_keys: Optional[List[str]] = None) -> ImportResult:
+        """把已预览的合并结果写入各存储后端；非法/未知项早已被剔除。
+
+        ``clear_keys`` 为 ``None`` 时按预览全部执行（非交互入口）；
+        给定列表时**只清空列表里的键**，其余清空项视为用户未勾选 → 保持现值
+        （默认为合并语义，不提供一键整体替换）。
+        """
         if not res.ok:
             return res
+        if clear_keys is not None:
+            selected = set(clear_keys)
+            for key, _old in res.clears:
+                if key not in selected:
+                    res.accepted.pop(key, None)
+            res.clears = [(k, o) for k, o in res.clears if k in selected]
         ai_values: Dict[str, Any] = {}
         for key, value in res.accepted.items():
             item = SCHEMA[key]
@@ -1459,32 +1601,11 @@ class SettingsPanel(QWidget):
         if not res.changes and not res.clears:
             QMessageBox.information(self, "无需导入", res.summary() + "。没有需要修改的项。")
             return
-        lines = [res.summary() + "。"]
-        if res.changes:
-            lines.append("将修改（旧值 → 新值）：")
-            for key, old, new in res.changes[:20]:
-                lines.append(f"  {key}：{old!r} → {new!r}")
-            if len(res.changes) > 20:
-                lines.append(f"  …其余 {len(res.changes) - 20} 项")
-        if res.clears:
-            lines.append("将清空：")
-            for key, old in res.clears[:20]:
-                lines.append(f"  {key}：{old!r} → 空")
-        if res.unknown:
-            lines.append("已忽略（未知字段，不导入）：" + "、".join(res.unknown[:20]))
-        if res.rejected:
-            lines.append("被拒绝（非法值，未写入）：" + "；".join(
-                f"{k}={r}" for k, r in res.rejected[:20]))
-        if res.warnings:
-            lines.append("提示：" + "；".join(res.warnings[:20]))
-        lines.append("文件里未提到的项保持现值；确认后才写入。")
-        if QMessageBox.question(
-                self, "确认导入", "\n".join(lines),
-                QMessageBox.Yes | QMessageBox.No,
-                QMessageBox.No) != QMessageBox.Yes:
+        dlg = ImportPreviewDialog(self, res)
+        if dlg.exec() != QDialog.Accepted:
             self._notify("已取消导入：未写入任何配置")
             return
-        res = self.apply_import(res)
+        res = self.apply_import(res, clear_keys=dlg.selected_clear_keys())
         done = ["导入完成：" + res.summary() + "。"]
         if res.rejected:
             done.append("被拒绝：" + "；".join(
