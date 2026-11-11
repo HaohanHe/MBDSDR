@@ -1,0 +1,572 @@
+{
+ "kind": "进程字体/排版地板（最小 QApplication + QWidget + QLabel）",
+ "date": "2026-11-12",
+ "runs_per_mode": 3,
+ "windows_per_process": 3,
+ "modes": [
+  "twofonts"
+ ],
+ "data": {
+  "twofonts": {
+   "ruler": {
+    "qt_platform": "windows",
+    "font_families": 395,
+    "resolved_family": "MiSans",
+    "resolved_point": 10.0,
+    "dpr": 1.0,
+    "text": "星象仪模式 频谱 控制 AI 助手",
+    "text_len": 17
+   },
+   "by_window": [
+    {
+     "window": 1,
+     "font_tag": "MiSans 10pt",
+     "font_family": "MiSans",
+     "text_len": 17,
+     "to_paint_dispatch_ms": [
+      71.7,
+      87.8,
+      78.5
+     ],
+     "paint_exec_ms": [
+      308.4,
+      551.4,
+      498.0
+     ],
+     "cycle_to_paint_done_ms": [
+      380.1,
+      639.2,
+      576.5
+     ],
+     "cycle_median_ms": 576.5,
+     "paint_exec_median_ms": 498.0
+    },
+    {
+     "window": 2,
+     "font_tag": "Consolas 14pt",
+     "font_family": "Consolas",
+     "text_len": 11,
+     "to_paint_dispatch_ms": [
+      20.7,
+      20.6,
+      18.2
+     ],
+     "paint_exec_ms": [
+      1.1,
+      1.2,
+      1.3
+     ],
+     "cycle_to_paint_done_ms": [
+      21.8,
+      21.8,
+      19.5
+     ],
+     "cycle_median_ms": 21.8,
+     "paint_exec_median_ms": 1.2
+    },
+    {
+     "window": 3,
+     "font_tag": "MiSans 10pt",
+     "font_family": "MiSans",
+     "text_len": 17,
+     "to_paint_dispatch_ms": [
+      19.0,
+      18.5,
+      23.1
+     ],
+     "paint_exec_ms": [
+      0.2,
+      0.2,
+      0.3
+     ],
+     "cycle_to_paint_done_ms": [
+      19.3,
+      18.7,
+      23.4
+     ],
+     "cycle_median_ms": 19.3,
+     "paint_exec_median_ms": 0.2
+    }
+   ],
+   "cold": {
+    "app_create_ms": [
+     35.9,
+     35.6,
+     38.6
+    ],
+    "font_set_ms": [
+     0.1,
+     0.1,
+     0.1
+    ],
+    "build_ms": [
+     0.2,
+     0.2,
+     0.2
+    ],
+    "to_paint_dispatch_ms": [
+     71.7,
+     87.8,
+     78.5
+    ],
+    "paint_exec_ms": [
+     308.4,
+     551.4,
+     498.0
+    ],
+    "cycle_to_paint_done_ms": [
+     380.1,
+     639.2,
+     576.5
+    ],
+    "total_incl_app_ms": [
+     416.1,
+     674.9,
+     615.2
+    ],
+    "total_incl_app_median_ms": 615.2
+   },
+   "warm": {
+    "cycle_to_paint_done_ms": [
+     21.8,
+     19.3,
+     21.8,
+     18.7,
+     19.5,
+     23.4
+    ],
+    "to_paint_dispatch_ms": [
+     20.7,
+     19.0,
+     20.6,
+     18.5,
+     18.2,
+     23.1
+    ],
+    "paint_exec_ms": [
+     1.1,
+     0.2,
+     1.2,
+     0.2,
+     1.3,
+     0.3
+    ],
+    "cycle_median_ms": 20.6
+   },
+   "warm_metrics_ms": [
+    0.097,
+    0.091,
+    0.386
+   ],
+   "consolas_metrics_ms": [
+    0.023,
+    0.024,
+    0.042
+   ],
+   "draw_text_after_warm_ms": [
+    0.206,
+    0.218,
+    0.331
+   ],
+   "loads": [
+    {
+     "before_python_pct": 114.0,
+     "after_python_pct": 131.3
+    },
+    {
+     "before_python_pct": 108.6,
+     "after_python_pct": 102.4
+    },
+    {
+     "before_python_pct": 125.0,
+     "after_python_pct": 88.2
+    }
+   ],
+   "load_gate_before_python_pct": [
+    96.1,
+    112.5,
+    79.7
+   ],
+   "runs": [
+    {
+     "mode": "twofonts",
+     "windows": [
+      {
+       "window": 1,
+       "cold": true,
+       "font_tag": "MiSans 10pt",
+       "font_family": "MiSans",
+       "text": "星象仪模式 频谱 控制 AI 助手",
+       "text_len": 17,
+       "app_create_ms": 35.9,
+       "font_set_ms": 0.1,
+       "build_ms": 0.2,
+       "show_ms": 382.7,
+       "to_paint_dispatch_ms": 71.7,
+       "paint_exec_ms": 308.4,
+       "cycle_to_paint_done_ms": 380.1,
+       "total_incl_app_ms": 416.1,
+       "paints": 1
+      },
+      {
+       "window": 2,
+       "cold": false,
+       "font_tag": "Consolas 14pt",
+       "font_family": "Consolas",
+       "text": "123.456 MHz",
+       "text_len": 11,
+       "app_create_ms": 0.0,
+       "font_set_ms": 0.0,
+       "build_ms": 0.3,
+       "show_ms": 16.4,
+       "to_paint_dispatch_ms": 20.7,
+       "paint_exec_ms": 1.1,
+       "cycle_to_paint_done_ms": 21.8,
+       "total_incl_app_ms": 21.8,
+       "paints": 1
+      },
+      {
+       "window": 3,
+       "cold": false,
+       "font_tag": "MiSans 10pt",
+       "font_family": "MiSans",
+       "text": "星象仪模式 频谱 控制 AI 助手",
+       "text_len": 17,
+       "app_create_ms": 0.0,
+       "font_set_ms": 0.0,
+       "build_ms": 0.2,
+       "show_ms": 16.1,
+       "to_paint_dispatch_ms": 19.0,
+       "paint_exec_ms": 0.2,
+       "cycle_to_paint_done_ms": 19.3,
+       "total_incl_app_ms": 19.3,
+       "paints": 1
+      }
+     ],
+     "warm_metrics_ms": 0.097,
+     "consolas_metrics_ms": 0.023,
+     "draw_text_after_warm_ms": 0.206,
+     "ruler": {
+      "qt_platform": "windows",
+      "font_families": 395,
+      "resolved_family": "MiSans",
+      "resolved_point": 10.0,
+      "dpr": 1.0,
+      "text": "星象仪模式 频谱 控制 AI 助手",
+      "text_len": 17
+     },
+     "load_before": {
+      "sys_cpu_pct": 22.2,
+      "python_proc_count": 8,
+      "python_total_cpu_pct": 114.0,
+      "python_top": [
+       {
+        "pid": 37092,
+        "cpu_pct": 107.0
+       },
+       {
+        "pid": 32508,
+        "cpu_pct": 6.2
+       },
+       {
+        "pid": 33600,
+        "cpu_pct": 0.8
+       },
+       {
+        "pid": 34516,
+        "cpu_pct": 0.0
+       },
+       {
+        "pid": 34948,
+        "cpu_pct": 0.0
+       }
+      ],
+      "cpu_count": 12
+     },
+     "load_after": {
+      "sys_cpu_pct": 46.7,
+      "python_proc_count": 6,
+      "python_total_cpu_pct": 131.3,
+      "python_top": [
+       {
+        "pid": 37092,
+        "cpu_pct": 125.0
+       },
+       {
+        "pid": 32508,
+        "cpu_pct": 4.7
+       },
+       {
+        "pid": 33600,
+        "cpu_pct": 0.8
+       },
+       {
+        "pid": 35108,
+        "cpu_pct": 0.8
+       },
+       {
+        "pid": 35144,
+        "cpu_pct": 0.0
+       }
+      ],
+      "cpu_count": 12
+     },
+     "process_total_ms": 5013.5,
+     "load_gate_before_python_pct": 96.1
+    },
+    {
+     "mode": "twofonts",
+     "windows": [
+      {
+       "window": 1,
+       "cold": true,
+       "font_tag": "MiSans 10pt",
+       "font_family": "MiSans",
+       "text": "星象仪模式 频谱 控制 AI 助手",
+       "text_len": 17,
+       "app_create_ms": 35.6,
+       "font_set_ms": 0.1,
+       "build_ms": 0.2,
+       "show_ms": 642.1,
+       "to_paint_dispatch_ms": 87.8,
+       "paint_exec_ms": 551.4,
+       "cycle_to_paint_done_ms": 639.2,
+       "total_incl_app_ms": 674.9,
+       "paints": 1
+      },
+      {
+       "window": 2,
+       "cold": false,
+       "font_tag": "Consolas 14pt",
+       "font_family": "Consolas",
+       "text": "123.456 MHz",
+       "text_len": 11,
+       "app_create_ms": 0.0,
+       "font_set_ms": 0.0,
+       "build_ms": 0.3,
+       "show_ms": 17.7,
+       "to_paint_dispatch_ms": 20.6,
+       "paint_exec_ms": 1.2,
+       "cycle_to_paint_done_ms": 21.8,
+       "total_incl_app_ms": 21.8,
+       "paints": 1
+      },
+      {
+       "window": 3,
+       "cold": false,
+       "font_tag": "MiSans 10pt",
+       "font_family": "MiSans",
+       "text": "星象仪模式 频谱 控制 AI 助手",
+       "text_len": 17,
+       "app_create_ms": 0.0,
+       "font_set_ms": 0.0,
+       "build_ms": 0.2,
+       "show_ms": 15.7,
+       "to_paint_dispatch_ms": 18.5,
+       "paint_exec_ms": 0.2,
+       "cycle_to_paint_done_ms": 18.7,
+       "total_incl_app_ms": 18.7,
+       "paints": 1
+      }
+     ],
+     "warm_metrics_ms": 0.091,
+     "consolas_metrics_ms": 0.024,
+     "draw_text_after_warm_ms": 0.218,
+     "ruler": {
+      "qt_platform": "windows",
+      "font_families": 395,
+      "resolved_family": "MiSans",
+      "resolved_point": 10.0,
+      "dpr": 1.0,
+      "text": "星象仪模式 频谱 控制 AI 助手",
+      "text_len": 17
+     },
+     "load_before": {
+      "sys_cpu_pct": 20.7,
+      "python_proc_count": 6,
+      "python_total_cpu_pct": 108.6,
+      "python_top": [
+       {
+        "pid": 37092,
+        "cpu_pct": 105.5
+       },
+       {
+        "pid": 32508,
+        "cpu_pct": 3.1
+       },
+       {
+        "pid": 35108,
+        "cpu_pct": 0.0
+       },
+       {
+        "pid": 35144,
+        "cpu_pct": 0.0
+       },
+       {
+        "pid": 36532,
+        "cpu_pct": 0.0
+       }
+      ],
+      "cpu_count": 12
+     },
+     "load_after": {
+      "sys_cpu_pct": 48.1,
+      "python_proc_count": 6,
+      "python_total_cpu_pct": 102.4,
+      "python_top": [
+       {
+        "pid": 37092,
+        "cpu_pct": 97.7
+       },
+       {
+        "pid": 32508,
+        "cpu_pct": 3.9
+       },
+       {
+        "pid": 35108,
+        "cpu_pct": 0.8
+       },
+       {
+        "pid": 35144,
+        "cpu_pct": 0.0
+       },
+       {
+        "pid": 36532,
+        "cpu_pct": 0.0
+       }
+      ],
+      "cpu_count": 12
+     },
+     "process_total_ms": 5257.6,
+     "load_gate_before_python_pct": 112.5
+    },
+    {
+     "mode": "twofonts",
+     "windows": [
+      {
+       "window": 1,
+       "cold": true,
+       "font_tag": "MiSans 10pt",
+       "font_family": "MiSans",
+       "text": "星象仪模式 频谱 控制 AI 助手",
+       "text_len": 17,
+       "app_create_ms": 38.6,
+       "font_set_ms": 0.1,
+       "build_ms": 0.2,
+       "show_ms": 579.2,
+       "to_paint_dispatch_ms": 78.5,
+       "paint_exec_ms": 498.0,
+       "cycle_to_paint_done_ms": 576.5,
+       "total_incl_app_ms": 615.2,
+       "paints": 1
+      },
+      {
+       "window": 2,
+       "cold": false,
+       "font_tag": "Consolas 14pt",
+       "font_family": "Consolas",
+       "text": "123.456 MHz",
+       "text_len": 11,
+       "app_create_ms": 0.0,
+       "font_set_ms": 0.0,
+       "build_ms": 0.3,
+       "show_ms": 15.1,
+       "to_paint_dispatch_ms": 18.2,
+       "paint_exec_ms": 1.3,
+       "cycle_to_paint_done_ms": 19.5,
+       "total_incl_app_ms": 19.5,
+       "paints": 1
+      },
+      {
+       "window": 3,
+       "cold": false,
+       "font_tag": "MiSans 10pt",
+       "font_family": "MiSans",
+       "text": "星象仪模式 频谱 控制 AI 助手",
+       "text_len": 17,
+       "app_create_ms": 0.0,
+       "font_set_ms": 0.0,
+       "build_ms": 0.3,
+       "show_ms": 20.8,
+       "to_paint_dispatch_ms": 23.1,
+       "paint_exec_ms": 0.3,
+       "cycle_to_paint_done_ms": 23.4,
+       "total_incl_app_ms": 23.4,
+       "paints": 1
+      }
+     ],
+     "warm_metrics_ms": 0.386,
+     "consolas_metrics_ms": 0.042,
+     "draw_text_after_warm_ms": 0.331,
+     "ruler": {
+      "qt_platform": "windows",
+      "font_families": 395,
+      "resolved_family": "MiSans",
+      "resolved_point": 10.0,
+      "dpr": 1.0,
+      "text": "星象仪模式 频谱 控制 AI 助手",
+      "text_len": 17
+     },
+     "load_before": {
+      "sys_cpu_pct": 55.0,
+      "python_proc_count": 6,
+      "python_total_cpu_pct": 125.0,
+      "python_top": [
+       {
+        "pid": 37092,
+        "cpu_pct": 116.4
+       },
+       {
+        "pid": 32508,
+        "cpu_pct": 8.6
+       },
+       {
+        "pid": 13064,
+        "cpu_pct": 0.0
+       },
+       {
+        "pid": 35108,
+        "cpu_pct": 0.0
+       },
+       {
+        "pid": 35144,
+        "cpu_pct": 0.0
+       }
+      ],
+      "cpu_count": 12
+     },
+     "load_after": {
+      "sys_cpu_pct": 55.3,
+      "python_proc_count": 6,
+      "python_total_cpu_pct": 88.2,
+      "python_top": [
+       {
+        "pid": 37092,
+        "cpu_pct": 85.9
+       },
+       {
+        "pid": 32508,
+        "cpu_pct": 2.3
+       },
+       {
+        "pid": 13064,
+        "cpu_pct": 0.0
+       },
+       {
+        "pid": 35108,
+        "cpu_pct": 0.0
+       },
+       {
+        "pid": 35144,
+        "cpu_pct": 0.0
+       }
+      ],
+      "cpu_count": 12
+     },
+     "process_total_ms": 5192.0,
+     "load_gate_before_python_pct": 79.7
+    }
+   ]
+  }
+ }
+}

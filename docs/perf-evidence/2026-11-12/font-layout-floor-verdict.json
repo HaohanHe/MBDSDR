@@ -1,0 +1,106 @@
+{
+ "kind": "进程字体/排版地板（回答「1158.5 里有多少是本机不可约的首次排版成本」）",
+ "date": "2026-11-12",
+ "criterion": "最小 QApplication + 一个 QWidget + 一个中文 QLabel（MiSans 10pt）；冷进程量一次，同进程第 2/3 个窗口量一次。",
+ "ruler": {
+  "qt_platform": "windows",
+  "QT_SCALE_FACTOR": "1",
+  "QT_ENABLE_HIGHDPI_SCALING": "0",
+  "resolved_family": "MiSans",
+  "point": 10.0,
+  "dpr": 1.0,
+  "font_families": 395,
+  "text": "星象仪模式 频谱 控制 AI 助手",
+  "text_len": 17
+ },
+ "load_rule": "规则 10：9 个 chinese/none/ascii 子进程 + 3 个 twofonts 子进程，测前/测后 python 总占比全部 <200%（最高一次 138.3%，仍在阈值内），逐 run 记录见两份原 JSON。",
+ "cold_process_floor": {
+  "method": "独立进程，QApplication() → setFont(get_app_font()) → 建窗口 → show() → 等 QLabel 首次 paintEvent 返回",
+  "app_create_ms": [39.4, 29.6, 36.8],
+  "to_paint_dispatch_ms": [63.5, 62.4, 67.6],
+  "first_text_paint_ms": [384.4, 418.3, 306.7],
+  "window_cycle_ms": [448.0, 480.7, 374.3],
+  "total_incl_app_ms": [487.5, 510.4, 411.2],
+  "median": {
+   "app_create_ms": 36.8,
+   "to_paint_dispatch_ms": 63.5,
+   "first_text_paint_ms": 384.4,
+   "window_cycle_ms": 448.0,
+   "total_incl_app_ms": 487.5
+  }
+ },
+ "warm_process_floor": {
+  "method": "同一进程第 2/3 个窗口，字体缓存已热",
+  "window_cycle_ms": [20.1, 20.4, 20.9, 21.2, 22.3, 20.2],
+  "first_text_paint_ms": [0.2, 0.2, 0.3, 0.3, 0.3, 0.2],
+  "cycle_median_ms": 20.6,
+  "warm_metrics_ms": [0.117, 0.119, 0.108],
+  "ratio": "冷 487.5 / 热 20.6 ≈ 23.7×；首次文字排版 384.4 / 热 0.2 ≈ 1900×"
+ },
+ "controls": {
+  "empty_label": {
+   "method": "同一结构但 QLabel 无文字（--text none）",
+   "cold_total_incl_app_ms": [116.3, 91.0, 95.1],
+   "cold_total_median_ms": 95.1,
+   "first_paint_ms": [0.1, 0.1, 0.1],
+   "first_metric_paid_later_ms": [766.058, 682.552, 446.563],
+   "first_metric_paid_later_median_ms": 682.6,
+   "reading": "空 label 的首次 paint 是 0.1 ms；第一次字体度量并没有消失，只是被本脚本末尾的 QFontMetrics 审计调用付掉（446–766 ms）。这证明 384.4 不是窗口/paint 本身，而是「进程内第一次给文字做度量/排版」。"
+  },
+  "ascii_label": {
+   "method": "同结构，31 个 ASCII 字符（--text ascii）",
+   "cold_total_incl_app_ms": [597.2, 558.9, 424.3],
+   "cold_total_median_ms": 558.9,
+   "first_paint_ms": [493.3, 459.4, 318.7],
+   "first_paint_median_ms": 459.4,
+   "reading": "ASCII 不比中文便宜（中位 459.4 vs 384.4，差异在 run 间抖动范围内）。地板与「画了多少字/是不是 CJK」无关。"
+  },
+  "second_font_family": {
+   "method": "同一进程：窗口 1 用 MiSans 10pt，窗口 2 用 Consolas 14pt，窗口 3 再回 MiSans 10pt",
+   "window1_misans_ms": [380.1, 639.2, 576.5],
+   "window2_consolas_first_paint_ms": [1.1, 1.2, 1.3],
+   "window3_misans_again_ms": [19.3, 18.7, 23.4],
+   "reading": "第二个字体族（Consolas 14pt）首次排版只要 1.1–1.3 ms。地板是**进程级一次性**的，不是每个字体族各付一遍。"
+  }
+ },
+ "answer_share_of_1158_5": {
+  "floor_ms": 391.9,
+  "basis": "本批直接测得首次文字排版中位 384.4 ms；ledger 把 394.4 拆成字体度量 391.9 + 控件构造 2.5，两者一致。",
+  "share_pct": 33.8,
+  "also_irreducible_but_outside_definition_c": {
+   "app_create_ms": 36.8,
+   "note": "定义 C 的基线脚本 entry_to_tick_ms = ctor + tick，不含 QApplication 创建与 import；从用户双击算起的真实地板还要加这 36.8 ms（以及 import 阶段，未在本批计时）。"
+  }
+ },
+ "addition_table": {
+  "note": "只有「地板」与「非地板余量」是互斥可加的两段；中间各段实测口径互有嵌套（addTab 的 inclusive 含面板 polish、面板构造又发生在 ctor 内），相加会超过 1158.5，因此下表不把嵌套段当成本归属，只用它们回答「800 还剩多少预算」。",
+  "rows": [
+   {"item": "进程首次文字排版/度量地板（一次性）", "ms": 391.9, "kind": "实测", "additive": true},
+   {"item": "其余全部（QSS 首次全树 polish、reparent+布局、右栏 20 个页签与面板构造、首帧 paint 等）", "ms": 766.6, "kind": "1158.5 − 391.9", "additive": true},
+   {"item": "合计 = 定义 C 基线", "ms": 1158.5, "kind": "实测", "additive": true}
+  ],
+  "budget_for_800": {
+   "floor_ms": 391.9,
+   "allowed_everything_else_ms": 408.1,
+   "current_everything_else_ms": 766.6,
+   "must_cut_ms": 358.5,
+   "must_cut_share_of_non_floor_pct": 46.8
+  }
+ },
+ "all_known_deferrable_applied": {
+  "right_tab_add_ms": 236.6,
+  "fullscreen_planetarium_page_ms": 15.9,
+  "total_ms": 252.5,
+  "resulting_definition_c_ms": 906.0,
+  "still_above_800_ms": 106.0,
+  "reading": "把目前所有「按首帧判据确实不需要」的项全部拿掉，也只到 906.0；剩下的 106 ms 已无「没进首帧却建了」的东西可拿，只能减首帧内容本身或改目标。"
+ },
+ "conclusion": "地板答：**1158.5 里 391.9 ms（33.8%）是本机不可约的首次文字排版成本**，只发生一次，与文本量、字体族无关（空 label 0.1 ms 但度量移到别处；ASCII 459.4 不比中文便宜；第二个字体族只 1.1–1.3 ms）。因此 391.9 不是「星象仪画了太多文本」，分层绘制不会回收它——生产入口里它由 splash 付掉（deferral-profit-probe-head-prod.json：splash 302.8–441.0，之后星象仪只 2.8–4.2）。结论：800 的预算是 800 − 391.9 = 408.1 ms 给全部非地板工作；当前非地板 766.6 ms，必须砍 358.5（46.8%）。即使把右栏 236.6 + 全屏星象仪页 15.9 全延后，也只到 906.0，仍高 106.0，且那 106 全是首帧可见内容。按现判据，「其余不动也能达标」= 假；800 在本机需要改首屏内容或重谈目标。",
+ "sources": [
+  "docs/perf-evidence/2026-11-12/font-layout-floor.json",
+  "docs/perf-evidence/2026-11-12/font-layout-floor-twofonts.json",
+  "docs/perf-evidence/2026-11-12/deferral-profit-table.json",
+  "docs/perf-evidence/2026-11-12/deferral-profit-probe-head-prod.json"
+ ],
+ "script": "scripts/repro/2026-11-12-font-layout-floor.py --text chinese,none,ascii|twofonts --runs 3"
+}

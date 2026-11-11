@@ -1,0 +1,1351 @@
+{
+ "kind": "进程字体/排版地板（最小 QApplication + QWidget + QLabel）",
+ "date": "2026-11-12",
+ "runs_per_mode": 3,
+ "windows_per_process": 3,
+ "modes": [
+  "chinese",
+  "none",
+  "ascii"
+ ],
+ "data": {
+  "chinese": {
+   "ruler": {
+    "qt_platform": "windows",
+    "font_families": 395,
+    "resolved_family": "MiSans",
+    "resolved_point": 10.0,
+    "dpr": 1.0,
+    "text": "星象仪模式 频谱 控制 AI 助手",
+    "text_len": 17
+   },
+   "cold": {
+    "app_create_ms": [
+     39.4,
+     29.6,
+     36.8
+    ],
+    "font_set_ms": [
+     0.1,
+     0.1,
+     0.1
+    ],
+    "build_ms": [
+     0.2,
+     0.2,
+     0.2
+    ],
+    "to_paint_dispatch_ms": [
+     63.5,
+     62.4,
+     67.6
+    ],
+    "paint_exec_ms": [
+     384.4,
+     418.3,
+     306.7
+    ],
+    "cycle_to_paint_done_ms": [
+     448.0,
+     480.7,
+     374.3
+    ],
+    "total_incl_app_ms": [
+     487.5,
+     510.4,
+     411.2
+    ],
+    "total_incl_app_median_ms": 487.5
+   },
+   "warm": {
+    "cycle_to_paint_done_ms": [
+     20.1,
+     20.4,
+     20.9,
+     21.2,
+     22.3,
+     20.2
+    ],
+    "to_paint_dispatch_ms": [
+     19.9,
+     20.1,
+     20.6,
+     20.9,
+     22.0,
+     20.0
+    ],
+    "paint_exec_ms": [
+     0.2,
+     0.2,
+     0.3,
+     0.3,
+     0.3,
+     0.2
+    ],
+    "cycle_median_ms": 20.6
+   },
+   "warm_metrics_ms": [
+    0.117,
+    0.119,
+    0.108
+   ],
+   "draw_text_after_warm_ms": [
+    0.369,
+    0.337,
+    0.208
+   ],
+   "loads": [
+    {
+     "before_python_pct": 4.7,
+     "after_python_pct": 7.8
+    },
+    {
+     "before_python_pct": 7.0,
+     "after_python_pct": 5.5
+    },
+    {
+     "before_python_pct": 6.2,
+     "after_python_pct": 5.5
+    }
+   ],
+   "load_gate_before_python_pct": [
+    110.1,
+    4.7,
+    7.8
+   ],
+   "runs": [
+    {
+     "mode": "chinese",
+     "windows": [
+      {
+       "window": 1,
+       "cold": true,
+       "app_create_ms": 39.4,
+       "font_set_ms": 0.1,
+       "build_ms": 0.2,
+       "show_ms": 450.6,
+       "to_paint_dispatch_ms": 63.5,
+       "paint_exec_ms": 384.4,
+       "cycle_to_paint_done_ms": 448.0,
+       "total_incl_app_ms": 487.5,
+       "paints": 1
+      },
+      {
+       "window": 2,
+       "cold": false,
+       "app_create_ms": 0.0,
+       "font_set_ms": 0.0,
+       "build_ms": 0.3,
+       "show_ms": 15.9,
+       "to_paint_dispatch_ms": 19.9,
+       "paint_exec_ms": 0.2,
+       "cycle_to_paint_done_ms": 20.1,
+       "total_incl_app_ms": 20.1,
+       "paints": 1
+      },
+      {
+       "window": 3,
+       "cold": false,
+       "app_create_ms": 0.0,
+       "font_set_ms": 0.0,
+       "build_ms": 0.5,
+       "show_ms": 17.1,
+       "to_paint_dispatch_ms": 20.1,
+       "paint_exec_ms": 0.2,
+       "cycle_to_paint_done_ms": 20.4,
+       "total_incl_app_ms": 20.4,
+       "paints": 1
+      }
+     ],
+     "warm_metrics_ms": 0.117,
+     "draw_text_after_warm_ms": 0.369,
+     "ruler": {
+      "qt_platform": "windows",
+      "font_families": 395,
+      "resolved_family": "MiSans",
+      "resolved_point": 10.0,
+      "dpr": 1.0,
+      "text": "星象仪模式 频谱 控制 AI 助手",
+      "text_len": 17
+     },
+     "load_before": {
+      "sys_cpu_pct": 11.0,
+      "python_proc_count": 5,
+      "python_total_cpu_pct": 4.7,
+      "python_top": [
+       {
+        "pid": 32508,
+        "cpu_pct": 3.9
+       },
+       {
+        "pid": 35108,
+        "cpu_pct": 0.8
+       },
+       {
+        "pid": 16944,
+        "cpu_pct": 0.0
+       },
+       {
+        "pid": 32436,
+        "cpu_pct": 0.0
+       },
+       {
+        "pid": 37752,
+        "cpu_pct": 0.0
+       }
+      ],
+      "cpu_count": 12
+     },
+     "load_after": {
+      "sys_cpu_pct": 26.7,
+      "python_proc_count": 5,
+      "python_total_cpu_pct": 7.8,
+      "python_top": [
+       {
+        "pid": 32508,
+        "cpu_pct": 7.8
+       },
+       {
+        "pid": 16944,
+        "cpu_pct": 0.0
+       },
+       {
+        "pid": 32436,
+        "cpu_pct": 0.0
+       },
+       {
+        "pid": 35108,
+        "cpu_pct": 0.0
+       },
+       {
+        "pid": 37752,
+        "cpu_pct": 0.0
+       }
+      ],
+      "cpu_count": 12
+     },
+     "process_total_ms": 5068.9,
+     "load_gate_before_python_pct": 110.1
+    },
+    {
+     "mode": "chinese",
+     "windows": [
+      {
+       "window": 1,
+       "cold": true,
+       "app_create_ms": 29.6,
+       "font_set_ms": 0.1,
+       "build_ms": 0.2,
+       "show_ms": 483.9,
+       "to_paint_dispatch_ms": 62.4,
+       "paint_exec_ms": 418.3,
+       "cycle_to_paint_done_ms": 480.7,
+       "total_incl_app_ms": 510.4,
+       "paints": 1
+      },
+      {
+       "window": 2,
+       "cold": false,
+       "app_create_ms": 0.0,
+       "font_set_ms": 0.0,
+       "build_ms": 0.3,
+       "show_ms": 16.1,
+       "to_paint_dispatch_ms": 20.6,
+       "paint_exec_ms": 0.3,
+       "cycle_to_paint_done_ms": 20.9,
+       "total_incl_app_ms": 20.9,
+       "paints": 1
+      },
+      {
+       "window": 3,
+       "cold": false,
+       "app_create_ms": 0.0,
+       "font_set_ms": 0.0,
+       "build_ms": 0.2,
+       "show_ms": 17.7,
+       "to_paint_dispatch_ms": 20.9,
+       "paint_exec_ms": 0.3,
+       "cycle_to_paint_done_ms": 21.2,
+       "total_incl_app_ms": 21.2,
+       "paints": 1
+      }
+     ],
+     "warm_metrics_ms": 0.119,
+     "draw_text_after_warm_ms": 0.337,
+     "ruler": {
+      "qt_platform": "windows",
+      "font_families": 395,
+      "resolved_family": "MiSans",
+      "resolved_point": 10.0,
+      "dpr": 1.0,
+      "text": "星象仪模式 频谱 控制 AI 助手",
+      "text_len": 17
+     },
+     "load_before": {
+      "sys_cpu_pct": 24.3,
+      "python_proc_count": 5,
+      "python_total_cpu_pct": 7.0,
+      "python_top": [
+       {
+        "pid": 32508,
+        "cpu_pct": 6.2
+       },
+       {
+        "pid": 35108,
+        "cpu_pct": 0.8
+       },
+       {
+        "pid": 16944,
+        "cpu_pct": 0.0
+       },
+       {
+        "pid": 37752,
+        "cpu_pct": 0.0
+       },
+       {
+        "pid": 38140,
+        "cpu_pct": 0.0
+       }
+      ],
+      "cpu_count": 12
+     },
+     "load_after": {
+      "sys_cpu_pct": 43.0,
+      "python_proc_count": 5,
+      "python_total_cpu_pct": 5.5,
+      "python_top": [
+       {
+        "pid": 32508,
+        "cpu_pct": 5.5
+       },
+       {
+        "pid": 16944,
+        "cpu_pct": 0.0
+       },
+       {
+        "pid": 35108,
+        "cpu_pct": 0.0
+       },
+       {
+        "pid": 37752,
+        "cpu_pct": 0.0
+       },
+       {
+        "pid": 38140,
+        "cpu_pct": 0.0
+       }
+      ],
+      "cpu_count": 12
+     },
+     "process_total_ms": 5061.9,
+     "load_gate_before_python_pct": 4.7
+    },
+    {
+     "mode": "chinese",
+     "windows": [
+      {
+       "window": 1,
+       "cold": true,
+       "app_create_ms": 36.8,
+       "font_set_ms": 0.1,
+       "build_ms": 0.2,
+       "show_ms": 376.7,
+       "to_paint_dispatch_ms": 67.6,
+       "paint_exec_ms": 306.7,
+       "cycle_to_paint_done_ms": 374.3,
+       "total_incl_app_ms": 411.2,
+       "paints": 1
+      },
+      {
+       "window": 2,
+       "cold": false,
+       "app_create_ms": 0.0,
+       "font_set_ms": 0.0,
+       "build_ms": 0.3,
+       "show_ms": 18.0,
+       "to_paint_dispatch_ms": 22.0,
+       "paint_exec_ms": 0.3,
+       "cycle_to_paint_done_ms": 22.3,
+       "total_incl_app_ms": 22.3,
+       "paints": 1
+      },
+      {
+       "window": 3,
+       "cold": false,
+       "app_create_ms": 0.0,
+       "font_set_ms": 0.0,
+       "build_ms": 0.3,
+       "show_ms": 15.7,
+       "to_paint_dispatch_ms": 20.0,
+       "paint_exec_ms": 0.2,
+       "cycle_to_paint_done_ms": 20.2,
+       "total_incl_app_ms": 20.2,
+       "paints": 1
+      }
+     ],
+     "warm_metrics_ms": 0.108,
+     "draw_text_after_warm_ms": 0.208,
+     "ruler": {
+      "qt_platform": "windows",
+      "font_families": 395,
+      "resolved_family": "MiSans",
+      "resolved_point": 10.0,
+      "dpr": 1.0,
+      "text": "星象仪模式 频谱 控制 AI 助手",
+      "text_len": 17
+     },
+     "load_before": {
+      "sys_cpu_pct": 26.6,
+      "python_proc_count": 7,
+      "python_total_cpu_pct": 6.2,
+      "python_top": [
+       {
+        "pid": 32508,
+        "cpu_pct": 6.2
+       },
+       {
+        "pid": 7252,
+        "cpu_pct": 0.0
+       },
+       {
+        "pid": 16944,
+        "cpu_pct": 0.0
+       },
+       {
+        "pid": 33808,
+        "cpu_pct": 0.0
+       },
+       {
+        "pid": 35108,
+        "cpu_pct": 0.0
+       }
+      ],
+      "cpu_count": 12
+     },
+     "load_after": {
+      "sys_cpu_pct": 51.5,
+      "python_proc_count": 5,
+      "python_total_cpu_pct": 5.5,
+      "python_top": [
+       {
+        "pid": 32508,
+        "cpu_pct": 5.5
+       },
+       {
+        "pid": 7252,
+        "cpu_pct": 0.0
+       },
+       {
+        "pid": 16944,
+        "cpu_pct": 0.0
+       },
+       {
+        "pid": 35108,
+        "cpu_pct": 0.0
+       },
+       {
+        "pid": 37752,
+        "cpu_pct": 0.0
+       }
+      ],
+      "cpu_count": 12
+     },
+     "process_total_ms": 4992.7,
+     "load_gate_before_python_pct": 7.8
+    }
+   ]
+  },
+  "none": {
+   "ruler": {
+    "qt_platform": "windows",
+    "font_families": 395,
+    "resolved_family": "MiSans",
+    "resolved_point": 10.0,
+    "dpr": 1.0,
+    "text": "",
+    "text_len": 0
+   },
+   "cold": {
+    "app_create_ms": [
+     40.2,
+     28.6,
+     30.3
+    ],
+    "font_set_ms": [
+     0.1,
+     0.1,
+     0.1
+    ],
+    "build_ms": [
+     0.2,
+     0.2,
+     0.2
+    ],
+    "to_paint_dispatch_ms": [
+     75.9,
+     62.2,
+     64.6
+    ],
+    "paint_exec_ms": [
+     0.1,
+     0.1,
+     0.1
+    ],
+    "cycle_to_paint_done_ms": [
+     76.0,
+     62.3,
+     64.7
+    ],
+    "total_incl_app_ms": [
+     116.3,
+     91.0,
+     95.1
+    ],
+    "total_incl_app_median_ms": 95.1
+   },
+   "warm": {
+    "cycle_to_paint_done_ms": [
+     21.5,
+     23.3,
+     19.9,
+     22.5,
+     21.8,
+     24.0
+    ],
+    "to_paint_dispatch_ms": [
+     21.3,
+     23.2,
+     19.8,
+     22.4,
+     21.8,
+     23.9
+    ],
+    "paint_exec_ms": [
+     0.2,
+     0.1,
+     0.1,
+     0.1,
+     0.1,
+     0.1
+    ],
+    "cycle_median_ms": 22.1
+   },
+   "warm_metrics_ms": [
+    766.058,
+    682.552,
+    446.563
+   ],
+   "draw_text_after_warm_ms": [
+    0.811,
+    0.822,
+    1.141
+   ],
+   "loads": [
+    {
+     "before_python_pct": 4.7,
+     "after_python_pct": 3.9
+    },
+    {
+     "before_python_pct": 8.6,
+     "after_python_pct": 3.1
+    },
+    {
+     "before_python_pct": 125.0,
+     "after_python_pct": 4.7
+    }
+   ],
+   "load_gate_before_python_pct": [
+    8.6,
+    8.6,
+    103.9
+   ],
+   "runs": [
+    {
+     "mode": "none",
+     "windows": [
+      {
+       "window": 1,
+       "cold": true,
+       "app_create_ms": 40.2,
+       "font_set_ms": 0.1,
+       "build_ms": 0.2,
+       "show_ms": 78.5,
+       "to_paint_dispatch_ms": 75.9,
+       "paint_exec_ms": 0.1,
+       "cycle_to_paint_done_ms": 76.0,
+       "total_incl_app_ms": 116.3,
+       "paints": 1
+      },
+      {
+       "window": 2,
+       "cold": false,
+       "app_create_ms": 0.0,
+       "font_set_ms": 0.0,
+       "build_ms": 0.3,
+       "show_ms": 17.7,
+       "to_paint_dispatch_ms": 21.3,
+       "paint_exec_ms": 0.2,
+       "cycle_to_paint_done_ms": 21.5,
+       "total_incl_app_ms": 21.5,
+       "paints": 1
+      },
+      {
+       "window": 3,
+       "cold": false,
+       "app_create_ms": 0.0,
+       "font_set_ms": 0.0,
+       "build_ms": 0.5,
+       "show_ms": 18.2,
+       "to_paint_dispatch_ms": 23.2,
+       "paint_exec_ms": 0.1,
+       "cycle_to_paint_done_ms": 23.3,
+       "total_incl_app_ms": 23.3,
+       "paints": 1
+      }
+     ],
+     "warm_metrics_ms": 766.058,
+     "draw_text_after_warm_ms": 0.811,
+     "ruler": {
+      "qt_platform": "windows",
+      "font_families": 395,
+      "resolved_family": "MiSans",
+      "resolved_point": 10.0,
+      "dpr": 1.0,
+      "text": "",
+      "text_len": 0
+     },
+     "load_before": {
+      "sys_cpu_pct": 14.7,
+      "python_proc_count": 5,
+      "python_total_cpu_pct": 4.7,
+      "python_top": [
+       {
+        "pid": 32508,
+        "cpu_pct": 4.7
+       },
+       {
+        "pid": 16944,
+        "cpu_pct": 0.0
+       },
+       {
+        "pid": 35108,
+        "cpu_pct": 0.0
+       },
+       {
+        "pid": 37752,
+        "cpu_pct": 0.0
+       },
+       {
+        "pid": 38448,
+        "cpu_pct": 0.0
+       }
+      ],
+      "cpu_count": 12
+     },
+     "load_after": {
+      "sys_cpu_pct": 22.9,
+      "python_proc_count": 5,
+      "python_total_cpu_pct": 3.9,
+      "python_top": [
+       {
+        "pid": 32508,
+        "cpu_pct": 3.9
+       },
+       {
+        "pid": 16944,
+        "cpu_pct": 0.0
+       },
+       {
+        "pid": 35108,
+        "cpu_pct": 0.0
+       },
+       {
+        "pid": 37752,
+        "cpu_pct": 0.0
+       },
+       {
+        "pid": 38448,
+        "cpu_pct": 0.0
+       }
+      ],
+      "cpu_count": 12
+     },
+     "process_total_ms": 5447.2,
+     "load_gate_before_python_pct": 8.6
+    },
+    {
+     "mode": "none",
+     "windows": [
+      {
+       "window": 1,
+       "cold": true,
+       "app_create_ms": 28.6,
+       "font_set_ms": 0.1,
+       "build_ms": 0.2,
+       "show_ms": 64.7,
+       "to_paint_dispatch_ms": 62.2,
+       "paint_exec_ms": 0.1,
+       "cycle_to_paint_done_ms": 62.3,
+       "total_incl_app_ms": 91.0,
+       "paints": 1
+      },
+      {
+       "window": 2,
+       "cold": false,
+       "app_create_ms": 0.0,
+       "font_set_ms": 0.0,
+       "build_ms": 0.3,
+       "show_ms": 16.7,
+       "to_paint_dispatch_ms": 19.8,
+       "paint_exec_ms": 0.1,
+       "cycle_to_paint_done_ms": 19.9,
+       "total_incl_app_ms": 19.9,
+       "paints": 1
+      },
+      {
+       "window": 3,
+       "cold": false,
+       "app_create_ms": 0.0,
+       "font_set_ms": 0.0,
+       "build_ms": 0.3,
+       "show_ms": 18.4,
+       "to_paint_dispatch_ms": 22.4,
+       "paint_exec_ms": 0.1,
+       "cycle_to_paint_done_ms": 22.5,
+       "total_incl_app_ms": 22.5,
+       "paints": 1
+      }
+     ],
+     "warm_metrics_ms": 682.552,
+     "draw_text_after_warm_ms": 0.822,
+     "ruler": {
+      "qt_platform": "windows",
+      "font_families": 395,
+      "resolved_family": "MiSans",
+      "resolved_point": 10.0,
+      "dpr": 1.0,
+      "text": "",
+      "text_len": 0
+     },
+     "load_before": {
+      "sys_cpu_pct": 20.3,
+      "python_proc_count": 5,
+      "python_total_cpu_pct": 8.6,
+      "python_top": [
+       {
+        "pid": 32508,
+        "cpu_pct": 8.6
+       },
+       {
+        "pid": 11776,
+        "cpu_pct": 0.0
+       },
+       {
+        "pid": 16944,
+        "cpu_pct": 0.0
+       },
+       {
+        "pid": 35108,
+        "cpu_pct": 0.0
+       },
+       {
+        "pid": 37752,
+        "cpu_pct": 0.0
+       }
+      ],
+      "cpu_count": 12
+     },
+     "load_after": {
+      "sys_cpu_pct": 23.3,
+      "python_proc_count": 5,
+      "python_total_cpu_pct": 3.1,
+      "python_top": [
+       {
+        "pid": 32508,
+        "cpu_pct": 3.1
+       },
+       {
+        "pid": 11776,
+        "cpu_pct": 0.0
+       },
+       {
+        "pid": 16944,
+        "cpu_pct": 0.0
+       },
+       {
+        "pid": 35108,
+        "cpu_pct": 0.0
+       },
+       {
+        "pid": 37752,
+        "cpu_pct": 0.0
+       }
+      ],
+      "cpu_count": 12
+     },
+     "process_total_ms": 5355.0,
+     "load_gate_before_python_pct": 8.6
+    },
+    {
+     "mode": "none",
+     "windows": [
+      {
+       "window": 1,
+       "cold": true,
+       "app_create_ms": 30.3,
+       "font_set_ms": 0.1,
+       "build_ms": 0.2,
+       "show_ms": 67.2,
+       "to_paint_dispatch_ms": 64.6,
+       "paint_exec_ms": 0.1,
+       "cycle_to_paint_done_ms": 64.7,
+       "total_incl_app_ms": 95.1,
+       "paints": 1
+      },
+      {
+       "window": 2,
+       "cold": false,
+       "app_create_ms": 0.0,
+       "font_set_ms": 0.0,
+       "build_ms": 0.3,
+       "show_ms": 17.6,
+       "to_paint_dispatch_ms": 21.8,
+       "paint_exec_ms": 0.1,
+       "cycle_to_paint_done_ms": 21.8,
+       "total_incl_app_ms": 21.8,
+       "paints": 1
+      },
+      {
+       "window": 3,
+       "cold": false,
+       "app_create_ms": 0.0,
+       "font_set_ms": 0.0,
+       "build_ms": 0.2,
+       "show_ms": 19.2,
+       "to_paint_dispatch_ms": 23.9,
+       "paint_exec_ms": 0.1,
+       "cycle_to_paint_done_ms": 24.0,
+       "total_incl_app_ms": 24.0,
+       "paints": 1
+      }
+     ],
+     "warm_metrics_ms": 446.563,
+     "draw_text_after_warm_ms": 1.141,
+     "ruler": {
+      "qt_platform": "windows",
+      "font_families": 395,
+      "resolved_family": "MiSans",
+      "resolved_point": 10.0,
+      "dpr": 1.0,
+      "text": "",
+      "text_len": 0
+     },
+     "load_before": {
+      "sys_cpu_pct": 39.9,
+      "python_proc_count": 8,
+      "python_total_cpu_pct": 125.0,
+      "python_top": [
+       {
+        "pid": 11724,
+        "cpu_pct": 120.3
+       },
+       {
+        "pid": 32508,
+        "cpu_pct": 3.9
+       },
+       {
+        "pid": 37604,
+        "cpu_pct": 0.8
+       },
+       {
+        "pid": 8052,
+        "cpu_pct": 0.0
+       },
+       {
+        "pid": 16944,
+        "cpu_pct": 0.0
+       }
+      ],
+      "cpu_count": 12
+     },
+     "load_after": {
+      "sys_cpu_pct": 33.0,
+      "python_proc_count": 7,
+      "python_total_cpu_pct": 4.7,
+      "python_top": [
+       {
+        "pid": 32508,
+        "cpu_pct": 4.7
+       },
+       {
+        "pid": 8052,
+        "cpu_pct": 0.0
+       },
+       {
+        "pid": 16944,
+        "cpu_pct": 0.0
+       },
+       {
+        "pid": 35108,
+        "cpu_pct": 0.0
+       },
+       {
+        "pid": 37604,
+        "cpu_pct": 0.0
+       }
+      ],
+      "cpu_count": 12
+     },
+     "process_total_ms": 5140.6,
+     "load_gate_before_python_pct": 103.9
+    }
+   ]
+  },
+  "ascii": {
+   "ruler": {
+    "qt_platform": "windows",
+    "font_families": 395,
+    "resolved_family": "MiSans",
+    "resolved_point": 10.0,
+    "dpr": 1.0,
+    "text": "Sky View  Spectrum  Control  AI",
+    "text_len": 31
+   },
+   "cold": {
+    "app_create_ms": [
+     35.4,
+     32.0,
+     32.9
+    ],
+    "font_set_ms": [
+     0.1,
+     0.1,
+     0.1
+    ],
+    "build_ms": [
+     0.2,
+     0.2,
+     0.2
+    ],
+    "to_paint_dispatch_ms": [
+     68.4,
+     67.4,
+     72.6
+    ],
+    "paint_exec_ms": [
+     493.3,
+     459.4,
+     318.7
+    ],
+    "cycle_to_paint_done_ms": [
+     561.7,
+     526.8,
+     391.3
+    ],
+    "total_incl_app_ms": [
+     597.2,
+     558.9,
+     424.3
+    ],
+    "total_incl_app_median_ms": 558.9
+   },
+   "warm": {
+    "cycle_to_paint_done_ms": [
+     20.9,
+     18.8,
+     21.5,
+     22.3,
+     24.8,
+     18.8
+    ],
+    "to_paint_dispatch_ms": [
+     20.6,
+     18.6,
+     21.3,
+     22.0,
+     24.4,
+     18.6
+    ],
+    "paint_exec_ms": [
+     0.2,
+     0.2,
+     0.2,
+     0.3,
+     0.3,
+     0.2
+    ],
+    "cycle_median_ms": 21.2
+   },
+   "warm_metrics_ms": [
+    1.049,
+    0.967,
+    0.701
+   ],
+   "draw_text_after_warm_ms": [
+    0.214,
+    0.4,
+    0.334
+   ],
+   "loads": [
+    {
+     "before_python_pct": 7.8,
+     "after_python_pct": 7.8
+    },
+    {
+     "before_python_pct": 5.5,
+     "after_python_pct": 6.2
+    },
+    {
+     "before_python_pct": 138.3,
+     "after_python_pct": 6.2
+    }
+   ],
+   "load_gate_before_python_pct": [
+    5.5,
+    4.7,
+    103.9
+   ],
+   "runs": [
+    {
+     "mode": "ascii",
+     "windows": [
+      {
+       "window": 1,
+       "cold": true,
+       "app_create_ms": 35.4,
+       "font_set_ms": 0.1,
+       "build_ms": 0.2,
+       "show_ms": 563.9,
+       "to_paint_dispatch_ms": 68.4,
+       "paint_exec_ms": 493.3,
+       "cycle_to_paint_done_ms": 561.7,
+       "total_incl_app_ms": 597.2,
+       "paints": 1
+      },
+      {
+       "window": 2,
+       "cold": false,
+       "app_create_ms": 0.0,
+       "font_set_ms": 0.0,
+       "build_ms": 0.5,
+       "show_ms": 16.8,
+       "to_paint_dispatch_ms": 20.6,
+       "paint_exec_ms": 0.2,
+       "cycle_to_paint_done_ms": 20.9,
+       "total_incl_app_ms": 20.9,
+       "paints": 1
+      },
+      {
+       "window": 3,
+       "cold": false,
+       "app_create_ms": 0.0,
+       "font_set_ms": 0.0,
+       "build_ms": 0.3,
+       "show_ms": 14.7,
+       "to_paint_dispatch_ms": 18.6,
+       "paint_exec_ms": 0.2,
+       "cycle_to_paint_done_ms": 18.8,
+       "total_incl_app_ms": 18.8,
+       "paints": 1
+      }
+     ],
+     "warm_metrics_ms": 1.049,
+     "draw_text_after_warm_ms": 0.214,
+     "ruler": {
+      "qt_platform": "windows",
+      "font_families": 395,
+      "resolved_family": "MiSans",
+      "resolved_point": 10.0,
+      "dpr": 1.0,
+      "text": "Sky View  Spectrum  Control  AI",
+      "text_len": 31
+     },
+     "load_before": {
+      "sys_cpu_pct": 29.8,
+      "python_proc_count": 5,
+      "python_total_cpu_pct": 7.8,
+      "python_top": [
+       {
+        "pid": 32508,
+        "cpu_pct": 7.0
+       },
+       {
+        "pid": 35108,
+        "cpu_pct": 0.8
+       },
+       {
+        "pid": 16944,
+        "cpu_pct": 0.0
+       },
+       {
+        "pid": 25960,
+        "cpu_pct": 0.0
+       },
+       {
+        "pid": 37752,
+        "cpu_pct": 0.0
+       }
+      ],
+      "cpu_count": 12
+     },
+     "load_after": {
+      "sys_cpu_pct": 47.3,
+      "python_proc_count": 5,
+      "python_total_cpu_pct": 7.8,
+      "python_top": [
+       {
+        "pid": 32508,
+        "cpu_pct": 7.0
+       },
+       {
+        "pid": 35108,
+        "cpu_pct": 0.8
+       },
+       {
+        "pid": 16944,
+        "cpu_pct": 0.0
+       },
+       {
+        "pid": 25960,
+        "cpu_pct": 0.0
+       },
+       {
+        "pid": 37752,
+        "cpu_pct": 0.0
+       }
+      ],
+      "cpu_count": 12
+     },
+     "process_total_ms": 5164.7,
+     "load_gate_before_python_pct": 5.5
+    },
+    {
+     "mode": "ascii",
+     "windows": [
+      {
+       "window": 1,
+       "cold": true,
+       "app_create_ms": 32.0,
+       "font_set_ms": 0.1,
+       "build_ms": 0.2,
+       "show_ms": 528.9,
+       "to_paint_dispatch_ms": 67.4,
+       "paint_exec_ms": 459.4,
+       "cycle_to_paint_done_ms": 526.8,
+       "total_incl_app_ms": 558.9,
+       "paints": 1
+      },
+      {
+       "window": 2,
+       "cold": false,
+       "app_create_ms": 0.0,
+       "font_set_ms": 0.0,
+       "build_ms": 0.3,
+       "show_ms": 17.8,
+       "to_paint_dispatch_ms": 21.3,
+       "paint_exec_ms": 0.2,
+       "cycle_to_paint_done_ms": 21.5,
+       "total_incl_app_ms": 21.5,
+       "paints": 1
+      },
+      {
+       "window": 3,
+       "cold": false,
+       "app_create_ms": 0.0,
+       "font_set_ms": 0.0,
+       "build_ms": 0.3,
+       "show_ms": 18.0,
+       "to_paint_dispatch_ms": 22.0,
+       "paint_exec_ms": 0.3,
+       "cycle_to_paint_done_ms": 22.3,
+       "total_incl_app_ms": 22.3,
+       "paints": 1
+      }
+     ],
+     "warm_metrics_ms": 0.967,
+     "draw_text_after_warm_ms": 0.4,
+     "ruler": {
+      "qt_platform": "windows",
+      "font_families": 395,
+      "resolved_family": "MiSans",
+      "resolved_point": 10.0,
+      "dpr": 1.0,
+      "text": "Sky View  Spectrum  Control  AI",
+      "text_len": 31
+     },
+     "load_before": {
+      "sys_cpu_pct": 19.4,
+      "python_proc_count": 5,
+      "python_total_cpu_pct": 5.5,
+      "python_top": [
+       {
+        "pid": 32508,
+        "cpu_pct": 4.7
+       },
+       {
+        "pid": 35108,
+        "cpu_pct": 0.8
+       },
+       {
+        "pid": 16944,
+        "cpu_pct": 0.0
+       },
+       {
+        "pid": 35224,
+        "cpu_pct": 0.0
+       },
+       {
+        "pid": 37752,
+        "cpu_pct": 0.0
+       }
+      ],
+      "cpu_count": 12
+     },
+     "load_after": {
+      "sys_cpu_pct": 38.2,
+      "python_proc_count": 5,
+      "python_total_cpu_pct": 6.2,
+      "python_top": [
+       {
+        "pid": 32508,
+        "cpu_pct": 6.2
+       },
+       {
+        "pid": 16944,
+        "cpu_pct": 0.0
+       },
+       {
+        "pid": 35108,
+        "cpu_pct": 0.0
+       },
+       {
+        "pid": 35224,
+        "cpu_pct": 0.0
+       },
+       {
+        "pid": 37752,
+        "cpu_pct": 0.0
+       }
+      ],
+      "cpu_count": 12
+     },
+     "process_total_ms": 5174.9,
+     "load_gate_before_python_pct": 4.7
+    },
+    {
+     "mode": "ascii",
+     "windows": [
+      {
+       "window": 1,
+       "cold": true,
+       "app_create_ms": 32.9,
+       "font_set_ms": 0.1,
+       "build_ms": 0.2,
+       "show_ms": 393.9,
+       "to_paint_dispatch_ms": 72.6,
+       "paint_exec_ms": 318.7,
+       "cycle_to_paint_done_ms": 391.3,
+       "total_incl_app_ms": 424.3,
+       "paints": 1
+      },
+      {
+       "window": 2,
+       "cold": false,
+       "app_create_ms": 0.0,
+       "font_set_ms": 0.0,
+       "build_ms": 0.3,
+       "show_ms": 21.1,
+       "to_paint_dispatch_ms": 24.4,
+       "paint_exec_ms": 0.3,
+       "cycle_to_paint_done_ms": 24.8,
+       "total_incl_app_ms": 24.8,
+       "paints": 1
+      },
+      {
+       "window": 3,
+       "cold": false,
+       "app_create_ms": 0.0,
+       "font_set_ms": 0.0,
+       "build_ms": 0.3,
+       "show_ms": 15.9,
+       "to_paint_dispatch_ms": 18.6,
+       "paint_exec_ms": 0.2,
+       "cycle_to_paint_done_ms": 18.8,
+       "total_incl_app_ms": 18.8,
+       "paints": 1
+      }
+     ],
+     "warm_metrics_ms": 0.701,
+     "draw_text_after_warm_ms": 0.334,
+     "ruler": {
+      "qt_platform": "windows",
+      "font_families": 395,
+      "resolved_family": "MiSans",
+      "resolved_point": 10.0,
+      "dpr": 1.0,
+      "text": "Sky View  Spectrum  Control  AI",
+      "text_len": 31
+     },
+     "load_before": {
+      "sys_cpu_pct": 31.2,
+      "python_proc_count": 7,
+      "python_total_cpu_pct": 138.3,
+      "python_top": [
+       {
+        "pid": 36468,
+        "cpu_pct": 110.2
+       },
+       {
+        "pid": 37484,
+        "cpu_pct": 19.5
+       },
+       {
+        "pid": 32508,
+        "cpu_pct": 8.6
+       },
+       {
+        "pid": 16944,
+        "cpu_pct": 0.0
+       },
+       {
+        "pid": 32540,
+        "cpu_pct": 0.0
+       }
+      ],
+      "cpu_count": 12
+     },
+     "load_after": {
+      "sys_cpu_pct": 21.9,
+      "python_proc_count": 7,
+      "python_total_cpu_pct": 6.2,
+      "python_top": [
+       {
+        "pid": 32508,
+        "cpu_pct": 6.2
+       },
+       {
+        "pid": 8004,
+        "cpu_pct": 0.0
+       },
+       {
+        "pid": 16944,
+        "cpu_pct": 0.0
+       },
+       {
+        "pid": 32540,
+        "cpu_pct": 0.0
+       },
+       {
+        "pid": 35108,
+        "cpu_pct": 0.0
+       }
+      ],
+      "cpu_count": 12
+     },
+     "process_total_ms": 5025.2,
+     "load_gate_before_python_pct": 103.9
+    }
+   ]
+  }
+ }
+}
