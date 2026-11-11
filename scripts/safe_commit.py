@@ -253,10 +253,13 @@ def _attempt(
         return 1, f"文件集不符：多 {extra} 缺 {missing}"
 
     # 3) 记录待提交 blob，供提交后复核（形态⑩）
-    wanted = {}
-    for f in files:
-        proc = _run(["rev-parse", f":{f}"], env)
-        wanted[f] = proc.stdout.decode().strip()
+    #    用 --verify --quiet 取：删除项（index/HEAD 都没有该路径）返回空，
+    #    否则 `rev-parse :path` 会把参数原样回显，删除项必被误判成 blob 不一致。
+    def _blob(rev: str) -> str:
+        proc = _run(["rev-parse", "--verify", "--quiet", rev], env)
+        return proc.stdout.decode().strip() if proc.returncode == 0 else ""
+
+    wanted = {f: _blob(f":{f}") for f in files}
 
     # 4) 提交前重校验基线：HEAD 变了就整盘重建
     now = _run(["rev-parse", "HEAD"], env).stdout.decode().strip()
@@ -272,11 +275,13 @@ def _attempt(
         return 1, f"git commit 失败：{err.strip()[:300]}"
 
     # 6) 提交后复核：HEAD 里每个文件的 blob 必须等于暂存时的 blob
+    #    （删除项两边都为空，相等即通过）
     bad = []
     for f, blob in wanted.items():
-        head_blob = _run(["rev-parse", f"HEAD:{f}"], env).stdout.decode().strip()
+        head_blob = _blob(f"HEAD:{f}")
         if head_blob != blob:
-            bad.append(f"{f}（暂存 {blob[:8]} / HEAD {head_blob[:8]}）")
+            bad.append(f"{f}（暂存 {blob[:8] or '<删除>'} / "
+                       f"HEAD {head_blob[:8] or '<删除>'}）")
     if bad:
         return 3, "提交后 blob 不一致：" + "；".join(bad)
 
