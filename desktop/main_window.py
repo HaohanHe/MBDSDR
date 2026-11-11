@@ -995,6 +995,9 @@ class MainWindow(QMainWindow):
         self._record_iq_buffer: list = []
         self._record_sr: float = float(DEFAULT_SAMPLE_RATE_HZ)
         self._record_center_hz: float = 0.0
+        # 本段内每一次「真正生效」的中心频率变更（P0-09）。按段重置：
+        # sidecar 的 start_sample 只在本段文件内有意义。
+        self._record_freq_changes: list = []
         self._record_guard: bool = False  # 同步两个录音按钮时防重入
         # sidecar 元数据（开始录制时从真实后端捕获，停止落盘时写入 .json）
         self._record_start_time: str = ""
@@ -7190,13 +7193,18 @@ class MainWindow(QMainWindow):
                 f"连接后参数未全部生效：{'、'.join(failures)}", MSG_IMPORTANT)
         return failures
 
-    def _apply_hw_action(self, action: str, fn) -> bool:
+    def _apply_hw_action(self, action: str, fn, target_hz=None) -> bool:
         """执行硬件写入；失败只提示并返回 False，不抛、不提交 UI。
 
         ``fn`` 返回 False 同样算失败：真实后端在频率越界/写频失败时用返回
         值报告失败，并在 ``status.error`` 留一句人话（例：「当前调谐器
         FC0012 可调范围 22.000–948.500 MHz，无法调谐到 1090.000 MHz」）。
         旧实现只看异常，会把 False 当成功继续写 UI 并落盘。
+
+        ``action == "调谐"`` 且成功时，在这里统一记一次录音中心频率变更
+        （P0-09）：所有调谐入口都经过本方法，新增入口只要仍走这里就自动
+        覆盖，不需要每个出口各补一次。``target_hz`` 是本次请求值；sidecar
+        一律按 ``backend.get_frequency()`` 的读回值记账。
         """
         try:
             result = fn()
@@ -7211,6 +7219,8 @@ class MainWindow(QMainWindow):
                 MSG_IMPORTANT,
             )
             return False
+        if action == "调谐":
+            self._note_record_center_change(target_hz)
         return True
 
     def _hw_failure_detail(self) -> str:
@@ -7270,7 +7280,8 @@ class MainWindow(QMainWindow):
         backend = self._active_sdr_backend
         if backend is not None:
             if not self._apply_hw_action(
-                    "调谐", lambda: backend.set_frequency(freq * 1e6)):
+                    "调谐", lambda: backend.set_frequency(freq * 1e6),
+                    target_hz=freq * 1e6):
                 self._revert_tune_ui()
                 return
         if self._worker:
@@ -7289,7 +7300,8 @@ class MainWindow(QMainWindow):
         backend = self._active_sdr_backend
         if backend is not None:
             if not self._apply_hw_action(
-                    "调谐", lambda: backend.set_frequency(freq * 1e3)):
+                    "调谐", lambda: backend.set_frequency(freq * 1e3),
+                    target_hz=freq * 1e3):
                 self._revert_tune_ui()
                 return
         if self._worker:
@@ -7305,7 +7317,8 @@ class MainWindow(QMainWindow):
         backend = self._active_sdr_backend
         if backend is not None:
             if not self._apply_hw_action(
-                    "调谐", lambda: backend.set_frequency(freq_hz)):
+                    "调谐", lambda: backend.set_frequency(freq_hz),
+                    target_hz=freq_hz):
                 self._revert_tune_ui()
                 return False
             if not self._apply_hw_action(
@@ -7341,7 +7354,8 @@ class MainWindow(QMainWindow):
         backend = self._active_sdr_backend
         if backend is not None:
             if not self._apply_hw_action(
-                    "调谐", lambda: backend.set_frequency(freq_hz)):
+                    "调谐", lambda: backend.set_frequency(freq_hz),
+                    target_hz=freq_hz):
                 self._revert_tune_ui()
                 mp = getattr(self, "module_panel", None)
                 last = float(getattr(self, "_backend_center_hz", 0.0) or 0.0)
@@ -8209,7 +8223,8 @@ class MainWindow(QMainWindow):
         if self._active_sdr_backend is not None:
             if not self._apply_hw_action(
                     "调谐", lambda: self._active_sdr_backend.set_frequency(
-                        freq * 1e6)):
+                        freq * 1e6),
+                    target_hz=freq * 1e6):
                 self._revert_tune_ui()
                 return      # 之后的状态栏/VFO 一律不动，避免显示成功值
         else:
@@ -9592,6 +9607,7 @@ class MainWindow(QMainWindow):
         self._record_sr = float(sr)
         self._record_center_hz = float(center_hz)
         self._record_samples_total = 0
+        self._record_freq_changes = []
         self._record_stream_fh = None
         try:
             self._record_stream_fh = open(path, "wb")
@@ -9613,11 +9629,88 @@ class MainWindow(QMainWindow):
             error=f"{reason}（已写 {written} 字节"
                   f"{('，文件 ' + os.path.basename(path)) if path else ''}）")
 
+    def _note_record_center_change(self, target_hz) -> None:
+        """把一次**已确认下发成功**的调谐记进当前录音段（P0-09）。
+
+        只认 ``backend.get_frequency()`` 的读回值：``set_frequency`` 的入参是
+        「请求」，设备可能钳位/忽略，拿它写 sidecar 就是记一个没生效的数。
+        ``target_hz`` 一并留档，便于区分「要到了但设备没跟」（差 >1 Hz 单独
+        warning，且按读回值记账）与「根本没要到」（下发失败，调用方不进来）。
+
+        不在录音中 / 本段流未建立时不记——没有样本可对应，不造空事件。
+        读回失败必须留 warning 并跳过，绝不静默写一个猜的值。
+        """
+        if not getattr(self, "_recording", False):
+            return
+        if getattr(self, "_record_stream_fh", None) is None:
+            return
+        backend = getattr(self, "_active_sdr_backend", None)
+        try:
+            actual = float(backend.get_frequency())
+        except Exception as e:  # noqa: BLE001 - 读回失败要留证并跳过
+            logger.warning("读取调谐后中心频率失败（本次不记入录音变更表）: %s: %s",
+                           type(e).__name__, e)
+            return
+        if target_hz is None:
+            _warn_throttled(
+                "p009-tune-target-missing",
+                "调谐收口未收到 target_hz，只能按读回值记账；"
+                "请给该调谐调用点补 target_hz=")
+            target = actual
+        else:
+            try:
+                target = float(target_hz)
+            except (TypeError, ValueError):
+                logger.warning("调谐请求值无效（%r），按读回值记账", target_hz)
+                target = actual
+        if abs(target - actual) > 1.0:
+            logger.warning(
+                "调谐未跟上：请求 %.3f MHz，设备读回 %.3f MHz（差 %+.0f Hz）；"
+                "录音按读回值记账",
+                target / 1e6, actual / 1e6, actual - target)
+        previous = float(getattr(self, "_record_center_hz", 0.0))
+        if abs(actual - previous) <= 1.0:
+            return
+        start_sample = int(getattr(self, "_record_samples_total", 0))
+        segment_index = int(getattr(self, "_record_segment_index", 1))
+        changes = getattr(self, "_record_freq_changes", None)
+        if changes is None:
+            changes = []
+            self._record_freq_changes = changes
+        last = changes[-1] if changes else None
+        # 「一拍一记」：同一段内样本位相同 = 两次调谐之间没写进任何样本，
+        # 只有最后一次真正作用于录音。按 (segment_index, start_sample) 去重，
+        # 保留净变化（原 from → 最后一次 to）；不按墙钟时间窗——墙钟受调度
+        # 抖动影响，且对不上回放时间轴。净变化为 0 时整条删掉。
+        same_tick = (last is not None
+                     and int(last.get("segment_index", -1)) == segment_index
+                     and int(last.get("start_sample", -1)) == start_sample)
+        if same_tick:
+            if abs(float(last["from_hz"]) - actual) <= 1.0:
+                changes.pop()
+            else:
+                last["to_hz"] = actual
+                last["target_hz"] = target
+                last["actual_hz"] = actual
+                last["at_time"] = datetime.now().isoformat(timespec="seconds")
+            self._record_center_hz = actual
+            return
+        changes.append({
+            "segment_index": segment_index,
+            "start_sample": start_sample,
+            "at_time": datetime.now().isoformat(timespec="seconds"),
+            "from_hz": previous,
+            "to_hz": actual,
+            "target_hz": target,
+            "actual_hz": actual,
+        })
+        self._record_center_hz = actual
+
     def _record_segment_meta(self) -> dict:
         """当前段的 sidecar 元数据（速率/样本/时长严格自洽）。"""
         n = int(getattr(self, "_record_samples_total", 0))
         secs = (n / self._record_sr) if self._record_sr else 0.0
-        return {
+        meta = {
             "sample_rate": float(self._record_sr),
             "center_freq_hz": float(self._record_center_hz),
             "start_time": (self._record_segment_start_time
@@ -9632,6 +9725,11 @@ class MainWindow(QMainWindow):
             "session_path": self._record_session_path or self._record_file_path,
             "note": "MBDSDR baseband recording (float32 interleaved I/Q, streamed)",
         }
+        # 只在真的变过频时才出现该字段：不留一个恒为 null 的「假功能」。
+        changes = list(getattr(self, "_record_freq_changes", []) or [])
+        if changes:
+            meta["center_freq_changes"] = changes
+        return meta
 
     def _finalize_record_segment(self) -> Optional[dict]:
         """收尾当前段：关流 + 写 sidecar；零样本段删除不留空文件。
@@ -9825,6 +9923,7 @@ class MainWindow(QMainWindow):
         self._record_segments = []
         self._record_segment_index = 1
         self._record_rate_changes = []
+        self._record_freq_changes = []
         # 流式落盘：句柄先就绪，再把 _recording 置真。RecordTap 是独立线程，
         # 若先置录音态，写者会撞进「已开录但句柄未建」的窗口，被
         # _record_write_chunk 判成「句柄丢失」并中止整场（2026-11-09 全量
@@ -11432,6 +11531,11 @@ class MainWindow(QMainWindow):
             except Exception as e:
                 tune_error = str(e)
             if not tune_error:
+                # 此处不走 `_apply_hw_action` 收口：扫频完成要把「未能调谐到
+                # 最强台」与峰值列表合成**最后一句**摘要，收口的失败提示会被
+                # 它立刻覆盖；补记复用同一个 `_note_record_center_change`，
+                # 读回口径与收口完全一致。
+                self._note_record_center_change(target_hz)
                 self.spectrum.generator.center_freq_hz = target_hz
             # 调谐没生效就不能把 marker 基准搬过去，否则图上标着新频率、
             # 实际仍收旧频，是另一种状态撒谎。
@@ -12483,6 +12587,9 @@ class MainWindow(QMainWindow):
         if tune_policy.get("allow_tune"):
             self._sat_tune_blocked_reason = ""
             try:
+                # 逐拍调星经 `_on_tune_sdr` → `_apply_hw_action("调谐")`，
+                # 录音中心频率记账已在该收口内完成；这里不再补记一次，否则
+                # 同一拍会写两条重复事件。也不要改回直调 backend.set_frequency。
                 self._on_tune_sdr(float(tune_hz), self._sat_track_mode)
                 self._sat_tune_failed_reason = ""
             except Exception as exc:  # noqa: BLE001 - 必须留痕，不许静默
@@ -13058,6 +13165,12 @@ class MainWindow(QMainWindow):
                 reason = "该卫星没有配置下行频率"
 
             if tuned:
+                # 此处直调后补记：本入口要把「方位角 + 未调谐原因（未连接 /
+                # 无下行频率 / 下发失败）+ 下一步」拼成一句最终状态，三类原因
+                # 由它自己分流，不适合套收口那句通用失败文案。收口的异常原文
+                # 已在状态栏按 `<类型>: <原文>` 透传（`_report_hw_failure`，
+                # 由用例钉住），所以这不是「收口丢原文」的例外。
+                self._note_record_center_change(float(freq_hz))
                 freq_mhz = float(freq_hz) / 1e6
                 self.freq_label.setText(f"{freq_mhz:.1f} MHz")
                 self.status_freq.setText(f"频率: {freq_mhz:.1f} MHz")
