@@ -94,68 +94,172 @@ def main_window(qtapp, isolated_profile):
     w.close()
 
 
-def _vocabulary(window) -> set:
-    """启动态真窗口里用户能看到的全部文字（控件 / 提示 / 菜单 / 下拉 / 分组）。"""
+#: 控件类型词固定词表：非可操作文字（组名/标签）必须与其中一个词同句出现，
+#: 并证明同一容器里真有该类型控件，才算「双命中」。
+_TYPE_WORD_NAMES = ("下拉框", "输入框", "按钮", "滑块", "页签")
+
+_ACTION_VERBS = ("点", "选", "输入")
+_VIEW_VERBS = ("看", "查看", "确认")
+
+#: 例外表冻结条数：出现第 N+1 条即红「新增例外需评审」，防止长成白名单。
+_EXCEPTION_LIMIT = 1
+
+
+def _exceptions_ok() -> bool:
+    return len(_DIALOG_ONLY) <= _EXCEPTION_LIMIT
+
+
+def _clauses(text: str) -> list:
+    """按句号/分号切句，动词只对所在分句生效（一句里可同时有「点」和「看」）。"""
+    return [c for c in re.split(r"[；;。\n]", text or "") if c.strip()]
+
+
+def _type_classes(type_word: str) -> tuple:
+    from PySide6.QtWidgets import (
+        QAbstractButton, QAbstractSpinBox, QComboBox, QLineEdit,
+        QPlainTextEdit, QSlider, QTabWidget,
+    )
+    return {
+        "下拉框": (QComboBox,),
+        "输入框": (QLineEdit, QAbstractSpinBox, QPlainTextEdit),
+        "按钮": (QAbstractButton,),
+        "滑块": (QSlider,),
+        "页签": (QTabWidget,),
+    }.get(type_word, ())
+
+
+def _is_operable(widget, kind: str) -> bool:
+    from PySide6.QtWidgets import (
+        QAbstractButton, QAbstractSpinBox, QComboBox, QLineEdit, QSlider,
+    )
+    if kind in ("action", "menu", "item", "tab"):
+        return True
+    return isinstance(
+        widget, (QAbstractButton, QComboBox, QLineEdit, QAbstractSpinBox, QSlider))
+
+
+def _is_visible(widget) -> bool:
+    from PySide6.QtWidgets import QWidget
+    if isinstance(widget, QWidget):
+        return not widget.isHidden()
+    return True  # QAction 属菜单，启动态未展开；存在性已由索引证明
+
+
+def _text_index(window) -> dict:
+    """可见文字 → [(控件, 类别, 是否可操作)]。
+
+    只收用户真能看到的文字（控件 text / 下拉项 / 菜单动作 / 分组标题 / 页签
+    文字 / 设置分节头）；**不收 tooltip 与 windowTitle**——tooltip 要悬停才
+    出现，不能当定位依据。
+    """
     from PySide6.QtGui import QAction
-    from PySide6.QtWidgets import QGroupBox, QMenu, QWidget
+    from PySide6.QtWidgets import QGroupBox, QLabel, QMenu, QTabWidget, QWidget
 
-    seen = set()
+    index = {}
 
-    def add(text):
+    def add(text, kind, widget):
         t = (text or "").strip()
         if t:
-            seen.add(t)
+            index.setdefault(t, []).append((widget, kind, _is_operable(widget, kind)))
 
     for wdg in window.findChildren(QWidget):
-        try:
-            add(wdg.text())
-        except Exception:  # noqa: BLE001 - 不是所有 QWidget 都有 text()
-            pass
-        add(wdg.toolTip())
-        add(wdg.windowTitle())
-        try:
-            for i in range(wdg.count()):
-                add(wdg.itemText(i))
-        except Exception:  # noqa: BLE001 - 非 item 型控件没有 count/itemText
-            pass
+        if type(wdg).__name__ == "_SectionHeader":
+            add(wdg.text(), "section", wdg)
+        elif isinstance(wdg, QGroupBox):
+            add(wdg.title(), "group", wdg)
+        elif isinstance(wdg, QLabel):
+            add(wdg.text(), "label", wdg)
+        else:
+            try:
+                add(wdg.text(), "control", wdg)
+            except Exception:  # noqa: BLE001 - 不是所有 QWidget 都有 text()
+                pass
+            if isinstance(wdg, QTabWidget):
+                for i in range(wdg.count()):
+                    add(wdg.tabText(i), "tab", wdg)
+            try:
+                for i in range(wdg.count()):
+                    add(wdg.itemText(i), "item", wdg)
+            except Exception:  # noqa: BLE001 - 非 item 型控件没有 count/itemText
+                pass
     for action in window.findChildren(QAction):
-        add(action.text())
-        add(action.toolTip())
-    for group in window.findChildren(QGroupBox):
-        add(group.title())
+        add(action.text(), "action", action)
     for menu in window.findChildren(QMenu):
-        add(menu.title())
-    return seen
+        add(menu.title(), "menu", menu)
+    return index
+
+
+def _type_hit(widget, type_word: str) -> bool:
+    """组名/标签所在容器里是否真有「类型词」对应的控件。"""
+    from PySide6.QtWidgets import QGroupBox
+
+    classes = _type_classes(type_word)
+    if not classes:
+        return False
+    container = widget if isinstance(widget, QGroupBox) else widget.parentWidget()
+    return container is not None and any(
+        container.findChildren(cls) for cls in classes)
 
 
 def _unresolved(window, texts) -> list:
-    """返回在真窗口里找不到的入口段（对话框专属项除外）。
+    """返回在真窗口里找不到落点的入口段。
 
-    非菜单段一律**精确**匹配控件原文：``seg in vocab`` / ``seen in seg``
-    这类包含判断会让「频率 −1 格」靠父分组「频率」蒙过。只有
-    ``_WIDGET_ALIASES`` 里逐条登记的菜单/产品名后缀例外。
+    口径：
+      * 精确匹配可见文字，不收 tooltip；
+      * 分句判动词：点/选/输入 → 必须命中可操作控件；
+        看/查看/确认 → 可命中可见文字（卡片标题、标签），但须此刻存在且
+        未隐藏；无动词时按动作类从严；
+      * 组名/标签 + 类型词（下拉框/输入框/按钮/滑块/页签）双命中，并断言
+        同一容器里确有该类型控件；
+      * 对话框专属段只认 ``_DIALOG_ONLY``，条数冻结。
     """
-    vocab = _vocabulary(window)
+    index = _text_index(window)
     missing = []
+
+    def mark(seg):
+        if seg not in missing:
+            missing.append(seg)
+
     for text in texts:
-        for seg in _segments(text):
-            if seg in _DIALOG_ONLY:
-                continue
-            if seg in _SCOPED_SEGMENTS:
-                holder = getattr(window, "control_panel", None)
-                widgets = getattr(holder, _SCOPED_SEGMENTS[seg], [])
-                if any(w.text().strip() == seg for w in widgets):
+        for clause in _clauses(text):
+            if any(v in clause for v in _ACTION_VERBS):
+                mode = "ACTION"
+            elif any(v in clause for v in _VIEW_VERBS):
+                mode = "VIEW"
+            else:
+                mode = "ACTION"
+            type_words = [tw for tw in _TYPE_WORD_NAMES if tw in clause]
+            for seg in _segments(clause):
+                if seg in _DIALOG_ONLY:
                     continue
-                if seg not in missing:
-                    missing.append(seg)
-                continue
-            if seg in vocab:
-                continue
-            aliases = _WIDGET_ALIASES.get(seg)
-            if aliases and any(alias in vocab for alias in aliases):
-                continue
-            if seg not in missing:
-                missing.append(seg)
+                if seg in _SCOPED_SEGMENTS:
+                    holder = getattr(window, "control_panel", None)
+                    widgets = getattr(holder, _SCOPED_SEGMENTS[seg], [])
+                    if any(w.text().strip() == seg for w in widgets):
+                        continue
+                    mark(seg)
+                    continue
+                entries = index.get(seg)
+                if not entries:
+                    for alias in _WIDGET_ALIASES.get(seg, ()):
+                        entries = index.get(alias)
+                        if entries:
+                            break
+                if not entries:
+                    mark(seg)
+                    continue
+                if any(operable for _, _, operable in entries):
+                    continue
+                if any(_type_hit(wdg, tw) for wdg, _, _ in entries
+                       for tw in type_words):
+                    continue
+                if any(kind == "section" and _is_visible(wdg)
+                       for wdg, kind, _ in entries):
+                    continue
+                if mode == "VIEW" and all(_is_visible(wdg)
+                                          for wdg, _, _ in entries):
+                    continue
+                mark(seg)
     return missing
 
 
@@ -193,6 +297,25 @@ def test_observer_hint_points_at_live_change_location_button(main_window):
     assert "输入框" not in _NO_OBSERVER_HINT
     buttons = [b.text() for b in main_window.findChildren(QPushButton)]
     assert "更改地点…" in buttons, buttons[:20]
+
+
+def test_exception_table_is_frozen():
+    assert _exceptions_ok(), (
+        f"例外表已有 {len(_DIALOG_ONLY)} 条，上限 {_EXCEPTION_LIMIT}；"
+        "新增例外需评审——只有既无可操作控件、又无稳定可见文字承载区的段才可登记")
+
+
+def test_counterexample_new_exception_turns_red(monkeypatch):
+    monkeypatch.setitem(_DIALOG_ONLY, "量子面板", "desktop/x.py")
+    assert not _exceptions_ok()
+
+
+def test_counterexample_view_to_action_turns_red(main_window):
+    """「看」类可指卡片标题；同一段改成「点」类后必须命中可操作控件。"""
+    ok = _unresolved(main_window, ["在「状态」页签看「解码结果」卡片。"])
+    assert ok == [], ok
+    bad = _unresolved(main_window, ["在「状态」页签点「解码结果」卡片。"])
+    assert bad == ["解码结果"], bad
 
 
 def test_counterexample_fake_entry_turns_red(main_window, monkeypatch):
