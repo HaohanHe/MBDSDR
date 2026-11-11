@@ -1,0 +1,1 @@
+{"version": "new", "shutdown_ms": 0.6, "hb_max_ms": 24.3, "hb_first_ms": 14.4, "hb_samples": 38, "reaper_done": true, "stale": ["IqReaderThread", "FftWorker", "DemodWorker1", "RecordTap"]}

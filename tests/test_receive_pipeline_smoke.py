@@ -35,6 +35,14 @@ def qapp():
     yield app
 
 
+def _shutdown_and_join(pipe, timeout_ms: int = 3000) -> None:
+    """关停后等后台回收线程结束（shutdown 本身不再阻塞 GUI 线程）。"""
+    pipe.shutdown()
+    assert pipe.wait_for_shutdown(timeout_ms), "后台回收线程未在预算内结束"
+    assert pipe.stale_threads == [], (
+        f"关停超预算：{[t.objectName() for t in pipe.stale_threads]}")
+
+
 # ---------------------------------------------------------------------------
 # stubs
 # ---------------------------------------------------------------------------
@@ -126,12 +134,19 @@ def test_start_flows_data_and_shutdown_joins(qapp):
     assert gen.pushed >= 1, "FFT 路必须收到 IQ"
 
     pipe.shutdown()
+    # shutdown 只请求关停（GUI 线程上限 0 ms），join 交给后台回收线程；
+    # 契约不变：不许留野线程。所以等回收结束再断言，而不是假定同步完成。
+    assert pipe.wait_for_shutdown(3000), "后台回收线程未在预算内结束"
+    assert pipe.stale_threads == [], (
+        f"关停超预算：{[t.objectName() for t in pipe.stale_threads]}")
     # 线程必须收干净（不许留野线程）
     for t in (pipe._reader, pipe._fft, pipe._demod1, pipe._demod2, pipe._record):
         if t is not None:
             assert not t.isRunning(), f"{t.__class__.__name__} 未回收"
-    # 幂等
+    # 幂等：再关一次只唤醒，不重复起回收线程
+    reaper = pipe._reaper
     pipe.shutdown()
+    assert pipe._reaper is reaper
 
 
 def test_single_vfo_pipeline_works(qapp):
@@ -145,7 +160,7 @@ def test_single_vfo_pipeline_works(qapp):
     ok = _wait(lambda: len(got) >= 2,
                pump=lambda: QApplication.processEvents())
     assert ok
-    pipe.shutdown()
+    _shutdown_and_join(pipe)
     assert not pipe._reader.isRunning()
 
 
@@ -164,7 +179,7 @@ def test_reader_returning_none_is_honest_empty(qapp):
     QApplication.processEvents()
     # 无数据时可以没有帧（诚实空态），但线程必须活着不崩
     assert pipe._reader.isRunning() or not pipe._started
-    pipe.shutdown()
+    _shutdown_and_join(pipe)
     assert not pipe._reader.isRunning()
 
 
@@ -175,5 +190,5 @@ def test_double_start_is_idempotent(qapp):
     pipe.start()   # 不许起两套线程
     QApplication.processEvents()
     time.sleep(0.1)
-    pipe.shutdown()
+    _shutdown_and_join(pipe)
     assert not pipe._reader.isRunning()

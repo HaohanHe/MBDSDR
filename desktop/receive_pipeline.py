@@ -29,6 +29,7 @@ VFO 解调 → 声卡）重构为 SDR++ 风格的多线程流水线：
 import logging
 import threading
 import time
+import weakref
 from typing import Callable, Dict, Optional
 
 import numpy as np
@@ -45,6 +46,52 @@ log = logging.getLogger(__name__)
 
 # 每块读取样点数：与 spectrum_widget FFT 16384 档位对齐（原 _poll_sdr_iq 同值）
 READ_BLOCK_SAMPLES = 16384
+
+#: 关停时单线程 join 预算（秒）。下游只是「读回流 + 看标志位」，200 ms 足够
+#: （实测唤醒 <50 ms）；reader 的阻塞点是设备 read（rtl_tcp 套接字 2.0 s 超时），
+#: 给 2.0 s + 0.5 s 余量，并且必须**最后** join——它是最慢的那个。
+STOP_TIMEOUT_DOWNSTREAM_S = 0.2
+STOP_TIMEOUT_READER_S = 2.5
+
+
+def _reap_pipeline_threads(pipe_ref, downstream, reader):
+    """后台 join（模块级函数：**不许**持有 ReceivePipeline 的强引用）。
+
+    管线对象可能在这 3 s 内被上层释放（重连压力测试就是这么查泄漏的），
+    所以这里只拿 weakref：管线已经没了就只记日志，不去碰它的信号。
+    """
+    for t in downstream:
+        try:
+            t.wait(int(STOP_TIMEOUT_DOWNSTREAM_S * 1000))
+        except Exception:
+            pass
+    # reader 最后 join：它的阻塞点是设备 read（rtl_tcp 套接字 2.0 s 超时），
+    # 先等它没有意义，只会把前面的预算叠加到最坏值上。
+    if reader is not None:
+        try:
+            reader.wait(int(STOP_TIMEOUT_READER_S * 1000))
+        except Exception:
+            pass
+
+    stale = [t for t in ([reader] + downstream)
+             if t is not None and t.isRunning()]
+    names = ", ".join(t.objectName() or type(t).__name__ for t in stale)
+    if stale:
+        log.warning("流水线关停超时：%s 仍未退出（已放弃等待，不阻塞界面；"
+                    "下次重建流水线前该线程可能仍在设备 read 中）", names)
+    pipe = pipe_ref()
+    if pipe is None:          # 上层已释放：不碰信号，日志已经记过了
+        return
+    pipe._stale_threads = stale
+    if stale:
+        try:
+            pipe.threads_stale.emit([type(t).__name__ for t in stale])
+        except Exception:
+            pass
+    try:
+        pipe.shutdown_finished.emit(not stale)
+    except Exception:
+        pass
 
 
 class SharedDemodConfig:
@@ -602,6 +649,11 @@ class ReceivePipeline(QObject):
     demod_failed = Signal(str)
     #: 静噪基线标定状态（标定中/完成/失败）：失败必须可见
     squelch_state = Signal(str)
+    #: 后台回收结束：True = 五个线程全部退出；False = 有线程超预算仍活着
+    shutdown_finished = Signal(bool)
+    #: 超预算仍未退出的线程类名。上层收到即按「链路不可再用」呈现
+    #: （``link_state=disconnected`` 口径），不弹模态、不假装还连着。
+    threads_stale = Signal(list)
 
     def __init__(self, read_fn: Callable[[int], Optional[np.ndarray]],
                  sr: float,
@@ -649,6 +701,10 @@ class ReceivePipeline(QObject):
         self._record = RecordTap(self._record_stream, on_record_iq)
 
         self._started = False
+        #: 后台 join 线程（shutdown 后才有）
+        self._reaper = None
+        #: 关停超预算仍未退出的线程
+        self._stale_threads: list = []
 
     @Slot(object, float)
     def _on_fft_frame(self, iq: np.ndarray, sr: float):
@@ -674,7 +730,23 @@ class ReceivePipeline(QObject):
         self._started = True
 
     def shutdown(self):
-        """停全部线程 + 停乒乓流，join 回收。幂等。"""
+        """请求关停并**立刻返回**：join 交给后台回收线程，GUI 侧不等。
+
+        旧实现在 GUI 线程上逐个 ``wait(2000)`` × 5：五个线程只要有一个卡在
+        不可打断的调用里，断连/重建流水线时界面就会连同整条事件循环冻住，
+        最坏 10 s。现在这里只做不阻塞的事——置停止标志、唤醒各阻塞点、
+        把 join 交给 ``_reap_threads()``。
+
+        边界（明说，调用方要知道）：
+          - join 不再同步完成，``shutdown()`` 返回后**不得**假设线程已死。
+            重建流水线时旧 reader 可能还在设备 read 里，最长到设备自己的
+            读超时（rtl_tcp 2.0 s）；这条窗口由 ``threads_stale`` 上报，
+            不静默。
+          - 绝不强杀线程（Python 无 detach，强杀会留半初始化的内核态）。
+            超预算仍未退出的记入 ``stale_threads``，发 ``shutdown_finished(False)``，
+            上层据此把链路如实标成断开（``link_state=disconnected`` 口径）。
+          - 幂等：重复调用只唤醒一次，不会重复起回收线程。
+        """
         if not self._started:
             return
         self._started = False
@@ -696,14 +768,7 @@ class ReceivePipeline(QObject):
                 w.shutdown()
             except Exception:
                 pass
-        # 4) join 所有线程
-        for t in (x for x in (self._reader, self._fft, self._demod1,
-                              self._demod2, self._record) if x is not None):
-            try:
-                t.wait(2000)
-            except Exception:
-                pass
-        # 5) 清停止标志，便于下次重建流水线时复用对象（我们这里每次都新建，防御性调用）
+        # 4) 清停止标志并关流：先清标志再关，免得关流途中又灌进一帧。
         for s in (x for x in (self._input, self._spectrum_stream,
                               self._vfo1_stream, self._vfo2_stream,
                               self._record_stream) if x is not None):
@@ -712,3 +777,27 @@ class ReceivePipeline(QObject):
                 s.stop_writer()
             except Exception:
                 pass
+        # 5) join 交给后台回收线程（GUI 线程到此返回，耗时 ≈ 0）。
+        #    只把 weakref 交给回收线程：管线对象随时可能被上层释放。
+        reaper = self._reaper
+        if reaper is None or not reaper.is_alive():
+            downstream = [t for t in (self._fft, self._demod1, self._demod2,
+                                      self._record) if t is not None]
+            self._reaper = threading.Thread(
+                target=_reap_pipeline_threads,
+                args=(weakref.ref(self), downstream, self._reader),
+                name="mbdsdr-pipeline-reap", daemon=True)
+            self._reaper.start()
+
+    def wait_for_shutdown(self, timeout_ms: int = 3000) -> bool:
+        """等后台回收线程结束（仅测试/退出前用，GUI 槽里不要调）。"""
+        reaper = self._reaper
+        if reaper is None:
+            return True
+        reaper.join(timeout_ms / 1000.0)
+        return not reaper.is_alive()
+
+    @property
+    def stale_threads(self):
+        """关停超预算仍未退出的线程（空列表 = 干净退出）。"""
+        return list(self._stale_threads)
