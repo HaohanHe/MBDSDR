@@ -100,7 +100,7 @@ FAILED tests/test_error_remedy_links.py::test_every_catalog_code_is_registered -
   `code` 来自 `mbdsdr_ai/tool_registry.py:917` 的 `ToolResult.error`）
 - **P2** 状态面板「解码结果」卡渲染 `错误码 {code}: {message}`
   （`desktop/status_panel.py:273`，标签映射 `:185-203`；入口 `:1159 is_decode_tool`）
-- **P3** 状态栏渲染 `设备已断开：{message}`（`desktop/main_window.py:8480`，
+- **P3** 状态栏渲染 `设备已断开：{message}`（`desktop/main_window.py:8610`，
   由 `:8480` 的 `_on_health_tick` 触发；`message` = `sdr_backend` 写入的
   `status.error = user_message(code)`）
 - **P4** AI 对话区渲染 `[错误] {message}`（`desktop/ai_panel.py:1328`）
@@ -148,11 +148,11 @@ FAILED tests/test_error_remedy_links.py::test_every_catalog_code_is_registered -
 | 37 | `unsupported_format` | 解码卡输入扩展名与模式要求不符 | 是 | P2 | `mbdsdr_ai/decode_router.py:835-841` → `desktop/status_panel.py:185,273` | 已补（解码结果族，`e95945b`） |
 | 38 | `decode_error` | 解码器运行期异常（弱信号 / 坏样本） | 是 | P2 | `mbdsdr_ai/decode_router.py:408,913-921` → `desktop/status_panel.py:185,273` | 已补（解码结果族，`e95945b`） |
 | 39 | `not_implemented` | 模式能力存在但通用入口未接线，用户仍可点 | 是 | P2 | `mbdsdr_ai/decode_router.py:382-383` → `desktop/status_panel.py:185,273` | 已补（解码结果族，`e95945b`） |
-| 40 | `sdr_set_frequency_failed` | 用户在「控制」面板改频率，设备拒绝 / 底层失败 | 是 | P3 | `mbdsdr_ai/sdr_backend.py:283,289` → `desktop/main_window.py:8480` | 已补（设备调谐族，`0e4b9ef6`） |
-| 41 | `sdr_set_sample_rate_failed` | 用户改采样率，设备不支持或底层失败 | 是 | P3 | `mbdsdr_ai/sdr_backend.py:368,374` → `desktop/main_window.py:8480` | 已补（设备调谐族，`0e4b9ef6`） |
-| 42 | `sdr_set_gain_failed` | 用户改增益，设备拒绝或底层失败 | 是 | P3 | `mbdsdr_ai/sdr_backend.py:418-423` → `desktop/main_window.py:8480` | 已补（设备调谐族，`0e4b9ef6`） |
-| 43 | `sdr_set_bandwidth_failed` | 用户改带宽，设备拒绝或底层失败 | 是 | P3 | `mbdsdr_ai/sdr_backend.py:471-477` → `desktop/main_window.py:8480` | 已补（设备调谐族，`0e4b9ef6`） |
-| 44 | `doppler_compensation_failed` | 接收链多普勒补偿失败（无预测 / 计算异常），该块音频跳过 | 是 | P3 | `mbdsdr_ai/sdr_backend.py:832,872` → `desktop/main_window.py:8480` | 已补（设备调谐族，`0e4b9ef6`） |
+| 40 | `sdr_set_frequency_failed` | 用户在「控制」面板改频率，设备拒绝 / 底层失败 | 是 | P3 | `mbdsdr_ai/sdr_backend.py:283,289` → `desktop/main_window.py:8610` | 已补（设备调谐族，`0e4b9ef6`） |
+| 41 | `sdr_set_sample_rate_failed` | 用户改采样率，设备不支持或底层失败 | 是 | P3 | `mbdsdr_ai/sdr_backend.py:368,374` → `desktop/main_window.py:8610` | 已补（设备调谐族，`0e4b9ef6`） |
+| 42 | `sdr_set_gain_failed` | 用户改增益，设备拒绝或底层失败 | 是 | P3 | `mbdsdr_ai/sdr_backend.py:418-423` → `desktop/main_window.py:8610` | 已补（设备调谐族，`0e4b9ef6`） |
+| 43 | `sdr_set_bandwidth_failed` | 用户改带宽，设备拒绝或底层失败 | 是 | P3 | `mbdsdr_ai/sdr_backend.py:471-477` → `desktop/main_window.py:8610` | 已补（设备调谐族，`0e4b9ef6`） |
+| 44 | `doppler_compensation_failed` | 接收链多普勒补偿失败（无预测 / 计算异常），该块音频跳过 | 是 | P3 | `mbdsdr_ai/sdr_backend.py:832,872` → `desktop/main_window.py:8610` | 已补（设备调谐族，`0e4b9ef6`） |
 | 45 | `llm_offline` | 用户开 `MBDSDR_OFFLINE` 或离线时点 AI 发送 | 是 | P4 | `mbdsdr_ai/model_manager.py:268,275` → `desktop/ai_panel.py:1328` | 已补（AI 模型族，`0e4b9ef6`） |
 | 46 | `llm_rate_limited` | 模型接口返回 429（用户连续发指令 / 额度耗尽） | 是 | P4 | `mbdsdr_ai/model_manager.py:31-32` → `desktop/ai_panel.py:1328` | 已补（AI 模型族，`0e4b9ef6`） |
 | 47 | `llm_http_4xx` | API Key 错 / 模型名不存在，接口返回 4xx | 是 | P4 | `mbdsdr_ai/model_manager.py:35-36` → `desktop/ai_panel.py:1328` | 已补（AI 模型族，`0e4b9ef6`） |
@@ -228,7 +228,7 @@ FAILED tests/test_error_remedy_links.py::test_every_catalog_code_is_registered -
 
 - 通道取证只看**桌面 UI 真实渲染点**，不看库 API 返回值：
   `desktop/ai_panel.py:852`、`desktop/status_panel.py:273`、
-  `desktop/main_window.py:8480`、`desktop/ai_panel.py:1328`、`desktop/ai_panel.py:847-849`。
+  `desktop/main_window.py:8610`、`desktop/ai_panel.py:1328`、`desktop/ai_panel.py:847-849`。
 - 「不可见」的机械证据是 `git grep -n <模块> -- desktop` 为 0：
   `recording_library` / `recorder` / `playback` / `tle_fetch` / `error_handler`（信封）
   在 `desktop/` 均无业务调用方。
@@ -325,9 +325,11 @@ python -c "import sys; sys.path.insert(0,'.'); sys.path.insert(0,'desktop'); imp
 
 ### 7.1 `desktop/troubleshooting.py:92` 的「2.048 MS/s」
 
-- 更正：该行单位由 `2.048 MHz` 改为 `2.048 MS/s` 的是 **`ff964183`**
+- 更正（`ff964183` — `desktop/troubleshooting.py:92` — `2.048 MS/s`，基准 `ff964183`）：该行单位由 `2.048 MHz`
+  改为 `2.048 MS/s` 的是 **`ff964183`**
   （`fix(copy): 缺值不再渲染 0（APT 统计/卫星表单）与采样率建议改 MS/s`，属**文案审计线**批次），
   **不是** `70429a02`（参数治理线，清单 4 个文件，不含 `troubleshooting.py`）。
+- 2026-11-11 单位统一后更新：四元组的字面量按 HEAD 现文改为 `2.048 MS/s`，基准取该行 blame 提交 `ff964183`。
 - 证据命令：
 
   ```text
