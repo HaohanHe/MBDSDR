@@ -3674,7 +3674,8 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
                 why = ("选中目标缺少 TLE（放到 ~/.mbdsdr/tle/ "
                        "或联网获取后再试）")
             else:
-                why = "观测站位置未设置，无法计算跟踪频点（先设 observer_lat/lon）"
+                why = ("观测地点未设置，无法计算跟踪频点"
+                       "（设置 → 卫星与多普勒 → 观测地点纬度/经度）")
             self._track_notice = f"无法跟踪：{why}"
             self._track_notice_until = time.time() + 4.0
             self.update()
@@ -5098,7 +5099,7 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         if self._ground_station() is not None:
             return True
         self._camera_notice = (
-            "未设置地面站：无法计算方位（设置 → 卫星与多普勒 → 地面站经纬度）")
+            "未设置观测地点：无法计算方位（设置 → 卫星与多普勒 → 观测地点纬度/经度）")
         self._camera_notice_until = time.time() + 6.0
         self.update()
         return False
