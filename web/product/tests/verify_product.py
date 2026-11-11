@@ -584,6 +584,40 @@ if "dayFactorAnchors" not in _tw.get("formulas", {}) and "dayFactorSource" not i
 print(f"[9.6.4] 天空背景亮度因子：内核 atmosphere.py 分段线性镜像 / "
       f"30-sky 昼夜背景委托 / 三点 golden（-1°→0.8883, -6°→0.33, 0°→1.0）")
 
+# ---------- 9.6.5 星点「画/不画」与内核同律 + 跨语言集合相等金标准 ----------
+# 观感律（半径/亮度/色偏）允许分层；可见性律（地平门 + 消光后星等门）必须同律。
+_sv_golden = ROOT / "build/star-visibility-golden.json"
+_sv = {}
+if not _sv_golden.is_file():
+    fail("[sv] 缺 build/star-visibility-golden.json（先跑 build/gen_star_visibility_golden.py）")
+else:
+    _sv = json.loads(_sv_golden.read_text(encoding="utf-8"))
+    _sm = _sv.get("meta", {})
+    if "star_catalog.py" not in _sm.get("source", ""):
+        fail("[sv] 星点可见性金标准事实源不是内核 skyengine/star_catalog.py（不得自证）")
+    if abs(float(_sm.get("horizonGateDeg", 999.0)) + 0.6) > 1e-12:
+        fail(f"[sv] golden 地平门不是内核 -0.6°：{_sm.get('horizonGateDeg')}")
+    if _sv.get("bandStarCount", 0) <= 0 or _sv.get("addedByOldGateCount", 0) <= 0:
+        fail("[sv] 金标准失去区分力：band/added 必须 > 0")
+    if _sv.get("frameBeforeCount", 0) <= _sv.get("frameAfterCount", 0):
+        fail("[sv] 画面级 before/after 未体现 -1.2° 多画的星")
+    if len(_sv.get("visibleIndices", [])) != _sv.get("visibleAfterGateCount"):
+        fail("[sv] visibleIndices 与 visibleAfterGateCount 不一致")
+if "const HORIZON_GATE_DEG = -0.6;" not in _celestial:
+    fail("[sv] 31-celestial.js 地平门未统一到内核 -0.6°")
+if re.search(r"Math\.sin\(-1\.2\s*\*\s*D2R\)", _celestial):
+    fail("[sv] 31-celestial.js 仍存 -1.2° 地平门")
+if "function visibleSet" not in _celestial or "function starVisible" not in _celestial:
+    fail("[sv] 31-celestial.js 缺 starVisible/visibleSet（集合相等断言入口）")
+for _bad in ("v.z > -0.02", "v.z < -0.02"):
+    if _bad in _celestial:
+        fail(f"[sv] 命名星/DSO 仍用旧门 {_bad}（应统一 HORIZON_SIN）")
+if not (ROOT / "tests/star_visibility_selftest.js").is_file():
+    fail("[sv] 缺 tests/star_visibility_selftest.js（集合相等 + 变异反证）")
+print(f"[9.6.5] 星点画/不画同律：地平门 -0.6° / 同星表同时刻集合相等 "
+      f"{_sv.get('visibleAfterGateCount', 0)} 颗 / 地平带 {_sv.get('bandStarCount', 0)} 颗、"
+      f"旧门多画 {_sv.get('addedByOldGateCount', 0)} 颗 / 命名星+DSO 旧门已清除")
+
 # ---------- 9.7 写工具确认通道（阶段 C：前端只登记意图，token 不出宿主） ----------
 _data = (SRC / "10-data.js").read_text(encoding="utf-8")
 _dialog = (SRC / "50-dialog.js").read_text(encoding="utf-8")

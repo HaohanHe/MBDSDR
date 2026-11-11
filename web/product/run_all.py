@@ -41,6 +41,7 @@ STEPS = [
     ("恒星自行跨语言自检", [NODE, "tests/proper_motion_selftest.js"] if NODE else None),
     ("极限星等跨语言自检", [NODE, "tests/limit_mag_selftest.js"] if NODE else None),
     ("晨昏亮度跨语言自检", [NODE, "tests/twilight_selftest.js"] if NODE else None),
+    ("星点可见性跨语言集合自检", [NODE, "tests/star_visibility_selftest.js"] if NODE else None),
     ("天球投影自检", [NODE, "tests/proj_selftest.js"] if NODE else None),
     ("无头运行时", [NODE, "tests/verify_runtime.js"] if NODE else None),
     ("视觉夹具", [PY, "tests/make_visual_fixture.py"]),
@@ -175,6 +176,12 @@ def main() -> int:
         "**仍未做 / 未标定**：惩罚是量级近似文献曲线（Krisciunas & Schaefer 1991 / Patat et al. 2006），"
         "非辐射标定（气溶胶/臭氧/纬度/方位约 ±1 等）、天顶等效、无方位依赖、无月光；只用于显示层，"
         "不参与指向/定轨/过境结论。入场暗适应淡入（intro 0→1 基线由 2 等放开）是 Web 呈现层，非内核。",
+        "- **星点「画/不画」已与内核同律**：地平门统一到内核 −0.6°（旧版 −1.2°、"
+        "命名星/DSO 的 z>−0.02≈−1.15° 已改），逐星消光后星等门同口径；"
+        "`build/gen_star_visibility_golden.py` 直接 import 内核常量/消光/极限星等，"
+        "`tests/star_visibility_selftest.js` 断言同星表/同时刻/同 L 下两边可见星集**完全相等**，"
+        "并做「改回 −1.2° 必红」的变异反证。星点半径/亮度/色偏仍为呈现层（有意分层，已登记），"
+        "不逐像素镜像内核 `star_draw`。",
         "- **桌面端未联调**：未与 Qt6 天空模式 `rf_sky_view.py` 做端到端对拍；"
         "设计令牌与时间倍率为代码事实源同步，非运行时连线。",
         "- **截图为 headless 静态态**：用于版式验收，不代表真机交互或信号接收结果。",

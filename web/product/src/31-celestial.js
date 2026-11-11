@@ -44,6 +44,13 @@
   /* 相机平面前向分量下限：Z<=NEAR 的点在相机背后或贴面，投影会爆到无穷远。
      0.02 ≈ 离 90° 视轴 1.1°，屏幕上早已出画，直接丢弃无视觉损失。 */
   const NEAR = 0.02;
+  /* 地平门（几何高度，度）：与内核 mbdsdr_ai/skyengine/star_catalog.py 的
+     _HORIZON_GATE_DEG = -0.6 同值（DSO 层同口径）。绘制按视高度落笔，几何 0°
+     附近的星经大气折射（地平约 34′）后仍在地平线之上，所以门放在 -0.6°。
+     旧版这里是 -1.2°、命名星/DSO 用 z > -0.02（≈-1.15°），比内核多画一条
+     0.6° 环带，会让「画 / 不画」的星集与内核不一致；golden 以内核为真值。 */
+  const HORIZON_GATE_DEG = -0.6;
+  const HORIZON_SIN = Math.sin(HORIZON_GATE_DEG * D2R);
 
   /* ---------- ViewState（对齐 sky_interaction.py：fov_deg / center_az / center_alt） ---------- */
   const V = {
@@ -393,6 +400,9 @@
   /* sin(asin(z)) === z：eachStar 已经算出了单位向量的 z 分量（= sin alt），
      直接传进来即可，不必 asin 求角度再 sin 回去（体检 P1）。 */
   function extinctionFromSin(sinAlt) {
+    /* sinAlt >= 1 只在数值上达到天顶时成立（alt=90°）。真实星位走不到
+       alt≥90°（超过就是另一个半球），保留这个早退是防御浮点把 sinAlt 抬到
+       1.0000000002 时 1/sin 溢出——不是漏改，勿删。 */
     if (sinAlt >= 1) return 0;
     return Math.min(LM.maxExt, LM.kExt / Math.max(Math.sin(0.5 * D2R), sinAlt));
   }
@@ -417,8 +427,22 @@
     return adapted - ASTRO.twilightLimitPenaltyMag(sunAltDeg);
   }
   function daylightHidden(sunAltDeg) { return sunAltDeg > -0.833; }
+  function effectiveMag(mag, sinAlt) { return mag + extinctionFromSin(sinAlt); }
+  /* 画/不画判据：与内核 star_catalog.select_for_view 同一律——
+     地平门 alt >= -0.6°、逐星消光后有效星等 <= 极限星等。
+     视锥/屏幕矩形裁剪是投影层（web 独有），不在本判据内。
+     跨语言强断言：同星表/同时刻/同 L，本判据选出的星集与内核必须完全相等
+     （build/gen_star_visibility_golden.py + tests/star_visibility_selftest.js）。 */
+  function starVisible(mag, sinAlt, L) {
+    if (sinAlt < HORIZON_SIN) return false;
+    return effectiveMag(mag, sinAlt) <= L;
+  }
+  /* 星点观感律：半径/亮度/色偏是 web 呈现层，**有意**不与内核 stars.star_draw
+     的 (6.5-mag)/8 幂律 + r³ 逐像素镜像（30° fov 下内核 α≈0.04 几乎看不见，
+     压成那样是本末倒置）。分层已登记，见 docs/research/2026-11-11-web-kernel-law-parity.md；
+     但「画/不画」必须同律，由 starVisible 保证。 */
   function starStyle(mag, bv, L, sinAlt) {
-    const eff = mag + extinctionFromSin(sinAlt);
+    const eff = effectiveMag(mag, sinAlt);
     if (eff > L) return null;
     const depth = L - eff;
     const r = clamp(0.60 + depth * 0.55, 0.55, 4.6);
@@ -452,7 +476,6 @@
       zViewMin = (1 - q * q) / (1 + q * q);
     }
     if (zViewMin < zc) zViewMin = zc;
-    const horizonSin = Math.sin(-1.2 * D2R);
     const m = f.m;
     const m0 = m[0], m1 = m[1], m2 = m[2], m3 = m[3], m4 = m[4],
           m5 = m[5], m6 = m[6], m7 = m[7], m8 = m[8];
@@ -474,7 +497,7 @@
       const sx = cx0 + X * k, sy = cy0 - Y * k;
       if (sx < -8 || sx > W + 8 || sy < -8 || sy > H + 8) continue;   // 窗口矩形裁剪
       const sinAlt = clamp(vz, -1, 1);
-      if (sinAlt < horizonSin) continue;                               // 地平门
+      if (!starVisible(MAG[i], sinAlt, L)) continue;   // 地平门 + 消光后星等门（与内核同律）
       const st = starStyle(MAG[i], BV[i], L, sinAlt);
       if (!st) continue;
       cb(sx, sy, st, MAG[i], BV[i], Math.asin(sinAlt) * R2D, i);
@@ -482,12 +505,28 @@
     }
     return { shown, L };
   }
+  /* 审计/跨语言入口：返回 eachStar 的「画/不画」判据通过的全部星序号
+     （不含视锥与屏幕矩形裁剪——那是投影层）。同星表/同时刻/同 L 时，
+     本集合必须与内核 star_catalog.select_for_view 完全相等。 */
+  function visibleSet(state, L) {
+    const m = frame(state).m;
+    const m6 = m[6], m7 = m[7], m8 = m[8];
+    const out = [];
+    for (let j = 0; j < N; j++) {
+      const i = ORDER[j];
+      if (MAG[i] > L) break;          // 消光只会更暗，后面全不可见
+      const x = VX[i], y = VY[i], z = VZ[i];
+      const sinAlt = clamp(m6 * x + m7 * y + m8 * z, -1, 1);
+      if (starVisible(MAG[i], sinAlt, L)) out.push(i);
+    }
+    return out;
+  }
   function namedScreen(state, W, H) {
     const f = frame(state), out = {};
     for (const s of NAMED) {
       const v = eqToHorizon(s.cosRA, s.sinRA, s.sinDec, s.cosDec, f);
       const p = toScreen(v, W, H);
-      if (p && v.z > -0.02) out[s.name] = { p, alt: Math.asin(clamp(v.z, -1, 1)) * R2D, s };
+      if (p && v.z > HORIZON_SIN) out[s.name] = { p, alt: Math.asin(clamp(v.z, -1, 1)) * R2D, s };
     }
     return out;
   }
@@ -504,7 +543,7 @@
       const d = e.d;
       const v = eqToHorizon(e.cRA, e.sRA, e.sD, e.cD, f);
       const p = toScreen(v, W, H);
-      if (!p || v.z < -0.02) continue;
+      if (!p || v.z < HORIZON_SIN) continue;
       const alt = Math.asin(clamp(v.z, -1, 1)) * R2D;
       // 仓库 dso_catalog.json 允许星等/角径为 null（源目录缺数据）。
       // 这种情况下**不参与亮度门**（不知道亮度就不能按亮度筛），
@@ -550,6 +589,7 @@
     altAzVector, basis, getBasis, projMode, focalOf,
     toScreen, projectAltAz, projectSegment, unproject, sunAltAz,
     limitMag, effectiveLimit, extinction, starStyle, daylightHidden,
+    HORIZON_GATE_DEG, HORIZON_SIN, effectiveMag, starVisible, visibleSet,
     eachStar, namedScreen, namedVector, dsoScreen,
     step, zoom, panTo,
     hud(state) {
