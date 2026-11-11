@@ -1,0 +1,80 @@
+{
+ "target_ms": 800,
+ "current_definition_c": {
+  "median_ms": 1158.5,
+  "source": "docs/perf-evidence/2026-11-11/first_tick_def_c_lazy_settings_ab.json",
+  "n": 3
+ },
+ "gap_ms": 358.5,
+ "note": "另一组串行 5 次定义 C 中位 1035.2 → 缺口 235.2；两组都合规，差在窗口负载，本表按 1158.5 记（更保守）。",
+ "candidates": [
+  {
+   "item": "自定义:RFSkyView 构造",
+   "ms": 345.6,
+   "status": "已测",
+   "evidence": "ctor_panel_type_breakdown_types.json run3",
+   "owner": "卫星线",
+   "note": "单这一项≈整个缺口；其构造里首实例样式初始化占多少未拆"
+  },
+  {
+   "item": "QLineEdit 首实例（Qt 样式初始化）",
+   "ms": 343.3,
+   "status": "已测",
+   "evidence": "同上（13 个合计）",
+   "note": "一次性成本；延迟构建只把它挪到别处，总量不消失"
+  },
+  {
+   "item": "_apply_initial_state 首次主题应用",
+   "ms": "160.2–191.2",
+   "status": "已测",
+   "evidence": "2026-11-12-settings-initial-state-breakdown.py",
+   "note": "32 项里其余合计 0.6 ms；这一次走的是 app.setStyleSheet(qss) 全树 polish，不是 _repolish_all"
+  },
+  {
+   "item": "SettingsPanel 其余（去掉主题那笔）",
+   "ms": "82.7–113.7",
+   "status": "已测",
+   "evidence": "panels run5 273.9 − 主题 160–191",
+   "note": "惰性化后剩下的部分"
+  },
+  {
+   "item": "右栏其余面板构造（不含 SettingsPanel）",
+   "ms": 203.9,
+   "status": "已测",
+   "evidence": "panels run5",
+   "note": "APRS 47.0 / 控制 42.4 / 频谱 19.0 / AI 18.8 / 卫星云图 18.1 / 设备 18.0 / ADS-B 16.4+12.9 / ANR 11.3"
+  },
+  {
+   "item": "右栏页签 addTab（10 个）",
+   "ms": 220.7,
+   "status": "已测",
+   "evidence": "panels run5 add_right_tab",
+   "note": "APRS 40.7 / VFO 35.7 / ADS-B 32.5 ..."
+  },
+  {
+   "item": "首次 show + 首帧 paint",
+   "ms": "134.7–282.7",
+   "status": "已测",
+   "evidence": "panels run5（show/tick）；types run3 92/182"
+  },
+  {
+   "item": "主题重复应用（幂等空转）",
+   "ms": 8.7,
+   "status": "已测",
+   "evidence": "breakdown（5.4 + 3.3）"
+  },
+  {
+   "item": "频谱/瀑布首帧绘制",
+   "ms": null,
+   "status": "只是估计",
+   "evidence": "未单独计时（含在 tick 里）"
+  },
+  {
+   "item": "MainWindow 骨架 + 框架未拆余量",
+   "ms": "≈815",
+   "status": "只是估计",
+   "evidence": "types run3: ctor 1513 − 面板 477.8 − 页签 220.7"
+  }
+ ],
+ "conclusion": "能凑够 358，但没有一条是本线单方面可动：RFSkyView 345.6 一项就够（归卫星线）；_apply_initial_state 主题 160–191 + 右栏非设置面板 204 ≈ 364 也够，但需要改 main_window/themes，且「窗口不可见时不做全树 polish」的替代方案尚未验证；把 _apply_initial_state 整段挪到首帧之后只是把 160–191 从构造期搬到首拍，定义 C 不变。"
+}

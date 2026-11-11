@@ -336,5 +336,6 @@
     ]
    }
   }
- ]
+ ],
+ "quantity": "entry_to_tick_ms = 定义 C（进程入口 → 真屏 show() 后首个 paint 派发完毕，含 import+构造+show+首帧绘制）；同批运行里的 ctor_ms 是构造期，两个量不能互换、不能跨文件比"
 }
