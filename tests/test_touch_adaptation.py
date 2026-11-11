@@ -196,7 +196,7 @@ class TestSettingsTouchMode:
 # 5. MainWindow 触控初始化（offscreen；sdr_connect 失败是已知基线）
 # --------------------------------------------------------------------------- #
 @pytest.fixture(scope="module")
-def main_window(qapp):
+def main_window(qapp, isolated_profile):
     from main_window import MainWindow
     w = MainWindow()
     yield w
