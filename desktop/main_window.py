@@ -5275,53 +5275,79 @@ class MainWindow(QMainWindow):
     # ========================================================================
 
     def _apply_theme(self, theme_name: str):
-        """应用主题。"""
+        """应用主题。
+
+        成本全在 `app.setStyleSheet` 对每个控件逐个重抛光（实测 2.6–3.8 s，
+        换 palette / font / 隐藏窗口都省不掉），期间事件循环被独占：改前
+        基线是切换期间 50 ms 定时器 **0 次**触发、状态栏前后**完全一致**——
+        用户看到的就是「点了没反应」，然后重复点击。这里补「正在做什么」
+        的可见反馈，并在 finally 恢复原样（原本为空就清空，不留永久提示）。
+        """
         self._current_theme = theme_name
         theme = get_theme(theme_name)
         _app = self.app if hasattr(self, 'app') else QApplication.instance()
-        theme.apply(_app)
-        # 记录主题基础 QSS，触屏模式下 _apply_touch_stylesheet 在其后追加触控规则
-        # （theme.apply 会整体替换 stylesheet，故这里必须重新捕获并叠加）。
+        prev_status = self.statusBar().currentMessage()
+        if _app is not None:
+            QApplication.setOverrideCursor(Qt.WaitCursor)
+        self.statusBar().showMessage("正在应用主题…", MSG_IMPORTANT)
         try:
-            self._theme_qss = _app.styleSheet() if _app is not None else ""
-        except Exception:
-            self._theme_qss = ""
-        self._apply_touch_stylesheet()
-
-        # 更新频谱组件颜色
-        self.spectrum.set_theme_colors(
-            theme.colors["bg"],
-            theme.colors["border"],
-            theme.colors["text"],
-            theme.colors["primary"],
-            theme.colors["accent"],
-            theme.spectrum_colors,
-        )
-
-        # 自绘/内联样式的控件不吃 app 级 QSS，换主题时要逐个重刷
-        self._restyle_hint_banner()
-        try:
-            self.connect_btn.setStyleSheet(self._connect_button_qss())
-        except Exception:  # noqa: BLE001 - 按钮尚未创建（构造早期调主题）时跳过
-            pass
-
-        # 更新主题下拉框
-        idx = self.theme_combo.findData(theme_name)
-        if idx >= 0:
-            self.theme_combo.blockSignals(True)
-            self.theme_combo.setCurrentIndex(idx)
-            self.theme_combo.blockSignals(False)
-
-        # 底图跟着主题走：深色主题用暗色瓦片（OSM 数据 + CARTO 暗色渲染），
-        # 浅色主题用 OSM 官方标准瓦片。地图是公用的，所有持有地图的面板一起换。
-        self._sync_map_style()
-
-        # 用户手动切主题时持久化；启动恢复阶段不回写（避免默认主题覆盖已读回值）
-        if not getattr(self, "_restoring_settings", False):
+            # 只在这一处调一次 processEvents：让忙碌光标与状态栏文案真正落屏。
+            # 不许改成循环或多次——本函数会重入事件派发，重复重入会把「再点
+            # 一次主题」「关窗」等用户动作插进只套了一半的状态里（隐式重入）。
+            # 构造期窗口还不可见，没有可落屏的对象，不刷，避免构造期重入。
+            if self.isVisible():
+                QApplication.processEvents()
+            theme.apply(_app)
+            # 记录主题基础 QSS，触屏模式下 _apply_touch_stylesheet 在其后追加触控规则
+            # （theme.apply 会整体替换 stylesheet，故这里必须重新捕获并叠加）。
             try:
-                self.settings.set("theme", theme_name)
+                self._theme_qss = _app.styleSheet() if _app is not None else ""
             except Exception:
+                self._theme_qss = ""
+            self._apply_touch_stylesheet()
+
+            # 更新频谱组件颜色
+            self.spectrum.set_theme_colors(
+                theme.colors["bg"],
+                theme.colors["border"],
+                theme.colors["text"],
+                theme.colors["primary"],
+                theme.colors["accent"],
+                theme.spectrum_colors,
+            )
+
+            # 自绘/内联样式的控件不吃 app 级 QSS，换主题时要逐个重刷
+            self._restyle_hint_banner()
+            try:
+                self.connect_btn.setStyleSheet(self._connect_button_qss())
+            except Exception:  # noqa: BLE001 - 按钮尚未创建（构造早期调主题）时跳过
                 pass
+
+            # 更新主题下拉框
+            idx = self.theme_combo.findData(theme_name)
+            if idx >= 0:
+                self.theme_combo.blockSignals(True)
+                self.theme_combo.setCurrentIndex(idx)
+                self.theme_combo.blockSignals(False)
+
+            # 底图跟着主题走：深色主题用暗色瓦片（OSM 数据 + CARTO 暗色渲染），
+            # 浅色主题用 OSM 官方标准瓦片。地图是公用的，所有持有地图的面板一起换。
+            self._sync_map_style()
+
+            # 用户手动切主题时持久化；启动恢复阶段不回写（避免默认主题覆盖已读回值）
+            if not getattr(self, "_restoring_settings", False):
+                try:
+                    self.settings.set("theme", theme_name)
+                except Exception:
+                    pass
+        finally:
+            # 无论主题应用成功与否都要收回忙碌态：留下永久光标/提示比卡一下更糟。
+            if _app is not None:
+                QApplication.restoreOverrideCursor()
+            if prev_status:
+                self.statusBar().showMessage(prev_status)
+            else:
+                self.statusBar().clearMessage()
 
     def _theme_is_dark(self) -> bool:
         """当前主题是不是深色：按背景亮度判定，不靠名字里有没有 dark。"""
