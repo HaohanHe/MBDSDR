@@ -100,7 +100,7 @@ class PanelRegistry:
                       summary="接收参数：频率/解调/带宽/增益/静噪/采样率与音量"),
             PanelSpec("status",      "状态",       "▦", AREA_RIGHT,
                       collapsible=True, min_w=side_min,
-                      summary="设备/信号/GNSS/接收参数实时读数；无数据显「--」"),
+                      summary="设备/信号/GNSS/接收参数实时读数；无数据显「—」"),
             PanelSpec("ai",          "AI 助手",    "✦", AREA_RIGHT,
                       collapsible=True, min_w=side_min,
                       summary="用自然语言描述需求，AI 调用工具完成调谐/解码/录制等操作"),
