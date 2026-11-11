@@ -328,7 +328,7 @@ settings 引用），所以：
 - 影响：用户无法确认当前 span（例如 48 kHz 还是 2.4 MHz），只能读刻度。
 - 成本：S（滑杆 tooltip 或悬停读数带"跨度"前缀与单位，遵守既有"裸数字禁止"规则）。
 
-### G15（P2，S）悬浮读数只有频率 + 电平
+### G15（P2，S）悬浮读数只有频率 + 电平（已修复，见 §7.6）
 
 - 位置：`desktop/spectrum_widget.py:2116-2134`。
 - 现象：悬停只显示 `MHz + dBFS`；SNR/相对本底只在峰值 tooltip 出现（`:2110-2113`）。
@@ -376,7 +376,7 @@ settings 引用），所以：
 | 12 | P2 | 断连时显示参数全置灰（**已修复，见 §7.5**：只置灰 DSP 项，纯显示项始终可用 + 空态第三行说明「接入后生效」） | `spectrum_widget.py:2881-2887` | 无法预先配置显示 | S |
 | 13 | P2 | QMenu 无滚动，高 DPI 裁切风险（推断） | `spectrum_widget.py:2700-2705` | 小屏/高缩放菜单出界 | S |
 | 14 | P2 | 跨度滑杆无数字读数 | `spectrum_widget.py:2741-2753` | 无法确认当前跨度 | S |
-| 15 | P2 | 悬浮读数缺 SNR/噪声底 | `spectrum_widget.py:2116-2134` | 读数入口缺失 | S |
+| 15 | P2 | 悬浮读数缺 SNR/噪声底（**已修复，见 §7.6**：悬停第二行 `SNR（相对本帧中位）`，与峰值提示数值相等；顺带修 `freq_to_bin` 取整） | `spectrum_widget.py:2208-2244` | 读数入口缺失 | S |
 | 16 | P2 | `prefer_opengl` 无效、`_spectrum_height` 旧 55% 口径 | `spectrum_widget.py:2425/4223-4233/3239-3242` | 文档与实现不符、复用陷阱 | S |
 | 17 | P2 | 上述缺口无回归测试 | `tests/` | 问题可无声复发 | S |
 | 18 | P2 | 档位常量双份维护（面板元组 vs schema） | `spectrum_widget.py:225-230`、`config_schema.py:266-294` | 改档漏改即 UI/配置错位 | S |
@@ -582,5 +582,45 @@ Max·Min 保持 / 书签 / 频段 / 自动量程 / 峰值门一项都配不了�
   _apply_render_bins → generator.reconfigure` 会按设计清空 max/min 包络，
   原用例先喂数据再首次 `resize/grab`，包络被重建清掉（HEAD 已如此，与本次改动
   无关）。改为先定画布尺寸再喂数据，断言一条未减。
+
+### 7.6 悬停读数补 SNR，与峰值提示数值相等（G15，2026-11-12 用户裁定）
+
+**口径**：悬停读数拆成两行——首行 `MHz + dBFS`（不变），第二行
+`SNR（相对本帧中位）xx.x dB`。
+
+**硬要求（用户原话）**：「同一帧里峰值 tooltip 与悬停读数必须给出同一个 SNR
+数值（不是措辞一致，是数值相等）。两处若各自算各自的中位/噪声底，会「各自
+正确」地显示不同数，那比现在只有频率更糟。」
+
+**实现**：
+
+- 新增纯函数 `_fmt_hover_text(freq_hz, val_db, noise_floor_db) -> (首行, 次行)`：
+  底噪**只作为入参**，函数内不取中位；`val_db` 或 `noise_floor_db` 为 `None`
+  时次行返回空串（无数据/带外不编 SNR）。
+- `_draw_hover_readout` 调 `gen.noise_floor_db()` 后传入——与
+  `find_peaks_with_snr` 内部 `floor = self.noise_floor_db()` 是**同一个出口**，
+  峰值侧 `snr = t["db"] − floor` 与悬停侧 `val − floor` 因此同源同值。
+- 第二行只在非空时画在首行下方（`rect.y()+28`）。
+
+**反证**（`tests/test_spectrum_hover_snr.py`，9 条）：
+
+1. **已知 IQ 逐项比对**：复正弦 + 固定种子噪声走真实 `push_iq` 链路 4 帧，
+   峰成熟后对每个峰把「峰值提示文本」与「同频率悬停两行」一起解析，断言
+   SNR **严格相等**（`==`，非 approx）、dBFS 相等、频率在 1e-4 MHz 内一致。
+2. **同源守卫**：`snr_db == db − noise_floor_db()`，悬停侧用同一个
+   `floor` 算出的 SNR 格式化值与峰值侧逐位相同。
+3. **变异反证 ×2**：先确认原实现是绿的，再分别让悬停侧 / 峰值侧的基准偏移
+   3 dB（monkeypatch `_fmt_hover_text` / `_fmt_peak_text`），比对助手必须抛
+   `AssertionError`——证明这条比对能咬住「两处各算各的」。
+4. 无数据 / 视口整体平移出采集带宽 → 悬停只有一行（`--`），无 SNR 段。
+5. 绘制层：`_draw_hover_readout` 真的落下两行，第二行在首行下方且含
+   `SNR（相对本帧中位）`；`grab()` 冒烟不抛。
+
+**顺带修的真缺陷（反证 1 直接咬出来的）**：`freq_to_bin` 原用 `round`，而
+`bin_to_freq` 返回的是 bin 中点 `(i+0.5)`——每根 bin 的上半段都被判到下一根
+（中点恰为 i+0.5，银行家舍入还会在奇偶间跳）。实测：峰值提示 `-12.4 dBFS`，
+在同一频率上悬停读 `-58.7 dBFS`。改为 `floor` 后 `freq_to_bin(bin_to_freq(i))
+== i` 对所有 i 成立；`freq_to_bin` 全仓仅 `value_at_freq` 一处调用，无其它
+消费者受影响。回归：频谱相关 6 个文件 70 passed，bandplan/crosshair 49 passed。
 
 

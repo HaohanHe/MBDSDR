@@ -682,8 +682,17 @@ class SpectrumDataGenerator:
                 + self.sample_rate_hz * (idx + 0.5) / self.num_bins)
 
     def freq_to_bin(self, freq_hz: float) -> int:
+        """频率 → bin 索引，与 :meth:`bin_to_freq` 互逆。
+
+        bin i 覆盖 ``[f0 + i·sr/N, f0 + (i+1)·sr/N)``，而 bin_to_freq 给的是
+        该区间中点 ``(i+0.5)``。因此取整必须用 floor 而非 round：round 会把
+        每根 bin 的上半段整段判到下一根（中点恰好 i+0.5，银行家舍入还会在
+        奇偶之间跳）。2026-11-12 G15 反证实测：峰值提示 -12.4 dBFS，而悬停
+        在同一频率上读到 -58.7 dBFS——就是踩到了邻 bin。
+        """
         f0 = self.center_freq_hz - self.sample_rate_hz / 2.0
-        idx = int(round((freq_hz - f0) / self.sample_rate_hz * self.num_bins))
+        idx = int(math.floor(
+            (freq_hz - f0) / self.sample_rate_hz * self.num_bins))
         return max(0, min(self.num_bins - 1, idx))
 
     def value_at_freq(self, freq_hz: float) -> Optional[float]:
@@ -2205,6 +2214,22 @@ def _fmt_peak_text(freq_hz: float, power_db: float, snr_db: float,
             f"SNR（{_REL_BASE}）{snr_db:.1f} dB）")
 
 
+def _fmt_hover_text(freq_hz: float, val_db: Optional[float],
+                    noise_floor_db: Optional[float]) -> Tuple[str, str]:
+    """悬停读数唯一出口：首行频率 + 绝对电平，次行 SNR。
+
+    SNR 的噪声底**必须由调用方传入** ``SpectrumDataGenerator.noise_floor_db()``
+    的返回值，本函数不自己取中位：悬停与峰值提示各自再算一次中位，就会出现
+    「两个都正确但数值不同」的读数，比只显示频率更糟（2026-11-12 裁定）。
+    无电平 / 无底噪 → 次行返回空串（不编造 SNR）。
+    """
+    first = (f"{freq_hz / 1e6:.4f} MHz   "
+             + (_fmt_abs_db(val_db) if val_db is not None else "--"))
+    if val_db is None or noise_floor_db is None:
+        return first, ""
+    return first, f"SNR（{_REL_BASE}）{val_db - noise_floor_db:.1f} dB"
+
+
 def _draw_hover_readout(painter, state, rect, text_color, line_color):
     if state.mouse_x_ratio is None or not state.mouse_in_spectrum:
         return
@@ -2221,9 +2246,11 @@ def _draw_hover_readout(painter, state, rect, text_color, line_color):
     f = QFont()
     f.setPointSize(9)
     painter.setFont(f)
-    db_txt = _fmt_abs_db(val) if val is not None else "--"
-    painter.drawText(QPointF(rect.x() + 6, rect.y() + 14),
-                     f"{freq_hz/1e6:.4f} MHz   {db_txt}")
+    # 底噪只取 gen 的这一个出口：与 _peak_annotations 里的 SNR 同源同值。
+    first, second = _fmt_hover_text(freq_hz, val, gen.noise_floor_db())
+    painter.drawText(QPointF(rect.x() + 6, rect.y() + 14), first)
+    if second:
+        painter.drawText(QPointF(rect.x() + 6, rect.y() + 28), second)
 
 
 def _draw_fixed_markers(painter, state, rect, color):
