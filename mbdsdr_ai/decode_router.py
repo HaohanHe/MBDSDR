@@ -577,12 +577,38 @@ def _route_acars(ctx: _Ctx) -> Dict[str, Any]:
             msgs, stats = dec.decode_audio_with_stats(audio)
             result["messages"] = [m.to_dict() for m in msgs]
             result["num_messages"] = len(msgs)
-            result["preamble_hits"] = int(stats.get("preamble_hits", 0))
-            result["crc_ok_count"] = sum(1 for m in msgs if m.crc_ok)
+            preamble_hits = int(stats.get("preamble_hits", 0))
+            crc_ok_count = sum(1 for m in msgs if m.crc_ok)
+            result["preamble_hits"] = preamble_hits
+            result["crc_ok_count"] = crc_ok_count
             result["note"] = (
                 f"内置 MSK 解调+帧同步+解析（1200 baud），解出 {len(msgs)} 条 ACARS 消息"
-                f"（CRC 通过 {sum(1 for m in msgs if m.crc_ok)} 条）。"
+                f"（CRC 通过 {crc_ok_count} 条）。"
             )
+            # 「0 条可信帧」不许当成功：噪声下帧同步会误锁出候选帧，全部
+            # CRC 不过还照样展示，等于把乱码当真实报文。判据只用解码证据，
+            # 不新造状态码：无前导 → signal_present_no_frame，有前导但
+            # 全 CRC 失败 → crc_failed。
+            if msgs and crc_ok_count == 0:
+                result["unverified_candidates"] = len(msgs)
+                result["messages"] = []
+                result["num_messages"] = 0
+                result["ok"] = False
+                result["found"] = False
+                result["status"] = "error"
+                if preamble_hits == 0:
+                    result["error_code"] = ERR_SIGNAL_PRESENT_NO_FRAME
+                    result["error"] = user_message(
+                        "signal_present_no_frame", mode="ACARS")
+                else:
+                    result["error_code"] = "crc_failed"
+                    result["error"] = user_message(
+                        "crc_failed", mode="ACARS",
+                        detail=f"{len(msgs)} 条候选帧 CRC 全部未通过")
+                result["note"] = (
+                    f"帧同步误锁出 {len(msgs)} 条候选帧，CRC 通过 0 条；"
+                    f"按「0 条可信帧」降级，不展示候选帧。"
+                )
         except Exception as e:
             result["error"] = f"ACARS 解码失败: {e}"
     return result

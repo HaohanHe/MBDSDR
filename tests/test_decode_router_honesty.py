@@ -541,6 +541,29 @@ class TestOutcomeClassification:
         assert out["preamble_hits"] >= 1
         assert out["num_messages"] == 1
 
+    @pytest.mark.parametrize("seed", [20261111, 1, 2, 3, 4])
+    def test_pure_noise_is_not_decoded(self, tmp_path, seed):
+        """纯噪声：帧同步会误锁出「乱码帧」，但 crc_ok=0 且 preamble_hits=0。
+
+        这不是「0 帧当成功」，是「0 条可信帧当成功」——面板会把乱码当真
+        报文展示，比 0 帧更坏。判据：没有一条 CRC 通过就不许叫 decoded，
+        也不许把候选帧当报文返回。
+        """
+        fs = 48000
+        rng = np.random.default_rng(seed)
+        wav = _write_wav(tmp_path / f"noise-{seed}.wav",
+                         rng.uniform(-0.2, 0.2, fs), sr=fs)
+
+        out = dr.run_digital_mode(wav, "acars", sample_rate=fs)
+
+        assert out["status"] != dr.STATUS_DECODED
+        assert out["ok"] is False
+        assert out["crc_ok_count"] == 0
+        assert out["num_messages"] == 0
+        assert not out.get("messages")
+        assert out["error_code"] in (dr.ERR_SIGNAL_PRESENT_NO_FRAME,
+                                     "crc_failed")
+
     def test_signal_present_no_frame_is_registered_and_declared(self):
         """该码此前只在路由里裸用：必须进 error_catalog，并在能力表声明。"""
         from mbdsdr_ai.error_catalog import ERRORS, user_message
