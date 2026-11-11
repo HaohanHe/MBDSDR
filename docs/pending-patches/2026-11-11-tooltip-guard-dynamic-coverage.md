@@ -206,3 +206,83 @@ tooltip 三条规矩里，只有一条能被机械校验，而它真正怕的是
 
 复跑：`python -m pytest tests/test_tooltip_dynamic_runtime.py tests/test_tooltip_guard.py -q`
 → **16 passed**。
+
+## 7. 运行时覆盖率（2026-11-11 23:4x 实测）
+
+口径：`desktop/*.py` 下所有 `setToolTip` 调用点（AST 计 227 个），逐个用
+「拦截 `setToolTip` + 记调用栈行号」的 9 个运行时用例跑一遍，看是否真的渲染。
+
+| 维度 | 覆盖 / 总数 | 比例 |
+| --- | --- | --- |
+| 全部调用点 | 168 / 227 | 74.0% |
+| 动态调用点（f-string/变量/拼接等 76 条） | 52 / 76 | 68.4% |
+| 纯透传登记项（38 条） | 38 / 38 | 100% |
+
+未渲染 **59 条**，分两类：
+
+- **35 条字面量**：静态守卫（长度 ≥12、不得与控件可见文字逐字相同）已覆盖；
+  其中 16 条在 `main_window` 的菜单栏/对话框构造里，测试不建整窗故不触发。
+- **24 条动态**：静态 `scan_dynamic_tooltips()` 的诚实性规则已覆盖，但**运行时
+  兜底看不到**——这就是本次要量的盲区。
+
+### 7.1 24 条动态未覆盖点（按触发条件）
+
+| 触发条件 | 位置 |
+| --- | --- |
+| 设备连接 / 能力回读 | `control_panel` `set_gain_range`:1466,1470、`set_gain_applied`:1592,1595、`set_ppm_applied`:1626、`set_offset_tuning_applied`:1649、`set_vfo_bandwidth`:1858；`module_panel.set_gain_range`:624；`satellite_image_panel._on_sr_changed`:194 |
+| 请求越界被钳位 | `control_panel.set_frequency_hz`:1504、`set_gain`:1561 |
+| 有收藏项 | `control_panel._refresh_bookmarks`:1208 |
+| 鼠标悬停 | `constellation_panel.mouseMoveEvent`:203 |
+| 设备异步枚举 | `device_panel.refresh_devices_async`:316 |
+| 过境预报出结果 | `new_spacetime_panel._populate_passes`:955 |
+| 错误码出现 | `error_remedy.set_code`:213 |
+| AI 面板刷新 | `capability_drawer.refresh`:177、`ai_panel._refresh_live_bar`:1160 |
+| 增益分档完成/失败 | `gain_panel._mark_stage_failed`:176、`_mark_stage_applied`:195 |
+| 主窗口状态同步 | `_refresh_tx_button_state`:5149、`_sync_fullscreen_btn`:10172、`_sync_tracking_ui`:12426、`_update_doppler_chip`:12723,12733 |
+| 停靠折叠条 | `dock_layout_manager.build_collapse_strip`:132 |
+
+按面板：`control_panel` 10、`main_window` 5、`gain_panel` 2、
+`capability_drawer` / `constellation_panel` / `dock_layout_manager` /
+`error_remedy` / `module_panel` / `new_spacetime_panel` /
+`satellite_image_panel` 各 1。
+
+### 7.2 9 个用例根本没构造的面板
+
+`location_panel`(7 条)、`ntrip_panel`(3)、`time_machine`(2)、`ai_panel`(1)、
+`capability_drawer`(1)、`error_remedy`(1)、`dock_layout_manager`(1)。
+除 `location_panel` / `ntrip_panel` / `time_machine` 全是字面量外，其余 4 条
+与 7.1 重合。
+
+### 7.3 判断
+
+- 纯透传（整段文案来自变量）这一层是满覆盖的，38/38；
+- 诚实性运行时兜底的盲区是 **24 个动态点**，占动态点的 31.6%，**但它们不是
+  无守卫**：静态扫描对 76 个动态点全覆盖，只是看不到「运行时才拼出来的整句」；
+- 补齐顺序建议：先补 `control_panel` 的设备回读分支（`set_gain_applied` /
+  `set_ppm_applied` / `set_offset_tuning_applied` / `set_vfo_bandwidth`，共 7 个点，
+  都能用假能力值触发），再补 `main_window` 的 `_update_doppler_chip` 与
+  `_sync_tracking_ui`（有真实信号流即可）。
+
+## 8. 运行时豁免冻结（2026-11-11）
+
+那 6 条「带量值/设备口径词、实为动作或状态说明」的文案，此前只是实现时
+绕开，没有落纸。现冻结为 `docs/tooltip-runtime-exemptions.json`（字段：
+`file` / `widget` / `match` / `why`），并由两条守卫看住：
+
+1. **条数守卫**：`test_runtime_exemptions_are_frozen` 断言恰好 6 条，
+   第 7 条出现即红，提示「新增豁免需评审」；
+2. **数值守卫**：运行时渲染文本若含数字、既无量纲也无来源标注，且不在
+   豁免表，直接红（快捷键名「已自定义：…」与文件路径按结构排除）。
+
+| # | 控件 | 原文（节选） | 判为动作/状态说明的理由 |
+| --- | --- | --- | --- |
+| 1 | `control_panel` Offset 调谐复选框 | Offset Tuning：把本振偏移半个信道，避开零中频的 DC 尖峰… | 讲开关做什么，不含设备读数 |
+| 2 | `constellation_panel` GNSS 状态行 | 可见 N 颗（GPS N）· 参与定位 N 颗 · 柱高=信噪比… | 星空状态与图例，颗数是本帧解算结果 |
+| 3 | `settings_panel` 翻译器/日志级别 | 重启后生效：… | 生效条件说明，整句无量值 |
+| 4 | `rf_sky_view` 云台跟随按钮 | 云台跟随：…（无可用云台后端：…） | 能力缺失说明 + 下一步，不含量值 |
+| 5 | `main_window` 星象仪图层「轨道线」 | 轨道线：卫星未来 10 分钟轨迹 | 10 分钟是显示窗口参数，非设备读数 |
+| 6 | `spectrum_widget` 显示跨度滑杆 | 显示跨度：右推收窄…左端回到全带宽。 | 交互说明，且已声明只改显示不改采样率 |
+
+反证：把豁免表复制出第 7 条 → 条数守卫红；把
+`_show_no_rtl_hint` 的文案改成「SDR 未连接，10 分钟后重试」→ 数值守卫红；
+改回后均绿。复跑 **17 passed**。
