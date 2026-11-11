@@ -125,14 +125,18 @@ class TestThreeColumnSplitter:
         # addWidget 的三个直接子 widget
         sp = main_window._main_splitter
         assert sp.widget(0) is main_window.left_tab
-        assert sp.widget(2) is main_window.right_tab
+        assert sp.widget(2) is main_window.right_tab.parent()
 
     def test_left_tab_has_sky_tabs(self, main_window):
         texts = [main_window.left_tab.tabText(i)
                  for i in range(main_window.left_tab.count())]
-        # 定轨去功能化（iron rule）：左栏只有这三个页签。
-        for expected in ("星象仪模式", "卫星跟踪", "频谱"):
+        # 定轨去功能化（iron rule）：左栏只留工作面两个页签。
+        # 卫星跟踪 2026-11-10 用户要求移到右栏（「卫星追踪，你应该往右边放」），
+        # 不再占左栏页签位置。
+        for expected in ("星象仪模式", "频谱"):
             assert expected in texts, f"左栏缺页签 {expected}: {texts}"
+        assert "卫星跟踪" not in texts, (
+            f"卫星跟踪应挂右栏（2026-11-10 用户裁决），不该在左栏: {texts}")
         # 守卫：任何页签文本都不得含"定轨"——定轨只能由用户开口触发，
         # 绝不在 UI 上作为功能位/页签出现（用户明确要求，最高优先级）。
         assert not any("定轨" in t for t in texts), \
@@ -141,17 +145,30 @@ class TestThreeColumnSplitter:
     def test_right_tab_has_core_apps(self, main_window):
         texts = [main_window.right_tab.tabText(i)
                  for i in range(main_window.right_tab.count())]
-        for expected in ("控制", "状态", "AI 助手", "扫频", "调制识别",
-                          "设备", "增益"):
+        for expected in ("控制", "状态", "AI 智能体", "卫星跟踪", "扫频",
+                          "调制识别", "设备", "增益"):
             assert expected in texts, f"右栏缺页签 {expected}: {texts}"
 
-    def test_right_panels_wrapped_in_scrollarea(self, main_window):
-        """右栏每个页签内容都是无框 QScrollArea（纵向可滚）。"""
+    def test_right_panels_stack_in_one_scroll_column(self, main_window):
+        """右栏是一根可滚动长列（SDR++ 侧栏形态），不是"一页签一滚动区"。
+
+        2026-11-10 用户裁决：侧栏要能一路滚下去，而不是一次只活一个页签。
+        因此只有一个 QScrollArea（RightColumn 本身），每个面板直接作为
+        可折叠的一节，不再各自套一层滚动区。
+        """
         from PySide6.QtCore import Qt
-        for i in range(main_window.right_tab.count()):
-            w = main_window.right_tab.widget(i)
-            assert isinstance(w, QScrollArea), f"页签 {i} 内容应为 QScrollArea"
-            assert w.horizontalScrollBarPolicy() == Qt.ScrollBarAlwaysOff
+        from PySide6.QtWidgets import QScrollArea
+        col = main_window.right_tab
+        assert isinstance(col, QScrollArea), "右栏本体应是唯一滚动区"
+        assert col.horizontalScrollBarPolicy() == Qt.ScrollBarAsNeeded
+        assert col.verticalScrollBarPolicy() == Qt.ScrollBarAsNeeded
+        for i in range(col.count()):
+            w = col.widget(i)
+            assert w is not None and not isinstance(w, QScrollArea), \
+                f"第 {i} 节不应再套一层 QScrollArea"
+            assert col.isAncestorOf(w), f"第 {i} 节不在长列里"
+        # 后面的节默认折叠，避免 19 个面板的轮询同时跑
+        assert col.count() > 2
 
     def test_splitter_sizes_resizable(self, main_window):
         """QSplitter 可 setSizes（用户拖宽生效；受最小宽约束，不要求精确像素）。"""

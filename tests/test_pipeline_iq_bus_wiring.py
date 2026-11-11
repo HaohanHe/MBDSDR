@@ -25,8 +25,7 @@ def w_stubbed(window, monkeypatch):
     """只保留帧入口的分发逻辑，把无关的 UI/状态刷新桩掉。"""
     w = window
     for name in ("_update_rssi_from_iq", "_refresh_vfo_panel",
-                 "_update_status_bar", "_tap_new_spacetime_iq",
-                 "_ensure_repaint_timer"):
+                 "_update_status_bar", "_tap_new_spacetime_iq"):
         monkeypatch.setattr(w, name, lambda *a, **k: None, raising=False)
     monkeypatch.setattr(w.spectrum, "_refresh_status_labels",
                         lambda *a, **k: None, raising=False)

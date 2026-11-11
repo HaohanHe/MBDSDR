@@ -28,6 +28,7 @@ sessionfinish 钩子被硬退出抢跑会把汇总与失败详情整批吞掉（
 import ctypes
 import gc
 import hashlib
+import json
 import os
 import sys
 import time
@@ -330,7 +331,8 @@ def pytest_runtest_teardown(item, nextitem):
 # HOME/USERPROFILE/APPDATA/LOCALAPPDATA 重定向到 tmp_path，见
 # docs/COORDINATION.md「测试纪律」。
 # ---------------------------------------------------------------------------
-_REAL_CONFIG_GUARD = {"path": None, "dir": None, "before": None,
+_REAL_CONFIG_GUARD = {"path": None, "dir": None, "before": None, "bm_path": None, "bm_before": None,
+                      "gui_path": None, "gui_before": None,
                       "before_listing": None, "error": None}
 
 
@@ -359,6 +361,26 @@ def _dir_names(path):
         return []
 
 
+def _gui_observer(path):
+    """只取 gui_config 里的观测站三项，窗口几何变化不算污染。
+
+    窗口几何被测试改动无伤大雅（下个用例/用户自己会重排）；真正危险的是
+    站址被写成测试值——用户下次启动会看到一片不属于自己的天，且界面不
+    会有任何"这是假位置"的标注。守卫只钉这一点，才不会被几何噪声淹没。
+    """
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except FileNotFoundError:
+        return None
+    except (OSError, ValueError):
+        return "unreadable"
+    if not isinstance(data, dict):
+        return "unreadable"
+    return (data.get("observer_lat"), data.get("observer_lon"),
+            data.get("observer_place"))
+
+
 def _snapshot_real_config():
     try:
         from settings import default_config_path
@@ -373,6 +395,20 @@ def _snapshot_real_config():
     _REAL_CONFIG_GUARD["dir"] = os.path.dirname(path)
     _REAL_CONFIG_GUARD["before"] = _file_state(path)
     _REAL_CONFIG_GUARD["before_listing"] = _dir_names(os.path.dirname(path))
+    # 书签库（~/.mbdsdr/bookmarks.json）同样属于用户真实配置：
+    # 2026-11-10 实测被测试写进 159 条垃圾（0 Hz、/etc/passwd、1MB AAAAA、
+    # Temp 探针路径），桌面端启动时把 0 Hz 当「上次频率」回填，连报三条
+    # 硬件 WARNING，收藏面板也随之变成乱码。只盯 desktop_settings.json 不够。
+    bm = os.path.join(os.path.expanduser("~"), ".mbdsdr", "bookmarks.json")
+    _REAL_CONFIG_GUARD["bm_path"] = bm
+    _REAL_CONFIG_GUARD["bm_before"] = _file_state(bm)
+    # gui_config.json 存着用户的观测站坐标与窗口几何。2026-11-11 实测：某次
+    # 用例/探针把 observer_lat/lon 写成 0,0，用户下次启动就被当成"站在
+    # 几内亚湾"——真实设备不在位时，这是最难自查的假数据。只钉观测站三项
+    # （见 _gui_observer），窗口几何重排不误报。
+    gui = os.path.join(os.path.expanduser("~"), ".mbdsdr", "gui_config.json")
+    _REAL_CONFIG_GUARD["gui_path"] = gui
+    _REAL_CONFIG_GUARD["gui_observer_before"] = _gui_observer(gui)
 
 
 def pytest_configure(config):
@@ -406,6 +442,22 @@ def _real_config_guard_fixture():
     if added or removed:
         problems.append(
             f"  {_REAL_CONFIG_GUARD['dir']}: 新增={added} 消失={removed}")
+    bm_path = _REAL_CONFIG_GUARD.get("bm_path")
+    if bm_path:
+        bal = _file_state(bm_path)
+        if bal != _REAL_CONFIG_GUARD["bm_before"]:
+            problems.append(
+                f"  {bm_path}: 大小 {_REAL_CONFIG_GUARD['bm_before']['size']} -> "
+                f"{bal['size']}；sha256 变化={bal['sha256'] != _REAL_CONFIG_GUARD['bm_before']['sha256']}（"
+                "书签库被测试污染；用例须请求 isolated_profile）")
+    gui_path = _REAL_CONFIG_GUARD.get("gui_path")
+    if gui_path:
+        gbefore = _REAL_CONFIG_GUARD.get("gui_observer_before")
+        gafter = _gui_observer(gui_path)
+        if gafter != gbefore:
+            problems.append(
+                f"  {gui_path}: 观测站 {gbefore!r} -> {gafter!r}"
+                "（测试不得改写真实站址；用例须请求 isolated_profile）")
     assert not problems, (
         "[mbdsdr-guard] 测试会话改动了用户真实配置，必须把 "
         "HOME/USERPROFILE/APPDATA/LOCALAPPDATA 重定向到 tmp_path：\n"

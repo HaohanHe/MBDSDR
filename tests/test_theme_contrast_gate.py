@@ -120,9 +120,24 @@ def test_control_coverage_is_applied_by_every_theme():
 
 
 def test_no_theme_leaves_toolbutton_unstyled():
-    """直接检查真实生成的样式表：任何一个主题都不许漏掉 QToolButton。"""
-    import inspect
+    """行为断言：真的把每个主题 apply 到 QApplication，检查最终生效的样式表。
 
-    src = inspect.getsource(type(THEMES["default"]).apply)
-    assert "_control_coverage_qss" in src, (
-        "Theme.apply 又回到只设 _build_qss()，原生控件会退回系统皮肤")
+    不再 pin `Theme.apply` 的源码文本（那是源码 pin，改个变量名就误报）。
+    直接看运行结果：apply 后 app.styleSheet() 必须含 QToolButton，否则原生
+    控件退回系统皮肤。跑完把 palette/font/stylesheet 复位，不污染后续用例。
+    """
+    from PySide6.QtWidgets import QApplication
+
+    app = QApplication.instance() or QApplication([])
+    saved_qss = app.styleSheet()
+    saved_palette = app.palette()
+    saved_font = app.font()
+    try:
+        for name, theme in THEMES.items():
+            theme.apply(app)
+            assert "QToolButton" in app.styleSheet(), (
+                f"{name} apply 后样式表不含 QToolButton，原生控件会退回系统皮肤")
+    finally:
+        app.setStyleSheet(saved_qss)
+        app.setPalette(saved_palette)
+        app.setFont(saved_font)

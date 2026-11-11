@@ -69,7 +69,8 @@ ADSB_UNREACHABLE_TEXT = (
     "当前设备上限 {max_mhz:.1f} MHz，无法接收 1090 MHz；"
     "需覆盖 1090 MHz 的前端（如 R820T/R828D）"
 )
-NO_STATION_TEXT = "未设置地面站位置（请在 ~/.mbdsdr/config.json 设置 ground_station_lat/lon）"
+NO_STATION_TEXT = ("未设置地面站位置\n"
+                   "请在 ~/.mbdsdr/config.json 设置 ground_station_lat / lon")
 
 # 飞机超时 30 秒未更新即移除。
 AIRCRAFT_TTL_SEC = 30.0
@@ -147,6 +148,20 @@ class _AdsbMapCanvas(QWidget):
         y = h / 2.0 - dy_km * scale  # 北 = -y
         return x, y, rng
 
+    def _draw_empty_text(self, p: QPainter, text: str) -> None:
+        """在画布中央画空态文案（自动换行）。
+
+        必须换行：长句在 320~560px 宽的画布上会被左右同时切掉——2026-11-11
+        实拍「未设置地面站位置（请在 ~/.mbdsdr/config.json 设置
+        ground_station_lat/lon）」，两端各缺一截，一个字都读不全。
+        """
+        p.setPen(QPen(_TEXT))
+        f = QFont()
+        f.setPointSize(12)
+        p.setFont(f)
+        p.drawText(self.rect().adjusted(14, 14, -14, -14),
+                   int(Qt.AlignCenter | Qt.TextWordWrap), text)
+
     def paintEvent(self, event) -> None:  # noqa: N802
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing, True)
@@ -156,22 +171,14 @@ class _AdsbMapCanvas(QWidget):
         # 径向距离圈（25/50/75% 半径）
         slat, slon = self._station
         if slat is None:
-            p.setPen(QPen(_TEXT))
-            f = QFont()
-            f.setPointSize(12)
-            p.setFont(f)
-            p.drawText(QRectF(self.rect()), Qt.AlignCenter, NO_STATION_TEXT)
+            self._draw_empty_text(p, NO_STATION_TEXT)
             p.end()
             return
 
         acs = [a for a in self._tracker.all()
                if a.lat is not None and a.lon is not None]
         if not acs:
-            p.setPen(QPen(_TEXT))
-            f = QFont()
-            f.setPointSize(12)
-            p.setFont(f)
-            p.drawText(QRectF(self.rect()), Qt.AlignCenter, ADSB_WAIT_TEXT)
+            self._draw_empty_text(p, ADSB_WAIT_TEXT)
             p.end()
             return
 
@@ -245,7 +252,9 @@ class AdsbPanel(QWidget):
         layout.setSpacing(4)
 
         self.header = QLabel(ADSB_WAIT_TEXT)
-        self.header.setStyleSheet(f"color: {_TEXT.name()}; padding: 2px;")
+        # 不给内联 color（也不给内联样式表）：_TEXT 是给那张浅色「地图纸」用的
+        # 墨色，画在深色面板上就是深灰压深灰；留白用布局边距做，颜色交给主题。
+        self.header.setContentsMargins(4, 2, 4, 2)
         layout.addWidget(self.header)
 
         splitter = QSplitter(Qt.Vertical)

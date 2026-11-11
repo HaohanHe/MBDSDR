@@ -250,6 +250,19 @@ class FloatingPanel(QFrame):
         self._detach_btn.setText("⤡" if self._detached else "⤢")
         self.save_geometry()
 
+    def attach_to_canvas(self) -> None:
+        """强制收回画布内，并把「已弹出」落盘改写掉。
+
+        给「独立窗口态不跨重启恢复」的面板在构造后调用：``_restore_geometry``
+        原样还原 detached 后，顶层窗口没有主窗口当宿主，主窗口最小化时
+        它仍独自留在桌面上——看起来像一块来历不明的黑框。
+        """
+        if not self._detached:
+            return
+        self._set_detached(False)
+        self._detach_btn.setText("⤢")
+        self.save_geometry()
+
     # ---------------------------------------------------------------- 归位
     def request_return(self) -> None:
         self.save_geometry()

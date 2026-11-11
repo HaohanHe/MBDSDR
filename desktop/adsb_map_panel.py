@@ -351,48 +351,22 @@ class AdsbMapPanel(QWidget):
             p.setBrush(Qt.NoBrush)
             return
 
-        # 空态：底图照常显示，只在中间叠一张"现在确实没数据"的牌
-        # QPainter.window() 是这次绘制的逻辑坐标矩形；device() 是物理像素，
-        # 高 DPI 下拿它算中心会把空态牌画到左上角去。
-        vp = p.window()
-        w, h = float(vp.width()), float(vp.height())
-        f = QFont()
-        f.setPointSize(10)
-        p.setFont(f)
-        fm = QFontMetrics(f)
-        box_w = min(w - 24.0,
-                    max(220.0, float(fm.horizontalAdvance(
-                        ADSB_EMPTY_TEXT)) + 40.0))
-        box_h = 34.0
-        bx = (w - box_w) / 2.0
-        # 不要放正中：地图中心就是本站，站址标记（红环+十字）正好在中心，
-        # 牌压上去看起来像"红点戳在字里"（2026-11-10 窄窗截图实证）。
-        # 放到视口 72% 高度处，两块信息互不遮挡。
-        by = max(8.0, min(h - box_h - 8.0, h * 0.72 - box_h / 2.0))
-        bg = QColor(_BG)
-        bg.setAlpha(220)
-        p.setPen(Qt.NoPen)
-        p.setBrush(QBrush(bg))
-        p.drawRoundedRect(QRectF(bx, by, box_w, box_h), 6, 6)
-        p.setPen(QPen(_GRID, 1))
-        p.setBrush(Qt.NoBrush)
-        p.drawRoundedRect(QRectF(bx, by, box_w, box_h), 6, 6)
-        p.setPen(QPen(_TEXT))
-        p.drawText(QRectF(bx, by, box_w, box_h),
-                   int(Qt.AlignCenter), ADSB_EMPTY_TEXT)
-        # 解码器给的真实诊断：单行省略，全文留 tooltip（多行会在矮卡里叠成一团）
+        # 空态：底图照常显示。地图是通用时空底图（今后还要承载星下点、
+        # 测向线、过境轨迹），不再往中央压「无 ADS-B 飞机」的空话牌。
         diag = self._diag_text
         if diag:
+            vp = p.window()
+            w, h = float(vp.width()), float(vp.height())
             f2 = QFont()
             f2.setPointSize(8)
             p.setFont(f2)
             fm2 = QFontMetrics(f2)
             avail = max(40.0, w - 16.0)
             one = fm2.elidedText(diag, Qt.ElideRight, int(avail))
-            ty = min(h - 14.0, by + box_h + 6.0)
+            ty = max(8.0, h - 22.0)
             p.setPen(QPen(_TEXT))
-            p.drawText(QRectF(8.0, ty, avail, 16.0),
-                       int(Qt.AlignHCenter | Qt.AlignVCenter), one)
+            p.drawText(QRectF(8.0, ty, avail, 14.0),
+                       int(Qt.AlignLeft | Qt.AlignVCenter), one)
 
     # ------------------------------------------------------------------ #
     def _refresh_table(self) -> None:

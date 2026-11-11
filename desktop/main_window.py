@@ -50,20 +50,22 @@ GIMBAL_DISPATCH_GRACE_S = 0.05
 GIMBAL_DISPATCH_TIMEOUT_S = 2.5
 
 
-def fill_sample_rate_combo(combo, device) -> None:
+def fill_sample_rate_combo(combo, device, preferred_hz=None) -> None:
     """按设备能力重建采样率下拉（主窗口与模块面板共用同一真值源）。
 
     - 设备报告量程 → 档位 = 后端离散表 ∩ 量程（不编中间档）；
     - 量程未知（含尚未连接）→ 单项显式说明且 data=None，应用侧按
       ``DEFAULT_SAMPLE_RATE_HZ`` 兜底；绝不把假档位摆进下拉。
+    - ``preferred_hz``：默认选中档对齐该速率（桌面性能档默认连接率）；
+      不传则按设备基准 DEFAULT_SAMPLE_RATE_HZ 对齐（模块面板/真值源口径）。
     """
     items = sample_rate_combo_items(device)
     combo.blockSignals(True)
     combo.clear()
     for text, hz in items:
         combo.addItem(text, hz)
-    # 默认档与后端 DEFAULT_SAMPLE_RATE 对齐（U-03：唯一 MS/s 口径）
-    combo.setCurrentIndex(default_sample_rate_combo_index(items))
+    # 默认选中档：传 preferred_hz 时随性能档（省电），否则与设备基准对齐。
+    combo.setCurrentIndex(default_sample_rate_combo_index(items, preferred_hz))
     combo.blockSignals(False)
 
 
@@ -268,6 +270,9 @@ _NO_SDR_HINT = (
 #: 与状态栏「查看怎么办」里。第一次打开没插设备是常态，不该被报错糊脸。
 _NO_SDR_BRIEF = "还没接 SDR · 插上设备点「连接」，或先逛星象仪"
 
+#: 星象仪底部频谱条的未连接提示：全屏窗里没有工具栏，必须先告诉人怎么回去。
+_PLANETARIUM_OFFLINE_HINT = "按 Esc 回主界面，点「连接」选设备"
+
 #: 站址标注：坐标本身不在 UI 层写死，见 _preview_site()。
 _PREVIEW_SITE_NOTE = "中性示例站 45.0°N 120.0°E · 非你的位置"
 
@@ -457,10 +462,11 @@ import numpy as np
 
 from PySide6.QtCore import (
     QEvent, Qt, QTimer, Slot, QDateTime, QTimeZone, QThread, Signal, QSettings,
-    QRect, QPoint,
+    QRect, QPoint, QRectF,
 )
 from PySide6.QtGui import (
     QAction, QActionGroup, QKeySequence, QFont, QShortcut, QGuiApplication,
+    QColor, QPainter,
 )
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QSplitter,
@@ -505,6 +511,7 @@ from rf_sky_view import RFSkyView, SkyObject, AntennaPointing, HeatmapCell, Sate
 from module_panel import ModulePanel
 # CarWith 设计体系：token 单例 / 面板注册表 / Dock 布局管理器
 from tokens import tokens
+from right_column import RightColumn
 from floating_panel import FloatingPanel
 from time_machine import TimeMachineDialog, format_offset
 from station_sync import (
@@ -519,6 +526,14 @@ from constants import (
     format_sample_rate,
     sample_rate_combo_items,
 )
+# 桌面性能档：内核 2.4 MS/s 是设备基准，不是桌面默认工作速率。
+# 用户 2026-11-10「电脑没有那么强大…得让路」。
+try:
+    from perf_profile import profile as _perf_profile
+    from perf_profile import sample_rate_for as _perf_sample_rate
+except ImportError:  # pragma: no cover - 单独打包时兜底
+    _perf_profile = None
+    _perf_sample_rate = None
 # 气象云图面板（懒加载：构造时只建 Qt 控件，后端 ToolRegistry
 # 在用户首次点解码时才创建，避免拖慢启动）。
 from weather_panel import WeatherPanel
@@ -710,6 +725,86 @@ class _SweepWorker(QThread):
             self.finished_ok.emit(result)
 
 
+class _PlanetariumWindow(QWidget):
+    """星相仪独立顶层窗口（真·全屏，可单独拖到第二块屏）。
+
+    用户口径（2026-11-10）：「星相仪要独立全屏，不是软件 windowed 全屏」。
+    星象仪页整体搬进这个窗口，部件对象身份不变；主窗口留在 IDE 形态，
+    两块屏可以一边看天、一边操作 SDR。Esc / 关窗 = 退出形态，不退出软件。
+    """
+
+    def __init__(self, owner):
+        super().__init__(None, Qt.Window)
+        self._owner = owner
+        self.setObjectName("planetariumWindow")
+        self.setWindowTitle("MBDSDR · 星相仪")
+        self.setStyleSheet(
+            "QWidget#planetariumWindow { background-color: #000000; }")
+
+    def keyPressEvent(self, event):  # noqa: N802 - Qt 命名
+        if event.key() == Qt.Key_Escape:
+            self._owner._on_escape()
+            event.accept()
+            return
+        if event.key() == Qt.Key_F11:
+            self._owner._toggle_fullscreen()
+            event.accept()
+            return
+        super().keyPressEvent(event)
+
+    def closeEvent(self, event):  # noqa: N802 - Qt 命名
+        # 关掉天空窗 = 退出星象仪形态（回主窗口），不是退出整个软件
+        self._owner.set_app_mode("ide")
+        super().closeEvent(event)
+
+
+class _NightVeil(QWidget):
+    """夜视红光纱罩：盖在整块画面上，把浮层一起压红。
+
+    为什么不是逐控件改样式/逐控件着色：
+      - 按钮各自带内联样式、图标由主题画，逐个换色既漏又难维护，新加一个
+        浮层就漏一块白；
+      - ``QGraphicsColorizeEffect`` 对带样式表底的控件会把整块底压成饱和红
+        （实测深色面板变成 #EC5955 的亮红板子），白天那层"深色半透明玻璃"
+        的层次全丢了。
+    一层半透明深红纱对任何新控件自动生效，且**乘以原色**的观感是整体压暗
+    转红，不是糊一层红漆。``WA_TransparentForMouseEvents`` 保证点击穿透，
+    按钮照常可点。
+
+    宿主（星象仪页 / 地点面板）resize 时自动铺满；宿主再 ``raise_()`` 一次
+    即可重新压到最上层。
+    """
+
+    #: rgba(60,6,5,165/255≈0.65)：白字压到约 129 的暗红、深底压到 44，
+    #: 对比仍在；蓝/青图标（找星、时间）也被压掉——夜里最毁暗适应的正是
+    #: 蓝光，弱纱罩（alpha≈0.39）会让它们原色漏出来。
+    TINT = (60, 6, 5, 165)
+
+    def __init__(self, host: QWidget, tint=None):
+        super().__init__(host)
+        self.setObjectName("nightVeil")
+        # 允许逐处覆盖：地点面板整块是地图，压到 0.65 就看不清路了，
+        # 那里用弱一档的纱罩（泥红而不是暗红）。
+        self.TINT = tuple(tint) if tint else tuple(type(self).TINT)
+        self.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+        self.setAttribute(Qt.WA_NoSystemBackground, True)
+        self.setAttribute(Qt.WA_TranslucentBackground, True)
+        self._host = host
+        self.setGeometry(host.rect())
+        self.hide()
+        host.installEventFilter(self)
+
+    def eventFilter(self, obj, event):  # noqa: N802 - Qt 命名
+        if obj is self._host and event.type() == QEvent.Resize:
+            self.setGeometry(self._host.rect())
+        return False
+
+    def paintEvent(self, _event):  # noqa: N802 - Qt 命名
+        p = QPainter(self)
+        p.fillRect(self.rect(), QColor(*self.TINT))
+        p.end()
+
+
 class MainWindow(QMainWindow):
     """MBDSDR 主窗口。"""
 
@@ -741,11 +836,17 @@ class MainWindow(QMainWindow):
         if os.path.exists(_icon_path):
             from PySide6.QtGui import QIcon
             self.setWindowIcon(QIcon(_icon_path))
-        # 最小窗口 860×560：旧值 1000×600 是写死的，竖屏/窄屏直接被挡住。
-        # 用户明确要求界面必须"活的"——按实际宽度自适应，而不是假设用户
-        # 一定有一块 1400px 宽的横屏。次要读数在窄窗里隐藏（见
-        # _apply_responsive_chrome），长文案省略但 tooltip 保留全文。
-        self.setMinimumSize(860, 560)
+        # 三栏（左工作面 / 中时空底图 / 右控制台）的真实下限约 1000×680：
+        # 比这更小的窗口只能让每一栏都露一半（2026-11-10「默认布局显示不全」
+        # 就是 860 宽下三栏互相压缩）。屏幕放得下就按 1000×680 兜底，
+        # 屏幕更小时退回屏幕可用区的 94%，绝不超出屏幕。
+        try:
+            _g = QGuiApplication.primaryScreen().availableGeometry()
+            _min_w = min(1000, int(_g.width() * 0.94))
+            _min_h = min(680, int(_g.height() * 0.94))
+        except (AttributeError, RuntimeError):
+            _min_w, _min_h = 860, 560
+        self.setMinimumSize(max(860, _min_w), max(560, _min_h))
         self.resize(1400, 900)
 
         # 状态
@@ -761,6 +862,11 @@ class MainWindow(QMainWindow):
         touch_manager().set_from_settings(
             str(self.settings.get("touch_mode", "auto")))
         touch_manager().touch_mode_changed.connect(self._on_touch_mode_changed)
+        #: 记下"本窗口确实连着触控模式信号"：shutdown() 会关掉它，而 shutdown
+        #: 可能被 close()/aboutToQuit/测试各调一次；对没连过的信号再 disconnect
+        #: 会触发 libpyside 的 "Failed to disconnect" RuntimeWarning（关窗日志里
+        #: 的常客，也说明收尾不幂等）。
+        self._touch_mode_bound = True
         self._worker_manager = MCPWorkerManager()
         self._worker: Optional[object] = None
         # AI 工具环内完成的硬件调用 → 回 UI 线程同步控件
@@ -883,6 +989,10 @@ class MainWindow(QMainWindow):
         self._record_segment_start_time: str = ""
         # 声卡实时输出（sounddevice 可选；无设备时 available=False 安全降级）
         self._audio_player = None
+        # 「插上设备」≠「开始播放」。对照 SDR++ main_window.h:51
+        # ``bool playing = false``：source 连上后必须用户显式点 PLAY 才
+        # 启动解调与声卡。默认 False，用户点工具栏「▶ 收听」才置 True。
+        self._listening = False
         if AudioPlayer is not None:
             try:
                 self._audio_player = AudioPlayer(sample_rate=48000, channels=1, gain=0.5)
@@ -1021,7 +1131,7 @@ class MainWindow(QMainWindow):
         # 硬件、往已关窗口的状态栏写提示）。挂成子对象后由
         # _release_runtime_resources 统一停掉。
         self._startup_timers: list = []
-        for _ms, _fn in ((100, self._load_gui_config),
+        for _ms, _fn in ((100, self._load_gui_config_and_fit),
                          (200, self._auto_enumerate_and_connect_async),
                          (400, self._auto_connect_gnss_async),
                          (1200, self._update_sky_satellites)):
@@ -1048,7 +1158,9 @@ class MainWindow(QMainWindow):
         # 不在启动时自动开串口——用户可能没接 GNSS；等「工具 → 连接 GNSS」手动触发。
         # 定时器照常跑：未连接时 _poll_gnss 把状态显示为“GNSS: 未连接”。
         self._gnss_timer = QTimer(self)
-        self._gnss_timer.setInterval(1000)
+        # 轮询间隔跟性能档走：省电档 2 s，避免 1 s 一次在主线程反复刷
+        # 状态栏/天空图，把 IQ 流水线挤得"原地不动"。
+        self._gnss_timer.setInterval(int(self._perf_gnss_poll_ms()))
         self._gnss_timer.timeout.connect(self._poll_gnss)
         self._gnss_timer.start()
 
@@ -1296,6 +1408,9 @@ class MainWindow(QMainWindow):
         self._bind_shortcut(fullscreen_action, "view.fullscreen")
         fullscreen_action.triggered.connect(self._toggle_fullscreen)
         view_menu.addAction(fullscreen_action)
+        # 星象仪形态会隐藏菜单栏；只挂在菜单里的 QAction 在菜单栏隐藏后
+        # 快捷键可能失效。再把同一个 action 挂到窗口上，F11 任何形态都直达。
+        self.addAction(fullscreen_action)
 
         # B2：外接屏拔掉后窗口可能落在屏幕外，这里给一个应用内复位入口
         reset_pos_action = QAction("重置窗口位置", self)
@@ -1446,20 +1561,21 @@ class MainWindow(QMainWindow):
         self.conn_label.setStyleSheet("font-weight: 600;")
         toolbar.addWidget(self.conn_label)
 
-        toolbar.addSeparator()
-
-        # 连接按钮（未连接时高亮引导用户点击；连接成功后取消高亮）
+        # 连接 / 断开 / 收听是**运行必需动作**，不挂 QToolBar：
+        # 默认「专注页面」会把整条 QToolBar 收起，用户就找不到
+        # 「点上面的那个」了（2026-11-10 截图实证）。这三个按钮统一挂到
+        # 常驻 topBar（固定 56px，不随专注模式隐藏），见 _build_top_bar。
         self.connect_btn = QPushButton(self.tr("连接"))
+        self.connect_btn.setObjectName("connectButton")
         self.connect_btn.setMinimumHeight(28)
         self.connect_btn.setStyleSheet(self._connect_button_qss())
         self.connect_btn.clicked.connect(self._connect_dialog)
-        toolbar.addWidget(self.connect_btn)
 
         self.disconnect_btn = QPushButton(self.tr("断开"))
+        self.disconnect_btn.setObjectName("disconnectButton")
         self.disconnect_btn.setMinimumHeight(28)
         self.disconnect_btn.clicked.connect(self._on_disconnect_clicked)
         self.disconnect_btn.setEnabled(False)
-        toolbar.addWidget(self.disconnect_btn)
 
         toolbar.addSeparator()
 
@@ -1561,6 +1677,27 @@ class MainWindow(QMainWindow):
         self.toolbar_mute_btn.toggled.connect(self._on_toolbar_mute_toggled)
         toolbar.addWidget(self.toolbar_mute_btn)
 
+        # 收听三档状态（2026-11-10 用户要求）：
+        #   收听    —— 解调 + 出声
+        #   停止解调 —— 保持连接，解调线程也停（最省 CPU，只留频谱）
+        #   不收听  —— 静音收听：解调继续（给解码/录制/星座图用），不出声
+        # 用下拉而不是单键开关：三档必须一眼看清，不再靠"点了才知道"。
+        self.listen_combo = QComboBox()
+        self.listen_combo.setObjectName("listenStateCombo")
+        self.listen_combo.setMinimumHeight(28)
+        self.listen_combo.setToolTip(
+            "收听 = 解调 + 出声；停止解调 = 保持连接但解调线程停（省 CPU）；"
+            "不收听 = 解调继续但静音（给解码/录制/星座图用）。\n"
+            "设备插上不会自动播放——连上设备与开始收听是两件事。")
+        for _label, _key in (("▶ 收听", "listen"),
+                             ("⏸ 停止解调", "idle"),
+                             ("🔇 不收听", "muted")):
+            self.listen_combo.addItem(_label, _key)
+        self.listen_combo.setCurrentIndex(1)      # 默认停止解调
+        self._listen_state = "idle"
+        self.listen_combo.currentIndexChanged.connect(
+            self._on_listen_state_changed)
+
         # 拉伸空白（QToolBar 没有 addStretch，用空白 QWidget 替代）
         spacer = QWidget()
         spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
@@ -1598,7 +1735,8 @@ class MainWindow(QMainWindow):
             self.toolbar_mode_combo, self.theme_combo, self.lang_combo,
             self.layout_combo, self.layout_save_btn, self.layout_delete_btn,
             self.new_vfo_btn, self.cycle_vfo_btn, self.toolbar_volume,
-            self.toolbar_mute_btn, self.record_btn, self.replay_btn,
+            self.toolbar_mute_btn, self.listen_combo, self.record_btn,
+            self.replay_btn,
         ]
         self._tab_order = tuple(chain)
         for first, second in zip(chain, chain[1:]):
@@ -1636,10 +1774,21 @@ class MainWindow(QMainWindow):
         # 天空页左下角（那一排 sky 按钮上方）的全天模式开关
         self._build_all_sky_toggle()
 
-        # Tab: 卫星闭环自动跟踪
+        # 星象仪页签内也常驻右侧浮层按钮条（含「⛶ 全屏」）：此前只有顶层
+        # 「星象仪模式」形态才 show，页签里连全屏入口都没有（2026-11-10 实指）。
+        def _sync_sky_strip(_idx: int) -> None:
+            strip = getattr(self, "_planetarium_strip", None)
+            if strip is None or getattr(self, "_app_mode", "ide") != "ide":
+                return
+            # 页签形态只保留右下角那颗 ⛶：竖排浮层条会压住右上角的过境卡片。
+            if left_tab.widget(_idx) is self.sky_view:
+                self._position_planetarium_overlay()
+        left_tab.currentChanged.connect(_sync_sky_strip)
+        QTimer.singleShot(0, lambda: _sync_sky_strip(left_tab.currentIndex()))
+
+        # Tab: 卫星闭环自动跟踪（2026-11-10 用户要求：跟天空/AI 一样挂右栏，
+        # 不再占左栏工作面的页签位置）
         self.sat_track_panel = SatTrackPanel()
-        left_tab.addTab(self.sat_track_panel, "卫星跟踪")
-        left_tab.tabBar().setTabData(left_tab.count() - 1, "sat_track")
         self.sat_track_panel.track_requested.connect(self._start_satellite_tracking)
         self.sat_track_panel.stop_requested.connect(self._stop_satellite_tracking)
         self.sat_track_panel.update_tle_requested.connect(self._on_update_sat_tle)
@@ -1686,8 +1835,15 @@ class MainWindow(QMainWindow):
         # 320x228（基线 320x240，见 test_ui_layout_locks 频谱基线）。
         # 窄窗用**省略号**（Qt.ElideRight）+ tooltip 全文，绝不显示半截字
         # ——见 _apply_responsive_chrome。
-        self._no_device_hint_full: str = self._no_device_hint.text()
+        # 水平策略 Ignored：QLabel 不换行时 minimumSizeHint 就是整句宽
+        # （实测 426px），会把「频谱」页的整页最小宽顶到 426，比左栏实际
+        # 宽度还宽，谱面右边被裁（用户 2026-11-10「显示不全」）。横幅本身
+        # 只吃布局给它的宽，文字已经按宽度省略，不需要参与最小宽计算。
+        self._no_device_hint.setSizePolicy(QSizePolicy.Ignored,
+                                           QSizePolicy.Preferred)
+        self._no_device_hint.setMinimumWidth(0)
         # 完整排查细节：横幅只显示短句，这份留在 tooltip，不删也不糊脸。
+        self._no_device_hint_full: str = self._no_device_hint.text()
         self._no_device_hint_detail: str = ""
         self._no_device_hint.setAlignment(Qt.AlignCenter)
         # 配色必须跟当前主题走：原来取 tokens.COLORS 的 light_hint_bg
@@ -1731,24 +1887,22 @@ class MainWindow(QMainWindow):
         center_lay = QVBoxLayout(center_widget)
         center_lay.setContentsMargins(0, 0, 0, 0)
         self.adsb_map_panel = AdsbMapPanel()
-        center_lay.addWidget(self.adsb_map_panel)
-        self._build_ai_command_bar(center_widget)
+        center_lay.addWidget(self.adsb_map_panel, stretch=1)
+        # 中栏**不再显示** AI 输入栏（2026-11-10 用户明确要求）：IDE 形态的
+        # AI 对话唯一入口是右栏「AI 智能体」面板里的输入框。这条命令栏只在
+        # 星象仪形态 reparent 到天空槽显示；IDE 里创建但不入布局、保持隐藏，
+        # 用来跨形态延续输入内容与对话路由（同一控件、同一 _on_ai_command）。
+        self._ai_cmd_bar = self._build_ai_command_bar(center_widget)
+        self._ai_cmd_bar.hide()
 
         # ------------------------------------------------------------------
-        # 右栏：当前 App 页签（原 QDockWidget 面板全部搬进来）
+        # 右栏：一根可滚动的纵向长列（SDR++ 侧栏形态，见 right_column.py）
         # ------------------------------------------------------------------
-        right_tab = QTabWidget()
-        right_tab.setTabPosition(QTabWidget.North)
-        # 右栏 19 个页签在 400px 里放不下：必须给滚动按钮 + 省略号，
-        # 否则末尾几个页签被窗口边缘硬切掉（2026-11-10 截图实证：
-        # 「新时空」只露出半个字，用户以为坏了）。
-        try:
-            _bar = right_tab.tabBar()
-            _bar.setUsesScrollButtons(True)
-            _bar.setElideMode(Qt.ElideRight)
-            _bar.setExpanding(False)
-        except (AttributeError, RuntimeError):
-            pass
+        # 用户对着 SDR++ 截图裁决：右栏是一根竖列、可以滚动，不是十几个页签
+        # 一次只显示一个。RightColumn 保留 QTabWidget 的最小 API（count /
+        # widget / tabText / setCurrentIndex / tabData），布局持久化与浮动
+        # 面板不用分叉。
+        right_tab = RightColumn()
         right_tab.setMinimumWidth(tokens().SIZE.get("min_dock_w", 320))
         self.right_tab = right_tab
         # 右栏最小宽度必须 >= 里页面的真实最小宽度，否则内容被硬裁
@@ -1822,8 +1976,20 @@ class MainWindow(QMainWindow):
         # 未定位空态的「先看看示例天空」：用户主动点才给标注过的示例站址
         self.sky_view.preview_sky_requested.connect(
             self._on_preview_sky_requested)
+        # 未定位空态的「📍 选地点」：与右上角「地点」同一个面板、同一个
+        # 唯一写入口；全屏形态下不再要求用户先退出星象仪去找设置。
+        self.sky_view.location_requested.connect(self._open_location_panel)
+        # 夜视：天空自身在 paintEvent 里压红光，浮层（按钮条/AI 命令栏/
+        # 回复卡/图层面板）是子控件，父控件画完才轮到它们，必须逐个压红，
+        # 否则夜里点一下按钮就是一块白光糊脸。
+        self.sky_view.night_vision_changed.connect(
+            self._apply_night_vision_to_overlays)
         self._init_ai_agent_from_config()
-        self._add_right_tab("AI 助手", self.ai_panel, "ai_dock")
+        self._add_right_tab("AI 智能体", self.ai_panel, "ai_dock")
+        # 卫星跟踪挂右栏（紧跟 AI 智能体，用户按「看天空 / 问 AI / 追卫星」
+        # 的同一列找得到，不再埋在左栏页签里）
+        if getattr(self, "sat_track_panel", None) is not None:
+            self._add_right_tab("卫星跟踪", self.sat_track_panel, "sat_track")
 
         # 模块 / 信号流（原中央页签 → 右栏 App）
         self.module_panel = ModulePanel()
@@ -1853,22 +2019,60 @@ class MainWindow(QMainWindow):
         # ------------------------------------------------------------------
         # 三栏 QSplitter（handle 4px，可拖宽）
         # ------------------------------------------------------------------
+        # 右栏导航：长列里 19 个分组要滚很久，给一个「跳到分组」菜单：
+        # 选中即展开该节并滚到眼前。它是跳转入口，不是"一次只活一个"的页签；
+        # 不用下拉框是因为它常显当前节名，和下方节标题重复成两行一样的字。
+        self.right_nav = QToolButton()
+        self.right_nav.setObjectName("rightTabNav")
+        self.right_nav.setText("跳到分组 ▾")
+        self.right_nav.setToolButtonStyle(Qt.ToolButtonTextOnly)
+        self.right_nav.setPopupMode(QToolButton.InstantPopup)
+        self.right_nav.setMenu(QMenu(self.right_nav))
+        self.right_nav.setFixedHeight(22)
+        self.right_nav.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+        # 它是"跳到分组"的入口，不是整栏的标题条：右对齐一条 9pt 灰字，
+        # 不要占满宽度（满宽灰条会把 20 个节标题压成"按钮列表"观感）。
+        self.right_nav.setStyleSheet(
+            "QToolButton#rightTabNav { background: transparent; border: none;"
+            " padding: 0 4px; color: #939393; font-size: 9pt; }"
+            "QToolButton#rightTabNav:hover { color: #ffffff; }")
+        right_col = QWidget()
+        right_col.setObjectName("rightColumn")
+        _rc = QVBoxLayout(right_col)
+        _rc.setContentsMargins(0, 2, 6, 0)
+        _rc.setSpacing(2)
+        _rc.addWidget(self.right_nav, 0, Qt.AlignRight)
+        _rc.addWidget(right_tab, 1)
+
         self._main_splitter = QSplitter(Qt.Horizontal)
         self._main_splitter.setHandleWidth(tokens().SIZE["splitter_handle"])
         self._main_splitter.setChildrenCollapsible(False)
         self._main_splitter.addWidget(left_tab)
         self._main_splitter.addWidget(center_widget)
-        self._main_splitter.addWidget(right_tab)
-        # 权重来源（截图三栏均分死黑事故）：弹性给左栏（天空/频谱工作面），
-        # 中栏 ADS-B 空态时不许吞主区——stretch=0 固定基线，最小宽见面板；
-        # 右栏控制台同样固定。窗口变宽时全部增量进左栏。
-        self._main_splitter.setStretchFactor(0, 1)
-        self._main_splitter.setStretchFactor(1, 0)
+        self._main_splitter.addWidget(right_col)
+        # 权重来源（截图三栏均分死黑事故）：增量由左栏与中栏平分——左栏是
+        # 天空/频谱工作面，中栏是时空底图；右栏控制台固定基线。原先增量
+        # 只给左栏，宽屏上把中栏地图压成 240px（2026-11-10 实测）。
+        self._main_splitter.setStretchFactor(0, 2)
+        self._main_splitter.setStretchFactor(1, 1)
         self._main_splitter.setStretchFactor(2, 0)
-        # 初始比例：左 392 / 中 300 / 右 300（= 最小窗口 1000 - 2×4px 手柄，
-        # 恰好放得下不触发压缩缩放；窗口更宽时全部增量由 stretch 进左栏，
-        # 用户拖动后持久化）
-        self._main_splitter.setSizes([392, 300, 300])
+        # 初始比例：左 470 / 中 330 / 右 320（最小窗口 860 以下自动压缩，
+        # 见各栏最小宽）；窗口更宽时增量优先给左栏工作面。
+        # 左栏 ≥ 中栏是硬规则：中栏空态地图不许吃成主区；右栏 320 起
+        # （再窄就出横向滚动条），保证 1000 宽时三栏份额都在 12%~35% 内。
+        self._main_splitter.setSizes([470, 330, 320])
+        # 窗口不允许窄于三栏的真实下限：否则右栏会被窗口右边缘直接裁掉，
+        # 只剩一条边（2026-11-10 用户截图「有的东西没展示全」就是这样）。
+        # 屏幕放得下就按三栏下限兜底；屏幕更小则退回可用区 94%，不超屏。
+        try:
+            _g = QGuiApplication.primaryScreen().availableGeometry()
+            _need = (sum(self._main_splitter.widget(i).minimumSizeHint().width()
+                         for i in range(3))
+                     + self._main_splitter.handleWidth() * 2)
+            self.setMinimumWidth(max(
+                self.minimumWidth(), min(int(_need), int(_g.width() * 0.94))))
+        except (AttributeError, RuntimeError):
+            pass
 
         # ------------------------------------------------------------------
         # root：顶栏 + 三栏 + 底坞
@@ -1893,6 +2097,13 @@ class MainWindow(QMainWindow):
         self.set_free_float_enabled(
             bool(self.settings.get("free_float_panels", True)))
         self._apply_callsign(str(self.settings.get("callsign", "") or ""))
+        # 启动即把频谱渲染档位对齐到持久化性能档（默认 eco）。GNSS 轮询已在
+        # 定时器创建时按档设好，但 FFT/刷新此前只在「手动切档」时才生效，启动
+        # 时停在面板默认高档——省电档名不副实，弱机一开机就重载（用户：电脑
+        # 没那么强大、GNSS 原地不动）。这里静默补上，让默认体验真省电；不弹
+        # 「已切到」提示（不是用户操作），也不改写 fft_size 偏好（沿用工具栏
+        # 性能下拉的既有语义：驱动渲染负载，不重写持久化分辨率偏好）。
+        self._apply_perf_profile(self._perf_key(), announce=False)
         # 常驻能力矩阵（原型 #capDrawer）：Agent 内核的能力位一直看得见，
         # 默认折叠成一条标题，不占频谱/天空的地方。
         self._build_capability_drawer()
@@ -2233,6 +2444,10 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(self._mode_stack)
         self._app_mode = "ide"
         self._sky_restore_info: Optional[dict] = None
+        # 独立天空窗（懒建）：进星象仪时把 _planetarium_page 搬进去真全屏，
+        # 主窗口留在 IDE——见 _PlanetariumWindow 的用户口径。
+        self._planetarium_window: Optional[_PlanetariumWindow] = None
+        self._planetarium_window_layout = None
 
     def _build_planetarium_page(self) -> QWidget:
         """星象仪容器页：天空铺满 + 底部瀑布 + 天空右上角形态浮层。
@@ -2284,6 +2499,18 @@ class MainWindow(QMainWindow):
         strip_lay = QVBoxLayout(strip)
         strip_lay.setContentsMargins(6, 6, 6, 6)
         strip_lay.setSpacing(4)
+        # 链路状态：星象仪是全屏独立窗，主窗口那行「状态: …」根本看不见。
+        # SDR 掉线时星空照转（星历是离线的），人却以为还在收信号——这里
+        # 只读地写一句真话；连接入口仍在主界面，不在这块浮层上造第二个。
+        link_label = QLabel("", strip)
+        link_label.setObjectName("planetariumLink")
+        link_label.setAlignment(Qt.AlignCenter)
+        link_label.setWordWrap(False)
+        link_label.setStyleSheet(
+            "QLabel#planetariumLink { background: transparent; color: "
+            + self._tok('gray_100', '#D9D9D9') + "; font-size: 8.5pt; }")
+        strip_lay.addWidget(link_label, 0, Qt.AlignHCenter)
+        self._planetarium_link_label = link_label
         # 录音指示：只读 _recording/_record_seconds，不自起计时
         rec_indicator = QLabel("")
         rec_indicator.setObjectName("planetariumRecIndicator")
@@ -2526,8 +2753,33 @@ class MainWindow(QMainWindow):
             f" border: 1px solid {self._tok('gray_400', '#585c63')};"
             " border-radius: 12px;")
         self._planetarium_strip = strip
+        # 页签形态下的常驻全屏按钮：竖排浮层条只属于顶层「星象仪模式」，
+        # 在「星象仪模式」页签里它不出现，用户就找不到全屏入口（实指）。
+        # 这颗 ⛶ 挂在 sky_view 右下角，两种形态都在。
+        fs = QPushButton("⛶", self.sky_view)
+        fs.setObjectName("skyFullscreenInline")
+        fs.setFixedSize(30, 30)
+        fs.setToolTip("全屏看天空（F11；再点一次回到窗口）")
+        fs.setCursor(Qt.PointingHandCursor)
+        fs.clicked.connect(self._toggle_fullscreen)
+        fs.setStyleSheet(
+            "QPushButton#skyFullscreenInline {"
+            " padding: 0px;"  # 30×30 的方按钮 + 全局 8/18 内边距 = 负内容区，字形被裁光
+            " background-color: rgba(14,17,24,0.86);"
+            " color: #e6e8ec; border: 1px solid rgba(120,126,140,0.6);"
+            " border-radius: 6px; font-size: 14px; }"
+            "QPushButton#skyFullscreenInline:hover {"
+            " border-color: #7aa2ff; color: #ffffff; }")
+        fs.show()
+        self._sky_fs_btn = fs
         self._planetarium_rec_indicator = rec_indicator
         strip.installEventFilter(self)
+        # 链路状态 1Hz 自检：连接/掉线/降级都发生在主窗口，星象仪里没有别的
+        # 通知面；只在形态驻留期间跑，退出就停。
+        self._planetarium_link_timer = QTimer(self)
+        self._planetarium_link_timer.setInterval(1000)
+        self._planetarium_link_timer.timeout.connect(self._sync_planetarium_link)
+        self._sync_planetarium_link()
         strip.hide()  # 只在星象仪形态显示；不占布局，天空视图保持满宽
 
         # AI 回复覆盖卡（天空槽上的半透明卡片；隐藏=无回复，诚实空态不编造）
@@ -2542,6 +2794,9 @@ class MainWindow(QMainWindow):
             "QLabel#planetariumAiCardText {"
             " background: transparent; color: rgba(255,255,255,0.92);"
             " padding: 8px 12px; }"
+            "QLabel#planetariumAiCardHint {"
+            " background: transparent; color: rgba(255,255,255,0.45);"
+            " font-size: 11px; padding: 0 12px 6px 12px; }"
         )
         card_lay = QVBoxLayout(card)
         card_lay.setContentsMargins(4, 4, 4, 4)
@@ -2551,10 +2806,20 @@ class MainWindow(QMainWindow):
         card_text.setTextFormat(Qt.PlainText)
         card_text.setMaximumWidth(520)
         card_lay.addWidget(card_text)
+        card_hint = QLabel("点卡片或按 Esc 收起", card)
+        card_hint.setObjectName("planetariumAiCardHint")
+        card_lay.addWidget(card_hint)
         card.setVisible(False)
+        # 卡片没有关闭按钮，但点它任意位置应当能收起；否则只能猜 Esc。
+        card.installEventFilter(self)
+        card_text.installEventFilter(self)
+        card_hint.installEventFilter(self)
         self._planetarium_ai_card = card
         self._planetarium_ai_card_text = card_text
         self._planetarium_sky_slot.installEventFilter(self)
+        # 夜视纱罩：铺满整页（天空 + 瀑布 + 按钮条 + 命令栏 + 回复卡），
+        # 最后创建/最后 raise，任何浮层都在它下面。
+        self._night_veil = _NightVeil(page)
         return page
 
     def _position_planetarium_ai_card(self) -> None:
@@ -2579,7 +2844,22 @@ class MainWindow(QMainWindow):
         x = max(margin, (slot.width() - card.width()) // 2)
         wf = self._planetarium_waterfall_slot
         bottom = wf.y() if wf.isVisibleTo(slot) else slot.height()
-        y = max(margin, bottom - card.height() - 12)
+        # 星象仪底边有 24px 操作提示角标（_draw_bottom_chips），卡片若仍贴
+        # 12px 会和「拖动看天 · 滚轮缩放…」叠着，实拍文字互相穿透。
+        bottom_gap = 44 if getattr(self, "_app_mode", "ide") == "planetarium" else 12
+        y = max(margin, bottom - card.height() - bottom_gap)
+        # 窄窗（实拍 1000×600）下这张卡片会横穿左下角的星象仪读数卡，
+        # 「时间/位置/星等」被压掉半行。几何问天空视图自己算（不读上一次
+        # paint 留下的矩形——刚 resize 时那份还是旧尺寸）。
+        try:
+            readout = self.sky_view.immersive_card_rect()
+            if not readout.isNull():
+                tl = self.sky_view.mapTo(slot, readout.topLeft().toPoint())
+                readout_rect = QRect(tl, readout.size().toSize())
+                if QRect(x, y, card.width(), card.height()).intersects(readout_rect):
+                    y = max(margin, readout_rect.top() - card.height() - 8)
+        except (AttributeError, RuntimeError):
+            pass
         card.move(x, y)
         card.raise_()
 
@@ -2592,6 +2872,14 @@ class MainWindow(QMainWindow):
         shown = text.strip() if text else ""
         if not shown:
             shown = "（AI 未返回文本内容，可能只执行了工具调用）"
+        # 与搜索框互斥：新回复要占底部这条横带，就把还开着的搜索收掉，
+        # 否则输入框会压在卡片左缘（两边都是"底部居中"）。
+        if getattr(self, "_app_mode", "ide") == "planetarium":
+            try:
+                if self.sky_view.search_visible():
+                    self.sky_view.hide_search()
+            except (AttributeError, RuntimeError):
+                pass
         self._planetarium_ai_card_text.setText(shown)
         card.setVisible(True)
         self._position_planetarium_ai_card()
@@ -2751,6 +3039,12 @@ class MainWindow(QMainWindow):
             ok = False
         try:
             if ok:
+                # 搜索框和 AI 回复卡都在底部居中：同时出现会叠成一团字
+                # （实拍：输入框压在卡片左缘上）。搜索是用户刚发起的主动
+                # 操作，先收起上一句 AI 回复；对话全文仍在 AI 面板里。
+                card = getattr(self, "_planetarium_ai_card", None)
+                if card is not None and card.isVisible():
+                    card.setVisible(False)
                 self.statusBar().showMessage(
                     "输入天体名：ISS / Vega / 木星 / M42；↑↓ 选择，回车定位",
                     MSG_NORMAL)
@@ -2864,6 +3158,40 @@ class MainWindow(QMainWindow):
         except RuntimeError:
             pass
 
+    def _apply_night_vision_to_overlays(self, on: bool) -> None:
+        """夜视：整页压一层红光纱罩（含全部浮层），并给地点面板补一层。
+
+        天空自身的红光在 ``RFSkyView.paintEvent`` 里，但它只覆盖自己那层：
+        浮层是子控件，Qt 在父 ``paintEvent`` 之后才合成它们，盖不到。纱罩
+        不碰任何控件样式，新加的浮层自动被压红，不会漏一块白。
+        """
+        on = bool(on)
+        veil = getattr(self, "_night_veil", None)
+        if veil is not None:
+            if on:
+                veil.setGeometry(veil.parentWidget().rect())
+                veil.show()
+                veil.raise_()
+            else:
+                veil.hide()
+        # 地点面板是独立顶层窗（Qt.Tool），不在星象仪页里，单独盖一层。
+        panel = getattr(self, "_location_panel", None)
+        if panel is not None:
+            pveil = getattr(self, "_location_night_veil", None)
+            if pveil is None and on:
+                pveil = _NightVeil(panel, tint=(120, 16, 14, 100))
+                self._location_night_veil = pveil
+            if pveil is not None:
+                try:
+                    if on:
+                        pveil.setGeometry(panel.rect())
+                        pveil.show()
+                        pveil.raise_()
+                    else:
+                        pveil.hide()
+                except RuntimeError:
+                    self._location_night_veil = None
+
     def _on_layer_btn(self, key: str) -> None:
         """图层按钮 → 天空视图（按钮不自己留状态，一律从视图读回）。"""
         btn = getattr(self, "_layer_btns", {}).get(key)
@@ -2888,40 +3216,92 @@ class MainWindow(QMainWindow):
         self._planetarium_waterfall_on = on
         slot = getattr(self, "_planetarium_waterfall_slot", None)
         if slot is not None and getattr(self, "_app_mode", "ide") == "planetarium":
+            # 天空窗与主窗口同时存在：频谱是同一个部件，只在打开时才搬进来，
+            # 关掉就还给主窗口的频谱页（不能让它两边都没有）。
+            if getattr(self, "spectrum", None) is not None:
+                if on:
+                    self._planetarium_waterfall_layout.addWidget(self.spectrum)
+                elif self._planetarium_waterfall_layout.indexOf(
+                        self.spectrum) >= 0:
+                    self._planetarium_waterfall_layout.removeWidget(
+                        self.spectrum)
+                    lay = getattr(self, "_spectrum_page_layout", None)
+                    if lay is not None:
+                        lay.addWidget(self.spectrum, stretch=1)
             slot.setVisible(on)
         btn = getattr(self, "_planetarium_wf_btn", None)
         if btn is not None and btn.isChecked() != on:
             btn.setChecked(on)
+        self._sync_planetarium_spectrum()
+
+    def _sync_planetarium_spectrum(self) -> None:
+        """频谱部件在谁手里，就用谁的形态与提示（同一部件两边搬，不重建）。
+
+        - 星象仪底部条：180px 高、没有工具栏 → 紧凑形态（收竖滑杆列），
+          未连接提示改成可执行的「按 Esc 回主界面…」；
+        - IDE 频谱页：恢复常规形态与默认提示。
+        """
+        sp = getattr(self, "spectrum", None)
+        if sp is None:
+            return
+        lay = getattr(self, "_planetarium_waterfall_layout", None)
+        inside = lay is not None and lay.indexOf(sp) >= 0
+        try:
+            sp.set_compact(inside)
+            sp.set_offline_hint(_PLANETARIUM_OFFLINE_HINT if inside else None)
+        except (AttributeError, RuntimeError):
+            pass
+
+    def _sync_planetarium_link(self) -> None:
+        """把 SDR 链路真相写进星象仪浮层（只读：不连接、不重连、不装在线）。
+
+        三种状态的唯一事实源：
+          - 未连接：``_active_sdr_backend`` / ``_pipeline`` 任一为空；
+          - 数据流中断：``_link_degraded``（连接仍在但 ≥2s 无 IQ 数据）；
+          - 已连接：上面都成立。
+        文案控制在 152px 浮层的内容宽内（不换行、不缩字），细节进 tooltip。
+        """
+        label = getattr(self, "_planetarium_link_label", None)
+        if label is None:
+            return
+        backend = getattr(self, "_active_sdr_backend", None)
+        pipeline = getattr(self, "_pipeline", None)
+        if backend is None or pipeline is None:
+            text = "SDR 未连接"
+            color = self._tok('gray_100', '#D9D9D9')
+            tip = ("SDR 未连接：按 Esc 回主界面，点工具栏「连接」选设备。"
+                   "星空来自离线星历，此时没有真实射频数据。")
+        elif getattr(self, "_link_degraded", False):
+            text = "数据流中断"
+            color = self._tok('danger', '#E5484D')
+            tip = ("数据流中断：连接仍在但收不到 IQ 数据，正在等待恢复；"
+                   "持续 10 秒会按断开处理（不会自动重连）。")
+        else:
+            text = "SDR 已连接"
+            color = self._tok('success', '#6BA89A')
+            name = ""
+            try:
+                name = str(getattr(backend.device, "name", "") or "")
+            except Exception:
+                name = ""
+            tip = "SDR 已连接，频谱与瀑布来自设备实时采样" + (
+                f"（{name}）" if name else "")
+        if getattr(self, "_planetarium_link_cache", None) == (text, color):
+            return
+        self._planetarium_link_cache = (text, color)
+        label.setText(text)
+        label.setToolTip(tip)
+        label.setStyleSheet(
+            "QLabel#planetariumLink { background: transparent; color: "
+            + color + "; font-size: 8.5pt; }")
 
     def _enter_planetarium(self) -> None:
         if getattr(self, "_app_mode", "ide") == "planetarium":
             return
-        # 沉浸：星象仪形态是"看天"，不是工具面板。IDE 的菜单栏与主工具栏
-        # 在这形态里只会把天空挤矮一条、并让人以为自己在操作软件而不是在看
-        # 天空。隐藏而不是禁用——退出时原样恢复（退出路径见 _exit_planetarium）。
+        # 星象仪现在住**独立顶层窗口**（用户 2026-11-10：「要独立全屏，不是
+        # 软件 windowed 全屏」）。主窗口留在 IDE 形态原样可用，所以这里不再
+        # 收掉菜单栏/工具栏/状态栏——那些是 IDE 的工具，不是天空的。
         self._hidden_chrome = []
-        try:
-            mb = self.menuBar()
-            if mb is not None:
-                # 不判 isVisible：启动恢复形态时窗口还没 show，全部 isVisible
-                # 都是 False，判可见性会让"上次在星象仪"的用户一启动就带着
-                # 整条 IDE 菜单栏看天。hide 幂等，记下来退出时统一 show。
-                self._hidden_chrome.append(mb)
-                mb.hide()
-        except (AttributeError, RuntimeError):
-            pass
-        for tb in self.findChildren(QToolBar):
-            self._hidden_chrome.append(tb)
-            tb.hide()
-        # 底部状态栏同理：星象仪里它显示的是"离线模式…未枚举硬件"这类
-        # IDE 语境文案，压在星空最底一条，既不沉浸也没意义。
-        try:
-            sb = self.statusBar()
-            if sb is not None:
-                self._hidden_chrome.append(sb)
-                sb.hide()
-        except (AttributeError, RuntimeError):
-            pass
         # 天空视图左下那颗「🌐 全天 160°」是 IDE 形态的控件，在星象仪里正好
         # 压在沉浸紧凑卡上（两套字叠成一团）。沉浸态收起来：全天空用 A 键
         # 或双击/滚轮，退出形态即恢复。
@@ -2938,30 +3318,38 @@ class MainWindow(QMainWindow):
         # 不显式 show 则星象仪整片天黑（只有槽底色）。show 只清自身标记，尺寸归布局。
         self.sky_view.show()
         # 底部瀑布：星象仪是时空主导形态，频谱默认不进来抢高度（1/5 屏）。
-        # 需要看频谱时从右侧浮层「频谱」开关拉出（同一部件 reparent，不重建）。
+        # 只有用户真的打开「频谱」开关才把频谱搬进天空窗——默认留在主窗口的
+        # 频谱页继续可用（同一部件 reparent，不重建）。
         wf_slot = self._planetarium_waterfall_slot
         if getattr(self, "spectrum", None) is not None:
-            self._planetarium_waterfall_layout.addWidget(self.spectrum)
+            if getattr(self, "_planetarium_waterfall_on", False):
+                self._planetarium_waterfall_layout.addWidget(self.spectrum)
             wf_slot.setVisible(bool(getattr(self, "_planetarium_waterfall_on",
                                             False)))
-        # AI 胶囊命令栏 reparent 到天空槽（同一颗胶囊、同一路由 _on_ai_command，
-        # 对话历史跨形态连续）；记下原父，退出归位。
+            self._sync_planetarium_spectrum()
+        # AI 命令栏只在星象仪形态存在（IDE 形态的 AI 入口是右栏「AI 助手」
+        # 面板，2026-11-10 用户明确要求「对话框应该在右侧面板里」）。
         bar = getattr(self, "_ai_cmd_bar", None)
-        if bar is not None:
+        if bar is None:
+            bar = self._build_ai_command_bar(self._planetarium_sky_slot)
+        else:
             self._ai_bar_restore_parent = bar.parentWidget()
             bar.setParent(self._planetarium_sky_slot)
-            self._ai_cmd_parent = self._planetarium_sky_slot
-            self._position_ai_cmd_bar()
-            # 星象仪里这颗胶囊是外行唯一的入口，占位文案不能还是
-            # "频率 / 模式 / 解调 / 搜索"——那是给懂的人看的。换成一句人话。
-            try:
-                self._ai_placeholder_ide = self.cmd_input.placeholderText()
-                self.cmd_input.setPlaceholderText(
-                    "问我：那颗最亮的是什么星？现在头顶有卫星吗？")
-            except (AttributeError, RuntimeError):
-                pass
-        self._mode_stack.setCurrentWidget(self._planetarium_page)
+        self._ai_cmd_parent = self._planetarium_sky_slot
+        bar.show()
+        self._style_ai_cmd_bar_for_sky()
+        self._position_ai_cmd_bar()
+        # 星象仪里这颗胶囊是外行唯一的入口，占位文案不能还是
+        # "频率 / 模式 / 解调 / 搜索"——那是给懂的人看的。换成一句人话。
+        try:
+            self._ai_placeholder_ide = self.cmd_input.placeholderText()
+            self.cmd_input.setPlaceholderText(
+                "问我：那颗最亮的是什么星？现在头顶有卫星吗？")
+        except (AttributeError, RuntimeError):
+            pass
         self._app_mode = "planetarium"
+        # 页面整体搬进独立窗口并真全屏；主窗口留在 IDE（可放另一块屏）
+        self._detach_planetarium_page()
         # 星象仪构图：朝地平看（地景剪影+辉光带入画），天顶俯视留给 IDE 形态
         if hasattr(self.sky_view, "enter_horizon_view"):
             self.sky_view.enter_horizon_view()
@@ -2973,12 +3361,80 @@ class MainWindow(QMainWindow):
         self._sync_planetarium_recording()
         self._position_planetarium_overlay()
         self._planetarium_strip.show()
+        self._planetarium_link_timer.start()
+        self._sync_planetarium_link()
         self._sync_fullscreen_btn()
         self._sync_projection_combo()
-        # 窗口已显示才联动全屏；启动恢复阶段窗口未 show，交给正常 show 流程。
-        if self.isVisible() and not self.isFullScreen():
-            self.showFullScreen()
+        # 夜视若在 IDE 里就先开了（或命令栏是刚懒建的），本形态里新出现
+        # 的浮层也要补红光——否则它们以原色浮在被压红的天空上格外刺眼。
+        try:
+            if bool(self.sky_view.layer_state().get("night", False)):
+                self._apply_night_vision_to_overlays(True)
+        except (AttributeError, RuntimeError):
+            pass
+
+    def _planetarium_window_host(self) -> "_PlanetariumWindow":
+        """懒建独立天空窗（只建一次，窗口对象跨形态复用）。"""
+        win = getattr(self, "_planetarium_window", None)
+        if win is None:
+            win = _PlanetariumWindow(self)
+            lay = QVBoxLayout(win)
+            lay.setContentsMargins(0, 0, 0, 0)
+            lay.setSpacing(0)
+            self._planetarium_window_layout = lay
+            self._planetarium_window = win
+            # 全屏/还原后同步浮层按钮文案（主窗口的 changeEvent 收不到这个窗的事件）
+            win.installEventFilter(self)
+        return win
+
+    def _detach_planetarium_page(self) -> None:
+        """把星象仪页搬进独立窗口并全屏：真正的顶层全屏，不是主窗全屏。
+
+        主窗口不跟着全屏/隐藏——它留在 IDE，两块屏可以一边看天一边操作 SDR。
+        启动恢复阶段主窗口还没 show，照样先把天空窗拉起来；主窗口 show 之后
+        由 showEvent 再提一次前台，免得它盖住真全屏的天空窗。
+        """
+        win = self._planetarium_window_host()
+        if self._mode_stack.indexOf(self._planetarium_page) >= 0:
+            self._mode_stack.removeWidget(self._planetarium_page)
+            self._planetarium_window_layout.addWidget(self._planetarium_page)
+        self._planetarium_page.show()
+        # 立刻真全屏（测试/用户都要求"按下去就在那儿"，不能等事件循环）
+        win.showFullScreen()
+        win.raise_()
+        win.activateWindow()
+
+    def _present_planetarium_window(self) -> None:
+        if getattr(self, "_app_mode", "ide") != "planetarium":
+            return
+        win = getattr(self, "_planetarium_window", None)
+        if win is None:
+            return
+        try:
+            if not win.isFullScreen():
+                win.showFullScreen()
+            win.raise_()
+            win.activateWindow()
             self._sync_fullscreen_btn()
+        except RuntimeError:
+            pass
+
+    def _reattach_planetarium_page(self) -> None:
+        """天空窗收起，页面回到形态栈页1（IDE 页0 不动）。"""
+        win = getattr(self, "_planetarium_window", None)
+        if win is not None:
+            lay = getattr(self, "_planetarium_window_layout", None)
+            if lay is not None:
+                lay.removeWidget(self._planetarium_page)
+            try:
+                if win.isFullScreen():
+                    win.showNormal()     # 退出全屏状态，下次进来重新真全屏
+                win.hide()
+            except RuntimeError:
+                pass
+        if self._mode_stack.indexOf(self._planetarium_page) < 0:
+            self._mode_stack.insertWidget(1, self._planetarium_page)
+        self._mode_stack.setCurrentIndex(0)
 
     def _exit_planetarium(self) -> None:
         if getattr(self, "_app_mode", "ide") != "planetarium":
@@ -2998,21 +3454,28 @@ class MainWindow(QMainWindow):
         self._planetarium_sky_layout.removeWidget(self.sky_view)
         self._restore_sky_location(self._sky_restore_info)
         self._sky_restore_info = None
-        # 瀑布归位频谱页签
+        # 瀑布归位频谱页签（只有真的搬进天空窗时才需要搬回）
         if getattr(self, "spectrum", None) is not None:
-            self._planetarium_waterfall_layout.removeWidget(self.spectrum)
-            lay = getattr(self, "_spectrum_page_layout", None)
-            if lay is not None:
-                lay.addWidget(self.spectrum, stretch=1)
+            if self._planetarium_waterfall_layout.indexOf(self.spectrum) >= 0:
+                self._planetarium_waterfall_layout.removeWidget(self.spectrum)
+                lay = getattr(self, "_spectrum_page_layout", None)
+                if lay is not None:
+                    lay.addWidget(self.spectrum, stretch=1)
         self._planetarium_waterfall_slot.setVisible(False)
-        # AI 命令栏归位 IDE 中栏
+        self._sync_planetarium_spectrum()
+        # AI 命令栏只属于星象仪形态：退出即隐藏并归位到 IDE 中栏（隐藏态）。
         bar = getattr(self, "_ai_cmd_bar", None)
         if bar is not None:
+            # 命令栏样式跟着形态走：IDE 里恢复构建时的主题样式。
+            bar.setStyleSheet(getattr(self, "_ai_cmd_bar_ide_style", ""))
             old_parent = getattr(self, "_ai_bar_restore_parent", None)
             if old_parent is not None:
                 bar.setParent(old_parent)
+                bar.hide()
                 self._ai_cmd_parent = old_parent
-                self._position_ai_cmd_bar()
+            else:
+                bar.hide()
+                self._ai_cmd_parent = None
             # 占位文案换回 IDE 语境
             saved = getattr(self, "_ai_placeholder_ide", None)
             if saved:
@@ -3024,13 +3487,26 @@ class MainWindow(QMainWindow):
         card = getattr(self, "_planetarium_ai_card", None)
         if card is not None:
             card.setVisible(False)
-        self._mode_stack.setCurrentIndex(0)
         self._app_mode = "ide"
+        # 页面搬回形态栈页1 + 收掉独立天空窗；主窗口本来就没全屏，不用 showNormal
+        self._reattach_planetarium_page()
         self.settings.set("app_mode", "ide")
         self._planetarium_strip.hide()
+        self._planetarium_link_timer.stop()
+        # 浮层已经不在天空上：把「右下让开」的声明一起撤掉，否则 IDE 里
+        # ⊖⊕ 会停在左移后的位置（下次 resize 也不会自动回位）。
+        try:
+            self.sky_view.set_hud_avoid_rect(None)
+        except (AttributeError, RuntimeError):
+            pass
+        # 夜视纱罩只在星象仪形态用（IDE 里天空自己压红光）；退出时收掉，
+        # 免得下次 grab 整页时莫名多一层红。
+        veil = getattr(self, "_night_veil", None)
+        if veil is not None:
+            veil.hide()
         if hasattr(self.sky_view, "set_immersive"):
             self.sky_view.set_immersive(False)
-        # 恢复进形态时隐藏的 IDE 外壳（菜单栏/主工具栏）
+        # 恢复进形态时隐藏的 IDE 控件（全天按钮）
         for wdg in getattr(self, "_hidden_chrome", None) or []:
             try:
                 wdg.show()
@@ -3038,13 +3514,21 @@ class MainWindow(QMainWindow):
                 pass
         self._hidden_chrome = []
         self._sync_mode_action()
+        # 退出后把焦点交还主窗口，不然键盘还留在已隐藏的天空窗上
+        try:
+            if self.isVisible():
+                self.raise_()
+                self.activateWindow()
+        except RuntimeError:
+            pass
         # _exit_planetarium 上面把 IDE 外壳统一 show 回来了；若用户仍在
         # 专注模式，这里立即重新收起主工具栏/工程读数/天空杂物，避免
         # 「退出星象仪 → 顶上又冒出一整排配置项」。
         self.set_focus_mode(getattr(self, "_focus_mode", True))
-        if self.isFullScreen():
-            self.showNormal()
         self._sync_fullscreen_btn()
+        # 浮层已收起：把页签形态的常驻 ⛶ 摆回右上角（上面在星象仪里收起了
+        # 重复入口，不在这里复位就会一直消失）。
+        self._position_planetarium_overlay()
 
     def set_app_mode(self, mode: str) -> None:
         """顶层形态切换入口（IDE / 星象仪）。"""
@@ -3069,10 +3553,29 @@ class MainWindow(QMainWindow):
             search_key.setEnabled(self._app_mode == "planetarium")
 
     def _on_escape(self) -> None:
-        """Esc 逐层退出当前状态：先关星象仪 AI 回复卡，再退出星象仪形态。
+        """Esc 逐层退出当前状态：搜索框 → 图层面板 → AI 回复卡 → 退出星象仪。
 
         只处理"看得见却点不到"的覆盖层；QDialog 弹窗由 Qt 自身 Esc→reject。
+        必须逐层：刚点开「🔍 找星」就按 Esc，人要的是收起搜索，
+        不是把整座星象仪关掉（那样还得重新进、重新定位）。
         """
+        sv = getattr(self, "sky_view", None)
+        try:
+            if sv is not None and sv.search_visible():
+                sv.hide_search()
+                sv.setFocus(Qt.OtherFocusReason)
+                return
+        except (AttributeError, RuntimeError):
+            pass
+        layer_btn = getattr(self, "_planetarium_layer_btn", None)
+        try:
+            if layer_btn is not None and layer_btn.isChecked():
+                # setChecked(False) 会走 toggled → 收起浮层；只 hide() 面板
+                # 会让按钮停在按下态，下一次点击变成"取消选中"（点不开）。
+                layer_btn.setChecked(False)
+                return
+        except (AttributeError, RuntimeError):
+            pass
         card = getattr(self, "_planetarium_ai_card", None)
         if card is not None and card.isVisible():
             card.setVisible(False)
@@ -3126,46 +3629,68 @@ class MainWindow(QMainWindow):
             pass
 
     def _add_right_tab(self, title: str, panel: QWidget,
-                       attr_name: Optional[str] = None) -> QScrollArea:
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QFrame.NoFrame)
-        # AsNeeded 而不是 AlwaysOff：页面最小宽度超出右栏时给横向滚动，
-        # 绝不把「增益/音量」右半边硬裁掉（2026-11-10 截图实证）。
-        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+                       attr_name: Optional[str] = None) -> QWidget:
+        """把面板注册成右栏长列里的一节（可折叠）。
+
+        旧实现给每个面板套一层 QScrollArea 当页签；现在整栏只有一根
+        QScrollArea（RightColumn），面板直接作为节内容，避免滚动条套滚动条。
+        §attr_name 仍指向面板本身（`_dock.isVisible()` 的数据 tap 守卫不变：
+        节折叠时 body 隐藏，tap 自然跳过）。
+        """
         # 中文长句的换行兜底：QLabel(wordWrap=True) 的 minimumSizeHint 按
         # "最长不可断词"算，中文整句没空格 → 整行宽 → 撑爆右栏再被裁。
-        # 在这一个口子上统一放开，所有页签（含以后新增的）都吃到，不用每处记。
+        # 在这一个口子上统一放开，所有面板（含以后新增的）都吃到，不用每处记。
         self._relax_label_wrapping(panel)
-        scroll.setWidget(panel)
-        self.right_tab.addTab(scroll, title)
-        # 右栏最小宽度跟着里页面的真实最小宽度走（上限 380，别把天空挤没）
+        self.right_tab.addTab(panel, title)
+        # 右栏最小宽度跟着里页面的真实最小宽度走（上限 320：右栏被拖窄时
+        # 给横向滚动条，绝不把控制面板裁成一条边）。
         try:
             need = int(panel.minimumSizeHint().width()) + 24
-            need = min(need, 380)
+            need = min(need, 320)
             if need > self.right_tab.minimumWidth():
                 self.right_tab.setMinimumWidth(need)
         except (AttributeError, RuntimeError, TypeError):
             pass
         if attr_name:
-            setattr(self, attr_name, scroll)
+            setattr(self, attr_name, panel)
             # 稳定身份：从 attr_name 推导 panel id（"control_dock" -> "control"）。
             # 落盘/恢复一律按 id 走，绝不按译文 —— 语言切换后译文会变，
             # 用译文当身份会让布局静默丢失（见 DockLayoutManager._tab_key）。
             pid = attr_name[:-5] if attr_name.endswith("_dock") else attr_name
             self.right_tab.tabBar().setTabData(self.right_tab.count() - 1, pid)
-        return scroll
+        # 右栏跳转菜单跟着节走：以后新增的面板自动出现，不用回来补。
+        nav = getattr(self, "right_nav", None)
+        menu = nav.menu() if nav is not None else None
+        if menu is not None:
+            idx = self.right_tab.count() - 1
+            act = menu.addAction(title)
+            act.triggered.connect(
+                lambda _checked=False, i=idx: self.right_tab.setCurrentIndex(i))
+        return panel
+
+    def _show_right_tab_of(self, panel: QWidget) -> bool:
+        """展开并滚到承载该面板的右栏节。"""
+        tabs = getattr(self, "right_tab", None)
+        if tabs is None or panel is None:
+            return False
+        for i in range(tabs.count()):
+            host = tabs.widget(i)
+            if host is panel or (host is not None and
+                                 host.findChild(type(panel)) is panel):
+                tabs.setCurrentIndex(i)
+                return True
+        return False
 
     # ------------------------------------------------------------------
     # 中栏悬浮 AI 命令栏（胶囊形半透明毛玻璃）
     # ------------------------------------------------------------------
-    def _build_ai_command_bar(self, parent: QWidget) -> None:
+    def _build_ai_command_bar(self, parent: QWidget) -> QFrame:
         bar = QFrame(parent)
         bar.setObjectName("aiCommandBar")
-        bar.setMinimumHeight(36)
-        bar.setMaximumHeight(64)
+        bar.setMinimumHeight(34)
+        bar.setMaximumHeight(44)
         lay = QHBoxLayout(bar)
-        lay.setContentsMargins(18, 0, 12, 0)
+        lay.setContentsMargins(10, 0, 10, 0)
         lay.setSpacing(8)
         self.cmd_input = QLineEdit()
         self.cmd_input.setPlaceholderText(
@@ -3174,40 +3699,51 @@ class MainWindow(QMainWindow):
         lay.addWidget(self.cmd_input, stretch=1)
         self.cmd_mic_btn = QPushButton("🎤")
         self.cmd_mic_btn.setObjectName("iconButton")
-        self.cmd_mic_btn.setMinimumSize(28, 28)
-        self.cmd_mic_btn.setMaximumSize(48, 48)
+        self.cmd_mic_btn.setMinimumSize(26, 26)
+        self.cmd_mic_btn.setMaximumSize(32, 32)
         self.cmd_mic_btn.setToolTip("语音输入（未连接麦克风时无操作）")
         self.cmd_mic_btn.clicked.connect(self._on_cmd_mic)
         lay.addWidget(self.cmd_mic_btn)
-        # 胶囊形半透明深色底（毛玻璃用半透明模拟；QSS 不支持 backdrop-filter）
+        # 用主题 token 的常规面板底色，不再做悬浮胶囊（半透明黑压在地图上
+        # 既挡内容又与主题割裂，2026-11-10 截图实指）。
         bar.setStyleSheet(
             "QFrame#aiCommandBar {"
-            " background-color: rgba(18,19,22,0.82);"
-            f" border: 1px solid {self._tok('gray_400', '#585c63')};"
-            f" border-radius: {tokens().RADIUS['circle_sm']}px;"
+            f" background-color: {self._tok('bg_alt', '#1f1f1f')};"
+            f" border-top: 1px solid {self._tok('border', '#585c63')};"
             "}"
             "QFrame#aiCommandBar QLineEdit {"
             " background: transparent; border: none;"
-            " color: rgba(255,255,255,0.9);"
+            f" color: {self._tok('text', '#ffffff')};"
             "}"
         )
-        bar.adjustSize()
         self._ai_cmd_bar = bar
+        self._ai_cmd_bar_ide_style = bar.styleSheet()
         self._ai_cmd_parent = parent
-        parent.installEventFilter(self)
-        self._position_ai_cmd_bar()
+        return bar
+
+    def _style_ai_cmd_bar_for_sky(self) -> None:
+        """星象仪形态的命令栏换成夜空胶囊样式（退出时还原 IDE 样式）。
+
+        浮在星空上的输入条如果是 IDE 的整块底色 + 上边框，会像一条贴在
+        画面顶部的工具条；胶囊底色半透明、圆角，才和「问一句话」的语义
+        一致（Stellarium 的搜索/指令入口同样是浮起的圆角条）。
+        """
+        bar = getattr(self, "_ai_cmd_bar", None)
+        if bar is None:
+            return
+        bar.setStyleSheet(
+            "QFrame#aiCommandBar { background-color: rgba(14,17,24,0.78);"
+            " border: 1px solid rgba(255,255,255,0.16); border-radius: 17px; }"
+            "QFrame#aiCommandBar QLineEdit { background: transparent;"
+            " border: none; color: #EAF1FA; padding: 0 8px; }"
+            "QFrame#aiCommandBar QPushButton#iconButton {"
+            " background: rgba(255,255,255,0.10);"
+            " border: 1px solid rgba(255,255,255,0.20); border-radius: 13px;"
+            " color: #EAF1FA; padding: 0; }")
 
     def _position_ai_cmd_bar(self) -> None:
-        """把胶囊命令栏定位到中栏顶部居中。"""
-        bar = getattr(self, "_ai_cmd_bar", None)
-        parent = getattr(self, "_ai_cmd_parent", None)
-        if bar is None or parent is None:
-            return
-        w = min(parent.width() - 40, 560)
-        bar.setFixedWidth(max(w, 280))
-        bar.move((parent.width() - bar.width()) // 2, 16)
-        bar.raise_()
-        self._position_planetarium_overlay()
+        """命令栏已在布局里，不再做绝对定位（保留空实现给旧的 Resize 回调）。"""
+        return
 
     def _handle_shortcut_override(self, event) -> bool:
         """Ctrl+C 焦点感知：文本输入控件上放行标准复制，返回 True 表示已接管。
@@ -3238,13 +3774,24 @@ class MainWindow(QMainWindow):
         # 不再对每个事件做 4 次 getattr + 重复 event.type()（旧实现占构造 59%）。
         etype = event.type()
         if etype == QEvent.Resize:
-            if obj is getattr(self, "_ai_cmd_parent", None):
-                self._position_ai_cmd_bar()
-            elif obj is getattr(self, "_planetarium_sky_slot", None):
+            # 命令栏已在布局里（_position_ai_cmd_bar 保留空实现），不再按
+            # _ai_cmd_parent 分派：星象仪形态下 _ai_cmd_parent 就是天空槽本身，
+            # 那个空操作分支会把天空槽的 Resize 截胡，AI 回复卡永远收不到重排。
+            if obj is getattr(self, "_planetarium_sky_slot", None):
                 self._position_planetarium_ai_card()
             elif obj is getattr(self, "sky_view", None):
                 self._position_all_sky_btn()
                 self._position_planetarium_overlay()
+        elif etype == QEvent.MouseButtonPress:
+            # 星象仪 AI 回复卡：点卡片任意位置收起（卡上另有 11px 提示）。
+            card = getattr(self, "_planetarium_ai_card", None)
+            if (card is not None and card.isVisible()
+                    and (obj is card or obj.parentWidget() is card)):
+                card.setVisible(False)
+                return True
+        elif etype == QEvent.WindowStateChange:
+            if obj is getattr(self, "_planetarium_window", None):
+                self._sync_fullscreen_btn()
         elif etype == QEvent.ShortcutOverride:
             if self._handle_shortcut_override(event):
                 return True
@@ -3297,7 +3844,9 @@ class MainWindow(QMainWindow):
                     txt = "频谱显示" if hw >= 340 else "频谱"
                     if title.text() != txt:
                         title.setText(txt)
-                    title.setToolTip("频谱显示")
+                    title.setToolTip(
+                        "频谱显示区：观察当前调谐波段的实时信号频谱与瀑布历史，"
+                        "判断有没有信号、信号强不强；工程读数收在「详细」抽屉")
             except (RuntimeError, AttributeError):
                 pass
         for attr, min_w in (("doppler_chip", 1180), ("status_sr", 940)):
@@ -3356,6 +3905,17 @@ class MainWindow(QMainWindow):
 
         self.status_conn = QLabel("未连接")
         lay.addWidget(self.status_conn)
+
+        # 常驻运行入口：连接 / 断开 / 收听。专注页面只收 QToolBar，不走这里，
+        # 所以「插上设备后点上面的那个」永远看得见、点得到。
+        for b in (getattr(self, "connect_btn", None),
+                  getattr(self, "disconnect_btn", None),
+                  getattr(self, "listen_combo", None)):
+            if b is not None:
+                b.setParent(bar)
+                b.setFixedHeight(30)
+                lay.addWidget(b)
+        lay.addSpacing(8)
         lay.addStretch(1)
 
         # 兼容垫片：契约测试与旧代码按属性名取它，但主界面不再挂载输入框、
@@ -3555,6 +4115,210 @@ class MainWindow(QMainWindow):
         except Exception:
             pass
 
+    # ------------------------------------------------------------ 性能档
+    def _perf_key(self) -> str:
+        """当前性能档 key（未知档回默认，绝不抛）。"""
+        try:
+            return str(self.settings.get("perf_profile", "eco") or "eco")
+        except Exception:
+            return "eco"
+
+    def _perf(self) -> dict:
+        """当前档位参数；perf_profile 模块不可用时给安全兜底。"""
+        if _perf_profile is not None:
+            try:
+                return _perf_profile(self._perf_key())
+            except Exception:
+                pass
+        # 模块缺失时的安全兜底：实际只有 gnss_poll_ms 被 _perf_gnss_poll_ms
+        # 消费；其余字段镜像默认 eco 档，与真实 profile 同形（panel_level 一致）。
+        return {"sample_rate_hz": DEFAULT_SAMPLE_RATE_HZ,
+                "panel_level": 2, "fft_size": 1024,
+                "spectrum_interval_ms": 100, "gnss_poll_ms": 1000}
+
+    def _perf_gnss_poll_ms(self) -> int:
+        try:
+            return max(200, int(self._perf().get("gnss_poll_ms", 1000)))
+        except (TypeError, ValueError):
+            return 1000
+
+    def _perf_default_sample_rate(self) -> float:
+        """桌面默认连接采样率：按性能档，不是内核 2.4 MS/s 设备基准。"""
+        if _perf_sample_rate is not None:
+            try:
+                return float(_perf_sample_rate(self._perf_key()))
+            except Exception:
+                pass
+        return float(DEFAULT_SAMPLE_RATE_HZ)
+
+    def _apply_perf_profile(self, key: str, *, announce: bool = True) -> None:
+        """切档即时生效：只改 GNSS 轮询 / 频谱刷新间隔 / FFT 点数。
+
+        不动用户手动选过的采样率档位——性能档只决定「下次连接的默认值」，
+        不越权覆盖控制面板里的显式选择，也不重建已连接的流水线（重建会卡住
+        UI）。状态栏如实说明哪几项已生效、采样率何时生效。
+
+        announce=False 供启动时静默对齐持久化档位（不是用户切档，不该弹
+        「已切到」提示）；FFT/刷新仍照常生效，与 GNSS 轮询启动即按档一致。
+        """
+        prof = None
+        if _perf_profile is not None:
+            try:
+                prof = _perf_profile(str(key))
+            except Exception:
+                prof = None
+        if prof is None:
+            return
+        try:
+            if self._gnss_timer is not None:
+                self._gnss_timer.setInterval(
+                    max(200, int(prof["gnss_poll_ms"])))
+        except (AttributeError, RuntimeError, KeyError):
+            pass
+        # FFT 点数 / 谱线数 / 频谱刷新：走频谱面板既有性能接缝
+        # set_performance_mode(panel_level)——它真改 generator.reconfigure
+        # （FFT + 谱线 + 瀑布缓冲）与 plot._timer 刷新间隔，并同步 FFT 下拉。
+        # 旧写法调 panel.set_fft_size（面板根本没有这方法，getattr 落空）
+        # + 改从不 start 的 _iq_poll_timer，两个杠杆全是死的，状态栏却宣称
+        # 已生效（假控件，2026-11-10 output/perf_lever_probe.py 实证）。
+        try:
+            sp = getattr(self, "spectrum", None)
+            level = prof.get("panel_level")
+            setter = getattr(sp, "set_performance_mode", None)
+            if sp is not None and level is not None and callable(setter):
+                setter(int(level))
+                # 同步面板「性能」下拉到同一档（阻塞信号避免重复触发）：
+                # 设置页与频谱工具栏两处性能控件保持一致，不互相打架。
+                combo = getattr(sp, "_perf_combo", None)
+                if combo is not None:
+                    combo.blockSignals(True)
+                    combo.setCurrentIndex(int(level))
+                    combo.blockSignals(False)
+        except (AttributeError, RuntimeError, TypeError, ValueError):
+            pass
+        if not announce:
+            return
+        try:
+            self.statusBar().showMessage(
+                f"性能档已切到「{prof['label']}」：GNSS/频谱刷新与 FFT 已生效；"
+                f"采样率 {format_sample_rate(prof['sample_rate_hz'])} "
+                "将在下次连接时作为默认值",
+                MSG_IMPORTANT)
+        except Exception:
+            pass
+
+    # ------------------------------------------------------------ 收听
+    #: 三档收听状态（唯一状态源）：listen / idle / muted
+    _LISTEN_STATES = ("listen", "idle", "muted")
+
+    def _on_listen_state_changed(self, index: int) -> None:
+        """下拉三档 → 统一状态机（listen / idle / muted）。"""
+        key = self.listen_combo.itemData(index)
+        self._apply_listen_state(str(key) if key else "idle")
+
+    def _set_listen_combo(self, state: str) -> None:
+        """状态 → 下拉（阻断信号，避免回调环）。"""
+        combo = getattr(self, "listen_combo", None)
+        if combo is None:
+            return
+        idx = {k: i for i, k in enumerate(self._LISTEN_STATES)}.get(state, 1)
+        if combo.currentIndex() != idx:
+            combo.blockSignals(True)
+            combo.setCurrentIndex(idx)
+            combo.blockSignals(False)
+
+    def _apply_listen_state(self, state: str) -> None:
+        """三档收听状态机：收听 / 停止解调 / 不收听。
+
+        收听    —— 解调 + 声卡出声；
+        停止解调 —— 保持连接，解调线程也停（最省 CPU，频谱照常）；
+        不收听  —— 解调继续，声卡静音（给解码/录制/星座图用，不出声）。
+        """
+        if state not in self._LISTEN_STATES:
+            state = "idle"
+        player = getattr(self, "_audio_player", None)
+        if state == "listen" and self._active_sdr_backend is None:
+            # 没设备还点收听：如实说清楚，不偷偷开一个空流
+            self._listen_state = "idle"
+            self._listening = False
+            self._set_listen_combo("idle")
+            self._sync_listen_workers(False)
+            self.statusBar().showMessage(
+                "还没有连接的 SDR：先点「连接」，再选「收听」", MSG_IMPORTANT)
+            return
+        if state == "listen" and player is not None:
+            try:
+                if not player.start():
+                    self.statusBar().showMessage(
+                        "无音频输出设备（收听已关闭，频谱/录制不受影响）",
+                        MSG_IMPORTANT)
+                    self._listen_state = "idle"
+                    self._listening = False
+                    self._set_listen_combo("idle")
+                    self._sync_listen_workers(False)
+                    return
+            except Exception:
+                pass
+        self._listen_state = state
+        self._set_listen_combo(state)
+        self._listening = state == "listen"
+        if state == "listen":
+            if player is not None:
+                try:
+                    player.set_muted(False)
+                except Exception:
+                    pass
+            self._sync_listen_workers(True, muted=False)
+            self._set_processing_status("接收中")
+            self.statusBar().showMessage(
+                "正在收听：解调 + 出声（选「停止解调」可让出 CPU）", MSG_NORMAL)
+        elif state == "muted":
+            # 静音收听：解调继续，只把声卡静音（解码/录制/星座图仍要数据）
+            if player is not None:
+                try:
+                    player.start()
+                    player.set_muted(True)
+                except Exception:
+                    pass
+            self._sync_listen_workers(True, muted=True)
+            self._set_processing_status("静音解调")
+            self.statusBar().showMessage(
+                "不收听：解调继续（供解码/录制/星座图），不出声", MSG_NORMAL)
+        else:
+            self._sync_listen_workers(False)
+            if player is not None:
+                try:
+                    player.stop()
+                except Exception:
+                    pass
+            self._set_processing_status("待机")
+            self.statusBar().showMessage(
+                "已停止解调：保持连接，解调线程让出 CPU，频谱仍在工作", MSG_NORMAL)
+
+    def _sync_listen_workers(self, on: bool, muted: bool = False) -> None:
+        """把收听态推给流水线里全部解调 worker（含主听/次听）。
+
+        on=False   → 连解调都不跑（停止解调，省 CPU）；
+        on=True    → 主听解调；muted=True 时只解调不写声卡。
+        """
+        pipe = getattr(self, "_pipeline", None)
+        if pipe is None:
+            return
+        for attr in ("_demod1", "_demod2"):
+            w = getattr(pipe, attr, None)
+            setter = getattr(w, "set_audio_enabled", None)
+            if callable(setter):
+                try:
+                    setter(bool(on) and (attr == "_demod1"))
+                except (RuntimeError, TypeError):
+                    pass
+            muter = getattr(w, "set_muted", None)
+            if callable(muter):
+                try:
+                    muter(bool(muted) and (attr == "_demod1"))
+                except (RuntimeError, TypeError):
+                    pass
+
     def _on_setting_changed(self, key: str, value) -> None:
         """设置页 / 导入 / 恢复默认 / 代码直接 set 的统一即时生效入口。"""
         if key == "callsign":
@@ -3563,6 +4327,8 @@ class MainWindow(QMainWindow):
             self.set_focus_mode(bool(value))
         elif key == "free_float_panels":
             self.set_free_float_enabled(bool(value))
+        elif key == "perf_profile":
+            self._apply_perf_profile(str(value))
         elif key in ("gnss_port", "gnss_baudrate"):
             self._gnss_port = str(self.settings.get("gnss_port", "") or "")
             try:
@@ -3609,8 +4375,18 @@ class MainWindow(QMainWindow):
             on_return=self._hide_capability_drawer)
         panel.resize(340, 240)
         panel.move(18, max(24, host.height() - 300))
+        # 用户口径（2026-11-10）：「这小框咋的？单独拿出来卖单的啊」——
+        # 这块面板上次被 ⤢ 弹出并折叠后，detached/collapsed 一起落盘，每次
+        # 启动都还原成一条没有主窗口当宿主的顶层黑条（主窗口最小化它还在
+        # 桌面上）。启动一律收回画布内；本次会话里仍可手动 ⤢ 弹出。
+        panel.attach_to_canvas()
         if not getattr(panel, "_collapsed", False):
             panel.toggle_collapse()      # 默认只留一条标题
+        # 默认不摆出来：收进主窗口后它仍是浮层，340×34 的标题条正好压在频谱
+        # 左上角，盖住「更多」工具栏和 dB 轴顶端刻度（2026-11-11 实拍）。
+        # 能力矩阵是元信息（工具/Hooks/编排），不是射频工作面，要看看的时候
+        # 从「面板 → 能力矩阵（◧ 事实源）」打开，不再默认占着仪表。
+        panel.hide()
         self._cap_panel = panel
         self._cap_body = body
         # init_agent 可能晚于本调用（无 API Key 也会装载内核），
@@ -3646,6 +4422,16 @@ class MainWindow(QMainWindow):
         self._refresh_capability_drawer()
         panel.show()
         panel.raise_()
+        act = getattr(self, "_cap_action", None)
+        if act is not None:
+            act.setChecked(True)
+
+    def _toggle_capability_drawer(self, on: bool) -> None:
+        """「面板 → 能力矩阵」开关：收起后必须还能从这里再打开。"""
+        if on:
+            self._show_capability_drawer()
+        else:
+            self._hide_capability_drawer()
 
     def _hide_capability_drawer(self) -> None:
         panel = getattr(self, "_cap_panel", None)
@@ -3653,6 +4439,9 @@ class MainWindow(QMainWindow):
             was_visible = panel.isVisible()
             panel.save_geometry()
             panel.hide()
+            act = getattr(self, "_cap_action", None)
+            if act is not None:
+                act.setChecked(False)
             # 抽屉本来就关着时点「⤶」界面一个字不变——用户会以为按钮没接上。
             # 给一句回执，说清「本来就没开」而不是「点了没反应」。
             self.statusBar().showMessage(
@@ -3716,10 +4505,19 @@ class MainWindow(QMainWindow):
 
     def _on_capability_activated(self, name: str) -> None:
         """点能力位只把名字送进 AI 输入栏，不预制流程、不自动执行。"""
+        text = "帮我用「%s」能力：" % str(name)
         ci = getattr(self, "cmd_input", None)
-        if ci is not None:
-            ci.setText("帮我用「%s」能力：" % str(name))
+        if ci is not None and getattr(self, "_app_mode", "ide") == "planetarium":
+            ci.setText(text)
             ci.setFocus()
+        else:
+            # IDE 形态：AI 输入唯一入口是右栏「AI 助手」面板。
+            try:
+                self.ai_panel.input_field.setText(text)
+                self.ai_panel.input_field.setFocus()
+                self._show_right_tab_of(self.ai_panel)
+            except (AttributeError, RuntimeError):
+                pass
         self._show_capability_drawer()
 
     # ---------------------------------------------------------------- 自由窗口
@@ -3949,6 +4747,9 @@ class MainWindow(QMainWindow):
         for i in range(tab.count()):
             if "频谱" in tab.tabText(i):
                 tab.setCurrentIndex(i)
+                # 已经在频谱页时 setCurrentIndex 是幂等的，界面零变化：
+                # 用户会以为这颗按钮是死的，交互审计也会判假活。给回执。
+                self.statusBar().showMessage("已回到频谱主页", MSG_NORMAL)
                 return
 
     # ------------------------------------------------------------------
@@ -4653,27 +5454,78 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------
     @staticmethod
     def _sanitize_window_pos(x: int, y: int, w: int, h: int) -> tuple:
-        """把恢复的窗口坐标夹到实际存在的屏幕上。
+        """把恢复的窗口坐标/尺寸夹到实际存在的屏幕上。
 
         外接显示器拔掉后，上次保存的 (5000, 400) 会被原样应用，窗口落在
         屏幕外且标题栏够不着。判定口径：窗口与任一屏幕可用区至少有
         96×96 的可见交集才认为可达；否则回落到主屏居中。
+
+        尺寸同时收口：在 4K 屏上把窗口拉到 1942×1150，换到 1024×768 的
+        演示/投影机后窗口比屏幕还大，底部状态栏和右栏页签直接看不见
+        （2026-11-10 用户演示现场）。宽高一律不超过屏幕可用区的 96%。
+        返回 ``(x, y, w, h)``。
         """
         try:
             screens = QGuiApplication.screens()
             primary = QGuiApplication.primaryScreen()
         except Exception:
-            return int(x), int(y)
+            return int(x), int(y), int(w), int(h)
         if not screens or primary is None:
-            return int(x), int(y)
-        target = QRect(int(x), int(y), max(1, int(w)), max(1, int(h)))
+            return int(x), int(y), int(w), int(h)
+        max_w = max(s.availableGeometry().width() for s in screens)
+        max_h = max(s.availableGeometry().height() for s in screens)
+        w = max(760, min(int(w), int(max_w * 0.96)))
+        h = max(520, min(int(h), int(max_h * 0.92)))
+        target = QRect(int(x), int(y), w, h)
         for scr in screens:
             inter = scr.availableGeometry().intersected(target)
             if inter.width() >= 96 and inter.height() >= 96:
-                return int(x), int(y)
+                return int(x), int(y), w, h
         g = primary.availableGeometry()
-        return (g.x() + max(0, (g.width() - int(w)) // 2),
-                g.y() + max(0, (g.height() - int(h)) // 2))
+        return (g.x() + max(0, (g.width() - w) // 2),
+                g.y() + max(0, (g.height() - h) // 2), w, h)
+
+    def _fit_window_to_screen(self) -> None:
+        """窗口不得大于屏幕可用区：小屏/投影上打开时必须能看全整个窗口。
+
+        默认 1400×900 在 1024×768 的演示机上会被系统裁掉右侧与底部——
+        右栏页签、状态栏、底栏全看不见（2026-11-10 用户现场）。这里按
+        当前主屏可用区收口，并保证位置仍可达。
+        """
+        scr = QGuiApplication.primaryScreen()
+        if scr is None or self.isFullScreen() or self.isMaximized():
+            return
+        g = scr.availableGeometry()
+        w = min(self.width(), int(g.width() * 0.96), max(1, g.width() - 8))
+        h = min(self.height(), int(g.height() * 0.92), max(1, g.height() - 8))
+        # 位置也要收口：x+w 必须落在屏幕内，否则右栏（AI 智能体/卫星跟踪）
+        # 被屏幕右缘裁掉——用户 2026-11-10 现场就是这个「显示不全」。
+        # 只保证「有 96px 可见」不够：窗口可以只露一条边，人却够不到内容。
+        x = max(g.x(), min(self.x(), g.x() + g.width() - w))
+        y = max(g.y(), min(self.y(), g.y() + g.height() - h))
+        if (w, h) != (self.width(), self.height()):
+            self.resize(w, h)
+        if (x, y) != (self.x(), self.y()):
+            self.move(x, y)
+
+    def showEvent(self, event) -> None:  # noqa: N802 (Qt 命名)
+        """首次显示后再收一次口：QSettings 恢复几何发生在 show 之后，
+        只在 __init__ 的定时器里收尺寸会晚一步（实测恢复成 1297 宽，在
+        1280 屏上右栏被裁 17~72px）。这里在真正上屏后补一次，且只补一次。
+        """
+        super().showEvent(event)
+        if not getattr(self, "_fit_on_show_done", False):
+            self._fit_on_show_done = True
+            QTimer.singleShot(0, self._fit_window_to_screen)
+        # 启动恢复成星象仪：主窗口 show 之后才把独立天空窗提到最前，
+        # 否则随后 show 的主窗口会盖在真全屏的天空窗上面。
+        if getattr(self, "_app_mode", "ide") == "planetarium":
+            QTimer.singleShot(0, self._present_planetarium_window)
+
+    def _load_gui_config_and_fit(self) -> None:
+        """恢复布局后立刻收口尺寸（无配置文件时也要收，不能只在有配置时收）。"""
+        self._load_gui_config()
+        self._fit_window_to_screen()
 
     def _on_reset_window_position(self) -> None:
         """把主窗口移回主屏中央（B2 的应用内复位入口）。"""
@@ -4751,6 +5603,16 @@ class MainWindow(QMainWindow):
         reset_act.setToolTip("清除所有自定义布局并回到默认布局")
         reset_act.triggered.connect(self._on_reset_layout)
         panel_menu.addAction(reset_act)
+        # 能力矩阵是 central widget 上的浮层，不是注册表页签，所以上面的循环
+        # 覆盖不到它。这里单独给一个开关：否则点「⤶」收起后全程序再没有
+        # 第二个入口能打开它，能力矩阵就此消失到下次重启。
+        cap_act = QAction("能力矩阵（◧ 事实源）", self)
+        cap_act.setCheckable(True)
+        cap_panel = getattr(self, "_cap_panel", None)
+        cap_act.setChecked(bool(cap_panel is not None and cap_panel.isVisible()))
+        cap_act.triggered.connect(self._toggle_capability_drawer)
+        panel_menu.addAction(cap_act)
+        self._cap_action = cap_act
 
     def _toggle_panel(self, spec, checked: bool) -> None:
         """面板菜单项勾选/取消：显示/隐藏对应页签（不删除控件，可随时再开）。"""
@@ -5013,7 +5875,7 @@ class MainWindow(QMainWindow):
                 return
             self._connect_backend(
                 backend,
-                sample_rate=float(DEFAULT_SAMPLE_RATE_HZ),
+                sample_rate=float(self._perf_default_sample_rate()),
                 gain=20.0,
                 ppm=0,
                 agc=True,
@@ -5057,8 +5919,8 @@ class MainWindow(QMainWindow):
                                    brief=_NO_SDR_BRIEF)
             return
 
-        # 构造后端并连接（默认参数：DEFAULT_SAMPLE_RATE_HZ = 2.400 MS/s、
-        # AGC 开、PPM 0、offset 关）
+        # 构造后端并连接（默认参数：采样率按性能档 _perf_default_sample_rate()
+        # ——默认省电 1.024 MS/s，非内核 2.4 MS/s 设备基准；AGC 开、PPM 0、offset 关）
         try:
             backend = build_backend_for_device(chosen)
         except Exception as e:
@@ -5072,7 +5934,7 @@ class MainWindow(QMainWindow):
 
         ok = self._connect_backend(
             backend,
-            sample_rate=float(DEFAULT_SAMPLE_RATE_HZ),
+            sample_rate=float(self._perf_default_sample_rate()),
             gain=20.0,
             ppm=0,
             agc=True,
@@ -5437,8 +6299,11 @@ class MainWindow(QMainWindow):
                 or d == self._RTL_TCP_SPECIAL
             )
             ppm_spin.setEnabled(is_rtl)
-            # 采样率档位随选中设备能力重建（换设备即换档位集合）
-            fill_sample_rate_combo(sr_combo, d)
+            # 采样率档位随选中设备能力重建（换设备即换档位集合）；
+            # 默认选中档随性能档（省电 1.024 MS/s），不再硬选设备基准 2.4 MS/s
+            # ——用户「电脑没有那么强大…得让路」，点「连接」不该默认把 GNSS 挤死。
+            fill_sample_rate_combo(sr_combo, d,
+                                   preferred_hz=self._perf_default_sample_rate())
 
         def _fill_combo(device_list, select_prev=None):
             """真实设备优先、rtl_tcp 殿后；无设备时不可选占位项置顶且默认选中。"""
@@ -5937,6 +6802,16 @@ class MainWindow(QMainWindow):
         self._link_degraded_code = ""
         self.connect_btn.setEnabled(True)
         self.disconnect_btn.setEnabled(False)
+        # 设备没了就不能还挂着"正在收听"：复位按钮 + 关声卡，避免重连时
+        # 用户没点收听却突然出声（插上≠播放的边界不能从断连这里漏掉）。
+        self._listening = False
+        self._listen_state = "idle"
+        self._set_listen_combo("idle")
+        if self._audio_player is not None:
+            try:
+                self._audio_player.stop()
+            except Exception:
+                pass
         self._refresh_tx_readout()  # 无设备 → 发射读数回 "—"，不留旧频点
         self._refresh_tx_button_state()  # 无硬件 → 发射按钮置灰并说明原因
 
@@ -6364,10 +7239,12 @@ class MainWindow(QMainWindow):
         if self._worker:
             self._worker.request_tool.emit(
                 "set_volume", {"volume": volume_pct_to_hw(volume)})
-        # (C) 真实声卡音量：0-100 → 0.0-2.0 增益
+        # 真实声卡音量：0-100 → 0.0-1.0 感知平方律（SDR++ powf(v,2)）。
+        # 旧式 ×2.0 在 72% 就把 20% 样本削成方波，是"过载"的根因。
         if self._audio_player is not None:
             try:
-                self._audio_player.set_gain(volume / 100.0 * 2.0)
+                from mbdsdr_ai.audio_out import volume_pct_to_gain
+                self._audio_player.set_gain(volume_pct_to_gain(volume))
             except Exception:
                 pass
         # 音量持久化（权威源 settings，0-100 人类量纲）。
@@ -6479,6 +7356,23 @@ class MainWindow(QMainWindow):
         全程精确，读取端按 ``segments`` / ``sample_rate_changes`` 分段。
         """
         rate = float(rate_hz)
+        if rate <= 0.0:
+            return
+        # 幂等 + 即时反馈：下拉的程序化回填、恢复配置、用户连拨都会重复发
+        # 同一个速率。旧实现每次都同步 stop+重建整条流水线（含线程 join），
+        # 在主线程上就是用户说的「调采样率有时原地不动」。同值直接返回；
+        # 真要重建时先给一句人话，再 processEvents 让提示真的画出来。
+        if not self._recording and abs(rate - float(self._record_sr)) < 1.0:
+            return
+        if not self._recording:
+            self.statusBar().showMessage(
+                f"正在切换到 {format_sample_rate(rate)}（重建接收链）…",
+                MSG_NORMAL)
+            try:
+                from PySide6.QtWidgets import QApplication
+                QApplication.processEvents()
+            except Exception:
+                pass
         if self._recording:
             if rate <= 0.0 or abs(rate - float(self._record_sr)) < 1.0:
                 return
@@ -7128,6 +8022,28 @@ class MainWindow(QMainWindow):
         # 录音指示显隐会改变浮层高度：必须重新 adjustSize，否则底部按钮被裁。
         self._position_planetarium_overlay()
 
+    def _place_ai_cmd_bar_in_sky(self) -> None:
+        """星象仪形态：把命令栏摆到天空顶部居中（显式几何，稍后随槽宽重算）。
+
+        IDE 里这颗命令栏是「创建但不入布局、保持隐藏」（IDE 的 AI 入口在
+        右栏面板），进形态时只 reparent 到天空槽，不会有任何布局替它算几何。
+        2026-11-11 实拍：它因此停在 ``(0, 0, 100, 34)`` 的残片状态，输入框
+        被压成一条「…」——星象仪里外行唯一的 AI 入口等于不存在。命令栏是
+        浮层，必须由这里按槽宽显式摆放并置顶。
+        """
+        bar = getattr(self, "_ai_cmd_bar", None)
+        slot = getattr(self, "_planetarium_sky_slot", None)
+        if bar is None or slot is None:
+            return
+        if getattr(self, "_app_mode", "ide") != "planetarium":
+            return
+        if bar.parentWidget() is not slot:
+            return
+        width = max(280, min(560, slot.width() - 40))
+        x = max(12, (slot.width() - width) // 2)
+        bar.setGeometry(x, 12, width, 34)
+        bar.raise_()
+
     def _position_planetarium_overlay(self) -> None:
         """浮层贴天空视图右上角 12px；与 AI 命令栏相交时下移避让。
 
@@ -7138,6 +8054,8 @@ class MainWindow(QMainWindow):
         sky = getattr(self, "sky_view", None)
         if strip is None or sky is None:
             return
+        # 命令栏是绝对定位浮层，先摆它，下面的相交判定才拿到真实矩形。
+        self._place_ai_cmd_bar_in_sky()
         strip.adjustSize()
         bar = getattr(self, "_ai_cmd_bar", None)
         bar_rect = QRect()
@@ -7149,6 +8067,28 @@ class MainWindow(QMainWindow):
             sky.width(), sky.height(), strip.width(), strip.height(), bar_rect)
         strip.move(x, y)
         strip.raise_()
+        # 右下 ⊖⊕ 与本条都贴右缘：窗口矮（600px 高再开底部频谱条）时两者
+        # 会叠在一起——⊖⊕ 被浮层盖住，点也点不到。让天空视图把这一块让开。
+        try:
+            sky.set_hud_avoid_rect(
+                QRectF(strip.geometry()) if strip.isVisible() else None)
+        except (AttributeError, RuntimeError):
+            pass
+        fs = getattr(self, "_sky_fs_btn", None)
+        if fs is not None:
+            if strip.isVisible():
+                # 星象仪形态浮层里已有「⛶ 全屏」，这颗是页签形态的替代入口；
+                # 两种形态都摆出来时，窗口一矮（600px + 底部频谱条）它就压在
+                # 浮层右缘上（实测盖住「频谱/退出」右半边），而且功能重复。
+                if fs.isVisible():
+                    fs.hide()
+            else:
+                # 页签形态（star 模式）按钮条是隐藏的，右上角是空的——把全屏
+                # 放在右上角，比压在底部「120.0°」与过境卡之间好点得多。
+                fs.move(max(8, sky.width() - fs.width() - 12), 12)
+                if not fs.isVisible():
+                    fs.show()
+            fs.raise_()
         # 图层面板跟着按钮条走（开着的时候才跟）
         pop = getattr(self, "_layer_popover", None)
         if pop is not None and pop.isVisible():
@@ -7207,9 +8147,24 @@ class MainWindow(QMainWindow):
         pop.adjustSize()
         x = int(strip.x() - pop.width() - 10)
         y = int(strip.y())
+        # 命令栏是星象仪里唯一的 AI 入口（麦克风/回车发送），面板不许压上去。
+        # 1000px 宽窗口实测：面板左缘 651、命令栏右缘 663，正好盖住麦克风。
+        bar_rect = QRect()
+        bar = getattr(self, "_ai_cmd_bar", None)
+        try:
+            if (bar is not None and bar.isVisible()
+                    and pop.parentWidget() is not None):
+                tl = pop.parentWidget().mapFromGlobal(
+                    bar.mapToGlobal(QPoint(0, 0)))
+                bar_rect = QRect(tl, bar.size())
+        except RuntimeError:
+            bar_rect = QRect()
         if x < 8:
             x = max(8, int(strip.x()))
             y = int(strip.y() + strip.height() + 8)
+        elif bar_rect.isValid() and QRect(
+                x, y, pop.width(), pop.height()).intersects(bar_rect):
+            y = bar_rect.bottom() + 1 + 8
         pop.move(max(8, x), max(8, y))
 
     def _set_planetarium_strip_hover(self, on: bool) -> None:
@@ -7257,13 +8212,17 @@ class MainWindow(QMainWindow):
         无后端 / 无 read_samples / 无声卡设备时全部安全降级，绝不崩溃。
         旧的 UI 线程 QTimer 轮询路径不再启动——FFT 与解调全部移到后台线程。
         """
-        # (C) 尝试打开声卡；无 sounddevice / 无设备时 available=False 安全降级
-        if self._audio_player is not None:
+        # (C) 声卡**不在这里自动打开**。对照 SDR++ ``playing=false``：
+        # 设备连接成功只把频谱/录制链路接通，出声必须用户显式点「▶ 收听」。
+        # 用户 2026-11-10：「不是插上就默认播放，是插上以后点上面的那个」。
+        # 断线重连时若用户此前已在收听，则保持收听态（不打断正在听的台）。
+        if self._listening and self._audio_player is not None:
             try:
-                ok = self._audio_player.start()
-                if not ok:
+                if not self._audio_player.start():
+                    self._listening = False
                     self.statusBar().showMessage(
-                        "无音频输出设备（声卡已禁用，不影响频谱/录制）", MSG_NORMAL)
+                        "无音频输出设备（收听已关闭，频谱/录制不受影响）",
+                        MSG_IMPORTANT)
             except Exception:
                 pass
         # 注意：桌面端不在此调用 backend.start_audio()。后端自带的 ReceiveChain +
@@ -7405,6 +8364,9 @@ class MainWindow(QMainWindow):
         self._vfo_workers = {
             self._main_vfo_id: pipe._demod1,
         }
+        # 流水线是重建出来的：把当前收听态推给新 worker，否则重建后
+        # worker 默认 audio_enabled=True，没点收听也会突然出声。
+        self._sync_listen_workers(self._listening)
         # 首帧：把 offset（= vfo_center - backend_center）推给 DDC
         self._update_main_vfo_offset()
 
@@ -7569,9 +8531,27 @@ class MainWindow(QMainWindow):
         if now - getattr(self, "_buffer_warn_last", -math.inf) < 30.0:
             return
         self._buffer_warn_last = now
-        self.statusBar().showMessage(
-            "环形缓冲积压，旧样本被覆盖（错误码 buffer_overflow）："
-            "降低采样率或减少订阅者，让读侧跟上", MSG_IMPORTANT)
+        # 不再用 statusBar().showMessage：那会在最底部多占一整行，
+        # 屏幕空间有限（2026-11-10 用户实指）。写进底坞同一行的状态位，
+        # 8 秒后自动回到当前接收态。错误码放 tooltip：状态位只有一行，
+        # 代码不该挤掉人话，但也不能丢（排障时要能对上后端）。
+        self._set_processing_status("缓冲积压（丢样）")
+        try:
+            self.status_processing.setToolTip(
+                "环形缓冲积压到 high：数据还在流，但会覆盖旧样本导致丢样"
+                "（错误码 buffer_overflow）。可降采样率或关掉多余 VFO 缓解。")
+        except Exception:
+            pass
+
+        def _restore():
+            self._set_processing_status(
+                "接收中" if getattr(self, "_listening", False) else "待机")
+            try:
+                self.status_processing.setToolTip("")
+            except Exception:
+                pass
+
+        QTimer.singleShot(8000, _restore)
 
     def _update_main_vfo_offset(self):
         """把每个已绑定 DSP 的 VFO 收听频率搬到各自 DDC：offset = vfo_center - backend_center。
@@ -7706,12 +8686,17 @@ class MainWindow(QMainWindow):
         # 收到真实数据 = 链路恢复，清零掉线计数
         self._read_fail_signals = 0
         self._health_has_data = True
-        # 频谱状态文字（重绘由 30fps 定时器统一驱动，避免逐帧重画）
+        # 频谱状态文字逐帧更新；重绘由频谱面板自己的 _plot._timer 统一驱动
+        # （set_performance_mode 按性能档调间隔：eco 100ms/10fps、quality
+        # 50ms/20fps），不逐帧 update()。此前这里另调 _ensure_repaint_timer
+        # 起一个硬编码 33ms/30fps 的旁路定时器，与面板定时器并存且更快，两者
+        # 都 connect _plot.update() → 有效重绘恒为 30fps，省电档的刷新让路在
+        # live 接收（用户真机场景）完全失效（2026-11-10 repaint_lever_probe 实证）。
+        # 旁路已移除：面板定时器是唯一重绘驱动，性能档刷新真生效。
         try:
             self.spectrum._refresh_status_labels()
         except Exception:
             pass
-        self._ensure_repaint_timer()
 
         # IQ 总线：ReceivePipeline 路径**不走** SpectrumPanel.set_iq_data
         # （FFT worker 直接把谱线喂给 _plot），所以总线原先没有任何发布者，
@@ -7779,24 +8764,6 @@ class MainWindow(QMainWindow):
             except Exception:
                 pass
 
-    def _ensure_repaint_timer(self):
-        """30fps 统一重绘定时器（随流水线数据启动），替代每帧 update()。"""
-        t = getattr(self, '_repaint_timer', None)
-        if t is None:
-            from PySide6.QtCore import QTimer
-            t = QTimer(self)
-            t.setInterval(33)
-            t.timeout.connect(self._repaint_plot)
-            self._repaint_timer = t
-        if not t.isActive():
-            t.start()
-
-    def _repaint_plot(self):
-        try:
-            self.spectrum._plot.update()
-        except Exception:
-            pass
-
     def _record_write_chunk(self, iq: np.ndarray) -> None:
         """录制写一块：直写磁盘；写失败立即停录并报错（S7）。
 
@@ -7843,13 +8810,6 @@ class MainWindow(QMainWindow):
         try:
             if self._iq_poll_timer is not None:
                 self._iq_poll_timer.stop()
-        except Exception:
-            pass
-        # 停 30fps 重绘定时器
-        try:
-            t = getattr(self, '_repaint_timer', None)
-            if t is not None:
-                t.stop()
         except Exception:
             pass
         # 停流水线（reader + splitter + FFT/demod/record workers），join 回收
@@ -8106,14 +9066,24 @@ class MainWindow(QMainWindow):
                 return
         try:
             self._last_dbfs = float(dbfs)
-            txt = f"RSSI: {dbfs:.1f} dBFS"
-            self.rssi_label.setText(txt)
-            self.status_rssi.setText(f"信号: {dbfs:.1f} dBFS")
+            # 读数要「稳」：SDR++ / SDR# 的电平表都是平滑后的值。这里做
+            # 0.85/0.15 指数平滑，并把文字刷新限到 5 Hz——原先每帧（20fps）
+            # 改一次数字，看起来就是一直乱跳（用户 2026-11-10 实指）。
+            prev = getattr(self, "_dbfs_ema", None)
+            ema = (float(dbfs) if prev is None
+                   else 0.85 * float(prev) + 0.15 * float(dbfs))
+            self._dbfs_ema = ema
+            now_mono = time.monotonic()
+            if now_mono - getattr(self, "_dbfs_label_ts", 0.0) >= 0.2:
+                self._dbfs_label_ts = now_mono
+                txt = f"RSSI: {ema:.1f} dBFS"
+                self.rssi_label.setText(txt)
+                self.status_rssi.setText(f"信号: {ema:.1f} dBFS")
             # 推送 S-meter（hasattr 守卫）
             try:
                 cp = getattr(self, "control_panel", None)
                 if cp is not None and hasattr(cp, "update_signal_level"):
-                    cp.update_signal_level(dbfs)
+                    cp.update_signal_level(ema)
             except Exception:
                 pass
             try:
@@ -8210,8 +9180,15 @@ class MainWindow(QMainWindow):
 
         # 2) WFM 广播特殊处理：跳过 VFO，直接对原始全带宽 IQ 鉴频（内部已重采样到 48k）
         if mode == "WFM":
+            # 有状态接收器：回放与实时链路共用同一份 DSP 语义。
+            # 旧的 wfm_broadcast_demod 对每块 IQ 独立归一化到 0.95，
+            # 静音/弱信号块的噪声被拉满 —— 回放同样会"大多过载"。
             try:
-                audio = _dsp.wfm_broadcast_demod(iq, sample_rate=sr, audio_sr=48000)
+                rx = getattr(self, "_replay_wfm_rx", None)
+                if rx is None or abs(float(getattr(rx, "sr", 0)) - float(sr)) > 1:
+                    rx = _dsp.WFMReceiver(sample_rate=sr, audio_sr=48000)
+                    self._replay_wfm_rx = rx
+                audio = rx.process(iq)
                 _emit(audio)
             except Exception:
                 pass
@@ -8770,28 +9747,53 @@ class MainWindow(QMainWindow):
             except Exception:
                 pass
 
+    def _planetarium_screen_window(self):
+        """全屏状态归属哪个窗口：星象仪形态是独立天空窗，其他是主窗口。"""
+        if getattr(self, "_app_mode", "ide") == "planetarium":
+            win = getattr(self, "_planetarium_window", None)
+            if win is not None:
+                return win
+        return self
+
     def _toggle_fullscreen(self):
-        """全屏/还原（菜单 F11、星象仪那颗按钮共用同一入口）。"""
-        if self.isFullScreen():
-            self.showNormal()
+        """全屏/还原（菜单 F11、星象仪那颗按钮共用同一入口）。
+
+        星象仪形态下操作的是**独立天空窗**，不是主窗口——用户要的是天空
+        自己全屏，主窗口仍留在 IDE（可放另一块屏）。
+        """
+        win = self._planetarium_screen_window()
+        if win.isFullScreen():
+            win.showNormal()
         else:
-            self.showFullScreen()
+            win.showFullScreen()
+        # 不读回 isFullScreen() 断言结果：offscreen 与部分 WM 下窗口状态要等
+        # 下一轮事件循环才落地，立刻读回会说反话。只给「已切换」的诚实回执，
+        # 也避免页签形态那颗 ⛶ 点了界面零变化（交互审计判假活）。
+        self.statusBar().showMessage("已切换全屏状态（F11 可再切回）", MSG_NORMAL)
         self._sync_fullscreen_btn()
 
     def _sync_fullscreen_btn(self) -> None:
-        """星象仪「全屏」按钮文案跟着真实窗口状态走（不猜、不留过期文案）。"""
-        btn = getattr(self, "_planetarium_fs_btn", None)
-        if btn is None:
-            return
+        """全屏按钮文案跟着真实窗口状态走（不猜、不留过期文案）。"""
         try:
-            if self.isFullScreen():
+            full = bool(self._planetarium_screen_window().isFullScreen())
+        except RuntimeError:
+            return
+        btn = getattr(self, "_planetarium_fs_btn", None)
+        if btn is not None:
+            if full:
                 btn.setText("🗗 退出全屏")
                 btn.setToolTip("回到窗口模式（F11 同效）")
             else:
                 btn.setText("⛶ 全屏")
                 btn.setToolTip("全屏看天空（F11；再点一次回到窗口）")
-        except RuntimeError:
-            pass
+        # 页签形态那颗 30×30 角标与浮层按钮共用 _toggle_fullscreen。旧实现
+        # 只同步浮层按钮，还因为 btn is None 直接 return：点角标全屏/还原后
+        # 界面零变化，交互审计判「假活」，用户也看不出当前状态。两颗一起跟。
+        fs = getattr(self, "_sky_fs_btn", None)
+        if fs is not None:
+            fs.setText("⊞" if full else "⛶")
+            fs.setToolTip("回到窗口模式（F11 同效）" if full
+                          else "全屏看天空（F11；再点一次回到窗口）")
 
     # ------------------------------------------------------------------
     # 右侧 QDockWidget 停靠体系（控制 / 状态 / AI 助手）
@@ -9984,7 +10986,11 @@ class MainWindow(QMainWindow):
             except Exception:
                 pass
 
-    _THREE_COLUMN_LAYOUT_VERSION = 3
+    # 版本 5（2026-11-10）：默认比例改为「左 520 / 中 360 / 右 380」并把增量
+    # 优先给左栏（左 ≥ 中为硬规则，中栏空态地图不许吃成主区）；version 4 的
+    # saveState 会带回旧的 [426,466,380]（中栏压过左栏），存量一律弃用，
+    # 用户在本版本拖动后才重新持久化。
+    _THREE_COLUMN_LAYOUT_VERSION = 5
 
     def _save_window_state(self):
         s = QSettings("MBDSDR", "Desktop")
@@ -10373,6 +11379,8 @@ class MainWindow(QMainWindow):
         except Exception:
             pass
 
+        # 每段回放都换一个全新接收器：滤波器历史不能跨文件带过去
+        self._replay_wfm_rx = None
         self._replay_iq = iq
         self._replay_pos = 0
         self._replay_sr = sr
@@ -10679,6 +11687,29 @@ class MainWindow(QMainWindow):
             panel.show()
             panel.raise_()
             panel.activateWindow()
+            # 定位收口：Qt.Tool 首次 show 由窗口管理器给位置，随后布局把
+            # 窗口撑高 100+ px，位置不跟着收敛（实测 1000×600 里底边 1029）。
+            # 按当前形态所在屏幕夹住，并保证「使用此地点」始终在屏内。
+            try:
+                host = (self._planetarium_window
+                        if self._app_mode == "planetarium"
+                        else self)
+                screen = host.screen() if host is not None else None
+                if screen is None:
+                    screen = QGuiApplication.primaryScreen()
+                avail = (screen.availableGeometry() if screen is not None
+                         else QRect(0, 0, 1280, 800))
+                panel.fit_to_available(avail)
+            except (AttributeError, RuntimeError):
+                pass
+            # 夜视开着时，面板晚于开关创建/打开也要补红光：这是一块整屏
+            # 白底地图，夜里直接糊脸，暗适应全废。放在 show 之后压，
+            # 免得面板内部控件在 show 时把自己抬到纱罩上面。
+            try:
+                if bool(self.sky_view.layer_state().get("night", False)):
+                    self._apply_night_vision_to_overlays(True)
+            except (AttributeError, RuntimeError):
+                pass
             # 面板已经开着时再点「📍 地点」界面不会有变化（幂等）——
             # 给一句状态栏回执，别让用户以为按钮没接上。
             self.statusBar().showMessage(
@@ -10852,6 +11883,34 @@ class MainWindow(QMainWindow):
         if names:
             self.sat_track_panel.set_downlink_mhz(
                 self._loop_sat_tracker.downlink_freq_for(names[0]) / 1e6)
+        # TLE 过期自动刷新：面板「TLE 日期」若是两天前的，过境预报就是错的
+        # （2026-11-10 实测停在 2026-09-25）。开窗后台拉一次 celestrak GP
+        # 分组（离线模式下 fetch 内部会明确拒绝，不冒充成功）。
+        #
+        # 必须挂成 self 的子定时器：QTimer.singleShot 静态版造出的定时器没有
+        # QObject parent，_release_runtime_resources 的 findChildren(QTimer) 扫不到、
+        # 关窗也停不掉——窗口关掉之后它照样跑网络，并把「TLE 更新失败」写进
+        # 已关窗口的状态栏（test_ui_stability_resources 实测抓到）。
+        try:
+            from datetime import date as _date, datetime as _dt
+            _d = _dt.strptime(str(self._loop_sat_tracker.tle_date)[:10],
+                               "%Y-%m-%d").date()
+            _stale = (_date.today() - _d).days >= 2
+        except Exception:
+            _stale = True
+        if _stale:
+            _tle_timer = QTimer(self)
+            _tle_timer.setSingleShot(True)
+            _tle_timer.setInterval(1500)
+            _tle_timer.timeout.connect(self._on_update_sat_tle)
+            _tle_timer.start()
+            self._tle_boot_timer = _tle_timer
+            # _build_ui 早于 __init__ 里 _startup_timers 的创建，这里可能还没有
+            # 那个列表；没有也不影响关窗回收（它是 self 的子 QTimer，
+            # findChildren(QTimer) 一定扫得到）。
+            _startup = getattr(self, "_startup_timers", None)
+            if _startup is not None:
+                _startup.append(_tle_timer)
 
     def _on_sat_combo_changed(self, name: str):
         """下拉框切换卫星：回填该星的标准下行频率。"""
@@ -11278,7 +12337,7 @@ class MainWindow(QMainWindow):
         if os.environ.get("MBDSDR_OFFLINE") == "1":
             return                      # 测试/CI 进程不碰真实串口
         try:
-            if self._gnss.is_connected:
+            if self._gnss.is_connected():
                 return
         except Exception:
             pass
@@ -11455,7 +12514,7 @@ class MainWindow(QMainWindow):
             pass
         # 底部状态栏 GNSS 标签：三态文案（同一串口数据源，不走 worker 双写）
         try:
-            connected = bool(self._gnss.is_connected)
+            connected = bool(self._gnss.is_connected())
         except Exception:
             connected = False
         try:
@@ -11519,6 +12578,12 @@ class MainWindow(QMainWindow):
             gsv_frames = self._gnss.get_gsv_frames()
             gsa_frame = self._gnss.get_gsa()
             self.sky_view.update_gnss_satellites(gsv_frames, gsa_frame)
+            # 星座图页以 GNSS 为主视图：同一份 GSV/GSA 真值直接喂过去，
+            # 不再只靠 SDR 的 I/Q 画散点（SDR 全向天线收不到卫星）。
+            cp = getattr(self, "constellation_panel", None)
+            if cp is not None and hasattr(cp, "update_gnss"):
+                cp.update_gnss(gsv_frames, gsa_frame,
+                               bool(self._gnss.is_connected()))
         except Exception:
             pass
 
@@ -11639,7 +12704,7 @@ class MainWindow(QMainWindow):
             self._replay_load_cancel.set()
         for attr in ("_sky_update_timer", "_utc_timer", "_sat_track_timer",
                      "_gnss_timer", "_iq_poll_timer", "_record_timer",
-                     "_replay_timer", "_repaint_timer"):
+                     "_replay_timer"):
             t = getattr(self, attr, None)
             if t is None:
                 continue
@@ -11673,11 +12738,13 @@ class MainWindow(QMainWindow):
                 _app.removeEventFilter(self)
         except RuntimeError:
             pass
-        try:
-            touch_manager().touch_mode_changed.disconnect(
-                self._on_touch_mode_changed)
-        except (RuntimeError, TypeError):
-            pass
+        if getattr(self, "_touch_mode_bound", False):
+            self._touch_mode_bound = False
+            try:
+                touch_manager().touch_mode_changed.disconnect(
+                    self._on_touch_mode_changed)
+            except (RuntimeError, TypeError):
+                pass
         # 4. 释放全局动作总线执行器。ui_actions / sky_actions 是进程级单例，
         #    __init__ 把本窗口绑定方法赋给 bus.executor；不释放则单例永久强引用
         #    本窗口——窗口连同三十余个子弹出件全部不可回收，长跑回归里窗口
@@ -11782,6 +12849,15 @@ class MainWindow(QMainWindow):
                 self._gnss.stop()
         except Exception:
             pass
+        # 星象仪独立天空窗是**无父顶层窗**：主窗口关掉后它若还显示着，
+        # quitOnLastWindowClosed 就永远等不到"最后一个窗口"（进程赖着不走）。
+        # 放在确认/收尾之后：前面任何一条 event.ignore() 返回都还没真退出。
+        pwin = getattr(self, "_planetarium_window", None)
+        if pwin is not None:
+            try:
+                pwin.hide()
+            except RuntimeError:
+                pass
         event.accept()
 
     def _confirm_stop_recording_for_close(self) -> bool:
@@ -11940,9 +13016,9 @@ class MainWindow(QMainWindow):
                 h = win.get("height", 900)
                 x = win.get("x", 100)
                 y = win.get("y", 100)
+                # B2：外接屏拔掉 / 换小屏后旧坐标与旧尺寸都会越界，先校验再摆。
+                x, y, w, h = self._sanitize_window_pos(x, y, w, h)
                 self.resize(w, h)
-                # B2：外接屏拔掉后旧坐标会落在屏幕外，必须先校验再 move
-                x, y = self._sanitize_window_pos(x, y, w, h)
                 self.move(x, y)
             # 恢复观测站坐标：缺失时默认 None（未配置），不再回退到示例城市硬编码坐标
             self._observer_lat = config.get("observer_lat")

@@ -102,6 +102,15 @@ DISABLED_REASONS: dict[str, str] = {
     "按钮|收藏当前频率|ControlPanel": "未拿到频率真值，没有可收藏的频点；"
                                       "`set_frequency_hz` 回填后自动启用",
     "按钮|断开|NtripConfigDialog": "NTRIP 配置对话框内尚未建立连接",
+    "按钮|连接|ModulePanel": "未发现 SDR 设备：module_panel 的 "
+                            "`_on_devices_refreshed` 在枚举结果为空时 "
+                            "`connect_btn.setEnabled(False)`；点「刷新」重新枚举到设备后自动启用",
+    "按钮|连接|DevicePanel": "正在后台枚举 / 未发现 SDR 设备 / 已连接：device_panel "
+                            "`connect_btn` 随 `_devices` 与连接状态置灰（构造时「正在枚举设备…」、"
+                            "`_on_devices_refreshed` 空结果、`set_connected(True)` 已连接）",
+    "按钮|OK|对话框:选择 SDR 设备": "设备下拉当前是占位项（currentData() 为 None，即无真设备）"
+                                   "或正在刷新枚举：`ok_btn.setEnabled(enabled and not busy['on'])`，"
+                                   "选中真实设备后自动启用",
     "菜单项|工具(&T) / FM 扫频找台|*": "未连接 SDR（FM 扫频需要可调谐的本地接收机）",
     "菜单项|工具(&T) / 停止卫星跟踪|*":
         "当前无跟踪目标：主窗口 `_sync_tracking_ui` 随跟踪状态启用/置灰",
@@ -505,15 +514,21 @@ class _ExceptionCatcher:
 def _reveal(obj) -> list[str]:
     """把控件所在页签/堆栈页/dock/对话框切到可交互状态；返回为此做的切换。"""
     from PySide6.QtWidgets import (QApplication, QDialog, QDockWidget,
-                                   QStackedWidget, QTabWidget)
+                                   QStackedWidget, QTabWidget, QWidget)
 
     switched = []
+    # isAncestorOf 只接受 QWidget。菜单/工具栏 QAction 不是控件，直接传进去
+    # 会 TypeError；改用它的关联控件做 ancestry 判定，没有关联控件就跳过页切换
+    # （菜单项靠弹出菜单可达，不依赖某个堆栈页）。
+    target = obj if isinstance(obj, QWidget) else next(
+        (w for w in getattr(obj, "associatedWidgets", lambda: [])()
+         if isinstance(w, QWidget)), None)
     p = obj.parent()
     while p is not None:
         if isinstance(p, QTabWidget):
             for i in range(p.count()):
                 w = p.widget(i)
-                if w is not None and w.isAncestorOf(obj):
+                if w is not None and target is not None and w.isAncestorOf(target):
                     if p.currentIndex() != i:
                         switched.append(f"切页签 {type(p).__name__} -> {i}")
                         p.setCurrentIndex(i)
@@ -521,7 +536,7 @@ def _reveal(obj) -> list[str]:
         elif isinstance(p, QStackedWidget):
             for i in range(p.count()):
                 w = p.widget(i)
-                if w is not None and w.isAncestorOf(obj):
+                if w is not None and target is not None and w.isAncestorOf(target):
                     if p.currentIndex() != i:
                         switched.append(f"切堆栈 {type(p).__name__} -> {i}")
                         p.setCurrentIndex(i)
@@ -823,6 +838,14 @@ def _probe_rows(win, rows, evidence, volatile=()) -> None:
 
     for row in rows:
         _init_row(row)
+        # 前面的动作可能整块重建/销毁面板（实测 _SectionHeader 的 C++ 端
+        # 在探测到一半时已释放）。清单是启动时的快照，这类行不是死按钮，
+        # 是快照与实时 UI 的正常竞态；如实标注后跳过，别让审计自己崩掉。
+        try:
+            row["obj"].parent()
+        except RuntimeError as exc:
+            row["destroyed"] = str(exc)
+            continue
 
         if not row["wired"]:
             input_note = _input_reason(row)
@@ -908,6 +931,9 @@ def _audit_runtime_dialogs(win, initial_ids, evidence, volatile=()) -> list[dict
 def classify(rows) -> dict:
     dead, false_alive, exceptions, unreasoned = [], [], [], []
     for row in rows:
+        if row.get("destroyed"):
+            row["conclusion"] = "探测前已被销毁（前面动作重建面板），不计入"
+            continue
         row["conclusion"] = ""
         if row["exception"]:
             row["conclusion"] = "抛异常"
@@ -934,6 +960,15 @@ def classify(rows) -> dict:
             continue
         if row["obs"]:
             row["conclusion"] = "可用"
+            continue
+        if not row.get("visible_initial", True):
+            # 判定必须拿「启动形态」的可见性：_reveal 会把控件所在页签/堆栈
+            # 人为切出来，触发当下 row["visible"] 几乎恒为 True，用它等于
+            # 没判（2026-11-11 审计收紧后 4 条星象仪按钮被误记假活）。
+            # 用户当下点不到的控件，程序化 click 属测量假阳性，不计假活。
+            # 真死/抛异常/禁用理由三条不受影响（它们在前面已判）。
+            row["conclusion"] = ("当前形态不可见（浮层/折叠页/它形态），"
+                                 "用户点不到，不计假活")
             continue
         fired = sum(row.get("emitted", {}).values())
         row["obs"].append(

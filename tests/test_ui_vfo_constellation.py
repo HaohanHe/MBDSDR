@@ -155,6 +155,154 @@ class TestConstellationPanel:
         p.tmpl_combo.setCurrentText("QPSK")
         assert p.view._template == "QPSK"
 
+    # -- 无载波判定（不许把噪声云当星座画） --------------------------------
+    def test_pure_noise_shows_no_carrier(self):
+        from constellation_panel import ConstellationPanel
+        rng = np.random.default_rng(7)
+        noise = (rng.normal(size=512) + 1j * rng.normal(size=512)) * 0.1
+        p = ConstellationPanel()
+        p.set_sdr_connected(True)
+        p.feed_iq(noise.astype(np.complex64))
+        assert p.carrier_locked is False
+        assert p.no_carrier_reason
+        assert p.view._points == []
+        assert p.view._has_data is False
+        assert "未锁定" in p.status_label.text()
+
+    def test_zero_iq_shows_no_carrier(self):
+        from constellation_panel import ConstellationPanel
+        p = ConstellationPanel()
+        p.set_sdr_connected(True)
+        p.feed_iq(np.zeros(512, dtype=np.complex64))
+        assert p.carrier_locked is False
+        assert "幅度为 0" in p.no_carrier_reason
+        assert p.view._points == []
+
+    def test_bpsk_locks_and_draws_points(self):
+        from constellation_panel import ConstellationPanel
+        rng = np.random.default_rng(11)
+        sym = rng.choice([-1.0, 1.0], size=512)
+        iq = sym + 0.02 * (rng.normal(size=512) + 1j * rng.normal(size=512))
+        p = ConstellationPanel()
+        p.set_sdr_connected(True)
+        p.feed_iq(iq.astype(np.complex64))
+        assert p.carrier_locked is True
+        assert p.no_carrier_reason == ""
+        assert len(p.view._points) == 512
+        assert "接收中" in p.status_label.text()
+
+    def test_16qam_locks(self):
+        from constellation_panel import ConstellationPanel
+        rng = np.random.default_rng(3)
+        levels = np.array([-3.0, -1.0, 1.0, 3.0])
+        i = rng.choice(levels, size=512)
+        q = rng.choice(levels, size=512)
+        p = ConstellationPanel()
+        p.set_sdr_connected(True)
+        p.feed_iq((i + 1j * q).astype(np.complex64))
+        assert p.carrier_locked is True
+
+    def test_carrier_loss_clears_stale_points(self):
+        """先有载波后掉成噪声：旧散点必须清掉，不能拿上一张图充数。"""
+        from constellation_panel import ConstellationPanel
+        rng = np.random.default_rng(5)
+        p = ConstellationPanel()
+        p.set_sdr_connected(True)
+        iq = np.array([1+1j, -1+1j, -1-1j, 1-1j] * 128, dtype=np.complex64)
+        p.feed_iq(iq)
+        assert p.carrier_locked is True
+        noise = (rng.normal(size=512) + 1j * rng.normal(size=512)) * 0.1
+        p.feed_iq(noise.astype(np.complex64))
+        assert p.carrier_locked is False
+        assert p.view._points == []
+
+    def test_outlier_does_not_define_scale(self):
+        """归一化用 p99 而不是 max：单个离群点不该把整幅压扁。"""
+        from constellation_panel import ConstellationPanel
+        iq = np.array([1+1j, -1+1j, -1-1j, 1-1j] * 128, dtype=np.complex64)
+        iq[-1] = 1000 + 0j
+        p = ConstellationPanel()
+        p.set_sdr_connected(True)
+        p.feed_iq(iq)
+        assert p.carrier_locked is True
+        assert 0 < p.view._ref_amp < 10.0
+
+    # -- GNSS 主视图：星座图不该只认 SDR ----------------------------------
+    def test_default_layer_is_gnss_only(self):
+        from constellation_panel import ConstellationPanel
+        p = ConstellationPanel()
+        assert p.gnss_only_btn.isChecked() is True
+        assert p.sdr_overlay is False
+        assert p.sdr_box.isVisibleTo(p) is False, "默认不该露出 SDR 叠加层"
+        assert "未连接" in p.gnss_status_text
+
+    def test_sdr_overlay_toggle(self):
+        from constellation_panel import ConstellationPanel
+        p = ConstellationPanel()
+        p.gnss_sdr_btn.click()
+        assert p.sdr_overlay is True
+        assert p.gnss_sdr_btn.isChecked() is True
+        assert p.sdr_box.isVisibleTo(p) is True
+        p.gnss_only_btn.click()
+        assert p.sdr_overlay is False
+        assert p.sdr_box.isVisibleTo(p) is False
+
+    def test_gnss_view_draws_real_gsv_only(self):
+        """只画 GSV 真上报的卫星；同名 PRN 分属不同星座不得互相点亮。"""
+        from constellation_panel import ConstellationPanel
+        p = ConstellationPanel()
+        p.update_gnss([], {}, True)
+        assert p.gnss_satellites == []
+        assert "暂无可见卫星" in p.gnss_status_text
+
+        frames = [
+            {"talker": "GP", "sats": [
+                {"id": 12, "elevation": 45.0, "azimuth": 130.0, "snr_db": 38.0},
+                {"id": 5, "elevation": 20.0, "azimuth": 310.0, "snr_db": 24.0},
+            ]},
+            {"talker": "GB", "sats": [
+                {"id": 5, "elevation": 60.0, "azimuth": 200.0, "snr_db": None},
+            ]},
+        ]
+        p.update_gnss(frames, {"GP": {"satellites_used": [12]}}, True)
+        sats = p.gnss_satellites
+        assert len(sats) == 3
+        assert {s["constellation"] for s in sats} == {"GPS", "BeiDou"}
+        assert "可见 3 颗" in p.gnss_status_text
+        assert "参与定位 1 颗" in p.gnss_status_text
+
+        def pick(cons, prn):
+            return next(s for s in sats
+                        if s["constellation"] == cons and s["prn"] == prn)
+
+        assert p.gnss_view.is_used(pick("GPS", 12)) is True
+        assert p.gnss_view.is_used(pick("GPS", 5)) is False
+        assert p.gnss_view.is_used(pick("BeiDou", 5)) is False
+
+    def test_gnss_disconnect_clears_stale_satellites(self):
+        """串口停掉后 get_gsv_frames() 仍会回上一帧，界面必须清空。"""
+        from constellation_panel import ConstellationPanel
+        p = ConstellationPanel()
+        p.update_gnss([{"talker": "GP",
+                        "sats": [{"id": 1, "snr_db": 30.0}]}], {}, True)
+        assert len(p.gnss_satellites) == 1
+        p.update_gnss([], {}, False)
+        assert p.gnss_satellites == []
+        assert "未连接" in p.gnss_status_text
+        assert "未连接" in p.gnss_view._empty_text
+
+    def test_gnss_view_paints_without_crash(self):
+        """柱状星群图要能画：含 snr 缺失、参与/未参与定位两种情况。"""
+        from constellation_panel import ConstellationPanel
+        p = ConstellationPanel()
+        p.resize(420, 620)
+        frames = [{"talker": "GP", "sats": [
+            {"id": i, "elevation": 10.0 * i, "azimuth": 30.0 * i,
+             "snr_db": None if i == 2 else 20.0 + i} for i in (1, 2, 3, 4)]}]
+        p.update_gnss(frames, {"GP": {"satellites_used": [1, 3]}}, True)
+        img = p.gnss_view.grab()
+        assert img.isNull() is False
+
 
 # ----------------------------------------------------------------------
 class TestDevicePanel:

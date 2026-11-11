@@ -132,8 +132,11 @@ def test_gui_config_no_longer_writes_canonical_keys():
 
 def _reset_canonical_settings(w):
     """把 settings 打回默认态，模拟「用户从未设置过」（迁移只在该前提发生）。"""
+    # theme 默认值取权威源 DEFAULTS（出厂深色 dark_car），不写死旧浅色值：
+    # 产品迁移守卫是 `theme == DEFAULT_THEME`，helper 必须打到真正的出厂默认
+    # 才能模拟「用户从未设置过」，否则旧 gui_config 主题永远迁不进来。
     for key, val in (("gnss_port", ""), ("gnss_baudrate", 9600),
-                     ("theme", "default")):
+                     ("theme", DEFAULTS["theme"])):
         w.settings.set(key, val)
 
 
@@ -612,9 +615,13 @@ def test_volume_wire_conversion_isolated_at_boundary(main_window, monkeypatch):
     w._on_volume_changed(30)
     assert worker.calls == [("set_volume", {"volume": volume_pct_to_hw(30)})], (
         "下发边界的 0-100→0-63 换算错误：" f"{worker.calls}（应为 19）")
-    assert audio.gains[-1] == pytest.approx(30 / 100.0 * 2.0), (
-        "声卡增益没按 0-100 基准（volume/100*2.0），实际 "
-        f"{audio.gains[-1]}（0-63 旧式会给 {30 / 63.0 * 2.0:.4f}）")
+    # 声卡增益走感知平方律 volume_pct_to_gain（SDR++ powf(v,2)，上限 1.0）：
+    # 旧式 volume/100*2.0 在 72% 就把 20% 样本削成方波，是「过载」根因，已废。
+    from mbdsdr_ai.audio_out import volume_pct_to_gain
+    assert audio.gains[-1] == pytest.approx(volume_pct_to_gain(30)), (
+        "声卡增益没按平方律 volume_pct_to_gain（0-100→0.0-1.0），实际 "
+        f"{audio.gains[-1]}（应为 {volume_pct_to_gain(30):.4f}；旧式 ×2.0 已废）")
+    assert audio.gains[-1] <= 1.0, "声卡增益超过 1.0 会硬削过载（平方律上限红线）"
 
     # 反向边界：硬件 0-63 量纲回填 UI 必须转回 0-100
     w.control_panel.set_volume(0)

@@ -467,10 +467,18 @@ class DockLayoutManager:
                 return
 
     def _preset_focus(self) -> None:
-        """专注：全屏频谱 + 右侧 36px 图标窄条。"""
+        """专注：频谱/天空占主区、收起工程读数，但**不隐藏右栏**。
+
+        旧实现把右栏三个 Dock 全部 setVisible(False)，只留 36px 窄条。新三栏
+        布局里右栏是页签容器，全部隐藏后整栏仍是 380px 空白，控制/AI 面板
+        直接找不到（用户 2026-11-10：「有的东西没展示全」「AI 面板在哪」）。
+        专注只该收注意力，不该把整栏功能藏起来；36px 窄条仅用于真正的
+        QDockWidget 老布局。
+        """
         self._move_sky_to_tab()
         self._raise_center_tab("spectrum")
-        # 右侧三个 Dock 默认折叠（隐藏），只留窄条图标
+        if not any(isinstance(d, QDockWidget) for d in self.docks.values()):
+            return
         for pid, dock in self.docks.items():
             dock.setVisible(False)
             if pid in self._strip_buttons:

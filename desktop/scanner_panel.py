@@ -237,11 +237,27 @@ class ScannerPanel(QWidget):
         self.result_list = QListWidget()
         self.result_list.itemDoubleClicked.connect(self._on_item_activated)
         self.result_list.itemClicked.connect(self._on_item_clicked)
+        # 空列表占位：整块 300px 的灰黑空框读起来像「扫完了但没结果」或
+        # 「界面坏了」，两种都是误导。没有活动段时换成一句说明，占同一块
+        # 空间；有结果立刻换回列表（不删控件，只切换可见性）。
+        self.empty_hint = QLabel(
+            "还没有活动段\n连上设备后点「开始扫描」")
+        self.empty_hint.setObjectName("scanEmptyHint")
+        self.empty_hint.setAlignment(Qt.AlignCenter)
+        self.empty_hint.setWordWrap(True)
+        root.addWidget(self.empty_hint, stretch=1)
         root.addWidget(self.result_list, stretch=1)
+        self._sync_empty_hint()
 
         tip = QLabel("点击活动段 → 自动调谐并建议解调模式")
         tip.setObjectName("hintLabel")
         root.addWidget(tip)
+
+    def _sync_empty_hint(self) -> None:
+        """结果列表与空态提示二选一（两者都保留，只切可见性）。"""
+        empty = self.result_list.count() == 0
+        self.empty_hint.setVisible(empty)
+        self.result_list.setVisible(not empty)
 
     # ------------------------------------------------------------ 外部接线
     def set_backend(self, backend):
@@ -291,6 +307,7 @@ class ScannerPanel(QWidget):
             if ans != QMessageBox.Yes:
                 return
         self.result_list.clear()
+        self._sync_empty_hint()
         self._segments = []
         self.progress_bar.setValue(0)
         self.scan_began.emit()
@@ -327,6 +344,7 @@ class ScannerPanel(QWidget):
             item = QListWidgetItem(text)
             item.setData(Qt.UserRole, seg)
             self.result_list.addItem(item)
+        self._sync_empty_hint()
         self.status_label.setText(f"完成：{len(self._segments)} 个活动段")
         self.done.emit(self._segments)
 

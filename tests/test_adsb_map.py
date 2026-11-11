@@ -114,11 +114,11 @@ def qapp():
 
 
 def test_panel_empty_state(qapp):
-    from desktop.adsb_map_panel import AdsbMapPanel, ADSB_EMPTY_TEXT
+    from desktop.adsb_map_panel import AdsbMapPanel
     panel = AdsbMapPanel()
     assert panel.aircraft_count() == 0
-    # 空态文案应包含“无 ADS-B 飞机”。
-    assert "无 ADS-B 飞机" in ADSB_EMPTY_TEXT
+    # 空态不再绘制「无 ADS-B 飞机」常驻牌子：地图是通用时空底图，
+    # 不是 ADS-B 专属画布（2026-11-10 产品决定）。
     # 初始表格无行。
     assert panel.table.rowCount() == 0
 

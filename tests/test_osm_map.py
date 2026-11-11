@@ -139,17 +139,33 @@ def test_center_pixel_maps_to_center_lonlat(qapp):
         v.deleteLater()
 
 
-def test_single_click_picks_and_sets_marker(qapp):
+def test_single_click_picks_without_moving_site_marker(qapp):
+    """单击只发选点信号：当前站址标记不该被一次点地图搬走。"""
     v = _view(qapp)
     got = []
     v.picked.connect(lambda la, lo: got.append((la, lo)))
+    v.set_marker(10.0, 20.0)
     try:
         _click(v, QPointF(120, 90))
         assert len(got) == 1
         la, lo = got[0]
         assert -90 <= la <= 90 and -180 <= lo <= 180
-        assert v.marker() is not None
-        assert v.marker()[0] == pytest.approx(la, abs=1e-9)
+        assert v.marker() == (10.0, 20.0)      # 站址原地不动
+        assert v.pick_marker() is None         # 预览标记由面板自己决定要不要画
+    finally:
+        v.deleteLater()
+
+
+def test_pick_marker_is_separate_from_site_marker(qapp):
+    v = _view(qapp)
+    try:
+        v.set_marker(10.0, 20.0)
+        v.set_pick_marker(31.5, 121.5)
+        assert v.marker() == (10.0, 20.0)
+        assert v.pick_marker() == (31.5, 121.5)
+        v.set_pick_marker(None, None)
+        assert v.pick_marker() is None
+        assert v.marker() == (10.0, 20.0)
     finally:
         v.deleteLater()
 

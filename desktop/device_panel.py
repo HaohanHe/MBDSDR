@@ -36,6 +36,21 @@ except Exception:  # noqa: BLE001
 
 from constants import DEFAULT_SAMPLE_RATE_HZ, format_sample_rate
 
+#: 无设备空态：下拉框说事实，状态行说下一步——两处都写「未检测到 SDR 设备」
+#: 等于同一句话念两遍，用户看不出该干什么。
+_NO_DEVICE_COMBO = "未检测到 SDR 设备"
+_NO_DEVICE_STATUS = "未检测到设备 · 插上后点「刷新」"
+_NO_DEVICE_TIP = ("可能原因：USB 没插好、缺驱动，或设备被其他程序占用。"
+                  "RTL-SDR 需要先用 Zadig 安装 WinUSB 驱动。")
+
+try:
+    from perf_profile import sample_rate_for as _profile_rate
+    from config_schema import SCHEMA as _SCHEMA
+    _DEFAULT_PROFILE = str(_SCHEMA["perf_profile"].default)
+    PERF_DEFAULT_SR = int(_profile_rate(_DEFAULT_PROFILE))
+except Exception:  # noqa: BLE001 - 单独打包时回内核基准
+    PERF_DEFAULT_SR = int(DEFAULT_SAMPLE_RATE_HZ)
+
 
 def _list_audio_output_devices() -> List[Dict]:
     """枚举 sounddevice 输出设备；无 sounddevice 时返回空列表（不造假）。"""
@@ -165,7 +180,9 @@ class DevicePanel(QWidget):
         # 采样率输入保留 Hz：帧格式与后端接口都以 Hz 计，输入框量纲合法，
         # 且 2048000 这类整数值不该被 3 位小数截断。右侧给等价值
         # （format_sample_rate，与状态栏/内核同一读数口径），用户不必自己换算。
-        self.sr_edit = QLineEdit(str(DEFAULT_SAMPLE_RATE_HZ))
+        # 桌面默认按性能档（省电 1.024 MS/s），不是内核 2.4 MS/s 基准。
+        # 内核常量仍是设备能力/验收基准，两者不是一回事。
+        self.sr_edit = QLineEdit(str(PERF_DEFAULT_SR))
         self.sr_edit.setToolTip(
             "每秒采集的样本数；越高能看的带宽越宽，默认值通常够用")
         self.sr_equiv = QLabel("")
@@ -200,8 +217,9 @@ class DevicePanel(QWidget):
         btn_row.addWidget(self.disconnect_btn)
         form.addRow("", btn_row)
 
-        self.status_label = QLabel("未检测到 SDR 设备")
+        self.status_label = QLabel(_NO_DEVICE_STATUS)
         self.status_label.setObjectName("statusValue")
+        self.status_label.setToolTip(_NO_DEVICE_TIP)
         form.addRow("", self.status_label)
 
         root.addWidget(sdr_box)
@@ -256,8 +274,11 @@ class DevicePanel(QWidget):
         if self._refresh_inflight or self._enum_inflight:
             return  # 上一拍还没回来，不堆积任务
         self._refresh_inflight = True
-        if not self._devices:
-            self.status_label.setText("正在枚举设备…")
+        # 每次手动刷新都给「正在枚举」这一拍：设备集合没变时，否则界面
+        # 从点击到结果零变化，用户无法判断按钮到底有没有被响应（审计
+        # 白名单里这条「幂等刷新」即由此而来）。结果回来照旧写实际台数。
+        self.status_label.setText("正在枚举设备…")
+        self.status_label.setToolTip("")
         QThreadPool.globalInstance().start(_DeviceEnumTask(self._refresh_signals))
 
     def _on_devices_refreshed(self, devices, err: str) -> None:
@@ -273,8 +294,9 @@ class DevicePanel(QWidget):
         self._devices = list(devices or [])
         self.dev_combo.clear()
         if not self._devices:
-            self.dev_combo.addItem("未检测到 SDR 设备")
-            self.status_label.setText("未检测到 SDR 设备")
+            self.dev_combo.addItem(_NO_DEVICE_COMBO)
+            self.status_label.setText(_NO_DEVICE_STATUS)
+            self.status_label.setToolTip(_NO_DEVICE_TIP)
             self.connect_btn.setEnabled(False)
             self._last_poll_locs = set()
             return
@@ -282,6 +304,7 @@ class DevicePanel(QWidget):
             label = d.get("label") or d.get("driver") or "未知设备"
             self.dev_combo.addItem(label)
         self.status_label.setText(f"检测到 {len(self._devices)} 台设备")
+        self.status_label.setToolTip("")
         self.connect_btn.setEnabled(not self._connected)
         # 手动刷新/初始刷新后，轮询基准同步到最新列表：刷新本身不算“新插入”。
         self._last_poll_locs = {self._locator_of(d) for d in self._devices}

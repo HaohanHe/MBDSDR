@@ -240,6 +240,20 @@ def _coerce(key: str, value: Any, notes: Optional[list] = None) -> Any:
     item = SCHEMA.get(key)
     if item is None:
         return value
+    # 0 Hz / 负频率不是"可调谐频点"，是"没读过"。旧版测试曾把 0 写进真实
+    # 配置文件，启动时 validate_value 会把它夹到调谐下界 10 kHz，于是界面
+    # 显示 000.010.000、后端却回退 98.5 MHz —— 两处读数对不上（2026-11-10
+    # 真机实证）。这里在契约层直接回默认值，别让"没读过"冒充一个频点。
+    if key == "frequency_hz":
+        try:
+            _f = float(value)
+        except (TypeError, ValueError):
+            _f = 0.0
+        if not math.isfinite(_f) or _f <= 0.0:
+            if notes is not None:
+                notes.append(
+                    "frequency_hz 为 0/非法值（不是可调谐频点），已回退默认 98 MHz")
+            return item.default
     norm, reason = validate_value(item, value)
     if reason and notes is not None:
         notes.append(f"{key}: {reason}")

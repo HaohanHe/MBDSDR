@@ -152,7 +152,17 @@ class SatelliteImagePanel(QWidget):
         rl.addWidget(QLabel("历史图像:"))
         self.history = QListWidget()
         self.history.setMaximumWidth(220)
+        # 空态说明：光秃秃一个空框既不告诉用户"这里以后会有东西"，也不告诉
+        # 他"现在没有"是怎么回事（无设备 ≠ 没解过图）。
+        self.history_hint = QLabel("还没有解码过图像\n解码完成后会列在这里")
+        self.history_hint.setObjectName("hintLabel")
+        # 顶部对齐：右栏这块高度可能几百像素，垂直居中会把说明甩到框正中，
+        # 离「历史图像」标题两百多像素，看着像两段无关内容。
+        self.history_hint.setAlignment(Qt.AlignTop | Qt.AlignHCenter)
+        self.history_hint.setContentsMargins(6, 8, 6, 6)
+        self.history_hint.setWordWrap(True)
         rl.addWidget(self.history, 1)
+        rl.addWidget(self.history_hint, 1)
         splitter.addWidget(right)
         splitter.setStretchFactor(0, 3)
         splitter.setStretchFactor(1, 1)
@@ -410,14 +420,17 @@ class SatelliteImagePanel(QWidget):
     # ------------------------------------------------------------------ #
     def _load_history(self) -> None:
         self.history.clear()
-        if not os.path.isdir(_IMG_DIR):
-            return
-        files = sorted(
-            [f for f in os.listdir(_IMG_DIR)
-             if f.endswith("_apt.png") or f.endswith("_lrpt.png")],
-            reverse=True)
-        for f in files[:50]:
-            QListWidgetItem(f, self.history)
+        if os.path.isdir(_IMG_DIR):
+            files = sorted(
+                [f for f in os.listdir(_IMG_DIR)
+                 if f.endswith("_apt.png") or f.endswith("_lrpt.png")],
+                reverse=True)
+            for f in files[:50]:
+                QListWidgetItem(f, self.history)
+        # 有图时只留列表，没图时只留说明（两块同占一份高度，不叠着占地方）。
+        has_items = self.history.count() > 0
+        self.history.setVisible(has_items)
+        self.history_hint.setVisible(not has_items)
 
     def _on_history_clicked(self, item: QListWidgetItem) -> None:
         path = os.path.join(_IMG_DIR, item.text())

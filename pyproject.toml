@@ -62,3 +62,14 @@ mbdsdr_ai = ["locale/*.json", "data/*.json", "data/*.npz", "VERSION"]
 
 [tool.setuptools.dynamic]
 version = {file = "mbdsdr_ai/VERSION"}
+
+# 从仓库根跑 pytest 时的收集边界：仓库里曾留下一份 sdist 解压目录
+# mbdsdr_ai-0.2.0/（内含整套旧 tests/），同名模块会顶掉真测试，
+# 实测 499 个 import file mismatch，把权威全量直接打断在收集阶段。
+# 显式排除非源码树；其余保留 pytest 默认 norecursedirs 口径。
+[tool.pytest.ini_options]
+norecursedirs = [
+    "mbdsdr_ai-0.2.0",
+    "*.egg", ".*", "_darcs", "build", "CVS", "dist", "node_modules",
+    "venv", "{arch}", "cpp/build", "cpp/build-local", "cmake-build-*",
+]

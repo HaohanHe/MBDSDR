@@ -533,7 +533,7 @@ def test_every_enum_roundtrip_records_normalization_and_fallback(tmp_path, item)
 
 @pytest.mark.parametrize("raw,expected_panel,notes_expected", [
     (1e12, 6.0e9, False),      # 高于 6 GHz → ControlPanel 夹到上限
-    (-1.0, 10_000.0, False),   # 负值 → ControlPanel 夹到下限
+    (-1.0, 98e6, True),        # 0/负值 = 「没设过」→ settings._coerce 回默认并留痕
     ("abc", 98e6, True),       # 非数字 → settings._coerce 回默认并记原因
 ])
 def test_internal_frequency_three_inputs_are_consumer_clamped(
@@ -742,8 +742,9 @@ def test_reset_single_and_all(env):
     ds, host, panel, _ = env
     ds.set("theme", "dark")
     ds.set("fft_size", 1024)
-    assert ds.reset("theme") == "default"
-    assert ds.get("theme") == "default"
+    # 出厂默认主题已是 dark_car，断言追权威源 SCHEMA 而非写死旧浅色值。
+    assert ds.reset("theme") == SCHEMA["theme"].default
+    assert ds.get("theme") == SCHEMA["theme"].default
     assert ds.get("fft_size") == 1024      # 单项只动一项
 
     ds.reset_all()
@@ -766,8 +767,8 @@ def test_panel_reset_all_restores_behavior(env):
     assert host._observer_lat == 39.9
 
     assert panel.reset_all(confirm=False) is True
-    assert ds.get("theme") == "default"
-    assert host.theme == "default"
+    assert ds.get("theme") == SCHEMA["theme"].default
+    assert host.theme == SCHEMA["theme"].default
     assert host.spectrum.generator.fft_size == 2048
     assert host._observer_lat is None
     assert host.spectrum.generator.fft_size == SCHEMA["fft_size"].default
@@ -875,7 +876,8 @@ def test_import_rejects_cross_major_version(env):
     # 跨主版本才拒绝，且必须说明为什么 + 该怎么办
     assert "主版本" in res.error
     assert "怎么办" in res.error
-    assert ds.get("theme") == "default"
+    # 拒绝导入后 settings 不动，仍是出厂默认主题（追 SCHEMA 权威源）。
+    assert ds.get("theme") == SCHEMA["theme"].default
 
 
 def test_import_old_document_migrates_missing_fields(env):
@@ -1391,7 +1393,10 @@ def test_record_dir_panel_row_and_buttons(env, monkeypatch):
 # ---------------------------------------------------------------------------
 def test_panel_has_required_groups_and_all_rows(env):
     ds, host, panel, _ = env
-    titles = [panel.tabs.tabText(i) for i in range(panel.tabs.count())]
+    # 2026-11-11：右栏只有 ~320px，7 个分组页签要 594px（第 4 个被右边界整字
+    # 切掉且无法滚动），故页签改为「可折叠分组长列」。这里改按新结构取分组名，
+    # 断言口径不变：7 个分组一个都不能少。
+    titles = [title for title, _section in panel.group_sections]
     for group in ("通用", "显示与主题", "星象仪", "频谱与解码",
                   "卫星与多普勒", "AI", "存储与日志"):
         assert group in titles
@@ -1413,7 +1418,7 @@ def test_panel_change_immediately_applies(env):
     panel._on_changed("show_waterfall", False)
     panel._on_changed("fft_size", 4096)
     panel._on_changed("fft_window", "Hann")
-    panel._on_changed("waterfall_palette", "sdrpp")
+    panel._on_changed("waterfall_palette", "soft")
     panel._on_changed("peak_threshold_db", 9.0)
     panel._on_changed("show_peaks", False)
     panel._on_changed("waterfall_smooth", True)

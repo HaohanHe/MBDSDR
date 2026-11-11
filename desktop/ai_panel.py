@@ -52,6 +52,30 @@ _AI_FAILURE_GUIDE = (
 )
 
 
+def _chat_colors() -> dict:
+    """对话区配色（全部从 tokens 取，不再写死浅色）。
+
+    历史包袱：本面板 2026-10 按浅色主题写的（light_* 令牌 = 米白气泡 +
+    深灰字）。整机换 CarWith 深色后，对话区变成一块刺眼的米白色板砖，
+    标题字 #3D3D3D 压在黑底上几乎看不见。这里统一映射到深色令牌：
+    AI 气泡中性、用户气泡偏冷，角色靠左侧 3px 竖条 + 8pt 标签区分，
+    不靠大面积亮色（SDR++ 原则：强调色只点一处）。
+    """
+    c = _tok().COLORS
+    return {
+        "panel_bg": c.get("card_1", "#1f1f1f"),
+        "panel_border": c.get("grid", "#35373c"),
+        "text": c.get("gray_100", "#d9d9d9"),
+        "text_secondary": c.get("gray_200", "#939393"),
+        "ai_bg": "#232528",
+        "ai_edge": c.get("success", "#6BA89A"),
+        "user_bg": c.get("card_2", "#2b2c2f"),
+        "user_edge": c.get("accent", "#919cac"),
+        "sys_bg": "#241f16",
+        "sys_text": c.get("status_warning", "#C8A040"),
+    }
+
+
 # 快捷指令（这些是提示用户可以说什么，不是直接执行的功能按钮）
 QUICK_COMMANDS = [
     "找一个信号强的 FM 电台",
@@ -215,7 +239,7 @@ class AIPanel(QWidget):
         _t = _tok()
         title_label = QLabel(self.tr("AI 智能体"))
         title_label.setStyleSheet(
-            f"font-size: 11pt; font-weight: 600; color: {_t.COLORS['light_text_strong']};")
+            f"font-size: 11pt; font-weight: 600; color: {_t.COLORS['text_primary']};")
         title_bar.addWidget(title_label)
         title_bar.addStretch()
 
@@ -236,14 +260,18 @@ class AIPanel(QWidget):
 
         # 弹出成自由窗口：右栏窄时对话挤成一团，用户自己决定它多大放哪。
         # 对齐用户「像真实桌面，想放哪儿放哪儿」「别老给他决定」。
-        self.pop_btn = QPushButton("⧉")
+        self.pop_btn = QPushButton("↗")
         self.pop_btn.setObjectName("aiPopBtn")
         self.pop_btn.setFixedWidth(26)
         self.pop_btn.setMinimumHeight(24)
+        # 图标用「↗」（拿出去、单独开）：旧值「⧉」在部分字体上缺字形，
+        # 显示成空方框；真正的空框是下面 padding 被子类样式吃掉造成的。
         self.pop_btn.setToolTip("把这个面板弹出成可拖动的自由窗口（也能再归位）")
         self.pop_btn.setStyleSheet(
             "font-size:10pt;background:transparent;color:#B9C7DB;"
-            "border:1px solid rgba(160,190,225,0.25);border-radius:5px;")
+            "border:1px solid rgba(160,190,225,0.25);border-radius:5px;"
+            "padding:0px;")  # 全局 QSS 的 8px/18px 内边距会把这个 26px 窄按钮的
+                              # 内容区压成负宽度——文字一个像素都画不出来（实拍空方框）
         self.pop_btn.clicked.connect(self._pop_out)
         title_bar.addWidget(self.pop_btn)
 
@@ -275,47 +303,39 @@ class AIPanel(QWidget):
         self._refresh_live_bar()
 
         # 对话历史
+        _chat = _chat_colors()
         self.conversation_view = QTextEdit()
         self.conversation_view.setReadOnly(True)
         self.conversation_view.setStyleSheet(f"""
             QTextEdit {{
-                background: {_t.COLORS['light_panel_bg']};
-                border: 1px solid {_t.COLORS['light_border_subtle']};
+                background: {_chat['panel_bg']};
+                border: 1px solid {_chat['panel_border']};
                 border-radius: 6px;
                 padding: 8px;
                 font-size: 9pt;
-                color: {_t.COLORS['light_text_strong']};
+                color: {_chat['text']};
             }}
         """)
         self.conversation_view.setMinimumHeight(150)
         layout.addWidget(self.conversation_view, 1)
 
-        # 快捷指令
-        quick_group = QGroupBox("快捷指令（点击发送）")
+        # 快捷指令：一行下拉，选一条即发送。
+        # 旧实现把 4 条长中文按钮横排，右栏 340px 根本放不下，文字互相
+        # 挤压/被裁（用户 2026-11-10：「里面内容写得乱七八糟」）。
+        quick_group = QGroupBox("快捷指令（选一条即发送）")
         quick_group.setStyleSheet(
             f"QGroupBox {{ font-size: 8pt; color: {_t.COLORS['text_muted']}; "
             f"border: none; margin-top: 4px; }}")
         quick_layout = QHBoxLayout()
-        quick_layout.setSpacing(4)
+        quick_layout.setSpacing(6)
         quick_layout.setContentsMargins(0, 4, 0, 0)
-        for cmd in QUICK_COMMANDS[:4]:
-            btn = QPushButton(cmd)
-            btn.setMinimumHeight(24)
-            btn.setMaximumHeight(32)
-            btn.setStyleSheet(f"""
-                QPushButton {{
-                    font-size: 8pt;
-                    padding: 2px 8px;
-                    background: {_t.COLORS['light_hover']};
-                    border: 1px solid {_t.COLORS['light_border_strong']};
-                    border-radius: 4px;
-                    color: {_t.COLORS['light_text_secondary']};
-                }}
-                QPushButton:hover {{ background: {_t.COLORS['light_hover_bg_strong']}; }}
-            """)
-            btn.clicked.connect(lambda checked, c=cmd: self._send_quick_command(c))
-            quick_layout.addWidget(btn)
-        quick_layout.addStretch()
+        self.quick_combo = QComboBox()
+        self.quick_combo.setMinimumHeight(26)
+        self.quick_combo.addItem("选一条示例说法…", "")
+        for cmd in QUICK_COMMANDS:
+            self.quick_combo.addItem(cmd, cmd)
+        self.quick_combo.activated.connect(self._on_quick_picked)
+        quick_layout.addWidget(self.quick_combo, 1)
         quick_group.setLayout(quick_layout)
         layout.addWidget(quick_group)
 
@@ -339,12 +359,13 @@ class AIPanel(QWidget):
         self.input_field.setStyleSheet(f"""
             QLineEdit {{
                 padding: 6px 10px;
-                border: 1px solid {_t.COLORS['light_border_input']};
+                border: 1px solid {_t.COLORS['gray_400']};
                 border-radius: 6px;
                 font-size: 9pt;
-                background: {_t.COLORS['light_card']};
+                background: {_t.COLORS['card_1']};
+                color: {_t.COLORS['gray_100']};
             }}
-            QLineEdit:focus {{ border-color: {_t.COLORS['light_accent_border']}; }}
+            QLineEdit:focus {{ border-color: {_t.COLORS['accent']}; }}
         """)
         self.input_field.returnPressed.connect(self._on_submit)
         input_bar.addWidget(self.input_field, 1)
@@ -390,8 +411,8 @@ class AIPanel(QWidget):
         step_scroll.setMaximumHeight(160)
         step_scroll.setStyleSheet(f"""
             QScrollArea {{
-                background: {_t.COLORS['light_log_bg']};
-                border: 1px solid {_t.COLORS['light_border_subtle']};
+                background: {_t.COLORS['card_1']};
+                border: 1px solid {_t.COLORS['gray_400']};
                 border-radius: 4px;
             }}
         """)
@@ -402,10 +423,13 @@ class AIPanel(QWidget):
 
         # 切换步骤视图显示按钮
         self.toggle_log_btn = QPushButton(self.tr("显示执行步骤"))
+        # 以前 max 28 但全局 QSS 给按钮上下各 8px 内边距（内容高 31），
+        # 于是文字被按钮底边裁掉半行。这里自己压平内边距再限高。
         self.toggle_log_btn.setMinimumHeight(20)
-        self.toggle_log_btn.setMaximumHeight(28)
+        self.toggle_log_btn.setMaximumHeight(22)
         self.toggle_log_btn.setStyleSheet(
-            f"font-size: 8pt; color: {_t.COLORS['disabled_gray']}; border: none;")
+            f"font-size: 8pt; color: {_t.COLORS['gray_200']}; border: none;"
+            f" background: transparent; padding: 0 4px; text-align: left;")
         self.toggle_log_btn.clicked.connect(self._toggle_log)
         layout.addWidget(self.toggle_log_btn)
 
@@ -621,42 +645,38 @@ class AIPanel(QWidget):
 
     def _add_welcome_message(self):
         self._add_ai_message(
-            "你好，我是 MBDSDR AI 智能体。\n\n"
-            "我可以帮你：\n"
-            "• 扫频找台、自动调谐\n"
-            "• 信号制式识别、质量分析\n"
-            "• 基带录制、GPS/IMU 数据获取\n"
-            "• 干扰源定位、天线指向指导\n\n"
-            "直接用自然语言告诉我你想做什么。"
+            "我是 MBDSDR AI 智能体。可以直接说：扫频找台、调谐录音、"
+            "识别信号、查卫星过境。\n\n"
+            "没配 API Key 时走本地工具协商（按工具描述匹配，不是语言模型理解）。"
         )
 
     def _add_user_message(self, text: str):
         self._conversation.append({"role": "user", "content": text, "time": datetime.now()})
-        _t = _tok().COLORS
+        c = _chat_colors()
         # 用户原话原文入视图：<&> 等字符必须先转义，否则被 rich text 当标签吞掉
         # （实测 "a < b" 只剩 "a "、"<script>..." 整句消失），显示与原文不符。
         self._append_to_view(
-            f'<div style="margin: 6px 0; padding: 8px; background: {_t["light_user_bubble"]};'
-            f' border-radius: 6px; border-left: 3px solid {_t["accent_warm"]};'
-            f'"><span style="color: {_t["light_user_label"]}; font-size: 8pt;">你</span><br>'
-            f'<span style="color: {_t["light_text_strong"]};">{_esc(text)}</span></div>')
+            f'<div style="margin: 6px 0; padding: 8px; background: {c["user_bg"]};'
+            f' border-radius: 6px; border-left: 3px solid {c["user_edge"]};'
+            f'"><span style="color: {c["user_edge"]}; font-size: 8pt;">你</span><br>'
+            f'<span style="color: {c["text"]};">{_esc(text)}</span></div>')
 
     def _add_ai_message(self, text: str):
         self._conversation.append({"role": "assistant", "content": text, "time": datetime.now()})
         # 简单的换行处理（同样先转义，模型/工具文本里的 <> 不得被当标签吞掉）
         safe_text = _esc(text).replace("\n", "<br>")
-        _t = _tok().COLORS
+        c = _chat_colors()
         self._append_to_view(
-            f'<div style="margin: 6px 0; padding: 8px; background: {_t["light_log_bg"]};'
-            f' border-radius: 6px; border-left: 3px solid {_t["status_success"]};'
-            f'"><span style="color: {_t["light_ai_label"]}; font-size: 8pt;">AI</span><br>'
-            f'<span style="color: {_t["light_text_strong"]};">{safe_text}</span></div>')
+            f'<div style="margin: 6px 0; padding: 8px; background: {c["ai_bg"]};'
+            f' border-radius: 6px; border-left: 3px solid {c["ai_edge"]};'
+            f'"><span style="color: {c["ai_edge"]}; font-size: 8pt;">AI</span><br>'
+            f'<span style="color: {c["text"]};">{safe_text}</span></div>')
 
     def _add_system_message(self, text: str):
-        _t = _tok().COLORS
+        c = _chat_colors()
         self._append_to_view(
-            f'<div style="margin: 4px 0; padding: 4px 8px; background: {_t["light_system_bg"]};'
-            f' border-radius: 4px; font-size: 8pt; color: {_t["accent_warm"]};'
+            f'<div style="margin: 4px 0; padding: 4px 8px; background: {c["sys_bg"]};'
+            f' border-radius: 4px; font-size: 8pt; color: {c["sys_text"]};'
             f'">{_esc(text)}</div>')
 
     # ── 执行步骤卡（字段语义对齐 cpp StepResult / mobile TaskStep）─────
@@ -686,12 +706,12 @@ class AIPanel(QWidget):
             f'<div>'
             f'<span style="color:{_t["text_muted"]}; font-family: monospace;">'
             f'{idx:02d}</span> '
-            f'<b style="color:{_t["light_text_strong"]};">{_esc(step.tool)}</b> '
+            f'<b style="color:{_t["text_primary"]};">{_esc(step.tool)}</b> '
             f'<span style="color:{status_color};">{status_label}</span> '
             f'<span style="color:{_t["disabled_gray"]};">{elapsed_txt}</span>'
         )
         if step.args_preview:
-            html += (f'<br><span style="color:{_t["light_text_secondary"]};">'
+            html += (f'<br><span style="color:{_t["gray_200"]};">'
                      f'参数 {_esc(step.args_preview)}</span>')
         if step.summary:
             html += (f'<br><span style="color:{status_color};">'
@@ -703,8 +723,8 @@ class AIPanel(QWidget):
 
         card = QFrame()
         card.setStyleSheet(
-            f"QFrame {{ background: {_t['light_panel_bg']};"
-            f" border: 1px solid {_t['light_border_subtle']};"
+            f"QFrame {{ background: {_t['card_1']};"
+            f" border: 1px solid {_t['grid']};"
             f" border-radius: 4px; }}")
         lay = QVBoxLayout(card)
         # 子步骤（workflow_execute / subagent_execute 展开）左缩进
@@ -714,7 +734,7 @@ class AIPanel(QWidget):
         label.setWordWrap(True)
         label.setTextFormat(Qt.RichText)
         label.setStyleSheet(
-            f"font-size: 8pt; color: {_t['light_text_strong']}; background: transparent;")
+            f"font-size: 8pt; color: {_t['gray_100']}; background: transparent;")
         lay.addWidget(label)
         # 插在尾部 stretch 之前
         self.step_list_layout.insertWidget(self.step_list_layout.count() - 1, card)
@@ -745,6 +765,19 @@ class AIPanel(QWidget):
     def _send_quick_command(self, cmd: str):
         self.input_field.setText(cmd)
         self._on_submit()
+
+    def _on_quick_picked(self, index: int):
+        """快捷指令下拉选中即发送；发完回位到占位项，不残留上次选择。"""
+        combo = getattr(self, "quick_combo", None)
+        cmd = ""
+        if combo is not None:
+            cmd = str(combo.itemData(index) or "")
+            try:
+                combo.setCurrentIndex(0)
+            except (AttributeError, RuntimeError):
+                pass
+        if cmd:
+            self._send_quick_command(cmd)
 
     @Slot()
     def _on_submit(self):
@@ -822,11 +855,11 @@ class AIPanel(QWidget):
         # 新建一条空 AI 消息用于流式追加
         self._stream_html = ""
         self._streamed_any = False  # 标记是否收到过流式增量，避免 finished 时重复追加
-        _t = _tok().COLORS
+        _c = _chat_colors()
         self._append_to_view(
-            f'<div style="margin: 6px 0; padding: 8px; background: {_t["light_log_bg"]}; '
-            f'border-radius: 6px; border-left: 3px solid {_t["status_success"]};">'
-            f'<span style="color: {_t["light_ai_label"]}; font-size: 8pt;">AI</span><br>')
+            f'<div style="margin: 6px 0; padding: 8px; background: {_c["ai_bg"]}; '
+            f'border-radius: 6px; border-left: 3px solid {_c["ai_edge"]};">'
+            f'<span style="color: {_c["ai_edge"]}; font-size: 8pt;">AI</span><br>')
 
         self._worker_thread.start()
         return True
@@ -988,9 +1021,8 @@ class AIPanel(QWidget):
             btn.setText("● 状态读取失败")
             return
         model = "模型已配置" if st.get("model") else "模型未配置·本地协商"
-        btn.setText("● %s · 工具 %s/%s · 任务 %s · 事件 %s  ▾" %
-                    (model, st.get("tools_available"), st.get("tools"),
-                     st.get("tasks"), st.get("events")))
+        btn.setText("● %s · 工具 %s/%s ▾" %
+                    (model, st.get("tools_available"), st.get("tools")))
         btn.setToolTip("内核在线；点开看真实任务与 Hooks 事件明细。"
                        "模型未配置时对话走本地能力协商，不编造模型回复。")
         rows = []

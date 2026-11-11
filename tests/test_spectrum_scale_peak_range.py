@@ -492,8 +492,12 @@ def test_counterproof_legacy_peak_has_no_snr(qapp):
     assert not any(field == "SNR" for field in old[0])
 
 
-def test_peak_snr_baseline_is_median_and_shown_on_label(qapp):
-    """SNR = 峰功率 − 本帧全谱中位数；图上的标签与命中返回必须同值。"""
+def test_peak_snr_baseline_is_median_and_kept_out_of_label(qapp):
+    """SNR = 峰功率 − 本帧全谱中位数；SNR 只在数据/悬停里，不上常驻标签。
+
+    2026-11-10 裁决：谱面常驻标签只写频点（SDR++ 峰值标签是短签，不是
+    读数表）；每秒跳几十次的 dBFS/SNR 挂上去没人读得过来。
+    """
     import spectrum_widget as sw
     panel, peak_freq = _panel_with_known_floor_peak(qapp)
     gen = panel.generator
@@ -509,15 +513,16 @@ def test_peak_snr_baseline_is_median_and_shown_on_label(qapp):
     rec = _RecordingPainter()
     sw._draw_peaks(rec, panel._state, rect, QColor("white"))
     labels = [t[2] for t in rec.texts]
-    assert any("SNR" in s for s in labels), f"峰值标签缺 SNR：{labels}"
-    assert any("60" in s for s in labels), f"SNR 数值没上标签：{labels}"
+    assert labels, "峰值标签全丢了"
+    assert not any("SNR" in s for s in labels), f"常驻标签又挂上 SNR：{labels}"
+    assert not any("dBFS" in s for s in labels), f"常驻标签又挂上 dBFS：{labels}"
 
     x, y = _peak_xy(panel, peak_freq)
     hit = panel._plot._peak_at(x, y)
     assert hit is not None and len(hit) == 3, f"命中没带 SNR：{hit}"
     assert hit[2] == pytest.approx(60.0, abs=0.2)
     # 标签文案必须由同一份数据生成：命中频率与图上标签同源
-    assert any(s.startswith(f"{hit[0] / 1e6:.3f}MHz") for s in labels), \
+    assert any(s.startswith(f"{hit[0] / 1e6:.3f} MHz") for s in labels), \
         f"图上标签与命中峰不是同一份数据：{labels}"
 
 
@@ -635,6 +640,62 @@ def test_ctrl_db_zoom_shows_value_bubble_at_cursor_and_hides_on_release(qapp):
     rec2 = _RecordingPainter()
     sw._draw_db_scale(rec2, rect, panel._state, QColor("white"))
     assert not [t for t in rec2.texts if t[2] == txt], "松手后气泡没有消失"
+
+
+def test_db_axis_labels_never_clipped_top_or_bottom(qapp):
+    """dB 刻度整行必须落在谱内（星象仪 98px 紧凑条实拍顶端被切）。"""
+    import spectrum_widget as sw
+    panel = _panel(qapp)
+    for h in (98.0, 160.0, 240.0):
+        rect = QRectF(0, 0, 640, h)
+        rec = _RecordingPainter()
+        sw._draw_db_scale(rec, rect, panel._state, QColor("white"))
+        assert rec.texts, f"h={h} 没有画出任何刻度"
+        for r in _text_rects(rec):
+            assert r[2] >= rect.top() - 0.01, (
+                f"h={h} 顶部刻度被裁：{r[4]!r} top={r[2]:.1f}")
+            assert r[3] <= rect.bottom() + 0.01, (
+                f"h={h} 底部刻度被裁：{r[4]!r} bottom={r[3]:.1f}")
+
+
+def test_peak_labels_never_cover_db_axis_text(qapp):
+    """峰标签不得压在左上那列 dBFS 刻度上（2026-11-11 实拍叠字）。"""
+    import spectrum_widget as sw
+    panel = _panel(qapp)
+    fm = _font8()
+    rect = QRectF(0, 0, 900, 98)
+    rec = _RecordingPainter()
+    sw._draw_db_scale(rec, rect, panel._state, QColor("white"))
+    axis = _text_rects(rec)
+    assert axis
+
+    def place(peaks):
+        return sw._peak_label_placements(
+            [(x, 10.0, lbl) for x, lbl in peaks], fm.horizontalAdvance,
+            sw._peak_label_left_bound(rect, panel._state, fm),
+            rect.right() - 2.0, fm.height() + 2.0,
+            text_ascent=fm.ascent(), text_descent=fm.descent())
+
+    bound = sw._peak_label_left_bound(rect, panel._state, fm)
+    # 贴着左缘的峰：标签整体让到刻度右侧（tx = x + 6），让不过去就丢弃——
+    # 无论哪种，产出的标签矩形都不许与刻度相交。
+    for x in (rect.x() + 2.0, bound - 20.0, bound - 7.0, bound - 1.0, bound):
+        for tx, ty, label, _row in place([(x, "97.800 MHz")]):
+            r = (tx, tx + fm.horizontalAdvance(label),
+                 ty - fm.ascent(), ty + fm.descent(), label)
+            for a in axis:
+                assert not _overlaps(r, a), (
+                    f"x={x} 峰标签 {label!r} 压住 dB 刻度 {a[4]!r}")
+    # 让得开的峰：照常画，两个都得留下。
+    placed = place([(bound + 1.0, "97.900 MHz"),
+                    (rect.right() - 140.0, "99.100 MHz")])
+    assert len(placed) == 2, f"正常位置被误丢：{placed}"
+    for tx, ty, label, _row in placed:
+        r = (tx, tx + fm.horizontalAdvance(label),
+             ty - fm.ascent(), ty + fm.descent(), label)
+        for a in axis:
+            assert not _overlaps(r, a), (
+                f"峰标签 {label!r} 压住 dB 刻度 {a[4]!r}")
 
 
 def test_db_zoom_clamps_span_and_axis_bounds(qapp):

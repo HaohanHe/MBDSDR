@@ -108,24 +108,29 @@ class TestCenterPane:
         center = mw._main_splitter.widget(1)
         assert mw.adsb_map_panel.parent() is center
 
-    def test_command_bar_floats_above_map(self, mw):
+    def test_command_bar_hidden_in_ide(self, mw):
         bar = mw._ai_cmd_bar
-        # 命令栏是中栏 child 且 raise 在地图之上
+        # IDE 形态不再把 AI 输入栏摆在中栏（用户要求 AI 对话只出现在
+        # 右栏「AI 智能体」面板）：控件保留（星象仪形态复用同一路由），
+        # 但不入布局且不可见。
         assert bar.parent() is mw._main_splitter.widget(1)
-        assert bar.isVisibleTo(mw) or True  # offscreen 不强制 map
-        # 胶囊形：圆角取自 tokens circle_sm
+        assert not bar.isVisible()
         assert bar.height() > 0
 
 
 class TestRightPane:
-    """右栏 = 当前 App 页签。"""
+    """右栏 = 一根可滚动的纵向长列（不是一个页签一次只活一个）。"""
 
-    def test_right_tab_is_qtabwidget(self, mw):
-        assert isinstance(mw.right_tab, QTabWidget)
+    def test_right_column_is_single_scroll_column(self, mw):
+        from PySide6.QtWidgets import QScrollArea
+        assert isinstance(mw.right_tab, QScrollArea)
+        # QTabWidget 的最小 API 仍成立（布局持久化/浮动面板靠它）
+        assert mw.right_tab.count() > 0
+        assert mw.right_tab.tabText(0)
 
     def test_required_app_tabs_present(self, mw):
         texts = [mw.right_tab.tabText(i) for i in range(mw.right_tab.count())]
-        required = ("控制", "状态", "AI 助手", "扫频", "调制识别", "书签",
+        required = ("控制", "状态", "AI 智能体", "扫频", "调制识别", "书签",
                     "设备", "增益", "VFO", "ANR", "星座图", "APRS", "ADS-B",
                     "卫星云图", "服务设置")
         missing = [t for t in required if t not in texts]

@@ -238,6 +238,11 @@ class FrequencyManager:
                 skipped += 1
                 continue
             freq = _num(d.get("freq_hz", d.get("frequency_hz")))
+            if freq is not None and freq <= 0:
+                # 0 Hz / 负频率不是可调谐书签：旧版测试曾把 0 Hz 写进真实
+                # 书签库，启动时被当成「上次频率」回填 → 三条硬件 WARNING
+                # （2026-11-10 真机实证）。这里一律当作无效丢弃。
+                freq = None
             start = _num(d.get("start_hz")) or 0.0
             end = _num(d.get("end_hz")) or 0.0
             if freq is None and not end > start > 0:

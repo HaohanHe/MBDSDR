@@ -71,7 +71,7 @@
 | 4 | FFT 点数 | `spectrum_widget.py:151` 2048 | 工具栏即时，不持久 | **暴露** `fft_size` |
 | 5 | 窗函数 | `spectrum_widget.py:150` Nuttall | 工具栏即时，不持久 | **暴露** `fft_window` |
 | 6 | 平均帧数 | `spectrum_widget.py:152` 1 | 工具栏即时，不持久 | **暴露** `fft_avg_frames` |
-| 7 | 瀑布配色 | `spectrum_widget.py:1789` 第 0 项 | 工具栏即时，不持久 | **暴露** `waterfall_palette` |
+| 7 | 瀑布配色 | `spectrum_widget.py` 第 0 项「SDR++ 经典」 | 工具栏即时，不持久 | **暴露** `waterfall_palette` |
 | 8 | 峰值阈值 | `spectrum_widget.py:859` 6.0 dB | 工具栏即时，不持久 | **暴露** `peak_threshold_db` |
 | 9 | 显示峰值 | `spectrum_widget.py:858` True | 工具栏即时，不持久 | **暴露** `show_peaks` |
 | 10 | 瀑布平滑 | `spectrum_widget.py:173` False | 工具栏即时，不持久 | **暴露** `waterfall_smooth` |
@@ -148,7 +148,7 @@
 | FFT 点数 | 找弱信号/看细节 vs 要流畅 | 2048：现有默认；档位与 C++ `settings_dialog` 对齐 | 1024/2048/4096 三档枚举；未知/8192/16384 回 2048 并记原因；即时 `set_fft_size` |
 | 窗函数 | 测幅度（Flattop）/低旁瓣（Nuttall） | Nuttall：现有默认 | 6 种枚举；未知回 Nuttall；即时 |
 | 平均帧数 | 弱信号平滑 vs 快速响应 | 1：现有默认 | 1/4/8/16；未知回 1；即时 |
-| 瀑布配色 | 弱信号层次 vs 不刺眼 | default：现有第 0 项 | default/sdrpp；未知回 default；即时 |
+| 瀑布配色 | 弱信号层次 vs 不刺眼 | sdrpp：SDR++ Turbo 色表（默认） | sdrpp/soft；未知回 sdrpp；即时 |
 | 峰值阈值 | 噪声大/信号密集 | 6.0 dB：既有 `peak_rel_db` | 1–30 dB，越界夹住；即时 |
 | 标注峰值 | 只想看强信号 | True：既有默认 | 布尔；即时 |
 | 瀑布平滑 | 追踪弱轨迹 | False：既有默认 | 布尔；即时 |
@@ -581,7 +581,7 @@ setter + `main_window` 的 `bw > 0` 守卫），不是 schema。**因此本轮�
 | `fft_size` | `desktop/spectrum_widget.py:151`；C++ `settings_dialog` | strip → 数字字符串转数值 | `2048` | 是 |
 | `fft_window` | `desktop/spectrum_widget.py:150` | strip → 大小写不敏感 | `Nuttall` | 是 |
 | `fft_avg_frames` | `desktop/spectrum_widget.py:152` | strip → 数字字符串转数值 | `1` | 是 |
-| `waterfall_palette` | `desktop/spectrum_widget.py` `_PlotState.wf_colors` | strip → 大小写不敏感 | `default` | 是 |
+| `waterfall_palette` | `desktop/spectrum_widget.py` `_PlotState.wf_colors` | strip → 大小写不敏感 | `sdrpp`（SDR++ Turbo） | 是 |
 | `tuning_step_hz` | 控制面板步进下拉（`step_combo`） | strip → 数字字符串转数值 | `10000` | 是 |
 | `waterfall_depth_rows` | `desktop/spectrum_widget.py` 六档 `WF_DEPTH_*` | strip → 数字字符串转数值 | `256` | 是 |
 | `demod_mode` | `mode_registry.py` analog ∩ `mbdsdr_ai/core/controller.py:43`（§13.2） | strip → 大小写不敏感 | `FM` | 是 |
@@ -650,8 +650,8 @@ setter + `main_window` 的 `bw > 0` 守卫），不是 schema。**因此本轮�
 
 | 指标 | 数值 | 口径 |
 |---|---|---|
-| schema 字段数 | **52** | `config_schema.ALL_ITEMS` 全量 |
-| 有 UI 入口 | **50** | 设置面板渲染 + 服务页签控件 + 内部键控件锚点 |
+| schema 字段数 | **53** | `config_schema.ALL_ITEMS` 全量 |
+| 有 UI 入口 | **51** | 设置面板渲染 + 服务页签控件 + 内部键控件锚点 |
 | 无 UI 但有明确理由 | **2** | 理由见「字段 → 位置」表的「说明」列 |
 | 缺失（无入口且无理由） | **0** | >0 即守卫红 |
 | 幽灵键（未在 schema 声明） | **0** | 扫描 desktop/*.py 的 settings 字面键 |

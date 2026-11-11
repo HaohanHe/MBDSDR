@@ -271,9 +271,12 @@ def _pump(app, seconds=2.0, step=0.1):
 
 
 def test_offscreen_no_hardware_zero_fake(qapp, monkeypatch, tmp_path):
-    # 隔离 HOME：避免开发者本机 ~/.mbdsdr/gui_config.json 里残留的手工观测站坐标
-    # 污染"无硬件→无地面站"核验。干净 HOME 下 _load_gui_config 读不到任何坐标。
+    # 隔离家目录：避免开发者本机 ~/.mbdsdr/gui_config.json 里残留的手工观测站
+    # 坐标污染"无硬件→无地面站"核验。注意 os.path.expanduser 在 Windows 上
+    # 取 USERPROFILE、POSIX 取 HOME —— 只改 HOME 在 Windows 等于没隔离，
+    # 本机会读到真实 gui_config 里已有的 observer_lat/lon（0,0 也算坐标）。
     monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
 
     try:
         from desktop.main_window import MainWindow

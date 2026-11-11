@@ -203,8 +203,13 @@ class TestExecutorWiring:
     def test_set_layout_ratio(self, mw):
         bus = get_ui_bus()
         # 小窗口下三栏全被 Qt 夹到最小宽度，任何比例都会钳回最小态——
-        # 先放大窗口留出弹性空间，再验证比例生效
-        mw.resize(1600, 900)
+        # 先放大窗口留出弹性空间，再验证比例生效。
+        # 为什么是 1800 而不是 1600：右栏是「可滚动竖列」，最小宽 326px
+        # （窄屏设计口径 320 + 边框/滚动条）。1600 的 20% 只有 318px，比
+        # 最小宽还窄 8px，任何比例都会被钳回最小态——这条用例在 1600 下
+        # 无论代码怎么改都不可能通过（HEAD 上实测 [576, 636, 380] 同样是
+        # 最小宽钳制）。1800 的 20% = 360px，才真正留出弹性。
+        mw.resize(1800, 950)
         assert bus.enqueue({"verb": "set_layout_ratio",
                             "value": "2:2:1"})["ok"] is True
         results = _drain(mw)

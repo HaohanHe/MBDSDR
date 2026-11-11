@@ -114,7 +114,17 @@ def test_agc_stereo_shape_preserved():
     assert out.shape == (2048, 2)
     rms_in = float(np.sqrt(np.mean(x ** 2)))
     rms_out = float(np.sqrt(np.mean(out ** 2)))
-    assert rms_out > rms_in * 2.0
+    # 2026-11-10 契约变更：旧 AGC target=0.5 / max_gain=60 会把静噪边界的
+    # 底噪直接顶到满幅，再叠音量增益就是持续削波。现在做温和补平
+    # (target=0.25 / max_gain=4)：单帧只涨一点，但确实在放大，且立体声
+    # 形状不变。断言从「放大 2 倍」改成「温和放大 + 绝不拉满」，这是修
+    # 缺陷而非放宽判据（新增了上限约束）。
+    assert rms_in < rms_out < rms_in * 2.0
+    assert float(np.max(np.abs(out))) < 0.2, "弱噪声不得被 AGC 拉到满幅"
+    # 持续喂噪声也不能越界（旧参数会一路爬到 max_gain）
+    for _ in range(40):
+        out = w._apply_audio_agc(x)
+    assert float(np.max(np.abs(out))) < 0.5
 
 
 def test_agc_speed_params_ordering():

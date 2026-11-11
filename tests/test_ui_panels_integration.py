@@ -29,6 +29,17 @@ from PySide6.QtWidgets import QApplication  # noqa: E402
 app = QApplication.instance() or QApplication(sys.argv)
 
 
+@pytest.fixture(scope="module", autouse=True)
+def _isolate_user_profile(isolated_profile):
+    """本模块直接构造 MainWindow 并 close()。
+
+    closeEvent 会写 gui_config.json；不隔离 HOME/USERPROFILE 就会把测试窗口
+    几何（以及被测代码默认的观察站状态）写进用户真实配置。会话级守卫
+    2026-11-11 实测抓到，故整个模块强制隔离。
+    """
+    return isolated_profile
+
+
 # ----------------------------------------------------------------------
 class TestScannerPanel:
     def test_instantiate_no_backend(self):

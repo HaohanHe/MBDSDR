@@ -357,6 +357,9 @@ class ModulePanel(QWidget):
         self.sr_combo.setSizeAdjustPolicy(
             QComboBox.AdjustToMinimumContentsLengthWithIcon)
         self.sr_combo.setMinimumContentsLength(16)
+        self.sr_combo.setToolTip(
+            "设备未报告采样率范围时下拉只有一项「未知（默认 …）」——那是兜底值，"
+            "不代表设备能力；连上设备后按实际档位重填。")
         self._fill_sample_rate_options(None)
         form.addRow("采样率", self.sr_combo)
 

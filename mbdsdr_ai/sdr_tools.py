@@ -8426,6 +8426,11 @@ class _FMListener:
         self.freq_mhz = None
         self.blocks_played = 0
         self.error = None
+        # 有状态 WFM 接收器（固定增益 + tanh 软限幅），替代逐块峰值归一化。
+        # 旧路径对每一块 IQ 独立归一化到 0.95：无台/静音块的噪声被拉到满幅，
+        # 强信号块正常 —— 听感就是"间歇正常、大多过载"。采样率在 start()
+        # 下发成功后才按真实值构建，避免用错率。
+        self._rx = None
 
     def start(self, freq_mhz: float) -> bool:
         if self._thread and self._thread.is_alive():
@@ -8451,7 +8456,21 @@ class _FMListener:
         except Exception as e:
             self.error = str(e)
             return False
-        # 启动音频
+        # 采样率下发成功后，按**设备回读的真实速率**构建有状态接收器
+        try:
+            real_sr = self.sample_rate_hz
+            if hasattr(self.backend, "get_sample_rate"):
+                got = self.backend.get_sample_rate()
+                if got and float(got) > 0:
+                    real_sr = int(float(got))
+            self.sample_rate_hz = real_sr
+            from .dsp import WFMReceiver
+            self._rx = WFMReceiver(real_sr, audio_sr=self.audio_sr)
+        except Exception as e:  # noqa: BLE001
+            self.error = f"WFM 接收器初始化失败: {e}"
+            return False
+        # 启动音频（音量上限 1.0，不再靠 gain 放大）
+        self.player.set_gain(min(1.0, self.gain))
         self.player.start()
         self._thread = threading.Thread(target=self._run, daemon=True)
         self._thread.start()
@@ -8484,10 +8503,9 @@ class _FMListener:
                     time.sleep(0.01)
                     continue
 
-                # FM 解调（单声道）
+                # FM 解调（单声道）：有状态、跨块保持滤波器历史
                 try:
-                    audio = wfm_broadcast_demod(iq, self.sample_rate_hz,
-                                                 audio_sr=self.audio_sr, deemph_us=50.0)
+                    audio = self._rx.process(iq)
                 except Exception as e:
                     self.error = f"demod: {e}"
                     time.sleep(0.05)

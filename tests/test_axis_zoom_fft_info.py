@@ -66,14 +66,19 @@ def test_wheel_on_freq_axis_zooms_span_anchored(qapp):
     before_center = gen.center_freq_hz
     before_span = gen.sample_rate_hz
 
-    _wheel_at(plot, x, y_axis, 120, Qt.NoModifier)
+    # 滚轮向上 = 拉近（span 变窄）；反向是拉远，但已到全带宽时无处可去。
+    _wheel_at(plot, x, y_axis, -120, Qt.NoModifier)
 
-    assert gen.sample_rate_hz == pytest.approx(before_span * 1.1)
+    assert gen.span_hz == pytest.approx(before_span / 1.1)
+    # 硬件采样率不是缩放目标：它每帧被 push_iq 覆写，写进去等于白改。
+    assert gen.sample_rate_hz == pytest.approx(before_span)
     # 锚点不变：缩放前后光标处绝对频率一致
     r = x / plot.width()
     anchor_before = before_center + (r - 0.5) * before_span
-    anchor_after = gen.center_freq_hz + (r - 0.5) * gen.sample_rate_hz
+    anchor_after = gen.center_freq_hz + (r - 0.5) * gen.span_hz
     assert anchor_after == pytest.approx(anchor_before)
+    # 右侧「缩放」滑杆跟着走到位
+    assert panel._span_slider.value() == panel._slider_from_span(gen.span_hz)
 
 
 def test_wheel_above_axis_still_tunes(qapp):
@@ -81,12 +86,12 @@ def test_wheel_above_axis_still_tunes(qapp):
     panel = _panel(qapp)
     plot = panel._plot
     gen = panel.generator
-    before_span = gen.sample_rate_hz
+    before_span = gen.span_hz
     y_above = int(plot.height()) - _SPEC_BOTTOM_PAD - 4  # 条带上方
 
     _wheel_at(plot, 400, y_above, 120, Qt.NoModifier)
 
-    assert gen.sample_rate_hz == pytest.approx(before_span)   # span 未动
+    assert gen.span_hz == pytest.approx(before_span)          # span 未动
     assert gen.center_freq_hz != pytest.approx(100e6)         # 中心被步进
 
 
@@ -95,107 +100,51 @@ def test_shift_wheel_on_axis_keeps_tuning_gear(qapp):
     panel = _panel(qapp)
     plot = panel._plot
     gen = panel.generator
-    before_span = gen.sample_rate_hz
+    before_span = gen.span_hz
     snap = panel._state.snap_interval
     y_axis = int(plot.height()) - _SPEC_BOTTOM_PAD + 4
 
     _wheel_at(plot, 400, y_axis, 120, Qt.ShiftModifier)
 
-    assert gen.sample_rate_hz == pytest.approx(before_span)   # 未缩放
+    assert gen.span_hz == pytest.approx(before_span)   # 未缩放
     # Shift×10 步进调谐
     assert abs(gen.center_freq_hz - 100e6) == pytest.approx(10 * snap, rel=1e-3)
 
 
 # ---------------------------------------------------------------------------
-# P2-10 FFT 仪器化读数
+# P2-10（2026-11-10 改判）：顶部不挂任何实时读数
 # ---------------------------------------------------------------------------
-def test_fft_info_shows_rbw_and_waterfall_span(qapp, monkeypatch):
-    """RBW 取真值 sr/fft_size；瀑布时长用实测行率——未测到显「--」不编秒数。
+def test_no_permanent_numeric_readouts(qapp):
+    """顶部不再挂 SNR / 跨度 / RBW / 瀑布秒数（用户裁决：数字没人读得过来）。
 
-    反证：把实现改回「行数×绘图定时器间隔」的旧公式必红（本用例曾固化
-    该错误公式，2026-11-07 按实测行率契约改正）。
+    SDR++ 顶上只有一个大频点和音量滑杆；读数只在鼠标悬停时临时出现。
+    generator 的测量 API（RBW、实测行率、瀑布可回看时长）仍然保留真值，
+    需要时能取到——只是不再常驻成一张每秒跳几十次的"读数表"。
     """
-    import spectrum_widget as sw
     panel = _panel(qapp)
+    for gone in ("_snr_label", "_span_label", "_fft_info_label", "_freq_label"):
+        assert not hasattr(panel, gone), f"{gone} 又回到顶栏了"
     gen = panel.generator
     gen._has_real_data = True
-    rbw = gen.sample_rate_hz / gen.fft_size
-    # 未测到行率：秒数不编造
-    panel._refresh_status_labels()
-    assert panel._fft_info_label.text() == f"RBW {rbw:g} Hz · 瀑布 -- s"
-    # 推帧建立实测行率（100 行/s）→ 时长 = 深度 ÷ 行率
-    clock = {"t": 1000.0}
-    monkeypatch.setattr(sw.time, "monotonic", lambda: clock["t"])
-    gen._wf_rate_t0 = None          # 换时钟后清行率基准（旧 t0 是真墙钟）
-    frame = np.zeros(1024, dtype=complex)
-    gen.push_iq(frame, 98.5e6, 2.4e6)
-    for _ in range(100):
-        clock["t"] += 0.01
-        gen.push_iq(frame, 98.5e6, 2.4e6)
-    panel._refresh_status_labels()
-    wf_s = gen.max_waterfall_lines / gen.wf_row_rate_hz()
-    assert gen.wf_row_rate_hz() == pytest.approx(100.0, rel=0.05)
-    assert panel._fft_info_label.text() == (
-        f"RBW {rbw:g} Hz · 瀑布 {wf_s:g} s")
+    panel._refresh_status_labels()          # 数据通路挂钩仍在，且不产生文字
+    assert gen.sample_rate_hz / gen.fft_size > 0     # RBW 真值仍可算
 
 
-def test_fft_info_updates_with_performance_mode(qapp, monkeypatch):
-    """换性能档后 RBW 按新 fft_size 重算，不是常数；时长仍走实测行率。"""
-    import spectrum_widget as sw
+def test_span_slider_controls_display_span_only(qapp):
+    """右侧「缩放」滑杆改显示跨度，绝不动硬件采样率。
+
+    反证：把实现改回"写 sample_rate_hz"必红——真机上该值每帧被
+    push_iq 覆写，缩放下一帧就被抹掉（这就是以前缩放失灵的根因）。
+    """
     panel = _panel(qapp)
     gen = panel.generator
-    gen._has_real_data = True
-    panel.set_performance_mode(2)          # 低档（legal FFT 档 1024，见 _PERF_LEVELS）
-    assert gen.fft_size == 1024
-    clock = {"t": 0.0}
-    monkeypatch.setattr(sw.time, "monotonic", lambda: clock["t"])
-    gen._wf_rate_t0 = None          # 换时钟后清行率基准
-    frame = np.zeros(1024, dtype=complex)
-    gen.push_iq(frame, 98.5e6, 2.4e6)
-    for _ in range(50):
-        clock["t"] += 0.02
-        gen.push_iq(frame, 98.5e6, 2.4e6)
-    panel._refresh_status_labels()
-    text = panel._fft_info_label.text()
-    rbw = gen.sample_rate_hz / gen.fft_size
-    assert text.startswith(f"RBW {rbw:g} Hz"), text
-    assert rbw == pytest.approx(2.4e6 / 1024)  # RBW 跟 fft_size 走
-    wf_s = gen.max_waterfall_lines / gen.wf_row_rate_hz()
-    assert text == f"RBW {rbw:g} Hz · 瀑布 {wf_s:g} s"
-
-
-def test_fft_info_empty_state(qapp):
-    from spectrum_widget import SpectrumPanel
-    panel = SpectrumPanel()
-    panel._refresh_status_labels()
-    assert panel._fft_info_label.text() == "RBW --"
-
-
-# ---------------------------------------------------------------------------
-# 顶部 span 读数：带含义与单位，不是裸数字
-# ---------------------------------------------------------------------------
-def test_span_label_has_meaning_and_unit_not_bare_number(qapp):
-    """反证：顶部 span 读数必须带含义+单位，不能是裸数字。
-
-    上游：该格取 ``generator.sample_rate_hz``；同一个变量在本文件里就是
-    显示跨度——频率轴 ``f0 = center − sr/2``、``RBW = sr/fft_size``，
-    Ctrl+滚轮/捏合还会把 ``new_span`` 直接写回 ``sample_rate_hz``。
-    所以单位是带宽的 MHz，而不是采样率 MS/s；裸 ``2.400 MHz`` 会被
-    读成第二个频率。
-    """
-    from spectrum_widget import SpectrumPanel
-    panel = _panel(qapp)                       # update_iq(..., 100e6, 2.4e6)
-    text = panel._span_label.text()
-    assert text == "跨度 2.400 MHz"
-    assert text != "2.400 MHz"                 # 裸数字会被误读成第二个频率
-    assert "跨度" in text and "MHz" in text
-
-    # 缩放会直接改写 sample_rate_hz（此处它就是显示跨度），读数仍是带含义的串。
-    panel.generator.sample_rate_hz = 1.2e6
-    panel._refresh_status_labels()
-    assert panel._span_label.text() == "跨度 1.200 MHz"
-
-    # 无数据态同样不许出现裸占位符。
-    empty = SpectrumPanel()
-    empty._refresh_status_labels()
-    assert empty._span_label.text() == "跨度 --"
+    full = gen.span_hz
+    panel._span_slider.setValue(panel._span_slider.maximum())
+    assert gen.span_hz < full
+    assert gen.span_hz >= 48_000.0
+    assert gen.sample_rate_hz == pytest.approx(full)   # 硬件采样率不动
+    panel._span_slider.setValue(0)
+    assert gen.span_hz == pytest.approx(full)          # 拉回全带宽
+    # 三根竖杆齐全，且没有「上限 -20 / 下限 -100」这类数值标签
+    assert hasattr(panel, "_db_max_slider") and hasattr(panel, "_db_min_slider")
+    assert not hasattr(panel, "_db_max_cap") and not hasattr(panel, "_db_min_cap")

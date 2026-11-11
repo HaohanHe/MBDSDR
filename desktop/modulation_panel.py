@@ -141,6 +141,9 @@ class ModulationPanel(QWidget):
         self.conf_bar = QProgressBar()
         self.conf_bar.setRange(0, 100)
         self.conf_bar.setValue(0)
+        # 没有识别结果时不能显示 "0%"：0% 是一个**测量值**（"识别了但完全没
+        # 把握"），与"还没识别/未连接"是两件事。空态统一显示 "—"。
+        self.conf_bar.setFormat("—")
         conf_row.addWidget(self.conf_bar, stretch=1)
         self.conf_val = QLabel("--")
         conf_row.addWidget(self.conf_val)
@@ -153,10 +156,17 @@ class ModulationPanel(QWidget):
         form.addRow("符号率提示", self.sr_hint_label)
         v.addLayout(form)
 
-        v.addWidget(QLabel("建议解调链（点击应用）:"))
+        v.addWidget(QLabel("建议解调链（点击应用）"))
         self.suggest_list = QListWidget()
         self.suggest_list.itemDoubleClicked.connect(self._on_apply_clicked)
+        # 空态占位：未识别时右侧是一整块 250px 的无字黑框，看着像加载失败。
+        self.suggest_hint = QLabel("识别成功后在这里列出\n可双击应用的解调链")
+        self.suggest_hint.setObjectName("hintLabel")
+        self.suggest_hint.setAlignment(Qt.AlignCenter)
+        self.suggest_hint.setWordWrap(True)
+        v.addWidget(self.suggest_hint, stretch=1)
         v.addWidget(self.suggest_list, stretch=1)
+        self.suggest_list.setVisible(False)
 
         self.apply_btn = QPushButton("应用该解调链")
         self.apply_btn.setEnabled(False)
@@ -204,6 +214,18 @@ class ModulationPanel(QWidget):
             return
         self.status_label.setText("识别中…，请稍候")
         self.identify_btn.setEnabled(False)
+        # 新一轮识别先把上一轮的数字清成 "—"：识别中点着上一条的
+        # 「95% NFM」会被读成当前信号的结果，属于拿旧读数冒充实时。
+        self.conf_bar.setFormat("—")
+        self.conf_bar.setValue(0)
+        self.conf_val.setText("--")
+        self.mod_label.setText("--")
+        self.bw_label.setText("--")
+        self.sr_hint_label.setText("--")
+        self.suggest_list.clear()
+        self.suggest_list.setVisible(False)
+        self.suggest_hint.setVisible(True)
+        self.apply_btn.setEnabled(False)
         self._worker = _IdentifyWorker(self._backend, parent=self)
         self._worker.done.connect(self._on_done)
         self._worker.failed.connect(self._on_failed)
@@ -219,6 +241,7 @@ class ModulationPanel(QWidget):
         suggestions = list(getattr(result, "suggestions", []) or [])
 
         self.mod_label.setText(str(mod))
+        self.conf_bar.setFormat("%p%")
         self.conf_bar.setValue(int(conf * 100))
         self.conf_val.setText(f"{conf*100:.0f}%")
         self.bw_label.setText(f"{bw/1e3:.1f} kHz" if bw > 0 else "--")
@@ -227,6 +250,9 @@ class ModulationPanel(QWidget):
         self.suggest_list.clear()
         for s in suggestions:
             self.suggest_list.addItem(QListWidgetItem(str(s)))
+        has_suggest = bool(suggestions)
+        self.suggest_list.setVisible(has_suggest)
+        self.suggest_hint.setVisible(not has_suggest)
         self.apply_btn.setEnabled(True)
         self.status_label.setText("识别完成")
         self.done.emit(result)

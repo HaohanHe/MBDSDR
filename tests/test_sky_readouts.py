@@ -717,3 +717,34 @@ class TestStatusCardScroll:
         finally:
             tall.close()
 
+
+class TestCardTextContrast:
+    """深色卡片上的字不跟天色切换。
+
+    2026-11-11 正午实拍：沉浸卡的时间/位置值、空态卡标题、过境与 GNSS
+    面板在白天全糊——卡片底恒为半透明黑，``_ink()`` 却切到深灰
+    ``sky_day_ink``。这里钉住「卡内文字与天色无关」。
+    """
+
+    def test_card_ink_stays_light_when_sky_is_bright(self):
+        v = RFSkyView()
+        try:
+            v._sky_brightness = 1.0
+            day = v._ink()
+            card = v._card_ink()
+            assert day.lightness() < 120, (
+                f"白天天空前景应为深色（既有行为），实际 {day.getRgb()}")
+            assert card.lightness() >= 180, (
+                f"深色卡片上的文字必须保持浅色，实际 {card.getRgb()}")
+        finally:
+            v.close()
+
+    def test_card_ink_is_identical_at_night(self):
+        """夜间观感不变：卡内文字与原来的 _ink() 同色。"""
+        v = RFSkyView()
+        try:
+            v._sky_brightness = 0.0
+            assert v._card_ink().getRgb() == v._ink().getRgb()
+        finally:
+            v.close()
+

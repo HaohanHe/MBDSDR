@@ -310,11 +310,18 @@ class TestMainWindowRecordingFlow:
 
     def test_volume_changes_do_not_crash(self, qtapp):
         w = self._make_window()
-        # 0-100 人类量纲（2026-10-30 量纲收敛后）；满档 100 → 增益 2.0
-        for v in (0, 25, 50, 100):
+        # 0-100 人类量纲。2026-11-10 契约变更：旧「满档 100 → 增益 2.0」
+        # 正是音频过载根因（72% 时 20.8% 样本被硬削成方波，100% 时
+        # 58.3%）。现按 SDR++ volume.h powf(v,2) 平方律，上限 1.0。
+        from mbdsdr_ai.audio_out import volume_pct_to_gain
+        for v in (0, 25, 50, 72, 100):
             w._on_volume_changed(v)
+            if w._audio_player is not None:
+                assert w._audio_player.gain == pytest.approx(
+                    volume_pct_to_gain(v), abs=1e-6)
+                assert w._audio_player.gain <= 1.0, "增益绝不允许放大到削波"
         if w._audio_player is not None:
-            assert abs(w._audio_player.gain - 2.0) < 1e-6
+            assert w._audio_player.gain == pytest.approx(1.0, abs=1e-6)
         w._disconnect()
 
     def test_disconnect_clears_spectrum(self, qtapp):

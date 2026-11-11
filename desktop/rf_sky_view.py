@@ -1756,6 +1756,14 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
     # 未定位空态里的「先看看示例天空」：用户主动点才加载**明确标注过**的
     # 示例站址；默认绝不塞默认坐标冒充"我的位置"。能力位，不是预制向导。
     preview_sky_requested = Signal()
+    # 未定位空态里的「📍 地点」：直接开选地点面板（与右上角「地点」同一个
+    # 落点），省掉"先退出星象仪找设置"的一跳。
+    location_requested = Signal()
+    # 夜视开关：天空自身在本控件的 paintEvent 里压红光，但浮层按钮条 / AI
+    # 命令栏 / 回复卡都是**子控件**（Qt 里子控件在父 paintEvent 之后才画），
+    # 盖不到。主窗口据此把这些浮层也压成红光——否则夜里一点按钮，白底按钮
+    # 就在瞳孔上炸开，暗适应白保了。
+    night_vision_changed = Signal(bool)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -1889,8 +1897,12 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         self._info_close_rect: Optional[QRectF] = None
         self._ask_rect: Optional[QRectF] = None
         self._preview_rect: Optional[QRectF] = None
+        self._location_rect: Optional[QRectF] = None
         self._fov_minus_rect: Optional[QRectF] = None
         self._fov_plus_rect: Optional[QRectF] = None
+        # 宿主浮层占用的右下区域（星象仪按钮条）。⊖⊕ 与之相交时左移，
+        # 否则窗口矮（如 600px 高 + 底部频谱条）时会被浮层盖住又点不到。
+        self._hud_avoid_rect: Optional[QRectF] = None
 
         # 站址口径标注：示例/预览位置时必须一直显式写明，绝不让它被读成
         # "我的位置"。空串 = 站址来自真实 GNSS 或手填，无需额外说明。
@@ -3083,21 +3095,33 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         elif key == "sats":
             self._show_satellites = on
         elif key == "night":
-            self._night_vision = on
+            self._apply_night_vision(on)
         else:
             raise ValueError(f"未知图层：{name!r}；可用：{self.LAYER_KEYS}")
         self.update()
         return on
+
+    def _apply_night_vision(self, on: bool, *, emit: bool = True) -> None:
+        """夜视状态唯一写入口：改状态 + 重绘 + 通知主窗口压下浮层。
+
+        两条入口（图层按钮 ``set_layer("night")`` 与外部 ``set_night_vision``）
+        都走这里，状态与信号不会分叉；值没变就不发信号，避免每帧重设特效。
+        """
+        on = bool(on)
+        changed = on != bool(self._night_vision)
+        self._night_vision = on
+        self.update()
+        if changed and emit:
+            self.night_vision_changed.emit(on)
 
     def set_night_vision(self, on: bool) -> None:
         """夜视模式：整幅画面压成单一红光（户外保暗适应）。
 
         不是滤镜贴图：把画面乘成红通道再把暗部提上来，等于把亮度信息
         全部搬到红光上——屏幕发光以红为主时瞳孔不收缩，这才是夜视仪
-        真正在做的事。
+        真正在做的事。浮层控件由主窗口按 ``night_vision_changed`` 同步。
         """
-        self._night_vision = bool(on)
-        self.update()
+        self._apply_night_vision(on)
 
     def reset_view(self):
         """重置摄像机：回到天顶居中 + FOV=120°，并解除摄像机锁定。
@@ -4079,6 +4103,16 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         g = int(night.green() * (1 - b) + day.green() * b)
         bl = int(night.blue() * (1 - b) + day.blue() * b)
         return QColor(r, g, bl)
+
+    def _card_ink(self) -> QColor:
+        """深色卡片上的文字色：固定浅灰，不随天色切换。
+
+        卡片底色恒为 ``card_2`` 半透明黑（见各 ``_draw_*`` 里的 bg），
+        而 ``_ink()`` 在白天会切到 #3A4550——深灰落在深底上等于没字
+        （2026-11-11 正午实拍：沉浸卡的时间/位置值、空态卡标题、过境面板
+        全都糊成一团）。凡是画在卡片底上的字都用这个。
+        """
+        return QColor(tokens().COLORS["gray_100"])
 
     # ========================================================================
     # 绘制
@@ -5466,42 +5500,77 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
             painter.drawText(QPointF(14.0, y), str(self._track_notice))
         painter.restore()
 
+    def set_hud_avoid_rect(self, rect: Optional[QRectF]) -> None:
+        """声明一块被宿主浮层占用的区域（视图坐标）；None = 无占用。
+
+        只影响右下 ⊖⊕ FOV 控件的位置：与之相交时整体左移到浮层左侧，
+        避免"画在浮层底下、点也点不到"（窄窗 + 底部频谱条时实测发生）。
+        """
+        new = QRectF(rect) if rect is not None else None
+        if new == self._hud_avoid_rect:
+            return
+        self._hud_avoid_rect = new
+        self.update()
+
     def _draw_fov_control(self, painter: QPainter):
         """右下角 ⊖ ⊕ FOV 步进控件 (Stellarium 底部 FOV 条的精简版)。
 
         与滚轮同一缩放律 (view_state.zoom ±1 步)，夹在 min_fov..max_fov。
         命中区暴露给 mousePressEvent 的 _hud_hit。
+
+        中间两行：上「视野：整片天/拉近看」（人话状态），下「120.0°」
+        （精确读数）。此前底边角标另画一遍「视野：…」，与控件矩形几乎
+        完全重合，实拍是文字压在按钮上的乱码 —— 同一角落只留一处。
         """
         painter.save()
         _t = tokens()
         btn = 26.0
+        btn_h = 34.0
         gap = 6.0
-        label_w = 64.0
+        label_w = 88.0
         total = btn * 2 + gap * 2 + label_w
         x0 = float(self.width()) - total - 12.0
-        y0 = float(self.height()) - btn - 12.0
+        y0 = float(self.height()) - btn_h - 12.0
+        # 宿主浮层（星象仪按钮条）压到右下角时整组左移：宁可离开默认角落，
+        # 也不能画在别人的按钮底下——那里既看不清也点不到。
+        avoid = self._hud_avoid_rect
+        if avoid is not None and QRectF(x0, y0, total, btn_h).intersects(avoid):
+            x0 = max(8.0, avoid.left() - total - 8.0)
         bg = QColor(_t.COLORS["card_2"])
         bg.setAlpha(220)
         border = QColor(_t.COLORS["gray_400"])
         painter.setBrush(QBrush(bg))
         painter.setPen(QPen(border, 1))
 
-        self._fov_minus_rect = QRectF(x0, y0, btn, btn)
-        self._fov_plus_rect = QRectF(x0 + btn + gap * 2 + label_w, y0, btn, btn)
+        self._fov_minus_rect = QRectF(x0, y0, btn, btn_h)
+        self._fov_plus_rect = QRectF(x0 + btn + gap * 2 + label_w, y0,
+                                     btn, btn_h)
         for r in (self._fov_minus_rect, self._fov_plus_rect):
             painter.drawRoundedRect(r, 4, 4)
 
         f = QFont(self._font)
         f.setBold(True)
+        # 用「−/+」而不是「⊖/⊕」：两个带圈数学符号在 Windows 上会落到
+        # 不同回退字体（一个圆、一个方），同组按钮字形不统一还偏小。
+        f.setPointSize(f.pointSize() + 2)
         painter.setFont(f)
         painter.setPen(QColor(_t.COLORS["gray_100"]))
-        painter.drawText(self._fov_minus_rect, Qt.AlignCenter, "⊖")
-        painter.drawText(self._fov_plus_rect, Qt.AlignCenter, "⊕")
+        painter.drawText(self._fov_minus_rect, Qt.AlignCenter, "\u2212")
+        painter.drawText(self._fov_plus_rect, Qt.AlignCenter, "+")
 
-        painter.setFont(self._mono_font)
-        label = QRectF(x0 + btn + gap, y0, label_w, btn)
-        # 1 位小数：这是画面里唯一的视场角读数（右上角那个已删）
-        painter.drawText(label, Qt.AlignCenter,
+        mode = QFont(self._font)
+        mode.setPointSize(9)
+        painter.setFont(mode)
+        painter.setPen(QColor(_t.COLORS["gray_100"]))
+        view = "视野：整片天" if self._all_sky_active else "视野：拉近看"
+        painter.drawText(QRectF(x0 + btn + gap, y0 + 2.0, label_w, 16.0),
+                         int(Qt.AlignCenter), view)
+        angle = QFont(self._mono_font)
+        angle.setPointSize(8)
+        painter.setFont(angle)
+        painter.setPen(QColor(_t.COLORS["gray_300"]))
+        painter.drawText(QRectF(x0 + btn + gap, y0 + 17.0, label_w, 15.0),
+                         int(Qt.AlignCenter),
                          format_angle_deg(self.view_state.fov_deg, digits=1))
         painter.restore()
 
@@ -5803,12 +5872,16 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
 
     def _draw_selection_crosshair(self, painter: QPainter, pos: QPointF,
                                   base_radius: float, color: QColor) -> None:
-        """选中标记：4 段圆弧十字 + 2s 呼吸（SWE 选中标记同形）。
+        """选中标记：4 段圆弧十字（静态，不做呼吸缩放）。
 
-        时间取自 self._breath_clock()（monotonic 秒），_refresh_timer 30fps
-        重绘驱动呼吸；纯几何走 selection_crosshair_geometry 以便确定性测试。
+        之前按 2s 呼吸半径，30fps 下满屏标记一涨一缩，像节日跑马灯里
+        一颗颗轮流亮（用户 2026-11-10 实指）。现在几何固定在 t=0，
+        纯几何仍走 selection_crosshair_geometry 以便确定性测试。
         圆头粗线（.figma 设计语言）。"""
-        geo = selection_crosshair_geometry(self._breath_clock(), base_radius)
+        # 静态十字：不做「呼吸」缩放。30fps 下半径一涨一缩，满屏标记看起来
+        # 像节日跑马灯里一颗颗轮流亮（用户 2026-11-10 实指）；对星图来说
+        # 标记只需要稳定可辨，不需要动。
+        geo = selection_crosshair_geometry(0.0, base_radius)
         r = max(1.0, float(geo["radius"]))
         rect = QRectF(pos.x() - r, pos.y() - r, 2.0 * r, 2.0 * r)
         pen = QPen(color, 2)
@@ -6753,9 +6826,8 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
                 az, alt = azalt_from_vec(v)
                 pos = self._sky_to_screen(az,
                                           max(self._display_alt_deg(alt), -2.0))
-                # 选中呼吸环（SWE 月/行星标记同形：2s 一吸一呼的虚线环）；
-                # 卫星用 4 段十字（_draw_selection_crosshair），天体用呼吸环区分。
-                rr = max(1.0, breathing_ring_radius(self._breath_clock(), 16.0))
+                # 选中环同样是静态的：不再按 2s 呼吸缩放（理由同上）。
+                rr = max(1.0, breathing_ring_radius(0.0, 16.0))
                 pen = QPen(self._colors["accent"], 2, Qt.DashLine)
                 pen.setCapStyle(Qt.RoundCap)
                 painter.save()
@@ -7066,27 +7138,28 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
             painter.drawEllipse(pos, 15, 15)
         painter.restore()
 
-    def _draw_immersive_card(self, painter: QPainter) -> None:
-        """沉浸态左下紧凑卡：现在几点 / 我在哪 / 头顶几颗星 / 什么天色。
+    def _immersive_card_geometry(self) -> dict:
+        """沉浸态读数卡的几何 + 内容（绘制与浮层避让的唯一事实源）。
 
-        星象仪是给"不懂星象仪原理的人"用的界面，读数只回答最朴素的问题；
-        视轴、受晒、调谐、数据源这些工程读数留在 IDE 形态的完整状态卡里，
-        不在这里挤掉星空。数值全部走既有格式化函数，不另拼一套口径。
+        主窗口要让 AI 回复卡避开这块卡片，而窗口刚 resize、还没重绘时
+        ``_immersive_card_rect`` 仍是上一个尺寸的旧值——所以几何必须能独立
+        算出来，不能只信上一次 paint 留下的矩形（实测 1600→1000 时避让失效，
+        回复卡直接压在「时间/位置/星等」上）。
         """
-        painter.save()
-        _t = tokens()
-        ink = self._ink()
-        label_col = QColor(_t.COLORS["gray_100"])
-        # 沉浸卡没有任何可滚动内容：清掉旧拾取矩形，免得滚轮/点击在空白处
-        # 命中一张已经不在屏幕上的卡。
-        self._status_card_rect = QRectF()
-
         # 时钟跟时间引擎走：时间穿梭 / ☾ 今夜 下还写墙钟就是假读数。
         # 与 IDE 状态卡同一判据：模拟时刻与真实时刻分叉就显式标「模拟」。
         now_unix = self._engine_unix()
         clock = format_local_time(now_unix, fmt="%H:%M")
         if abs(now_unix - time.time()) > 2.0:
             clock += " · 模拟"
+        # 日期必须跟着时间引擎走：能跳到任意一天时，只写 "20:00 · 模拟"
+        # 会让人分不清是今晚还是三个月后的那晚。星期用中文，不靠系统 locale。
+        try:
+            _local = datetime.fromtimestamp(now_unix)
+            date_text = (f"{_local.year}-{_local.month:02d}-{_local.day:02d}"
+                         f" 周{'一二三四五六日'[_local.weekday()]}")
+        except (OverflowError, OSError, ValueError):
+            date_text = ""
         place = ("示例位置 · 未校准" if self._site_note
                  else format_observer_chip(self._observer))
         hidden = self._stars_hidden_by_daylight()
@@ -7107,6 +7180,7 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         fm_big = QFontMetrics(f_big)
         fm_small = QFontMetrics(f_small)
         text_w = fm_big.horizontalAdvance(clock)
+        text_w = max(text_w, fm_small.horizontalAdvance(date_text) + 14)
         for k, v in rows:
             text_w = max(text_w,
                          fm_small.horizontalAdvance(f"{k}  {v}") + 14)
@@ -7115,13 +7189,50 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         row_h = 18.0
         # 操作提示改放画面底边的角标（_draw_bottom_chips），不占信息卡：
         # 地平线以下那片黑色正好用来承载"能干什么"，卡片也不再被压。
-        card_h = 26.0 + row_h * len(rows) + 8.0
+        # 时钟下面多一行日期（16px），行序：时钟 → 日期 → 位置/星空/天色。
+        card_h = 26.0 + 16.0 + row_h * len(rows) + 8.0
         x = 12.0
         y = max(12.0, float(self.height()) - card_h - 12.0)
+        return {"clock": clock, "date_text": date_text, "rows": rows,
+                "f_big": f_big, "f_small": f_small, "row_h": row_h,
+                "rect": QRectF(x, y, card_w, card_h)}
+
+    def immersive_card_rect(self) -> QRectF:
+        """左下读数卡当前占用矩形（布局避让用；尺寸随窗口变，随时可算）。"""
+        try:
+            return QRectF(self._immersive_card_geometry()["rect"])
+        except Exception:  # pragma: no cover - 字体/历表异常不外溢到布局
+            return QRectF()
+
+    def _draw_immersive_card(self, painter: QPainter) -> None:
+        """沉浸态左下紧凑卡：现在几点 / 我在哪 / 头顶几颗星 / 什么天色。
+
+        星象仪是给"不懂星象仪原理的人"用的界面，读数只回答最朴素的问题；
+        视轴、受晒、调谐、数据源这些工程读数留在 IDE 形态的完整状态卡里，
+        不在这里挤掉星空。数值全部走既有格式化函数，不另拼一套口径。
+        """
+        painter.save()
+        _t = tokens()
+        # 卡片底恒为深色半透明：文字不跟天色走（见 _card_ink）。
+        ink = self._card_ink()
+        label_col = QColor(_t.COLORS["gray_100"])
+        # 沉浸卡没有任何可滚动内容：清掉旧拾取矩形，免得滚轮/点击在空白处
+        # 命中一张已经不在屏幕上的卡。
+        self._status_card_rect = QRectF()
+
+        geo = self._immersive_card_geometry()
+        clock = geo["clock"]
+        date_text = geo["date_text"]
+        rows = geo["rows"]
+        f_big = geo["f_big"]
+        f_small = geo["f_small"]
+        row_h = geo["row_h"]
+        rect = geo["rect"]
+        x, y, card_w, card_h = rect.x(), rect.y(), rect.width(), rect.height()
 
         # 单独记一份给底部角标避让；_status_card_rect 仍保持空（沉浸卡
         # 不参与滚轮/点选拾取），两件事别混在一个矩形里。
-        self._immersive_card_rect = QRectF(x, y, card_w, card_h)
+        self._immersive_card_rect = QRectF(rect)
         bg = QColor(_t.COLORS["card_2"])
         bg.setAlpha(150)
         painter.setBrush(QBrush(bg))
@@ -7133,7 +7244,11 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         painter.drawText(QRectF(x + 14.0, y + 6.0, card_w - 28.0, 24.0),
                          int(Qt.AlignLeft | Qt.AlignVCenter), clock)
         painter.setFont(f_small)
-        cy = y + 30.0
+        if date_text:
+            painter.setPen(label_col)
+            painter.drawText(QRectF(x + 14.0, y + 28.0, card_w - 28.0, 16.0),
+                             int(Qt.AlignLeft | Qt.AlignVCenter), date_text)
+        cy = y + 46.0
         for k, v in rows:
             painter.setPen(label_col)
             painter.drawText(QRectF(x + 14.0, cy, 48.0, row_h),
@@ -7196,11 +7311,9 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
                     hint = ""
         if hint:
             chip(hint, hx)
-        view = "视野：整片天" if self._all_sky_active else "视野：拉近看"
-        vw = float(fm.horizontalAdvance(view)) + 30.0
-        vx = float(self.width()) - vw - 18.0
-        if vx > hx + hw + 8.0:      # 窄屏别叠在一起，宁可不画
-            chip(view, vx)
+        # 「视野：整片天 / 拉近看」已并入右下 ⊖⊕ 控件（同一角落只留一处
+        # 视图状态）。此前两者都画在底边右侧且矩形几乎完全重合，实拍是
+        # 「视野：拉近看」压在 ⊖⊕ 按钮上的乱码；信息也重复了一遍。
         painter.restore()
 
     def _draw_unlocated_state(self, painter: QPainter) -> None:
@@ -7212,6 +7325,7 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         偷偷塞默认坐标——能力而非流程，也不冒充"我的位置"。
         """
         self._preview_rect = None
+        self._location_rect = None
         if (not self._immersive or self._observer is not None
                 or self._site_note):
             return
@@ -7267,7 +7381,7 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         f_title.setPointSize(14)
         f_title.setBold(True)
         painter.setFont(f_title)
-        painter.setPen(self._ink())
+        painter.setPen(self._card_ink())
         painter.drawText(QRectF(card_x + 18, card_y + 12, card_w - 36, 28),
                          int(Qt.AlignLeft | Qt.AlignVCenter), "这片天还没定位")
 
@@ -7277,14 +7391,19 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         painter.setPen(QColor(_t.COLORS["gray_100"]))
         painter.drawText(QRectF(card_x + 18, card_y + 44, card_w - 36, 56),
                          int(Qt.AlignLeft | Qt.AlignTop),
-                         "接上 GNSS，或在设置里填一次经纬度，\n"
+                         "接上 GNSS，或直接选一个地点，\n"
                          "就能看到你头顶此刻真实的星空。\n"
                          "天还亮着？点右上 ☾ 今夜 切到天黑。")
 
-        btn = QRectF(card_x + 18, card_y + 112, card_w - 36, 32)
+        # 两枚能力位并排：示例天空（明确标注的示例站址）/ 直接选地点。
+        # 空态文案原本写"在设置里填经纬度"，可星象仪是全屏的，设置根本不在
+        # 视野里；这里给出和右上「📍 地点」同一个落点。
         accent = QColor(self._colors["accent"])
         fill = QColor(accent)
         fill.setAlpha(46)
+        gap = 10.0
+        btn_w = (card_w - 36.0 - gap) / 2.0
+        btn = QRectF(card_x + 18, card_y + 112, btn_w, 32)
         painter.setPen(QPen(accent, 1))
         painter.setBrush(QBrush(fill))
         painter.drawRoundedRect(btn, 6, 6)
@@ -7292,8 +7411,16 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         f_btn.setPointSize(10)
         painter.setFont(f_btn)
         painter.setPen(accent)
-        painter.drawText(btn, int(Qt.AlignCenter), "先看看示例天空   ›")
+        painter.drawText(btn, int(Qt.AlignCenter), "先看看示例天空  ›")
         self._preview_rect = btn
+
+        loc_btn = QRectF(card_x + 18 + btn_w + gap, card_y + 112, btn_w, 32)
+        painter.setPen(QPen(QColor(_t.COLORS["gray_400"]), 1))
+        painter.setBrush(Qt.NoBrush)
+        painter.drawRoundedRect(loc_btn, 6, 6)
+        painter.setPen(QColor(_t.COLORS["gray_100"]))
+        painter.drawText(loc_btn, int(Qt.AlignCenter), "📍 选地点")
+        self._location_rect = loc_btn
 
         f_note = QFont(self._font)
         f_note.setPointSize(8)
@@ -7331,7 +7458,7 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         painter.setPen(QPen(border, 1))
         painter.drawRoundedRect(card_x, card_y, card_w, card_h, 6, 6)
 
-        ink = self._ink()
+        ink = self._card_ink()
         dim = QColor(_t.COLORS["gray_300"])
         label_col = QColor(_t.COLORS["gray_100"])
 
@@ -7662,7 +7789,7 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         painter.setPen(QPen(QColor(_t.COLORS["gray_400"]), 1))
         painter.drawRoundedRect(panel_x, panel_y, panel_w, panel_h, 6, 6)
 
-        ink = self._ink()
+        ink = self._card_ink()
         dim = QColor(_t.COLORS["gray_300"])
         painter.setFont(self._font)
         painter.setPen(ink)
@@ -7809,7 +7936,7 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         painter.drawRoundedRect(QRectF(x0, y0, card_w, card_h), 6, 6)
 
         painter.setFont(self._font)
-        painter.setPen(self._ink())
+        painter.setPen(self._card_ink())
         painter.drawText(QPointF(x0 + 10, y0 + 19),
                          f"GNSS: 已连接 | 可见 {n_vis} 颗 | "
                          f"定位 {n_used} 颗 | 固定: {fix_txt}")
@@ -7819,7 +7946,7 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
             painter.setPen(Qt.NoPen)
             painter.setBrush(QBrush(col))
             painter.drawRect(QRectF(x0 + 12, ty - 9, 10, 10))
-            painter.setPen(self._ink())
+            painter.setPen(self._card_ink())
             painter.drawText(QPointF(x0 + 30, ty), f"{cons}  {counts[cons]} 颗")
             ty += row_h
         painter.restore()
@@ -7928,6 +8055,10 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         r = self._preview_rect
         if r is not None and r.contains(px, py):
             self.preview_sky_requested.emit()
+            return True
+        r = self._location_rect
+        if r is not None and r.contains(px, py):
+            self.location_requested.emit()
             return True
         r = self._ask_rect
         if r is not None and r.contains(px, py):

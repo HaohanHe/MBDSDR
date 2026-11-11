@@ -442,7 +442,7 @@ class WFMReceiver:
 
     def __init__(self, sample_rate: float, audio_sr: int = 48000,
                  deemph_us: float = 50.0, audio_cutoff: float = 15000.0,
-                 channel_bw: float = 120000.0, output_gain: float = 1.6):
+                 channel_bw: float = 120000.0, output_gain: float = 1.0):
         from scipy.signal import firwin, butter
         self.sr = float(sample_rate)
         self.audio_sr = int(audio_sr)

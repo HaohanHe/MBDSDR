@@ -317,12 +317,24 @@ class SatelliteTracker:
             return 0
         deadline = (float(hard_deadline_s) if hard_deadline_s is not None
                     else float(timeout) + _TLE_HARD_DEADLINE_MARGIN_S)
+        # 数据源：CelesTrak GP 分组接口（celestrak.org 域名），按需只取几组，
+        # 不再拖 active.txt 全表（几 MB、含全部在轨对象）。
+        # 分组覆盖本目录用到的星：业余（ISS/AMSAT）、气象（NOAA/METEOR/FY）、
+        # 空间站。换星只改这里的分组名，不改代码结构。
+        _groups = ("amateur", "weather", "stations")
+        chunks: List[str] = []
         try:
-            resp = _bounded_requests_get(
-                "https://celestrak.com/NORAD/elements/active.txt",
-                float(timeout), deadline)
-            resp.raise_for_status()
-            text = resp.text
+            for _g in _groups:
+                resp = _bounded_requests_get(
+                    f"https://celestrak.org/NORAD/elements/gp.php"
+                    f"?GROUP={_g}&FORMAT=tle",
+                    float(timeout), deadline)
+                resp.raise_for_status()
+                if resp.text:
+                    chunks.append(resp.text)
+            text = "\n".join(chunks)
+            if not text.strip():
+                raise ValueError("GP 接口返回空响应")
         except Exception as e:  # noqa: BLE001 - 网络失败如实留痕
             self._last_refresh_error = \
                 f"联网刷新失败（{type(e).__name__}: {e}），沿用旧 TLE"

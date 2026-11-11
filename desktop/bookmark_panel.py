@@ -116,8 +116,9 @@ class BookmarkPanel(QWidget):
         self.del_btn = QPushButton("删除")
         self.del_btn.setToolTip("先在列表里选中一条书签")
         self.del_btn.clicked.connect(self._on_delete)
-        self.nearest_btn = QPushButton("找最近")
-        self.nearest_btn.setToolTip("找当前频率附近的书签")
+        self.nearest_btn = QPushButton("最近书签")
+        self.nearest_btn.setToolTip(
+            "在当前频率附近找最近的一条书签并直接调过去（不改动已有书签）")
         self.nearest_btn.clicked.connect(self._on_nearest)
         for b in (self.add_btn, self.edit_btn, self.del_btn, self.nearest_btn):
             ops.addWidget(b)
@@ -319,7 +320,10 @@ class BookmarkPanel(QWidget):
             except Exception:  # noqa: BLE001
                 freq = 0.0
         if freq <= 0:
-            QMessageBox.information(self, "找最近", "无当前频率（未调谐）。")
+            QMessageBox.information(
+                self, "最近书签",
+                "还不知道当前频率（设备未连接或未调谐）。\n"
+                "先连接并调谐到任意频率，再点「最近书签」。")
             return
         best = None
         best_d = float("inf")
@@ -329,7 +333,9 @@ class BookmarkPanel(QWidget):
                 best_d = d
                 best = bm
         if best is None:
-            QMessageBox.information(self, "找最近", "书签列表为空。")
+            QMessageBox.information(
+                self, "最近书签",
+                "还没有任何书签。\n先用「添加当前频率」记一条，或导入 CSV。")
             return
         QMessageBox.information(
             self, "最近书签",

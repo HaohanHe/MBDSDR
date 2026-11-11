@@ -824,6 +824,7 @@ _GRID = QColor(255, 255, 255, 34)   # 占位虚线得看得见，否则空白像
 _LOADING = QColor(255, 255, 255, 16)
 _DIM = "#8f95a3"
 _ACCENT = "#ff5b4a"
+_PICK = QColor("#e8b84b")           # 待确认选点：与站址（红橙）区分开
 _BG_DARK = "#10151d"
 _BG_LIGHT = "#e9eef4"
 
@@ -877,6 +878,7 @@ class OsmMapView(QWidget, _PinchMixin):
         self._center_lat = 30.0
         self._center_lon = 110.0
         self._marker: Optional[Tuple[float, float]] = None
+        self._pick: Optional[Tuple[float, float]] = None
         self._layers: List[Tuple[str, Callable]] = []
         self._drag_from: Optional[QPointF] = None
         self._drag_start: Optional[QPointF] = None
@@ -948,6 +950,19 @@ class OsmMapView(QWidget, _PinchMixin):
 
     def marker(self) -> Optional[Tuple[float, float]]:
         return self._marker
+
+    def set_pick_marker(self, lat: Optional[float], lon: Optional[float]) -> None:
+        """待确认的选点（与 ``set_marker`` 的站址是两回事）。
+
+        点地图只是"我选了这里"，站址在用户按「用这个位置」之前不该动；
+        两者分两个标记画，站址标记才不会被一次误点搬走。
+        """
+        self._pick = (None if lat is None or lon is None
+                      else (float(lat), float(lon)))
+        self.update()
+
+    def pick_marker(self) -> Optional[Tuple[float, float]]:
+        return self._pick
 
     # ------------------------------------------------------------ 图层
     def add_layer(self, name: str, painter_cb: Optional[Callable]) -> None:
@@ -1067,6 +1082,7 @@ class OsmMapView(QWidget, _PinchMixin):
                 except Exception:  # noqa: BLE001
                     continue
             self._draw_marker(p)
+            self._draw_pick_marker(p)
             self._draw_hud(p)
         finally:
             p.end()
@@ -1114,6 +1130,20 @@ class OsmMapView(QWidget, _PinchMixin):
         p.setPen(QPen(QColor(_ACCENT), 1.0, Qt.DashLine))
         p.drawLine(QPointF(pos.x() - 10, pos.y()), QPointF(pos.x() + 10, pos.y()))
         p.drawLine(QPointF(pos.x(), pos.y() - 10), QPointF(pos.x(), pos.y() + 10))
+
+    def _draw_pick_marker(self, p: QPainter) -> None:
+        """待确认选点：琥珀色虚线环 + 实线短十字（不冒充站址）。"""
+        if self._pick is None:
+            return
+        pos = self.project(*self._pick)
+        if not self.rect().adjusted(-40, -40, 40, 40).contains(pos.toPoint()):
+            return
+        p.setPen(QPen(_PICK, 1.4, Qt.DashLine))
+        p.setBrush(Qt.NoBrush)
+        p.drawEllipse(pos, 9.0, 9.0)
+        p.setPen(QPen(_PICK, 1.2))
+        p.drawLine(QPointF(pos.x() - 6, pos.y()), QPointF(pos.x() + 6, pos.y()))
+        p.drawLine(QPointF(pos.x(), pos.y() - 6), QPointF(pos.x(), pos.y() + 6))
 
     def _draw_hud(self, p: QPainter) -> None:
         f = QFont(self.font())
@@ -1231,7 +1261,9 @@ class OsmMapView(QWidget, _PinchMixin):
             self.open_attribution()      # 署名校验：点它就该能开版权页
             return
         lat, lon = self.unproject(QPointF(event.position()))
-        self.set_marker(lat, lon)
+        # 点选只发信号，**不接管站址标记**：站址归 set_marker 的持有者
+        # （地点面板的「当前」、ADS-B 的上报点），一次误点不该把它搬走。
+        # 需要"待确认"预览的面板自己调 set_pick_marker。
         self.picked.emit(lat, lon)
 
     def mouseDoubleClickEvent(self, event) -> None:  # noqa: N802 (Qt)

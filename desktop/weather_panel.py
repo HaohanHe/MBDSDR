@@ -492,6 +492,16 @@ class WeatherPanel(QWidget):
         self.sr_edit.setToolTip(
             "录制文件的采样率（MS/s）；必须与录制时一致，不一致会解码失败")
         form.addRow("采样率 (MS/s)", self.sr_edit)
+        # 三个输入框统一吃主题色：此前只靠全局 QSS，面板底色与控件底色同为
+        # card_2 时看起来就是一块块硬黑砖，与周围割裂（2026-11-10 用户实指）。
+        for _w in (self.freq_edit, self.sym_edit, self.sr_edit):
+            _w.setStyleSheet(
+                "QLineEdit {"
+                f" background-color:{self._c.get('card', self._c['bg_alt'])};"
+                f" color:{self._c['text']};"
+                f" border:1px solid {self._c['border']};"
+                " border-radius:6px; padding:4px 8px;"
+                "}")
         cl.addLayout(form)
 
         # 按钮行

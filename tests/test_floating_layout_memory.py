@@ -83,3 +83,56 @@ def test_popout_layout_survives_restart_and_clears_on_explicit_return(
         except Exception:
             pass
         w.close()
+
+
+def test_capability_panel_never_restores_detached(isolated_profile, qapp):
+    """上次把能力矩阵 ⤢ 弹出并折叠，重启不许再还原成桌面上的孤儿黑条。
+
+    用户 2026-11-10：「这小框咋的？干哈的？单独拿出来卖单的啊」——弹出态的
+    顶层窗口没有主窗口当宿主，主窗口最小化后它仍留在桌面上。
+    """
+    from PySide6.QtCore import QSettings
+    from main_window import MainWindow
+
+    s = QSettings("MBDSDR", "Desktop")
+    s.setValue("floating_panel/capability_matrix/detached", True)
+    s.setValue("floating_panel/capability_matrix/collapsed", True)
+    s.sync()
+
+    w = MainWindow()
+    try:
+        panel = w._cap_panel
+        assert panel is not None, "能力矩阵必须真实创建"
+        assert panel._detached is False, "启动不得恢复成独立窗口"
+        assert panel.isWindow() is False, "收回后必须是主窗口内的子控件"
+        assert w.isAncestorOf(panel) is True, "回收后必须挂在主窗口控件树里"
+        assert str(s.value("floating_panel/capability_matrix/detached")
+                   ).lower() in ("false", "0", "none"), "落盘的弹出态必须被改写"
+    finally:
+        w.close()
+
+
+def test_capability_drawer_reopens_from_panel_menu(isolated_profile, qapp):
+    """能力矩阵默认不占工作面；从「面板」菜单能开、⤶ 能收、还能再开。"""
+    from main_window import MainWindow
+
+    w = MainWindow()
+    w.show()
+    qapp.processEvents()
+    try:
+        act = w._cap_action
+        assert act.isCheckable() is True
+        # 默认收起不摆出来：它若默认可见就会浮在频谱左上角盖住工具栏
+        assert w._cap_panel.isVisible() is False
+        assert act.isChecked() is False
+
+        act.trigger()
+        qapp.processEvents()
+        assert act.isChecked() is True
+        assert w._cap_panel.isVisible() is True, "菜单必须能打开能力矩阵"
+
+        w._hide_capability_drawer()
+        assert w._cap_panel.isVisible() is False
+        assert act.isChecked() is False, "收起后菜单勾选必须同步取消"
+    finally:
+        w.close()

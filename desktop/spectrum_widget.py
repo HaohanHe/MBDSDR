@@ -134,6 +134,13 @@ PAL_MAXHOLD = _c["spectrum_max_hold"]   # Max hold 包络线（SDR++ 同款语�
 PAL_MINHOLD = _c["spectrum_min_hold"]   # Min hold 包络线
 PAL_BOOKMARK = _c["spectrum_bookmark"]  # 书签标签（gqrx 书签竖旗）
 
+# 谱迹（SDR++ FFT 线签名）：1px 亮青实线 + 同色低透明度向下渐变填充。
+# 不跟主题走：SDR++ 里谱迹是信号读数的"主角"，换 UI 主题也不该变灰。
+PAL_TRACE = "#4FE3F0"
+
+# 网格线：SDR++ 是极淡 1px 实线（不是虚线），只用来读刻度不抢谱迹。
+PAL_GRID_ALPHA = 60
+
 # 频段彩带分类色（SDR++ bandplan 仿妆: 截图同款语义——
 # 航空绿 / 低轨卫星灰 / 广播蓝 / 40m 业余红, 短波广播青, 海事紫灰, 对讲机琥珀）
 BANDPLAN_CATEGORY_COLORS = {
@@ -149,16 +156,20 @@ BANDPLAN_CATEGORY_COLORS = {
 # 书签药丸高度（像素）：谱面顶部这一条带内点击 = 激活书签（不进调谐/拖拽）。
 _BM_TAG_H = 16.0
 
-# 瀑布图色带（低饱和，从冷到暖）
+# 瀑布图默认色带：SDR++ 启动时加载的 Turbo 色表（waterfall.cpp:11-25 的
+# 经典色表在 SDR++ 里已被 Turbo 取代，见 docs/learn/sdrpp.md §3.5）。
+# 深紫蓝 → 蓝 → 青 → 绿 → 黄 → 橙 → 红 → 深红：弱信号（底噪）落在冷端，
+# 强信号一路烧到红端，层次比低饱和灰调清楚得多。
 WATERFALL_COLORS = [
-    "#EDEAE4", "#D8DCD8", "#AFC0C4", "#8FA8B0",
-    "#6BA89A", "#9FB07A", "#C4B85C", "#C4845C", "#B85C5C",
+    "#30123B", "#3A32A8", "#4272E8", "#399FF8", "#1FCFD2", "#22EBA5",
+    "#5CFC6C", "#A2FC3C", "#D0E834", "#F2C53A", "#FD9A2D", "#F26215",
+    "#D83706", "#B01901", "#7A0402",
 ]
 
-# SDR++ 经典瀑布调色板（深蓝→青→绿→黄→橙→红，对标 SDR++ 默认色带）
-WATERFALL_COLORS_SDRPP = [
-    "#000000", "#000033", "#000066", "#000099", "#0000CC", "#0033FF", "#0099FF",
-    "#00FFFF", "#66FF66", "#FFFF00", "#FF9900", "#FF3300", "#FF0000", "#CC0000",
+# 旧低饱和色带（保留为第二选项：打印/长时间盯屏不刺眼）
+WATERFALL_COLORS_SOFT = [
+    "#EDEAE4", "#D8DCD8", "#AFC0C4", "#8FA8B0",
+    "#6BA89A", "#9FB07A", "#C4B85C", "#C4845C", "#B85C5C",
 ]
 
 
@@ -223,6 +234,10 @@ class SpectrumDataGenerator:
         # 单位：Hz（SDR++ main_window.cpp:84-85 默认带宽 8MHz，这里给个常见 FM 广播中心）
         self.center_freq_hz = 98.5e6
         self.sample_rate_hz = DEFAULT_SAMPLE_RATE_HZ
+        # 显示跨度（SDR++「缩放」滑杆同语义）：None = 全带宽（= 采样率）。
+        # 与 sample_rate_hz 分开：采样率是硬件事实（每帧被 push_iq 覆写），
+        # 缩放大小时用户意图，**不能被下一帧数据冲掉**。
+        self._zoom_span_hz: Optional[float] = None
         # FFT 参数；默认窗 Nuttall（main_window.cpp:91 IQFrontEnd::FFTWindow::NUTTALL）
         self.window_name = "Nuttall"
         self.fft_size = 2048
@@ -624,6 +639,30 @@ class SpectrumDataGenerator:
         return out
 
     # ------------------------------------------------------------------ 频率轴
+    @property
+    def span_hz(self) -> float:
+        """当前显示跨度（Hz）。
+
+        未缩放 = 采样率；缩放后 = 用户选定值（夹在 [48 kHz, 采样率] 内）。
+        所有「画在哪一列」的几何必须用它；所有「第几号 bin」的换算必须用
+        sample_rate_hz——两者混用会把缩放后的谱线画到错误频率上。
+        """
+        sr = float(self.sample_rate_hz)
+        z = self._zoom_span_hz
+        if z is not None and 0.0 < float(z) < sr:
+            return float(z)
+        return sr
+
+    def set_span(self, span_hz: Optional[float]) -> None:
+        """设置显示跨度；None 或 >= 采样率 = 取消缩放（全带宽）。"""
+        sr = float(self.sample_rate_hz)
+        try:
+            hz = float(span_hz) if span_hz is not None else sr
+        except (TypeError, ValueError):
+            hz = sr
+        hz = max(48_000.0, min(sr, hz))
+        self._zoom_span_hz = None if hz >= sr * 0.999 else hz
+
     def bin_to_freq(self, idx: int) -> float:
         """第 idx 个 bin 中心频率（Hz）。center ± sample_rate/2。"""
         idx = max(0, min(self.num_bins - 1, idx))
@@ -924,7 +963,7 @@ def _vfo_px_range(state: "_PlotState", rect: QRectF,
                   center_hz: float, bw_hz: float) -> Optional[Tuple[float, float]]:
     """返回某个 VFO 矩形在谱面的 (x0, x1) 像素坐标；完全在视口外返回 None。"""
     gen = state.panel.generator
-    span = gen.sample_rate_hz
+    span = gen.span_hz
     view_center = _view_center_hz(state)
     x_center = _freq_to_x(rect, view_center, span, center_hz)
     x_half = (bw_hz / 2.0) / span * rect.width()
@@ -1006,7 +1045,7 @@ def _draw_vfo_band(painter: QPainter, state: "_PlotState", rect: QRectF):
         f_lo, f_hi = state.vfo_create_band
         c0 = min(f_lo, f_hi); c1 = max(f_lo, f_hi)
         view_center = _view_center_hz(state)
-        span = gen.sample_rate_hz
+        span = gen.span_hz
         xa = _freq_to_x(rect, view_center, span, c0)
         xb = _freq_to_x(rect, view_center, span, c1)
         fill = QColor(PAL_GRID); fill.setAlpha(35)
@@ -1135,11 +1174,16 @@ def _band_x_range(rect: QRectF, view_center_hz: float, span_hz: float,
     return (max(rect.x(), x0), min(rect.x() + rect.width(), x1))
 
 
+#: 未连接时谱面第二行提示的默认文案（IDE 形态：工具栏就在上方）。
+OFFLINE_HINT_DEFAULT = "点击工具栏「连接」选择设备"
+
+
 class _PlotState:
     """两个渲染路径共享的交互状态。"""
 
     def __init__(self, panel: "SpectrumPanel"):
         self.panel = panel
+        # dB 显示量程（自动量程接管前的手动初值；SDR++ 同款 -100…-20 起步）
         self.db_min = -100.0
         self.db_max = -20.0
         # dB 轴拖动中：绘制时叠加当前量程读数（跟手反馈）。
@@ -1147,6 +1191,9 @@ class _PlotState:
         # Ctrl+竖拖 = 锚点缩放：光标旁弹数值气泡（与轴区读数同格式）。
         self.db_drag_zoom = False
         self.db_drag_cursor_y = 0.0
+        # 无数据时谱面第二行提示：宿主可替换（星象仪全屏窗没有工具栏，
+        # 同一句「点击工具栏」在那里不可执行），见 SpectrumPanel.set_offline_hint。
+        self.offline_hint: str = OFFLINE_HINT_DEFAULT
         self.show_waterfall = True
         self.mouse_x_ratio: Optional[float] = None     # 鼠标悬停 x 比例
         self.mouse_in_spectrum = False
@@ -1171,6 +1218,11 @@ class _PlotState:
         # ---- 瀑布调色板 / 时间平滑 ----
         self.wf_colors: List[str] = list(WATERFALL_COLORS)   # 当前瀑布色带
         self.wf_smooth: bool = False                 # IIR 时间平滑（仅瀑布）
+        # 自动量程（SDR++ autoRange 语义）：把底噪锚在色带冷端 ~22% 处，
+        # 固定量程做不到——-100…-20 时常见 -60 dBFS 底噪正好落在色带中段，
+        # 整幅瀑布糊成一片亮绿（2026-11-10 实拍）。用户动过任一 dB 滑杆/轴上
+        # 拖动即永久转手动（apply_db_range 负责关掉），不再抢量程。
+        self.auto_db_range: bool = True
         # ---- 调谐步进网格（对标 SDR++ waterfall.h:38 snapInterval）----
         # 普通滚轮/左右箭头按此步进调谐；Shift ×10，Alt ×0.1。
         self.snap_interval = 10_000.0                   # Hz，默认 10 kHz
@@ -1222,6 +1274,10 @@ class _PlotState:
 # FFT 谱面底部预留高度（像素）：用于画频率轴刻度，避免标签被裁剪。
 _SPEC_BOTTOM_PAD = 18
 
+# 频率轴右端留白（像素）：贴着右缘画「MHz」时，右侧竖滑杆列的「最小」标签
+# 只隔 2px，实拍读成「MHz最小」一串。轴内退这么多，让单位与滑杆标签分开。
+_AXIS_RIGHT_PAD = 6.0
+
 # 左侧 dB 轴拖拽热区宽度（像素）：gqrx plotter.cpp:350-368 YAXIS 捕获区。
 # 在频谱左缘这条带内按住拖动 = 整体平移 dB 量程（不调谐、不改 span）；
 # Ctrl+竖拖 = 以按下处 dB 为锚缩放跨度；该带上的滚轮同样只缩跨度。
@@ -1231,6 +1287,11 @@ _DB_AXIS_DRAG_W = 40.0
 _DB_AXIS_MIN = -160.0
 _DB_AXIS_MAX = 0.0
 _DB_MIN_SPAN = 10.0       # 与右栏滑杆最小间隔一致（SDR++ main_window.cpp:639）
+
+#: 右侧「缩放」滑杆刻度数（整数 0..N，对数映射到 [48 kHz, 采样率]）
+_SPAN_SLIDER_STEPS = 1000
+#: 显示跨度下限（Hz）：再窄就只剩 FFT 泄漏和窗函数旁瓣，没有可读信息
+_SPAN_MIN_HZ = 48_000.0
 _DB_MAX_SPAN = _DB_AXIS_MAX - _DB_AXIS_MIN
 # Ctrl+竖拖满量程一屏 = 跨度 ×4（或 ÷4）；半屏 = ×2，手感线性于像素。
 _DB_ZOOM_PER_HEIGHT = 4.0
@@ -1370,6 +1431,10 @@ def _render_spectrum(painter: QPainter, state: _PlotState, w: int, h: int):
     gen = panel.generator
     has_data = gen.has_data()
 
+    # 自动量程先于一切几何：谱线/瀑布/刻度都吃同一份 db_min/db_max。
+    if has_data:
+        _auto_db_range(state)
+
     bg = QColor(panel.color_bg)
     grid = QColor(panel.color_grid)
     text = QColor(panel.color_text)
@@ -1381,10 +1446,15 @@ def _render_spectrum(painter: QPainter, state: _PlotState, w: int, h: int):
     # 与 _freq_at_x 的“x=0 ↔ 视口左缘”映射保持一致。
     spec_rect = QRectF(0, 0, w, max(1, h - _SPEC_BOTTOM_PAD))
 
-    view_center = _view_center_hz(state)
-    span = gen.sample_rate_hz
+    # 缩放后视口只显示带宽中间一段：所有以频率落位的元素（谱线、VFO、
+    # 书签、峰值）都可能落到谱面矩形之外，必须整体裁剪，不能画到杆上。
+    painter.save()
+    painter.setClipRect(spec_rect)
 
-    _draw_grid(painter, spec_rect, grid)
+    view_center = _view_center_hz(state)
+    span = gen.span_hz
+
+    _draw_grid(painter, spec_rect, grid, state)
     # 频段彩带垫底（SDR++ bandplan 仿妆）: 网格之上、谱线之下
     _draw_bandplan(painter, state, spec_rect)
 
@@ -1397,7 +1467,7 @@ def _render_spectrum(painter: QPainter, state: _PlotState, w: int, h: int):
         # docs/perf-evidence/aa_*_crop4x.png）；峰点/刻度/文字仍走原 AA。
         _aa = bool(painter.renderHints() & QPainter.Antialiasing)
         painter.setRenderHint(QPainter.Antialiasing, False)
-        _draw_spectrum(painter, state, spec_rect, line)
+        _draw_spectrum(painter, state, spec_rect)
         painter.setRenderHint(QPainter.Antialiasing, _aa)
         _draw_hold_lines(painter, state, spec_rect)
         _draw_peaks(painter, state, spec_rect, QColor(PAL_PEAK))
@@ -1414,7 +1484,7 @@ def _render_spectrum(painter: QPainter, state: _PlotState, w: int, h: int):
         f2 = QFont()
         f2.setPointSize(9)
         painter.setFont(f2)
-        msg2 = "点击工具栏「连接」选择设备"
+        msg2 = getattr(state, "offline_hint", "") or OFFLINE_HINT_DEFAULT
         tw2 = painter.fontMetrics().horizontalAdvance(msg2)
         painter.drawText(QPointF((w - tw2) / 2.0, y1 + 20), msg2)
 
@@ -1427,6 +1497,7 @@ def _render_spectrum(painter: QPainter, state: _PlotState, w: int, h: int):
         _draw_hover_readout(painter, state, spec_rect, text, line)
         _draw_fixed_markers(painter, state, spec_rect, line)
     _draw_bookmark_tags(painter, state, spec_rect)
+    painter.restore()
 
     # 频率轴（画在谱面底部预留区）+ dB 轴
     _draw_freq_scale(painter, spec_rect, view_center, span, text)
@@ -1442,37 +1513,178 @@ def _render_wf_only(painter: QPainter, state: _PlotState, w: int, h: int):
     panel = state.panel
     bg = QColor(panel.color_bg)
     painter.fillRect(0, 0, w, h, bg)
+    # 瀑布与谱面是两块独立 widget，绘制顺序不由我们决定：自动量程必须
+    # 在这里也算一次，否则瀑布先画时仍用旧量程上色，谱面再改量程 →
+    # 同一帧里上下两半用两个色标（实拍：瀑布亮绿、刻度已到 0 dBFS）。
+    if panel.generator.has_data():
+        _auto_db_range(state)
     if h > 0:
         # 瀑布不再单独画一条频率轴：谱面底部那条轴就在两区之间，是二者
         # 共用的唯一刻度；瀑布画布按同一 _px_to_freq 落列（见
         # _wf_paint_row_into），Ctrl 平移后仍与上方刻度对齐。
         wf_rect = QRectF(0, 0, w, h)
-        if state.show_waterfall:
+        if not panel.generator.has_data():
+            _draw_wf_placeholder(painter, state, wf_rect)
+        elif state.show_waterfall:
             _draw_waterfall(painter, wf_rect, state)
         # 顶缘频段彩带是视口装饰不是数据，瀑布关着也画（频率锚不丢）
         _draw_bandplan_wf_strip(painter, state, wf_rect)
 
 
-def _draw_grid(painter, rect, grid):
-    painter.setPen(QPen(grid, 1, Qt.DashLine))
-    for i in range(1, 5):
-        x = rect.x() + rect.width() * i / 5
-        painter.drawLine(QPointF(x, rect.y()),
-                         QPointF(x, rect.y() + rect.height()))
-    for i in range(1, 4):
-        y = rect.y() + rect.height() * i / 4
-        painter.drawLine(QPointF(rect.x(), y),
-                         QPointF(rect.x() + rect.width(), y))
+def _draw_wf_placeholder(painter, state, rect):
+    """无 IQ 数据时瀑布的诚实空态。
+
+    一整块 200px 高的纯黑在界面里读起来像"渲染坏了"，而 SDR++ 那块永远
+    有噪声。没有硬件就不画噪声（红线），但可以让它读起来是"在等数据"：
+    与谱面同几何的极淡频率网格 + 一行说明。网格用同一套 _freq_scale_ticks，
+    所以接上硬件后噪声行落下时不会跳位。
+    """
+    gen = state.panel.generator
+    grid = QColor(state.panel.color_grid)
+    grid.setAlpha(26)
+    painter.setPen(QPen(grid, 1))
+    old_font = painter.font()
+    f = QFont()
+    f.setPointSize(8)
+    painter.setFont(f)
+    fm = painter.fontMetrics()
+    reserve = fm.horizontalAdvance("MHz") + 8.0 + _AXIS_RIGHT_PAD
+    view_center = _view_center_hz(state)
+    _step, ticks, _labels, _unit = _freq_scale_ticks(
+        view_center, gen.span_hz, rect.width(),
+        fm.horizontalAdvance, reserve_px=reserve)
+    for tick_hz in ticks:
+        x = rect.center().x() + (tick_hz - view_center) / gen.span_hz * rect.width()
+        if rect.x() < x < rect.x() + rect.width():
+            painter.drawLine(QPointF(x, rect.y()),
+                             QPointF(x, rect.y() + rect.height()))
+
+    text = QColor(state.panel.color_text)
+    text.setAlpha(120)
+    painter.setPen(QPen(text, 1))
+    f1 = QFont()
+    f1.setPointSize(9)
+    painter.setFont(f1)
+    msg = "瀑布图 · 等待 IQ 数据"
+    cy = rect.center().y()
+    painter.drawText(QPointF(rect.center().x()
+                             - painter.fontMetrics().horizontalAdvance(msg) / 2.0,
+                             cy), msg)
+    f2 = QFont()
+    f2.setPointSize(8)
+    painter.setFont(f2)
+    text.setAlpha(90)
+    painter.setPen(QPen(text, 1))
+    # 紧凑槽（星象仪底部条约 50px 高）只放得下一行：第二行会被裁进频率轴，
+    # 宁可不写也不叠字；第一行「等待 IQ 数据」已说明状态。
+    if rect.height() >= 64:
+        sub = "没有真实采样就不画噪声条"
+        painter.drawText(QPointF(rect.center().x()
+                                 - painter.fontMetrics().horizontalAdvance(sub) / 2.0,
+                                 cy + 16), sub)
+    painter.setFont(old_font)
+
+
+def _draw_grid(painter, rect, grid, state):
+    """刻度网格：竖线对频率刻度、横线对 dB 刻度，极淡 1px 实线。
+
+    网格不是装饰、也不是等分的四六格：每一根都必须落在 _draw_freq_scale /
+    _draw_db_scale 实际画出的刻度值上，否则"线在这里、数字在那里"就是
+    2026-11-10 用户说的"垃圾玩意"。两条轴共用同一套刻度生成器与映射。
+    """
+    g = QColor(grid)
+    g.setAlpha(PAL_GRID_ALPHA)
+    painter.setPen(QPen(g, 1))
+    gen = state.panel.generator
+    # 与 _draw_freq_scale 完全同参：8pt 字度量 + 右端单位预留，否则刻度
+    # 会被挤掉一格、网格线又对不上数字。
+    old_font = painter.font()
+    f = QFont()
+    f.setPointSize(8)
+    painter.setFont(f)
+    fm = painter.fontMetrics()
+    reserve = fm.horizontalAdvance("MHz") + 8.0 + _AXIS_RIGHT_PAD
+    _step, ticks, _labels, _unit = _freq_scale_ticks(
+        _view_center_hz(state), gen.span_hz, rect.width(),
+        fm.horizontalAdvance, reserve_px=reserve)
+    for tick_hz in ticks:
+        x = rect.center().x() + (tick_hz - _view_center_hz(state)) \
+            / gen.span_hz * rect.width()
+        if rect.x() < x < rect.x() + rect.width():
+            painter.drawLine(QPointF(x, rect.y()),
+                             QPointF(x, rect.y() + rect.height()))
+    _step, dbs = _nice_ticks(state.db_min, state.db_max, 5)
+    for db in dbs:
+        y = _db_to_y(rect, db, state.db_min, state.db_max)
+        if rect.y() < y < rect.y() + rect.height():
+            painter.drawLine(QPointF(rect.x(), y),
+                             QPointF(rect.x() + rect.width(), y))
+    painter.setFont(old_font)
+
+
+# 自动量程把底噪锚在量程的这个位置（0=底、1=顶）。SDR++ autoRange 的观感：
+# 底噪贴着底边（深紫/深蓝），只有抬头的信号才走到青绿黄红；锚太高（实测
+# 0.22 在 Turbo 色表上已是整片亮青）整幅瀑布又变成一块发光板。
+_AUTO_DB_NOISE_POS = 0.10
+# 自动量程的最小/最大跨度。跨度必须能收窄：0 dBFS 是硬天花板，底噪 -56 时
+# 想把噪声压到 10% 处，跨度最多只剩 ~62 dB；硬撑 80 dB 会被天花板顶回去，
+# 噪声又回到色带 30% 的整片亮青（2026-11-10 实拍两次）。
+_AUTO_DB_MIN_SPAN = 40.0
+_AUTO_DB_MAX_SPAN = 80.0
+
+
+def _auto_db_range(state) -> None:
+    """自动量程（SDR++ autoRange 的显示语义）：把底噪锚在色带下 10% 处。
+
+    只在用户没动过 dB 滑杆/轴拖动时生效（``auto_db_range``，apply_db_range
+    一旦被手动调用就永久关掉）。跨度在手动态量程的 40–80 dB 之间收放，
+    只整体平移窗口：底噪落在冷端 → 强信号一路烧到红端，与 SDR++ 观感一致。
+    滞回 3 dB，避免量程随噪声每次都在 10 Hz 刷新里来回跳。
+    """
+    if not state.auto_db_range:
+        return
+    if getattr(state.panel, "_db_min_slider", None) is None:
+        return
+    spec = state.panel.generator.spectrum
+    finite = spec[np.isfinite(spec)]
+    if finite.size < 64:
+        return
+    span = min(max(state.db_max - state.db_min, _AUTO_DB_MIN_SPAN),
+               _AUTO_DB_MAX_SPAN)
+    noise = float(np.percentile(finite, 20))
+    # 先按"底噪落 10%、顶到 0 dBFS"反推跨度，再夹进可用区间。
+    span = min(span, (_DB_AXIS_MAX - noise) / (1.0 - _AUTO_DB_NOISE_POS))
+    span = max(span, _AUTO_DB_MIN_SPAN)
+    lo = noise - _AUTO_DB_NOISE_POS * span
+    if lo + span > _DB_AXIS_MAX:
+        lo = _DB_AXIS_MAX - span
+    lo = max(_DB_AXIS_MIN, lo)
+    hi = lo + span
+    if abs(lo - state.db_min) < 3.0 and abs(hi - state.db_max) < 3.0:
+        return
+    lo, hi = float(round(lo)), float(round(hi))
+    state.db_min, state.db_max = lo, hi
+    # 滑杆是唯一状态源的共享显示：状态变了必须同帧跟上（阻断回调环，
+    # 也不走 apply_db_range —— 那是"手动"入口，会关掉自动量程）。
+    panel = state.panel
+    for slider, val in ((panel._db_max_slider, hi),
+                        (panel._db_min_slider, lo)):
+        slider.blockSignals(True)
+        slider.setValue(int(val))
+        slider.blockSignals(False)
 
 
 def _db_to_y(rect, db, db_min, db_max):
     h = rect.height()
     ratio = (db - db_min) / (db_max - db_min)
     ratio = max(0.0, min(1.0, ratio))
-    return rect.y() + rect.height() - ratio * h * 0.92
+    # 上下各留 4%：谱线、hold、峰值、VFO 带与 dB 轴刻度共用这一条映射，
+    # 刻度文字才真正落在它标的那条电平上（旧式 1-0.92r 与轴上 0.04+0.92f
+    # 差 0.04h，1400×360 的谱面上就是 14px 的错位）。
+    return rect.y() + rect.height() * (0.04 + 0.92 * (1.0 - ratio))
 
 
-def _draw_spectrum(painter, state, rect, line_color):
+def _draw_spectrum(painter, state, rect):
     """向量化画频谱折线 + 渐变填充。numpy 一次算完全部 x/y，QPolygonF
     单次 drawPolyline/drawPolygon，避免逐 bin 函数调用与路径拼接。"""
     gen = state.panel.generator
@@ -1483,7 +1695,8 @@ def _draw_spectrum(painter, state, rect, line_color):
     rx0, rw = rect.x(), rect.width()
     ry0, rh = rect.y(), rect.height()
     view_center = _view_center_hz(state)
-    span = gen.sample_rate_hz
+    # x 几何用显示跨度（缩放后变窄），bin→频率仍用采样率（bins 覆盖全带宽）。
+    span = gen.span_hz
     f_left = view_center - span / 2.0
     ii = np.arange(n, dtype=np.float64)
     freq = (gen.center_freq_hz - gen.sample_rate_hz / 2.0
@@ -1493,21 +1706,28 @@ def _draw_spectrum(painter, state, rect, line_color):
     x = rx0 + (freq - f_left) / span * rw
     ratio = np.clip((db - state.db_min) / (state.db_max - state.db_min),
                     0.0, 1.0)
-    y = ry0 + rh - ratio * rh * 0.92
-    # 低饱和橙渐变填充
+    y = ry0 + rh * (0.96 - 0.92 * ratio)
+    floor_y = ry0 + rh * 0.96
+    # SDR++ 签名：1px 亮青实线 + 同色低透明度向下渐变（越靠底越淡），
+    # 不再用整块不透明灰蓝把谱面糊成一面墙。
+    trace = QColor(PAL_TRACE)
+    top = QColor(trace)
+    top.setAlpha(96)
+    bot = QColor(trace)
+    bot.setAlpha(10)
     grad = QLinearGradient(0, ry0, 0, ry0 + rh)
-    grad.setColorAt(0.0, QColor(PAL_LINE).lighter(130))
-    grad.setColorAt(1.0, QColor(PAL_LINE).darker(160))
+    grad.setColorAt(0.0, top)
+    grad.setColorAt(1.0, bot)
     # PySide6 QPainter 无 fillPolygon(poly, brush)：把渐变设为当前 brush，
     # drawPolygon 会按当前 brush 填充，语义与原 fillPolygon 一致。
-    painter.setPen(QPen(line_color, 2))
+    painter.setPen(QPen(trace, 1))
     if finite.all():
         poly = QPolygonF([QPointF(float(a), float(b))
                           for a, b in zip(x, y)])
         fillpoly = QPolygonF()
-        fillpoly.append(QPointF(rx0, ry0 + rh))
+        fillpoly.append(QPointF(rx0, floor_y))
         fillpoly += poly
-        fillpoly.append(QPointF(rx0 + rw, ry0 + rh))
+        fillpoly.append(QPointF(rx0 + rw, floor_y))
         painter.setBrush(QBrush(grad))
         painter.drawPolygon(fillpoly)
         painter.drawPolyline(poly)
@@ -1525,9 +1745,9 @@ def _draw_spectrum(painter, state, rect, line_color):
                              for j in range(a, b)])
             if b - a >= 2:
                 fillpoly = QPolygonF()
-                fillpoly.append(QPointF(float(x[a]), ry0 + rh))
+                fillpoly.append(QPointF(float(x[a]), floor_y))
                 fillpoly += seg
-                fillpoly.append(QPointF(float(x[b - 1]), ry0 + rh))
+                fillpoly.append(QPointF(float(x[b - 1]), floor_y))
                 painter.setBrush(QBrush(grad))
                 painter.drawPolygon(fillpoly)
                 painter.drawPolyline(seg)
@@ -1550,17 +1770,18 @@ def _draw_hold_lines(painter, state, rect):
         if n == 0:
             return
         view_center = _view_center_hz(state)
-        span = gen.sample_rate_hz
+        span = gen.span_hz
+        sr = gen.sample_rate_hz
         f_left = view_center - span / 2.0
         ii = np.arange(n, dtype=np.float64)
-        freq = (gen.center_freq_hz - span / 2.0
-                + span * (ii + 0.5) / n)
+        freq = (gen.center_freq_hz - sr / 2.0
+                + sr * (ii + 0.5) / n)
         finite = np.isfinite(hold)
         db = np.where(finite, hold, state.db_min)
         x = rect.x() + (freq - f_left) / span * rect.width()
         ratio = np.clip((db - state.db_min) / (state.db_max - state.db_min),
                         0.0, 1.0)
-        y = rect.y() + rect.height() - ratio * rect.height() * 0.92
+        y = rect.y() + rect.height() * (0.96 - 0.92 * ratio)
         painter.setPen(QPen(color, 1))
         if finite.all():
             poly = QPolygonF([QPointF(float(a), float(b))
@@ -1602,7 +1823,7 @@ def _draw_bandplan(painter, state, rect, overlay=False):
     if not state.show_bandplan or not state.bandplan:
         return
     view_center = _view_center_hz(state)
-    span = state.panel.generator.sample_rate_hz
+    span = state.panel.generator.span_hz
     hover = getattr(state, "bandplan_hover", None)
     selected = getattr(state, "bandplan_selected", None)
     if not overlay:
@@ -1668,7 +1889,7 @@ def _draw_bandplan_wf_strip(painter, state, rect):
     if not state.show_bandplan or not state.bandplan:
         return
     view_center = _view_center_hz(state)
-    span = state.panel.generator.sample_rate_hz
+    span = state.panel.generator.span_hz
     hover = getattr(state, "bandplan_hover", None)
     selected = getattr(state, "bandplan_selected", None)
     painter.setPen(Qt.NoPen)
@@ -1694,7 +1915,7 @@ def _draw_bookmark_tags(painter, state, rect):
         return
     gen = state.panel.generator
     view_center = _view_center_hz(state)
-    span = gen.sample_rate_hz
+    span = gen.span_hz
     f_left = view_center - span / 2.0
     color = QColor(PAL_BOOKMARK)
     f = QFont()
@@ -1799,19 +2020,43 @@ def _peak_label_placements(peaks_xy, measure, x_min: float, x_max: float,
     return out
 
 
+#: 纵轴刻度文字画在谱内左上（距左边 4px）；峰标签必须让开它。
+_DB_AXIS_INSET = 4.0
+#: 峰标签与刻度文字之间至少留的横向空隙（像素）。
+_DB_AXIS_GAP = 6.0
+
+
+def _peak_label_left_bound(rect, state, fm) -> float:
+    """峰标签左界：让开谱内左上那列 dBFS 刻度文字。
+
+    实拍缺陷（2026-11-11，星象仪 180px 紧凑频谱条）：靠近左缘的峰标签
+    「97.730 MHz」直接压在「-40 dBFS」上，两串读数互相污染。刻度画在
+    ``rect.x() + 4``，而峰标签只让了 2px。这里按当前量程实测最宽刻度，
+    把标签起点推到刻度右侧；推不过去的峰按既有策略诚实丢弃（不漂移、
+    不叠字），与 ``_peak_label_placements`` 的锚定规则一致。
+    """
+    _step, dbs = _nice_ticks(state.db_min, state.db_max, 5)
+    if not dbs:
+        dbs = [state.db_min, state.db_max]
+    axis_w = max(float(fm.horizontalAdvance(_fmt_axis_tick(db)))
+                 for db in dbs)
+    return rect.x() + _DB_AXIS_INSET + axis_w + _DB_AXIS_GAP
+
+
 def _peak_annotations(state):
     """峰值标注唯一数据源：[(freq_hz, db, snr_db, label), ...]。
 
     绘制与命中（_peak_at / 悬停 / 点击提示）都读这一份，标签里的 SNR
     与命中返回的 SNR 因此不可能分叉。SNR 基准见
     SpectrumDataGenerator.noise_floor_db（本帧全谱中位数）。
+
+    常驻标签只写频率（SDR++ 峰值标签是站名/频点短签，不是读数表）：
+    dBFS/SNR 这类每秒跳几十次的量只在悬停提示里出现，绝不挂在谱面上。
     """
     gen = state.panel.generator
     if not state.show_peaks or not gen.has_data():
         return []
-    return [(freq_hz, db, snr,
-             f"{freq_hz/1e6:.3f}MHz {db:.1f}{_DBFS_UNIT} "
-             f"SNR({_REL_BASE}) {snr:.1f}dB")
+    return [(freq_hz, db, snr, f"{freq_hz/1e6:.3f} MHz")
             for freq_hz, db, snr in gen.find_peaks_with_snr(state.peak_rel_db)]
 
 
@@ -1827,7 +2072,7 @@ def _draw_peaks(painter, state, rect, color):
     painter.setFont(f)
     fm = painter.fontMetrics()
     view_center = _view_center_hz(state)
-    span = gen.sample_rate_hz
+    span = gen.span_hz
     pts = []
     for freq_hz, db, _snr, label in ann:
         x = _freq_to_x(rect, view_center, span, freq_hz)
@@ -1838,7 +2083,7 @@ def _draw_peaks(painter, state, rect, color):
     pts.sort(key=lambda p: p[0])
     row_h = fm.height() + 2.0
     for tx, ty, label, _row in _peak_label_placements(
-            pts, fm.horizontalAdvance, rect.x() + 2.0,
+            pts, fm.horizontalAdvance, _peak_label_left_bound(rect, state, fm),
             rect.x() + rect.width() - 2.0, row_h,
             text_ascent=fm.ascent(), text_descent=fm.descent()):
         painter.drawText(QPointF(tx, ty), label)
@@ -1873,7 +2118,7 @@ def _draw_hover_readout(painter, state, rect, text_color, line_color):
         return
     gen = state.panel.generator
     view_center = _view_center_hz(state)
-    span = gen.sample_rate_hz
+    span = gen.span_hz
     freq_hz = view_center - span / 2.0 + state.mouse_x_ratio * span
     x = rect.x() + state.mouse_x_ratio * rect.width()
     val = gen.value_at_freq(freq_hz)
@@ -1892,7 +2137,7 @@ def _draw_hover_readout(painter, state, rect, text_color, line_color):
 def _draw_fixed_markers(painter, state, rect, color):
     gen = state.panel.generator
     view_center = _view_center_hz(state)
-    span = gen.sample_rate_hz
+    span = gen.span_hz
     f = QFont()
     f.setPointSize(8)
     for freq_hz in state.markers:
@@ -1931,12 +2176,13 @@ def _wf_paint_row_into(state: "_PlotState", row_db: np.ndarray, dst_row: np.ndar
     n = len(row_db)
     gen = state.panel.generator
     view_center = _view_center_hz(state)
-    span = gen.sample_rate_hz
+    span = gen.span_hz
+    sr = gen.sample_rate_hz
     # 像素中心 → 频率 → bin；与 _freq_at_x 的像素含义严格一致。
     x = np.arange(w, dtype=np.float64) + 0.5
     freq = _px_to_freq(x, w, view_center, span)
-    f0 = gen.center_freq_hz - span / 2.0
-    idx = np.floor((freq - f0) / span * n).astype(np.int64)
+    f0 = gen.center_freq_hz - sr / 2.0
+    idx = np.floor((freq - f0) / sr * n).astype(np.int64)
     valid = (idx >= 0) & (idx < n)
     # NaN = 未采到：该像素画背景色（不是色图最低档，避免与真实弱信号混淆）。
     raw = np.where(valid, row_db[np.clip(idx, 0, max(0, n - 1))], np.nan)
@@ -1945,7 +2191,7 @@ def _wf_paint_row_into(state: "_PlotState", row_db: np.ndarray, dst_row: np.ndar
     dmin, dmax = state.db_min, state.db_max
     t = np.clip((vals - dmin) / (dmax - dmin + 1e-9), 0.0, 1.0)
     li = (t * 255.0).astype(np.int64)
-    bg = QColor(PAL_BG)
+    bg = QColor(state.panel.color_bg)
     dst_row[:, 0:3] = (bg.red(), bg.green(), bg.blue())
     dst_row[ok, 0:3] = state._wf_lut[li[ok]]
     dst_row[:, 3] = 255
@@ -1959,7 +2205,7 @@ def _wf_ensure_canvas(state: "_PlotState", w: int, h: int) -> bool:
     if (state._wf_cw == w and state._wf_ch == h
             and state._wf_buf is not None and state._wf_canvas is not None):
         return True
-    bg = QColor(PAL_BG)
+    bg = QColor(state.panel.color_bg)
     buf = np.empty((h, w, 4), dtype=np.uint8)
     buf[:, :, 0] = bg.red()
     buf[:, :, 1] = bg.green()
@@ -1991,7 +2237,7 @@ def _draw_waterfall(painter, rect, state):
         _wf_build_lut(state)
 
     buf = state._wf_buf
-    bg = QColor(PAL_BG)
+    bg = QColor(state.panel.color_bg)
     total = gen.wf_rows_written
 
     # 历史回看：滚轮在瀑布上滚到旧行时，按绝对窗口重绘，不再增量跟随最新。
@@ -2022,7 +2268,8 @@ def _draw_waterfall(painter, rect, state):
     # 永久的水平色带断层，直到平移/改深度才消失。回看键（_wf_hist_key）与
     # 改配色处（_on_palette_changed）本来就是含配色的，这里属于漏项。
     map_key = (round(_view_center_hz(state), 3),
-               float(gen.sample_rate_hz), int(gen.num_bins), w, h,
+               float(gen.span_hz), float(gen.sample_rate_hz),
+               int(gen.num_bins), w, h,
                float(state.db_min), float(state.db_max))
     if state._wf_map_key != map_key:
         state._wf_map_key = map_key
@@ -2074,9 +2321,16 @@ def _draw_waterfall(painter, rect, state):
     painter.drawImage(rect, state._wf_canvas)
 
 
+def _axis_pen(text_color) -> QPen:
+    """刻度字用半透明文字色：SDR++ 的轴字是"能读但不抢"的灰，不是纯白。"""
+    c = QColor(text_color)
+    c.setAlpha(175)
+    return QPen(c, 1)
+
+
 def _draw_freq_scale(painter, rect, view_center_hz: float, span_hz: float,
                      text_color):
-    painter.setPen(text_color)
+    painter.setPen(_axis_pen(text_color))
     f = QFont()
     f.setPointSize(8)
     painter.setFont(f)
@@ -2084,7 +2338,7 @@ def _draw_freq_scale(painter, rect, view_center_hz: float, span_hz: float,
     # 1/2/5×10ⁿ 阶梯 + 按量程自动单位（SDR++ waterfall.cpp:40-62）。
     # 单位只在轴右端画一次；刻度的可用宽度扣掉单位区，避免标签贴上去。
     unit_w = fm.horizontalAdvance("MHz")   # 取最长单位宽度做统一预留
-    reserve = unit_w + 8.0
+    reserve = unit_w + 8.0 + _AXIS_RIGHT_PAD
     _step, ticks, labels, unit = _freq_scale_ticks(
         view_center_hz, span_hz, rect.width(), fm.horizontalAdvance,
         reserve_px=reserve)
@@ -2096,30 +2350,34 @@ def _draw_freq_scale(painter, rect, view_center_hz: float, span_hz: float,
         tw = fm.horizontalAdvance(s)
         tx = max(rect.x(), min(x - tw / 2.0, right_bound - tw))
         painter.drawText(QPointF(tx, rect.y() + rect.height() + 14), s)
-    # 自动单位（kHz / MHz / GHz）只标一次，右端对齐。
+    # 自动单位（kHz / MHz / GHz）只标一次，右端对齐（留 _AXIS_RIGHT_PAD，
+    # 避免与右侧滑杆列的「最小」标签贴成一串）。
     uw = fm.horizontalAdvance(unit)
     painter.drawText(
-        QPointF(rect.x() + rect.width() - uw, rect.y() + rect.height() + 14),
+        QPointF(rect.x() + rect.width() - uw - _AXIS_RIGHT_PAD,
+                rect.y() + rect.height() + 14),
         unit)
 
 
 def _draw_db_scale(painter, rect, state, text_color):
-    painter.setPen(text_color)
+    painter.setPen(_axis_pen(text_color))
     f = QFont()
     f.setPointSize(8)
     painter.setFont(f)
     fm = painter.fontMetrics()
-    # dB 轴同理：1/2/5×10ⁿ 阶梯（默认 -100…-20 会选出 20 dB 步长，
+    # dB 轴同理：1/2/5×10ⁿ 阶梯（默认 -80…-20 会选出 20 dB 步长，
     # 与原 5 等分位置一致；量程变了也不会出现非整数刻度）。
-    span_db = state.db_max - state.db_min
     _step, dbs = _nice_ticks(state.db_min, state.db_max, 5)
     if not dbs:
         dbs = [state.db_min, state.db_max]
     for db in dbs:
-        # 4%…96% 内缩：与旧实现同几何，顶部/底部刻度不被边界裁半。
-        y = rect.y() + rect.height() * (
-            0.04 + 0.92 * (state.db_max - db) / max(1e-9, span_db))
-        painter.drawText(QPointF(rect.x() + 4, y + 4), _fmt_axis_tick(db))
+        y = _db_to_y(rect, db, state.db_min, state.db_max)
+        # 顶端/底端刻度都贴边：baseline 固定在 y+4 时，「0 dBFS」上半截
+        # 被谱面上缘切掉、「-60 dBFS」下半截掉进频率轴（2026-11-11 星象仪
+        # 紧凑条实拍）。按 ascent/descent 夹住 baseline，整行字落在谱内。
+        by = min(max(y + 4.0, rect.y() + fm.ascent() + 1.0),
+                 rect.y() + rect.height() - fm.descent() - 1.0)
+        painter.drawText(QPointF(rect.x() + 4, by), _fmt_axis_tick(db))
     # 拖动时读数跟手：把当前量程直接画在轴区右上，位置不随值移动，
     # 内容随每一帧重算（几何断言 + 离屏截图可验，不靠肉眼）。
     if getattr(state, "db_drag_active", False):
@@ -2139,7 +2397,7 @@ def _draw_db_scale(painter, rect, state, text_color):
             bw = tw + 12.0
             bh = fm.height() + 4.0
             painter.setPen(QPen(QColor(PAL_GRID), 1))
-            painter.setBrush(QBrush(QColor(PAL_BG)))
+            painter.setBrush(QBrush(QColor(state.panel.color_bg)))
             painter.drawRoundedRect(
                 QRectF(bx, y - bh / 2.0, bw, bh), 4.0, 4.0)
             painter.setPen(QPen(text_color, 1))
@@ -2179,6 +2437,8 @@ class SpectrumPanel(QWidget):
         self.color_line = PAL_LINE
 
         self._state = _PlotState(self)
+        # 紧凑形态（星象仪底部条）标志：见 set_compact。
+        self._compact = False
 
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
@@ -2216,7 +2476,13 @@ class SpectrumPanel(QWidget):
         body.setContentsMargins(0, 0, 0, 0)
         body.setSpacing(2)
         body.addWidget(self._splitter, stretch=1)
-        body.addLayout(self._build_db_sliders())
+        # 滑杆列装进独立容器：星象仪底部条只有 180px 高，三根竖滑杆 + 标签的
+        # 最小高实测 347px，放进去会把谱面/瀑布连同「最小」标签一起挤出可视区。
+        # 紧凑形态下整列收起（见 set_compact），缩放仍可用 Ctrl+滚轮/捏合。
+        self._db_slider_col = QWidget()
+        self._db_slider_col.setObjectName("dbSliderCol")
+        self._db_slider_col.setLayout(self._build_db_sliders())
+        body.addWidget(self._db_slider_col)
         root.addLayout(body, stretch=1)
 
         # 初始：未连接 → 控件置灰
@@ -2228,31 +2494,60 @@ class SpectrumPanel(QWidget):
         self._fft_plot.update()
         self._wf_plot.update()
 
+    # ------------------------------------------------------------------ 宿主适配
+    def set_offline_hint(self, text: Optional[str]) -> None:
+        """设置「未连接」时谱面第二行提示；None/空串恢复默认文案。
+
+        星象仪全屏窗里没有工具栏，默认的「点击工具栏…」在那里不可执行，
+        由宿主换成「按 Esc 回主界面…」。提示只在无数据时出现，有数据时
+        改它无需重绘；无数据才重绘，避免每帧白刷。
+        """
+        hint = (text or "").strip() or OFFLINE_HINT_DEFAULT
+        if hint == self._state.offline_hint:
+            return
+        self._state.offline_hint = hint
+        if not self.generator.has_data():
+            self._fft_plot.update()
+
+    def set_compact(self, on: bool) -> None:
+        """紧凑形态（星象仪底部 180px 条）：收起右侧竖滑杆列、压低分区下限。
+
+        不这么做时实测面板最小高 347px（三根 80px 竖滑杆 + 标签），塞进
+        180px 槽里 QSplitter 按各自治最小高溢出：谱面 120px 与瀑布 60px
+        互相覆盖，频率轴被压进瀑布，「最小」标签整条出了面板（截图可判）。
+        收起滑杆列后最小高回落到 160px，谱面约 100px、瀑布约 50px，
+        缩放改用 Ctrl+滚轮/双指捏合。
+
+        只改布局，不动数据与控制器：滑杆对象仍在，只是不可见。
+        """
+        on = bool(on)
+        if on == self._compact:
+            return
+        self._compact = on
+        col = getattr(self, "_db_slider_col", None)
+        if col is not None:
+            col.setVisible(not on)
+        if on:
+            self._fft_plot.setMinimumHeight(80)
+            self._wf_plot.setMinimumHeight(40)
+            self._splitter.setSizes([110, 50])
+        else:
+            self._fft_plot.setMinimumHeight(120)
+            self._wf_plot.setMinimumHeight(60)
+            # 不恢复像素值：分区拉伸比是 3:2（见 __init__），回到 IDE 后
+            # 面板变高，QSplitter 按拉伸比重新分配；硬塞回紧凑时的 [110,50]
+            # 反而会把两区钉在贴底的位置。
+
     # ------------------------------------------------------------------ 工具栏
     def _build_toolbar(self) -> QHBoxLayout:
         bar = QHBoxLayout()
         bar.setContentsMargins(4, 0, 4, 0)
         bar.setSpacing(6)
 
-        bar.addWidget(QLabel("窗:"))
-        self._win_combo = QComboBox()
-        self._win_combo.addItems(SpectrumDataGenerator.WINDOWS)
-        # SDR++ main_window.cpp:91 默认 NUTTALL
-        self._win_combo.setCurrentText(self.generator.window_name)
-        self._win_combo.currentTextChanged.connect(self.generator.set_window)
-        bar.addWidget(self._win_combo)
-
-        bar.addWidget(QLabel("FFT:"))
-        self._fft_combo = QComboBox()
-        self._fft_combo.addItems([str(s) for s in SpectrumDataGenerator.FFT_SIZES])
-        self._fft_combo.setCurrentText("2048")
-        self._fft_combo.currentTextChanged.connect(
-            lambda t: self.generator.set_fft_size(int(t)))
-        bar.addWidget(self._fft_combo)
-
-        # 窄屏重排：自「平均」起不再常驻工具栏，统一收进「更多 ⋯」菜单。
-        # 控件本体不删、信号接线不变；QWidgetAction 直接承载原控件，
-        # 「原来在栏上 → 现在在菜单里」仍可操作，属性名也不变（测试照旧可取）。
+        # 窗函数 / FFT 点数也不再常驻工具栏：它们各自要 100+px，把频谱面板的
+        # 最小宽顶到 364px，而 1000 宽窗口下左栏只有约 340px——频谱被直接
+        # 裁掉右边（用户 2026-11-10「默认布局直接冲上，显示不全」）。
+        # 控件本体与信号不变，只是换成在「更多」菜单里出现。
         more_rows: list[QWidget] = []
 
         def _row(*widgets: QWidget) -> QWidget:
@@ -2264,6 +2559,21 @@ class SpectrumPanel(QWidget):
                 hl.addWidget(w_)
             hl.addStretch(1)
             return holder
+
+        # 窗函数（SDR++ main_window.cpp:91 默认 NUTTALL）
+        self._win_combo = QComboBox()
+        self._win_combo.addItems(SpectrumDataGenerator.WINDOWS)
+        self._win_combo.setCurrentText(self.generator.window_name)
+        self._win_combo.currentTextChanged.connect(self.generator.set_window)
+        more_rows.append(_row(QLabel("窗:"), self._win_combo))
+
+        # FFT 点数
+        self._fft_combo = QComboBox()
+        self._fft_combo.addItems([str(s) for s in SpectrumDataGenerator.FFT_SIZES])
+        self._fft_combo.setCurrentText("2048")
+        self._fft_combo.currentTextChanged.connect(
+            lambda t: self.generator.set_fft_size(int(t)))
+        more_rows.append(_row(QLabel("FFT:"), self._fft_combo))
 
         avg_label = QLabel("平均:")
         self._avg_combo = QComboBox()
@@ -2281,10 +2591,10 @@ class SpectrumPanel(QWidget):
         self._perf_combo.currentIndexChanged.connect(self.set_performance_mode)
         more_rows.append(_row(perf_label, self._perf_combo))
 
-        # 瀑布调色板（默认低饱和 / SDR++ 经典蓝-青-绿-黄-红）
+        # 瀑布调色板（默认 SDR++ Turbo 色表 / 旧低饱和色带）
         palette_label = QLabel("调色板:")
         self._palette_combo = QComboBox()
-        self._palette_combo.addItems(["默认", "经典SDR++"])
+        self._palette_combo.addItems(["SDR++ 经典", "低饱和"])
         self._palette_combo.currentIndexChanged.connect(self._on_palette_changed)
         more_rows.append(_row(palette_label, self._palette_combo))
 
@@ -2327,11 +2637,21 @@ class SpectrumPanel(QWidget):
             lambda on: (setattr(self._state, "show_bandplan", bool(on)),
                         self._redraw()))
 
+        # 自动量程（SDR++ autoRange 语义）：底噪锚在色带冷端，强信号烧到红端。
+        # 动过任一 dB 滑杆/轴上拖动后自动关掉（手动优先，不跟用户抢量程）。
+        self._auto_db_chk = QCheckBox("自动量程")
+        self._auto_db_chk.setChecked(True)
+        self._auto_db_chk.setToolTip(
+            "跟着底噪自动平移 dB 显示量程（跨度不变）：底噪落色带冷端、"
+            "强信号到红端。手动拖过 dB 滑杆/轴后即转手动，勾回来可恢复")
+        self._auto_db_chk.toggled.connect(self._on_auto_db_toggled)
+
         # 每行 3 个开关，菜单总高控制在 ~3 行（窄屏纵向也省）
         more_rows.append(_row(self._wf_smooth_chk, self._peak_chk,
                               self._maxhold_chk))
         more_rows.append(_row(self._minhold_chk, self._bookmark_chk,
                               self._bandplan_chk))
+        more_rows.append(_row(self._auto_db_chk))
 
         gate_label = QLabel("峰值门(相对本帧中位):")
         gate_label.setObjectName("peakGateLabel")
@@ -2362,15 +2682,15 @@ class SpectrumPanel(QWidget):
         self._tune_mode_btn.toggled.connect(self._on_tune_mode_toggled)
         more_rows.append(_row(self._tune_mode_btn))
 
-        # 「更多 ⋯」入口：常驻工具栏只多这一个按钮（约 70px），
-        # 换来 ②③ 与 ① 的平均/性能共 11 个控件不再占宽。
+        # 「更多 ⋯」入口：工具栏只剩这一个按钮（约 70px），全部显示参数
+        # 都收在这里，频谱面板才能缩到左栏实际宽度而不被裁。
         self._more_btn = QToolButton()
         self._more_btn.setText("更多")
         self._more_btn.setObjectName("spectrumMoreButton")
         self._more_btn.setPopupMode(QToolButton.InstantPopup)
         self._more_btn.setToolTip(
-            "频谱显示选项：平均 / 性能 / 调色板 / 瀑布平滑 / 峰值 / Max·Min 保持 / "
-            "书签 / 频段 / 峰值门 / 调谐模式")
+            "频谱显示选项：窗 / FFT 点数 / 平均 / 性能 / 调色板 / 瀑布平滑 / "
+            "峰值 / Max·Min 保持 / 书签 / 频段 / 峰值门 / 调谐模式")
         more_menu = QMenu(self._more_btn)
         more_menu.setToolTipsVisible(True)
         for row in more_rows:
@@ -2383,42 +2703,55 @@ class SpectrumPanel(QWidget):
 
         bar.addStretch(1)
 
-        # 只读状态显示：当前中心频率 / span / SNR（无数据时显 --）
-        # 对标 SDR++ main_window.cpp 顶部频率读数；这里只读展示，由 _refresh_status_labels 刷新。
-        self._freq_label = QLabel("--")
-        self._span_label = QLabel("跨度 --")
-        self._snr_label = QLabel("SNR --")
-        _lbl_color = _c["gray_200"]
-        self._freq_label.setStyleSheet(f"color:{_lbl_color};")
-        self._span_label.setStyleSheet(f"color:{_lbl_color};")
-        self._snr_label.setStyleSheet(f"color:{_c['spectrum_max_hold']};")
-        bar.addWidget(self._freq_label)
-        bar.addSpacing(12)
-        bar.addWidget(self._span_label)
-        bar.addSpacing(12)
-        bar.addWidget(self._snr_label)
-        # FFT 仪器化读数（gqrx 把瀑布当测量仪器）：RBW = span/FFT 点数，
-        # 瀑布时间跨度 = 环形缓冲行数 × 绘图定时器间隔。
-        self._fft_info_label = QLabel("RBW --")
-        self._fft_info_label.setStyleSheet(f"color:{_lbl_color};")
-        bar.addSpacing(12)
-        bar.addWidget(self._fft_info_label)
+        # 顶栏不放任何实时读数（2026-11-10 用户裁决）：
+        # SNR / 跨度 / RBW / 瀑布秒数每秒跳几十次，没人读得过来，SDR++ 顶上
+        # 也没有这些数字。频率看谱面刻度与主窗顶栏；电平看左边 dB 轴；
+        # 细节只在鼠标悬停时临时出现（_draw_hover_readout）。
         return bar
 
     # ------------------------------------------------------------------ dB 滑杆
     def _build_db_sliders(self) -> QVBoxLayout:
-        """右侧 Max/Min 垂直滑杆，对标 SDR++ main_window.cpp:635-656。
+        """右侧三根竖滑杆：缩放 / 最大 / 最小（SDR++ 主窗右侧同款）。
 
-        SDR++ 行为（main_window.cpp:638-656）：
-          - VSliderFloat 范围 0.0 ~ -160.0（顶部 0 dB，底部 -160 dB）
+        SDR++ 行为（main_window.cpp:635-656）：
+          - 上：缩放（FFT zoom，收窄显示跨度）
+          - 中：最大（fftMax，纵轴上限）
+          - 下：最小（fftMin，纵轴下限）
           - 拖 Max 时 fftMax = max(fftMax, fftMin + 10)   （line 639）
           - 拖 Min 时 fftMin = min(fftMax - 10, fftMin)   （line 652）
+
+        标签只写「缩放/最大/最小」，**不写数值**：这三根滑杆的数值每秒
+        都可能变，挂在面板上就是噪声；当前位置由滑杆拇指本身表达。
         """
         col = QVBoxLayout()
         col.setContentsMargins(2, 0, 2, 0)
         col.setSpacing(2)
 
-        col.addWidget(QLabel("Max", alignment=Qt.AlignHCenter))
+        def _cap(text: str, tip: str) -> QLabel:
+            lbl = QLabel(text)
+            lbl.setObjectName("dbCapLabel")
+            lbl.setAlignment(Qt.AlignHCenter)
+            lbl.setToolTip(tip)
+            return lbl
+
+        # ① 缩放：显示跨度（起始/截止频率区间），不碰硬件采样率
+        col.addWidget(_cap(
+            "缩放",
+            "显示跨度：上推收窄（放大细节），下拉回到全带宽。\n"
+            "只改变显示范围，不改变硬件采样率。"))
+        self._span_slider = QSlider(Qt.Vertical)
+        self._span_slider.setRange(0, _SPAN_SLIDER_STEPS)
+        self._span_slider.setValue(0)
+        self._span_slider.setMinimumHeight(90)
+        self._span_slider.setToolTip(
+            "缩放：上推收窄显示跨度（起始/截止频率靠拢），下拉回到全带宽。")
+        self._span_slider.valueChanged.connect(self._on_span_slider_changed)
+        col.addWidget(self._span_slider, stretch=1)
+
+        # ② 最大：纵轴上限（dBFS）
+        col.addWidget(_cap(
+            "最大",
+            "显示量程上限（dBFS，纵轴顶部）。不是接收增益——增益在控制面板。"))
         self._db_max_slider = QSlider(Qt.Vertical)
         # Qt 垂直滑杆：minimum 在底部、maximum 在顶部。
         # 我们用 dB 整数值：-160（底）.. 0（顶）。
@@ -2429,25 +2762,68 @@ class SpectrumPanel(QWidget):
         self._db_max_slider.setRange(-160, 0)
         self._db_max_slider.setValue(int(self._state.db_max))
         # 100 而非 150：1000×600 下频谱页扣掉头部只剩 292px，
-        # 两根 150 滑杆 + Max/Min 字条会把滑杆底端顶出面板 36px（被裁）。
-        self._db_max_slider.setMinimumHeight(100)
+        # 三根 150 滑杆 + 字条会把滑杆底端顶出面板（被裁）。
+        self._db_max_slider.setMinimumHeight(80)
         self._db_max_slider.setToolTip(
-            "Max：上推=图形上移（显示增益增大），下拉=压缩量程")
+            "显示上限：上推=整个谱面上移（放大弱信号），下拉=压缩量程。\n"
+            "它只改显示刻度，不改增益。")
         self._db_max_slider.valueChanged.connect(self._on_db_max_changed)
         col.addWidget(self._db_max_slider, stretch=1)
 
-        col.addWidget(QLabel("Min", alignment=Qt.AlignHCenter))
+        # ③ 最小：纵轴下限（dBFS）
+        col.addWidget(_cap(
+            "最小",
+            "显示量程下限（dBFS，纵轴底部）。不是接收增益——增益在控制面板。"))
         self._db_min_slider = QSlider(Qt.Vertical)
         self._db_min_slider.setInvertedAppearance(True)
         self._db_min_slider.setRange(-160, 0)
         self._db_min_slider.setValue(int(self._state.db_min))
-        self._db_min_slider.setMinimumHeight(100)
+        self._db_min_slider.setMinimumHeight(80)
         self._db_min_slider.setToolTip(
-            "Min：上推=弱信号也被放大（底噪抬高），下拉=隐藏弱信号")
+            "显示下限：上推=弱信号也显示（抬高底噪），下拉=隐藏弱信号。\n"
+            "它只改显示刻度，不改增益。")
         self._db_min_slider.valueChanged.connect(self._on_db_min_changed)
         col.addWidget(self._db_min_slider, stretch=1)
 
         return col
+
+    # ------------------------------------------------------------------ 缩放滑杆
+    def _span_from_slider(self, value: int) -> float:
+        """滑杆整数 → 显示跨度（对数刻度，0=全带宽，1000=48 kHz）。"""
+        sr = max(_SPAN_MIN_HZ, float(self.generator.sample_rate_hz))
+        f = max(0.0, min(1.0, float(value) / _SPAN_SLIDER_STEPS))
+        return sr * (_SPAN_MIN_HZ / sr) ** f
+
+    def _slider_from_span(self, span_hz: float) -> int:
+        """显示跨度 → 滑杆整数（与 ``_span_from_slider`` 互逆）。"""
+        sr = max(_SPAN_MIN_HZ, float(self.generator.sample_rate_hz))
+        span = max(_SPAN_MIN_HZ, min(sr, float(span_hz)))
+        if sr <= _SPAN_MIN_HZ * 1.001:
+            return 0
+        ratio = math.log(span / sr) / math.log(_SPAN_MIN_HZ / sr)
+        return int(round(max(0.0, min(1.0, ratio)) * _SPAN_SLIDER_STEPS))
+
+    @Slot(int)
+    def _on_span_slider_changed(self, value: int) -> None:
+        if getattr(self, "_syncing_span_slider", False):
+            return
+        span = self._span_from_slider(value)
+        if abs(span - self.generator.span_hz) < 1.0:
+            return
+        self.generator.set_span(span)
+        # 保持视图中心不动（缩放是"拉近看"，不是"换台"）。
+        self._redraw()
+
+    def sync_span_slider(self) -> None:
+        """外部改跨度（Ctrl+滚轮/捏合/换采样率）后，把滑杆拉到对应位置。"""
+        slider = getattr(self, "_span_slider", None)
+        if slider is None:
+            return
+        self._syncing_span_slider = True
+        try:
+            slider.setValue(self._slider_from_span(self.generator.span_hz))
+        finally:
+            self._syncing_span_slider = False
 
     def apply_db_range(self, db_min: float, db_max: float):
         """dB 量程的唯一状态源：滑杆、轴上拖动、外部调用都走这里。
@@ -2455,6 +2831,13 @@ class SpectrumPanel(QWidget):
         先把值规范成整数（滑杆本身是整数刻度，状态若留小数就会出现
         "状态一套、滑杆一套"的假量程），再同步状态与两根滑杆。
         """
+        # 手动改量程 = 自动量程让位（勾选框同步取消，避免"勾着却在手调"）。
+        self._state.auto_db_range = False
+        chk = getattr(self, "_auto_db_chk", None)
+        if chk is not None and chk.isChecked():
+            chk.blockSignals(True)
+            chk.setChecked(False)
+            chk.blockSignals(False)
         lo = max(_DB_AXIS_MIN, min(float(db_min), _DB_AXIS_MAX))
         hi = max(_DB_AXIS_MIN, min(float(db_max), _DB_AXIS_MAX))
         if hi - lo < _DB_MIN_SPAN:        # SDR++ main_window.cpp:639 最小间隔 10
@@ -2471,6 +2854,7 @@ class SpectrumPanel(QWidget):
             slider.blockSignals(True)
             slider.setValue(int(val))
             slider.blockSignals(False)
+        # 标签只写「缩放/最大/最小」，位置由滑杆拇指表达（不挂实时数值）。
         self._redraw()
 
     def db_range(self) -> Tuple[float, float]:
@@ -2485,12 +2869,17 @@ class SpectrumPanel(QWidget):
         # SDR++ main_window.cpp:652: fftMin = min(fftMax - 10, fftMin)
         self.apply_db_range(int(val), self._state.db_max)
 
+    def _on_auto_db_toggled(self, on: bool):
+        """自动量程开关：勾回来下一帧就按底噪重新锚定（不立刻改量程）。"""
+        self._state.auto_db_range = bool(on)
+        self._redraw()
+
     def _set_controls_enabled(self, on: bool):
         for w_ in (self._win_combo, self._fft_combo, self._avg_combo,
                    self._perf_combo, self._palette_combo, self._wf_smooth_chk,
                    self._peak_chk, self._peak_spin, self._tune_mode_btn,
                    self._maxhold_chk, self._minhold_chk, self._bookmark_chk,
-                   self._bandplan_chk):
+                   self._bandplan_chk, self._auto_db_chk):
             w_.setEnabled(on)
 
     def _on_tune_mode_toggled(self, checked: bool):
@@ -2547,7 +2936,7 @@ class SpectrumPanel(QWidget):
     def _on_palette_changed(self, idx: int):
         """切换瀑布调色板：重建 LUT 并清空 key，使整幅瀑布用新色带重绘。"""
         self._state.wf_colors = list(
-            WATERFALL_COLORS_SDRPP if idx == 1 else WATERFALL_COLORS)
+            WATERFALL_COLORS_SOFT if idx == 1 else WATERFALL_COLORS)
         # 强制 LUT 重建 + 让画布从空白重绘（旧行随新数据以新色带重涂）
         self._state._wf_lut = None
         self._state._wf_lut_key = (0.0, 0.0)
@@ -2727,31 +3116,14 @@ class SpectrumPanel(QWidget):
         return float(vals.max() - np.median(vals))
 
     def _refresh_status_labels(self):
-        """刷新顶部中心频率/span/SNR 只读读数并触发重绘。无数据时显 --。"""
-        if self.generator.has_data():
-            self._freq_label.setText(f"{self.generator.center_freq_hz/1e6:.3f} MHz")
-            # 这一格是「显示的频率跨度」，不是采样率读数：同一个 sample_rate_hz
-            # 在本文件里就是 span（f0 = center − sr/2、RBW = sr/fft_size，
-            # Ctrl+滚轮/捏合还会把 new_span 直接写回它）。单位是带宽 MHz；
-            # 裸数字会被读成第二个频率，故显式标「跨度」。
-            self._span_label.setText(
-                f"跨度 {self.generator.sample_rate_hz/1e6:.3f} MHz")
-            snr = self.compute_snr_db()
-            self._snr_label.setText(
-                f"SNR {snr:.1f} dB" if snr is not None else "SNR --")
-            rbw = self.generator.sample_rate_hz / max(1, self.generator.fft_size)
-            # 可回看时长必须用**实测行率**算：行是每 IQ 帧一行（≈146 行/s），
-            # 与 FFT 重绘定时器（50 ms）无关。按定时器算会把 256 行说成
-            # 12.8 s，实际只有 1.75 s（差 7 倍）。未测到行率就写「--」。
-            wf_span = self.generator.wf_span_seconds()
-            wf_txt = "瀑布 -- s" if wf_span is None else f"瀑布 {wf_span:g} s"
-            self._fft_info_label.setText(
-                f"RBW {rbw:g} Hz · {wf_txt}")
-        else:
-            self._freq_label.setText("--")
-            self._span_label.setText("跨度 --")
-            self._snr_label.setText("SNR --")
-            self._fft_info_label.setText("RBW --")
+        """刷新视图状态（缩放滑杆位置 + 重绘）。
+
+        原先这里刷新顶部 SNR/跨度/RBW 读数。2026-11-10 裁决撤掉这些数字：
+        它们每秒跳几十次，人的读数速度跟不上，SDR++ 顶上也没有。现在
+        保留同名方法是给数据通路一个「本帧到了」的挂钩（同时把缩放滑杆
+        对齐到真实跨度），不再产生任何文字读数。
+        """
+        self.sync_span_slider()
         self._redraw()
 
     # ------------------------------------------------------------------ 交互转发
@@ -2861,7 +3233,7 @@ class _TuningPlotMixin:
         """谱面某 x 像素对应的绝对频率（含视图平移偏移）。"""
         gen = self.state.panel.generator
         return _px_to_freq(x_px, self.width(),
-                           _view_center_hz(self.state), gen.sample_rate_hz)
+                           _view_center_hz(self.state), gen.span_hz)
 
     # ------------------------------------------------------------------ dB 轴拖动
     def _begin_db_drag(self, y_px: float, zoom: bool = False) -> None:
@@ -2975,7 +3347,7 @@ class _TuningPlotMixin:
             return None
         gen = state.panel.generator
         view_center = _view_center_hz(state)
-        span = gen.sample_rate_hz
+        span = gen.span_hz
         w = max(1, self.width())
         f_left = view_center - span / 2.0
         best = None
@@ -3085,18 +3457,21 @@ class _TuningPlotMixin:
             # Ctrl+滚轮 = 以光标为中心缩放 span（对标 SDR++ waterfall.cpp
             # processInputs 的鼠标锚点缩放：缩放前后光标处绝对频率不变）。
             factor = 1.1 if dy > 0 else 1 / 1.1
-            span = gen.sample_rate_hz
-            new_span = max(48_000.0, min(20_000_000.0, span * factor))
+            span = gen.span_hz
+            # 缩放是**显示跨度**，不是硬件采样率：采样率每帧被 push_iq
+            # 覆写，写在这里等于下一帧就被抹掉（真机缩放失灵的根因）。
+            new_span = max(48_000.0, min(float(gen.sample_rate_hz), span * factor))
             # 光标处绝对频率（含 Ctrl 拖动的视图平移偏移）
             r = event.position().x() / max(1, self.width())
             view_center = _view_center_hz(self.state)
             anchor_freq = view_center + (r - 0.5) * span
             # 保持光标频率不变：new_view_center = anchor - (r-0.5)*new_span
             new_view_center = anchor_freq - (r - 0.5) * new_span
-            gen.sample_rate_hz = new_span
+            gen.set_span(new_span)
             # view_offset 保持不变，反解出真调谐中心
             gen.center_freq_hz = new_view_center - self.state.view_offset_hz
             self._emit_tuned(gen.center_freq_hz)
+            self.state.panel.sync_span_slider()
             self._show_tune_tip(
                 f"缩放 {new_span / 1e6:.3f} MHz")
         else:
@@ -3330,7 +3705,7 @@ class _TuningPlotMixin:
                 return
             if self._vfo_drag_mode == 'move':
                 # 移动 VFO：硬件中心随光标平移（保持 VFO 在视口内可见）
-                shift = -(x - self._vfo_press_x) / max(1, self.width()) * gen.sample_rate_hz
+                shift = -(x - self._vfo_press_x) / max(1, self.width()) * gen.span_hz
                 gen.center_freq_hz = self._vfo_press_gen_center + shift
                 vfo.center_hz = self._vfo_press_vfo_center + shift
                 self.state.panel.vfo_moved.emit(vfo.vfo_id, float(vfo.center_hz))
@@ -3429,7 +3804,7 @@ class _TuningPlotMixin:
         if self._is_panning:
             dx = event.position().x() - self._press_anchor_x
             gen = self.state.panel.generator
-            shift = -dx / max(1, self.width()) * gen.sample_rate_hz
+            shift = -dx / max(1, self.width()) * gen.span_hz
             if self._rf_shift:
                 # 仅平移视图偏移，不调谐、不 emit（对标 center tuning 平移）
                 self.state.view_offset_hz += shift
@@ -3506,7 +3881,7 @@ class _TuningPlotMixin:
         if y_px > rect.height():
             return None
         view_center = _view_center_hz(state)
-        span = gen.sample_rate_hz
+        span = gen.span_hz
         f = QFont()
         f.setPointSize(8)
         fm = QFontMetricsF(f)
@@ -3519,7 +3894,8 @@ class _TuningPlotMixin:
         pts.sort(key=lambda p: p[0])
         placed = _peak_label_placements(
             [(p[0], p[1], p[2]) for p in pts], fm.horizontalAdvance,
-            rect.x() + 2.0, rect.x() + rect.width() - 2.0, row_h,
+            _peak_label_left_bound(rect, state, fm),
+            rect.x() + rect.width() - 2.0, row_h,
             text_ascent=fm.ascent(), text_descent=fm.descent())
         hits = []
         for p in pts:
@@ -3722,23 +4098,24 @@ class SpectrumCurveWidget(*_PinchBases, _TuningPlotMixin, QWidget):
         QPinchGesture.scaleFactor>1 = 双指张开 = 内容放大 = 收窄 span（看更细）。
         """
         gen = self.state.panel.generator
-        span = gen.sample_rate_hz
+        span = gen.span_hz
         # 捏合张开(scale>1) → span 缩小；捏合收拢(scale<1) → span 放大。
         new_span = span / max(0.2, min(5.0, scale_factor))
-        new_span = max(48_000.0, min(20_000_000.0, new_span))
+        new_span = max(48_000.0, min(float(gen.sample_rate_hz), new_span))
         r = center_pos.x() / max(1, self.width())
         view_center = _view_center_hz(self.state)
         anchor_freq = view_center + (r - 0.5) * span
         new_view_center = anchor_freq - (r - 0.5) * new_span
-        gen.sample_rate_hz = new_span
+        gen.set_span(new_span)
         gen.center_freq_hz = new_view_center - self.state.view_offset_hz
         self._emit_tuned(gen.center_freq_hz)
+        self.state.panel.sync_span_slider()
         self.update()
 
     def _on_touch_pan(self, dx: float, dy: float) -> None:
         """单指拖动：平移中心频率（与 mouseMoveEvent 普通拖动同数学）。"""
         gen = self.state.panel.generator
-        shift = -dx / max(1, self.width()) * gen.sample_rate_hz
+        shift = -dx / max(1, self.width()) * gen.span_hz
         gen.center_freq_hz += shift
         snapped = self._snap_center()
         self._emit_tuned(snapped)
@@ -3774,7 +4151,7 @@ class WaterfallWidget(QWidget):
         """瀑布某 x 像素对应的绝对频率：与上方谱面 _freq_at_x 同一公式。"""
         gen = self.state.panel.generator
         return _px_to_freq(x_px, self.width(),
-                           _view_center_hz(self.state), gen.sample_rate_hz)
+                           _view_center_hz(self.state), gen.span_hz)
 
     def paintEvent(self, event):
         p = QPainter(self)

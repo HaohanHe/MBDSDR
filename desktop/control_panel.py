@@ -93,6 +93,12 @@ PRESET_FM_STATIONS: list[tuple[str, str]] = []
 # 同样不预存地区性中波台：频率随地区不同。请自动扫台或手动输入。
 PRESET_AM_STATIONS: list[tuple[str, str]] = []
 
+#: 空预设占位文案。原句「（无预设：请用“自动扫台”或手动输入频率）」在
+#: 右栏 320 宽的下拉框里被硬切成「…或手动输入频」——省略号都没机会出现。
+#: 这里收短到 140px 内，完整解释放 tooltip。
+_NO_PRESET_TEXT = "无预设：先扫台或直接输频"
+_NO_PRESET_TIP = ("该频段暂无内置电台：用工具栏「自动扫台」发现，"
+                  "或直接在频率框输入频率后调谐。")
 # SDR 常用频段预设（频率MHz, 名称, 模式）
 SDR_BAND_PRESETS = [
     # 航空
@@ -200,10 +206,26 @@ class ControlPanel(QWidget):
         self._bookmarks: list[tuple[float, str, str]] = []
 
         self._build_ui()
+        self._relax_combo_widths()
         self._update_freq_display()
         # 默认未连接 SDR：调谐/音量/模式/录音控件全部置灰，绝不暴露假可控状态
         self.set_sdr_connected(False)
         self._apply_touch_targets()
+
+    def _relax_combo_widths(self) -> None:
+        """下拉框的条目文本不得决定面板最小宽（右栏只有 320）。
+
+        默认 QComboBox 的 minimumSizeHint 取最长条目文本：模式「WFM（宽带
+        调频）」、AGC 速度这类条目把 ControlPanel 顶到 334，而右栏视口
+        只有 310——右边被硬裁（用户 2026-11-10「显示不全」）。统一改成
+        「按最少字符数算 + 水平 Ignored」，控件照常吃布局给它的宽。
+        """
+        from PySide6.QtWidgets import QComboBox
+        for combo in self.findChildren(QComboBox):
+            combo.setSizeAdjustPolicy(
+                QComboBox.AdjustToMinimumContentsLengthWithIcon)
+            combo.setMinimumContentsLength(10)
+            combo.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
 
     def _apply_touch_targets(self) -> None:
         """触屏模式下把调谐/收藏/录音等按钮与下拉/输入框最小高度提到 ≥44px。
@@ -435,7 +457,6 @@ class ControlPanel(QWidget):
         # 频段分类选择
         band_row = QHBoxLayout()
         self.band_combo = QComboBox()
-        self.band_combo.setMinimumHeight(24)
         self.band_combo.addItems(["FM 广播", "AM 广播", "航空", "业余 2m", "业余 70cm", "气象卫星", "导航", "ISM/物联网", "短波"])
         self.band_combo.currentIndexChanged.connect(self._on_band_changed)
         band_row.addWidget(QLabel("频段:"))
@@ -443,7 +464,6 @@ class ControlPanel(QWidget):
         preset_layout.addLayout(band_row)
 
         self.preset_combo = QComboBox()
-        self.preset_combo.setMinimumHeight(28)
         # 尺寸策略：条目文本长短不得改变面板最小宽。占位文案
         # 「（无预设：请用“自动扫台”或手动输入频率）」曾经 AdjustToContentsOnFirstShow
         # 把「频率预设」组撑到 332，清空后该最小宽缓存又是 292↔101 两态，右栏随
@@ -464,7 +484,10 @@ class ControlPanel(QWidget):
         bookmark_layout = QVBoxLayout(bookmark_group)
 
         self.bookmark_combo = QComboBox()
-        self.bookmark_combo.setMinimumHeight(24)
+        # 不写 setMinimumHeight：QSS 给下拉/按钮的内边距（8px 上下）已经让
+        # sizeHint 是 34~36px，显式把最小值压到 24 会让右栏纵向空间不够时
+        # 「合法地」压到 24——文字被裁掉半行（2026-11-11 实拍「收藏当前频率」
+        # 只剩上半截）。保持默认最小值 = 内容真实高度。
         # 尺寸策略：item 文本再长也不得把面板撑开。AdjustToMinimumContentsLength
         # 让 sizeHint 只按最少字符数算；水平 Ignored 让布局用可用宽度而不是
         # item 的 minimumSizeHint（100k 字符书签曾把面板撑到 1.3M px）。
@@ -478,12 +501,10 @@ class ControlPanel(QWidget):
 
         bm_btn_row = QHBoxLayout()
         self.bookmark_add_btn = QPushButton("收藏当前频率")
-        self.bookmark_add_btn.setMinimumHeight(24)
         self.bookmark_add_btn.clicked.connect(self._on_bookmark_add)
         bm_btn_row.addWidget(self.bookmark_add_btn)
 
         self.bookmark_del_btn = QPushButton("删除选中")
-        self.bookmark_del_btn.setMinimumHeight(24)
         self.bookmark_del_btn.clicked.connect(self._on_bookmark_del)
         bm_btn_row.addWidget(self.bookmark_del_btn)
         bookmark_layout.addLayout(bm_btn_row)
@@ -550,6 +571,9 @@ class ControlPanel(QWidget):
         self.sample_rate_combo.setMinimumContentsLength(16)
         self.sample_rate_combo.setSizePolicy(
             QSizePolicy.Ignored, QSizePolicy.Fixed)
+        self.sample_rate_combo.setToolTip(
+            "采样率档位来自设备能力。显示「未知…」时说明后端未报告档位，"
+            "那一项只是说明，不代表设备能力。")
         self._populate_sample_rate_options(
             self._default_sample_rate_options(), DEFAULT_SAMPLE_RATE_HZ)
         self.sample_rate_combo.currentIndexChanged.connect(self._on_sample_rate_changed)
@@ -823,13 +847,13 @@ class ControlPanel(QWidget):
                 for freq, name in PRESET_FM_STATIONS:
                     self.preset_combo.addItem(f"{freq} MHz - {name}", (float(freq), "FM"))
             else:
-                self.preset_combo.addItem("（无预设：请用“自动扫台”或手动输入频率）", None)
+                self.preset_combo.addItem(_NO_PRESET_TEXT, None)
         elif band == "AM 广播":
             if PRESET_AM_STATIONS:
                 for freq, name in PRESET_AM_STATIONS:
                     self.preset_combo.addItem(f"{freq} kHz - {name}", (float(freq) / 1000.0, "AM"))
             else:
-                self.preset_combo.addItem("（无预设：请用“自动扫台”或手动输入频率）", None)
+                self.preset_combo.addItem(_NO_PRESET_TEXT, None)
         else:
             # SDR 频段预设，按频段过滤
             band_keywords = {
@@ -846,6 +870,9 @@ class ControlPanel(QWidget):
                 if any(k in name for k in keywords):
                     self.preset_combo.addItem(f"{freq} MHz - {name} ({mode})", (float(freq), mode))
         self.preset_combo.blockSignals(False)
+        # 占位项没有频率可调：给它一句"怎么办"，别让用户点了个空。
+        has_preset = self.preset_combo.currentData() is not None
+        self.preset_combo.setToolTip("" if has_preset else _NO_PRESET_TIP)
 
     @Slot(int)
     def _on_band_changed(self, index: int):
@@ -1059,10 +1086,21 @@ class ControlPanel(QWidget):
             return raw, False
         return raw[:BOOKMARK_NAME_MAX_CHARS] + "…", True
 
-    def _elide_bookmark_text(self, text: str, max_px: int = 240) -> str:
-        """按像素宽度省略：下拉框文本永远不超过 max_px，避免横向撑爆。"""
+    def _elide_bookmark_text(self, text: str, max_px: int = 200) -> str:
+        """按像素宽度省略：下拉框文本永远不超过 max_px，避免横向撑爆。
+
+        max_px 取 200 而不是更多：右栏 320 宽时，卡内下拉框的可用文本区
+        约 230px（扣掉 8px 内边距与 26px 下拉箭头），240px 的省略宽度仍会
+        被控件边缘硬切一半——实拍「航空应急频率 121.500（内置）（121.50(」
+        就是省略后又被裁。
+
+        用 ElideMiddle 而不是 ElideRight：本项目书签名是「名字 + 频率」的
+        顺序（内置种子 "航空应急频率 121.500"、收藏默认名 "121.500MHz AM"），
+        从右边省略正好把频率切掉——而频率恰恰是选台时唯一要读的数。
+        中间省略会同时保住名字开头与频率结尾。全文仍在 tooltip 里。
+        """
         return self.bookmark_combo.fontMetrics().elidedText(
-            text, Qt.ElideRight, max_px)
+            text, Qt.ElideMiddle, max_px)
 
     def _refresh_bookmarks(self):
         self.bookmark_combo.blockSignals(True)
@@ -1075,9 +1113,17 @@ class ControlPanel(QWidget):
                 shown, bad = self._bookmark_display_name(name)
                 abnormal += int(bad)
                 tag = "（内置）" if builtin else ""
-                label = self._elide_bookmark_text(
-                    f"{shown}{tag} ({hz / 1e6:.3f}MHz {mode})")
+                # 收起态只排「（内置）+ 名字」：名字本身已含频率（内置种子与
+                # 「收藏当前频率」的默认名都是 "121.500MHz AM" 这种），再拼一段
+                # 频率只会把 200px 的省略号顶到「（12…」那一截——既重复又看不全。
+                # 完整「频率 + 模式」留在悬停全文里，不丢信息。
+                full = f"{shown}{tag} ({hz / 1e6:.3f}MHz {mode})"
+                label = self._elide_bookmark_text(f"{tag}{shown}")
                 self.bookmark_combo.addItem(("⚠ " if bad else "") + label, i)
+                if not bad:
+                    # 省略后的全文仍可读：悬停下拉框给完整条目。
+                    self.bookmark_combo.setItemData(
+                        self.bookmark_combo.count() - 1, full, Qt.ToolTipRole)
                 if bad:
                     self.bookmark_combo.setItemData(
                         self.bookmark_combo.count() - 1,

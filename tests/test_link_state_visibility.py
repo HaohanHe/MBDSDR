@@ -196,14 +196,22 @@ def test_recovery_restores_connected_label(window):
 
 
 def test_buffer_overflow_code_is_visible_without_disconnect(window):
-    """环形缓冲积压 high：数据还在流，只提示 buffer_overflow，不拆连接。"""
+    """环形缓冲积压 high：数据还在流，只提示 buffer_overflow，不拆连接。
+
+    提示面在底坞状态位（`status_processing`）而不是状态栏最后一行：
+    2026-11-10 用户实指状态栏再占一行会挤掉界面，代码改走 tooltip。
+    本用例钉的是「积压可见 + 错误码可查 + 不拆连接」三件事。
+    """
     b = _StubBackend(connected=True, error="", age=0.3,
                      link_state="connected", buffer_level="high",
                      error_code="buffer_overflow")
     w = _prepare(window, b)
     w._on_health_tick()
     assert w._active_sdr_backend is b, "缓冲积压不是断链，不能拆连接"
-    assert "buffer_overflow" in w.statusBar().currentMessage()
+    assert "缓冲积压" in w.status_processing.text(), (
+        f"积压必须在底坞状态位可见，实际：{w.status_processing.text()!r}")
+    assert "buffer_overflow" in w.status_processing.toolTip(), (
+        f"错误码必须可查（tooltip），实际：{w.status_processing.toolTip()!r}")
     assert w.status_conn.text() == "FakeSDR", "数据仍在流，不能降级成中断"
 
 

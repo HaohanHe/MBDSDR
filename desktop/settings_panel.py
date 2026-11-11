@@ -21,14 +21,18 @@ import os
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from PySide6.QtCore import Qt, QUrl
+from PySide6.QtCore import Qt, QTimer, QUrl
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
     QSizePolicy, QWidget, QVBoxLayout, QHBoxLayout, QGroupBox, QCheckBox, QSpinBox,
-    QDoubleSpinBox, QComboBox, QLineEdit, QLabel, QFormLayout, QTabWidget,
-    QScrollArea, QPushButton, QToolButton, QMessageBox, QFileDialog,
-    QFrame,
+    QDoubleSpinBox, QComboBox, QLineEdit, QLabel, QFormLayout,
+    QPushButton, QToolButton, QMessageBox, QFileDialog,
 )
+
+try:  # 右栏「分组标题 + 展开内容」的同款折叠节（唯一实现，不复制第二套）
+    from right_column import RightSection
+except ImportError:  # pragma: no cover - 包内导入
+    from .right_column import RightSection
 
 # 单一事实源：默认值/范围/文案全部来自 config_schema，UI 不写第二份。
 logger = logging.getLogger(__name__)
@@ -419,7 +423,7 @@ def _atomic_write_json(path: str, data: Dict[str, Any], mode: Optional[int] = No
 
 
 class SettingsPanel(QWidget):
-    """按 schema 渲染的设置面板：分组页签 + 单项/全部恢复默认 + 导入导出。
+    """按 schema 渲染的设置面板：可折叠分组长列 + 单项/全部恢复默认 + 导入导出。
 
     红线：
       * 默认值/范围/文案只从 config_schema 读，本文件不写第二份；
@@ -606,24 +610,35 @@ class SettingsPanel(QWidget):
         root = QVBoxLayout(self)
         root.setContentsMargins(6, 4, 6, 4)
         root.setSpacing(4)
-        nav_hint = QLabel("服务开关与端口见「服务设置」页签。")
+        nav_hint = QLabel("服务开关与端口见右栏「服务设置」一节。")
         wrap_cn_label(nav_hint)
         nav_hint.setObjectName("hintLabel")
         root.addWidget(nav_hint)
-        self.tabs = QTabWidget()
+        # 右栏只有 ~320px 宽：7 个分组页签按全局 QSS 的 6/14 内边距要 594px，
+        # 第 4 个「频谱与解码」被右边界整字切掉，且页签栏没有滚动按钮——后面
+        # 三组等于不可达（2026-11-11 实拍）。这里不再用页签，改成与右栏一致的
+        # 可折叠长列：7 个分组名一屏看全、点标题展开，也不再有"滚动条套滚动条"。
+        self.group_sections: List[Any] = []
         for group in GROUP_ORDER:
-            # 服务开关保留在独立的「服务设置」页签（避免两个 ServiceSettingsPanel
+            # 服务开关保留在独立的「服务设置」一节（避免两个 ServiceSettingsPanel
             # 各自持有一套 RemoteControl/WebServer 实例）；其键仍在 schema 内，
             # 参与导入导出与"恢复全部默认"。
             if group == "服务与远程访问":
                 continue
             if group == "存储与日志":
-                self.tabs.addTab(self._build_storage_tab(), group)
-                continue
-            items = items_for_group(group)
-            if items:
-                self.tabs.addTab(self._build_group_page(items, group), group)
-        root.addWidget(self.tabs, 1)
+                body = self._build_storage_tab()
+            else:
+                items = items_for_group(group)
+                if not items:
+                    continue
+                body = self._build_group_body(items, group)
+            section = RightSection(group, body,
+                                   expanded=not self.group_sections)
+            section.expanded_changed.connect(
+                lambda on, s=section: self._on_group_expanded(s, on))
+            self.group_sections.append((group, section))
+            root.addWidget(section)
+        root.addStretch(1)
         self.status_label = QLabel("")
         wrap_cn_label(self.status_label)
         self.status_label.setObjectName("hintLabel")
@@ -634,10 +649,41 @@ class SettingsPanel(QWidget):
         self.btn_reset_all.clicked.connect(lambda: self.reset_all(confirm=True))
         root.addWidget(self.btn_reset_all)
 
-    def _build_group_page(self, items, group: str = "") -> QScrollArea:
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QFrame.NoFrame)
+    def _on_group_expanded(self, section, expanded: bool) -> None:
+        """分组展开/收起后，把新高度报给外层右栏长列，并把该组滚进视野。
+
+        设置面板自己不再套滚动区（整栏只留外层一根），分组一展开内容高度
+        就变了；外层 QScrollArea 只在它自己的节展开时同步容器最小高，收不到
+        内层信号就会把刚展开的行裁掉半截（与 AI 面板同一个缺陷）。点的是
+        折叠在屏幕外的组时，不滚过去等于"点了没反应"。
+        """
+        QTimer.singleShot(0, lambda: self._reveal_group(section, expanded))
+
+    def _reveal_group(self, section, expanded: bool) -> None:
+        self._sync_outer_column()
+        if not expanded:
+            return
+        w = self.parentWidget()
+        while w is not None:
+            ensure = getattr(w, "ensureWidgetVisible", None)
+            if callable(ensure):
+                try:
+                    ensure(section, 0, 8)
+                except (RuntimeError, TypeError):
+                    pass
+                return
+            w = w.parentWidget()
+
+    def _sync_outer_column(self) -> None:
+        w = self.parentWidget()
+        while w is not None:
+            sync = getattr(w, "_sync_container_height", None)
+            if callable(sync):
+                sync()
+                return
+            w = w.parentWidget()
+
+    def _build_group_body(self, items, group: str = "") -> QWidget:
         inner = QWidget()
         lay = QVBoxLayout(inner)
         lay.setContentsMargins(6, 6, 6, 6)
@@ -649,8 +695,7 @@ class SettingsPanel(QWidget):
             if extra is not None:
                 lay.addWidget(extra)
         lay.addStretch(1)
-        scroll.setWidget(inner)
-        return scroll
+        return inner
 
     def _build_appearance_box(self):
         """把主窗口的主题/语言/布局控件接进设置页（唯一入口）。
@@ -915,7 +960,7 @@ class SettingsPanel(QWidget):
         try:
             key = item.key
             if key in ("callsign", "gnss_port", "gnss_baudrate",
-                       "focus_mode", "free_float_panels"):
+                       "focus_mode", "free_float_panels", "perf_profile"):
                 # 身份/接线/页面形态这几项由 DesktopSettings 的变更订阅统一
                 # 推给主窗口（覆盖设置页、导入、恢复默认、代码直接 set 等
                 # 所有写入路径），这里只声明「已接入」，别在状态栏误报
@@ -1058,7 +1103,7 @@ class SettingsPanel(QWidget):
             gen.set_avg_frames(int(value))
             self._sync_combo(sp, "_avg_combo", str(int(value)))
         elif key == "waterfall_palette":
-            idx = 1 if value == "sdrpp" else 0
+            idx = 1 if value == "soft" else 0
             sp._on_palette_changed(idx)
             self._sync_combo(sp, "_palette_combo", sp._palette_combo.itemText(idx))
         elif key == "peak_threshold_db":
@@ -1162,7 +1207,7 @@ class SettingsPanel(QWidget):
                 _atomic_write_json(AI_CONFIG_PATH, self._ai, mode=0o600)
             except (OSError, TypeError, ValueError) as exc:
                 self._notify(f"AI 配置恢复默认后写入失败：{exc}")
-        # 服务页签由主窗口持有；恢复默认后让它回填（端口置灰由它自身状态决定）
+        # 服务设置由主窗口持有；恢复默认后让它回填（端口置灰由它自身状态决定）
         sp = getattr(self._host, "service_settings_panel", None)
         if sp is not None:
             sp.refresh_from_settings()

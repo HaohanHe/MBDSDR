@@ -869,19 +869,20 @@ class StatusPanel(QWidget):
 
     @staticmethod
     def _set_card_enabled(card: QGroupBox, enabled: bool):
-        """断连时把卡片整组禁用并把 QGroupBox 标题置灰 (#9AA0A6)；连接时恢复。
+        """断连时把卡片整组禁用（标题变灰），连接时恢复。
 
         setEnabled(False) 会连带禁用卡片内所有子控件（视觉上整体变灰）；
         conn_group 不传入此方法，保持始终可用。
+
+        标题置灰走全局 QSS 的 ``QGroupBox:disabled::title``，**不**给单个卡片
+        设 widget 级样式表：Qt 一旦发现控件自带样式表，就会换一条"样式化"
+        绘制路径，QGroupBox 标题从边框上方挪到边框内侧——于是卡片顶边在标题
+        下面被擦出一个黑色缺口、字底贴着边框（2026-11-11 实拍「信号质量」）。
+        全局伪状态选择器不触发这条路径。
         """
         if card is None:
             return
         card.setEnabled(enabled)
-        if enabled:
-            card.setStyleSheet("")
-        else:
-            card.setStyleSheet(
-                "QGroupBox::title { color: " + tokens().text("disabled") + "; }")
 
     # ========================================================================
     # 内部工具

@@ -177,6 +177,22 @@ ALL_ITEMS: Tuple[SettingItem, ...] = (
         choices=tuple(_e(b, str(b)) for b in
                       (9600, 19200, 38400, 57600, 115200)),
     ),
+    SettingItem(
+        key="perf_profile", group="通用", kind="enum",
+        label="接收性能档", default="eco",
+        help=("决定**默认接收采样率 / FFT 点数 / 频谱与 GNSS 刷新率**。"
+              "省电档 1.024 MS/s：普通笔记本上 CPU 约为 2.4 MS/s 的三分之一，"
+              "GNSS 与设置页不会再被 IQ 流水线挤得原地不动；"
+              "均衡/精细档给宽带解码与录制用。切档即时改 GNSS 轮询 / 频谱刷新 / "
+              "FFT；采样率只作为下次连接的默认值，不覆盖控制面板手动选的档、"
+              "也不重建已连接的流水线（重建会卡住 UI）。"),
+        source="desktop/perf_profile.py PROFILES（档位采样率取自 "
+               "mbdsdr_ai.sdr_backend.RTLSDRBackend.SAMPLE_RATES）；"
+               "默认值口径见用户 2026-11-10「电脑没有那么强大…得让路」",
+        choices=(_e("eco", "省电（1.024 MS/s）"),
+                 _e("balanced", "均衡（2.048 MS/s）"),
+                 _e("quality", "精细（2.400 MS/s）")),
+    ),
 
     # ---------------------------------------------------------------- 显示与主题
     SettingItem(
@@ -278,10 +294,12 @@ ALL_ITEMS: Tuple[SettingItem, ...] = (
     ),
     SettingItem(
         key="waterfall_palette", group="频谱与解码", kind="enum",
-        label="瀑布配色", default="default",
-        help="默认低饱和不刺眼；经典 SDR++ 色带对弱信号层次更敏感。",
-        source="desktop/spectrum_widget.py: _PlotState.wf_colors（默认第 0 项「默认」）",
-        choices=(_e("default", "默认（低饱和）"), _e("sdrpp", "经典 SDR++")),
+        label="瀑布配色", default="sdrpp",
+        help=("默认用 SDR++ 的 Turbo 色表（深紫蓝→蓝→青→绿→黄→红），"
+              "底噪落冷端、强信号烧到红端，弱信号层次最清楚；"
+              "低饱和米白色带旧方案，长时间盯屏不刺眼但层次弱。"),
+        source="desktop/spectrum_widget.py: WATERFALL_COLORS（默认 Turbo）/ WATERFALL_COLORS_SOFT",
+        choices=(_e("sdrpp", "SDR++ Turbo（默认）"), _e("soft", "低饱和（米白）")),
     ),
     SettingItem(
         key="peak_threshold_db", group="频谱与解码", kind="float",

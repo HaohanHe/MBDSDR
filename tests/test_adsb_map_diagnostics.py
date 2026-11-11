@@ -132,7 +132,7 @@ class TestEmptyStatePainting:
         p._paint_adsb_layer(painter, p.canvas.project)
         assert _RecordingPainter.instances
         texts = painter.texts
-        assert amp.ADSB_EMPTY_TEXT in texts, texts
+        assert amp.ADSB_EMPTY_TEXT not in texts, texts
         assert "诊断可见性取证：CRC 通过 0 帧" in texts, texts
 
     def test_same_text_does_not_repaint(self, qtapp, monkeypatch):

@@ -529,6 +529,44 @@ def _install_sigint_graceful_quit(app):
     app._sigint_graceful_timer = timer  # 保活：避免被回收后轮询消失
 
 
+def _install_combo_wheel_guard(app) -> None:
+    """下拉框滚轮守卫：没展开的下拉框不吃滚轮，滚轮改为滚动所在页面。
+
+    Qt 默认「鼠标停在哪，滚轮就改哪个下拉框」——设置页里从「简体中文」
+    轻轻一滚就跳到「日本語」，用户根本没打算改值（2026-11-10 实指）。
+    这里只在**下拉列表已展开**或**控件已获得焦点**时放行滚轮；其余情况
+    把事件转给最近的滚动区域，让页面自己滚。
+    """
+    from PySide6.QtCore import QEvent, QObject, QThread
+    from PySide6.QtWidgets import QAbstractScrollArea, QApplication, QComboBox
+
+    class _ComboWheelGuard(QObject):
+        def eventFilter(self, obj, event):  # noqa: N802 (Qt 命名)
+            # 与主窗口同一个坑：app 级过滤器会被工作线程的事件循环调用，
+            # 在非 GUI 线程碰 QWidget 会直接 access violation，必须放行。
+            if QThread.currentThread() is not app.thread():
+                return False
+            if event.type() != QEvent.Wheel or not isinstance(obj, QComboBox):
+                return False
+            try:
+                popup_open = obj.view().isVisible()
+            except (AttributeError, RuntimeError):
+                popup_open = False
+            if popup_open or obj.hasFocus():
+                return False
+            scroll = obj.parentWidget()
+            while scroll is not None and not isinstance(
+                    scroll, QAbstractScrollArea):
+                scroll = scroll.parentWidget()
+            if scroll is not None:
+                QApplication.sendEvent(scroll.viewport(), event)
+            return True
+
+    guard = _ComboWheelGuard(app)
+    app.installEventFilter(guard)
+    app._combo_wheel_guard = guard  # 保活：局部对象被回收过滤器就失效
+
+
 def main():
     # pythonw.exe 无控制台：必须在任何 print / argparse --help 之前兜底 stdio
     _ensure_stdio_for_pythonw()
@@ -589,6 +627,9 @@ def main():
     # 应用主题
     theme = get_theme(args.theme)
     theme.apply(app)
+
+    # 下拉框滚轮守卫：滚轮滚页面，不改选中项（必须在建窗口前装好）。
+    _install_combo_wheel_guard(app)
 
     # i18n：按 ui_language 装翻译器（Qt Linguist .qm），必须先于任何窗口构造。
     # 源语言 zh 或 .qm 缺失时 l10n 内部诚实回退源语言并提示一次；加载异常

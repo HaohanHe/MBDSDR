@@ -70,18 +70,32 @@ def sample_rate_combo_items(device) -> list:
             logger.warning("读取设备采样率档位失败，按未知处理: %s: %s",
                            type(exc).__name__, exc)
     if not options:
+        # 文案要能塞进 320px 右栏的下拉（原「未知（设备未报告采样率范围，将用
+        # 默认 1.024 MS/s）」有 30 字，实测被下拉右边界整段切掉且没有省略号）。
+        # 「为什么未知」放进 tooltip，不占下拉宽度。
         return [(
-            "未知（设备未报告采样率范围，将用默认 "
-            f"{format_sample_rate(DEFAULT_SAMPLE_RATE_HZ)}）",
+            f"未知（默认 {format_sample_rate(DEFAULT_SAMPLE_RATE_HZ)}）",
             None,
         )]
     return [(format_sample_rate(rate), float(rate)) for rate in options]
 
 
-def default_sample_rate_combo_index(items) -> int:
-    """默认选中档：优先与 ``DEFAULT_SAMPLE_RATE_HZ`` 对齐，缺该档选第一项。"""
-    for index, (_text, hz) in enumerate(items):
-        if hz is not None and float(hz) == float(DEFAULT_SAMPLE_RATE_HZ):
-            return index
+def default_sample_rate_combo_index(items, preferred_hz=None) -> int:
+    """默认选中档：优先对齐 ``preferred_hz``，未指定时回 ``DEFAULT_SAMPLE_RATE_HZ``，
+    两者都缺则选第一项。
+
+    ``preferred_hz`` 把「桌面默认连接率（性能档，省电 1.024 MS/s）」与「设备
+    能力基准（内核 2.4 MS/s）」分开：内核常量不动，通用连接下拉的默认选中档
+    随性能档走（用户 2026-11-10「电脑没有那么强大…得让路」）。不传该参数的
+    调用方（模块面板宽带解码 / 真值源测试）仍按设备基准对齐，行为不变。
+    """
+    targets = []
+    if preferred_hz is not None:
+        targets.append(float(preferred_hz))
+    targets.append(float(DEFAULT_SAMPLE_RATE_HZ))
+    for target in targets:
+        for index, (_text, hz) in enumerate(items):
+            if hz is not None and float(hz) == target:
+                return index
     return 0
 

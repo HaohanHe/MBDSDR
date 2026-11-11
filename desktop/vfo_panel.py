@@ -126,6 +126,14 @@ class VfoPanel(QWidget):
         self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.table.verticalHeader().setVisible(False)
         self.table.itemSelectionChanged.connect(self._on_row_selected)
+        # 空态占位：没有 VFO 时表格只剩 5 个表头 + 一大片无字黑格，看着像
+        # 表格加载失败（2026-11-11 实拍）。与扫频/调制识别面板同一口径：
+        # 表格与提示二选一，只切可见性，不清空结构。
+        self.empty_hint = QLabel("还没有 VFO\n连上设备后点右上「+ VFO」新建一个")
+        self.empty_hint.setObjectName("hintLabel")
+        self.empty_hint.setAlignment(Qt.AlignCenter)
+        self.empty_hint.setWordWrap(True)
+        root.addWidget(self.empty_hint, stretch=1)
         root.addWidget(self.table, stretch=1)
 
         # 底部提示
@@ -160,6 +168,7 @@ class VfoPanel(QWidget):
             self.add_btn.setEnabled(self._mgr is not None)
             self.cycle_btn.setEnabled(self._mgr is not None)
             self.table.setEnabled(True)
+        self._sync_empty_hint()
 
     # ------------------------------------------------------------------ 数据
     def refresh(self) -> None:
@@ -167,6 +176,7 @@ class VfoPanel(QWidget):
         mgr = self._mgr
         self.table.setRowCount(0)
         if mgr is None:
+            self._sync_empty_hint()
             return
         primary_id = getattr(mgr, "active_vfo_id", None)
         for v in mgr.list_all():
@@ -227,6 +237,18 @@ class VfoPanel(QWidget):
             ol.addWidget(del_btn)
             self.table.setCellWidget(row, 4, ops)
             self.table.setRowHeight(row, 28)
+        self._sync_empty_hint()
+
+    def _sync_empty_hint(self) -> None:
+        """表格与空态提示二选一（表格结构保留，只切可见性）。
+
+        空态时连底部「点行设为主听…」也一起收起：没有行的时候那句话说的是
+        点不到的操作，与空态提示叠成两行更像报错。
+        """
+        empty = self.table.rowCount() == 0
+        self.empty_hint.setVisible(empty)
+        self.table.setVisible(not empty)
+        self.hint.setVisible(not empty)
 
     # ------------------------------------------------------------------ 槽
     def _on_add_vfo(self):

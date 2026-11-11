@@ -142,19 +142,18 @@ def test_snr_vfo_band_ignores_outband_peak(qapp):
     assert snr == pytest.approx(40.0, abs=0.6)
 
 
-def test_snr_label_refresh(qapp):
+def test_no_permanent_snr_readout(qapp):
+    """SNR 不再常驻顶部（2026-11-10 裁决）；数据侧仍算得出来。"""
     spec = np.full(128, -90.0)
     spec[64] = -45.0
     panel = _panel_with_spectrum(qapp, spec)
-    panel._refresh_status_labels()
-    assert panel._snr_label.text() == "SNR --" or "SNR" in panel._snr_label.text()
+    assert not hasattr(panel, "_snr_label"), "SNR 读数又回到顶栏了"
     panel.generator._has_real_data = True
-    panel._refresh_status_labels()
-    assert panel._snr_label.text().startswith("SNR ")
-    assert "dB" in panel._snr_label.text()
+    panel._refresh_status_labels()          # 数据通路挂钩不得抛
+    assert panel.compute_snr_db() is not None
     panel.generator.clear_data()
     panel._refresh_status_labels()
-    assert panel._snr_label.text() == "SNR --"
+    assert panel.compute_snr_db() is None
 
 
 # ---------------------------------------------------------------------------

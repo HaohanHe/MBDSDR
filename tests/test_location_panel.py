@@ -200,6 +200,24 @@ def test_panel_map_pick_sets_pending(qapp):
         panel.close()
 
 
+def test_map_pick_keeps_current_site_marker(qapp):
+    """点地图只出「待确认」标记：当前站址标记不许跟着搬家。"""
+    panel, _ = _panel(qapp)
+    try:
+        panel.set_current(45.0, 120.0, "手动设置")
+        panel._on_map_picked(31.2304, 121.4737)
+        view = panel.map_view
+        assert view.marker() == (45.0, 120.0)
+        pick = view.pick_marker()
+        assert pick is not None and pick[0] == pytest.approx(31.2304, abs=1e-6)
+
+        panel._on_clear()
+        assert view.pick_marker() is None
+        assert view.marker() is None
+    finally:
+        panel.close()
+
+
 def test_panel_emits_site_and_clear_but_never_writes(qapp):
     p1 = P.Place("长春", 43.8171, 125.3235, source="osm")
     panel, _ = _panel(qapp, hits=[p1])
@@ -231,5 +249,35 @@ def test_panel_shows_current_and_source(qapp):
         assert "手动设置" in panel.current_label.text()
         panel.set_current(None, None)
         assert "未设置" in panel.current_label.text()
+    finally:
+        panel.close()
+
+
+def test_panel_fits_small_screen_and_apply_stays_reachable(qapp):
+    """小屏（1000×600）上面板必须整体落在可用区，按钮不能被挤出屏幕。
+
+    实测缺陷（2026-11-11）：Qt.Tool 首次 show 时先给小窗一个初始位置，
+    布局随后把窗口撑到 632px 高，位置不收敛——1000×600 里底边到 1029，
+    「使用此地点」整排在屏幕外，选点流程走不完。
+    """
+    from PySide6.QtCore import QRect
+    from location_panel import LocationPanel
+    panel = LocationPanel(None, provider=_FakeProvider([]),
+                          async_search=False, map_online=False)
+    try:
+        panel.show()
+        qapp.processEvents()
+        avail = QRect(0, 0, 1000, 600)
+        panel.fit_to_available(avail)
+        qapp.processEvents()
+        assert avail.contains(panel.geometry()), (
+            f"面板必须完整落在可用区：{panel.geometry()} vs {avail}")
+        btn = panel.apply_btn
+        assert btn.isVisible() is True
+        bottom = btn.mapToGlobal(btn.rect().bottomRight())
+        assert avail.contains(bottom), (
+            f"「使用此地点」必须可点到，实际底边在 {bottom}")
+        # 地图是唯一可伸缩项：缩的是它，搜索/结果/手填一行没少。
+        assert panel.search_edit.isVisible() and panel.result_list.isVisible()
     finally:
         panel.close()

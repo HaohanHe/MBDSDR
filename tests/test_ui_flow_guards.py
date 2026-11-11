@@ -58,6 +58,10 @@ def window(isolated_profile, qtapp):
     except Exception as exc:  # noqa: BLE001 - 收尾失败必须留证，不静默
         log.warning("fixture 收尾失败（MainWindow._teardown_connection）：%s: %s",
                     type(exc).__name__, exc)
+    # 必须在 isolated_profile 撤销之前关窗：本用例把 _observer_lat/lon 设成
+    # 中性 0,0，窗口活到解释器退出才析构时，closeEvent 会走真实 HOME 把 0,0
+    # 写进用户 gui_config.json（2026-11-11 会话守卫实测抓到）。
+    w.close()
 
 
 @pytest.mark.usefixtures("qtapp", "window")

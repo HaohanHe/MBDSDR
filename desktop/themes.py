@@ -10,8 +10,125 @@ MBDSDR 桌面端主题系统
 from PySide6.QtGui import QFont, QColor, QPalette
 from PySide6.QtWidgets import QApplication
 
+import os
+import tempfile
+
 # 设计令牌单一来源：主题色只从 tokens.THEME_COLORS 取，不在本文件写 hex。
 from tokens import tokens
+
+
+# ============================================================================
+# 数值微调框箭头图标
+# ============================================================================
+def _spin_arrow_url(color: str, up: bool) -> str:
+    """生成（并复用）一枚主题色的三角形箭头 PNG，返回 QSS `url()` 用的路径。
+
+    为什么非要落成文件：Qt 的 `::up-arrow` / `::down-arrow` 只认 `image`。
+    用 border 拼三角形的写法在 6.x 上只会画出一块**实心矩形**（三种写法
+    实测都是白方块，见 2026-11-11 探针），而系统样式在深色主题下画的是
+    **深色位图**——右栏「下行频率」右侧因此是一条完全看不见箭头的空条。
+    颜色随主题取次级文字色，按色值缓存，换主题自动换图。
+    """
+    tag = "up" if up else "down"
+    d = os.path.join(tempfile.gettempdir(), "mbdsdr_ui_assets")
+    path = os.path.join(d, f"spin_{tag}_{color.lstrip('#').lower()}.png")
+    if os.path.exists(path):
+        return path.replace("\\", "/")
+    try:
+        from PySide6.QtCore import Qt, QPointF
+        from PySide6.QtGui import QImage, QPainter, QPolygonF
+
+        os.makedirs(d, exist_ok=True)
+        # 2 倍图：QSS 里按 9×6 逻辑像素摆放，高分屏缩小采样仍然锐利。
+        img = QImage(22, 14, QImage.Format_ARGB32)
+        img.fill(Qt.transparent)
+        p = QPainter(img)
+        p.setRenderHint(QPainter.Antialiasing, True)
+        p.setPen(Qt.NoPen)
+        p.setBrush(QColor(color))
+        if up:
+            pts = [QPointF(1.0, 12.0), QPointF(11.0, 2.0), QPointF(21.0, 12.0)]
+        else:
+            pts = [QPointF(1.0, 2.0), QPointF(11.0, 12.0), QPointF(21.0, 2.0)]
+        p.drawPolygon(QPolygonF(pts))
+        p.end()
+        img.save(path, "PNG")
+    except Exception:
+        # 生成失败不阻断主题应用：只是没有箭头，输入框本身仍可用。
+        return ""
+    return path.replace("\\", "/")
+
+
+# ============================================================================
+# 复选 / 单选指示符图标
+# ============================================================================
+def _indicator_asset_dir() -> str:
+    d = os.path.join(tempfile.gettempdir(), "mbdsdr_ui_assets")
+    os.makedirs(d, exist_ok=True)
+    return d
+
+
+#: 图标几何版本。改了勾/圆点的形状必须 +1，否则临时目录里的旧图会被复用
+#: （文件名只按颜色区分），升级后用户看到的还是老形状。
+_ASSET_VERSION = 1
+
+
+def _check_mark_url(color: str) -> str:
+    """生成一枚「对勾」PNG，给 ``QCheckBox::indicator:checked`` 当 image。
+
+    为什么非要落成文件：Qt 的 ``::indicator`` 只认 ``image``（与 ``::up-arrow``
+    同一条规则）。CSS 式那块纯色填充在勾选后只显示成一个亮方块，既没有勾，
+    也与"不确定态"长得一样——2026-11-11 放大实拍，用户只能靠亮/暗猜。
+    """
+    path = os.path.join(_indicator_asset_dir(),
+                        f"check_v{_ASSET_VERSION}_{color.lstrip('#').lower()}.png")
+    if os.path.exists(path):
+        return path.replace("\\", "/")
+    try:
+        from PySide6.QtCore import Qt, QPointF
+        from PySide6.QtGui import QImage, QPainter, QPen, QPolygonF
+
+        # 2 倍图：QSS 把它缩到 15px 指示符里，高分屏仍有足够采样点。
+        img = QImage(26, 26, QImage.Format_ARGB32)
+        img.fill(Qt.transparent)
+        p = QPainter(img)
+        p.setRenderHint(QPainter.Antialiasing, True)
+        pen = QPen(QColor(color), 3.4)
+        pen.setCapStyle(Qt.RoundCap)
+        pen.setJoinStyle(Qt.RoundJoin)
+        p.setPen(pen)
+        p.setBrush(Qt.NoBrush)
+        p.drawPolyline(QPolygonF([QPointF(5.0, 13.5), QPointF(10.5, 19.0),
+                                  QPointF(21.0, 7.5)]))
+        p.end()
+        img.save(path, "PNG")
+    except Exception:
+        return ""
+    return path.replace("\\", "/")
+
+
+def _radio_dot_url(color: str) -> str:
+    """生成单选按钮的实心圆点 PNG（口径与 ``_check_mark_url`` 相同）。"""
+    path = os.path.join(_indicator_asset_dir(),
+                        f"radiodot_v{_ASSET_VERSION}_{color.lstrip('#').lower()}.png")
+    if os.path.exists(path):
+        return path.replace("\\", "/")
+    try:
+        from PySide6.QtCore import Qt, QPointF
+        from PySide6.QtGui import QImage, QPainter
+
+        img = QImage(26, 26, QImage.Format_ARGB32)
+        img.fill(Qt.transparent)
+        p = QPainter(img)
+        p.setRenderHint(QPainter.Antialiasing, True)
+        p.setPen(Qt.NoPen)
+        p.setBrush(QColor(color))
+        p.drawEllipse(QPointF(13.0, 13.0), 6.0, 6.0)
+        p.end()
+        img.save(path, "PNG")
+    except Exception:
+        return ""
+    return path.replace("\\", "/")
 
 
 # ============================================================================
@@ -68,8 +185,23 @@ def _control_coverage_qss(c: dict) -> str:
     disabled = c.get("text_disabled", c.get("text_secondary", text))
     disabled_bg = c.get("button_disabled", card)
     secondary = c.get("text_secondary", text)
+    arrow_up = _spin_arrow_url(secondary, True)
+    arrow_down = _spin_arrow_url(secondary, False)
+    # 勾/圆点色：勾画在 primary 填充上，用页面底色反白；单选的圆点画在按钮
+    # 底色上，用 primary。两者都按色值缓存，换主题自动换图。
+    check_mark = _check_mark_url(bg)
+    check_mark_off = _check_mark_url(disabled)
+    radio_dot = _radio_dot_url(primary)
     return f"""
         /* ---------- 原生控件接管（菜单栏/工具栏/复选/列表/分隔条/分组框） ---------- */
+        /* QLabel 必须显式透明：tokens 的 QSS 给 `QMainWindow, QWidget` 统一压了
+           底色（#000），而 QLabel 是 QWidget 的子类、会一起吃到这条规则。结果
+           卡片里每一个裸 QLabel（「步进:」「RSSI:」「设备名:」…）都变成一块
+           纯黑小方块——2026-11-11 实拍右栏状态面板，整页像一排黑洞。id 选择器
+           （#freqDisplay 等）优先级更高，自带底色的标签不受影响。 */
+        QLabel {{
+            background: transparent;
+        }}
         /* QMenuBar：default 有这条规则，dark_car/figma 走的
            tokens.to_stylesheet() 里没有——菜单栏高度实测 31px vs 33px，
            中央区因此少 2px，所有面板跟着漂。补齐后两套主题同高。 */
@@ -99,14 +231,73 @@ def _control_coverage_qss(c: dict) -> str:
             background-color: {card};
             border: 1px solid {border};
             border-radius: 12px;
-            margin-top: 16px;
+            /* 20px 而不是 16px：标题行高（9pt 中文 ≈ 18px）比 16px 的 margin
+               高 2px，标题框会压到卡片顶边上——Qt 用父窗口底色擦掉标题占的
+               那块，于是卡片顶边在标题下面被啃出一个黑色缺口，字底也贴着
+               边框（2026-11-11 实拍「连接」「信号质量」）。 */
+            margin-top: 20px;
             padding: 12px 10px;
         }}
         QGroupBox::title {{
             subcontrol-origin: margin;
+            subcontrol-position: top left;
             left: 10px;
             padding: 0 4px;
             color: {text};
+        }}
+        /* 断连卡片整组 setEnabled(False)：标题跟着变灰。
+           必须写成全局选择器——若改成给单张卡片 setStyleSheet，Qt 会切到
+           "控件自带样式表"的绘制路径，标题从边框上方挪进边框内，卡片顶边
+           被擦出黑色缺口（2026-11-11 实拍右栏状态面板）。
+           选属性选择器而不是伪状态：实测 `QGroupBox:disabled::title` 在
+           QGroupBox 的子控件上不生效（标题仍是纯白），`[enabled="false"]`
+           生效。 */
+        QGroupBox[enabled="false"]::title {{
+            color: {c['text_disabled']};
+        }}
+        /* 可折叠分组框：标题里已经用 ▼/▶ 表达展开态，Qt 自带的可选中勾选框
+           会把它重复一次（2026-11-11 实拍卫星跟踪面板「☑ ▼ 目标卫星 · 2 项」）。
+           只关掉带 collapseBox 属性的分组框，不碰别处可能真需要勾选框的组。 */
+        QGroupBox[collapseBox="true"]::indicator,
+        QGroupBox[collapseBox="true"]::indicator:checked,
+        QGroupBox[collapseBox="true"]::indicator:unchecked {{
+            width: 0px;
+            height: 0px;
+            margin: 0px;
+            image: none;
+            border: none;
+            background: transparent;
+        }}
+        /* 数值微调框的上下箭头：dark_car/figma 的 tokens QSS 里没有这条，
+           箭头由系统样式用**深色位图**画在深色按钮上——实测右栏「下行频率」
+           右侧是一块看不见箭头的空条。这里显式接管按钮与箭头，颜色取主题
+           次级文字色，保证任何主题下都读得出来。 */
+        QSpinBox::up-button, QSpinBox::down-button,
+        QDoubleSpinBox::up-button, QDoubleSpinBox::down-button {{
+            subcontrol-origin: border;
+            width: 14px;
+            background: transparent;
+            border: none;
+        }}
+        QSpinBox::up-button, QDoubleSpinBox::up-button {{
+            subcontrol-position: top right;
+        }}
+        QSpinBox::down-button, QDoubleSpinBox::down-button {{
+            subcontrol-position: bottom right;
+        }}
+        QSpinBox::up-button:hover, QSpinBox::down-button:hover,
+        QDoubleSpinBox::up-button:hover, QDoubleSpinBox::down-button:hover {{
+            background-color: {hover};
+        }}
+        QSpinBox::up-arrow, QDoubleSpinBox::up-arrow {{
+            image: url("{arrow_up}");
+            width: 9px;
+            height: 6px;
+        }}
+        QSpinBox::down-arrow, QDoubleSpinBox::down-arrow {{
+            image: url("{arrow_down}");
+            width: 9px;
+            height: 6px;
         }}
         QToolButton {{
             background-color: transparent;
@@ -155,6 +346,12 @@ def _control_coverage_qss(c: dict) -> str:
         QCheckBox::indicator:checked {{
             background-color: {primary};
             border-color: {primary};
+            image: url("{check_mark}");
+        }}
+        QCheckBox::indicator:checked:disabled {{
+            background-color: {disabled_bg};
+            border-color: {grid};
+            image: url("{check_mark_off}");
         }}
         QCheckBox::indicator:disabled {{
             border-color: {grid};
@@ -167,9 +364,20 @@ def _control_coverage_qss(c: dict) -> str:
             border-radius: 8px;
             background-color: {button};
         }}
+        QRadioButton::indicator:hover {{
+            border-color: {primary};
+        }}
+        /* 选中态用「描边 + 圆心」，不用 4px 粗边框：15px 方框减去 4px 描边后
+           内圆半径只剩 3.5px，实测画出来是一个方角深坑（2026-11-11 放大图），
+           看着像禁用而不是选中。 */
         QRadioButton::indicator:checked {{
-            border: 4px solid {primary};
-            background-color: {card};
+            border: 1px solid {primary};
+            background-color: {button};
+            image: url("{radio_dot}");
+        }}
+        QRadioButton::indicator:disabled {{
+            border-color: {grid};
+            background-color: {disabled_bg};
         }}
         QListView, QListWidget {{
             background-color: {card};
@@ -418,18 +626,53 @@ class Theme:
         }}
         QSlider::groove:horizontal {{
             height: 4px;
-            background: {c['border']};
+            background: {c['grid']};
+            border-radius: 2px;
+        }}
+        /* 手柄左侧填 primary：没有填充时滑杆只有一个小圆点，看不出"当前值
+           占了几分"（ANR 强度、音量都靠这个读数）。 */
+        QSlider::sub-page:horizontal {{
+            background: {c['primary']};
             border-radius: 2px;
         }}
         QSlider::handle:horizontal {{
-            width: 16px;
-            height: 16px;
-            margin: -6px 0;
+            width: 14px;
+            height: 14px;
+            margin: -5px 0;
             background: {c['primary']};
-            border-radius: 8px;
+            border: none;
+            border-radius: 7px;
         }}
         QSlider::handle:horizontal:hover {{
             background: {c['accent']};
+        }}
+        /* 竖滑杆（频谱右侧缩放/dB 量程）：只给轨道和手柄，不做填充——三根里
+           两根是 setInvertedAppearance(True)，sub/add-page 的上下方向会跟着
+           翻转，填充方向写错就是"越推越少"的错误读数。 */
+        QSlider::groove:vertical {{
+            width: 4px;
+            background: {c['grid']};
+            border-radius: 2px;
+        }}
+        QSlider::handle:vertical {{
+            width: 14px;
+            height: 14px;
+            margin: 0 -5px;
+            background: {c['primary']};
+            border: none;
+            border-radius: 7px;
+        }}
+        QSlider::handle:vertical:hover {{
+            background: {c['accent']};
+        }}
+        /* 禁用态必须变灰：QSS 只要写了 groove/handle，Qt 就不会再按"禁用"自动
+           调暗（实测 ANR 面板无硬件时滑杆看起来完全可拖）。 */
+        QSlider::sub-page:horizontal:disabled {{
+            background: {c['grid']};
+        }}
+        QSlider::handle:horizontal:disabled,
+        QSlider::handle:vertical:disabled {{
+            background: {c['border']};
         }}
         QLineEdit {{
             background-color: {c['card']};

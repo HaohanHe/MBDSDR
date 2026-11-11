@@ -68,7 +68,7 @@ def test_unparseable_file_is_backed_up_and_reported(tmp_path, body):
     ("volume", "x", 48, "无法解析为数字"),
     ("show_waterfall", [], True, "布尔字段"),
     ("callsign", {"a": 1}, "", "文本字段"),
-    ("theme", {"x": 1}, "default", "不在可选值"),
+    ("theme", {"x": 1}, DEFAULTS["theme"], "不在可选值"),
     ("fft_size", [2048], 2048, "不在可选值"),
 ])
 def test_wrong_type_falls_back_with_visible_note(tmp_path, key, bad, expected, keyword):

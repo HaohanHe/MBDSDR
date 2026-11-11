@@ -215,8 +215,10 @@ class DemodWorker(QThread):
       - WFM：信道就是全带宽，对原始 IQ 算功率做门控。
       - AudioPlayer 内部 5ms ramp 消咔哒。
 
-    audio_enabled=False 时仍完整跑 DDC+解调（验证并行链路），但不写声卡、
-    不做静噪门控——供第二 VFO 静音并行解调使用。
+    audio_enabled=False（未点「收听」/ 静音 VFO）时，run() 每帧重算门控后
+    直接 msleep 让路，连 DDC+解调都不跑——把 CPU 让给频谱与 GNSS（对照
+    SDR++ main_window.cpp:51 playing=false）。当前共享单一声卡，只允许一个
+    VFO 出声；门控每帧重算，运行时收听开关即时生效。
     """
 
     #: 单帧解调失败（可预期数据异常）：供状态栏/日志如实提示，不静默吞掉
@@ -237,6 +239,8 @@ class DemodWorker(QThread):
         self._cfg = config
         self._sr = float(sr)
         self._audio_enabled = bool(audio_enabled)
+        # 「不收听」：解调照跑（解码/录制/星座图要数据），只是不写声卡
+        self._muted = False
         self._running = False
         # 主窗口统一音频后处理缝（ANR 降噪/tap 分发）；None=不处理后直接写声卡
         self.audio_tap = None
@@ -252,6 +256,7 @@ class DemodWorker(QThread):
                                         mode=self._cfg.mode,
                                         sample_rate=48000.0)
         self._last_squelch_label = ""
+        self._last_squelch_key = None
         self._last_gain_db = float(self._cfg.gain_db)
         # 解调后音频 AGC（gqrx 式三档+关）：每档一个实例，档位各自保留
         # 增益状态，来回切换不跳变；off 直通。
@@ -275,8 +280,11 @@ class DemodWorker(QThread):
         agc = self._audio_agc.get(speed)
         if agc is None:
             attack, release = self._AGC_SPEED_PARAMS[speed]
-            agc = AGC(target_level=0.5, attack=attack, release=release,
-                      max_gain=60.0)
+            # max_gain 60 倍会把静噪边界的噪声直接顶到满幅，再叠音量增益
+            # 就是持续削波。gqrx 音频链 AF 增益默认 -6 dB；这里 AGC 只做
+            # 温和补平：目标 0.25（-12 dB 余量），最多补 4 倍（+12 dB）。
+            agc = AGC(target_level=0.25, attack=attack, release=release,
+                      max_gain=4.0)
             self._audio_agc[speed] = agc
         if audio.ndim == 2:
             # WFM 立体声：各声道共用同一 AGC 实例顺序处理（增益状态连续）
@@ -295,7 +303,12 @@ class DemodWorker(QThread):
         self._squelch.track = bool(self._cfg.auto_squelch)
         open_g = bool(self._squelch.update(audio, int(audio.shape[0])))
         label = self._squelch.state_label()
-        if label != self._last_squelch_label:
+        # 只在「状态」变化时上报：label 里带基线数值（每帧都在微调），
+        # 拿整串比较会让日志每 20ms 刷一行（2026-11-10 真机实测）。
+        key = (self._squelch.mode, self._squelch.calibrating,
+               self._squelch.calibration_failed)
+        if key != self._last_squelch_key:
+            self._last_squelch_key = key
             self._last_squelch_label = label
             log.info("%s", label)
             self.squelch_state.emit(label)
@@ -345,12 +358,15 @@ class DemodWorker(QThread):
         """静噪门控：判定失败限流上报（保持上次静音状态）；编程错误上抛。"""
         try:
             open_g = self._squelch_open(audio)
-            player.set_muted(not open_g)
+            # 全局静音（「不收听」）优先：解调继续，但声卡不出声
+            player.set_muted(self._muted or not open_g)
         except self._FRAME_ERRORS as exc:
             self._report_demod_failure(mode, exc, stage="静噪判定")
 
     def _push_audio(self, audio, player, mode: str) -> None:
         """AGC → tap → 写卡：设备/数据异常限流上报；编程错误原样上抛。"""
+        if getattr(self, "_muted", False):
+            return          # 「不收听」：只解调不写卡，省一次声卡写
         try:
             audio = self._apply_audio_agc(audio)
             if self.audio_tap is not None:
@@ -367,13 +383,21 @@ class DemodWorker(QThread):
         self._running = False
 
     def set_audio_enabled(self, on: bool) -> None:
-        """运行时切换本 VFO 是否把解调结果写声卡（主听/次听切换）。
+        """运行时切换本 VFO 是否解调并写声卡（收听 / 停止收听、主听/次听）。
 
-        主听 VFO 置 True（写声卡），次听 VFO 置 False（仍跑 DDC+解调验证并行
-        链路，但不写声卡）。GIL 下 bool 赋值原子，worker 循环每帧读到新值。
-        多 VFO 各自独立 DDC 真解调；当前共享单一声卡，只允许一个 VFO 出声。
+        GIL 下 bool 赋值原子，worker 循环每帧读到新值。False 时直接跳过解调，
+        把 CPU 让给频谱与 GNSS（对照 SDR++ playing=false 的资源口径）。
+        多 VFO 各自独立 DDC；当前共享单一声卡，只允许一个 VFO 出声。
         """
         self._audio_enabled = bool(on)
+
+    def set_muted(self, muted: bool) -> None:
+        """「不收听」：解调/AGC/tap 照跑，只是不写声卡（给解码/录制/星座图用）。
+
+        与 ``set_audio_enabled(False)``（连解调都停）是两件事：
+        前者让出一次声卡写，后者让出整个 DSP。
+        """
+        self._muted = bool(muted)
 
     def _demod_48k(self, dsp, mode: str, vfo_out: np.ndarray) -> np.ndarray:
         """VFO 输出已是 48k complex IQ，按模式解调。
@@ -392,8 +416,15 @@ class DemodWorker(QThread):
         self._running = True
         from mbdsdr_ai import dsp as _dsp
         player = self._player
-        player_ok = (player is not None and getattr(player, "available", False)
-                     and self._audio_enabled)
+        # 每帧重算，不能在线程启动时算一次就固定：运行时「收听 / 停止收听」
+        # 会改 _audio_enabled 与声卡流状态，旧写法让开关永远不生效（真 bug）。
+        def _player_ok() -> bool:
+            # 门控只看 available + _audio_enabled：收听开关由
+            # set_audio_enabled() 推送到这里，不需要再查 is_playing
+            # （有些合法 player 实现没有该属性，多一层判断会把所有帧挡掉）。
+            return bool(player is not None
+                        and getattr(player, "available", False)
+                        and self._audio_enabled)
 
         while self._running:
             buf, n = self._in.read()
@@ -416,20 +447,19 @@ class DemodWorker(QThread):
                 self.recalibrate()
             if mode in ("RAW", "DIG"):
                 continue
+            # 未点「收听」：连解调都不跑，把 CPU 让给频谱与 GNSS。
+            # 对照 SDR++ main_window.cpp:51 playing=false —— 设备连上不等于播。
+            # 每帧重算 _player_ok()：运行时收听开关 / 声卡流状态会变，
+            # 线程启动时算一次就固定会让开关永远不生效（真 bug）。
+            if not _player_ok():
+                self.msleep(10)
+                continue
 
             # ===== WFM 广播路径：信道就是全带宽，先鉴频解调，再据音频形态静噪 =====
             if mode == "WFM":
                 if self._wfm_rx is None:
                     self._wfm_rx = _dsp.WFMReceiver(
                         sample_rate=self._sr, audio_sr=48000)
-                if not player_ok:
-                    # 无设备 / 静音 VFO：仍跑鉴频验证链路，但不写声卡、不做静噪门控
-                    try:
-                        self._wfm_audio(iq)
-                    except Exception as exc:  # noqa: BLE001
-                        self._report_unexpected(exc, mode)
-                        break
-                    continue
                 try:
                     audio = self._wfm_audio(iq)
                 except Exception as exc:  # noqa: BLE001
@@ -463,11 +493,6 @@ class DemodWorker(QThread):
                 self._report_unexpected(exc, mode)
                 break
             if vfo_out is None or len(vfo_out) <= 16:
-                continue
-
-            if not player_ok:
-                # 无设备 / 静音 VFO：上面已跑完 VFO.process 验证 DDC 链路，
-                # 不写声卡、也不做静噪门控。
                 continue
 
             try:

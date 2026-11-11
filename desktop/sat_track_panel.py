@@ -22,6 +22,7 @@ from PySide6.QtCore import Qt, Signal, QTimer
 from PySide6.QtWidgets import (
     QFrame, QVBoxLayout, QHBoxLayout, QFormLayout, QLabel, QComboBox,
     QDoubleSpinBox, QPushButton, QProgressBar, QGroupBox, QMessageBox,
+    QWidget,
 )
 
 from tokens import tokens
@@ -44,6 +45,47 @@ except ImportError:  # pragma: no cover - 兼容 desktop 目录直接上 sys.pat
         effective_pass_visibility_gate_deg,
         effective_show_low_elevation_passes,
     )
+
+
+#: 标题带的可点击高度（px）。与全局 QSS 的 `QGroupBox { margin-top: 20px }`
+#: 成对：标题就画在这条 20px 的带里，带下方才是卡片正文。
+_TITLE_BAND_PX = 20
+
+
+class _CollapsibleGroupBox(QGroupBox):
+    """点标题行即可展开/收起的分组框。
+
+    Qt 的可勾选 QGroupBox 只在那颗勾选框上响应鼠标（内部 hitButton 取
+    SC_GroupBoxCheckBox），点标题文字没反应。可折叠面板的标题行是唯一的
+    点击目标——勾选框本身被全局 QSS 收成 0×0，否则会同时出现「☑ ▼」两个
+    指示符（2026-11-11 实拍右栏卫星跟踪面板），于是必须由这里接管点击。
+    """
+
+    def __init__(self, title: str, parent: Optional[QWidget] = None):
+        super().__init__(title, parent)
+        self.setMouseTracking(True)
+
+    def _in_title_band(self, y: float) -> bool:
+        return y < _TITLE_BAND_PX
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton and self._in_title_band(
+                event.position().y()):
+            self.setChecked(not self.isChecked())
+            event.accept()
+            return
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event):
+        # 手型光标只落在标题带上：正文里的下拉/输入框不该变成"可点整块"。
+        self.setCursor(Qt.PointingHandCursor
+                       if self._in_title_band(event.position().y())
+                       else Qt.ArrowCursor)
+        super().mouseMoveEvent(event)
+
+    def leaveEvent(self, event):
+        self.unsetCursor()
+        super().leaveEvent(event)
 
 
 class SatTrackPanel(QFrame):
@@ -98,7 +140,7 @@ class SatTrackPanel(QFrame):
         root.addWidget(self.tle_date_label)
 
         # ---- 卫星选择 + 下行频率 ----
-        sel_box = QGroupBox("目标卫星")
+        sel_box = _CollapsibleGroupBox("目标卫星")
         self._make_collapsible(sel_box, "目标卫星", 2, "satSelBox")
         form = QFormLayout(sel_box)
         self.sat_combo = QComboBox()
@@ -136,7 +178,7 @@ class SatTrackPanel(QFrame):
         self.update_tle_btn.clicked.connect(self.update_tle_requested.emit)
 
         # ---- 实时数据 ----
-        data_box = QGroupBox("实时状态")
+        data_box = _CollapsibleGroupBox("实时状态")
         self._make_collapsible(data_box, "实时状态", 6, "satDataBox")
         dform = QFormLayout(data_box)
         self.az_label = QLabel("--")
@@ -155,7 +197,7 @@ class SatTrackPanel(QFrame):
         root.addWidget(data_box)
 
         # ---- 仰角指示器（0-90° 进度条）----
-        el_box = QGroupBox("仰角指示器")
+        el_box = _CollapsibleGroupBox("仰角指示器")
         self._make_collapsible(el_box, "仰角指示器", 2, "satElBox")
         el_layout = QVBoxLayout(el_box)
         self.el_bar = QProgressBar()
@@ -189,6 +231,8 @@ class SatTrackPanel(QFrame):
         box.setObjectName(object_name)
         box.setCheckable(True)
         box.setChecked(True)
+        # 让全局 QSS 把这颗勾选框收成 0×0：展开态已经由标题里的 ▼/▶ 表达。
+        box.setProperty("collapseBox", True)
         self._collapsible_boxes.append(box)
 
         def _sync(checked: bool) -> None:

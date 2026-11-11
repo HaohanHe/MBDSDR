@@ -166,9 +166,11 @@ class TestPinchZoomMixin:
         assert issubclass(SpectrumCurveWidget, PinchZoomMixin)
 
     def test_map_canvas_has_mixin(self):
-        from adsb_map_panel import _MapCanvas
+        # 2026-11-10：ADS-B 自绘 _MapCanvas 已删（无测绘资质、几何拉伸），
+        # 全软件共用 OsmMapView。手势能力在这里验同一个契约。
+        from osm_map import OsmMapView
         from touch_helpers import PinchZoomMixin
-        assert issubclass(_MapCanvas, PinchZoomMixin)
+        assert issubclass(OsmMapView, PinchZoomMixin)
 
 
 # --------------------------------------------------------------------------- #

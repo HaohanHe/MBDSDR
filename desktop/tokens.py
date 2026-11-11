@@ -426,9 +426,18 @@ QWidget#topBar {{
     border-bottom: 1px solid {c['gray_400']};
 }}
 QWidget#bottomDock {{
-    background-color: {c['card_1']};
+    background-color: {c['bg_dark']};
     border: none;
     border-top: 1px solid {c['gray_400']};
+}}
+QLabel#dockMode {{
+    color: rgba(255,255,255,{self.TEXT_ALPHA['secondary']});
+    font-weight: {self.FONT_WEIGHT['title']};
+}}
+QLabel#dockNow {{
+    font-family: "JetBrains Mono", "Fira Code", "Consolas", monospace;
+    color: rgba(255,255,255,{self.TEXT_ALPHA['primary']});
+    font-weight: {self.FONT_WEIGHT['title']};
 }}
 QFrame#card, QFrame#sectionCard {{
     background-color: {c['card_2']};
@@ -519,6 +528,24 @@ QComboBox QAbstractItemView {{
     selection-color: {c['bg_dark']};
     border: none;
 }}
+/* 下拉项必须「点得中」：默认行高只有 ~20px，中文项挤在一起像列表而不是
+   菜单，鼠标点选容易点偏（用户 2026-11-10：为什么必须滚轮才能选？）。
+   给足 30px 行高与左右内边距，展开后一眼一条、直接点击即可。 */
+QComboBox QAbstractItemView::item {{
+    min-height: 30px;
+    padding: 4px 10px;
+}}
+/* 右栏面板选择器（替代被截断的页签条）：整栏唯一的导航入口，要比普通输入框
+   更醒目一点，但不能抢内容区的注意力。 */
+QComboBox#rightTabNav {{
+    background-color: {c['card_1']};
+    color: rgba(255,255,255,{self.TEXT_ALPHA['primary']});
+    border: 1px solid {c['border']};
+    border-radius: {r['card_sm']}px;
+    padding: 4px 12px;
+    font-size: {self._px_to_pt(self.FONT['body'])}pt;
+}}
+QComboBox#rightTabNav:hover {{ border-color: {c['accent']}; }}
 QSlider::groove:horizontal {{
     height: {self.SIZE['splitter_handle']}px;
     background: {c['gray_400']};

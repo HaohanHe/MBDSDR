@@ -90,3 +90,24 @@ def test_module_panel_device_capability_limits_tiers():
     assert format_sample_rate(3_200_000) not in texts, "3.2 MS/s 超出设备量程"
     assert format_sample_rate(DEFAULT_SAMPLE_RATE_HZ) in texts
     assert float(panel.sr_combo.currentData()) == float(DEFAULT_SAMPLE_RATE_HZ)
+
+
+def test_preferred_hz_selects_perf_default_tier():
+    """通用连接下拉传 preferred_hz（性能档省电）→ 默认选中 eco 档，非设备基准 2.4M。
+
+    用户「电脑没有那么强大…得让路」：工具栏「连接」走 _connect_dialog，默认
+    选中档必须随性能档（eco 1.024 MS/s），否则 GNSS 被 2.4 MS/s 挤死原地不动。
+    反证：不传 preferred_hz 的调用方（模块面板宽带解码）仍按设备基准 2.4M。
+    """
+    from perf_profile import sample_rate_for
+    eco = float(sample_rate_for("eco"))
+    combo = QComboBox()
+    fill_sample_rate_combo(combo, _RTL_DEVICE, preferred_hz=eco)
+    assert float(combo.currentData()) == eco, (
+        f"传性能档默认率应选中 eco {eco:.0f}，实际 {combo.currentData()}")
+    # eco 档必须在设备能力档位里（否则「选了又跳回去」）
+    assert eco in [float(combo.itemData(i)) for i in range(combo.count())]
+    # 反向：不传 preferred_hz 仍对齐设备基准（模块面板/旧调用方行为不变）
+    combo2 = QComboBox()
+    fill_sample_rate_combo(combo2, _RTL_DEVICE)
+    assert float(combo2.currentData()) == float(DEFAULT_SAMPLE_RATE_HZ)

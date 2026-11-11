@@ -122,6 +122,19 @@ class AprsPanel(QWidget):
         hdr.setSectionResizeMode(4, QHeaderView.ResizeToContents)
         hdr.setSectionResizeMode(5, QHeaderView.Stretch)
         self.table.itemSelectionChanged.connect(self._on_row_selected)
+        # 空表说明：只有表头的空表格既不告诉用户"这里以后会有东西"，也不告诉
+        # 他"现在没内容"是怎么回事。挂在 viewport 上（不占行列、不参与选择），
+        # 有包后随表格一起隐藏。
+        self.empty_hint = QLabel(
+            "还没有收到数据包\n调到 144.390 MHz（FM），等附近台站发报后会自动列出",
+            self.table.viewport())
+        self.empty_hint.setObjectName("hintLabel")
+        self.empty_hint.setAlignment(Qt.AlignCenter)
+        self.empty_hint.setWordWrap(True)
+        self.empty_hint.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+        _hint_lay = QVBoxLayout(self.table.viewport())
+        _hint_lay.setContentsMargins(12, 8, 12, 8)
+        _hint_lay.addWidget(self.empty_hint)
         splitter.addWidget(self.table)
 
         self.detail = QTextEdit()
@@ -223,6 +236,7 @@ class AprsPanel(QWidget):
 
     def _refresh_table(self) -> None:
         shown = [p for p in self._packets if self._matches(p)]
+        self.empty_hint.setVisible(not shown)
         self.table.setRowCount(len(shown))
         for row, p in enumerate(shown):
             # 缺收报时刻时显示「—」：etime 0 会渲染成 1970 年，那是假读数。
@@ -292,6 +306,6 @@ class AprsPanel(QWidget):
 
     def clear(self) -> None:
         self._packets.clear()
-        self.table.setRowCount(0)
+        self._refresh_table()
         self.detail.clear()
         self._refresh_header()

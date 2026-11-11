@@ -39,6 +39,44 @@ except Exception:  # pragma: no cover - 取决于运行环境
     _SD_AVAILABLE = False
 
 
+def soft_limit(data, threshold: float = 0.9):
+    """软限幅：阈值以下原样，之上按有理函数渐近压到 ±1 但**永不到达 1**。
+
+    ``out = t + span * d / (d + span)``，其中 ``d = |x| - t``。
+    在 ``|x| == t`` 处值与斜率都连续（一阶连续），正常电平不染色；
+    与 hard clip 的关键差别：越界的 1.2 / 2.0 / 3.0 会得到**不同**输出，
+    不会全被切成同一个 1.0 平顶 -> 不会出现方波失真。
+
+    为什么不用 tanh：``tanh(d/span)`` 在 d>10*span 时，float32 精度下
+    已等于 1.0，多个不同电平仍会压成同一个平顶（测试抓到过）。
+    """
+    ax = np.abs(data)
+    over = ax > threshold
+    if not np.any(over):
+        return data
+    span = 1.0 - threshold
+    d = ax[over] - threshold
+    out = np.array(data, dtype=np.float32, copy=True)
+    out[over] = (np.sign(data[over])
+                 * (threshold + span * d / (d + span)))
+    return out
+
+
+def volume_pct_to_gain(pct: float) -> float:
+    """0-100 音量滑杆 → 线性增益（0.0-1.0），**永远不会放大到削波**。
+
+    对照 SDR++ ``core/src/dsp/audio/volume.h:14,22`` 的 ``powf(volume, 2)``：
+    听感是近似对数的，线性滑杆配平方律才"均匀响"。上限 1.0 是硬约束——
+    gqrx receiver.cpp:49 默认 -6 dB (0.5)，我们允许拉满到 0 dB 但不能再高。
+
+    旧实现 ``pct/100*2.0`` 在 72% 就给 1.44 倍，实测 20.8% 样本被
+    ``np.clip`` 硬削成方波（100% 时 58.3%）——这正是"大多时间过载、
+    偶尔正常"的来源：只有信号弱的瞬间没削到。
+    """
+    v = max(0.0, min(100.0, float(pct))) / 100.0
+    return v * v
+
+
 class AudioPlayer:
     """把解调后的 float32 音频块实时输出到默认声卡。
 
@@ -214,6 +252,14 @@ class AudioPlayer:
                     return 0
             if self.gain != 1.0:
                 data = data * self.gain
+            # 硬 clip 会把超出部分切平→方波失真（听起来就是"过载/破音"）。
+            # 改成软限幅：0.9 以下原样通过，超出部分按有理函数渐近压到 ±1
+            # （永不到达 1，不同电平仍可分；见 soft_limit，那里解释了为何
+            # 不用 tanh——float32 下大 d 会压成同一个平顶）。即使上游 AGC/
+            # 解调偶发越界也只压不切。对照 SDR++ 音频 sink 由 PortAudio 侧
+            # 限幅、DSP 侧不自行放大的分层做法。
+            data = soft_limit(data, 0.9)
+            # 最后一层只防 NaN / 数值异常；正常路径不会出现越界样本。
             np.clip(data, -1.0, 1.0, out=data)
             # 立体声 (N, C) → 交错 (N*C,)
             if data.ndim == 2:

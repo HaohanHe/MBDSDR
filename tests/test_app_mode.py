@@ -100,7 +100,10 @@ class TestEnterPlanetarium:
         mw.set_app_mode("planetarium")
         try:
             assert mw._app_mode == "planetarium"
-            assert mw._mode_stack.currentWidget() is mw._planetarium_page
+            # 星象仪页不再住在形态栈里：整页搬进独立全屏窗口
+            assert mw._mode_stack.indexOf(mw._planetarium_page) < 0
+            assert mw._planetarium_page.parentWidget() is mw._planetarium_window
+            assert mw._planetarium_window.isFullScreen()
             # sky_view 身份不变（同一对象），父链落在星象仪页内
             assert mw.sky_view.parentWidget() is mw._planetarium_sky_slot
             # left_tab 不再持有天空页签（页签数减一）
@@ -168,21 +171,24 @@ class TestPlanetariumAssembly:
         assert mw._spectrum_page_layout.indexOf(mw.spectrum) >= 0
         mw.set_app_mode("planetarium")
         try:
-            assert mw._spectrum_page_layout.indexOf(mw.spectrum) < 0
+            # 独立天空窗与主窗口并存：默认频谱留在主窗口，不抢天空高度
+            assert mw._spectrum_page_layout.indexOf(mw.spectrum) >= 0
+            assert mw._planetarium_waterfall_layout.indexOf(mw.spectrum) < 0
+            assert not mw._planetarium_waterfall_slot.isVisible()
+            mw.set_planetarium_waterfall(True)
             assert mw._planetarium_waterfall_layout.indexOf(mw.spectrum) >= 0
             assert mw.spectrum.parentWidget() is mw._planetarium_waterfall_slot
-            # 时空主导形态：频谱默认不占位（底部 180px = 1/5 天空），
-            # 但必须能一键拉出来——"不默认显示"≠"拿不到"。
-            assert not mw._planetarium_waterfall_slot.isVisibleTo(mw)
-            mw.set_planetarium_waterfall(True)
-            assert mw._planetarium_waterfall_slot.isVisibleTo(mw)
+            assert mw._planetarium_waterfall_slot.isVisible()
             mw.set_planetarium_waterfall(False)
-            assert not mw._planetarium_waterfall_slot.isVisibleTo(mw)
+            # 关掉就还给主窗口：不能两边都没有
+            assert mw._spectrum_page_layout.indexOf(mw.spectrum) >= 0
+            assert mw._planetarium_waterfall_layout.indexOf(mw.spectrum) < 0
+            assert not mw._planetarium_waterfall_slot.isVisible()
         finally:
             mw.set_app_mode("ide")
         assert mw._spectrum_page_layout.indexOf(mw.spectrum) >= 0
         assert mw._planetarium_waterfall_layout.indexOf(mw.spectrum) < 0
-        assert not mw._planetarium_waterfall_slot.isVisibleTo(mw)
+        assert not mw._planetarium_waterfall_slot.isVisible()
 
     def test_ai_command_bar_moves_and_restores(self, mw):
         ide_parent = mw._ai_cmd_bar.parentWidget()

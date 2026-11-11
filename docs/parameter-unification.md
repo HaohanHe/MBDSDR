@@ -79,7 +79,7 @@
 | 8 | `fft_size` | 2048 | 1024/2048/4096 | `desktop/spectrum_widget.py:SpectrumDataGenerator.set_fft_size` → FFT | 是 |
 | 9 | `fft_window` | Nuttall | 6 枚举 | `desktop/spectrum_widget.py:SpectrumDataGenerator.set_window` | 是 |
 | 10 | `fft_avg_frames` | 1 | 1/4/8/16 | `desktop/spectrum_widget.py:SpectrumDataGenerator.set_avg_frames` | 是 |
-| 11 | `waterfall_palette` | default | default/sdrpp | `desktop/spectrum_widget.py:SpectrumPanel._on_palette_changed` → `_PlotState.wf_colors` | 是 |
+| 11 | `waterfall_palette` | sdrpp | sdrpp/soft | `desktop/spectrum_widget.py:SpectrumPanel._on_palette_changed` → `_PlotState.wf_colors` | 是 |
 | 12 | `peak_threshold_db` | 6.0 | 1–30 | `desktop/spectrum_widget.py:_PlotState.peak_rel_db` → `find_peaks_with_snr` | 是 |
 | 13 | `show_peaks` | True | bool | `desktop/spectrum_widget.py:_PlotState.show_peaks` → 峰值绘制 | 是 |
 | 14 | `waterfall_smooth` | False | bool | `desktop/spectrum_widget.py:_on_wf_smooth_toggled` → `generator.wf_smooth` | 是 |

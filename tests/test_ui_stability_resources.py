@@ -194,17 +194,23 @@ class TestEventFilterThreadAffinity:
         assert _SpyEvent.touched is False, "非 GUI 线程不得读取事件对象"
 
     def test_gui_thread_still_filters(self, mw, qapp):
-        """放行只针对别的线程：本线程的 Resize 仍要触发命令栏重定位。"""
-        parent = getattr(mw, "_ai_cmd_parent", None)
-        assert parent is not None, "缺少命令栏父控件，定位链已断"
+        """放行只针对别的线程：本线程的 Resize 仍要触发天空槽重排。
+
+        2026-11-11 命令栏改成布局内控件（no-op ``_position_ai_cmd_bar``）后，
+        Resize 分派只剩两条活路径：天空槽 → AI 回复卡重排、天空视图 → 按钮/
+        浮层重排。这里钉前者——它也正是被旧 ``_ai_cmd_parent`` 分支截胡的那条。
+        """
+        parent = getattr(mw, "_planetarium_sky_slot", None)
+        assert parent is not None, "缺少星象仪天空槽，Resize 分派链已断"
         hits = {"n": 0}
-        orig = mw._position_ai_cmd_bar
-        mw._position_ai_cmd_bar = lambda: hits.__setitem__("n", hits["n"] + 1)
+        orig = mw._position_planetarium_ai_card
+        mw._position_planetarium_ai_card = (
+            lambda: hits.__setitem__("n", hits["n"] + 1))
         try:
             qapp.sendEvent(parent, QEvent(QEvent.Type.Resize))
         finally:
-            mw._position_ai_cmd_bar = orig
-        assert hits["n"] >= 1, "本线程 Resize 未触发命令栏定位（过滤链失效）"
+            mw._position_planetarium_ai_card = orig
+        assert hits["n"] >= 1, "本线程 Resize 未触发天空槽重排（过滤链失效）"
 
 
 class TestCloseReleasesGlobalHooks:

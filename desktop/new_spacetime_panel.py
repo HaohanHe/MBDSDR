@@ -101,20 +101,19 @@ except ImportError:  # pragma: no cover - 兼容 desktop 目录直接上 sys.pat
 from mbdsdr_ai.station import station_from_user, trust_for_calculation  # noqa: E402
 
 # ---------------------------------------------------------------------------
-# 默认主题色值（从 tokens.py 语义化取色，与 light 主题对齐）
+# 配色：一律从 tokens 的深色语义色取（CarWith dark）
 # ---------------------------------------------------------------------------
+# 历史：本面板 2026-10 是浅色主题写的（米白卡片 + 深灰字），整机换深色后
+# 整块面板变成一张白纸戳在右栏里；卡片内还混着写死的黑底徽章。现在统一
+# 映射到深色语义色，图表（网格/轴字/散点）与 QSS 用同一组常量。
 _t = tokens()
-COLOR_BG = _t.COLORS["light_bg"]           # 主背景
-COLOR_CARD = _t.COLORS["light_card"]       # 卡片
-COLOR_TEXT = _t.COLORS["light_text"]       # 文字主色
-COLOR_TEXT_SEC = _t.COLORS["light_text_sub"]  # 文字次色
-COLOR_BORDER = _t.COLORS["light_border"]   # 边框
-COLOR_PRIMARY = _t.COLORS["light_accent"]  # 强调
+COLOR_CARD = _t.COLORS["card_1"]           # 卡片
+COLOR_TEXT = _t.COLORS["gray_100"]         # 文字主色
+COLOR_TEXT_SEC = _t.COLORS["gray_200"]     # 文字次色
+COLOR_BORDER = _t.COLORS["gray_400"]       # 边框/网格
+COLOR_PRIMARY = _t.COLORS["accent"]        # 强调
 COLOR_SUCCESS = _t.COLORS["success"]       # 同步 / 成功
 COLOR_DANGER = _t.COLORS["danger"]         # 未同步 / 警示
-COLOR_GRID = _t.COLORS["light_grid"]       # 网格
-COLOR_HOVER = _t.COLORS["light_hover"]     # 按钮 hover
-COLOR_BG_ALT = _t.COLORS["light_bg_alt"]   # 次级背景
 
 _NO_SIGNAL_TEXT = "未检测到信号"
 _NA = "--"
@@ -160,20 +159,65 @@ class FreqOrbitChart(QWidget):
         return len(self.plottable_points()) > 0
 
     # ------------------------------------------------------------------
+    def _draw_empty_frame(self, painter: QPainter) -> None:
+        """空态骨架：极淡的绘图区 + 5×5 网格 + 轴名。
+
+        只画「这里是一张图」的几何，不画任何假数据点。
+        """
+        plot = self.rect().adjusted(48, 18, -16, -30)
+        if plot.width() < 20 or plot.height() < 20:
+            return
+        faint = QColor(COLOR_BORDER)
+        faint.setAlpha(40)
+        pen = QPen(faint)
+        pen.setWidth(1)
+        painter.setPen(pen)
+        painter.drawRect(plot)
+        for i in range(1, 5):
+            gx = plot.left() + plot.width() * i / 5.0
+            painter.drawLine(QPointF(gx, plot.top()), QPointF(gx, plot.bottom()))
+            gy = plot.top() + plot.height() * i / 5.0
+            painter.drawLine(QPointF(plot.left(), gy), QPointF(plot.right(), gy))
+
+        axis = QColor(COLOR_TEXT_SEC)
+        axis.setAlpha(60)
+        painter.setPen(axis)
+        f = painter.font()
+        f.setPointSize(8)
+        painter.setFont(f)
+        painter.drawText(QRectF(plot.left(), plot.bottom() + 18,
+                                plot.width(), 16),
+                         Qt.AlignHCenter | Qt.AlignTop, "轨道高度 (km)")
+        painter.drawText(QRectF(plot.left() - 44, plot.top() - 2, 40, 16),
+                         Qt.AlignRight | Qt.AlignVCenter, "MHz")
+
     def paintEvent(self, event):  # noqa: D401 - Qt 虚函数
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing, True)
         painter.fillRect(self.rect(), QColor(COLOR_CARD))
 
         points = self.plottable_points()
-        # 无数据：居中提示（区分「一颗都没算到」与「有星但频率未知」）
+        # 无数据：先画一层极淡的坐标骨架，再写清「为什么空、下一步做什么」。
+        # 284px 高的纯黑卡片读起来像渲染坏了——和瀑布空态同一口径。
         if not points:
-            painter.setPen(QColor(COLOR_TEXT_SEC))
+            self._draw_empty_frame(painter)
+            if self._points:
+                title = "暂无频率数据"
+                hint = "已算到过境，但没有可用的下行频率"
+            else:
+                title = "暂无过境数据"
+                hint = "设好观测站后点「刷新过境」，按 TLE 计算未来过境"
             f = painter.font()
-            f.setPointSize(10)
+            f.setPointSize(9)
             painter.setFont(f)
-            painter.drawText(self.rect(), Qt.AlignCenter,
-                             "无频率数据" if self._points else "无数据")
+            painter.setPen(QColor(COLOR_TEXT_SEC))
+            painter.drawText(self.rect().adjusted(0, -12, 0, -12),
+                             Qt.AlignCenter, title)
+            f.setPointSize(8)
+            painter.setFont(f)
+            painter.setPen(QColor(COLOR_TEXT_SEC))
+            painter.drawText(self.rect().adjusted(12, 14, -12, 14),
+                             Qt.AlignHCenter | Qt.AlignVCenter, hint)
             painter.end()
             return
 
@@ -420,20 +464,33 @@ class NewSpacetimePanel(QWidget):
         self.passes_filter_label.setWordWrap(True)
         lay.addWidget(self.passes_filter_label)
 
-        # 过境表格
-        self.passes_table = QTableWidget(0, 7)
+        # 过境表格：右栏只有 ~300px 宽，7 列曾在屏上挤成「卫(U / 升起(U /
+        # 大仰 仪」——表头与单元格都被横向硬切，数字读不出来。改成两行一行的
+        # 两列版式：左列卫星名 + 过境时刻（升起→中天→落下 · 最大多普勒），
+        # 右列峰值仰角 + 持续。所有数值仍在屏上，一个都没藏进 tooltip。
+        self.passes_table = QTableWidget(0, 2)
         self.passes_table.setHorizontalHeaderLabels(
-            ["卫星", "升起(UTC)", "中天(UTC)", "落下(UTC)",
-             "最大仰角", "持续(分)", "多普勒(Hz)"])
-        self.passes_table.horizontalHeader().setSectionResizeMode(
-            QHeaderView.Stretch)
+            ["卫星 · 升起→中天→落下 (UTC)", "仰角 / 分"])
+        hdr = self.passes_table.horizontalHeader()
+        hdr.setSectionResizeMode(0, QHeaderView.Stretch)
+        hdr.setSectionResizeMode(1, QHeaderView.Fixed)
+        self.passes_table.setColumnWidth(1, 76)
+        self.passes_table.setWordWrap(True)
         self.passes_table.verticalHeader().setVisible(False)
+        self.passes_table.verticalHeader().setSectionResizeMode(
+            QHeaderView.ResizeToContents)
         self.passes_table.setEditTriggers(QTableWidget.NoEditTriggers)
         self.passes_table.setSelectionBehavior(QTableWidget.SelectRows)
+        self.passes_table.setMinimumHeight(96)
+        # 首次打开还没有过境数据：先只显示提示句，刷出结果再展开表格。
+        self.passes_table.setVisible(False)
         lay.addWidget(self.passes_table)
 
-        # 空数据提示
-        self.passes_hint = QLabel("无数据")
+        # 空数据提示：说清「为什么空」与「下一步做什么」，不留一块无字黑框。
+        self.passes_hint = QLabel(
+            "无过境数据：先确认已设观测站，再点「刷新过境」"
+            "（需要联网更新 TLE）。")
+        self.passes_hint.setWordWrap(True)
         self.passes_hint.setStyleSheet(f"color: {COLOR_TEXT_SEC};")
         self.passes_hint.setAlignment(Qt.AlignCenter)
         lay.addWidget(self.passes_hint)
@@ -449,51 +506,15 @@ class NewSpacetimePanel(QWidget):
         lay.addWidget(self.chart)
         return box
 
-    # ---- 独立实例化时的兜底 QSS（嵌入主窗口后会被 themes.py 覆盖）----
+    # ---- 面板自身底色；子控件一律交给全局主题（themes.py）----
     def _apply_styles(self) -> None:
-        self.setStyleSheet(f"""
-            QWidget#newSpacetimePanel {{ background: {COLOR_BG}; }}
-            QGroupBox {{
-                background: {COLOR_CARD};
-                border: 1px solid {COLOR_BORDER};
-                border-radius: 8px;
-                margin-top: 12px; padding-top: 8px;
-                color: {COLOR_TEXT}; font-weight: 600;
-            }}
-            QGroupBox::title {{
-                subcontrol-origin: margin; left: 10px; padding: 0 4px;
-            }}
-            QPushButton {{
-                background: {COLOR_CARD}; color: {COLOR_TEXT};
-                border: 1px solid {COLOR_BORDER}; border-radius: 6px;
-                padding: 6px 14px;
-            }}
-            QPushButton:hover {{ background: {COLOR_HOVER}; }}
-            QPushButton:checked {{
-                background: {COLOR_PRIMARY}; color: {COLOR_CARD};
-                border-color: {COLOR_PRIMARY};
-            }}
-            QDoubleSpinBox {{
-                background: {COLOR_CARD}; color: {COLOR_TEXT};
-                border: 1px solid {COLOR_BORDER}; border-radius: 6px;
-                padding: 3px 6px;
-            }}
-            QProgressBar {{
-                background: {COLOR_GRID}; border: 1px solid {COLOR_BORDER};
-                border-radius: 6px; text-align: center; color: {COLOR_TEXT};
-            }}
-            QProgressBar::chunk {{ background: {COLOR_PRIMARY}; border-radius: 5px; }}
-            QTableWidget {{
-                background: {COLOR_CARD}; color: {COLOR_TEXT};
-                border: 1px solid {COLOR_BORDER}; border-radius: 6px;
-                gridline-color: {COLOR_GRID};
-            }}
-            QHeaderView::section {{
-                background: {COLOR_BG_ALT}; color: {COLOR_TEXT};
-                border: none; border-bottom: 1px solid {COLOR_BORDER};
-                padding: 4px 6px; font-weight: 600;
-            }}
-        """)
+        # 只声明面板背景。以前这里把 QGroupBox / QPushButton / QTableWidget
+        # 全套又写了一遍浅色值——widget 级样式表不会"被 themes.py 覆盖"，
+        # 反而是它盖住全局主题：嵌入右栏后整块面板仍是米白纸片，且 widget
+        # 级 QGroupBox 样式会把标题画进边框内侧，卡片顶边被擦出黑缺口
+        # （2026-11-11 实拍「新时空」）。全局主题已经有同一组深色规则。
+        self.setStyleSheet(
+            "QWidget#newSpacetimePanel { background: transparent; }")
 
     # ==================================================================
     # 区域 1 对外接口
@@ -839,8 +860,12 @@ class NewSpacetimePanel(QWidget):
     def _populate_passes(self, passes: List[SatellitePass]) -> None:
         self.passes_table.setRowCount(0)
         if not passes:
+            # 空表格会留一块 150px 的无字黑框把提示挤到最下面；没有行就干脆
+            # 收起表头，只留一句「为什么空、下一步做什么」。
+            self.passes_table.setVisible(False)
             self.passes_hint.setVisible(True)
             return
+        self.passes_table.setVisible(True)
         self.passes_hint.setVisible(False)
         self.passes_table.setRowCount(len(passes))
         for row, p in enumerate(passes):
@@ -855,18 +880,40 @@ class NewSpacetimePanel(QWidget):
                 name += f"（TLE {p.tle_tier_label or '过期'}{age}）"
             elif tier == "unknown":
                 name += "（TLE 年龄未知）"
-            self._set_item(row, 0, name)
-            self._set_item(row, 1, self._fmt_dt(p.rise_time))
-            self._set_item(row, 2, self._fmt_dt(p.max_time))
-            self._set_item(row, 3, self._fmt_dt(p.set_time))
-            self._set_item(row, 4, f"{p.max_elevation:.1f}°")
-            self._set_item(row, 5, f"{p.duration_sec / 60.0:.1f}")
-            self._set_item(row, 6, f"{p.max_doppler_hz:+.0f}")
 
-    def _set_item(self, row: int, col: int, text: str) -> None:
-        item = QTableWidgetItem(text)
-        item.setTextAlignment(Qt.AlignCenter)
-        self.passes_table.setItem(row, col, item)
+            # 左列两行：卫星名 / 过境时刻 + 最大多普勒
+            times = (f"{self._fmt_hm(p.rise_time)} → "
+                     f"{self._fmt_hm(p.max_time)} → "
+                     f"{self._fmt_hm(p.set_time)}"
+                     f" · {p.max_doppler_hz / 1000.0:+.1f} kHz")
+            item = QTableWidgetItem(f"{name}\n{times}")
+            item.setTextAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+            item.setToolTip(
+                f"{p.name}\n"
+                f"升起 {self._fmt_dt(p.rise_time)}\n"
+                f"中天 {self._fmt_dt(p.max_time)}\n"
+                f"落下 {self._fmt_dt(p.set_time)}\n"
+                f"最大仰角 {p.max_elevation:.1f}°\n"
+                f"持续 {p.duration_sec / 60.0:.1f} 分钟\n"
+                f"最大多普勒 {p.max_doppler_hz:+.0f} Hz")
+            self.passes_table.setItem(row, 0, item)
+
+            # 右列两行：峰值仰角 / 持续分钟
+            right = QTableWidgetItem(
+                f"{p.max_elevation:.1f}°\n{p.duration_sec / 60.0:.1f} 分")
+            right.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
+            self.passes_table.setItem(row, 1, right)
+        self.passes_table.resizeRowsToContents()
+
+    @staticmethod
+    def _fmt_hm(dt) -> str:
+        """只取时分：右栏一行要放三个时刻，带日期会横向挤爆。"""
+        if dt is None:
+            return _NA
+        try:
+            return dt.strftime("%H:%M")
+        except (AttributeError, ValueError):
+            return _NA
 
     @staticmethod
     def _fmt_dt(dt) -> str:

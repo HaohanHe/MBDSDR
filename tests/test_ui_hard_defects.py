@@ -274,6 +274,14 @@ class TestThreeColumnLayout:
 
     def test_stretch_gives_left_the_flex(self, qapp, clean_window_settings):
         """窗口加宽 600px：增量必须全部进左栏（stretch=1 的行为证据）。"""
+        from PySide6.QtGui import QGuiApplication
+        scr = QGuiApplication.primaryScreen()
+        # 这个用例要在两档窗口宽度之间比较增量。窗口宽度被屏幕可用区收口
+        # （main_window._fit_window_to_screen），屏幕放不下 1600 宽时两档会被
+        # 钳成同一个最小宽，增量恒为 0——那是屏幕的事实，不是布局的缺陷。
+        # 800x800 的 offscreen 平台就是这种情形；此时跳过并说明原因。
+        if scr is None or scr.availableGeometry().width() < 1700:
+            pytest.skip("屏幕宽 < 1700px，窗口被收口到最小宽，无法比较两档增量")
         s1 = self._sizes_at(qapp, 1000, 600)
         s2 = self._sizes_at(qapp, 1600, 900)
         d_left = s2[0] - s1[0]

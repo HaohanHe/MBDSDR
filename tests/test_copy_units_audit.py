@@ -335,7 +335,11 @@ def test_e04_bookmark_failure_says_what_survives_and_what_to_do():
 
 
 def test_discoverability_ports_are_findable_from_settings_tab():
-    """「设置」页签必须指向服务端口所在页；两处端口框必须有用途 tooltip。"""
+    """「设置」页必须指向服务端口所在处；两处端口框必须有用途 tooltip。
+
+    2026-11-11：设置面板的 7 个分组页签在 320px 右栏里放不下（第 4 个被整字
+    切掉），已改成可折叠分组长列，指向文案随之从「页签」改为「一节」。
+    """
     _qt_app()
     from PySide6.QtWidgets import QGroupBox, QLabel, QWidget
     from settings_panel import ServiceSettingsPanel, SettingsPanel
@@ -344,7 +348,7 @@ def test_discoverability_ports_are_findable_from_settings_tab():
         [w.text() for p in panels for w in p.findChildren(QLabel)]
         + [w.title() for p in panels for w in p.findChildren(QGroupBox)]
         + [w.toolTip() for p in panels for w in p.findChildren(QWidget)])
-    for needle in ("服务开关与端口见「服务设置」页签。",
+    for needle in ("服务开关与端口见右栏「服务设置」一节。",
                    "远程控制 7356", "GQRX/hamlib",
                    "Web 8080", "HTTP/WS",
                    "重启远程控制服务", "重启 Web 服务"):

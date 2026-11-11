@@ -21,7 +21,9 @@ Web Mercator 坐标，右下角常驻 ODbL 署名。
    明确降级为「直接点地图或手填经纬度」，不白屏、不静默失败；
    瓦片加载不出来同理——深色底+经纬网，顶上一句人话；
 3. 选中地点**只改位置，不改时间**——时刻归用户自己按「时间」，
-   与 Stellarium 一致。
+   与 Stellarium 一致；
+4. 点地图只是**待确认选点**（琥珀色虚线环），当前站址的红橙标记原地不动，
+   按「用这个位置」才真正换站址——一次误点不该看起来像把家搬走了。
 
 ## 写入口
 
@@ -39,7 +41,7 @@ from typing import List, Optional
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from PySide6.QtCore import Qt, QThread, Signal  # noqa: E402
+from PySide6.QtCore import Qt, QRect, QThread, Signal  # noqa: E402
 from PySide6.QtWidgets import (  # noqa: E402
     QComboBox, QFrame, QHBoxLayout, QLabel, QLineEdit, QListWidget,
     QListWidgetItem, QMessageBox, QPushButton, QVBoxLayout, QWidget,
@@ -157,13 +159,13 @@ class LocationPanel(QFrame):
         self.zoom_out_btn = QPushButton("−", self)
         self.zoom_out_btn.setObjectName("lpMapTool")
         self.zoom_out_btn.setFixedSize(28, 24)
-        self.zoom_out_btn.setToolTip("缩小")
+        self.zoom_out_btn.setToolTip("缩小地图，查看更大范围的区域背景；想回到本站点「回到当前」")
         self.zoom_out_btn.clicked.connect(lambda: self._map_zoom(-1))
         mrow.addWidget(self.zoom_out_btn, 0)
         self.zoom_in_btn = QPushButton("+", self)
         self.zoom_in_btn.setObjectName("lpMapTool")
         self.zoom_in_btn.setFixedSize(28, 24)
-        self.zoom_in_btn.setToolTip("放大")
+        self.zoom_in_btn.setToolTip("放大地图，看清当前站址周边的街道与地形细节")
         self.zoom_in_btn.clicked.connect(lambda: self._map_zoom(+1))
         mrow.addWidget(self.zoom_in_btn, 0)
         self.recenter_btn = QPushButton("回到当前", self)
@@ -201,7 +203,9 @@ class LocationPanel(QFrame):
 
         map_hint = QLabel("拖拽平移 · 滚轮缩放 · 单击选点", self)
         map_hint.setObjectName("lpHint")
-        map_hint.setToolTip("拖拽平移 · 滚轮缩放 · 单击选点 · 双击放大")
+        map_hint.setToolTip(
+            "拖拽平移 · 滚轮缩放 · 双击放大\n"
+            "单击选点只出琥珀色虚线圈（待确认），按「用这个位置」才换站址")
         self.map_hint = map_hint
         mrow.addWidget(map_hint, 0)
         mrow.addStretch(1)
@@ -442,9 +446,13 @@ class LocationPanel(QFrame):
             "QPushButton:disabled { color: #5b6478; }"
             "QPushButton#lpGo { background: #2b6cf6; border-color: #2b6cf6;"
             " color: #ffffff; font-weight: 600; }"
+            # ID 选择器优先级高于上面的 QPushButton:disabled；不补这条，
+            # 没选点时的「用这个位置」仍是饱满蓝底白字，看着可点、点了没反应。
+            "QPushButton#lpGo:disabled { background: %s; border-color: %s;"
+            " color: #5b6478; }"
             "QPushButton#lpMapTool { padding: 1px 8px; font-size: 12px; }"
             % (_BG, _LINE, _TEXT, _DIM, _TEXT, _PANEL, _TEXT, _LINE,
-               _PANEL, _LINE, _PANEL, _LINE))
+               _PANEL, _LINE, _PANEL, _LINE, _PANEL, _LINE))
 
     # ------------------------------------------------------------- 对外 API
     def set_current(self, lat: Optional[float], lon: Optional[float],
@@ -461,6 +469,44 @@ class LocationPanel(QFrame):
             f"当前：{float(lat):.4f}°, {float(lon):.4f}°{src}")
         self._set_map_marker(float(lat), float(lon))
 
+    def fit_to_available(self, avail: QRect) -> None:
+        """把面板摆进可用屏幕区域：先定型，再「不够高就缩地图」，最后居中夹住。
+
+        面板是延迟创建的 ``Qt.Tool``：首次 ``show()`` 时由窗口管理器给一个
+        初始位置，随后布局把窗口从很小撑到 632px 高，位置却不跟着收敛。
+        实测 1000×600 窗口里落在 y=397、底边 1029——只露出上半截，
+        「使用此地点 / 取消」整排在屏幕外，等于没法完成选点。
+
+        高度不够时只压地图的最小高（唯一可伸缩的视觉主体），
+        固定行（搜索、结果、手填、按钮）一律不动——它们才是可操作部分。
+        另外要连**窗口边框**一起算，并上最大高度：只 resize 的话，随后到达
+        的 LayoutRequest 会按 sizeHint 再长回去（实测 576 → 589）。
+        """
+        self.setMaximumHeight(16777215)   # 先解除上一次的限高
+        self.adjustSize()
+        margin = 12
+        # 标题栏/边框不占客户区，但占屏幕；不扣掉就会"看着在框内、按钮出屏"。
+        frame_extra = max(0, self.frameGeometry().height() - self.height())
+        max_client_h = max(240, avail.height() - margin * 2 - frame_extra)
+        max_w = max(360, (avail.width() - margin * 2))
+        over = self.minimumSizeHint().height() - max_client_h
+        view = getattr(self, "map_view", None)
+        if over > 0 and view is not None:
+            try:
+                view.setMinimumHeight(max(120, view.minimumHeight() - over))
+                self.adjustSize()
+            except (AttributeError, RuntimeError):
+                pass
+        self.setMaximumHeight(max_client_h)
+        w = min(max(self.width(), 460), max_w)
+        h = min(self.height(), max_client_h)
+        try:
+            self.resize(w, h)
+        except (AttributeError, RuntimeError):
+            return
+        self.move(avail.x() + (avail.width() - w) // 2,
+                  avail.y() + (avail.height() - (h + frame_extra)) // 2)
+
     def _set_map_marker(self, lat: Optional[float], lon: Optional[float]) -> None:
         view = getattr(self, "map_view", None)
         if view is None or OsmMapView is None:
@@ -472,6 +518,16 @@ class LocationPanel(QFrame):
                 # 免得下次打开停在上次的荒野里）
                 view.set_view(lat, lon, max(int(view.zoom()), 6))
                 self._on_map_zoom(view.zoom())
+        except (AttributeError, RuntimeError):
+            pass
+
+    def _set_pick_marker(self, lat: Optional[float], lon: Optional[float]) -> None:
+        """待确认选点的琥珀色标记；``None`` 清掉。站址标记不归它管。"""
+        view = getattr(self, "map_view", None)
+        if view is None or OsmMapView is None:
+            return
+        try:
+            view.set_pick_marker(lat, lon)
         except (AttributeError, RuntimeError):
             pass
 
@@ -572,11 +628,9 @@ class LocationPanel(QFrame):
 
     def _set_pending(self, place) -> None:
         self._pending = place
-        # 只挪 marker，不动视图中心：用户正看着选中的这块地图
-        try:
-            self.map_view.set_marker(place.lat, place.lon)
-        except (AttributeError, RuntimeError):
-            pass
+        # 只挪「待确认」标记（琥珀色），不动视图中心、也不动站址标记：
+        # 用户正看着选中的这块地图，还没按「用这个位置」之前当前位置不该变
+        self._set_pick_marker(place.lat, place.lon)
         src = {"map": "地图点选", "osm": "城市搜索·OSM",
                "offline": "离线城市表"}.get(getattr(place, "source", ""), "地点")
         self.pending_label.setText(
@@ -588,17 +642,16 @@ class LocationPanel(QFrame):
             return
         self.site_chosen.emit(self._pending)
         self._pending = None
+        self._set_pick_marker(None, None)     # 待确认已落地，预览标记收起
         self.apply_btn.setEnabled(False)
         self.hide()
 
     def _on_clear(self) -> None:
         self._pending = None
+        self._set_pick_marker(None, None)
         self.apply_btn.setEnabled(False)
         self.pending_label.setText("")
-        try:
-            self.map_view.set_marker(None, None)
-        except (AttributeError, RuntimeError):
-            pass
+        self._set_map_marker(None, None)
         self.cleared.emit()
 
     # ------------------------------------------------------------- 生命周期
