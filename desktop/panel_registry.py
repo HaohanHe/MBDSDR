@@ -103,6 +103,16 @@ class PanelRegistry:
             PanelSpec("ai",          "AI 助手",    "✦", AREA_RIGHT,
                       collapsible=True, min_w=side_min,
                       summary="用自然语言描述需求，AI 调用工具完成调谐/解码/录制等操作"),
+            # 以下两个是右栏页签（MainWindow._attach_digital_panels 创建），
+            # 此前只在代码里存在、不在注册表，能力目录与「面板」菜单都看不到。
+            PanelSpec("aprs",        "APRS 数据包", "✉", AREA_RIGHT,
+                      collapsible=True, min_w=side_min,
+                      summary="解出的 AX.25/APRS 报文列表；需 NFM 解调且中心频率对准 "
+                              "144.390/144.800 MHz 等 APRS 频点"),
+            PanelSpec("sat_image",   "卫星云图",   "▨", AREA_RIGHT,
+                      collapsible=True, min_w=side_min,
+                      summary="NOAA APT / Meteor LRPT 云图与最近产物；离线 IQ 出图，"
+                              "不是实时边收边解"),
 
         ]
         for s in specs:

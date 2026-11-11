@@ -56,6 +56,7 @@ PANEL_CATEGORY: Dict[str, str] = {
     "spectrum": "接收", "control": "接收", "module": "接收",
     "weather": "天空", "rf_sky": "天空", "adsb": "天空",
     "sat_track": "卫星", "new_spacetime": "卫星",
+    "aprs": "解码", "sat_image": "卫星",
     "ai": "AI", "status": "接收",
 }
 
