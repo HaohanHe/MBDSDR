@@ -24,7 +24,7 @@ from __future__ import annotations
 from typing import List, Optional
 
 from PySide6.QtCore import (
-    Qt, Signal, QTimer, QRectF, QPoint, QPointF, QEvent, QSettings,
+    Qt, Signal, QTimer, QRectF, QPoint, QPointF, QEvent,
 )
 from PySide6.QtGui import QColor, QFont, QPainter, QPen
 from PySide6.QtWidgets import (
@@ -40,26 +40,17 @@ except Exception:  # pragma: no cover - 以 desktop 包方式导入时
 #: 节标题的固定行高（像素）。SDR++ 侧栏的分组标题就是一条 24px 的灰字行。
 _SECTION_HEADER_H = 24
 
+#: 手风琴记忆的存储键（W48 / D-10）。登记在 desktop/config_schema.py
+#: （exposed=False 的内部键），由 DesktopSettings 统一落盘；不再用 QSettings：
+#: 后者在 PySide6 6.12 的两参构造器下恒定走 Windows 注册表，测试隔离形同虚设。
+_EXPANDED_KEY = "right_column_expanded_section"
+
 
 def _section_colors() -> dict:
     if _tokens is None:
         return {"text_primary": "#ffffff", "gray_200": "#939393",
                 "card_2": "#2b2c2f", "accent": "#919cac"}
     return _tokens().COLORS
-
-
-def _remembered_settings() -> QSettings:
-    """W48 记忆上次展开节的 QSettings。
-
-    必须走**显式 IniFormat 构造器**：本机 PySide6 6.12 上
-    ``QSettings("MBDSDR", "Desktop")`` 无视 ``setDefaultFormat()``，恒定用
-    NativeFormat（Windows 注册表）。测试里 conftest 的隔离只重定向了
-    IniFormat 的 path，用两参构造器会直接写进用户真实注册表——2026-11-11
-    实测在注册表 HKCU\\Software\\MBDSDR\\Desktop 里留下了
-    ``right_column/expanded_section``。
-    """
-    return QSettings(QSettings.IniFormat, QSettings.UserScope,
-                     "MBDSDR", "Desktop")
 
 
 class _SectionHeader(QToolButton):
@@ -149,7 +140,6 @@ class RightSection(QWidget):
         self.header = _SectionHeader(self)
         self.header.toggled.connect(self.set_expanded)
         lay.addWidget(self.header)
-
         self._line = QFrame(self)
         self._line.setObjectName("rightSectionLine")
         self._line.setFrameShape(QFrame.HLine)
@@ -184,12 +174,26 @@ class RightSection(QWidget):
         self.header.blockSignals(False)
         # 箭头由 _SectionHeader 自己画（▾ 展开 / ▸ 收起），文本只存标题。
         self.header.setText(self._title)
+        self._sync_header_accessibility()
         self.header.update()
         # 只在状态真的变化时发信号：setTabText 会为了刷新标题重新调
         # set_expanded(现值)，若无条件 emit，切语言时每改一个标题都会被
         # 手风琴当成「用户展开了这一节」，把别的节全部收起。
         if changed:
             self.expanded_changed.emit(expanded)
+
+    def _sync_header_accessibility(self) -> None:
+        """读屏信息跟随展开态（D-10 裁定：accessibleName + checked 一致）。
+
+        QToolButton 是 checkable，``checked`` 已经由 set_expanded 同步；但
+        读屏软件念的是 accessibleName/Description——只报标题不报「展开还是
+        收起」，用户就得靠试。这里把状态写进 Description，并在标题变化
+        （setTabText / 切语言）时一起刷新。
+        """
+        state = "已展开" if self._expanded else "已收起"
+        self.header.setAccessibleName(self._title)
+        self.header.setAccessibleDescription(
+            f"右栏分组「{self._title}」，{state}。回车或空格切换。")
 
 
 class _TabBarShim:
@@ -230,8 +234,11 @@ class RightColumn(QScrollArea):
 
     currentChanged = Signal(int)
 
-    def __init__(self, parent: Optional[QWidget] = None):
+    def __init__(self, parent: Optional[QWidget] = None, settings=None):
         super().__init__(parent)
+        #: 配置源：显式注入优先，否则取宿主窗口的 settings（主窗口唯一实例）。
+        #: 见 :meth:`_resolved_settings`；都没有时不持久化（纯内存默认）。
+        self._settings = settings
         self.setObjectName("rightColumnScroll")
         self.setWidgetResizable(True)
         self.setFrameShape(QFrame.NoFrame)
@@ -433,26 +440,59 @@ class RightColumn(QScrollArea):
         return self.tabText(index)
 
     def _remember_expanded(self, section: "RightSection") -> None:
+        """把「当前展开的是哪一节」写进设置（W48 / D-10）。
+
+        键登记在 config_schema.py（exposed=False）：走 DesktopSettings 的
+        防抖落盘与校验，不再用 QSettings 另开一套存储。全部折叠是临时查看
+        动作，不写入记忆——记住的是「上次展开的节」，不是「上次全关」。
+        """
         try:
             index = self._sections.index(section)
         except ValueError:
             return
-        s = _remembered_settings()
-        s.setValue("right_column/expanded_section", self._section_key(index))
-        s.sync()
+        settings = self._resolved_settings()
+        if settings is None:
+            return
+        settings.set(_EXPANDED_KEY, self._section_key(index))
+
+    def _resolved_settings(self):
+        """显式注入优先；否则取宿主（主窗口）的 settings 实例。
+
+        主窗口在构建右栏之前就 ``self.settings = DesktopSettings.load()``，
+        这里读的是同一个实例（内存值即时可见，不依赖 500ms 防抖落盘）。
+        """
+        if self._settings is not None:
+            return self._settings
+        return getattr(self.window(), "settings", None)
 
     def _restore_expanded(self) -> None:
-        """跨会话恢复上次展开的那一节（用户 2026-11-11 裁定）。"""
-        want = _remembered_settings().value("right_column/expanded_section")
-        if not want:
+        """跨会话恢复上次展开的那一节（用户 2026-11-11 裁定）。
+
+        坏值口径：设置里是空白、类型不可读、或指向已不存在的节（面板菜单
+        关过某个面板 / 旧版本 id）时，**只展开首节**——绝不因为一个坏字符串
+        把整列 20 节全展开，也不静默全折叠让用户以为面板丢了。
+        """
+        settings = self._resolved_settings()
+        if settings is None or self.count() == 0:
             return
-        want = str(want)
-        for index in range(self.count()):
-            if self._section_key(index) == want:
-                section = self._sections[index]
-                if not section.is_expanded():
-                    section.set_expanded(True)
-                return
+        want = settings.get(_EXPANDED_KEY)
+        want = "" if want is None else str(want).strip()
+        target = -1
+        if want:
+            for index in range(self.count()):
+                if self._section_key(index) == want:
+                    target = index
+                    break
+        if target < 0:
+            target = 0
+        # 恢复也要绕过手风琴互斥：先收其它节再展开目标，避免两次记忆写入。
+        self._suspend_accordion = True
+        try:
+            for index, section in enumerate(self._sections):
+                section.set_expanded(index == target)
+        finally:
+            self._suspend_accordion = False
+        self._sync_container_height()
 
     def showEvent(self, event):
         super().showEvent(event)

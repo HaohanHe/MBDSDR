@@ -1,24 +1,33 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
 """
-右栏手风琴互斥 + 跨会话记忆（W48 / D-10 用户裁定 A）反证
-========================================================
+右栏手风琴互斥 + 跨会话记忆 + 读屏信息（W48 / D-10 用户裁定）
+==============================================================
 
 用户 2026-11-11 裁定：**默认单展开**（同一时刻最多一节展开），保留
 「全部折叠 / 全部展开」两个显式动作，不做 Ctrl 叠加这类隐藏交互，展开
-状态跨会话记住上次那一节。
+状态跨会话记住上次那一节，且读屏信息（accessibleName/Description +
+checked）必须与展开态一致。折叠状态**入库**（desktop_settings.json，
+键登记在 config_schema.py），不用 QSettings 另开一套。
 
 判据（全部是状态/数值断言）：
 
 1. 展开第二节时第一节自动收起——全列**只有一节**展开；
 2. `setTabText()`（切语言/改标题）不许被当成「用户展开」把别节收起；
-3. 关掉重建（同一 QSettings profile）后仍是上次那一节；
-4. 「全部展开」真的多开（显式动作允许），「全部折叠」后 0 节展开且
-   滚动上限随之变小。
+3. 关掉重建（同一条 desktop_settings.json）后仍是上次那一节；
+4. 设置里是未知/空白节 id 时只展开首节（不静默全展开、不静默全折叠）；
+5. `accessibleName` 跟随标题、`accessibleDescription` 与 `checked` 跟随
+   展开态；
+6. 「全部展开」真的多开（显式动作允许），「全部折叠」后 0 节展开且
+   滚动上限随之变小；
+7. 不再写 QSettings（`right_column/expanded_section` 在 QSettings 存储里
+   不存在）；
+8. 同一进程里两个 `RightColumn` 互不影响（展开态是实例自己的，不是
+   全局单例）。
 
-改前复跑（`git show HEAD:desktop/right_column.py` 单独放到临时目录跑同一
-场景，实测）：点第 4 节后同时展开 `[0, 3]`（判据 1 FAIL）、重建后回到
-`[0]`（判据 3 FAIL）。
+改前反证（`git show HEAD:desktop/right_column.py` 单独放到临时目录跑同一
+场景，实测）：判据 3 失败（旧实现写 QSettings，DesktopSettings 里读不到
+该键）；判据 5 失败（旧 header 的 accessibleName/Description 均为空）。
 
 运行:
     QT_QPA_PLATFORM=offscreen python -m pytest tests/test_right_column_accordion.py -v
@@ -41,6 +50,7 @@ _VIEW_W = 320
 _VIEW_H = 300
 _SECTION_COUNT = 8
 _BODY_H = 400
+_KEY = "right_column_expanded_section"
 
 
 @pytest.fixture(scope="module")
@@ -54,9 +64,14 @@ def _pump(app, ms=80):
     app.exec()
 
 
-def _build_column(qapp):
+def _settings():
+    from settings import DesktopSettings
+    return DesktopSettings.load()
+
+
+def _build_column(qapp, settings=None):
     from right_column import RightColumn
-    col = RightColumn()
+    col = RightColumn(settings=settings)
     col.resize(_VIEW_W, _VIEW_H)
     for i in range(_SECTION_COUNT):
         body = QWidget()
@@ -94,22 +109,71 @@ def test_expanding_another_section_collapses_previous(qapp, isolated_profile):
 
 
 def test_last_expanded_section_restored_after_restart(qapp, isolated_profile):
-    """关掉重建（同一 profile）：仍是上次展开的那一节。"""
-    col = _build_column(qapp)
+    """关掉重建（同一 desktop_settings.json）：仍是上次展开的那一节。"""
+    s1 = _settings()
+    col = _build_column(qapp, s1)
     try:
         col._sections[5].header.click()
         _pump(qapp, 120)
         assert _expanded(col) == [5]
+        # 入库的是稳定 id，不是下标。
+        assert s1.get(_KEY) == "节5", (
+            f"折叠状态没写进 DesktopSettings：{s1.get(_KEY)!r}（改前写的是"
+            " QSettings，这个键恒为空）")
+        s1.flush()
     finally:
         col.close()
         col.deleteLater()
 
-    col2 = _build_column(qapp)
+    s2 = _settings()
+    col2 = _build_column(qapp, s2)
     try:
         assert _expanded(col2) == [5], (
             f"重启后没记住上次那一节，展开的是 {_expanded(col2)}（改前是 [0]）")
     finally:
         col2.close()
+
+
+@pytest.mark.parametrize("bad", ["已删除的面板", "   ", "0"])
+def test_bad_remembered_section_falls_back_to_first(qapp, isolated_profile, bad):
+    """未知/空白/下标式旧值：只展开首节（不静默全展开、不静默全折叠）。"""
+    s = _settings()
+    s.set(_KEY, bad)
+    s.flush()
+
+    col = _build_column(qapp, s)
+    try:
+        assert _expanded(col) == [0], (
+            f"坏值 {bad!r} 没有回落为只展开首节，实际 {_expanded(col)}")
+    finally:
+        col.close()
+
+
+def test_header_accessibility_follows_expanded_state(qapp, isolated_profile):
+    """accessibleName 跟随标题，Description 与 checked 跟随展开态。"""
+    col = _build_column(qapp)
+    try:
+        first = col._sections[0].header
+        third = col._sections[3].header
+        assert first.isChecked() and not third.isChecked()
+        assert first.accessibleName() == "节0"
+        assert "已展开" in first.accessibleDescription()
+        assert third.accessibleName() == "节3"
+        assert "已收起" in third.accessibleDescription(), (
+            f"读屏描述没跟上折叠态：{third.accessibleDescription()!r}"
+            "（改前两个属性都是空串）")
+
+        third.click()
+        _pump(qapp, 120)
+        assert third.isChecked() and not first.isChecked()
+        assert "已展开" in third.accessibleDescription()
+        assert "已收起" in first.accessibleDescription()
+
+        col.setTabText(3, "新时空")
+        assert third.accessibleName() == "新时空", (
+            "setTabText 后读屏名称仍是旧标题")
+    finally:
+        col.close()
 
 
 def test_expand_all_then_collapse_all_shrinks_scroll_range(qapp, isolated_profile):
@@ -133,6 +197,65 @@ def test_expand_all_then_collapse_all_shrinks_scroll_range(qapp, isolated_profil
             f"全部折叠后滚动上限没变小：{many} -> {bar.maximum()}")
     finally:
         col.close()
+
+
+def test_qsettings_store_is_not_written(qapp, isolated_profile):
+    """点过标题后，QSettings 里不该再出现 right_column/expanded_section。
+
+    改前实现用 QSettings 存展开节——PySide6 6.12 上两参构造器还会无视
+    ``setDefaultFormat`` 恒定写注册表。现在只走 DesktopSettings，这里既查
+    模块里已无 QSettings 记忆函数，也查隔离出来的 QSettings 存储确实没键。
+    """
+    from PySide6.QtCore import QSettings
+    import right_column as rc
+
+    assert not hasattr(rc, "_remembered_settings"), (
+        "right_column 仍有 QSettings 记忆函数")
+    assert not hasattr(rc, "QSettings"), (
+        "right_column 仍导入/引用 QSettings 符号")
+
+    col = _build_column(qapp, _settings())
+    try:
+        col._sections[4].header.click()
+        _pump(qapp, 120)
+    finally:
+        col.close()
+
+    qs = QSettings(QSettings.IniFormat, QSettings.UserScope,
+                   "MBDSDR", "Desktop")
+    assert "right_column/expanded_section" not in qs.allKeys(), (
+        f"展开态仍被写进 QSettings：{qs.allKeys()}")
+
+
+def test_two_columns_in_one_process_are_independent(qapp, isolated_profile):
+    """两个 RightColumn 同进程共存：展开态、expand_all 都不得串台。
+
+    展开态是每列自己的状态；若哪天被做成全局单例（例如共用一个类变量），
+    这条会直接红——防止「同一时刻只展开一节」被误实现成「全应用只展开一节」。
+    """
+    a = _build_column(qapp)
+    b = _build_column(qapp)
+    try:
+        a._sections[2].header.click()
+        _pump(qapp, 120)
+        assert _expanded(a) == [2]
+        assert _expanded(b) == [0], (
+            f"点 A 的标题把 B 带跑了：B 展开 {_expanded(b)}")
+
+        b._sections[6].header.click()
+        _pump(qapp, 120)
+        assert _expanded(b) == [6]
+        assert _expanded(a) == [2], (
+            f"点 B 的标题把 A 带跑了：A 展开 {_expanded(a)}")
+
+        a.expand_all(True)
+        _pump(qapp, 120)
+        assert _expanded(a) == list(range(_SECTION_COUNT))
+        assert _expanded(b) == [6], (
+            f"A 的「全部展开」泄漏到 B：B 展开 {_expanded(b)}")
+    finally:
+        a.close()
+        b.close()
 
 
 if __name__ == "__main__":
