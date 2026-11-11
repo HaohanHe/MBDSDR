@@ -458,10 +458,11 @@ def _driver(runs: int, scope: str = "all") -> int:
             if gate is None:
                 print(f"[{arm} r{r}] 低负载窗口不足，跳过", flush=True)
                 continue
-            env = dict(os.environ, MBDSDR_HEAD_SNAP=snap, MBDSDR_HEAD=head,
-                       MBDSDR_THEME_SCOPE=scope)
+            from _qsettings_startup import child_cmd, child_env
+            env = child_env(dict(os.environ, MBDSDR_HEAD_SNAP=snap,
+                                 MBDSDR_HEAD=head, MBDSDR_THEME_SCOPE=scope))
             proc = subprocess.run(
-                [sys.executable, os.path.abspath(__file__), "--one", "--arm", arm],
+                child_cmd(os.path.abspath(__file__), ["--one", "--arm", arm]),
                 capture_output=True, text=True, timeout=600, env=env)
             payload = None
             for line in proc.stdout.splitlines():
