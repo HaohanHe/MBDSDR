@@ -44,6 +44,13 @@ try:
 except ImportError:  # 脚本 / 直接运行时
     from tle_integrity import freshness, accuracy  # type: ignore
 
+# 过境网格唯一事实源：粗扫/细扫步长与细扫实现都来自 sat_passes（P1-13）。
+# 本模块不再私藏一套「网格点当峰值」的算法——面板与 AI 必须同网格。
+try:
+    from . import sat_passes as _sat_passes
+except ImportError:  # 脚本 / 直接运行时
+    import sat_passes as _sat_passes  # type: ignore
+
 
 def _require_sgp4() -> None:
     if not _HAS_SGP4:
@@ -118,9 +125,9 @@ class SatellitePass:
     tle_tier_label: str = ""
     accuracy_risk: str = ""
     accuracy_note: str = ""
-    # 本引擎的采样步长（秒）。用户看到的时刻必须能区分「星历精度」与
-    # 「采样精度」：sat_passes 走 2 s 细扫，本引擎面板走 60 s 网格，
-    # 实测峰值时刻偏差见 docs/limitations-register.md 附 O。
+    # 轨迹采样步长（秒）。用户要能区分「星历精度」与「轨迹绘制精度」；
+    # 中天时刻/仰角已由 sat_passes 的 2 s 细扫网格校正（见 _refine_peak），
+    # 与 AI 口径一致，不再是「网格点即峰值」。
     sampling_step_s: float = 0.0
 
 
@@ -224,6 +231,39 @@ def _ecef_to_enu(dx: float, dy: float, dz: float,
 # TimelineEngine
 # ============================================================
 
+def _state_at(sat, obs_ecef: Tuple[float, float, float],
+              lat_deg: float, lon_deg: float, t: datetime,
+              freq_hz: float
+              ) -> Optional[Tuple[float, float, float, float]]:
+    """单时刻的 ``(仰角°, 方位角°, 距离 km, 多普勒 Hz)``；传播失败返回 None。
+
+    粗扫与 2 s 细扫共用这一份求值，避免每个网格各写一套公式。
+    """
+    jd_int, jd_fr = jday(t.year, t.month, t.day, t.hour, t.minute,
+                         t.second + t.microsecond / 1e6)
+    err, r_teme, v_teme = sat.sgp4(jd_int, jd_fr)
+    if err != 0:
+        return None
+    gmst = _gmst_rad(jd_int + jd_fr)
+    rs_ecef = _teme_to_ecef(r_teme[0], r_teme[1], r_teme[2], gmst)
+    vs_ecef = _teme_to_ecef(v_teme[0], v_teme[1], v_teme[2], gmst)
+    dx = rs_ecef[0] - obs_ecef[0]
+    dy = rs_ecef[1] - obs_ecef[1]
+    dz = rs_ecef[2] - obs_ecef[2]
+    e, n, u = _ecef_to_enu(dx, dy, dz, lat_deg, lon_deg)
+    range_km = math.sqrt(e * e + n * n + u * u)
+    if range_km < 1e-6:
+        return None
+    elevation = math.degrees(math.asin(max(-1.0, min(1.0, u / range_km))))
+    azimuth = math.degrees(math.atan2(e, n)) % 360.0
+    # 视线速度（沿观测者→卫星方向的径向速度，km/s）
+    range_rate = ((vs_ecef[0]) * dx + (vs_ecef[1]) * dy
+                  + (vs_ecef[2]) * dz) / range_km
+    # 约定：接近时多普勒为正（接收频率升高），远离为负。
+    doppler_hz = -freq_hz * range_rate / SPEED_OF_LIGHT_KM_S
+    return elevation, azimuth, range_km, doppler_hz
+
+
 class TimelineEngine:
     """卫星过境时间线 + 授时状态 + 频率-轨道关系计算引擎。
 
@@ -299,17 +339,15 @@ class TimelineEngine:
             current: Optional[SatellitePass] = None
             in_pass = False
             traj: List[PassPoint] = []
-            max_el = -90.0
 
             for i in range(n_steps + 1):
                 t = start + timedelta(seconds=i * step_sec)
-                yy, mm, dd = t.year, t.month, t.day
-                jd_int, jd_fr = jday(yy, mm, dd, t.hour, t.minute,
-                                     t.second + t.microsecond / 1e6)
-
-                err, r_teme, v_teme = sat.sgp4(jd_int, jd_fr)
-                if err != 0:
-                    if in_pass:
+                st = _state_at(sat, obs_ecef, observer_lat, observer_lon, t,
+                              freq_hz)
+                if st is None:
+                    if in_pass and current is not None:
+                        self._refine_peak(sat, obs_ecef, observer_lat,
+                                          observer_lon, freq_hz, current)
                         self._finalize_pass(current, traj, freq_hz)
                         all_passes.append(current)
                     in_pass = False
@@ -317,35 +355,13 @@ class TimelineEngine:
                     traj = []
                     continue
 
-                jd_now = jd_int + jd_fr
-                gmst = _gmst_rad(jd_now)
-                rs_ecef = _teme_to_ecef(r_teme[0], r_teme[1], r_teme[2], gmst)
-                vs_ecef = _teme_to_ecef(v_teme[0], v_teme[1], v_teme[2], gmst)
-
-                dx = rs_ecef[0] - obs_ecef[0]
-                dy = rs_ecef[1] - obs_ecef[1]
-                dz = rs_ecef[2] - obs_ecef[2]
-                e, n, u = _ecef_to_enu(dx, dy, dz, observer_lat, observer_lon)
-                range_km = math.sqrt(e * e + n * n + u * u)
-                if range_km < 1e-6:
-                    continue
-
-                elevation = math.degrees(math.asin(max(-1.0, min(1.0, u / range_km))))
-                azimuth = math.degrees(math.atan2(e, n)) % 360.0
-
-                # 视线速度（沿观测者→卫星方向的径向速度，km/s）
-                range_rate = ((vs_ecef[0]) * dx +
-                              (vs_ecef[1]) * dy +
-                              (vs_ecef[2]) * dz) / range_km
-                # 约定：接近时多普勒为正（接收频率升高），远离为负。
-                doppler_hz = -freq_hz * range_rate / SPEED_OF_LIGHT_KM_S
+                elevation, azimuth, range_km, doppler_hz = st
 
                 if elevation >= min_elevation:
                     if not in_pass:
                         # 升起
                         in_pass = True
                         traj = []
-                        max_el = elevation
                         current = SatellitePass(
                             name=name,
                             rise_time=t,
@@ -368,17 +384,14 @@ class TimelineEngine:
                         doppler_hz=doppler_hz,
                     )
                     traj.append(pt)
-                    if elevation > max_el:
-                        max_el = elevation
-                        current.max_time = t
-                        current.max_elevation = elevation
-                        current.max_azimuth = azimuth
                 else:
                     if in_pass:
                         # 落下
                         in_pass = False
                         current.set_time = t
                         current.set_azimuth = azimuth
+                        self._refine_peak(sat, obs_ecef, observer_lat,
+                                          observer_lon, freq_hz, current)
                         self._finalize_pass(current, traj, freq_hz)
                         all_passes.append(current)
                         current = None
@@ -388,11 +401,49 @@ class TimelineEngine:
             if in_pass and current is not None and current.rise_time is not None:
                 current.set_time = end
                 current.set_azimuth = traj[-1].azimuth_deg if traj else 0.0
+                self._refine_peak(sat, obs_ecef, observer_lat, observer_lon,
+                                  freq_hz, current)
                 self._finalize_pass(current, traj, freq_hz)
                 all_passes.append(current)
 
         all_passes.sort(key=lambda p: p.rise_time or end)
         return all_passes
+
+    @staticmethod
+    def _refine_peak(sat, obs_ecef, lat_deg: float, lon_deg: float,
+                     freq_hz: float, p: SatellitePass) -> None:
+        """用 sat_passes 的 2 s 细扫网格校正中天时刻/仰角/方位（P1-13）。
+
+        过去中天只能取粗扫网格点（面板 60 s），峰值时刻最多偏 30 s、仰角
+        差 3–7.5°；现在与 AI 走同一个 ``refine_culmination()``，误差 ≤1 s。
+        轨迹点保持原 ``step_sec`` 网格不变（面板绘制依赖它）。
+        """
+        if p.rise_time is None or p.set_time is None:
+            return
+        base = p.rise_time
+        span = (p.set_time - base).total_seconds()
+        if span <= 0:
+            return
+
+        def _el_az(sec: float):
+            st = _state_at(sat, obs_ecef, lat_deg, lon_deg,
+                          base + timedelta(seconds=sec), freq_hz)
+            return (st[0], st[1]) if st else None
+
+        try:
+            best_sec, best_el = _sat_passes.refine_culmination(
+                _el_az, 0.0, span)
+        except Exception:
+            return
+        if best_el <= -900.0:      # 细扫全部失败：保留粗扫结果，不造假
+            return
+        st = _state_at(sat, obs_ecef, lat_deg, lon_deg,
+                      base + timedelta(seconds=best_sec), freq_hz)
+        if st is None:
+            return
+        p.max_time = base + timedelta(seconds=best_sec)
+        p.max_elevation = st[0]
+        p.max_azimuth = st[1]
 
     @staticmethod
     def _finalize_pass(p: SatellitePass,
