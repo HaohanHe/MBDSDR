@@ -316,6 +316,8 @@ class SatTrackPanel(QFrame):
             "倒计时数字与内部时基始终是同一个 UTC 时钟")
         self.utc_check.toggled.connect(self._on_utc_toggled)
         cd_layout.addWidget(self.utc_check)
+        # 收起分组 = 倒计时不可见：1s 重绘必须跟着停，不做常驻心跳。
+        cd_box.toggled.connect(self._sync_countdown_timer)
         root.addWidget(cd_box)
 
         root.addStretch(1)
@@ -374,13 +376,24 @@ class SatTrackPanel(QFrame):
     def showEvent(self, event):
         super().showEvent(event)
         self._apply_narrow_defaults()
-        # 只在可见时跑 1s 重绘：面板藏在别的页签里不烧事件循环。
-        self._update_countdown(None)
-        self._countdown_timer.start()
+        self._sync_countdown_timer()
 
     def hideEvent(self, event):
         self._countdown_timer.stop()
         super().hideEvent(event)
+
+    def _sync_countdown_timer(self, _checked: bool = False) -> None:
+        """1 s 重绘只在该看倒计时时存活：面板可见 **且** 分组展开。
+
+        收起分组、切到别的页签（hideEvent）都必须停心跳——
+        「重排很便宜」不是常驻每秒定时器的理由。
+        """
+        if self.isVisible() and self._countdown_box.isChecked():
+            if not self._countdown_timer.isActive():
+                self._countdown_timer.start()
+            self._update_countdown(None)
+        else:
+            self._countdown_timer.stop()
 
     # ------------------------------------------------------------ 对外接口
     def populate_satellites(self, names, tier_badges: Optional[Dict[str, str]] = None):

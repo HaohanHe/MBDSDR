@@ -112,6 +112,32 @@ def test_hidden_panel_wide_window_stays_expanded():
 
 
 @pytest.mark.usefixtures("qtapp")
+def test_countdown_repaint_timer_stops_when_not_visible():
+    """1 s 倒计时重绘不能常驻：面板隐藏、分组收起都必须停心跳。
+
+    性能口径：不是「重排很便宜」，而是「不显示时不该有心跳」。
+    """
+    host, panel = _host_with_panel()
+    host.resize(1500, 800)
+    host.show()
+    QApplication.instance().processEvents()
+
+    assert panel.isVisible()
+    assert panel._countdown_timer.isActive(), "面板可见且分组展开时应有 1s 心跳"
+
+    panel._countdown_box.setChecked(False)
+    assert not panel._countdown_timer.isActive(), "倒计时分组收起后心跳应停止"
+
+    panel._countdown_box.setChecked(True)
+    assert panel._countdown_timer.isActive(), "重新展开后心跳应恢复"
+
+    host.hide()
+    QApplication.instance().processEvents()
+    assert not panel.isVisible()
+    assert not panel._countdown_timer.isActive(), "面板隐藏后心跳应停止"
+
+
+@pytest.mark.usefixtures("qtapp")
 def test_fixture_catches_unbound_single_shot():
     """夹具自检：旧两参写法必须仍被抓到，否则上面的 0 异常没有意义。"""
     with _ExcCapture() as cap:
