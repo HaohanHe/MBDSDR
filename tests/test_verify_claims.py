@@ -149,12 +149,40 @@ def test_line_check_contains_literal(tmp_path):
     assert r.result == vc.LINE_OK
 
 
-def test_line_check_shifted_line_is_mismatch(tmp_path):
-    """第 4 步反证②：行号 +1 指向相邻无关行 → 「行存在但不含」。"""
+def test_line_check_shifted_line_is_misref_when_file_unchanged(tmp_path):
+    """第 4 步反证②（红）：行号 +1 指向相邻无关行，且文件自基准以来未改动 → 「错引」。"""
+    repo, h = _repo(tmp_path, {"src/foo.py": "MAGIC_TOKEN = 42\nOTHER = 1\n"})
+    r = vc.check_line(repo, h, "src/foo.py:2", "MAGIC_TOKEN", baseline=h)
+    assert r.result == vc.LINE_MISLOCATED
+    assert r.changes_since == 0
+    assert "OTHER" in r.detail
+
+
+def test_line_check_drift_is_relocate_when_file_changed(tmp_path):
+    """第 4 步反证④（黄）：文件自基准以来被改过 → 「需重定位」，带次数与最近提交。"""
+    repo, h = _repo(tmp_path, {"src/foo.py": "MAGIC_TOKEN = 42\n"})
+    (repo / "src/foo.py").write_text("NEW_HEADER = 0\nMAGIC_TOKEN = 42\n", encoding="utf-8")
+    _git(repo, "add", "src/foo.py")
+    _git(repo, "commit", "-q", "-m", "insert header")
+    r = vc.check_line(repo, h, "src/foo.py:1", "MAGIC_TOKEN", baseline=h)
+    assert r.result == vc.LINE_RELOCATE
+    assert r.changes_since == 1
+    assert "insert header" in r.latest_change
+
+
+def test_line_check_missing_baseline_is_relocate_not_red(tmp_path):
+    """第 4 步反证⑤：老条目没有坐标基准 → 一律「需重定位」，不得判红。"""
     repo, h = _repo(tmp_path, {"src/foo.py": "MAGIC_TOKEN = 42\nOTHER = 1\n"})
     r = vc.check_line(repo, h, "src/foo.py:2", "MAGIC_TOKEN")
-    assert r.result == vc.LINE_MISMATCH
-    assert "OTHER" in r.detail
+    assert r.result == vc.LINE_RELOCATE
+    assert "无坐标基准" in r.detail
+
+
+def test_line_check_unresolvable_baseline_is_relocate(tmp_path):
+    """第 4 步反证⑥：基准哈希解析不出 commit（打错/被删）→ 同样按黄处理。"""
+    repo, h = _repo(tmp_path, {"src/foo.py": "MAGIC_TOKEN = 42\nOTHER = 1\n"})
+    r = vc.check_line(repo, h, "src/foo.py:2", "MAGIC_TOKEN", baseline="deadbeef")
+    assert r.result == vc.LINE_RELOCATE
 
 
 def test_line_check_unresolved_distinguishes_path_and_range(tmp_path):
@@ -170,9 +198,10 @@ def test_line_check_unresolved_distinguishes_path_and_range(tmp_path):
 
 
 def test_line_check_range_uses_first_line_only(tmp_path):
-    """区间 N–M 只判首行（§7.7）：字面量只在第 2 行时，:1-2 仍判「行存在但不含」。"""
+    """区间 N–M 只判首行（§7.7）：字面量只在第 2 行时，:1-2 仍判对不上。"""
     repo, h = _repo(tmp_path, {"src/foo.py": "HEADER = 0\nMAGIC_TOKEN = 42\n"})
-    assert vc.check_line(repo, h, "src/foo.py:1-2", "MAGIC_TOKEN").result == vc.LINE_MISMATCH
+    assert vc.check_line(repo, h, "src/foo.py:1-2", "MAGIC_TOKEN",
+                         baseline=h).result == vc.LINE_MISLOCATED
     assert vc.check_line(repo, h, "src/foo.py:2-3", "MAGIC_TOKEN").result == vc.LINE_OK
 
 
@@ -187,6 +216,19 @@ def test_line_check_uses_head_not_cited_commit(tmp_path):
     _git(repo, "add", "src/foo.py")
     _git(repo, "commit", "-q", "-m", "later")
     assert vc.check_line(repo, h, "src/foo.py:1", "MAGIC_TOKEN").result == vc.LINE_OK
+
+
+def test_baseline_priority_inline_heading_doc(tmp_path):
+    """坐标基准三处来源的优先级：本行 > 最近标题 > 文件首部；都没有则空串。"""
+    repo, h = _repo(tmp_path, {"src/foo.py": "MAGIC_TOKEN = 42\n"})
+    _write_doc(repo, (
+        f"<!-- line-baseline: {h[:7]} -->\n"
+        "### 1.1 `src/foo.py:1`\n"
+        f"- 已修复 — `{h}` — src/foo.py:1 — `MAGIC_TOKEN`\n"
+        f"- 已修复 — `{h}` — src/foo.py:1 — `MAGIC_TOKEN`（基准 `{'0' * 7}{h[:7]}`）\n"
+    ))
+    bases = [row[4] for row in vc.iter_claim_lines(repo / "docs")]
+    assert bases == [h[:7], "0000000" + h[:7]]
 
 
 def test_repo_docs_have_no_dangling_hash():

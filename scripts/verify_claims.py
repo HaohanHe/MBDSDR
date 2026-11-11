@@ -46,6 +46,10 @@ PATHLINE_RE = re.compile(
     r"([A-Za-z0-9_./\\-]+\.(?:py|md|json|yaml|yml|ts|dart|cpp|c|h|hpp))"
     r":(\d+(?:-\d+)?)")
 TICK_RE = re.compile(r"`([^`]+)`")
+#: 行内坐标基准：``（基准 `abc1234`）`` / ``baseline abc1234``
+BASELINE_RE = re.compile(r"(?:基准|baseline)[:：]?\s*`?([0-9a-f]{7,40})`?")
+#: 文件级坐标基准：``<!-- line-baseline: abc1234 -->``（写在文首，整篇生效）
+DOC_BASELINE_RE = re.compile(r"<!--\s*line-baseline:\s*([0-9a-f]{7,40})\s*-->")
 
 OK = "可证实"
 STALE = "未证实（文档过期）"
@@ -68,6 +72,8 @@ class Claim:
     target: str = ""
     literal: str = ""
     detail: List[str] = field(default_factory=list)
+    #: 坐标基准（写入该四元组时的 HEAD 短 hash）；缺省则第 4 步一律判「需重定位」
+    baseline: str = ""
 
 
 def _git(root: Path, args: List[str], timeout: int = 30) -> Optional[subprocess.CompletedProcess]:
@@ -155,14 +161,17 @@ def _hashes(text: str, root: Optional[Path] = None) -> List[str]:
     return out
 
 
-def classify(text: str, root: Path, heading: str = "") -> Claim:
+def classify(text: str, root: Path, heading: str = "", baseline: str = "") -> Claim:
     """把一行文本判成三栏之一，并给出修复动作。
 
     ``heading`` 是最近一个标题行：标题里常写着 `path:line`（如
     ``### 7.1 desktop/troubleshooting.py:92``），断言本体则常省略它。
     只借用标题里的定位，不跨段落借用 hash/字面量。
+
+    ``baseline`` 是「坐标基准」（写入四元组时的 HEAD），只给第 4 步判
+    红/黄用，不参与前三步；缺省则第 4 步一律按「需重定位」处理。
     """
-    c = Claim(doc="", line=0, text=text.strip())
+    c = Claim(doc="", line=0, text=text.strip(), baseline=baseline)
     hashes = _hashes(text, root)
     targets = PATHLINE_RE.findall(text) or PATHLINE_RE.findall(heading)
     if not hashes:
@@ -217,7 +226,11 @@ def classify(text: str, root: Path, heading: str = "") -> Claim:
 
 
 def iter_claim_lines(docs_root: Path, recursive: bool = False) -> List[tuple]:
-    """返回 (相对路径, 行号, 文本, 最近标题)；跳过围栏代码块与 $ 证据命令。
+    """返回 (相对路径, 行号, 文本, 最近标题, 坐标基准)；跳过围栏与 $ 证据命令。
+
+    坐标基准的优先级：本行 ``（基准 `abc1234`）`` > 最近标题里的同写法 >
+    文件首部 ``<!-- line-baseline: abc1234 -->``；都没有则为空串（第 4 步按
+    「需重定位」处理，不判红）。
 
     默认只扫 ``docs/*.md`` 顶层（与历史盘点的 103 条同口径）；
     ``--recursive`` 才下沉到 docs/learn 等历史子目录。
@@ -231,10 +244,17 @@ def iter_claim_lines(docs_root: Path, recursive: bool = False) -> List[tuple]:
             continue
         in_fence = False
         heading = ""
+        heading_baseline = ""
+        doc_baseline = ""
         try:
             lines = p.read_text(encoding="utf-8", errors="ignore").splitlines()
         except OSError:
             continue
+        for raw in lines[:20]:
+            m = DOC_BASELINE_RE.search(raw)
+            if m:
+                doc_baseline = m.group(1)
+                break
         for i, raw in enumerate(lines, 1):
             s = raw.strip()
             if s.startswith("```"):
@@ -244,9 +264,13 @@ def iter_claim_lines(docs_root: Path, recursive: bool = False) -> List[tuple]:
                 continue
             if s.startswith("#"):
                 heading = s
+                m = BASELINE_RE.search(s)
+                heading_baseline = m.group(1) if m else ""
                 continue
             if CLAIM_RE.search(s):
-                out.append((p.relative_to(docs_root.parent).as_posix(), i, s, heading))
+                m = BASELINE_RE.search(s)
+                baseline = m.group(1) if m else (heading_baseline or doc_baseline)
+                out.append((p.relative_to(docs_root.parent).as_posix(), i, s, heading, baseline))
     return out
 
 
@@ -255,8 +279,8 @@ def verify_docs(root: Path = ROOT, docs_root: Optional[Path] = None,
     root = Path(root)
     docs_root = Path(docs_root) if docs_root else root / "docs"
     claims: List[Claim] = []
-    for rel, line, text, heading in iter_claim_lines(docs_root, recursive):
-        c = classify(text, root, heading)
+    for rel, line, text, heading, baseline in iter_claim_lines(docs_root, recursive):
+        c = classify(text, root, heading, baseline)
         c.doc, c.line = rel, line
         claims.append(c)
     return claims
@@ -270,9 +294,13 @@ def summarize(claims: List[Claim]) -> Dict[str, int]:
 
 
 # ——— 第 4 步：行号内容校验（--check-lines，只报不拦） ———
+#
+# 三态会误判：HEAD 每前进一次，行号就漂一次，文件改过之后「行存在但不含」
+# 是**正常老化**，不是引错。故扩成四态，用「坐标基准」把两者分开。
 
 LINE_OK = "含字面量"
-LINE_MISMATCH = "行存在但不含"
+LINE_MISLOCATED = "错引"
+LINE_RELOCATE = "需重定位"
 LINE_UNRESOLVED = "path 或行号不存在"
 LINE_UNRESOLVED_SUB = {
     "path-missing": "HEAD 里没有这个路径",
@@ -287,8 +315,12 @@ class LineCheck:
     commit: str
     target: str        # path:N 或 path:N-M
     literal: str
-    result: str        # LINE_OK / LINE_MISMATCH / LINE_UNRESOLVED
+    result: str        # LINE_OK / LINE_MISLOCATED / LINE_RELOCATE / LINE_UNRESOLVED
     detail: str = ""
+    baseline: str = ""            # 坐标基准（写入四元组时的 HEAD）
+    changes_since: Optional[int] = None   # 该文件自基准以来被改过几次
+    latest_change: str = ""       # 最近一次改动：<短hash> <日期> <标题>
+    hint: str = ""                # 无基准时的代理信息（仅供派活参考，不参与判定）
 
 
 def _norm_ws(s: str) -> str:
@@ -313,8 +345,24 @@ def _split_target(target: str) -> tuple:
     return path, int(lines.split("-")[0])
 
 
+def _changes_since(root: Path, baseline: str, path: str) -> Optional[tuple]:
+    """``baseline..HEAD`` 之间该路径被改过几次：(次数, 最近一次描述)。
+
+    基准缺失或解析不出 commit 时返回 ``None``——调用方据此判「需重定位」，
+    **不得**当成「未改动」判红。
+    """
+    if not baseline or not _commit_exists(root, baseline):
+        return None
+    proc = _git(root, ["log", "--format=%h\t%ad\t%s", "--date=short",
+                       f"{baseline}..HEAD", "--", path])
+    if proc is None or proc.returncode != 0:
+        return None
+    rows = [ln for ln in proc.stdout.splitlines() if ln.strip()]
+    return len(rows), (rows[0] if rows else "")
+
+
 def check_line(root: Path, commit: str, target: str, literal: str,
-               doc: str = "", doc_line: int = 0) -> LineCheck:
+               doc: str = "", doc_line: int = 0, baseline: str = "") -> LineCheck:
     """第 4 步：校验 ``path:N`` 在 **HEAD** 的第 N 行是否含字面量。
 
     **坐标口径（写死，勿改成被引提交坐标）**：行号是「当前 HEAD 坐标」，必须取
@@ -324,14 +372,21 @@ def check_line(root: Path, commit: str, target: str, literal: str,
     ``6ed9ee7d`` 的 ``mbdsdr_ai/sdr_backend.py:111`` 当时是空行。
     按被引提交坐标判，会把现在正确的四元组判成红。
 
-    三种结果分开返回，不合并：
-      * ``LINE_OK``        第 N 行含该字面量（先精确子串，再空白归一后子串）
-      * ``LINE_MISMATCH``  行存在但不含 → 说明「hash 对、行号漂了」
+    四种结果分开返回，不合并：
+      * ``LINE_OK``         第 N 行含该字面量（先精确子串，再空白归一后子串）
+      * ``LINE_MISLOCATED`` 行存在但不含，且该文件自 ``baseline`` 以来**未改动**
+                            → 真的引错了（红）
+      * ``LINE_RELOCATE``   行存在但不含，但文件此后**改过**（或根本没有基准）
+                            → 正常老化，需重定位（黄，不算失败）
       * ``LINE_UNRESOLVED`` 取不到那一行，``detail`` 区分「HEAD 无此路径」与「行数不够」
+
+    判红/黄的分界只看「``baseline`` 之后该路径有没有提交」：没有提交却对不上，
+    说明写四元组时就引错了；有提交则可能只是行号被推移，按黄处理。
     """
     path, n = _split_target(target)
     lines = _head_lines(root, path)
-    base = dict(doc=doc, line=doc_line, commit=commit, target=target, literal=literal)
+    base = dict(doc=doc, line=doc_line, commit=commit, target=target,
+                literal=literal, baseline=baseline)
     if lines is None:
         return LineCheck(result=LINE_UNRESOLVED,
                          detail=LINE_UNRESOLVED_SUB["path-missing"], **base)
@@ -342,7 +397,27 @@ def check_line(root: Path, commit: str, target: str, literal: str,
     text = lines[n - 1]
     if literal in text or _norm_ws(literal) in _norm_ws(text):
         return LineCheck(result=LINE_OK, detail=text.strip()[:120], **base)
-    return LineCheck(result=LINE_MISMATCH, detail=text.strip()[:120], **base)
+
+    info = _changes_since(root, baseline, path)
+    if info is None:
+        # 无基准就判不了红/黄；用被引提交当代理给个老化线索，方便按文件派活。
+        proxy = _changes_since(root, commit, path)
+        hint = ""
+        if proxy is not None:
+            moves, last = proxy
+            hint = (f"参考：自被引提交 {commit} 以来该文件改动 {moves} 次"
+                    + (f"（最近 {last}）" if last else ""))
+        return LineCheck(result=LINE_RELOCATE, hint=hint,
+                         detail=f"无坐标基准（或缺基准哈希解析不出）；当前第 {n} 行：{text.strip()[:100]}",
+                         **base)
+    changes, latest = info
+    if changes == 0:
+        return LineCheck(result=LINE_MISLOCATED, changes_since=0,
+                         detail=f"基准 {baseline} 之后该文件未改动，第 {n} 行：{text.strip()[:100]}",
+                         latest_change=latest, **base)
+    return LineCheck(result=LINE_RELOCATE, changes_since=changes, latest_change=latest,
+                     detail=f"基准之后该文件改动 {changes} 次；当前第 {n} 行：{text.strip()[:100]}",
+                     **base)
 
 
 def line_checks(root: Path, claims: List[Claim]) -> List[LineCheck]:
@@ -351,27 +426,60 @@ def line_checks(root: Path, claims: List[Claim]) -> List[LineCheck]:
     for c in claims:
         if c.target and c.literal:
             out.append(check_line(root, c.commit, c.target, c.literal,
-                                  doc=c.doc, doc_line=c.line))
+                                  doc=c.doc, doc_line=c.line, baseline=c.baseline))
     return out
 
 
 def print_line_checks(rows: List[LineCheck]) -> None:
-    counts = {LINE_OK: 0, LINE_MISMATCH: 0, LINE_UNRESOLVED: 0}
+    order = (LINE_OK, LINE_MISLOCATED, LINE_RELOCATE, LINE_UNRESOLVED)
+    counts = {k: 0 for k in order}
     for r in rows:
         counts[r.result] = counts.get(r.result, 0) + 1
     print("\n=== 行号内容校验（--check-lines，只报不拦） ===")
     print("坐标口径：git show HEAD:<path> 第 N 行（evidence-standard §7.7），"
           "不取被引提交坐标；区间 N–M 只判首行 N")
-    print(f"含字面量 {counts[LINE_OK]}  |  行存在但不含 {counts[LINE_MISMATCH]}  |  "
+    print(f"含字面量 {counts[LINE_OK]}  |  错引（红） {counts[LINE_MISLOCATED]}  |  "
+          f"需重定位（黄） {counts[LINE_RELOCATE]}  |  "
           f"path 或行号不存在 {counts[LINE_UNRESOLVED]}  |  合计 {len(rows)}")
-    for result in (LINE_MISMATCH, LINE_UNRESOLVED, LINE_OK):
+    print("判红/黄：基准之后该文件无提交 → 错引；有提交或无基准 → 需重定位（不进失败数）")
+
+    for result in (LINE_MISLOCATED, LINE_UNRESOLVED, LINE_RELOCATE, LINE_OK):
         group = [r for r in rows if r.result == result]
         if not group:
             continue
         print(f"\n[{result}] {len(group)} 条")
         for r in group:
             print(f"  {r.doc}:{r.line}  {r.commit}  {r.target}  `{r.literal}`")
+            if result == LINE_RELOCATE:
+                changes = "-" if r.changes_since is None else f"{r.changes_since} 次"
+                print(f"      上次基准：{r.baseline or '（无）'}  |  此后改动：{changes}"
+                      f"  |  最近一次：{r.latest_change or '-'}")
+                if r.hint:
+                    print(f"      {r.hint}")
             print(f"      结果：{r.result}" + (f"（{r.detail}）" if r.detail else ""))
+
+    drift = [r for r in rows if r.result in (LINE_MISLOCATED, LINE_RELOCATE)]
+    if drift:
+        _print_grouped(drift)
+
+
+def _print_grouped(rows: List[LineCheck]) -> None:
+    """按文件聚合，先看集中度再决定重定位怎么派活。"""
+    by_doc: Dict[str, List[LineCheck]] = {}
+    by_path: Dict[str, List[LineCheck]] = {}
+    for r in rows:
+        by_doc.setdefault(r.doc, []).append(r)
+        by_path.setdefault(r.target.rpartition(":")[0], []).append(r)
+
+    def _dump(title: str, groups: Dict[str, List[LineCheck]]) -> None:
+        print(f"\n--- 按{title}聚合（{len(groups)} 个文件 / {len(rows)} 条对不上）---")
+        for name, items in sorted(groups.items(), key=lambda kv: (-len(kv[1]), kv[0])):
+            red = sum(1 for x in items if x.result == LINE_MISLOCATED)
+            yellow = sum(1 for x in items if x.result == LINE_RELOCATE)
+            print(f"  {len(items):3d}  {name}   （错引 {red} / 需重定位 {yellow}）")
+
+    _dump("文档", by_doc)
+    _dump("目标代码路径", by_path)
 
 
 def print_report(claims: List[Claim]) -> None:
@@ -399,7 +507,12 @@ def main(argv: Optional[List[str]] = None) -> int:
     ap.add_argument("--fail-on-unverified", action="store_true")
     ap.add_argument("--check-lines", action="store_true",
                     help="第 4 步：校验 path:N 在 HEAD 第 N 行是否含字面量（只报不拦）")
+    ap.add_argument("--fail-on-line-misref", action="store_true",
+                    help="第 4 步里只有「错引」（红）算失败；「需重定位」（黄）不影响退出码。"
+                         "隐含开启 --check-lines")
     args = ap.parse_args(argv)
+    if args.fail_on_line_misref:
+        args.check_lines = True
 
     root = Path(args.root)
     if not is_git_repo(root):
@@ -421,6 +534,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         out.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
         print(f"\nJSON: {out}")
     if args.fail_on_unverified and any(c.status != OK for c in claims):
+        return 1
+    if args.fail_on_line_misref and any(r.result == LINE_MISLOCATED for r in rows):
         return 1
     return 0
 
