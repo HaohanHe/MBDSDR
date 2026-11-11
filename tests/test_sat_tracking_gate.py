@@ -305,3 +305,94 @@ def test_poll_expired_tunes_because_confirm_happened_at_start(
 
     assert len(_poll_once(window, monkeypatch, policy)) == 1
 
+
+# --------------------------------------------------------------------------- #
+# 云台闸门：按「当前实际跟踪目标」判，未跟踪才回落天空选中星
+# --------------------------------------------------------------------------- #
+class _GimbalTracker:
+    """跟踪器替身：目录含 A/B，档位按名字给（判据仍走 tle_integrity）。"""
+
+    def __init__(self, tracked, tiers):
+        self.selected_name = tracked
+        self._tiers = tiers
+
+    def list_satellites(self):
+        return [{"name": n} for n in self._tiers]
+
+    def tracking_policy_for(self, name=None):
+        tier = self._tiers[name]
+        return tracking_policy({"tier": tier,
+                                "age_days": 0.3 if tier == "fresh" else 40.0})
+
+
+class _Timer:
+    def __init__(self, active):
+        self._active = active
+
+    def isActive(self):  # noqa: N802 - 模拟 QTimer 接口
+        return self._active
+
+
+class _ManualGimbal:
+    """manual 模式后端：只要星历放行，``_gimbal_available`` 就该为真。"""
+
+    def __init__(self):
+        from types import SimpleNamespace
+        self.status = SimpleNamespace(mode=SimpleNamespace(value="manual"))
+
+
+def _gimbal_gate(window, monkeypatch, *, tracked, tiers, sky, active):
+    from types import SimpleNamespace
+
+    monkeypatch.setattr(window, "_loop_sat_tracker",
+                        _GimbalTracker(tracked, tiers), raising=False)
+    monkeypatch.setattr(window, "_sat_track_timer", _Timer(active),
+                        raising=False)
+    monkeypatch.setattr(window, "sky_view",
+                        SimpleNamespace(_selected_info={"title": sky}),
+                        raising=False)
+    monkeypatch.setattr(window, "_gimbal_controller", lambda: _ManualGimbal(),
+                        raising=False)
+
+
+def test_gimbal_gate_uses_tracked_target_not_sky_selection(window, monkeypatch):
+    """反证①：跟踪 A（dead）+ 天空选 B（fresh）→ 必须拒。
+
+    按 ``_sky_selected_name()`` 判会因 B 新鲜而放行，云台就会追着一条
+    dead 根数算出的方位走。
+    """
+    _gimbal_gate(window, monkeypatch, tracked="SAT A",
+                 tiers={"SAT A": "dead", "SAT B": "fresh"},
+                 sky="SAT B", active=True)
+
+    reason = window._tle_gimbal_block_reason()
+    assert reason, "跟踪目标 dead，却因天空选中星新鲜放行云台"
+    assert "跟踪目标「SAT A」" in reason, reason
+    assert window._gimbal_available() is False
+
+
+def test_gimbal_gate_allows_when_tracked_target_fresh(window, monkeypatch):
+    """反证②：跟踪 A（fresh）+ 天空选 B（dead）→ 必须放行。
+
+    按 ``_sky_selected_name()`` 判会因 B 失效而误禁当前跟踪目标。
+    """
+    _gimbal_gate(window, monkeypatch, tracked="SAT A",
+                 tiers={"SAT A": "fresh", "SAT B": "dead"},
+                 sky="SAT B", active=True)
+
+    assert window._tle_gimbal_block_reason() == "", \
+        "天空选中星 dead 却拦住跟踪目标"
+    assert window._gimbal_available() is True
+
+
+def test_gimbal_gate_fallback_names_its_target(window, monkeypatch):
+    """未跟踪才回落天空选中星，且理由必须写明口径（不许静默切换依据）。"""
+    _gimbal_gate(window, monkeypatch, tracked="SAT A",
+                 tiers={"SAT A": "fresh", "SAT B": "dead"},
+                 sky="SAT B", active=False)
+
+    reason = window._tle_gimbal_block_reason()
+    assert "按天空选中星判" in reason, reason
+    assert "SAT B" in reason, reason
+    assert window._gimbal_available() is False
+

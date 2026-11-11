@@ -153,3 +153,48 @@ python scripts\repro\2026-11-11-p0-01-dead-tle-tracking-gate.py
 验收：`python -m pytest tests/test_sat_tracking_gate.py
 tests/test_ui_hotpath_honesty.py -q` 全绿，且新用例可补一条
 「`_on_tune_sdr` 抛异常 → 状态栏含『调谐下发失败』+ 异常类型」。
+
+## 六、两个 tracker 的分工与唯一真值源（2026-11-11 定，已踩线一次）
+
+|  | `self.sat_tracker` | `self._loop_sat_tracker` |
+|---|---|---|
+| 服务对象 | 天空图/星象仪**展示桥**：把 az/el 推给 `rf_sky_view`，跳时刻后 `refresh()` | 卫星闭环**跟踪执行**：500 ms 轮询 → 调谐/多普勒/云台，以及「卫星跟踪」面板 |
+| 创建点 | `_init_sky_view()`；站点就位时 `_apply_observer_location` 兜底 | `_init_loop_sat_catalog()`；开始跟踪时若仍为空则先建（在闸门之前） |
+| TLE 来源 | 仅 `_BUILTIN_TLES`，**不联网刷新、不落盘** | `_BUILTIN_TLES` + `_on_update_sat_tle()` 在线刷新（原地写内存） |
+| 谁写它 | 展示侧：`set_location()` / `refresh()` | TLE 刷新、`select_satellite()`、`ground_station` 注入 |
+| 谁读它 | 天空视图绘制、选中星详情、跳时刻重算 | 开始闸门 `_tracking_policy_for()`、每拍 `current_position()["policy"]`、面板「TLE 日期」与下拉（`_refresh_sat_panel` / `list_satellites`）、下行频率（`downlink_freq_for`）、云台闸门 `_tle_gimbal_block_reason()` |
+
+**唯一真值源 = `_loop_sat_tracker`。** 「能不能调谐 / 能不能动云台 / 星历新不新鲜」
+只问它；`sat_tracker` 只负责展示，**不得**作为任何闸门依据。
+
+会分叉的三种情况（都真实发生）：
+
+1. `_on_update_sat_tle()` 只写 `_loop_sat_tracker` → `sat_tracker` 恒停在启动时的内置根数；
+2. 站点坐标变化时两者各自 `set_location()`，谁先谁后不保证；
+3. 任一时刻可能一方为 `None`（未进天空视图 / 未初始化目录），另一方已建。
+
+**踩线记录**：`d1fcba5b` 的开始闸门读了 `sat_tracker` —— Celestrak 刷新成功后
+仍按内置 47 天前根数判 dead，「刷新成功却拒绝跟踪」，gimbal 用例因此变红。
+`94ab10cd` 改为读 `_loop_sat_tracker`，并把「建/注入执行 tracker」提到闸门之前。
+
+守卫（改这两处前先跑）：
+
+- `tests/test_sat_tracking_gate.py::test_gate_reads_execution_tracker_not_sky_view`
+  —— 两侧档位摆相反，闸门读错任一侧都红；
+- 所有 tracker 替身必须复刻 `selected_name` / `list_satellites()` /
+  `tracking_policy_for()` / `current_position()["policy"]`；缺任一项会被判
+  「星历状态无法判定」而禁用云台（见 `test_gimbal_track_chain.py` 等 4 处替身）。
+
+### 6.1 云台闸门口径（2026-11-11 用户拍板）
+
+`_gimbal_available()` → `_tle_gimbal_block_reason()` 按**当前实际跟踪目标**判：
+
+- 跟踪环在跑（`_sat_track_timer.isActive()` 且 `_loop_sat_tracker.selected_name`
+  非空）→ 按该目标。理由是用户按「开始跟踪」时认定的是它，不是天空图上点着的星；
+  按选中星判会「跟踪 A 被 B 的档位拦住」或「B 允许就放 A」。
+- 未在跟踪 → 才回落到天空选中星，且理由文案必须写明口径
+  （`按天空选中星判「X」…`），不许静默切换依据。
+- 反证：跟踪 A(dead) + 天空选 B(fresh) → 必拒；跟踪 A(fresh) + 天空选 B(dead)
+  → 必放行（`test_gimbal_gate_uses_tracked_target_not_sky_selection` /
+  `test_gimbal_gate_allows_when_tracked_target_fresh`），回落文案另有
+  `test_gimbal_gate_fallback_names_its_target` 钉住。

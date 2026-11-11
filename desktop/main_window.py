@@ -10797,14 +10797,39 @@ class MainWindow(QMainWindow):
         except Exception:
             return None
 
+    def _gimbal_policy_target(self) -> tuple:
+        """云台闸门该按哪颗星判：返回 ``(目标名, 口径说明)``。
+
+        跟踪环在跑（500 ms 环 active 且有选中的跟踪目标）时按**当前实际跟踪
+        目标**判：用户按「开始跟踪」时脑子里的目标是它，不是天空图上当前
+        点着的那颗星；按选中星判会出现「跟踪 A 却被 B 的档位拦住」或
+        「B 允许就放 A」。未在跟踪时才回落天空选中星，并在说明里写明依据，
+        不静默切换口径。
+        """
+        tracker = getattr(self, "_loop_sat_tracker", None)
+        timer = getattr(self, "_sat_track_timer", None)
+        tracked = str(getattr(tracker, "selected_name", "") or "")
+        try:
+            tracking = bool(tracked and timer is not None and timer.isActive())
+        except RuntimeError:      # Qt 对象已销毁：按未跟踪处理
+            tracking = False
+        if tracking:
+            return tracked, f"跟踪目标「{tracked}」"
+        name = self._sky_selected_name()
+        return name, (f"按天空选中星判「{name}」" if name else "")
+
     def _tle_gimbal_block_reason(self) -> str:
         """星历闸门：云台只允许 fresh/usable（判据来自 tracking_policy）。
+
+        判的是 ``_gimbal_policy_target()`` 给出的目标：跟踪中按跟踪目标，
+        未跟踪才回落天空选中星；理由文案带口径，状态栏不会出现「不知道按
+        谁判的」的禁用。
 
         只对 tracker 目录里的卫星生效；目录外目标留给天空视图自身的 TLE
         状态，避免把「本目录不认识」误判成「星历失效」。拿不到状态时按
         禁用处理（云台会动机械，宁可不动作也不猜）。
         """
-        name = self._sky_selected_name()
+        name, source = self._gimbal_policy_target()
         tracker = getattr(self, "_loop_sat_tracker", None)
         if not name or tracker is None:
             return ""
@@ -10818,7 +10843,8 @@ class MainWindow(QMainWindow):
             return "星历状态无法判定（跟踪器异常）"
         if pol.get("allow_gimbal"):
             return ""
-        return f"{pol.get('label', '星历不可用')}；{pol.get('next_action', '请更新星历')}"
+        return (f"{source}{pol.get('label', '星历不可用')}；"
+                f"{pol.get('next_action', '请更新星历')}")
 
     def _gimbal_available(self) -> bool:
         """云台后端可用性：board 通道已注入 / rotctld 连通 / manual。

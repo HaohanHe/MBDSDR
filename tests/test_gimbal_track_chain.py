@@ -192,7 +192,13 @@ def _active_tracking(mw, monkeypatch, pos, gimbal):
     monkeypatch.setattr(mw, "_loop_sat_tracker", SimpleNamespace(
         current_position=lambda: dict(pos),
         downlink_freq_hz=lambda: 137.1e6,
-        selected_name="NOAA 19"))
+        selected_name="NOAA 19",
+        # 云台闸门（P0-01）按「当前跟踪目标」判：替身必须复刻目录接口，
+        # 否则被判「星历状态无法判定」而禁用云台（与指向/误差无关）。
+        list_satellites=lambda: [{"name": "NOAA 19"}],
+        tracking_policy_for=lambda *_a, **_k: {
+            "allow_gimbal": True, "label": "星历新鲜",
+            "next_action": "可直接跟踪"}))
     mw._observer_lat, mw._observer_lon = 39.9, 116.4
     mw._observer_from_gnss = False
     # mw 是 module 级夹具：每个用例前清空误差记录，避免上一用例的回读样本串味。
