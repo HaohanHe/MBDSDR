@@ -13,6 +13,27 @@ from PySide6.QtWidgets import QApplication
 import os
 import tempfile
 
+# `themes`（main.py / main_window.py 的裸导入）与 `desktop.themes`（测试与工具的
+# 包式导入）会各执行一遍模块，`_FONT_SCALE_OVERRIDE` / `_FONT_SCALE_NOTE` 因此
+# 分裂成两份：写 A 读 B，**字体降档提示永不显示**（2026-11-11 冗余治理线全仓
+# 扫描确认为运行时多真值源，不是重复代码）。
+# 下面两行把另一个名字指回本模块：先导入的那份胜出，后导入的直接复用同一个
+# 对象，模块级全局变量只留一份。
+import sys as _sys
+_sys.modules.setdefault(
+    "desktop.themes" if __name__ == "themes" else "themes",
+    _sys.modules[__name__])
+# 只写 sys.modules 不够：`import desktop.themes` 一旦命中 sys.modules，导入器
+# 就不再执行「给父包 setattr」那一步，`desktop.themes` 的属性访问会
+# AttributeError。裸导入先发生时父包通常还没导入，这里补一次属性绑定。
+if __name__ == "themes":
+    try:
+        import desktop as _desktop_pkg
+    except ImportError:   # 脚本上下文（python desktop/main.py）没有仓库根
+        _desktop_pkg = None
+    if _desktop_pkg is not None:
+        setattr(_desktop_pkg, "themes", _sys.modules[__name__])
+
 # 设计令牌单一来源：主题色只从 tokens.THEME_COLORS 取，不在本文件写 hex。
 from tokens import tokens
 
