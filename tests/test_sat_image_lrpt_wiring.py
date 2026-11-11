@@ -143,7 +143,7 @@ class TestModeSwitch:
         assert "不能从 APT 音频解码" in text
         assert "图像重组待实现" not in text
         assert "选择录制 IQ 解码" in text
-        assert p.image_label.text() == sip.SAT_WAIT_TEXT
+        assert p.image_label.text() == sip.SAT_FAILED_TEXT
 
 
 # ---------------------------------------------------------------------------
@@ -186,7 +186,7 @@ class TestDecodeWiring:
         assert params["family"] == "meteor"
         assert params["sample_rate"] == pytest.approx(2_400_000.0)
         assert params["out_png"].endswith("_lrpt.png")
-        assert p.image_label.text() == sip.SAT_WAIT_TEXT
+        assert p.image_label.text() == sip.SAT_FAILED_TEXT
         assert "not_verified" in p.stats_label.text()
         assert "帧数 3" in p.stats_label.text()
         assert not p.save_btn.isEnabled()

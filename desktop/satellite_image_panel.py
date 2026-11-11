@@ -56,6 +56,9 @@ from tokens import tokens as _tok  # noqa: E402
 
 # 空态文案（测试据此断言面板进入“无数据”状态）。
 SAT_WAIT_TEXT = "等待卫星下行信号"
+# 终态失败文案：解码失败/出图失败时不能再显示「等待」，否则用户会继续
+# 等一台已经失败的卫星。具体原因写在下方 stats_label。
+SAT_FAILED_TEXT = "解码失败（原因见下方状态行）"
 
 SATELLITES = ["NOAA-15 (APT)", "NOAA-18 (APT)", "NOAA-19 (APT)", "METEOR-M2 (LRPT)"]
 
@@ -309,7 +312,7 @@ class SatelliteImagePanel(QWidget):
         self.stats_label.setText(str(text)[:160])
 
     def _on_decode_failed(self, text: str) -> None:
-        self.image_label.setText(SAT_WAIT_TEXT)
+        self.image_label.setText(SAT_FAILED_TEXT)
         self.stats_label.setText(f"LRPT 解码失败: {str(text)[:160]}")
         self.progress.setValue(0)
 
@@ -318,7 +321,7 @@ class SatelliteImagePanel(QWidget):
         if res.get("ok") and png and os.path.isfile(png):
             pix = QPixmap(png)
             if pix.isNull():
-                self.image_label.setText(SAT_WAIT_TEXT)
+                self.image_label.setText(SAT_FAILED_TEXT)
                 self.stats_label.setText("LRPT 出图文件无法加载（PNG 损坏）")
                 return
             self._current_png = png
@@ -333,9 +336,9 @@ class SatelliteImagePanel(QWidget):
             self.progress.setValue(100)
             self._load_history()
             return
-        # 不出图就是不出图：保持空态，写明真实原因（帧约定未对齐 / 段不全 /
-        # 无 CADU），绝不补假图、绝不拿半幅图冒充。
-        self.image_label.setText(SAT_WAIT_TEXT)
+        # 不出图就是不出图：写明真实原因（帧约定未对齐 / 段不全 / 无 CADU），
+        # 绝不补假图、绝不拿半幅图冒充；也不再显示「等待」，那是另一种误导。
+        self.image_label.setText(SAT_FAILED_TEXT)
         err = str(res.get("error") or "未知原因")
         self.stats_label.setText(
             f"未出图（帧数 {res.get('frames', '—')}）: {err[:200]}")
@@ -370,7 +373,7 @@ class SatelliteImagePanel(QWidget):
             self.stats_label.setText(
                 "METEOR LRPT 是 QPSK 数字链路，不能从 APT 音频解码；"
                 "请点「选择录制 IQ 解码」选 complex64 录制文件")
-            self.image_label.setText(SAT_WAIT_TEXT)
+            self.image_label.setText(SAT_FAILED_TEXT)
             return
         if not _HAS_APT:
             self.image_label.setText("APT 解码器不可用")
