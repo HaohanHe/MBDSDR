@@ -169,6 +169,92 @@ def test_palette_blocks_unavailable_with_reason(main_window, index):
     dlg.deleteLater()
 
 
+def _press_enter(widget):
+    from PySide6.QtCore import Qt
+    from PySide6.QtTest import QTest
+    QTest.keyClick(widget, Qt.Key_Return)
+
+
+def test_enter_in_search_box_runs_selected_command(main_window, qapp):
+    """G-02：焦点在搜索框时按回车必须直接执行，不必先 Tab 进列表。"""
+    from command_palette import CommandPalette
+    dlg = CommandPalette(window=main_window, parent=main_window)
+    dlg.show()
+    qapp.processEvents()
+    dlg.search_edit.setFocus()
+    dlg.search_edit.setText("设置")
+    assert dlg.visible_commands()[0].title == "设置"
+
+    _press_enter(dlg.search_edit)
+    qapp.processEvents()
+
+    assert dlg.last_result.get("ok") is True, f"回车没执行条目: {dlg.last_result}"
+    assert not dlg.isVisible(), "执行成功后命令面板应关闭"
+    rt = main_window.right_tab
+    assert rt.tabBar().tabData(rt.currentIndex()) == "settings", (
+        "回车执行了「设置」但右栏没切到设置页签")
+    dlg.deleteLater()
+    qapp.processEvents()
+
+
+def test_down_arrow_moves_focus_into_list(main_window, qapp):
+    """G-02：↓ 从搜索框进入结果列表，不丢焦点。"""
+    from PySide6.QtCore import Qt
+    from PySide6.QtTest import QTest
+    from command_palette import CommandPalette
+    dlg = CommandPalette(window=main_window, parent=main_window)
+    dlg.show()
+    qapp.processEvents()
+    dlg.search_edit.setFocus()
+    dlg.search_edit.setText("设置")
+
+    QTest.keyClick(dlg.search_edit, Qt.Key_Down)
+    qapp.processEvents()
+    assert dlg.focusWidget() is dlg.list_widget, (
+        f"↓ 没把焦点送进列表，当前焦点是 {type(dlg.focusWidget()).__name__}")
+    dlg.deleteLater()
+    qapp.processEvents()
+
+
+def test_enter_on_unavailable_keeps_panel_open_with_reason(main_window, index, qapp):
+    """G-03：不可用项回车后面板必须留在原地并显示原因。"""
+    from command_palette import CommandPalette
+    unavailable = next(c for c in index if c.status == "unavailable")
+    dlg = CommandPalette(window=main_window, parent=main_window)
+    dlg.show()
+    qapp.processEvents()
+    dlg.search_edit.setFocus()
+    dlg.search_edit.setText(unavailable.title)
+    assert dlg.visible_commands()[0].title == unavailable.title
+
+    _press_enter(dlg.search_edit)
+    qapp.processEvents()
+
+    assert dlg.last_result.get("ok") is False
+    assert dlg.isVisible(), "执行失败后面板被关闭，用户看不到失败原因"
+    assert unavailable.reason in dlg.reason_label.text()
+    dlg.deleteLater()
+    qapp.processEvents()
+
+
+def test_runtime_failure_keeps_panel_open(main_window, qapp):
+    """G-03：条目可执行但执行结果 ok=False 时，面板不得先关闭。"""
+    from command_palette import Command, CommandPalette
+    dlg = CommandPalette(window=main_window, parent=main_window)
+    dlg._commands.insert(0, Command(
+        title="__失败样例__", group="菜单", description="执行必失败的样例",
+        run=lambda: {"ok": False, "status": "FAILED", "reason": "设备未连接"}))
+    dlg.show()
+    qapp.processEvents()
+
+    result = dlg.run_first("__失败样例__")
+    assert result["ok"] is False
+    assert dlg.isVisible(), "执行失败后面板被关闭，用户看不到原因"
+    assert "设备未连接" in dlg.reason_label.text()
+    dlg.deleteLater()
+    qapp.processEvents()
+
+
 # ---------------------------------------------------------------------------
 # 主窗口接缝 + 登记
 # ---------------------------------------------------------------------------

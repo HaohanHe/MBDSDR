@@ -276,7 +276,7 @@ def search_commands(commands: Sequence[Command], query: str) -> List[Command]:
 # Qt 层（PEP 562：只在取 CommandPalette 时构造）
 # ---------------------------------------------------------------------------
 def _build_dialog_class():
-    from PySide6.QtCore import Qt
+    from PySide6.QtCore import QEvent, Qt
     from PySide6.QtWidgets import (
         QDialog, QLabel, QLineEdit, QListWidget, QListWidgetItem, QVBoxLayout,
     )
@@ -299,6 +299,8 @@ def _build_dialog_class():
             self.search_edit.setPlaceholderText(
                 "搜索菜单命令 / 面板页签 / 能力 / 快捷键（例如：设置、全天、FT8、Ctrl+K）")
             self.search_edit.textChanged.connect(self._refresh)
+            self.search_edit.returnPressed.connect(self._on_return_pressed)
+            self.search_edit.installEventFilter(self)
             root.addWidget(self.search_edit)
 
             self.list_widget = QListWidget(self)
@@ -345,18 +347,39 @@ def _build_dialog_class():
 
         # ---------------- 执行 ----------------
         def run_command(self, cmd: Command) -> dict:
+            """执行一条命令；只有成功才关闭面板，失败必须留在原地给原因。"""
             if cmd.run is None or cmd.status == "unavailable":
                 result = {"ok": False, "status": "UNAVAILABLE",
                           "reason": cmd.reason or f"「{cmd.title}」当前不可用"}
                 self.reason_label.setText(result["reason"])
                 self.last_result = result
                 return result
-            self.hide()
             result = cmd.run()
             self.last_result = result
-            if not result.get("ok"):
-                self.reason_label.setText(str(result.get("reason") or "执行失败"))
+            if result.get("ok"):
+                self.hide()
+            else:
+                self.reason_label.setText(
+                    str(result.get("reason") or f"「{cmd.title}」执行失败"))
             return result
+
+        def eventFilter(self, obj, event):
+            """↓ 从搜索框进入结果列表（回车仍由 returnPressed 负责）。"""
+            if obj is self.search_edit and event.type() == QEvent.KeyPress:
+                if event.key() == Qt.Key_Down and self.list_widget.count():
+                    self.list_widget.setCurrentRow(0)
+                    self.list_widget.setFocus()
+                    return True
+            return super().eventFilter(obj, event)
+
+        def _on_return_pressed(self) -> None:
+            """回车直接执行当前（默认第一条）结果，不必再 Tab 进列表。"""
+            item = self.list_widget.currentItem()
+            if item is None:
+                self.reason_label.setText(
+                    "没有可执行的条目：先输入关键词，或在列表里选中一行。")
+                return
+            self.run_command(item.data(Qt.UserRole))
 
         def run_first(self, query: str) -> dict:
             """测试/自动化接缝：按关键词取第一条并执行。"""
