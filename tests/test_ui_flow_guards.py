@@ -314,6 +314,16 @@ class TestUiFlowGuards:
                 self.selected_name = name
                 return True
 
+            def tracking_policy_for(self, name=None):
+                # P0-01 星历闸门（2026-11-12）：生产 tracker 有这个方法，
+                # 桩缺了就会按 no_data 全禁，_start_satellite_tracking 在
+                # 闸门处早退，停止动作永远到不了「跟踪中」。给一份新鲜星历，
+                # 让本用例继续只测「停止动作跟随跟踪状态」这一件事。
+                from mbdsdr_ai.tle_integrity import tracking_policy
+                return tracking_policy(
+                    {"tier": "fresh", "age_days": 0.1, "reason": ""},
+                    "verified")
+
             def set_downlink_freq(self, hz):
                 self.freq = float(hz)
 
@@ -322,6 +332,10 @@ class TestUiFlowGuards:
 
         monkeypatch.setattr(mw, "LoopSatTracker", _StubTracker)
         monkeypatch.setattr(w, "_poll_satellite_track", lambda: None)
+        # 模块级窗口的启动轮询可能已经建过真 tracker；不清掉的话，
+        # _start_satellite_tracking 会沿用旧实例、闸门问到的仍是 no_data，
+        # 桩永远不生效（2026-11-12 实测：这是本用例恒红的第二个原因）。
+        w._loop_sat_tracker = None
         w._observer_lat, w._observer_lon = 0.0, 0.0  # 中性示例站点
         w._start_satellite_tracking("ISS (ZARYA)", 145_800_000.0)
 
