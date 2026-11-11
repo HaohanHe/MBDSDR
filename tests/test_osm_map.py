@@ -261,6 +261,9 @@ def test_attribution_click_opens_odbl_page(qapp, monkeypatch):
         v.show()
         rect = v._attr_rect()
         assert v.width() > 0
+        # 署名只在真有瓦片画出来时才显示/可点（零瓦片不挂来源署名）。
+        # 本用例只验「点署名开版权页」，所以直接把绘制结果记为有瓦片。
+        v._drawn_tiles = 1
         pos = QPointF(rect.center().x(), rect.center().y())
         _click(v, pos)
         assert opened and "openstreetmap.org" in opened[0]

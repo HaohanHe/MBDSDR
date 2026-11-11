@@ -69,6 +69,15 @@ MAX_ZOOM = 20            # 各家上限不同：OSM 官方 19，CARTO 20
 MAX_INFLIGHT = 4          # OSM 官方瓦片对并发敏感：12 并发实测被回 "Connection closed"
 PREFETCH_RINGS = 1           # 视口外预取 1 圈瓦片（浏览器同款，不至于刷爆服务器）
 RETRY_AFTER_S = 15.0         # 失败后退避（不刷服务器，也不至于让地图空白一分钟）
+
+#: 单张瓦片的传输超时。QNetworkReply 默认**没有**超时（0 = 不超时），离线或
+#: 代理拦截时套接字能挂几分钟——HUD 的「正在加载」因此永远不结束（2026-11-11
+#: 实测：瓦片数 0、蓝条从启动 3 秒挂到十几分钟，红色失败态永不触发）。
+TILE_TIMEOUT_MS = 8000
+
+#: 首屏宽限：从最近一次瓦片活动起，超过这个时长仍零成功，就不再口称
+#: 「正在加载」，改报「瓦片加载失败（原因）」。比单张超时多留几秒换源时间。
+TILE_LOADING_GRACE_S = TILE_TIMEOUT_MS / 1000.0 + 4.0
 USER_AGENT = ("MBDSDR/1.0 (amateur-radio SDR desktop; "
               "+https://github.com/HaohanHe/MBDSDR)")
 
@@ -381,6 +390,8 @@ def _make_request(url: str) -> QNetworkRequest:
         req.setAttribute(
             QNetworkRequest.Attribute.RedirectPolicyAttribute,
             QNetworkRequest.RedirectPolicy.NoLessSafeRedirectPolicy)
+        # 必须显式设超时：默认 0 = 永不超时，离线时请求会一直挂在 inflight 里
+        req.setTransferTimeout(TILE_TIMEOUT_MS)
     except Exception:  # noqa: BLE001
         pass
     return req
@@ -509,6 +520,12 @@ class TileLoader(QObject):
         self._sig.failed.connect(self._on_decode_failed)
         self.ok_count = 0
         self.fail_count = 0
+        # ---- 可终止的加载判据（HUD 用）----
+        # ``inflight()`` 本身不可终止：Qt 的 QNetworkReply 默认不超时，离线时
+        # 请求能在途几分钟。这里记「最近一次瓦片活动」和最近一条失败原因，
+        # status_line() 只在活动新鲜时报「正在加载」，否则给明确失败态。
+        self.last_activity_t = 0.0
+        self.last_error = ""
         if self.online:
             _use_system_proxy()
             self._nam = QNetworkAccessManager(self)
@@ -520,6 +537,26 @@ class TileLoader(QObject):
     def inflight(self) -> int:
         """在途请求数（HUD 用它说"正在加载"，不猜）。"""
         return len(self._inflight)
+
+    def status_line(self) -> Tuple[str, str]:
+        """HUD 的终态判据：``("loading"|"failed"|"idle", 原因)``。
+
+        ``inflight() > 0`` 不是可终止条件——离线/代理拦截时请求能挂到十几分钟，
+        蓝条永远不消失、红色失败态永不触发（2026-11-11 缺陷）。这里只在
+        「最近 TILE_LOADING_GRACE_S 内确有瓦片活动」时才算加载中；超过宽限
+        仍零成功就落到 failed，并带上可读原因。
+        """
+        now = time.monotonic()
+        if self.ok_count > 0:
+            return ("idle", "")
+        if (self.inflight() > 0
+                and now - self.last_activity_t < TILE_LOADING_GRACE_S):
+            return ("loading", "")
+        if self.fail_count > 0:
+            return ("failed", self.last_error or "瓦片服务器无响应")
+        if self.inflight() > 0:
+            return ("failed", "请求超时（网络不可达或被代理拦截）")
+        return ("idle", "")
 
     def peek(self, z: int, x: int, y: int) -> Optional[QPixmap]:
         """只查缓存（内存→磁盘），**不发请求**。绘制首遍用它。"""
@@ -550,6 +587,7 @@ class TileLoader(QObject):
             return None
         url = self._url_for(key, x % n, y)
         self._inflight.add(key)
+        self.last_activity_t = time.monotonic()
         reply = self._nam.get(_make_request(url))
         reply.finished.connect(lambda r=reply, k=key: self._on_finished(r, k))
         return None
@@ -568,6 +606,7 @@ class TileLoader(QObject):
     def _on_finished(self, reply, key) -> None:
         z, x, y = key
         self._inflight.discard(key)
+        self.last_activity_t = time.monotonic()
         try:
             err = reply.error()
             data = bytes(reply.readAll())
@@ -604,12 +643,18 @@ class TileLoader(QObject):
             except RuntimeError:
                 pass
             try:
+                if err == QNetworkReply.NetworkError.TimeoutError:
+                    msg = (msg + "·传输超时") if msg else "传输超时"
+            except RuntimeError:
+                pass
+            try:
                 code = int(reply.attribute(
                     QNetworkRequest.Attribute.HttpStatusCodeAttribute) or 0)
                 if code:
                     msg = f"{msg}·HTTP {code}"
             except (TypeError, ValueError, RuntimeError):
                 pass
+            self.last_error = msg or "瓦片服务器无响应"
             self.failed.emit(z, x, y, msg)
             return
         # 无滤镜：原始 PNG 直接落盘（最省，也最快）；有滤镜：等线程处理完
@@ -624,6 +669,8 @@ class TileLoader(QObject):
         pm = QPixmap.fromImage(img)
         if pm.isNull():
             self.fail_count += 1
+            self.last_error = "解码失败"
+            self.last_activity_t = time.monotonic()
             self.failed.emit(z, x, y, "解码失败")
             return
         self.cache.put(z, x, y, pm)
@@ -635,12 +682,16 @@ class TileLoader(QObject):
             except Exception:  # noqa: BLE001
                 pass
         self.ok_count += 1
+        self.last_error = ""
+        self.last_activity_t = time.monotonic()
         self.ready.emit(z, x, y)
 
     def _on_decode_failed(self, z: int, x: int, y: int, msg: str) -> None:
         self._pending.pop((z, x, y), None)
         self.fail_count += 1
         self._failed[(z, x, y)] = time.monotonic()
+        self.last_error = msg or "解码失败"
+        self.last_activity_t = time.monotonic()
         self.failed.emit(z, x, y, msg)
 
 
@@ -885,6 +936,8 @@ class OsmMapView(QWidget, _PinchMixin):
         self._dragging = False
         self._error_text = ""
         self._plan: Optional[dict] = None
+        #: 上一帧真正画出的瓦片数：署名只在 >0 时显示（零瓦片不许挂 OSM 署名）
+        self._drawn_tiles = 0
         # 触摸手势走 mixin 的 event()；这里只连信号
         try:
             self.init_pinch_zoom()
@@ -1055,6 +1108,7 @@ class OsmMapView(QWidget, _PinchMixin):
                 return
             plan = self._tile_plan()
             missing = []
+            drawn = 0
             w, h = self.width(), self.height()
             for d, px, py, tx, ty in plan["items"]:
                 if px > w or py > h:
@@ -1064,6 +1118,7 @@ class OsmMapView(QWidget, _PinchMixin):
                 pm = self._cached_tile(tx, ty)
                 if pm is not None:
                     p.drawPixmap(int(px), int(py), TILE_SIZE, TILE_SIZE, pm)
+                    drawn += 1
                     continue
                 p.fillRect(QRectF(px, py, TILE_SIZE, TILE_SIZE), _LOADING)
                 p.setPen(QPen(_GRID, 1, Qt.DotLine))
@@ -1083,6 +1138,7 @@ class OsmMapView(QWidget, _PinchMixin):
                     continue
             self._draw_marker(p)
             self._draw_pick_marker(p)
+            self._drawn_tiles = drawn
             self._draw_hud(p)
         finally:
             p.end()
@@ -1145,6 +1201,27 @@ class OsmMapView(QWidget, _PinchMixin):
         p.drawLine(QPointF(pos.x() - 6, pos.y()), QPointF(pos.x() + 6, pos.y()))
         p.drawLine(QPointF(pos.x(), pos.y() - 6), QPointF(pos.x(), pos.y() + 6))
 
+    def _attr_visible(self) -> bool:
+        """署名是否该显示：仅在**真有瓦片画出来**时显示。
+
+        零瓦片时照挂 © OpenStreetMap 等于伪造来源——屏幕上并没有那张图。
+        """
+        return bool(self._show_attr and self._drawn_tiles > 0)
+
+    def _loading_hud(self) -> Tuple[str, str]:
+        """HUD 的加载态判定（不绘制）：``(状态, 文案)``，状态 = loading/failed/idle。
+
+        离线时必须能落到 failed——这是「蓝条挂十几分钟」那个缺陷的判据所在。
+        """
+        if self._tile_source is not None:
+            return ("idle", "")
+        state, why = self._loader.status_line()
+        if state == "loading":
+            return ("loading", "正在加载地图…（首次经代理会慢几秒，之后走缓存）")
+        if state == "failed":
+            return ("failed", f"瓦片加载失败：{why}（离线仍可点选坐标）")
+        return ("idle", "")
+
     def _draw_hud(self, p: QPainter) -> None:
         f = QFont(self.font())
         f.setPointSizeF(max(7.5, f.pointSizeF() - 1))
@@ -1156,26 +1233,22 @@ class OsmMapView(QWidget, _PinchMixin):
         p.fillRect(QRectF(6, 6, w, 17), QColor(10, 14, 20, 170))
         p.setPen(QPen(QColor(_DIM), 1))
         p.drawText(QRectF(6, 6, w, 17), Qt.AlignCenter, badge)
-        ok, bad = self._loader.ok_count, self._loader.fail_count
-        # 还在等第一批瓦片：明说"在加载"，别让空白被读成坏了
-        if (self._tile_source is None and ok == 0 and bad == 0
-                and self._loader.inflight() > 0):
-            msg = "正在加载地图…（首次经代理会慢几秒，之后走缓存）"
+        # 加载态必须可终止：只看 _loading_hud()（带超时宽限），
+        # 不再用永不归零的 inflight()。离线时蓝条 12 s 内落到红色失败态。
+        state, msg = self._loading_hud()
+        if state != "idle":
             fw = min(self.width() - 20,
                      p.fontMetrics().horizontalAdvance(msg) + 16)
-            p.fillRect(QRectF(10, 28, fw, 19), QColor(20, 34, 52, 210))
-            p.setPen(QPen(QColor("#9fc4ee"), 1))
+            if state == "loading":
+                p.fillRect(QRectF(10, 28, fw, 19), QColor(20, 34, 52, 210))
+                p.setPen(QPen(QColor("#9fc4ee"), 1))
+            else:
+                p.fillRect(QRectF(10, 28, fw, 19), QColor(90, 26, 26, 210))
+                p.setPen(QPen(QColor("#ffb0a6"), 1))
             p.drawText(QRectF(10, 28, fw, 19), Qt.AlignCenter, msg)
-        # 瓦片全挂时的一句人话（不白屏装正常）
-        if self._tile_source is None and ok == 0 and bad >= 3:
-            msg = "瓦片未加载：检查联网或系统代理（离线仍可点选坐标）"
-            fw = min(self.width() - 20,
-                     p.fontMetrics().horizontalAdvance(msg) + 16)
-            p.fillRect(QRectF(10, 28, fw, 19), QColor(90, 26, 26, 210))
-            p.setPen(QPen(QColor("#ffb0a6"), 1))
-            p.drawText(QRectF(10, 28, fw, 19), Qt.AlignCenter, msg)
-        # 右下：署名（ODbL / 各家条款）
-        if self._show_attr:
+        # 右下：署名（ODbL / 各家条款）。前提是**确有瓦片画出来**：
+        # 零瓦片时署名会被读成「这张图来自 OSM」，而屏幕上其实什么都没有。
+        if self._attr_visible():
             r = self._attr_rect()
             p.fillRect(QRectF(r), QColor(10, 14, 20, 170))
             p.setPen(QPen(QColor("#b9c0cc"), 1))
@@ -1256,8 +1329,9 @@ class OsmMapView(QWidget, _PinchMixin):
         self.setCursor(Qt.CrossCursor)
         if was_drag:
             return
-        if self._show_attr and self._attr_rect().contains(
-                event.position().toPoint()):
+        if (self._attr_visible()
+                and self._attr_rect().contains(
+                    event.position().toPoint())):
             self.open_attribution()      # 署名校验：点它就该能开版权页
             return
         lat, lon = self.unproject(QPointF(event.position()))
