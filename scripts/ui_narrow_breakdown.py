@@ -8,8 +8,16 @@
 * 只读——不调用任何 set/flush/save，不改文件；
 * ``HOME/USERPROFILE/APPDATA/LOCALAPPDATA`` 一律重定向到临时目录，
   真实 ``%APPDATA%/mbdsdr/desktop_settings.json`` 一个字节都不碰；
-* offscreen 与真屏都能跑，但**数字依赖字体/DPI**，输出头部会打印环境指纹，
-  两边对账必须同一指纹。
+* **必须用 ``windows`` 平台插件**：本机 ``QT_QPA_PLATFORM=offscreen`` 下
+  ``QFontDatabase.families()`` 为 0（实测），所有文字按方框度量，字号/控件高/
+  挤压数全部不可信；脚本启动即断言字体库非空，为 0 直接退出码 2。
+  窗口用 ``WA_DontShowOnScreen`` 不上屏，布局仍按请求尺寸计算；
+* 每次 ``resize`` 后**硬断言**「实际尺寸 == 请求尺寸」：窗口有最小尺寸硬墙
+  （实测 ``setMinimumSize(1000, 680)``），请求 960×633 会被夹成 1000×680、
+  1265×618 会被抬成 1265×680。一旦不相等立即写 stderr 并以**退出码 3**
+  终止——绝不把夹取后的尺寸当测量结果写进 JSON。
+* 验收三档固定为 ``1000×680`` / ``1265×680`` / ``1440×900``
+  （见 ``docs/narrow-screen-plan.md`` §0.0）；`960×633` 与 `1265×618` 已作废。
 
 运行::
 
@@ -37,12 +45,25 @@ _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, _ROOT)
 sys.path.insert(0, os.path.join(_ROOT, "desktop"))
 
-from PySide6.QtGui import QFontMetrics  # noqa: E402
+from PySide6.QtCore import Qt  # noqa: E402
+from PySide6.QtGui import QFontDatabase, QFontMetrics  # noqa: E402
 from PySide6.QtWidgets import (  # noqa: E402
     QApplication, QComboBox, QDoubleSpinBox, QFrame, QLabel, QLineEdit,
     QPushButton, QCheckBox, QSlider, QStyle, QTabWidget, QToolBar, QToolButton,
     QWidget,
 )
+
+#: 验收三档（唯一口径，见 ``docs/narrow-screen-plan.md`` §0.0）。
+#: ``960×633`` 宽被声明最小宽 1000 改写、``1265×618`` 高被声明最小高 680
+#: 改写，两者物理不可达，已作废，不得再出现在测量点里。
+TIERS = ((1000, 680), (1265, 680), (1440, 900))
+
+#: 请求尺寸被窗口最小尺寸夹住时的退出码（与「字体库为 0」的 2 区分）。
+EXIT_SIZE_CLAMPED = 3
+
+
+class SizeClamped(RuntimeError):
+    """请求尺寸被最小尺寸夹住：此时任何数字都不能当测量结果。"""
 
 
 def _isolate_qsettings() -> None:
@@ -155,11 +176,23 @@ def main() -> int:
     args = ap.parse_args()
 
     app = QApplication.instance() or QApplication([])
+    fams = QFontDatabase.families()
+    if not fams:
+        print("错误：QFontDatabase.families() 为 0（平台 %s）。"
+              "字体会退化成方框，文字尺寸/控件高/挤压数全部不可信；"
+              "本脚本拒绝出数。请改用 QT_QPA_PLATFORM=windows "
+              "（窗口用 WA_DontShowOnScreen 不上屏）。" % app.platformName(),
+              file=sys.stderr)
+        return 2
     _isolate_qsettings()
     import main_window as mw
 
     win = mw.MainWindow()
-    win.resize(1000, 600)
+    # 不上屏：windows 平台下也能按请求尺寸算布局，但不会真的弹窗。
+    win.setAttribute(Qt.WA_DontShowOnScreen, True)
+    # 初始尺寸就按声明最小（地板）请求：比地板小的请求会被夹取，而夹取后的
+    # 结果正是本脚本明令拒绝的「假尺寸」。
+    win.resize(win.minimumWidth(), win.minimumHeight())
     win.show()
     _pump(app)
 
@@ -168,6 +201,7 @@ def main() -> int:
     fm = QFontMetrics(font)
     env = {
         "qt_platform": app.platformName(),
+        "font_families": len(fams),
         "device_pixel_ratio": round(screen.devicePixelRatio(), 4),
         "logical_dpi": round(screen.logicalDotsPerInch(), 2),
         "physical_dpi": round(screen.physicalDotsPerInch(), 2),
@@ -553,28 +587,79 @@ def main() -> int:
             last = cur
         return last
 
-    _pump(app, 20)
-    overflow_at_declared = _scan_stable()
-    win.resize(1344, 700)
-    _pump(app, 40)
-    overflow_at_target = _scan_stable()
-    win.resize(1400, 900)
-    _pump(app, 40)
+    def _resize_exact(req_w: int, req_h: int, label: str = "") -> dict:
+        """按请求尺寸摆开并**硬断言**实际 == 请求。
+
+        窗口最小尺寸会夹住请求（旧 `960×633` / `1265×618` 就是这么测错的）。
+        夹住时抛 ``SizeClamped``，由 ``main`` 转成退出码 3——测量结果作废，
+        不许把夹取后的尺寸当成那个尺寸的账。
+        """
+        win.resize(req_w, req_h)
+        _pump(app, 40)
+        actual = [win.width(), win.height()]
+        if actual != [req_w, req_h]:
+            raise SizeClamped(
+                f"{label or f'{req_w}×{req_h}'}：请求 {req_w}×{req_h}，"
+                f"实际 {actual[0]}×{actual[1]}（窗口最小 "
+                f"{win.minimumWidth()}×{win.minimumHeight()}）。"
+                f"请求尺寸不可达，本次测量作废。")
+        return {"requested": [req_w, req_h], "actual": actual, "equal": True}
+
+    try:
+        _pump(app, 20)
+        # 声明最小（setMinimumSize 硬墙）就是能达到的最小尺寸，按它测量。
+        size_declared = _resize_exact(*declared, label="declared")
+        overflow_at_declared = _scan_stable()
+        # 1344×700 不是验收档（验收见 TIERS），只是 release_check.py 沿用的
+        # 诊断点；它高于地板、请求可达，同样受硬断言约束。
+        size_target = _resize_exact(1344, 700, label="1344x700")
+        overflow_at_target = _scan_stable()
+        # 验收三档：每档都断言实际 == 请求，任何一档被夹住即整体作废。
+        tier_sizes: dict = {}
+        tier_overflow: dict = {}
+        for tw, th in TIERS:
+            key = f"{tw}x{th}"
+            tier_sizes[key] = _resize_exact(tw, th, label=key)
+            tier_overflow[key] = _scan_stable()
+        win.resize(1400, 900)
+        _pump(app, 40)
+        sizes = {
+            "declared": size_declared,
+            "1344x700": size_target,
+            **tier_sizes,
+        }
+    except SizeClamped as exc:
+        print(f"错误：{exc}", file=sys.stderr)
+        win.close()
+        return EXIT_SIZE_CLAMPED
     result["caliber"] = {
         "declared_minimum": declared,
         "content_minimumSizeHint": content_hint,
+        "sizes": sizes,
+        # 硬断言之后这里恒为空（夹具被夹住时进程已退出码 3）；
+        # 保留键位给 release_check.py 对账。
+        "size_mismatch": [k for k, v in sizes.items() if not v["equal"]],
         "overflow_at_declared_minimum": overflow_at_declared,
         "overflow_at_1344x700": overflow_at_target,
+        "tiers": {"sizes": tier_sizes, "overflow": tier_overflow},
     }
     if not args.json:
         print("\n== 口径核对（声明最小 vs 内容最小） ==")
         print(f"  声明最小（setMinimumSize 硬墙）: {declared[0]}×{declared[1]}")
         print(f"  内容最小（minimumSizeHint）: {content_hint[0]}×{content_hint[1]}"
               f"  ← 这是「内容想要」，不是窗口地板")
-        print(f"  按 1000×600 摆开：挤压 {overflow_at_declared['squeezed_count']}"
+        print(f"  按声明最小 {declared[0]}×{declared[1]} 摆开"
+              f"（实际 {size_declared['actual'][0]}×{size_declared['actual'][1]}）："
+              f"挤压 {overflow_at_declared['squeezed_count']}"
               f" / 越界 {overflow_at_declared['clipped_count']}")
-        print(f"  按 1344×700 摆开：挤压 {overflow_at_target['squeezed_count']}"
+        print(f"  按 1344×700 摆开（实际 {size_target['actual'][0]}×"
+              f"{size_target['actual'][1]}，诊断点非验收档）："
+              f"挤压 {overflow_at_target['squeezed_count']}"
               f" / 越界 {overflow_at_target['clipped_count']}")
+        for key, ov in tier_overflow.items():
+            print(f"  验收档 {key}（实际 {tier_sizes[key]['actual'][0]}×"
+                  f"{tier_sizes[key]['actual'][1]}）："
+                  f"挤压 {ov['squeezed_count']} / 越界 {ov['clipped_count']}")
 
     # ---------- 5. 汇总 ----------
     # 键名沿用（release_check.py 消费 window_minimumSizeHint），但语义必须读清：

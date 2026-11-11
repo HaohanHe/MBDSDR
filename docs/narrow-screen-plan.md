@@ -8,6 +8,27 @@
 > 数字来源只有一个：`python scripts/ui_narrow_breakdown.py`（只读，见 §1.0）。
 > **不按 §1.0 的环境指纹复跑就不许拿这些数改代码。**
 
+## §0.0 尺寸口径裁定（2026-11-11，覆盖本文件旧口径）
+
+产品地板由 `main_window.py` 的 `setMinimumSize(...)` 决定（见 §2.3.2），实测
+**1000×680**。因此**验收尺寸只有三档**：
+
+| 档位 | 用途 |
+| --- | --- |
+| **1000×680** | 声明最小尺寸（地板）；任何窗口都不可能比它小 |
+| **1265×680** | 1366×768 @100% 的有效工作区宽度下的常用尺寸 |
+| **1440×900** | 大屏舒适尺寸 |
+
+**作废口径（不得再当验收证据）**：
+
+- **`960×633` 不支持**：声明最小宽 1000，960 物理不可达（请求会被抬到 1000）。
+  文中凡是 960×633 / 960 宽的「通过」记录，都只是 DPR 1.5 下的**内容最小宽提示**
+  被误当成实际窗口尺寸，一律降级为历史数据。
+- **`1265×618` 作废**：最小高 680 会把请求高度抬到 680，618 物理不可达。
+  文中凡是 1265×618 的结论，实际测的是 1265×680。
+- **每次测量必须断言「实际尺寸 == 请求尺寸」**；不相等就是测量失败，不许记过线。
+  `scripts/ui_narrow_breakdown.py` 已内置该硬断言（不符直接非零退出）。
+
 ## §0 结论先说
 
 1. **原始基线（2026-11-04，未改前）**：三处宽度溢出 + 一处高度溢出。
@@ -17,11 +38,14 @@
    - 高度 **729**；1366×768 屏扣任务栏后可用约 **728**
 2. **已落地（2026-11-05）**：顶栏 1625→**1265**（§2.3.1）、频谱 1941→**688**（§2.1.1）、
    高度 729→644→**618** / 799→659→**633**（§3.1 + §3.2）。
-3. **新验收线（DPR 1.0 = 1366×768 @100%）**：可用 **1344×700**。
+3. **新验收线（2026-11-11 三档，取代旧口径）**：`1000×680` / `1265×680` / `1440×900`
+   （见 §0.0）。旧口径「DPR 1.0 可用 1344×700」「真屏 960×633」作废：
+   前者是内容最小宽提示，后者宽高都不可达。
    当前 offscreen 指纹 **内容最小宽提示（平台度量）1265×618**（宽余 79 / 高余 82）；
-   真屏 DPR 1.5 指纹 **960×633**（宽/高均不退化：原 1237×659）。两指纹都过。
-   声明最小宽（1000）地板仍是 `setMinimumSize(1000, 600)`（`main_window.py:591`），
-   口径见 §2.3.2。
+   真屏 DPR 1.5 指纹内容最小 **834×607**（实测，见 §3.3；旧记录的 960×633 已作废）。
+   声明最小尺寸地板实为 **1000×680**（`main_window.py:846-852` 的
+   `setMinimumSize(max(860, _min_w), max(560, _min_h))`，实测 `_min_w=1000`、
+   `_min_h=680`，见 §2.3.2）。旧记录的 `setMinimumSize(1000, 600)` 已过期。
 
 ## §1.0 测量环境与唯一数字来源
 
@@ -292,23 +316,31 @@ after 完整可见）。
   收进 `»` 扩展菜单，**1 次点击可达**（原位置不变）。这是 Qt 自动溢出，不是本笔新增
   菜单；上一版窗口被 1625 顶住时这些控件从不溢出，现在窗口能缩到 1265 才暴露。
 
-### §2.3.2 口径核对：960 是「内容最小宽提示（平台度量）」，不是「声明最小宽（1000）」
+### §2.3.2 口径核对：地板是 `setMinimumSize`，不是 `minimumSizeHint`（2026-11-11 更新）
 
-`setMinimumSize(1000, 600)` 在 `desktop/main_window.py:591`，**本批没动过**。
-`minimumSizeHint()` 是内容自己想多宽，会被字体/样式度量放大或缩小，**不能当窗口地板**。
+> **本节旧结论「`setMinimumSize(1000, 600)` 在 `main_window.py:591`、本批没动过」
+> 已过期。** 现行地板由 `main_window.py:846-852` 按屏幕可用区算出并写入
+> `setMinimumSize(max(860, _min_w), max(560, _min_h))`，本机实测
+> `_min_w=1000`、`_min_h=680` → **地板 1000×680**（算法见 §3.3.1）。
+> 因此本节下面凡是「1000×600」「960×633」的数，都是旧地板的产物，
+> 只作历史对照，**不得再作为验收依据**（§0.0）。
 
-> **已更正**：`minimumSizeHint()` ≠ 窗口地板；声明最小宽（1000）
-> `setMinimumSize(1000, 600)` 未改。960 只是 DPR 1.5 下的内容最小宽提示
-> （平台度量），不得当作产品最小宽引用。
+`minimumSizeHint()` 是内容自己想多大，会被字体/样式度量放大或缩小，**不能当窗口地板**；
+`minimumSize()` 才是地板。两者不必相等，差额就是「产品要求的余量」。
 
-**三个实测数（同一时刻，两种指纹）**
+**两个数（2026-11-11，真屏 `windows` DPR 1.5 / MiSans 10pt / 行高 18，实测）**
 
-| 指纹 | `minimumWidth()` 声明值 | `width()` 实际（resize 1000 后） | `minimumSizeHint()` 内容值 |
-| --- | --- | --- | --- |
-| offscreen DPR 1.0 | **1000** | **1000** | 1265×618 |
-| windows DPR 1.5 | **1000** | **1000** | 960×633 |
+| 量 | 值 | 含义 |
+| --- | --- | --- |
+| `minimumSize()` 声明地板 | **1000×680** | 产品地板，请求小于它会被顶上来 |
+| `minimumSizeHint()` 内容需求 | **834×596～607** | 内容自己想多大（高度随宽度浮动） |
 
-强制越界验证：两种指纹下 `resize(800, 500)` **都还是 1000×600** → 硬墙生效，960 从未成为实际窗口宽。
+差额：宽 **166**、高 **73～84**。这个差额不是 bug，是「地板留的余量」；
+真正的 bug 是地板与内容都没有一起随屏幕高度收敛（§3.3.2）。
+
+**旧口径的强制越界验证已重做**：`resize(960, 633)` 与 `resize(1265, 618)`
+在现行地板下分别被顶成 **1000×680** 与 **1265×680** —— 也就是说，
+旧文档里所有「960×633」「1265×618」的测量，**测的都不是那个尺寸**。
 
 **1237→960（真屏 277px）逐项对账**（同一窗口、同一 DPR 1.5、同一字体）：
 
@@ -588,73 +620,205 @@ updated_at / measured`，缺任一字段即拒绝更新。本条为
 `authorized_by=用户 2026-11-05 裁定 + 2026-11-06 批准`、
 `measured` 如上表；存量 token 未留存的历史字段如实写「未留存」，不编数字。
 
+## §3.3 高度链实测复核（2026-11-11，HEAD `9836b98b`，旧「溢出 71px」作废）
+
+**测量条件**（与 §1.0 指纹一致，且**不上屏**，避免窗口管理器夹取）：
+`QT_QPA_PLATFORM=windows`、DPR **1.5**、字体 **MiSans 10pt**、行高 **18**、
+`WA_DontShowOnScreen=1`、`win.resize(请求)` 后 `layout().activate()`。
+每行都断言「实际 == 请求」，不等的那两行单独标出。
+
+### §3.3.1 高度链（真屏指纹，单位 px）
+
+`topBar` 是中央区的子控件，**它的 56 已含在「中央区」里**，不能再单列相加。
+
+| 请求尺寸 | 实际尺寸 | 菜单栏 | 中央区（含 `topBar` 56） | 状态栏 | 校验：菜单+中央+状态 | 窗口 `minimumSizeHint` |
+| --- | --- | --- | --- | --- | --- | --- |
+| **1366×768** | 1366×768 ✅ | 29 | 716 | 23 | **768** ✓ | **834×599** |
+| **1237×799** | 1237×799 ✅ | 29 | 748 | 22 | **799** ✓ | **834×607** |
+| **1440×900** | 1440×900 ✅ | 29 | 849 | 22 | **900** ✓ | 834×607 |
+| 1265×618（作废，请求值会被最小尺寸抬高） | **1265×680** ❌ 高 +62 | 29 | 629 | 22 | **680** ✓ | 834×607 |
+| 960×633（不支持，声明最小宽 1000） | **1000×680** ❌ 宽 +40 / 高 +47 | 29 | 629 | 22 | **680** ✓ | 834×607 |
+| 1000×680 | 1000×680 ✅ | 29 | 629 | 22 | **680** ✓ | 834×607 |
+
+**内容高度需求 = 607**（把地板临时清零后请求任意宽度、高度 300，实际都被顶到
+607；构成 29 + 556 + 22，`topBar` 的 56 含在中央区 556 内）。
+`topBar` 现高 **56**（旧文档记的 44 已过期）。
+
+> 旧版这张表把 `topBar` 56 单列又加上中央区，得出「768 高的窗口合计 824」这种
+> 自相矛盾的假数；上面已按「中央区含 topBar」重算，每行都能对上窗口实际高。
+
+### §3.3.2 结论：680 不是 768 屏溢出的直接原因（旧结论已推翻）
+
+**判据一：1366×768 @100% 下内容与地板都装得下。**
+可用客户区高 = 768 − 任务栏 40 = **728**（标题栏在客户区之外，不再重复扣）；
+内容最小高 **607**、地板 **680**，两者都 < 728，**没有任何溢出**。旧账
+「1237×799 > 728 = 溢出 71px」用的是旧的 `minimumSizeHint` 高度，已作废。
+
+**判据二：`_min_h=680` 会随屏幕变小自动缩，不会把窗口顶出屏幕。**
+`main_window.py:847-849` 是 `_min_h = min(680, int(avail.height() * 0.94))`。
+本机实测（`QT_SCALE_FACTOR` 三档，`QT_QPA_PLATFORM=windows`，
+`probe_floor_scaling.py`，物理屏 1920×1200）：
+
+| QT_SCALE_FACTOR | DPR | `availableGeometry` | 窗口地板 `minimumSize` | 内容 `minimumSizeHint` | 结论 |
+| --- | --- | --- | --- | --- | --- |
+| 1.0 | 1.5 | 1280×752 | **1000×680** | 834×588 | 装得下 |
+| 1.25 | 1.875 | 1024×602 | **962×565** | 834×588 | 地板比内容矮 23 → **窗口内裁切** |
+| 1.5 | 2.25 | 853×501 | **860×560** | 834×588 | 地板比内容矮 28；宽 860 > 853 **超出屏宽 7** |
+
+地板随可用尺寸一路下降（680 → 565 → 560），所以「680 把窗口顶出 768 屏」这条
+机制**不成立**。
+
+**判据三：真正的缺口是「内容最小高」，不是地板。**
+高 DPI 下地板已被 `0.94` 压到 560～565，反而低于内容需求 588～607，
+表现为**窗口内部裁切 / 挤压**（中央区实得不足 556），而不是窗口超出屏幕。
+因此把 `_min_h` 从 680 压到 640 **对这一档没有任何作用**（640 仍高于
+`0.94 × avail`，地板根本轮不到它）——**该收口的是中央区那 556**。
+`_min_w` 侧唯一残留是 150% 下 `max(860, 0.94×853)=860` 比屏宽 853 多 7px。
+
+### §3.3.3 地板 1000×680 的来历（`path:line`）
+
+`desktop/main_window.py:846-852`（2026-11-10 为「默认布局显示不全」加入）：
+
+```python
+_min_w = min(1000, int(avail.width() * 0.94))
+_min_h = min(680, int(avail.height() * 0.94))
+self.setMinimumSize(max(860, _min_w), max(560, _min_h))
+```
+
+- `_min_w=1000`、`_min_h=680` 都是**常数上限**，不是控件最小宽/高的累加值；
+  `0.94` 只在屏幕更小时才起作用（本机 `avail=1280×752` → `0.94×752=706`，
+  `min(680,706)=680`，所以实测就是 680）。
+- 结论：**1000 与 680 均无「控件累加」来源**，是手写的 UX 地板；
+  与内容需求（834×607）的差 **166×73** 就是纯余量。
+- 待办（`main_window.py` 现由另一线持有未提交改动，本线不抢）：**不是**把 `_min_h`
+  压到 640——§3.3.2 判据二/三已实测否决该方案（地板本就随屏幕下缩，640 在高 DPI
+  下轮不到生效，在 100% 下也换不来可见收益）。真正的收口目标是中央区那 556
+  （内容最小高 588～607 的唯一来源），见
+  `docs/pending-patches/2026-11-11-minheight-680-to-640.md`（该文件记录的是
+  「680→640 被实测否决」与替代目标，不是待执行补丁）。
+
+### §3.3.4 另一起独立缺陷（另一线报告，本线未修）
+
+1000×680 下「频谱头部卡压住左上『星象仪模式/频谱』页签条」是**内容重叠**，
+与屏幕高度溢出无关（该尺寸下中央区实得 629 > 内容需求 556）。本线只登记：
+**待复验**，需 UI 线在 `1000×680` 三档里各截一次图取证。
+
+### §3.3.5 dpr1（DPR 1.0 / 行高 27）在 1000×680 的越界两笔
+
+指纹：`QT_QPA_PLATFORM=windows` + `QT_SCALE_FACTOR=1` + `QT_ENABLE_HIGHDPI_SCALING=0`，
+**行高 27**（DPR 1.5 指纹下是 18），窗口实得 1000×680，连续三次都是 **挤压 8 / 越界 2**。
+
+| # | 控件 | 方向 | 越出多少 | 父容器 | 直接成因 |
+| --- | --- | --- | --- | --- | --- |
+| 1 | `rightColumnBody`（右栏滚动内容） | 右 | **+38px**（body 349 vs 视口 310，横向滚动条已出现） | `qt_scrollarea_viewport` 310×472 | `ControlPanel` 最小宽 349 ← 一个 `QGroupBox` 最小宽 325（标签 + 最小宽 210 的组合框横排）；行高 27 把标签与组合框的最小宽一起放大 |
+| 2 | `dbSliderCol` 第 3 根竖滑杆（「最小」） | 下 | **+6px**（底 309 vs 父高 303） | `dbSliderCol` 40×303 | 三根滑杆 `setMinimumHeight(90/80/80)` + 三个 24px 标签 → 列最小高 332；工具条藏/显一次后频谱面板只剩 303，末根滑杆被挤出 |
+
+> 越界 2 的触发条件：脚本 §4b「归属对照」会藏/显一次 `topBar` 与工具栏，之后
+> 频谱面板高度从 345 落到 303；不扰动时两笔都不出现（末根滑杆刚好贴底 −1px）。
+> 也就是说 **它没有余量，任何一次重排都会翻红**。
+
+**成因判读**：两笔都是**行高 27 把最小尺寸放大**（横向是 min-width、纵向是 min-height），
+不是阈值、也不是坐标系问题——同一份代码在行高 18 下是**挤压 4 / 越界 1**
+（越界的同样只有右栏滚动体，宽度差更小；滑杆列不越界）。
+挤压 8 项同样是组合框 `sizeHint=minHint=210` 被压到 60～180。
+
+**修法（改产品代码，不动 `SIZE_LIMITS`、不动 `_min_h`）**
+
+1. 横向（右栏 349 → ≤310）：`desktop/control_panel.py` 里「标签 + 组合框」那一排改为
+   允许组合框低于内容宽并省略——`setSizeAdjustPolicy(AdjustToMinimumContentsLengthWithIcon)`
+   + `setMinimumContentsLength(10)`（当前 16 → 最小宽 210）。**牺牲**：极窄时组合框
+   显示省略号，全称靠 tooltip；如果不想省略，就把这一排改成标签在上、组合框在下的两行。
+2. 纵向（滑杆列 332 → ≤303）：`desktop/spectrum_widget.py:2749/2770/2792`
+   三处 `setMinimumHeight(90/80/80)` 降到 `60`，列最小高约 260。**牺牲**：面板被压到
+   303 时滑杆行程变短（拖动手感略钝），数值精度不变（步进由 `setSingleStep` 决定）。
+3. 这两笔的执行方：`control_panel.py`、`spectrum_widget.py` 均不在本线名下，本线只出
+   patch 计划，不抢改；改完必须用三档 × 双指纹复测同一组数字（本表是棘轮起点）。
+
 ## §4 验收口径（冻结解除后第一件事按这个改）
 
-**规则（双指纹最坏值，不许挑一个指纹交差）**：
+**规则（三档 × 双指纹，不许挑一档交差）**：
 
-1. 同一组断言必须在**两种指纹**下各跑一次：`offscreen` 与真屏 `windows`；
-2. **DPR 1.0（offscreen）**：宽 ≤ **1344** 且 高 ≤ **700**（1366×768 @100%
-   扣边框/任务栏后的可用区）；**真屏 DPR 1.5（windows）**：不得比
-   2026-11-05 基线更差（宽 ≤1237、高 ≤659；实测 960×633）；
-3. 每次测量输出必须带 `env` 段（platform / DPR / 逻辑 DPI / 字体与行高 /
+1. **验收尺寸只有三档**（§0.0）：`1000×680`（地板）/ `1265×680` / `1440×900`。
+   `960×633` 不支持（宽被地板抬高）、`1265×618` 作废（高被地板抬高）；
+2. 同一组断言必须在**两种真屏指纹**下各跑一次：**DPR 1.0**
+   （`QT_QPA_PLATFORM=windows` + `QT_SCALE_FACTOR=0.6666667`）与 **DPR 1.5**
+   （`QT_QPA_PLATFORM=windows`，默认缩放）。**禁用 `QT_QPA_PLATFORM=offscreen`**：
+   本机 offscreen 下 `QFontDatabase.families()=0`，文字全成方框，尺寸不可信，
+   脚本已内置退出码 2 拒绝出数（§1.0）；
+3. 每次测量必须断言 **实际尺寸 == 请求尺寸**；不相等即**测量失败**（不是过线），
+   由 `scripts/ui_narrow_breakdown.py` 的非零退出码强制；
+4. 每次测量输出必须带 `env` 段（platform / DPR / 逻辑 DPI / 字体与行高 /
    style），**缺一段视为无效**；
-4. 任一指纹失败即不合格，不得用另一指纹的通过来抵。
+5. 任一档任一指纹失败即不合格，不得用另一档/另一指纹的通过来抵。
+6. 判定量仍是**内容最小宽/高提示**（`minimumSizeHint`）与**每档挤压/越界计数**；
+   它不是窗口地板，地板另断言 `minimumSize()`（见 §2.3.2）。
 
 ```python
 import json, os, subprocess, sys
 
-LIMITS = {
-    "offscreen": (1344, 700),   # DPR 1.0：1366×768 @100% 扣边框/任务栏
-    "windows":   (1237, 659),   # 真屏 DPR 1.5：不得比基线更差
-}
+# 三档验收尺寸；960×633 与 1265×618 已作废（§0.0）
+TIERS = [(1000, 680), (1265, 680), (1440, 900)]
 ENV_KEYS = ("qt_platform", "device_pixel_ratio", "logical_dpi",
             "font_family", "font_point_size", "font_line_height", "style")
+FLOOR = (1000, 680)   # window.minimumSize()，地板
 
-def _measure(platform):
-    env = dict(os.environ, QT_QPA_PLATFORM=platform)
+def _measure(scale_factor: str, expect_dpr: float):
+    env = dict(os.environ, QT_QPA_PLATFORM="windows",
+               QT_SCALE_FACTOR=scale_factor)
     out = subprocess.run(
         [sys.executable, "scripts/ui_narrow_breakdown.py", "--json"],
-        capture_output=True, text=True, env=env, check=True).stdout
+        capture_output=True, text=True, env=env)
+    # 非零退出 = 实际尺寸 != 请求尺寸（脚本内置硬断言，§3.3/§4 规则 3）
+    assert out.returncode == 0, f"[dpr{expect_dpr}] 测量失败：{out.stderr.strip()[-300:]}"
     data = json.loads(out[out.index("{"):])
     missing = [k for k in ENV_KEYS if k not in data.get("env", {})]
-    assert not missing, f"[{platform}] env 缺 {missing}，测量无效"
+    assert not missing, f"[dpr{expect_dpr}] env 缺 {missing}，测量无效"
+    assert abs(data["env"]["device_pixel_ratio"] - expect_dpr) < 0.01, (
+        f"[dpr{expect_dpr}] 指纹不符：{data['env']['device_pixel_ratio']}"
+        "（缩放没生效，测的不是这一档）")
     return data["summary"]
 
-@pytest.mark.parametrize("platform", ["offscreen", "windows"])
-def test_narrow_screen_is_fully_usable(platform):
-    s = _measure(platform)
-    # 口径：window_minimumSizeHint = 内容最小；window_minimumWidth = 声明硬墙。
+@pytest.mark.parametrize("scale_factor,expect_dpr", [
+    ("0.6666667", 1.0),   # DPR 1.0 指纹
+    ("1", 1.5),           # DPR 1.5 指纹（本机 Windows 150% 缩放，默认）
+])
+def test_narrow_screen_is_fully_usable(scale_factor, expect_dpr):
+    s = _measure(scale_factor, expect_dpr)
+    tag = f"dpr{expect_dpr}"
+    # 口径：window_minimumSizeHint = 内容最小；window_minimumSize = 声明地板。
     # 两者都断言，别把内容最小当窗口地板（见 §2.3.2）。
     w, h = s["window_minimumSizeHint"]
-    limit_w, limit_h = LIMITS[platform]
-    assert w <= limit_w, f"[{platform}] 内容最小宽提示（平台度量）{w} > {limit_w}"
-    assert h <= limit_h, f"[{platform}] 内容最小高 {h} > {limit_h}"
-    assert s["window_minimumWidth"] == [1000, 600], (
-        f"[{platform}] 声明最小被改动：{s['window_minimumWidth']}"
-        f"（应先答「为什么改、依据是什么、有没有破坏 1000 那条测试」）")
-    assert s["topBar_width"] <= w, f"[{platform}] topBar {s['topBar_width']}"
-    # 注意：summary 里的 mainToolBar_width 是「内容合计」（1344 下 1575），
-    # 不是声明最小宽地板——Qt 会把右端 6 个控件收进 » 菜单（1 次点击可达，
-    # 见 §2.3.1）。窗口地板由 topBar / 中央区决定，故此处不断言它 ≤ limit_w。
-    assert s["spectrum_width"] <= limit_w, (
-        f"[{platform}] 频谱工具栏 {s['spectrum_width']}")
+    assert [w, h] <= [FLOOR[0], 728], (
+        f"[{tag}] 内容最小 {w}×{h} 超出地板宽 {FLOOR[0]} 或 768 屏可用高 728")
+    assert s["window_minimumWidth"] == list(FLOOR), (
+        f"[{tag}] 声明最小被改动：{s['window_minimumWidth']}"
+        f"（应先答「为什么改、依据是什么、有没有破坏地板测试」）")
+    assert s["topBar_width"] <= w, f"[{tag}] topBar {s['topBar_width']}"
+    # 注意：summary 里的 mainToolBar_width 是「内容合计」，不是地板——
+    # Qt 会把右端 6 个控件收进 » 菜单（1 次点击可达，见 §2.3.1）。
+    assert s["spectrum_width"] <= FLOOR[0], (
+        f"[{tag}] 频谱工具栏 {s['spectrum_width']}")
 
-@pytest.mark.parametrize("platform", ["offscreen", "windows"])
-def test_no_text_squeezed_at_target_width(platform):
-    """目标 1344×700 下顶栏/底坞不得有控件被压到小于 sizeHint（§2.3.2）。"""
-    s = _measure(platform)
-    over = s["caliber"]["overflow_at_1344x700"]
-    top_squeezed = [r for r in over["squeezed"]
-                    if r.startswith("topBar:") and "statusValue" in r]
-    assert not top_squeezed, f"[{platform}] 顶栏状态标签被压：{top_squeezed}"
-    assert over["clipped_count"] <= 1, (
-        f"[{platform}] 越界控件 {over['clipped_count']} > 1（唯一允许项是 "
-        f"ControlPanel 自己的滚动视口）")
+@pytest.mark.parametrize("scale_factor,expect_dpr", [
+    ("0.6666667", 1.0),
+    ("1", 1.5),
+])
+def test_no_text_squeezed_at_tiers(scale_factor, expect_dpr):
+    """三档验收尺寸下不得出现「标签被压到小于 sizeHint」以外的越界（§2.3.2）。"""
+    s = _measure(scale_factor, expect_dpr)
+    for key, over in s["caliber"]["tiers"]["overflow"].items():
+        top_squeezed = [r for r in over["squeezed"]
+                        if r.startswith("topBar:") and "statusValue" in r]
+        assert not top_squeezed, f"[{key}] 顶栏状态标签被压：{top_squeezed}"
+        assert over["clipped_count"] <= 1, (
+            f"[{key}] 越界控件 {over['clipped_count']} > 1（唯一允许项是 "
+            f"右栏自己的滚动视口 body）")
 ```
 
 绘图区/控件越界仍按原口径单独断言（`_fft_plot` ≥ 600×200、可见控件不越父边界）；
-它们同样要在两种指纹下跑。新增这一档窄屏断言，**不改现有 1000×600 /
-1600×900 两条基线**。
+它们同样要在两种指纹下跑。新增这一档窄屏断言，**不改现有基线的截图基准**；
+但验收尺寸以 §0.0 三档为准——旧 `1000×600` 请求在本机被地板夹成 `1000×680`，
+它只能当「历史基线测试的入参」，不得再当验收测量点。
 
 ## §5 明确不改
 
@@ -668,9 +832,11 @@ def test_no_text_squeezed_at_target_width(platform):
 ## §6 自拟登记（评审时逐条确认）
 
 - §2.1 的 #4、#5；§2.2 的 #3、#4；§2.3 全部；§2.4 抽屉阈值 1440；§3 的 #1、#2。
-- 由实测得出的：双指纹内容最小宽提示（平台度量，1625/1237）、三处布局最小宽拆账
-  （1941/1652 等）、756/1060 可用宽、714×255 绘图区、双指纹高度链（729=24+39+644+22 与
-  799=29+44+705+21；中央 644/705 = 顶栏 56 + 左栏 514/575 + 底坞 74）。
+- 由实测得出的（2026-11-11 更新；旧「1625/1237」「729=24+39+644+22」与
+  「799=29+44+705+21」已作废——`topBar` 44→56、口径见 §3.3.1）：
+  内容最小 **834×596～607**、三档高度链 `1366×768 = 29+716+23`、
+  `1440×900 = 29+849+22`；三处布局最小宽拆账（1941/1652 等）、756/1060 可用宽、
+  714×255 绘图区。
 - **两份基准都没有的**：窄屏形态本身。原型是 1920 宽设计，`.figma` 是 1920 宽车机 HMI，
   `reference/`（satdump / sdrpp / stellarium）也没有 1366 窄屏形态 → 本方案属**自拟**。
 
