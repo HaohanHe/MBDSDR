@@ -44,7 +44,7 @@ sys.path.insert(0, os.path.join(_ROOT, "scripts"))
 
 import pytest  # noqa: E402
 from PySide6.QtCore import QEvent, QPointF, QRectF, QSettings, Qt  # noqa: E402
-from PySide6.QtGui import QColor, QFont, QFontMetricsF, QImage  # noqa: E402
+from PySide6.QtGui import QColor, QFont, QFontMetricsF, QGuiApplication, QImage  # noqa: E402
 from PySide6.QtWidgets import (  # noqa: E402
     QApplication, QComboBox, QScrollArea, QTabBar, QWidget,
 )
@@ -308,9 +308,22 @@ def test_request_800_is_clamped_to_declared_1000():
         app.setStyleSheet(app.styleSheet())
         _pump(150)
         win.layout().activate()
-        assert win.minimumWidth() == 860, (
-            f"产品声明的最小宽度变成 {win.minimumWidth()}；本用例的前提是 860"
+        assert win.minimumWidth() >= 860, (
+            f"产品声明的最小宽度 {win.minimumWidth()} 低于地板 860"
             "（2026-11-07 用户要求界面自适应竖屏/窄屏，旧值 1000 已作废）")
+        # 最小宽不是常量，是派生值：三栏真实下限之和 + 两条分隔条，再夹到
+        # 「不超过屏幕可用宽 94%」的上限（见 main_window.py 的 setMinimumWidth 块）。
+        # 这里锁算式、不锁具体数字——面板最小宽一变，报出来的是「谁把下限顶高了」。
+        _sp = win._main_splitter
+        _cols = [_sp.widget(i).minimumSizeHint().width() for i in range(3)]
+        _need = sum(_cols) + _sp.handleWidth() * 2
+        _cap = int(QGuiApplication.primaryScreen().availableGeometry().width() * 0.94)
+        assert win.minimumWidth() >= min(max(860, _need), _cap), (
+            f"声明最小宽 {win.minimumWidth()} 装不下三栏下限 {_need}"
+            f"（左/中/右 {_cols} + 分隔条 {_sp.handleWidth()}×2，屏幕 94% 上限 {_cap}）："
+            "有面板的最小宽涨了，请查是谁顶高的，不要改这个断言")
+        assert win.minimumWidth() <= max(860, _cap), (
+            f"声明最小宽 {win.minimumWidth()} 超过屏幕可用宽 94%（{_cap}）：会把窗口顶出屏外")
         # 高度不再是写死的 560/600：三栏 + 频谱 + 瀑布 + 底栏的真实下限是
         # 680（2026-11-10 用户实指「默认布局显示不全」，把下限抬到内容真需要
         # 的高度）。这里断言的是「请求值被夹到声明下限」这个行为本身，
@@ -318,9 +331,9 @@ def test_request_800_is_clamped_to_declared_1000():
         expected_h = win.minimumHeight()
         assert expected_h >= 600, (
             f"声明最小高度 {expected_h} 小于 600：窗口底座不该缩到看不清")
-        assert (win.width(), win.height()) == (860, expected_h), (
+        assert (win.width(), win.height()) == (win.minimumWidth(), expected_h), (
             f"请求 800x600 实际得到 {win.width()}x{win.height()}，"
-            f"应被声明最小尺寸夹成 860x{expected_h}")
+            f"应被声明最小尺寸夹成 {win.minimumWidth()}x{expected_h}")
     finally:
         if win is not None:
             try:
