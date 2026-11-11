@@ -106,8 +106,10 @@ def test_gain_readback_failure_falls_back_to_last_applied(mw, monkeypatch):
             raise OSError("读不到设备增益")
 
     shown = []
+    # set_gain_applied 现带可选 readback_source：桩要按新签名收参，
+    # 断言仍只钉「退回到最后一次读回值」。
     monkeypatch.setattr(mw.control_panel, "set_gain_applied",
-                        lambda db: shown.append(float(db)))
+                        lambda db, source="": shown.append(float(db)))
     mw._last_gain_applied = 20.0
 
     mw._show_real_gain(_Backend())

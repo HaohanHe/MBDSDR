@@ -221,6 +221,10 @@ class SDRStatus:
     # 来源: gqrx/src/applications/gqrx/receiver.cpp:66 —— GQRX 默认守 144.8 MHz 业余段；
     # 我们面向普通用户首启体验，落在 98 MHz FM 广播段，一上来就能听到东西。
     frequency_hz: float = 98_000_000.0
+    # 频率读数来源：request=只下发了请求值，设备未回执；readback=刚从驱动
+    # 接口回读；空串=尚未调谐/未观测。界面与工具据此区分「设备确认」与
+    # 「请求值」，不得把 request 冒充成设备实际频率。
+    frequency_source: str = ""
     # None 表示"未选定，由后端子类决定"。各后端在 __init__ 里设自己的甜点档
     # （RTL 2.048M / HackRF 8M / USRP 1M / Pluto 2M，来源 gqrx ioconfig.cpp:266,279-302）；
     # connect() 时若仍为 None，用 2.048M 兜底。
@@ -383,6 +387,9 @@ class SDRBackend:
             logger.warning(f"set_frequency({freq_hz}) 失败，已回滚到 {old}")
             return False
         self.status.frequency_hz = freq_hz
+        # 默认后端只下发请求值，没有回读通道；有 getFrequency 的子类会覆写
+        # 成 readback（见 SoapySDRBackend.set_frequency）。
+        self.status.frequency_source = "request"
         # 换频后清空接收链状态 + 环形缓冲（RTLSDRBackend._apply_frequency 已
         # reset_buffer + ring_reader.clear()，这里再重置链状态，避免旧频残留）
         self._invalidate_rx_chain(rebuild=False)
@@ -3544,6 +3551,29 @@ class SoapySDRBackend(SDRBackend):
             self.status.error = f"setFrequency({freq_hz}) 失败: {e}"
             return False
 
+    def set_frequency(self, freq_hz: float) -> bool:
+        """调谐后回读 ``getFrequency()``；读不到就保留请求值并标明是请求值。
+
+        Soapy 驱动可能把请求频率量化到硬件步进（或直接拒绝后仍报旧值），
+        只把请求值写进状态会让界面显示一个设备并未接受的频点。
+        """
+        ok = super().set_frequency(freq_hz)
+        if not ok or self._sdr is None:
+            return ok
+        try:
+            actual = float(self._sdr.getFrequency(self._rx, self._chan))
+        except Exception as e:  # noqa: BLE001 - 驱动可能没有 getFrequency
+            logger.debug("Soapy getFrequency 回读失败（保留请求值）: %s", e)
+            self.status.frequency_source = "request"
+            return True
+        if math.isfinite(actual) and actual > 0:
+            self.status.frequency_hz = actual
+            self.status.frequency_source = "readback"
+        else:
+            # 回读值不可用：保留请求值，并如实标成 request。
+            self.status.frequency_source = "request"
+        return True
+
     @staticmethod
     def _coerce_rate(value) -> Optional[float]:
         """把驱动返回的速率转成正的有限值；不可用时返回 None（不编造）。"""
@@ -3719,6 +3749,7 @@ class SoapySDRBackend(SDRBackend):
             # 来源: Device.hpp:789 附近 getFrequency(RX, chan)
             self.status.frequency_hz = float(
                 self._sdr.getFrequency(self._rx, self._chan))
+            self.status.frequency_source = "readback"
             got += 1
         except Exception:
             pass
