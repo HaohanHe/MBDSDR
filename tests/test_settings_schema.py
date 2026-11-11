@@ -880,8 +880,8 @@ def test_import_rejects_cross_major_version(env):
     assert ds.get("theme") == SCHEMA["theme"].default
 
 
-def test_import_old_document_migrates_missing_fields(env):
-    """真造旧格式 JSON（删掉本轮新增键）→ 允许导入、按默认补齐、用户值不动。"""
+def test_import_old_document_keeps_missing_fields(env):
+    """旧格式文件（缺本轮新增键）→ 合并导入：缺失键保持现值，绝不回默认。"""
     ds, host, panel, tmp_path = env
     base = str(tmp_path / "base.json")
     panel.export_to(base)
@@ -908,14 +908,18 @@ def test_import_old_document_migrates_missing_fields(env):
     path = tmp_path / "old.json"
     path.write_text(json.dumps(payload), encoding="utf-8")
 
+    # 文件里缺失的键在导入前被用户改过：合并语义下必须保持这个值
+    ds.set("tuning_step_hz", 1000)      # 合法非默认档（七档之一）
     res = panel.import_from(str(path))
     assert res.ok, res.error
-    assert set(new_keys) <= set(res.filled)
-    # 缺字段 = 当前 schema 默认值
+    assert set(new_keys) <= set(res.absent)
+    assert ds.get("tuning_step_hz") == 1000, "缺键不得被当成改回默认"
     for key in new_keys:
+        if key == "tuning_step_hz":
+            continue
         assert ds.get(key) == SCHEMA[key].default, key
-    assert any("已按默认补齐" in w for w in res.warnings)
-    assert "已按默认补齐" in res.summary()
+    assert not any("已按默认补齐" in w for w in res.warnings)
+    assert "已按默认补齐" not in res.summary()
 
     # 用户原有值一个都没被覆盖（含 gui_config 的观测站坐标）
     for key, value in user_values.items():
@@ -948,6 +952,163 @@ def test_parse_import_reports_section_mismatch():
     })
     assert res.ok
     assert res.rejected and res.rejected[0][0] == "observer_lat"
+
+
+# ---------------------------------------------------------------------------
+# 5.0 合并语义三条反证（2026-11-11 行为变更：旧语义是全量覆盖）
+# ---------------------------------------------------------------------------
+def _set_live_baseline(panel, ds):
+    """造一份"用户已调好"的现场：频点/观测站/5 个 AI 参数全部偏离默认。"""
+    ds.set("frequency_hz", 145_500_000.0)
+    panel._on_changed("observer_lat", 31.23)
+    panel._on_changed("observer_lon", 121.47)
+    ai_values = {
+        "ai_temperature": 1.5, "ai_top_p": 0.5,
+        "ai_max_output_tokens": 4096, "ai_max_context_tokens": 65536,
+        "ai_timeout": 120,
+    }
+    for key, value in ai_values.items():
+        panel._on_changed(key, value)
+    return ai_values
+
+
+def test_import_theme_only_changes_exactly_one_item(env):
+    """反证①：只含 theme 的文件 → 只改 1 项，其余（含观测站/5 个 AI/频点）不动。"""
+    ds, host, panel, tmp_path = env
+    ai_values = _set_live_baseline(panel, ds)
+
+    path = tmp_path / "theme_only.json"
+    path.write_text(json.dumps({
+        "schema_version": CONFIG_SCHEMA_VERSION,
+        "settings": {"theme": "dark"},
+    }), encoding="utf-8")
+
+    res = panel.import_from(str(path))
+    assert res.ok, res.error
+    # 预览口径：只报 1 项修改、0 项清空；旧值 → 新值可读
+    assert res.changes == [("theme", SCHEMA["theme"].default, "dark")]
+    assert res.clears == []
+    assert "修改 1 项" in res.summary()
+    assert ds.get("theme") == "dark"
+
+    # 文件没提到的项必须一个都不动
+    assert ds.get("frequency_hz") == 145_500_000.0, "频点不得被缺键覆盖"
+    assert (host._observer_lat, host._observer_lon) == (31.23, 121.47)
+    for key, value in ai_values.items():
+        item = SCHEMA[key]
+        assert panel._current_value(item) == value, key
+        assert panel._ai[panel._ai_file_key(item)] == value, key
+    assert "frequency_hz" in res.absent
+    assert "observer_lat" in res.absent
+    assert len(res.absent) >= 45, "缺键应大量落在 absent（保持现值）"
+
+
+def test_import_rejects_illegal_value_instead_of_falling_back(env):
+    """反证②：非法值必须拒绝并进 warnings，不得静默回落默认后写盘。"""
+    ds, host, panel, tmp_path = env
+    ds.set("fft_size", 2048)
+
+    path = tmp_path / "illegal.json"
+    path.write_text(json.dumps({
+        "schema_version": CONFIG_SCHEMA_VERSION,
+        "settings": {"theme": "dark", "fft_size": 9999},
+    }), encoding="utf-8")
+
+    res = panel.import_from(str(path))
+    assert res.ok, res.error
+    # 合法的 theme 照常导入
+    assert ds.get("theme") == "dark"
+    # 非法的 fft_size 被拒绝：不写入、不改盘、有用户可见说明
+    assert [k for k, _reason in res.rejected] == ["fft_size"]
+    assert any(w.startswith("fft_size:") for w in res.warnings)
+    assert "fft_size" not in res.accepted
+    assert ds.get("fft_size") == 2048, "非法值不得静默回落默认"
+    assert "拒绝 1 项" in res.summary()
+    assert [k for k, _old, _new in res.changes] == ["theme"]
+
+
+def test_import_full_old_document_still_restores(env):
+    """反证③：旧格式整份配置导入仍能还原（合并语义不削弱完整恢复）。"""
+    ds, host, panel, tmp_path = env
+    panel._on_changed("ai_temperature", 1.5)
+    ds.set("frequency_hz", 145_500_000.0)
+    panel._on_changed("observer_lat", 31.23)
+    panel._on_changed("observer_lon", 121.47)
+    base = tmp_path / "full.json"
+    panel.export_to(str(base))
+
+    # 改乱现值，模拟"导错一份想还原"
+    ds.set("frequency_hz", 98_000_000.0)
+    ds.set("theme", "default")
+    panel._on_changed("observer_lat", 10.0)
+    panel._on_changed("observer_lon", 20.0)
+    panel._on_changed("ai_temperature", 0.2)
+
+    res = panel.import_from(str(base))
+    assert res.ok, res.error
+    changed = {k: (old, new) for k, old, new in res.changes}
+    assert changed["frequency_hz"] == (98_000_000.0, 145_500_000.0)
+    assert changed["theme"] == ("default", SCHEMA["theme"].default)
+    assert ds.get("frequency_hz") == 145_500_000.0
+    assert ds.get("theme") == SCHEMA["theme"].default
+    assert (host._observer_lat, host._observer_lon) == (31.23, 121.47)
+    assert panel._current_value(SCHEMA["ai_temperature"]) == 1.5
+    # 整份文件不缺键 → absent 只有密钥类
+    assert "frequency_hz" not in res.absent
+    assert "observer_lat" not in res.absent
+
+
+def test_preview_import_does_not_write(env):
+    """预览纯读：调用方拿差异后再决定写，预览本身一个字段都不许落盘。"""
+    ds, host, panel, tmp_path = env
+    path = tmp_path / "theme_only.json"
+    path.write_text(json.dumps({
+        "schema_version": CONFIG_SCHEMA_VERSION,
+        "settings": {"theme": "dark"},
+    }), encoding="utf-8")
+
+    before_theme = host.theme
+    res = panel.preview_import(str(path))
+    assert res.ok
+    assert [k for k, _old, _new in res.changes] == ["theme"]
+    assert ds.get("theme") == SCHEMA["theme"].default
+    assert host.theme == before_theme, "预览不得推送到运行时"
+
+
+def test_import_dialog_cancel_writes_nothing(env, monkeypatch):
+    """对话框必须先给预览、用户确认后才落盘；选「否」一个字段都不写。"""
+    ds, host, panel, tmp_path = env
+    ds.set("frequency_hz", 145_500_000.0)
+
+    path = tmp_path / "theme_only.json"
+    path.write_text(json.dumps({
+        "schema_version": CONFIG_SCHEMA_VERSION,
+        "settings": {"theme": "dark"},
+    }), encoding="utf-8")
+
+    seen = {}
+
+    def _question(_parent, title, text, *args, **kwargs):
+        seen["title"], seen["text"] = title, text
+        return settings_panel.QMessageBox.No
+
+    monkeypatch.setattr(
+        settings_panel.QFileDialog, "getOpenFileName",
+        staticmethod(lambda *a, **k: (str(path), "JSON (*.json)")))
+    monkeypatch.setattr(settings_panel.QMessageBox, "question",
+                        staticmethod(_question))
+
+    panel._on_import_clicked()
+
+    # 预览内容确实展示给用户后才问确认
+    assert seen["title"] == "确认导入"
+    assert "将修改（旧值 → 新值）" in seen["text"]
+    assert "主题" not in seen["text"] and "theme" in seen["text"]
+    assert "文件里未提到的项保持现值" in seen["text"]
+    # 取消 → 未写盘，且明确告知
+    assert ds.get("theme") == SCHEMA["theme"].default
+    assert ds.get("frequency_hz") == 145_500_000.0
+    assert "已取消导入" in panel.status_label.text()
 
 
 # ---------------------------------------------------------------------------

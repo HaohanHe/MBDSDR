@@ -39,13 +39,13 @@ logger = logging.getLogger(__name__)
 
 try:
     from config_schema import (
-        CONFIG_SCHEMA_VERSION, EXPOSED_ITEMS, GROUP_ORDER, SCHEMA,
+        ALL_ITEMS, CONFIG_SCHEMA_VERSION, EXPOSED_ITEMS, GROUP_ORDER, SCHEMA,
         ImportResult, build_export, items_for_group, parse_import,
         validate_value,
     )
 except ImportError:  # pragma: no cover - 包内导入
     from .config_schema import (
-        CONFIG_SCHEMA_VERSION, EXPOSED_ITEMS, GROUP_ORDER, SCHEMA,
+        ALL_ITEMS, CONFIG_SCHEMA_VERSION, EXPOSED_ITEMS, GROUP_ORDER, SCHEMA,
         ImportResult, build_export, items_for_group, parse_import,
         validate_value,
     )
@@ -1258,14 +1258,22 @@ class SettingsPanel(QWidget):
         self._notify(f"已导出：{path}")
         return payload
 
-    def import_from(self, path: str) -> ImportResult:
-        """校验版本/字段后导入；未知键进 result.unknown（不静默丢弃）。"""
+    def preview_import(self, path: str) -> ImportResult:
+        """只读解析导入文件：不写任何配置，返回逐项差异供确认。
+
+        合并语义：文件没提到的键保持现值（``absent``），
+        ``changes``/``clears`` 给出「旧值 → 新值」供对话框预览。
+        """
         try:
             with open(path, "r", encoding="utf-8") as f:
                 payload = json.load(f)
         except (OSError, ValueError) as e:
             return ImportResult(error=f"读取失败：{e}")
-        res = parse_import(payload)
+        current = {item.key: self._current_value(item) for item in ALL_ITEMS}
+        return parse_import(payload, current=current)
+
+    def apply_import(self, res: ImportResult) -> ImportResult:
+        """把已预览的合并结果写入各存储后端；非法/未知项早已被剔除。"""
         if not res.ok:
             return res
         for key, value in res.accepted.items():
@@ -1291,6 +1299,10 @@ class SettingsPanel(QWidget):
                 self._apply(item, self._current_value(item))
         self._notify("导入完成：" + res.summary())
         return res
+
+    def import_from(self, path: str) -> ImportResult:
+        """非交互入口：预览后立即写入（对话框走 preview → 确认 → apply）。"""
+        return self.apply_import(self.preview_import(path))
 
     # ------------------------------------------------------------ 存储与日志页
     def _build_storage_tab(self) -> QWidget:
@@ -1353,24 +1365,49 @@ class SettingsPanel(QWidget):
             self, "导入配置", "", "JSON (*.json)")
         if not path:
             return
-        res = self.import_from(path)
+        res = self.preview_import(path)
         if not res.ok:
             detail = res.error or "没有返回具体原因"
             QMessageBox.warning(
                 self, "导入被拒绝",
                 f"导入被拒绝：{detail}。请修正该字段后重试，或点「恢复默认」重新导入。")
             return
+        if not res.changes and not res.clears:
+            QMessageBox.information(self, "无需导入", res.summary() + "。没有需要修改的项。")
+            return
         lines = [res.summary() + "。"]
-        if res.filled:
-            lines.append("已按默认补齐（旧文件缺少的字段）：" + "、".join(res.filled[:20]))
+        if res.changes:
+            lines.append("将修改（旧值 → 新值）：")
+            for key, old, new in res.changes[:20]:
+                lines.append(f"  {key}：{old!r} → {new!r}")
+            if len(res.changes) > 20:
+                lines.append(f"  …其余 {len(res.changes) - 20} 项")
+        if res.clears:
+            lines.append("将清空：")
+            for key, old in res.clears[:20]:
+                lines.append(f"  {key}：{old!r} → 空")
         if res.unknown:
             lines.append("已忽略（未知字段，不导入）：" + "、".join(res.unknown[:20]))
         if res.rejected:
-            lines.append("被拒绝：" + "；".join(
+            lines.append("被拒绝（非法值，未写入）：" + "；".join(
                 f"{k}={r}" for k, r in res.rejected[:20]))
         if res.warnings:
             lines.append("提示：" + "；".join(res.warnings[:20]))
-        QMessageBox.information(self, "导入完成", "\n".join(lines))
+        lines.append("文件里未提到的项保持现值；确认后才写入。")
+        if QMessageBox.question(
+                self, "确认导入", "\n".join(lines),
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No) != QMessageBox.Yes:
+            self._notify("已取消导入：未写入任何配置")
+            return
+        res = self.apply_import(res)
+        done = ["导入完成：" + res.summary() + "。"]
+        if res.rejected:
+            done.append("被拒绝：" + "；".join(
+                f"{k}={r}" for k, r in res.rejected[:20]))
+        if res.warnings:
+            done.append("提示：" + "；".join(res.warnings[:20]))
+        QMessageBox.information(self, "导入完成", "\n".join(done))
 
     def _browse_record_dir(self):
         """选择录音目录；已录文件不迁移（只影响新录音）。"""

@@ -699,8 +699,12 @@ class ImportResult:
     unknown: List[str] = field(default_factory=list)
     rejected: List[Tuple[str, str]] = field(default_factory=list)
     warnings: List[str] = field(default_factory=list)
-    #: 文件里缺失、按当前 schema 默认值补齐的键（同主版本迁移）。
-    filled: List[str] = field(default_factory=list)
+    #: 文件里没有提到、因而**保持现值**的已知键（合并语义；不写盘）。
+    absent: List[str] = field(default_factory=list)
+    #: 逐项差异 (键, 旧值, 新值)；没有 current 基准时旧值为 None。
+    changes: List[Tuple[str, Any, Any]] = field(default_factory=list)
+    #: 会被清空成空的项 (键, 旧值)。
+    clears: List[Tuple[str, Any]] = field(default_factory=list)
     error: Optional[str] = None
 
     @property
@@ -708,9 +712,10 @@ class ImportResult:
         return self.error is None
 
     def summary(self) -> str:
-        """人话结果：导入 N 项 / 补齐 N 项 / 忽略 N 项 / 拒绝 N 项。"""
-        parts = [f"已导入 {len(self.accepted)} 项",
-                 f"已按默认补齐 {len(self.filled)} 项",
+        """人话结果：修改 N 项 / 清空 N 项 / 保持 N 项 / 忽略 N 项 / 拒绝 N 项。"""
+        parts = [f"修改 {len(self.changes)} 项",
+                 f"清空 {len(self.clears)} 项",
+                 f"保持 {len(self.absent)} 项",
                  f"忽略未知 {len(self.unknown)} 项"]
         if self.rejected:
             parts.append(f"拒绝 {len(self.rejected)} 项")
@@ -768,13 +773,25 @@ def _parse_version(raw: Any) -> Tuple[int, int]:
     return major, minor
 
 
-def parse_import(payload: Any) -> ImportResult:
-    """解析导入 JSON：同主版本迁移，跨主版本拒绝；未知键**列出来**，不静默丢弃。
+_NORMALIZATION_PREFIXES = ("大小写/空白已归一", "数字档位已归一")
 
-    迁移口径（用户拿旧导出文件回来不该被拒之门外）：
-      * 同主版本、字段子集变化 → 缺的字段取当前 schema 默认（记入 ``filled``），
-        多的字段列进 ``unknown`` 并忽略；
-      * 跨主版本 → 拒绝，并说明原因与下一步该怎么办。
+
+def _is_normalization(reason: str) -> bool:
+    """写法归一（值语义不变）可以接受；其余说明一律视为非法值拒绝。"""
+    return reason.startswith(_NORMALIZATION_PREFIXES)
+
+
+def parse_import(payload: Any,
+                 current: Optional[Dict[str, Any]] = None) -> ImportResult:
+    """解析导入 JSON：同主版本**合并**，跨主版本拒绝。
+
+    合并口径（缺键 ≠ 改回默认）：
+      * 只接受文件里**实际出现**且合法的键；文件没提的键记入 ``absent``，
+        保持现值，不写盘；
+      * 非法值（越界/未知枚举/坏类型/null）进 ``rejected`` 与 ``warnings``，
+        **不回落默认**、不写入；
+      * 给了 ``current`` 时产出逐项 ``changes``（旧值 → 新值）与 ``clears``；
+      * 未知键列进 ``unknown`` 并忽略；跨主版本拒绝并说明原因与下一步。
     """
     res = ImportResult()
     if not isinstance(payload, dict):
@@ -800,7 +817,7 @@ def parse_import(payload: Any) -> ImportResult:
     if (major, minor) < (CONFIG_SCHEMA_MAJOR, CONFIG_SCHEMA_MINOR):
         res.warnings.append(
             f"导入文件版本 {major}.{minor} 较早（当前 "
-            f"{CONFIG_SCHEMA_MAJOR}.{CONFIG_SCHEMA_MINOR}），按当前 schema 迁移")
+            f"{CONFIG_SCHEMA_MAJOR}.{CONFIG_SCHEMA_MINOR}），按当前 schema 合并")
     elif (major, minor) > (CONFIG_SCHEMA_MAJOR, CONFIG_SCHEMA_MINOR):
         res.warnings.append(
             f"导入文件版本 {major}.{minor} 较新（当前 "
@@ -825,19 +842,30 @@ def parse_import(payload: Any) -> ImportResult:
                 res.rejected.append(
                     (key, f"属于 {item.storage} 存储，不应出现在 {section} 段"))
                 continue
+            if value is None and item.default is not None:
+                res.rejected.append(
+                    (key, "空值（null）不是该字段的合法值，未导入"))
+                res.warnings.append(f"{key}: 空值不是合法值（已拒绝，未写入）")
+                continue
             norm, reason = validate_value(item, value)
+            if reason and not _is_normalization(reason):
+                res.rejected.append((key, reason))
+                res.warnings.append(f"{key}: {reason}（已拒绝，未写入）")
+                continue
             res.accepted[key] = norm
             if reason:
                 res.warnings.append(f"{key}: {reason}")
 
-    # 同主版本迁移：文件里没有的键按当前默认值补齐（密钥类不参与导入导出）。
-    for item in ALL_ITEMS:
-        if item.secret or item.key in seen:
+    # 合并语义：文件没提到的键保持现值，只记录、不写盘。
+    res.absent = [it.key for it in ALL_ITEMS
+                  if not it.secret and it.key not in seen]
+    for key, new in res.accepted.items():
+        old = None if current is None else current.get(key)
+        if new is None:
+            if current is None or old is not None:
+                res.clears.append((key, old))
             continue
-        res.accepted[item.key] = item.default
-        res.filled.append(item.key)
-    if res.filled:
-        shown = "、".join(res.filled[:12])
-        more = f" 等 {len(res.filled)} 项" if len(res.filled) > 12 else ""
-        res.warnings.append(f"已按默认补齐 {len(res.filled)} 项：{shown}{more}")
+        if current is not None and old == new:
+            continue
+        res.changes.append((key, old, new))
     return res
