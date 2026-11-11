@@ -892,8 +892,9 @@ class NewSpacetimePanel(QWidget):
 
         stale = {}
         for p in passes:
-            tier = getattr(p, "tle_tier", "")
-            if tier not in ("expired", "dead", "unknown"):
+            # 档位判定与标签都在 tle_integrity.tracking_policy 里，本层只读
+            # policy 字段（不再 getattr(tle_tier) 后自己比较）。
+            if not (getattr(p, "policy", None) or {}).get("stale"):
                 continue
             prev = stale.get(p.name)
             if prev is None or ((p.tle_age_days or 0)
@@ -938,13 +939,8 @@ class NewSpacetimePanel(QWidget):
             low = (self._pass_show_low
                    and p.max_elevation < self._pass_min_elevation_deg)
             name = f"{p.name}（低仰角）" if low else p.name
-            tier = getattr(p, "tle_tier", "")
-            if tier in ("expired", "dead"):
-                age = (f" {p.tle_age_days:.0f} 天"
-                       if p.tle_age_days is not None else "")
-                name += f"（TLE {p.tle_tier_label or '过期'}{age}）"
-            elif tier == "unknown":
-                name += "（TLE 年龄未知）"
+            policy = getattr(p, "policy", None) or {}
+            name += policy.get("display_tag") or ""
 
             # 左列两行：卫星名 / 过境时刻 + 最大多普勒
             times = (f"{self._fmt_pass_time(p.rise_time, p)} → "
