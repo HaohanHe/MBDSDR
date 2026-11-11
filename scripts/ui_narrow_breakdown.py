@@ -18,6 +18,22 @@
   终止——绝不把夹取后的尺寸当测量结果写进 JSON。
 * 验收三档固定为 ``1000×680`` / ``1265×680`` / ``1440×900``
   （见 ``docs/narrow-screen-plan.md`` §0.0）；`960×633` 与 `1265×618` 已作废。
+* **验收必须按状态矩阵量**，不许拿「当前恰好是什么形态」当口径。三个可见性
+  开关（``topBarDetail`` / ``QToolBar`` / 焦点模式）显式组合成四个状态：
+
+  ============= ============ ========== ============== ==========================
+  状态           topBarDetail QToolBar   set_focus_mode 说明
+  ============= ============ ========== ============== ==========================
+  ``focus_mode``  隐藏         隐藏       True           开箱默认（main_window.py:2104）
+  ``legacy_gate`` 隐藏         可见       False          旧闸门口径，只作 6px 反证对照
+  ``detail_open`` 可见         隐藏       False          只展开读数条，隔离 56px
+  ``default``     可见         可见       False          点「详细」后的真实形态（24px）
+  ============= ============ ========== ============== ==========================
+
+  旧版只测 ``focus_mode``，再手动 ``hide()/show()`` 造出 ``legacy_gate`` 这个
+  产品里不存在的中间态——它把滑杆列越界量成 **+6px**，真实 ``default`` 是
+  **+24px**（差 18px）。每个状态都先断言可见性（不一致退出码 4），再逐档
+  断言「实际尺寸 == 请求尺寸」（夹取退出码 3）。
 
 运行::
 
@@ -49,8 +65,8 @@ from PySide6.QtCore import Qt  # noqa: E402
 from PySide6.QtGui import QFontDatabase, QFontMetrics  # noqa: E402
 from PySide6.QtWidgets import (  # noqa: E402
     QApplication, QComboBox, QDoubleSpinBox, QFrame, QLabel, QLineEdit,
-    QPushButton, QCheckBox, QSlider, QStyle, QTabWidget, QToolBar, QToolButton,
-    QWidget,
+    QPushButton, QCheckBox, QSlider, QScrollArea, QStyle, QTabWidget,
+    QToolBar, QToolButton, QWidget,
 )
 
 #: 验收三档（唯一口径，见 ``docs/narrow-screen-plan.md`` §0.0）。
@@ -60,10 +76,27 @@ TIERS = ((1000, 680), (1265, 680), (1440, 900))
 
 #: 请求尺寸被窗口最小尺寸夹住时的退出码（与「字体库为 0」的 2 区分）。
 EXIT_SIZE_CLAMPED = 3
+#: 状态开关没有落到预期可见性时的退出码（量到的不是该状态，数字作废）。
+EXIT_STATE_MISMATCH = 4
+
+
+#: 验收状态矩阵（唯一口径，组合见模块 docstring）。
+#: 顺序 = 输出顺序；``default`` 必须留在最后，它同时是 release_check.py
+#: 读的验收口径。
+STATES = (
+    ("focus_mode", {"detail": False, "toolbars": False, "focus": True}),
+    ("legacy_gate", {"detail": False, "toolbars": True, "focus": False}),
+    ("detail_open", {"detail": True, "toolbars": False, "focus": False}),
+    ("default", {"detail": True, "toolbars": True, "focus": False}),
+)
 
 
 class SizeClamped(RuntimeError):
     """请求尺寸被最小尺寸夹住：此时任何数字都不能当测量结果。"""
+
+
+class StateMismatch(RuntimeError):
+    """状态开关没有落到预期可见性：此时量到的是别的状态。"""
 
 
 def _isolate_qsettings() -> None:
@@ -497,38 +530,16 @@ def main() -> int:
         print(f"  菜单栏 minHint {result['chrome_floor']['menu_bar_min_hint']}"
               f"｜状态栏 minHint {result['chrome_floor']['status_bar_min_hint']}")
 
-    # ---------- 4b. 1625 到底谁撑的（隐藏对照实验） ----------
-    def _win_min() -> tuple[int, int]:
-        _pump(app, 40)
-        ms = win.minimumSizeHint()
-        return ms.width(), ms.height()
-
-    baseline = _win_min()
-    top.hide()
-    top_hidden = _win_min()
-    top.show()
-    tb.hide()
-    tb_hidden = _win_min()
-    tb.show()
-    _pump(app, 40)
-    emit("归属对照（隐藏谁，窗口最小宽降到多少）")
-    attribution = {
-        "both_shown": list(baseline),
-        "topBar_hidden": list(top_hidden),
-        "mainToolBar_hidden": list(tb_hidden),
-    }
-    result["attribution"] = attribution
-    if not args.json:
-        print(f"  两者都在: {baseline}")
-        print(f"  隐藏 topBar: {top_hidden}  → 降 {baseline[0] - top_hidden[0]}")
-        print(f"  隐藏 mainToolBar: {tb_hidden}  → 降 {baseline[0] - tb_hidden[0]}")
-
-    # ---------- 4f. 口径核对：声明最小宽 = 1000（硬墙），内容最小宽 = ?
-    # minimumSizeHint() 只是「内容想要多宽」；真正挡住窗口的是
-    # setMinimumSize(1000, 600)。两者必须分开报，别把 hint 当最小宽。
-    # 顺带统计「按声明最小宽 1000 摆开时」有多少控件被压/越界。
+    # ---------- 4b. 声明最小（硬墙）与内容最小必须分开报 ----------
+    # minimumSizeHint() 只是「内容想要多高多宽」；真正挡住窗口的是
+    # setMinimumSize(1000, 680)。别把 hint 当最小宽。
     declared = [win.minimumWidth(), win.minimumHeight()]
-    content_hint = list(baseline)
+
+    # ---------- 4f. 口径核对：状态矩阵 × 验收档（唯一验收口径） ----------
+    # 旧版只测「专注态」（读数条与工具栏都隐藏），再手动 hide/show 造出一个
+    # 产品里不存在的中间态（读数条隐藏 + 工具栏可见），把滑杆列的越界量成
+    # +6px；真实详细态是 +24px。下面把三个可见性开关显式组合成状态，
+    # 每个状态都先断言可见性，再逐档断言「实际尺寸 == 请求尺寸」。
 
     def _scan_overflow() -> dict:
         from PySide6.QtWidgets import (
@@ -605,68 +616,237 @@ def main() -> int:
                 f"请求尺寸不可达，本次测量作废。")
         return {"requested": [req_w, req_h], "actual": actual, "equal": True}
 
+    def _slider_col() -> dict:
+        """频谱右侧三根竖滑杆所在列的越界量（纵向真红的量尺）。
+
+        「越界 px」= 列内子控件底边超出列底边的最大值，正是用户看到被裁掉
+        的那一截；``deficit`` = 列自报最小高 − 实得高，是挤压总量。两者不是
+        同一个数：布局会先把子控件按比例压缩，压缩到极限才向外溢出。
+        """
+        col = win.findChild(QWidget, "dbSliderCol")
+        if col is None or col.layout() is None:
+            return {"error": "no_dbSliderCol"}
+        avail = col.height()
+        rows = []
+        for i in range(col.layout().count()):
+            cw = col.layout().itemAt(i).widget()
+            if cw is None:
+                continue
+            rows.append({
+                "label": _label_of(cw),
+                "text": _text_of(cw),
+                "y": cw.y(),
+                "height": cw.height(),
+                "min_height": cw.minimumHeight(),
+                "overflow": max(0, cw.y() + cw.height() - avail - 1),
+            })
+        needed = col.minimumSizeHint().height()
+        return {
+            "visible": col.isVisible(),
+            "needed": needed,
+            "actual": avail,
+            "deficit": max(0, needed - avail),
+            "overflow_px": max((r["overflow"] for r in rows), default=0),
+            "offenders": sorted([r for r in rows if r["overflow"] > 0],
+                                key=lambda r: -r["overflow"]),
+            "rows": rows,
+        }
+
+    def _right_column() -> dict:
+        """右栏横向真红的量尺：容器最小宽 vs 滚动视口宽（body ≤ 视口）。"""
+        area = win.findChild(QScrollArea, "rightColumnScroll")
+        body = win.findChild(QWidget, "rightColumnBody")
+        if area is None or body is None:
+            return {"error": "no_rightColumn"}
+        vp = area.viewport()
+        widest = []
+        for c in body.findChildren(QWidget):
+            if not c.isVisible() or c.width() <= 0:
+                continue
+            need = c.minimumSizeHint().width()
+            if need > vp.width():
+                widest.append({"label": _label_of(c), "text": _text_of(c),
+                               "min_w": need})
+        widest.sort(key=lambda r: -r["min_w"])
+        return {
+            "viewport": [vp.width(), vp.height()],
+            "body": [body.width(), body.height()],
+            "body_min_w": body.minimumSizeHint().width(),
+            "overflow_px": max(0, body.minimumSizeHint().width() - vp.width() - 1),
+            "hscroll_visible": area.horizontalScrollBar().isVisible(),
+            "hscroll_range": area.horizontalScrollBar().maximum(),
+            "widest": widest[:5],
+        }
+
+    def _apply_state(name: str, state: dict) -> None:
+        """把三个可见性开关显式设成 ``state`` 的组合（不是「碰巧是什么」）。"""
+        win.set_focus_mode(bool(state["focus"]))
+        td = win.findChild(QWidget, "topBarDetail")
+        if td is not None:
+            td.setVisible(bool(state["detail"]))
+        for bar in win.findChildren(QToolBar):
+            bar.setVisible(bool(state["toolbars"]))
+        _pump(app, 20)
+
+    def _assert_state(name: str, state: dict) -> dict:
+        """断言状态真的生效；不一致就抛 ``StateMismatch``（退出码 4）。"""
+        td = win.findChild(QWidget, "topBarDetail")
+        bars = win.findChildren(QToolBar)
+        got = {
+            "detail": bool(td is not None and td.isVisible()),
+            "toolbars": bool(bars) and all(b.isVisible() for b in bars),
+            "focus": bool(getattr(win, "_focus_mode", None)),
+        }
+        bad = [k for k in ("detail", "toolbars", "focus")
+               if got[k] != bool(state[k])]
+        if bad:
+            raise StateMismatch(
+                f"状态 {name} 未生效：期望 {state}，实际 {got}"
+                f"（不一致项 {bad}）。量到的不是该状态，数字作废。")
+        return got
+
+    matrix: dict = {}
     try:
         _pump(app, 20)
-        # 声明最小（setMinimumSize 硬墙）就是能达到的最小尺寸，按它测量。
-        size_declared = _resize_exact(*declared, label="declared")
-        overflow_at_declared = _scan_stable()
-        # 1344×700 不是验收档（验收见 TIERS），只是 release_check.py 沿用的
-        # 诊断点；它高于地板、请求可达，同样受硬断言约束。
-        size_target = _resize_exact(1344, 700, label="1344x700")
-        overflow_at_target = _scan_stable()
-        # 验收三档：每档都断言实际 == 请求，任何一档被夹住即整体作废。
-        tier_sizes: dict = {}
-        tier_overflow: dict = {}
-        for tw, th in TIERS:
-            key = f"{tw}x{th}"
-            tier_sizes[key] = _resize_exact(tw, th, label=key)
-            tier_overflow[key] = _scan_stable()
+        for name, state in STATES:
+            _apply_state(name, state)
+            _assert_state(name, state)
+            ms = win.minimumSizeHint()
+            entry = {
+                "visible": dict(state),
+                "minimumSizeHint": [ms.width(), ms.height()],
+                "tiers": {},
+            }
+            points = [("declared", declared[0], declared[1])]
+            points += [(f"{tw}x{th}", tw, th) for tw, th in TIERS]
+            # 1344×700 不是验收档，只是 release_check.py 沿用的诊断点；
+            # 只在验收态测一次，避免把同一份账重复记四遍。
+            if name == "default":
+                points.append(("1344x700", 1344, 700))
+            for key, tw, th in points:
+                size = _resize_exact(tw, th, label=f"{name}@{key}")
+                col = _slider_col()
+                rc = _right_column()
+                # 只有 release_check.py 对账的两个点等稳定帧（计数抖动实测
+                # 会有 1~6 个差），其余档位取当帧即可——它们是同一份记账。
+                scan = (_scan_stable()
+                        if name == "default" and key in ("declared", "1344x700")
+                        else _scan_overflow())
+                reds = []
+                if col.get("overflow_px", 0) > 0:
+                    reds.append({
+                        "part": "dbSliderCol",
+                        "overflow_px": col["overflow_px"],
+                        "needed": col.get("needed"),
+                        "actual": col.get("actual"),
+                        "who": [f"{o['label']}{o['text']!r}+{o['overflow']}"
+                                for o in col.get("offenders", [])[:5]],
+                    })
+                if rc.get("overflow_px", 0) > 0:
+                    reds.append({
+                        "part": "rightColumn",
+                        "overflow_px": rc["overflow_px"],
+                        "needed": rc.get("body_min_w"),
+                        "actual": (rc.get("viewport") or [None])[0],
+                        "who": [f"{w['label']}{w['text']!r}:{w['min_w']}"
+                                for w in rc.get("widest", [])[:5]],
+                    })
+                entry["tiers"][key] = {
+                    "size": size,
+                    "slider_col": col,
+                    "right_column": rc,
+                    "squeezed_count": scan["squeezed_count"],
+                    "clipped_count": scan["clipped_count"],
+                    "squeezed": scan["squeezed"],
+                    "clipped": scan["clipped"],
+                    "red": reds,
+                }
+            matrix[name] = entry
+        # 量完回到专注态：后面的 summary 里其它字段仍按「开箱默认」读取。
+        _apply_state("focus_mode", STATES[0][1])
         win.resize(1400, 900)
         _pump(app, 40)
-        sizes = {
-            "declared": size_declared,
-            "1344x700": size_target,
-            **tier_sizes,
-        }
     except SizeClamped as exc:
         print(f"错误：{exc}", file=sys.stderr)
         win.close()
         return EXIT_SIZE_CLAMPED
+    except StateMismatch as exc:
+        print(f"错误：{exc}", file=sys.stderr)
+        win.close()
+        return EXIT_STATE_MISMATCH
+
+    result["states"] = matrix
+    default_tiers = matrix["default"]["tiers"]
+    sizes = {k: v["size"] for k, v in default_tiers.items()}
     result["caliber"] = {
         "declared_minimum": declared,
-        "content_minimumSizeHint": content_hint,
+        "content_minimumSizeHint": matrix["focus_mode"]["minimumSizeHint"],
+        "states": matrix,
         "sizes": sizes,
         # 硬断言之后这里恒为空（夹具被夹住时进程已退出码 3）；
         # 保留键位给 release_check.py 对账。
         "size_mismatch": [k for k, v in sizes.items() if not v["equal"]],
-        "overflow_at_declared_minimum": overflow_at_declared,
-        "overflow_at_1344x700": overflow_at_target,
-        "tiers": {"sizes": tier_sizes, "overflow": tier_overflow},
+        # 旧键位保留，口径已改成 ``default``（读数条+工具栏可见、焦点关闭）：
+        # 旧版在这里量的是专注态，正是「尺子短 18px」的来源。
+        "overflow_at_declared_minimum": default_tiers["declared"],
+        "overflow_at_1344x700": default_tiers["1344x700"],
+        "tiers": {"sizes": {k: v["size"] for k, v in default_tiers.items()},
+                  "overflow": default_tiers},
     }
     if not args.json:
-        print("\n== 口径核对（声明最小 vs 内容最小） ==")
-        print(f"  声明最小（setMinimumSize 硬墙）: {declared[0]}×{declared[1]}")
-        print(f"  内容最小（minimumSizeHint）: {content_hint[0]}×{content_hint[1]}"
-              f"  ← 这是「内容想要」，不是窗口地板")
-        print(f"  按声明最小 {declared[0]}×{declared[1]} 摆开"
-              f"（实际 {size_declared['actual'][0]}×{size_declared['actual'][1]}）："
-              f"挤压 {overflow_at_declared['squeezed_count']}"
-              f" / 越界 {overflow_at_declared['clipped_count']}")
-        print(f"  按 1344×700 摆开（实际 {size_target['actual'][0]}×"
-              f"{size_target['actual'][1]}，诊断点非验收档）："
-              f"挤压 {overflow_at_target['squeezed_count']}"
-              f" / 越界 {overflow_at_target['clipped_count']}")
-        for key, ov in tier_overflow.items():
-            print(f"  验收档 {key}（实际 {tier_sizes[key]['actual'][0]}×"
-                  f"{tier_sizes[key]['actual'][1]}）："
-                  f"挤压 {ov['squeezed_count']} / 越界 {ov['clipped_count']}")
+        print("\n== 验收矩阵（状态 × 尺寸，唯一口径） ==")
+        for name, entry in matrix.items():
+            v = entry["visible"]
+            flags = "读数条{} / 工具栏{} / 焦点{}".format(
+                "可见" if v["detail"] else "隐藏",
+                "可见" if v["toolbars"] else "隐藏",
+                "开" if v["focus"] else "关")
+            print(f"  [{name}] {flags}｜窗口 minHint "
+                  f"{entry['minimumSizeHint'][0]}×"
+                  f"{entry['minimumSizeHint'][1]}")
+            for key, t in entry["tiers"].items():
+                a = t["size"]["actual"]
+                sc = t["slider_col"]
+                rc = t["right_column"]
+                print(f"    {'RED' if t['red'] else 'OK '} {key:<10} "
+                      f"实际 {a[0]}×{a[1]}｜滑杆列 "
+                      f"需{sc.get('needed', '?')}/实{sc.get('actual', '?')}"
+                      f"/越界+{sc.get('overflow_px', 0)}｜右栏 "
+                      f"需{rc.get('body_min_w', '?')}/视口"
+                      f"{(rc.get('viewport') or ['?'])[0]}"
+                      f"/越界+{rc.get('overflow_px', 0)}"
+                      f"｜挤压 {t['squeezed_count']} 越界 {t['clipped_count']}")
+        print("\n== 红榜（状态 / 档位 / 越界 px / 责任控件） ==")
+        any_red = False
+        for name, entry in matrix.items():
+            for key, t in entry["tiers"].items():
+                for r in t["red"]:
+                    any_red = True
+                    print(f"  RED [{name}] {key} {r['part']} "
+                          f"+{r['overflow_px']}px（需要 {r['needed']}，"
+                          f"实得 {r['actual']}）← "
+                          f"{'、'.join(r['who']) or '（无逐项）'}")
+        if not any_red:
+            print("  （无）")
+        print("\n== 反证：滑杆列越界 px（旧口径 legacy_gate vs 真实 default） ==")
+        for key in ["declared"] + [f"{w}x{h}" for w, h in TIERS]:
+            old = matrix["legacy_gate"]["tiers"][key]["slider_col"]
+            new = matrix["default"]["tiers"][key]["slider_col"]
+            print(f"  {key:<10} legacy_gate +{old.get('overflow_px', 0)}px"
+                  f"（列 {old.get('actual')}/{old.get('needed')}）"
+                  f" | default +{new.get('overflow_px', 0)}px"
+                  f"（列 {new.get('actual')}/{new.get('needed')}）")
 
     # ---------- 5. 汇总 ----------
-    # 键名沿用（release_check.py 消费 window_minimumSizeHint），但语义必须读清：
-    #   window_minimumSizeHint = 内容最小（minimumSizeHint，会被字体度量放大/缩小）
+    # 键名沿用（release_check.py 消费 window_minimumSizeHint），语义按新口径：
+    #   window_minimumSizeHint = **真实默认态**（读数条+工具栏可见、焦点关闭）
+    #                            的内容最小；旧版这里是专注态，量短了 18px。
+    #   window_minimumSizeHint_focus_mode = 开箱默认（专注态）的内容最小，仅参考。
     #   window_minimumWidth    = 声明最小（setMinimumSize 硬墙，真正挡住窗口的那个）
     summary = {
-        "window_minimumSizeHint": list(baseline),
+        "window_minimumSizeHint": list(matrix["default"]["minimumSizeHint"]),
+        "window_minimumSizeHint_focus_mode": list(
+            matrix["focus_mode"]["minimumSizeHint"]),
         "window_minimumWidth": declared,
         "window_minimumSize": [win.minimumSize().width(),
                                win.minimumSize().height()],
@@ -674,6 +854,13 @@ def main() -> int:
         "mainToolBar_width": tb_sum,
         "spectrum_width": spec.minimumSizeHint().width(),
         "height": h["sum"],
+        "state_overflow": {
+            name: {key: {"slider_col_px": t["slider_col"].get("overflow_px", 0),
+                         "right_column_px": t["right_column"].get("overflow_px", 0),
+                         "red": bool(t["red"])}
+                   for key, t in entry["tiers"].items()}
+            for name, entry in matrix.items()
+        },
         "caliber": result["caliber"],
     }
     result["summary"] = summary
@@ -681,9 +868,11 @@ def main() -> int:
         print("\n== 环境指纹 ==")
         for k, v in env.items():
             print(f"  {k}: {v}")
-        print("\n== 汇总（对账用这 6 个数） ==")
-        for k, v in summary.items():
-            print(f"  {k}: {v}")
+        print("\n== 汇总（对账用） ==")
+        for k in ("window_minimumSizeHint", "window_minimumSizeHint_focus_mode",
+                  "window_minimumWidth", "window_minimumSize", "topBar_width",
+                  "mainToolBar_width", "spectrum_width", "height"):
+            print(f"  {k}: {summary[k]}")
     else:
         print(json.dumps(result, ensure_ascii=False, indent=2))
 
