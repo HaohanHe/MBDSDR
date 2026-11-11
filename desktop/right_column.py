@@ -23,10 +23,11 @@ from __future__ import annotations
 
 from typing import List, Optional
 
-from PySide6.QtCore import Qt, Signal, QTimer, QRectF, QPoint, QPointF
+from PySide6.QtCore import Qt, Signal, QTimer, QRectF, QPoint, QPointF, QEvent
 from PySide6.QtGui import QColor, QFont, QPainter, QPen
 from PySide6.QtWidgets import (
-    QFrame, QScrollArea, QSizePolicy, QToolButton, QVBoxLayout, QWidget,
+    QApplication, QFrame, QScrollArea, QSizePolicy, QToolButton, QVBoxLayout,
+    QWidget,
 )
 
 try:
@@ -255,17 +256,43 @@ class RightColumn(QScrollArea):
         return index
 
     def _sync_container_height(self) -> None:
-        """把容器最小高对齐到内容 sizeHint。
+        """把容器最小高对齐到内容 sizeHint，并让滚动上限真的跟上。
 
         QScrollArea（widgetResizable）只保证容器不低于 minimumSizeHint；而
         每个面板的 minimumSizeHint 常常远小于 sizeHint（内部 QTextEdit /
         日志区带 stretch），于是一节展开时布局只按最小值分配高度，面板底部
         的控件被裁掉半行——2026-11-11 实拍 AI 面板「显示执行步骤」只剩上半截。
         容器最小高 = 布局 sizeHint 之后，面板拿到它想要的高度，滚动条负责其余。
+
+        三个坑（2026-11-11 实测，展开末节后上限恒 414、`setValue(689)` 只能
+        落到 414、末节标题停在视口 y=275）：
+          * 布局 sizeHint 有缓存：body 刚显示时各节 layout 没重算，`_lay` 仍
+            报旧高度（714），拿它设最小高等于没设——先把每节 layout 失效并
+            激活一次，把新展开的内容算进去；
+          * 容器被拉高后不会自己重排，各节仍按旧高度挤压（两条各 525 的节
+            被压成 275，正文被裁）——显式 resize 到目标高后再激活一次布局；
+          * QScrollArea 只在**自己**收到 LayoutRequest 时重算滚动范围，容器的
+            minimumHeight 变化传不到它那里，上限就停在旧值——显式补一条事件，
+            否则展开末节后末几节永远顶不到视口顶部。
         """
-        target = self._lay.sizeHint().height()
+        for section in self._sections:
+            sec_lay = section.layout()
+            if sec_lay is not None:
+                sec_lay.invalidate()
+                sec_lay.activate()
+        lay = self._lay
+        lay.invalidate()
+        lay.activate()
+        target = lay.sizeHint().height()
         if abs(self._container.minimumHeight() - target) >= 2:
             self._container.setMinimumHeight(target)
+        # 容器拉高/压矮后重排一次：只改 minimumHeight 时布局仍按旧高度分配。
+        self._container.resize(self._container.width(),
+                               max(target, self.viewport().height()))
+        lay.invalidate()
+        lay.activate()
+        # QScrollArea 不监听容器的 LayoutRequest（中间隔着 viewport），显式通知。
+        QApplication.sendEvent(self, QEvent(QEvent.LayoutRequest))
 
     def removeTab(self, index: int) -> None:
         if not (0 <= index < len(self._sections)):
