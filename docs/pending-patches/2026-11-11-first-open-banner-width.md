@@ -78,3 +78,75 @@
 3. `pytest tests/test_first_open_welcome.py -q` 全绿，且断言未被放宽；**该用例现在
    就是红的**（fixture 已切频谱页，`f7a38c82`），它转绿只算数于结构修复落地之后；
 4. 频谱面板高度余量不低于 §3.9 的 26px（B 落地后），为此重跑 `ui_narrow_breakdown.py --json`。
+
+## 五、2026-11-12 01:3x 收口：工作树 hunk 已回退，实测补正
+
+> 执行：协作线/TRAE-翠（接管 `desktop/main_window.py` 的过期孤儿 claim：
+> 卫星过境线 pid 36552 已死、超时 7 分钟）。未动测试、未改断言/预算。
+
+### 5.1 归属与处置
+
+- 该 hunk（`_NO_SDR_BRIEF` 改短 + 4 行注释）**从未进入任何提交**：
+  `git log -S '还没接 SDR · 点「连接」或逛星象仪' --oneline --all` 无命中。
+  工作树里它是**布局线/36568** 在 23:27–23:30 持 `desktop/main_window.py`
+  期间留下的半成品；23:38 起本交接单（`553884b7` / `bc0c75e1` /
+  `9aecffb2`）已裁定「文案缩短不够、须结构修复」。
+- hunk 注释里的「现句 ≈240px」是 §一 更正前被撤回的数：240 是
+  **不含两端各 2 个字面空格**的纯文本宽，整串是 288px。
+- 处置：**回退到 HEAD**（工作树已无该 hunk），缺陷按 §二/§三 保留为待办。
+  被回退的差异原文，便于重放：
+
+  ```
+  -_NO_SDR_BRIEF = "还没接 SDR · 插上设备点「连接」，或先逛星象仪"
+  +_NO_SDR_BRIEF = "还没接 SDR · 点「连接」或逛星象仪"
+  ```
+
+### 5.2 860 宽实测（offscreen，与 `test_first_open_welcome.py` 的 `win` 同构）
+
+`win` 请求 1280×800，但 `showEvent` 的 `_fit_window_to_screen()` 在
+800×800 的 offscreen 主屏上把它收口为 **860×736**（宽 = 最小宽 860；
+高 = 800×0.92 = 736）。
+
+| 现场 | left_tab | hint.width | 预算 `max(80, w-14)` | 整串宽 | `text()` 实际渲染 |
+|---|---|---|---|---|---|
+| HEAD 长句 | 260 | 258 | 244 | 360（纯文本 312） | `'  还没接 SDR · 插上设备点「连…'` |
+| 工作树短句 | 260 | 258 | 244 | 288（纯文本 240） | `'  还没接 SDR · 点「连接」或逛…'` |
+| 同一短句，show 之后再次 `resize(1280, 800)`（不再触发首帧收口） | 478 | 476 | 462 | 288 | `'  还没接 SDR · 点「连接」或逛星象仪  '`（不省略） |
+
+- 两种文案在真实的 860×736 下**都红**：HEAD 更早截断（两个下一步入口
+  都丢），短句保留了「点连接/或逛星」，但「星象仪」仍被吃掉。
+- 所以「该 hunk 让用例红」不成立：**回退到 HEAD 复跑仍红**，实测
+  `assert '星象仪' in '  还没接 SDR · 插上设备点「连…'`。红因是 §二 的
+  结构问题，不是某一条文案。
+- 本机预算是 **244**，不是 §一 的 263：`QSettings("MBDSDR","Desktop")`
+  在 Windows 落注册表 `HKCU\Software\MBDSDR\Desktop`，
+  `three_column_layout_version=5`、`three_column_sizes` 解出
+  `[260, 240, 352]` → 左栏 260 → hint 258 → 预算 244。§一 的 277/263
+  来自另一份已持久化的分割比例；**预算随本机上次拖动而变**。
+
+### 5.3 `test_first_open_hint_is_short_and_detail_is_kept` 脆弱性判定
+
+结论：**脆**，且比 §三·五 记的更脆——不止「标签有没有被布局过」。
+
+1. 窗口宽不取 fixture 的 `resize(1280, 800)`：`showEvent` 的
+   `_fit_window_to_screen()` 按 offscreen 主屏 800×800 收口成 860×736；
+   换屏/换平台就换尺寸。
+2. 左栏宽与预算取**真实注册表**里的 `three_column_sizes`（`isolated_profile`
+   只隔 profile 文件，不隔 QSettings）：本机 260，换成 §一的 279，预算
+   就从 244 变 263，同一条文案两种结果。
+3. 字体是 offscreen 回退度量（本进程 `QFontDatabase.families()=0`），
+   240/288 依赖回退字体与 DPI；换机器/字号缩放即可翻面。
+4. 断言是绝对文本包含，预算差 1–2px 就红绿翻转。
+
+修法（不放宽断言）：
+
+- fixture 在 `show()` **之后**显式钉死 `w.resize(860, 736)` 与
+  `w.main_splitter.setSizes([260, 240, 352])`（或把 `hint` 固定成待测
+  宽度），再 pump；不要只靠 show 前的 `resize`。
+- conftest 把 `QSettings` 指到临时文件（`setDefaultFormat(IniFormat)` +
+  `setPath(...)`），或在测试里 monkeypatch `main_window.QSettings`，
+  禁止注册表存量参与布局。
+- 钉住字体（明确 family/pointSize），或改为对 `elidedText` 预算关系的
+  相对断言。
+- 以上只让红**确定性复现**；转绿仍须 §三 的结构修复（横幅移出左栏或
+  换行，并重跑余量矩阵），不砍到丢「星象仪」。
