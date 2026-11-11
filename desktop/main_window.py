@@ -825,6 +825,9 @@ class MainWindow(QMainWindow):
     _auto_enum_ready = Signal(object)        # {"devices": [...]} 或 {"error": "..."}
     # GNSS 零配置自动连接：后台探测线程 → UI 线程（auto_detect 最坏 15 s）
     _gnss_auto_done = Signal(bool, str)      # (是否连上, 失败细节)
+    # 授时信息：后台线程 → UI 线程（NTP 查询最坏数个秒级超时，绝不压 GUI）。
+    # payload = 天空图 time_dict，或 {"error": "<类型>: <原因>"}。
+    _time_info_ready = Signal(object)
 
     def __init__(self):
         super().__init__()
@@ -927,6 +930,11 @@ class MainWindow(QMainWindow):
             self._on_auto_enum_ready, Qt.QueuedConnection)
         self._gnss_auto_done.connect(
             self._on_gnss_auto_done, Qt.QueuedConnection)
+        # 授时后台线程 → UI 线程（NTP 慢/离线时界面不得僵住）
+        self._time_info_thread: Optional[threading.Thread] = None
+        self._time_info_last_error: str = ""
+        self._time_info_ready.connect(
+            self._on_time_info_ready, Qt.QueuedConnection)
         self._sat_track_timer: Optional[QTimer] = None
         self._sat_track_prev_freq_hz: Optional[float] = None
         self._sat_track_prev_mode: Optional[str] = None
@@ -12309,27 +12317,58 @@ class MainWindow(QMainWindow):
         self._refresh_gimbal_availability()
 
     def _update_time_info(self):
-        """更新新时空授时信息到天空图。"""
-        try:
-            from mbdsdr_ai.new_spacetime import get_time_info
-            # 每30次更新（约150秒）做一次NTP同步，其余用系统时间
-            if not hasattr(self, '_ntp_sync_counter'):
-                self._ntp_sync_counter = 0
-            self._ntp_sync_counter += 1
-            do_ntp = (self._ntp_sync_counter % 30 == 1)
+        """更新新时空授时信息到天空图（NTP 查询走后台线程，绝不压 GUI）。
 
-            info = get_time_info(prefer_ntp=do_ntp)
-            time_dict = {
-                "utc_time": info.utc_time,
-                "gps_week": int(info.gps_time // 604800) if info.gps_time else 0,
-                "gps_tow": info.gps_time % 604800 if info.gps_time else 0,
-                "ntp_server": info.ntp_server,
-                "ntp_status": info.source,
-                "clock_offset_ms": info.clock_offset_ms,
-            }
-            self.sky_view.set_time_info(time_dict)
-        except Exception:
-            pass
+        旧实现把 ``get_time_info(prefer_ntp=True)`` 同步跑在 UI 线程：NTP 一慢
+        整个界面就僵住（每 30 拍一次），而 ``except: pass`` 又让失败完全不可见。
+        现在本线程只拿拍数与起线程，结果经 ``_time_info_ready`` 排队回 UI。
+        """
+        th = self._time_info_thread
+        if th is not None and th.is_alive():
+            return                      # 上一拍还没回来：本拍放过，绝不叠线程
+        self._ntp_sync_counter = getattr(self, "_ntp_sync_counter", 0) + 1
+        # 每30次更新（约150秒）做一次NTP同步，其余用系统时间
+        do_ntp = (self._ntp_sync_counter % 30 == 1)
+
+        def _work():
+            try:
+                from mbdsdr_ai.new_spacetime import get_time_info
+                info = get_time_info(prefer_ntp=do_ntp)
+                payload = {
+                    "utc_time": info.utc_time,
+                    "gps_week": int(info.gps_time // 604800) if info.gps_time else 0,
+                    "gps_tow": info.gps_time % 604800 if info.gps_time else 0,
+                    "ntp_server": info.ntp_server,
+                    "ntp_status": info.source,
+                    "clock_offset_ms": info.clock_offset_ms,
+                }
+            except Exception as e:  # noqa: BLE001 - 失败必须带原因回报
+                payload = {"error": f"{e.__class__.__name__}: {e}"}
+            try:
+                self._time_info_ready.emit(payload)
+            except RuntimeError:
+                pass      # 窗口已销毁（daemon 线程收尾）
+
+        self._time_info_thread = threading.Thread(
+            target=_work, name="time-info", daemon=True)
+        self._time_info_thread.start()
+
+    def _on_time_info_ready(self, payload):
+        """后台授时回 GUI：成功写天空图；失败写状态栏（同一原因只报一次）。
+
+        不在这里清 ``_time_info_thread``：槽可能在下一拍已起新线程之后才排队
+        执行，清掉会把新线程当成「无在途」从而叠线程。是否在途只由
+        ``is_alive()`` 判定。
+        """
+        err = str((payload or {}).get("error") or "")
+        if err:
+            if err != self._time_info_last_error:
+                self._time_info_last_error = err
+                self.statusBar().showMessage(
+                    f"授时信息获取失败：{err}", MSG_IMPORTANT)
+            return
+        self._time_info_last_error = ""
+        self.sky_view.set_time_info(payload)
 
     # ========================================================================
     # 真实串口 GNSS（NMEA）轮询
