@@ -35,6 +35,14 @@
   **+24px**（差 18px）。每个状态都先断言可见性（不一致退出码 4），再逐档
   断言「实际尺寸 == 请求尺寸」（夹取退出码 3）。
 
+  2026-11-11 频谱线把三根量程滑杆收进工具栏「显示」弹出层后，``dbSliderCol``
+  的 ``parentWidget()`` 变成 ``QMenu``、未弹出时 ``isVisible()==False``，
+  旧量尺 ``slider_column_report`` 对真窗口恒得 ``visible=False /
+  actual=480（未布局的默认几何）/ rows=[] / overflow_px=0``——那个 0 是
+  「量不到」，不是「没越界」。闸门改用 ``spectrum_panel_report``：面板
+  ``minimumSizeHint().height()`` 与工具栏 ``minimumSizeHint().width()``
+  对实得尺寸，越界 > 0 才判红。
+
 运行::
 
     python scripts/ui_narrow_breakdown.py
@@ -200,7 +208,7 @@ def _label_of(w: QWidget) -> str:
 
 def _who_text(row: dict) -> str:
     """责任控件的一行摘要：``名字'文本'+越界px``（滑杆/分隔线不重复文本）。"""
-    text = ("" if row.get("text") in ("slider", "separator")
+    text = ("" if row.get("text") in ("slider", "separator", "", None)
             else repr(row.get("text")))
     return f"{row['label']}{text}+{row['overflow']}"
 
@@ -239,15 +247,18 @@ def _layout_spacers(layout) -> list[int]:
 
 
 def slider_column_report(col) -> dict:
-    """频谱右侧三根竖滑杆所在列的越界量（纵向量尺；纯测量，不依赖 MainWindow）。
+    """旧量尺：竖排滑杆列的越界量（**已不用于真窗口**，只喂自检构造样本）。
 
     「越界 px」= 列内子控件底边超出列底边的最大值，正是用户看到被裁掉
     的那一截；``deficit`` = 列自报最小高 − 实得高，是挤压总量。两者不是
     同一个数：布局会先把子控件按比例压缩，压缩到极限才向外溢出。
 
-    独立成模块级函数是为了让 ``tests/test_narrow_gate_selfcheck.py`` 能拿
-    构造样本（固定高的容器 + 固定高子控件）直接量到红，而不是拿真窗口在
-    特定 DPR 下碰运气（DPR1.5 实测两态均为 0，构造不出 24px）。
+    2026-11-11 弹层化后 ``dbSliderCol`` 挂在 ``QMenu`` 上、列布局的直接子项
+    变成 3 个嵌套 ``QHBoxLayout``（滑杆不再是列的直接子控件），本函数在真
+    窗口上恒得 ``rows=[] / overflow_px=0``。真窗口改用
+    :func:`spectrum_panel_report`；本函数保留是给
+    ``tests/test_narrow_gate_selfcheck.py`` 的构造样本（固定高的容器 + 固定
+    高子控件）钉住「越界公式与红榜判定仍能抓到 24px」。
     """
     if col is None or col.layout() is None:
         return {"error": "no_dbSliderCol"}
@@ -283,8 +294,57 @@ def slider_column_report(col) -> dict:
     }
 
 
+def spectrum_panel_report(panel) -> dict:
+    """频谱面板的越界量（当前量尺）：声明最小 vs 实得尺寸。
+
+    为什么换尺：三根量程滑杆挂在工具栏「显示」``QMenu`` 的 ``QWidgetAction``
+    上，``dbSliderCol.parentWidget()`` 是 ``QMenu``，未弹出时不参与面板布局；
+    且列的布局直接子项是 3 个嵌套 ``QHBoxLayout``，旧量尺的行循环
+    ``itemAt(i).widget()`` 一个控件都取不到，``overflow_px`` 结构上恒为 0。
+    旧读数的 0 是「量不到」，不是「没越界」（对照实测见 commit 说明）。
+
+    新口径只量两件可解释的事，差值都带明确责任方：
+      * 高：面板 ``minimumSizeHint().height()`` − 面板 ``height()``
+        （页面被压扁＝内容裁切）；
+      * 宽：工具栏 ``minimumSizeHint().width()`` − 工具栏 ``width()``
+        （「更多 / 显示」入口被裁）。
+    """
+    if panel is None:
+        return {"error": "no_spectrum_panel"}
+    tb = getattr(panel, "_toolbar", None)
+    min_w = panel.minimumSizeHint().width()
+    min_h = panel.minimumSizeHint().height()
+    tb_min = tb.minimumSizeHint().width() if tb is not None else 0
+    tb_act = tb.width() if tb is not None else 0
+    over_h = max(0, min_h - panel.height())
+    over_w = max(0, tb_min - tb_act)
+    offenders = []
+    if over_h > 0:
+        offenders.append({"label": "spectrumPanel(高)", "text": "",
+                          "overflow": over_h})
+    if over_w > 0:
+        offenders.append({"label": "spectrumToolbar(宽)", "text": "",
+                          "overflow": over_w})
+    offenders.sort(key=lambda r: -r["overflow"])
+    return {
+        "part": "spectrumPanel",
+        "visible": panel.isVisible(),
+        "panel_min": [min_w, min_h],
+        "panel_actual": [panel.width(), panel.height()],
+        "toolbar_min_w": tb_min,
+        "toolbar_actual_w": tb_act,
+        "axis": {"width": over_w, "height": over_h},
+        "needed": min_h,
+        "actual": panel.height(),
+        "deficit": over_h,
+        "overflow_px": max(over_h, over_w),
+        "offenders": offenders,
+        "rows": [],
+    }
+
+
 def red_entries(col: dict, rc: dict) -> list[dict]:
-    """红榜判定（唯一口径）：滑杆列或右栏越界 > 0 即入红，并带责任控件。
+    """红榜判定（唯一口径）：频谱面板或右栏越界 > 0 即入红，并带责任控件。
 
     闸门 ``main()`` 与自检共用这一段，避免「测量函数改了、判红逻辑没改」
     各自一套。
@@ -292,10 +352,11 @@ def red_entries(col: dict, rc: dict) -> list[dict]:
     reds = []
     if col.get("overflow_px", 0) > 0:
         reds.append({
-            "part": "dbSliderCol",
+            "part": col.get("part", "dbSliderCol"),
             "overflow_px": col["overflow_px"],
             "needed": col.get("needed"),
             "actual": col.get("actual"),
+            "axis": col.get("axis"),
             "who": [_who_text(o) for o in col.get("offenders", [])[:5]],
         })
     if rc.get("overflow_px", 0) > 0:
@@ -730,9 +791,13 @@ def main() -> int:
                 f"请求尺寸不可达，本次测量作废。")
         return {"requested": [req_w, req_h], "actual": actual, "equal": True}
 
-    def _slider_col() -> dict:
-        """频谱右侧三根竖滑杆所在列的越界量，量尺在 ``slider_column_report``。"""
-        return slider_column_report(win.findChild(QWidget, "dbSliderCol"))
+    def _spectrum_panel() -> dict:
+        """频谱面板的越界量（声明最小 vs 实得），量尺在 ``spectrum_panel_report``。
+
+        旧口径量的是 ``dbSliderCol`` 容器；滑杆收进「显示」弹层后它挂在
+        ``QMenu`` 上，未弹出时既不布局也不可见，读数恒 0（量不到）。
+        """
+        return spectrum_panel_report(win.spectrum)
 
     def _right_column() -> dict:
         """右栏横向真红的量尺：容器最小宽 vs 滚动视口宽（body ≤ 视口）。"""
@@ -807,7 +872,7 @@ def main() -> int:
                 points.append(("1344x700", 1344, 700))
             for key, tw, th in points:
                 size = _resize_exact(tw, th, label=f"{name}@{key}")
-                col = _slider_col()
+                col = _spectrum_panel()
                 rc = _right_column()
                 # 只有 release_check.py 对账的两个点等稳定帧（计数抖动实测
                 # 会有 1~6 个差），其余档位取当帧即可——它们是同一份记账。
@@ -817,7 +882,7 @@ def main() -> int:
                 reds = red_entries(col, rc)
                 entry["tiers"][key] = {
                     "size": size,
-                    "slider_col": col,
+                    "spectrum_panel": col,
                     "right_column": rc,
                     "squeezed_count": scan["squeezed_count"],
                     "clipped_count": scan["clipped_count"],
@@ -870,13 +935,16 @@ def main() -> int:
                   f"{entry['minimumSizeHint'][1]}")
             for key, t in entry["tiers"].items():
                 a = t["size"]["actual"]
-                sc = t["slider_col"]
+                sc = t["spectrum_panel"]
                 rc = t["right_column"]
+                ax = sc.get("axis") or {}
+                pm = sc.get("panel_min") or ["?", "?"]
+                pa = sc.get("panel_actual") or ["?", "?"]
                 print(f"    {'RED' if t['red'] else 'OK '} {key:<10} "
-                      f"实际 {a[0]}×{a[1]}｜滑杆列 "
-                      f"需{sc.get('needed', '?')}/实{sc.get('actual', '?')}"
-                      f"/越界+{sc.get('overflow_px', 0)}｜右栏 "
-                      f"需{rc.get('body_min_w', '?')}/视口"
+                      f"实际 {a[0]}×{a[1]}｜频谱面板 最小{pm[0]}×{pm[1]}"
+                      f"/实{pa[0]}×{pa[1]}"
+                      f"/越界 宽+{ax.get('width', 0)} 高+{ax.get('height', 0)}"
+                      f"｜右栏 需{rc.get('body_min_w', '?')}/视口"
                       f"{(rc.get('viewport') or ['?'])[0]}"
                       f"/越界+{rc.get('overflow_px', 0)}"
                       f"｜挤压 {t['squeezed_count']} 越界 {t['clipped_count']}")
@@ -886,20 +954,23 @@ def main() -> int:
             for key, t in entry["tiers"].items():
                 for r in t["red"]:
                     any_red = True
+                    axis = ""
+                    if r.get("axis"):
+                        axis = (f"［宽+{r['axis']['width']} / "
+                                f"高+{r['axis']['height']}］")
                     print(f"  RED [{name}] {key} {r['part']} "
-                          f"+{r['overflow_px']}px（需要 {r['needed']}，"
+                          f"+{r['overflow_px']}px{axis}（需要 {r['needed']}，"
                           f"实得 {r['actual']}）← "
                           f"{'、'.join(r['who']) or '（无逐项）'}")
         if not any_red:
             print("  （无）")
-        print("\n== 反证：滑杆列越界 px（旧口径 legacy_gate vs 真实 default） ==")
+        print("\n== 频谱面板量尺（声明最小 vs 实得，default 态） ==")
         for key in ["declared"] + [f"{w}x{h}" for w, h in TIERS]:
-            old = matrix["legacy_gate"]["tiers"][key]["slider_col"]
-            new = matrix["default"]["tiers"][key]["slider_col"]
-            print(f"  {key:<10} legacy_gate +{old.get('overflow_px', 0)}px"
-                  f"（列 {old.get('actual')}/{old.get('needed')}）"
-                  f" | default +{new.get('overflow_px', 0)}px"
-                  f"（列 {new.get('actual')}/{new.get('needed')}）")
+            blk = matrix["default"]["tiers"][key]["spectrum_panel"]
+            print(f"  {key:<10} 面板最小高 {blk['panel_min'][1]} / 实得高 "
+                  f"{blk['panel_actual'][1]}｜工具栏最小宽 "
+                  f"{blk['toolbar_min_w']} / 实际宽 {blk['toolbar_actual_w']}"
+                  f"｜越界 {blk['overflow_px']}px")
 
     # ---------- 5. 汇总 ----------
     # 键名沿用（release_check.py 消费 window_minimumSizeHint），语义按新口径：
@@ -919,7 +990,8 @@ def main() -> int:
         "spectrum_width": spec.minimumSizeHint().width(),
         "height": h["sum"],
         "state_overflow": {
-            name: {key: {"slider_col_px": t["slider_col"].get("overflow_px", 0),
+            name: {key: {"spectrum_panel_px": t["spectrum_panel"].get(
+                             "overflow_px", 0),
                          "right_column_px": t["right_column"].get("overflow_px", 0),
                          "red": bool(t["red"])}
                    for key, t in entry["tiers"].items()}

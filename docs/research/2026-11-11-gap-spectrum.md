@@ -456,5 +456,9 @@ settings 引用），所以：
 - 连带改的旧钉子：`test_ui_hard_defects`（竖排 `invertedAppearance` → 横排
   方向契约）、`test_planetarium_entry_visibility`（「紧凑收起滑杆列」不再成立，
   改为断言滑杆列不在面板里）。
-- 已知未收口：`scripts/ui_narrow_breakdown.py` 仍按「常驻 `dbSliderCol`」量
-  滑杆底边，弹层化后该段读数失去意义（属 layout-gap 线的脚本，未在本笔改）。
+- 已收口（2026-11-11 夜，layout-gap 线）：`scripts/ui_narrow_breakdown.py` 原按
+  「常驻 `dbSliderCol`」量滑杆底边，弹层化后该读数恒 0（量不到）。已换尺为
+  `spectrum_panel_report()`：面板 `minimumSizeHint().height()` 与工具栏
+  `minimumSizeHint().width()` 对实得尺寸，`state_overflow` 键
+  `slider_col_px` → `spectrum_panel_px`。死尺证据与新旧读数见
+  [2026-11-11-gap-layout.md](2026-11-11-gap-layout.md) §3.6。
