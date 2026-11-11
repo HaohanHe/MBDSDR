@@ -26,14 +26,20 @@ CELESTRAK_BASE = "https://celestrak.org/NORAD/elements/gp.php"
 # 默认关注卫星列表 (名称, NORAD CATNR)
 # 编号校正（2026-11）：METEOR-M 2 = 40069（44016 是 ATLAS 5 CENTAUR DEB），
 # FENGYUN 3D = 43010（54234 是 NOAA 21/JPSS-2）。
-DEFAULT_SATELLITES: List[Tuple[str, int]] = [
-    ("ISS (ZARYA)", 25544),
-    ("NOAA 19", 33591),
-    ("NOAA 18", 28654),
-    ("NOAA 15", 25338),
-    ("METEOR M2", 40069),
-    ("FENGYUN 3D", 43010),
-]
+#
+# P0-02：本模块**不再保存第二份编号表**——(名称, CATNR) 的唯一事实源是
+# ``orbit.BUILTIN_SATS``，这里只保留面板的展示顺序（ISS 置顶，其后
+# NOAA 19/18/15、METEOR-M 2、FY-3D）。``DEFAULT_SATELLITES`` 由模块级
+# ``__getattr__`` 惰性投影，见文件末尾。历史上这里与 orbit 各写一份编号，
+# 才出现「同一颗星两处编号不一致」。
+_DEFAULT_SATELLITE_ORDER: Tuple[str, ...] = (
+    "ISS (ZARYA)",
+    "NOAA 19",
+    "NOAA 18",
+    "NOAA 15",
+    "METEOR M2",
+    "FENGYUN 3D",
+)
 
 # 缓存有效期：24 小时
 _CACHE_TTL = 24 * 3600.0
@@ -446,3 +452,22 @@ def tle_freshness(line1: str,
     return {"status": status, "epoch_utc": epoch.strftime("%Y-%m-%dT%H:%M:%SZ"),
             "age_days": round(age, 3) if age is not None else None,
             "threshold_days": float(max_days)}
+
+
+def __getattr__(name: str):
+    """惰性导出 ``DEFAULT_SATELLITES``（P0-02 单源收敛，PEP 562）。
+
+    编号只认 ``orbit.BUILTIN_SATS``。不能在本模块顶部 ``from .orbit import``：
+    ``orbit → tle_integrity → 本模块`` 是既有的链式依赖，顶部导入会让某个
+    导入顺序下的 orbit 处于半初始化状态而缺少 ``BUILTIN_SATS``。惰性投影
+    在真正取用时才 import，两种导入顺序都安全。取用一次后写回模块字典，
+    之后就是普通常量（``monkeypatch.setattr`` 依旧可覆盖）。
+    """
+    if name != "DEFAULT_SATELLITES":
+        raise AttributeError(name)
+    from .orbit import BUILTIN_SATS
+    value: List[Tuple[str, int]] = [
+        (n, int(BUILTIN_SATS[n])) for n in _DEFAULT_SATELLITE_ORDER
+    ]
+    globals()[name] = value
+    return value
