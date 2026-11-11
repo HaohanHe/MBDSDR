@@ -158,3 +158,51 @@ tooltip 三条规矩里，只有一条能被机械校验，而它真正怕的是
 - 不要给片段加「长度 ≥12」：会红 32 条且全是碎片；
 - 不要把 76 条一次性全登记成白名单：等于把盲区固化成制度；
 - 不要用行号做登记键：`control_panel.py` 单文件 32 条，行号漂移是常态。
+
+## 6. 落库结果（2026-11-11 23:07）
+
+| 提交 | 内容 |
+| --- | --- |
+| `212d8b95` 23:07:10 | `desktop/new_spacetime_panel.py`：多普勒列补「（按 TLE 推算）」 |
+| `1a8a34fb` 23:07:35 | `docs/tooltip-dynamic-baseline.json`（38 条）+ `tests/test_tooltip_guard.py`（动态扫描 4 用例）+ `tests/test_tooltip_dynamic_runtime.py`（9 用例） |
+
+### 6.1 落地时与本单的差异
+
+1. **`satellite_image_panel.py:194` 只扩词表，未改文案**。它的片段是
+   「卫星下行信号的中心频率（MHz）；选好制式会自动填入…」与「录制文件带
+   SigMF meta 时优先用 meta 里的值」——后者本身就是来源标注，所以把
+   `SigMF|meta` 加入限定词表，而不是把文案改得更啰嗦。
+2. **占位符先剥离再判**（`_strip_placeholders`），不是放宽词表。
+   实测对照：同一套规则下，不剥离 → `capability_drawer.py:177`
+   （`"把「%s」送进 AI 输入栏（不会自动执行）" % name`）被当成含百分号
+   的数值文案误报；剥离后违规 0 条。词表未因此改动。
+3. **运行时判据落成「非空 + 非裸数值 + 有量纲必带限定」，不是字面的
+   「必含单位或来源标注」**。按字面执行会误伤 6 条合法文案：
+   Offset 说明、GPS 分段说明、重启生效说明、云台无后端说明、轨道线
+   「10 分钟」、显示跨度不改采样率——它们是动作/状态说明，不是设备量。
+   这一层守的是诚实性而非文案字数，故不设长度断言（「卫星层」这类短语合法）。
+4. **同一行循环复位多个控件时允许空串**。`set_sdr_connected` 里
+   `w.setToolTip(base)` 一行会遍历 12 个控件，本来没有 tooltip 的控件
+   渲染空串属合法清空。用例改为「该行至少一条真文案 + 非空文案全部
+   自描述」，不因此豁免任何一条有文案的调用点。
+
+### 6.2 词表新增及依据
+
+| 词 | 依据 |
+| --- | --- |
+| `不是` | 频谱 `gate_tip`「不是 dBFS 绝对电平」：否定式本身即口径 |
+| `典型` | PPM 说明「廉价棒典型偏差 20~50 ppm」：一般值，非设备读数 |
+| `配置请求` | 采样率越界提示自称「配置请求 … 已按最近档 … 显示（配置文件未改）」 |
+| `SigMF` / `meta` | 卫星面板注明频率来源为录制文件 meta |
+
+### 6.3 反证实测
+
+| 改回旧行为 | 结果 |
+| --- | --- |
+| 去掉多普勒「（按 TLE 推算）」 | `test_dynamic_tooltips_are_honest` 红（`new_spacetime_panel.py:955` unqualified_quantity） |
+| 删登记表任一条 `runtime_test` 字段 | `test_dynamic_baseline_schema_is_complete` 红 |
+| `_show_no_rtl_hint` 传「2.400」 | 运行时用例红：`main_window.py:6047 渲染成裸数值 '2.400'` |
+| `_strip_placeholders` 改恒等 | 违规 0 → 1（`capability_drawer.py:177`） |
+
+复跑：`python -m pytest tests/test_tooltip_dynamic_runtime.py tests/test_tooltip_guard.py -q`
+→ **16 passed**。
