@@ -45,6 +45,12 @@ except Exception:  # noqa: BLE001 - mbdsdr_ai 不可用时的安全回退
 FREQ_MIN_HZ = 10_000.0
 FREQ_MAX_HZ = 6.0e9
 
+#: 未连接/未确认时采样率默认值的唯一写法（控制面板 / 模块面板 / 设备面板共用）。
+#: 光写「2.400 MS/s」会被读成"设备正在跑 2.400 MS/s"——那是没被确认过的默认
+#: 值。把默认值与未确认状态写进同一句，和状态栏空态「—」保持同一诚实口径。
+DEFAULT_SR_UNCONFIRMED = (
+    f"{format_sample_rate(DEFAULT_SAMPLE_RATE_HZ)}（默认 · 未确认）")
+
 logger = logging.getLogger(__name__)
 
 
@@ -70,13 +76,9 @@ def sample_rate_combo_items(device) -> list:
             logger.warning("读取设备采样率档位失败，按未知处理: %s: %s",
                            type(exc).__name__, exc)
     if not options:
-        # 文案要能塞进 320px 右栏的下拉（原「未知（设备未报告采样率范围，将用
-        # 默认 1.024 MS/s）」有 30 字，实测被下拉右边界整段切掉且没有省略号）。
-        # 「为什么未知」放进 tooltip，不占下拉宽度。
-        return [(
-            f"未知（默认 {format_sample_rate(DEFAULT_SAMPLE_RATE_HZ)}）",
-            None,
-        )]
+        # 文案要能塞进 320px 右栏的下拉；「为什么未知」放进 tooltip。
+        # 「未知」必须保留（能力确实没报），后缀与控制面板同一句写法。
+        return [(f"未知 · {DEFAULT_SR_UNCONFIRMED}", None)]
     return [(format_sample_rate(rate), float(rate)) for rate in options]
 
 

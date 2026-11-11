@@ -39,7 +39,8 @@ logger = logging.getLogger(__name__)
 from tokens import tokens
 
 from constants import (
-    DEFAULT_SAMPLE_RATE_HZ, FREQ_MIN_HZ, FREQ_MAX_HZ, format_sample_rate)
+    DEFAULT_SAMPLE_RATE_HZ, DEFAULT_SR_UNCONFIRMED,
+    FREQ_MIN_HZ, FREQ_MAX_HZ, format_sample_rate)
 
 # 静噪门限的唯一口径（相对该模式噪声基线的余量）定义在内核侧，
 # 桌面端不复制数字；见 mbdsdr_ai/squelch.py 的常量段。
@@ -337,6 +338,9 @@ class ControlPanel(QWidget):
         # 频率未知时 ±步进/收藏保持禁用：连接成功不等于拿到了频率真值。
         # 放在最后统一收口，避免上面每处 setEnabled 各写一份判断。
         self._sync_freq_actions_enabled()
+        # 采样率文案随连接态重标：未连接时必须写「默认 · 未确认」，
+        # 不能把预填档位当成设备正在跑的速率。
+        self._apply_sample_rate_unconfirmed_marker()
 
     def set_connected(self, connected: bool):
         """主窗口在连接/断开时调用（hasattr 守卫，方法名固定为 set_connected）。
@@ -1572,11 +1576,13 @@ class ControlPanel(QWidget):
         current = combo.currentData()
         combo.blockSignals(True)
         combo.clear()
-        for _rate in rates:
-            combo.addItem(format_sample_rate(_rate), float(_rate))
+        self._sr_base_texts = [format_sample_rate(_rate) for _rate in rates]
+        for _rate, _text in zip(rates, self._sr_base_texts):
+            combo.addItem(_text, float(_rate))
         if not rates:
             # 未知不是“一档”，给出不可选的说明项；不拿默认采样率凑成假档位。
             combo.addItem("未知（后端未报告采样率范围）", None)
+            self._sr_base_texts = ["未知（后端未报告采样率范围）"]
             combo.setEnabled(False)
             combo.setCurrentIndex(0)
             combo.blockSignals(False)
@@ -1597,6 +1603,32 @@ class ControlPanel(QWidget):
         if idx < 0:
             idx = 0
         combo.setCurrentIndex(idx)
+        combo.blockSignals(False)
+        self._apply_sample_rate_unconfirmed_marker()
+
+    def _apply_sample_rate_unconfirmed_marker(self):
+        """未连接时把采样率档位标成「默认 · 未确认」（全 UI 同一句写法）。
+
+        连接前下拉里的档位来自能力声明/项目基准，没有一条是设备回执；
+        光显示「2.400 MS/s」会被读成"设备正在跑 2.400 MS/s"。默认档用
+        ``constants.DEFAULT_SR_UNCONFIRMED``（与模块面板/设备面板同一句），
+        其余声明档位标「（未确认）」——都是"可选项"而不是"当前值"。
+        连接后恢复纯档位文案。
+        """
+        combo = getattr(self, "sample_rate_combo", None)
+        base_texts = list(getattr(self, "_sr_base_texts", []) or [])
+        if combo is None or not base_texts or len(base_texts) != combo.count():
+            return
+        connected = bool(getattr(self, "_sdr_connected", False))
+        default_text = format_sample_rate(DEFAULT_SAMPLE_RATE_HZ)
+        combo.blockSignals(True)
+        for i, base in enumerate(base_texts):
+            if connected:
+                combo.setItemText(i, base)
+            elif base == default_text:
+                combo.setItemText(i, DEFAULT_SR_UNCONFIRMED)
+            else:
+                combo.setItemText(i, f"{base}（未确认）")
         combo.blockSignals(False)
 
     def set_sample_rate_options(self, options, select_hz=None):

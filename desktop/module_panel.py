@@ -49,7 +49,8 @@ from PySide6.QtWidgets import (
 from tokens import tokens as _tok
 from mode_registry import get as _get_mode
 from constants import (
-    DEFAULT_SAMPLE_RATE_HZ, FREQ_MIN_HZ, FREQ_MAX_HZ, format_sample_rate,
+    DEFAULT_SAMPLE_RATE_HZ, DEFAULT_SR_UNCONFIRMED,
+    FREQ_MIN_HZ, FREQ_MAX_HZ, format_sample_rate,
     default_sample_rate_combo_index, sample_rate_combo_items)
 
 try:  # pragma: no cover - 失败消息整形（clean_exc 战役先例），缺失时退化原文
@@ -584,7 +585,7 @@ class ModulePanel(QWidget):
         self.sr_combo.setEnabled(known)
         self.sr_combo.setToolTip(
             "可设采样率来自所连设备能力（后端离散表 ∩ 设备量程）。"
-            f"未报告范围时置灰，连接按默认 {format_sample_rate(DEFAULT_SAMPLE_RATE_HZ)}。"
+            f"未报告范围时置灰，连接按 {DEFAULT_SR_UNCONFIRMED} 兜底。"
             if not known else
             "可设采样率来自所选设备的真实能力；连接时按此档下发，"
             "实际生效值以设备回执为准。")
