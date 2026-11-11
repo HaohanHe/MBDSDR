@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QSlider, QComboBox, QLineEdit, QFrame, QGroupBox, QSizePolicy,
     QCheckBox, QSpinBox, QProgressBar, QInputDialog, QMessageBox,
+    QToolButton,
 )
 from PySide6.QtGui import QFont, QIntValidator, QDoubleValidator
 
@@ -208,6 +209,9 @@ class ControlPanel(QWidget):
         self._record_outcome: str | None = None
         # 收藏列表：内存中，初始为空，不预存任何地区性电台
         self._bookmarks: list[tuple[float, str, str]] = []
+        #: 6 组折叠头：(header, body, title)。W51 / D-10 A：手风琴单展开，
+        #: 默认只展开「频率」，保证默认高度 < 1 屏（旧版全展开 1,148 px ≈1.95 屏）。
+        self._fold_sections: list[tuple[QToolButton, QWidget, str]] = []
 
         self._build_ui()
         self._relax_combo_widths()
@@ -373,6 +377,55 @@ class ControlPanel(QWidget):
             # 换成真实档位；没有探测结果就保持原说明项（不编档）。
             self.refresh_sample_rate_options_from_active_backend()
 
+    # ------------------------------------------------------------------
+    # 6 组折叠（W51 / P1-07；D-10 A：手风琴单展开）
+    # ------------------------------------------------------------------
+    def _add_foldable(self, layout: QVBoxLayout, title: str,
+                      group: QWidget, expanded: bool = False) -> None:
+        """把一组控件挂到可折叠头下；默认只展开「频率」，其余收起。
+
+        旧版 25 个控件 6 组全展开 = 1,148 px（≈1.95 屏），右栏里必须一路滚。
+        折叠后默认只露一组，列高才有上限；手风琴语义见 _on_fold_clicked。
+        """
+        header = QToolButton()
+        header.setObjectName("controlFoldHeader")
+        header.setCheckable(True)
+        header.setAutoRaise(True)
+        header.setCursor(Qt.PointingHandCursor)
+        header.setToolButtonStyle(Qt.ToolButtonTextOnly)
+        header.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        header.setMinimumHeight(24)
+        header.toggled.connect(
+            lambda checked, h=header: self._on_fold_toggled(h, checked))
+        layout.addWidget(header)
+        if isinstance(group, QGroupBox):
+            group.setTitle("")   # 标题交给折叠头，避免出现两层标题
+        layout.addWidget(group)
+        self._fold_sections.append((header, group, title))
+        self._set_fold_state(header, group, title, expanded)
+
+    def _set_fold_state(self, header: QToolButton, group: QWidget,
+                        title: str, expanded: bool) -> None:
+        expanded = bool(expanded)
+        group.setVisible(expanded)
+        header.blockSignals(True)
+        header.setChecked(expanded)
+        header.blockSignals(False)
+        header.setText(("▾ " if expanded else "▸ ") + title)
+        header.setToolTip(("收起" if expanded else "展开") + f"「{title}」分组")
+
+    def _on_fold_toggled(self, header: QToolButton, checked: bool) -> None:
+        for h, g, t in self._fold_sections:
+            if h is not header:
+                continue
+            self._set_fold_state(h, g, t, checked)
+            if checked:
+                # 手风琴：展开一节就收起其余，列高才有上限（可全部收起）
+                for oh, og, ot in self._fold_sections:
+                    if oh is not header:
+                        self._set_fold_state(oh, og, ot, False)
+            return
+
     def _build_ui(self):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(12, 12, 12, 12)
@@ -459,7 +512,7 @@ class ControlPanel(QWidget):
             step_row.addWidget(btn)
         freq_layout.addLayout(step_row)
 
-        layout.addWidget(freq_group)
+        self._add_foldable(layout, "频率", freq_group, expanded=True)
 
         # ---- 预设电台 ----
         preset_group = QGroupBox("频率预设")
@@ -488,7 +541,7 @@ class ControlPanel(QWidget):
         self.preset_combo.currentIndexChanged.connect(self._on_preset_selected)
         preset_layout.addWidget(self.preset_combo)
 
-        layout.addWidget(preset_group)
+        self._add_foldable(layout, "频率预设", preset_group)
 
         # ---- 收藏（书签）----
         bookmark_group = QGroupBox("书签")
@@ -520,7 +573,7 @@ class ControlPanel(QWidget):
         bm_btn_row.addWidget(self.bookmark_del_btn)
         bookmark_layout.addLayout(bm_btn_row)
 
-        layout.addWidget(bookmark_group)
+        self._add_foldable(layout, "书签", bookmark_group)
 
         # ---- 音量 ----
         volume_group = QGroupBox("音量")
@@ -543,7 +596,7 @@ class ControlPanel(QWidget):
         vol_row.addWidget(self.volume_slider)
 
         volume_layout.addLayout(vol_row)
-        layout.addWidget(volume_group)
+        self._add_foldable(layout, "音量", volume_group)
 
         # ---- 接收：S-meter + 采样率 + 带宽 + 增益 + AGC + PPM + Offset + 静噪 ----
         rx_group = QGroupBox("接收")
@@ -755,7 +808,7 @@ class ControlPanel(QWidget):
         sq_auto_row.addStretch(1)
         rx_layout.addLayout(sq_auto_row)
 
-        layout.addWidget(rx_group)
+        self._add_foldable(layout, "接收", rx_group)
 
         # ---- 录音 ----
         record_group = QGroupBox("录音")
@@ -773,7 +826,7 @@ class ControlPanel(QWidget):
         self.record_status.setAlignment(Qt.AlignCenter)
         record_layout.addWidget(self.record_status)
 
-        layout.addWidget(record_group)
+        self._add_foldable(layout, "录音", record_group)
 
         # 弹性空间
         layout.addStretch()
