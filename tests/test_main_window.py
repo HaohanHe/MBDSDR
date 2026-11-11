@@ -92,6 +92,9 @@ def isolated_persisted_state(tmp_path_factory):
 def main_window(qapp, isolated_profile, isolated_persisted_state):
     from main_window import MainWindow
     w = MainWindow()
+    # 星象仪视图惰性构建：本文件测的是天空/主窗一体化行为，先按"切到
+    # 星象仪页"把视图同步补建出来（等价于用户点开该页签）。
+    w._ensure_sky_view()
     w.show()
     _pump(qapp, 150)
     yield w

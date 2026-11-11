@@ -515,6 +515,8 @@ class TestNegotiationLoop:
 def mw(isolated_profile):
     from main_window import MainWindow
     w = MainWindow()
+    # 星象仪视图惰性构建：协商缝操作的是 sky_view 上的按钮，先同步补建。
+    w._ensure_sky_view()
     w.show()
     from PySide6.QtCore import QTimer
     QTimer.singleShot(120, app.quit)
