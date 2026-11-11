@@ -133,7 +133,7 @@ harness），要求"深度调研学习完，再根据它看我们 agent 有什�
 翻车"的硬机制，逐条对照我们的 agent 层。完整报告
 `docs/learn/agent-harness-gap-audit.md`。
 
-- **P0（已修）模型对话通道没有写入门**：`tool_registry.call()` 全段不看 — `da7eebee` — `mbdsdr_ai/tool_registry.py:525` — `MODEL_HARD_GATE_PATTERNS`
+- **P0（已修）模型对话通道没有写入门**：`tool_registry.call()` 全段不看 — `da7eebee` — `mbdsdr_ai/tool_registry.py:529` — `MODEL_HARD_GATE_PATTERNS`（基准 `da7eebee`）
   write 标记；`WRITE_TOOL_NAME_PATTERNS` 列了几十个写/发射工具，全仓
   `resolve_write_authorization` 只有 6 处。结果：同一工具走 MCP 通道会被
   拦，走 `agent.chat()` 直接执行——`radio_ptt` / `radio_send_cw` 裸奔。
@@ -2716,6 +2716,54 @@ git status --porcelain -- <path>                # 确认期间是否正被他人
 2. 一个文件改完 → 跑测试 → 提交 → 释放 claim，再拿下一样；**同时持有两个以上未提交文件就是隐患**；
 3. 长跑回归开始前先 `py_compile` 一遍待测包（或直接在 `git archive HEAD` 的干净导出树上跑），
    别在别人的编辑窗口里跑——也不要把这时的红算成被测代码的缺陷。
+
+#### 6.9.17 私有索引 + 提交间隙 HEAD 推进 = 反向卷回（`b28ddadf`）
+
+> 与 6.9.11 同源不同果：6.9.11 是「撞锁 / 提交失败」，这一形态是**提交成功但把别人刚修好的文件卷回旧内容**。
+
+**判据（任一命中，按本形态处理）**
+
+1. `git diff <该笔父提交> <该笔> --stat` 里出现**自己根本没改的文件**，且方向是回退到旧内容（不是新增）；
+2. 被卷回文件的 blob 等于更早的提交，而不是该笔父提交：
+
+   ```powershell
+   git rev-parse <该笔>:<file>
+   git rev-parse <该笔>^:<file>
+   git rev-parse <上一笔恢复/修复提交>:<file>
+   ```
+
+   第一条与第三条相同、与第二条不同 = 卷回成立；
+3. 提交信息声明的文件集与实际 `--name-only` 不一致，且多出的文件属于别线正在维护的路径。
+
+**成因**：私有 index 在 T0 用 `HEAD0` 建好；T1 另一条线推进到 `HEAD1`（含对 X 的修复）；T2 直接 `git commit`。旧 index 里 X 仍是 `HEAD0` 的 blob，提交树于是把 X 写回旧内容。提交瞬间 `git status` 看不出异常——幻影 `D` 被 commit 吞掉，事后只能从「父提交 vs 本笔」的 diff 里看见。**「`read-tree` 后立即 commit 并重试」不算修复**，它同样看不见幻影 `D`。现由 `scripts/safe_commit.py` 的四道闸兜住（重建 index / 精确文件集 / 提交前重校验基线 / 提交后逐文件复核 blob）。
+
+**本次实例**：`b28ddadf` 把 `desktop/ai_panel.py`、`desktop/station_sync.py`、`mbdsdr_ai/config.py`、`tests/test_config_store_single_writer.py` 四个路径卷回旧内容；另一条线用 `b4ea081d` 按 `68eb37db` 逐个恢复，恢复后与 `68eb37db` 零差异。同类事故第五次，前四次登记在 6.9.8 / 6.9.10 / 6.9.11 / 6.9.14。
+
+**纪律**：禁止自建 `GIT_INDEX_FILE` / 手工 `read-tree` 提交流程；一律 `python scripts/safe_commit.py --files ... --message-file ...`。提交前先 `git diff <file>` 确认暂存内容不含别线的 hunk 或变异探针标记（如 `# MUTATION:`）。在别人 claim 的文件上提交是越权，即使内容无冲突：先请求释放，或写 `docs/pending-patches/` 交接单。
+
+#### 6.9.18 孤儿 hunk：只接管能独立成立的改动（2026-11-11）
+
+**条件（三条同时满足）**：某路径有他人未提交改动、**无活跃 claim**、静置超过 30 分钟（文件 mtime 与当前时间比）。
+
+**允许的动作**：正式 `python scripts/file_claim.py claim <path> --owner <线名/会话>` 后，连同该改动一并落库，提交信息注明「接管无主 hunk（N 行）」，行号与基准按 HEAD 现值重取。
+
+**硬门槛——只适用于自证完整、可独立成立的改动**（如一行文案、一次纯行号重定位）。判据是「能独立成立」：新增标志位但全仓无人读取、新增调用点但没有方法体，这类半成品**一律不接管**，改为丢弃并单独立案——否则等于把一个哑弹放进仓库。
+
+**本次实例**：`docs/error-code-visibility.md` 的 9 行状态栏坐标重定位（8480/8495 → 8610）静置 43 分钟、无 claim，claim 后按 HEAD 逐条重定位一并落库。
+
+#### 6.9.19 报「已释放」必须附 `git status --porcelain -- <path>` 实际输出（2026-11-11）
+
+只说自己「交完了」不算释放，必须贴命令原始输出。实例：一条线释放 `desktop/main_window.py` 时报「工作区无未完成改动」，另一条线随后在同一文件看到 3 行不属于自己的改动。
+
+**30 秒复核**：`git status --porcelain -- <path>` 为空才算释放；非空就把那几行写清归属（谁的、是否在途）。释放语统一写成「`git status --porcelain -- <path>` 输出：<原文或空>」。
+
+#### 6.9.20 多线在途文档 + 私有 index = 工作区副本落后（2026-11-11）
+
+**形态**：别的线用私有 index 提交了文档，但工作区那份副本仍是「旧 HEAD + 在途改动」，**不含**它刚提交的内容。此时谁直接在工作区副本上改并整文件提交，就会把对方刚入库的行静默回退。
+
+**识别**：`git diff -- <doc>` 里出现「你明明没删的内容显示为删除」；或 post-commit 报 `STALE_INDEX_SUSPECT`。
+
+**处置**：以 `git show HEAD:<doc>` 为底重放自己的段落；提交后用 `git show HEAD:<doc>` 逐字确认对方那几行还在；随后把工作区副本同步成「新 HEAD + 在途改动」（把在途补丁重新应用到新 HEAD），不要留一份落后副本。
 
 ### 6.10 历史改写事件（主分支被 reset 改写；按批次登记，跨日后继续累计）
 

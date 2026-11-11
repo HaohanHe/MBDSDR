@@ -389,18 +389,17 @@ path 或行号不存在 0**。35 条集中在被后续重构推移过行号的�
 判据只有一条：`git blame -L 556,556 --porcelain HEAD -- mbdsdr_ai/decode_router.py`
 首行首字段为 `8213a3d7`，与 `82bb5421` 不同 → 基准不合规 → 判黄并重写。
 
-**剩余 1 条黄**：`docs/COORDINATION.md:136` 所在文件有他线在途改动，本轮不得插入，
-按 §7.7.1 进白名单（owner + 到期日），不是在文档里改坐标了事。
+**`COORDINATION.md:136` 收口（2026-11-11 夜）**：该条原无坐标基准，进白名单挂了两天。本轮按 HEAD 现文重定位 `mbdsdr_ai/tool_registry.py:525 → :529`，基准取该行 blame `da7eebee`（与证据同笔，走「基准兜底」分支），白名单随之清零。
 
-**白名单现状**：`docs/line-check-waivers.md` 1 条 / 上限 1；严格模式复跑
-`--check-lines --strict-lines` 退出码 0（未豁免对不上 0）。
+**白名单现状**：`docs/line-check-waivers.md` 0 条 / 上限 1；严格模式复跑
+`--check-lines --strict-lines` 退出码 0（未豁免对不上 0），白名单清零后自动严格。
 
 **统计口径：HEAD 快照与工作区必须分两行报，验收只认 HEAD 快照（2026-11-11 写死）**
 
-| 口径 | 怎么量 | 当日实测（HEAD `3429bf8c`） |
+| 口径 | 怎么量 | 当日实测 |
 |---|---|---|
-| **HEAD 快照（验收口径）** | `git worktree add --detach <tmp> <hash>`，再跑 `<tmp>\scripts\verify_claims.py --check-lines --strict-lines`（脚本与文档树都是该提交版） | **72 绿 / 0 红 / 1 黄**（黄=白名单 1 条，未豁免 0），退出码 0 |
-| **工作区** | 仓库根同一条命令 | 72 绿 / 0 红 / 1 黄（与 HEAD 同值） |
+| **HEAD 快照（验收口径）** | `git worktree add --detach <tmp> <hash>`，再跑 `<tmp>\scripts\verify_claims.py --check-lines --strict-lines`（脚本与文档树都是该提交版） | **73 绿 / 0 红 / 0 黄**（白名单 0 条，自动严格），退出码 0 |
+| **工作区** | 仓库根同一条命令 | 73 绿 / 0 红 / 0 黄（与 HEAD 同值） |
 
 - 两行**必须一起报**，各自带 commit 哈希与命令；只报一行即不合规。数字随并行线提交会变，所以哈希必须跟着变。
 - 工作区绿只说明「先改」，HEAD 绿才说明「入库」。今天实测到过两行不一致：`4583f75f` 落库后 HEAD（`d8d2f963`）快照是 `70 绿 / 0 红 / 3 黄`，其中 2 条黄分别是 `error-code-visibility.md:328`（工作区先改、HEAD 未落库）与 `reference-mechanisms.md:424`（被并行线 `eb8515dc` 的行号位移推黄）。

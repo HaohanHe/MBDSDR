@@ -397,7 +397,7 @@ P1–P15 覆盖刻度、dB 量程、峰值、hold、调色板、缩放锚定、�
 
 | 机制 | 参考做法 | 我们现状 | 决定与动作 |
 |---|---|---|---|
-| C1 坏配置恢复 | `sdrpp/core/src/config.cpp`（34-43）（直接覆盖写默认） | `a96c010f` — `desktop/settings.py:342` — `os.replace(path, backup)`（基准 `5ac5e764`）；实现位置：`desktop/settings.py:342` 先备份 `*.corrupt-时间戳` | **改良后做**（已落地）：先留证据再回默认 |
+| C1 坏配置恢复 | `sdrpp/core/src/config.cpp`（34-43）（直接覆盖写默认） | `a96c010f` — `desktop/settings.py:342` — `os.replace(path, backup)`（基准 `a96c010f`）；实现位置：`desktop/settings.py:342` 先备份 `*.corrupt-时间戳` | **改良后做**（已落地）：先留证据再回默认 |
 | C2 原子写 | `config.cpp`（47-52）（`ofstream` 直接覆盖） | `357076eb` — `desktop/settings.py:638` — `_write_to_disk`（基准 `357076eb`，该行 blame）；实现位置：`desktop/settings.py:638-688`（`tmp_path = ...pid...tmp` + `os.replace(tmp_path, self._path)`） | **改良后做**（已落地；上游是反例） |
 | C3 定时自动保存线程 | `config.cpp:82-100`（1s `try_lock` + 写） | 按需 `flush` | **明确不做**：无收益且与原子写重复 |
 | C4 崩溃自检/配置重载提示 | `gqrx/.../mainwindow.cpp:500-521`（`crashed` 标志） | 未做 | **明确不做**：原子写+备份已降低丢配置概率；崩溃标记无法区分断电/强杀，误报成本高于收益 |
