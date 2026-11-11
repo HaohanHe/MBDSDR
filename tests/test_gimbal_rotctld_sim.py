@@ -131,11 +131,6 @@ def _sim_controller(server):
     return gc
 
 
-@pytest.fixture(autouse=True)
-def _isolated(isolated_profile):
-    yield
-
-
 @pytest.fixture(scope="module")
 def mw(isolated_profile):
     from main_window import MainWindow
