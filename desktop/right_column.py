@@ -23,11 +23,13 @@ from __future__ import annotations
 
 from typing import List, Optional
 
-from PySide6.QtCore import Qt, Signal, QTimer, QRectF, QPoint, QPointF, QEvent
+from PySide6.QtCore import (
+    Qt, Signal, QTimer, QRectF, QPoint, QPointF, QEvent, QSettings,
+)
 from PySide6.QtGui import QColor, QFont, QPainter, QPen
 from PySide6.QtWidgets import (
-    QApplication, QFrame, QScrollArea, QSizePolicy, QToolButton, QVBoxLayout,
-    QWidget,
+    QApplication, QFrame, QMenu, QScrollArea, QSizePolicy, QToolButton,
+    QVBoxLayout, QWidget,
 )
 
 try:
@@ -44,6 +46,20 @@ def _section_colors() -> dict:
         return {"text_primary": "#ffffff", "gray_200": "#939393",
                 "card_2": "#2b2c2f", "accent": "#919cac"}
     return _tokens().COLORS
+
+
+def _remembered_settings() -> QSettings:
+    """W48 记忆上次展开节的 QSettings。
+
+    必须走**显式 IniFormat 构造器**：本机 PySide6 6.12 上
+    ``QSettings("MBDSDR", "Desktop")`` 无视 ``setDefaultFormat()``，恒定用
+    NativeFormat（Windows 注册表）。测试里 conftest 的隔离只重定向了
+    IniFormat 的 path，用两参构造器会直接写进用户真实注册表——2026-11-11
+    实测在注册表 HKCU\\Software\\MBDSDR\\Desktop 里留下了
+    ``right_column/expanded_section``。
+    """
+    return QSettings(QSettings.IniFormat, QSettings.UserScope,
+                     "MBDSDR", "Desktop")
 
 
 class _SectionHeader(QToolButton):
@@ -160,6 +176,7 @@ class RightSection(QWidget):
 
     def set_expanded(self, expanded: bool) -> None:
         expanded = bool(expanded)
+        changed = self._expanded != expanded
         self._expanded = expanded
         self._body.setVisible(expanded)
         self.header.blockSignals(True)
@@ -168,7 +185,11 @@ class RightSection(QWidget):
         # 箭头由 _SectionHeader 自己画（▾ 展开 / ▸ 收起），文本只存标题。
         self.header.setText(self._title)
         self.header.update()
-        self.expanded_changed.emit(expanded)
+        # 只在状态真的变化时发信号：setTabText 会为了刷新标题重新调
+        # set_expanded(现值)，若无条件 emit，切语言时每改一个标题都会被
+        # 手风琴当成「用户展开了这一节」，把别的节全部收起。
+        if changed:
+            self.expanded_changed.emit(expanded)
 
 
 class _TabBarShim:
@@ -230,6 +251,13 @@ class RightColumn(QScrollArea):
         self._data: List[object] = []
         self._current = -1
         self._tabbar = _TabBarShim(self)
+        # 手风琴（D-10 用户裁定 A）：默认单展开，同一时刻最多一节展开。
+        # 「全部展开」是用户显式动作，允许短暂多开，用这个标志绕开互斥。
+        self._suspend_accordion = False
+        self._restored = False
+        # 「全部折叠 / 全部展开」两个显式动作（右键菜单，不做隐藏快捷键）。
+        self.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.customContextMenuRequested.connect(self._show_context_menu)
 
     # ------------------------------------------------------------------ 注册
     def addTab(self, widget: QWidget, title: str) -> int:
@@ -241,7 +269,7 @@ class RightColumn(QScrollArea):
         # 整栏才能落在 320 宽里而不出横向滚动条。
         section = RightSection(title, widget, expanded=(index == 0))
         section.expanded_changed.connect(
-            lambda _on: QTimer.singleShot(0, self._sync_container_height))
+            lambda on, s=section: self._on_section_expanded(s, on))
         # 用户点节标题 = 切节（W47）：旧滚动位置对新内容没有意义，先归零。
         # 程序化路径（setCurrentIndex / 跳到分组 / 浮动面板归位）走的是
         # 「展开并滚到目标节」，那条路不能归零，否则目标节被甩到视口外。
@@ -376,6 +404,75 @@ class RightColumn(QScrollArea):
             return
         self.scroll_to_top()
 
+    # ------------------------------------------------------- 手风琴（W48 / D-10）
+    def _on_section_expanded(self, section: "RightSection", expanded: bool) -> None:
+        """展开互斥：同一时刻最多一节展开（D-10 用户裁定 A）。
+
+        用户 2026-11-11 裁定：默认单展开，展开第二节时第一节自动收起；
+        「全部折叠 / 全部展开」是仅有的两个显式动作，不做 Ctrl 叠加这类
+        隐藏交互；展开状态跨会话记住上次那一节。
+        """
+        if expanded and not self._suspend_accordion:
+            for other in self._sections:
+                if other is not section and other.is_expanded():
+                    other.set_expanded(False)
+            self._remember_expanded(section)
+        # 几何要在手风琴收起其它节之后才算得准，等一帧。
+        QTimer.singleShot(0, self._sync_container_height)
+
+    def _section_key(self, index: int) -> str:
+        """节的稳定身份：优先 tabData（面板 id），没有就用标题。
+
+        不用下标：右栏增删节（面板菜单开关）后下标会漂，记住的节会错位。
+        也不用译文兜底成唯一身份——tabData 由 main_window 按 attr_name 写入，
+        语言切换不变。
+        """
+        data = self.tabData(index)
+        if isinstance(data, str) and data:
+            return data
+        return self.tabText(index)
+
+    def _remember_expanded(self, section: "RightSection") -> None:
+        try:
+            index = self._sections.index(section)
+        except ValueError:
+            return
+        s = _remembered_settings()
+        s.setValue("right_column/expanded_section", self._section_key(index))
+        s.sync()
+
+    def _restore_expanded(self) -> None:
+        """跨会话恢复上次展开的那一节（用户 2026-11-11 裁定）。"""
+        want = _remembered_settings().value("right_column/expanded_section")
+        if not want:
+            return
+        want = str(want)
+        for index in range(self.count()):
+            if self._section_key(index) == want:
+                section = self._sections[index]
+                if not section.is_expanded():
+                    section.set_expanded(True)
+                return
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        # 只在首次显示时恢复：此后再 show 不应把用户当前的选择改掉。
+        if not self._restored:
+            self._restored = True
+            if self._current < 0:
+                self._restore_expanded()
+
+    def _show_context_menu(self, pos) -> None:
+        """右键：两个显式动作——全部折叠 / 全部展开（不做隐藏快捷键）。"""
+        menu = QMenu(self)
+        expand_act = menu.addAction("全部展开")
+        collapse_act = menu.addAction("全部折叠")
+        chosen = menu.exec(self.viewport().mapToGlobal(pos))
+        if chosen is expand_act:
+            self.expand_all(True)
+        elif chosen is collapse_act:
+            self.expand_all(False)
+
     def setCurrentIndex(self, index: int) -> None:
         if not (0 <= index < len(self._sections)):
             return
@@ -414,5 +511,17 @@ class RightColumn(QScrollArea):
 
     # ------------------------------------------------------------------ 折叠
     def expand_all(self, expanded: bool = True) -> None:
-        for section in self._sections:
-            section.set_expanded(bool(expanded))
+        """两个显式动作之一：全部展开 / 全部折叠（W48）。
+
+        这是用户主动要求的多开，不在手风琴互斥范围内——用 _suspend_accordion
+        绕开 `_on_section_expanded`，否则每展开一节就把前一节收起，最终只剩
+        最后一节，按钮等于没反应。全部折叠后同样同步一次容器高度，滚动上限
+        随之变小。
+        """
+        self._suspend_accordion = True
+        try:
+            for section in self._sections:
+                section.set_expanded(bool(expanded))
+        finally:
+            self._suspend_accordion = False
+        self._sync_container_height()

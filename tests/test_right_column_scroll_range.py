@@ -7,13 +7,15 @@
 （本件不在 roadmap §7 现有工单号里，由用户当次口述立项：`_sync_container_height`
 滞后、末几节顶不到视口顶部。roadmap 单写者未分配编号，此处只写件名不借用 W 号。）
 
-现象（改前 HEAD 实测，offscreen，320×300 视口、8 节、每节正文 500 px）：
+现象（改前 HEAD 实测，offscreen，320×300 视口、8 节、每节正文 500 px；
+W48 起右栏是手风琴，现场即「全部折叠 → 展开末节」，内容从折叠态长出来）：
 
-  * 展开末节后，容器 `minimumHeight` 从 714 变成 1214，但
-    `verticalScrollBar().maximum()` 停在 **414**（应为 1214−300=914）；
-  * 把滚动值设到末节标题的内容坐标（689）只能落到 414，末节标题停在
-    视口 y=**275**，末几节永远顶不到视口顶部；
-  * 各节高度被按旧尺寸挤压（两条 525 px 的节被压成 275，正文肉眼被裁）。
+  * 全折叠后容器上限停在 **414**（内容早已不足一屏，本应为 0），末节标题
+    内容坐标 689；
+  * 展开末节后 `verticalScrollBar().maximum()` 仍是 **414**：内容没有重排，
+    末节标题仍算在 y=689，`setValue(689)` 只能落到 414、标题停在视口
+    y=**275**，末几节永远顶不到视口顶部；
+  * 各节高度按旧尺寸挤压，正文肉眼被裁。
 
 三条根因（都写在 `RightColumn._sync_container_height` 的 docstring 里）：
 布局 sizeHint 缓存未失效、容器拉高后未重排、QScrollArea 不监听容器的
@@ -85,20 +87,28 @@ def _header_y(col, index):
 
 def test_expanding_last_section_grows_scroll_range_and_reaches_top(
         qapp, isolated_profile):
-    """展开最后一节：上限要涨、要能把它滚到标题 y=0、正文不能被裁。"""
+    """展开最后一节：上限要涨、要能把它滚到标题 y=0、正文不能被裁。
+
+    W48 起右栏是手风琴（同一时刻只有一节展开），所以「展开末节」的现场是
+    **先收起默认展开的首节**、内容从折叠态长出来——这正是用户报的
+    「展开最后一节后上限不跟着涨、末几节顶不到视口顶部」。
+    """
     col = _build_column(qapp)
     try:
         bar = col.verticalScrollBar()
         last_index = _SECTION_COUNT - 1
         last = col._sections[last_index]
-        assert not last.is_expanded(), "前置条件不成立：末节应默认折叠"
 
+        # 先全部折叠（显式动作）：此时内容只有 8 条标题，上限应为 0。
+        col.expand_all(False)
+        _pump(qapp, 120)
+        assert not last.is_expanded(), "前置条件不成立：末节应处于折叠态"
         max_before = bar.maximum()
         target_y = _header_y(col, last_index)
-        assert max_before > 0, "前置条件不成立：长列没有可滚区间"
+        assert max_before == 0, (
+            f"前置条件不成立：全折叠后不应有可滚区间（max={max_before}）")
         assert target_y > max_before, (
-            f"前置条件不成立：末节标题（y={target_y}）没有落在旧上限"
-            f"（{max_before}）之外，场景不会触发滞后")
+            "前置条件不成立：末节标题没有落在旧上限之外，场景不会触发滞后")
 
         last.header.click()          # 用户展开末节
         _pump(qapp, 120)

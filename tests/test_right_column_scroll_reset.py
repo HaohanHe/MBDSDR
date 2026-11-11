@@ -74,6 +74,11 @@ def _build_column(qapp):
         col.addTab(body, f"节{i}")
     col.show()
     _pump(qapp, 80)
+    # W48 起右栏是手风琴，且会恢复上次展开的那一节（同模块共用
+    # isolated_profile，前一条用例点过的节会被记住）。本文件要的是确定状态：
+    # 只展开首节，其余收起。
+    col._sections[0].set_expanded(True)
+    _pump(qapp, 40)
     return col
 
 
