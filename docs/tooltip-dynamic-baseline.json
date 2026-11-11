@@ -1,0 +1,233 @@
+{
+  "note": "纯透传 tooltip 登记表：只减不增，runtime_test 必须指向真实用例。",
+  "entries": [
+    {
+      "file": "desktop/constellation_panel.py",
+      "expr": "_gnss_status_detail(sats, used)",
+      "reason": "passthrough",
+      "runtime_test": "tests/test_tooltip_dynamic_runtime.py::test_constellation_panel_passthrough_tooltips_self_describe"
+    },
+    {
+      "file": "desktop/control_panel.py",
+      "expr": "base",
+      "reason": "passthrough",
+      "runtime_test": "tests/test_tooltip_dynamic_runtime.py::test_control_panel_passthrough_tooltips_self_describe"
+    },
+    {
+      "file": "desktop/control_panel.py",
+      "expr": "f'{base}\\n{_why}' if base else _why",
+      "reason": "passthrough",
+      "runtime_test": "tests/test_tooltip_dynamic_runtime.py::test_control_panel_passthrough_tooltips_self_describe"
+    },
+    {
+      "file": "desktop/control_panel.py",
+      "expr": "self._ppm_base_tip",
+      "reason": "passthrough",
+      "runtime_test": "tests/test_tooltip_dynamic_runtime.py::test_control_panel_passthrough_tooltips_self_describe"
+    },
+    {
+      "file": "desktop/control_panel.py",
+      "expr": "self._offset_base_tip",
+      "reason": "passthrough",
+      "runtime_test": "tests/test_tooltip_dynamic_runtime.py::test_control_panel_passthrough_tooltips_self_describe"
+    },
+    {
+      "file": "desktop/control_panel.py",
+      "expr": "self._freq_input_base_tip",
+      "reason": "passthrough",
+      "runtime_test": "tests/test_tooltip_dynamic_runtime.py::test_control_panel_passthrough_tooltips_self_describe"
+    },
+    {
+      "file": "desktop/control_panel.py",
+      "expr": "'' if has_preset else _NO_PRESET_TIP",
+      "reason": "passthrough",
+      "runtime_test": "tests/test_tooltip_dynamic_runtime.py::test_control_panel_passthrough_tooltips_self_describe"
+    },
+    {
+      "file": "desktop/control_panel.py",
+      "expr": "self._gain_base_tip",
+      "reason": "passthrough",
+      "runtime_test": "tests/test_tooltip_dynamic_runtime.py::test_control_panel_passthrough_tooltips_self_describe"
+    },
+    {
+      "file": "desktop/control_panel.py",
+      "expr": "self._vfo_bw_base_tip",
+      "reason": "passthrough",
+      "runtime_test": "tests/test_tooltip_dynamic_runtime.py::test_control_panel_passthrough_tooltips_self_describe"
+    },
+    {
+      "file": "desktop/control_panel.py",
+      "expr": "base",
+      "reason": "passthrough",
+      "runtime_test": "tests/test_tooltip_dynamic_runtime.py::test_control_panel_passthrough_tooltips_self_describe"
+    },
+    {
+      "file": "desktop/control_panel.py",
+      "expr": "self._freq_input_base_tip",
+      "reason": "passthrough",
+      "runtime_test": "tests/test_tooltip_dynamic_runtime.py::test_control_panel_passthrough_tooltips_self_describe"
+    },
+    {
+      "file": "desktop/control_panel.py",
+      "expr": "self._vfo_bw_base_tip",
+      "reason": "passthrough",
+      "runtime_test": "tests/test_tooltip_dynamic_runtime.py::test_control_panel_passthrough_tooltips_self_describe"
+    },
+    {
+      "file": "desktop/control_panel.py",
+      "expr": "self._gain_base_tip",
+      "reason": "passthrough",
+      "runtime_test": "tests/test_tooltip_dynamic_runtime.py::test_control_panel_passthrough_tooltips_self_describe"
+    },
+    {
+      "file": "desktop/control_panel.py",
+      "expr": "self._ppm_base_tip",
+      "reason": "passthrough",
+      "runtime_test": "tests/test_tooltip_dynamic_runtime.py::test_control_panel_passthrough_tooltips_self_describe"
+    },
+    {
+      "file": "desktop/control_panel.py",
+      "expr": "self._offset_base_tip",
+      "reason": "passthrough",
+      "runtime_test": "tests/test_tooltip_dynamic_runtime.py::test_control_panel_passthrough_tooltips_self_describe"
+    },
+    {
+      "file": "desktop/control_panel.py",
+      "expr": "hint",
+      "reason": "passthrough",
+      "runtime_test": "tests/test_tooltip_dynamic_runtime.py::test_control_panel_passthrough_tooltips_self_describe"
+    },
+    {
+      "file": "desktop/control_panel.py",
+      "expr": "hint",
+      "reason": "passthrough",
+      "runtime_test": "tests/test_tooltip_dynamic_runtime.py::test_control_panel_passthrough_tooltips_self_describe"
+    },
+    {
+      "file": "desktop/control_panel.py",
+      "expr": "self._vfo_bw_base_tip",
+      "reason": "passthrough",
+      "runtime_test": "tests/test_tooltip_dynamic_runtime.py::test_control_panel_passthrough_tooltips_self_describe"
+    },
+    {
+      "file": "desktop/device_panel.py",
+      "expr": "_NO_DEVICE_TIP",
+      "reason": "passthrough",
+      "runtime_test": "tests/test_tooltip_dynamic_runtime.py::test_device_panel_passthrough_tooltips_self_describe"
+    },
+    {
+      "file": "desktop/device_panel.py",
+      "expr": "_NO_DEVICE_TIP",
+      "reason": "passthrough",
+      "runtime_test": "tests/test_tooltip_dynamic_runtime.py::test_device_panel_passthrough_tooltips_self_describe"
+    },
+    {
+      "file": "desktop/device_panel.py",
+      "expr": "tip",
+      "reason": "passthrough",
+      "runtime_test": "tests/test_tooltip_dynamic_runtime.py::test_device_panel_passthrough_tooltips_self_describe"
+    },
+    {
+      "file": "desktop/main_window.py",
+      "expr": "tip",
+      "reason": "passthrough",
+      "runtime_test": "tests/test_tooltip_dynamic_runtime.py::test_main_window_passthrough_tooltips_self_describe"
+    },
+    {
+      "file": "desktop/main_window.py",
+      "expr": "tip",
+      "reason": "passthrough",
+      "runtime_test": "tests/test_tooltip_dynamic_runtime.py::test_main_window_passthrough_tooltips_self_describe"
+    },
+    {
+      "file": "desktop/main_window.py",
+      "expr": "text",
+      "reason": "passthrough",
+      "runtime_test": "tests/test_tooltip_dynamic_runtime.py::test_main_window_passthrough_tooltips_self_describe"
+    },
+    {
+      "file": "desktop/main_window.py",
+      "expr": "text",
+      "reason": "passthrough",
+      "runtime_test": "tests/test_tooltip_dynamic_runtime.py::test_main_window_passthrough_tooltips_self_describe"
+    },
+    {
+      "file": "desktop/main_window.py",
+      "expr": "message",
+      "reason": "passthrough",
+      "runtime_test": "tests/test_tooltip_dynamic_runtime.py::test_main_window_passthrough_tooltips_self_describe"
+    },
+    {
+      "file": "desktop/rf_sky_view.py",
+      "expr": "tip",
+      "reason": "passthrough",
+      "runtime_test": "tests/test_tooltip_dynamic_runtime.py::test_rf_sky_view_passthrough_tooltips_self_describe"
+    },
+    {
+      "file": "desktop/rf_sky_view.py",
+      "expr": "tip",
+      "reason": "passthrough",
+      "runtime_test": "tests/test_tooltip_dynamic_runtime.py::test_rf_sky_view_passthrough_tooltips_self_describe"
+    },
+    {
+      "file": "desktop/rf_sky_view.py",
+      "expr": "_rate_tips[label]",
+      "reason": "passthrough",
+      "runtime_test": "tests/test_tooltip_dynamic_runtime.py::test_rf_sky_view_passthrough_tooltips_self_describe"
+    },
+    {
+      "file": "desktop/settings_panel.py",
+      "expr": "purpose",
+      "reason": "passthrough",
+      "runtime_test": "tests/test_tooltip_dynamic_runtime.py::test_settings_panel_passthrough_tooltips_self_describe"
+    },
+    {
+      "file": "desktop/settings_panel.py",
+      "expr": "text",
+      "reason": "passthrough",
+      "runtime_test": "tests/test_tooltip_dynamic_runtime.py::test_settings_panel_passthrough_tooltips_self_describe"
+    },
+    {
+      "file": "desktop/settings_panel.py",
+      "expr": "item.apply_note",
+      "reason": "passthrough",
+      "runtime_test": "tests/test_tooltip_dynamic_runtime.py::test_settings_panel_passthrough_tooltips_self_describe"
+    },
+    {
+      "file": "desktop/shortcuts_panel.py",
+      "expr": "1",
+      "reason": "passthrough",
+      "runtime_test": "tests/test_tooltip_dynamic_runtime.py::test_shortcuts_panel_passthrough_tooltips_self_describe"
+    },
+    {
+      "file": "desktop/spectrum_widget.py",
+      "expr": "gate_tip",
+      "reason": "passthrough",
+      "runtime_test": "tests/test_tooltip_dynamic_runtime.py::test_spectrum_widget_passthrough_tooltips_self_describe"
+    },
+    {
+      "file": "desktop/spectrum_widget.py",
+      "expr": "gate_tip",
+      "reason": "passthrough",
+      "runtime_test": "tests/test_tooltip_dynamic_runtime.py::test_spectrum_widget_passthrough_tooltips_self_describe"
+    },
+    {
+      "file": "desktop/spectrum_widget.py",
+      "expr": "tip",
+      "reason": "passthrough",
+      "runtime_test": "tests/test_tooltip_dynamic_runtime.py::test_spectrum_widget_passthrough_tooltips_self_describe"
+    },
+    {
+      "file": "desktop/spectrum_widget.py",
+      "expr": "tip",
+      "reason": "passthrough",
+      "runtime_test": "tests/test_tooltip_dynamic_runtime.py::test_spectrum_widget_passthrough_tooltips_self_describe"
+    },
+    {
+      "file": "desktop/weather_panel.py",
+      "expr": "path",
+      "reason": "passthrough",
+      "runtime_test": "tests/test_tooltip_dynamic_runtime.py::test_weather_panel_passthrough_tooltips_self_describe"
+    }
+  ]
+}

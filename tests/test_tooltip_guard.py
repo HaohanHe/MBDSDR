@@ -21,6 +21,7 @@
 import ast
 import json
 import os
+import re
 
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _DESKTOP = os.path.join(_ROOT, "desktop")
@@ -120,6 +121,130 @@ def _fingerprint(item):
 def _load_baseline():
     with open(_BASELINE, encoding="utf-8") as fh:
         return json.load(fh)["entries"]
+
+
+# ======================================================================
+# 动态 tooltip（f-string / + 拼接 / .format() / 变量）诚实性守卫
+#
+# 静态扫描拿不到渲染后的整句，只能看「常量片段 + 插值表达式」。这里只守
+# 一件事：**有量纲的文案必须自带来源/置信标注**——数值可以显示，但必须
+# 说清它是配置意图、声明值还是设备回读。纯动作说明、纯占位符不在此列。
+# ======================================================================
+UNIT_RE = re.compile(
+    r"(MS/s|Msps|MHz|kHz|ksps|dBFS|dBm|dB|Hz|°|ppm|PPM|百万分率|%)")
+QUAL_RE = re.compile(
+    r"(未确认|未验证|未知|以设备为准|以设备回执为准|不是|配置意图|配置请求|"
+    r"回读|回执|声明|未施加|未下发|夹到|默认值|不直接改设备|"
+    r"只改显示|按 TLE 推算|典型|SigMF|meta)")
+_PLACEHOLDER_RE = re.compile(r"%\(\w+\)[sdifr]|%[sdifr]|\{[^{}]*\}")
+_NUMFMT_RE = re.compile(r"format_sample_rate|:\s*[^}]*\.[0-9]+f")
+_DYNAMIC_BASELINE = os.path.join(_ROOT, "docs", "tooltip-dynamic-baseline.json")
+
+
+def _strip_placeholders(text):
+    """先剥 ``%s`` / ``{}`` 占位符再判，避免把格式占位符当成百分号。"""
+    return _PLACEHOLDER_RE.sub(" ", text)
+
+
+def scan_dynamic_tooltips():
+    """扫描 desktop/ 下所有非字面量 setToolTip。
+
+    返回 (全部动态条目, 违规条目)。条目 dict：{file, line, expr, text}。
+    字面量归 ``scan_tooltips()`` 管，这里跳过；违规理由只有
+    ``unqualified_quantity``：有量纲（或插值里带数值格式化）却没有
+    来源/置信标注。
+    """
+    all_items, violations = [], []
+    for name in sorted(os.listdir(_DESKTOP)):
+        if not name.endswith(".py"):
+            continue
+        path = os.path.join(_DESKTOP, name)
+        rel = "desktop/" + name
+        with open(path, encoding="utf-8") as fh:
+            tree = ast.parse(fh.read(), filename=path)
+        for node in ast.walk(tree):
+            if not (isinstance(node, ast.Call)
+                    and isinstance(node.func, ast.Attribute)
+                    and node.func.attr == "setToolTip"
+                    and node.args):
+                continue
+            arg = node.args[0]
+            if _literal(arg) is not None:
+                continue
+            frags = [s.value for s in ast.walk(arg)
+                     if isinstance(s, ast.Constant) and isinstance(s.value, str)]
+            text = _strip_placeholders("".join(frags)).strip()
+            item = {"file": rel, "line": node.lineno,
+                    "expr": ast.unparse(arg), "text": text}
+            all_items.append(item)
+            numeric = bool(UNIT_RE.search(text)) or bool(
+                _NUMFMT_RE.search(item["expr"]))
+            if numeric and not QUAL_RE.search(text):
+                violations.append(dict(item, reason="unqualified_quantity"))
+    return all_items, violations
+
+
+def _load_dynamic_baseline():
+    with open(_DYNAMIC_BASELINE, encoding="utf-8") as fh:
+        return json.load(fh)["entries"]
+
+
+def test_dynamic_tooltips_are_honest():
+    """动态 tooltip 一旦有量纲，就必须写清来源（配置意图 / 未确认 / 以设备为准…）。"""
+    _, violations = scan_dynamic_tooltips()
+    assert not violations, (
+        "动态 tooltip 有量纲却没写来源/置信标注：\n  "
+        + "\n  ".join(f"{v['file']}:{v['line']} {v['expr']} :: {v['text'][:60]}"
+                      for v in violations)
+        + "\n要么补「未确认 / 配置意图 / 以设备为准」这类标注，要么删掉数值。")
+
+
+def test_dynamic_baseline_schema_is_complete():
+    """登记项四字段齐全，且 runtime_test 必须指向真实存在的用例（不许空挂）。"""
+    entries = _load_dynamic_baseline()
+    assert entries, "动态 tooltip 登记表不能为空"
+    for e in entries:
+        assert set(e) >= {"file", "expr", "reason", "runtime_test"}, e
+        assert e["reason"] in {"passthrough", "action-only", "placeholder"}, e
+        rel, _, name = e["runtime_test"].partition("::")
+        assert rel and name, f"runtime_test 格式应为 文件::用例名：{e}"
+        full = os.path.join(_ROOT, rel)
+        assert os.path.exists(full), f"runtime_test 指向的文件不存在：{e['runtime_test']}"
+        with open(full, encoding="utf-8") as fh:
+            src = fh.read()
+        assert f"def {name}(" in src, (
+            f"runtime_test 指向的用例不存在：{e['runtime_test']}（没有这个字段/用例"
+            "的条目不许进 baseline）")
+
+
+def test_dynamic_baseline_entries_still_exist():
+    """登记项必须仍是动态调用；改回字面量后还留着条目就红（只减不增）。"""
+    items, _ = scan_dynamic_tooltips()
+    pool = {}
+    for it in items:
+        pool[(it["file"], it["expr"])] = pool.get((it["file"], it["expr"]), 0) + 1
+    stale = []
+    for e in _load_dynamic_baseline():
+        key = (e["file"], e["expr"])
+        if pool.get(key, 0) <= 0:
+            stale.append(f"{key[0]} :: {key[1]}")
+        else:
+            pool[key] -= 1
+    assert not stale, ("登记表里的条目已经不是动态 tooltip（已改成字面量或被删），"
+                       "请从 docs/tooltip-dynamic-baseline.json 移除：\n  "
+                       + "\n  ".join(stale))
+
+
+def test_every_passthrough_tooltip_is_registered():
+    """零常量片段的透传 tooltip 必须全部登记，否则运行时兜底无从挂载。"""
+    items, _ = scan_dynamic_tooltips()
+    registered = {(e["file"], e["expr"]) for e in _load_dynamic_baseline()}
+    unregistered = [f"{i['file']}:{i['line']} :: {i['expr']}"
+                    for i in items
+                    if not i["text"] and (i["file"], i["expr"]) not in registered]
+    assert not unregistered, (
+        "以下透传 tooltip 没有进登记表（也就不可能有运行时兜底）：\n  "
+        + "\n  ".join(unregistered))
 
 
 def test_tooltip_baseline_only_shrinks():
