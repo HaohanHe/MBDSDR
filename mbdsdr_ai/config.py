@@ -403,6 +403,9 @@ def load_config(path: str = "~/.mbdsdr/config.json") -> AgentConfig:
     def _defaults() -> AgentConfig:
         cfg = AgentConfig()
         cfg._config_path = path
+        #: 读盘时的内存值快照：``save_config`` 只提交「相对它变过的键」，
+        #: 避免把这份快照里没动过的键（典型 api_key）当成用户意图写回去。
+        cfg._disk_baseline = cfg.to_dict()
         return cfg
 
     if not os.path.exists(path):
@@ -421,6 +424,8 @@ def load_config(path: str = "~/.mbdsdr/config.json") -> AgentConfig:
         for key in ("api_key", "base_url", "model"):
             if key in normalized:
                 setattr(config, key, normalized[key])
+        #: 读盘时的内存值快照：``save_config`` 只提交「相对它变过的键」。
+        config._disk_baseline = config.to_dict()
         if normalized != data:
             # 迁移回写也走唯一写入口：锁内重读磁盘后再归一，绝不拿读盘时的
             # 旧快照整份覆盖（面板可能刚在两次读之间写入了 api_key）。
@@ -459,11 +464,25 @@ def save_config(config: AgentConfig,
         path or getattr(config, "_config_path", None) or CONFIG_PATH)
     payload = config.to_dict()
 
+    # 只提交「相对 load_config 读盘时的值变过的键」：没变过的键不是本次写入者
+    # 的意图，写回去就是把别处（AI 面板 / 设置面板）刚写的值回滚——典型事故
+    # 是快照里 api_key 还是空串，一保存就把面板刚存的 key 抹掉（P1-47）。
+    # 没有基线（AgentConfig() 直接构造，例如迁移/测试）时保持原行为整份写。
+    baseline = getattr(config, "_disk_baseline", None)
+    if isinstance(baseline, dict):
+        payload = {k: v for k, v in payload.items() if baseline.get(k) != v}
+        if not payload:
+            config._config_path = target
+            _set_error(None)
+            return True
+
     def _merge(disk: Dict[str, Any]) -> None:
         disk.update(payload)
 
     if not ConfigStore(target).update(_merge):
         return False
     config._config_path = target
+    if isinstance(baseline, dict):
+        config._disk_baseline = config.to_dict()
     _set_error(None)
     return True
