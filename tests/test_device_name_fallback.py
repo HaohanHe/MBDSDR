@@ -210,3 +210,58 @@ class TestDeviceNameFallback:
 
         QTest.qWait(50)
         w._teardown_connection()
+
+
+class TestRealBackendCoverage:
+    """后端 × 名称来源矩阵：每个真实后端类都走同一个受保护取值口。"""
+
+    @staticmethod
+    def _resolve(backend):
+        import main_window as mw
+        return mw.MainWindow._resolve_device_display_name(backend)
+
+    def test_rtlsdr_local_and_rtl_tcp(self):
+        from mbdsdr_ai.sdr_backend import RTLSDRBackend
+
+        assert self._resolve(RTLSDRBackend(device_index=2)) == \
+            ("RTL-SDR #2", True)
+        assert self._resolve(RTLSDRBackend(host="127.0.0.1", port=1234)) == \
+            ("rtl_tcp 127.0.0.1:1234", True)
+
+    def test_soapy_uses_enumerated_label(self):
+        from mbdsdr_ai.sdr_backend import SoapySDRBackend
+
+        backend = SoapySDRBackend(
+            "driver=rtlsdr",
+            {"label": "Generic RTL2832U", "driver": "rtlsdr"})
+        assert self._resolve(backend) == ("Generic RTL2832U", True)
+
+    def test_soapy_without_label_falls_back_to_args(self):
+        from mbdsdr_ai.sdr_backend import SoapySDRBackend
+
+        backend = SoapySDRBackend("driver=x", {"driver": "x"})
+        name, readable = self._resolve(backend)
+        assert name == "driver=x"
+        assert readable is True, "参数串是可读身份，不算名称不可读"
+
+    def test_bladerf_and_lime_have_no_device_object(self):
+        from mbdsdr_ai.bladerf_params import BladeRFBackend
+        from mbdsdr_ai.limesuite_params import LimeSDRBackend
+
+        assert self._resolve(BladeRFBackend()) == ("BladeRFBackend", False)
+        assert self._resolve(LimeSDRBackend()) == ("LimeSDRBackend", False)
+
+    def test_file_playback_uses_filename(self):
+        from mbdsdr_ai.sdr_backend import FileIQBackend
+
+        backend = FileIQBackend(r"C:\tmp\rec 001.cf32")
+        assert self._resolve(backend) == ("IQ 文件回放: rec 001.cf32", True)
+
+    def test_blank_name_falls_back_and_flags_unreadable(self):
+        class _BlankName:
+            device = SimpleNamespace(name="   ")
+
+        name, readable = self._resolve(_BlankName())
+        assert name == "_BlankName"
+        assert readable is False
+
