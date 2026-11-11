@@ -338,6 +338,10 @@ class RtlTcpClient:
         """设置晶振频偏校正（ppm）。opcode 0x05。"""
         return self._send_cmd(self.CMD_SET_FREQ_CORRECTION, int(ppm))
 
+    def set_agc(self, enabled: bool) -> bool:
+        """tuner 增益模式（0x03）：0=auto(AGC)、1=manual，返回真实下发结果。"""
+        return self._send_cmd(self.CMD_SET_GAIN_MODE, 0 if enabled else 1)
+
     # ── IQ 流读取 ───────────────────────────────────────────────────────
     def _recvexactly(self, n: int, phase: str = "stream") -> Optional[bytes]:
         """从 socket 读满 n 字节（可能多次 recv）。
@@ -565,7 +569,16 @@ class RtlTcpDeviceAdapter:
     def bandwidth(self, value):
         return None
 
-    # ── pyrtlsdr 风格方法（协议不支持的显式 no-op）──────────────────────
+    # 能力声明（2026-11-11 工单：报告 #9）：rtl_tcp 协议只覆盖
+    # 频率/采样率/增益模式/增益/频偏 五个命令，下列控制在协议层没有对应
+    # 命令，统一声明"不支持"，由上层跳过并如实说明，绝不返回 True 冒充已生效。
+    supports_bandwidth = False
+    supports_agc_mode = False          # 仅 RTL2832 数字 AGC；tuner AGC 走 0x03
+    supports_direct_sampling = False
+    supports_bias_tee = False
+    supports_offset_tuning = False
+
+    # ── pyrtlsdr 风格方法（协议不支持的显式"不支持"）────────────────────
     def set_manual_gain_mode(self, mode):
         # 增益模式由 RtlTcpClient.set_gain 内部切 1=manual；AGC(0) 走 0x03=0。
         if not mode:
@@ -574,19 +587,23 @@ class RtlTcpDeviceAdapter:
         return True
 
     def set_agc_mode(self, enabled):
-        # rtl_tcp 无独立的 RTL2832 数字 AGC 命令，显式 no-op。
-        return True
+        # rtl_tcp 无独立的 RTL2832 数字 AGC 命令：明确不支持，不冒充生效。
+        logger.info("rtl_tcp 协议无数字 AGC 命令，set_agc_mode(%s) 不支持", enabled)
+        return False
 
     def set_direct_sampling(self, mode):
-        # rtl_tcp 协议无直采命令，显式 no-op。
-        return True
+        # rtl_tcp 协议无直采命令：明确不支持（用不了 ≠ 设置成功）。
+        logger.info("rtl_tcp 协议无直采命令，set_direct_sampling(%s) 不支持", mode)
+        return False
 
     def set_bias_tee(self, enabled):
-        # rtl_tcp 协议无偏置供电命令，显式 no-op。
-        return True
+        # rtl_tcp 协议无偏置供电命令：明确不支持。
+        logger.info("rtl_tcp 协议无偏置供电命令，set_bias_tee(%s) 不支持", enabled)
+        return False
 
     def set_offset_tuning(self, enabled):
-        return True
+        logger.info("rtl_tcp 协议无 Offset Tuning 命令，不支持")
+        return False
 
     def reset_buffer(self):
         return None
@@ -807,6 +824,49 @@ class RtlTcpBackend(SDRBackend):
             return False
         gain_tenths = int(round(gain_db * 10))
         return self._client.set_gain(gain_tenths)
+
+    # ── 协议层不存在的控制：显式"不支持"，不冒充成功（报告 #9）──────────
+    # 旧行为：继承基类默认实现，带宽/AGC 直接 return True，直采/偏置/偏移在
+    # 设备适配器里是空操作也 return True —— 面板显示"已生效"，远端什么都没变。
+    def _apply_bandwidth(self, bw_hz: float) -> bool:
+        """rtl_tcp 协议没有带宽命令，模拟滤波器由采样率决定。"""
+        self.status.error = (
+            "rtl_tcp 协议没有带宽命令（远端模拟滤波器由采样率决定），"
+            f"带宽 {int(bw_hz) / 1000:.0f} kHz 未生效")
+        logger.info("rtl_tcp 不支持带宽设置：请求 %.0f Hz 未下发", bw_hz)
+        return False
+
+    def _apply_agc(self, enabled: bool) -> bool:
+        """AGC 只等价于 tuner 增益模式（0x03 真实下发），无数字 AGC。
+
+        远端 rtl_tcp 的 AGC = rtlsdr_set_tuner_gain_mode(0)，这条是真实命令；
+        RTL2832 的数字 AGC 协议里没有，不再"顺带"返回成功去冒充它。
+        """
+        if self._client is None:
+            return False
+        ok = self._client.set_agc(bool(enabled))
+        if not ok:
+            self.status.error = "AGC 下发失败：rtl_tcp 增益模式命令未发出"
+        return ok
+
+    def set_bias_tee(self, enabled: bool) -> bool:
+        self.status.error = "rtl_tcp 协议没有偏置供电命令，无法给有源天线供电"
+        logger.info("rtl_tcp 不支持偏置供电：请求 %s 未下发", enabled)
+        return False
+
+    def set_direct_sampling(self, branch: str = "q") -> bool:
+        self.status.error = "rtl_tcp 协议没有直采命令，远端无法切换 HF 直采"
+        logger.info("rtl_tcp 不支持直采：请求 %s 未下发", branch)
+        return False
+
+    def supports_offset_tuning(self) -> bool:
+        """rtl_tcp 协议没有 offset tuning 命令，连接流程应跳过而不是报错。"""
+        return False
+
+    def set_offset_tuning(self, enabled: bool) -> bool:
+        self.status.error = "rtl_tcp 协议没有 Offset Tuning 命令，DC 抵消不可用"
+        logger.info("rtl_tcp 不支持 Offset Tuning：请求 %s 未下发", enabled)
+        return False
 
     def set_ppm(self, ppm: int) -> bool:
         """保存并下发晶振频偏校正（ppm）。未连接时仅保存，connect 时再发。"""
