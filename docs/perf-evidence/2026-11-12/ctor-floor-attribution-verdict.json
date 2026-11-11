@@ -83,9 +83,9 @@
   "q3_sky_widget_net": "≈2.3 ms：本线 cold 臂 sky_total 与同 run 最慢 QLineEdit 的差为 2.6/3.3/3.7 ms，与卫星线 40b2d27b 的 345.6−343.3=2.3 一致。延后只转移不减少。"
  },
  "next": {
-  "target": "主题预应用的 ≈+360：按控件类型拆建树期 QSS polish 成本",
-  "method": "同进程、同快照，preapply 后给 QWidget.__init__ / QLabel.__init__ / QPushButton.__init__ / QComboBox.__init__ / QGroupBox.__init__ 计次与累计（不改 main_window.py，只 patch 类）；按累计 top-N 给账。",
-  "secondary": "入口其余 +135.5：分别加回 splash 上屏、_run_import_smoke、deps 探测，各测一臂。"
+  "target": "已由重排实验回收，不再按控件类型拆 ≈+360",
+  "method": "见 docs/perf-evidence/2026-11-12/theme-order-verdict.json：把主题应用从建树前移到 ctor 后 / show 前，端到端（定义 C）省 694.9–821.0 ms（全量推后）或 245.5 ms（只搬入口）。≈+360 只是「建树期带样式构造」总代价约 1000 ms 的一部分，继续按控件类型拆属于给残差记账。",
+  "remaining": "统一「主题应用唯一出口」：需要 main_window 把 ctor 内 _apply_touch_adaptation 的 app 级 setStyleSheet 也推迟到 ctor 之后（归卫星线）。入口其余 +135.5 未处理。"
  },
  "scripts": [
   "scripts/repro/2026-11-12-ctor-floor-prewarm-ab.py --runs 3 --rev 88e458c8",

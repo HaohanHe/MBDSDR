@@ -1,0 +1,2009 @@
+{
+ "kind": "theme.apply 位置 AB：建树前（生产现状）vs ctor 后 show 前",
+ "date": "2026-11-12",
+ "scope": "all",
+ "scope_note": "all = 连 ctor 内 main_window 自己的 app.setStyleSheet 也一起推后",
+ "head": "fbf192a3",
+ "snapshot": "C:\\Users\\xxhzb\\AppData\\Local\\Temp\\kilo\\themeorder_head_fbf192a3",
+ "definition": "定义 C 端到端 = 进程入口(T0) → 主窗首个 Paint 派发完毕；两臂只在 theme.apply 的位置上不同",
+ "arms": {
+  "before": {
+   "n": 3,
+   "ctor_ms": {
+    "runs": [
+     1450.5,
+     1647.2,
+     1605.0
+    ],
+    "median": 1605.0,
+    "min": 1450.5,
+    "max": 1647.2
+   },
+   "apply_after_ctor_ms": null,
+   "activate_ms": {
+    "runs": [
+     0.2,
+     0.2,
+     0.2
+    ],
+    "median": 0.2,
+    "min": 0.2,
+    "max": 0.2
+   },
+   "theme_before_ctor_ms": {
+    "runs": [
+     1.9,
+     2.3,
+     2.5
+    ],
+    "median": 2.3,
+    "min": 1.9,
+    "max": 2.5
+   },
+   "show_to_paint_ms": {
+    "runs": [
+     51.9,
+     46.8,
+     46.9
+    ],
+    "median": 46.9,
+    "min": 46.8,
+    "max": 51.9
+   },
+   "def_c_entry_to_paint_ms": {
+    "runs": [
+     5337.8,
+     5445.2,
+     5287.2
+    ],
+    "median": 5337.8,
+    "min": 5287.2,
+    "max": 5445.2
+   },
+   "splash_paint_ms": {
+    "runs": [
+     1713.6,
+     1719.5,
+     1654.3
+    ],
+    "median": 1713.6,
+    "min": 1654.3,
+    "max": 1719.5
+   },
+   "samples": [
+    {
+     "arm": "before",
+     "scope": "all",
+     "head": "fbf192a3",
+     "mw_file": "C:\\Users\\xxhzb\\AppData\\Local\\Temp\\kilo\\themeorder_head_fbf192a3\\main_window.py",
+     "t_to_qapp_ms": 233.3,
+     "splash_paint_ms": 1713.6,
+     "smoke_ms": 1034.3,
+     "deps_ms": 329.5,
+     "theme_before_ctor_ms": 1.9,
+     "import_mw_ms": 588.4,
+     "ctor_ms": 1450.5,
+     "apply_after_ctor_ms": null,
+     "activate_ms": 0.2,
+     "fit_scale_ms": 1.0,
+     "show_to_paint_ms": 51.9,
+     "def_c_entry_to_paint_ms": 5337.8,
+     "theme_calls": [
+      {
+       "t_ms": 3084.7,
+       "ms": 1.0,
+       "skipped": false,
+       "what": "app.setStyleSheet",
+       "qss_len_set": 20127
+      },
+      {
+       "t_ms": 3083.9,
+       "ms": 1.9,
+       "skipped": false,
+       "qss_len_before": 0,
+       "qss_len_after": 20127,
+       "branch": "setStyleSheet"
+      },
+      {
+       "t_ms": 4696.0,
+       "ms": 1.1,
+       "skipped": false,
+       "qss_len_before": 20127,
+       "qss_len_after": 20127,
+       "branch": "repolish_or_early"
+      },
+      {
+       "t_ms": 5178.2,
+       "ms": 1.0,
+       "skipped": false,
+       "qss_len_before": 20127,
+       "qss_len_after": 20127,
+       "branch": "repolish_or_early"
+      },
+      {
+       "t_ms": 5181.1,
+       "ms": 0.8,
+       "skipped": false,
+       "qss_len_before": 20127,
+       "qss_len_after": 20127,
+       "branch": "repolish_or_early"
+      },
+      {
+       "t_ms": 5200.1,
+       "ms": 0.8,
+       "skipped": false,
+       "qss_len_before": 20127,
+       "qss_len_after": 20127,
+       "branch": "repolish_or_early"
+      }
+     ],
+     "deferred_qss_len": [],
+     "style_len_at_first_paint": 20127,
+     "hints_ctor_end": {
+      "buttons": [
+       {
+        "cls": "QPushButton",
+        "w": 54,
+        "h": 45
+       },
+       {
+        "cls": "QPushButton",
+        "w": 94,
+        "h": 45
+       },
+       {
+        "cls": "QPushButton",
+        "w": 114,
+        "h": 45
+       },
+       {
+        "cls": "QPushButton",
+        "w": 74,
+        "h": 45
+       }
+      ],
+      "combos": [
+       {
+        "cls": "QComboBox",
+        "w": 100,
+        "h": 43
+       },
+       {
+        "cls": "QComboBox",
+        "w": 163,
+        "h": 43
+       },
+       {
+        "cls": "QComboBox",
+        "w": 210,
+        "h": 43
+       },
+       {
+        "cls": "QComboBox",
+        "w": 210,
+        "h": 43
+       }
+      ],
+      "min_width": 834
+     },
+     "hints_after_apply": null,
+     "hints_after_paint": {
+      "buttons": [
+       {
+        "cls": "QPushButton",
+        "w": 54,
+        "h": 45
+       },
+       {
+        "cls": "QPushButton",
+        "w": 94,
+        "h": 45
+       },
+       {
+        "cls": "QPushButton",
+        "w": 114,
+        "h": 45
+       },
+       {
+        "cls": "QPushButton",
+        "w": 74,
+        "h": 45
+       }
+      ],
+      "combos": [
+       {
+        "cls": "QComboBox",
+        "w": 100,
+        "h": 43
+       },
+       {
+        "cls": "QComboBox",
+        "w": 163,
+        "h": 43
+       },
+       {
+        "cls": "QComboBox",
+        "w": 210,
+        "h": 43
+       },
+       {
+        "cls": "QComboBox",
+        "w": 210,
+        "h": 43
+       }
+      ],
+      "min_width": 749
+     },
+     "colors": {
+      "size": [
+       1400,
+       900
+      ],
+      "sha1": "d42f92ebcdd1685f",
+      "expected_window": "#000000",
+      "thumb_8x8": [
+       "#2c2d2e",
+       "#232426",
+       "#171717",
+       "#0f0f10",
+       "#0e0f10",
+       "#0e0f10",
+       "#101010",
+       "#151515",
+       "#363537",
+       "#282728",
+       "#2b292b",
+       "#242a32",
+       "#252c36",
+       "#212831",
+       "#1b1c1d",
+       "#1e1f1f",
+       "#0f1216",
+       "#04080c",
+       "#04070b",
+       "#1d2228",
+       "#1f242b",
+       "#1f232a",
+       "#222324",
+       "#2a2b2c",
+       "#0f1319",
+       "#1d181d",
+       "#0a0e13",
+       "#1d2228",
+       "#1f242b",
+       "#1e232a",
+       "#27282a",
+       "#2b2c2d",
+       "#0d1117",
+       "#0a0f15",
+       "#070c12",
+       "#1d2228",
+       "#1f242b",
+       "#1e232a",
+       "#060606",
+       "#111111",
+       "#090b0e",
+       "#06090c",
+       "#090b0e",
+       "#1d2228",
+       "#1f242b",
+       "#1e232a",
+       "#060606",
+       "#070707",
+       "#000000",
+       "#0b0b0b",
+       "#000000",
+       "#1c2127",
+       "#1f242b",
+       "#1e232a",
+       "#101010",
+       "#030303",
+       "#1b1b1c",
+       "#111111",
+       "#0d0d0d",
+       "#101113",
+       "#111214",
+       "#111214",
+       "#0c0c0c",
+       "#0d0d0e"
+      ],
+      "win_center": "#1f242b",
+      "btn_center": "#000000",
+      "btn_expected": "#35373c",
+      "combo_center": "#000000",
+      "combo_expected": "#2b2c2f"
+     },
+     "paints": 1,
+     "load_after": {
+      "sys_cpu_pct": 20.4,
+      "python_proc_count": 5,
+      "python_total_cpu_pct": 118.7,
+      "python_top": [
+       {
+        "pid": 7976,
+        "cpu_pct": 111.7
+       },
+       {
+        "pid": 32508,
+        "cpu_pct": 7.0
+       },
+       {
+        "pid": 13740,
+        "cpu_pct": 0.0
+       },
+       {
+        "pid": 32192,
+        "cpu_pct": 0.0
+       },
+       {
+        "pid": 37752,
+        "cpu_pct": 0.0
+       }
+      ],
+      "cpu_count": 12
+     },
+     "load_gate_before_python_pct": 116.4
+    },
+    {
+     "arm": "before",
+     "scope": "all",
+     "head": "fbf192a3",
+     "mw_file": "C:\\Users\\xxhzb\\AppData\\Local\\Temp\\kilo\\themeorder_head_fbf192a3\\main_window.py",
+     "t_to_qapp_ms": 219.6,
+     "splash_paint_ms": 1719.5,
+     "smoke_ms": 1113.3,
+     "deps_ms": 337.0,
+     "theme_before_ctor_ms": 2.3,
+     "import_mw_ms": 370.6,
+     "ctor_ms": 1647.2,
+     "apply_after_ctor_ms": null,
+     "activate_ms": 0.2,
+     "fit_scale_ms": 1.1,
+     "show_to_paint_ms": 46.8,
+     "def_c_entry_to_paint_ms": 5445.2,
+     "theme_calls": [
+      {
+       "t_ms": 3177.1,
+       "ms": 1.2,
+       "skipped": false,
+       "what": "app.setStyleSheet",
+       "qss_len_set": 20127
+      },
+      {
+       "t_ms": 3176.0,
+       "ms": 2.3,
+       "skipped": false,
+       "qss_len_before": 0,
+       "qss_len_after": 20127,
+       "branch": "setStyleSheet"
+      },
+      {
+       "t_ms": 4773.4,
+       "ms": 0.9,
+       "skipped": false,
+       "qss_len_before": 20127,
+       "qss_len_after": 20127,
+       "branch": "repolish_or_early"
+      },
+      {
+       "t_ms": 5262.2,
+       "ms": 0.9,
+       "skipped": false,
+       "qss_len_before": 20127,
+       "qss_len_after": 20127,
+       "branch": "repolish_or_early"
+      },
+      {
+       "t_ms": 5264.6,
+       "ms": 1.0,
+       "skipped": false,
+       "qss_len_before": 20127,
+       "qss_len_after": 20127,
+       "branch": "repolish_or_early"
+      },
+      {
+       "t_ms": 5287.3,
+       "ms": 0.9,
+       "skipped": false,
+       "qss_len_before": 20127,
+       "qss_len_after": 20127,
+       "branch": "repolish_or_early"
+      }
+     ],
+     "deferred_qss_len": [],
+     "style_len_at_first_paint": 20127,
+     "hints_ctor_end": {
+      "buttons": [
+       {
+        "cls": "QPushButton",
+        "w": 54,
+        "h": 45
+       },
+       {
+        "cls": "QPushButton",
+        "w": 94,
+        "h": 45
+       },
+       {
+        "cls": "QPushButton",
+        "w": 114,
+        "h": 45
+       },
+       {
+        "cls": "QPushButton",
+        "w": 74,
+        "h": 45
+       }
+      ],
+      "combos": [
+       {
+        "cls": "QComboBox",
+        "w": 100,
+        "h": 43
+       },
+       {
+        "cls": "QComboBox",
+        "w": 163,
+        "h": 43
+       },
+       {
+        "cls": "QComboBox",
+        "w": 210,
+        "h": 43
+       },
+       {
+        "cls": "QComboBox",
+        "w": 210,
+        "h": 43
+       }
+      ],
+      "min_width": 834
+     },
+     "hints_after_apply": null,
+     "hints_after_paint": {
+      "buttons": [
+       {
+        "cls": "QPushButton",
+        "w": 54,
+        "h": 45
+       },
+       {
+        "cls": "QPushButton",
+        "w": 94,
+        "h": 45
+       },
+       {
+        "cls": "QPushButton",
+        "w": 114,
+        "h": 45
+       },
+       {
+        "cls": "QPushButton",
+        "w": 74,
+        "h": 45
+       }
+      ],
+      "combos": [
+       {
+        "cls": "QComboBox",
+        "w": 100,
+        "h": 43
+       },
+       {
+        "cls": "QComboBox",
+        "w": 163,
+        "h": 43
+       },
+       {
+        "cls": "QComboBox",
+        "w": 210,
+        "h": 43
+       },
+       {
+        "cls": "QComboBox",
+        "w": 210,
+        "h": 43
+       }
+      ],
+      "min_width": 749
+     },
+     "colors": {
+      "size": [
+       1400,
+       900
+      ],
+      "sha1": "7a810906d9881a09",
+      "expected_window": "#000000",
+      "thumb_8x8": [
+       "#2c2d2e",
+       "#232426",
+       "#171717",
+       "#0f0f10",
+       "#0e0f10",
+       "#0e0f10",
+       "#101010",
+       "#151515",
+       "#363537",
+       "#282728",
+       "#2b292b",
+       "#242a32",
+       "#252c36",
+       "#212831",
+       "#1b1c1d",
+       "#1e1f1f",
+       "#0f1216",
+       "#04080c",
+       "#04070b",
+       "#1d2228",
+       "#1f242b",
+       "#1f232a",
+       "#222324",
+       "#2a2b2c",
+       "#0f1319",
+       "#1d181d",
+       "#0a0e13",
+       "#1d2228",
+       "#1f242b",
+       "#1e232a",
+       "#27282a",
+       "#2b2c2d",
+       "#0d1117",
+       "#0a0f15",
+       "#070c12",
+       "#1d2228",
+       "#1f242b",
+       "#1e232a",
+       "#060606",
+       "#111111",
+       "#090b0e",
+       "#06090c",
+       "#090b0e",
+       "#1d2228",
+       "#1f242b",
+       "#1e232a",
+       "#060606",
+       "#070707",
+       "#000000",
+       "#0b0b0b",
+       "#000000",
+       "#1c2127",
+       "#1f242b",
+       "#1e232a",
+       "#101010",
+       "#030303",
+       "#1b1b1c",
+       "#111111",
+       "#0d0d0d",
+       "#101113",
+       "#111214",
+       "#111214",
+       "#0c0c0c",
+       "#0d0d0e"
+      ],
+      "win_center": "#1f242b",
+      "btn_center": "#000000",
+      "btn_expected": "#35373c",
+      "combo_center": "#000000",
+      "combo_expected": "#2b2c2f"
+     },
+     "paints": 1,
+     "load_after": {
+      "sys_cpu_pct": 16.5,
+      "python_proc_count": 5,
+      "python_total_cpu_pct": 96.9,
+      "python_top": [
+       {
+        "pid": 37672,
+        "cpu_pct": 92.2
+       },
+       {
+        "pid": 32508,
+        "cpu_pct": 4.7
+       },
+       {
+        "pid": 13740,
+        "cpu_pct": 0.0
+       },
+       {
+        "pid": 35476,
+        "cpu_pct": 0.0
+       },
+       {
+        "pid": 37752,
+        "cpu_pct": 0.0
+       }
+      ],
+      "cpu_count": 12
+     },
+     "load_gate_before_python_pct": 108.5
+    },
+    {
+     "arm": "before",
+     "scope": "all",
+     "head": "fbf192a3",
+     "mw_file": "C:\\Users\\xxhzb\\AppData\\Local\\Temp\\kilo\\themeorder_head_fbf192a3\\main_window.py",
+     "t_to_qapp_ms": 220.8,
+     "splash_paint_ms": 1654.3,
+     "smoke_ms": 1107.1,
+     "deps_ms": 336.0,
+     "theme_before_ctor_ms": 2.5,
+     "import_mw_ms": 353.7,
+     "ctor_ms": 1605.0,
+     "apply_after_ctor_ms": null,
+     "activate_ms": 0.2,
+     "fit_scale_ms": 1.1,
+     "show_to_paint_ms": 46.9,
+     "def_c_entry_to_paint_ms": 5287.2,
+     "theme_calls": [
+      {
+       "t_ms": 3102.7,
+       "ms": 1.1,
+       "skipped": false,
+       "what": "app.setStyleSheet",
+       "qss_len_set": 20127
+      },
+      {
+       "t_ms": 3101.3,
+       "ms": 2.5,
+       "skipped": false,
+       "qss_len_before": 0,
+       "qss_len_after": 20127,
+       "branch": "setStyleSheet"
+      },
+      {
+       "t_ms": 4632.6,
+       "ms": 0.9,
+       "skipped": false,
+       "qss_len_before": 20127,
+       "qss_len_after": 20127,
+       "branch": "repolish_or_early"
+      },
+      {
+       "t_ms": 5126.8,
+       "ms": 0.9,
+       "skipped": false,
+       "qss_len_before": 20127,
+       "qss_len_after": 20127,
+       "branch": "repolish_or_early"
+      },
+      {
+       "t_ms": 5129.5,
+       "ms": 0.8,
+       "skipped": false,
+       "qss_len_before": 20127,
+       "qss_len_after": 20127,
+       "branch": "repolish_or_early"
+      },
+      {
+       "t_ms": 5148.5,
+       "ms": 0.9,
+       "skipped": false,
+       "qss_len_before": 20127,
+       "qss_len_after": 20127,
+       "branch": "repolish_or_early"
+      }
+     ],
+     "deferred_qss_len": [],
+     "style_len_at_first_paint": 20127,
+     "hints_ctor_end": {
+      "buttons": [
+       {
+        "cls": "QPushButton",
+        "w": 54,
+        "h": 45
+       },
+       {
+        "cls": "QPushButton",
+        "w": 94,
+        "h": 45
+       },
+       {
+        "cls": "QPushButton",
+        "w": 114,
+        "h": 45
+       },
+       {
+        "cls": "QPushButton",
+        "w": 74,
+        "h": 45
+       }
+      ],
+      "combos": [
+       {
+        "cls": "QComboBox",
+        "w": 100,
+        "h": 43
+       },
+       {
+        "cls": "QComboBox",
+        "w": 163,
+        "h": 43
+       },
+       {
+        "cls": "QComboBox",
+        "w": 210,
+        "h": 43
+       },
+       {
+        "cls": "QComboBox",
+        "w": 210,
+        "h": 43
+       }
+      ],
+      "min_width": 834
+     },
+     "hints_after_apply": null,
+     "hints_after_paint": {
+      "buttons": [
+       {
+        "cls": "QPushButton",
+        "w": 54,
+        "h": 45
+       },
+       {
+        "cls": "QPushButton",
+        "w": 94,
+        "h": 45
+       },
+       {
+        "cls": "QPushButton",
+        "w": 114,
+        "h": 45
+       },
+       {
+        "cls": "QPushButton",
+        "w": 74,
+        "h": 45
+       }
+      ],
+      "combos": [
+       {
+        "cls": "QComboBox",
+        "w": 100,
+        "h": 43
+       },
+       {
+        "cls": "QComboBox",
+        "w": 163,
+        "h": 43
+       },
+       {
+        "cls": "QComboBox",
+        "w": 210,
+        "h": 43
+       },
+       {
+        "cls": "QComboBox",
+        "w": 210,
+        "h": 43
+       }
+      ],
+      "min_width": 749
+     },
+     "colors": {
+      "size": [
+       1400,
+       900
+      ],
+      "sha1": "b3b47da89b79764c",
+      "expected_window": "#000000",
+      "thumb_8x8": [
+       "#2c2d2e",
+       "#232426",
+       "#171717",
+       "#0f0f10",
+       "#0e0f10",
+       "#0e0f10",
+       "#101010",
+       "#151515",
+       "#363537",
+       "#282728",
+       "#2b292b",
+       "#242a32",
+       "#252c36",
+       "#212831",
+       "#1b1c1d",
+       "#1e1f1f",
+       "#0f1216",
+       "#04080c",
+       "#04070b",
+       "#1d2228",
+       "#1f242b",
+       "#1f232a",
+       "#222324",
+       "#2a2b2c",
+       "#0f1319",
+       "#1d181d",
+       "#0a0e13",
+       "#1d2228",
+       "#1f242b",
+       "#1e232a",
+       "#27282a",
+       "#2b2c2d",
+       "#0d1117",
+       "#0a0f15",
+       "#070c12",
+       "#1d2228",
+       "#1f242b",
+       "#1e232a",
+       "#060606",
+       "#111111",
+       "#090b0e",
+       "#06090c",
+       "#090b0e",
+       "#1d2228",
+       "#1f242b",
+       "#1e232a",
+       "#060606",
+       "#070707",
+       "#000000",
+       "#0b0b0b",
+       "#000000",
+       "#1c2127",
+       "#1f242b",
+       "#1e232a",
+       "#101010",
+       "#030303",
+       "#1b1b1c",
+       "#111111",
+       "#0d0d0d",
+       "#101113",
+       "#111214",
+       "#111214",
+       "#0c0c0c",
+       "#0d0d0e"
+      ],
+      "win_center": "#1f242b",
+      "btn_center": "#000000",
+      "btn_expected": "#35373c",
+      "combo_center": "#000000",
+      "combo_expected": "#2b2c2f"
+     },
+     "paints": 1,
+     "load_after": {
+      "sys_cpu_pct": 22.2,
+      "python_proc_count": 5,
+      "python_total_cpu_pct": 103.9,
+      "python_top": [
+       {
+        "pid": 21740,
+        "cpu_pct": 100.8
+       },
+       {
+        "pid": 32508,
+        "cpu_pct": 3.1
+       },
+       {
+        "pid": 13740,
+        "cpu_pct": 0.0
+       },
+       {
+        "pid": 29948,
+        "cpu_pct": 0.0
+       },
+       {
+        "pid": 37752,
+        "cpu_pct": 0.0
+       }
+      ],
+      "cpu_count": 12
+     },
+     "load_gate_before_python_pct": 89.1
+    }
+   ]
+  },
+  "after": {
+   "n": 3,
+   "ctor_ms": {
+    "runs": [
+     514.3,
+     516.1,
+     468.4
+    ],
+    "median": 514.3,
+    "min": 468.4,
+    "max": 516.1
+   },
+   "apply_after_ctor_ms": {
+    "runs": [
+     288.8,
+     249.5,
+     214.3
+    ],
+    "median": 249.5,
+    "min": 214.3,
+    "max": 288.8
+   },
+   "activate_ms": {
+    "runs": [
+     0.2,
+     0.2,
+     0.2
+    ],
+    "median": 0.2,
+    "min": 0.2,
+    "max": 0.2
+   },
+   "theme_before_ctor_ms": {
+    "runs": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "median": 0.0,
+    "min": 0.0,
+    "max": 0.0
+   },
+   "show_to_paint_ms": {
+    "runs": [
+     40.0,
+     56.8,
+     37.7
+    ],
+    "median": 40.0,
+    "min": 37.7,
+    "max": 56.8
+   },
+   "def_c_entry_to_paint_ms": {
+    "runs": [
+     4711.3,
+     4642.9,
+     4438.3
+    ],
+    "median": 4642.9,
+    "min": 4438.3,
+    "max": 4711.3
+   },
+   "splash_paint_ms": {
+    "runs": [
+     1685.8,
+     1711.6,
+     1711.5
+    ],
+    "median": 1711.5,
+    "min": 1685.8,
+    "max": 1711.6
+   },
+   "samples": [
+    {
+     "arm": "after",
+     "scope": "all",
+     "head": "fbf192a3",
+     "mw_file": "C:\\Users\\xxhzb\\AppData\\Local\\Temp\\kilo\\themeorder_head_fbf192a3\\main_window.py",
+     "t_to_qapp_ms": 220.7,
+     "splash_paint_ms": 1685.8,
+     "smoke_ms": 1107.0,
+     "deps_ms": 360.7,
+     "theme_before_ctor_ms": 0.0,
+     "import_mw_ms": 511.0,
+     "ctor_ms": 514.3,
+     "apply_after_ctor_ms": 288.8,
+     "activate_ms": 0.2,
+     "fit_scale_ms": 1.0,
+     "show_to_paint_ms": 40.0,
+     "def_c_entry_to_paint_ms": 4711.3,
+     "theme_calls": [
+      {
+       "t_ms": 4095.6,
+       "ms": 0.0,
+       "skipped": true
+      },
+      {
+       "t_ms": 4097.0,
+       "ms": 0.0,
+       "skipped": true,
+       "what": "app.setStyleSheet"
+      },
+      {
+       "t_ms": 4235.2,
+       "ms": 0.0,
+       "skipped": true
+      },
+      {
+       "t_ms": 4237.6,
+       "ms": 0.0,
+       "skipped": true
+      },
+      {
+       "t_ms": 4262.0,
+       "ms": 286.9,
+       "skipped": false,
+       "what": "app.setStyleSheet",
+       "qss_len_set": 20127
+      },
+      {
+       "t_ms": 4260.1,
+       "ms": 288.8,
+       "skipped": false,
+       "qss_len_before": 0,
+       "qss_len_after": 20127,
+       "branch": "setStyleSheet"
+      },
+      {
+       "t_ms": 4563.3,
+       "ms": 0.7,
+       "skipped": false,
+       "qss_len_before": 20127,
+       "qss_len_after": 20127,
+       "branch": "repolish_or_early"
+      }
+     ],
+     "deferred_qss_len": [
+      20127
+     ],
+     "style_len_at_first_paint": 20127,
+     "hints_ctor_end": {
+      "buttons": [
+       {
+        "cls": "QPushButton",
+        "w": 115,
+        "h": 40
+       },
+       {
+        "cls": "QPushButton",
+        "w": 115,
+        "h": 40
+       },
+       {
+        "cls": "QPushButton",
+        "w": 115,
+        "h": 40
+       },
+       {
+        "cls": "QPushButton",
+        "w": 115,
+        "h": 40
+       }
+      ],
+      "combos": [
+       {
+        "cls": "QComboBox",
+        "w": 102,
+        "h": 37
+       },
+       {
+        "cls": "QComboBox",
+        "w": 165,
+        "h": 37
+       },
+       {
+        "cls": "QComboBox",
+        "w": 212,
+        "h": 37
+       },
+       {
+        "cls": "QComboBox",
+        "w": 212,
+        "h": 37
+       }
+      ],
+      "min_width": 834
+     },
+     "hints_after_apply": {
+      "buttons": [
+       {
+        "cls": "QPushButton",
+        "w": 54,
+        "h": 45
+       },
+       {
+        "cls": "QPushButton",
+        "w": 94,
+        "h": 45
+       },
+       {
+        "cls": "QPushButton",
+        "w": 114,
+        "h": 45
+       },
+       {
+        "cls": "QPushButton",
+        "w": 74,
+        "h": 45
+       }
+      ],
+      "combos": [
+       {
+        "cls": "QComboBox",
+        "w": 100,
+        "h": 43
+       },
+       {
+        "cls": "QComboBox",
+        "w": 163,
+        "h": 43
+       },
+       {
+        "cls": "QComboBox",
+        "w": 210,
+        "h": 43
+       },
+       {
+        "cls": "QComboBox",
+        "w": 210,
+        "h": 43
+       }
+      ],
+      "min_width": 834
+     },
+     "hints_after_paint": {
+      "buttons": [
+       {
+        "cls": "QPushButton",
+        "w": 54,
+        "h": 45
+       },
+       {
+        "cls": "QPushButton",
+        "w": 94,
+        "h": 45
+       },
+       {
+        "cls": "QPushButton",
+        "w": 114,
+        "h": 45
+       },
+       {
+        "cls": "QPushButton",
+        "w": 74,
+        "h": 45
+       }
+      ],
+      "combos": [
+       {
+        "cls": "QComboBox",
+        "w": 100,
+        "h": 43
+       },
+       {
+        "cls": "QComboBox",
+        "w": 163,
+        "h": 43
+       },
+       {
+        "cls": "QComboBox",
+        "w": 210,
+        "h": 43
+       },
+       {
+        "cls": "QComboBox",
+        "w": 210,
+        "h": 43
+       }
+      ],
+      "min_width": 749
+     },
+     "colors": {
+      "size": [
+       1400,
+       900
+      ],
+      "sha1": "663be5b4f2ae63ea",
+      "expected_window": "#000000",
+      "thumb_8x8": [
+       "#2d2d2f",
+       "#252628",
+       "#191919",
+       "#0e0f10",
+       "#0e0f10",
+       "#0e0f10",
+       "#111111",
+       "#151515",
+       "#383739",
+       "#282729",
+       "#2b292b",
+       "#242a33",
+       "#252c36",
+       "#212831",
+       "#1b1c1d",
+       "#1e1f20",
+       "#0f1215",
+       "#04070b",
+       "#04070b",
+       "#1d2228",
+       "#1f242b",
+       "#1f232a",
+       "#212223",
+       "#292a2b",
+       "#0e1318",
+       "#1c171c",
+       "#0a0d13",
+       "#1d2228",
+       "#1f242b",
+       "#1e232a",
+       "#28292b",
+       "#2c2d2e",
+       "#0c1117",
+       "#0b1016",
+       "#080d12",
+       "#1d2228",
+       "#1f242b",
+       "#1e232a",
+       "#060606",
+       "#111111",
+       "#0a0c0f",
+       "#06090c",
+       "#090b0e",
+       "#1d2228",
+       "#1f242b",
+       "#1e232a",
+       "#050505",
+       "#060607",
+       "#000000",
+       "#0b0b0b",
+       "#000000",
+       "#1c2127",
+       "#1f242b",
+       "#1e232a",
+       "#111111",
+       "#030303",
+       "#1b1c1c",
+       "#121212",
+       "#101010",
+       "#101113",
+       "#111214",
+       "#111214",
+       "#0c0c0c",
+       "#0e0e0e"
+      ],
+      "win_center": "#1f242b",
+      "btn_center": "#000000",
+      "btn_expected": "#35373c",
+      "combo_center": "#000000",
+      "combo_expected": "#2b2c2f"
+     },
+     "paints": 1,
+     "load_after": {
+      "sys_cpu_pct": 21.4,
+      "python_proc_count": 5,
+      "python_total_cpu_pct": 79.7,
+      "python_top": [
+       {
+        "pid": 7976,
+        "cpu_pct": 75.0
+       },
+       {
+        "pid": 32508,
+        "cpu_pct": 4.7
+       },
+       {
+        "pid": 13740,
+        "cpu_pct": 0.0
+       },
+       {
+        "pid": 30428,
+        "cpu_pct": 0.0
+       },
+       {
+        "pid": 37752,
+        "cpu_pct": 0.0
+       }
+      ],
+      "cpu_count": 12
+     },
+     "load_gate_before_python_pct": 93.8
+    },
+    {
+     "arm": "after",
+     "scope": "all",
+     "head": "fbf192a3",
+     "mw_file": "C:\\Users\\xxhzb\\AppData\\Local\\Temp\\kilo\\themeorder_head_fbf192a3\\main_window.py",
+     "t_to_qapp_ms": 222.4,
+     "splash_paint_ms": 1711.6,
+     "smoke_ms": 1173.4,
+     "deps_ms": 339.8,
+     "theme_before_ctor_ms": 0.0,
+     "import_mw_ms": 381.6,
+     "ctor_ms": 516.1,
+     "apply_after_ctor_ms": 249.5,
+     "activate_ms": 0.2,
+     "fit_scale_ms": 1.2,
+     "show_to_paint_ms": 56.8,
+     "def_c_entry_to_paint_ms": 4642.9,
+     "theme_calls": [
+      {
+       "t_ms": 4023.8,
+       "ms": 0.0,
+       "skipped": true
+      },
+      {
+       "t_ms": 4024.9,
+       "ms": 0.0,
+       "skipped": true,
+       "what": "app.setStyleSheet"
+      },
+      {
+       "t_ms": 4177.7,
+       "ms": 0.0,
+       "skipped": true
+      },
+      {
+       "t_ms": 4181.6,
+       "ms": 0.0,
+       "skipped": true
+      },
+      {
+       "t_ms": 4196.3,
+       "ms": 247.6,
+       "skipped": false,
+       "what": "app.setStyleSheet",
+       "qss_len_set": 20127
+      },
+      {
+       "t_ms": 4194.5,
+       "ms": 249.4,
+       "skipped": false,
+       "qss_len_before": 0,
+       "qss_len_after": 20127,
+       "branch": "setStyleSheet"
+      },
+      {
+       "t_ms": 4460.0,
+       "ms": 1.0,
+       "skipped": false,
+       "qss_len_before": 20127,
+       "qss_len_after": 20127,
+       "branch": "repolish_or_early"
+      }
+     ],
+     "deferred_qss_len": [
+      20127
+     ],
+     "style_len_at_first_paint": 20127,
+     "hints_ctor_end": {
+      "buttons": [
+       {
+        "cls": "QPushButton",
+        "w": 115,
+        "h": 40
+       },
+       {
+        "cls": "QPushButton",
+        "w": 115,
+        "h": 40
+       },
+       {
+        "cls": "QPushButton",
+        "w": 115,
+        "h": 40
+       },
+       {
+        "cls": "QPushButton",
+        "w": 115,
+        "h": 40
+       }
+      ],
+      "combos": [
+       {
+        "cls": "QComboBox",
+        "w": 102,
+        "h": 37
+       },
+       {
+        "cls": "QComboBox",
+        "w": 165,
+        "h": 37
+       },
+       {
+        "cls": "QComboBox",
+        "w": 212,
+        "h": 37
+       },
+       {
+        "cls": "QComboBox",
+        "w": 212,
+        "h": 37
+       }
+      ],
+      "min_width": 834
+     },
+     "hints_after_apply": {
+      "buttons": [
+       {
+        "cls": "QPushButton",
+        "w": 54,
+        "h": 45
+       },
+       {
+        "cls": "QPushButton",
+        "w": 94,
+        "h": 45
+       },
+       {
+        "cls": "QPushButton",
+        "w": 114,
+        "h": 45
+       },
+       {
+        "cls": "QPushButton",
+        "w": 74,
+        "h": 45
+       }
+      ],
+      "combos": [
+       {
+        "cls": "QComboBox",
+        "w": 100,
+        "h": 43
+       },
+       {
+        "cls": "QComboBox",
+        "w": 163,
+        "h": 43
+       },
+       {
+        "cls": "QComboBox",
+        "w": 210,
+        "h": 43
+       },
+       {
+        "cls": "QComboBox",
+        "w": 210,
+        "h": 43
+       }
+      ],
+      "min_width": 834
+     },
+     "hints_after_paint": {
+      "buttons": [
+       {
+        "cls": "QPushButton",
+        "w": 54,
+        "h": 45
+       },
+       {
+        "cls": "QPushButton",
+        "w": 94,
+        "h": 45
+       },
+       {
+        "cls": "QPushButton",
+        "w": 114,
+        "h": 45
+       },
+       {
+        "cls": "QPushButton",
+        "w": 74,
+        "h": 45
+       }
+      ],
+      "combos": [
+       {
+        "cls": "QComboBox",
+        "w": 100,
+        "h": 43
+       },
+       {
+        "cls": "QComboBox",
+        "w": 163,
+        "h": 43
+       },
+       {
+        "cls": "QComboBox",
+        "w": 210,
+        "h": 43
+       },
+       {
+        "cls": "QComboBox",
+        "w": 210,
+        "h": 43
+       }
+      ],
+      "min_width": 749
+     },
+     "colors": {
+      "size": [
+       1400,
+       900
+      ],
+      "sha1": "9c97d1ec9b69a159",
+      "expected_window": "#000000",
+      "thumb_8x8": [
+       "#2d2d2f",
+       "#252628",
+       "#191919",
+       "#0e0f10",
+       "#0e0f10",
+       "#0e0f10",
+       "#111111",
+       "#151515",
+       "#383739",
+       "#282729",
+       "#2b292b",
+       "#242a33",
+       "#252c36",
+       "#212831",
+       "#1b1c1d",
+       "#1e1f20",
+       "#0f1215",
+       "#04070b",
+       "#04070b",
+       "#1d2228",
+       "#1f242b",
+       "#1f232a",
+       "#212223",
+       "#292a2b",
+       "#0e1318",
+       "#1c171c",
+       "#0a0d13",
+       "#1d2228",
+       "#1f242b",
+       "#1e232a",
+       "#28292b",
+       "#2c2d2e",
+       "#0c1117",
+       "#0b1016",
+       "#080d12",
+       "#1d2228",
+       "#1f242b",
+       "#1e232a",
+       "#060606",
+       "#111111",
+       "#0a0c0f",
+       "#06090c",
+       "#090b0e",
+       "#1d2228",
+       "#1f242b",
+       "#1e232a",
+       "#050505",
+       "#060607",
+       "#000000",
+       "#0b0b0b",
+       "#000000",
+       "#1c2127",
+       "#1f242b",
+       "#1e232a",
+       "#111111",
+       "#030303",
+       "#1b1c1c",
+       "#121212",
+       "#101010",
+       "#101113",
+       "#111214",
+       "#111214",
+       "#0c0c0c",
+       "#0e0e0e"
+      ],
+      "win_center": "#1f242b",
+      "btn_center": "#000000",
+      "btn_expected": "#35373c",
+      "combo_center": "#000000",
+      "combo_expected": "#2b2c2f"
+     },
+     "paints": 1,
+     "load_after": {
+      "sys_cpu_pct": 29.9,
+      "python_proc_count": 5,
+      "python_total_cpu_pct": 113.3,
+      "python_top": [
+       {
+        "pid": 37672,
+        "cpu_pct": 103.9
+       },
+       {
+        "pid": 32508,
+        "cpu_pct": 9.4
+       },
+       {
+        "pid": 13740,
+        "cpu_pct": 0.0
+       },
+       {
+        "pid": 37752,
+        "cpu_pct": 0.0
+       },
+       {
+        "pid": 38876,
+        "cpu_pct": 0.0
+       }
+      ],
+      "cpu_count": 12
+     },
+     "load_gate_before_python_pct": 96.1
+    },
+    {
+     "arm": "after",
+     "scope": "all",
+     "head": "fbf192a3",
+     "mw_file": "C:\\Users\\xxhzb\\AppData\\Local\\Temp\\kilo\\themeorder_head_fbf192a3\\main_window.py",
+     "t_to_qapp_ms": 234.2,
+     "splash_paint_ms": 1711.5,
+     "smoke_ms": 1105.4,
+     "deps_ms": 347.5,
+     "theme_before_ctor_ms": 0.0,
+     "import_mw_ms": 371.4,
+     "ctor_ms": 468.4,
+     "apply_after_ctor_ms": 214.3,
+     "activate_ms": 0.2,
+     "fit_scale_ms": 1.2,
+     "show_to_paint_ms": 37.7,
+     "def_c_entry_to_paint_ms": 4438.3,
+     "theme_calls": [
+      {
+       "t_ms": 3927.2,
+       "ms": 0.0,
+       "skipped": true
+      },
+      {
+       "t_ms": 3928.7,
+       "ms": 0.0,
+       "skipped": true,
+       "what": "app.setStyleSheet"
+      },
+      {
+       "t_ms": 4062.6,
+       "ms": 0.0,
+       "skipped": true
+      },
+      {
+       "t_ms": 4064.5,
+       "ms": 0.0,
+       "skipped": true
+      },
+      {
+       "t_ms": 4075.6,
+       "ms": 213.2,
+       "skipped": false,
+       "what": "app.setStyleSheet",
+       "qss_len_set": 20127
+      },
+      {
+       "t_ms": 4074.5,
+       "ms": 214.3,
+       "skipped": false,
+       "qss_len_before": 0,
+       "qss_len_after": 20127,
+       "branch": "setStyleSheet"
+      },
+      {
+       "t_ms": 4302.0,
+       "ms": 0.9,
+       "skipped": false,
+       "qss_len_before": 20127,
+       "qss_len_after": 20127,
+       "branch": "repolish_or_early"
+      }
+     ],
+     "deferred_qss_len": [
+      20127
+     ],
+     "style_len_at_first_paint": 20127,
+     "hints_ctor_end": {
+      "buttons": [
+       {
+        "cls": "QPushButton",
+        "w": 115,
+        "h": 40
+       },
+       {
+        "cls": "QPushButton",
+        "w": 115,
+        "h": 40
+       },
+       {
+        "cls": "QPushButton",
+        "w": 115,
+        "h": 40
+       },
+       {
+        "cls": "QPushButton",
+        "w": 115,
+        "h": 40
+       }
+      ],
+      "combos": [
+       {
+        "cls": "QComboBox",
+        "w": 102,
+        "h": 37
+       },
+       {
+        "cls": "QComboBox",
+        "w": 165,
+        "h": 37
+       },
+       {
+        "cls": "QComboBox",
+        "w": 212,
+        "h": 37
+       },
+       {
+        "cls": "QComboBox",
+        "w": 212,
+        "h": 37
+       }
+      ],
+      "min_width": 834
+     },
+     "hints_after_apply": {
+      "buttons": [
+       {
+        "cls": "QPushButton",
+        "w": 54,
+        "h": 45
+       },
+       {
+        "cls": "QPushButton",
+        "w": 94,
+        "h": 45
+       },
+       {
+        "cls": "QPushButton",
+        "w": 114,
+        "h": 45
+       },
+       {
+        "cls": "QPushButton",
+        "w": 74,
+        "h": 45
+       }
+      ],
+      "combos": [
+       {
+        "cls": "QComboBox",
+        "w": 100,
+        "h": 43
+       },
+       {
+        "cls": "QComboBox",
+        "w": 163,
+        "h": 43
+       },
+       {
+        "cls": "QComboBox",
+        "w": 210,
+        "h": 43
+       },
+       {
+        "cls": "QComboBox",
+        "w": 210,
+        "h": 43
+       }
+      ],
+      "min_width": 834
+     },
+     "hints_after_paint": {
+      "buttons": [
+       {
+        "cls": "QPushButton",
+        "w": 54,
+        "h": 45
+       },
+       {
+        "cls": "QPushButton",
+        "w": 94,
+        "h": 45
+       },
+       {
+        "cls": "QPushButton",
+        "w": 114,
+        "h": 45
+       },
+       {
+        "cls": "QPushButton",
+        "w": 74,
+        "h": 45
+       }
+      ],
+      "combos": [
+       {
+        "cls": "QComboBox",
+        "w": 100,
+        "h": 43
+       },
+       {
+        "cls": "QComboBox",
+        "w": 163,
+        "h": 43
+       },
+       {
+        "cls": "QComboBox",
+        "w": 210,
+        "h": 43
+       },
+       {
+        "cls": "QComboBox",
+        "w": 210,
+        "h": 43
+       }
+      ],
+      "min_width": 749
+     },
+     "colors": {
+      "size": [
+       1400,
+       900
+      ],
+      "sha1": "aa18ad36825f95d3",
+      "expected_window": "#000000",
+      "thumb_8x8": [
+       "#2d2d2f",
+       "#252628",
+       "#191919",
+       "#0e0f10",
+       "#0e0f10",
+       "#0e0f10",
+       "#111111",
+       "#151515",
+       "#383739",
+       "#282729",
+       "#2b292b",
+       "#242a33",
+       "#252c36",
+       "#212831",
+       "#1b1c1d",
+       "#1e1f20",
+       "#0f1215",
+       "#04070b",
+       "#04070b",
+       "#1d2228",
+       "#1f242b",
+       "#1f232a",
+       "#212223",
+       "#292a2b",
+       "#0e1318",
+       "#1c171c",
+       "#0a0d13",
+       "#1d2228",
+       "#1f242b",
+       "#1e232a",
+       "#28292b",
+       "#2c2d2e",
+       "#0c1117",
+       "#0b1016",
+       "#080d12",
+       "#1d2228",
+       "#1f242b",
+       "#1e232a",
+       "#060606",
+       "#111111",
+       "#0a0c0f",
+       "#06090c",
+       "#090b0e",
+       "#1d2228",
+       "#1f242b",
+       "#1e232a",
+       "#050505",
+       "#060607",
+       "#000000",
+       "#0b0b0b",
+       "#000000",
+       "#1c2127",
+       "#1f242b",
+       "#1e232a",
+       "#111111",
+       "#030303",
+       "#1b1c1c",
+       "#121212",
+       "#101010",
+       "#101113",
+       "#111214",
+       "#111214",
+       "#0c0c0c",
+       "#0e0e0e"
+      ],
+      "win_center": "#1f242b",
+      "btn_center": "#000000",
+      "btn_expected": "#35373c",
+      "combo_center": "#000000",
+      "combo_expected": "#2b2c2f"
+     },
+     "paints": 1,
+     "load_after": {
+      "sys_cpu_pct": 21.6,
+      "python_proc_count": 5,
+      "python_total_cpu_pct": 94.6,
+      "python_top": [
+       {
+        "pid": 21740,
+        "cpu_pct": 88.3
+       },
+       {
+        "pid": 32508,
+        "cpu_pct": 5.5
+       },
+       {
+        "pid": 35960,
+        "cpu_pct": 0.8
+       },
+       {
+        "pid": 13740,
+        "cpu_pct": 0.0
+       },
+       {
+        "pid": 37752,
+        "cpu_pct": 0.0
+       }
+      ],
+      "cpu_count": 12
+     },
+     "load_gate_before_python_pct": 114.0
+    }
+   ]
+  }
+ },
+ "delta_after_minus_before_ms": {
+  "ctor": -1090.7,
+  "show_to_paint": -6.9,
+  "apply_after_ctor": null,
+  "activate": 0.0,
+  "def_c_entry_to_paint": -694.9
+ },
+ "load_rule": "规则 10：每个子 run 前父进程采 2 s 低负载门（<200%），子进程跑完再采一次。",
+ "gui_checks": {
+  "after_sizehint_jump_after_first_paint": [
+   0,
+   0,
+   0
+  ],
+  "after_apply_vs_before_ctor_sizehint_diff": [
+   0,
+   0,
+   0
+  ],
+  "grab_thumb_max_channel_diff_before_vs_after": [
+   3,
+   3,
+   3
+  ],
+  "grab_sha1": [
+   [
+    "before",
+    "d42f92ebcdd1685f",
+    null
+   ],
+   [
+    "before",
+    "7a810906d9881a09",
+    null
+   ],
+   [
+    "before",
+    "b3b47da89b79764c",
+    null
+   ],
+   [
+    "after",
+    "663be5b4f2ae63ea",
+    null
+   ],
+   [
+    "after",
+    "9c97d1ec9b69a159",
+    null
+   ],
+   [
+    "after",
+    "aa18ad36825f95d3",
+    null
+   ]
+  ],
+  "style_len_at_first_paint": [
+   [
+    "before",
+    20127
+   ],
+   [
+    "before",
+    20127
+   ],
+   [
+    "before",
+    20127
+   ],
+   [
+    "after",
+    20127
+   ],
+   [
+    "after",
+    20127
+   ],
+   [
+    "after",
+    20127
+   ]
+  ],
+  "note": "jump=0 表示首帧后尺寸不再变；diff=0 表示 after 臂 apply 后的尺寸与 before 臂构造完的尺寸一致；缩略图最大通道差 ≤2 视为外观一致。"
+ }
+}

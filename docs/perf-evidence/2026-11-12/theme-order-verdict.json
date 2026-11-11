@@ -1,0 +1,90 @@
+{
+ "kind": "重排实验：theme.apply 从建树前移到 ctor 后 / show 前，按定义 C 端到端验收",
+ "date": "2026-11-12",
+ "head": "fbf192a3",
+ "snapshot": "git show HEAD:desktop/{main_window,module_panel,device_panel,bookmark_panel}.py → %TEMP%\\kilo\\themeorder_head_fbf192a3",
+ "definition": "定义 C 端到端 = 进程入口(T0) → 主窗首个 Paint 派发完毕；两臂都跑真实生产序列（splash → smoke → deps → setFont → 主题 → 守卫 → l10n → import → MainWindow → 图标 → fit_scale → show → splash.finish），只改主题应用的位置。",
+ "answer": "重排不仅省 ctor，也省首帧：全量推后（含 ctor 内 main_window 自己那次 app.setStyleSheet）端到端省 694.9–821.0 ms；只搬入口那一次则省 245.5 ms。没有出现「省 ctor、亏 show」。",
+ "variants": {
+  "all": {
+   "what_it_changes": "入口 Theme.apply 与 ctor 内 main_window._apply_touch_adaptation 的 app.setStyleSheet 全部挂起，ctor 返回后一次性 apply，再 show",
+   "needs_code_change_outside_this_line": "需要 main_window.py 把 ctor 内 app 级 setStyleSheet 推迟（归卫星线）",
+   "before": {
+    "ctor_ms": {"runs": [1450.5, 1647.2, 1605.0], "median": 1605.0},
+    "apply_after_ctor_ms": null,
+    "show_to_paint_ms": {"runs": [51.9, 46.8, 46.9], "median": 46.9},
+    "def_c_entry_to_paint_ms": {"runs": [5337.8, 5445.2, 5287.2], "median": 5337.8}
+   },
+   "after": {
+    "ctor_ms": {"runs": [514.3, 516.1, 468.4], "median": 514.3},
+    "apply_after_ctor_ms": {"runs": [288.8, 249.5, 214.3], "median": 249.5},
+    "set_style_sheet_share_ms": [286.9, 247.6, 213.2],
+    "show_to_paint_ms": {"runs": [40.0, 56.8, 37.7], "median": 40.0},
+    "def_c_entry_to_paint_ms": {"runs": [4711.3, 4642.9, 4438.3], "median": 4642.9}
+   },
+   "delta_after_minus_before_ms": {"ctor": -1090.7, "apply_after_ctor": 249.5,
+                                   "show_to_paint": -6.9, "def_c_entry_to_paint": -694.9},
+   "independent_second_round": {
+    "before_ctor_median_ms": 1453.6, "after_ctor_median_ms": 455.4,
+    "apply_after_ctor_median_ms": 219.5, "def_c_delta_ms": -821.0,
+    "note": "同一脚本的上一轮（3+3 run，交替顺序），方向与量级一致。"
+   }
+  },
+  "entry_only": {
+   "what_it_changes": "只把入口那一次 Theme.apply 移到 ctor 后；ctor 内 main_window 的 setStyleSheet 保持原状",
+   "before": {
+    "ctor_ms": {"runs": [1391.5, 1455.5, 1547.1], "median": 1455.5},
+    "show_to_paint_ms": {"runs": [40.1, 38.6, 34.3], "median": 38.6},
+    "def_c_entry_to_paint_ms": {"runs": [5209.3, 5127.3, 5214.7], "median": 5209.3}
+   },
+   "after": {
+    "ctor_ms": {"runs": [1042.2, 1070.5, 1101.6], "median": 1070.5},
+    "apply_after_ctor_ms": {"runs": [177.4, 154.3, 190.9], "median": 177.4},
+    "show_to_paint_ms": {"runs": [35.1, 38.0, 43.6], "median": 38.0},
+    "def_c_entry_to_paint_ms": {"runs": [4914.8, 4963.8, 4993.4], "median": 4963.8}
+   },
+   "delta_after_minus_before_ms": {"ctor": -385.0, "apply_after_ctor": 177.4,
+                                   "show_to_paint": -0.6, "def_c_entry_to_paint": -245.5},
+   "note": "这 177.4 ms 是「QSS 已在 ctor 内生效、palette/font 后补」触发的全树重抛光，属重复劳动；所以只搬入口这一次的收益被它吃掉一半。"
+  }
+ },
+ "first_frame_batch_polish": {
+  "measured_ms_all": {"runs": [288.8, 249.5, 214.3], "median": 249.5},
+  "set_style_sheet_part_ms": [286.9, 247.6, 213.2],
+  "separate_relayout_ms": {"runs": [0.0, 0.0, 0.0], "median": 0.0},
+  "note": "预期 150–190，实测 214–289，偏高；批量应用本身包含全树 polish，之后显式 layout().activate() 为 0，说明不再有第二次全树重排版。"
+ },
+ "counter_tests": {
+  "unstyled_first_frame": {
+   "style_len_at_first_paint": "两臂 6/6 次都是 20127（主题 QSS 全文）",
+   "qss_apply_count_after": "after 臂只在 ctor 后应用一次（deferred_qss_len=[20127]），此前 4 次调用全部挂起（ms=0.0）",
+   "verdict": "首帧不存在未上样式的画面：样式表在 show 之前已经生效。"
+  },
+  "sizehint_jump": {
+   "after_sizehint_jump_after_first_paint": {"all": [0, 0, 0], "entry_only": [0, 0, 0]},
+   "after_apply_vs_before_ctor_sizehint_diff": {"all": [0, 0, 0], "entry_only": [0, 0, 0]},
+   "widgets": "每轮取前 4 个 QPushButton + 前 4 个 QComboBox 的 sizeHint，另记 minimumSizeHint().width()",
+   "verdict": "受 QSS padding 影响的尺寸在首帧后不再跳变，且与 before 臂构造完时完全一致。"
+  },
+  "visual": {
+   "method": "win.grab() → 8×8 缩略图逐通道比对",
+   "max_channel_diff": {"all": [3, 4, 3], "entry_only": [21, 3, 7]},
+   "verdict": "未做逐像素等价证明。尺寸与样式表长度完全一致，缩略图残差 3–21/255，来源可能是时钟/随机内容/抗锯齿；不作为「视觉完全等价」的证据。"
+  }
+ },
+ "honest_accounting": {
+  "all_scope": "端到端 −694.9（本轮）/ −821.0（上一轮）；构成：ctor −1090.7，首帧批量 polish +249.5，show→paint −6.9，其余为各段自身波动。",
+  "entry_only": "端到端 −245.5；构成：ctor −385.0，首帧重抛光 +177.4，show→paint −0.6。",
+  "no_regression": "两臂的首帧 show→paint 都是 34–57 ms，重排后没有变慢；splash 首帧时间（T1 段）也在两臂间一致（同一段代码，未被改动）。"
+ },
+ "conclusion": "359.5 ms 的「建树前 QSS 已生效」是可回收的，而且比它更大：整段建树期带样式构造的代价约 1000 ms。按定义 C 端到端，全量推后拿回 ~700–820，只搬入口拿回 ~245。下一步不是拆控件类型，而是统一「主题应用唯一出口」——这需要 main_window 把 ctor 内的 app 级 setStyleSheet 也交出来（卫星线）。",
+ "scripts": [
+  "scripts/repro/2026-11-12-theme-order-ab.py --runs 3 --scope all",
+  "scripts/repro/2026-11-12-theme-order-ab.py --runs 3 --scope entry"
+ ],
+ "sources": [
+  "docs/perf-evidence/2026-11-12/theme-order-ab.json",
+  "docs/perf-evidence/2026-11-12/theme-order-ab-entry-only.json",
+  "docs/perf-evidence/2026-11-12/ctor-floor-attribution-verdict.json"
+ ]
+}
