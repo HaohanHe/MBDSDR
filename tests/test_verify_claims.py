@@ -142,6 +142,53 @@ def test_negated_claim_is_not_silently_green(tmp_path):
     assert claims[0].status == vc.NO_HASH
 
 
+def test_line_check_contains_literal(tmp_path):
+    """第 4 步反证①：正确四元组 → 「含字面量」。"""
+    repo, h = _repo(tmp_path, {"src/foo.py": "MAGIC_TOKEN = 42\nOTHER = 1\n"})
+    r = vc.check_line(repo, h, "src/foo.py:1", "MAGIC_TOKEN")
+    assert r.result == vc.LINE_OK
+
+
+def test_line_check_shifted_line_is_mismatch(tmp_path):
+    """第 4 步反证②：行号 +1 指向相邻无关行 → 「行存在但不含」。"""
+    repo, h = _repo(tmp_path, {"src/foo.py": "MAGIC_TOKEN = 42\nOTHER = 1\n"})
+    r = vc.check_line(repo, h, "src/foo.py:2", "MAGIC_TOKEN")
+    assert r.result == vc.LINE_MISMATCH
+    assert "OTHER" in r.detail
+
+
+def test_line_check_unresolved_distinguishes_path_and_range(tmp_path):
+    """第 4 步反证③：路径不存在 vs 行号超界，必须可区分（同一大类、不同 sub）。"""
+    repo, h = _repo(tmp_path, {"src/foo.py": "MAGIC_TOKEN = 42\nOTHER = 1\n"})
+    missing = vc.check_line(repo, h, "src/nope.py:1", "MAGIC_TOKEN")
+    assert missing.result == vc.LINE_UNRESOLVED
+    assert missing.detail == vc.LINE_UNRESOLVED_SUB["path-missing"]
+
+    oob = vc.check_line(repo, h, "src/foo.py:99", "MAGIC_TOKEN")
+    assert oob.result == vc.LINE_UNRESOLVED
+    assert oob.detail.startswith(vc.LINE_UNRESOLVED_SUB["line-out-of-range"])
+
+
+def test_line_check_range_uses_first_line_only(tmp_path):
+    """区间 N–M 只判首行（§7.7）：字面量只在第 2 行时，:1-2 仍判「行存在但不含」。"""
+    repo, h = _repo(tmp_path, {"src/foo.py": "HEADER = 0\nMAGIC_TOKEN = 42\n"})
+    assert vc.check_line(repo, h, "src/foo.py:1-2", "MAGIC_TOKEN").result == vc.LINE_MISMATCH
+    assert vc.check_line(repo, h, "src/foo.py:2-3", "MAGIC_TOKEN").result == vc.LINE_OK
+
+
+def test_line_check_uses_head_not_cited_commit(tmp_path):
+    """坐标口径反证：行号按 HEAD 判，不按被引提交当时的坐标。
+
+    构造「提交时第 1 行是 OLD，HEAD 第 1 行是 MAGIC_TOKEN」：
+    按 HEAD 判 → 含；若误用 ``git show <hash>:<path>`` → 不含。
+    """
+    repo, h = _repo(tmp_path, {"src/foo.py": "OLD_NAME = 1\n"})
+    (repo / "src/foo.py").write_text("MAGIC_TOKEN = 42\n", encoding="utf-8")
+    _git(repo, "add", "src/foo.py")
+    _git(repo, "commit", "-q", "-m", "later")
+    assert vc.check_line(repo, h, "src/foo.py:1", "MAGIC_TOKEN").result == vc.LINE_OK
+
+
 def test_repo_docs_have_no_dangling_hash():
     claims = vc.verify_docs(ROOT)
     bad = [c for c in claims if "不存在或不是 commit" in c.reason]

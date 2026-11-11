@@ -295,6 +295,16 @@ WINDOWS_POPUP_PLAYBOOK.md:12      硬件争用层状态
 `git log -S` 能在同一 hash 命中该字面量」（`cat-file` / `--name-only` / `log -S`），
 **不校验行号内容**；第 4 步（HEAD 第 N 行含字面量）就是补这一环，判红名为「行号失效」。
 
+**第 4 步已实现（2026-11-11，`--check-lines`，只报不拦）**：`scripts/verify_claims.py`
+的 `check_line()` 按本节口径取 `git show HEAD:<path>` 第 N 行，结果分三类且不合并——
+`含字面量` / `行存在但不含` / `path 或行号不存在`（第三类再分「HEAD 无此路径」与
+「行数不够」）；区间只判首行。默认不参与退出码，`--fail-on-unverified` 仍只看前三步。
+
+首跑分布（`--docs docs`，与前三步同批 74 条可证实断言）：**含字面量 39 / 行存在但不含 35 /
+path 或行号不存在 0**。35 条集中在被后续重构推移过行号的文件（`settings-inventory` 12、
+`reference-mechanisms` 6、`parameter-unification` 5），说明「三步全过」确实不代表行号还在原处。
+分布稳定、误报清零前不并入主闸门。
+
 ### 7.8 统计快照的生成方式（2026-11-06 写死）
 
 **规则**：凡对外引用的「断言分布 / 文档统计」快照，必须用 `git archive <HEAD> <dir>` 生成，**禁止**用 `git ls-tree --name-only` 的文本输出自行拼装。违反时数字会静默偏小，且无法复现。

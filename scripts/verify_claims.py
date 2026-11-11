@@ -12,6 +12,10 @@
   2. ``git show --name-only --format= <hash> -- <path>`` 必须命中声明路径
   3. ``git log -S <字面量> --oneline -- <path>`` 必须命中同一 hash
 
+第 4 步（``--check-lines``，只报不拦）核对**行号内容**：取 ``git show HEAD:<path>``
+的第 N 行，判断该行是否包含被引字面量。坐标口径见 ``check_line()`` 的注释与
+``docs/evidence-standard.md §7.7``。
+
 分类：
 
   * 可证实                三步全过
@@ -21,7 +25,7 @@
 跳过：标题行、``` 围栏代码块、``$ git`` 证据命令行 —— 它们不是断言。
 
 默认只报告、退出码 0（存量 92 条待各线认领）；``--fail-on-unverified``
-供存量清零后接 CI。
+供存量清零后接 CI。``--check-lines`` 的输出**不参与**任何退出码。
 """
 from __future__ import annotations
 
@@ -265,6 +269,111 @@ def summarize(claims: List[Claim]) -> Dict[str, int]:
     return counts
 
 
+# ——— 第 4 步：行号内容校验（--check-lines，只报不拦） ———
+
+LINE_OK = "含字面量"
+LINE_MISMATCH = "行存在但不含"
+LINE_UNRESOLVED = "path 或行号不存在"
+LINE_UNRESOLVED_SUB = {
+    "path-missing": "HEAD 里没有这个路径",
+    "line-out-of-range": "路径存在但行数不够",
+}
+
+
+@dataclass
+class LineCheck:
+    doc: str
+    line: int          # 断言所在文档行
+    commit: str
+    target: str        # path:N 或 path:N-M
+    literal: str
+    result: str        # LINE_OK / LINE_MISMATCH / LINE_UNRESOLVED
+    detail: str = ""
+
+
+def _norm_ws(s: str) -> str:
+    return re.sub(r"\s+", " ", s).strip()
+
+
+def _head_lines(root: Path, path: str) -> Optional[List[str]]:
+    """取 ``HEAD:<path>`` 的行；路径不在 HEAD 里返回 None（与「文件为空」区分）。"""
+    proc = _git(root, ["show", f"HEAD:{path}"])
+    if proc is None or proc.returncode != 0:
+        return None
+    return proc.stdout.splitlines()
+
+
+def _split_target(target: str) -> tuple:
+    """``path:N`` / ``path:N-M`` → (path, N)。
+
+    **区间只取首行 N**（§7.7 写死）：``path:10-20`` 只校验第 10 行；要判
+    「区间内任一行含字面量」必须另写显式标记，当前不支持。
+    """
+    path, _, lines = target.rpartition(":")
+    return path, int(lines.split("-")[0])
+
+
+def check_line(root: Path, commit: str, target: str, literal: str,
+               doc: str = "", doc_line: int = 0) -> LineCheck:
+    """第 4 步：校验 ``path:N`` 在 **HEAD** 的第 N 行是否含字面量。
+
+    **坐标口径（写死，勿改成被引提交坐标）**：行号是「当前 HEAD 坐标」，必须取
+    ``git show HEAD:<path>`` 的第 N 行。不得取 ``git show <hash>:<path>`` ——
+    被引提交当时那一行未必是文中写的那个内容。8/8 反例：
+    ``2614c7f8`` 的 ``desktop/config_schema.py:377`` 当时是 ``agc_enabled``；
+    ``6ed9ee7d`` 的 ``mbdsdr_ai/sdr_backend.py:111`` 当时是空行。
+    按被引提交坐标判，会把现在正确的四元组判成红。
+
+    三种结果分开返回，不合并：
+      * ``LINE_OK``        第 N 行含该字面量（先精确子串，再空白归一后子串）
+      * ``LINE_MISMATCH``  行存在但不含 → 说明「hash 对、行号漂了」
+      * ``LINE_UNRESOLVED`` 取不到那一行，``detail`` 区分「HEAD 无此路径」与「行数不够」
+    """
+    path, n = _split_target(target)
+    lines = _head_lines(root, path)
+    base = dict(doc=doc, line=doc_line, commit=commit, target=target, literal=literal)
+    if lines is None:
+        return LineCheck(result=LINE_UNRESOLVED,
+                         detail=LINE_UNRESOLVED_SUB["path-missing"], **base)
+    if n < 1 or n > len(lines):
+        return LineCheck(result=LINE_UNRESOLVED,
+                         detail=f'{LINE_UNRESOLVED_SUB["line-out-of-range"]}（共 {len(lines)} 行）',
+                         **base)
+    text = lines[n - 1]
+    if literal in text or _norm_ws(literal) in _norm_ws(text):
+        return LineCheck(result=LINE_OK, detail=text.strip()[:120], **base)
+    return LineCheck(result=LINE_MISMATCH, detail=text.strip()[:120], **base)
+
+
+def line_checks(root: Path, claims: List[Claim]) -> List[LineCheck]:
+    """对带完整 ``hash/target/literal`` 的断言逐条做第 4 步。"""
+    out: List[LineCheck] = []
+    for c in claims:
+        if c.target and c.literal:
+            out.append(check_line(root, c.commit, c.target, c.literal,
+                                  doc=c.doc, doc_line=c.line))
+    return out
+
+
+def print_line_checks(rows: List[LineCheck]) -> None:
+    counts = {LINE_OK: 0, LINE_MISMATCH: 0, LINE_UNRESOLVED: 0}
+    for r in rows:
+        counts[r.result] = counts.get(r.result, 0) + 1
+    print("\n=== 行号内容校验（--check-lines，只报不拦） ===")
+    print("坐标口径：git show HEAD:<path> 第 N 行（evidence-standard §7.7），"
+          "不取被引提交坐标；区间 N–M 只判首行 N")
+    print(f"含字面量 {counts[LINE_OK]}  |  行存在但不含 {counts[LINE_MISMATCH]}  |  "
+          f"path 或行号不存在 {counts[LINE_UNRESOLVED]}  |  合计 {len(rows)}")
+    for result in (LINE_MISMATCH, LINE_UNRESOLVED, LINE_OK):
+        group = [r for r in rows if r.result == result]
+        if not group:
+            continue
+        print(f"\n[{result}] {len(group)} 条")
+        for r in group:
+            print(f"  {r.doc}:{r.line}  {r.commit}  {r.target}  `{r.literal}`")
+            print(f"      结果：{r.result}" + (f"（{r.detail}）" if r.detail else ""))
+
+
 def print_report(claims: List[Claim]) -> None:
     counts = summarize(claims)
     print(f"断言总数：{len(claims)}  |  可证实 {counts[OK]}  |  "
@@ -288,6 +397,8 @@ def main(argv: Optional[List[str]] = None) -> int:
                     help="下沉到 docs 子目录（含 docs/learn 历史档）")
     ap.add_argument("--json", default=None)
     ap.add_argument("--fail-on-unverified", action="store_true")
+    ap.add_argument("--check-lines", action="store_true",
+                    help="第 4 步：校验 path:N 在 HEAD 第 N 行是否含字面量（只报不拦）")
     args = ap.parse_args(argv)
 
     root = Path(args.root)
@@ -296,12 +407,18 @@ def main(argv: Optional[List[str]] = None) -> int:
         return 2
     claims = verify_docs(root, Path(args.docs) if args.docs else None, args.recursive)
     print_report(claims)
+    rows: List[LineCheck] = []
+    if args.check_lines:
+        rows = line_checks(root, claims)
+        print_line_checks(rows)
     if args.json:
         out = Path(args.json)
         out.parent.mkdir(parents=True, exist_ok=True)
-        out.write_text(json.dumps({"summary": summarize(claims),
-                                   "claims": [asdict(c) for c in claims]},
-                                  ensure_ascii=False, indent=2), encoding="utf-8")
+        payload = {"summary": summarize(claims),
+                   "claims": [asdict(c) for c in claims]}
+        if args.check_lines:
+            payload["line_checks"] = [asdict(r) for r in rows]
+        out.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
         print(f"\nJSON: {out}")
     if args.fail_on_unverified and any(c.status != OK for c in claims):
         return 1
