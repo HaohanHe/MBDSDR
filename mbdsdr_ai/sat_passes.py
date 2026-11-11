@@ -39,6 +39,8 @@ import math
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
+import numpy as np
+
 try:
     from skyfield.api import EarthSatellite, Topos, Time, load as _sky_load
     _HAS_SKYFIELD = True
@@ -68,6 +70,13 @@ __all__ = [
     "DopplerPoint",
     "compute_doppler_curve",
     "predict_upcoming_passes",
+    "PASS_COARSE_STEP_S",
+    "PASS_FINE_STEP_S",
+    "PASS_SCAN_BATCH",
+    "PASS_CHUNK_HOURS",
+    "refine_culmination",
+    "split_pass_window",
+    "grid_manifest",
 ]
 
 try:
@@ -110,6 +119,153 @@ PASS_EDGE_PROBE_MARGIN_DEG = 15.0
 _COARSE_STEP_S = PASS_COARSE_STEP_S
 _FINE_STEP_S = PASS_FINE_STEP_S
 _BISECT_TOL_S = 0.5       # 二分收敛容差（秒），LEO 仰角变化 ~0.5°/s ⇒ ~0.25° 精度
+
+# 粗扫向量化批大小（点数）。skyfield 的 ``diff.at(t_array).altaz()`` 一次算
+# 一批，比逐点调用快约 7 倍；2048 点的内存占用可忽略。这是 P1-13「72 h 分批」
+# 的落点：72 h / 60 s ≈ 4321 点被切成 3 批送入，而不是 4321 次标量传播。
+PASS_SCAN_BATCH = 2048
+# 单次计算窗口上限（小时）。与 PASS_WINDOW_MAX_HOURS 同值：任何更长的时间窗
+# 先切段再算，绝不把「一次请求」变成无界长任务。桌面 72 h 窗即 1 段。
+PASS_CHUNK_HOURS = 72.0
+
+
+def split_pass_window(start_unix: float, hours: Any,
+                      chunk_hours: float = PASS_CHUNK_HOURS
+                      ) -> List[Tuple[float, float]]:
+    """把连续时间窗切成若干 ≤ ``chunk_hours`` 的段：``[(start_unix, hours), ...]``。
+
+    先按 ``clamp_pass_window_hours`` 得到实际生效的 ``hours``，保证调用方
+    「按段算完再合并」与「一次算完」拿到同一个窗口。面板/时间线按段分配
+    到后台任务时可逐段刷新进度，不必等整窗算完。
+    """
+    total = clamp_pass_window_hours(hours)
+    chunk = float(chunk_hours)
+    if not math.isfinite(chunk) or chunk <= 0:
+        chunk = PASS_CHUNK_HOURS
+    out: List[Tuple[float, float]] = []
+    cur = float(start_unix)
+    remain = total
+    while remain > 1e-9:
+        seg = min(chunk, remain)
+        out.append((cur, seg))
+        cur += seg * 3600.0
+        remain -= seg
+    return out
+
+
+def grid_manifest() -> Dict[str, Any]:
+    """过境网格的精度档声明（界面/AI 共用同一份文案来源）。
+
+    面板与 AI 都从这里取「多少秒粗扫、多少秒细扫、二分收敛多少秒」，避免
+    界面写「±30 s」而 AI 写「±2 s」这种各说各话。返回值是纯数据，不含 I/O。
+    """
+    return {
+        "engine": "skyfield",
+        "coarse_step_s": PASS_COARSE_STEP_S,
+        "fine_step_s": PASS_FINE_STEP_S,
+        "bisect_tol_s": _BISECT_TOL_S,
+        "scan_batch": PASS_SCAN_BATCH,
+        "chunk_hours": PASS_CHUNK_HOURS,
+        "culmination_precision_s": PASS_FINE_STEP_S / 2.0,
+        "crossing_precision_s": _BISECT_TOL_S,
+        "accuracy_note": (f"粗扫 {PASS_COARSE_STEP_S:.0f} s / 细扫 "
+                          f"{PASS_FINE_STEP_S:.0f} s：中天时刻约 ±"
+                          f"{PASS_FINE_STEP_S / 2.0:.0f} s，AOS/LOS 二分收敛 "
+                          f"{_BISECT_TOL_S:.1f} s"),
+    }
+
+
+def refine_culmination(el_az_at_s, rise_s: float, set_s: float,
+                       step_s: float = PASS_FINE_STEP_S,
+                       batch_alt=None) -> Tuple[float, float]:
+    """在 ``[rise_s, set_s]`` 内按 ``step_s`` 细采样找最大仰角时刻。
+
+    **共享细扫网格的唯一实现**：``predict_passes`` 与时间线（面板）都调它，
+    两套实现各写一遍正是「面板 60 s 网格 vs AI 2 s 网格」分叉的来源（P1-13）。
+    返回 ``(峰值时刻秒, 峰值仰角°)``；采样全失败时返回 ``(rise_s, -999.0)``。
+
+    ``batch_alt`` 可传 ``(secs: list) -> list[仰角|None]`` 的批量求值器（向量化
+    skyfield）；传入且调用成功时整段一次算完，失败自动退回逐点
+    ``el_az_at_s``。网格点与逐点版本完全相同，仅求值方式不同。
+    """
+    best_sec, best_el = float(rise_s), -999.0
+    if not (math.isfinite(rise_s) and math.isfinite(set_s)) or set_s < rise_s:
+        return best_sec, best_el
+    if step_s <= 0:
+        step_s = PASS_FINE_STEP_S
+    secs: List[float] = []
+    s = float(rise_s)
+    while s <= set_s + 1e-6:
+        secs.append(s)
+        s += step_s
+    if batch_alt is not None and secs:
+        try:
+            vals = batch_alt(secs)
+        except Exception:
+            vals = None
+        if vals is not None and len(vals) == len(secs):
+            for sec, el in zip(secs, vals):
+                if el is not None and el > best_el:
+                    best_el, best_sec = float(el), sec
+            return best_sec, best_el
+    for sec in secs:
+        r = el_az_at_s(sec)
+        if r is not None and r[0] > best_el:
+            best_el, best_sec = r[0], sec
+    return best_sec, best_el
+
+
+def _vector_alt_evaluator(diff, start_time: Time):
+    """批量仰角求值器：``(secs) -> [仰角°|None]``，一次传播一批时刻。
+
+    仅用于「网格点固定」的批量采样（粗扫、细扫）；二分等任意时刻仍需逐点。
+    形状不符或传播失败时抛异常，由调用方退回逐点路径。
+    """
+    def _eval(secs: Sequence[float]) -> List[Optional[float]]:
+        times = start_time + np.asarray(list(secs), dtype=float) / 86400.0
+        alt, _az, _dist = diff.at(times).altaz()
+        raw = np.asarray(alt.degrees, dtype=float)
+        if raw.shape != (len(secs),):
+            raise ValueError(f"altaz 形状不符: {raw.shape}")
+        return [None if not math.isfinite(v) else float(v) for v in raw]
+    return _eval
+
+
+def _coarse_alt_grid(diff, start_time: Time, total_s: float,
+                     batch_alt=None) -> List[Tuple[float, Optional[float]]]:
+    """粗扫仰角网格：按 ``PASS_SCAN_BATCH`` 分批求值，返回 ``[(sec, el|None)]``。
+
+    网格点与原逐点实现**完全一致**（``min(k*PASS_COARSE_STEP_S, total_s)``）；
+    只把「一次传播一个时刻」换成「一次传播一批」（``batch_alt`` 提供时）。
+    批量求值抛异常（缺星历表等）时退回逐点标量路径，保证结果不因优化而缺失。
+    """
+    step = PASS_COARSE_STEP_S
+    n_steps = int(total_s / step) + 1
+    secs = [min(k * step, total_s) for k in range(n_steps + 1)]
+    out: List[Tuple[float, Optional[float]]] = []
+    batch = max(1, int(PASS_SCAN_BATCH))
+    # 只有「未被替换」的 _alt_az 才允许走批量快路径：测试/仿真会注入解析仰角
+    # 曲线（monkeypatch _alt_az），那时必须逐点走 _alt_az，否则注入被绕过、
+    # 擦边补点等既有判据会静默失效。
+    if _alt_az is not _ALT_AZ_ORIGINAL:
+        batch_alt = None
+    for i in range(0, len(secs), batch):
+        part = secs[i:i + batch]
+        vals: Optional[List[Optional[float]]] = None
+        if batch_alt is not None:
+            try:
+                got = batch_alt(part)
+                if len(got) == len(part):
+                    vals = list(got)
+            except Exception:
+                vals = None
+        if vals is None:
+            vals = []
+            for sec in part:
+                r = _alt_az(diff, start_time + sec / 86400.0)
+                vals.append(r[0] if r else None)
+        out.extend(zip(part, vals))
+    return out
 
 
 def clamp_pass_window_hours(hours: Any) -> float:
@@ -230,6 +386,11 @@ def _alt_az(diff, t: Time) -> Optional[Tuple[float, float]]:
         return None
 
 
+# 向量快路径的开关判据：``_alt_az`` 被测试/仿真替换后，粗扫必须退回逐点，
+# 否则注入的解析仰角曲线会被绕过（见 _coarse_alt_grid 注释）。
+_ALT_AZ_ORIGINAL = _alt_az
+
+
 def _bisect_cross(el_fn, lo: float, hi: float, target: float,
                   tol: float = _BISECT_TOL_S) -> float:
     """在 [lo, hi]（秒，相对 t0）之间二分求仰角=target 的时刻。
@@ -335,13 +496,14 @@ def predict_passes(
     # 任意 hours 会直接变成数十万次 SGP4 传播。
     hours = clamp_pass_window_hours(hours)
     total_s = hours * 3600.0
-    n_steps = int(total_s / PASS_COARSE_STEP_S) + 1
 
-    # a) 粗扫：60s 步长记录 (sec, el)。
-    coarse: List[Tuple[float, Optional[float]]] = []
-    for k in range(n_steps + 1):
-        sec = min(k * PASS_COARSE_STEP_S, total_s)
-        coarse.append((sec, el_at_s(sec)))
+    # 批量求值器：`_alt_az` 未被替换时才启用（测试注入解析曲线时自动退回逐点）
+    batch_alt = (_vector_alt_evaluator(diff, start_time)
+                 if _alt_az is _ALT_AZ_ORIGINAL else None)
+
+    # a) 粗扫：60s 步长记录 (sec, el)，按 PASS_SCAN_BATCH 分批传播。
+    coarse: List[Tuple[float, Optional[float]]] = _coarse_alt_grid(
+        diff, start_time, total_s, batch_alt)
     if all(e is None for _, e in coarse):
         return []
 
@@ -404,14 +566,9 @@ def predict_passes(
             i = max(j, i + 1)
             continue
 
-        # c) pass 内 2s 细采样，找最大仰角时刻
-        best_sec, best_el = t_rise_s, -999.0
-        s = t_rise_s
-        while s <= t_set_s + 1e-6:
-            r = el_az_at_s(s)
-            if r is not None and r[0] > best_el:
-                best_el, best_sec = r[0], s
-            s += PASS_FINE_STEP_S
+        # c) pass 内 2s 细采样，找最大仰角时刻（共享细扫网格唯一实现）
+        best_sec, best_el = refine_culmination(
+            el_az_at_s, t_rise_s, t_set_s, batch_alt=batch_alt)
 
         rise_r = el_az_at_s(t_rise_s) or (None, None)
         set_r = el_az_at_s(t_set_s) or (None, None)
