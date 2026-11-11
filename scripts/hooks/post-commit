@@ -31,6 +31,12 @@ pre-commit 通过时会在 hook_ok/<tree>.json 留标记，本钩子消费标记
 最后把共享 index 同步到新 HEAD（`scripts/git_sync_index.py`）：私有
 GIT_INDEX_FILE 提交后，共享 index 仍停在旧 HEAD，本次提交的每个文件都会
 显示成「反向暂存」。同步失败只打印警告，不阻塞。
+
+同步后再做一次**只读**的残余检查：剥掉调用方的 `GIT_INDEX_FILE`，跑
+`git diff --cached --name-only` 看共享 index 还剩哪些暂存条目，非空就写
+`INDEX_RESIDUE` 记录并逐条打印路径。**不改退出码、不阻断、不自动修复**——
+这些条目可能是别线正在准备的提交，也可能是旧 blob 未重新 add（事故
+`bc0c75e1`）；清理动作由 owner 或人工决定。
 """
 import json
 import os
@@ -242,6 +248,29 @@ def _sync_shared_index(root, files):
             print(f"    {line}", file=sys.stderr)
 
 
+def _shared_index_residue(root):
+    """共享 index 里残留的暂存条目；读不到时返回 None（不假报）。
+
+    **只读**：不 `git add`、不 `restore`、不改退出码。剥掉调用方的
+    ``GIT_INDEX_FILE``，看的是共享 index——私有 index 提交后，共享 index
+    可能还挂着别人的暂存条目或旧 blob（事故 `bc0c75e1`）。
+    """
+    env = os.environ.copy()
+    env.pop("GIT_INDEX_FILE", None)
+    proc = subprocess.run(
+        ["git", "diff", "--cached", "--name-only", "--no-renames"],
+        cwd=str(root),
+        env=env,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+    if proc.returncode != 0:
+        return None
+    return [line.strip() for line in proc.stdout.splitlines() if line.strip()]
+
+
 def main():
     started_at = time.time()
     root = Path(_git("rev-parse", "--show-toplevel").stdout.strip() or ".")
@@ -255,6 +284,33 @@ def main():
     log_path = Path(
         os.environ.get("MBDSDR_HOOK_LOG") or r"D:\mbdsdr\.locks\git_hook_bypass.log"
     )
+
+    # 共享 index 残余：只记录 + 打印路径，不改退出码、不阻断、不自动修。
+    residue = _shared_index_residue(root)
+    if residue:
+        _append_records(
+            log_path,
+            [
+                {
+                    "type": "INDEX_RESIDUE",
+                    "ts": datetime.now().isoformat(timespec="seconds"),
+                    "commit": head,
+                    "count": len(residue),
+                    "paths": residue,
+                    "reason": (
+                        "提交后共享 index 仍有暂存条目：可能是别线正在准备提交，"
+                        "也可能是旧 blob 未重新 add（事故 bc0c75e1）；只记录不修复"
+                    ),
+                }
+            ],
+        )
+        print(
+            f"[post-commit] 共享 index 残留 {len(residue)} 个暂存条目"
+            "（只记录，不修复）：",
+            file=sys.stderr,
+        )
+        for path in residue:
+            print(f"    {path}", file=sys.stderr)
 
     # 提交后自检：旧索引漏带只记录、不阻断（提交已经发生，回滚不是本钩子的事）。
     stale = _stale_index_suspects(head, files, started_at)
