@@ -20,6 +20,24 @@ import shiboken6
 
 logger = logging.getLogger(__name__)
 
+# `main_window`（main.py 的裸导入）与 `desktop.main_window`（测试/工具的包式导入）
+# 是同一文件的两个模块对象，模块级 `_WARN_THROTTLE_LAST` 因此有两份：同一进程里
+# 同一 key 的告警各记各的（同故障落两条日志），测试里 `_WARN_THROTTLE_LAST.clear()`
+# 清的也可能是「不是正在打日志的那一份」（限流状态没清掉 → 该出现的告警不出现）。
+# 定性见 docs/redundancy-register.md §5.10。下面几行把另一个名字指回本模块。
+sys.modules.setdefault(
+    "desktop.main_window" if __name__ == "main_window" else "main_window",
+    sys.modules[__name__])
+# 只写 sys.modules 不够：`import desktop.main_window` 命中后导入器不再给父包
+# setattr，属性访问会 AttributeError。裸导入先发生时父包通常还没导入，这里补一次。
+if __name__ == "main_window":
+    try:
+        import desktop as _desktop_pkg
+    except ImportError:   # 脚本上下文（python desktop/main.py）没有仓库根
+        _desktop_pkg = None
+    if _desktop_pkg is not None:
+        setattr(_desktop_pkg, "main_window", sys.modules[__name__])
+
 # 状态栏提示时长登记档（唯一口径，见 tests/test_status_message_durations.py）：
 # QUICK   一眼读完的瞬时反馈（模式切换/已清空/扫频进度）
 # NORMAL  普通结果（已保存/已应用/一般失败）
