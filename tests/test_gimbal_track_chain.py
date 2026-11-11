@@ -165,12 +165,6 @@ class FakeGimbal:
         return self.status
 
 
-@pytest.fixture(autouse=True)
-def _isolated(isolated_profile):
-    """MainWindow 会读写 DesktopSettings/QSettings，必须隔离到 tmp_path。"""
-    yield
-
-
 @pytest.fixture(scope="module")
 def mw(isolated_profile):
     from main_window import MainWindow
