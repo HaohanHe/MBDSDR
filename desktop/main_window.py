@@ -12413,10 +12413,28 @@ class MainWindow(QMainWindow):
         tune_hz = comp.rx_freq()
         if tune_hz is None:
             tune_hz = float(self._loop_sat_tracker.downlink_freq_hz())
-        try:
-            self._on_tune_sdr(float(tune_hz), self._sat_track_mode)
-        except Exception:
-            pass
+        # 执行层闸门（P0-01）：本次位置结果自带 policy（= tracking_policy_for()
+        # 同一份），allow_tune=False 就绝不下发。开始时的闸门只管「能否进入」，
+        # 跟踪中途星历可能被刷新/身份复核，故每一拍下发前都要再读一次；
+        # 这里不比较 tle_tier/age_days——档位只在 tle_integrity 一处判定。
+        # 口径（D-7 方案 A）：dead/unknown 才是 0 次；expired 是「确认后 1 次」
+        # （TRACKING_MODES["expired"]["tune"] == "confirm"），别把 expired 当 dead。
+        tune_policy = pos.get("policy") or {}
+        if tune_policy.get("allow_tune"):
+            self._sat_tune_blocked_reason = ""
+            try:
+                self._on_tune_sdr(float(tune_hz), self._sat_track_mode)
+            except Exception:
+                pass
+        else:
+            blocked = (
+                f"{tune_policy.get('label') or '星历不可用'}"
+                f"（{tune_policy.get('reason') or '无可用星历'}）"
+                f" → {tune_policy.get('next_action') or '请更新星历'}")
+            if blocked != getattr(self, "_sat_tune_blocked_reason", ""):
+                self._sat_tune_blocked_reason = blocked
+                self.statusBar().showMessage(
+                    f"未下发调谐：{blocked}", MSG_IMPORTANT)
         # 星点亮：主听 VFO 带内 SNR 过门限 -> 天空图该星加辉光环
         # （点星即听闭环下半场："信号出现星点亮"）。
         try:

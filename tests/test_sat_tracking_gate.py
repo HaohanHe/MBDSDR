@@ -8,7 +8,8 @@
 本文件用假 tracker 替换档位来源，只验桌面确实读 policy：
 - ``command_allowed`` 为假 → 拒绝开始，状态栏给出档位原因；
 - ``require_confirm`` 为真且用户说不 → 拒绝；
-- ``require_confirm`` 为真且用户说是 / 无需确认 → 正常进入跟踪。
+- ``require_confirm`` 为真且用户说是 / 无需确认 → 正常进入跟踪；
+- 进入跟踪后每一拍下发调谐前同样读 ``allow_tune``（执行层闸门）。
 """
 import os
 import sys
@@ -152,3 +153,120 @@ def test_missing_policy_source_fails_closed(window, monkeypatch):
     window._start_satellite_tracking(_SAT, 137.62e6)
     assert not _tracking_active(window), "取数失败却放行：缺数据被当成可信"
     assert "不跟踪" in window.statusBar().currentMessage()
+
+
+# --------------------------------------------------------------------------- #
+# P0-01 执行层：500 ms 轮询下发调谐前必须读同一份 policy 的 allow_tune
+# --------------------------------------------------------------------------- #
+from mbdsdr_ai.tle_integrity import tracking_policy  # noqa: E402
+
+
+class _PollLoop:
+    """只回答轮询要用的两个接口；policy 随位置一起透出（真实实现同款）。"""
+
+    selected_name = _SAT
+
+    def __init__(self, policy, elevation):
+        self._policy = policy
+        self._elevation = elevation
+
+    def current_position(self):
+        return {"valid": True, "azimuth": 180.0,
+                "elevation": self._elevation, "policy": self._policy}
+
+    def downlink_freq_hz(self):
+        return 145.8e6
+
+
+def _poll_once(window, monkeypatch, policy, elevation=45.0):
+    """跑一拍真实 ``_poll_satellite_track``，返回实际下发调谐的参数列表。"""
+    import mbdsdr_ai.doppler_link as dl
+    import main_window as mw
+
+    tuned = []
+
+    class _Comp:
+        def refresh(self, _pos):
+            pass
+
+        def rx_freq(self):
+            return 145.8e6
+
+    class _Panel:
+        def update_position(self, _pos):
+            pass
+
+    class _Spectrum:
+        def compute_snr_db(self):
+            return None
+
+    monkeypatch.setattr(dl, "get_compensator", lambda: _Comp())
+    monkeypatch.setattr(window, "_loop_sat_tracker",
+                        _PollLoop(policy, elevation), raising=False)
+    monkeypatch.setattr(window, "_sat_track_mode", "FM", raising=False)
+    monkeypatch.setattr(window, "_sat_signal_present", False, raising=False)
+    monkeypatch.setattr(window, "_gimbal_follow", False, raising=False)
+    monkeypatch.setattr(window, "sat_track_panel", _Panel(), raising=False)
+    monkeypatch.setattr(window, "spectrum", _Spectrum(), raising=False)
+    monkeypatch.setattr(window, "_update_doppler_chip", lambda _c: None,
+                        raising=False)
+    monkeypatch.setattr(window, "_on_tune_sdr",
+                        lambda f, m: (tuned.append((f, m)), True)[1],
+                        raising=False)
+    mw.MainWindow._poll_satellite_track(window)
+    return tuned
+
+
+@pytest.mark.parametrize("fresh", [
+    {"tier": "dead", "age_days": 400.0},
+    {"tier": "unknown", "age_days": None},
+])
+def test_poll_denial_never_tunes(window, monkeypatch, fresh):
+    """dead/unknown 才是 0 次（expired 是「确认后 1 次」，见下一条）。"""
+    policy = tracking_policy(fresh)
+    assert policy["allow_tune"] is False, policy
+
+    assert _poll_once(window, monkeypatch, policy) == []
+
+
+@pytest.mark.parametrize("fresh", [
+    {"tier": "usable", "age_days": 2.0},
+    {"tier": "fresh", "age_days": 0.5},
+])
+def test_poll_allow_tunes_once(window, monkeypatch, fresh):
+    """allow_tune 为真 → 该下发就下发，且频率是多普勒校正后的值。"""
+    policy = tracking_policy(fresh)
+    assert policy["allow_tune"] is True, policy
+
+    tuned = _poll_once(window, monkeypatch, policy)
+
+    assert len(tuned) == 1, tuned
+    assert tuned[0][0] == pytest.approx(145.8e6)
+
+
+def test_poll_denied_tuning_reports_policy_reason(window, monkeypatch):
+    """不下发时必须给出可读原因：档位 + 为什么禁 + 下一步。"""
+    policy = tracking_policy({"tier": "dead", "age_days": 400.0})
+
+    assert _poll_once(window, monkeypatch, policy) == []
+
+    msg = window.statusBar().currentMessage()
+    assert "未下发调谐" in msg, msg
+    assert policy["label"] in msg, msg
+    assert policy["next_action"] in msg, msg
+
+
+def test_poll_expired_tunes_because_confirm_happened_at_start(
+        window, monkeypatch):
+    """expired 的 tune 策略是 confirm（allow_tune=True）：确认点在开始闸门。
+
+    轮询不重复弹确认，云台另由 allow_gimbal=False 禁掉；这条钉住的是
+    「执行层只读 allow_tune，不自己另写一套档位判断」。
+    """
+    policy = tracking_policy({"tier": "expired", "age_days": 40.0})
+    assert policy["allow_tune"] is True
+    assert policy["require_confirm"] is True
+    assert policy["allow_gimbal"] is False
+
+    assert len(_poll_once(window, monkeypatch, policy)) == 1
+
