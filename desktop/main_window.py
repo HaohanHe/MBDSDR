@@ -10582,6 +10582,9 @@ class MainWindow(QMainWindow):
         t_pos = float(ctx.get("t_pos") or 0.0)
         t_plan = float(ctx.get("t_plan") or 0.0)
         t_cmd = float(ctx.get("t_cmd") or 0.0)
+        # 真实拍差：本拍起点 → 结论落地时刻。旧实现两处都写死 0.5 s，
+        # 累计时长变成「拍数 × 0.5s」，与实际跟踪频率/卡顿脱钩。
+        elapsed_s = max(0.0, time.monotonic() - t_cycle) if t_cycle > 0 else 0.0
         rec = getattr(self, "_gimbal_error", None)
         res = res if isinstance(res, dict) else {}
         dispatched = bool(res.get("dispatched", False))
@@ -10605,7 +10608,7 @@ class MainWindow(QMainWindow):
                 "total_ms": (time.monotonic() - t_cycle) * 1000.0,
             }
             if rec is not None:
-                rec.record(az, el, cmd[0], cmd[1], elapsed_s=0.5)
+                rec.record(az, el, cmd[0], cmd[1], elapsed_s=elapsed_s)
             self._stop_gimbal_follow(
                 f"云台指令未执行（{err_text}），跟随已停止", important=True)
             return
@@ -10622,7 +10625,7 @@ class MainWindow(QMainWindow):
         errs = (rec.record(az, el, effective[0], effective[1],
                            pose_az=pose_az, pose_el=pose_el,
                            pose_source=pose_source,
-                           elapsed_s=0.5)
+                           elapsed_s=elapsed_s)
                 if rec is not None else {})
         self._gimbal_cycle_seq = getattr(self, "_gimbal_cycle_seq", 0) + 1
         self._last_gimbal_cycle = {
@@ -12180,14 +12183,18 @@ class MainWindow(QMainWindow):
                        "t_cycle": t_cycle, "t_pos": t_pos,
                        "t_plan": t_plan, "t_cmd": t_cmd}
                 if cmd is None:
-                    # 死区/限速抑制：没有下发，但仍记账（含指令侧滞后）
-                    self._apply_gimbal_result(ctx, {}, 0.0)
+                    # 死区/限速抑制：没有下发，但仍记账（含指令侧滞后）。
+                    # 记账入参必须与 ``_apply_gimbal_result`` 的 ``task.get("ctx")``
+                    # 约定一致：传 ctx 本身会让 az/el 读成 0°，整条误差统计失真。
+                    self._apply_gimbal_result({"ctx": ctx}, {}, 0.0)
                     return
                 # 下发 + 本拍收结果（快速后端在同一拍落地；
                 # 慢后端返回 False，状态栏提示等待中，下一拍再收）
                 self._gimbal_dispatch_async(gc, cmd, ctx)
-            except Exception:
-                pass
+            except Exception as e:      # noqa: BLE001 - 原因必须可见，不许静默
+                self._stop_gimbal_follow(
+                    "云台跟随异常已停止："
+                    f"{e.__class__.__name__}: {e}", important=True)
 
     def _update_doppler_chip(self, comp) -> None:
         """把链路补偿状态写进顶栏芯片（标称/实际/Δ + 开关 + 失效原因）。"""
