@@ -418,7 +418,6 @@ try:
     from PySide6.QtGui import QColor, QFont, QIcon, QPainter, QPixmap
 
     from themes import get_theme, DEFAULT_THEME, get_app_font
-    from main_window import MainWindow
 except ImportError as _startup_exc:
     # 缺件只会是 ImportError / ModuleNotFoundError；其它异常照常向上抛，
     # 不在这里把真实 bug 伪装成「安装包坏了」。
@@ -615,6 +614,34 @@ def _show_startup_splash(app):
         return None
 
 
+def _close_splash(splash) -> None:
+    """失败路径抢在弹窗前收掉 splash：别让「启动失败」压在加载画面上。"""
+    if splash is None:
+        return
+    try:
+        splash.close()
+    except (AttributeError, RuntimeError):  # noqa: BLE001 - 收尾失败不拦失败提示
+        pass
+
+
+def _import_main_window(splash=None):
+    """导入主窗口类；放在 splash 之后做（该模块导入本身实测 ~0.8 s）。
+
+    打包版缺件的翻译口径与模块级导入完全一致：缺件给「缺什么 + 怎么修」，
+    其它异常照常向上抛，不把真实 bug 伪装成安装包坏了。
+    """
+    try:
+        from main_window import MainWindow
+    except ImportError as exc:
+        _close_splash(splash)
+        first_line = (str(exc).strip().splitlines() or [""])[0]
+        _report_startup_failure(
+            "无法加载界面依赖：" + (first_line or exc.__class__.__name__),
+            _import_error_text(exc))
+        raise SystemExit(3)
+    return MainWindow
+
+
 def main():
     # pythonw.exe 无控制台：必须在任何 print / argparse --help 之前兜底 stdio
     _ensure_stdio_for_pythonw()
@@ -632,21 +659,6 @@ def main():
     parser.add_argument("--import-probe", type=str, default=None, metavar="MOD1,MOD2",
                         help="只做导入自检（逗号分隔模块名），打印结果后退出，不建窗口")
     args = parser.parse_args()
-
-    # 启动自检：把 PyInstaller 静态分析易漏的私有模块逐个导入并记日志。
-    _run_import_smoke()
-
-    # 启动自检（硬门槛）：必需依赖/数据件逐项探针。缺件立即中止并弹
-    # 「MBDSDR 启动失败 + 缺什么 + 怎么修」，绝不照常开一个半残窗口。
-    # 覆盖「import 成功、运行期懒加载才崩」的场景（如 _internal/scipy/_external 被删）。
-    dep_problems = _startup_dependency_problems()
-    if dep_problems:
-        _report_startup_failure(
-            "启动自检失败：缺少必需组件（已中止启动）",
-            "下面这些是应用正常工作的必需项，缺一项都无法继续：\n\n"
-            + "\n\n".join(dep_problems)
-            + "\n\n请按每项的「怎么修」处理后重新启动。")
-        return 3
 
     # 高 DPI 支持
     QApplication.setHighDpiScaleFactorRoundingPolicy(
@@ -673,6 +685,25 @@ def main():
     # 这段时间屏幕上什么都没有，用户会以为程序没起来。splash 放在主题/翻译
     # 之前，是因为那些步骤也在吃首屏前的空白期，没必要等它们。
     splash = _show_startup_splash(app)
+
+    # 启动自检（导入探针 + 必需依赖）挪到 splash 之后：这两步实测合计约 2 s
+    # （scipy 私有子树逐个探针 ~1.0 s、必需依赖探针 ~1.0 s），原先排在
+    # QApplication 之前，等于把 2 s 全扔进「屏幕上什么都没有」的空白期。
+    # 顺序不变：自检仍在主窗口构造之前，缺件照样中止启动。
+    _run_import_smoke()
+
+    # 启动自检（硬门槛）：必需依赖/数据件逐项探针。缺件立即中止并弹
+    # 「MBDSDR 启动失败 + 缺什么 + 怎么修」，绝不照常开一个半残窗口。
+    # 覆盖「import 成功、运行期懒加载才崩」的场景（如 _internal/scipy/_external 被删）。
+    dep_problems = _startup_dependency_problems()
+    if dep_problems:
+        _close_splash(splash)
+        _report_startup_failure(
+            "启动自检失败：缺少必需组件（已中止启动）",
+            "下面这些是应用正常工作的必需项，缺一项都无法继续：\n\n"
+            + "\n\n".join(dep_problems)
+            + "\n\n请按每项的「怎么修」处理后重新启动。")
+        return 3
 
     # 设置默认字体
     app.setFont(get_app_font())
@@ -701,8 +732,8 @@ def main():
         print(f"[mbdsdr] i18n: 加载失败，保持源语言 zh: {_l10n_ex}",
               file=sys.stderr)
 
-    # 主窗口构造实测 2.5–4 s，splash 已在 QApplication 建好后先行显示。
-    # 创建主窗口
+    # 主窗口模块导入 ~0.8 s + 构造 2.5–4 s，都在 splash 之后做。
+    MainWindow = _import_main_window(splash)
     window = MainWindow()
     window.app = app  # 传递 app 引用给主题切换
 
