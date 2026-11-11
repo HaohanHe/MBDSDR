@@ -353,13 +353,23 @@ def _state_from_satrec(
     }
 
 
+class TimeBasisUnavailable(RuntimeError):
+    """时间引擎不可用：拒绝退回系统时钟继续算。
+
+    位置/过境都是时间的函数。取不到统一时基时退回墙钟，算出来的
+    方位角、过境时刻**看起来完全正常**，但对应的是另一个时刻——尤其
+    在时间穿梭/快转之后，这是一条会被当成真值读的假答案。宁可显式失败。
+    """
+
+
 def _engine_now_unix() -> float:
-    """全链路统一缺省时间：TimeEngine 模拟时刻优先，不可用才退系统时钟。"""
+    """全链路统一缺省时间：只认 TimeEngine；不可用就抛，绝不退回墙钟。"""
     try:
         from .new_spacetime import get_time_engine
         return float(get_time_engine().now_unix())
-    except Exception:  # noqa: BLE001 - 引擎不可用不阻断位置计算
-        return time.time()
+    except Exception as exc:  # noqa: BLE001 - 统一转成显式时基故障
+        raise TimeBasisUnavailable(
+            f"时间引擎不可用（{type(exc).__name__}: {exc}）；不退回系统时钟") from exc
 
 
 def compute_satellite_state(
@@ -382,6 +392,8 @@ def compute_satellite_state(
 
     When:
         unix 秒；缺省取 TimeEngine（模拟时刻优先，未穿越即墙钟）。
+        引擎不可用时抛 ``TimeBasisUnavailable``——不退回墙钟，免得把
+        另一个时刻的位置当成「现在」返回。
     """
     _require_sgp4()
     catnr = BUILTIN_SATS.get(satellite_name)
@@ -708,7 +720,9 @@ def predict_passes(
     ``geodetic_to_ecef`` 同一 WGS-72 km 口径）。站址配置存米，调用方先
     ``/1000.0``——传米会把站址抬到几百公里，仰角与升起时刻全错。
 
-    ``start_unix`` 显式 UTC 秒；缺省取 TimeEngine（模拟时刻优先，未穿越即墙钟）。
+    ``start_unix`` 显式 UTC 秒；缺省取 TimeEngine。引擎不可用时抛
+    ``TimeBasisUnavailable``，绝不用墙钟顶替（否则「下一颗什么时候过境」
+    会得到一个看似正常、实则对应另一时刻的答案）。
 
     自适应粗/细扫描（60s 粗扫 + 二分收敛 + 2s 中天采样）。每条结果都附带
     TLE 身份/历元/新鲜度/精度风险字段；过期或失效时时刻自动降到分钟级。
@@ -762,10 +776,29 @@ def predict_passes_report(
                 "expired_max_days": 30.0,
             },
         }
-    passes, degraded = _predict_passes_impl(
-        observer_lat, observer_lon, observer_alt, hours,
-        min_elevation, satellite_type, nominal_freq_hz, allow_stale,
-        start_unix)
+    try:
+        passes, degraded = _predict_passes_impl(
+            observer_lat, observer_lon, observer_alt, hours,
+            min_elevation, satellite_type, nominal_freq_hz, allow_stale,
+            start_unix)
+    except TimeBasisUnavailable as exc:
+        # 报告层走现有 degraded 通道如实留痕：不返回「0 次过境」的假答案。
+        return {
+            "n_passes": 0,
+            "passes": [],
+            "degraded": [{
+                "satellite": "（时间基准）", "catnr": 0,
+                "reason": "time_basis_unavailable",
+                "detail": str(exc),
+            }],
+            "station": station_ev,
+            "tle_policy": {
+                "allow_stale": bool(allow_stale),
+                "fresh_max_hours": 24.0,
+                "usable_max_days": 7.0,
+                "expired_max_days": 30.0,
+            },
+        }
     if station_ev.get("station_warning"):
         # 放宽必须留痕：位置被启发式怀疑也要进降级清单，用户看得见。
         # 放在末尾：站址 warning 是「照常计算但位置可疑」，不该抢掉

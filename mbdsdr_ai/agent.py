@@ -1552,7 +1552,7 @@ class MBDSDRAgent:
 
     def _register_orbit_tools(self):
         """新时空核心：TLE 卫星过境预测（仰角/方位/多普勒）。"""
-        from mbdsdr_ai.orbit import predict_passes
+        from mbdsdr_ai.orbit import predict_passes, TimeBasisUnavailable
 
         def _passes(args):
             try:
@@ -1585,14 +1585,14 @@ class MBDSDRAgent:
                 min_el = float(args.get("min_elevation", 10) or 10)
                 stype = str(args.get("satellite_type", "all") or "all")
                 freq = float(args.get("frequency_hz", 137.1e6) or 137.1e6)
-                # P11：过境预测用 TimeEngine 模拟时刻，与天空视图同一时间基准
+                # P11：时间基准由 orbit 统一解析（与天空视图同一 TimeEngine）。
+                # 引擎不可用时必须如实说「算不了」——绝不退回墙钟给出一个
+                # 看起来正常的过境时刻。
                 try:
-                    from mbdsdr_ai.new_spacetime import get_time_engine
-                except ImportError:
-                    from new_spacetime import get_time_engine
-                ps = predict_passes(lat, lon, alt, hours, min_el, stype,
-                                    nominal_freq_hz=freq,
-                                    start_unix=get_time_engine().now_unix())
+                    ps = predict_passes(lat, lon, alt, hours, min_el, stype,
+                                        nominal_freq_hz=freq)
+                except TimeBasisUnavailable as e:
+                    return ToolResult(False, f"时间基准不可用，无法计算过境：{e}")
             except Exception as e:
                 return ToolResult(False, f"过境预测失败: {e}")
             return ToolResult(True, json.dumps(
@@ -1629,7 +1629,8 @@ class MBDSDRAgent:
 
     def _register_pointing_tools(self):
         """新时空：当前时刻卫星位置 + 天线指向建议（AI 反向指挥人）。"""
-        from mbdsdr_ai.orbit import compute_satellite_state, BUILTIN_SATS
+        from mbdsdr_ai.orbit import (compute_satellite_state, BUILTIN_SATS,
+                                     TimeBasisUnavailable)
 
         def _point(args):
             try:
@@ -1649,11 +1650,9 @@ class MBDSDRAgent:
                 lat = float(fix.lat)
                 lon = float(fix.lon)
                 try:
-                    from mbdsdr_ai.new_spacetime import get_time_engine
-                except ImportError:
-                    from new_spacetime import get_time_engine
-                s = compute_satellite_state(name, lat, lon,
-                                            when=get_time_engine().now_unix())
+                    s = compute_satellite_state(name, lat, lon)
+                except TimeBasisUnavailable as e:
+                    return ToolResult(False, f"时间基准不可用，无法计算卫星位置：{e}")
                 if s is None:
                     return ToolResult(False, f"未知卫星: {name}")
                 visible = s["elevation"] >= 0
@@ -1723,7 +1722,7 @@ class MBDSDRAgent:
 
     def _register_doppler_tools(self):
         """新时空：多普勒补偿调谐频率。"""
-        from mbdsdr_ai.orbit import doppler_correction
+        from mbdsdr_ai.orbit import doppler_correction, TimeBasisUnavailable
 
         def _doppler(args):
             try:
@@ -1740,7 +1739,10 @@ class MBDSDRAgent:
                     )
                 lat = float(lat)
                 lon = float(lon)
-                r = doppler_correction(name, f0, lat, lon)
+                try:
+                    r = doppler_correction(name, f0, lat, lon)
+                except TimeBasisUnavailable as e:
+                    return ToolResult(False, f"时间基准不可用，无法计算多普勒：{e}")
             except Exception as e:
                 return ToolResult(False, f"多普勒计算失败: {e}")
             return ToolResult(True, json.dumps(r, ensure_ascii=False, default=str))
