@@ -2,7 +2,7 @@
 
 > 本页由 `build/sync_from_repo.py` 生成，勿手改。产品工程在仓库外，
 > 但**能力面、通道、设计令牌、站点口径全部来自原仓库代码**，不是手抄的设计稿。
-> 生成时间：2026-11-09T17:58:17+08:00 · 仓库基线：`eb03b893`（只读抽取；工作树可能含其它会话在途改动，HEAD 仅标识基线）。
+> 生成时间：2026-11-11T21:51:36+08:00 · 仓库基线：`57a92669`（只读抽取；工作树可能含其它会话在途改动，HEAD 仅标识基线）。
 
 ## 为什么要有这一层
 
@@ -29,7 +29,7 @@ python tests/verify_product.py     # 校验事实源与 UI/文档一致
 | id | 域名（三语） | 组 | 代表工具（代码抽取） |
 |---|---|---|---|
 | `sdr-vfo` | SDR 调谐/VFO / SDR 同調 / VFO / SDR Tuning / VFO | 冻结 | `add_vfo`、`get_demod`、`get_frequency`、`learn_noise_floor`、`list_vfos`、`read_spectrum` |
-| `subaudio` | 亚音数字解码 / サブトーン・デジタル復号 / Subtone & Digital Decode | 冻结 | `get_decoder_messages`、`start_decoder`、`stop_decoder` |
+| `subaudio` | 亚音数字解码 / サブトーン・デジタル復号 / Subtone & Digital Decode | 冻结 | `get_decoder_messages`、`list_decoders`、`start_decoder`、`stop_decoder` |
 | `vna-measure` | VNA 测量 / VNA 測定 / VNA Measurement | 冻结 | **（诚实空态）该面无工具** |
 | `vna-analyze` | VNA 分析 / VNA 解析 / VNA Analysis | 冻结 | `vna_analyze_sweep` |
 | `vna-calib` | VNA 校准 / VNA 較正 / VNA Calibration | 冻结 | `vna_apply_calibration`、`vna_solve_error_box` |

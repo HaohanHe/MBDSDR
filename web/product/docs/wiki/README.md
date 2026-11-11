@@ -9,7 +9,7 @@
 | id | 域名（三语） | 组 | 代表工具 | 词条 |
 |---|---|---|---|---|
 | `sdr-vfo` | SDR 调谐/VFO / SDR 同調 / VFO / SDR Tuning / VFO | 冻结 | `add_vfo`、`get_demod`、`get_frequency`、`learn_noise_floor`、`list_vfos`、`read_spectrum` | [SDR 调谐/VFO](capabilities/sdr-vfo.md) |
-| `subaudio` | 亚音数字解码 / サブトーン・デジタル復号 / Subtone & Digital Decode | 冻结 | `get_decoder_messages`、`start_decoder`、`stop_decoder` | [亚音数字解码](capabilities/subaudio.md) |
+| `subaudio` | 亚音数字解码 / サブトーン・デジタル復号 / Subtone & Digital Decode | 冻结 | `get_decoder_messages`、`list_decoders`、`start_decoder`、`stop_decoder` | [亚音数字解码](capabilities/subaudio.md) |
 | `vna-measure` | VNA 测量 / VNA 測定 / VNA Measurement | 冻结 | 诚实空态 · 该面无工具 | [VNA 测量](capabilities/vna-measure.md) |
 | `vna-analyze` | VNA 分析 / VNA 解析 / VNA Analysis | 冻结 | `vna_analyze_sweep` | [VNA 分析](capabilities/vna-analyze.md) |
 | `vna-calib` | VNA 校准 / VNA 較正 / VNA Calibration | 冻结 | `vna_apply_calibration`、`vna_solve_error_box` | [VNA 校准](capabilities/vna-calib.md) |

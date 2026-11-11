@@ -205,7 +205,9 @@
   /* ---------- 极限星等模型（事实源：内核 skyengine，逐式镜像 + 跨语言钉扎） ----------
    * 三函数与 mbdsdr_ai/skyengine/stars.py::naked_eye_limit_mag 及
    * star_catalog.py::detail_gain_mag / limit_magnitude 逐字同构：
-   *   nakedEyeLimitMag(b) = 6.5 - 0.35·max(0, trunc(b)-3)  （Stellarium StelSkyDrawer 同语义）
+   *   nakedEyeLimitMag(b) = 6.5 - 0.35·(trunc(b)-3)  （Stellarium StelSkyDrawer 同语义；
+   *   **不夹 Bortle<3**——Bortle 1/2 必须比 3 更暗，夹平会让光害设置在最该体现
+   *   差别的暗空区间完全失效）
    *   detailGainMag(fov)  = clamp(0.5·log2(30/fov), 0, 1.5)（fov>=30 → 0，永不为负）
    *   limitMagnitude(fov,b,depthCap) = min(depthCap, nakedEye + detailGain)
    * detailGain 是**渲染 LOD 经验式**（放大后像素张角变小、暗星不再挤成一团，
@@ -223,7 +225,7 @@
   const CATALOG_DEPTH_MAG = 9.0;
   function nakedEyeLimitMag(bortle = DEFAULT_BORTLE) {
     return NAKED_EYE_LIMIT_SCALE
-      - NAKED_EYE_BORTLE_SLOPE * Math.max(0, Math.trunc(bortle) - 3);
+      - NAKED_EYE_BORTLE_SLOPE * (Math.trunc(bortle) - 3);
   }
   function detailGainMag(fovDeg) {
     const fov = Math.max(1e-6, Number(fovDeg));
@@ -297,7 +299,7 @@
       properMotion: "HYG v4.1 pmra/pmdec (mas/yr) linear RA/Dec drift; "
         + "cross-checked vs skyfield 1.54 rigorous space motion (<=0.35\" at 2026, <=1.5\" J2000->2051)",
       limitingMagnitude: "kernel fact source: skyengine/stars.py::naked_eye_limit_mag "
-        + "(6.5-0.35*max(0,trunc(bortle)-3), Stellarium StelSkyDrawer semantics) + "
+        + "(6.5-0.35*(trunc(bortle)-3), no Bortle<3 clamp, Stellarium StelSkyDrawer semantics) + "
         + "star_catalog.py::detail_gain_mag (clamp(0.5*log2(30/fov),0,1.5), render LOD not photometry) "
         + "/ limit_magnitude (min(depthCap, sum)); cross-language pinned by "
         + "build/gen_limit_mag_golden.py + tests/limit_mag_selftest.js",

@@ -12,7 +12,7 @@
   "webDepthCap": 7.5,
   "webDepthCapSource": "build/sky-catalog.json meta.magMax (= web MAG_CAP = Number(CAT.meta.magMax || 7.5))",
   "formulas": {
-   "nakedEyeLimitMag": "6.5 - 0.35*max(0, int(bortle)-3) [Stellarium StelSkyDrawer semantics; int truncates toward zero]",
+   "nakedEyeLimitMag": "6.5 - 0.35*(int(bortle)-3) [Stellarium StelSkyDrawer semantics; int truncates toward zero; NO max(0,...) clamp: Bortle 1/2 must be darker than 3]",
    "detailGainMag": "fov=max(1e-6,fov); fov>=30 -> 0; else clamp(0.5*log2(30/fov), 0, 1.5) [render LOD, NOT photometry]",
    "limitMagnitude": "min(depthCap, nakedEyeLimitMag(bortle) + detailGainMag(fov)); kernel default depthCap = CATALOG_DEPTH_MAG = 9.0"
   },
@@ -68,26 +68,26 @@
   {
    "fov": 160.0,
    "bortle": 0,
-   "nakedEye": 6.5,
+   "nakedEye": 7.55,
    "detailGain": 0.0,
-   "limitDefault": 6.5,
-   "limitWeb": 6.5
+   "limitDefault": 7.55,
+   "limitWeb": 7.5
   },
   {
    "fov": 160.0,
    "bortle": 1,
-   "nakedEye": 6.5,
+   "nakedEye": 7.2,
    "detailGain": 0.0,
-   "limitDefault": 6.5,
-   "limitWeb": 6.5
+   "limitDefault": 7.2,
+   "limitWeb": 7.2
   },
   {
    "fov": 160.0,
    "bortle": 2,
-   "nakedEye": 6.5,
+   "nakedEye": 6.85,
    "detailGain": 0.0,
-   "limitDefault": 6.5,
-   "limitWeb": 6.5
+   "limitDefault": 6.85,
+   "limitWeb": 6.85
   },
   {
    "fov": 160.0,
@@ -164,10 +164,10 @@
   {
    "fov": 160.0,
    "bortle": -1,
-   "nakedEye": 6.5,
+   "nakedEye": 7.9,
    "detailGain": 0.0,
-   "limitDefault": 6.5,
-   "limitWeb": 6.5
+   "limitDefault": 7.9,
+   "limitWeb": 7.5
   },
   {
    "fov": 160.0,
@@ -188,26 +188,26 @@
   {
    "fov": 120.0,
    "bortle": 0,
-   "nakedEye": 6.5,
+   "nakedEye": 7.55,
    "detailGain": 0.0,
-   "limitDefault": 6.5,
-   "limitWeb": 6.5
+   "limitDefault": 7.55,
+   "limitWeb": 7.5
   },
   {
    "fov": 120.0,
    "bortle": 1,
-   "nakedEye": 6.5,
+   "nakedEye": 7.2,
    "detailGain": 0.0,
-   "limitDefault": 6.5,
-   "limitWeb": 6.5
+   "limitDefault": 7.2,
+   "limitWeb": 7.2
   },
   {
    "fov": 120.0,
    "bortle": 2,
-   "nakedEye": 6.5,
+   "nakedEye": 6.85,
    "detailGain": 0.0,
-   "limitDefault": 6.5,
-   "limitWeb": 6.5
+   "limitDefault": 6.85,
+   "limitWeb": 6.85
   },
   {
    "fov": 120.0,
@@ -284,10 +284,10 @@
   {
    "fov": 120.0,
    "bortle": -1,
-   "nakedEye": 6.5,
+   "nakedEye": 7.9,
    "detailGain": 0.0,
-   "limitDefault": 6.5,
-   "limitWeb": 6.5
+   "limitDefault": 7.9,
+   "limitWeb": 7.5
   },
   {
    "fov": 120.0,
@@ -308,26 +308,26 @@
   {
    "fov": 100.0,
    "bortle": 0,
-   "nakedEye": 6.5,
+   "nakedEye": 7.55,
    "detailGain": 0.0,
-   "limitDefault": 6.5,
-   "limitWeb": 6.5
+   "limitDefault": 7.55,
+   "limitWeb": 7.5
   },
   {
    "fov": 100.0,
    "bortle": 1,
-   "nakedEye": 6.5,
+   "nakedEye": 7.2,
    "detailGain": 0.0,
-   "limitDefault": 6.5,
-   "limitWeb": 6.5
+   "limitDefault": 7.2,
+   "limitWeb": 7.2
   },
   {
    "fov": 100.0,
    "bortle": 2,
-   "nakedEye": 6.5,
+   "nakedEye": 6.85,
    "detailGain": 0.0,
-   "limitDefault": 6.5,
-   "limitWeb": 6.5
+   "limitDefault": 6.85,
+   "limitWeb": 6.85
   },
   {
    "fov": 100.0,
@@ -404,10 +404,10 @@
   {
    "fov": 100.0,
    "bortle": -1,
-   "nakedEye": 6.5,
+   "nakedEye": 7.9,
    "detailGain": 0.0,
-   "limitDefault": 6.5,
-   "limitWeb": 6.5
+   "limitDefault": 7.9,
+   "limitWeb": 7.5
   },
   {
    "fov": 100.0,
@@ -428,26 +428,26 @@
   {
    "fov": 88.0,
    "bortle": 0,
-   "nakedEye": 6.5,
+   "nakedEye": 7.55,
    "detailGain": 0.0,
-   "limitDefault": 6.5,
-   "limitWeb": 6.5
+   "limitDefault": 7.55,
+   "limitWeb": 7.5
   },
   {
    "fov": 88.0,
    "bortle": 1,
-   "nakedEye": 6.5,
+   "nakedEye": 7.2,
    "detailGain": 0.0,
-   "limitDefault": 6.5,
-   "limitWeb": 6.5
+   "limitDefault": 7.2,
+   "limitWeb": 7.2
   },
   {
    "fov": 88.0,
    "bortle": 2,
-   "nakedEye": 6.5,
+   "nakedEye": 6.85,
    "detailGain": 0.0,
-   "limitDefault": 6.5,
-   "limitWeb": 6.5
+   "limitDefault": 6.85,
+   "limitWeb": 6.85
   },
   {
    "fov": 88.0,
@@ -524,10 +524,10 @@
   {
    "fov": 88.0,
    "bortle": -1,
-   "nakedEye": 6.5,
+   "nakedEye": 7.9,
    "detailGain": 0.0,
-   "limitDefault": 6.5,
-   "limitWeb": 6.5
+   "limitDefault": 7.9,
+   "limitWeb": 7.5
   },
   {
    "fov": 88.0,
@@ -548,26 +548,26 @@
   {
    "fov": 60.0,
    "bortle": 0,
-   "nakedEye": 6.5,
+   "nakedEye": 7.55,
    "detailGain": 0.0,
-   "limitDefault": 6.5,
-   "limitWeb": 6.5
+   "limitDefault": 7.55,
+   "limitWeb": 7.5
   },
   {
    "fov": 60.0,
    "bortle": 1,
-   "nakedEye": 6.5,
+   "nakedEye": 7.2,
    "detailGain": 0.0,
-   "limitDefault": 6.5,
-   "limitWeb": 6.5
+   "limitDefault": 7.2,
+   "limitWeb": 7.2
   },
   {
    "fov": 60.0,
    "bortle": 2,
-   "nakedEye": 6.5,
+   "nakedEye": 6.85,
    "detailGain": 0.0,
-   "limitDefault": 6.5,
-   "limitWeb": 6.5
+   "limitDefault": 6.85,
+   "limitWeb": 6.85
   },
   {
    "fov": 60.0,
@@ -644,10 +644,10 @@
   {
    "fov": 60.0,
    "bortle": -1,
-   "nakedEye": 6.5,
+   "nakedEye": 7.9,
    "detailGain": 0.0,
-   "limitDefault": 6.5,
-   "limitWeb": 6.5
+   "limitDefault": 7.9,
+   "limitWeb": 7.5
   },
   {
    "fov": 60.0,
@@ -668,26 +668,26 @@
   {
    "fov": 45.0,
    "bortle": 0,
-   "nakedEye": 6.5,
+   "nakedEye": 7.55,
    "detailGain": 0.0,
-   "limitDefault": 6.5,
-   "limitWeb": 6.5
+   "limitDefault": 7.55,
+   "limitWeb": 7.5
   },
   {
    "fov": 45.0,
    "bortle": 1,
-   "nakedEye": 6.5,
+   "nakedEye": 7.2,
    "detailGain": 0.0,
-   "limitDefault": 6.5,
-   "limitWeb": 6.5
+   "limitDefault": 7.2,
+   "limitWeb": 7.2
   },
   {
    "fov": 45.0,
    "bortle": 2,
-   "nakedEye": 6.5,
+   "nakedEye": 6.85,
    "detailGain": 0.0,
-   "limitDefault": 6.5,
-   "limitWeb": 6.5
+   "limitDefault": 6.85,
+   "limitWeb": 6.85
   },
   {
    "fov": 45.0,
@@ -764,10 +764,10 @@
   {
    "fov": 45.0,
    "bortle": -1,
-   "nakedEye": 6.5,
+   "nakedEye": 7.9,
    "detailGain": 0.0,
-   "limitDefault": 6.5,
-   "limitWeb": 6.5
+   "limitDefault": 7.9,
+   "limitWeb": 7.5
   },
   {
    "fov": 45.0,
@@ -788,26 +788,26 @@
   {
    "fov": 30.0,
    "bortle": 0,
-   "nakedEye": 6.5,
+   "nakedEye": 7.55,
    "detailGain": 0.0,
-   "limitDefault": 6.5,
-   "limitWeb": 6.5
+   "limitDefault": 7.55,
+   "limitWeb": 7.5
   },
   {
    "fov": 30.0,
    "bortle": 1,
-   "nakedEye": 6.5,
+   "nakedEye": 7.2,
    "detailGain": 0.0,
-   "limitDefault": 6.5,
-   "limitWeb": 6.5
+   "limitDefault": 7.2,
+   "limitWeb": 7.2
   },
   {
    "fov": 30.0,
    "bortle": 2,
-   "nakedEye": 6.5,
+   "nakedEye": 6.85,
    "detailGain": 0.0,
-   "limitDefault": 6.5,
-   "limitWeb": 6.5
+   "limitDefault": 6.85,
+   "limitWeb": 6.85
   },
   {
    "fov": 30.0,
@@ -884,10 +884,10 @@
   {
    "fov": 30.0,
    "bortle": -1,
-   "nakedEye": 6.5,
+   "nakedEye": 7.9,
    "detailGain": 0.0,
-   "limitDefault": 6.5,
-   "limitWeb": 6.5
+   "limitDefault": 7.9,
+   "limitWeb": 7.5
   },
   {
    "fov": 30.0,
@@ -908,26 +908,26 @@
   {
    "fov": 29.9,
    "bortle": 0,
-   "nakedEye": 6.5,
+   "nakedEye": 7.55,
    "detailGain": 0.002408508148887921,
-   "limitDefault": 6.502408508148888,
-   "limitWeb": 6.502408508148888
+   "limitDefault": 7.552408508148888,
+   "limitWeb": 7.5
   },
   {
    "fov": 29.9,
    "bortle": 1,
-   "nakedEye": 6.5,
+   "nakedEye": 7.2,
    "detailGain": 0.002408508148887921,
-   "limitDefault": 6.502408508148888,
-   "limitWeb": 6.502408508148888
+   "limitDefault": 7.2024085081488884,
+   "limitWeb": 7.2024085081488884
   },
   {
    "fov": 29.9,
    "bortle": 2,
-   "nakedEye": 6.5,
+   "nakedEye": 6.85,
    "detailGain": 0.002408508148887921,
-   "limitDefault": 6.502408508148888,
-   "limitWeb": 6.502408508148888
+   "limitDefault": 6.852408508148888,
+   "limitWeb": 6.852408508148888
   },
   {
    "fov": 29.9,
@@ -1004,10 +1004,10 @@
   {
    "fov": 29.9,
    "bortle": -1,
-   "nakedEye": 6.5,
+   "nakedEye": 7.9,
    "detailGain": 0.002408508148887921,
-   "limitDefault": 6.502408508148888,
-   "limitWeb": 6.502408508148888
+   "limitDefault": 7.902408508148889,
+   "limitWeb": 7.5
   },
   {
    "fov": 29.9,
@@ -1028,26 +1028,26 @@
   {
    "fov": 22.0,
    "bortle": 0,
-   "nakedEye": 6.5,
+   "nakedEye": 7.55,
    "detailGain": 0.22372948848561058,
-   "limitDefault": 6.723729488485611,
-   "limitWeb": 6.723729488485611
+   "limitDefault": 7.7737294884856105,
+   "limitWeb": 7.5
   },
   {
    "fov": 22.0,
    "bortle": 1,
-   "nakedEye": 6.5,
+   "nakedEye": 7.2,
    "detailGain": 0.22372948848561058,
-   "limitDefault": 6.723729488485611,
-   "limitWeb": 6.723729488485611
+   "limitDefault": 7.423729488485611,
+   "limitWeb": 7.423729488485611
   },
   {
    "fov": 22.0,
    "bortle": 2,
-   "nakedEye": 6.5,
+   "nakedEye": 6.85,
    "detailGain": 0.22372948848561058,
-   "limitDefault": 6.723729488485611,
-   "limitWeb": 6.723729488485611
+   "limitDefault": 7.07372948848561,
+   "limitWeb": 7.07372948848561
   },
   {
    "fov": 22.0,
@@ -1124,10 +1124,10 @@
   {
    "fov": 22.0,
    "bortle": -1,
-   "nakedEye": 6.5,
+   "nakedEye": 7.9,
    "detailGain": 0.22372948848561058,
-   "limitDefault": 6.723729488485611,
-   "limitWeb": 6.723729488485611
+   "limitDefault": 8.12372948848561,
+   "limitWeb": 7.5
   },
   {
    "fov": 22.0,
@@ -1148,26 +1148,26 @@
   {
    "fov": 15.0,
    "bortle": 0,
-   "nakedEye": 6.5,
+   "nakedEye": 7.55,
    "detailGain": 0.5,
-   "limitDefault": 7.0,
-   "limitWeb": 7.0
+   "limitDefault": 8.05,
+   "limitWeb": 7.5
   },
   {
    "fov": 15.0,
    "bortle": 1,
-   "nakedEye": 6.5,
+   "nakedEye": 7.2,
    "detailGain": 0.5,
-   "limitDefault": 7.0,
-   "limitWeb": 7.0
+   "limitDefault": 7.7,
+   "limitWeb": 7.5
   },
   {
    "fov": 15.0,
    "bortle": 2,
-   "nakedEye": 6.5,
+   "nakedEye": 6.85,
    "detailGain": 0.5,
-   "limitDefault": 7.0,
-   "limitWeb": 7.0
+   "limitDefault": 7.35,
+   "limitWeb": 7.35
   },
   {
    "fov": 15.0,
@@ -1244,10 +1244,10 @@
   {
    "fov": 15.0,
    "bortle": -1,
-   "nakedEye": 6.5,
+   "nakedEye": 7.9,
    "detailGain": 0.5,
-   "limitDefault": 7.0,
-   "limitWeb": 7.0
+   "limitDefault": 8.4,
+   "limitWeb": 7.5
   },
   {
    "fov": 15.0,
@@ -1268,26 +1268,26 @@
   {
    "fov": 10.0,
    "bortle": 0,
-   "nakedEye": 6.5,
+   "nakedEye": 7.55,
    "detailGain": 0.792481250360578,
-   "limitDefault": 7.292481250360578,
-   "limitWeb": 7.292481250360578
+   "limitDefault": 8.342481250360578,
+   "limitWeb": 7.5
   },
   {
    "fov": 10.0,
    "bortle": 1,
-   "nakedEye": 6.5,
+   "nakedEye": 7.2,
    "detailGain": 0.792481250360578,
-   "limitDefault": 7.292481250360578,
-   "limitWeb": 7.292481250360578
+   "limitDefault": 7.992481250360578,
+   "limitWeb": 7.5
   },
   {
    "fov": 10.0,
    "bortle": 2,
-   "nakedEye": 6.5,
+   "nakedEye": 6.85,
    "detailGain": 0.792481250360578,
-   "limitDefault": 7.292481250360578,
-   "limitWeb": 7.292481250360578
+   "limitDefault": 7.642481250360578,
+   "limitWeb": 7.5
   },
   {
    "fov": 10.0,
@@ -1364,10 +1364,10 @@
   {
    "fov": 10.0,
    "bortle": -1,
-   "nakedEye": 6.5,
+   "nakedEye": 7.9,
    "detailGain": 0.792481250360578,
-   "limitDefault": 7.292481250360578,
-   "limitWeb": 7.292481250360578
+   "limitDefault": 8.69248125036058,
+   "limitWeb": 7.5
   },
   {
    "fov": 10.0,
@@ -1388,25 +1388,25 @@
   {
    "fov": 5.0,
    "bortle": 0,
-   "nakedEye": 6.5,
+   "nakedEye": 7.55,
    "detailGain": 1.292481250360578,
-   "limitDefault": 7.792481250360578,
+   "limitDefault": 8.842481250360578,
    "limitWeb": 7.5
   },
   {
    "fov": 5.0,
    "bortle": 1,
-   "nakedEye": 6.5,
+   "nakedEye": 7.2,
    "detailGain": 1.292481250360578,
-   "limitDefault": 7.792481250360578,
+   "limitDefault": 8.492481250360578,
    "limitWeb": 7.5
   },
   {
    "fov": 5.0,
    "bortle": 2,
-   "nakedEye": 6.5,
+   "nakedEye": 6.85,
    "detailGain": 1.292481250360578,
-   "limitDefault": 7.792481250360578,
+   "limitDefault": 8.142481250360579,
    "limitWeb": 7.5
   },
   {
@@ -1484,9 +1484,9 @@
   {
    "fov": 5.0,
    "bortle": -1,
-   "nakedEye": 6.5,
+   "nakedEye": 7.9,
    "detailGain": 1.292481250360578,
-   "limitDefault": 7.792481250360578,
+   "limitDefault": 9.0,
    "limitWeb": 7.5
   },
   {
@@ -1508,25 +1508,25 @@
   {
    "fov": 2.8,
    "bortle": 0,
-   "nakedEye": 6.5,
+   "nakedEye": 7.55,
    "detailGain": 1.5,
-   "limitDefault": 8.0,
+   "limitDefault": 9.0,
    "limitWeb": 7.5
   },
   {
    "fov": 2.8,
    "bortle": 1,
-   "nakedEye": 6.5,
+   "nakedEye": 7.2,
    "detailGain": 1.5,
-   "limitDefault": 8.0,
+   "limitDefault": 8.7,
    "limitWeb": 7.5
   },
   {
    "fov": 2.8,
    "bortle": 2,
-   "nakedEye": 6.5,
+   "nakedEye": 6.85,
    "detailGain": 1.5,
-   "limitDefault": 8.0,
+   "limitDefault": 8.35,
    "limitWeb": 7.5
   },
   {
@@ -1604,9 +1604,9 @@
   {
    "fov": 2.8,
    "bortle": -1,
-   "nakedEye": 6.5,
+   "nakedEye": 7.9,
    "detailGain": 1.5,
-   "limitDefault": 8.0,
+   "limitDefault": 9.0,
    "limitWeb": 7.5
   },
   {
@@ -1628,25 +1628,25 @@
   {
    "fov": 2.0,
    "bortle": 0,
-   "nakedEye": 6.5,
+   "nakedEye": 7.55,
    "detailGain": 1.5,
-   "limitDefault": 8.0,
+   "limitDefault": 9.0,
    "limitWeb": 7.5
   },
   {
    "fov": 2.0,
    "bortle": 1,
-   "nakedEye": 6.5,
+   "nakedEye": 7.2,
    "detailGain": 1.5,
-   "limitDefault": 8.0,
+   "limitDefault": 8.7,
    "limitWeb": 7.5
   },
   {
    "fov": 2.0,
    "bortle": 2,
-   "nakedEye": 6.5,
+   "nakedEye": 6.85,
    "detailGain": 1.5,
-   "limitDefault": 8.0,
+   "limitDefault": 8.35,
    "limitWeb": 7.5
   },
   {
@@ -1724,9 +1724,9 @@
   {
    "fov": 2.0,
    "bortle": -1,
-   "nakedEye": 6.5,
+   "nakedEye": 7.9,
    "detailGain": 1.5,
-   "limitDefault": 8.0,
+   "limitDefault": 9.0,
    "limitWeb": 7.5
   },
   {
@@ -1748,25 +1748,25 @@
   {
    "fov": 1.5,
    "bortle": 0,
-   "nakedEye": 6.5,
+   "nakedEye": 7.55,
    "detailGain": 1.5,
-   "limitDefault": 8.0,
+   "limitDefault": 9.0,
    "limitWeb": 7.5
   },
   {
    "fov": 1.5,
    "bortle": 1,
-   "nakedEye": 6.5,
+   "nakedEye": 7.2,
    "detailGain": 1.5,
-   "limitDefault": 8.0,
+   "limitDefault": 8.7,
    "limitWeb": 7.5
   },
   {
    "fov": 1.5,
    "bortle": 2,
-   "nakedEye": 6.5,
+   "nakedEye": 6.85,
    "detailGain": 1.5,
-   "limitDefault": 8.0,
+   "limitDefault": 8.35,
    "limitWeb": 7.5
   },
   {
@@ -1844,9 +1844,9 @@
   {
    "fov": 1.5,
    "bortle": -1,
-   "nakedEye": 6.5,
+   "nakedEye": 7.9,
    "detailGain": 1.5,
-   "limitDefault": 8.0,
+   "limitDefault": 9.0,
    "limitWeb": 7.5
   },
   {
@@ -1868,25 +1868,25 @@
   {
    "fov": 1.0,
    "bortle": 0,
-   "nakedEye": 6.5,
+   "nakedEye": 7.55,
    "detailGain": 1.5,
-   "limitDefault": 8.0,
+   "limitDefault": 9.0,
    "limitWeb": 7.5
   },
   {
    "fov": 1.0,
    "bortle": 1,
-   "nakedEye": 6.5,
+   "nakedEye": 7.2,
    "detailGain": 1.5,
-   "limitDefault": 8.0,
+   "limitDefault": 8.7,
    "limitWeb": 7.5
   },
   {
    "fov": 1.0,
    "bortle": 2,
-   "nakedEye": 6.5,
+   "nakedEye": 6.85,
    "detailGain": 1.5,
-   "limitDefault": 8.0,
+   "limitDefault": 8.35,
    "limitWeb": 7.5
   },
   {
@@ -1964,9 +1964,9 @@
   {
    "fov": 1.0,
    "bortle": -1,
-   "nakedEye": 6.5,
+   "nakedEye": 7.9,
    "detailGain": 1.5,
-   "limitDefault": 8.0,
+   "limitDefault": 9.0,
    "limitWeb": 7.5
   },
   {
@@ -1988,25 +1988,25 @@
   {
    "fov": 0.5,
    "bortle": 0,
-   "nakedEye": 6.5,
+   "nakedEye": 7.55,
    "detailGain": 1.5,
-   "limitDefault": 8.0,
+   "limitDefault": 9.0,
    "limitWeb": 7.5
   },
   {
    "fov": 0.5,
    "bortle": 1,
-   "nakedEye": 6.5,
+   "nakedEye": 7.2,
    "detailGain": 1.5,
-   "limitDefault": 8.0,
+   "limitDefault": 8.7,
    "limitWeb": 7.5
   },
   {
    "fov": 0.5,
    "bortle": 2,
-   "nakedEye": 6.5,
+   "nakedEye": 6.85,
    "detailGain": 1.5,
-   "limitDefault": 8.0,
+   "limitDefault": 8.35,
    "limitWeb": 7.5
   },
   {
@@ -2084,9 +2084,9 @@
   {
    "fov": 0.5,
    "bortle": -1,
-   "nakedEye": 6.5,
+   "nakedEye": 7.9,
    "detailGain": 1.5,
-   "limitDefault": 8.0,
+   "limitDefault": 9.0,
    "limitWeb": 7.5
   },
   {
@@ -2108,25 +2108,25 @@
   {
    "fov": 1e-06,
    "bortle": 0,
-   "nakedEye": 6.5,
+   "nakedEye": 7.55,
    "detailGain": 1.5,
-   "limitDefault": 8.0,
+   "limitDefault": 9.0,
    "limitWeb": 7.5
   },
   {
    "fov": 1e-06,
    "bortle": 1,
-   "nakedEye": 6.5,
+   "nakedEye": 7.2,
    "detailGain": 1.5,
-   "limitDefault": 8.0,
+   "limitDefault": 8.7,
    "limitWeb": 7.5
   },
   {
    "fov": 1e-06,
    "bortle": 2,
-   "nakedEye": 6.5,
+   "nakedEye": 6.85,
    "detailGain": 1.5,
-   "limitDefault": 8.0,
+   "limitDefault": 8.35,
    "limitWeb": 7.5
   },
   {
@@ -2204,9 +2204,9 @@
   {
    "fov": 1e-06,
    "bortle": -1,
-   "nakedEye": 6.5,
+   "nakedEye": 7.9,
    "detailGain": 1.5,
-   "limitDefault": 8.0,
+   "limitDefault": 9.0,
    "limitWeb": 7.5
   },
   {
@@ -2228,25 +2228,25 @@
   {
    "fov": 0.0,
    "bortle": 0,
-   "nakedEye": 6.5,
+   "nakedEye": 7.55,
    "detailGain": 1.5,
-   "limitDefault": 8.0,
+   "limitDefault": 9.0,
    "limitWeb": 7.5
   },
   {
    "fov": 0.0,
    "bortle": 1,
-   "nakedEye": 6.5,
+   "nakedEye": 7.2,
    "detailGain": 1.5,
-   "limitDefault": 8.0,
+   "limitDefault": 8.7,
    "limitWeb": 7.5
   },
   {
    "fov": 0.0,
    "bortle": 2,
-   "nakedEye": 6.5,
+   "nakedEye": 6.85,
    "detailGain": 1.5,
-   "limitDefault": 8.0,
+   "limitDefault": 8.35,
    "limitWeb": 7.5
   },
   {
@@ -2324,9 +2324,9 @@
   {
    "fov": 0.0,
    "bortle": -1,
-   "nakedEye": 6.5,
+   "nakedEye": 7.9,
    "detailGain": 1.5,
-   "limitDefault": 8.0,
+   "limitDefault": 9.0,
    "limitWeb": 7.5
   },
   {

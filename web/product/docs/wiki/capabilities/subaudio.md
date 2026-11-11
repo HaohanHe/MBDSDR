@@ -14,9 +14,9 @@ CTCSS/DCS 亚音与各类数字报文解码器的启停与报文读取。
 
 ## 域内的真实工具
 
-`get_decoder_messages`、`start_decoder`、`stop_decoder`
+`get_decoder_messages`、`list_decoders`、`start_decoder`、`stop_decoder`
 
-代表工具：`get_decoder_messages`、`start_decoder`、`stop_decoder`
+代表工具：`get_decoder_messages`、`list_decoders`、`start_decoder`、`stop_decoder`
 
 工具名来自 `mbdsdr_ai/core/mcp_server.py` 的 `_TOOL_DOMAIN`（工具 → 域映射），
 由 `build/sync_from_repo.py` 只读抽取。**不要手工往这里加工具**——工具面以运行时

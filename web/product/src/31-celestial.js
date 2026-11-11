@@ -380,7 +380,7 @@
   /* 极限星等 = 内核事实源（14-astro-frame.limitMagnitude，逐式镜像
      skyengine.stars.naked_eye_limit_mag + star_catalog.detail_gain_mag/limit_magnitude，
      跨语言钉扎 build/gen_limit_mag_golden.py + tests/limit_mag_selftest.js）。
-     Bortle 裸眼基线 6.5-0.35·max(0,b-3)（Stellarium 同语义）+ FOV 渲染 LOD 增益
+     Bortle 裸眼基线 6.5-0.35·(b-3)，不夹 Bortle<3（Stellarium 同语义）+ FOV 渲染 LOD 增益
      clamp(0.5·log2(30/fov),0,1.5)：广角（fov>=30）增益为 0、保持裸眼基线，
      窄视场才逐层露暗星。旧版自研 1.85·log10(60/fov) 在 fov>60 时变负、凭空压低
      极限（广角比裸眼还少星），窄视场增益又过猛——现已统一到内核口径。

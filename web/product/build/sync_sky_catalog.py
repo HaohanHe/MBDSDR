@@ -291,7 +291,7 @@ def main() -> None:
         "limitingMagnitude": {
             "source": "内核事实源 mbdsdr_ai/skyengine/stars.py::naked_eye_limit_mag "
                       "+ star_catalog.py::detail_gain_mag / limit_magnitude（唯一权威，禁同式副本）",
-            "baseline": "Bortle 裸眼极限 6.5-0.35·max(0,int(b)-3)（Stellarium StelSkyDrawer 同语义）",
+            "baseline": "Bortle 裸眼极限 6.5-0.35·(int(b)-3)，不夹 Bortle<3（Stellarium StelSkyDrawer 同语义）",
             "fovLod": "detail_gain=clamp(0.5·log2(30/fov),0,1.5)：fov>=30 恒 0、永不为负；"
                       "渲染 LOD 经验式（放大露暗星），非光度学/望远镜口径增益",
             "webDepthCap": "前端 MAG_CAP=meta.magMax（随仓 HYG 截断 7.5）作 depthCap；"

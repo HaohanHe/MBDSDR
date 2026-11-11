@@ -157,7 +157,7 @@ def main() -> int:
         "- **太阳位置是低精度解析式**（Meeus 简化，约 ±0.5°）：只用于昼夜/晨昏蒙影判定，"
         "不用于日出时刻表或日食计算。",
         "- **极限星等已接内核事实源**：Bortle 裸眼基线（`skyengine/stars.py::naked_eye_limit_mag`，"
-        "6.5-0.35·max(0,b-3)，Stellarium StelSkyDrawer 同语义）+ FOV 渲染 LOD 增益"
+        "6.5-0.35·(b-3)，不夹 Bortle<3，Stellarium StelSkyDrawer 同语义）+ FOV 渲染 LOD 增益"
         "（`star_catalog.py::detail_gain_mag`，clamp(0.5·log2(30/fov),0,1.5)，广角恒 0、永不为负），"
         "由 `build/gen_limit_mag_golden.py`（直接 import 内核真值）与 `tests/limit_mag_selftest.js` "
         "跨语言紧钉扎（分量/合成 1e-12 等）；前端以随仓 HYG 截断 MAG_CAP=7.5 作 depthCap。"

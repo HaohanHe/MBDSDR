@@ -3,10 +3,10 @@
   "use strict";
   const MB = global.MBDSDR = global.MBDSDR || {};
   MB.REPO = {
-  "generatedAt": "2026-11-09T17:58:17+08:00",
+  "generatedAt": "2026-11-11T21:51:36+08:00",
   "repo": {
     "root": "D:\\mbdsdr\\MBDSDR",
-    "head": "eb03b893",
+    "head": "57a92669",
     "note": "只读抽取；工作树可能含其它会话在途改动，HEAD 仅标识基线"
   },
   "domains": [
@@ -60,11 +60,13 @@
       "summary": "CTCSS/DCS 亚音与各类数字报文解码器的启停与报文读取。",
       "tools": [
         "get_decoder_messages",
+        "list_decoders",
         "start_decoder",
         "stop_decoder"
       ],
       "sample": [
         "get_decoder_messages",
+        "list_decoders",
         "start_decoder",
         "stop_decoder"
       ],
@@ -351,7 +353,7 @@
   ],
   "frozenCount": 10,
   "pythonExtensionCount": 4,
-  "toolDomainCount": 82,
+  "toolDomainCount": 83,
   "writePatterns": [
     "sdr_set_*",
     "sdr_connect*",

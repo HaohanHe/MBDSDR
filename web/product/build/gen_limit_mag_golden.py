@@ -4,7 +4,9 @@
 前端 14-astro-frame.js 的 nakedEyeLimitMag / detailGainMag / limitMagnitude
 逐式镜像内核：
   - mbdsdr_ai/skyengine/stars.py::naked_eye_limit_mag(bortle)
-        = 6.5 - 0.35·max(0, int(bortle)-3)   （Stellarium StelSkyDrawer 同语义）
+        = 6.5 - 0.35·(int(bortle)-3)   （Stellarium StelSkyDrawer 同语义；
+        **不夹 Bortle<3**——Bortle 1/2 必须比 3 更暗，夹平会让光害设置在最该
+        体现差别的暗空区间完全失效）
   - mbdsdr_ai/skyengine/star_catalog.py::detail_gain_mag(fov)
         = clamp(0.5·log2(30/fov), 0, 1.5)    （fov>=30 → 0；渲染 LOD 经验式，非光度学）
   - star_catalog.py::limit_magnitude(fov, bortle)
@@ -84,8 +86,9 @@ def main() -> None:
         "webDepthCapSource": "build/sky-catalog.json meta.magMax "
                              "(= web MAG_CAP = Number(CAT.meta.magMax || 7.5))",
         "formulas": {
-            "nakedEyeLimitMag": "6.5 - 0.35*max(0, int(bortle)-3) "
-                                "[Stellarium StelSkyDrawer semantics; int truncates toward zero]",
+            "nakedEyeLimitMag": "6.5 - 0.35*(int(bortle)-3) "
+                                "[Stellarium StelSkyDrawer semantics; int truncates toward zero; "
+                                "NO max(0,...) clamp: Bortle 1/2 must be darker than 3]",
             "detailGainMag": "fov=max(1e-6,fov); fov>=30 -> 0; "
                              "else clamp(0.5*log2(30/fov), 0, 1.5) [render LOD, NOT photometry]",
             "limitMagnitude": "min(depthCap, nakedEyeLimitMag(bortle) + detailGainMag(fov)); "
