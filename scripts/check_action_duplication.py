@@ -19,7 +19,15 @@
 
     python scripts/check_action_duplication.py            # 真机对象图盘点
     python scripts/check_action_duplication.py --json     # 机器可读
+    python scripts/check_action_duplication.py --gate     # 发布闸门（release_check 调用）
     python scripts/check_action_duplication.py --self-test  # 反证：注入/移除假重复
+    python scripts/check_action_duplication.py --gate --probe-duplicate
+                                                          # 反证：闸门必须 FAIL
+
+闸门判据（``--gate``）：**真重复 > 0** 或 **同名但命令标识不同 > 0** → 退出码 1。
+两项都可挂白名单 ``docs/action-duplication-waivers.md``（owner + 到期 + 原因，
+过期即 FAIL），没有 ``--allow-pending`` 这类整体放水开关。
+``objectName`` 为空只计入 ``[INFO]`` 计数，不拦发布。
 """
 
 from __future__ import annotations
@@ -30,6 +38,7 @@ import os
 import sys
 import tempfile
 from dataclasses import dataclass, field
+from datetime import date
 from pathlib import Path
 from typing import Dict, List, Optional, Sequence
 
@@ -37,6 +46,12 @@ _ROOT = Path(__file__).resolve().parents[1]
 for _p in (str(_ROOT), str(_ROOT / "desktop")):
     if _p not in sys.path:
         sys.path.insert(0, _p)
+
+#: 闸门白名单（在途豁免）：每条必须带 owner + 到期 + 原因，过期即失败
+WAIVER_PATH = _ROOT / "docs" / "action-duplication-waivers.md"
+
+#: 白名单条数上限，只减不增（新增必须改这个常量，评审可见）
+MAX_WAIVERS = 1
 
 
 @dataclass(frozen=True)
@@ -208,6 +223,124 @@ def _bootstrap_qt():
     return app
 
 
+# ---------------------------------------------------------------------------
+# 闸门：白名单 + 判据
+# ---------------------------------------------------------------------------
+@dataclass(frozen=True)
+class Waiver:
+    target: str
+    owner: str
+    expires: str
+    reason: str
+
+
+def load_waivers(path: Optional[Path] = None) -> List[Waiver]:
+    """解析白名单表：| target | owner | 到期 | 原因 |（表头与分隔行跳过）。"""
+    path = path or WAIVER_PATH
+    try:
+        text = path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return []
+    rows: List[Waiver] = []
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line.startswith("|"):
+            continue
+        if set(line) <= {"|", "-", ":", " "}:
+            continue
+        cells = [c.strip() for c in line.strip("|").split("|")]
+        if len(cells) != 4 or cells[0].lower() in ("target", "文档"):
+            continue
+        rows.append(Waiver(target=cells[0].strip("`"), owner=cells[1],
+                           expires=cells[2], reason=cells[3]))
+    return rows
+
+
+def validate_waivers(waivers: Sequence[Waiver], today: date) -> List[str]:
+    """白名单自身的毛病：缺字段/日期格式错/重复/超上限/已过期。"""
+    problems: List[str] = []
+    targets = [w.target for w in waivers]
+    if len(targets) != len(set(targets)):
+        problems.append("白名单 target 重复")
+    if len(waivers) > MAX_WAIVERS:
+        problems.append(f"白名单 {len(waivers)} 条，超上限 {MAX_WAIVERS}（只减不增）")
+    for w in waivers:
+        if not w.owner or not w.reason:
+            problems.append(f"白名单 {w.target} 缺 owner 或原因")
+        try:
+            expires = date.fromisoformat(w.expires)
+        except ValueError:
+            problems.append(f"白名单 {w.target} 到期不是 YYYY-MM-DD：{w.expires!r}")
+            continue
+        if expires < today:
+            problems.append(f"白名单 {w.target} 已过期（{w.expires}），到期未清即失败")
+    return problems
+
+
+def gate(paired: List[Group], duplicated: List[Group],
+         label_conflicts: Dict[str, List[str]], empty_names: List[Group],
+         waivers: Sequence[Waiver], today: date, probe: bool = False) -> int:
+    """闸门判据：真重复 >0 或 同名不同标识 >0 且未被有效豁免 → FAIL。"""
+    findings = [g.key for g in duplicated] + list(label_conflicts)
+    problems = validate_waivers(waivers, today)
+    valid = {w.target for w in waivers
+             if w.target and not any(w.target in p for p in problems)}
+    blocking = [t for t in findings if t not in valid]
+    stale = [w.target for w in waivers if w.target not in findings]
+
+    if probe:
+        print("[INFO] 已开启 --probe-duplicate：本次故意注入假重复（反证用）")
+    print(f"[INFO] 正常配对 {len(paired)} 条；入口 "
+          f"{sum(len(g.entries) for g in paired + duplicated)} 个")
+    print(f"[INFO] objectName 为空的命令 {len(empty_names)} 条（只报不拦）")
+    for t in findings:
+        state = "豁免" if t in valid else "未豁免"
+        print(f"  - {t}  [{state}]")
+    if stale:
+        print(f"[INFO] 白名单有 {len(stale)} 条已无对应问题（可删）：{stale}")
+    for p in problems:
+        print(f"[FAIL] 白名单：{p}")
+    if blocking:
+        print(f"[FAIL] {len(blocking)} 项命令重复未豁免：{blocking}")
+        print("[FAIL] 修法见 scripts/check_action_duplication.py 头部；"
+              "豁免只允许「他线正在改」，须带 owner + 到期 + 原因")
+        return 1
+    if problems:
+        return 1
+    print("[OK] 无未豁免的命令重复")
+    return 0
+
+
+
+def _inject_duplicate_probe(window):
+    """在真实菜单里注入两个同 id 的 QAction（闸门反证用）。
+
+    返回 ``cleanup()``：移除探针并释放。注入的是**两个独立实例**，
+    因此必须落进「真重复」而不是「同一实例多入口」。
+    """
+    from PySide6.QtGui import QAction
+    menus = [a.menu() for a in window.menuBar().actions()
+             if a.menu() is not None]
+    if len(menus) < 2:
+        raise RuntimeError("主窗菜单不足两个，无法注入反证探针")
+    a1 = QAction("假重复命令", window)
+    a1.setProperty("mbdsdr_shortcut_id", "probe.duplicate")
+    a1.setObjectName("probe_dup_1")
+    a2 = QAction("假重复命令", window)
+    a2.setProperty("mbdsdr_shortcut_id", "probe.duplicate")
+    a2.setObjectName("probe_dup_2")
+    a2.setEnabled(False)
+    menus[0].addAction(a1)
+    menus[1].addAction(a2)
+
+    def cleanup() -> None:
+        menus[0].removeAction(a1)
+        menus[1].removeAction(a2)
+        a1.deleteLater()
+        a2.deleteLater()
+    return cleanup
+
+
 def _self_test() -> int:
     """反证：在真实菜单里造「两实例同一命令」，必须报出；移除后必须消失。"""
     app = _bootstrap_qt()
@@ -267,6 +400,10 @@ def _self_test() -> int:
 def main(argv: Optional[Sequence[str]] = None) -> int:
     parser = argparse.ArgumentParser(description="命令/QAction 重复注册检查")
     parser.add_argument("--json", action="store_true", help="输出 JSON")
+    parser.add_argument("--gate", action="store_true",
+                        help="闸门模式：真重复或同名不同标识未豁免即返回 1")
+    parser.add_argument("--probe-duplicate", action="store_true",
+                        help="反证：注入两个同 id 实例，闸门必须 FAIL")
     parser.add_argument("--self-test", action="store_true",
                         help="反证：注入假重复，必须被报出；移除后消失")
     args = parser.parse_args(argv)
@@ -278,7 +415,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     from main_window import MainWindow
 
     window = MainWindow()
+    cleanup = None
     try:
+        if args.probe_duplicate:
+            cleanup = _inject_duplicate_probe(window)
+
         entries = collect_entries(window)
         groups = aggregate(entries)
         paired, duplicated, singles = classify(groups)
@@ -315,15 +456,21 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             if missing:
                 print(f"\n== panel_registry 有声明但面板菜单无 QAction: "
                       f"{len(missing)} ==\n- " + "\n- ".join(missing))
+
+        if args.gate or args.probe_duplicate:
+            print()
+            return gate(paired, duplicated, label_conflicts, empty_names,
+                        load_waivers(), date.today(), probe=args.probe_duplicate)
     finally:
+        if cleanup is not None:
+            cleanup()
         window.close()
+        app.quit()
 
     if duplicated:
         print(f"\nFAIL: {len(duplicated)} 个命令由多个 QAction 实例驱动")
-        app.quit()
         return 1
     print("\nOK: 没有多实例驱动的命令")
-    app.quit()
     return 0
 
 
