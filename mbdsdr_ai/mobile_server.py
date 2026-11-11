@@ -77,16 +77,28 @@ class MobileHub:
 
 
 def compute_passes(lat: float, lon: float):
-    """用 sgp4 算当前可见卫星。失败时返回空列表。"""
+    """用 sgp4 算当前可见卫星。
+
+    返回 ``(passes, error)``：``error`` 非空表示**服务不可用**（如时间基准
+    缺失），此时 ``passes`` 为空但手机端必须显示原因——不能把故障渲染成
+    「当前没有可见卫星」。
+    """
     try:
         from mbdsdr_ai import orbit
+    except Exception as e:
+        log.warning("orbit import failed: %s", e)
+        return [], f"轨道模块不可用：{e}"
+    try:
         # 注意：orbit.visible_satellites 的阈值参数名是 min_elevation。
         # 曾误写 min_el 致 TypeError 被 except 吞掉、过境计算恒返回空列表
         # （phase66 覆盖测试补全时实证发现并修复）。
-        return orbit.visible_satellites(lat, lon, min_elevation=0)
+        return orbit.visible_satellites(lat, lon, min_elevation=0), None
+    except orbit.TimeBasisUnavailable as e:
+        log.warning("mobile passes unavailable: %s", e)
+        return [], f"时间基准不可用，无法计算可见卫星：{e}"
     except Exception as e:
-        log.debug("orbit compute skipped: %s", e)
-        return []
+        log.warning("mobile passes failed: %s", e)
+        return [], f"可见卫星计算失败：{e}"
 
 
 async def pointing_loop(hub: MobileHub, interval: float = 5.0):
@@ -95,8 +107,11 @@ async def pointing_loop(hub: MobileHub, interval: float = 5.0):
         await asyncio.sleep(interval)
         if hub.last_fix["lat"] is None:
             continue
-        passes = compute_passes(hub.last_fix["lat"], hub.last_fix["lon"])
-        await hub.broadcast({"type": "satellite_passes", "payload": {"passes": passes}})
+        passes, error = compute_passes(hub.last_fix["lat"], hub.last_fix["lon"])
+        payload = {"passes": passes, "status": "unavailable" if error else "ok"}
+        if error:
+            payload["error"] = error
+        await hub.broadcast({"type": "satellite_passes", "payload": payload})
 
 
 async def serve(host=DEFAULT_HOST, port=DEFAULT_PORT):

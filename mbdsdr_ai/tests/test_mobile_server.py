@@ -245,25 +245,44 @@ def test_compute_passes_uses_min_elevation_kwarg(monkeypatch):
         return [{"name": "spy-sat"}]
 
     monkeypatch.setattr(orbit, "visible_satellites", spy)
-    out = compute_passes(39.9, 116.4)
-    assert out == [{"name": "spy-sat"}]
+    passes, error = compute_passes(39.9, 116.4)
+    assert passes == [{"name": "spy-sat"}]
+    assert error is None
     assert calls == [(39.9, 116.4, 0.0, 0.0, "all")]
 
 
-def test_compute_passes_swallows_orbit_error(monkeypatch):
-    """orbit 抛异常 -> 空列表，不把异常泄给推送循环。"""
+def test_compute_passes_reports_orbit_error(monkeypatch):
+    """orbit 抛异常 -> (空列表, 原因)，不把异常泄给推送循环，也不装成「没有卫星」。"""
     from mbdsdr_ai import orbit
 
     def boom(*a, **k):
         raise RuntimeError("tle fetch failed")
 
     monkeypatch.setattr(orbit, "visible_satellites", boom)
-    assert compute_passes(39.9, 116.4) == []
+    passes, error = compute_passes(39.9, 116.4)
+    assert passes == []
+    assert error and "tle fetch failed" in error
+    assert "没有可见卫星" not in error
+
+
+def test_compute_passes_time_basis_unavailable_is_explicit(monkeypatch):
+    """时间基准不可用必须单独成类：手机端要能区分「故障」与「真没有卫星」。"""
+    from mbdsdr_ai import orbit
+
+    def boom(*a, **k):
+        raise orbit.TimeBasisUnavailable("时间引擎坏了")
+
+    monkeypatch.setattr(orbit, "visible_satellites", boom)
+    passes, error = compute_passes(39.9, 116.4)
+    assert passes == []
+    assert "时间基准不可用" in error
+    assert "没有可见卫星" not in error
 
 
 def test_compute_passes_real_orbit_returns_list():
-    """真 sgp4 链路（TLE 时效性决定非空与否，故只钉契约：list of dict）。"""
-    res = compute_passes(39.9, 116.4)
+    """真 sgp4 链路（TLE 时效性决定非空与否，故只钉契约：list of dict + 无错误）。"""
+    res, error = compute_passes(39.9, 116.4)
+    assert error is None
     assert isinstance(res, list)
     for sat in res:
         assert isinstance(sat, dict)
@@ -292,7 +311,7 @@ def test_pointing_loop_no_fix_no_push():
 def test_pointing_loop_pushes_passes(monkeypatch):
     """有 fix：按 interval 广播 satellite_passes（compute_passes 打桩保确定性）。"""
     monkeypatch.setattr(mobile_server, "compute_passes",
-                        lambda lat, lon: [{"name": "ISS"}])
+                        lambda lat, lon: ([{"name": "ISS"}], None))
     hub = MobileHub()
     ws = FakeWS()
     asyncio.run(hub.register(ws))
@@ -313,6 +332,35 @@ def test_pointing_loop_pushes_passes(monkeypatch):
     out = json.loads(ws.sent[0])
     assert out["type"] == "satellite_passes"
     assert out["payload"]["passes"] == [{"name": "ISS"}]
+    assert out["payload"]["status"] == "ok"
+    assert "error" not in out["payload"]
+
+
+def test_pointing_loop_payload_marks_unavailable(monkeypatch):
+    """服务端故障要在推送里明确标出，手机端不能把它读成「没有可见卫星」。"""
+    monkeypatch.setattr(
+        mobile_server, "compute_passes",
+        lambda lat, lon: ([], "时间基准不可用，无法计算可见卫星：x"))
+    hub = MobileHub()
+    ws = FakeWS()
+    asyncio.run(hub.register(ws))
+    hub.last_fix = {"lat": 39.9, "lon": 116.4, "alt": None}
+
+    async def scenario():
+        task = asyncio.create_task(pointing_loop(hub, interval=0.01))
+        for _ in range(300):
+            if ws.sent:
+                break
+            await asyncio.sleep(0.01)
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
+
+    asyncio.run(scenario())
+    out = json.loads(ws.sent[0])
+    assert out["payload"]["status"] == "unavailable"
+    assert "时间基准不可用" in out["payload"]["error"]
+    assert out["payload"]["passes"] == []
 
 
 # ---------------------------------------------------------------- serve 端到端
