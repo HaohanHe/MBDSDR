@@ -29,6 +29,11 @@ STATUS_LABELS = {
     STATUS_DECLARED: "声明",
     STATUS_UNKNOWN: "未知",
 }
+#: 能力文案后缀：声明值一律标「未验证」，不许被读成设备实测。
+STATUS_SUFFIX = {
+    STATUS_PROBED: "探测",
+    STATUS_DECLARED: "声明支持，未验证",
+}
 
 #: 能力字段与界面标签（顺序即界面展示顺序）
 FIELD_LABELS: Dict[str, str] = {
@@ -125,11 +130,12 @@ def _range_field(device: Dict[str, Any], key: str,
         return _unknown(key, notes.get(key, ""))
     status = statuses.get(key)
     if status not in (STATUS_PROBED, STATUS_DECLARED):
-        status = STATUS_DECLARED
+        # 没标来源 = 未知。不许回退成「按声明」：声明也要有据（厂商文档/
+        # 驱动常量），展示层不替生产者补来源。
+        return _unknown(key, notes.get(key, "设备未标注该能力的来源"))
     label = format_range(raw, key)
-    suffix = f"（{STATUS_LABELS[status]}）"
     return CapabilityField(key=key, status=status, value=raw,
-                           text=label + suffix)
+                           text=f"{label}（{STATUS_SUFFIX[status]}）")
 
 
 def _tx_field(device: Dict[str, Any],
@@ -138,32 +144,39 @@ def _tx_field(device: Dict[str, Any],
     if tx_range is not None:
         status = statuses.get("tx")
         if status not in (STATUS_PROBED, STATUS_DECLARED):
-            status = STATUS_DECLARED
+            return _unknown("tx", notes.get("tx", "设备未标注发射能力来源"))
         return CapabilityField(key="tx", status=status, value=tx_range,
                                text=f"可发 {format_range(tx_range, 'freq_range')}"
-                                    f"（{STATUS_LABELS[status]}）")
+                                    f"（{STATUS_SUFFIX[status]}）")
     channels = device.get("tx_channels")
     if channels is not None:
+        status = statuses.get("tx")
+        if status not in (STATUS_PROBED, STATUS_DECLARED):
+            return _unknown("tx", notes.get("tx", "设备未标注发射能力来源"))
         try:
             n = int(channels)
         except (TypeError, ValueError):
             return _unknown("tx", notes.get("tx", ""))
-        status = statuses.get("tx")
-        if status not in (STATUS_PROBED, STATUS_DECLARED):
-            status = STATUS_PROBED
         if n > 0:
             return CapabilityField(key="tx", status=status, value=None,
                                    text=f"可发射（驱动报告 {n} 个 TX 通道，"
-                                        f"{STATUS_LABELS[status]}）")
+                                        f"{STATUS_SUFFIX[status]}）")
         return CapabilityField(key="tx", status=status, value=None,
                                text=f"不可发射（驱动报告 0 个 TX 通道，"
-                                    f"{STATUS_LABELS[status]}）")
+                                    f"{STATUS_SUFFIX[status]}）")
     supports = device.get("supports_tx")
     if isinstance(supports, bool):
-        status = STATUS_DECLARED
-        return CapabilityField(key="tx", status=status, value=None,
-                               text=("可发射（设备声明，未给频率范围）"
-                                     if supports else "不可发射（设备声明）"))
+        status = statuses.get("tx")
+        if status not in (STATUS_PROBED, STATUS_DECLARED):
+            # 裸布尔值没有来源就算未知：不许替它编成「设备声明」。
+            return _unknown("tx", notes.get("tx", "设备未标注发射能力来源"))
+        if supports:
+            text = ("可发射（声明支持，未验证）"
+                    if status == STATUS_DECLARED else "可发射（驱动探测）")
+        else:
+            text = ("不可发射（声明）"
+                    if status == STATUS_DECLARED else "不可发射（驱动探测）")
+        return CapabilityField(key="tx", status=status, value=None, text=text)
     return _unknown("tx", notes.get("tx", ""))
 
 
@@ -171,12 +184,13 @@ def _antenna_field(device: Dict[str, Any],
                    statuses: Dict[str, str], notes: Dict[str, str]) -> CapabilityField:
     antennas = device.get("antennas")
     if isinstance(antennas, (list, tuple)):
-        names = [str(a) for a in antennas if str(a).strip()]
         status = statuses.get("antenna")
         if status not in (STATUS_PROBED, STATUS_DECLARED):
-            status = STATUS_PROBED
+            return _unknown("antenna", notes.get("antenna",
+                                                 "设备未标注天线口来源"))
+        names = [str(a) for a in antennas if str(a).strip()]
         text = "、".join(names) if names else "无（驱动未报告天线口）"
-        text += f"（{STATUS_LABELS[status]}）"
+        text += f"（{STATUS_SUFFIX[status]}）"
         return CapabilityField(key="antenna", status=status,
                                value=None, text=text)
     return _unknown("antenna", notes.get("antenna", ""))
@@ -240,14 +254,21 @@ def sample_rate_options(device: Dict[str, Any]) -> Optional[list]:
 
 
 def sample_rate_options_for_backend(backend: Any) -> Optional[list]:
-    """从已连接后端取可见档位；后端没报告范围就是 None（界面不得编表）。"""
+    """从已连接后端取可见档位；没报告范围或没标来源就是 None（界面不得编表）。"""
     dev = getattr(backend, "device", None)
     if dev is None:
         return None
+    statuses = dict(getattr(dev, "capability_status", None) or {})
+    notes = dict(getattr(dev, "capability_note", None) or {})
     raw = {
         "driver": str(getattr(dev, "device_type", "") or ""),
         "sample_rate_range": getattr(dev, "sample_rate_range", None),
-        "capability_status": {"sample_rate_range": STATUS_DECLARED},
+        # 来源必须由后端设备对象显式给出；缺省留空 → build_capability_report
+        # 按 unknown 处理 → 不生成任何可见档位（不回退成「按声明」）。
+        "capability_status": {
+            "sample_rate_range": statuses.get("sample_rate_range", "")},
+        "capability_note": {
+            "sample_rate_range": notes.get("sample_rate_range", "")},
     }
     return sample_rate_options(raw)
 

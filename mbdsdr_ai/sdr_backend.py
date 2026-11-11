@@ -207,6 +207,11 @@ class SDRDevice:
     # 没上过真机就必须保持 False，UI/工具面据此标「未验证」而不是「支持」。
     tx_verified: bool = False
     connected: bool = False
+    # 能力来源：{字段: probed/declared}。缺省=未标注，device_capabilities
+    # 一律按 unknown 展示——绝不回退成「按声明」。
+    capability_status: Dict[str, str] = field(default_factory=dict)
+    # 能力项备注（未知原因/声明依据），与 capability_status 配合使用。
+    capability_note: Dict[str, str] = field(default_factory=dict)
 
 
 #: ``SDRStatus.squelch_applied_by`` 的合法取值（Python 与 C++ 回写共用同一组
@@ -1659,6 +1664,18 @@ class RTLSDRBackend(SDRBackend):
             max_gain=49.6,
             supports_iq=True,
             supports_tx=False,
+            # 范围/增益来自 librtlsdr 与调谐器参数表（厂商文档常量），
+            # 不是逐台探测 → declared（界面标「声明支持，未验证」）。
+            capability_status={
+                "freq_range": "declared",
+                "sample_rate_range": "declared",
+                "gain_range": "declared",
+                "tx": "declared",
+            },
+            capability_note={
+                "freq_range": "RTL 调谐器覆盖范围来自驱动/调谐器参数表",
+                "sample_rate_range": "librtlsdr 合法区间（驱动常量）",
+            },
         )
         super().__init__(device)
         # 默认采样率：2.400 MS/s（模块级 DEFAULT_SAMPLE_RATE_HZ，见类常量
@@ -2676,6 +2693,13 @@ class AISDRMiniBackend(SDRBackend):
             max_gain=12.0,
             supports_iq=False,  # SI4732 不出原始 IQ
             supports_tx=False,
+            # 自研产品规格常量（SI4732 数据手册 + 本产品定义）→ declared。
+            capability_status={
+                "freq_range": "declared",
+                "sample_rate_range": "declared",
+                "gain_range": "declared",
+                "tx": "declared",
+            },
         )
         super().__init__(device)
         self._host = host
@@ -2875,6 +2899,14 @@ class HackRFBackend(SDRBackend):
             supports_iq=True,
             supports_tx=True,
             tx_verified=False,  # 尚未在真机验证过发射链路
+            # HackRF 参数表（mbdsdr_ai/hackrf_params.py）来自厂商文档 → declared。
+            capability_status={
+                "freq_range": "declared",
+                "sample_rate_range": "declared",
+                "gain_range": "declared",
+                "tx": "declared",
+            },
+            capability_note={"tx": "HackRF 半双工发射，真机链路未验证"},
         )
         super().__init__(device)
         self._device_index = device_index
@@ -3145,6 +3177,9 @@ class SoapySDRBackend(SDRBackend):
             max_gain=max_gain,
             supports_iq=True,
             supports_tx=False,  # 接收优先；TX 由具体 driver 决定，本后端默认只收
+            # 枚举阶段探测到的来源原样透传；缺失即 unknown（不补 declared）。
+            capability_status=dict(info.get("capability_status") or {}),
+            capability_note=dict(info.get("capability_note") or {}),
         )
         super().__init__(device)
         # 保留 enumerate 原样返回的 dict（含 driver/serial/label/manufacturer/product），
@@ -3835,6 +3870,17 @@ class USRPBackend(SDRBackend):
             supports_iq=True,
             supports_tx=True,
             tx_verified=False,  # 尚未在真机验证过发射链路
+            # UHD 的覆盖范围是 API 级常量，未按具体母板/子板探测 → declared。
+            capability_status={
+                "freq_range": "declared",
+                "sample_rate_range": "declared",
+                "gain_range": "declared",
+                "tx": "declared",
+            },
+            capability_note={
+                "freq_range": "UHD 覆盖范围，未按具体母板/子板查询",
+                "sample_rate_range": "UHD 通用范围，未按具体设备查询",
+            },
         )
         super().__init__(device)
         self._device_args = device_args
@@ -4081,6 +4127,14 @@ class PlutoSDRBackend(SDRBackend):
             supports_iq=True,
             supports_tx=True,  # AD9361 半双工收发
             tx_verified=False,  # 发射链路尚未在真机验证
+            # 出厂规格来自 AD9361/ADALM-PLUTO 数据手册 → declared。
+            capability_status={
+                "freq_range": "declared",
+                "sample_rate_range": "declared",
+                "gain_range": "declared",
+                "tx": "declared",
+            },
+            capability_note={"tx": "AD9361 半双工发射，真机链路未验证"},
         )
         super().__init__(device)
         self._uri = uri
@@ -4781,6 +4835,17 @@ class FileIQBackend(SDRBackend):
             max_gain=0.0,
             supports_iq=True,
             supports_tx=False,
+            # 文件回放不声明设备能力：上面只是合法性边界，不是文件元数据。
+            # 实际采样率/中心频率在 _load() 后由 status 如实给出。
+            capability_status={
+                "freq_range": "unknown",
+                "sample_rate_range": "unknown",
+                "tx": "declared",
+            },
+            capability_note={
+                "freq_range": "文件回放不声明设备能力；实际频点见文件元数据/状态",
+                "sample_rate_range": "文件回放不声明设备能力；实际速率见状态",
+            },
         )
         super().__init__(device)
         self._path = path
@@ -4986,6 +5051,16 @@ class NetworkIQBackend(SDRBackend):
             max_gain=0.0,
             supports_iq=True,
             supports_tx=False,
+            # 速率/频率由用户配置显式给定（配置即声明），范围只是合法性边界。
+            capability_status={
+                "freq_range": "declared",
+                "sample_rate_range": "declared",
+                "tx": "declared",
+            },
+            capability_note={
+                "freq_range": "中心频率由用户配置显式给定，非设备探测",
+                "sample_rate_range": "采样率由用户配置显式给定，非设备探测",
+            },
         )
         super().__init__(device)
         if protocol not in ("tcp", "udp"):
@@ -5347,6 +5422,9 @@ class SDRBackendManager:
                 # 「未验证」直接画成「支持」。
                 "supports_tx": bool(b.device.supports_tx),
                 "tx_capability": b.tx_capability(),
+                # 能力来源随设备对象一起交出；缺省=未标注，展示层按未知处理。
+                "capability_status": dict(b.device.capability_status),
+                "capability_note": dict(b.device.capability_note),
                 "connected": b.status.connected,
                 "active": b == self.active_backend,
             }

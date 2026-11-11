@@ -81,6 +81,9 @@ def _desktop_tiers():
     class _Device:
         device_type = "rtlsdr"
         sample_rate_range = (225_001, 3_200_000)
+        # RTL 档位来自驱动/厂商常量 → 显式声明，不靠展示层兜底。
+        capability_status = {"sample_rate_range": "declared"}
+        capability_note = {}
 
     class _Backend:
         device = _Device()

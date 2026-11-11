@@ -101,7 +101,13 @@ def test_control_panel_repopulates_from_backend_options(qapp):
 
 class _FakeBackend:
     def __init__(self, rng):
-        self.device = type("Dev", (), {"device_type": "rtlsdr", "sample_rate_range": rng})()
+        self.device = type("Dev", (), {
+            "device_type": "rtlsdr",
+            "sample_rate_range": rng,
+            # 来源必须显式：缺省=未知，不会再回退成 declared。
+            "capability_status": {"sample_rate_range": "declared"},
+            "capability_note": {},
+        })()
 
     def get_sample_rate(self):
         return 1_024_000
