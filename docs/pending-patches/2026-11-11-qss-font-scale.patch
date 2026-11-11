@@ -1,0 +1,182 @@
+diff --git a/desktop/themes.py b/desktop/themes.py
+index 45c4a685..412c9d77 100644
+--- a/desktop/themes.py
++++ b/desktop/themes.py
+@@ -130,6 +130,36 @@ def _check_mark_url(disabled: bool = False) -> str:
+ # 字体
+ # ============================================================================
+ 
++#: 设计稿基准字号（pt）。QSS 里所有绝对字号都以它为 1.0 倍基准。
++BASE_FONT_PT = 10.0
++
++#: 平台默认字号只取一次：主题反复 apply 时 app.font() 已被我们自己写过，
++#: 每次重读会把上一轮的放大值当成新基准（棘轮）。
++_PLATFORM_FONT_PT: float | None = None
++
++
++def _platform_font_pt() -> float:
++    """Qt 报告的默认界面字号（pt）；不可用时按设计基准算。
++
++    无障碍意义：系统/平台把界面字号调大时，``QApplication.font()`` 会跟着
++    变大。以前这里写死 10pt，等于把用户的选择直接丢掉；现在只允许**上调**
++    （下限 10pt），系统字号更小时仍按设计稿，不动布局基线。
++    """
++    global _PLATFORM_FONT_PT
++    if _PLATFORM_FONT_PT is None:
++        pt = BASE_FONT_PT
++        try:
++            app = QApplication.instance()
++            if app is not None:
++                got = float(app.font().pointSizeF())
++                if got > 0:
++                    pt = got
++        except Exception:
++            pass
++        _PLATFORM_FONT_PT = pt
++    return _PLATFORM_FONT_PT
++
++
+ def get_app_font() -> QFont:
+     """获取应用字体：优先 MiSans，回退 Noto Sans CJK，最后系统无衬线。"""
+     font = QFont()
+@@ -145,11 +175,33 @@ def get_app_font() -> QFont:
+         "Arial",
+         "sans-serif",
+     ])
+-    font.setPointSize(10)
++    font.setPointSizeF(max(BASE_FONT_PT, _platform_font_pt()))
+     font.setHintingPreference(QFont.PreferFullHinting)
+     return font
+ 
+ 
++def font_scale() -> float:
++    """当前应用字体相对设计基准（``BASE_FONT_PT``）的倍率。
++
++    QSS 的 ``font-size`` 只认 pt/px 这类绝对值，不认 em/%；一旦写成
++    ``font-size: 10pt``，被该选择器选中的控件就再也不随字号设置变化——
++    用户把字调大，按钮/下拉/输入框/分组框装作没听见。所有 QSS 字号都必须
++    经 :func:`qss_font_size` 换算，倍率就是这里返回的值。
++    """
++    try:
++        pt = float(get_app_font().pointSizeF())
++    except Exception:
++        return 1.0
++    if pt <= 0:
++        return 1.0
++    return pt / BASE_FONT_PT
++
++
++def qss_font_size(pt: float) -> str:
++    """把设计稿 pt 换算成当前缩放下的 QSS ``font-size`` 字面量（如 ``12.5pt``）。"""
++    return f"{round(float(pt) * font_scale(), 2):g}pt"
++
++
+ # ============================================================================
+ # 主题定义
+ # ============================================================================
+@@ -580,19 +632,19 @@ class Theme:
+             border-radius: 12px;
+         }}
+         QLabel#sectionTitle {{
+-            font-size: 11pt;
++            font-size: {qss_font_size(11)};
+             font-weight: 600;
+             color: palette(window-text);
+             padding: 4px 0px;
+         }}
+         QLabel#statusValue {{
+             font-family: "JetBrains Mono", "Fira Code", "Consolas", monospace;
+-            font-size: 11pt;
++            font-size: {qss_font_size(11)};
+             color: palette(window-text);
+         }}
+         QLabel#freqDisplay {{
+             font-family: "JetBrains Mono", "Fira Code", "Consolas", monospace;
+-            font-size: 28pt;
++            font-size: {qss_font_size(28)};
+             font-weight: 700;
+             color: palette(window-text);
+             background-color: palette(base);
+@@ -606,7 +658,7 @@ class Theme:
+             border: 1px solid palette(mid);
+             border-radius: 8px;
+             padding: 8px 16px;
+-            font-size: 10pt;
++            font-size: {qss_font_size(10)};
+         }}
+         QPushButton:hover {{
+             background-color: palette(light);
+@@ -646,7 +698,7 @@ class Theme:
+             border: 1px solid palette(mid);
+             border-radius: 8px;
+             padding: 6px 12px;
+-            font-size: 10pt;
++            font-size: {qss_font_size(10)};
+         }}
+         QComboBox:hover {{
+             border-color: palette(highlight);
+@@ -724,7 +776,7 @@ class Theme:
+             border: 1px solid palette(mid);
+             border-radius: 8px;
+             padding: 7px 12px;
+-            font-size: 10pt;
++            font-size: {qss_font_size(10)};
+         }}
+         QLineEdit:focus {{
+             border-color: palette(highlight);
+@@ -736,7 +788,7 @@ class Theme:
+             border-radius: 8px;
+             padding: 6px;
+             font-family: "JetBrains Mono", "Fira Code", "Consolas", monospace;
+-            font-size: 9pt;
++            font-size: {qss_font_size(9)};
+         }}
+         QTabWidget::pane {{
+             border: 1px solid palette(mid);
+@@ -794,7 +846,7 @@ class Theme:
+             border-radius: 12px;
+             margin-top: 16px;
+             padding: 12px 10px 10px 10px;
+-            font-size: 11pt;
++            font-size: {qss_font_size(11)};
+             font-weight: 600;
+             color: palette(window-text);
+         }}
+@@ -810,7 +862,7 @@ class Theme:
+             border: 1px solid palette(mid);
+             border-radius: 8px;
+             padding: 5px 10px;
+-            font-size: 10pt;
++            font-size: {qss_font_size(10)};
+         }}
+         QSpinBox:focus, QDoubleSpinBox:focus {{
+             border-color: palette(highlight);
+diff --git a/desktop/tokens.py b/desktop/tokens.py
+index b19a7467..af39a540 100644
+--- a/desktop/tokens.py
++++ b/desktop/tokens.py
+@@ -385,11 +385,22 @@ class DesignTokens:
+ 
+     @staticmethod
+     def _px_to_pt(px_str: str) -> float:
+-        """'39px' -> 29.25pt（QSS font-size 用 pt）。"""
++        """'39px' -> 29.25pt（QSS font-size 用 pt），并按界面字号倍率缩放。
++
++        QSS 不认 em/%，写死的 pt 会让控件无视用户的字号设置。倍率取
++        ``themes.font_scale()``（应用字体 / 设计基准），延迟导入避免与
++        themes→tokens 的模块级依赖成环。
++        """
+         try:
+-            return round(float(px_str.replace("px", "")) * 0.75, 1)
++            pt = float(px_str.replace("px", "")) * 0.75
+         except Exception:
+             return 10.0
++        try:
++            from themes import font_scale
++            pt *= font_scale()
++        except Exception:
++            pass
++        return round(pt, 1)
+ 
+     # ------------------------------------------------------------------
+     # QSS 生成

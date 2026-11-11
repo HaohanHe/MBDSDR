@@ -1,0 +1,30 @@
+diff --git a/desktop/control_panel.py b/desktop/control_panel.py
+index a49161c7..2972da98 100644
+--- a/desktop/control_panel.py
++++ b/desktop/control_panel.py
+@@ -702,16 +702,21 @@ class ControlPanel(QWidget):
+         rx_layout.addWidget(self.offset_check)
+ 
+         # IQ 前端校正：DC 去除 + I/Q 平衡（默认开，对标 SDR++/GQRX 前端校正）
+-        iq_cal_row = QHBoxLayout()
++        # 竖排两行而不是并排：并排时这一行的最小宽是 138+9+126=273px，150%
++        # 字号下右栏（视口约 310）只剩十几像素余量，一有滚动条就横向溢出。
++        # 竖排后该组最小宽由较宽的那个复选框（"DC 去除"，138px）决定，
++        # 代价是多占一行高度（右栏本就是纵向滚动列，可接受）。
++        iq_cal_box = QVBoxLayout()
++        iq_cal_box.setSpacing(2)
+         self.dc_removal_check = QCheckBox("DC 去除")
+         self.dc_removal_check.setChecked(True)
+         self.dc_removal_check.toggled.connect(self._on_dc_removal_changed)
+-        iq_cal_row.addWidget(self.dc_removal_check)
++        iq_cal_box.addWidget(self.dc_removal_check)
+         self.iq_balance_check = QCheckBox("IQ 平衡")
+         self.iq_balance_check.setChecked(True)
+         self.iq_balance_check.toggled.connect(self._on_iq_balance_changed)
+-        iq_cal_row.addWidget(self.iq_balance_check)
+-        rx_layout.addLayout(iq_cal_row)
++        iq_cal_box.addWidget(self.iq_balance_check)
++        rx_layout.addLayout(iq_cal_box)
+ 
+         sq_row = QHBoxLayout()
+         self.squelch_label = QLabel("静噪门限")

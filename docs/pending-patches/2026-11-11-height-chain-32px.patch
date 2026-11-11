@@ -1,0 +1,129 @@
+diff --git a/desktop/main_window.py b/desktop/main_window.py
+index c02b133d..5bd06819 100644
+--- a/desktop/main_window.py
++++ b/desktop/main_window.py
+@@ -4030,14 +4030,18 @@ class MainWindow(QMainWindow):
+         self._top_detail.setVisible(False)
+ 
+     def _build_bottom_dock(self, parent_layout: QVBoxLayout) -> None:
+-        """底部坞（48px）：Home + 当前解调模式 + 频率 + 待机。
++        """底部坞（40px）：Home + 当前解调模式 + 频率 + 待机。
+ 
+         与顶栏重复的增益 / 带宽 / 设备 / 信号读数收进「详细」，不再在
+         明面上和顶栏各写一遍（用户点名的「冗余」「嘎拉马英糟的」）。
++
++        高度 48→40：与天空画布最小高 400→376 一起在默认态高度链上承担
++        32px（728→696，窄屏门槛 700 留 4px）。坞内最小 hint 是 28px，
++        40 仍留 12px 余量，工程读数条上下留白由 10 收到 6。
+         """
+         dock = QWidget()
+         dock.setObjectName("bottomDock")
+-        dock.setFixedHeight(48)
++        dock.setFixedHeight(40)
+         lay = QHBoxLayout(dock)
+         lay.setContentsMargins(16, 0, 16, 0)
+         lay.setSpacing(16)
+diff --git a/desktop/rf_sky_view.py b/desktop/rf_sky_view.py
+index 86293220..52400677 100644
+--- a/desktop/rf_sky_view.py
++++ b/desktop/rf_sky_view.py
+@@ -224,6 +224,13 @@ HORIZON_ALT_DEG = 0.0
+ # 历表缺失视直径时只画最小位置标记（不编造角直径）。
+ MOON_UNKNOWN_DIAMETER_RADIUS_PX = 2.0
+ 
++# 天空画布的最小高（px）。原 400，与最小宽 400 同值；高度链上默认态窗口
++# 最小高 728 对窄屏门槛 700 差 28，天空地板 400→376（−24）与底部坞
++# 48→40（−8）合计 −32，落到 696（4px 余量）。单把天空压到 368 的方案
++# 已被驳回（最小框更扁）。改这里前必须在 376 与 400 两档各截一张天空
++# 画布图，确认星点密度与方位标签没有退化。
++SKY_MIN_H = 376
++
+ # 大气消光系数 k 的取值域（单一定义，设置面板 schema 同口径）：
+ # 0=无消光；0.2=晴朗海平面（stars.EXTINCTION_K 默认）；0.5=雾霾。
+ EXTINCTION_K_MIN = 0.0
+@@ -2134,7 +2141,9 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
+         self._gnss_label_font.setPointSize(8)
+ 
+         self.setMouseTracking(True)
+-        self.setMinimumSize(400, 400)
++        # 最小高 376（原 400）：与底部坞 48→40 一起在高度链上承担 32px，
++        # 见模块顶部 SKY_MIN_H 的说明。宽度仍 400，投影/标签按实际画布算。
++        self.setMinimumSize(400, SKY_MIN_H)
+ 
+         # 搜索框 + 分类下拉 (自包含, 不依赖外部面板)
+         self._build_search_widgets()
+diff --git a/scripts/ui_baseline.py b/scripts/ui_baseline.py
+index 1e71bbd6..0ab72dff 100644
+--- a/scripts/ui_baseline.py
++++ b/scripts/ui_baseline.py
+@@ -69,6 +69,13 @@ DESIGN_CHANGES = {
+         "+26px；ADS-B 面板宽恒 300（归一化不缩放）故四尺寸均匀 +26；"
+         "频谱面板归一化高 = 320×H/W，Δ = 320×26/W（W=390/670/990/1310，"
+         "实测 +21/+12/+9/+6）",
++    "narrow-bottom-dock-48-to-40":
++        "窄屏收高续：底坞定高 48→40（Δ8），同时天空画布最小高 400→376"
++        "（Δ24），合计 Δ32，默认态窗口最小高 728→696（窄屏门槛 700 留 4px）。"
++        "截图基线是 1000x680 起的窗口，本就高于窗口最小高，所以只有底坞那 "
++        "Δ8 进入面板高度（天空 −24 只在地板生效）：ADS-B 面板高 +Δ8；"
++        "频谱归一化高 = 320×H/W，Δ = round(320×8/W)，实测 +7/+4/+4/+2"
++        "（W=390/670/990/1310）。",
+     "focus-mode-hide-main-toolbar":
+         "页面极简（用户 2026-11-07 口述）：主工具栏（主题/语言/布局/保存/"
+         "删除/+VFO/静音/录音/回放等工程配置）默认收进「详细」抽屉，"
+@@ -189,6 +196,27 @@ BASELINE_PROVENANCE = {
+         "measured": "spectrum 320x240→261 / 197→209 / 191→200 / 189→195；"
+                     "adsb_empty 384→410 / 504→530 / 684→710 / 864→890",
+     },
++    "narrow-bottom-dock-48-to-40": {
++        "authorized_by": "用户 2026-11-11 裁定（原话）：「高度链按『RFSkyView "
++                         "400→376 + bottomDock 48→40』两块拆，合计 −32 到 696、"
++                         "留 4 px 余量。不接受把天空地板单独压到 368（会变成"
++                         "非方形）」",
++        "formula": "默认态 window_minimumSizeHint = 37(菜单) + 56(topBar) + "
++                   "56(topBarDetail) + splitter + 53(工具栏) + dock + 32(状态栏)；"
++                   "splitter = 页签条 40 + RFSkyView 400 + 6 ⇒ 446。"
++                   "dock 48→40 ⇒ Δsplitter=+8；sky 400→376 ⇒ Δsplitter=+24；"
++                   "合计 Δ=−32（728→696）。"
++                   "截图基线里只有 dock 的 Δ8 进入面板高度：ADS-B +8；"
++                   "频谱 = round(320×8/W) ⇒ +7/+4/+4/+2",
++        "source_commit": "未提交：output/wt-fs @6e90e93b 上的补丁（themes.py 与"
++                         "main_window.py 被启动工单线占用，见 docs/pending-patches/"
++                         "2026-11-11-height-chain-32px.md）",
++        "updated_at": "2026-11-11",
++        "measured": "同一进程内运行时回退对照：728（sky400/dock48）→696"
++                    "（sky376/dock40），splitter 446→422；sky 376/400 两档截图"
++                    "星数均 1669，星座标签无新增重叠。面板基线按上式重定标后"
++                    "见对应 PNG",
++    },
+     "focus-mode-hide-main-toolbar": {
+         "authorized_by": "用户 2026-11-07 口述：「核心目标是让页面变成极简风，"
+                          "不是整个软件极简」「把烦人的配置项移到设置里」"
+diff --git a/tests/test_ui_layout_locks.py b/tests/test_ui_layout_locks.py
+index f30f9ba9..947adc40 100644
+--- a/tests/test_ui_layout_locks.py
++++ b/tests/test_ui_layout_locks.py
+@@ -909,7 +909,7 @@ def test_panel_screenshot_matches_baseline(main_window, panel):
+ # 底坞高度锁：它是 8 张布局基线的间接输入
+ # ---------------------------------------------------------------------------
+ def test_bottom_dock_height_is_locked():
+-    """底坞定高 48。
++    """底坞定高 40（2026-11-11 由 48 收窄，配合天空画布最小高 400→376）。
+ 
+     注意：改这个数会让 spectrum / adsb_empty **8 张布局基线全变**——
+     面板纵向位移 = 底坞高度差（ADS-B 恒定，频谱按 320×Δ/W 归一化）。
+@@ -935,11 +935,11 @@ def test_bottom_dock_height_is_locked():
+         _pump(80)
+         dock = win.findChild(QWidget, "bottomDock")
+         assert dock is not None, "缺少 bottomDock（底坞高度锁失效）"
+-        assert dock.height() == 48, (
+-            f"底坞高度 {dock.height()} != 48；改这个数会让 8 张布局基线全变，"
++        assert dock.height() == 40, (
++            f"底坞高度 {dock.height()} != 40；改这个数会让 8 张布局基线全变，"
+             f"必须同时重定标")
+-        assert dock.minimumHeight() == dock.maximumHeight() == 48, (
+-            "底坞必须是固定高 48（min == max），否则布局会随内容伸缩")
++        assert dock.minimumHeight() == dock.maximumHeight() == 40, (
++            "底坞必须是固定高 40（min == max），否则布局会随内容伸缩")
+         win.close()
+         win.deleteLater()
+         app.sendPostedEvents(None, QEvent.DeferredDelete)
