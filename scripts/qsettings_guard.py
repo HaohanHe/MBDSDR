@@ -17,9 +17,19 @@ pytest 里生效；`scripts/repro` 与其它独立进程照样直连真实 QSett
 wrap 模式装好哨兵后用 ``runpy`` 以 ``__main__`` 跑目标脚本；结束时打印
 每条写入的 `caller=<module>:<func> file=<file>:<line>` 与调用栈。
 子进程不在覆盖范围内：目标脚本自己 spawn 的进程要另包一层。
+
+2026-11-12 追加「默认重定向」：`install_isolation()` 把 `QSettings` 符号换成
+子类，两参字符串构造（`QSettings("MBDSDR", "Desktop")`）改写成显式
+`IniFormat + UserScope`，落到临时目录——不是写完再记一笔，而是根本不写真实
+注册表。`MBDSDR_QS_ISOLATE=0` 显式关闭（用于反证哨兵没被短路）。
+`install_meta_hook()` 在 `PySide6.QtCore` 首次导入后立即打补丁，避免为了
+隔离而在被测脚本 T0 之前预导入 PySide6（那会把导入耗时移出计时窗口）。
 """
 from __future__ import annotations
 
+import atexit
+import importlib.abc
+import importlib.util
 import os
 import sys
 import tempfile
@@ -184,6 +194,170 @@ def report(prefix="[qsettings-guard]"):
     print("%s 首个写入的调用栈：" % prefix, flush=True)
     print("".join(first["stack"]), flush=True)
     return len(recs)
+
+
+def isolation_enabled():
+    """默认开启；`MBDSDR_QS_ISOLATE=0` 显式关闭（反证用）。"""
+    return os.environ.get("MBDSDR_QS_ISOLATE", "1") != "0"
+
+
+def _isolation_dir():
+    path = os.path.join(tempfile.gettempdir(),
+                        "mbdsdr-qsettings-repro-%d" % os.getpid())
+    os.makedirs(path, exist_ok=True)
+    return path
+
+
+def install_isolation():
+    """把 QSettings 换成「两参字符串构造 → 临时 Ini」的子类。
+
+    产品侧 7 处都是 `QSettings("MBDSDR", "Desktop")`（两参字符串）或
+    `QSettings(self._ORG, self._APP)`。两参形式无视 `setDefaultFormat` /
+    `setPath`，直连注册表；这里显式补成 (IniFormat, UserScope, org, app)。
+    子类必须建在 `install()` 之后，才能继承已包裹的 setValue/remove/clear。
+    """
+    if not isolation_enabled():
+        return False
+    from PySide6.QtCore import QSettings as _Base
+    if getattr(_Base, "_mbdsdr_qisolated", False):
+        return False
+
+    class IsolatedQSettings(_Base):
+        def __init__(self, *args, **kwargs):
+            if (len(args) == 2 and not kwargs
+                    and all(isinstance(a, str) for a in args)):
+                super().__init__(_Base.IniFormat, _Base.UserScope,
+                                 args[0], args[1])
+            else:
+                super().__init__(*args, **kwargs)
+
+    IsolatedQSettings.__name__ = "QSettings"
+    IsolatedQSettings.__qualname__ = "QSettings"
+    IsolatedQSettings.__module__ = _Base.__module__
+    IsolatedQSettings._mbdsdr_qisolated = True
+
+    # 默认落点：临时目录（被测脚本之后若自己 setPath，就以它的为准）。
+    _Base.setDefaultFormat(_Base.IniFormat)
+    for scope in (_Base.UserScope, _Base.SystemScope):
+        _Base.setPath(_Base.IniFormat, scope, _isolation_dir())
+
+    import PySide6.QtCore as _qtcore
+    _qtcore.QSettings = IsolatedQSettings
+    # 已经 `from PySide6.QtCore import QSettings` 过的模块，把全局名换掉。
+    for mod in list(sys.modules.values()):
+        try:
+            if getattr(mod, "QSettings", None) is _Base:
+                setattr(mod, "QSettings", IsolatedQSettings)
+        except Exception:  # noqa: BLE001 - 只读模块/代理对象跳过
+            continue
+    return True
+
+
+class _QtCoreHook(importlib.abc.MetaPathFinder):
+    """在 `PySide6.QtCore` 首次导入完成后打补丁。
+
+    这样被测脚本自己的 `T0 = time.perf_counter()`（模块顶部）仍在所有
+    Qt 导入之前，导入耗时留在计时窗口内，测量口径不变。
+    """
+
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname != "PySide6.QtCore":
+            return None
+        try:
+            sys.meta_path.remove(self)
+        except ValueError:
+            pass
+        try:
+            spec = importlib.util.find_spec(fullname)
+        finally:
+            sys.meta_path.insert(0, self)
+        if spec is None or spec.loader is None:
+            return None
+        loader = spec.loader
+        if getattr(loader, "_mbdsdr_qhook", False):
+            return spec
+        original = loader.exec_module
+
+        def exec_module(module, _original=original):
+            _original(module)
+            try:
+                install()
+                install_isolation()
+            except Exception:  # noqa: BLE001 - 受害的只是取证，不拖垮脚本
+                pass
+
+        loader.exec_module = exec_module
+        loader._mbdsdr_qhook = True
+        return spec
+
+
+def install_meta_hook():
+    """幂等：把 QtCore 钩子插到 meta_path 最前，不提前 import PySide6。"""
+    if os.environ.get("MBDSDR_QS_GUARD", "1") == "0":
+        return False
+    if any(isinstance(f, _QtCoreHook) for f in sys.meta_path):
+        return False
+    # 必须在 PathFinder 之前：追加到末尾会被 PathFinder 抢答，钩子永不触发。
+    sys.meta_path.insert(0, _QtCoreHook())
+    return True
+
+
+def log_records(path=None):
+    """数一数哨兵日志里有多少条真实 store 写入（跨进程取证用）。"""
+    path = path or os.environ.get("MBDSDR_QS_GUARD_LOG")
+    if not path or not os.path.exists(path):
+        return 0
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return sum(1 for line in f if line.strip())
+    except OSError:
+        return 0
+
+
+def install_exit_check():
+    """本进程有真实写入 → 退出码 3（atexit 里 os._exit，能改退出码）。"""
+    if getattr(sys, "_mbdsdr_qg_exit", False):
+        return False
+    sys._mbdsdr_qg_exit = True
+
+    def _check():
+        recs = records()
+        if not recs:
+            return
+        report()
+        try:
+            sys.stdout.flush()
+            sys.stderr.flush()
+        except Exception:  # noqa: BLE001
+            pass
+        os._exit(3)
+
+    atexit.register(_check)
+    return True
+
+
+def install_log_exit_check(path=None):
+    """父进程（driver）按共享日志判定：子进程写过真实 store 就非零退出。"""
+    path = path or os.environ.get("MBDSDR_QS_GUARD_LOG")
+    if not path or getattr(sys, "_mbdsdr_qg_log_exit", False):
+        return False
+    sys._mbdsdr_qg_log_exit = True
+
+    def _check():
+        count = log_records(path)
+        if not count:
+            return
+        print("[qsettings-guard] %s 记录 %d 次对真实 store 的写入，本脚本退出码置 3"
+              % (path, count), flush=True)
+        try:
+            sys.stdout.flush()
+            sys.stderr.flush()
+        except Exception:  # noqa: BLE001
+            pass
+        os._exit(3)
+
+    atexit.register(_check)
+    return True
 
 
 def main(argv=None):
