@@ -40,7 +40,12 @@ except ImportError:  # skyfield 属 satellite 可选依赖组；缺它模块仍�
     _HAS_SKYFIELD = False
 
 from .sat_passes import _require_skyfield  # noqa: E402  (统一的诚实报错口径)
-from .tle_integrity import accuracy, freshness, verify_identity  # noqa: E402
+from .tle_integrity import (  # noqa: E402
+    accuracy,
+    freshness,
+    tracking_policy,
+    verify_identity,
+)
 from .tle_fetch import classify_failure, failure_copy  # noqa: E402
 
 # 复用 sat_passes 已经过验证的核心：地面站数据类、过境预测、TLE 解析、
@@ -446,6 +451,29 @@ class SatelliteTracker:
         """按卫星名查内置下行频率；未知卫星返回 0.0。"""
         return BUILTIN_DOWNLINK_HZ.get(name, 0.0)
 
+    def tracking_policy_for(self, name: Optional[str] = None) -> Dict[str, object]:
+        """跟踪闸门的**唯一对外入口**（P0-01）。
+
+        规则实现只有 ``tle_integrity.tracking_policy()`` 一处；本方法只做
+        「目录条目 → (新鲜度, 身份状态)」的取数，不复制任何档位判断。
+        面板、天空动作总线、AI 工具都应读这里的 ``allow_tune`` /
+        ``allow_gimbal`` / ``command_allowed``，不得自行比较 ``tle_tier``。
+
+        ``name`` 缺省取当前选中星；目录里没有该条目（或未选星）时按
+        ``unknown`` 返回全禁止——缺数据不冒充可信。
+        """
+        target = name if name is not None else self._selected_name
+        entry = (next((c for c in self._catalog if c["name"] == target), None)
+                 if target else None)
+        if entry is None:
+            return tracking_policy(None, "no_data")
+        fresh = {
+            "tier": entry.get("tle_tier", "unknown"),
+            "age_days": entry.get("tle_age_days"),
+            "reason": entry.get("accuracy_note") or "",
+        }
+        return tracking_policy(fresh, str(entry.get("identity_status", "no_data")))
+
     # ------------------------------------------------------------- 选中卫星
     def _build_satellite(self, name: str) -> bool:
         """根据 name 找目录条目，构造 skyfield 传播器与站心几何对象。"""
@@ -541,6 +569,8 @@ class SatelliteTracker:
             "station_reasons": [],
             "station_warning": "",
             "clock_warning": "",
+            # P0-01：闸门随位置一起透出，调用方只读布尔，不再自判档位
+            "policy": self.tracking_policy_for(),
         }
         if self.ground_station is None or self._diff is None or self._sat is None:
             return empty
@@ -603,6 +633,8 @@ class SatelliteTracker:
             "accuracy_note": entry.get("accuracy_note", ""),
             "pass_eligible": entry.get("pass_eligible", False),
             "refresh_status": self._last_refresh_error or "ok",
+            # P0-01：闸门随位置一起透出（dead 仍给出预测频率，但不许写硬件）
+            "policy": self.tracking_policy_for(),
             "station_untrusted": False,
             "station_reasons": [],
             "station_warning": st.get("station_warning") or "",
