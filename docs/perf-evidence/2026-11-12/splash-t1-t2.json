@@ -1,0 +1,492 @@
+{
+ "kind": "T1/T2：进程入口 → splash 首帧 → 主窗首帧（paint 完成点）",
+ "date": "2026-11-12",
+ "definition": {
+  "T1": "进程入口（本脚本第一行，含模块级 import）→ splash 首帧 paintEvent 返回",
+  "T2": "splash 首帧 paintEvent 返回 → 主窗顶层 Paint 事件在 notify 中派发完毕",
+  "entry_to_main_frame": "T1 + T2（不含父进程 spawn 与解释器启动）"
+ },
+ "runs": 3,
+ "head": "88e458c8",
+ "snapshot": "C:\\Users\\xxhzb\\AppData\\Local\\Temp\\kilo\\t1t2_head_88e458c8",
+ "mw_file_samples": [
+  "C:\\Users\\xxhzb\\AppData\\Local\\Temp\\kilo\\t1t2_head_88e458c8\\main_window.py",
+  "C:\\Users\\xxhzb\\AppData\\Local\\Temp\\kilo\\t1t2_head_88e458c8\\main_window.py",
+  "C:\\Users\\xxhzb\\AppData\\Local\\Temp\\kilo\\t1t2_head_88e458c8\\main_window.py"
+ ],
+ "load_rule": "每个 run 之前父进程采 2 s 低负载门（python 总占比 <200%）；子进程跑完再采一次，逐 run 记录在 load_gate_before / load_after。",
+ "samples": [
+  {
+   "head": "88e458c8",
+   "mw_file": "C:\\Users\\xxhzb\\AppData\\Local\\Temp\\kilo\\t1t2_head_88e458c8\\main_window.py",
+   "t0_abs": 25018.0006253,
+   "t_import_done_abs": 25018.2643365,
+   "t_app_created_abs": 25018.3175406,
+   "t_splash_enter_abs": 25018.3177463,
+   "t_splash_show_abs": 25018.9890355,
+   "t_splash_paint_done_abs": 25020.0148216,
+   "t_mw_created_abs": 25023.7567222,
+   "t_mw_show_abs": 25023.9207325,
+   "t_mw_paint_done_abs": 25024.3101505,
+   "t_label_paint_done_abs": 25024.3135136,
+   "splash_drawtext_ms": 668.0,
+   "splash_drawtext_each_ms": [
+    664.9,
+    2.7,
+    0.4
+   ],
+   "splash_drawtext_calls": 3,
+   "splash_fn_ms": 1704.2,
+   "import_smoke_ms": 1132.0,
+   "dependency_probe_ms": 342.1,
+   "theme_apply_ms": 154.1,
+   "fit_scale_ms": 159.3,
+   "mw_import_ms": 587.8,
+   "mw_ctor_ms": 1610.9,
+   "mw_paint_ms": 0.1,
+   "label_paint_ms": 0.5,
+   "post_run_metrics_ms": 0.085,
+   "resolved_font": "MiSans",
+   "timeout": false,
+   "error": null,
+   "load_after": {
+    "sys_cpu_pct": 32.6,
+    "python_proc_count": 4,
+    "python_total_cpu_pct": 7.1,
+    "python_top": [
+     {
+      "pid": 32508,
+      "cpu_pct": 5.5
+     },
+     {
+      "pid": 32712,
+      "cpu_pct": 1.6
+     },
+     {
+      "pid": 36980,
+      "cpu_pct": 0.0
+     },
+     {
+      "pid": 37752,
+      "cpu_pct": 0.0
+     }
+    ],
+    "cpu_count": 12
+   },
+   "interpreter_ms": 41.5,
+   "load_gate_before_python_pct": 3.1,
+   "load_gate_before": {
+    "sys_cpu_pct": 30.2,
+    "python_proc_count": 3,
+    "python_total_cpu_pct": 3.1,
+    "python_top": [
+     {
+      "pid": 32508,
+      "cpu_pct": 3.1
+     },
+     {
+      "pid": 36980,
+      "cpu_pct": 0.0
+     },
+     {
+      "pid": 37752,
+      "cpu_pct": 0.0
+     }
+    ],
+    "cpu_count": 12
+   },
+   "_t1": 2014.2,
+   "_t2": 4295.3,
+   "_entry": 6309.5,
+   "_import": 263.7,
+   "_appsetup": 53.2,
+   "_splash_show_to_paint": 1025.8,
+   "_mw_show_to_paint": 389.4,
+   "_label_offset": 4298.7
+  },
+  {
+   "head": "88e458c8",
+   "mw_file": "C:\\Users\\xxhzb\\AppData\\Local\\Temp\\kilo\\t1t2_head_88e458c8\\main_window.py",
+   "t0_abs": 25028.8751057,
+   "t_import_done_abs": 25029.0427068,
+   "t_app_created_abs": 25029.0737077,
+   "t_splash_enter_abs": 25029.073828,
+   "t_splash_show_abs": 25029.5859419,
+   "t_splash_paint_done_abs": 25030.6105325,
+   "t_mw_created_abs": 25034.0655081,
+   "t_mw_show_abs": 25034.2326751,
+   "t_mw_paint_done_abs": 25034.6003378,
+   "t_label_paint_done_abs": 25034.6033435,
+   "splash_drawtext_ms": 510.0,
+   "splash_drawtext_each_ms": [
+    507.6,
+    2.1,
+    0.3
+   ],
+   "splash_drawtext_calls": 3,
+   "splash_fn_ms": 1541.6,
+   "import_smoke_ms": 1084.5,
+   "dependency_probe_ms": 318.4,
+   "theme_apply_ms": 156.3,
+   "fit_scale_ms": 162.5,
+   "mw_import_ms": 423.1,
+   "mw_ctor_ms": 1567.6,
+   "mw_paint_ms": 0.1,
+   "label_paint_ms": 0.3,
+   "post_run_metrics_ms": 0.077,
+   "resolved_font": "MiSans",
+   "timeout": false,
+   "error": null,
+   "load_after": {
+    "sys_cpu_pct": 24.4,
+    "python_proc_count": 4,
+    "python_total_cpu_pct": 7.0,
+    "python_top": [
+     {
+      "pid": 32508,
+      "cpu_pct": 6.2
+     },
+     {
+      "pid": 32488,
+      "cpu_pct": 0.8
+     },
+     {
+      "pid": 36980,
+      "cpu_pct": 0.0
+     },
+     {
+      "pid": 37752,
+      "cpu_pct": 0.0
+     }
+    ],
+    "cpu_count": 12
+   },
+   "interpreter_ms": 38.4,
+   "load_gate_before_python_pct": 4.7,
+   "load_gate_before": {
+    "sys_cpu_pct": 12.9,
+    "python_proc_count": 3,
+    "python_total_cpu_pct": 4.7,
+    "python_top": [
+     {
+      "pid": 32508,
+      "cpu_pct": 4.7
+     },
+     {
+      "pid": 36980,
+      "cpu_pct": 0.0
+     },
+     {
+      "pid": 37752,
+      "cpu_pct": 0.0
+     }
+    ],
+    "cpu_count": 12
+   },
+   "_t1": 1735.4,
+   "_t2": 3989.8,
+   "_entry": 5725.2,
+   "_import": 167.6,
+   "_appsetup": 31.0,
+   "_splash_show_to_paint": 1024.6,
+   "_mw_show_to_paint": 367.7,
+   "_label_offset": 3992.8
+  },
+  {
+   "head": "88e458c8",
+   "mw_file": "C:\\Users\\xxhzb\\AppData\\Local\\Temp\\kilo\\t1t2_head_88e458c8\\main_window.py",
+   "t0_abs": 25039.1708316,
+   "t_import_done_abs": 25039.342831,
+   "t_app_created_abs": 25039.3786934,
+   "t_splash_enter_abs": 25039.3788439,
+   "t_splash_show_abs": 25039.8235484,
+   "t_splash_paint_done_abs": 25040.8584749,
+   "t_mw_created_abs": 25044.2793706,
+   "t_mw_show_abs": 25044.4419319,
+   "t_mw_paint_done_abs": 25044.8384438,
+   "t_label_paint_done_abs": 25044.8421186,
+   "splash_drawtext_ms": 442.7,
+   "splash_drawtext_each_ms": [
+    439.9,
+    2.3,
+    0.5
+   ],
+   "splash_drawtext_calls": 3,
+   "splash_fn_ms": 1485.1,
+   "import_smoke_ms": 1110.0,
+   "dependency_probe_ms": 316.8,
+   "theme_apply_ms": 152.9,
+   "fit_scale_ms": 158.5,
+   "mw_import_ms": 355.4,
+   "mw_ctor_ms": 1573.6,
+   "mw_paint_ms": 0.1,
+   "label_paint_ms": 0.5,
+   "post_run_metrics_ms": 0.072,
+   "resolved_font": "MiSans",
+   "timeout": false,
+   "error": null,
+   "load_after": {
+    "sys_cpu_pct": 19.1,
+    "python_proc_count": 4,
+    "python_total_cpu_pct": 6.3,
+    "python_top": [
+     {
+      "pid": 32508,
+      "cpu_pct": 4.7
+     },
+     {
+      "pid": 9376,
+      "cpu_pct": 1.6
+     },
+     {
+      "pid": 36980,
+      "cpu_pct": 0.0
+     },
+     {
+      "pid": 37752,
+      "cpu_pct": 0.0
+     }
+    ],
+    "cpu_count": 12
+   },
+   "interpreter_ms": 33.1,
+   "load_gate_before_python_pct": 4.7,
+   "load_gate_before": {
+    "sys_cpu_pct": 20.4,
+    "python_proc_count": 3,
+    "python_total_cpu_pct": 4.7,
+    "python_top": [
+     {
+      "pid": 32508,
+      "cpu_pct": 4.7
+     },
+     {
+      "pid": 36980,
+      "cpu_pct": 0.0
+     },
+     {
+      "pid": 37752,
+      "cpu_pct": 0.0
+     }
+    ],
+    "cpu_count": 12
+   },
+   "_t1": 1687.6,
+   "_t2": 3980.0,
+   "_entry": 5667.6,
+   "_import": 172.0,
+   "_appsetup": 35.9,
+   "_splash_show_to_paint": 1034.9,
+   "_mw_show_to_paint": 396.5,
+   "_label_offset": 3983.6
+  }
+ ],
+ "T1_ms": {
+  "runs": [
+   2014.2,
+   1735.4,
+   1687.6
+  ],
+  "median": 1735.4,
+  "min": 1687.6,
+  "max": 2014.2
+ },
+ "T2_ms": {
+  "runs": [
+   4295.3,
+   3989.8,
+   3980.0
+  ],
+  "median": 3989.8,
+  "min": 3980.0,
+  "max": 4295.3
+ },
+ "entry_to_main_frame_ms": {
+  "runs": [
+   6309.5,
+   5725.2,
+   5667.6
+  ],
+  "median": 5725.2,
+  "min": 5667.6,
+  "max": 6309.5
+ },
+ "interpreter_startup_ms": {
+  "runs": [
+   41.5,
+   38.4,
+   33.1
+  ],
+  "median": 38.4,
+  "min": 33.1,
+  "max": 41.5
+ },
+ "t1_split_ms": {
+  "import_main": {
+   "runs": [
+    263.7,
+    167.6,
+    172.0
+   ],
+   "median": 172.0,
+   "min": 167.6,
+   "max": 263.7
+  },
+  "app_create_plus_argparse": {
+   "runs": [
+    53.2,
+    31.0,
+    35.9
+   ],
+   "median": 35.9,
+   "min": 31.0,
+   "max": 53.2
+  },
+  "splash_fn_total": {
+   "runs": [
+    1704.2,
+    1541.6,
+    1485.1
+   ],
+   "median": 1541.6,
+   "min": 1485.1,
+   "max": 1704.2
+  },
+  "splash_drawtext_sum": {
+   "runs": [
+    668.0,
+    510.0,
+    442.7
+   ],
+   "median": 510.0,
+   "min": 442.7,
+   "max": 668.0
+  },
+  "splash_show_to_paint": {
+   "runs": [
+    1025.8,
+    1024.6,
+    1034.9
+   ],
+   "median": 1025.8,
+   "min": 1024.6,
+   "max": 1034.9
+  }
+ },
+ "t2_split_ms": {
+  "import_smoke": {
+   "runs": [
+    1132.0,
+    1084.5,
+    1110.0
+   ],
+   "median": 1110.0,
+   "min": 1084.5,
+   "max": 1132.0
+  },
+  "dependency_probe": {
+   "runs": [
+    342.1,
+    318.4,
+    316.8
+   ],
+   "median": 318.4,
+   "min": 316.8,
+   "max": 342.1
+  },
+  "theme_apply": {
+   "runs": [
+    154.1,
+    156.3,
+    152.9
+   ],
+   "median": 154.1,
+   "min": 152.9,
+   "max": 156.3
+  },
+  "fit_scale": {
+   "runs": [
+    159.3,
+    162.5,
+    158.5
+   ],
+   "median": 159.3,
+   "min": 158.5,
+   "max": 162.5
+  },
+  "mw_import": {
+   "runs": [
+    587.8,
+    423.1,
+    355.4
+   ],
+   "median": 423.1,
+   "min": 355.4,
+   "max": 587.8
+  },
+  "mw_ctor": {
+   "runs": [
+    1610.9,
+    1567.6,
+    1573.6
+   ],
+   "median": 1573.6,
+   "min": 1567.6,
+   "max": 1610.9
+  },
+  "mw_show_to_paint": {
+   "runs": [
+    389.4,
+    367.7,
+    396.5
+   ],
+   "median": 389.4,
+   "min": 367.7,
+   "max": 396.5
+  },
+  "mw_paint_exec": {
+   "runs": [
+    0.1,
+    0.1,
+    0.1
+   ],
+   "median": 0.1,
+   "min": 0.1,
+   "max": 0.1
+  }
+ },
+ "label_after_splash": {
+  "first_label_paint_ms": {
+   "runs": [
+    0.5,
+    0.3,
+    0.5
+   ],
+   "median": 0.5,
+   "min": 0.3,
+   "max": 0.5
+  },
+  "post_run_metrics_ms": {
+   "runs": [
+    0.085,
+    0.077,
+    0.072
+   ],
+   "median": 0.1,
+   "min": 0.1,
+   "max": 0.1
+  },
+  "offset_after_splash_ms": {
+   "runs": [
+    4298.7,
+    3992.8,
+    3983.6
+   ],
+   "median": 3992.8,
+   "min": 3983.6,
+   "max": 4298.7
+  }
+ },
+ "errors": [],
+ "timeout": false
+}

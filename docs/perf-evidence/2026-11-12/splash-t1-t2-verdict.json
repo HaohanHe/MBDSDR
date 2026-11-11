@@ -1,0 +1,89 @@
+{
+ "kind": "T1/T2：进程入口 → splash 首帧 → 主窗首帧（paint 完成点）",
+ "date": "2026-11-12",
+ "head": "88e458c8",
+ "snapshot_rule": "子进程经 MBDSDR_HEAD_SNAP 优先导入 HEAD 版 main_window/module_panel/device_panel/bookmark_panel；工作树（卫星线惰性星象仪）未参与。3 次 run 的 main_window.__file__ 均落在临时快照目录。",
+ "definition": {
+  "T1": "进程入口 → splash paintEvent 返回；本脚本第一行起算（解释器启动单列），含 main.py 模块级 import",
+  "T2": "splash 首帧 paintEvent 返回 → 主窗顶层 Paint 事件在 QApplication.notify 中派发完毕",
+  "entry_to_main_frame": "T1 + T2；再加解释器启动 ≈ 用户双击到主窗首帧"
+ },
+ "ruler": {
+  "qt_platform": "windows",
+  "QT_SCALE_FACTOR": "1",
+  "QT_ENABLE_HIGHDPI_SCALING": "0",
+  "font": "MiSans 10pt（splash 标题 22pt bold）",
+  "isolated_profile": true
+ },
+ "loads": {
+  "rule": "每个 run 之前父进程采 2 s 低负载门；子进程跑完再采一次",
+  "gate_before_python_pct": [3.1, 4.7, 4.7],
+  "after_python_pct": [7.1, 7.0, 6.3],
+  "verdict": "3 次全部 <200%，满足规则 10"
+ },
+ "T1_ms": {"runs": [2014.2, 1735.4, 1687.6], "median": 1735.4, "range": [1687.6, 2014.2]},
+ "T2_ms": {"runs": [4295.3, 3989.8, 3980.0], "median": 3989.8, "range": [3980.0, 4295.3]},
+ "entry_to_main_frame_ms": {"runs": [6309.5, 5725.2, 5667.6], "median": 5725.2, "range": [5667.6, 6309.5]},
+ "interpreter_startup_ms": {"runs": [41.5, 38.4, 33.1], "median": 38.4, "range": [33.1, 41.5],
+  "method": "父进程 spawn 前 perf_counter − 子进程第一行 perf_counter；含 CreateProcess + 解释器启动"},
+ "t1_split": {
+  "note": "中位；T1 本身不含解释器启动，解释器单列。各项相加 ≈ T1 + 解释器（边界差 <20 ms）。",
+  "interpreter_startup": 38.4,
+  "import_main_py": {"median": 172.0, "range": [167.6, 263.7], "share_of_T1_pct": 9.9},
+  "qapplication_create_argparse_plugin_check": {"median": 35.9, "range": [31.0, 53.2], "share_of_T1_pct": 2.1},
+  "splash_pixmap_prep_drawtext": {"median": 510.0, "range": [442.7, 668.0], "share_of_T1_pct": 29.4},
+  "splash_show_to_first_paint": {"median": 1025.8, "range": [1024.6, 1034.9], "share_of_T1_pct": 59.1},
+  "reading": "T1 里解释器 + import 合计 ≈ 210 ms（12.1%）；splash 自己的首次排版 510 ms（29.4%，那 384 地板在这里）；剩下 1025.8 ms（59.1%）是第一个原生窗口从 show 到首帧 paint 完成的平台/合成器成本，不是排版。"
+ },
+ "t2_split": {
+  "note": "中位；fit_scale 内部会再调一次 theme.apply，theme_apply 154.1 已含在 fit_scale 159.3 里，不重复相加。",
+  "import_smoke": {"median": 1110.0, "range": [1084.5, 1132.0], "share_pct": 27.8},
+  "dependency_probe": {"median": 318.4, "range": [316.8, 342.1], "share_pct": 8.0},
+  "fit_scale_incl_theme_apply": {"median": 159.3, "range": [158.5, 162.5], "share_pct": 4.0,
+   "theme_apply_inside": {"median": 154.1, "range": [152.9, 156.3]}},
+  "main_window_import": {"median": 423.1, "range": [355.4, 587.8], "share_pct": 10.6},
+  "main_window_ctor": {"median": 1573.6, "range": [1567.6, 1610.9], "share_pct": 39.4},
+  "main_window_show_to_first_paint": {"median": 389.4, "range": [367.7, 396.5], "share_pct": 9.8},
+  "first_paint_exec": {"median": 0.1, "range": [0.1, 0.1]},
+  "residual": 16.0,
+  "reading": "T2 的两大块是启动自检 1428.4（import smoke 1110 + 依赖探针 318）与主窗构造 1573.6；show→首帧 paint 389.4，paint 本体 0.1。"
+ },
+ "fact_check_splash_vs_384": {
+  "question": "生产入口里 splash 的 302.8–441.0 是不是同一笔 384？同一进程里 splash 首帧与首个 QLabel 排版会不会重复付？",
+  "same_process_evidence": {
+   "splash_drawtext_per_call_ms": [
+    [664.9, 2.7, 0.4],
+    [507.6, 2.1, 0.3],
+    [439.9, 2.3, 0.5]
+   ],
+   "call_order": ["MBDSDR 22pt bold", "副标题 10pt", "版本号 10pt"],
+   "first_label_paint_ms": [0.5, 0.3, 0.5],
+   "post_run_qfontmetrics_ms": [0.085, 0.077, 0.072]
+  },
+  "answer": "是同一笔钱，没有重复付。地板只落在进程内第一次 drawText（22pt bold 标题，440–665 ms）；紧接着同一 QPainter 的 10pt 副标题只要 2.1–2.7 ms、版本号 0.3–0.5 ms；主窗出来后的第一个 QLabel paint 0.3–0.5 ms，QFontMetrics 0.07–0.09 ms。如果 splash 与主窗各付一遍，首个 QLabel 会回到 ≈390 ms，现在不是。",
+  "what_splash_buys": "splash 不省这笔钱，也没有把它藏起来：drawText 付完才 show，首帧 paint 还要 1025.8 ms，用户看到 splash 时 T1 已经 1.7 s。它遮住的是之后的 ≈4.0 s（自检 + 构造），不是这 0.5 s 排版。",
+  "note_302_vs_384": "上一批模拟 splash（只画三行字）得到 302.8–441.0，本批真实入口 439.9–664.9；同一现象，差异来自 22pt bold 标题与 run 间抖动。"
+ },
+ "comparability_with_1158_5": {
+  "warning": "本批是生产入口；1158.5 是基线脚本的 ctor + tick，二者不可直接并列。",
+  "items_in_this_run_absent_from_1158_5": {
+   "interpreter_startup": 38.4,
+   "import_main_py": 172.0,
+   "qapplication_create": 35.9,
+   "splash_total": 1541.6,
+   "startup_self_checks": 1428.4,
+   "main_window_import": 423.1
+  },
+  "rough_bridge": "生产入口 5725.2（中位）− 上述非基线项 ≈ 2086；仍高于 1158.5，差在 ctor 1573.6 vs 基线 1048.3（+525）与 show→paint 389.4 vs 基线 tick。本批不解释这项差异，只作为下一步待查项。"
+ },
+ "caveats": [
+  "3 次 run 都在 OS 文件缓存已热的机器上，import 172 ms 偏乐观；冷文件缓存未测。",
+  "HEAD 在本批测量期间从 e34d5c56 前进到 88e458c8，本批数据全部来自 88e458c8 的快照。",
+  "splash show→paint 1025.8 ms 只观测到现象，未拆平台/合成器内部；上一批最小 QWidget 首窗是 63.5 ms，差异可能来自 QSplashScreen 的 frameless/stay-on-top 标志。"
+ ],
+ "sources": [
+  "docs/perf-evidence/2026-11-12/splash-t1-t2.json",
+  "docs/perf-evidence/2026-11-12/font-layout-floor-verdict.json"
+ ],
+ "script": "scripts/repro/2026-11-12-splash-t1-t2.py --runs 3"
+}
