@@ -29,7 +29,7 @@ def qtapp():
 
 
 @pytest.fixture
-def window(qtapp):
+def window(qtapp, isolated_profile):
     import main_window as mw
     w = mw.MainWindow()
     yield w, mw
