@@ -523,10 +523,12 @@ def test_planetarium_spectrum_strip_is_compact_and_fits(window, qtapp):
         f"谱面与瀑布必须首尾相接不重叠：fft={fft.geometry().getRect()} "
         f"wf={wf.geometry().getRect()}")
 
-    # 三根竖滑杆的最小高 314px 在 180px 里无解 → 紧凑形态整体收起。
-    assert sp._db_slider_col.isHidden() is True, "紧凑形态必须收起竖滑杆列"
+    # 三根量程滑杆已迁出面板（工具栏「显示」弹出层，2026-11-11）：紧凑形态
+    # 不再需要「收起滑杆列」，面板里也不该再有它们占宽度/高度。
+    assert sp._db_slider_col.parentWidget() is not sp, (
+        "滑杆列必须挂在「显示」弹层，不得常驻占面板宽/高")
     for sl in (sp._span_slider, sp._db_max_slider, sp._db_min_slider):
-        assert sl.isVisible() is False
+        assert sl.isVisible() is False, "弹层未打开时滑杆不应可见"
 
     hint = sp._state.offline_hint
     assert "Esc" in hint, f"全屏窗里必须给出可执行的出口，实际：{hint}"
@@ -536,7 +538,7 @@ def test_planetarium_spectrum_strip_is_compact_and_fits(window, qtapp):
     # 收起瀑布条 → 频谱回 IDE 页，必须恢复常规形态与默认提示。
     w._planetarium_wf_btn.click()
     qtapp.processEvents()
-    assert sp._db_slider_col.isHidden() is False, "回 IDE 必须恢复竖滑杆列"
+    assert sp._display_menu.isHidden() is True, "回 IDE 弹层保持关闭（滑杆不常驻）"
     assert sp._fft_plot.minimumHeight() == 120
     assert "工具栏" in sp._state.offline_hint, "回 IDE 提示必须指回工具栏「连接」"
 

@@ -156,12 +156,12 @@ BANDPLAN_CATEGORY_COLORS = {
 # 书签药丸高度（像素）：谱面顶部这一条带内点击 = 激活书签（不进调谐/拖拽）。
 _BM_TAG_H = 16.0
 
-# 右侧三根竖滑杆（缩放/最大/最小）的最小高（px）。
-# QSlider 自身的 minimumSizeHint 只有 16 px；旧值 90/80/80 把「三标签 + 三滑杆」
-# 列的最小高撑到 314，面板最小高 347，请求 303 时父容器只能裁掉末根滑杆下半段
-# 44 px（2026-11-11 实测：不是内容放不下，是 fixed 最小高）。50 是仍可拖动的
-# 下限：303 档下列高 270，三根实得约 70/84/84，底边 270 刚好贴住。
-_SLIDER_MIN_H = 50
+# 「显示」弹层里三根横滑杆（缩放/上限/下限）的最小宽（px）。
+# QSlider 自身的 minimumSizeHint 只有 84 px：-160..0 的量程落到 84 px 时
+# 每像素跳近 2 dB，拖不准；120 px 让上限/下限各留约 1.3 dB/px 的行程。
+# 竖排时这里曾是「最小高 90/80/80 把面板最小高撑到 347、303 档裁掉末根
+# 滑杆 44 px」的元凶；迁进弹层后高度不再参与面板最小尺寸。
+_SLIDER_MIN_W = 120
 
 # 瀑布图默认色带：SDR++ 启动时加载的 Turbo 色表（waterfall.cpp:11-25 的
 # 经典色表在 SDR++ 里已被 Turbo 取代，见 docs/learn/sdrpp.md §3.5）。
@@ -2458,7 +2458,13 @@ class SpectrumPanel(QWidget):
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(2)
 
-        root.addLayout(self._build_toolbar())
+        # 工具栏装进独立 QWidget：布局对象本身没有 minimumSizeHint/geometry，
+        # 而「窄档 331px 下不许裁切」只能用控件几何反证（见
+        # tests/test_spectrum_slider_overflow.py 反证一）。
+        self._toolbar = QWidget()
+        self._toolbar.setObjectName("spectrumToolbar")
+        self._toolbar.setLayout(self._build_toolbar())
+        root.addWidget(self._toolbar)
 
         # SDR++ 风格：垂直 QSplitter 上下分屏 ——
         #   上方 = FFT 频谱曲线（承载全部调谐 / VFO 拖拽交互）
@@ -2485,18 +2491,13 @@ class SpectrumPanel(QWidget):
         self._fft_plot.setMinimumHeight(120)
         self._wf_plot.setMinimumHeight(60)
 
-        # 右侧 dB Max/Min 垂直滑杆（对标 SDR++ main_window.cpp:635-656）
+        # 右侧滑杆列已迁到工具栏「显示」弹出层（2026-11-11）：常驻会白占 30px
+        # 宽、把面板最小高撑到 247px，窄档 331px 下绘图区被挤。滑杆对象与信号
+        # 保持不变，只是换了父容器（见 _build_db_sliders）。
         body = QHBoxLayout()
         body.setContentsMargins(0, 0, 0, 0)
         body.setSpacing(2)
         body.addWidget(self._splitter, stretch=1)
-        # 滑杆列装进独立容器：星象仪底部条只有 180px 高，三根竖滑杆 + 标签的
-        # 最小高实测 247px，放进去会把谱面/瀑布连同「最小」标签一起挤出可视区。
-        # 紧凑形态下整列收起（见 set_compact），缩放仍可用 Ctrl+滚轮/捏合。
-        self._db_slider_col = QWidget()
-        self._db_slider_col.setObjectName("dbSliderCol")
-        self._db_slider_col.setLayout(self._build_db_sliders())
-        body.addWidget(self._db_slider_col)
         root.addLayout(body, stretch=1)
 
         # 初始：未连接 → 控件置灰
@@ -2524,24 +2525,20 @@ class SpectrumPanel(QWidget):
             self._fft_plot.update()
 
     def set_compact(self, on: bool) -> None:
-        """紧凑形态（星象仪底部 180px 条）：收起右侧竖滑杆列、压低分区下限。
+        """紧凑形态（星象仪底部 180px 条）：压低谱面/瀑布分区下限。
 
-        不这么做时实测面板最小高 247px（三根 50px 竖滑杆 + 标签；旧 fixed
-        90/80/80 时是 347px），塞进 180px 槽里 QSplitter 按各自治最小高溢出：
-        谱面 120px 与瀑布 60px 互相覆盖，频率轴被压进瀑布，「最小」标签整条
-        出了面板（截图可判）。
-        收起滑杆列后最小高回落到 160px，谱面约 100px、瀑布约 50px，
-        缩放改用 Ctrl+滚轮/双指捏合。
+        三根量程滑杆已迁出面板（工具栏「显示」弹出层，见 _build_db_sliders），
+        面板最小高不再包含滑杆列；但非紧凑的 120+60 两区加上工具栏仍装不进
+        180px 槽，所以紧凑形态把分区下限降到 80/40 并切成 [110, 50]：
+        否则 QSplitter 按各自最小高溢出，谱面与瀑布互相覆盖、频率轴被压进
+        瀑布（截图可判）。缩放改用 Ctrl+滚轮/双指捏合。
 
-        只改布局，不动数据与控制器：滑杆对象仍在，只是不可见。
+        只改布局，不动数据与控制器。
         """
         on = bool(on)
         if on == self._compact:
             return
         self._compact = on
-        col = getattr(self, "_db_slider_col", None)
-        if col is not None:
-            col.setVisible(not on)
         if on:
             self._fft_plot.setMinimumHeight(80)
             self._wf_plot.setMinimumHeight(40)
@@ -2611,7 +2608,7 @@ class SpectrumPanel(QWidget):
             lambda t: self.generator.set_avg_frames(int(t)))
         more_rows.append(_row(avg_label, self._avg_combo))
 
-        # 性能模式（高/均衡/低）：切换 FFT 点数 / 谱线数 / 刷新间隔
+        # 性能模式（高/均衡/低）：切换刷新间隔与送绘根数上限，不动 FFT 点数
         perf_label = QLabel("性能:")
         self._perf_combo = QComboBox()
         self._perf_combo.addItems(["高", "均衡", "低"])
@@ -2729,6 +2726,28 @@ class SpectrumPanel(QWidget):
         self._more_menu = more_menu
         bar.addWidget(self._more_btn)
 
+        # 「显示」入口：三根量程滑杆（缩放 / 上限 / 下限）收进弹出层。
+        # 常驻竖排时它们白占 30px 宽、把面板最小高撑到 247px（窄档 331px 下
+        # 绘图区被挤，303 档还会裁掉末根滑杆）；收进弹层后工具栏最小宽只从
+        # 约 59px 涨到约 120px，绘图区宽度与高度都不再被它影响。
+        # 点击一次弹出 + 拖动一次即生效（与常驻滑杆相比只多「点开」这一步）。
+        self._display_btn = QToolButton()
+        self._display_btn.setText("显示")
+        self._display_btn.setObjectName("spectrumDisplayButton")
+        self._display_btn.setPopupMode(QToolButton.InstantPopup)
+        self._display_btn.setToolTip(
+            "显示量程与缩放：缩放跨度 / 显示上限 / 显示下限。\n"
+            "三者都只改怎么看，不改硬件采样率与接收增益。")
+        self._db_slider_col = self._build_db_sliders()
+        display_menu = QMenu(self._display_btn)
+        display_menu.setToolTipsVisible(True)
+        display_action = QWidgetAction(display_menu)
+        display_action.setDefaultWidget(self._db_slider_col)
+        display_menu.addAction(display_action)
+        self._display_btn.setMenu(display_menu)
+        self._display_menu = display_menu
+        bar.addWidget(self._display_btn)
+
         bar.addStretch(1)
 
         # 顶栏不放任何实时读数（2026-11-10 用户裁决）：
@@ -2738,80 +2757,66 @@ class SpectrumPanel(QWidget):
         return bar
 
     # ------------------------------------------------------------------ dB 滑杆
-    def _build_db_sliders(self) -> QVBoxLayout:
-        """右侧三根竖滑杆：缩放 / 最大 / 最小（SDR++ 主窗右侧同款）。
+    def _build_db_sliders(self) -> QWidget:
+        """三根横滑杆：缩放 / 上限 / 下限（装在工具栏「显示」弹出层里）。
 
-        SDR++ 行为（main_window.cpp:635-656）：
-          - 上：缩放（FFT zoom，收窄显示跨度）
-          - 中：最大（fftMax，纵轴上限）
-          - 下：最小（fftMin，纵轴下限）
-          - 拖 Max 时 fftMax = max(fftMax, fftMin + 10)   （line 639）
-          - 拖 Min 时 fftMin = min(fftMax - 10, fftMin)   （line 652）
+        语义沿用 SDR++ 主窗右侧竖排（main_window.cpp:635-656）：
+          - 缩放：收窄显示跨度（起始/截止频率靠拢），不碰硬件采样率
+          - 上限 / 下限：纵轴 dBFS 量程；拖动时的 10 dB 最小间隔由
+            _on_db_max_changed / _on_db_min_changed 保证（同 main_window.cpp:639/652）
+        方向：左端 = 最小值、右端 = 最大值。
 
-        标签只写「缩放/最大/最小」，**不写数值**：这三根滑杆的数值每秒
-        都可能变，挂在面板上就是噪声；当前位置由滑杆拇指本身表达。
+        标签只写「缩放/上限/下限」，**不写数值**：这三根每秒都可能变，
+        挂在界面上就是噪声；当前位置由滑杆拇指本身表达。
         """
-        col = QVBoxLayout()
-        col.setContentsMargins(2, 0, 2, 0)
-        col.setSpacing(2)
+        col = QWidget()
+        col.setObjectName("dbSliderCol")
+        lay = QVBoxLayout(col)
+        lay.setContentsMargins(8, 2, 8, 4)
+        lay.setSpacing(4)
 
-        def _cap(text: str, tip: str) -> QLabel:
-            lbl = QLabel(text)
+        def _add(caption: str, tip: str, slider: QSlider) -> None:
+            row = QHBoxLayout()
+            row.setSpacing(6)
+            lbl = QLabel(caption)
             lbl.setObjectName("dbCapLabel")
-            lbl.setAlignment(Qt.AlignHCenter)
             lbl.setToolTip(tip)
-            return lbl
+            lbl.setMinimumWidth(28)
+            slider.setMinimumWidth(_SLIDER_MIN_W)
+            slider.setToolTip(tip)
+            row.addWidget(lbl)
+            row.addWidget(slider, stretch=1)
+            lay.addLayout(row)
 
-        # ① 缩放：显示跨度（起始/截止频率区间），不碰硬件采样率
-        col.addWidget(_cap(
-            "缩放",
-            "显示跨度：上推收窄（放大细节），下拉回到全带宽。\n"
-            "只改变显示范围，不改变硬件采样率。"))
-        self._span_slider = QSlider(Qt.Vertical)
+        # ① 缩放：显示跨度（起始/截止频率区间）
+        self._span_slider = QSlider(Qt.Horizontal)
         self._span_slider.setRange(0, _SPAN_SLIDER_STEPS)
         self._span_slider.setValue(0)
-        self._span_slider.setMinimumHeight(_SLIDER_MIN_H)
-        self._span_slider.setToolTip(
-            "缩放：上推收窄显示跨度（起始/截止频率靠拢），下拉回到全带宽。")
         self._span_slider.valueChanged.connect(self._on_span_slider_changed)
-        col.addWidget(self._span_slider, stretch=1)
+        _add("缩放",
+             "显示跨度：右推收窄（放大细节），左端回到全带宽。\n"
+             "只改变显示范围，不改变硬件采样率。",
+             self._span_slider)
 
-        # ② 最大：纵轴上限（dBFS）
-        col.addWidget(_cap(
-            "最大",
-            "显示量程上限（dBFS，纵轴顶部）。不是接收增益——增益在控制面板。"))
-        self._db_max_slider = QSlider(Qt.Vertical)
-        # Qt 垂直滑杆：minimum 在底部、maximum 在顶部。
-        # 我们用 dB 整数值：-160（底）.. 0（顶）。
-        # 方向（用户裁决）：向上推 = 显示增益增大（图形上移）——
-        # invertedAppearance 让滑块顶=最小值、底=最大值，
-        # Max 上推 → db_max 减小 → 信号在纵轴被放大靠上。
-        self._db_max_slider.setInvertedAppearance(True)
+        # ② 上限：纵轴上限（dBFS）
+        self._db_max_slider = QSlider(Qt.Horizontal)
         self._db_max_slider.setRange(-160, 0)
         self._db_max_slider.setValue(int(self._state.db_max))
-        # 最小高统一走 _SLIDER_MIN_H（50）：面板压到 303 时三根仍完整可见，
-        # 余下空间由 stretch=1 均分，不会被 fixed 尺寸顶出面板。
-        self._db_max_slider.setMinimumHeight(_SLIDER_MIN_H)
-        self._db_max_slider.setToolTip(
-            "显示上限：上推=整个谱面上移（放大弱信号），下拉=压缩量程。\n"
-            "它只改显示刻度，不改增益。")
         self._db_max_slider.valueChanged.connect(self._on_db_max_changed)
-        col.addWidget(self._db_max_slider, stretch=1)
+        _add("上限",
+             "显示上限（dBFS，纵轴顶部）：右推=整个谱面下移，左推=放大弱信号。\n"
+             "它只改显示刻度，不改增益。",
+             self._db_max_slider)
 
-        # ③ 最小：纵轴下限（dBFS）
-        col.addWidget(_cap(
-            "最小",
-            "显示量程下限（dBFS，纵轴底部）。不是接收增益——增益在控制面板。"))
-        self._db_min_slider = QSlider(Qt.Vertical)
-        self._db_min_slider.setInvertedAppearance(True)
+        # ③ 下限：纵轴下限（dBFS）
+        self._db_min_slider = QSlider(Qt.Horizontal)
         self._db_min_slider.setRange(-160, 0)
         self._db_min_slider.setValue(int(self._state.db_min))
-        self._db_min_slider.setMinimumHeight(_SLIDER_MIN_H)
-        self._db_min_slider.setToolTip(
-            "显示下限：上推=弱信号也显示（抬高底噪），下拉=隐藏弱信号。\n"
-            "它只改显示刻度，不改增益。")
         self._db_min_slider.valueChanged.connect(self._on_db_min_changed)
-        col.addWidget(self._db_min_slider, stretch=1)
+        _add("下限",
+             "显示下限（dBFS，纵轴底部）：右推=隐藏弱信号，左推=弱信号也显示。\n"
+             "它只改显示刻度，不改增益。",
+             self._db_min_slider)
 
         return col
 
@@ -2882,7 +2887,7 @@ class SpectrumPanel(QWidget):
             slider.blockSignals(True)
             slider.setValue(int(val))
             slider.blockSignals(False)
-        # 标签只写「缩放/最大/最小」，位置由滑杆拇指表达（不挂实时数值）。
+        # 标签只写「缩放/上限/下限」，位置由滑杆拇指表达（不挂实时数值）。
         self._redraw()
 
     def db_range(self) -> Tuple[float, float]:

@@ -167,21 +167,29 @@ class TestPeakLabelPlacements:
 # 2. Max/Min 滑块方向（三档单调性）
 # ---------------------------------------------------------------------------
 class TestSliderDirectionMonotonic:
-    def test_inverted_appearance_flags(self):
-        """两个滑杆都开启 invertedAppearance（顶=最小值）。"""
+    def test_horizontal_slider_runs_min_to_max(self):
+        """方向契约：横滑杆左端=最小值、右端=最大值。
+
+        2026-11-11 三根量程滑杆迁到工具栏「显示」弹层，竖排专用的
+        invertedAppearance（顶=最小值）随之取消；这里改为钉住新的方向
+        语义，防止旧 flag 被原样搬回来把横滑杆左右反转。
+        """
+        from PySide6.QtCore import Qt
         from spectrum_widget import SpectrumPanel
         w = SpectrumPanel()
-        assert w._db_max_slider.invertedAppearance() is True
-        assert w._db_min_slider.invertedAppearance() is True
+        for slider in (w._db_max_slider, w._db_min_slider):
+            assert slider.orientation() == Qt.Horizontal
+            assert slider.invertedAppearance() is False
+            assert (slider.minimum(), slider.maximum()) == (-160, 0)
         w.deleteLater()
 
-    def test_knob_top_converges_to_min_edge(self):
-        """invertedAppearance：旋钮推到顶（Max 档）→ 取量程最小端，
-        夹逻辑（max >= min+10，SDR++ fftMax 同款）收敛到 db_min+10。"""
+    def test_knob_min_edge_converges_to_lower_bound(self):
+        """把「上限」推到最小端 → 夹逻辑（max >= min+10，SDR++ fftMax 同款）
+        收敛到 db_min+10。"""
         from spectrum_widget import SpectrumPanel
         w = SpectrumPanel()
         db_min0 = float(w._state.db_min)
-        # 顶档（用户「推到 Max」）：inverted 下 setValue(minimum) 即旋钮在顶
+        # 最小端（用户「推到上限最小」）：横滑杆左端 = 最小值
         w._db_max_slider.setValue(w._db_max_slider.minimum())
         assert w._db_max_slider.value() == int(db_min0) + 10
         assert w._state.db_max == db_min0 + 10.0
