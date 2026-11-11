@@ -138,6 +138,17 @@ CELLS = {
     # 只建模块面板（枚举线程的唯一启动点）
     "X": dict(platform="windows", show="none", loop="none",
               exit="osmain", rmtree="yes", font="no", window="modulepanel"),
+    # X 的对照：同样只建模块面板，但枚举被 patch 掉（验证 patch 生效）
+    "Y": dict(platform="windows", show="none", loop="none",
+              exit="osmain", rmtree="yes", font="no", window="modulepanel",
+              patch="noenum"),
+    # 缓解候选：退出前排空 Qt 全局线程池
+    "Z": dict(platform="windows", show="none", loop="none",
+              exit="osmain", rmtree="yes", font="yes", window="full",
+              patch="noenum", drain=True),
+    # 应用级 Python 事件过滤器（MainWindow 也装了）
+    "AA": dict(platform="windows", show="none", loop="none",
+               exit="osmain", rmtree="yes", font="no", window="appfilter"),
 }
 
 CODE_LABEL = {
@@ -165,6 +176,7 @@ def _mark(path: str, stage: str, extra: str = "") -> None:
 def run_child(cell_id: str) -> None:
     cfg = dict(CELLS[cell_id])
     mark = os.environ["MBDSDR_AV_MARK"]
+    _mark(mark, "S0_pid", str(os.getpid()))
     fh_path = os.environ.get("MBDSDR_AV_FH")
     if fh_path:
         # 只装 VEH 处理器：正常路径不跑任何探针代码，崩溃时才落栈
@@ -207,7 +219,7 @@ def run_child(cell_id: str) -> None:
         _mark(mark, "S3_ctor")
     elif cfg["window"] in ("minqmw", "minwidget", "qthreads", "many",
                            "aipanel", "spectrum", "statuspanel",
-                           "modulepanel"):
+                           "modulepanel", "appfilter"):
         from PySide6.QtWidgets import QMainWindow, QWidget      # noqa: E402
         if cfg["window"] == "minwidget":
             window = QWidget()
@@ -235,6 +247,16 @@ def run_child(cell_id: str) -> None:
         elif cfg["window"] == "modulepanel":
             import module_panel                                 # noqa: E402
             window._probe_panel = module_panel.ModulePanel()
+        elif cfg["window"] == "appfilter":
+            # 与 MainWindow 同款：应用级 Python eventFilter
+            class _F(QMainWindow):
+                def eventFilter(self, obj, ev):
+                    return super().eventFilter(obj, ev)
+
+            window = _F()
+            window.setCentralWidget(QWidget())
+            window.menuBar()
+            app.installEventFilter(window)
         window.resize(640, 480)
         _mark(mark, "S3_ctor", cfg["window"])
 
@@ -259,6 +281,12 @@ def run_child(cell_id: str) -> None:
         # 判定格：等后台线程跑完再退（不 patch，只等）
         time.sleep(float(cfg["wait_s"]))
         _mark(mark, "S6b_wait", f"{cfg['wait_s']}s")
+
+    if cfg.get("drain"):
+        # 缓解候选：退出前排空 Qt 全局线程池，确认后台 Python 任务不再与退出竞态
+        from PySide6.QtCore import QThreadPool                  # noqa: E402
+        drained = QThreadPool.globalInstance().waitForDone(5000)
+        _mark(mark, "S6c_drain", f"ok={drained}")
 
     mode = cfg["exit"]
     if mode == "natural":
