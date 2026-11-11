@@ -121,30 +121,46 @@ def main() -> int:
 
     ap.AIPanel.init_agent = _probe
 
-    _hr("实测：构造 MainWindow（offscreen），期间统计 init_agent")
+    # 两段分开量：构造期（MainWindow() 返回到 return 为止）与首个事件循环拍。
+    # 后者是 QTimer.singleShot(0, …) 的落点——它不属于构造期，但会推迟首帧后的
+    # 交互，必须单独记，不能混进「构造耗-时」里冒充构造期成本（上一版就混了）。
+    _hr("实测：构造 MainWindow（offscreen），分构造期 / 首拍两段统计 init_agent")
     window = None
-    t0 = time.perf_counter()
+    t_ctor = time.perf_counter()
     try:
         window = mw.MainWindow()
-        app.processEvents()
     except Exception as exc:  # noqa: BLE001
         ap.AIPanel.init_agent = orig
         print(f"[无法判定] MainWindow 构造失败：{type(exc).__name__}: {exc}")
         shutil.rmtree(profile, ignore_errors=True)
         return 2
-    ctor_ms = (time.perf_counter() - t0) * 1000.0
+    ctor_ms = (time.perf_counter() - t_ctor) * 1000.0
+    ctor_calls = list(calls)
+    try:
+        agent_at_ctor = getattr(window.ai_panel, "agent", None) is not None
+    except Exception:  # noqa: BLE001
+        agent_at_ctor = None
 
-    total_ms = sum(c[0] for c in calls)
-    print(f"  MainWindow 构造总耗时 : {ctor_ms:.0f} ms")
-    print(f"  init_agent 调用次数   : {len(calls)}")
-    print(f"  init_agent 总耗时     : {total_ms:.0f} ms")
-    for i, (dt, stack) in enumerate(calls, 1):
-        print(f"    第 {i} 次：{dt:.0f} ms，调用栈 {' <- '.join(stack)}")
+    t_tick = time.perf_counter()
+    app.processEvents()
+    tick_ms = (time.perf_counter() - t_tick) * 1000.0
+    tick_calls = list(calls[len(ctor_calls):])
+
+    def _report(label: str, rows, span_ms: float) -> None:
+        total = sum(r[0] for r in rows)
+        print(f"  {label}: 耗时 {span_ms:.0f} ms，init_agent {len(rows)} 次 / "
+              f"合计 {total:.0f} ms")
+        for i, (dt, stack) in enumerate(rows, 1):
+            print(f"    第 {i} 次：{dt:.0f} ms，调用栈 {' <- '.join(stack)}")
+
+    _report("构造期", ctor_calls, ctor_ms)
+    _report("首个事件循环拍", tick_calls, tick_ms)
     try:
         has_agent = getattr(window.ai_panel, "agent", None) is not None
     except Exception:  # noqa: BLE001
         has_agent = None
-    print(f"  构造后 ai_panel.agent 非空 : {has_agent}")
+    print(f"  构造返回时 ai_panel.agent 非空 : {agent_at_ctor}")
+    print(f"  首拍后 ai_panel.agent 非空     : {has_agent}")
 
     ap.AIPanel.init_agent = orig
     try:
@@ -153,17 +169,19 @@ def main() -> int:
         pass
     shutil.rmtree(profile, ignore_errors=True)
 
-    reproduced = bool(calls) and total_ms >= 50.0
-    print(f"\n结论：当前实现复现 P0-15（构造期同步 init_agent）: {reproduced}")
+    ctor_total = sum(c[0] for c in ctor_calls)
+    tick_total = sum(c[0] for c in tick_calls)
+    reproduced = bool(ctor_calls) and ctor_total >= 50.0
+    print(f"\n结论：构造期同步 init_agent = {reproduced}；"
+          f"首拍装载 {tick_total:.0f} ms（延后≠免费）")
     if reproduced:
-        print("[复现] 成本仍在首帧前；但位置不是 AIPanel.__init__，"
-              "而是 MainWindow 构造链（路径需勘误）。")
+        print("[复现] 构造期仍在同步装载内核。")
         return 0
-    if calls:
-        print(f"[未复现] 虽有 {len(calls)} 次调用，但合计 {total_ms:.0f} ms < 50 ms，"
-              "不再构成首帧阻塞。")
+    if tick_total >= 50.0:
+        print("[未复现] 构造期已不装载；成本挪到事件循环首拍 "
+              f"{tick_total:.0f} ms，属另一笔（延后，不是消失）。")
         return 1
-    print("[未复现] 构造期未调用 init_agent（或已异步化）。")
+    print("[未复现] 构造期与首拍都未装载内核。")
     return 1
 
 
