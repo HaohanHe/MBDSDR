@@ -80,6 +80,10 @@ class TestModulePanelParamsReachBackend:
         p._apply_devices([{
             "label": "RTL-SDR", "driver": "rtlsdr",
             "sample_rate_range": (1_000_000, 2_560_000),
+            # 16042e4b 起能力来源缺省按 unknown：只给数值不给来源，面板
+            # 不再当「已知量程」，下拉会退化成一条「档位未知」。这里补的是
+            # 设备**声明**来源（declared），不是放宽断言。
+            "capability_status": {"sample_rate_range": "declared"},
         }])
         assert p.sr_combo.count() == 8
         assert p.sr_combo.itemText(0) == format_sample_rate(1_024_000)
@@ -112,6 +116,8 @@ class TestModulePanelParamsReachBackend:
         p._devices = [{
             "label": "FakeSDR", "driver": "rtlsdr",
             "sample_rate_range": (1_000_000, 2_560_000),
+            # 同上：能力来源必须显式给出，否则档位表退化、选中项恒为兜底值。
+            "capability_status": {"sample_rate_range": "declared"},
         }]
         p.device_combo.clear()
         p.device_combo.addItem("FakeSDR")
@@ -232,7 +238,9 @@ ALLOWED_UNCONNECTED = {
     "adsb_map_panel.py:self.table": "只读飞机列表（NoEditTriggers+NoSelection）",
     "aprs_panel.py:self.detail": "只读报文详情 QTextEdit",
     "ai_panel.py:self.conversation_view": "只读对话历史 QTextEdit",
-    "new_spacetime_panel.py:self.passes_table": "只读过境表（NoEditTriggers）",
+    # 2026-11-11 删（不许续期）：`new_spacetime_panel.py:self.passes_table`
+    # 已被 cb3250f4 接上 itemClicked → _on_pass_clicked（行定位/联动），
+    # 不再是「只读过境表」，白名单条目过期即删。
     # 对话框/表单：按下"确定"后统一读值（read-on-use），不需要逐控件 connect
     "ai_panel.py:api_key_edit": "配置对话框：Accepted 后统一读 text()",
     "ai_panel.py:base_url_edit": "配置对话框：Accepted 后统一读 text()",
