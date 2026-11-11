@@ -33,8 +33,18 @@ def qapp():
     yield app
 
 
+@pytest.fixture(autouse=True)
+def _fresh_recent(tmp_path, monkeypatch):
+    """每条用例用独立的「最近使用」文件，互不串味、不碰真实配置。"""
+    import command_palette as cp
+    monkeypatch.setattr(cp, "_recent_path", lambda: tmp_path / "recent.json")
+    cp.reset_recent()
+    yield
+    cp.reset_recent()
+
+
 @pytest.fixture(scope="module")
-def main_window(qapp):
+def main_window(qapp, isolated_profile):
     from main_window import MainWindow
     w = MainWindow()
     w.show()
@@ -141,7 +151,11 @@ def test_palette_smoke_filters_and_runs(main_window, index, qapp):
     dlg = CommandPalette(window=main_window, parent=main_window)
     assert not dlg.isModal()
     assert not dlg.isVisible()
-    assert dlg.visible_count() == len(index)
+    executable = [c for c in index if c.available]
+    assert dlg.visible_count() == len(executable), (
+        "空查询必须只列可执行动作，不得混入不可用项")
+    assert all(c.available for c in dlg.visible_commands())
+    assert "回车" in dlg.reason_label.text() or "Enter" in dlg.reason_label.text()
 
     dlg.search_edit.setText("设置")
     assert 0 < dlg.visible_count() < len(index)
@@ -253,6 +267,132 @@ def test_runtime_failure_keeps_panel_open(main_window, qapp):
     assert "设备未连接" in dlg.reason_label.text()
     dlg.deleteLater()
     qapp.processEvents()
+
+
+# ---------------------------------------------------------------------------
+# 第二阶段：模糊匹配 / 最近使用 / 空态与无匹配态 / 键盘路径
+# ---------------------------------------------------------------------------
+def test_fuzzy_subsequence_matches_non_contiguous():
+    """「命板」这种不连续输入也要命中「命令面板」，但顺序不能乱。"""
+    from command_palette import Command, search_commands
+    cmds = [
+        Command(title="命令面板", group="菜单", description="打开全局命令面板"),
+        Command(title="恢复出厂布局", group="菜单", description="重置窗口布局"),
+    ]
+    assert [c.title for c in search_commands(cmds, "命板")] == ["命令面板"]
+    assert search_commands(cmds, "板命") == [], (
+        "子序列必须按顺序匹配，反序不该命中")
+
+
+def test_recent_commands_rank_first_in_same_tier():
+    """同一相关度档位内，最近用过的排前；空查询也按最近使用排。"""
+    from command_palette import Command, search_commands
+    cmds = [
+        Command(title="甲页", group="页签", description="a", source="tab:a",
+                run=lambda: {"ok": True}),
+        Command(title="乙页", group="页签", description="b", source="tab:b",
+                run=lambda: {"ok": True}),
+        Command(title="丙页", group="页签", description="c", source="tab:c",
+                run=lambda: {"ok": True}),
+    ]
+    empty = [c.source for c in search_commands(cmds, "", recent=["tab:c", "tab:a"])]
+    assert empty == ["tab:c", "tab:a", "tab:b"], f"空查询没按最近使用排: {empty}"
+
+    hits = search_commands(cmds, "页签", recent=["tab:b"])
+    assert [c.source for c in hits][0] == "tab:b", (
+        f"同档位内最近使用没排前: {[c.source for c in hits]}")
+
+
+def test_empty_query_hides_unavailable_actions(main_window, index):
+    """空查询只给可执行动作；不可用项要靠输入关键词才出现（带原因）。"""
+    from command_palette import CommandPalette
+    dlg = CommandPalette(window=main_window, parent=main_window)
+    shown = dlg.visible_commands()
+    assert shown and all(c.available for c in shown)
+    assert len(shown) == len([c for c in index if c.available])
+    unavailable = next(c for c in index if c.status == "unavailable")
+    dlg.search_edit.setText(unavailable.title)
+    assert any(c.source == unavailable.source and not c.available
+               for c in dlg.visible_commands()), (
+        "输入关键词后应能搜到不可用项（用于看原因）")
+    dlg.deleteLater()
+
+
+def test_no_match_hint_is_actionable(main_window, index):
+    """无匹配不是干巴巴「未找到」：给真实可执行样例 + 键盘提示。"""
+    from command_palette import CommandPalette
+    dlg = CommandPalette(window=main_window, parent=main_window)
+    dlg.search_edit.setText("zzz_不存在")
+    text = dlg.reason_label.text()
+    assert "没有匹配" in text
+    assert "试试" in text and "Enter" in text and "↑↓" in text, text
+    real = [c.title for c in index if c.available and f"「{c.title}」" in text]
+    assert real, f"提示里的样例不是索引里的真实条目: {text}"
+    dlg.deleteLater()
+
+
+#: 键盘可达性契约：从触发到执行最多 3 个按键动作。
+#: 「输入关键词」算一个动作（中文靠输入法，测试走同一条 textChanged 链路）。
+KEY_PATH_CONTRACT = [
+    ("最近使用项", ["Ctrl+K", "Enter"]),
+    ("检索命中首条", ["Ctrl+K", "输入关键词", "Enter"]),
+    ("列表下移一格", ["Ctrl+K", "↓", "Enter"]),
+]
+
+
+def test_key_path_contract_within_three_keys():
+    for label, seq in KEY_PATH_CONTRACT:
+        assert len(seq) <= 3, f"{label} 要 {len(seq)} 个键：{seq}"
+
+
+def test_mru_item_runs_with_two_keys(main_window, qapp):
+    """Ctrl+K → Enter：最近使用项两键可执行（且它确实被顶到首条）。"""
+    from PySide6.QtCore import Qt
+    from PySide6.QtTest import QTest
+    from command_palette import remember_recent, search_commands
+    assert search_commands(main_window_command_index(main_window), "")[0].source \
+        != "tab:settings", "前提不成立：设置页签本来就排第一，测不出 MRU 效果"
+    remember_recent("tab:settings", persist=False)
+
+    main_window._show_command_palette()
+    qapp.processEvents()
+    dlg = main_window._command_palette_dialog
+    assert dlg.visible_commands()[0].source == "tab:settings", "最近使用项没排第一"
+
+    QTest.keyClick(dlg.search_edit, Qt.Key_Return)
+    qapp.processEvents()
+    assert dlg.last_result.get("ok") is True
+    rt = main_window.right_tab
+    assert rt.tabBar().tabData(rt.currentIndex()) == "settings"
+
+
+def test_search_then_enter_runs_with_three_keys(main_window, qapp):
+    """Ctrl+K → 输入「全天」→ Enter：三步行到执行。"""
+    from PySide6.QtCore import Qt
+    from PySide6.QtTest import QTest
+    sv = main_window.sky_view
+    sv.set_all_sky_mode(False)
+    qapp.processEvents()
+
+    main_window._show_command_palette()
+    qapp.processEvents()
+    dlg = main_window._command_palette_dialog
+    dlg.search_edit.setFocus()
+    dlg.search_edit.setText("全天")          # 输入法一次输入 = 一个动作
+    qapp.processEvents()
+    assert "全天" in dlg.visible_commands()[0].title, (
+        f"「全天」没排到首条: {[c.title for c in dlg.visible_commands()[:3]]}")
+
+    QTest.keyClick(dlg.search_edit, Qt.Key_Return)
+    qapp.processEvents()
+    assert dlg.last_result.get("ok") is True, dlg.last_result
+    assert sv.all_sky_active is True
+    sv.set_all_sky_mode(False)
+
+
+def main_window_command_index(window):
+    from command_palette import build_index
+    return build_index(window)
 
 
 # ---------------------------------------------------------------------------

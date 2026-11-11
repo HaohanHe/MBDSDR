@@ -22,9 +22,12 @@ Qt 类在 ``from command_palette import CommandPalette`` 时才构造（PEP 562�
 
 from __future__ import annotations
 
+import json
+import logging
 import os
 import sys
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Callable, List, Optional, Sequence
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
@@ -34,8 +37,83 @@ if _HERE not in sys.path:
 from shortcuts import SHORTCUTS  # noqa: E402
 from capability_catalog import build_catalog  # noqa: E402
 
+logger = logging.getLogger(__name__)
+
 #: 分组顺序（界面上按此顺序排；搜索命中后按相关度重排）
 GROUPS = ("菜单", "页签", "能力", "快捷键")
+
+#: 「最近使用」落盘文件名（与 desktop_settings.json 同目录，独立小文件不碰用户设置）
+RECENT_FILENAME = "command_palette_recent.json"
+
+#: 最近使用最多保留条数（再多也排不进首屏）
+RECENT_LIMIT = 12
+
+#: 模糊（子序列）匹配的起始分档：10 起，越紧凑越小
+_FUZZY_BASE = 10
+
+_RECENT: Optional[List[str]] = None
+
+
+def _recent_path() -> Path:
+    """最近使用文件的绝对路径；测试可用 monkeypatch 覆盖本函数。"""
+    import settings as _desktop_settings  # 延迟导入，数据层测试不必起 Qt
+
+    return Path(_desktop_settings.default_config_path()).parent / RECENT_FILENAME
+
+
+def _read_recent_file() -> List[str]:
+    path = _recent_path()
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return []
+    except (OSError, ValueError) as exc:
+        logger.debug("命令面板最近使用读取失败（按空处理）：%s: %s",
+                     type(exc).__name__, exc)
+        return []
+    if not isinstance(raw, list):
+        logger.debug("命令面板最近使用文件格式不是列表，按空处理：%s", path)
+        return []
+    return [str(x) for x in raw if isinstance(x, str)][:RECENT_LIMIT]
+
+
+def _write_recent_file(items: Sequence[str]) -> None:
+    path = _recent_path()
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(list(items), ensure_ascii=False),
+                        encoding="utf-8")
+    except OSError as exc:
+        logger.debug("命令面板最近使用写入失败（不影响本次执行）：%s: %s",
+                     type(exc).__name__, exc)
+
+
+def load_recent() -> List[str]:
+    """读最近使用（进程内缓存；首次访问才读盘）。"""
+    global _RECENT
+    if _RECENT is None:
+        _RECENT = _read_recent_file()
+    return _RECENT
+
+
+def remember_recent(source: str, *, persist: bool = True) -> None:
+    """把一条入口置顶为「最近使用」；``persist=False`` 只改内存（测试用）。"""
+    if not source:
+        return
+    items = load_recent()
+    if source in items:
+        items.remove(source)
+    items.insert(0, source)
+    del items[RECENT_LIMIT:]
+    if persist:
+        _write_recent_file(items)
+
+
+def reset_recent() -> None:
+    """清空进程内缓存（测试隔离用；不动磁盘文件）。"""
+    global _RECENT
+    _RECENT = None
+
 
 #: 状态 → 界面后缀
 _STATUS_SUFFIX = {
@@ -243,7 +321,31 @@ def build_index(window=None) -> List[Command]:
     return commands
 
 
+def _fuzzy_score(text: str, q: str) -> Optional[int]:
+    """子序列匹配（不必连续、按顺序）；返回越紧凑越小的分数，不匹配返回 None。
+
+    单字符子序列等价于子串，已由前缀/包含档位覆盖，这里只处理 ≥2 字符，
+    避免把「随便一个字命中」的噪声项推上前排。
+    """
+    if len(q) < 2:
+        return None
+    start = -1
+    end = -1
+    pos = 0
+    for ch in q:
+        idx = text.find(ch, pos)
+        if idx < 0:
+            return None
+        if start < 0:
+            start = idx
+        end = idx
+        pos = idx + 1
+    span = end - start + 1
+    return _FUZZY_BASE + min(span - len(q), 9)
+
+
 def _relevance(cmd: Command, q: str) -> Optional[int]:
+    """分档：逐字 > 前缀 > 标题包含 > 说明/触发命中 > 标题模糊 > 说明模糊。"""
     title = cmd.title.lower()
     if title == q:
         return 0
@@ -255,21 +357,43 @@ def _relevance(cmd: Command, q: str) -> Optional[int]:
                     cmd.group)).lower()
     if q in hay:
         return 3
+    fuzzy = _fuzzy_score(title, q)
+    if fuzzy is not None:
+        return fuzzy                     # 10–19
+    fuzzy = _fuzzy_score(hay, q)
+    if fuzzy is not None:
+        return 20 + (fuzzy - _FUZZY_BASE)  # 20–29
     return None
 
 
-def search_commands(commands: Sequence[Command], query: str) -> List[Command]:
-    """按标题相关度过滤：逐字命中 > 前缀 > 包含 > 说明/触发/原因命中。"""
+def _recent_rank(recent: Optional[Sequence[str]]) -> dict:
+    rank: dict = {}
+    for i, src in enumerate(recent or ()):
+        rank.setdefault(src, i)
+    return rank
+
+
+def search_commands(commands: Sequence[Command], query: str,
+                    recent: Optional[Sequence[str]] = None) -> List[Command]:
+    """过滤并排序：相关度 > 最近使用 > 索引原序。
+
+    空查询不返回「全部（含不可用）」——那是点了没反应的一堆灰条；
+    只给**可执行动作清单**，最近用过的排前。
+    """
     q = (query or "").strip().lower()
+    rank = _recent_rank(recent)
     if not q:
-        return list(commands)
+        order = sorted(
+            enumerate(c for c in commands if c.available),
+            key=lambda t: (rank.get(t[1].source, 10 ** 6), t[0]))
+        return [cmd for _i, cmd in order]
     scored = []
     for order, cmd in enumerate(commands):
         score = _relevance(cmd, q)
         if score is not None:
-            scored.append((score, order, cmd))
-    scored.sort(key=lambda x: (x[0], x[1]))
-    return [cmd for _score, _order, cmd in scored]
+            scored.append((score, rank.get(cmd.source, 10 ** 6), order, cmd))
+    scored.sort(key=lambda x: (x[0], x[1], x[2]))
+    return [cmd for _s, _r, _o, cmd in scored]
 
 
 # ---------------------------------------------------------------------------
@@ -317,7 +441,8 @@ def _build_dialog_class():
 
         # ---------------- 列表 ----------------
         def _refresh(self, text: str) -> None:
-            self._results = search_commands(self._commands, text)
+            self._results = search_commands(self._commands, text,
+                                            recent=load_recent())
             self.list_widget.clear()
             self.reason_label.clear()
             for cmd in self._results:
@@ -328,12 +453,30 @@ def _build_dialog_class():
                 elif cmd.status == "conditional":
                     item.setForeground(Qt.darkYellow)
                 self.list_widget.addItem(item)
-            if not self._results:
-                self.reason_label.setText(
-                    "没有匹配的入口。换个关键词（例如「设置」「全天」「FT8」），"
-                    "或直接按快捷键执行。")
-            else:
+            if self._results:
                 self.list_widget.setCurrentRow(0)
+                if not (text or "").strip():
+                    self.reason_label.setText(
+                        "可执行动作（最近使用优先）：回车执行首条，"
+                        "↑↓ 选择，输入关键词过滤，Esc 关闭。")
+                return
+            self.reason_label.setText(self._no_match_hint(text))
+
+        def _no_match_hint(self, text: str) -> str:
+            """没匹配也给下一步：拿索引里真实存在的条目举例，不写死样例。"""
+            recent = set(load_recent())
+            ranked = sorted(self._commands,
+                            key=lambda c: (c.source not in recent,))
+            samples: List[str] = []
+            for cmd in ranked:
+                if cmd.available and cmd.title not in samples:
+                    samples.append(cmd.title)
+                if len(samples) >= 3:
+                    break
+            tried = " ".join(f"「{t}」" for t in samples)
+            head = (f"没有匹配「{(text or '').strip()}」。"
+                    if (text or "").strip() else "当前没有可执行的入口。")
+            return (f"{head}试试：{tried}；按 ↑↓ 选择，Enter 执行，Esc 关闭。")
 
         @staticmethod
         def _item_text(cmd: Command) -> str:
@@ -357,6 +500,7 @@ def _build_dialog_class():
             result = cmd.run()
             self.last_result = result
             if result.get("ok"):
+                remember_recent(cmd.source)
                 self.hide()
             else:
                 self.reason_label.setText(
