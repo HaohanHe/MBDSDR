@@ -18,6 +18,9 @@
 | 死代码 | 12 | 2（4 个函数 `c14ac51e`；2 个纯函数 `1c0464b6`；删除取证见 §4.1/§4.2，C12 见 §6.2） | 9（三录音模块、C++ 同名模块、仅测试模块、未接线方法、触屏控件、两条动态调用误报、测试钉住函数） | 1（46 个 library-only 模块，已三类归档 §5.3） |
 | 死分支/死配置 | 6 | 0 | 6（ACARS 死分支、`not_implemented`、零消费常量、全部在用设置键、无死键结论、legacy 别名） | 0 |
 
+> 另：§5.10（2026-11-11）记录新发现的一类**运行时多真值源**——同一源码被裸导入与包导入加载成
+> 两个模块对象（29 个模块存在两种形态，6 个带可变模块级状态）。它不改变本表 41 项的计数口径。
+
 **一句话结论**：真正能动的只有 2 组死函数（已删 6 个，见 §4.1/§4.2）、1 组逐字相同的格式化函数（已合并，见 §5.5）和 1 处常量复用（已拆分 `ef07c133`，见 A12）；
 其余"看起来重复"的，要么是**两种用途**（采样率白名单 vs 候选探测表），要么是
 **两个独立 App 各自的实现**（C++ Qt 与 Python PyQt6 无共享运行时），要么是
@@ -540,6 +543,74 @@ python -m pytest tests/test_theme_switch.py tests/test_theme_tokens.py \
 **重写约束（写死）**：若日后重写 ECEF→开普勒，必须按正确公式与归一化实现，并补
 「已知根数 → ECI → ECEF → 还原」的闭环数值测试（含 `e>0` 与退化轨道两类用例），
 **不得复原此实现**。
+
+## 5.10 双模块实例（裸导入 + 包导入）—— 2026-11-11 新增
+
+> 定性：**多真值源（运行时副本）**。与 §2 各条的“同一事实写两处”不同，这里同一份源码被
+> Python 加载成**两个互不相干的模块对象**，各自的模块级变量是两份。不计入 §0 的 41 项口径。
+> 本条**只出结论，未改代码**。
+
+### 5.10.1 成因（不是谁写错了，是两处垫路径叠出来的）
+
+- `desktop/main.py:21/35/36` 把 `desktop/` 与仓库根先后塞进 `sys.path`；
+- `desktop/__init__.py` 的“双上下文垫片”又把 `desktop/` 垫一次，目的是让
+  `from desktop.ai_panel import …` 能解析同级裸导入；
+- `tests/conftest.py:44-46` 同样把**仓库根 + desktop/** 都垫进去。
+
+于是同一进程里 `import themes`（解析到 `desktop/themes.py`，模块名 `themes`）与
+`import desktop.themes`（同一文件，模块名 `desktop.themes`）会各执行一遍模块体。
+实测（本机，仓库根 + desktop 同时在 path）：
+
+```
+themes             | same object: False | themes.py  themes.py
+shortcuts          | same object: False | shortcuts.py shortcuts.py
+constants          | same object: False | constants.py constants.py
+settings           | same object: False | settings.py settings.py
+spectrum_processor | same object: False
+new_spacetime      | same object: False
+```
+
+`themes` 的后果已由用户实测：用 `desktop.themes` 设降档 → `_FONT_SCALE_NOTE` 写进 A 副本，
+面板从 B 副本读 → **提示永远不显示**（沉默失效，不报错）。
+
+### 5.10.2 全仓盘点（29 个模块同时存在两种导入形态）
+
+| 模块 | 裸导入 / 包导入（文件数） | 可变模块级状态 | 后果 |
+|---|---|---|---|
+| `desktop.themes` | 8 / 0（包名形态运行时可构造） | `_FONT_SCALE_OVERRIDE`、`_FONT_SCALE_NOTE` | **沉默失效（已实测）**：写入一份、读取另一份 |
+| `desktop.shortcuts` | 7 / 0 | `_OVERRIDES` | **同型沉默失效**：用户改键覆盖写一份、面板读另一份 → 自定义静默丢失（未单独复现，机制与 themes 相同） |
+| `mbdsdr_ai.new_spacetime` | 15 / 82 | `_global_engine` | **假绿风险最高**：两份 `TimeEngine`，桌面走包名、`mbdsdr_ai` 内部走裸名 → 时间基准分裂、测试可因副本不同而绿 |
+| `mbdsdr_ai.orbit` | 8 / 15 | `_TLE_FETCHER` | 两份抓取器/缓存：重复取数、缓存不同步（沉默，非致命） |
+| `mbdsdr_ai.time_basis` | 8 / 3 | `_guard` | 两份时钟守卫：保护/告警各算一份（沉默，非致命） |
+| `desktop.spectrum_widget` | 55 / 6 | `_BANDPLAN_CACHE` | 缓存双份：内存浪费 + 可能读旧 bandplan（沉默，非致命） |
+| `desktop.main_window` / `rf_sky_view` / `control_panel` 等 11 个 UI 模块 | 4–208 / 2–39 | 无 `global` 可变，但定义 **Qt 类** | **类型身份分裂**：两份同名类对象，跨副本 `isinstance` / 信号连接互不识别（当前未触发，属潜在） |
+| `mbdsdr_ai.tool_registry` | 2 / 126 | 注册表（函数式写入，无 `global`） | 裸形态当前 `ImportError`（模块内相对导入）→ **暂不形成双实例**；一旦有人在 `mbdsdr_ai/` 目录内跑脚本即分裂 → 工具注册到一份、另一份看不到（沉默丢失） |
+| `mbdsdr_ai.spectrum_processor`、`decoders`、`sat_passes`、`serial_gnss`、`hal`、`gnss_monitor`、`tle_integrity`、`new_spacetime_tle`、`builtin_tle_meta`、`audio_resampler` | 1–15 / 2–44 | 无可变状态（纯函数/常量） | 无害，但模块体重复执行、内存翻倍 |
+| `desktop.constants`、`desktop.settings` | 26 / 1、21 / 0 | 无可变状态 | 无害（两份同值）；`settings` 若日后加缓存，立即升级为沉默失效 |
+| `mbdsdr_ai.config`、`mbdsdr_ai.sdr_backend` | 0 / 17、0 / 30 | — | **单形态，无副本**（不在风险面内） |
+
+### 5.10.3 治理方案（三选一：选 ①，并配 ③ 作长期规则）
+
+- **① 每个模块顶部做 `sys.modules` 双向别名（选定，立即做）**
+  在模块最上方加 6 行：以裸名加载时 `sys.modules.setdefault("desktop.<名>", 当前模块)`；
+  以包名加载时若裸副本已存在，则 `sys.modules[__name__] = 裸副本` 并立即返回式复用。
+  这样无论谁先加载，后到的名字都拿到同一个对象，模块体只执行一次。
+  **选它的理由**：附加式、不改任何一处 import 语句，改动面 = 风险面（今晚在途的
+  `main_window.py`/`rf_sky_view.py` 一行都不用碰）；可逐模块上线、可单独 revert；
+  双向生效，脚本上下文（`python desktop/main.py`）与包上下文（pytest/工具）都被覆盖。
+  配套一条棘轮测试：固定清单逐个断言 `import X is import 包.X`，回归即红，不再沉默。
+- **② 全仓统一成包式导入、删掉裸导入路径（否决）**
+  要改 600+ 处 import，且今晚这些文件正被他线高频编辑 → 冲突与回归成本极高；
+  更关键的是 `scripts/**`、`mbdsdr_ai/tests/**` 依赖裸导入直接运行，统一后必须给每个
+  入口补 `sys.path` 引导，等于把“垫路径”从 3 处扩散到几十处。**改动面 > 收益面。**
+- **③ 禁止模块级可变状态，改由单例持有（采纳为长期规则，不在本轮铺开）**
+  它不消灭副本，只把“副本分裂”的爆炸半径从“功能静默失效”降成“多一个实例”。
+  配合 ① 后收益最大；单独用则 `themes` 这类“状态就长在模块里”的模块依然无解。
+  本轮只立规矩：新代码不得新增模块级可变全局；已有 6 处（`themes`/`shortcuts`/
+  `spectrum_widget`/`new_spacetime`/`orbit`/`time_basis`）登记在案，随 ① 落地后逐条迁移。
+
+**执行顺序（待授权）**：① 先做 6 个带可变状态的模块 → 再补 UI/纯函数模块 → 最后上棘轮测试；
+每步单独提交、跑该模块测试，禁一次性全铺。
 
 ## 6. 账本线登记行并入（R1–R20）
 
