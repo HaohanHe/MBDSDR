@@ -227,6 +227,28 @@ CELLS = {
                rmtree="yes", font="no", window="pysignal", emit="yes"),
     "BT": dict(platform="windows", show="none", loop="none", exit="osmain",
                rmtree="yes", font="no", window="pysignal", emit="no"),
+    # ModulePanel 内部 59 个控件的结构二分
+    # 只导入 module_panel（模块级 QColor 常量 + 导入链），不建面板
+    "BU": dict(platform="windows", show="none", loop="none", exit="osmain",
+               rmtree="yes", font="no", window="importmod",
+               mod="module_panel"),
+    # 只建自绘信号流画布
+    "BV": dict(platform="windows", show="none", loop="none", exit="osmain",
+               rmtree="yes", font="no", window="flowcanvas"),
+    # ModulePanel，但把 FlowCanvas 换成无自绘的桩（其余 58 个控件不变）
+    "BW": dict(platform="windows", show="none", loop="none", exit="osmain",
+               rmtree="yes", font="no", window="modulepanel_stub"),
+    # 类级二分：把 ModulePanel 用到的控件类别各自单建
+    "BX": dict(platform="windows", show="none", loop="none", exit="osmain",
+               rmtree="yes", font="no", window="wclass", cls="groupbox", n=2),
+    "BY": dict(platform="windows", show="none", loop="none", exit="osmain",
+               rmtree="yes", font="no", window="wclass", cls="combo", n=4),
+    "BZ": dict(platform="windows", show="none", loop="none", exit="osmain",
+               rmtree="yes", font="no", window="wclass", cls="spin", n=3),
+    "CA": dict(platform="windows", show="none", loop="none", exit="osmain",
+               rmtree="yes", font="no", window="wclass", cls="lam20", n=20),
+    "CB": dict(platform="windows", show="none", loop="none", exit="osmain",
+               rmtree="yes", font="no", window="wclass", cls="form", n=3),
 }
 
 CODE_LABEL = {
@@ -387,6 +409,87 @@ def run_child(cell_id: str) -> None:
         window._probe_objs = [em, rc]
         window.resize(640, 480)
         _mark(mark, "S3_ctor", f"pysignal emit={cfg.get('emit')}")
+    elif cfg["window"] in ("flowcanvas", "modulepanel_stub"):
+        from PySide6.QtWidgets import QMainWindow, QWidget      # noqa: E402
+        from PySide6.QtCore import Signal                       # noqa: E402
+        import module_panel                                     # noqa: E402
+        window = QMainWindow()
+        window.setCentralWidget(QWidget())
+        if cfg["window"] == "flowcanvas":
+            window.setCentralWidget(module_panel.FlowCanvas())
+            _mark(mark, "S3_ctor", "FlowCanvas")
+        else:
+            # 只把自绘画布换成桩：Signal/set_graph/selected 三个被用到的接口保留，
+            # 其余 58 个控件与真实 ModulePanel 完全一致。
+            class _StubFlow(QWidget):
+                node_selected = Signal(str, str)
+
+                def __init__(self):
+                    super().__init__()
+                    self.selected = None
+
+                def set_graph(self, modules, edges):
+                    pass
+
+            module_panel.FlowCanvas = _StubFlow
+            panel = module_panel.ModulePanel()
+            panel.setParent(window)
+            window._probe_panel = panel
+            _mark(mark, "S3_ctor", "ModulePanel+stubFlow")
+    elif cfg["window"] == "wclass":
+        # 类级二分：只建 ModulePanel 用到的某一类控件
+        from PySide6.QtWidgets import (                         # noqa: E402
+            QMainWindow, QWidget, QGroupBox, QVBoxLayout, QHBoxLayout,
+            QComboBox, QDoubleSpinBox, QSlider, QFormLayout, QLabel,
+            QPushButton, QFrame)
+        from PySide6.QtCore import Qt                            # noqa: E402
+        window = QMainWindow()
+        box = QWidget()
+        lay = QVBoxLayout(box)
+        kind, n = cfg["cls"], int(cfg["n"])
+        if kind == "groupbox":
+            for i in range(n):
+                g = QGroupBox(f"g{i}")
+                gl = QVBoxLayout(g)
+                gl.addWidget(QLabel("说明文本"))
+                gl.addWidget(QPushButton("按钮"))
+                lay.addWidget(g)
+        elif kind == "combo":
+            for i in range(n):
+                c = QComboBox()
+                c.addItems(["甲", "乙", "丙"])
+                c.currentIndexChanged.connect(lambda _i: None)
+                lay.addWidget(c)
+        elif kind == "spin":
+            for i in range(n):
+                s = QDoubleSpinBox()
+                s.setRange(0, 250000)
+                s.setValue(1.5)
+                s.valueChanged.connect(lambda _v: None)
+                lay.addWidget(s)
+                sl = QSlider(Qt.Horizontal)
+                sl.setRange(0, 50)
+                sl.setValue(20)
+                sl.valueChanged.connect(lambda _v: None)
+                lay.addWidget(sl)
+        elif kind == "lam20":
+            # 对照 BH/BI（普通函数 500/5000 连接）：这里用 20 个闭包连接
+            sl = QSlider(Qt.Horizontal)
+            sl.setRange(0, 50)
+            sl.setValue(20)
+            for _i in range(n):
+                sl.valueChanged.connect(lambda _v, k=_i: None)
+            lay.addWidget(sl)
+        elif kind == "form":
+            for i in range(n):
+                w = QWidget()
+                f = QFormLayout(w)
+                f.addRow("频率", QDoubleSpinBox())
+                f.addRow("增益", QLabel("—"))
+                lay.addWidget(w)
+        window.setCentralWidget(box)
+        window.resize(640, 480)
+        _mark(mark, "S3_ctor", f"{kind}x{n}")
     elif cfg["window"] in ("minqmw", "minwidget", "qthreads", "many",
                            "aipanel", "spectrum", "statuspanel",
                            "modulepanel", "appfilter"):
