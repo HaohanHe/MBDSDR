@@ -395,6 +395,18 @@ path 或行号不存在 0**。35 条集中在被后续重构推移过行号的�
 **白名单现状**：`docs/line-check-waivers.md` 1 条 / 上限 1；严格模式复跑
 `--check-lines --strict-lines` 退出码 0（未豁免对不上 0）。
 
+**统计口径：HEAD 快照与工作区必须分两行报，验收只认 HEAD 快照（2026-11-11 写死）**
+
+| 口径 | 怎么量 | 当日实测（HEAD `3429bf8c`） |
+|---|---|---|
+| **HEAD 快照（验收口径）** | `git worktree add --detach <tmp> <hash>`，再跑 `<tmp>\scripts\verify_claims.py --check-lines --strict-lines`（脚本与文档树都是该提交版） | **72 绿 / 0 红 / 1 黄**（黄=白名单 1 条，未豁免 0），退出码 0 |
+| **工作区** | 仓库根同一条命令 | 72 绿 / 0 红 / 1 黄（与 HEAD 同值） |
+
+- 两行**必须一起报**，各自带 commit 哈希与命令；只报一行即不合规。数字随并行线提交会变，所以哈希必须跟着变。
+- 工作区绿只说明「先改」，HEAD 绿才说明「入库」。今天实测到过两行不一致：`4583f75f` 落库后 HEAD（`d8d2f963`）快照是 `70 绿 / 0 红 / 3 黄`，其中 2 条黄分别是 `error-code-visibility.md:328`（工作区先改、HEAD 未落库）与 `reference-mechanisms.md:424`（被并行线 `eb8515dc` 的行号位移推黄）。
+- 反过来也一样：只看 HEAD 会漏掉「在途修好的 hunk」，只看工作区会拿「没入库的绿」结案。所以两行都要，**验收取 HEAD 那行**。
+- 今天并行线提交（`3f8657f7`、`bedf3c4d`、`7501d5d4`、`a72996fb` 等）把已绿行推黄共 4 轮，每轮都是按 §7.7 重定位 + 取该行 blame 作基准，**没有一条走豁免**。
+
 ### 7.7.1 渐进严格：白名单只收「在途」，且必须自己会关门（2026-11-11）
 
 `--check-lines` 默认只报不拦时**闸门等于没关**。渐进方案：
@@ -412,6 +424,49 @@ path 或行号不存在 0**。35 条集中在被后续重构推移过行号的�
 
 对应反证在 `tests/test_verify_claims.py`：无豁免判失败、有效豁免通过、过期豁免失败、
 超上限失败、白名单为零时自动严格。
+
+**白名单三条负向实测（2026-11-11，真实命令输出）**：用临时 `--waivers` 文件跑真实仓库，
+不改已入库的白名单；三条都退出码 1：
+
+```text
+$ python scripts/verify_claims.py --check-lines --strict-lines --waivers %TEMP%\waiver_tests\due_yesterday.md
+白名单（line-check-waivers）：1 条 / 上限 1
+  [白名单不合规] 白名单第 3 行：docs/COORDINATION.md mbdsdr_ai/tool_registry.py:525 豁免已过期（2026-11-10）
+第 4 步：对不上 1 条（白名单吸收 1，未豁免 0）；模式=严格
+EXIT=1
+
+$ python scripts/verify_claims.py --check-lines --strict-lines --waivers %TEMP%\waiver_tests\no_owner.md
+白名单（line-check-waivers）：1 条 / 上限 1
+  [白名单不合规] 白名单第 3 行：docs/COORDINATION.md mbdsdr_ai/tool_registry.py:525 缺 owner
+第 4 步：对不上 1 条（白名单吸收 1，未豁免 0）；模式=严格
+EXIT=1
+
+$ python scripts/verify_claims.py --check-lines --strict-lines --waivers %TEMP%\waiver_tests\duplicated.md
+白名单（line-check-waivers）：1 条 / 上限 1
+  [白名单不合规] 白名单第 4 行：重复豁免 docs/COORDINATION.md mbdsdr_ai/tool_registry.py:525
+第 4 步：对不上 1 条（白名单吸收 1，未豁免 0）；模式=严格
+EXIT=1
+```
+
+超上限另有单测 `test_waiver_over_cap_fails`（`MAX_WAIVERS=1` 时塞 2 条 → 失败），
+不在这里重复贴输出。
+
+**闸门接进发布检查，不再靠人记得跑**：`scripts/release_check.py` 的第一个步骤就是
+`docs`，直接跑 `verify_claims.py --check-lines --strict-lines`，非零退出即整轮 FAIL，
+`FAIL_HINTS["docs"]` 写明重定位口径。反证（在 `docs/` 放一条「引用存在但行号越界」的断言：
+`c6805f7c` — `mbdsdr_ai/solar_system.py:1117` — `SAMPLE_SITE`，该文件当时只有 1116 行）：
+
+```text
+[FAIL] docs  43.0s  退出码 1；含字面量 72  |  错引（红） 0  |  需重定位（黄） 1  |
+       path 或行号不存在 1  |  合计 74；第 4 步：对不上 2 条（白名单吸收 1，未豁免 1）；
+       模式=严格；结果：path 或行号不存在（路径存在但行数不够（共 1116 行））
+汇总：PASS 0 / FAIL 1 / SKIP 0  ｜总耗时 43.0s
+FAIL 步骤：docs
+EXIT=1
+```
+
+样本删除后同一命令恢复 `[PASS] docs  39.1s … 合计 73`、退出码 0。`docs` 步约 40–47s
+（全量 `git blame`），排在构建之前，代价可接受。
 
 ### 7.8 统计快照的生成方式（2026-11-06 写死）
 
