@@ -77,6 +77,33 @@ BUILTIN_SATS: Dict[str, int] = {
     "FENGYUN 3D": 43010,
 }
 
+# 内置目录的**唯一取数入口**（P0-02 最小收敛）：其它模块（new_spacetime_tle 等）
+# 要通过它取清单，不得再各自硬编码一份名字表；筛选口径也只在这里写一次。
+SATELLITE_KIND_FILTERS: Dict[str, Tuple[str, ...]] = {
+    "weather": ("NOAA", "METEOR", "FENGYUN"),
+    "amateur": ("ISS",),
+}
+
+
+def builtin_satellite_names(satellite_type: str = "all") -> List[str]:
+    """按类别取内置卫星名（保持 ``BUILTIN_SATS`` 的声明顺序）。
+
+    ``all`` 返回全部；``weather``/``amateur`` 按 ``SATELLITE_KIND_FILTERS``
+    的关键词匹配。类别与名字的对应关系只此一处，避免多个调用点各写一套
+    ``any(k in name ...)`` 造成「同一颗星在不同入口归到不同组」。
+    """
+    if satellite_type not in SATELLITE_KIND_FILTERS:
+        return list(BUILTIN_SATS)
+    keys = SATELLITE_KIND_FILTERS[satellite_type]
+    return [n for n in BUILTIN_SATS if any(k in n for k in keys)]
+
+
+# 过境预测网格与精度档（单一常量源；面板/AI 的「精度标注」都读这里）
+PASS_COARSE_STEP_S = 60.0      # 粗扫步长
+PASS_FINE_STEP_S = 2.0         # 过境段内采样步长
+PASS_BISECT_TOL_S = 0.25       # 二分收敛容差（秒）
+PASS_ALGORITHM = "sgp4-coarse60-fine2-bisect0.25"
+
 _TLE_CACHE: Dict[str, Tuple[float, Tuple[str, str]]] = {}
 _CACHE_DIR = os.path.join(os.path.expanduser("~"), ".mbdsdr", "tle_cache")
 _CTX = ssl.create_default_context()
@@ -124,6 +151,15 @@ def _bounded_urlopen(req, timeout_s: float, hard_deadline_s: float):
     if "e" in box:
         raise box["e"]
     return box["r"]
+
+
+def _iso_utc(unix_ts: float) -> str:
+    """Unix UTC 秒 → ISO-8601 UTC（带 ``Z``、带日期）。
+
+    过境时刻的权威表示：跨日不会丢掉日期，也不依赖本机时区（P1-14）。
+    """
+    return datetime.fromtimestamp(float(unix_ts), tz=timezone.utc) \
+        .strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def _gmst_days(jd_ut1: float) -> float:
@@ -412,12 +448,7 @@ def visible_satellites(
     否则与 ``sky_view_visible``（TimeEngine 口径）结果分叉。
     """
     out = []
-    for name in BUILTIN_SATS:
-        if satellite_type == "weather" and not any(
-                k in name for k in ("NOAA", "METEOR", "FENGYUN")):
-            continue
-        if satellite_type == "amateur" and "ISS" not in name:
-            continue
+    for name in builtin_satellite_names(satellite_type):
         st = compute_satellite_state(name, observer_lat, observer_lon,
                                      observer_alt, when=when)
         if st and st["elevation"] >= min_elevation:
@@ -427,7 +458,7 @@ def visible_satellites(
 
 
 def _bisect_threshold(el_fn, t_lo: float, t_hi: float, target: float,
-                      tol_s: float = 0.25, max_iter: int = 40) -> float:
+                      tol_s: float = PASS_BISECT_TOL_S, max_iter: int = 40) -> float:
     """二分法求仰角过零（阈值）时刻。
 
     细扫到 |el|<0.005°。
@@ -480,15 +511,12 @@ def _predict_passes_impl(
     except ImportError:  # 扁平导入（脚本直接 import orbit）
         from time_basis import validate_pass_window
 
-    coarse_step = 60.0   # 粗扫量级（~0.5min）
-    fine_step = 2.0      # pass 内采样步长，找中天/多普勒极值
+    coarse_step = PASS_COARSE_STEP_S   # 粗扫量级（~0.5min）
+    fine_step = PASS_FINE_STEP_S      # pass 内采样步长，找中天/多普勒极值
     # 显式时刻优先（仿真/测试口径）；缺省取 TimeEngine，与天空视图同一时间源
     t0 = _engine_now_unix() if start_unix is None else float(start_unix)
     t_end = t0 + hours * 3600.0
-    names = [n for n in BUILTIN_SATS
-             if not (satellite_type == "weather" and not any(
-                 k in n for k in ("NOAA", "METEOR", "FENGYUN")))
-             and not (satellite_type == "amateur" and "ISS" not in n)]
+    names = builtin_satellite_names(satellite_type)
     passes: List[Dict[str, Any]] = []
     degraded: List[Dict[str, Any]] = []
     for name in names:
@@ -613,6 +641,16 @@ def _predict_passes_impl(
                 # 内部排序键：rise_time 只有 HH:MM:SS，跨午夜按字符串排序会把
                 # 明天 05:34 排到今晚 20:48 前面。按真实 epoch 排序，输出前删除。
                 "_rise_epoch": t_rise,
+                # UTC 规范字段（P1-14）：全链唯一权威时刻，带 Z、带日期。
+                # 本地字段仅为兼容旧消费方保留，禁止在 AI/界面文案里当权威值。
+                "rise_utc": _iso_utc(t_rise),
+                "culmination_utc": _iso_utc(t_cul),
+                "set_utc": _iso_utc(t_set),
+                "rise_epoch_unix": round(t_rise, 3),
+                "culmination_epoch_unix": round(t_cul, 3),
+                "set_epoch_unix": round(t_set, 3),
+                "time_basis": "utc",
+                "legacy_time_fields_tz": "local",
                 "rise_time": time.strftime(tfmt, time.localtime(t_rise)),
                 "rise_azimuth": round(s_rise["azimuth"], 1),
                 "culmination_time": time.strftime(tfmt, time.localtime(t_cul)),
@@ -638,6 +676,14 @@ def _predict_passes_impl(
                 "accuracy_risk": acc["risk"],
                 "accuracy_note": acc["note"],
                 "time_precision_s": acc["time_precision_s"],
+                # 精度档（P1-13）：面板/AI 都读同一份算法与网格声明，
+                # 不再各自猜「这个时刻到底准到秒还是准到分」。
+                "precision_tier": ("second" if acc["time_precision_s"] <= 1
+                                   else "minute"),
+                "algorithm": PASS_ALGORITHM,
+                "coarse_step_s": coarse_step,
+                "fine_step_s": fine_step,
+                "bisect_tol_s": PASS_BISECT_TOL_S,
             })
             i = j
     passes.sort(key=lambda p: p["_rise_epoch"])
