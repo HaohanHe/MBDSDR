@@ -54,7 +54,19 @@
   他人暂存文件也不能放行**。事故 `bc0c75e1`：从共享 index 提交了 4 份别人
   文档的旧 blob，工作树是新内容，行号重定位被整体回退，而当时闸门判「允许提交」。
 
-退出码：0 无 MULTI；1 发现 MULTI（需人工确认）；2 用法/git 错误。
+  2026-11-12 裁定：**闸门管的是「共享 index 里的旧快照」，不是「暂存≠工作树」
+  这个形态**，二者只在共享 index 路径上等价。因此：
+  * 共享 index（未设置 `GIT_INDEX_FILE`，或它指向 `.git/index`）：DIRTY 一律
+    拒绝，无任何豁免；
+  * 私有 index（`GIT_INDEX_FILE` 指向别的文件）：允许差异，但每个有差异的
+    文件必须有**逐文件显式声明**的排除 hunk（环境变量 `MBDSDR_EXCLUDE_HUNKS`，
+    JSON：`[{"path","start","end","owner"}]`，由 `safe_commit.py --exclude-hunk`
+    写入）。声明为空又有差异 → 拒（无法区分「排除了什么」与「自己的改动没
+    add 全」）。不读通配、不认全局开关。
+  放行时打印 `DIRTY(allowed) <path> — <范围>（<owner>）`，并把声明写进
+  `MBDSDR_HOOK_LOG`（若设置）与 JSON 输出。
+
+退出码：0 无 MULTI；1 发现 MULTI 或有未解释差异（需人工确认）；2 用法/git 错误。
 """
 from __future__ import annotations
 
@@ -71,6 +83,7 @@ ROOT = Path(os.environ.get("MBDSDR_REPO_ROOT") or Path(__file__).resolve().paren
 DEFAULT_LOCKS_DIR = Path(r"D:\mbdsdr\.locks")
 LOCKS_DIR = Path(os.environ.get("MBDSDR_LOCKS_DIR") or DEFAULT_LOCKS_DIR)
 REGISTRY_PATH = LOCKS_DIR / "claims.json"
+EXCLUDE_ENV = "MBDSDR_EXCLUDE_HUNKS"
 
 
 def _git(*args: str) -> str:
@@ -406,6 +419,82 @@ def _worktree_dirty(paths: List[str]) -> List[str]:
     return dirty
 
 
+def _private_index() -> Optional[str]:
+    """当前是否走私有 index；是则返回其绝对路径，共享 index 返回 None。
+
+    判据只有一条：`GIT_INDEX_FILE` 已设置且**不是**共享 `.git/index`。
+    shell 里把变量指回共享 index 不算私有 index，仍按 DIRTY 全拒处理。
+    """
+    raw = (os.environ.get("GIT_INDEX_FILE") or "").strip()
+    if not raw:
+        return None
+    common = _git("rev-parse", "--git-common-dir").strip() or ".git"
+    common_dir = Path(common)
+    if not common_dir.is_absolute():
+        common_dir = (ROOT / common_dir).resolve()
+    candidate = Path(raw)
+    if not candidate.is_absolute():
+        candidate = (ROOT / candidate).resolve()
+    if os.path.normcase(str(candidate)) == os.path.normcase(str(common_dir / "index")):
+        return None
+    return str(candidate)
+
+
+def _excluded_hunks() -> Dict[str, List[Dict[str, Any]]]:
+    """解析 `MBDSDR_EXCLUDE_HUNKS`：私有 index 提交里显式排除的 hunk。
+
+    形态：`[{"path": "...", "start": 12, "end": 20, "owner": "..."}]`。
+    任何解析失败都当「未声明」（宁可拒，不假报放行）。
+    """
+    raw = (os.environ.get(EXCLUDE_ENV) or "").strip()
+    if not raw:
+        return {}
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        print(f"WARN {EXCLUDE_ENV} 不是合法 JSON，按未声明处理", file=sys.stderr)
+        return {}
+    if not isinstance(data, list):
+        print(f"WARN {EXCLUDE_ENV} 不是列表，按未声明处理", file=sys.stderr)
+        return {}
+    out: Dict[str, List[Dict[str, Any]]] = {}
+    for item in data:
+        if not isinstance(item, dict):
+            continue
+        path = _canonical(str(item.get("path") or ""))
+        try:
+            start = int(item["start"])
+            end = int(item["end"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if not path or start <= 0 or end < start:
+            continue
+        out.setdefault(path, []).append(
+            {"start": start, "end": end, "owner": str(item.get("owner") or "").strip()}
+        )
+    return out
+
+
+def _log_dirty_allowed(paths: List[str], exclusions: Dict[str, List[Dict[str, Any]]]) -> None:
+    """把 DIRTY(allowed) 的排除声明写进钩子日志（只写日志，不改退出码）。"""
+    log = (os.environ.get("MBDSDR_HOOK_LOG") or "").strip()
+    if not log:
+        return
+    record = {
+        "type": "DIRTY_ALLOWED",
+        "ts": datetime.now().isoformat(timespec="seconds"),
+        "paths": paths,
+        "exclude_hunks": {path: exclusions[_canonical(path)] for path in paths},
+    }
+    try:
+        log_path = Path(log)
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        with log_path.open("a", encoding="utf-8") as fh:
+            fh.write(json.dumps(record, ensure_ascii=False) + "\n")
+    except OSError as exc:
+        print(f"WARN 无法写 DIRTY_ALLOWED 日志：{exc}", file=sys.stderr)
+
+
 def check_staged(
     as_json: bool,
     expect: Optional[List[str]] = None,
@@ -414,7 +503,9 @@ def check_staged(
     """检查暂存区：①跨线（≥2 个活跃 owner）拒；②超出声明清单的文件拒；
     ③声明的私有 index 与实际读到的 index 不一致拒；
     ④出现「声明清单里没有的删除条目」时拒（陈旧私有 index 的幻影删除）；
-    ⑤暂存 blob 与工作树不一致时拒（共享 index 里的旧快照会被一起提交）。
+    ⑤暂存 blob 与工作树不一致时拒（共享 index 里的旧快照会被一起提交）；
+    私有 index 例外：必须在 `MBDSDR_EXCLUDE_HUNKS` 里逐文件声明排除了哪些
+    hunk，声明为空又存在差异一律拒（2026-11-12 裁定，见模块 docstring）。
 
     第 ② 条是「私有 index 文件名撞车 / 复用旧 index」这类事故的机械闸：
     提交的文件集合必须**全部落在声明清单内**，多一个就拒并打印多出来的路径。
@@ -491,6 +582,10 @@ def check_staged(
         unexplained_deletions = [p for p in deletions if _canonical(p) not in allowed]
 
     dirty = _worktree_dirty([p for p in paths if not status_of[p].startswith("D")])
+    private_index = _private_index()
+    exclusions = _excluded_hunks() if private_index else {}
+    allowed_dirty = [p for p in dirty if exclusions.get(_canonical(p))]
+    blocked_dirty = [p for p in dirty if p not in allowed_dirty]
 
     multi = len(owners) >= 2
     if as_json:
@@ -505,6 +600,10 @@ def check_staged(
                     "declared": declared,
                     "extras": extras,
                     "worktree_dirty": dirty,
+                    "private_index": _index_abs(private_index) if private_index else None,
+                    "dirty_allowed": allowed_dirty,
+                    "dirty_blocked": blocked_dirty,
+                    "exclude_hunks": exclusions,
                     "actual_index": _index_abs(actual_index),
                     "declared_index": _index_abs(declared_index),
                     "index_mismatch": index_mismatch,
@@ -514,7 +613,17 @@ def check_staged(
                 indent=2,
             )
         )
-        return 1 if (multi or extras or index_mismatch or unexplained_deletions or dirty) else 0
+        return (
+            1
+            if (
+                multi
+                or extras
+                or index_mismatch
+                or unexplained_deletions
+                or blocked_dirty
+            )
+            else 0
+        )
 
     print(f"INDEX 实际读取 {_index_abs(actual_index)}")
     if declared_index:
@@ -561,15 +670,44 @@ def check_staged(
             print(f"  DELETE  {path}")
         print("  删除条目必须逐条能解释来源；若是私有 index 基于旧 HEAD 建出的，")
         print("  先 `git read-tree HEAD` 重建私有 index，再提交。")
-    if dirty:
-        print(f"拒绝：{len(dirty)} 个暂存文件的 index 内容与工作树不一致（会提交旧 blob）：")
-        for path in dirty:
-            print(f"  DIRTY   {path}")
-        print("  原因：index 里留的是旧 blob、工作树是新内容（事故 bc0c75e1：")
-        print("        从共享 index 提交了 4 份他人文档的旧快照，行号重定位整体回退）。")
-        print("        这一条不看 owner、不看声明清单，暂存内容必须与工作树一致。")
-        print("  修法：确认工作树内容无误后 `git add -- <path>` 重新写入 index；")
-        print("        若这些路径不该进本次提交，`git restore --staged -- <path>` 撤出。")
+    if allowed_dirty:
+        print(
+            f"DIRTY(allowed)：{len(allowed_dirty)} 个文件在私有 index 里与工作树不一致，"
+            "已逐文件声明排除 hunk："
+        )
+        for path in allowed_dirty:
+            ranges = exclusions[_canonical(path)]
+            desc = ", ".join(
+                f"{r['start']}-{r['end']}" + (f"（{r['owner']}）" if r["owner"] else "")
+                for r in ranges
+            )
+            print(f"  DIRTY(allowed) {path} — 排除 hunk {desc}")
+        print("  说明：共享 index 不认此形态；私有 index 只认逐文件显式声明。")
+        _log_dirty_allowed(allowed_dirty, exclusions)
+    if blocked_dirty:
+        if private_index:
+            print(
+                f"拒绝：私有 index 里 {len(blocked_dirty)} 个文件与工作树不一致，"
+                "但没有声明排除 hunk："
+            )
+            for path in blocked_dirty:
+                print(f"  DIRTY   {path}")
+            print("  原因：私有 index 允许「排除他人 hunk」，但必须逐文件显式声明，")
+            print("        否则无法区分「排除了什么」与「自己的改动没 add 全」。")
+            print("  修法：`safe_commit.py --exclude-hunk <path>:<start-end>` 重提交；")
+            print("        或 `git add -- <path>` 把工作树内容全部暂存。")
+        else:
+            print(
+                f"拒绝：{len(blocked_dirty)} 个暂存文件的 index 内容与工作树不一致"
+                "（会提交旧 blob）："
+            )
+            for path in blocked_dirty:
+                print(f"  DIRTY   {path}")
+            print("  原因：index 里留的是旧 blob、工作树是新内容（事故 bc0c75e1：")
+            print("        从共享 index 提交了 4 份他人文档的旧快照，行号重定位整体回退）。")
+            print("        共享 index 不认排除声明，暂存内容必须与工作树一致。")
+            print("  修法：确认工作树内容无误后 `git add -- <path>` 重新写入 index；")
+            print("        若这些路径不该进本次提交，`git restore --staged -- <path>` 撤出。")
         failed = True
     if extras:
         print(f"拒绝：暂存区有 {len(extras)} 个文件不在声明清单内（多一个就拒）：")

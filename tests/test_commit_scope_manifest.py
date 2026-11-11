@@ -310,3 +310,71 @@ def test_stale_private_index_rebuilt_from_head_allowed(tmp_path):
     assert proc.returncode == 0, (proc.returncode, out)
     assert "DELETE" not in out
     assert "幻影删除" not in out
+
+
+def _private_dirty_repo(repo, tmp_path, name="idx_文档闸门线_20261112_0100"):
+    """私有 index 里放 a2、工作树是 a3（模拟「暂存≠工作树」）。"""
+    private = tmp_path / name
+    env = os.environ.copy()
+    env.pop("GIT_INDEX_FILE", None)
+    env["GIT_INDEX_FILE"] = str(private)
+    _git(repo, "read-tree", "HEAD", env=env, check=True)
+    _git(repo, "add", "a.txt", env=env, check=True)
+    (repo / "a.txt").write_text("a3\n", encoding="utf-8")
+    return private
+
+
+def test_private_index_dirty_without_exclusion_rejected(tmp_path):
+    """反证②：私有 index 有差异、排除清单为空 → 必须拒（2026-11-12 裁定）。"""
+    repo = _make_repo(tmp_path)
+    private = _private_dirty_repo(repo, tmp_path)
+
+    proc = _run(
+        repo, tmp_path, "--staged",
+        env_extra={"GIT_INDEX_FILE": str(private)},
+    )
+
+    out = proc.stdout + proc.stderr
+    assert proc.returncode == 1, (proc.returncode, out)
+    assert "DIRTY" in out
+    assert "没有声明排除" in out
+    assert "a.txt" in out
+
+
+def test_private_index_dirty_with_exclusion_allowed(tmp_path):
+    """私有 index 有差异 + 逐文件声明排除 hunk → 放行并打印 DIRTY(allowed)。"""
+    repo = _make_repo(tmp_path)
+    private = _private_dirty_repo(repo, tmp_path)
+    declare = '[{"path": "a.txt", "start": 1, "end": 1, "owner": "别线"}]'
+
+    proc = _run(
+        repo, tmp_path, "--staged",
+        env_extra={
+            "GIT_INDEX_FILE": str(private),
+            "MBDSDR_EXCLUDE_HUNKS": declare,
+        },
+    )
+
+    out = proc.stdout + proc.stderr
+    assert proc.returncode == 0, (proc.returncode, out)
+    assert "DIRTY(allowed)" in out
+    assert "1-1" in out
+    assert "别线" in out
+
+
+def test_shared_index_ignores_exclusion_declaration(tmp_path):
+    """反证①：共享 index 即使带了排除声明，旧快照形态仍必须红。"""
+    repo = _make_repo(tmp_path)
+    _git(repo, "add", "a.txt", check=True)
+    (repo / "a.txt").write_text("a3\n", encoding="utf-8")
+    declare = '[{"path": "a.txt", "start": 1, "end": 1, "owner": "别线"}]'
+
+    proc = _run(
+        repo, tmp_path, "--staged",
+        env_extra={"MBDSDR_EXCLUDE_HUNKS": declare},
+    )
+
+    out = proc.stdout + proc.stderr
+    assert proc.returncode == 1, (proc.returncode, out)
+    assert "DIRTY" in out
+    assert "bc0c75e1" in out

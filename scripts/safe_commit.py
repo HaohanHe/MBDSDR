@@ -10,9 +10,21 @@
 操作，任何一步不满足就退出且**不提交**；撞上 ref 锁就用新 HEAD 整盘重建 index
 再试（默认 3 次）。
 
+排除他人 hunk（2026-11-12 裁定）
+--------------------------------
+
+共享文件里同时有自己和他人的在途改动时，可用 ``--exclude-hunk <path>:<start-end>``
+（可重复）把指定 hunk 从**私有 index** 里反向撤掉，工作树保持原样。声明会：
+① 作为 ``MBDSDR_EXCLUDE_HUNKS``（JSON）传给 pre-commit 闸门，闸门据此放行
+``DIRTY(allowed)``（共享 index 不认这种声明）；
+② 追加到提交说明的 ``excluded-hunks:`` 段，写明路径、行号范围与 owner（可空）。
+声明范围必须完整覆盖 diff 的 hunk，跨 hunk 边界或对不上任何改动一律拒绝。
+
 用法::
 
     python scripts/safe_commit.py --files a.py b.md --message-file msg.txt
+    python scripts/safe_commit.py --files a.md --message-file msg.txt \\
+        --exclude-hunk a.md:120-138 --exclude-owner 接入层线
 
 退出码：0 成功；1 前置校验失败（未提交）；2 重试耗尽（未提交）；3 提交后复核失败
 （已提交，需按事故卡处理）。
@@ -20,14 +32,128 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
 import time
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(
+    os.environ.get("MBDSDR_REPO_ROOT") or Path(__file__).resolve().parents[1]
+)
+
+EXCLUDE_ENV = "MBDSDR_EXCLUDE_HUNKS"
+_HUNK_RE = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@")
+
+
+def _parse_exclusions(specs: list[str], files: list[str]) -> list[dict]:
+    """解析 `--exclude-hunk <path>:<start-end>`；格式错误或路径越界直接失败。"""
+    items: list[dict] = []
+    for spec in specs:
+        path, sep, rng = spec.rpartition(":")
+        match = re.fullmatch(r"\s*(\d+)\s*-\s*(\d+)\s*", rng or "")
+        if not sep or not match:
+            raise ValueError(f"--exclude-hunk 格式应为 <path>:<start-end>，收到 {spec!r}")
+        norm = path.replace("\\", "/").lstrip("./")
+        if norm not in files:
+            raise ValueError(f"--exclude-hunk 的路径不在 --files 清单内：{norm}")
+        start, end = int(match.group(1)), int(match.group(2))
+        if start <= 0 or end < start:
+            raise ValueError(f"--exclude-hunk 行号范围不合法：{spec!r}")
+        items.append({"path": norm, "start": start, "end": end})
+    return items
+
+
+def _revert_index_hunks(env: dict, path: str, ranges: list[dict]) -> None:
+    """把声明的 hunk 从私有 index 里反向撤掉（工作树不动）。
+
+    只接受「完整覆盖某个 hunk」的声明：跨 hunk 边界会多撤或少撤，宁可拒绝
+    也不静默扩大排除范围。新增文件与二进制文件不支持排除。
+    """
+    if _run(["cat-file", "-e", f"HEAD:{path}"], env).returncode != 0:
+        raise ValueError(f"{path} 是新增文件，不支持 --exclude-hunk")
+    proc = _run(["diff", "--cached", "--no-renames", "-U0", "HEAD", "--", path], env)
+    if proc.returncode != 0:
+        raise ValueError(
+            f"读取 {path} 的暂存 diff 失败：{proc.stderr.decode('utf-8', 'replace')[:200]}"
+        )
+    text = proc.stdout.decode("utf-8", "replace")
+    if "GIT binary patch" in text or text.startswith("Binary files"):
+        raise ValueError(f"{path} 是二进制文件，不支持 --exclude-hunk")
+    header: list[str] = []
+    hunks: list[dict] = []
+    cur: dict | None = None
+    for line in text.splitlines(True):
+        if line.startswith("@@"):
+            if cur is not None:
+                hunks.append(cur)
+            cur = {"head": line, "body": [], "start": 0, "end": -1}
+        elif cur is None:
+            header.append(line)
+        else:
+            cur["body"].append(line)
+    if cur is not None:
+        hunks.append(cur)
+    if not hunks:
+        raise ValueError(f"{path} 在私有 index 里没有改动，无法排除")
+
+    for hunk in hunks:
+        match = _HUNK_RE.match(hunk["head"].rstrip("\n"))
+        if not match:
+            raise ValueError(f"{path} 的 hunk 头无法解析：{hunk['head'].strip()}")
+        hunk["start"] = int(match.group(1))
+        count = int(match.group(2) or 1)
+        if count == 0:
+            raise ValueError(
+                f"{path} 含纯删除 hunk（@@ … +{hunk['start']},0），暂不支持 --exclude-hunk"
+            )
+        hunk["end"] = hunk["start"] + count - 1
+
+    selected: list[dict] = []
+    for item in ranges:
+        matched = [
+            h for h in hunks if h["start"] <= item["end"] and h["end"] >= item["start"]
+        ]
+        if not matched:
+            raise ValueError(
+                f"{path}:{item['start']}-{item['end']} 没对上任何暂存 hunk"
+            )
+        for hunk in matched:
+            if not (item["start"] <= hunk["start"] and hunk["end"] <= item["end"]):
+                raise ValueError(
+                    f"{path}:{item['start']}-{item['end']} 未完整覆盖 hunk "
+                    f"{hunk['start']}-{hunk['end']}，请按完整 hunk 范围声明"
+                )
+            if all(hunk is not s for s in selected):
+                selected.append(hunk)
+    if not selected:
+        raise ValueError(f"{path} 的排除声明没有选中任何 hunk")
+
+    patch = "".join(header) + "".join(
+        h["head"] + "".join(h["body"]) for h in selected
+    )
+    apply = _run(
+        ["apply", "--cached", "-R", "--unidiff-zero", "--whitespace=nowarn", "-"],
+        env,
+        patch.encode("utf-8"),
+    )
+    if apply.returncode != 0:
+        raise ValueError(
+            f"{path} 排除 hunk 失败：{apply.stderr.decode('utf-8', 'replace')[:300]}"
+        )
+
+
+def _exclusion_trailer(message: bytes, exclusions: list[dict], owner: str) -> bytes:
+    """把排除清单追加到提交说明（提交说明即持久日志）。"""
+    if not exclusions:
+        return message
+    lines = ["", "", "excluded-hunks:" + (f" owner={owner}" if owner else "")]
+    for item in exclusions:
+        lines.append(f"- {item['path']}:{item['start']}-{item['end']}")
+    return message.rstrip(b"\n") + ("\n" + "\n".join(lines) + "\n").encode("utf-8")
 
 LOCK_HINTS = ("cannot lock ref", "expected ", "Unable to create", "index.lock")
 
@@ -54,8 +180,15 @@ def _staged_set(env) -> list[str]:
     return out
 
 
-def _attempt(files: list[str], message: bytes, index: Path) -> tuple[int, str]:
+def _attempt(
+    files: list[str],
+    message: bytes,
+    index: Path,
+    exclusions: list[dict] | None = None,
+    exclude_owner: str = "",
+) -> tuple[int, str]:
     """一次完整尝试。返回 (退出码, 说明)。"""
+    exclusions = exclusions or []
     if index.exists():
         index.unlink()
     env = _index_env(index)
@@ -71,6 +204,34 @@ def _attempt(files: list[str], message: bytes, index: Path) -> tuple[int, str]:
     if add.returncode != 0:
         return 1, f"git add 失败：{add.stderr.decode('utf-8', 'replace')[:200]}"
 
+    # 2b) 排除他人 hunk：只从私有 index 反向撤掉，工作树不动
+    if exclusions:
+        for path in sorted({e["path"] for e in exclusions}):
+            ranges = [e for e in exclusions if e["path"] == path]
+            try:
+                _revert_index_hunks(env, path, ranges)
+            except ValueError as exc:
+                return 1, str(exc)
+            print(
+                f"[exclude] {path}: "
+                + ", ".join(f"{e['start']}-{e['end']}" for e in ranges)
+                + (f"（owner={exclude_owner}）" if exclude_owner else "")
+            )
+        env[EXCLUDE_ENV] = json.dumps(
+            [
+                {
+                    "path": e["path"],
+                    "start": e["start"],
+                    "end": e["end"],
+                    "owner": exclude_owner,
+                }
+                for e in exclusions
+            ],
+            ensure_ascii=False,
+        )
+        env["MBDSDR_DECLARED_INDEX"] = str(index)
+        message = _exclusion_trailer(message, exclusions, exclude_owner)
+
     staged = _staged_set(env)
     expect = []
     for f in files:
@@ -79,6 +240,12 @@ def _attempt(files: list[str], message: bytes, index: Path) -> tuple[int, str]:
     if sorted(staged) != sorted(expect):
         extra = [s for s in staged if s not in expect]
         missing = [e for e in expect if e not in staged]
+        if exclusions and missing:
+            names = [m.split("\t", 1)[-1] for m in missing]
+            return 1, (
+                f"排除 hunk 后文件无剩余改动：{names}"
+                "（把不该提交的 hunk 全排除了，或声明范围过大）"
+            )
         return 1, f"文件集不符：多 {extra} 缺 {missing}"
 
     # 3) 记录待提交 blob，供提交后复核（形态⑩）
@@ -118,15 +285,31 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--files", nargs="+", required=True, help="本笔要提交的文件（精确清单）")
     ap.add_argument("--message-file", required=True, help="提交信息文件（UTF-8）")
     ap.add_argument("--retries", type=int, default=3, help="撞锁/基线变化时的重建次数")
+    ap.add_argument(
+        "--exclude-hunk",
+        action="append",
+        default=[],
+        metavar="PATH:START-END",
+        help="从私有 index 排除的 hunk（可重复）；工作树保持原样",
+    )
+    ap.add_argument("--exclude-owner", default="", help="排除 hunk 的归属线（可留空）")
     args = ap.parse_args(argv)
 
     files = [f.replace("\\", "/").lstrip("./") for f in args.files]
     message = Path(args.message_file).read_bytes()
+    try:
+        exclusions = _parse_exclusions(args.exclude_hunk, files)
+    except ValueError as exc:
+        print(f"拒绝：{exc}")
+        return 1
     index = Path(tempfile.gettempdir()) / f"safe_commit_{os.getpid()}_{int(time.time())}.idx"
 
     try:
         for n in range(1, args.retries + 1):
-            code, note = _attempt(files, message, index)
+            code, note = _attempt(
+                files, message, index, exclusions=exclusions,
+                exclude_owner=args.exclude_owner,
+            )
             print(f"[try {n}] {note}")
             if code == 0:
                 return 0
