@@ -1,0 +1,152 @@
+{
+  "ctor_ms": 3622.7,
+  "phase_ms": {
+    "eventFilter": [
+      404.1,
+      69973
+    ],
+    "_create_sky_widget": [
+      3.6,
+      1
+    ],
+    "_add_right_tab": [
+      370.5,
+      20
+    ],
+    "_build_top_bar": [
+      40.8,
+      1
+    ],
+    "_build_bottom_dock": [
+      0.9,
+      1
+    ],
+    "_apply_perf_profile": [
+      0.3,
+      1
+    ],
+    "_build_capability_drawer": [
+      1161.6,
+      1
+    ],
+    "_build_kernel_panels": [
+      287.7,
+      1
+    ],
+    "_build_extended_panels": [
+      77.5,
+      1
+    ],
+    "_build_digital_decode_panels": [
+      158.3,
+      1
+    ],
+    "_build_panel_menu": [
+      1.8,
+      1
+    ],
+    "_restore_user_layout": [
+      16.3,
+      1
+    ],
+    "_build_planetarium_page": [
+      22.8,
+      1
+    ],
+    "_build_mode_shell": [
+      625.3,
+      1
+    ],
+    "_restore_app_mode": [
+      0.0,
+      1
+    ],
+    "_init_ui_action_bus": [
+      0.1,
+      1
+    ],
+    "_init_sky_action_bus": [
+      1.9,
+      1
+    ],
+    "_build_central_widget": [
+      3124.0,
+      1
+    ]
+  },
+  "class_init_ms": {
+    "control_panel.ControlPanel": [
+      42.2,
+      1
+    ],
+    "status_panel.StatusPanel": [
+      11.3,
+      1
+    ],
+    "ai_panel.AIPanel": [
+      14.4,
+      1
+    ],
+    "module_panel.ModulePanel": [
+      15.5,
+      1
+    ],
+    "weather_panel.WeatherPanel": [
+      14.4,
+      1
+    ],
+    "new_spacetime_panel.NewSpacetimePanel": [
+      31.1,
+      1
+    ],
+    "sat_track_panel.SatTrackPanel": [
+      7.1,
+      1
+    ],
+    "adsb_map_panel.AdsbMapPanel": [
+      15.9,
+      1
+    ],
+    "settings_panel.SettingsPanel": [
+      140.6,
+      1
+    ],
+    "scanner_panel.ScannerPanel": [
+      8.8,
+      1
+    ],
+    "modulation_panel.ModulationPanel": [
+      4.1,
+      1
+    ],
+    "bookmark_panel.BookmarkPanel": [
+      8.6,
+      1
+    ],
+    "constellation_panel.ConstellationPanel": [
+      6.5,
+      1
+    ],
+    "device_panel.DevicePanel": [
+      9.0,
+      1
+    ],
+    "gain_panel.GainPanel": [
+      7.6,
+      1
+    ],
+    "satellite_image_panel.SatelliteImagePanel": [
+      20.5,
+      1
+    ],
+    "dock_layout_manager.DockLayoutManager": [
+      0.1,
+      1
+    ]
+  },
+  "profile_dir": "D:\\mbdsdr\\output\\tmp\\mbdsdr-gap-0a0pvc0i",
+  "conditions": {
+    "offline": "1",
+    "platform": "windows?"
+  }
+}

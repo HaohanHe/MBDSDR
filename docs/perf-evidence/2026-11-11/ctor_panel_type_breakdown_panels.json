@@ -1,0 +1,208 @@
+[
+ {
+  "mode": "panels",
+  "run": 1,
+  "load_before": {
+   "python_proc_count": 8,
+   "python_total_cpu_pct": 125.0,
+   "python_top": [
+    {
+     "pid": 31428,
+     "cpu_pct": 82.0
+    },
+    {
+     "pid": 36856,
+     "cpu_pct": 23.4
+    },
+    {
+     "pid": 32508,
+     "cpu_pct": 10.2
+    },
+    {
+     "pid": 25044,
+     "cpu_pct": 9.4
+    },
+    {
+     "pid": 31508,
+     "cpu_pct": 0.0
+    }
+   ],
+   "cpu_count": 12
+  },
+  "load_after": {
+   "python_proc_count": 10,
+   "python_total_cpu_pct": 174.3,
+   "python_top": [
+    {
+     "pid": 31428,
+     "cpu_pct": 109.4
+    },
+    {
+     "pid": 33412,
+     "cpu_pct": 29.7
+    },
+    {
+     "pid": 36856,
+     "cpu_pct": 17.2
+    },
+    {
+     "pid": 33672,
+     "cpu_pct": 10.2
+    },
+    {
+     "pid": 32508,
+     "cpu_pct": 7.8
+    }
+   ],
+   "cpu_count": 12
+  },
+  "ctor_ms": 3168.1,
+  "show_ms": 140.0,
+  "tick_ms": 220.6,
+  "widgets": 1454,
+  "rows": [
+   {
+    "name": "SettingsPanel",
+    "count": 1,
+    "total_ms": 566.8,
+    "p50_ms": 566.75,
+    "max_ms": 566.75,
+    "widgets": 342
+   },
+   {
+    "name": "ControlPanel",
+    "count": 1,
+    "total_ms": 38.4,
+    "p50_ms": 38.37,
+    "max_ms": 38.37,
+    "widgets": 109
+   },
+   {
+    "name": "AprsPanel",
+    "count": 1,
+    "total_ms": 20.9,
+    "p50_ms": 20.88,
+    "max_ms": 20.88,
+    "widgets": 40
+   },
+   {
+    "name": "SatelliteImagePanel",
+    "count": 1,
+    "total_ms": 20.8,
+    "p50_ms": 20.75,
+    "max_ms": 20.75,
+    "widgets": 32
+   },
+   {
+    "name": "AIPanel",
+    "count": 1,
+    "total_ms": 20.1,
+    "p50_ms": 20.08,
+    "max_ms": 20.08,
+    "widgets": 34
+   },
+   {
+    "name": "DevicePanel",
+    "count": 1,
+    "total_ms": 17.4,
+    "p50_ms": 17.37,
+    "max_ms": 17.37,
+    "widgets": 32
+   },
+   {
+    "name": "SpectrumPanel",
+    "count": 1,
+    "total_ms": 15.5,
+    "p50_ms": 15.47,
+    "max_ms": 15.47,
+    "widgets": 85
+   },
+   {
+    "name": "AdsbMapPanel",
+    "count": 1,
+    "total_ms": 13.3,
+    "p50_ms": 13.28,
+    "max_ms": 13.28,
+    "widgets": 21
+   },
+   {
+    "name": "AdsbPanel",
+    "count": 1,
+    "total_ms": 13.1,
+    "p50_ms": 13.09,
+    "max_ms": 13.09,
+    "widgets": 25
+   },
+   {
+    "name": "ConstellationPanel",
+    "count": 1,
+    "total_ms": 12.0,
+    "p50_ms": 11.99,
+    "max_ms": 11.99,
+    "widgets": 23
+   }
+  ],
+  "add_right_tab": [
+   {
+    "title": "设置",
+    "count": 1,
+    "total_ms": 197.1,
+    "max_ms": 197.1
+   },
+   {
+    "title": "APRS",
+    "count": 1,
+    "total_ms": 23.9,
+    "max_ms": 23.9
+   },
+   {
+    "title": "卫星云图",
+    "count": 1,
+    "total_ms": 23.4,
+    "max_ms": 23.4
+   },
+   {
+    "title": "VFO",
+    "count": 1,
+    "total_ms": 22.7,
+    "max_ms": 22.7
+   },
+   {
+    "title": "设备",
+    "count": 1,
+    "total_ms": 22.7,
+    "max_ms": 22.7
+   },
+   {
+    "title": "新时空",
+    "count": 1,
+    "total_ms": 19.7,
+    "max_ms": 19.7
+   },
+   {
+    "title": "ADS-B",
+    "count": 1,
+    "total_ms": 18.9,
+    "max_ms": 18.9
+   },
+   {
+    "title": "气象云图",
+    "count": 1,
+    "total_ms": 15.7,
+    "max_ms": 15.7
+   },
+   {
+    "title": "状态",
+    "count": 1,
+    "total_ms": 14.1,
+    "max_ms": 14.1
+   },
+   {
+    "title": "模块",
+    "count": 1,
+    "total_ms": 13.1,
+    "max_ms": 13.1
+   }
+  ]
+ }
+]

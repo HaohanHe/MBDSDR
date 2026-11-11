@@ -1,0 +1,62 @@
+{
+  "levels": {
+    "eco(100ms,256bin)": {
+      "curve_paints": 56,
+      "fps": 9.33,
+      "interval_ms": 100,
+      "curve_paint": {
+        "p50": 6.59,
+        "p95": 8.11,
+        "max": 8.48
+      },
+      "waterfall_paint": {
+        "p50": 1.18,
+        "p95": 1.73,
+        "max": 2.05
+      },
+      "waterfall_paints": 82,
+      "push_iq_ms_median": 2.14,
+      "push_iq_ms_max": 4.25,
+      "widget_size": [
+        449,
+        433
+      ],
+      "plot_size": [
+        417,
+        238
+      ]
+    },
+    "balanced(66ms,384bin)": {
+      "curve_paints": 80,
+      "fps": 13.34,
+      "interval_ms": 66,
+      "curve_paint": {
+        "p50": 12.13,
+        "p95": 15.48,
+        "max": 16.13
+      },
+      "waterfall_paint": {
+        "p50": 1.16,
+        "p95": 2.21,
+        "max": 2.27
+      },
+      "waterfall_paints": 84,
+      "push_iq_ms_median": 2.78,
+      "push_iq_ms_max": 17.68,
+      "widget_size": [
+        449,
+        433
+      ],
+      "plot_size": [
+        417,
+        238
+      ]
+    }
+  },
+  "dpr": 1.5,
+  "profile_dir": "D:\\mbdsdr\\output\\tmp\\mbdsdr-gap-nap7zeqh",
+  "conditions": {
+    "offline": "1",
+    "platform": "windows?"
+  }
+}

@@ -1,0 +1,427 @@
+{
+  "ctor_ms": 2935.4,
+  "phase_ms": {
+    "eventFilter": [
+      569.5,
+      97996
+    ],
+    "_build_top_bar": [
+      39.1,
+      1
+    ],
+    "_apply_perf_profile": [
+      0.9,
+      3
+    ],
+    "_build_kernel_panels": [
+      233.7,
+      1
+    ],
+    "_build_extended_panels": [
+      58.9,
+      1
+    ],
+    "_build_digital_decode_panels": [
+      65.9,
+      1
+    ],
+    "_build_panel_menu": [
+      1.3,
+      1
+    ],
+    "_restore_user_layout": [
+      1.5,
+      1
+    ],
+    "_build_mode_shell": [
+      473.6,
+      1
+    ],
+    "_restore_app_mode": [
+      0.0,
+      1
+    ],
+    "_init_ui_action_bus": [
+      0.2,
+      1
+    ],
+    "_init_sky_action_bus": [
+      3.3,
+      1
+    ],
+    "_build_central_widget": [
+      2438.2,
+      1
+    ]
+  },
+  "ops": [
+    {
+      "op": "左栏页签→星象仪模式",
+      "wall_ms": 0.6,
+      "hb_max_ms": 18.2,
+      "hb_p95_ms": 11.0,
+      "err": ""
+    },
+    {
+      "op": "左栏页签→频谱",
+      "wall_ms": 0.6,
+      "hb_max_ms": 14.2,
+      "hb_p95_ms": 12.1,
+      "err": ""
+    },
+    {
+      "op": "右栏面板→控制",
+      "wall_ms": 0.1,
+      "hb_max_ms": 11.6,
+      "hb_p95_ms": 11.0,
+      "err": ""
+    },
+    {
+      "op": "右栏面板→状态",
+      "wall_ms": 6.4,
+      "hb_max_ms": 20.6,
+      "hb_p95_ms": 10.8,
+      "err": ""
+    },
+    {
+      "op": "右栏面板→AI 智能体",
+      "wall_ms": 10.7,
+      "hb_max_ms": 14.2,
+      "hb_p95_ms": 12.6,
+      "err": ""
+    },
+    {
+      "op": "右栏面板→卫星跟踪",
+      "wall_ms": 9.5,
+      "hb_max_ms": 29.5,
+      "hb_p95_ms": 13.2,
+      "err": ""
+    },
+    {
+      "op": "右栏面板→模块",
+      "wall_ms": 5.0,
+      "hb_max_ms": 15.6,
+      "hb_p95_ms": 10.8,
+      "err": ""
+    },
+    {
+      "op": "右栏面板→气象云图",
+      "wall_ms": 6.1,
+      "hb_max_ms": 22.5,
+      "hb_p95_ms": 10.8,
+      "err": ""
+    },
+    {
+      "op": "右栏面板→新时空",
+      "wall_ms": 5.8,
+      "hb_max_ms": 22.5,
+      "hb_p95_ms": 11.2,
+      "err": ""
+    },
+    {
+      "op": "右栏面板→扫频",
+      "wall_ms": 4.2,
+      "hb_max_ms": 12.4,
+      "hb_p95_ms": 11.3,
+      "err": ""
+    },
+    {
+      "op": "右栏面板→调制识别",
+      "wall_ms": 2.7,
+      "hb_max_ms": 10.8,
+      "hb_p95_ms": 10.8,
+      "err": ""
+    },
+    {
+      "op": "右栏面板→书签",
+      "wall_ms": 3.3,
+      "hb_max_ms": 15.4,
+      "hb_p95_ms": 10.9,
+      "err": ""
+    },
+    {
+      "op": "右栏面板→服务设置",
+      "wall_ms": 6.8,
+      "hb_max_ms": 22.6,
+      "hb_p95_ms": 10.7,
+      "err": ""
+    },
+    {
+      "op": "右栏面板→设置",
+      "wall_ms": 16.2,
+      "hb_max_ms": 22.3,
+      "hb_p95_ms": 16.5,
+      "err": ""
+    },
+    {
+      "op": "右栏面板→VFO",
+      "wall_ms": 1.6,
+      "hb_max_ms": 29.5,
+      "hb_p95_ms": 11.0,
+      "err": ""
+    },
+    {
+      "op": "右栏面板→ANR",
+      "wall_ms": 1.9,
+      "hb_max_ms": 17.5,
+      "hb_p95_ms": 10.6,
+      "err": ""
+    },
+    {
+      "op": "右栏面板→星座图",
+      "wall_ms": 0.7,
+      "hb_max_ms": 12.6,
+      "hb_p95_ms": 11.1,
+      "err": ""
+    },
+    {
+      "op": "右栏面板→设备",
+      "wall_ms": 2.9,
+      "hb_max_ms": 17.7,
+      "hb_p95_ms": 11.2,
+      "err": ""
+    },
+    {
+      "op": "右栏面板→增益",
+      "wall_ms": 1.3,
+      "hb_max_ms": 11.6,
+      "hb_p95_ms": 11.0,
+      "err": ""
+    },
+    {
+      "op": "右栏面板→ADS-B",
+      "wall_ms": 3.1,
+      "hb_max_ms": 19.3,
+      "hb_p95_ms": 10.9,
+      "err": ""
+    },
+    {
+      "op": "右栏面板→APRS",
+      "wall_ms": 5.8,
+      "hb_max_ms": 19.8,
+      "hb_p95_ms": 11.4,
+      "err": ""
+    },
+    {
+      "op": "右栏面板→卫星云图",
+      "wall_ms": 1.2,
+      "hb_max_ms": 21.0,
+      "hb_p95_ms": 10.9,
+      "err": ""
+    },
+    {
+      "op": "面板隐藏→spectrum",
+      "wall_ms": 0.0,
+      "hb_max_ms": 11.2,
+      "hb_p95_ms": 11.1,
+      "err": ""
+    },
+    {
+      "op": "面板恢复→spectrum",
+      "wall_ms": 0.0,
+      "hb_max_ms": 16.2,
+      "hb_p95_ms": 15.5,
+      "err": ""
+    },
+    {
+      "op": "面板隐藏→rf_sky",
+      "wall_ms": 0.1,
+      "hb_max_ms": 12.1,
+      "hb_p95_ms": 10.8,
+      "err": ""
+    },
+    {
+      "op": "面板恢复→rf_sky",
+      "wall_ms": 0.0,
+      "hb_max_ms": 22.5,
+      "hb_p95_ms": 17.8,
+      "err": ""
+    },
+    {
+      "op": "面板隐藏→weather",
+      "wall_ms": 0.1,
+      "hb_max_ms": 13.0,
+      "hb_p95_ms": 11.3,
+      "err": ""
+    },
+    {
+      "op": "面板恢复→weather",
+      "wall_ms": 0.1,
+      "hb_max_ms": 13.3,
+      "hb_p95_ms": 10.9,
+      "err": ""
+    },
+    {
+      "op": "面板隐藏→module",
+      "wall_ms": 0.0,
+      "hb_max_ms": 13.0,
+      "hb_p95_ms": 11.4,
+      "err": ""
+    },
+    {
+      "op": "面板恢复→module",
+      "wall_ms": 0.0,
+      "hb_max_ms": 11.1,
+      "hb_p95_ms": 11.1,
+      "err": ""
+    },
+    {
+      "op": "面板隐藏→sat_track",
+      "wall_ms": 0.0,
+      "hb_max_ms": 11.4,
+      "hb_p95_ms": 10.9,
+      "err": ""
+    },
+    {
+      "op": "面板恢复→sat_track",
+      "wall_ms": 0.0,
+      "hb_max_ms": 11.4,
+      "hb_p95_ms": 10.7,
+      "err": ""
+    },
+    {
+      "op": "面板隐藏→new_spacetime",
+      "wall_ms": 0.0,
+      "hb_max_ms": 11.8,
+      "hb_p95_ms": 11.2,
+      "err": ""
+    },
+    {
+      "op": "面板恢复→new_spacetime",
+      "wall_ms": 0.0,
+      "hb_max_ms": 11.9,
+      "hb_p95_ms": 11.0,
+      "err": ""
+    },
+    {
+      "op": "面板隐藏→adsb",
+      "wall_ms": 0.0,
+      "hb_max_ms": 10.9,
+      "hb_p95_ms": 10.9,
+      "err": ""
+    },
+    {
+      "op": "面板恢复→adsb",
+      "wall_ms": 0.0,
+      "hb_max_ms": 10.9,
+      "hb_p95_ms": 10.8,
+      "err": ""
+    },
+    {
+      "op": "面板隐藏→control",
+      "wall_ms": 0.0,
+      "hb_max_ms": 12.2,
+      "hb_p95_ms": 11.0,
+      "err": ""
+    },
+    {
+      "op": "面板恢复→control",
+      "wall_ms": 0.0,
+      "hb_max_ms": 12.8,
+      "hb_p95_ms": 11.8,
+      "err": ""
+    },
+    {
+      "op": "面板隐藏→status",
+      "wall_ms": 0.1,
+      "hb_max_ms": 11.7,
+      "hb_p95_ms": 11.4,
+      "err": ""
+    },
+    {
+      "op": "面板恢复→status",
+      "wall_ms": 0.0,
+      "hb_max_ms": 10.7,
+      "hb_p95_ms": 10.6,
+      "err": ""
+    },
+    {
+      "op": "面板隐藏→ai",
+      "wall_ms": 0.0,
+      "hb_max_ms": 11.0,
+      "hb_p95_ms": 10.8,
+      "err": ""
+    },
+    {
+      "op": "面板恢复→ai",
+      "wall_ms": 0.0,
+      "hb_max_ms": 10.8,
+      "hb_p95_ms": 10.7,
+      "err": ""
+    },
+    {
+      "op": "命令面板打开",
+      "wall_ms": 44.7,
+      "hb_max_ms": 44.9,
+      "hb_p95_ms": 11.0,
+      "err": ""
+    },
+    {
+      "op": "命令面板关闭",
+      "wall_ms": 4.2,
+      "hb_max_ms": 11.6,
+      "hb_p95_ms": 11.2,
+      "err": ""
+    },
+    {
+      "op": "进入星象仪",
+      "wall_ms": 35.3,
+      "hb_max_ms": 41.0,
+      "hb_p95_ms": 24.4,
+      "err": ""
+    },
+    {
+      "op": "退出星象仪",
+      "wall_ms": 50.6,
+      "hb_max_ms": 50.7,
+      "hb_p95_ms": 15.1,
+      "err": ""
+    },
+    {
+      "op": "性能档 eco→quality",
+      "wall_ms": 0.4,
+      "hb_max_ms": 12.8,
+      "hb_p95_ms": 11.4,
+      "err": ""
+    },
+    {
+      "op": "性能档 quality→eco",
+      "wall_ms": 0.3,
+      "hb_max_ms": 11.2,
+      "hb_p95_ms": 11.1,
+      "err": ""
+    }
+  ],
+  "close_ms": 76.3,
+  "left_tabs": [
+    "星象仪模式",
+    "频谱"
+  ],
+  "right_sections": [
+    "控制",
+    "状态",
+    "AI 智能体",
+    "卫星跟踪",
+    "模块",
+    "气象云图",
+    "新时空",
+    "扫频",
+    "调制识别",
+    "书签",
+    "服务设置",
+    "设置",
+    "VFO",
+    "ANR",
+    "星座图",
+    "设备",
+    "增益",
+    "ADS-B",
+    "APRS",
+    "卫星云图"
+  ],
+  "profile_dir": "D:\\mbdsdr\\output\\tmp\\mbdsdr-gap-7p6e4cca",
+  "conditions": {
+    "offline": "1",
+    "platform": "windows?"
+  }
+}

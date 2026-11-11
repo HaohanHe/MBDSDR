@@ -1,0 +1,111 @@
+{
+  "ops": [
+    {
+      "op": "窗口缩放 1280→900",
+      "wall_ms": 3.2,
+      "hb_max_ms": 30.9,
+      "hb_p95_ms": 11.4,
+      "err": ""
+    },
+    {
+      "op": "窗口缩放 900→1280",
+      "wall_ms": 1.9,
+      "hb_max_ms": 51.2,
+      "hb_p95_ms": 11.6,
+      "err": ""
+    },
+    {
+      "op": "主题 默认→深色",
+      "wall_ms": 1618.3,
+      "hb_max_ms": 1618.4,
+      "hb_p95_ms": 22.8,
+      "err": ""
+    },
+    {
+      "op": "主题 深色→默认",
+      "wall_ms": 1591.9,
+      "hb_max_ms": 1592.7,
+      "hb_p95_ms": 11.9,
+      "err": ""
+    },
+    {
+      "op": "天空单帧 grab",
+      "wall_ms": 6.7,
+      "hb_max_ms": 10.9,
+      "hb_p95_ms": 10.7,
+      "err": ""
+    },
+    {
+      "op": "频谱单帧 grab",
+      "wall_ms": 121.7,
+      "hb_max_ms": 122.2,
+      "hb_p95_ms": 11.6,
+      "err": ""
+    },
+    {
+      "op": "地图单帧 grab",
+      "wall_ms": 9.2,
+      "hb_max_ms": 10.9,
+      "hb_p95_ms": 10.6,
+      "err": ""
+    },
+    {
+      "op": "全屏",
+      "wall_ms": 26.4,
+      "hb_max_ms": 27.0,
+      "hb_p95_ms": 10.9,
+      "err": ""
+    },
+    {
+      "op": "退出全屏",
+      "wall_ms": 42.2,
+      "hb_max_ms": 42.7,
+      "hb_p95_ms": 10.8,
+      "err": ""
+    },
+    {
+      "op": "打开地点面板",
+      "wall_ms": 27.0,
+      "hb_max_ms": 27.6,
+      "hb_p95_ms": 11.8,
+      "err": ""
+    },
+    {
+      "op": "关闭地点面板",
+      "wall_ms": 1.9,
+      "hb_max_ms": 126.5,
+      "hb_p95_ms": 15.6,
+      "err": ""
+    },
+    {
+      "op": "整窗 grab 首屏",
+      "wall_ms": 26.3,
+      "hb_max_ms": 26.6,
+      "hb_p95_ms": 11.1,
+      "err": ""
+    }
+  ],
+  "sizes": {
+    "window": [
+      1280,
+      780
+    ],
+    "sky": [
+      449,
+      503
+    ],
+    "spectrum": [
+      476,
+      519
+    ],
+    "map": [
+      442,
+      622
+    ]
+  },
+  "profile_dir": "D:\\mbdsdr\\output\\tmp\\mbdsdr-gap-nrgrnlnw",
+  "conditions": {
+    "offline": "1",
+    "platform": "windows?"
+  }
+}

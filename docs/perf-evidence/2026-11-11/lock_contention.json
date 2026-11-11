@@ -1,0 +1,1 @@
+﻿{"holder":"HELD","flush_blocked_ms":2003.3,"lock_timeout_const_s":2.0,"last_error":"配置写锁等待超过 2s，可能有其他进程正在写；本次未写入，稍后重试","method":"独立进程持有 msvcrt 字节锁 6s，本进程调用 DesktopSettings.flush()","call_sites":["settings.py:392-395 QTimer(GUI) -> _write_to_disk","settings.py:652-667 with _exclusive_lock","main_window.py closeEvent -> settings.flush"]}

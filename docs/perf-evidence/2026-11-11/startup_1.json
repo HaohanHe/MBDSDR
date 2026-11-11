@@ -1,0 +1,112 @@
+{
+  "marks_ms": {
+    "process_start": 0.0,
+    "startup_paths+version": 13.9,
+    "selfcheck_risky_imports": 1067.8,
+    "selfcheck_required(scipy.signal)": 1067.8,
+    "import_pyside6": 1149.2,
+    "import_themes": 1153.4,
+    "import_main_window": 1979.5,
+    "qapplication": 2003.8,
+    "font+theme": 2005.8,
+    "mainwindow_ctor": 4469.3,
+    "show+first_loop": 4600.5,
+    "first_grab": 4875.5,
+    "settle_600ms": 5480.5
+  },
+  "phase_ms": {
+    "eventFilter": [
+      332.7,
+      73047
+    ],
+    "_build_top_bar": [
+      51.1,
+      1
+    ],
+    "_apply_perf_profile": [
+      0.2,
+      1
+    ],
+    "_build_kernel_panels": [
+      229.0,
+      1
+    ],
+    "_build_extended_panels": [
+      56.0,
+      1
+    ],
+    "_build_digital_decode_panels": [
+      71.2,
+      1
+    ],
+    "_build_panel_menu": [
+      1.1,
+      1
+    ],
+    "_restore_user_layout": [
+      2.7,
+      1
+    ],
+    "_build_mode_shell": [
+      403.5,
+      1
+    ],
+    "_restore_app_mode": [
+      0.0,
+      1
+    ],
+    "_init_ui_action_bus": [
+      0.1,
+      1
+    ],
+    "_init_sky_action_bus": [
+      2.3,
+      1
+    ],
+    "_build_central_widget": [
+      1973.4,
+      1
+    ]
+  },
+  "ctor_ms": 2463.5,
+  "show_to_loop_ms": 131.2,
+  "first_paint_at_ms": -1.0,
+  "first_grab_ms": 274.9,
+  "dpr": 1.5,
+  "size": [
+    1228,
+    691
+  ],
+  "left_tabs": [
+    "星象仪模式",
+    "频谱"
+  ],
+  "right_sections": [
+    "控制",
+    "状态",
+    "AI 智能体",
+    "卫星跟踪",
+    "模块",
+    "气象云图",
+    "新时空",
+    "扫频",
+    "调制识别",
+    "书签",
+    "服务设置",
+    "设置",
+    "VFO",
+    "ANR",
+    "星座图",
+    "设备",
+    "增益",
+    "ADS-B",
+    "APRS",
+    "卫星云图"
+  ],
+  "platform": "windows",
+  "profile_dir": "D:\\mbdsdr\\output\\tmp\\mbdsdr-gap-08dhm3t8",
+  "conditions": {
+    "offline": "1",
+    "platform": "windows?"
+  }
+}

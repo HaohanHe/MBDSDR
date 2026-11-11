@@ -1,0 +1,160 @@
+{
+  "ctor_ms": 4227.8,
+  "phase_ms": {
+    "eventFilter": [
+      475.3,
+      69962
+    ],
+    "_create_sky_widget": [
+      6.2,
+      1
+    ],
+    "_add_right_tab": [
+      430.4,
+      20
+    ],
+    "_build_top_bar": [
+      53.5,
+      1
+    ],
+    "_build_bottom_dock": [
+      0.9,
+      1
+    ],
+    "_apply_perf_profile": [
+      0.5,
+      1
+    ],
+    "_ensure_agent_kernel": [
+      974.9,
+      1
+    ],
+    "_build_capability_drawer": [
+      1079.4,
+      1
+    ],
+    "_build_kernel_panels": [
+      300.3,
+      1
+    ],
+    "_build_extended_panels": [
+      63.6,
+      1
+    ],
+    "_build_digital_decode_panels": [
+      78.5,
+      1
+    ],
+    "_build_panel_menu": [
+      2.8,
+      1
+    ],
+    "_restore_user_layout": [
+      4.4,
+      1
+    ],
+    "_build_planetarium_page": [
+      14.4,
+      1
+    ],
+    "_build_mode_shell": [
+      466.5,
+      1
+    ],
+    "_restore_app_mode": [
+      0.0,
+      1
+    ],
+    "_init_ui_action_bus": [
+      0.2,
+      1
+    ],
+    "_init_sky_action_bus": [
+      3.1,
+      1
+    ],
+    "_build_central_widget": [
+      3335.5,
+      1
+    ]
+  },
+  "class_init_ms": {
+    "control_panel.ControlPanel": [
+      111.2,
+      1
+    ],
+    "status_panel.StatusPanel": [
+      21.3,
+      1
+    ],
+    "ai_panel.AIPanel": [
+      24.1,
+      1
+    ],
+    "ai_panel.AIPanel.init_agent": [
+      972.8,
+      1
+    ],
+    "module_panel.ModulePanel": [
+      30.6,
+      1
+    ],
+    "weather_panel.WeatherPanel": [
+      24.5,
+      1
+    ],
+    "new_spacetime_panel.NewSpacetimePanel": [
+      43.7,
+      1
+    ],
+    "sat_track_panel.SatTrackPanel": [
+      16.2,
+      1
+    ],
+    "adsb_map_panel.AdsbMapPanel": [
+      59.3,
+      1
+    ],
+    "settings_panel.SettingsPanel": [
+      167.0,
+      1
+    ],
+    "scanner_panel.ScannerPanel": [
+      6.5,
+      1
+    ],
+    "modulation_panel.ModulationPanel": [
+      4.9,
+      1
+    ],
+    "bookmark_panel.BookmarkPanel": [
+      11.5,
+      1
+    ],
+    "constellation_panel.ConstellationPanel": [
+      7.7,
+      1
+    ],
+    "device_panel.DevicePanel": [
+      5.9,
+      1
+    ],
+    "gain_panel.GainPanel": [
+      2.8,
+      1
+    ],
+    "satellite_image_panel.SatelliteImagePanel": [
+      19.7,
+      1
+    ],
+    "dock_layout_manager.DockLayoutManager": [
+      0.1,
+      1
+    ]
+  },
+  "profile_dir": "D:\\mbdsdr\\output\\tmp\\mbdsdr-gap-vu77_fwj",
+  "conditions": {
+    "offline": "1",
+    "platform": "windows?"
+  }
+}

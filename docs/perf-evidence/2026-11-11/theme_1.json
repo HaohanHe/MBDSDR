@@ -1,0 +1,27 @@
+{
+  "widget_count": 1480,
+  "apply_theme_ms": [
+    2253.1,
+    2126.5,
+    2583.8,
+    2181.2
+  ],
+  "touch_stylesheet_ms": [
+    0.3,
+    4
+  ],
+  "sync_map_style_ms": [
+    3.1,
+    4
+  ],
+  "spectrum_set_colors_ms": [
+    0.1,
+    4
+  ],
+  "qss_len": 17509,
+  "profile_dir": "D:\\mbdsdr\\output\\tmp\\mbdsdr-gap-nk0926q8",
+  "conditions": {
+    "offline": "1",
+    "platform": "windows?"
+  }
+}
