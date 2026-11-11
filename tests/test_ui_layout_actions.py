@@ -93,7 +93,7 @@ def qapp():
 
 
 @pytest.fixture(scope="module")
-def mw(qapp):
+def mw(qapp, isolated_profile):
     from main_window import MainWindow
     # 隔离持久化状态（QSettings 几何/分栏、gui_config window 键、
     # desktop_settings 的 app_mode）：否则用户真机/其他测试落盘的状态
