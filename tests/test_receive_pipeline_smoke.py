@@ -12,12 +12,14 @@ desktop/receive_pipeline.py 529 行零测试。多线程流水线一崩就是
 """
 import os
 import sys
+import threading
 import time
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import numpy as np  # noqa: E402
 import pytest  # noqa: E402
+from PySide6.QtCore import QThread  # noqa: E402
 
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, _ROOT)
@@ -35,12 +37,28 @@ def qapp():
     yield app
 
 
-def _shutdown_and_join(pipe, timeout_ms: int = 3000) -> None:
-    """关停后等后台回收线程结束（shutdown 本身不再阻塞 GUI 线程）。"""
+def _thread_names(threads) -> str:
+    return ", ".join(t.objectName() or type(t).__name__ for t in threads)
+
+
+def _shutdown_and_join(pipe, timeout_ms: int = 4000) -> None:
+    """关停后等后台回收线程结束（shutdown 本身不再阻塞 GUI 线程）。
+
+    断言是**硬**的：超时、``stale_threads`` 非空、或还有线程在跑，都必须让
+    测试红。**回收线程结束 ≠ 线程已死**——超预算的线程会被记进
+    ``stale_threads`` 继续跑，只判前者就是把「同步卡 8 秒」换成「安静地留
+    野线程」，测试照样绿。预算按最坏值给：4×200 ms（下游）+ 2500 ms（reader）
+    = 3300 ms，取 4000 ms 留余量。
+    """
     pipe.shutdown()
-    assert pipe.wait_for_shutdown(timeout_ms), "后台回收线程未在预算内结束"
+    assert pipe.wait_for_shutdown(timeout_ms), (
+        f"关停未在 {timeout_ms} ms 内收干净："
+        f"stale={_thread_names(pipe.stale_threads)}，"
+        f"still_alive={_thread_names(pipe.alive_threads)}")
     assert pipe.stale_threads == [], (
-        f"关停超预算：{[t.objectName() for t in pipe.stale_threads]}")
+        f"关停超预算：{_thread_names(pipe.stale_threads)}")
+    assert pipe.alive_threads == [], (
+        f"线程仍在运行：{_thread_names(pipe.alive_threads)}")
 
 
 # ---------------------------------------------------------------------------
@@ -136,9 +154,12 @@ def test_start_flows_data_and_shutdown_joins(qapp):
     pipe.shutdown()
     # shutdown 只请求关停（GUI 线程上限 0 ms），join 交给后台回收线程；
     # 契约不变：不许留野线程。所以等回收结束再断言，而不是假定同步完成。
-    assert pipe.wait_for_shutdown(3000), "后台回收线程未在预算内结束"
+    # 注意 wait_for_shutdown 只在「回收线程结束 **且** 无线程存活」时返回 True。
+    assert pipe.wait_for_shutdown(4000), (
+        f"关停未收干净：stale={_thread_names(pipe.stale_threads)}，"
+        f"still_alive={_thread_names(pipe.alive_threads)}")
     assert pipe.stale_threads == [], (
-        f"关停超预算：{[t.objectName() for t in pipe.stale_threads]}")
+        f"关停超预算：{_thread_names(pipe.stale_threads)}")
     # 线程必须收干净（不许留野线程）
     for t in (pipe._reader, pipe._fft, pipe._demod1, pipe._demod2, pipe._record):
         if t is not None:
@@ -192,3 +213,56 @@ def test_double_start_is_idempotent(qapp):
     time.sleep(0.1)
     _shutdown_and_join(pipe)
     assert not pipe._reader.isRunning()
+
+
+class _StubbornThread(QThread):
+    """无视停止信号的工作线程（证伪用：让关停检测真的红）。"""
+
+    def __init__(self):
+        super().__init__()
+        self.setObjectName("StubbornThread")
+        self._release = threading.Event()
+
+    def run(self):
+        self._release.wait(30)
+
+    def shutdown(self):
+        pass    # 故意不理会停止请求
+
+    def release(self):
+        self._release.set()
+
+
+def test_stuck_thread_makes_shutdown_wait_fail(qapp):
+    """1 个线程无视停止信号时，等待机制必须红，而不是等够 3 秒就放行。
+
+    反向钉扎「安静地留野线程」：``wait_for_shutdown`` 若只判回收线程存活，
+    超预算的线程会被记进 ``stale_threads`` 后测试照样绿。这里把一个真正
+    卡死的线程塞进流水线，要求 ① ``wait_for_shutdown`` 返回 False、
+    ② ``stale_threads`` 有它、③ 关停 helper 抛 AssertionError。
+    """
+    from PySide6.QtWidgets import QApplication
+    pipe, *_ = _build(qapp)
+    pipe.start()
+    assert _wait(lambda: pipe._fft.isRunning(),
+                 pump=lambda: QApplication.processEvents()), "FFT 线程未启动"
+
+    stuck = _StubbornThread()
+    stuck.start()
+    real_fft = pipe._fft
+    pipe._fft = stuck          # 让回收线程盯上一个真正卡死的线程
+    try:
+        pipe.shutdown()
+        # 回收线程会在下游 200 ms 预算后放弃并记账
+        assert pipe.wait_for_shutdown(2000) is False, (
+            "有线程卡死，wait_for_shutdown 却报成功——把野线程静默放行了")
+        assert stuck in pipe.stale_threads, (
+            f"卡死线程未记账：{_thread_names(pipe.stale_threads)}")
+        assert stuck in pipe.alive_threads
+        with pytest.raises(AssertionError):
+            _shutdown_and_join(pipe, timeout_ms=200)
+    finally:
+        pipe._fft = real_fft
+        stuck.release()
+        assert stuck.wait(5000), "证伪线程自身没能回收，测试留下野线程"
+    assert not stuck.isRunning()

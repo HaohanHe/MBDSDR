@@ -790,14 +790,29 @@ class ReceivePipeline(QObject):
             self._reaper.start()
 
     def wait_for_shutdown(self, timeout_ms: int = 3000) -> bool:
-        """等后台回收线程结束（仅测试/退出前用，GUI 槽里不要调）。"""
+        """等后台回收线程结束，**并**确认没有线程还活着（仅测试/退出前用）。
+
+        返回 True 的充要条件是「回收线程已结束 且 五个线程全部退出」。
+        只有回收线程结束不算数：超预算的线程会被记进 ``stale_threads``，
+        它们仍然是野线程；旧实现只判回收线程存活（且回收线程为 None 时直接
+        返回 True），会让调用方把「等够了」当成「干净了」——这正是安静地
+        留野线程的口子。GUI 槽里不要调本方法。
+        """
         reaper = self._reaper
-        if reaper is None:
-            return True
-        reaper.join(timeout_ms / 1000.0)
-        return not reaper.is_alive()
+        if reaper is not None:
+            reaper.join(timeout_ms / 1000.0)
+            if reaper.is_alive():
+                return False
+        return not self.alive_threads
 
     @property
     def stale_threads(self):
         """关停超预算仍未退出的线程（空列表 = 干净退出）。"""
         return list(self._stale_threads)
+
+    @property
+    def alive_threads(self):
+        """当前仍在运行的流水线线程（不依赖回收线程的记账）。"""
+        return [t for t in (self._reader, self._fft, self._demod1,
+                            self._demod2, self._record)
+                if t is not None and t.isRunning()]

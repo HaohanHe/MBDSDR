@@ -1,0 +1,11 @@
+{
+  "kind": "reap_verdict_semantics",
+  "date": "2026-11-11",
+  "why": "旧 wait_for_shutdown 只判回收线程是否结束，卡死线程会被记为 stale 后判定为「干净」，测试照样绿。",
+  "scenario": "ReceivePipeline 正常运行，把 _fft 换成一个无视 shutdown() 的 _StubbornThread 后 shutdown()",
+  "old_verdict_clean": true,
+  "new_verdict_clean": false,
+  "stale": ["StubbornThread"],
+  "alive": ["StubbornThread"],
+  "note": "old = not reaper.is_alive(); new = reaper 结束 且 alive_threads 为空"
+}
