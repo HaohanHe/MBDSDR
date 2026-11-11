@@ -1,0 +1,4858 @@
+{
+ "question": "构造期 ≈815 ms 未归属拆解",
+ "method": "栈式计时器包主窗 _build_/_restore_/_init_/_apply_/... 方法 + 叶子嫌疑 + 构造期首次 import 记账；每个 case 独立进程",
+ "runs": [
+  {
+   "load_before": {
+    "sys_cpu_pct": 41.6,
+    "python_proc_count": 9,
+    "python_total_cpu_pct": 53.9,
+    "python_top": [
+     {
+      "pid": 35764,
+      "cpu_pct": 45.3
+     },
+     {
+      "pid": 32508,
+      "cpu_pct": 8.6
+     },
+     {
+      "pid": 2836,
+      "cpu_pct": 0.0
+     },
+     {
+      "pid": 6776,
+      "cpu_pct": 0.0
+     },
+     {
+      "pid": 28504,
+      "cpu_pct": 0.0
+     }
+    ],
+    "cpu_count": 12
+   },
+   "load_after": {
+    "sys_cpu_pct": 32.5,
+    "python_proc_count": 10,
+    "python_total_cpu_pct": 17.2,
+    "python_top": [
+     {
+      "pid": 2836,
+      "cpu_pct": 10.2
+     },
+     {
+      "pid": 32508,
+      "cpu_pct": 7.0
+     },
+     {
+      "pid": 6776,
+      "cpu_pct": 0.0
+     },
+     {
+      "pid": 28504,
+      "cpu_pct": 0.0
+     },
+     {
+      "pid": 32352,
+      "cpu_pct": 0.0
+     }
+    ],
+    "cpu_count": 12
+   },
+   "import_phase_ms": 952.8,
+   "qapp_ms": 26.2,
+   "prewarm_font_ms": null,
+   "ctor_ms": 1227.3,
+   "definition_c_ms": 6473.2,
+   "widgets": 1128,
+   "ruler": {
+    "qt_platform": "windows",
+    "font": "MiSans",
+    "pt": 10.0,
+    "line_h": 27,
+    "dpr": 1.0
+   },
+   "named_top_level_ms": 1220.8,
+   "residual_ms": 6.5,
+   "ctor_row": {
+    "calls": 1,
+    "inclusive_ms": 1227.3,
+    "exclusive_ms": 6.4
+   },
+   "rows": [
+    {
+     "name": "MW._create_sky_widget",
+     "calls": 1,
+     "inclusive_ms": 295.0,
+     "exclusive_ms": 293.9,
+     "parents": {
+      "MW._build_central_widget": 1
+     }
+    },
+    {
+     "name": "Theme.apply",
+     "calls": 3,
+     "inclusive_ms": 161.9,
+     "exclusive_ms": 156.3,
+     "parents": {
+      "MW._apply_theme": 3
+     }
+    },
+    {
+     "name": "QStackedWidget.addWidget",
+     "calls": 2,
+     "inclusive_ms": 136.9,
+     "exclusive_ms": 133.0,
+     "parents": {
+      "MW._build_mode_shell": 2
+     }
+    },
+    {
+     "name": "QMainWindow.setCentralWidget",
+     "calls": 2,
+     "inclusive_ms": 132.9,
+     "exclusive_ms": 131.7,
+     "parents": {
+      "MW._build_central_widget": 1,
+      "MW._build_mode_shell": 1
+     }
+    },
+    {
+     "name": "MW._add_right_tab",
+     "calls": 20,
+     "inclusive_ms": 160.3,
+     "exclusive_ms": 95.4,
+     "parents": {
+      "MW._build_central_widget": 7,
+      "MW._build_kernel_panels": 5,
+      "MW._build_extended_panels": 5,
+      "MW._build_digital_decode_panels": 3
+     }
+    },
+    {
+     "name": "MW._build_central_widget",
+     "calls": 1,
+     "inclusive_ms": 1144.3,
+     "exclusive_ms": 86.4,
+     "parents": {
+      "MW.__init__": 1
+     }
+    },
+    {
+     "name": "QWidget.minimumSizeHint",
+     "calls": 237,
+     "inclusive_ms": 84.0,
+     "exclusive_ms": 83.9,
+     "parents": {
+      "MW._build_central_widget": 43,
+      "MW._add_right_tab": 32,
+      "Theme.apply": 31,
+      "QStackedWidget.addWidget": 30
+     }
+    },
+    {
+     "name": "MW._build_extended_panels",
+     "calls": 1,
+     "inclusive_ms": 88.7,
+     "exclusive_ms": 34.9,
+     "parents": {
+      "MW._build_central_widget": 1
+     }
+    },
+    {
+     "name": "MW._build_tool_bar",
+     "calls": 1,
+     "inclusive_ms": 49.7,
+     "exclusive_ms": 33.0,
+     "parents": {
+      "MW.__init__": 1
+     }
+    },
+    {
+     "name": "MW._build_digital_decode_panels",
+     "calls": 1,
+     "inclusive_ms": 74.3,
+     "exclusive_ms": 26.7,
+     "parents": {
+      "MW._build_central_widget": 1
+     }
+    },
+    {
+     "name": "QComboBox.addItems",
+     "calls": 13,
+     "inclusive_ms": 23.7,
+     "exclusive_ms": 23.7,
+     "parents": {
+      "MW._build_central_widget": 10,
+      "MW._build_digital_decode_panels": 2,
+      "MW._build_tool_bar": 1
+     }
+    },
+    {
+     "name": "MW._build_top_bar",
+     "calls": 1,
+     "inclusive_ms": 20.8,
+     "exclusive_ms": 20.7,
+     "parents": {
+      "MW._build_central_widget": 1
+     }
+    },
+    {
+     "name": "MW._build_kernel_panels",
+     "calls": 1,
+     "inclusive_ms": 190.8,
+     "exclusive_ms": 17.6,
+     "parents": {
+      "MW._build_central_widget": 1
+     }
+    },
+    {
+     "name": "QWidget.setStyleSheet",
+     "calls": 136,
+     "inclusive_ms": 16.5,
+     "exclusive_ms": 16.5,
+     "parents": {
+      "MW._build_central_widget": 51,
+      "MW._build_planetarium_page": 32,
+      "MW._add_right_tab": 20,
+      "MW._create_sky_widget": 7
+     }
+    },
+    {
+     "name": "MW._build_capability_drawer",
+     "calls": 1,
+     "inclusive_ms": 12.6,
+     "exclusive_ms": 12.1,
+     "parents": {
+      "MW._build_central_widget": 1
+     }
+    },
+    {
+     "name": "MW._build_planetarium_page",
+     "calls": 1,
+     "inclusive_ms": 15.1,
+     "exclusive_ms": 10.7,
+     "parents": {
+      "MW._build_mode_shell": 1
+     }
+    },
+    {
+     "name": "QIcon.__init__",
+     "calls": 1,
+     "inclusive_ms": 9.9,
+     "exclusive_ms": 9.9,
+     "parents": {
+      "MW.__init__": 1
+     }
+    },
+    {
+     "name": "MW.__init__",
+     "calls": 1,
+     "inclusive_ms": 1227.3,
+     "exclusive_ms": 6.4,
+     "parents": {
+      "None": 1
+     }
+    },
+    {
+     "name": "MW._apply_theme",
+     "calls": 3,
+     "inclusive_ms": 168.3,
+     "exclusive_ms": 5.2,
+     "parents": {
+      "MW._build_kernel_panels": 1,
+      "MW.__init__": 1,
+      "MW._apply_restored_settings": 1
+     }
+    },
+    {
+     "name": "MW._init_loop_sat_catalog",
+     "calls": 1,
+     "inclusive_ms": 7.7,
+     "exclusive_ms": 5.0,
+     "parents": {
+      "MW._build_central_widget": 1
+     }
+    },
+    {
+     "name": "MW._init_sky_action_bus",
+     "calls": 1,
+     "inclusive_ms": 3.9,
+     "exclusive_ms": 3.9,
+     "parents": {
+      "MW._build_central_widget": 1
+     }
+    },
+    {
+     "name": "MW._apply_touch_adaptation",
+     "calls": 1,
+     "inclusive_ms": 3.9,
+     "exclusive_ms": 3.7,
+     "parents": {
+      "MW.__init__": 1
+     }
+    },
+    {
+     "name": "LoopSatTracker.__init__",
+     "calls": 1,
+     "inclusive_ms": 2.7,
+     "exclusive_ms": 2.7,
+     "parents": {
+      "MW._init_loop_sat_catalog": 1
+     }
+    },
+    {
+     "name": "MW._build_menu_bar",
+     "calls": 1,
+     "inclusive_ms": 2.3,
+     "exclusive_ms": 2.3,
+     "parents": {
+      "MW.__init__": 1
+     }
+    },
+    {
+     "name": "MW._restore_user_layout",
+     "calls": 1,
+     "inclusive_ms": 1.7,
+     "exclusive_ms": 1.7,
+     "parents": {
+      "MW._build_central_widget": 1
+     }
+    },
+    {
+     "name": "MW._init_ui_action_bus",
+     "calls": 1,
+     "inclusive_ms": 1.6,
+     "exclusive_ms": 1.6,
+     "parents": {
+      "MW._build_central_widget": 1
+     }
+    },
+    {
+     "name": "MW._build_panel_menu",
+     "calls": 1,
+     "inclusive_ms": 1.4,
+     "exclusive_ms": 1.4,
+     "parents": {
+      "MW._build_central_widget": 1
+     }
+    },
+    {
+     "name": "MW._build_status_bar",
+     "calls": 1,
+     "inclusive_ms": 1.1,
+     "exclusive_ms": 1.1,
+     "parents": {
+      "MW.__init__": 1
+     }
+    },
+    {
+     "name": "MW._build_bottom_dock",
+     "calls": 1,
+     "inclusive_ms": 0.9,
+     "exclusive_ms": 0.9,
+     "parents": {
+      "MW._build_central_widget": 1
+     }
+    },
+    {
+     "name": "MW._build_all_sky_toggle",
+     "calls": 1,
+     "inclusive_ms": 0.9,
+     "exclusive_ms": 0.8,
+     "parents": {
+      "MW._build_central_widget": 1
+     }
+    },
+    {
+     "name": "MW._build_ai_command_bar",
+     "calls": 1,
+     "inclusive_ms": 0.9,
+     "exclusive_ms": 0.7,
+     "parents": {
+      "MW._build_central_widget": 1
+     }
+    },
+    {
+     "name": "MW._panels_set_sdr_connected",
+     "calls": 1,
+     "inclusive_ms": 1.1,
+     "exclusive_ms": 0.7,
+     "parents": {
+      "MW.__init__": 1
+     }
+    },
+    {
+     "name": "MW._restore_window_state",
+     "calls": 1,
+     "inclusive_ms": 0.6,
+     "exclusive_ms": 0.5,
+     "parents": {
+      "MW.__init__": 1
+     }
+    },
+    {
+     "name": "DesktopSettings.load",
+     "calls": 1,
+     "inclusive_ms": 0.3,
+     "exclusive_ms": 0.3,
+     "parents": {
+      "MW.__init__": 1
+     }
+    },
+    {
+     "name": "MW._setup_tab_order",
+     "calls": 1,
+     "inclusive_ms": 0.3,
+     "exclusive_ms": 0.3,
+     "parents": {
+      "MW._build_tool_bar": 1
+     }
+    },
+    {
+     "name": "MW._apply_restored_settings",
+     "calls": 1,
+     "inclusive_ms": 3.2,
+     "exclusive_ms": 0.3,
+     "parents": {
+      "MW.__init__": 1
+     }
+    },
+    {
+     "name": "QMainWindow.__init__",
+     "calls": 1,
+     "inclusive_ms": 0.2,
+     "exclusive_ms": 0.2,
+     "parents": {
+      "MW.__init__": 1
+     }
+    },
+    {
+     "name": "RealGNSSMonitor.__init__",
+     "calls": 1,
+     "inclusive_ms": 0.2,
+     "exclusive_ms": 0.2,
+     "parents": {
+      "MW.__init__": 1
+     }
+    },
+    {
+     "name": "MW._init_ai_agent_from_config",
+     "calls": 1,
+     "inclusive_ms": 0.2,
+     "exclusive_ms": 0.2,
+     "parents": {
+      "MW._build_central_widget": 1
+     }
+    },
+    {
+     "name": "MW._apply_perf_profile",
+     "calls": 1,
+     "inclusive_ms": 0.2,
+     "exclusive_ms": 0.2,
+     "parents": {
+      "MW._build_central_widget": 1
+     }
+    },
+    {
+     "name": "MW._apply_touch_stylesheet",
+     "calls": 4,
+     "inclusive_ms": 0.2,
+     "exclusive_ms": 0.2,
+     "parents": {
+      "MW._apply_theme": 3,
+      "MW._apply_touch_adaptation": 1
+     }
+    },
+    {
+     "name": "MW._build_mode_shell",
+     "calls": 1,
+     "inclusive_ms": 285.0,
+     "exclusive_ms": 0.2,
+     "parents": {
+      "MW._build_central_widget": 1
+     }
+    },
+    {
+     "name": "MW._apply_responsive_chrome",
+     "calls": 1,
+     "inclusive_ms": 0.2,
+     "exclusive_ms": 0.2,
+     "parents": {
+      "MW.__init__": 1
+     }
+    },
+    {
+     "name": "TouchManager.set_from_settings",
+     "calls": 2,
+     "inclusive_ms": 0.0,
+     "exclusive_ms": 0.0,
+     "parents": {
+      "MW.__init__": 1,
+      "MW._build_kernel_panels": 1
+     }
+    },
+    {
+     "name": "MCPWorkerManager.__init__",
+     "calls": 1,
+     "inclusive_ms": 0.0,
+     "exclusive_ms": 0.0,
+     "parents": {
+      "MW.__init__": 1
+     }
+    },
+    {
+     "name": "AudioPlayer.__init__",
+     "calls": 1,
+     "inclusive_ms": 0.0,
+     "exclusive_ms": 0.0,
+     "parents": {
+      "MW.__init__": 1
+     }
+    },
+    {
+     "name": "VfoManager.__init__",
+     "calls": 2,
+     "inclusive_ms": 0.0,
+     "exclusive_ms": 0.0,
+     "parents": {
+      "MW.__init__": 1,
+      "MW._build_central_widget": 1
+     }
+    },
+    {
+     "name": "SharedDemodConfig.__init__",
+     "calls": 1,
+     "inclusive_ms": 0.0,
+     "exclusive_ms": 0.0,
+     "parents": {
+      "MW.__init__": 1
+     }
+    },
+    {
+     "name": "MW._apply_callsign",
+     "calls": 1,
+     "inclusive_ms": 0.0,
+     "exclusive_ms": 0.0,
+     "parents": {
+      "MW._build_central_widget": 1
+     }
+    },
+    {
+     "name": "MW._perf_key",
+     "calls": 2,
+     "inclusive_ms": 0.0,
+     "exclusive_ms": 0.0,
+     "parents": {
+      "MW._build_central_widget": 1,
+      "MW._perf_gnss_poll_ms": 1
+     }
+    },
+    {
+     "name": "MW._restore_app_mode",
+     "calls": 1,
+     "inclusive_ms": 0.0,
+     "exclusive_ms": 0.0,
+     "parents": {
+      "MW._build_central_widget": 1
+     }
+    },
+    {
+     "name": "MW._perf_gnss_poll_ms",
+     "calls": 1,
+     "inclusive_ms": 0.0,
+     "exclusive_ms": 0.0,
+     "parents": {
+      "MW.__init__": 1
+     }
+    },
+    {
+     "name": "QFontMetrics.__init__",
+     "calls": 1,
+     "inclusive_ms": 0.0,
+     "exclusive_ms": 0.0,
+     "parents": {
+      "None": 1
+     }
+    }
+   ],
+   "ctor_top_level": [
+    {
+     "name": "MW._build_central_widget",
+     "calls": 1,
+     "inclusive_ms": 1144.3
+    },
+    {
+     "name": "MW._build_tool_bar",
+     "calls": 1,
+     "inclusive_ms": 49.7
+    },
+    {
+     "name": "QIcon.__init__",
+     "calls": 1,
+     "inclusive_ms": 9.9
+    },
+    {
+     "name": "MW._apply_theme",
+     "calls": 1,
+     "inclusive_ms": 3.9
+    },
+    {
+     "name": "MW._apply_touch_adaptation",
+     "calls": 1,
+     "inclusive_ms": 3.9
+    },
+    {
+     "name": "MW._apply_restored_settings",
+     "calls": 1,
+     "inclusive_ms": 3.2
+    },
+    {
+     "name": "MW._build_menu_bar",
+     "calls": 1,
+     "inclusive_ms": 2.3
+    },
+    {
+     "name": "MW._build_status_bar",
+     "calls": 1,
+     "inclusive_ms": 1.1
+    },
+    {
+     "name": "MW._panels_set_sdr_connected",
+     "calls": 1,
+     "inclusive_ms": 1.1
+    },
+    {
+     "name": "MW._restore_window_state",
+     "calls": 1,
+     "inclusive_ms": 0.6
+    },
+    {
+     "name": "DesktopSettings.load",
+     "calls": 1,
+     "inclusive_ms": 0.3
+    },
+    {
+     "name": "QMainWindow.__init__",
+     "calls": 1,
+     "inclusive_ms": 0.2
+    },
+    {
+     "name": "RealGNSSMonitor.__init__",
+     "calls": 1,
+     "inclusive_ms": 0.2
+    },
+    {
+     "name": "MW._apply_responsive_chrome",
+     "calls": 1,
+     "inclusive_ms": 0.2
+    },
+    {
+     "name": "TouchManager.set_from_settings",
+     "calls": 1,
+     "inclusive_ms": 0.0
+    },
+    {
+     "name": "MCPWorkerManager.__init__",
+     "calls": 1,
+     "inclusive_ms": 0.0
+    },
+    {
+     "name": "AudioPlayer.__init__",
+     "calls": 1,
+     "inclusive_ms": 0.0
+    },
+    {
+     "name": "VfoManager.__init__",
+     "calls": 1,
+     "inclusive_ms": 0.0
+    },
+    {
+     "name": "SharedDemodConfig.__init__",
+     "calls": 1,
+     "inclusive_ms": 0.0
+    },
+    {
+     "name": "MW._perf_gnss_poll_ms",
+     "calls": 1,
+     "inclusive_ms": 0.0
+    }
+   ],
+   "region_children": {
+    "MW.__init__": [
+     {
+      "name": "MW._build_central_widget",
+      "calls": 1,
+      "inclusive_ms": 1144.3
+     },
+     {
+      "name": "MW._build_tool_bar",
+      "calls": 1,
+      "inclusive_ms": 49.7
+     },
+     {
+      "name": "QIcon.__init__",
+      "calls": 1,
+      "inclusive_ms": 9.9
+     },
+     {
+      "name": "MW._apply_theme",
+      "calls": 1,
+      "inclusive_ms": 3.9
+     },
+     {
+      "name": "MW._apply_touch_adaptation",
+      "calls": 1,
+      "inclusive_ms": 3.9
+     },
+     {
+      "name": "MW._apply_restored_settings",
+      "calls": 1,
+      "inclusive_ms": 3.2
+     },
+     {
+      "name": "MW._build_menu_bar",
+      "calls": 1,
+      "inclusive_ms": 2.3
+     },
+     {
+      "name": "MW._build_status_bar",
+      "calls": 1,
+      "inclusive_ms": 1.1
+     },
+     {
+      "name": "MW._panels_set_sdr_connected",
+      "calls": 1,
+      "inclusive_ms": 1.1
+     },
+     {
+      "name": "MW._restore_window_state",
+      "calls": 1,
+      "inclusive_ms": 0.6
+     },
+     {
+      "name": "DesktopSettings.load",
+      "calls": 1,
+      "inclusive_ms": 0.3
+     },
+     {
+      "name": "QMainWindow.__init__",
+      "calls": 1,
+      "inclusive_ms": 0.2
+     },
+     {
+      "name": "RealGNSSMonitor.__init__",
+      "calls": 1,
+      "inclusive_ms": 0.2
+     },
+     {
+      "name": "MW._apply_responsive_chrome",
+      "calls": 1,
+      "inclusive_ms": 0.2
+     },
+     {
+      "name": "TouchManager.set_from_settings",
+      "calls": 1,
+      "inclusive_ms": 0.0
+     }
+    ],
+    "MW._build_tool_bar": [
+     {
+      "name": "QComboBox.addItems",
+      "calls": 1,
+      "inclusive_ms": 16.1
+     },
+     {
+      "name": "QWidget.setStyleSheet",
+      "calls": 3,
+      "inclusive_ms": 0.4
+     },
+     {
+      "name": "MW._setup_tab_order",
+      "calls": 1,
+      "inclusive_ms": 0.3
+     }
+    ],
+    "MW._create_sky_widget": [
+     {
+      "name": "QWidget.setStyleSheet",
+      "calls": 7,
+      "inclusive_ms": 1.0
+     }
+    ],
+    "MW._build_central_widget": [
+     {
+      "name": "MW._create_sky_widget",
+      "calls": 1,
+      "inclusive_ms": 295.0
+     },
+     {
+      "name": "MW._build_mode_shell",
+      "calls": 1,
+      "inclusive_ms": 285.0
+     },
+     {
+      "name": "MW._build_kernel_panels",
+      "calls": 1,
+      "inclusive_ms": 190.8
+     },
+     {
+      "name": "MW._build_extended_panels",
+      "calls": 1,
+      "inclusive_ms": 88.7
+     },
+     {
+      "name": "MW._build_digital_decode_panels",
+      "calls": 1,
+      "inclusive_ms": 74.3
+     },
+     {
+      "name": "MW._add_right_tab",
+      "calls": 7,
+      "inclusive_ms": 52.1
+     },
+     {
+      "name": "MW._build_top_bar",
+      "calls": 1,
+      "inclusive_ms": 20.8
+     },
+     {
+      "name": "MW._build_capability_drawer",
+      "calls": 1,
+      "inclusive_ms": 12.6
+     },
+     {
+      "name": "MW._init_loop_sat_catalog",
+      "calls": 1,
+      "inclusive_ms": 7.7
+     },
+     {
+      "name": "QWidget.setStyleSheet",
+      "calls": 51,
+      "inclusive_ms": 7.1
+     },
+     {
+      "name": "QWidget.minimumSizeHint",
+      "calls": 43,
+      "inclusive_ms": 6.9
+     },
+     {
+      "name": "QComboBox.addItems",
+      "calls": 10,
+      "inclusive_ms": 5.1
+     },
+     {
+      "name": "MW._init_sky_action_bus",
+      "calls": 1,
+      "inclusive_ms": 3.9
+     },
+     {
+      "name": "MW._restore_user_layout",
+      "calls": 1,
+      "inclusive_ms": 1.7
+     },
+     {
+      "name": "MW._init_ui_action_bus",
+      "calls": 1,
+      "inclusive_ms": 1.6
+     }
+    ],
+    "MW._build_all_sky_toggle": [
+     {
+      "name": "QWidget.setStyleSheet",
+      "calls": 1,
+      "inclusive_ms": 0.1
+     }
+    ],
+    "MW._init_loop_sat_catalog": [
+     {
+      "name": "LoopSatTracker.__init__",
+      "calls": 1,
+      "inclusive_ms": 2.7
+     },
+     {
+      "name": "QWidget.setStyleSheet",
+      "calls": 1,
+      "inclusive_ms": 0.0
+     }
+    ],
+    "MW._build_ai_command_bar": [
+     {
+      "name": "QWidget.setStyleSheet",
+      "calls": 1,
+      "inclusive_ms": 0.1
+     }
+    ],
+    "MW._add_right_tab": [
+     {
+      "name": "QWidget.minimumSizeHint",
+      "calls": 32,
+      "inclusive_ms": 63.5
+     },
+     {
+      "name": "QWidget.setStyleSheet",
+      "calls": 20,
+      "inclusive_ms": 1.4
+     }
+    ],
+    "QWidget.setStyleSheet": [
+     {
+      "name": "QWidget.minimumSizeHint",
+      "calls": 2,
+      "inclusive_ms": 0.0
+     }
+    ],
+    "QWidget.minimumSizeHint": [
+     {
+      "name": "QWidget.minimumSizeHint",
+      "calls": 12,
+      "inclusive_ms": 0.1
+     }
+    ],
+    "MW._build_top_bar": [
+     {
+      "name": "QWidget.setStyleSheet",
+      "calls": 2,
+      "inclusive_ms": 0.1
+     }
+    ],
+    "MW._build_capability_drawer": [
+     {
+      "name": "QWidget.minimumSizeHint",
+      "calls": 8,
+      "inclusive_ms": 0.3
+     },
+     {
+      "name": "QWidget.setStyleSheet",
+      "calls": 4,
+      "inclusive_ms": 0.2
+     }
+    ],
+    "MW._build_kernel_panels": [
+     {
+      "name": "MW._apply_theme",
+      "calls": 1,
+      "inclusive_ms": 161.5
+     },
+     {
+      "name": "MW._add_right_tab",
+      "calls": 5,
+      "inclusive_ms": 11.7
+     },
+     {
+      "name": "TouchManager.set_from_settings",
+      "calls": 1,
+      "inclusive_ms": 0.0
+     }
+    ],
+    "Theme.apply": [
+     {
+      "name": "QWidget.minimumSizeHint",
+      "calls": 31,
+      "inclusive_ms": 5.5
+     }
+    ],
+    "MW._apply_theme": [
+     {
+      "name": "Theme.apply",
+      "calls": 3,
+      "inclusive_ms": 161.9
+     },
+     {
+      "name": "QWidget.setStyleSheet",
+      "calls": 6,
+      "inclusive_ms": 1.1
+     },
+     {
+      "name": "MW._apply_touch_stylesheet",
+      "calls": 3,
+      "inclusive_ms": 0.1
+     }
+    ],
+    "MW._build_extended_panels": [
+     {
+      "name": "MW._add_right_tab",
+      "calls": 5,
+      "inclusive_ms": 53.7
+     },
+     {
+      "name": "QWidget.setStyleSheet",
+      "calls": 4,
+      "inclusive_ms": 0.1
+     }
+    ],
+    "MW._build_digital_decode_panels": [
+     {
+      "name": "MW._add_right_tab",
+      "calls": 3,
+      "inclusive_ms": 42.7
+     },
+     {
+      "name": "QComboBox.addItems",
+      "calls": 2,
+      "inclusive_ms": 2.6
+     },
+     {
+      "name": "QWidget.minimumSizeHint",
+      "calls": 9,
+      "inclusive_ms": 2.2
+     },
+     {
+      "name": "QWidget.setStyleSheet",
+      "calls": 1,
+      "inclusive_ms": 0.0
+     }
+    ],
+    "QStackedWidget.addWidget": [
+     {
+      "name": "QWidget.minimumSizeHint",
+      "calls": 30,
+      "inclusive_ms": 3.9
+     }
+    ],
+    "MW._build_mode_shell": [
+     {
+      "name": "QStackedWidget.addWidget",
+      "calls": 2,
+      "inclusive_ms": 137.0
+     },
+     {
+      "name": "QMainWindow.setCentralWidget",
+      "calls": 1,
+      "inclusive_ms": 132.7
+     },
+     {
+      "name": "MW._build_planetarium_page",
+      "calls": 1,
+      "inclusive_ms": 15.1
+     }
+    ],
+    "MW._build_planetarium_page": [
+     {
+      "name": "QWidget.setStyleSheet",
+      "calls": 32,
+      "inclusive_ms": 4.4
+     }
+    ],
+    "QMainWindow.setCentralWidget": [
+     {
+      "name": "QWidget.minimumSizeHint",
+      "calls": 25,
+      "inclusive_ms": 1.2
+     }
+    ],
+    "MW._restore_window_state": [
+     {
+      "name": "QWidget.minimumSizeHint",
+      "calls": 30,
+      "inclusive_ms": 0.0
+     }
+    ],
+    "MW._panels_set_sdr_connected": [
+     {
+      "name": "QWidget.setStyleSheet",
+      "calls": 3,
+      "inclusive_ms": 0.3
+     }
+    ],
+    "MW._apply_restored_settings": [
+     {
+      "name": "MW._apply_theme",
+      "calls": 1,
+      "inclusive_ms": 2.9
+     }
+    ],
+    "MW._perf_gnss_poll_ms": [
+     {
+      "name": "MW._perf_key",
+      "calls": 1,
+      "inclusive_ms": 0.0
+     }
+    ],
+    "MW._apply_touch_adaptation": [
+     {
+      "name": "QWidget.minimumSizeHint",
+      "calls": 15,
+      "inclusive_ms": 0.2
+     },
+     {
+      "name": "MW._apply_touch_stylesheet",
+      "calls": 1,
+      "inclusive_ms": 0.0
+     }
+    ]
+   },
+   "imports_during_ctor": [
+    {
+     "module": "rtlsdr",
+     "ms": 835.8,
+     "calls": 1,
+     "parents": {
+      "None@Dummy-1": 1
+     }
+    },
+    {
+     "module": "pkg_resources",
+     "ms": 791.7,
+     "calls": 1,
+     "parents": {
+      "None@Dummy-1": 1
+     }
+    },
+    {
+     "module": "packaging",
+     "ms": 219.3,
+     "calls": 2,
+     "parents": {
+      "MW._add_right_tab@Dummy-1": 2
+     }
+    },
+    {
+     "module": "_parser",
+     "ms": 200.3,
+     "calls": 1,
+     "parents": {
+      "MW._add_right_tab@Dummy-1": 1
+     }
+    },
+    {
+     "module": "_tokenizer",
+     "ms": 192.6,
+     "calls": 1,
+     "parents": {
+      "MW._add_right_tab@Dummy-1": 1
+     }
+    },
+    {
+     "module": "specifiers",
+     "ms": 186.9,
+     "calls": 1,
+     "parents": {
+      "MW._add_right_tab@Dummy-1": 1
+     }
+    },
+    {
+     "module": "utils",
+     "ms": 182.8,
+     "calls": 1,
+     "parents": {
+      "MW._add_right_tab@Dummy-1": 1
+     }
+    },
+    {
+     "module": "tags",
+     "ms": 160.1,
+     "calls": 1,
+     "parents": {
+      "MW._apply_theme@Dummy-1": 1
+     }
+    },
+    {
+     "module": "",
+     "ms": 147.6,
+     "calls": 1,
+     "parents": {
+      "MW._apply_theme@Dummy-1": 1
+     }
+    },
+    {
+     "module": "jaraco",
+     "ms": 89.5,
+     "calls": 3,
+     "parents": {
+      "MW._add_right_tab@Dummy-1": 3
+     }
+    },
+    {
+     "module": "_elffile",
+     "ms": 38.9,
+     "calls": 1,
+     "parents": {
+      "Theme.apply@Dummy-1": 1
+     }
+    },
+    {
+     "module": "platformdirs",
+     "ms": 36.2,
+     "calls": 2,
+     "parents": {
+      "MW._build_digital_decode_panels@Dummy-1": 2
+     }
+    },
+    {
+     "module": "plistlib",
+     "ms": 21.8,
+     "calls": 1,
+     "parents": {
+      "MW._build_capability_drawer@Dummy-1": 1
+     }
+    },
+    {
+     "module": "more_itertools",
+     "ms": 14.1,
+     "calls": 1,
+     "parents": {
+      "MW._add_right_tab@Dummy-1": 1
+     }
+    },
+    {
+     "module": "tarfile",
+     "ms": 13.8,
+     "calls": 1,
+     "parents": {
+      "MW._add_right_tab@Dummy-1": 1
+     }
+    }
+   ],
+   "unparented_calls": [
+    {
+     "name": "MW.__init__",
+     "parent": null,
+     "depth": 0,
+     "ms": 1227.29,
+     "exclusive_ms": 6.45
+    },
+    {
+     "name": "QFontMetrics.__init__",
+     "parent": null,
+     "depth": 0,
+     "ms": 0.01,
+     "exclusive_ms": 0.01
+    }
+   ]
+  },
+  {
+   "load_before": {
+    "sys_cpu_pct": 53.6,
+    "python_proc_count": 8,
+    "python_total_cpu_pct": 11.0,
+    "python_top": [
+     {
+      "pid": 32508,
+      "cpu_pct": 10.2
+     },
+     {
+      "pid": 33876,
+      "cpu_pct": 0.8
+     },
+     {
+      "pid": 28504,
+      "cpu_pct": 0.0
+     },
+     {
+      "pid": 32352,
+      "cpu_pct": 0.0
+     },
+     {
+      "pid": 34532,
+      "cpu_pct": 0.0
+     }
+    ],
+    "cpu_count": 12
+   },
+   "load_after": {
+    "sys_cpu_pct": 57.3,
+    "python_proc_count": 6,
+    "python_total_cpu_pct": 92.2,
+    "python_top": [
+     {
+      "pid": 36848,
+      "cpu_pct": 77.3
+     },
+     {
+      "pid": 33876,
+      "cpu_pct": 8.6
+     },
+     {
+      "pid": 32508,
+      "cpu_pct": 5.5
+     },
+     {
+      "pid": 37696,
+      "cpu_pct": 0.8
+     },
+     {
+      "pid": 28504,
+      "cpu_pct": 0.0
+     }
+    ],
+    "cpu_count": 12
+   },
+   "import_phase_ms": 924.6,
+   "qapp_ms": 25.8,
+   "prewarm_font_ms": null,
+   "ctor_ms": 2317.5,
+   "definition_c_ms": 7557.4,
+   "widgets": 1128,
+   "ruler": {
+    "qt_platform": "windows",
+    "font": "MiSans",
+    "pt": 10.0,
+    "line_h": 27,
+    "dpr": 1.0
+   },
+   "named_top_level_ms": 2310.2,
+   "residual_ms": 7.3,
+   "ctor_row": {
+    "calls": 1,
+    "inclusive_ms": 2317.5,
+    "exclusive_ms": 7.3
+   },
+   "rows": [
+    {
+     "name": "MW._create_sky_widget",
+     "calls": 1,
+     "inclusive_ms": 882.4,
+     "exclusive_ms": 881.1,
+     "parents": {
+      "MW._build_central_widget": 1
+     }
+    },
+    {
+     "name": "MW._build_tool_bar",
+     "calls": 1,
+     "inclusive_ms": 265.1,
+     "exclusive_ms": 240.1,
+     "parents": {
+      "MW.__init__": 1
+     }
+    },
+    {
+     "name": "Theme.apply",
+     "calls": 3,
+     "inclusive_ms": 227.2,
+     "exclusive_ms": 220.6,
+     "parents": {
+      "MW._apply_theme": 3
+     }
+    },
+    {
+     "name": "MW._build_central_widget",
+     "calls": 1,
+     "inclusive_ms": 2014.1,
+     "exclusive_ms": 153.7,
+     "parents": {
+      "MW.__init__": 1
+     }
+    },
+    {
+     "name": "QStackedWidget.addWidget",
+     "calls": 2,
+     "inclusive_ms": 148.6,
+     "exclusive_ms": 143.4,
+     "parents": {
+      "MW._build_mode_shell": 2
+     }
+    },
+    {
+     "name": "QMainWindow.setCentralWidget",
+     "calls": 2,
+     "inclusive_ms": 144.1,
+     "exclusive_ms": 142.8,
+     "parents": {
+      "MW._build_central_widget": 1,
+      "MW._build_mode_shell": 1
+     }
+    },
+    {
+     "name": "MW._add_right_tab",
+     "calls": 20,
+     "inclusive_ms": 234.9,
+     "exclusive_ms": 132.9,
+     "parents": {
+      "MW._build_central_widget": 7,
+      "MW._build_kernel_panels": 5,
+      "MW._build_extended_panels": 5,
+      "MW._build_digital_decode_panels": 3
+     }
+    },
+    {
+     "name": "QWidget.minimumSizeHint",
+     "calls": 237,
+     "inclusive_ms": 123.0,
+     "exclusive_ms": 122.9,
+     "parents": {
+      "MW._build_central_widget": 43,
+      "MW._add_right_tab": 32,
+      "Theme.apply": 31,
+      "QStackedWidget.addWidget": 30
+     }
+    },
+    {
+     "name": "MW._build_extended_panels",
+     "calls": 1,
+     "inclusive_ms": 123.5,
+     "exclusive_ms": 48.2,
+     "parents": {
+      "MW._build_central_widget": 1
+     }
+    },
+    {
+     "name": "QComboBox.addItems",
+     "calls": 13,
+     "inclusive_ms": 35.0,
+     "exclusive_ms": 35.0,
+     "parents": {
+      "MW._build_central_widget": 10,
+      "MW._build_digital_decode_panels": 2,
+      "MW._build_tool_bar": 1
+     }
+    },
+    {
+     "name": "MW._build_digital_decode_panels",
+     "calls": 1,
+     "inclusive_ms": 82.4,
+     "exclusive_ms": 29.7,
+     "parents": {
+      "MW._build_central_widget": 1
+     }
+    },
+    {
+     "name": "MW._build_top_bar",
+     "calls": 1,
+     "inclusive_ms": 28.9,
+     "exclusive_ms": 28.8,
+     "parents": {
+      "MW._build_central_widget": 1
+     }
+    },
+    {
+     "name": "QWidget.setStyleSheet",
+     "calls": 136,
+     "inclusive_ms": 26.4,
+     "exclusive_ms": 26.4,
+     "parents": {
+      "MW._build_central_widget": 51,
+      "MW._build_planetarium_page": 32,
+      "MW._add_right_tab": 20,
+      "MW._create_sky_widget": 7
+     }
+    },
+    {
+     "name": "MW._build_kernel_panels",
+     "calls": 1,
+     "inclusive_ms": 269.9,
+     "exclusive_ms": 22.3,
+     "parents": {
+      "MW._build_central_widget": 1
+     }
+    },
+    {
+     "name": "MW._build_capability_drawer",
+     "calls": 1,
+     "inclusive_ms": 18.6,
+     "exclusive_ms": 17.7,
+     "parents": {
+      "MW._build_central_widget": 1
+     }
+    },
+    {
+     "name": "QIcon.__init__",
+     "calls": 1,
+     "inclusive_ms": 14.2,
+     "exclusive_ms": 14.2,
+     "parents": {
+      "MW.__init__": 1
+     }
+    },
+    {
+     "name": "MW._build_planetarium_page",
+     "calls": 1,
+     "inclusive_ms": 16.4,
+     "exclusive_ms": 11.7,
+     "parents": {
+      "MW._build_mode_shell": 1
+     }
+    },
+    {
+     "name": "MW.__init__",
+     "calls": 1,
+     "inclusive_ms": 2317.5,
+     "exclusive_ms": 7.3,
+     "parents": {
+      "None": 1
+     }
+    },
+    {
+     "name": "MW._init_loop_sat_catalog",
+     "calls": 1,
+     "inclusive_ms": 9.4,
+     "exclusive_ms": 6.1,
+     "parents": {
+      "MW._build_central_widget": 1
+     }
+    },
+    {
+     "name": "MW._apply_theme",
+     "calls": 3,
+     "inclusive_ms": 234.2,
+     "exclusive_ms": 5.6,
+     "parents": {
+      "MW._build_kernel_panels": 1,
+      "MW.__init__": 1,
+      "MW._apply_restored_settings": 1
+     }
+    },
+    {
+     "name": "MW._init_sky_action_bus",
+     "calls": 1,
+     "inclusive_ms": 3.8,
+     "exclusive_ms": 3.8,
+     "parents": {
+      "MW._build_central_widget": 1
+     }
+    },
+    {
+     "name": "LoopSatTracker.__init__",
+     "calls": 1,
+     "inclusive_ms": 3.3,
+     "exclusive_ms": 3.3,
+     "parents": {
+      "MW._init_loop_sat_catalog": 1
+     }
+    },
+    {
+     "name": "MW._apply_touch_adaptation",
+     "calls": 1,
+     "inclusive_ms": 3.1,
+     "exclusive_ms": 2.9,
+     "parents": {
+      "MW.__init__": 1
+     }
+    },
+    {
+     "name": "MW._build_menu_bar",
+     "calls": 1,
+     "inclusive_ms": 2.6,
+     "exclusive_ms": 2.6,
+     "parents": {
+      "MW.__init__": 1
+     }
+    },
+    {
+     "name": "MW._build_bottom_dock",
+     "calls": 1,
+     "inclusive_ms": 2.4,
+     "exclusive_ms": 2.4,
+     "parents": {
+      "MW._build_central_widget": 1
+     }
+    },
+    {
+     "name": "MW._init_ui_action_bus",
+     "calls": 1,
+     "inclusive_ms": 2.3,
+     "exclusive_ms": 2.3,
+     "parents": {
+      "MW._build_central_widget": 1
+     }
+    },
+    {
+     "name": "MW._restore_user_layout",
+     "calls": 1,
+     "inclusive_ms": 1.6,
+     "exclusive_ms": 1.6,
+     "parents": {
+      "MW._build_central_widget": 1
+     }
+    },
+    {
+     "name": "MW._build_panel_menu",
+     "calls": 1,
+     "inclusive_ms": 1.4,
+     "exclusive_ms": 1.4,
+     "parents": {
+      "MW._build_central_widget": 1
+     }
+    },
+    {
+     "name": "MW._build_status_bar",
+     "calls": 1,
+     "inclusive_ms": 1.2,
+     "exclusive_ms": 1.2,
+     "parents": {
+      "MW.__init__": 1
+     }
+    },
+    {
+     "name": "MW._build_all_sky_toggle",
+     "calls": 1,
+     "inclusive_ms": 0.8,
+     "exclusive_ms": 0.7,
+     "parents": {
+      "MW._build_central_widget": 1
+     }
+    },
+    {
+     "name": "MW._panels_set_sdr_connected",
+     "calls": 1,
+     "inclusive_ms": 1.0,
+     "exclusive_ms": 0.7,
+     "parents": {
+      "MW.__init__": 1
+     }
+    },
+    {
+     "name": "MW._restore_window_state",
+     "calls": 1,
+     "inclusive_ms": 0.7,
+     "exclusive_ms": 0.6,
+     "parents": {
+      "MW.__init__": 1
+     }
+    },
+    {
+     "name": "DesktopSettings.load",
+     "calls": 1,
+     "inclusive_ms": 0.5,
+     "exclusive_ms": 0.5,
+     "parents": {
+      "MW.__init__": 1
+     }
+    },
+    {
+     "name": "MW._build_ai_command_bar",
+     "calls": 1,
+     "inclusive_ms": 0.7,
+     "exclusive_ms": 0.5,
+     "parents": {
+      "MW._build_central_widget": 1
+     }
+    },
+    {
+     "name": "RealGNSSMonitor.__init__",
+     "calls": 1,
+     "inclusive_ms": 0.3,
+     "exclusive_ms": 0.3,
+     "parents": {
+      "MW.__init__": 1
+     }
+    },
+    {
+     "name": "MW._setup_tab_order",
+     "calls": 1,
+     "inclusive_ms": 0.3,
+     "exclusive_ms": 0.3,
+     "parents": {
+      "MW._build_tool_bar": 1
+     }
+    },
+    {
+     "name": "MW._init_ai_agent_from_config",
+     "calls": 1,
+     "inclusive_ms": 0.3,
+     "exclusive_ms": 0.3,
+     "parents": {
+      "MW._build_central_widget": 1
+     }
+    },
+    {
+     "name": "MW._apply_perf_profile",
+     "calls": 1,
+     "inclusive_ms": 0.3,
+     "exclusive_ms": 0.3,
+     "parents": {
+      "MW._build_central_widget": 1
+     }
+    },
+    {
+     "name": "MW._apply_restored_settings",
+     "calls": 1,
+     "inclusive_ms": 4.0,
+     "exclusive_ms": 0.3,
+     "parents": {
+      "MW.__init__": 1
+     }
+    },
+    {
+     "name": "QMainWindow.__init__",
+     "calls": 1,
+     "inclusive_ms": 0.2,
+     "exclusive_ms": 0.2,
+     "parents": {
+      "MW.__init__": 1
+     }
+    },
+    {
+     "name": "MW._apply_touch_stylesheet",
+     "calls": 4,
+     "inclusive_ms": 0.2,
+     "exclusive_ms": 0.2,
+     "parents": {
+      "MW._apply_theme": 3,
+      "MW._apply_touch_adaptation": 1
+     }
+    },
+    {
+     "name": "MW._build_mode_shell",
+     "calls": 1,
+     "inclusive_ms": 309.1,
+     "exclusive_ms": 0.2,
+     "parents": {
+      "MW._build_central_widget": 1
+     }
+    },
+    {
+     "name": "MW._apply_responsive_chrome",
+     "calls": 1,
+     "inclusive_ms": 0.2,
+     "exclusive_ms": 0.2,
+     "parents": {
+      "MW.__init__": 1
+     }
+    },
+    {
+     "name": "TouchManager.set_from_settings",
+     "calls": 2,
+     "inclusive_ms": 0.0,
+     "exclusive_ms": 0.0,
+     "parents": {
+      "MW.__init__": 1,
+      "MW._build_kernel_panels": 1
+     }
+    },
+    {
+     "name": "MCPWorkerManager.__init__",
+     "calls": 1,
+     "inclusive_ms": 0.0,
+     "exclusive_ms": 0.0,
+     "parents": {
+      "MW.__init__": 1
+     }
+    },
+    {
+     "name": "AudioPlayer.__init__",
+     "calls": 1,
+     "inclusive_ms": 0.0,
+     "exclusive_ms": 0.0,
+     "parents": {
+      "MW.__init__": 1
+     }
+    },
+    {
+     "name": "VfoManager.__init__",
+     "calls": 2,
+     "inclusive_ms": 0.0,
+     "exclusive_ms": 0.0,
+     "parents": {
+      "MW.__init__": 1,
+      "MW._build_central_widget": 1
+     }
+    },
+    {
+     "name": "SharedDemodConfig.__init__",
+     "calls": 1,
+     "inclusive_ms": 0.0,
+     "exclusive_ms": 0.0,
+     "parents": {
+      "MW.__init__": 1
+     }
+    },
+    {
+     "name": "MW._apply_callsign",
+     "calls": 1,
+     "inclusive_ms": 0.0,
+     "exclusive_ms": 0.0,
+     "parents": {
+      "MW._build_central_widget": 1
+     }
+    },
+    {
+     "name": "MW._perf_key",
+     "calls": 2,
+     "inclusive_ms": 0.0,
+     "exclusive_ms": 0.0,
+     "parents": {
+      "MW._build_central_widget": 1,
+      "MW._perf_gnss_poll_ms": 1
+     }
+    },
+    {
+     "name": "MW._restore_app_mode",
+     "calls": 1,
+     "inclusive_ms": 0.0,
+     "exclusive_ms": 0.0,
+     "parents": {
+      "MW._build_central_widget": 1
+     }
+    },
+    {
+     "name": "MW._perf_gnss_poll_ms",
+     "calls": 1,
+     "inclusive_ms": 0.0,
+     "exclusive_ms": 0.0,
+     "parents": {
+      "MW.__init__": 1
+     }
+    },
+    {
+     "name": "QFontMetrics.__init__",
+     "calls": 1,
+     "inclusive_ms": 0.0,
+     "exclusive_ms": 0.0,
+     "parents": {
+      "None": 1
+     }
+    }
+   ],
+   "ctor_top_level": [
+    {
+     "name": "MW._build_central_widget",
+     "calls": 1,
+     "inclusive_ms": 2014.1
+    },
+    {
+     "name": "MW._build_tool_bar",
+     "calls": 1,
+     "inclusive_ms": 265.1
+    },
+    {
+     "name": "QIcon.__init__",
+     "calls": 1,
+     "inclusive_ms": 14.2
+    },
+    {
+     "name": "MW._apply_restored_settings",
+     "calls": 1,
+     "inclusive_ms": 4.0
+    },
+    {
+     "name": "MW._apply_theme",
+     "calls": 1,
+     "inclusive_ms": 3.0
+    },
+    {
+     "name": "MW._apply_touch_adaptation",
+     "calls": 1,
+     "inclusive_ms": 3.0
+    },
+    {
+     "name": "MW._build_menu_bar",
+     "calls": 1,
+     "inclusive_ms": 2.6
+    },
+    {
+     "name": "MW._build_status_bar",
+     "calls": 1,
+     "inclusive_ms": 1.2
+    },
+    {
+     "name": "MW._panels_set_sdr_connected",
+     "calls": 1,
+     "inclusive_ms": 1.0
+    },
+    {
+     "name": "MW._restore_window_state",
+     "calls": 1,
+     "inclusive_ms": 0.7
+    },
+    {
+     "name": "DesktopSettings.load",
+     "calls": 1,
+     "inclusive_ms": 0.5
+    },
+    {
+     "name": "QMainWindow.__init__",
+     "calls": 1,
+     "inclusive_ms": 0.2
+    },
+    {
+     "name": "RealGNSSMonitor.__init__",
+     "calls": 1,
+     "inclusive_ms": 0.2
+    },
+    {
+     "name": "MW._apply_responsive_chrome",
+     "calls": 1,
+     "inclusive_ms": 0.2
+    },
+    {
+     "name": "TouchManager.set_from_settings",
+     "calls": 1,
+     "inclusive_ms": 0.0
+    },
+    {
+     "name": "MCPWorkerManager.__init__",
+     "calls": 1,
+     "inclusive_ms": 0.0
+    },
+    {
+     "name": "AudioPlayer.__init__",
+     "calls": 1,
+     "inclusive_ms": 0.0
+    },
+    {
+     "name": "VfoManager.__init__",
+     "calls": 1,
+     "inclusive_ms": 0.0
+    },
+    {
+     "name": "SharedDemodConfig.__init__",
+     "calls": 1,
+     "inclusive_ms": 0.0
+    },
+    {
+     "name": "MW._perf_gnss_poll_ms",
+     "calls": 1,
+     "inclusive_ms": 0.0
+    }
+   ],
+   "region_children": {
+    "MW.__init__": [
+     {
+      "name": "MW._build_central_widget",
+      "calls": 1,
+      "inclusive_ms": 2014.1
+     },
+     {
+      "name": "MW._build_tool_bar",
+      "calls": 1,
+      "inclusive_ms": 265.1
+     },
+     {
+      "name": "QIcon.__init__",
+      "calls": 1,
+      "inclusive_ms": 14.2
+     },
+     {
+      "name": "MW._apply_restored_settings",
+      "calls": 1,
+      "inclusive_ms": 4.0
+     },
+     {
+      "name": "MW._apply_theme",
+      "calls": 1,
+      "inclusive_ms": 3.0
+     },
+     {
+      "name": "MW._apply_touch_adaptation",
+      "calls": 1,
+      "inclusive_ms": 3.0
+     },
+     {
+      "name": "MW._build_menu_bar",
+      "calls": 1,
+      "inclusive_ms": 2.6
+     },
+     {
+      "name": "MW._build_status_bar",
+      "calls": 1,
+      "inclusive_ms": 1.2
+     },
+     {
+      "name": "MW._panels_set_sdr_connected",
+      "calls": 1,
+      "inclusive_ms": 1.0
+     },
+     {
+      "name": "MW._restore_window_state",
+      "calls": 1,
+      "inclusive_ms": 0.7
+     },
+     {
+      "name": "DesktopSettings.load",
+      "calls": 1,
+      "inclusive_ms": 0.5
+     },
+     {
+      "name": "QMainWindow.__init__",
+      "calls": 1,
+      "inclusive_ms": 0.2
+     },
+     {
+      "name": "RealGNSSMonitor.__init__",
+      "calls": 1,
+      "inclusive_ms": 0.2
+     },
+     {
+      "name": "MW._apply_responsive_chrome",
+      "calls": 1,
+      "inclusive_ms": 0.2
+     },
+     {
+      "name": "TouchManager.set_from_settings",
+      "calls": 1,
+      "inclusive_ms": 0.0
+     }
+    ],
+    "MW._build_tool_bar": [
+     {
+      "name": "QComboBox.addItems",
+      "calls": 1,
+      "inclusive_ms": 24.1
+     },
+     {
+      "name": "QWidget.setStyleSheet",
+      "calls": 3,
+      "inclusive_ms": 0.6
+     },
+     {
+      "name": "MW._setup_tab_order",
+      "calls": 1,
+      "inclusive_ms": 0.3
+     }
+    ],
+    "MW._create_sky_widget": [
+     {
+      "name": "QWidget.setStyleSheet",
+      "calls": 7,
+      "inclusive_ms": 1.3
+     }
+    ],
+    "MW._build_central_widget": [
+     {
+      "name": "MW._create_sky_widget",
+      "calls": 1,
+      "inclusive_ms": 882.4
+     },
+     {
+      "name": "MW._build_mode_shell",
+      "calls": 1,
+      "inclusive_ms": 309.1
+     },
+     {
+      "name": "MW._build_kernel_panels",
+      "calls": 1,
+      "inclusive_ms": 269.9
+     },
+     {
+      "name": "MW._build_extended_panels",
+      "calls": 1,
+      "inclusive_ms": 123.5
+     },
+     {
+      "name": "MW._add_right_tab",
+      "calls": 7,
+      "inclusive_ms": 92.5
+     },
+     {
+      "name": "MW._build_digital_decode_panels",
+      "calls": 1,
+      "inclusive_ms": 82.4
+     },
+     {
+      "name": "MW._build_top_bar",
+      "calls": 1,
+      "inclusive_ms": 28.9
+     },
+     {
+      "name": "MW._build_capability_drawer",
+      "calls": 1,
+      "inclusive_ms": 18.6
+     },
+     {
+      "name": "QWidget.setStyleSheet",
+      "calls": 51,
+      "inclusive_ms": 15.1
+     },
+     {
+      "name": "MW._init_loop_sat_catalog",
+      "calls": 1,
+      "inclusive_ms": 9.4
+     },
+     {
+      "name": "QComboBox.addItems",
+      "calls": 10,
+      "inclusive_ms": 8.1
+     },
+     {
+      "name": "QWidget.minimumSizeHint",
+      "calls": 43,
+      "inclusive_ms": 6.5
+     },
+     {
+      "name": "MW._init_sky_action_bus",
+      "calls": 1,
+      "inclusive_ms": 3.8
+     },
+     {
+      "name": "MW._build_bottom_dock",
+      "calls": 1,
+      "inclusive_ms": 2.4
+     },
+     {
+      "name": "MW._init_ui_action_bus",
+      "calls": 1,
+      "inclusive_ms": 2.3
+     }
+    ],
+    "MW._build_all_sky_toggle": [
+     {
+      "name": "QWidget.setStyleSheet",
+      "calls": 1,
+      "inclusive_ms": 0.1
+     }
+    ],
+    "MW._init_loop_sat_catalog": [
+     {
+      "name": "LoopSatTracker.__init__",
+      "calls": 1,
+      "inclusive_ms": 3.3
+     },
+     {
+      "name": "QWidget.setStyleSheet",
+      "calls": 1,
+      "inclusive_ms": 0.0
+     }
+    ],
+    "MW._build_ai_command_bar": [
+     {
+      "name": "QWidget.setStyleSheet",
+      "calls": 1,
+      "inclusive_ms": 0.1
+     }
+    ],
+    "MW._add_right_tab": [
+     {
+      "name": "QWidget.minimumSizeHint",
+      "calls": 32,
+      "inclusive_ms": 99.9
+     },
+     {
+      "name": "QWidget.setStyleSheet",
+      "calls": 20,
+      "inclusive_ms": 2.1
+     }
+    ],
+    "QWidget.setStyleSheet": [
+     {
+      "name": "QWidget.minimumSizeHint",
+      "calls": 2,
+      "inclusive_ms": 0.0
+     }
+    ],
+    "QWidget.minimumSizeHint": [
+     {
+      "name": "QWidget.minimumSizeHint",
+      "calls": 12,
+      "inclusive_ms": 0.1
+     }
+    ],
+    "MW._build_top_bar": [
+     {
+      "name": "QWidget.setStyleSheet",
+      "calls": 2,
+      "inclusive_ms": 0.1
+     }
+    ],
+    "MW._build_capability_drawer": [
+     {
+      "name": "QWidget.setStyleSheet",
+      "calls": 4,
+      "inclusive_ms": 0.5
+     },
+     {
+      "name": "QWidget.minimumSizeHint",
+      "calls": 8,
+      "inclusive_ms": 0.4
+     }
+    ],
+    "MW._build_kernel_panels": [
+     {
+      "name": "MW._apply_theme",
+      "calls": 1,
+      "inclusive_ms": 227.5
+     },
+     {
+      "name": "MW._add_right_tab",
+      "calls": 5,
+      "inclusive_ms": 20.1
+     },
+     {
+      "name": "TouchManager.set_from_settings",
+      "calls": 1,
+      "inclusive_ms": 0.0
+     }
+    ],
+    "Theme.apply": [
+     {
+      "name": "QWidget.minimumSizeHint",
+      "calls": 31,
+      "inclusive_ms": 6.5
+     }
+    ],
+    "MW._apply_theme": [
+     {
+      "name": "Theme.apply",
+      "calls": 3,
+      "inclusive_ms": 227.2
+     },
+     {
+      "name": "QWidget.setStyleSheet",
+      "calls": 6,
+      "inclusive_ms": 1.2
+     },
+     {
+      "name": "MW._apply_touch_stylesheet",
+      "calls": 3,
+      "inclusive_ms": 0.2
+     }
+    ],
+    "MW._build_extended_panels": [
+     {
+      "name": "MW._add_right_tab",
+      "calls": 5,
+      "inclusive_ms": 75.2
+     },
+     {
+      "name": "QWidget.setStyleSheet",
+      "calls": 4,
+      "inclusive_ms": 0.1
+     }
+    ],
+    "MW._build_digital_decode_panels": [
+     {
+      "name": "MW._add_right_tab",
+      "calls": 3,
+      "inclusive_ms": 47.2
+     },
+     {
+      "name": "QWidget.minimumSizeHint",
+      "calls": 9,
+      "inclusive_ms": 2.8
+     },
+     {
+      "name": "QComboBox.addItems",
+      "calls": 2,
+      "inclusive_ms": 2.7
+     },
+     {
+      "name": "QWidget.setStyleSheet",
+      "calls": 1,
+      "inclusive_ms": 0.0
+     }
+    ],
+    "QStackedWidget.addWidget": [
+     {
+      "name": "QWidget.minimumSizeHint",
+      "calls": 30,
+      "inclusive_ms": 5.2
+     }
+    ],
+    "MW._build_mode_shell": [
+     {
+      "name": "QStackedWidget.addWidget",
+      "calls": 2,
+      "inclusive_ms": 148.6
+     },
+     {
+      "name": "QMainWindow.setCentralWidget",
+      "calls": 1,
+      "inclusive_ms": 143.8
+     },
+     {
+      "name": "MW._build_planetarium_page",
+      "calls": 1,
+      "inclusive_ms": 16.4
+     }
+    ],
+    "MW._build_planetarium_page": [
+     {
+      "name": "QWidget.setStyleSheet",
+      "calls": 32,
+      "inclusive_ms": 4.7
+     }
+    ],
+    "QMainWindow.setCentralWidget": [
+     {
+      "name": "QWidget.minimumSizeHint",
+      "calls": 25,
+      "inclusive_ms": 1.2
+     }
+    ],
+    "MW._restore_window_state": [
+     {
+      "name": "QWidget.minimumSizeHint",
+      "calls": 30,
+      "inclusive_ms": 0.0
+     }
+    ],
+    "MW._panels_set_sdr_connected": [
+     {
+      "name": "QWidget.setStyleSheet",
+      "calls": 3,
+      "inclusive_ms": 0.3
+     }
+    ],
+    "MW._apply_restored_settings": [
+     {
+      "name": "MW._apply_theme",
+      "calls": 1,
+      "inclusive_ms": 3.7
+     }
+    ],
+    "MW._perf_gnss_poll_ms": [
+     {
+      "name": "MW._perf_key",
+      "calls": 1,
+      "inclusive_ms": 0.0
+     }
+    ],
+    "MW._apply_touch_adaptation": [
+     {
+      "name": "QWidget.minimumSizeHint",
+      "calls": 15,
+      "inclusive_ms": 0.2
+     },
+     {
+      "name": "MW._apply_touch_stylesheet",
+      "calls": 1,
+      "inclusive_ms": 0.0
+     }
+    ]
+   },
+   "imports_during_ctor": [
+    {
+     "module": "rtlsdr",
+     "ms": 995.0,
+     "calls": 1,
+     "parents": {
+      "None@Dummy-1": 1
+     }
+    },
+    {
+     "module": "pkg_resources",
+     "ms": 935.9,
+     "calls": 1,
+     "parents": {
+      "None@Dummy-1": 1
+     }
+    },
+    {
+     "module": "packaging",
+     "ms": 319.2,
+     "calls": 2,
+     "parents": {
+      "MW._add_right_tab@Dummy-1": 2
+     }
+    },
+    {
+     "module": "_parser",
+     "ms": 267.3,
+     "calls": 1,
+     "parents": {
+      "MW._add_right_tab@Dummy-1": 1
+     }
+    },
+    {
+     "module": "_tokenizer",
+     "ms": 263.9,
+     "calls": 1,
+     "parents": {
+      "MW._add_right_tab@Dummy-1": 1
+     }
+    },
+    {
+     "module": "specifiers",
+     "ms": 225.4,
+     "calls": 1,
+     "parents": {
+      "MW._add_right_tab@Dummy-1": 1
+     }
+    },
+    {
+     "module": "utils",
+     "ms": 174.1,
+     "calls": 1,
+     "parents": {
+      "MW._add_right_tab@Dummy-1": 1
+     }
+    },
+    {
+     "module": "jaraco",
+     "ms": 132.9,
+     "calls": 3,
+     "parents": {
+      "MW._build_extended_panels@Dummy-1": 3
+     }
+    },
+    {
+     "module": "tags",
+     "ms": 112.3,
+     "calls": 1,
+     "parents": {
+      "MW._add_right_tab@Dummy-1": 1
+     }
+    },
+    {
+     "module": "platformdirs",
+     "ms": 26.1,
+     "calls": 2,
+     "parents": {
+      "MW._add_right_tab@Dummy-1": 2
+     }
+    },
+    {
+     "module": "SoapySDR",
+     "ms": 21.4,
+     "calls": 1,
+     "parents": {
+      "MW._build_central_widget@Dummy-1": 1
+     }
+    },
+    {
+     "module": "tarfile",
+     "ms": 20.3,
+     "calls": 1,
+     "parents": {
+      "MW._build_extended_panels@Dummy-1": 1
+     }
+    },
+    {
+     "module": "more_itertools",
+     "ms": 19.6,
+     "calls": 1,
+     "parents": {
+      "MW._build_extended_panels@Dummy-1": 1
+     }
+    },
+    {
+     "module": "",
+     "ms": 17.2,
+     "calls": 1,
+     "parents": {
+      "MW._build_extended_panels@Dummy-1": 1
+     }
+    },
+    {
+     "module": "mbdsdr_ai",
+     "ms": 12.4,
+     "calls": 7,
+     "parents": {
+      "MW.__init__@MainThread": 1,
+      "MW._build_central_widget@MainThread": 2,
+      "MW._build_kernel_panels@MainThread": 1,
+      "MW._init_ui_action_bus@MainThread": 1,
+      "MW._init_sky_action_bus@MainThread": 2
+     }
+    }
+   ],
+   "unparented_calls": [
+    {
+     "name": "MW.__init__",
+     "parent": null,
+     "depth": 0,
+     "ms": 2317.48,
+     "exclusive_ms": 7.26
+    },
+    {
+     "name": "QFontMetrics.__init__",
+     "parent": null,
+     "depth": 0,
+     "ms": 0.01,
+     "exclusive_ms": 0.01
+    }
+   ]
+  },
+  {
+   "load_before": {
+    "sys_cpu_pct": 29.0,
+    "python_proc_count": 6,
+    "python_total_cpu_pct": 78.1,
+    "python_top": [
+     {
+      "pid": 36848,
+      "cpu_pct": 73.4
+     },
+     {
+      "pid": 32508,
+      "cpu_pct": 3.9
+     },
+     {
+      "pid": 37696,
+      "cpu_pct": 0.8
+     },
+     {
+      "pid": 6772,
+      "cpu_pct": 0.0
+     },
+     {
+      "pid": 28504,
+      "cpu_pct": 0.0
+     }
+    ],
+    "cpu_count": 12
+   },
+   "load_after": {
+    "sys_cpu_pct": 44.2,
+    "python_proc_count": 7,
+    "python_total_cpu_pct": 164.9,
+    "python_top": [
+     {
+      "pid": 13844,
+      "cpu_pct": 96.1
+     },
+     {
+      "pid": 36848,
+      "cpu_pct": 53.1
+     },
+     {
+      "pid": 6772,
+      "cpu_pct": 10.2
+     },
+     {
+      "pid": 32508,
+      "cpu_pct": 5.5
+     },
+     {
+      "pid": 28504,
+      "cpu_pct": 0.0
+     }
+    ],
+    "cpu_count": 12
+   },
+   "import_phase_ms": 890.1,
+   "qapp_ms": 25.0,
+   "prewarm_font_ms": null,
+   "ctor_ms": 2038.7,
+   "definition_c_ms": 7157.1,
+   "widgets": 1128,
+   "ruler": {
+    "qt_platform": "windows",
+    "font": "MiSans",
+    "pt": 10.0,
+    "line_h": 27,
+    "dpr": 1.0
+   },
+   "named_top_level_ms": 2033.2,
+   "residual_ms": 5.5,
+   "ctor_row": {
+    "calls": 1,
+    "inclusive_ms": 2038.7,
+    "exclusive_ms": 5.5
+   },
+   "rows": [
+    {
+     "name": "MW._create_sky_widget",
+     "calls": 1,
+     "inclusive_ms": 395.2,
+     "exclusive_ms": 394.4,
+     "parents": {
+      "MW._build_central_widget": 1
+     }
+    },
+    {
+     "name": "Theme.apply",
+     "calls": 3,
+     "inclusive_ms": 278.1,
+     "exclusive_ms": 271.4,
+     "parents": {
+      "MW._apply_theme": 3
+     }
+    },
+    {
+     "name": "QMainWindow.setCentralWidget",
+     "calls": 2,
+     "inclusive_ms": 238.3,
+     "exclusive_ms": 236.3,
+     "parents": {
+      "MW._build_central_widget": 1,
+      "MW._build_mode_shell": 1
+     }
+    },
+    {
+     "name": "QStackedWidget.addWidget",
+     "calls": 2,
+     "inclusive_ms": 238.8,
+     "exclusive_ms": 230.8,
+     "parents": {
+      "MW._build_mode_shell": 2
+     }
+    },
+    {
+     "name": "MW._build_tool_bar",
+     "calls": 1,
+     "inclusive_ms": 172.0,
+     "exclusive_ms": 156.7,
+     "parents": {
+      "MW.__init__": 1
+     }
+    },
+    {
+     "name": "MW._add_right_tab",
+     "calls": 20,
+     "inclusive_ms": 247.4,
+     "exclusive_ms": 147.1,
+     "parents": {
+      "MW._build_central_widget": 7,
+      "MW._build_kernel_panels": 5,
+      "MW._build_extended_panels": 5,
+      "MW._build_digital_decode_panels": 3
+     }
+    },
+    {
+     "name": "MW._build_central_widget",
+     "calls": 1,
+     "inclusive_ms": 1827.6,
+     "exclusive_ms": 129.6,
+     "parents": {
+      "MW.__init__": 1
+     }
+    },
+    {
+     "name": "QWidget.minimumSizeHint",
+     "calls": 237,
+     "inclusive_ms": 129.3,
+     "exclusive_ms": 129.2,
+     "parents": {
+      "MW._build_central_widget": 43,
+      "MW._add_right_tab": 32,
+      "Theme.apply": 31,
+      "QStackedWidget.addWidget": 30
+     }
+    },
+    {
+     "name": "MW._build_extended_panels",
+     "calls": 1,
+     "inclusive_ms": 147.9,
+     "exclusive_ms": 69.1,
+     "parents": {
+      "MW._build_central_widget": 1
+     }
+    },
+    {
+     "name": "MW._build_digital_decode_panels",
+     "calls": 1,
+     "inclusive_ms": 134.0,
+     "exclusive_ms": 51.9,
+     "parents": {
+      "MW._build_central_widget": 1
+     }
+    },
+    {
+     "name": "MW._build_kernel_panels",
+     "calls": 1,
+     "inclusive_ms": 340.0,
+     "exclusive_ms": 29.8,
+     "parents": {
+      "MW._build_central_widget": 1
+     }
+    },
+    {
+     "name": "MW._build_top_bar",
+     "calls": 1,
+     "inclusive_ms": 29.9,
+     "exclusive_ms": 29.7,
+     "parents": {
+      "MW._build_central_widget": 1
+     }
+    },
+    {
+     "name": "QWidget.setStyleSheet",
+     "calls": 136,
+     "inclusive_ms": 27.2,
+     "exclusive_ms": 27.2,
+     "parents": {
+      "MW._build_central_widget": 51,
+      "MW._build_planetarium_page": 32,
+      "MW._add_right_tab": 20,
+      "MW._create_sky_widget": 7
+     }
+    },
+    {
+     "name": "QComboBox.addItems",
+     "calls": 13,
+     "inclusive_ms": 25.7,
+     "exclusive_ms": 25.7,
+     "parents": {
+      "MW._build_central_widget": 10,
+      "MW._build_digital_decode_panels": 2,
+      "MW._build_tool_bar": 1
+     }
+    },
+    {
+     "name": "MW._build_capability_drawer",
+     "calls": 1,
+     "inclusive_ms": 22.7,
+     "exclusive_ms": 22.0,
+     "parents": {
+      "MW._build_central_widget": 1
+     }
+    },
+    {
+     "name": "MW._apply_theme",
+     "calls": 3,
+     "inclusive_ms": 300.0,
+     "exclusive_ms": 19.8,
+     "parents": {
+      "MW._build_kernel_panels": 1,
+      "MW.__init__": 1,
+      "MW._apply_restored_settings": 1
+     }
+    },
+    {
+     "name": "MW._build_planetarium_page",
+     "calls": 1,
+     "inclusive_ms": 23.8,
+     "exclusive_ms": 15.9,
+     "parents": {
+      "MW._build_mode_shell": 1
+     }
+    },
+    {
+     "name": "QIcon.__init__",
+     "calls": 1,
+     "inclusive_ms": 8.8,
+     "exclusive_ms": 8.8,
+     "parents": {
+      "MW.__init__": 1
+     }
+    },
+    {
+     "name": "MW.__init__",
+     "calls": 1,
+     "inclusive_ms": 2038.7,
+     "exclusive_ms": 5.5,
+     "parents": {
+      "None": 1
+     }
+    },
+    {
+     "name": "MW._init_sky_action_bus",
+     "calls": 1,
+     "inclusive_ms": 4.3,
+     "exclusive_ms": 4.3,
+     "parents": {
+      "MW._build_central_widget": 1
+     }
+    },
+    {
+     "name": "MW._init_loop_sat_catalog",
+     "calls": 1,
+     "inclusive_ms": 6.7,
+     "exclusive_ms": 4.2,
+     "parents": {
+      "MW._build_central_widget": 1
+     }
+    },
+    {
+     "name": "MW._restore_user_layout",
+     "calls": 1,
+     "inclusive_ms": 3.9,
+     "exclusive_ms": 3.9,
+     "parents": {
+      "MW._build_central_widget": 1
+     }
+    },
+    {
+     "name": "MW._apply_touch_adaptation",
+     "calls": 1,
+     "inclusive_ms": 4.0,
+     "exclusive_ms": 3.8,
+     "parents": {
+      "MW.__init__": 1
+     }
+    },
+    {
+     "name": "MW._build_panel_menu",
+     "calls": 1,
+     "inclusive_ms": 3.4,
+     "exclusive_ms": 3.4,
+     "parents": {
+      "MW._build_central_widget": 1
+     }
+    },
+    {
+     "name": "MW._build_bottom_dock",
+     "calls": 1,
+     "inclusive_ms": 2.6,
+     "exclusive_ms": 2.6,
+     "parents": {
+      "MW._build_central_widget": 1
+     }
+    },
+    {
+     "name": "LoopSatTracker.__init__",
+     "calls": 1,
+     "inclusive_ms": 2.5,
+     "exclusive_ms": 2.5,
+     "parents": {
+      "MW._init_loop_sat_catalog": 1
+     }
+    },
+    {
+     "name": "MW._init_ui_action_bus",
+     "calls": 1,
+     "inclusive_ms": 2.2,
+     "exclusive_ms": 2.2,
+     "parents": {
+      "MW._build_central_widget": 1
+     }
+    },
+    {
+     "name": "MW._build_status_bar",
+     "calls": 1,
+     "inclusive_ms": 2.1,
+     "exclusive_ms": 2.1,
+     "parents": {
+      "MW.__init__": 1
+     }
+    },
+    {
+     "name": "MW._build_menu_bar",
+     "calls": 1,
+     "inclusive_ms": 1.6,
+     "exclusive_ms": 1.6,
+     "parents": {
+      "MW.__init__": 1
+     }
+    },
+    {
+     "name": "MW._panels_set_sdr_connected",
+     "calls": 1,
+     "inclusive_ms": 2.2,
+     "exclusive_ms": 1.5,
+     "parents": {
+      "MW.__init__": 1
+     }
+    },
+    {
+     "name": "MW._build_all_sky_toggle",
+     "calls": 1,
+     "inclusive_ms": 1.2,
+     "exclusive_ms": 1.1,
+     "parents": {
+      "MW._build_central_widget": 1
+     }
+    },
+    {
+     "name": "MW._build_ai_command_bar",
+     "calls": 1,
+     "inclusive_ms": 1.3,
+     "exclusive_ms": 1.0,
+     "parents": {
+      "MW._build_central_widget": 1
+     }
+    },
+    {
+     "name": "MW._restore_window_state",
+     "calls": 1,
+     "inclusive_ms": 1.1,
+     "exclusive_ms": 1.0,
+     "parents": {
+      "MW.__init__": 1
+     }
+    },
+    {
+     "name": "MW._apply_restored_settings",
+     "calls": 1,
+     "inclusive_ms": 6.5,
+     "exclusive_ms": 0.5,
+     "parents": {
+      "MW.__init__": 1
+     }
+    },
+    {
+     "name": "MW._build_mode_shell",
+     "calls": 1,
+     "inclusive_ms": 501.0,
+     "exclusive_ms": 0.4,
+     "parents": {
+      "MW._build_central_widget": 1
+     }
+    },
+    {
+     "name": "MW._setup_tab_order",
+     "calls": 1,
+     "inclusive_ms": 0.3,
+     "exclusive_ms": 0.3,
+     "parents": {
+      "MW._build_tool_bar": 1
+     }
+    },
+    {
+     "name": "MW._apply_perf_profile",
+     "calls": 1,
+     "inclusive_ms": 0.3,
+     "exclusive_ms": 0.3,
+     "parents": {
+      "MW._build_central_widget": 1
+     }
+    },
+    {
+     "name": "MW._apply_responsive_chrome",
+     "calls": 1,
+     "inclusive_ms": 0.3,
+     "exclusive_ms": 0.3,
+     "parents": {
+      "MW.__init__": 1
+     }
+    },
+    {
+     "name": "QMainWindow.__init__",
+     "calls": 1,
+     "inclusive_ms": 0.2,
+     "exclusive_ms": 0.2,
+     "parents": {
+      "MW.__init__": 1
+     }
+    },
+    {
+     "name": "DesktopSettings.load",
+     "calls": 1,
+     "inclusive_ms": 0.2,
+     "exclusive_ms": 0.2,
+     "parents": {
+      "MW.__init__": 1
+     }
+    },
+    {
+     "name": "MW._init_ai_agent_from_config",
+     "calls": 1,
+     "inclusive_ms": 0.2,
+     "exclusive_ms": 0.2,
+     "parents": {
+      "MW._build_central_widget": 1
+     }
+    },
+    {
+     "name": "MW._apply_touch_stylesheet",
+     "calls": 4,
+     "inclusive_ms": 0.2,
+     "exclusive_ms": 0.2,
+     "parents": {
+      "MW._apply_theme": 3,
+      "MW._apply_touch_adaptation": 1
+     }
+    },
+    {
+     "name": "TouchManager.set_from_settings",
+     "calls": 2,
+     "inclusive_ms": 0.0,
+     "exclusive_ms": 0.0,
+     "parents": {
+      "MW.__init__": 1,
+      "MW._build_kernel_panels": 1
+     }
+    },
+    {
+     "name": "MCPWorkerManager.__init__",
+     "calls": 1,
+     "inclusive_ms": 0.0,
+     "exclusive_ms": 0.0,
+     "parents": {
+      "MW.__init__": 1
+     }
+    },
+    {
+     "name": "RealGNSSMonitor.__init__",
+     "calls": 1,
+     "inclusive_ms": 0.0,
+     "exclusive_ms": 0.0,
+     "parents": {
+      "MW.__init__": 1
+     }
+    },
+    {
+     "name": "AudioPlayer.__init__",
+     "calls": 1,
+     "inclusive_ms": 0.0,
+     "exclusive_ms": 0.0,
+     "parents": {
+      "MW.__init__": 1
+     }
+    },
+    {
+     "name": "VfoManager.__init__",
+     "calls": 2,
+     "inclusive_ms": 0.0,
+     "exclusive_ms": 0.0,
+     "parents": {
+      "MW.__init__": 1,
+      "MW._build_central_widget": 1
+     }
+    },
+    {
+     "name": "SharedDemodConfig.__init__",
+     "calls": 1,
+     "inclusive_ms": 0.0,
+     "exclusive_ms": 0.0,
+     "parents": {
+      "MW.__init__": 1
+     }
+    },
+    {
+     "name": "MW._apply_callsign",
+     "calls": 1,
+     "inclusive_ms": 0.0,
+     "exclusive_ms": 0.0,
+     "parents": {
+      "MW._build_central_widget": 1
+     }
+    },
+    {
+     "name": "MW._perf_key",
+     "calls": 2,
+     "inclusive_ms": 0.0,
+     "exclusive_ms": 0.0,
+     "parents": {
+      "MW._build_central_widget": 1,
+      "MW._perf_gnss_poll_ms": 1
+     }
+    },
+    {
+     "name": "MW._restore_app_mode",
+     "calls": 1,
+     "inclusive_ms": 0.0,
+     "exclusive_ms": 0.0,
+     "parents": {
+      "MW._build_central_widget": 1
+     }
+    },
+    {
+     "name": "MW._perf_gnss_poll_ms",
+     "calls": 1,
+     "inclusive_ms": 0.0,
+     "exclusive_ms": 0.0,
+     "parents": {
+      "MW.__init__": 1
+     }
+    },
+    {
+     "name": "QFontMetrics.__init__",
+     "calls": 1,
+     "inclusive_ms": 0.0,
+     "exclusive_ms": 0.0,
+     "parents": {
+      "None": 1
+     }
+    }
+   ],
+   "ctor_top_level": [
+    {
+     "name": "MW._build_central_widget",
+     "calls": 1,
+     "inclusive_ms": 1827.6
+    },
+    {
+     "name": "MW._build_tool_bar",
+     "calls": 1,
+     "inclusive_ms": 172.1
+    },
+    {
+     "name": "QIcon.__init__",
+     "calls": 1,
+     "inclusive_ms": 8.8
+    },
+    {
+     "name": "MW._apply_theme",
+     "calls": 1,
+     "inclusive_ms": 6.6
+    },
+    {
+     "name": "MW._apply_restored_settings",
+     "calls": 1,
+     "inclusive_ms": 6.5
+    },
+    {
+     "name": "MW._apply_touch_adaptation",
+     "calls": 1,
+     "inclusive_ms": 4.0
+    },
+    {
+     "name": "MW._panels_set_sdr_connected",
+     "calls": 1,
+     "inclusive_ms": 2.2
+    },
+    {
+     "name": "MW._build_status_bar",
+     "calls": 1,
+     "inclusive_ms": 2.1
+    },
+    {
+     "name": "MW._build_menu_bar",
+     "calls": 1,
+     "inclusive_ms": 1.6
+    },
+    {
+     "name": "MW._restore_window_state",
+     "calls": 1,
+     "inclusive_ms": 1.1
+    },
+    {
+     "name": "MW._apply_responsive_chrome",
+     "calls": 1,
+     "inclusive_ms": 0.3
+    },
+    {
+     "name": "QMainWindow.__init__",
+     "calls": 1,
+     "inclusive_ms": 0.2
+    },
+    {
+     "name": "DesktopSettings.load",
+     "calls": 1,
+     "inclusive_ms": 0.2
+    },
+    {
+     "name": "TouchManager.set_from_settings",
+     "calls": 1,
+     "inclusive_ms": 0.0
+    },
+    {
+     "name": "MCPWorkerManager.__init__",
+     "calls": 1,
+     "inclusive_ms": 0.0
+    },
+    {
+     "name": "RealGNSSMonitor.__init__",
+     "calls": 1,
+     "inclusive_ms": 0.0
+    },
+    {
+     "name": "AudioPlayer.__init__",
+     "calls": 1,
+     "inclusive_ms": 0.0
+    },
+    {
+     "name": "VfoManager.__init__",
+     "calls": 1,
+     "inclusive_ms": 0.0
+    },
+    {
+     "name": "SharedDemodConfig.__init__",
+     "calls": 1,
+     "inclusive_ms": 0.0
+    },
+    {
+     "name": "MW._perf_gnss_poll_ms",
+     "calls": 1,
+     "inclusive_ms": 0.0
+    }
+   ],
+   "region_children": {
+    "MW.__init__": [
+     {
+      "name": "MW._build_central_widget",
+      "calls": 1,
+      "inclusive_ms": 1827.6
+     },
+     {
+      "name": "MW._build_tool_bar",
+      "calls": 1,
+      "inclusive_ms": 172.1
+     },
+     {
+      "name": "QIcon.__init__",
+      "calls": 1,
+      "inclusive_ms": 8.8
+     },
+     {
+      "name": "MW._apply_theme",
+      "calls": 1,
+      "inclusive_ms": 6.6
+     },
+     {
+      "name": "MW._apply_restored_settings",
+      "calls": 1,
+      "inclusive_ms": 6.5
+     },
+     {
+      "name": "MW._apply_touch_adaptation",
+      "calls": 1,
+      "inclusive_ms": 4.0
+     },
+     {
+      "name": "MW._panels_set_sdr_connected",
+      "calls": 1,
+      "inclusive_ms": 2.2
+     },
+     {
+      "name": "MW._build_status_bar",
+      "calls": 1,
+      "inclusive_ms": 2.1
+     },
+     {
+      "name": "MW._build_menu_bar",
+      "calls": 1,
+      "inclusive_ms": 1.6
+     },
+     {
+      "name": "MW._restore_window_state",
+      "calls": 1,
+      "inclusive_ms": 1.1
+     },
+     {
+      "name": "MW._apply_responsive_chrome",
+      "calls": 1,
+      "inclusive_ms": 0.3
+     },
+     {
+      "name": "QMainWindow.__init__",
+      "calls": 1,
+      "inclusive_ms": 0.2
+     },
+     {
+      "name": "DesktopSettings.load",
+      "calls": 1,
+      "inclusive_ms": 0.2
+     },
+     {
+      "name": "TouchManager.set_from_settings",
+      "calls": 1,
+      "inclusive_ms": 0.0
+     },
+     {
+      "name": "MCPWorkerManager.__init__",
+      "calls": 1,
+      "inclusive_ms": 0.0
+     }
+    ],
+    "MW._build_tool_bar": [
+     {
+      "name": "QComboBox.addItems",
+      "calls": 1,
+      "inclusive_ms": 14.8
+     },
+     {
+      "name": "QWidget.setStyleSheet",
+      "calls": 3,
+      "inclusive_ms": 0.3
+     },
+     {
+      "name": "MW._setup_tab_order",
+      "calls": 1,
+      "inclusive_ms": 0.2
+     }
+    ],
+    "MW._create_sky_widget": [
+     {
+      "name": "QWidget.setStyleSheet",
+      "calls": 7,
+      "inclusive_ms": 0.8
+     }
+    ],
+    "MW._build_central_widget": [
+     {
+      "name": "MW._build_mode_shell",
+      "calls": 1,
+      "inclusive_ms": 501.0
+     },
+     {
+      "name": "MW._create_sky_widget",
+      "calls": 1,
+      "inclusive_ms": 395.2
+     },
+     {
+      "name": "MW._build_kernel_panels",
+      "calls": 1,
+      "inclusive_ms": 340.0
+     },
+     {
+      "name": "MW._build_extended_panels",
+      "calls": 1,
+      "inclusive_ms": 147.8
+     },
+     {
+      "name": "MW._build_digital_decode_panels",
+      "calls": 1,
+      "inclusive_ms": 134.0
+     },
+     {
+      "name": "MW._add_right_tab",
+      "calls": 7,
+      "inclusive_ms": 73.6
+     },
+     {
+      "name": "MW._build_top_bar",
+      "calls": 1,
+      "inclusive_ms": 29.9
+     },
+     {
+      "name": "MW._build_capability_drawer",
+      "calls": 1,
+      "inclusive_ms": 22.7
+     },
+     {
+      "name": "QWidget.setStyleSheet",
+      "calls": 51,
+      "inclusive_ms": 12.4
+     },
+     {
+      "name": "QWidget.minimumSizeHint",
+      "calls": 43,
+      "inclusive_ms": 8.4
+     },
+     {
+      "name": "MW._init_loop_sat_catalog",
+      "calls": 1,
+      "inclusive_ms": 6.7
+     },
+     {
+      "name": "QComboBox.addItems",
+      "calls": 10,
+      "inclusive_ms": 6.3
+     },
+     {
+      "name": "MW._init_sky_action_bus",
+      "calls": 1,
+      "inclusive_ms": 4.3
+     },
+     {
+      "name": "MW._restore_user_layout",
+      "calls": 1,
+      "inclusive_ms": 3.9
+     },
+     {
+      "name": "MW._build_panel_menu",
+      "calls": 1,
+      "inclusive_ms": 3.4
+     }
+    ],
+    "MW._build_all_sky_toggle": [
+     {
+      "name": "QWidget.setStyleSheet",
+      "calls": 1,
+      "inclusive_ms": 0.1
+     }
+    ],
+    "MW._init_loop_sat_catalog": [
+     {
+      "name": "LoopSatTracker.__init__",
+      "calls": 1,
+      "inclusive_ms": 2.5
+     },
+     {
+      "name": "QWidget.setStyleSheet",
+      "calls": 1,
+      "inclusive_ms": 0.0
+     }
+    ],
+    "MW._build_ai_command_bar": [
+     {
+      "name": "QWidget.setStyleSheet",
+      "calls": 1,
+      "inclusive_ms": 0.3
+     }
+    ],
+    "MW._add_right_tab": [
+     {
+      "name": "QWidget.minimumSizeHint",
+      "calls": 32,
+      "inclusive_ms": 98.3
+     },
+     {
+      "name": "QWidget.setStyleSheet",
+      "calls": 20,
+      "inclusive_ms": 2.0
+     }
+    ],
+    "QWidget.setStyleSheet": [
+     {
+      "name": "QWidget.minimumSizeHint",
+      "calls": 2,
+      "inclusive_ms": 0.0
+     }
+    ],
+    "QWidget.minimumSizeHint": [
+     {
+      "name": "QWidget.minimumSizeHint",
+      "calls": 12,
+      "inclusive_ms": 0.1
+     }
+    ],
+    "MW._build_top_bar": [
+     {
+      "name": "QWidget.setStyleSheet",
+      "calls": 2,
+      "inclusive_ms": 0.1
+     }
+    ],
+    "MW._build_capability_drawer": [
+     {
+      "name": "QWidget.setStyleSheet",
+      "calls": 4,
+      "inclusive_ms": 0.4
+     },
+     {
+      "name": "QWidget.minimumSizeHint",
+      "calls": 8,
+      "inclusive_ms": 0.4
+     }
+    ],
+    "MW._build_kernel_panels": [
+     {
+      "name": "MW._apply_theme",
+      "calls": 1,
+      "inclusive_ms": 287.4
+     },
+     {
+      "name": "MW._add_right_tab",
+      "calls": 5,
+      "inclusive_ms": 22.7
+     },
+     {
+      "name": "TouchManager.set_from_settings",
+      "calls": 1,
+      "inclusive_ms": 0.0
+     }
+    ],
+    "Theme.apply": [
+     {
+      "name": "QWidget.minimumSizeHint",
+      "calls": 31,
+      "inclusive_ms": 6.7
+     }
+    ],
+    "MW._apply_theme": [
+     {
+      "name": "Theme.apply",
+      "calls": 3,
+      "inclusive_ms": 278.1
+     },
+     {
+      "name": "QWidget.setStyleSheet",
+      "calls": 6,
+      "inclusive_ms": 1.9
+     },
+     {
+      "name": "MW._apply_touch_stylesheet",
+      "calls": 3,
+      "inclusive_ms": 0.2
+     }
+    ],
+    "MW._build_extended_panels": [
+     {
+      "name": "MW._add_right_tab",
+      "calls": 5,
+      "inclusive_ms": 78.6
+     },
+     {
+      "name": "QWidget.setStyleSheet",
+      "calls": 4,
+      "inclusive_ms": 0.2
+     }
+    ],
+    "MW._build_digital_decode_panels": [
+     {
+      "name": "MW._add_right_tab",
+      "calls": 3,
+      "inclusive_ms": 72.4
+     },
+     {
+      "name": "QWidget.minimumSizeHint",
+      "calls": 9,
+      "inclusive_ms": 5.0
+     },
+     {
+      "name": "QComboBox.addItems",
+      "calls": 2,
+      "inclusive_ms": 4.6
+     },
+     {
+      "name": "QWidget.setStyleSheet",
+      "calls": 1,
+      "inclusive_ms": 0.1
+     }
+    ],
+    "QStackedWidget.addWidget": [
+     {
+      "name": "QWidget.minimumSizeHint",
+      "calls": 30,
+      "inclusive_ms": 8.0
+     }
+    ],
+    "MW._build_mode_shell": [
+     {
+      "name": "QStackedWidget.addWidget",
+      "calls": 2,
+      "inclusive_ms": 238.8
+     },
+     {
+      "name": "QMainWindow.setCentralWidget",
+      "calls": 1,
+      "inclusive_ms": 238.0
+     },
+     {
+      "name": "MW._build_planetarium_page",
+      "calls": 1,
+      "inclusive_ms": 23.8
+     }
+    ],
+    "MW._build_planetarium_page": [
+     {
+      "name": "QWidget.setStyleSheet",
+      "calls": 32,
+      "inclusive_ms": 7.9
+     }
+    ],
+    "QMainWindow.setCentralWidget": [
+     {
+      "name": "QWidget.minimumSizeHint",
+      "calls": 25,
+      "inclusive_ms": 1.9
+     }
+    ],
+    "MW._restore_window_state": [
+     {
+      "name": "QWidget.minimumSizeHint",
+      "calls": 30,
+      "inclusive_ms": 0.0
+     }
+    ],
+    "MW._panels_set_sdr_connected": [
+     {
+      "name": "QWidget.setStyleSheet",
+      "calls": 3,
+      "inclusive_ms": 0.7
+     }
+    ],
+    "MW._apply_restored_settings": [
+     {
+      "name": "MW._apply_theme",
+      "calls": 1,
+      "inclusive_ms": 6.0
+     }
+    ],
+    "MW._perf_gnss_poll_ms": [
+     {
+      "name": "MW._perf_key",
+      "calls": 1,
+      "inclusive_ms": 0.0
+     }
+    ],
+    "MW._apply_touch_adaptation": [
+     {
+      "name": "QWidget.minimumSizeHint",
+      "calls": 15,
+      "inclusive_ms": 0.2
+     },
+     {
+      "name": "MW._apply_touch_stylesheet",
+      "calls": 1,
+      "inclusive_ms": 0.0
+     }
+    ]
+   },
+   "imports_during_ctor": [
+    {
+     "module": "rtlsdr",
+     "ms": 1346.4,
+     "calls": 1,
+     "parents": {
+      "None@Dummy-1": 1
+     }
+    },
+    {
+     "module": "pkg_resources",
+     "ms": 1262.0,
+     "calls": 1,
+     "parents": {
+      "None@Dummy-1": 1
+     }
+    },
+    {
+     "module": "packaging",
+     "ms": 343.1,
+     "calls": 2,
+     "parents": {
+      "MW._apply_theme@Dummy-1": 2
+     }
+    },
+    {
+     "module": "_parser",
+     "ms": 300.7,
+     "calls": 1,
+     "parents": {
+      "MW._apply_theme@Dummy-1": 1
+     }
+    },
+    {
+     "module": "_tokenizer",
+     "ms": 293.1,
+     "calls": 1,
+     "parents": {
+      "MW._apply_theme@Dummy-1": 1
+     }
+    },
+    {
+     "module": "specifiers",
+     "ms": 281.6,
+     "calls": 1,
+     "parents": {
+      "MW._apply_theme@Dummy-1": 1
+     }
+    },
+    {
+     "module": "utils",
+     "ms": 275.8,
+     "calls": 1,
+     "parents": {
+      "MW._apply_theme@Dummy-1": 1
+     }
+    },
+    {
+     "module": "tags",
+     "ms": 197.9,
+     "calls": 1,
+     "parents": {
+      "Theme.apply@Dummy-1": 1
+     }
+    },
+    {
+     "module": "",
+     "ms": 191.2,
+     "calls": 1,
+     "parents": {
+      "Theme.apply@Dummy-1": 1
+     }
+    },
+    {
+     "module": "jaraco",
+     "ms": 119.1,
+     "calls": 3,
+     "parents": {
+      "MW._add_right_tab@Dummy-1": 1,
+      "MW._build_extended_panels@Dummy-1": 2
+     }
+    },
+    {
+     "module": "version",
+     "ms": 76.6,
+     "calls": 2,
+     "parents": {
+      "MW._apply_theme@Dummy-1": 1,
+      "MW._add_right_tab@Dummy-1": 1
+     }
+    },
+    {
+     "module": "_elffile",
+     "ms": 63.4,
+     "calls": 1,
+     "parents": {
+      "Theme.apply@Dummy-1": 1
+     }
+    },
+    {
+     "module": "_structures",
+     "ms": 34.0,
+     "calls": 1,
+     "parents": {
+      "MW._apply_theme@Dummy-1": 1
+     }
+    },
+    {
+     "module": "tarfile",
+     "ms": 32.3,
+     "calls": 1,
+     "parents": {
+      "MW._build_extended_panels@Dummy-1": 1
+     }
+    },
+    {
+     "module": "SoapySDR",
+     "ms": 26.6,
+     "calls": 1,
+     "parents": {
+      "MW._build_central_widget@Dummy-1": 1
+     }
+    }
+   ],
+   "unparented_calls": [
+    {
+     "name": "MW.__init__",
+     "parent": null,
+     "depth": 0,
+     "ms": 2038.66,
+     "exclusive_ms": 5.46
+    },
+    {
+     "name": "QFontMetrics.__init__",
+     "parent": null,
+     "depth": 0,
+     "ms": 0.02,
+     "exclusive_ms": 0.02
+    }
+   ]
+  }
+ ],
+ "medians": {
+  "import_phase_ms": 924.6,
+  "qapp_ms": 25.8,
+  "ctor_ms": 2038.7,
+  "named_top_level_ms": 2033.2,
+  "residual_ms": 6.5,
+  "widgets": 1128,
+  "prewarm_font_ms": null
+ },
+ "table": [
+  {
+   "name": "MW._create_sky_widget",
+   "exclusive_ms": 394.4,
+   "inclusive_ms": 395.2,
+   "calls": 1,
+   "parents": {
+    "MW._build_central_widget": 1
+   }
+  },
+  {
+   "name": "Theme.apply",
+   "exclusive_ms": 220.6,
+   "inclusive_ms": 227.2,
+   "calls": 3,
+   "parents": {
+    "MW._apply_theme": 3
+   }
+  },
+  {
+   "name": "MW._build_tool_bar",
+   "exclusive_ms": 156.7,
+   "inclusive_ms": 172.0,
+   "calls": 1,
+   "parents": {
+    "MW.__init__": 1
+   }
+  },
+  {
+   "name": "QStackedWidget.addWidget",
+   "exclusive_ms": 143.4,
+   "inclusive_ms": 148.6,
+   "calls": 2,
+   "parents": {
+    "MW._build_mode_shell": 2
+   }
+  },
+  {
+   "name": "QMainWindow.setCentralWidget",
+   "exclusive_ms": 142.8,
+   "inclusive_ms": 144.1,
+   "calls": 2,
+   "parents": {
+    "MW._build_central_widget": 1,
+    "MW._build_mode_shell": 1
+   }
+  },
+  {
+   "name": "MW._add_right_tab",
+   "exclusive_ms": 132.9,
+   "inclusive_ms": 234.9,
+   "calls": 20,
+   "parents": {
+    "MW._build_central_widget": 7,
+    "MW._build_kernel_panels": 5,
+    "MW._build_extended_panels": 5,
+    "MW._build_digital_decode_panels": 3
+   }
+  },
+  {
+   "name": "MW._build_central_widget",
+   "exclusive_ms": 129.6,
+   "inclusive_ms": 1827.6,
+   "calls": 1,
+   "parents": {
+    "MW.__init__": 1
+   }
+  },
+  {
+   "name": "QWidget.minimumSizeHint",
+   "exclusive_ms": 122.9,
+   "inclusive_ms": 123.0,
+   "calls": 237,
+   "parents": {
+    "MW._build_central_widget": 43,
+    "MW._add_right_tab": 32,
+    "Theme.apply": 31,
+    "QStackedWidget.addWidget": 30
+   }
+  },
+  {
+   "name": "MW._build_extended_panels",
+   "exclusive_ms": 48.2,
+   "inclusive_ms": 123.5,
+   "calls": 1,
+   "parents": {
+    "MW._build_central_widget": 1
+   }
+  },
+  {
+   "name": "MW._build_digital_decode_panels",
+   "exclusive_ms": 29.7,
+   "inclusive_ms": 82.4,
+   "calls": 1,
+   "parents": {
+    "MW._build_central_widget": 1
+   }
+  },
+  {
+   "name": "MW._build_top_bar",
+   "exclusive_ms": 28.8,
+   "inclusive_ms": 28.9,
+   "calls": 1,
+   "parents": {
+    "MW._build_central_widget": 1
+   }
+  },
+  {
+   "name": "QWidget.setStyleSheet",
+   "exclusive_ms": 26.4,
+   "inclusive_ms": 26.4,
+   "calls": 136,
+   "parents": {
+    "MW._build_central_widget": 51,
+    "MW._build_planetarium_page": 32,
+    "MW._add_right_tab": 20,
+    "MW._create_sky_widget": 7
+   }
+  },
+  {
+   "name": "QComboBox.addItems",
+   "exclusive_ms": 25.7,
+   "inclusive_ms": 25.7,
+   "calls": 13,
+   "parents": {
+    "MW._build_central_widget": 10,
+    "MW._build_digital_decode_panels": 2,
+    "MW._build_tool_bar": 1
+   }
+  },
+  {
+   "name": "MW._build_kernel_panels",
+   "exclusive_ms": 22.3,
+   "inclusive_ms": 269.9,
+   "calls": 1,
+   "parents": {
+    "MW._build_central_widget": 1
+   }
+  },
+  {
+   "name": "MW._build_capability_drawer",
+   "exclusive_ms": 17.7,
+   "inclusive_ms": 18.6,
+   "calls": 1,
+   "parents": {
+    "MW._build_central_widget": 1
+   }
+  },
+  {
+   "name": "MW._build_planetarium_page",
+   "exclusive_ms": 11.7,
+   "inclusive_ms": 16.4,
+   "calls": 1,
+   "parents": {
+    "MW._build_mode_shell": 1
+   }
+  },
+  {
+   "name": "QIcon.__init__",
+   "exclusive_ms": 9.9,
+   "inclusive_ms": 9.9,
+   "calls": 1,
+   "parents": {
+    "MW.__init__": 1
+   }
+  },
+  {
+   "name": "MW.__init__",
+   "exclusive_ms": 6.4,
+   "inclusive_ms": 2038.7,
+   "calls": 1,
+   "parents": {
+    "None": 1
+   }
+  },
+  {
+   "name": "MW._apply_theme",
+   "exclusive_ms": 5.6,
+   "inclusive_ms": 234.2,
+   "calls": 3,
+   "parents": {
+    "MW._build_kernel_panels": 1,
+    "MW.__init__": 1,
+    "MW._apply_restored_settings": 1
+   }
+  },
+  {
+   "name": "MW._init_loop_sat_catalog",
+   "exclusive_ms": 5.0,
+   "inclusive_ms": 7.7,
+   "calls": 1,
+   "parents": {
+    "MW._build_central_widget": 1
+   }
+  },
+  {
+   "name": "MW._init_sky_action_bus",
+   "exclusive_ms": 3.9,
+   "inclusive_ms": 3.9,
+   "calls": 1,
+   "parents": {
+    "MW._build_central_widget": 1
+   }
+  },
+  {
+   "name": "MW._apply_touch_adaptation",
+   "exclusive_ms": 3.7,
+   "inclusive_ms": 3.9,
+   "calls": 1,
+   "parents": {
+    "MW.__init__": 1
+   }
+  },
+  {
+   "name": "LoopSatTracker.__init__",
+   "exclusive_ms": 2.7,
+   "inclusive_ms": 2.7,
+   "calls": 1,
+   "parents": {
+    "MW._init_loop_sat_catalog": 1
+   }
+  },
+  {
+   "name": "MW._build_bottom_dock",
+   "exclusive_ms": 2.4,
+   "inclusive_ms": 2.4,
+   "calls": 1,
+   "parents": {
+    "MW._build_central_widget": 1
+   }
+  },
+  {
+   "name": "MW._build_menu_bar",
+   "exclusive_ms": 2.3,
+   "inclusive_ms": 2.3,
+   "calls": 1,
+   "parents": {
+    "MW.__init__": 1
+   }
+  },
+  {
+   "name": "MW._init_ui_action_bus",
+   "exclusive_ms": 2.2,
+   "inclusive_ms": 2.2,
+   "calls": 1,
+   "parents": {
+    "MW._build_central_widget": 1
+   }
+  },
+  {
+   "name": "MW._restore_user_layout",
+   "exclusive_ms": 1.7,
+   "inclusive_ms": 1.7,
+   "calls": 1,
+   "parents": {
+    "MW._build_central_widget": 1
+   }
+  },
+  {
+   "name": "MW._build_panel_menu",
+   "exclusive_ms": 1.4,
+   "inclusive_ms": 1.4,
+   "calls": 1,
+   "parents": {
+    "MW._build_central_widget": 1
+   }
+  },
+  {
+   "name": "MW._build_status_bar",
+   "exclusive_ms": 1.2,
+   "inclusive_ms": 1.2,
+   "calls": 1,
+   "parents": {
+    "MW.__init__": 1
+   }
+  },
+  {
+   "name": "MW._build_all_sky_toggle",
+   "exclusive_ms": 0.8,
+   "inclusive_ms": 0.9,
+   "calls": 1,
+   "parents": {
+    "MW._build_central_widget": 1
+   }
+  },
+  {
+   "name": "MW._build_ai_command_bar",
+   "exclusive_ms": 0.7,
+   "inclusive_ms": 0.9,
+   "calls": 1,
+   "parents": {
+    "MW._build_central_widget": 1
+   }
+  },
+  {
+   "name": "MW._panels_set_sdr_connected",
+   "exclusive_ms": 0.7,
+   "inclusive_ms": 1.1,
+   "calls": 1,
+   "parents": {
+    "MW.__init__": 1
+   }
+  },
+  {
+   "name": "MW._restore_window_state",
+   "exclusive_ms": 0.6,
+   "inclusive_ms": 0.7,
+   "calls": 1,
+   "parents": {
+    "MW.__init__": 1
+   }
+  },
+  {
+   "name": "DesktopSettings.load",
+   "exclusive_ms": 0.3,
+   "inclusive_ms": 0.3,
+   "calls": 1,
+   "parents": {
+    "MW.__init__": 1
+   }
+  },
+  {
+   "name": "MW._setup_tab_order",
+   "exclusive_ms": 0.3,
+   "inclusive_ms": 0.3,
+   "calls": 1,
+   "parents": {
+    "MW._build_tool_bar": 1
+   }
+  },
+  {
+   "name": "MW._apply_restored_settings",
+   "exclusive_ms": 0.3,
+   "inclusive_ms": 4.0,
+   "calls": 1,
+   "parents": {
+    "MW.__init__": 1
+   }
+  },
+  {
+   "name": "MW._apply_perf_profile",
+   "exclusive_ms": 0.3,
+   "inclusive_ms": 0.3,
+   "calls": 1,
+   "parents": {
+    "MW._build_central_widget": 1
+   }
+  },
+  {
+   "name": "QMainWindow.__init__",
+   "exclusive_ms": 0.2,
+   "inclusive_ms": 0.2,
+   "calls": 1,
+   "parents": {
+    "MW.__init__": 1
+   }
+  },
+  {
+   "name": "RealGNSSMonitor.__init__",
+   "exclusive_ms": 0.2,
+   "inclusive_ms": 0.2,
+   "calls": 1,
+   "parents": {
+    "MW.__init__": 1
+   }
+  },
+  {
+   "name": "MW._init_ai_agent_from_config",
+   "exclusive_ms": 0.2,
+   "inclusive_ms": 0.2,
+   "calls": 1,
+   "parents": {
+    "MW._build_central_widget": 1
+   }
+  },
+  {
+   "name": "MW._apply_touch_stylesheet",
+   "exclusive_ms": 0.2,
+   "inclusive_ms": 0.2,
+   "calls": 4,
+   "parents": {
+    "MW._apply_theme": 3,
+    "MW._apply_touch_adaptation": 1
+   }
+  },
+  {
+   "name": "MW._build_mode_shell",
+   "exclusive_ms": 0.2,
+   "inclusive_ms": 309.1,
+   "calls": 1,
+   "parents": {
+    "MW._build_central_widget": 1
+   }
+  },
+  {
+   "name": "MW._apply_responsive_chrome",
+   "exclusive_ms": 0.2,
+   "inclusive_ms": 0.2,
+   "calls": 1,
+   "parents": {
+    "MW.__init__": 1
+   }
+  },
+  {
+   "name": "TouchManager.set_from_settings",
+   "exclusive_ms": 0.0,
+   "inclusive_ms": 0.0,
+   "calls": 2,
+   "parents": {
+    "MW.__init__": 1,
+    "MW._build_kernel_panels": 1
+   }
+  },
+  {
+   "name": "MCPWorkerManager.__init__",
+   "exclusive_ms": 0.0,
+   "inclusive_ms": 0.0,
+   "calls": 1,
+   "parents": {
+    "MW.__init__": 1
+   }
+  },
+  {
+   "name": "AudioPlayer.__init__",
+   "exclusive_ms": 0.0,
+   "inclusive_ms": 0.0,
+   "calls": 1,
+   "parents": {
+    "MW.__init__": 1
+   }
+  },
+  {
+   "name": "VfoManager.__init__",
+   "exclusive_ms": 0.0,
+   "inclusive_ms": 0.0,
+   "calls": 2,
+   "parents": {
+    "MW.__init__": 1,
+    "MW._build_central_widget": 1
+   }
+  },
+  {
+   "name": "SharedDemodConfig.__init__",
+   "exclusive_ms": 0.0,
+   "inclusive_ms": 0.0,
+   "calls": 1,
+   "parents": {
+    "MW.__init__": 1
+   }
+  },
+  {
+   "name": "MW._apply_callsign",
+   "exclusive_ms": 0.0,
+   "inclusive_ms": 0.0,
+   "calls": 1,
+   "parents": {
+    "MW._build_central_widget": 1
+   }
+  },
+  {
+   "name": "MW._perf_key",
+   "exclusive_ms": 0.0,
+   "inclusive_ms": 0.0,
+   "calls": 2,
+   "parents": {
+    "MW._build_central_widget": 1,
+    "MW._perf_gnss_poll_ms": 1
+   }
+  },
+  {
+   "name": "MW._restore_app_mode",
+   "exclusive_ms": 0.0,
+   "inclusive_ms": 0.0,
+   "calls": 1,
+   "parents": {
+    "MW._build_central_widget": 1
+   }
+  },
+  {
+   "name": "MW._perf_gnss_poll_ms",
+   "exclusive_ms": 0.0,
+   "inclusive_ms": 0.0,
+   "calls": 1,
+   "parents": {
+    "MW.__init__": 1
+   }
+  },
+  {
+   "name": "QFontMetrics.__init__",
+   "exclusive_ms": 0.0,
+   "inclusive_ms": 0.0,
+   "calls": 1,
+   "parents": {
+    "None": 1
+   }
+  }
+ ],
+ "ctor_top_level": [
+  {
+   "name": "MW._build_central_widget",
+   "inclusive_ms": 1827.6,
+   "runs": 3
+  },
+  {
+   "name": "MW._build_tool_bar",
+   "inclusive_ms": 172.1,
+   "runs": 3
+  },
+  {
+   "name": "QIcon.__init__",
+   "inclusive_ms": 9.9,
+   "runs": 3
+  },
+  {
+   "name": "MW._apply_restored_settings",
+   "inclusive_ms": 4.0,
+   "runs": 3
+  },
+  {
+   "name": "MW._apply_theme",
+   "inclusive_ms": 3.9,
+   "runs": 3
+  },
+  {
+   "name": "MW._apply_touch_adaptation",
+   "inclusive_ms": 3.9,
+   "runs": 3
+  },
+  {
+   "name": "MW._build_menu_bar",
+   "inclusive_ms": 2.3,
+   "runs": 3
+  },
+  {
+   "name": "MW._build_status_bar",
+   "inclusive_ms": 1.2,
+   "runs": 3
+  },
+  {
+   "name": "MW._panels_set_sdr_connected",
+   "inclusive_ms": 1.1,
+   "runs": 3
+  },
+  {
+   "name": "MW._restore_window_state",
+   "inclusive_ms": 0.7,
+   "runs": 3
+  },
+  {
+   "name": "DesktopSettings.load",
+   "inclusive_ms": 0.3,
+   "runs": 3
+  },
+  {
+   "name": "QMainWindow.__init__",
+   "inclusive_ms": 0.2,
+   "runs": 3
+  },
+  {
+   "name": "RealGNSSMonitor.__init__",
+   "inclusive_ms": 0.2,
+   "runs": 3
+  },
+  {
+   "name": "MW._apply_responsive_chrome",
+   "inclusive_ms": 0.2,
+   "runs": 3
+  },
+  {
+   "name": "TouchManager.set_from_settings",
+   "inclusive_ms": 0.0,
+   "runs": 3
+  },
+  {
+   "name": "MCPWorkerManager.__init__",
+   "inclusive_ms": 0.0,
+   "runs": 3
+  },
+  {
+   "name": "AudioPlayer.__init__",
+   "inclusive_ms": 0.0,
+   "runs": 3
+  },
+  {
+   "name": "VfoManager.__init__",
+   "inclusive_ms": 0.0,
+   "runs": 3
+  },
+  {
+   "name": "SharedDemodConfig.__init__",
+   "inclusive_ms": 0.0,
+   "runs": 3
+  },
+  {
+   "name": "MW._perf_gnss_poll_ms",
+   "inclusive_ms": 0.0,
+   "runs": 3
+  }
+ ],
+ "region_children": {
+  "MW.__init__": [
+   {
+    "name": "MW._build_central_widget",
+    "inclusive_ms": 1827.6,
+    "runs": 3
+   },
+   {
+    "name": "MW._build_tool_bar",
+    "inclusive_ms": 172.1,
+    "runs": 3
+   },
+   {
+    "name": "QIcon.__init__",
+    "inclusive_ms": 9.9,
+    "runs": 3
+   },
+   {
+    "name": "MW._apply_restored_settings",
+    "inclusive_ms": 4.0,
+    "runs": 3
+   },
+   {
+    "name": "MW._apply_theme",
+    "inclusive_ms": 3.9,
+    "runs": 3
+   },
+   {
+    "name": "MW._apply_touch_adaptation",
+    "inclusive_ms": 3.9,
+    "runs": 3
+   },
+   {
+    "name": "MW._build_menu_bar",
+    "inclusive_ms": 2.3,
+    "runs": 3
+   },
+   {
+    "name": "MW._build_status_bar",
+    "inclusive_ms": 1.2,
+    "runs": 3
+   },
+   {
+    "name": "MW._panels_set_sdr_connected",
+    "inclusive_ms": 1.1,
+    "runs": 3
+   },
+   {
+    "name": "MW._restore_window_state",
+    "inclusive_ms": 0.7,
+    "runs": 3
+   },
+   {
+    "name": "DesktopSettings.load",
+    "inclusive_ms": 0.3,
+    "runs": 3
+   },
+   {
+    "name": "QMainWindow.__init__",
+    "inclusive_ms": 0.2,
+    "runs": 3
+   },
+   {
+    "name": "RealGNSSMonitor.__init__",
+    "inclusive_ms": 0.2,
+    "runs": 2
+   },
+   {
+    "name": "MW._apply_responsive_chrome",
+    "inclusive_ms": 0.2,
+    "runs": 3
+   },
+   {
+    "name": "TouchManager.set_from_settings",
+    "inclusive_ms": 0.0,
+    "runs": 3
+   },
+   {
+    "name": "MCPWorkerManager.__init__",
+    "inclusive_ms": 0.0,
+    "runs": 1
+   }
+  ],
+  "MW._build_tool_bar": [
+   {
+    "name": "QComboBox.addItems",
+    "inclusive_ms": 16.1,
+    "runs": 3
+   },
+   {
+    "name": "QWidget.setStyleSheet",
+    "inclusive_ms": 0.4,
+    "runs": 3
+   },
+   {
+    "name": "MW._setup_tab_order",
+    "inclusive_ms": 0.3,
+    "runs": 3
+   }
+  ],
+  "MW._create_sky_widget": [
+   {
+    "name": "QWidget.setStyleSheet",
+    "inclusive_ms": 1.0,
+    "runs": 3
+   }
+  ],
+  "MW._build_central_widget": [
+   {
+    "name": "MW._create_sky_widget",
+    "inclusive_ms": 395.2,
+    "runs": 3
+   },
+   {
+    "name": "MW._build_mode_shell",
+    "inclusive_ms": 309.1,
+    "runs": 3
+   },
+   {
+    "name": "MW._build_kernel_panels",
+    "inclusive_ms": 269.9,
+    "runs": 3
+   },
+   {
+    "name": "MW._build_extended_panels",
+    "inclusive_ms": 123.5,
+    "runs": 3
+   },
+   {
+    "name": "MW._build_digital_decode_panels",
+    "inclusive_ms": 82.4,
+    "runs": 3
+   },
+   {
+    "name": "MW._add_right_tab",
+    "inclusive_ms": 73.6,
+    "runs": 3
+   },
+   {
+    "name": "MW._build_top_bar",
+    "inclusive_ms": 28.9,
+    "runs": 3
+   },
+   {
+    "name": "MW._build_capability_drawer",
+    "inclusive_ms": 18.6,
+    "runs": 3
+   },
+   {
+    "name": "QWidget.setStyleSheet",
+    "inclusive_ms": 12.4,
+    "runs": 3
+   },
+   {
+    "name": "MW._init_loop_sat_catalog",
+    "inclusive_ms": 7.7,
+    "runs": 3
+   },
+   {
+    "name": "QWidget.minimumSizeHint",
+    "inclusive_ms": 6.9,
+    "runs": 3
+   },
+   {
+    "name": "QComboBox.addItems",
+    "inclusive_ms": 6.3,
+    "runs": 3
+   },
+   {
+    "name": "MW._init_sky_action_bus",
+    "inclusive_ms": 3.9,
+    "runs": 3
+   },
+   {
+    "name": "MW._build_panel_menu",
+    "inclusive_ms": 3.4,
+    "runs": 1
+   },
+   {
+    "name": "MW._restore_user_layout",
+    "inclusive_ms": 2.8,
+    "runs": 2
+   },
+   {
+    "name": "MW._build_bottom_dock",
+    "inclusive_ms": 2.4,
+    "runs": 1
+   },
+   {
+    "name": "MW._init_ui_action_bus",
+    "inclusive_ms": 1.9,
+    "runs": 2
+   }
+  ],
+  "MW._build_all_sky_toggle": [
+   {
+    "name": "QWidget.setStyleSheet",
+    "inclusive_ms": 0.1,
+    "runs": 3
+   }
+  ],
+  "MW._init_loop_sat_catalog": [
+   {
+    "name": "LoopSatTracker.__init__",
+    "inclusive_ms": 2.7,
+    "runs": 3
+   },
+   {
+    "name": "QWidget.setStyleSheet",
+    "inclusive_ms": 0.0,
+    "runs": 3
+   }
+  ],
+  "MW._build_ai_command_bar": [
+   {
+    "name": "QWidget.setStyleSheet",
+    "inclusive_ms": 0.1,
+    "runs": 3
+   }
+  ],
+  "MW._add_right_tab": [
+   {
+    "name": "QWidget.minimumSizeHint",
+    "inclusive_ms": 98.3,
+    "runs": 3
+   },
+   {
+    "name": "QWidget.setStyleSheet",
+    "inclusive_ms": 2.0,
+    "runs": 3
+   }
+  ],
+  "QWidget.setStyleSheet": [
+   {
+    "name": "QWidget.minimumSizeHint",
+    "inclusive_ms": 0.0,
+    "runs": 3
+   }
+  ],
+  "QWidget.minimumSizeHint": [
+   {
+    "name": "QWidget.minimumSizeHint",
+    "inclusive_ms": 0.1,
+    "runs": 3
+   }
+  ],
+  "MW._build_top_bar": [
+   {
+    "name": "QWidget.setStyleSheet",
+    "inclusive_ms": 0.1,
+    "runs": 3
+   }
+  ],
+  "MW._build_capability_drawer": [
+   {
+    "name": "QWidget.minimumSizeHint",
+    "inclusive_ms": 0.4,
+    "runs": 3
+   },
+   {
+    "name": "QWidget.setStyleSheet",
+    "inclusive_ms": 0.4,
+    "runs": 3
+   }
+  ],
+  "MW._build_kernel_panels": [
+   {
+    "name": "MW._apply_theme",
+    "inclusive_ms": 227.5,
+    "runs": 3
+   },
+   {
+    "name": "MW._add_right_tab",
+    "inclusive_ms": 20.1,
+    "runs": 3
+   },
+   {
+    "name": "TouchManager.set_from_settings",
+    "inclusive_ms": 0.0,
+    "runs": 3
+   }
+  ],
+  "Theme.apply": [
+   {
+    "name": "QWidget.minimumSizeHint",
+    "inclusive_ms": 6.5,
+    "runs": 3
+   }
+  ],
+  "MW._apply_theme": [
+   {
+    "name": "Theme.apply",
+    "inclusive_ms": 227.2,
+    "runs": 3
+   },
+   {
+    "name": "QWidget.setStyleSheet",
+    "inclusive_ms": 1.2,
+    "runs": 3
+   },
+   {
+    "name": "MW._apply_touch_stylesheet",
+    "inclusive_ms": 0.2,
+    "runs": 3
+   }
+  ],
+  "MW._build_extended_panels": [
+   {
+    "name": "MW._add_right_tab",
+    "inclusive_ms": 75.2,
+    "runs": 3
+   },
+   {
+    "name": "QWidget.setStyleSheet",
+    "inclusive_ms": 0.1,
+    "runs": 3
+   }
+  ],
+  "MW._build_digital_decode_panels": [
+   {
+    "name": "MW._add_right_tab",
+    "inclusive_ms": 47.2,
+    "runs": 3
+   },
+   {
+    "name": "QWidget.minimumSizeHint",
+    "inclusive_ms": 2.8,
+    "runs": 3
+   },
+   {
+    "name": "QComboBox.addItems",
+    "inclusive_ms": 2.7,
+    "runs": 3
+   },
+   {
+    "name": "QWidget.setStyleSheet",
+    "inclusive_ms": 0.0,
+    "runs": 3
+   }
+  ],
+  "QStackedWidget.addWidget": [
+   {
+    "name": "QWidget.minimumSizeHint",
+    "inclusive_ms": 5.2,
+    "runs": 3
+   }
+  ],
+  "MW._build_mode_shell": [
+   {
+    "name": "QStackedWidget.addWidget",
+    "inclusive_ms": 148.6,
+    "runs": 3
+   },
+   {
+    "name": "QMainWindow.setCentralWidget",
+    "inclusive_ms": 143.8,
+    "runs": 3
+   },
+   {
+    "name": "MW._build_planetarium_page",
+    "inclusive_ms": 16.4,
+    "runs": 3
+   }
+  ],
+  "MW._build_planetarium_page": [
+   {
+    "name": "QWidget.setStyleSheet",
+    "inclusive_ms": 4.7,
+    "runs": 3
+   }
+  ],
+  "QMainWindow.setCentralWidget": [
+   {
+    "name": "QWidget.minimumSizeHint",
+    "inclusive_ms": 1.2,
+    "runs": 3
+   }
+  ],
+  "MW._restore_window_state": [
+   {
+    "name": "QWidget.minimumSizeHint",
+    "inclusive_ms": 0.0,
+    "runs": 3
+   }
+  ],
+  "MW._panels_set_sdr_connected": [
+   {
+    "name": "QWidget.setStyleSheet",
+    "inclusive_ms": 0.3,
+    "runs": 3
+   }
+  ],
+  "MW._apply_restored_settings": [
+   {
+    "name": "MW._apply_theme",
+    "inclusive_ms": 3.7,
+    "runs": 3
+   }
+  ],
+  "MW._perf_gnss_poll_ms": [
+   {
+    "name": "MW._perf_key",
+    "inclusive_ms": 0.0,
+    "runs": 3
+   }
+  ],
+  "MW._apply_touch_adaptation": [
+   {
+    "name": "QWidget.minimumSizeHint",
+    "inclusive_ms": 0.2,
+    "runs": 3
+   },
+   {
+    "name": "MW._apply_touch_stylesheet",
+    "inclusive_ms": 0.0,
+    "runs": 3
+   }
+  ]
+ },
+ "imports_during_ctor": [
+  {
+   "module": "rtlsdr",
+   "median_ms": 995.0
+  },
+  {
+   "module": "pkg_resources",
+   "median_ms": 935.9
+  },
+  {
+   "module": "packaging",
+   "median_ms": 319.2
+  },
+  {
+   "module": "_parser",
+   "median_ms": 267.3
+  },
+  {
+   "module": "_tokenizer",
+   "median_ms": 263.9
+  },
+  {
+   "module": "specifiers",
+   "median_ms": 225.4
+  },
+  {
+   "module": "utils",
+   "median_ms": 182.8
+  },
+  {
+   "module": "tags",
+   "median_ms": 160.1
+  },
+  {
+   "module": "",
+   "median_ms": 147.6
+  },
+  {
+   "module": "jaraco",
+   "median_ms": 119.1
+  },
+  {
+   "module": "version",
+   "median_ms": 76.6
+  },
+  {
+   "module": "_elffile",
+   "median_ms": 51.1
+  }
+ ],
+ "verdict": "构造期拆解完成；residual_ms 是主窗 __init__ 里未被任何 _build_/_restore_/_init_/_apply_/叶子项覆盖的直写代码，已显式列出。",
+ "conclusion": {
+  "headline": "「≈815 ms 未归属」不存在：把主窗 __init__ 用栈式计时器全包一遍后，未命名的直写代码只剩 5.5–7.3 ms（中位 6.5）。815 是先前用「ctor − top-10 控件类型合计 − addTab」相减得到的记账错误：控件类型合计与 addTab 互相嵌套，不能从 ctor 里直接扣。",
+  "ctor_ms_runs": [
+   1227.3,
+   2317.5,
+   2038.7
+  ],
+  "dispersion_note": "同机并发 python 进程 6–9 个（测前总占比 11–78%，均在规则 10 的 <200% 内），ctor 离散 1.2–2.3 s，绝对值只取区间；结构占比三次一致。",
+  "segments": [
+   {
+    "segment": "RFSkyView / 星象仪首建",
+    "ms": 394.4,
+    "variant": "纯",
+    "prewarm_control_ms": 2.7,
+    "kind": "一次性",
+    "deferrable": false,
+    "why": "预热字体后掉到 2.7 ms → 这一段几乎全是进程首次字体度量；首帧内容依赖"
+   },
+   {
+    "segment": "工具条 _build_tool_bar",
+    "ms": 156.7,
+    "variant": "纯",
+    "prewarm_control_ms": 6.9,
+    "kind": "一次性",
+    "deferrable": false,
+    "why": "预热后 6.9 ms；控件构造只占 ~1 ms，其余是 addWidget/addItems 触发的首次文字度量"
+   },
+   {
+    "segment": "Theme.apply（3 次：2 次空转 + 1 次初始状态）",
+    "ms": 220.6,
+    "prewarm_control_ms": 166.7,
+    "kind": "一次性",
+    "deferrable": false,
+    "why": "app.setStyleSheet 全树 polish；首帧样式依赖，挪到 show 之后首帧变空壳"
+   },
+   {
+    "segment": "QStackedWidget.addWidget（2 次）",
+    "ms": 143.4,
+    "prewarm_control_ms": 177.8,
+    "kind": "一次性",
+    "deferrable": false,
+    "why": "把整棵中央树塞进模式栈，触发全树布局/抛光；首帧布局依赖"
+   },
+   {
+    "segment": "QMainWindow.setCentralWidget（2 次）",
+    "ms": 142.8,
+    "prewarm_control_ms": 153.3,
+    "kind": "一次性",
+    "deferrable": false,
+    "why": "同上，重设中央部件会重新 parent/布局"
+   },
+   {
+    "segment": "右栏 addTab（20 次，含 minimumSizeHint 123 ms）",
+    "ms": 234.9,
+    "prewarm_control_ms": null,
+    "kind": "一次性",
+    "deferrable": false,
+    "why": "20 个页各自 minimumSizeHint 触发布局；右栏首帧可见"
+   },
+   {
+    "segment": "扩展/数字解码面板（含各自 addTab）",
+    "ms": 205.9,
+    "prewarm_control_ms": null,
+    "kind": "一次性",
+    "deferrable": false,
+    "why": "与前一项同源，首帧可见页"
+   },
+   {
+    "segment": "顶栏 / 能力抽屉 / 菜单 / 状态栏",
+    "ms": 52.4,
+    "prewarm_control_ms": null,
+    "kind": "一次性",
+    "deferrable": false,
+    "why": "首帧内容"
+   },
+   {
+    "segment": "QIcon（窗口图标）",
+    "ms": 9.9,
+    "prewarm_control_ms": null,
+    "kind": "一次性",
+    "deferrable": true,
+    "why": "不参与首帧布局；可延后，但只有 ~10 ms，且延后会让标题栏图标晚出现"
+   },
+   {
+    "segment": "DesktopSettings.load / MCPWorkerManager / AudioPlayer / VfoManager / SharedDemodConfig / LoopSatTracker / RealGNSSMonitor",
+    "ms": 0.4,
+    "prewarm_control_ms": null,
+    "kind": "一次性",
+    "deferrable": false,
+    "why": "全部命中但合计 <1 ms（隔离 profile 下无设置文件）；不是可疑点"
+   },
+   {
+    "segment": "构造期 import（主线程首次加载的模块）",
+    "ms": 0.0,
+    "prewarm_control_ms": null,
+    "kind": "一次性",
+    "deferrable": false,
+    "why": "主线程没有首次 import 落进 ctor；账上的 rtlsdr 995 ms / pkg_resources 936 ms 发生在后台线程 Dummy-1（硬件探测），不进 ctor 墙钟，但会抢 GIL/CPU，是 ctor 离散 1.2–2.3 s 的嫌疑之一"
+   },
+   {
+    "segment": "未命名的直写代码（显式列出，不再叫「其它」）",
+    "ms": 6.5,
+    "prewarm_control_ms": null,
+    "kind": "一次性",
+    "deferrable": false,
+    "why": "主窗 __init__ 里既不属于任何 _build_/_restore_/_init_/_apply_/叶子项的赋值与调用；三次 6.5/7.3/5.5 ms，全部是属性赋值与 QTimer 句柄创建"
+   }
+  ],
+  "deferrable_total_ms": 9.9,
+  "judgement": "拆开之后：可延后项只有窗口图标 ~10 ms；其余 ~1.2–1.8 s 全部是首帧内容依赖的一次性成本（字体度量 ~0.6 s、polish ~0.22 s、reparent/布局 ~0.29 s、面板 sizeHint ~0.23 s、RFSkyView 剩余 ~0.39 s）。所以「到 800」不能靠挪到首帧之后，只能靠减少首帧要建的东西（RFSkyView 归卫星线）或改变布局策略——本线无可单方面回收的 358 ms。"
+ }
+}

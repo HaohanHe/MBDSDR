@@ -1,0 +1,325 @@
+{
+ "question": "不可见时 apply QSS 后 show 是否二次 polish",
+ "method": "栈式计时器包主窗 _build_/_restore_/_init_/_apply_/... 方法 + 叶子嫌疑 + 构造期首次 import 记账；每个 case 独立进程",
+ "runs": [
+  {
+   "no_theme": false,
+   "skip_theme": false,
+   "load_before": {
+    "sys_cpu_pct": 31.0,
+    "python_proc_count": 9,
+    "python_total_cpu_pct": 111.0,
+    "python_top": [
+     {
+      "pid": 35764,
+      "cpu_pct": 97.7
+     },
+     {
+      "pid": 6824,
+      "cpu_pct": 7.8
+     },
+     {
+      "pid": 32508,
+      "cpu_pct": 4.7
+     },
+     {
+      "pid": 9144,
+      "cpu_pct": 0.8
+     },
+     {
+      "pid": 30716,
+      "cpu_pct": 0.0
+     }
+    ],
+    "cpu_count": 12
+   },
+   "load_after": {
+    "sys_cpu_pct": 49.0,
+    "python_proc_count": 7,
+    "python_total_cpu_pct": 118.0,
+    "python_top": [
+     {
+      "pid": 35764,
+      "cpu_pct": 94.5
+     },
+     {
+      "pid": 6824,
+      "cpu_pct": 9.4
+     },
+     {
+      "pid": 9144,
+      "cpu_pct": 9.4
+     },
+     {
+      "pid": 32508,
+      "cpu_pct": 4.7
+     },
+     {
+      "pid": 37696,
+      "cpu_pct": 0.0
+     }
+    ],
+    "cpu_count": 12
+   },
+   "ctor_ms": 1398.9,
+   "show_sync_ms": 224.3,
+   "paint_ms": 157.0,
+   "show_plus_events_ms": 381.3,
+   "apply_after_show_ms": null,
+   "widgets": 1128,
+   "ruler": {
+    "qt_platform": "windows",
+    "font": "MiSans",
+    "pt": 10.0,
+    "line_h": 27
+   },
+   "phase1_ctor": {
+    "PaletteChange": 8729,
+    "StyleChange": 5267,
+    "Polish": 1049
+   },
+   "phase1_widgets_with_polish": 1128,
+   "phase2_show": {
+    "Polish": 85,
+    "PaletteChange": 721,
+    "Paint": 161,
+    "PolishRequest": 1128,
+    "StyleChange": 306
+   },
+   "phase2_widgets_with_polish": 177,
+   "widgets_polished_both_phases": 170
+  },
+  {
+   "no_theme": false,
+   "skip_theme": false,
+   "load_before": {
+    "sys_cpu_pct": 34.1,
+    "python_proc_count": 6,
+    "python_total_cpu_pct": 89.9,
+    "python_top": [
+     {
+      "pid": 35764,
+      "cpu_pct": 84.4
+     },
+     {
+      "pid": 32508,
+      "cpu_pct": 4.7
+     },
+     {
+      "pid": 37696,
+      "cpu_pct": 0.8
+     },
+     {
+      "pid": 13504,
+      "cpu_pct": 0.0
+     },
+     {
+      "pid": 37752,
+      "cpu_pct": 0.0
+     }
+    ],
+    "cpu_count": 12
+   },
+   "load_after": {
+    "sys_cpu_pct": 33.4,
+    "python_proc_count": 6,
+    "python_total_cpu_pct": 97.7,
+    "python_top": [
+     {
+      "pid": 35764,
+      "cpu_pct": 79.7
+     },
+     {
+      "pid": 32508,
+      "cpu_pct": 9.4
+     },
+     {
+      "pid": 13504,
+      "cpu_pct": 8.6
+     },
+     {
+      "pid": 37696,
+      "cpu_pct": 0.0
+     },
+     {
+      "pid": 37752,
+      "cpu_pct": 0.0
+     }
+    ],
+    "cpu_count": 12
+   },
+   "ctor_ms": 1711.3,
+   "show_sync_ms": 191.5,
+   "paint_ms": 126.4,
+   "show_plus_events_ms": 317.9,
+   "apply_after_show_ms": null,
+   "widgets": 1128,
+   "ruler": {
+    "qt_platform": "windows",
+    "font": "MiSans",
+    "pt": 10.0,
+    "line_h": 27
+   },
+   "phase1_ctor": {
+    "PaletteChange": 8724,
+    "StyleChange": 5267,
+    "Polish": 1049
+   },
+   "phase1_widgets_with_polish": 1128,
+   "phase2_show": {
+    "Polish": 85,
+    "PaletteChange": 721,
+    "Paint": 161,
+    "PolishRequest": 1128,
+    "StyleChange": 306
+   },
+   "phase2_widgets_with_polish": 177,
+   "widgets_polished_both_phases": 170
+  },
+  {
+   "no_theme": false,
+   "skip_theme": false,
+   "load_before": {
+    "sys_cpu_pct": 28.2,
+    "python_proc_count": 6,
+    "python_total_cpu_pct": 12.5,
+    "python_top": [
+     {
+      "pid": 32508,
+      "cpu_pct": 6.2
+     },
+     {
+      "pid": 35764,
+      "cpu_pct": 5.5
+     },
+     {
+      "pid": 37696,
+      "cpu_pct": 0.8
+     },
+     {
+      "pid": 33328,
+      "cpu_pct": 0.0
+     },
+     {
+      "pid": 37752,
+      "cpu_pct": 0.0
+     }
+    ],
+    "cpu_count": 12
+   },
+   "load_after": {
+    "sys_cpu_pct": 38.5,
+    "python_proc_count": 8,
+    "python_total_cpu_pct": 82.0,
+    "python_top": [
+     {
+      "pid": 9152,
+      "cpu_pct": 64.1
+     },
+     {
+      "pid": 33328,
+      "cpu_pct": 11.7
+     },
+     {
+      "pid": 32508,
+      "cpu_pct": 6.2
+     },
+     {
+      "pid": 34136,
+      "cpu_pct": 0.0
+     },
+     {
+      "pid": 35764,
+      "cpu_pct": 0.0
+     }
+    ],
+    "cpu_count": 12
+   },
+   "ctor_ms": 1634.4,
+   "show_sync_ms": 211.5,
+   "paint_ms": 142.8,
+   "show_plus_events_ms": 354.3,
+   "apply_after_show_ms": null,
+   "widgets": 1128,
+   "ruler": {
+    "qt_platform": "windows",
+    "font": "MiSans",
+    "pt": 10.0,
+    "line_h": 27
+   },
+   "phase1_ctor": {
+    "PaletteChange": 8768,
+    "StyleChange": 5267,
+    "Polish": 1049
+   },
+   "phase1_widgets_with_polish": 1128,
+   "phase2_show": {
+    "Polish": 85,
+    "PaletteChange": 721,
+    "Paint": 161,
+    "PolishRequest": 1128,
+    "StyleChange": 306
+   },
+   "phase2_widgets_with_polish": 177,
+   "widgets_polished_both_phases": 170
+  }
+ ],
+ "medians": {
+  "ctor_ms": 1634.4,
+  "show_sync_ms": 211.5,
+  "paint_ms": 142.8,
+  "show_plus_events_ms": 354.3,
+  "apply_after_show_ms": null,
+  "widgets": 1128,
+  "phase1_widgets_with_polish": 1128,
+  "phase2_widgets_with_polish": 177,
+  "widgets_polished_both_phases": 170,
+  "phase1_ctor": {
+   "PaletteChange": 8729,
+   "StyleChange": 5267,
+   "Polish": 1049
+  },
+  "phase2_show": {
+   "Polish": 85,
+   "PaletteChange": 721,
+   "Paint": 161,
+   "PolishRequest": 1128,
+   "StyleChange": 306
+  }
+ },
+ "verdict": "见 medians：widgets_polished_both_phases > 0 且 phase2_show 的 Polish/StyleChange 计数可观 → show 会重刷；若两者≈0 且 show 耗时≈纯首帧 Paint → 不重刷。",
+ "conclusion": {
+  "question": "窗口不可见时 apply QSS，show 时会不会二次 polish？",
+  "answer": "会重刷，但只重刷一小部分：170/1128 ≈15% 的控件在两个阶段都被 polish，show 期间 Polish 事件 85 次、StyleChange 306 次；同步 show 段 211.5 ms，首帧 Paint 142.8 ms。",
+  "control": {
+   "what": "把 MainWindow._apply_theme 在构造期置空（真·不挂 QSS），show 之后再 apply 一次",
+   "ctor_ms": 872.6,
+   "show_sync_ms": 189.6,
+   "paint_ms": 101.3,
+   "apply_after_show_ms": 440.5,
+   "phase2_counts": {
+    "Polish": 142,
+    "PaletteChange": 5391,
+    "Paint": 282,
+    "PolishRequest": 1135,
+    "StyleChange": 3074
+   },
+   "polished_both_phases": 1041
+  },
+  "verdict": "否掉「挪到 show 之后」这条路，两个理由同时成立：① 判据：首帧会是无样式空壳，即使定义 C 变小也不算省；② 成本：在可见窗口上 apply 同一套 QSS 要 440.5 ms（419.6–456.3），比隐藏期 160–221 ms 更贵，因为它要重刷 + 重绘样式。隐藏期那次 apply 不是重复劳动：show 只额外重刷 15% 的控件（同步段比对照组多 ~22 ms），剩下的 160–220 ms 是首帧样式必须付的。",
+  "loads": [
+   [
+    111.0,
+    118.0
+   ],
+   [
+    89.9,
+    97.7
+   ],
+   [
+    12.5,
+    82.0
+   ]
+  ]
+ }
+}

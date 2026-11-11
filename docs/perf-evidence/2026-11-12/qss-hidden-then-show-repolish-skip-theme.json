@@ -1,0 +1,297 @@
+{
+ "question": "不可见时 apply QSS 后 show 是否二次 polish",
+ "method": "栈式计时器包主窗 _build_/_restore_/_init_/_apply_/... 方法 + 叶子嫌疑 + 构造期首次 import 记账；每个 case 独立进程",
+ "runs": [
+  {
+   "no_theme": false,
+   "skip_theme": true,
+   "load_before": {
+    "sys_cpu_pct": 31.1,
+    "python_proc_count": 9,
+    "python_total_cpu_pct": 4.7,
+    "python_top": [
+     {
+      "pid": 32508,
+      "cpu_pct": 4.7
+     },
+     {
+      "pid": 2988,
+      "cpu_pct": 0.0
+     },
+     {
+      "pid": 24464,
+      "cpu_pct": 0.0
+     },
+     {
+      "pid": 32352,
+      "cpu_pct": 0.0
+     },
+     {
+      "pid": 34472,
+      "cpu_pct": 0.0
+     }
+    ],
+    "cpu_count": 12
+   },
+   "load_after": {
+    "sys_cpu_pct": 34.5,
+    "python_proc_count": 7,
+    "python_total_cpu_pct": 14.8,
+    "python_top": [
+     {
+      "pid": 34472,
+      "cpu_pct": 10.9
+     },
+     {
+      "pid": 32508,
+      "cpu_pct": 3.1
+     },
+     {
+      "pid": 37696,
+      "cpu_pct": 0.8
+     },
+     {
+      "pid": 24464,
+      "cpu_pct": 0.0
+     },
+     {
+      "pid": 32352,
+      "cpu_pct": 0.0
+     }
+    ],
+    "cpu_count": 12
+   },
+   "ctor_ms": 722.2,
+   "show_sync_ms": 189.6,
+   "paint_ms": 101.3,
+   "show_plus_events_ms": 290.9,
+   "apply_after_show_ms": 440.5,
+   "widgets": 1127,
+   "ruler": {
+    "qt_platform": "windows",
+    "font": "MiSans",
+    "pt": 10.0,
+    "line_h": 27
+   },
+   "phase1_ctor": {
+    "PaletteChange": 922,
+    "StyleChange": 565,
+    "Polish": 993
+   },
+   "phase1_widgets_with_polish": 1041,
+   "phase2_show": {
+    "Polish": 142,
+    "PaletteChange": 5391,
+    "Paint": 282,
+    "PolishRequest": 1135,
+    "StyleChange": 3074
+   },
+   "phase2_widgets_with_polish": 1135,
+   "widgets_polished_both_phases": 1041
+  },
+  {
+   "no_theme": false,
+   "skip_theme": true,
+   "load_before": {
+    "sys_cpu_pct": 36.8,
+    "python_proc_count": 8,
+    "python_total_cpu_pct": 91.4,
+    "python_top": [
+     {
+      "pid": 35764,
+      "cpu_pct": 87.5
+     },
+     {
+      "pid": 32508,
+      "cpu_pct": 3.9
+     },
+     {
+      "pid": 24464,
+      "cpu_pct": 0.0
+     },
+     {
+      "pid": 30736,
+      "cpu_pct": 0.0
+     },
+     {
+      "pid": 32352,
+      "cpu_pct": 0.0
+     }
+    ],
+    "cpu_count": 12
+   },
+   "load_after": {
+    "sys_cpu_pct": 27.4,
+    "python_proc_count": 7,
+    "python_total_cpu_pct": 117.1,
+    "python_top": [
+     {
+      "pid": 35764,
+      "cpu_pct": 100.0
+     },
+     {
+      "pid": 30736,
+      "cpu_pct": 10.9
+     },
+     {
+      "pid": 32508,
+      "cpu_pct": 6.2
+     },
+     {
+      "pid": 24464,
+      "cpu_pct": 0.0
+     },
+     {
+      "pid": 32352,
+      "cpu_pct": 0.0
+     }
+    ],
+    "cpu_count": 12
+   },
+   "ctor_ms": 995.0,
+   "show_sync_ms": 212.5,
+   "paint_ms": 127.2,
+   "show_plus_events_ms": 339.7,
+   "apply_after_show_ms": 456.3,
+   "widgets": 1127,
+   "ruler": {
+    "qt_platform": "windows",
+    "font": "MiSans",
+    "pt": 10.0,
+    "line_h": 27
+   },
+   "phase1_ctor": {
+    "PaletteChange": 922,
+    "StyleChange": 565,
+    "Polish": 993
+   },
+   "phase1_widgets_with_polish": 1041,
+   "phase2_show": {
+    "Polish": 142,
+    "PaletteChange": 5288,
+    "Paint": 282,
+    "PolishRequest": 1135,
+    "StyleChange": 3074
+   },
+   "phase2_widgets_with_polish": 1135,
+   "widgets_polished_both_phases": 1041
+  },
+  {
+   "no_theme": false,
+   "skip_theme": true,
+   "load_before": {
+    "sys_cpu_pct": 28.1,
+    "python_proc_count": 7,
+    "python_total_cpu_pct": 121.1,
+    "python_top": [
+     {
+      "pid": 35764,
+      "cpu_pct": 114.1
+     },
+     {
+      "pid": 32508,
+      "cpu_pct": 6.2
+     },
+     {
+      "pid": 37696,
+      "cpu_pct": 0.8
+     },
+     {
+      "pid": 24464,
+      "cpu_pct": 0.0
+     },
+     {
+      "pid": 32352,
+      "cpu_pct": 0.0
+     }
+    ],
+    "cpu_count": 12
+   },
+   "load_after": {
+    "sys_cpu_pct": 28.1,
+    "python_proc_count": 7,
+    "python_total_cpu_pct": 112.5,
+    "python_top": [
+     {
+      "pid": 35764,
+      "cpu_pct": 96.1
+     },
+     {
+      "pid": 32764,
+      "cpu_pct": 9.4
+     },
+     {
+      "pid": 32508,
+      "cpu_pct": 7.0
+     },
+     {
+      "pid": 24464,
+      "cpu_pct": 0.0
+     },
+     {
+      "pid": 32352,
+      "cpu_pct": 0.0
+     }
+    ],
+    "cpu_count": 12
+   },
+   "ctor_ms": 872.6,
+   "show_sync_ms": 173.8,
+   "paint_ms": 94.3,
+   "show_plus_events_ms": 268.1,
+   "apply_after_show_ms": 419.6,
+   "widgets": 1127,
+   "ruler": {
+    "qt_platform": "windows",
+    "font": "MiSans",
+    "pt": 10.0,
+    "line_h": 27
+   },
+   "phase1_ctor": {
+    "PaletteChange": 922,
+    "StyleChange": 565,
+    "Polish": 993
+   },
+   "phase1_widgets_with_polish": 1041,
+   "phase2_show": {
+    "Polish": 142,
+    "PaletteChange": 5688,
+    "Paint": 282,
+    "PolishRequest": 1135,
+    "StyleChange": 3074
+   },
+   "phase2_widgets_with_polish": 1135,
+   "widgets_polished_both_phases": 1041
+  }
+ ],
+ "medians": {
+  "ctor_ms": 872.6,
+  "show_sync_ms": 189.6,
+  "paint_ms": 101.3,
+  "show_plus_events_ms": 290.9,
+  "apply_after_show_ms": 440.5,
+  "widgets": 1127,
+  "phase1_widgets_with_polish": 1041,
+  "phase2_widgets_with_polish": 1135,
+  "widgets_polished_both_phases": 1041,
+  "phase1_ctor": {
+   "PaletteChange": 922,
+   "StyleChange": 565,
+   "Polish": 993
+  },
+  "phase2_show": {
+   "Polish": 142,
+   "PaletteChange": 5391,
+   "Paint": 282,
+   "PolishRequest": 1135,
+   "StyleChange": 3074
+  }
+ },
+ "verdict": "见 medians：widgets_polished_both_phases > 0 且 phase2_show 的 Polish/StyleChange 计数可观 → show 会重刷；若两者≈0 且 show 耗时≈纯首帧 Paint → 不重刷。",
+ "conclusion": {
+  "role": "对照组：构造期完全不挂主题 QSS，show 之后再 apply（不是产品方案，只用于隔离）",
+  "ctor_ms": 872.6,
+  "apply_after_show_ms": 440.5,
+  "note": "首帧 Paint 101.3 ms（默认组 142.8）；可见窗口 apply 440.5 ms（默认组隐藏期 160–221）。"
+ }
+}

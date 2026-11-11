@@ -77,9 +77,11 @@
   {
    "item": "MainWindow 骨架 + 框架未拆余量",
    "ms": "≈815",
-   "status": "只是估计",
-   "evidence": "types run3: ctor 1513 − 面板 477.8 − 页签 220.7"
+   "status": "已作废（记账错误）",
+   "evidence": "types run3: ctor 1513 − 面板 477.8 − 页签 220.7",
+   "replaced_by": "ctor-residual-breakdown.json（栈式计时器全包主窗 __init__）",
+   "note": "815 不是真实的无名区：控件类型合计与 addTab 互相嵌套，不能从 ctor 里直接扣。全包后未命名的直写代码只有 5.5–7.3 ms。ctor 实际由：首次字体度量 ≈656（星象仪 394 + 工具条 157，预热对照后塌到 2.7/6.9）、QSS polish ≈221、reparent+布局 ≈286（addWidget 143 + setCentralWidget 143）、右栏 minimumSizeHint+addTab ≈235、扩展/数字面板 ≈206、其余 ≈60 组成。可延后项只有窗口图标 ≈10 ms。"
   }
  ],
- "conclusion": "按「首帧内容完整、可交互」的判据重算：表里前两条（RFSkyView 345.6 / QLineEdit 343.3）定义 C 可回收都是 0——前者默认页就是星象仪、惰性触发在首帧前；后者是进程首次字体度量，换个控件付而已。真正的可动项是 _apply_initial_state 主题 160–191 + 右栏非设置面板 204 ≈ 364（需改 main_window/themes），但「窗口不可见时不做全树 polish」的替代方案尚未验证；把整段挪到首帧之后只是把 160–191 从构造期搬到首拍，定义 C 不变。以已测项计，本线单方面凑不出 358.5。"
+ "conclusion": "按「首帧内容完整、可交互」的判据重算：RFSkyView 345.6 与 QLineEdit 343.3 的定义 C 可回收都是 0（前者默认页即星象仪；后者是进程首次字体度量，换支付者而已）。原来记作「框架余量 ≈815」的那块已拆开（ctor-residual-breakdown.json）：未命名直写代码只剩 6.5 ms，其余是首次字体度量 ≈656、QSS polish ≈221、reparent/布局 ≈286、右栏 sizeHint+addTab ≈235、扩展/数字面板 ≈206——全部首帧内容依赖，可延后项只有窗口图标 ≈10 ms。隐藏期 QSS 是否白做也已验：show 只重刷 170/1128（≈15%），可见窗口再 apply 要 440.5 ms，故「挪到 show 之后」按判据和成本双否。以已测项计，本线单方面凑不出 358.5；要谈 800 只能减少首帧要建的东西（RFSkyView 归卫星线），不存在本线可单方面回收的 358。"
 }
