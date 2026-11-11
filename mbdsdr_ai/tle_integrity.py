@@ -45,6 +45,10 @@ __all__ = [
     "verify_identity",
     "freshness",
     "accuracy",
+    "TRACKING_LEVELS",
+    "TRACKING_OPERATIONS",
+    "TRACKING_MODES",
+    "tracking_policy",
     "parse_tle_blocks",
     "user_entries",
     "cache_entries",
@@ -351,6 +355,126 @@ def accuracy(fresh: Dict[str, Any]) -> Dict[str, Any]:
         "age_days": age,
         "epoch_utc": fresh.get("epoch_utc"),
         "pass_eligible": bool(fresh.get("pass_eligible")),
+    }
+
+
+# ---------------------------------------------------------------------------
+# 跟踪闸门：四档 × 四操作的唯一判定表
+#
+# 这是「档位 → 能不能写硬件」的唯一事实源（P0-01）。desktop 侧只读本函数
+# 给出的布尔值，不得再自行比较 ``tier ==``——否则 AI 工具链与 CLI 会各写
+# 一份规则，正是「48.9° 旧根数照常调谐」的形态。
+#
+# 操作 × 模式：
+#   allow   = 直接允许
+#   confirm = 允许，但必须先经用户二次确认（确认框须写明年龄与后果）
+#   deny    = 禁止（dead 保留只读演示：照常算并显示将下发的频率，不写设备）
+# ---------------------------------------------------------------------------
+TRACKING_LEVELS: Tuple[str, ...] = ("fresh", "usable", "expired", "dead", "unknown")
+TRACKING_OPERATIONS: Tuple[str, ...] = ("pass_list", "tune", "gimbal", "tool_write")
+
+TRACKING_MODES: Dict[str, Dict[str, str]] = {
+    "fresh":   {"pass_list": "allow", "tune": "allow",
+                "gimbal": "allow", "tool_write": "allow"},
+    "usable":  {"pass_list": "allow", "tune": "allow",
+                "gimbal": "allow", "tool_write": "allow"},
+    "expired": {"pass_list": "allow", "tune": "confirm",
+                "gimbal": "deny", "tool_write": "confirm"},
+    "dead":    {"pass_list": "deny", "tune": "deny",
+                "gimbal": "deny", "tool_write": "deny"},
+    "unknown": {"pass_list": "deny", "tune": "deny",
+                "gimbal": "deny", "tool_write": "deny"},
+}
+
+TRACKING_LEVEL_LABELS: Dict[str, str] = {
+    "fresh": "星历新鲜",
+    "usable": "星历可用",
+    "expired": "星历过期",
+    "dead": "星历失效",
+    "unknown": "星历不可用",
+}
+
+TRACKING_NEXT_ACTIONS: Dict[str, str] = {
+    "fresh": "",
+    "usable": "临近过境前刷新 TLE 以减小轨道漂移",
+    "expired": "确认星历年龄后可调谐；云台与自动工具写操作仍被禁止",
+    "dead": "更新或导入 TLE 后重试",
+    "unknown": "刷新或导入 TLE（当前历元无法解析）",
+}
+
+
+def tracking_policy(fresh: Optional[Dict[str, Any]],
+                    identity_status: str = "verified") -> Dict[str, Any]:
+    """档位 → 操作许可（纯函数，无 I/O，desktop/AI 共用）。
+
+    ``fresh`` 是 :func:`freshness` 的返回值；``identity_status`` 是
+    :func:`verify_identity` 的 ``status``（verified/mismatch/no_data）。
+
+    身份不符（``mismatch``，44016/54234 事故形态）**无视年龄一律按 dead
+    处理**——错误的对象比过期的对象更危险；``no_data`` 不冒充核实，按
+    ``unknown`` 走同一套禁止策略（缺数据的轨道同样不可信）。
+
+    返回键：``level``/``tier``/``identity_status``/``age_days``/``band``/
+    ``allow_pass_list``/``allow_tune``/``require_confirm``/``allow_gimbal``/
+    ``allow_tool_write``/``tool_require_confirm``/``command_allowed``/
+    ``label``/``reason``/``next_action``。
+
+    语义分工：
+      - ``allow_tune`` = 可以下发调谐（``require_confirm`` 为真时先确认）；
+      - ``command_allowed`` = 是否**存在**写硬件的合法路径（dead/unknown 为
+        假：只读演示，任何入口都不得下发）；
+      - ``require_confirm`` = 调谐前必须二次确认；``tool_require_confirm``
+        对应 AI 工具写操作。
+    """
+    data: Dict[str, Any] = fresh if isinstance(fresh, dict) else {}
+    tier = str(data.get("tier") or "unknown")
+    if tier not in TRACKING_MODES:
+        tier = "unknown"
+    ident = str(identity_status or "verified")
+    forced = ident == "mismatch"
+    if forced:
+        level = "dead"
+    elif ident == "no_data":
+        level = "unknown"
+    else:
+        level = tier
+    modes = TRACKING_MODES[level]
+    age = data.get("age_days")
+    band = age_band(age)
+
+    if forced:
+        label = "星历身份不符（按失效处理）"
+        reason = ("卫星声明名与轨道数据对象名不符（编号被映射到另一颗对象）："
+                  "无视星历年龄一律按失效处理")
+        next_action = "用正确编号的 TLE 更新或导入后重试"
+    else:
+        label = TRACKING_LEVEL_LABELS[level]
+        if level == "unknown":
+            reason = "星历历元缺失或无法解析，无法判断轨道是否可信"
+        else:
+            reason = str(data.get("reason") or band_note(band, age))
+        next_action = TRACKING_NEXT_ACTIONS[level]
+
+    tune_mode = modes["tune"]
+    tool_mode = modes["tool_write"]
+    return {
+        "level": level,
+        "tier": tier,
+        "identity_status": ident,
+        "identity_forced": forced,
+        "age_days": age,
+        "band": band,
+        "modes": dict(modes),
+        "allow_pass_list": modes["pass_list"] != "deny",
+        "allow_tune": tune_mode != "deny",
+        "require_confirm": tune_mode == "confirm",
+        "allow_gimbal": modes["gimbal"] == "allow",
+        "allow_tool_write": tool_mode != "deny",
+        "tool_require_confirm": tool_mode == "confirm",
+        "command_allowed": tune_mode != "deny",
+        "label": label,
+        "reason": reason,
+        "next_action": next_action,
     }
 
 
