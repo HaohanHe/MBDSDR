@@ -91,8 +91,8 @@ def test_no_station_hint(panel, monkeypatch):
 
     assert not panel.passes_hint.isHidden(), "空态提示必须可见"
     text = panel.passes_hint.text()
-    assert text.startswith("未配置观测站位置"), (
-        f"没配站址仍去算 0,0 的过境/打网络：{text!r}")
+    assert text.startswith("未设置观测地点"), (
+        f"没配观测地点仍去算 0,0 的过境/打网络：{text!r}")
     assert calls == [], f"未配置站址时不应发起 TLE 请求，实际请求 {len(calls)} 次"
 
 
