@@ -4160,14 +4160,18 @@ class MainWindow(QMainWindow):
         return float(DEFAULT_SAMPLE_RATE_HZ)
 
     def _apply_perf_profile(self, key: str, *, announce: bool = True) -> None:
-        """切档即时生效：只改 GNSS 轮询 / 频谱刷新间隔 / FFT 点数。
+        """切档即时生效：只改 GNSS 轮询 / 频谱刷新间隔与送绘上限。
+
+        **不碰 FFT 点数**——FFT 的唯一真值源是设置里的 ``fft_size``（由
+        设置面板经 ``_apply_fft_size`` 下发）。性能档再改一次会与用户显式
+        选的 FFT 打架（实测过：fft_size=4096 被档位冲回 1024）。
 
         不动用户手动选过的采样率档位——性能档只决定「下次连接的默认值」，
         不越权覆盖控制面板里的显式选择，也不重建已连接的流水线（重建会卡住
         UI）。状态栏如实说明哪几项已生效、采样率何时生效。
 
         announce=False 供启动时静默对齐持久化档位（不是用户切档，不该弹
-        「已切到」提示）；FFT/刷新仍照常生效，与 GNSS 轮询启动即按档一致。
+        「已切到」提示）；GNSS/刷新仍照常生效。
         """
         prof = None
         if _perf_profile is not None:
@@ -4183,12 +4187,9 @@ class MainWindow(QMainWindow):
                     max(200, int(prof["gnss_poll_ms"])))
         except (AttributeError, RuntimeError, KeyError):
             pass
-        # FFT 点数 / 谱线数 / 频谱刷新：走频谱面板既有性能接缝
-        # set_performance_mode(panel_level)——它真改 generator.reconfigure
-        # （FFT + 谱线 + 瀑布缓冲）与 plot._timer 刷新间隔，并同步 FFT 下拉。
-        # 旧写法调 panel.set_fft_size（面板根本没有这方法，getattr 落空）
-        # + 改从不 start 的 _iq_poll_timer，两个杠杆全是死的，状态栏却宣称
-        # 已生效（假控件，2026-11-10 output/perf_lever_probe.py 实证）。
+        # 频谱刷新间隔 / 送绘上限：走频谱面板既有性能接缝
+        # set_performance_mode(panel_level)——它只改 plot._timer 刷新间隔与
+        # 送绘根数上限，**不改 FFT 点数**（FFT 真值源是 fft_size）。
         try:
             sp = getattr(self, "spectrum", None)
             level = prof.get("panel_level")
@@ -4208,7 +4209,8 @@ class MainWindow(QMainWindow):
             return
         try:
             self.statusBar().showMessage(
-                f"性能档已切到「{prof['label']}」：GNSS/频谱刷新与 FFT 已生效；"
+                f"性能档已切到「{prof['label']}」：GNSS/频谱刷新已生效；"
+                "FFT 点数由频谱工具栏「FFT」下拉决定；"
                 f"采样率 {format_sample_rate(prof['sample_rate_hz'])} "
                 "将在下次连接时作为默认值",
                 MSG_IMPORTANT)
