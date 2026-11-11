@@ -23,7 +23,7 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
 from PySide6.QtCore import Qt, QTimer, QUrl
-from PySide6.QtGui import QDesktopServices
+from PySide6.QtGui import QDesktopServices, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QSizePolicy, QWidget, QVBoxLayout, QHBoxLayout, QGroupBox, QCheckBox, QSpinBox,
     QDoubleSpinBox, QComboBox, QLineEdit, QLabel, QFormLayout,
@@ -609,6 +609,24 @@ class SettingsPanel(QWidget):
         self._settings = settings
         self._host = host
         self._rows: Dict[str, QWidget] = {}
+        #: 行容器（QGroupBox）。过滤时按行 setVisible，控件本身在 _rows。
+        self._row_boxes: Dict[str, QWidget] = {}
+        #: 每项的检索文本（名称 + 键名 + 分组 + 说明 + 生效提示 + 枚举文案）。
+        self._search_index: Dict[str, str] = {}
+        #: 分组 → 该组在 schema 里的键；用于「不留空组」判定。
+        self._group_keys: Dict[str, List[str]] = {}
+        #: 分组 → RightSection（可折叠节）。
+        self._group_sections: Dict[str, Any] = {}
+        #: 分组 → 非 schema 行的附加控件（如「外观」方块），搜索时一并隐藏。
+        self._search_extras: Dict[str, List[QWidget]] = {}
+        #: 不在本页渲染的键（4 个服务开关 + 11 个内部键）→ 可检索文本。
+        #: 搜得到、但改不了：状态行如实点名它在哪里，不能报「无匹配」骗人。
+        self._other_index: Dict[str, str] = {}
+        self._other_hint: Dict[str, str] = {}
+        #: 搜索前的展开状态；清空搜索后原样恢复。
+        self._expanded_before_search: Optional[Dict[str, bool]] = None
+        #: 当前命中的键集合（测试与「回车跳到首项」共用）。
+        self._search_hits: set = set()
         # 经纬度"半对"输入的暂存（只在本面板内存里，不进 host、不参与计算）。
         # 没有这个的话，用户先输纬度会被当成"坐标清空"——两个框是分开提交的。
         self._pending_lat: Optional[float] = None
@@ -817,6 +835,26 @@ class SettingsPanel(QWidget):
         wrap_cn_label(nav_hint)
         nav_hint.setObjectName("hintLabel")
         root.addWidget(nav_hint)
+
+        # 搜索框：输入即过滤（名称/键名/说明/生效提示/枚举文案），清空即恢复。
+        # 53 个 schema 项里 11 个是内部键不出现在面板（见 docs/settings-inventory.md），
+        # 这里只索引**真的渲染出来**的行，避免"搜到了却改不了"。
+        self.search_edit = QLineEdit()
+        self.search_edit.setPlaceholderText(
+            "搜索设置项：名称 / 键名 / 说明（回车跳到首项，Esc 清空）")
+        self.search_edit.setClearButtonEnabled(True)
+        self.search_edit.textChanged.connect(self._on_search_changed)
+        self.search_edit.returnPressed.connect(self._jump_to_first_match)
+        root.addWidget(self.search_edit)
+        self.search_status = QLabel("")
+        wrap_cn_label(self.search_status)
+        self.search_status.setObjectName("hintLabel")
+        self.search_status.setVisible(False)
+        root.addWidget(self.search_status)
+        # Esc 清空（搜索框有焦点时生效；不清空就别把用户困在过滤视图里）
+        self._esc_shortcut = QShortcut(QKeySequence(Qt.Key_Escape), self.search_edit)
+        self._esc_shortcut.setContext(Qt.WidgetShortcut)
+        self._esc_shortcut.activated.connect(self.search_edit.clear)
         # 右栏只有 ~320px 宽：7 个分组页签按全局 QSS 的 6/14 内边距要 594px，
         # 第 4 个「频谱与解码」被右边界整字切掉，且页签栏没有滚动按钮——后面
         # 三组等于不可达（2026-11-11 实拍）。这里不再用页签，改成与右栏一致的
@@ -841,6 +879,27 @@ class SettingsPanel(QWidget):
                 lambda on, s=section: self._on_group_expanded(s, on))
             self.group_sections.append((group, section))
             root.addWidget(section)
+            self._group_keys[group] = [it.key for it in items_for_group(group)]
+            self._group_sections[group] = section
+            for key in self._group_keys[group]:
+                item = SCHEMA.get(key)
+                if item is not None:
+                    self._search_index[key] = self._searchable_text(item)
+
+        # 53 项 = 本页 38 行 + 服务设置 4 项 + 内部键 11 项。后两类改不了，但
+        # **必须搜得到**：搜「远程控制端口」若直接报「无匹配」，就是在骗人——
+        # 项存在，只是不在这页。状态行如实点名它住在哪，不假装命中。
+        page_keys = set(self._search_index)
+        for item in ALL_ITEMS:
+            if item.key in page_keys:
+                continue
+            self._other_index[item.key] = self._searchable_text(item)
+            # 10 个内部运行态键在 schema 里 label 为空串（它们从不在面板出现），
+            # 提示里退回键名，别让状态行变成「（内部键，不在面板）」这种哑谜。
+            label = item.label or item.key
+            self._other_hint[item.key] = (
+                f"{label}（「服务设置」一节）" if item.exposed
+                else f"{label}（内部键，不在面板）")
         root.addStretch(1)
         self.status_label = QLabel("")
         wrap_cn_label(self.status_label)
@@ -851,6 +910,124 @@ class SettingsPanel(QWidget):
         self.btn_reset_all.setToolTip("把所有分组恢复到 schema 默认值（含观测站清空、服务关闭）")
         self.btn_reset_all.clicked.connect(lambda: self.reset_all(confirm=True))
         root.addWidget(self.btn_reset_all)
+
+        # Tab 从搜索框直达第一项（当前第一组的第一个控件；折叠时也先落到标题）
+        first = self._first_visible_control()
+        if first is not None:
+            QWidget.setTabOrder(self.search_edit, first)
+
+    # ------------------------------------------------------------ 设置项搜索
+    @staticmethod
+    def _searchable_text(item) -> str:
+        """一项的可检索文本（小写）：名称 / 键名 / 分组 / 说明 / 生效提示 / 枚举文案。
+
+        键名也进索引，方便懂行的用户直接搜 `fft_size`；apply_note 同样进，
+        否则「波特率」搜不到那两项延迟提示（用户记得的往往正是那句提示）。
+        """
+        parts = [
+            str(getattr(item, "label", "")),
+            str(getattr(item, "key", "")),
+            str(getattr(item, "group", "")),
+            str(getattr(item, "help", "") or ""),
+            str(getattr(item, "apply_note", "") or ""),
+            str(getattr(item, "restart_note", "") or ""),
+        ]
+        parts.extend(str(c) for c in (getattr(item, "choice_labels", ()) or ()))
+        return " ".join(parts).lower()
+
+    def _on_search_changed(self, text: str) -> None:
+        """输入即过滤：命中行走、未命中行隐；空分组整个收起；无命中显式报「无匹配」。"""
+        query = (text or "").strip().lower()
+        if not query:
+            self._restore_after_search()
+            return
+        if self._expanded_before_search is None:
+            self._expanded_before_search = {
+                g: s.is_expanded() for g, s in self._group_sections.items()}
+
+        hits = set()
+        for group, section in self._group_sections.items():
+            group_hits = 0
+            for key in self._group_keys.get(group, []):
+                row = self._row_boxes.get(key)
+                if row is None:
+                    continue
+                matched = query in self._search_index.get(key, "")
+                row.setVisible(matched)
+                if matched:
+                    group_hits += 1
+                    hits.add(key)
+            for extra in self._search_extras.get(group, []):
+                extra.setVisible(False)
+            section.setVisible(group_hits > 0)
+            if group_hits and not section.is_expanded():
+                section.set_expanded(True)
+        self._search_hits = hits
+        others = [k for k, t in self._other_index.items() if query in t]
+
+        if hits:
+            text = (f"匹配 {len(hits)} 项（本页索引 {len(self._search_index)} 项，"
+                    f"Schema 全量 {len(ALL_ITEMS)} 项）")
+            if others:
+                text += "；另有 " + "、".join(
+                    self._other_hint[k] for k in others[:5])
+        elif others:
+            # 项存在但不在这页：不能报「无匹配」，那是把「改不了」说成「不存在」。
+            # 措辞也不带「无匹配」四个字——那四个字只留给真的查无此项。
+            text = ("本页没有可改的匹配项；Schema 里有 " + str(len(others))
+                    + " 项同名：" + "、".join(self._other_hint[k]
+                                             for k in others[:5]))
+        else:
+            text = (f"无匹配：没有设置项的名称、键名或说明包含「{query}」。"
+                    "换个词试试，或按 Esc 清空搜索。")
+        self.search_status.setText(text)
+        self.search_status.setVisible(True)
+        first = self._first_visible_control()
+        if first is not None:
+            QWidget.setTabOrder(self.search_edit, first)
+
+    def _restore_after_search(self) -> None:
+        """清空搜索 → 所有行/分组/附加控件回到搜索前的状态。"""
+        for key, row in self._row_boxes.items():
+            row.setVisible(True)
+        for group, section in self._group_sections.items():
+            section.setVisible(True)
+            for extra in self._search_extras.get(group, []):
+                extra.setVisible(True)
+        if self._expanded_before_search is not None:
+            for group, expanded in self._expanded_before_search.items():
+                section = self._group_sections.get(group)
+                if section is not None:
+                    section.set_expanded(expanded)
+            self._expanded_before_search = None
+        self._search_hits = set()
+        self.search_status.setVisible(False)
+        self.search_status.setText("")
+
+    def _first_visible_control(self) -> Optional[QWidget]:
+        """按分组顺序找第一个可见行的控件（回车跳转与 Tab 顺序共用）。"""
+        for group, _section in self.group_sections:
+            for key in self._group_keys.get(group, []):
+                row = self._row_boxes.get(key)
+                control = self._rows.get(key)
+                if row is not None and control is not None and not row.isHidden():
+                    return control
+        return None
+
+    def _jump_to_first_match(self) -> None:
+        """回车：跳到第一个命中项（展开分组 + 滚进视野 + 聚焦控件）。"""
+        if not self._search_hits:
+            return
+        first = self._first_visible_control()
+        if first is None:
+            return
+        for group, section in self._group_sections.items():
+            if any(k in self._search_hits for k in self._group_keys.get(group, [])):
+                if not section.is_expanded():
+                    section.set_expanded(True)
+                self._reveal_group(section, True)
+                break
+        first.setFocus(Qt.TabFocusReason)
 
     def _on_group_expanded(self, section, expanded: bool) -> None:
         """分组展开/收起后，把新高度报给外层右栏长列，并把该组滚进视野。
@@ -897,6 +1074,9 @@ class SettingsPanel(QWidget):
             extra = self._build_appearance_box()
             if extra is not None:
                 lay.addWidget(extra)
+                # 外观方块不是 schema 行：过滤时它不含任何 schema 键，
+                # 必须随分组一起隐藏，否则「搜索只留命中的行」变成半截。
+                self._search_extras.setdefault(group, []).append(extra)
         lay.addStretch(1)
         return inner
 
@@ -983,6 +1163,7 @@ class SettingsPanel(QWidget):
             note.setStyleSheet("color:#D4956A;")
             v.addWidget(note)
         self._rows[item.key] = control
+        self._row_boxes[item.key] = box
         return box
 
     def _make_control(self, item) -> QWidget:
@@ -1549,6 +1730,7 @@ class SettingsPanel(QWidget):
             lay.addWidget(self._build_row(item))
         settings_path = (self._settings.path if self._settings is not None
                          else "（未挂载 settings）")
+        extra_widgets: List[QWidget] = []
         for label, path in (
                 ("桌面设置", settings_path),
                 ("GUI 配置（观测站/窗口）", GUI_CONFIG_PATH),
@@ -1560,6 +1742,7 @@ class SettingsPanel(QWidget):
             wrap_cn_label(row)
             row.setTextInteractionFlags(Qt.TextSelectableByMouse)
             lay.addWidget(row)
+            extra_widgets.append(row)
 
         note = QLabel(
             "损坏的配置不会被覆盖：解析失败会先备份为 *.corrupt-时间戳，"
@@ -1581,6 +1764,9 @@ class SettingsPanel(QWidget):
         row.addWidget(btn_open)
         lay.addLayout(row)
         lay.addStretch(1)
+        # 存储页里的路径/说明/导入导出按钮都不是 schema 行，过滤时一并收起。
+        self._search_extras.setdefault("存储与日志", []).extend(
+            extra_widgets + [note, btn_export, btn_import, btn_open])
         return page
 
     def _on_export_clicked(self):
