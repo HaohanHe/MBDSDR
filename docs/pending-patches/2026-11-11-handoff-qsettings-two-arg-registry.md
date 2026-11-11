@@ -48,3 +48,30 @@
 - `docs/packaging.md` §5「读数隔离」（两参构造 → NativeFormat，脚本侧适配 + 哈希反证）。
 - `docs/research/2026-11-11-roadmap.md` R-02（实测污染并清理，建议口径）。
 - `tests/conftest.py::isolated_profile`（现有隔离手段的边界，见上「影响面」）。
+
+## 附：工具缺陷——`scripts/safe_commit.py` 不支持带删除
+
+写这份交接单与清点在途补丁时踩到：`safe_commit.py --files <path>` 会把每个文件
+的期望状态当成 `M`，一旦该文件在工作区是删除（`D`），直接拒绝：
+
+```
+多 ['D\tdocs/pending-patches/2026-11-11-connect-timeout-race.patch']
+缺 ['M\tdocs/pending-patches/2026-11-11-connect-timeout-race.patch']
+```
+
+这是工具能力缺口，不是操作错（`git rm` 本身没问题，只是不能用安全提交脚本把
+这次删除单独提交）。
+
+**绕过方式（本次采用）**：不删文件，保留补丁并在**文件头**标注状态：
+
+```
+# 已应用 84e166cc（fix(connect): 超时后保持「上一次仍在收尾」），勿再贴。
+```
+
+已实测文件头不影响补丁解析：`git apply --check -R <patch>` 通过（说明补丁内容
+与工作区一致、且前导注释被正常忽略）。后续再遇到「已应用补丁」时，同样按
+「保留 + 头部标注提交号」处理，别试图用 safe_commit 删。
+
+真需要删除文件时（**未实测，仅静态推断**）：`git commit -- <path>` 只记录该路径
+的当前内容、不动共享 index 里别人暂存的内容；用前先 `git status --porcelain`
+核对暂存区，并在提交说明里写明为何绕过 `safe_commit.py`。

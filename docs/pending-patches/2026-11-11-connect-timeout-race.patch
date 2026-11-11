@@ -1,3 +1,5 @@
+# 已应用 84e166cc（fix(connect): 超时后保持「上一次仍在收尾」），勿再贴。
+# 本文件只作 hunk 记录；重复贴会因上下文不符直接失败。
 diff --git a/desktop/main_window.py b/desktop/main_window.py
 index b3c7e40..f41180b 100644
 --- a/desktop/main_window.py
