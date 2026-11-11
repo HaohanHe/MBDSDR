@@ -94,13 +94,18 @@ def test_more_menu_is_not_mostly_gray_when_disconnected(panel):
 # ② 空态第三行说明（只放开控件不给说明 = 用户以为坏了）
 # ---------------------------------------------------------------------------
 def test_offline_note_text_and_visibility(panel):
-    from spectrum_widget import OFFLINE_SETTINGS_NOTE, _offline_text_lines
+    from spectrum_widget import (
+        OFFLINE_SETTINGS_NOTE, PAL_GRID, PAL_OFFLINE_NOTE, _offline_text_lines,
+    )
     st = panel._state
 
     lines = _offline_text_lines(st, 238.0)
     assert len(lines) == 3
     assert lines[2][0] == OFFLINE_SETTINGS_NOTE
     assert "接入后生效" in lines[2][0]
+    # 这句话的作用就是"必须被看见"：不能与网格同档灰（gray_400 在卡底上
+    # 对比度约 2.4:1，用户会漏看）
+    assert QColor(PAL_OFFLINE_NOTE).lightness() > QColor(PAL_GRID).lightness()
 
     # 接上后不再需要这句说明
     panel.set_connected(True)

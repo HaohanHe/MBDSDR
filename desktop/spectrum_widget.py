@@ -131,6 +131,10 @@ PAL_GRID = _c["gray_400"]     # 网格/文字
 PAL_LINE = _c["accent"]       # 谱线/游标（冷蓝灰）
 PAL_PEAK = _c["success"]      # 峰值标注
 PAL_OFFLINE = _c["danger"]    # 未连接提示
+# 空态第三行（「显示设置已保存，接入后生效」）：比网格亮一档。
+# 用 gray_400 时 8pt 小字在 #1f1f1f 上对比度仅约 2.4:1，用户容易漏看，
+# 而这句话的作用就是"改了之后必须被看见"。
+PAL_OFFLINE_NOTE = _c["gray_200"]
 PAL_MAXHOLD = _c["spectrum_max_hold"]   # Max hold 包络线（SDR++ 同款语义）
 PAL_MINHOLD = _c["spectrum_min_hold"]   # Min hold 包络线
 PAL_BOOKMARK = _c["spectrum_bookmark"]  # 书签标签（gqrx 书签竖旗）
@@ -1457,7 +1461,7 @@ def _offline_text_lines(state: "_PlotState", spec_h: float) -> List[Tuple[str, i
         (getattr(state, "offline_hint", "") or OFFLINE_HINT_DEFAULT, 9, PAL_OFFLINE),
     ]
     if (not getattr(state.panel, "_connected", False)) and spec_h >= _OFFLINE_NOTE_MIN_H:
-        lines.append((OFFLINE_SETTINGS_NOTE, 8, state.panel.color_text))
+        lines.append((OFFLINE_SETTINGS_NOTE, 9, PAL_OFFLINE_NOTE))
     return lines
 
 
