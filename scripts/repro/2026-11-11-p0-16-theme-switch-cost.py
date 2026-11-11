@@ -13,9 +13,15 @@
 退出码：0 = 仍然慢（任一次墙钟 ≥ 1000 ms）；1 = 已改善（全部 < 1000 ms）；
         2 = 环境不满足（Qt/构造失败）。
 
+``--touch``：先切到触控模式再跑同一序列。触控模式会在主题 QSS 后追加
+触控规则（`_apply_touch_stylesheet`），历史上每次切主题会多一次应用级
+``setStyleSheet``（2.1–3.7 s）。**鼠标与触控必须各跑一次、各占一行**，
+不许合并成一个数。
+
 用法：
     $env:MBDSDR_REPRO_ROOT="<快照或基线根>"
     python scripts/repro/2026-11-11-p0-16-theme-switch-cost.py
+    python scripts/repro/2026-11-11-p0-16-theme-switch-cost.py --touch
 """
 from __future__ import annotations
 
@@ -89,6 +95,20 @@ def main() -> int:
         widgets = len(QApplication.allWidgets())
         print(f"控件总数: {widgets}")
 
+        touch = "--touch" in sys.argv
+        if touch:
+            # 触控模式下 QSS 带追加后缀，走的是 _apply_touch_stylesheet 那条路径。
+            # 切换本身不算主题耗时，单独计时后清零。
+            from touch_manager import touch_manager
+            touch_manager().set_from_settings("on")
+            t_touch = time.perf_counter()
+            window._apply_touch_adaptation()
+            app.processEvents()
+            print(f"触控模式适配（不计入切主题）: "
+                  f"{(time.perf_counter() - t_touch) * 1000:.1f} ms；"
+                  f"is_touch_mode={touch_manager().is_touch_mode()}")
+        print(f"模式: {'触控' if touch else '鼠标'}")
+
         seq = ("dark", "default", "dark")
 
         def _run(label: str, apply):
@@ -104,7 +124,8 @@ def main() -> int:
                 rows.append((name, wall, cpu, counter["widget"], counter["app"]))
                 print(f"  {label} -> {name:8s} 墙钟 {wall:8.1f} ms  "
                       f"CPU {cpu:8.1f} ms  setStyleSheet 控件/应用 = "
-                      f"{counter['widget']}/{counter['app']}")
+                      f"{counter['widget']}/{counter['app']}  "
+                      f"QSS 长度 {len(app.styleSheet())}")
             return rows
 
         _hr("入口 A：直调 MainWindow._apply_theme")
