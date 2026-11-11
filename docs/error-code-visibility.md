@@ -96,8 +96,10 @@ FAILED tests/test_error_remedy_links.py::test_every_catalog_code_is_registered -
 
 > 引用口径（2026-11-12）：本节**桌面侧**引用改为 `文件:符号`（括号内是渲染锚点
 > 字面量），不再写行号；库侧（`mbdsdr_ai/…`）本轮仍保留行号。
-> `main_window.py:7917` 已于 2026-11-12 复核：#107–#113 七行由「否」改为「是」；
-> 原因是实现改为按 code 渲染（**内容变更，非行号漂移**），行内已注明前后判断。
+> 原 §三 状态栏那条引用已于 2026-11-12 复核（现指向
+> `desktop/main_window.py:_on_tle_update_result` → `mbdsdr_ai/tle_fetch.py:tle_refresh_status_text`）：
+> #107–#113 七行由「否」改为「是」，原判「状态栏通用文案」已不成立——
+> 实现改为按 code/label/reason/action 渲染（**内容变更，非行号漂移**），行内已注明前后判断。
 
 可见路径缩写：
 
