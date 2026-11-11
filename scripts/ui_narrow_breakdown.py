@@ -39,6 +39,12 @@
 
     python scripts/ui_narrow_breakdown.py
     python scripts/ui_narrow_breakdown.py --json      # 只输出 JSON，便于机器比对
+
+字体缩放反证（系统字体 125% / 150%）::
+
+    MBDSDR_GATE_FONT_SCALE=1.25 python scripts/ui_narrow_breakdown.py --json
+
+它只放大字号，不改 DPI 指纹（``QT_FONT_DPI`` 会连 devicePixelRatio 一起改）。
 """
 from __future__ import annotations
 
@@ -129,6 +135,26 @@ def _isolate_qsettings() -> None:
             return real(*args, **kwargs)
 
     qtcore.QSettings = _IniQSettings
+
+
+def _install_font_scale(scale: float) -> None:
+    """把主题字体整体放大 ``scale`` 倍（模拟系统字体 125% / 150%）。
+
+    不能改 ``QT_FONT_DPI``：实测它改的是屏幕 DPI，会把 devicePixelRatio
+    一起改掉（DPR1.5 指纹下设 120，实测 ``dpr=1.25``），量到的就不是
+    「只放大字体」。这里包 ``themes.get_app_font``——主题在 MainWindow 构造
+    里调用它，包一层只放大字号，DPI 指纹保持不动。
+    """
+    import themes
+
+    real = themes.get_app_font
+
+    def scaled():
+        f = real()
+        f.setPointSizeF(f.pointSizeF() * scale)
+        return f
+
+    themes.get_app_font = scaled
 
 
 def _pump(app, n: int = 60) -> None:
@@ -227,6 +253,12 @@ def main() -> int:
               file=sys.stderr)
         return 2
     _isolate_qsettings()
+    try:
+        font_scale = float(os.environ.get("MBDSDR_GATE_FONT_SCALE", "1") or 1)
+    except ValueError:
+        font_scale = 1.0
+    if font_scale != 1.0:
+        _install_font_scale(font_scale)
     import main_window as mw
 
     win = mw.MainWindow()
@@ -250,6 +282,7 @@ def main() -> int:
         "font_family": font.family(),
         "font_point_size": font.pointSizeF(),
         "font_line_height": fm.height(),
+        "font_scale": font_scale,
         "style": type(app.style()).__name__,
         "appdata_redirected_to": _HOME,
     }
