@@ -39,6 +39,24 @@ _DIALOG_ONLY = {
 
 _TOKEN_RE = re.compile(r"「([^」]+)」")
 
+#: 段与控件原文不同、但确属同一入口的情况：逐条登记预期控件原文。
+#: 只收菜单助记符后缀（``文件(F)`` / ``文件(&F)``）与产品名后缀
+#: （``更新卫星 TLE (Celestrak)``）；禁止用包含判断或正则兜底——那会让
+#: 「频率 −1 格」靠父分组「频率」混过（2026-11-11 实测发现的漏网）。
+_WIDGET_ALIASES = {
+    "文件": ("文件(F)", "文件(&F)"),
+    "工具": ("工具(T)", "工具(&T)"),
+    "视图": ("视图(V)", "视图(&V)"),
+    "更新卫星 TLE": ("更新卫星 TLE (Celestrak)",),
+}
+
+#: 单字符段只在指定控件集合里核验：全窗口另有多处 "+"（悬浮面板折叠、
+#: 地点面板缩放），全局精确匹配会被这些同名按钮蒙过。
+_SCOPED_SEGMENTS = {
+    "-": "_step_buttons",
+    "+": "_step_buttons",
+}
+
 
 def _segments(text: str) -> list:
     out = []
@@ -111,14 +129,30 @@ def _vocabulary(window) -> set:
 
 
 def _unresolved(window, texts) -> list:
-    """返回在真窗口里找不到的入口段（对话框专属项除外）。"""
+    """返回在真窗口里找不到的入口段（对话框专属项除外）。
+
+    非菜单段一律**精确**匹配控件原文：``seg in vocab`` / ``seen in seg``
+    这类包含判断会让「频率 −1 格」靠父分组「频率」蒙过。只有
+    ``_WIDGET_ALIASES`` 里逐条登记的菜单/产品名后缀例外。
+    """
     vocab = _vocabulary(window)
     missing = []
     for text in texts:
         for seg in _segments(text):
             if seg in _DIALOG_ONLY:
                 continue
-            if any(seg in seen or seen in seg for seen in vocab):
+            if seg in _SCOPED_SEGMENTS:
+                holder = getattr(window, "control_panel", None)
+                widgets = getattr(holder, _SCOPED_SEGMENTS[seg], [])
+                if any(w.text().strip() == seg for w in widgets):
+                    continue
+                if seg not in missing:
+                    missing.append(seg)
+                continue
+            if seg in vocab:
+                continue
+            aliases = _WIDGET_ALIASES.get(seg)
+            if aliases and any(alias in vocab for alias in aliases):
                 continue
             if seg not in missing:
                 missing.append(seg)
@@ -167,3 +201,26 @@ def test_counterexample_fake_entry_turns_red(main_window, monkeypatch):
         "在「量子面板」把「录音目录」换到剩余空间更大的盘。")
     missing = _unresolved(main_window, _remedy_texts())
     assert "量子面板" in missing, missing
+
+
+def test_counterexample_removing_step_buttons_turns_red(main_window):
+    """反证：调谐步进的「-」「+」按钮没了，频率超范围文案必须红。
+
+    旧实现用包含判断，删掉按钮后仍能靠父分组「频率」蒙过；现在只有按钮
+    本身的原文能证明入口存在。清空按钮文字等同按钮被删（控件树里不再有
+    该段），收尾恢复，避免影响同模块后续用例。
+    """
+    panel = main_window.control_panel
+    buttons = [b for b in panel._step_buttons if b.text() in ("-", "+")]
+    assert len(buttons) == 2, [b.text() for b in panel._step_buttons]
+
+    saved = [(btn, btn.text()) for btn in buttons]
+    try:
+        for btn, _ in saved:
+            btn.setText("")
+        missing = _unresolved(
+            main_window, [ts.NEXT_STEPS["frequency_out_of_range"]])
+        assert "-" in missing and "+" in missing, missing
+    finally:
+        for btn, text in saved:
+            btn.setText(text)
