@@ -72,6 +72,22 @@ _TEXT = "#e8eaf0"
 _DIM = "#8f95a3"
 
 
+def download_summary(ok: int, bad: int) -> str:
+    """下载结束提示：只有真的缓存到瓦片才允许说「可离线查看」。
+
+    ok=0 时仍宣称「这片区域已可离线查看」会让人拔网后才发现是空的。
+    """
+    if ok and bad:
+        return (f"下载结束：已缓存 {ok} 张，可离线查看；{bad} 张失败，"
+                f"可再点「⤓ 下载」补下")
+    if ok:
+        return f"下载结束：已缓存 {ok} 张，这片区域可离线查看"
+    if bad:
+        return (f"下载失败 {bad} 张：没有缓存任何瓦片，检查网络或瓦片源后"
+                f"再点「⤓ 下载」重试")
+    return "下载结束：没有可下载的瓦片"
+
+
 class _SearchWorker(QThread):
     """把 6 秒超时的网络请求挪出 UI 线程。"""
 
@@ -395,9 +411,7 @@ class LocationPanel(QFrame):
 
     def _on_download_finished(self, ok: int, bad: int) -> None:
         self.download_btn.setText("⤓ 下载")
-        if ok or bad:
-            self.map_hint.setText(
-                f"下载结束：成功 {ok} 张、失败 {bad} 张；这片区域已可离线查看")
+        self.map_hint.setText(download_summary(ok, bad))
 
     def _on_map_zoom(self, zoom: int) -> None:
         # 守卫：地图控件在 _build_ui 里先于状态标签构造，构造期的

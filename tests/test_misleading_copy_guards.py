@@ -31,3 +31,18 @@ def test_spacetime_observer_hint_points_at_existing_control():
     assert "更改地点…" in text
     assert "输入框" not in text
     assert "地面站坐标" not in text
+
+
+def test_location_download_zero_success_never_claims_offline():
+    """ok=0 时不得出现「可离线查看」。"""
+    import location_panel as lp
+
+    zero = lp.download_summary(0, 3)
+    assert "可离线" not in zero
+    assert "没有缓存" in zero
+
+    partial = lp.download_summary(2, 1)
+    assert "可离线" in partial and "1 张失败" in partial
+
+    assert "可离线" in lp.download_summary(5, 0)
+    assert "可离线" not in lp.download_summary(0, 0)
