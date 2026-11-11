@@ -974,6 +974,14 @@ class SettingsPanel(QWidget):
             wrap_cn_label(note)
             note.setStyleSheet("color:#D4956A;")
             v.addWidget(note)
+        elif getattr(item, "apply_note", ""):
+            # 不是重启级、但也不是下一帧：重连 / 重启某个服务 / 下次录音。
+            # 不标清楚，用户会以为「保存 = 立刻生效」（设置项名字看不出来）。
+            control.setToolTip(item.apply_note)
+            note = QLabel(item.apply_note)
+            wrap_cn_label(note)
+            note.setStyleSheet("color:#D4956A;")
+            v.addWidget(note)
         self._rows[item.key] = control
         return box
 

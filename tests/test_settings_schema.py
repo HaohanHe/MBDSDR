@@ -1899,3 +1899,50 @@ def test_import_clear_only_happens_for_checked_keys(env):
     res2 = panel.apply_import(preview2, clear_keys=dlg2.selected_clear_keys())
     assert [k for k, _old in res2.clears] == ["observer_lat"]
     assert host._observer_lat is None, "勾选的清空项必须真的清掉"
+
+
+# ---------------------------------------------------------------------------
+# 8. 生效时机标注：重启级只有 2 项；6 项「非重启但延迟」必须有橙色提示
+# ---------------------------------------------------------------------------
+#: 逐项对着代码核实过的「不是下一帧、也不需要重启应用」的项：
+#: gnss_port/gnss_baudrate → 下次连接 GNSS（main_window.py:12512 才开串口）；
+#: perf_profile → 刷新/GNSS 轮询立即、采样率默认值下次连接（_apply_perf_profile）；
+#: record_dir → 下次录音（settings_panel.py:1277 注释 + help）；
+#: rc_port/web_port → 重启对应服务（服务面板 tooltip / help）。
+DELAYED_APPLY_KEYS = {
+    "gnss_port", "gnss_baudrate", "perf_profile",
+    "record_dir", "rc_port", "web_port",
+}
+
+
+def test_requires_restart_is_only_language_and_log_level():
+    """重启应用级只有界面语言与日志级别；其余项不得冒充重启级。"""
+    marked = {it.key for it in EXPOSED_ITEMS if it.requires_restart}
+    assert marked == {"ui_language", "log_level"}
+
+
+def test_delayed_items_carry_apply_note_and_not_restart_flag():
+    """6 项延迟生效必须有提示，且不能靠 requires_restart 撒谎。"""
+    noted = {it.key for it in EXPOSED_ITEMS if getattr(it, "apply_note", "")}
+    assert noted == DELAYED_APPLY_KEYS
+    for key in DELAYED_APPLY_KEYS:
+        item = SCHEMA[key]
+        assert not item.requires_restart, f"{key} 不需要重启应用，别乱标"
+        assert item.apply_note.strip(), f"{key} 缺生效时机提示"
+        assert ("生效" in item.apply_note) or ("影响" in item.apply_note)
+
+
+def test_apply_note_reaches_the_widget_tooltip(env):
+    """提示必须真的挂到控件上（只在 schema 里写一句等于没写）。"""
+    ds, host, panel, _ = env
+    in_panel = [k for k in DELAYED_APPLY_KEYS if k in panel._rows]
+    assert set(in_panel) == {"gnss_port", "gnss_baudrate",
+                             "perf_profile", "record_dir"}
+    for key in in_panel:
+        assert SCHEMA[key].apply_note in panel._rows[key].toolTip()
+
+    # 端口项在「服务设置」面板（不是本页）：它自己的 tooltip 明说需重启服务
+    svc = getattr(host, "service_settings_panel", None)
+    if svc is not None:
+        for widget in (svc.rc_port, svc.web_port):
+            assert "重启" in widget.toolTip()

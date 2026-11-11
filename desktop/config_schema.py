@@ -111,6 +111,10 @@ class SettingItem:
     step: Optional[float] = None
     requires_restart: bool = False
     restart_note: str = ""
+    #: 非「重启应用」但也不是下一帧生效的项（重连 / 重启某个服务 / 下次录音）。
+    #: 面板渲染成同款橙色提示，避免用户以为改完立刻生效。结构化 apply_mode
+    #: 字段是后续独立一项；在那之前这里如实写一句话，不允许留空装没事。
+    apply_note: str = ""
     storage: str = "settings"
     exposed: bool = True           # False = 内部键（不在面板出现，但仍参与导入导出）
     secret: bool = False           # True = 永不写入导出文件
@@ -166,12 +170,14 @@ ALL_ITEMS: Tuple[SettingItem, ...] = (
         label="GNSS 串口", default="",
         help=("GNSS 接收机所接串口（如 COM4）。留空 = 自动探测；"
               "改动在下次连接 GNSS 时生效。"),
+        apply_note="改完需重新连接 GNSS 才生效（不必重启应用）",
         source="desktop/settings.py DEFAULTS['gnss_port']=\"\"（原 GNSS 连接对话框同一键）",
     ),
     SettingItem(
         key="gnss_baudrate", group="通用", kind="enum",
         label="GNSS 波特率", default=9600,
         help="与 GNSS 接收机一致的波特率；多数模块出厂为 9600。",
+        apply_note="改完需重新连接 GNSS 才生效（不必重启应用）",
         source="desktop/main_window.py GNSS 连接对话框 baud_combo 构建处"
                "（9600/19200/38400/57600/115200）",
         choices=tuple(_e(b, str(b)) for b in
@@ -180,12 +186,14 @@ ALL_ITEMS: Tuple[SettingItem, ...] = (
     SettingItem(
         key="perf_profile", group="通用", kind="enum",
         label="接收性能档", default="eco",
-        help=("决定**默认接收采样率 / FFT 点数 / 频谱与 GNSS 刷新率**。"
+        help=("决定**默认接收采样率 / 频谱与 GNSS 刷新率**。"
               "省电档 1.024 MS/s：普通笔记本上 CPU 约为 2.4 MS/s 的三分之一，"
               "GNSS 与设置页不会再被 IQ 流水线挤得原地不动；"
-              "均衡/精细档给宽带解码与录制用。切档即时改 GNSS 轮询 / 频谱刷新 / "
-              "FFT；采样率只作为下次连接的默认值，不覆盖控制面板手动选的档、"
-              "也不重建已连接的流水线（重建会卡住 UI）。"),
+              "均衡/精细档给宽带解码与录制用。切档即时改 GNSS 轮询 / 频谱刷新；"
+              "采样率只作为下次连接的默认值，不覆盖控制面板手动选的档、"
+              "也不重建已连接的流水线（重建会卡住 UI）。FFT 点数不归本档管，"
+              "唯一真值源是「FFT 点数」设置项。"),
+        apply_note="刷新与 GNSS 轮询立即生效；采样率默认值下次连接生效",
         source="desktop/perf_profile.py PROFILES（档位采样率取自 "
                "mbdsdr_ai.sdr_backend.RTLSDRBackend.SAMPLE_RATES）；"
                "默认值口径见用户 2026-11-10「电脑没有那么强大…得让路」",
@@ -402,6 +410,7 @@ ALL_ITEMS: Tuple[SettingItem, ...] = (
         help=("录制的 IQ/音频文件存到这里。留空 = 用户目录下的 "
               "MBDSDR/recordings（删/升级程序目录不会连带删除录音）。"
               "改目录只影响新录音，已有录音不动。"),
+        apply_note="只影响新录音；当前录音会话与已有文件不受影响",
         source=("desktop/main_window.py:5536 旧写死 ~/mbdsdr_recordings；"
                 "新唯一来源 desktop/settings.py:resolve_record_dir"),
     ),
@@ -562,6 +571,7 @@ ALL_ITEMS: Tuple[SettingItem, ...] = (
                 label="远程控制端口", default=7356, minimum=1, maximum=65535,
                 step=1, help=("hamlib/rigctld 兼容端口；仅本机监听，改完需重启服务。"
                               "联动：仅当「启用远程控制（TCP）」开启时生效。"),
+                apply_note="改完需重启远程控制服务（关掉再启用）才生效",
                 source="mbdsdr_ai/remote_control.py:40 DEFAULT_RC_PORT=7356"),
     SettingItem(key="web_enabled", group="服务与远程访问", kind="bool",
                 label="启用 Web 服务", default=False,
@@ -572,6 +582,7 @@ ALL_ITEMS: Tuple[SettingItem, ...] = (
                 label="Web 服务端口", default=8080, minimum=1, maximum=65535,
                 step=1, help=("浏览器访问 http://127.0.0.1:端口/ 的端口；仅本机监听。"
                               "联动：仅当「启用 Web 服务」开启时生效，改端口需重启该服务。"),
+                apply_note="改完需重启 Web 服务（关掉再启用）才生效",
                 source="git HEAD:desktop/settings_panel.py DEFAULT_WEB_PORT=8080"),
 )
 
