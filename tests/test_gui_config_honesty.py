@@ -105,6 +105,32 @@ def test_freq_none_omits_key(qapp, tmp_path, monkeypatch):
     assert "current_mode" not in out
 
 
+def test_observer_site_parsed_by_station_sync_not_by_hand(
+        qapp, tmp_path, monkeypatch, isolated_profile):
+    """主窗读站址也走 station_sync：越界/非数值不得落进 ``_observer_lat``。
+
+    反证：把 ``_load_gui_config`` 改回 ``config.get("observer_lat")`` →
+    999 会被原样收下 → 本用例红。
+    """
+    from main_window import MainWindow
+
+    gui_dir = os.path.join(str(isolated_profile), ".mbdsdr")
+    os.makedirs(gui_dir, exist_ok=True)
+    with open(os.path.join(gui_dir, "gui_config.json"), "w",
+              encoding="utf-8") as f:
+        json.dump({"observer_lat": 999.0, "observer_lon": 116.4,
+                   "window": {"width": 1280, "height": 800, "x": 10, "y": 10}},
+                  f)
+    win = MainWindow()
+    try:
+        # 构造函数不读盘（延后到 showEvent/定时器），显式触发一次才真的走加载链
+        win._load_gui_config()
+        assert win._observer_lat is None, "999 不是合法纬度，不得收下"
+        assert win._observer_lon is None
+    finally:
+        win.close()
+
+
 def test_waterfall_reads_real_state(qapp, tmp_path, monkeypatch):
     """瀑布可见性不再落盘 gui_config（权威源是 settings）。
 

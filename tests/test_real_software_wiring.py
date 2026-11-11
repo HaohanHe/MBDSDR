@@ -142,7 +142,7 @@ def test_center_map_skips_other_bands(qapp):
 
 
 def test_center_map_observer_never_invented(qapp, tmp_path, monkeypatch):
-    """没有站址配置时距离列必须是 --，不得编造坐标。"""
+    """没有 push 过站址时距离列必须是 --，不得编造坐标。"""
     from desktop.iq_bus import reset_iq_bus
     from adsb_map_panel import AdsbMapPanel
 
@@ -150,12 +150,16 @@ def test_center_map_observer_never_invented(qapp, tmp_path, monkeypatch):
     monkeypatch.setenv("USERPROFILE", str(tmp_path))
     reset_iq_bus()
     panel = AdsbMapPanel()
-    panel._observer_checked_at = 0.0
-    panel._refresh_observer_from_config()
     assert panel._observer is None
 
 
-def test_center_map_observer_reads_gui_config(qapp, tmp_path, monkeypatch):
+def test_center_map_observer_comes_from_push_not_disk(qapp, tmp_path, monkeypatch):
+    """站址只有主窗 push 一条来路：盘上有值也不许面板自己读。
+
+    反证：把 ``_poll_iq_bus`` 里旧的 ``_refresh_observer_from_config()`` 加回
+    去 → 解码成功后 ``_observer`` 变成盘上的 39.9/116.4 → 本用例红。
+    """
+    from desktop.iq_bus import reset_iq_bus
     from adsb_map_panel import AdsbMapPanel
 
     home = tmp_path / "home"
@@ -165,9 +169,15 @@ def test_center_map_observer_reads_gui_config(qapp, tmp_path, monkeypatch):
         encoding="utf-8")
     monkeypatch.setenv("HOME", str(home))
     monkeypatch.setenv("USERPROFILE", str(home))
+    bus = reset_iq_bus()
     panel = AdsbMapPanel()
-    panel._observer_checked_at = 0.0
-    panel._refresh_observer_from_config()
+
+    bus.publish(_synthetic_adsb_iq(), 2_000_000.0, 1_090_000_000.0)
+    panel._poll_iq_bus()
+    assert panel.decoded_frames_total() >= 1, "先确认这一拍真的解码了"
+    assert panel._observer is None, "面板不得自己读 gui_config（读口只有一个）"
+
+    panel.set_observer(39.9, 116.4)
     assert panel._observer == pytest.approx((39.9, 116.4))
 
 

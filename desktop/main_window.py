@@ -535,7 +535,7 @@ from right_column import RightColumn
 from floating_panel import FloatingPanel
 from time_machine import TimeMachineDialog, format_offset
 from station_sync import (
-    clear_config_site, read_config_site, write_config_site,
+    clear_config_site, gui_site_from, read_config_site, write_config_site,
 )
 from location_panel import LocationPanel
 from panel_registry import registry
@@ -13724,9 +13724,12 @@ class MainWindow(QMainWindow):
                 x, y, w, h = self._sanitize_window_pos(x, y, w, h)
                 self.resize(w, h)
                 self.move(x, y)
-            # 恢复观测站坐标：缺失时默认 None（未配置），不再回退到示例城市硬编码坐标
-            self._observer_lat = config.get("observer_lat")
-            self._observer_lon = config.get("observer_lon")
+            # 恢复观测站坐标：缺失时默认 None（未配置），不再回退到示例城市硬编码坐标。
+            # 解析口径只走 station_sync（键名/非数值/越界校验一处定），不在这里
+            # 自己 config.get——否则与 ADS-B/镜像读口各有一套「什么算合法站址」。
+            _site = gui_site_from(config)
+            self._observer_lat = _site["lat"] if _site else None
+            self._observer_lon = _site["lon"] if _site else None
             # 旧版本迁移：GUI 没有坐标、但镜像里有（agent/controller 时代配过）
             # → 搬进 GUI。方向只有「镜像 → GUI」这一次，反方向永远由
             # _save_gui_config 单向下发，避免两边互相覆盖。

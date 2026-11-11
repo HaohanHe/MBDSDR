@@ -38,6 +38,16 @@ def test_read_gui_and_config(tmp_path):
     assert ss.read_config_site(cfg) == {"lat": 31.2, "lon": 121.5}
 
 
+def test_gui_site_from_is_the_one_parser():
+    """整份 gui_config 的调用方与 read_gui_site 共用同一套键名/校验。"""
+    assert ss.gui_site_from({"observer_lat": 45.0, "observer_lon": 120.0}) == \
+        {"lat": 45.0, "lon": 120.0}
+    assert ss.gui_site_from({"observer_lat": 45.0}) is None, "半对坐标不算站址"
+    assert ss.gui_site_from(
+        {"observer_lat": 999.0, "observer_lon": 120.0}) is None, "越界不算站址"
+    assert ss.gui_site_from({}) is None
+
+
 def test_zero_zero_is_a_legal_site(tmp_path):
     """0,0 是几内亚湾，不是"未设置"哨兵。"""
     gui = str(tmp_path / "gui_config.json")

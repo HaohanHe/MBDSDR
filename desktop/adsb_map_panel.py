@@ -163,7 +163,6 @@ class AdsbMapPanel(QWidget):
         # 只在中心频率落在 1090MHz 附近、采样率够宽时才解码，其余零开销跳过。
         self._iq_seq = 0
         self._adsb_frames_total = 0
-        self._observer_checked_at = 0.0
         self._bus_timer = QTimer(self)
         self._bus_timer.setInterval(200)
         self._bus_timer.timeout.connect(self._poll_iq_bus)
@@ -239,10 +238,10 @@ class AdsbMapPanel(QWidget):
                     f"{frame.sample_rate / 1e6:.3f} MS/s，"
                     "不在 1090±1.5 MHz 或采样率不足；未解码")
                 return
-            # 只有真的解出帧才去读站址配置：空闲/无关频段时不碰磁盘、
-            # 不改表格宽度，避免给别的面板（中栏 splitter 尺寸）带来副作用
-            if self._decode_and_update(frame.iq, frame.sample_rate):
-                self._refresh_observer_from_config()
+            # 站址由主窗 push（_push_site_to_panels），本面板不自己读盘：
+            # 以前这里每 5 s 直读 gui_config.json，自带一份 TTL，和主窗各判
+            # 「什么时候站址变了」——两处真相 + 两套失效时机。
+            self._decode_and_update(frame.iq, frame.sample_rate)
         except Exception as exc:
             # 总线异常同样不得静默：空态诊断行写明异常类型，下一拍再试。
             self._set_diag(f"IQ 总线读取异常：{type(exc).__name__}")
@@ -250,40 +249,6 @@ class AdsbMapPanel(QWidget):
     def decoded_frames_total(self) -> int:
         """累计解码成功的帧数（测试与状态查询用，不参与绘制）。"""
         return int(self._adsb_frames_total)
-
-    def _refresh_observer_from_config(self) -> None:
-        """本站坐标：从 ~/.mbdsdr/gui_config.json 读（设置面板写的那份）。
-
-        每 5 秒最多读一次，避免每帧碰磁盘。读不到就保持 None，距离列继续
-        显示 ``--``——绝不编造观察者坐标。
-        """
-        import time as _time
-        now = _time.monotonic()
-        if now - self._observer_checked_at < 5.0 and self._observer is not None:
-            return
-        self._observer_checked_at = now
-        try:
-            import json
-            cfg_path = os.path.expanduser("~/.mbdsdr/gui_config.json")
-            with open(cfg_path, "r", encoding="utf-8") as fh:
-                cfg = json.load(fh)
-        except (OSError, ValueError):
-            return
-        if not isinstance(cfg, dict):
-            return
-        lat = cfg.get("observer_lat")
-        lon = cfg.get("observer_lon")
-        if lat is None or lon is None:
-            nested = cfg.get("observer")
-            if isinstance(nested, dict):
-                lat = nested.get("lat", nested.get("observer_lat"))
-                lon = nested.get("lon", nested.get("observer_lon"))
-        try:
-            if lat is None or lon is None:
-                return
-            self.set_observer(float(lat), float(lon))
-        except (TypeError, ValueError):
-            return
 
     def set_observer(self, lat: float, lon: float) -> None:
         """设定本站坐标：距离列用它算，地图顺带居中到本站。"""

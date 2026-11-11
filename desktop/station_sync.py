@@ -35,7 +35,7 @@ __all__ = [
     "GUI_LAT_KEY", "GUI_LON_KEY",
     "CFG_LAT_KEY", "CFG_LON_KEY", "CFG_ALT_KEY",
     "gui_config_path", "config_path",
-    "read_gui_site", "read_config_site", "merge_sites",
+    "read_gui_site", "gui_site_from", "read_config_site", "merge_sites",
     "write_config_site", "clear_config_site",
 ]
 
@@ -90,10 +90,20 @@ def _site_from(data: Optional[Dict[str, Any]], lat_key: str,
     return {"lat": lat_f, "lon": lon_f}
 
 
+def gui_site_from(data: Optional[Dict[str, Any]]) -> Optional[Dict[str, float]]:
+    """从已读好的 ``gui_config`` dict 抽站址（``read_gui_site`` 的无 IO 版本）。
+
+    读入口只有 ``read_gui_site`` 与本函数（同一套键名/校验）。需要整个
+    gui_config 的调用方（``MainWindow._load_gui_config``）把手上这份 dict
+    交给这里，不要再自己 ``data.get("observer_lat")``——两处各解析一次，
+    校验口径（范围、非数值）就会分叉。
+    """
+    return _site_from(data, GUI_LAT_KEY, GUI_LON_KEY)
+
+
 def read_gui_site(path: Optional[str] = None) -> Optional[Dict[str, float]]:
     """用户权威站址；未配置返回 None。"""
-    return _site_from(_read_json(path or gui_config_path()),
-                      GUI_LAT_KEY, GUI_LON_KEY)
+    return gui_site_from(_read_json(path or gui_config_path()))
 
 
 def read_config_site(path: Optional[str] = None) -> Optional[Dict[str, float]]:
