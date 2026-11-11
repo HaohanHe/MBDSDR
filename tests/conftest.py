@@ -28,10 +28,13 @@ sessionfinish 钩子被硬退出抢跑会把汇总与失败详情整批吞掉（
 import ctypes
 import gc
 import hashlib
+import importlib.util
+import inspect
 import json
 import os
 import sys
 import time
+import types
 
 import pytest
 
@@ -64,6 +67,16 @@ _RESULT = {"exitstatus": 0}
 # 系统字节锁（进程被崩/被杀时内核自动释放），不做 O_EXCL 死文件，天然没有
 # 「过期判定」问题。可用 MBDSDR_TEST_LOCK=0 显式关闭（明确知道自己在做并发
 # 压测时），或用 MBDSDR_TEST_LOCK_TIMEOUT 调等待秒数。
+#
+# 门控（2026-11-11 改为运行时判定）：旧实现读源码前 200 KB 找 "PySide6"/
+# "QApplication"，543 个测试文件里漏掉一批「间接依赖」——test_x 只 import
+# status_panel，Qt 在 status_panel 里被拉进来，源码看不到字样（实测
+# test_decode_error_labels 已加载 Qt 却无 [mbdsdr-lock] 行）。现在改为两条
+# 运行时判据，任一命中即算：① 收集阶段 sys.modules 里已有 PySide6；② 用例
+# 模块里有函数在体内懒 import PySide6（这类 58 个文件纯看 sys.modules 会漏，
+# 只能读已编译的代码对象，不读源码文本）。
+# 已知残留：只懒 import「会拉 Qt 的项目模块」（10 个文件）仍判定不到，
+# 其中 9 个在旧启发式下同样没有锁，属既有缺口，不构成本次回退。
 # ---------------------------------------------------------------------------
 def _qt_lock_path():
     root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -117,30 +130,174 @@ def _release_qt_lock(fh):
 
 _LOCK = {"fh": None, "waited": 0.0}
 
+# conftest 自己在 pytest_configure 里为了「真实配置快照」会 import desktop/settings，
+# 而 settings.py 顶部就 `from PySide6.QtCore import QTimer`。这份基线把「守卫自己
+# 拉进来的 Qt」从判定里扣掉，否则每个会话都会被判成 Qt 会话（纯非 Qt 文件也被拉
+# 进来抢锁，正是本次要修的误报）。
+_QT_BASELINE = {"mods": set()}
 
-def _collects_qt_tests(items):
-    """收集结果里是否有直接 import PySide6 的用例文件（读源码关键字，零副作用）。"""
-    seen_files = set()
-    for item in items:
-        path = str(getattr(item, "fspath", ""))
-        if not path.endswith(".py") or path in seen_files:
-            continue
-        seen_files.add(path)
-        try:
-            with open(path, "rb") as f:
-                head = f.read(200_000)
-        except OSError:
-            continue
-        if b"PySide6" in head or b"QApplication" in head:
+
+def _code_imports_qt(code):
+    """已编译代码对象（含嵌套函数/类方法）里是否出现 PySide6 的 import。
+
+    不读源码文本：`from PySide6.QtWidgets import QApplication` 编译后模块名
+    落在 co_names（实测 ('PySide6.QtWidgets', 'QApplication')），函数体内再
+    嵌套的 def/lambda 落在 co_consts 的 code 对象里。
+    """
+    for name in code.co_names:
+        if name == "PySide6" or name.startswith("PySide6."):
+            return True
+    for const in code.co_consts:
+        if isinstance(const, types.CodeType) and _code_imports_qt(const):
             return True
     return False
+
+
+def _code_names(code):
+    """代码对象（含嵌套）里出现过的全部名字。"""
+    names = set(code.co_names)
+    for const in code.co_consts:
+        if isinstance(const, types.CodeType):
+            names |= _code_names(const)
+    return names
+
+
+_MODULE_QT_CACHE = {}
+_MODULE_QT_MISS = set()
+
+
+def _name_pulls_new_qt(name, depth=0, seen=None):
+    """按模块名判断：import 它会不会拉进「基线里没有的」PySide6 子模块。
+
+    只编译不执行（`spec.loader.get_code`），避免为了判定而真的 import 面板——
+    那会把内存开销提前到门控之前，正是锁要防的东西。
+    只认仓库内的单段模块名（desktop/ 与仓库根），标准库/三方包一律跳过；
+    点号名会顺带 import 父包，有副作用，不追。
+    """
+    if name in _MODULE_QT_CACHE:
+        return _MODULE_QT_CACHE[name]
+    if name in _MODULE_QT_MISS or depth > 2:
+        return False
+    if seen is None:
+        seen = set()
+    if name in seen:
+        return False
+    seen.add(name)
+    try:
+        spec = importlib.util.find_spec(name)
+    except (ImportError, AttributeError, ValueError):
+        _MODULE_QT_MISS.add(name)
+        return False
+    origin = getattr(spec, "origin", None) if spec is not None else None
+    if not origin or not os.path.abspath(origin).startswith(_ROOT_DIR + os.sep):
+        _MODULE_QT_MISS.add(name)
+        return False
+    try:
+        code = spec.loader.get_code(name)          # 只编译，不执行
+    except (ImportError, SyntaxError, OSError, AttributeError):
+        _MODULE_QT_MISS.add(name)
+        return False
+    if code is None:
+        _MODULE_QT_MISS.add(name)
+        return False
+    qt = {n for n in code.co_names if n == "PySide6" or n.startswith("PySide6.")}
+    if qt - _QT_BASELINE["mods"]:
+        _MODULE_QT_CACHE[name] = True
+        return True
+    for sub in code.co_names:
+        if "." in sub or not sub.islower() or not sub.isidentifier():
+            continue
+        if _name_pulls_new_qt(sub, depth + 1, seen):
+            _MODULE_QT_CACHE[name] = True
+            return True
+    return False
+
+
+def _module_refs_qt(mod):
+    """模块命名空间里是否直接挂着 PySide6 的模块/类/函数（模块级 import）。"""
+    for obj in vars(mod).values():
+        if isinstance(obj, types.ModuleType):
+            name = getattr(obj, "__name__", "")
+            if name == "PySide6" or name.startswith("PySide6."):
+                return True
+        elif getattr(obj, "__module__", "").startswith("PySide6"):
+            return True
+    return False
+
+
+def _code_of(obj):
+    """取对象对应的已编译代码；解开 pytest fixture / functools.wraps 包装。
+
+    `@pytest.fixture def qapp(): from PySide6... import QApplication` 在模块
+    globals 里是 FixtureFunctionDefinition（没有 __code__），真函数藏在
+    __wrapped__ 上——不解开就会漏判（实测 test_status_panel_squelch_units 的
+    懒 import 只存在于 fixture 里）。
+    """
+    try:
+        obj = inspect.unwrap(obj)
+    except (ValueError, TypeError):
+        return None
+    code = getattr(obj, "__code__", None)
+    return code if isinstance(code, types.CodeType) else None
+
+
+def _module_lazily_imports_qt(mod):
+    """模块自身定义的函数/类方法/fixture 里，是否有体内懒 import PySide6，
+    或懒 import 一个「会把 PySide6 拉进来」的仓库内模块（如 main_window）。"""
+    modname = getattr(mod, "__name__", "")
+    for obj in vars(mod).values():
+        code = _code_of(obj)
+        if code is not None:
+            if _code_imports_qt(code):
+                return True
+            for name in _code_names(code):
+                if "." in name or not name.islower() or not name.isidentifier():
+                    continue
+                if _name_pulls_new_qt(name):
+                    return True
+            continue
+        if isinstance(obj, type) and getattr(obj, "__module__", None) == modname:
+            for member in vars(obj).values():
+                code = _code_of(member)
+                if code is not None and _code_imports_qt(code):
+                    return True
+    return False
+
+
+def _qt_trigger(items):
+    """本会话会不会加载 PySide6；返回触发原因字符串，不加载则返回 None。
+
+    运行时判定，不看源码文本：
+      1. 收集阶段 sys.modules 里多了 PySide6 模块（扣掉 conftest 自己的基线）
+         —— 覆盖直接 import 和「test_x → status_panel → PySide6」这类间接依赖；
+      2. 用例模块的命名空间里挂着 Qt 模块/类（模块级 import 的静态等价），或
+         有函数在体内懒 import PySide6（收集阶段还看不到，读已编译代码对象）。
+
+    conftest 自己不会误报：基线取自 pytest_configure 里配置快照跑完之后。
+    """
+    new = {n for n in sys.modules
+           if n == "PySide6" or n.startswith("PySide6.")} - _QT_BASELINE["mods"]
+    if new:
+        return "收集阶段加载 %s" % (sorted(new)[0],)
+    seen = set()
+    for item in items:
+        mod = getattr(item, "module", None)
+        if mod is None or id(mod) in seen:
+            continue
+        seen.add(id(mod))
+        if _module_refs_qt(mod):
+            return "模块级 Qt 依赖（%s）" % (getattr(mod, "__name__", "?"),)
+        if _module_lazily_imports_qt(mod):
+            return "用例内有懒 import（%s）" % (getattr(mod, "__name__", "?"),)
+    return None
 
 
 def pytest_collection_finish(session):
     """收集定稿、用例尚未执行时拿锁：保证「同一时刻只有一个 Qt 测试进程在跑」。"""
     if os.environ.get("MBDSDR_TEST_LOCK", "1") == "0":
         return
-    if not _collects_qt_tests(session.items):
+    trigger = _qt_trigger(session.items)
+    if trigger is None:
         return
     timeout = float(os.environ.get("MBDSDR_TEST_LOCK_TIMEOUT", "300"))
     path = _qt_lock_path()
@@ -163,7 +320,8 @@ def pytest_collection_finish(session):
     _LOCK["fh"] = fh
     _LOCK["waited"] = waited
     sys.stderr.write(
-        "[mbdsdr-lock] 已获得 Qt 测试互斥锁（等待 %.1fs）：%s\n" % (waited, path)
+        "[mbdsdr-lock] 已获得 Qt 测试互斥锁（等待 %.1fs，触发：%s）：%s\n"
+        % (waited, trigger, path)
     )
 
 
@@ -417,6 +575,10 @@ def pytest_configure(config):
         "allow_modal: 允许该用例弹真模态（默认全局拦下；offscreen 下真 exec "
         "可能永不返回，只有确需验证模态行为的用例才可 opt-in）")
     _snapshot_real_config()
+    # 配置快照会 import desktop/settings（其顶部 import PySide6.QtCore）：把这批
+    # 守卫自己拉进来的模块记成基线，锁门控只认「收集阶段新增」的 Qt 模块。
+    _QT_BASELINE["mods"] = {n for n in sys.modules
+                            if n == "PySide6" or n.startswith("PySide6.")}
 
 
 @pytest.fixture(scope="session", autouse=True)
