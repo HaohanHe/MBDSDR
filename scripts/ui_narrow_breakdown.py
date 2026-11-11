@@ -238,6 +238,78 @@ def _layout_spacers(layout) -> list[int]:
     return out
 
 
+def slider_column_report(col) -> dict:
+    """频谱右侧三根竖滑杆所在列的越界量（纵向量尺；纯测量，不依赖 MainWindow）。
+
+    「越界 px」= 列内子控件底边超出列底边的最大值，正是用户看到被裁掉
+    的那一截；``deficit`` = 列自报最小高 − 实得高，是挤压总量。两者不是
+    同一个数：布局会先把子控件按比例压缩，压缩到极限才向外溢出。
+
+    独立成模块级函数是为了让 ``tests/test_narrow_gate_selfcheck.py`` 能拿
+    构造样本（固定高的容器 + 固定高子控件）直接量到红，而不是拿真窗口在
+    特定 DPR 下碰运气（DPR1.5 实测两态均为 0，构造不出 24px）。
+    """
+    if col is None or col.layout() is None:
+        return {"error": "no_dbSliderCol"}
+    avail = col.height()
+    rows = []
+    slider_n = 0
+    for i in range(col.layout().count()):
+        cw = col.layout().itemAt(i).widget()
+        if cw is None:
+            continue
+        label = _label_of(cw)
+        if isinstance(cw, QSlider):
+            slider_n += 1
+            label = f"QSlider#{slider_n}"   # 三根滑杆都没名字，按顺序编号
+        rows.append({
+            "label": label,
+            "text": _text_of(cw),
+            "y": cw.y(),
+            "height": cw.height(),
+            "min_height": cw.minimumHeight(),
+            "overflow": max(0, cw.y() + cw.height() - avail - 1),
+        })
+    needed = col.minimumSizeHint().height()
+    return {
+        "visible": col.isVisible(),
+        "needed": needed,
+        "actual": avail,
+        "deficit": max(0, needed - avail),
+        "overflow_px": max((r["overflow"] for r in rows), default=0),
+        "offenders": sorted([r for r in rows if r["overflow"] > 0],
+                            key=lambda r: -r["overflow"]),
+        "rows": rows,
+    }
+
+
+def red_entries(col: dict, rc: dict) -> list[dict]:
+    """红榜判定（唯一口径）：滑杆列或右栏越界 > 0 即入红，并带责任控件。
+
+    闸门 ``main()`` 与自检共用这一段，避免「测量函数改了、判红逻辑没改」
+    各自一套。
+    """
+    reds = []
+    if col.get("overflow_px", 0) > 0:
+        reds.append({
+            "part": "dbSliderCol",
+            "overflow_px": col["overflow_px"],
+            "needed": col.get("needed"),
+            "actual": col.get("actual"),
+            "who": [_who_text(o) for o in col.get("offenders", [])[:5]],
+        })
+    if rc.get("overflow_px", 0) > 0:
+        reds.append({
+            "part": "rightColumn",
+            "overflow_px": rc["overflow_px"],
+            "needed": rc.get("body_min_w"),
+            "actual": (rc.get("viewport") or [None])[0],
+            "who": [f"{w['label']}{w['text']!r}:{w['min_w']}"
+                    for w in rc.get("widest", [])[:5]],
+        })
+    return reds
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--json", action="store_true", help="只输出 JSON 汇总")
@@ -659,45 +731,8 @@ def main() -> int:
         return {"requested": [req_w, req_h], "actual": actual, "equal": True}
 
     def _slider_col() -> dict:
-        """频谱右侧三根竖滑杆所在列的越界量（纵向真红的量尺）。
-
-        「越界 px」= 列内子控件底边超出列底边的最大值，正是用户看到被裁掉
-        的那一截；``deficit`` = 列自报最小高 − 实得高，是挤压总量。两者不是
-        同一个数：布局会先把子控件按比例压缩，压缩到极限才向外溢出。
-        """
-        col = win.findChild(QWidget, "dbSliderCol")
-        if col is None or col.layout() is None:
-            return {"error": "no_dbSliderCol"}
-        avail = col.height()
-        rows = []
-        slider_n = 0
-        for i in range(col.layout().count()):
-            cw = col.layout().itemAt(i).widget()
-            if cw is None:
-                continue
-            label = _label_of(cw)
-            if isinstance(cw, QSlider):
-                slider_n += 1
-                label = f"QSlider#{slider_n}"   # 三根滑杆都没名字，按顺序编号
-            rows.append({
-                "label": label,
-                "text": _text_of(cw),
-                "y": cw.y(),
-                "height": cw.height(),
-                "min_height": cw.minimumHeight(),
-                "overflow": max(0, cw.y() + cw.height() - avail - 1),
-            })
-        needed = col.minimumSizeHint().height()
-        return {
-            "visible": col.isVisible(),
-            "needed": needed,
-            "actual": avail,
-            "deficit": max(0, needed - avail),
-            "overflow_px": max((r["overflow"] for r in rows), default=0),
-            "offenders": sorted([r for r in rows if r["overflow"] > 0],
-                                key=lambda r: -r["overflow"]),
-            "rows": rows,
-        }
+        """频谱右侧三根竖滑杆所在列的越界量，量尺在 ``slider_column_report``。"""
+        return slider_column_report(win.findChild(QWidget, "dbSliderCol"))
 
     def _right_column() -> dict:
         """右栏横向真红的量尺：容器最小宽 vs 滚动视口宽（body ≤ 视口）。"""
@@ -779,25 +814,7 @@ def main() -> int:
                 scan = (_scan_stable()
                         if name == "default" and key in ("declared", "1344x700")
                         else _scan_overflow())
-                reds = []
-                if col.get("overflow_px", 0) > 0:
-                    reds.append({
-                        "part": "dbSliderCol",
-                        "overflow_px": col["overflow_px"],
-                        "needed": col.get("needed"),
-                        "actual": col.get("actual"),
-                        "who": [_who_text(o)
-                                for o in col.get("offenders", [])[:5]],
-                    })
-                if rc.get("overflow_px", 0) > 0:
-                    reds.append({
-                        "part": "rightColumn",
-                        "overflow_px": rc["overflow_px"],
-                        "needed": rc.get("body_min_w"),
-                        "actual": (rc.get("viewport") or [None])[0],
-                        "who": [f"{w['label']}{w['text']!r}:{w['min_w']}"
-                                for w in rc.get("widest", [])[:5]],
-                    })
+                reds = red_entries(col, rc)
                 entry["tiers"][key] = {
                     "size": size,
                     "slider_col": col,
