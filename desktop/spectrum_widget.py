@@ -24,7 +24,8 @@ from constants import DEFAULT_SAMPLE_RATE_HZ
 from PySide6.QtCore import Qt, QRectF, QPointF, Signal, Slot, QTimer
 from PySide6.QtGui import (
     QPainter, QColor, QPen, QBrush, QFont, QFontMetricsF, QLinearGradient,
-    QImage, QPainterPath, QPolygonF, QCursor, QShortcut, QKeySequence,
+    QImage, QPainterPath, QPolygon, QPolygonF, QRegion, QCursor, QShortcut,
+    QKeySequence,
 )
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QComboBox, QCheckBox, QLabel,
@@ -1262,6 +1263,13 @@ class _PlotState:
         self._wf_map_key: Optional[Tuple[float, float, int, int, int]] = None
         self._wf_lut: Optional[np.ndarray] = None   # db→RGB 查找表 (256,3)
         self._wf_lut_key: Tuple[float, float] = (0.0, 0.0)
+        # ---- 谱迹填充：1×h 渐变贴图 + 整数裁剪区域（都按画布高度缓存）----
+        # 原实现把渐变笔刷挂在 drawPolygon 上，噪声谱每扫描线数百个跨度，
+        # 光栅器逐跨度算渐变实测 6–8 ms/帧；改成「贴图 + 裁剪」后只剩一次
+        # blit。剪裁必须用整数 QRegion：QPainterPath 的路径→区域转换单次
+        # 6–11 ms（实测），比它省下的还贵。
+        self._spec_fill_img: Optional[QImage] = None
+        self._spec_fill_h: int = -1
 
     # ------------------------------------------------------------------ setter
     def set_snap_interval(self, hz: float):
@@ -1691,20 +1699,20 @@ def _db_to_y(rect, db, db_min, db_max):
     return rect.y() + rect.height() * (0.04 + 0.92 * (1.0 - ratio))
 
 
-def _draw_spectrum(painter, state, rect):
-    """向量化画频谱折线 + 渐变填充。numpy 一次算完全部 x/y，QPolygonF
-    单次 drawPolyline/drawPolygon，避免逐 bin 函数调用与路径拼接。"""
+def _spectrum_xy(state, rect):
+    """谱迹几何：(x, y, floor_y, finite)，按显示跨度把 bin 映射到画布像素。
+
+    绘制与「填充边界 ±1 px」回归测试共用这一份映射，测试才能拿来建边界带，
+    而不是自己抄一份公式。
+    """
     gen = state.panel.generator
     spec = gen.spectrum
     n = len(spec)
-    if n == 0:
-        return
     rx0, rw = rect.x(), rect.width()
     ry0, rh = rect.y(), rect.height()
-    view_center = _view_center_hz(state)
     # x 几何用显示跨度（缩放后变窄），bin→频率仍用采样率（bins 覆盖全带宽）。
     span = gen.span_hz
-    f_left = view_center - span / 2.0
+    f_left = _view_center_hz(state) - span / 2.0
     ii = np.arange(n, dtype=np.float64)
     freq = (gen.center_freq_hz - gen.sample_rate_hz / 2.0
             + gen.sample_rate_hz * (ii + 0.5) / n)
@@ -1714,20 +1722,70 @@ def _draw_spectrum(painter, state, rect):
     ratio = np.clip((db - state.db_min) / (state.db_max - state.db_min),
                     0.0, 1.0)
     y = ry0 + rh * (0.96 - 0.92 * ratio)
-    floor_y = ry0 + rh * 0.96
+    return x, y, ry0 + rh * 0.96, finite
+
+
+#: 谱迹填充渐变的上下端点透明度（SDR++ 同款：顶部 96、底部 10）。
+_TRACE_FILL_TOP_ALPHA = 96
+_TRACE_FILL_BOT_ALPHA = 10
+
+
+def _trace_fill_image(state, h: int) -> QImage:
+    """谱迹填充用的 1×h 竖直渐变贴图（缓存在 ``_PlotState`` 上）。
+
+    渐变只取决于高度与谱迹色/透明度，与 dB 量程无关（量程只改 y 几何），
+    所以整幅重绘期间只在高度变化时重建一次；绘制时横向拉伸到画布宽。
+    """
+    h = max(1, int(round(h)))
+    if state._spec_fill_img is not None and state._spec_fill_h == h:
+        return state._spec_fill_img
+    img = QImage(1, h, QImage.Format.Format_ARGB32_Premultiplied)
+    img.fill(Qt.GlobalColor.transparent)
+    p = QPainter(img)
+    grad = QLinearGradient(0, 0, 0, h)
+    top = QColor(PAL_TRACE)
+    top.setAlpha(_TRACE_FILL_TOP_ALPHA)
+    bot = QColor(PAL_TRACE)
+    bot.setAlpha(_TRACE_FILL_BOT_ALPHA)
+    grad.setColorAt(0.0, top)
+    grad.setColorAt(1.0, bot)
+    p.fillRect(0, 0, 1, h, QBrush(grad))
+    p.end()
+    state._spec_fill_img = img
+    state._spec_fill_h = h
+    return img
+
+
+def _fill_spectrum_under(painter, state, fillpoly, rect):
+    """按 ``fillpoly`` 裁剪后一次贴上渐变贴图（替代渐变笔刷 drawPolygon）。
+
+    只负责填充：轮廓与谱线由调用方用纯色描边，两者分离后光栅器不再
+    逐跨度计算渐变。裁剪走整数 ``QRegion``——多边形顶点在这里被取整，
+    填充边界因此有 1 px 量级的位移（非抗锯齿，见 docs 的等价口径）。
+    """
+    reg = QRegion(QPolygon([q.toPoint() for q in fillpoly]))
+    painter.save()
+    painter.setClipRegion(reg, Qt.ClipOperation.IntersectClip)
+    painter.drawImage(QRectF(rect.x(), rect.y(), rect.width(), rect.height()),
+                      _trace_fill_image(state, rect.height()))
+    painter.restore()
+
+
+def _draw_spectrum(painter, state, rect):
+    """向量化画频谱折线 + 渐变填充。numpy 一次算完全部 x/y，QPolygonF
+    单次 drawPolyline，填充走「渐变贴图 + 整数区域裁剪」。"""
+    gen = state.panel.generator
+    if len(gen.spectrum) == 0:
+        return
+    x, y, floor_y, finite = _spectrum_xy(state, rect)
+    rx0, rw = rect.x(), rect.width()
+    n = len(x)
     # SDR++ 签名：1px 亮青实线 + 同色低透明度向下渐变（越靠底越淡），
     # 不再用整块不透明灰蓝把谱面糊成一面墙。
     trace = QColor(PAL_TRACE)
-    top = QColor(trace)
-    top.setAlpha(96)
-    bot = QColor(trace)
-    bot.setAlpha(10)
-    grad = QLinearGradient(0, ry0, 0, ry0 + rh)
-    grad.setColorAt(0.0, top)
-    grad.setColorAt(1.0, bot)
-    # PySide6 QPainter 无 fillPolygon(poly, brush)：把渐变设为当前 brush，
-    # drawPolygon 会按当前 brush 填充，语义与原 fillPolygon 一致。
+    # 填充与描边分离：填充贴渐变图，描边用纯色。
     painter.setPen(QPen(trace, 1))
+    painter.setBrush(Qt.NoBrush)
     if finite.all():
         poly = QPolygonF([QPointF(float(a), float(b))
                           for a, b in zip(x, y)])
@@ -1735,7 +1793,7 @@ def _draw_spectrum(painter, state, rect):
         fillpoly.append(QPointF(rx0, floor_y))
         fillpoly += poly
         fillpoly.append(QPointF(rx0 + rw, floor_y))
-        painter.setBrush(QBrush(grad))
+        _fill_spectrum_under(painter, state, fillpoly, rect)
         painter.drawPolygon(fillpoly)
         painter.drawPolyline(poly)
         return
@@ -1755,13 +1813,11 @@ def _draw_spectrum(painter, state, rect):
                 fillpoly.append(QPointF(float(x[a]), floor_y))
                 fillpoly += seg
                 fillpoly.append(QPointF(float(x[b - 1]), floor_y))
-                painter.setBrush(QBrush(grad))
+                _fill_spectrum_under(painter, state, fillpoly, rect)
                 painter.drawPolygon(fillpoly)
                 painter.drawPolyline(seg)
             else:
-                painter.setBrush(Qt.NoBrush)
                 painter.drawPoint(QPointF(float(x[a]), float(y[a])))
-    painter.setBrush(Qt.NoBrush)
 
 
 def _draw_hold_lines(painter, state, rect):
