@@ -3794,24 +3794,14 @@ class SoapySDRBackend(SDRBackend):
             got += 1
         except Exception:
             pass
-        # 用硬件真实范围覆盖构造时的占位范围。三项分开查：任一项失败不
-        # 连坐其他项；采样率范围真查到了就把来源登记为 probed，界面才允许
-        # 据此生成可见档位（缺省 unknown → 不回退成「按声明」）。
+        # 用硬件真实范围覆盖构造时的占位范围
         try:
             fr = self._sdr.getFrequencyRange(self._rx, self._chan)
             self.device.frequency_range = self._range_tuple(
                 fr, self.device.frequency_range)
-        except Exception:
-            pass
-        try:
             sr = self._sdr.getSampleRateRange(self._rx, self._chan)
-            sr_rng = self._range_tuple_strict(sr)
-            if sr_rng is not None:
-                self.device.sample_rate_range = sr_rng
-                self.device.capability_status["sample_rate_range"] = "probed"
-        except Exception:
-            pass
-        try:
+            self.device.sample_rate_range = self._range_tuple(
+                sr, self.device.sample_rate_range)
             gr = self._sdr.getGainRange(self._rx, self._chan)
             self.device.max_gain = float(gr.maximum())
         except Exception:
