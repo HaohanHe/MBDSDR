@@ -12,6 +12,7 @@
 本文件都会红。
 """
 import os
+import re
 import sys
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -329,3 +330,61 @@ def test_help_menu_is_wired_in_main_window(main_window, qtapp):
     assert sc is not None and sc.isVisible(), "「快捷键一览」没有打开面板"
     sc.close()
     qtapp.processEvents()
+
+
+# ---------------------------------------------------------------------------
+# 能力断言 ↔ AI 工具注册表实况（2026-11-11，A1「不暴露发射工具」事故）
+# ---------------------------------------------------------------------------
+#: 目录文案里可能点名的 AI 工具名（前缀白名单，避免把普通英文词当工具名）
+_TOOL_MENTION_RE = re.compile(
+    r"\b(?:radio|sdr|gimbal|vfo|code|memory|astro|tc|doppler|lro|baseband|"
+    r"file_change|guardian|evolution|satdump|rtlsdr|hackrf|limesdr|bladerf)"
+    r"_[a-z0-9_]*[a-z0-9]\b")
+#: 否定词：与工具名同句出现即表示「这个工具不存在 / 不暴露」
+_DENIAL_WORDS = ("不暴露", "未暴露", "不提供", "未提供", "未注册", "没有提供",
+                 "不会调用", "不具备")
+
+
+def _ai_tool_surface() -> set:
+    """AI 工具面实况 = agent 工具注册表 ∪ MCP 工具表（两条通道都算工具面）。"""
+    from mbdsdr_ai.core import mcp_server as mcp
+    from mbdsdr_ai.sdr_backend import SDRBackendManager
+    from mbdsdr_ai.sdr_tools import register_sdr_tools
+    from mbdsdr_ai.tool_registry import ToolRegistry
+
+    class _Agent:
+        pass
+
+    ag = _Agent()
+    ag.tool_registry = ToolRegistry()
+    ag.sdr_manager = SDRBackendManager()
+    register_sdr_tools(ag)
+    names = set(ag.tool_registry.tools)
+    names |= {t["name"] for t in mcp._build_tool_table()}
+    return names
+
+
+def test_catalog_tool_claims_match_registry(catalog):
+    """目录点名「有」的工具必须真实存在，点名「没有」的必须真的没有。
+
+    反证：把 `capability_catalog.STATIC_CAPABILITIES` 的发射条目改回
+    「AI 工具面不暴露发射工具」——`radio_ptt` 在注册表里，本用例立即红；
+    反过来删掉注册表里的 `radio_send_cw` 而目录仍点名它，同样红。
+    """
+    real = _ai_tool_surface()
+    mentioned, denied = set(), []
+    for cap in catalog:
+        text = " ".join((cap.title, cap.description, cap.trigger, cap.note))
+        mentioned |= set(_TOOL_MENTION_RE.findall(text))
+        for clause in re.split(r"[；;。\n]", text):
+            hits = set(_TOOL_MENTION_RE.findall(clause))
+            if hits and any(w in clause for w in _DENIAL_WORDS):
+                denied.extend(sorted(hits))
+    ghost = sorted(mentioned - real)
+    assert not ghost, f"目录点名了注册表里不存在的工具: {ghost}"
+    false_denial = sorted(set(denied) & real)
+    assert not false_denial, (
+        f"目录声称「不提供/不暴露」但注册表里确实有: {false_denial}")
+    assert {"radio_ptt", "radio_send_cw"} <= mentioned, (
+        "发射能力条目必须如实点名 AI 工具面里的发射工具，不许再写「不暴露」")
+

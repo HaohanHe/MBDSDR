@@ -98,7 +98,10 @@ STATIC_CAPABILITIES: Tuple[Tuple[str, str, str, str, str, str, str], ...] = (
     ("发射", "发射 / PTT",
      "按下开始发射，再次按下停止；只有具备发射能力的设备才会亮起",
      "控制面板「发射」按钮（每次发射都要人工确认）",
-     "conditional", "需硬件支持发射；AI 工具面不暴露发射工具，避免误触",
+     "conditional",
+     "需硬件支持发射；AI 工具面确实带发射工具（radio_ptt / radio_send_cw），"
+     "每次执行都要外部确认通道签发的一次性 confirm_token（tx_guard 硬门），"
+     "模型无法自备授权",
      "module:desktop/main_window.py:_tx_block_reason"),
 )
 

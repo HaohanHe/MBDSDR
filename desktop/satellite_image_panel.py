@@ -382,6 +382,7 @@ class SatelliteImagePanel(QWidget):
             result = _apt.decode_apt(audio, self._audio_sr)
         except Exception as e:
             self.stats_label.setText(f"解码失败: {_clean_exc(e)}")
+            self.image_label.setText(SAT_FAILED_TEXT)
             return
         if not result.get("apt_present"):
             lines = result.get("lines_aligned")

@@ -947,7 +947,8 @@ class AIPanel(QWidget):
             self._add_ai_message(
                 "AI 未配置 API Key。\n\n"
                 "请点击右上角「配置」按钮填入 API Key 后使用完整 AI 功能。\n"
-                "当前仅支持手动控制面板操作。"
+                "未配置时仍可用本地能力协商：按工具描述匹配并执行本进程的真实工具"
+                "（这是匹配，不是模型理解）；写/发射类工具仍需人工确认。"
             )
 
     def _call_ai(self, text: str) -> bool:

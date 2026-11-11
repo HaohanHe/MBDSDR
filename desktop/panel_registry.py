@@ -79,7 +79,8 @@ class PanelRegistry:
                       summary="全天球视图：恒星/行星/深空/卫星；点天体看信息，点卫星调谐收听"),
             PanelSpec("weather",    "气象云图",   "☁", AREA_CENTER,
                       collapsible=False, min_w=center_min,
-                      summary="气象卫星云图：GOES/GK-2A/Meteor/NOAA/FY 用真实录制或实时数据解码出图"),
+                      summary="气象卫星云图：GOES/GK-2A/Meteor/NOAA/FY 用录制文件离线解码出图"
+                              "（不实时边收边解）"),
             PanelSpec("module",      "模块/信号流","▤", AREA_CENTER,
                       collapsible=False, min_w=center_min,
                       summary="SDR++ 式信号流：源设备 → 解调 → 解码 → 输出，逐段调参数"),

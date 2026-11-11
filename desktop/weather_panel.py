@@ -543,7 +543,8 @@ class WeatherPanel(QWidget):
         self.start_btn = QPushButton("开始解码")
         self.start_btn.setObjectName("recordButton")
         self.start_btn.setToolTip(
-            "开始解码当前文件或实时信号；完成后右侧出图，失败时下方会写明原因")
+            "解码所选录制文件（.iq/.wav）并在右侧出图，失败时下方写明原因；"
+            "「实时 SDR」档位不在此面板解码，只给「主窗口录音 → 切录制文件」的指引")
         self.start_btn.clicked.connect(self.start_decode)
         btn_row.addWidget(self.start_btn)
         self.stop_btn = QPushButton("停止")
