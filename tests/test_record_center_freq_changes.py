@@ -351,6 +351,32 @@ def test_same_tick_tune_back_to_origin_drops_event(window, tmp_path):
     assert float(meta["center_freq_hz"]) == pytest.approx(145_500_000.0)
 
 
+def test_counterproof_disabling_dedup_writes_two_events(window, tmp_path,
+                                                        monkeypatch):
+    """反证：把 (segment_index, start_sample) 去重关掉，同一拍就会写两条。
+
+    正证用例（上一条）只有「只写一条」的断言，若有人把去重删掉，它仍然会
+    通过。这条把 `_is_same_record_tick` 打桩成恒 False，复现被删掉后的
+    重复写入，保证正证真的踩在去重逻辑上。
+    """
+    window._active_sdr_backend = _StubBackend()
+    path = tmp_path / "no_dedup.iq"
+    _start_segment(window, path)
+    window._record_write_chunk(np.ones(512, dtype=np.complex64))
+    monkeypatch.setattr(MainWindow, "_is_same_record_tick",
+                        staticmethod(lambda *a, **k: False))
+
+    assert window._on_tune_sdr(146_000_000.0, "FM") is True
+    window._on_tune_fm(147.0)
+
+    meta = _finalize_and_read(window, path)
+    changes = meta.get("center_freq_changes") or []
+    assert len(changes) == 2, f"关掉去重后应重复写两条: {changes!r}"
+    assert [int(c["start_sample"]) for c in changes] == [512, 512]
+    assert len({(int(c["segment_index"]), int(c["start_sample"]))
+                for c in changes}) == 1
+
+
 def test_apply_hw_action_passes_through_exception_text(window):
     """收口异常原文必须在状态栏透传 `<类型>: <原文>`，不许折成通用句。"""
     def _boom():

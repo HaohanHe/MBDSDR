@@ -9635,6 +9635,17 @@ class MainWindow(QMainWindow):
             error=f"{reason}（已写 {written} 字节"
                   f"{('，文件 ' + os.path.basename(path)) if path else ''}）")
 
+    @staticmethod
+    def _is_same_record_tick(last, segment_index: int, start_sample: int) -> bool:
+        """同一段、同一样本位 = 同一拍（两次调谐之间没写进任何样本）。
+
+        单列成方法是为了让反证用例能把它打桩成恒 False，断言「关掉去重就会
+        重复写两条」；正证用例则走真实实现。
+        """
+        return (last is not None
+                and int(last.get("segment_index", -1)) == segment_index
+                and int(last.get("start_sample", -1)) == start_sample)
+
     def _note_record_center_change(self, target_hz) -> None:
         """把一次**已确认下发成功**的调谐记进当前录音段（P0-09）。
 
@@ -9688,9 +9699,7 @@ class MainWindow(QMainWindow):
         # 只有最后一次真正作用于录音。按 (segment_index, start_sample) 去重，
         # 保留净变化（原 from → 最后一次 to）；不按墙钟时间窗——墙钟受调度
         # 抖动影响，且对不上回放时间轴。净变化为 0 时整条删掉。
-        same_tick = (last is not None
-                     and int(last.get("segment_index", -1)) == segment_index
-                     and int(last.get("start_sample", -1)) == start_sample)
+        same_tick = self._is_same_record_tick(last, segment_index, start_sample)
         if same_tick:
             if abs(float(last["from_hz"]) - actual) <= 1.0:
                 changes.pop()
