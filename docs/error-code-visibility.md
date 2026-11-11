@@ -226,9 +226,15 @@ FAILED tests/test_error_remedy_links.py::test_every_catalog_code_is_registered -
 
 ## 四、判定口径与复核命令
 
+> 引用格式（2026-11-12 试点）：本节改为 `文件:符号` 形式（括号内是渲染锚点
+> 字面量），不再写行号——改一个函数不动的行号，引用就不会过期。
+
 - 通道取证只看**桌面 UI 真实渲染点**，不看库 API 返回值：
-  `desktop/ai_panel.py:852`、`desktop/status_panel.py:309`、
-  `desktop/main_window.py:8758`、`desktop/ai_panel.py:1329`、`desktop/ai_panel.py:847-849`。
+  `desktop/ai_panel.py:_append_step_card`（`错误 {…}`）、
+  `desktop/status_panel.py:format_decode_result`（`错误码 {code}: …`）、
+  `desktop/main_window.py:_handle_backend_lost`（`设备已断开：`）、
+  `desktop/ai_panel.py:_on_ai_finished`（`[错误]`）、
+  `desktop/ai_panel.py:_append_step_card`（`参数 {…}` 与 `step.summary`）。
 - 「不可见」的机械证据是 `git grep -n <模块> -- desktop` 为 0：
   `recording_library` / `recorder` / `playback` / `tle_fetch` / `error_handler`（信封）
   在 `desktop/` 均无业务调用方。
