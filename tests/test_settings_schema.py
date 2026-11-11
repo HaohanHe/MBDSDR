@@ -288,6 +288,9 @@ def env(tmp_path, monkeypatch, qapp):   # 必须先有 QApplication 才能建 QW
     ds = DesktopSettings(path=str(tmp_path / "desktop_settings.json"))
     host = _FakeHost()
     panel = settings_panel.SettingsPanel(settings=ds, host=host)
+    # 设置页是惰性构建的（首次显示才建 38 行）：本文件按"已打开的面板"检查
+    # 控件，先把它物化。不 show()：那会让 reset_all(confirm=True) 弹出确认框。
+    panel._ensure_ui_built()
     return ds, host, panel, tmp_path
 
 

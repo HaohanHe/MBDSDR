@@ -640,6 +640,79 @@ class SettingsPanel(QWidget):
         super().__init__(parent)
         self._settings = settings
         self._host = host
+        #: 惰性构建：__init__ 只建外框，38 行设置项 / 外观块 / 工具按钮等
+        #: 首次显示才建。启动期右栏有九个面板、设置页不是首屏，构造它的控件
+        #: 没人看得到——与 `f0f82d9a`「能力矩阵首次打开才装载」同一手法。
+        #: 不新增空窗：补建在 showEvent 里同步做完，首帧绘制前已齐全。
+        self._ui_built = False
+        #: 首次显示前的用户可见提示（迁移/降档）。先存着，建完一次性显示；
+        #: 不能为此去写 `self.status_label`——那会当场把面板建出来。
+        self._pending_notices: List[str] = []
+        #: 展开态是否已从磁盘恢复：恢复过程中 set_expanded 会发信号，
+        #: 那时绝不能反写磁盘（会把「刚读到的值」再写一遍，甚至写坏）。
+        self._expanded_state_ready = False
+        #: 是否处于搜索筛选视图：这期间分组的自动展开/收起不落库。
+        self._searching = False
+        #: 搜索前的展开状态；清空搜索后原样恢复。
+        self._expanded_before_search: Optional[Dict[str, bool]] = None
+        #: 当前命中的键集合（测试与「回车跳到首项」共用）。
+        self._search_hits: set = set()
+        # 经纬度"半对"输入的暂存（只在本面板内存里，不进 host、不参与计算）。
+        # 没有这个的话，用户先输纬度会被当成"坐标清空"——两个框是分开提交的。
+        self._pending_lat: Optional[float] = None
+        self._pending_lon: Optional[float] = None
+        self._building = False
+        self._host_signals_wired = False
+        self._ai = _load_json_dict(AI_CONFIG_PATH)
+        #: 字号降档提示。主题的变更广播可能在设置页首次显示前就回调刷新它，
+        #: 所以这个标签随面板一起建（一个空 QLabel，很便宜），不随外观块延迟。
+        self._font_scale_note = QLabel("")
+        self._build_shell()
+        self._wire_host_signals()
+        # 一次性迁移提示要在回推默认值之前（避免自己写盘把"从未有过"变成"已有"）
+        self._announce_squelch_migration()
+        # 持久化的 Bortle/静噪/步进在启动时推给消费点（默认值与内置默认一致；
+        # 用户改过的话重启后仍是用户值，不是"改了白改"）。
+        self._apply_initial_state()
+        # 读回时被归一（越界/非法档位/非法模式）的项必须给出原因；
+        # demod_mode 是内部键没有独立行，原因统一落在面板状态行。
+        self._announce_migration_notes()
+
+    # ------------------------------------------------------------ 惰性构建
+    #: 首次显示前不存在的 UI 属性。外部（主窗口、测试、复现脚本）按既有名字
+    #: 直接取时自动补建，不要求调用方知道这里有惰性构建。
+    _LAZY_UI_ATTRS = frozenset((
+        "_rows", "_row_boxes", "_search_index", "_group_keys",
+        "_group_sections", "_key_section", "_section_purpose",
+        "_search_extras", "_other_index", "_other_hint",
+        "group_sections", "search_edit", "search_status", "status_label",
+        "btn_reset_all", "_esc_shortcut",
+    ))
+
+    def __getattr__(self, name: str):
+        if name in type(self)._LAZY_UI_ATTRS:
+            # 消费方读的是"已经存在"的面板：先补建，再按正常路径取。
+            self._ensure_ui_built()
+            return object.__getattribute__(self, name)
+        raise AttributeError(name)
+
+    def showEvent(self, event):  # noqa: N802 - Qt 命名
+        # 首次显示：同步补建。showEvent 在首帧绘制之前，用户看不到空壳，
+        # 也不是"切过去先白一下再长出来"（不新增空窗）。
+        self._ensure_ui_built()
+        super().showEvent(event)
+
+    def _build_shell(self) -> None:
+        """只建外框（布局 + 边距）。内容等首次显示再建。"""
+        self._root = QVBoxLayout(self)
+        self._root.setContentsMargins(6, 4, 6, 4)
+        self._root.setSpacing(4)
+
+    def _ensure_ui_built(self) -> None:
+        """补建内容；已建直接返回。"""
+        if self._ui_built:
+            return
+        self._ui_built = True
         self._rows: Dict[str, QWidget] = {}
         #: 行容器（QGroupBox）。过滤时按行 setVisible，控件本身在 _rows。
         self._row_boxes: Dict[str, QWidget] = {}
@@ -653,39 +726,35 @@ class SettingsPanel(QWidget):
         self._key_section: Dict[str, str] = {}
         #: 分组标题 → 一句用途（读屏描述随展开态刷新时用）。
         self._section_purpose: Dict[str, str] = {}
-        #: 展开态是否已从磁盘恢复：恢复过程中 set_expanded 会发信号，
-        #: 那时绝不能反写磁盘（会把「刚读到的值」再写一遍，甚至写坏）。
-        self._expanded_state_ready = False
-        #: 是否处于搜索筛选视图：这期间分组的自动展开/收起不落库。
-        self._searching = False
         #: 分组 → 非 schema 行的附加控件（如「外观」方块），搜索时一并隐藏。
         self._search_extras: Dict[str, List[QWidget]] = {}
         #: 不在本页渲染的键（4 个服务开关 + 11 个内部键）→ 可检索文本。
         #: 搜得到、但改不了：状态行如实点名它在哪里，不能报「无匹配」骗人。
         self._other_index: Dict[str, str] = {}
         self._other_hint: Dict[str, str] = {}
-        #: 搜索前的展开状态；清空搜索后原样恢复。
-        self._expanded_before_search: Optional[Dict[str, bool]] = None
-        #: 当前命中的键集合（测试与「回车跳到首项」共用）。
-        self._search_hits: set = set()
-        # 经纬度"半对"输入的暂存（只在本面板内存里，不进 host、不参与计算）。
-        # 没有这个的话，用户先输纬度会被当成"坐标清空"——两个框是分开提交的。
-        self._pending_lat: Optional[float] = None
-        self._pending_lon: Optional[float] = None
-        self._building = False
-        self._host_signals_wired = False
-        self._ai = _load_json_dict(AI_CONFIG_PATH)
+        self.group_sections: List[Any] = []
         self._build_ui()
+        self._relax_own_label_wrapping()
         self._refresh_from_storage()
-        self._wire_host_signals()
-        # 一次性迁移提示要在回推默认值之前（避免自己写盘把"从未有过"变成"已有"）
-        self._announce_squelch_migration()
-        # 持久化的 Bortle/静噪/步进在启动时推给消费点（默认值与内置默认一致；
-        # 用户改过的话重启后仍是用户值，不是"改了白改"）。
-        self._apply_initial_state()
-        # 读回时被归一（越界/非法档位/非法模式）的项必须给出原因；
-        # demod_mode 是内部键没有独立行，原因统一落在面板状态行。
-        self._announce_migration_notes()
+        self._flush_pending_notices()
+
+    def _relax_own_label_wrapping(self) -> None:
+        """补做右栏那次统一放开（`_add_right_tab` 量到的是空壳）。
+
+        与 `main_window._add_right_tab` 的 `_relax_label_wrapping` 同一判定：
+        wordWrap 的 QLabel 必须把水平策略设成 Ignored，否则中文整句按"最长
+        不可断词"算最小宽，右栏被撑爆后半句被裁掉。
+        """
+        for lab in self.findChildren(QLabel):
+            if lab.wordWrap():
+                lab.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
+
+    def _flush_pending_notices(self) -> None:
+        """把首次显示前攒下的提示落到状态行（保留先后顺序，不互相覆盖）。"""
+        if not self._pending_notices:
+            return
+        msgs, self._pending_notices = self._pending_notices, []
+        self.status_label.setText(" ".join(m for m in msgs if m))
 
     # ------------------------------------------------------------ 外部接线
     def attach_settings(self, settings):
@@ -869,9 +938,7 @@ class SettingsPanel(QWidget):
 
     # ------------------------------------------------------------ 构建 UI
     def _build_ui(self):
-        root = QVBoxLayout(self)
-        root.setContentsMargins(6, 4, 6, 4)
-        root.setSpacing(4)
+        root = self._root          # 外框在 __init__ 里建好，这里只往里填内容
         nav_hint = QLabel("服务开关与端口见右栏「服务设置」一节。")
         wrap_cn_label(nav_hint)
         nav_hint.setObjectName("hintLabel")
@@ -900,7 +967,6 @@ class SettingsPanel(QWidget):
         # 第 4 个「频谱与解码」被右边界整字切掉，且页签栏没有滚动按钮——后面
         # 三组等于不可达（2026-11-11 实拍）。这里按 D-10 裁定的 6 个**用途**
         # 分组切，折叠标题保持一屏可见。
-        self.group_sections: List[Any] = []
         for title, purpose, keys in PANEL_SECTIONS:
             items = [SCHEMA[k] for k in keys]
             body = self._build_group_body(items, title, purpose)
@@ -1192,8 +1258,8 @@ class SettingsPanel(QWidget):
         form.addRow(note)
         # 自动降档说明：屏幕放不下请求倍率时，主窗口会降一档渲染；这里把
         # 「你要 150%、实际 125%」写明，避免用户以为设置没生效。
-        # 文本由主窗口启动时调用 refresh_font_scale_note() 刷新。
-        self._font_scale_note = QLabel("")
+        # 文本由主窗口启动时调用 refresh_font_scale_note() 刷新；标签本体在
+        # __init__ 里就建好了（广播可能在首次显示前写过文案，不能在这里重建）。
         wrap_cn_label(self._font_scale_note)
         self._font_scale_note.setObjectName("hintLabel")
         self._font_scale_note.setWordWrap(True)
@@ -1372,6 +1438,7 @@ class SettingsPanel(QWidget):
 
     # ------------------------------------------------------------ 刷新
     def _refresh_from_storage(self):
+        self._ensure_ui_built()      # 外部可在首次显示前调（测试/复现脚本）
         self._ai = _load_json_dict(AI_CONFIG_PATH)
         self._building = True
         try:
@@ -1449,6 +1516,9 @@ class SettingsPanel(QWidget):
         if not notes:
             return
         msg = "启动时已修正配置：" + "；".join(notes)
+        if not self._ui_built:
+            self._pending_notices.append(msg)
+            return
         prev = self.status_label.text().strip()
         if msg in prev:
             return
@@ -1457,6 +1527,10 @@ class SettingsPanel(QWidget):
     def _notify(self, msg: str):
         """状态栏提示（保存成功/失败、降级原因）。方法名含 notify，是扫描器
         认可的"用户可见记录"路径——配置层不许静默吞掉任何失败。"""
+        if not self._ui_built:
+            # 首次显示前不能为了写状态行把整个面板建出来：先攒着，建完再显示。
+            self._pending_notices.append(msg)
+            return
         self.status_label.setText(msg)
 
     # ------------------------------------------------------------ 立即生效

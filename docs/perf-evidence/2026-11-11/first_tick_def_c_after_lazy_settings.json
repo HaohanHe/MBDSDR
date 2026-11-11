@@ -1,0 +1,340 @@
+{
+ "definition": "C",
+ "definition_text": "进程入口 → 真屏 show() 后首个 paint 事件派发完毕",
+ "script": "scripts/repro/2026-11-11-first-tick-definitions.py --def d3",
+ "snapshot": "1e90b7f6 + 工作区未提交（desktop/settings_panel.py 惰性构建）",
+ "change": "SettingsPanel 惰性构建：__init__ 只建外框，首次 showEvent 同步补建（f0f82d9a 同手法）",
+ "runs": 5,
+ "entry_to_tick_ms_sorted": [
+  1006.8,
+  1016.0,
+  1035.2,
+  1058.9,
+  1887.5
+ ],
+ "entry_to_tick_ms_range": [
+  1006.8,
+  1887.5
+ ],
+ "entry_to_tick_ms_median": 1035.2,
+ "ctor_ms_sorted": [
+  829.4,
+  906.6,
+  931.8,
+  938.6,
+  1649.9
+ ],
+ "ctor_ms_median": 931.8,
+ "baseline_same_window": {
+  "file": "docs/perf-evidence/2026-11-11/first_tick_def_c_runs5.json",
+  "entry_to_tick_ms_median": 1336.3,
+  "entry_to_tick_ms_sorted": [
+   1235.2,
+   1262.2,
+   1336.3,
+   1526.9,
+   1852.0
+  ]
+ },
+ "delta_median_ms": -301.1,
+ "load_rule": "规则 10：测前/测后各采一次系统 CPU + python 进程占比（均在低负载窗口，python 总占比 <200%）",
+ "samples": [
+  {
+   "def": "d3",
+   "ruler": {
+    "qt_platform": "windows",
+    "font_families": 394,
+    "dpr": 1.0,
+    "logical_dpi": 144.0,
+    "font": "MiSans",
+    "pt": 10.0,
+    "line_h": 27
+   },
+   "ctor_ms": 938.6,
+   "tick_ms": 120.3,
+   "entry_to_tick_ms": 1058.9,
+   "entry_to_end_ms": 4215.0,
+   "paints": 1,
+   "kernel_calls": 0,
+   "init_agent_calls": 0,
+   "load_before": {
+    "sys_cpu_pct": 36.1,
+    "python_proc_count": 3,
+    "python_total_cpu_pct": 1.6,
+    "python_top": [
+     {
+      "pid": 32508,
+      "cpu_pct": 1.6
+     },
+     {
+      "pid": 26548,
+      "cpu_pct": 0.0
+     },
+     {
+      "pid": 37752,
+      "cpu_pct": 0.0
+     }
+    ]
+   },
+   "load_after": {
+    "sys_cpu_pct": 46.9,
+    "python_proc_count": 3,
+    "python_total_cpu_pct": 23.4,
+    "python_top": [
+     {
+      "pid": 26548,
+      "cpu_pct": 23.4
+     },
+     {
+      "pid": 32508,
+      "cpu_pct": 0.0
+     },
+     {
+      "pid": 37752,
+      "cpu_pct": 0.0
+     }
+    ]
+   }
+  },
+  {
+   "def": "d3",
+   "ruler": {
+    "qt_platform": "windows",
+    "font_families": 394,
+    "dpr": 1.0,
+    "logical_dpi": 144.0,
+    "font": "MiSans",
+    "pt": 10.0,
+    "line_h": 27
+   },
+   "ctor_ms": 931.8,
+   "tick_ms": 103.4,
+   "entry_to_tick_ms": 1035.2,
+   "entry_to_end_ms": 3766.2,
+   "paints": 1,
+   "kernel_calls": 0,
+   "init_agent_calls": 0,
+   "load_before": {
+    "sys_cpu_pct": 14.4,
+    "python_proc_count": 3,
+    "python_total_cpu_pct": 1.6,
+    "python_top": [
+     {
+      "pid": 32508,
+      "cpu_pct": 1.6
+     },
+     {
+      "pid": 9048,
+      "cpu_pct": 0.0
+     },
+     {
+      "pid": 37752,
+      "cpu_pct": 0.0
+     }
+    ]
+   },
+   "load_after": {
+    "sys_cpu_pct": 15.3,
+    "python_proc_count": 3,
+    "python_total_cpu_pct": 32.9,
+    "python_top": [
+     {
+      "pid": 9048,
+      "cpu_pct": 18.8
+     },
+     {
+      "pid": 32508,
+      "cpu_pct": 14.1
+     },
+     {
+      "pid": 37752,
+      "cpu_pct": 0.0
+     }
+    ]
+   }
+  },
+  {
+   "def": "d3",
+   "ruler": {
+    "qt_platform": "windows",
+    "font_families": 394,
+    "dpr": 1.0,
+    "logical_dpi": 144.0,
+    "font": "MiSans",
+    "pt": 10.0,
+    "line_h": 27
+   },
+   "ctor_ms": 829.4,
+   "tick_ms": 186.6,
+   "entry_to_tick_ms": 1016.0,
+   "entry_to_end_ms": 3809.1,
+   "paints": 1,
+   "kernel_calls": 0,
+   "init_agent_calls": 0,
+   "load_before": {
+    "sys_cpu_pct": 15.0,
+    "python_proc_count": 3,
+    "python_total_cpu_pct": 7.8,
+    "python_top": [
+     {
+      "pid": 32508,
+      "cpu_pct": 7.8
+     },
+     {
+      "pid": 36564,
+      "cpu_pct": 0.0
+     },
+     {
+      "pid": 37752,
+      "cpu_pct": 0.0
+     }
+    ]
+   },
+   "load_after": {
+    "sys_cpu_pct": 28.8,
+    "python_proc_count": 3,
+    "python_total_cpu_pct": 37.5,
+    "python_top": [
+     {
+      "pid": 36564,
+      "cpu_pct": 29.7
+     },
+     {
+      "pid": 32508,
+      "cpu_pct": 7.8
+     },
+     {
+      "pid": 37752,
+      "cpu_pct": 0.0
+     }
+    ]
+   }
+  },
+  {
+   "def": "d3",
+   "ruler": {
+    "qt_platform": "windows",
+    "font_families": 394,
+    "dpr": 1.0,
+    "logical_dpi": 144.0,
+    "font": "MiSans",
+    "pt": 10.0,
+    "line_h": 27
+   },
+   "ctor_ms": 1649.9,
+   "tick_ms": 237.6,
+   "entry_to_tick_ms": 1887.5,
+   "entry_to_end_ms": 4918.1,
+   "paints": 1,
+   "kernel_calls": 0,
+   "init_agent_calls": 0,
+   "load_before": {
+    "sys_cpu_pct": 48.5,
+    "python_proc_count": 3,
+    "python_total_cpu_pct": 7.8,
+    "python_top": [
+     {
+      "pid": 32508,
+      "cpu_pct": 7.8
+     },
+     {
+      "pid": 13700,
+      "cpu_pct": 0.0
+     },
+     {
+      "pid": 37752,
+      "cpu_pct": 0.0
+     }
+    ]
+   },
+   "load_after": {
+    "sys_cpu_pct": 82.1,
+    "python_proc_count": 4,
+    "python_total_cpu_pct": 35.9,
+    "python_top": [
+     {
+      "pid": 13700,
+      "cpu_pct": 28.1
+     },
+     {
+      "pid": 32508,
+      "cpu_pct": 6.2
+     },
+     {
+      "pid": 30136,
+      "cpu_pct": 1.6
+     },
+     {
+      "pid": 37752,
+      "cpu_pct": 0.0
+     }
+    ]
+   }
+  },
+  {
+   "def": "d3",
+   "ruler": {
+    "qt_platform": "windows",
+    "font_families": 394,
+    "dpr": 1.0,
+    "logical_dpi": 144.0,
+    "font": "MiSans",
+    "pt": 10.0,
+    "line_h": 27
+   },
+   "ctor_ms": 906.6,
+   "tick_ms": 100.2,
+   "entry_to_tick_ms": 1006.8,
+   "entry_to_end_ms": 4366.9,
+   "paints": 1,
+   "kernel_calls": 0,
+   "init_agent_calls": 0,
+   "load_before": {
+    "sys_cpu_pct": 50.1,
+    "python_proc_count": 4,
+    "python_total_cpu_pct": 1.6,
+    "python_top": [
+     {
+      "pid": 32508,
+      "cpu_pct": 1.6
+     },
+     {
+      "pid": 30136,
+      "cpu_pct": 0.0
+     },
+     {
+      "pid": 37752,
+      "cpu_pct": 0.0
+     },
+     {
+      "pid": 38424,
+      "cpu_pct": 0.0
+     }
+    ]
+   },
+   "load_after": {
+    "sys_cpu_pct": 34.7,
+    "python_proc_count": 4,
+    "python_total_cpu_pct": 20.4,
+    "python_top": [
+     {
+      "pid": 38424,
+      "cpu_pct": 18.8
+     },
+     {
+      "pid": 32508,
+      "cpu_pct": 1.6
+     },
+     {
+      "pid": 30136,
+      "cpu_pct": 0.0
+     },
+     {
+      "pid": 37752,
+      "cpu_pct": 0.0
+     }
+    ]
+   }
+  }
+ ]
+}
