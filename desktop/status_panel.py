@@ -201,6 +201,36 @@ DECODE_ERROR_LABELS = {
     "no_frame_recovered": "未能恢复完整帧",
     "truncated_frame": "帧被截断",
     "crc_failed": "校验失败（CRC/FCS）",
+    # P1-22：此前漏标，用户只看到裸 code。
+    "address_not_recovered": "未能恢复地址（前导/位定时不足）",
+    "not_connected": "未连接 SDR",
+    "decoder_not_available": "解码器不可用",
+}
+
+# 错误码 → 补救动作（用户下一步该动哪个旋钮/走哪个入口）。
+# 与 DECODE_ERROR_LABELS 一一对应；新增错误码忘了补 → 覆盖测试红。
+DECODE_ERROR_REMEDY = {
+    "unknown_mode": "核对模式名（能力表/`list_decoders` 里的名字），别用缩写",
+    "missing_dependency": "安装可选依赖后重试（见 requirements.txt 对应模块）",
+    "missing_sample": "先录制一段 IQ/WAV 再解码，别对着空文件解",
+    "unsupported_format": "改用 cf32（复数 float32）或 16-bit/float32 单声道 WAV",
+    "decode_error": "展开「详情」看错误原文；反复出现请连同记录方式反馈",
+    "not_implemented": "该模式只有文件级入口：用 --decode-file 或对应专用入口",
+    "sample_rate_mismatch": "把采样率调到该模式要求的整数倍档位（见能力表）",
+    "insufficient_samples": "延长录制到至少一帧的长度（各模式时长不同）",
+    "invalid_wav": "换成 16-bit PCM 或 float32 单声道 WAV 重新导出",
+    "invalid_input": "检查文件路径是否存在、参数类型是否正确",
+    "param_not_in_enum": "从能力表列出的允许取值里选，别手填自由文本",
+    "preamble_not_found": "确认模式与信号匹配（如 ACARS 需 SYN,SYN,SOH 前导），"
+                          "并对准频点、必要时校 PPM",
+    "nothing_detected": "输入没有信号能量：确认中心频率、增益与天线是否接好",
+    "signal_present_no_frame": "有能量但解不出：换成正确解调（AM/NFM）并微调中心频率",
+    "no_frame_recovered": "同上：提高信噪比（对准频点、缩短馈线、避开干扰）",
+    "truncated_frame": "延长录制时长，避免把帧截断在中间",
+    "crc_failed": "误码过高：降低增益避免过载、避开强干扰后再录",
+    "address_not_recovered": "确认模式与采样率正确；信号太弱时先提高信噪比",
+    "not_connected": "先连接 SDR（工具栏「连接」）再解码",
+    "decoder_not_available": "换用 list_decoders 里登记的模式名",
 }
 
 # 证据等级 → 人话（与 P2 真样本盘点口径一致）
@@ -253,6 +283,11 @@ def format_decode_result(tool_name: str, result) -> dict:
     code = str(res.get("error_code") or "")
     ok = bool(res.get("ok", not code and "error" not in res))
     label = DECODE_ERROR_LABELS.get(code, code or "完成")
+    if code:
+        remedy = DECODE_ERROR_REMEDY.get(
+            code, f"未知错误码 {code}：请把「详情」原文反馈给开发者")
+    else:
+        remedy = ""
 
     summary = f"{mode} · {label}"
     ev = res.get("evidence_level")
@@ -274,6 +309,9 @@ def format_decode_result(tool_name: str, result) -> dict:
         lines.append(f"错误码 {code}: {res['error']}")
     elif res.get("error"):
         lines.append(f"错误: {res['error']}")
+    if code and remedy:
+        # 补救紧跟错误：用户看完原因就能知道下一步动哪个旋钮。
+        lines.append(f"补救: {remedy}")
     if isinstance(msgs, list):
         lines.extend(_render_message(m) for m in msgs[:50])
         if len(msgs) > 50:
@@ -288,7 +326,8 @@ def format_decode_result(tool_name: str, result) -> dict:
     if not lines:
         lines.append("本次解码无输出")
     return {"mode": mode, "ok": ok, "error_code": code,
-            "summary": summary, "detail": "\n".join(lines)}
+            "summary": summary, "detail": "\n".join(lines),
+            "remedy": remedy}
 
 
 class StatusPanel(QWidget):
@@ -408,7 +447,7 @@ class StatusPanel(QWidget):
         self.rx_gain.setObjectName("statusValue")
         rx_layout.addWidget(self.rx_gain, 2, 1)
 
-        rx_layout.addWidget(QLabel("AGC:"), 2, 2)
+        rx_layout.addWidget(QLabel("硬件 AGC:"), 2, 2)
         self.rx_agc = QLabel("—")
         self.rx_agc.setObjectName("statusValue")
         rx_layout.addWidget(self.rx_agc, 2, 3)
