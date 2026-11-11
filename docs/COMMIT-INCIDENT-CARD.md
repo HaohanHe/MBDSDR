@@ -12,7 +12,7 @@
 | ① | 多带别人的 | pre-commit 报 `MULTI` / `EXTRA <path>`；或提交文件集超出自己的 claim 清单 | 1) 停，别 push；2) 用私有 index 只装自己的 hunks（`read-tree HEAD` 后逐条 add）；3) 重提，`--expect` 只写自己的清单 | [§6.9](./COORDINATION.md#L2184) |
 | ② | 漏带自己的 | 提交后 `git show --stat` 比预期少文件/少 hunk | 1) 停；2) **补一笔新提交**（不 reset、不改写历史）；3) 在台账记一笔 | [§6.9](./COORDINATION.md#L2184) |
 | ③ | 陈旧 index 回退已入库内容 | 提交后 `diff HEAD~1 HEAD -- <file>` 出现行数减少；post-commit 报 `STALE_INDEX_SUSPECT` | 1) 停；2) 逐文件确认丢了哪些 hunk，`git revert` 或补回；3) 重建私有 index 再提交 | [§6.9.3](./COORDINATION.md#L2316) |
-| ④ | 回退事件（共享文档被改回旧版） | 共享文档出现整段删除，且不是本笔意图；blob 回环 | 1) `git branch rescue/<short> <hash>` 保命；2) `git revert` 恢复；3) 报主会话（时间/目标/被移出 hash） | [§6.10.2](./COORDINATION.md#L2870) |
+| ④ | 回退事件（共享文档被改回旧版） | 共享文档出现整段删除，且不是本笔意图；blob 回环 | 1) `git branch rescue/<short> <hash>` 保命；2) `git revert` 恢复；3) 报主会话（时间/目标/被移出 hash） | [§6.10.2](./COORDINATION.md#L2871) |
 | ⑤ | 私有 index 提交的副作用（反向暂存） | 提交成功后 `git status` 仍是本笔文件 staged（`MM`） | 1) 在仓库根目录 `python scripts/git_sync_index.py --paths <files>`；2) `--check` 复核 `staged=0`；3) 不一致才 `--all` | [§6.9.5](./COORDINATION.md#L2368) |
 | ⑥ | 私有 index 文件名撞车 | 提交夹带别线文件；index 用了固定名/复用旧名；闸门报 `EXTRA` | 1) 坏提交已入库先 `git revert <hash>`（未入库跳过）；2) 换唯一名（会话标识 + 时间戳）+ `read-tree HEAD` 重建；3) 只 add 自己的文件，带 `--expect` 提交并复核 `EXTRA` 为空 | [§6.9.6](./COORDINATION.md#L2411) |
 | ⑦ | PowerShell 环境变量没落到子进程 | 闸门打印 `INDEX 实际读取 .git/index`，而声明的是私有 index | 1) 停；2) 用 `GIT_INDEX_FILE=<path> git commit ...` 或 `subprocess.run(env=...)`；3) 复核 `INDEX 实际读取` 与 `INDEX 声明` 同路径 | [§6.9.7](./COORDINATION.md#L2438) |
@@ -22,9 +22,9 @@
 | ⑪ | 私有 index 的基线不是当时的 HEAD（复用陈旧 index / 他线毫秒级连提两笔） | 闸门报 `EXTRA`（他线文件被带入）或幻影 `DELETE`；`git rev-parse HEAD` 与建 index 时记下的基线不等 | 1) 停，不 push；2) 在同一份私有 index 上用**当时的** HEAD `git read-tree HEAD` 重建，重新 add 自己的文件；3) 提交前再比一次 HEAD，未变才提交（变了回第 2 步） | [§6.9.11](./COORDINATION.md#L2555) |
 | ⑫ | 私有 index 的环境变量泄漏（`GIT_INDEX_FILE` 被会话级导出，别的会话写进同一 index） | `$env:GIT_INDEX_FILE` 指向共享/固定路径；`git status` 出现不属于自己的文件；钩子报 `EXTRA`+`MULTI` | 1) 停，清掉当前会话的 `GIT_INDEX_FILE`；2) 改一次性驱动，`GIT_INDEX_FILE` 只进子进程 `env`；3) 用唯一路径 `read-tree` 重建，提交前校验基线与自己的文件清单 | [§6.9.12](./COORDINATION.md#L2595) |
 | ⑬ | 空占用表被当无人占（真机测量窗口误判，非提交类） | `§6.1` 只有模板行；`Get-Process python` 里有 `deadscan.py` 等单核满载；PnP 再正常也已被污染 | 1) 停，按 §6.1 三查（`file_claim.py status` + `Get-Process` + PnP）；2) 命中重负载 → 等其跑完或 `SKIP(NEEDS_OPERATOR)`，不 kill 他人进程；3) 三条件全绿才开跑，占用行写不进去就报主会话 | [§6.1](./COORDINATION.md#L1828) |
-| ⑭ | 私有 index 提交前把 blob 写回工作区，覆盖他人未提交内容 | 提交前有没有 `Write`/重定向写过任何工作区文件；提交后 `git log -S` 对丢失内容零命中、`git status` 里别人的改动变少 | 1) 立即停写；2) 查 `git log -S` 与本地历史，记录丢失文件/行数与最后可见版本；3) 由原作者按会话记录重放，并在重放节首标「非原始文本」；不要假装恢复成功 | [§6.9.14](./COORDINATION.md#L2626) |
-| ⑮ | 「pid 已死」被当成「可接管」（claim 交接误判） | `file_claim.py status` 里 `pid=…(已不存在)`，但 TTL 未归零且 `git status --porcelain -- <path>` 有改动 | 1) 停；2) 看 `held/剩余 TTL` 与 `git status --porcelain -- <path>`：两者都 FAIL 就等 TTL 或让持有方 `release`；3) 只有「pid 死 +（过期 或 无在途）」才 takeover，reason 写可复核证据；绝不 `checkout`/覆盖 | [§6.9.15](./COORDINATION.md#L2653) |
-| ⑯ | 分步编辑的中间态窗口（先加调用点、后落方法体） | `git status` 只有 `M`，但测试在 **setup** 阶段报 `AttributeError`/`NameError`；`py_compile` 过、导入却缺符号 | 1) 先确认是不是别人的编辑窗口（`git status --porcelain -- <path>`）；2) `python -m py_compile <file>` + 一次最小导入确认；3) 不是自己的缺陷就别改代码——等持锁方落完、或在 `git archive HEAD` 干净树上重跑 | [§6.9.16](./COORDINATION.md#L2674) |
+| ⑭ | 私有 index 提交前把 blob 写回工作区，覆盖他人未提交内容 | 提交前有没有 `Write`/重定向写过任何工作区文件；提交后 `git log -S` 对丢失内容零命中、`git status` 里别人的改动变少 | 1) 立即停写；2) 查 `git log -S` 与本地历史，记录丢失文件/行数与最后可见版本；3) 由原作者按会话记录重放，并在重放节首标「非原始文本」；不要假装恢复成功 | [§6.9.14](./COORDINATION.md#L2627) |
+| ⑮ | 「pid 已死」被当成「可接管」（claim 交接误判） | `file_claim.py status` 里 `pid=…(已不存在)`，但 TTL 未归零且 `git status --porcelain -- <path>` 有改动 | 1) 停；2) 看 `held/剩余 TTL` 与 `git status --porcelain -- <path>`：两者都 FAIL 就等 TTL 或让持有方 `release`；3) 只有「pid 死 +（过期 或 无在途）」才 takeover，reason 写可复核证据；绝不 `checkout`/覆盖 | [§6.9.15](./COORDINATION.md#L2654) |
+| ⑯ | 分步编辑的中间态窗口（先加调用点、后落方法体） | `git status` 只有 `M`，但测试在 **setup** 阶段报 `AttributeError`/`NameError`；`py_compile` 过、导入却缺符号 | 1) 先确认是不是别人的编辑窗口（`git status --porcelain -- <path>`）；2) `python -m py_compile <file>` + 一次最小导入确认；3) 不是自己的缺陷就别改代码——等持锁方落完、或在 `git archive HEAD` 干净树上重跑 | [§6.9.16](./COORDINATION.md#L2675) |
 
 ## 取证三件套（任何形态都先留证）
 
