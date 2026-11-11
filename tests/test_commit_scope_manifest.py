@@ -8,6 +8,7 @@ index 文件名，其中一个提交时把对方正在改的文件卷走。
 - 清单外的暂存文件 → 拒绝（退出码 1），输出 EXTRA 与具体路径；
 - 清单与暂存完全一致 → 放行；
 - 未声明清单 → 不做「多一个就拒」的检查（保持旧行为，不假报）；
+- 暂存 blob 与工作树不一致 → 拒绝（事故 `bc0c75e1` 的旧快照回退）；
 - 走 pre-commit 钩子的真实提交被拒，HEAD 不动。
 """
 import os
@@ -212,6 +213,39 @@ def _stale_private_index(repo, tmp_path, name, old_commit):
     env["GIT_INDEX_FILE"] = str(private)
     _git(repo, "read-tree", old_commit, env=env, check=True)
     return private, env
+
+
+def test_staged_old_blob_new_worktree_rejected(tmp_path):
+    """反证：暂存的是旧 blob、工作树是新内容 → 必须拒（事故 `bc0c75e1`）。
+
+    事故形态：共享 index 里留着 4 份别人文档的旧快照，工作树已被重定位成新
+    内容；提交按 index 走，把行号重定位整体回退。这条路径**没有活跃 claim**，
+    所以只有「index 必须等于工作树」这一条能拦住。
+    """
+    repo = _make_repo(tmp_path)
+    _git(repo, "add", "a.txt", check=True)  # index 里是 a2
+    (repo / "a.txt").write_text("a3\n", encoding="utf-8")  # 工作树改成 a3，不 add
+
+    proc = _run(repo, tmp_path, "--staged")
+
+    out = proc.stdout + proc.stderr
+    assert proc.returncode == 1, (proc.returncode, out)
+    assert "DIRTY" in out
+    assert "a.txt" in out
+    assert "bc0c75e1" in out
+
+
+def test_worktree_reblobbed_into_index_allowed(tmp_path):
+    """反修：把工作树的新内容重新 add 进 index → 一致，正常放行。"""
+    repo = _make_repo(tmp_path)
+    (repo / "a.txt").write_text("a3\n", encoding="utf-8")
+    _git(repo, "add", "a.txt", check=True)
+
+    proc = _run(repo, tmp_path, "--staged")
+
+    out = proc.stdout + proc.stderr
+    assert proc.returncode == 0, (proc.returncode, out)
+    assert "DIRTY" not in out
 
 
 def test_stale_private_index_phantom_deletions_rejected(tmp_path):

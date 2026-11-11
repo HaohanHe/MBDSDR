@@ -48,6 +48,12 @@
   `read-tree`，旧 HEAD 之后入库的文件会表现为「删除」，闸门对清单外的删除
   条目直接拒并打印 `DELETE <path>`（未声明清单时只告警）。
 
+  `--staged` 还有一道**内容一致性**闸：每个非删除的暂存条目，index 里的 blob
+  必须与工作树当前内容一致；只要 `git diff --quiet -- <path>` 报 1 就拒，
+  并打印 `DIRTY <path>`。这一条不看 owner、不看声明清单——**没有 claim 的
+  他人暂存文件也不能放行**。事故 `bc0c75e1`：从共享 index 提交了 4 份别人
+  文档的旧 blob，工作树是新内容，行号重定位被整体回退，而当时闸门判「允许提交」。
+
 退出码：0 无 MULTI；1 发现 MULTI（需人工确认）；2 用法/git 错误。
 """
 from __future__ import annotations
@@ -374,6 +380,32 @@ def _normalize_index_path(path: str) -> str:
     return os.path.normcase(_index_abs(path))
 
 
+def _worktree_dirty(paths: List[str]) -> List[str]:
+    """index 内容与工作树不一致的路径（`git diff --quiet` 退出码 1）。
+
+    事故 `bc0c75e1`：共享 index 里留着 4 份别人文档的**旧 blob**，工作树是
+    新内容；提交按 index 走，于是重定位后的新行号被旧快照整体回退。当时
+    闸门只看 owner 与声明清单，判「允许提交」。这里逐 path 比对，不看 owner。
+    """
+    dirty: List[str] = []
+    for path in paths:
+        proc = subprocess.run(
+            ["git", "diff", "--quiet", "--", path],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+        )
+        if proc.returncode == 1:
+            dirty.append(path)
+        elif proc.returncode != 0:
+            raise SystemExit(
+                f"git diff --quiet -- {path} 失败：{proc.stderr.strip()}"
+            )
+    return dirty
+
+
 def check_staged(
     as_json: bool,
     expect: Optional[List[str]] = None,
@@ -381,7 +413,8 @@ def check_staged(
 ) -> int:
     """检查暂存区：①跨线（≥2 个活跃 owner）拒；②超出声明清单的文件拒；
     ③声明的私有 index 与实际读到的 index 不一致拒；
-    ④出现「声明清单里没有的删除条目」时拒（陈旧私有 index 的幻影删除）。
+    ④出现「声明清单里没有的删除条目」时拒（陈旧私有 index 的幻影删除）；
+    ⑤暂存 blob 与工作树不一致时拒（共享 index 里的旧快照会被一起提交）。
 
     第 ② 条是「私有 index 文件名撞车 / 复用旧 index」这类事故的机械闸：
     提交的文件集合必须**全部落在声明清单内**，多一个就拒并打印多出来的路径。
@@ -391,6 +424,9 @@ def check_staged(
     第 ④ 条是「陈旧私有 index 制造幻影删除」的机械闸：私有 index 若基于旧 HEAD
     `read-tree`，旧 HEAD 之后入库的文件在它看来就是删除（`D`），会被计入暂存。
     删除条目必须逐条落在声明清单内，否则拒；未声明清单时只告警（保持旧行为）。
+    第 ⑤ 条是「旧 blob 被提交」的机械闸（事故 `bc0c75e1`）：共享 index 里留着
+    别人文档的旧快照、工作树是新内容时，提交会把旧内容写回库并整体回退重定位。
+    这一条逐 path 比对 index 与工作树，**无 claim 的文件同样适用**。
     """
     import time
 
@@ -454,6 +490,8 @@ def check_staged(
         extras = [p for p in paths if _canonical(p) not in allowed]
         unexplained_deletions = [p for p in deletions if _canonical(p) not in allowed]
 
+    dirty = _worktree_dirty([p for p in paths if not status_of[p].startswith("D")])
+
     multi = len(owners) >= 2
     if as_json:
         print(
@@ -466,6 +504,7 @@ def check_staged(
                     "multi_owner": multi,
                     "declared": declared,
                     "extras": extras,
+                    "worktree_dirty": dirty,
                     "actual_index": _index_abs(actual_index),
                     "declared_index": _index_abs(declared_index),
                     "index_mismatch": index_mismatch,
@@ -475,7 +514,7 @@ def check_staged(
                 indent=2,
             )
         )
-        return 1 if (multi or extras or index_mismatch or unexplained_deletions) else 0
+        return 1 if (multi or extras or index_mismatch or unexplained_deletions or dirty) else 0
 
     print(f"INDEX 实际读取 {_index_abs(actual_index)}")
     if declared_index:
@@ -522,6 +561,16 @@ def check_staged(
             print(f"  DELETE  {path}")
         print("  删除条目必须逐条能解释来源；若是私有 index 基于旧 HEAD 建出的，")
         print("  先 `git read-tree HEAD` 重建私有 index，再提交。")
+    if dirty:
+        print(f"拒绝：{len(dirty)} 个暂存文件的 index 内容与工作树不一致（会提交旧 blob）：")
+        for path in dirty:
+            print(f"  DIRTY   {path}")
+        print("  原因：index 里留的是旧 blob、工作树是新内容（事故 bc0c75e1：")
+        print("        从共享 index 提交了 4 份他人文档的旧快照，行号重定位整体回退）。")
+        print("        这一条不看 owner、不看声明清单，暂存内容必须与工作树一致。")
+        print("  修法：确认工作树内容无误后 `git add -- <path>` 重新写入 index；")
+        print("        若这些路径不该进本次提交，`git restore --staged -- <path>` 撤出。")
+        failed = True
     if extras:
         print(f"拒绝：暂存区有 {len(extras)} 个文件不在声明清单内（多一个就拒）：")
         for path in extras:
