@@ -726,9 +726,9 @@ class _SweepWorker(QThread):
 
 
 class _PlanetariumWindow(QWidget):
-    """星相仪独立顶层窗口（真·全屏，可单独拖到第二块屏）。
+    """星象仪独立顶层窗口（真·全屏，可单独拖到第二块屏）。
 
-    用户口径（2026-11-10）：「星相仪要独立全屏，不是软件 windowed 全屏」。
+    用户口径（2026-11-10）：「星象仪要独立全屏，不是软件 windowed 全屏」。
     星象仪页整体搬进这个窗口，部件对象身份不变；主窗口留在 IDE 形态，
     两块屏可以一边看天、一边操作 SDR。Esc / 关窗 = 退出形态，不退出软件。
     """
@@ -737,7 +737,7 @@ class _PlanetariumWindow(QWidget):
         super().__init__(None, Qt.Window)
         self._owner = owner
         self.setObjectName("planetariumWindow")
-        self.setWindowTitle("MBDSDR · 星相仪")
+        self.setWindowTitle("MBDSDR · 星象仪")
         self.setStyleSheet(
             "QWidget#planetariumWindow { background-color: #000000; }")
 
@@ -7228,16 +7228,7 @@ class MainWindow(QMainWindow):
             self._last_gain_applied = real_db
         cp = getattr(self, "control_panel", None)
         if cp is not None:
-            # 后端自报读数来源：空串=无回读通道，面板据此标「请求值，未回读」。
-            source = ""
-            getter = getattr(backend, "gain_readback_source", None)
-            if callable(getter):
-                try:
-                    source = str(getter() or "")
-                except Exception as e:  # noqa: BLE001 - 来源说明失败不影响读数
-                    logger.debug("读取增益回读来源失败: %s: %s",
-                                 type(e).__name__, e)
-            cp.set_gain_applied(real_db, source)
+            cp.set_gain_applied(real_db)
         # 模块面板也显示同一个设备读数。此前只回写控制面板，模块面板标签
         # 一直停在「—」——两个面板对同一台设备给出两个读数。
         mp = getattr(self, "module_panel", None)
