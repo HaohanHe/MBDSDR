@@ -91,49 +91,51 @@ class TestProbe:
 
 
 # ---------------------------------------------------------------------------
+def _run_worker(monkeypatch, tmp_path, cadus, compose_result=None,
+                real_result=None):
+    import weather_panel as wp
+    from mbdsdr_ai import lrpt_pipeline as lp
+
+    iq_file = tmp_path / "fake.iq"
+    iq_file.write_bytes(b"")
+    calls = {"compose": 0, "real": 0}
+
+    monkeypatch.setattr(wp, "_load_complex64",
+                        lambda _p: np.zeros(16, dtype=np.complex64))
+    monkeypatch.setattr(ms, "demodulate_lrpt",
+                        lambda *_a, **_k: cadus)
+
+    def _real(*_a, **_k):
+        calls["real"] += 1
+        if real_result is not None:
+            return real_result
+        return lp.RecordingImageResult(stage="sync",
+                                       error="帧同步未锁（测试桩）")
+
+    monkeypatch.setattr(lp, "decode_recording_to_image", _real)
+
+    def _compose(items, **_kw):
+        calls["compose"] += 1
+        return compose_result
+
+    monkeypatch.setattr(ms, "compose_visible_image", _compose)
+    worker = wp.DecodeWorker({
+        "family": "meteor", "iq_file": str(iq_file),
+        "sample_rate": 1e6, "out_png": str(tmp_path / "out.png"),
+        "satellite": "METEOR-M2 (LRPT)",
+    })
+    results, progress = [], []
+    worker.finished.connect(results.append)
+    worker.progress.connect(progress.append)
+    worker._run_meteor()
+    return results, progress, calls
+
+
+# ---------------------------------------------------------------------------
 class TestWorkerDiagnosis:
-    def _run(self, monkeypatch, tmp_path, cadus, compose_result=None,
-             real_result=None):
-        import weather_panel as wp
-        from mbdsdr_ai import lrpt_pipeline as lp
-
-        iq_file = tmp_path / "fake.iq"
-        iq_file.write_bytes(b"")
-        calls = {"compose": 0, "real": 0}
-
-        monkeypatch.setattr(wp, "_load_complex64",
-                            lambda _p: np.zeros(16, dtype=np.complex64))
-        monkeypatch.setattr(ms, "demodulate_lrpt",
-                            lambda *_a, **_k: cadus)
-
-        def _real(*_a, **_k):
-            calls["real"] += 1
-            if real_result is not None:
-                return real_result
-            return lp.RecordingImageResult(stage="sync",
-                                           error="帧同步未锁（测试桩）")
-
-        monkeypatch.setattr(lp, "decode_recording_to_image", _real)
-
-        def _compose(items, **_kw):
-            calls["compose"] += 1
-            return compose_result
-
-        monkeypatch.setattr(ms, "compose_visible_image", _compose)
-        worker = wp.DecodeWorker({
-            "family": "meteor", "iq_file": str(iq_file),
-            "sample_rate": 1e6, "out_png": str(tmp_path / "out.png"),
-            "satellite": "METEOR-M2 (LRPT)",
-        })
-        results, progress = [], []
-        worker.finished.connect(results.append)
-        worker.progress.connect(progress.append)
-        worker._run_meteor()
-        return results, progress, calls
-
     def test_unaligned_frames_report_convention_not_signal_quality(
             self, monkeypatch, tmp_path):
-        results, _progress, calls = self._run(
+        results, _progress, calls = _run_worker(
             monkeypatch, tmp_path, _frames("meteor_sat_asm_8b"))
         assert len(results) == 1
         err = results[0]["error"]
@@ -148,7 +150,7 @@ class TestWorkerDiagnosis:
 
     def test_aligned_but_incomplete_still_reports_segments(
             self, monkeypatch, tmp_path):
-        results, _progress, calls = self._run(
+        results, _progress, calls = _run_worker(
             monkeypatch, tmp_path, _frames("lrpc_simplified_3b"),
             compose_result=None)
         assert len(results) == 1
@@ -157,7 +159,44 @@ class TestWorkerDiagnosis:
         assert "not_verified" not in results[0]["error"]
 
     def test_no_cadu_is_its_own_reason(self, monkeypatch, tmp_path):
-        results, _progress, calls = self._run(monkeypatch, tmp_path, [])
+        results, _progress, calls = _run_worker(monkeypatch, tmp_path, [])
         assert len(results) == 1
         assert "未解出任何 LRPT CADU 帧" in results[0]["error"]
         assert calls["compose"] == 0
+
+
+# ---------------------------------------------------------------------------
+class TestChainVisibility:
+    """② 不能静默降级：真录链与旧链回退必须从结果里一眼看出来。
+
+    2026-11-11 用户口径：用户看到的是「自动用了真录链」，哪天退回旧链，
+    必须能从界面上看出差别。annotation 会进 meta_label 持久展示，所以
+    链路标记钉在 annotation/link 上，而不是只在瞬时的 progress 行。
+    """
+
+    def test_real_chain_labels_itself(self, monkeypatch, tmp_path):
+        import numpy as np
+        from mbdsdr_ai import lrpt_pipeline as lp
+        real = lp.RecordingImageResult(
+            success=True, rgb=np.zeros((5, 7, 3), dtype=np.uint8),
+            stats={"n_valid_vcdu": 3, "n_image_packets": 9})
+        results, _progress, _calls = _run_worker(
+            monkeypatch, tmp_path, [], real_result=real)
+        assert len(results) == 1 and results[0]["ok"] is True
+        assert results[0]["link"] == "真录链"
+        assert "链路：真录链" in results[0]["annotation"]
+
+    def test_legacy_fallback_is_visible_not_silent(self, monkeypatch, tmp_path):
+        import numpy as np
+        img = np.zeros((4, 6, 3), dtype=np.uint8)
+        results, _progress, calls = _run_worker(
+            monkeypatch, tmp_path, _frames("lrpc_simplified_3b"),
+            compose_result=img)
+        assert len(results) == 1 and results[0]["ok"] is True
+        res = results[0]
+        assert calls["real"] == 1, "回退前必须先真跑真录链"
+        # 界面可读的差别：链路字段 + annotation 里写明真录链失败原因
+        assert res["link"] == "旧链回退"
+        assert "链路：旧链回退" in res["annotation"]
+        assert "帧同步未锁" in res["annotation"]
+

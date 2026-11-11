@@ -333,11 +333,12 @@ class DecodeWorker(QObject):
             st = real.stats
             self._emit(
                 ok=True, png=out_png, width=w, height=h,
-                annotation=(f"LRPT 真录链 {w}x{h}"
+                annotation=(f"链路：真录链 | LRPT {w}x{h}"
                             f"（VCDU {st.get('n_valid_vcdu', 0)} / "
                             f"图像包 {st.get('n_image_packets', 0)}）"),
                 channel="Meteor-M2 LRPT",
                 frames=int(st.get("n_valid_vcdu", 0)),
+                link="真录链",
                 meta={"chain": st})
             return
         real_reason = real.error or f"真录链在 {real.stage} 阶段未出图"
@@ -382,9 +383,13 @@ class DecodeWorker(QObject):
         out_png = self._p.get("out_png") or os.path.join(
             os.path.dirname(self._p["iq_file"]), "meteor_composed.png")
         Image.fromarray(arr).save(out_png)
+        # 旧链回退**必须可见**：annotation 是持久字段，用户从图上就能看出
+        # 「这次不是真录链出的图」，避免哪天链路悄悄降级还以为一切正常。
         self._emit(ok=True, png=out_png, width=arr.shape[1], height=arr.shape[0],
-                   annotation=f"LRPT 合成 {arr.shape[1]}x{arr.shape[0]}",
-                   channel="Meteor-M2 LRPT", frames=len(cadus))
+                   annotation=(f"链路：旧链回退 | LRPT 合成 "
+                               f"{arr.shape[1]}x{arr.shape[0]}"
+                               f"（真录链原因：{real_reason}）"),
+                   channel="Meteor-M2 LRPT", frames=len(cadus), link="旧链回退")
 
     # ---- FY-4 / FY-3：调用真实模块，raw IQ 端到端出图未接通则如实报告 ----
     def _run_fengyun(self):
@@ -785,7 +790,9 @@ class WeatherPanel(QWidget):
                 f"时间: {ts} | "
                 f"分辨率: {res.get('width','?')}×{res.get('height','?')} | "
                 f"注释: {res.get('annotation','') or '—'}")
-            self._update_status(extra=f"出图成功: {os.path.basename(res['png'])}")
+            self._update_status(extra=(
+                f"出图成功: {os.path.basename(res['png'])}"
+                + (f" | 链路: {res['link']}" if res.get("link") else "")))
         else:
             # 不出图：保持空白占位，如实说明，绝不补假图
             self._set_placeholder("无数据")
