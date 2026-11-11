@@ -940,33 +940,57 @@ def _loaded_app_singletons():
     """只认已经 import 过的单例模块：还原不能把 Qt 拽进纯逻辑用例。"""
     tm_mod = sys.modules.get("touch_manager")
     ls_mod = sys.modules.get("layout_store")
+    pr_mod = sys.modules.get("panel_registry")
+    ua_mod = sys.modules.get("ui_actions") or sys.modules.get("mbdsdr_ai.ui_actions")
     tm = getattr(getattr(tm_mod, "TouchManager", None), "_instance", None)
-    return tm, ls_mod
+    reg = getattr(getattr(pr_mod, "PanelRegistry", None), "_instance", None)
+    return tm, ls_mod, reg, ua_mod
 
 
 @pytest.fixture(autouse=True)
 def _restore_app_singletons():
-    """每个用例前后保存/恢复两个应用级单例的可变状态。
+    """每个用例前后保存/恢复应用级单例的可变状态。
 
     * ``touch_manager()._mode_override``：触屏模式是进程级开关，某个用例把
       它强制成 True/False 后不还，后面的用例会凭空进/出触屏模式；
     * ``layout_store()`` 的 ``_default_store``：用例替换单例（隔离目录）后
-      忘记还原，后面的模块就写进别人的临时布局库。
+      忘记还原，后面的模块就写进别人的临时布局库；
+    * ``PanelRegistry._instance`` 与它的 ``_widgets`` 表：类级单例 + 强引用
+      表，某用例注册/替换面板后不摘，后面的用例 ``get_widget`` 会拿到别人的
+      控件（甚至已删的 C++ 对象），而 ``_widgets`` 还会压住整棵子树不回收；
+    * ``ui_actions._BUS`` 与 ``bus.executor``：主窗口 ``__init__`` 把绑定方法
+      挂上总线，窗口关掉不还，后面的用例排水时打到已死的窗口上。
 
-    两个模块若在本用例里才首次 import，teardown 把状态还给初始值
-    （override=None / store=None）——此时那个对象本来就是本用例造出来的。
-    直接赋值而不走 ``set_override``：还原不该再发 ``touch_mode_changed``
-    去惊动已经回收的控件。
+    这些模块若在本用例里才首次 import，teardown 把状态还给初始值
+    （override=None / store=None / registry 单例=None / bus=None）——此时
+    那些对象本来就是本用例造出来的。直接赋值而不走 ``set_override``：
+    还原不该再发 ``touch_mode_changed`` 去惊动已经回收的控件。
     """
-    tm, ls_mod = _loaded_app_singletons()
+    if os.environ.get("MBDSDR_SINGLETON_GUARD", "1") == "0":
+        yield
+        return
+    tm, ls_mod, reg, ua_mod = _loaded_app_singletons()
     tm_override = tm._mode_override if tm is not None else None
     store = getattr(ls_mod, "_default_store", None) if ls_mod is not None else None
+    reg_widgets = dict(reg._widgets) if reg is not None else None
+    bus = getattr(ua_mod, "_BUS", None) if ua_mod is not None else None
+    bus_executor = bus.executor if bus is not None else None
     yield
-    tm2, ls_mod2 = _loaded_app_singletons()
+    tm2, ls_mod2, reg2, ua_mod2 = _loaded_app_singletons()
     if tm2 is not None:
         tm2._mode_override = tm_override
     if ls_mod2 is not None:
         ls_mod2._default_store = store
+    if reg2 is not None or reg_widgets is not None:
+        import panel_registry as pr
+        pr.PanelRegistry._instance = reg      # noqa: SLF001
+        if reg is not None:
+            reg._widgets.clear()              # noqa: SLF001
+            reg._widgets.update(reg_widgets)  # noqa: SLF001
+    if ua_mod2 is not None:
+        ua_mod2._BUS = bus                    # noqa: SLF001
+        if bus is not None:
+            bus.executor = bus_executor
 
 
 @pytest.fixture(autouse=True)
