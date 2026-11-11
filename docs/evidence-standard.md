@@ -83,6 +83,28 @@
     `setLayout(…)` 被描述为「旧布局无父、靠 GC」，实测 `parent() == toolbar`、
     包装 gc 后仍活、C++ 删除后 `isValid` 正确转 `False`。两处都已按「已否证」入案，
     而非按注释下结论。
+13. **用户的真实环境状态不是实验对象。** 实验前必须把 `HOME` / `APPDATA` /
+    `QSettings` 存储 / `QSettings` 路径全部重定向到临时位置；隔离装置本身要有反证
+    （先写「坏」值，证明不隔离必红、隔离后稳定）。
+    **不得已触碰真实状态时，还原必须给哈希或类型级证据，不接受「我已还原」的自述**；
+    备份原件在实验结束前不得删除，删除即视为放弃内容级证明。判据：
+    - 「已还原」不算证据；要给「实验前抓到的 blob 哈希」与「还原后读出 blob 哈希」
+      是否相等，或至少给读回类型 + 解码后的值；
+    - `restoreState() == True` 只证明能解析，**不证明内容对**，不得替代哈希；
+    - 备份件已删、无法回溯时，如实写「内容一致性不可证明」，不得用间接可解析性顶替。
+    实例（2026-11-12，本轮 QSettings 隔离提交 `8ecf720f`）：
+    - `HKCU\Software\MBDSDR\Desktop` 的 `three_column_sizes`：隔离实验中毒写后还原，
+      第一次用 PowerShell 直接写裸 blob，Qt 6 在注册表里的 `QByteArray` 是带包装的
+      REG_BINARY 形态，裸字节被读成 `str`，用户上次三栏布局失效（读回 35 字节的
+      `bytes()` 转换直接抛 `TypeError`）。改用 `QSettings.setValue(..., QByteArray(...))`
+      才恢复类型。备份 JSON 在收尾清理时被删，**内容一致性不可证明**（只剩会话日志里的
+      还原后读回哈希 `c913f29c…` 与解码值 `[260,2000,326]`）。
+    - `~/.mbdsdr/gui_config.json`：用 PowerShell `Set-Content -Encoding UTF8` 直写，
+      PS 5.1 带 BOM，应用判为损坏文件并改名备份，用户观测站/窗口配置从原文件消失。
+      记录见 `tests/test_ui_hard_defects.py` 的 docstring（「不要用 PowerShell 直接改
+      这个 JSON」）。该次未留 commit 号，只作历史线索（E3）。
+    后果写清：前者让 `QByteArray` 被读成 `str`、静默丢弃用户布局；后者让应用读不到配置
+    并触发损坏备份分支——两者都不是「测试里的小事」，是用户可见的数据损失。
 
 ## 3. 反例（出现即判不合规）
 
