@@ -233,8 +233,12 @@ module 级 `mw` 先于 function 级 autouse 实例化，`MainWindow()` 在隔离
 ## 10. 未做 / 需他人接手
 
 - 注册表（两参 `QSettings`）清点与隔离：锁线。
-- `test_gimbal_rotctld_sim::test_ui_never_shows_degrees` 现为红：`d1fcba5b`（P0-01 执行层
-  闸门，22:38 落库）在「星历不可用」时改走「未下发调谐 → 请更新星历」，不再产出
-  「不可报 …」；属卫星线文案/闸门与旧断言的冲突，不在测试隔离范围。
+- `test_gimbal_rotctld_sim::test_ui_never_shows_degrees`：**已恢复绿，不需要接手**。
+  当时红因是 `d1fcba5b` 的 `_allow_for()` 读天空图侧 `sat_tracker`，而该用例注入的是
+  执行侧 `_loop_sat_tracker` → 闸门判 `no_data` → 不下发调谐 → 走「未下发」分支，
+  不再产出「不可报」。这是两处 tracker 不同源的真实不一致，不是「文案冲突」。
+  卫星线已用 `94ab10cd`（23:16）改读 `_loop_sat_tracker` 并前移其创建，顺带补了
+  6 个用例的 `tracking_policy_for` 桩。实测整文件 `6 passed in 5.74s`。
+  断言本身不过宽（作用域是精度文本/状态栏片段/tooltip 片段），保留。
 - `mbdsdr_ai/config.py` 的 `ConfigStore.update()`：不改（理由见 §5 命名更正）。
 - 12 处用例体内直接构造：已由 autouse 兜底覆盖，未逐个改 fixture。
