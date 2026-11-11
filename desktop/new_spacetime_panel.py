@@ -116,6 +116,8 @@ COLOR_SUCCESS = _t.COLORS["success"]       # 同步 / 成功
 COLOR_DANGER = _t.COLORS["danger"]         # 未同步 / 警示
 
 _NO_SIGNAL_TEXT = "未检测到信号"
+_NO_OBSERVER_HINT = (
+    "未设置观测地点：点上方「更改地点…」搜索城市、地图点选或手填经纬度")
 _NA = "--"
 
 
@@ -717,8 +719,7 @@ class NewSpacetimePanel(QWidget):
         # 观测站是过境的必要条件。判定用显式状态位：None/未配置才提示，
         # 绝不能拿 0.0 当哨兵（0.0/0.0 是合法站址）。未配置时不白跑网络请求。
         if not inputs["observer_configured"]:
-            out["passes_hint"] = (
-                "未配置观测站位置：请在纬度/经度输入框填写地面站坐标")
+            out["passes_hint"] = _NO_OBSERVER_HINT
             return out
 
         # 拉 TLE（失败的卫星跳过，绝不伪造）

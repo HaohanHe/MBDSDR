@@ -21,3 +21,13 @@ def test_satellite_failure_is_not_waiting_text():
     assert sip.SAT_FAILED_TEXT != sip.SAT_WAIT_TEXT
     assert "等待" not in sip.SAT_FAILED_TEXT
     assert "失败" in sip.SAT_FAILED_TEXT
+
+
+def test_spacetime_observer_hint_points_at_existing_control():
+    """「未设置观测地点」必须指向真实存在的「更改地点…」，不再提已删除的输入框。"""
+    import new_spacetime_panel as nsp
+
+    text = nsp._NO_OBSERVER_HINT
+    assert "更改地点…" in text
+    assert "输入框" not in text
+    assert "地面站坐标" not in text
