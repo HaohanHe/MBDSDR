@@ -462,7 +462,7 @@ import numpy as np
 
 from PySide6.QtCore import (
     QEvent, Qt, QTimer, Slot, QDateTime, QTimeZone, QThread, Signal, QSettings,
-    QRect, QPoint, QRectF,
+    QRect, QPoint, QRectF, QEventLoop,
 )
 from PySide6.QtGui import (
     QAction, QActionGroup, QKeySequence, QFont, QShortcut, QGuiApplication,
@@ -971,6 +971,9 @@ class MainWindow(QMainWindow):
         # 真实 SDR 后端（SoapySDR/RTL-SDR/HackRF 等）。由设备选择对话框真实 connect 后填充；
         # 与 self._worker（ai-sdr Mini WebSocket）互斥。硬件失败绝不静默切 mock。
         self._active_sdr_backend: Optional[object] = None
+        # 硬件 connect 正在后台线程跑：并发点击/切换时直接拒绝，避免两个线程抢
+        # 同一根棒子（第二个 open 会拿到 ACCESS(-3)）。
+        self._connect_in_flight: bool = False
         # NTRIP 配置对话框（非模态）。首次从菜单打开时才创建；保持引用防 GC。
         self._ntrip_dialog: Optional[object] = None
 
@@ -6009,6 +6012,60 @@ class MainWindow(QMainWindow):
             return name.strip(), True
         return (type(backend).__name__ or "未命名设备"), False
 
+    #: 硬件 connect 的后台等待上限：超过就按失败处理，别把界面锁死在「连接中」。
+    _CONNECT_WAIT_TIMEOUT_MS = 20000
+
+    def _connect_backend_in_background(self, backend) -> bool:
+        """把原生 ``connect()`` 丢到后台线程，GUI 线程用嵌套事件循环等结果。
+
+        原生 connect 实测 2.0 s（USB 打开 + 调谐器探测），原先直接在 GUI 线程
+        调用、只在前面 ``processEvents()`` 冲一次事件循环：这 2 s 里窗口不重绘，
+        「连接中」标签停在旧值，用户看到的就是「点了没反应」。
+        这里保持同步返回语义（调用方仍在连接结束后接着切状态/下发参数），
+        但等待期间持续处理事件：窗口能重绘、能拖动，状态栏提示真的在刷。
+        """
+        if self._connect_in_flight:
+            self.statusBar().showMessage("正在连接设备，请等本次连接结束", MSG_QUICK)
+            return False
+        self._connect_in_flight = True
+        box: dict = {}
+
+        def _worker() -> None:
+            try:
+                box["ok"] = bool(backend.connect())
+            except Exception as exc:  # noqa: BLE001 - 交回 GUI 线程按原口径处理
+                box["exc"] = exc
+
+        worker = threading.Thread(target=_worker, name="sdr-connect", daemon=True)
+        loop = QEventLoop()
+        poll = QTimer()
+        poll.setInterval(30)
+        watchdog = QTimer()
+        watchdog.setSingleShot(True)
+        watchdog.timeout.connect(loop.quit)
+
+        def _check() -> None:
+            if not worker.is_alive():
+                loop.quit()
+
+        poll.timeout.connect(_check)
+        try:
+            poll.start()
+            worker.start()
+            watchdog.start(self._CONNECT_WAIT_TIMEOUT_MS)
+            loop.exec()
+        finally:
+            poll.stop()
+            watchdog.stop()
+            self._connect_in_flight = False
+        if worker.is_alive():
+            logger.warning("设备 connect 超过 %d ms 未返回，按失败处理"
+                           "（后台线程留着不阻塞界面）", self._CONNECT_WAIT_TIMEOUT_MS)
+            return False
+        if "exc" in box:
+            raise box["exc"]
+        return bool(box.get("ok"))
+
     def _connect_backend(self, backend, sample_rate: float = float(DEFAULT_SAMPLE_RATE_HZ),
                          gain: float = 20.0, ppm: int = 0,
                          agc: bool = True, offset_tuning: bool = False,
@@ -6020,6 +6077,11 @@ class MainWindow(QMainWindow):
         （启动自动选 RTL）共用。连接失败返回 False 并写状态栏，不抛异常。
         红线：硬件失败绝不静默切 mock 报 success。
         """
+        # 上一次连接还在后台跑：此时拆旧后端会把正在被 open 的同一个设备拽走，
+        # 直接拒绝本次操作，让用户等当前这次结束。
+        if self._connect_in_flight:
+            self.statusBar().showMessage("正在连接设备，请等本次连接结束", MSG_QUICK)
+            return False
         # B1：切换设备必须先幂等拆除旧连接（停读线程/释放硬件/清 UI 连接态）。
         # 不拆旧后端会出现两种坏状态：旧后端继续供数（界面换了、数据还是旧的）；
         # 同一根棒子被自己占着，新 connect 直接 ACCESS(-3) 失败。
@@ -6056,7 +6118,7 @@ class MainWindow(QMainWindow):
             except Exception:
                 pass
             try:
-                ok = backend.connect()
+                ok = self._connect_backend_in_background(backend)
             except Exception as e:
                 ok = False
                 try:
