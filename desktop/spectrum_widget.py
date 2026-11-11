@@ -3290,6 +3290,12 @@ class _TuningPlotMixin:
     def _tuning_common_init(self):
         # 接收键盘事件需要 StrongFocus（否则 keyPressEvent 不触发）
         self.setFocusPolicy(Qt.StrongFocus)
+        # 键盘调谐是可发现性盲区：方向键只在焦点落到本控件时生效，焦点在
+        # 输入框/表格时归那边（QLineEdit 移光标、表格移选择），不会调谐。
+        # 鼠标点击由 mousePressEvent 显式补 setFocus，这条 tooltip 说明前提。
+        self.setToolTip(
+            "键盘调谐需焦点在谱面：点击谱面或瀑布后，"
+            "←/→ 整格、↑/↓ 细调（Shift ×10 / Alt ×0.1）")
         # 局部快捷键（A/N/F/W/C、S/Shift+S）：装成 QShortcut + WidgetShortcut，
         # 只有本控件自身获焦时才匹配——这是 Qt 里最具体的上下文，优先于主窗
         # 的全天模式 A（WidgetWithChildrenShortcut）。键位来自 shortcuts.py。
@@ -3790,6 +3796,10 @@ class _TuningPlotMixin:
         super().contextMenuEvent(event)
 
     def mousePressEvent(self, event):
+        # 显式拿焦点：键盘调谐（方向键）只发给焦点控件。StrongFocus 下 Qt
+        # 通常会在点击时自动给焦点，这里不依赖该平台默认——否则焦点留在
+        # 工具栏/表格时，用户点完谱面按方向键会去移动那边的选择。
+        self.setFocus(Qt.MouseFocusReason)
         if event.button() == Qt.LeftButton:
             x = event.position().x()
             y = event.position().y()
@@ -4319,6 +4329,18 @@ class WaterfallWidget(QWidget):
         gen = self.state.panel.generator
         return _px_to_freq(x_px, self.width(),
                            _view_center_hz(self.state), gen.span_hz)
+
+    def mousePressEvent(self, event):
+        """点瀑布把键盘焦点交给上方谱面（方向键调谐的唯一入口）。
+
+        瀑布本身没有调谐交互（见类 docstring）。不转交焦点的话，点击后
+        焦点仍留在工具栏/表格，方向键会去移动那边的选择，表现为
+        「点完瀑布键盘调谐失灵」。
+        """
+        plot = getattr(self.state.panel, "_fft_plot", None)
+        if plot is not None:
+            plot.setFocus(Qt.MouseFocusReason)
+        event.accept()
 
     def paintEvent(self, event):
         p = QPainter(self)
