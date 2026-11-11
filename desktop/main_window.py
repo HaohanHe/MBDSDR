@@ -1848,6 +1848,8 @@ class MainWindow(QMainWindow):
         self.sat_track_panel.update_tle_requested.connect(self._on_update_sat_tle)
         self.sat_track_panel.satellite_changed.connect(self._on_sat_combo_changed)
         self._init_loop_sat_catalog()
+        # 过境倒计时数据源：轨道计算只在 sat_passes 一处，面板只消费结果。
+        self.sat_track_panel.set_pass_provider(self._provide_sat_passes)
 
         # Tab: 频谱显示（左栏页签之一；拖宽 splitter 获得更宽 FFT/瀑布）
         spectrum_widget = QWidget()
@@ -12352,6 +12354,12 @@ class MainWindow(QMainWindow):
         """
         lat = self._observer_lat
         lon = self._observer_lon
+        # 站址真变了才作废过境列表：本函数会被 GNSS 轮询反复调用，
+        # 每次都失效会让面板反复触发 skyfield 预测。
+        _site = (lat, lon)
+        if _site != getattr(self, "_sat_passes_site", None):
+            self._sat_passes_site = _site
+            self.sat_track_panel.invalidate_passes()
         if lat is None or lon is None:
             # 未设置观测站位置（GNSS 未连接或未手动配置）
             if self.sat_tracker is not None:
@@ -12455,6 +12463,50 @@ class MainWindow(QMainWindow):
             if _startup is not None:
                 _startup.append(_tle_timer)
 
+    def _provide_sat_passes(self, name: str):
+        """面板过境倒计时数据源：执行侧 TLE + 当前站址 → ``sat_passes``。
+
+        轨道计算只有 ``predict_upcoming_passes`` 一处（与天空图过境列表同源），
+        面板不写第二套。站址/星历缺失时抛异常——面板会显示「过境预测失败：
+        …」，绝不返回空列表冒充「窗口内没有过境」。
+        """
+        tracker = self._loop_sat_tracker
+        if tracker is None:
+            raise RuntimeError("卫星目录未就绪")
+        row = next((s for s in tracker.list_satellites()
+                    if s.get("name") == name), None)
+        if row is None:
+            raise RuntimeError(f"目录里没有 {name}")
+        gs = getattr(tracker, "ground_station", None)
+        if gs is None:
+            if self._observer_lat is None or self._observer_lon is None:
+                raise RuntimeError("观测站未设置，无法预测过境")
+            from mbdsdr_ai.sat_passes import GroundStation
+            gs = GroundStation(lat_deg=self._observer_lat,
+                               lon_deg=self._observer_lon)
+        from mbdsdr_ai.sat_passes import predict_upcoming_passes
+        from settings import (effective_pass_min_elevation_deg,
+                              effective_pass_window_hours)
+        entries = predict_upcoming_passes(
+            [row["tle"]], gs,
+            hours=float(effective_pass_window_hours(self.settings)),
+            min_alt=float(effective_pass_min_elevation_deg(self.settings)))
+        rows = []
+        for entry in entries:
+            p = entry["pass"]
+            # skyfield Time → tz-aware UTC datetime；时间基仍是 UTC，
+            # 显示层（面板 UTC 开关）只做格式化，不改这里的时基。
+            aos = p.rise_time.utc_datetime()
+            los = p.set_time.utc_datetime()
+            rows.append({
+                "aos_unix": aos.timestamp(),
+                "los_unix": los.timestamp(),
+                "max_alt": float(p.max_alt),
+                "aos_utc": aos,
+                "los_utc": los,
+            })
+        return rows
+
     def _on_sat_combo_changed(self, name: str):
         """下拉框切换卫星：回填该星的标准下行频率。"""
         if self._loop_sat_tracker is not None and name:
@@ -12497,6 +12549,8 @@ class MainWindow(QMainWindow):
         self._tle_update_thread = None
         n, failure = payload
         self._refresh_sat_panel()
+        # TLE 变了 → 早先算出的过境列表作废，倒计时必须按新星历重算。
+        self.sat_track_panel.invalidate_passes()
         # 刷新成功：天空图立刻向执行侧目录重新投影并重画（此前要等下一次
         # 定时器，更早的实现里根本不变——刷新后仍画旧根数）。
         if n > 0:
@@ -12712,26 +12766,46 @@ class MainWindow(QMainWindow):
         t_cycle = time.monotonic()
         pos = self._loop_sat_tracker.current_position()
         t_pos = time.monotonic()
-        self.sat_track_panel.update_position(pos)
         # 链路补偿状态（唯一真相源；失效自动关闭 + 原因上芯片）
         from mbdsdr_ai.doppler_link import get_compensator
         comp = get_compensator()
         comp.refresh(pos)
         self._update_doppler_chip(comp)
+        # 判据先全部算完，UI 刷新统一放到末尾：显示层异常不得吞掉停跟踪。
+        trackable = True
         if not pos.get("valid"):
             # 目标位置失效：云台跟随不能对着过期方位继续下发，诚实解锁并提示
             if self._gimbal_follow:
                 self._stop_gimbal_follow(
                     "目标位置失效，云台跟随已停止并解锁（保持最后指向）")
-            return
-        el = float(pos["elevation"])
-        # 仰角 < 5°：卫星不可见 → 跟踪与云台一起明确停止，不向地平线下发角
-        if el < 5.0:
+            trackable = False
+        elif float(pos["elevation"]) < 5.0:
+            # 仰角 < 5°：卫星不可见 → 跟踪与云台一起明确停止，不向地平线下发角
+            el = float(pos["elevation"])
             self._stop_satellite_tracking()
             self.statusBar().showMessage(
                 f"卫星不可见（仰角 {el:.1f}° < 5°），跟踪与云台跟随已停止",
                 MSG_IMPORTANT)
-            return
+            trackable = False
+        if trackable:
+            self._apply_satellite_tick(pos, comp, t_cycle, t_pos)
+        # 判据已执行完，这里才刷新显示。try/except 只为不让面板异常带崩
+        # tick 体后续步骤，不替代上面的顺序修复。
+        try:
+            from mbdsdr_ai.new_spacetime import get_time_engine
+            frame_now_unix = float(get_time_engine().now_unix())
+        except Exception:
+            frame_now_unix = None      # 面板显示「倒计时暂停」，不回退墙钟
+        try:
+            self.sat_track_panel.update_position(
+                pos, now_unix=frame_now_unix)
+        except Exception:
+            logger.exception(
+                "卫星跟踪面板刷新失败（判据已先执行，不影响停跟踪/调谐）")
+
+    def _apply_satellite_tick(self, pos, comp, t_cycle, t_pos):
+        """跟踪可继续时的一拍：调谐 SDR + 星点亮 + 云台跟随（判据见调用方）。"""
+        el = float(pos["elevation"])
         # 核心：调谐频率 = 下行频率 + 多普勒偏移（补偿开启时）；
         # 用户关闭补偿 → 调谐标称下行（诚实不补偿，不沿用过期偏移）。
         tune_hz = comp.rx_freq()
