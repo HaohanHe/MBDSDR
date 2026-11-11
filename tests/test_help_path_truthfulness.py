@@ -107,11 +107,7 @@ def _git(cwd, *args):
 
 
 def test_render_points_read_head_not_worktree(tmp_path, monkeypatch):
-    """口径反证：工作树有未提交改动、HEAD 干净时，默认绿、--worktree 红。
-
-    并行开发时工作树每一分钟都在被别人改；拿它判「文档漂移」会把「别人正在
-    编辑」误报成事实（2026-11-11 夜间 main_window.py 未提交 +59 行的活例）。
-    """
+    """口径反证：工作树有未提交改动、HEAD 干净时，默认绿、--worktree 红。"""
     repo = tmp_path / "repo"
     repo.mkdir()
     _git(repo, "init", "-q")
@@ -139,5 +135,36 @@ def test_render_points_read_head_not_worktree(tmp_path, monkeypatch):
         chp.set_source("worktree")
         problems = chp.check_render_points()
         assert problems and "文档行号漂移" in problems[0], problems
+    finally:
+        chp.set_source("head")
+
+
+def test_bare_path_line_out_of_range_turns_red(tmp_path, monkeypatch):
+    """反证：不带 hash 的裸 `path:N` 也进池，且全文扫描（不再有章节窗口）。
+
+    §九 在旧的「§三–§五」窗口之外；把它的行号写成越界值，必须报红。
+    """
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-q")
+    _git(repo, "config", "user.email", "ci@example.com")
+    _git(repo, "config", "user.name", "ci")
+    src = repo / "desktop" / "status_panel.py"
+    src.parent.mkdir()
+    src.write_text('A = 1\nB = 2\nC = 3\n', encoding="utf-8")
+    doc = repo / "docs" / "error-code-visibility.md"
+    doc.parent.mkdir()
+    doc.write_text("## 三、通道\n\n- 说明 `desktop/status_panel.py:2`\n\n"
+                   "## 九、历史账\n\n- 旧账 `desktop/status_panel.py:99`\n",
+                   encoding="utf-8")
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-q", "-m", "fixture")
+
+    monkeypatch.setattr(chp, "_ROOT", str(repo))
+    monkeypatch.setattr(chp, "_DOC", str(doc))
+    try:
+        chp.set_source("head")
+        problems = chp.check_render_points()
+        assert any("越界" in p and ":99" in p for p in problems), problems
     finally:
         chp.set_source("head")

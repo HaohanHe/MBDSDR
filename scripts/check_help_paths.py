@@ -225,10 +225,16 @@ def _bullet_blocks(section: str) -> list[str]:
 
 
 def check_render_points(doc_path: str | None = None) -> list[str]:
-    """文档第三、四节引用的渲染点行号必须仍落在渲染字面量上（防行号漂移）。
+    """文档里每个 ``文件:行号`` 引用都要能定位；渲染通道声明的还要落在字面量上。
 
-    扫描窗口是 ``## 三、``–``## 五、``：§四是「判定口径」里对同一批通道的
-    复述，不在窗口内时它漂了也没人知道（2026-11-11 实测：漏报 3 处）。
+    **不再按章节窗口截断**（局部窗口本身就是漏点：§五 的 ``6119`` 实际在
+    ``9620``，把窗口扩到 §五 也扫不到）。现在全文每个 ``path:N`` 都进池：
+
+    * 结构：文件在读取口径下存在、行号在范围内；
+    * 语义：只有 P1–P5 的通道定义（含续行）与「可见路径=是」的判定行才是
+      **渲染点声明**，它们的行号必须仍落在 ``_RENDER_ANCHORS`` 的字面量上。
+      其余引用是触发点/底层实现，不套渲染字面量（§八/§九 的步骤卡定位就属于
+      这一类，套锚点会制造假红）。
     """
     problems: list[str] = []
     src = doc_path or _DOC
@@ -242,40 +248,49 @@ def check_render_points(doc_path: str | None = None) -> list[str]:
         doc = None
     if doc is None:
         return [f"读不到 {src}（口径：{source_label()}）"]
-    start = doc.find("## 三、")
-    end = doc.find("## 五、")
-    if start < 0:
-        return ["文档缺少「## 三、」章节，无法核验渲染点"]
-    if end < 0:
-        end = len(doc)
-    section = doc[start:end]
-    cache: dict[str, list[str]] = {}
-    # 只核「渲染点」：P1–P5 的通道定义（含续行）+ 可见行（用户可见=是）的
-    # 判定依据。不可见行的 文件:行 是触发点/底层实现，不是渲染点，不套渲染字面量。
-    targets: list[str] = _bullet_blocks(section)
-    for ln in section.splitlines():
-        m = re.match(r"\| (\d+) \| `[^`]+` \|.*", ln)
-        if m and int(m.group(1)) > 52:
+    cache: dict[str, list[str] | None] = {}
+
+    def _lines_for(path: str) -> list[str] | None:
+        if path not in cache:
+            text = _read_text(path)
+            cache[path] = None if text is None else text.splitlines()
+        return cache[path]
+
+    # 1) 结构：全文每一个引用都必须能定位（文件被删/行号越界都算失效）
+    for m in _CITE_RE.finditer(doc):
+        path, spec = m.groups()
+        lines = _lines_for(path)
+        if lines is None:
+            msg = f"文档引用的 {path} 在{source_label()}里不存在（{path}:{spec}）"
+            if msg not in problems:
+                problems.append(msg)
             continue
-        if m:
-            cells = [c.strip() for c in ln.strip().strip("|").split("|")]
-            if len(cells) >= 7 and cells[3] == "是":
-                targets.append(ln)
+        bad = [p for p in spec.split(",")
+               if any(not (1 <= n <= len(lines)) for n in _expand_lines(p))]
+        if bad:
+            msg = (f"文档引用越界：{path}:{','.join(bad)}"
+                   f"（该文件共 {len(lines)} 行）")
+            if msg not in problems:
+                problems.append(msg)
+
+    # 2) 语义：渲染点声明必须落在渲染字面量上。判据是**行内容**（P1–P5 通道
+    #    定义 / 可见路径=是），不再是「第几节到第几节」的位置窗口。
+    targets: list[str] = [b for b in _bullet_blocks(doc)
+                          if re.match(r"- \*\*P\d", b)]
+    for ln in doc.splitlines():
+        m = re.match(r"\| (\d+) \| `[^`]+` \|.*", ln)
+        if not m or int(m.group(1)) > 52:
+            continue
+        cells = [c.strip() for c in ln.strip().strip("|").split("|")]
+        if len(cells) >= 7 and cells[3] == "是":
+            targets.append(ln)
     for line in targets:
         for m in _CITE_RE.finditer(line):
             path, spec = m.groups()
             anchors = _RENDER_ANCHORS.get(os.path.basename(path))
             if not anchors:
                 continue
-            if path not in cache:
-                text = _read_text(path)
-                if text is None:
-                    problems.append(
-                        f"读不到 {path}（口径：{source_label()}），无法核验 :{spec}")
-                    cache[path] = []
-                else:
-                    cache[path] = text.splitlines()
-            lines = cache[path]
+            lines = _lines_for(path) or []
             if not lines:
                 continue
             cited = _expand_lines(spec)
