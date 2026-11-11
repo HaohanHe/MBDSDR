@@ -34,6 +34,12 @@ from tokens import tokens
 #               （浅色主题偏低，但仍高于改造前的 #A0A0A0 on #D8D2C8 ≈ 1.7）
 #   * 箭头：    #808080 画在 card 上，3.95 / 3.72 / 5.32 / 3.54 / 4.17
 #               （非文本图形 3:1 达标）
+# 等价性实测（2026-11-11，旧路径 hex-QSS vs A′，default 主题逐像素比对）：
+#   QCheckBox 勾选区（10,16)-(22,26) 两路径不同：**旧路径渲染里该区域一个墨色
+#   像素都没有**（只有 primary 底色 #C4845C），A′ 才有 3 个墨色像素。
+#   但**不能排除**是旧路径探针复用了临时目录里一张空白 PNG（`_check_mark_url`
+#   命中 `os.path.exists` 就直接复用），所以这条只记为「差异方向是从无到有」，
+#   **不作为 A′ 更优的证据**。
 # 单选按钮的圆点**取消图片**：圆点画在 15px 框里、背景是 button 色，
 # 任何定色都会在浅色或深色主题之一里看不清（#808080 对 button 最低 3.02）。
 # 选中态改成 primary 实心圆（border-radius），颜色由 palette(highlight) 给，
@@ -457,6 +463,17 @@ _ACCENT_ROLE = getattr(QPalette, "Accent", QPalette.Shadow)
 #:   danger          → Shadow（Fusion 的阴影绘制几乎全被 QSS 接管）
 #: 这比「把颜色字面量留在 QSS 里」唯一多出的风险是：若将来某个原生控件
 #: 直接读这三个角色，颜色会是灰/灰/红。可用 5 个主题的 36 点像素取样复验。
+#:
+#: 为什么 border/grid/button_hover/button_pressed 必须占用 Mid/Midlight/Light/Dark
+#: （不能像上面三个那样回退成 Fusion 默认灰）：它们不是「纯颜色通道」，QSS 自己
+#: 大量引用它们——实测 `palette(mid)` 26 处、`palette(midlight)` 13 处、
+#: `palette(light)` 7 处、`palette(dark)` 5 处，分别承载描边、网格线、
+#: hover 底色、pressed 底色。把四槽回退成 Fusion 灰，等于把悬停/按下/描边
+#: 全部变回系统皮肤。
+#: 代价是 Fusion 在**未被 QSS 接管**的绘制里也会读这四个角色（如 QTabBar 底部
+#: 1px 线、未接管的滚动条），因此与旧路径（hex-QSS，这四个角色保持 Fusion 默认）
+#: 会出现零星 1px 差异——这是 A′ 的固有取舍，不是漏改；差异清单见
+#: docs/perf-evidence/2026-11-11/ 下逐像素比对结果。
 _THEME_ROLE_MAP = (
     ("bg", QPalette.Window),
     ("bg_alt", QPalette.AlternateBase),
@@ -782,7 +799,7 @@ class Theme:
             margin: 0;
         }}
         QScrollBar::handle:vertical {{
-            background: palette(mid);
+            background: palette(placeholder-text);
             border-radius: 5px;
             min-height: 30px;
         }}
@@ -796,14 +813,19 @@ class Theme:
            原生绘制，而 Fusion 的滚动条手柄取 QPalette::Shadow——A′ 把 danger
            放在 Shadow 槽里，结果横向手柄被画成红色（实测 #B85C5C，纵向是
            #C8C0B4）。这里补齐 :horizontal，与纵向同色同圆角，颜色仍走 palette，
-           五套主题共用同一份 QSS。 */
+           五套主题共用同一份 QSS。
+           手柄色取 placeholder-text（= text_secondary）而不是 mid：mid 对底色
+           只有 1.36–3.13:1，达不到非文本 3:1（实测 default 1.63、dark 1.72、
+           figma 2.03）；placeholder-text 是 4.64 / 5.91 / 13.08 / 12.42 / 13.48，
+           五套主题全过。门禁见 tests/test_theme_contrast_gate.py 的
+           test_scrollbar_handle_meets_non_text_contrast。 */
         QScrollBar:horizontal {{
             background: palette(window);
             height: 10px;
             margin: 0;
         }}
         QScrollBar::handle:horizontal {{
-            background: palette(mid);
+            background: palette(placeholder-text);
             border-radius: 5px;
             min-width: 30px;
         }}

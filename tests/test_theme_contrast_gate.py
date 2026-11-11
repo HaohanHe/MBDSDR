@@ -25,6 +25,7 @@
 from __future__ import annotations
 
 import os
+import re
 import sys
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -70,6 +71,32 @@ def test_on_primary_counterproof():
     """反证：白字压在 default 的原强调色上确实不达标（说明这条规则有实际意义）。"""
     original = "#C4845C"
     assert contrast_ratio("#FFFFFF", original) < 4.5, "反证前提变了，需重新评估这条规则"
+
+
+def test_scrollbar_handle_meets_non_text_contrast():
+    """滚动条手柄对轨道 ≥3:1（WCAG 非文本对比度）。
+
+    轨道是 window（bg），手柄是 placeholder-text（text_secondary）。实测 mid
+    对底色只有 1.36–3.13:1（default 1.63 / dark 1.72 / figma 2.03），所以 QSS
+    里的手柄**不能**写 palette(mid)——那正是 2026-11-11 横向滚动条被画成
+    #B85C5C、纵向看不清的根因。
+    """
+    for name, theme in THEMES.items():
+        c = theme.colors
+        ratio = contrast_ratio(c["text_secondary"], c["bg"])
+        assert ratio >= 3.0, (
+            f"{name} 滚动条手柄 {c['text_secondary']} on {c['bg']} 只有 {ratio:.2f}，"
+            f"低于非文本 3:1")
+
+
+def test_scrollbar_qss_uses_gated_handle_role():
+    """QSS 里两条 handle 规则都必须用被门禁盯住的那个角色，防止只改测试不改实现。"""
+    qss = THEMES["default"]._qss()
+    blocks = re.findall(
+        r"QScrollBar::handle:(?:vertical|horizontal)\s*\{([^}]*)\}", qss)
+    assert len(blocks) == 2, f"应有纵/横两条 handle 规则，实际 {len(blocks)}"
+    for block in blocks:
+        assert "palette(placeholder-text)" in block, block
 
 
 # ---------------------------------------------------------------- 门禁二
