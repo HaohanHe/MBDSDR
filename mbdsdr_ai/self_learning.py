@@ -343,46 +343,44 @@ class SelfLearningEngine:
 
     def _load_experiences(self):
         """加载历史经验（只加载元数据）。"""
+        from .history_snapshot import load_json_files
         exp_dir = os.path.join(self.storage_dir, "experiences")
         if not os.path.exists(exp_dir):
             return
+        paths = []
         for date_dir in os.listdir(exp_dir):
             full_dir = os.path.join(exp_dir, date_dir)
             if not os.path.isdir(full_dir):
                 continue
             for filename in os.listdir(full_dir):
-                if not filename.endswith('.json'):
-                    continue
-                path = os.path.join(full_dir, filename)
-                try:
-                    with open(path, 'r', encoding='utf-8') as f:
-                        data = json.load(f)
-                    exp = Experience(
-                        experience_id=data["experience_id"],
-                        experience_type=ExperienceType(data["experience_type"]),
-                        question=data.get("question", ""),
-                        score=data.get("score", 0),
-                        feedback=data.get("feedback", ""),
-                        timestamp=data.get("timestamp", 0),
-                        learned=data.get("learned", False),
-                    )
-                    self.experiences[exp.experience_id] = exp
-                    self._counter = max(self._counter, int(exp.experience_id.split('_')[-1]))
-                except Exception:
-                    pass
+                if filename.endswith('.json'):
+                    paths.append(os.path.join(full_dir, filename))
+        for path, data in load_json_files(paths):
+            try:
+                exp = Experience(
+                    experience_id=data["experience_id"],
+                    experience_type=ExperienceType(data["experience_type"]),
+                    question=data.get("question", ""),
+                    score=data.get("score", 0),
+                    feedback=data.get("feedback", ""),
+                    timestamp=data.get("timestamp", 0),
+                    learned=data.get("learned", False),
+                )
+                self.experiences[exp.experience_id] = exp
+                self._counter = max(self._counter, int(exp.experience_id.split('_')[-1]))
+            except Exception:
+                pass
 
     def _load_patterns(self):
         """加载历史模式。"""
+        from .history_snapshot import load_json_files
         pattern_dir = os.path.join(self.storage_dir, "patterns")
         if not os.path.exists(pattern_dir):
             return
-        for filename in os.listdir(pattern_dir):
-            if not filename.endswith('.json'):
-                continue
-            path = os.path.join(pattern_dir, filename)
+        paths = [os.path.join(pattern_dir, f)
+                 for f in os.listdir(pattern_dir) if f.endswith('.json')]
+        for path, data in load_json_files(paths):
             try:
-                with open(path, 'r', encoding='utf-8') as f:
-                    data = json.load(f)
                 pattern = LearnedPattern(
                     pattern_id=data["pattern_id"],
                     pattern_type=data["pattern_type"],
