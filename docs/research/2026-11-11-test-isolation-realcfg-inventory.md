@@ -242,3 +242,9 @@ module 级 `mw` 先于 function 级 autouse 实例化，`MainWindow()` 在隔离
   断言本身不过宽（作用域是精度文本/状态栏片段/tooltip 片段），保留。
 - `mbdsdr_ai/config.py` 的 `ConfigStore.update()`：不改（理由见 §5 命名更正）。
 - 12 处用例体内直接构造：已由 autouse 兜底覆盖，未逐个改 fixture。
+- **待办（先登记不修）**：`test_gimbal_rotctld_sim::test_ui_never_shows_degrees` 两处断言隐患——
+  ① `assert "°" not in text` 应收窄到「指向精度」字段本身；同一串里将来合法出现目标角
+  （如「目标 123°」）就会误伤；② `"不可报"` 是硬编码中文短语，i18n 后必脆。
+  今天不动它们：它们守的是「模拟后端下不得报精度」这条核心不变量。
+- `scripts/triage_failure.py`（在途半成品判别器）：**先只读跑一周**，收集命中样本人工核对，
+  确认无误报再考虑接进 CI 失败摘要；它恒退出码 0，不作门禁。
