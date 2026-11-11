@@ -23,7 +23,7 @@ from __future__ import annotations
 
 from typing import List, Optional
 
-from PySide6.QtCore import Qt, Signal, QTimer, QRectF, QPointF
+from PySide6.QtCore import Qt, Signal, QTimer, QRectF, QPoint, QPointF
 from PySide6.QtGui import QColor, QFont, QPainter, QPen
 from PySide6.QtWidgets import (
     QFrame, QScrollArea, QSizePolicy, QToolButton, QVBoxLayout, QWidget,
@@ -356,10 +356,34 @@ class RightColumn(QScrollArea):
         section.set_expanded(True)
         changed = index != self._current
         self._current = index
-        # 展开会改变几何，等一帧再滚，否则算出来的位置是折叠前的高度。
-        QTimer.singleShot(0, lambda s=section: self.ensureWidgetVisible(s, 0, 8))
+        # 展开会改变几何，等一帧再算落点（否则算出来的是折叠前的高度）。
+        QTimer.singleShot(0, lambda s=section: self._reveal_section(s))
         if changed:
             self.currentChanged.emit(index)
+
+    def _reveal_section(self, section: "RightSection", _attempt: int = 0) -> None:
+        """程序化跳转的落点：把该节标题顶到视口顶部（W46 / P1-01）。
+
+        `ensureWidgetVisible(s, 0, 8)` 只做「最小滚动」，实测两处失真
+        （真 MainWindow、1366×768、视口 562）：
+          * 目标节已经在视口里露出一条边时它一帧都不动 → 跳「控制」后
+            标题 y=−281，被切在视口上方；
+          * 目标节比视口高时它只把标题压到视口**底边** → y=529/562，
+            正文全在视口外，等于跳过去只看到一条标题。
+        这里直接按标题的内容坐标设滚动值（超上限贴底），跳完标题完整可见。
+        滚动上限要等容器 resize 事件处理完才变大，首帧可能还没跟上，这时
+        下一帧再补一次（最多补 2 次）。
+        """
+        self._sync_container_height()
+        lay = self._container.layout()
+        if lay is not None:
+            lay.activate()
+        bar = self.verticalScrollBar()
+        y = int(section.mapTo(self._container, QPoint(0, 0)).y())
+        bar.setValue(max(0, y))
+        if _attempt < 2 and bar.maximum() < y:
+            QTimer.singleShot(
+                0, lambda s=section, n=_attempt + 1: self._reveal_section(s, n))
 
     # ------------------------------------------------------------------ 折叠
     def expand_all(self, expanded: bool = True) -> None:
