@@ -612,6 +612,80 @@ new_spacetime      | same object: False
 **执行顺序（待授权）**：① 先做 6 个带可变状态的模块 → 再补 UI/纯函数模块 → 最后上棘轮测试；
 每步单独提交、跑该模块测试，禁一次性全铺。
 
+## 5.11 同一实体、两个可变状态持有者（对象级多真值源）—— 2026-11-11 新增
+
+> 定性：与 §5.10 同族但不同层。§5.10 是「同一文件被加载成两个模块对象」；
+> 本条是「同一个事实被两个对象各存一份**可写**状态」。
+> 判据不是「代码看起来重复」，而是：**能否从两个入口独立改变该事实，且没有任何一方被强制同步**。
+> 本轮只出结论，**未改任何代码**；卫星闸门修复属他线提交（`94ab10cd`），本表只登记其**残留**。
+> 行号会随工作树漂移，检索以 `path::符号` 为准；下文行号取 2026-11-11 夜工作树。
+
+### 5.11.1 判定标准（先立规矩，再看清单）
+
+**合理（允许两个持有者）** —— 须同时满足：
+
+1. **单一写入口**：只有一个对象能改；另一个是只读派生（每次从真值重算）或显式投影
+   （写方整份 push，读方不保留差异）。
+2. **有失效协议**：要么每次读都重算，要么写方广播一次全量；不存在「各带 TTL、互相不可见」。
+3. **读取方不参与控制决策**：只用于显示，可容忍一拍旧值。
+4. **外部可变来源只有一个读取入口**（磁盘文件 / 环境变量不得被多个面板各自直读）。
+
+**必然出事（必须收敛）** —— 命中任一条：
+
+1. **两个写入口**：两侧都能被独立修改（`themes._FONT_SCALE_OVERRIDE`、`dev["_sample_rate"]`）。
+2. **写 A 读 B**：写入方与决策方不是同一个对象（tracker 闸门读天空图侧）。
+3. **各带缓存/TTL**：同一份数据两份内存副本，失效互不可见（`orbit._TLE_CACHE` 24h
+   与 `sat_tracker._catalog`）。
+4. **用副本校验/回滚主副本**：UI 先接受请求值、失败再手工回滚（采样率 4 处回滚）。
+5. **副本绕过真值源直读盘**：面板自己读 `gui_config.json` 并回填（ADS-B 每 5s）。
+
+**灰色**：两份都可写但生命周期极短、退出即全量重建（对话框草稿）——登记，不急着动。
+
+### 5.11.2 清单（按严重度）
+
+| 实体 | 持有者（path::符号） | 可变 | 后果 | 级别 |
+|---|---|---|---|---|
+| 卫星 TLE 目录 / 站址 / 选中星 | 天空图侧 `desktop/main_window.py::MainWindow.sat_tracker`，其目录在 `desktop/rf_sky_view.py::SatelliteTracker._catalog`；执行侧 `MainWindow._loop_sat_tracker`，其目录在 `mbdsdr_ai/sat_tracker.py::SatelliteTracker._catalog` | 是 | 闸门已改读执行侧（`94ab10cd`）；但天空图 `refresh()` 只用自持 `_catalog`，`_reload_catalog()` 仅在 `__init__` 调一次，「更新 TLE」（`MainWindow._on_update_sat_tle`）只写执行侧 → 同一会话内天空图星历与执行/调谐不一致（沉默，不报错） | **P1**（原 P0） |
+| 同一批 TLE 的三份内存状态 | `mbdsdr_ai/orbit.py::_TLE_CACHE`（`fetch_tle` 默认 24h）／`mbdsdr_ai/sat_tracker.py::SatelliteTracker._catalog`／磁盘 `~/.mbdsdr/tle_cache`（`orbit._CACHE_DIR` 与 `sat_tracker._tle_cache_dir` 同目录） | 是 | 只有磁盘共享；刷新落盘后另一侧内存仍读旧值（最长 24h），无失效广播 | **P1** |
+| 星历计算实现 ×3 | `desktop/rf_sky_view.py::SatelliteTracker`／`mbdsdr_ai/sat_tracker.py::SatelliteTracker`／`mbdsdr_ai/satellite/tracker.py::SatelliteTracker`（第三个由 `rf_sky_view::RFSkyView._build_tune_tracker` 每次构造） | 否（无状态） | 同一 az/el 三条代码路径，口径漂移不报错；判断「哪颗可跟踪」可能三个答案 | P2 |
+| 字体降档状态 | `desktop/themes.py::_FONT_SCALE_OVERRIDE` / `_FONT_SCALE_NOTE`，双模块实例（§5.10） | 是 | 已实测：写 A 读 B，提示永不显示 | **P0** |
+| 快捷键覆盖 | `desktop/shortcuts.py::_OVERRIDES`，双模块实例 | 是 | 同型：改键写一份、面板读另一份 → 自定义静默丢失 | **P1** |
+| 时间基准 | `mbdsdr_ai/new_spacetime.py::_global_engine`（`get_time_engine()`），双模块实例 | 是 | 两份 `TimeEngine`：跟踪、过境、测试可能不同基准；测试可因副本不同而绿（假绿） | **P1** |
+| 采样率 | 真值：`mbdsdr_ai/sdr_backend.py::SDRBackend._applied_sample_rate_hz`（驱动回读）；副本：`desktop/control_panel.py::ControlPanel.set_sample_rate` 下拉、`desktop/spectrum_widget.py::SpectrumState.sample_rate_hz`（每帧覆写）、`dev["_sample_rate"]`（`device_panel.py::DevicePanel._on_connect_clicked` / `module_panel.py::ModulePanel._emit_connect`）、`DesktopSettings` 的 `sample_rate_hz` | 是 | 真值唯一但需 4 处手工同步；失败回滚散在 `MainWindow` 采样率分支。漏一处即显示、录制段头、设置三份口径分裂 | **P1** |
+| 中心频率 | 后端值 / `SpectrumState.center_freq_hz`（每帧覆写）/ `settings.frequency_hz` / 状态栏与 VFO 显示 | 是 | 调谐失败有回滚路径，回滚期间三处短暂不一致；显示值本身是合法投影 | P2 |
+| 观测站坐标 | `MainWindow._observer_lat/_observer_lon`／`~/.mbdsdr/gui_config.json`／`read_config_site()` 镜像／`desktop/adsb_map_panel.py::AdsbMapPanel._refresh_observer_from_config`（每 5s 直读盘）／`new_spacetime_panel` 内 `_observer_lat` 副本／`rf_sky_view` 内部 observer | 是 | 代码自认「这些面板以前各读各的盘」（`MainWindow._push_site_to_panels` docstring）。ADS-B 距离列可能与主窗不同站；外部改 gui_config 后主窗不重载 | **P1** |
+| 设备连接参数（采样率/增益/PPM） | `ModulePanel._devices` 与 `DevicePanel` 各自枚举的 `dev` dict，均写 `_sample_rate/_gain/_ppm` 副本 | 是 | 两面板同设备参数互不同步（沉默：先连哪块用哪份） | P2 |
+| 设备能力报告 | `DevicePanel._last_capability_report` vs 其它面板每次 `build_capability_report()` 重算 | 否（派生） | 合理；但缓存不失效，换设备后旧报告仍可能被展示 | P3 |
+| 频段表 | `desktop/spectrum_widget.py::_BANDPLAN_CACHE`（模块级）vs `SpectrumState.bandplan`（实例） | 否（只读） | 无害：同源重复解析；双模块时各一份缓存，内容相同 | 无害 |
+| 配置实例 | `desktop/main.py::_boot_settings`（只读快照）vs `MainWindow.settings`（唯一可写实例） | 一写一读 | 合理；若 boot 实例也 `set()`，两个 flush 会整份覆盖（当前未触发） | P3 |
+
+> 另：claim 标签（用户已知）与 §5.10 的模块级副本不在本表重复登记。
+> 复现双模块身份：`python -c "import sys; sys.path[:0]=[r'D:\mbdsdr\MBDSDR', r'D:\mbdsdr\MBDSDR\desktop']; import themes, desktop.themes; print(themes is desktop.themes)"`
+> 实测 `themes / shortcuts / constants / settings / spectrum_processor / new_spacetime` 均 `same object: False`。
+
+### 5.11.3 治理（承接 §5.10，仍不动代码）
+
+原则：**一个实体一个 owner**；其余只允许「整份投影」或「可重算派生」。三种合法形态：
+
+- **真值持有者**：唯一写入口，docstring 指名。
+- **投影**：写方 push 全量，读方不保留差异。
+- **派生**：每次重算，或带显式失效。
+
+落地顺序：
+
+1. **卫星（P1）**：天空图 `_catalog` 改为订阅执行侧目录，删自持目录与私有加载入口；
+   `orbit._TLE_CACHE` 收进同一 TLE 服务，刷新后显式失效。
+   验收：刷新后一拍内天空图与执行侧 epoch 相同；反向测试——只更新一侧必须红。
+2. **采样率（P1）**：删 `dev["_sample_rate"]` 的独立写，连接时问后端回读；
+   `control_panel.set_sample_rate` 只做显示，回滚改为「回读覆盖」一次完成。
+3. **坐标（P1）**：`gui_config` 只留一个读取入口（settings 的 adapter）；
+   `adsb_map_panel` 删 5s 直读，改订阅 push。
+4. **模块副本（P1）**：`themes` / `shortcuts` / `time_basis` 按 §5.10 方案 ①（`sys.modules` 双向别名）。
+5. **P2/P3**：先加「同源断言」测试再收敛；`_last_capability_report` 加失效或直接删缓存。
+
+**红线**：不许把显示层副本改成真值对象（显示层本来就该有副本）；只砍「可写副本」与「第二写入口」。
+每条收敛必须带反向测试（两侧对调必须红），否则就是另一种假绿。
+
 ## 6. 账本线登记行并入（R1–R20）
 
 > 来源：`D:\mbdsdr\.tmp\account_redundancy_rows.md`（账本线导出 20 行，不是 16 行）。
