@@ -1,0 +1,116 @@
+diff --git a/desktop/main_window.py b/desktop/main_window.py
+index b3c7e40..f41180b 100644
+--- a/desktop/main_window.py
++++ b/desktop/main_window.py
+@@ -972,10 +972,13 @@ class MainWindow(QMainWindow):
+         # 与 self._worker（ai-sdr Mini WebSocket）互斥。硬件失败绝不静默切 mock。
+         self._active_sdr_backend: Optional[object] = None
+         # 硬件 connect 正在后台线程跑：并发点击/切换时直接拒绝，避免两个线程抢
+         # 同一根棒子（第二个 open 会拿到 ACCESS(-3)）。
+         self._connect_in_flight: bool = False
++        # 上一次 connect 的后台线程。超时返回后它可能仍卡在 connect() 里，
++        # 保留引用才能把「仍在收尾」读出来，而不是把闸门复位成空闲。
++        self._connect_worker: Optional[threading.Thread] = None
+         # NTRIP 配置对话框（非模态）。首次从菜单打开时才创建；保持引用防 GC。
+         self._ntrip_dialog: Optional[object] = None
+ 
+         # ---- 真实数据链路状态（A 频谱 / B baseband 录制 / C 声卡输出）----
+         # 统一的 IQ 轮询定时器（50ms / 20fps）：一次 read_samples 同时喂给
+@@ -6048,21 +6051,50 @@ class MainWindow(QMainWindow):
+         return (type(backend).__name__ or "未命名设备"), False
+ 
+     #: 硬件 connect 的后台等待上限：超过就按失败处理，别把界面锁死在「连接中」。
+     _CONNECT_WAIT_TIMEOUT_MS = 20000
+ 
++    def _connect_worker_alive(self) -> bool:
++        """上一次 connect 的后台线程是否还活着（超时窗口里它仍卡在 connect()）。"""
++        worker = getattr(self, "_connect_worker", None)
++        return bool(worker is not None and worker.is_alive())
++
++    @property
++    def connect_still_settling(self) -> bool:
++        """「上一次连接仍在收尾」：超时返回后线程未退出，不能再起第二根。"""
++        return bool(self._connect_in_flight and self._connect_worker_alive())
++
++    def _connect_busy_reason(self) -> str:
++        """连接闸门的唯一判定：空闲返回空串，忙则返回给用户看的原因。
++
++        收尾态（上次超时但线程还卡在 connect()）**不能**当空闲：此时再起一根
++        线程就是两根抢同一根棒子。线程真的退出后，闸门才回落成空闲。
++        """
++        if self._connect_in_flight and not self._connect_worker_alive():
++            self._connect_in_flight = False
++        if not self._connect_in_flight:
++            return ""
++        if self.connect_still_settling:
++            return (f"上一次连接仍在收尾（后台仍卡在 connect()，最多再等 "
++                    f"{self._CONNECT_WAIT_TIMEOUT_MS // 1000} 秒）")
++        return "正在连接设备，请等本次连接结束"
++
+     def _connect_backend_in_background(self, backend) -> bool:
+         """把原生 ``connect()`` 丢到后台线程，GUI 线程用嵌套事件循环等结果。
+ 
+         原生 connect 实测 2.0 s（USB 打开 + 调谐器探测），原先直接在 GUI 线程
+         调用、只在前面 ``processEvents()`` 冲一次事件循环：这 2 s 里窗口不重绘，
+         「连接中」标签停在旧值，用户看到的就是「点了没反应」。
+         这里保持同步返回语义（调用方仍在连接结束后接着切状态/下发参数），
+         但等待期间持续处理事件：窗口能重绘、能拖动，状态栏提示真的在刷。
+         """
+-        if self._connect_in_flight:
+-            self.statusBar().showMessage("正在连接设备，请等本次连接结束", MSG_QUICK)
++        busy = self._connect_busy_reason()
++        if busy:
++            self.statusBar().showMessage(busy, MSG_IMPORTANT)
++            if self.connect_still_settling:
++                logger.warning("拒绝第二次连接：上一次 connect 仍在后台收尾，"
++                               "不新增线程（避免两根线程抢同一根棒子）")
+             return False
+         self._connect_in_flight = True
+         box: dict = {}
+ 
+         def _worker() -> None:
+@@ -6090,14 +6122,21 @@ class MainWindow(QMainWindow):
+             watchdog.start(self._CONNECT_WAIT_TIMEOUT_MS)
+             loop.exec()
+         finally:
+             poll.stop()
+             watchdog.stop()
+-            self._connect_in_flight = False
++            # 超时返回 ≠ 线程退出：worker 仍卡在 connect() 时必须保持「收尾」态，
++            # 否则闸门重新打开，用户再点一下就是第二根线程抢同一根棒子。
++            self._connect_worker = worker
++            self._connect_in_flight = worker.is_alive()
+         if worker.is_alive():
++            self.statusBar().showMessage(
++                f"设备连接超过 {self._CONNECT_WAIT_TIMEOUT_MS // 1000} 秒未返回，"
++                "已停止等待；后台仍在收尾，请稍后再试", MSG_IMPORTANT)
+             logger.warning("设备 connect 超过 %d ms 未返回，按失败处理"
+-                           "（后台线程留着不阻塞界面）", self._CONNECT_WAIT_TIMEOUT_MS)
++                           "（后台线程留在 connect() 里收尾，保持忙碌态、不新增线程）",
++                           self._CONNECT_WAIT_TIMEOUT_MS)
+             return False
+         if "exc" in box:
+             raise box["exc"]
+         return bool(box.get("ok"))
+ 
+@@ -6110,14 +6149,16 @@ class MainWindow(QMainWindow):
+ 
+         被 _connect_dialog（用户手动选设备）和 _auto_enumerate_and_connect
+         （启动自动选 RTL）共用。连接失败返回 False 并写状态栏，不抛异常。
+         红线：硬件失败绝不静默切 mock 报 success。
+         """
+-        # 上一次连接还在后台跑：此时拆旧后端会把正在被 open 的同一个设备拽走，
+-        # 直接拒绝本次操作，让用户等当前这次结束。
+-        if self._connect_in_flight:
+-            self.statusBar().showMessage("正在连接设备，请等本次连接结束", MSG_QUICK)
++        # 上一次连接还在后台跑（含「已超时但线程仍卡在 connect()」的收尾态）：
++        # 此时拆旧后端会把正在被 open 的同一个设备拽走，直接拒绝本次操作，
++        # 并说清是还在连还是仍在收尾，让用户知道该等多久。
++        busy = self._connect_busy_reason()
++        if busy:
++            self.statusBar().showMessage(busy, MSG_IMPORTANT)
+             return False
+         # B1：切换设备必须先幂等拆除旧连接（停读线程/释放硬件/清 UI 连接态）。
+         # 不拆旧后端会出现两种坏状态：旧后端继续供数（界面换了、数据还是旧的）；
+         # 同一根棒子被自己占着，新 connect 直接 ACCESS(-3) 失败。
+         # 切换设备前先抓住当前调谐：teardown 会 set_connected(False) 清空
