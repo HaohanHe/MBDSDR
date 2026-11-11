@@ -60,7 +60,7 @@ from PySide6.QtGui import QPixmap, QFont  # noqa: E402
 from PySide6.QtWidgets import (  # noqa: E402
     QWidget, QVBoxLayout, QHBoxLayout, QFormLayout, QComboBox, QPushButton,
     QLabel, QCheckBox, QFrame, QFileDialog, QGroupBox, QMessageBox,
-    QLineEdit, QProgressBar,
+    QLineEdit, QProgressBar, QListWidget, QListWidgetItem,
 )
 
 from themes import get_theme, DEFAULT_THEME  # noqa: E402
@@ -104,6 +104,13 @@ ENHANCE_OPS = {
     "白平衡": "white_balance",
     "Kuwahara 降噪": "kuwahara",
 }
+
+#: 解码产物目录：**用户目录**，不写回源码树。
+#: 2026-11-11（P2-06）：旧实现把 PNG 写进 ``<repo>/mbdsdr_ai/artifacts/``，
+#: 跑一次解码就污染工作区（git status 多一堆未跟踪文件，且清理时容易误删
+#: 源码树里的东西）。输出与用户数据一律落 ``~/.mbdsdr/``（与 adsb_panel 的
+#: ``~/.mbdsdr/adsb`` 同口径）。
+_OUT_DIR = os.path.expanduser(os.path.join("~", ".mbdsdr", "weather"))
 
 
 def _theme_colors() -> Dict[str, str]:
@@ -469,6 +476,7 @@ class WeatherPanel(QWidget):
         self._frame_count = 0
         self._build_ui()
         self._on_satellite_changed(0)
+        self._load_history()
         self._refresh_state()
 
     # ------------------------------------------------------------------
@@ -572,6 +580,30 @@ class WeatherPanel(QWidget):
         eh.addStretch()
         cl.addWidget(enh_box)
 
+        # 产物：另存为 + 历史列表。输出目录是用户目录（_OUT_DIR），
+        # 不再污染源码树；历史列表让用户能找回前几次的解码/后处理结果。
+        self.save_btn = QPushButton("另存为 PNG...")
+        self.save_btn.setToolTip(
+            "把当前云图另存到你选择的位置；保存成败都会写在状态行")
+        self.save_btn.setEnabled(False)
+        self.save_btn.clicked.connect(self._save_current)
+        cl.addWidget(self.save_btn)
+
+        out_box = QGroupBox("历史产物（解码输出到 ~/.mbdsdr/weather）")
+        ol = QVBoxLayout(out_box)
+        ol.setContentsMargins(6, 6, 6, 6)
+        self.history = QListWidget()
+        self.history.setMaximumHeight(110)
+        self.history.setToolTip("以往解码/后处理的产物，点击可在右侧预览")
+        self.history.itemClicked.connect(self._on_history_clicked)
+        ol.addWidget(self.history)
+        self.history_hint = QLabel("还没有产物\n解码完成后会列在这里")
+        self.history_hint.setAlignment(Qt.AlignTop | Qt.AlignHCenter)
+        self.history_hint.setStyleSheet(
+            f"color:{self._c['text_secondary']};font-size:11px;")
+        ol.addWidget(self.history_hint)
+        cl.addWidget(out_box)
+
         outer.addWidget(ctrl)
 
         # 图像卡片
@@ -665,6 +697,8 @@ class WeatherPanel(QWidget):
         else:
             self.start_btn.setEnabled(self._iq_file is not None)
         self.stop_btn.setEnabled(busy)
+        self.save_btn.setEnabled(
+            bool(self._current_png and os.path.exists(self._current_png)))
 
         if no_hw:
             self._set_placeholder("未连接SDR设备 — 请接好硬件，或切到「录制文件」离线解码")
@@ -695,11 +729,9 @@ class WeatherPanel(QWidget):
 
     # ------------------------------------------------------------------
     def _out_png_path(self, tag: str) -> str:
-        art = os.path.join(
-            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-            "mbdsdr_ai", "artifacts")
-        os.makedirs(art, exist_ok=True)
-        return os.path.join(art, f"weather_{tag}_{int(time.time())}.png")
+        """产物路径：用户目录（``~/.mbdsdr/weather``），**绝不写回源码树**。"""
+        os.makedirs(_OUT_DIR, exist_ok=True)
+        return os.path.join(_OUT_DIR, f"weather_{tag}_{int(time.time())}.png")
 
     # ------------------------------------------------------------------
     def start_decode(self):
@@ -793,6 +825,8 @@ class WeatherPanel(QWidget):
             self._update_status(extra=(
                 f"出图成功: {os.path.basename(res['png'])}"
                 + (f" | 链路: {res['link']}" if res.get("link") else "")))
+            self.save_btn.setEnabled(True)
+            self._load_history()
         else:
             # 不出图：保持空白占位，如实说明，绝不补假图
             self._set_placeholder("无数据")
@@ -807,6 +841,54 @@ class WeatherPanel(QWidget):
         self.image_label.setPixmap(
             pix.scaled(self.image_label.size(),
                        Qt.KeepAspectRatio, Qt.SmoothTransformation))
+
+    # ------------------------------------------------------------------
+    # 产物：另存为 / 历史列表
+    # ------------------------------------------------------------------
+    def _load_history(self):
+        """刷新历史产物列表（只认 ``_OUT_DIR`` 下 weather_*.png）。"""
+        self.history.clear()
+        names = []
+        if os.path.isdir(_OUT_DIR):
+            names = sorted(
+                (f for f in os.listdir(_OUT_DIR)
+                 if f.startswith("weather_") and f.endswith(".png")),
+                reverse=True)[:50]
+        for f in names:
+            QListWidgetItem(f, self.history)
+        has_items = self.history.count() > 0
+        self.history.setVisible(has_items)
+        self.history_hint.setVisible(not has_items)
+
+    def _on_history_clicked(self, item: "QListWidgetItem"):
+        path = os.path.join(_OUT_DIR, item.text())
+        if not os.path.exists(path):
+            self._update_status(extra=f"产物已不存在: {item.text()}")
+            return
+        self._current_png = path
+        self._show_image(path)
+        self.image_title.setText(f"云图 — 历史产物 {item.text()}")
+        self.save_btn.setEnabled(True)
+        self._update_status(extra=f"预览历史产物: {item.text()}")
+
+    def _save_current(self):
+        """把当前云图另存为 PNG；**成败都要在状态行里说人话**（不许静默）。"""
+        if not (self._current_png and os.path.exists(self._current_png)):
+            return
+        path, _ = QFileDialog.getSaveFileName(
+            self, "保存云图", os.path.basename(self._current_png),
+            "PNG (*.png)")
+        if not path:
+            return
+        target_name = os.path.basename(str(path))
+        try:
+            from PIL import Image
+            Image.open(self._current_png).save(path)
+        except Exception as exc:  # noqa: BLE001 - 失败必须可见
+            self._update_status(
+                extra=f"保存 PNG 失败: {target_name}（{type(exc).__name__}）")
+            return
+        self._update_status(extra=f"云图已另存: {target_name}")
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
@@ -830,6 +912,7 @@ class WeatherPanel(QWidget):
             if os.path.exists(out_png):
                 self._current_png = out_png
                 self._show_image(out_png)
+                self._load_history()
         except Exception as e:  # noqa: BLE001
             self._update_status(extra=f"后处理失败: {_clean_exc(e)}")
 
