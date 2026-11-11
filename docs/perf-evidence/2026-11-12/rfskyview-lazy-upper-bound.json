@@ -1,0 +1,18 @@
+{
+ "question": "RFSkyView 惰性构建能回收多少（定义 C）",
+ "measured_cost_ms": 345.6,
+ "evidence": "docs/perf-evidence/2026-11-11/ctor_panel_type_breakdown_types.json run3",
+ "default_page_fact": "desktop/main_window.py:1829 把 self.sky_view 加为 left_tab 第 0 页（默认可见页）；频谱在同文件 1934 才加入",
+ "bounds": {
+  "upper_ms": 345.6,
+  "lower_ms": 0,
+  "expected_ms": 0
+ },
+ "reason": "惰性构建的触发是首次显示；默认页就是星象仪，首帧前必须建，回收 0。除非同时改默认页——那是产品决策，且会把 345.6 变成用户第一次点星象仪的等待。",
+ "conditions_where_it_pays": [
+  "默认页改成非星象仪",
+  "且持久化布局恢复的也不是星象仪页"
+ ],
+ "method": "上界=该控件构造实测值；下界=0；期望=按当前默认页取 0。判据：首帧内容必须完整，空壳不算省。",
+ "not_mine": "未改 desktop/rf_sky_view.py 与 desktop/main_window.py，仅给口径"
+}

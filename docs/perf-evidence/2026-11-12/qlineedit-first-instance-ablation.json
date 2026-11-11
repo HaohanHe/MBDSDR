@@ -1,0 +1,114 @@
+{
+ "question": "types run3 里 QLineEdit 343.3 ms（13 个合计）到底是什么成本，能否首帧后预热",
+ "method": "消融法；每个 case 独立进程（第一次建 QLineEdit 每进程只有一次），各 3 次取中位。尺子 windows + QT_SCALE_FACTOR=1 + MiSans 10pt",
+ "script": "scripts/repro/2026-11-12-qlineedit-first-instance.py --case cold|font|qss|draw|prewarm",
+ "cases_3runs_ms": {
+  "cold": {
+   "first_qlineedit_ms": [
+    282.0,
+    323.8,
+    368.9
+   ],
+   "second_qlineedit_ms": [
+    0.0,
+    0.0,
+    0.0
+   ]
+  },
+  "font": {
+   "font_metrics_warm_ms": [
+    280.4,
+    340.2,
+    350.8
+   ],
+   "first_qlineedit_ms": [
+    0.2,
+    0.2,
+    0.2
+   ]
+  },
+  "qss": {
+   "theme_apply_ms": [
+    2.6,
+    2.8,
+    3.3
+   ],
+   "first_qlineedit_ms": [
+    1.0,
+    1.0,
+    3.9
+   ],
+   "qss_len": 20127
+  },
+  "draw": {
+   "first_qlineedit_ms": [
+    1.0,
+    1.1,
+    1.3
+   ],
+   "first_draw_ms": [
+    68.3,
+    74.4,
+    83.5
+   ]
+  },
+  "prewarm": {
+   "first_frame_ms": [
+    76.1,
+    78.5,
+    79.4
+   ],
+   "prewarm_first_ms": [
+    0.1,
+    0.2,
+    0.2
+   ],
+   "prewarm_second_ms": [
+    0.1,
+    0.1,
+    0.1
+   ],
+   "prewarm_show_ms": [
+    34.4,
+    36.3,
+    37.4
+   ]
+  }
+ },
+ "medians": {
+  "cold_qlineedit": 323.8,
+  "font_metrics_first": 340.2,
+  "font_warmed_qlineedit": 0.2,
+  "qss_assembly": 0.8,
+  "qss_warmed_qlineedit": 1.0,
+  "first_draw_top_level": 74.4,
+  "prewarm_after_frame_qlineedit": 0.2
+ },
+ "decomposition": {
+  "字体度量首算": {
+   "ms": "≈323.6",
+   "share": "≈99.9%",
+   "evidence": "cold 323.8 vs 先摸 QFontMetrics 后 0.2"
+  },
+  "QStyleSheetStyle 装配": {
+   "ms": "≈0.8",
+   "evidence": "预热字体后 0.2 → 应用 20127 字符 QSS 后 1.0（theme.apply 本身 2.6–3.3）"
+  },
+  "首次 draw": {
+   "ms": "68.3–83.5",
+   "evidence": "独立顶级窗口 show+processEvents；是顶层窗成本，不是输入框特有"
+  },
+  "后续 12 个实例": {
+   "ms": "0.0–0.2",
+   "evidence": "second_qlineedit_ms"
+  }
+ },
+ "prewarm": {
+  "setup": "最小窗口（一个 QLabel）→ show + 一次 processEvents（首帧 76.1–79.4 ms）",
+  "first_qlineedit_after_frame_ms": "0.1–0.2",
+  "second_qlineedit_ms": "0.1",
+  "conclusion": "首帧只要画过任何文字控件，字体度量就已预热：首帧后建第一个 QLineEdit 只花 0.1–0.2 ms。所以首帧后预热既无收益也无代价；反过来，把首建 QLineEdit 挪到首帧后也不会省下 323 ms——这笔钱会转给第一个需要文字度量的控件（在首帧绘制里）。"
+ },
+ "verdict": "343.3 ms 不是 QLineEdit 的成本，是进程首次字体度量，被「首次要文字度量」的控件付掉；就定义 C 而言延迟构建回收 = 0 ms（只会转嫁，不会消失）。",
+ "load": "每 case 测前/测后系统 CPU 均有记录（7.4→11.3 / 13.3→36.1 / 19.0→12.1 等），全程 python 总占比 <200%"
+}
