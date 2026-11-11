@@ -73,3 +73,18 @@ def test_help_planetarium_points_at_real_entry():
     assert "顶栏" not in text
     assert "星象仪模式" in text
     assert "视图" in text
+
+
+def test_scanner_empty_state_distinguishes_zero_hits():
+    """已连接且扫完 0 段时，空态应指向门限/步进，而不是让用户去连设备。"""
+    import scanner_panel as sp
+
+    done_empty = sp.empty_hint_text(True, True, True)
+    assert "连上设备" not in done_empty
+    assert "门限" in done_empty
+
+    not_started = sp.empty_hint_text(False, True, True)
+    assert "连上设备" in not_started
+
+    no_kernel = sp.empty_hint_text(True, True, False)
+    assert "连上设备" in no_kernel

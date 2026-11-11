@@ -161,6 +161,19 @@ class _ScanWorker(QThread):
         self.done.emit(out)
 
 
+def empty_hint_text(scan_ran: bool, connected: bool,
+                    kernel_ok: bool) -> str:
+    """空态文案按真实状态分支：没开始扫 vs 扫完但 0 段。
+
+    已连接且扫完了还说「连上设备后点开始扫频」是空态误导——用户会去
+    找设备，而真正该做的是调门限或步进。
+    """
+    if scan_ran and connected and kernel_ok:
+        return ("本次扫频没有发现超过门限的活动段\n"
+                "调低「门限余量」或减小「步进」后重新扫频")
+    return "还没有活动段\n连上设备后点「开始扫频」"
+
+
 class ScannerPanel(QWidget):
     """扫频面板：参数输入 + 进度 + 活动段列表。"""
 
@@ -178,6 +191,7 @@ class ScannerPanel(QWidget):
         self._connected = False
         self._worker: Optional[_ScanWorker] = None
         self._segments: list = []
+        self._scan_ran = False
         self._build_ui()
         self._refresh_state()
 
@@ -216,7 +230,7 @@ class ScannerPanel(QWidget):
         root.addWidget(params)
 
         row = QHBoxLayout()
-        self.scan_btn = QPushButton("开始扫描")
+        self.scan_btn = QPushButton("开始扫频")
         self.scan_btn.clicked.connect(self._on_start_clicked)
         self.cancel_btn = QPushButton("取消")
         self.cancel_btn.setEnabled(False)
@@ -241,7 +255,7 @@ class ScannerPanel(QWidget):
         # 「界面坏了」，两种都是误导。没有活动段时换成一句说明，占同一块
         # 空间；有结果立刻换回列表（不删控件，只切换可见性）。
         self.empty_hint = QLabel(
-            "还没有活动段\n连上设备后点「开始扫描」")
+            "还没有活动段\n连上设备后点「开始扫频」")
         self.empty_hint.setObjectName("scanEmptyHint")
         self.empty_hint.setAlignment(Qt.AlignCenter)
         self.empty_hint.setWordWrap(True)
@@ -254,8 +268,16 @@ class ScannerPanel(QWidget):
         root.addWidget(tip)
 
     def _sync_empty_hint(self) -> None:
-        """结果列表与空态提示二选一（两者都保留，只切可见性）。"""
+        """结果列表与空态提示二选一（两者都保留，只切可见性）。
+
+        空态文案按真实状态分两种：没开始扫 / 扫完但 0 段。已连接却说
+        「连上设备后点『开始扫频』」是空态误导，用户会去找设备。
+        """
         empty = self.result_list.count() == 0
+        if empty:
+            self.empty_hint.setText(
+                empty_hint_text(self._scan_ran, self._connected,
+                                _KERNEL_AVAILABLE))
         self.empty_hint.setVisible(empty)
         self.result_list.setVisible(not empty)
 
@@ -282,9 +304,10 @@ class ScannerPanel(QWidget):
         elif not ready:
             self.status_label.setText("未连接")
         elif scanning:
-            self.status_label.setText("扫描中…")
+            self.status_label.setText("扫频中…")
         else:
             self.status_label.setText("就绪")
+        self._sync_empty_hint()
 
     # ------------------------------------------------------------------ slots
     def _on_start_clicked(self):
@@ -300,13 +323,14 @@ class ScannerPanel(QWidget):
         # 结果虽可重扫，但用户可能正对着某条活动段在看（误点一下全没了）。
         if self.result_list.count() > 0:
             ans = QMessageBox.question(
-                self, "开始新扫描？",
-                f"当前有 {self.result_list.count()} 条扫描结果，"
-                "开始新扫描会清空它们。是否继续？",
+                self, "开始新扫频？",
+                f"当前有 {self.result_list.count()} 条扫频结果，"
+                "开始新扫频会清空它们。是否继续？",
                 QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
             if ans != QMessageBox.Yes:
                 return
         self.result_list.clear()
+        self._scan_ran = False
         self._sync_empty_hint()
         self._segments = []
         self.progress_bar.setValue(0)
@@ -327,11 +351,12 @@ class ScannerPanel(QWidget):
 
     def _on_progress(self, frac: float, center_hz: float):
         self.progress_bar.setValue(int(frac * 100))
-        self.status_label.setText(f"扫描中… {center_hz / 1e6:.3f} MHz")
+        self.status_label.setText(f"扫频中… {center_hz / 1e6:.3f} MHz")
         self.progress.emit(float(frac), float(center_hz))
 
     def _on_done(self, segments: list):
         self._segments = segments or []
+        self._scan_ran = True
         self.result_list.clear()
         for seg in self._segments:
             icon = _KIND_ICON.get(seg.get("kind", "UNKNOWN"), "•")
