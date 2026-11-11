@@ -59,8 +59,9 @@ def sample_rate_combo_items(device) -> list:
 
     档位只来自设备能力 ``mbdsdr_ai.device_capabilities.sample_rate_options``
     （后端离散表 ∩ 设备量程）；桌面不再持有第二份档位表。设备未报告量程
-    （含尚未连接）时只给一项显式「未知」说明，data=None，应用侧按
-    ``DEFAULT_SAMPLE_RATE_HZ`` 兜底——文案里的默认值与兜底是同一个常量。
+    （含尚未连接）时只给一项显式「档位未知」说明，data=None，**不显示任何
+    MS/s 数字**（避免被读成设备能跑的速率）；连接时的兜底值由调用方按
+    ``DEFAULT_SAMPLE_RATE_HZ`` 决定，不写进下拉文案。
     能力查询失败只记日志并按「未知」处理，不编档位。
     """
     options = None
@@ -77,8 +78,8 @@ def sample_rate_combo_items(device) -> list:
                            type(exc).__name__, exc)
     if not options:
         # 文案要能塞进 320px 右栏的下拉；「为什么未知」放进 tooltip。
-        # 「未知」必须保留（能力确实没报），后缀与控制面板同一句写法。
-        return [(f"未知 · {DEFAULT_SR_UNCONFIRMED}", None)]
+        # 「未知」必须保留（能力确实没报），且不得夹带 MS/s 数字。
+        return [("档位未知，连接设备后探测", None)]
     return [(format_sample_rate(rate), float(rate)) for rate in options]
 
 

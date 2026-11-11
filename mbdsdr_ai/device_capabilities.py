@@ -273,6 +273,68 @@ def sample_rate_options_for_backend(backend: Any) -> Optional[list]:
     return sample_rate_options(raw)
 
 
+#: 采样率档位状态：``None`` 只是「没有可见档位」，但原因不同，界面必须分开说。
+#: pending_probe = 还没连/还没探测，连接后可能拿到；not_reported = 已连接且
+#: 后端确实没有可用范围；unattributed = 有范围数值但没标来源（生产端缺登记）。
+SR_STATE_KNOWN = "known"
+SR_STATE_PENDING_PROBE = "pending_probe"
+SR_STATE_UNATTRIBUTED = "unattributed"
+SR_STATE_NOT_REPORTED = "not_reported"
+SR_STATE_NO_DEVICE = "no_device"
+
+#: 空档位时下拉里显示的唯一一句话（不得含任何 MS/s 数字）。
+SR_STATE_MESSAGES: Dict[str, str] = {
+    SR_STATE_PENDING_PROBE: "档位未知，连接设备后探测",
+    SR_STATE_UNATTRIBUTED: "档位未知（设备未标注来源）",
+    SR_STATE_NOT_REPORTED: "该后端不提供采样率档位",
+    SR_STATE_NO_DEVICE: "档位未知，连接设备后探测",
+}
+
+
+@dataclass(frozen=True)
+class SampleRateOptionsReport:
+    """采样率档位 + 「为什么没有」的状态；界面据此区分两种空态。"""
+
+    options: Optional[list]
+    state: str
+    message: str
+
+    @property
+    def known(self) -> bool:
+        return self.state == SR_STATE_KNOWN
+
+
+def sample_rate_options_report(backend: Any) -> SampleRateOptionsReport:
+    """取档位并给出空态原因（``sample_rate_options_for_backend`` 的超集）。
+
+    区分两类 None：
+      * 还没探测（未连接）→ "档位未知，连接设备后探测"；
+      * 已连接仍没有 → "该后端不提供采样率档位"（有范围数值但缺来源则单独说明）。
+    连接后由后端把探测结果写进 ``capability_status``（probed），下一次刷新
+    自然变成真实档位，说明项随之消失。
+    """
+    dev = getattr(backend, "device", None)
+    if dev is None:
+        return SampleRateOptionsReport(
+            None, SR_STATE_NO_DEVICE, SR_STATE_MESSAGES[SR_STATE_NO_DEVICE])
+    options = sample_rate_options_for_backend(backend)
+    if options:
+        return SampleRateOptionsReport(list(options), SR_STATE_KNOWN, "")
+    connected = bool(getattr(getattr(backend, "status", None), "connected", False)
+                     or getattr(dev, "connected", False))
+    state = SR_STATE_PENDING_PROBE
+    if connected:
+        if _as_range(getattr(dev, "sample_rate_range", None)) is None:
+            state = SR_STATE_NOT_REPORTED
+        else:
+            statuses = dict(getattr(dev, "capability_status", None) or {})
+            state = (SR_STATE_UNATTRIBUTED
+                     if statuses.get("sample_rate_range")
+                     not in (STATUS_PROBED, STATUS_DECLARED)
+                     else SR_STATE_NOT_REPORTED)
+    return SampleRateOptionsReport(None, state, SR_STATE_MESSAGES[state])
+
+
 def build_capability_report(device: Dict[str, Any]) -> Dict[str, CapabilityField]:
     """把设备 dict 归一成 {字段: CapabilityField}；缺失即未知，绝不填默认值。"""
     device = dict(device or {})

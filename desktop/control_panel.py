@@ -368,6 +368,10 @@ class ControlPanel(QWidget):
             self.record_status.setText("未连接")
         elif not self._recording:
             self.record_status.setText("未录音")
+        if connected:
+            # 连接后立即按活跃后端探测结果回填档位：把「档位未知，连接设备后探测」
+            # 换成真实档位；没有探测结果就保持原说明项（不编档）。
+            self.refresh_sample_rate_options_from_active_backend()
 
     def _build_ui(self):
         layout = QVBoxLayout(self)
@@ -579,8 +583,10 @@ class ControlPanel(QWidget):
         self.sample_rate_combo.setSizePolicy(
             QSizePolicy.Ignored, QSizePolicy.Fixed)
         self.sample_rate_combo.setToolTip(
-            "采样率档位来自设备能力。显示「未知…」时说明后端未报告档位，"
-            "那一项只是说明，不代表设备能力。")
+            "采样率档位来自设备能力。显示「档位未知，连接设备后探测」时，"
+            "说明还没拿到档位（连接后按探测结果自动回填）；显示"
+            "「该后端不提供采样率档位」时，说明该后端没有可用档位。"
+            "说明项不是档位，不代表设备能力。")
         self._populate_sample_rate_options(
             self._default_sample_rate_options(), DEFAULT_SAMPLE_RATE_HZ)
         self.sample_rate_combo.currentIndexChanged.connect(self._on_sample_rate_changed)
@@ -1607,8 +1613,12 @@ class ControlPanel(QWidget):
                            type(exc).__name__, exc)
             return []
 
-    def _populate_sample_rate_options(self, options, select_hz=None):
-        """用后端可见档位重建下拉；保持“可见 ⊆ 后端可接受”，不补默认档。"""
+    def _populate_sample_rate_options(self, options, select_hz=None, message=""):
+        """用后端可见档位重建下拉；保持“可见 ⊆ 后端可接受”，不补默认档。
+
+        ``options`` 为空时只放一条说明项（不可选），文案由 ``message`` 给出
+        ——区分「还没探测」与「后端不给档位」，且绝不出现任何 MS/s 数字。
+        """
         combo = self.sample_rate_combo
         rates = [float(r) for r in (options or [])]
         current = combo.currentData()
@@ -1618,9 +1628,11 @@ class ControlPanel(QWidget):
         for _rate, _text in zip(rates, self._sr_base_texts):
             combo.addItem(_text, float(_rate))
         if not rates:
-            # 未知不是“一档”，给出不可选的说明项；不拿默认采样率凑成假档位。
-            combo.addItem("未知（后端未报告采样率范围）", None)
-            self._sr_base_texts = ["未知（后端未报告采样率范围）"]
+            # 未知不是“一档”，给出不可选的说明项；不拿默认采样率凑成假档位，
+            # 也不用 MS/s 数字暗示设备能跑多少。
+            text = message or "档位未知，连接设备后探测"
+            combo.addItem(text, None)
+            self._sr_base_texts = [text]
             combo.setEnabled(False)
             combo.setCurrentIndex(0)
             combo.blockSignals(False)
@@ -1661,7 +1673,10 @@ class ControlPanel(QWidget):
         default_text = format_sample_rate(DEFAULT_SAMPLE_RATE_HZ)
         combo.blockSignals(True)
         for i, base in enumerate(base_texts):
-            if connected:
+            if combo.itemData(i) is None:
+                # 「档位未知…」是说明项，不是默认档；不往上叠加「未确认」。
+                combo.setItemText(i, base)
+            elif connected:
                 combo.setItemText(i, base)
             elif base == default_text:
                 combo.setItemText(i, DEFAULT_SR_UNCONFIRMED)
@@ -1669,13 +1684,14 @@ class ControlPanel(QWidget):
                 combo.setItemText(i, f"{base}（未确认）")
         combo.blockSignals(False)
 
-    def set_sample_rate_options(self, options, select_hz=None):
-        """由后端能力设置可见档位；``options=None`` 表示未知，显示说明项。"""
+    def set_sample_rate_options(self, options, select_hz=None, message=""):
+        """由后端能力设置可见档位；``options=None`` 表示未知，显示 ``message``。"""
         self._sample_rate_options = [float(r) for r in (options or [])]
-        self._populate_sample_rate_options(self._sample_rate_options, select_hz)
+        self._populate_sample_rate_options(
+            self._sample_rate_options, select_hz, message)
 
     def refresh_sample_rate_options_from_active_backend(self):
-        """按当前活跃后端刷新可见档位（下拉展开时调用，不依赖前端常量）。"""
+        """按当前活跃后端刷新可见档位（下拉展开/连接成功时调用）。"""
         win = self.window()
         backend = getattr(win, "_active_sdr_backend", None)
         if backend is None:
@@ -1688,13 +1704,15 @@ class ControlPanel(QWidget):
                            type(exc).__name__, exc)
             current = None
         try:
-            from mbdsdr_ai.device_capabilities import sample_rate_options_for_backend
-            options = sample_rate_options_for_backend(backend)
+            from mbdsdr_ai.device_capabilities import sample_rate_options_report
+            report = sample_rate_options_report(backend)
         except Exception as exc:
             logger.warning("获取后端采样率档位失败，按未知处理: %s: %s",
                            type(exc).__name__, exc)
-            options = None
-        self.set_sample_rate_options(options, current)
+            self.set_sample_rate_options(
+                None, current, "档位未知（读取设备能力失败）")
+            return
+        self.set_sample_rate_options(report.options, current, report.message)
 
     def set_sample_rate(self, rate_hz: float):
         """从外部恢复采样率档位；无精确匹配时选最近档，不发射 sample_rate_changed。

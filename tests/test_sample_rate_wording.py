@@ -56,13 +56,13 @@ class TestSampleRateWording:
             panel.deleteLater()
 
     def test_module_panel_unknown_item_uses_same_wording(self, qtapp):
-        from constants import DEFAULT_SR_UNCONFIRMED
         from module_panel import ModulePanel
         panel = ModulePanel()
         try:
             panel._fill_sample_rate_options(None)
-            assert panel.sr_combo.currentText() == f"未知 · {DEFAULT_SR_UNCONFIRMED}"
-            assert TOKEN in panel.sr_combo.currentText()
+            assert panel.sr_combo.currentText() == "档位未知，连接设备后探测"
+            assert "MS/s" not in panel.sr_combo.currentText(), \
+                "未知档位不得夹带 MS/s 数字（会被读成设备能跑的速率）"
             assert panel.sr_combo.currentData() is None, "未知档不得塞假数据"
             assert panel.sr_combo.isEnabled() is False
         finally:
