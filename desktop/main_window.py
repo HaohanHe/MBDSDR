@@ -2164,7 +2164,7 @@ class MainWindow(QMainWindow):
         # 见各栏最小宽）；窗口更宽时增量优先给左栏工作面。
         # 左栏 ≥ 中栏是硬规则：中栏空态地图不许吃成主区；右栏 320 起
         # （再窄就出横向滚动条），保证 1000 宽时三栏份额都在 12%~35% 内。
-        self._main_splitter.setSizes([470, 330, 320])
+        self._main_splitter.setSizes(list(self._DEFAULT_THREE_COLUMN_SIZES))
         # 窗口不允许窄于三栏的真实下限：否则右栏会被窗口右边缘直接裁掉，
         # 只剩一条边（2026-11-10 用户截图「有的东西没展示全」就是这样）。
         # 屏幕放得下就按三栏下限兜底；屏幕更小则退回可用区 94%，不超屏。
@@ -11543,10 +11543,77 @@ class MainWindow(QMainWindow):
             ver = 0
         if sizes is not None and ver >= self._THREE_COLUMN_LAYOUT_VERSION \
                 and getattr(self, "_main_splitter", None) is not None:
+            self._restore_three_column_sizes(sizes)
+
+    #: 三栏默认宽度（左/中/右）：与构造期 setSizes 同一口径。
+    _DEFAULT_THREE_COLUMN_SIZES = (470, 330, 320)
+
+    def _three_column_screen_width(self) -> int:
+        """校验用的屏宽：优先窗口所在屏，取不到就退主屏/1920。"""
+        try:
+            scr = self.screen()
+            if scr is None:
+                from PySide6.QtWidgets import QApplication
+                scr = QApplication.primaryScreen()
+            if scr is not None:
+                return int(scr.availableGeometry().width())
+        except (AttributeError, RuntimeError):
+            pass
+        return 1920
+
+    def _validate_three_column_sizes(self, sizes):
+        """三栏宽度是否可落地。返回 ``(ok, reason)``。
+
+        拒绝条件（存储值可能是用户手改、旧版本别的格式、或跨屏恢复的
+        脏数据）：长度≠3、任一 ≤0、任一 > 屏宽、三栏和 > 可用宽度。
+        任何一条命中都**不**拿它恢复布局——中栏 2000px 这类值会把窗口
+        塌掉（实测 ``[260,2000,326]``）。
+        """
+        if not isinstance(sizes, (list, tuple)):
+            return False, f"不是三元素序列（{type(sizes).__name__}）"
+        try:
+            vals = [int(v) for v in sizes]
+        except (TypeError, ValueError):
+            return False, f"含非整数项（原值={sizes!r}）"
+        if len(vals) != 3:
+            return False, f"长度≠3（实际 {len(vals)}）"
+        if any(v <= 0 for v in vals):
+            return False, f"存在 ≤0 的栏宽（{vals}）"
+        screen_w = self._three_column_screen_width()
+        if any(v > screen_w for v in vals):
+            return False, f"单栏宽 {max(vals)} > 屏宽 {screen_w}"
+        avail = self.width() if self.width() > 0 else screen_w
+        if sum(vals) > avail:
+            return False, f"三栏和 {sum(vals)} > 可用宽度 {avail}"
+        return True, ""
+
+    def _restore_three_column_sizes(self, sizes) -> None:
+        """恢复三栏比例；存储值不可信时忽略并回落默认（带一行警告）。"""
+        sp = self._main_splitter
+        original = sizes
+        vec = None
+        if isinstance(sizes, (list, tuple)):
             try:
-                self._main_splitter.restoreState(sizes)
-            except Exception:
-                pass
+                vec = [int(v) for v in sizes]
+            except (TypeError, ValueError):
+                vec = None
+        else:
+            # 正常格式是 QSplitter.saveState() 的 QByteArray：先恢复到控件
+            # 上拿到真实 widths 再校验；decode 失败按不可用处理。
+            try:
+                sp.restoreState(sizes)
+                vec = [int(v) for v in sp.sizes()]
+            except Exception:  # noqa: BLE001 - 脏值一律回落，不抛给启动
+                vec = None
+        ok, reason = (False, "无法解析存储值") if vec is None else \
+            self._validate_three_column_sizes(vec)
+        if not ok:
+            logger.warning(
+                "三栏比例存储值不可用（原值=%r）：%s；忽略存储值，改用默认三栏 %r",
+                original, reason, list(self._DEFAULT_THREE_COLUMN_SIZES))
+            sp.setSizes(list(self._DEFAULT_THREE_COLUMN_SIZES))
+            return
+        sp.setSizes(vec)
 
     # 版本 5（2026-11-10）：默认比例改为「左 520 / 中 360 / 右 380」并把增量
     # 优先给左栏（左 ≥ 中为硬规则，中栏空态地图不许吃成主区）；version 4 的
@@ -11557,15 +11624,27 @@ class MainWindow(QMainWindow):
     def _save_window_state(self):
         s = QSettings("MBDSDR", "Desktop")
         s.setValue("window_geometry", self.saveGeometry())
-        # 三栏 splitter 比例持久化（替代旧 dock_state）
-        if getattr(self, "_main_splitter", None) is not None:
-            try:
-                s.setValue("three_column_sizes",
-                           self._main_splitter.saveState())
-                s.setValue("three_column_layout_version",
-                           self._THREE_COLUMN_LAYOUT_VERSION)
-            except Exception:
-                pass
+        # 三栏 splitter 比例持久化（替代旧 dock_state）。
+        # 保存前与读入同一道校验：当前值不可落地（≤0 / 超屏 / 超出窗口）
+        # 时先归位到默认三栏再落盘——否则一次坏状态会被永久写回注册表，
+        # 下次启动就靠读入侧兜底，坏值仍可能在两端之间来回滚。
+        sp = getattr(self, "_main_splitter", None)
+        if sp is None:
+            return
+        try:
+            widths = [int(v) for v in sp.sizes()]
+            ok, reason = self._validate_three_column_sizes(widths)
+            if not ok:
+                logger.warning(
+                    "三栏比例当前值不可用（实际=%r）：%s；拒绝保存该值，"
+                    "先归位默认三栏 %r 再落盘",
+                    widths, reason, list(self._DEFAULT_THREE_COLUMN_SIZES))
+                sp.setSizes(list(self._DEFAULT_THREE_COLUMN_SIZES))
+            s.setValue("three_column_sizes", sp.saveState())
+            s.setValue("three_column_layout_version",
+                       self._THREE_COLUMN_LAYOUT_VERSION)
+        except Exception:
+            pass
 
     def _start_sweep(self):
         """启动宽带扫频找台（真实后端步进调谐 → 拼接 PSD → 提取活动信号）。
