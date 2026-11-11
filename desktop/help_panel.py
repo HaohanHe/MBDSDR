@@ -185,8 +185,9 @@ def _build_dialog_class():
             foot = QLabel(page)
             foot.setWordWrap(True)
             foot.setText(
-                "本目录由注册表实时生成：面板 / 解调模式 / 数字解码能力表 / "
-                "长尾解码器 / AI 工具域 / 快捷键。新增能力会自动出现；"
+                "本目录由注册表生成：面板 / 解调模式 / 数字解码能力表 / "
+                "长尾解码器 / AI 工具域随注册表自动更新；快捷键与发射、录制、"
+                "书签等静态条目随版本更新。"
                 "标「暂不可用」的条目按原因处理，不会点了没反应。")
             lay.addWidget(foot)
             return page
