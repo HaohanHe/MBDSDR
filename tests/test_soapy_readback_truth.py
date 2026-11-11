@@ -130,3 +130,55 @@ class TestSoapyReadbackTruth:
         assert backend.get_frequency() == pytest.approx(100_000_000.0)
         assert backend.status.frequency_source == "request", \
             "没有回读通道时状态必须标成 request，不得冒充 readback"
+
+    def test_sample_rate_range_probe_marks_probed_for_ui(self, qtapp):
+        """连接回读拿到范围 → 登记 probed，采样率下拉才能从「未知」回填。
+
+        反证：沿用旧的合并 try，``getFrequencyRange`` 不存在会让后面三项
+        一起跳过，这里拿不到 probed，下拉永远停在「档位未知」。
+        """
+        class _Range:
+            def __init__(self, lo, hi):
+                self._lo, self._hi = float(lo), float(hi)
+
+            def minimum(self):
+                return self._lo
+
+            def maximum(self):
+                return self._hi
+
+        fake = _FakeSoapy()
+        # 故意只提供采样率范围：频率范围查不到不得连坐采样率探测。
+        fake.getSampleRateRange = lambda *_a: [_Range(2_000_000.0, 8_000_000.0)]
+        backend = _backend(fake)
+
+        assert backend.readback_hw_state() is True
+        assert backend.device.capability_status["sample_rate_range"] == "probed", \
+            "真从驱动查到范围就必须登记来源，否则界面按 unknown 拒绝生成档位"
+
+        from mbdsdr_ai.device_capabilities import sample_rate_options_report
+        rpt = sample_rate_options_report(backend)
+        assert rpt.known is True
+        assert rpt.options == [2_000_000.0, 8_000_000.0], \
+            "连续可调后端只给两端，但必须是驱动回读的真实范围"
+        assert rpt.message == ""
+
+    def test_sample_rate_range_probe_failure_stays_unknown(self, qtapp):
+        """范围查询失败时不得凭空标 probed；占位范围仍是「未标注来源」。"""
+        fake = _FakeSoapy()
+
+        def _boom(*_a):
+            raise RuntimeError("驱动不支持 getSampleRateRange")
+
+        fake.getSampleRateRange = _boom
+        backend = _backend(fake)
+
+        backend.readback_hw_state()
+        assert "sample_rate_range" not in backend.device.capability_status
+
+        from mbdsdr_ai.device_capabilities import sample_rate_options_report
+        rpt = sample_rate_options_report(backend)
+        assert rpt.options is None
+        assert rpt.state == "unattributed", \
+            "有占位范围但没来源 ≠ 已探测；不得生成任何 MS/s 档位"
+        assert "MS/s" not in rpt.message
