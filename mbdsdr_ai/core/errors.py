@@ -183,9 +183,14 @@ class DecoderNotAvailableError(SDRUserError):
 
 
 class DecoderNotStreamableError(DecoderNotAvailableError):
-    """解码器有文件级实现，但没有流式 IQ 入口。"""
+    """解码器有文件级实现，但没有流式 IQ 入口。
 
-    code = "not_implemented"
+    与 :class:`DecoderNotAvailableError` 分开：这是「我们没做流式入口」，
+    但**有替代做法**（``--decode-file``）；``not_implemented`` 是能力根本
+    未接线，两者对用户是两句话，不许合并。
+    """
+
+    code = "decoder_not_streamable"
 
     def _default_suggestion(self) -> str:
         return (

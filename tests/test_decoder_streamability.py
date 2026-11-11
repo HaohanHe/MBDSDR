@@ -71,7 +71,7 @@ def test_streaming_entry_rejected_without_side_effect(ctrl, dt):
     before = set(_dec_threads())
     with pytest.raises(DecoderNotStreamableError) as ei:
         ctrl.start_decoder(dt)
-    assert ei.value.code == "not_implemented"
+    assert ei.value.code == "decoder_not_streamable"
     assert dt in ei.value.suggestion or "--decode-file" in ei.value.suggestion
     assert set(_dec_threads()) == before
     assert ctrl._dec_counter == 0 and ctrl._decoders == {}

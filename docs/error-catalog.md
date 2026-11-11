@@ -98,6 +98,7 @@ AI 层各自拼中文。守卫测试 `tests/test_error_catalog_guard.py` 校验�
 | `confirm_disabled` | access | 确认通道被禁用（只读模式） | 确认通道已禁用（只读模式）：{detail} | 需要执行写操作时由宿主启用确认通道（MBDSDR_BRIDGE_CONFIRM）后重试。 | 否 |
 | `confirm_rejected` | access | 确认请求被拒绝 | 确认请求被拒绝：{detail} | 等当前确认过期或完成后再提交同一操作。 | 是 |
 | `decoder_not_available` | access | 解码器不可用 | 解码器不可用：{detail} | 安装对应解码依赖后重试。 | 否 |
+| `decoder_not_streamable` | access | 解码器没有流式入口 | {mode} 只有文件级解码，没有流式 IQ 入口。 | 改用文件级入口：--decode-file <文件> --mode {mode}；流式 start_decoder 仅支持 adsb/rds。 | 否 |
 | `denied_by_policy` | access | 策略拒绝执行 | denied_by_policy：策略拒绝执行 {tool}（规则集不可被 armed 覆盖）。 | 换用允许的工具或修改策略；不要重复尝试同一个被拒调用。 | 否 |
 | `device_busy` | access | 设备被占用 | 设备被其它进程占用：{detail} | 关闭占用进程后重试；不要并发打开同一设备。 | 是 |
 | `device_not_found` | access | 找不到设备 | 找不到 SDR 设备：{detail} | 检查 USB/驱动后重新枚举。 | 否 |

@@ -53,23 +53,27 @@ def test_declaration_partition_is_total_and_disjoint():
 
 @pytest.mark.parametrize("dt", FILE_ONLY_DECODERS)
 def test_file_only_decoder_streaming_is_rejected(ctrl, dt):
-    """反证 1：8 类文件级解码器逐个拒绝流式启动，错误码为 not_implemented。"""
+    """反证 1：8 类文件级解码器逐个拒绝流式启动，错误码为 decoder_not_streamable。
+
+    与「能力未接线」的 ``not_implemented`` 分开：这里能力真实存在，只是
+    没有流式入口，替代做法是 ``--decode-file``。
+    """
     with pytest.raises(DecoderNotStreamableError) as ei:
         ctrl.start_decoder(dt)
-    assert ei.value.code == "not_implemented"
+    assert ei.value.code == "decoder_not_streamable"
     assert "文件级" in ei.value.message
     assert "--decode-file" in ei.value.suggestion
 
 
 @pytest.mark.parametrize("dt", FILE_ONLY_DECODERS)
-def test_mcp_reports_not_implemented(ctrl, dt):
-    """反证 2：MCP 出口必须是 error/not_implemented，且没有 handle、没有 ok=True。"""
+def test_mcp_reports_not_streamable(ctrl, dt):
+    """反证 2：MCP 出口必须是 error/decoder_not_streamable，且无 handle、无 ok=True。"""
     ctrl.is_connected = lambda: True
     ts = MCPToolSet(ctrl, policy=_AllowAllPolicy())
     out = ts.call_tool("start_decoder", {"decoder_type": dt})
     assert out.get("ok") is not True
     assert out.get("outcome") == "error"
-    assert out.get("error") == "not_implemented"
+    assert out.get("error") == "decoder_not_streamable"
     assert "handle" not in out
     assert out.get("suggestion")
 
@@ -106,3 +110,42 @@ def test_unknown_decoder_is_not_mislabeled(ctrl):
         ctrl.start_decoder("nonexistent_mode_xyz")
     assert type(ei.value) is DecoderNotAvailableError
     assert ei.value.code == "decoder_not_available"
+
+
+def test_unimplemented_path_still_returns_not_implemented(tmp_path):
+    """反证 6：真正的「未实现」路径仍返回 not_implemented，两个码没被合并。
+
+    ft8 通用入口未接线（仓内有算法实现，但通用入口没接）：它既不是
+    「未知解码器」，也不是「只有文件级入口」，必须仍是 not_implemented。
+    """
+    import wave
+
+    from mbdsdr_ai.decode_router import run_digital_mode
+
+    wav = tmp_path / "silence.wav"
+    with wave.open(str(wav), "wb") as wf:
+        wf.setnchannels(1)
+        wf.setsampwidth(2)
+        wf.setframerate(12000)
+        wf.writeframes(b"\x00\x00" * 12000 * 2)
+
+    out = run_digital_mode(str(wav), "ft8",
+                           output_dir=str(tmp_path / "out_ft8"))
+
+    assert out["ok"] is False
+    assert out["error_code"] == "not_implemented"
+    assert out["error_code"] != "decoder_not_streamable"
+
+
+def test_both_codes_are_registered_side_by_side():
+    """两个码在目录里并列，not_implemented 原样保留（不许挪走或改语义）。"""
+    from mbdsdr_ai.error_catalog import ERRORS, suggestion, user_message
+
+    assert "not_implemented" in ERRORS
+    assert "decoder_not_streamable" in ERRORS
+    assert ERRORS["not_implemented"].layer == "decode"
+    assert ERRORS["decoder_not_streamable"].layer == "access"
+    assert "--decode-file" in suggestion("decoder_not_streamable",
+                                         mode="ACARS")
+    assert "通用入口未接线" in user_message("not_implemented", mode="FT8",
+                                            impl="ft8_lite.py")

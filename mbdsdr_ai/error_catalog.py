@@ -455,6 +455,11 @@ _SPECS = (
           "解码器不可用",
           "解码器不可用：{detail}",
           "安装对应解码依赖后重试。"),
+    _spec("decoder_not_streamable", LAYER_ACCESS, False,
+          "解码器没有流式入口",
+          "{mode} 只有文件级解码，没有流式 IQ 入口。",
+          "改用文件级入口：--decode-file <文件> --mode {mode}；"
+          "流式 start_decoder 仅支持 adsb/rds。"),
     _spec("not_available", LAYER_ACCESS, False,
           "能力不可用",
           "能力不可用：{detail}",
