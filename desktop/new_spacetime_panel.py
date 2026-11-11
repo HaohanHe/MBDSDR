@@ -883,9 +883,9 @@ class NewSpacetimePanel(QWidget):
                 name += "（TLE 年龄未知）"
 
             # 左列两行：卫星名 / 过境时刻 + 最大多普勒
-            times = (f"{self._fmt_hm(p.rise_time)} → "
-                     f"{self._fmt_hm(p.max_time)} → "
-                     f"{self._fmt_hm(p.set_time)}"
+            times = (f"{self._fmt_pass_time(p.rise_time, p)} → "
+                     f"{self._fmt_pass_time(p.max_time, p)} → "
+                     f"{self._fmt_pass_time(p.set_time, p)}"
                      f" · {p.max_doppler_hz / 1000.0:+.1f} kHz")
             item = QTableWidgetItem(f"{name}\n{times}")
             item.setTextAlignment(Qt.AlignLeft | Qt.AlignVCenter)
@@ -905,6 +905,29 @@ class NewSpacetimePanel(QWidget):
             right.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
             self.passes_table.setItem(row, 1, right)
         self.passes_table.resizeRowsToContents()
+
+    @staticmethod
+    def _pass_crosses_utc_day(p: SatellitePass) -> bool:
+        """过境是否跨 UTC 日界（升起与落下落在不同 UTC 日，P1-16）。"""
+        rise, st = p.rise_time, p.set_time
+        if rise is None or st is None:
+            return False
+        try:
+            return rise.date() != st.date()
+        except (AttributeError, ValueError):
+            return False
+
+    @classmethod
+    def _fmt_pass_time(cls, dt, p: SatellitePass) -> str:
+        """跨 UTC 日界的过境逐时刻带日期；同日仍只留时分以免挤爆一行。
+
+        改前一律 ``%H:%M``，跨日条目显示成「23:58 → 00:03 → 00:10」，
+        用户无法判断落在哪一天（72 h 窗口下更糟）。窗口内跨日条目占比很低
+        （实测 23 条中 1 条），只在该行加日期不会撑破两列版式。
+        """
+        if cls._pass_crosses_utc_day(p):
+            return cls._fmt_dt(dt)
+        return cls._fmt_hm(dt)
 
     @staticmethod
     def _fmt_hm(dt) -> str:

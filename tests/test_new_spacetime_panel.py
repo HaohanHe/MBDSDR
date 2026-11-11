@@ -42,7 +42,9 @@ from desktop.new_spacetime_panel import (  # noqa: E402
     NewSpacetimePanel, FreqOrbitChart,
 )
 from mbdsdr_ai.new_spacetime_amr import AMRStreamResult  # noqa: E402
-from mbdsdr_ai.new_spacetime_timeline import FreqOrbitPoint  # noqa: E402
+from mbdsdr_ai.new_spacetime_timeline import (  # noqa: E402
+    FreqOrbitPoint, SatellitePass,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -201,6 +203,50 @@ def test_panel_layout_sections(qapp):
     # 图表实例存在
     assert isinstance(panel.chart, FreqOrbitChart)
     panel.close()
+
+
+# ---------------------------------------------------------------------------
+# 10. 跨 UTC 日界的过境必须带日期（P1-16）
+# ---------------------------------------------------------------------------
+def _mk_pass(name, rise, mx, st):
+    return SatellitePass(
+        name=name, rise_time=rise, rise_azimuth=0.0,
+        max_time=mx, max_elevation=45.0, max_azimuth=0.0,
+        set_time=st, set_azimuth=0.0, duration_sec=720.0,
+        max_doppler_hz=-2500.0)
+
+
+def test_cross_utc_day_pass_shows_date(qapp):
+    """跨 UTC 日界的行逐时刻带日期；同日行仍只留时分。
+
+    改前一律 ``%H:%M``，跨日条目显示成「23:58 → 00:03 → 00:10」，
+    实测 23 条里就有 1 条如此，用户无法判断落在哪一天。去掉日期 → 本用例红。
+    """
+    from datetime import datetime
+    panel = NewSpacetimePanel()
+    try:
+        cross = _mk_pass(
+            "CROSS",
+            datetime(2026, 11, 11, 23, 58),
+            datetime(2026, 11, 12, 0, 3),
+            datetime(2026, 11, 12, 0, 10))
+        same = _mk_pass(
+            "SAME",
+            datetime(2026, 11, 12, 12, 0),
+            datetime(2026, 11, 12, 12, 5),
+            datetime(2026, 11, 12, 12, 12))
+        panel._populate_passes([cross, same])
+
+        text_cross = panel.passes_table.item(0, 0).text()
+        text_same = panel.passes_table.item(1, 0).text()
+        assert "11-11 23:58" in text_cross
+        assert "11-12 00:03" in text_cross
+        assert "11-12 00:10" in text_cross
+        assert "23:58 → 00:03" not in text_cross
+        assert "12:00" in text_same
+        assert "11-12" not in text_same
+    finally:
+        panel.close()
 
 
 if __name__ == "__main__":
