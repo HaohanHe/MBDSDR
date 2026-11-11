@@ -912,6 +912,8 @@ class MainWindow(QMainWindow):
         #: 上一次已挂上去的触控模式（None=从未挂过）。模式未变时
         #: _apply_touch_stylesheet 直接返回，不重复叠加后缀。
         self._touch_qss_applied = None
+        #: 主题唯一出口是否已执行（构造末尾调一次；main.py 再调是幂等空操作）。
+        self._theme_once_done = False
         self._worker_manager = MCPWorkerManager()
         self._worker: Optional[object] = None
         # AI 工具环内完成的硬件调用 → 回 UI 线程同步控件
@@ -1176,8 +1178,9 @@ class MainWindow(QMainWindow):
         # 启动即无硬件：所有 SDR 操作控件（调谐/音量/模式/录音/面板实时按钮）置灰
         self._panels_set_sdr_connected(False)
 
-        # 应用默认主题
-        self._apply_theme(DEFAULT_THEME)
+        # 主题不在这里应用：统一留到构造末尾 apply_theme_once()。建树期间
+        # 每新建一个控件就按样式表抛光一次，是 ctor 里最大的一笔开销
+        # （性能线 2026-11-12 实测：全部推后 ctor 1605→514 ms）。
 
         # 用读回的运行参数回填控件（专用 setter 内部 blockSignals，不触发 save/后端）。
         # 放在 _panels_set_sdr_connected(False) 之后，避免恢复出的频率显示被清成 "--"。
@@ -1238,6 +1241,20 @@ class MainWindow(QMainWindow):
         # ---- 触屏适配：UI 全部构建完成后，统一开启触控事件 / 放大触控目标 /
         # 加宽 splitter 手柄与滚动条。鼠标模式下这些操作零副作用（helper 内部判断）。
         self._apply_touch_adaptation()
+
+        # ---- 主题唯一出口：控件树全部建完后只应用一次。
+        # 此前启动路径上有三处 app 级应用：main.py 建窗前 theme.apply()、
+        # 这里 ctor 里的 _apply_theme(DEFAULT_THEME)、恢复设置里的再一次
+        # _apply_theme —— 建窗之前挂样式表会让每个新控件在构造期各自抛光
+        # （性能线实测 ctor 1.6 s 的大头）。构造期窗口不可见，QSS 落到整棵
+        # 树后随 show() 首帧批量抛光。
+        # _restoring_settings 临时置回 True：启动应用主题属于恢复语义，
+        # 不回写 settings（与 _apply_restored_settings 的口径一致）。
+        self._restoring_settings = True
+        try:
+            self.apply_theme_once()
+        finally:
+            self._restoring_settings = False
 
     # ========================================================================
     # 触屏 / Surface / 平板适配
@@ -1306,6 +1323,11 @@ class MainWindow(QMainWindow):
         """
         tm = touch_manager()
         touch_on = bool(tm.is_touch_mode())
+        if not getattr(self, "_theme_qss", ""):
+            # 主题唯一出口还没落地（构造期 _apply_touch_adaptation 先跑，
+            # _theme_qss 仍是空串）：此时 setStyleSheet 只会挂上触控后缀、
+            # 把主题整个冲掉。等 apply_theme_once 里连同基串一次挂上。
+            return
         if getattr(self, "_touch_qss_applied", None) == touch_on:
             return
         extra = ""
@@ -5368,6 +5390,19 @@ class MainWindow(QMainWindow):
     # 主题
     # ========================================================================
 
+    def apply_theme_once(self) -> None:
+        """主题应用唯一出口：主窗构造完成后、show() 之前调一次。
+
+        构造末尾已调用（控件树完整、窗口还不可见，QSS 随首帧批量抛光）；
+        ``main.py`` 走同一个出口而不是自己 ``theme.apply(app)``，第二次调用
+        在这里直接返回（幂等）。用户手动切主题仍走 ``_apply_theme``，不受
+        这个「一次」限制。
+        """
+        if getattr(self, "_theme_once_done", False):
+            return
+        self._apply_theme(self._current_theme)
+        self._theme_once_done = True
+
     def _apply_theme(self, theme_name: str):
         """应用主题。
 
@@ -5865,9 +5900,11 @@ class MainWindow(QMainWindow):
             self.sky_view.set_callsign(cs)
         except Exception:
             pass
-        # 主题（恢复到上次退出时的主题；_restoring_settings 守卫下不回写）
+        # 主题（只记录到 _current_theme，统一在构造末尾 apply_theme_once 落地；
+        # _restoring_settings 守卫下不回写）
         try:
-            self._apply_theme(str(s.get("theme", DEFAULT_THEME) or DEFAULT_THEME))
+            self._current_theme = str(
+                s.get("theme", DEFAULT_THEME) or DEFAULT_THEME)
         except Exception:
             pass
         self._restoring_settings = False

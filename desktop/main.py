@@ -708,9 +708,10 @@ def main():
     # 设置默认字体
     app.setFont(get_app_font())
 
-    # 应用主题
+    # 主题不在建窗之前应用：窗口构造末尾的 apply_theme_once() 是唯一出口
+    # （建窗前 setStyleSheet 会让每个新控件在构造期各自抛光，ctor 实测
+    # 1.6 s 的大头）。这里只取主题对象给 fit_scale_to_screen 重算字号 QSS。
     theme = get_theme(args.theme)
-    theme.apply(app)
 
     # 下拉框滚轮守卫：滚轮滚页面，不改选中项（必须在建窗口前装好）。
     _install_combo_wheel_guard(app)
@@ -736,6 +737,9 @@ def main():
     MainWindow = _import_main_window(splash)
     window = MainWindow()
     window.app = app  # 传递 app 引用给主题切换
+    # 主题唯一出口：构造末尾已应用过，这里显式走同一个出口（幂等空操作），
+    # 以后调整时机也只改这一个方法，不再各写一遍 theme.apply(app)。
+    window.apply_theme_once()
 
     # 设置写盘失败（例如安装目录/配置目录只读）时把真相送到状态栏，
     # 而不是只写进 settings.last_error 里无人看见。
