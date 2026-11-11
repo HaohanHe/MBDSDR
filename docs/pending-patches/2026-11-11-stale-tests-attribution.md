@@ -80,6 +80,22 @@ python -m pytest tests/test_ui_wiring_audit.py -q           -> 3 failed
 
 ---
 
+## 落库结果（2026-11-11 22:43 / 22:47 实测，本节为结论，正文保留当时的归因过程）
+
+| 项 | 结论 | 提交 |
+| --- | --- | --- |
+| ① | 改测试，断言 `eb8515dc` 后的两句原文，注释写明「随 `eb8515dc` 同步」 | `2cc57808` |
+| ② | **归因判断推翻正文建议**：该 tooltip 不是 `constants.DEFAULT_SR_UNCONFIRMED` 的唯一写法，且是 f 字符串、`scan_tooltips()` 的 AST 字面量扫描根本取不到它，塞进逐字清单本身就是错项。改为源码存在性校验两个语义片段（「配置意图，不是设备读数」/「（默认 · 未确认）」） | `469de07c` |
+| ②b | 同文件另有一条同样过期的期望（被 ② 挡在循环后面）：`weather_panel.py`「开始解码」tooltip 已被 `b5b956c7` 改成对「实时 SDR」档位说实话的版本 → 期望同步真实文案 | `469de07c` |
+| ③ | 补 fixture `capability_status`（两份 fake device），断言一条未动 | `63a006c0` |
+| ④ | 删白名单条目，留注释说明依据；删后报错只剩该条，无真重复 | `63a006c0` |
+
+最终复跑：`test_real_software_wiring.py` 19 passed、`test_tooltip_guard.py` 3 passed、
+`test_ui_wiring_audit.py` 11 passed。反证（改回旧断言/旧 fixture 各自变红）逐条记在
+对应提交说明里。
+
+---
+
 ## 接线顺序建议
 
 四件事互不冲突，可分四笔小提交（每笔只含测试文件或对应源文件）：
