@@ -4019,7 +4019,14 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         return min(self.width(), self.height()) / 2.0
 
     def _sky_to_screen(self, azimuth_deg: float, elevation_deg: float) -> QPointF:
-        """(az, alt) -> 屏幕像素。委托 sky_interaction.sky_to_screen。"""
+        """(az, alt) -> 屏幕像素。委托 sky_interaction.sky_to_screen。
+
+        投影失败（相机背后的天区，``sky_to_screen`` 返回 NaN）时兜到屏幕
+        中心。**这份兜底只给「一定要有个像素点」的绘制路径用**；任何带
+        「在不在屏上」判定的覆盖层（罗盘/标签/标记）必须用
+        ``_sky_to_screen_finite``，否则背向天区会被搬到正中，``_on_screen``
+        又只能判出「在屏上」，结果是全叠在画面中心（2026-11-11 真机实证）。
+        """
         px, py = sky_to_screen(azimuth_deg, elevation_deg,
                                self.view_state, self.projection,
                                self._widget_size_tuple())
@@ -4986,7 +4993,10 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
                                   text, col, small=True)
 
 
-    def _on_screen(self, pos: QPointF, margin: float = 4.0) -> bool:
+    def _on_screen(self, pos: Optional[QPointF], margin: float = 4.0) -> bool:
+        # None = 相机背后/投影失败（见 _sky_to_screen_finite）：没有位置就不可见。
+        if pos is None:
+            return False
         return (-margin <= pos.x() <= self.width() + margin
                 and -margin <= pos.y() <= self.height() + margin)
 
@@ -5585,7 +5595,7 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         dim = QColor(_t.COLORS["gray_300"])
         for az, label, cardinal in compass_labels():
             alt = 2.0 if cardinal else 1.3
-            pos = self._sky_to_screen(float(az), alt)
+            pos = self._sky_to_screen_finite(float(az), alt)
             if not self._on_screen(pos, margin=14.0):
                 continue
             if cardinal:
@@ -5905,7 +5915,10 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
                 continue
             if skip_sats and obj.obj_type == "satellite":
                 continue
-            pos = self._sky_to_screen(obj.azimuth_deg, obj.elevation_deg)
+            pos = self._sky_to_screen_finite(obj.azimuth_deg, obj.elevation_deg)
+            if pos is None:
+                # 相机背后：没有可信落点，标记与标签都不画（不兜到中心）。
+                continue
             color = QColor(obj.color) if obj.color else self._colors.get(
                 obj.obj_type, self._colors["custom"])
 
@@ -5986,10 +5999,11 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         # 选中对象：4 段圆弧十字 + 2s 呼吸（SWE 选中标记同形）
         if self._hovered_object is not None and self._hovered_object.visible \
                 and self._hovered_object.is_above_horizon():
-            hp = self._sky_to_screen(self._hovered_object.azimuth_deg,
-                                     self._hovered_object.elevation_deg)
-            self._draw_selection_crosshair(
-                painter, hp, 14.0, self._colors["accent"])
+            hp = self._sky_to_screen_finite(self._hovered_object.azimuth_deg,
+                                         self._hovered_object.elevation_deg)
+            if hp is not None:
+                self._draw_selection_crosshair(
+                    painter, hp, 14.0, self._colors["accent"])
         painter.restore()
 
     def _draw_picked_info(self, painter: QPainter):
@@ -5999,7 +6013,12 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
             self._info_card_rect = None
             self._info_close_rect = None
             return
-        pos = self._sky_to_screen(obj.azimuth_deg, obj.elevation_deg)
+        pos = self._sky_to_screen_finite(obj.azimuth_deg, obj.elevation_deg)
+        if pos is None:
+            # 选中的对象转到相机背后：信息卡没有可信锚点，收起而不是钉在正中。
+            self._info_card_rect = None
+            self._info_close_rect = None
+            return
 
         # 选中标记（4 段圆弧十字 + 2s 呼吸）由 _draw_objects 统一绘制，
         # 此处不再重复画环，避免双标记。
