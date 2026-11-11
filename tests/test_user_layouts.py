@@ -37,7 +37,7 @@ def qapp():
 
 
 @pytest.fixture(scope="module")
-def main_window(qapp, tmp_path_factory):
+def main_window(qapp, tmp_path_factory, isolated_profile):
     """整文件共用一个窗口。
 
     存量挂起根因：原来每个用例都新建 MainWindow（且旧窗口只 close 不删），
