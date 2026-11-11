@@ -104,6 +104,21 @@ _VIEW_VERBS = ("看", "查看", "确认")
 #: 例外表冻结条数：出现第 N+1 条即红「新增例外需评审」，防止长成白名单。
 _EXCEPTION_LIMIT = 1
 
+#: 分句里出现这些容器名时，把该段的同名候选限到那个容器（显式词表，
+#: 不做自然语言解析）。值为 MainWindow 属性名；``None`` 表示按 QGroupBox 标题认。
+_PANEL_SCOPES = {
+    "控制面板": "control_panel",
+    "控制": "control_panel",
+    "设备": "device_panel",
+    "设置": "settings_panel",
+    "状态": "status_panel",
+    "AI 助手": "ai_panel",
+    "参数": None,
+}
+
+#: 可折叠分组的标题前缀装饰符（「▾ 频率」实为「频率」组）。
+_TITLE_DECOR = "▾▸▶◀▼▲ "
+
 
 def _exceptions_ok() -> bool:
     return len(_DIALOG_ONLY) <= _EXCEPTION_LIMIT
@@ -158,7 +173,7 @@ def _text_index(window) -> dict:
     index = {}
 
     def add(text, kind, widget):
-        t = (text or "").strip()
+        t = (text or "").strip().lstrip(_TITLE_DECOR).strip()
         if t:
             index.setdefault(t, []).append((widget, kind, _is_operable(widget, kind)))
 
@@ -269,12 +284,50 @@ def _type_resolution(widget, type_word: str, mode: str) -> bool:
     容器级默认可过；但**同容器同类候选 > 2 且分句动词是 ACTION** 时，
     必须过 ``_row_pair_hit`` 的行级配对——否则「频率」可以靠同组里另一个
     「频率」标签旁边的输入框蒙过。
+
+    标签（QLabel）另有一条更严的约束：标签天然属于某一行，ACTION 句里
+    只认同行的类型控件，不再看容器候选数——否则拆掉同行控件后，剩 2 个
+    候选就会滑回容器级判定。
     """
+    from PySide6.QtWidgets import QLabel
+
     if not _type_hit(widget, type_word):
         return False
-    if mode != "ACTION" or _type_count(widget, type_word) <= 2:
+    if mode != "ACTION":
+        return True
+    if isinstance(widget, QLabel):
+        return _row_pair_hit(widget, type_word)
+    if _type_count(widget, type_word) <= 2:
         return True
     return _row_pair_hit(widget, type_word)
+
+
+def _in_scope(widget, attr, window) -> bool:
+    """控件是否落在分句点名的那只容器里。"""
+    from PySide6.QtWidgets import QGroupBox, QWidget
+
+    if not isinstance(widget, QWidget):
+        return False
+    node = widget if isinstance(widget, QGroupBox) else widget.parentWidget()
+    if attr is None:  # QGroupBox[参数]
+        while node is not None:
+            if isinstance(node, QGroupBox) and node.title() == "参数":
+                return True
+            node = node.parentWidget()
+        return False
+    panel = getattr(window, attr, None)
+    if panel is None:
+        return False
+    return widget is panel or panel.isAncestorOf(widget)
+
+
+def _scope_words(clause: str) -> list:
+    return [word for word in _PANEL_SCOPES if word in clause]
+
+
+def _scoped(entries, words, window):
+    attrs = [_PANEL_SCOPES[w] for w in words]
+    return [e for e in entries if any(_in_scope(e[0], a, window) for a in attrs)]
 
 
 def _unresolved(window, texts) -> list:
@@ -326,6 +379,12 @@ def _unresolved(window, texts) -> list:
                     continue
                 if any(operable for _, _, operable in entries):
                     continue
+                words = _scope_words(clause)
+                if words:
+                    entries = _scoped(entries, words, window)
+                    if not entries:
+                        mark(seg)   # 分句点名的容器里没有这段文字
+                        continue
                 if any(_type_resolution(wdg, tw, mode) for wdg, _, _ in entries
                        for tw in type_words):
                     continue
@@ -379,6 +438,15 @@ def test_exception_table_is_frozen():
     assert _exceptions_ok(), (
         f"例外表已有 {len(_DIALOG_ONLY)} 条，上限 {_EXCEPTION_LIMIT}；"
         "新增例外需评审——只有既无可操作控件、又无稳定可见文字承载区的段才可登记")
+
+
+def test_counterexample_wrong_panel_turns_red(main_window):
+    """分句点名面板时，同名文字落在别的面板不算命中。"""
+    assert _unresolved(
+        main_window, [ts.NEXT_STEPS["sample_rate_not_supported"]]) == []
+    bad = _unresolved(
+        main_window, ["在「设备」页签把「采样率」下拉框降到 2.048 MS/s。"])
+    assert bad == ["采样率"], bad
 
 
 def test_counterexample_new_exception_turns_red(monkeypatch):
