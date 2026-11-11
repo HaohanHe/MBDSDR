@@ -7314,14 +7314,7 @@ class MainWindow(QMainWindow):
 
     @Slot(bool)
     def _on_record_toggled(self, recording: bool):
-        """控制面板录音按钮 toggled → 走与工具栏/菜单一致的本地 baseband 录制链路。"""
-        # 同步工具栏录音按钮（防重入 guard）
-        if self.record_btn.isChecked() != recording:
-            self._record_guard = True
-            try:
-                self.record_btn.setChecked(recording)
-            finally:
-                self._record_guard = False
+        """控制面板录音按钮 toggled → 本地 baseband 录制的唯一动作入口。"""
         # 转发给旧 worker（WebSocket 模式）保持兼容；真实 SDR 模式下 worker 为 None
         if self._worker:
             try:
@@ -7329,6 +7322,17 @@ class MainWindow(QMainWindow):
                     "start_record" if recording else "stop_record", {})
             except Exception:
                 pass
+        # 由 _toggle_record 对齐按钮产生的回声：发起方已负责动作，这里直接
+        # 返回。否则失败路径会第二次执行 _start_recording（弹窗弹两次）。
+        if self._record_guard:
+            return
+        # 同步工具栏录音按钮（防重入 guard）
+        if self.record_btn.isChecked() != recording:
+            self._record_guard = True
+            try:
+                self.record_btn.setChecked(recording)
+            finally:
+                self._record_guard = False
         # 真正的本地 baseband 录制状态机（幂等：已是该状态则 no-op）
         self._apply_recording(recording)
 
@@ -8257,8 +8261,8 @@ class MainWindow(QMainWindow):
                 self.control_panel.record_button.setChecked(target)
         finally:
             self._record_guard = False
-        # control_panel.record_button.setChecked 会触发 record_toggled
-        # → _on_record_toggled → _apply_recording；这里兜底再调一次（幂等）。
+        # 对齐按钮时触发的 record_toggled 会被 _record_guard 挡回（回声），
+        # 因此 _apply_recording 只在下面执行一次——成功与失败都不会重复执行。
         self._apply_recording(target)
 
     # ========================================================================
