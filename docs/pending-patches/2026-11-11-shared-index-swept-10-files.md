@@ -106,3 +106,36 @@ git show --name-status --format="%h %s" HEAD    # 文件数对不上就是卷进
 >
 > **已发生后的撤回**：`git reset --mixed HEAD^`（不动工作区），随后按上法重提；
 > 同时**主动报备**：`reset --mixed` 会清掉他线的暂存状态，代码不丢但提交面被改。
+
+## 七、同日第二次踩坑：私有 index 挡不住「父提交前进」（2026-11-11 22:14）
+
+同一晚复现了更隐蔽的变体：私有 index **只隔离「提交哪些路径」，不隔离父提交**。
+
+```
+read-tree HEAD              # 此时 HEAD = 62c48f40
+（另一条线落库 4ab818a0：sdr_backend 的 Soapy 读回真值 + 一个测试）
+git commit                  # 父提交已是 4ab818a0，但待提交树基于 62c48f40
+→ 该提交相对新父表现为「反向修改」，回退了别人 3 个文件（70 行）
+```
+
+第一次 `commit` 因 `cannot lock ref 'HEAD'` 失败——**那条报错就是父提交被推进的信号**，
+当时只当成并发噪声重试，结果第二次成功地把别人的改动回退了。
+
+**30 秒认出**：提交后 `git show --name-status HEAD` 里出现**不是你 add 过**的文件路径；
+或 `git show --stat` 的文件数与 `git diff --cached --name-only` 对不上。
+
+**处置（本次）**：不回滚历史，补一笔恢复提交，把工作区现状原样提交回去
+（工作区从未被私有 index 改动，内容仍在）：
+
+```
+git diff HEAD -- <被回退的文件>    # 非空 = 需要恢复
+```
+
+**规矩（补进形态⑰）**：
+
+1. `read-tree HEAD` 与 `commit` 之间必须复核 `git rev-parse HEAD` 未变；
+   变了就重建 index，不要重试；
+2. 更稳的写法是 `git commit-tree <tree> -p <old-head>` 拿到 sha 后再
+   `git update-ref HEAD <new> <old>` 做 CAS——父提交不对会直接失败，不会静默回退；
+3. 提交后**永远**核验 `git show --name-status HEAD`，文件清单必须与本条工单
+   一一对应；多一个都要按本文件第四节处置。
