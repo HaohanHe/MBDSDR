@@ -203,6 +203,9 @@ class ControlPanel(QWidget):
         self._volume = 48
         self._recording = False
         self._record_seconds = 0
+        #: 录音结果态：None=未收口；"cancelled"/"failed"/"completed" 由主窗口写入。
+        #: 面板不得仅凭按钮取消就宣布「完成」——取消/失败必须有自己的说法。
+        self._record_outcome: str | None = None
         # 收藏列表：内存中，初始为空，不预存任何地区性电台
         self._bookmarks: list[tuple[float, str, str]] = []
 
@@ -1252,13 +1255,42 @@ class ControlPanel(QWidget):
     def _on_record_toggled(self, checked: bool):
         self._recording = checked
         if checked:
+            self._record_outcome = None
             self.record_button.setText("停止录音")
             self.record_status.setText("录音中... 00:00")
             self._record_seconds = 0
         else:
             self.record_button.setText("开始录音")
-            self.record_status.setText(f"录音完成 ({self._record_seconds} 秒)")
+            # 取消/失败/正常完成由主窗口 set_record_outcome 收口；这里只在
+            # 没有结果态时回到中性文案，绝不无条件宣布「录音完成」。
+            if self._record_outcome is None:
+                self.record_status.setText("未录音")
         self.record_toggled.emit(checked)
+
+    def set_record_outcome(self, kind: str, text: str = "") -> None:
+        """写入一次录音结果（三分支：取消 / 失败 / 正常保存）。
+
+        kind:
+          ``cancelled`` —— 用户取消或目录未确认，``text`` 可空；
+          ``failed``    —— 未连接/目录不可用/写盘失败，``text`` 是原因；
+          ``completed`` —— 真正落了盘，``text`` 形如「已保存 N 样本 (X KB)」。
+        失败与取消路径不得出现「完成」二字（完成只属于成功路径）。
+        """
+        kind = str(kind or "").strip().lower()
+        self._record_outcome = kind or None
+        if kind == "cancelled":
+            self.record_status.setText("已取消（未开始录音）")
+        elif kind == "failed":
+            reason = str(text or "").replace("完成", "结束").strip()
+            self.record_status.setText(
+                f"录音失败：{reason}" if reason else "录音失败")
+        elif kind == "completed":
+            self.record_status.setText(str(text or "已保存"))
+        elif kind == "recording":
+            self.record_status.setText("录音中... 00:00")
+        else:
+            self._record_outcome = None
+            self.record_status.setText("未录音")
 
     # ========================================================================
     # 外部接口

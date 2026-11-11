@@ -7228,7 +7228,16 @@ class MainWindow(QMainWindow):
             self._last_gain_applied = real_db
         cp = getattr(self, "control_panel", None)
         if cp is not None:
-            cp.set_gain_applied(real_db)
+            # 后端自报读数来源：空串=无回读通道，面板据此标「请求值，未回读」。
+            source = ""
+            getter = getattr(backend, "gain_readback_source", None)
+            if callable(getter):
+                try:
+                    source = str(getter() or "")
+                except Exception as e:  # noqa: BLE001 - 来源说明失败不影响读数
+                    logger.debug("读取增益回读来源失败: %s: %s",
+                                 type(e).__name__, e)
+            cp.set_gain_applied(real_db, source)
         # 模块面板也显示同一个设备读数。此前只回写控制面板，模块面板标签
         # 一直停在「—」——两个面板对同一台设备给出两个读数。
         mp = getattr(self, "module_panel", None)
@@ -9573,6 +9582,10 @@ class MainWindow(QMainWindow):
                 self.control_panel.record_button.setChecked(False)
             finally:
                 self._record_guard = False
+            try:
+                self.control_panel.set_record_outcome("failed", "未连接 SDR")
+            except Exception:
+                pass
             return
 
         try:
@@ -9609,6 +9622,10 @@ class MainWindow(QMainWindow):
                 self.control_panel.record_button.setChecked(False)
             finally:
                 self._record_guard = False
+            try:
+                self.control_panel.set_record_outcome("cancelled")
+            except Exception:
+                pass
             return
 
         # 录音目录唯一来源是设置（settings.record_dir）；目录不可用时绝不
@@ -9626,6 +9643,10 @@ class MainWindow(QMainWindow):
                 self.control_panel.record_button.setChecked(False)
             finally:
                 self._record_guard = False
+            try:
+                self.control_panel.set_record_outcome("failed", rec_error)
+            except Exception:
+                pass
             return
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
         # 防呆：同名 .iq/.json 已存在则换名，绝不覆盖上一段录音（L3）
@@ -9787,17 +9808,23 @@ class MainWindow(QMainWindow):
                 msg = (f"录制完成: {info['path']}  "
                        f"({info['samples']} 样本, {kb:.1f} KB, {secs}s)")
             try:
-                self.control_panel.record_status.setText(
-                    f"已存 {info['samples']} 样本 ({kb:.0f} KB)")
+                self.control_panel.set_record_outcome(
+                    "completed",
+                    f"已保存 {info['samples']} 样本 ({kb:.0f} KB)")
             except Exception:
                 pass
         else:
             msg = "录制结束（无数据落盘）"
             try:
-                self.control_panel.record_status.setText("未录音")
+                self.control_panel.set_record_outcome("failed", "没有数据落盘")
             except Exception:
                 pass
         if error:
+            # 中止路径的面板必须是「失败 + 原因」，绝不落成完成态。
+            try:
+                self.control_panel.set_record_outcome("failed", str(error))
+            except Exception:
+                pass
             msg = f"{error}；{msg}"
         self.statusBar().showMessage(msg, MSG_IMPORTANT)
 
