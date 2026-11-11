@@ -189,16 +189,92 @@ def _text_index(window) -> dict:
     return index
 
 
+def _type_container(widget):
+    from PySide6.QtWidgets import QGroupBox
+    return widget if isinstance(widget, QGroupBox) else widget.parentWidget()
+
+
 def _type_hit(widget, type_word: str) -> bool:
     """组名/标签所在容器里是否真有「类型词」对应的控件。"""
-    from PySide6.QtWidgets import QGroupBox
+    classes = _type_classes(type_word)
+    container = _type_container(widget)
+    return bool(classes) and container is not None and any(
+        container.findChildren(cls) for cls in classes)
+
+
+def _type_count(widget, type_word: str) -> int:
+    container = _type_container(widget)
+    if container is None:
+        return 0
+    return sum(len(container.findChildren(cls))
+               for cls in _type_classes(type_word))
+
+
+def _row_pair_hit(widget, type_word: str) -> bool:
+    """同行配对：标签与该类型控件必须在同一行，而不是「同容器里碰巧有一个」。
+
+    * 最近的 QFormLayout 行：只认同一行的 FieldRole 控件；
+    * 没有 QFormLayout（控制面板的横向行）：只认同一个水平行布局里的兄弟控件。
+    """
+    from PySide6.QtWidgets import QBoxLayout, QFormLayout
 
     classes = _type_classes(type_word)
     if not classes:
         return False
-    container = widget if isinstance(widget, QGroupBox) else widget.parentWidget()
-    return container is not None and any(
-        container.findChildren(cls) for cls in classes)
+
+    def is_type(wd) -> bool:
+        return wd is not None and isinstance(wd, classes)
+
+    node = widget.parentWidget()
+    while node is not None:
+        for lay in node.findChildren(QFormLayout):
+            row = lay.getWidgetPosition(widget)[0]
+            if row >= 0:
+                item = lay.itemAt(row, QFormLayout.ItemRole.FieldRole)
+                return is_type(item.widget() if item else None)
+        node = node.parentWidget()
+
+    node = widget.parentWidget()
+    while node is not None:
+        lay = _direct_layout(widget, node.layout())
+        if lay is not None:
+            if not (isinstance(lay, QBoxLayout)
+                    and lay.direction() == QBoxLayout.Direction.LeftToRight):
+                return False
+            return any(is_type(lay.itemAt(i).widget())
+                       for i in range(lay.count()) if lay.itemAt(i))
+        node = node.parentWidget()
+    return False
+
+
+def _direct_layout(widget, lay):
+    """返回直接包含该控件的布局（会递归进嵌套布局，行布局常是子项）。"""
+    if lay is None:
+        return None
+    if lay.indexOf(widget) != -1:
+        return lay
+    for i in range(lay.count()):
+        item = lay.itemAt(i)
+        sub = item.layout() if item else None
+        if sub is not None:
+            found = _direct_layout(widget, sub)
+            if found is not None:
+                return found
+    return None
+
+
+def _type_resolution(widget, type_word: str, mode: str) -> bool:
+    """组名/标签 + 类型词是否可放行。
+
+    容器级默认可过；但**同容器同类候选 > 2 且分句动词是 ACTION** 时，
+    必须过 ``_row_pair_hit`` 的行级配对——否则「频率」可以靠同组里另一个
+    「频率」标签旁边的输入框蒙过。
+    """
+    if not _type_hit(widget, type_word):
+        return False
+    if mode != "ACTION" or _type_count(widget, type_word) <= 2:
+        return True
+    return _row_pair_hit(widget, type_word)
 
 
 def _unresolved(window, texts) -> list:
@@ -250,7 +326,7 @@ def _unresolved(window, texts) -> list:
                     continue
                 if any(operable for _, _, operable in entries):
                     continue
-                if any(_type_hit(wdg, tw) for wdg, _, _ in entries
+                if any(_type_resolution(wdg, tw, mode) for wdg, _, _ in entries
                        for tw in type_words):
                     continue
                 if any(kind == "section" and _is_visible(wdg)
@@ -308,6 +384,32 @@ def test_exception_table_is_frozen():
 def test_counterexample_new_exception_turns_red(monkeypatch):
     monkeypatch.setitem(_DIALOG_ONLY, "量子面板", "desktop/x.py")
     assert not _exceptions_ok()
+
+
+def test_counterexample_label_and_control_on_different_rows_turns_red(qtapp):
+    """同类候选 >2 且 ACTION 时，标签与控件不在同一行必须红。"""
+    from PySide6.QtWidgets import QComboBox, QFormLayout, QGroupBox, QLabel
+
+    box = QGroupBox("采样率")
+    form = QFormLayout(box)
+    label = QLabel("采样率")
+    form.addRow(label, QLabel("说明"))          # 标签同行没有下拉
+    for i in range(3):
+        form.addRow(f"档位{i}", QComboBox(box))  # 同容器里 3 个下拉
+
+    assert _type_count(label, "下拉框") == 3
+    assert not _row_pair_hit(label, "下拉框")
+    assert not _type_resolution(label, "下拉框", "ACTION")
+    assert _type_resolution(label, "下拉框", "VIEW")  # 只有 ACTION 才要求行级
+
+    paired = QGroupBox("采样率")
+    form2 = QFormLayout(paired)
+    label2 = QLabel("采样率")
+    form2.addRow(label2, QComboBox(paired))      # 标签与下拉同一行
+    form2.addRow("档位", QComboBox(paired))
+    form2.addRow("档位2", QComboBox(paired))
+    assert _row_pair_hit(label2, "下拉框")
+    assert _type_resolution(label2, "下拉框", "ACTION")
 
 
 def test_counterexample_view_to_action_turns_red(main_window):
