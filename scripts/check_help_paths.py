@@ -147,27 +147,56 @@ def _read_lines(path: str) -> list[str]:
         return f.read().splitlines()
 
 
-def check_render_points() -> list[str]:
-    """文档第三节引用的渲染点行号必须仍落在渲染字面量上（防行号漂移）。"""
+def _bullet_blocks(section: str) -> list[str]:
+    """把「- 开头 + 两空格续行」合成一块，续行里的引用也算这条通道的断言。
+
+    只看 ``ln.startswith("- **P")`` 会漏掉被折行的通道定义：P2 的
+    ``status_panel.py:N`` 正好落在续行里，旧扫描器从未检查过它（2026-11-11
+    实测：漏报 1 处）。
+    """
+    blocks: list[str] = []
+    cur: list[str] = []
+    for ln in section.splitlines():
+        if ln.startswith("- "):
+            if cur:
+                blocks.append("\n".join(cur))
+            cur = [ln]
+        elif cur and ln.startswith("  ") and not ln.startswith("  |"):
+            cur.append(ln)
+        else:
+            if cur:
+                blocks.append("\n".join(cur))
+            cur = []
+    if cur:
+        blocks.append("\n".join(cur))
+    return blocks
+
+
+def check_render_points(doc_path: str | None = None) -> list[str]:
+    """文档第三、四节引用的渲染点行号必须仍落在渲染字面量上（防行号漂移）。
+
+    扫描窗口是 ``## 三、``–``## 五、``：§四是「判定口径」里对同一批通道的
+    复述，不在窗口内时它漂了也没人知道（2026-11-11 实测：漏报 3 处）。
+    """
     problems: list[str] = []
+    src = doc_path or _DOC
     try:
-        with open(_DOC, encoding="utf-8") as f:
+        with open(src, encoding="utf-8") as f:
             doc = f.read()
     except OSError:
-        return [f"读不到 {_DOC}"]
+        return [f"读不到 {src}"]
     start = doc.find("## 三、")
-    end = doc.find("## 四、")
-    if start < 0 or end < 0:
-        return ["文档缺少「## 三、」或「## 四、」章节，无法核验渲染点"]
+    end = doc.find("## 五、")
+    if start < 0:
+        return ["文档缺少「## 三、」章节，无法核验渲染点"]
+    if end < 0:
+        end = len(doc)
     section = doc[start:end]
     cache: dict[str, list[str]] = {}
-    # 只核「渲染点」：P1–P5 的通道定义行 + 可见行（用户可见=是）的判定依据。
-    # 不可见行的 文件:行 是触发点/底层实现，不是渲染点，不套渲染字面量。
-    targets: list[str] = []
+    # 只核「渲染点」：P1–P5 的通道定义（含续行）+ 可见行（用户可见=是）的
+    # 判定依据。不可见行的 文件:行 是触发点/底层实现，不是渲染点，不套渲染字面量。
+    targets: list[str] = _bullet_blocks(section)
     for ln in section.splitlines():
-        if ln.startswith("- **P"):
-            targets.append(ln)
-            continue
         m = re.match(r"\| (\d+) \| `[^`]+` \|.*", ln)
         if m and int(m.group(1)) > 52:
             continue

@@ -176,9 +176,11 @@ SIZE_LIMITS = {
 
 #: FAIL 后下一步该查什么（按步骤名一一对应，失败即停时打印）
 FAIL_HINTS = {
-    "docs": "跑 `python scripts/verify_claims.py --check-lines` 看「错引 / 需重定位」"
-            "逐条明细；按 docs/evidence-standard.md §7.7 重定位并取该行 blame 作基准，"
-            "不许把基准写成 HEAD，也不许为了过闸而扩大白名单",
+    "docs": "四元组断言跑 `python scripts/verify_claims.py --check-lines` 看「错引 / 需重定位」"
+            "逐条明细，按 docs/evidence-standard.md §7.7 重定位并取该行 blame 作基准，"
+            "不许把基准写成 HEAD，也不许为了过闸而扩大白名单；"
+            "渲染点漂移跑 `python scripts/check_help_paths.py` 看「文档行号漂移」，"
+            "按 §三/§四 的真实渲染行改坐标（先确认该行含锚点字面量）",
     "action_dup": "跑 `python scripts/check_action_duplication.py --gate` 看未豁免项："
                   "真重复要把多个 QAction 实例并成一个，同名不同标识要定单一归属；"
                   "只在「他线正在改、本线这轮动不了」时才挂 "
@@ -861,7 +863,11 @@ def main() -> int:
             "\n", "\n    "), flush=True)
 
     def do_docs() -> tuple[bool, str]:
-        """文档行号断言闸门：把它接进发布检查，别指望有人记得单独跑。"""
+        """文档断言闸门：四元组（verify_claims）+ 渲染点（check_render_points）。
+
+        两者输入集不相交：verify_claims 只认带 hash+字面量的行，裸 ``path:N``
+        渲染点引用根本不在它的池子里。只接一个，另一边红着也能打印 PASS。
+        """
         script = os.path.join(ROOT, "scripts", "verify_claims.py")
         proc = subprocess.run(
             [sys.executable, script, "--check-lines", "--strict-lines"],
@@ -871,14 +877,25 @@ def main() -> int:
         dist = next((ln.strip() for ln in lines
                      if "含字面量" in ln and "合计" in ln), "（未产出分布行）")
         step4 = next((ln.strip() for ln in lines if ln.startswith("第 4 步")), "")
+        problems: list[str] = []
         if proc.returncode != 0:
             bad = next((ln.strip() for ln in lines
                         if ln.strip().startswith("结果：")), "（未产出明细行）")
             bad_w = next((ln.strip() for ln in lines
                           if "白名单不合规" in ln), "")
-            return False, f"退出码 {proc.returncode}；{dist}；{step4}；" + \
-                (f"{bad} {bad_w}".strip())
-        return True, f"{dist}；{step4}"
+            problems.append(f"四元组退出码 {proc.returncode}；{dist}；{step4}；"
+                            + f"{bad} {bad_w}".strip())
+        try:
+            sys.path.insert(0, os.path.join(ROOT, "scripts"))
+            import check_help_paths
+            render = check_help_paths.check_render_points()
+        except Exception as e:  # noqa: BLE001 - 跑不起来也算没查，不能静默当绿
+            render = [f"渲染点闸门跑不起来：{type(e).__name__}: {e}"]
+        if render:
+            problems.append(f"渲染点 {len(render)} 处：" + "；".join(render[:3]))
+        if problems:
+            return False, "；".join(problems)
+        return True, f"{dist}；{step4}；渲染点 0 处"
 
     def do_action_dup() -> tuple[bool, str]:
         """命令/QAction 重复注册闸门：与 docs 同级，真重复或同名不同标识即 FAIL。
