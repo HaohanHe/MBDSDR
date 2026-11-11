@@ -205,7 +205,7 @@ def _digital_capabilities() -> List[Capability]:
 
 
 def _decoder_registry_capabilities() -> List[Capability]:
-    """长尾解码器注册表——注册表尚未接主调度，如实标注不可用。"""
+    """长尾解码器注册表——POCSAG/ACARS 已由 decode_router 接主调度，VOR 无路由。"""
     out: List[Capability] = []
     for d in _decoders.list_decoders():
         # POCSAG/ACARS 另有 CLI 文件解码入口；VOR 没有通用路由。
@@ -213,7 +213,8 @@ def _decoder_registry_capabilities() -> List[Capability]:
             trigger = (f"命令行：python -m mbdsdr_ai --decode-file <文件> "
                        f"--mode {d.mode.lower()}（桌面界面/AI 工具面未直接暴露）")
             status = "available"
-            note = "decoder_registry 尚未接主调度；此入口走 decode_digital_mode"
+            note = ("decode_router 已接 POCSAG / ACARS 专用路由；"
+                    "桌面/AI 工具面未直接暴露该入口，走 CLI --decode-file")
         else:
             trigger = "无（该解码器未接通用解码路由，桌面/AI 界面无入口）"
             status = "unavailable"
