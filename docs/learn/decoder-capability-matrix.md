@@ -79,7 +79,7 @@ export MBDSDR_NULL_AUDIO=1 MBDSDR_NO_HW=1 QT_QPA_PLATFORM=offscreen
 | `aprs` | 音频域（NFM 鉴频后）｜噪声带宽 = fs/2 = 24 kHz（全带白噪，未按 1200 bd AFSK 占用带宽归一）｜每样本：整段平均信号功率 / 噪声方差；AFSK 1 bit/符号 | -10..16 dB（14 档 / 20 次） | 0 dB | 2 dB | -2..2 dB | `crc_failed` | 是 |
 | `ft4` | 复基带（基带 IQ）｜噪声带宽 = fs/2 = 6 kHz（全带白噪，未按 4-FSK 约 83 Hz 占用带宽归一）｜每样本：整帧（5.04 s）平均信号功率 / 噪声方差；4-FSK 2 bit/符号（LDPC(174,91)） | -24..0 dB（13 档 / 20 次） | -20 dB | -20 dB | -22..-20 dB | `ldpc_parity_failed` | 是 |
 | `pocsag` | 音频域（FM 鉴频后）｜噪声带宽 = fs/2 = 11.025 kHz（全带白噪，未按 1200 bd FSK 占用带宽归一）｜每样本：整段（含 576 bit 前导）平均信号功率 / 噪声方差；FSK 1 bit/符号 + BCH(31,21) | 0..18 dB（10 档 / 20 次） | 6 dB | 8 dB | 2..8 dB | `address_not_recovered` | 是 |
-| `acars` | 音频域（AM/FM 鉴频后）｜噪声带宽 = fs/2 = 24 kHz（全带白噪，未按 2400 bd MSK 占用带宽归一）｜每样本：整段平均信号功率 / 噪声方差；MSK 1 bit/符号 + 奇校验/CRC-16 | -6..14 dB（6 档 / 20 次） | 2 dB | 2 dB | -2..2 dB | `nothing_detected` | 是 |
+| `acars` | 音频域（AM/FM 鉴频后）｜噪声带宽 = fs/2 = 24 kHz（全带白噪，未按 1200 bd MSK 占用带宽归一）｜每样本：整段平均信号功率 / 噪声方差；MSK 1 bit/符号 + 奇校验/CRC-16 | -6..14 dB（6 档 / 20 次） | -2 dB | -2 dB | -6..-2 dB | `nothing_detected` | 是 |
 | `navtex` | 音频域（NFM 鉴频后）｜噪声带宽 = fs/2 = 6 kHz（fs=12 kS/s，全带白噪，未按 100 bd FSK 占用带宽归一）｜每样本：整段（定相 + 报文）平均信号功率 / 噪声方差；SITOR-B 100 bd，4:7 恒比 + 分集 | 8..40 dB（9 档 / 20 次） | 36 dB | 36 dB | 32..36 dB | `nothing_detected` | 是 |
 | `apt` | 音频域（AM 包络解调后）｜噪声带宽 = fs/2 = 12 kHz（fs=24 kS/s，全带白噪，未按 2400 Hz 副载波占用带宽归一）｜每样本：整段平均信号功率 / 噪声方差；AM 2400 Hz 副载波，104 行/min | -8..16 dB（7 档 / 20 次） | 4 dB | 8 dB | 4..8 dB | `no_sync` | 是 |
 | `wspr` | 复基带（基带 IQ）｜噪声带宽 = fs/2 = 187.5 Hz（fs=375 S/s，全带白噪，未按 1.46 Hz 符号率归一）｜每样本：整帧（110.592 s）平均信号功率 / 噪声方差；4-FSK 1 bit/符号（K=32 卷积 + 交织） | -32..-8 dB（7 档 / 20 次） | -12 dB | -12 dB | -16..-12 dB | `sync_not_found` | 是 |

@@ -44,17 +44,17 @@
       "file": "acars.wav",
       "domain": "audio",
       "fs_hz": 48000,
-      "samples": 9920,
+      "samples": 15040,
       "truth": {
         "mode": "2",
         "reg": "BA1234",
         "label": "H1",
         "text": "TEST MESSAGE",
-        "baud": 2400
+        "baud": 1200
       },
-      "condition": "MSK 音频 2400 bd（中心 1800 Hz），1 帧",
+      "condition": "MSK 音频 1200 bd（中心 1800 Hz），1 帧",
       "generation": "mbdsdr_ai.acars_protocol.acars_encode",
-      "sha256": "33f32b507251647126a70af289f899b08f6556aec4ae214a82e83ecf9166659a"
+      "sha256": "9a47c7e1d5931f6c271d6ca932b062b9f7fde4bdbfe760ec3b4ce530d931b55f"
     },
     "navtex": {
       "file": "navtex.wav",

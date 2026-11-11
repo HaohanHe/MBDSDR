@@ -24,7 +24,7 @@
   * POCSAG：CCIR Radiopaging Code No.1（1200bd FSK 音频，BCH(31,21)）；
     波形 ``pocsag_encode``、判决 ``pocsag_decode``；成功 = 21-bit 地址
     与报文均与合成真值一致。
-  * ACARS：ARINC 618 风格 MSK（2400bd，中心 1800Hz，mark 2400/space
+  * ACARS：ARINC 618 风格 MSK（1200bd，中心 1800Hz，mark 2400/space
     1200）；波形 ``acars_protocol.acars_encode``、判决
     ``acars_decoder.acars_decode_iq``；成功 = CRC 通过且模式/注册号/
     标签/正文逐字段一致。
@@ -109,7 +109,7 @@ POCSAG_TEST_MESSAGE = "HELLO"
 POCSAG_TEST_BAUD = 1200
 ACARS_TEST_FIELDS = {"mode": "2", "reg": "BA1234", "label": "H1",
                      "text": "TEST MESSAGE"}
-ACARS_TEST_BAUD = 2400
+ACARS_TEST_BAUD = 1200
 
 
 def _read_wav_fixture(path: str):
@@ -669,7 +669,7 @@ MODE_BASIS = {
     },
     "acars": {
         "domain": "音频域（AM/FM 鉴频后）",
-        "bandwidth": "噪声带宽 = fs/2 = 24 kHz（全带白噪，未按 2400 bd MSK 占用带宽归一）",
+        "bandwidth": "噪声带宽 = fs/2 = 24 kHz（全带白噪，未按 1200 bd MSK 占用带宽归一）",
         "snr": "每样本：整段平均信号功率 / 噪声方差；MSK 1 bit/符号 + 奇校验/CRC-16",
     },
     "navtex": {

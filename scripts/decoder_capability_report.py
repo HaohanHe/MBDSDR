@@ -198,8 +198,8 @@ SENSITIVITY_SNAPSHOT = {
         "first_failure_code": "address_not_recovered", "monotonic": True,
     },
     "acars": {
-        "threshold_snr_db": 2.0, "threshold_100pct_snr_db": 2.0,
-        "first_success_snr_db": -2.0, "critical_band_db": [-2.0, 2.0],
+        "threshold_snr_db": -2.0, "threshold_100pct_snr_db": -2.0,
+        "first_success_snr_db": -6.0, "critical_band_db": [-6.0, -2.0],
         "first_failure_code": "nothing_detected", "monotonic": True,
     },
     "navtex": {

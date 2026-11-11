@@ -102,26 +102,12 @@ def test_wspr_wav_input_is_proven(tmp_path):
 
 @pytest.mark.parametrize("mode,fixture,rate", [
     ("pocsag", "pocsag.wav", 22050.0),
-    ("acars", None, 48000.0),
+    ("acars", "acars.wav", 48000.0),
     ("navtex", "navtex.wav", 12000.0),
 ])
 def test_audio_modes_declared_rate_is_proven(tmp_path, mode, fixture, rate):
     """三个音频模式声明「任意 fs」，至少要在入库 fixture 的采样率上真解出。"""
-    if mode == "acars":
-        # 入库的 sensitivity/acars.wav 是 acars_protocol 的 2400 bd 波形，
-        # 超出生产路由声明的 1200 bd 能力（此前 0 帧被当成 ok=True 才「通过」）。
-        # 这里按生产协议合成 1200 bd、带 SYN,SYN,SOH 前导的帧，真正证明采样率支持。
-        from mbdsdr_ai.acars_decoder import (SOH, SYN, build_acars_frame,
-                                             frame_bits_from_bytes,
-                                             synthesize_msk_audio)
-        body = build_acars_frame(mode="2", reg="BA1234", label="H1",
-                                 block_id="1", text="TEST MESSAGE")
-        bits = frame_bits_from_bytes(bytes([SYN, SYN, SOH]) + body)
-        audio = synthesize_msk_audio(bits, rate, 1200)
-        path = str(tmp_path / "acars_1200.wav")
-        _write_wav(path, audio, int(rate))
-    else:
-        path = os.path.join(SENS, fixture)
+    path = os.path.join(SENS, fixture)
     kwargs = {}
     if mode == "pocsag":
         # 入库 fixture 只有 0.93s，比能力表声明的最短 1152 bit（0.96s @1200bd）
@@ -137,6 +123,13 @@ def test_audio_modes_declared_rate_is_proven(tmp_path, mode, fixture, rate):
     _ok(r, mode)
     assert r.get("audio_sample_rate_hz") in (None, rate), (
         f"{mode} 实际读到的采样率与声明不符: {r.get('audio_sample_rate_hz')}")
+    if mode == "acars":
+        # 入库 fixture 必须是生产声明的 1200 bd，且能被生产解码器解出至少
+        # 1 条真实帧（CRC 通过）。此前 2400 bd fixture 一直解出 0 帧，
+        # 靠「0 帧当成功」假绿；合成帧绕过同样不算证明。
+        assert r["crc_ok_count"] >= 1, f"fixture 没有一条 CRC 通过的帧: {r}"
+        texts = [m.get("text") for m in r.get("messages", [])]
+        assert "TEST MESSAGE" in texts, f"fixture 解出的正文与真值不符: {texts}"
 
 
 @pytest.mark.parametrize("target_fs", [8000, 44100, 48000])

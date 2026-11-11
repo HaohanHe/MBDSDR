@@ -42,7 +42,7 @@ TODAY = date(2026, 11, 6).isoformat()
 # 固定合成真值（解码侧按同样字段比对）。
 POCSAG_TRUTH = {"address": 54321, "message": "HELLO", "baud": 1200}
 ACARS_TRUTH = {"mode": "2", "reg": "BA1234", "label": "H1",
-               "text": "TEST MESSAGE", "baud": 2400}
+               "text": "TEST MESSAGE", "baud": 1200}
 NAVTEX_TRUTH = {"b1": "C", "b2": "A", "serial": "12",
                 "text": "SENSITIVITY BASELINE TEST MESSAGE",
                 # build_message 会在正文后补报文尾 'N'（EOT），解码器原样保留；
@@ -109,9 +109,12 @@ def build_acars() -> dict:
     from mbdsdr_ai.acars_protocol import acars_encode
 
     fs = 48000
+    # block_id 用字母：块号是数字时，线上还有 msg_num/序号/航班号
+    # （3+1+6 字符），生产解码器会先把正文前 10 字符当这些字段吃掉。
+    # 这里要的是「正文 = 真值 TEXT」，所以用非数字块号。
     audio = acars_encode(ACARS_TRUTH["mode"], reg=ACARS_TRUTH["reg"],
                          label=ACARS_TRUTH["label"],
-                         text=ACARS_TRUTH["text"],
+                         text=ACARS_TRUTH["text"], block_id="A",
                          baud=ACARS_TRUTH["baud"], sample_rate=fs)
     path = os.path.join(FIXTURE_DIR, "acars.wav")
     _write_wav(path, audio, fs)
