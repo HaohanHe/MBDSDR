@@ -456,6 +456,84 @@ class SpyServerBackend(SDRBackend):
 
     DEFAULT_SAMPLE_RATE = 2_048_000.0
 
+    #: 服务端量程在握手串里的候选键名（不同固件/服务端版本命名不一）。
+    #: 只有**服务端真的声明了**才采信；没声明就保留声明默认值并标 unknown，
+    #: 绝不再把 RTL-SDR 的假设当成服务端能力（P1-32）。
+    _CAP_FREQ_MIN = ("MinFrequency", "MinFreq", "MinFreqHz")
+    _CAP_FREQ_MAX = ("MaxFrequency", "MaxFreq", "MaxFreqHz")
+    _CAP_RATE_MIN = ("MinSampleRate", "MinRate")
+    _CAP_RATE_MAX = ("MaxSampleRate", "MaxRate")
+    _CAP_GAIN_MAX = ("MaxGain",)
+
+    @staticmethod
+    def _cap_num(info: Dict[str, str], keys: tuple) -> Optional[float]:
+        """从握手串取数值；缺键/脏值返回 None（不猜、不兜底成 0）。"""
+        for key in keys:
+            raw = str(info.get(key, "")).strip()
+            if not raw:
+                continue
+            try:
+                val = float(raw)
+            except ValueError:
+                continue
+            if val > 0:
+                return val
+        return None
+
+    def _apply_server_capabilities(self, info: Dict[str, str]) -> Dict[str, Any]:
+        """把服务端声明的量程写进 device，并记录来源。
+
+        修复 P1-32：此前 frequency_range/sample_rate_range/max_gain 全硬编码成
+        RTL-SDR 假设（500 k–1.766 G / 225 k–3.2 M / 49.6 dB），服务端挂 Airspy
+        或 HF 设备时 UI 会给出越界档位（选不中/滑杆越界）。现在：
+          * 服务端声明了就采用，并同步默认采样率/起始频点；
+          * 没声明就保持默认，``capabilities_source`` 标 "declared"，
+            由上层按"未核实"呈现，而不是冒充服务端能力。
+        """
+        applied: Dict[str, Any] = {}
+        fmin = self._cap_num(info, self._CAP_FREQ_MIN)
+        fmax = self._cap_num(info, self._CAP_FREQ_MAX)
+        if fmin and fmax and fmin < fmax:
+            self.device.frequency_range = (int(fmin), int(fmax))
+            self.device.capability_status["frequency_range"] = "probed"
+            self.device.capability_note["frequency_range"] = "服务端握手声明"
+            applied["frequency_range"] = self.device.frequency_range
+            # 默认起始频点落进服务端量程（HF 专用服务端不该默认开到 98 MHz）
+            target = self.status.frequency_hz or 98_000_000.0
+            self.status.frequency_hz = float(min(max(target, fmin), fmax))
+        rmin = self._cap_num(info, self._CAP_RATE_MIN)
+        rmax = self._cap_num(info, self._CAP_RATE_MAX)
+        if rmin and rmax and rmin < rmax:
+            self.device.sample_rate_range = (int(rmin), int(rmax))
+            self.device.capability_status["sample_rate_range"] = "probed"
+            self.device.capability_note["sample_rate_range"] = "服务端握手声明"
+            applied["sample_rate_range"] = self.device.sample_rate_range
+        gmax = self._cap_num(info, self._CAP_GAIN_MAX)
+        if gmax:
+            self.device.max_gain = float(gmax)
+            self.device.capability_status["max_gain"] = "probed"
+            self.device.capability_note["max_gain"] = "服务端握手声明"
+            applied["max_gain"] = self.device.max_gain
+        # 服务端配置串里的 SampleRate 是它实际出数速率：跟它对齐可避免
+        # data_health 里那条 sample_rate_mismatch（请求值与服务端不一致）。
+        exact_rate = self._cap_num(info, ("SampleRate",))
+        if exact_rate:
+            self.status.sample_rate_hz = float(exact_rate)
+            applied["sample_rate_hz"] = self.status.sample_rate_hz
+        self.capabilities_source = (
+            "server" if any(k in applied for k in (
+                "frequency_range", "sample_rate_range", "max_gain"))
+            else "declared")
+        self.capabilities_applied = applied
+        if applied:
+            logger.info("SpyServer 服务端量程已采信: %s", applied)
+        else:
+            # 没声明就保持 RTL-SDR 假设，但必须留下"未核实"的口子：
+            # capability_status 保持缺省（= unknown），界面据此显示未核实。
+            logger.warning(
+                "SpyServer 握手未声明量程，界面按 RTL-SDR 声明值呈现（未核实）")
+        return applied
+
     def __init__(self, host: str, port: int = 7355, ppm: int = 0,
                  sock_factory: Optional[Any] = None,
                  idle_timeout: float = 5.0):
@@ -479,6 +557,9 @@ class SpyServerBackend(SDRBackend):
         self._client: Optional[SpyServerClient] = None
         self._ring_reader: Optional[_ThreadedRingReader] = None
         self._reconnect_count = 0
+        #: 量程来源："server"（握手声明）/ "declared"（未声明，沿用 RTL 假设）
+        self.capabilities_source = "declared"
+        self.capabilities_applied: Dict[str, Any] = {}
 
     def connect(self) -> bool:
         # 重连前彻底释放旧 socket/生产者线程
@@ -514,6 +595,10 @@ class SpyServerBackend(SDRBackend):
         self.status.error_category = ""
         self.status.error_code = ""
         self._start_time = time.time()
+
+        # 服务端量程优先：拿到握手就按它校准 device 与默认采样率/频点（P1-32），
+        # 再下发初始化命令，避免用 RTL-SDR 假设去要求一台 Airspy/HF 服务端。
+        self._apply_server_capabilities(client.server_info)
 
         # 初始化下发（失败不掩盖：set_* 会把原因写进 status.error）
         self.set_sample_rate(self.status.sample_rate_hz)
