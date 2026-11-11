@@ -43,6 +43,12 @@ def win(isolated_profile, qapp):
     w.show()
     for _ in range(20):
         qapp.processEvents()
+    # 横幅挂在频谱页左栏：只有该页是当前页，`QLabel` 才会被布局成真实宽度。
+    # 否则 `width()` 停在 Qt 默认的 640，`_apply_responsive_chrome` 拿 626 的
+    # 假预算去算省略，测试就永远绿——假绿比红坏得多（2026-11-12 用户口径）。
+    w.left_tab.setCurrentWidget(w._spectrum_page)
+    for _ in range(12):
+        qapp.processEvents()
     yield w
     w.close()
     # 时间引擎是全局单例：本文件按过「☾ 今夜」，必须还给后续测试一个
