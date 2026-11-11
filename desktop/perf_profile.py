@@ -41,7 +41,7 @@ PROFILES: Dict[str, dict] = {
     "eco": {
         "label": "省电（1.024 MS/s）",
         "sample_rate_hz": 1_024_000,
-        "panel_level": 2,            # 面板「低」：(1024, 256, 100)
+        "panel_level": 2,            # 面板「低」：(1024, 根数上限 256, 100)
         "fft_size": 1024,
         "spectrum_interval_ms": 100,
         "gnss_poll_ms": 2000,
@@ -51,7 +51,7 @@ PROFILES: Dict[str, dict] = {
     "balanced": {
         "label": "均衡（2.048 MS/s）",
         "sample_rate_hz": 2_048_000,
-        "panel_level": 1,            # 面板「均衡」：(1024, 384, 66)
+        "panel_level": 1,            # 面板「均衡」：(1024, 根数上限 512, 66)
         "fft_size": 1024,
         "spectrum_interval_ms": 66,
         "gnss_poll_ms": 1000,
@@ -60,7 +60,7 @@ PROFILES: Dict[str, dict] = {
     "quality": {
         "label": "精细（2.400 MS/s）",
         "sample_rate_hz": 2_400_000,
-        "panel_level": 0,            # 面板「高」：(2048, 512, 50)
+        "panel_level": 0,            # 面板「高」：(2048, 根数上限 2048, 50)
         "fft_size": 2048,
         "spectrum_interval_ms": 50,
         "gnss_poll_ms": 500,
