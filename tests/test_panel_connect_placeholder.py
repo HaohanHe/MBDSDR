@@ -27,7 +27,9 @@ def qtapp():
 
 
 @pytest.fixture(scope="module")
-def window(qtapp):
+def window(qtapp, isolated_profile):
+    # MainWindow() 会读真实 %APPDATA% 配置、QSettings 与 layout_store；
+    # 不请求 isolated_profile 会把测试值写进用户真实配置（见 conftest 防线 4）。
     import main_window as mw
     from PySide6.QtTest import QTest
     w = mw.MainWindow()
