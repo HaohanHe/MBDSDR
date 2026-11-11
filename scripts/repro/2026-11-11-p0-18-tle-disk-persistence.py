@@ -73,7 +73,8 @@ def _child(phase: str) -> int:
         "epoch_utc": sat["tle_epoch_utc"],
         "tier": sat["tle_tier"],
         "line1": sat["tle"][0],
-        "persist_error": tracker.last_persist_error,
+        # 改前版本没有这个属性：留空以便同一脚本能跑「改前」对照
+        "persist_error": getattr(tracker, "last_persist_error", ""),
     }, ensure_ascii=False))
     return 0
 
