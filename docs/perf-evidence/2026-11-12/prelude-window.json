@@ -1,0 +1,409 @@
+{
+ "kind": "prelude 在定义 C 计时窗口内/外的直接测量",
+ "date": "2026-11-12",
+ "head": "e5e5c93f",
+ "snapshot": "C:\\Users\\xxhzb\\AppData\\Local\\Temp\\kilo\\prelude_head_e5e5c93f",
+ "arms": {
+  "prelude": {
+   "n": 3,
+   "prelude_ms": {
+    "runs": [
+     470.5,
+     428.1,
+     408.0
+    ],
+    "median": 428.1,
+    "min": 408.0,
+    "max": 470.5
+   },
+   "to_prelude_end_ms": {
+    "runs": [
+     656.8,
+     617.7,
+     614.3
+    ],
+    "median": 617.7,
+    "min": 614.3,
+    "max": 656.8
+   },
+   "to_ctor_start_ms": {
+    "runs": [
+     1871.4,
+     1576.6,
+     1402.3
+    ],
+    "median": 1576.6,
+    "min": 1402.3,
+    "max": 1871.4
+   },
+   "ctor_ms": {
+    "runs": [
+     1021.0,
+     797.7,
+     833.5
+    ],
+    "median": 833.5,
+    "min": 797.7,
+    "max": 1021.0
+   },
+   "tick_ms": {
+    "runs": [
+     106.2,
+     100.8,
+     100.2
+    ],
+    "median": 100.8,
+    "min": 100.2,
+    "max": 106.2
+   },
+   "def_c_reported_ms": {
+    "runs": [
+     1127.2,
+     898.5,
+     933.8
+    ],
+    "median": 933.8,
+    "min": 898.5,
+    "max": 1127.2
+   },
+   "entry_to_first_paint_ms": {
+    "runs": [
+     2998.6,
+     2475.1,
+     2336.1
+    ],
+    "median": 2475.1,
+    "min": 2336.1,
+    "max": 2998.6
+   },
+   "samples": [
+    {
+     "arm": "prelude",
+     "head": "e5e5c93f",
+     "mw_file": "C:\\Users\\xxhzb\\AppData\\Local\\Temp\\kilo\\prelude_head_e5e5c93f\\main_window.py",
+     "t0_abs": 26840.866392,
+     "to_qapp_ms": 180.7,
+     "to_prelude_end_ms": 656.8,
+     "prelude_ms": 470.5,
+     "to_ctor_start_ms": 1871.4,
+     "ctor_ms": 1021.0,
+     "tick_ms": 106.2,
+     "def_c_reported_ms": 1127.2,
+     "entry_to_first_paint_ms": 2998.6,
+     "paints": 1,
+     "load_after": {
+      "sys_cpu_pct": 9.2,
+      "python_proc_count": 4,
+      "python_total_cpu_pct": 14.1,
+      "python_top": [
+       {
+        "pid": 32488,
+        "cpu_pct": 9.4
+       },
+       {
+        "pid": 32508,
+        "cpu_pct": 4.7
+       },
+       {
+        "pid": 34744,
+        "cpu_pct": 0.0
+       },
+       {
+        "pid": 37752,
+        "cpu_pct": 0.0
+       }
+      ],
+      "cpu_count": 12
+     },
+     "load_gate_before_python_pct": 5.5
+    },
+    {
+     "arm": "prelude",
+     "head": "e5e5c93f",
+     "mw_file": "C:\\Users\\xxhzb\\AppData\\Local\\Temp\\kilo\\prelude_head_e5e5c93f\\main_window.py",
+     "t0_abs": 26862.5300572,
+     "to_qapp_ms": 185.3,
+     "to_prelude_end_ms": 617.7,
+     "prelude_ms": 428.1,
+     "to_ctor_start_ms": 1576.6,
+     "ctor_ms": 797.7,
+     "tick_ms": 100.8,
+     "def_c_reported_ms": 898.5,
+     "entry_to_first_paint_ms": 2475.1,
+     "paints": 1,
+     "load_after": {
+      "sys_cpu_pct": 11.9,
+      "python_proc_count": 4,
+      "python_total_cpu_pct": 14.1,
+      "python_top": [
+       {
+        "pid": 32252,
+        "cpu_pct": 9.4
+       },
+       {
+        "pid": 32508,
+        "cpu_pct": 4.7
+       },
+       {
+        "pid": 34744,
+        "cpu_pct": 0.0
+       },
+       {
+        "pid": 37752,
+        "cpu_pct": 0.0
+       }
+      ],
+      "cpu_count": 12
+     },
+     "load_gate_before_python_pct": 4.7
+    },
+    {
+     "arm": "prelude",
+     "head": "e5e5c93f",
+     "mw_file": "C:\\Users\\xxhzb\\AppData\\Local\\Temp\\kilo\\prelude_head_e5e5c93f\\main_window.py",
+     "t0_abs": 26869.5982099,
+     "to_qapp_ms": 200.7,
+     "to_prelude_end_ms": 614.3,
+     "prelude_ms": 408.0,
+     "to_ctor_start_ms": 1402.3,
+     "ctor_ms": 833.5,
+     "tick_ms": 100.2,
+     "def_c_reported_ms": 933.8,
+     "entry_to_first_paint_ms": 2336.1,
+     "paints": 1,
+     "load_after": {
+      "sys_cpu_pct": 13.0,
+      "python_proc_count": 4,
+      "python_total_cpu_pct": 10.9,
+      "python_top": [
+       {
+        "pid": 32068,
+        "cpu_pct": 7.8
+       },
+       {
+        "pid": 32508,
+        "cpu_pct": 3.1
+       },
+       {
+        "pid": 34744,
+        "cpu_pct": 0.0
+       },
+       {
+        "pid": 37752,
+        "cpu_pct": 0.0
+       }
+      ],
+      "cpu_count": 12
+     },
+     "load_gate_before_python_pct": 3.9
+    }
+   ]
+  },
+  "cold": {
+   "n": 3,
+   "prelude_ms": {
+    "runs": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "median": 0.0,
+    "min": 0.0,
+    "max": 0.0
+   },
+   "to_prelude_end_ms": {
+    "runs": [
+     196.1,
+     198.7,
+     191.4
+    ],
+    "median": 196.1,
+    "min": 191.4,
+    "max": 198.7
+   },
+   "to_ctor_start_ms": {
+    "runs": [
+     1097.2,
+     1159.4,
+     1103.6
+    ],
+    "median": 1103.6,
+    "min": 1097.2,
+    "max": 1159.4
+   },
+   "ctor_ms": {
+    "runs": [
+     1245.5,
+     1253.6,
+     1282.0
+    ],
+    "median": 1253.6,
+    "min": 1245.5,
+    "max": 1282.0
+   },
+   "tick_ms": {
+    "runs": [
+     102.8,
+     110.5,
+     98.1
+    ],
+    "median": 102.8,
+    "min": 98.1,
+    "max": 110.5
+   },
+   "def_c_reported_ms": {
+    "runs": [
+     1348.3,
+     1364.1,
+     1380.1
+    ],
+    "median": 1364.1,
+    "min": 1348.3,
+    "max": 1380.1
+   },
+   "entry_to_first_paint_ms": {
+    "runs": [
+     2445.5,
+     2523.5,
+     2483.7
+    ],
+    "median": 2483.7,
+    "min": 2445.5,
+    "max": 2523.5
+   },
+   "samples": [
+    {
+     "arm": "cold",
+     "head": "e5e5c93f",
+     "mw_file": "C:\\Users\\xxhzb\\AppData\\Local\\Temp\\kilo\\prelude_head_e5e5c93f\\main_window.py",
+     "t0_abs": 26848.3803247,
+     "to_qapp_ms": 191.6,
+     "to_prelude_end_ms": 196.1,
+     "prelude_ms": 0.0,
+     "to_ctor_start_ms": 1097.2,
+     "ctor_ms": 1245.5,
+     "tick_ms": 102.8,
+     "def_c_reported_ms": 1348.3,
+     "entry_to_first_paint_ms": 2445.5,
+     "paints": 1,
+     "load_after": {
+      "sys_cpu_pct": 10.9,
+      "python_proc_count": 4,
+      "python_total_cpu_pct": 14.9,
+      "python_top": [
+       {
+        "pid": 38608,
+        "cpu_pct": 9.4
+       },
+       {
+        "pid": 32508,
+        "cpu_pct": 5.5
+       },
+       {
+        "pid": 34744,
+        "cpu_pct": 0.0
+       },
+       {
+        "pid": 37752,
+        "cpu_pct": 0.0
+       }
+      ],
+      "cpu_count": 12
+     },
+     "load_gate_before_python_pct": 5.5
+    },
+    {
+     "arm": "cold",
+     "head": "e5e5c93f",
+     "mw_file": "C:\\Users\\xxhzb\\AppData\\Local\\Temp\\kilo\\prelude_head_e5e5c93f\\main_window.py",
+     "t0_abs": 26855.3928206,
+     "to_qapp_ms": 194.1,
+     "to_prelude_end_ms": 198.7,
+     "prelude_ms": 0.0,
+     "to_ctor_start_ms": 1159.4,
+     "ctor_ms": 1253.6,
+     "tick_ms": 110.5,
+     "def_c_reported_ms": 1364.1,
+     "entry_to_first_paint_ms": 2523.5,
+     "paints": 1,
+     "load_after": {
+      "sys_cpu_pct": 28.6,
+      "python_proc_count": 4,
+      "python_total_cpu_pct": 16.4,
+      "python_top": [
+       {
+        "pid": 35892,
+        "cpu_pct": 9.4
+       },
+       {
+        "pid": 32508,
+        "cpu_pct": 7.0
+       },
+       {
+        "pid": 34744,
+        "cpu_pct": 0.0
+       },
+       {
+        "pid": 37752,
+        "cpu_pct": 0.0
+       }
+      ],
+      "cpu_count": 12
+     },
+     "load_gate_before_python_pct": 3.9
+    },
+    {
+     "arm": "cold",
+     "head": "e5e5c93f",
+     "mw_file": "C:\\Users\\xxhzb\\AppData\\Local\\Temp\\kilo\\prelude_head_e5e5c93f\\main_window.py",
+     "t0_abs": 26876.4598442,
+     "to_qapp_ms": 187.0,
+     "to_prelude_end_ms": 191.4,
+     "prelude_ms": 0.0,
+     "to_ctor_start_ms": 1103.6,
+     "ctor_ms": 1282.0,
+     "tick_ms": 98.1,
+     "def_c_reported_ms": 1380.1,
+     "entry_to_first_paint_ms": 2483.7,
+     "paints": 1,
+     "load_after": {
+      "sys_cpu_pct": 21.3,
+      "python_proc_count": 4,
+      "python_total_cpu_pct": 12.5,
+      "python_top": [
+       {
+        "pid": 9068,
+        "cpu_pct": 7.0
+       },
+       {
+        "pid": 32508,
+        "cpu_pct": 5.5
+       },
+       {
+        "pid": 34744,
+        "cpu_pct": 0.0
+       },
+       {
+        "pid": 37752,
+        "cpu_pct": 0.0
+       }
+      ],
+      "cpu_count": 12
+     },
+     "load_gate_before_python_pct": 6.2
+    }
+   ]
+  }
+ },
+ "load_rule": "规则 10：每个子 run 前父进程采 2 s 低负载门（<200%），子进程跑完再采一次。",
+ "verdict": {
+  "window_definition": "被报出的定义 C = ctor_ms + tick_ms，窗口 = [t_ctor_start, t_first_paint]",
+  "prelude_position": "prelude 在 [t_qapp, t_prelude_end]，早于 t_ctor_start，即在窗口之外",
+  "includes_floor": false,
+  "prelude_ms_median": 428.1,
+  "def_c_with_prelude_ms_median": 933.8,
+  "def_c_cold_ms_median": 1364.1,
+  "understated_by_ms": 430.3,
+  "conclusion": "不含：1158.5 这类 ctor+tick 读数把首次排版地板留在了窗口外。同一结构冷跑的中位比带 prelude 高 430.3 ms（1364.1 vs 933.8），prelude 自身 428.1 ms。按该尺子，带地板的真实值 = 报出值 + 这个差值；跨尺子比较前必须补回。"
+ }
+}

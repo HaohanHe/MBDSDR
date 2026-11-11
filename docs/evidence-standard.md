@@ -57,6 +57,17 @@
       的读数与另一条线报的值几乎相同；逐次读数、系统 CPU 与本机 python 进程占比见
       `docs/perf-evidence/2026-11-11/ctor_segments_load.json`，复跑命令
       `python scripts/repro/2026-11-11-ctor-segments-with-load.py --run N`。
+    - **量具自己付掉的开销必须声明在窗口内还是窗口外。** 计时脚本的
+      prelude（枚举字体族、`QFontMetrics` 预热、`QApplication` 创建、import 等）
+      如果发生在起计时点之后、被计指标之前，它既不属于产品耗时、又已经吃掉了
+      产品本来要付的钱，必须写明「在窗口外」并单列其耗时；否则该指标被低估。
+      实例（2026-11-12）：`first-tick-definitions.py` 的
+      `QFontDatabase.families()` + `QFontMetrics(app.font()).height()` 跑在
+      `T0` 之后、`t_ctor` 之前，中位 428.1 ms（408.0–470.5；另一轮 408.9），
+      而报出的 `entry_to_tick_ms = ctor_ms + tick_ms` 不含它；同结构去掉 prelude
+      的对照中位 1364.1 vs 933.8，差 430.3 ms（另一轮 455.3）。逐时间戳见
+      `docs/perf-evidence/2026-11-12/prelude-window.json`，复跑
+      `python scripts/repro/2026-11-12-prelude-window-probe.py --runs 3`。
 11. **脚本自带的判据不等于我们的验收判据。** 引用任何脚本打印的
     OK / FAIL / 未复现 之前，先按验收判据手算一遍：脚本内置阈值是它自己的口径，
     脚本通过 ≠ 验收通过（例：首拍脚本内置的通过线比验收线宽，引用时必须换成
