@@ -241,6 +241,11 @@ class RightColumn(QScrollArea):
         section = RightSection(title, widget, expanded=(index == 0))
         section.expanded_changed.connect(
             lambda _on: QTimer.singleShot(0, self._sync_container_height))
+        # 用户点节标题 = 切节（W47）：旧滚动位置对新内容没有意义，先归零。
+        # 程序化路径（setCurrentIndex / 跳到分组 / 浮动面板归位）走的是
+        # 「展开并滚到目标节」，那条路不能归零，否则目标节被甩到视口外。
+        section.header.clicked.connect(
+            lambda _checked=False, s=section: self._on_section_clicked(s))
         self._sections.insert(index, section)
         self._titles.insert(index, str(title))
         self._data.insert(index, None)
@@ -328,6 +333,21 @@ class RightColumn(QScrollArea):
     # ------------------------------------------------------------------ 导航
     def currentIndex(self) -> int:
         return self._current
+
+    def scroll_to_top(self) -> None:
+        """把纵向滚动位置复位到 0（W47「回到顶部」的行为入口）。"""
+        self.verticalScrollBar().setValue(0)
+
+    def _on_section_clicked(self, section: "RightSection") -> None:
+        """用户点了节标题（切节）→ 滚动位置归零。
+
+        改前实测（HEAD）：滚到第 6 节后点标题，滚动条停在原值
+        （gap-right-column #4，最坏 10,149 px，目标标题直接被切在视口外）。
+        这里只复位滚动位置，不动任何尺寸/颜色/分组顺序。
+        """
+        if section not in self._sections:
+            return
+        self.scroll_to_top()
 
     def setCurrentIndex(self, index: int) -> None:
         if not (0 <= index < len(self._sections)):
