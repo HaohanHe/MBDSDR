@@ -206,14 +206,20 @@ def test_sky_search_empty_state_is_explicit(qapp):
 
 
 def test_sky_search_needs_station_notice(qapp):
-    """无地面站时点搜索结果要提示，不静默 return。"""
+    """无观测地点时点搜索结果要提示，不静默 return。
+
+    随 ``eb8515dc`` 同步：B3 把泛称「地面站」改成了设置页真实项名
+    「设置 → 卫星与多普勒 → 观测地点纬度/经度」（rf_sky_view.py:5102），
+    断言跟着产品文案走，不再钉旧口号。
+    """
     from rf_sky_view import RFSkyView
 
     view = RFSkyView()
     view._camera_notice = ""
     assert view._ground_station() is None
     assert view._require_station_for_search() is False
-    assert "地面站" in view._camera_notice
+    assert "未设置观测地点" in view._camera_notice
+    assert "观测地点纬度/经度" in view._camera_notice
 
 
 def test_xingguan_layer_toggle_shared_state(qapp):
