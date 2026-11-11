@@ -239,7 +239,9 @@ def test_count_below_is_layer_boundary(catalog):
 # ---------------------------------------------------------------------------
 def test_limit_matches_star_draw_baseline():
     for bortle in range(0, 10):
-        baseline = 6.5 - 0.35 * max(0, int(bortle) - 3)
+        # 与 stars.naked_eye_limit_mag 同一线性律（Bortle 3 = 6.5，逐档 -0.35，
+        # 暗空段不再截断；P1-46）。
+        baseline = 6.5 - 0.35 * (int(bortle) - 3)
         assert sc.naked_eye_limit_mag(bortle) == pytest.approx(baseline)
         # 宽视场必须回到同一条基线，不立第二套阈值。
         assert sc.limit_magnitude(120.0, bortle) == pytest.approx(baseline)
@@ -261,9 +263,12 @@ def test_limit_magnitude_monotone_and_bounded():
 
 def test_limit_magnitude_bortle_monotone():
     vals = [sc.limit_magnitude(120.0, b) for b in range(0, 10)]
-    assert all(b <= a for a, b in zip(vals, vals[1:])), \
-        "Bortle 越差极限星等只能更低"
-    assert vals[0] == vals[3]  # 与 star_draw 一致：<=3 都按 6.5 处理
+    # Bortle 越差极限星等只能更低，且 1..9 必须**严格**下降（P1-46：旧实现
+    # 用 max(0, bortle-3) 把 Bortle 1/2/3 夹成同一个 6.5，暗空段星数完全相同）。
+    assert all(b < a for a, b in zip(vals, vals[1:])), \
+        "Bortle 越差极限星等只能更低，不能出现相同档"
+    assert vals[3] == pytest.approx(6.5)
+    assert vals[1] == pytest.approx(7.2)
 
 
 def test_extinction_vector_matches_scalar():

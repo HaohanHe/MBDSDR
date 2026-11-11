@@ -147,8 +147,10 @@ def culture_label(name: str) -> str:
 # ---------------------------------------------------------------------------
 # 光害可见性口径（**唯一事实源**）
 # ---------------------------------------------------------------------------
-# 裸眼极限星等基线：Bortle<=3（暗空）按 6.5 等，每高一档降 0.35 等
-# （Bortle 9 城市天 ≈ 4.4 等，Stellarium StelSkyDrawer 同语义）。
+# 裸眼极限星等基线：**Bortle 3 为 6.5 等**，每档 -0.35 等，上下都不截断
+# （Bortle 1 暗空 ≈ 7.2 等，Bortle 9 城市天 ≈ 4.4 等，Stellarium
+# StelSkyDrawer 同语义）。Bortle 1/2 当初被 max(0, bortle-3) 夹成与 3 同值，
+# 于是把光害从 3 调到 1 画面一颗星都不多（P1-46），此处按同一线性律放开。
 # 所有"这颗星画不画/点不点得中"的门都必须走 naked_eye_limit_mag()，
 # 不许在别处复制这条公式（历史上 star_catalog.py 曾自带一份同式副本，
 # 改一处漏一处就会让绘制门与拾取门各说各话）。
@@ -163,12 +165,14 @@ MAG_SPAN_TO_FULL_BRIGHT = 8.0
 def naked_eye_limit_mag(bortle: int = DEFAULT_BORTLE) -> float:
     """光害等级 → 裸眼极限星等（天顶方向）。
 
-    Bortle<=3 时恒为 6.5；更高光害按 0.35 等/档递减。这是**唯一**定义，
-    绘制层（``star_draw``/``star_draw_many``）与星表 LOD 层
-    （``star_catalog``）都调用本函数。
+    以 Bortle 3 = 6.5 等为基线，每档 -0.35 等，**1..9 全程单调**：
+    Bortle 1 = 7.2、2 = 6.85、3 = 6.5、…、9 = 4.4。更暗的天空必须露出
+    更暗的恒星，不能把 Bortle 1/2 夹成与 3 同值（否则光害设置在最该
+    体现差别的暗空区间完全失效）。这是**唯一**定义，绘制层
+    （``star_draw``/``star_draw_many``）与星表 LOD 层（``star_catalog``）
+    都调用本函数。
     """
-    return NAKED_EYE_LIMIT_SCALE - NAKED_EYE_BORTLE_SLOPE * max(
-        0, int(bortle) - 3)
+    return NAKED_EYE_LIMIT_SCALE - NAKED_EYE_BORTLE_SLOPE * (int(bortle) - 3)
 
 
 def bortle_dim_factor(bortle: float) -> float:

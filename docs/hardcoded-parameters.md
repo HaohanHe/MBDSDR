@@ -464,6 +464,17 @@ spin `-140..20`）才是 B 类锁死项，各写清理由。
 - 同时收口：`bortle_dim_factor()`（`0.06` 压暗系数）、
   `MAG_SPAN_TO_FULL_BRIGHT`（`8.0`，原在标量/向量各写一次）、
   `DEFAULT_BORTLE`（原来 6 处签名写 `bortle: int = 3`）。
+- **2026-11-11 口径修正（P1-46）**：上面收口时公式仍是
+  `6.5 - 0.35*max(0,int(bortle)-3)`，Bortle 1/2/3 同值、星数完全相同。
+  现改为 `6.5 - 0.35*(int(bortle)-3)`（Bortle 1 = 7.2、2 = 6.85、
+  3 = 6.5、9 = 4.4 不变），仍是**同一函数、同一条线性律**，只是不再对
+  Bortle<3 截断。下文「口径未变证据」那组 `limit_diff=0` 是收口当时
+  （旧口径）的差分记录，保留为历史；新口径的钉扎见
+  `tests/test_hardcoded_parameter_registry.py` 与
+  `mbdsdr_ai/tests/test_star_catalog.py::test_limit_magnitude_bortle_monotone`。
+  `web/product/src/14-astro-frame.js` 的 JS 镜像与
+  `web/product/build/limit-mag-golden.json` 仍按旧式，需由 Web 线重生成
+  （跨线交接，不在本次改动范围）。
 
 **口径未变证据**（差分探针 `output/_probe_star_limit_equiv.py`，
 用 `git show HEAD:mbdsdr_ai/skyengine/stars.py` 加载旧实现，与本工作树逐点比较）：

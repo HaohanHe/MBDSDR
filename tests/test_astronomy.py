@@ -175,7 +175,9 @@ class TestStarsAndSatMeta(unittest.TestCase):
         from mbdsdr_ai.skyengine.stars import star_draw
 
         def old(vmag, bortle):
-            limit = 6.5 - 0.35 * max(0, int(bortle) - 3)
+            # 旧公式在 Bortle<=3 段用 max(0, ...) 截断；2026-11-11（P1-46）
+            # 放开为同一线性律，镜像同步去掉截断。
+            limit = 6.5 - 0.35 * (int(bortle) - 3)
             if vmag > limit:
                 return (0.0, 0.0, 0.0)
             dim = 1.0 - 0.06 * (bortle - 3)

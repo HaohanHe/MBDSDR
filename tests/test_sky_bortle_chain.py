@@ -176,3 +176,27 @@ def test_limit_magnitude_is_single_source():
             naked_eye_limit_mag(b) + detail_gain_mag(120.0))
     assert naked_eye_limit_mag(8) == pytest.approx(4.75)
     assert naked_eye_limit_mag(3) == pytest.approx(6.5)
+
+
+def test_bortle_below_three_still_adds_stars():
+    """Bortle 1/2 必须露出比 3 更多的星（P1-46 反证）。
+
+    改前：``max(0, bortle-3)`` 把 1/2/3 夹成同一个 6.5 等，三档 limit 相同、
+    实际落笔星数完全相同（实测 Bortle 1/2/3 均为 1695）；把截断加回来，
+    本用例的 ``m1["drawn"] > m2["drawn"] > m3["drawn"]`` 立即红。
+    """
+    v = _new_view()
+    try:
+        m1 = _measure(v, 120.0, 1)
+        m2 = _measure(v, 120.0, 2)
+        m3 = _measure(v, 120.0, 3)
+    finally:
+        v.close()
+
+    assert m1["sel_bortle"] == 1 and m2["sel_bortle"] == 2
+    assert m1["limit_mag"] == pytest.approx(7.2)
+    assert m2["limit_mag"] == pytest.approx(6.85)
+    assert m3["limit_mag"] == pytest.approx(6.5)
+    assert m1["drawn"] > m2["drawn"] > m3["drawn"], (
+        f"暗空没有更多星：Bortle1={m1['drawn']} Bortle2={m2['drawn']} "
+        f"Bortle3={m3['drawn']}")

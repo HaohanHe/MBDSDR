@@ -38,15 +38,18 @@ def test_mag_limit_is_the_same_function_object():
 
 
 @pytest.mark.parametrize("bortle,expected", [
-    (1, 6.5), (2, 6.5), (3, 6.5),
+    (1, 7.2), (2, 6.85), (3, 6.5),
     (4, 6.15), (5, 5.8), (6, 5.45),
     (9, 4.4),
 ])
 def test_mag_limit_values_are_pinned(bortle, expected):
     """锁定裸眼极限口径（Stellarium StelSkyDrawer 同语义）。
 
-    Bortle<=3 恒为 6.5 等，每高一档 -0.35 等。改这些值会同时改变
+    以 Bortle 3 = 6.5 等为基线，每档 -0.35 等，1..9 全程单调
+    （Bortle 1 = 7.2、2 = 6.85、9 = 4.4）。改这些值会同时改变
     「星画不画」与「星点不点得中」两个门，属于科学口径，不许随手调。
+    Bortle 1/2 曾是 6.5（max(0, bortle-3) 截断），三档星数完全相同，
+    2026-11-11 按 P1-46 放开；谁把截断加回来，这里立刻红。
     """
     assert stars.naked_eye_limit_mag(bortle) == pytest.approx(expected)
 
