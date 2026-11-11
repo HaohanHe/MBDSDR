@@ -32,7 +32,9 @@ import importlib.util
 import inspect
 import json
 import os
+import shutil
 import sys
+import tempfile
 import time
 import types
 
@@ -297,6 +299,9 @@ def pytest_collection_finish(session):
     # 此刻所有测试模块已 import、任何 module fixture 都还没跑：第一次见到
     # QApplication 就在这里拍 app 级样式基线（锁的几处早退不能吞掉它）。
     _capture_app_style_baseline()
+    # 同理：module 级 fixture 会先于 function 级构造 MainWindow，QSettings
+    # 的隔离必须在这之前装好。
+    _install_qsettings_isolation()
     if os.environ.get("MBDSDR_TEST_LOCK", "1") == "0":
         return
     trigger = _qt_trigger(session.items)
@@ -647,11 +652,11 @@ def _isolate_backing_config(tmp_path_factory):
     靠人记；只要有人在用例体里直接 ``MainWindow()`` 就漏。
 
     这里只重定向 ``default_config_path()``（desktop_settings.json），不动
-    HOME/APPDATA/QSettings：
+    HOME/APPDATA：
       * HOME/APPDATA 是隔离手段的"大锤"，会话级改动会影响依赖真实 home 的
         用例；
-      * QSettings 两参构造（``QSettings("MBDSDR", "Desktop")``）根本不吃
-        setPath，仍落 HKCU 注册表——那半由锁线统一清点，不在本装置里假装修好。
+      * QSettings 由下面的 ``_install_qsettings_isolation`` /
+        ``_isolate_qsettings`` 单独接管（见那两处注释）。
 
     注意：pytest_configure 的守卫快照在**本 fixture 之前**取，所以守卫盯的
     仍是用户真实文件；本 fixture 只保证写盘不落到那里。
@@ -666,6 +671,120 @@ def _isolate_backing_config(tmp_path_factory):
         yield root
     finally:
         mp.undo()
+
+
+# ---------------------------------------------------------------------------
+# 防线 7：QSettings 默认写 Windows 注册表，测试读到用户上次拖动的布局
+# （2026-11-12 实测，PySide6 6.12 + Win）
+#
+# ``QSettings.setDefaultFormat(IniFormat)`` + ``setPath(IniFormat, ...)`` 对
+# 两参构造 ``QSettings("MBDSDR", "Desktop")`` **无效**：
+#   QSettings("MBDSDR", "Desktop").fileName()
+#     -> '\\HKEY_CURRENT_USER\\Software\\MBDSDR\\Desktop'
+# 于是 test_first_open_welcome 之类读到本机历史 three_column_sizes，红绿
+# 随机器翻转。isolated_profile 里那两句因此是假隔离。
+#
+# 两层：
+#   * 会话级（pytest_collection_finish）：把 QSettings 符号换成子类，两参
+#     构造补成显式 Ini + UserScope，并把默认格式/路径指到会话临时目录。
+#     module 级 fixture 在 function 级之前构造 MainWindow，必须在那之前生效。
+#   * 函数级 autouse：每个用例再分一份独立临时目录，用例结束还原默认格式
+#     并回到会话目录——同一用例连跑多次读数一致，也不把 ini 状态带给下一例。
+# 只改 Python 侧符号，不碰产品代码；MBDSDR_QS_ISOLATE=0 可关（反证用）。
+# Qt 没有 QSettings.path() 读取口，所以「还原 path」只能还原到本装置自己
+# 记录的会话目录（原来是谁设的 path 已无从查证）。
+# ---------------------------------------------------------------------------
+_QS_ISOLATION = {"cls": None, "format": None, "session_path": None,
+                 "seq": 0, "patched": {}}
+
+
+def _qsettings_isolation_enabled():
+    return os.environ.get("MBDSDR_QS_ISOLATE", "1") != "0"
+
+
+def _install_qsettings_isolation():
+    """收集定稿后、任何 fixture 之前装好：把双参 QSettings 钉到临时 Ini。"""
+    if not _qsettings_isolation_enabled() or _QS_ISOLATION["cls"] is not None:
+        return
+    try:
+        import PySide6.QtCore as qtcore
+    except ImportError:               # 裁剪环境没有 PySide6：没有 QSettings 可隔离
+        return
+
+    real = qtcore.QSettings
+    session_path = tempfile.mkdtemp(prefix="mbdsdr-qsettings-")
+    _QS_ISOLATION.update(cls=real, format=real.defaultFormat(),
+                         session_path=session_path, seq=0, patched={})
+
+    class IsolatedQSettings(real):
+        """双参构造补成显式 Ini + UserScope；其余重载原样透传。"""
+
+        def __init__(self, *args, **kwargs):
+            if (len(args) == 2 and not kwargs
+                    and all(isinstance(a, str) for a in args)):
+                args = (real.IniFormat, real.UserScope) + args
+            super().__init__(*args, **kwargs)
+
+    real.setDefaultFormat(real.IniFormat)
+    for scope in (real.UserScope, real.SystemScope):
+        real.setPath(real.IniFormat, scope, session_path)
+
+    patched = {}
+    for name, mod in list(sys.modules.items()):
+        if mod is None:
+            continue
+        ns = getattr(mod, "__dict__", None)     # 避开模块级 __getattr__ 副作用
+        if ns is not None and ns.get("QSettings") is real:
+            try:
+                mod.QSettings = IsolatedQSettings
+                patched[name] = mod
+            except Exception:  # noqa: BLE001 - 个别模块禁止赋值，跳过即可
+                continue
+    qtcore.QSettings = IsolatedQSettings
+    _QS_ISOLATION["patched"] = patched
+
+
+def _restore_qsettings_isolation():
+    real = _QS_ISOLATION["cls"]
+    if real is None:
+        return
+    import PySide6.QtCore as qtcore
+
+    qtcore.QSettings = real
+    for mod in _QS_ISOLATION["patched"].values():
+        try:
+            if getattr(mod, "__dict__", {}).get("QSettings") is not real:
+                mod.QSettings = real
+        except Exception:  # noqa: BLE001
+            continue
+    real.setDefaultFormat(_QS_ISOLATION["format"])
+    for scope in (real.UserScope, real.SystemScope):
+        real.setPath(real.IniFormat, scope, _QS_ISOLATION["session_path"])
+    _QS_ISOLATION.update(cls=None, patched={})
+
+
+@pytest.fixture(autouse=True)
+def _isolate_qsettings():
+    """每个用例一份干净 ini：读写都落在临时目录，结束还原默认格式/路径。"""
+    real = _QS_ISOLATION["cls"]
+    if real is None or not _qsettings_isolation_enabled():
+        yield
+        return
+    old_format = real.defaultFormat()
+    _QS_ISOLATION["seq"] += 1
+    path = os.path.join(_QS_ISOLATION["session_path"],
+                        "case%05d" % _QS_ISOLATION["seq"])
+    os.makedirs(path, exist_ok=True)
+    real.setDefaultFormat(real.IniFormat)
+    for scope in (real.UserScope, real.SystemScope):
+        real.setPath(real.IniFormat, scope, path)
+    try:
+        yield
+    finally:
+        real.setDefaultFormat(old_format)
+        for scope in (real.UserScope, real.SystemScope):
+            real.setPath(real.IniFormat, scope, _QS_ISOLATION["session_path"])
+        shutil.rmtree(path, ignore_errors=True)
 
 
 @pytest.fixture(scope="module")
@@ -920,6 +1039,7 @@ def pytest_sessionfinish(session, exitstatus):
 
 
 def pytest_unconfigure(config):
+    _restore_qsettings_isolation()
     sys.stdout.flush()
     sys.stderr.flush()
     _release_qt_lock(_LOCK["fh"])       # 硬退出前先交锁，否则其它会话要等满超时
