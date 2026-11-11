@@ -315,38 +315,41 @@ class FileChangeTracker:
         """加载历史变更（只加载元数据，不加载完整内容）。"""
         if not os.path.exists(self.storage_dir):
             return
+        # 历史记录只读快照：同一进程反复构造 FileTracker 时，目录签名不变
+        # 就复用已解析的 JSON，省掉每个实例的 open + json.load。签名带
+        # mtime_ns/size，新增或改写记录会让下一个实例立刻重读（语义不变）。
+        from .history_snapshot import load_json_files
+        paths = []
         for date_dir in os.listdir(self.storage_dir):
             full_dir = os.path.join(self.storage_dir, date_dir)
             if not os.path.isdir(full_dir):
                 continue
             for filename in os.listdir(full_dir):
-                if not filename.endswith('.json'):
-                    continue
-                path = os.path.join(full_dir, filename)
-                try:
-                    with open(path, 'r', encoding='utf-8') as f:
-                        data = json.load(f)
-                    change = FileChange(
-                        change_id=data["change_id"],
-                        file_path=data["file_path"],
-                        change_type=ChangeType(data["change_type"]),
-                        hash_before=data.get("hash_before", ""),
-                        hash_after=data.get("hash_after", ""),
-                        reason=data.get("reason", ""),
-                        actor=data.get("actor", "agent"),
-                        timestamp=data.get("timestamp", 0),
-                        metadata=data.get("metadata", {}),
-                        reverted=data.get("reverted", False),
-                        reverted_to=data.get("reverted_to", ""),
-                    )
-                    self.changes[change.change_id] = change
-                    if change.file_path not in self.file_changes:
-                        self.file_changes[change.file_path] = []
-                    self.file_changes[change.file_path].append(change.change_id)
-                    self._counter = max(self._counter, int(change.change_id.split('_')[-1]))
-                except Exception as e:  # noqa: BLE001
-                    # 单条损坏不能拖垮全部加载，但绝不能无声消失（审计链要有痕迹）
-                    print(f"警告: 变更记录加载失败，已跳过 {path}: {e}")
+                if filename.endswith('.json'):
+                    paths.append(os.path.join(full_dir, filename))
+        for path, data in load_json_files(paths):
+            try:
+                change = FileChange(
+                    change_id=data["change_id"],
+                    file_path=data["file_path"],
+                    change_type=ChangeType(data["change_type"]),
+                    hash_before=data.get("hash_before", ""),
+                    hash_after=data.get("hash_after", ""),
+                    reason=data.get("reason", ""),
+                    actor=data.get("actor", "agent"),
+                    timestamp=data.get("timestamp", 0),
+                    metadata=data.get("metadata", {}),
+                    reverted=data.get("reverted", False),
+                    reverted_to=data.get("reverted_to", ""),
+                )
+                self.changes[change.change_id] = change
+                if change.file_path not in self.file_changes:
+                    self.file_changes[change.file_path] = []
+                self.file_changes[change.file_path].append(change.change_id)
+                self._counter = max(self._counter, int(change.change_id.split('_')[-1]))
+            except Exception as e:  # noqa: BLE001
+                # 单条损坏不能拖垮全部加载，但绝不能无声消失（审计链要有痕迹）
+                print(f"警告: 变更记录加载失败，已跳过 {path}: {e}")
 
         # os.listdir 顺序由文件系统决定（Windows 近似有序、Linux 哈希序），
         # 不保证时间顺序。历史列表是 get_file_history "最新在前"的依据，

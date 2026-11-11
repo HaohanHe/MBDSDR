@@ -16,6 +16,7 @@ MBDSDR AI 内核 - 工具注册表
 
 import fnmatch
 import json
+from functools import lru_cache
 import math
 import re
 import threading
@@ -357,13 +358,20 @@ WRITE_TOOL_NAME_PATTERNS = (
 )
 
 
+@lru_cache(maxsize=4096)
+def _auto_write_by_name(name: str) -> bool:
+    """名字 → 是否写工具。工具名是有限集合，结果进程内可复用。"""
+    return any(fnmatch.fnmatchcase(name, p) for p in WRITE_TOOL_NAME_PATTERNS)
+
+
 def _auto_write(name: str, parameters: Any) -> bool:
     """写工具自动判定：名字命中写模式。
 
     S13 起不再用 schema 里的 ``arm_manual`` 作为判定信号——模型可传参数
     不能既当"动作声明"又当"授权"。写工具资格只认名称模式（或显式 write=True）。
+    ``parameters`` 保留在签名里兼容既有调用，但判定只看名字（与优化前一致）。
     """
-    return any(fnmatch.fnmatchcase(name, p) for p in WRITE_TOOL_NAME_PATTERNS)
+    return _auto_write_by_name(name)
 
 
 #: 模型对话通道的**硬门**：会发射 / 删除 / 回滚 / 建立外部连接的动作。
@@ -389,6 +397,7 @@ MODEL_HARD_GATE_PATTERNS = (
 )
 
 
+@lru_cache(maxsize=4096)
 def _model_hard_gate(name: str) -> bool:
     """模型通道必须人工授权的动作（名字命中即拦，不依赖模型自报）。"""
     return any(fnmatch.fnmatchcase(name, p)

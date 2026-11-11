@@ -259,11 +259,12 @@ class MBDSDRAgent:
             timeout=self.config.timeout,
         )
 
-        # 从真实 API 获取模型列表（失败则 fallback 到内置列表，不阻塞初始化）
-        try:
-            self.model_manager.fetch_models(force_refresh=True)
-        except Exception:
-            pass
+        # 模型列表**按需**查询：/models 命令与 list_models 工具会显式拉取。
+        # 旧实现在构造里 fetch_models(force_refresh=True)，每次启动都同步
+        # GET /v1/models（超时上限 config.timeout，默认 60s）；离线、代理
+        # 不通或接口慢时直接把 UI 启动卡住，注释却写「不阻塞初始化」。
+        # 构造期不联网，available_models 保持内置静态列表（本地、无时效
+        # 问题）；用户开口要模型列表时才走真实网络，符合「能力而非流程」。
 
         self.tool_registry = ToolRegistry(
             tool_output_max_chars=self.config.tool_output_max_chars,

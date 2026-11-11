@@ -27,6 +27,7 @@ import time
 import shutil
 import subprocess
 import importlib
+from functools import lru_cache
 from dataclasses import dataclass, field
 from typing import Dict, List, Any, Optional, Tuple
 from enum import Enum
@@ -76,6 +77,23 @@ class EditRecord:
         }
 
 
+@lru_cache(maxsize=1)
+def _git_version_available() -> bool:
+    """git --version 是纯环境探测，同一进程里不会自己变。
+
+    这是**模块级**函数：CodeEditor 每个实例构造时都会探测一次 git 可用性，
+    进程内结果不会变，缓存掉重复的 subprocess 开销。
+    """
+    try:
+        result = subprocess.run(
+            ["git", "--version"],
+            capture_output=True, text=True, timeout=5
+        )
+        return result.returncode == 0
+    except Exception:
+        return False
+
+
 class CodeEditor:
     """
     代码编辑器：自编程核心。
@@ -119,16 +137,10 @@ class CodeEditor:
         # 检查 git 是否可用
         self.git_available = self._check_git()
 
-    def _check_git(self) -> bool:
-        """检查 git 是否可用。"""
-        try:
-            result = subprocess.run(
-                ["git", "--version"],
-                capture_output=True, text=True, timeout=5
-            )
-            return result.returncode == 0
-        except Exception:
-            return False
+    @staticmethod
+    def _check_git() -> bool:
+        """检查 git 是否可用（进程内结果缓存，避免每个实例都 spawn）。"""
+        return _git_version_available()
 
     def read_file(self, file_path: str, max_lines: int = 0) -> Tuple[str, int]:
         """
