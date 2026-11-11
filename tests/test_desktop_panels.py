@@ -78,7 +78,33 @@ class TestWeatherPanel:
         w.set_sdr_connected(True)
         assert w._sdr_connected is True
         w.src_combo.setCurrentIndex(w.src_combo.findText("实时 SDR"))
-        assert w.start_btn.isEnabled() is True
+        # P1-24：本面板不做边收边解，实时档位即使有连接也不许点亮「开始解码」
+        assert w.start_btn.isEnabled() is False
+        assert "不在此面板解码" in w.image_label.text()
+
+    def test_realtime_start_decode_does_not_promise_receiving(self):
+        """实时档位直接调 start_decode：不许弹「实时接收指引」模态假装能收。"""
+        from weather_panel import WeatherPanel
+        from PySide6.QtWidgets import QMessageBox
+
+        w = WeatherPanel()
+        w.set_sdr_connected(True)
+        w.src_combo.setCurrentIndex(w.src_combo.findText("实时 SDR"))
+
+        calls = []
+        orig_info, orig_warn = QMessageBox.information, QMessageBox.warning
+        QMessageBox.information = staticmethod(
+            lambda *a, **k: calls.append(("info", a)) or QMessageBox.Ok)
+        QMessageBox.warning = staticmethod(
+            lambda *a, **k: calls.append(("warn", a)) or QMessageBox.Ok)
+        try:
+            w.start_decode()
+        finally:
+            QMessageBox.information = orig_info
+            QMessageBox.warning = orig_warn
+        assert calls == [], f"实时档位仍弹模态: {calls}"
+        assert "录音" in w.image_label.text()
+        assert "不直接接收" in w.status_label.text()
 
 
 # ----------------------------------------------------------------------

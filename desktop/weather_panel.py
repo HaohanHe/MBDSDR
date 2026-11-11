@@ -30,7 +30,8 @@ MBDSDR 桌面端 - 气象卫星云图面板 (WeatherPanel)
 红线：
   * 无 SDR 连接且无录制文件 → 图像区空白，仅显示「未连接 / 无数据」占位文字。
   * 不内置任何默认/示例/合成云图，不 np.random 生成假图，不从 URL 拉示例图。
-  * 实时 SDR 模式在 set_sdr_connected(False) 时整体置灰。
+  * 「实时 SDR」档位不在此面板边收边解，只是录音指引；该档位「开始解码」
+    恒置灰（接了 SDR 也不点亮），文案不许写成「边收边解」。
 
 配色（低饱和默认主题，与 themes.py 一致；面板局部强调色直接取任务给定值）：
   米白 #F5F3EF / 蓝灰 #5B7B8C / 橙 #C4845C / 绿 #6BA89A / 红 #B85C5C
@@ -299,18 +300,49 @@ class DecodeWorker(QObject):
                    frames=res["lines_aligned"],
                    meta={"duration_s": res["duration_s"], "paths": paths})
 
-    # ---- Meteor-M2 LRPT：真实解调链 + 帧约定诊断 ------------------------
-    # 2026-11-06：旧注释写「可见光重组上游未实现」，但 compose_visible_image
-    # 早已实现。真正的坑在两层的**帧首约定不一致**：demodulate_lrpt 走
-    # extract_cadu 产出 CCSDS ASM 开头的 CADU，图像层默认只认
-    # lrpc_build_frame 的 3B 1DFCDC。旧实现把 None 一律报成「段不全或数据
+    # ---- Meteor-M2 LRPT：真录链优先，旧合成级链作回退 --------------------
+    # 2026-11-11（P1-23）：`lrpt_pipeline` 的真录链此前只被测试用，面板一直走
+    # `meteor_sat` 的简化帧链——真录解出的 CADU 帧首是 CCSDS ASM，图像层只认
+    # 3B 1DFCDC，于是真录必然报「帧约定不一致」、永远不出图。现改为先走
+    # 真录链（重采样→软判决→ASM→擦除辅助 RS→woven→M_PDU→MCU→RGB），
+    # 它解不出图时再回退旧链，并把真录链的阶段化原因一起告诉用户。
+    # 2026-11-06 旧注释（保留作背景）：旧实现把 None 一律报成「段不全或数据
     # 损坏」，用户会以为信号差，其实是第一帧就被全部判成"无同步"。
     def _run_meteor(self):
+        from mbdsdr_ai import lrpt_pipeline as lp
         from mbdsdr_ai import meteor_sat as ms
         path = self._p["iq_file"]
         fs = float(self._p.get("sample_rate", 1e6))
         self.progress.emit(f"读取 Meteor IQ {os.path.basename(path)} ...")
         iq = _load_complex64(path).astype(np.complex128)
+
+        self.progress.emit(
+            f"IQ {iq.size/1e6:.1f} M 采样 @ {fs/1e6:.3f} MS/s → LRPT 真录链 ...")
+        try:
+            real = lp.decode_recording_to_image(iq, fs)
+        except Exception as e:  # noqa: BLE001 - 回退旧链前必须如实记录
+            real = lp.RecordingImageResult(
+                stage="exception", stats={"chain": "lrpt_pipeline.real"},
+                error=f"真录链异常：{type(e).__name__}: {e}")
+        if real.success and real.rgb is not None:
+            from PIL import Image
+            h, w = real.rgb.shape[:2]
+            out_png = self._p.get("out_png") or os.path.join(
+                os.path.dirname(self._p["iq_file"]), "meteor_recording.png")
+            Image.fromarray(real.rgb).save(out_png)
+            st = real.stats
+            self._emit(
+                ok=True, png=out_png, width=w, height=h,
+                annotation=(f"LRPT 真录链 {w}x{h}"
+                            f"（VCDU {st.get('n_valid_vcdu', 0)} / "
+                            f"图像包 {st.get('n_image_packets', 0)}）"),
+                channel="Meteor-M2 LRPT",
+                frames=int(st.get("n_valid_vcdu", 0)),
+                meta={"chain": st})
+            return
+        real_reason = real.error or f"真录链在 {real.stage} 阶段未出图"
+        self.progress.emit(f"真录链未出图（{real_reason}）→ 回退旧链 ...")
+
         params = ms.get_satellite_params("meteor_m2_hrpt")
         if params is None:
             self._emit(ok=False, error="meteor_sat 未找到 meteor_m2_hrpt 参数")
@@ -319,7 +351,8 @@ class DecodeWorker(QObject):
         cadus = ms.demodulate_lrpt(iq, fs, params)
         if not cadus:
             self._emit(ok=False, frames=0,
-                       error="未解出任何 LRPT CADU 帧（信号弱/参数不符），无图可合成")
+                       error=("未解出任何 LRPT CADU 帧（信号弱/参数不符），无图可合成；"
+                              f"真录链：{real_reason}"))
             return
         self.progress.emit(f"已解出 {len(cadus)} 帧 → 帧约定诊断 ...")
         probe = ms.probe_cadu_sync(cadus)
@@ -330,8 +363,7 @@ class DecodeWorker(QObject):
                 error=(f"已真实解出 {len(cadus)} 个 LRPT CADU 帧，但帧首 "
                        f"{head}… 属于「{probe['best'] or '未知'}」口径，"
                        "与图像重组器期待的 1DFCDC 简化帧不一致；"
-                       "本仓 LRPT 物理层与图像层的帧头约定尚未统一"
-                       "（not_verified），不出图，也不拿半幅图冒充。"))
+                       f"真录链：{real_reason}"))
             return
         self.progress.emit(
             f"帧约定对齐（{probe['counts']['lrpc_simplified_3b']} 帧）"
@@ -342,7 +374,7 @@ class DecodeWorker(QObject):
                        meta={"frame_probe": probe},
                        error=(f"已真实解出 {len(cadus)} 个 LRPT CADU 帧；"
                               "但段重组/熵解码未得到完整图像"
-                              "（段不全或数据损坏，详见日志），不出半幅图"))
+                              f"（段不全或数据损坏）；真录链：{real_reason}"))
             return
         import numpy as _np
         from PIL import Image
@@ -461,7 +493,9 @@ class WeatherPanel(QWidget):
         form.addRow("卫星制式", self.sat_combo)
 
         self.src_combo = QComboBox()
-        self.src_combo.setToolTip("离线录制文件解码，或实时 SDR 边收边解")
+        self.src_combo.setToolTip(
+            "录制文件：解码已落盘的 IQ/WAV；"
+            "实时 SDR：本面板不直接收（不与主窗口抢环形缓冲），只按录音步骤引导")
         self.src_combo.addItems(["录制文件", "实时 SDR"])
         self.src_combo.currentIndexChanged.connect(self._refresh_state)
         form.addRow("数据来源", self.src_combo)
@@ -614,13 +648,14 @@ class WeatherPanel(QWidget):
         for w in (self.freq_edit, self.sym_edit, self.sr_edit, self.sat_combo, self.src_combo):
             w.setEnabled(not busy)
         # 实时模式需要 SDR 连接；离线需要文件
-        if no_hw:
+        if realtime:
+            # 本面板不做边收边解（见 start_decode 注释：会与主窗口统一 IQ 轮询
+            # 抢同一环形缓冲），只给「先录音、再切录制文件」的指引。
+            # 因此实时档位「开始解码」恒置灰——有连接也不点亮，避免按钮承诺
+            # 一个本面板做不到的动作。
             self.start_btn.setEnabled(False)
         elif busy:
             self.start_btn.setEnabled(False)
-        elif realtime:
-            # 实时：只要 SDR 已连接即可开始（边收边落盘）
-            self.start_btn.setEnabled(self._sdr_connected)
         else:
             self.start_btn.setEnabled(self._iq_file is not None)
         self.stop_btn.setEnabled(busy)
@@ -628,6 +663,11 @@ class WeatherPanel(QWidget):
         if no_hw:
             self._set_placeholder("未连接SDR设备 — 请接好硬件，或切到「录制文件」离线解码")
             self._update_status(extra="未连接SDR设备")
+        elif realtime and not busy:
+            self._set_placeholder(
+                "实时档位不在此面板解码 — 主窗口调谐 → 录音(Ctrl+R) → "
+                "切「录制文件」选该文件解码")
+            self._update_status(extra="实时档位只给录音指引，不直接接收")
         elif not busy and not self._current_png:
             self._set_placeholder("未连接 / 无数据")
             self._update_status()
@@ -665,20 +705,15 @@ class WeatherPanel(QWidget):
         out_png = self._out_png_path("decode")
 
         if realtime:
-            if not self._sdr_connected:
-                QMessageBox.warning(self, "未连接 SDR", "未连接SDR设备，无法实时接收。")
-                return
-            # 实时过境接收需要独占调谐到卫星下行频率并录制一个完整过境段。
-            # 不再在此面板另起 read_samples 定时器——那会与主窗口统一 IQ 轮询
+            # 本面板不做边收边解：另起 read_samples 定时器会与主窗口统一 IQ 轮询
             # （50ms 一次 read_samples）抢同一环形缓冲，两路消费者互相偷样本。
-            # 改为引导用户走已验证的录制文件链路：主窗口录音 → 落盘 .iq → 本面板解码。
-            QMessageBox.information(
-                self, "实时接收指引",
-                "接收卫星云图需要把接收机调到下行频率并录制一个过境段。\n\n"
-                "操作步骤：\n"
-                "  1. 在主窗口调谐到下方中心频率；\n"
-                "  2. 点工具栏「录音」(Ctrl+R) 录制 baseband 到 .iq 文件；\n"
-                "  3. 停止录制后切到「录制文件」，选择该 .iq 解码出图。")
+            # 实时档位只引导「主窗口录音 → 落盘 → 切录制文件解码」，因此这里
+            # 不弹模态承诺「开始接收」，只在面板内说明下一步（按钮本身已置灰，
+            # 本分支只兜住程序化调用）。
+            self._update_status(extra="实时档位只给录音指引，不直接接收")
+            self._set_placeholder(
+                "实时档位不在此面板解码 — 主窗口调谐 → 录音(Ctrl+R) → "
+                "切「录制文件」选该文件解码")
             return
 
         # 离线
