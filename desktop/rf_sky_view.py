@@ -411,6 +411,51 @@ def _star_label_limit_mag(fov_deg: float) -> float:
     return 5.5
 
 
+# 中文**口语常用名** → 专名（搜索别名层）。
+# 与 star_culture.json 的分工：那里是星官名（天狼/勾陈一/玉衡），是「读懂」
+# 层；这里是大众日常说法（北极星/北斗七星/牛郎星），星表里查不到，但用户
+# 就是这么叫的。只收录有明确专名一一对应（或整组）的说法，不猜、不编。
+COMMON_STAR_ALIASES: Dict[str, Tuple[str, ...]] = {
+    "北极星": ("Polaris",),
+    "北斗七星": ("Dubhe", "Merak", "Phecda", "Megrez",
+                 "Alioth", "Mizar", "Alkaid"),
+    "北斗": ("Dubhe", "Merak", "Phecda", "Megrez",
+             "Alioth", "Mizar", "Alkaid"),
+    "牛郎星": ("Altair",),
+    "牵牛星": ("Altair",),
+}
+
+
+def star_search_terms(text: str) -> Tuple[str, ...]:
+    """搜索词归一：返回原词 + 去掉末尾「星」的词（天狼星→天狼）。
+
+    星官名通常不带「星」字（天狼/老人/大角/织女一），而口语常带。只去
+    一个后缀、只对中文生效；不把「星星」「卫星」这类词剥成空串。
+    """
+    q = str(text or "").strip().lower()
+    if not q:
+        return ()
+    if len(q) > 1 and q.endswith("星") and q[-2] not in "星星卫行":
+        return (q, q[:-1])
+    return (q,)
+
+
+def common_star_alias_targets(text: str) -> Tuple[str, ...]:
+    """搜索词命中的口语常用名对应的专名（无命中返回空）。
+
+    按「完全相等或前缀」匹配别名键："北斗"与"北斗七"都指向北斗七星，
+    "极星"不会误中来历不明的目标。
+    """
+    out: List[str] = []
+    for term in star_search_terms(text):
+        for alias, members in COMMON_STAR_ALIASES.items():
+            if term == alias or alias.startswith(term):
+                for nm in members:
+                    if nm not in out:
+                        out.append(nm)
+    return tuple(out)
+
+
 def star_catalog_status_text(selection, daylight_hidden: bool = False,
                              error: str = "") -> str:
     """状态卡「星表」行的事实文案（截断时如实写 N/M，不静默少画）。
@@ -2134,7 +2179,10 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         self._gnss_label_font.setPointSize(8)
 
         self.setMouseTracking(True)
-        self.setMinimumSize(400, 400)
+        # 天空画布最小高 376（不是正方形 368）：高度链按「天空 −24 + 底坞 −8」
+        # 拆两块，合计 −32 到 696 并留 4px；368 会让画布变成 400×368 非方形，
+        # 投影与标签密度都会退化。见 docs/research/2026-11-11-gap-layout.md §2.5。
+        self.setMinimumSize(400, 376)
 
         # 搜索框 + 分类下拉 (自包含, 不依赖外部面板)
         self._build_search_widgets()
@@ -3327,14 +3375,38 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
                     "label": name, "sub": info["kind_label"],
                     "az": None, "alt": None, "obj_name": name,
                 })
-        # 2) 恒星: 先全天星表 proper 名（83,479 颗里 430 个专名，前缀匹配），
-        #    再叠亮星表的中文星名（星表没有中文名，读懂层只在亮星表里）。
+        # 2) 恒星: 口语常用名（北极星/北斗七星/天狼星…）先解析成专名，
+        #    再搜全天星表 proper 名（83,479 颗里 430 个专名，前缀匹配），
+        #    最后叠亮星表的中文星官名（星表没有中文名，读懂层只在亮星表里）。
         #    旧实现只遍历 54 颗 BRIGHT_STARS —— 搜 Sadr / Alcyone 一律 0 结果，
-        #    而能力目录写的是「按名称搜索恒星」，属于看得见的能力没接上。
+        #    而能力目录写的是「按名称搜索恒星」，属于看得见的能力没接上；
+        #    中文口语名（P1-45）同样 0 命中，因为星表里只有西方专名。
         seen_star = set()
+        terms = star_search_terms(text)
+        alias_names = common_star_alias_targets(text)
         try:
             from mbdsdr_ai.skyengine.star_catalog import get_catalog
-            for cs in get_catalog().search_by_name(text, limit=20):
+            catalog = get_catalog()
+            # 别名整组要一颗不漏：Merak/Phecda/Megrez 不在 54 颗亮星表里，
+            # 只能从全天星表按专名精确取（北斗七星 = 7 颗，少一颗就是谎报）。
+            for nm in alias_names:
+                for cs in catalog.search_by_name(nm, limit=1)[:1]:
+                    if cs.name.lower() in seen_star:
+                        continue
+                    seen_star.add(cs.name.lower())
+                    zh = ""
+                    c = _stars.star_culture(cs.name)
+                    if c:
+                        zh = c.get("zh", "")
+                    self._search_results.append({
+                        "kind": "star", "kind_label": "恒星",
+                        "label": zh if zh else cs.name,
+                        "sub": (f"Star · {cs.name} · {cs.con}" if zh
+                                else f"Star · {cs.con}"),
+                        "ra": cs.ra_deg, "dec": cs.dec_deg, "vmag": cs.vmag,
+                        "name": cs.name,
+                    })
+            for cs in catalog.search_by_name(text, limit=20):
                 seen_star.add(cs.name.lower())
                 zh = ""
                 c = _stars.star_culture(cs.name)
@@ -3359,7 +3431,9 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
             c = _stars.star_culture(st.name)
             if c:
                 zh = c.get("zh", "")
-            if text in st.name.lower() or (zh and text in zh.lower()):
+            if (st.name in alias_names
+                    or any(t in st.name.lower() for t in terms)
+                    or (zh and any(t in zh.lower() for t in terms))):
                 self._search_results.append({
                     "kind": "star", "kind_label": "恒星",
                     "label": zh if zh else st.name,

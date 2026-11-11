@@ -218,6 +218,35 @@ class TestSearch:
         hits = [r for r in v._search_results if r["kind"] == "star"]
         assert any(r["name"] == "Vega" for r in hits)
 
+    def test_search_common_name_polaris(self):
+        # P1-45：口语名「北极星」不是星官名（勾陈一），星表里查不到。
+        v = _new_view()
+        v._on_search_text("北极星")
+        hits = [r for r in v._search_results if r["kind"] == "star"]
+        assert [r["name"] for r in hits] == ["Polaris"]
+
+    def test_search_common_name_beidou_group_complete(self):
+        # 「北斗七星」必须七颗全到：Merak/Phecda/Megrez 不在 54 颗亮星表里。
+        v = _new_view()
+        v._on_search_text("北斗七星")
+        hits = [r["name"] for r in v._search_results if r["kind"] == "star"]
+        assert hits == ["Dubhe", "Merak", "Phecda", "Megrez",
+                        "Alioth", "Mizar", "Alkaid"]
+
+    def test_search_star_with_colloquial_suffix(self):
+        # 口语带「星」后缀（天狼星）与星官名（天狼）必须同一颗。
+        v = _new_view()
+        v._on_search_text("天狼星")
+        hits = [r for r in v._search_results if r["kind"] == "star"]
+        assert [r["name"] for r in hits] == ["Sirius"]
+
+    def test_search_common_name_picks_and_locates(self):
+        v = _new_view()
+        v._on_search_text("北极星")
+        r = next(x for x in v._search_results if x["kind"] == "star")
+        v.on_body_picked({"kind": "star", "key": r["name"]})
+        assert v._picked_body["key"] == "Polaris"
+
     def test_search_star_pick_selects(self):
         v = _new_view()
         v._on_search_text("天狼")
