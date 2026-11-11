@@ -89,7 +89,7 @@ def isolated_persisted_state(tmp_path_factory):
 
 
 @pytest.fixture(scope="module")
-def main_window(qapp, isolated_persisted_state):
+def main_window(qapp, isolated_profile, isolated_persisted_state):
     from main_window import MainWindow
     w = MainWindow()
     w.show()
