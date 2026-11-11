@@ -5990,6 +5990,23 @@ class MainWindow(QMainWindow):
         except Exception:
             pass
 
+    @staticmethod
+    def _resolve_device_display_name(backend) -> tuple:
+        """受保护地取设备显示名，返回 ``(显示名, 名称是否可读)``。
+
+        不是所有后端都有 ``device.name``：BladeRF / LimeSDR 的后端不是
+        ``SDRBackend`` 子类（`bladerf_params.py:346`、`limesuite_params.py:367`），
+        直取属性会抛 ``AttributeError``。连接成功槽里这行一旦抛出，后面的
+        增益范围收放、参数下发、读数回填全部被跳过，界面停在"半个连接"。
+        所以统一在这里取值：拿不到就用后端类名兜底，并把"读不到"作为
+        可见事实返回，由调用方写进设备槽/状态栏，绝不静默降级。
+        """
+        dev = getattr(backend, "device", None)
+        name = getattr(dev, "name", None) if dev is not None else None
+        if isinstance(name, str) and name.strip():
+            return name.strip(), True
+        return (type(backend).__name__ or "未命名设备"), False
+
     def _connect_backend(self, backend, sample_rate: float = float(DEFAULT_SAMPLE_RATE_HZ),
                          gain: float = 20.0, ppm: int = 0,
                          agc: bool = True, offset_tuning: bool = False,
@@ -6084,10 +6101,15 @@ class MainWindow(QMainWindow):
         self._panels_set_sdr_connected(True)
         # 面板入口连上 ≠ 设备收得到 1090；上限提示必须在连接成功路径同步。
         self._sync_adsb_tuner_limit()
+        # 设备名必须受保护取值：BladeRF/Lime 后端没有 `.device`，直取会抛
+        # AttributeError 打断本槽后续（增益收放/参数下发/回填都不再执行）。
+        # 读不到时用后端类名兜底，并把「设备名称不可读」明确写进设备槽/状态栏。
+        device_name, name_readable = self._resolve_device_display_name(backend)
+        name_suffix = "" if name_readable else "（设备名称不可读）"
         try:
-            self.conn_label.setText(f"  状态: {backend.device.name}  ")
+            self.conn_label.setText(f"  状态: {device_name}{name_suffix}  ")
             self.conn_label.setStyleSheet(self._conn_label_qss(True))
-            self.status_conn.setText(backend.device.name)
+            self.status_conn.setText(f"{device_name}{name_suffix}")
         except Exception:
             pass
         self.connect_btn.setEnabled(False)
@@ -6102,13 +6124,18 @@ class MainWindow(QMainWindow):
                 self._no_device_hint.setVisible(False)
         except Exception:
             pass
-        self.statusBar().showMessage(f"已连接 {backend.device.name}", MSG_NORMAL)
+        if name_readable:
+            self.statusBar().showMessage(f"已连接 {device_name}", MSG_NORMAL)
+        else:
+            self.statusBar().showMessage(
+                f"已连接 {device_name}，但设备名称不可读（后端未提供 device.name）",
+                MSG_IMPORTANT)
 
         # 增益动态范围：按所连设备能力收放面板滑杆（此前 0-49/0-50 硬编码
         # 是"RTL-SDR 典型"占位，接到别的设备也不动）。失败仅忽略——滑杆
         # 退回硬编码兜底范围，不影响连接。
         try:
-            max_gain = float(getattr(backend.device, "max_gain", 0.0) or 0.0)
+            max_gain = float(getattr(getattr(backend, "device", None), "max_gain", 0.0) or 0.0)
             if max_gain > 0:
                 for _pname in ("control_panel", "module_panel"):
                     _panel = getattr(self, _pname, None)
