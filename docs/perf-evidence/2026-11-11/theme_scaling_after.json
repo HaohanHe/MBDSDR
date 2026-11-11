@@ -1,0 +1,99 @@
+{
+ "repolish_scaling": [
+  {
+   "widgets": 501,
+   "cpu_ms": 62.5,
+   "us_per_widget": 124.8
+  },
+  {
+   "widgets": 1001,
+   "cpu_ms": 93.8,
+   "us_per_widget": 93.7
+  },
+  {
+   "widgets": 2001,
+   "cpu_ms": 203.1,
+   "us_per_widget": 101.5
+  },
+  {
+   "widgets": 4001,
+   "cpu_ms": 578.1,
+   "us_per_widget": 144.5
+  }
+ ],
+ "setstylesheet_scaling": [
+  {
+   "widgets": 501,
+   "cpu_ms": 62.5,
+   "us_per_widget": 124.8
+  },
+  {
+   "widgets": 1001,
+   "cpu_ms": 125.0,
+   "us_per_widget": 124.9
+  },
+  {
+   "widgets": 2001,
+   "cpu_ms": 312.5,
+   "us_per_widget": 156.2
+  },
+  {
+   "widgets": 4001,
+   "cpu_ms": 718.8,
+   "us_per_widget": 179.6
+  }
+ ],
+ "repolish_halving": [
+  {
+   "from": 501,
+   "to": 1001,
+   "widget_ratio": 2.0,
+   "time_ratio": 1.5,
+   "us_per_widget_from": 124.8,
+   "us_per_widget_to": 93.7
+  },
+  {
+   "from": 1001,
+   "to": 2001,
+   "widget_ratio": 2.0,
+   "time_ratio": 2.17,
+   "us_per_widget_from": 93.7,
+   "us_per_widget_to": 101.5
+  },
+  {
+   "from": 2001,
+   "to": 4001,
+   "widget_ratio": 2.0,
+   "time_ratio": 2.85,
+   "us_per_widget_from": 101.5,
+   "us_per_widget_to": 144.5
+  }
+ ],
+ "setstylesheet_halving": [
+  {
+   "from": 501,
+   "to": 1001,
+   "widget_ratio": 2.0,
+   "time_ratio": 2.0,
+   "us_per_widget_from": 124.8,
+   "us_per_widget_to": 124.9
+  },
+  {
+   "from": 1001,
+   "to": 2001,
+   "widget_ratio": 2.0,
+   "time_ratio": 2.5,
+   "us_per_widget_from": 124.9,
+   "us_per_widget_to": 156.2
+  },
+  {
+   "from": 2001,
+   "to": 4001,
+   "widget_ratio": 2.0,
+   "time_ratio": 2.3,
+   "us_per_widget_from": 156.2,
+   "us_per_widget_to": 179.6
+  }
+ ],
+ "note": "合成树只有 QFrame；全应用控件数==树控件数。setStyleSheet 取第二次（稳态）。"
+}

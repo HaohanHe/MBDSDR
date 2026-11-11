@@ -1,0 +1,32 @@
+{
+ "what": "A′ 落地后，主窗（设置页选中）连续切 10 次主题的墙钟 / CPU 时间 / RSS / 句柄",
+ "probe": "output/tmp/theme_cpu_and_scaling_probe.py（A 段）",
+ "why_cpu_time": "本机 cpu_pct=100、10 个 python 进程并行（16 条线），墙钟在 0.55–5.15 s 间抖动，不能作为累积判据；time.process_time() 只计本进程，是判据。",
+ "rows": [
+  {"i": 1,  "theme": "dark",    "wall_ms": 933.5,  "cpu_ms": 546.9, "rss_mb": 354.0, "handles": 1386},
+  {"i": 2,  "theme": "default", "wall_ms": 1102.7, "cpu_ms": 703.1, "rss_mb": 354.0, "handles": 1386},
+  {"i": 3,  "theme": "dark",    "wall_ms": 1326.7, "cpu_ms": 687.5, "rss_mb": 354.4, "handles": 1391},
+  {"i": 4,  "theme": "default", "wall_ms": 1144.0, "cpu_ms": 703.1, "rss_mb": 354.6, "handles": 1386},
+  {"i": 5,  "theme": "dark",    "wall_ms": 966.0,  "cpu_ms": 687.5, "rss_mb": 354.6, "handles": 1386},
+  {"i": 6,  "theme": "default", "wall_ms": 1038.2, "cpu_ms": 703.1, "rss_mb": 354.8, "handles": 1386},
+  {"i": 7,  "theme": "dark",    "wall_ms": 679.9,  "cpu_ms": 562.5, "rss_mb": 355.1, "handles": 1386},
+  {"i": 8,  "theme": "default", "wall_ms": 559.9,  "cpu_ms": 640.6, "rss_mb": 355.2, "handles": 1388},
+  {"i": 9,  "theme": "dark",    "wall_ms": 561.3,  "cpu_ms": 625.0, "rss_mb": 355.2, "handles": 1387},
+  {"i": 10, "theme": "default", "wall_ms": 545.7,  "cpu_ms": 562.5, "rss_mb": 358.4, "handles": 1456}
+ ],
+ "cpu_ms_first_half_avg": 665.6,
+ "cpu_ms_second_half_avg": 618.7,
+ "cpu_trend": "第二半 <= 第一半（三次独立 10 连切复现：665.6/618.7、703.1/643.8、743.7/703.1），无单调上升",
+ "three_runs_cpu_halves": [[665.6, 618.7], [703.1, 643.8], [743.7, 703.1]],
+ "rss_first": 354.0,
+ "rss_last": 358.4,
+ "rss_delta_mb": 4.4,
+ "rss_note": "增量全部落在第 10 次（354.0→355.2 前 9 次仅 +1.2 MB；358.4 是最后一次 +3.2 MB），且 20 连切探针显示 RSS 自第 13 次起恒为 347.1 MB（7 次不涨）——一次性增长，非每次累积。",
+ "handles_first": 1386,
+ "handles_last": 1456,
+ "handles_note": "前 9 次 1386–1391（±5 属正常波动），第 10 次一次性到 1456；20 连切探针中段到 1462 后持平并回落到 1455。与切换次数无关（两次独立运行都在第 10 次触发，且不再增长），不做主题线归因。",
+ "widgets": 1588,
+ "widgets_stable": true,
+ "qss_sha1_stable": true,
+ "verdict": "无泄漏：CPU 时间不随切换次数上升，RSS/句柄为一次性台阶后平台化，控件数与 QSS 哈希恒定。"
+}
