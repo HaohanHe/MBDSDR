@@ -170,8 +170,6 @@ class TestTrackToggleSignals:
 def mw(isolated_profile):
     from main_window import MainWindow
     w = MainWindow()
-    # 星象仪视图惰性构建：跟踪按钮就在 sky_view 上，先同步补建。
-    w._ensure_sky_view()
     w.show()
     from PySide6.QtCore import QTimer
     QTimer.singleShot(120, app.quit)

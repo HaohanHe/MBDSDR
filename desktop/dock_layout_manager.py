@@ -152,16 +152,9 @@ class DockLayoutManager:
     # 天空模式在 Tab / 右侧 Dock 之间搬运（流体侧栏用）
     # ------------------------------------------------------------------
     def _ensure_sky_dock(self) -> QDockWidget:
-        """把天空外壳包进一个 QDockWidget（懒创建，可重复调用）。
-
-        天空视图本身是惰性构建的（`MainWindow._ensure_sky_view`）；要把天空
-        摆到用户面前（布局预设含星象仪）就属于「首次真的需要它」，先同步补建。
-        """
+        """把 self.mw.sky_view 包进一个 QDockWidget（懒创建，可重复调用）。"""
         if self._sky_dock is not None:
             return self._sky_dock
-        ensure = getattr(self.mw, "_ensure_sky_view", None)
-        if callable(ensure):
-            ensure()
         sky = getattr(self.mw, "sky_view", None)
         dock = QDockWidget("星象仪模式", self.mw)
         dock.setObjectName("skyDock")

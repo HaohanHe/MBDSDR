@@ -134,7 +134,7 @@ def test_search_all_sky_really_enters_all_sky(index, main_window, qapp):
     target = hits[0]
     assert "全天" in target.title
 
-    sv = main_window._ensure_sky_view()
+    sv = main_window.sky_view
     sv.set_all_sky_mode(False)
     main_window.left_tab.setFocus()
     qapp.processEvents()
@@ -370,7 +370,7 @@ def test_search_then_enter_runs_with_three_keys(main_window, qapp):
     """Ctrl+K → 输入「全天」→ Enter：三步行到执行。"""
     from PySide6.QtCore import Qt
     from PySide6.QtTest import QTest
-    sv = main_window._ensure_sky_view()
+    sv = main_window.sky_view
     sv.set_all_sky_mode(False)
     qapp.processEvents()
 

@@ -947,13 +947,6 @@ class MainWindow(QMainWindow):
         #   "gnss"   = 由 GNSS 实时 fix 自动写入 —— 丢 fix 时收回，回到未知态。
         self._observer_source: Optional[str] = None
         self.sat_tracker: Optional[SatelliteTracker] = None
-        # 星象仪视图**惰性构建**：构造期不建（`_create_sky_widget()` 首建实测
-        # 394.4 ms，几乎全是首次字体度量）。首次切到星象仪页/首次真的需要它
-        # 时由 `_ensure_sky_view()` 同步补建——补建在事件返回前完成，不会出现
-        # 「先看到空画布再补画」。
-        self.sky_view = None
-        self._sky_placeholder: Optional[QWidget] = None
-        self._sky_building = False
         # ---- 卫星闭环自动跟踪（过境预测 -> 闭环调谐）----
         # loop_tracker 持有选中卫星与实时 az/el/多普勒；由单帧定时器每 500ms 驱动。
         # 与上面的展示型 sat_tracker（rf_sky_view 桥）互不相干。
@@ -1836,18 +1829,14 @@ class MainWindow(QMainWindow):
         left_tab.setTabPosition(QTabWidget.North)
         left_tab.setMinimumWidth(260)  # 左栏沉浸天空最小宽（tokens 无此键，弹性下限）
 
-        # Tab: 星象仪模式（惰性构建，见 `_ensure_sky_view`）
-        # 构造期不建天空视图：`_create_sky_widget()` 首建实测 394.4 ms，绝大部分
-        # 是首次字体度量（同一上下文预热后 2.7 ms）。星象仪不是默认页，首帧
-        # 不需要它存在——与 `SettingsPanel` 同一手法：先占一个外壳，首次切到
-        # 本页（或首次真的需要它）时**同步**补建，补建在事件返回前完成，
-        # 用户不会看到「先空画布再补画」。
-        # 先占位；首次真正需要时由 `_ensure_sky_view()` 在建好后**原位替换**
-        # 成天空视图（页签里最终仍是 sky_view 本尊，替换发生在同一事件内）。
-        self._sky_placeholder = QWidget()
-        self._sky_placeholder.setObjectName("skyPlaceholder")
-        left_tab.addTab(self._sky_placeholder, "星象仪模式")
+        # Tab: 星象仪模式（主）
+        self.sky_view = self._create_sky_widget()
+        if hasattr(self.sky_view, "object_clicked"):
+            self.sky_view.object_clicked.connect(self._on_sky_object_clicked)
+        left_tab.addTab(self.sky_view, "星象仪模式")
         left_tab.tabBar().setTabData(left_tab.count() - 1, "rf_sky")
+        # 天空页左下角（那一排 sky 按钮上方）的全天模式开关
+        self._build_all_sky_toggle()
 
         # 星象仪页签内也常驻右侧浮层按钮条（含「⛶ 全屏」）：此前只有顶层
         # 「星象仪模式」形态才 show，页签里连全屏入口都没有（2026-11-10 实指）。
@@ -1858,23 +1847,8 @@ class MainWindow(QMainWindow):
             # 页签形态只保留右下角那颗 ⛶：竖排浮层条会压住右上角的过境卡片。
             if left_tab.widget(_idx) is self.sky_view:
                 self._position_planetarium_overlay()
-
-        def _on_left_tab_changed(_idx: int) -> None:
-            # 切到星象仪页 = 首次需要天空视图：同步补建后再让 Qt 画这一帧。
-            if left_tab.widget(_idx) is self._sky_placeholder:
-                self._ensure_sky_view()
-            _sync_sky_strip(_idx)
-
-        left_tab.currentChanged.connect(_on_left_tab_changed)
-
-        def _initial_sync() -> None:
-            try:
-                _sync_sky_strip(left_tab.currentIndex())
-            except RuntimeError:
-                # 窗口已关闭（测试/快速退出）：没有可同步的几何。
-                return
-
-        QTimer.singleShot(0, _initial_sync)
+        left_tab.currentChanged.connect(_sync_sky_strip)
+        QTimer.singleShot(0, lambda: _sync_sky_strip(left_tab.currentIndex()))
 
         # Tab: 卫星闭环自动跟踪（2026-11-10 用户要求：跟天空/AI 一样挂右栏，
         # 不再占左栏工作面的页签位置）
@@ -1968,8 +1942,6 @@ class MainWindow(QMainWindow):
         left_tab.tabBar().setTabData(left_tab.count() - 1, "spectrum")
         # 无设备引导横幅就在这一页；首启提示要能把用户带到它面前（S1）。
         self._spectrum_page = spectrum_widget
-        # 默认工作面 = 频谱：星象仪页惰性构建，默认页绝不能触发那 394 ms 首建。
-        left_tab.setCurrentIndex(left_tab.count() - 1)
 
         self.left_tab = left_tab
 
@@ -2065,9 +2037,19 @@ class MainWindow(QMainWindow):
         # 星象仪命令栏仍显式走 _on_ai_command（见 _build_ai_command_bar）。
         # 星象仪覆盖卡：AI 回复跨形态镜像（只读，历史以面板为准）
         self.ai_panel.reply_received.connect(self._on_planetarium_ai_reply)
-        # 点星信息卡「问模型」/ 示例天空 / 地点入口 / 夜视：天空视图信号。
-        # 视图是惰性构建的，接线随 `_ensure_sky_view()` 一并补上（不在这里做，
-        # 否则构造期就得先造出天空视图）。
+        # 点星信息卡「问模型」：只把问题送进对话栏，发不发由用户决定
+        self.sky_view.question_requested.connect(self._on_sky_question)
+        # 未定位空态的「先看看示例天空」：用户主动点才给标注过的示例站址
+        self.sky_view.preview_sky_requested.connect(
+            self._on_preview_sky_requested)
+        # 未定位空态的「📍 选地点」：与右上角「地点」同一个面板、同一个
+        # 唯一写入口；全屏形态下不再要求用户先退出星象仪去找设置。
+        self.sky_view.location_requested.connect(self._open_location_panel)
+        # 夜视：天空自身在 paintEvent 里压红光，浮层（按钮条/AI 命令栏/
+        # 回复卡/图层面板）是子控件，父控件画完才轮到它们，必须逐个压红，
+        # 否则夜里点一下按钮就是一块白光糊脸。
+        self.sky_view.night_vision_changed.connect(
+            self._apply_night_vision_to_overlays)
         self._init_ai_agent_from_config()
         self._add_right_tab("AI 智能体", self.ai_panel, "ai_dock")
         # 卫星跟踪挂右栏（紧跟 AI 智能体，用户按「看天空 / 问 AI / 追卫星」
@@ -2217,7 +2199,7 @@ class MainWindow(QMainWindow):
         # _release_runtime_resources 对称摘除，见 PanelRegistry.detach_widget）----
         reg = registry()
         self._panel_attachments = [
-            ("spectrum", self.spectrum), ("rf_sky", self._sky_placeholder),
+            ("spectrum", self.spectrum), ("rf_sky", self.sky_view),
             ("weather", self.weather_panel), ("module", self.module_panel),
             ("sat_track", self.sat_track_panel),
             ("new_spacetime", self.new_spacetime_panel),
@@ -2577,7 +2559,7 @@ class MainWindow(QMainWindow):
 
         # 形态浮层：浮在天空视图右上角，不参与布局。占一条 132px 的窄条会
         # 永久吃掉 96px 天空宽度（764→668，面积 -12.6%），浮层只遮右上角一隅。
-        strip = QFrame(self._sky_placeholder)
+        strip = QFrame(self.sky_view)
         strip.setObjectName("planetariumStrip")
         # 宽度走令牌 152px（内容外边距 6×2 + 按钮 sizeHint 136 + 边框 2，
         # 留 2px 余量）；collapse_strip(36) 会把「退出星象仪」裁掉右缘。
@@ -2622,7 +2604,7 @@ class MainWindow(QMainWindow):
         # 图层矩阵收进「▦ 图层」浮层——Stellarium 的左右竖条也是「一颗
         # 图标 → 展开具体选项」。11 个开关平铺在 152px 窄条里会堆成四行
         # 方块，和下面一串动作按钮挤成一坨，谁也找不着。
-        self._layer_popover = QFrame(self._sky_placeholder)
+        self._layer_popover = QFrame(self.sky_view)
         self._layer_popover.setObjectName("planetariumLayerPopover")
         self._layer_popover.setStyleSheet(
             "QFrame#planetariumLayerPopover {"
@@ -2671,8 +2653,7 @@ class MainWindow(QMainWindow):
             ("night", "", "夜视", "夜视模式（整屏红光，保暗适应）"),
         )
         try:
-            _layer_state = (self.sky_view.layer_state()
-                            if self.sky_view is not None else {})
+            _layer_state = self.sky_view.layer_state()
         except AttributeError:
             _layer_state = {}
         for i, (key, glyph, label, tip) in enumerate(_layer_btns):
@@ -2844,7 +2825,7 @@ class MainWindow(QMainWindow):
         # 页签形态下的常驻全屏按钮：竖排浮层条只属于顶层「星象仪模式」，
         # 在「星象仪模式」页签里它不出现，用户就找不到全屏入口（实指）。
         # 这颗 ⛶ 挂在 sky_view 右下角，两种形态都在。
-        fs = QPushButton("⛶", self._sky_placeholder)
+        fs = QPushButton("⛶", self.sky_view)
         fs.setObjectName("skyFullscreenInline")
         fs.setFixedSize(30, 30)
         fs.setToolTip("全屏看天空（F11；再点一次回到窗口）")
@@ -3105,8 +3086,7 @@ class MainWindow(QMainWindow):
         except Exception:
             return
         self._sync_time_rate_btn()
-        if self.sky_view is not None:
-            self.sky_view.update()
+        self.sky_view.update()
         try:
             self.statusBar().showMessage(
                 f"时间流速 {('停' if steps[idx] == 0 else f'{steps[idx]:g}×')}"
@@ -3191,8 +3171,7 @@ class MainWindow(QMainWindow):
             tracker.refresh()
         self._sync_time_rate_btn()
         try:
-            if self.sky_view is not None:
-                self.sky_view.update()
+            self.sky_view.update()
         except RuntimeError:
             pass
         local = datetime.fromtimestamp(float(unix_ts)).strftime("%m-%d %H:%M")
@@ -3237,14 +3216,7 @@ class MainWindow(QMainWindow):
         path = os.path.join(
             folder, f"sky_{stamp}{'_sim' if sim else ''}.png")
         try:
-            ok = bool(self.sky_view is not None
-                      and self.sky_view.grab().save(path, "PNG"))
-            if self.sky_view is None:
-                # 视图还没建（惰性）：先说清为什么没图，别静默存一张空 PNG。
-                self.statusBar().showMessage(
-                    "存图失败：天空视图尚未创建（先打开星象仪页）",
-                    MSG_NORMAL)
-                return
+            ok = bool(self.sky_view.grab().save(path, "PNG"))
         except (RuntimeError, OSError):
             ok = False
         try:
@@ -3409,9 +3381,6 @@ class MainWindow(QMainWindow):
                 all_sky_btn.hide()
         except (AttributeError, RuntimeError):
             pass
-        # 星象仪形态 = 「首次真的需要天空视图」：先同步补建，再记录/搬移，
-        # 否则归位信息拿到的是空对象、搬过去也只是一片底色。
-        self._ensure_sky_view()
         self._sky_restore_info = self._capture_sky_location()
         self._planetarium_sky_layout.addWidget(self.sky_view)
         # 天空可能从"非当前页签/隐藏 Dock"进来，自带 hidden 标记；reparent 不清它，
@@ -4580,9 +4549,6 @@ class MainWindow(QMainWindow):
         - 星表、投影、天文计算全是真的，只是观测点不是用户实际位置，且说清楚。
         """
         lat, lon = _preview_site()
-        # 示例天空是"用户要找天空"的第一入口，可能从首个欢迎页直接点进来：
-        # 视图还没建就同步补建，别对着 None 设站址。
-        self._ensure_sky_view()
         self._observer_source = "preview"
         self.sky_view.set_observer(lat, lon)
         # 时间不在这里动：Stellarium 的「切到晚上」是 ☾ 今夜 一颗独立按钮
@@ -4936,111 +4902,6 @@ class MainWindow(QMainWindow):
         if highlighted:
             return f"color: {self._tok('light_accent', '#C4845C')}; font-weight: 600;"
         return "font-weight: 600;"
-
-    def _ensure_sky_view(self):
-        """首次需要时同步补建天空视图（惰性构建；已建直接返回）。
-
-        背景：`_create_sky_widget()` 首建实测 394.4 ms，绝大部分是首次字体度量
-        （同一绘图上下文预热后 2.7 ms）。星象仪不是默认页，这笔钱只在用户
-        第一次真的要看天时付。
-
-        补建必须把原先「构造期就做掉」的初始化**原样重放**，一项都不能漏：
-        信号接线（点星问模型 / 示例天空 / 地点 / 夜视 / 调谐 / 跟踪 / 云台）、
-        SatelliteTracker 绑定、站址注入与目录投影、过境列表作废、图层按钮
-        状态、全天开关、呼号、投影/时间倍率/全屏按钮、夜视浮层。
-        """
-        if self.sky_view is not None or self._sky_building:
-            return self.sky_view
-        self._sky_building = True
-        try:
-            w = self._create_sky_widget()
-            self.sky_view = w
-            # 原位替换占位页签：页签里从此是 sky_view 本尊（保持
-            # `left_tab.indexOf(sky_view)` 等既有身份不变）。
-            lt = getattr(self, "left_tab", None)
-            ph = self._sky_placeholder
-            if lt is not None and ph is not None:
-                idx = lt.indexOf(ph)
-                if idx >= 0:
-                    was_current = lt.currentIndex() == idx
-                    lt.blockSignals(True)
-                    lt.removeTab(idx)
-                    lt.insertTab(idx, w, "星象仪模式")
-                    lt.tabBar().setTabData(idx, "rf_sky")
-                    if was_current:
-                        lt.setCurrentIndex(idx)
-                    lt.blockSignals(False)
-                # 浮层原先挂在占位控件上，换成真视图，否则换父后会一起消失。
-                for attr in ("_planetarium_strip", "_layer_popover",
-                             "_sky_fs_btn"):
-                    child = getattr(self, attr, None)
-                    if child is not None:
-                        child.setParent(w)
-                ph.hide()
-                ph.deleteLater()
-                self._sky_placeholder = None
-            # ---- 信号接线（原先散在 _build_central_widget/_build_panels/
-            #      _build_kernel_panels 里，且都排在天空视图构造之后）----
-            if hasattr(w, "object_clicked"):
-                w.object_clicked.connect(self._on_sky_object_clicked)
-            if hasattr(w, "question_requested"):
-                w.question_requested.connect(self._on_sky_question)
-            if hasattr(w, "preview_sky_requested"):
-                w.preview_sky_requested.connect(self._on_preview_sky_requested)
-            if hasattr(w, "location_requested"):
-                w.location_requested.connect(self._open_location_panel)
-            if hasattr(w, "night_vision_changed"):
-                w.night_vision_changed.connect(
-                    self._apply_night_vision_to_overlays)
-            if hasattr(w, "tune_satellite_requested"):
-                w.tune_satellite_requested.connect(self._on_sky_tune_requested)
-            if hasattr(w, "track_toggled"):
-                w.track_toggled.connect(self._on_sky_track_requested)
-            if hasattr(w, "gimbal_follow_toggled"):
-                w.gimbal_follow_toggled.connect(
-                    self._on_sky_gimbal_follow_requested)
-            if hasattr(w, "set_gimbal_available"):
-                w.set_gimbal_available(self._gimbal_available())
-            # ---- 卫星显示层：与 `_init_sky_view` 同口径 ----
-            self._apply_observer_location()
-            self._bind_sky_catalog()
-            # 启动期只记了站址、没有消费方；真视图就位后强制作废一次，
-            # 让过境列表按真视图重算（不依赖「站址是否变化」）。
-            try:
-                self.sat_track_panel.invalidate_passes()
-            except (AttributeError, RuntimeError):
-                pass
-            # ---- 依赖视图的控件与读数 ----
-            self._build_all_sky_toggle()
-            self._apply_callsign(str(self.settings.get("callsign", "") or ""))
-            self._sync_projection_combo()
-            self._sync_time_rate_btn()
-            self._sync_fullscreen_btn()
-            self._refresh_gimbal_availability()
-            self._sync_sky_track_btn(bool(getattr(self, "_sat_tracking", False)))
-            # 图层按钮：外壳建得早，按钮初值是空态；视图就位后对齐真值。
-            try:
-                state = w.layer_state()
-            except AttributeError:
-                state = {}
-            for key, btn in getattr(self, "_layer_btns", {}).items():
-                btn.blockSignals(True)
-                btn.setChecked(bool(state.get(key, False)))
-                btn.blockSignals(False)
-            if bool(state.get("night", False)):
-                self._apply_night_vision_to_overlays(True)
-            # 浮层是外壳的子控件；视图后加进布局会盖住它们，重新抬到最上层。
-            for attr in ("_planetarium_strip", "_layer_popover",
-                         "_sky_fs_btn", "_all_sky_btn"):
-                child = getattr(self, attr, None)
-                if child is not None:
-                    child.raise_()
-            self._position_planetarium_overlay()
-            # 首建后立刻补一次授时（此前视图不存在，周期任务一直跳过）。
-            self._update_time_info()
-        finally:
-            self._sky_building = False
-        return self.sky_view
 
     def _create_sky_widget(self):
         """创建星象仪模式 widget：路B工厂 create_sky_widget() 优先，回退 RFSkyView。
@@ -10457,10 +10318,20 @@ class MainWindow(QMainWindow):
                 "设置", self.settings_panel, "settings_dock")
 
         # 天空视图「调到该星 / 跟踪 / 云台跟随」→ 先走 agent 能力协商，
-        # 不再由按钮直连硬件（按钮只表达意图，执行由模型决定后经动作总线落地）。
-        # 天空视图是惰性构建的，这三路与 `set_gimbal_available` 的初始态
-        # 一起在 `_ensure_sky_view()` 里接线；这里只接不依赖天空的 AI 动作。
+        # 不再由按钮直连硬件（按钮只表达意图，执行由模型决定后经动作总线落地）
         try:
+            sv = getattr(self, "sky_view", None)
+            if sv is not None and hasattr(sv, "tune_satellite_requested"):
+                sv.tune_satellite_requested.connect(
+                    self._on_sky_tune_requested)
+            if sv is not None and hasattr(sv, "track_toggled"):
+                sv.track_toggled.connect(self._on_sky_track_requested)
+            if sv is not None and hasattr(sv, "gimbal_follow_toggled"):
+                sv.gimbal_follow_toggled.connect(
+                    self._on_sky_gimbal_follow_requested)
+                # 初始可用性（后端可能 200ms 后才连上，5s 周期任务会再刷）
+                if hasattr(sv, "set_gimbal_available"):
+                    sv.set_gimbal_available(self._gimbal_available())
             if self.ai_panel is not None and hasattr(
                     self.ai_panel, "sky_action_resolved"):
                 self.ai_panel.sky_action_resolved.connect(
@@ -11508,8 +11379,7 @@ class MainWindow(QMainWindow):
             self._sync_all_sky_ui(
                 bool(getattr(sv, "all_sky_active", False)) if sv else False)
             return
-        sv = (self._ensure_sky_view() if checked
-              else getattr(self, "sky_view", None))
+        sv = getattr(self, "sky_view", None)
         if sv is None:
             return
         if checked and getattr(self, "_app_mode", "ide") != "planetarium":
@@ -12491,12 +12361,6 @@ class MainWindow(QMainWindow):
         if _site != getattr(self, "_sat_passes_site", None):
             self._sat_passes_site = _site
             self.sat_track_panel.invalidate_passes()
-        if self.sky_view is None:
-            # 天空视图尚未构建（惰性）：站址事实先同步给其它面板；
-            # tracker 绑定 / 天空注入 / 示例站标注都等视图就绪后由
-            # `_ensure_sky_view()` 重放本函数（站址不变也不会丢）。
-            self._push_site_to_panels(lat, lon)
-            return
         if lat is None or lon is None:
             # 未设置观测站位置（GNSS 未连接或未手动配置）
             if self.sat_tracker is not None:
@@ -13171,12 +13035,7 @@ class MainWindow(QMainWindow):
         卫星位置统一由 SatelliteTracker（mbdsdr_ai.orbit 真实 celestrak TLE）
         以自身定时器驱动；原 decoders.BUILTIN_TLE 硬编码 TLE 计算路径已移除，
         避免两套卫星数据冲突。
-
-        天空视图是惰性构建的：还没切到星象仪页时这里直接放过——不为一个
-        不存在的视图起 NTP 线程、也不产生任何天空相关定时工作。
         """
-        if self.sky_view is None:
-            return
         # 新时空：更新授时信息（每30秒NTP同步一次，其余用系统时间）
         self._update_time_info()
         # 云台后端可用性可能随 ai-sdr-mini 连接状态变化，周期刷新按钮态
@@ -13234,8 +13093,7 @@ class MainWindow(QMainWindow):
                     f"授时信息获取失败：{err}", MSG_IMPORTANT)
             return
         self._time_info_last_error = ""
-        if self.sky_view is not None:
-            self.sky_view.set_time_info(payload)
+        self.sky_view.set_time_info(payload)
 
     # ========================================================================
     # 真实串口 GNSS（NMEA）轮询
@@ -13475,10 +13333,8 @@ class MainWindow(QMainWindow):
             # （2026-11-10 真机截图实证）。
             preview_site = (self._observer_source == "preview"
                             and not static_site)
-            sky = self.sky_view
             if has_fix:
-                if sky is not None:
-                    sky.set_gnss_position(fix_dict)
+                self.sky_view.set_gnss_position(fix_dict)
                 if not static_site:
                     self._observer_source = "gnss"
                 # 只在"还没设过站"或"还在看示例站"时写真 GNSS；
@@ -13490,8 +13346,7 @@ class MainWindow(QMainWindow):
                     self._observer_from_gnss = True
                     self._apply_observer_location()
             elif not static_site:
-                if sky is not None:
-                    sky.set_gnss_position(fix_dict)
+                self.sky_view.set_gnss_position(fix_dict)
                 self._observer_source = None
         except Exception:
             pass
@@ -13500,8 +13355,7 @@ class MainWindow(QMainWindow):
         try:
             gsv_frames = self._gnss.get_gsv_frames()
             gsa_frame = self._gnss.get_gsa()
-            if self.sky_view is not None:
-                self.sky_view.update_gnss_satellites(gsv_frames, gsa_frame)
+            self.sky_view.update_gnss_satellites(gsv_frames, gsa_frame)
             # 星座图页以 GNSS 为主视图：同一份 GSV/GSA 真值直接喂过去，
             # 不再只靠 SDR 的 I/Q 画散点（SDR 全向天线收不到卫星）。
             cp = getattr(self, "constellation_panel", None)

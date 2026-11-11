@@ -53,9 +53,9 @@ def mw(isolated_profile, qapp):
     import main_window as mwmod
 
     # 会话级 desktop_settings.json 可能被别的模块留成 app_mode=planetarium
-    # （例如 test_first_open_welcome 按了「进入星象仪」）。本模块测的是从
-    # IDE 形态出发的壳层行为，**构造前**就得回 ide；等造完再切，星象仪页
-    # 已经触发惰性补建，左栏占位页签早被替换掉了。
+    # （例如 test_first_open_welcome 按了「进入星象仪」）。本模块断言的就是
+    # 从 IDE 形态出发的壳层行为，**构造前**就得回 ide：等造完再切，星象仪
+    # 形态已把 sky_view 换父，左栏页签断言就红了。
     class _IdeDefaultSettings(mwmod.DesktopSettings):
         @classmethod
         def load(cls, *a, **k):
@@ -104,13 +104,8 @@ class TestModeShell:
         assert mw._mode_stack.currentIndex() == 0
 
     def test_sky_starts_in_left_tab(self, mw):
-        # 星象仪视图惰性构建：构造期只是一个占位页签，切到该页（= 用户打开
-        # 星象仪）才同步补建；建好后仍原位住在左栏页签里，tabData 不变。
-        ph = mw._sky_placeholder
-        if ph is not None:
-            mw.left_tab.setCurrentIndex(mw.left_tab.indexOf(ph))
+        assert mw.left_tab.indexOf(mw.sky_view) >= 0
         idx = mw.left_tab.indexOf(mw.sky_view)
-        assert idx >= 0
         assert mw.left_tab.tabBar().tabData(idx) == "rf_sky"
 
 

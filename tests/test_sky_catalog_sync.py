@@ -116,8 +116,6 @@ def test_main_window_refresh_slot_updates_sky(qapp, monkeypatch, isolated_profil
     from desktop.rf_sky_view import SatelliteTracker as SkyTracker
 
     w = MainWindow()
-    # 星象仪视图惰性构建：本用例要往 sky_view 里绑目录，先同步补建。
-    w._ensure_sky_view()
     try:
         if getattr(w, "sat_tracker", None) is None:
             w.sat_tracker = SkyTracker(w.sky_view, None, None)

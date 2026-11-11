@@ -102,8 +102,6 @@ def _pin_default_config(isolated_profile, monkeypatch):
 @pytest.fixture()
 def window(isolated_profile):
     w = MainWindow()
-    # 星象仪视图惰性构建：点星录音要真实天空视图（其惰性补建等价于点开页签）。
-    w._ensure_sky_view()
     w.settings = DesktopSettings.load(
         str(isolated_profile / "desktop_settings.json"))
     yield w

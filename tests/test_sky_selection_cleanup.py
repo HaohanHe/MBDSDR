@@ -140,8 +140,6 @@ class TestObserverWiring:
         """手动站址必须真的注入天空图（此前只标 real 未调 set_observer）。"""
         from main_window import MainWindow
         w = MainWindow()
-        # 星象仪视图惰性构建：站址注入落在 sky_view 上，先同步补建。
-        w._ensure_sky_view()
         try:
             w._observer_lat, w._observer_lon = 39.9, 116.4
             w._apply_observer_location()

@@ -65,8 +65,6 @@ def spectrum_plot(qapp):
 def main_window(qapp, isolated_profile):
     from main_window import MainWindow
     w = MainWindow()
-    # 星象仪视图惰性构建：快捷键作用于天空视图，先把视图补建出来。
-    w._ensure_sky_view()
     w.show()
     w.activateWindow()
     qapp.processEvents()

@@ -33,8 +33,6 @@ def window(qtapp, isolated_profile):
     import main_window as mw
     from PySide6.QtTest import QTest
     w = mw.MainWindow()
-    # 星象仪视图惰性构建：点击调谐要真实天空视图，先同步补建。
-    w._ensure_sky_view()
     QTest.qWait(350)
     yield w
     try:

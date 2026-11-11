@@ -191,8 +191,6 @@ class TestMainWindowWiring:
     def test_sky_view_exposes_tune_signal(self):
         from main_window import MainWindow
         w = MainWindow()
-        # 星象仪视图惰性构建：先同步补建再验信号。
-        w._ensure_sky_view()
         assert hasattr(w.sky_view, "tune_satellite_requested")
         w.close()
 

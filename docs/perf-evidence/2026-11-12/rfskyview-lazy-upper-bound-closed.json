@@ -1,0 +1,36 @@
+{
+ "record": "RFSkyView 惰性构建（定义 C）实测收口",
+ "closes": "docs/perf-evidence/2026-11-12/rfskyview-lazy-upper-bound.json",
+ "verdict": "不要重试这条路",
+ "why": "394.4 ms 里天空自建净成本 ≈2.3 ms，其余是一次性首次字体度量——由首帧第一个重文本控件付账；把天空延后只是转移账单，不减少总量。实测延迟后的首帧收益落在噪声里，而默认落地页是用户看得见的行为，不拿它换量不出来的毫秒。",
+ "breakdown": {
+  "source": "docs/perf-evidence/2026-11-11/ctor_panel_type_breakdown_types.json run3",
+  "RFSkyView": {"count": 1, "total_ms": 345.6, "p50_ms": 345.58},
+  "QLineEdit": {"count": 13, "total_ms": 343.3, "p50_ms": 0.09, "max_ms": 341.89},
+  "sky_net_ms": 2.3,
+  "note": "13 个 QLineEdit 的 p50 只有 0.09 ms，343.3 ms 全由 1 个 341.89 ms 的离群项贡献；它与 RFSkyView 345.6 ms 同量级，即『第一个重文本控件』的首次字体度量，不是天空自有成本。"
+ },
+ "definition_c_ab": {
+  "method": "git archive HEAD 导出干净对照树；对照侧只替换 desktop/main_window.py 与 desktop/dock_layout_manager.py；两侧交替执行各 3 次；尺子 windows / MiSans 10pt / DPR 1 / logical_dpi 144。",
+  "load_note": "d3 自带 load_before/load_after；复测窗口 sys_cpu 8.3%→11.7%，python 进程 3。",
+  "before_ctor_ms": [809.5, 801.6, 798.6],
+  "after_ctor_ms": [796.6, 793.4, 797.2],
+  "before_entry_to_tick_ms": [904.7, 892.3, 885.9],
+  "after_entry_to_tick_ms": [881.1, 880.5, 877.8],
+  "median_before_ctor_ms": 801.6,
+  "median_after_ctor_ms": 796.6,
+  "median_delta_ctor_ms": -5.0,
+  "median_before_entry_to_tick_ms": 892.3,
+  "median_after_entry_to_tick_ms": 880.5,
+  "median_delta_entry_to_tick_ms": -11.8
+ },
+ "first_switch_ms": [24.1, 23.7, 20.8],
+ "first_switch_note": "补建在 currentChanged 内同步完成、不出现空画布；但首次点星象仪仍要等约 23.7 ms，属转移账单。",
+ "reverted_commit": "40b2d27b",
+ "kept": "两处测试隔离修复（test_app_mode 构造前强制 app_mode=ide、test_first_open_welcome 收尾还原并 flush）不属于本笔，保留。",
+ "do_not_retry": [
+  "不要为了回收首次字体度量而延迟天空视图构建",
+  "不要把默认落地页改成频谱来换首帧毫秒",
+  "不要用『预热绘图上下文后 2.7 ms』论证可回收：预热本身就要先付一次首次度量"
+ ]
+}

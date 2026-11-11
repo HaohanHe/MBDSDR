@@ -38,8 +38,6 @@ def win(isolated_profile, qapp):
     from PySide6.QtCore import Qt
     from main_window import MainWindow
     w = MainWindow()
-    # 星象仪视图惰性构建：本文件测的就是天空空态，先按"打开星象仪"补建。
-    w._ensure_sky_view()
     w.setAttribute(Qt.WA_DontShowOnScreen, True)
     w.resize(1280, 800)
     w.show()
@@ -54,8 +52,8 @@ def win(isolated_profile, qapp):
     yield w
     w.close()
     # 本文件多处 set_app_mode("planetarium")，会把会话级 desktop_settings.json
-    # 留成星象仪；后续模块按 IDE 形态构造窗口时会直接进星象仪（惰性构建就
-    # 被绕过了）。收尾还回 IDE 并同步落盘。
+    # 留成星象仪；后续模块按 IDE 形态构造窗口时会直接进星象仪。收尾还回 IDE
+    # 并同步落盘。
     try:
         w.settings.set("app_mode", "ide")
         w.settings.flush()
