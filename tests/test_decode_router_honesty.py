@@ -513,6 +513,20 @@ class TestOutcomeClassification:
         assert out["num_messages"] == 0
         assert "SYN,SYN,SOH" in out["error"]
 
+    def test_pocsag_silence_is_empty_with_sync_stats(self, tmp_path):
+        """其余解码器同样给出「为什么 0 条」的证据：POCSAG 同步字候选数。"""
+        fs = 12500
+        wav = _write_wav(tmp_path / "pocsag_silence.wav",
+                         np.zeros(fs * 6), sr=fs)
+
+        out = dr.run_digital_mode(wav, "pocsag", sample_rate=fs, baud=1200)
+
+        assert out["ok"] is False
+        assert out["status"] == dr.STATUS_EMPTY
+        assert out["error_code"] == dr.ERR_NOTHING_DETECTED
+        assert out["sync_candidates"] == 0
+        assert out["num_messages"] == 0
+
     def test_signal_with_preamble_is_decoded(self, tmp_path):
         from mbdsdr_ai.acars_decoder import frame_bits_from_bytes
 

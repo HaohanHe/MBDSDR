@@ -25,7 +25,7 @@ POCSAG 空中接口要点：
 from __future__ import annotations
 
 import math
-from typing import List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 
@@ -526,7 +526,16 @@ def pocsag_decode(audio: np.ndarray,
                   sample_rate: float,
                   baud: int,
                   baseband: bool = False) -> List[dict]:
-    """解码 POCSAG 音频。
+    """解码 POCSAG 音频（见 :func:`pocsag_decode_with_stats`）。"""
+    return pocsag_decode_with_stats(audio, sample_rate, baud, baseband)[0]
+
+
+def pocsag_decode_with_stats(audio: np.ndarray,
+                             sample_rate: float,
+                             baud: int,
+                             baseband: bool = False
+                             ) -> Tuple[List[dict], Dict[str, object]]:
+    """解码 POCSAG 音频，另返回同步证据统计。
 
     参数:
         audio: 一维浮点音频。baseband=False 时是 1200/2400 Hz AFSK 音调；
@@ -536,7 +545,9 @@ def pocsag_decode(audio: np.ndarray,
         baud: 512 / 1200 / 2400
 
     返回:
-        list[dict]，每项含 address / function / message / baud 字段。
+        (list[dict], stats)。list 每项含 address / function / message / baud；
+        stats 里 `sync_candidates` 是找到的同步字候选数——0 表示前导/同步没
+        锁定（有能量也不该算「没有信号」），供路由层区分空结果与解码失败。
     """
     if baud not in SUPPORTED_BAUDS:
         raise ValueError(f"不支持的波特率 {baud}")
@@ -546,8 +557,13 @@ def pocsag_decode(audio: np.ndarray,
     else:
         df = _fsk_discriminator(audio, sample_rate, baud)
     candidates = _bitsync_candidates(df, sample_rate, baud)
+    stats: Dict[str, object] = {
+        "sync_candidates": len(candidates),
+        "baud": baud,
+        "baseband": bool(baseband),
+    }
     if not candidates:
-        return []
+        return [], stats
 
     def _parse_batch(bits: List[int], sync_pos: int, polarity: int) -> List[dict]:
         """从给定 bits/sync_pos/polarity 解析 POCSAG 帧。"""
@@ -640,4 +656,4 @@ def pocsag_decode(audio: np.ndarray,
             for r in best
         ):
             best = res
-    return best
+    return best, stats

@@ -139,7 +139,7 @@ DIGITAL_MODE_CAPABILITIES: Dict[str, DigitalModeCapability] = {
         external_tools=("dump1090", "dump1090-fa"),
         failure_codes=(
             ERR_SAMPLE_RATE_MISMATCH, ERR_INSUFFICIENT_SAMPLES,
-            "preamble_not_found", "no_frame_recovered",
+            "preamble_not_found", ERR_NOTHING_DETECTED, "invalid_input",
             ERR_UNSUPPORTED_FORMAT, ERR_DECODE_ERROR, ERR_MISSING_SAMPLE,
             ERR_MISSING_DEPENDENCY,
         ),
@@ -168,7 +168,7 @@ DIGITAL_MODE_CAPABILITIES: Dict[str, DigitalModeCapability] = {
         delegate_format_check=True,
         failure_codes=(ERR_UNSUPPORTED_FORMAT, ERR_INVALID_WAV,
                        ERR_INSUFFICIENT_SAMPLES, ERR_DECODE_ERROR,
-                       "invalid_input"),
+                       "invalid_input", ERR_NOTHING_DETECTED),
     ),
     "ft8": DigitalModeCapability(
         mode="ft8",
@@ -186,7 +186,7 @@ DIGITAL_MODE_CAPABILITIES: Dict[str, DigitalModeCapability] = {
             "ft8_lite.decode_ft8_audio 或走专用工具"
         ),
         external_tools=("jt9", "wsjtx"),
-        failure_codes=(ERR_NOT_IMPLEMENTED,),
+        failure_codes=(ERR_NOT_IMPLEMENTED, ERR_MISSING_SAMPLE),
     ),
     "aprs": DigitalModeCapability(
         mode="aprs",
@@ -212,7 +212,7 @@ DIGITAL_MODE_CAPABILITIES: Dict[str, DigitalModeCapability] = {
         failure_codes=(
             ERR_UNSUPPORTED_FORMAT, ERR_INSUFFICIENT_SAMPLES,
             ERR_SAMPLE_RATE_MISMATCH, "nothing_detected", "truncated_frame",
-            "crc_failed", ERR_DECODE_ERROR,
+            "crc_failed", "no_frame_recovered", ERR_DECODE_ERROR,
         ),
         # 运行期最短样本由 run_aprs_* 按 136 bit HDLC 帧 + 48kHz 重采样校验。
     ),
@@ -234,8 +234,8 @@ DIGITAL_MODE_CAPABILITIES: Dict[str, DigitalModeCapability] = {
             "NFM-FSK 合成 IQ 端到端验证，无 OTA 真录"
         ),
         failure_codes=(
-            ERR_UNSUPPORTED_FORMAT, "param_not_in_enum",
-            ERR_INSUFFICIENT_SAMPLES, ERR_DECODE_ERROR,
+            ERR_UNSUPPORTED_FORMAT, "param_not_in_enum", ERR_INVALID_WAV,
+            ERR_INSUFFICIENT_SAMPLES, ERR_DECODE_ERROR, ERR_NOTHING_DETECTED,
         ),
         # POCSAG 最短：前导 576 bit + 同步字 32 bit + 一个 16 码字批（544 bit）。
         min_duration_seconds=0.0,  # 按 baud 动态计算，见 _min_duration_seconds
@@ -259,6 +259,7 @@ DIGITAL_MODE_CAPABILITIES: Dict[str, DigitalModeCapability] = {
         failure_codes=(
             ERR_UNSUPPORTED_FORMAT, ERR_INSUFFICIENT_SAMPLES,
             ERR_DECODE_ERROR, ERR_NOTHING_DETECTED, ERR_PREAMBLE_NOT_FOUND,
+            ERR_INVALID_WAV,
         ),
         # 最短 ACARS 报文：16 字符前导 + 16 字符最小数据体（8 bit/字符）。
         min_duration_seconds=0.2,
@@ -286,7 +287,7 @@ DIGITAL_MODE_CAPABILITIES: Dict[str, DigitalModeCapability] = {
         delegate_format_check=True,
         failure_codes=(ERR_UNSUPPORTED_FORMAT, ERR_INVALID_WAV,
                        ERR_INSUFFICIENT_SAMPLES, ERR_DECODE_ERROR,
-                       "invalid_input"),
+                       "invalid_input", ERR_NOTHING_DETECTED),
         # 完整 162 符号 WSPR 传输 = 162 / 1.4648 baud ≈ 110.6s，见 handler。
         min_duration_seconds=0.0,
         min_duration_rule="完整 162 符号 WSPR 传输（110.6s）",
@@ -308,7 +309,7 @@ DIGITAL_MODE_CAPABILITIES: Dict[str, DigitalModeCapability] = {
         ),
         failure_codes=(
             ERR_UNSUPPORTED_FORMAT, ERR_SAMPLE_RATE_MISMATCH,
-            ERR_INSUFFICIENT_SAMPLES, ERR_DECODE_ERROR,
+            ERR_INSUFFICIENT_SAMPLES, ERR_DECODE_ERROR, ERR_NOTHING_DETECTED,
         ),
         # 最短一帧：168 bit 报文 + 16 bit FCS + 16 bit 标志 = 200 bit。
         min_duration_seconds=200.0 / 9600.0,
@@ -330,7 +331,7 @@ DIGITAL_MODE_CAPABILITIES: Dict[str, DigitalModeCapability] = {
         ),
         failure_codes=(
             ERR_UNSUPPORTED_FORMAT, ERR_INSUFFICIENT_SAMPLES,
-            ERR_DECODE_ERROR,
+            ERR_DECODE_ERROR, ERR_NOTHING_DETECTED, ERR_INVALID_WAV,
         ),
         # 最短：16 定相字符 + 8 头 + 4 尾部字符，7 bit/字符 × 2 分集。
         min_duration_seconds=(16 + 8 + 4) * 7 * 2 / 100.0,
@@ -505,7 +506,7 @@ def _route_aprs(ctx: _Ctx) -> Dict[str, Any]:
 
 def _route_pocsag(ctx: _Ctx) -> Dict[str, Any]:
     from .decoders import _demod_iq_to_audio, _read_wav_audio
-    from .pocsag_decoder import pocsag_decode
+    from .pocsag_decoder import pocsag_decode_with_stats
 
     result = ctx.result
     if ctx.baud not in (512, 1200, 2400):
@@ -535,13 +536,15 @@ def _route_pocsag(ctx: _Ctx) -> Dict[str, Any]:
         result["error"] = err
     else:
         try:
-            msgs = pocsag_decode(audio, a_sr, baud, baseband=baseband)
+            msgs, stats = pocsag_decode_with_stats(
+                audio, a_sr, baud, baseband=baseband)
             result["messages"] = msgs
             result["num_messages"] = len(msgs)
             result["baud"] = baud
+            result["sync_candidates"] = int(stats.get("sync_candidates", 0))
             result["note"] = (
                 f"内置 multimon-ng 口径 POCSAG 解码（BCH(31,21) 纠错，{baud} baud）；"
-                f"解出 {len(msgs)} 条消息。"
+                f"同步字候选 {result['sync_candidates']} 个，解出 {len(msgs)} 条消息。"
             )
         except Exception as e:
             result["error"] = f"POCSAG 解码失败: {e}"

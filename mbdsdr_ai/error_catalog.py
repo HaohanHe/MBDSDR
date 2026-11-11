@@ -283,11 +283,13 @@ _SPECS = (
     _spec("preamble_not_found", LAYER_DECODE, False,
           "未找到前导",
           "{mode} 未找到前导/同步模板：{detail}",
-          "确认频点与采样率正确、信号存在后重试。"),
+          "这是「有信号但输入约定不满足」，不是没有信号：确认解调方式"
+          "（AM/NFM/音频）与协议前导（如 ACARS 需 SYN,SYN,SOH）后重新采集。"),
     _spec("nothing_detected", LAYER_DECODE, False,
-          "未检测到帧",
-          "{mode} 未检测到帧：{detail}",
-          "检查频点、增益与调制参数后重试。"),
+          "空结果（无信号）",
+          "{mode} 输入没有信号能量（静音/全零）：空结果，未检测到帧。",
+          "空结果不是解码失败：确认频点、天线与增益后重新录制，"
+          "或换一段含信号的录音。"),
     _spec("no_frame_recovered", LAYER_DECODE, False,
           "未能恢复完整帧",
           "{mode} 未能恢复完整帧：{detail}",

@@ -96,6 +96,16 @@ class TestTableRegistration:
         assert [r["mode"] for r in rows] == dm.supported_modes()
         assert all(r["handler_registered"] for r in rows)
 
+    def test_empty_capable_modes_declare_nothing_detected(self):
+        """能产出 0 条的模式必须登记空结果码（七态口径，声明=实现）。
+
+        ft8 通用入口未接线、meteor 输出 symbols/bits，二者不走空结果分支。
+        """
+        for key in ("adsb", "ft4", "aprs", "pocsag", "acars", "wspr",
+                    "ais", "navtex"):
+            cap = dm.DIGITAL_MODE_CAPABILITIES[key]
+            assert dm.ERR_NOTHING_DETECTED in cap.failure_codes, key
+
 
 # ---------------------------------------------------------------------------
 # 三类诚实错误码
