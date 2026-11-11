@@ -14,14 +14,19 @@
    "status": "已测",
    "evidence": "ctor_panel_type_breakdown_types.json run3",
    "owner": "卫星线",
-   "note": "单这一项≈整个缺口；其构造里首实例样式初始化占多少未拆"
+   "expected_recoverable_ms": 0,
+   "bounds_ms": {"upper": 345.6, "lower": 0, "expected": 0},
+   "cost_if_deferred": "首次点『星象仪』页 +≈345.6 ms（未分段，估计）",
+   "note": "main_window.py:1829 把 sky_view 加成 left_tab 第 0 页（默认可见），惰性触发就在首帧前 → 回收 0；只有同时改默认页/持久化布局不在星象仪页才有 345.6，而那时代价是首次切页的等待。见 rfskyview-lazy-upper-bound.json"
   },
   {
-   "item": "QLineEdit 首实例（Qt 样式初始化）",
+   "item": "QLineEdit 首实例（进程首次字体度量）",
    "ms": 343.3,
    "status": "已测",
-   "evidence": "同上（13 个合计）",
-   "note": "一次性成本；延迟构建只把它挪到别处，总量不消失"
+   "evidence": "qlineedit-first-instance-ablation.json（13 个合计；消融 cold 中位 323.8）",
+   "expected_recoverable_ms": 0,
+   "cost_if_deferred": "首帧绘制里第一个要文字度量的控件付掉（≈323.8 ms 转嫁）；首帧后首次输入延迟 +0.1–0.2 ms",
+   "note": "≈99.9% 是进程首次字体度量，QStyleSheetStyle 装配仅 ≈0.8 ms；延迟构建不减少总量，只换支付者"
   },
   {
    "item": "_apply_initial_state 首次主题应用",
@@ -76,5 +81,5 @@
    "evidence": "types run3: ctor 1513 − 面板 477.8 − 页签 220.7"
   }
  ],
- "conclusion": "能凑够 358，但没有一条是本线单方面可动：RFSkyView 345.6 一项就够（归卫星线）；_apply_initial_state 主题 160–191 + 右栏非设置面板 204 ≈ 364 也够，但需要改 main_window/themes，且「窗口不可见时不做全树 polish」的替代方案尚未验证；把 _apply_initial_state 整段挪到首帧之后只是把 160–191 从构造期搬到首拍，定义 C 不变。"
+ "conclusion": "按「首帧内容完整、可交互」的判据重算：表里前两条（RFSkyView 345.6 / QLineEdit 343.3）定义 C 可回收都是 0——前者默认页就是星象仪、惰性触发在首帧前；后者是进程首次字体度量，换个控件付而已。真正的可动项是 _apply_initial_state 主题 160–191 + 右栏非设置面板 204 ≈ 364（需改 main_window/themes），但「窗口不可见时不做全树 polish」的替代方案尚未验证；把整段挪到首帧之后只是把 160–191 从构造期搬到首拍，定义 C 不变。以已测项计，本线单方面凑不出 358.5。"
 }
