@@ -302,6 +302,9 @@ def pytest_collection_finish(session):
     # 同理：module 级 fixture 会先于 function 级构造 MainWindow，QSettings
     # 的隔离必须在这之前装好。
     _install_qsettings_isolation()
+    # 隔离只对 pytest 有效；外面还有独立进程直连真实存储。装上写入哨兵，
+    # 任何漏到非临时 store 的写都会留痕并在 sessionfinish 直接把会话判红。
+    _install_qsettings_write_guard()
     if os.environ.get("MBDSDR_TEST_LOCK", "1") == "0":
         return
     trigger = _qt_trigger(session.items)
@@ -702,6 +705,25 @@ def _qsettings_isolation_enabled():
     return os.environ.get("MBDSDR_QS_ISOLATE", "1") != "0"
 
 
+def _qsettings_guard():
+    """导入 scripts/qsettings_guard；哨兵坏了不能拖垮测试，失败即视为未装。"""
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    scripts = os.path.join(root, "scripts")
+    if scripts not in sys.path:
+        sys.path.insert(0, scripts)
+    try:
+        import qsettings_guard
+        return qsettings_guard
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _install_qsettings_write_guard():
+    guard = _qsettings_guard()
+    if guard is not None:
+        guard.install()
+
+
 def _install_qsettings_isolation():
     """收集定稿后、任何 fixture 之前装好：把双参 QSettings 钉到临时 Ini。"""
     if not _qsettings_isolation_enabled() or _QS_ISOLATION["cls"] is not None:
@@ -1060,6 +1082,17 @@ def _recycle_top_level_widgets():
 @pytest.hookimpl(trylast=True)
 def pytest_sessionfinish(session, exitstatus):
     _RESULT["exitstatus"] = int(exitstatus)
+    guard = _qsettings_guard()
+    if guard is None:
+        return
+    written = guard.records()
+    if not written:
+        return
+    guard.report()
+    print("[mbdsdr] QSettings 写入哨兵：隔离期外仍有 %d 次写入真实 store，"
+          "本会话判红" % len(written), flush=True)
+    _RESULT["exitstatus"] = 1
+    session.exitstatus = 1
 
 
 def pytest_unconfigure(config):
