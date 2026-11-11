@@ -7760,7 +7760,6 @@ class MainWindow(QMainWindow):
                     self.statusBar().showMessage(
                         f"采样率切换失败（保持原速率）: {e}", MSG_IMPORTANT)
                     # 下拉必须回到设备真实值：停在新请求上就是显示一个从未生效的数
-                    # 下拉必须回到设备真实值：停在新请求上就是显示一个从未生效的数
                     self._sync_sample_rate_display_from_backend(self._record_sr)
                     return
                 if ok is False:
