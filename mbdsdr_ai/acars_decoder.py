@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass, field
-from typing import List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 
@@ -433,6 +433,25 @@ class ACARSMessageParser:
 # 顶层整合解调器
 # ─────────────────────────────────────────────────────────────────────
 
+def count_preamble_hits(data: bytes) -> int:
+    """统计字节流里「SYN(一个及以上),SOH」前导结构出现次数。
+
+    按 7 位值比对，忽略偶校验位（SYN=0x16 线上常带 bit7 成 0x96）。
+    空中帧标准前导是 ``SYN,SYN,SOH``；解调的 warmup 常常吃掉第一个
+    SYN，生产链里实际观测到 ``SYN,SOH``，所以这里以「SOH 前紧邻一个
+    SYN」为命中，不因少一个 SYN 就把合规帧判成缺前导。
+
+    这个计数是「输入约定是否满足」的证据：0 次说明帧同步状态机不会
+    启动，此时 0 帧不能归因为「没有信号」。
+    """
+    n = 0
+    for i in range(1, len(data)):
+        if ((data[i] & 0x7F) == (SOH & 0x7F)
+                and (data[i - 1] & 0x7F) == (SYN & 0x7F)):
+            n += 1
+    return n
+
+
 class ACARSDecoder:
     """整合 MSK 解调 + 帧同步 + 消息解析。
 
@@ -456,6 +475,15 @@ class ACARSDecoder:
         本路径是 ``decode_router`` / ``--decode-file --mode acars`` 的
         生产入口（2026-11-06 起有直接行为测试，见 tests/acars_test.py）。
         """
+        return self.decode_audio_with_stats(audio)[0]
+
+    def decode_audio_with_stats(self, audio) -> Tuple[List[ACARSMessage],
+                                                      Dict[str, object]]:
+        """同 :meth:`decode_audio`，另返回解调统计（前导命中次数）。
+
+        ``preamble_hits`` 供路由层区分「有信号但输入约定不满足」与
+        「有信号且前导在、只是没解出」，避免把缺前导的 0 帧说成空结果。
+        """
         audio = np.asarray(audio, dtype=np.float64)
         demod = ACARSMDemod(self.sample_rate, self.baud_rate)
         bits = demod.demodulate_bits(audio)
@@ -464,8 +492,16 @@ class ACARSDecoder:
         # 取能解出合法帧（CRC 通过）的那种。等价于 的
         # WSYN/SYN2 状态机在比特流上反复重锁。
         best: List[ACARSMessage] = []
+        stats: Dict[str, object] = {
+            "preamble_hits": 0, "byte_offset": None,
+            "num_bits": len(bits),
+        }
         for off in range(8):
             bytes_ = bits_to_bytes(bits[off:])
+            hits = count_preamble_hits(bytes_)
+            if hits > int(stats["preamble_hits"]):
+                stats["preamble_hits"] = hits
+                stats["byte_offset"] = off
             syncer = ACARSFrameSynchronizer()
             cand: List[ACARSMessage] = []
             for b in bytes_:
@@ -476,10 +512,10 @@ class ACARSDecoder:
                         cand.append(m)
             # 优先选有 CRC 通过的对齐
             if any(m.crc_ok for m in cand):
-                return cand
+                return cand, stats
             if len(cand) > len(best):
                 best = cand
-        return best
+        return best, stats
 
     def parse_bytes(self, body: bytes) -> Optional[ACARSMessage]:
         """直接解析一帧已对齐的字节（SOH 之后，含 CRC，含 DEL）。"""

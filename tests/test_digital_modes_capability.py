@@ -150,7 +150,9 @@ class TestHonestErrorCodes:
         f = _write_cf32(tmp_path / "x.cf32")
         out = decode_digital_mode(f, "AIS", sample_rate=192000)
         assert out["mode"] == "ais"
-        assert out["error_code"] == ""
+        # 极弱噪声 = 无信号：0 条按空结果归类，不是 ok=True
+        assert out["status"] == dm.STATUS_EMPTY
+        assert out["error_code"] == dm.ERR_NOTHING_DETECTED
 
 
 # ---------------------------------------------------------------------------

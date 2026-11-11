@@ -61,6 +61,17 @@ ERR_INSUFFICIENT_SAMPLES = "insufficient_samples"
 ERR_INVALID_WAV = "invalid_wav"
 # 有信号能量却解出 0 帧：不许把「调制/前导不匹配」伪装成 ok=True 的空成功。
 ERR_SIGNAL_PRESENT_NO_FRAME = "signal_present_no_frame"
+# 输入没有信号能量（静音/全零）：这是「空结果」，不是解码失败。
+ERR_NOTHING_DETECTED = "nothing_detected"
+# 有信号但输入约定不满足（ACARS 缺 SYN,SYN,SOH 前导）。
+ERR_PREAMBLE_NOT_FOUND = "preamble_not_found"
+
+# 状态取值：decoded / empty / error / rejected / not_implemented
+STATUS_DECODED = "decoded"
+STATUS_EMPTY = "empty"
+
+# 输入能量下限（IQ 复数 RMS / WAV 归一化音频 RMS）：低于此值视为无信号。
+_SIGNAL_RMS_FLOOR = 1e-3
 
 # ---- 证据等级（真实度）--------------------------------------------------
 EVIDENCE_REAL = "real"            # 真录/真值对拍
@@ -247,7 +258,7 @@ DIGITAL_MODE_CAPABILITIES: Dict[str, DigitalModeCapability] = {
         ),
         failure_codes=(
             ERR_UNSUPPORTED_FORMAT, ERR_INSUFFICIENT_SAMPLES,
-            ERR_DECODE_ERROR,
+            ERR_DECODE_ERROR, ERR_NOTHING_DETECTED, ERR_PREAMBLE_NOT_FOUND,
         ),
         # 最短 ACARS 报文：16 字符前导 + 16 字符最小数据体（8 bit/字符）。
         min_duration_seconds=0.2,
@@ -557,9 +568,10 @@ def _route_acars(ctx: _Ctx) -> Dict[str, Any]:
     else:
         try:
             dec = ACARSDecoder(sample_rate=a_sr)
-            msgs = dec.decode_audio(audio)
+            msgs, stats = dec.decode_audio_with_stats(audio)
             result["messages"] = [m.to_dict() for m in msgs]
             result["num_messages"] = len(msgs)
+            result["preamble_hits"] = int(stats.get("preamble_hits", 0))
             result["crc_ok_count"] = sum(1 for m in msgs if m.crc_ok)
             result["note"] = (
                 f"内置 MSK 解调+帧同步+解析（1200 baud），解出 {len(msgs)} 条 ACARS 消息"
@@ -855,6 +867,91 @@ def _decoded_total(result: Dict[str, Any]) -> int:
     return 0
 
 
+def _wav_rms(path: str) -> Optional[float]:
+    """WAV 音频能量（归一化到 ±1 的 RMS）；容器/宽度不可解析时返回 None。
+
+    这是 WAV 侧的「信号在不在」证据：此前只有 .cf32 算 IQ RMS，WAV 的
+    0 帧只能靠 handler 自述，静音与「有信号但没解出」无法区分。
+    """
+    import wave
+    import numpy as np
+
+    try:
+        with wave.open(path, "rb") as wf:
+            width = wf.getsampwidth()
+            raw = wf.readframes(wf.getnframes())
+    except Exception:
+        return None
+    dtype = {1: np.uint8, 2: np.int16, 4: np.int32}.get(width)
+    if dtype is None or not raw:
+        return None
+    data = np.frombuffer(raw, dtype=dtype).astype(np.float64)
+    if width == 1:
+        data = (data - 128.0) / 128.0
+    else:
+        data = data / float(2 ** (8 * width - 1))
+    if data.size == 0:
+        return None
+    return float(np.sqrt(np.mean(data ** 2)))
+
+
+def _finalize_honest_status(result: Dict[str, Any],
+                            signal_present: Optional[bool]) -> None:
+    """七态收敛的最后一步：把「成功但 0 条」按输入证据重新定性。
+
+    判定规则（互不混淆）：
+      * 成功      ok=True  / status=decoded（有产出）
+      * 空结果    ok=False / status=empty / error_code=nothing_detected
+                  —— 输入无能量（静音/全零），信号不在
+      * 前导不符  ok=False / status=error / error_code=preamble_not_found
+                  —— 有能量且前导计数为 0（ACARS 输入约定不满足）
+      * 有信号无帧 ok=False / status=error / error_code=signal_present_no_frame
+                  —— 有能量、前导在（或不适用），但没解出帧
+      * rejected / not_implemented / 其它 error 沿用 handler 已下的码
+    ``signal_present=None`` 表示读不到能量证据（容器不可解析等），此时
+    不推断，维持 handler 的结论。
+    """
+    if result.get("status") == "rejected":
+        if not result.get("error_code"):
+            result["error_code"] = result.get("reject_reason") or ERR_DECODE_ERROR
+        return
+    if result.get("ok") is False:
+        # handler 自己判定的 empty（如 FT4/WSPR 的 no_signal）补统一错误码
+        if result.get("status") == STATUS_EMPTY and not result.get("error_code"):
+            result["error_code"] = ERR_NOTHING_DETECTED
+        return
+    if result.get("ok") is not True:
+        return
+    if _decoded_total(result) > 0:
+        result["status"] = STATUS_DECODED
+        return
+    if signal_present is None:
+        return
+    result["ok"] = False
+    result.setdefault("found", False)
+    if not signal_present:
+        result["status"] = STATUS_EMPTY
+        result["error_code"] = ERR_NOTHING_DETECTED
+        result.pop("error", None)   # 空结果不是错误，不编造 error 文案
+        return
+    result["status"] = "error"
+    # 只有 .wav 音频入口能直接观测「输入约定」：cf32 走的是解调链，
+    # 解调方式不对（如 FM IQ 喂 AM 解调）同样没有 SYN，不能赖到前导上。
+    if (result.get("format") == ".wav" and "preamble_hits" in result
+            and not result.get("preamble_hits")):
+        result["error_code"] = ERR_PREAMBLE_NOT_FOUND
+        result["error"] = user_message(
+            "preamble_not_found", mode=str(result.get("mode", "")).upper(),
+            detail="输入有信号能量，但字节流中没有 SYN,SYN,SOH 前导"
+                   "（ACARS 帧同步必需，缺失时状态机不会启动）")
+        return
+    result["error_code"] = ERR_SIGNAL_PRESENT_NO_FRAME
+    result["error"] = (
+        "输入有信号能量但解出 0 帧：调制/前导与本模式不符，"
+        "或解码器未锁定；不把 0 帧当作成功"
+    )
+
+
 def run_digital_mode(
     input_path: str,
     mode: str,
@@ -1008,36 +1105,34 @@ def _run_digital_mode(
                           result.get("reject_reason") or ERR_DECODE_ERROR)
     elif "ok" not in result:
         result["ok"] = True
-        result["status"] = "decoded"
-    result.setdefault("error_code", "")
 
-    # 简化频谱特征（.cf32 才做；窄带入口显式拒绝时不补频谱，维持原契约）
-    iq_rms = 0.0
+    # 输入能量证据（.cf32 的 IQ RMS / .wav 的音频 RMS）+ 简化频谱特征
+    signal_present: Optional[bool] = None
     try:
         if ext in (".cf32", ".cfile") and result.get("status") != "rejected":
             raw = np.fromfile(input_path, dtype=np.float32, count=100000)
             if len(raw) >= 2:
                 iq = raw[0::2] + 1j * raw[1::2]
                 iq_rms = float(np.sqrt(np.mean(np.abs(iq) ** 2)))
+                signal_present = iq_rms > _SIGNAL_RMS_FLOOR
+                result["input_rms"] = iq_rms
+                result["signal_present"] = signal_present
                 spectrum = np.fft.fft(iq[:1024])
                 powers = np.abs(spectrum) ** 2
                 result["spectral_peak"] = float(np.max(powers))
                 result["spectral_mean"] = float(np.mean(powers))
                 result["samples_analyzed"] = len(iq)
+        elif ext == ".wav" and result.get("status") != "rejected":
+            audio_rms = _wav_rms(input_path)
+            if audio_rms is not None:
+                signal_present = audio_rms > _SIGNAL_RMS_FLOOR
+                result["input_rms"] = audio_rms
+                result["signal_present"] = signal_present
     except Exception as e:
         result["analysis_error"] = str(e)
 
-    # 「有信号能量但 0 帧」不是成功：ACARS 之前的静默 0 帧正是这样伪装的。
-    if (ext in (".cf32", ".cfile") and result.get("ok") is True
-            and result.get("status") != "rejected"
-            and _decoded_total(result) == 0
-            and iq_rms > 1e-3):
-        result["ok"] = False
-        result["status"] = "error"
-        result["error_code"] = ERR_SIGNAL_PRESENT_NO_FRAME
-        result["error"] = (
-            "输入 IQ 有信号能量但解出 0 帧：调制/前导与本模式不符，"
-            "或解码器未锁定；不把 0 帧当作成功"
-        )
+    # 「成功但 0 条」不是成功：静音 → empty，有能量解不出 → 明确错误码。
+    _finalize_honest_status(result, signal_present)
+    result.setdefault("error_code", "")
 
     return result

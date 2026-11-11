@@ -141,8 +141,12 @@ def test_fm_iq_into_am_acars_is_explicit_failure(tmp_path):
 
 
 def test_zero_iq_is_not_reported_as_signal_present(tmp_path):
-    """无能量（全零）不是「有信号但解不出」，保持原有 0 帧语义。"""
+    """无能量（全零）不是「有信号但解不出」，也不是成功：归为空结果。"""
     cf = _write_cf32(tmp_path / "zeros.cf32",
                      np.zeros(3000, dtype=np.complex128))
     out = dr.run_digital_mode(cf, "acars", sample_rate=12500.0)
     assert out["error_code"] != dr.ERR_SIGNAL_PRESENT_NO_FRAME
+    assert out["ok"] is False
+    assert out["status"] == dr.STATUS_EMPTY
+    assert out["error_code"] == dr.ERR_NOTHING_DETECTED
+    assert out["signal_present"] is False

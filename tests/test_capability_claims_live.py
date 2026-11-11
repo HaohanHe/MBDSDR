@@ -102,12 +102,26 @@ def test_wspr_wav_input_is_proven(tmp_path):
 
 @pytest.mark.parametrize("mode,fixture,rate", [
     ("pocsag", "pocsag.wav", 22050.0),
-    ("acars", "acars.wav", 48000.0),
+    ("acars", None, 48000.0),
     ("navtex", "navtex.wav", 12000.0),
 ])
 def test_audio_modes_declared_rate_is_proven(tmp_path, mode, fixture, rate):
     """三个音频模式声明「任意 fs」，至少要在入库 fixture 的采样率上真解出。"""
-    path = os.path.join(SENS, fixture)
+    if mode == "acars":
+        # 入库的 sensitivity/acars.wav 是 acars_protocol 的 2400 bd 波形，
+        # 超出生产路由声明的 1200 bd 能力（此前 0 帧被当成 ok=True 才「通过」）。
+        # 这里按生产协议合成 1200 bd、带 SYN,SYN,SOH 前导的帧，真正证明采样率支持。
+        from mbdsdr_ai.acars_decoder import (SOH, SYN, build_acars_frame,
+                                             frame_bits_from_bytes,
+                                             synthesize_msk_audio)
+        body = build_acars_frame(mode="2", reg="BA1234", label="H1",
+                                 block_id="1", text="TEST MESSAGE")
+        bits = frame_bits_from_bytes(bytes([SYN, SYN, SOH]) + body)
+        audio = synthesize_msk_audio(bits, rate, 1200)
+        path = str(tmp_path / "acars_1200.wav")
+        _write_wav(path, audio, int(rate))
+    else:
+        path = os.path.join(SENS, fixture)
     kwargs = {}
     if mode == "pocsag":
         # 入库 fixture 只有 0.93s，比能力表声明的最短 1152 bit（0.96s @1200bd）

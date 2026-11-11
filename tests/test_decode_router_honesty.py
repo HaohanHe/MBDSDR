@@ -208,13 +208,21 @@ def test_short_input_is_insufficient_samples(tmp_path, mode, ext, fs, n):
     assert out["required_samples"] > n
 
 
-def test_long_enough_silence_is_not_insufficient(tmp_path):
-    """阈值不是「一律失败」：6s 静音够 NAVTEX 一帧，应正常返回 0 条。"""
+def test_long_enough_silence_is_empty_not_success(tmp_path):
+    """阈值不是「一律失败」：6s 静音够 NAVTEX 一帧，但 0 条不是成功。
+
+    契约（P0-2）：输入无能量 → ok=False / status=empty /
+    error_code=nothing_detected；空结果与解码失败、未实现分开。
+    """
     wav = _write_wav(tmp_path / "n.wav", np.zeros(72000))
     out = dr.run_digital_mode(wav, "navtex")
     assert out["error_code"] != dr.ERR_INSUFFICIENT_SAMPLES
-    assert out["ok"] is True
+    assert out["ok"] is False
+    assert out["status"] == dr.STATUS_EMPTY
+    assert out["error_code"] == dr.ERR_NOTHING_DETECTED
+    assert out["signal_present"] is False
     assert out["num_messages"] == 0
+    assert "error" not in out
 
 
 # ---------------------------------------------------------------------------
@@ -452,3 +460,69 @@ class TestKnownFrameFields:
         assert m["shipname"] == "OCEAN STAR"
         assert m["destination"] == "SHANGHAI"
         assert m["draught_m"] == pytest.approx(8.5, abs=0.05)
+
+
+# ---------------------------------------------------------------------------
+# 11. 结果分类七态：静音 / 缺前导 / 合规 三条反证互不混
+# ---------------------------------------------------------------------------
+class TestOutcomeClassification:
+    """0 帧不能一律当「没信号」：ACARS 缺前导就是有信号却解不出。
+
+    三条输入分别落到三种判定：
+      静音      → empty / nothing_detected（信号不在）
+      有信号缺前导 → error / preamble_not_found（输入约定不满足）
+      有信号且合规 → decoded（真的解出 1 条）
+    """
+
+    def _acars_wav(self, tmp_path, name, bits):
+        from mbdsdr_ai.acars_decoder import synthesize_msk_audio
+
+        fs = 12500
+        audio = synthesize_msk_audio(bits, fs, 1200)
+        return _write_wav(tmp_path / name, audio, sr=fs), fs
+
+    def test_silence_is_empty_not_error(self, tmp_path):
+        fs = 12500
+        wav = _write_wav(tmp_path / "silence.wav", np.zeros(fs * 2), sr=fs)
+
+        out = dr.run_digital_mode(wav, "acars", sample_rate=fs)
+
+        assert out["ok"] is False
+        assert out["status"] == dr.STATUS_EMPTY
+        assert out["error_code"] == dr.ERR_NOTHING_DETECTED
+        assert out["signal_present"] is False
+        assert out["num_messages"] == 0
+        assert "error" not in out
+
+    def test_signal_without_preamble_is_preamble_not_found(self, tmp_path):
+        from mbdsdr_ai.acars_decoder import build_acars_frame, frame_bits_from_bytes
+
+        # 只发 body（SOH 之后），不带 SYN,SYN,SOH 前导：有信号但约定不符
+        body = build_acars_frame(mode="2", reg="N842UA", label="DF",
+                                 block_id="6", text="WEATHER 1500Z")
+        wav, fs = self._acars_wav(tmp_path, "no_preamble.wav",
+                                  frame_bits_from_bytes(body))
+
+        out = dr.run_digital_mode(wav, "acars", sample_rate=fs)
+
+        assert out["ok"] is False
+        assert out["status"] == "error"
+        assert out["error_code"] == dr.ERR_PREAMBLE_NOT_FOUND
+        assert out["signal_present"] is True
+        assert out["preamble_hits"] == 0
+        assert out["num_messages"] == 0
+        assert "SYN,SYN,SOH" in out["error"]
+
+    def test_signal_with_preamble_is_decoded(self, tmp_path):
+        from mbdsdr_ai.acars_decoder import frame_bits_from_bytes
+
+        wav, fs = self._acars_wav(tmp_path, "with_preamble.wav",
+                                  frame_bits_from_bytes(_acars_over_air()))
+
+        out = dr.run_digital_mode(wav, "acars", sample_rate=fs)
+
+        assert out["ok"] is True
+        assert out["status"] == dr.STATUS_DECODED
+        assert out["error_code"] == ""
+        assert out["preamble_hits"] >= 1
+        assert out["num_messages"] == 1

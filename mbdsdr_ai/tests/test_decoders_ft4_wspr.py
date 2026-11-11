@@ -217,6 +217,7 @@ def test_valid_wav_with_silence_is_empty_not_success_or_error(
 
     assert result["ok"] is False
     assert result["status"] == "empty"
+    assert result["error_code"] == "nothing_detected"
     assert result["rejected"] is False
     assert result["found"] is False
     assert result["messages"] == []

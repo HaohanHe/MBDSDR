@@ -120,14 +120,21 @@ class TestMessageLanding:
         assert "SEA ICE" in view["detail"]
 
     def test_empty_decode_is_honest(self):
+        """P0-2 契约：空结果 ok=False / status=empty / nothing_detected。
+
+        面板不再显示「完成 · 0 条报文」，而是明确「未检测到帧」，并保留
+        输入无能量的说明。
+        """
         view = format_decode_result("sdr_decode_navtex", {
-            "mode": "navtex", "ok": True, "status": "decoded",
-            "output_kind": "messages", "num_messages": 0,
-            "messages": [], "note": "解出 0 条报文。",
+            "mode": "navtex", "ok": False, "status": "empty",
+            "error_code": "nothing_detected", "output_kind": "messages",
+            "num_messages": 0, "messages": [], "signal_present": False,
+            "note": "输入无信号能量（静音），未解出报文。",
         })
-        assert "0 条报文" in view["summary"]
-        assert "0 条" in view["detail"]
-        assert "GALE" not in view["detail"]
+        assert "未检测到帧" in view["summary"]
+        assert view["ok"] is False
+        assert "0 条报文" not in view["summary"]
+        assert "静音" in view["detail"]
 
     def test_no_output_says_no_output(self):
         view = format_decode_result("sdr_decode_x", {"mode": "x"})
