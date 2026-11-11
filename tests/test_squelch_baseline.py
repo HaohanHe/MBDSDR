@@ -93,6 +93,7 @@ def _worker_shell(mode: str, auto: bool):
         _squelch=BaselineSquelch(squelch_db=DEFAULT_SQUELCH_DBFS, mode=mode,
                                  sample_rate=SR),
         _last_squelch_label="",
+        _last_squelch_key=None,
         squelch_state=_DummySignal(),
     )
     return w

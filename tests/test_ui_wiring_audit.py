@@ -258,7 +258,6 @@ ALLOWED_UNCONNECTED = {
     "weather_panel.py:self.freq_edit": "开始解码读 text()",
     "weather_panel.py:self.sym_edit": "开始解码读 text()",
     "weather_panel.py:self.sr_edit": "开始解码读 text()",
-    "main_window.py:left_tab": "QTabWidget 页签容器，不做业务接线",
     "main_window.py:right_tab": "QTabWidget 页签容器，不做业务接线",
     "main_window.py:sr_combo": "连接对话框：Accepted 后统一读 currentData()",
     "main_window.py:gain_spin": "连接对话框：Accepted 后统一读 value()",

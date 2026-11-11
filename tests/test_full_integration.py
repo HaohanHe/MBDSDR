@@ -38,8 +38,13 @@ def result():
 
 
 @pytest.fixture(scope="module")
-def agent():
-    """pytest 兼容：与 main() 一致地构造一个测试用 Agent。"""
+def agent(isolated_profile):
+    """pytest 兼容：与 main() 一致地构造一个测试用 Agent。
+
+    全工具 dry-call 会写书签库；Agent/工具注册表可能在构造时缓存
+    ``Path.home()``，所以隔离必须先于 Agent 生效（2026-11-11 实证
+    只给用例加隔离仍会写脏 ~/.mbdsdr/bookmarks.json）。
+    """
     config = AgentConfig(api_key="sk-test", model="test-model")
     return MBDSDRAgent(config)
 
@@ -1227,7 +1232,8 @@ def test_ft8_roundtrip(result: TestResult):
                   f"best={best}/{n_sym}")
 
 
-def test_tool_callability(result: TestResult, agent: MBDSDRAgent):
+def test_tool_callability(result: TestResult, agent: MBDSDRAgent,
+                         isolated_profile):
     """全部工具 dry-call：无硬件时不得 traceback 崩溃，只友好返回。"""
     bad = ("traceback (most recent", "isadirectoryerror", "permissionerror",
            "keyerror", "indexerror", "typeerror", "attributeerror",

@@ -77,7 +77,10 @@ def test_night_time_is_real_solar_altitude_not_fixed_clock():
     # 换一个站点：真实日落时刻必须变，证明不是写死「今晚 22:00」。
     # 按 UTC 日扫描时两地天文暮光终可能只差几十分钟，但绝不该完全相同。
     other, _ = _night_observation_time(-33.8688, 151.2093)   # 悉尼
-    assert abs((other - t).total_seconds()) > 600
+    # 天文暮光终随季节变化，两站差值实测可低至约 10 分钟；
+    # 断言本意是「不是写死时刻」，不是硬卡 10 分钟，且仍要求确实不同。
+    delta = abs((other - t).total_seconds())
+    assert 60 < delta < 6 * 3600, f"两站暮光终差值异常：{delta:.1f}s"
 
 
 # ---------------------------------------------------------------------------

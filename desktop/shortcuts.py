@@ -83,6 +83,8 @@ SHORTCUTS: Tuple[Shortcut, ...] = (
     Shortcut("help.command_palette", "Ctrl+K", "命令面板",
              note="一个搜索框定位菜单命令/面板页签/能力/快捷键；想不起入口在哪时用"),
     # ---- 面板菜单 ----
+    Shortcut("panel.capability_matrix", None, "能力矩阵（◧ 事实源）",
+             note="能力只读清单，低频入口，不占快捷键"),
     Shortcut("panel.reset_layout", None, "恢复出厂布局", note="破坏性操作，要求点击确认"),
     # ---- 顶栏 ----
     Shortcut("layout.save", "Ctrl+Shift+S", "保存"),

@@ -67,8 +67,11 @@ def _refresh(panel, monkeypatch, settings: dict):
     panel.refresh_passes()
     out = []
     for row in range(panel.passes_table.rowCount()):
-        name = panel.passes_table.item(row, 0).text()
-        alt = panel.passes_table.item(row, 4).text()
+        # 左列两行：卫星名（可能带「低仰角」）\n过境时刻。集合比较
+        # 只能取名字行，否则 5°/10° 的分钟差会让每一行都算「多出来」。
+        name = panel.passes_table.item(row, 0).text().splitlines()[0]
+        # 2026-11-11 表格压成 2 列：右列两行「峰值仰角°\n持续分」
+        alt = panel.passes_table.item(row, 1).text().splitlines()[0]
         out.append((name, float(alt.rstrip("°"))))
     return out
 

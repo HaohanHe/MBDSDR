@@ -128,9 +128,15 @@ class TestVfoWheelGestures:
               + 1j * np.random.default_rng(1).standard_normal(16384)
               ).astype(np.complex64)
         panel.update_iq(iq, 120e6, 2.4e6)
-        # 无 VFO → Ctrl+滚轮仍是锚点缩放
-        _wheel(panel._plot, 400, 100, 120, Qt.KeyboardModifier.ControlModifier)
-        assert panel.generator.sample_rate_hz != 2.4e6
+        # 无 VFO → Ctrl+滚轮仍是锚点缩放。2026-11-11 起缩放改的是
+        # 显示跨度 span_hz：采样率是硬件事实，每帧被 push_iq 覆写，
+        # 写采样率等于下一帧就被抹掉（真机缩放失灵的根因）。
+        span_before = panel.generator.span_hz
+        # 起始就是全带宽（span == 采样率），向上拉远无处可去；
+        # 与频率轴缩放同一约定：-120 = 拉近（span 变窄）。
+        _wheel(panel._plot, 400, 100, -120, Qt.KeyboardModifier.ControlModifier)
+        assert panel.generator.span_hz != span_before, "Ctrl+滚轮应缩放显示跨度"
+        assert panel.generator.sample_rate_hz == 2.4e6, "滚轮不得改硬件采样率"
 
 
 class TestFilterPresetKeys:

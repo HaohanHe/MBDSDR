@@ -100,10 +100,10 @@ FAILED tests/test_error_remedy_links.py::test_every_catalog_code_is_registered -
   `code` 来自 `mbdsdr_ai/tool_registry.py:917` 的 `ToolResult.error`）
 - **P2** 状态面板「解码结果」卡渲染 `错误码 {code}: {message}`
   （`desktop/status_panel.py:273`，标签映射 `:185-203`；入口 `:1159 is_decode_tool`）
-- **P3** 状态栏渲染 `设备已断开：{message}`（`desktop/main_window.py:8477`，
+- **P3** 状态栏渲染 `设备已断开：{message}`（`desktop/main_window.py:8480`，
   由 `:8480` 的 `_on_health_tick` 触发；`message` = `sdr_backend` 写入的
   `status.error = user_message(code)`）
-- **P4** AI 对话区渲染 `[错误] {message}`（`desktop/ai_panel.py:1193`）
+- **P4** AI 对话区渲染 `[错误] {message}`（`desktop/ai_panel.py:1198`）
 - **P5** 步骤卡摘要显示兜底 message（`desktop/ai_panel.py:716-719`，
   正文由 `mbdsdr_ai/tool_registry.py:967` 用 `user_message("missing_error_detail")` 填入）
 
@@ -129,8 +129,8 @@ FAILED tests/test_error_remedy_links.py::test_every_catalog_code_is_registered -
 | 18 | `offline_or_api_error` | 联网类工具离线或上游接口无数据 | 是 | P1 | `mbdsdr_ai/sdr_tools.py:7618,7644,7676,7711` → `desktop/ai_panel.py:721` | 已补（工具执行族，`e95945b`） |
 | 19 | `recording_not_found` | AI 指定不存在的记录 / 模板名 | 是 | P1 | `mbdsdr_ai/agent.py:2866` → `desktop/ai_panel.py:721` | 已补（工具执行族，`e95945b`） |
 | 20 | `subagent_not_found` | AI 指定不存在或已结束的子代理 | 是 | P1 | `mbdsdr_ai/agent.py:2688-2690` → `desktop/ai_panel.py:721` | 已补（工具执行族，`e95945b`） |
-| 21 | `agent_busy` | 上一轮未结束时用户再发一条指令 | 是 | P4 | `mbdsdr_ai/agent.py:126,3782-3794` → `desktop/ai_panel.py:1193` | 已补（AI 会话族，`e95945b`） |
-| 22 | `cancelled` | 用户点停止 / 取消本轮对话 | 是 | P4 | `mbdsdr_ai/agent.py:127,3903-3905,3956-3958,4131-4134` → `desktop/ai_panel.py:1193` | 已补（AI 会话族，`e95945b`） |
+| 21 | `agent_busy` | 上一轮未结束时用户再发一条指令 | 是 | P4 | `mbdsdr_ai/agent.py:126,3782-3794` → `desktop/ai_panel.py:1198` | 已补（AI 会话族，`e95945b`） |
+| 22 | `cancelled` | 用户点停止 / 取消本轮对话 | 是 | P4 | `mbdsdr_ai/agent.py:127,3903-3905,3956-3958,4131-4134` → `desktop/ai_panel.py:1198` | 已补（AI 会话族，`e95945b`） |
 | 23 | `device_unavailable` | 未连接设备时调用需要设备的工具 | 是 | P1 | `mbdsdr_ai/sdr_tools.py:2960` → `desktop/ai_panel.py:721` | 已补（设备能力族，`e95945b`） |
 | 24 | `ptt_not_on` | 未打开 PTT 就让 AI 调发射工具 | 是 | P1 | `mbdsdr_ai/sdr_tools.py:6744` → `desktop/ai_panel.py:721` | 已补（设备能力族，`e95945b`） |
 | 25 | `capability_unknown` | 设备能力未声明，无法判断是否支持该能力（如发射） | 是 | P1 | `mbdsdr_ai/sdr_tools.py:6326-6327` → `desktop/ai_panel.py:721` | 已补（设备能力族，`e95945b`） |
@@ -148,18 +148,18 @@ FAILED tests/test_error_remedy_links.py::test_every_catalog_code_is_registered -
 | 37 | `unsupported_format` | 解码卡输入扩展名与模式要求不符 | 是 | P2 | `mbdsdr_ai/decode_router.py:835-841` → `desktop/status_panel.py:185,273` | 已补（解码结果族，`e95945b`） |
 | 38 | `decode_error` | 解码器运行期异常（弱信号 / 坏样本） | 是 | P2 | `mbdsdr_ai/decode_router.py:408,913-921` → `desktop/status_panel.py:185,273` | 已补（解码结果族，`e95945b`） |
 | 39 | `not_implemented` | 模式能力存在但通用入口未接线，用户仍可点 | 是 | P2 | `mbdsdr_ai/decode_router.py:382-383` → `desktop/status_panel.py:185,273` | 已补（解码结果族，`e95945b`） |
-| 40 | `sdr_set_frequency_failed` | 用户在「控制」面板改频率，设备拒绝 / 底层失败 | 是 | P3 | `mbdsdr_ai/sdr_backend.py:283,289` → `desktop/main_window.py:8477` | 已补（设备调谐族，`0e4b9ef6`） |
-| 41 | `sdr_set_sample_rate_failed` | 用户改采样率，设备不支持或底层失败 | 是 | P3 | `mbdsdr_ai/sdr_backend.py:368,374` → `desktop/main_window.py:8477` | 已补（设备调谐族，`0e4b9ef6`） |
-| 42 | `sdr_set_gain_failed` | 用户改增益，设备拒绝或底层失败 | 是 | P3 | `mbdsdr_ai/sdr_backend.py:418-423` → `desktop/main_window.py:8477` | 已补（设备调谐族，`0e4b9ef6`） |
-| 43 | `sdr_set_bandwidth_failed` | 用户改带宽，设备拒绝或底层失败 | 是 | P3 | `mbdsdr_ai/sdr_backend.py:471-477` → `desktop/main_window.py:8477` | 已补（设备调谐族，`0e4b9ef6`） |
-| 44 | `doppler_compensation_failed` | 接收链多普勒补偿失败（无预测 / 计算异常），该块音频跳过 | 是 | P3 | `mbdsdr_ai/sdr_backend.py:832,872` → `desktop/main_window.py:8477` | 已补（设备调谐族，`0e4b9ef6`） |
-| 45 | `llm_offline` | 用户开 `MBDSDR_OFFLINE` 或离线时点 AI 发送 | 是 | P4 | `mbdsdr_ai/model_manager.py:268,275` → `desktop/ai_panel.py:1193` | 已补（AI 模型族，`0e4b9ef6`） |
-| 46 | `llm_rate_limited` | 模型接口返回 429（用户连续发指令 / 额度耗尽） | 是 | P4 | `mbdsdr_ai/model_manager.py:31-32` → `desktop/ai_panel.py:1193` | 已补（AI 模型族，`0e4b9ef6`） |
-| 47 | `llm_http_4xx` | API Key 错 / 模型名不存在，接口返回 4xx | 是 | P4 | `mbdsdr_ai/model_manager.py:35-36` → `desktop/ai_panel.py:1193` | 已补（AI 模型族，`0e4b9ef6`） |
-| 48 | `llm_http_5xx` | 模型服务端 5xx | 是 | P4 | `mbdsdr_ai/model_manager.py:33-34` → `desktop/ai_panel.py:1193` | 已补（AI 模型族，`0e4b9ef6`） |
-| 49 | `llm_timeout` | 用户设置超时过小或网络慢，模型请求超时 | 是 | P4 | `mbdsdr_ai/model_manager.py:40` → `desktop/ai_panel.py:1193` | 已补（AI 模型族，`0e4b9ef6`） |
-| 50 | `llm_unreachable` | 断网 / 代理错误 / 域名不可达 | 是 | P4 | `mbdsdr_ai/model_manager.py:42` → `desktop/ai_panel.py:1193` | 已补（AI 模型族，`0e4b9ef6`） |
-| 51 | `llm_unexpected` | 模型客户端内部异常（用户可触发，如坏响应） | 是 | P4 | `mbdsdr_ai/model_manager.py:44` → `desktop/ai_panel.py:1193` | 已补（AI 模型族，`0e4b9ef6`） |
+| 40 | `sdr_set_frequency_failed` | 用户在「控制」面板改频率，设备拒绝 / 底层失败 | 是 | P3 | `mbdsdr_ai/sdr_backend.py:283,289` → `desktop/main_window.py:8480` | 已补（设备调谐族，`0e4b9ef6`） |
+| 41 | `sdr_set_sample_rate_failed` | 用户改采样率，设备不支持或底层失败 | 是 | P3 | `mbdsdr_ai/sdr_backend.py:368,374` → `desktop/main_window.py:8480` | 已补（设备调谐族，`0e4b9ef6`） |
+| 42 | `sdr_set_gain_failed` | 用户改增益，设备拒绝或底层失败 | 是 | P3 | `mbdsdr_ai/sdr_backend.py:418-423` → `desktop/main_window.py:8480` | 已补（设备调谐族，`0e4b9ef6`） |
+| 43 | `sdr_set_bandwidth_failed` | 用户改带宽，设备拒绝或底层失败 | 是 | P3 | `mbdsdr_ai/sdr_backend.py:471-477` → `desktop/main_window.py:8480` | 已补（设备调谐族，`0e4b9ef6`） |
+| 44 | `doppler_compensation_failed` | 接收链多普勒补偿失败（无预测 / 计算异常），该块音频跳过 | 是 | P3 | `mbdsdr_ai/sdr_backend.py:832,872` → `desktop/main_window.py:8480` | 已补（设备调谐族，`0e4b9ef6`） |
+| 45 | `llm_offline` | 用户开 `MBDSDR_OFFLINE` 或离线时点 AI 发送 | 是 | P4 | `mbdsdr_ai/model_manager.py:268,275` → `desktop/ai_panel.py:1198` | 已补（AI 模型族，`0e4b9ef6`） |
+| 46 | `llm_rate_limited` | 模型接口返回 429（用户连续发指令 / 额度耗尽） | 是 | P4 | `mbdsdr_ai/model_manager.py:31-32` → `desktop/ai_panel.py:1198` | 已补（AI 模型族，`0e4b9ef6`） |
+| 47 | `llm_http_4xx` | API Key 错 / 模型名不存在，接口返回 4xx | 是 | P4 | `mbdsdr_ai/model_manager.py:35-36` → `desktop/ai_panel.py:1198` | 已补（AI 模型族，`0e4b9ef6`） |
+| 48 | `llm_http_5xx` | 模型服务端 5xx | 是 | P4 | `mbdsdr_ai/model_manager.py:33-34` → `desktop/ai_panel.py:1198` | 已补（AI 模型族，`0e4b9ef6`） |
+| 49 | `llm_timeout` | 用户设置超时过小或网络慢，模型请求超时 | 是 | P4 | `mbdsdr_ai/model_manager.py:40` → `desktop/ai_panel.py:1198` | 已补（AI 模型族，`0e4b9ef6`） |
+| 50 | `llm_unreachable` | 断网 / 代理错误 / 域名不可达 | 是 | P4 | `mbdsdr_ai/model_manager.py:42` → `desktop/ai_panel.py:1198` | 已补（AI 模型族，`0e4b9ef6`） |
+| 51 | `llm_unexpected` | 模型客户端内部异常（用户可触发，如坏响应） | 是 | P4 | `mbdsdr_ai/model_manager.py:44` → `desktop/ai_panel.py:1198` | 已补（AI 模型族，`0e4b9ef6`） |
 | 52 | `missing_error_detail` | 工具失败且 handler 没给正文，registry 兜底填 message | 是 | P5 | `mbdsdr_ai/tool_registry.py:967` → `desktop/ai_panel.py:716-719` | 已补（工具结果族，`0e4b9ef6`） |
 | 53 | `workflow_executor_missing` | 工作流引擎未注入执行器（构造顺序错误，开发者态） | 否 | — | `mbdsdr_ai/workflow_engine.py:298-299`；`mbdsdr_ai/agent.py:453` 总会 `set_tool_executor`，用户路径造不出 | 不补：仅开发者构造错误可达，桌面无渲染路径 |
 | 54 | `unknown_tool` | 旧 MCP 服务端收到未注册工具名（外部客户端发起） | 否 | — | `mbdsdr_ai/core/mcp_server.py:2072`；桌面 AI 走 `tool_not_found`（`tool_registry.py`），不读该 envelope | 不补：只有外部 MCP 客户端能看到，我方 UI 不渲染 |
@@ -228,7 +228,7 @@ FAILED tests/test_error_remedy_links.py::test_every_catalog_code_is_registered -
 
 - 通道取证只看**桌面 UI 真实渲染点**，不看库 API 返回值：
   `desktop/ai_panel.py:721`、`desktop/status_panel.py:273`、
-  `desktop/main_window.py:8477`、`desktop/ai_panel.py:1193`、`desktop/ai_panel.py:716-719`。
+  `desktop/main_window.py:8480`、`desktop/ai_panel.py:1198`、`desktop/ai_panel.py:716-719`。
 - 「不可见」的机械证据是 `git grep -n <模块> -- desktop` 为 0：
   `recording_library` / `recorder` / `playback` / `tle_fetch` / `error_handler`（信封）
   在 `desktop/` 均无业务调用方。
