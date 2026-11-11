@@ -64,17 +64,17 @@
   「频谱页未前置」→ 假绿；单跑时频谱页恰好前置 → 暴露真省略。宽度本身两种现场
   完全一致，**不是前序用例留下的宽度残留**。
 - 归属：**结构问题**（文案 + 左栏固定宽在 860 窗下装不下），与 §二 同一条。
-- 同一条也说明 `test_first_open_hint_is_short_and_detail_is_kept` 目前是**假绿**：
-  它的 `win` fixture 不切频谱页，断言时 `hint.width()` 是 640。忠实做法（未施工，
-  需裁定）：fixture 里 `win.left_tab.setCurrentWidget(win._spectrum_page)` + pump
-  之后再调 `_show_no_rtl_hint`——那样该用例今天就会红，正好把这条结构问题钉住。
-  不放宽断言，也不假装它已经绿。
+- 同一条也说明 `test_first_open_hint_is_short_and_detail_is_kept` 原本是**假绿**：
+  它的 `win` fixture 不切频谱页，断言时 `hint.width()` 是 640。已按裁定施工
+  （`f7a38c82`）：fixture 里先 `win.left_tab.setCurrentWidget(win._spectrum_page)`
+  + pump，再调 `_show_no_rtl_hint`——该用例**现在是红的**（实测
+  `'  还没接 SDR · 点「连接」或逛星象…'`），断言未放宽、预算未改、无例外。
+  红转绿只能来自结构修复，不许再动这条测试。
 
 ## 四、验收判据（施工后）
 
 1. 100% 字号 × 860 宽窗口：`hint.text()` 含「星象仪」，且不含 `…`（省略号）；
 2. 125% 字号 × 860 宽窗口：同上；150% 字号 × 该窗口最小宽：同上（若选「横跨整窗」方案）；
-3. `pytest tests/test_first_open_welcome.py -q` 全绿，且断言未被放宽；**但这一步
-   目前不算数**：该用例的标签未被布局（`hint.width()` 640），绿是假绿（见 §三·五），
-   须连同「fixture 先切频谱页」一起改，绿才有意义；
+3. `pytest tests/test_first_open_welcome.py -q` 全绿，且断言未被放宽；**该用例现在
+   就是红的**（fixture 已切频谱页，`f7a38c82`），它转绿只算数于结构修复落地之后；
 4. 频谱面板高度余量不低于 §3.9 的 26px（B 落地后），为此重跑 `ui_narrow_breakdown.py --json`。
