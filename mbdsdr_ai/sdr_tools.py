@@ -124,10 +124,13 @@ def _resolve_station_args(args, lat_key="latitude", lon_key="longitude",
 
 
 def _physics_now(args) -> float:
-    """物理计算统一时刻：显式 timestamp > TimeEngine 仿真时刻 > 墙钟。
+    """物理计算统一时刻：显式 timestamp > TimeEngine 仿真时刻。
 
     P11 修复：天空视图/多普勒/过境三条入口必须同一时间基准，否则同一模拟
     时刻会各算各的（例如快转到 2026-09 后仍按 2026-11 墙钟算可见性）。
+
+    与 orbit 同一策略：引擎不可用时**抛 TimeBasisUnavailable**，不退回墙钟。
+    退回墙钟会给出「看起来正常」的时刻/方位/频率，用户根本看不见那条 warning。
     """
     ts = args.get("timestamp")
     if ts is not None:
@@ -141,11 +144,10 @@ def _physics_now(args) -> float:
         from new_spacetime import get_time_engine
     try:
         return float(get_time_engine().now_unix())
-    except (RuntimeError, ValueError, TypeError, AttributeError, OSError) as e:
-        # 时间基准切换会改变天空视图/多普勒/过境的时间语义，必须留证据。
-        logger.warning("时间引擎不可用，回退墙钟: %s", e)
-        import time as _time
-        return _time.time()
+    except Exception as e:  # noqa: BLE001 - 时基失败必须显式，不能静默降级
+        raise orbit.TimeBasisUnavailable(
+            f"时间基准不可用（时间引擎 {type(e).__name__}: {e}）；不退回系统时钟"
+        ) from e
 
 
 def _utc_local(when: float) -> tuple:
@@ -4712,7 +4714,14 @@ def _satellite_doppler_track(mgr, args):
     def state_at(when):
         return orbit.compute_satellite_state(sat, lat, lon, alt_km, when=when)
 
-    st0 = state_at(_time.time())
+    try:
+        t0 = _physics_now(args)
+    except orbit.TimeBasisUnavailable as e:
+        # 控制决策（是否已升起）必须走引擎时基；开着时间机器时用墙钟判断
+        # 可能真去录一段空的。宁可拒绝，也不给「按墙钟看它已升起」的假结论。
+        return ToolResult(success=False, content=f"时间基准不可用，拒绝录制：{e}")
+
+    st0 = state_at(t0)
     if st0 is None:
         return ToolResult(success=False, content=(
             f"无法计算卫星 {sat}（TLE 不可用或不在内置列表）。"
@@ -4747,7 +4756,9 @@ def _satellite_doppler_track(mgr, args):
                 elapsed = now - t_start
                 if elapsed >= duration:
                     break
-                st = state_at(now)
+                # 真实节奏用墙钟（采集间隔），物理时刻用引擎时基推进；
+                # 否则开着时间机器时会把「仿真时刻 + 墙钟增量」混成一锅。
+                st = state_at(t0 + elapsed)
                 if st is None:
                     break
                 shift = -nominal * st["range_rate_kms"] / orbit.C_LIGHT

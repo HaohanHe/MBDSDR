@@ -98,3 +98,63 @@ def test_agent_answers_unavailable_without_concrete_times(monkeypatch):
     assert "时间基准不可用" in doppler.content
     assert not re.search(r"\d+\.\d+\s*MHz", doppler.content), \
         f"不可用时仍给出了频率: {doppler.content}"
+
+
+def test_sdr_physics_now_raises(monkeypatch):
+    from mbdsdr_ai import sdr_tools
+
+    _break_engine(monkeypatch)
+    with pytest.raises(orbit.TimeBasisUnavailable) as ei:
+        sdr_tools._physics_now({})
+    assert "时间基准不可用" in str(ei.value)
+
+
+def test_sdr_satellite_handlers_do_not_fabricate(monkeypatch):
+    """三条入口统一向上抛时基故障；不允许返回看似正常的数字。"""
+    from mbdsdr_ai import sdr_tools
+
+    _break_engine(monkeypatch)
+    station = {"latitude": 45.0, "longitude": 120.0}
+    cases = [
+        (sdr_tools._satellite_sky_view, dict(station)),
+        (sdr_tools._satellite_passes, dict(station, hours=6.0)),
+        (sdr_tools._satellite_doppler,
+         dict(station, satellite_name="NOAA 19", frequency_hz=137.62e6)),
+    ]
+    for fn, args in cases:
+        with pytest.raises(orbit.TimeBasisUnavailable) as ei:
+            fn(args)
+        msg = str(ei.value)
+        assert "时间基准不可用" in msg
+        assert not re.search(r"\d{1,2}:\d{2}|MHz|\d+(\.\d+)?°", msg), \
+            f"{fn.__name__} 不可用时仍给出了数字: {msg}"
+
+
+def test_recording_refuses_without_time_basis(monkeypatch):
+    """录制是控制动作：时基不可用必须显式拒绝，不能按墙钟判「已升起」。"""
+    from mbdsdr_ai import sdr_tools
+
+    _break_engine(monkeypatch)
+
+    class _Backend:
+        class status:  # noqa: N801 - 只模拟需要的字段
+            connected = True
+
+        def get_doppler_compensation_status(self):
+            return {"enabled": False}
+
+        def set_doppler_compensation(self, _v):
+            return True
+
+        def set_frequency(self, _hz):
+            return True
+
+    monkeypatch.setattr(sdr_tools, "_get_backend", lambda _mgr: _Backend())
+    out = sdr_tools._satellite_doppler_track(None, {
+        "satellite_name": "NOAA 19", "frequency_mhz": 137.62,
+        "latitude": 45.0, "longitude": 120.0, "duration_s": 1.0,
+    })
+    assert out.success is False
+    assert "时间基准不可用" in out.content
+    assert "拒绝录制" in out.content
+    assert not re.search(r"\d{1,2}:\d{2}|MHz", out.content)
