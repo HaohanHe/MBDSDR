@@ -37,10 +37,11 @@ rg -c "<symbol>" D:\mbdsdr\MBDSDR
 
 - 统计范围显式包含 `scripts/`、`tests/`、`docs/`、`cpp/`、`mobile/`、`tools/`、`experiments/`。
 - **数字引用规矩**：任何 `verify_claims` 数字必须带口径 + HEAD 短哈希，两种口径不可混比：
-  - `HEAD <hash>（提交态）`：用 `git archive HEAD docs` 抽到临时目录后跑 `--docs`，只算已落库文档；
+  - `HEAD <hash>（提交态）`：`git worktree add --detach <tmp> <hash>` 取**整仓**快照（文档与代码同一 commit）后跑 `--root <tmp>`；**不得**用「文档取 HEAD、代码取工作区」的混口径——拼起来的结果不可归因到任何一个 commit（旧记法 `git archive HEAD docs` + 工作区代码已废弃）。
   - `HEAD <hash> + 工作区在途（WT）`：直接跑工作区，含他线未提交改动。
-  - 例（2026-11-06 实测）：`HEAD e4810574（提交态）156 / 63 / 12 / 81`（`git archive HEAD docs` 抽测）；`HEAD e4810574 + WT 128 / 70 / 12 / 46`。**禁止裸报一个总数。**
-  - 他线自测数字（如采样率线的 `164 / 58 / 17 / 89`）只在其自身 HEAD 快照下成立，引用时必须带其 hash 与统计范围，不得与本表两组混比。
+  - **口径自证**：提交态与 WT 的差 = 在途文档条数 + 在途代码影响条数。2026-11-06 实测 `HEAD 78003d87`（同一 hash 三跑）：提交态 **138 / 74 / 15 / 49**；混合口径（HEAD 代码 + WT 文档）**140 / 74 / 16 / 50**；纯 WT **140 / 74 / 16 / 50**。混合与纯 WT 逐项相同 → 这 +2 条（+1 文档过期、+1 无 hash）**全部来自在途文档，代码侧贡献 0 条**。
+  - 存档（旧混口径，不可归因，只作对照）：`HEAD e4810574（文档 HEAD + 代码工作区）156 / 63 / 12 / 81`；`HEAD e4810574 + WT 128 / 70 / 12 / 46`。**禁止裸报一个总数。**
+  - 采样率线的 `164 / 58 / 17 / 89`：**已撤回**（该线自认不可复现）。同口径重跑 `b0a440e3` = **156 / 58 / 12 / 86**，复现式见 `docs/evidence-standard.md` §7.8（`git archive` 快照 + `git show <HEAD>:scripts/verify_claims.py` + 顶层非递归 + `EXCLUDE_FILES={claim-waivers.md}`）。引用他线数字必须带其 hash、范围与复现式，不得与本表两组混比。
 - 删除前后各跑同一组测试并对比通过项数（见 §4）。
 - 采样率真机事实来自另一条线的实测记录（见 §3）。
 
@@ -422,6 +423,13 @@ python -m pytest tests/test_theme_switch.py tests/test_theme_tokens.py \
 > 补测试发现的现状缺陷（`ecef_state_to_keplerian` 的 argp/ν 公式、退化轨道除零；
 > `load_ground_station_config` 的 `MBDSDR_GS_*` 唯一实现）已随删除记录在提交说明中。
 
+> **文档侧收尾（2026-11-06）**：本轮 8 个删名（`build_short_frame`、`grid_resolution_pix_per_deg`、
+> `audio_info_from_service`、`hard_tones_to_llr`、`convolutional_interleave`、`nav_bits_from_corr`、
+> `ecef_state_to_keplerian`、`load_ground_station_config`）连同 `MBDSDR_GS_*` 环境变量名，在
+> `docs/**/*.md`（含 `docs/learn/data-inventory*`、`docs/learn/capability-map.md`）中 **0 命中**——
+> 唯一命中就是本表与 `docs/pending-patches/2026-11-06-deadcode-unused-symbols.md` 自身。
+> 因此无需向其它 owner 出交接单。
+
 #### 5.8.2 动态调用存疑（7 项）——确认手段与结论
 
 确认手段（全部已执行）：① 字符串/配置：扫 `*.json/*.yaml/*.toml/*.ini/*.cfg/*.conf/*.txt`，7 个名字 **0 命中**；② `getattr`/`importlib`/`eval`/`exec`/`globals()[...]`：生产代码中无按这些名字取用的形态；③ Qt 字符串 connect：无 `connect("...")` 形态；④ `git grep -w`：全仓仅定义行。
@@ -519,6 +527,19 @@ python -m pytest tests/test_theme_switch.py tests/test_theme_tokens.py \
 - 过渡期：允许同提交上调基线，但 commit message 必须写明新增符号与接线计划；CI 只拦"基线未更新且计数上升"。
 
 **结论**：等 §5.7 A 表清零、`new_spacetime_panel` 落库后重新评估；在此之前 §5.8 只作为人工清单维护。
+
+#### 5.8.4 已删代码的已知缺陷（重写时不得复原）
+
+删除前用「先补测试再删」逼出来的实现缺陷。**这些函数已不在 HEAD**，此处留档的唯一目的是：
+日后若重写同一能力，必须按正确公式实现，**不得把原实现照抄回来**。
+
+| 原符号 | 原位置（删除前） | 基线提交 / 删除提交 | 已证实的缺陷 |
+|---|---|---|---|
+| `ecef_state_to_keplerian` | `mbdsdr_ai/orbit_determination.py:796` | 基线 `bf7370bc` / 删除 `24d20bba` | ① `argp` 的 `atan2` 把**未归一化的 `e_vec`** 与 `cos ν` 混作两个分量（正确做法：`atan2(dot(n̂, ê), dot(ê, r̂))`，`ê` 必须归一化）；② `ν = atan2(cos ν, sin ν)` **参数颠倒**；③ 已知根数 `a=7000 km, e=0.01, i=51.6°, Ω=30°, ω=60°, ν=45°` 实测 `argp=0.405°`、`M=45.2°`（应为 60° / 45°），`a/e/i/Ω` 正确；④ 退化轨道（ECEF 下随地球自转、ECI 静止，`h=0`）直接抛 `ZeroDivisionError`，无 NaN/显式报错分支。 |
+
+**重写约束（写死）**：若日后重写 ECEF→开普勒，必须按正确公式与归一化实现，并补
+「已知根数 → ECI → ECEF → 还原」的闭环数值测试（含 `e>0` 与退化轨道两类用例），
+**不得复原此实现**。
 
 ## 6. 账本线登记行并入（R1–R20）
 

@@ -1866,6 +1866,14 @@ No supported devices found），GNSS+SDR 同开复验没做成；离线那次
 > （外层硬上限，超时自杀并留日志）。缺任一条，视为「随时可能污染窗口」，其它线有权
 > 按「不干净」处理，不得先开跑再说。
 
+> **未提交 hunk 不得追加（2026-11-06 立规；形态⑭变体）**
+>
+> 别线在途、尚未 commit 的 hunk 一律不追加、不格式化、不改错字，哪怕内容已经写好、只差一笔提交。
+> 判据：改前跑 `git diff -U0 <file>`，看目标行是否落在某个 `@@ ... @@` 新增块内；落在里面就只登记，
+> 等对方 commit 落库后再补一句。**理由**：未提交 hunk 随时可能被对方重写或丢弃，往上追加等于把
+> 两方改动绑进同一个 blob，任何一方重写都会造成二次覆盖——这正是形态⑭（私有 index 回退他人文件）的变体。
+> 本次按选项①处理：§6.1 真机线那两段等其落库后再补；审计交接单也不写进 §7.5 表体，只挂在表下指向。
+
 > **有活跃 claim ≠ 文件可运行（2026-11-11 立规；「空表 ≠ 无人占」的姊妹条）**
 >
 > 占用表与 `file_claim.py` 只解决**抢写**：它保证同一时刻只有一条线在改这个文件，
@@ -3262,6 +3270,9 @@ HEAD `2f83f482` 实测：白名单 103 行，`test_waivers_are_not_stale` 红 **
 | `docs/learn/settings-surface-audit.md:199` | `451073e` | 本条没有可比的改动对象 | 补文件名/符号或删断言 | WorkBuddy | 2026-11-13 | done：hash 未错（module_panel 旋钮 + clean_exc 同笔）；原句只有裸 hash，补 `desktop/module_panel.py:315` — `round(v * 1e6)` |
 | `docs/learn/ui_operation_logic_real.md:60` | `7d3fa3f` | 引用 Python 对象，提交改的是 C++ | 拆开两条或换正确 hash | WorkBuddy | 2026-11-13 | done：hash 未错（C++ panel id 修复）；原句把无提交的 Python `_raise_center_tab` 与 C++ 混写，已拆——Python 半边标〔推断〕，C++ 半边补 `cpp/src/ui/main_window.cpp` |
 | `docs/PRD.md:869` | `4abde1a` | 引用测试文件，提交改的是 `desktop/main_window.py` | 改引用 + 复跑 | WorkBuddy | 2026-11-13 | done：hash 未错（删假 0 Hz 回填）；补 `desktop/main_window.py:4213` — `绝不用 0 Hz`（R11 本体仍是「待补」） |
+
+> **外挂交接单（不计入 R1 条数）**：`docs/pending-patches/2026-11-06-audit-ft8-get-colorder-stale.md`（`86ae9807`）→ 审计线。
+> `docs/audit_r2/08_ft8_full.md:36` 称 `reorder_to_ldpc` 调用 `get_colorder`，但 `285a9863` 起已改为恒等映射、全仓零调用；待持有方修订。
 
 机检复跑：`python scripts/check_red_lifecycle.py` → 本轮实测 `FAIL 66 / R1 实修 71 条 / SNAPSHOT 0 条 / 历史横幅 123 条`（派发表落库时为 109，两数随各线提交浮动，以复跑为准）；派发完成后总账里的 `SNAPSHOT` 必须上升、`FAIL` 必须相应下降，不允许两边都不动。
 
