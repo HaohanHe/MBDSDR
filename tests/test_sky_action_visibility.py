@@ -27,7 +27,7 @@ def qtapp():
 
 
 @pytest.fixture(scope="module")
-def window(qtapp):
+def window(qtapp, isolated_profile):
     import main_window as mw
     from PySide6.QtTest import QTest
     w = mw.MainWindow()
