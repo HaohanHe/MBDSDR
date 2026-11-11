@@ -78,7 +78,7 @@ def test_builtin_bookmark_delete_is_refused_with_next_step(panel, monkeypatch):
 
 
 @pytest.fixture(scope="module")
-def window(qtapp):
+def window(qtapp, isolated_profile):
     import main_window as mw
     w = mw.MainWindow()
     yield w
