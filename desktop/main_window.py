@@ -7035,11 +7035,18 @@ class MainWindow(QMainWindow):
             pass
 
     def _revert_tune_ui(self) -> None:
-        """把频率/模式显示拉回最后一次真实成功值（失败后不许留在新值）。"""
+        """把频率/模式显示拉回最后一次真实成功值（失败后不许留在新值）。
+
+        频谱拖动/双击是「先动视窗、再下发硬件」（``_on_spectrum_freq_changed``），
+        所以失败时视窗已经停在目标频率上。只回写标签会让刻度回退、瀑布仍在
+        失败频率——必须把频谱中心与 ``_vfo_center_hz`` 一起拉回。
+        """
         last_hz = float(getattr(self, "_backend_center_hz", 0.0) or 0.0)
         if last_hz > 0:
             self.freq_label.setText(f"{last_hz / 1e6:.3f} MHz")
             self.status_freq.setText(f"频率: {last_hz / 1e6:.3f} MHz")
+            self.spectrum.set_center_freq(last_hz / 1e6)
+            self._vfo_center_hz = last_hz
         else:
             self.freq_label.setText("-- MHz")
             self.status_freq.setText("频率: —")
