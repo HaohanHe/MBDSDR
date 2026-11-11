@@ -294,6 +294,9 @@ def _qt_trigger(items):
 
 def pytest_collection_finish(session):
     """收集定稿、用例尚未执行时拿锁：保证「同一时刻只有一个 Qt 测试进程在跑」。"""
+    # 此刻所有测试模块已 import、任何 module fixture 都还没跑：第一次见到
+    # QApplication 就在这里拍 app 级样式基线（锁的几处早退不能吞掉它）。
+    _capture_app_style_baseline()
     if os.environ.get("MBDSDR_TEST_LOCK", "1") == "0":
         return
     trigger = _qt_trigger(session.items)
@@ -697,6 +700,100 @@ def isolated_profile(tmp_path_factory):
     ls.reset_layout_store_singleton()
     QSettings.setDefaultFormat(old_format)
     mp.undo()
+
+
+# ---------------------------------------------------------------------------
+# 防线 5：QApplication 级全局态跨用例泄漏（2026-11-12 实测）
+#
+# 现场：test_planetarium_entry_visibility 的 module 级 fixture 构造 MainWindow，
+# 走 main_window._apply_theme → app.setPalette / setFont / setStyleSheet，把
+# QApplication 的字体改成 MiSans 10.0、QSS 长度改成 20127，用例结束后没人还原。
+# 同进程后面跑 test_spectrum_slider_overflow 的工具栏用例，最小宽从 126 涨到
+# 160，「两个入口约 120px」直接红——纯顺序依赖红。
+#
+# 分两层，缺一不可：
+#   * 函数级：每个用例结束，把它在用例体内改过的字体/样式表/调色板还回用例
+#     开始时的样子（模块内用例之间互不污染）；
+#   * 模块级：模块结束，还回本会话第一次见到 QApplication 时的样子。函数级
+#     单独不够——它的快照拍在 module fixture **之后**，拍到的已是 MiSans，
+#     只能挡住模块内的串味，跨模块的污染照样流出去（实测：只留函数级仍红）。
+# 只在状态真的变了才调 setXxx：setStyleSheet 会触发全树重抛光，每个用例
+# 白付一次会把套件拖慢。
+# 已知边界：若 QApplication 本身由某个模块的 fixture 首次创建，会话基线就
+# 没有「更早的干净状态」可拍，该模块的 teardown 只能跳过（它后面没有别的
+# 模块时才无影响；全量套件中 app 一般在收集阶段已被创建）。
+# ---------------------------------------------------------------------------
+_APP_STYLE_BASELINE = {"app": None, "font": None, "qss": None, "palette": None}
+
+
+def _live_qapp():
+    """当前 QApplication；没有（纯逻辑用例）或 C++ 对象已删时返回 None。"""
+    try:
+        from PySide6.QtWidgets import QApplication
+        app = QApplication.instance()
+        if app is None:
+            return None
+        app.font()                       # 触碰一次：C++ 侧已删会抛 RuntimeError
+        return app
+    except Exception:  # noqa: BLE001 - 裁剪环境没装 PySide6 时一律跳过
+        return None
+
+
+def _app_style_snapshot(app):
+    return {"font": app.font(), "qss": app.styleSheet(),
+            "palette": app.palette()}
+
+
+def _app_restore_style(app, snap):
+    """差异恢复；顺序与 themes.Theme.apply 一致（palette → font → qss）。"""
+    try:
+        if app.palette() != snap["palette"]:
+            app.setPalette(snap["palette"])
+        if app.font() != snap["font"]:
+            app.setFont(snap["font"])
+        if app.styleSheet() != snap["qss"]:
+            app.setStyleSheet(snap["qss"])
+    except RuntimeError:
+        pass                             # app 已随会话销毁
+
+
+def _capture_app_style_baseline():
+    """会话基线只在第一次见到 app 时拍一次，之后不覆盖。"""
+    if _APP_STYLE_BASELINE["app"] is not None:
+        return
+    app = _live_qapp()
+    if app is None:
+        return
+    _APP_STYLE_BASELINE["app"] = app
+    _APP_STYLE_BASELINE.update(_app_style_snapshot(app))
+
+
+@pytest.fixture(autouse=True)
+def _restore_app_style():
+    """每个用例前后保存/恢复 QApplication 的字体、样式表、调色板。"""
+    app = _live_qapp()
+    if app is None:
+        yield
+        return
+    snap = _app_style_snapshot(app)
+    yield
+    _app_restore_style(app, snap)
+
+
+@pytest.fixture(autouse=True, scope="module")
+def _restore_app_style_at_module_boundary():
+    """模块结束时把 app 级样式还回会话基线（跨文件不串味）。
+
+    autouse 模块级 fixture 先于同模块其它 fixture 建立、晚于它们拆除，
+    因此 setup 这里看到的是「上一模块收尾后」的状态，正好当懒基线；
+    teardown 在 module 级 MainWindow 等夹具拆完之后执行。
+    """
+    _capture_app_style_baseline()
+    yield
+    app = _live_qapp()
+    if app is None or _APP_STYLE_BASELINE["app"] is not app:
+        return
+    _app_restore_style(app, _APP_STYLE_BASELINE)
 
 
 @pytest.fixture(autouse=True)
