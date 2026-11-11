@@ -541,6 +541,15 @@ class SDRBackend:
     def get_gain(self) -> float:
         return self.status.gain_db
 
+    def gain_readback_source(self) -> str:
+        """增益读数的来源说明（界面 tooltip 用）。
+
+        空串 = 本后端没有增益回读通道，``status.gain_db`` 只是请求值（可能
+        经软件限幅/吸附），界面必须显示「请求值，未回读」。子类确有回读通道
+        时返回人话说明，界面据此标明读数来源，不许把请求值包装成设备回执。
+        """
+        return ""
+
     def readback_hw_state(self) -> bool:
         """连接成功后从硬件回读实际 center_freq/sample_rate/gain，对齐内部状态。
 
@@ -1669,6 +1678,10 @@ class RTLSDRBackend(SDRBackend):
         # 来源: librtlsdr src/librtlsdr.c:959-969 —— 真实离散增益表在
         # mbdsdr_ai/rtlsdr_params.py，连上探测到调谐器型号后填充。
         self._gain_table_db: list = []
+        # 最近一次真正写进调谐器的增益（dB）。本地 USB 由 pyrtlsdr 的
+        # ``gain`` getter 回读确认；rtl_tcp 无回执，只记下发值。
+        # ``set_gain`` 成功后用它覆盖基类写入的请求值。
+        self._applied_gain_db: Optional[float] = None
         # 本地 USB 直连不可用时，自动拉起的 rtl_tcp 子进程句柄（disconnect 时回收，
         # 绝不留下野进程占着棒子——rtl_tcp 单客户端，占着别人就枚举不到）。
         self._rtl_tcp_proc = None
@@ -2394,10 +2407,44 @@ class RTLSDRBackend(SDRBackend):
                 except Exception:
                     pass
             self._sdr.gain = float(target)
+            # 回读确认：pyrtlsdr 的 ``gain`` getter 调 rtlsdr_get_tuner_gain，
+            # 拿到的是 librtlsdr 实际写入的离散档——setter 先按 gain_values
+            # 吸附，请求值 28.0 不会原样到达驱动。2026-11-11 实测（pyrtlsdr
+            # 0.2.93，gain_values=[0,250,500] 十分之一 dB）：set_gain(28.0)
+            # 只下发 250，get_gain() 返回 25.0。
+            # rtl_tcp 适配器的 getter 只是本地缓存、无设备回执，不算回读。
+            self._applied_gain_db = float(target)
+            if self._host is None:
+                try:
+                    written = float(self._sdr.gain)
+                except Exception as e:  # noqa: BLE001 - 读不到就保留下发值
+                    logger.debug("RTL-SDR 增益回读失败（保留下发值）: %s", e)
+                else:
+                    if math.isfinite(written):
+                        self._applied_gain_db = written
         except Exception as e:
             logger.warning(f"RTL-SDR 设置增益 {gain_db} dB 失败: {e}")
             return False
         return True
+
+    def set_gain(self, gain_db: float) -> bool:
+        """设置增益，并把驱动确认的实际档位写回状态。
+
+        基类成功后写入的是限幅后的请求值；RTL 调谐器只接受离散档，
+        这里覆盖成 ``_apply_gain`` 回读到的实际档位，状态面板才不会把
+        「请求 28.0 dB」显示成已生效。
+        """
+        self._applied_gain_db = None
+        ok = super().set_gain(gain_db)
+        if ok and self._applied_gain_db is not None:
+            self.status.gain_db = self._applied_gain_db
+        return ok
+
+    def gain_readback_source(self) -> str:
+        """本地 USB 有驱动确认通道；rtl_tcp 协议不回执增益值。"""
+        if self._sdr is None or self._host is not None:
+            return ""
+        return "驱动确认档位（librtlsdr 实际写入的离散档，非硬件物理回读）"
 
     def readback_hw_state(self) -> bool:
         if not self._sdr:
@@ -3568,6 +3615,9 @@ class SoapySDRBackend(SDRBackend):
                 if math.isfinite(actual):
                     return actual
         return self.status.gain_db
+
+    def gain_readback_source(self) -> str:
+        return "驱动回读档位（SoapySDR getGain）"
 
     def _apply_agc(self, enabled: bool) -> bool:
         if self._sdr is not None:

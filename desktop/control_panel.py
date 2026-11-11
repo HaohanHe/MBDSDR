@@ -1463,7 +1463,7 @@ class ControlPanel(QWidget):
         else:
             self.gain_slider.setToolTip(self._gain_base_tip)
 
-    def set_gain_applied(self, db: float) -> bool:
+    def set_gain_applied(self, db: float, readback_source: str = "") -> bool:
         """回填设备真实增益读数；只改标签，不动滑杆。
 
         与 :meth:`set_gain` 的分工：``set_gain`` 写配置意图（滑杆位置），
@@ -1472,6 +1472,9 @@ class ControlPanel(QWidget):
 
         后端夹值或写入失败时，调用方回读 ``get_gain()`` 后传给本方法：
         标签显示真实值并追加 ⚠ 提示，滑杆仍停在用户意图，配置文件不改。
+
+        ``readback_source`` 是后端自报的读数来源（``gain_readback_source()``）：
+        非空表示确有回读通道，空串表示该后端只回报请求值。
         """
         if not self._sdr_connected:
             return False
@@ -1488,13 +1491,16 @@ class ControlPanel(QWidget):
                     "（配置文件未改）")
             logger.warning("%s", hint)
             self.gain_val.setToolTip(f"⚠ {hint}")
+        elif readback_source:
+            # 有回读通道：如实标明读数来源，不升级成“设备实测”。
+            self.gain_val.setToolTip(f"已连接：{readback_source}")
         else:
-            # 相等不等于"设备回执"：RTL 等后端 get_gain() 回的就是请求值，
-            # 离散调谐器吸附后的真实档位没有回读通道。这里只陈述来源，
-            # 不替"没回读过的值"背书。
+            # 相等不等于“设备回执”：该后端没有增益回读通道，读数只是
+            # 请求值（可能经软件吸附/限幅）。这里只陈述来源，不替没回读
+            # 过的值背书。
             self.gain_val.setToolTip(
-                "已连接：后端当前增益读数；部分后端只回报请求值，"
-                "硬件吸附/限幅后的真实档位未回读")
+                "已连接：增益读数为请求值，硬件未回读"
+                "（该后端无增益回读通道，吸附/限幅后的真实档位未知）")
         return True
 
     def set_ppm_applied(self, value: int) -> bool:
