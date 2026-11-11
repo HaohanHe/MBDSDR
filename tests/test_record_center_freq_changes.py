@@ -26,6 +26,7 @@ import json
 import logging
 import os
 import sys
+import time
 import types
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -493,12 +494,46 @@ def test_tune_calls_through_apply_hw_action_pass_target_hz():
     assert tune_calls >= 5, f"调谐收口调用点异常少（{tune_calls}）"
 
 
-def test_satellite_track_tunes_through_apply_hw_action():
-    """第 7 条（逐拍调星）已并入 `_on_tune_sdr` 收口，不得退回直调。"""
-    path, src = _main_window_source()
-    visitor = _SetFrequencyCallsiteVisitor()
-    visitor.visit(ast.parse(src, filename=path))
-    node = visitor.functions["MainWindow._poll_satellite_track"]
-    segment = ast.get_source_segment(src, node)
-    assert "self._on_tune_sdr(" in segment, (
-        "逐拍调星没有走 `_on_tune_sdr` → `_apply_hw_action` 收口")
+class _RecordingBackend(_StubBackend):
+    """在真实写频路径上记账：调谐到底有没有下发、下发的具体值。"""
+
+    def __init__(self, hz=145_500_000.0):
+        super().__init__(hz)
+        self.set_calls = []
+
+    def set_frequency(self, hz):
+        self.set_calls.append(float(hz))
+        return super().set_frequency(hz)
+
+
+def test_satellite_track_tunes_through_apply_hw_action(window):
+    """逐拍调星必须把「补偿后的下行频率」真正下发到后端。
+
+    行为断言：驱动一次 `_apply_satellite_tick`，读后端实际收到的写频参数。
+    反证：把 `_apply_satellite_tick` 里那条 `self._on_tune_sdr(...)` 注释掉，
+    后端就收不到任何写频，本用例立刻红。
+    """
+    backend = _RecordingBackend(145_500_000.0)
+    window._active_sdr_backend = backend
+    window._sat_tracking = True
+    window._sat_track_mode = "FM"
+    window._gimbal_follow = False
+    window._loop_sat_tracker = types.SimpleNamespace(
+        current_position=lambda: None,
+        downlink_freq_hz=lambda: 145_800_000.0,
+        selected_name="ISS",
+    )
+    # 多普勒补偿开启时调谐值 = 补偿后的接收频率，不是标称下行。
+    comp = types.SimpleNamespace(rx_freq=lambda: 145_805_000.0)
+    pos = {"elevation": 30.0, "azimuth": 180.0,
+           "policy": {"allow_tune": True}}
+
+    now = time.monotonic()
+    window._apply_satellite_tick(pos, comp, now, now)
+
+    assert backend.set_calls == [pytest.approx(145_805_000.0)], (
+        "逐拍调星没有把补偿后的频率下发到后端，实际写频："
+        f"{backend.set_calls!r}")
+    assert window._vfo_center_hz == pytest.approx(145_805_000.0)
+    assert window._sat_tune_failed_reason == ""
+
