@@ -48,6 +48,38 @@ FIELD_ORDER: Tuple[str, ...] = tuple(FIELD_LABELS)
 
 _RANGE_KEYS = ("freq_range", "sample_rate_range", "gain_range", "bandwidth_range")
 
+#: 能力口径（2026-11-11 D-1 裁定）：**量程可以先信后验，开关必须验了才信。**
+#:   * 读数量程类（频率/增益/采样率/带宽）：允许展示驱动「声明」值，但必须
+#:     标「声明支持，未验证」；允许用户输入，越界或设置失败如实报错——
+#:     **不许静默，也不许夹取到范围内再当成功**。
+#:   * 开关类（偏置电压/AGC/Offset/直采）：只有 ``probed`` 才算支持；
+#:     声明/未知一律置灰（``enabled=False``），未知还必须给「重新探测」入口。
+#:     理由：开关假装支持，就是此前修过的「假生效」。
+SWITCH_KEYS: Tuple[str, ...] = (
+    "bias_tee", "agc", "offset_tuning", "direct_sampling")
+
+SWITCH_LABELS: Dict[str, str] = {
+    "bias_tee": "偏置电压",
+    "agc": "AGC",
+    "offset_tuning": "Offset 调谐",
+    "direct_sampling": "直采",
+}
+
+#: 开关能力在设备/后端对象上的布尔标志名。
+SWITCH_ATTRS: Dict[str, str] = {
+    "bias_tee": "supports_bias_tee",
+    "agc": "supports_agc_mode",
+    "offset_tuning": "supports_offset_tuning",
+    "direct_sampling": "supports_direct_sampling",
+}
+
+#: 未知开关的统一 tooltip（用户口径原文，别改写成含糊话）。
+SWITCH_UNKNOWN_TOOLTIP = "未检测到该能力，无法确认"
+#: 仅声明、未探测的开关 tooltip：说明为什么仍然不能点。
+SWITCH_DECLARED_TOOLTIP = "仅驱动声明支持、未探测；开关类必须验了才信"
+#: 置灰开关旁的重新探测入口文案。
+SWITCH_RESCAN_LABEL = "重新探测"
+
 _UNKNOWN_REASONS = {
     "freq_range": "设备未报告频率范围",
     "sample_rate_range": "设备未报告采样率范围",
@@ -121,6 +153,77 @@ def _unknown(key: str, reason: str = "") -> CapabilityField:
     why = reason or _UNKNOWN_REASONS.get(key, "能力未知")
     return CapabilityField(key=key, status=STATUS_UNKNOWN, value=None,
                            text=f"未知（{why}）", reason=why)
+
+
+@dataclass(frozen=True)
+class SwitchCapability:
+    """一个开关类能力（偏置/AGC/Offset/直采）。
+
+    ``enabled`` 是界面唯一可点的判据：**只有 ``probed`` 且标志为 True** 才
+    True；声明/未知一律 False（开关必须验了才信）。``can_rescan`` 为 True
+    时界面应在置灰控件旁挂「重新探测」入口（``SWITCH_RESCAN_LABEL``）。
+    """
+
+    key: str
+    label: str
+    state: str
+    supported: Optional[bool]
+    enabled: bool
+    text: str
+    tooltip: str
+    can_rescan: bool
+
+
+def _device_get(device: Any, name: str, default: Any = None) -> Any:
+    """设备既可能是枚举 dict，也可能是后端对象（带 supports_* 标志）。"""
+    if isinstance(device, dict):
+        return device.get(name, default)
+    return getattr(device, name, default)
+
+
+def switch_capability(device: Any, key: str,
+                      statuses: Optional[Dict[str, str]] = None
+                      ) -> SwitchCapability:
+    """归一一个开关类能力；只有探测证实支持才可点。"""
+    if key not in SWITCH_ATTRS:
+        raise KeyError(f"未知的开关类能力: {key}")
+    if statuses is None:
+        statuses = dict(_device_get(device, "capability_status", None) or {})
+    label = SWITCH_LABELS[key]
+    raw = _device_get(device, SWITCH_ATTRS[key])
+    flag = raw if isinstance(raw, bool) else None
+    status = statuses.get(key)
+
+    if status == STATUS_PROBED and flag is not None:
+        if flag:
+            return SwitchCapability(
+                key=key, label=label, state=status, supported=True, enabled=True,
+                text=f"{label}：探测支持", tooltip="", can_rescan=False)
+        return SwitchCapability(
+            key=key, label=label, state=status, supported=False, enabled=False,
+            text=f"{label}：探测不支持",
+            tooltip="设备探测结果：不支持该能力", can_rescan=False)
+
+    if status == STATUS_DECLARED:
+        # 声明不算数：外观可以显示「声明支持」，但控件必须置灰。
+        text = (f"{label}：声明支持，未验证" if flag is not False
+                else f"{label}：声明不支持，未验证")
+        return SwitchCapability(
+            key=key, label=label, state=status, supported=None, enabled=False,
+            text=text, tooltip=SWITCH_DECLARED_TOOLTIP, can_rescan=True)
+
+    # unknown：没有来源，或只有「有这个标志/方法」而没有锁存探测结果。
+    return SwitchCapability(
+        key=key, label=label, state=STATUS_UNKNOWN, supported=None,
+        enabled=False, text=f"{label}：未知",
+        tooltip=SWITCH_UNKNOWN_TOOLTIP, can_rescan=True)
+
+
+def build_switch_report(device: Any) -> Dict[str, SwitchCapability]:
+    """把设备 dict/后端对象归一成四个开关类能力（缺省=未知，绝不当成支持）。"""
+    statuses = dict(_device_get(device, "capability_status", None) or {})
+    return {key: switch_capability(device, key, statuses)
+            for key in SWITCH_KEYS}
 
 
 def _range_field(device: Dict[str, Any], key: str,
