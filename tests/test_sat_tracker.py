@@ -22,6 +22,19 @@ from mbdsdr_ai.sat_tracker import SatelliteTracker, BUILTIN_TLE_DATE
 from mbdsdr_ai.sat_passes import GroundStation
 
 
+@pytest.fixture(autouse=True)
+def _isolated_tle_disk_cache(tmp_path, monkeypatch):
+    """把 TLE 磁盘缓存隔离到空目录。
+
+    本文件钉的是「内置 TLE 基线」口径（失败/离线/身份核验），不能受开发机
+    上 ``~/.mbdsdr/tle_cache`` 里已刷新过的真实 TLE 影响——否则同一用例在
+    不同机器上读到不同历元。落盘/读回本身由
+    ``tests/test_sat_tracker_persistence.py`` 用独立目录验证。
+    """
+    from mbdsdr_ai import orbit
+    monkeypatch.setattr(orbit, "_CACHE_DIR", str(tmp_path / "tle_cache"))
+
+
 # 北京附近观测站（39.9N 116.4E，海拔 50m）。
 def _beijing_gs() -> GroundStation:
     return GroundStation(lat_deg=39.9, lon_deg=116.4, alt_m=50.0)

@@ -22,12 +22,15 @@ MBDSDR AI 内核 - 卫星闭环自动跟踪器
 TLE 来源（不造假）：
   1) 内置 6 颗常用气象/业余卫星的真实 TLE（Celestrak 抓取，见 BUILTIN_TLE_DATE）；
   2) 用户 .tle 文件；
-  3) "更新 TLE" 从 Celestrak active.txt 在线刷新内置目录。
+  3) "更新 TLE" 从 Celestrak active.txt 在线刷新内置目录；
+  4) 刷新成功即原子落盘到 ~/.mbdsdr/tle_cache/<NORAD>.tle，启动时读回
+     （只采用历元比内置新、且编号/名称核验一致的缓存）。
 下载失败时保留内置 TLE，绝不编造轨道根数。
 """
 from __future__ import annotations
 
 import os
+import time
 from datetime import datetime, timezone
 from typing import Optional, List, Dict, Sequence
 
@@ -158,6 +161,17 @@ def _bounded_requests_get(url: str, timeout_s: float, hard_deadline_s: float):
     return box["r"]
 
 
+def _tle_cache_dir() -> str:
+    """TLE 磁盘缓存目录的唯一来源：复用 orbit 的 ``_CACHE_DIR``。
+
+    与 :mod:`tle_fetch` 共用同一目录与文件格式（``<NORAD>.tle``，内容
+    ``name\\nline1\\nline2``）。每次调用时读取模块属性，测试 monkeypatch
+    ``orbit._CACHE_DIR`` 才会生效——本模块不再写第二份路径字面量。
+    """
+    from .orbit import _CACHE_DIR
+    return _CACHE_DIR
+
+
 def _engine_now_unix() -> Optional[float]:
     """全局 TimeEngine 当前 Unix 秒；不可用（扁平导入）时返回 None 走墙钟。"""
     try:
@@ -227,10 +241,15 @@ class SatelliteTracker:
         # 不许再写与 code 无关的固定句子。
         self._last_refresh_failure: Optional[Dict[str, object]] = None
         self._identity_conflicts: List[Dict[str, object]] = []
+        # 落盘失败留痕（写盘失败不静默，也不影响本次内存刷新结果）
+        self._last_persist_error: str = ""
 
         # 启动即加载内置真实 TLE（失败不崩：单条无效跳过）。
         for tle in _BUILTIN_TLES:
             self.load_tle(tle)
+        # 再读回磁盘缓存：上次刷新落盘的 TLE 若比内置新，覆盖对应条目。
+        # 否则每次重启都退回 2026-09-25 内置快照，「更新 TLE」等于白做。
+        self._load_disk_cache()
 
     # ------------------------------------------------------------------ TLE
     @property
@@ -290,6 +309,103 @@ class SatelliteTracker:
             if self.load_tle(block):
                 count += 1
         return count
+
+    # ------------------------------------------------------------ 磁盘缓存
+    @staticmethod
+    def _cache_file(cache_dir: str, norad_id: str) -> str:
+        return os.path.join(cache_dir, f"{norad_id}.tle")
+
+    def _persist_entry(self, entry: Dict[str, object], fetched_at: float) -> None:
+        """把一条已采用的 TLE 原子落盘（临时文件 + ``os.replace``）。
+
+        与 :class:`tle_fetch.TleFetcher` 的文件格式/目录保持一致，重启时
+        由 :meth:`_load_disk_cache` 读回。写盘失败不改内存结果，但必须记入
+        ``last_persist_error``——不静默。
+        """
+        nid = str(entry["norad_id"])
+        tmp_path = ""
+        try:
+            cache_dir = _tle_cache_dir()
+            os.makedirs(cache_dir, exist_ok=True)
+            path = self._cache_file(cache_dir, nid)
+            tmp_path = f"{path}.tmp.{os.getpid()}"
+            with open(tmp_path, "w", encoding="utf-8", newline="\n") as fh:
+                fh.write("\n".join([str(entry["name"]),
+                                    str(entry["line1"]), str(entry["line2"])]))
+            os.replace(tmp_path, path)
+            try:
+                os.utime(path, (fetched_at, fetched_at))
+            except OSError:
+                pass
+        except OSError as e:
+            self._last_persist_error = (
+                f"TLE 落盘失败（{type(e).__name__}: {e}）：{nid}.tle")
+            if tmp_path:
+                try:
+                    os.remove(tmp_path)
+                except OSError:
+                    pass
+
+    def _load_disk_cache(self) -> int:
+        """启动时读回磁盘缓存，返回采用条数。
+
+        规则（宁缺毋滥）：
+          - 只覆盖目录里已有条目，不凭空扩充卫星列表；
+          - 缓存编号必须与条目 NORAD 一致，名称必须通过身份核验；
+          - 只采用**历元比当前条目更新**的缓存，旧缓存不得把内置基线顶回更旧；
+          - 读/解析失败按无缓存处理，不编造、不崩。
+        """
+        try:
+            cache_dir = _tle_cache_dir()
+        except Exception:  # noqa: BLE001 - 拿不到缓存目录就按无缓存处理
+            return 0
+        if not os.path.isdir(cache_dir):
+            return 0
+        adopted = 0
+        newest_epoch = ""
+        for entry in self._catalog:
+            nid = str(entry["norad_id"])
+            path = self._cache_file(cache_dir, nid)
+            if not os.path.isfile(path):
+                continue
+            try:
+                with open(path, "r", encoding="utf-8", errors="replace") as fh:
+                    lines = [ln.strip() for ln in fh.read().splitlines() if ln.strip()]
+            except OSError:
+                continue
+            parsed = _parse_tle(lines)
+            if parsed is None:
+                continue
+            name, line1, line2 = parsed
+            if line2[2:7].strip() != nid:
+                continue                      # 文件内容与条目编号不符：不采用
+            ident = verify_identity(str(entry["name"]), name)
+            if ident["status"] != "verified":
+                continue                      # 身份不符的缓存可能被污染：不采用
+            new_epoch = freshness(line1).get("epoch_utc")
+            old_epoch = freshness(str(entry.get("line1", ""))).get("epoch_utc")
+            if not new_epoch or (old_epoch and str(new_epoch) <= str(old_epoch)):
+                continue
+            try:
+                fetched_at = os.path.getmtime(path)
+            except OSError:
+                fetched_at = None
+            entry["line1"] = line1
+            entry["line2"] = line2
+            entry["name"] = name
+            entry["source"] = "disk_cache"
+            entry["identity_status"] = "verified"
+            entry["identity_detail"] = ident["reason"]
+            entry["object_name"] = name
+            if fetched_at is not None:
+                entry["fetched_at"] = fetched_at
+            self._annotate_entry(entry)
+            adopted += 1
+            if str(new_epoch) > newest_epoch:
+                newest_epoch = str(new_epoch)
+        if newest_epoch:
+            self._tle_date = newest_epoch[:10]
+        return adopted
 
     def update_tle_from_celestrak(self, timeout: float = 5.0,
                                   hard_deadline_s: Optional[float] = None) -> int:
@@ -371,6 +487,8 @@ class SatelliteTracker:
         updated = 0
         self._last_refresh_error = ""
         self._last_refresh_failure = None
+        self._last_persist_error = ""
+        fetched_at = time.time()
         for entry in self._catalog:
             nid = str(entry["norad_id"])
             if nid not in fresh:
@@ -397,7 +515,10 @@ class SatelliteTracker:
             entry["identity_detail"] = ident["reason"]
             entry["object_name"] = name
             entry["source"] = "celestrak"
+            entry["fetched_at"] = fetched_at
             self._annotate_entry(entry)
+            # 采用即落盘：上次刷新结果必须能跨进程存活（重启不再退回内置快照）
+            self._persist_entry(entry, fetched_at)
             updated += 1
         if updated > 0:
             from datetime import datetime, timezone
@@ -411,6 +532,15 @@ class SatelliteTracker:
     def last_refresh_error(self) -> str:
         """最近一次联网刷新的失败原因（空串 = 成功或未尝试）。"""
         return self._last_refresh_error
+
+    @property
+    def last_persist_error(self) -> str:
+        """最近一次刷新落盘的失败原因（空串 = 未失败）。
+
+        落盘失败不影响本次内存中的刷新结果，但必须能被看到——否则
+        「重启又回旧 TLE」会被当成随机故障。
+        """
+        return self._last_persist_error
 
     @property
     def last_refresh_failure(self) -> Optional[Dict[str, object]]:

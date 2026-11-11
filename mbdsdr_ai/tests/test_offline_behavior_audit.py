@@ -93,8 +93,14 @@ def test_offline_tle_group_does_not_touch_network(tmp_path, monkeypatch, offline
 
 
 # ---------------------------------------------------------------- 卫星跟踪刷新
-def test_offline_sat_tracker_refresh_keeps_builtin_tle(monkeypatch, offline):
-    """B+A：不访问 celerytrak；沿用内置真实 TLE，并如实报「离线未刷新」。"""
+def test_offline_sat_tracker_refresh_keeps_builtin_tle(monkeypatch, offline, tmp_path):
+    """B+A：不访问 celerytrak；沿用内置真实 TLE，并如实报「离线未刷新」。
+
+    缓存目录隔离到 tmp：本用例钉的是「无缓存时的内置基线」，不能受开发机
+    真实 ``~/.mbdsdr/tle_cache`` 里已刷新的 TLE 影响。
+    """
+    from mbdsdr_ai import orbit
+    monkeypatch.setattr(orbit, "_CACHE_DIR", str(tmp_path / "tle_cache"))
     tr = SatelliteTracker(GroundStation(39.9, 116.4))
     monkeypatch.setitem(sys.modules, "requests", SimpleNamespace(get=_boom))
     assert tr.update_tle_from_celestrak(timeout=1.0) == 0
