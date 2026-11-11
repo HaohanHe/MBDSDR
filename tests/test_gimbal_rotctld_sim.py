@@ -101,9 +101,15 @@ class TestLatencyLag:
 # 主窗口：丢指令停机 + UI 永不出现度数
 # ---------------------------------------------------------------------------
 def _pos(az=123.0, el=30.0):
+    # 真实 current_position() 必带 policy（sat_tracker.py 的 current_position）；
+    # 替身漏掉该键会被执行层闸门判为「缺数据」并拒发调谐（见 d1fcba5b），
+    # 与云台指向/精度记账无关，故此处按真实契约补齐。
     return {"valid": True, "azimuth": az, "elevation": el,
             "doppler_hz": 0.0, "corrected_freq_hz": 137.1e6,
-            "range_km": 1050.0}
+            "range_km": 1050.0,
+            "policy": {"allow_tune": True, "allow_gimbal": True,
+                       "label": "星历新鲜", "reason": "TLE 年龄 0.3 天",
+                       "next_action": "可直接跟踪"}}
 
 
 def _prep_tracking(mw, monkeypatch, pos):

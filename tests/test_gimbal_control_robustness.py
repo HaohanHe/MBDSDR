@@ -131,9 +131,13 @@ def _clean_gimbal_state(mw):
 
 
 def _pos(az=123.0, el=30.0):
+    # 真实 current_position() 必带 policy；替身漏键会被执行层闸门判为缺数据。
     return {"valid": True, "azimuth": az, "elevation": el,
             "doppler_hz": 0.0, "corrected_freq_hz": 137.1e6,
-            "range_km": 1050.0}
+            "range_km": 1050.0,
+            "policy": {"allow_tune": True, "allow_gimbal": True,
+                       "label": "星历新鲜", "reason": "TLE 年龄 0.3 天",
+                       "next_action": "可直接跟踪"}}
 
 
 def _active_tracking(mw, monkeypatch, pos, gimbal):

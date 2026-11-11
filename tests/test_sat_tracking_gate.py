@@ -49,6 +49,11 @@ class _FakeLoopTracker:
     def __init__(self, _gs=None):
         self.selected_name = ""
         self.ground_station = None
+        self.policy = None
+
+    def tracking_policy_for(self, _name=None):
+        # 闸门读的就是这个对象（执行跟踪的那个 tracker），故档位挂在这里。
+        return self.policy
 
     def select_satellite(self, name):
         self.selected_name = name
@@ -60,6 +65,16 @@ class _FakeLoopTracker:
 
     def __getattr__(self, _name):
         return lambda *_a, **_k: None
+
+
+class _PolicySource:
+    """天空图侧 ``sat_tracker`` 的替身：只提供档位，用来验证闸门不读它。"""
+
+    def __init__(self, policy):
+        self.policy = policy
+
+    def tracking_policy_for(self, _name=None):
+        return self.policy
 
 
 def _policy(allowed: bool, confirm: bool) -> dict:
@@ -77,21 +92,17 @@ def gate(window, monkeypatch):
     """把档位来源与 LoopSatTracker 换成假的，其余走真实桌面逻辑。"""
     import main_window as mw
 
-    class _FakeSatTracker:
-        def __init__(self, policy):
-            self.policy = policy
-
-        def tracking_policy_for(self, _name=None):
-            return self.policy
-
     monkeypatch.setattr(mw, "LoopSatTracker", _FakeLoopTracker)
     monkeypatch.setattr(window, "_observer_lat", 43.9, raising=False)
     monkeypatch.setattr(window, "_observer_lon", 125.3, raising=False)
     window._loop_sat_tracker = None
 
     def _install(policy):
-        monkeypatch.setattr(window, "sat_tracker", _FakeSatTracker(policy),
-                            raising=False)
+        # 档位挂在**执行跟踪**的 tracker 上：桌面闸门只读它（见
+        # test_gate_reads_execution_tracker_not_sky_view）。
+        tracker = _FakeLoopTracker()
+        tracker.policy = policy
+        window._loop_sat_tracker = tracker
         return policy
 
     yield _install
@@ -136,6 +147,31 @@ def test_fresh_tle_starts_without_confirm(window, gate):
     assert _tracking_active(window), "新鲜星历不需要确认却没放行"
 
 
+def test_gate_reads_execution_tracker_not_sky_view(window, gate, monkeypatch):
+    """闸门必须问**执行跟踪的** ``_loop_sat_tracker``，不是天空图侧 ``sat_tracker``。
+
+    两者 TLE 目录各自独立：在线刷新（``_on_update_sat_tle``）只写
+    ``_loop_sat_tracker``，面板「TLE 日期」与每拍 ``current_position()["policy"]``
+    也来自它。闸门若读 ``sat_tracker``，会出现「刚刷新成功却被旧根数拒绝」；
+    反向则是「天空图侧新鲜放行、执行侧 dead 照样调谐」。这里把两侧档位
+    摆成相反，任一侧读错都会红。
+    """
+    gate(_policy(allowed=False, confirm=False))          # 执行侧 dead
+    monkeypatch.setattr(window, "sat_tracker",
+                        _PolicySource(_policy(allowed=True, confirm=False)),
+                        raising=False)
+    window._start_satellite_tracking(_SAT, 137.62e6)
+    assert not _tracking_active(window), "执行侧 dead 却因天空图侧新鲜放行"
+    assert "不跟踪" in window.statusBar().currentMessage()
+
+    gate(_policy(allowed=True, confirm=False))           # 执行侧 fresh
+    monkeypatch.setattr(window, "sat_tracker",
+                        _PolicySource(_policy(allowed=False, confirm=False)),
+                        raising=False)
+    window._start_satellite_tracking(_SAT, 137.62e6)
+    assert _tracking_active(window), "执行侧新鲜却被天空图侧旧根数挡住"
+
+
 def test_missing_policy_source_fails_closed(window, monkeypatch):
     """tracker 取不到数（字段异常）必须按禁止处理，不许放行。"""
     import main_window as mw
@@ -143,13 +179,12 @@ def test_missing_policy_source_fails_closed(window, monkeypatch):
     monkeypatch.setattr(mw, "LoopSatTracker", _FakeLoopTracker)
     monkeypatch.setattr(window, "_observer_lat", 43.9, raising=False)
     monkeypatch.setattr(window, "_observer_lon", 125.3, raising=False)
-    window._loop_sat_tracker = None
 
     class _Broken:
         def tracking_policy_for(self, _name=None):
             raise ValueError("catalog 条目缺字段")
 
-    monkeypatch.setattr(window, "sat_tracker", _Broken(), raising=False)
+    window._loop_sat_tracker = _Broken()
     window._start_satellite_tracking(_SAT, 137.62e6)
     assert not _tracking_active(window), "取数失败却放行：缺数据被当成可信"
     assert "不跟踪" in window.statusBar().currentMessage()

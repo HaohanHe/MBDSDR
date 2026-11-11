@@ -145,7 +145,13 @@ def _arm_gimbal_tick(mw, monkeypatch, *, activate=None):
         current_position=lambda: {"valid": True, "azimuth": 123.0,
                                   "elevation": 45.0, "doppler_hz": 0.0,
                                   "corrected_freq_hz": 145_800_000.0,
-                                  "range_km": 1000.0},
+                                  "range_km": 1000.0,
+                                  # 真实 current_position() 必带 policy；漏键会被闸门拒发调谐
+                                  "policy": {"allow_tune": True,
+                                             "allow_gimbal": True,
+                                             "label": "星历新鲜",
+                                             "reason": "TLE 年龄 0.3 天",
+                                             "next_action": "可直接跟踪"}},
         downlink_freq_hz=lambda: 145_800_000.0,
         selected_name="ISS")
     mw._gimbal_follow = True

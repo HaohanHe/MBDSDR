@@ -12430,12 +12430,15 @@ class MainWindow(QMainWindow):
         """取某颗星的操作许可（P0-01 桌面侧唯一入口）。
 
         档位判定只在 ``mbdsdr_ai.tle_integrity.tracking_policy()`` 一处，
-        桌面不再自己比较 ``tle_tier``/``age_days``。取不到数（无 tracker、
-        目录里没这颗星、条目字段异常）一律按 ``no_data`` 全禁止——
-        缺数据不冒充可信。
+        桌面不再自己比较 ``tle_tier``/``age_days``。取的是**执行跟踪的那个
+        tracker**（``_loop_sat_tracker``）：TLE 在线刷新写它、面板「TLE 日期」
+        读它、每拍 ``current_position()["policy"]`` 也来自它；若改读天空图侧
+        ``sat_tracker``，用户刚刷新的 TLE 不会体现在闸门上（刷新成功却仍被
+        判成 dead 而拒跟踪）。取不到数（无 tracker、目录里没这颗星、条目
+        字段异常）一律按 ``no_data`` 全禁止——缺数据不冒充可信。
         """
         from mbdsdr_ai.tle_integrity import tracking_policy
-        tracker = getattr(self, "sat_tracker", None)
+        tracker = getattr(self, "_loop_sat_tracker", None)
         if tracker is None or not hasattr(tracker, "tracking_policy_for"):
             return tracking_policy(None, "no_data")
         try:
@@ -12490,6 +12493,18 @@ class MainWindow(QMainWindow):
                 return
             self._stop_satellite_tracking()
 
+        # 先拿到**执行跟踪的那个 tracker**，再问闸门：档位必须与接下来每拍
+        # current_position()["policy"]、TLE 刷新目标、面板日期行同源。
+        from mbdsdr_ai.sat_passes import GroundStation
+        gs = GroundStation(lat_deg=self._observer_lat,
+                           lon_deg=self._observer_lon)
+        if self._loop_sat_tracker is None:
+            self._loop_sat_tracker = LoopSatTracker(gs)
+        else:
+            # 切换观测站坐标后必须在 select_satellite 之前注入，
+            # 否则 _build_satellite 仍用旧 Topos。
+            self._loop_sat_tracker.ground_station = gs
+
         # 星历闸门（P0-01）：能不能开始跟踪、要不要先确认，只由 tracking_policy_for
         # 一处说了算。过期/身份不符/无数据都走同一套禁止策略——不在这里另写一套
         # age_days/tle_tier 比较，否则两处档位迟早对不上。
@@ -12507,16 +12522,6 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage(
                 "已取消卫星跟踪（星历精度需确认后再开始）", MSG_NORMAL)
             return
-
-        from mbdsdr_ai.sat_passes import GroundStation
-        gs = GroundStation(lat_deg=self._observer_lat,
-                           lon_deg=self._observer_lon)
-        if self._loop_sat_tracker is None:
-            self._loop_sat_tracker = LoopSatTracker(gs)
-        else:
-            # 切换观测站坐标后必须在 select_satellite 之前注入，
-            # 否则 _build_satellite 仍用旧 Topos。
-            self._loop_sat_tracker.ground_station = gs
 
         if not self._loop_sat_tracker.select_satellite(sat_name):
             self.statusBar().showMessage(f"无法选中卫星 {sat_name}", MSG_NORMAL)

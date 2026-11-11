@@ -172,6 +172,10 @@ class TestMainWindowGimbalLoop:
                 "valid": True, "elevation": 30.0, "azimuth": 123.0,
                 "doppler_hz": 3500.0, "corrected_freq_hz": 137.1e6,
                 "range_km": 1050.0,
+                # 与真实 current_position() 同契约，否则执行层闸门拒发调谐
+                "policy": {"allow_tune": True, "allow_gimbal": True,
+                           "label": "星历新鲜", "reason": "TLE 年龄 0.3 天",
+                           "next_action": "可直接跟踪"},
             },
             # 多普勒补偿关闭时主循环回退到标称下行（monkeypatch 纪律：
             # 替身必须复刻真 tracker 的这一接口，97683ab 之后主循环会调）。

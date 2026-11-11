@@ -752,6 +752,14 @@ def test_sat_track_start_without_backend_warns(window, monkeypatch):
         def set_downlink_freq(self, hz):
             pass
 
+        def tracking_policy_for(self, _name=None):
+            # 与真实 SatelliteTracker 同契约：能开始跟踪的前提是有可用星历策略。
+            # 本用例考的是「无设备时的提示」，不是星历闸门，故给新鲜档。
+            return {"level": "fresh", "allow_tune": True, "allow_gimbal": True,
+                    "require_confirm": False, "command_allowed": True,
+                    "label": "星历新鲜", "reason": "TLE 年龄 0.3 天",
+                    "next_action": "可直接跟踪"}
+
     class _Timer:
         def start(self):
             pass
