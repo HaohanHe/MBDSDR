@@ -237,12 +237,12 @@ def test_dead_band_note_has_one_source_across_panel_tooltip_sdr(
     """
     from mbdsdr_ai.new_spacetime_timeline import SatellitePass
     from desktop.new_spacetime_panel import NewSpacetimePanel
-    from mbdsdr_ai.tle_integrity import accuracy, band_note
+    from mbdsdr_ai.tle_integrity import accuracy, band_note, tracking_policy
 
     expected = _dead_note()
     assert expected == band_note("dead", 365.0)
 
-    # 1) 面板提示区：只贴数据层原文
+    # 1) 面板提示区：只贴数据层原文（档位判定读 policy，不再比较 tle_tier）
     panel = NewSpacetimePanel()
     try:
         p = SatellitePass(
@@ -250,7 +250,8 @@ def test_dead_band_note_has_one_source_across_panel_tooltip_sdr(
             max_time=None, max_elevation=0.0, max_azimuth=0.0,
             set_time=None, set_azimuth=0.0, duration_sec=0.0,
             tle_age_days=365.0, tle_tier="dead", tle_tier_label="失效",
-            accuracy_risk="unusable", accuracy_note=expected)
+            accuracy_risk="unusable", accuracy_note=expected,
+            policy=tracking_policy({"tier": "dead", "age_days": 365.0}))
         lines = panel._pass_warning_lines([p], {})
         assert lines and lines[-1].endswith(expected), lines
     finally:
