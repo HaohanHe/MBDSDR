@@ -796,6 +796,60 @@ def _restore_app_style_at_module_boundary():
     _app_restore_style(app, _APP_STYLE_BASELINE)
 
 
+@pytest.fixture(scope="session")
+def app_style_baseline():
+    """会话 app 样式基线的可比较快照，供护栏用例直接断言状态。
+
+    像素尺寸是果，字体/QSS 才是因：``134 px`` 能落在 ``110..135`` 容差里
+    蒙过去，状态断言蒙不过去。
+    """
+    _capture_app_style_baseline()
+    font = _APP_STYLE_BASELINE["font"]
+    if font is None:
+        pytest.skip("会话内没有 QApplication，app 样式基线不存在")
+    qss = _APP_STYLE_BASELINE["qss"]
+    return {
+        "font_family": font.family(),
+        "font_point_size": font.pointSizeF(),
+        "qss_len": len(qss),
+        "qss_head": qss[:64],
+        "qss_tail": qss[-64:],
+    }
+
+
+def _loaded_app_singletons():
+    """只认已经 import 过的单例模块：还原不能把 Qt 拽进纯逻辑用例。"""
+    tm_mod = sys.modules.get("touch_manager")
+    ls_mod = sys.modules.get("layout_store")
+    tm = getattr(getattr(tm_mod, "TouchManager", None), "_instance", None)
+    return tm, ls_mod
+
+
+@pytest.fixture(autouse=True)
+def _restore_app_singletons():
+    """每个用例前后保存/恢复两个应用级单例的可变状态。
+
+    * ``touch_manager()._mode_override``：触屏模式是进程级开关，某个用例把
+      它强制成 True/False 后不还，后面的用例会凭空进/出触屏模式；
+    * ``layout_store()`` 的 ``_default_store``：用例替换单例（隔离目录）后
+      忘记还原，后面的模块就写进别人的临时布局库。
+
+    两个模块若在本用例里才首次 import，teardown 把状态还给初始值
+    （override=None / store=None）——此时那个对象本来就是本用例造出来的。
+    直接赋值而不走 ``set_override``：还原不该再发 ``touch_mode_changed``
+    去惊动已经回收的控件。
+    """
+    tm, ls_mod = _loaded_app_singletons()
+    tm_override = tm._mode_override if tm is not None else None
+    store = getattr(ls_mod, "_default_store", None) if ls_mod is not None else None
+    yield
+    tm2, ls_mod2 = _loaded_app_singletons()
+    if tm2 is not None:
+        tm2._mode_override = tm_override
+    if ls_mod2 is not None:
+        ls_mod2._default_store = store
+
+
 @pytest.fixture(autouse=True)
 def _restore_time_engine():
     """每个用例结束把全局时间引擎还给「此刻 / 1×」。
