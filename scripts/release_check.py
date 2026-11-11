@@ -128,8 +128,8 @@ DEFAULT_WORK = os.path.join(TMP_ROOT, "pyi-build12")
 DEFAULT_DIAG_DIST = os.path.join(TMP_ROOT, "pyi-dist12-noarchive")
 DEFAULT_DIAG_WORK = os.path.join(TMP_ROOT, "pyi-build12-noarchive")
 
-ALL_STEPS = ("docs", "build", "smoke", "subtree", "single", "optional", "qt",
-             "narrow", "overlap", "log")
+ALL_STEPS = ("docs", "action_dup", "build", "smoke", "subtree", "single",
+             "optional", "qt", "narrow", "overlap", "log")
 
 #: 窄屏验收：两套指纹各自独立判（任一越线整步 FAIL），不换算、不互相代表。
 #: 两套**都跑 windows 平台插件**（要有真字体；offscreen 下 QFontDatabase
@@ -179,6 +179,11 @@ FAIL_HINTS = {
     "docs": "跑 `python scripts/verify_claims.py --check-lines` 看「错引 / 需重定位」"
             "逐条明细；按 docs/evidence-standard.md §7.7 重定位并取该行 blame 作基准，"
             "不许把基准写成 HEAD，也不许为了过闸而扩大白名单",
+    "action_dup": "跑 `python scripts/check_action_duplication.py --gate` 看未豁免项："
+                  "真重复要把多个 QAction 实例并成一个，同名不同标识要定单一归属；"
+                  "只在「他线正在改、本线这轮动不了」时才挂 "
+                  "docs/action-duplication-waivers.md，且必须带 owner + 到期 + 原因，"
+                  "到期自动 FAIL，不许加整体放水开关",
     "build": "查 PyInstaller 输出与 --workpath 下的 warn-MBDSDR.txt；"
              "对照 desktop/MBDSDR.spec 的 datas/hiddenimports",
     "smoke": "看启动日志 [smoke] 行的失败模块名；"
@@ -875,6 +880,32 @@ def main() -> int:
                 (f"{bad} {bad_w}".strip())
         return True, f"{dist}；{step4}"
 
+    def do_action_dup() -> tuple[bool, str]:
+        """命令/QAction 重复注册闸门：与 docs 同级，真重复或同名不同标识即 FAIL。
+
+        ``MBDSDR_ACTION_DUP_PROBE=1`` 只在反证时用：往真实菜单里注入两个
+        同 id 实例，让闸门必红——它只会让这一步更严，不能把红变绿。
+        """
+        script = os.path.join(ROOT, "scripts", "check_action_duplication.py")
+        cmd = [sys.executable, script, "--gate"]
+        probe = os.environ.get("MBDSDR_ACTION_DUP_PROBE") == "1"
+        if probe:
+            cmd.append("--probe-duplicate")
+        proc = subprocess.run(cmd, cwd=ROOT, capture_output=True,
+                              text=True, timeout=600)
+        out = (proc.stdout or "") + "\n" + (proc.stderr or "")
+        lines = [ln.strip() for ln in out.splitlines() if ln.strip()]
+        counts = [ln for ln in lines if ln.startswith("[INFO] 正常配对")
+                  or ln.startswith("[INFO] objectName")]
+        detail = "；".join(counts) if counts else "（未产出计数行）"
+        if probe:
+            detail = "反证注入探针；" + detail
+        if proc.returncode != 0:
+            bad = [ln for ln in lines if ln.startswith("[FAIL]")]
+            return False, detail + "；" + (" / ".join(bad) if bad
+                                          else f"退出码 {proc.returncode}")
+        return True, detail
+
     def do_build() -> tuple[bool, str]:
         exe = _build(args.dist_dir, args.work_dir, noarchive=False)
         count, size, _files = _dist_stats(args.dist_dir)
@@ -1003,6 +1034,7 @@ def main() -> int:
 
     steps = (
         ("docs", do_docs),
+        ("action_dup", do_action_dup),
         ("build", do_build),
         ("smoke", do_smoke),
         ("subtree", do_subtree),
