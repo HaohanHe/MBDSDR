@@ -4399,10 +4399,10 @@ class MainWindow(QMainWindow):
         # 内核常驻：无 API Key 时也把工具注册表 / Hooks / 编排器装载起来，
         # 否则能力矩阵只能对着一个 None 说"没有"（实测离线构造可得 496 个
         # 真实工具）。模型只是 Agent 的一个部件，不是 Agent 本身。
-        # 但这套装载要在内存里造几百个工具对象，排在构造期就是直接顶后首帧
-        # （P0-15）。挪到事件循环第一拍做：窗口先出来，能力矩阵先显示空态，
-        # 下面那个 1500 ms 的延迟刷新会把真实工具域补上。
-        QTimer.singleShot(0, self._ensure_agent_kernel)
+        # 但这套装载要在内存里造几百个工具对象，构造期/事件循环首拍做都会
+        # 直接顶后主窗口首帧（P0-15）。改为能力矩阵**首次打开**时才建（见
+        # `_show_capability_drawer`）：默认收起、默认隐藏的元信息面板，
+        # 不该为它推迟启动。
         try:
             from capability_drawer import CapabilityDrawer
         except ImportError:
@@ -4433,9 +4433,10 @@ class MainWindow(QMainWindow):
         panel.hide()
         self._cap_panel = panel
         self._cap_body = body
-        # init_agent 可能晚于本调用（无 API Key 也会装载内核），
-        # 延迟刷一次，保证摆出来的是真实工具域而不是启动瞬间的空态。
-        QTimer.singleShot(1500, self._refresh_capability_drawer)
+        self._cap_kernel_ready = False   # 首次打开能力矩阵时才装载内核
+        # 内核与刷新都推迟到首次打开：这里不再排 1500 ms 的延迟刷新，
+        # 否则启动后仍会白装一次内核又刷一遍空态。
+
 
     def _ensure_agent_kernel(self) -> None:
         """确保 AI 内核在进程里真实存在（不依赖是否配置了 API Key）。"""
@@ -4463,6 +4464,11 @@ class MainWindow(QMainWindow):
         panel = getattr(self, "_cap_panel", None)
         if panel is None:
             return
+        # 首次打开才装载 Agent 内核（P0-15）：构造期与首拍都不碰这堆工具
+        # 对象；后续打开直接复用已有内核，不重复装载。
+        if not getattr(self, "_cap_kernel_ready", False):
+            self._ensure_agent_kernel()
+            self._cap_kernel_ready = True
         self._refresh_capability_drawer()
         panel.show()
         panel.raise_()
