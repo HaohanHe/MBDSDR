@@ -524,20 +524,6 @@ class DesktopSettings:
                 logging.getLogger(__name__).warning(
                     "设置变更订阅者异常 key=%s: %s", key, exc)
 
-    def reset_all(self) -> None:
-        """恢复全部默认值（一次落盘）。"""
-        changed = [k for k in DEFAULTS
-                   if self._data.get(k) != DEFAULTS[k]]
-        self._data = dict(DEFAULTS)
-        self._dirty_keys = set(DEFAULTS)
-        self._dirty = True
-        try:
-            self._timer.start()
-        except RuntimeError:
-            self._write_to_disk()
-        for k in changed:
-            self._emit_change(k, DEFAULTS[k])
-
     def values(self) -> Dict[str, Any]:
         """返回当前全部设置的浅拷贝（供导出/审计）。"""
         return dict(self._data)

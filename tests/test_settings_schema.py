@@ -739,17 +739,25 @@ def test_new_keys_persist_roundtrip(tmp_path):
     assert again.get("sky_pressure_hpa") == 1002.5
 
 
-def test_reset_single_and_all(env):
+def test_reset_single_key_only(env):
     ds, host, panel, _ = env
     ds.set("theme", "dark")
     ds.set("fft_size", 1024)
+    ds.set("frequency_hz", 145_500_000.0)
     # 出厂默认主题已是 dark_car，断言追权威源 SCHEMA 而非写死旧浅色值。
     assert ds.reset("theme") == SCHEMA["theme"].default
     assert ds.get("theme") == SCHEMA["theme"].default
     assert ds.get("fft_size") == 1024      # 单项只动一项
 
-    ds.reset_all()
-    assert ds.values() == settings_mod.DEFAULTS
+    # P0-07 反证：settings 层不得再暴露「一次改回全部 DEFAULTS」的入口。
+    # 旧 ``reset_all()`` 会把频点/音量/解调/带宽等运行态键静默改回出厂值——
+    # 界面不变、下次启动听到的东西却变了。恢复全部默认只允许走
+    # SettingsPanel 的可见项白名单（RESETTABLE_SETTING_KEYS）。
+    with pytest.raises(AttributeError):
+        ds.reset_all()
+
+    assert ds.get("frequency_hz") == 145_500_000.0
+    assert ds.get("fft_size") == 1024
 
 
 def test_panel_reset_all_restores_behavior(env):
