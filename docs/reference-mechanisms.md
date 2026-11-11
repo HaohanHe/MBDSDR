@@ -374,7 +374,7 @@ P1–P15 覆盖刻度、dB 量程、峰值、hold、调色板、缩放锚定、�
 | D3 预暖机 + 纠正位数 | `goestools/src/decoder/packetizer.cc:11-20`、`:129-136` | `lrpt_fec.py:151-190` 从同步字起整帧；无纠正位统计 | **明确不做**：prelude 只影响首帧边缘；纠正位数可由 `rs_errors` 推导，无 UI 消费方（推翻 §15 第 5 条） |
 | D4 VCID 路由/黑名单/填充包 | `xrit-rx/src/demuxer.py:48-111` | 未做：`lrpt_pipeline.py:48-165` 单 VCID 端到端 | **明确不做**：产品只做 LRPT 单虚拟信道，多 VCID 无需求 |
 | D5 全文件同步对齐 | `noaa-apt/src/decode.rs:106-118`（≥5 帧） | 实现位置（替代）：`mbdsdr_ai/noaa_apt_lite.py:23-51` 逐行相关 | **明确不做**（两遍扫描）：整文件两遍不适合实时流；逐行已有单测 |
-| D6 AGC→Costas→Gardner 闭环 | `meteor_demod/demod.c`（8-12）、（36-40） | `560f6564` — `mbdsdr_ai/lrpt_pipeline.py:130` — `_estimate_cfo_4thpower`（基准 `7f91c6d3`）；实现位置：`mbdsdr_ai/lrpt_pipeline.py:128-133` 前馈 CFO + 符号恢复 | **改良后做**（已落地）：闭环 Gardner 已实验证伪（COORDINATION LRPT 队列 #9） |
+| D6 AGC→Costas→Gardner 闭环 | `meteor_demod/demod.c`（8-12）、（36-40） | `560f6564` — `mbdsdr_ai/lrpt_pipeline.py:142` — `_estimate_cfo_4thpower`（基准 `560f6564`）；实现位置：`mbdsdr_ai/lrpt_pipeline.py:140-145` 前馈 CFO + 符号恢复 | **改良后做**（已落地）：闭环 Gardner 已实验证伪（COORDINATION LRPT 队列 #9） |
 | D7 FEC API（RS(204,188)） | `onair/.../fec_proto.h:13-20` | 实现位置：`mbdsdr_ai/lrpt_fec.py:246-350`；另做 CCSDS 4 路解交织 | **照做**（保持） |
 | D8 分级解码器 + 失败计数 | `rtl_433/include/r_device.h:73`、`:85-87`；`r_api.c:443-454`、`:867-874` | 实现位置（替代）：`mbdsdr_ai/decoder_registry.py:119` 单车道选择 | **明确不做**（多协议竞争）：盲试会误报，违反「不伪造解码结果」；失败计数可低优先再借 |
 | D9 GPL 上游作 KAT 生成器 | `dvbs2_bch_external/upstream_rx/`、`dvbs2_ldpc_external/upstream/` | 独立实现 `mbdsdr_ai/dvbs2_bch.py`、`dvbs2_ldpc.py`；金样 `tests/golden/` | **明确不做**（复制代码）：只对拍向量，见 §17.3 |

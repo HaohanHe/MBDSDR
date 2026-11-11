@@ -3,6 +3,8 @@
 """发布前自检（可重复执行）：构建 → 启动冒烟 → 三类缺件 → 窄屏下限 → 日志落点。
 
 设计口径：
+* 第一步就是 ``docs``：跑 ``scripts/verify_claims.py --check-lines --strict-lines``，
+  文档行号断言不通过则整个发布检查 FAIL——闸门接在这里，「忘了跑」变成不可能；
 * 所有产物（build/dist/config/日志 diff）只落 D 盘；落点若在 C 盘直接判 FAIL；
 * 缺件场景不是「看有没有弹窗」，而是**弹窗标题 + 正文逐字全匹配**
   （整棵子树缺失 / 只缺单文件 / 可选件缺失 三类各一份期望原文）；
@@ -126,7 +128,7 @@ DEFAULT_WORK = os.path.join(TMP_ROOT, "pyi-build12")
 DEFAULT_DIAG_DIST = os.path.join(TMP_ROOT, "pyi-dist12-noarchive")
 DEFAULT_DIAG_WORK = os.path.join(TMP_ROOT, "pyi-build12-noarchive")
 
-ALL_STEPS = ("build", "smoke", "subtree", "single", "optional", "qt",
+ALL_STEPS = ("docs", "build", "smoke", "subtree", "single", "optional", "qt",
              "narrow", "overlap", "log")
 
 #: 窄屏验收：两套指纹各自独立判（任一越线整步 FAIL），不换算、不互相代表。
@@ -174,6 +176,9 @@ SIZE_LIMITS = {
 
 #: FAIL 后下一步该查什么（按步骤名一一对应，失败即停时打印）
 FAIL_HINTS = {
+    "docs": "跑 `python scripts/verify_claims.py --check-lines` 看「错引 / 需重定位」"
+            "逐条明细；按 docs/evidence-standard.md §7.7 重定位并取该行 blame 作基准，"
+            "不许把基准写成 HEAD，也不许为了过闸而扩大白名单",
     "build": "查 PyInstaller 输出与 --workpath 下的 warn-MBDSDR.txt；"
              "对照 desktop/MBDSDR.spec 的 datas/hiddenimports",
     "smoke": "看启动日志 [smoke] 行的失败模块名；"
@@ -850,6 +855,26 @@ def main() -> int:
         print(f"[{status}] {name}  {elapsed:.1f}s  {detail}".replace(
             "\n", "\n    "), flush=True)
 
+    def do_docs() -> tuple[bool, str]:
+        """文档行号断言闸门：把它接进发布检查，别指望有人记得单独跑。"""
+        script = os.path.join(ROOT, "scripts", "verify_claims.py")
+        proc = subprocess.run(
+            [sys.executable, script, "--check-lines", "--strict-lines"],
+            cwd=ROOT, capture_output=True, text=True, timeout=900)
+        out = (proc.stdout or "") + "\n" + (proc.stderr or "")
+        lines = out.splitlines()
+        dist = next((ln.strip() for ln in lines
+                     if "含字面量" in ln and "合计" in ln), "（未产出分布行）")
+        step4 = next((ln.strip() for ln in lines if ln.startswith("第 4 步")), "")
+        if proc.returncode != 0:
+            bad = next((ln.strip() for ln in lines
+                        if ln.strip().startswith("结果：")), "（未产出明细行）")
+            bad_w = next((ln.strip() for ln in lines
+                          if "白名单不合规" in ln), "")
+            return False, f"退出码 {proc.returncode}；{dist}；{step4}；" + \
+                (f"{bad} {bad_w}".strip())
+        return True, f"{dist}；{step4}"
+
     def do_build() -> tuple[bool, str]:
         exe = _build(args.dist_dir, args.work_dir, noarchive=False)
         count, size, _files = _dist_stats(args.dist_dir)
@@ -977,6 +1002,7 @@ def main() -> int:
                       f"（*.log/startup，mtime 过滤）；日志={log_path}")
 
     steps = (
+        ("docs", do_docs),
         ("build", do_build),
         ("smoke", do_smoke),
         ("subtree", do_subtree),
