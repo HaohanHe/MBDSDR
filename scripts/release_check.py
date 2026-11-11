@@ -876,7 +876,8 @@ def main() -> int:
         lines = out.splitlines()
         dist = next((ln.strip() for ln in lines
                      if "含字面量" in ln and "合计" in ln), "（未产出分布行）")
-        step4 = next((ln.strip() for ln in lines if ln.startswith("第 4 步")), "")
+        step4 = next((ln.strip() for ln in lines
+                      if ln.strip().startswith("第 4 步")), "")
         problems: list[str] = []
         if proc.returncode != 0:
             bad = next((ln.strip() for ln in lines
@@ -895,7 +896,7 @@ def main() -> int:
             problems.append(f"渲染点 {len(render)} 处：" + "；".join(render[:3]))
         if problems:
             return False, "；".join(problems)
-        return True, f"{dist}；{step4}；渲染点 0 处"
+        return True, "；".join(p for p in (dist, step4, "渲染点 0 处") if p)
 
     def do_action_dup() -> tuple[bool, str]:
         """命令/QAction 重复注册闸门：与 docs 同级，真重复或同名不同标识即 FAIL。
