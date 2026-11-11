@@ -62,3 +62,14 @@ def test_settings_start_failure_gives_port_action():
         "Web 服务", OSError(errno.EACCES, "Permission denied"), 8080)
     assert "8080" in other and "检查端口" in other
     assert "[Errno" not in other
+
+
+def test_help_planetarium_points_at_real_entry():
+    """帮助不能再写不存在的「顶栏」按钮，必须写左栏页签 / 视图菜单。"""
+    import help_panel as hp
+
+    entry = next(t for t in hp.ONBOARDING_STEPS if t[0] == "view.planetarium")
+    text = entry[2]
+    assert "顶栏" not in text
+    assert "星象仪模式" in text
+    assert "视图" in text
