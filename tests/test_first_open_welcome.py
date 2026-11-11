@@ -39,13 +39,22 @@ def win(isolated_profile, qapp):
     from main_window import MainWindow
     w = MainWindow()
     w.setAttribute(Qt.WA_DontShowOnScreen, True)
-    w.resize(1280, 800)
     w.show()
     for _ in range(20):
         qapp.processEvents()
-    # 横幅挂在频谱页左栏：只有该页是当前页，`QLabel` 才会被布局成真实宽度。
-    # 否则 `width()` 停在 Qt 默认的 640，`_apply_responsive_chrome` 拿 626 的
-    # 假预算去算省略，测试就永远绿——假绿比红坏得多（2026-11-12 用户口径）。
+    # 尺寸钉死（2026-11-12）：showEvent 的 _fit_window_to_screen 会按主屏
+    # 把窗口收口（offscreen 800×800 → 860×736），show 之前 resize(1280,800)
+    # 落不了地；左栏预算又取真实注册表的 three_column_sizes（isolated_profile
+    # 不隔 QSettings）。不钉死的话，同一条文案会随开发者上次拖动、屏幕尺寸
+    # 红绿翻转。这里把 860×736 与 [260,240,352] 显式落地后再量横幅。
+    w.resize(860, 736)
+    w._main_splitter.setSizes([260, 240, 352])
+    for _ in range(20):
+        qapp.processEvents()
+    assert (w.width(), w.height()) == (860, 736)
+    assert w._main_splitter.sizes() == [260, 240, 352]
+    # 首启无设备时 _show_no_rtl_hint 会把「频谱」页带到前台；这里保持同一
+    # 现场（横幅挂在「频谱」页左栏，必须在当前页才量得到真实宽度）。
     w.left_tab.setCurrentWidget(w._spectrum_page)
     for _ in range(12):
         qapp.processEvents()
@@ -101,17 +110,33 @@ def test_night_time_is_real_solar_altitude_not_fixed_clock():
 # 2. 首屏：短句说人话，排查细节没丢
 # ---------------------------------------------------------------------------
 def test_first_open_hint_is_short_and_detail_is_kept(win):
-    from main_window import _NO_SDR_BRIEF, _NO_SDR_HINT
+    from main_window import (_NO_SDR_BRIEF, _NO_SDR_BRIEF_WIDE,
+                             _NO_SDR_HINT)
 
     win._show_no_rtl_hint(_NO_SDR_HINT, code="device_not_found",
-                          brief=_NO_SDR_BRIEF)
+                          brief=_NO_SDR_BRIEF,
+                          brief_wide=_NO_SDR_BRIEF_WIDE)
     hint = win._no_device_hint
     assert hint is not None
     assert "USB 没插好" not in hint.text(), "首屏不该糊一整条排查报错"
     assert "Zadig" not in hint.text()
     assert "星象仪" in hint.text()
+    # 860×736 下必须是完整窄形态：省略号一个都不许有（不许接受截断）。
+    assert hint.text() == _NO_SDR_BRIEF, f"860 下横幅被改写: {hint.text()!r}"
+    assert "…" not in hint.text()
     assert "Zadig" in hint.toolTip(), "详细排查要留在该去的地方，不是删掉"
     assert win.status_conn.text() == "未连接"
+
+    # 1280 宽必须回到完整长句形态（不是把窄形态放大用）。
+    win.resize(1280, 736)
+    _pump(20)
+    assert hint.text() == _NO_SDR_BRIEF_WIDE, (
+        f"1280 下应是长句形态，实际: {hint.text()!r}")
+    assert "…" not in hint.text()
+    # 还原本文件其余用例依赖的钉死尺寸。
+    win.resize(860, 736)
+    win._main_splitter.setSizes([260, 240, 352])
+    _pump(20)
 
 
 # ---------------------------------------------------------------------------

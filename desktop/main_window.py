@@ -288,7 +288,16 @@ _NO_SDR_HINT = (
 
 #: 首屏只说人话：横幅/状态栏用短句，上面那一长串排查细节留在 tooltip
 #: 与状态栏「查看怎么办」里。第一次打开没插设备是常态，不该被报错糊脸。
-_NO_SDR_BRIEF = "还没接 SDR · 插上设备点「连接」，或先逛星象仪"
+#:
+#: 两套形态（2026-11-12 实测，offscreen 9pt 回退度量，文本不含字面补白；
+#: QSS 的 8px padding 已由 `_apply_responsive_chrome` 的 -14 预算扣掉）：
+#:   窄形态 216px：860×736 下左栏最小宽 260（left_tab.minimumWidth），
+#:                横幅宽 258、预算 244 → 余 28px；900 宽预算 265 仍用它。
+#:   宽形态 312px：1280 宽预算 462 → 整句显示。
+#: 断点按**实际预算**选：宽形态放得下才用宽形态，否则回落窄形态；
+#: 窄形态在任何允许的窗口宽下都放得下（预算地板 244 > 216），没有空档。
+_NO_SDR_BRIEF = "还没接 SDR · 点连接或看星象仪"
+_NO_SDR_BRIEF_WIDE = "还没接 SDR · 插上设备点「连接」，或先逛星象仪"
 
 #: 星象仪底部频谱条的未连接提示：全屏窗里没有工具栏，必须先告诉人怎么回去。
 _PLANETARIUM_OFFLINE_HINT = "按 Esc 回主界面，点「连接」选设备"
@@ -1910,12 +1919,17 @@ class MainWindow(QMainWindow):
         self._no_device_hint.setMinimumWidth(0)
         # 完整排查细节：横幅只显示短句，这份留在 tooltip，不删也不糊脸。
         self._no_device_hint_full: str = self._no_device_hint.text()
+        #: 宽栏用的完整短句；空 = 只有一套形态（普通长消息）。
+        self._no_device_hint_wide_full: str = ""
         self._no_device_hint_detail: str = ""
         self._no_device_hint.setAlignment(Qt.AlignCenter)
         # 配色必须跟当前主题走：原来取 tokens.COLORS 的 light_hint_bg
         # （#F0E8DC 米黄，浅色专用），深色主题下就成了一块贴在黑底上的
         # 创可贴——2026-11-09 截图里最刺眼的一处。
         self._restyle_hint_banner()
+        # 横幅仍在频谱页左栏（不动布局：挪到 root 通栏会让三栏一起缩高，
+        # 实测 adsb_empty 基线矮 10~20px）。宽度约束靠两套文案 + 按实际
+        # 预算选形态解决：窄形态 216px ≤ 860 下的预算地板 244px。
         spectrum_layout.addWidget(self._no_device_hint)
 
         self.spectrum = create_spectrum_widget(prefer_opengl=False)
@@ -3939,8 +3953,13 @@ class MainWindow(QMainWindow):
         if hint is not None and full:
             try:
                 avail = max(80, hint.width() - 14)
-                elided = hint.fontMetrics().elidedText(
-                    full, Qt.ElideRight, avail)
+                fmt = hint.fontMetrics()
+                # 两套形态按**实际预算**选：宽形态放得下才用；否则回落
+                # 窄形态（860 下预算地板 244，窄形态 216，不会两者都放不下）。
+                wide = getattr(self, "_no_device_hint_wide_full", "")
+                if wide and fmt.horizontalAdvance(wide) <= avail:
+                    full = wide
+                elided = fmt.elidedText(full, Qt.ElideRight, avail)
                 if hint.text() != elided:
                     hint.setText(elided)
                 # tooltip 给完整排查（Zadig / 驱动 / 占用），不是短句重复
@@ -5917,7 +5936,8 @@ class MainWindow(QMainWindow):
             # 不枚举硬件，但状态栏提示必须与"无设备"口径一致（含排查关键词）：
             # 离线态同样没有连上后端，用户需要知道怎么排查，不能只说"跳过"。
             self._show_no_rtl_hint("离线模式（未枚举硬件）。" + _NO_SDR_HINT,
-                                   brief=_NO_SDR_BRIEF)
+                                   brief=_NO_SDR_BRIEF,
+                                   brief_wide=_NO_SDR_BRIEF_WIDE)
             return True
         return False
 
@@ -6034,7 +6054,8 @@ class MainWindow(QMainWindow):
             # 真的没设备：明确提示，不弹对话框、不造假。
             # 默认 USB 走 SoapySDR（无 GPL）；pyrtlsdr 仅可选自装。
             self._show_no_rtl_hint(_NO_SDR_HINT, code="device_not_found",
-                                   brief=_NO_SDR_BRIEF)
+                                   brief=_NO_SDR_BRIEF,
+                                   brief_wide=_NO_SDR_BRIEF_WIDE)
             return
 
         # 构造后端并连接（默认参数：采样率按性能档 _perf_default_sample_rate()
@@ -6047,7 +6068,8 @@ class MainWindow(QMainWindow):
             return
         if backend is None:
             self._show_no_rtl_hint(_NO_SDR_HINT, code="device_not_found",
-                                   brief=_NO_SDR_BRIEF)
+                                   brief=_NO_SDR_BRIEF,
+                                   brief_wide=_NO_SDR_BRIEF_WIDE)
             return
 
         ok = self._connect_backend(
@@ -6066,12 +6088,15 @@ class MainWindow(QMainWindow):
                 "RTL-SDR 连接失败：检查 Zadig WinUSB 驱动 / SoapySDR 驱动 / 设备是否被占用",
                 code=getattr(self, "_last_connect_code", None))
 
-    def _show_no_rtl_hint(self, message: str, code=None, brief=None):
+    def _show_no_rtl_hint(self, message: str, code=None, brief=None,
+                          brief_wide=None):
         """无设备 / 枚举失败时：状态栏 + 频谱上方横幅同时显示明确提示。
 
         绝不静默走假后端、绝不显示"已连接"。``brief`` 是首屏短句（说人话），
-        完整排查 ``message`` 保留在 tooltip 与状态栏「查看怎么办」里——
-        「页面极简」不等于把信息删掉，是把它放到该去的地方。
+        ``brief_wide`` 是宽栏用的完整短句；横幅按实际预算二选一
+        （见 ``_apply_responsive_chrome``）。完整排查 ``message`` 保留在
+        tooltip 与状态栏「查看怎么办」里——「页面极简」不等于把信息删掉，
+        是把它放到该去的地方。
         """
         shown = brief or message
         try:
@@ -6080,9 +6105,13 @@ class MainWindow(QMainWindow):
             pass
         try:
             if self._no_device_hint is not None:
-                self._no_device_hint_full = f"  {shown}  "
+                # 文本不再加两端字面空格：标签居中，QSS 已有 8px padding；
+                # 字面空格只会白吃省略预算（2 空格/端 = 24px/端）。
+                self._no_device_hint_full = str(shown)
+                self._no_device_hint_wide_full = (
+                    str(brief_wide) if brief_wide else "")
                 self._no_device_hint_detail = str(message)
-                self._no_device_hint.setText(f"  {shown}  ")
+                self._no_device_hint.setText(str(shown))
                 self._no_device_hint.setToolTip(message)
                 self._no_device_hint.setVisible(True)
                 self._apply_responsive_chrome()
