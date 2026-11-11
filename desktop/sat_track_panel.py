@@ -9,6 +9,7 @@ MBDSDR 卫星闭环跟踪面板
   - "开始跟踪 / 停止跟踪"按钮（触发 main_window 的 500ms 自动调谐闭环）；
   - "更新 TLE"按钮（从 Celestrak 在线刷新）；
   - 实时显示：方位角 / 仰角 / 多普勒偏移 / 校正后接收频率 / 斜距；
+  - 过境倒计时：AOS / LOS 相对当前时刻的剩余时间 + UTC↔本地显示开关；
   - 仰角指示器（0-90° 进度条）：仰角低于跟踪门限时变红并提示"跟踪已停止"。
 
 本面板只负责 UI 展示与发信号，真正的轨道计算与 SDR 调谐闭环在
@@ -16,13 +17,15 @@ main_window（持有 mbdsdr_ai.sat_tracker.SatelliteTracker）。
 """
 from __future__ import annotations
 
+import math
+from datetime import datetime, timezone
 from typing import Optional, Dict
 
 from PySide6.QtCore import Qt, Signal, QTimer
 from PySide6.QtWidgets import (
     QFrame, QVBoxLayout, QHBoxLayout, QFormLayout, QLabel, QComboBox,
     QDoubleSpinBox, QPushButton, QProgressBar, QGroupBox, QMessageBox,
-    QWidget,
+    QWidget, QCheckBox, QSizePolicy,
 )
 
 from tokens import tokens
@@ -34,16 +37,22 @@ from tokens import tokens
 #     按**峰值**仰角筛「这次过境值不值得列出来」，不是当前仰角门。
 from mbdsdr_ai.sat_passes import VISIBLE_MIN_ALT_DEG
 from mbdsdr_ai.tle_integrity import age_band, tracking_policy
+# 时间口径的单一事实源：轨道计算只用 UTC；本地时区仅是显示变换。
+# 面板不自己算偏移、不读墙钟——倒计时的 now 由调用方（主窗口）用
+# mbdsdr_ai.new_spacetime.get_time_engine() 的同一时基传入。
+from mbdsdr_ai.time_basis import format_local, validate_pass_window
 try:
     from settings import (
         effective_pass_min_elevation_deg,
         effective_pass_visibility_gate_deg,
+        effective_pass_window_hours,
         effective_show_low_elevation_passes,
     )
 except ImportError:  # pragma: no cover - 兼容 desktop 目录直接上 sys.path
     from .settings import (  # type: ignore
         effective_pass_min_elevation_deg,
         effective_pass_visibility_gate_deg,
+        effective_pass_window_hours,
         effective_show_low_elevation_passes,
     )
 
@@ -56,6 +65,10 @@ _TITLE_BAND_PX = 20
 #: ``mbdsdr_ai.tle_integrity.tracking_policy`` 给出（显示口径单一事实源），
 #: 本模块不再维护第二份档位文案表，也不自己比较 tier。
 _TIER_ALIAS = {"stale": "dead"}
+
+#: 过境列表取数的冷却（秒）。列表只由宿主注入的 provider 产生；
+#: 窗口内确实没有过境 / provider 失败时，冷却期内不再触发第二次 skyfield 计算。
+_PASSES_COOLDOWN_S = 60.0
 
 
 def _tle_policy(age_days: Optional[float], tier: Optional[str] = None) -> Dict:
@@ -140,6 +153,18 @@ class SatTrackPanel(QFrame):
         self._collapse_applied = False
         # 过境列表筛选门从这里读（不是当前可见门，见模块顶部注释）。
         self._settings = settings
+        # ---- 过境倒计时（机制 C）----
+        # 列表由宿主（主窗口）用 sat_passes.predict_upcoming_passes 算好后注入；
+        # 面板不写第二套轨道计算，也不另起定时器去重算，只做「取一次 → 每秒重绘」。
+        self._pass_provider = None          # provider(name) -> [{aos_unix, los_unix, ...}]
+        self._passes: list[dict] = []
+        self._passes_for = ""               # 这份列表属于哪颗卫星
+        self._passes_fetched_unix = None    # 上次取数时刻（冷却用）
+        self._pass_warning = ""             # 负时长等异常：如实显示，不画假倒计时
+        self._last_now_unix = None          # 最近一次显示用的时基（UTC 开关复用）
+        self._countdown_timer = QTimer(self)
+        self._countdown_timer.setInterval(1000)
+        self._countdown_timer.timeout.connect(self._on_countdown_tick)
         self._build_ui()
         # 面板可能一直藏在非当前页签里（永不触发 showEvent），所以在事件循环
         # 第一次空闲时也判定一次；此时主窗口几何已就绪。
@@ -253,6 +278,46 @@ class SatTrackPanel(QFrame):
         self._refresh_pass_gate_label()
         root.addWidget(el_box)
 
+        # ---- 过境倒计时（AOS / LOS）----
+        # 放在最后而不是嵌入「实时状态」：它是选星后就能看的信息，
+        # 不依赖是否正在跟踪（跟踪中的 500ms 帧顺带刷新它）。
+        cd_box = _CollapsibleGroupBox("过境倒计时")
+        self._countdown_box = cd_box
+        self._make_collapsible(cd_box, "过境倒计时", 3, "satPassBox")
+        cd_layout = QVBoxLayout(cd_box)
+        self.countdown_label = QLabel("--")
+        self.countdown_label.setObjectName("passCountdownLabel")
+        self.countdown_label.setWordWrap(True)
+        # QSizePolicy.Ignored + 最小宽 0：文本再长也不参与右栏最小宽推导
+        # （tests/test_ui_layout_locks.py 的「谁把下限顶高了」会点名）。
+        self.countdown_label.setMinimumWidth(0)
+        self.countdown_label.setSizePolicy(QSizePolicy.Ignored,
+                                           QSizePolicy.Preferred)
+        self.countdown_label.setStyleSheet(
+            "font-size: 12pt; font-weight: 600; color: "
+            + tokens().text("secondary") + ";")
+        cd_layout.addWidget(self.countdown_label)
+        self.pass_abs_label = QLabel("--")
+        self.pass_abs_label.setObjectName("passAbsLabel")
+        self.pass_abs_label.setWordWrap(True)
+        self.pass_abs_label.setMinimumWidth(0)
+        self.pass_abs_label.setSizePolicy(QSizePolicy.Ignored,
+                                          QSizePolicy.Preferred)
+        self.pass_abs_label.setStyleSheet(
+            "color: " + tokens().text("tertiary") + "; font-size: 8.5pt;")
+        cd_layout.addWidget(self.pass_abs_label)
+        self.utc_check = QCheckBox("UTC 显示")
+        self.utc_check.setObjectName("passUtcCheck")
+        self.utc_check.setChecked(True)
+        self.utc_check.setMinimumWidth(0)
+        self.utc_check.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
+        self.utc_check.setToolTip(
+            "只切换 AOS/LOS **绝对时刻**的显示口径（UTC ↔ 本地时区，带偏移）；"
+            "倒计时数字与内部时基始终是同一个 UTC 时钟")
+        self.utc_check.toggled.connect(self._on_utc_toggled)
+        cd_layout.addWidget(self.utc_check)
+        root.addWidget(cd_box)
+
         root.addStretch(1)
 
     # ------------------------------------------------------- 窄屏可折叠
@@ -300,11 +365,22 @@ class SatTrackPanel(QFrame):
         self._collapse_applied = True
         if self.window().width() < 1440:
             for box in self._collapsible_boxes[1:]:
+                # 过境倒计时是「选完星就能看」的主信息，窄屏也保持展开；
+                # 其余大块状态可以收起省高度。
+                if box is self._countdown_box:
+                    continue
                 box.setChecked(False)
 
     def showEvent(self, event):
         super().showEvent(event)
         self._apply_narrow_defaults()
+        # 只在可见时跑 1s 重绘：面板藏在别的页签里不烧事件循环。
+        self._update_countdown(None)
+        self._countdown_timer.start()
+
+    def hideEvent(self, event):
+        self._countdown_timer.stop()
+        super().hideEvent(event)
 
     # ------------------------------------------------------------ 对外接口
     def populate_satellites(self, names, tier_badges: Optional[Dict[str, str]] = None):
@@ -382,8 +458,15 @@ class SatTrackPanel(QFrame):
         else:
             self.start_btn.setEnabled(not self._tracking)
 
-    def update_position(self, pos: Dict[str, object]):
-        """用 tracker.current_position() 的结果刷新显示。"""
+    def update_position(self, pos: Dict[str, object], now_unix=None):
+        """用 tracker.current_position() 的结果刷新显示。
+
+        ``now_unix`` 与位置帧同一次采样（宿主的 get_time_engine().now_unix()）。
+        传 None 时面板自己向同一时间引擎取一次——绝不用 ``time.time()`` 另造
+        时间基准；引擎不可用就明说倒计时暂停。
+        """
+        # 即便 pos 无效（未跟踪/无星）也要刷新倒计时：AOS 前正是不在跟踪时。
+        self._update_countdown(now_unix)
         # 设置可能被用户改过：每次刷新重读两个门的显示（只拼一行文本）。
         self._refresh_pass_gate_label()
         if not pos.get("valid"):
@@ -460,10 +543,168 @@ class SatTrackPanel(QFrame):
             f"QProgressBar::chunk {{ background:{hex_color}; }}"
         )
 
+    # ---------------------------------------------------------- 过境倒计时
+    def set_pass_provider(self, provider) -> None:
+        """注入过境数据源：``provider(name) -> [{aos_unix, los_unix, max_alt?}, ...]``。
+
+        轨道计算在宿主（主窗口）里用 ``sat_passes.predict_upcoming_passes``
+        完成；面板只消费结果——不写第二套轨道计算，也不另起定时器重算。
+        """
+        self._pass_provider = provider
+        self.invalidate_passes()
+
+    def invalidate_passes(self) -> None:
+        """丢弃缓存的过境列表：换星 / TLE 更新 / 站址变更时由宿主调用。"""
+        self._passes = []
+        self._passes_for = ""
+        self._passes_fetched_unix = None
+        self._pass_warning = ""
+        # 注意：不清 ``_last_now_unix``——它只是「上次显示用的时基」，
+        # 与过境数据无关；清掉会让 UTC 开关退回一次时钟读取（数字会跳）。
+
+    def _ensure_passes(self, name: str, now_unix: float) -> None:
+        """确保手上有覆盖 now 的过境列表；只在「换星/窗口耗尽/冷却到期」时取数。"""
+        if not name:
+            self._passes = []
+            self._passes_for = ""
+            return
+        if name != self._passes_for:
+            # 切星：旧列表是别的卫星的过境，绝不能拿来给这颗星倒计时。
+            self.invalidate_passes()
+            self._passes_for = name
+        if self._passes and max(r["los"] for r in self._passes) > now_unix:
+            return
+        if (self._passes_fetched_unix is not None
+                and now_unix - self._passes_fetched_unix < _PASSES_COOLDOWN_S):
+            # 刚取过（窗口内确实没有过境 / provider 失败）：冷却期内不再触发
+            # 第二次 skyfield 计算，避免每秒一拍把界面拖死。
+            return
+        if self._pass_provider is None:
+            self._passes = []
+            return
+        try:
+            rows = list(self._pass_provider(name) or [])
+        except Exception as exc:          # provider 是宿主的，异常不外抛
+            self._passes = []
+            self._passes_fetched_unix = now_unix
+            self._pass_warning = f"过境预测失败：{exc}"
+            return
+        self._passes_fetched_unix = now_unix
+        self._pass_warning = ""
+        parsed = []
+        for row in rows:
+            try:
+                aos = float(row["aos_unix"])
+                los = float(row["los_unix"])
+            except (KeyError, TypeError, ValueError):
+                continue
+            chk = validate_pass_window(aos, los, now_unix)
+            if not chk["ok"]:
+                # 负时长/时钟回跳：如实标出来，不画一个假倒计时。
+                self._pass_warning = chk["warning"]
+                continue
+            peak = row.get("max_alt")
+            parsed.append({"aos": aos, "los": los, "peak_alt": peak})
+        parsed.sort(key=lambda r: r["aos"])
+        self._passes = parsed
+
+    @staticmethod
+    def _engine_now_unix():
+        """全局时间引擎的 Unix 时刻（与主窗口/天空图同一时基）。
+
+        失败返回 None——绝不回退 ``time.time()`` 另造时间基准。
+        """
+        try:
+            from mbdsdr_ai.new_spacetime import get_time_engine
+            return float(get_time_engine().now_unix())
+        except Exception:
+            return None
+
+    @staticmethod
+    def _fmt_when(ts_unix, utc: bool) -> str:
+        """Unix 时刻 → 显示字符串。UTC 用「UTC」后缀，本地走 time_basis.format_local。"""
+        dt = datetime.fromtimestamp(float(ts_unix), timezone.utc)
+        if utc:
+            return dt.strftime("%m-%d %H:%M:%S") + " UTC"
+        return format_local(dt)
+
+    @staticmethod
+    def _fmt_countdown(seconds: float) -> str:
+        """剩余秒 → ``H:MM:SS`` / ``MM:SS``；向上取整（还剩 0.2s 不显示 00:00）。"""
+        s = int(math.ceil(max(0.0, float(seconds))))
+        h, rem = divmod(s, 3600)
+        m, sec = divmod(rem, 60)
+        return f"{h}:{m:02d}:{sec:02d}" if h else f"{m:02d}:{sec:02d}"
+
+    def _on_countdown_tick(self) -> None:
+        """1s 重绘（不重算过境）：只把已取到的列表对着同一时基重新排一次。"""
+        self._update_countdown(None)
+
+    def _on_utc_toggled(self, _checked: bool = False) -> None:
+        """UTC 开关只改绝对时刻的显示口径；倒计时数字与内部时基不动。"""
+        self._update_countdown(self._last_now_unix)
+
+    def _update_countdown(self, now_unix=None) -> None:
+        """刷新 AOS/LOS 倒计时。
+
+        ``now_unix=None`` → 向全局时间引擎取当前时刻（与主窗口同一时基）；
+        引擎不可用就显示暂停说明，绝不回退墙钟。
+        """
+        if now_unix is None:
+            now_unix = self._engine_now_unix()
+        if now_unix is None:
+            self.countdown_label.setText("--")
+            self.pass_abs_label.setText("时间引擎不可用，倒计时暂停")
+            return
+        self._last_now_unix = float(now_unix)
+
+        name = self.current_satellite_name()
+        if not name:
+            self.countdown_label.setText("--")
+            self.pass_abs_label.setText("先选择一颗卫星")
+            return
+        self._ensure_passes(name, now_unix)
+        if self._pass_provider is None:
+            self.countdown_label.setText("--")
+            self.pass_abs_label.setText("过境数据未接入（由主窗口注入预测结果）")
+            return
+
+        active = next((r for r in self._passes if r["los"] > now_unix), None)
+        if active is None:
+            self.countdown_label.setText("窗口内无过境")
+            self.pass_abs_label.setText(
+                self._pass_warning or "预测窗口内这颗星不再升起")
+            return
+
+        utc = self.utc_check.isChecked()
+        aos_txt = self._fmt_when(active["aos"], utc)
+        los_txt = self._fmt_when(active["los"], utc)
+        if now_unix < active["aos"]:
+            self.countdown_label.setText(
+                "AOS 倒计时 " + self._fmt_countdown(active["aos"] - now_unix))
+            sub = f"AOS {aos_txt} · LOS {los_txt}"
+        else:
+            self.countdown_label.setText(
+                "LOS 倒计时 " + self._fmt_countdown(active["los"] - now_unix))
+            peak = active.get("peak_alt")
+            peak_txt = ""
+            if peak is not None:
+                try:
+                    peak_txt = f" · 峰值仰角 {float(peak):.0f}°"
+                except (TypeError, ValueError):
+                    peak_txt = ""
+            sub = f"LOS {los_txt}{peak_txt}"
+        if self._pass_warning:
+            sub += f" · {self._pass_warning}"
+        self.pass_abs_label.setText(sub)
+
     # ------------------------------------------------------------ 内部槽
     def _on_sat_selected(self, name: str):
         """用户在下拉框选了卫星：由 main_window 注入下行频率。这里只发出查询请求，
         实际频率回填由 main_window 通过 set_downlink_mhz 完成。"""
+        # 换星后旧过境列表属于别的卫星，立刻失效并重排一次倒计时。
+        self.invalidate_passes()
+        self._update_countdown(None)
         self.satellite_changed.emit(name)
 
     # 额外信号：卫星切换时通知 main_window 刷新下行频率

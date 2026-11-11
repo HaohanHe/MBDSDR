@@ -83,7 +83,10 @@ def test_hidden_panel_destroyed_before_idle_does_not_callback_deleted_object():
 
 @pytest.mark.usefixtures("qtapp")
 def test_hidden_panel_narrow_window_still_collapses_on_first_idle():
-    """原始目的：从未 show 的窄屏面板在首次空闲时收起第 2 个起的分组。"""
+    """原始目的：从未 show 的窄屏面板在首次空闲时收起第 2 个起的分组。
+
+    例外：过境倒计时（机制 C）是「选完星就能看」的主信息，窄屏也保持展开。
+    """
     host, panel = _host_with_panel()
     host.resize(1200, 800)
     QApplication.instance().processEvents()
@@ -92,6 +95,9 @@ def test_hidden_panel_narrow_window_still_collapses_on_first_idle():
     assert len(panel._collapsible_boxes) >= 2
     assert panel._collapsible_boxes[0].isChecked(), "目标卫星分组应保持展开"
     for box in panel._collapsible_boxes[1:]:
+        if box is panel._countdown_box:
+            assert box.isChecked(), "过境倒计时在窄屏下也应保持展开"
+            continue
         assert not box.isChecked(), "窄屏下非目标分组应默认收起"
 
 
