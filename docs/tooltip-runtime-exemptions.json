@@ -1,0 +1,41 @@
+{
+  "note": "运行时诚实性守卫的人工豁免。只减不增：新增一条必须评审，并把条数同步进 tests/test_tooltip_dynamic_runtime.py 的冻结断言。match 比较前会把数字归一成 #；以 * 结尾的按前缀匹配。",
+  "exemptions": [
+    {
+      "file": "desktop/control_panel.py",
+      "widget": "Offset 调谐复选框",
+      "match": "Offset Tuning：把本振偏移半个信道，避开零中频的 DC 尖峰，改善强台附近的接收",
+      "why": "讲开关做什么（动作说明），不含设备读数；「半个信道」是原理描述，不是量测值"
+    },
+    {
+      "file": "desktop/constellation_panel.py",
+      "widget": "GNSS 状态行 tooltip（_gnss_status_detail）",
+      "match": "可见 # 颗（GPS #）· 参与定位 # 颗 · 柱高=信噪比，实心=参与定位，半透明=仅可见",
+      "why": "星空状态与图例说明；颗数是本帧解算结果，不是设备量测，无需来源标注"
+    },
+    {
+      "file": "desktop/settings_panel.py",
+      "widget": "翻译器 / 日志级别设置行",
+      "match": "重启后生效：*",
+      "why": "生效条件说明（动作），整句没有量值，不适用「有量纲须带来源」"
+    },
+    {
+      "file": "desktop/rf_sky_view.py",
+      "widget": "云台跟随按钮",
+      "match": "云台跟随：跟踪时同步驱动天线指向（无可用云台后端：连接 ai-sdr-mini 或在 AI 对话里配置 rotctld）",
+      "why": "能力缺失说明（状态）并给出下一步，不含量值"
+    },
+    {
+      "file": "desktop/main_window.py",
+      "widget": "星象仪图层「轨道线」",
+      "match": "轨道线：卫星未来 10 分钟轨迹",
+      "why": "图层内容说明；10 分钟是显示窗口参数（产品设定），不是设备读数"
+    },
+    {
+      "file": "desktop/spectrum_widget.py",
+      "widget": "显示跨度滑杆",
+      "match": "显示跨度：右推收窄（放大细节），左端回到全带宽。",
+      "why": "交互说明（动作），且已明确「只改显示、不改采样率」的口径"
+    }
+  ]
+}

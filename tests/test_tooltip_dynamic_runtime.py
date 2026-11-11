@@ -41,6 +41,12 @@ from test_tooltip_guard import (  # noqa: E402
 RUNTIME_TEST = "tests/test_tooltip_dynamic_runtime.py::"
 _BARE_VALUE_RE = re.compile(
     r"^\s*[±+\-–—~]?\s*[\d.,]+\s*[A-Za-z/%°]*(?:\s*/\s*[A-Za-z]+)?\s*$")
+#: 带数值的文案里，这几类不是「量值声明」，不要求来源标注：
+#: 快捷键描述（「已自定义：F11（出厂是 F11）」）与文件路径（路径本身就是来源）。
+_IDENT_RE = re.compile(r"^已自定义：")
+_PATH_RE = re.compile(r"^[A-Za-z]:[\\/]|^[/~]")
+_DIGITS_RE = re.compile(r"\d")
+_EXEMPT_PATH = os.path.join(REPO_ROOT, "docs", "tooltip-runtime-exemptions.json")
 
 
 @pytest.fixture(scope="module")
@@ -80,14 +86,48 @@ def _record(panel_factory, triggers=()):
     return panel, calls
 
 
-def _assert_self_describing(text, where):
+def _load_exemptions():
+    import json
+    with open(_EXEMPT_PATH, encoding="utf-8") as fh:
+        return json.load(fh)["exemptions"]
+
+
+def _norm(text):
+    """数字归一成 #，让「可见 1 颗」与「可见 12 颗」算同一条文案。"""
+    return _DIGITS_RE.sub("#", (text or "").strip())
+
+
+def _is_exempt(file_rel, text):
+    t = _norm(text)
+    for e in _load_exemptions():
+        if e["file"] != file_rel:
+            continue
+        if e["match"].endswith("*"):
+            if t.startswith(_norm(e["match"][:-1])):
+                return True
+        elif t == _norm(e["match"]):
+            return True
+    return False
+
+
+def _assert_self_describing(text, where, file_rel):
     t = (text or "").strip()
     assert t, f"{where}：透传 tooltip 渲染后为空，用户看不到任何说明"
+    if _is_exempt(file_rel, t):
+        return
     assert not _BARE_VALUE_RE.match(t), (
         f"{where}：渲染成裸数值 {t!r}，没说清它是什么、从哪来")
     # 不卡长度：这一层守的是诚实性，不是文案字数（「卫星层」这类短语是合法的）
     if UNIT_RE.search(t) and not QUAL_RE.search(t):
         raise AssertionError(f"{where}：有量纲却缺来源/置信标注：{t!r}")
+    # 带数字但既无量纲也无来源的文案，必须先进冻结豁免表（人工判定为
+    # 动作/状态说明）才放行——豁免不许在运行时悄悄长出来。
+    if (_DIGITS_RE.search(t) and not UNIT_RE.search(t)
+            and not QUAL_RE.search(t)
+            and not _IDENT_RE.match(t) and not _PATH_RE.match(t)):
+        raise AssertionError(
+            f"{where}：带数值却无量纲也无来源标注，且不在冻结豁免表"
+            f"（新增豁免需评审）：{t!r}")
 
 
 def _check_file(calls, file_rel):
@@ -123,7 +163,7 @@ def _check_file(calls, file_rel):
             continue
         for text in texts:
             try:
-                _assert_self_describing(text, where)
+                _assert_self_describing(text, where, file_rel)
             except AssertionError as exc:
                 bad.append(str(exc))
     assert not missing, (
@@ -254,3 +294,25 @@ def test_shortcuts_panel_passthrough_tooltips_self_describe(qapp, monkeypatch):
 
     _, calls = _record(sp.ShortcutsPanel, [triggers])
     _check_file(calls, "desktop/shortcuts_panel.py")
+
+
+def test_runtime_exemptions_are_frozen():
+    """豁免只减不增：出现第 7 条必须评审。
+
+    这 6 条是「带量值/设备口径词，但实为动作或状态说明」的文案，靠人工
+    判断放行——正因为它不可机械区分，才必须冻结成名单：任何新增都要走
+    评审（判断是该真补来源标注，还是确属动作说明），并同步改这里的条数。
+    """
+    ex = _load_exemptions()
+    assert len(ex) == 6, (
+        f"运行时豁免现有 {len(ex)} 条，冻结名单是 6 条。新增豁免需评审："
+        "先判断它是「动作/状态说明」还是真该补来源标注，确认后同步 "
+        "docs/tooltip-runtime-exemptions.json 与交接文档。")
+    seen = set()
+    for e in ex:
+        for key in ("file", "widget", "match", "why"):
+            assert e.get(key), f"豁免条目缺字段 {key}：{e}"
+        assert os.path.exists(os.path.join(REPO_ROOT, e["file"])), e["file"]
+        key = (e["file"], e["match"])
+        assert key not in seen, f"豁免条目重复：{key}"
+        seen.add(key)

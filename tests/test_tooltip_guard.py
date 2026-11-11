@@ -135,7 +135,8 @@ UNIT_RE = re.compile(
 QUAL_RE = re.compile(
     r"(未确认|未验证|未知|以设备为准|以设备回执为准|不是|配置意图|配置请求|"
     r"回读|回执|声明|未施加|未下发|夹到|默认值|不直接改设备|"
-    r"只改显示|按 TLE 推算|典型|SigMF|meta)")
+    r"只改显示|按 TLE 推算|典型|量纲|模拟时间|真实时间|模拟秒|真实秒|"
+    r"SigMF|meta)")
 _PLACEHOLDER_RE = re.compile(r"%\(\w+\)[sdifr]|%[sdifr]|\{[^{}]*\}")
 _NUMFMT_RE = re.compile(r"format_sample_rate|:\s*[^}]*\.[0-9]+f")
 _DYNAMIC_BASELINE = os.path.join(_ROOT, "docs", "tooltip-dynamic-baseline.json")
