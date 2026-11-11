@@ -41,7 +41,7 @@ def _pump(app, ms=80):
 
 
 @pytest.fixture(scope="module")
-def mw(qapp):
+def mw(qapp, isolated_profile):
     from main_window import MainWindow
     w = MainWindow()
     w.show()
