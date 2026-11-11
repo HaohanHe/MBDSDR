@@ -772,6 +772,19 @@ def main():
         mcp_host, mcp_port = resolve_mcp_endpoint(args.host, args.port)
         QTimer.singleShot(500, lambda: window._connect_real(mcp_host, mcp_port))
 
+    # 无障碍字号自动降档（裁定① A）：150% 档最小宽 1157px，1024 屏放不下。
+    # 宁可按 125% 渲染让整窗可用，也不让窗口右边缘被裁。必须在 show 之前
+    # 量最小宽；降档后重算 QSS 字号，并把说明写进设置页。
+    try:
+        from themes import fit_scale_to_screen
+        fit_scale_to_screen(window, app, theme)
+        _sp = getattr(window, "settings_panel", None)
+        if _sp is not None and hasattr(_sp, "refresh_font_scale_note"):
+            _sp.refresh_font_scale_note()
+    except Exception as _fs_ex:  # noqa: BLE001 - 降档失败不得拦启动
+        print(f"[mbdsdr] 字号自动降档失败，按请求倍率启动: {_fs_ex}",
+              file=sys.stderr)
+
     window.show()
     if splash is not None:
         try:

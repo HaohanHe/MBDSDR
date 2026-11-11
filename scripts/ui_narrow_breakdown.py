@@ -343,8 +343,14 @@ def spectrum_panel_report(panel) -> dict:
     }
 
 
+#: 频谱面板高度余量的红线。150% 档实测只剩 6px（100%→43、125%→25），
+#: 外推约 153% 归零；等归零才报红等于「已经压坏了才提示」。低于 10px
+#: 就入红，留出观察窗口。
+SPECTRUM_MARGIN_MIN_PX = 10
+
+
 def red_entries(col: dict, rc: dict) -> list[dict]:
-    """红榜判定（唯一口径）：频谱面板或右栏越界 > 0 即入红，并带责任控件。
+    """红榜判定（唯一口径）：频谱面板/右栏越界 > 0，或频谱余量 < 10px。
 
     闸门 ``main()`` 与自检共用这一段，避免「测量函数改了、判红逻辑没改」
     各自一套。
@@ -359,6 +365,22 @@ def red_entries(col: dict, rc: dict) -> list[dict]:
             "axis": col.get("axis"),
             "who": [_who_text(o) for o in col.get("offenders", [])[:5]],
         })
+    elif col.get("part") == "spectrumPanel":
+        try:
+            margin_h = (int(col["panel_actual"][1])
+                        - int(col["panel_min"][1]))
+        except (KeyError, TypeError, ValueError, IndexError):
+            margin_h = None
+        if margin_h is not None and 0 <= margin_h < SPECTRUM_MARGIN_MIN_PX:
+            reds.append({
+                "part": "spectrumPanel(余量)",
+                "overflow_px": 0,
+                "margin_px": margin_h,
+                "needed": col.get("needed"),
+                "actual": col.get("actual"),
+                "who": [f"面板最小高 {col['panel_min'][1]} / "
+                        f"实得 {col['panel_actual'][1]}"],
+            })
     if rc.get("overflow_px", 0) > 0:
         reds.append({
             "part": "rightColumn",
@@ -958,9 +980,14 @@ def main() -> int:
                     if r.get("axis"):
                         axis = (f"［宽+{r['axis']['width']} / "
                                 f"高+{r['axis']['height']}］")
+                    if "margin_px" in r:
+                        detail = (f"余量 {r['margin_px']}px "
+                                  f"< {SPECTRUM_MARGIN_MIN_PX}px")
+                    else:
+                        detail = (f"+{r['overflow_px']}px{axis}"
+                                  f"（需要 {r['needed']}，实得 {r['actual']}）")
                     print(f"  RED [{name}] {key} {r['part']} "
-                          f"+{r['overflow_px']}px{axis}（需要 {r['needed']}，"
-                          f"实得 {r['actual']}）← "
+                          f"{detail} ← "
                           f"{'、'.join(r['who']) or '（无逐项）'}")
         if not any_red:
             print("  （无）")

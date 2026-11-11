@@ -320,7 +320,13 @@ class DesignTokens:
             "dock_h":          64,    # 底部 Dock 高度
             "splitter_handle": 4,     # QSplitter handle 厚度
             "collapse_strip":  36,    # 副窗折叠窄条宽度
-            "min_dock_w":      300,   # 停靠面板最小宽
+            # 停靠面板最小宽（基准）。150% 档需要 +27（300→327）才能让
+            # 竖排后的书签组不裁字；但写死 327 会把 125% 档的最小窗宽推到
+            # 940，1024 屏连 125% 都放不下、被迫降到 100%。所以 +27 只在
+            # 150% 生效，由 themes.fit_scale_to_screen() 按选中档动态设置
+            # right_tab.setMinimumWidth()。见 gap-layout.md §3.10。
+            "min_dock_w":      300,
+
             # 星象仪形态浮层窄条：外边距 6×2 + 按钮 sizeHint 136 + 边框 2，
             # 再留 2px 余量；用 collapse_strip(36) 会把「退出星象仪」裁掉。
             "planetarium_strip_w": 152,
@@ -385,11 +391,22 @@ class DesignTokens:
 
     @staticmethod
     def _px_to_pt(px_str: str) -> float:
-        """'39px' -> 29.25pt（QSS font-size 用 pt）。"""
+        """'39px' -> 29.25pt（QSS font-size 用 pt），并按界面字号倍率缩放。
+
+        QSS 不认 em/%，写死的 pt 会让控件无视用户的字号设置。倍率取
+        ``themes.font_scale()``（应用字体 / 设计基准），延迟导入避免与
+        themes→tokens 的模块级依赖成环。
+        """
         try:
-            return round(float(px_str.replace("px", "")) * 0.75, 1)
+            pt = float(px_str.replace("px", "")) * 0.75
         except Exception:
             return 10.0
+        try:
+            from themes import font_scale
+            pt *= font_scale()
+        except Exception:
+            pass
+        return round(pt, 1)
 
     # ------------------------------------------------------------------
     # QSS 生成

@@ -1190,6 +1190,16 @@ class SettingsPanel(QWidget):
         wrap_cn_label(note)
         note.setObjectName("hintLabel")
         form.addRow(note)
+        # 自动降档说明：屏幕放不下请求倍率时，主窗口会降一档渲染；这里把
+        # 「你要 150%、实际 125%」写明，避免用户以为设置没生效。
+        # 文本由主窗口启动时调用 refresh_font_scale_note() 刷新。
+        self._font_scale_note = QLabel("")
+        wrap_cn_label(self._font_scale_note)
+        self._font_scale_note.setObjectName("hintLabel")
+        self._font_scale_note.setWordWrap(True)
+        self._font_scale_note.setVisible(False)
+        form.addRow(self._font_scale_note)
+        self.refresh_font_scale_note()
         form.addRow("主题", h.theme_combo)
         form.addRow("界面语言", h.lang_combo)
         form.addRow("布局预设", h.layout_combo)
@@ -1208,6 +1218,19 @@ class SettingsPanel(QWidget):
         hint.setObjectName("hintLabel")
         form.addRow(hint)
         return box
+
+    def refresh_font_scale_note(self) -> None:
+        """刷新「已按 125% 显示」提示；未降档时隐藏该行。"""
+        label = getattr(self, "_font_scale_note", None)
+        if label is None:
+            return
+        try:
+            from themes import font_scale_note
+            note = font_scale_note()
+        except Exception:
+            note = ""
+        label.setText(note)
+        label.setVisible(bool(note))
 
     def _build_row(self, item) -> QGroupBox:
         box = QGroupBox(item.label)

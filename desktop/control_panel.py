@@ -563,7 +563,12 @@ class ControlPanel(QWidget):
         self.bookmark_combo.currentIndexChanged.connect(self._on_bookmark_selected)
         bookmark_layout.addWidget(self.bookmark_combo)
 
-        bm_btn_row = QHBoxLayout()
+        # 按钮竖排（裁定：允许竖排、禁止裁字）。横排时「存为书签」+「删除选中」
+        # 两个按钮的最小宽把收藏组顶到 325/375/425（100/125/150%），超过右栏
+        # 视口 310−4；竖排只让按钮各自占一行，文字一个不裁，代价是组高
+        # +37px。still >314 时再走右栏声明宽（见 gap-layout.md §3.10）。
+        bm_btn_row = QVBoxLayout()
+        bm_btn_row.setSpacing(4)
         self.bookmark_add_btn = QPushButton("存为书签")
         self.bookmark_add_btn.clicked.connect(self._on_bookmark_add)
         bm_btn_row.addWidget(self.bookmark_add_btn)
@@ -755,7 +760,10 @@ class ControlPanel(QWidget):
         rx_layout.addWidget(self.offset_check)
 
         # IQ 前端校正：DC 去除 + I/Q 平衡（默认开，对标 SDR++/GQRX 前端校正）
-        iq_cal_row = QHBoxLayout()
+        # 竖排：横排时两个复选框并排要把「接收」组撑到 273px，150% 档右栏
+        # 余量被吃光；竖排后组宽回落到 138px，代价是多 27px 高（裁定② A）。
+        iq_cal_row = QVBoxLayout()
+        iq_cal_row.setSpacing(2)
         self.dc_removal_check = QCheckBox("DC 去除")
         self.dc_removal_check.setChecked(True)
         self.dc_removal_check.toggled.connect(self._on_dc_removal_changed)

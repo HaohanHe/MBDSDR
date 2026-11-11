@@ -1,8 +1,11 @@
 # 待落库补丁：高度链 −32（天空 400→376 + 底坞 48→40）
 
 > 提出：2026-11-11 夜；来源：裁定③
-> 占用：`desktop/rf_sky_view.py` 未被占用（干净）；`desktop/main_window.py` 归
-> *启动工单线/W26*（存活）→ 两块必须一起落，故整组按补丁交付，不单落半边。
+> **状态：天空 376 已落地**（2026-11-11 深夜，裁定③「批」后，
+> `desktop/rf_sky_view.py` 已改为 `setMinimumSize(400, 376)`）；
+> **底坞 40 未落**——`desktop/main_window.py` 归 *启动工单线/W25*（施工中），
+> 需等其释放后把 `setFixedHeight(48)` 改 40。两块合计 −32 到 696 的目标在底坞
+> 落地前只完成 −24。
 > 验证工作树：`d:\mbdsdr\output\wt-fs`（detached @ `6e90e93b`）
 > 关联：裁定④「频谱页已不在高度链上」见 `docs/research/2026-11-11-gap-layout.md` §2.5
 

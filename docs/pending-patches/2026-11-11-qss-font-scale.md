@@ -1,11 +1,30 @@
 # 待落库补丁：QSS 字号钉死 10pt（无障碍「假支持」）
 
 > 提出：2026-11-11 夜；来源：裁定①（本轮优先级最高）
-> 占用：`desktop/themes.py` 归 *启动工单线/W25*（pid 35784，TTL 未到）；
-> `desktop/control_panel.py`、`desktop/main_window.py` 有他线 WIP。
-> 本线按形态⑮不碰，全部以补丁交付。`desktop/tokens.py` 未被占用但与本补丁同源，一起给。
+> **状态：已落地**（2026-11-11 深夜，裁定①「选 A + 自动降档」后）。
+> 落地文件：`desktop/themes.py`（`BASE_FONT_PT` / `font_scale()` /
+> `qss_font_size()` / 9 处 QSS 字号）、`desktop/tokens.py`（`_px_to_pt` 乘倍率）、
+> `desktop/main.py`（show 前调用 `fit_scale_to_screen`）、
+> `desktop/settings_panel.py`（降档说明行）、`desktop/control_panel.py`（②竖排）。
+> 下方 `.patch` 为落地前版本，自动降档未包含；以工作树代码为准。
 > 验证工作树：`d:\mbdsdr\output\wt-fs`（detached @ `6e90e93b`）
-> 基线报告：`docs/research/2026-11-11-gap-layout.md` §2.5
+> 基线报告：`docs/research/2026-11-11-gap-layout.md` §2.5 / §3.9 / §3.10
+
+## 〇、自动降档（裁定①新增，已落地）
+
+`themes.fit_scale_to_screen(window, app, theme)` 在主窗 `show()` 前量
+`minimumSizeHint().width()`：
+
+1. 屏幕可用宽的 90% 为上限；`150%` 最小宽 988 → 1024 屏（上限 921）放不下，
+   逐档降到 **125%**（865，余 56px）；1280 屏保留 150%。
+2. 降档后重算 QSS（`theme.apply`）与 `QFont`，否则只改了一半。
+3. 150% 档把 `right_tab.setMinimumWidth(353)`（书签组竖排后需 330，基准视口
+   310 会裁字）；125% 及以下置 0，避免把 1024 屏的 125% 顶到 940。
+4. 降档说明写进设置页「外观与语言」组：
+   「当前屏幕不足以按 150% 渲染，已按 125% 显示。」
+5. 剩余 63 处局部 `font-size`（ai_panel 23、main_window 12、location_panel 6 等）
+   不在本补丁范围，列为后续项；本次反证覆盖的是主题 QSS 选中的按钮/下拉/
+   输入/分组框。
 
 ## 一、钉死的范围（全仓 78 处 / 14 文件）
 

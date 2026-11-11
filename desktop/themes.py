@@ -136,6 +136,165 @@ def _check_mark_url(disabled: bool = False) -> str:
 # 字体
 # ============================================================================
 
+#: 设计稿基准字号（pt）。QSS 里所有绝对字号都以它为 1.0 倍基准。
+BASE_FONT_PT = 10.0
+
+#: 允许的界面字号档位。自动降档只会沿这个序列往下走，不会造出 1.1/1.33
+#: 这类非标准倍率——用户要的是「150% 或 125%」，不是任意插值。
+FONT_SCALE_STEPS = (1.0, 1.25, 1.5)
+
+#: 平台默认字号只取一次：主题反复 apply 时 app.font() 已被我们自己写过，
+#: 每次重读会把上一轮的放大值当成新基准（棘轮）。
+_PLATFORM_FONT_PT: float | None = None
+
+#: 自适应降档后的实际倍率；None 表示尚未降档，按平台请求值。
+_FONT_SCALE_OVERRIDE: float | None = None
+
+#: 降档说明（设置页展示）；None 表示没有降档。
+_FONT_SCALE_NOTE: str | None = None
+
+
+def _platform_font_pt() -> float:
+    """Qt 报告的默认界面字号（pt）；不可用时按设计基准算。
+
+    无障碍意义：系统/平台把界面字号调大时，``QApplication.font()`` 会跟着
+    变大。以前这里写死 10pt，等于把用户的选择直接丢掉；现在只允许**上调**
+    （下限 10pt），系统字号更小时仍按设计稿，不动布局基线。
+    """
+    global _PLATFORM_FONT_PT
+    if _PLATFORM_FONT_PT is None:
+        pt = BASE_FONT_PT
+        try:
+            app = QApplication.instance()
+            if app is not None:
+                got = float(app.font().pointSizeF())
+                if got > 0:
+                    pt = got
+        except Exception:
+            pass
+        _PLATFORM_FONT_PT = pt
+    return _PLATFORM_FONT_PT
+
+
+def requested_font_scale() -> float:
+    """平台/系统请求的倍率（未经屏幕宽度降档）。"""
+    return max(1.0, _platform_font_pt() / BASE_FONT_PT)
+
+
+def font_scale() -> float:
+    """当前实际生效的界面字号倍率（含自动降档）。
+
+    QSS 的 ``font-size`` 只认 pt/px 这类绝对值，不认 em/%；一旦写成
+    ``font-size: 10pt``，被该选择器选中的控件就再也不随字号设置变化——
+    用户把字调大，按钮/下拉/输入框/分组框装作没听见。所有 QSS 字号都必须
+    经 :func:`qss_font_size` 换算，倍率就是这里返回的值。
+    """
+    if _FONT_SCALE_OVERRIDE is not None:
+        return _FONT_SCALE_OVERRIDE
+    return requested_font_scale()
+
+
+def set_font_scale_override(scale: float | None) -> None:
+    """强制指定实际倍率（自动降档用）；``None`` 恢复按平台请求值。"""
+    global _FONT_SCALE_OVERRIDE
+    _FONT_SCALE_OVERRIDE = scale
+
+
+def font_scale_note() -> str:
+    """自动降档时给用户看的一句话；未降档返回空串。"""
+    return _FONT_SCALE_NOTE or ""
+
+
+def _set_font_scale_note(requested: float, actual: float) -> None:
+    global _FONT_SCALE_NOTE
+    if actual + 1e-6 >= requested:
+        _FONT_SCALE_NOTE = None
+        return
+    _FONT_SCALE_NOTE = (
+        f"当前屏幕不足以按 {round(requested * 100)}% 渲染，"
+        f"已按 {round(actual * 100)}% 显示。")
+
+
+def fit_scale_to_screen(window, app=None, theme=None) -> float:
+    """按屏幕可用宽自动降档：最小宽超过可用宽 90% 就降一档。
+
+    背景：150% 档下窗口最小宽约 988px（书签组再加宽后约 1,077），1024 屏
+    （可用宽 90% = 921）物理放不下。「放大」如果以整窗被裁掉换来的，就不是
+    无障碍而是新的不可用。这里在主窗口建好后（show 之前）量一次
+    ``minimumSizeHint().width()``，超出屏宽的 90% 就沿
+    :data:`FONT_SCALE_STEPS` 降档，直到放得下或已是最低档。
+
+    返回实际生效倍率；降档结果同时写入 :func:`font_scale_note` 供设置页展示。
+    """
+    import logging
+    log = logging.getLogger(__name__)
+
+    requested = requested_font_scale()
+    candidates = [s for s in FONT_SCALE_STEPS if s <= requested + 1e-6]
+    if not candidates:
+        candidates = [requested]
+    chosen = candidates[-1]
+    try:
+        screen = window.screen()
+        if screen is None:
+            from PySide6.QtGui import QGuiApplication
+            screen = QGuiApplication.primaryScreen()
+        avail_w = int(screen.availableGeometry().width())
+    except Exception as exc:  # noqa: BLE001 - 探测失败不拦启动
+        log.debug("屏幕可用宽探测失败，跳过自动降档: %s: %s",
+                  type(exc).__name__, exc)
+        return chosen
+    limit = int(avail_w * 0.9)
+
+    right = getattr(window, "right_tab", None)
+    # 150% 档书签组竖排后仍需 330px：书签下拉 minimumContentsLength=16
+    # 要 280，加组内/面板边距 50；基准视口 310 会把书名挤出可视区。
+    # 实测视口 317（+27）仍不够，取裁定口径的 353 声明宽 → 视口 343。
+    # 只在这一档加宽；125% 及以下置 0（回到构建时的自然最小 320），
+    # 否则 1024 屏的 125% 最小宽会被推到 940、被迫降到 100%。
+    wide_min_w = 353
+
+    for scale in reversed(candidates):
+        set_font_scale_override(scale)
+        try:
+            if right is not None:
+                right.setMinimumWidth(
+                    wide_min_w if scale > 1.25 + 1e-6 else 0)
+            if app is not None:
+                app.setFont(get_app_font())
+            # 主题 QSS 里的字号也要按新倍率重算，否则只改了 QFont 的一半。
+            app_ref = app or QApplication.instance()
+            if theme is not None and app_ref is not None:
+                theme.apply(app_ref)
+            window.ensurePolished()
+            lay = window.layout()
+            if lay is not None:
+                lay.activate()
+            need_w = int(window.minimumSizeHint().width())
+        except Exception as exc:  # noqa: BLE001 - 量不到就按当前档继续
+            log.debug("最小宽复测失败（%s%%）: %s: %s",
+                      round(scale * 100), type(exc).__name__, exc)
+            chosen = scale
+            break
+        if need_w <= limit:
+            chosen = scale
+            break
+    else:
+        chosen = candidates[0]
+
+    _set_font_scale_note(requested, chosen)
+    if chosen + 1e-6 < requested:
+        log.info("界面字号自动降档：请求 %d%%，屏幕可用宽 %dpx（上限 %dpx），"
+                 "实际 %d%%", round(requested * 100), avail_w, limit,
+                 round(chosen * 100))
+    return chosen
+
+
+def qss_font_size(pt: float) -> str:
+    """把设计稿 pt 换算成当前缩放下的 QSS ``font-size`` 字面量（如 ``12.5pt``）。"""
+    return f"{round(float(pt) * font_scale(), 2):g}pt"
+
+
 def get_app_font() -> QFont:
     """获取应用字体：优先 MiSans，回退 Noto Sans CJK，最后系统无衬线。"""
     font = QFont()
@@ -151,7 +310,7 @@ def get_app_font() -> QFont:
         "Arial",
         "sans-serif",
     ])
-    font.setPointSize(10)
+    font.setPointSizeF(BASE_FONT_PT * font_scale())
     font.setHintingPreference(QFont.PreferFullHinting)
     return font
 
@@ -601,19 +760,19 @@ class Theme:
             border-radius: 12px;
         }}
         QLabel#sectionTitle {{
-            font-size: 11pt;
+            font-size: {qss_font_size(11)};
             font-weight: 600;
             color: palette(window-text);
             padding: 4px 0px;
         }}
         QLabel#statusValue {{
             font-family: "JetBrains Mono", "Fira Code", "Consolas", monospace;
-            font-size: 11pt;
+            font-size: {qss_font_size(11)};
             color: palette(window-text);
         }}
         QLabel#freqDisplay {{
             font-family: "JetBrains Mono", "Fira Code", "Consolas", monospace;
-            font-size: 28pt;
+            font-size: {qss_font_size(28)};
             font-weight: 700;
             color: palette(window-text);
             background-color: palette(base);
@@ -627,7 +786,7 @@ class Theme:
             border: 1px solid palette(mid);
             border-radius: 8px;
             padding: 8px 16px;
-            font-size: 10pt;
+            font-size: {qss_font_size(10)};
         }}
         QPushButton:hover {{
             background-color: palette(light);
@@ -667,7 +826,7 @@ class Theme:
             border: 1px solid palette(mid);
             border-radius: 8px;
             padding: 6px 12px;
-            font-size: 10pt;
+            font-size: {qss_font_size(10)};
         }}
         QComboBox:hover {{
             border-color: palette(highlight);
@@ -745,7 +904,7 @@ class Theme:
             border: 1px solid palette(mid);
             border-radius: 8px;
             padding: 7px 12px;
-            font-size: 10pt;
+            font-size: {qss_font_size(10)};
         }}
         QLineEdit:focus {{
             border-color: palette(highlight);
@@ -757,7 +916,7 @@ class Theme:
             border-radius: 8px;
             padding: 6px;
             font-family: "JetBrains Mono", "Fira Code", "Consolas", monospace;
-            font-size: 9pt;
+            font-size: {qss_font_size(9)};
         }}
         QTabWidget::pane {{
             border: 1px solid palette(mid);
@@ -841,7 +1000,7 @@ class Theme:
             border-radius: 12px;
             margin-top: 16px;
             padding: 12px 10px 10px 10px;
-            font-size: 11pt;
+            font-size: {qss_font_size(11)};
             font-weight: 600;
             color: palette(window-text);
         }}
@@ -857,7 +1016,7 @@ class Theme:
             border: 1px solid palette(mid);
             border-radius: 8px;
             padding: 5px 10px;
-            font-size: 10pt;
+            font-size: {qss_font_size(10)};
         }}
         QSpinBox:focus, QDoubleSpinBox:focus {{
             border-color: palette(highlight);

@@ -2,8 +2,10 @@
 
 > 提出：2026-11-11 夜；来源：裁定②「150% 档的红治接收组：`DC 去除` 与 `IQ 平衡`
 > 那对复选框换行（273→138），**不要动书签组**」
-> 占用：`desktop/control_panel.py` 归 *设备缺口修复线*（pid 存活，TTL 未到）且工作树有
-> 他线未提交改动 → 按形态⑮只交补丁。
+> **状态：已落地**（2026-11-11 深夜，裁定②「批」后）。`desktop/control_panel.py`
+> 的 `iq_cal_row` 已改为 `QVBoxLayout`（spacing 2），与本文 §一 一致。
+> 补充：同文件书签组按钮也按同日裁定改竖排（`bookmark_add_btn` / `bookmark_del_btn`
+> → `QVBoxLayout`），见 `2026-11-11-right-column-width-margin.md` §7.5。
 > 验证工作树：`d:\mbdsdr\output\wt-fs`（detached @ `6e90e93b`）
 
 ## 一、改了什么
