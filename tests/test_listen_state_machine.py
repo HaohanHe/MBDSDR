@@ -68,23 +68,47 @@ def test_listen_has_three_states(win, monkeypatch):
 
 
 def test_default_perf_profile_applied_at_startup(win):
-    """默认省电档必须在启动时就真生效（FFT/谱线/刷新/GNSS），不是只在手动切档时才动。
+    """启动契约（2026-11-11 变更，提交 685e8f50）：FFT 点数由 schema 单一真值源
+    决定，默认性能档只负责「刷新间隔 + 送绘根数上限」。
 
-    病征（2026-11-10）：GNSS 轮询在定时器创建时按档设了，频谱 FFT/刷新却停在
-    面板默认高档——eco 名不副实，弱机启动即重载。修后启动即静默对齐三杠杆。
+    旧契约（性能档连带下发 FFT）已废弃：启动时按 eco 调 set_performance_mode(2)
+    会把用户写盘的 4096 覆盖成 1024（实测缺口 S-01）。因此这里断言
+    fft_size == SCHEMA["fft_size"].default，而不是 perf_profile 的参考点数。
+
+    反证：若有人把 reconfigure(1024, ...) 加回 set_performance_mode，
+    下面的「切档不得改写 fft_size / 下拉」断言必红。
+
     本例必须排在所有切档用例之前：module 共用 win，一旦被后面的用例改过档，
     startup 断言就失去意义（同 test_listen_defaults_off 的早序约定）。
     """
+    import config_schema
     from perf_profile import PROFILES, DEFAULT_PROFILE
     conf = PROFILES[DEFAULT_PROFILE]
     sp = win.spectrum
     gen = sp.generator
     level = conf["panel_level"]
-    assert gen.fft_size == conf["fft_size"]
-    assert gen.num_bins == sp._PERF_LEVELS[level][1]
+
+    # 1) FFT = schema 默认值（不是档位参考值，也不该被 eco 改写）
+    assert gen.fft_size == config_schema.SCHEMA["fft_size"].default, \
+        f"FFT 应由 schema 默认值决定，实际 {gen.fft_size}"
+
+    # 2) 档位只改刷新间隔与送绘根数上限
     assert sp._plot._timer.interval() == conf["spectrum_interval_ms"]
     assert sp._perf_combo.currentIndex() == level
+    assert 0 < gen.num_bins <= sp._PERF_LEVELS[level][1], \
+        f"送绘根数 {gen.num_bins} 应受档位上限 {sp._PERF_LEVELS[level][1]} 约束"
     assert win._gnss_timer.interval() == conf["gnss_poll_ms"]
+
+    # 3) 反证：切档不得改写 fft_size / FFT 下拉（FFT 单一真值源）
+    fft_before = gen.fft_size
+    combo_before = sp._fft_combo.currentText()
+    sp.set_performance_mode(0)
+    assert gen.fft_size == fft_before, \
+        f"性能档偷偷改写了 FFT：{fft_before} → {gen.fft_size}"
+    assert sp._fft_combo.currentText() == combo_before, \
+        "性能档不得偷偷改 FFT 下拉（FFT 只由 fft_size 下发）"
+    # 还原默认档，避免影响后续用例
+    sp.set_performance_mode(level)
 
 
 def test_start_iq_streams_does_not_auto_open_soundcard(win, monkeypatch):
@@ -192,15 +216,14 @@ def test_perf_profile_changes_gnss_poll_interval(win, monkeypatch):
     win._apply_perf_profile("eco")
 
 
-def test_perf_profile_changes_live_spectrum_fft_and_refresh(win):
-    """切档必须真改活对象：generator.fft_size/num_bins + plot._timer 刷新间隔。
+def test_perf_profile_changes_live_refresh_and_bins_cap(win):
+    """切档必须真改活对象：plot._timer 刷新间隔 + 送绘根数上限（**不改 FFT**）。
 
-    反证（2026-11-10 output/perf_lever_probe.py 实证）：旧 _apply_perf_profile
-    调 panel.set_fft_size（面板根本没有这方法，getattr 落空）+ 改从不 start 的
-    _iq_poll_timer，活对象全不变 = 假控件，状态栏却宣称「FFT/频谱刷新已生效」。
-    修后走既有 set_performance_mode 接缝：eco 真把 FFT 2048→1024、谱线 512→256、
-    刷新 50→100ms（4× 少 FFT 工作量 + 半刷新率），这才是「原地不动」的性能解药。
-    把任一杠杆改回死路径，本例即红。
+    契约变更（提交 685e8f50，2026-11-11）：FFT 点数的单一真值源是设置项
+    fft_size，性能档不再连带下发 FFT。本用例同时钉住两件事：
+    ① 刷新间隔与送绘根数上限必须真跟着档位动；
+    ② 切档不得改写 generator.fft_size（反证：谁把 reconfigure 加回
+       set_performance_mode，下面的 fft_before 断言必红）。
     """
     from perf_profile import PROFILES
     sp = win.spectrum
@@ -208,15 +231,20 @@ def test_perf_profile_changes_live_spectrum_fft_and_refresh(win):
     plot_timer = getattr(sp._plot, "_timer", None)
     assert plot_timer is not None, "频谱面板应有 live 刷新定时器"
 
+    fft_before = gen.fft_size
     win._apply_perf_profile("quality")
     q = PROFILES["quality"]
-    assert gen.fft_size == q["fft_size"]
-    assert plot_timer.interval() == q["spectrum_interval_ms"]
+    assert plot_timer.interval() == q["spectrum_interval_ms"] == 50
+    assert gen.fft_size == fft_before, "性能档不得改写 FFT 点数"
+    bins_quality = gen.num_bins
 
     win._apply_perf_profile("eco")
     e = PROFILES["eco"]
-    assert gen.fft_size == e["fft_size"] == 1024
-    assert gen.num_bins == 256, "eco=面板「低」档，谱线数应降到 256"
+    cap_eco = sp._PERF_LEVELS[e["panel_level"]][1]
+    assert gen.fft_size == fft_before, "性能档不得改写 FFT 点数"
+    assert 0 < gen.num_bins <= cap_eco == 256, \
+        f"eco=面板「低」档，送绘根数应受上限 256 约束，实际 {gen.num_bins}"
+    assert gen.num_bins <= bins_quality, "降档不得反而让送绘根数变多"
     assert plot_timer.interval() == e["spectrum_interval_ms"] == 100
     # 面板「性能」下拉同步到 eco（index 2），不与设置页打架
     assert sp._perf_combo.currentIndex() == e["panel_level"] == 2

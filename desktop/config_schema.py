@@ -264,8 +264,12 @@ ALL_ITEMS: Tuple[SettingItem, ...] = (
     # ---------------------------------------------------------------- 频谱与解码
     SettingItem(
         key="fft_size", group="频谱与解码", kind="enum",
-        label="频谱分辨率（FFT 点数）", default=2048,
-        help=("点数越大，频率分得越细但刷新越慢；2048 是速度与细节的平衡点。"
+        label="FFT 点数（计算分辨率）", default=2048,
+        help=("本项决定计算分辨率（RBW 与峰值测量精度）：点数越大，相邻频率越容易"
+              "被分开，但单帧 FFT 越慢。"
+              "显示分辨率不由本项决定——谱线会按 max 抽取到「画布像素宽 / 性能档」"
+              "允许的根数，因此选 4096 时屏幕上的列数通常仍是 512 根左右；"
+              "实际「计算 N / 显示 M」见频谱工具栏「更多 → FFT」行。"
               "更大的点数（8192/16384）当前内核不支持：C++ 侧与 AI 工具只认 "
               "1024/2048/4096，越界会被回退 2048（分辨率骤降 4×/8×），"
               "因此这里只暴露三档。"
@@ -286,7 +290,7 @@ ALL_ITEMS: Tuple[SettingItem, ...] = (
         key="fft_avg_frames", group="频谱与解码", kind="enum",
         label="频谱平均帧数", default=1,
         help=("多帧平均让底噪更平滑、弱信号更易读，但会拖慢响应。"
-              "联动：与「频谱分辨率（FFT 点数）」叠加，点数越大单帧越慢，"
+              "联动：与「FFT 点数（计算分辨率）」叠加，点数越大单帧越慢，"
               "平均帧数越多总延迟越高。"),
         source=("desktop/spectrum_widget.SpectrumDataGenerator.AVG_FRAMES"
                 "（默认第 0 项 1；档位 1/4/8/16）"),
@@ -425,18 +429,18 @@ ALL_ITEMS: Tuple[SettingItem, ...] = (
     # ---------------------------------------------------------------- 卫星与多普勒
     SettingItem(
         key="observer_lat", group="卫星与多普勒", kind="float",
-        label="地面站纬度", default=None, minimum=-90.0, maximum=90.0, step=0.000001,
+        label="观测地点纬度", default=None, minimum=-90.0, maximum=90.0, step=0.000001,
         storage="gui_config",
         help=("北纬为正。未设置时卫星过境/天空图保持空状态，不编造位置。"
-              "联动：需与「地面站经度」一起填写，缺任一项过境列表都为空。"),
+              "联动：需与「观测地点经度」一起填写，缺任一项过境列表都为空。"),
         source="desktop/main_window.py:447 初始 None；:7768 从 gui_config.json 读回",
     ),
     SettingItem(
         key="observer_lon", group="卫星与多普勒", kind="float",
-        label="地面站经度", default=None, minimum=-180.0, maximum=180.0, step=0.000001,
+        label="观测地点经度", default=None, minimum=-180.0, maximum=180.0, step=0.000001,
         storage="gui_config",
         help=("东经为正。与纬度一起决定过境时刻与多普勒曲线。"
-              "联动：需与「地面站纬度」一起填写，缺任一项过境列表都为空。"),
+              "联动：需与「观测地点纬度」一起填写，缺任一项过境列表都为空。"),
         source="desktop/main_window.py:447 初始 None；:7769 从 gui_config.json 读回",
     ),
     SettingItem(

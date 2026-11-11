@@ -156,6 +156,13 @@ BANDPLAN_CATEGORY_COLORS = {
 # 书签药丸高度（像素）：谱面顶部这一条带内点击 = 激活书签（不进调谐/拖拽）。
 _BM_TAG_H = 16.0
 
+# 右侧三根竖滑杆（缩放/最大/最小）的最小高（px）。
+# QSlider 自身的 minimumSizeHint 只有 16 px；旧值 90/80/80 把「三标签 + 三滑杆」
+# 列的最小高撑到 314，面板最小高 347，请求 303 时父容器只能裁掉末根滑杆下半段
+# 44 px（2026-11-11 实测：不是内容放不下，是 fixed 最小高）。50 是仍可拖动的
+# 下限：303 档下列高 270，三根实得约 70/84/84，底边 270 刚好贴住。
+_SLIDER_MIN_H = 50
+
 # 瀑布图默认色带：SDR++ 启动时加载的 Turbo 色表（waterfall.cpp:11-25 的
 # 经典色表在 SDR++ 里已被 Turbo 取代，见 docs/learn/sdrpp.md §3.5）。
 # 深紫蓝 → 蓝 → 青 → 绿 → 黄 → 橙 → 红 → 深红：弱信号（底噪）落在冷端，
@@ -2443,6 +2450,9 @@ class SpectrumPanel(QWidget):
         # 重绘唯一驱动是面板定时器（_plot._timer），但首帧/重连首帧可能还没
         # 排到定时器上，靠这个标记保证首屏一定画出来（见 _refresh_status_labels）。
         self._label_has_data = False
+        # 当前性能档索引（0 高 / 1 均衡 / 2 低）：送绘根数的上限由它决定
+        # （见 _apply_render_bins；性能下拉创建时默认也是第 0 项）。
+        self._perf_level = 0
 
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
@@ -2481,7 +2491,7 @@ class SpectrumPanel(QWidget):
         body.setSpacing(2)
         body.addWidget(self._splitter, stretch=1)
         # 滑杆列装进独立容器：星象仪底部条只有 180px 高，三根竖滑杆 + 标签的
-        # 最小高实测 347px，放进去会把谱面/瀑布连同「最小」标签一起挤出可视区。
+        # 最小高实测 247px，放进去会把谱面/瀑布连同「最小」标签一起挤出可视区。
         # 紧凑形态下整列收起（见 set_compact），缩放仍可用 Ctrl+滚轮/捏合。
         self._db_slider_col = QWidget()
         self._db_slider_col.setObjectName("dbSliderCol")
@@ -2516,9 +2526,10 @@ class SpectrumPanel(QWidget):
     def set_compact(self, on: bool) -> None:
         """紧凑形态（星象仪底部 180px 条）：收起右侧竖滑杆列、压低分区下限。
 
-        不这么做时实测面板最小高 347px（三根 80px 竖滑杆 + 标签），塞进
-        180px 槽里 QSplitter 按各自治最小高溢出：谱面 120px 与瀑布 60px
-        互相覆盖，频率轴被压进瀑布，「最小」标签整条出了面板（截图可判）。
+        不这么做时实测面板最小高 247px（三根 50px 竖滑杆 + 标签；旧 fixed
+        90/80/80 时是 347px），塞进 180px 槽里 QSplitter 按各自治最小高溢出：
+        谱面 120px 与瀑布 60px 互相覆盖，频率轴被压进瀑布，「最小」标签整条
+        出了面板（截图可判）。
         收起滑杆列后最小高回落到 160px，谱面约 100px、瀑布约 50px，
         缩放改用 Ctrl+滚轮/双指捏合。
 
@@ -2575,9 +2586,22 @@ class SpectrumPanel(QWidget):
         self._fft_combo = QComboBox()
         self._fft_combo.addItems([str(s) for s in SpectrumDataGenerator.FFT_SIZES])
         self._fft_combo.setCurrentText("2048")
-        self._fft_combo.currentTextChanged.connect(
-            lambda t: self.generator.set_fft_size(int(t)))
-        more_rows.append(_row(QLabel("FFT:"), self._fft_combo))
+        self._fft_combo.setToolTip(
+            "FFT 点数 = 计算分辨率（RBW/峰值测量精度）。\n"
+            "它不是屏幕上的列数：谱线会按画布像素宽与性能档 max 抽取后再画。")
+        self._fft_combo.currentTextChanged.connect(self._on_fft_size_changed)
+        # 真实口径标注：「计算 N / 显示 M」。M 是实际送绘根数（generator.num_bins），
+        # 用户能直接看出 4096 点并不等于 4096 列（2026-11-11 用户裁决：不许让
+        # 用户误以为看到的是 4096 的显示分辨率）。
+        self._fft_bin_label = QLabel()
+        self._fft_bin_label.setObjectName("fftBinTruthLabel")
+        self._fft_bin_label.setToolTip(
+            "计算 = FFT 点数（决定 RBW 与峰值测量精度）；\n"
+            "显示 = 实际送绘的谱线根数（由画布像素宽与性能档决定，max 抽取）。\n"
+            "两者不同不代表设置没生效：仍按 N 点计算，只是画布放不下那么多列。")
+        self._update_fft_bin_label()
+        more_rows.append(_row(QLabel("FFT:"), self._fft_combo,
+                              self._fft_bin_label))
 
         avg_label = QLabel("平均:")
         self._avg_combo = QComboBox()
@@ -2587,7 +2611,7 @@ class SpectrumPanel(QWidget):
             lambda t: self.generator.set_avg_frames(int(t)))
         more_rows.append(_row(avg_label, self._avg_combo))
 
-        # 性能模式（高/均衡/低）：只切刷新间隔；FFT 点数由设置项 fft_size 决定
+        # 性能模式（高/均衡/低）：切换 FFT 点数 / 谱线数 / 刷新间隔
         perf_label = QLabel("性能:")
         self._perf_combo = QComboBox()
         self._perf_combo.addItems(["高", "均衡", "低"])
@@ -2746,7 +2770,7 @@ class SpectrumPanel(QWidget):
         self._span_slider = QSlider(Qt.Vertical)
         self._span_slider.setRange(0, _SPAN_SLIDER_STEPS)
         self._span_slider.setValue(0)
-        self._span_slider.setMinimumHeight(90)
+        self._span_slider.setMinimumHeight(_SLIDER_MIN_H)
         self._span_slider.setToolTip(
             "缩放：上推收窄显示跨度（起始/截止频率靠拢），下拉回到全带宽。")
         self._span_slider.valueChanged.connect(self._on_span_slider_changed)
@@ -2765,9 +2789,9 @@ class SpectrumPanel(QWidget):
         self._db_max_slider.setInvertedAppearance(True)
         self._db_max_slider.setRange(-160, 0)
         self._db_max_slider.setValue(int(self._state.db_max))
-        # 100 而非 150：1000×600 下频谱页扣掉头部只剩 292px，
-        # 三根 150 滑杆 + 字条会把滑杆底端顶出面板（被裁）。
-        self._db_max_slider.setMinimumHeight(80)
+        # 最小高统一走 _SLIDER_MIN_H（50）：面板压到 303 时三根仍完整可见，
+        # 余下空间由 stretch=1 均分，不会被 fixed 尺寸顶出面板。
+        self._db_max_slider.setMinimumHeight(_SLIDER_MIN_H)
         self._db_max_slider.setToolTip(
             "显示上限：上推=整个谱面上移（放大弱信号），下拉=压缩量程。\n"
             "它只改显示刻度，不改增益。")
@@ -2782,7 +2806,7 @@ class SpectrumPanel(QWidget):
         self._db_min_slider.setInvertedAppearance(True)
         self._db_min_slider.setRange(-160, 0)
         self._db_min_slider.setValue(int(self._state.db_min))
-        self._db_min_slider.setMinimumHeight(80)
+        self._db_min_slider.setMinimumHeight(_SLIDER_MIN_H)
         self._db_min_slider.setToolTip(
             "显示下限：上推=弱信号也显示（抬高底噪），下拉=隐藏弱信号。\n"
             "它只改显示刻度，不改增益。")
@@ -2890,23 +2914,78 @@ class SpectrumPanel(QWidget):
         self._state.tune_mode = "center" if checked else "normal"
         self._tune_mode_btn.setText("调谐:中心" if checked else "调谐:VFO")
 
+    def _on_fft_size_changed(self, text: str):
+        """FFT 点数变更：改计算点数，并按当前画布重算送绘根数。"""
+        self.generator.set_fft_size(int(text))
+        self._apply_render_bins()
+        self._update_fft_bin_label()
+
+    def _update_fft_bin_label(self):
+        """把真实口径「计算 N / 显示 M」写进菜单行（M = 实际送绘根数）。"""
+        lbl = getattr(self, "_fft_bin_label", None)
+        if lbl is None:
+            return
+        lbl.setText(
+            f"计算 {self.generator.fft_size} / 显示 {self.generator.num_bins}")
+
     # ------------------------------------------------------------------ 性能模式
-    # level 0=高 / 1=均衡 / 2=低：刷新间隔档位。
-    # 第一列 FFT 点数只是档位设计参考值，**不再参与下发**：FFT 的单一真值源
-    # 是设置项 fft_size（见 set_performance_mode 注释）。
+    # level 0=高 / 1=均衡 / 2=低：送绘根数上限、刷新间隔档位。
+    # 第一列的 FFT 点数只是档位设计参考值，**不再参与下发**：FFT 的单一
+    # 真值源是设置项 fft_size（见 set_performance_mode 注释）。
+    # 第二列是**上限**而不是固定值：实际根数 = min(FFT 点数, 画布像素宽, 上限)，
+    # 见 _bins_for_width / _apply_render_bins（2026-11-11 用户裁决：画布放不下
+    # 的谱线不许假装画出来，也不许把 4096 点全送出去）。
     _PERF_LEVELS = (
-        # (参考点数, 送绘根数上限, refresh_ms)
-        (2048, 512, 50),
-        (1024, 384, 66),
-        # 2026-11-06：低档原为 512 点，而 FFT_SIZES 白名单只有 1024/2048/4096
-        # （C++/AI/schema 同口径）。512 绕过校验生效后，非可编辑下拉框
-        # setCurrentText("512") 找不到项、静默无效 → 下拉显示 2048、实际 512、
-        # RBW 又按 512 算，三处互相矛盾。低档改用合法档 1024（仍比高档省 4 倍）。
+        # (fft_size, bins_cap, refresh_ms)
+        (2048, 2048, 50),
+        (1024, 512, 66),
+        # 低档（默认 eco）：根数上限保持 256，不因画布变宽而加倍，守住省电预算。
         (1024, 256, 100),
     )
+    #: 送绘根数的合法档：必须整除 FFT 点数，才能走 _resample_max 的
+    #: reshape+max 快速路径（非整除会退回逐 bin 循环，明显更慢）。
+    _BINS_STEPS = (64, 128, 256, 512, 1024, 2048, 4096)
+
+    @classmethod
+    def _bins_for_width(cls, fft_size: int, width_px: int, cap: int) -> int:
+        """送绘根数 = min(FFT 点数, 画布像素宽, 档位上限)，取最接近的整除档。
+
+        画布上每多一根谱线最多对应 1 px——比像素还密的列只会互相覆盖，
+        没有信息量，却要付折线与重采样的成本。因此以画布像素宽为目标，
+        在能整除 FFT 点数的 2 的幂里取**比值最接近**的一档（256/512/1024…），
+        既不多送，也保住 _resample_max 的 reshape+max 快速路径。
+        """
+        fft_size = int(fft_size)
+        limit = max(cls._BINS_STEPS[0], min(fft_size, int(cap)))
+        target = float(max(1, int(width_px)))
+        cands = [d for d in cls._BINS_STEPS
+                 if d <= limit and fft_size % d == 0]
+        if not cands:
+            return min(limit, fft_size)
+        return min(cands, key=lambda d: abs(math.log(d / target)))
+
+    def _apply_render_bins(self) -> int:
+        """按当前画布宽度重算送绘根数；变化时重建 spectrum/瀑布缓冲。
+
+        量化到 _BINS_STEPS，所以拖动窗口时只在跨档（512↔1024）时重建一次，
+        不会每个像素都清空瀑布历史。
+        """
+        if not hasattr(self, "_fft_plot"):
+            return self.generator.num_bins
+        cap = self._PERF_LEVELS[self._perf_level][1]
+        want = self._bins_for_width(
+            self.generator.fft_size, self._fft_plot.width(), cap)
+        if want != self.generator.num_bins:
+            self.generator.reconfigure(self.generator.fft_size, want)
+            self._update_fft_bin_label()
+        return want
+
+    def resizeEvent(self, event):  # noqa: N802 - Qt 命名
+        super().resizeEvent(event)
+        self._apply_render_bins()
 
     def set_performance_mode(self, level: int):
-        """切换渲染性能档位：只调绘图刷新间隔（不改 FFT 点数）。
+        """切换渲染性能档位：只调绘图刷新间隔与送绘根数上限（不改 FFT 点数）。
 
         FFT 点数的单一真值源是设置项的 fft_size（经 SettingsPanel.
         _apply_fft_size 下发）。性能档若顺手 reconfigure，启动时回推的
@@ -2915,11 +2994,15 @@ class SpectrumPanel(QWidget):
         level = int(level)
         if not (0 <= level < len(self._PERF_LEVELS)):
             return
+        self._perf_level = level
         _, _bins_cap, refresh_ms = self._PERF_LEVELS[level]
         # 调整绘图定时器刷新间隔（QTimer.setInterval 即时生效）
         timer = getattr(self._plot, "_timer", None)
         if timer is not None:
             timer.setInterval(refresh_ms)
+        # 档位上限可能变窄：按当前画布重算送绘根数（FFT 点数保持不变）
+        self._apply_render_bins()
+        self._update_fft_bin_label()
         self._refresh_status_labels()
 
     # ------------------------------------------------------------------ 调色板 / 平滑
