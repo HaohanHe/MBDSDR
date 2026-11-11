@@ -5426,6 +5426,14 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
     # 赤道网格 (RA 时圈 + 赤纬圈), lines.c equatorial
     # ------------------------------------------------------------------ #
     def _draw_eq_grid(self, painter: QPainter):
+        """赤道网格（RA 时圈 + 赤纬圈）。
+
+        W80：整环一次批量变换。旧版逐点 ``j2000_to_altaz`` + ``azalt_from_vec``，
+        每帧 6×25 + 12×17 = 354 次 Python 调用，每次都重建岁差/章动/地平矩阵；
+        改成每环一次 ``j2000_to_altaz_many`` + ``azalt_from_vec_many``（共 18 次）。
+        绘制语义逐点不变：出画即断线（first=True），与旧版一致。
+        用视高度绘制（与恒星同帧），否则地平附近网格与星点错开约 0.5°。
+        """
         gs = self._ground_station()
         if gs is None:
             return
@@ -5433,50 +5441,40 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         painter.save()
         grid_col = QColor(88, 92, 99, 70)  # gray_400 带 alpha（赤道网格）
         painter.setPen(QPen(grid_col, 1, Qt.DotLine))
+
+        def _ring_path(ras_deg, decs_deg):
+            try:
+                vecs = np.array([vec_from_radec(float(ra), float(dec))
+                                 for ra, dec in zip(ras_deg, decs_deg)], dtype=float)
+                altaz = j2000_to_altaz_many(vecs, gs, jd)
+                azs, alts = azalt_from_vec_many(altaz)
+            except Exception:
+                return None
+            path = QPainterPath()
+            first = True
+            for az, alt in zip(azs, alts):
+                p = self._sky_to_screen(float(az), self._display_alt_deg(float(alt)))
+                if not self._on_screen(p):
+                    first = True
+                    continue
+                if first:
+                    path.moveTo(p); first = False
+                else:
+                    path.lineTo(p)
+            return path
+
         # 赤纬圈: 每 30°, RA 扫一圈
         for dec in range(-60, 91, 30):
-            path = QPainterPath()
-            first = True
-            for rah in range(0, 25):  # 0..24h
-                ra = rah * 15.0
-                try:
-                    v = j2000_to_altaz(vec_from_radec(float(ra), float(dec)), gs, jd)
-                    from mbdsdr_ai.celestial_geometry import azalt_from_vec
-                    az, alt = azalt_from_vec(v)
-                except Exception:
-                    continue
-                # 赤道网格与恒星同帧绘制：用视高度，否则网格与星点在
-                # 地平附近错开约 0.5°。
-                p = self._sky_to_screen(az, self._display_alt_deg(alt))
-                if not self._on_screen(p):
-                    first = True
-                    continue
-                if first:
-                    path.moveTo(p); first = False
-                else:
-                    path.lineTo(p)
-            painter.drawPath(path)
+            path = _ring_path([rah * 15.0 for rah in range(0, 25)],
+                              [float(dec)] * 25)
+            if path is not None:
+                painter.drawPath(path)
         # RA 时圈: 每 2h, dec 扫一圈
         for rah in range(0, 24, 2):
-            ra = rah * 15.0
-            path = QPainterPath()
-            first = True
-            for dec in range(-80, 81, 10):
-                try:
-                    v = j2000_to_altaz(vec_from_radec(float(ra), float(dec)), gs, jd)
-                    from mbdsdr_ai.celestial_geometry import azalt_from_vec
-                    az, alt = azalt_from_vec(v)
-                except Exception:
-                    continue
-                p = self._sky_to_screen(az, self._display_alt_deg(alt))
-                if not self._on_screen(p):
-                    first = True
-                    continue
-                if first:
-                    path.moveTo(p); first = False
-                else:
-                    path.lineTo(p)
-            painter.drawPath(path)
+            path = _ring_path([float(rah * 15.0)] * 17,
+                              list(range(-80, 81, 10)))
+            if path is not None:
+                painter.drawPath(path)
         painter.restore()
 
     def _draw_camera_hud(self, painter: QPainter):
