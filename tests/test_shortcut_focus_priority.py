@@ -62,7 +62,7 @@ def spectrum_plot(qapp):
 
 
 @pytest.fixture(scope="module")
-def main_window(qapp):
+def main_window(qapp, isolated_profile):
     from main_window import MainWindow
     w = MainWindow()
     w.show()
