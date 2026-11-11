@@ -172,7 +172,7 @@ def _isolated(isolated_profile):
 
 
 @pytest.fixture(scope="module")
-def mw():
+def mw(isolated_profile):
     from main_window import MainWindow
     from PySide6.QtCore import QTimer
     w = MainWindow()
