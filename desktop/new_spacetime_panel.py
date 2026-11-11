@@ -26,6 +26,7 @@ from __future__ import annotations
 import os
 import sys
 import threading
+from datetime import datetime, timezone
 from typing import List, Optional
 
 import numpy as np
@@ -37,7 +38,7 @@ from PySide6.QtGui import (
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QFormLayout, QGroupBox, QLabel,
     QDoubleSpinBox, QPushButton, QProgressBar, QTableWidget,
-    QTableWidgetItem, QHeaderView, QSizePolicy,
+    QTableWidgetItem, QHeaderView, QSizePolicy, QLineEdit,
 )
 
 # ---------------------------------------------------------------------------
@@ -119,6 +120,24 @@ _NO_SIGNAL_TEXT = "未检测到信号"
 _NO_OBSERVER_HINT = (
     "未设置观测地点：点上方「更改地点…」搜索城市、地图点选或手填经纬度")
 _NA = "--"
+
+
+class _SortKeyItem(QTableWidgetItem):
+    """按 UserRole 排序键比较的表格项。
+
+    过境表左列是「卫星名\\n升起→中天→落下」混排文本，按字面排序会得到字母序
+    而不是过境时间序；右列「45.0°\\n12.0 分」同理。排序键统一走 UserRole。
+    """
+
+    def __lt__(self, other) -> bool:  # noqa: D105 - Qt 排序钩子
+        mine = self.data(Qt.UserRole)
+        theirs = other.data(Qt.UserRole)
+        if mine is None or theirs is None:
+            return QTableWidgetItem.__lt__(self, other)
+        try:
+            return mine < theirs
+        except TypeError:
+            return QTableWidgetItem.__lt__(self, other)
 
 
 # ===========================================================================
@@ -322,6 +341,14 @@ class NewSpacetimePanel(QWidget):
         self._pass_show_low = effective_show_low_elevation_passes(settings)
         self._pass_window_hours = effective_pass_window_hours(settings)
 
+        # 已加载的过境（筛选只在显示层隐藏行，不丢原始数据，也不重算过境）
+        self._passes: List[SatellitePass] = []
+        # 行点击定位命中的过境（供宿主/测试读取）
+        self._located_pass: Optional[SatellitePass] = None
+        # 倒计时时钟可注入：TimelineEngine 的 rise_time 是 tz-aware UTC，
+        # 这里同口径；测试注入固定 now（naive/aware 都支持）。
+        self._clock = lambda: datetime.now(timezone.utc)
+
         # 后端引擎（纯对象，构造不联网）
         self._tle_mgr = TLEManager()
         self._engine = TimelineEngine()
@@ -353,6 +380,13 @@ class NewSpacetimePanel(QWidget):
         self._sync_timer.setInterval(60_000)
         self._sync_timer.timeout.connect(self._refresh_time_sync_local)
         self._sync_timer.start()
+
+        # 「下一次过境」倒计时：1 Hz 只更新一条标签（不逐行铺）；无过境时回调
+        # 直接收起标签，构造期不做任何计算。
+        self._countdown_timer = QTimer(self)
+        self._countdown_timer.setInterval(1000)
+        self._countdown_timer.timeout.connect(self._update_next_pass_countdown)
+        self._countdown_timer.start()
 
     # ------------------------------------------------------------------ UI
     def _build_ui(self) -> None:
@@ -466,6 +500,15 @@ class NewSpacetimePanel(QWidget):
         self.passes_filter_label.setWordWrap(True)
         lay.addWidget(self.passes_filter_label)
 
+        # 显示层筛选：只过滤已算出的行（卫星名 / 时刻），不重新算过境、不联网。
+        # 无输入时行为与改前一致；输入不匹配时由 _apply_passes_filter 给明确文案。
+        self.passes_filter_edit = QLineEdit()
+        self.passes_filter_edit.setObjectName("passesFilterEdit")
+        self.passes_filter_edit.setPlaceholderText("筛选卫星名或时刻…")
+        self.passes_filter_edit.setClearButtonEnabled(True)
+        self.passes_filter_edit.textChanged.connect(self._apply_passes_filter)
+        lay.addWidget(self.passes_filter_edit)
+
         # 过境表格：右栏只有 ~300px 宽，7 列曾在屏上挤成「卫(U / 升起(U /
         # 大仰 仪」——表头与单元格都被横向硬切，数字读不出来。改成两行一行的
         # 两列版式：左列卫星名 + 过境时刻（升起→中天→落下 · 最大多普勒），
@@ -484,6 +527,13 @@ class NewSpacetimePanel(QWidget):
         self.passes_table.setEditTriggers(QTableWidget.NoEditTriggers)
         self.passes_table.setSelectionBehavior(QTableWidget.SelectRows)
         self.passes_table.setMinimumHeight(96)
+        # 表头排序：点表头按「升起时刻 / 峰值仰角」排，不按两行混排的字面文本。
+        # 行高仍由 resizeRowsToContents 统一决定，不另设固定行高。
+        self.passes_table.setSortingEnabled(True)
+        hdr.setSortIndicatorShown(True)
+        hdr.setSortIndicator(0, Qt.AscendingOrder)
+        # 行点击定位：整行选中 + 滚到可见；命中的过境记在 _located_pass。
+        self.passes_table.itemClicked.connect(self._on_pass_clicked)
         # 首次打开还没有过境数据：先只显示提示句，刷出结果再展开表格。
         self.passes_table.setVisible(False)
         lay.addWidget(self.passes_table)
@@ -496,6 +546,15 @@ class NewSpacetimePanel(QWidget):
         self.passes_hint.setStyleSheet(f"color: {COLOR_TEXT_SEC};")
         self.passes_hint.setAlignment(Qt.AlignCenter)
         lay.addWidget(self.passes_hint)
+
+        # 「下一次过境」单行倒计时：只此一条，不逐行铺；无过境时整行收起。
+        self.next_pass_label = QLabel("")
+        self.next_pass_label.setObjectName("nextPassLabel")
+        self.next_pass_label.setStyleSheet(
+            f"color: {COLOR_TEXT}; font-weight: 600;")
+        self.next_pass_label.setWordWrap(True)
+        self.next_pass_label.setVisible(False)
+        lay.addWidget(self.next_pass_label)
 
         return box
 
@@ -859,17 +918,22 @@ class NewSpacetimePanel(QWidget):
         return lines
 
     def _populate_passes(self, passes: List[SatellitePass]) -> None:
+        self._passes = list(passes)
+        self._located_pass = None
+        # 排序开着时逐格 setItem 会边填边重排、行号错位：先关，填完再按表头
+        # 当前排序方向重排。行高仍由 resizeRowsToContents 统一决定。
+        self.passes_table.setSortingEnabled(False)
         self.passes_table.setRowCount(0)
         if not passes:
             # 空表格会留一块 150px 的无字黑框把提示挤到最下面；没有行就干脆
             # 收起表头，只留一句「为什么空、下一步做什么」。
             self.passes_table.setVisible(False)
             self.passes_hint.setVisible(True)
+            self.next_pass_label.setVisible(False)
+            self.passes_table.setSortingEnabled(True)
             return
-        self.passes_table.setVisible(True)
-        self.passes_hint.setVisible(False)
         self.passes_table.setRowCount(len(passes))
-        for row, p in enumerate(passes):
+        for idx, p in enumerate(passes):
             # 低仰角 = 峰值低于用户设置门（只有开关打开时才会进列表）
             low = (self._pass_show_low
                    and p.max_elevation < self._pass_min_elevation_deg)
@@ -887,8 +951,11 @@ class NewSpacetimePanel(QWidget):
                      f"{self._fmt_pass_time(p.max_time, p)} → "
                      f"{self._fmt_pass_time(p.set_time, p)}"
                      f" · {p.max_doppler_hz / 1000.0:+.1f} kHz")
-            item = QTableWidgetItem(f"{name}\n{times}")
+            item = _SortKeyItem(f"{name}\n{times}")
             item.setTextAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+            # 排序键 = 升起时刻（不是两行混排的字面文本）；点击定位用 UserRole+1
+            item.setData(Qt.UserRole, self._pass_sort_key(p.rise_time))
+            item.setData(Qt.UserRole + 1, idx)
             item.setToolTip(
                 f"{p.name}\n"
                 f"升起 {self._fmt_dt(p.rise_time)}\n"
@@ -897,14 +964,116 @@ class NewSpacetimePanel(QWidget):
                 f"最大仰角 {p.max_elevation:.1f}°\n"
                 f"持续 {p.duration_sec / 60.0:.1f} 分钟\n"
                 f"最大多普勒 {p.max_doppler_hz:+.0f} Hz")
-            self.passes_table.setItem(row, 0, item)
+            self.passes_table.setItem(idx, 0, item)
 
             # 右列两行：峰值仰角 / 持续分钟
-            right = QTableWidgetItem(
+            right = _SortKeyItem(
                 f"{p.max_elevation:.1f}°\n{p.duration_sec / 60.0:.1f} 分")
             right.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
-            self.passes_table.setItem(row, 1, right)
+            right.setData(Qt.UserRole, float(p.max_elevation))
+            right.setData(Qt.UserRole + 1, idx)
+            self.passes_table.setItem(idx, 1, right)
         self.passes_table.resizeRowsToContents()
+        self.passes_table.setSortingEnabled(True)
+        self._apply_passes_filter(self.passes_filter_edit.text())
+        self._update_next_pass_countdown()
+
+    @staticmethod
+    def _pass_sort_key(dt) -> float:
+        """排序键：升起时刻的 epoch 秒；缺时刻排到最后（不伪装成最早）。"""
+        if dt is None:
+            return float("inf")
+        try:
+            return float(dt.timestamp())
+        except (AttributeError, ValueError, OSError):
+            return float("inf")
+
+    def _apply_passes_filter(self, text: str) -> None:
+        """按卫星名 / 时刻过滤已算出的行（空白分词，全部命中才显示）。
+
+        空结果必须给明确文案并收起表格：否则用户看到的是「表突然没了」，
+        分不清是筛选没命中还是过境刷新失败。
+        """
+        if not self._passes:
+            return
+        tokens = [t for t in str(text or "").lower().split() if t]
+        visible = 0
+        for row in range(self.passes_table.rowCount()):
+            label = ""
+            for col in range(self.passes_table.columnCount()):
+                item = self.passes_table.item(row, col)
+                if item is not None:
+                    label += " " + item.text().lower()
+            hit = all(t in label for t in tokens)
+            self.passes_table.setRowHidden(row, not hit)
+            if hit:
+                visible += 1
+        if visible:
+            self.passes_table.setVisible(True)
+            self.passes_hint.setVisible(False)
+            return
+        self.passes_table.setVisible(False)
+        self.passes_hint.setText(
+            f"筛选无结果：没有卫星名或时刻包含「{str(text).strip()}」"
+            f"（共 {len(self._passes)} 条过境，清空筛选框可恢复全部）。")
+        self.passes_hint.setVisible(True)
+
+    def _on_pass_clicked(self, item: QTableWidgetItem) -> None:
+        """行点击定位：整行选中 + 滚到可见，并记录命中的过境。"""
+        if item is None:
+            return
+        row = item.row()
+        self.passes_table.selectRow(row)
+        self.passes_table.setCurrentCell(row, item.column())
+        idx = item.data(Qt.UserRole + 1)
+        if isinstance(idx, int) and 0 <= idx < len(self._passes):
+            self._located_pass = self._passes[idx]
+        self.passes_table.scrollToItem(item, QTableWidget.PositionAtCenter)
+
+    def _update_next_pass_countdown(
+            self, now: Optional[datetime] = None) -> None:
+        """只显示「下一次过境」（未开始且升起最早那条）的倒计时。
+
+        筛选/排序只影响表格显示，不改变这里的判定；没有未来过境就整行收起，
+        绝不逐行铺倒计时。
+        """
+        upcoming = [p for p in self._passes if p.rise_time is not None]
+        if not upcoming:
+            self.next_pass_label.setVisible(False)
+            return
+        current = now if now is not None else self._clock()
+        future = []
+        for p in upcoming:
+            remain = self._remain_seconds(p.rise_time, current)
+            if remain is not None and remain > 0:
+                future.append((remain, p))
+        if not future:
+            # 列表里全是已开始的过境：说清「下一步」而不是硬报一个过去时刻
+            self.next_pass_label.setText(
+                "列表内过境均已开始：点「刷新过境」获取下一轮。")
+            self.next_pass_label.setVisible(True)
+            return
+        remain, nxt = min(future, key=lambda pair: pair[0])
+        target = nxt.rise_time.strftime("%m-%d %H:%M:%S")
+        hours, rem = divmod(int(remain), 3600)
+        minutes, seconds = divmod(rem, 60)
+        clock = (f"{hours:d}:{minutes:02d}:{seconds:02d}" if hours
+                 else f"{minutes:02d}:{seconds:02d}")
+        self.next_pass_label.setText(
+            f"下一次过境：{nxt.name} · {clock} 后（{target} UTC）")
+        self.next_pass_label.setVisible(True)
+
+    @staticmethod
+    def _remain_seconds(rise: datetime, current: datetime) -> Optional[float]:
+        """两个时刻的秒差；时区口径不同（naive vs aware）时统一到 rise 口径。"""
+        try:
+            if rise.tzinfo is None and current.tzinfo is not None:
+                current = current.replace(tzinfo=None)
+            elif rise.tzinfo is not None and current.tzinfo is None:
+                current = current.replace(tzinfo=timezone.utc)
+            return (rise - current).total_seconds()
+        except (TypeError, ValueError):
+            return None
 
     @staticmethod
     def _pass_crosses_utc_day(p: SatellitePass) -> bool:

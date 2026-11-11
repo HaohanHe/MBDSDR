@@ -29,6 +29,7 @@ sys.path.insert(0, _ROOT)
 
 import numpy as np  # noqa: E402
 
+from PySide6.QtCore import Qt  # noqa: E402
 from PySide6.QtWidgets import QApplication, QGroupBox  # noqa: E402
 
 
@@ -208,10 +209,10 @@ def test_panel_layout_sections(qapp):
 # ---------------------------------------------------------------------------
 # 10. 跨 UTC 日界的过境必须带日期（P1-16）
 # ---------------------------------------------------------------------------
-def _mk_pass(name, rise, mx, st):
+def _mk_pass(name, rise, mx, st, max_elevation=45.0):
     return SatellitePass(
         name=name, rise_time=rise, rise_azimuth=0.0,
-        max_time=mx, max_elevation=45.0, max_azimuth=0.0,
+        max_time=mx, max_elevation=max_elevation, max_azimuth=0.0,
         set_time=st, set_azimuth=0.0, duration_sec=720.0,
         max_doppler_hz=-2500.0)
 
@@ -245,6 +246,180 @@ def test_cross_utc_day_pass_shows_date(qapp):
         assert "23:58 → 00:03" not in text_cross
         assert "12:00" in text_same
         assert "11-12" not in text_same
+    finally:
+        panel.close()
+
+
+# ---------------------------------------------------------------------------
+# 11. W84-P1-15：表头排序 —— 行序真的按过境时刻/峰值仰角变（不是按显示文本）
+# ---------------------------------------------------------------------------
+def _visible_rows(panel):
+    return sum(1 for r in range(panel.passes_table.rowCount())
+               if not panel.passes_table.isRowHidden(r))
+
+
+def test_pass_table_header_sort_reorders_rows(qapp):
+    """插入序是 LATE→EARLY→MID，排序后行序必须真的变。
+
+    改前 passes_table 没开 sortingEnabled，行序恒等于插入序 → 本用例红。
+    左列显示文本是「卫星名\\n时刻」，若按字面排则是 EARLY→LATE→MID 的
+    字母序，与时刻序不同；这里断言以「升起时刻」为键。
+    """
+    from datetime import datetime
+    panel = NewSpacetimePanel()
+    try:
+        late = _mk_pass(
+            "LATE", datetime(2026, 12, 1, 20, 0), datetime(2026, 12, 1, 20, 5),
+            datetime(2026, 12, 1, 20, 9), max_elevation=10.0)
+        early = _mk_pass(
+            "EARLY", datetime(2026, 12, 1, 1, 0), datetime(2026, 12, 1, 1, 5),
+            datetime(2026, 12, 1, 1, 9), max_elevation=80.0)
+        mid = _mk_pass(
+            "MID", datetime(2026, 12, 1, 10, 0), datetime(2026, 12, 1, 10, 5),
+            datetime(2026, 12, 1, 10, 9), max_elevation=45.0)
+        panel._populate_passes([late, early, mid])
+
+        def name_at(row):
+            return panel.passes_table.item(row, 0).text().split("\n")[0]
+
+        # 默认升序（表头第 0 列）：最早的 EARLY 排第一，插入序已被打乱
+        assert name_at(0) == "EARLY"
+        assert name_at(2) == "LATE"
+
+        # 点表头第 0 列降序：行序真的翻转
+        panel.passes_table.sortItems(0, Qt.DescendingOrder)
+        assert name_at(0) == "LATE"
+        assert name_at(2) == "EARLY"
+
+        # 第 1 列按峰值仰角：降序时 80° 的 EARLY 回到第一
+        panel.passes_table.sortItems(1, Qt.DescendingOrder)
+        assert name_at(0) == "EARLY"
+        panel.passes_table.sortItems(1, Qt.AscendingOrder)
+        assert name_at(0) == "LATE"
+    finally:
+        panel.close()
+
+
+# ---------------------------------------------------------------------------
+# 12. W84-P1-15：筛选输入框 —— 行数变化，空结果有明确文案
+# ---------------------------------------------------------------------------
+def test_pass_filter_changes_rows_and_empty_result_text(qapp):
+    """改前面板没有筛选入口 → `passes_filter_edit` 不存在，本用例红。"""
+    from datetime import datetime
+    panel = NewSpacetimePanel()
+    try:
+        panel._populate_passes([
+            _mk_pass("ALPHA-1", datetime(2026, 12, 2, 1, 0),
+                     datetime(2026, 12, 2, 1, 5), datetime(2026, 12, 2, 1, 9)),
+            _mk_pass("BETA-2", datetime(2026, 12, 2, 2, 0),
+                     datetime(2026, 12, 2, 2, 5), datetime(2026, 12, 2, 2, 9)),
+            _mk_pass("GAMMA-3", datetime(2026, 12, 2, 3, 0),
+                     datetime(2026, 12, 2, 3, 5), datetime(2026, 12, 2, 3, 9)),
+        ])
+        assert _visible_rows(panel) == 3
+
+        panel.passes_filter_edit.setText("alpha")
+        assert _visible_rows(panel) == 1
+        assert not panel.passes_table.isHidden()
+
+        # 空结果：表收起 + 提示写明原因和恢复办法（不能留一块无字框）
+        panel.passes_filter_edit.setText("zzz-no-such-sat")
+        assert _visible_rows(panel) == 0
+        assert panel.passes_table.isHidden()
+        assert not panel.passes_hint.isHidden()
+        hint = panel.passes_hint.text()
+        assert "筛选无结果" in hint
+        assert "zzz-no-such-sat" in hint
+        assert "3 条过境" in hint
+
+        # 清空筛选恢复全部行
+        panel.passes_filter_edit.setText("")
+        assert _visible_rows(panel) == 3
+        assert not panel.passes_table.isHidden()
+    finally:
+        panel.close()
+
+
+# ---------------------------------------------------------------------------
+# 13. W84-P1-15：下一次过境倒计时 —— 只一条，且目标时刻 = 全表最早升起
+# ---------------------------------------------------------------------------
+def test_next_pass_countdown_matches_earliest_rise(qapp):
+    """改前没有倒计时控件/更新入口，本用例红。"""
+    from datetime import datetime
+    panel = NewSpacetimePanel()
+    try:
+        later = _mk_pass(
+            "LATER", datetime(2026, 12, 1, 3, 0), datetime(2026, 12, 1, 3, 5),
+            datetime(2026, 12, 1, 3, 9))
+        nxt = _mk_pass(
+            "NEXT", datetime(2026, 12, 1, 1, 0, 30),
+            datetime(2026, 12, 1, 1, 5), datetime(2026, 12, 1, 1, 9))
+        # 插入序反着来，验证挑选依据是升起时刻而不是行序
+        panel._populate_passes([later, nxt])
+
+        fixed = datetime(2026, 12, 1, 0, 0, 0)
+        panel._update_next_pass_countdown(now=fixed)
+        text = panel.next_pass_label.text()
+        assert not panel.next_pass_label.isHidden()
+        assert "NEXT" in text
+        # 倒计时目标时刻与「下一次过境」的升起时间一致
+        assert "12-01 01:00:30" in text
+        assert "1:00:30 后" in text
+
+        # 筛选只影响表格显示，不改变「下一次过境」的判定
+        panel.passes_filter_edit.setText("LATER")
+        panel._update_next_pass_countdown(now=fixed)
+        assert "NEXT" in panel.next_pass_label.text()
+
+        # 02:00 时 NEXT 已升起：「下一次」自动顺延到尚未开始的 LATER
+        panel._update_next_pass_countdown(now=datetime(2026, 12, 1, 2, 0, 0))
+        assert "LATER" in panel.next_pass_label.text()
+        assert "1:00:00 后" in panel.next_pass_label.text()
+        assert "12-01 03:00:00" in panel.next_pass_label.text()
+
+        # 全部已开始：不硬报过去时刻，明确让用户刷新
+        panel._update_next_pass_countdown(now=datetime(2026, 12, 1, 4, 0, 0))
+        assert "均已开始" in panel.next_pass_label.text()
+
+        # 生产口径：TimelineEngine 产出 tz-aware UTC 的 rise_time + aware 时钟
+        from datetime import timezone
+        aware = _mk_pass(
+            "AWARE", datetime(2026, 12, 1, 5, 0, tzinfo=timezone.utc),
+            datetime(2026, 12, 1, 5, 5, tzinfo=timezone.utc),
+            datetime(2026, 12, 1, 5, 9, tzinfo=timezone.utc))
+        panel._populate_passes([aware])
+        panel._clock = lambda: datetime(2026, 12, 1, 4, 0, tzinfo=timezone.utc)
+        panel._update_next_pass_countdown()
+        assert "AWARE" in panel.next_pass_label.text()
+        assert "1:00:00 后" in panel.next_pass_label.text()
+        assert "12-01 05:00:00" in panel.next_pass_label.text()
+    finally:
+        panel.close()
+
+
+# ---------------------------------------------------------------------------
+# 14. W84-P1-15：行点击定位 —— 选中整行并记录命中的过境
+# ---------------------------------------------------------------------------
+def test_pass_row_click_locates_pass(qapp):
+    """改前 itemClicked 未接线，currentRow / _located_pass 都不会更新 → 红。"""
+    from datetime import datetime
+    panel = NewSpacetimePanel()
+    try:
+        passes = [
+            _mk_pass(f"SAT-{i:02d}", datetime(2026, 12, 1, 0, i, 0),
+                     datetime(2026, 12, 1, 0, i, 5),
+                     datetime(2026, 12, 1, 0, i, 9))
+            for i in range(20)
+        ]
+        panel._populate_passes(passes)
+        item = panel.passes_table.item(7, 0)
+        assert item is not None
+        panel._on_pass_clicked(item)
+        assert panel.passes_table.currentRow() == 7
+        assert panel._located_pass is not None
+        assert panel._located_pass.name == "SAT-07"
+        selected = panel.passes_table.selectedItems()
+        assert selected and all(i.row() == 7 for i in selected)
     finally:
         panel.close()
 
