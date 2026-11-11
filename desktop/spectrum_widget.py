@@ -3474,6 +3474,14 @@ class _TuningPlotMixin:
             if rng is None:
                 continue
             x0, x1 = rng
+            # 窄带保护：宽度 ≤ 2×边沿容差时左右手柄互相覆盖，body 永远进不去
+            # （2.4 MHz span 落在 1000 px 上时 1 px≈2.4 kHz，2.7 kHz USB 通带
+            # 只有约 1.1 px）。此时整条按 body 处理，不提供边沿手柄；命中
+            # footprint 与旧手柄一致（±edge），不额外放大拦截范围。
+            if x1 - x0 <= 2 * edge:
+                if x0 - edge <= x_px <= x1 + edge:
+                    return vfo, 'body'
+                continue
             if abs(x_px - x0) <= edge:
                 return vfo, 'left'
             if abs(x_px - x1) <= edge:
@@ -4061,15 +4069,33 @@ class _TuningPlotMixin:
         best = hits[0][1]
         return best[3], best[4], best[5]
 
+    def _end_all_gestures(self):
+        """松手统一清拖拽态（release 入口无条件调用，分支只负责副作用）。
+
+        返回 (vfo, vfo_mode, rf_shift, was_create)：这些上下文决定分支副作用，
+        必须在清空前读出——尤其 `_vfo_drag_vfo`，先清后读会丢拖拽目标，
+        发不出 vfo_moved / vfo_bw_changed。
+        """
+        ctx = (self._vfo_drag_vfo, self._vfo_drag_mode,
+               self._rf_shift, self._vfo_create_mode)
+        self._vfo_drag_vfo = None
+        self._vfo_drag_mode = None
+        self._vfo_create_mode = False
+        self._rf_shift = False
+        self._is_panning = False
+        return ctx
+
     def mouseReleaseEvent(self, event):
         if event.button() == Qt.LeftButton:
+            # 先无条件清全部拖拽态：任一分支提前 return 都不会留下
+            # `_is_panning=True`（否则松手后鼠标一动整屏跟着平移）。
+            vfo, vfo_mode, rf_shift, was_create = self._end_all_gestures()
             # dB 轴拖动结束：量程已随每帧写入唯一状态源，这里只清拖拽态。
             if self._db_drag_active:
                 self._end_db_drag()
                 return
             # 橡皮筋新建 VFO 结束：按 rubber-band 区间 center/bw 创建
-            if self._vfo_create_mode:
-                self._vfo_create_mode = False
+            if was_create:
                 band = self.state.vfo_create_band
                 self.state.vfo_create_band = None
                 if band is not None:
@@ -4089,11 +4115,8 @@ class _TuningPlotMixin:
                 return
 
             # VFO 移动/缩放结束：对齐网格并 emit 最终值
-            if self._vfo_drag_mode is not None:
-                was_resize = self._vfo_drag_mode in ('resize_l', 'resize_r')
-                self._vfo_drag_mode = None
-                vfo = self._vfo_drag_vfo
-                self._vfo_drag_vfo = None
+            if vfo_mode is not None:
+                was_resize = vfo_mode in ('resize_l', 'resize_r')
                 gen = self.state.panel.generator
                 snapped = self._snap_center()
                 if vfo is not None:
@@ -4111,9 +4134,8 @@ class _TuningPlotMixin:
                 return
 
             moved = abs(event.position().x() - (self._press_x or 0))
-            self._is_panning = False
             if moved > 4:
-                if not self._rf_shift:
+                if not rf_shift:
                     # 拖拽结束：对齐网格并 emit 最终中心频率
                     snapped = self._snap_center()
                     self._emit_tuned(snapped)
