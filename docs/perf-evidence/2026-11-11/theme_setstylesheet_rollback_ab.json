@@ -1,0 +1,105 @@
+{
+ "kind": "单变量对照：只回退「应用级 setStyleSheet」这一处行为（临时树，未改工作区）",
+ "question": "「切主题 5–8 s → 0.24–0.40 s」的因果是不是 0ce78fb3 拿掉应用级 setStyleSheet 造成的",
+ "temp_tree": "D:\\mbdsdr\\output\\tmp\\wt_theme_ab",
+ "worktree_from": "3c23faa2（HEAD；0ce78fb3 / 68962abc 均已在链上）",
+ "patch": "desktop/themes.py Theme.apply: if not qss_same: → if True:（每次切主题都走 app.setStyleSheet(qss)），仅此一行",
+ "entry": "MainWindow._apply_theme 直调（入口 A）+ theme_combo 信号路径（入口 B），主题序列 dark/default/dark",
+ "ruler": "offscreen，控件 1201",
+ "baseline_head": {
+  "wall_ms": {
+   "A": [
+    158.0,
+    150.0,
+    186.0
+   ],
+   "B": [
+    157.0,
+    157.0
+   ]
+  },
+  "app_setStyleSheet_per_switch": 0,
+  "qss_len": 20127,
+  "load_before": {
+   "sys_cpu_pct": 32.4,
+   "python_total_cpu_pct": 10.9,
+   "python_proc_count": 4
+  },
+  "load_after": {
+   "sys_cpu_pct": 40.6,
+   "python_total_cpu_pct": 10.9,
+   "python_proc_count": 4
+  },
+  "load_during": {
+   "sys_cpu_pct": 34.9,
+   "python_total_cpu_pct": 96.3
+  },
+  "stdout_tail": [
+   "  _apply_theme -> default  墙钟    185.8 ms  CPU    156.2 ms  setStyleSheet 控件/应用 = 2/0  QSS 长度 20127",
+   "  _apply_theme -> dark     墙钟    149.7 ms  CPU    187.5 ms  setStyleSheet 控件/应用 = 2/0  QSS 长度 20127",
+   "==============================================================================",
+   "入口 B：工具栏 theme_combo 真实信号路径",
+   "==============================================================================",
+   "  combo -> dark     墙钟      0.4 ms  CPU      0.0 ms  setStyleSheet 控件/应用 = 0/0",
+   "  combo -> default  墙钟    156.9 ms  CPU    171.9 ms  setStyleSheet 控件/应用 = 2/0",
+   "  combo -> dark     墙钟    157.0 ms  CPU    156.2 ms  setStyleSheet 控件/应用 = 2/0",
+   "==============================================================================",
+   "汇总（固定四行）",
+   "==============================================================================",
+   "A 直调: 控件 1201 | setStyleSheet 6 次 | 墙钟 150–186 ms（中位 158）| CPU 156–188 ms",
+   "B 下拉: 控件 1201 | setStyleSheet 4 次 | 墙钟 0–157 ms（中位 157）| CPU 0–172 ms",
+   "[未复现] 最慢一次 186 ms < 1000 ms。"
+  ]
+ },
+ "rollback_forced_setstylesheet": {
+  "wall_ms": {
+   "A": [
+    1633.0,
+    1681.0,
+    1408.0
+   ],
+   "B": [
+    1379.0,
+    2156.0
+   ]
+  },
+  "app_setStyleSheet_per_switch": 1,
+  "qss_len": 20127,
+  "load_before": {
+   "sys_cpu_pct": 41.9,
+   "python_total_cpu_pct": 0.0,
+   "python_proc_count": 4
+  },
+  "load_after": {
+   "sys_cpu_pct": 30.6,
+   "python_total_cpu_pct": 0.0,
+   "python_proc_count": 4
+  },
+  "load_during": {
+   "sys_cpu_pct": 52.4,
+   "python_total_cpu_pct": 108.5
+  },
+  "stdout_tail": [
+   "  _apply_theme -> default  墙钟   1680.8 ms  CPU   1734.4 ms  setStyleSheet 控件/应用 = 3/1  QSS 长度 20127",
+   "  _apply_theme -> dark     墙钟   1633.3 ms  CPU   2515.6 ms  setStyleSheet 控件/应用 = 3/1  QSS 长度 20127",
+   "==============================================================================",
+   "入口 B：工具栏 theme_combo 真实信号路径",
+   "==============================================================================",
+   "  combo -> dark     墙钟      0.1 ms  CPU      0.0 ms  setStyleSheet 控件/应用 = 0/0",
+   "  combo -> default  墙钟   1379.0 ms  CPU   1515.6 ms  setStyleSheet 控件/应用 = 3/1",
+   "  combo -> dark     墙钟   2156.1 ms  CPU   2078.1 ms  setStyleSheet 控件/应用 = 7/1",
+   "==============================================================================",
+   "汇总（固定四行）",
+   "==============================================================================",
+   "A 直调: 控件 1201 | setStyleSheet 11 次 | 墙钟 1408–1681 ms（中位 1633）| CPU 1500–2516 ms",
+   "B 下拉: 控件 1201 | setStyleSheet 12 次 | 墙钟 0–2156 ms（中位 1379）| CPU 0–2078 ms",
+   "[复现] 最慢一次 2156 ms ≥ 1000 ms，切主题仍卡 GUI。"
+  ]
+ },
+ "verdict": "因果成立（秒级 vs 百毫秒级，8–12×）：回退「应用级 setStyleSheet」后回到 1.4–2.2 s；绝对值低于 20f64d35 的 5.8–8.0 s，因控件数 1201 vs 1585、负载与 QSS 解析缓存不同，不可逐数值对比。",
+ "excluded_candidates": {
+  "a5ce2f66": "纯文档提交（4 份证据 JSON，0 行代码），不可能因果",
+  "68962abc": "只改触控路径；鼠标模式首调用后应用级 setStyleSheet 恒 0 次，本组测量全为鼠标模式"
+ },
+ "load_rule": "规则 10：测前/测后各采一次系统 CPU + python 总占比；during 为 0.5 s 采样的中位（python 总占比：基线 96.3%，回退 108.5%，均 <200%）"
+}

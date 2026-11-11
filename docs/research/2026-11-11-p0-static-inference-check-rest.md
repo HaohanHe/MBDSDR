@@ -115,7 +115,19 @@ P0-13 用 `QT_ENABLE_HIGHDPI_SCALING=0` 构造 DPR 1.0；P0-15b `--screen` 另�
 
 - 入口 B（下拉信号）与入口 A 同量级（`33b8de5e` 鼠标：5–380 ms），**入口不是变量**；
 - 真正的变量是 `0ce78fb3`「主题色改走 QPalette，不再重设 QSS」：应用级 `setStyleSheet`
-  从每次 1 次降为 0，墙钟从 5–8 s 降到 0.2–0.4 s（`33b8de5e`）；
+  从每次 1 次降为 0；**原「5–8 s」区间无逐次负载出处，已按规则 10 重测并改为带出处写法**：
+  历史读数 `20f64d35`（`0ce78fb3^`）为 5814 / 5956 / 8027 ms（本文件跨快照表，**无负载记录、只作量级**）；
+  当前 HEAD（`1e90b7f6`）低负载窗口复测 **243–397 ms**（python 总占比测前 103.1% / 测后 108.6%，
+  均 <200%；应用级 `setStyleSheet` 全程 0 次），
+  证据 `docs/perf-evidence/2026-11-11/theme_switch_lowload_retest.json`；
+- **因果已证（单变量对照，2026-11-11）**：临时树（`3c23faa2`）里只把 `Theme.apply` 的
+  `if not qss_same:` 改成 `if True:`（即每次切主题都走应用级 `setStyleSheet(qss)`，
+  其余不动），同一脚本立刻回到 **1408–2156 ms（应用级 1 次/切）**，基线为
+  **150–186 ms（应用级 0 次/切）**，8–12×；测前/测后负载均 <200%。
+  绝对值低于 `20f64d35` 的 5.8–8.0 s 是因为控件数 1201 vs 1585、且 QSS 解析有缓存，
+  只认倍数不认逐数值。同轮排除了另两个候选：`a5ce2f66` 是纯文档提交（0 行代码），
+  `68962abc` 只改触控路径（鼠标模式应用级 `setStyleSheet` 恒 0 次）。
+  证据 `docs/perf-evidence/2026-11-11/theme_setstylesheet_rollback_ab.json`；
 - 性能线的 386–540 ms 与 `a2837671` 的 498–954 ms 同一量级，差异来自机器负载
   （本轮同时有别的 Qt 进程在跑）；
 - 第一轮的 4527/4387/3269 ms 是 `c899eb51`（修复前）读数，**不是 HEAD**。数字不改口，
@@ -324,6 +336,28 @@ offscreen 下 `QFontDatabase.families()==0`，字体按方框度量（实测：`
    offscreen 只用于同尺子跨快照比较。
 7. **新 worktree 是冷态**：没有 `__pycache__`，首跑要多编译 .pyc，导入段被放大
    （同配置 3293 → 1618 ms）。用户装完第一次启动就是冷态，冷/热要分开报。
+
+### 4.5 `0xC0000005` / `eventFilter`「已删除布局」的定位状态（2026-11-11，阴性收口）
+
+**结论：没有定位到具体布局。** B1（`1e90b7f6`）已挡：`MainWindow.eventFilter` 入口加
+`shiboken6.isValid(obj)`、去掉 `super().eventFilter(...)`；`touch_helpers.py:139` 首行
+`isValid(self)`。在 HEAD 上用
+`scripts/repro/2026-11-11-floating-return-exit-filtertrace.py` 跑了三个变体——
+①手动归位→退出、②退出时由 `closeEvent._return_all_panes` 收、③强制 `panel.deleteLater()`
+模拟「C++ 先删、Python 包装还活」——**`isValid=False` 均为 0 条**；事件过滤器收到的
+布局类事件只有 `QVBoxLayout` / `QHBoxLayout` / `QFormLayout` / `QBoxLayout`，**全部 valid**。
+浮动面板自身布局是 `QVBoxLayout`、面板内共 36 个布局；归位后面板**确实被回收**
+（weakref 已死），但随后没有任何事件再派发给它的布局。
+
+两条旁证**只是旁证、不是定死**：`_return_panel` 注释「不用 deleteLater()：…C++
+QVBoxLayout 比 Python 包装先走」；`closeEvent` 注释「先收自由浮层…晚收会在窗口析构时
+撞上已删除的 C++ layout」。两者都指向「浮动面板的 QVBoxLayout」，但没有一条运行时证据
+把某次事件钉到它。
+
+追踪脚本保留为复现工具：等真机崩溃再现（真 `main.py` + 触控模式 + 窗口管理器，或
+`scripts/ui_narrow_breakdown.py --json` 再次 `0xC0000005`）时直接跑它，记录
+`type(obj).__name__ + isValid`，那时才算定死。证据：
+`docs/perf-evidence/2026-11-11/floating_return_exit_filtertrace{,_exit-return,_force-delete}.json`。
 
 ## 5. 文档路径与测量环境勘误
 
