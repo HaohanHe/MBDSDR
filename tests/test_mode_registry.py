@@ -82,6 +82,27 @@ def test_mode_registry_register_new():
     assert mr.get(sentinel) is None
 
 
+def test_mode_registry_single_instance_across_import_names():
+    """裸名 `mode_registry` 与包名 `desktop.mode_registry` 必须是同一模块对象。
+
+    两条导入路径会各执行一遍模块体，`_REGISTRY` 就分裂成两份：`register()` 落进
+    一份、UI 读另一份 → 新模式静默不出现（docs/redundancy-register.md §5.10）。
+    反证：删掉 mode_registry.py 顶部的 sys.modules 别名块，本用例必红。
+    """
+    import desktop.mode_registry as pkg_mod
+
+    assert pkg_mod is mr, "mode_registry 与 desktop.mode_registry 是两个模块对象"
+    sentinel = "ZZALIAS"
+    try:
+        pkg_mod.register(pkg_mod.DemodMode(
+            mode=sentinel, display_name="别名测试", demod_func="",
+            outputs_audio=False))
+        assert mr.get(sentinel) is not None, "经包名注册的模式，裸名读方看不到"
+    finally:
+        mr._REGISTRY.pop(sentinel, None)
+    assert mr.get(sentinel) is None
+
+
 # ─────────────────────────────────────────────────────────────────────
 # 3. 默认带宽与旧 MODE_VFO_BANDWIDTH 一致
 # ─────────────────────────────────────────────────────────────────────

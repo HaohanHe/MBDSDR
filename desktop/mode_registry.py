@@ -23,6 +23,27 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
+# `mode_registry`（桌面各面板的裸导入）与 `desktop.mode_registry`（测试/工具/插件的
+# 包式导入）会各执行一遍模块，`_REGISTRY` 因此分裂成两份：`register()` 写进先被
+# 加载的那份，UI 下拉/解调分发读另一份，**注册的模式在界面里永远不出现**
+# （定性见 docs/redundancy-register.md §5.10，与 themes 同型）。
+# 下面几行把另一个名字指回本模块：先导入的胜出，后导入的直接复用同一对象。
+import sys as _sys
+
+_sys.modules.setdefault(
+    "desktop.mode_registry" if __name__ == "mode_registry" else "mode_registry",
+    _sys.modules[__name__])
+# 只写 sys.modules 不够：`import desktop.mode_registry` 命中 sys.modules 后不再执行
+# 「给父包 setattr」那一步，属性访问会 AttributeError。裸导入先发生时父包通常
+# 还没导入，这里补一次绑定（脚本上下文没有仓库根，忽略 ImportError）。
+if __name__ == "mode_registry":
+    try:
+        import desktop as _desktop_pkg
+    except ImportError:
+        _desktop_pkg = None
+    if _desktop_pkg is not None:
+        setattr(_desktop_pkg, "mode_registry", _sys.modules[__name__])
+
 
 @dataclass(frozen=True)
 class DemodMode:
