@@ -2,9 +2,10 @@
 
 > 提出：2026-11-11，设备缺口修复线。
 > 落点：`mbdsdr_ai/sdr_backend.py` `SoapySDRBackend.readback_hw_state()`
-> （约 `:3797-3808`）。
-> 状态：**等待执行**。该文件当前被 `roadmap-W72W77` claim（见
-> `python scripts/file_claim.py status`），本线按纪律不抢。
+> （约 `:3797-3819`）。
+> 状态：**已落地**。原 claim（roadmap-W72W77）过期且 `no_inflight=PASS`，
+> 本线接管后实施；配套用例见 `tests/test_soapy_readback_truth.py`
+> 的两条 `test_sample_rate_range_probe_*`。
 
 ## 一、缺陷
 
@@ -52,8 +53,7 @@
 
 ## 三、验证
 
-在 `tests/test_sample_rate_unknown_state.py` 的假后端之外，补一条 Soapy 集成
-用例（或由收件线在现有 Soapy 假件文件里加）：
+在 `tests/test_soapy_readback_truth.py` 补两条 Soapy 集成用例（已落地）：
 
 1. 构造 `SoapySDRBackend(device_info={})`（枚举只给身份、`capability_status`
    全 unknown）；
