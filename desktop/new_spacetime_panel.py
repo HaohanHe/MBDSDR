@@ -959,7 +959,7 @@ class NewSpacetimePanel(QWidget):
                 f"落下 {self._fmt_dt(p.set_time)}\n"
                 f"最大仰角 {p.max_elevation:.1f}°\n"
                 f"持续 {p.duration_sec / 60.0:.1f} 分钟\n"
-                f"最大多普勒 {p.max_doppler_hz:+.0f} Hz")
+                f"最大多普勒 {p.max_doppler_hz:+.0f} Hz（按 TLE 推算）")
             self.passes_table.setItem(idx, 0, item)
 
             # 右列两行：峰值仰角 / 持续分钟
