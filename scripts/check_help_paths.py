@@ -10,11 +10,17 @@
 节名（源码 AST 解析，不 import Qt）；``config_schema.GROUP_ORDER`` 是 schema
 侧的数据分组，面板重排后两者不再等价，拿它验文案会假绿。
 
-只读 git 索引/工作区里的源码文本，不启动 Qt、不 import 桌面 UI。
+只读 git 里的源码文本（默认 HEAD 快照，``--worktree`` 时读工作树），不启动
+Qt、不 import 桌面 UI。
 
 用法：
-    python scripts/check_help_paths.py            # 检查，失败退出码 1
+    python scripts/check_help_paths.py            # 按 HEAD 快照检查，失败退出码 1
+    python scripts/check_help_paths.py --worktree # 改读工作树（含未提交改动）
     python scripts/check_help_paths.py --markdown # 额外输出 52 条核验表
+
+默认读 **HEAD 快照**（``git show HEAD:<path>`` / ``git grep ... HEAD``）：并行开发
+时工作树每一分钟都在被别人改，拿它判「文档有没有漂」会把「别人正在编辑」误报成
+「文档漂移」。单人本地自测可用 ``--worktree``，输出会显式标注口径。
 """
 from __future__ import annotations
 
@@ -41,7 +47,40 @@ _CODE_PATHSPECS = (
 
 _TOKEN_RE = re.compile(r"「([^」]+)」")
 
-_DOC = os.path.join(_ROOT, "docs", "error-code-visibility.md")
+_DOC_REL = "docs/error-code-visibility.md"
+_DOC = os.path.join(_ROOT, _DOC_REL)
+
+#: 读源头。默认 **HEAD 快照**：并行开发时工作树每一分钟都在被别人改，拿它判
+#: 「文档有没有漂」会把「别人正在编辑」误报成「文档漂移」（2026-11-11 夜间
+#: main_window.py 未提交 +59 行，渲染闸门当场红在尚未成为事实的代码上）。
+#: 单人本地自测可用 ``--worktree`` 切到工作树，输出会显式标注口径。
+_SOURCE = "head"
+
+
+def set_source(mode: str) -> None:
+    """切换读取口径：``head``（默认）或 ``worktree``。"""
+    global _SOURCE
+    _SOURCE = "worktree" if mode == "worktree" else "head"
+
+
+def source_label() -> str:
+    return "工作树（可能含未提交改动）" if _SOURCE == "worktree" else "HEAD 快照"
+
+
+def _read_text(path: str) -> str | None:
+    """按当前口径读仓库内文件；读不到返回 None。"""
+    if _SOURCE == "worktree":
+        try:
+            with open(os.path.join(_ROOT, path), encoding="utf-8") as f:
+                return f.read()
+        except OSError:
+            return None
+    proc = subprocess.run(
+        ["git", "show", f"HEAD:{path}"], cwd=_ROOT, capture_output=True,
+        text=True, encoding="utf-8", errors="replace")
+    if proc.returncode != 0:
+        return None
+    return proc.stdout
 
 #: 用户可见通道的渲染文件 → 渲染点必须包含的字面量。
 #: 文档（第三节）里引用的行号必须仍落在这些字面量的行上，否则就是行号漂移。
@@ -87,14 +126,25 @@ def segments_of(text: str) -> list[str]:
 
 
 def _candidate_files(seg: str) -> list[str]:
+    cmd = ["git", "grep", "-l", "-F", "-e", seg]
+    if _SOURCE != "worktree":
+        cmd.append("HEAD")       # 读提交里的事实，不看别人正在编辑的副本
+    cmd += ["--", *_CODE_PATHSPECS]
     proc = subprocess.run(
-        ["git", "grep", "-l", "-F", "-e", seg, "--", *_CODE_PATHSPECS],
-        cwd=_ROOT, capture_output=True, text=True, encoding="utf-8",
+        cmd, cwd=_ROOT, capture_output=True, text=True, encoding="utf-8",
         errors="replace",
     )
     if proc.returncode not in (0, 1):      # 1 = 没有命中
         raise RuntimeError(proc.stderr.strip() or "git grep 失败")
-    return [ln.strip() for ln in proc.stdout.splitlines() if ln.strip()]
+    out: list[str] = []
+    for ln in proc.stdout.splitlines():
+        ln = ln.strip()
+        if not ln:
+            continue
+        if _SOURCE != "worktree" and ln.startswith("HEAD:"):
+            ln = ln[len("HEAD:"):]        # git grep <rev> 会把 rev 前缀带进路径
+        out.append(ln)
+    return out
 
 
 def is_ui_literal(seg: str, text: str) -> bool:
@@ -109,10 +159,10 @@ def _literal_ok(seg: str, cache: dict[str, bool]) -> tuple[bool, str]:
         return cache[seg], ""
     files = _candidate_files(seg)
     for name in files:
-        with open(os.path.join(_ROOT, name), encoding="utf-8") as f:
-            if is_ui_literal(seg, f.read()):
-                cache[seg] = True
-                return True, ""
+        text = _read_text(name)
+        if text is not None and is_ui_literal(seg, text):
+            cache[seg] = True
+            return True, ""
     cache[seg] = False
     if not files:
         return False, "生产源码里 grep 不到该词"
@@ -143,8 +193,10 @@ def _expand_lines(spec: str) -> list[int]:
 
 
 def _read_lines(path: str) -> list[str]:
-    with open(os.path.join(_ROOT, path), encoding="utf-8") as f:
-        return f.read().splitlines()
+    text = _read_text(path)
+    if text is None:
+        raise FileNotFoundError(f"读不到 {path}（口径：{source_label()}）")
+    return text.splitlines()
 
 
 def _bullet_blocks(section: str) -> list[str]:
@@ -181,10 +233,15 @@ def check_render_points(doc_path: str | None = None) -> list[str]:
     problems: list[str] = []
     src = doc_path or _DOC
     try:
-        with open(src, encoding="utf-8") as f:
-            doc = f.read()
+        if doc_path:
+            with open(src, encoding="utf-8") as f:   # 显式传入的路径按磁盘读
+                doc = f.read()
+        else:
+            doc = _read_text(_DOC_REL)              # 默认按当前口径（HEAD）
     except OSError:
-        return [f"读不到 {src}"]
+        doc = None
+    if doc is None:
+        return [f"读不到 {src}（口径：{source_label()}）"]
     start = doc.find("## 三、")
     end = doc.find("## 五、")
     if start < 0:
@@ -210,7 +267,17 @@ def check_render_points(doc_path: str | None = None) -> list[str]:
             anchors = _RENDER_ANCHORS.get(os.path.basename(path))
             if not anchors:
                 continue
-            lines = cache.setdefault(path, _read_lines(path))
+            if path not in cache:
+                text = _read_text(path)
+                if text is None:
+                    problems.append(
+                        f"读不到 {path}（口径：{source_label()}），无法核验 :{spec}")
+                    cache[path] = []
+                else:
+                    cache[path] = text.splitlines()
+            lines = cache[path]
+            if not lines:
+                continue
             cited = _expand_lines(spec)
             if any(
                 any(a in lines[n - 1] for a in anchors)
@@ -219,9 +286,10 @@ def check_render_points(doc_path: str | None = None) -> list[str]:
                 continue
             actual = [str(i + 1) for i, ln in enumerate(lines)
                       if any(a in ln for a in anchors)]
-            problems.append(
-                f"文档行号漂移：{path}:{spec} 已不是渲染点"
-                f"（渲染字面量现在在 :{', '.join(actual[:6]) or '（源码里也没了）'}）")
+            msg = (f"文档行号漂移：{path}:{spec} 已不是渲染点"
+                   f"（渲染字面量现在在 :{', '.join(actual[:6]) or '（源码里也没了）'}）")
+            if msg not in problems:      # 同一坐标被多个通道引用时只报一次
+                problems.append(msg)
     return problems
 
 
@@ -243,9 +311,10 @@ def rendered_settings_sections() -> dict[str, tuple[str, ...]]:
     的数据分组（导入/导出/文档用），面板已按用途重排成 6 节；拿 schema 分组
     验文案，「存储与日志」这种已并入别页的旧名会假绿（P1-41 的根因）。
     """
-    path = os.path.join(_ROOT, "desktop", "settings_panel.py")
-    with open(path, encoding="utf-8") as f:
-        tree = ast.parse(f.read())
+    text = _read_text("desktop/settings_panel.py")
+    if text is None:
+        return {}
+    tree = ast.parse(text)
     value = None
     for node in tree.body:
         if isinstance(node, ast.AnnAssign):
@@ -305,7 +374,12 @@ def _markdown_table() -> str:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--markdown", action="store_true", help="输出逐条核验表")
+    parser.add_argument("--worktree", action="store_true",
+                        help="读工作树而不是 HEAD 快照；输出会标注"
+                             "「工作树口径，可能含未提交改动」")
     args = parser.parse_args(argv)
+    set_source("worktree" if args.worktree else "head")
+    print(f"口径：{source_label()}")
     problems = check_paths()
     problems += check_render_points()
     problems += check_mechanisms()

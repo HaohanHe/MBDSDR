@@ -21,6 +21,7 @@
 只读源码文本，不启动 Qt、不改 UI。
 """
 import os
+import subprocess
 import sys
 
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -98,3 +99,45 @@ def test_counterexample_nonexistent_code_step_turns_red(monkeypatch):
         "在「控制」页签降低「量子带宽」后重录。")
     problems = chp.check_paths()
     assert any("量子带宽" in p for p in problems), problems
+
+
+def _git(cwd, *args):
+    subprocess.run(["git", "-C", str(cwd), *args],
+                   check=True, capture_output=True, text=True)
+
+
+def test_render_points_read_head_not_worktree(tmp_path, monkeypatch):
+    """口径反证：工作树有未提交改动、HEAD 干净时，默认绿、--worktree 红。
+
+    并行开发时工作树每一分钟都在被别人改；拿它判「文档漂移」会把「别人正在
+    编辑」误报成事实（2026-11-11 夜间 main_window.py 未提交 +59 行的活例）。
+    """
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-q")
+    _git(repo, "config", "user.email", "ci@example.com")
+    _git(repo, "config", "user.name", "ci")
+    src = repo / "desktop" / "status_panel.py"
+    src.parent.mkdir()
+    src.write_text('A = 1\nB = 2\nDECODE_ERROR_LABELS = "错误码 "\nC = 4\n',
+                   encoding="utf-8")
+    doc = repo / "docs" / "error-code-visibility.md"
+    doc.parent.mkdir()
+    doc.write_text("## 三、通道\n\n- **P2** `desktop/status_panel.py:3`\n\n## 五、其它\n",
+                   encoding="utf-8")
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-q", "-m", "fixture")
+    # 工作树插一行把渲染点从 :3 推到 :4，不提交
+    src.write_text('A = 1\nB = 2\nX = 3\nDECODE_ERROR_LABELS = "错误码 "\nC = 4\n',
+                   encoding="utf-8")
+
+    monkeypatch.setattr(chp, "_ROOT", str(repo))
+    monkeypatch.setattr(chp, "_DOC", str(doc))
+    try:
+        chp.set_source("head")
+        assert chp.check_render_points() == []
+        chp.set_source("worktree")
+        problems = chp.check_render_points()
+        assert problems and "文档行号漂移" in problems[0], problems
+    finally:
+        chp.set_source("head")
