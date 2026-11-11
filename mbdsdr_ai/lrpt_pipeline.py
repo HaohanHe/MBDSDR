@@ -5,12 +5,18 @@
   payload → RS 编码 → 交织 → 加扰 → ASM → 卷积编码 → QPSK 调制 → IQ
   → QPSK 解调 → 帧同步 → Viterbi → 解扰 → RS 解码 → payload
 
+另含**真录链**（:func:`decode_recording_to_image`）：真实 SDR 录制的 IQ →
+重采样到整数符号倍率 → 软判决解调 → ASM 验证 → 擦除辅助 RS → woven 重组
+→ M_PDU 空间包 → MCU 熵解码 → RGB。该链路的口径由第三方真样本钉死
+（见 tests/test_lrpt_meteor_real_golden.py，2026-11-07 实测 10 条 VCDU）。
+
 机制证据见 weather-sat-digital-study.md；本文件只做串联，不重复实现算法。
 """
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Optional, Tuple
+from fractions import Fraction
+from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 
@@ -30,7 +36,13 @@ from .lrpt_fec import (
 __all__ = [
     "LrptE2EPipeline",
     "E2EResult",
+    "RecordingImageResult",
+    "decode_recording_to_image",
 ]
+
+#: 真录链的固定符号率与 ASM（Meteor-M2 LRPT 72 ksym/s，CCSDS TM 同步字）
+RECORDING_SYM_RATE = 72_000
+CADU_ASM = bytes([0x1A, 0xCF, 0xFC, 0x1D])
 
 
 @dataclass
@@ -177,3 +189,206 @@ class LrptE2EPipeline:
             result.success = True
             result.payload = payload
         return result
+
+
+# ---------------------------------------------------------------------- #
+# 真录链：真实 SDR 录制 IQ → 图像（2026-11-11 接线，工单 P1-23）
+# ---------------------------------------------------------------------- #
+@dataclass
+class RecordingImageResult:
+    """真录 IQ → 图像结果（诚实空态：失败时 rgb=None，并给阶段化原因）。"""
+    success: bool = False
+    rgb: Optional[np.ndarray] = None
+    payloads: List[bytes] = field(default_factory=list)
+    stats: Dict = field(default_factory=dict)
+    stage: str = "init"
+    error: str = ""
+
+
+def _pair_swap(soft: np.ndarray) -> np.ndarray:
+    """c0/c1 位对互换（真录裁决的 Meteor-M2 卷积位→IQ 映射）。
+
+    本仓合成链不 swap 自洽；真实 OTA 必须 swap 后才能过 Viterbi
+    （tests/test_lrpt_meteor_real_golden.py 2026-11-03 真录像裁决）。
+    """
+    sw = np.empty_like(soft)
+    sw[0::2] = soft[1::2]
+    sw[1::2] = soft[0::2]
+    return sw
+
+
+def _suppress_ghosts(cands, radius: int = 32):
+    """NMS：±radius 符号内只留汉明最优（滑窗鬼影保险，真帧间隔 8198 符号）。"""
+    kept = []
+    for c in sorted(cands, key=lambda c: c.hamming):
+        if all(abs(c.sync_symbol_index - k.sync_symbol_index) > radius
+               for k in kept):
+            kept.append(c)
+    return kept
+
+
+def _resample_for_symbols(iq: np.ndarray, sample_rate: float,
+                          sym_rate: int, sps: int
+                          ) -> Tuple[np.ndarray, int, int, int]:
+    """重采样到 ``sps × sym_rate``（LrptDemodulator 的整数 sps 前提）。
+
+    真实 SDR 录制常是 2.4/1.024 MS/s 等非整数倍符号率；直接喂整数 sps
+    解调器会失锁（2026-11-03 实测：187.5k ÷ 72k = 2.604 sps → 0 候选）。
+    返回 ``(iq, target_hz, up, down)``；已是整数倍时 up=down=1 不做滤波。
+    """
+    target = int(sps * sym_rate)
+    src = int(round(float(sample_rate)))
+    if src <= 0:
+        raise ValueError(f"采样率必须为正数，收到 {sample_rate!r}")
+    if src == target:
+        return iq, target, 1, 1
+    ratio = Fraction(target, src).limit_denominator(2000)
+    from scipy.signal import resample_poly  # 反混叠抽取，禁止裸抽点
+    return (resample_poly(iq, ratio.numerator, ratio.denominator),
+            target, ratio.numerator, ratio.denominator)
+
+
+def decode_recording_to_image(
+    iq: np.ndarray,
+    sample_rate: float,
+    *,
+    sym_rate: int = RECORDING_SYM_RATE,
+    sps: int = 2,
+    max_hamming: int = 8,
+    min_payloads: int = 1,
+) -> RecordingImageResult:
+    """真实录制 IQ → LRPT 可见光 RGB（失败时给阶段化人话原因）。
+
+    链路（与 tests/test_lrpt_meteor_real_golden.py 的真录口径逐段一致）：
+      重采样到 sps×72k → AGC/粗 CFO/定时/Costas → ham≤8 松阈值帧同步
+      → NMS → pair-swap± → Viterbi（带每字节可靠性）→ ASM 验证
+      → 擦除辅助 RS(255,223)×4 + woven 重组 + version 结构判据
+      → M_PDU 空间包重组 → 图像包抽取 → MCU 熵解码 → RGB。
+
+    任何一段没拿到东西都返回 ``success=False``，并把 ``stage`` / ``error``
+    写成用户能看懂的原因（绝不拿半幅图或噪声图冒充成功）。
+    """
+    res = RecordingImageResult()
+    stats: Dict = {"chain": "lrpt_pipeline.real"}
+    res.stats = stats
+    try:
+        arr = np.asarray(iq, dtype=np.complex128)
+    except (TypeError, ValueError) as e:
+        res.stage = "input"
+        res.error = f"IQ 数据无法转成复数基带：{type(e).__name__}: {e}"
+        return res
+    if arr.size == 0:
+        res.stage = "input"
+        res.error = "IQ 录制裁剪为空，无样点可解"
+        return res
+
+    # 1. 重采样到整数 sps（真录固定 2 sps = 144 kS/s）
+    try:
+        arr, target_hz, up, down = _resample_for_symbols(
+            arr, sample_rate, sym_rate, sps)
+    except (ValueError, ImportError) as e:
+        res.stage = "resample"
+        res.error = f"重采样失败：{e}"
+        return res
+    stats.update({
+        "sample_rate_hz": float(sample_rate),
+        "resampled_hz": target_hz,
+        "resample_up": up,
+        "resample_down": down,
+        "duration_s": float(arr.size) / float(target_hz),
+    })
+
+    # 2. 软判决解调 + 帧同步（松阈值，ASM 负责证伪）
+    dem = LrptDemodulator(fs=target_hz, sym_rate=sym_rate, costas_bw=0.01)
+    soft, cands = dem.demodulate_soft(arr, max_hamming=max_hamming)
+    kept = _suppress_ghosts(cands)
+    stats["n_candidates"] = len(kept)
+    if soft.size == 0 or not kept:
+        res.stage = "sync"
+        res.error = (f"帧同步未锁（软位 {soft.size}，候选 {len(kept)}）："
+                     "录制不是 LRPT / 信号过弱 / 采样率标注不符")
+        return res
+
+    # 3. 逐帧 Viterbi → ASM → 擦除辅助 RS → woven 重组
+    decoder = LrptCaduDecoder()
+    need_bits = SYNC_BITS + (CADU_SIZE * 8 + 6) * 2
+    payloads: List[bytes] = []
+    asm_hits = 0
+    for c in kept:
+        start = c.sync_symbol_index * 2
+        end = min(start + need_bits, soft.size)
+        if end - start < need_bits - 64:
+            continue
+        sl = soft[start:end]
+        for cand_soft in (_pair_swap(sl), -_pair_swap(sl)):
+            try:
+                raw, rel = decoder.decode_viterbi_to_bytes(
+                    cand_soft, return_reliability=True)
+            except (ValueError, IndexError):
+                continue
+            if raw[:4] != CADU_ASM:
+                continue
+            asm_hits += 1
+            try:
+                payload, errs, _used = decoder.decode_cadu_erasure(
+                    raw[:CADU_SIZE], rel[:CADU_SIZE], order="woven")
+            except (ValueError, IndexError):
+                continue
+            # 全 4 块可纠 + 结构判据（合法 TM VCDU 主头 version 恒为 1）：
+            # 擦除辅助放宽到 2e+f≤32 后仍可能纠到别的合法码字，只能靠
+            # 协议结构剔除（真录实测 10 条里 1 条 version=2 属此类）。
+            if (all(e >= 0 for e in errs) and len(payload) == 892
+                    and ((payload[0] >> 6) & 0x3) == 1):
+                payloads.append(payload)
+            break
+    stats["n_asm"] = asm_hits
+    stats["n_valid_vcdu"] = len(payloads)
+    res.payloads = payloads
+    if asm_hits == 0:
+        res.stage = "decode"
+        res.error = (f"帧同步找到 {len(kept)} 个候选，但 Viterbi 后未见 ASM "
+                     "0x1ACFFC1D：符号/比特映射不符或信号质量不足")
+        return res
+    if len(payloads) < min_payloads:
+        res.stage = "decode"
+        res.error = (f"ASM 命中 {asm_hits} 次，但 RS(255,223) 全纠正的 VCDU 只有 "
+                     f"{len(payloads)} 条（< {min_payloads}）：载噪比不足或录制过短")
+        return res
+
+    # 4. M_PDU → 空间包 → 图像包
+    from .lrpt_image import (
+        lrpt_packets_to_rgb, parse_image_packet, reassemble_space_packets,
+    )
+    try:
+        pkts, pstats = reassemble_space_packets(payloads)
+    except (ValueError, IndexError) as e:
+        res.stage = "mpdu"
+        res.error = f"VCDU→M_PDU 重组失败：{type(e).__name__}: {e}"
+        return res
+    img_pkts = [ip for p in pkts if (ip := parse_image_packet(p)) is not None]
+    stats.update({k: pstats[k] for k in ("n_packets", "n_skipped",
+                                        "n_resets", "n_fhp_out_of_range")})
+    stats["n_image_packets"] = len(img_pkts)
+    if not img_pkts:
+        res.stage = "mpdu"
+        res.error = (f"{len(payloads)} 条 VCDU 重组出 {len(pkts)} 个空间包，"
+                     "但无 LRPT 图像包（APID 64/65/68）——本段可能不含图像")
+        return res
+
+    # 5. MCU 熵解码 → RGB
+    rgb, channels, istats = lrpt_packets_to_rgb(img_pkts)
+    stats.update({
+        "n_blocks": int(sum(c.n_blocks for c in channels.values())),
+        "width": int(istats["width"]),
+        "height": int(istats["height"]),
+        "n_scan_rows": int(istats["n_scan_rows"]),
+    })
+    if rgb.size == 0 or rgb.shape[0] < 8 or stats["n_blocks"] == 0:
+        res.stage = "image"
+        res.error = ("图像包已解出，但 MCU 熵解码没解出任何有效块"
+                     "（包头损坏/量化表不符），不出空白图")
+        return res
+    res.success = True
+    res.rgb = rgb
+    res.stage = "done"
+    return res

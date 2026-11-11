@@ -92,17 +92,28 @@ class TestProbe:
 
 # ---------------------------------------------------------------------------
 class TestWorkerDiagnosis:
-    def _run(self, monkeypatch, tmp_path, cadus, compose_result=None):
+    def _run(self, monkeypatch, tmp_path, cadus, compose_result=None,
+             real_result=None):
         import weather_panel as wp
+        from mbdsdr_ai import lrpt_pipeline as lp
 
         iq_file = tmp_path / "fake.iq"
         iq_file.write_bytes(b"")
-        calls = {"compose": 0}
+        calls = {"compose": 0, "real": 0}
 
         monkeypatch.setattr(wp, "_load_complex64",
                             lambda _p: np.zeros(16, dtype=np.complex64))
         monkeypatch.setattr(ms, "demodulate_lrpt",
                             lambda *_a, **_k: cadus)
+
+        def _real(*_a, **_k):
+            calls["real"] += 1
+            if real_result is not None:
+                return real_result
+            return lp.RecordingImageResult(stage="sync",
+                                           error="帧同步未锁（测试桩）")
+
+        monkeypatch.setattr(lp, "decode_recording_to_image", _real)
 
         def _compose(items, **_kw):
             calls["compose"] += 1
@@ -127,7 +138,10 @@ class TestWorkerDiagnosis:
         assert len(results) == 1
         err = results[0]["error"]
         assert results[0]["frames"] == 3
-        assert "not_verified" in err and "帧首" in err
+        # 2026-11-11（P1-23）：真录链先行，旧链只作回退；两条链的原因都要在
+        assert "帧首" in err and "1DFCDC" in err
+        assert "真录链" in err and "帧同步未锁" in err
+        assert calls["real"] == 1, "必须先走真录链（lrpt_pipeline）"
         assert "段不全或数据损坏" not in err, err
         # 关键：约定不对齐时根本不该进图像重组器，免得把锅甩给它
         assert calls["compose"] == 0
