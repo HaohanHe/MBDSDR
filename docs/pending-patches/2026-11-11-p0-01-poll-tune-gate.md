@@ -116,3 +116,40 @@ python scripts\repro\2026-11-11-p0-01-dead-tle-tracking-gate.py
 `tests/test_tle_staleness_ui.py` 三处已逐字一致，无需联动修改。
 
 **dead/unknown 才是 0 次。** 下一个人若把 expired 当 dead 硬禁，先回看本节。
+
+## 五、追加（待应用）：调谐异常不得静默
+
+> `desktop/main_window.py` 于 2026-11-11 22:39:19 起由 `主题线/A-prime` 持有
+> （TTL 40 min），本线已 release，不回头抢。下列 hunk 待持锁方应用，
+> 或在 release 后由任意线按本单落地；**改动只在此处，不新增其他逻辑**。
+
+原代码把下发异常整段吞掉：
+
+```python
+            try:
+                self._on_tune_sdr(float(tune_hz), self._sat_track_mode)
+            except Exception:
+                pass
+```
+
+改为（状态栏留痕 + 同因去重 + debug 日志，与 `_sat_tune_blocked_reason`
+同一套路；成功时清空去重键，下次失败还能再提示）：
+
+```python
+            try:
+                self._on_tune_sdr(float(tune_hz), self._sat_track_mode)
+                self._sat_tune_failed_reason = ""
+            except Exception as exc:  # noqa: BLE001 - 必须留痕，不许静默
+                reason = f"{type(exc).__name__}: {exc}"
+                logger.debug("卫星跟踪调谐下发失败：%s", reason)
+                if reason != getattr(self, "_sat_tune_failed_reason", ""):
+                    self._sat_tune_failed_reason = reason
+                    self.statusBar().showMessage(
+                        f"调谐下发失败：{reason}", MSG_IMPORTANT)
+```
+
+`logger` 为本模块既有的 `logging.getLogger`（`_tracking_policy_for` 已在用）。
+
+验收：`python -m pytest tests/test_sat_tracking_gate.py
+tests/test_ui_hotpath_honesty.py -q` 全绿，且新用例可补一条
+「`_on_tune_sdr` 抛异常 → 状态栏含『调谐下发失败』+ 异常类型」。
