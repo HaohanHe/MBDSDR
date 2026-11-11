@@ -541,6 +541,7 @@ from location_panel import LocationPanel
 from panel_registry import registry
 from dock_layout_manager import DockLayoutManager
 from constants import (
+    CONNECT_SAMPLE_RATE_KEY,
     DEFAULT_SAMPLE_RATE_HZ,
     default_sample_rate_combo_index,
     format_sample_rate,
@@ -7622,6 +7623,28 @@ class MainWindow(QMainWindow):
             pass
         return True
 
+    def _sync_sample_rate_display_from_backend(self, fallback_hz=None) -> None:
+        """把采样率下拉拉回设备真值：回读覆盖，不用本地副本。
+
+        唯一真值是 ``backend.get_sample_rate()``（后端吸附/回滚后的生效值）。
+        ``_record_sr`` 只是 UI 侧维护的副本——两边一旦分叉，拿副本回填就是
+        「显示一个设备从未跑过的数」。回读不可用（无后端/抛错/非正）时才退回
+        ``fallback_hz``，且必须留日志：不静默替换。
+        """
+        backend = self._active_sdr_backend
+        actual = None
+        if backend is not None:
+            try:
+                actual = float(backend.get_sample_rate())
+            except Exception as e:  # noqa: BLE001 - 回读失败要留证
+                logger.warning("读取设备实际采样率失败（下拉退回最后已知值）: %s: %s",
+                               type(e).__name__, e)
+        if actual is None or not (actual > 0.0):
+            if fallback_hz is None:
+                return
+            actual = float(fallback_hz)
+        self.control_panel.set_sample_rate(actual)
+
     @Slot(float)
     def _on_sample_rate_changed(self, rate_hz: float):
         """控制面板采样率下拉切换 → 下发后端 + 重建流水线（VFO 重采样系数变了）。
@@ -7667,8 +7690,9 @@ class MainWindow(QMainWindow):
                     applied_sr = float(self._active_sdr_backend.get_sample_rate())
                 except Exception as e:
                     logger.warning("设备切换采样率失败: %s", e)
-                    # 下拉回到实际速率：继续按旧速录制时，界面不能停在新请求上
-                    self.control_panel.set_sample_rate(old_sr)
+                    # 下拉回到设备真值（回读覆盖）：继续按旧速录制时，界面不能
+                    # 停在新请求上，也不能拿 _record_sr 这份 UI 副本回填。
+                    self._sync_sample_rate_display_from_backend(old_sr)
                     # 后端速率没变：用旧速率续录新段，绝不让 _recording=True
                     # 却没有任何段可写（否则停止时会覆盖已收尾的旧文件）。
                     next_index = len(self._record_segments) + 1
@@ -7736,11 +7760,8 @@ class MainWindow(QMainWindow):
                     self.statusBar().showMessage(
                         f"采样率切换失败（保持原速率）: {e}", MSG_IMPORTANT)
                     # 下拉必须回到设备真实值：停在新请求上就是显示一个从未生效的数
-                    try:
-                        actual = float(self._active_sdr_backend.get_sample_rate())
-                    except Exception:  # noqa: BLE001 - 回读也失败时用最后一次已知值
-                        actual = float(self._record_sr)
-                    self.control_panel.set_sample_rate(actual)
+                    # 下拉必须回到设备真实值：停在新请求上就是显示一个从未生效的数
+                    self._sync_sample_rate_display_from_backend(self._record_sr)
                     return
                 if ok is False:
                     logger.warning("设备拒绝采样率 %s，保持 %s", rate, applied)
@@ -10626,7 +10647,9 @@ class MainWindow(QMainWindow):
             return
         ok = self._connect_backend(
             backend,
-            sample_rate=float(dev.get("_sample_rate", DEFAULT_SAMPLE_RATE_HZ)),
+            # 只按键取值：载荷里的采样率由 constants.set_connect_sample_rate
+            # 唯一写入口保证存在，读侧不再自带第二个默认值。
+            sample_rate=float(dev[CONNECT_SAMPLE_RATE_KEY]),
             gain=float(dev.get("_gain", 20.0)),
             ppm=int(dev.get("_ppm", 0)),
             agc=False,

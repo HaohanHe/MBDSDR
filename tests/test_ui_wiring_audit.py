@@ -143,6 +143,71 @@ class TestModulePanelParamsReachBackend:
         p._on_connect()
         assert got == [], "无设备时不得 emit（绝不假造设备）"
 
+    def test_sample_rate_payload_has_single_write_entry(self, monkeypatch):
+        """采样率进连接载荷只经 constants.set_connect_sample_rate 一个写入口。
+
+        现状（修前）：``device_panel._on_connect_clicked`` 与
+        ``module_panel._on_connect`` 各写一次 ``dev["_sample_rate"]``，主窗口
+        读侧还带第三个默认值——同一份「没填」三处三个答案，改协议必须三处
+        一起改，漏一处就是沉默错值。
+
+        反证：把任一面板改回 ``dev["_sample_rate"] = ...`` 直写，spy 就少
+        一次调用 → 本用例红。
+        """
+        import constants
+        import device_panel as device_panel_mod
+        import module_panel as module_panel_mod
+        from PySide6.QtWidgets import QMessageBox
+
+        calls = []
+
+        def spy(payload, requested_hz=None):
+            real = constants.set_connect_sample_rate
+            calls.append(requested_hz)
+            return real(payload, requested_hz)
+
+        monkeypatch.setattr(device_panel_mod, "set_connect_sample_rate", spy)
+        monkeypatch.setattr(module_panel_mod, "set_connect_sample_rate", spy)
+        monkeypatch.setattr(QMessageBox, "information",
+                            lambda *a, **k: QMessageBox.Ok)
+
+        # 设备面板：输入框显式 2.048 MS/s
+        dp = device_panel_mod.DevicePanel()
+        dp._hotplug_timer.stop()
+        got_dev = []
+        dp.connect_requested.connect(lambda d: got_dev.append(dict(d)))
+        dp._devices = [{
+            "label": "FakeSDR", "driver": "fake",
+            "sample_rate_range": (250_000.0, 3_200_000.0),
+            "gain_range": (0.0, 40.0),
+        }]
+        dp.dev_combo.clear()
+        dp.dev_combo.addItem("FakeSDR")
+        dp.dev_combo.setCurrentIndex(0)
+        dp.sr_edit.setText("2048000")
+        dp.gain_edit.setText("30")
+        dp.ppm_edit.setText("0")
+        dp._on_connect_clicked()
+
+        # 模块面板：能力下拉第一档 1.024 MS/s
+        mp = module_panel_mod.ModulePanel()
+        got_mod = []
+        mp.device_selected.connect(lambda d: got_mod.append(dict(d)))
+        mp._apply_devices([{
+            "label": "RTL-SDR", "driver": "rtlsdr",
+            "sample_rate_range": (1_000_000, 2_560_000),
+            "capability_status": {"sample_rate_range": "declared"},
+        }])
+        mp.sr_combo.setCurrentIndex(0)
+        mp._on_connect()
+
+        assert len(calls) == 2, "两个面板都必须走唯一写入口（直写该键即少一次）"
+        assert got_dev and got_mod
+        assert got_dev[0][constants.CONNECT_SAMPLE_RATE_KEY] == pytest.approx(
+            2_048_000.0)
+        assert got_mod[0][constants.CONNECT_SAMPLE_RATE_KEY] == pytest.approx(
+            1_024_000.0)
+
 
 # ===========================================================================
 # 2. control_panel：删书签必须落盘

@@ -34,7 +34,8 @@ except Exception:  # noqa: BLE001
     enumerate_all_sdr_devices = None  # type: ignore
     _ENUM_OK = False
 
-from constants import DEFAULT_SAMPLE_RATE_HZ, format_sample_rate
+from constants import (DEFAULT_SAMPLE_RATE_HZ, format_sample_rate,
+                       set_connect_sample_rate)
 
 #: 无设备空态：下拉框说事实，状态行说下一步——两处都写「未检测到 SDR 设备」
 #: 等于同一句话念两遍，用户看不出该干什么。
@@ -467,7 +468,8 @@ class DevicePanel(QWidget):
         if verdict is None:
             # 未知范围：不能假装校验通过，也不能凭空填默认范围；如实说明后放行。
             self.status_label.setText(f"采样率范围未知，无法校验；将以 {sr:.0f} Hz 下发")
-        dev["_sample_rate"] = sr
+        # 采样率写进载荷只走 constants 的唯一写入口（不与模块面板各写一份）。
+        set_connect_sample_rate(dev, sr)
 
         text = self.gain_edit.text().strip()
         try:

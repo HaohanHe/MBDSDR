@@ -51,7 +51,8 @@ from mode_registry import get as _get_mode
 from constants import (
     DEFAULT_SAMPLE_RATE_HZ, DEFAULT_SR_UNCONFIRMED,
     FREQ_MIN_HZ, FREQ_MAX_HZ, format_sample_rate,
-    default_sample_rate_combo_index, sample_rate_combo_items)
+    default_sample_rate_combo_index, sample_rate_combo_items,
+    connect_sample_rate_hz, set_connect_sample_rate)
 
 try:  # pragma: no cover - 失败消息整形（clean_exc 战役先例），缺失时退化原文
     from mbdsdr_ai.tool_registry import clean_exc as _clean_exc
@@ -594,14 +595,10 @@ class ModulePanel(QWidget):
     def selected_sample_rate_hz(self) -> float:
         """当前采样率下拉档位（Hz）。
 
-        供连接时下发 + 测试断言。itemData 缺失/异常时回退项目基准采样率，
-        绝不返回 0 之类会让后端崩掉的假值。
+        供连接时下发 + 测试断言。itemData 缺失/异常时的兜底口径由
+        ``constants.connect_sample_rate_hz`` 唯一决定（不再在本面板写一遍默认）。
         """
-        try:
-            hz = float(self.sr_combo.currentData())
-        except (TypeError, ValueError):
-            return float(DEFAULT_SAMPLE_RATE_HZ)
-        return hz if hz > 0 else float(DEFAULT_SAMPLE_RATE_HZ)
+        return connect_sample_rate_hz(self.sr_combo.currentData())
 
     def selected_gain_db(self) -> float:
         """当前增益滑块值（dB），语义与 device_panel.gain_edit 一致。"""
@@ -629,12 +626,13 @@ class ModulePanel(QWidget):
         idx = self.device_combo.currentIndex()
         if not self._devices or idx >= len(self._devices):
             return
-        # 面板参数随设备一起下发：沿用 device_panel 的 dev["_sample_rate"] /
-        # dev["_gain"] 协议（main_window._on_panel_device_connect 读取这两个键）。
+        # 面板参数随设备一起下发：沿用 device_panel 的 dev["_gain"] 协议
+        # （main_window._on_panel_device_connect 读取）；采样率只经 constants
+        # 唯一写入口落进载荷，不再与设备面板各写一份。
         # 此前这两个控件改了不下发，连接永远走默认
         # DEFAULT_SAMPLE_RATE_HZ = 2.400 MS/s / 20 dB。
         dev = dict(self._devices[idx])
-        dev["_sample_rate"] = self.selected_sample_rate_hz()
+        set_connect_sample_rate(dev, self.sr_combo.currentData())
         dev["_gain"] = self.selected_gain_db()
         # 带宽也进载荷（此前只有采样率/增益下发，用户设的带宽被静默丢弃）
         try:

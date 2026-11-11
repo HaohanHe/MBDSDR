@@ -83,6 +83,47 @@ def sample_rate_combo_items(device) -> list:
     return [(format_sample_rate(rate), float(rate)) for rate in options]
 
 
+#: 连接载荷里「本次请求的采样率」的键名。写入只允许走
+#: ``set_connect_sample_rate``（全仓唯一写入口，见 docs/redundancy-register.md §5.11.3）。
+CONNECT_SAMPLE_RATE_KEY = "_sample_rate"
+
+
+def connect_sample_rate_hz(requested_hz=None) -> float:
+    """连接请求采样率的唯一取值口径：默认值只在这里给一次。
+
+    ``requested_hz`` 为空/非数/NaN/<=0 一律按 ``DEFAULT_SAMPLE_RATE_HZ``——
+    载荷与下拉里绝不出现 0 Hz 这种会让后端崩掉、又会被读成读数的假值。
+    调用方（设备面板输入框、模块面板能力下拉）各自解析后都交到这里，
+    不再各带一份默认。
+    """
+    try:
+        hz = float(requested_hz)
+    except (TypeError, ValueError):
+        hz = 0.0
+    if not _math.isfinite(hz) or hz <= 0.0:
+        return float(DEFAULT_SAMPLE_RATE_HZ)
+    return hz
+
+
+def set_connect_sample_rate(payload: dict, requested_hz=None) -> float:
+    """把「本次连接请求的采样率」写进连接载荷——全仓唯一写入口。
+
+    此前设备面板（``device_panel.py::_on_connect_clicked``）与模块面板
+    （``module_panel.py::_on_connect``）各写一次 ``payload["_sample_rate"]``，
+    主窗口读侧还带了第三个默认值：同一份「没填」在三处有三个答案，改协议
+    必须三处一起改，漏一处就是沉默错值。收口到本函数后：
+
+    - 写：只有这里能写这个键；
+    - 默认：只有 ``connect_sample_rate_hz`` 决定；
+    - 读：``MainWindow._on_panel_device_connect`` 只按键取值，不再自带默认。
+
+    返回实际写进载荷的值（Hz），便于调用方留证/测试。
+    """
+    hz = connect_sample_rate_hz(requested_hz)
+    payload[CONNECT_SAMPLE_RATE_KEY] = hz
+    return hz
+
+
 def default_sample_rate_combo_index(items, preferred_hz=None) -> int:
     """默认选中档：优先对齐 ``preferred_hz``，未指定时回 ``DEFAULT_SAMPLE_RATE_HZ``，
     两者都缺则选第一项。

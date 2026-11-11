@@ -144,3 +144,38 @@ def test_single_segment_keeps_plain_sidecar(window, tmp_path):
     assert meta["samples"] == 2000
     assert meta["duration_s"] == 0.002
     assert "segments" not in meta, "单段录音不应伪造分段清单"
+
+
+class _RefusingRecorderBackend(_Backend):
+    """拒绝新采样率；回读值是设备真值（故意与 UI 的 _record_sr 不同）。"""
+
+    def set_sample_rate(self, rate):
+        self.set_calls.append(float(rate))
+        return False
+
+
+def test_rate_change_failure_restores_device_readback_not_record_copy(
+        window, tmp_path):
+    """失败回填必须回读设备真值，不能拿 `_record_sr` 这份 UI 副本回填。
+
+    现状（修前）：录音中改率失败走 ``control_panel.set_sample_rate(old_sr)``，
+    ``old_sr`` 来自 ``_record_sr``——UI 侧维护的副本；一旦它与设备真值分叉，
+    界面就停在「设备从未跑过的数」上。修后统一走
+    ``_sync_sample_rate_display_from_backend``（回读覆盖）。
+    反证：把该行改回 ``set_sample_rate(old_sr)`` → 本用例红。
+    """
+    first = tmp_path / "baseband_20261105_020000.iq"
+    _prepare_recording(window, first, sr=1_000_000.0)
+    assert window._record_sr == pytest.approx(1_000_000.0)
+    # 档位里同时放 1.000 / 1.024 MS/s：若实现用 _record_sr(1.000) 回填，
+    # 下拉会精确选中它而不是设备真值 1.024——两种做法必须能区分开。
+    window.control_panel.set_sample_rate_options(
+        [1_000_000, 1_024_000, 2_400_000], 2_400_000)
+    window._active_sdr_backend = _RefusingRecorderBackend(sr=1_024_000.0)
+
+    window._on_sample_rate_changed(2_400_000.0)
+
+    assert window.control_panel.sample_rate_combo.currentData() == pytest.approx(
+        1_024_000.0), "失败后下拉必须是设备回读值，不是 _record_sr 副本"
+    assert window._record_sr == pytest.approx(1_000_000.0), \
+        "续录仍按旧速率（文件段头不许写成请求值）"
