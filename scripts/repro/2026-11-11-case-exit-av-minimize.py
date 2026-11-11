@@ -149,6 +149,84 @@ CELLS = {
     # 应用级 Python 事件过滤器（MainWindow 也装了）
     "AA": dict(platform="windows", show="none", loop="none",
                exit="osmain", rmtree="yes", font="no", window="appfilter"),
+    # ---- 找完整窗剩下的贡献者：逐个面板单建 ----
+    "BA": dict(platform="windows", show="none", loop="none", exit="osmain",
+               rmtree="yes", font="no", window="build",
+               build=[("sat_track_panel", "SatTrackPanel")]),
+    "BB": dict(platform="windows", show="none", loop="none", exit="osmain",
+               rmtree="yes", font="no", window="build",
+               build=[("adsb_map_panel", "AdsbMapPanel")]),
+    "BC": dict(platform="windows", show="none", loop="none", exit="osmain",
+               rmtree="yes", font="no", window="build",
+               build=[("weather_panel", "WeatherPanel")]),
+    "BD": dict(platform="windows", show="none", loop="none", exit="osmain",
+               rmtree="yes", font="no", window="build",
+               build=[("new_spacetime_panel", "NewSpacetimePanel")]),
+    "BE": dict(platform="windows", show="none", loop="none", exit="osmain",
+               rmtree="yes", font="no", window="build",
+               build=[("control_panel", "ControlPanel")]),
+    # ---- 组合：单建不崩、合起来才崩？ ----
+    "BF": dict(platform="windows", show="none", loop="none", exit="osmain",
+               rmtree="yes", font="no", window="build",
+               build=[("module_panel", "ModulePanel"),
+                      ("control_panel", "ControlPanel")]),
+    "BG": dict(platform="windows", show="none", loop="none", exit="osmain",
+               rmtree="yes", font="no", window="build",
+               build=[("module_panel", "ModulePanel"),
+                      ("sat_track_panel", "SatTrackPanel")]),
+    # ---- 假设：贡献者是「Python 槽的 Qt 信号连接数量」 ----
+    "BH": dict(platform="windows", show="none", loop="none", exit="osmain",
+               rmtree="yes", font="no", window="conns", n=500),
+    "BI": dict(platform="windows", show="none", loop="none", exit="osmain",
+               rmtree="yes", font="no", window="conns", n=5000),
+    # ---- 假设：触发条件是「进程里导入过 rtlsdr / sdr_backend」 ----
+    "BJ": dict(platform="windows", show="none", loop="none", exit="osmain",
+               rmtree="yes", font="no", window="importmod",
+               mod="mbdsdr_ai.sdr_backend"),
+    "BK": dict(platform="windows", show="none", loop="none", exit="osmain",
+               rmtree="yes", font="no", window="importmod", mod="rtlsdr"),
+    # ---- 用户点名：设备面板 / 右栏容器 / 左栏星象仪页 ----
+    # 只建设备面板（同 ModulePanel 一样有 QThreadPool 枚举，但延后 400 ms）
+    "BL": dict(platform="windows", show="none", loop="none", exit="osmain",
+               rmtree="yes", font="no", window="build",
+               build=[("device_panel", "DevicePanel")]),
+    # BL + 让 400 ms 单次定时器真的触发（枚举任务启动后立刻退）
+    "BO": dict(platform="windows", show="none", loop="pe1s", exit="osmain",
+               rmtree="yes", font="no", window="build",
+               build=[("device_panel", "DevicePanel")]),
+    # 只建右栏容器
+    "BM": dict(platform="windows", show="none", loop="none", exit="osmain",
+               rmtree="yes", font="no", window="rightcol"),
+    # 右栏容器 + 主窗里挂右栏的那批面板（组合形态）
+    "BN": dict(platform="windows", show="none", loop="none", exit="osmain",
+               rmtree="yes", font="no", window="rightcol",
+               build=[("control_panel", "ControlPanel"),
+                      ("status_panel", "StatusPanel"),
+                      ("module_panel", "ModulePanel"),
+                      ("weather_panel", "WeatherPanel"),
+                      ("new_spacetime_panel", "NewSpacetimePanel"),
+                      ("sat_track_panel", "SatTrackPanel"),
+                      ("device_panel", "DevicePanel")]),
+    # 左栏「星象仪模式」页（左栏那根 QTabWidget 的首页）
+    "BP": dict(platform="windows", show="none", loop="none", exit="osmain",
+               rmtree="yes", font="no", window="sky"),
+    # BN 的二分：右栏容器 + 只有 ModulePanel / 只有其余面板
+    "BQ": dict(platform="windows", show="none", loop="none", exit="osmain",
+               rmtree="yes", font="no", window="rightcol",
+               build=[("module_panel", "ModulePanel")]),
+    "BR": dict(platform="windows", show="none", loop="none", exit="osmain",
+               rmtree="yes", font="no", window="rightcol",
+               build=[("control_panel", "ControlPanel"),
+                      ("status_panel", "StatusPanel"),
+                      ("weather_panel", "WeatherPanel"),
+                      ("new_spacetime_panel", "NewSpacetimePanel"),
+                      ("sat_track_panel", "SatTrackPanel"),
+                      ("device_panel", "DevicePanel")]),
+    # ModulePanel 里剩下的结构候选：Python 子类 QObject + Python 声明 Signal
+    "BS": dict(platform="windows", show="none", loop="none", exit="osmain",
+               rmtree="yes", font="no", window="pysignal", emit="yes"),
+    "BT": dict(platform="windows", show="none", loop="none", exit="osmain",
+               rmtree="yes", font="no", window="pysignal", emit="no"),
 }
 
 CODE_LABEL = {
@@ -217,6 +295,98 @@ def run_child(cell_id: str) -> None:
         from main_window import MainWindow                      # noqa: E402
         window = MainWindow()
         _mark(mark, "S3_ctor")
+    elif cfg["window"] == "conns":
+        # 假设验证：只增加「Python 槽的 Qt 信号连接」数量，不加其它结构
+        from PySide6.QtWidgets import (                         # noqa: E402
+            QMainWindow, QPushButton, QWidget)
+        window = QMainWindow()
+        window.setCentralWidget(QWidget())
+        _sink = []
+
+        def _slot(*_a, **_k):
+            _sink.append(1)
+
+        for _i in range(int(cfg["n"])):
+            b = QPushButton(window)
+            b.clicked.connect(_slot)
+        window.resize(640, 480)
+        _mark(mark, "S3_ctor", f"conns={cfg['n']}")
+    elif cfg["window"] == "build":
+        from PySide6.QtWidgets import QMainWindow, QWidget      # noqa: E402
+        window = QMainWindow()
+        window.setCentralWidget(QWidget())
+        for mod_name, cls_name in cfg["build"]:
+            mod = __import__(mod_name)
+            panel = getattr(mod, cls_name)()
+            panel.setParent(window)
+            window._probe_panels = getattr(window, "_probe_panels", []) + [panel]
+        window.resize(640, 480)
+        _mark(mark, "S3_ctor", "+".join(c for _m, c in cfg["build"]))
+    elif cfg["window"] == "importmod":
+        # 假设验证：只导入模块（不建面板），确认「导入过即崩」
+        import importlib                                       # noqa: E402
+        from PySide6.QtWidgets import QMainWindow, QWidget      # noqa: E402
+        window = QMainWindow()
+        window.setCentralWidget(QWidget())
+        importlib.import_module(cfg["mod"])
+        _mark(mark, "S3_ctor", f"import {cfg['mod']}")
+    elif cfg["window"] == "rightcol":
+        # 右栏容器（+ 可选：把主窗挂右栏的那批面板塞进去）
+        from right_column import RightColumn                    # noqa: E402
+        from PySide6.QtWidgets import QMainWindow, QWidget      # noqa: E402
+        window = QMainWindow()
+        rc = RightColumn()
+        window.setCentralWidget(rc)
+        for mod_name, cls_name in cfg.get("build", []):
+            mod = __import__(mod_name)
+            panel = getattr(mod, cls_name)()
+            rc.addTab(panel, cls_name)
+            window._probe_panels = getattr(window, "_probe_panels", []) + [panel]
+        window.resize(640, 480)
+        _mark(mark, "S3_ctor", "rightcol+" + "+".join(
+            c for _m, c in cfg.get("build", [])))
+    elif cfg["window"] == "sky":
+        # 左栏「星象仪模式」页（工厂优先，回退 RFSkyView，与主窗同一路径）
+        from rf_sky_view import RFSkyView                          # noqa: E402
+        from PySide6.QtWidgets import QMainWindow                 # noqa: E402
+        window = QMainWindow()
+        sky = None
+        try:
+            from rf_sky_view import create_sky_widget as _factory  # noqa: E402
+            sky = _factory()
+        except Exception:                                         # noqa: BLE001
+            sky = None
+        if sky is None:
+            sky = RFSkyView()
+        window.setCentralWidget(sky)
+        window._probe_panel = sky
+        window.resize(640, 480)
+        _mark(mark, "S3_ctor", f"sky={type(sky).__name__}")
+    elif cfg["window"] == "pysignal":
+        # ModulePanel 里剩下的结构候选：Python 子类 QObject + 模块内声明 Signal
+        from PySide6.QtWidgets import QMainWindow, QWidget      # noqa: E402
+        from PySide6.QtCore import QObject, Signal              # noqa: E402
+
+        class _Emitter(QObject):
+            ping = Signal(int)
+
+        class _Receiver(QObject):
+            def __init__(self):
+                super().__init__()
+                self.seen = []
+
+            def on_ping(self, v):
+                self.seen.append(v)
+
+        window = QMainWindow()
+        window.setCentralWidget(QWidget())
+        em, rc = _Emitter(), _Receiver()
+        if cfg.get("emit") == "yes":
+            em.ping.connect(rc.on_ping)
+            em.ping.emit(1)
+        window._probe_objs = [em, rc]
+        window.resize(640, 480)
+        _mark(mark, "S3_ctor", f"pysignal emit={cfg.get('emit')}")
     elif cfg["window"] in ("minqmw", "minwidget", "qthreads", "many",
                            "aipanel", "spectrum", "statuspanel",
                            "modulepanel", "appfilter"):
@@ -268,6 +438,13 @@ def run_child(cell_id: str) -> None:
     if cfg["loop"] == "pe":
         app.processEvents()
         _mark(mark, "S5_loop", "processEvents")
+    elif cfg["loop"] == "pe1s":
+        # 连续泵 1 s 事件（让 400 ms 单次定时器真的触发，如 DevicePanel 的枚举）
+        for _ in range(20):
+            app.processEvents()
+            time.sleep(0.05)
+        app.processEvents()
+        _mark(mark, "S5_loop", "processEvents~1s")
     elif cfg["loop"] == "exec" and cfg["exit"] != "oswatch":
         QTimer.singleShot(600, app.quit)
         rc = app.exec()
@@ -293,7 +470,7 @@ def run_child(cell_id: str) -> None:
         # 不调退出原语：解释器收尾（Py_FinalizeEx）= 全窗析构
         return
 
-    _mark(mark, "S7_exit", f"mode={mode}")
+    _mark(mark, "S7_exit", f"mode={mode} widgets={len(app.allWidgets())}")
     sys.stdout.flush()
     sys.stderr.flush()
 
@@ -432,7 +609,8 @@ def main() -> int:
             _yn(c["font"] == "yes"), _yn(c["rmtree"] == "yes"),
             ",".join(_label(x) for x in r["codes"]),
             f"{r['crashes']}/{len(r['codes'])}",
-            "; ".join(uniq) if uniq else "—", r["last"][0]))
+            "; ".join(uniq) if uniq else "—",
+            "; ".join(dict.fromkeys(r["last"]))))
     print("=" * 132)
     print("口径：0/5 只表示本机该格未复现，不反推其它格。最后标记 = "
           "崩溃前最后一个 fsync 落盘的阶段。WER 按子进程 PID 1:1 匹配。")
