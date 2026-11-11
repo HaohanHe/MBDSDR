@@ -101,11 +101,6 @@ class FakeGimbal:
 # ---------------------------------------------------------------------------
 # 主窗口夹具（与 test_gimbal_track_chain.py 同口径）
 # ---------------------------------------------------------------------------
-@pytest.fixture(autouse=True)
-def _isolated(isolated_profile):
-    yield
-
-
 @pytest.fixture(scope="module")
 def mw(isolated_profile):
     from main_window import MainWindow
