@@ -1,0 +1,55 @@
+{
+  "kind": "theme_switch_palette_feasibility",
+  "date": "2026-11-11",
+  "question": "方案 A（颜色进 QPalette、QSS 只留边框/圆角/间距、切主题不重设 QSS）在这台 Qt 6.12 / PySide6 上到底能不能变色？切换要多久？",
+  "probes": {
+    "1_qss_palette_role_frozen": {
+      "setup": "QSS 用 palette(window)/palette(base)/palette(button)，先 setStyleSheet 再 setPalette(dark->light)",
+      "before": {"window": "#efefef", "lineedit": "#ffffff", "button": "#efefef"},
+      "after": {"window": "#efefef", "lineedit": "#ffffff", "button": "#efefef"},
+      "changed": false,
+      "conclusion": "palette(role) 在 polish 时固化成当时的应用调色板，之后 setPalette 不生效（连首次 dark 都没进去）。"
+    },
+    "2_colorless_qss": {
+      "setup": "QSS 完全不写颜色（只有 border/radius/padding），app.setPalette 暗->亮",
+      "window_changed": true,
+      "lineedit_changed": false,
+      "button_changed": true,
+      "lineedit_palette_base_after_app_set_palette": "#202020",
+      "app_palette_base": "#ffffff",
+      "conclusion": "顶层窗口底色跟 palette 走；被 QSS polish 过的控件（QLineEdit 的 Base）调色板被固化，update() 重绘也不变。"
+    },
+    "3_window_level_palette": {
+      "setup": "只对顶层窗口 setPalette(light) 再 app.setPalette(light)",
+      "lineedit_changed": false,
+      "conclusion": "把调色板设在窗口上同样不传播给 QSS 控件的绘制颜色。"
+    },
+    "4_explicit_palette_push": {
+      "setup": "palette(role) QSS + 遍历每个控件显式 setPalette + update()",
+      "push_ms": 10.1,
+      "changed": false,
+      "conclusion": "连逐控件 setPalette 也不变色：QStyleSheetStyle 的颜色只在 polish 时解析一次。"
+    },
+    "5_palette_role_plus_repolish": {
+      "setup": "palette(role) QSS + app.setPalette + 每个控件 unpolish/polish",
+      "switch_ms": 36.6,
+      "changed": {"window": true, "lineedit": true, "button": true, "combo": true, "spin": true, "check": true},
+      "conclusion": "唯一能让 QSS 颜色跟着 palette 变的路径：切主题后重抛光。palette(role) 的方案可行，但不是零成本。"
+    }
+  },
+  "real_window_measurement": {
+    "script": "output/tmp/theme_switch_probe.py",
+    "widgets": 2537,
+    "ctor_ms": 8120.5,
+    "current_qss_switch_ms": [3328.8, 3610.6, 3803.3, 4560.7],
+    "repolish_all_widgets_ms": 419.6,
+    "clear_app_qss_ms": 508.0,
+    "palette_only_switch_ms": [79.5, 55.8, 60.9, 59.2],
+    "settings_page_pixels_changed": {
+      "current_qss_default_vs_dark": "35 / 36 采样点变化",
+      "palette_only_default_vs_dark": "36 / 36 采样点变化"
+    },
+    "note": "current_qss 每次都在变慢（3.3 -> 4.6 s），与并行线在跑的构建/测试负载有关，量级以 3.3-4.6 s 记。"
+  },
+  "verdict": "方案 A 的原始形态（只 setPalette 就变色）不成立；可行形态是 palette(role) QSS + 切主题后重抛光全树，实测 0.42 s（目标 0.3 s，差 0.12 s，卡在 2537 个控件逐个 polish）。不重抛光的裸调色板路径 60 ms 但会丢掉 QSS 的全部造型（边框/圆角/卡片底色）。"
+}
