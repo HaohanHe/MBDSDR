@@ -21,7 +21,14 @@ roadmap 断言（原文）：
     2  无法判定   —— 数据层没有给出 deny（前置不成立）或导入失败
 
 反证对照：同一桩上跑一份「带闸门」的等价实现（读 ``policy.allow_tune``），
-必须得到 0 次下发——证明探针能区分「有闸门 / 无闸门」。
+必须得到 0 次下发——证明探针能区分「有闸门 / 无闸门」。判定句固定为：
+
+    显式读 policy = 0 次 / 实际 = 1 次     ← 修前（复现）
+    显式读 policy = 0 次 / 实际 = 0 次     ← 修后（未复现）
+
+口径（D-7 方案 A）：**dead/unknown 才是 0 次；expired 是「确认后 1 次」**
+（``TRACKING_MODES["expired"]["tune"] == "confirm"``，云端/云台另禁）。
+本脚本用 dead TLE 作探针，不得拿 expired 当 dead 用。
 
 用法：
     python scripts/repro/2026-11-11-p0-01-dead-tle-tracking-gate.py
@@ -190,7 +197,7 @@ def main() -> int:
         self._on_tune_sdr(145.8e6, self._sat_track_mode)
 
     _fixed_poll(_make_stub(tunes_fixed))
-    print(f"  对照实际：_on_tune_sdr 调用 {len(tunes_fixed)} 次")
+    print(f"  显式读 policy = {len(tunes_fixed)} 次 / 实际 = {len(tunes)} 次")
     print(f"  对照组可复现旧行为 : {len(tunes) > 0}")
     print(f"  对照组闸门有效     : {len(tunes_fixed) == 0}")
     if len(tunes_fixed) != 0:
