@@ -17,6 +17,8 @@ from __future__ import annotations
 
 from typing import Optional, Tuple
 
+import shiboken6
+
 from PySide6.QtCore import Qt, QEvent, QPointF, Signal
 try:
     from PySide6.QtGui import QTouchEvent, QMouseEvent
@@ -136,6 +138,10 @@ class PinchZoomMixin:
 
     def event(self, event: QEvent) -> bool:
         """拦截手势事件。"""
+        # 已销毁的控件：C++ 对象没了、Python 包装还在，下面每条分支都会抛
+        # SystemError，异常在派发里会重入成递归（见 main_window.eventFilter）。
+        if not shiboken6.isValid(self):
+            return False
         if event.type() == QEvent.Type.Gesture:
             if self._handle_gesture(event):
                 return True

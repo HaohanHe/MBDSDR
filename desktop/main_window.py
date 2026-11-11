@@ -16,6 +16,8 @@ import time
 from datetime import datetime
 from typing import Optional, Dict
 
+import shiboken6
+
 logger = logging.getLogger(__name__)
 
 # 状态栏提示时长登记档（唯一口径，见 tests/test_status_message_durations.py）：
@@ -3809,6 +3811,12 @@ class MainWindow(QMainWindow):
         # 我们的。直接放行（连 super() 都不调，避免基类再碰一次 event）。
         if threading.get_ident() != self._event_filter_thread_id:
             return False
+        # 已销毁的 C++ 对象（QLayout / QWidget 的 Python 包装还活着）直接放行：
+        # 下面任何一次 obj 属性访问、以及 super().eventFilter(obj, …) 都会抛
+        # SystemError；异常在事件派发里会变成重入（实测与 PinchZoomMixin.event
+        # 交替递归 40+ 层）。isValid 是一次 C 调用，比一次 getattr 便宜。
+        if not shiboken6.isValid(obj):
+            return False
         # 构造期 8 万次事件：先取一次事件类型，按类型分派后再比对象身份，
         # 不再对每个事件做 4 次 getattr + 重复 event.type()（旧实现占构造 59%）。
         etype = event.type()
@@ -3837,7 +3845,9 @@ class MainWindow(QMainWindow):
         elif etype == QEvent.Enter or etype == QEvent.Leave:
             if obj is getattr(self, "_planetarium_strip", None):
                 self._set_planetarium_strip_hover(etype == QEvent.Enter)
-        return super().eventFilter(obj, event)
+        # 不调 super()：基类 eventFilter 没有本项目要用的逻辑，而它是唯一会把
+        # 已销毁 obj 的包装再送进 C++ 的入口（SystemError 的抛点）。
+        return False
 
     def resizeEvent(self, event):  # noqa: N802 (Qt 命名)
         super().resizeEvent(event)
