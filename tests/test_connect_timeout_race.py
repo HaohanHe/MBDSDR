@@ -7,7 +7,7 @@
 入口闸门是开的 → 起第二根线程 → 两根线程抢同一根棒子（同一 USB 设备第二次
 open，实测语义就是 ACCESS(-3)）。
 
-本文件先断「修好之后应该成立」的三件事，当前代码必红：
+本文件先断「修好之后应该成立」的三件事：
 1. 超时后有一个**公开可读**的状态 `connect_still_settling`，值为 True；
 2. `_connect_in_flight` 不是被 `finally` 复位成 False（它与上面同真）；
 3. 第二次调用不再触发第二次真实 `connect()`，返回 False，并给出可读提示
@@ -15,10 +15,6 @@ open，实测语义就是 ACCESS(-3)）。
 
 假 backend 的 `connect()` 阻塞 21 s（> 20 s 看门狗），测试收尾用 Event 放行，
 不把线程留在进程里；不用真实硬件、不断言耗时曲线。
-
-本用例目前是 `xfail(strict=True)`：补丁在 `docs/pending-patches/2026-11-11-
-connect-timeout-race.patch`，排队在卫星线 P0-01、性能线触控后缀之后。补丁落地
-后本用例 XPASS，strict=True 会失败，提醒把 marker 删掉。
 """
 import os
 import sys
@@ -71,11 +67,6 @@ def window(isolated_profile, qtapp):
         pass
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="连接超时竞态补丁未下（排队在卫星线 P0-01、性能线触控后缀之后）；"
-           "补丁落地后本用例会 XPASS，strict=True 会提醒删掉这个 marker",
-)
 def test_timed_out_connect_does_not_start_second_real_connect(window):
     be = _BlockingBackend("A")
     try:
