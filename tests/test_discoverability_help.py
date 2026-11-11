@@ -38,7 +38,7 @@ def catalog():
 
 
 @pytest.fixture(scope="module")
-def main_window(qtapp):
+def main_window(qtapp, isolated_profile):
     from main_window import MainWindow
     w = MainWindow()
     yield w
