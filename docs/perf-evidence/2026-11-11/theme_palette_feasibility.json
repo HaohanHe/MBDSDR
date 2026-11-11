@@ -46,10 +46,10 @@
     "clear_app_qss_ms": 508.0,
     "palette_only_switch_ms": [79.5, 55.8, 60.9, 59.2],
     "settings_page_pixels_changed": {
-      "current_qss_default_vs_dark": "35 / 36 采样点变化",
+      "current_qss_default_vs_dark": "35 / 36 采样点变化（隐藏面板首帧伪影；设置页真正选中后连续三次均 36/36，见 theme_switch_accumulation.json）",
       "palette_only_default_vs_dark": "36 / 36 采样点变化"
     },
-    "note": "current_qss 每次都在变慢（3.3 -> 4.6 s），与并行线在跑的构建/测试负载有关，量级以 3.3-4.6 s 记。"
+    "note": "首轮 3.3 -> 4.6 s 的单调上升已被 10 次连切复测推翻：无累积，是并行线负载造成的波动（见 theme_switch_accumulation.json）。量级按 2.1-5.2 s 记。"
   },
   "verdict": "方案 A 的原始形态（只 setPalette 就变色）不成立；可行形态是 palette(role) QSS + 切主题后重抛光全树，实测 0.42 s（目标 0.3 s，差 0.12 s，卡在 2537 个控件逐个 polish）。不重抛光的裸调色板路径 60 ms 但会丢掉 QSS 的全部造型（边框/圆角/卡片底色）。"
 }

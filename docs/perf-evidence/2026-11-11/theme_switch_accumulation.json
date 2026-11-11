@@ -1,0 +1,40 @@
+{
+  "kind": "theme_switch_accumulation",
+  "date": "2026-11-11",
+  "question": "连续切主题是否累积（耗时/RSS/控件数/QSS 尺寸）？以及 A/B 里那个不变色的采样点是谁？",
+  "method": "同一进程构造一次 MainWindow，连续 apply 10 次（default/dark/high_contrast 轮换），每次记耗时、RSS(psutil)、findChildren(QObject)、QSS 行数；另在设置页可见态做 36 点像素逐点比对。",
+  "switch_rows": [
+    {"n": 1, "theme": "default", "ms": 3886.7, "rss_mb": 351.4, "widgets": 2546, "qss_lines": 551},
+    {"n": 2, "theme": "dark", "ms": 3639.9, "rss_mb": 350.5, "widgets": 2555, "qss_lines": 551},
+    {"n": 3, "theme": "high_contrast", "ms": 4244.0, "rss_mb": 351.9, "widgets": 2548, "qss_lines": 551},
+    {"n": 4, "theme": "default", "ms": 5224.5, "rss_mb": 354.7, "widgets": 2547, "qss_lines": 551},
+    {"n": 5, "theme": "dark", "ms": 4615.1, "rss_mb": 355.2, "widgets": 2547, "qss_lines": 551},
+    {"n": 6, "theme": "high_contrast", "ms": 3606.8, "rss_mb": 354.6, "widgets": 2551, "qss_lines": 551},
+    {"n": 7, "theme": "default", "ms": 3237.2, "rss_mb": 356.1, "widgets": 2547, "qss_lines": 551},
+    {"n": 8, "theme": "dark", "ms": 3670.3, "rss_mb": 355.3, "widgets": 2545, "qss_lines": 551},
+    {"n": 9, "theme": "high_contrast", "ms": 2304.3, "rss_mb": 355.3, "widgets": 2545, "qss_lines": 551},
+    {"n": 10, "theme": "default", "ms": 2101.4, "rss_mb": 356.1, "widgets": 2545, "qss_lines": 551}
+  ],
+  "second_run_switch_ms": [5523.4, 4059.8, 4808.2, 3686.1, 3644.0, 3447.2, 3250.6, 3169.5, 2351.4, 3290.6],
+  "verdict": "无累积：耗时没有单调上升（首切最慢，末几次反而更低，波动来自并行线负载）；QSS 恒为 551 行 / 17509 字符；控件数 2545-2555 区间震荡无增长；RSS 351.4 -> 356.1 MB 在前 4 次升到位后平台化（+4.7 MB 一次性缓存，非每次递增）。之前 3.33->4.56 s 的单调上升是本机并行负载，不是泄漏。",
+  "pixel_check": {
+    "hidden_panel_original_ab": {"changed": 35, "total": 36,
+      "note": "设置页所在右栏从未被选中，panel.isVisible()=False，grab() 是隐藏控件合成渲染；首帧那次 index9 像素两次相同"},
+    "point_index_9": {"xy_in_panel": [116, 501], "default_rgb": "#4f6b79",
+      "dark_rgb": "#1e1e20",
+      "widget": "QLabel#hintLabel", "ancestors": "QLabel#hintLabel < QGroupBox#- < QWidget#- < RightSection#-",
+      "hit_rect": [20, 84, 246, 52]},
+    "visible_page_after_select_tab": {"changed": 36, "total": 36,
+      "select_tab": "settings（tabData 由 settings_dock 推导，不带 _dock 后缀）",
+      "panel_visible": true}
+  },
+  "residual_timer": {
+    "context": "关窗 + 事件循环跑完 250 ms 后仍 isActive 的 QTimer",
+    "count": 1,
+    "parent_chain": "QNetworkReply#- < QNetworkAccessManager#- < TileLoader#- < OsmMapView#-",
+    "interval_ms": 8000,
+    "single_shot": true,
+    "remaining_ms": 7782,
+    "verdict": "不是窗口/面板自己起的常驻定时器，是 QNetworkReply 的传输超时单次定时器（OSM 瓦片下载，OsmMapView -> TileLoader）。修法在 TileLoader/关窗清理（abort 在途 reply），不在 MainWindow 的定时器清单里。"
+  }
+}
