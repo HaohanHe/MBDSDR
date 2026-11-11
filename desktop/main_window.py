@@ -6943,6 +6943,12 @@ class MainWindow(QMainWindow):
             # 点了没反应是最糟的体验：没连上也说清楚
             self.statusBar().showMessage("当前未连接 SDR，没有可断开的设备", MSG_NORMAL)
         self._teardown_connection()
+        # teardown 刷新的是底部状态标签，不覆盖消息区——连接成功时写的
+        # 「已连接 <设备名>」会一直留着，用户点完「断开」看到的第一行还是
+        # 「已连接」（2026-11-11 离屏实测）。这里只收拾这一句：消息区若已被
+        # teardown 写成落盘/断开原因就不动，避免压掉更有价值的信息。
+        if "已连接" in self.statusBar().currentMessage():
+            self.statusBar().showMessage("已断开连接（设备已释放）", MSG_NORMAL)
 
     # ========================================================================
     # 信号槽：从 Worker 接收数据更新 UI
