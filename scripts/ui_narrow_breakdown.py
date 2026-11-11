@@ -64,9 +64,9 @@ sys.path.insert(0, os.path.join(_ROOT, "desktop"))
 from PySide6.QtCore import Qt  # noqa: E402
 from PySide6.QtGui import QFontDatabase, QFontMetrics  # noqa: E402
 from PySide6.QtWidgets import (  # noqa: E402
-    QApplication, QComboBox, QDoubleSpinBox, QFrame, QLabel, QLineEdit,
-    QPushButton, QCheckBox, QSlider, QScrollArea, QStyle, QTabWidget,
-    QToolBar, QToolButton, QWidget,
+    QApplication, QComboBox, QDoubleSpinBox, QFrame, QGroupBox, QLabel,
+    QLineEdit, QPushButton, QCheckBox, QSlider, QScrollArea, QStyle,
+    QTabWidget, QToolBar, QToolButton, QWidget,
 )
 
 #: 验收三档（唯一口径，见 ``docs/narrow-screen-plan.md`` §0.0）。
@@ -161,6 +161,8 @@ def _text_of(w: QWidget) -> str:
         return w.text() or w.placeholderText()
     if isinstance(w, QSlider):
         return "slider"
+    if isinstance(w, QGroupBox):
+        return w.title()
     if isinstance(w, QFrame) and w.frameShape() in (QFrame.VLine, QFrame.HLine):
         return "separator"
     return ""
@@ -168,6 +170,13 @@ def _text_of(w: QWidget) -> str:
 
 def _label_of(w: QWidget) -> str:
     return f"{type(w).__name__}({w.objectName() or '-'})"
+
+
+def _who_text(row: dict) -> str:
+    """责任控件的一行摘要：``名字'文本'+越界px``（滑杆/分隔线不重复文本）。"""
+    text = ("" if row.get("text") in ("slider", "separator")
+            else repr(row.get("text")))
+    return f"{row['label']}{text}+{row['overflow']}"
 
 
 def _rows_for_layout(layout) -> list[tuple[QWidget, int, int, int]]:
@@ -628,12 +637,17 @@ def main() -> int:
             return {"error": "no_dbSliderCol"}
         avail = col.height()
         rows = []
+        slider_n = 0
         for i in range(col.layout().count()):
             cw = col.layout().itemAt(i).widget()
             if cw is None:
                 continue
+            label = _label_of(cw)
+            if isinstance(cw, QSlider):
+                slider_n += 1
+                label = f"QSlider#{slider_n}"   # 三根滑杆都没名字，按顺序编号
             rows.append({
-                "label": _label_of(cw),
+                "label": label,
                 "text": _text_of(cw),
                 "y": cw.y(),
                 "height": cw.height(),
@@ -739,7 +753,7 @@ def main() -> int:
                         "overflow_px": col["overflow_px"],
                         "needed": col.get("needed"),
                         "actual": col.get("actual"),
-                        "who": [f"{o['label']}{o['text']!r}+{o['overflow']}"
+                        "who": [_who_text(o)
                                 for o in col.get("offenders", [])[:5]],
                     })
                 if rc.get("overflow_px", 0) > 0:
