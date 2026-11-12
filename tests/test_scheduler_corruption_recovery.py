@@ -112,7 +112,7 @@ def test_second_write_does_not_create_an_extra_backup(tmp_path):
 def test_backup_failure_blocks_task_writes(tmp_path, monkeypatch):
     path = tmp_path / "tasks.json"
     path.write_bytes(_CORRUPT_BYTES)
-    monkeypatch.setattr(scheduler_module, "_backup_corrupt_tasks", lambda _p: None)
+    monkeypatch.setattr(scheduler_module, "backup_corrupt_tasks", lambda _p: None)
 
     store = Scheduler(tasks_file=str(path))
     assert store._save_blocked is True, "备份失败后没有挂 blocked 状态"
@@ -147,7 +147,7 @@ def test_oserror_is_not_corruption_but_blocks(tmp_path):
 def test_status_text_surfaces_last_error(tmp_path, monkeypatch):
     path = tmp_path / "tasks.json"
     path.write_bytes(_CORRUPT_BYTES)
-    monkeypatch.setattr(scheduler_module, "_backup_corrupt_tasks", lambda _p: None)
+    monkeypatch.setattr(scheduler_module, "backup_corrupt_tasks", lambda _p: None)
     store = Scheduler(tasks_file=str(path))
 
     text = store.get_status_text()
