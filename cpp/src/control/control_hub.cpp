@@ -2508,14 +2508,23 @@ QJsonObject ControlHub::cmdTuneToBookmark(const QJsonObject& a) {
     if (!needInt(a, "index", idx, err)) return errResult(err);
     if (idx < 0 || idx >= bookmarks_->count())
         return errResult(QString::fromUtf8("书签下标越界: %1").arg(idx));
+    // Order is mode -> bandwidth -> tune (same as the desktop bookmark path and
+    // SDR++ applyBookmark): VfoManager::setMode resets the VFO bandwidth to the
+    // new mode's default, so a bookmarked bandwidth must be applied AFTER the
+    // mode, otherwise it gets stomped. Tuning last keeps the "retuned but the
+    // bandwidth never landed" intermediate state out of the picture.
+    // bandwidthHz == 0 means "not recorded" (legacy bookmark) -> keep the mode
+    // default the mode switch just applied; never invent a value here.
     const ui::Bookmark b = bookmarks_->list().at(idx);
-    engine_->onSetCenterFreq(b.frequencyHz);
     if (!b.mode.isEmpty()) engine_->setDemodMode(b.mode);
+    if (b.bandwidthHz > 0.0) engine_->setBandwidth(b.bandwidthHz);
+    engine_->onSetCenterFreq(b.frequencyHz);
     QJsonObject o = okBase();
     o["command"] = "tune_to_bookmark";
     o["index"] = idx;
     o["freq_hz"] = b.frequencyHz;
     o["mode"] = b.mode;
+    o["bandwidth_hz"] = b.bandwidthHz;
     return o;
 }
 
