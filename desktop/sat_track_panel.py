@@ -162,6 +162,8 @@ class SatTrackPanel(QFrame):
         self._passes_fetched_unix = None    # 上次取数时刻（冷却用）
         self._pass_warning = ""             # 负时长等异常：如实显示，不画假倒计时
         self._last_now_unix = None          # 最近一次显示用的时基（UTC 开关复用）
+        #: 已绑定完成回执的宿主；None=还没绑上（见 _bind_tle_completion）。
+        self._tle_bound_host = None
         self._countdown_timer = QTimer(self)
         self._countdown_timer.setInterval(1000)
         self._countdown_timer.timeout.connect(self._on_countdown_tick)
@@ -197,9 +199,22 @@ class SatTrackPanel(QFrame):
         self.tle_refresh_btn.setToolTip(
             "立即从 Celestrak 更新 TLE；失败会如实报错，不伪造星历")
         self.tle_refresh_btn.setFixedHeight(20)
-        self.tle_refresh_btn.clicked.connect(self.update_tle_requested.emit)
+        self.tle_refresh_btn.clicked.connect(self._on_update_tle_clicked)
         tle_row.addWidget(self.tle_refresh_btn)
         root.addLayout(tle_row)
+
+        # 更新进行中/结果行：状态来自宿主的完成回执（见 _bind_tle_completion），
+        # 面板不另存一份「我以为更新完了」的真值。
+        self.tle_status_label = QLabel()
+        self.tle_status_label.setObjectName("tleStatusLabel")
+        self.tle_status_label.setWordWrap(True)
+        self.tle_status_label.setMinimumWidth(0)
+        self.tle_status_label.setSizePolicy(QSizePolicy.Ignored,
+                                            QSizePolicy.Preferred)
+        self.tle_status_label.setStyleSheet(
+            "color: " + tokens().text("tertiary") + "; font-size: 8.5pt;")
+        self.tle_status_label.setVisible(False)
+        root.addWidget(self.tle_status_label)
 
         # ---- 卫星选择 + 下行频率 ----
         sel_box = _CollapsibleGroupBox("目标卫星")
@@ -237,7 +252,7 @@ class SatTrackPanel(QFrame):
 
         self.start_btn.clicked.connect(self._on_start_clicked)
         self.stop_btn.clicked.connect(self._on_stop_clicked)
-        self.update_tle_btn.clicked.connect(self.update_tle_requested.emit)
+        self.update_tle_btn.clicked.connect(self._on_update_tle_clicked)
 
         # ---- 实时数据 ----
         data_box = _CollapsibleGroupBox("实时状态")
@@ -321,6 +336,69 @@ class SatTrackPanel(QFrame):
         root.addWidget(cd_box)
 
         root.addStretch(1)
+
+    # ------------------------------------------------- TLE 更新（宿主驱动）
+    # 真值只有一份：主窗口持有更新线程，并在结束时 emit ``_tle_update_result``。
+    # 面板只做两件事——把点击变成请求、收到回执后放开按钮并如实写结果。
+    # 面板不存本地 inflight 布尔：否则「面板以为还在跑、宿主已经结束」时
+    # 用户不知道信谁，等于造了第二真值源。
+    def _bind_tle_completion(self) -> None:
+        """把「更新是否结束」接到宿主的完成回执上（只读，不改宿主）。"""
+        host = self.window()
+        if host is None or host is self._tle_bound_host:
+            return
+        sig = getattr(host, "_tle_update_result", None)
+        if sig is None or not hasattr(sig, "connect"):
+            # 没有完成回执通道：宁可不进入「进行中」，也不靠计时器猜。
+            self._tle_bound_host = None
+            return
+        sig.connect(self._on_tle_update_finished)
+        self._tle_bound_host = host
+
+    def _on_update_tle_clicked(self) -> None:
+        self._bind_tle_completion()
+        host = self.window()
+        if self._tle_bound_host is None:
+            # 宿主没有回执通道：请求照样发，但不假装自己知道结果。
+            self.update_tle_requested.emit()
+            self._set_tle_busy(False)
+            self._show_tle_status(
+                "已请求更新 TLE；本面板收不到宿主完成回执，结果请以状态栏为准。")
+            return
+        self._set_tle_busy(True)
+        # 10 s = update_tle_from_celestrak 的 5 s 请求超时 + 5 s 墙钟余量
+        # （_TLE_HARD_DEADLINE_MARGIN_S）；这是链路自报的上限，不是本面板猜的。
+        self._show_tle_status("正在更新 TLE…（后台最长约 10 秒，结束后这里显示结果）")
+        self.update_tle_requested.emit()
+        if getattr(host, "_loop_sat_tracker", None) is None:
+            # 宿主明确拒绝（没有可更新的星历目录）：不会再有完成回执，立即落地。
+            self._set_tle_busy(False)
+            self._show_tle_status(
+                "未开始更新 TLE：本地星历目录不可用（没有可更新的卫星）。\n"
+                "现在可以：确认 TLE 文件存在后点「更新 TLE」重试。")
+
+    def _on_tle_update_finished(self, payload) -> None:
+        """宿主完成回执：复位按钮，并写宿主给的结论（不自行判成功）。"""
+        try:
+            count, failure = payload
+        except (TypeError, ValueError):
+            count, failure = 0, {
+                "code": "tle_unknown",
+                "reason": "完成回执格式不可解析（不是（更新数, 失败对象））"}
+        self._set_tle_busy(False)
+        # 与状态栏同一个渲染器：措辞只有一份，不在这里发明第二套成败话术。
+        from mbdsdr_ai.tle_fetch import tle_refresh_status_text
+        self._show_tle_status(tle_refresh_status_text(int(count or 0), failure))
+
+    def _set_tle_busy(self, busy: bool) -> None:
+        self.update_tle_btn.setEnabled(not busy)
+        self.tle_refresh_btn.setEnabled(not busy)
+        self.update_tle_btn.setText("更新中…" if busy else "更新 TLE")
+
+    def _show_tle_status(self, text: str) -> None:
+        self.tle_status_label.setText(text)
+        self.tle_status_label.setToolTip(text)
+        self.tle_status_label.setVisible(bool(text))
 
     # ------------------------------------------------------- 窄屏可折叠
     def _make_collapsible(self, box: QGroupBox, label: str, count: int,
