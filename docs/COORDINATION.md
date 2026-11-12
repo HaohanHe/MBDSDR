@@ -1653,6 +1653,12 @@ No supported devices found），GNSS+SDR 同开复验没做成；离线那次
    `tests/test_ui_layout_locks.py` E4→E0；基线未动。复跑：
    `python scripts/lint_swallow_all.py --no-fail`、
    `python -m pytest tests/test_swallow_guard.py -q`。
+10. **引用位置不写行号**（2026-11-13 用户裁定，适用于所有线）：代码、测试、
+   文档里凡引用别处的位置，一律写「文件 + 哪个函数 / 哪个判断 / 哪个符号」，
+   **不写 `xxx.py:1234`**。行号只在不可变的历史快照（已入库 golden、事故日志）
+   里出现，并注明「历史快照」。理由：共享文件每笔提交都会让行号漂移，
+   行号引用会制造假导航、假复核（实例：视觉冻结豁免理由里的三处行号刚被迫
+   改成按「哪三处」描述）。检查方法：提交前看自己的 diff 有没有 `\.py:\d+`。
 
 ### 测试纪律（2026-11-05 落地，硬规矩）
 
@@ -1859,6 +1865,8 @@ No supported devices found），GNSS+SDR 同开复验没做成；离线那次
 | 文件 | 线名 | 开始时间 | 预计提交 hash |
 |---|---|---|---|
 | _（空）_ | | | |
+| `desktop/spectrum_widget.py` | A02读数失真线（孤儿 claim 接管；原持有者 右栏收窄A pid 已死、心跳过期 681 min、工作区干净） | 2026-11-13 01:48 | 随本笔 |
+| `desktop/{readouts,adsb_map_panel,bookmark_panel,control_panel,scanner_panel}.py` | A02读数失真线（MHz 读数精度收口到 readouts；逐文件提交后释放） | 2026-11-13 01:48 | 随本笔 |
 | `docs/settings-inventory.md` | K18收口线（孤儿 claim 接管；脚本重生成数字块，提交后即释放） | 2026-11-13 01:48 | 随本笔 |
 | `desktop/control_panel.py` | 参数治理线/59ca04d1（preset_combo 宽策略 + 静噪行拆行；pid 见 claim 记录） | 2026-11-06 06:23 | 待定 |
 | `docs/COORDINATION.md` | 参数治理线/59ca04d1（本文件 §6.1 备忘 + 尺寸登记） | 2026-11-06 06:23 | 同笔 |
@@ -2092,20 +2100,33 @@ No supported devices found），GNSS+SDR 同开复验没做成；离线那次
 `docs/evidence-standard.md` 由真机证据线持有，`pid=25880` 已不存在，
 心跳停在 `01:11:10`（TTL 90 min），文件工作区干净——一个死进程把文件锁死。
 
-**判据（三条，逐条由脚本判定，不靠人眼）**
+**判据（两条硬条件，逐条由脚本判定，不靠人眼）**
 
-1. `expired`：`now - heartbeat_at > ttl_min`（TTL 已过期）。
-2. `pid_dead_or_reused`：原 `pid` **不是**那个还活着的进程。只看 pid 号不行——
-   pid 会被系统复用；必须比对进程**创建时间**（claim 时记 `pid_create_time`，
-   接管时用 `psutil`/`GetProcessTimes` 取当前同号进程的创建时间）：
-   - 号下无进程 → 死亡；
-   - 号下有进程但创建时间不同 → 原进程已死、号被复用；
-   - 创建时间相同 → **仍是原进程，一律拒绝**（疑似繁忙）；
-   - 取不到创建时间（旧 claim / 权限不足）→ 无法排除复用，按拒绝处理。
-3. `no_inflight`：`git status --porcelain -- <该文件>` 为空。
+1. `expired`：`now - heartbeat_at > ttl_min` **且过期已满 30 分钟**
+   （§6.1.4 宽限：刚过期可能只是没来得及续租）。
+2. `no_inflight`：`git status --porcelain -- <该文件>` 为空。
 
-**放行条件**：`pid_dead_or_reused` 是硬前提，另加 `expired` / `no_inflight`
-至少一条（总计 ≥2 条）。`pid` 仍存活时，即使心跳过期也**必须拒绝**。
+**放行条件**：两条**同时**满足，且 `--reason` 非空（已改为必填）。`pid` 不参与判定。
+
+**为什么 pid 不能当判据（2026-11-13 收口）**：`claim` 是一次性 CLI，写完即退出，
+`pid` 记的就是那个短命进程——「pid 已死」是默认状态，不是异常状态。旧判据把
+`pid_dead_or_reused` 当硬前提、再任选「过期 / 无在途」一条，等于任何 claim 都能
+被接管：`desktop/ai_panel.py`、`desktop/ai_sdr_session.py` 在 TTL 还剩 160+ 分钟、
+工作区干净时被 `orphan_takeover` 抢走（理由为空），原持有者连 release 都做不到
+（token 被换）。这和「用 owner 字符串相等就跳过判活」是同一族错误——**判据依赖的
+信息本身不唯一、或者不新鲜，判据就一定是错的**。
+
+**为什么不用「父进程 / shell pid」，也不用「显式 --session-id」**：
+
+- 父进程 / shell pid：本机每个工具调用常是新的短命 shell，父 pid 同样不新鲜；
+  A 会话换一个工具调用继续工作时，还会被误判为「会话结束」。
+- 显式 `--session-id`：那只是一个名字，不唯一（两条线可同名），也不能证明
+  「还在工作」；能证明身份的是凭据 token，能证明活跃的是心跳。
+- 所以判据 = `heartbeat_at + ttl_min`（新鲜且唯一），`pid` 只作诊断。
+- 同一 shell 连跑两条命令：第二条 claim/续租自动读 sidecar 凭据 → 心跳刷新；
+  `pid` 不参与，不会因为「换了条命令」而放宽接管。
+- 两个不同会话同名：名字只用于展示；续租 / 释放凭 token 区分，同名不同 token
+  不能互相 release；takeover 只看 TTL / 在途，不因同名变松或变紧。
 
 **接管程序（谁有权、怎么留痕、记哪个账）**
 
@@ -2115,48 +2136,56 @@ No supported devices found），GNSS+SDR 同开复验没做成；离线那次
   python scripts/file_claim.py takeover <path> --owner <接管线> --reason "<原因>"
   ```
 
-- 判据不足时退出码 2，并逐条打印 `[PASS]/[FAIL]` 与缺哪一条；
+- `--reason` 必填：没理由的接管事后无法审计，脚本在参数层直接拒。
+- 判据不满足时退出码 2，并逐条打印 `[PASS]/[FAIL]` 与缺哪一条；
   拒绝的接管不写日志、不改占位文件。
 - 成功时**强制**写 `.locks/claim_takeovers.log`（JSONL，每笔含原持有者、
-  原 pid、原心跳、三条判据逐条结果与明细、新持有者、新 pid、时间、原因）；
+  原 pid（诊断）、原心跳、判据逐条结果与明细、新持有者、新 pid、时间、理由）；
   日志写失败即回滚占位文件。台账 `claims.json` 的历史项同时记
   `closed_reason="orphan_takeover"` 与 `takeover` 明细。
 - 接管成功后按 §6.1 在「当前占用」表写一行，注明是从孤儿 claim 接管。
 
-**与 §6.1.1 对齐**：接管只解决「锁」，不解决「对方的在途改动」。判据 3 不满足
-但 `pid` 已死 + 过期时仍允许接管，同时脚本会告警：接管后只能按 hunk 进 index
-或私有 index，**禁止整文件 `git add` / `--only` 提交**，否则会把死者的未提交
-内容一起卷走。
+**与 §6.1.1 对齐**：接管只解决「锁」，不解决「对方的在途改动」。`no_inflight`
+现在是硬条件：有在途改动一律拒绝——等对方提交 / 清理或 release，否则会把死者的
+未提交内容一起卷走（整文件 `git add` / `--only` 提交）。
 
 **反证**（`tests/test_file_claim_takeover.py`）：
 
-- (a) `pid` 死 + 心跳过期 → 接管成功，日志含原持有者、三条判据、新持有者与时间；
-- (b) `pid` 活着（创建时间一致）+ 心跳过期 → 退出码 2，打印 `[FAIL] pid 已死/被复用`，
-  不产生成功日志。
+- (a) 事故形态：`pid` 已死、心跳**未**过期、工作区干净 → 退出码 2，打印
+  `[FAIL] 心跳过期` 与「pid 仅诊断」，不产生成功日志，原持有者保持不动；
+- (b) 心跳过期 + 干净 + 理由 → 接管成功，日志记 `expired/no_inflight` 与理由；
+- (c) 心跳过期 + 有在途改动 → 拒绝，打印「有在途改动」；
+- (d) 没写 `--reason` → 参数层拒绝；
+- (e) `pid` 活着但心跳过期 + 干净 + 理由 → 允许（`pid` 不参与判定）。
 
-### 6.1.3 `pid` 已死 ≠ 可接管（2026-11-06 实测）
+### 6.1.3 `pid` 已死 ≠ 可接管（2026-11-06 实测，2026-11-13 收口为「pid 不参与」）
 
 **机制事实**：claim 记录里的 `pid` 是执行 `claim` **那条 CLI 进程**，跑完
-即退出——所以事后读台账，`pid` 几乎恒为「已死」。`pid_dead_or_reused`
-只解开第一道闸，不构成可接管。
+即退出——所以事后读台账，`pid` 几乎恒为「已死」。「已死」是默认状态，不是
+异常证据，因此 **`pid` 既不构成可接管理由，也不构成不可接管理由**（2026-11-13
+起从判据里整体移除，只保留诊断展示，见 §6.1.2）。
 
-**可接管判据**：只能是「TTL 过期」或「该路径 `git status` 为空」，两者至少
-满足一条（外加 `pid_dead_or_reused` 硬前提，见 §6.1.2）：
+**可接管判据**：`expired` **且** `no_inflight` **且** `--reason` 非空，三条都满足：
 
-1. `expired`：`now - heartbeat_at > ttl_min`；
+1. `expired`：`now - heartbeat_at > ttl_min`，且过期已满 30 分钟（§6.1.4）；
 2. `no_inflight`：`git status --porcelain -- <该路径>` 为空。
 
 日志与状态输出必须同时打印三个字段：`owner`、持有起点（`acquired_at`）、
 `held` 与剩余 TTL。只给 `pid` 的日志无法区分「孤儿」与「正在写」。
 
-**`file_claim.py status` 改动建议**：`_describe()`（`scripts/file_claim.py:757`）
+**`file_claim.py status` 改动建议**：`_describe()`（`scripts/file_claim.py`）
 每行补一列「可接管?」，单路径分支直接复用 `_orphan_criteria()` 的判定
-（`pid_dead_or_reused` + `expired`/`no_inflight` 之一）；全量列表为免逐文件跑
+（`expired` + `no_inflight`，`pid` 只展示）；全量列表为免逐文件跑
 `git status`，只标「过期 PASS，需查在途」。字段与判据不许另算一套。
 
 **实例**：`docs/COORDINATION.md` 本轮被占时 pid 已死，但 TTL 未过且文件有
-在途改动 → 拒绝接管（1/3）；`desktop/control_panel.py` 则 pid 已死 + 文件干净
-→ 接管成功。两例只差「过期/无在途」这一条，凭 pid 判会两次都判反。
+在途改动 → 拒绝接管；`desktop/control_panel.py` 则 pid 已死 + 文件干净 + 过期
+→ 接管成功。两例凭 pid 判会两次都判反。
+
+**2026-11-13 01:39 事故**：`desktop/ai_panel.py`、`desktop/ai_sdr_session.py`
+原由 D1 分层收口持有（心跳 01:26:59、TTL 180 min，接管时只过了 12/14 分钟），
+工作区干净但**未过期**，被 A03 线以 `orphan_takeover` 拿走且理由为空——按新判据
+两笔都**不合规**（未过期 + 无理由）。归属回退由协调线决定，脚本不做自动回滚。
 
 ### 6.1.4 记录型接管：30 分钟宽限 + 记录模板（2026-11-12）
 
@@ -3155,6 +3184,47 @@ git status --porcelain -- <path>                # 确认期间是否正被他人
 `tests/test_commit_scope_intent_delete.py`：旧树 + 私有 index 造出的删除被真实
 pre-commit 挡下、HEAD 不前进。**守卫只能证明「这条删除你声明过」，证明不了
 「你的树建得对」——所以这条规则仍然必须人知道。**
+
+### 6.1.6 回放审计、审计行与 legacy 凭据修复（2026-11-13）
+
+**① 回放结论：2026-11-13 的 11 笔 takeover 里 6 笔不合规，但实际损失全为零。**
+按 §6.1.2 新判据（过期满 30min + 无在途改动 + `--reason` 非空，pid 不参与）回放：
+
+| 文件 | 不合规原因 | 实际损失 |
+|---|---|---|
+| `desktop/settings_panel.py` | 未过期（17.1/60min） | 0（改动已随 `b4369fdf` 01:13 落库，接管时文件干净） |
+| `tests/test_settings_panel_corrupt_config.py` | 未过期（17.3/60min） | 0（同上，`b4369fdf` 新增） |
+| `tests/test_file_claim.py` | 未过期（5.8/90min） | 0（`d880505f` 01:13 已落库） |
+| `mbdsdr_ai/agent.py` | 理由为空（已过 170min） | 0（接管时文件干净） |
+| `desktop/ai_sdr_session.py` | 未过期（12.0/180min）+ 理由为空 | 0（`5823c6a1` 01:27 已落库）；过程损失：01:40 断链修复 `d47af7d3` 由接管方提交 |
+| `desktop/ai_panel.py` | 未过期（14.0/180min）+ 理由为空 | 0（最后一次提交 11-12 20:21，接管时尚未开始改） |
+
+判据：六笔接管时 `git status --porcelain -- <path>` 均为空（per-file
+`no_inflight=PASS`），且原持有者改动都已在接管前落库，**没有任何在途内容被覆盖**。
+全量 32 笔里 17 笔不合规、空理由 3 笔——后者说明当时这套机制是软的。
+**归属不回退**（用户 2026-11-13 决定：owner 是短命字段，回退它只改一行标记，
+要留的是审计事实）。结论以 `action=audit_replay` **追加**进 `claim_takeovers.log`，
+不删不改历史行。
+
+**② 于是日志成了混合日志，闸门必须认 `action`。** `claim_gate.py` 只把
+`action` 缺省或 `orphan_takeover` 的行当接管凭证；`audit_replay` /
+`legacy_token_repair` 跳过；**其它 action 一律失败关闭**。此前任意一行带
+`path`/`new_owner` 的 JSON 都能给一次提交发通行证——审计越写，后门越大。
+
+**③ `legacy-token-repair`：有审计的一次性修复，不是后门。** 只对同时满足
+「有 `token_sha256` + sidecar 缺失 + 签发早于 `028f390f`」的 claim 有效，
+另加 `--owner` 与台账原文一致 + `--reason` 非空；日志写原 owner / 签发时间 /
+`repaired_by` / 理由。落地顺序：先写审计 → 删 marker → 关台账；审计写不进去
+则 claim 一字节不动，删 marker 失败则原状保留可重跑，不产生「marker 在、
+token 没了、谁也 release 不了」的中间态。
+
+**④ 现存 legacy 无 sidecar 的 claim：10 条**，全部 `A03静默降级线/6ae85f56`，
+签发 00:52–00:57（早于 sidecar 上线 01:13），到期集中在 04:27 前后。
+04:27 前它们会挡住想提交这些文件的所有线——修复入口就是 ③（不是手改台账）。
+
+**⑤ 过期 claim 清单（2026-11-13 02:2x 快照）**：占位文件 110 个，未过期 40、
+已过期 70；其中 **68 个文件当前无在途改动**（批量释放候选）、**2 个仍有在途
+改动**（不许释放，可能是忘了续租的活跃线）。批量释放尚未执行，等用户确认。
 
 ### 6.10 历史改写事件（主分支被 reset 改写；按批次登记，跨日后继续累计）
 
@@ -4205,3 +4275,84 @@ pid 3484 已退出，属 K16 同形的「孤儿改动」。配套测试
 
 **遗留**：`mbdsdr_ai -> tools` 6 条为 HEAD 既有；`tests -> desktop` 305 条属 review
 级既有量，按规则「确需 UI 的用例放 tests/ui 并显式标注」另立 K 单，本次未动。
+
+---
+
+## 处理记录（2026-11-13 02:30）：录音/回放链路——冻结文件内的功能改动报备（录音回放核查线）
+
+**一句话**：`desktop/main_window.py` 处于 FZ-04 视觉冻结期（豁免理由见
+`docs/axioms-waivers.json`：「视觉冻结期，改动需先上报排期」）。本轮在该文件里改的
+全部是**录音/回放行为逻辑**，零视觉改动；逐处登记在此，避免后人把「冻结文件被改过」
+误读成「冻结已失效」。
+
+**改了什么（按符号描述，不写行号——该文件行号每笔都会漂）**：
+
+| 位置（按符号） | 改动 | 为什么必须改 | 不改的后果 |
+|---|---|---|---|
+| 模块级 `replay_source_notice`（新增）、`_fmt_rate_msps`、`_EXT_IQ_FORMAT` | 回放前对「文件速率 vs 当前设置」「缺 sidecar」「sidecar 格式 vs 扩展名」「半成品」生成归因文案 | 实测：速率不匹配仍能出声，但旧版一句提示都没有 | 用户只看到「没声/变调」，无从归因 |
+| `_begin_replay_from_rec`（起播前判断） | 调用上述归因：warning 用 `QMessageBox.warning`、info 用 `QMessageBox.information` | 回放进度每 50 ms 覆盖状态栏，说明放状态栏会一闪而过 | 提示等于没提示 |
+| `_report_record_abort` | 中止文案明确「文件不完整」/「未生成文件」 | 旧文案「已写 0 字节，文件 xxx」暗示盘上有文件 | 用户以为录音存在，实际没有 |
+| `_record_segment_meta`、`_finalize_record_segment` | sidecar 增加 `complete`/`aborted_reason`；收尾按磁盘实际大小校正样本数 | 中止的半成品原先与完整录音无法区分 | 回放方把截断文件当完整文件使用 |
+| `_reconcile_record_file_samples`（新增） | 截掉不足一个样本的尾部残字节，使 sidecar 的 `samples` == 磁盘样本数 | 写失败可能留下计数之外的尾部字节 | sidecar 与文件不自洽，回放读出额外/错位样本 |
+| `_stop_recording` | 透传 `aborted_reason` 到收尾 | 同上 | 同上 |
+| `_replay_blocks_tune`（新增）+ `_on_tune_fm` / `_on_tune_am` / `_on_tune_sdr` / `_on_module_tune` / `_on_spectrum_freq_changed` 入口 | 回放中拦下调谐，并把频率读数复位到文件中心 | 实测：回放固定在文件中心离线解码，调谐只改设备频率，读数与耳朵里的内容从此脱节 | 「这一秒听到的是哪个频点」被读错，用户按假读数做判断 |
+| `_on_sample_rate_changed` 的回放分支 | 回放中改采样率只记设备设置、回放结束后生效，不再 `_stop_iq_streams` / `_start_iq_streams` | 旧路径会停声卡、再把实时流接进来，而回放定时器仍按文件推进 | 进度条继续走、耳朵里没声或混入实时噪声，时间轴与音频脱节 |
+| `_begin_replay_from_rec` / `_stop_replay` | 复位「调谐被拦只提示一次」的标记 | 不在每段回放起止复位，第二段起调谐会被静默拦下 | 用户以为调谐生效，实际没有，也没有任何说明 |
+
+**为什么判定不是视觉改动**：以上不新增/删除控件，不改布局、尺寸、颜色、层级、
+控件样式；新增物只有对话框（沿用既有 `QMessageBox` 用法）与状态栏文本，
+以及 sidecar 的机读字段。
+
+**验证与提交**：`tests/test_record_replay_fidelity.py` 9 条（含端到端解调音频 SNR
+与 BPSK 符号错误判据）+ `tests/test_replay_timeline.py` 3 条（时间轴 == 已消费
+样本、回放中改采样率不动声卡与 pos、调谐被拦且读数复位），录音/回放相关 14 个
+测试文件合计 60 passed；反证见提交说明。提交 `9b7373b0`（录音完整性实现）、
+`3c205705`（保真测试）、`a68ce617`（回放时间轴 + 回放中设备设置护栏 + 测试）。
+实测事实：本版本回放**没有**暂停/快进/跳转控件，停止即归零、重新回放从头开始
+（不是缺陷，是当前形态；时间轴口径 = 已消费样本数 / 文件采样率）。
+
+**本笔的行号引用自查**：三笔提交新增的代码、测试、本条登记均无 `xxx.py:1234`
+形式的跨文件行号引用；引用一律落到函数/判断。`main_window` 里唯一一处既有行号
+引用（指向 `bladerf_params` / `limesuite_params` 的参数说明）不是本笔引入，未改。
+
+---
+
+## 处理记录（2026-11-13）：键盘全操作——冻结文件内的两处行为改动报备（键盘可达线）
+
+**一句话**：`desktop/main_window.py` 仍处于 FZ-04 视觉冻结期（豁免理由见
+`docs/axioms-waivers.json`：「视觉冻结期，改动需先上报排期」）。本轮在该文件里只改
+**焦点顺序与浮层可见性复位**，两处都是「不改就不可达 / 顺序错」的行为缺陷，零视觉
+设计改动；逐处登记在此，避免后人把「冻结文件被改过」误读成「冻结已失效」。
+
+**改了什么（按符号描述，不写行号——该文件行号每笔都会漂）**：
+
+| 位置（按符号） | 改动 | 为什么必须改 | 不改的后果 |
+|---|---|---|---|
+| `_open_right_overlay` | 在 `lay.addWidget(self._right_col, 1)` 之后补 `self._right_col.show()` | `right_col` 作为 `QStackedLayout` 的非当前页被显式 `hide()`；`removeWidget` + reparent 不会复位 hidden 状态，`ov.show()` 也递归不到它 | 窄窗点「展开」后浮层里只剩「收起」，整块右栏（含增益）键盘和鼠标都进不去——功能不可达，不是顺序问题 |
+| `_setup_tab_order`（重写；新增 `_window_focus_chain` / `_right_column_focus_widgets`），调用点从 `_build_tool_bar` 末尾移到 `__init__` 末尾 | 显式串「工具栏 → 顶栏 → 左栏 → 右栏顶部的『跳到分组』→ 右栏内部（按节顺序）→ 底坞」；右栏内部按键位过滤后逐对 `setTabOrder` | Qt 默认焦点链按创建/重挂接次序：右栏是 `QScrollArea`（内容体 `setWidget` 时才重新入链），底坞又晚于右栏创建，且「扫频」「调制识别」等节更晚 | Tab 从右栏「新时空」跳到左下底坞「⌂」再回「扫频」；布局恢复后顺序还会再漂 |
+
+**为什么判定不是视觉改动**：两处都不新增/删除控件，不改布局、尺寸、颜色、层级、
+控件样式，也不改任何控件的位置；唯一可见变化是「原本空白的浮层里出现了本该在那里的
+右栏内容」——这是恢复既有控件的可见性，不是新视觉。命令面板两条入口（见下）也不在
+`main_window.py` 里。
+
+**同轮的非冻结文件改动（一并登记，便于追溯）**：
+
+- `desktop/command_palette.py`：新增「跳到设备」「跳到增益」两条可执行入口
+  （`_panel_commands` / `_jump_to_right` / `_expand_fold`），归入新分组「面板」。
+  **不新增任何快捷键**：复用命令面板既有的 Ctrl+K 与模糊搜索；执行时切到右栏目标
+  节、展开「接收」折叠组、下一帧把焦点落到 `dev_combo` / `gain_slider`（命令面板
+  关闭时会把焦点「还给打开前位置」，所以必须延后一帧）。
+- `tests/test_keyboard_main_flow.py`：摘掉两条 `xfail(strict=True)`；新增「显式链
+  清单」「链外控件仍可 Tab 到」反证、「浮层关闭后 `right_col` 的 hide/show 还原」。
+- `tests/test_command_palette.py`、`tests/test_discoverability_help.py`：新增两条
+  入口的可发现性与实际落焦验证。
+
+**验证口径**：显式链清单由 `_tab_order` 钉住；链外可达性用真实 `QTest.keyClick`
+按 Tab 走一整圈收集实际焦点控件（不用 `nextInFocusChain` 自证——那只能证明环没断，
+证明不了 Tab 真能停上去）。浮层用例覆盖三段状态：收窄时 `right_col` 隐藏 → 打开浮层
+后右栏可见 → Esc 后回到窄条且 `right_col` 重新隐藏 → 恢复展开后 `right_col` 可见。
+
+**本笔的行号引用自查**：本条登记不写行号，引用一律落到函数/判断。
+
+
