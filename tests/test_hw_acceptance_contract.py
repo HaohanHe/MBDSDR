@@ -71,10 +71,10 @@ def test_normalize_keeps_pass_and_fail():
     )["status"] == common.FAIL
 
 
-def test_real_devices_retries_placeholder_serial(monkeypatch):
-    """上一进程刚释放句柄时 DeviceManager 会给 'rtl-0' 占位号；必须重试到真序列号。
+def test_real_devices_retries_unidentifiable_device(monkeypatch):
+    """上一进程刚释放句柄时序列号读不到（空串、身份不可分辨）；必须重试到真序列号。
 
-    实测两次拿占位号去 connect → DeviceNotFound（探针第 22 轮、ring3 首开）。
+    旧实现用 'rtl-0' 占位号，已被移除：占位号随枚举顺序变，不是身份。
     """
     from mbdsdr_ai.device_manager import DeviceInfo, DeviceManager
 
@@ -82,8 +82,8 @@ def test_real_devices_retries_placeholder_serial(monkeypatch):
 
     def fake_list(_self):
         calls.append(1)
-        ser = "rtl-0" if len(calls) == 1 else "77771111153705700"
-        return [DeviceInfo(name="RTL-SDR #0", driver="rtlsdr", serial=ser)]
+        ser = "" if len(calls) == 1 else "77771111153705700"
+        return [DeviceInfo(name="RTL-SDR #0", driver="rtlsdr", serial=ser, enum_index=0)]
 
     monkeypatch.setattr(DeviceManager, "list_devices", fake_list)
     monkeypatch.setattr(common.time, "sleep", lambda _s: None)
