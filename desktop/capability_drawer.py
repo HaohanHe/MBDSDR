@@ -179,7 +179,7 @@ class CapabilityDrawer(QWidget):
             btn = QToolButton()
             btn.setObjectName("capCell")
             btn.setText(name + "\n" + note)
-            btn.setToolTip("把「%s」送进 AI 输入栏（不会自动执行）" % name)
+            btn.setToolTip("把这个能力位送进 AI 输入栏（不会自动执行）")
             btn.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
             btn.setMinimumHeight(42)
             btn.clicked.connect(
