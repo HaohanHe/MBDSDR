@@ -254,10 +254,11 @@ def install_isolation():
 
 
 class _QtCoreHook(importlib.abc.MetaPathFinder):
-    """在 `PySide6.QtCore` 首次导入完成后打补丁。
+    """在 `PySide6.QtCore` 首次导入完成后打补丁，然后自卸载。
 
     这样被测脚本自己的 `T0 = time.perf_counter()`（模块顶部）仍在所有
-    Qt 导入之前，导入耗时留在计时窗口内，测量口径不变。
+    Qt 导入之前，导入耗时留在计时窗口内，测量口径不变；打完补丁立刻从
+    `sys.meta_path` 移除，之后任何 import 都不再经过本钩子（不常驻）。
     """
 
     def find_spec(self, fullname, path=None, target=None):
@@ -267,11 +268,10 @@ class _QtCoreHook(importlib.abc.MetaPathFinder):
             sys.meta_path.remove(self)
         except ValueError:
             pass
-        try:
-            spec = importlib.util.find_spec(fullname)
-        finally:
-            sys.meta_path.insert(0, self)
+        spec = importlib.util.find_spec(fullname)
         if spec is None or spec.loader is None:
+            # 没拿到 spec 就放回去，等下一次（正常不会发生）。
+            sys.meta_path.insert(0, self)
             return None
         loader = spec.loader
         if getattr(loader, "_mbdsdr_qhook", False):
@@ -292,8 +292,17 @@ class _QtCoreHook(importlib.abc.MetaPathFinder):
 
 
 def install_meta_hook():
-    """幂等：把 QtCore 钩子插到 meta_path 最前，不提前 import PySide6。"""
+    """幂等：把 QtCore 钩子插到 meta_path 最前，不提前 import PySide6。
+
+    钩子在 `PySide6.QtCore` 导入完成、补丁打好后自卸载，不常驻，之后的
+    import 不再经过它。
+    """
     if os.environ.get("MBDSDR_QS_GUARD", "1") == "0":
+        return False
+    if "PySide6.QtCore" in sys.modules:
+        # Qt 已被导入（wrap 模式等），直接补打，省掉一次钩子往返。
+        install()
+        install_isolation()
         return False
     if any(isinstance(f, _QtCoreHook) for f in sys.meta_path):
         return False
