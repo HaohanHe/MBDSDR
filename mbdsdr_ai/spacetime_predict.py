@@ -11,13 +11,15 @@ MBDSDR - 过境预测时间基准显式化 + TLE 新鲜度报告（时空链路�
    - 否则用本机时钟 UTC（``clock`` 可注入，便于确定性测试）→ ``time_source="system"``。
    预测结果里始终带上时间来源，不偷偷用系统时间冒充 GNSS 授时。
 
-2. **TLE 新鲜度联动**：复用 ``new_spacetime_tle.tle_freshness``（统一阈值
-   ``TLE_FRESHNESS_MAX_DAYS``），在预测报告里报告历元、年龄（天）与
-   fresh/stale/none 三态。stale 仍出预报，但显式告警精度下降；none 不出假预报。
+2. **TLE 新鲜度联动**：复用 ``new_spacetime_tle.tle_freshness`` 报告历元与年龄，
+   但 ``status`` 三态与 ``tier`` 分级**共用同一阈值源**（``tle_integrity``：
+   fresh=≤24h，其余一律 stale，历元不可解析=none）。stale 仍出预报，但显式
+   告警精度下降；none 不出假预报。
 
 红线：无 TLE / 历元无法解析时返回空过境 + ``status="none"``，绝不伪造过境。
-本模块只是 :mod:`mbdsdr_ai.sat_passes.predict_passes` 的薄包装，轨道传播仍走
-skyfield/SGP4，不另写传播器。
+预测抛异常时保留 ``predict_error`` 原因，不把「依赖缺失/坏 TLE/真无过境」
+压成同一个 ``n_passes=0``。本模块只是 :mod:`mbdsdr_ai.sat_passes.predict_passes`
+的薄包装，轨道传播仍走 skyfield/SGP4，不另写传播器。
 """
 from __future__ import annotations
 
@@ -36,6 +38,17 @@ from .new_spacetime_tle import (
 from .tle_integrity import accuracy as _tle_accuracy, freshness as _tle_tier
 
 __all__ = ["predict_passes_report", "TLE_FRESHNESS_MAX_DAYS"]
+
+#: ``tle.status`` 由 ``tle.tier`` 投影而来，两处必须同源（``tle_integrity``）。
+#: TODO(FZ-04 后的产品口径)：阈值取 24h 还是 7d 属决策项；无论选哪个，
+#: status 与 tier 只能从同一份 thresholds 派生，不许再各写一套天数。
+_STATUS_BY_TIER = {
+    "fresh": "fresh",      # ≤24h
+    "usable": "stale",     # ≤7d：可预报，但已不是「新鲜」
+    "expired": "stale",    # 7–30d
+    "dead": "stale",       # >30d
+    "unknown": "none",     # 历元不可解析
+}
 
 
 def _default_clock() -> datetime:
@@ -64,11 +77,13 @@ def predict_passes_report(
         {
           "time_source": "gnss" | "system",
           "prediction_start_utc": "ISO...",
-          "tle": {"status": "fresh"|"stale"|"none",
+          "tle": {"status": "fresh"|"stale"|"none",   # 与 tier 同源（≤24h=fresh）
+                  "tier": "fresh"|"usable"|"expired"|"dead"|"unknown",
                   "epoch_utc": ..., "age_days": ..., "threshold_days": ...},
           "n_passes": int,
           "passes": [ {"rise_utc":..., "set_utc":..., "max_alt":...,
                        "rise_az":..., "set_az":..., "duration_s":...}, ... ],
+          "predict_error": None | "ExcType: 原因",
         }
     """
     ts = make_timescale()
@@ -93,6 +108,10 @@ def predict_passes_report(
     tier = _tle_tier(line1, now=start_time.utc_datetime())
     acc = _tle_accuracy(tier)
     fresh = dict(fresh, **{
+        # status / threshold_days 必须由 tier 的同一阈值源派生：tle_freshness
+        # 自带的 7 天阈值会让 3 天龄 TLE 同时是 status="fresh" 与 tier="usable"。
+        "status": _STATUS_BY_TIER[tier["tier"]],
+        "threshold_days": tier["thresholds"]["fresh_max_hours"] / 24.0,
         "tier": tier["tier"],
         "label": tier["label"],
         "age_days": tier["age_days"],
@@ -101,11 +120,14 @@ def predict_passes_report(
     })
 
     # 3) 过境预测（坏 TLE → predict_passes 返回 []）
+    # 异常必须留原因：依赖缺失 / 坏数据不能伪装成「真无过境」。
+    predict_error: Optional[str] = None
     try:
         passes = predict_passes(tle_lines, ground_station,
                                 start_time=start_time, hours=hours, min_alt=min_alt)
-    except Exception:
+    except Exception as exc:
         passes = []
+        predict_error = f"{type(exc).__name__}: {exc}"
 
     # 过期/失效 TLE：时刻降为分钟级（不照常输出精确到秒）
     precise = acc["time_precision_s"] <= 1
@@ -136,4 +158,6 @@ def predict_passes_report(
         "accuracy": acc,
         "n_passes": len(pass_rows),
         "passes": pass_rows,
+        # None = 预测本身没出错（含「真无过境」）；字符串 = 异常类型与原因。
+        "predict_error": predict_error,
     }
