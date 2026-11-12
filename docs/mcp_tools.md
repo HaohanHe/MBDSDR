@@ -191,6 +191,7 @@ ts.call_tool("read_spectrum", {"nfft": 256})
 | `learn_noise_floor` | — | 用当前音频学习噪声底。 |
 | `list_audio_outputs` | — | 枚举音频输出设备。 |
 | `list_bookmarks` | — | 列出书签（可按 group 过滤）。 |
+| `list_decoders` | — | 列出解码器能力分区：可流式（start_decoder）与仅文件级。 |
 | `list_devices` | — | 枚举可见 SDR 设备（无硬件返回空，含 debug 调试源）。 |
 | `list_satellites` | — | 列出内置可接收卫星。 |
 | `list_vfos` | — | 列出全部 VFO。 |
@@ -225,7 +226,7 @@ ts.call_tool("read_spectrum", {"nfft": 256})
 | `shutdown` | — | 优雅关闭全部资源。 |
 | `start_analyze` | — | 对当前信号做自动调制识别。 |
 | `start_audio` | — | 启动音频播放。 |
-| `start_decoder` | `decoder_type` | 启动解码器（adsb/aprs/noaa_apt/meteor），返回句柄。 |
+| `start_decoder` | `decoder_type` | 启动流式解码器（仅 adsb, rds），返回句柄；aprs, noaa_apt, meteor, sstv, ft8, wspr, pocsag, acars 只有文件级入口，请用 --decode-file（见 list_decoders）。 |
 | `start_recording` | `path` | 开始 IQ 录制（SigMF）。 |
 | `start_remote_control` | `port` | 启动 GQRX 风格远程控制服务。 |
 | `start_scan` | `start_hz`, `stop_hz`, `step_hz` | 启动步进扫频，返回扫描句柄。 |
