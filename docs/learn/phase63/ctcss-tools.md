@@ -1,5 +1,6 @@
 # Phase63 — CTCSS 亚音三通道工具落地（set_ctcss / get_ctcss_status）
 
+> 证据状态：E4——本文件数字未逐条绑定原始件/复跑命令，引用前须复核（判据见 docs/evidence-standard.md）。
 - 仓库：MBDSDR（C++ Qt 桌面 SDR），基线 HEAD = `2781b12`
 - 职责范围：在已由并行会话落地的 CTCSS DSP 核心（`dsp/ctcss.*`、`SpectrumEngine`
   的 `setCtcssEnabled/setCtcssFreqHz/ctcssEnabled/ctcssFreqHz/ctcssPresent`，tokens

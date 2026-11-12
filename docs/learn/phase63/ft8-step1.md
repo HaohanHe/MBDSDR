@@ -1,5 +1,6 @@
 # FT8 第①步落地：8-FSK 调制器 + Costas 粗同步器（Python）
 
+> 证据状态：E4——本文件数字未逐条绑定原始件/复跑命令，引用前须复核（判据见 docs/evidence-standard.md）。
 > 日期：2026-10-10  作者：MBDSDR 工程轮
 > 基线 HEAD：2ff3840  产物：纯 Python 层，未改任何 cpp
 > 配套：`ft8-mechanism-study.md`（机制笔记，独立实现）、`ft8-landing-path.md` §轮次 1

@@ -1,5 +1,6 @@
 # Phase60 — ACARS + NAVTEX 全链集成（云端重建）
 
+> 证据状态：E4——本文件数字未逐条绑定原始件/复跑命令，引用前须复核（判据见 docs/evidence-standard.md）。
 方向：把两个 packet-text 解码器（ACARS / NAVTEX）从"隔离核心"集成到完整接收链
 （VfoManager 解调 → 引擎快照 emit → UI 数据面板 → 三通道只读工具），并保留每个
 失效边界的诚实数字。本阶段不写论文文本，只做厚项目本体。

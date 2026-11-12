@@ -1,5 +1,6 @@
 # CTCSS 亚音门控静音闭环（phase63 closed loop）
 
+> 证据状态：E4——本文件数字未逐条绑定原始件/复跑命令，引用前须复核（判据见 docs/evidence-standard.md）。
 HEAD `74a2432` 落地了 CTCSS **检测**（`CtcssToneDetector` Goertzel + 三通道工具 + UI
 面板）。这一轮把检测闭环成真正的「亚音静噪」：在检测之上新增一个**与检测使能分离的
 speaker 门控开关**——开启后，仅当真实检测到匹配亚音才放音 speaker，无亚音 / 不匹配 /

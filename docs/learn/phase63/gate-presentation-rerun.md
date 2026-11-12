@@ -1,5 +1,6 @@
 # Gate 拦截后呈现实测复核（UI 渲染快照 + 金集复跑）
 
+> 证据状态：E4——本文件数字未逐条绑定原始件/复跑命令，引用前须复核（判据见 docs/evidence-standard.md）。
 - 仓库：MBDSDR（C++ Qt 桌面 SDR），复核基线 HEAD = `abf5cc4`（main）。
 - 交付方式：**只读复核落档**。新增本 md + 一张实测快照 `gated-steps-rerun.png`；未改任何 `cpp/src/**`、未改任何既有测试、未 `git add/commit/push`。
 - 环境：`QT_QPA_PLATFORM=offscreen`，`LD_LIBRARY_PATH=/home/user/Qt/6.8.2/gcc_64/lib`，全程 CLI/offscreen，未操控任何 GUI；金集一律 **clean env（不设 `MBDSDR_TEST_SOURCE`）**。

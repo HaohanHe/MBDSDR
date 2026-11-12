@@ -1,5 +1,6 @@
 # A2UI v1.0 官方 spec vs MBDSDR AIGUI P0 子集——差距清单（Delta）
 
+> 证据状态：E4——本文件数字未逐条绑定原始件/复跑命令，引用前须复核（判据见 docs/evidence-standard.md）。
 > **历史快照，不作现状依据**。本文记录当时的阶段状态，其中的「已修 / 未修 / 已完成」等结论不得作为现状依据；现状以代码、测试与最新台账为准。
 
 > **文档性质**：对照 A2UI Protocol v1.0（Candidate，Last Updated 2026-06-08）官方原文，逐项核对 MBDSDR 已落地的 AIGUI P0 子集（commit 链 e330700 后）的差距。

@@ -1,5 +1,6 @@
 # FT8 落地路径方案（MBDSDR 内部）
 
+> 证据状态：E4——本文件数字未逐条绑定原始件/复跑命令，引用前须复核（判据见 docs/evidence-standard.md）。
 > 日期：2026-10-10  作者：MBDSDR 工程轮
 > HEAD：MBDSDR @ 764866a
 > 配套文档：`ft8-mechanism-study.md`（机制学习，独立实现）

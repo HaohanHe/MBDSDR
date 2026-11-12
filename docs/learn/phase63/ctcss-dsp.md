@@ -1,5 +1,6 @@
 # CTCSS 亚音静噪 DSP 核心（Phase 63）
 
+> 证据状态：E4——本文件数字未逐条绑定原始件/复跑命令，引用前须复核（判据见 docs/evidence-standard.md）。
 落地文件：`cpp/src/dsp/ctcss.{h,cpp}`，接入 `SpectrumEngine` 的 NFM 解调后
 48 kHz 单音音频链路。本页只描述 DSP 机制与如实参数；三通道与 UI 由并行会话
 消费冻结接口。

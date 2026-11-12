@@ -1,5 +1,6 @@
 # FT8 SIC 逐帧谱减多信号分离
 
+> 证据状态：E4——本文件数字未逐条绑定原始件/复跑命令，引用前须复核（判据见 docs/evidence-standard.md）。
 HEAD=a955242。独立实现 MIT（wsjtx subtractft8 机制概念参考不抄码）。
 
 ## 1. 落地 file:line

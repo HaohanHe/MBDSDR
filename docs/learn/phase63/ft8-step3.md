@@ -1,5 +1,6 @@
 # FT8 第③步落地：C++ 检测层 + 三通道工具
 
+> 证据状态：E4——本文件数字未逐条绑定原始件/复跑命令，引用前须复核（判据见 docs/evidence-standard.md）。
 HEAD=1c78080。独立实现 MIT，不抄 WSJT-X GPL；Python 原型
 (`mbdsdr_ai/ft8_modem.py`/`ft8_codec.py`) 为自写基准。
 

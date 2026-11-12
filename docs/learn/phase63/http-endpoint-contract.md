@@ -1,5 +1,6 @@
 # HTTP 通道端点契约审计
 
+> 证据状态：E4——本文件数字未逐条绑定原始件/复跑命令，引用前须复核（判据见 docs/evidence-standard.md）。
 **HEAD**: `ae0effb`
 **范围**: `cpp/src/control/control_http_server.{h,cpp}` 全部路由、方法语义、参数名、错误码、响应形状 vs ControlHub 命令面
 **金集**: test_control_http 14/14, test_control_hub 29/29, test_agent 34/34（全绿）

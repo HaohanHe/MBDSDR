@@ -1,5 +1,6 @@
 # FT8 第④步落地：C++ 解码层移植 + 读回接线
 
+> 证据状态：E4——本文件数字未逐条绑定原始件/复跑命令，引用前须复核（判据见 docs/evidence-standard.md）。
 HEAD=21cf42d。独立实现 MIT，规范为 Python `mbdsdr_ai/ft8_codec.py`。
 
 ## 1. 解码层 file:line

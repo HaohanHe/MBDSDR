@@ -1,5 +1,6 @@
 # Agent 架构侦察 + 开源通用 Agent 对照（Claude Agent SDK / OpenHands / CrewAI）
 
+> 证据状态：E4——本文件数字未逐条绑定原始件/复跑命令，引用前须复核（判据见 docs/evidence-standard.md）。
 **日期**: 2026-10-13
 **范围**: 只读侦察本仓库 agent 层真实能力（file:line 证据），再联网对照 3 个开源通用 Agent，产出对照表 + 真差距 + 取舍。
 **红线**: 本文档不预置场景/呼号/TLE；零 LLM 依赖的 headless 工具面（86 工具 / MCP 10 域）保持不变。
