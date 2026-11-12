@@ -272,6 +272,90 @@ def _unique_record_path(path: str) -> str:
         idx += 1
 
 
+#: 扩展名 → 回放格式（与 mbdsdr_ai.baseband_io._format_from_path 同口径）。
+#: 只用于「sidecar 声明格式 vs 扩展名」冲突归因；真正读盘仍以 sidecar 为准。
+_EXT_IQ_FORMAT = {
+    ".wav": "wav", ".cs16": "cs16", ".cu8": "cu8", ".u8": "cu8",
+    ".bin": "cu8", ".cf32": "cf32", ".cfile": "cf32", ".iq": "cf32",
+}
+
+
+def _fmt_rate_msps(hz) -> str:
+    """采样率 → ``2.400 MS/s``；无法判定时显式「未知」，不拿 0 冒充。"""
+    try:
+        v = float(hz)
+    except (TypeError, ValueError):
+        return "未知"
+    if not math.isfinite(v) or v <= 0:
+        return "未知"
+    return f"{v / 1e6:.3f} MS/s"
+
+
+def replay_source_notice(rec: dict, current_sr=None):
+    """回放前的元数据归因：返回 ``(kind, text)``，``None`` 表示无需说明。
+
+    ``kind`` 取 ``"information"`` / ``"warning"``。三类必须说清楚的情形：
+      1. 录音是中止的半成品（sidecar complete=false）；
+      2. 缺 sidecar / 缺 sample_rate——采样率是默认假设值，会变调；
+      3. 文件采样率与当前设置不同——回放按文件自身速率解码（离线，不依赖
+         设备设置），并给出当前设置值，避免用户把「没声」归因到看不见的地方；
+      4. sidecar 声明格式与扩展名指向不同格式——按 sidecar 读，但要说出来。
+
+    绝不把「按默认 2.4 MS/s 猜的」装成实测元数据，也绝不静默。
+    """
+    parts = []
+    kind = "information"
+
+    if rec.get("complete") is False:
+        kind = "warning"
+        reason = str(rec.get("aborted_reason") or "").strip() or "未记录"
+        parts.append(
+            f"该录音在录制中中止（原因：{reason}），文件不完整；"
+            f"本次只回放已写入的 {int(rec.get('samples') or 0):,} 个样本。")
+
+    if rec.get("metadata_missing"):
+        kind = "warning"
+        parts.append(
+            "该文件没有 sidecar 元数据：格式按扩展名推断为 "
+            f"{rec.get('format') or '未知'}，采样率按默认 2.400 MS/s 回放。"
+            "若录制时不是这个速率，回放会变调、时长也不准。")
+    elif rec.get("sample_rate_assumed"):
+        kind = "warning"
+        parts.append(
+            "该文件的 sidecar 缺少 sample_rate，采样率按默认 2.400 MS/s 回放；"
+            "若录制时不是这个速率，回放会变调、时长也不准。")
+    else:
+        try:
+            rate = float(rec.get("sample_rate") or 0.0)
+        except (TypeError, ValueError):
+            rate = 0.0
+        try:
+            cur = float(current_sr) if current_sr is not None else 0.0
+        except (TypeError, ValueError):
+            cur = 0.0
+        # 两边都已知且差异超过 1%（或 1 Hz）才提示：相同速率不打扰用户。
+        if rate > 0 and cur > 0 and abs(rate - cur) > max(1.0, 0.01 * cur):
+            parts.append(
+                f"文件采样率 {_fmt_rate_msps(rate)}，当前设置 "
+                f"{_fmt_rate_msps(cur)}。回放按文件自身的采样率离线解码，"
+                "与设备设置无关；若没有声音，请检查解调模式、静噪与音量。")
+
+    meta_fmt = str(rec.get("format") or "")
+    ext = os.path.splitext(str(rec.get("path") or ""))[1].lower()
+    ext_fmt = _EXT_IQ_FORMAT.get(ext, "")
+    if (meta_fmt and ext_fmt and meta_fmt != ext_fmt
+            and not rec.get("metadata_missing")):
+        kind = "warning"
+        parts.append(
+            f"sidecar 声明格式 {meta_fmt}，文件扩展名指向 {ext_fmt}；"
+            f"本次按 sidecar 的 {meta_fmt} 读取。若听到杂音或没有声音，"
+            "请确认文件真实格式。")
+
+    if not parts:
+        return None
+    return kind, " ".join(parts)
+
+
 def _planetarium_overlay_pos(sky_w: int, sky_h: int, strip_w: int,
                              strip_h: int, bar_rect: QRect,
                              margin: int = 12, gap: int = 8) -> tuple[int, int]:
@@ -9954,14 +10038,20 @@ class MainWindow(QMainWindow):
         """写盘失败/文件打不开的统一收口：报错 + 停止录音 + 保留已写部分（S7）。
 
         sidecar 只按**已成功写入**的样本数收尾（其 samples 就是磁盘上真实的
-        样本数）；内存缓冲里的任何东西都不参与落盘，也不冒充已录数据。
+        样本数），并显式记 ``complete=false`` + ``aborted_reason``：中止的
+        半成品绝不能再长得像一个完整录音。零样本时不生成文件，也不拿
+        「文件 xxx」这种措辞暗示盘上有东西。
         """
-        written = int(getattr(self, "_record_samples_total", 0)) * 8
+        n = int(getattr(self, "_record_samples_total", 0))
+        written = n * 8
         path = self._record_file_path or ""
         logger.error("录音中止：%s（已写 %d 字节 → %s）", reason, written, path)
-        self._stop_recording(
-            error=f"{reason}（已写 {written} 字节"
-                  f"{('，文件 ' + os.path.basename(path)) if path else ''}）")
+        if n <= 0:
+            detail = f"{reason}（已写 0 字节，未落盘任何样本，未生成文件）"
+        else:
+            detail = (f"{reason}（录音已中止，文件不完整：已写 {written} 字节"
+                      f"{('，文件 ' + os.path.basename(path)) if path else ''}）")
+        self._stop_recording(error=detail, aborted_reason=reason)
 
     @staticmethod
     def _is_same_record_tick(last, segment_index: int, start_sample: int) -> bool:
@@ -10049,8 +10139,13 @@ class MainWindow(QMainWindow):
         })
         self._record_center_hz = actual
 
-    def _record_segment_meta(self) -> dict:
-        """当前段的 sidecar 元数据（速率/样本/时长严格自洽）。"""
+    def _record_segment_meta(self, aborted_reason: Optional[str] = None) -> dict:
+        """当前段的 sidecar 元数据（速率/样本/时长严格自洽）。
+
+        ``aborted_reason`` 非空表示这一段是写盘中止的半成品：sidecar 必须
+        显式记 ``complete=false`` 与原因，回放端据此提示「文件不完整」。
+        正常停止写 ``complete=true``，老读取端忽略新字段也不受影响。
+        """
         n = int(getattr(self, "_record_samples_total", 0))
         secs = (n / self._record_sr) if self._record_sr else 0.0
         meta = {
@@ -10066,17 +10161,25 @@ class MainWindow(QMainWindow):
             "format": "cf32",
             "segment_index": int(self._record_segment_index),
             "session_path": self._record_session_path or self._record_file_path,
+            "complete": not bool(aborted_reason),
             "note": "MBDSDR baseband recording (float32 interleaved I/Q, streamed)",
         }
+        if aborted_reason:
+            meta["aborted_reason"] = str(aborted_reason)
         # 只在真的变过频时才出现该字段：不留一个恒为 null 的「假功能」。
         changes = list(getattr(self, "_record_freq_changes", []) or [])
         if changes:
             meta["center_freq_changes"] = changes
         return meta
 
-    def _finalize_record_segment(self) -> Optional[dict]:
+    def _finalize_record_segment(
+            self, aborted_reason: Optional[str] = None
+    ) -> Optional[dict]:
         """收尾当前段：关流 + 写 sidecar；零样本段删除不留空文件。
 
+        ``aborted_reason`` 非空 = 写盘中止：sidecar 记 ``complete=false``，
+        样本数以**磁盘实际内容**为准（写失败可能留下「计数之外」的尾部
+        字节），并截掉不足一个样本的残字节，保证 sidecar 与文件严格自洽。
         返回段信息（写入 ``_record_segments``）；无数据可落盘时返回 None。
         """
         path = self._record_file_path
@@ -10089,6 +10192,8 @@ class MainWindow(QMainWindow):
                 fh.close()
             except Exception as e:
                 logger.warning("关闭录制流失败: %s", e)
+            if n > 0:
+                n = self._reconcile_record_file_samples(path, n)
             if n <= 0:
                 # 改率发生在任何样本之前：删掉空壳，段序号也不占位
                 try:
@@ -10099,14 +10204,16 @@ class MainWindow(QMainWindow):
                 info = None
                 try:
                     from mbdsdr_ai.baseband_io import write_sidecar
-                    meta = self._record_segment_meta()
+                    meta = self._record_segment_meta(aborted_reason)
                     sidecar = write_sidecar(path, meta)
                     info = {"path": path, "samples": n,
                             "sample_rate": float(self._record_sr),
                             "duration_s": meta["duration_s"],
                             "start_time": meta["start_time"],
                             "segment_index": meta["segment_index"],
-                            "size_bytes": n * 8, "sidecar": sidecar}
+                            "size_bytes": n * 8, "sidecar": sidecar,
+                            "complete": meta["complete"],
+                            "aborted_reason": meta.get("aborted_reason", "")}
                 except Exception as e:
                     logger.warning("录制 sidecar 写盘失败: %s", e)
                     self.statusBar().showMessage(
@@ -10116,7 +10223,9 @@ class MainWindow(QMainWindow):
                             "duration_s": round(n / (self._record_sr or 1), 3),
                             "start_time": self._record_segment_start_time,
                             "segment_index": int(self._record_segment_index),
-                            "size_bytes": n * 8, "sidecar": None}
+                            "size_bytes": n * 8, "sidecar": None,
+                            "complete": not bool(aborted_reason),
+                            "aborted_reason": str(aborted_reason or "")}
         else:
             # 流从未成功打开（S7）：没有落盘数据可记，不得拿内存缓冲冒充存盘
             info = None
@@ -10124,6 +10233,34 @@ class MainWindow(QMainWindow):
         if info is not None:
             self._record_segments.append(info)
         return info
+
+    def _reconcile_record_file_samples(self, path: str, counted: int) -> int:
+        """把「已计数样本」对齐到磁盘实际内容；截掉不足一个样本的残字节。
+
+        写失败时 ``write`` 可能已落了一部分字节而计数没加：以磁盘为准
+        才不会让 sidecar 少报（回放读出计数之外的尾巴）或多报。cf32 固定
+        8 字节/样本，残字节无法组成样本，必须截掉——否则文件看起来比
+        sidecar 更完整。
+        """
+        try:
+            on_disk = int(os.path.getsize(path))
+        except OSError as e:
+            logger.warning("录音收尾读取文件大小失败（按计数 %d 样本收尾）: %s",
+                           counted, e)
+            return counted
+        disk_n = on_disk // 8
+        if on_disk % 8:
+            logger.warning("录音文件尾部有 %d 字节不足一个样本，已截掉（%s）",
+                           on_disk % 8, os.path.basename(path))
+            try:
+                os.truncate(path, disk_n * 8)
+            except OSError as e:
+                logger.warning("截掉录音尾部残字节失败: %s", e)
+        if disk_n != counted:
+            logger.warning("录音样本计数与磁盘不一致：计数 %d，磁盘 %d；按磁盘收尾",
+                           counted, disk_n)
+        self._record_samples_total = disk_n
+        return disk_n
 
     def _confirm_record_dir_safe(self) -> bool:
         """录音目录在程序目录内时，首次录音前必须让用户明确确认。
@@ -10343,11 +10480,14 @@ class MainWindow(QMainWindow):
                     f"会话 sidecar 写盘失败（{os.path.basename(seg['path'])}）: {e}",
                     MSG_NORMAL)
 
-    def _stop_recording(self, error: Optional[str] = None):
+    def _stop_recording(self, error: Optional[str] = None,
+                        aborted_reason: Optional[str] = None):
         """停止录制：收尾最后一段并写 sidecar；多段时汇总 segments 清单。
 
         ``error`` 非空表示因写盘失败而中止（S7）：已写部分照常收尾，最终
-        提示以错误开头，绝不把中止说成「录制完成」。
+        提示以错误开头，绝不把中止说成「录制完成」。``aborted_reason`` 是
+        要写进 sidecar 的机读原因（不带「已写 N 字节」这类给人看的尾巴），
+        缺省沿用 ``error``。
         """
         self._recording = False
         self._sync_planetarium_recording()
@@ -10359,7 +10499,8 @@ class MainWindow(QMainWindow):
             self._record_timer = None
 
         info = None
-        self._finalize_record_segment()
+        self._finalize_record_segment(
+            aborted_reason if aborted_reason is not None else error)
         segments = list(getattr(self, "_record_segments", None) or [])
         if segments:
             total_samples = sum(int(s["samples"]) for s in segments)
@@ -12601,6 +12742,23 @@ class MainWindow(QMainWindow):
             return
         sr = float(rec.get("sample_rate", DEFAULT_SAMPLE_RATE_HZ))
         center_hz = float(rec.get("center_freq_hz", 0.0))
+        # 速率/格式/完整性归因：状态栏会被 50ms 一帧的回放进度覆盖，必须用
+        # 对话框把「文件什么速率、当前什么设置、是不是半成品」说清楚，
+        # 否则用户只看到「没声」或音调不对，无从归因。
+        current_sr = None
+        backend = getattr(self, "_active_sdr_backend", None)
+        if backend is not None:
+            try:
+                current_sr = float(backend.get_sample_rate())
+            except Exception:  # noqa: BLE001 - 取不到就不比较，绝不猜一个值
+                current_sr = None
+        notice = replay_source_notice(rec, current_sr)
+        if notice is not None:
+            kind, text = notice
+            if kind == "warning":
+                QMessageBox.warning(self, "回放说明", text)
+            else:
+                QMessageBox.information(self, "回放说明", text)
         # S4：分段录音/混率录音的读数不能装成单一速率
         segments = rec.get("segments") or []
         self._replay_unknown_duration = rec.get("duration_s") is None

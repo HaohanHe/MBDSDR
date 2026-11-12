@@ -475,6 +475,11 @@ def load_iq(path: str, sample_rate: float = None, *,
         "sample_rate_source": rate_source,
         "sample_rate_assumed": rate_assumed,
         "metadata_missing": not bool(meta),
+        "format": fmt,
+        # 录制中止的半成品：sidecar 显式记 complete=false/aborted_reason。
+        # 老 sidecar 没有这两个字段，按「完整」读（当时也没有中止路径）。
+        "complete": bool(meta.get("complete", True)),
+        "aborted_reason": str(meta.get("aborted_reason") or ""),
         "center_freq_known": "center_freq_hz" in meta,
         "gain_known": "gain_db" in meta,
         "center_freq_hz": meta.get("center_freq_hz", 0),
