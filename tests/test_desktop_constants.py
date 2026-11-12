@@ -18,6 +18,7 @@ desktop/constants.py 常量语义钉扎测试
 运行:
     QT_QPA_PLATFORM=offscreen python -m pytest tests/test_desktop_constants.py -v
 """
+import ast
 import importlib.util
 import inspect
 import os
@@ -119,6 +120,12 @@ class TestNoSecondSourceOfTruth:
         ``default_sample_rate_combo_index`` 两个函数成为下拉档位与默认档
         的唯一事实源（档位只来自设备能力表，桌面不再持第二份），一并入册。
 
+        2026-11-12 采样率写入口收口（3c64ef0f）：连接载荷的键名与写入口
+        ``CONNECT_SAMPLE_RATE_KEY`` / ``connect_sample_rate_hz`` /
+        ``set_connect_sample_rate`` 也落在本模块——写、默认、读三处口径
+        只剩这一份；``DEFAULT_SR_UNCONFIRMED`` 同属空态唯一写法。这几项
+        是入册的**收口结果**，不是新事实源；白名单仍封闭，多一个符号照样红。
+
         导入痕迹不算"第二个事实源"：``logging``（模块对象）与 ``logger``
         （日志设施）显式排除在统计外；若本模块再长出一个**真正的常量**，
         本条仍然会红。
@@ -126,8 +133,12 @@ class TestNoSecondSourceOfTruth:
         _INFRA = {"logging", "logger"}          # 日志设施，非常量
         public = {n for n in vars(constants)
                   if not n.startswith("_") and n not in _INFRA}
-        assert public == {"DEFAULT_SAMPLE_RATE_HZ", "FREQ_MIN_HZ", "FREQ_MAX_HZ",
+        assert public == {"DEFAULT_SAMPLE_RATE_HZ", "DEFAULT_SR_UNCONFIRMED",
+                          "FREQ_MIN_HZ", "FREQ_MAX_HZ",
+                          "CONNECT_SAMPLE_RATE_KEY",
                           "format_sample_rate",
+                          "connect_sample_rate_hz",
+                          "set_connect_sample_rate",
                           "sample_rate_combo_items",
                           "default_sample_rate_combo_index"}, sorted(public)
 
@@ -163,10 +174,34 @@ class TestPanelIdentityLivesElsewhere:
     """常量模块不承载面板 id / tab 身份：身份事实源在 panel_registry。"""
 
     def test_constants_carries_no_panel_id(self):
-        """身份常量不得混进共享常量模块（译文/面板名会随语言漂）。"""
+        """身份常量不得混进共享常量模块（id/译文会随注册表与语言漂）。
+
+        只扫「模块级常量名」与「字面量值」：文档里提到 ``device_panel.py``
+        这类文件名是在解释写入口的历史，不是面板身份。判据：
+          * 不许有名字含 PANEL/TAB 的模块级常量；
+          * 不许出现等于注册表 id 或面板中文名的字符串字面量。
+        任一条命中都说明身份被复制到了本模块，本条即红。
+        """
         text = _desktop_sources()["constants.py"]
-        assert "panel" not in text.lower()
-        assert "tab" not in text.lower()
+        known = set(panel_registry.registry().ids())
+        known |= {spec.name for spec in panel_registry.registry().list()}
+        offenders = []
+        for node in ast.parse(text).body:
+            targets = []
+            value = None
+            if isinstance(node, ast.Assign):
+                targets = [t.id for t in node.targets if isinstance(t, ast.Name)]
+                value = node.value
+            elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+                targets = [node.target.id]
+                value = node.value
+            for name in targets:
+                if "PANEL" in name.upper() or "TAB" in name.upper():
+                    offenders.append(f"常量名 {name}")
+            if isinstance(value, ast.Constant) and isinstance(value.value, str) \
+                    and value.value in known:
+                offenders.append(f"字面量 {value.value!r}")
+        assert offenders == [], f"constants.py 混入了面板身份: {offenders}"
 
     def test_registry_ids_are_stable_ascii(self):
         """面板 id 必须是稳定 ASCII 标识，不能是译文。"""
