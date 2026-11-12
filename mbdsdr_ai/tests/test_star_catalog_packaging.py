@@ -106,3 +106,48 @@ def test_sdist_contains_star_catalog(tmp_path):
                        if n.endswith(f"mbdsdr_ai/{NPZ_REL}")), None)
         assert member is not None, f"sdist 内缺 mbdsdr_ai/{NPZ_REL}"
         assert tf.getmember(member).size > 1_000_000
+
+
+def test_skip_markers_carry_visible_reason():
+    """跳过的理由必须能在 `pytest -rs` 输出里看到。
+
+    `-rs` 打印的是 Mark 的 reason。没有 reason 的 skip 在 CI 日志里只剩一行
+    「SKIPPED」，谁也不知道为什么没跑，等于把真构建藏起来。
+    """
+    for fn in (test_wheel_contains_star_catalog, test_sdist_contains_star_catalog):
+        marks = [m for m in getattr(fn, "pytestmark", []) if m.name == "skipif"]
+        assert marks, f"{fn.__name__} 缺少 skipif 标记"
+        for mark in marks:
+            reason = str(mark.kwargs.get("reason") or "").strip()
+            assert reason, f"{fn.__name__} 的 skipif 没有 reason，-rs 里看不到理由"
+            assert "MBSDSR_SKIP_WHEEL_BUILD" in reason, (
+                f"{fn.__name__} 的 skip 理由没写明触发开关：{reason!r}")
+
+
+#: CI 配置的候选路径。新增 CI 系统时把文件加进来，否则这个约束看不到它。
+_CI_CONFIG_GLOBS = (
+    ".github/workflows/*.yml",
+    ".github/workflows/*.yaml",
+    ".gitlab-ci.yml",
+    "azure-pipelines.yml",
+    "Jenkinsfile",
+    ".travis.yml",
+    "appveyor.yml",
+)
+
+
+def test_ci_never_sets_skip_wheel_build():
+    """CI 配置里不得出现 MBSDSR_SKIP_WHEEL_BUILD。
+
+    这个开关只给本地纯逻辑调试用。哪天有人在 CI 里把它设成默认，真构建这条
+    防线就静默失效了——所以在这里钉死。
+    """
+    offenders = []
+    for pattern in _CI_CONFIG_GLOBS:
+        for path in ROOT.glob(pattern):
+            text = path.read_text(encoding="utf-8", errors="replace")
+            if "MBSDSR_SKIP_WHEEL_BUILD" in text:
+                offenders.append(str(path.relative_to(ROOT)))
+    assert not offenders, (
+        f"CI 配置里出现了 MBSDSR_SKIP_WHEEL_BUILD: {offenders}；"
+        "真构建必须在 CI 里一直跑，这个开关只给本地调试用。")
