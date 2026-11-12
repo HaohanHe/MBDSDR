@@ -2632,7 +2632,8 @@ python scripts/git_sync_index.py --check                 # 只校验，不改 in
    解释不了的删除一律当作「陈旧 index 的幻影删除」，停下来重建索引。
 3. 机械闸：删除条目同样受声明清单约束——`check_commit_scope.py --staged --expect ...`
    对清单外的 `D` 条目直接拒并打印 `DELETE <path>`，附带「基于旧 HEAD read-tree」的
-   归因与修法；未声明清单时只告警（不假报）。反证见
+   归因与修法；未声明清单时**同样拒绝**（2026-11-12 起 fail-closed，见 §6.9.22，
+   此前只告警，`35db7a13` 正是从这个缺口穿过）。反证见
    `tests/test_commit_scope_manifest.py`：按旧提交 `read-tree` 建私有 index，再 add
    自己的文件 → 提交被拒、打印幻影删除；`read-tree HEAD` 重建后放行。
 
@@ -2929,6 +2930,37 @@ git status --porcelain -- <path>                # 确认期间是否正被他人
 **三、判据是一句话能回答。**
 `file_claim status` 每一行都要能读出：**谁（线名/pid）、在改什么（用途）、
 还剩多久（未过期）**。缺任一项或相互矛盾，就是无效 claim——先修台账，再动代码。
+
+#### 6.9.22 用私有 index 建树必须先 `read-tree HEAD`（幻影删除的「因」，2026-11-12）
+
+**规则（一句话）**：用私有 `GIT_INDEX_FILE` 提交，**建索引后立刻 `git read-tree HEAD`**，
+再 add 自己的文件；不许拿上一轮的索引文件接着用。
+
+**为什么**：私有 index 是「建它那一刻的树 + 你 add 的内容」的快照。索引基于旧 HEAD 时，
+新提交的树 = 旧树 + 你的改动——从旧 HEAD 到当时 HEAD 之间别人入库的文件，在这棵树里
+**不存在**，提交后就被记成删除。Git 不会提醒，因为对这份索引来说它们确实是删除。
+
+**四条实例（同一机制，均已定论）**：
+
+| 事故提交 | 被记成删除的文件（新增它的提交） | 恢复提交 |
+|---|---|---|
+| `16f075f3` | `tests/test_pose_fusion.py`、`web/product/` 下 4 个文件（`0055dddb`） | `a5d062e8` |
+| `b28ddadf` | `tests/test_config_store_single_writer.py`（`8d8e3e6b`） | `b4ea081d` |
+| `685e8f50` | `tests/test_sample_rate_wording.py`（`d77d9b78`） | `78003d87` |
+| `35db7a13` | `tests/test_theme_dual_value_guard.py`（`b4c2e308`） | `ad7408dd` |
+
+四起的共同判据：`git diff --name-status <新增文件的提交>^ <事故提交>` 只剩本人改动、
+**零 D**，即树 = 旧基树 + 本人改动。逐条证据（父提交、树哈希、用临时 index 复现）
+见 `docs/incidents/2026-11-12-phantom-delete-incident.md`。
+
+**守卫只拦结果，不拦成因**：`scripts/check_commit_scope.py --staged` 现在对**任何
+未声明为意图删除的 `D` 条目一律拒绝**（fail-closed）。真删用 `--intent-delete <path>`
+（可重复）或环境变量 `MBDSDR_INTENT_DELETIONS`（换行 / `;` 分隔）声明；
+`safe_commit.py --files` 会把「HEAD 有、新索引没有」的路径自动导出，正常删文件不用
+手写。幻影删除则按本条的规则重建索引，不要靠声明「过闸」。反证在
+`tests/test_commit_scope_intent_delete.py`：旧树 + 私有 index 造出的删除被真实
+pre-commit 挡下、HEAD 不前进。**守卫只能证明「这条删除你声明过」，证明不了
+「你的树建得对」——所以这条规则仍然必须人知道。**
 
 ### 6.10 历史改写事件（主分支被 reset 改写；按批次登记，跨日后继续累计）
 
