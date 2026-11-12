@@ -142,7 +142,7 @@ def test_cli_open_refuses_unreadable_registry_as_unknown(registry,
     反证：把 unknown 当 free，``_open_rtlsdr`` 会被调用 → 本用例红。
     """
     registry.write_bytes(b'{"owners": ')
-    monkeypatch.setattr(own, "_backup_corrupt_registry", lambda reason: None)
+    monkeypatch.setattr(own, "backup_corrupt_registry", lambda reason: None)
     opened = _forbid_open(monkeypatch)
     probed = _forbid_probe(monkeypatch)
 

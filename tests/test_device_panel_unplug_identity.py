@@ -241,7 +241,7 @@ def test_owner_unreadable_registry_is_shown_as_unknown_not_free(
     reg = tmp_path / "device_owner.json"
     monkeypatch.setenv(own.OWNER_REGISTRY_ENV, str(reg))
     # 备份失败：坏文件留在原地，claim 必然失败——这正是「说空闲却连不上」的场景。
-    monkeypatch.setattr(own, "_backup_corrupt_registry", lambda reason: None)
+    monkeypatch.setattr(own, "backup_corrupt_registry", lambda reason: None)
     reg.write_bytes(b'{"owners": ')
 
     panel._apply_devices([_dev(0, serial="A-0001", label="RTL-A")])

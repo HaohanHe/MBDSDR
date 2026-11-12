@@ -6,8 +6,8 @@
 启动时间」都对上才算持有者活着。
 
 本模块不 import ``sdr_backend``（否则成环）；``sdr_backend`` 只在顶部再导出
-公共名。私有名（``_backup_corrupt_registry`` / ``_open_process_for_query`` /
-``_proc_start_time`` 等）的唯一归属在这里，测试/嵌入方要替换应直接指向本模块。
+公共名。判活/备份等内部细节的唯一归属在这里；测试/嵌入方要替换，用公共入口
+:func:`open_process_query` / :func:`backup_corrupt_registry`，不再直接改私有名。
 """
 from __future__ import annotations
 
@@ -237,12 +237,13 @@ def _kernel32():
     return k32
 
 
-def _open_process_for_query(pid: int):
+def open_process_query(pid: int):
     """Windows：打开进程查询句柄，返回 ``(handle, GetLastError())``。
 
     失败时 handle 为 0；错误码交给 :func:`_open_process_failure_means_dead`
-    分流出「真死」和「查不到」。单独拆出来是为了让测试能注入 ACCESS_DENIED，
-    而不必真去搞一个高完整性进程。
+    分流出「真死」和「查不到」。这是判活链路的**公共接缝**：测试要注入
+    ACCESS_DENIED / ERROR_INVALID_PARAMETER 时替换本函数，不必造一个高
+    完整性进程，也不必改模块私有名。
     """
     import ctypes
     k32 = _kernel32()
@@ -265,7 +266,7 @@ def _proc_probe(pid: int) -> Tuple[str, Optional[float]]:
         if os.name == "nt":
             import ctypes
             import ctypes.wintypes as wt
-            handle, err = _open_process_for_query(int(pid))
+            handle, err = open_process_query(int(pid))
             if not handle:
                 return ((PROC_DEAD if _open_process_failure_means_dead(err)
                          else PROC_UNKNOWN), None)
@@ -391,12 +392,15 @@ def _registry_lock():
                 pass
 
 
-def _backup_corrupt_registry(reason: str) -> Optional[str]:
+def backup_corrupt_registry(reason: str) -> Optional[str]:
     """登记文件损坏：改名成 ``<path>.corrupt-<时间戳>`` 并写理由文件。
 
     复用 ``corrupt_evidence`` 的统一模板（与设置/书签/布局同一套命名与
     ``.reason.txt`` 配对），这样它会自动出现在启动日志的损坏备份清点里，
     不另开一套。调用方必须已持有登记文件锁；改名失败只告警，仍按空登记继续。
+
+    这是损坏留证的**公共接缝**：测试模拟「备份失败」时替换本函数返回
+    ``None``，不再改模块私有名；正常的损坏路径不替换它，直接验证备份文件。
     """
     path = owner_registry_path()
     stamp = time.strftime("%Y%m%d-%H%M%S")
@@ -500,14 +504,14 @@ def _read_registry_state() -> Tuple[Dict[str, Dict[str, Any]], str, bool]:
         return {}, "", True
     except Exception as e:  # noqa: BLE001 - 先留证据，再把结论交给调用方
         reason = f"JSON 读取/解析失败：{e.__class__.__name__}: {e}"
-        backup = _backup_corrupt_registry(reason)
+        backup = backup_corrupt_registry(reason)
         if backup is None:
             return {}, f"{reason}；备份失败，原文件仍在，拒绝写回", False
         return {}, f"{reason}；原件已备份到 {backup}", True
     owners = data.get("owners") if isinstance(data, dict) else None
     if not isinstance(owners, dict):
         reason = "顶层结构非法（缺少 owners 对象）"
-        backup = _backup_corrupt_registry(reason)
+        backup = backup_corrupt_registry(reason)
         if backup is None:
             return {}, f"{reason}；备份失败，原文件仍在，拒绝写回", False
         return {}, f"{reason}；原件已备份到 {backup}", True

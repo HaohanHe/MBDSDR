@@ -155,7 +155,7 @@ def test_unreadable_registry_refuses_as_unknown_not_busy(_registry,
     本用例立刻红（``connect() True``、``opened == 1``）。
     """
     _registry.write_bytes(b'{"owners": ')
-    monkeypatch.setattr(own, "_backup_corrupt_registry", lambda reason: None)
+    monkeypatch.setattr(own, "backup_corrupt_registry", lambda reason: None)
 
     be = _FakeHardware("rtlsdr|index:0")
     assert be.connect() is False, "登记不可读时必须 fail-closed"

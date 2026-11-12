@@ -172,7 +172,7 @@ def test_open_process_error_classification():
 def test_access_denied_keeps_live_holder_record(_registry, monkeypatch):
     """反证：没权限查（ACCESS_DENIED）时记录不被清，claim 必须被拒。"""
     _seed(_registry, "rtl_0", 424242, None)
-    monkeypatch.setattr(own, "_open_process_for_query", lambda pid: (0, 5))
+    monkeypatch.setattr(own, "open_process_query", lambda pid: (0, 5))
 
     assert own._proc_probe(424242) == (own.PROC_UNKNOWN, None)
     assert own.release_stale_owners() == [], "没权限查不能当成持有者已死"
@@ -186,7 +186,7 @@ def test_access_denied_keeps_live_holder_record(_registry, monkeypatch):
 def test_invalid_parameter_still_releases_dead_holder(_registry, monkeypatch):
     """反证的另一半（别为了安全把功能锁死）：确证进程不存在时仍必须让位。"""
     _seed(_registry, "rtl_0", 424242, None)
-    monkeypatch.setattr(own, "_open_process_for_query", lambda pid: (0, 87))
+    monkeypatch.setattr(own, "open_process_query", lambda pid: (0, 87))
 
     assert own._proc_probe(424242) == (own.PROC_DEAD, None)
     ok, _ = own.claim_active_owner(own.AI_OWNER, "rtl_0")
@@ -524,7 +524,7 @@ def test_corrupt_registry_backup_failure_refuses_claim(_registry, monkeypatch):
     """反证：备份失败 → claim 直接失败，登记文件逐字节不变。"""
     bad = b'{"owners": '
     _registry.write_bytes(bad)
-    monkeypatch.setattr(own, "_backup_corrupt_registry", lambda reason: None)
+    monkeypatch.setattr(own, "backup_corrupt_registry", lambda reason: None)
 
     ok, rec = own.claim_active_owner(own.AI_OWNER, "rtl_0")
 
@@ -538,7 +538,7 @@ def test_non_object_registry_backup_failure_refuses_claim(_registry,
     """结构损坏（顶层不是对象）与 JSON 损坏同等对待。"""
     bad = b'[1, 2, 3]'
     _registry.write_bytes(bad)
-    monkeypatch.setattr(own, "_backup_corrupt_registry", lambda reason: None)
+    monkeypatch.setattr(own, "backup_corrupt_registry", lambda reason: None)
 
     ok, rec = own.claim_active_owner(own.AI_OWNER, "rtl_0")
 
@@ -568,7 +568,7 @@ def test_corrupt_registry_backup_success_preserves_evidence(_registry):
 def test_untrusted_registry_is_not_permanently_locked(_registry, monkeypatch):
     """权衡验证：备份失败只锁「本次/当前坏文件」，不会永久锁死设备。"""
     _registry.write_bytes(b'{"owners": ')
-    monkeypatch.setattr(own, "_backup_corrupt_registry", lambda reason: None)
+    monkeypatch.setattr(own, "backup_corrupt_registry", lambda reason: None)
     ok, _ = own.claim_active_owner(own.AI_OWNER, "rtl_0")
     assert ok is False
 
@@ -583,7 +583,7 @@ def test_untrusted_registry_blocks_release_and_stale_cleanup(_registry,
     """释放/清失效也要写回：同样拒绝，避免写出误导性的空表。"""
     bad = b'{"owners": '
     _registry.write_bytes(bad)
-    monkeypatch.setattr(own, "_backup_corrupt_registry", lambda reason: None)
+    monkeypatch.setattr(own, "backup_corrupt_registry", lambda reason: None)
 
     assert own.release_active_owner(own.AI_OWNER, "rtl_0") is False
     assert own.release_stale_owners() == []
@@ -597,7 +597,7 @@ def test_get_active_owner_degrades_without_raising(_registry, monkeypatch):
     None，界面据此显示「设备空闲」，用户点连接才被拒，界面在说假话。
     """
     _registry.write_bytes(b'{ broken')
-    monkeypatch.setattr(own, "_backup_corrupt_registry", lambda reason: None)
+    monkeypatch.setattr(own, "backup_corrupt_registry", lambda reason: None)
 
     state = own.get_active_owner("rtl_0")
     assert isinstance(state, own.OwnerState), "「不知道」不能被压成 None"
@@ -622,7 +622,7 @@ def test_owner_state_three_values(_registry, monkeypatch):
 
     _registry.write_bytes(b'{"owners": ')
     # 备份失败：坏文件留在原地，claim 会失败，所以状态必须是持久 unknown。
-    monkeypatch.setattr(own, "_backup_corrupt_registry", lambda reason: None)
+    monkeypatch.setattr(own, "backup_corrupt_registry", lambda reason: None)
     unknown = own.get_owner_state("rtl_0")
     assert unknown.state == own.OWNER_STATE_UNKNOWN
     assert unknown.reason and "拒绝写回" in unknown.reason
@@ -631,7 +631,7 @@ def test_owner_state_three_values(_registry, monkeypatch):
 def test_unknown_state_has_no_holder_get(_registry, monkeypatch):
     """unknown 不能长得像一条 holder：否则会显示成「owner 空、pid 0」。"""
     _registry.write_bytes(b'{ broken')
-    monkeypatch.setattr(own, "_backup_corrupt_registry", lambda reason: None)
+    monkeypatch.setattr(own, "backup_corrupt_registry", lambda reason: None)
 
     state = own.get_active_owner("rtl_0")
     assert not hasattr(state, "get")
