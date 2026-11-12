@@ -497,9 +497,9 @@ class DeviceManager:
             tuner = it.get("tuner", "")
             # 读不到序列号就留空：序号/品牌串随插拔变化，不能拿来当身份。
             serial = str(it.get("serial") or "").strip()
-            label = ("RTL-SDR #%d (%s)" % (idx, tuner)) if tuner else ("RTL-SDR #%d" % idx)
+            display_name = ("RTL-SDR #%d (%s)" % (idx, tuner)) if tuner else ("RTL-SDR #%d" % idx)
             info = DeviceInfo(
-                name=label,
+                name=display_name,
                 driver="rtlsdr",
                 serial=serial,
                 sample_rates=self._RTL_SRATES,
@@ -531,7 +531,7 @@ class DeviceManager:
                 # 只认 serial；label 可能重名/被改，序号每次枚举都变，
                 # 都不能当身份。读不到就留空，由 has_stable_identity 报不可分辨。
                 serial = str(sarg.get("serial") or "").strip()
-                label = str(sarg.get("label", f"SoapySDR {driver} #{i}"))
+                display_name = str(sarg.get("label", f"SoapySDR {driver} #{i}"))
                 # 尝试打开一次拿采样率/增益（只读 properties，不读流）
                 sample_rates: Tuple[float, ...] = ()
                 gains: Tuple[float, ...] = ()
@@ -557,9 +557,9 @@ class DeviceManager:
                         pass
                     dev.close()
                 except Exception as e:
-                    logger.debug("SoapySDR 打开 probe 失败 %s: %s", label, e)
+                    logger.debug("SoapySDR 打开 probe 失败 %s: %s", display_name, e)
                 info = DeviceInfo(
-                    name=label,
+                    name=display_name,
                     driver=f"soapysdr:{driver}",
                     serial=serial,
                     sample_rates=sample_rates,
