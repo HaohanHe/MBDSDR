@@ -589,15 +589,22 @@ QT_QPA_PLATFORM=offscreen python -m pytest "<nodeid>" -q
   `_right_stack_host`；该提交只改 `desktop/main_window.py`，未更新
   `tests/test_main_window.py`。父提交 `c204e945^` 里是
   `_main_splitter.addWidget(right_col)`，HEAD 里是 `addWidget(self._right_stack_host)`。
-- **现状**：工作区 `tests/test_main_window.py` 已有未提交的新断言（点名
-  `rightColumnHost`，docstring 引用 `c204e945`），即**修复在途未落库**；
-  登记后由布局线提交即可销账。
+- **现状**：工作区 `tests/test_main_window.py` 的修复已确认归属本线（布局锁线）
+  ——diff 与登记描述逐条对应：点名 `rightColumnHost`、`_right_stack` 两页顺序
+  （`_right_col` / `right_strip`）、`right_tab` 父件是 `_right_col`，docstring
+  引用 `c204e945`。不再按「孤儿改动」处理。
 - **2026-11-13 复核**：HEAD `99a61044` 独立 worktree 单跑仍 `1 failed`；主工作区
   那份未提交断言仍在，但 claim 持有进程 pid 26460 已不存在（`Get-Process` 查无），
-  claim（2026-11-12 20:39 取得，TTL 10min）已过期。即「在途」应改判为
-  **无人接手的孤儿改动**：需布局锁线确认后提交，或按接管规则另行处理。
+  claim（2026-11-12 20:39 取得，TTL 10min）已过期。
 - **转绿条件**：提交工作区那份 `test_main_window.py`；验收单跑 `1 passed`，
   且断言仍点名 host 层（拆掉这层要能红）。不许为了让测试绿去改产品结构。
+- **收口（2026-11-13）**：随本线「conftest 每用例配置隔离 / 锁可见性」同批提交。
+  验收证据：同一次全量运行（6889 tests）里
+  `tests/test_main_window.py::TestThreeColumnSplitter::test_three_panes_present`
+  **不在 82 条失败清单中**，其余失败照常红（不是整批变绿的假象）。
+  反证方向写在断言里：拆掉 `rightColumnHost` 这层后 `sp.widget(2)` 不再是 host
+  且两页顺序断言失效，必红；旧的 `sp.widget(2) is right_tab.parent()` 在拆层后
+  反而仍绿，这就是必须点名该层的原因。修复只动测试断言，未改产品结构。
 
 ---
 
@@ -678,13 +685,13 @@ QT_QPA_PLATFORM=offscreen python -m pytest "<nodeid>" -q
 
 ---
 
-## K19 — 源码文本 pin 棘轮新增 33 条（2026-11-13 实跑，存量·未修）
+## K19 — 源码文本 pin 棘轮新增 33 条（2026-11-13 已转绿 · 提交 `748a2992` / `b00a73d3` / `ce31ff20`）
 
 - **nodeid**：`tests/test_source_pin_ratchet.py::test_no_new_source_text_pins`
 - **复跑命令**：
   ```bash
   MBDSDR_OFFLINE=1 QT_QPA_PLATFORM=offscreen \
-    python -m pytest tests/test_source_pin_ratchet.py::test_no_new_source_text_pins -q -rf
+    python -m pytest tests/test_source_pin_ratchet.py -q -rf
   ```
 - **失败消息首行**：
   `AssertionError: 新增源码文本 pin（必须改成行为断言，或由 owner 在基线写明理由）：`
@@ -692,32 +699,80 @@ QT_QPA_PLATFORM=offscreen python -m pytest "<nodeid>" -q
   `"配置意图，不是设备读数"` pin）。基线最后更新是 `01cf93de`（2026-11-06），
   其后任何新增 pin 都会让该节点红；定位方式 `git log -S`（按文件取最早一条，
   未逐提交 checkout 复跑）。
-- **新增 pin 清单（33 条 / 10 个文件）**：
-  - `test_config_persistence_safety.py`（3）：`"损坏"`、`str(path)`、
-    `text.count("\n")`
-  - `test_connect_request_store.py`（3）：`payload["_bandwidth"]`、
-    `payload["_gain"]`、`payload["_ppm"]`
-  - `test_device_owner_lock.py`（2）：`"JSON 读取/解析失败"`、`str(_registry)`
-  - `test_diagnostics_panel_pure_display.py`（7）：`".setText("`、
-    `"QApplication.clipboard"`、`"QDesktopServices"`、`"startfile"`、
-    `"QScrollArea"`、`"QTextEdit"`、`"setPlainText"`
-  - `test_hw_acceptance_contract.py`（7）：`"abs(f_p - 19000) < 100"`、
-    `"abs(f_p - 19000) < 300"`、`f"19000±{tol:.0f} Hz 且峰/邻域 >{snr:.0f} dB"`、
-    `ring3_src.count("PILOT_FREQ_TOL_HZ")`、`f"{lo} – {hi}"`、
-    `"此值不适用于产品立体声探测"`、`"此值不适用于硬件验收"`
-  - `test_island_contrast_batch1.py`（2）：`"QPen(_GRID"`、`"p.setPen(MUTED)"`
-  - `test_island_contrast_batch2.py`（2）：`"QPushButton:hover { border-color: #8f95a3; }"`、
-    `src.count("border: 1px solid #6A7284")`
-  - `test_safe_commit_exclude.py`（1）：`"line5 other"`
-  - `test_startup_selfcheck.py`（3）：`"延后导入失败"`、`"怎么修"`、`"缺了会怎样"`
-  - `test_tooltip_guard.py`（3）：`f"def {name}("`、`"配置意图，不是设备读数"`、
-    `"（默认 · 未确认）"`
-- **当前 owner**：`tests/test_source_pin_ratchet.py`、`docs/source-pin-ratchet-baseline.json`
-  均无活跃 claim；各 pin 由对应测试线引入。建议由引入线改成行为断言，确实必须钉
-  文本的由 **机制线** 在基线按现有 schema 登记 `reason`。
-- **转绿条件**：单跑 `1 passed`；每条 pin 要么改成行为断言，要么在
-  `docs/source-pin-ratchet-baseline.json` 写明理由。反证验收：再加一条未登记 pin，
-  节点必须红。
+- **逐条判定结果（33 条，不按文件成批）**：**删 16 / 改 15 / 留 2**。
+
+### 该删 16 条（能用行为断言替代，或已被既有断言覆盖）
+
+- 4 条与既有行为用例/AST 硬闸重复，直接删：
+  `".setText("`、`"QApplication.clipboard"` 已有
+  `test_copy_path_button_copies_without_opening_directory` 覆盖；
+  `"QDesktopServices"`、`"startfile"` 已由同文件 AST 硬闸
+  `test_module_has_no_write_or_delete_calls` 覆盖（含参数化反证）。
+- 3 条 `"QScrollArea"` / `"QTextEdit"` / `"setPlainText"` 改为新增行为用例
+  `test_reason_text_renders_full_inside_scroll_area`：真的构造对话框，断言
+  长理由 `toPlainText() == long_reason`、只读、且祖先链上有 `QScrollArea`。
+- 2 条 tooltip（`"配置意图，不是设备读数"`、`"（默认 · 未确认）"`）改为
+  构造 `DevicePanel` 读渲染后的 `sr_edit.toolTip()`。
+- 3 条 `payload["_gain"/"_ppm"/"_bandwidth"]` 改为
+  `test_store_fills_every_connect_payload_key`：写入意图后直接断言
+  `fill_payload` 带出四个键。
+- 2 条岛内对比度负向 pin（`"QPen(_GRID"`、`"p.setPen(MUTED)"`）改为
+  渲染时收集 `setPen` 颜色（`_pens_from_paint`），断言 `_GRID`/`MUTED`
+  不在实际画笔集合里。
+- 2 条注释文本 pin（`"此值不适用于产品立体声探测"`、
+  `"此值不适用于硬件验收"`）直接删：注释不承载行为，两阈值分离已由
+  命名、不等与大小关系四条断言覆盖；注释措辞变更不应让用例红。
+
+### 该改 15 条（pin 写法让结果不可靠）
+
+- 9 条断言的其实是**运行期生成的文件**（`.reason.txt` / 启动日志 /
+  临时 git 仓库里的 doc.md），不是源码文本；扫描器按
+  `read_text()` / `open().read()` 误判成源码 pin。原写法把整份文本当
+  子串匹配，换行与空白一变就抖。改为按行断言（行数 / 逐行包含 /
+  精确行成员），语义不变且更严格：`test_config_persistence_safety.py`（3）、
+  `test_device_owner_lock.py`（2）、`test_startup_selfcheck.py`（3）、
+  `test_safe_commit_exclude.py`（1）。
+- 3 条 ring3 文本匹配改为 AST：`count("PILOT_FREQ_TOL_HZ") >= 2` →
+  「至少 2 个函数引用该常量」；两条 `"abs(f_p - 19000) < 100/300" not in src`
+  → 「不存在 `abs(f_p …)` 与裸 100/300 字面量比较」。空格/换行不再影响判据。
+- 1 条 `f"def {name}("` → AST `FunctionDef` 判定，避免命中注释或调用。
+- 2 条时间机器描边 pin（`"QPushButton:hover { border-color: #8f95a3; }"`、
+  `src.count("border: 1px solid #6A7284")`）改为构造对话框读实际
+  `styleSheet()`，按选择器提取描边色与 hover 色。
+
+### 该留 2 条（只能文本断言）
+
+已按现有 schema 登记到 `docs/source-pin-ratchet-baseline.json`，
+baseline 56 → 58（`BUILT_AT` 同步 58），每条带 owner + reason：
+
+| pinned | 为什么不能被重构掉 |
+|---|---|
+| `f"19000±{tol:.0f} Hz 且峰/邻域 >{snr:.0f} dB"` | 人工验收卡 `docs/hw-acceptance.md` 是给操作员逐字核对的判据表，产品代码没有可断言的消费入口；串由 ring3 两个常量拼出，改常量或改文档任一侧都会红。 |
+| `f"{lo} – {hi}"` | 回放比区间只在人工卡里以文本呈现，ring4 常量没有行为调用点；串由两个常量拼出，任一侧改动都会红。 |
+
+两条的共同出路写在 reason 里：**要让验收卡由常量生成**，之后即可改为行为断言。
+
+### 反证（两类都实跑，不是推理）
+
+- **行为断言类**：临时把 `desktop/module_panel.py:154` 空态画笔
+  `p.setPen(CANVAS_MUTED)` 改成 `p.setPen(MUTED)` →
+  `test_module_canvas_empty_state_uses_canvas_ink` 红：
+  `AssertionError: 空态文字没有用画布墨色 / assert '#939393' in {'#606060'}`；
+  还原后绿（`git diff` 为空）。
+- **保留 pin 类**：临时把 `docs/hw-acceptance.md:169` 的 `>10 dB` 改成
+  `>12 dB` → `test_pilot_acceptance_thresholds_match_doc_card` 红：
+  `AssertionError: 人工卡与 ring3 导频阈值已分叉：文档里找不到由常量拼出的判据串`；
+  还原后绿（`git diff` 为空）。
+
+### 验证
+
+- 11 个相关测试文件同会话运行：**117 passed**（37.55s，持 Qt 锁）。
+- 中途另一会话（PID 24992）持锁时，单跑 ratchet 曾用 `MBDSDR_TEST_LOCK=0`
+  得到 3 passed；最终结论以持锁的 117 passed 为准。
+- **判断**：33 条里只有 2 条真的在钉「产品必须给操作员看到的文档判据」，
+  其余 31 条钉的是实现写法——4 条与既有行为用例/AST 硬闸重复、10 条改写为
+  行为或运行时取值、2 条是注释文本、9 条是扫描器把运行期文件误判成源码、
+  6 条改写成 AST/运行时取值。**31/33 是「我们自己给自己写的答案」**。
 
 ---
 
