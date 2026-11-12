@@ -92,7 +92,10 @@ class DesktopSdrSession:
         self._window_ref = window
         self._resolved: Any = None
         if local_manager is None:
-            from .sdr_backend import SDRBackendManager
+            # 后端模块只有一份，在 AI 内核里（desktop/ 下没有 sdr_backend）。
+            # 本模块从 mbdsdr_ai 迁出后沿用了原来的 ``from .sdr_backend``，
+            # 在包上下文下会被解析成不存在的 desktop.sdr_backend。
+            from mbdsdr_ai.sdr_backend import SDRBackendManager
             local_manager = SDRBackendManager()
         self._local = local_manager
         #: 只有存在事件循环（桌面）时才建桥：没有它说明是 CLI/单测，
