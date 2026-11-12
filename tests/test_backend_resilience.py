@@ -663,6 +663,11 @@ class TestDeviceExclusivityAndHotplug:
         busy = error_handler.classify_connect_failure(
             OSError("usb_open error -3"), "usb_open error -3")
         assert isinstance(busy, error_handler.DeviceBusyError)
+        # 「设备不在」必须落到另一个分支：否则「任何错误都返回 Busy」也会绿
+        missing = error_handler.classify_connect_failure(
+            OSError("No devices found"), "No devices found")
+        assert isinstance(missing, error_handler.USBDisconnectedError)
+        assert not isinstance(missing, error_handler.DeviceBusyError)
 
     def test_probe_occupant_is_honest_when_it_cannot_see(self):
         unknown = error_handler.probe_occupant()
