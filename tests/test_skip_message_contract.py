@@ -44,6 +44,7 @@ _SITES = [
     ("tests/test_satdump_live_envelope.py",
      "test_missing_satdump_is_failure_not_success"),
     ("tests/test_satellite_tracker.py", "test_sgp4_crosscheck_skyfield"),
+    ("tests/test_tool_param_fuzz_guard.py", "test_fuzz_memory_cap_aborts_case"),
 ]
 
 
