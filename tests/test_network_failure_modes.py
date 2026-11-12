@@ -242,27 +242,51 @@ class TestRtlTcpFailureModes:
             c1.close()
 
     def test_slow_drip_handshake_cannot_hold_connect_forever(self, monkeypatch):
-        """慢滴握手：每字节都小于超时，但总时长必须被硬上限截断。"""
+        """慢滴握手：对端每 0.25s 一字节且永不主动停，connect 仍须在预算内失败。
+
+        对端由本测试通过 ``stop`` 控制，没有「发完 12 字节就结束」这种自然
+        终点，所以 connect 在预算内返回只可能来自握手总时限（逐字节 recv 各自
+        0.5s 超时，慢滴每 0.25s 一字节恰好绕过它）。实现若退化成只靠逐字节
+        超时，这里会在预算处失败并报出对端已发字节数，不会挂死。
+        """
         monkeypatch.setattr(RtlTcpClient, "CONNECT_TIMEOUT", 0.5)
+        result = {}
+        sent = {"n": 0}
+        budget = 2.0
 
         def handler(conn, idx, stop):
-            for b in _RTL_HEADER:
-                if stop.is_set():
+            while not stop.is_set():          # 与测试等待赛跑，自己不会结束
+                try:
+                    _send(conn, bytes([_RTL_HEADER[sent["n"] % len(_RTL_HEADER)]]))
+                except OSError:
                     return
-                _send(conn, bytes([b]))
-                time.sleep(0.25)   # < socket 超时，单次 recv 永远不会超时
+                sent["n"] += 1
+                time.sleep(0.25)              # < 0.5s 单次 recv 超时
 
-        with _server(handler) as (port, _stop, _conns):
+        with _server(handler) as (port, stop, _conns):
             c = RtlTcpClient("127.0.0.1", port, idle_timeout=0.4)
+
+            def run():
+                try:
+                    result["ok"] = c.connect()
+                except Exception as e:          # noqa: BLE001 - 记录现象
+                    result["error"] = e
+
+            th = threading.Thread(target=run, daemon=True)
             t0 = time.perf_counter()
-            ok = c.connect()
+            th.start()
+            th.join(budget)
             elapsed = time.perf_counter() - t0
-            assert elapsed < 1.5, (
-                f"慢滴握手 12 字节就要 {12 * 0.25:.1f}s，实测 {elapsed:.2f}s，"
-                "握手没有总时限")
-            assert ok is False
+            finished = not th.is_alive()
+            stop.set()
+            assert finished, (
+                f"connect 在预算 {budget:.1f}s 内没有返回（对端已发 {sent['n']}/12 "
+                f"字节，耗时 {elapsed:.1f}s）：握手缺少总时限，被慢滴对端拖住")
+            assert result.get("ok") is False, "慢滴握手不该连成功"
             assert c.error_category in (
                 link_state.CATEGORY_TIMEOUT, link_state.CATEGORY_HANDSHAKE)
+            assert 0 < sent["n"] < 12, (
+                f"握手应在读满 12 字节前被总时限截断，对端实际发出 {sent['n']} 字节")
             c.close()
 
 
