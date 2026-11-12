@@ -186,5 +186,3 @@ def test_repeated_files_flag_commits_every_declared_file(tmp_path):
     names = _git(repo, "show", "--pretty=", "--name-only", "HEAD").stdout.split()
     assert sorted(names) == ["a.txt", "b.txt"], out
 
-
-# 计时探针：本次不提交，只用来在真实钩子内量 ④ 的秒数。

@@ -165,3 +165,107 @@ def test_staged_mode_passes_with_row_and_ignores_unstaged_claims(tmp_path, monke
     # 同一份 claim 未进暂存区 → 本模式不报（cheap：只为这次要提交的文件算）
     monkeypatch.setattr(cc, "staged_paths", lambda root=None: ["docs/other.md"])
     assert cc.main(argv) == 0
+
+
+OWNER = "残留收口线/6ae85f56"
+
+
+def _release_fixture(tmp_path: Path, doc_text: str, released_ago: float,
+                     owner: str = OWNER):
+    """造一份「已释放」台账：history 里有 released_at，没有活跃占位文件。"""
+    import json
+    import time
+
+    doc = tmp_path / "COORD.md"
+    doc.write_text(doc_text, encoding="utf-8")
+    now = time.time()
+    reg = tmp_path / "claims.json"
+    reg.write_text(json.dumps({"version": 1, "claims": {
+        "scripts/safe_commit.py": {
+            "path": "scripts/safe_commit.py",
+            "current": None,
+            "history": [{
+                "owner": owner,
+                "acquired_at": now - 600,
+                "released_at": now - released_ago,
+                "last_heartbeat_at": now - released_ago,
+            }],
+        },
+    }}, ensure_ascii=False), encoding="utf-8")
+    markers = tmp_path / "markers"
+    markers.mkdir()
+    return ["--doc", str(doc), "--registry", str(reg), "--markers", str(markers), "--staged"]
+
+
+def test_release_then_commit_without_row_is_blocked(tmp_path, monkeypatch, capsys):
+    """反证①：持有 → 释放 → 立刻提交，缺行必须被拦。
+
+    ④ 原来只看活跃 claim，提交前一秒 release 就能让行要求一起消失；这条锁窗口。
+    """
+    monkeypatch.setenv(cc.IDENTITY_ENV, OWNER)
+    monkeypatch.setattr(
+        cc, "staged_paths", lambda root=None: ["scripts/safe_commit.py"])
+    assert cc.main(_release_fixture(tmp_path, _doc(), released_ago=30)) == 3
+    out = capsys.readouterr().out
+    assert "缺 §6.1 行 1 条" in out, out
+    assert "最近 60 分钟内释放过" in out, out
+    assert "release 不消行" in out, out
+
+
+def test_release_older_than_window_does_not_block(tmp_path, monkeypatch, capsys):
+    """反证②：60 分钟前就已释放的旧 claim，不许拦住正常提交。"""
+    monkeypatch.setenv(cc.IDENTITY_ENV, OWNER)
+    monkeypatch.setattr(
+        cc, "staged_paths", lambda root=None: ["scripts/safe_commit.py"])
+    argv = _release_fixture(tmp_path, _doc(), released_ago=cc.RELEASE_WINDOW_S + 600)
+    assert cc.main(argv) == 0
+    out = capsys.readouterr().out
+    assert "缺 §6.1 行 0 条" in out, out
+    assert "最近 60 分钟内释放过" not in out, out
+
+
+def test_recent_release_with_row_passes(tmp_path, monkeypatch, capsys):
+    """正向：窗口内释放但行已在 → 0（否则上面两条可能只是恒红）。"""
+    doc_text = _doc(
+        "| `scripts/safe_commit.py` | 残留收口线/6ae85f56 | 2026-11-13 06:00 | 随本笔 |")
+    monkeypatch.setenv(cc.IDENTITY_ENV, OWNER)
+    monkeypatch.setattr(
+        cc, "staged_paths", lambda root=None: ["scripts/safe_commit.py"])
+    assert cc.main(_release_fixture(tmp_path, doc_text, released_ago=30)) == 0
+
+
+def test_release_by_other_owner_does_not_block(tmp_path, monkeypatch, capsys):
+    """窗口只对**同一 owner** 生效：别线释放过的文件不拦我这一笔。"""
+    monkeypatch.setenv(cc.IDENTITY_ENV, OWNER)
+    monkeypatch.setattr(
+        cc, "staged_paths", lambda root=None: ["scripts/safe_commit.py"])
+    argv = _release_fixture(tmp_path, _doc(), released_ago=30, owner="他线")
+    assert cc.main(argv) == 0
+    out = capsys.readouterr().out
+    assert "最近 60 分钟内被同一 owner 释放的暂存文件" not in out, out
+
+
+def test_entry_extraction_never_mistakes_body_text_for_a_key(tmp_path):
+    """快速取条（不解析整本 1MB）必须只认**键**：别人的 claim_reason 里引用了
+    同一个路径字符串时，不能拿那段文字当这条记录。"""
+    import json
+
+    text = json.dumps({"version": 1, "claims": {
+        "scripts/a.py": {
+            "path": "scripts/a.py",
+            "current": {"owner": "他线", "claim_reason": '顺带看了 "scripts/b.py": {"x": 1}'},
+            "history": [{"owner": "他线", "released_at": 1.0}],
+        },
+        "scripts/b.py": {
+            "path": "scripts/b.py",
+            "current": None,
+            "history": [{"owner": OWNER, "released_at": 2.0}],
+        },
+    }}, ensure_ascii=False)
+    reg = tmp_path / "claims.json"
+    reg.write_text(text, encoding="utf-8")
+
+    found = cc.recently_released_claims(reg, ["scripts/b.py"], OWNER, now=3.0, window_s=60)
+    assert found == [("scripts/b.py", OWNER, 2.0)], found
+    miss = cc.recently_released_claims(reg, ["scripts/b.py"], "别的线", now=3.0, window_s=60)
+    assert miss == [], miss

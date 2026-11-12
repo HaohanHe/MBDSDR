@@ -15,9 +15,11 @@
    加 `# pragma: allowlist secret` 逐行豁免，不支持目录级豁免。
 ④ `scripts/check_claim_coordination.py --staged`：暂存文件里仍有活跃 claim 的，
    必须在 `docs/COORDINATION.md` §6.1 已有行（逐条，或对只读批量目录的目录级行）。
-   这条以前只能事后扫全量，等发现时已经提交了。预算 `COORD_BUDGET_S`：超过只告警
-   不阻塞（说明原因），因为它是登记一致性检查，不是安全闸；读不到台账也降级为告警
-   ——「文件是否被他人占用」由 ② 的 claim_gate fail-closed 保底。
+   这条以前只能事后扫全量，等发现时已经提交了。**最近 60 分钟内被同一 owner
+   持有过又释放的暂存文件同样要行**——否则「先 release 再提交」能在提交前一刻
+   把行要求一起释放掉。预算 `COORD_BUDGET_S`：超过只告警不阻塞（说明原因），
+   因为它是登记一致性检查，不是安全闸；读不到台账也降级为告警——「文件是否被
+   他人占用」由 ② 的 claim_gate fail-closed 保底。
 
 安装：python scripts/install_git_hooks.py
 绕过：git commit --no-verify（会由 post-commit 写入 bypass 日志）

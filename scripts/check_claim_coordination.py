@@ -36,12 +36,22 @@
 * 同一模式下的活跃 claim 若出现**第二个 owner**，目录级行只写第一个 → 报，
   必须再补一行（或多行）直到每个 owner 都有覆盖。
 
+「先 release 再提交」窗口（2026-11-13）
+---------------------------------------
+
+④ 原来只看**活跃 claim**，于是提交前一刻 `release` 就能把行要求一起释放掉——
+把「提交时必须已有 §6.1 行」偷换成「提交时只要没有活跃 claim」。现在补一条
+窗口：暂存文件若在最近 ``RELEASE_WINDOW_S``（60 分钟）内被**同一 owner**持有过
+并释放，仍要求行存在。判据只读台账 ``claims[key].history[].released_at`` 与
+``owner``，不新增人工手续；超过窗口的旧释放不影响正常提交。
+
 退出码：0 = 两个方向都无发现；1 = 用法/解析错误；3 = 有发现（同 audit-stale）。
 """
 from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import subprocess
 import sys
@@ -62,6 +72,12 @@ EXIT_FINDINGS = 3
 TICK_RE = re.compile(r"`([^`]+)`")
 #: 显式历史/已释放标记：只有写明的旧行才允许「文档有、台账无」。
 RELEASED_MARKERS = ("已释放", "（历史）", "(历史)")
+#: 「先 release 再提交」窗口（秒）：同一 owner 在窗口内释放过的暂存文件，仍要行。
+RELEASE_WINDOW_S = 3600.0
+#: 提交者身份环境变量（与 claim_gate 同口径）。
+IDENTITY_ENV = "MBDSDR_CLAIM_OWNER"
+#: 只解析台账里单条记录用的解码器（见 `_entry_for`）。
+_JSON_DECODER = json.JSONDecoder()
 #: 代码根 + docs 顶层共享文档必须逐条；其余 docs/<子目录> 允许目录级。
 STRICT_PREFIXES = ("desktop/", "mbdsdr_ai/", "scripts/", "tools/", "tests/",
                    "web/", "cpp/", "mobile/", "deploy/", "service/")
@@ -211,6 +227,101 @@ def active_claims_for_paths(
     return out
 
 
+def resolve_owner(root: Path = ROOT) -> str:
+    """提交者身份：环境变量优先，其次 ``git config mbdsdr.owner``（与 claim_gate 同口径）。"""
+    raw = (os.environ.get(IDENTITY_ENV) or "").strip()
+    if raw:
+        return raw
+    proc = subprocess.run(
+        ["git", "config", "--get", "mbdsdr.owner"],
+        cwd=str(root), capture_output=True, text=True,
+        encoding="utf-8", errors="replace")
+    return proc.stdout.strip() if proc.returncode == 0 else ""
+
+
+def _entry_for(raw: bytes, path: str) -> Optional[Dict[str, Any]]:
+    """从台账原文里取出 ``"<path>": {…}`` 这一条，不解析整本。
+
+    整本 ``json.loads``（1 MB）实测中位 40ms，直接顶破钩子 0.30s 预算；这里用
+    mmap + ``bytes.find`` 只切出目标条目再 ``raw_decode``（实测 0.3ms 量级）。
+
+    台账由 ``file_claim`` 以 ``json.dumps`` 写出，``claims`` 的键就是规范化路径。
+    同一段文字也可能出现在别人的 ``claim_reason`` 里，所以要求冒号后紧跟 ``{``，
+    并用条目里的 ``path`` 字段再核对一次。
+    """
+    needle = f'"{path}":'.encode("utf-8")
+    start = 0
+    while True:
+        idx = raw.find(needle, start)
+        if idx < 0:
+            return None
+        start = idx + 1
+        pos = idx + len(needle)
+        while pos < len(raw) and raw[pos] in b" \t\r\n":
+            pos += 1
+        if raw[pos:pos + 1] != b"{":
+            continue
+        try:
+            entry, _end = _JSON_DECODER.raw_decode(
+                raw[pos:pos + 65536].decode("utf-8", "ignore"))
+        except json.JSONDecodeError:  # 条目异常大：宁可不认，也不整本解析
+            continue
+        entry_path = entry.get("path") if isinstance(entry, dict) else None
+        if isinstance(entry_path, str) and _norm(entry_path) == path:
+            return entry
+
+
+def _read_registry_bytes(registry_path: Path) -> Optional[bytes]:
+    """台账原文（字节）；文件不存在 → None。读 1 MB 实测 0.4ms。"""
+    try:
+        return registry_path.read_bytes()
+    except FileNotFoundError:
+        return None
+
+
+def recently_released_claims(
+    registry_path: Path,
+    paths: Iterable[str],
+    owner: str = "",
+    now: Optional[float] = None,
+    window_s: float = RELEASE_WINDOW_S,
+) -> List[Tuple[str, str, float]]:
+    """最近 ``window_s`` 内被释放的暂存路径：[(规范化路径, 释放者 owner, 释放时间)]。
+
+    只看 ``claims[key].history[].released_at``：释放不等于没发生过——「先 release
+    再提交」若不加这条窗口，④ 就会从「提交时必须已有 §6.1 行」退化成「提交时只要
+    没有活跃 claim」。
+
+    ``owner`` 为空（提交身份未声明）时按**任一 owner**匹配（fail closed）：
+    否则「release 完不声明身份」就成了绕过窗口的开关。
+    """
+    now = time.time() if now is None else now
+    raw = _read_registry_bytes(Path(registry_path))
+    if raw is None:
+        return []  # 没有台账 = 没有持有过
+    out: List[Tuple[str, str, float]] = []
+    for path in {_norm(p) for p in paths}:
+        entry = _entry_for(raw, path)
+        if entry is None:
+            continue
+        latest: Optional[Tuple[str, float]] = None
+        for item in entry.get("history") or []:
+            if not isinstance(item, dict):
+                continue
+            released = item.get("released_at")
+            if not isinstance(released, (int, float)):
+                continue  # 仍在持有：由活跃 claim 分支负责
+            held = str(item.get("owner") or "")
+            if owner and held != owner:
+                continue
+            if latest is None or float(released) > latest[1]:
+                latest = (held, float(released))
+        if latest is not None and now - latest[1] <= window_s:
+            out.append((path, latest[0], latest[1]))
+    out.sort()
+    return out
+
+
 def _is_pattern(path: str) -> bool:
     return path.endswith("/**")
 
@@ -352,18 +463,37 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     try:
         text = Path(args.doc).read_text(encoding="utf-8")
         if args.staged:
-            # 只为「这次要提交的文件」算：按路径直接定位占位文件，不 glob 全量，
-            # 也不读 claims.json —— 每一块都在 0.3s 预算里。
+            # 只为「这次要提交的文件」算：按路径直接定位占位文件，不 glob 全量。
+            root = Path(args.doc).resolve().parents[1]
             rows = parse_coordination_rows(text)
-            staged = set(staged_paths(Path(args.doc).resolve().parents[1]))
+            staged = set(staged_paths(root))
             active = active_claims_for_paths(
                 staged, marker_dir=Path(args.markers) if args.markers != str(fc.MARKER_DIR) else None)
             pairs = [(p, o) for p, o in active if p in staged]
             missing, _pats = _uncovered(pairs, rows)
+            # 「先 release 再提交」窗口：释放不等于没发生过，窗口内仍要 §6.1 行。
+            # 只对「没有活跃 claim」的暂存路径查，活跃的那批已由上面判过。
+            # 协调文档本身豁免：它是登记面而不是被登记对象，否则「提交后删行」
+            # 这一步永远要先给自己写一行、删行时又欠一行。
+            rest = staged - {p for p, _o in pairs} - {_norm(os.path.relpath(args.doc, root))}
+            recent: List[Tuple[str, str, float]] = []
+            owner = resolve_owner(root) if rest else ""
+            if rest:
+                recent = recently_released_claims(
+                    Path(args.registry), rest, owner)
+            recent_missing, _ = _uncovered([(p, o) for p, o, _t in recent], rows)
+            if recent_missing:
+                note = "" if owner else "；提交身份未声明，按任一 owner 匹配"
+                missing = missing + [
+                    f"{line}（最近 {RELEASE_WINDOW_S / 60:.0f} 分钟内释放过，release 不消行{note}）"
+                    for line in recent_missing
+                ]
             result: Dict[str, Any] = {
                 "ledger_only": missing, "doc_only": [],
                 "rows": len(rows), "active": len(active),
                 "staged": len(staged), "staged_claims": len(pairs),
+                "staged_released": len(recent),
+                "staged_released_missing": len(recent_missing),
             }
         else:
             active = active_claims(marker_dir=Path(args.markers))
@@ -378,6 +508,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     elif args.staged:
         print(f"暂存文件 {result['staged']} 个，其中仍有活跃 claim "
               f"{result['staged_claims']} 条；缺 §6.1 行 {len(result['ledger_only'])} 条")
+        if result.get("staged_released"):
+            print(f"  最近 {RELEASE_WINDOW_S / 60:.0f} 分钟内被同一 owner 释放的暂存文件 "
+                  f"{result['staged_released']} 个（release 不消行），其中缺行 "
+                  f"{result['staged_released_missing']} 个")
         for line in result["ledger_only"]:
             print(f"  - {line}")
     else:
@@ -391,7 +525,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
     if not args.json:
         print("[规矩] 活跃 claim 在提交时就必须已有 §6.1 行：pre-commit ④ 用 --staged "
-              "逐文件拦（0.3s 预算），不靠事后扫全量。")
+              "逐文件拦（0.3s 预算），不靠事后扫全量；最近 60 分钟内被同一 owner "
+              "释放过的暂存文件同样要行——先 release 再提交不算消行。")
 
     findings = len(result["ledger_only"]) + len(result["doc_only"])
     return EXIT_FINDINGS if findings else EXIT_OK
