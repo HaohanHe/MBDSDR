@@ -587,7 +587,7 @@ SHA256，再**真跑一次** `python scripts/ui_narrow_breakdown.py --json`（�
    子集，6/6 通过（全量 51/51 由频谱线另行实测）。注意：单独 `-k` 选到
    `test_record_dir_missing_target_reports_actionable_error` 时会因没有
    QApplication 而 Qt abort（`0xC0000409`）——已给该用例补 `qapp` fixture，
-   子集命令现可独立复现全绿（2026-11-13 于 `97fc5fc8` 复跑：`python -m pytest tests/test_settings_schema.py -k "record_dir or corrupt or write_failure" -q` → 6 passed, 130 deselected），不依赖全量顺序。
+   子集命令现可独立复现全绿（历史快照，非当前树：2026-11-13 于 `97fc5fc8` 复跑：`python -m pytest tests/test_settings_schema.py -k "record_dir or corrupt or write_failure" -q` → 6 passed, 130 deselected），不依赖全量顺序。
 2. 4 个扩展项（cobyqa/pyprima、deprecation/_ccallback/_uarray、numpy._core.multiarray、
    numpy.fft/linalg）只在源码与 TOC 层核验，未纳入冻结版启动自检；要覆盖需把它们
    加进 `_RISKY_IMPORTS` 再重建。

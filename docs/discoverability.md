@@ -199,7 +199,7 @@ tooltip 必须 ≥12 字、且不得与同一函数内该控件的可见文字�
 - 快捷键面板：41 条每条恰好出现一次，显示键位逐字等于登记表，无键项必须有原因；
 - 三步上手的键位仍登记在 `shortcuts.py`，且第一步明确"不伪造"；
 - Qt 冒烟：帮助/快捷键面板非模态、构造时不显示、搜索/分类过滤、空态切换正确；
-- `test_shortcuts_guard.py` 全绿（含原先失败的 2 条；2026-11-13 于 `97fc5fc8` 复跑：`python -m pytest tests/test_shortcuts_guard.py -q` → 11 passed）。
+- `test_shortcuts_guard.py` 全绿（含原先失败的 2 条；历史快照，非当前树：2026-11-13 于 `97fc5fc8` 复跑：`python -m pytest tests/test_shortcuts_guard.py -q` → 11 passed）。
 
 ## 八、仍未做 / 需要别的线
 

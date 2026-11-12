@@ -116,8 +116,8 @@ FEC 链回收，非本机自采；1 块边缘发散未深追（1/35178，两独�
   提取执行，漏锁/假就绪复现 + 对照组不变，3/3 + 3/3 OK
   （`output/_probe_busy_lock_reverse.py` / `_probe_status_reverse.py`）。
 - **验证**：12 文件巷道 **287 passed / 0 failed**
-  （`output/_legacy_red_lane3.log`）；身份门 3 全绿；污染+受害+behavior
-  三文件组合 76 全绿（`_pollution_fix_proof.log`）。
+  （`output/_legacy_red_lane3.log`）；身份门 3 全绿（历史记录：2026-11-08）；污染+受害+behavior
+  三文件组合 76 全绿（历史记录：2026-11-08，`_pollution_fix_proof.log`）。
 - **顺手核查销账**：队列另账 ② 野码（ba0e8dbe）与 ① 热插拔污染
   （171dd97c）均已在案闭环；队列 #10① 合成链 woven 切分 + 默认翻转
   实际已由 c05b565b 落地（build_cadu `payload[b::4]`、decode_cadu
@@ -205,7 +205,7 @@ not_verified：真机 SDR/GNSS 不在位（首开硬件路径、GNSS×地点面�
   `20 failed / 5553 passed / 4 skipped / 5 xfailed`，exit 1，
   `counts_trustworthy=True`，汇总行完整。日志
   `output/evidence/bundle_desktop/test_suites/desktop.log`。
-  至此 `tests/` 全量不再挂着「没有完整跑过」，但**不是全绿**。
+  至此 `tests/` 全量不再挂着「没有完整跑过」（历史记录：2026-11-09），但**不是全绿**。
 - 20 条 nodeid 从 `-rf` 汇总的 `FAILED ...` 行取，放进一个无并发进程复跑
   → **18 failed / 2 passed**。上午「15 passed = 顺序依赖假红」作废：
   那是用日志点号序号映射 collect 清单得到的错误 nodeid，跑的不是真失败
@@ -271,7 +271,7 @@ not_verified：真机 SDR/GNSS 不在位（首开硬件路径、GNSS×地点面�
   根因（哪个用例留下什么全局状态）尚未定位，登记在
   `docs/known-red-register.md` K05，**不许按「假红」略过**。
 - **桌面全量仍是 not_verified**：本轮没有 55 分钟完整跑的记录，
-  不宣称 `tests/` 全绿。`--with-tests` 现在具备跑完的条件
+  不宣称 `tests/` 全绿（历史记录：2026-11-09 中午）。`--with-tests` 现在具备跑完的条件
   （慢机器可加 `--desktop-timeout 5400`）。
 - 验证：契约 16 passed；kernel 组 PASS；15 节点干净复跑 15 passed。
 
@@ -459,7 +459,7 @@ astronomicalDuskJD)`，时刻由 `getRTSTime(core, altitude)` 按**真实太阳�
 - **验证**：13 文件 **226 passed / 0 failed / 7 deselected**；7 条是用干净
   `git worktree` 在 HEAD 基线复跑确认的**存量红**（ui_flow_guards 2 /
   sky_readouts 3 / sky_full_catalog 2），非本轮引入，按纪律未碰。
-  `test_ui_layout_locks.py` 74 条全绿。新增 `test_first_open_welcome.py`
+  `test_ui_layout_locks.py` 74 条全绿（历史记录：2026-11-08 傍晚）。新增 `test_first_open_welcome.py`
   6 条（太阳 -18° 真值对拍、换站点证明不是写死钟点、示例不写配置、
   GNSS 覆盖、回实时）。新测试 fixture 收尾复位全局时间引擎，消掉跨文件污染。
 - **证据**（仓库外 `output/evidence/`，零个人信息）：
@@ -493,7 +493,7 @@ No supported devices found），真机首开与 GNSS+SDR 同开复验继续挂�
 - **队列①存量挂起销账**：独立复现脚本连建 4 窗口 18s 跑通 ⇒ 产品
   链路正常，是 pytest 夹具每例新建窗口的资源累积（320s 长跑仍卡在
   第 8 例）。`test_user_layouts.py` fixture 改 module scope，
-  **10 passed / 8.32s**，随机顺序 7.78s 全绿。
+  **10 passed / 8.32s**，随机顺序 7.78s 全绿（历史记录：2026-11-08 下午）。
 
 验证：18 文件 **279 passed / 0 failed**；新增两个契约文件；4 张
 `adsb_empty_*` 基线按「仅颜色漂移」受控重定标，四档几何全部不变，
@@ -815,7 +815,7 @@ No supported devices found），GNSS+SDR 同开复验没做成；离线那次
   （`C:/QtLocal`），只是没进 PATH。`cmake --build` **1374 个源文件全过、0 错误、
   164 个可执行文件**（含 `mbdsdr.exe`/`mbdsdr_mcp.exe`）。修了 C++ 夹具与两条
   陈旧断言：真录两帧的 PIN 是 RS 误纠产物，补伴随式验证后盲解不可纠，改为钉
-  「不许假成功」。`test_lrpt_cpp` 8/8、`test_lrpt_real_cross` 5/5 全绿。
+  「不许假成功」。`test_lrpt_cpp` 8/8、`test_lrpt_real_cross` 5/5 全绿（历史记录：2026-11-07）。
 - **`b7ece821`** 初始频率被拒时回退 98.5 MHz 并留痕（不再出现"未全部生效"）。
 - 剩余：① 频谱头部次要读数在窄窗内让位（面板级，非窗口级）；② C++ 侧擦除
   路径（Python 有，2e+f≤32）——目前 C++ 只能诚实拒收真录两帧；③ 日志偶现
@@ -911,7 +911,7 @@ No supported devices found），GNSS+SDR 同开复验没做成；离线那次
   （_rtlsdr_pollution_lane.log）。
   ~~② test_error_catalog_guard::test_no_wild_codes~~ **已销（ba0e8dbe）**：
   recorder already_exists + web_bridge_host 八码按真实语境登记三件套，
-  守卫巷道 41 passed 首次全绿（_wildcodes_lane.log）。
+  守卫巷道 41 passed 首次全绿（历史记录：2026-11-07，_wildcodes_lane.log）。
   ⚠ TLE 过期门仍属产品口径待决，别擅自上硬门。
 
 ### 我这边（2026-11-06 深夜 追加：#19 配置/增益/布局 + 过境链两批）
@@ -968,7 +968,7 @@ No supported devices found），GNSS+SDR 同开复验没做成；离线那次
 
 - **`3594087f` 真机截图复核后收掉重复入口**：`15add04c` 接 LRPT 时同时
   挂了「选择录制 IQ 解码」和独立的「从录制 IQ 解码 (Meteor LRPT)」两个
-  几乎同名按钮 —— 测试全绿但真机截图里用户不知道点哪个。删掉独立按钮，
+  几乎同名按钮 —— 测试全绿（历史记录：2026-11-06）但真机截图里用户不知道点哪个。删掉独立按钮，
   唯一入口是随模式变语义的 start_btn，测试加 `not hasattr(p,"iq_btn")` 钉死。
   **方法教训：测试绿不等于产品对，改动 UI 后必须真机渲染肉眼看一遍。**
   取证图（仓库外 `D:/mbdsdr/output/evidence/`，零个人信息不入库）：
@@ -1251,7 +1251,7 @@ No supported devices found），GNSS+SDR 同开复验没做成；离线那次
   4. 云台跟随替身欠账销账（`5770ba5`）——97683ab 多普勒改动给跟踪循环加
      `downlink_freq_hz()` 回退，替身 SimpleNamespace 未同步致两红；
   5. 瀑布顶缘频段彩带（`9bcafec`）——bandplan.json schema「谱面+瀑布色带」
-     瀑布半边兑现：4px 顶缘条复用既有几何/色/开关机制，3 新守卫全绿；
+     瀑布半边兑现：4px 顶缘条复用既有几何/色/开关机制，3 新守卫全绿（历史记录：2026-11-03）；
   6. 红账归因（2026-11-04）：`test_identity_redline` 红=本文件未提交稿的
      提醒文字里出现了行踪类措辞字面量（即扫描器自己的规则词），被自家
      扫描器自指命中（HEAD 干净，`git grep` 无命中）；本条已改写为不引字
@@ -1474,7 +1474,7 @@ No supported devices found），GNSS+SDR 同开复验没做成；离线那次
 
 0. **[我，续]** 队列第 0 条（2026-11-08 下午复核）：
    ① **存量挂起已修复销账**：`test_user_layouts.py` fixture 改 module — `692fb3ce` — `tests/test_user_layouts.py:33` — `scope="module"`
-   scope（共用窗口），整文件 10 passed / 8.32s，随机顺序 7.78s 全绿；
+   scope（共用窗口），整文件 10 passed / 8.32s，随机顺序 7.78s 全绿（历史记录：2026-11-08 下午复核）；
    根因是每例新建 MainWindow 的 Qt 对象累积，非产品代码。
    ② **真机复验仍待设备**：本轮 COM4 与 RTL2832U 都不在位（只有蓝牙
    COM6/7，`rtl_test -t` No supported devices found），等插回再跑
@@ -1891,6 +1891,19 @@ No supported devices found），GNSS+SDR 同开复验没做成；离线那次
 | `docs/audit_r2/**` | A11文档证据线/6ae85f56（A11 文档证据修复；目录级常驻登记） | 2026-11-13 06:54 | 随本笔 |
 | `docs/COORDINATION.md` | A11文档证据线/6ae85f56（A11 文档证据修复；本笔提交后释放） | 2026-11-13 06:54 | 本笔 |
 | `docs/learn/rewrite-sha-map.md` | A11文档证据线/6ae85f56（新映射文档；本笔提交后释放） | 2026-11-13 06:54 | 本笔 |
+| `docs/PRD.md` | A11文档证据线/6ae85f56（8 条绿声明改历史快照口径） | 2026-11-13 07:15 | 本笔 |
+| `docs/known-red-register.md` | A11文档证据线/6ae85f56（3 条：补日期/改销账判据/补复核绑定） | 2026-11-13 07:15 | 本笔 |
+| `docs/reference-mechanisms.md` | A11文档证据线/6ae85f56（2 条：标历史快照/补登记日期） | 2026-11-13 07:15 | 本笔 |
+| `docs/推进报告-本轮排错.md` | A11文档证据线/6ae85f56（2 条：报告日改回 2026-10-27） | 2026-11-13 07:15 | 本笔 |
+| `docs/copy-audit.md` | A11文档证据线/6ae85f56（1 条：标历史快照） | 2026-11-13 07:15 | 本笔 |
+| `docs/data-inventory.md` | A11文档证据线/6ae85f56（1 条：补首跑提交与日期） | 2026-11-13 07:15 | 本笔 |
+| `docs/discoverability.md` | A11文档证据线/6ae85f56（1 条：标历史快照） | 2026-11-13 07:15 | 本笔 |
+| `docs/error-code-visibility.md` | A11文档证据线/6ae85f56（1 条：标历史快照） | 2026-11-13 07:15 | 本笔 |
+| `docs/hardcoded-parameters.md` | A11文档证据线/6ae85f56（1 条：补 §10-1 实测记录日期与提交） | 2026-11-13 07:16 | 本笔 |
+| `docs/packaging.md` | A11文档证据线/6ae85f56（1 条：标历史快照） | 2026-11-13 07:15 | 本笔 |
+| `docs/redundancy-register.md` | A11文档证据线/6ae85f56（1 条：补修复提交日期） | 2026-11-13 07:15 | 本笔 |
+| `docs/star-catalog.md` | A11文档证据线/6ae85f56（1 条：标历史快照） | 2026-11-13 07:16 | 本笔 |
+| `docs/COORDINATION.md` | A11文档证据线/6ae85f56（A11 最后 11 条补历史日期 + 本笔 §6.1 登记） | 2026-11-13 07:15 | 本笔 |
 | `docs/axioms-accepted.json` | 公理棘轮线（目的未声明） | 2026-11-13 03:40 | 未声明 |
 | `docs/axioms-baseline.json` | 公理棘轮线（目的未声明） | 2026-11-13 02:45 | 未声明 |
 | `docs/axioms.md` | 公理棘轮线（目的未声明） | 2026-11-13 05:13 | 未声明 |
@@ -1922,6 +1935,8 @@ No supported devices found），GNSS+SDR 同开复验没做成；离线那次
 | `tests/test_module_panel_truthful_controls.py` | 设备会话锁线（拒绝原因不复写 tooltip + 重连清旧 tooltip） | 2026-11-13 07:11 | 本笔 |
 | `docs/pending-patches/2026-11-13-device-session-lock-not-implemented.md` | 设备会话锁线（§五写门/§5.6 tooltip 规矩/§六 main_window 符号清单/§七接管审计） | 2026-11-13 07:11 | 本笔 |
 | `docs/COORDINATION.md` | 设备会话锁线（本笔文件的 §6.1 登记行） | 2026-11-13 07:11 | 本笔 |
+| `desktop/control_panel.py` | 设备会话锁线（会话占用态置灰：采样率/增益/PPM/带宽等六个连接参数控件禁用，tooltip 写清「断开设备」怎么解除；提交后释放） | 2026-11-13 07:27 | 在途 |
+| `desktop/main_window.py` | 设备会话锁线（§六：四槽走同一写门、删 `_gain_intent_db`/`_last_ppm_applied` 两个第二状态、连接载荷作会话起点；提交后释放） | 2026-11-13 07:28 | 在途 |
 | `scripts/audit_evidence.py` | 守卫账本线（目的未声明） | 2026-11-13 05:31 | 未声明 |
 | `docs/evidence-standard.md` | 守卫账本线（目的未声明） | 2026-11-13 06:23 | 未声明 |
 | `desktop/mbdsdr.spec` | 守卫账本线（目的未声明） | 2026-11-13 06:23 | 未声明 |
@@ -4035,9 +4050,9 @@ HEAD `2f83f482` 实测：白名单 103 行，`test_waivers_are_not_stale` 红 **
   缺 `set_offset_tuning`、`listGains` 无 `hasattr` 探测，改它会脏掉
   `f9c3bb92` 的全量数字）、K11（R4 RMS 判据跨时间窗擦线，未改阈值）、
   K12（门限边缘掠射过境偶发漏检，窗口依赖）。
-- **诚实边界**：`f9c3bb92` 的 `5573 passed / 0 failed` 是**本轮改代码之前**
+- **诚实边界（历史记录：2026-11-09）**：`f9c3bb92` 的 `5573 passed / 0 failed` 是**本轮改代码之前**
   的权威数字；本轮动过 `baseband_io.py` / `agent.py` / `orbit.py`，
-  全量**未重跑**，不许拿那个数字说当前代码全绿。真机只验了 30 秒级链路，
+  全量**未重跑**（历史记录：2026-11-09），不许拿那个数字说当前代码全绿。真机只验了 30 秒级链路，
   长时间稳定性、发射射频、C++ 侧本地编译仍 `not_verified`。
 
 ---
@@ -4131,9 +4146,9 @@ dark 卡片描边 1.30（<1.5）。选中态墨色改为按实际对比度挑
 已同步并加 `test_schema_default_matches_themes` 钉住。
 
 **验证**：布局锁 74 passed（含 12 张基线）；UI 全量批次 269 passed；
-AMR 相关回归 0 failed；设计门禁 21 passed。
+AMR 相关回归 0 failed；设计门禁 21 passed（历史记录：2026-11-09）。
 **诚实边界**：①同一批次跑两次，第一次 268 passed + 1 failed、第二次 269
-全绿，偶发那条未定位；②推送失败（GitHub 443 连不上），三笔提交只在本地
+全绿（历史记录：2026-11-09），偶发那条未定位；②推送失败（GitHub 443 连不上），三笔提交只在本地
 （`cabba5cc` / `2635a98c` / `d509a4db`）；③离线城市表仍未生成
 （Overpass 超时、GitHub raw 也 reset）；④kernel 全量与真机链路本轮未重跑。
 
@@ -4226,7 +4241,7 @@ spectrum / release / map 与窄屏测量）；截至 11-12 本地已累计 458 �
 time_input_guard 4 处裸时钟）；等对方收工、工作区静止后重跑才算数。
 
 **本线可复验硬结果**（`a2be554a` 审计 + `9836b98b` 收口）：交互审计 353
-动作 0/0/0/0；交互守卫 + UI 硬缺陷 20 项全绿；改动相关子集 296 项唯一红
+动作 0/0/0/0；交互守卫 + UI 硬缺陷 20 项全绿（历史记录：2026-11-11）；改动相关子集 296 项唯一红
 复跑转绿；11 红 + 1 error 收口后的红项子集 205 passed / 0 failed / 0 error。
 
 **待办 / 提醒**
@@ -4584,7 +4599,7 @@ A 一退 B 就裸奔（探针 WROTE-OK）；修复后 B 存活期间一律 REFUS
 来自 `tests/test_ui_hard_defects.py::clean_window_settings` 直写真实
 `~/.mbdsdr/gui_config.json`（只重定向了 APPDATA、没重定向 HOME）。改为请求 `isolated_profile`，连 HOME 一起重定向 — `7d19ea90` — `tests/conftest.py:1870` — `USERPROFILE`；
 同文件复跑 15 passed / 1 skipped（skip 是屏幕可用宽 <1700px，与本次
-无关）。其余候选文件全绿。
+无关）。其余候选文件全绿（历史记录：2026-11-13，本仓未重跑）。
 
 **附带修复（子会话锁）**：`tests/test_ui_settings_isolation_guard.py` 的子进程原先被塞
 `MBDSDR_TEST_LOCK=0`，锁判据修正后父会话不持锁，子会话建窗口即被判「绕锁碰 Qt」。改为给

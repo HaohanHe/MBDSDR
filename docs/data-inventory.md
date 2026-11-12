@@ -505,7 +505,7 @@ horizon / dateHorizon / ofDate / temeToJ2000 四类向量；容差为矩阵 `1e-
 - 首跑实测（HEAD `9c287c66`）：**1 个生成物不同步**——`docs/error-catalog.md`
   有 5 行（`bad_field` / `bad_param` / `bad_parameter` / `invalid_arguments` /
   `missing_required_params`）的文案与建议落后于 `ERRORS`，其余 5 项一致。
-  这 5 行已按模块重建，复查全绿（历史记录：2026-11 首跑后复查，未在现树复核）。
+  这 5 行已按模块重建，复查全绿（历史记录：2026-11-13 于 `9c287c66` 首跑后复查，未在现树复核）。
 
 **xingguan 源快照钉逐项**（本轮补的是「离线可验的那一段」，不是重跑守卫）：
 

@@ -69,7 +69,7 @@
 若本机有 HYG 源 CSV，`test_catalog_matches_local_hyg_source_when_available`
 还会重新计算源文件 SHA-256，与 `meta.source_file_sha256` 核对。
 
-新增测试共 **32 项**（星表/守卫 29 + 打包 3），全部通过（2026-11-13 于 `97fc5fc8` 复跑相关星表文件 `tests/test_sky_catalog_sync.py tests/test_sky_full_catalog.py` → 15 passed；原 32 项的逐项映射未留存，按文件级复核）。
+新增测试共 **32 项**（星表/守卫 29 + 打包 3），全部通过（历史快照，非当前树：2026-11-13 于 `97fc5fc8` 复跑相关星表文件 `tests/test_sky_catalog_sync.py tests/test_sky_full_catalog.py` → 15 passed；原 32 项的逐项映射未留存，按文件级复核）。
 
 ### 1.5 字段
 

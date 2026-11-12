@@ -32,7 +32,7 @@
 | `missing_iq`（1） | 76 | 确不可见 | chat 路摘要只看 `ToolResult.content`（`ai_steps.py:162,165,171`）；该工具 content 是 137 字手写说明、code 才放在 `data.error`；实测 summary 全文无 code、`step.error` 为空 |
 
 - 修正行数：**36 行**（只改表里的「判定依据 / 处置」两列）；新增帮助条目 **0**。
-- `mapping_gaps() == []`、`mapping_overlaps() == []`（复跑 `tests/test_error_remedy_links.py` 全绿；2026-11-13 于 `97fc5fc8` 复跑 → 17 passed）。
+- `mapping_gaps() == []`、`mapping_overlaps() == []`（复跑 `tests/test_error_remedy_links.py` 全绿；历史快照，非当前树：2026-11-13 于 `97fc5fc8` 复跑 → 17 passed）。
 
 ## 一、114 行的四类统计
 

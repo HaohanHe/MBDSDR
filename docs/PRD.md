@@ -831,7 +831,7 @@ MBDSDR 是**单机桌面观测台**，不是在线服务、不是专业仪器软
 **已知限制（必须写进结论）**：`desktop/startup_paths.py:_dll_search_dirs` 把 `PATH` 各目录计入搜索范围，所以报告只能说明"本机某处有"，**不能证明"随包携带"**；系统级 DLL 会掩盖安装包缺件。对外只说"本机缺少"，不说"安装包缺件"。
 
 **验收**
-- AC-R1（已有自动化）：`QT_QPA_PLATFORM=offscreen python -m pytest tests/test_startup_log_policy.py -q` 全绿（2026-11-13 于 `97fc5fc8` 复跑 → 8 passed）。`test_runtime_dll_report_finds_and_misses` 用临时目录构造"缺/不缺"两种布局，精确断言两个列表；`test_candidates_never_under_user_profile` 钉住日志不落用户目录。
+- AC-R1（已有自动化）：`QT_QPA_PLATFORM=offscreen python -m pytest tests/test_startup_log_policy.py -q` 全绿（历史快照，非当前树：2026-11-13 于 `97fc5fc8` 复跑 → 8 passed）。`test_runtime_dll_report_finds_and_misses` 用临时目录构造"缺/不缺"两种布局，精确断言两个列表；`test_candidates_never_under_user_profile` 钉住日志不落用户目录。
 - AC-R2（可复跑脚本）：`scripts/repro/2026-11-12-deferred-import-verify.py` —— **历史声明（2026-11-12 记录，未在现树复核）**：三条反证当时全绿——`gate_missing` 模拟缺件 → 3/3 退出码 3、弹窗文案含「缺了会怎样 / 怎么修」、不导入主窗口；`defer_broken` 模拟「文件在但加载失败」→ 3/3 首帧已出后报 1 条、状态栏有提示、进程不崩；`frame_gap` 量延后期间最坏帧间隔 87.0–90.1 ms（无延后对照 88.7–93.0 ms），无切片超过 100 ms。**2026-11-13 复跑数字已漂移**：同一脚本得 `frame_gap worst_gap=114.5 ms`、`defer_broken=132.0 ms`，原「无切片超过 100 ms」不成立于当前机，需在稳定机重测后再下结论。
 - AC-R3（已有自动化）：`tests/test_startup_log_policy.py::test_all_unwritable_uses_memory_buffer` 断言三处都不可写时回退内存缓冲且不抛异常。
 - 提交：`c295423`（ProgramData 日志兜底、异步可写探测、运行库 DLL 自检）。
@@ -846,8 +846,8 @@ MBDSDR 是**单机桌面观测台**，不是在线服务、不是专业仪器软
 **已知例外（未收口）**：`desktop/receive_pipeline.py:FftWorker.run` 对 `self._gen.push_iq(...)` 与 `frame_ready.emit` 都是 `except Exception: pass`。频谱计算失败时既无 warning 也无信号，违反红线 2，列为待补。
 
 **验收**
-- AC-R4（已有自动化）：`python -m pytest tests/test_demod_worker_failure_visibility.py -q` 全绿（2026-11-13 于 `97fc5fc8` 复跑 → 4 passed；4 条：恰好 1 次上报且线程继续；helper 层编程错误原样上抛；`run()` 捕获后干净退出；连发 20 块只 1 条 warning）。
-- AC-R5（已有自动化）：`python -m pytest tests/test_s8_backend_loss.py tests/test_backend_resilience.py -q` 全绿（2026-11-13 于 `97fc5fc8` 复跑 → 38 passed）。`test_s8_backend_loss.py` 覆盖：后端异常上报为断开、陈旧数据不依赖信号、未连接态、新鲜数据保持、宽限期不误报、未知新鲜度交给信号路径、尚无帧不算丢、短停顿只警告且第三次才断开、星象仪模式不误报、切换静默后端时健康位复位、健康定时器生命周期。
+- AC-R4（已有自动化）：`python -m pytest tests/test_demod_worker_failure_visibility.py -q` 全绿（历史快照，非当前树：2026-11-13 于 `97fc5fc8` 复跑 → 4 passed；4 条：恰好 1 次上报且线程继续；helper 层编程错误原样上抛；`run()` 捕获后干净退出；连发 20 块只 1 条 warning）。
+- AC-R5（已有自动化）：`python -m pytest tests/test_s8_backend_loss.py tests/test_backend_resilience.py -q` 全绿（历史快照，非当前树：2026-11-13 于 `97fc5fc8` 复跑 → 38 passed）。`test_s8_backend_loss.py` 覆盖：后端异常上报为断开、陈旧数据不依赖信号、未连接态、新鲜数据保持、宽限期不误报、未知新鲜度交给信号路径、尚无帧不算丢、短停顿只警告且第三次才断开、星象仪模式不误报、切换静默后端时健康位复位、健康定时器生命周期。
 - AC-R6（待补）：给 `FftWorker` 注入抛异常的 `push_iq` → 应有 1 次可见失败信号；当前无信号、无测试，不算通过。
 - 提交：`52cc888`（接收链单帧失败可见化）；`7f518fe`（掉线如实断开）。
 
@@ -862,8 +862,8 @@ MBDSDR 是**单机桌面观测台**，不是在线服务、不是专业仪器软
 | 无设备横幅 | `desktop/main_window.py:_show_no_rtl_hint` + `_NO_SDR_HINT`；离线 `MBDSDR_OFFLINE=1` 不碰 USB，也走同一文案 | 无 |
 
 **验收**
-- AC-R7（已有自动化）：`python -m pytest tests/test_reconnection.py tests/test_reconnection_e2e.py -q` 全绿（2026-11-13 于 `97fc5fc8` 复跑 → 18 passed）；`test_default_reconnect_is_bounded_not_infinite` 断言总等待有上限且必然 `gave_up`。
-- AC-R8（已有自动化）：`python -m pytest tests/test_backend_resilience.py -q` 全绿（2026-11-13 于 `97fc5fc8` 复跑，与 `test_s8_backend_loss.py` 合跑 → 38 passed）：loopback 假服务制造拒绝连接/半开/掉线/RST，断言 `link_state` 与真实数据流一致。
+- AC-R7（已有自动化）：`python -m pytest tests/test_reconnection.py tests/test_reconnection_e2e.py -q` 全绿（历史快照，非当前树：2026-11-13 于 `97fc5fc8` 复跑 → 18 passed）；`test_default_reconnect_is_bounded_not_infinite` 断言总等待有上限且必然 `gave_up`。
+- AC-R8（已有自动化）：`python -m pytest tests/test_backend_resilience.py -q` 全绿（历史快照，非当前树：2026-11-13 于 `97fc5fc8` 复跑，与 `test_s8_backend_loss.py` 合跑 → 38 passed）：loopback 假服务制造拒绝连接/半开/掉线/RST，断言 `link_state` 与真实数据流一致。
 - AC-R9（库层已有，桌面待补）：`python -m pytest tests/test_device_manager.py::test_monitor_callback_no_crash -q` 通过。桌面接入判据：拔掉正在收的设备 → 4s 内横幅/状态栏显示"已断开"并保留最后真实频点；**当前无调用方，故不算通过**。
 - AC-R10（已有自动化）：`python -m pytest tests/test_no_device_onboarding.py::test_no_device_banner_is_plain_and_actionable -q` 通过：横幅含"没找到 SDR 设备"、可能原因、下一步。
 - AC-R11（待补）：自动重连接入后，断网 30s 内状态依次 retrying → gave_up；重连成功回填真实频率（不得回填 0 Hz）。已修假 0 Hz — `4abde1a` — `desktop/main_window.py:7080` — `绝不用 0 Hz`（基准 `4abde1aa`）。
@@ -880,9 +880,9 @@ MBDSDR 是**单机桌面观测台**，不是在线服务、不是专业仪器软
 | 发射能力不冒充 | `desktop/main_window.py:ptt_state`：`verified` 只读，未验证显示"真机未验证" | `d0b585a` 文案区分未连接/不支持 |
 
 **验收**
-- AC-R12（已有自动化）：`python -m pytest tests/test_doppler_readout.py -q` 全绿（2026-11-13 于 `97fc5fc8` 复跑 → 8 passed）。
+- AC-R12（已有自动化）：`python -m pytest tests/test_doppler_readout.py -q` 全绿（历史快照，非当前树：2026-11-13 于 `97fc5fc8` 复跑 → 8 passed）。
 - AC-R13（待补自动化）：脚本直接调 `SpectrumGenerator._resample_max`，构造"3 个 bin 只有 1 个有样本"→ 输出必须含 `nan`，峰检测不得落 nan。当前只有代码注释。
-- AC-R14（已有自动化）：`python -m pytest tests/test_tune_failure_no_commit.py -q` 全绿（2026-11-13 于 `97fc5fc8` 复跑 → 4 passed；原始修复 `d0445ba`）。
+- AC-R14（已有自动化）：`python -m pytest tests/test_tune_failure_no_commit.py -q` 全绿（历史快照，非当前树：2026-11-13 于 `97fc5fc8` 复跑 → 4 passed；原始修复 `d0445ba`）。
 - AC-R15（待补）：给 `_ntp` 注入 `reachable=False`，断言 `ToolResult.success is False` 且无"已同步"文案。
 
 #### 10.7.5 测试隔离
@@ -895,7 +895,7 @@ MBDSDR 是**单机桌面观测台**，不是在线服务、不是专业仪器软
 | 内存上限 | `tests/conftest.py` 会话内 RSS 上限（1.8 GB） | 防止用例把整表/整段 IQ 常驻内存 |
 
 **验收**
-- AC-R16（已有自动化）：`python -m pytest tests/test_ui_settings_isolation_guard.py tests/test_modal_dialog_guard.py -q` 全绿（2026-11-13 于 `97fc5fc8` 复跑 → 8 passed）。
+- AC-R16（已有自动化）：`python -m pytest tests/test_ui_settings_isolation_guard.py tests/test_modal_dialog_guard.py -q` 全绿（历史快照，非当前树：2026-11-13 于 `97fc5fc8` 复跑 → 8 passed）。
 - AC-R17（可复跑脚本）：跑完代表性 UI 子集后 `git status --porcelain` 与 `%APPDATA%\mbdsdr` 目录清单均无变化。
 - AC-R18（可复跑脚本）：两个终端并发启动 pytest，第二个进入等待而非并行开 Qt；`MBDSDR_TEST_LOCK=0` 时可并行（反向证明锁生效）。
 - 提交：`7d19ea9`（禁止真模态 + 禁止写真实配置）。

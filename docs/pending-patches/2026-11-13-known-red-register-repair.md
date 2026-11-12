@@ -170,13 +170,13 @@ FAILED tests/test_tooltip_guard.py::test_every_passthrough_tooltip_is_registered
 
 ### 3.4 当前结果（替换过期结论，**不许再写 deps PASS**）
 
-**查找**（L1172–L1177 整段）
+**查找**（L1172–L1177 整段；引文里〔〕内是摘录标记，不在源文件中）
 
 ```
 - **当前结果**：`--only version` FAIL=1（唯一残留是本文件 1127/1144 引用 canonical，
   本段落库即消失）；`--only deps` PASS（SKIP=1 为 tomli）；
   `--only secrets` PASS（4 处登记误报，复核期限 2027-03-31）。
-- **缺什么才能全绿**：① 本段替换落库（消除自触发 2 处）；
+- **缺什么才能全绿**：① 本段替换落库（消除自触发 2 处）；〔历史原文，2026-11-13 摘录〕
   ② 用**当前 HEAD** 重建产物后复跑一次，替换 dist16 的旧包口径
   （`check_dist_head_parity` 同因，属 pipeline 债不是缺陷）。
 ```
@@ -201,7 +201,7 @@ FAILED tests/test_tooltip_guard.py::test_every_passthrough_tooltip_is_registered
   → 窗口起、`[smoke]` 13/13；`MBDSDR.exe --resource-probe` → 版本 / locale /
   `data/dso_catalog.json`(117 条) / `data/moon_albedo_*.npz` / `assets/icon.ico`
   五项全 OK。
-- **缺什么才能全绿**：无——五类已全 PASS（安装器为 BY-DESIGN）。
+- **缺什么才能全绿**：无——五类已全 PASS（安装器为 BY-DESIGN；2026-11-13 复核，绑定本节「再检绑定」`<APPLY_HEAD>`）。
 ```
 
 ## 4. K23 段：把估算替换为实测（`2701 → 约 308` 作废）

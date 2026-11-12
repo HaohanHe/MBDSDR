@@ -15,6 +15,9 @@
 | `ae0effb` | 否 | `a752f1bc` | 上游 tree `91d85c25874d7dea40b8be1eee7fc5464db1666f` = 本地 `git rev-parse a752f1bc^{tree}`，逐字符一致 |
 | `bda5e48` | 否 | `ae7a5b75` | 上游 tree `024d95ab909bfa856e50fe59c5b9c40f71703250` = 本地 `git rev-parse ae7a5b75^{tree}`，逐字符一致 |
 | `6a7ad7b` | 否 | `6b6287a8` | 上游 tree `077dfdf9a996afc01c283b0e0ead1f92f584f9c9` = 本地 `git rev-parse 6b6287a8^{tree}`，逐字符一致 |
+| `d82247f` | 否 | `35a5f126` | 上游 tree `56ef9dab843019ad9de2511bd02dfa3505e5e08c` = 本地 `git rev-parse 35a5f126^{tree}`，逐字符一致（2026-11-13 复核） |
+| `aabc309` | 否 | `00ce48a5` | 上游 tree `a36d57b770a16086c9d92c51bc65aadf74842865` = 本地 `git rev-parse 00ce48a5^{tree}`，逐字符一致（2026-11-13 复核） |
+| `9efbdcb` | 否 | `3b1973eb` | 上游 tree `dca3a8208411b96f73c35af62c075d822f6bef1a` = 本地 `git rev-parse 3b1973eb^{tree}`，逐字符一致（2026-11-13 复核） |
 
 复核命令（本表 2026-11-13 实测）：
 
@@ -25,23 +28,15 @@ git rev-parse <本地等价提交>^{tree}      # 本地 tree
 #       -> .commit.tree.sha
 ```
 
-## 2. 待证（上游存在、本地不存在；等价 tree 尚未比对）
+## 2. 待证
 
-| 旧 SHA | 本仓是否存在 | 本地等价提交 | 证据 |
-|---|---|---|---|
-| `d82247f` | 否 | 待证 | 上游存在：feat(phase8) 真机回填一键闭环…，2026-10-02，tree `56ef9dab843019ad9de2511bd02dfa3505e5e08c`；本地等价 tree 未比对 |
-| `aabc309` | 否 | 待证 | 上游存在：docs: readback-loop audit…，2026-10-09，tree `a36d57b770a16086c9d92c51bc65aadf74842865`；本地等价 tree 未比对 |
-| `9efbdcb` | 否 | 待证 | 上游存在：ui: right-rail tab visibility…，2026-10-08，tree `dca3a8208411b96f73c35af62c075d822f6bef1a`；本地等价 tree 未比对 |
-
-待证条目的当前所在位置（只登记，不改动）：
-
-- `d82247f`：`docs/learn/phase9/_PHASE9_SPEC.md:3`（写作「远端 main = d82247f」）
-- `aabc309`：`docs/learn/phase63/no-engine-readonly-audit.md:5`、`:192`（写作「HEAD」）
-- `9efbdcb`：`docs/learn/phase63/tool-golden-47-check.md:7`（写作「上轮基线 HEAD」）
+无。原「待证」三条（`d82247f` / `aabc309` / `9efbdcb`）已于 2026-11-13 全部取证：
+按上游 tree 哈希在本地 `git log --all` 里逐条命中唯一等价提交，
+`git rev-parse <本地提交>^{tree}` 与上游 `.commit.tree.sha` 逐字符一致，见 §1。
 
 ## 3. 待改引用点（不在本次 A11 范围内，留给对应线）
 
-共 6 个文件、8 行（`readonly-tools-audit.md` 与 `rx-stats-and-freeze-recon.md` 各 2 行）。
+共 9 个文件、12 行（`readonly-tools-audit.md`、`rx-stats-and-freeze-recon.md`、`no-engine-readonly-audit.md` 各 2 行）。
 逐文件 claim 后按行改，不要整文件批量替换；改前先用 `git cat-file -t` 复核旧 SHA。
 
 | 位置 | 旧 SHA | 建议改为 | 备注 |
@@ -54,6 +49,10 @@ git rev-parse <本地等价提交>^{tree}      # 本地 tree
 | `docs/learn/phase63/gate-semantics-audit.md:6` | `6a7ad7b` | `6b6287a8` | tree 已证相同 |
 | `docs/learn/phase63/rx-stats-and-freeze-recon.md:4` | `6a7ad7b` | `6b6287a8` | tree 已证相同 |
 | `docs/learn/phase63/rx-stats-and-freeze-recon.md:88` | `6a7ad7b` | `6b6287a8` | tree 已证相同 |
+| `docs/learn/phase9/_PHASE9_SPEC.md:3` | `d82247f` | `35a5f126` | tree 已证相同（写作「远端 main = d82247f」） |
+| `docs/learn/phase63/no-engine-readonly-audit.md:5` | `aabc309` | `00ce48a5` | tree 已证相同（写作「HEAD」） |
+| `docs/learn/phase63/no-engine-readonly-audit.md:192` | `aabc309` | `00ce48a5` | tree 已证相同（写作「HEAD」） |
+| `docs/learn/phase63/tool-golden-47-check.md:7` | `9efbdcb` | `3b1973eb` | tree 已证相同（写作「上轮基线 HEAD」） |
 
 ## 4. 已处理记录
 

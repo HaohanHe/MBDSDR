@@ -85,7 +85,7 @@ MBDSDR_TEST_LOCK=0 QT_QPA_PLATFORM=offscreen \
 ## K05 — desktop 全量确定性红（2026-11-09 16:09–17:10 权威复跑）
 
 **本节取代上午那版 K05，上午的结论作废。** 上午用「日志点号序号 →
-collect 清单」映射 nodeid 得到 15 条，并判成「单跑全绿 = 顺序依赖假红」（历史判断，本段另有结论）。
+collect 清单」映射 nodeid 得到 15 条，并判成「单跑全绿 = 顺序依赖假红」（历史判断：2026-11-09 上午，本段另有结论）。
 那套映射是错的：collect 顺序随代码变动整体偏移，跑的根本不是真失败的
 用例，所以 `15 passed` 证明不了任何事。**以后一律从 pytest `-rf` 汇总的
 `FAILED ...` 行取 nodeid，不许用点号序号猜。**
@@ -932,7 +932,7 @@ baseline 56 → 58（`BUILT_AT` 同步 58），每条带 owner + reason：
 - 中途另一会话（PID 24992）持锁时，单跑 ratchet 曾用 `MBDSDR_TEST_LOCK=0`
   得到 3 passed；最终结论以持锁的 117 passed 为准。
 - **转绿条件**：33 条逐条处置（删 16 / 改 15 / 留 2）后，
-  `test_no_new_source_text_pins` 与 11 个相关测试文件全绿（当前树复核见下条 `97fc5fc8`）；留下的 2 条必须继续
+  `test_no_new_source_text_pins` 与 11 个相关测试文件全绿（本条是销账判据，不是已绿事实；当前树复核见下条 `97fc5fc8`，结论为未满足）；留下的 2 条必须继续
   带 owner + reason，且基线只降不升（当前 56 → 58 是这 2 条的登记，不许再涨）。
   反证：把任一「改」过的断言退回文本 pin，该节点必须红。
 - **2026-11-13 复核**（`97fc5fc8` 独立 worktree）：
@@ -1242,7 +1242,7 @@ baseline 56 → 58（`BUILT_AT` 同步 58），每条带 owner + reason：
   → 窗口起、`[smoke]` 13/13；`MBDSDR.exe --resource-probe` → 版本 / locale /
   `data/dso_catalog.json`(117 条) / `data/moon_albedo_*.npz` / `assets/icon.ico`
   五项全 OK。
-- **缺什么才能全绿**：无——五类已全 PASS（安装器为 BY-DESIGN）。
+- **缺什么才能全绿**：无——五类已全 PASS（安装器为 BY-DESIGN；2026-11-13 复核，绑定本节「再检绑定」`20d71e92`）。
 - **复跑命令**：
   ```bash
   python scripts/release_manifest.py --only version
