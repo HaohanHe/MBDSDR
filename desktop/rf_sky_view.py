@@ -381,19 +381,6 @@ def _star_pen(r: int, g: int, b: int, width_x2: int, alpha: int) -> QPen:
     return pen
 
 
-def _star_brush(r: int, g: int, b: int, alpha: int) -> QBrush:
-    """按 (颜色, alpha) 复用亮星辉光刷。"""
-    key = (r, g, b, alpha)
-    brush = _star_brush_cache.get(key)
-    if brush is not None:
-        return brush
-    if len(_star_brush_cache) >= _STAR_STYLE_CACHE_MAX:
-        _star_brush_cache.clear()
-    brush = QBrush(QColor(r, g, b, alpha))
-    _star_brush_cache[key] = brush
-    return brush
-
-
 def _star_label_limit_mag(fov_deg: float) -> float:
     """星名标签的视星等上限（按视场自适应）。
 
