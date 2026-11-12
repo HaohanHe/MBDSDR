@@ -122,29 +122,53 @@ def test_machine_never_overwrites_manual_freq_and_records_conflict():
     assert conflicts[0]["delta_hz"] == 1000.0
 
 
-def test_bandwidth_range_drives_identify_for_machine_only_transponder():
+def test_identify_uses_machine_bandwidth_on_catalog_link():
+    # 无缓存时 145.9385 超出 145.935±1000 的容差 → 不命中
+    assert SL.identify_by_freq(145.9385e6, tolerance_hz=1000.0) == []
+    # 机器库把这条人工信标标成一段区间（模拟转发器带宽）
+    body = [tx("u-beacon", 145930000, 145940000, "BPSK", 1200)]
+    SF.refresh(target(39444, "funcube_1"), opener=opener_map({39444: body}))
+
+    # 有机器区间后按 [145.930, 145.940] 判定 → 命中且标 satnogs
+    hits = SL.identify_by_freq(145.9385e6, tolerance_hz=1000.0)
+    assert len(hits) == 1
+    assert hits[0]["_link_name"] == "funcube_1"
+    assert hits[0]["_matched_source"] == "satnogs"
+    assert hits[0]["_matched_link"]["low_hz"] == 145930000.0
+    assert hits[0]["_matched_link"]["high_hz"] == 145940000.0
+    # 人工频点本身未变
+    assert hits[0]["_matched_link"]["freq_hz"] == 145935000.0
+
+
+def test_machine_only_links_exposed_but_not_injected_into_identify():
     body = [
         tx("u-beacon", 145935000, 145935000, "BPSK", 1200),
         tx("u-linear", 145950000, 145970000, "LSB", None),
     ]
     SF.refresh(target(39444, "funcube_1"), opener=opener_map({39444: body}))
 
-    # 人工信标 145.935 未变
-    beacon = SL.identify_by_freq(145.935e6, tolerance_hz=1000.0)
-    assert any(h["_link_name"] == "funcube_1"
-               and not h.get("_matched_machine_only") for h in beacon)
+    only = SL.machine_only_links("funcube_1")
+    assert len(only) == 1
+    assert only[0]["low_hz"] == 145950000.0
+    assert only[0]["high_hz"] == 145970000.0
+    assert only[0]["uuid"] == "u-linear"
+    # 不自动注入 identify，避免机器库独有条目变成频谱反查噪音
+    assert SL.identify_by_freq(145.965e6, tolerance_hz=1000.0) == []
 
-    # 机器独有的线性转发器：按 145.950–145.970 区间命中
-    inside = SL.identify_by_freq(145.965e6, tolerance_hz=1000.0)
-    assert len(inside) == 1
-    hit = inside[0]
-    assert hit["_link_name"] == "funcube_1"
-    assert hit["_matched_machine_only"] is True
-    assert hit["_matched_link"]["low_hz"] == 145950000.0
-    assert hit["_matched_link"]["high_hz"] == 145970000.0
 
-    # 区间外的频点不命中（不猜最近）
-    assert SL.identify_by_freq(145.940e6, tolerance_hz=1000.0) == []
+def test_same_freq_prefers_matching_mode_over_active_status():
+    # NOAA-18 同频两条：FSK「IQ Recording」active，APT「Downlink」inactive。
+    # 人工 link 是 apt，必须配 APT 那条，不能因为 active 配成 FSK。
+    body = [
+        tx("u-iq", 137912500, 137912500, "FSK", 400, "active"),
+        tx("u-apt", 137912500, 137912500, "APT", None, "inactive"),
+    ]
+    SF.refresh(target(28654, "noaa_18"), opener=opener_map({28654: body}))
+    link = SL.load_sat_link("noaa_18")["links"][0]
+    assert link["machine"]["uuid"] == "u-apt"
+    assert link["machine"]["mode"] == "APT"
+    assert link["status"] == "inactive"
+    assert link["freq_hz"] == 137912500.0
 
 
 # ----------------------------------------------------------- 失败与诚实回退
