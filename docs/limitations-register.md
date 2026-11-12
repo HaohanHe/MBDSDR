@@ -801,5 +801,35 @@ python -c "from mbdsdr_ai.core.mcp_server import MCPToolSet; print(len(MCPToolSe
 > 4.92 s 只是 **Welch 用掉的整段部分**，不含末尾不足一段的余量。真实 `pilot_mpx_points=1,026,762`
 > → 5.13 s → 丢样 **14.4%**。以后这类数字只从 `result.json` 取，不再口算。依据：同轮 `result.json` 的 `pilot_mpx_points` 与 `pilot_captured_s` 实测值（口径修正非代码提交，故标推断）。
 
+## 附 T：同型号多台无法区分（bus/port 别名数据源，2026-11-12，接入层线追加）
+
+**一句话结论：同型号多台设备同时插着时，只能报「无法唯一确定设备」并拒绝，无法分辨是哪一台。**
+
+背景是跨进程互斥（桌面端 / AI 抢同一根 RTL-SDR）。设备被占用时，竞争者枚举
+读不到 serial（libusb 打不开），只能算出 `rtlsdr|index:0`；因此占用登记会带
+别名（序号 / bus:port / 标签），任一命中即视为同一台。其中 bus/port 是唯一
+「不需要 open 也读得到、且跟着物理插口走」的依据。
+
+数据源查证（2026-11-12）：
+
+| 途径 | 结论 |
+| --- | --- |
+| `requirements.txt` / `desktop/requirements.txt` | 无 `pyusb` / `libusb1` / `usb1` |
+| 运行期 `importlib.util.find_spec` | `usb` / `pyusb` / `libusb1` / `usb1` 全部取不到 |
+| librtlsdr C API | 不导出 bus/port（只有 count / usb_strings / open / tuner / close） |
+
+**决策：不为这一个场景新增运行期依赖。** 引入 pyusb 只为「两根同型号同时插着
+且其中一根被占用」这一种情况，代价（打包体积、许可证与驱动兼容面）大于收益。
+
+因此：原生 RTL 目前只有 `index` / `label` 别名，没有 bus/port。当同一组别名
+命中多条登记时，`mbdsdr_ai/sdr_backend.py` 返回 `AmbiguousOwners`（不是占用
+记录，误当 holder 用会当场 AttributeError），`claim` 拒绝，用户可见文案给出
+三条出路：断开其中一台、只想用一根时先拔掉另一根再刷新、或改用带独立地址的
+设备（rtl_tcp / SpyServer）。
+
+复跑条件：`pytest tests/test_device_owner_lock.py -q`（`test_ambiguous_alias_refuses_instead_of_guessing`
+钉住「拒绝而不猜」+「文案给出路」）；若将来 pyusb 进入依赖，再用 libusb 设备
+列表按 serial 反查 bus/port 补进 `device_identity_aliases`，届时本附录删除。
+
 
 

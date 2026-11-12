@@ -183,7 +183,12 @@ def test_corrupt_registry_is_backed_up_with_reason(_registry):
     assert len(backups) == 1, backups
     reason = backups[0].with_name(backups[0].name + ".reason.txt")
     assert reason.exists(), "损坏备份必须与理由文件成对"
-    assert reason.read_text(encoding="utf-8").strip()
+    text = reason.read_text(encoding="utf-8").strip()
+    assert text, "理由不能为空"
+    # 理由文本必须自带登记文件路径：其余四类（配置/书签/布局/AI 记忆）
+    # 都有，单独看理由或以后加导出时才能定位到是哪一份文件坏了。
+    assert str(_registry) in text, f"理由缺少登记文件路径：{text!r}"
+    assert "JSON 读取/解析失败" in text, text
 
 
 def test_non_object_registry_is_also_treated_as_corrupt(_registry):
@@ -394,16 +399,26 @@ def test_ambiguous_alias_refuses_instead_of_guessing(_registry):
         ])
         ok, holder = sb.claim_active_owner(sb.AI_OWNER, "rtlsdr|index:0")
         assert ok is False
-        assert holder.get("reason") == "ambiguous_alias"
-        assert len(holder.get("candidates") or []) == 2
+        assert isinstance(holder, sb.AmbiguousOwners)
+        assert len(holder.candidates) == 2
+        # 它不是一条占用记录：当 holder 用必须当场炸，而不是显示假的
+        # 「owner 空、pid 0」。类型上就堵住，不靠文档提醒。
+        assert not hasattr(holder, "get")
+        with pytest.raises(AttributeError):
+            holder.get("owner")
+        with pytest.raises((AttributeError, TypeError)):
+            holder["owner"]
 
         text = sb.owner_conflict_text(holder)
         assert "无法唯一确定设备" in text
         assert "AAA" in text and "BBB" in text
+        # 拒绝之外必须给出路，不能只说「无法唯一确定」让用户卡死。
+        assert "断开其中一台" in text and "拔掉另一根" in text
 
-        # 读侧同样不猜：返回歧义标记（真值），调用方一律按被占用处理。
+        # 读侧同样不猜：返回同一类标记（真值），调用方一律按被占用处理。
         seen = sb.get_active_owner("rtlsdr|index:0")
-        assert seen and seen.get("reason") == "ambiguous_alias"
+        assert isinstance(seen, sb.AmbiguousOwners)
+        assert bool(seen) is True
 
         # 别名有歧义时也不许释放任何一条（避免放错人）。
         assert sb.release_active_owner("desktop", "rtlsdr|index:0") is False

@@ -48,7 +48,7 @@ import collections
 import threading
 import numpy as np
 from dataclasses import dataclass, field
-from typing import List, Dict, Any, Optional, Tuple
+from typing import List, Dict, Any, Optional, Tuple, Union
 
 logger = logging.getLogger(__name__)
 
@@ -98,18 +98,45 @@ _OWNER_LABELS = {"desktop": "桌面端", "mbdsdr-ai": "AI/MCP 进程"}
 AI_OWNER = "mbdsdr-ai"
 
 
-def owner_conflict_text(holder: Dict[str, Any]) -> str:
+class AmbiguousOwners:
+    """「同一组备用标识命中多条登记」的结果标记。
+
+    **它不是一条占用记录**：没有 owner、没有 pid，也没有 ``.get()``／
+    ``[]``。故意不继承 dict——任何把它当 holder 用的代码
+    （``holder["owner"]``、``holder.get("pid")``）都会当场 AttributeError，
+    而不是安静地显示「owner 空、pid 0」这种看着像真数据的假信息。
+
+    ``bool()`` 为 True：调用方一律按「占用方向」处理（拒绝连接/开流）。
+    """
+
+    __slots__ = ("device_id", "candidates")
+
+    def __init__(self, device_id: str, candidates: List[str]):
+        self.device_id = str(device_id)
+        self.candidates = tuple(str(c) for c in candidates)
+
+    def __bool__(self) -> bool:
+        return True
+
+    def __repr__(self) -> str:
+        return (f"AmbiguousOwners(device_id={self.device_id!r}, "
+                f"candidates={list(self.candidates)!r})")
+
+
+def owner_conflict_text(holder: Union[Dict[str, Any], AmbiguousOwners]) -> str:
     """占用冲突的可执行提示：谁占着、它还活着、下一步能做什么。"""
-    if holder.get("reason") == "ambiguous_alias":
-        dev = holder.get("device_id") or ""
-        cands = holder.get("candidates") or []
-        shown = ", ".join(str(c) for c in cands[:3])
-        if len(cands) > 3:
-            shown += f" 等 {len(cands)} 条"
+    if isinstance(holder, AmbiguousOwners):
+        dev = holder.device_id
+        shown = ", ".join(holder.candidates[:3])
+        if len(holder.candidates) > 3:
+            shown += f" 等 {len(holder.candidates)} 条"
         return (f"无法唯一确定设备：键 {dev} 同时匹配多条占用记录（{shown}）。"
-                f"可能是两台同型号设备共用同一组备用标识（序号/总线位置）。"
-                f"请先在占用侧断开其中一台，或改用其他设备"
-                f"（先用 sdr_list_devices 查看）——不会替你猜是哪一台。")
+                f"这通常是两根同型号设备同时插着——枚举读不到序列号时只能靠"
+                f"序号/总线位置区分，此时无法判断是哪一台（本机未引入额外的 "
+                f"USB 枚举依赖，不会替你猜）。"
+                f"你可以：① 在桌面端/AI 侧断开其中一台后重试；"
+                f"② 只想用其中一根时，先拔掉另一根再点「刷新」；"
+                f"③ 或改用带独立地址的设备（如 rtl_tcp / SpyServer）。")
     dev = holder.get("device_id") or ""
     who = owner_label(holder.get("owner", ""))
     return (f"设备 {dev} 当前由{who}占用（pid {holder.get('pid')}，进程仍在运行）。"
@@ -337,7 +364,9 @@ def _backup_corrupt_registry(reason: str) -> Optional[str]:
         return None
     try:
         from .corrupt_evidence import write_reason
-        write_reason(backup, reason, logger)
+        # 理由里带上登记文件自己的路径：其余四类（配置/书签/布局/AI 记忆）
+        # 的理由都含路径，单独看理由文本时也能定位到是哪一份文件坏了。
+        write_reason(backup, f"{path}：{reason}", logger)
     except Exception:  # noqa: BLE001 - 理由写失败不影响已落好的备份
         pass
     logger.warning("设备占用登记损坏（%s），原文件已备份为 %s；本次按无占用处理",
@@ -437,8 +466,13 @@ def _match_owner_record(owners: Dict[str, Dict[str, Any]], device_id: str,
 
 
 def get_active_owner(device_id: str = "",
-                     allow_alias_match: bool = True) -> Optional[Dict[str, Any]]:
-    """当前占用者（先清失效记录再判）。device_id 为空时返回唯一的记录。"""
+                     allow_alias_match: bool = True
+                     ) -> Optional[Union[Dict[str, Any], AmbiguousOwners]]:
+    """当前占用者（先清失效记录再判）。device_id 为空时返回唯一的记录。
+
+    命中多条登记（别名有歧义）时返回 :class:`AmbiguousOwners`，**不是**
+    一条记录——它连 ``.get()`` 都没有，误当 holder 用会立刻 AttributeError。
+    """
     release_stale_owners()
     # 与写路径同锁：读到的如果是损坏文件，这里会改名留证，不能在无锁时与
     # 别的进程的原子替换交错（否则可能把刚写好的好文件当成损坏备份走）。
@@ -450,9 +484,7 @@ def get_active_owner(device_id: str = "",
             kind, _key, rec, candidates = _match_owner_record(
                 owners, device_id, allow_alias_match)
             if kind == "ambiguous":
-                # 返回一个真值标记：调用方一律按「被占用」处理并拒绝连接。
-                return {"reason": "ambiguous_alias", "device_id": str(device_id),
-                        "candidates": candidates, "owner": "", "pid": 0}
+                return AmbiguousOwners(device_id, candidates)
             return dict(rec) if rec is not None else None
         if len(owners) == 1:
             return dict(next(iter(owners.values())))
@@ -462,7 +494,7 @@ def get_active_owner(device_id: str = "",
 def claim_active_owner(owner: str, device_id: str,
                        aliases: Optional[List[str]] = None,
                        allow_alias_match: bool = True
-                       ) -> Tuple[bool, Dict[str, Any]]:
+                       ) -> Tuple[bool, Union[Dict[str, Any], AmbiguousOwners]]:
     """为 ``owner`` 声明占用 ``device_id``。
 
     返回 ``(ok, record)``：成功时 record 是本次写入的记录；失败时 record
@@ -471,7 +503,8 @@ def claim_active_owner(owner: str, device_id: str,
     ``aliases`` 是同一台设备的其它可选身份键（见
     :func:`device_identity_aliases`）：设备被占用时枚举读不到序列号，
     竞争者只能算出枚举序号键，只按主键比对会漏掉活着的持有者。
-    别名命中**必须唯一**，撞上多条记录时返回 ``reason=ambiguous_alias``，
+    别名命中**必须唯一**，撞上多条记录时第二项返回
+    :class:`AmbiguousOwners`（不是 holder，误用会 AttributeError），
     由调用方拒绝并说明——绝不取第一条。
 
     同进程内的重复声明允许覆盖（桌面端与 AI 适配器同在一个进程时不能互相
@@ -486,9 +519,7 @@ def claim_active_owner(owner: str, device_id: str,
         kind, matched_key, cur, candidates = _match_owner_record(
             owners, device_id, allow_alias_match)
         if kind == "ambiguous":
-            return False, {"reason": "ambiguous_alias",
-                           "device_id": str(device_id),
-                           "candidates": candidates, "owner": "", "pid": 0}
+            return False, AmbiguousOwners(device_id, candidates)
         if cur is not None and str(cur.get("owner")) != str(owner):
             try:
                 cur_pid = int(cur.get("pid") or 0)
@@ -659,8 +690,12 @@ def device_identity_aliases(device: Dict[str, Any]) -> List[str]:
     if index_text:
         out.append(f"{driver}|index:{index_text}")
     # USB 总线位置：设备被占用时**不需要 open 也读得到**（libusb 枚举即可），
-    # 是 serial 读不到时最接近「物理那一台」的替代依据。注意只在枚举方
-    # 提供了 bus/port 时才存在（原生 RTL 的 librtlsdr 不导出该信息）。
+    # 是 serial 读不到时最接近「物理那一台」的替代依据。只在枚举方提供了
+    # bus/port 时才存在：原生 RTL 的 librtlsdr 不导出该信息，而 Python 侧的
+    # pyusb/libusb 绑定**不在本项目依赖里**（requirements.txt 无此项、运行期
+    # import 也失败）。为「插两根同型号」这一个场景新增运行期依赖，代价大于
+    # 收益，故不引入——同型号多台时只能告警歧义、无法分辨是哪一台，
+    # 该限制写在 docs/limitations-register.md 附 T 并出现在占用冲突文案里。
     bus = _identity_text(device.get("bus") or device.get("usb_bus")
                          or args.get("bus") or args.get("usb_bus"))
     port = _identity_text(device.get("port") or device.get("usb_port")
