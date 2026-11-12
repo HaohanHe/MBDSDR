@@ -13,7 +13,7 @@ import subprocess
 from dataclasses import dataclass, field
 from typing import Dict, Iterable, List, Optional, Sequence, Set, Tuple
 
-from .checks import build_axioms
+from .checks import build_axioms, reset_skips
 from .model import (
     Axiom,
     Finding,
@@ -45,7 +45,7 @@ class Dimension:
 RULE_DIMENSION = {
     "A01": "D2", "A02": "D2", "A03": "D2", "A04": "D2", "A12": "D2", "A13": "D2",
     "A05": "D4", "A06": "D4", "A07": "D4", "A08": "D4", "A09": "D4",
-    "A10": "D5", "A11": "D5",
+    "A10": "D5", "A11": "D5", "A14": "D5",
 }
 
 DIMENSIONS = [
@@ -161,7 +161,7 @@ def collect_d1(repo: Repo) -> Dimension:
                 "只依赖 mbdsdr_ai 的纯接口；确需 UI 的用例放在 tests/ui 并显式标注。",
                 "review",
             ))
-    for path, lineno, module in qt_sites[:40]:
+    for path, lineno, module in qt_sites:
         dim.findings.append(Finding(
             "D1-qt-in-core", path, lineno, f"import {module}",
             "纯 Python 层（mbdsdr_ai）直接 import 了 Qt；这层一旦被 CLI/MCP 复用就会拖入 GUI 依赖。",
@@ -203,7 +203,7 @@ def collect_d1(repo: Repo) -> Dimension:
     sccs = _tarjan(graph)
     cycles = [c for c in sccs if len(c) > 1]
     dim.facts.append(f"模块级强连通分量：{len(cycles)} 个")
-    for comp in cycles[:5]:
+    for comp in cycles:
         dim.findings.append(Finding(
             "D1-cycle", comp[0].replace(".", "/") + ".py", 0,
             f"{len(comp)} 个模块互相依赖",
@@ -300,7 +300,7 @@ def collect_d2(repo: Repo, base: Sequence[Finding]) -> Dimension:
             consts.setdefault(name, {}).setdefault(value, []).append(f"{unit.path}:{lineno}")
     dual = {k: v for k, v in consts.items() if len(v) > 1 and len(k) >= 4}
     dim.facts.append(f"同名常量存在多值：{len(dual)} 组")
-    for name, values in list(dual.items())[:12]:
+    for name, values in dual.items():
         locs = [loc for v in values.values() for loc in v]
         dim.findings.append(Finding(
             "D2-dual-constant", locs[0].split(":")[0], int(locs[0].split(":")[1]),
@@ -364,7 +364,7 @@ def collect_d3(repo: Repo) -> Dimension:
                 alias_sites[(a, b)]["b"].add(unit.path)
 
     dim.facts.append(f"公开函数/类 >=8 但未声明 __all__ 的模块：{len(modules_no_contract)} 个")
-    for path, line in modules_no_contract[:10]:
+    for path, line in modules_no_contract:
         dim.findings.append(Finding(
             "D3-no-contract", path, line, "模块未声明 __all__",
             "模块对外暴露面未登记，调用方无法判断哪些名字是契约、哪些是内部实现。",
@@ -379,7 +379,7 @@ def collect_d3(repo: Repo) -> Dimension:
         if len(paths) >= 2 and len(bodies) >= 2:
             role_conflicts.append((name, items))
     dim.facts.append(f"同名不同职的公开函数：{len(role_conflicts)} 组")
-    for name, items in role_conflicts[:15]:
+    for name, items in role_conflicts:
         first = items[0]
         second = items[1]
         dim.findings.append(Finding(
@@ -576,17 +576,16 @@ def collect_d6(repo: Repo) -> Dimension:
                 referenced += 1
                 if raw not in index:
                     missing += 1
-                    if missing <= 30:
-                        artifact = raw.endswith((".json", ".log", ".csv", ".bin", ".npz", ".wav", ".db"))
-                        archive = bool(_ARCHIVE_DOC.search(unit.path))
-                        dim.findings.append(Finding(
-                            "D6-missing-path", unit.path, lineno, f"引用的 {raw} 不存在",
-                            "文档事实指向了仓库里不存在的路径，按文档操作会直接失败。"
-                            + ("（该路径像运行时产物，需注明生成命令或移除引用。）" if artifact else "")
-                            + ("（历史快照文档，当时可能确实存在。）" if archive else ""),
-                            "改为真实路径；文件已迁移时同步更新文档；产物路径写明生成方式。",
-                            "review" if (artifact or archive) else "must-fix",
-                        ))
+                    artifact = raw.endswith((".json", ".log", ".csv", ".bin", ".npz", ".wav", ".db"))
+                    archive = bool(_ARCHIVE_DOC.search(unit.path))
+                    dim.findings.append(Finding(
+                        "D6-missing-path", unit.path, lineno, f"引用的 {raw} 不存在",
+                        "文档事实指向了仓库里不存在的路径，按文档操作会直接失败。"
+                        + ("（该路径像运行时产物，需注明生成命令或移除引用。）" if artifact else "")
+                        + ("（历史快照文档，当时可能确实存在。）" if archive else ""),
+                        "改为真实路径；文件已迁移时同步更新文档；产物路径写明生成方式。",
+                        "review" if (artifact or archive) else "must-fix",
+                    ))
                     continue
                 if m.group(2):
                     full = os.path.join(repo.root, raw)
@@ -692,7 +691,7 @@ def collect_d8(repo: Repo) -> Dimension:
     if no_expiry:
         dim.findings.append(Finding(
             "D8-debt-no-expiry", "docs/known-red-register.md", 0,
-            f"{len(no_expiry)} 条已知红没有到期/复核条件：{', '.join(no_expiry[:8])}",
+            f"{len(no_expiry)} 条已知红没有到期/复核条件：{', '.join(no_expiry)}",
             "债务没有到期就不会被重新审视，只增不减。",
             "为每条补「复核日期」或「转绿条件」；转绿条件已有时可视为到期判据。",
             "review",
@@ -705,13 +704,14 @@ def collect_d8(repo: Repo) -> Dimension:
 
 def collect_all(repo: Repo) -> Tuple[List[Axiom], List[Dimension]]:
     axioms = build_axioms(repo)
+    reset_skips()
     units = repo.py_units(("desktop", "mbdsdr_ai", "tests", "scripts", "tools"))
     base: List[Finding] = []
     docs = repo.doc_units()
     for axiom in axioms:
         try:
-            # A10/A11 检查的是文档里的事实，其余检查源码/测试。
-            target = docs if axiom.id in {"A10", "A11"} else units
+            # A10/A11/A14 检查的是文档与台账里的事实，其余检查源码/测试。
+            target = docs if axiom.id in {"A10", "A11", "A14"} else units
             base.extend(axiom.scan(target))
         except Exception as exc:  # 检查器自身故障必须显式暴露
             base.append(Finding(

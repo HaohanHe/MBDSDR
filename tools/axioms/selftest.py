@@ -17,6 +17,7 @@ from dataclasses import dataclass
 from typing import Callable, Dict, List, Optional, Sequence
 
 from .model import Axiom, Finding, Repo, priority_score
+from .ratchet import build_baseline, compare, load_baseline, snippet_key, write_baseline
 from .survey import audit_waiver_items, collect_all
 
 
@@ -89,10 +90,22 @@ CASES: List[Case] = [
          "mbdsdr_ai/conversation.py 读会话文件 except Exception: pass",
          {"mbdsdr_ai/store.py": "import json\n\ndef load(p):\n    try:\n        return json.load(open(p))\n    except Exception:\n        pass\n"},
          {"mbdsdr_ai/store.py": "import json, logging\n\ndef load(p):\n    try:\n        return json.load(open(p))\n    except Exception as exc:\n        logging.warning('load failed: %s', exc)\n        return None\n"}),
+    Case("A03", "换方法名/包一层不能绕过",
+         "`ConfigStore.read()` 这类不叫 load/read_text 的读法（名字白名单的绕过面）",
+         {"mbdsdr_ai/store.py": "from pathlib import Path\n\nclass ConfigStore:\n    def __init__(self, root):\n        self._path = Path(root) / 'config.json'\n\n    def _fetch(self):\n        return self._path.read_text()\n\n    def read(self):\n        try:\n            return self._fetch()\n        except Exception:\n            return {}\n"},
+         {"mbdsdr_ai/store.py": "import logging\nfrom pathlib import Path\n\nclass ConfigStore:\n    def __init__(self, root):\n        self._path = Path(root) / 'config.json'\n\n    def _fetch(self):\n        return self._path.read_text()\n\n    def read(self):\n        try:\n            return self._fetch()\n        except FileNotFoundError:\n            return {}\n        except Exception as exc:\n            logging.warning('config read failed: %s', exc)\n            return None\n"}),
     Case("A04", "读损坏后仍整文件覆写",
          "mbdsdr_ai/conversation.py 读失败回默认后继续 json.dump",
          {"mbdsdr_ai/store.py": "import json, os\n\ndef load(p):\n    try:\n        return json.load(open(os.path.expanduser(p)))\n    except Exception:\n        return {}\n\ndef save(p, data):\n    json.dump(data, open(os.path.expanduser(p), 'w'))\n"},
-         {"mbdsdr_ai/store.py": "import json, os\n\ndef load(p):\n    try:\n        return json.load(open(os.path.expanduser(p)))\n    except Exception:\n        backup_corrupt(p)\n        return {}\n\ndef save(p, data):\n    json.dump(data, open(os.path.expanduser(p), 'w'))\n"}),
+         {"mbdsdr_ai/store.py": "import json, os, shutil\n\ndef backup_corrupt(p):\n    shutil.copy(p, p + '.corrupt')\n\ndef load(p):\n    try:\n        return json.load(open(os.path.expanduser(p)))\n    except Exception:\n        backup_corrupt(p)\n        return {}\n\ndef save(p, data):\n    json.dump(data, open(os.path.expanduser(p), 'w'))\n"}),
+    Case("A04", "空壳 backup 函数不能关掉检查",
+         "旧判据「模块里出现 corrupt|backup 字样就整模块跳过」——命名即开关",
+         {"mbdsdr_ai/store.py": "import json, os\n\ndef _backup_corrupt(p):\n    pass\n\ndef load(p):\n    try:\n        return json.load(open(os.path.expanduser(p)))\n    except Exception:\n        return {}\n\ndef save(p, data):\n    json.dump(data, open(os.path.expanduser(p), 'w'))\n"},
+         {"mbdsdr_ai/store.py": "import json, os, shutil\n\ndef _backup_corrupt(p):\n    shutil.copy(p, p + '.corrupt')\n\ndef load(p):\n    try:\n        return json.load(open(os.path.expanduser(p)))\n    except Exception:\n        _backup_corrupt(p)\n        return {}\n\ndef save(p, data):\n    json.dump(data, open(os.path.expanduser(p), 'w'))\n"}),
+    Case("A04", "pathlib + 改名读法不能绕过",
+         "读用 Path.read_text 包在自定义方法里，写用 open(...'w') + json.dump",
+         {"mbdsdr_ai/store.py": "import json\nfrom pathlib import Path\n\nclass Store:\n    def __init__(self):\n        self._file = Path.home() / '.mbdsdr' / 'state.json'\n\n    def _grab(self):\n        return self._file.read_text()\n\n    def load(self):\n        try:\n            return json.loads(self._grab())\n        except Exception:\n            return {}\n\n    def save(self, data):\n        with open(self._file, 'w') as f:\n            json.dump(data, f)\n"},
+         {"mbdsdr_ai/store.py": "import logging\nfrom pathlib import Path\n\nclass Store:\n    def __init__(self):\n        self._file = Path.home() / '.mbdsdr' / 'state.json'\n\n    def _grab(self):\n        return self._file.read_text()\n\n    def load(self):\n        try:\n            return json.loads(self._grab())\n        except FileNotFoundError:\n            return {}\n        except Exception as exc:\n            logging.warning('state read failed: %s', exc)\n            self._backup()\n            return None\n\n    def _backup(self):\n        import shutil\n        shutil.copy(self._file, str(self._file) + '.corrupt')\n\n    def save(self, data):\n        with open(self._file, 'w') as f:\n            json.dump(data, f)\n"}),
     Case("A05", "物理上不可能通过的断言",
          "tests/test_network_failure_modes.py:407 慢滴握手（消息自述需要 307s）",
          {"tests/test_x.py": "def test_x():\n    assert False, \"按当前实现需要 307s 才可能结束\"\n"},
@@ -169,6 +182,18 @@ CASES: List[Case] = [
          {"docs/x.md": "见 `desktop/nope.py`。\n"},
          {"docs/x.md": "见 `desktop/ok.py`。\n", "desktop/ok.py": "x = 1\n"},
          match="D6-missing-path"),
+    Case("A14", "台账只用行号定位",
+         "desktop/main_window.py 改十几行后，豁免 :8327/:12761/:14455 全部失效",
+         {"docs/known-red-register.md": "# K01\n\n- 位置：`desktop/ok.py:12`\n",
+          "desktop/ok.py": "def apply():\n    return 1\n"},
+         {"docs/known-red-register.md": "# K01\n\n- 位置：`desktop/ok.py:12` 的 `apply()`\n",
+          "desktop/ok.py": "def apply():\n    return 1\n"}),
+    Case("A14", "台账引用了不存在的符号",
+         "符号改名/删除后，台账仍指向旧函数名",
+         {"docs/known-red-register.md": "# K01\n\n- 位置：`desktop/ok.py:12` 的 `apply_all()`\n",
+          "desktop/ok.py": "def apply():\n    return 1\n"},
+         {"docs/known-red-register.md": "# K01\n\n- 位置：`desktop/ok.py:12` 的 `apply()`\n",
+          "desktop/ok.py": "def apply():\n    return 1\n"}),
     Case("A10", "文档引用不存在的提交",
          "docs/推进报告-本轮排错.md:141 引用不存在的 `5d09bb2`",
          {"docs/x.md": "见提交 `5d09bb2`。\n", "desktop/__init__.py": ""},
@@ -177,7 +202,7 @@ CASES: List[Case] = [
     Case("A11", "绿色声明绑定到不存在的树",
          "docs/learn/phase40/ci-notes.md 的绿色记录距 HEAD 752 个提交",
          {"docs/x.md": "本轮全绿 `5d09bb2`。\n"},
-         {"docs/x.md": "本轮全绿 `{head}`。\n"},
+         {"docs/x.md": "本轮全绿 `{head}`。\n转绿条件：4 条全部通过（动态 tooltip 三项）。\n"},
          True),
 ]
 
@@ -241,4 +266,111 @@ def _extra_checks() -> List[dict]:
         "ok": order_ok,
         "detail": "" if order_ok else "优先级没有把用户可感知损失排在前面",
     })
+
+    results.append(_ratchet_check())
+    results.append(_locator_drift_check())
     return results
+
+
+def _locator_drift_check() -> dict:
+    """A14 反证：目标文件顶部插入 20 行空行后，按符号定位的引用必须仍然通过。
+
+    如果插入空行后变红，说明那条判据还是靠行号。
+    """
+    ledger = "# K01\n\n- 位置：`desktop/ok.py:12` 的 `apply()`\n"
+    target = "def apply():\n    return 1\n"
+    root = tempfile.mkdtemp(prefix="mbdsdr-locator-")
+    try:
+        _write_tree(root, {"desktop/ok.py": target, "docs/known-red-register.md": ledger})
+        before = [f for d in collect_all(Repo(root))[1] for f in d.findings if f.rule == "A14"]
+        _write_tree(root, {"desktop/ok.py": "\n" * 20 + target})
+        after = [f for d in collect_all(Repo(root))[1] for f in d.findings if f.rule == "A14"]
+        # 台账常写裸文件名（`main_window.py:3679`）：能唯一解析到 desktop/ok.py，
+        # 不能因为「不是仓内相对路径」就报模块不存在。
+        _write_tree(root, {"docs/known-red-register.md": "- 位置：`ok.py:12` 的 `apply()`\n"})
+        bare = [f for d in collect_all(Repo(root))[1] for f in d.findings if f.rule == "A14"]
+        ok = not before and not after and not bare
+        detail = ""
+        if before:
+            detail = "按符号定位的引用被误报（符号存在但检查没认出来）"
+        elif after:
+            detail = "目标文件插入 20 行空行后引用变红：这条判据仍然依赖行号"
+        elif bare:
+            detail = "裸文件名（唯一可解析）被误报成模块不存在"
+        return {
+            "rule": "A14", "name": "行号漂移不影响符号定位",
+            "provenance": "desktop/main_window.py 改动导致豁免 :8327/:12761/:14455 全部失效",
+            "positive_hits": len(before), "negative_hits": len(after),
+            "ok": ok, "detail": detail,
+        }
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def _ratchet_check() -> dict:
+    """棘轮自检：新增即红、删掉即绿、换一条同数量的另一条不得互相抵消。"""
+    root = tempfile.mkdtemp(prefix="mbdsdr-ratchet-")
+    probe = "mbdsdr_ai/ratchet_probe.py"
+    probe2 = "mbdsdr_ai/ratchet_probe2.py"
+    code = ("import json\n\ndef load(p):\n    try:\n        return json.load(open(p))\n"
+            "    except Exception:\n        pass\n")
+    code2 = ("import json\n\ndef load2(p):\n    try:\n        return json.load(open(p))\n"
+             "    except Exception:\n        return None\n")
+    try:
+        _write_tree(root, {"desktop/__init__.py": ""})
+        repo = Repo(root)
+        _, dims = collect_all(repo)
+        base = build_baseline(repo, [f for d in dims for f in d.findings], "fixture")
+        write_baseline(repo, "docs/base.json", base)
+        loaded = load_baseline(repo, "docs/base.json")
+
+        _write_tree(root, {probe: code})
+        _, dims = collect_all(repo)
+        added = compare([f for d in dims for f in d.findings], loaded)
+        red_ok = any(f.path == probe and f.rule == "A03" for _, f in added.new)
+
+        _write_tree(root, {probe: ""})
+        os.remove(os.path.join(root, probe))
+        _, dims = collect_all(repo)
+        removed = compare([f for d in dims for f in d.findings], loaded)
+        green_ok = not removed.new and not removed.gone
+
+        # 同数量替换：先把 probe 记为基线，再「删 probe、加 probe2」。
+        # 数量仍是 1 对 1，但指纹不同，必须同时报出「新增 1 / 消失 1」。
+        _write_tree(root, {probe: code})
+        _, dims = collect_all(repo)
+        base2 = build_baseline(repo, [f for d in dims for f in d.findings], "fixture2")
+        os.remove(os.path.join(root, probe))
+        _write_tree(root, {probe2: code2})
+        _, dims = collect_all(repo)
+        swapped = compare([f for d in dims for f in d.findings], base2)
+        swap_ok = (
+            any(f.path == probe2 for _, f in swapped.new)
+            and any(str(e.get("path")) == probe for _, e in swapped.gone)
+        )
+
+        # 片段里内嵌的「对方文件:行号」不得影响指纹：对方挪一行也不能造出新条目。
+        drift_ok = (
+            snippet_key("file_to_vcdus 与 mbdsdr_ai/fengyun_sat.py:286 同名") ==
+            snippet_key("file_to_vcdus 与 mbdsdr_ai/fengyun_sat.py:817 同名")
+        )
+
+        ok = red_ok and green_ok and swap_ok and drift_ok
+        detail = ""
+        if not red_ok:
+            detail = "新增静默 except: pass 没有变红"
+        elif not green_ok:
+            detail = "删掉违规文件后仍然红（或出现幻影消失）"
+        elif not swap_ok:
+            detail = "同数量替换被抵消：棘轮按数量而不是按指纹"
+        elif not drift_ok:
+            detail = "片段内的文件行号参与了指纹：对方文件挪一行就会报假新增"
+        return {
+            "rule": "R1", "name": "棘轮：新增即红/删掉即绿/不可抵消",
+            "provenance": "docs/axioms.md 棘轮规则",
+            "positive_hits": 1 if red_ok else 0,
+            "negative_hits": 0 if green_ok else 1,
+            "ok": ok, "detail": detail,
+        }
+    finally:
+        shutil.rmtree(root, ignore_errors=True)

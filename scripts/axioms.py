@@ -21,7 +21,18 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
+from tools.axioms.checks import skip_report  # noqa: E402
 from tools.axioms.model import DEFAULT_WAIVER_FILE, Repo, apply_waivers, load_waivers  # noqa: E402
+from tools.axioms.ratchet import (  # noqa: E402
+    DEFAULT_BASELINE,
+    RatchetResult,
+    build_baseline,
+    compare,
+    load_baseline,
+    render,
+    render_accept,
+    write_baseline,
+)
 from tools.axioms.report8 import Report8  # noqa: E402
 from tools.axioms.selftest import run as run_selftest  # noqa: E402
 from tools.axioms.survey import collect_all  # noqa: E402
@@ -39,7 +50,19 @@ def main(argv=None) -> int:
     parser.add_argument("--rule", default="", help="只显示某条规则（如 A03 / D1）")
     parser.add_argument("--fail-on", choices=["none", "must-fix"], default="none",
                         help="默认不因违规失败；接入 CI 时用 must-fix")
+    parser.add_argument("--ratchet", dest="ratchet", action="store_true", default=None,
+                        help="启用棘轮（默认：基线存在即启用）")
+    parser.add_argument("--no-ratchet", dest="ratchet", action="store_false",
+                        help="本次不做棘轮比对")
+    parser.add_argument("--baseline", default="", help=f"基线路径（默认 {DEFAULT_BASELINE}）")
+    parser.add_argument("--accept-current", action="store_true",
+                        help="把当前违规写为新基线；会打印本次接受/移除的条目")
+    parser.add_argument("--accept-reason", default="", help="写基线时记录的理由")
     args = parser.parse_args(argv)
+
+    if args.accept_current and args.rule:
+        print("拒绝：--accept-current 不能与 --rule 一起用（会只保留被过滤的条目）。", file=sys.stderr)
+        return 2
 
     repo = Repo(args.root)
 
@@ -58,13 +81,17 @@ def main(argv=None) -> int:
     for dim in dims:
         apply_waivers(dim.findings, waivers)
 
+    # 棘轮始终看全量（未过滤），否则 --rule 会把基线算残。
+    all_findings = [f for dim in dims for f in dim.findings]
+    skips_snapshot = skip_report()
+
     if args.rule:
         rule = args.rule.upper()
         for dim in dims:
             dim.findings = [f for f in dim.findings if f.rule.upper() == rule or dim.id == rule]
 
     self_test = [] if args.no_self_test else run_selftest(repo)
-    report = Report8(axioms, dims, self_test)
+    report = Report8(axioms, dims, self_test, skips_snapshot)
 
     print(report.render_text(max_per_dim=args.max_per_dim, prioritize=args.prioritize))
 
@@ -83,7 +110,31 @@ def main(argv=None) -> int:
         return 1
     if args.fail_on == "must-fix" and report.summary()["must_fix"] > 0:
         return 1
-    return 0
+
+    baseline_path = args.baseline or DEFAULT_BASELINE
+    if args.accept_current:
+        if any(not t["ok"] for t in self_test):
+            print("\n拒绝写基线：反证自检未通过，检查器本身不可信。", file=sys.stderr)
+            return 1
+        old = load_baseline(repo, baseline_path)
+        old_total = len((old or {}).get("entries", {}))
+        result = compare(all_findings, old) if old else RatchetResult()
+        new_data = build_baseline(repo, all_findings, repo.head(), args.accept_reason)
+        full = write_baseline(repo, baseline_path, new_data)
+        print(render_accept(result, old_total, int(new_data["total_active"]), full, args.accept_reason))
+        return 0
+
+    ratchet_on = args.ratchet if args.ratchet is not None else True
+    if not ratchet_on:
+        return 0
+    baseline = load_baseline(repo, baseline_path)
+    if baseline is None:
+        print(f"\n── 棘轮 ──\n尚未建立基线：运行 python scripts/axioms.py --accept-current 建立。"
+              f"（路径 {baseline_path}）")
+        return 0
+    result = compare(all_findings, baseline)
+    print(render(result, baseline_path))
+    return 1 if result.failed else 0
 
 
 if __name__ == "__main__":

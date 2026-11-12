@@ -212,6 +212,13 @@ class Repo:
         except ValueError:
             return None
 
+    def head(self) -> str:
+        proc = subprocess.run(
+            ["git", "-C", self.root, "rev-parse", "--short", "HEAD"],
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+        )
+        return proc.stdout.strip() if proc.returncode == 0 else "unknown"
+
 
 def _read(path: str) -> str:
     try:

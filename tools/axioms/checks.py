@@ -1,4 +1,4 @@
-"""13 条公理的可执行检查。
+"""14 条公理的可执行检查。
 
 每条检查只读仓库内容：源码 AST、测试里的 skip/xfail 元数据、文档里引用的
 提交号。不 import 项目模块、不启动 Qt、不连硬件。
@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import ast
+import json
 import os
 import re
 from typing import Dict, Iterable, List, Optional, Sequence, Set, Tuple
@@ -16,12 +17,31 @@ from .model import (
     Finding,
     Repo,
     Unit,
+    _read,
     const_eval,
     enclosing_functions,
     line_of,
     parse,
     walk_with_parents,
 )
+
+# ────────────────────────────── 跳过账本 ──────────────────────────────
+# 「没报」可能是真的没有违规，也可能是检查器主动没看。两者必须分开计数，
+# 否则「应修 0」无法区分「没问题」与「没看见」。
+_SKIPS: Dict[str, Dict[str, int]] = {}
+
+
+def note_skip(rule: str, reason: str) -> None:
+    bucket = _SKIPS.setdefault(rule, {})
+    bucket[reason] = bucket.get(reason, 0) + 1
+
+
+def reset_skips() -> None:
+    _SKIPS.clear()
+
+
+def skip_report() -> Dict[str, Dict[str, int]]:
+    return {rule: dict(reasons) for rule, reasons in sorted(_SKIPS.items())}
 
 # ────────────────────────────── 公共工具 ──────────────────────────────
 
@@ -43,6 +63,8 @@ SPEC_CONTEXT = re.compile(
 )
 HISTORY_MARKER = re.compile(r"历史|当时|首次|截至|快照|此后|不再|未重跑|已修|已销账|previous|at the time")
 GREEN_CLAIM = re.compile(r"全绿|全部通过|零失败|all green")
+#: 「转绿条件：…全部通过」是在写出口判据，不是声称当前树已经绿。
+EXIT_CRITERION = re.compile(r"转绿条件|销账条件|复核条件|验收条件|判据|通过条件|acceptance criteria", re.I)
 IMPOSSIBLE_MESSAGE = re.compile(
     r"永不可能|不可能(?:通过|成立|绿|变绿)|才可能结束|"
     r"永远不(?:会|可能)(?:通过|结束|退出|返回)"
@@ -216,18 +238,89 @@ def scan_a02(units: List[Unit]) -> List[Finding]:
 
 # ────────────────────────────── A03 ──────────────────────────────
 
+#: 名字只是线索，不是门槛。真正的判据是「这段代码有没有碰持久化」：
+#: 被 open(...) / Path(...) 绑定的对象、模块内做过同样事情的函数，都算。
+#: 之前白名单里没有裸 `read`，于是 `ConfigStore.read()` 换个方法名就合规——
+#: 列举法的病不是漏了哪个名字，而是它可以被换名字绕过。
+_PERSIST_HINT = {
+    "read", "readline", "readlines", "read_text", "read_bytes", "readinto",
+    "load", "loads", "safe_load", "parse",
+}
+_OPENERS = {"open", "Path", "PurePath", "PureWindowsPath", "PurePosixPath"}
 
-_PERSIST_READ = {"load", "loads", "read_text", "read_bytes", "safe_load"}
+
+def _attr_text(node: ast.AST) -> str:
+    if isinstance(node, ast.Name):
+        return node.id
+    if isinstance(node, ast.Attribute):
+        base = _attr_text(node.value)
+        return f"{base}.{node.attr}" if base else node.attr
+    if isinstance(node, ast.Call):
+        return _call_name(node)
+    if isinstance(node, ast.Subscript):
+        return _attr_text(node.value)
+    return ""
 
 
-def _has_persist_read(nodes: Iterable[ast.AST]) -> bool:
+def _is_opener(call: ast.Call) -> bool:
+    name = _call_name(call)
+    return name in _OPENERS or name.split(".")[-1] == "open"
+
+
+def _persistent_names(tree: ast.Module) -> Set[str]:
+    """被 open(...) / Path(...) 绑定出来的名字：之后调什么方法都视为持久化 I/O。"""
+    names: Set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.With, ast.AsyncWith)):
+            for item in node.items:
+                if not isinstance(item.context_expr, ast.Call):
+                    continue
+                if _is_opener(item.context_expr) and item.optional_vars is not None:
+                    text = _attr_text(item.optional_vars)
+                    if text:
+                        names.add(text)
+        elif isinstance(node, ast.Assign) and isinstance(node.value, ast.Call) and _is_opener(node.value):
+            for target in node.targets:
+                text = _attr_text(target)
+                if text:
+                    names.add(text)
+    return names
+
+
+def _touches_persistence(nodes: Iterable[ast.AST], bound: Set[str],
+                         module_fns: Set[str]) -> bool:
     for node in nodes:
         for child in ast.walk(node):
-            if isinstance(child, ast.Call):
-                name = _call_name(child)
-                if name in _PERSIST_READ:
-                    return True
+            if not isinstance(child, ast.Call):
+                continue
+            name = _call_name(child)
+            short = name.split(".")[-1]
+            if short in _OPENERS or short == "open":
+                return True
+            if short in _PERSIST_HINT:
+                return True
+            if isinstance(child.func, ast.Attribute) and _attr_text(child.func.value) in bound:
+                return True
+            if name in module_fns or short in module_fns:
+                return True
     return False
+
+
+def _persist_functions(tree: ast.Module, bound: Set[str]) -> Set[str]:
+    """模块内碰持久化的函数（含「包一层」：调用这些函数的函数也算）。"""
+    funcs = [n for n in ast.walk(tree)
+             if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))]
+    out: Set[str] = set()
+    for fn in funcs:
+        if _touches_persistence(fn.body, bound, set()):
+            out.add(fn.name)
+    for _ in range(2):  # 允许两层包装
+        for fn in funcs:
+            if fn.name in out:
+                continue
+            if _touches_persistence(fn.body, bound, out):
+                out.add(fn.name)
+    return out
 
 
 def scan_a03(units: List[Unit]) -> List[Finding]:
@@ -238,16 +331,20 @@ def scan_a03(units: List[Unit]) -> List[Finding]:
         tree = parse(unit)
         if tree is None:
             continue
+        bound = _persistent_names(tree)
+        persist_fns = _persist_functions(tree, bound)
         for node in ast.walk(tree):
             if not isinstance(node, ast.Try):
                 continue
-            if not _has_persist_read(node.body):
+            broad_silent = [h for h in node.handlers
+                            if _broad_except(h) and _silent_handler(h)]
+            if not broad_silent:
                 continue
-            for handler in node.handlers:
-                if not _broad_except(handler):
-                    continue
-                if not _silent_handler(handler):
-                    continue
+            if not _touches_persistence(node.body, bound, persist_fns):
+                for handler in broad_silent:
+                    note_skip("A03", "宽泛静默 except，但这段代码不碰持久化（需人工复核）")
+                continue
+            for handler in broad_silent:
                 _add(
                     findings, "A03", unit, handler.lineno,
                     "持久化读取失败被宽泛 except 静默吞掉（不记录、不提示、不区分失败原因），"
@@ -266,35 +363,141 @@ _USER_DATA_HINT = re.compile(
     re.I,
 )
 
+#: 真正的「备份」是拷贝/改名原文件，而不是模块里出现了 backup 这个词。
+#: 之前按整模块扫 `corrupt|backup` 决定跳过，等于给被测代码一个开关：
+#: 写个空函数 `_backup_corrupt` 就能让这个模块永远不被检查。
+_BACKUP_QUALIFIED = {
+    "shutil.copy", "shutil.copy2", "shutil.copyfile", "shutil.copyfileobj",
+    "shutil.move", "os.rename", "os.replace", "os.link",
+}
+_BACKUP_SHORT = {"copy", "copy2", "copyfile", "copyfileobj", "move"}
+
+
+def _same_path(unit: Unit, node: ast.AST, expected: str) -> bool:
+    if not expected:
+        return False
+    seg = " ".join((ast.get_source_segment(unit.text, node) or "").split())
+    return seg == expected
+
+
+def _read_path(unit: Unit, nodes: Iterable[ast.AST], bound: Set[str],
+               persist_fns: Set[str]) -> str:
+    """读失败前那次持久化读取的路径表达式（用于判断备份是不是备份同一个文件）。"""
+    for node in nodes:
+        for child in ast.walk(node):
+            if not isinstance(child, ast.Call):
+                continue
+            name = _call_name(child)
+            short = name.split(".")[-1]
+            persistent = (
+                short in _OPENERS or short == "open" or short in _PERSIST_HINT
+                or (isinstance(child.func, ast.Attribute) and _attr_text(child.func.value) in bound)
+                or name in persist_fns or short in persist_fns
+            )
+            if not persistent:
+                continue
+            if child.args:
+                return " ".join((ast.get_source_segment(unit.text, child.args[0]) or "").split())
+            if isinstance(child.func, ast.Attribute):
+                return _attr_text(child.func.value)
+    return ""
+
+
+def _backup_names(tree: ast.Module) -> Set[str]:
+    """本模块里可用的「备份」调用名：shutil/os 的拷贝改名，或 from ... import 进来的同名函数。"""
+    names = set(_BACKUP_QUALIFIED)
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and node.module in {"shutil", "os"}:
+            for a in node.names:
+                if a.name in {"copy", "copy2", "copyfile", "copyfileobj", "move",
+                              "rename", "replace", "link"}:
+                    names.add(a.asname or a.name)
+    return names
+
+
+def _is_backup_call(unit: Unit, node: ast.Call, names: Set[str], read_path: str = "") -> bool:
+    op = _call_name(node)
+    if op in names:
+        return True
+    short = op.split(".")[-1]
+    if short in {"rename", "replace"} and isinstance(node.func, ast.Attribute):
+        # Path(p).replace(...) / p.rename(...)：接收者或参数里出现被读的那个路径。
+        if not read_path:
+            return True
+        segments = [ast.get_source_segment(unit.text, n) or "" for n in node.args]
+        receiver = ast.get_source_segment(unit.text, node.func.value) or ""
+        return any(read_path in s for s in segments + [receiver])
+    return False
+
+
+def _backup_functions(tree: ast.Module, names: Set[str]) -> Set[str]:
+    """函数体里真的做了拷贝/改名的模块内函数。
+
+    只看结构（有没有 shutil.copy / os.replace 这类调用），不看名字：
+    空壳 `def _backup_corrupt(p): pass` 不在集合里。
+    """
+    out: Set[str] = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        for child in ast.walk(node):
+            if isinstance(child, ast.Call) and _call_name(child) in names:
+                out.add(node.name)
+                break
+    return out
+
+
+def _handler_backs_up(unit: Unit, handler: ast.ExceptHandler, read_path: str,
+                      backup_fns: Set[str], names: Set[str]) -> bool:
+    """读失败分支里是否有可达的备份调用（直接调用，或调用模块内真会拷贝的函数）。"""
+    for node in ast.walk(handler):
+        if not isinstance(node, ast.Call):
+            continue
+        if _is_backup_call(unit, node, names, read_path):
+            return True
+        op = _call_name(node)
+        if op in backup_fns or op.split(".")[-1] in backup_fns:
+            return True
+    return False
+
 
 def scan_a04(units: List[Unit]) -> List[Finding]:
     findings: List[Finding] = []
     for unit in units:
         if not (unit.path.startswith("desktop/") or unit.path.startswith("mbdsdr_ai/")):
             continue
-        # 只认 json.dump( 这个「整文件覆写」，json.dumps( 只是序列化，不会写盘。
-        if not re.search(r"json\.dump\(", unit.text):
-            continue
-        if not _USER_DATA_HINT.search(unit.text):
-            continue
-        if re.search(r"corrupt|backup|write_reason|\.corrupt-", unit.text, re.I):
-            continue
         tree = parse(unit)
         if tree is None:
             continue
-        silent_lines: List[int] = []
-        for node in ast.walk(tree):
-            if not (isinstance(node, ast.Try) and _has_persist_read(node.body)):
-                continue
-            for handler in node.handlers:
-                if _broad_except(handler) and _silent_handler(handler):
-                    silent_lines.append(handler.lineno)
-        if not silent_lines:
-            continue
+        # 只认 json.dump( 这个「整文件覆写」，json.dumps( 只是序列化，不会写盘。
         dump_line = next(
             (i for i, line in enumerate(unit.text.splitlines(), 1) if re.search(r"json\.dump\(", line)),
             0,
         )
+        names = _backup_names(tree)
+        backup_fns = _backup_functions(tree, names)
+        bound = _persistent_names(tree)
+        persist_fns = _persist_functions(tree, bound)
+        silent_lines: List[int] = []
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Try):
+                continue
+            if not _touches_persistence(node.body, bound, persist_fns):
+                continue
+            read_path = _read_path(unit, node.body, bound, persist_fns)
+            for handler in node.handlers:
+                if not (_broad_except(handler) and _silent_handler(handler)):
+                    continue
+                if _handler_backs_up(unit, handler, read_path, backup_fns, names):
+                    note_skip("A04", "读失败分支里有可达的备份调用")
+                    continue
+                if not dump_line:
+                    note_skip("A04", "模块没有整文件写回路径")
+                    continue
+                if not _USER_DATA_HINT.search(unit.text):
+                    note_skip("A04", "路径不像用户数据（无 expanduser/APPDATA 等）")
+                    continue
+                silent_lines.append(handler.lineno)
         for line in sorted(set(silent_lines)):
             _add(
                 findings, "A04", unit, line,
@@ -578,6 +781,7 @@ def scan_a07(units: List[Unit]) -> List[Finding]:
             if unit.path in guarded[method]:
                 continue
             if WIDGET_RECEIVER.search(_receiver_text(unit, node)):
+                note_skip("A07", "接收者名字像控件（display/label/panel…），视为展示而非执行")
                 continue
             seen_files.add(unit.path)
             _add(
@@ -696,11 +900,15 @@ def scan_a09(units: List[Unit]) -> List[Finding]:
 
 HASH_IN_BACKTICKS = re.compile(r"`([0-9a-f]{7,40})`")
 PLACEHOLDERS = {"abc1234", "0123456789", "deadbeef", "0000000", "1234567"}
-#: 同一段反引号里的 16 进制串可能根本不是提交：会话 id、blob、字节串、二进制字面量、
-#: 上游仓库版本号。这些不该算「引用了不存在的提交」。
-A10_NON_COMMIT = re.compile(
+#: 只有当 hash 前紧邻「提交 / commit / HEAD」时，才算「按提交引用」。
+#: 同一行后文出现「提交」不算——那句可能说的是另一件事（例如「接管提交 diff」）。
+A10_AS_COMMIT = re.compile(r"(?:提交|commit|HEAD)[\s:：]*$", re.I)
+#: 「不是提交」的说明必须紧贴这个 hash（前后各一句内），不能靠整行任意位置的一个词来关掉检查。
+#: 窗口从「整行」收到 ±24 字符后，这些词就不再是开关，而是就近的语境证据。
+A10_NON_COMMIT_NEAR = re.compile(
     r"会话|session|线名|交接方|收件方|来源|提出|维护者|owner|blob|字节|byte|打包|"
-    r"多项式|系数|二进制|0b[01]+|第三方|不存在|幻影|幽灵|phantom|未落地|已作废",
+    r"多项式|系数|二进制|0b[01]{6,}|第三方|不存在|幻影|幽灵|phantom|未落地|已作废|"
+    r"报出|误报|抓到|示例|例如|示意|占位|placeholder",
     re.I,
 )
 
@@ -735,25 +943,26 @@ def scan_a10(repo: Repo, units: List[Unit]) -> List[Finding]:
                 token = m.group(1)
                 if not _looks_like_commit(token):
                     continue
-                if A10_NON_COMMIT.search(line):
+                near = line[max(0, m.start() - 24): m.end() + 24]
+                if A10_NON_COMMIT_NEAR.search(near):
+                    note_skip("A10", "hash 紧邻处标明不是提交（会话/blob/二进制等）")
                     continue
                 if line[: m.start()].rstrip().endswith("@"):
                     # `repo @ <hash>` 指向上游版本，不是本仓提交。
+                    note_skip("A10", "`repo @ hash` 指向上游版本")
                     continue
                 occurrences.setdefault(token, []).append((unit, lineno, line))
     types = repo.batch_object_types(list(occurrences))
     for token, items in occurrences.items():
         typ = types.get(token, "missing")
         for unit, lineno, line in items:
-            if re.search(r"例如|示例|示意|占位|placeholder", line):
-                continue
             if typ == "missing":
                 _add(
                     findings, "A10", unit, lineno,
                     f"文档引用的提交 `{token}` 在本仓不存在；基于它的后续结论无法复核。",
                     "改为真实提交号；未落地的改动标注「未落地」，不要用提交口吻引用。",
                 )
-            elif typ != "commit" and re.search(r"提交|commit|HEAD", line, re.I):
+            elif typ != "commit" and A10_AS_COMMIT.search(line[: m.start()]):
                 _add(
                     findings, "A10", unit, lineno,
                     f"`{token}` 在本仓是 {typ}，不是提交，但文中按提交引用。",
@@ -783,11 +992,16 @@ def scan_a11(repo: Repo, units: List[Unit]) -> List[Finding]:
             if not GREEN_CLAIM.search(line):
                 continue
             window = "\n".join(lines[max(0, i - 2): min(len(lines), i + 3)])
-            if HISTORY_MARKER.search(window):
+            if EXIT_CRITERION.search(line):
+                note_skip("A11", "写的是转绿/验收判据，不是已绿的声明")
+                continue
+            if HISTORY_MARKER.search(line):
+                note_skip("A11", "同一句已标注历史/快照")
                 continue
             match = HASH_IN_BACKTICKS.search(window)
             if not match:
                 if unit.path.startswith("docs/learn/") or ARCHIVE_DOC.search(unit.path):
+                    note_skip("A11", "历史快照目录里的声明不承担当前树结论")
                     continue
                 if not no_hash_reported:
                     no_hash_reported = True
@@ -961,6 +1175,156 @@ def scan_a13(units: List[Unit]) -> List[Finding]:
     return findings
 
 
+# ────────────────────────────── A14 ──────────────────────────────
+
+#: 机器会读的台账：这些位置一旦漂移，闸门会指向错误代码（而不是「过期记录」）。
+#: 一次性审计报告里的行号属于历史快照，不在本规则范围内。
+LEDGER_DOCS = ("docs/known-red-register.md",)
+LEDGER_JSON = "docs/axioms-waivers.json"
+
+_LOC_REF = re.compile(r"(?P<path>(?:[A-Za-z0-9_.-]+/)*[A-Za-z0-9_.-]+\.py):(?P<line>\d+)(?:-\d+)?")
+_IDENT_HINT = re.compile(r"^[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)?$")
+
+
+def _file_index(repo: Repo) -> Dict[str, List[str]]:
+    index: Dict[str, List[str]] = {}
+    for dp, dn, fn in os.walk(repo.root):
+        dn[:] = [d for d in dn if d not in {".git", "__pycache__", ".venv", "build", "dist"}]
+        for f in fn:
+            index.setdefault(f, []).append(os.path.join(dp, f))
+    return index
+
+
+def _resolve_module(repo: Repo, rel: str, index: Dict[str, List[str]]) -> Tuple[Optional[str], int]:
+    """把台账里的路径解析成仓内真实模块。
+
+    台账常写裸文件名（`main_window.py:3679`），它本身不是仓内路径；
+    「模块不存在」按裸文件名判会全线误报。返回 (唯一解析结果, 同名候选数)。
+    """
+    if "/" in rel:
+        return (rel if os.path.isfile(os.path.join(repo.root, rel)) else None), 1
+    hits = index.get(rel, [])
+    if len(hits) == 1:
+        return repo.rel(hits[0]), 1
+    return None, len(hits)
+
+
+def _module_symbols(repo: Repo, rel: str, cache: Dict[str, Optional[Set[str]]]) -> Optional[Set[str]]:
+    """目标模块的符号表（函数/类/方法/模块级名字）；文件不存在返回 None。"""
+    if rel in cache:
+        return cache[rel]
+    path = os.path.join(repo.root, rel)
+    if not os.path.isfile(path):
+        cache[rel] = None
+        return None
+    tree = parse(Unit(rel, _read(path)))
+    names: Set[str] = set()
+    if tree is not None:
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                names.add(node.name)
+            elif isinstance(node, (ast.Assign, ast.AnnAssign)):
+                targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+                for target in targets:
+                    if isinstance(target, ast.Name):
+                        names.add(target.id)
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ClassDef):
+                for child in node.body:
+                    if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                        names.add(f"{node.name}.{child.name}")
+    cache[rel] = names
+    return names
+
+
+def scan_a14(repo: Repo, docs: List[Unit]) -> List[Finding]:
+    findings: List[Finding] = []
+    cache: Dict[str, Optional[Set[str]]] = {}
+    index = _file_index(repo)
+    for unit in docs:
+        if unit.path not in LEDGER_DOCS:
+            continue
+        for lineno, line in enumerate(unit.text.splitlines(), 1):
+            for m in _LOC_REF.finditer(line):
+                raw_rel = m.group("path").lstrip("./")
+                rel, candidates = _resolve_module(repo, raw_rel, index)
+                hints: List[str] = []
+                calls: List[str] = []
+                for token in re.findall(r"`([^`]+)`", line):
+                    text = token.strip()
+                    if "/" in text or ":" in text or text.endswith(".py"):
+                        continue
+                    call = re.fullmatch(r"([A-Za-z_]\w*)\(\)", text)
+                    if call:
+                        hints.append(call.group(1))
+                        calls.append(call.group(1))
+                    elif _IDENT_HINT.match(text):
+                        hints.append(text)
+                if rel is None:
+                    if candidates > 1:
+                        _add(
+                            findings, "A14", unit, lineno,
+                            f"位置引用只写裸文件名 `{raw_rel}`，仓内有 {candidates} 个同名模块，无法确定指向哪一个。",
+                            "写成仓内相对路径（如 desktop/xxx.py），并补上符号名。",
+                            "review",
+                        )
+                    else:
+                        _add(
+                            findings, "A14", unit, lineno, f"位置引用指向不存在的模块 {raw_rel}",
+                            "改为真实路径；文件迁移后同步更新台账。",
+                        )
+                    continue
+                symbols = _module_symbols(repo, rel, cache)
+                if symbols is None:
+                    _add(
+                        findings, "A14", unit, lineno, f"位置引用指向不存在的模块 {rel}",
+                        "改为真实路径；文件迁移后同步更新台账。",
+                    )
+                    continue
+                if not hints:
+                    _add(
+                        findings, "A14", unit, lineno,
+                        f"位置引用只有 `{m.group(0)}`：行号会随无关改动漂移，"
+                        "同一天内已发生多次「改十几行、豁免全部失效」。",
+                        "写成 `模块` 的 `函数名`（或一句可搜到的判断描述）；行号可留作辅助，但不能是唯一定位。",
+                        "review",
+                    )
+                elif calls and not any(name.split(".")[-1] in symbols for name in calls):
+                    _add(
+                        findings, "A14", unit, lineno,
+                        f"位置引用里的符号 {', '.join(calls)} 在 {rel} 的 AST 符号表里不存在（已改名/删除）。",
+                        "改成当前真实存在的函数/类名；符号不存在说明这条定位已经失效。",
+                    )
+    # 豁免文件：位置只允许「模块 + 符号/描述」，带行号即定位不稳定。
+    wpath = os.path.join(repo.root, LEDGER_JSON)
+    if os.path.isfile(wpath):
+        try:
+            data = json.loads(_read(wpath))
+        except Exception:
+            data = {}
+        for i, item in enumerate((data.get("waivers") or []) if isinstance(data, dict) else []):
+            rel = str(item.get("path", ""))
+            line_field = item.get("line", item.get("line_start"))
+            inline = bool(re.search(r":\d+$", rel))
+            if line_field is not None or inline:
+                findings.append(Finding(
+                    "A14", LEDGER_JSON, 0, f"waivers[{i}] 用行号定位：{rel}:{line_field or ''}",
+                    "豁免表是机器会读的台账；用行号定位时，目标文件一被改动，豁免就指向别的代码或直接失效。",
+                    "改为模块 + 符号（函数名）或一句可搜到、稳定的判断描述；行号最多作为附加说明。",
+                    "review",
+                ))
+            symbol = str(item.get("symbol", "") or "")
+            if symbol:
+                symbols = _module_symbols(repo, rel, cache)
+                if symbols is None or symbol not in symbols:
+                    findings.append(Finding(
+                        "A14", LEDGER_JSON, 0, f"waivers[{i}] 符号 {symbol} 在 {rel} 中不存在",
+                        "豁免指向的符号已不存在，这条豁免已经落到空处（既没保护代码，也没暴露问题）。",
+                        "更新为当前符号；若问题已修，删除该豁免。",
+                    ))
+    return findings
+
+
 # ────────────────────────────── 公理登记 ──────────────────────────────
 
 
@@ -1007,6 +1371,9 @@ def build_axioms(repo: Repo) -> List[Axiom]:
 
     def a13(units: List[Unit]) -> List[Finding]:
         return scan_a13(units)
+
+    def a14(units: List[Unit]) -> List[Finding]:
+        return scan_a14(repo, units)
 
     return [
         Axiom(
@@ -1128,5 +1495,17 @@ def build_axioms(repo: Repo) -> List[Axiom]:
              "mbdsdr_ai/device_manager.py:422/451 序列号缺失时用 `rtl-<枚举序号>` / `soapysdr-<序号>` 兜底"],
             "identity_not_reusable", "scripts/file_claim.py:540",
             3, 3, 2, a13,
+        ),
+        Axiom(
+            "A14", "定位必须用符号，不能用行号",
+            "台账/豁免引用代码位置时，必须用「模块 + 符号（函数/类/判断描述）」；"
+            "行号可以留作辅助，但不能是唯一定位方式——行号会随无关改动漂移，"
+            "目标文件一改，整批引用同时失效。",
+            "扫描机器会读的台账（known-red 台账、豁免表）里的 `path.py:N` 引用："
+            "无符号即「定位不稳定」；写了符号则用 AST 符号表校验它是否真实存在。",
+            ["desktop/main_window.py 被另一条线改十几行后，三个豁免的 :8327/:12761/:14455 全部失效",
+             "同一天另一份文档的部分行号引用同样失效"],
+            "locator_is_symbolic", "docs/known-red-register.md 里的 `path.py:行号`",
+            2, 3, 2, a14,
         ),
     ]

@@ -7,16 +7,20 @@ from dataclasses import asdict
 from datetime import date
 from typing import Dict, List, Sequence
 
-from .checks import build_axioms
+from .checks import build_axioms, skip_report
 from .model import Axiom, Finding, priority_score
 from .survey import Dimension
 
 
 class Report8:
-    def __init__(self, axioms: Sequence[Axiom], dims: Sequence[Dimension], self_test: Sequence[dict]):
+    def __init__(self, axioms: Sequence[Axiom], dims: Sequence[Dimension], self_test: Sequence[dict],
+                 skips: Dict[str, Dict[str, int]] = None):
         self.axioms = list(axioms)
         self.dims = list(dims)
         self.self_test = list(self_test)
+        # 必须在 collect_all 之后立刻快照：反证自检会在临时仓库里再跑 collect_all，
+        # 那会把跳过账本覆盖成临时目录的内容（「0 处跳过」的假象）。
+        self.skips = dict(skips if skips is not None else skip_report())
         self._by_id = {a.id: a for a in self.axioms}
 
     class _Meta:
@@ -60,6 +64,7 @@ class Report8:
             "review": sum(1 for f in active_all if f.severity != "must-fix"),
             "self_test_failed": sum(1 for t in self.self_test if not t.get("ok")),
             "by_dimension": by_dim,
+            "skips": self.skips,
         }
 
     def ranked(self) -> List[Finding]:
@@ -74,7 +79,7 @@ class Report8:
         out.append("工程治理合规报告（八维）—— 只读静态，全部输入来自本仓库")
         out.append("=" * 78)
         out.append(
-            f"违规 {s['total']} 条：应修 {s['must_fix']}，复核 {s['review']}，豁免 {s['waived']}；"
+            f"违规 {s['total']} 条（全量计数）：应修 {s['must_fix']}，复核 {s['review']}，豁免 {s['waived']}；"
             f"反证自检 {'全部通过' if not s['self_test_failed'] else '失败 %d 条' % s['self_test_failed']}"
         )
         out.append("")
@@ -89,12 +94,15 @@ class Report8:
         if prioritize:
             out.append("")
             out.append("── 按派活规则排序（先做上面的）──")
-            for i, f in enumerate(self.ranked()[:30], 1):
+            ranking = self.ranked()
+            for i, f in enumerate(ranking[:30], 1):
                 a = self._meta_for(f.rule)
                 out.append(
                     f"{i:>3}. [{priority_score(f, a):>4}] {f.rule} {f.path}:{f.line}"
                     f"{'（豁免）' if f.waived else ''}"
                 )
+            if len(ranking) > 30:
+                out.append(f"   … 已隐藏 {len(ranking) - 30} 条（展示层截断）")
 
         for d in self.dims:
             active = d.active()
@@ -110,9 +118,19 @@ class Report8:
                 out.append(f"        为什么违反：{f.why}")
                 out.append(f"        怎么修：{f.fix}")
             if len(active) > max_per_dim:
-                out.append(f"   … 其余 {len(active) - max_per_dim} 条省略（--max-per-dim 调整）")
+                out.append(f"   … 已隐藏 {len(active) - max_per_dim} 条"
+                           f"（展示层截断，上方计数与棘轮判定均为全量；--max-per-dim 调整）")
             for f in waived:
                 out.append(f"   [豁免] {f.rule} {f.path}:{f.line}  {f.waiver_reason}")
+
+        out.append("")
+        out.append("── 检查器自述：哪些地方被跳过（没看见 ≠ 没问题）──")
+        skips = s.get("skips") or {}
+        if not skips:
+            out.append("   无：所有规则都逐条看过了。")
+        for rule, reasons in skips.items():
+            detail = "；".join(f"{k} {v} 处" for k, v in reasons.items())
+            out.append(f"   {rule} 跳过 {sum(reasons.values())} 处：{detail}")
 
         out.append("")
         out.append("── 反证自检（真实违规片段必须红，对应修复必须绿）──")
@@ -144,6 +162,19 @@ class Report8:
             r = s["by_dimension"][d.id]
             out.append(f"| {d.id} | {d.title} | {r['active']} | {r['must_fix']} | {r['review']} | {r['waived']} |")
         out.append("")
+        out.append("## 检查器自述：跳过统计")
+        out.append("")
+        out.append("「0 条」只说明没报。下表列出检查器主动没看的地方：这些位置不是「没问题」，是「没看见」。")
+        out.append("")
+        out.append("| 规则 | 跳过处数 | 原因 |")
+        out.append("|---|---:|---|")
+        skips = s.get("skips") or {}
+        if not skips:
+            out.append("| — | 0 | 无跳过 |")
+        for rule, reasons in skips.items():
+            for reason, n in reasons.items():
+                out.append(f"| {rule} | {n} | {reason} |")
+        out.append("")
         out.append("## 反证自检")
         out.append("")
         out.append("| 规则 | 反证 | 结果 | 正例 | 负例 | 来源 |")
@@ -170,7 +201,7 @@ class Report8:
                 out.append(f"  - 为什么：{f.why}")
                 out.append(f"  - 怎么修：{f.fix}")
             if len(active) > max_per_dim:
-                out.append(f"- … 其余 {len(active) - max_per_dim} 条省略")
+                out.append(f"- … 已隐藏 {len(active) - max_per_dim} 条（展示层截断，计数为全量）")
             for f in waived:
                 out.append(f"- **豁免** `{f.rule}` `{f.path}:{f.line}` — {f.waiver_reason}")
             out.append("")
