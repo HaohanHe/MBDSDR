@@ -14,7 +14,7 @@
    `numpy/__init__.py` 里的 `__import__(__package__ + ".fft")` 动态导入，静态分析
    同样看不见。**是 spec 的模块收集方式漏了文件，不是本机 scipy 残缺，也不是
    用户解压不全。**
-2. 修法已落地（`50aa1db0` — `desktop/main.py:74` — `scipy._external.array_api_compat.numpy.fft`，同一提交同改 `desktop/MBDSDR.spec`）：[MBDSDR.spec](../../desktop/MBDSDR.spec) 增加按文件系统遍历
+2. 修法已落地（`50aa1db0` — `desktop/main.py:76` — `scipy._external.array_api_compat.numpy.fft`，同一提交同改 `desktop/MBDSDR.spec`）：[MBDSDR.spec](../../desktop/MBDSDR.spec) 增加按文件系统遍历
    `scipy/_external` 的 `_collect_namespace_submodules()`；新构建
    `Analysis-00.toc` 里 `scipy._external.*` 共 **88 条**，`...numpy.fft` 在列。复跑：`python scripts/release_check.py`（build 步重生成 `Analysis-00.toc` 并核对子树）。
 3. 同时发现第二处同类缺陷：`mbdsdr_ai/astronomy/__init__.py` 用
@@ -200,11 +200,11 @@ DLL load failed while importing QtWidgets: 找不到指定的模块。
 ```
 
 （早期版本只检查「platforms 目录里有任意一个平台插件」，qoffscreen 还在时会误放行，
-Qt 随后自己 abort 成英文弹窗；已改为按实际请求平台精确匹配后复测通过（`50aa1db0` — `desktop/main.py:366` — `缺少 Qt 平台插件 platforms/`，基准 `7f91c6d3`）。）
+Qt 随后自己 abort 成英文弹窗；已改为按实际请求平台精确匹配后复测通过（`50aa1db0` — `desktop/main.py:564` — `缺少 Qt 平台插件 platforms/`，基准 `50aa1db0`）。）
 
 ## 5. 四条现实约束（实际 vs 期望）
 
-| 约束 | 实测行为 | 期望 | 差距 / 已修（证据：`c295423e` — `desktop/startup_paths.py:59` — `def startup_log_path() -> str:`） |
+| 约束 | 实测行为 | 期望 | 差距 / 已修（证据：`c295423e` — `desktop/startup_paths.py:63` — `def startup_log_path() -> str:`） |
 |---|---|---|---|
 | ① 机器没有 D 盘 | 启动日志按裁定顺序：环境变量 → 非 C 盘盘符 → 安装根 `logs`（实际可创建）→ `%PROGRAMDATA%\MBDSDR\logs`；全不可写则进内存环形缓冲（200 行）。审计日志 `default_audit_path()` 落 `<程序根>\logs\tx_audit.jsonl` 并告警；录音默认目录：用户目录 `MBDSDR\recordings`，与盘符无关 | 绝不写 C 盘用户目录的日志；能看到明确告警 | 日志已按裁定落地，`%LOCALAPPDATA%` / `~/.config` / `%TEMP%` 全部不在候选内。**录音**是用户数据不是日志，已与程序目录/盘符解耦：默认落用户目录 `MBDSDR\recordings`，只有 C 盘的机器照常可用；复跑：`python scripts/release_check.py`（九步全量含日志落点与冷启动） |
 | ② 目标目录只读/无写权限 | 设置写盘失败：`设置保存失败（PermissionError）：[WinError 5] 拒绝访问。: '…\readonly_appdata\mbdsdr'`；录音写盘失败：`录音目录不可用（…\readonly_root\recordings）：[WinError 5] 拒绝访问。…`。启动期改为后台线程试写 0 字节文件（不阻塞主线程），失败进状态栏 + 日志（见 §5.1） | 明确说明「哪不可写、下一步怎么办」，不裸崩 | 提示达预期；启动期不再用 `tempfile.mkstemp`（ACL deny-write 目录实测会卡 >6s） |
@@ -388,7 +388,7 @@ overlap 的 windows 两格这次正好**压在上限**（13 ≤ 13、7 ≤ 7）�
 --work-dir d:\mbdsdr\.tmp\wf2-work --diag-dist-dir d:\mbdsdr\.tmp\wf2-diag-dist
 --diag-work-dir d:\mbdsdr\.tmp\wf2-diag-work`。
 
-**子树回归已修复**：`c72896c4` — `desktop/main.py:190` — `_startup_dependency_problems`
+**子树回归已修复**：`c72896c4` — `desktop/main.py:275` — `_startup_dependency_problems`
 （`git show --name-only c72896c4` 命中 `desktop/main.py` 与 `scripts/release_check.py`；
 `git log -S _startup_dependency_problems -- desktop/main.py` 只命中该提交）。修法是把
 缺件判定改成启动期逐项必需依赖探针，不再依赖「`from main_window import MainWindow`
@@ -595,7 +595,7 @@ SHA256，再**真跑一次** `python scripts/ui_narrow_breakdown.py --json`（�
    `C:\Users\<user>\...` 下，日志会写在该安装根内。这是裁定顺序本身的结果，
    不再回落到 `%APPDATA%`/`%LOCALAPPDATA%`；如要连安装根在用户目录也拒绝，
    需另行裁定（会导致部分用户完全没有持久日志）。
-4. ACL 级只读（非 Program Files）不再靠启动期同步判断（`c295423e` — `desktop/startup_paths.py:98` — `probe_dir_writable_async`）：已改为后台线程试写 +
+4. ACL 级只读（非 Program Files）不再靠启动期同步判断（`c295423e` — `desktop/startup_paths.py:113` — `probe_dir_writable_async`）：已改为后台线程试写 +
    状态栏/日志回报（§5.1）。主线程不等待，因此不会出现「启动不报、写盘才炸」，
    但状态栏提示可能晚于窗口出现几秒。
 5. C++ 线直接双击 `mbdsdr.exe` 时，缺 `librtlsdr.dll` 仍由 Windows 加载器先拦成
@@ -733,7 +733,7 @@ canonical 拍定为 `0.2.0`；唯一手抄点是 `mbdsdr_ai/VERSION`，其余全
 | `_show_about` 渲染文本 | `版本 v0.2.1-verify` |
 | spec `VSVersionInfo`（stub 求值） | filevers=`(0,2,1,0)`、FileVersion 串=`0.2.1-verify` |
 
-首轮证伪曾实测到两处硬失败（已修）（`52b0f587` — `docs/packaging.md:682` — `MBDSDR_VERSION_NUMERIC`，基准 `7f91c6d3`；该提交的 `git show --name-only` 同时列出 `cpp/CMakeLists.txt`/`desktop/MBDSDR.spec`）：`project(VERSION 0.2.1-verify)` 直接
+首轮证伪曾实测到两处硬失败（已修）（`52b0f587` — `docs/packaging.md:686` — `MBDSDR_VERSION_NUMERIC`，基准 `0583eab1`；该提交的 `git show --name-only` 同时列出 `cpp/CMakeLists.txt`/`desktop/MBDSDR.spec`）：`project(VERSION 0.2.1-verify)` 直接
 configure 失败（`VERSION "0.2.1-verify" format invalid`）；spec 用 `int(p)` 拆段
 在 `1-verify` 上抛 `ValueError`。这两处正是“单一真值源”最容易被后缀打穿的地方。复跑：`python scripts/release_manifest.py --only version --dist d:\mbdsdr\.tmp\pyi-dist14`。
 
@@ -912,7 +912,7 @@ python scripts/release_manifest.py --only installer
 | 状态 | 语义 | 能否发布 |
 |---|---|---|
 | `PASS` | 验证通过（每条附命令/证据） | 可以 |
-| WARN（取证：`a0969112` — `scripts/release_manifest.py:689` — `未归因（不在 Requires-Dist 闭包`，基准 `7f91c6d3`） | 缺口存在但不构成取值冲突（依赖差集②已改为 PASS/FAIL 两态，不再产生 WARN） | 可以，需登记 |
+| WARN（取证：`a0969112` — `scripts/release_manifest.py:693` — `未归因（不在 Requires-Dist 闭包`，基准 `a0969112`） | 缺口存在但不构成取值冲突（依赖差集②已改为 PASS/FAIL 两态，不再产生 WARN） | 可以，需登记 |
 | `FAIL` | 红（含「正则失配」这种删位置置换绿的情况） | 不可以 |
 | `BY-DESIGN` | 该项按产品决策不做，理由与边界已登记（如无安装器） | 可以，但必须带理由 |
 | `SKIP` | 对象不存在、未验 | 不算绿 |
