@@ -88,6 +88,7 @@ from mode_registry import (
 # 读数格式化与「未生效」文案的唯一来源（与控制/模块/状态面板同字）。
 from readouts import (
     format_dbfs,
+    format_frequency_hz,
     format_gain_db,
     gain_differs,
     gain_not_applied_hint,
@@ -1182,7 +1183,7 @@ class ControlPanel(QWidget):
         就是省略后又被裁。
 
         用 ElideMiddle 而不是 ElideRight：本项目书签名是「名字 + 频率」的
-        顺序（内置种子 "航空应急频率 121.500"、收藏默认名 "121.500MHz AM"），
+        顺序（内置种子 "航空应急频率 121.500"、收藏默认名 "121.500000 MHz AM"），
         从右边省略正好把频率切掉——而频率恰恰是选台时唯一要读的数。
         中间省略会同时保住名字开头与频率结尾。全文仍在 tooltip 里。
         """
@@ -1201,10 +1202,10 @@ class ControlPanel(QWidget):
                 abnormal += int(bad)
                 tag = "（内置）" if builtin else ""
                 # 收起态只排「（内置）+ 名字」：名字本身已含频率（内置种子与
-                # 「收藏当前频率」的默认名都是 "121.500MHz AM" 这种），再拼一段
+                # 「收藏当前频率」的默认名都是 "121.500000 MHz AM" 这种），再拼一段
                 # 频率只会把 200px 的省略号顶到「（12…」那一截——既重复又看不全。
                 # 完整「频率 + 模式」留在悬停全文里，不丢信息。
-                full = f"{shown}{tag} ({hz / 1e6:.3f}MHz {mode})"
+                full = f"{shown}{tag} ({format_frequency_hz(hz)} {mode})"
                 label = self._elide_bookmark_text(f"{tag}{shown}")
                 self.bookmark_combo.addItem(("⚠ " if bad else "") + label, i)
                 if not bad:
@@ -1246,7 +1247,7 @@ class ControlPanel(QWidget):
         # 按钮此刻已禁用（_sync_freq_actions_enabled），此处兜内部调用。
         if self._freq_hz is None:
             return
-        default_name = f"{self._freq_hz / 1e6:.3f}MHz {self._current_mode}"
+        default_name = f"{format_frequency_hz(self._freq_hz)} {self._current_mode}"
         name, ok = QInputDialog.getText(
             self, "收藏频率", "名称:", QLineEdit.Normal, default_name)
         if not ok:
@@ -1282,7 +1283,7 @@ class ControlPanel(QWidget):
             return
         answer = QMessageBox.question(
             self, "删除书签",
-            f"删除书签「{name}」（{hz / 1e6:.3f} MHz）？此操作不能撤销。",
+            f"删除书签「{name}」（{format_frequency_hz(hz)}）？此操作不能撤销。",
             QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
         if answer != QMessageBox.Yes:
             return
