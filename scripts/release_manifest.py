@@ -17,9 +17,11 @@
   产物定位 = ``<dist>/MBDSDR/_internal`` 顶层 + exe 内嵌 ``PYZ.pyz`` 模块表
   （纯 Python 包不在 ``_internal`` 里，这是 PyInstaller 6 onedir 的正常布局，
   只看 ``_internal`` 会假报缺失）。差集分「声明了但产物没有」「产物有但没声明」；
-  后者只有两种状态：**已归因**（指得到 ``Requires-Dist`` 闭包，或指得到一条
-  从项目/已声明包出发的 import 链，且在产物解释器里 import 成功）→ PASS；
-  **未归因**（两种情况都指不到，或链上的包在产物里其实 import 不起来）→ FAIL。
+  后者有三种状态：**已归因**——指得到 ``Requires-Dist`` 闭包、指得到 ``pyproject``
+  的 ``optional-dependencies`` 组（按 optional 声明，组注释里写明运行期 guard/降级
+  路径），或指得到一条从项目/已声明包出发的 import 链且在产物解释器里 import
+  成功 → PASS；**未归因**（都指不到，或链上的包在产物里其实 import 不起来）→ FAIL。
+  可选面不进差集①：缺可选包只废对应功能路径，不算缺件。
   静态 xref 只解释「PyInstaller 为什么收集它」，不能单独作为可发布理由。
 * **许可证**：复用 ``scripts/check_data_licenses.py`` 的既有 GPL 扫描结论
   （不另造一套规则）；再查产物里是否带项目 LICENSE/NOTICE、copyleft 组件
@@ -57,6 +59,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 TMP_ROOT = ROOT.parent / ".tmp"
 SPEC = ROOT / "desktop" / "MBDSDR.spec"
+PYPROJECT = ROOT / "pyproject.toml"
 CHECK_LICENSE = ROOT / "scripts" / "check_data_licenses.py"
 
 PASS, WARN, FAIL, SKIP, BY_DESIGN = "PASS", "WARN", "FAIL", "SKIP", "BY-DESIGN"
@@ -394,6 +397,49 @@ def _declared_requirements() -> dict[str, str]:
     return merged
 
 
+def _optional_groups() -> dict[str, list[str]]:
+    """``pyproject.toml`` 的 ``[project.optional-dependencies]``：组名 → 发行名列表。
+
+    可选面**不是**声明面：缺了不进差集①（缺哪个只废哪条功能路径）。但产物里真
+    出现某个可选包时，它也必须有解释——「按 optional 声明 + 运行期 guard/降级」
+    就是解释，与 ``Requires-Dist`` 传递依赖同属「指得到上游」。
+    """
+    try:
+        import tomllib
+    except ImportError:  # pragma: no cover - 3.10 走 pyproject 自己声明的 tomli
+        try:
+            import tomli as tomllib
+        except ImportError:
+            return {}
+    if not PYPROJECT.exists():
+        return {}
+    try:
+        data = tomllib.loads(_read(PYPROJECT))
+    except Exception as exc:  # 坏 TOML 不能让可选面静默消失
+        print(f"[release_manifest] pyproject.toml 解析失败，可选面归因不可用：{exc}",
+              file=sys.stderr)
+        return {}
+    out: dict[str, list[str]] = {}
+    groups = (data.get("project") or {}).get("optional-dependencies") or {}
+    for group, reqs in groups.items():
+        names: list[str] = []
+        for raw in reqs:
+            head = re.split(r"[<>=!~\[;@\s]", str(raw).strip(), maxsplit=1)[0]
+            if head:
+                names.append(_norm(head))
+        out[str(group)] = names
+    return out
+
+
+def _optional_closures() -> dict[str, str]:
+    """可选组及其 ``Requires-Dist`` 闭包：发行名 → 组名（同一包取首个组）。"""
+    out: dict[str, str] = {}
+    for group, names in _optional_groups().items():
+        for d in sorted(_requires_closure(set(names))):
+            out.setdefault(d, group)
+    return out
+
+
 def _dist_to_imports() -> dict[str, list[str]]:
     """发行名 → 顶层 import 名（来自当前构建环境的 packages_distributions）。"""
     out: dict[str, list[str]] = {}
@@ -711,16 +757,19 @@ def check_deps(dist: Path) -> list[dict]:
             _record(FAIL, f"spec datas → 产物缺 {item}", items)
 
     # 产物差集：每个额外包都要能说清「为什么在产物里」。
-    # 两种状态：已归因（Requires-Dist 闭包，或 import 链 + 产物解释器 import 成功）
-    # → PASS；未归因（指不到上游，或链上的包在产物里根本 import 不起来）→ FAIL。
+    # 三种状态：已归因（Requires-Dist 闭包 / pyproject optional 组 / import 链 +
+    # 产物解释器 import 成功）→ PASS；未归因（都指不到，或链上的包根本 import
+    # 不起来）→ FAIL。
     artifact_dists = {imp2dist[n] for n in names if n in imp2dist}
     declared_norm = set(declared)
     root_closures = {d: _requires_closure({d}) for d in declared_norm}
+    optional = _optional_closures()
     roots = {i.split(".")[0] for d in declared_norm for i in dist2imports.get(d, [])}
     roots |= {"mbdsdr_ai", "main"}
     reverse = _xref_reverse(dist)
     extras = sorted(artifact_dists - declared_norm)
     transitive: list[str] = []
+    optional_attr: list[str] = []
     chain_attributed: list[str] = []
     unattributed: list[str] = []
 
@@ -740,6 +789,12 @@ def check_deps(dist: Path) -> list[dict]:
         if owners:
             transitive.append(d)
             _record(PASS, f"差集② {d}：已归因（Requires-Dist 传递依赖 ← {', '.join(owners)}）", items)
+            continue
+        if d in optional:
+            optional_attr.append(d)
+            _record(PASS, f"差集② {d}：已归因（pyproject optional-dependencies 的 "
+                          f"`{optional[d]}` 组；缺它只废对应功能路径，运行期 "
+                          f"guard/降级路径见 pyproject.toml 该组注释）", items)
             continue
         chat: list[str] = []
         for imp_name in dist2imports.get(d, []):
@@ -779,12 +834,13 @@ def check_deps(dist: Path) -> list[dict]:
         pass
     elif unattributed:
         _record(FAIL, f"差集②「产物里有但没声明」：{len(extras)} 个，"
-                      f"已归因 {len(transitive) + len(chain_attributed)}"
+                      f"已归因 {len(transitive) + len(optional_attr) + len(chain_attributed)}"
                       f" / 未归因 {len(unattributed)}（未归因逐包见上，不可发布）", items)
     else:
         _record(PASS, f"差集②「产物里有但没声明」：{len(extras)} 个全部已归因"
-                      f"（Requires-Dist 传递 {len(transitive)} / import 链 {len(chain_attributed)}，"
-                      f"运行时 import 全部成功）", items)
+                      f"（Requires-Dist 传递 {len(transitive)} / optional {len(optional_attr)}"
+                      f" / import 链 {len(chain_attributed)}，import 链的运行时 import 全部成功）",
+                items)
     return items
 
 
@@ -1016,7 +1072,7 @@ def _secret_scan_module():
 #: ``review_by`` 到期后条目自动失效，不能靠「以前判过」永久免检。
 ARTIFACT_SECRET_ALLOWLIST = (
     {
-        "path": "MBDSDR/_internal/PySide6/Qt6Network.dll",
+        "path": "MBDSDR/_internal/PySide6/Qt6Network.dll",  # pragma: allowlist secret — 产物相对路径，非凭据
         "sha256": "1c7c393b264ae78f4dee211656377a086c4be714bf768d3135f94f11c1d0be61",
         "rules": ("pem-private-key",),
         "reason": "Qt 网络模块内置的 PEM 头常量（命中的是 "

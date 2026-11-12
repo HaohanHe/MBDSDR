@@ -43,10 +43,21 @@ satellite = ["sgp4", "skyfield", "jplephem", "astropy"]
 # product.cbor 元数据（可选增强）：satdump_integration 已做 try/except 降级，
 # 缺 cbor2 只少「按 product.cbor 的 images 清单精确取图」，仍走文件名规则。
 satdump = ["cbor2>=5.0"]
+# viz：matplotlib 只在出图路径按需 import —— orbit_determination.py:1245/1292
+# 与 sdr_tools.py:4219 均在函数内 try/except ImportError，缺它时工具返回
+# 「未安装，不伪造图片」；另有 sky_plot 等函数内直接 import，缺包时仅该次调用
+# 报 ImportError，不影响主包导入。psutil 在 core/controller.py:1687 与
+# hal_enhanced.py:183 的 try/except 里读 CPU/内存，缺失只让对应字段留空。
 viz = ["matplotlib", "Pillow", "psutil"]
 desktop = ["PySide6"]
 llm = ["tiktoken"]
+# net：zstandard 仅在 baseband_io.py:687/757 的压缩读写分支内导入，缺失时抛
+# OSError 明说需要该包（不拿裸数据冒充压缩流）；websocket 面缺包只废长连接。
 net = ["websocket-client", "websockets", "zstandard"]
+# http：requests/urllib3 的可选加速与 TLS 后端（urllib3.response 与
+# urllib3.util.request 里 brotli 是 try/except ImportError，urllib3.contrib.pyopenssl
+# 的 cryptography 同理）。缺失时自动退回 gzip / 内置 ssl，不阻断任何请求。
+http = ["brotli", "cryptography"]
 configs = ["PyYAML"]  # frame_layout_tool 布局表 YAML 面（可选，缺失显式报错）
 test = ["pytest"]
 

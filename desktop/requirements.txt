@@ -30,4 +30,10 @@ websockets>=12.0
 # 固定 0.2.93：0.3.4+ 需要 rtlsdr_set_dithering（仅 rtlsdr-blog 分支 DLL 提供），
 # 与随包的 osmocom librtlsdr Windows DLL 不兼容，import 即崩。
 pyrtlsdr==0.2.93
+# pyrtlsdr 0.2.93 在模块导入期就 `import pkg_resources`（rtlsdr/__init__.py:19）
+# 并 `pkg_resources.require('pyrtlsdr')` 取版本；pkg_resources 由 setuptools 提供，
+# 而 pyrtlsdr 的元数据没有声明它，Python 3.12+ 也不再默认安装 setuptools。
+# 缺它 → `import rtlsdr` 直接 ImportError，整个 RTL-SDR 功能面不可用。
+# 所以这是**运行期必需依赖**，不是 optional。
+setuptools>=68
 sounddevice>=0.4.6
