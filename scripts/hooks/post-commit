@@ -328,11 +328,30 @@ def main():
     )
     marker = marker_dir / f"{tree}.json"
     if marker.exists() and (time.time() - marker.stat().st_mtime) <= 900:
+        # 空标记（files=[]）或损坏标记不算「已审计」：它可能来自一次无暂存内容的
+        # pre-commit 运行，且以 tree 命名会覆盖同名 tree 的正常标记。
+        valid = False
+        try:
+            payload = json.loads(marker.read_text(encoding="utf-8"))
+            listed = payload.get("files")
+            valid = isinstance(listed, list) and len(listed) > 0
+        except (OSError, json.JSONDecodeError, AttributeError):
+            valid = False
+        if valid:
+            try:
+                marker.unlink()
+            except OSError as exc:
+                print(f"[post-commit] 清理闸门标记失败：{exc}", file=sys.stderr)
+            return 0
         try:
             marker.unlink()
-        except OSError as exc:
-            print(f"[post-commit] 清理闸门标记失败：{exc}", file=sys.stderr)
-        return 0
+        except OSError:
+            pass
+        print(
+            f"[post-commit] 忽略无效闸门标记 {marker.name}（files 为空或损坏），"
+            "按未审计处理。",
+            file=sys.stderr,
+        )
 
     author = _git("log", "-1", "--format=%an <%ae>", head).stdout.strip()
     subject = _git("log", "-1", "--format=%s", head).stdout.strip()
