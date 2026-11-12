@@ -31,7 +31,7 @@ class TestKnownAnswers:
         assert crc.crc_generic(b"123456789", crc.CRC16_CCITT_DAB) == 0xD64E
 
     def test_crc16_m17(self):
-        # 既有 digital_voice_roundtrip 钉扎值（专用非标 LFSR 结构）
+        # 既有 test_digital_voice_roundtrip 钉扎值（专用非标 LFSR 结构）
         assert crc.crc16_m17(b"123456789") == 0x772B
 
     def test_crc32_ieee_matches_zlib(self):

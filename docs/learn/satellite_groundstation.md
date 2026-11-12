@@ -176,7 +176,7 @@ MBDSDR 实现一个 JSON 命令/状态信封：
 | `mbdsdr_ai/r2cloud_adapter.py` | 调度器 + 观测站配置 + SigMF 录制元数据；`register_r2cloud_tools` |
 | `mbdsdr_ai/satnogs_adapter.py` | 观测流水线 + DopplerCorrector + DemodMode 枚举 + 网络调度；`register_satnogs_tools` |
 | `mbdsdr_ai/sdrangel_plugins.py` | OGN FLARM 解析 + FireDetector 聚类 + RemoteControl JSON；`register_sdrangel_plugins_tools` |
-| `tests/sat_groundstation_roundtrip.py` | 5 项端到端往返 + 注册集成 |
+| `tests/test_sat_groundstation_roundtrip.py` | 6 项端到端往返 + 注册集成 |
 
 硬约束遵守：
 - 未修改 `tool_registry.py`、`agent.py`、`sdrangel_adapter.py`。
@@ -186,7 +186,7 @@ MBDSDR 实现一个 JSON 命令/状态信封：
 ## 5. 验证结果
 
 ```
-$ python3 tests/sat_groundstation_roundtrip.py
+$ python3 -m pytest tests/test_sat_groundstation_roundtrip.py -q
 == 1. r2cloud 调度器            ... 18 checks PASS
 == 2. satnogs 多普勒校正        ...  5 checks PASS (误差 0.0000 Hz < 1 Hz)
 == 3. OGN FLARM V6 帧解析       ...  7 checks PASS

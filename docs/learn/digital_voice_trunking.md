@@ -10,7 +10,7 @@
 >   - `mbdsdr_ai/op25_adapter.py`
 >   - `mbdsdr_ai/m17_adapter.py`
 >
-> 验证见 `tests/digital_voice_roundtrip.py`（7 项全过）。
+> 验证见 `tests/test_digital_voice_roundtrip.py`（7 项全过）。
 
 ---
 
@@ -216,7 +216,7 @@ RESET     -> IDLE
 
 ## 6. 验证
 
-`python3 tests/digital_voice_roundtrip.py` 结果：
+`python3 -m pytest tests/test_digital_voice_roundtrip.py -q` 结果：
 
 ```
 PASS: M17 CRC16 known vectors        ('A'=0x206E, '123456789'=0x772B)

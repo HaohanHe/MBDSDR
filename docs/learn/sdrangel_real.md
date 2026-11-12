@@ -2,7 +2,7 @@
 
 > 仓库：`repos/sdrangel`（GPLv3, Edouard Griffiths F4EXB 等）
 > 移植产物：`mbdsdr_ai/sdrangel_adapter.py`
-> 往返验证：`tests/sdrangel_roundtrip.py`（18/18 通过）
+> 往返验证：`tests/test_sdrangel_roundtrip.py`（7 项通过）
 
 本笔记记录**真读 .cpp/.h 源码**后提取的架构与常量，以及向 MBDSDR 的移植映射。
 所有常量均标注 `file:line`。
@@ -125,7 +125,7 @@ POCSAG 寻呼（demodpager）：channelSR=38400（lcm(512,2400)，pagerdemodsett
 
 ## 7. 往返验证
 
-`python3 tests/sdrangel_roundtrip.py` → **18/18 通过**：
+`python3 -m pytest tests/test_sdrangel_roundtrip.py -q` → **7 passed**：
 
 1. FFTFilter：通带增益≈1，阻带抑制>20dB
 2. DownChannelizer：1.024M→64k（4 级半带），输出率严格 64000

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
 """
-tests/digital_voice_roundtrip.py — 数字语音/集群无线电往返测试。
+tests/test_digital_voice_roundtrip.py — 数字语音/集群无线电往返测试。
 
 覆盖：
   1. M17 CRC16 往返（已知数据 -> CRC -> 追加 FCS -> 二次校验余数 0）
