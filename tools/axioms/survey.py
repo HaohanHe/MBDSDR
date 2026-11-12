@@ -271,37 +271,172 @@ def _tarjan(graph: Dict[str, Set[str]]) -> List[List[str]]:
 
 CONST_ASSIGN = re.compile(r"^([A-Z][A-Z0-9_]{2,})\s*=\s*(.+)$")
 
+#: 真值源登记表。登记意味着「这个量的合法产生点就是这些文件」，其余产生点
+#: 各算一条违规；登记了但文件不存在/不产生这个量，算登记失真。
+DEFAULT_TRUTH_SOURCES = "docs/truth-sources.json"
+#: 登记表允许把产生点指到这两个文件：它们是唯一读数口径的出口。
+CANONICAL_SOURCES = {"desktop/readouts.py", "desktop/constants.py"}
+
+
+def _declared_produces(repo: Repo, path: str, fact: str) -> bool:
+    """登记的文件到底有没有产生这个量。
+
+    不去信任登记表自己的声明：看文件里有没有一个与事实同名的产生函数
+    （`format_frequency_hz` 之于频率）。这样「把登记指到 readouts.py，
+    但它根本没有采样率口径」会被抓出来，而不是被 CANONICAL 名单放行。
+    """
+    full = os.path.join(repo.root, path)
+    if not os.path.exists(full):
+        return False
+    try:
+        with open(full, encoding="utf-8") as f:
+            text = f.read()
+    except OSError:
+        return False
+    return any(_fact_of(m.group(1), "") == fact
+               for m in re.finditer(r"^def\s+(\w+)", text, re.M))
+
+#: 读数的「量」按事实类别分，不按单位分——只按 Hz 分组会把全仓 244 个文件
+#: 算成同一个量，登记表就失去意义；按 (事实,单位) 分又会把同一个量碎成
+#: 「频率（MHz）/频率（kHz）」两组，同样没法登记。
+D2_FACTS = (
+    ("频率", re.compile(r"freq|frequency|center_hz|tune_hz", re.I)),
+    ("带宽", re.compile(r"\bbw\b|bandwidth|band_width", re.I)),
+    ("增益", re.compile(r"(?<![a-z])gain(?![a-z])|gain_db", re.I)),
+    ("采样率", re.compile(r"sample_?rate|rate_hz|\bsr\b|ms/s", re.I)),
+    ("电平", re.compile(r"dbfs|dbm|dbµv", re.I)),
+)
+D2_UNITS = ("GHz", "MHz", "kHz", "Hz", "dBFS", "dBm", "dBµV", "dB")
+D2_VISIBLE = re.compile(
+    r"setText|setToolTip|setWindowTitle|setStatusTip|setPlaceholderText|showMessage|"
+    r"set_status|statusBar|QLabel|label|text\(",
+)
+
+
+def _load_truth_sources(repo: Repo) -> Dict[str, Set[str]]:
+    full = os.path.join(repo.root, DEFAULT_TRUTH_SOURCES)
+    if not os.path.exists(full):
+        return {}
+    try:
+        with open(full, encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, ValueError):
+        return {}
+    sources = data.get("sources")
+    if not isinstance(sources, dict):
+        return {}
+    out: Dict[str, Set[str]] = {}
+    for key, value in sources.items():
+        if isinstance(value, dict):
+            prods = value.get("producers", [])
+        else:
+            prods = value
+        if isinstance(prods, str):
+            prods = [prods]
+        out[str(key)] = {str(p) for p in prods if p}
+    return out
+
+
+def _fact_of(expr: str, context: str) -> str:
+    text = f"{expr} {context}"
+    for name, pattern in D2_FACTS:
+        if pattern.search(text):
+            return name
+    return ""
+
 
 def collect_d2(repo: Repo, base: Sequence[Finding]) -> Dimension:
     dim = Dimension("D2", "真值源清单", DIMENSIONS[1][2])
     dim.findings.extend(f for f in base if RULE_DIMENSION.get(f.rule) == "D2")
 
     units = repo.py_units(("desktop", "mbdsdr_ai"))
+    # key = 事实（频率/带宽/…）；value = 产生该读数的文件集合。
+    # 只认「用户可见读数」：一段 f-string 出现在 setText/日志/配置说明里，
+    # 才是在产生别人会看到的字符串；纯内部提示不算第二个真值源。
     producers: Dict[str, Set[str]] = {}
     for unit in units:
-        if unit.path in ("desktop/readouts.py", "desktop/constants.py"):
+        if unit.path in CANONICAL_SOURCES:
             continue
         tree = parse(unit)
         if tree is None:
             continue
         for node in ast.walk(tree):
-            if isinstance(node, ast.JoinedStr):
-                literals = "".join(
-                    v.value for v in node.values if isinstance(v, ast.Constant) and isinstance(v.value, str)
-                )
-                for unit_name in re.findall(r"GHz|MHz|kHz|Hz|dBFS|dBm|dB", literals):
-                    producers.setdefault(unit_name, set()).add(unit.path)
-    for unit_name, paths in sorted(producers.items(), key=lambda kv: -len(kv[1])):
-        dim.facts.append(f"读数单位 {unit_name}：{len(paths)} 个文件各自拼装")
-    multi = {k: v for k, v in producers.items() if len(v) >= 2}
-    if multi:
-        top = max(multi.items(), key=lambda kv: len(kv[1]))
-        dim.findings.append(Finding(
-            "D2-multi-producer", sorted(top[1])[0], 0,
-            f"{top[0]} 读数由 {len(top[1])} 个文件产生",
-            "同一事实存在多个产生点，尚未登记真值源；改一处口径不会传导到其他面板。",
-            "在 docs/truth-sources.json 登记唯一产生函数，消费点只读该函数。",
-        ))
+            if not isinstance(node, ast.JoinedStr):
+                continue
+            literals = "".join(
+                v.value for v in node.values if isinstance(v, ast.Constant) and isinstance(v.value, str)
+            )
+            if not any(u in literals for u in D2_UNITS):
+                continue
+            # 与 A01 同口径：看整行源码，而不是只看 f-string 片段——
+            # 多行调用时 `setText(` 在上一行，只看片段会把用户可见读数漏掉。
+            line_text = line_of(unit, node.lineno)
+            if not D2_VISIBLE.search(line_text):
+                continue
+            expr = " ".join(
+                (ast.get_source_segment(unit.text, v.value) or "")
+                for v in node.values if isinstance(v, ast.FormattedValue)
+            )
+            fact = _fact_of(expr, line_text)
+            if not fact:
+                continue
+            producers.setdefault(fact, set()).add(unit.path)
+
+    registered = _load_truth_sources(repo)
+    dim.facts.append(
+        f"真值源登记表：{len(registered)} 个量（{DEFAULT_TRUTH_SOURCES}）"
+        if registered else f"真值源登记表：未建立（{DEFAULT_TRUTH_SOURCES}）"
+    )
+
+    # 1) 登记失真：登记的路径不存在，或该文件并不产生这个量。
+    for key, declared in sorted(registered.items()):
+        for path in sorted(declared):
+            if not os.path.exists(os.path.join(repo.root, path)):
+                dim.findings.append(Finding(
+                    "D2-truth-source-stale", DEFAULT_TRUTH_SOURCES, 0,
+                    f"{key} 登记失真：{path} 不存在",
+                    "登记表指向了一个不存在的路径；按登记表去读唯一产生点会直接失败。",
+                    "把登记改成真实存在的产生文件，或删掉这条登记。",
+                ))
+            elif not _declared_produces(repo, path, key):
+                dim.findings.append(Finding(
+                    "D2-truth-source-stale", DEFAULT_TRUTH_SOURCES, 0,
+                    f"{key} 登记失真：{path} 里没有产生这个量的函数",
+                    "登记表把「不产生这个量」的文件标成了唯一产生点，检查器会因此放过真正的多产生点。",
+                    "把登记改成实际产生这个量的文件，或先在该文件补一个与事实同名的产生函数。",
+                ))
+
+    # 2) 未登记：该量的全部产生者各算一条；已登记：登记文件之外的产生者各算一条。
+    for key, paths in sorted(producers.items()):
+        legal = {p for p in registered.get(key, set())
+                 if p in paths or _declared_produces(repo, p, key)}
+        offenders = sorted(p for p in paths if p not in legal)
+        if not offenders:
+            continue
+        fact = key
+        declared = sorted(registered.get(key, set()))
+        # 未登记且只有一个产生者：还不构成「同一事实两份实现」，不报。
+        if not declared and len(paths) < 2:
+            continue
+        dim.facts.append(
+            f"{fact}：{len(paths)} 个文件各自拼装"
+            + (f"，登记 {len(legal)} 个合法产生点" if legal else "，未登记真值源")
+        )
+        for path in offenders:
+            others = [p for p in sorted(paths) if p != path]
+            if declared:
+                why = (f"登记的真值源是 {', '.join(declared)}；其余 {len(offenders)} 处仍自行拼装："
+                       f"{', '.join(others)}。")
+            else:
+                why = (f"同一事实共 {len(paths)} 个文件各自产生：{', '.join(sorted(paths))}；"
+                       "尚未登记真值源。")
+            dim.findings.append(Finding(
+                "D2-multi-producer", path, 0,
+                f"{fact}读数在本文件自行拼装",
+                why,
+                "改为调用登记的唯一产生函数（desktop/readouts.py），或把本文件的产生点登记进 "
+                f"{DEFAULT_TRUTH_SOURCES}。",
+            ))
 
     # 同名常量不同值
     consts: Dict[str, Dict[str, List[str]]] = {}

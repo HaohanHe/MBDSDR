@@ -172,11 +172,33 @@ CASES: List[Case] = [
          {"mbdsdr_ai/x.py": "from mbdsdr_ai.playback import parse_sigmf_meta\n"},
          match="D1-core-depends-tools"),
     Case("D2", "同一读数多文件产生",
-         "desktop 多处各自拼 Hz 读数，未登记真值源",
-         {"desktop/a.py": "def f(x):\n    return f\"{x} Hz\"\n",
-          "desktop/b.py": "def g(x):\n    return f\"{x} Hz\"\n"},
-         {"desktop/a.py": "def f(x):\n    return f\"{x} Hz\"\n"},
+         "desktop 多处各自拼 dB 读数，未登记真值源",
+         {"desktop/a.py": "def f(panel, gain):\n    panel.label.setText(f\"{gain:.1f} dB\")\n",
+          "desktop/b.py": "def g(panel, gain_db):\n    panel.label.setText(f\"{gain_db:.1f} dB\")\n"},
+         {"desktop/a.py": "def f(panel, gain):\n    panel.label.setText(f\"{gain:.1f} dB\")\n"},
          match="D2-multi-producer"),
+    Case("D2", "登记一个产生点后只剩另一个违规",
+         "docs/truth-sources.json 登记 增益->desktop/a.py；b.py 仍自行拼装",
+         {"desktop/a.py": "def format_gain(db):\n    return f\"{db:.1f} dB\"\n\n"
+                          "def f(panel, gain):\n    panel.label.setText(f\"{gain:.1f} dB\")\n",
+          "desktop/b.py": "def g(panel, gain_db):\n    panel.label.setText(f\"{gain_db:.1f} dB\")\n",
+          "docs/truth-sources.json":
+              '{"schema": 1, "sources": {"增益": {"producers": ["desktop/a.py"]}}}\n'},
+         {"desktop/a.py": "def format_gain(db):\n    return f\"{db:.1f} dB\"\n\n"
+                          "def f(panel, gain):\n    panel.label.setText(f\"{gain:.1f} dB\")\n",
+          "desktop/b.py": "def g(panel, gain_db):\n    panel.label.setText(f\"{gain_db:.1f} dB\")\n",
+          "docs/truth-sources.json":
+              '{"schema": 1, "sources": {"增益": {"producers": ["desktop/a.py", "desktop/b.py"]}}}\n'},
+         match="D2-multi-producer"),
+    Case("D2", "登记指向不存在的文件必须报失真",
+         "手改 docs/truth-sources.json 指向一个从未存在的位置",
+         {"desktop/a.py": "def format_gain(db):\n    return f\"{db:.1f} dB\"\n",
+          "docs/truth-sources.json":
+              '{"schema": 1, "sources": {"增益": {"producers": ["desktop/nope.py"]}}}\n'},
+         {"desktop/a.py": "def format_gain(db):\n    return f\"{db:.1f} dB\"\n",
+          "docs/truth-sources.json":
+              '{"schema": 1, "sources": {"增益": {"producers": ["desktop/a.py"]}}}\n'},
+         match="D2-truth-source-stale"),
     Case("D3", "同一概念两个名字",
          "仓内 bw / bandwidth 两套命名并存",
          {"desktop/a1.py": "bw = 1\n", "desktop/a2.py": "bw = 2\n",

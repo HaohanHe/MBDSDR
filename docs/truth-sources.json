@@ -1,0 +1,22 @@
+{
+  "schema": 1,
+  "note": "每个量只允许登记的这些文件产生。检查器 D2 会按此表判定：未登记的量，所有产生者各报一条；登记后，登记文件之外的产生者各报一条；登记的文件不存在或不产生这个量，报「登记失真」。改这里等于改判据，必须同步看清受影响的面板。",
+  "sources": {
+    "频率": {
+      "producers": ["desktop/readouts.py"],
+      "note": "format_frequency_hz：MHz/Hz 频率读数唯一出口"
+    },
+    "带宽": {
+      "producers": ["desktop/readouts.py"],
+      "note": "format_bandwidth_hz：kHz 带宽读数唯一出口"
+    },
+    "增益": {
+      "producers": ["desktop/readouts.py"],
+      "note": "format_gain_db：增益/dB 读数唯一出口"
+    },
+    "电平": {
+      "producers": ["desktop/readouts.py"],
+      "note": "dBFS/dBm 电平读数唯一出口"
+    }
+  }
+}
