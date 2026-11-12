@@ -64,16 +64,16 @@ _UNWIRED = (
 )
 
 
-def _scan_directories() -> List[str]:
+def scan_directories() -> List[str]:
     """清点目录：桌面设置所在目录 + 数据根与已知子目录。
 
-    单独抽成函数便于测试替换；本身只算路径，不建目录。
+    公共接缝：测试替换本函数即可换扫描根；本身只算路径，不建目录。
     """
     return default_scan_directories(default_config_path())
 
 
 def _collect_backups() -> Dict[str, Any]:
-    directories = _scan_directories()
+    directories = scan_directories()
     report = scan_corruption_evidence(directories)
     items = []
     for reason_file in report["recent"]:

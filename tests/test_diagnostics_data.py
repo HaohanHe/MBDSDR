@@ -36,7 +36,7 @@ def _pair(directory, name="bookmarks.json", reason="书签文件读取失败：�
 
 def test_backups_carry_full_reason(tmp_path, monkeypatch):
     backup = _pair(tmp_path)
-    monkeypatch.setattr(dd, "_scan_directories", lambda: [str(tmp_path)])
+    monkeypatch.setattr(dd, "scan_directories", lambda: [str(tmp_path)])
 
     data = dd.collect_diagnostics()
 
@@ -50,7 +50,7 @@ def test_backups_carry_full_reason(tmp_path, monkeypatch):
 def test_bare_corrupt_and_bak_are_not_counted(tmp_path, monkeypatch):
     (tmp_path / "bookmarks.json.corrupt-20261112-220000").write_text("{}")
     (tmp_path / "config.json.bak").write_text("{}")
-    monkeypatch.setattr(dd, "_scan_directories", lambda: [str(tmp_path)])
+    monkeypatch.setattr(dd, "scan_directories", lambda: [str(tmp_path)])
 
     data = dd.collect_diagnostics()
 
@@ -61,7 +61,7 @@ def test_log_path_comes_from_recorder_without_side_effects(tmp_path, monkeypatch
     log = tmp_path / "logs" / "mbdsdr_startup.log"
     monkeypatch.setenv("MBDSDR_STARTUP_LOG", str(log))
     monkeypatch.setattr(sp, "_LAST_LOG_PATH", "")
-    monkeypatch.setattr(dd, "_scan_directories", lambda: [str(tmp_path)])
+    monkeypatch.setattr(dd, "scan_directories", lambda: [str(tmp_path)])
 
     assert dd.collect_diagnostics()["log"]["path"] == ""
     assert sp.append_startup_log("配置清点：0 个") == str(log)
@@ -141,7 +141,7 @@ def test_api_key_never_leaks_from_collected_structure(tmp_path, monkeypatch):
     monkeypatch.setattr(sp, "last_log_path", lambda: "")
     monkeypatch.setattr(sp, "buffered_log",
                         lambda: [f"Authorization: Bearer {_FAKE_KEY}"])
-    monkeypatch.setattr(dd, "_scan_directories", lambda: [str(leak_dir)])
+    monkeypatch.setattr(dd, "scan_directories", lambda: [str(leak_dir)])
 
     data = dd.collect_diagnostics()
     blob = json.dumps(data, ensure_ascii=False)
@@ -169,7 +169,7 @@ def test_redaction_keeps_location_type_and_step(tmp_path, monkeypatch):
                         encoding="utf-8")
 
     mbdsdr_config.load_config(str(cfg_path))
-    monkeypatch.setattr(dd, "_scan_directories", lambda: [str(workdir)])
+    monkeypatch.setattr(dd, "scan_directories", lambda: [str(workdir)])
 
     data = dd.collect_diagnostics()
     blob = json.dumps(data, ensure_ascii=False)
