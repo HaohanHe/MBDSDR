@@ -173,16 +173,6 @@ def _pick_numeric(tool):
     return cands[0]
 
 
-def _pick_numeric_second(tool, first):
-    props = _props(tool)
-    req = _required(tool)
-    cands = [n for n, s in props.items() if _is_num(s) and n != first]
-    if not cands:
-        return ""
-    cands.sort(key=lambda n: (n not in req, n))
-    return cands[0]
-
-
 def _pick_string(tool, path_like=False):
     props = _props(tool)
     req = _required(tool)
@@ -367,10 +357,6 @@ def _abort_thread(t):
 _MEM_PROBE = None
 _MEM_PROBE_READY = False
 _MEM_PROBE_WARNING_PRINTED = False
-
-
-class _ProcessMemoryCountersEx:
-    """Windows PROCESS_MEMORY_COUNTERS_EX（此处只用到 WS/PrivateUsage）。"""
 
 
 def _mem_probe_supported() -> bool:
