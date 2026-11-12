@@ -5,6 +5,9 @@
 契约（2026-11-13 起）：
   * 身份 = claim 时签发的一次性 --token，不是 owner 名字。
     两条同名线各自占文件时，互相 release 必须失败；只有凭据匹配才能释放/续租。
+  * 凭据持久化在 `<claim_id>.token` sidecar：claim 后进程退出仍可 release/续租；
+    删掉 sidecar 后 release 必须被拒并给出「TTL 过期/takeover」提示，不允许
+    退化成按名字放行。
   * 旧格式 claim（占位文件无 token_sha256）不按名字放行：
     release 必须拒绝；只能 claim --adopt-legacy 显式迁移，或过期夺取/takeover。
 """
@@ -33,6 +36,10 @@ def _token(result: subprocess.CompletedProcess) -> str:
 
 def _markers(locks: Path) -> list[Path]:
     return sorted((locks / "claims").glob("*.claim"))
+
+
+def _sidecars(locks: Path) -> list[Path]:
+    return sorted((locks / "claims").glob("*.token"))
 
 
 def _env(locks: Path) -> dict:
@@ -115,8 +122,8 @@ def test_same_owner_claim_renews_with_token(tmp_path: Path) -> None:
     assert "owner=线A" in status.stdout
 
 
-def test_same_owner_without_token_cannot_renew(tmp_path: Path) -> None:
-    """反证：同名不等于同一持有者——没有凭据（或凭据错）时不能续租别人的 claim。
+def test_same_owner_without_credential_cannot_renew(tmp_path: Path) -> None:
+    """反证：同名不等于同一持有者——既没 sidecar 也没正确 --token 时不能续租。
 
     把 cmd_claim 里的 _token_matches 判据删掉后，本用例必须变红（同名即可续租）。
     """
@@ -124,20 +131,23 @@ def test_same_owner_without_token_cannot_renew(tmp_path: Path) -> None:
     first = run(locks, "claim", SHARED, "--owner", "同名线")
     assert first.returncode == 0, first.stderr
     token = _token(first)
+    for sidecar in _sidecars(locks):
+        sidecar.unlink()  # 模拟另一条同名线：拿不到本 claim 的凭据
 
     no_token = run(locks, "claim", SHARED, "--owner", "同名线", "--ttl-min", "10")
     assert no_token.returncode == 2, no_token.stdout + no_token.stderr
-    assert "同名不等于同一会话" in no_token.stdout + no_token.stderr
+    assert "无法证明是同一持有者" in no_token.stdout + no_token.stderr
 
     wrong = run(
         locks, "claim", SHARED, "--owner", "同名线", "--ttl-min", "10", "--token", "0" * 32
     )
     assert wrong.returncode == 2, wrong.stdout + wrong.stderr
 
-    # 真持有者凭据仍然有效
+    # 真持有者凭据仍然有效，并会顺手把 sidecar 补回来
     ok = run(locks, "claim", SHARED, "--owner", "同名线", "--ttl-min", "10", "--token", token)
     assert ok.returncode == 0, ok.stderr
     assert "CLAIM RENEWED" in ok.stdout
+    assert _sidecars(locks), "带正确 --token 续租时应补齐凭据文件"
 
 
 def test_expired_claim_can_be_stolen(tmp_path: Path) -> None:
@@ -243,6 +253,90 @@ def test_legacy_claim_requires_explicit_migration(tmp_path: Path) -> None:
     assert "id=token" in run(locks, "status", SHARED).stdout
 
     assert run(locks, "release", SHARED, "--owner", "老格式线", "--token", token).returncode == 0
+
+
+def test_claim_persists_sidecar_and_release_reads_it(tmp_path: Path) -> None:
+    """claim 后进程退出，release 不带 --token 也能靠 sidecar 完成。"""
+    locks = tmp_path / "locks"
+    claimed = run(locks, "claim", SHARED, "--owner", "线A")
+    assert claimed.returncode == 0, claimed.stderr
+    token = _token(claimed)
+
+    sidecars = _sidecars(locks)
+    assert len(sidecars) == 1, "claim 必须把凭据落到 sidecar"
+    assert sidecars[0].read_text(encoding="utf-8").strip() == token
+    marker = json.loads(_markers(locks)[0].read_text(encoding="utf-8"))
+    assert marker["token_sha256"] != token, "占位文件只存 sha256，不存明文"
+
+    released = run(locks, "release", SHARED, "--owner", "线A")
+    assert released.returncode == 0, released.stdout + released.stderr
+    assert "RELEASE OK" in released.stdout
+    assert not _sidecars(locks), "release 成功后 sidecar 必须删除"
+
+    # 续租同样可以不带 --token
+    again = run(locks, "claim", SHARED, "--owner", "线A")
+    run(locks, "claim", SHARED, "--owner", "线A", "--ttl-min", "10")
+    renewed = run(locks, "claim", SHARED, "--owner", "线A", "--ttl-min", "10")
+    assert again.returncode == 0, again.stderr
+    assert renewed.returncode == 0, renewed.stdout + renewed.stderr
+    assert "CLAIM RENEWED" in renewed.stdout
+
+
+def test_missing_sidecar_denies_release_and_says_what_to_do(tmp_path: Path) -> None:
+    """反证：删掉 sidecar 后 release 必须被拒，并给出 TTL/takeover 的可操作提示。
+
+    如果实现退化成「没有凭据就按 owner 名放行」，本用例会红。
+    """
+    locks = tmp_path / "locks"
+    claimed = run(locks, "claim", SHARED, "--owner", "线A")
+    assert claimed.returncode == 0, claimed.stderr
+    token = _token(claimed)
+    for sidecar in _sidecars(locks):
+        sidecar.unlink()
+
+    denied = run(locks, "release", SHARED, "--owner", "线A")
+    assert denied.returncode == 2, denied.stdout + denied.stderr
+    text = denied.stdout + denied.stderr
+    assert "凭据缺失或不匹配" in text
+    assert "TTL 过期" in text and "takeover" in text
+    assert "不会按 owner 名放行" in text
+    assert _markers(locks), "被拒绝的 release 不得删掉别人的 claim"
+
+    # 显式 --token 仍然是可用出路
+    ok = run(locks, "release", SHARED, "--owner", "线A", "--token", token)
+    assert ok.returncode == 0, ok.stdout + ok.stderr
+
+
+def test_takeover_replaces_sidecar_and_invalidates_old_token(tmp_path: Path) -> None:
+    """takeover 后旧 token 与旧 sidecar 都作废，新持有者不带 --token 也能释放。"""
+    locks = tmp_path / "locks"
+    claimed = run(locks, "claim", SHARED, "--owner", "线A")
+    assert claimed.returncode == 0, claimed.stderr
+    old_token = _token(claimed)
+
+    # 伪造孤儿条件：pid 已死 + 心跳过期
+    marker = _markers(locks)[0]
+    data = json.loads(marker.read_text(encoding="utf-8"))
+    data["pid"] = 99999999
+    data.pop("pid_create_time", None)
+    data["heartbeat_at"] = time.time() - 3600
+    data["acquired_at"] = time.time() - 7200
+    data["ttl_min"] = 1
+    marker.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+
+    taken = run(locks, "takeover", SHARED, "--owner", "线B", "--reason", "原进程已死")
+    assert taken.returncode == 0, taken.stdout + taken.stderr
+    new_token = _token(taken)
+    assert new_token != old_token
+    assert _sidecars(locks)[0].read_text(encoding="utf-8").strip() == new_token
+
+    stale = run(locks, "release", SHARED, "--owner", "线A", "--token", old_token)
+    assert stale.returncode == 2, "旧 token 在 takeover 后必须失效"
+    assert "RELEASE DENIED" in stale.stdout + stale.stderr
+
+    ok = run(locks, "release", SHARED, "--owner", "线B")
+    assert ok.returncode == 0, ok.stdout + ok.stderr
+    assert not _sidecars(locks)
 
 
 def test_release_without_claim_fails(tmp_path: Path) -> None:
