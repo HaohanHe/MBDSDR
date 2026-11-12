@@ -112,7 +112,7 @@
 | 3 | 进度条 track/chunk 2.22（`status_panel:945-947`、`sat_track:552-556`） | 设计 | 轨道判装饰（与滑块方案 C 同口径），或新增 track 令牌（与滑块那份合并决策） |
 | 4 | `control_panel` 红底前景 | 设计 | **已停**：五套主题仅 1 套「白 / bright-text」能到 4.5，见 §7.2；不自行调红底 |
 | 5 | `gain_panel:67` 8pt 提示字 | 产品 | **已执行**（`9b3b055b`）：按禁用态豁免，并加门禁——可用档必须回到 ≥4.5 的角色 |
-| 6 | `floating_panel:94` 外框 2.04、`freq_display` 禁用档 2.22（岛内） | 设计 | 岛内是否也按 3:1；若要修，用岛内既有白色 alpha 阶梯，不引入主题色 |
+| 6 | `floating_panel:94` 外框 2.04、`freq_display` 禁用档 2.62/2.45（岛内） | 设计 | 岛内是否也按 3:1；若要修，用岛内既有白色 alpha 阶梯，不引入主题色 |
 
 ### 3.1 决策项 6 的实测量化（2026-11-12 复测，未改代码）
 
@@ -124,11 +124,19 @@
 
 | 组合 | 对比度 |
 |---|---|
-| `gray_300` on `card_1` | **2.62**（审计记 2.22，差异待核，均未达 3:1） |
+| `gray_300` on `card_1` | **2.62**（`gray_400` on `card_1` = 2.45，两档都未达 3:1） |
 | `gray_400` on `card_1` | 2.45 |
 | 白 @ `TEXT_ALPHA.tertiary` 0.50 | **5.10** |
 | 白 @ `TEXT_ALPHA.quaternary` 0.30 | 2.70 |
 | 白 @ `TEXT_ALPHA.tertiary2` 0.67 | 8.04 |
+
+> 审计那句「2.22」的来历：同表里 `success` / `accent` 对 `card_2` 是
+> 5.115 / 5.023（文档记 5.11 / 5.02），说明那一列的底是电平条轨道
+> `card_2`；`gray_300` 对 `card_2` 正好 2.220。审计把这条比值抄进了
+> `freq_display` 行，同时把底改写成了 `#1f1f1f`（`card_1`）。该面板实际
+> 底色是 `card_1`（`freq_display.py:201` `fillRect card_1`），所以复测是
+> 2.62 / 2.45。`git log -S'#606060' -- desktop/tokens.py` 只有 2026-11-04
+> 一次取值提交，排除色值漂移。
 
 岛内既有阶梯（primary 1.0 / secondary 0.78 / tertiary2 0.67 / tertiary 0.5 /
 quaternary 0.3 / faint 0.23 / disabled 0.2）里**没有任何一档**能保持「显著位 /

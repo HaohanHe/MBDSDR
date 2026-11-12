@@ -79,7 +79,7 @@
 | `location_panel.py` | `#14161c` / `#1b1e26` | 岛内正确；`_EDGE` 同上 |
 | `time_machine.py` | 深底 | 岛内正确（10 个字面量集中在 :134 一带） |
 | `floating_panel.py` | 深底 | :94 外框 2.04（非文本不足 3:1，岛内独立缺陷） |
-| `freq_display.py:201,214-216` | `card_1 #1f1f1f` 填充 | 岛；禁用态 `gray_300` 在 `#1f1f1f` 上 2.22（岛内独立缺陷） |
+| `freq_display.py:201,214-216` | `card_1 #1f1f1f` 填充 | 岛；禁用态 `gray_300` 在 `#1f1f1f` 上 2.62（`gray_400` 2.45）。**原记 2.22 有误**：那是同表「`gray_300` 对 `card_2` 电平条轨道」的比值被抄进本行，底也写成了 `#1f1f1f` |
 | `adsb_panel.py:58-62` | `light_bg` 米白纸 | 岛；**注释写「主题联动」是错的**——模块级常量，永不随主题变 |
 | `constellation_panel.py`（14 处） | `card_1` 填充（:211,:412） | 星图岛；:571 那处文字已改走 `palette(placeholder-text)`（`1b546a98`） |
 | `module_panel.py:68-72,76,78` | `card_1` 画布（PAPER） | 岛；画布内配色是信息图语汇，不属于主题化范围 |
