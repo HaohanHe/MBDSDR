@@ -1,0 +1,250 @@
+{
+  "schema": "mbdsdr.bench.dsp_throughput/1",
+  "generated_at": "2026-11-12T17:34:24",
+  "host": {
+    "platform": "Windows-11-10.0.26200-SP0",
+    "python": "3.14.0",
+    "cpu_count": 12,
+    "numpy": "2.4.6"
+  },
+  "method": "微基准：单线程逐环节计时，block=16384，中位数为单块耗时；RTF=(block/sr)/单块耗时。端到端：真 ReceivePipeline 三线程，不定速合成 IQ 源被消费者反压，统计实际可持续样本率。输入为合成信号（仅测吞吐，不验信号内容）。",
+  "block_samples": 16384,
+  "thresholds": {
+    "min_stage_rtf": 1.15,
+    "min_e2e_rtf": 1.0,
+    "e2e_max_gap_s": 0.25,
+    "record_tolerance": 0.01
+  },
+  "rates": [
+    {
+      "sample_rate": 960000.0,
+      "sample_rate_msps": 0.96,
+      "block_period_ms": 17.07,
+      "stages": {
+        "fft_2048": {
+          "median_ms": 0.167,
+          "block_period_ms": 17.067,
+          "realtime_factor": 102.2,
+          "rtf_ok": true,
+          "note": "窗×FFT×fftshift×dBFS×512bin 抽取（每块一帧，仅取前 2048 样本）"
+        },
+        "vfo_nbfm": {
+          "median_ms": 0.484,
+          "block_period_ms": 17.067,
+          "realtime_factor": 35.24,
+          "rtf_ok": true,
+          "note": "NCO 搬频 + 有理重采样到 48k + 12.5kHz Nuttall LPF"
+        },
+        "vfo_resample": {
+          "median_ms": 0.397,
+          "block_period_ms": 17.067,
+          "realtime_factor": 43.02,
+          "rtf_ok": true,
+          "note": "仅 NCO 搬频 + 有理重采样（带宽=输出率，跳过 LPF）"
+        },
+        "wfm_rx": {
+          "median_ms": 0.906,
+          "block_period_ms": 17.067,
+          "realtime_factor": 18.84,
+          "rtf_ok": true,
+          "note": "信道 FIR + 正交鉴频 + 48k 重采样 + 去加重"
+        },
+        "record_write": {
+          "median_ms": 0.046,
+          "block_period_ms": 17.067,
+          "realtime_factor": 371.01,
+          "rtf_ok": true,
+          "note": "complex64→float32 交织 + 缓冲写盘（cf32）"
+        }
+      },
+      "min_stage_rtf": 18.84,
+      "e2e": {
+        "wall_s": 5.0,
+        "sustained_msps": 9.571,
+        "sustained_rtf": 9.97,
+        "margin_pct": 897.0,
+        "cpu_seconds": 9.12,
+        "cpu_utilization_pct": 182.4,
+        "produced_samples": 47874048,
+        "recorded_bytes": 382861312,
+        "recorded_blocks": 2921,
+        "record_byte_error_pct": 0.03,
+        "record_max_gap_s": 0.006,
+        "audio_blocks": 2920,
+        "audio_max_gap_s": 0.009,
+        "lingering_threads": [],
+        "verdicts": {
+          "sustained_rtf_ge_1": true,
+          "record_bytes_match": true,
+          "record_no_data_hole": true,
+          "no_lingering_threads": true
+        },
+        "ok": true
+      },
+      "verdicts": {
+        "all_stages_margin_ge_15pct": true,
+        "e2e_sustains_nominal": true,
+        "e2e_no_data_hole": true,
+        "e2e_no_lingering": true
+      },
+      "ok": true
+    },
+    {
+      "sample_rate": 1200000.0,
+      "sample_rate_msps": 1.2,
+      "block_period_ms": 13.65,
+      "stages": {
+        "fft_2048": {
+          "median_ms": 0.205,
+          "block_period_ms": 13.653,
+          "realtime_factor": 66.55,
+          "rtf_ok": true,
+          "note": "窗×FFT×fftshift×dBFS×512bin 抽取（每块一帧，仅取前 2048 样本）"
+        },
+        "vfo_nbfm": {
+          "median_ms": 0.475,
+          "block_period_ms": 13.653,
+          "realtime_factor": 28.77,
+          "rtf_ok": true,
+          "note": "NCO 搬频 + 有理重采样到 48k + 12.5kHz Nuttall LPF"
+        },
+        "vfo_resample": {
+          "median_ms": 0.411,
+          "block_period_ms": 13.653,
+          "realtime_factor": 33.19,
+          "rtf_ok": true,
+          "note": "仅 NCO 搬频 + 有理重采样（带宽=输出率，跳过 LPF）"
+        },
+        "wfm_rx": {
+          "median_ms": 0.878,
+          "block_period_ms": 13.653,
+          "realtime_factor": 15.55,
+          "rtf_ok": true,
+          "note": "信道 FIR + 正交鉴频 + 48k 重采样 + 去加重"
+        },
+        "record_write": {
+          "median_ms": 0.072,
+          "block_period_ms": 13.653,
+          "realtime_factor": 190.69,
+          "rtf_ok": true,
+          "note": "complex64→float32 交织 + 缓冲写盘（cf32）"
+        }
+      },
+      "min_stage_rtf": 15.55,
+      "e2e": {
+        "wall_s": 5.0,
+        "sustained_msps": 9.812,
+        "sustained_rtf": 8.18,
+        "margin_pct": 718.0,
+        "cpu_seconds": 9.52,
+        "cpu_utilization_pct": 190.2,
+        "produced_samples": 49102848,
+        "recorded_bytes": 392691712,
+        "recorded_blocks": 2996,
+        "record_byte_error_pct": 0.03,
+        "record_max_gap_s": 0.004,
+        "audio_blocks": 2995,
+        "audio_max_gap_s": 0.009,
+        "lingering_threads": [],
+        "verdicts": {
+          "sustained_rtf_ge_1": true,
+          "record_bytes_match": true,
+          "record_no_data_hole": true,
+          "no_lingering_threads": true
+        },
+        "ok": true
+      },
+      "verdicts": {
+        "all_stages_margin_ge_15pct": true,
+        "e2e_sustains_nominal": true,
+        "e2e_no_data_hole": true,
+        "e2e_no_lingering": true
+      },
+      "ok": true
+    },
+    {
+      "sample_rate": 2400000.0,
+      "sample_rate_msps": 2.4,
+      "block_period_ms": 6.83,
+      "stages": {
+        "fft_2048": {
+          "median_ms": 0.157,
+          "block_period_ms": 6.827,
+          "realtime_factor": 43.58,
+          "rtf_ok": true,
+          "note": "窗×FFT×fftshift×dBFS×512bin 抽取（每块一帧，仅取前 2048 样本）"
+        },
+        "vfo_nbfm": {
+          "median_ms": 0.477,
+          "block_period_ms": 6.827,
+          "realtime_factor": 14.32,
+          "rtf_ok": true,
+          "note": "NCO 搬频 + 有理重采样到 48k + 12.5kHz Nuttall LPF"
+        },
+        "vfo_resample": {
+          "median_ms": 0.4,
+          "block_period_ms": 6.827,
+          "realtime_factor": 17.07,
+          "rtf_ok": true,
+          "note": "仅 NCO 搬频 + 有理重采样（带宽=输出率，跳过 LPF）"
+        },
+        "wfm_rx": {
+          "median_ms": 1.013,
+          "block_period_ms": 6.827,
+          "realtime_factor": 6.74,
+          "rtf_ok": true,
+          "note": "信道 FIR + 正交鉴频 + 48k 重采样 + 去加重"
+        },
+        "record_write": {
+          "median_ms": 0.047,
+          "block_period_ms": 6.827,
+          "realtime_factor": 145.56,
+          "rtf_ok": true,
+          "note": "complex64→float32 交织 + 缓冲写盘（cf32）"
+        }
+      },
+      "min_stage_rtf": 6.74,
+      "e2e": {
+        "wall_s": 5.0,
+        "sustained_msps": 9.677,
+        "sustained_rtf": 4.03,
+        "margin_pct": 303.0,
+        "cpu_seconds": 8.33,
+        "cpu_utilization_pct": 166.5,
+        "produced_samples": 48398336,
+        "recorded_bytes": 387055616,
+        "recorded_blocks": 2953,
+        "record_byte_error_pct": 0.03,
+        "record_max_gap_s": 0.007,
+        "audio_blocks": 2952,
+        "audio_max_gap_s": 0.007,
+        "lingering_threads": [],
+        "verdicts": {
+          "sustained_rtf_ge_1": true,
+          "record_bytes_match": true,
+          "record_no_data_hole": true,
+          "no_lingering_threads": true
+        },
+        "ok": true
+      },
+      "verdicts": {
+        "all_stages_margin_ge_15pct": true,
+        "e2e_sustains_nominal": true,
+        "e2e_no_data_hole": true,
+        "e2e_no_lingering": true
+      },
+      "ok": true
+    }
+  ],
+  "signal_dispatch": {
+    "count": 2000,
+    "delivered": 2000,
+    "elapsed_s": 0.006,
+    "per_signal_us": 3.14,
+    "max_signals_per_s": 318552.0,
+    "production_worst_signals_per_s": 146.5,
+    "duty_at_worst_pct": 0.05,
+    "note": "跨线程 queued 信号（含 GIL/事件循环）；不含实际 QPainter 绘制"
+  },
+  "overall_ok": true
+}
