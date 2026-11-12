@@ -29,6 +29,13 @@
       "reason": "冻结文件；3 处（读 config.json 自动初始化 AI、读 gui_config 的 ntrip 段 ×2）均为「读配置失败 → 降级为空/默认」，是真问题但语义本身正确。改法是各在 except 内补一行 logger.warning（文件第 21 行已有 logger），约 3 行，解冻后随 A01/A02/A12 一并处理。",
       "review_by": "2027-06-30",
       "approver": "待用户批准"
+    },
+    {
+      "rule": "A09",
+      "path": "mbdsdr_ai/tests/test_star_catalog_packaging.py",
+      "reason": "用户 2026-11-13 裁定：两处（:68/:91）的 @pytest.mark.skipif 是 MBSDSR_SKIP_WHEEL_BUILD=1 的人工 opt-out（分钟级真构建，纯逻辑调试时用），不是「环境缺失」，删除开关会让每次调试都跑分钟级构建；且该开关不是默认值，不设就不跳，故判 A09 误报。约束已落成测试 7467dc5d：reason 必须非空且写明开关（pytest -rs 可见原因）、CI 配置出现 MBSDSR_SKIP_WHEEL_BUILD 即红。A09 判据对装饰器的结构性误报另见 docs/pending-patches/2026-11-13-a09-skip-shape-and-a07-name-guard.md。",
+      "review_by": "2027-06-30",
+      "approver": "user（2026-11-13 裁定：误报，不改）"
     }
   ]
 }
