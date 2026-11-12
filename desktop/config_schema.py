@@ -379,7 +379,7 @@ ALL_ITEMS: Tuple[SettingItem, ...] = (
               "10 kHz 是默认平衡点；细调选 1/10/100 Hz，快速跨越选 1 MHz。"
               "七档与 C++ kStepValuesHz 一致（含 1 Hz）。"),
         source="desktop/spectrum_widget.py:921 snap_interval=10_000；"
-               "档位同 desktop/control_panel.py:331-332；"
+               "档位同 desktop/control_panel.py step_combo（七档，按位置映射）；"
                "cpp/src/ui/main_window.cpp kStepValuesHz（七档）",
         choices=(_e(1, "1 Hz"), _e(10, "10 Hz"), _e(100, "100 Hz"),
                  _e(1_000, "1 kHz"), _e(10_000, "10 kHz"),
@@ -421,8 +421,8 @@ ALL_ITEMS: Tuple[SettingItem, ...] = (
               "MBDSDR/recordings（删/升级程序目录不会连带删除录音）。"
               "改目录只影响新录音，已有录音不动。"),
         apply_note="只影响新录音；当前录音会话与已有文件不受影响",
-        source=("desktop/main_window.py:5536 旧写死 ~/mbdsdr_recordings；"
-                "新唯一来源 desktop/settings.py:resolve_record_dir"),
+        source=("desktop/main_window.py 旧实现写死 ~/mbdsdr_recordings（历史说明）；"
+                "新唯一来源 desktop/settings.py resolve_record_dir()"),
     ),
     SettingItem(
         key="record_dir_inside_program_ack", group="存储与日志", kind="bool",
@@ -553,7 +553,8 @@ ALL_ITEMS: Tuple[SettingItem, ...] = (
     SettingItem(key="agc_speed", group="", kind="enum", label="", help="",
                 default="medium",
                 source="desktop/control_panel.py agc_speed_combo 与 "
-                       "desktop/main_window.py:3319 共同认的四档（off/fast/medium/slow）",
+                       "desktop/main_window.py _on_agc_speed_changed 共同认的"
+                       "四档（off/fast/medium/slow）",
                 choices=(_e("off", "off"), _e("fast", "fast"),
                          _e("medium", "medium"), _e("slow", "slow")),
                 exposed=False),
