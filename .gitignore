@@ -152,4 +152,4 @@ cmake-build-*/
 evidence-out/
 
 # sdist 解包残留（21MB 完整副本，非源码；防盲目 add -A 扫走）
-mbdsdr_ai-0.2.0/
+mbdsdr_ai-[0-9]*/
