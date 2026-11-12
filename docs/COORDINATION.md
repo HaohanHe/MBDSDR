@@ -3703,3 +3703,40 @@ AMR 相关回归 0 failed；设计门禁 21 passed。
    中心标签偏密——本轮涉及多处改动，待用户在真机/截图上复核是否销账。
 2. 权威桌面全量 pytest：在跑，结果见本节后续补记。
 3. 待验：OSM 离线下载完整跑一次、高 DPI 真机触屏。
+
+---
+
+## 补记（2026-11-11 20:20）：并行会话回归，全量口径标 not_verified
+
+**当前在途：并行会话（TRAE）活跃。** 本线三个提交 `a2be554a` / `d876f51c` /
+`9836b98b` 都在 origin/main（远端指针 `9836b98b`）。补记时其上叠加对方 7 个
+**本地未推送**提交（`19fb9c9b` … `c55a4bf6`：tune / time / gimbal /
+spectrum / release / map 与窄屏测量）；截至 11-12 本地已累计 458 个未推
+送提交，工作区另有对方未提交编辑和 `docs/pending-patches/` 现 64 份待
+处理文档（补记时 5 份）。按「谁在途谁所有」，本线不碰、也不代推。
+
+**权威全量（本线最后一轮，42:31）**：`5687 passed / 28 skipped / 6 xfailed /
+3 failed`，日志 `output/_authoritative_v2.log`（11-12 已不在工作区，数字
+不可复核）。3 条红全部来自**测试运行期间工作区被并行改动**，与本线无关：
+
+- `test_help_path_truthfulness`：对方给 `desktop/main_window.py` 加 91 行、
+  删 32 行，渲染点从 8480 漂到 8495，文档行号未同步。
+- `test_source_pin_ratchet` / `test_time_input_guard`：
+  `tests/test_ui_flow_guards.py` 被工具写成双 BOM（U+FEFF），AST 扫描器
+  拒绝解析，两个守卫同时带病拦下。
+
+处置：文档渲染点重定标到 8495、双 BOM 还原成单 BOM，补记时三条守卫单跑
+12 passed。**但本轮全量数字标 `not_verified`**：它是在对方持续改码的
+42 分钟里跑出来的，不能当合并后的权威结果。11-12 复核 help_path 绿，
+另两条因他线新增测试再红（source_pin_ratchet 10 条新 pin、
+time_input_guard 4 处裸时钟）；等对方收工、工作区静止后重跑才算数。
+
+**本线可复验硬结果**（`a2be554a` 审计 + `9836b98b` 收口）：交互审计 353
+动作 0/0/0/0；交互守卫 + UI 硬缺陷 20 项全绿；改动相关子集 296 项唯一红
+复跑转绿；11 红 + 1 error 收口后的红项子集 205 passed / 0 failed / 0 error。
+
+**待办 / 提醒**
+- 用户真实书签 `~/.mbdsdr/bookmarks.json` 被历史 dry-call 探针写脏到
+  1095 字节（4 条 Temp 探针书签）。隔离缺陷在本线修掉，按个人文件安全
+  规矩**没有擅自清理**，需用户确认才动。
+- 队列 2（权威桌面全量）顺延到对方收工、工作区静止后重跑；队列 1、3 不变。
