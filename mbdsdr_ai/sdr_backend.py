@@ -42,6 +42,8 @@ import math
 
 import os
 import json
+import atexit
+import contextlib
 import collections
 import threading
 import numpy as np
@@ -70,6 +72,318 @@ def _warn_once(key: str, msg: str, *args) -> None:
         return
     _WARNED_ONCE.add(key)
     logger.warning(msg, *args)
+
+
+# ──────────────────────── 设备占用登记（跨进程） ────────────────────────
+# 桌面端与 AI/MCP 可能在不同进程里抢同一根 USB 棒。占用登记必须让**别的
+# 进程也读得到**——模块级字典只在一个进程里有效，那样「桌面端崩溃后 AI 永久
+# 被拒」这类失效根本无从谈起，也就无从修起。
+#
+# 判活口径（2026-11-12 裁定）：只记时间戳无法区分「活着但没读到心跳」和
+# 「已经死了」。登记里记 **pid + 进程启动时间**，两者都对上才算持有者活着；
+# 启动时间同时防 pid 复用（进程死了、pid 被别的进程拿走，不能当成同一持有者）。
+# 判占用**之前**先清失效记录，不做「第一次失败、TTL 过期后才成功」。
+OWNER_REGISTRY_ENV = "MBDSDR_OWNER_REGISTRY"
+_OWNER_REGISTRY_DEFAULT = os.path.join("~", ".mbdsdr", "device_owner.json")
+#: 进程内镜像（只用于观测/调试；判定一律以登记文件为准）。
+_ACTIVE_OWNER: Dict[str, Dict[str, Any]] = {}
+_OWNER_LOCK = threading.RLock()
+_SELF_PID = os.getpid()
+_SELF_START: Optional[float] = None
+#: 本进程以哪些 (owner, device_id) 身份登记过；atexit 时逐一释放。
+_OWNED_HERE: set = set()
+
+_OWNER_LABELS = {"desktop": "桌面端", "mbdsdr-ai": "AI/MCP 进程"}
+#: AI/MCP 侧登记占用时使用的 owner 名（桌面端用 "desktop"）。
+AI_OWNER = "mbdsdr-ai"
+
+
+def _owner_conflict_text(holder: Dict[str, Any]) -> str:
+    """占用冲突的可执行提示：谁占着、它还活着、下一步能做什么。"""
+    dev = holder.get("device_id") or ""
+    who = owner_label(holder.get("owner", ""))
+    return (f"设备 {dev} 当前由{who}占用（pid {holder.get('pid')}，进程仍在运行）。"
+            f"请先在{who}侧断开该设备，或改用其他设备"
+            f"（先用 sdr_list_devices 查看）。")
+
+
+def owner_registry_path() -> str:
+    """登记文件路径（测试用 ``MBDSDR_OWNER_REGISTRY`` 指到临时文件）。"""
+    raw = os.environ.get(OWNER_REGISTRY_ENV) or _OWNER_REGISTRY_DEFAULT
+    return os.path.abspath(os.path.expanduser(raw))
+
+
+def owner_label(owner: str) -> str:
+    return _OWNER_LABELS.get(str(owner or ""), str(owner or "其他程序"))
+
+
+def _proc_start_time(pid: int) -> Optional[float]:
+    """进程启动时间（秒，平台无关的相对量）；进程不存在/查不到返回 None。"""
+    if not pid or pid <= 0:
+        return None
+    try:
+        if os.name == "nt":
+            import ctypes
+            import ctypes.wintypes as wt
+            # 用私有 DLL 对象设 argtypes：HANDLE 是 64 位指针，按默认 int 传会
+            # 被截断（真机上 OpenProcess 拿到的句柄无效，判活会永远失败）。
+            k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+            k32.OpenProcess.restype = wt.HANDLE
+            k32.OpenProcess.argtypes = (wt.DWORD, wt.BOOL, wt.DWORD)
+            k32.GetExitCodeProcess.argtypes = (wt.HANDLE, ctypes.POINTER(wt.DWORD))
+            k32.GetProcessTimes.argtypes = (
+                wt.HANDLE, ctypes.POINTER(wt.FILETIME), ctypes.POINTER(wt.FILETIME),
+                ctypes.POINTER(wt.FILETIME), ctypes.POINTER(wt.FILETIME))
+            k32.CloseHandle.argtypes = (wt.HANDLE,)
+            STILL_ACTIVE = 259
+            PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+            handle = k32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, int(pid))
+            if not handle:
+                return None
+            try:
+                # 已退出但句柄仍被 Popen 持有的进程，OpenProcess 依然成功、
+                # GetProcessTimes 也返回原值——必须用退出码区分「还活着」。
+                code = wt.DWORD()
+                if not k32.GetExitCodeProcess(handle, ctypes.byref(code)):
+                    return None
+                if code.value != STILL_ACTIVE:
+                    return None
+                creation, exit_t = wt.FILETIME(), wt.FILETIME()
+                kernel, user = wt.FILETIME(), wt.FILETIME()
+                ok = k32.GetProcessTimes(
+                    handle, ctypes.byref(creation), ctypes.byref(exit_t),
+                    ctypes.byref(kernel), ctypes.byref(user))
+                if not ok:
+                    return None
+                ticks = (creation.dwHighDateTime << 32) | creation.dwLowDateTime
+                return ticks / 1e7          # 100ns → 秒
+            finally:
+                k32.CloseHandle(handle)
+        data = open(f"/proc/{int(pid)}/stat", encoding="utf-8", errors="replace").read()
+        fields = data[data.rindex(")") + 2:].split()
+        return float(fields[19]) / float(os.sysconf("SC_CLK_TCK"))
+    except Exception:
+        return None
+
+
+def _self_start() -> Optional[float]:
+    global _SELF_START
+    if _SELF_START is None:
+        _SELF_START = _proc_start_time(_SELF_PID)
+    return _SELF_START
+
+
+def _pid_alive(pid: int, recorded_start: Optional[float]) -> bool:
+    """持有者是否仍活着：进程在 + 启动时间对得上（防 pid 复用）。"""
+    if not pid or pid <= 0:
+        return False
+    start = _proc_start_time(pid)
+    if start is None:
+        return False
+    if recorded_start is None:
+        # 旧格式记录没有启动时间：只能退化为「进程还在」，如实按活着处理。
+        return True
+    try:
+        return abs(start - float(recorded_start)) <= 0.5
+    except (TypeError, ValueError):
+        return True
+
+
+@contextlib.contextmanager
+def _registry_lock():
+    """跨进程互斥（尽力而为：拿不到锁也只告警，不阻塞硬件流程）。"""
+    path = owner_registry_path() + ".lock"
+    fh = None
+    locked = False
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        fh = open(path, "a+b")
+        fh.seek(0)
+        if os.name == "nt":
+            import msvcrt
+            deadline = time.monotonic() + 2.0
+            while True:
+                try:
+                    msvcrt.locking(fh.fileno(), msvcrt.LK_NBLCK, 1)
+                    locked = True
+                    break
+                except OSError:
+                    if time.monotonic() >= deadline:
+                        logger.warning("设备占用登记锁等待超时，继续（不阻塞硬件流程）")
+                        break
+                    time.sleep(0.02)
+        else:
+            import fcntl
+            fcntl.flock(fh.fileno(), fcntl.LOCK_EX)
+            locked = True
+    except Exception as e:  # noqa: BLE001
+        logger.warning("设备占用登记加锁失败，继续（不阻塞硬件流程）: %s", e)
+    try:
+        yield
+    finally:
+        if fh is not None:
+            if locked:
+                try:
+                    if os.name == "nt":
+                        import msvcrt
+                        fh.seek(0)
+                        msvcrt.locking(fh.fileno(), msvcrt.LK_UNLCK, 1)
+                    else:
+                        import fcntl
+                        fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
+                except Exception:
+                    pass
+            try:
+                fh.close()
+            except Exception:
+                pass
+
+
+def _read_registry() -> Dict[str, Dict[str, Any]]:
+    try:
+        with open(owner_registry_path(), encoding="utf-8") as f:
+            data = json.load(f)
+    except FileNotFoundError:
+        return {}
+    except Exception as e:  # noqa: BLE001 - 登记损坏按空处理，不阻塞连接
+        logger.warning("设备占用登记读取失败（按空处理）: %s", e)
+        return {}
+    owners = data.get("owners") if isinstance(data, dict) else None
+    if not isinstance(owners, dict):
+        return {}
+    return {str(k): v for k, v in owners.items() if isinstance(v, dict)}
+
+
+def _write_registry(owners: Dict[str, Dict[str, Any]]) -> None:
+    path = owner_registry_path()
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        tmp = f"{path}.{_SELF_PID}.tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump({"version": 1, "owners": owners}, f,
+                      ensure_ascii=False, indent=2)
+        os.replace(tmp, path)
+    except Exception as e:  # noqa: BLE001 - 写不了登记不该阻断硬件流程
+        logger.warning("设备占用登记写入失败（本次不阻塞连接）: %s", e)
+    _ACTIVE_OWNER.clear()
+    _ACTIVE_OWNER.update(owners)
+
+
+def release_stale_owners() -> List[Dict[str, Any]]:
+    """清掉持有者进程已不存在的登记，返回被清掉的记录。
+
+    判活靠 pid + 启动时间，不靠 TTL：持有者被杀后，下一位申请者**立即**
+    能拿到设备，而不是先失败一次、等「过期」。
+    """
+    removed: List[Dict[str, Any]] = []
+    with _OWNER_LOCK, _registry_lock():
+        owners = _read_registry()
+        for dev, rec in list(owners.items()):
+            try:
+                pid = int(rec.get("pid") or 0)
+            except (TypeError, ValueError):
+                pid = 0
+            if _pid_alive(pid, rec.get("proc_start")):
+                continue
+            owners.pop(dev, None)
+            removed.append(dict(rec))
+        if removed:
+            _write_registry(owners)
+            for rec in removed:
+                logger.warning(
+                    "清理失效设备占用：%s 原由 %s（pid %s，启动于 %s）持有，"
+                    "该进程已不存在", rec.get("device_id"),
+                    owner_label(rec.get("owner", "")), rec.get("pid"),
+                    rec.get("proc_start"))
+    return removed
+
+
+def get_active_owner(device_id: str = "") -> Optional[Dict[str, Any]]:
+    """当前占用者（先清失效记录再判）。device_id 为空时返回唯一的记录。"""
+    release_stale_owners()
+    with _OWNER_LOCK:
+        owners = _read_registry()
+        _ACTIVE_OWNER.clear()
+        _ACTIVE_OWNER.update(owners)
+        if device_id:
+            return dict(owners[device_id]) if device_id in owners else None
+        if len(owners) == 1:
+            return dict(next(iter(owners.values())))
+        return None
+
+
+def claim_active_owner(owner: str, device_id: str) -> Tuple[bool, Dict[str, Any]]:
+    """为 ``owner`` 声明占用 ``device_id``。
+
+    返回 ``(ok, record)``：成功时 record 是本次写入的记录；失败时 record
+    是**仍在运行**的现有持有者（调用方据此给出可执行提示）。
+    同进程内的重复声明允许覆盖（桌面端与 AI 适配器同在一个进程时不能互相
+    死锁）；跨进程只有持有者进程真的不在了才会被清掉。
+    """
+    if not device_id:
+        return False, {"owner": "", "device_id": "", "pid": 0,
+                       "reason": "device_id 为空"}
+    release_stale_owners()
+    with _OWNER_LOCK, _registry_lock():
+        owners = _read_registry()
+        cur = owners.get(device_id)
+        if cur is not None and str(cur.get("owner")) != str(owner):
+            try:
+                cur_pid = int(cur.get("pid") or 0)
+            except (TypeError, ValueError):
+                cur_pid = 0
+            if cur_pid != _SELF_PID and _pid_alive(cur_pid, cur.get("proc_start")):
+                return False, dict(cur)
+        rec = {
+            "owner": str(owner),
+            "pid": _SELF_PID,
+            "proc_start": _self_start(),
+            "device_id": str(device_id),
+            "claimed_at": time.time(),
+        }
+        owners[device_id] = rec
+        _write_registry(owners)
+    _OWNED_HERE.add((str(owner), str(device_id)))
+    return True, dict(rec)
+
+
+def release_active_owner(owner: str, device_id: str = "") -> bool:
+    """释放 ``owner`` 的占用（只释放自己的；device_id 为空则释放本进程全部）。"""
+    released: List[str] = []
+    with _OWNER_LOCK, _registry_lock():
+        owners = _read_registry()
+        targets = ([device_id] if device_id
+                   else [d for d, r in owners.items()
+                         if str(r.get("owner")) == str(owner)])
+        for dev in targets:
+            rec = owners.get(dev)
+            if rec is None or str(rec.get("owner")) != str(owner):
+                continue
+            try:
+                if int(rec.get("pid") or 0) != _SELF_PID:
+                    continue        # 只释放本进程写的记录
+            except (TypeError, ValueError):
+                continue
+            owners.pop(dev, None)
+            released.append(dev)
+        if released:
+            _write_registry(owners)
+    for dev in released:
+        _OWNED_HERE.discard((str(owner), dev))
+    return bool(released)
+
+
+def _release_owned_here_at_exit() -> None:
+    """atexit 兜底：进程正常退出/被礼貌终止时，把本进程的占用还回去。"""
+    for owner, dev in list(_OWNED_HERE):
+        try:
+            release_active_owner(owner, dev)
+        except Exception:  # noqa: BLE001 - 退出路径绝不抛
+            pass
+
+
+atexit.register(_release_owned_here_at_exit)
+
 
 # rtl_tcp 网络源的环境变量登记口（comma-separated host[:port]，默认端口 1234）。
 # 让 MCP server / GUI / CLI 在零代码变化下把同一根（远端或本机）rtl_tcp 棒
@@ -5668,8 +5982,21 @@ class SDRBackendManager:
                 self.last_conflict = ""
                 return True
             self._switch_in_progress = True
+            claimed_id = ""
             try:
+                # 先声明占用、再碰硬件：别的进程（桌面端/另一个 AI）占着这台
+                # 设备时必须在这里拒绝，不能等 USB open 失败再猜原因。
+                new_did = backend.device.device_id
+                claimed, holder = claim_active_owner(AI_OWNER, new_did)
+                if not claimed:
+                    self.last_conflict = _owner_conflict_text(holder)
+                    self.last_connect_notice = self.last_conflict
+                    logger.warning("激活被拒：%s", self.last_conflict)
+                    return False
+                claimed_id = new_did
                 old = self.active_backend
+                old_did = (old.device.device_id
+                           if old is not None and old is not backend else "")
                 if old is not None and old is not backend:
                     detail = ""
                     try:
@@ -5693,6 +6020,9 @@ class SDRBackendManager:
                 self.active_backend = backend
                 self.switch_generation += 1
                 self.last_conflict = ""
+                claimed_id = ""          # 已生效：占用保持到 disconnect/切换
+                if old_did:
+                    release_active_owner(AI_OWNER, old_did)
                 # 连接成功后从硬件回读实际参数，对齐软件状态与硬件实际
                 try:
                     backend.readback_hw_state()
@@ -5700,6 +6030,9 @@ class SDRBackendManager:
                     logger.warning(f"硬件回读失败（不影响连接）: {e}")
                 return True
             finally:
+                if claimed_id:
+                    # 任何失败路径都不留占用记录，否则下一个进程会被自己人挡。
+                    release_active_owner(AI_OWNER, claimed_id)
                 self._switch_in_progress = False
 
     def disconnect(self):
@@ -5707,8 +6040,12 @@ class SDRBackendManager:
         with self._switch_lock:
             old = self.active_backend
             if old is not None:
+                did = old.device.device_id
                 if not self._release_backend(old):
-                    self.last_conflict = f"旧源 {old.device.device_id} 未完全释放"
+                    # 句柄未释放 = 设备可能还开着：保留占用登记，别让别人接手。
+                    self.last_conflict = f"旧源 {did} 未完全释放"
+                else:
+                    release_active_owner(AI_OWNER, did)
             self.active_backend = None
 
     def switch_device(self, device_id: str) -> bool:
@@ -5748,10 +6085,15 @@ class SDRBackendManager:
         if not be.connect():
             return None
         if self.active_backend and self.active_backend is not be:
+            old = self.active_backend
             try:
-                self.active_backend.disconnect()
+                old.disconnect()
             except Exception:
                 pass
+            # 从真实硬件切到离线回放：硬件句柄已释放，占用登记也要还回去
+            # （IQ 文件不是硬件，不上报占用）。
+            if getattr(old.device, "device_type", "") != "iq_file":
+                release_active_owner(AI_OWNER, old.device.device_id)
         self.backends[be.device.device_id] = be
         self.active_backend = be
         return be
