@@ -1,0 +1,291 @@
+{
+  "comment": "守卫账本：每个机检脚本要么跑绿，要么在 K 账里有编号，要么有一条带期限的豁免。机检入口 scripts/check_red_accounting.py。mode=manual 表示无法从当前仓库独立执行（缺参数/硬件/GUI/钩子上下文），必须写 reason + review_by。",
+  "version": 1,
+  "ledger": "docs/known-red-register.md",
+  "guards": [
+    {
+      "id": "verify_claims",
+      "script": "scripts/verify_claims.py",
+      "args": ["--check-lines", "--strict-lines"],
+      "mode": "run",
+      "slow": true
+    },
+    {
+      "id": "check_rollback_table",
+      "script": "scripts/check_rollback_table.py",
+      "mode": "run"
+    },
+    {
+      "id": "check_generated_artifacts",
+      "script": "scripts/check_generated_artifacts.py",
+      "mode": "run"
+    },
+    {
+      "id": "check_action_duplication",
+      "script": "scripts/check_action_duplication.py",
+      "args": ["--gate"],
+      "mode": "run"
+    },
+    {
+      "id": "check_help_paths",
+      "script": "scripts/check_help_paths.py",
+      "mode": "run",
+      "slow": true
+    },
+    {
+      "id": "check_card_links",
+      "script": "scripts/check_card_links.py",
+      "mode": "run"
+    },
+    {
+      "id": "check_data_licenses",
+      "script": "scripts/check_data_licenses.py",
+      "args": ["--check"],
+      "mode": "run"
+    },
+    {
+      "id": "audit_source_text_pins",
+      "script": "scripts/audit_source_text_pins.py",
+      "mode": "run"
+    },
+    {
+      "id": "gen_shortcut_table",
+      "script": "scripts/gen_shortcut_table.py",
+      "args": ["--check"],
+      "mode": "run"
+    },
+    {
+      "id": "settings_inventory",
+      "script": "scripts/settings_inventory.py",
+      "args": ["--check"],
+      "mode": "run"
+    },
+    {
+      "id": "theme_contrast",
+      "script": "scripts/theme_contrast.py",
+      "mode": "run"
+    },
+    {
+      "id": "install_git_hooks",
+      "script": "scripts/install_git_hooks.py",
+      "args": ["--check"],
+      "mode": "run"
+    },
+    {
+      "id": "fetch_constellation_names_cc0",
+      "script": "scripts/fetch_constellation_names_cc0.py",
+      "args": ["--check"],
+      "mode": "run"
+    },
+    {
+      "id": "fetch_dso_supplement",
+      "script": "scripts/fetch_dso_supplement.py",
+      "args": ["--check"],
+      "mode": "run"
+    },
+    {
+      "id": "ai_intent_regression",
+      "script": "scripts/ai_intent_regression.py",
+      "args": ["--limit", "40"],
+      "mode": "run"
+    },
+    {
+      "id": "ai_tool_consistency",
+      "script": "scripts/ai_tool_consistency.py",
+      "args": ["--limit", "40"],
+      "mode": "run"
+    },
+    {
+      "id": "tool_honesty_scan",
+      "script": "scripts/tool_honesty_scan.py",
+      "mode": "run"
+    },
+    {
+      "id": "access_layer_fault_injection",
+      "script": "scripts/access_layer_fault_injection.py",
+      "mode": "run"
+    },
+    {
+      "id": "check_roadmap_blocking",
+      "script": "scripts/check_roadmap_blocking.py",
+      "mode": "run"
+    },
+    {
+      "id": "check_commit_scope",
+      "script": "scripts/check_commit_scope.py",
+      "args": ["--staged"],
+      "mode": "manual",
+      "reason": "pre-commit 钩子内对暂存区判定；独立跑暂存区为空，恒 0，不能代表提交时的判定。",
+      "review_by": "2027-01"
+    },
+    {
+      "id": "claim_gate",
+      "script": "scripts/claim_gate.py",
+      "args": ["--staged"],
+      "mode": "manual",
+      "reason": "pre-commit 钩子内对暂存区判定；独立跑为空集。",
+      "review_by": "2027-01"
+    },
+    {
+      "id": "secret_scan_staged",
+      "script": "scripts/secret_scan.py",
+      "args": ["--staged"],
+      "mode": "manual",
+      "reason": "钩子只扫暂存区；独立跑需先造暂存内容，否则是空集。全树/历史口径见 secret_scan_worktree 与 secret_scan_history。",
+      "review_by": "2027-01"
+    },
+    {
+      "id": "secret_scan_worktree",
+      "script": "scripts/secret_scan.py",
+      "mode": "manual",
+      "reason": "全树字节扫描单次 >300s（2026-11-13 实测 BLOCK=4 / WARN=8561）；4 个 BLOCK 全在仓库根之外的 D:\\mbdsdr\\output\\（api_push.py、ci_watch*.sh，同一枚 PAT），不在 git 里，预提交钩子与发布产物都碰不到，只能人工删文件或轮换。钩子口径由 secret_scan_staged 覆盖。",
+      "review_by": "2026-12"
+    },
+    {
+      "id": "release_manifest",
+      "script": "scripts/release_manifest.py",
+      "mode": "run",
+      "slow": true,
+      "k": ["K24"]
+    },
+    {
+      "id": "git_sync_index",
+      "script": "scripts/git_sync_index.py",
+      "args": ["--check"],
+      "mode": "run"
+    },
+    {
+      "id": "lint_swallow_all",
+      "script": "scripts/lint_swallow_all.py",
+      "mode": "run",
+      "slow": true,
+      "k": ["K06"]
+    },
+    {
+      "id": "check_red_lifecycle",
+      "script": "scripts/check_red_lifecycle.py",
+      "args": ["--paths", "docs/known-red-register.md"],
+      "mode": "run",
+      "slow": true
+    },
+    {
+      "id": "check_destructive_ops",
+      "script": "scripts/check_destructive_ops.py",
+      "mode": "run",
+      "k": ["K22"]
+    },
+    {
+      "id": "check_test_version",
+      "script": "scripts/check_test_version.py",
+      "mode": "manual",
+      "reason": "必须给具体测试路径，且内部跑两次 pytest；只在怀疑「改测试销红」的事件调查时使用。",
+      "review_by": "2027-01"
+    },
+    {
+      "id": "find_blob_reverts",
+      "script": "scripts/find_blob_reverts.py",
+      "mode": "run",
+      "slow": true
+    },
+    {
+      "id": "tool_param_fuzz",
+      "script": "scripts/tool_param_fuzz.py",
+      "args": ["--limit", "40", "--no-write"],
+      "mode": "run"
+    },
+    {
+      "id": "tool_availability_audit",
+      "script": "scripts/tool_availability_audit.py",
+      "args": ["--no-write"],
+      "mode": "run"
+    },
+    {
+      "id": "qsettings_guard",
+      "script": "scripts/qsettings_guard.py",
+      "mode": "manual",
+      "reason": "哨兵包装器，必须 --wrap 一个真实进程才有判定对象；没有独立的「当前仓库」口径。",
+      "review_by": "2027-01"
+    },
+    {
+      "id": "gen_mcp_tools_doc",
+      "script": "scripts/gen_mcp_tools_doc.py",
+      "mode": "manual",
+      "reason": "生成器，产物由 check_generated_artifacts 对账；每次跑都会重写文档，不适合闸门。",
+      "review_by": "2027-01"
+    },
+    {
+      "id": "report_token_dual_values",
+      "script": "scripts/report_token_dual_values.py",
+      "mode": "run"
+    },
+    {
+      "id": "release_check_guards",
+      "script": "scripts/release_check.py",
+      "args": ["--steps", "guards"],
+      "mode": "manual",
+      "reason": "汇总器：所辖 13 条廉价机检已在本表逐条登记，重复跑只增加 40s。发版时由 release_check 整步执行。",
+      "review_by": "2027-01"
+    },
+    {
+      "id": "audit_evidence",
+      "script": "scripts/audit_evidence.py",
+      "mode": "run",
+      "slow": true,
+      "k": ["K23"]
+    },
+    {
+      "id": "make_decode_fixtures",
+      "script": "scripts/make_decode_fixtures.py",
+      "args": ["--check"],
+      "mode": "run"
+    },
+    {
+      "id": "check_commit_residue",
+      "script": "scripts/check_commit_residue.py",
+      "mode": "manual",
+      "reason": "必须给提交范围；无调用方、无责任人，登记为待接 post-commit 的候选。",
+      "review_by": "2027-01"
+    },
+    {
+      "id": "ci_pytest_groups",
+      "script": "scripts/ci_pytest_groups.py",
+      "args": ["--check"],
+      "mode": "run"
+    },
+    {
+      "id": "config_write_guard",
+      "script": "scripts/config_write_guard.py",
+      "mode": "manual",
+      "reason": "哨兵包装器，需挂在真实配置写点；没有独立的「当前仓库」口径。",
+      "review_by": "2027-01"
+    },
+    {
+      "id": "check_dist_head_parity",
+      "script": "scripts/check_dist_head_parity.py",
+      "mode": "manual",
+      "reason": "必须给 --dist；本机现有 .tmp/pyi-dist16 是 6b19aa89 的旧包（非当前 HEAD），拿它判红会把旧构建算成现状。",
+      "review_by": "2026-12"
+    },
+    {
+      "id": "ui_layout_audit",
+      "script": "scripts/ui_layout_audit.py",
+      "mode": "manual",
+      "reason": "需要起 GUI 并对比几何基线（Qt），耗时与稳定性都不适合自动闸门。",
+      "review_by": "2027-01"
+    },
+    {
+      "id": "sample_rate_readback_check",
+      "script": "scripts/sample_rate_readback_check.py",
+      "args": ["--mode", "honest"],
+      "mode": "run"
+    },
+    {
+      "id": "secret_scan_history",
+      "script": "scripts/secret_scan.py",
+      "args": ["--history"],
+      "mode": "manual",
+      "reason": "全量历史扫描单次 >300s；钩子只覆盖暂存区，按季度人工跑并留结论。",
+      "review_by": "2027-01"
+    }
+  ]
+}

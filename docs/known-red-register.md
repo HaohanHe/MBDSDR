@@ -730,7 +730,12 @@ QT_QPA_PLATFORM=offscreen python -m pytest "<nodeid>" -q
 
 ## K18 — 设置盘点表与脚本读数不一致（2026-11-13 实跑，已转绿 `dad6324f`）
 
-- **再检绑定**：验证提交 `dad6324f`；文件集合 `docs/settings-inventory.md`、`scripts/settings_inventory.py`、`tests/test_settings_ui_coverage.py`、`desktop/config_schema.py`
+- **再检绑定**：验证提交 `8199fcd2`；文件集合 `docs/settings-inventory.md`、`scripts/settings_inventory.py`、`tests/test_settings_ui_coverage.py`、`desktop/config_schema.py`
+- **再检（2026-11-13 深夜，R8 二次清账）**：`docs/settings-inventory.md` 又被
+  `8199fcd2`（12 条行号按 HEAD 重定位）改动，R8 把本条退回待复核；在当前
+  工作树实跑 `pytest tests/test_settings_ui_coverage.py::test_inventory_table_matches_script`
+  → `1 passed`，`python scripts/settings_inventory.py --check` → `文档块一致`，
+  绑定更新为 `8199fcd2`。
 - **再检（2026-11-13，R8 清账）**：`docs/settings-inventory.md` 在旧验证提交
   `a92d74c4` 之后被重生成 3 笔，曾被 R8 退回待复核。本次在
   `D:\mbdsdr\_wt\kcheck-dad6324f`（`dad6324f`）实跑：
@@ -911,7 +916,14 @@ baseline 56 → 58（`BUILT_AT` 同步 58），每条带 owner + reason：
 
 ## K20 — tooltip 守卫 4 条（2026-11-13 收口，已转绿 `5e0bb563`）
 
-- **再检绑定**：验证提交 `5e0bb563`；文件集合 `desktop/device_panel.py`、`desktop/control_panel.py`、`docs/tooltip-dynamic-baseline.json`、`tests/test_tooltip_dynamic_runtime.py`
+- **再检绑定**：验证提交 `a33eca46`；文件集合 `desktop/device_panel.py`、`desktop/control_panel.py`、`docs/tooltip-dynamic-baseline.json`、`tests/test_tooltip_dynamic_runtime.py`
+- **再检（2026-11-13 深夜，R8 二次清账）**：`desktop/device_panel.py` 被
+  `a33eca46`（采样率输入收 Hz 与 MS/s）改动，R8 退回待复核；在干净 worktree
+  `D:\mbdsdr\_wt\kcheck-a33eca46`（`a33eca46`）实跑
+  `pytest tests/test_tooltip_guard.py tests/test_tooltip_dynamic_runtime.py`
+  → **17 passed**，绑定更新为 `a33eca46`。主工作树当前那 1 条红是
+  `desktop/sat_track_panel.py:400 :: text`（卫星过境线**未提交**改动），
+  按本节下方「未处理并点名」不计入本条。
 - **收口（2026-11-13，验证提交 `5e0bb563`）**：逐处判定（不是整批豁免），并把
   `08e61bd5` 新引入的 2 处同型透传一并清掉：
 
@@ -1056,4 +1068,84 @@ baseline 56 → 58（`BUILT_AT` 同步 58），每条带 owner + reason：
   `desktop/settings_panel.py` 均无活跃 claim；按引入线归设置页线（K15）。
 - **再检**：已按上面的绑定登记；`settings_panel.py` 或该运行时用例任一变动，R8 都会
   把本条退回待复核（判据只用 git 历史）。
+
+---
+
+## K22 — `check_destructive_ops` 有 27 笔 reflog 破坏性操作未审计（2026-11-13 实测，存量·未修）
+
+- **首次记录**：2026-11-13（工作树 HEAD `90452159`，`python scripts/check_destructive_ops.py`）。
+- **分类**：存量。27 笔 reset 发生在 2026-11-05～11-11 的多条 worktree 线
+  （`backend-opt`、`wt-p017`、`readme-opt` 与 main），不是本线引入。
+- **症状**：reflog 里 27 笔 `reset: moving to ...` / `forced-update` 候选，在
+  `.locks/destructive_ops.log` 里 `allowed=true` 的放行记录 **0 笔**，脚本退出 1。
+- **根因**：这些操作发生时没有留下审计记录。reflog 不记录 reset 模式，
+  soft/mixed/hard/no-op 一律算候选，所以「确实只是 no-op」也无法从 reflog 自证；
+  只能逐笔由操作人补审计，不能靠改判据或清空 log 变绿。
+- **转绿条件**：27 笔逐笔复核，分别补一条 `destructive_ops.log` 审计记录
+  （操作人 / 目的 / 可回滚点 / 结论），或由操作 owner 明确裁定「无需放行」并把
+  裁定理由写进同一日志。禁止删日志、放宽 `allowed` 判据、或把候选数写死。
+  验收：脚本退出 0，且 `未审计 0 笔`。
+- **复跑命令 + 实际输出**：
+  ```bash
+  python scripts/check_destructive_ops.py
+  # reflog 破坏性候选 27 笔；有放行记录 0 笔；未审计 27 笔
+  ```
+- **owner / 复核**：各笔操作执行人（main 与三条 worktree 线）；复核期限 2026-12。
+
+---
+
+## K23 — `audit_evidence` 2701 条数字断言无证据（2026-11-13 实测，存量·未修）
+
+- **首次记录**：2026-11-13（工作树 HEAD `90452159`，`python scripts/audit_evidence.py`）。
+- **分类**：存量。扫描 641 个文件 / 3468 条数字断言，落在
+  `docs/limitations-register.md`、`docs/COORDINATION.md`、`docs/audit_r2/` 等
+  历史文档，不是本线本轮新增。
+- **症状**：`| 有证据 | 无证据 | 已显式标未验证 |` = `636 / 2701 / 131`；
+  脚本结论「红 —— 2701 条数字断言既无证据也未标未验证」，退出 1。
+- **根因**：证据标准（commit / 原始件 / 复跑命令 / 未验证标记）落地晚于这批文档；
+  数字断言只写了结论，没写来源。
+- **转绿条件**：每条补四类证据之一（commit、原始件、可复跑命令、显式未验证标记），
+  或删除无法证实的断言；`无证据` 总数只降不升。禁止把脚本排除出守卫清单、
+  禁止把阈值写死成当前值。验收：退出 0。
+- **复跑命令 + 实际输出**：
+  ```bash
+  python scripts/audit_evidence.py
+  # 扫描 641 个文件，3468 条数字断言（48.9s）
+  # | 636 | 2701 | 131 |
+  # 结论：红 —— 2701 条数字断言既无证据也未标未验证。
+  ```
+- **owner / 复核**：证据标准 owner；复核期限 2026-12。
+
+---
+
+## K24 — `release_manifest` 发布清单 5 项 FAIL（2026-11-13 实测，存量·未修）
+
+- **首次记录**：2026-11-13（工作树 HEAD `90452159`，`python scripts/release_manifest.py`，
+  自动取到 `.tmp/pyi-dist16` 产物）。
+- **分类**：存量，横跨版本号 / 依赖 / 产物凭据三类，不是本轮改动引入。
+- **症状**（脚本总判 `FAIL=5 WARN=0 PASS=84 BY-DESIGN=7`，退出 1）：
+  1. **版本号字面量**：`pyproject.toml:70` 与 `:75` 写死 `0.2.0`；全仓另有 4 处
+     手写 canonical 字面量（`.gitignore:155`、`desktop/settings.py:143`、
+     `docs/COORDINATION.md:4082/4123`）。版本唯一来源应是 `mbdsdr_ai/VERSION`。
+  2. **依赖 pin**：`tomli>=2.0; python_version < "3.11"` 声明了但产物里没有
+     （`_internal` 与 PYZ 均未找到）——要么打进包，要么从依赖里删掉并说明。
+  3. **产物凭据形状**：`Qt6Network.dll`、`qopensslbackend.dll`、
+     `qschannelbackend.dll`、`scipy ... _core.cp314-win_amd64.pyd` 4 个第三方
+     二进制命中形状规则。需要判定是「误报」还是「真凭据」：误报要按路径/哈希
+     登记二进制白名单并写解除条件，不许直接关掉第 5 项。
+- **根因**：三项各自独立：版本派生点没收干净、可选依赖与打包口径不一致、
+  产物字节扫描没有为第三方二进制定义豁免机制。
+- **转绿条件**：三项分别定夺并落地（版本改派生；tomli 二选一；二进制命中
+  逐条登记理由 + 复核期限），然后 `release_manifest.py` 退出 0。
+  **不许**把 `release_manifest.py` 从守卫清单删掉来变绿。
+- **复跑命令 + 实际输出**：
+  ```bash
+  python scripts/release_manifest.py
+  # [FAIL] pyproject.toml 写死版本字面量：第 70 行 0.2.0；第 75 行 0.2.0
+  # [FAIL] 全仓出现手写 canonical 字面量 4 处
+  # [FAIL] tomli ← 声明了但产物没有
+  # [FAIL] 发布产物凭据扫描：Qt6Network.dll 等 4 个文件
+  # == 总判 == FAIL=5 WARN=0 PASS=84 BY-DESIGN=7 SKIP=0 -> FAIL
+  ```
+- **owner / 复核**：发版人（版本与打包）＋ 安全 owner（二进制命中）；复核期限 2026-12。
 
