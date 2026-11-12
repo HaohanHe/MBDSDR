@@ -1336,19 +1336,15 @@ def scan_a10(repo: Repo, units: List[Unit]) -> List[Finding]:
 
 # ────────────────────────────── A11 ──────────────────────────────
 
-CURRENT_DOC = re.compile(r"code-guards|evidence|known-red|ci-notes|redundancy|hardcoded|packaging|network-layer|copy-audit")
-#: 这些目录是「某一时刻的快照」，本身不承担当前树的结论；其中的绿色声明
-#: 只要不是绑到不存在/过期的提交就不算违规（后者仍会报）。
-ARCHIVE_DOC = re.compile(r"^docs/(?:learn|research|audit[^/]*|pending-patches|incidents)/")
-
-
 def scan_a11(repo: Repo, units: List[Unit]) -> List[Finding]:
     findings: List[Finding] = []
     for unit in units:
         if not unit.path.startswith("docs/"):
             continue
-        if unit.path.startswith("docs/learn/") and not CURRENT_DOC.search(unit.path):
-            continue
+        # 目录不再是开关：docs/learn、docs/incidents 这些「历史快照目录」里的
+        # 绿色声明同样要对当前树负责。确实不该计入的，按文件在
+        # docs/axioms-waivers.json 显式登记（理由 + 到期 + 批准人），
+        # 由 apply_waivers 统一判定；过期即重新计入违规。
         lines = unit.text.splitlines()
         no_hash_reported = False
         for i, line in enumerate(lines):
@@ -1378,9 +1374,6 @@ def scan_a11(repo: Repo, units: List[Unit]) -> List[Finding]:
             if not match:
                 if has_command or has_date:
                     note_skip("A11", "绿声明带命令/日期，可复核（未绑定提交号）")
-                    continue
-                if unit.path.startswith("docs/learn/") or ARCHIVE_DOC.search(unit.path):
-                    note_skip("A11", "历史快照目录里的声明不承担当前树结论")
                     continue
                 if not no_hash_reported:
                     no_hash_reported = True
@@ -1543,6 +1536,30 @@ def _has_index_name(node: ast.AST) -> bool:
     return any(isinstance(n, ast.Name) and n.id in INDEX_NAMES for n in ast.walk(node))
 
 
+def _module_fields(tree: ast.Module) -> List[str]:
+    """模块里实际出现的字段名：dict 字符串键 + 赋值目标名 + 函数参数名。
+
+    只在「判据无法判定」时用于把缺口写清楚：读者要能看到检查器到底拿到了
+    哪些字段，才知道该补 pid/serial，还是该确认这个字段本来就合法。
+    """
+    names: Set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Dict):
+            names |= {k.value for k in node.keys
+                      if isinstance(k, ast.Constant) and isinstance(k.value, str)}
+        elif isinstance(node, ast.Assign):
+            for t in node.targets:
+                if isinstance(t, ast.Name):
+                    names.add(t.id)
+                elif isinstance(t, ast.Attribute):
+                    names.add(t.attr)
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            for a in list(node.args.args) + list(node.args.kwonlyargs):
+                if isinstance(a.arg, str):
+                    names.add(a.arg)
+    return sorted(names)
+
+
 def _index_derived(value: ast.AST) -> bool:
     """身份值是否「把下标拼进了字符串」。
 
@@ -1605,8 +1622,9 @@ def scan_a13(units: List[Unit]) -> List[Finding]:
                 # 有记录 schema 时：只有「schema 里的名字类字段」才算违规——
                 # entry_id / fingerprint / size_bytes / source 本身就是唯一或
                 # 内容标识，比较它们不是违规。
-                # 没有 schema 时退回原来那窄口径（owner/holder/identity），
-                # 这一段仍可改名绕过，已在文档里写明是两个数里的残留。
+                # 没有 schema 时不允许退回「owner/holder/identity 字样」判断：
+                # 字样既不能证明违规，也不能证明清白。判据无法判定时必须报出来，
+                # 让缺口可见（否则换个字段名就静默通过）。
                 name_like = re.search(r"owner|holder|claimant|identity", field, re.I)
                 if schema:
                     if field not in schema:
@@ -1614,7 +1632,21 @@ def scan_a13(units: List[Unit]) -> List[Finding]:
                     if not re.search(r"owner|holder|claimant|identity|label|^name$|user|author",
                                      field, re.I):
                         continue
-                elif not name_like:
+                else:
+                    if not name_like:
+                        continue
+                    fields = _module_fields(tree)
+                    shown = "、".join(fields[:12]) + ("…" if len(fields) > 12 else "")
+                    _add(
+                        findings, "A13-undecidable", unit, node.lineno,
+                        f"{unit.path} 里找不到带 pid/serial 等唯一字段的记录，"
+                        f"无法判定 `{field}` 是不是可复用的身份；"
+                        f"本模块可见字段：{shown or '（无）'}。",
+                        "把持有者记录改成带 pid + 进程启动时间（或设备序列号）的结构，"
+                        "让判据能判定；确认该比较本来就合法时，在 docs/axioms-waivers.json "
+                        "按文件登记豁免（理由 + 到期 + 批准人）。",
+                        "review",
+                    )
                     continue
                 # 只有比较式本身带了 pid/serial 才算「用了唯一事实」；
                 # 同函数别处出现 `'pid'` 字面量（比如记录定义）不能当作豁免。

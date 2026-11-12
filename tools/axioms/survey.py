@@ -56,6 +56,16 @@ RULE_DIMENSION = {
     "A10": "D5", "A11": "D5", "A14": "D5",
 }
 
+
+def _dimension_of(rule: str) -> Optional[str]:
+    """finding 的规则名归一：`A13-undecidable` 与 `A13` 属于同一维。
+
+    维度由公理前缀决定；子规则名（判据无法判定这类）不能掉出维度，
+    否则它会被静默丢弃、报告里看不到。
+    """
+    return RULE_DIMENSION.get(rule) or RULE_DIMENSION.get(rule.split("-")[0])
+
+
 DIMENSIONS = [
     ("D1", "分层与依赖方向", "哪一层可以 import 哪一层；纯 Python 层不得依赖 Qt。"),
     ("D2", "真值源清单", "每个事实只能有一个产生点；同一事实两份实现即为违规。"),
@@ -222,11 +232,11 @@ def collect_d1(repo: Repo) -> Dimension:
             # 环的身份 = 代表模块（path）；成员数只写进 why 供人读。
             "模块级 import 环",
             f"与另外 {len(comp) - 1} 个模块互相依赖（代表模块取字典序最小者）："
-            + "、".join(comp[1:]) + "。",
-            "存在 import 环，任何一侧的初始化顺序都会影响另一侧；单独改一处无法预测影响面。",
+            + "、".join(comp[1:]) + "。任何一侧的初始化顺序都会影响另一侧；"
+            "单独改一处无法预测影响面。",
             "把常量/状态下沉到下层，或改依赖注入；不得用函数体内延迟 import "
             "掩盖——依赖没有变，只是检查器看不见。",
-            "review",
+            severity="review",
         ))
     return dim
 
@@ -347,7 +357,7 @@ def _fact_of(expr: str, context: str) -> str:
 
 def collect_d2(repo: Repo, base: Sequence[Finding]) -> Dimension:
     dim = Dimension("D2", "真值源清单", DIMENSIONS[1][2])
-    dim.findings.extend(f for f in base if RULE_DIMENSION.get(f.rule) == "D2")
+    dim.findings.extend(f for f in base if _dimension_of(f.rule) == "D2")
 
     units = repo.py_units(("desktop", "mbdsdr_ai"))
     # key = 事实（频率/带宽/…）；value = 产生该读数的文件集合。
@@ -582,9 +592,55 @@ def _gate_scripts(repo: Repo) -> List[str]:
     return sorted(names)
 
 
+#: 文档里的可执行入口：脚本路径 / release_check 步名 / 钩子名。
+_ENTRY_SCRIPT = re.compile(r"`?(?:python[0-9.]*\s+)?(scripts/[A-Za-z0-9_./-]+\.py)")
+_ENTRY_HOOK = re.compile(r"(?:\.git/hooks/|钩子[：:\s]+)(pre-commit|pre-push|commit-msg|post-commit)")
+_ENTRY_STEP = re.compile(r"--steps?[= ]`?([A-Za-z0-9_,-]+)")
+
+
+def _gate_entries(docs_text: str, gate: str) -> List[str]:
+    """提到这个门禁的行里给出的可执行入口。
+
+    只在「同一行提到门禁名」的地方找，避免文档任意角落的一句 `scripts/x.py`
+    被算成所有门禁的登记。
+    """
+    out: List[str] = []
+    for line in docs_text.splitlines():
+        if gate not in line:
+            continue
+        out += [m.group(1) for m in _ENTRY_SCRIPT.finditer(line)]
+        out += ["hook:" + m.group(1) for m in _ENTRY_HOOK.finditer(line)]
+        for m in _ENTRY_STEP.finditer(line):
+            out += ["step:" + s.strip() for s in m.group(1).split(",") if s.strip()]
+    return out
+
+
+def _entry_resolves(repo: Repo, entry: str, gate: str, hooks: Sequence[str]) -> bool:
+    """入口真实存在，并且真的是这个门禁的入口。
+
+    只查「文件存在」不够：登记到别的脚本、或写一个不存在的路径，都会让
+    「文档里有名字」重新变成装饰品。钩子/步骤要能看出它确实调用了本门禁。
+    """
+    stem = gate[:-3] if gate.endswith(".py") else gate
+    if entry.startswith("hook:"):
+        name = entry[5:]
+        return any(os.path.basename(h) == name and stem in _read(h) for h in hooks)
+    if entry.startswith("step:"):
+        path = os.path.join(repo.root, "scripts", "release_check.py")
+        if not os.path.isfile(path):
+            return False
+        text = _read(path)
+        m = re.search(rf"def\s+_step_{re.escape(entry[5:])}\s*\(.*?(?=\ndef |\Z)", text, re.S)
+        return bool(m) and stem in m.group(0)
+    full = os.path.join(repo.root, entry)
+    if not os.path.isfile(full):
+        return False
+    return os.path.basename(entry) == gate or stem in _read(full)
+
+
 def collect_d4(repo: Repo, base: Sequence[Finding]) -> Dimension:
     dim = Dimension("D4", "门禁与验收", DIMENSIONS[3][2])
-    dim.findings.extend(f for f in base if RULE_DIMENSION.get(f.rule) == "D4")
+    dim.findings.extend(f for f in base if _dimension_of(f.rule) == "D4")
 
     hooks = _hook_files(repo)
     gates = _gate_scripts(repo)
@@ -593,16 +649,50 @@ def collect_d4(repo: Repo, base: Sequence[Finding]) -> Dimension:
         "docs/code-guards.md", "docs/evidence-standard.md", "AGENTS.md",
     ))
     wired = [g for g in gates if g in hook_text]
-    documented = [g for g in gates if g in docs_text]
-    silent = [g for g in gates if g not in hook_text and g not in docs_text]
+    # 「门禁名出现在文档任意位置」曾经就是登记的全部条件：写一行
+    # 「这个门禁不能用」也能绿。登记必须指名可执行入口，且入口要能解析到真实存在。
+    registered: List[str] = []
+    unresolved: List[Tuple[str, str]] = []
+    silent: List[str] = []
+    for g in gates:
+        if g in wired:
+            continue
+        if g not in docs_text:
+            silent.append(g)
+            continue
+        entries = _gate_entries(docs_text, g)
+        if not entries:
+            unresolved.append((g, ""))
+            continue
+        # 登记成立的口径是「至少有一个入口能解析」：一行里常同时写脚本路径和
+        # release_check 步名，只要脚本路径真实存在且确实调用本门禁，这条登记就
+        # 成立；另一个入口写错不该把已成立的登记否掉。
+        if any(_entry_resolves(repo, e, g, hooks) for e in entries):
+            registered.append(g)
+        else:
+            unresolved.append((g, entries[0]))
     dim.facts.append(f"已安装 git 钩子：{len(hooks)} 个")
-    dim.facts.append(f"门禁类脚本：{len(gates)} 个；钩子直接调用 {len(wired)} 个；文档登记 {len(documented)} 个")
+    dim.facts.append(
+        f"门禁类脚本：{len(gates)} 个；钩子直接调用 {len(wired)} 个；"
+        f"文档登记且入口可解析 {len(registered)} 个；登记不可解析 {len(unresolved)} 个；"
+        f"无任何入口 {len(silent)} 个"
+    )
 
     if not any("pre-commit" in os.path.basename(h) for h in hooks):
         dim.findings.append(Finding(
             "D4-no-hook", ".git/hooks", 0, "未安装 pre-commit 钩子",
             "门禁脚本没有挂在提交必经路径上，是否执行完全取决于人。",
             "运行 python scripts/install_git_hooks.py 并验证钩子可执行。",
+        ))
+    for g, entry in unresolved:
+        detail = (f"文档里点名的入口 `{entry}` 在本仓不存在，或它并没有调用 {g}" if entry
+                  else "文档只提到了这个名字，没有给出任何可执行入口")
+        dim.findings.append(Finding(
+            "D4-gate-unresolvable", f"scripts/{g}", 0,
+            f"登记入口 `{entry}` 不可解析" if entry else "登记只有名字，没有可执行入口",
+            f"{detail}；写一行文字不等于登记，这个门禁仍然没有入口。",
+            "在 docs/code-guards.md 写明可执行入口（`python scripts/xxx.py` / "
+            "`--steps xxx` / `.git/hooks/pre-commit`），并确保该入口真实存在且调用了本脚本。",
         ))
     for g in silent:
         dim.findings.append(Finding(
@@ -681,7 +771,13 @@ def collect_d5(repo: Repo, base: Sequence[Finding]) -> Dimension:
     coord = os.path.join(repo.root, "docs/COORDINATION.md")
     if os.path.isfile(coord):
         text = _read(coord)
-        dim.facts.append(f"协作记录：{len(re.findall(r'claim|CLAIM', text))} 处 claim 提及")
+        # 只做计数，不做语义判定。这里刻意不产出 finding：
+        # 「出现过 claim 字样」既不能证明协作有效，也不能证明无效；
+        # 把它当白名单用是误读，所以结论里必须写明白。
+        dim.facts.append(
+            f"协作记录：docs/COORDINATION.md 有 {len(re.findall(r'claim|CLAIM', text))} 处 "
+            "claim 提及（只统计提及次数，不做语义判定；不是白名单）"
+        )
     return dim
 
 

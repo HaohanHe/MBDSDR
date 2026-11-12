@@ -9,6 +9,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import subprocess
@@ -16,7 +17,14 @@ import tempfile
 from dataclasses import dataclass
 from typing import Callable, Dict, List, Optional, Sequence
 
-from .model import Axiom, Finding, Repo, priority_score
+from .model import (
+    Axiom,
+    Finding,
+    Repo,
+    apply_waivers,
+    load_waivers,
+    priority_score,
+)
 from .ratchet import build_baseline, compare, load_baseline, snippet_key, write_baseline
 from .survey import audit_waiver_items, collect_all
 
@@ -65,11 +73,18 @@ def _run_case(case: Case, files: Dict[str, str]) -> List[Finding]:
                         _write_tree(root, {rel: text.replace("{head}", head)})
         repo = Repo(root)
         _, dims = collect_all(repo)
+        # 与 CLI 同一条路径：豁免由 docs/axioms-waivers.json 显式判定，
+        # 已豁免（未过期）的不算红；过期的 apply_waivers 会改回 must-fix 且不 waived。
+        waivers = load_waivers(repo)
         want = case.match or case.rule
-        return [
-            f for d in dims for f in d.findings
-            if f.rule == want or (not case.match and f.rule.startswith(case.rule + "-"))
-        ]
+        out: List[Finding] = []
+        for d in dims:
+            apply_waivers(d.findings, waivers)
+            out.extend(
+                f for f in d.findings
+                if not f.waived and (f.rule == want or (not case.match and f.rule.startswith(case.rule + "-")))
+            )
+        return out
     finally:
         shutil.rmtree(root, ignore_errors=True)
 
@@ -193,6 +208,17 @@ CASES: List[Case] = [
                               "    if item['claimant'] == payload['claimant']:\n        return True\n    return False\n"},
          {"scripts/claim.py": "def check(item, payload):\n    rec = {'pid': 1, 'claimant': 'x'}\n"
                               "    if item['pid'] == payload['pid']:\n        return True\n    return False\n"}),
+    Case("A13", "只有 owner 字样、没有唯一字段记录时必须报无法判定",
+         "没有带 pid/serial 的记录时，owner 字样既不能证明违规也不能证明清白；"
+         "旧实现按字样直接判违规，仍可换字段名绕过",
+         {"scripts/claim.py": "def check(item, payload):\n"
+                              "    if item['owner'] == payload['owner']:\n        return True\n"
+                              "    return False\n"},
+         {"scripts/claim.py": "def check(item, payload):\n"
+                              "    rec = {'pid': 1, 'owner': 'x'}\n"
+                              "    if item['pid'] == payload['pid']:\n        return True\n"
+                              "    return False\n"},
+         match="A13-undecidable"),
     Case("D1", "纯 Python 层依赖 Qt",
          "mbdsdr_ai 不得 import PySide6（分层契约）",
          {"mbdsdr_ai/core.py": "import PySide6\n"},
@@ -249,6 +275,20 @@ CASES: List[Case] = [
          {"scripts/check_foo.py": "print('gate')\n"},
          {"scripts/check_foo.py": "print('gate')\n", "docs/code-guards.md": "运行 `scripts/check_foo.py`。\n"},
          match="D4-silent-gate"),
+    Case("D4", "登记只写名字、没有可执行入口",
+         "旧判据「门禁名出现在文档任意位置」就算登记：写一行「这个门禁不能用」也能绿",
+         {"scripts/check_foo.py": "print('gate')\n",
+          "docs/code-guards.md": "`check_foo.py` 这个门禁不能用，先别接钩子。\n"},
+         {"scripts/check_foo.py": "print('gate')\n",
+          "docs/code-guards.md": "手动执行：`python scripts/check_foo.py`。\n"},
+         match="D4-gate-unresolvable"),
+    Case("D4", "登记指向不存在的脚本",
+         "docs/code-guards.md 写 `python scripts/check_missing.py`，该入口在本仓不存在",
+         {"scripts/check_foo.py": "print('gate')\n",
+          "docs/code-guards.md": "门禁 `check_foo.py` 由 `python scripts/check_missing.py` 执行。\n"},
+         {"scripts/check_foo.py": "print('gate')\n",
+          "docs/code-guards.md": "门禁 `check_foo.py` 由 `python scripts/check_foo.py` 执行。\n"},
+         match="D4-gate-unresolvable"),
     Case("D5", "已知红缺转绿条件",
          "docs/known-red-register.md 要求每条红必须带转绿条件",
          {"docs/known-red-register.md": "## K01 坏\n\n- 症状：x\n"},
@@ -297,6 +337,24 @@ CASES: List[Case] = [
          {"docs/x.md": "本轮全绿 `5d09bb2`。\n"},
          {"docs/x.md": "本轮全绿 `{head}`。\n转绿条件：4 条全部通过（动态 tooltip 三项）。\n"},
          True),
+    Case("A11", "历史快照目录不再是免检开关",
+         "docs/incidents/ 里的绿色声明没有命令/提交号/日期：目录本身不构成豁免"
+         "（旧的 ARCHIVE_DOC 按路径直接跳过整篇）",
+         {"docs/incidents/x.md": "本轮全绿。\n"},
+         {"docs/incidents/x.md": "本轮全绿，见 `pytest -q tests/`。\n"},
+         match="A11"),
+    Case("A11", "显式豁免登记才免检",
+         "docs/axioms-waivers.json 按文件登记（文件 + 理由 + 到期 + approver），"
+         "过期后重新计入违规",
+         {"docs/incidents/x.md": "本轮全绿。\n",
+          "docs/axioms-waivers.json": json.dumps({"version": 1, "waivers": [{
+              "rule": "A11", "path": "docs/incidents/x.md", "reason": "历史快照",
+              "review_by": "2000-01-01", "approver": "user"}]}, ensure_ascii=False)},
+         {"docs/incidents/x.md": "本轮全绿。\n",
+          "docs/axioms-waivers.json": json.dumps({"version": 1, "waivers": [{
+              "rule": "A11", "path": "docs/incidents/x.md", "reason": "历史快照",
+              "review_by": "2999-01-01", "approver": "user"}]}, ensure_ascii=False)},
+         match="A11"),
 ]
 
 
