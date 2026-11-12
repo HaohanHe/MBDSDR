@@ -72,6 +72,7 @@ export MBDSDR_NULL_AUDIO=1 MBDSDR_NO_HW=1 QT_QPA_PLATFORM=offscreen
 
 > 全部为**合成 fixture + AWGN，非 OTA**。不同模式的噪声域/带宽口径不同，**dB 值不可横向比较**；这张表只钉方向性、90% 档、100% 档、临界区间与首个失败码，不钉具体 dB 数值。
 
+> 证据等级 E4：本段数字未验证，引用前须复核（判据见 docs/evidence-standard.md）。
 | 模式 | 口径（噪声域｜带宽｜SNR） | 档位网格 | 90% 档 | 100% 档 | 临界区间 | 首个失败码 | 是否单调 |
 |---|---|---|---|---|---|---|---|
 | `ais` | 复基带（基带 IQ）｜噪声带宽 = fs/2 = 120 kHz（fs=240 kS/s，全带白噪，未按 9600 bit/s 占用带宽归一）｜每样本：突发（含前导）内平均信号功率 / 噪声方差；GMSK 1 bit/符号（25 样本/符号） | -10..16 dB（14 档 / 20 次） | 8 dB | 10 dB | 6..10 dB | `nothing_detected` | 是 |

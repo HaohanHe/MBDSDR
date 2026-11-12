@@ -29,6 +29,7 @@
 
 ### 1.1 FT8 物理层常量（权威来源 `lib/ft8/ft8_params.f90`）
 
+> 证据等级 E4：本段数字未验证，引用前须复核（判据见 docs/evidence-standard.md）。
 | 常量 | 值 | 含义 | 源码引用 |
 |---|---|---|---|
 | `KK` | **91** | LDPC 信息位 = 77 消息 + 14 CRC | `lib/ft8/ft8_params.f90:2` |

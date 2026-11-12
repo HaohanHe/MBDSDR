@@ -178,6 +178,7 @@ VSWR     = (1 + |Γ|) / (1 - |Γ|)        [驻波比]
 ```
 
 手工可验标准点：
+> 证据等级 E4：本段数字未验证，引用前须复核（判据见 docs/evidence-standard.md）。
 - 理想匹配 Γ=0 → RL=+∞、VSWR=1.0、Z=50 Ω；
 - 全反射 Γ=1（开路/短路）→ RL=0 dB、VSWR=∞；
 - Γ=0.1∠0 → VSWR=(1.1)/(0.9)=1.222…。
@@ -238,7 +239,8 @@ TCXO/晶振决定，无法经串口校正；若未来需 ppm 补偿，只能由�
 
 - IF 架构：IF=5kHz，ADC 48kHz 采样，MCU 数字滤波——bandwidth 五档即 IF 模拟带宽选择。
 - 谐波测频：本振基波 50k-300MHz 直出；300-900MHz 用 3 次谐波；900-1500MHz 用 5 次谐波；基波始终存在。
-- req=zero span（CW FREQ 单频点）语义，与 protocol-study §2.2 记录一致。
+- 
+req=zero span（CW FREQ 单频点）语义，与 protocol-study §2.2 记录一致。
 - 校准槽 5 个、开机载入 0；RECALL 恢复整套 UI 状态（含迹线/标记/域/速度因数/电延迟），不止误差项。
 - 速度因数官方按百分数输入（67=0.67）；我方 CLI 文档里的 0.66 默认同物。
 - TDR 窗三档（矩形/Kaiser b6/b13）与 vna_rf::tdrCable 采用的 beta=6（官方 NORMAL 默认档）对齐，可在工具描述中引官方三档名。
