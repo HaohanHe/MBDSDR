@@ -653,8 +653,9 @@ def _report_runtime_dlls() -> None:
 def _report_corruption_evidence() -> None:
     """启动自检：只读清点历史损坏备份，结论只写启动日志（不碰界面）。
 
-    覆盖书签 / FM 预设（默认 ``~/.mbdsdr``）与桌面配置所在目录。只报告
-    数量，不删除任何文件；超过 30 天的备份提示用户手动清理。
+    覆盖书签 / FM 预设（默认 ``~/.mbdsdr``）、已知数据子目录
+    （``evolution`` / ``guardian_snapshots`` / ``workflows``）与桌面配置
+    所在目录。只报告数量，不删除任何文件；超过 30 天的备份提示用户手动清理。
     """
     from mbdsdr_ai.corrupt_evidence import (
         corruption_startup_report,

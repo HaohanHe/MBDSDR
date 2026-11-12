@@ -84,13 +84,23 @@ guardian / version_store / workflow_engine / command_palette）都做到「备�
   memory / scheduler / workflow_engine 本来就在表里；它默认收起，所以不算主动打扰，
   但也**不是主动提示** —— 这一点如实记下，别把它当成「用户一定会看到」。
 - **留白（未覆盖）**：
-  - `version_store` 在桌面没有任何入口，能力位表里也没有它的位置；
-    **本次不硬塞**，明确标记「这处损坏用户暂时看不到」。
+  - `version_store`：桌面无入口、能力位表里也没有位置，**本次不硬塞**。可落的路只有
+    一条——启动日志。`default_scan_directories` 已把 `~/.mbdsdr/evolution`
+    （以及 `guardian_snapshots`、`workflows`）纳入启动清点，索引损坏的
+    `versions.json.corrupt-*` 会出现在启动日志的「配置/数据文件损坏并已备份」那一行。
+    **代价**：只在日志文件里，启动时不由界面展示；用户得自己找到
+    `<程序目录>/logs/*.log`（无菜单入口，见下），且日志只报数量与最近一条路径，
+    不会主动解释「objects/ 还在但无法找回」。所以它仍**不是**用户可见的恢复入口。
+  - **缺口登记（本仓当前不具备面向用户的诊断出口）**：`corrupt_evidence` 旧文案
+    写着「见帮助 › 诊断」，但 `main_window.py` 的「帮助」菜单只有三步上手 / 能力目录 /
+    快捷键一览 / 命令面板，**没有诊断页**；启动日志也没有任何菜单可打开。本批顺手删掉了
+    这句指向不存在位置的提示。要真正让 version_store 的损坏可见，需要一个「数据健康」
+    面板或「打开日志」菜单项 —— 二者都落在 `main_window.py`，等卫星线，不在本目录。
   - `command_palette.recent_error()` 同理：命令面板的语义是「输入即过滤可执行动作」，
     把错误塞进结果列表会污染可执行项，**本次不接线**，等 main_window 统一诊断位。
-  - `memory.get_status_text()` 目前**没有**把 `last_error` 拼进去（scheduler/guardian 有）。
-    草稿因此直接读属性而不是解析文本；若要统一文本口径，需要另开一笔改 memory，
-    不在本目录范围内。
+  - `memory.get_status_text()` 已在 `1db672b3` 补上 `last_error`（与 scheduler/guardian
+    同前缀「持久化错误:」）。03 仍直接读属性：那对没有该文本通道的对象也成立，
+    且不依赖文本格式；要改用文本口径也可以，但别两种混用。
 - **同一行被改动后怎么判断**：
   1. 能力位元组是否仍是 `(attr, title)` 二元组、渲染是否仍用 `name + "\n" + note`；
   2. 若 `_collect` 被改成返回 3 元组/数据类 → 本 patch 放弃，按新结构重写（不要硬改）；

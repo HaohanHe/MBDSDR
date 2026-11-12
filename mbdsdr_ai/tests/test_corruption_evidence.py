@@ -144,8 +144,36 @@ def test_unwritable_log_falls_back_to_memory_buffer(tmp_path, monkeypatch):
 
 
 def test_default_scan_directories_covers_bookmarks_and_settings():
+    base = os.path.join(os.path.expanduser("~"), ".mbdsdr")
     dirs = ce.default_scan_directories("/data/config/desktop_settings.json")
-    assert dirs[0] == os.path.join(os.path.expanduser("~"), ".mbdsdr")
-    assert dirs[1] == os.path.dirname("/data/config/desktop_settings.json")
+    assert dirs[0] == base
+    assert "/data/config" in dirs
+    # 已知数据子目录：清点只做一级 listdir，不加这几项会漏掉
+    # version_store / guardian / workflow_engine 的损坏备份。
+    for sub in ("evolution", "guardian_snapshots", "workflows"):
+        assert os.path.join(base, sub) in dirs
     # 配置路径只有文件名（无目录）时不额外加一个空目录。
-    assert ce.default_scan_directories("desktop_settings.json") == [dirs[0]]
+    no_dir = ce.default_scan_directories("desktop_settings.json")
+    assert no_dir[0] == base
+    assert "" not in no_dir
+
+
+def test_version_store_backup_is_reported_from_evolution_dir(
+        tmp_path, monkeypatch):
+    """version_store 的索引备份在 ~/.mbdsdr/evolution 下，启动清点必须看到。"""
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
+    monkeypatch.setenv("HOME", str(tmp_path))
+    evolution = tmp_path / ".mbdsdr" / "evolution"
+    evolution.mkdir(parents=True)
+    backup = evolution / "versions.json.corrupt-20261112-221000"
+    backup.write_text("{}", encoding="utf-8")
+    ce.write_reason(str(backup), "版本索引损坏：测试", None)
+
+    lines = []
+    report = ce.corruption_startup_report(
+        ce.default_scan_directories(str(tmp_path / "config" / "settings.json")),
+        append_line=lines.append)
+
+    assert report["total"] == 1
+    assert str(backup) + ce.REASON_SUFFIX in report["recent"]
+    assert lines and "已备份" in lines[0], lines
