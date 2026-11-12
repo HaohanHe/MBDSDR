@@ -161,7 +161,7 @@ def test_backup_failure_blocks_index_writes(tmp_path, monkeypatch):
     store_dir.mkdir()
     path = store_dir / "versions.json"
     path.write_bytes(_CORRUPT_BYTES)
-    monkeypatch.setattr(version_store_module, "_backup_corrupt_versions",
+    monkeypatch.setattr(version_store_module, "backup_corrupt_versions",
                         lambda _p: None)
 
     store = VersionStore(store_path=str(store_dir))
@@ -179,7 +179,7 @@ def test_save_refuses_when_blocked(tmp_path, monkeypatch):
     store_dir = tmp_path / "store"
     store_dir.mkdir()
     (store_dir / "versions.json").write_bytes(_CORRUPT_BYTES)
-    monkeypatch.setattr(version_store_module, "_backup_corrupt_versions",
+    monkeypatch.setattr(version_store_module, "backup_corrupt_versions",
                         lambda _p: None)
     store = VersionStore(store_path=str(store_dir))
 

@@ -27,8 +27,12 @@ from .corrupt_evidence import write_reason
 logger = logging.getLogger(__name__)
 
 
-def _backup_corrupt_versions(path: str) -> Optional[str]:
-    """把损坏的版本索引改名成 ``*.corrupt-时间戳``，返回备份路径（失败 None）。"""
+def backup_corrupt_versions(path: str) -> Optional[str]:
+    """把损坏的版本索引改名成 ``*.corrupt-时间戳``，返回备份路径（失败 None）。
+
+    这是损坏留证的**公共接缝**：测试模拟「备份失败」时替换本函数返回
+    ``None``，不再改模块私有名。
+    """
     backup = f"{path}.corrupt-{time.strftime('%Y%m%d-%H%M%S')}"
     try:
         os.replace(path, backup)
@@ -149,7 +153,7 @@ class VersionStore:
 
     def _mark_corrupt(self, reason: str) -> None:
         """损坏：先备份原件再留人话错误；备份失败则禁止后续写盘。"""
-        self.corrupt_backup = _backup_corrupt_versions(self.versions_file)
+        self.corrupt_backup = backup_corrupt_versions(self.versions_file)
         objects_count = self._object_count()
         objects_note = (
             f"磁盘上的对象文件还在 objects/（{objects_count} 个），"
