@@ -41,6 +41,8 @@ def _assert_backup_intact(root):
     backups = _backups(path)
     assert len(backups) == 1, "损坏文件没有留下备份"
     assert backups[0].read_bytes() == CORRUPT, "备份内容与原件不一致"
+    assert list(path.parent.glob(path.name + ".corrupt-*.reason.txt")), \
+        "备份旁没有成对的损坏理由"
     assert "已备份" in (mgr.last_error or "")
     return path, mgr, backups
 
@@ -65,7 +67,7 @@ def test_add_after_corrupt_keeps_old_evidence(tmp_path):
 def test_without_real_backup_the_check_turns_red(tmp_path, monkeypatch):
     # 假备份：返回一个路径但不真改名 —— 等价于"备份逻辑被去掉"。
     monkeypatch.setattr(
-        bm_mod, "_backup_corrupt_bookmarks",
+        bm_mod, "backup_corrupt_bookmarks",
         lambda p: f"{p}.corrupt-fake")
     with pytest.raises(AssertionError):
         _assert_add_keeps_backup(tmp_path / "mutation")

@@ -90,11 +90,14 @@ def _from_legacy_entry(d: dict) -> "Bookmark":
     )
 
 
-def _backup_corrupt_bookmarks(path: Path) -> Optional[str]:
+def backup_corrupt_bookmarks(path: Path) -> Optional[str]:
     """把损坏的书签文件改名成 ``*.corrupt-时间戳``，返回备份路径。
 
     只改名不删除：原件字节必须原样留在备份里，后续写新文件才不会吞掉证据。
     改名失败返回 None，调用方据此拒绝写盘。
+
+    这是损坏留证的**公共接缝**：测试模拟「备份失败」时替换本函数返回
+    ``None``，不再改模块私有名。
     """
     stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     backup = path.with_name(f"{path.name}.corrupt-{stamp}")
@@ -241,7 +244,7 @@ class BookmarkManager:
         """损坏文件：备份原件、留人话错误；备份失败则禁止后续写盘。"""
         self._bookmarks = []
         self._tag_colors = {UNTAGGED: DEFAULT_COLOR}
-        self.corrupt_backup = _backup_corrupt_bookmarks(self.bookmarks_path)
+        self.corrupt_backup = backup_corrupt_bookmarks(self.bookmarks_path)
         self._save_blocked = self.corrupt_backup is None
         message = (
             f"书签文件读取失败（{reason}）：{self.bookmarks_path}；"
