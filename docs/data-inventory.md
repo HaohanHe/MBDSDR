@@ -488,6 +488,25 @@ horizon / dateHorizon / ofDate / temeToJ2000 四类向量；容差为矩阵 `1e-
 `gen_docs.py` / `index.html` / docs 四处接线落库后补，接手条件=`git status`
 对这四个路径为空且 `run_all.py` 已驱动。接线线在途，别抢。
 
+## 3d. 生成物对账统一入口（2026-11-13）
+
+§3c 判的是「有没有守卫」，本节回答「跑一次就知道现在同步没有」。统一入口
+`python scripts/check_generated_artifacts.py`：`--list` 看登记表与豁免理由，
+`--changed` 只查输入有改动的生成物，`--json` 给闸门解析。
+
+- 判据是**重跑生成器、比对产物**（`--check` 形态；只能整篇写盘的走
+  「快照→重跑→比对→还原」；`docs/error-catalog.md` 无独立脚本，按 `ERRORS`
+  重建表行逐行对），不是人眼看内容对不对；
+- 自动闸门挂在 `scripts/release_check.py` 的 `gen_reconcile` 步骤（发版前，
+  约 3 秒）；**不挂 pre-commit**——钩子变慢会诱发 `--no-verify`（既有裁定）；
+- 受查 6 项：shortcuts / mcp_tools / settings_inventory / incident_card_anchors /
+  decoder_matrix / error_catalog；豁免 6 项（运行时审计报告、星文化快照、
+  perf 证据、棘轮基线、时点报告、前端文档构建链），理由逐条写在脚本 `EXEMPT`；
+- 首跑实测（HEAD `9c287c66`）：**1 个生成物不同步**——`docs/error-catalog.md`
+  有 5 行（`bad_field` / `bad_param` / `bad_parameter` / `invalid_arguments` /
+  `missing_required_params`）的文案与建议落后于 `ERRORS`，其余 5 项一致。
+  这 5 行已按模块重建，复查全绿。
+
 **xingguan 源快照钉逐项**（本轮补的是「离线可验的那一段」，不是重跑守卫）：
 
 | 产物 | 生成器 | 输入源 | 现文件里的可校验字段 | 缺什么钉 | 补钉后能拦哪类漂移 |

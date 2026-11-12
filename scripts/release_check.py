@@ -128,8 +128,8 @@ DEFAULT_WORK = os.path.join(TMP_ROOT, "pyi-build12")
 DEFAULT_DIAG_DIST = os.path.join(TMP_ROOT, "pyi-dist12-noarchive")
 DEFAULT_DIAG_WORK = os.path.join(TMP_ROOT, "pyi-build12-noarchive")
 
-ALL_STEPS = ("docs", "action_dup", "build", "smoke", "subtree", "single",
-             "optional", "qt", "narrow", "overlap", "log")
+ALL_STEPS = ("docs", "gen_reconcile", "action_dup", "build", "smoke", "subtree",
+             "single", "optional", "qt", "narrow", "overlap", "log")
 
 #: 窄屏验收：两套指纹各自独立判（任一越线整步 FAIL），不换算、不互相代表。
 #: 两套**都跑 windows 平台插件**（要有真字体；offscreen 下 QFontDatabase
@@ -181,6 +181,10 @@ FAIL_HINTS = {
             "不许把基准写成 HEAD，也不许为了过闸而扩大白名单；"
             "渲染点漂移跑 `python scripts/check_help_paths.py` 看「文档行号漂移」，"
             "按 §三/§四 的真实渲染行改坐标（先确认该行含锚点字面量）",
+    "gen_reconcile": "跑 `python scripts/check_generated_artifacts.py` 看哪些生成物"
+                     "与生成器不一致：按行内「重生成」命令重跑（不要手改产物），"
+                     "再 `--list` 核对豁免理由是否仍然成立；不要在 pre-commit 加这道闸"
+                     "（钩子变慢会诱发 --no-verify）",
     "action_dup": "跑 `python scripts/check_action_duplication.py --gate` 看未豁免项："
                   "真重复要把多个 QAction 实例并成一个，同名不同标识要定单一归属；"
                   "只在「他线正在改、本线这轮动不了」时才挂 "
@@ -921,6 +925,29 @@ def main() -> int:
         return True, "；".join(p for p in (dist, step4, "渲染点 0 处",
                                            rb_detail) if p)
 
+    def do_gen_reconcile() -> tuple[bool, str]:
+        """生成物对账：重跑文档/表格/清单生成器，比对产物是否同步。
+
+        刻意不挂 pre-commit：钩子变慢会诱发 --no-verify（既有裁定）。这里
+        （发版前）是唯一自动闸门；日常改动相关源文件时手动跑 ``--changed``。
+        """
+        script = os.path.join(ROOT, "scripts", "check_generated_artifacts.py")
+        proc = subprocess.run([sys.executable, script, "--json"],
+                              cwd=ROOT, capture_output=True, text=True,
+                              timeout=1800)
+        out = (proc.stdout or "") + "\n" + (proc.stderr or "")
+        try:
+            data = json.loads((proc.stdout or "").strip())
+        except json.JSONDecodeError:
+            return False, "对账输出不是 JSON（生成器崩了）：" + \
+                out.strip().replace("\n", " ")[:300]
+        if proc.returncode == 0:
+            return True, (f"{data.get('checked', 0)} 个生成物与生成器一致；"
+                          f"豁免 {data.get('exempt', 0)}（理由见 --list）")
+        bad = [r.get("path", "?") for r in data.get("results", [])
+               if r.get("status") != "ok"]
+        return False, "生成物不同步/生成器失败：" + (", ".join(bad) or "见脚本输出")
+
     def do_action_dup() -> tuple[bool, str]:
         """命令/QAction 重复注册闸门：与 docs 同级，真重复或同名不同标识即 FAIL。
 
@@ -1075,6 +1102,7 @@ def main() -> int:
 
     steps = (
         ("docs", do_docs),
+        ("gen_reconcile", do_gen_reconcile),
         ("action_dup", do_action_dup),
         ("build", do_build),
         ("smoke", do_smoke),
