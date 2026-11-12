@@ -6,6 +6,8 @@
   ① 行号在文档范围内；
   ② 该行确实是 markdown 标题；
   ③ 标题的编号与卡片引用的 §编号一致（如 §6.9.6 ↔ `#### 6.9.6 ...`）；
+  ③b 该编号在长文里**只能有一处标题**——同一编号出现两次时，`#L` 指向其中任一处
+     都「行号对、编号也对」，但没人能断定它指的是哪一节；这种歧义按失败处理；
   ④ 卡片覆盖 §6.9.5–§6.9.12 与 §6.9.14–§6.9.16 十一节（形态卡不允许漏节）。
 
 用法：python scripts/check_card_links.py [--card <卡片>] [--doc <长文>] [--fix-anchors]
@@ -55,18 +57,23 @@ def main(argv: Optional[List[str]] = None) -> int:
         print("PARSE FAIL：卡片里没有找到 `[§x](./COORDINATION.md#Ln)` 形式的直链")
         return 2
 
+    # 编号 -> 全部标题行号。正常只有一处；出现两处时 #L 锚点就是歧义的
+    # （指向哪一处都「编号对得上」），交给下面的 ③b 报出来，不在这里猜。
+    heading_at: dict[str, List[int]] = {}
+    for i, line in enumerate(doc_lines, 1):
+        m = HEADING_RE.match(line.strip())
+        if m:
+            heading_at.setdefault(m.group(1), []).append(i)
+
     if args.fix_anchors:
-        anchors: dict[str, int] = {}
-        for i, line in enumerate(doc_lines, 1):
-            m = HEADING_RE.match(line.strip())
-            if m:
-                anchors.setdefault(m.group(1), i)
+        anchors: dict[str, int] = {
+            section: lines[0] for section, lines in heading_at.items() if len(lines) == 1}
 
         def _rewrite(m: re.Match) -> str:
             section = m.group(1)
             actual = anchors.get(section)
             if actual is None:
-                return m.group(0)      # 长文里没这节：保留原样，让下面的校验报出来
+                return m.group(0)      # 长文里没这节或编号重复：保留原样，让下面的校验报出来
             return f"[§{section}](./COORDINATION.md#L{actual})"
 
         fixed = LINK_RE.sub(_rewrite, card)
@@ -92,6 +99,14 @@ def main(argv: Optional[List[str]] = None) -> int:
             continue
         if match.group(1) != section:
             errors.append(f"§{section} -> L{line_no}：实际标题编号是 {match.group(1)}：{heading[:60]!r}")
+            continue
+        dup = heading_at.get(section, [])
+        if len(dup) > 1:
+            # 「行号对、编号也对」但存在同编号的另一处标题：这条链接证明不了
+            # 自己指的是哪一节，按失败处理，而不是静默采信。
+            errors.append(
+                f"§{section} -> L{line_no}：该编号在长文里有 {len(dup)} 处标题"
+                f"（L{', L'.join(str(n) for n in dup)}），锚点无法唯一确定指哪一处")
 
     missing = REQUIRED - seen
     if missing:
