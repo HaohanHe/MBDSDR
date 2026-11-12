@@ -719,8 +719,14 @@ class Theme:
         self.colors = colors
         self.spectrum_colors = spectrum_colors  # 频谱渐变颜色列表 (hex)
 
-    def apply(self, app: QApplication):
+    def apply(self, app: QApplication) -> str:
         """应用主题到 QApplication（幂等：状态相同则跳过重抛光）。
+
+        **返回本次实际生效的 qss**（三条分支都返回，早退也不例外）。调用方
+        （``MainWindow._apply_theme``）用它给 ``_theme_qss`` 赋值，不再自己
+        调一次 ``_qss()``：两处推导一旦算出不同的串，``_apply_touch_stylesheet``
+        就会每次切主题都回退到全量 ``setStyleSheet``（2–3 s 老路），而功能
+        完全正常、只是变慢——这种「只慢不坏」的回归极难发现。
 
         2026-11-11 改造（A′）：QSS 里不再写任何颜色字面量，颜色一律写成
         ``palette(<role>)``。于是五套主题的样式表**逐字相同**——
@@ -751,7 +757,7 @@ class Theme:
             # 前缀相等即视为同一个 QSS：后缀不含颜色，palette(role) 重解析靠重抛光。
             qss_same = current == qss or current.startswith(qss)
             if app.palette() == palette and app.font() == font and qss_same:
-                return                  # 已应用过同一状态：跳过全量重抛光
+                return qss              # 早退：本次生效的就是 qss，不是 None
         except Exception:
             qss_same = False            # 比较失败（异常平台）则照常应用
 
@@ -760,8 +766,9 @@ class Theme:
         if not qss_same:
             # 首次应用 / 样式表本身变了：setStyleSheet 自带全树刷新
             app.setStyleSheet(qss)
-            return
+            return qss
         _repolish_all(app)
+        return qss
 
     def _qss(self) -> str:
         """本主题的最终样式表（五套主题逐字相同：颜色全走 palette(role)）。"""
