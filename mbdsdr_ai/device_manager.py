@@ -20,6 +20,8 @@ SDR++ 的设计是"每个硬件一个插件模块，靠 SourceManager 注册表�
   - 打开不存在/已拔出的设备抛 DeviceNotFoundError。
   - read_samples() 期间设备拔出抛 DeviceDisconnectedError，不崩。
   - 所有可选驱动（pyrtlsdr / SoapySDR）导入失败时静默降级，不影响其它驱动枚举。
+  - 序列号读不到时 serial 保持空串并置 has_stable_identity=False（身份不可分辨），
+    绝不用枚举序号("rtl-0"/"soapysdr-0")或可改的 label 拼一个会变的假身份。
 """
 
 from __future__ import annotations
@@ -62,8 +64,10 @@ class DeviceInfo:
         name:        人类可读名（如 "RTL-SDR #0 (Realtek RTL2838UHIDIR)"）。
         driver:      驱动键（"rtlsdr" / "soapysdr" / "hackrf" / "bladerf" / "plutosdr"）。
         serial:      USB 序列号 / 设备唯一 id；同型号多棒时靠它区分。
+                     读不到就是空串——**绝不拼 "rtl-0" 这类枚举序号冒充身份**。
         sample_rates: 支持的采样率列表（Hz）。空列表表示"未声明，用驱动默认"。
         gains:       支持的增益档位列表（dB）。空列表表示 AGC-only 或未探测到。
+        enum_index:  本次枚举中的位置。只是定位符，拔插/换口会变，不参与身份。
     """
 
     name: str
@@ -74,11 +78,41 @@ class DeviceInfo:
     # rtl_tcp 网络源的 host/port（本地 USB 设备为空元组）。driver="rtltcp"
     # 时由 _probe_rtltcp 从 MBDSDR_RTL_TCP env 登记并供 _open_rtltcp 使用。
     endpoint: Tuple[str, int] = ("", 0)
+    # 本次枚举位置：序列号缺失时用于定位，不能当身份（换口会变）。
+    enum_index: int = -1
+
+    @property
+    def has_stable_identity(self) -> bool:
+        """是否有跟设备走、拔插不变的标识（序列号）。
+
+        空串表示「读不到」，不是「身份是空」：此时设备仍然可见、可打开，
+        但任何依赖身份的功能（占用登记、记住连接参数）都必须把它当不可分辨，
+        不能按枚举序号分一个新身份。
+        """
+        return bool(str(self.serial).strip())
+
+    @property
+    def identity_warning(self) -> str:
+        """身份不可分辨时的可见提示；可用时为空串。"""
+        if self.has_stable_identity:
+            return ""
+        return (
+            f"{self.name} 读不到序列号，身份不可分辨："
+            f"只按本次枚举位置 {self.enum_index} 临时定位，拔插/换口后可能指向别的机器；"
+            "设备占用与连接参数不会跟随这台设备。"
+        )
 
     @property
     def device_key(self) -> str:
-        """枚举时用作去重键（driver + serial）。"""
-        return f"{self.driver}:{self.serial}"
+        """枚举/监控用的键。
+
+        序列号可用时 = `driver:serial`（稳定身份）；读不到时复用
+        sdr_backend.device_identity_key 的临时写法 `driver|index:n`，
+        并在 has_stable_identity 上明确标为不可分辨。
+        """
+        if self.has_stable_identity:
+            return f"{self.driver}:{self.serial}"
+        return f"{self.driver}|index:{self.enum_index}"
 
 
 # ---------------------------------------------------------------------------
@@ -405,6 +439,18 @@ class DeviceManager:
         self._monitor_thread: Optional[threading.Thread] = None
         self._monitor_stop = threading.Event()
         self._last_keys: set = set()
+        self._last_infos: Dict[str, DeviceInfo] = {}
+        # 已提示过「身份不可分辨」的键：轮询时不重复刷日志。
+        self._identity_warned: set = set()
+
+    def _warn_identity_once(self, info: DeviceInfo) -> None:
+        if info.has_stable_identity:
+            return
+        key = info.device_key
+        if key in self._identity_warned:
+            return
+        self._identity_warned.add(key)
+        logger.warning(info.identity_warning)
 
     # -- 枚举 ---------------------------------------------------------------
     def _probe_rtlsdr(self) -> List[DeviceInfo]:
@@ -417,19 +463,21 @@ class DeviceManager:
             return []
         out: List[DeviceInfo] = []
         for it in items:
-            idx = it.get("index", 0)
+            idx = int(it.get("index", 0))
             tuner = it.get("tuner", "")
-            serial = it.get("serial", "") or ("rtl-%d" % idx)
+            # 读不到序列号就留空：序号/品牌串随插拔变化，不能拿来当身份。
+            serial = str(it.get("serial") or "").strip()
             label = ("RTL-SDR #%d (%s)" % (idx, tuner)) if tuner else ("RTL-SDR #%d" % idx)
-            out.append(
-                DeviceInfo(
-                    name=label,
-                    driver="rtlsdr",
-                    serial=serial,
-                    sample_rates=self._RTL_SRATES,
-                    gains=self._RTL_GAINS,
-                )
+            info = DeviceInfo(
+                name=label,
+                driver="rtlsdr",
+                serial=serial,
+                sample_rates=self._RTL_SRATES,
+                gains=self._RTL_GAINS,
+                enum_index=idx,
             )
+            self._warn_identity_once(info)
+            out.append(info)
         return out
 
     def _probe_soapysdr(self) -> List[DeviceInfo]:
@@ -448,7 +496,9 @@ class DeviceManager:
         for i, sarg in enumerate(results or []):
             try:
                 driver = str(sarg.get("driver", "unknown"))
-                serial = str(sarg.get("serial", sarg.get("label", f"soapysdr-{i}")))
+                # 只认 serial；label 可能重名/被改，序号每次枚举都变，
+                # 都不能当身份。读不到就留空，由 has_stable_identity 报不可分辨。
+                serial = str(sarg.get("serial") or "").strip()
                 label = str(sarg.get("label", f"SoapySDR {driver} #{i}"))
                 # 尝试打开一次拿采样率/增益（只读 properties，不读流）
                 sample_rates: Tuple[float, ...] = ()
@@ -476,15 +526,16 @@ class DeviceManager:
                     dev.close()
                 except Exception as e:
                     logger.debug("SoapySDR 打开 probe 失败 %s: %s", label, e)
-                out.append(
-                    DeviceInfo(
-                        name=label,
-                        driver=f"soapysdr:{driver}",
-                        serial=serial,
-                        sample_rates=sample_rates,
-                        gains=gains,
-                    )
+                info = DeviceInfo(
+                    name=label,
+                    driver=f"soapysdr:{driver}",
+                    serial=serial,
+                    sample_rates=sample_rates,
+                    gains=gains,
+                    enum_index=i,
                 )
+                self._warn_identity_once(info)
+                out.append(info)
             except Exception as e:
                 logger.warning("解析 SoapySDR 结果失败: %s", e)
         return out
@@ -529,9 +580,19 @@ class DeviceManager:
     # -- 打开 / 关闭 --------------------------------------------------------
     def open(self, info: DeviceInfo) -> OpenDevice:
         """打开一台设备，返回 OpenDevice 句柄。找不到/驱动失败抛 DeviceNotFoundError。"""
+        if not info.has_stable_identity and info.enum_index < 0:
+            raise DeviceNotFoundError(
+                f"设备「{info.name}」身份不可分辨：既没有序列号，也没有本次枚举位置；"
+                "请重新 list_devices() 取一份新快照，不要复用旧对象。"
+            )
         # 先校验还在
         present = {d.device_key for d in self.list_devices()}
         if info.device_key not in present:
+            if not info.has_stable_identity:
+                raise DeviceNotFoundError(
+                    f"「{info.name}」身份不可分辨（序列号读不到），"
+                    f"枚举位置 {info.enum_index} 已不在当前枚举中；请重新 list_devices()。"
+                )
             raise DeviceNotFoundError(
                 f"设备 {info.device_key} 不在当前枚举列表中（可能已拔出）"
             )
@@ -548,13 +609,26 @@ class DeviceManager:
             import rtlsdr  # type: ignore
         except Exception as e:
             raise DeviceNotFoundError(f"pyrtlsdr 未安装: {e}") from e
-        # 找 serial 匹配的 index
         devs = self._probe_rtlsdr()
-        idx = 0
-        for i, d in enumerate(devs):
-            if d.serial == info.serial:
-                idx = i
-                break
+        if info.has_stable_identity:
+            # 序列号是稳定身份：按它定位，枚举顺序变了也认同一台。
+            idx = next((i for i, d in enumerate(devs) if d.serial == info.serial), None)
+            if idx is None:
+                raise DeviceNotFoundError(
+                    f"RTL-SDR 序列号 {info.serial} 不在当前枚举中（可能已拔出）"
+                )
+        else:
+            # 读不到序列号：只能用本次枚举位置定位，并明确告知这是猜测。
+            idx = info.enum_index
+            if not (0 <= idx < len(devs)):
+                raise DeviceNotFoundError(
+                    f"「{info.name}」身份不可分辨（序列号读不到），"
+                    f"且枚举位置 {idx} 已不存在（当前 {len(devs)} 台）；请重新 list_devices()。"
+                )
+            logger.warning(
+                "按枚举位置 %d 打开「%s」：序列号读不到，无法确认是不是同一台（拔插后位置会变）",
+                idx, info.name,
+            )
         try:
             backend = rtlsdr.RtlSdr(device_index=idx)
         except Exception as e:
@@ -588,9 +662,20 @@ class DeviceManager:
             raise DeviceNotFoundError(f"SoapySDR 未安装: {e}") from e
         # 重新 enumerate 找匹配的 args
         try:
-            for sarg in SoapySDR.Device.enumerate():
-                serial = str(sarg.get("serial", sarg.get("label", "")))
-                if serial == info.serial:
+            for i, sarg in enumerate(SoapySDR.Device.enumerate() or []):
+                serial = str(sarg.get("serial") or "").strip()
+                if info.has_stable_identity:
+                    matched = serial == info.serial
+                else:
+                    # 序列号读不到：只能按本次枚举位置，且要明确这是不可分辨的猜测。
+                    matched = i == info.enum_index
+                    if matched:
+                        logger.warning(
+                            "按枚举位置 %d 打开「%s」：序列号读不到，"
+                            "无法确认是不是同一台（拔插后位置会变）",
+                            i, info.name,
+                        )
+                if matched:
                     backend = SoapySDR.Device(sarg)
                     # 启用 Rx 流（不开始 read，只配置）
                     try:
@@ -602,7 +687,12 @@ class DeviceManager:
                     return OpenDevice(info, backend)
         except Exception as e:
             raise DeviceNotFoundError(f"SoapySDR 打开失败: {e}") from e
-        raise DeviceNotFoundError(f"SoapySDR 设备 {info.serial} 未找到")
+        if info.has_stable_identity:
+            raise DeviceNotFoundError(f"SoapySDR 设备 {info.serial} 未找到")
+        raise DeviceNotFoundError(
+            f"「{info.name}」身份不可分辨（序列号读不到），枚举位置 {info.enum_index} 已不存在；"
+            "请重新 list_devices()。"
+        )
 
     # -- 热插拔 -------------------------------------------------------------
     def start_monitor(
@@ -613,7 +703,8 @@ class DeviceManager:
             return
         self._monitor_stop.clear()
         interval = float(poll_interval) if poll_interval else self._poll_interval
-        self._last_keys = {d.device_key for d in self.list_devices()}
+        self._last_infos = {d.device_key: d for d in self.list_devices()}
+        self._last_keys = set(self._last_infos)
 
         def _loop():
             while not self._monitor_stop.is_set():
@@ -628,15 +719,15 @@ class DeviceManager:
                 removed = self._last_keys - cur_keys
                 if added or removed:
                     added_infos = [current[k] for k in added]
-                    removed_infos = [
-                        DeviceInfo(name=k.split(":", 1)[1], driver=k.split(":")[0], serial=k)
-                        for k in removed
-                    ]
+                    # 用上一轮快照还原被移除设备的真实信息（而不是从键反拼，
+                    # 序列号缺失时键是 driver|index:n，反拼会造出假身份）。
+                    removed_infos = [self._last_infos[k] for k in removed if k in self._last_infos]
                     try:
                         callback({"added": added_infos, "removed": removed_infos})
                     except Exception as e:
                         logger.warning("热插拔回调异常: %s", e)
                     self._last_keys = cur_keys
+                    self._last_infos = current
                 self._monitor_stop.wait(interval)
 
         self._monitor_thread = threading.Thread(
