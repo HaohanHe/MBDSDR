@@ -312,6 +312,41 @@ def test_snapshot_crosscheck_matches_report_numbers():
     assert machine_only == 74
 
 
+# --------------------------------------------------- 首次使用时的自动刷新闸
+def test_ensure_machine_refresh_offline_never_starts(monkeypatch):
+    monkeypatch.setenv("MBDSDR_OFFLINE", "1")
+    monkeypatch.setattr(SL, "_AUTO_REFRESH_DONE", False)
+    called = []
+    monkeypatch.setattr(SL, "start_machine_refresh",
+                        lambda path=None: called.append(path))
+    assert SL.ensure_machine_refresh() is False
+    assert called == []
+    # 每进程只判定一次，不因反复选中而反复检查
+    assert SL.ensure_machine_refresh() is False
+
+
+def test_ensure_machine_refresh_skips_fresh_cache(monkeypatch):
+    SF.refresh(target(25338), opener=opener_map({25338: [tx("u", 137620000)]}))
+    monkeypatch.setattr(SL, "_AUTO_REFRESH_DONE", False)
+    called = []
+    monkeypatch.setattr(SL, "start_machine_refresh",
+                        lambda path=None: called.append(path))
+    assert SL.ensure_machine_refresh() is False
+    assert called == []
+
+
+def test_ensure_machine_refresh_starts_once_when_cache_missing(monkeypatch):
+    monkeypatch.setattr(SL, "_AUTO_REFRESH_DONE", False)
+    called = []
+    monkeypatch.setattr(SL, "start_machine_refresh",
+                        lambda path=None: called.append(path))
+    assert SL.ensure_machine_refresh() is True
+    assert len(called) == 1
+    # 第二次选中不再起线程
+    assert SL.ensure_machine_refresh() is False
+    assert len(called) == 1
+
+
 # --------------------------------------------------------------- 后台不阻塞
 def test_background_refresh_returns_immediately_and_is_daemon():
     def _slow(url, timeout_s, deadline_s):
