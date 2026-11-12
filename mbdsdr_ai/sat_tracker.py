@@ -423,8 +423,8 @@ class SatelliteTracker:
         P12：``MBDSDR_OFFLINE=1`` 时**不发起任何网络请求**，直接如实报
         「离线模式，未刷新」——离线语义只免联网，不冒充成功。
         """
-        from .orbit import _network_disabled
-        if _network_disabled():
+        from .net_policy import network_disabled
+        if network_disabled():
             detail = "离线模式（MBDSDR_OFFLINE），未联网刷新（沿用旧 TLE）"
             self._last_refresh_error = detail
             self._last_refresh_failure = failure_copy("offline", detail)
