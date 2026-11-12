@@ -159,14 +159,14 @@ python scripts\hw_acceptance\check_ring_labels.py
 2. 打开产物 `wfm_audio.wav` 播放 30 s；
 3. 记录是否有周期性爆音/金属声/静音段。
 
-> 判据来源：≥4096 帧 / RMS 1e-4–1.0 / 能量比 >2 ↔ `scripts/hw_acceptance/ring3_demod_audio.py:215–217` 一致；19 kHz 导频 19000±300 Hz 且 >10 dB ↔ 同文件 `PILOT_CENTER_HZ` / `PILOT_FREQ_TOL_HZ` / `PILOT_SNR_MIN_DB`（唯一真值源）。产品运行时的立体声探测口径不同（`mbdsdr_ai/fm_scan.py` 的 `PILOT_DETECT_SNR_DB` / `PILOT_DETECT_BAND_HZ`），此值不适用于那一场景。
+> 判据来源：≥4096 帧 / RMS 1e-4–1.0 / 能量比 >2 ↔ `scripts/hw_acceptance/ring3_demod_audio.py:217–219` 一致；19 kHz 导频 19000±100 Hz 且 >10 dB ↔ 同文件 `PILOT_CENTER_HZ` / `PILOT_FREQ_TOL_HZ` / `PILOT_SNR_MIN_DB`（唯一真值源，离线夹具与真机两条路径共用）。产品运行时的立体声探测口径不同（`mbdsdr_ai/fm_scan.py` 的 `PILOT_DETECT_SNR_DB` / `PILOT_DETECT_BAND_HZ`），此值不适用于那一场景。
 
 | 记录项 | 实测 | 合格判据 |
 |---|---|---|
 | 音频帧数 / 声道 | | ≥4096 / 1 或 2 |
 | RMS | | 1e-4 – 1.0 |
 | <15k/>15k 能量比 | | >2 |
-| 19 kHz 导频 | | 有则 19000±300 Hz 且峰/邻域 >10 dB；无则记「单声道」 |
+| 19 kHz 导频 | | 有则 19000±100 Hz 且峰/邻域 >10 dB；无则记「单声道」 |
 | 听感 | 清晰 / 爆音 / 金属声 | 可懂、无周期性爆音 |
 
 ### 卡 R4 录音与回放（需设备 + 人耳）

@@ -27,11 +27,13 @@ PILOT_SEG = 65536
 PILOT_BLOCK = 262144          # 读线程每次 USB 块读的复样本数（实测吞吐最好）
 PILOT_QUEUE_MAX = 6           # 队列上限 6 块 ≈ 12 MB，满则读线程阻塞，内存有界
 
-# 硬件验收口径（本文件的唯一真值源，文档人工卡只能引用这三个常量）。
+# 硬件验收口径（本文件唯一真值源；离线夹具与真机两条路径共用，文档人工卡只能引用）。
+# 真机路径 `_pilot_from_ctrl` 与夹具路径 `_pilot` 用同一套 `_analyze_mpx`（65536 点
+# Welch + 抛物线插值，频率不确定度约 ±1 Hz），没有「离线松、真机严」的技术理由。
 # 此值不适用于产品立体声探测：mbdsdr_ai/fm_scan.py 的 PILOT_DETECT_SNR_DB /
 # PILOT_DETECT_BAND_HZ 是扫描时「这个台是不是立体声」的启发式，口径不同。
 PILOT_CENTER_HZ = 19000.0
-PILOT_FREQ_TOL_HZ = 300.0
+PILOT_FREQ_TOL_HZ = 100.0
 PILOT_SNR_MIN_DB = 10.0
 
 
@@ -335,8 +337,9 @@ def run(freq_hz: float) -> dict:
                                        "IQ 不足，无法测导频", skipped=True))
         else:
             f_p, snr_p, segs = pilot["pilot_hz"], pilot["peak_over_neigh_db"], pilot["segments"]
-            ok_p = abs(f_p - 19000) < 100 and snr_p > 10
-            weak = snr_p <= 10
+            ok_p = (abs(f_p - PILOT_CENTER_HZ) < PILOT_FREQ_TOL_HZ
+                    and snr_p > PILOT_SNR_MIN_DB)
+            weak = snr_p <= PILOT_SNR_MIN_DB
             # 单声道台没有 19 kHz 导频是合法状态，不判失败，标 skipped 并写明。
             verdict = "立体声台" if ok_p else (
                 "导频过弱，可能为单声道台（不判失败）" if weak else "19 kHz 导频频率异常")

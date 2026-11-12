@@ -222,18 +222,27 @@ def test_floor_drift_threshold_inside_measured_envelope():
 # ------------------------------------------------- 阈值单一真值源（不许再分叉）
 import ring4_recording_playback as ring4  # noqa: E402
 
+RING3 = ROOT / "scripts" / "hw_acceptance" / "ring3_demod_audio.py"
+
 
 def test_pilot_acceptance_thresholds_match_doc_card():
-    """导频判据只有一处真值源：ring3 常量 = 人工卡原文。
+    """导频判据只有一处真值源：ring3 常量 = 人工卡原文 = 两条路径共用。
 
-    反证：改 ring3.PILOT_FREQ_TOL_HZ（300→100）或文档卡里的 ±值，本用例红。
+    反证：改 ring3.PILOT_FREQ_TOL_HZ（100→300）或文档卡里的 ±值，本用例红；
+    把任一路径写回裸字面量（`abs(f_p - 19000) < 100/300`）也红。
     """
     tol = ring3.PILOT_FREQ_TOL_HZ
     snr = ring3.PILOT_SNR_MIN_DB
-    assert (tol, snr) == (300.0, 10.0)
+    assert (tol, snr) == (100.0, 10.0)
     text = DOC.read_text(encoding="utf-8")
     assert f"19000±{tol:.0f} Hz 且峰/邻域 >{snr:.0f} dB" in text, (
         "人工卡与 ring3 导频阈值已分叉：文档里找不到由常量拼出的判据串")
+
+    ring3_src = RING3.read_text(encoding="utf-8")
+    assert ring3_src.count("PILOT_FREQ_TOL_HZ") >= 2, (
+        "ring3 的夹具路径与真机路径没有共用同一个容差常量")
+    assert "abs(f_p - 19000) < 100" not in ring3_src
+    assert "abs(f_p - 19000) < 300" not in ring3_src
 
 
 def test_playback_ratio_thresholds_match_doc_card():
