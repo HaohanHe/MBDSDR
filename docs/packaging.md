@@ -139,7 +139,10 @@ package 遮住的 `../astronomy.py`。冻结版里该文件不存在 →
 ## 4. 启动自检与三类缺件实测
 
 自检实现（`desktop/main.py`）：
-- `_RISKY_IMPORTS` 17 项私有/动态模块逐个 import（结果写日志，不阻塞启动）；
+- `_SPEC_FIRST_DEPENDENCIES`（scipy 系 4 项）在**创建 `QApplication` 与 splash 之后**只做
+  `find_spec` 存在性检查，缺件 → 中止并弹缺件窗；
+- `_RISKY_IMPORTS` 13 项私有/动态模块的真 import 推迟到主窗首个 `Paint` 之后
+  （`_start_deferred_imports`），失败只写日志 + 状态栏提示，不阻断启动；
 - GUI 导入失败 → `_import_error_text()` 判定「打包缺陷 / 解压不完整 / 未知」；
 - Qt 平台插件前置检查（按 `QApplication` 实际请求的平台精确匹配）；
 - 弹窗用 `ctypes.MessageBoxW`，**不依赖 Qt**；日志落点见 §5。
@@ -517,7 +520,8 @@ SHA256，再**真跑一次** `python scripts/ui_narrow_breakdown.py --json`（�
 
 ## 6. 私有子包同类风险与冒烟清单
 
-启动自检 `_RISKY_IMPORTS` 当前 13 项（每次启动跑一遍，冻结版新构建日志 13/13 通过）；
+启动自检 `_RISKY_IMPORTS` 当前 13 项（首帧之后逐个真 import；正常时只留沉默，
+失败才写 `[selfcheck] 延后导入失败…`，见 §4）；
 下表另含 4 项源码/TOC 核验项（cobyqa、pyprima、deprecation、_multiarray_umath 中的
 二进制形态），合计 17 项在源码环境逐个导入通过。
 
