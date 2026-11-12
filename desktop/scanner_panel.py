@@ -26,6 +26,9 @@ import numpy as np
 
 from constants import DEFAULT_SAMPLE_RATE_HZ
 
+# 频率读数唯一口径（6 位小数 MHz = 1 Hz），扫频状态与结果行不再就地拼小数位。
+from readouts import format_frequency_hz, format_frequency_range_hz
+
 from PySide6.QtCore import Qt, QThread, Signal
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QFormLayout, QGroupBox,
@@ -351,7 +354,7 @@ class ScannerPanel(QWidget):
 
     def _on_progress(self, frac: float, center_hz: float):
         self.progress_bar.setValue(int(frac * 100))
-        self.status_label.setText(f"扫频中… {center_hz / 1e6:.3f} MHz")
+        self.status_label.setText(f"扫频中… {format_frequency_hz(center_hz)}")
         self.progress.emit(float(frac), float(center_hz))
 
     def _on_done(self, segments: list):
@@ -362,8 +365,8 @@ class ScannerPanel(QWidget):
             icon = _KIND_ICON.get(seg.get("kind", "UNKNOWN"), "•")
             peak_db = seg.get("peak_db")
             peak_txt = "—" if peak_db is None else f"{float(peak_db):.1f} dB"
-            text = (f"{icon} {seg['start_freq']/1e6:.3f}–"
-                    f"{seg['end_freq']/1e6:.3f} MHz   "
+            text = (f"{icon} "
+                    f"{format_frequency_range_hz(seg['start_freq'], seg['end_freq'])}   "
                     f"峰值 {peak_txt}   "
                     f"{seg.get('kind', '?')} → {seg.get('suggested_mode', '?')}")
             item = QListWidgetItem(text)
