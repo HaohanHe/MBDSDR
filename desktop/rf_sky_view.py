@@ -145,6 +145,7 @@ except ImportError:  # pragma: no cover - 兼容 desktop 目录直接上 sys.pat
         effective_show_low_elevation_passes,
     )
 
+from themes import relative_luminance
 from tokens import tokens
 
 _log = logging.getLogger(__name__)
@@ -2708,7 +2709,7 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         # 星象仪底部唤出时尤其刺眼（夜空中间一块白）。
         self._search_edit.setStyleSheet(
             "QLineEdit { background-color: rgba(18,20,26,0.92);"
-            " color: #E6EAF2; border: 1px solid rgba(255,255,255,0.20);"
+            " color: #E6EAF2; border: 1px solid rgba(255,255,255,0.34);"
             " border-radius: 8px; padding: 3px 9px; }"
             "QLineEdit:focus { border-color: rgba(120,170,255,0.78); }")
         self._search_edit.textChanged.connect(self._on_search_text)
@@ -2717,7 +2718,7 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         # 结果是夜空上的浮层，跟输入框同一套深色；白底黑字会把星辰全压掉。
         self._search_popup.setStyleSheet(
             "QListWidget { background-color: #14161c; color: #D8DEEA;"
-            " border: 1px solid rgba(255,255,255,0.16); border-radius: 8px;"
+            " border: 1px solid rgba(255,255,255,0.34); border-radius: 8px;"
             " padding: 4px; }"
             "QListWidget::item { padding: 5px 8px; border-radius: 6px; }"
             "QListWidget::item:selected {"
@@ -5672,11 +5673,30 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         """兼容旧接口: 方位网格已由 _draw_az_grid (透视) 实现。"""
         self._draw_az_grid(painter)
 
+    def _compass_dim_ink(self) -> QColor:
+        """罗盘非主方位数字：在既有 gray_200 / card_1 里取对当前天光更清楚的一个。
+
+        这圈数字贴在**地平**（alt 1.3–2.0°），压在暮光渐变最亮的一段：
+        固定 gray_300 对夜地平只有 1.65:1、对白天地平 5.00 但白天更暗的
+        天顶 2.44，两个固定值都有一头看不清。两个既有值极性相反（浅墨/
+        深墨），不能像 _ink() 那样按亮度插值（中点必与天光同色），所以按
+        「对当前地平渐变色谁更清楚」二选一：夜侧 gray_200、昼侧 card_1。
+        不新增色值，也不用拍脑袋的亮度阈值。
+        """
+        _t = tokens()
+        night = QColor(_t.COLORS["gray_200"])
+        day = QColor(_t.COLORS["card_1"])
+        horizon = _twilight_stops(self._sky_brightness)[-1][1]
+        lum = relative_luminance(horizon.name())
+        gap_night = abs(relative_luminance(night.name()) - lum)
+        gap_day = abs(relative_luminance(day.name()) - lum)
+        return night if gap_night >= gap_day else day
+
     def _draw_compass(self, painter: QPainter):
         """方位罗盘: 地平圈上的 N/E/S/W + 每 30° 数字度数，N 红色。"""
         painter.save()
         _t = tokens()
-        dim = QColor(_t.COLORS["gray_300"])
+        dim = self._compass_dim_ink()
         for az, label, cardinal in compass_labels():
             alt = 2.0 if cardinal else 1.3
             pos = self._sky_to_screen_finite(float(az), alt)
