@@ -168,6 +168,13 @@ _SPECS = (
           "录像或模板不存在",
           "记录/模板 '{name}' 不存在。",
           "用列表工具确认名称后重试。"),
+    _spec("station_config_unreadable", LAYER_TOOL, False,
+          "地面站配置存在但读不出来",
+          "地面站配置读取失败：{detail}。请修复 {origin}，"
+          "或在参数中传入地面站坐标。",
+          "在「设置」页「卫星与多普勒」核对「观测地点纬度」「观测地点经度」"
+          "是否为合法数字；配置文件损坏就修好 JSON 后重填，"
+          "或直接在参数里传 observer_lat/observer_lon。"),
     _spec("workflow_executor_missing", LAYER_TOOL, False,
           "工作流执行器未接线",
           "工作流执行器未设置，无法执行工具步骤。",

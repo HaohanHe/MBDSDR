@@ -177,6 +177,9 @@ VISIBLE_BY_FAMILY: Dict[str, Tuple[str, ...]] = {
         "handler_error", "exception", "empty_result_without_reason",
         "compose_failed", "gimbal_stop_failed", "no_rssi",
         "offline_or_api_error", "recording_not_found", "subagent_not_found",
+        # fy3_pass_curve / lro_track 在配置存在但读不出来时返该码，AI 步骤卡
+        # 渲染 ``错误 {code}``，因此必须给「怎么办」。
+        "station_config_unreadable",
     ),
     "AI 会话": ("agent_busy", "cancelled"),
     "设备能力": (
@@ -308,6 +311,11 @@ CODE_NEXT_STEPS: Dict[str, str] = {
         "该模式只有文件级解码：点顶栏「回放」（Ctrl+Shift+R）载入已录制的 "
         ".iq/.wav 文件离线解码；要实时流式只能切到「ADS-B 航路」或「APRS "
         "数据包」面板用 adsb/rds 两种模式，其余模式走 `--decode-file` 命令行。"),
+    "station_config_unreadable": (
+        "先分清「坏了」与「没配」：到「设置」页「卫星与多普勒」把"
+        "「观测地点纬度」「观测地点经度」重新填成合法数字；"
+        "若配置文件本身损坏（JSON 语法错/不是对象/字段类型非法），"
+        "修好 ~/.mbdsdr/config.json 或删掉损坏文件后再重填。"),
     # ── TLE 抓取族：逐码与 tle_fetch.failure_copy 的 action 对齐 ──────
     "rate_limited": (
         "这是 TLE 源返回 429 限流，不是本机故障：等退避结束（首次约 1 分钟，"
