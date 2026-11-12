@@ -45,7 +45,7 @@
     ]
   },
   "funcube1_ao73_frame": {
-    "honesty": "FUNcube-1（AO-73）256 字节下行帧：1 字节帧头（2bit Sat Id + 6bit Frame Type）+ 55 字节实时遥测 + 200 字节载荷，依据 AMSAT-UK《FUNcube-1 Downlink Data》Issue 1.0 Final as flown（05/03/2015，Distribution: Unlimited public release）§1–§4。位序按文档对 Frame Type 明示的 MSB-first，其余字段沿用同一 MSB-first 口径（文档未逐字段另行声明）。文档未给换算系数与单位，故全部输出原始计数、不造标度；载荷内容随 Frame Type 变化，本布局按 hex 透传，不解释 WOD/HR 采样。该帧的同步与 RS/卷积编码在解调/FEC 层完成，本布局不含 sync/crc，不能直接用于 verify_sample。未做 OTA 或上星验证",
+    "honesty": "FUNcube-1（AO-73）256 字节下行帧：1 字节帧头（2bit Sat Id + 6bit Frame Type）+ 55 字节实时遥测 + 200 字节载荷，依据 AMSAT-UK《FUNcube-1 Downlink Data》Issue 1.0 Final as flown（05/03/2015，Distribution: Unlimited public release）§1–§4。位序按文档对 Frame Type 明示的 MSB-first，其余字段沿用同一 MSB-first 口径（文档未逐字段另行声明）。文档未给换算系数与单位，故全部输出原始计数、不造标度；载荷内容随 Frame Type 变化，本布局按 hex 透传，不解释 WOD/HR 采样。该帧的同步与 RS/卷积编码在解调/FEC 层完成，本布局不含 sync/crc，不能直接用于 verify_sample。规范未给示例帧（全文仅有位宽表，无示例帧字节、无字段取值示例，§6 Fitter Message Slot 9 data 为「To be added」），本布局无法端到端验证，仅通过 schema 校验；测试中的 256 字节帧是机制用例，不是规范样例。未做 OTA 或上星验证",
     "source": {
       "document": "FUNcube-1 Downlink Data, Issue 1.0 Final as flown, 05/03/2015 (AMSAT-UK; Distribution: Unlimited public release)",
       "url": "https://funcube.org.uk/wp-content/uploads/2010/11/funcube-1-downlink-data-spec_ver1-as_flown.pdf",
@@ -120,7 +120,7 @@
   "funcube1_ao73_fitter": {
     "frame_type": "FM",
     "derived_from": "funcube1_ao73_frame",
-    "honesty": "由 funcube1_ao73_frame 派生：Frame Type 值 14–24 为 Fitter 消息帧（FUNcube-1 Downlink Data §3、§5 传输调度表），200 字节载荷按文档「copied out verbatim」语义透传为 ASCII；同名 payload 字段由 hex 覆盖为 ascii，帧头与实时遥测字段全部继承。非 ASCII 字节按替换字符呈现，不猜测编码。未做 OTA 或上星验证",
+    "honesty": "由 funcube1_ao73_frame 派生：Frame Type 值 14–24 为 Fitter 消息帧（FUNcube-1 Downlink Data §3、§5 传输调度表），200 字节载荷按文档「copied out verbatim」语义透传为 ASCII；同名 payload 字段由 hex 覆盖为 ascii，帧头与实时遥测字段全部继承。非 ASCII 字节按替换字符呈现，不猜测编码。规范未给示例帧（全文仅有位宽表，无示例帧字节、无字段取值示例，§6 Fitter Message Slot 9 data 为「To be added」），本布局无法端到端验证，仅通过 schema 校验；测试中的 256 字节帧是机制用例，不是规范样例。未做 OTA 或上星验证",
     "source": {
       "document": "FUNcube-1 Downlink Data, Issue 1.0 Final as flown, 05/03/2015 (AMSAT-UK; Distribution: Unlimited public release)",
       "url": "https://funcube.org.uk/wp-content/uploads/2010/11/funcube-1-downlink-data-spec_ver1-as_flown.pdf",
