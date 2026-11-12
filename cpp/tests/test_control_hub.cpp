@@ -1049,8 +1049,11 @@ void TestControlHub::bookmarksPersistToQSettings() {
     const int countBefore =
         parseObj(hub.execute("list_bookmarks", {})).value("count").toInt();
 
+    // 8 kHz deliberately differs from NFM's 12.5 kHz default: tuning this
+    // bookmark must restore the stored bandwidth, not leave the mode default.
     QJsonObject r = parseObj(hub.execute("add_bookmark",
-        {{"freq_hz", 144.5e6}, {"name", QStringLiteral("测试台")}, {"mode", "NFM"}}));
+        {{"freq_hz", 144.5e6}, {"name", QStringLiteral("测试台")}, {"mode", "NFM"},
+         {"bandwidth_hz", 8000.0}}));
     QVERIFY2(r.value("ok").toBool(), r.value("error").toString().toUtf8().constData());
     const int idx = r.value("index").toInt();
 
@@ -1070,8 +1073,13 @@ void TestControlHub::bookmarksPersistToQSettings() {
     r = parseObj(hub.execute("tune_to_bookmark", {{"index", idx}}));
     QVERIFY(r.value("ok").toBool());
     QCOMPARE(r.value("freq_hz").toDouble(), 144.5e6);
+    QCOMPARE(r.value("bandwidth_hz").toDouble(), 8000.0);
     QCOMPARE(parseObj(hub.execute("get_frequency", {})).value("frequency_hz").toDouble(),
              144.5e6);
+    // Order mode -> bandwidth -> tune: the stored 8 kHz survives the NFM mode
+    // switch (setMode would otherwise reset it to the 12.5 kHz default).
+    QCOMPARE(eng.demodMode(), QString("NFM"));
+    QCOMPARE(eng.bandwidth(), 8000.0);
 
     // delete_bookmark removes it (explicit confirm=true required since D3-7).
     r = parseObj(hub.execute("delete_bookmark", {{"index", idx}, {"confirm", true}}));
