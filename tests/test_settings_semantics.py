@@ -80,7 +80,10 @@ class TestE1MagicValuesExplained:
             "0 档必须显式显示为「自动」，而不是让用户猜 0 是什么"
         tip = p.bw_spin.toolTip()
         assert "自动" in tip, f"tooltip 必须写明 0=自动，实际 {tip!r}"
-        assert "VFO" in tip, "tooltip 必须与 VFO 带宽区分（两套带宽同名）"
+        # 区分对象要与界面标签一致：控制面板那一项叫「解调带宽」。
+        # 旧断言要求字面量 VFO，11-12 产品把术语换成了用户能看到的中文标签，
+        # 这里跟产品走（意图仍是「两套带宽不许混」）。
+        assert "解调带宽" in tip, "tooltip 必须与解调带宽区分（两套带宽同名）"
         assert "硬件" in tip, "tooltip 必须写明这是硬件带宽"
 
     def test_bw_spin_auto_still_reaches_payload_as_zero(self):

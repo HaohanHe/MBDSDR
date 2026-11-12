@@ -714,12 +714,20 @@ def test_corrupt_file_is_backed_up_and_error_visible(tmp_path):
     assert ds.get("theme") == SCHEMA["theme"].default
 
 
-def test_write_failure_calls_on_error(tmp_path):
-    blocker = tmp_path / "cfg"
-    blocker.mkdir()                      # 目标路径是目录 → os.replace 必失败
-    ds = DesktopSettings(path=str(blocker))
+def test_write_failure_calls_on_error(tmp_path, monkeypatch):
+    # 目标先是可读的合法文件（读改写能过），只让最后一步落盘失败。
+    # 旧写法把目标做成目录：读改写引入后，flush 在读阶段就报「配置读取
+    # 失败」，走不到写盘分支，这条用例因此从未真正验到写失败提示。
+    path = tmp_path / "desktop_settings.json"
+    path.write_text("{}", encoding="utf-8")
+    ds = DesktopSettings(path=str(path))
     seen = []
     ds.on_error = seen.append
+
+    def _boom(*_a, **_k):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(settings_mod.os, "replace", _boom)
     ds.set("theme", "dark")
     ds.flush()
     assert ds.last_error and "保存失败" in ds.last_error

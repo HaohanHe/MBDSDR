@@ -92,7 +92,11 @@ def test_top_level_array_is_visible_backed_up(ai_path):
         assert "顶层不是对象" in text, text
         assert "list" in text, text
         assert not ai_path.exists(), "结构不符也要先备份留证再回默认"
-        assert list(ai_path.parent.glob("config.json.corrupt-*"))
+        backups = [p for p in ai_path.parent.glob("config.json.corrupt-*")
+                   if not p.name.endswith(".reason.txt")]
+        assert len(backups) == 1, backups
+        assert backups[0].with_name(backups[0].name + ".reason.txt").exists(), \
+            "结构不符同样要成对写理由，否则诊断页查不到"
         assert panel._ai == {}
     finally:
         panel.deleteLater()
