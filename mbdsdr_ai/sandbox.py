@@ -216,18 +216,35 @@ class Sandbox:
 
             # 解析结果
             output = None
+            result_error = ""
+            stdout_truncated = len(proc.stdout) > self.max_output_chars
             if "===SANDBOX_RESULT===" in stdout:
                 parts = stdout.split("===SANDBOX_RESULT===")
                 if len(parts) > 1:
                     try:
-                        output = json.loads(parts[-1].strip())
-                    except Exception:
-                        pass
+                        parsed = json.loads(parts[-1].strip())
+                    except (ValueError, TypeError) as exc:
+                        # 打了结果标记却给不出合法 JSON：不能当作「没有输出」
+                        result_error = f"沙箱结果解析失败（{type(exc).__name__}: {exc}）"
+                    else:
+                        if isinstance(parsed, dict):
+                            output = parsed
+                        else:
+                            result_error = (
+                                f"沙箱结果不是 JSON 对象，而是 {type(parsed).__name__}")
+            elif stdout_truncated:
+                # 截断把结果标记连同载荷一起切掉：同样不能报成功
+                result_error = (
+                    f"沙箱输出超过 {self.max_output_chars} 字符被截断，结果载荷不完整")
 
-            success = proc.returncode == 0 and (output is None or output.get("success", True))
-            error = ""
+            success = (
+                proc.returncode == 0
+                and not result_error
+                and (output is None or output.get("success", True))
+            )
+            error = result_error
             if output and not output.get("success", True):
-                error = output.get("error", "")
+                error = output.get("error", "") or error
 
             return SandboxResult(
                 success=success,
