@@ -179,15 +179,24 @@ class SoapySDRBackend(SDRBackendBase):
     }
 
     def list_devices(self) -> List[DeviceInfo]:
-        """通过 SoapySDR 列出所有可用设备。"""
+        """通过 SoapySDR 列出所有可用设备。
+
+        身份口径（唯一事实源 ``mbdsdr_ai/device_identity.py``，与
+        ``device_manager.DeviceInfo.has_stable_identity`` 同口径）：稳定身份
+        只取序列号这类跟着设备走的唯一事实；label 仅作显示；枚举下标是
+        「这一次的位置」，拔插/换口就会变，不能当身份。旧写法拿
+        ``f"{driver}-{i}"`` 兜底：两台同 driver 设备交换枚举顺序后名字互换，
+        按名字挑选设备的流程会连到另一台物理设备。缺序列号的条目仍在列表
+        里可见，但标为不可用并给出可归因提示，绝不静默生成伪身份。
+        """
         devices = []
         try:
             import SoapySDR
             results = SoapySDR.Device.enumerate()
-            for i, result in enumerate(results):
+            for result in results:
                 driver = result.get("driver", "unknown")
-                serial = result.get("serial", "")
-                name = result.get("label", f"{driver}-{i}")
+                serial = str(result.get("serial") or "").strip()
+                label = str(result.get("label") or "").strip()
 
                 rx_range = self.RANGE_MAP.get(driver, (0.0, 0.0))
                 tx_capable = driver in ("hackrf", "plutosdr", "bladerf", "lime", "uhd", "redpitaya")
@@ -203,6 +212,28 @@ class SoapySDRBackend(SDRBackendBase):
                 if rx_range[1] > 300e6:
                     caps.append("uhf")
 
+                if serial:
+                    # 有稳定身份：显示名优先用 label（仅作显示）；缺 label
+                    # 时用「驱动+序列号」——序列号跟着设备走，枚举顺序变了
+                    # 名字不变。
+                    name = label or f"{driver} {serial}"
+                    is_available = True
+                    description = self.DRIVER_MAP.get(driver, driver)
+                else:
+                    # 缺稳定身份：不拿枚举下标或可改 label 造身份。设备仍
+                    # 可见，但标不可用并说清原因；按名选择的流程不得把它当
+                    # 可选设备。
+                    name = label or self.DRIVER_MAP.get(driver, driver)
+                    is_available = False
+                    description = (
+                        f"{self.DRIVER_MAP.get(driver, driver)}："
+                        "枚举未给出序列号，身份不可分辨；"
+                        "为防止按枚举下标连错设备，本条不参与连接选择。"
+                    )
+                    logger.warning(
+                        "SoapySDR 设备缺序列号，身份不可分辨，标为不可用："
+                        "driver=%s label=%r", driver, label)
+
                 devices.append(DeviceInfo(
                     name=name,
                     driver=f"soapy_{driver}",
@@ -212,8 +243,8 @@ class SoapySDRBackend(SDRBackendBase):
                     tx_range=tx_range,
                     sample_rates=[2e6, 4e6, 8e6, 10e6, 20e6],
                     capabilities=caps,
-                    is_available=True,
-                    description=self.DRIVER_MAP.get(driver, driver),
+                    is_available=is_available,
+                    description=description,
                 ))
         except ImportError:
             logger.info("SoapySDR 未安装，列出已知设备类型")
