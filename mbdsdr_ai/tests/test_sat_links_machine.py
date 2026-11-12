@@ -364,3 +364,58 @@ def test_background_refresh_returns_immediately_and_is_daemon():
     assert not thread.is_alive()
     assert SF.last_refresh_result()["state"] == "ok"
     assert SL.machine_status_text().startswith("SatNOGS 发射机库：机器缓存")
+
+
+# ------------------------------------------------- 降级实测回归（写失败/坏 JSON）
+def test_write_failure_is_reported_not_hidden(monkeypatch):
+    """写盘失败必须报 write_failed，不许 state=ok 只留 written=False。"""
+    monkeypatch.setattr(SF, "_write_cache",
+                        lambda payload, path: (False, "PermissionError: 拒绝访问"))
+    res = SF.refresh(target(25338),
+                     opener=opener_map({25338: [tx("u", 137620000)]}))
+    assert res["state"] == "write_failed"
+    assert res["written"] is False
+    assert "拒绝访问" in res["detail"]
+    # 人工目录照常可用，不因写失败变空
+    assert len(SL.list_link_sats()) == 8
+    assert SL.load_sat_link("noaa_15")["links"][0]["freq_hz"] == 137620000.0
+
+
+def test_bad_json_says_unavailable_not_schema_mismatch():
+    os.makedirs(os.path.dirname(cache_file()), exist_ok=True)
+    with open(cache_file(), "w", encoding="utf-8") as fh:
+        fh.write("{ this is not json")
+    SF.clear_cache_memo()
+
+    text = SL.machine_status_text()
+    assert "缓存不可用" in text
+    assert "缓存结构不符" not in text
+    assert "沿用人工目录" in text
+    assert len(SL.list_link_sats()) == 8
+
+
+def test_transient_read_error_recovers_and_is_not_memoized(monkeypatch):
+    """读盘共享冲突重试；仍失败不写 memo，下一次调用能恢复。"""
+    import builtins
+
+    assert SF.refresh(
+        target(25338),
+        opener=opener_map({25338: [tx("u", 137620000)]}))["written"]
+    SF.clear_cache_memo()
+    real_open = builtins.open
+    name = os.path.basename(SF.CACHE_FILENAME)
+
+    def denied(path, *args, **kwargs):
+        if os.path.basename(str(path)) == name:
+            raise PermissionError(13, "denied", str(path))
+        return real_open(path, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "open", denied)
+    payload, state = SF.load_cache()
+    assert payload is None and state["state"] == "invalid"
+    assert "缓存不可用" in SF.status_text(state)
+
+    # 只还原 open，不 undo（undo 会连本用例的缓存目录环境一起撤掉）
+    monkeypatch.setattr(builtins, "open", real_open)
+    payload2, state2 = SF.load_cache()
+    assert payload2 is not None and state2["state"] == "ok"
