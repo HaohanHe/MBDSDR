@@ -5658,7 +5658,11 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         angle = QFont(self._mono_font)
         angle.setPointSize(8)
         painter.setFont(angle)
-        painter.setPen(QColor(_t.COLORS["gray_300"]))
+        # 读数直接画在天光渐变上（FOV 组只有两个按钮有底，中间标签无底），
+        # 固定 gray_300 夜里 1.65–3.19:1、白天地平 5.00:1 但天顶只有
+        # 1.18:1，两头必有一头看不清。用本文件既有的昼夜自适应墨色
+        # （夜 gray_100 7.35:1 / 昼 sky_day_ink 7.77:1）。
+        painter.setPen(self._ink())
         painter.drawText(QRectF(x0 + btn + gap, y0 + 17.0, label_w, 15.0),
                          int(Qt.AlignCenter),
                          format_angle_deg(self.view_state.fov_deg, digits=1))
@@ -8009,7 +8013,9 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
             f = QFont(self._font)
             f.setPointSize(11)
             painter.setFont(f)
-            painter.setPen(QColor(_t.COLORS["gray_300"]))
+            # 这行字直接画在天光渐变上，没有卡片底：固定 gray_300 夜间
+            # 1.65–3.19:1、白天（天顶 #3F6E9E 起）低到 1.18:1。改用昼夜自适应墨色。
+            painter.setPen(self._ink())
             painter.drawText(QRectF(0, self.height() * 0.30, self.width(), 60),
                              Qt.AlignHCenter | Qt.AlignVCenter, "GNSS 未连接")
             painter.restore()

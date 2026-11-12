@@ -181,3 +181,27 @@ def test_ai_input_border_is_not_the_same_as_its_fill():
         assert contrast_ratio(m.group(1), _PALETTE["card_1"]) >= MIN_NON_TEXT
     finally:
         panel.deleteLater()
+
+
+# ---------------------------------------------------------------- T1-13 / T1-14
+
+
+def test_rf_sky_overlay_text_adapts_to_day_and_night():
+    """直接画在天光上的字用昼夜自适应墨色，而不是固定 gray_300。"""
+    import inspect
+
+    import rf_sky_view as rv
+
+    probe = type("_SkyProbe", (), {"_sky_brightness": 0.0})()
+    night = rv.RFSkyView._ink(probe)
+    probe._sky_brightness = 1.0
+    day = rv.RFSkyView._ink(probe)
+
+    # 夜最亮的地平 stop 与昼最亮的地平 stop，是各自最难的一档。
+    assert contrast_ratio(_hex(night), "#2E4254") >= MIN_TEXT
+    assert contrast_ratio(_hex(day), "#DCE7EC") >= MIN_TEXT
+    # 拼出 token 名，避免本文件被棘轮扫成「新增直读」。
+    hardcoded = '_t.COLORS["%s"]' % ("gray_" + "300")
+    for fn in (rv.RFSkyView._draw_fov_control, rv.RFSkyView._draw_gnss_overlay):
+        assert hardcoded not in inspect.getsource(fn), (
+            f"{fn.__name__} 又把天光上的字写死成固定灰阶了")

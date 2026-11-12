@@ -311,7 +311,7 @@ _LEGACY_READS = {
         "bg_dark": 4, "card_1": 9, "card_2": 12, "card_3": 1,
         "card_hover": 5, "celestial_moon": 1, "celestial_sun": 1,
         "constellation_galileo": 1, "gray_100": 9, "gray_200": 4,
-        "gray_300": 17, "gray_400": 13, "ground_shadow_day": 1,
+        "gray_300": 15, "gray_400": 13, "ground_shadow_day": 1,
         "heatmap_high": 1, "heatmap_low": 1, "heatmap_mid": 1,
         "light_accent": 4, "light_bg": 1, "sky_day_ink": 1,
         "sky_day_zenith": 1, "sky_night_glow": 1, "sky_night_horizon": 1,
