@@ -5,7 +5,15 @@ import os, sys, time
 import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-from mbdsdr_ai.orbit import fetch_tle  # noqa: E402
+from mbdsdr_ai.orbit import TLEUnavailableError, fetch_tle  # noqa: E402
+
+#: 允许 skip 的 TLE 失败类别：全部是外部/环境原因（离线、网络不通、
+#: 超时、源限流、源 5xx）。parse_failure / http_4xx / empty_response
+#: 说明抓取或解析链本身有问题（编号不存在、返回的不是 TLE），必须让测试红。
+_SKIPPABLE_TLE_FAILURES = {
+    "offline", "network_unreachable", "network_timeout", "network_other",
+    "rate_limited", "http_5xx",
+}
 
 
 class TestRuntimeTle:
@@ -18,8 +26,12 @@ class TestRuntimeTle:
         """联网时拉真实 TLE（ISS），失败则 skip（不 mock、不预置）。"""
         try:
             l1, l2 = fetch_tle(25544)
-        except Exception as e:
-            pytest.skip(f"无网络，TLE 拉取空态: {e}")
+        except TLEUnavailableError as e:
+            kind = str((getattr(e, "failure", None) or {}).get("code") or "")
+            if kind not in _SKIPPABLE_TLE_FAILURES:
+                # 不是环境问题：换源/解析链坏了也要能看见，不伪装成「无网络」。
+                raise
+            pytest.skip(f"无网络，TLE 拉取空态（{kind}）: {e}")
         assert l1.startswith("1 ") and l2.startswith("2 ")
         epoch = l1[18:32].strip()
         assert epoch  # 新鲜度字段非空（运行时拉，非预置）
