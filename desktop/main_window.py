@@ -7415,6 +7415,18 @@ class MainWindow(QMainWindow):
         """
         failures = []
 
+        def _supports(name: str) -> bool:
+            """后端是否有这个方法（没有 = 设备不支持该项，不是参数未生效）。
+
+            K10（真机 rtl_tcp）：``RtlTcpBackend`` 没有 ``set_offset_tuning``，
+            旧实现把它当异常记进失败清单，状态栏于是报「连接后参数未全部
+            生效：Offset Tuning」——链路完全正常，是措辞在撒谎。
+            """
+            return callable(getattr(backend, name, None))
+
+        def _skip(label: str) -> None:
+            logger.info("连接后参数 %s：设备不支持该项，已跳过（不计失败）", label)
+
         def _run(label, fn) -> bool:
             try:
                 ok = fn()
@@ -7456,22 +7468,35 @@ class MainWindow(QMainWindow):
                                    type(e).__name__, e)
         # 只有设备接受的连接值才算「最后生效值」；被拒时记 None，失败回填
         # 会退到连接默认（PPM 0 / Offset 关），而不是一个设备没接受过的数。
-        self._last_ppm_applied = (int(ppm) if
-                                  _run("PPM", lambda: backend.set_ppm(ppm))
-                                  else None)
+        if not _supports("set_ppm"):
+            _skip("PPM")
+            self._last_ppm_applied = None
+        else:
+            self._last_ppm_applied = (int(ppm) if
+                                      _run("PPM", lambda: backend.set_ppm(ppm))
+                                      else None)
         # 「不支持」≠「未生效」：能探测到驱动没有该能力就直接跳过，既不下发
-        # 也不记失败——否则本地 RTL（pyrtlsdr 无该方法）每次连接都刷一条假失败。
+        # 也不记失败——否则本地 RTL（pyrtlsdr 无该方法）/ rtl_tcp 每次连接都
+        # 刷一条假失败。
         _supports_ot = getattr(backend, "supports_offset_tuning", None)
-        if callable(_supports_ot) and not _supports_ot():
+        if (not _supports("set_offset_tuning")
+                or (callable(_supports_ot) and not _supports_ot())):
+            _skip("Offset Tuning")
             self._last_offset_applied = None
         else:
             self._last_offset_applied = (
                 bool(offset) if
                 _run("Offset Tuning", lambda: backend.set_offset_tuning(offset))
                 else None)
-        _run("AGC", lambda: backend.set_agc(agc))
+        if _supports("set_agc"):
+            _run("AGC", lambda: backend.set_agc(agc))
+        else:
+            _skip("AGC")
         if not agc:
-            _run("增益", lambda: backend.set_gain(gain))
+            if _supports("set_gain"):
+                _run("增益", lambda: backend.set_gain(gain))
+            else:
+                _skip("增益")
         # 意图跟着连接参数走；AGC 打开时手动增益不生效，清空意图以免三块
         # 面板把「AGC 自动增益」误报成「配置意图未生效」。
         self._set_gain_intent(gain if not agc else None)
