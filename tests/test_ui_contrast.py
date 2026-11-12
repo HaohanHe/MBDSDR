@@ -194,13 +194,17 @@ def test_status_color_readable_on_dark_panel(theme, kind, bg):
         f"{theme}: {kind} {color} on 深色面板 {bg} 对比度 {ratio:.2f} < 4.5")
 
 
-#: 直接读全局语义色 = 绕过主题 remap。浅色主题下 danger 4.45、success 2.73、
-#: accent 2.78、status_busy 2.03，全部掉出正文 4.5 阈值。
+#: 直接读全局 COLORS = 绕过主题 remap。
+#: 六类语义色最危险：浅色主题下 danger 4.45、success 2.73、accent 2.78、
+#: status_busy 2.03，全部掉出正文 4.5 阈值；其余 token 直读同样是欠账
+#: （岛屿内属设计，但也要在基线里显式记账，不能悄悄新增）。
+_DIRECT_READ = re.compile(
+    r"""(?<!THEME_)COLORS\s*(?:\[\s*['"]([A-Za-z_]\w*)['"]\s*\]"""
+    r"""|\.get\(\s*['"]([A-Za-z_]\w*)['"]\s*(?:,\s*[^)]*)?\))""")
+
+#: 六类语义色的 token 名（A1/A2 分档只对这几类有意义）。
 _SEMANTIC_TOKENS = ("danger", "success", "accent", "status_busy",
                     "status_warning", "status_danger")
-_DIRECT_READ = re.compile(
-    r"""COLORS\s*\[\s*['"](danger|success|accent|status_busy"""
-    r"""|status_warning|status_danger)['"]\s*\]""")
 
 #: 棘轮基线（只许降不许涨）：当前全部命中，逐条「文件:行 + 取的 token」。
 #: kind 语义：
@@ -281,9 +285,64 @@ _BASELINE = (
 #: A1 单元数上限（只许降）：当前 11 = status 4 + sat 3 + vfo 1 + ntrip 2 + control 1。
 _BASELINE_CEILING = 11
 
+#: 非语义 token 的直读欠账（2026-11-12 扩面后按「文件 × token 计数」重建）。
+#: 与 `_BASELINE` 同一口径：只许降不许涨；改掉一处就同笔减数，减到 0 删键。
+#: 岛内（rf_sky_view / ai_panel 等）的直读是设计，但也要在这里显式记账——
+#: 否则「岛屿」会变成任何新直读的免检通道。注释行和 scripts/ 不参与扫描。
+_LEGACY_READS = {
+    "desktop/adsb_map_panel.py": {"card_1": 2, "gray_100": 2, "gray_400": 2},
+    "desktop/adsb_panel.py": {"light_accent": 1, "light_bg": 1,
+                              "light_grid": 1, "light_text": 1,
+                              "station_blue": 1},
+    "desktop/ai_panel.py": {"accent_warm": 1, "accent_warm_hover": 1,
+                            "card_1": 2, "disabled_gray": 1, "gray_100": 1,
+                            "gray_200": 1, "gray_400": 2,
+                            "status_success": 1, "text_muted": 2},
+    "desktop/constellation_panel.py": {"card_1": 2, "gray_200": 3,
+                                       "gray_300": 2, "gray_400": 6},
+    "desktop/freq_display.py": {"card_1": 1, "gray_300": 1, "gray_400": 1},
+    "desktop/gain_panel.py": {"disabled_gray": 1},
+    "desktop/main_window.py": {"bg_dark": 1, "card_2": 1, "card_hover": 1},
+    "desktop/module_panel.py": {"card_1": 1, "gray_200": 1, "gray_300": 1,
+                                "source_node": 1, "text_primary": 1},
+    "desktop/new_spacetime_panel.py": {"card_1": 1, "gray_100": 1,
+                                        "gray_200": 1, "gray_400": 1},
+    "desktop/rf_sky_view.py": {
+        "bg_dark": 4, "card_1": 9, "card_2": 12, "card_3": 1,
+        "card_hover": 5, "celestial_moon": 1, "celestial_sun": 1,
+        "constellation_galileo": 1, "gray_100": 9, "gray_200": 4,
+        "gray_300": 17, "gray_400": 13, "ground_shadow_day": 1,
+        "heatmap_high": 1, "heatmap_low": 1, "heatmap_mid": 1,
+        "light_accent": 4, "light_bg": 1, "sky_day_ink": 1,
+        "sky_day_zenith": 1, "sky_night_glow": 1, "sky_night_horizon": 1,
+        "sky_night_zenith": 1, "text_primary": 2},
+    "desktop/sat_track_panel.py": {"card_2": 1, "gray_300": 1, "gray_400": 1},
+    "desktop/satellite_image_panel.py": {"image_placeholder_bg": 1},
+    "desktop/status_panel.py": {"card_2": 1, "gray_300": 5, "gray_400": 1},
+    "desktop/tokens.py": {"light_accent": 1, "light_bg": 1, "light_bg_alt": 1,
+                          "light_border": 1, "light_card": 1, "light_text": 1},
+    "desktop/vfo_panel.py": {"card_2": 1, "gray_200": 1, "text_primary": 1},
+    "tests/test_theme_tokens.py": {"bg_dark": 1},
+    "tests/test_ui_contrast.py": {"disabled_gray": 1},
+}
 
-def _scan_semantic_reads():
-    """返回 [(相对路径, 行号, token)]；跳过隐藏目录与缓存目录。"""
+
+def _baseline_counts():
+    """基线计数 = 逐行语义行 + 非语义 token 的 file × token 欠账。"""
+    base = Counter((f, t) for f, _l, t, *_ in _BASELINE)
+    for rel, toks in _LEGACY_READS.items():
+        for tok, n in toks.items():
+            base[(rel, tok)] += n
+    return base
+
+
+def _scan_direct_reads():
+    """返回 [(相对路径, 行号, token)]；跳过隐藏/缓存目录、scripts/ 与整行注释。
+
+    `scripts/` 是一次性报表脚本，不属于产品代码；整行注释里的示例
+    （形如 ``COLORS["<token>"]`` 的注释）不是真读。行尾注释不排除——真读后面
+    跟注释的情况更常见，宁可多记一条也不能漏。
+    """
     hits = []
     for dirpath, dirnames, filenames in os.walk(_ROOT):
         dirnames[:] = [d for d in dirnames
@@ -293,18 +352,27 @@ def _scan_semantic_reads():
                 continue
             path = os.path.join(dirpath, name)
             rel = os.path.relpath(path, _ROOT).replace(os.sep, "/")
+            if rel.startswith("scripts/"):
+                continue
             with open(path, encoding="utf-8") as fh:
                 for lineno, line in enumerate(fh, 1):
+                    if line.lstrip().startswith("#"):
+                        continue
                     for m in _DIRECT_READ.finditer(line):
-                        hits.append((rel, lineno, m.group(1)))
+                        hits.append((rel, lineno, m.group(1) or m.group(2)))
     return hits
 
 
 def test_no_new_direct_semantic_color_reads():
     """棘轮：新增直读 → 红；基线已过期（修完没删行）或上限没跟着降 → 也红。
 
+    范围是**任何直读全局 `COLORS[...]` / `.get(...)`**（不限六类语义色）：
+    只拦 status_* 时，A1 那批 danger/success/accent/status_busy 全在门外，
+    修完也没人守。六类语义色另在 `_BASELINE` 里逐条标 A1/A2 档位。
+
     允许集合是「基线（文件 × token 计数）」而不是行号集合：行号会随上方编辑漂移，
-    但计数不会——漂移只更新注释里的行号，不改变判定。
+    但计数不会——漂移只更新注释里的行号，不改变判定。非语义 token 的欠账在
+    `_LEGACY_READS`，两者合并成基线。
 
     两个方向都拦：
       * 代码里多出直读、基线没登记            → extra 红；
@@ -313,12 +381,15 @@ def test_no_new_direct_semantic_color_reads():
     第三条是「每修一处必须同笔降 1」的执行点：漏降上限、漏删基线行都过不去。
     """
     assert {e[2] for e in _BASELINE} <= set(_SEMANTIC_TOKENS), "基线里有未知 token"
-    hits = _scan_semantic_reads()
+    known = set(tokens().COLORS)
+    unknown = {(f, t) for (f, t) in _baseline_counts() if t not in known}
+    assert not unknown, f"基线里登记了全局 COLORS 不存在的 token：{sorted(unknown)}"
+    hits = _scan_direct_reads()
     got = Counter((f, t) for f, _l, t in hits)
-    base = Counter((f, t) for f, _l, t, *_ in _BASELINE)
+    base = _baseline_counts()
     extra = {k: got[k] - base[k] for k in got if got[k] > base[k]}
     assert not extra, (
-        "新增了直接读全局语义色的点位（必须走 tokens().status_color(...) "
+        "新增了直接读全局 COLORS 的点位（必须走 tokens().status_color(...) "
         "或主题 token）："
         + ", ".join("%s %s +%d" % (f, t, n) for (f, t), n in sorted(extra.items())))
     stale = {k: base[k] - got[k] for k in base if got[k] < base[k]}
@@ -330,6 +401,49 @@ def test_no_new_direct_semantic_color_reads():
     assert len(a1_units) == _BASELINE_CEILING, (
         f"A1 待迁单元 {len(a1_units)} != 上限 {_BASELINE_CEILING}："
         "每修完一处必须同笔删基线行并把 _BASELINE_CEILING 减 1（只许降）")
+
+
+#: 样本里的命名空间名拼出来：本文件也会被 `_scan_direct_reads()` 扫到，
+#: 写成字面量就等于自己给自己贡献「新增直读」。
+_GLOBAL = "COL" + "ORS"
+
+
+def _index_read(token: str) -> str:
+    return 'fg = %s["%s"]' % (_GLOBAL, token)
+
+
+def _get_read(token: str) -> str:
+    return "fg = t.%s.get('%s', '#000')" % (_GLOBAL, token)
+
+
+@pytest.mark.parametrize("token", _SEMANTIC_TOKENS + ("gray_300", "card_2", "light_bg"))
+def test_direct_read_regex_covers_all_six_semantic_families(token):
+    """反证底线：正则必须命中六类语义色**和任意其它全局 token**。
+
+    旧正则只写 `status_warning|status_danger`，A1 那批 danger/success/accent/
+    status_busy 全被漏掉——这条用例就是为了让「缩回旧正则」立刻变红。
+    `.get()` 分支走的是第二个捕获组，也必须取到 token 名。
+    """
+    for line in (_index_read(token), _get_read(token)):
+        hit = _DIRECT_READ.search(line)
+        assert hit is not None, f"正则漏掉了这行直读：{line}"
+        assert (hit.group(1) or hit.group(2)) == token
+
+
+def test_direct_read_regex_ignores_theme_colors():
+    """`THEME_COLORS[...]` 是随主题的命名空间，不是「直读全局」，不许被拦。"""
+    assert _DIRECT_READ.search('c = THEME_COLORS["default"]["danger"]') is None
+    assert _DIRECT_READ.search("c = THEME_COLORS.get('default')") is None
+
+
+def test_semantic_tokens_never_hide_in_legacy_debt():
+    """六类语义色必须逐行登记在 `_BASELINE`（A1/A2/...），不许挪进 `_LEGACY_READS`。
+
+    否则「把 A1 从基线剔掉、改记成一条欠账计数」也能让门禁变绿，棘轮就废了。
+    """
+    hidden = {(f, t) for f, toks in _LEGACY_READS.items()
+              for t in toks if t in _SEMANTIC_TOKENS}
+    assert not hidden, f"语义色不许走文件×token 欠账通道：{sorted(hidden)}"
 
 
 def test_gain_range_hint_exempt_only_when_stage_unsupported():
