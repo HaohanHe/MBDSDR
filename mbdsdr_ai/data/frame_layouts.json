@@ -1,9 +1,10 @@
 {
-  "_schema": "mbdsdr frame_layout_spec v2 —— 帧布局库（同步字/字段布局/CRC 一律配置注入；可选帧型变体 + 派生）",
-  "_note": "字段定义支持：name/offset(字节)/len(字节)/type(uint8..uint64/int8..int64_be|_le/hex/ascii)/scale/offset_val/unit/bit_offset/bit_len(可选位级)。位级字段：声明 bit_len 时走位级路径，bit_offset 以帧首为 0（绝对位偏移，MSB-first），bit_len 为位数，type 须为 uint，offset/len 不再参与；未声明 bit_len 的字段仍走字节路径。CRC 由 crc 字段指名（名字必须能在 mbdsdr_ai.crc 预设表里找到）。len=-1 是哨兵值，含义为「从该 offset 到帧尾的剩余全部字节」，不是「长度未知」也不是「长度非法」；当前解释器（mbdsdr_ai/verify_chain.py::extract_fields）只展开 name=data 的字段，其它字段名写 -1 会按越界报错。实例：ccsds_tc_classic 的 data 字段 offset=5、len=-1 → 从第 6 字节到帧尾；该帧帧尾固定 2 字节 FECF，所以这个「剩余全部」含 FECF，取纯数据需去掉末 2 字节。派生布局 ccsds_tc_segmented 的 data 为 offset=6、len=-1（同一条「到帧尾剩余全部、含 FECF」口径，只是起点后移到 Segment Header 之后）。变体/派生：条目可选 frame_type（帧型标签）与 derived_from（父布局名）；父布局提供基础字段，子布局 fields 同名整体覆盖（子胜、位置不变）、新名追加；同一 fields 内重名直接报错；派生布局必须自带 source.url + source.retrieved_at，无出处不入库。",
+  "_schema": "mbdsdr frame_layout_spec v3 —— 帧布局库（同步字/字段布局/CRC 一律配置注入；可选帧型变体 + 派生；verification 验证等级必填）",
+  "_note": "字段定义支持：name/offset(字节)/len(字节)/type(uint8..uint64/int8..int64_be|_le/hex/ascii)/scale/offset_val/unit/bit_offset/bit_len(可选位级)。位级字段：声明 bit_len 时走位级路径，bit_offset 以帧首为 0（绝对位偏移，MSB-first），bit_len 为位数，type 须为 uint，offset/len 不再参与；未声明 bit_len 的字段仍走字节路径。CRC 由 crc 字段指名（名字必须能在 mbdsdr_ai.crc 预设表里找到）。len=-1 是哨兵值，含义为「从该 offset 到帧尾的剩余全部字节」，不是「长度未知」也不是「长度非法」；当前解释器（mbdsdr_ai/verify_chain.py::extract_fields）只展开 name=data 的字段，其它字段名写 -1 会按越界报错。实例：ccsds_tc_classic 的 data 字段 offset=5、len=-1 → 从第 6 字节到帧尾；该帧帧尾固定 2 字节 FECF，所以这个「剩余全部」含 FECF，取纯数据需去掉末 2 字节。派生布局 ccsds_tc_segmented 的 data 为 offset=6、len=-1（同一条「到帧尾剩余全部、含 FECF」口径，只是起点后移到 Segment Header 之后）。变体/派生：条目可选 frame_type（帧型标签）与 derived_from（父布局名）；父布局提供基础字段，子布局 fields 同名整体覆盖（子胜、位置不变）、新名追加；同一 fields 内重名直接报错；派生布局必须自带 source.url + source.retrieved_at，无出处不入库。验证等级：每个顶层布局必填 verification，只允许 schema_only（仅过结构校验）/spec_example（用规范给的示例数据逐字段对上）/ota（真实接收数据验证过）；spec_example 与 ota 还必须同时给 verification_evidence 证据文件路径，否则加载即报错。honesty 保留为人读说明，verification 是机器字段，两者矛盾时以 evidence 缺失检查兜底。",
   "astu_1_tm_example": {
     "profile": "astu_1",
     "honesty": "ASRTU-1 教程只给到 CCSDS TM 体制（ASM+卷积+扰码），未公开帧内字段布局——本布局是示例布局，用于验证字段抽取引擎，不是该星真实遥测格式",
+    "verification": "schema_only",
     "sync": {"type": "asm", "hex": "1ACFFC1D"},
     "crc": {"name": "crc16_ccitt_false", "cover": "payload"},
     "fields": [
@@ -17,6 +18,7 @@
   },
   "ccsds_tc_classic": {
     "honesty": "CCSDS TC 经典帧（CCSDS 232.0-B-4）：5 字节主头 + 数据域 + 16bit FECF（CRC-16/CCSDS，poly 0x1021，初值 0xFFFF，MSB 先行，无反射无终异或）；CCSDS 230.1-G-3 Annex F Example 10 样例 001B000E06010203040506070814BB 已逐字节对拍，不代表真实 OTA 或上星验证",
+    "verification": "schema_only",
     "sync": {"type": "cltu_start", "hex": "EB90"},
     "crc": {"name": "crc16_ccsds", "cover": "header_and_data"},
     "header": {
@@ -32,6 +34,7 @@
     "frame_type": "AD_SEGMENTED",
     "derived_from": "ccsds_tc_classic",
     "honesty": "由 ccsds_tc_classic 派生的帧型变体：CCSDS 232.0-B-4 §4.1.3.2.2 规定 Frame Data Unit 可在 5 字节主头后紧接 1 字节 Segment Header（2bit Sequence Flags + 6bit MAP ID，Figure 4-3），其后才是 User Data。本布局把 data 起点从 5 后移到 6，并在 offset=5 追加 segment_header_hex；只做字节偏移解释，不拆分位域（解释器无位级支持）。§4.1.3.2.2.1.3 另规定 Type-C 控制命令帧不得带 Segment Header，本布局只覆盖 AD 数据帧；不代表真实 OTA 或上星验证",
+    "verification": "schema_only",
     "source": {
       "document": "CCSDS 232.0-B-4, TC Space Data Link Protocol, Issue 4, October 2021 (incl. Technical Corrigendum 1 October 2023, Editorial Change 1 October 2024)",
       "url": "https://public.ccsds.org/Pubs/232x0b4e1c1.pdf",
@@ -46,6 +49,7 @@
   },
   "funcube1_ao73_frame": {
     "honesty": "FUNcube-1（AO-73）256 字节下行帧：1 字节帧头（2bit Sat Id + 6bit Frame Type）+ 55 字节实时遥测 + 200 字节载荷，依据 AMSAT-UK《FUNcube-1 Downlink Data》Issue 1.0 Final as flown（05/03/2015，Distribution: Unlimited public release）§1–§4。位序按文档对 Frame Type 明示的 MSB-first，其余字段沿用同一 MSB-first 口径（文档未逐字段另行声明）。文档未给换算系数与单位，故全部输出原始计数、不造标度；载荷内容随 Frame Type 变化，本布局按 hex 透传，不解释 WOD/HR 采样。该帧的同步与 RS/卷积编码在解调/FEC 层完成，本布局不含 sync/crc，不能直接用于 verify_sample。规范未给示例帧（全文仅有位宽表，无示例帧字节、无字段取值示例，§6 Fitter Message Slot 9 data 为「To be added」），本布局无法端到端验证，仅通过 schema 校验；测试中的 256 字节帧是机制用例，不是规范样例。未做 OTA 或上星验证",
+    "verification": "schema_only",
     "source": {
       "document": "FUNcube-1 Downlink Data, Issue 1.0 Final as flown, 05/03/2015 (AMSAT-UK; Distribution: Unlimited public release)",
       "url": "https://funcube.org.uk/wp-content/uploads/2010/11/funcube-1-downlink-data-spec_ver1-as_flown.pdf",
@@ -121,6 +125,7 @@
     "frame_type": "FM",
     "derived_from": "funcube1_ao73_frame",
     "honesty": "由 funcube1_ao73_frame 派生：Frame Type 值 14–24 为 Fitter 消息帧（FUNcube-1 Downlink Data §3、§5 传输调度表），200 字节载荷按文档「copied out verbatim」语义透传为 ASCII；同名 payload 字段由 hex 覆盖为 ascii，帧头与实时遥测字段全部继承。非 ASCII 字节按替换字符呈现，不猜测编码。规范未给示例帧（全文仅有位宽表，无示例帧字节、无字段取值示例，§6 Fitter Message Slot 9 data 为「To be added」），本布局无法端到端验证，仅通过 schema 校验；测试中的 256 字节帧是机制用例，不是规范样例。未做 OTA 或上星验证",
+    "verification": "schema_only",
     "source": {
       "document": "FUNcube-1 Downlink Data, Issue 1.0 Final as flown, 05/03/2015 (AMSAT-UK; Distribution: Unlimited public release)",
       "url": "https://funcube.org.uk/wp-content/uploads/2010/11/funcube-1-downlink-data-spec_ver1-as_flown.pdf",
