@@ -13,13 +13,29 @@ MBDSDR AI 内核 - 版本存储
 - 防幻觉变砖：任何修改前自动快照，失败自动回滚
 """
 
+import hashlib
 import json
+import logging
 import os
 import time
 
-import hashlib
 from dataclasses import dataclass, field
 from typing import List, Dict, Any, Optional, Tuple
+
+from .corrupt_evidence import write_reason
+
+logger = logging.getLogger(__name__)
+
+
+def _backup_corrupt_versions(path: str) -> Optional[str]:
+    """把损坏的版本索引改名成 ``*.corrupt-时间戳``，返回备份路径（失败 None）。"""
+    backup = f"{path}.corrupt-{time.strftime('%Y%m%d-%H%M%S')}"
+    try:
+        os.replace(path, backup)
+    except OSError as exc:
+        logger.error("版本索引损坏备份失败：%s（%s）", path, exc)
+        return None
+    return backup
 
 
 @dataclass
@@ -65,33 +81,109 @@ class VersionStore:
         os.makedirs(self.objects_path, exist_ok=True)
         self._versions: Dict[str, Version] = {}
         self._head: Optional[str] = None
+        #: 上次读取失败的人话说明（None = 正常）。目前没有独立界面消费，
+        #: 完整提示接线等 main_window.py 那一笔。
+        self.last_error: Optional[str] = None
+        #: 损坏索引的备份路径（None = 未损坏或备份失败）。
+        self.corrupt_backup: Optional[str] = None
+        #: 读失败/损坏且备份失败时拒绝写盘：snapshot 会 _save，一旦放行
+        #: 就会把「无版本」写成唯一索引。
+        self._save_blocked = False
         self._load()
 
     # ── 持久化 ──────────────────────────────────────────
 
     def _load(self):
-        """加载版本数据（原子：任一条目损坏则整体不载入，避免半截状态）。"""
-        if os.path.exists(self.versions_file):
-            try:
-                with open(self.versions_file, "r", encoding="utf-8") as f:
-                    data = json.load(f)
-                loaded: Dict[str, Version] = {}
-                for v in data.get("versions", []):
-                    loaded[v["id"]] = Version(**v)
-                # 全部解析成功才提交：中途失败不留半截（部分版本 + head=None）
-                self._versions = loaded
-                self._head = data.get("head")
-            except Exception as e:
-                print(f"警告: 版本存储加载失败: {e}")
+        """加载版本数据：缺失 = 空库；损坏先备份；读不了不写。
 
-    def _save(self):
-        """保存版本数据。"""
+        注意：``objects/`` 只有「内容 hash → 内容」，没有文件名、版本分组、
+        时间戳与父链。索引一旦丢失，这些对象文件无法反推出属于哪个版本、
+        叫什么名字——所以这里必须保住原件、禁止用空索引覆盖。
+        """
+        if not os.path.exists(self.versions_file):
+            return
+        try:
+            with open(self.versions_file, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        except OSError as exc:
+            self.last_error = (
+                f"版本索引读取失败（{exc.__class__.__name__}）："
+                f"{self.versions_file}；本次不写入，避免覆盖可能仍可恢复的索引")
+            self._save_blocked = True
+            logger.warning("版本索引读取失败（非损坏，不备份）：%s", exc)
+            return
+        except ValueError as exc:
+            self._mark_corrupt(f"解析失败（{exc.__class__.__name__}: {exc}）")
+            return
+        try:
+            if not isinstance(data, dict):
+                raise ValueError("根节点不是对象")
+            items = data.get("versions", [])
+            if not isinstance(items, list):
+                raise ValueError("versions 不是列表")
+            loaded: Dict[str, Version] = {}
+            for item in items:
+                if not isinstance(item, dict):
+                    raise TypeError("版本条目不是对象")
+                version = Version(**item)
+                loaded[version.id] = version
+            head = data.get("head")
+            if head is not None and head not in loaded:
+                raise ValueError(f"head 指向不存在的版本 {head}")
+        except (TypeError, KeyError, ValueError, AttributeError) as exc:
+            self._mark_corrupt(f"条目非法（{exc.__class__.__name__}: {exc}）")
+            return
+        # 全部解析成功才提交：中途失败不留半截（部分版本 + head=None）
+        self._versions = loaded
+        self._head = head
+        self.last_error = None
+        self.corrupt_backup = None
+        self._save_blocked = False
+
+    def _object_count(self) -> int:
+        """objects/ 里现有对象文件数（只用于错误文本，读不了按 0 计）。"""
+        try:
+            return len(os.listdir(self.objects_path))
+        except OSError:
+            return 0
+
+    def _mark_corrupt(self, reason: str) -> None:
+        """损坏：先备份原件再留人话错误；备份失败则禁止后续写盘。"""
+        self.corrupt_backup = _backup_corrupt_versions(self.versions_file)
+        objects_count = self._object_count()
+        objects_note = (
+            f"磁盘上的对象文件还在 objects/（{objects_count} 个），"
+            "但索引里没有「版本 → 文件」映射，无法从对象目录重建，"
+            "已无法通过界面找回")
+        if self.corrupt_backup:
+            self.last_error = (
+                f"版本索引损坏（{reason}）：{self.versions_file}；"
+                f"原件已备份为 {self.corrupt_backup}，本次按无版本启动。"
+                + objects_note)
+            write_reason(self.corrupt_backup, self.last_error, logger)
+        else:
+            self.last_error = (
+                f"版本索引损坏（{reason}）：{self.versions_file}；"
+                "备份失败，本次不写入，避免覆盖唯一证据。" + objects_note)
+        self._save_blocked = self.corrupt_backup is None
+        logger.error(self.last_error)
+
+    def _save(self) -> bool:
+        """保存版本数据。读失败/损坏未备份时拒绝写盘。"""
+        if self._save_blocked:
+            self.last_error = (
+                f"版本索引未保存：{self.versions_file} 读取失败或已损坏且无法备份；"
+                "为避免覆盖唯一证据，本次不写入")
+            logger.error("版本索引写入被拒绝（文件不可用且未备份）：%s",
+                         self.versions_file)
+            return False
         data = {
             "head": self._head,
             "versions": [v.to_dict() for v in self._versions.values()],
         }
         with open(self.versions_file, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=2, ensure_ascii=False)
+        return True
 
     # ── 内容寻址存储 ────────────────────────────────────
 
@@ -125,7 +217,13 @@ class VersionStore:
 
         files: {filename: content}
         返回创建的 Version。
+
+        索引读不了且无法备份时拒绝新建：写下去只会得到一份磁盘上没有、
+        重启就消失的「假快照」。
         """
+        if self._save_blocked:
+            raise RuntimeError(self.last_error or "版本存储不可写（索引损坏且无法备份）")
+
         # 存储所有文件内容
         file_hashes = {}
         for filename, content in files.items():
