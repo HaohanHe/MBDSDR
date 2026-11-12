@@ -4546,4 +4546,57 @@ A 一退 B 就裸奔（探针 WROTE-OK）；修复后 B 存活期间一律 REFUS
 8 条无任何入口，「一条命令出合规状态」对这 19 条目前**不成立**，清单与触发条件见
 `docs/code-guards.md` §B/§C。
 
+---
+
+## 订正（2026-11-13 05:40）：`ddcecf76` 消息与内容错配，不改历史
+
+**已知实例**：`ddcecf76` 的消息是
+`docs(claims): reference-mechanisms 4 条坐标随他线改动再校正（settings 298/637/348，rf_sky 8710）`，
+tree 里却**只有** `scripts/config_write_guard.py`（+7/−55）。那笔内容属于冗余治理线：
+`records()` 改调 `guard_common.log_records`、删掉 `atexit` 重复收尾，与消息里的
+文档坐标校正毫无关系。
+
+**内容实际落点**：
+
+| 提交 | 消息 | 实际改动 | 归属 |
+| --- | --- | --- | --- |
+| `ddcecf76` | docs(claims) 4 条坐标再校正 | `scripts/config_write_guard.py`（+7/−55） | 冗余治理线（guard_common 收口） |
+| `80a1b873` | 同一句消息 | `docs/reference-mechanisms.md`（+4/−4） | 体检线（坐标校正） |
+
+**互补、无重叠**：两条路径集合不相交（源码 vs 文档），没有同一文件被两笔各改一半的情况。
+`80a1b873` **没有丢件**——消息声称 4 条坐标，diff 恰好 4 增 4 删（C1/C2/C6/过境缓存），
+逐行核对 `298` = `os.replace(path, backup)`、`348` = `self.migration_notes`、
+`637` = `def _write_to_disk`、`8710`/`8711` = `PASS_REFRESH_SIM_S`/`PASS_REFRESH_WALL_S`，
+全部命中，且工作树对该文件无残留未提交改动。
+
+**成因（已可机检，不靠自觉）**：共享 `.git/index`。A 会话 `git add -A` 把冗余线的在途
+文件暂存进共享 index，B 会话用它自己的普通 `git commit` 提交时，那些暂存项按 **B 的消息**
+一起入库。`safe_commit.py` 本来就用私有 index，所以这不是它的泄漏，是**别人的笔**被共享
+index 带走。
+
+**处置**：不改写历史（子孙提交多且多线并行）。代码侧已隔离——`5b87f779`
+（会话私有 index + `<locks>/commit.lock` 提交窗口互斥 + 提交后作用域机检）、`f31fb274`
+（4 条反证：两进程并发、共享 index 污染、阳性对照、后提交方不得删前一笔的文件）。
+审计入口 `0161a9f0`：`python scripts/audit_commit_scope.py`。
+
+**全历史审计口径与结果**（3253 笔提交，`--all`）：声称通道只认机读的三种——前缀类别
+（`docs(`/`test(` 的实际改动要含文档类/测试类文件）、scope 写成路径、`files:` 显式清单行；
+正文里反引号提及的路径算上下文不算声明（放宽实测 136 笔、再放宽 957 笔，噪声淹没真错配）。
+结果 **33 笔**，其中 5 笔仅改注释行（归类习惯），**28 笔动了代码/非注释内容**。前几条：
+
+| 提交 | 消息声称 | tree 实际 | 内容是否另行落库 |
+| --- | --- | --- | --- |
+| `ddcecf76` | docs：reference-mechanisms 坐标 | `scripts/config_write_guard.py` | 文档侧在 `80a1b873`；本笔代码内容即其唯一落点 |
+| `f91ffe4a` | docs(readouts)：精度示例 | `desktop/readouts.py` | 该文件另有 `ff60308a` |
+| `153b21e8` | docs(comments)：注释 | 3 个 `desktop/*_panel.py` | 两处另有落库，`ntrip_panel.py` 只此一笔 |
+| `ce1ed9ef` / `19d7ead7` / `5051cf81` | docs(schema)：行号/符号 | `desktop/config_schema.py` + 一个测试 | 三笔互为对方的第二落点 |
+| `62f30317` | docs(verify-chain)：位级口径 | `mbdsdr_ai/verify_chain.py` | 另有 `fd3fb925` |
+| `18ba6d53` | test(guard)：写哨兵 | `scripts/config_write_guard.py` | 另有 `afd449fa` |
+
+**诚实边界**：33 笔里**只有 `ddcecf76` 被两线交叉确认**是「A 线的消息带走 B 线的内容」；
+其余多是「改代码文件里的注释/文档字符串却用 `docs` 前缀」的归类习惯，本表只证明
+**消息类别与 tree 类别不符**，不等于每笔都发生了跨线串味。判定「内容另行落库」用的是
+「同 subject 的另一笔 + 路径 ±400 笔内最近落点」，不是逐字节比对，可能指错邻居。
+
+
 
