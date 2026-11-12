@@ -132,8 +132,13 @@ class TestFovControl:
     def test_fov_rects_present(self):
         v = _new_view()
         v.grab()
-        assert v._fov_minus_rect is not None
-        assert v._fov_plus_rect is not None
+        minus, plus = v._fov_minus_rect, v._fov_plus_rect
+        assert minus is not None and plus is not None
+        # 两个按钮必须各自有面积、且不重合；否则「两个矩形设成同一个」也会绿
+        assert minus.width() > 0 and minus.height() > 0, minus
+        assert plus.width() > 0 and plus.height() > 0, plus
+        assert minus != plus
+        assert minus.right() < plus.left(), (minus, plus)
 
     def test_minus_zooms_in(self):
         v = _new_view()
