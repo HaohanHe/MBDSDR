@@ -2,7 +2,7 @@
   "schema": 1,
   "built_at": "2026-11-06",
   "scanner": "scripts/audit_source_text_pins.py",
-  "built_count": 56,
+  "built_count": 58,
   "entries": [
     {
       "path": "tests/test_ai_panel_behavior.py",
@@ -531,8 +531,26 @@
       "reason": "他线 pin（967ac726 引入，owner=操作逻辑线）：跨文件真值源守卫——GNSS 工具默认采样率必须引用 DEFAULT_SAMPLE_RATE_HZ，行为测试无法证明「整文件没有手写 2.048e6」；重新评估条件：sdr_tools 默认值收敛到单一构造器、手写值不可能存在时。",
       "legacy": false,
       "verdict": "tbd"
+    },
+    {
+      "path": "tests/test_hw_acceptance_contract.py",
+      "func": "test_pilot_acceptance_thresholds_match_doc_card",
+      "pinned": "f\"19000±{tol:.0f} Hz 且峰/邻域 >{snr:.0f} dB\"",
+      "owner": "K19收口线 / 6ae85f56a16a76df1598024e",
+      "reason": "保留：人工验收卡 docs/hw-acceptance.md 是给操作员逐字核对的判据表，产品代码没有可断言的行为入口；判据串由 ring3 的 PILOT_FREQ_TOL_HZ / PILOT_SNR_MIN_DB 拼出，改常量或改文档任一侧都会红。整句中的「且峰/邻域」是判据本身的一部分（峰与邻域两个统计量），不做最小锚点切分。若要删此条，必须先让验收卡由常量生成。",
+      "legacy": false,
+      "verdict": "keep"
+    },
+    {
+      "path": "tests/test_hw_acceptance_contract.py",
+      "func": "test_playback_ratio_thresholds_match_doc_card",
+      "pinned": "f\"{lo} – {hi}\"",
+      "owner": "K19收口线 / 6ae85f56a16a76df1598024e",
+      "reason": "保留：回放比区间 0.3 – 3.0 只在人工验收卡里以文本呈现，ring4 常量没有可供行为断言调用的消费入口；区间串由 PLAYBACK_RMS_RATIO_MIN/MAX 拼出，任一侧改动都会红。若要删此条，必须先让验收卡由常量生成。",
+      "legacy": false,
+      "verdict": "keep"
     }
   ],
-  "revised_at": "2026-11-06",
+  "revised_at": "2026-11-13",
   "classification_note": "分类器（_literal_of / 邻近 assert 归组）会把同一函数的多条 pin 重复计入不同判定：看条数前必须按 (path, func, pinned) 去重并回读 assert 原文。条数会虚高；砍条数时若只按 C/B 标签操作，可能删掉真判据。"
 }
