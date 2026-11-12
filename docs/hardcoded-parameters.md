@@ -194,7 +194,7 @@ Python 标签数取 **6**；C++ 仍为 12，因为它只画三角形不画文字
 | D-10 | AI 上下文 | Python 8192（`max_context_tokens`） vs C++ `32768×0.75` | `config.py:20` / `config_schema.py:237` vs `tokens.h:1321-1322` |
 
 D-9-AI **不是**同一语义：Python 是"工具调用可重试判定"，C++ 是"LLM 请求瞬时错误退避"。
-此处曾与录音 D-9 重名，已改（2026-11-12，编号让位给录音格式裁决 D-9，见 `docs/research/2026-11-12-d9-recording-format-ruling.md`）。
+此处曾与录音 D-9 重名，2026-11-12 让号给录音格式裁决 D-9（现名 D-9-AI，见 `docs/research/2026-11-12-d9-recording-format-ruling.md`）。
 两者都合理，只需在文档写清（已写）。其余 8 组是真·同一语义两套数。
 
 **D-2 撤回（本线自我纠错）**：先把 `tokens.h:283 kFreqStepHz = 100e3` 当成"调谐步进"，
