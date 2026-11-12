@@ -319,7 +319,7 @@ DVB-S2 BCH/LDPC 表、月面反照率），另有 `desktop/bandplan.json` 频段
 |---|---|---|---|
 | `sat_links.json` | 无条数声明；每条带 `source`/`culture`，只含下行 | 8 星 / 9 条链路，全部 `direction=downlink`；卫星级 `source` 8/8、`culture` 8/8；频点 137.1–436.795 MHz | 0 |
 | `sat_profiles.json` | 7 剖面，逐条带 `source` | 7 剖面，`source` 7/7；`baud` 缺 5、`coding` 缺 5（DVB-S2/模拟体制本就不适用） | 0 |
-| `frame_layouts.json` | 无条数声明；逐条 `honesty`；`_note` 解释 `len=-1` 与位级字段 | 5 顶层 = 示例 1（`astu_1_tm_example`，非真实星）+ 通用协议帧 2（`ccsds_tc_classic` 基座 / `ccsds_tc_segmented` 派生）+ 星上遥测 2（`funcube1_ao73_frame` 基座 / `funcube1_ao73_fitter` 派生）；派生共 2 条；`source` 3/5（既有 2 条无 `source`，按红线冻结）；字段字节/位段不重叠；声明 CRC 的布局均可解析 | 0（W91 星覆盖仅 FUNcube-1 1 颗；NOAA KLM 手册 37.4MB 本环境实测 1.8KB/s，5 分钟时限内不可取得） |
+| `frame_layouts.json` | 无条数声明；逐条 `honesty`；`_note` 解释 `len=-1` 与位级字段 | 5 顶层 = 示例 1（`astu_1_tm_example`，非真实星）+ 通用协议帧 2（`ccsds_tc_classic` 基座 / `ccsds_tc_segmented` 派生）+ 星上遥测 2（`funcube1_ao73_frame` 基座 / `funcube1_ao73_fitter` 派生）；派生共 2 条；`source` 3/5（既有 2 条无 `source`，按红线冻结）；字段字节/位段不重叠；声明 CRC 的布局均可解析 | 0（W91 星覆盖 1 颗 = 达下限，其余待公开规范；NOAA KLM 手册 37.4MB 本环境实测 1.8KB/s，5 分钟时限内不可取得；**规范未给示例帧，FUNcube 布局无法端到端验证，仅通过 schema 校验**） |
 | `dvbs2_bch.json` | 21 模式码 | normal 11 + short 10；short 的 9/10 标 `unavailable` 并带原因（表 5b 全 NA、表 7b 无 q 条目） | 0 |
 | `dvbs2_ldpc_tables.json` | 21 张表 + `source_files.sha256` | 21 = normal 11 + short 10；`n>k>0`、`q>0` 全部成立；短帧缺 9/10 与 BCH 一致 | 0（外部源不可复核，见下） |
 | `moon_albedo_lola_2ppd.npz` | LRO-L-LOLA-4-GDR-V1.0，Public Domain | `albedo` (360,720) float32，范围 [0.1359, 0.4716] | 0 |
@@ -357,6 +357,12 @@ DVB-S2 BCH/LDPC 表、月面反照率），另有 `desktop/bandplan.json` 频段
    累加（头 8bit + 实时遥测 440bit + 载荷 200 字节 = 2048bit），源 PDF 的
    URL/SHA-256/抓取时间写在条目 `source` 里；文档未给换算系数，故只输出
    原始计数，单位为空。
+6. **FUNcube 布局的验证边界**：AMSAT-UK《FUNcube-1 Downlink Data》全文
+   只有位宽表，**没有示例帧字节，也没有字段取值示例**（§6「Fitter Message
+   Slot 9 data」为「To be added」），因此该布局**无法用规范样例做端到端
+   验证，仅通过 schema 校验**。测试里的 256 字节帧是字段抽取机制的用例，
+   不是规范样例，不能当验证证据。此结论同步写在 `funcube1_ao73_frame` 与
+   `funcube1_ao73_fitter` 的 `honesty` 字段中。
 
 ## 3b. Web 产品生成产物（`web/product/build/*.json`）
 
