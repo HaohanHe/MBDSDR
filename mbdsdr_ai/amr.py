@@ -452,7 +452,11 @@ class AMRClassifier:
                     return False
                 labels = [str(v) for v in data["labels"]]
                 features = np.asarray(data["features"], dtype=np.float64)
-        except Exception:  # noqa: BLE001 - 缓存坏了就重算，不能因此崩
+        except Exception as exc:  # noqa: BLE001 - 缓存坏了就重算，不能因此崩
+            # 缓存只是加速手段，坏了重算即可；但原因必须可查，否则永远不知道
+            # 「每次启动都慢」是因为缓存一直在坏。
+            logger.warning("AMR 内置模板缓存不可用，将重新合成：%s | %s: %s",
+                           path, type(exc).__name__, exc)
             return False
         if features.ndim != 2 or features.shape[1] != len(names):
             return False
