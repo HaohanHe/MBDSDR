@@ -305,3 +305,150 @@ def test_removing_type_check_makes_the_guard_red(tmp_path, monkeypatch):
 def test_default_path_stays_inside_isolated_profile(isolated_profile):
     ds = DesktopSettings()
     assert ds.path.startswith(os.environ["APPDATA"]), ds.path
+
+
+# ---------------------------------------------------------------------------
+# 10. 写盘路径遇到坏文件：先备份，备份失败则拒绝覆盖
+# ---------------------------------------------------------------------------
+#: 加载成功后磁盘文件被别的进程/编辑器弄坏的形态（截断 JSON）。
+_CORRUPT_SETTINGS = '{"theme": "dark", "future_flag": {"trunc'
+
+
+def _corrupt_on_disk(path) -> None:
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(_CORRUPT_SETTINGS)
+
+
+def _backups(path):
+    directory, name = os.path.split(str(path))
+    return sorted(
+        os.path.join(directory, entry)
+        for entry in os.listdir(directory)
+        if entry.startswith(name + ".corrupt-")
+        and not entry.endswith(".reason.txt"))
+
+
+def _assert_write_after_corrupt_backs_up(tmp_path):
+    """load 之后文件才损坏：写盘必须先备份，且备份字节就是坏文件原样。"""
+    path = _write(tmp_path / "desktop_settings.json", json.dumps({"theme": "dark"}))
+    ds = DesktopSettings.load(path=path)
+    _corrupt_on_disk(path)
+
+    ds.set("callsign", "N0CALL")
+    ds.flush()
+
+    backups = _backups(path)
+    assert len(backups) == 1, "写盘路径遇到坏文件却没留下备份"
+    with open(backups[0], encoding="utf-8") as f:
+        assert f.read() == _CORRUPT_SETTINGS, "备份内容与坏文件原样不一致"
+    assert ds.corrupt_backup == backups[0]
+    assert ds.last_error and "已备份" in ds.last_error, ds.last_error
+    with open(path, encoding="utf-8") as f:
+        on_disk = json.load(f)
+    assert on_disk["callsign"] == "N0CALL"
+    return path, ds, backups
+
+
+def test_write_path_backs_up_newly_corrupted_file(tmp_path):
+    _assert_write_after_corrupt_backs_up(tmp_path)
+
+
+def test_write_after_corrupt_keeps_backup_and_old_bytes(tmp_path):
+    path, ds, backups = _assert_write_after_corrupt_backs_up(tmp_path)
+    # 再写一次：备份必须还在、字节不变——旧证据不能被后续写入吞掉。
+    ds.set("callsign", "N0CALL2")
+    ds.flush()
+    assert _backups(path) == backups, "第二次写盘后备份消失了"
+    with open(backups[0], encoding="utf-8") as f:
+        assert f.read() == _CORRUPT_SETTINGS, "旧证据被后续写入吞掉"
+    with open(path, encoding="utf-8") as f:
+        assert json.load(f)["callsign"] == "N0CALL2"
+
+
+def test_without_real_backup_the_guard_turns_red(tmp_path, monkeypatch):
+    # 假备份：返回路径但不真改名 —— 等价于"备份逻辑被去掉"。
+    target = tmp_path / "mutation"
+    target.mkdir()
+    monkeypatch.setattr(
+        settings_module, "backup_corrupt_config",
+        lambda p: f"{p}.corrupt-fake")
+    with pytest.raises(AssertionError):
+        _assert_write_after_corrupt_backs_up(target)
+
+
+def test_backup_failure_refuses_to_overwrite(tmp_path, monkeypatch):
+    """备份失败 → 本次不写，坏文件原样留盘（不能拿内存默认值顶掉证据）。"""
+    path = _write(tmp_path / "desktop_settings.json", json.dumps({"theme": "dark"}))
+    ds = DesktopSettings.load(path=path)
+    _corrupt_on_disk(path)
+    monkeypatch.setattr(settings_module, "backup_corrupt_config", lambda p: None)
+
+    ds.set("callsign", "N0CALL")
+    ds.flush()
+
+    with open(path, encoding="utf-8") as f:
+        assert f.read() == _CORRUPT_SETTINGS, "备份失败时仍把坏文件覆盖了"
+    assert ds.last_error and "备份失败" in ds.last_error, ds.last_error
+    assert ds._dirty is True, "未写入时应保留 dirty，等下次重试"
+
+
+# ---------------------------------------------------------------------------
+# 11. OSError（文件被占 / 读不了）不是损坏：不许备份、不许写、保留 dirty
+# ---------------------------------------------------------------------------
+def _assert_oserror_is_not_corruption(path, backups, dirty, last_error):
+    assert backups == [], "OSError 被当成损坏，造了备份"
+    assert dirty is True, "读取失败后没有保留 dirty，下次不会重试"
+    assert last_error and "读取失败" in last_error, last_error
+    assert "已备份" not in last_error, "临时读失败不该报「已备份」"
+
+
+def test_read_oserror_does_not_backup_and_keeps_dirty(tmp_path):
+    path = _write(tmp_path / "desktop_settings.json", json.dumps({"theme": "dark"}))
+    ds = DesktopSettings.load(path=path)
+
+    # 把路径换成目录：open(目录) → IsADirectoryError（OSError），不是内容损坏。
+    blocked = tmp_path / "blocked"
+    blocked.mkdir()
+    ds._path = str(blocked)
+    ds.set("callsign", "N0CALL")
+    ds.flush()
+
+    _assert_oserror_is_not_corruption(
+        str(blocked), _backups(blocked), ds._dirty, ds.last_error)
+    assert not os.listdir(blocked), "读取失败后仍然写了文件"
+    with open(path, encoding="utf-8") as f:
+        assert json.load(f) == {"theme": "dark"}, "原配置被改了"
+
+
+def test_mutated_oserror_branch_backs_up_and_turns_red(tmp_path, monkeypatch):
+    """变异：把 OSError 也当损坏（备份后照写）→ 上面的断言必须红。
+
+    这里不伪造结果、而是把「变异后的 ``_merged_payload``」原样喂给同一组
+    断言：读失败时先备份再写，等价于把 ``except OSError`` 并进
+    ``except ValueError``。
+    """
+    path = _write(tmp_path / "desktop_settings.json", json.dumps({"theme": "dark"}))
+    ds = DesktopSettings.load(path=path)
+    blocked = tmp_path / "blocked"
+    blocked.mkdir()
+    ds._path = str(blocked)
+
+    def mutated_merged(self):
+        try:
+            with open(self._path, encoding="utf-8") as f:
+                return dict(json.load(f))
+        except OSError:
+            # 变异点：读失败也当损坏 → 备份 + 用默认值覆盖。
+            backup = settings_module.backup_corrupt_config(self._path)
+            self.corrupt_backup = backup
+            self.last_error = f"配置文件损坏：原文件已备份为 {backup}"
+            return dict(self._data)
+
+    monkeypatch.setattr(DesktopSettings, "_merged_payload", mutated_merged)
+
+    ds.set("callsign", "N0CALL")
+    ds.flush()
+
+    with pytest.raises(AssertionError):
+        _assert_oserror_is_not_corruption(
+            str(blocked), _backups(blocked), ds._dirty, ds.last_error)

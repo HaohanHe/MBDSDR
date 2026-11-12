@@ -35,6 +35,14 @@ try:  # 包内导入
 except ImportError:  # pragma: no cover - 兼容 desktop 目录直接上 sys.path
     from .config_schema import SCHEMA, defaults, validate_value
 
+try:  # 常规：仓库根在 sys.path 上（main.py / 测试都这么进来）
+    from mbdsdr_ai.corrupt_evidence import write_reason
+except ImportError:  # pragma: no cover - 兼容只把 desktop/ 放进 sys.path 的调用方
+    _root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    if _root not in sys.path:
+        sys.path.insert(0, _root)
+    from mbdsdr_ai.corrupt_evidence import write_reason
+
 
 #: 全部可持久化字段及其默认值——**唯一来源是 config_schema.py**。
 #: 这里只做派生，不再手写第二份默认值（防 UI/配置层默认值漂移）。
@@ -384,6 +392,9 @@ class DesktopSettings:
         #: 最近一次读/写失败的用户可读说明（None = 无错误）。
         #: 设置面板订阅 on_error 后能在状态栏显示"改了没保存"这类真相。
         self.last_error: Optional[str] = None
+        #: 本次写盘因文件损坏而备份后要留给人看的一句话；成功落盘后写进
+        #: last_error（否则会被"写盘成功清空错误"顺手抹掉）。
+        self._corrupt_notice: Optional[str] = None
         #: 写盘失败回调（签名 (message) -> None）；由 UI 注入，避免配置层依赖 Qt。
         self.on_error: Optional[Any] = None
         #: 值变更订阅（签名 (key, value) -> None）。用纯 Python 回调而非 Qt
@@ -470,6 +481,9 @@ class DesktopSettings:
                 f"配置读取失败（{exc.__class__.__name__}）：{inst._path}；"
                 f"原文件已备份为 {inst.corrupt_backup or '（备份失败）'}，"
                 "本次以默认值启动")
+            # 备份已成功 → 才写理由；理由写失败只记日志，不影响启动。
+            if inst.corrupt_backup:
+                write_reason(inst.corrupt_backup, inst.last_error, logger)
             inst._data = dict(DEFAULTS)
         return inst
 
@@ -585,26 +599,63 @@ class DesktopSettings:
         if self._dirty:
             self._write_to_disk()
 
-    def _merged_payload(self) -> Dict[str, Any]:
+    def _merged_payload(self) -> Optional[Dict[str, Any]]:
         """把"本次改动的键"合并到磁盘现值上（读-改-写，锁内调用）。
 
         规则：
-          * 磁盘不存在/不可读 → 写自己完整视图（首次落盘不能只写一个键）；
+          * 磁盘不存在 → 写自己完整视图（首次落盘不能只写一个键）；
           * 磁盘可读 → 以磁盘为底（保留未知键），只覆盖本次改过的键；
+          * 磁盘损坏（解析失败/顶层不是对象）→ 先备份成 ``*.corrupt-*``，
+            再写新的完整视图；**备份失败则返回 None，调用方拒绝写盘**，
+            绝不用默认值把唯一证据覆盖掉；
+          * 磁盘读失败（可能是别的进程短暂持有，不等于文件坏）→ 不备份
+            不写，返回 None，保留 dirty 等下次重试；
           * 未改动的键若磁盘值正是我们内存值的归一结果（如手改越界值被夹取），
             写回归一值，让修复落盘；否则视为别的实例写了更新值，尊重磁盘。
         """
         payload: Dict[str, Any] = {}
         disk_ok = False
         if os.path.exists(self._path):
+            reason = ""
             try:
                 with open(self._path, "r", encoding="utf-8") as f:
                     disk = json.load(f)
+            except OSError as exc:
+                self.last_error = (
+                    f"配置读取失败（{exc.__class__.__name__}）：{self._path}；"
+                    "本次未写入，稍后重试")
+                if callable(self.on_error):
+                    self.on_error(self.last_error)
+                logger.warning("配置文件读取失败，跳过本次写入：%s", exc)
+                return None
+            except ValueError as exc:
+                reason = f"解析失败（{exc.__class__.__name__}）"
+            else:
                 if isinstance(disk, dict):
                     payload = dict(disk)
                     disk_ok = True
-            except (OSError, ValueError):
-                payload = {}
+                else:
+                    reason = f"顶层不是对象（{type(disk).__name__}）"
+            if not disk_ok:
+                backup = backup_corrupt_config(self._path)
+                self.corrupt_backup = backup
+                if backup is None:
+                    self.last_error = (
+                        f"配置文件损坏（{reason}）：{self._path}；"
+                        "备份失败，本次未写入，避免覆盖唯一证据")
+                    if callable(self.on_error):
+                        self.on_error(self.last_error)
+                    logger.error("配置文件损坏且备份失败，拒绝写入：%s", self._path)
+                    return None
+                self._corrupt_notice = (
+                    f"配置文件损坏（{reason}）：{self._path}；"
+                    f"原文件已备份为 {backup}，本次写入新的完整配置")
+                # 备份已成功 → 才写理由；理由写失败只记日志，不拦本次写入。
+                write_reason(backup, self._corrupt_notice, logger)
+                self.last_error = self._corrupt_notice
+                if callable(self.on_error):
+                    self.on_error(self.last_error)
+                logger.warning("配置文件损坏（%s），已备份到 %s", reason, backup)
         if not disk_ok:
             return dict(self._data)
 
@@ -670,6 +721,9 @@ class DesktopSettings:
                         self.on_error(self.last_error)
                     return
                 payload = self._merged_payload()
+                if payload is None:
+                    # 损坏且备份失败 / 磁盘暂时读不了：保留 dirty，下次重试。
+                    return
                 text = json.dumps(payload, indent=2, ensure_ascii=False)
                 try:
                     with open(self._path, "r", encoding="utf-8") as f:
@@ -689,7 +743,9 @@ class DesktopSettings:
             # 落盘成功后磁盘现值就是刚写的 payload：刷新并发检测基线。
             self._disk_snapshot = {
                 k: _coerce(k, payload[k]) for k in DEFAULTS if k in payload}
-            self.last_error = None
+            # 损坏备份的提示不能被"写盘成功"抹掉；普通成功才清空旧错误。
+            self.last_error = self._corrupt_notice
+            self._corrupt_notice = None
         except (OSError, TypeError, ValueError) as exc:
             # 磁盘满/权限不足/只读/不可序列化：不抛（退出 flush 也不崩），
             # 但必须让用户看见——"改设置写失败静默"等于下次开机改动凭空消失。
