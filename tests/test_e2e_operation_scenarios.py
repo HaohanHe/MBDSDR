@@ -303,6 +303,9 @@ def test_scenario_b_sky_to_spectrum(agent, pass_case, tmp_path, monkeypatch):
         line, elev, azim, dopp = _parse_sky_line(r_sky.content, SAT)
 
         st = orbit.compute_satellite_state(SAT, LAT, LON, ALT, when=t_off)
+        # 两条路径必须同刻：工具走 TimeEngine（拨表后 now_unix 可带亚秒），
+        # 参考侧显式传 t_off。判据只比较同一时刻的两个实现，与过境几何无关
+        # （K13：修复 decoders 的整秒截断后，全过境范围内差 ~1e-4°）。
         assert abs(elev - st["elevation"]) <= 0.2
         assert abs(azim - st["azimuth"]) <= 1.0
         assert abs(dopp - _doppler_hz(st["range_rate_kms"], nominal)) <= 60
@@ -353,6 +356,33 @@ def test_scenario_b_sky_to_spectrum(agent, pass_case, tmp_path, monkeypatch):
           f"合成 IQ 频谱峰值落在 {spectrum.peak_freq - nominal:+.0f}Hz"
           f"（SNR {spectrum.peak_power_db - spectrum.noise_floor_db:.1f}dB）。"
           f"人工确认与 IQ 均为替身，非真机")
+
+
+def test_scenario_b_sky_guard_is_live(agent, pass_case, monkeypatch):
+    """反证（K13）：工具不跟随拨过的时刻时，场景 B 的仰角判据必须红。
+
+    场景 B 的价值全在「工具与 sgp4 直算在同一拨表时刻对得上」。这里把工具
+    的物理时刻固定回退 60 s（等价于「跳时刻后没跟上」），同一个判据必须失败。
+    不用 sleep、不看当前几点：偏移是常量，任何时刻跑出同样结果。
+    """
+    from mbdsdr_ai import sdr_tools
+
+    t_off = pass_case["t_cul"] - 120.0
+    engine = get_time_engine()
+    engine.set_unix(t_off)
+    try:
+        monkeypatch.setattr(sdr_tools, "_physics_now", lambda args: t_off - 60.0)
+        r_sky = agent.tool_registry.call("sky_view_visible",
+                                         {"observer_lat": LAT, "observer_lon": LON,
+                                          "min_elevation": -90.0})
+        assert r_sky.success, r_sky.content[:300]
+        _, elev, _azim, _dopp = _parse_sky_line(r_sky.content, SAT)
+
+        st = orbit.compute_satellite_state(SAT, LAT, LON, ALT, when=t_off)
+        with pytest.raises(AssertionError):
+            assert abs(elev - st["elevation"]) <= 0.2
+    finally:
+        engine.set_time_now()
 
 
 # ---------------------------------------------------------------------------

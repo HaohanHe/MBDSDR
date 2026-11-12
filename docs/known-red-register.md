@@ -433,7 +433,7 @@ skyfield 参考：首场峰值 5.025°（贴 5° 门限的掠射场）
 
 ---
 
-## K13 — 场景 B 天空视图仰角与 sgp4 直算差 0.23°（2026-11-09 23:05，稳定红·未修）
+## K13 — 场景 B 天空视图仰角与 sgp4 直算差 0.23°（2026-11-09 23:05，已修·改为确定性用例）
 
 ```
 tests/test_e2e_operation_scenarios.py::test_scenario_b_sky_to_spectrum
@@ -442,22 +442,49 @@ assert abs(elev - st["elevation"]) <= 0.2
   → 差 0.227，超阈值 0.013
 ```
 
-- **与本轮改动无关**：观测站 `ALT=0.0`（高度不是原因）；
-  `sky_view_visible` 走 `compute_visible_satellite_count`，
-  不经过本轮改的 `agent._passes` / `baseband_io.load_iq` / `orbit` docstring。
-- **不是抖动**：连跑两次都红（7.86s / 7.92s），是当前时刻的确定性差异。
-- **疑点**：`sky_view_visible` 内部历表缓存 10 s 一刷，
-  `compute_satellite_state` 是 sgp4 现算；测试 `engine.set_unix(t_off)` 跳时刻后
-  没有等历表刷新——差几秒就是 0.2° 量级。
-- **未修原因**：要先确认历表刷新与 TimeEngine 的同步点，再决定是改产品
-  （跳时刻主动通知刷新）还是改测试（显式传 timestamp + 等刷新）。
-  两条路都会动时刻语义，本轮不顺手改。
-- **转绿条件**：该用例 `1 passed`，且另加一条反证证明「跳时刻后不等刷新
-  就会红」，否则改完等于把真实延迟掩盖掉。
-- **诚实边界**：提交 `bd0e7ec0` 不含这条修复；2026-11-09 记录时该用例为红。
-  **2026-11-13 复核**：HEAD `99a61044` 独立 worktree 单跑 `1 passed`；但该失败
-  依赖墙钟时刻，且未按转绿条件补「跳时刻不等刷新会红」的反证，**不据此销账**，
-  状态记为「实跑绿·待反证」。
+- **根因（2026-11-13 更正，推翻原「历表缓存 10 秒一刷」）**：该链路
+  `sky_view_visible → new_spacetime.compute_visible_satellite_count →
+  decoders.list_visible_satellites → decoders.compute_satellite_position`
+  **没有任何缓存/刷新**，每次现算。真正的分叉是
+  `decoders.compute_satellite_position` 用 `time.gmtime(timestamp)` 把时刻
+  截到整秒；而 TimeEngine `set_unix(整数)` 后 `now_unix()` 因 JD 往返落在
+  整秒下方约 18µs，截断后整整退回 **1 秒**，参考侧
+  `orbit.compute_satellite_state(when=t_off)` 用精确时刻。差值 = 该几何下
+  1 秒的仰角变化量：2026-11-13 当天首场 0.074°（绿），24h 内最大 0.2598°（红），
+  历史 0.227° 是同一机制下更陡的一场。即「1 秒量化 × 当天过境几何」，
+  不是「跳时刻后没等刷新」。
+- **不是抖动（保留原文）**：连跑两次都红（7.86s / 7.92s），是当前时刻的确定性差异。
+- **修复**：`decoders.compute_satellite_position` 改为直接用 Unix 秒算儒略日
+  （`jd_utc = timestamp/86400 + 2440587.5`，`jd=int(jd_utc)`，`fr=jd_utc-jd`），
+  保留亚秒，与 `orbit` 同一口径；删除 `time.gmtime` + `jday` 的整秒截断。
+- **确定性反证**（固定偏移、无 sleep、不依赖运行时刻）：
+  `tests/test_e2e_operation_scenarios.py::test_scenario_b_sky_guard_is_live`
+  把工具物理时刻固定回退 60 s（等价「跳时刻后没跟上」），同一仰角判据必须
+  `AssertionError`。
+- **改前/改后（独立 worktree 实测）**：
+  - 改前 worktree `d:\mbdsdr\_wt\k13-before`（HEAD `99a61044`）
+    - 当日单跑：`test_scenario_b_sky_to_spectrum` **1 passed**（该场几何恰好
+      只差 0.074°，说明原「绿」不代表修好）；
+    - 固定 epoch `1794576350`（2026-11-13T13:25:50Z，当日 1s 仰角变化最大处，
+      取本地 TLE 缓存算得）：工具 49.8272° vs 直算 50.0732°，差 **-0.2459°**
+      → 判据**红**（工具走 TimeEngine 缺省时刻，参考侧显式同刻）。
+  - 改后 worktree `d:\mbdsdr\_wt\kred-99a61044`
+    - 同固定 epoch：差 **-0.0001°** → 绿；
+    - `tests/test_e2e_operation_scenarios.py` 全文件 **5 passed**；
+      K13 两条节点连跑 3 次均 `2 passed`。
+- **复跑命令**：
+
+  ```bash
+  MBDSDR_OFFLINE=1 QT_QPA_PLATFORM=offscreen python -m pytest \
+    tests/test_e2e_operation_scenarios.py::test_scenario_b_sky_to_spectrum \
+    tests/test_e2e_operation_scenarios.py::test_scenario_b_sky_guard_is_live -q
+  ```
+- **诚实边界**：用例仍依赖「24h 内有一场 NOAA 19 过境 + 本地有可用 TLE」，
+  无 TLE 时 skip（环境前置条件，与本红无关）；但判据本身不再随当天过境几何
+  在绿/红之间摇摆——1 秒级时间差已消除（改前/改后同刻差 0.2459° → 0.0001°）。
+- **状态**：已修（2026-11-13，基于 `99a61044` 的单笔提交含 `mbdsdr_ai/decoders.py`
+  + `tests/test_e2e_operation_scenarios.py` + 本条目）。历史原文保留不改，
+  仅追加本次结论。
 
 ---
 

@@ -22,7 +22,7 @@ from dataclasses import dataclass
 
 # sgp4 卫星轨道计算
 try:
-    from sgp4.api import Satrec, jday
+    from sgp4.api import Satrec
     HAS_SGP4 = True
 except ImportError:
     HAS_SGP4 = False
@@ -180,10 +180,14 @@ def compute_satellite_position(
         except Exception:  # noqa: BLE001
             timestamp = time.time()
 
-    # 转换为 Julian Date
-    dt = time.gmtime(timestamp)
-    jd, fr = jday(dt.tm_year, dt.tm_mon, dt.tm_mday,
-                   dt.tm_hour, dt.tm_min, dt.tm_sec)
+    # 转换为 Julian Date：直接从 Unix 秒算，保留亚秒。
+    # 不能用 time.gmtime(timestamp) + jday：gmtime 把秒截成整数，而 TimeEngine
+    # 拨表后 now_unix() 常落在整秒下方几微秒（JD 往返误差），截断会整整退回
+    # 1 秒——与 orbit.compute_satellite_state 同刻直算相差 1 秒，仰角差
+    # 0.07~0.23°（K13：同一用例随当天过境几何在绿/红之间摇摆）。
+    jd_utc = timestamp / 86400.0 + 2440587.5
+    jd = int(jd_utc)
+    fr = jd_utc - jd
 
     # 从 TLE 创建卫星对象（优先联网最新，回退内置）
     line1, line2, _src = _resolve_tle(satellite_name)
@@ -194,8 +198,7 @@ def compute_satellite_position(
     if e != 0:
         return None
 
-    # TEME -> ECEF：绕 z 轴转 -GMST
-    jd_utc = timestamp / 86400.0 + 2440587.5
+    # TEME -> ECEF：绕 z 轴转 -GMST（jd_utc 即上面用于 sgp4 的同一时刻）
     t_ut1 = (jd_utc - 2451545.0) / 36525.0
     gmst_sec = (67310.54841 + (876600.0 * 3600.0 + 8640184.812866) * t_ut1
                 + 0.093104 * t_ut1 * t_ut1 - 6.2e-6 * t_ut1 ** 3)
