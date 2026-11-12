@@ -42,7 +42,8 @@ def test_panel_labels_builtin_bookmark(panel):
     assert "内置" not in custom_text, f"自定义项不该标内置，实际: {custom_text}"
 
 
-_EXPECTED_BUILTIN_NOTE = "收藏当前频率"
+#: 产品按钮当前文案（desktop/control_panel.py 的 bookmark_add_btn）。
+_EXPECTED_BUILTIN_NOTE = "存为书签"
 
 
 class _FakeStore:
