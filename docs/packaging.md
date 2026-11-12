@@ -326,12 +326,12 @@ optional → qt → narrow → overlap → log；每步打印 `[PASS]/[FAIL]/[SK
 - single：同一诊断包删 `fft.pyc` →「安装包解压不完整：只缺 …」；
 - optional：发布包改名 `_internal/librtlsdr.dll`（干净 PATH）→「缺少运行库：librtlsdr.dll」。
 
-> **度量有效性更正（2026-11-11）**：下面 2026-11-05~06 的历史记录里凡是
+> **度量有效性说明（2026-11-11）**：下面 2026-11-05~06 的历史记录里凡是
 > `offscreen` 的数字（`1265×618`、`960×633`、`30/1`、`9/1`、`35/14` 等）**不可信、
 > 已作废**——本机 `QT_QPA_PLATFORM=offscreen` 下 `QFontDatabase.families()` 为
 > **0**（实测；`windows` 为 394），文字按方框度量。现口径：两套指纹都跑
 > `windows` 平台插件 + `WA_DontShowOnScreen`（不上屏），并在每次 `resize` 后
-> 硬断言「实际尺寸 == 请求尺寸」。新数字见 §5.3 的「度量更正」段。历史记录
+> 硬断言「实际尺寸 == 请求尺寸」。新数字见 §5.3 的「度量说明」段。历史记录
 > 只保留作追溯，不改写当时的原始输出。
 
 **2026-11-06 04:52–05:06 复跑（新产物 `pyi-dist15`/`pyi-dist16`）：九步全 PASS**。
@@ -442,12 +442,12 @@ narrow 只有一套指纹口径、`overlap` 仍叫 `size1366`，数字不再适�
   QComboBox/QLineEdit` 且 `sizeHint().width() > width()+2`。输出四个数字
   （尺寸 × 指纹 × 挤压/越界），每个都有自己的上限（`SIZE_LIMITS`）。
 
-  **度量更正（2026-11-11，HEAD `63a20b2c` + 工作区未提交改动；实测时
+  **度量说明（2026-11-11，取 HEAD `63a20b2c` 加当时工作区未入库改动；实测时
   `desktop/adsb_panel.py`、`bookmark_panel.py`、`control_panel.py`、
   `device_panel.py`、`rf_sky_view.py`、`scanner_panel.py`、`status_panel.py`
   均为 `M`）**：两套指纹都改用 `windows` 平台插件 + `WA_DontShowOnScreen`，
   尺寸断言全部 `equal=True`；`1000×600` 只是旧标签，窗口声明最小实测为
-  **`1000×680`**（请求 1000×600 每次都被夹成 1000×680，已改为按声明最小的
+  **`1000×680`**（请求 1000×600 每次都被夹成 1000×680，现改为按声明最小的
   请求并硬断言）。连跑分布：
 
   | 指纹（字体库 394） | 声明最小 1000×680 | 1344×700 | 次数 |
@@ -617,8 +617,8 @@ SHA256，再**真跑一次** `python scripts/ui_narrow_breakdown.py --json`（�
    `TEMPORARY_WIDENED`）：本次实测 dpr1 **9/2、8/1**，windows **4/1、4/1**；
    **dpr1 声明最小档越界 2 > 上限 1，该步 FAIL**（交 UI 布局线定位）。
    旧的 offscreen `1265×618` / `960×633` 与 `30/1`、`13/7` 全部作废（度量用
-   offscreen 方框字体，见 §5.3「度量更正」）；窗口在 1366×768 屏上完整显示
-   仍属 UI 布局线待办（§5.4）。
+   offscreen 方框字体，见 §5.3「度量说明」）；窗口按 `1000×680` 兜底放置，
+   能否在 1366×768 屏上完整显示待复验（§5.4）
 
 ## 8. 本轮改动的文件
 
