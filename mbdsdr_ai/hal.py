@@ -583,8 +583,11 @@ def detect_embedded_platform() -> Dict[str, Any]:
         if "BCM" in cpuinfo or "Raspberry Pi" in cpuinfo:
             info["is_embedded"] = True
             info["platform_name"] = "raspberry_pi"
-    except Exception:
-        pass
+    except Exception as e:
+        # 读不到 /proc 不等于「不是树莓派」，原因要带回调用方，别让两者等同。
+        logger.debug("读 /proc/cpuinfo 失败：%s: %s", type(e).__name__, e)
+        info.setdefault("detection_notes", []).append(
+            f"/proc/cpuinfo 不可读（{type(e).__name__}）：未判定是否树莓派")
 
     # 检测 Jetson
     try:
@@ -594,8 +597,10 @@ def detect_embedded_platform() -> Dict[str, Any]:
             info["is_embedded"] = True
             info["platform_name"] = "jetson"
             info["gpu_available"] = True
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("读 /proc/device-tree/model 失败：%s: %s", type(e).__name__, e)
+        info.setdefault("detection_notes", []).append(
+            f"/proc/device-tree/model 不可读（{type(e).__name__}）：未判定是否 Jetson")
 
     # 检测 Windows ARM
     if platform.system() == "Windows" and platform.machine() == "ARM64":
