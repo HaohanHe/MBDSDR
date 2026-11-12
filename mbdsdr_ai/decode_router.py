@@ -511,7 +511,8 @@ def _route_aprs(ctx: _Ctx) -> Dict[str, Any]:
 
 
 def _route_pocsag(ctx: _Ctx) -> Dict[str, Any]:
-    from .decoders import _demod_iq_to_audio, _read_wav_audio
+    from .audio_io import read_wav_audio
+    from .decoders import _demod_iq_to_audio
     from .pocsag_decoder import pocsag_decode_with_stats
 
     result = ctx.result
@@ -527,7 +528,7 @@ def _route_pocsag(ctx: _Ctx) -> Dict[str, Any]:
     baud = int(ctx.baud)
     baseband = False
     if ctx.ext == ".wav":
-        audio, a_sr, err = _read_wav_audio(ctx.input_path)
+        audio, a_sr, err = read_wav_audio(ctx.input_path)
     elif ctx.ext in (".cf32", ".cfile"):
         audio, a_sr, err = _demod_iq_to_audio(ctx.input_path, ctx.sample_rate)
         # 真实 POCSAG 是 NFM FSK：FM 鉴频输出是 NRZ 基带（±频偏的方波），
@@ -559,11 +560,12 @@ def _route_pocsag(ctx: _Ctx) -> Dict[str, Any]:
 
 def _route_acars(ctx: _Ctx) -> Dict[str, Any]:
     from .acars_decoder import ACARSDecoder
-    from .decoders import _demod_am_to_audio, _read_wav_audio
+    from .audio_io import read_wav_audio
+    from .decoders import _demod_am_to_audio
 
     result = ctx.result
     if ctx.ext == ".wav":
-        audio, a_sr, err = _read_wav_audio(ctx.input_path)
+        audio, a_sr, err = read_wav_audio(ctx.input_path)
     elif ctx.ext in (".cf32", ".cfile"):
         # ACARS 是 VHF AM 下行：走包络检波，不能走 FM 鉴频（见 _demod_am_to_audio）。
         audio, a_sr, err = _demod_am_to_audio(
@@ -655,12 +657,12 @@ def _route_ais(ctx: _Ctx) -> Dict[str, Any]:
 
 
 def _route_navtex(ctx: _Ctx) -> Dict[str, Any]:
-    from .decoders import _read_wav_audio
+    from .audio_io import read_wav_audio
     from .navtex_decoder import navtex_decode_audio
 
     result = ctx.result
     if ctx.ext == ".wav":
-        audio, a_sr, err = _read_wav_audio(ctx.input_path)
+        audio, a_sr, err = read_wav_audio(ctx.input_path)
         if err:
             result["error"] = err
         else:
