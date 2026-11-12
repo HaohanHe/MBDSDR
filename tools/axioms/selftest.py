@@ -269,7 +269,33 @@ def _extra_checks() -> List[dict]:
 
     results.append(_ratchet_check())
     results.append(_locator_drift_check())
+    results.append(_cycle_representative_check())
     return results
+
+
+def _cycle_representative_check() -> dict:
+    """D1-cycle 的代表模块必须是环里字典序最小的模块，不能随遍历/哈希顺序变。
+
+    代表模块一变，棘轮就把同一个环报成「新增 + 消失」——2026-11-13 实测发生过。
+    """
+    a = {"mbdsdr_ai/aaa.py": "import mbdsdr_ai.zzz\n", "mbdsdr_ai/zzz.py": "import mbdsdr_ai.aaa\n",
+         "desktop/__init__.py": ""}
+    b = dict(reversed(list(a.items())))
+    seen: List[List[str]] = []
+    for files in (a, b):
+        root = tempfile.mkdtemp(prefix="mbdsdr-cycle-")
+        try:
+            _write_tree(root, files)
+            _, dims = collect_all(Repo(root))
+            seen.append(sorted(f.path for d in dims for f in d.findings if f.rule == "D1-cycle"))
+        finally:
+            shutil.rmtree(root, ignore_errors=True)
+    ok = seen[0] == seen[1] == ["mbdsdr_ai/aaa.py"]
+    return {
+        "rule": "D1", "name": "环的代表模块稳定", "provenance": "棘轮在干净树上首跑即红：同一环换了代表模块",
+        "positive_hits": len(seen[0]), "negative_hits": len(seen[1]),
+        "ok": ok, "detail": "" if ok else f"两种遍历顺序下代表模块不同：{seen}",
+    }
 
 
 def _locator_drift_check() -> dict:

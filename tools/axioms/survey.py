@@ -13,8 +13,9 @@ import subprocess
 from dataclasses import dataclass, field
 from typing import Dict, Iterable, List, Optional, Sequence, Set, Tuple
 
-from .checks import build_axioms, reset_skips
+from .checks import build_axioms, note_skip, reset_skips
 from .model import (
+    GENERATED_ARTIFACTS,
     Axiom,
     Finding,
     Repo,
@@ -23,6 +24,10 @@ from .model import (
     line_of,
     parse,
 )
+
+#: 本检查器自己的产物。它们「是否存在于工作区」取决于有没有跑过，
+#: 不能当作「文档指向不存在的路径」来计数，否则同一棵树在跑基线前后各出一个数。
+TOOL_ARTIFACTS = set(GENERATED_ARTIFACTS) | {"docs/axioms-baseline.json"}
 
 # ────────────────────────────── 维度 ──────────────────────────────
 
@@ -201,7 +206,10 @@ def collect_d1(repo: Repo) -> Dimension:
             if target.startswith(("desktop.", "mbdsdr_ai.")) and target in graph:
                 graph[mod].add(target)
     sccs = _tarjan(graph)
-    cycles = [c for c in sccs if len(c) > 1]
+    # 环的「代表模块」必须稳定：集合/字典迭代顺序受字符串哈希随机化影响，
+    # 同一棵树两次跑会选到不同成员，棘轮就会把一个环报成「新增 + 消失」。
+    cycles = [sorted(c) for c in sccs if len(c) > 1]
+    cycles.sort(key=lambda c: c[0])
     dim.facts.append(f"模块级强连通分量：{len(cycles)} 个")
     for comp in cycles:
         dim.findings.append(Finding(
@@ -228,7 +236,7 @@ def _tarjan(graph: Dict[str, Set[str]]) -> List[List[str]]:
         counter[0] += 1
         stack.append(v)
         on_stack.add(v)
-        for w in graph.get(v, ()):  # type: ignore[arg-type]
+        for w in sorted(graph.get(v, ())):  # type: ignore[arg-type]
             if w not in index:
                 strong(w)
                 low[v] = min(low[v], low[w])
@@ -244,7 +252,7 @@ def _tarjan(graph: Dict[str, Set[str]]) -> List[List[str]]:
                     break
             result.append(comp)
 
-    for node in list(graph):
+    for node in sorted(graph):
         if node not in index:
             strong(node)
     return result
@@ -572,6 +580,11 @@ def collect_d6(repo: Repo) -> Dimension:
                     # 文档里的占位路径（如 docs/X.md），不是对真实文件的陈述。
                     continue
                 if not raw.startswith(("desktop/", "mbdsdr_ai/", "scripts/", "tools/", "tests/", "docs/")):
+                    continue
+                if raw in TOOL_ARTIFACTS:
+                    # 本工具自己的产物：存在与否取决于「有没有跑过 --accept-current」，
+                    # 把它计入「文档指向不存在的路径」会让同一棵树在跑基线前后各出一个数。
+                    note_skip("D6", "引用的是本检查器自己的产物（按需生成）")
                     continue
                 referenced += 1
                 if raw not in index:
