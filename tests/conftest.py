@@ -800,12 +800,105 @@ def _snapshot_real_config():
     _REAL_CONFIG_GUARD["gui_observer_before"] = _gui_observer(gui)
 
 
+#: 会话开始时备份真实配置**内容**的目录（仓库外 .locks，与 file_claim 令牌同级）。
+_REAL_CONFIG_BACKUP_ROOT = os.path.join(
+    os.path.dirname(_ROOT_DIR), ".locks", "real_config_snapshots")
+#: 只留最近 N 个会话的备份，避免无限增长。
+_REAL_CONFIG_BACKUP_KEEP = 20
+
+
+def _real_config_files():
+    """真实用户配置文件的唯一清单：``{键: 路径}``。
+
+    守卫、备份、还原都只从这里取路径——新增第四份真实配置时加一个
+    ``*_path`` 键即可，不会出现「守了 A 忘了 B」。当前三份的写入点仍是
+    各自拼路径（settings / bookmarks / gui_config），收敛写入点属各线，
+    详见 docs/COORDINATION.md「测试纪律」。
+    """
+    return {k: v for k, v in _REAL_CONFIG_GUARD.items()
+            if k in ("path", "bm_path", "gui_path") and v}
+
+
+def _backup_real_config_contents():
+    """把真实配置**内容**整份拷到 .locks/real_config_snapshots/<会话>/。
+
+    守卫原来只存 size/mtime/sha256：能证明「变了」，证明不了「原来是什么」。
+    2026-11-13 用户真实 desktop_settings.json 被探针整份覆盖，最后靠别的
+    探针留下的副本才逐字节还原——只有备份内容才谈得上可还原。
+    """
+    files = _real_config_files()
+    if not files:
+        return
+    stamp = time.strftime("%Y%m%d-%H%M%S")
+    dest = os.path.join(_REAL_CONFIG_BACKUP_ROOT,
+                        f"session-{stamp}-{os.getpid()}")
+    manifest = {}
+    try:
+        os.makedirs(dest, exist_ok=True)
+        for key, src in files.items():
+            if not os.path.exists(src):
+                continue
+            name = os.path.basename(src)
+            shutil.copy2(src, os.path.join(dest, name))
+            manifest[key] = {"path": src, "name": name,
+                             "sha256": _file_state(src)["sha256"]}
+        if not manifest:
+            os.rmdir(dest)
+            return
+        with open(os.path.join(dest, "manifest.json"), "w",
+                  encoding="utf-8") as f:
+            json.dump(manifest, f, ensure_ascii=False, indent=2)
+        _REAL_CONFIG_GUARD["backup_dir"] = dest
+        # 只留最近 N 个会话备份：每个会话一份，不清会越积越多。
+        try:
+            dirs = sorted(d for d in os.listdir(_REAL_CONFIG_BACKUP_ROOT)
+                          if d.startswith("session-"))
+            for old in dirs[:-_REAL_CONFIG_BACKUP_KEEP]:
+                shutil.rmtree(os.path.join(_REAL_CONFIG_BACKUP_ROOT, old),
+                              ignore_errors=True)
+        except OSError:
+            pass
+    except OSError as exc:
+        sys.stderr.write(
+            "[mbdsdr-guard] 真实配置内容备份失败（这次仍会判红，但不可还原）："
+            f"{exc}\n")
+
+
+def _restore_real_config_from_backup():
+    """会话结束时按内容备份还原被改的真实配置文件，返回还原说明。"""
+    dest = _REAL_CONFIG_GUARD.get("backup_dir")
+    if not dest:
+        return []
+    manifest_path = os.path.join(dest, "manifest.json")
+    try:
+        with open(manifest_path, "r", encoding="utf-8") as f:
+            manifest = json.load(f)
+    except (OSError, ValueError):
+        return []
+    restored = []
+    for key, info in manifest.items():
+        target = info.get("path")
+        src = os.path.join(dest, info.get("name") or "")
+        if not target or not os.path.exists(src):
+            continue
+        if _file_state(target)["sha256"] == info.get("sha256"):
+            continue
+        try:
+            shutil.copy2(src, target)
+        except OSError as exc:
+            restored.append(f"  {key}: {target} 还原失败：{exc}")
+        else:
+            restored.append(f"  {key}: {target} 已按会话备份还原")
+    return restored
+
+
 def pytest_configure(config):
     config.addinivalue_line(
         "markers",
         "allow_modal: 允许该用例弹真模态（默认全局拦下；offscreen 下真 exec "
         "可能永不返回，只有确需验证模态行为的用例才可 opt-in）")
     _snapshot_real_config()
+    _backup_real_config_contents()
     # 配置快照会 import desktop/settings（其顶部 import PySide6.QtCore）：把这批
     # 守卫自己拉进来的模块记成基线，锁门控只认「收集阶段新增」的 Qt 模块。
     _QT_BASELINE["mods"] = {n for n in sys.modules
@@ -851,11 +944,90 @@ def _real_config_guard_fixture():
             problems.append(
                 f"  {gui_path}: 观测站 {gbefore!r} -> {gafter!r}"
                 "（测试不得改写真实站址；用例须请求 isolated_profile）")
+    restored = _restore_real_config_from_backup() if problems else []
     assert not problems, (
         "[mbdsdr-guard] 测试会话改动了用户真实配置，必须把 "
         "HOME/USERPROFILE/APPDATA/LOCALAPPDATA 重定向到 tmp_path：\n"
         + "\n".join(problems)
+        + "\n本轮用到的会话备份："
+        + str(_REAL_CONFIG_GUARD.get("backup_dir") or "未建立（定位失败）")
+        + "\n按备份还原：\n" + ("\n".join(restored) or "  （无）")
         + "\n纪律见 docs/COORDINATION.md「测试纪律」。")
+
+
+# ---------------------------------------------------------------------------
+# 防线 4b：逐用例点名（2026-11-13）
+#
+# 会话级守卫只在会话结束时报「哪个文件变了」，查不出是**哪条用例**写的；
+# 2026-11-13 凌晨一支仓库外的临时探针把用户真实 desktop_settings.json 整份
+# 覆盖（record_dir 指向探针临时目录、frequency_hz 写成 0.0），会话级守卫能
+# 给出文件与字节差，却点不出写入者。这里每个用例前后各取一次
+# size/mtime_ns + 目录清单（只有变化时才谈 sha256），变了就当场 pytest.fail
+# 并点名 nodeid。
+#
+# 该守卫是 autouse、没有跳过标记、没有环境变量开关：只有「测试真的没写真实
+# 配置」才能绿。守的是 pytest_configure 快照下来的真实路径，所以别人把
+# APPDATA 改到沙箱也不会让它看不见真实文件。
+# ---------------------------------------------------------------------------
+def _guard_quick_state():
+    """真实配置的廉价指纹：只 stat，避免每条用例都读整份文件。"""
+    state = {}
+    for key in ("path", "bm_path", "gui_path"):
+        path = _REAL_CONFIG_GUARD.get(key)
+        if not path:
+            continue
+        try:
+            st = os.stat(path)
+        except OSError:
+            state[key] = None
+        else:
+            state[key] = (st.st_size, st.st_mtime_ns)
+    d = _REAL_CONFIG_GUARD.get("dir")
+    state["dir_listing"] = tuple(_dir_names(d)) if d else ()
+    return state
+
+
+def _guard_fail_if_changed(nodeid, before):
+    after = _guard_quick_state()
+    if after == before:
+        return
+    changed = [k for k in before if before[k] != after.get(k)]
+    pytest.fail(
+        f"[mbdsdr-guard] 用例 {nodeid} 写改了用户真实配置"
+        f"（变化项：{', '.join(changed)}）。\n"
+        f"真实配置路径：{_REAL_CONFIG_GUARD.get('path')}\n"
+        "测试必须把 HOME/USERPROFILE/APPDATA/LOCALAPPDATA 重定向到 tmp_path"
+        "（请求 isolated_profile），或把配置目录指到临时目录"
+        "（MBDSDR_SETTINGS_DIR）。探针/脚本请用 "
+        "`python scripts/config_write_guard.py --wrap <脚本>` 跑。\n"
+        "纪律见 docs/COORDINATION.md「测试纪律」。",
+        pytrace=False)
+
+
+@pytest.hookimpl(wrapper=True)
+def pytest_runtest_call(item):
+    """用例主体前后各比一次：当场点名写真实配置的那条用例（判 FAIL 而非 ERROR）。"""
+    before = _guard_quick_state()
+    try:
+        return (yield)
+    finally:
+        after = _guard_quick_state()
+        if after != before:
+            item._mbdsdr_guard_fired = True
+            _guard_fail_if_changed(item.nodeid, before)
+
+
+@pytest.fixture(autouse=True)
+def _real_config_per_case_guard(request):
+    """兜住 setup/teardown 阶段的写入（call 阶段已由上面的钩子点名）。"""
+    if _REAL_CONFIG_GUARD.get("before") is None:
+        yield
+        return
+    before = _guard_quick_state()
+    yield
+    if getattr(request.node, "_mbdsdr_guard_fired", False):
+        return
+    _guard_fail_if_changed(request.node.nodeid, before)
 
 
 @pytest.fixture(scope="session")

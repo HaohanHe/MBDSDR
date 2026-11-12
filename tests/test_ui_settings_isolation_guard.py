@@ -181,3 +181,71 @@ def test_redirected_appdata_writes_only_to_temp_dir(tmp_path):
         "重定向写盘仍改到了真实配置（说明某处绕开了 %APPDATA%）")
     assert _dir_listing(REAL_DIR) == before_dir, (
         "重定向写盘仍在真实 %APPDATA%/mbdsdr 里留下了文件")
+
+
+#: 反证探针（文件名不以 test_ 开头，全量收集不会把它当正式用例）。
+_PROBE = os.path.join(_ROOT, "tests", "_pollution_probe",
+                      "pollutes_real_config.py")
+
+
+def test_per_case_guard_turns_red_and_names_the_case(tmp_path):
+    """反证：故意写一次「真实配置」，逐用例守卫必须红并点名该用例。
+
+    用 ``MBDSDR_SETTINGS_DIR`` 把「真实配置」指到 tmp_path 里的一个目录：
+    守卫在 ``pytest_configure`` 取快照，探针随后写同一路径。写真实用户目录
+    的事一次也不做。
+    """
+    real = tmp_path / "realdir"
+    real.mkdir()
+    proc = _run_pytest_subprocess(
+        [f"{_PROBE}::test_writes_declared_real_config"],
+        extra_env={"MBDSDR_SETTINGS_DIR": str(real)})
+    text = proc.stdout + proc.stderr
+    assert proc.returncode != 0, (
+        f"故意写真实配置却没被判红——守卫是假的：\n{text[-3000:]}")
+    assert "test_writes_declared_real_config" in text, (
+        f"守卫红了但没点名写入的用例：\n{text[-3000:]}")
+    assert "[mbdsdr-guard]" in text, (
+        f"不是配置守卫判的红（可能是别的原因）：\n{text[-3000:]}")
+    assert (real / "desktop_settings.json").exists(), (
+        "探针没有真的写下去，反证不成立")
+
+
+def test_per_case_guard_stays_green_for_tmp_writes(tmp_path):
+    """阴性对照：只写 tmp_path 的用例必须绿，证明守卫不是「永远红」。"""
+    real = tmp_path / "realdir"
+    real.mkdir()
+    proc = _run_pytest_subprocess(
+        [f"{_PROBE}::test_writes_tmp_only"],
+        extra_env={"MBDSDR_SETTINGS_DIR": str(real)})
+    text = proc.stdout + proc.stderr
+    assert proc.returncode == 0, (
+        f"只写临时目录的用例被守卫误伤（永远红的守卫等于没有）：\n"
+        f"{text[-3000:]}")
+    assert not (real / "desktop_settings.json").exists(), (
+        "阴性对照竟然写了守卫路径，反证不成立")
+
+
+def test_session_backup_restores_overwritten_content(tmp_path):
+    """反证还原：整份覆盖已有内容后，会话结束必须按**内容备份**逐字节还原。
+
+    守卫只存 sha256 时只能证明「变了」；用户真实配置 2026-11-13 被探针覆盖
+    后能逐字节找回，靠的是别人留下的副本。这里钉住「会话自己就留副本、自己
+    就还原」，不再依赖运气。
+    """
+    real = tmp_path / "realdir"
+    real.mkdir()
+    target = real / "desktop_settings.json"
+    original = b'{"record_dir": "", "frequency_hz": 98000000}\n'
+    target.write_bytes(original)
+    proc = _run_pytest_subprocess(
+        [f"{_PROBE}::test_overwrites_existing_real_config"],
+        extra_env={"MBDSDR_SETTINGS_DIR": str(real)})
+    text = proc.stdout + proc.stderr
+    assert proc.returncode != 0, (
+        f"整份覆盖真实配置却没被判红：\n{text[-3000:]}")
+    assert "test_overwrites_existing_real_config" in text, (
+        f"守卫没点名覆盖配置的用例：\n{text[-3000:]}")
+    assert target.read_bytes() == original, (
+        "会话结束没有按备份还原被覆盖的真实配置："
+        f"now={target.read_bytes()!r}")
