@@ -1824,6 +1824,9 @@ def test_import_preview_has_three_sections_and_unaffected_list(env):
 
     res = panel.preview_import(str(path))
     assert res.ok
+    # 预览必须真的识别出 theme 这一项变化；否则「文案写 0 项」也能自洽通过
+    assert [k for k, _old, _new in res.changes] == ["theme"], res.changes
+    assert res.clears == []
     text = settings_panel.format_import_preview(res)
     assert f"将改 {len(res.changes)} 项，清空 {len(res.clears)} 项" in text
     for tag in ("【变化】", "【缺失】", "【清空】", "【不受影响】"):
