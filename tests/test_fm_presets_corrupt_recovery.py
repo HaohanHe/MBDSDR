@@ -51,6 +51,8 @@ def _assert_backup_intact(presets):
     backups = _backups(presets)
     assert len(backups) == 1, "损坏文件没有留下备份"
     assert backups[0].read_bytes() == CORRUPT, "备份内容与原件不一致"
+    assert list(presets.parent.glob(presets.name + ".corrupt-*.reason.txt")), \
+        "备份旁没有成对的损坏理由"
     assert "已备份" in (fm.presets_last_error() or "")
     return backups
 
@@ -76,6 +78,6 @@ def test_save_after_corrupt_keeps_old_evidence(presets):
 def test_without_real_backup_the_check_turns_red(presets, monkeypatch):
     # 假备份：返回一个路径但不真改名 —— 等价于"备份逻辑被去掉"。
     monkeypatch.setattr(
-        fm, "_backup_corrupt_presets", lambda p: f"{p}.corrupt-fake")
+        fm, "backup_corrupt_presets", lambda p: f"{p}.corrupt-fake")
     with pytest.raises(AssertionError):
         _assert_save_keeps_backup(presets)

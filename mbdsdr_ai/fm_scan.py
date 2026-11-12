@@ -379,11 +379,15 @@ def presets_last_error() -> Optional[str]:
     return _LAST_ERROR
 
 
-def _backup_corrupt_presets(path: str) -> Optional[str]:
+def backup_corrupt_presets(path: str) -> Optional[str]:
     """把损坏的预设文件改名成 ``*.corrupt-时间戳``，返回备份路径。
 
     只改名不删除：原件字节必须原样留在备份里，后续写新文件才不会吞掉证据。
     改名失败返回 None，调用方据此拒绝写盘。
+
+    这是损坏留证的**公共接缝**：测试模拟「备份失败」时替换本函数返回
+    ``None``，不再改模块私有名。预设的状态访问器（``_LAST_ERROR`` /
+    ``_CORRUPT_BACKUP`` / ``_SAVE_BLOCKED``）不在本接缝范围内。
     """
     backup = f"{path}.corrupt-{time.strftime('%Y%m%d-%H%M%S')}"
     try:
@@ -397,7 +401,7 @@ def _backup_corrupt_presets(path: str) -> Optional[str]:
 def _fallback_corrupt(reason: str) -> Dict[str, Any]:
     """损坏文件：备份原件、留人话错误；备份失败则禁止后续写盘。"""
     global _LAST_ERROR, _CORRUPT_BACKUP, _SAVE_BLOCKED
-    _CORRUPT_BACKUP = _backup_corrupt_presets(PRESETS_FILE)
+    _CORRUPT_BACKUP = backup_corrupt_presets(PRESETS_FILE)
     _SAVE_BLOCKED = _CORRUPT_BACKUP is None
     _LAST_ERROR = (
         f"FM 预设读取失败（{reason}）：{PRESETS_FILE}；"
