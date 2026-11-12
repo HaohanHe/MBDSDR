@@ -863,10 +863,14 @@ def main() -> int:
             "\n", "\n    "), flush=True)
 
     def do_docs() -> tuple[bool, str]:
-        """文档断言闸门：四元组（verify_claims）+ 渲染点（check_render_points）。
+        """文档断言闸门：四元组（verify_claims）+ 渲染点（check_render_points）
+        + 回退事件表（check_rollback_table）。
 
-        两者输入集不相交：verify_claims 只认带 hash+字面量的行，裸 ``path:N``
-        渲染点引用根本不在它的池子里。只接一个，另一边红着也能打印 PASS。
+        三者输入集不相交：verify_claims 只认带 hash+字面量的行，裸 ``path:N``
+        渲染点引用根本不在它的池子里，§6.10.2 回退表则是列内计数与提交号的
+        对账。只接一个，另一边红着也能打印 PASS。
+        ``MBDSDR_ROLLBACK_TABLE_DOC`` 只在反证时用：指向一份被改坏的表副本，
+        让这一步必红——它只会让这一步更严，不能把红变绿。
         """
         script = os.path.join(ROOT, "scripts", "verify_claims.py")
         proc = subprocess.run(
@@ -894,9 +898,28 @@ def main() -> int:
             render = [f"渲染点闸门跑不起来：{type(e).__name__}: {e}"]
         if render:
             problems.append(f"渲染点 {len(render)} 处：" + "；".join(render[:3]))
+
+        rollback = os.path.join(ROOT, "scripts", "check_rollback_table.py")
+        rb_cmd = [sys.executable, rollback]
+        rb_doc = os.environ.get("MBDSDR_ROLLBACK_TABLE_DOC")
+        if rb_doc:
+            rb_cmd += ["--doc", rb_doc]
+        rb = subprocess.run(rb_cmd, cwd=ROOT, capture_output=True, text=True,
+                            timeout=120)
+        rb_lines = [ln.strip() for ln in
+                    ((rb.stdout or "") + "\n" + (rb.stderr or "")).splitlines()
+                    if ln.strip()]
+        rb_detail = next((ln for ln in reversed(rb_lines)
+                          if ln.startswith(("PASS", "FAIL"))), "（未产出结论行）")
+        if rb.returncode != 0:
+            bad = [ln for ln in rb_lines if ln.startswith("FAIL")]
+            problems.append(f"回退表 {rb_detail}："
+                            + (" / ".join(bad[:3]) if bad
+                               else f"退出码 {rb.returncode}"))
         if problems:
             return False, "；".join(problems)
-        return True, "；".join(p for p in (dist, step4, "渲染点 0 处") if p)
+        return True, "；".join(p for p in (dist, step4, "渲染点 0 处",
+                                           rb_detail) if p)
 
     def do_action_dup() -> tuple[bool, str]:
         """命令/QAction 重复注册闸门：与 docs 同级，真重复或同名不同标识即 FAIL。
