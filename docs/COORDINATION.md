@@ -1910,9 +1910,6 @@ No supported devices found），GNSS+SDR 同开复验没做成；离线那次
 | `scripts/check_dist_head_parity.py` | 守卫账本线（目的未声明） | 2026-11-13 06:23 | 未声明 |
 | `scripts/check_banner_coverage.py` | 守卫账本线（目的未声明） | 2026-11-13 06:23 | 未声明 |
 | `desktop/sat_track_panel.py` | K20sat收口线/6ae85f56（修 sat_track_panel.py:400 动态 tooltip 未登记导致 test_every_passthrough_tooltip_is_registered 红） | 2026-11-13 06:23 | 未声明 |
-| `scripts/file_claim.py` | 残留收口线/6ae85f56（老数据清账到期：到期未清=退出码 4） | 2026-11-13 06:37 | 未声明 |
-| `tests/test_file_claim.py` | 残留收口线/6ae85f56（清账到期的反证两条） | 2026-11-13 06:37 | 未声明 |
-| `docs/COORDINATION.md` | 残留收口线/6ae85f56（补上面两条 claim 的 §6.1 行） | 2026-11-13 06:37 | 未声明 |
 | **真机（USB SDR）** | 跑 `hw_acceptance/`、七环、`capture_throughput.py` 的线（资源独占） | 占用时段 | — |
 
 > 上表各行均由 `claim` 台账推导：owner 原文与 `acquired_at` 直接取自台账，
