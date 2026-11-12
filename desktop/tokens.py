@@ -30,6 +30,32 @@ from __future__ import annotations
 from typing import Dict
 
 
+# ----------------------------------------------------------------------
+# 颜色数学（WCAG 2.1 对比度）
+# ----------------------------------------------------------------------
+# 纯函数住在令牌层。themes（上层）从这里取，tokens 的 status_color(bg=...)
+# 也用它；放在 themes 里会迫使 tokens 反向 import themes，形成环。
+def _srgb_channel(value: int) -> float:
+    c = value / 255.0
+    return c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4
+
+
+def relative_luminance(color: str) -> float:
+    """sRGB 相对亮度（WCAG 2.1 定义）。"""
+    h = color.lstrip("#")
+    if len(h) == 3:
+        h = "".join(ch * 2 for ch in h)
+    r, g, b = (int(h[i:i + 2], 16) for i in (0, 2, 4))
+    return 0.2126 * _srgb_channel(r) + 0.7152 * _srgb_channel(g) + 0.0722 * _srgb_channel(b)
+
+
+def contrast_ratio(fg: str, bg: str) -> float:
+    """两色对比度，1.0–21.0。设计约束住在令牌层，脚本与测试都从这里取。"""
+    a, b = relative_luminance(fg), relative_luminance(bg)
+    hi, lo = max(a, b), min(a, b)
+    return (hi + 0.05) / (lo + 0.05)
+
+
 class DesignTokens:
     """CarWith 设计令牌单例。
 
@@ -57,6 +83,12 @@ class DesignTokens:
     # 令牌本体（数值严格对照 Figma / SCSS）
     # ------------------------------------------------------------------
     def _build(self) -> None:
+        # ---- 主题语境（由 themes 下推，令牌层不得 import themes）----
+        # tokens 是下层、themes 是上层；tokens 反过来读 themes 会成环
+        # （详见 set_theme_name / set_font_scale）。
+        self._theme_name = ""
+        self._font_scale = 1.0
+
         # ---- 颜色（深色方向）----
         # bg 纯黑；卡片四级明度从 #1f1f1f 起逐级提亮；强调用冷蓝灰 #919cac。
         self.COLORS: Dict[str, str] = {
@@ -442,39 +474,39 @@ class DesignTokens:
             raise KeyError(f"未知状态色 token: {key}")
         fallback = self.COLORS[key]
         if not theme:
-            try:
-                from themes import active_theme_name
-                theme = active_theme_name()
-            except Exception:
-                theme = ""
+            theme = self._theme_name
         base = self.theme_colors(theme).get(key, fallback) if theme else fallback
         if not bg:
             return base
-        from themes import contrast_ratio
         candidates = {base, fallback}
         for palette in self.THEME_COLORS.values():
             if key in palette:
                 candidates.add(palette[key])
         return max(candidates, key=lambda color: contrast_ratio(color, bg))
 
-    @staticmethod
-    def _px_to_pt(px_str: str) -> float:
+    def set_theme_name(self, name: str) -> None:
+        """记录当前生效主题名（由 themes 在状态变化时下推）。
+
+        令牌层是下层：``import themes`` 会与 ``themes -> tokens`` 成环，
+        所以主题语境改成自上而下推送，tokens 只读自己记下的值。
+        """
+        self._theme_name = str(name or "")
+
+    def set_font_scale(self, scale: float) -> None:
+        """记录界面字号倍率（同样由 themes 下推，见 :meth:`set_theme_name`）。"""
+        self._font_scale = float(scale)
+
+    def _px_to_pt(self, px_str: str) -> float:
         """'39px' -> 29.25pt（QSS font-size 用 pt），并按界面字号倍率缩放。
 
-        QSS 不认 em/%，写死的 pt 会让控件无视用户的字号设置。倍率取
-        ``themes.font_scale()``（应用字体 / 设计基准），延迟导入避免与
-        themes→tokens 的模块级依赖成环。
+        QSS 不认 em/%，写死的 pt 会让控件无视用户的字号设置。倍率由
+        themes 下推（``self._font_scale``），本层不 import themes。
         """
         try:
             pt = float(px_str.replace("px", "")) * 0.75
         except Exception:
             return 10.0
-        try:
-            from themes import font_scale
-            pt *= font_scale()
-        except Exception:
-            pass
-        return round(pt, 1)
+        return round(pt * self._font_scale, 1)
 
     # ------------------------------------------------------------------
     # QSS 生成

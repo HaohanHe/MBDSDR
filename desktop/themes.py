@@ -35,7 +35,7 @@ if __name__ == "themes":
         setattr(_desktop_pkg, "themes", _sys.modules[__name__])
 
 # 设计令牌单一来源：主题色只从 tokens.THEME_COLORS 取，不在本文件写 hex。
-from tokens import tokens
+from tokens import contrast_ratio, relative_luminance, tokens
 
 
 # ============================================================================
@@ -219,6 +219,8 @@ def set_font_scale_override(scale: float | None) -> None:
     """强制指定实际倍率（自动降档用）；``None`` 恢复按平台请求值。"""
     global _FONT_SCALE_OVERRIDE
     _FONT_SCALE_OVERRIDE = scale
+    # 下推给令牌层（见 Theme.apply 的说明）。
+    tokens().set_font_scale(font_scale())
 
 
 def font_scale_note() -> str:
@@ -595,27 +597,9 @@ def _control_coverage_qss() -> str:
         """
 
 
-def _srgb_channel(value: int) -> float:
-    c = value / 255.0
-    return c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4
-
-
-def relative_luminance(color: str) -> float:
-    """sRGB 相对亮度（WCAG 2.1 定义）。"""
-    h = color.lstrip("#")
-    if len(h) == 3:
-        h = "".join(ch * 2 for ch in h)
-    r, g, b = (int(h[i:i + 2], 16) for i in (0, 2, 4))
-    return 0.2126 * _srgb_channel(r) + 0.7152 * _srgb_channel(g) + 0.0722 * _srgb_channel(b)
-
-
-def contrast_ratio(fg: str, bg: str) -> float:
-    """两色对比度，1.0–21.0。设计约束住在主题层，脚本与测试都从这里取。"""
-    a, b = relative_luminance(fg), relative_luminance(bg)
-    hi, lo = max(a, b), min(a, b)
-    return (hi + 0.05) / (lo + 0.05)
-
-
+# 颜色数学（relative_luminance / contrast_ratio）住在 tokens：tokens 的
+# status_color(bg=...) 也要用它，放在主题层会迫使 tokens 反向 import themes
+# 成环。这里保留同名导入，主题侧与既有调用方（themes.contrast_ratio）不变。
 def _on_primary(c: dict) -> str:
     """强调色底上该用什么颜色的文字（保证 >= 4.5:1）。
 
@@ -751,6 +735,9 @@ class Theme:
         """
         # 幂等早退也要记：早退说明这套主题本来就是当前生效的那个。
         set_active_theme(self.name)
+        # 令牌层语境下推：QSS 的 px->pt 换算读 tokens 记下的倍率。tokens 不
+        # import themes（会成环），所以由上层在生成 QSS 之前把值推下去。
+        tokens().set_font_scale(font_scale())
         palette = _build_palette(self.colors)
         font = get_app_font()
         qss = self._qss()
@@ -1298,8 +1285,15 @@ def set_active_theme(name: str) -> None:
     name = _THEME_ALIASES.get(name, name)
     if name in THEMES:
         _ACTIVE_THEME = name
+        # 下推给令牌层：tokens.status_color() 要按当前主题取状态色，
+        # 但 tokens 是下层、不能 import themes（会成环）。
+        tokens().set_theme_name(_ACTIVE_THEME)
 
 
 def active_theme_name() -> str:
     """当前生效的主题名。"""
     return _ACTIVE_THEME
+
+
+# 导入即把默认主题下推：tokens 不 import themes，初始语境由这里给。
+tokens().set_theme_name(_ACTIVE_THEME)
