@@ -200,9 +200,9 @@ class FreqOrbitChart(QWidget):
             gy = plot.top() + plot.height() * i / 5.0
             painter.drawLine(QPointF(plot.left(), gy), QPointF(plot.right(), gy))
 
-        axis = QColor(COLOR_TEXT_SEC)
-        axis.setAlpha(60)
-        painter.setPen(axis)
+        # 轴名是正文级信息，不是水印：旧实现 setAlpha(60) 把 gray_200 压到
+        # 1.45:1（对 card_1），空图时「轨道高度 / MHz」等于没写。次色全不透明。
+        painter.setPen(QColor(COLOR_TEXT_SEC))
         f = painter.font()
         f.setPointSize(8)
         painter.setFont(f)
