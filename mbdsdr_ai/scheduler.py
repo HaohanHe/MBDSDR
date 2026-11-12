@@ -21,10 +21,26 @@ Scheduler：定时任务调度。
 
 import os
 import json
+import logging
 import time
 import threading
 from dataclasses import dataclass, field
 from typing import List, Dict, Any, Optional
+
+from .corrupt_evidence import write_reason
+
+logger = logging.getLogger(__name__)
+
+
+def _backup_corrupt_tasks(path: str) -> Optional[str]:
+    """把损坏的任务文件改名成 ``*.corrupt-时间戳``，返回备份路径（失败 None）。"""
+    backup = f"{path}.corrupt-{time.strftime('%Y%m%d-%H%M%S')}"
+    try:
+        os.replace(path, backup)
+    except OSError as exc:
+        logger.error("调度任务文件损坏备份失败：%s（%s）", path, exc)
+        return None
+    return backup
 
 
 @dataclass
@@ -105,31 +121,90 @@ class Scheduler:
         self._task_counter = 0
         self.workflow_engine = None  # 外部注入
         self.tool_executor = None  # 外部注入
+        #: 上次读取失败的人话说明（None = 正常）。目前无独立界面消费，
+        #: 但会进 get_status_text()，接线更完整的提示等 main_window.py 那一笔。
+        self.last_error: Optional[str] = None
+        #: 损坏文件的备份路径（None = 未损坏或备份失败）。
+        self.corrupt_backup: Optional[str] = None
+        #: 读失败/损坏且备份失败时拒绝写盘：add/enable/tick 都会 _save，
+        #: 一旦放行就会把「无任务」写成唯一版本。
+        self._save_blocked = False
         os.makedirs(os.path.dirname(self.tasks_file), exist_ok=True)
         self._load()
 
     # ── 持久化 ──────────────────────────────────────────
 
     def _load(self):
-        """加载任务。"""
-        if os.path.exists(self.tasks_file):
-            try:
-                with open(self.tasks_file, "r", encoding="utf-8") as f:
-                    data = json.load(f)
-                for item in data:
-                    task = ScheduledTask.from_dict(item)
-                    self.tasks[task.task_id] = task
-                if self.tasks:
-                    max_id = max(int(t.task_id.split("_")[-1]) for t in self.tasks.values())
-                    self._task_counter = max_id + 1
-            except Exception as e:
-                print(f"警告: 调度器任务加载失败: {e}")
+        """加载任务：缺失 = 空任务；损坏先备份；读不了不写。
 
-    def _save(self):
-        """保存任务。"""
+        三种情况分开：
+          * 文件不存在 —— 首次启动正常路径，空任务，不算错误；
+          * 文件损坏（解析失败 / 顶层不是列表 / 条目缺 task_id/name）——
+            备份原件 + last_error；备份失败则 _save_blocked，拒绝覆盖；
+          * OSError（被占用 / 是目录 / 无权限）—— 不备份、不写入、置 block。
+        """
+        if not os.path.exists(self.tasks_file):
+            return
+        try:
+            with open(self.tasks_file, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        except OSError as exc:
+            self.last_error = (
+                f"调度任务文件读取失败（{exc.__class__.__name__}）：{self.tasks_file}；"
+                "本次不写入，避免覆盖可能仍可恢复的文件")
+            self._save_blocked = True
+            logger.warning("调度任务文件读取失败（非损坏，不备份）：%s", exc)
+            return
+        except ValueError as exc:
+            self._mark_corrupt(f"解析失败（{exc.__class__.__name__}: {exc}）")
+            return
+        try:
+            if not isinstance(data, list):
+                raise ValueError("根节点不是列表")
+            loaded: Dict[str, ScheduledTask] = {}
+            for item in data:
+                task = ScheduledTask.from_dict(item)
+                loaded[task.task_id] = task
+            next_counter = 0
+            if loaded:
+                max_id = max(int(t.task_id.split("_")[-1]) for t in loaded.values())
+                next_counter = max_id + 1
+        except (TypeError, KeyError, ValueError, AttributeError) as exc:
+            self._mark_corrupt(f"条目非法（{exc.__class__.__name__}: {exc}）")
+            return
+        self.tasks = loaded
+        self._task_counter = next_counter
+        self.last_error = None
+        self.corrupt_backup = None
+        self._save_blocked = False
+
+    def _mark_corrupt(self, reason: str) -> None:
+        """损坏：先备份原件再留人话错误；备份失败则禁止后续写盘。"""
+        self.corrupt_backup = _backup_corrupt_tasks(self.tasks_file)
+        self._save_blocked = self.corrupt_backup is None
+        message = (
+            f"调度任务文件损坏（{reason}）：{self.tasks_file}；"
+            f"原文件已备份为 {self.corrupt_backup or '（备份失败）'}，"
+            "本次按无任务启动")
+        if self.corrupt_backup:
+            write_reason(self.corrupt_backup, message, logger)
+        self.last_error = message
+        logger.warning("调度任务文件不可用（%s）：%s；备份=%s", self.tasks_file,
+                       reason, self.corrupt_backup or "（备份失败）")
+
+    def _save(self) -> bool:
+        """保存任务。读失败/损坏未备份时拒绝写盘。"""
+        if self._save_blocked:
+            self.last_error = (
+                f"调度任务未保存：{self.tasks_file} 读取失败或已损坏且无法备份；"
+                "为避免覆盖唯一证据，本次不写入")
+            logger.error("调度任务写入被拒绝（文件不可用且未备份）：%s",
+                         self.tasks_file)
+            return False
         data = [t.to_dict() for t in self.tasks.values()]
         with open(self.tasks_file, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=2, ensure_ascii=False)
+        return True
 
     # ── 任务管理 ────────────────────────────────────────
 
@@ -385,6 +460,9 @@ class Scheduler:
             f"总执行次数: {stats['total_runs']} (成功 {stats['total_success']}, 成功率 {stats['success_rate']:.1%})",
             f"后台运行: {'是' if stats['running'] else '否'}",
         ]
+        if self.last_error:
+            # 已有文本通道：状态查询能看到损坏/拒写原因，不新建界面。
+            lines.append(f"持久化错误: {self.last_error}")
         if self.tasks:
             lines.append("\n任务列表:")
             for task in sorted(self.tasks.values(), key=lambda t: t.next_run):
