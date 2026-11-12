@@ -13,7 +13,8 @@
 
 两条断言各管一件事：
 1. ``main`` 模块导入本身不得连带导入 ``main_window``（子进程实测，不靠读源码）；
-2. ``main()`` 的事件次序必须是 qapp → splash → smoke → deps → mainwindow。
+2. ``main()`` 的事件次序必须是 qapp → splash → deps → mainwindow → deferred
+   （scipy 私有子树的真 import 在首帧之后，见 ``_start_deferred_imports``）。
 """
 import os
 import subprocess
@@ -116,6 +117,9 @@ class _FakeWindow:
     def show(self):
         return None
 
+    def apply_theme_once(self):
+        return None
+
 
 def test_splash_precedes_selfcheck_and_window_import(monkeypatch, tmp_path):
     events = []
@@ -130,8 +134,6 @@ def test_splash_precedes_selfcheck_and_window_import(monkeypatch, tmp_path):
             "P", (), {"PassThrough": 0})}))
     monkeypatch.setattr(main_mod, "_qt_platform_plugin_problem", lambda: None)
     monkeypatch.setattr(main_mod, "_show_startup_splash", _splash)
-    monkeypatch.setattr(main_mod, "_run_import_smoke",
-                        lambda: events.append("smoke"))
     monkeypatch.setattr(main_mod, "_startup_dependency_problems",
                         lambda: (events.append("deps"), [])[1])
     monkeypatch.setattr(main_mod, "_import_main_window",
@@ -141,6 +143,8 @@ def test_splash_precedes_selfcheck_and_window_import(monkeypatch, tmp_path):
     monkeypatch.setattr(main_mod, "_install_sigint_graceful_quit", lambda app: None)
     monkeypatch.setattr(main_mod, "_report_runtime_dlls", lambda: None)
     monkeypatch.setattr(main_mod, "_check_record_dir_async", lambda window: None)
+    monkeypatch.setattr(main_mod, "_start_deferred_imports",
+                        lambda window: events.append("deferred"))
     monkeypatch.setattr(main_mod, "get_theme", lambda name: _FakeTheme())
     monkeypatch.setattr(main_mod, "get_app_font", lambda: None)
     # QIcon 会真的读 PNG 造 QPixmap：没有真实 QGuiApplication 时 Qt 直接 qFatal。
@@ -154,8 +158,9 @@ def test_splash_precedes_selfcheck_and_window_import(monkeypatch, tmp_path):
     with pytest.raises(SystemExit) as exc:
         main_mod.main()
     assert exc.value.code == 0
-    assert events == ["qapp", "splash", "smoke", "deps", "mainwindow"], (
-        "启动顺序退化了：splash 必须早于启动自检与主窗口导入，实际 " + repr(events))
+    assert events == ["qapp", "splash", "deps", "mainwindow", "deferred"], (
+        "启动顺序退化了：splash 必须早于启动自检与主窗口导入，"
+        "scipy 的延后导入必须在主窗显示之后，实际 " + repr(events))
 
 
 def test_splash_closed_before_failure_dialog(monkeypatch, tmp_path):
@@ -174,7 +179,7 @@ def test_splash_closed_before_failure_dialog(monkeypatch, tmp_path):
     monkeypatch.setattr(main_mod, "_qt_platform_plugin_problem", lambda: None)
     monkeypatch.setattr(main_mod, "_show_startup_splash",
                         lambda app: (events.append("splash"), _Splash(events))[1])
-    monkeypatch.setattr(main_mod, "_run_import_smoke", lambda: None)
+    monkeypatch.setattr(main_mod, "_start_deferred_imports", lambda window: None)
     monkeypatch.setattr(main_mod, "_startup_dependency_problems",
                         lambda: ["• 缺 scipy"])
     monkeypatch.setattr(main_mod, "_report_startup_failure",
