@@ -145,7 +145,7 @@ class DesignTokens:
 
         # ---- 主题语义色映射（单一来源）----
         # themes.py 的每套主题只从这里取色，不再各自写 hex。键名固定为下面
-        # 17 个语义槽位；新增主题只需在 THEME_COLORS 里加一列。
+        # 19 个语义槽位；新增主题只需在 THEME_COLORS 里加一列。
         # 2026-11 可读性修正：default 的正文/次级正文与 dark 的次级正文
         # 都压暗到 ≥4.5:1（见 tests/test_ui_contrast.py 的门禁）。
         self.THEME_COLORS: Dict[str, Dict[str, str]] = {
@@ -168,6 +168,11 @@ class DesignTokens:
                 "button_pressed": "#E8E4DD", "button_disabled": "#D8D2C8",
                 # 品牌橙作正文底色不足 4.5:1：文字态另取压暗档（fill 仍是原橙）
                 "primary_text": "#9A5F33",    # 4.67:1 on bg
+                # 2026-11-12：这两个状态色原先只走全局 COLORS，不随主题 remap。
+                # 浅底上 warning 2.21:1、danger 4.21:1（bg），连图标级 3:1 都
+                # 不够；沿明度压暗、色相与饱和度不动，到正文级 4.5:1。
+                "status_warning": "#876B27",  # 4.55:1 on bg
+                "status_danger": "#BD4848",   # 4.53:1 on bg
             },
             # 深色
             "dark": {
@@ -184,6 +189,10 @@ class DesignTokens:
                 "button": "#333336", "button_hover": "#3D3D41",
                 "button_pressed": "#2A2A2D", "button_disabled": "#262629",
                 "primary_text": "#7A9CAC",
+                # 2026-11-12：warning 沿用全局取值（card 上 5.99:1 已达标）；
+                # danger 提亮到正文级 4.5:1，色相与饱和度不动。
+                "status_warning": "#C8A040",  # 5.99:1 on card
+                "status_danger": "#CE7676",   # 4.53:1 on card
             },
             # 高对比（无障碍）
             "high_contrast": {
@@ -197,6 +206,10 @@ class DesignTokens:
                 "button": "#222222", "button_hover": "#333333",
                 "button_pressed": "#444444", "button_disabled": "#1A1A1A",
                 "primary_text": "#00BFFF",
+                # 2026-11-12：warning 在 bg/bg_alt 上均 ≥7.70:1；danger 提亮
+                # 到正文级 4.5:1（最严苛背景是 bg_alt #111111）。
+                "status_warning": "#C8A040",  # 7.70:1 on bg_alt
+                "status_danger": "#C45C5C",   # 4.53:1 on bg_alt
             },
             # CarWith 深色（docs/design_ref/carwith_figma）
             "dark_car": {
@@ -210,6 +223,10 @@ class DesignTokens:
                 "button": "#35373c", "button_hover": "#3d3f44",
                 "button_pressed": "#36383a", "button_disabled": "#1f1f1f",
                 "primary_text": "#919cac",
+                # 2026-11-12：warning 在 card 上 5.69:1 已达标；danger 提亮到
+                # 正文级 4.5:1，色相与饱和度不动。
+                "status_warning": "#C8A040",  # 5.69:1 on card
+                "status_danger": "#CF7B7B",   # 4.50:1 on card
             },
             # Figma 原生深色（.figma/284_1xx…284_6xx 导出稿的取值）
             "figma": {
@@ -227,6 +244,10 @@ class DesignTokens:
                 "button": "#2C2C2C", "button_hover": "#404040",
                 "button_pressed": "#4F4F4F", "button_disabled": "#1F1F1F",
                 "primary_text": "#D9D9D9",
+                # 2026-11-12：warning 在 #1f1f1f 上 6.72:1 已达标；danger 提亮
+                # 到正文级 4.5:1，色相与饱和度不动。
+                "status_warning": "#C8A040",  # 6.72:1 on #1f1f1f
+                "status_danger": "#C96A6A",   # 4.52:1 on #1f1f1f
             },
         }
 
