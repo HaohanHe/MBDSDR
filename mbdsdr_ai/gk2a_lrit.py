@@ -38,12 +38,15 @@ SatDump（https://www.satdump.org/）等开源项目仅作技术参考与致谢�
 from __future__ import annotations
 
 import io
+import logging
 import math
 import struct
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
 
 import numpy as np
+
+logger = logging.getLogger(__name__)
 
 
 # ============================================================================
@@ -904,7 +907,11 @@ def decode_jpeg2000(data: bytes) -> Optional[np.ndarray]:
             # 兜底：convert("L") 后理论上不会到这；保险起见对通道维求均值
             arr = arr.mean(axis=-1).astype(arr.dtype)
         return arr
-    except Exception:  # noqa: BLE001 —— 任何解码失败都走回退路径
+    except Exception as exc:  # noqa: BLE001 —— 任何解码失败都走回退路径
+        # 回退是有意的安全降级（见 docstring），但原因不能丢：
+        # 否则 metadata 只有 "none[回退]"，无人能判断是格式不支持还是数据损坏。
+        logger.warning("JPEG2000 解码失败，回退无压缩直通：%s: %s",
+                       type(exc).__name__, exc)
         return None
 
 
