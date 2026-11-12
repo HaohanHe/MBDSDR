@@ -5,6 +5,13 @@
 > 每条红必须带「转绿条件」，否则不许写成"已知红"。
 > 状态口径：写「已修」必须带一次**可复跑的验证记录**（命令 + 实际输出）；
 > 没有记录的只能写「实跑绿·待反证」，不得直接销账。
+> 再检义务（机检 R8）：写「已转绿」的条目必须带一行「再检绑定」，写明
+> 验证提交 `<sha>` 和文件集合（文件或目录，多个用「、」分隔，格式见 K17）。
+> 只要这些文件/目录在 `<sha>` 之后又被改动，该条目**自动退回「待复核」**，
+> 检查输出会点名「哪个文件在哪笔提交之后又变了」。判据只用 git 历史
+> （`git log <sha>..HEAD -- <path>`），不用行号、不用 mtime。
+> 机检命令：`python scripts/check_red_lifecycle.py --paths docs/known-red-register.md`
+> ——在提交前/CI 手动跑，**不挂 pre-commit**（钩子只留便宜检查）。
 
 字段说明：ID / nodeid / 首次记录 / 分类 / 症状 / 根因 / 转绿条件 / 复跑命令。
 分类只有两种：**存量**（不是本轮引入）、**自引入**（本轮改动导致，必须当轮修）。
@@ -654,7 +661,13 @@ QT_QPA_PLATFORM=offscreen python -m pytest "<nodeid>" -q
 
 ---
 
-## K17 — 设置向前覆盖：3 个字段无 UI 入口也无理由（2026-11-13 实跑，已转绿 `ffeeb7c5`）
+## K17 — 设置向前覆盖：3 个字段无 UI 入口也无理由（2026-11-13 实跑，待复核：原验证提交 `ffeeb7c5`）
+
+- **再检绑定**：验证提交 `ffeeb7c5`；文件集合 `scripts/settings_inventory.py`、`tests/test_settings_ui_coverage.py`、`desktop/config_schema.py`、`desktop/control_panel.py`、`desktop/settings_panel.py`
+- **再检（2026-11-13，R8）**：`desktop/control_panel.py`（3 笔）、
+  `desktop/settings_panel.py`（1 笔）在 `ffeeb7c5` 之后又被改动 → 本条自动退回
+  待复核；下面 `1 passed` 是当时那次验证，不代表当前树。按记录命令重跑后再改回
+  `已转绿` 并更新验证提交。
 
 - **nodeid**：`tests/test_settings_ui_coverage.py::test_forward_every_field_has_ui_entry_or_reason`
 - **复跑命令**：
@@ -676,8 +689,8 @@ QT_QPA_PLATFORM=offscreen python -m pytest "<nodeid>" -q
   定位方式：`git log -S`（未逐提交 checkout 复跑）。
 - **根因**：盘点锚点跟着产品文案走，文案改了锚点没跟；内部持久化键入库时没有
   同步登记「为什么没有 UI」。
-- **当前 owner**：无（K17 关闭；`scripts/settings_inventory.py` 无活跃 claim；
-  `desktop/settings_panel.py` 仍属设置三环线，本笔未触碰）。
+- **当前 owner**：设置线（K17 已由 R8 退回待复核）；`scripts/settings_inventory.py`
+  无活跃 claim；`desktop/settings_panel.py` 仍属设置三环线，本笔未触碰。
 - **收口判定（逐字段）**：
   - `agc_enabled`：不是缺控件，是锚点过时。控件文案早在 `2a07f344` 改为
     `QCheckBox("硬件 AGC")`，产品形态正确，**不补新控件/不改 UI**，按实际控件
@@ -702,7 +715,12 @@ QT_QPA_PLATFORM=offscreen python -m pytest "<nodeid>" -q
 
 ---
 
-## K18 — 设置盘点表与脚本读数不一致（2026-11-13 实跑，已转绿 `a92d74c4`）
+## K18 — 设置盘点表与脚本读数不一致（2026-11-13 实跑，待复核：原验证提交 `a92d74c4`）
+
+- **再检绑定**：验证提交 `a92d74c4`；文件集合 `docs/settings-inventory.md`、`scripts/settings_inventory.py`、`tests/test_settings_ui_coverage.py`、`desktop/config_schema.py`
+- **再检（2026-11-13，R8）**：`docs/settings-inventory.md` 在 `a92d74c4` 之后又被
+  重生成 3 笔（`57ddb41d` / `97f213d5` / `515fe918`）→ 本条自动退回待复核；按记录
+  命令重跑并核对读数后再改回 `已转绿`。
 
 - **nodeid**：`tests/test_settings_ui_coverage.py::test_inventory_table_matches_script`
 - **复跑命令**：
@@ -717,9 +735,9 @@ QT_QPA_PLATFORM=offscreen python -m pytest "<nodeid>" -q
 - **首次变红**：`2a07f344`（2026-11-11 22:14，UI 入口 51→50、缺失 0→1），随后
   `20652e90`（22:26，字段 53→55、缺失 1→3）；表最后一次生成在 `a2be554a`
   （2026-11-11）。定位方式 `git log -S`。
-- **当前 owner**：无（K18 关闭）。`docs/settings-inventory.md` 原为机制线孤儿 claim
-  （pid 34636 已退出、心跳过期 +1611.8min、工作区无在途改动），按
-  COORDINATION §6.1.4 2026-11-13 记录型接管，提交后已释放。
+- **当前 owner**：设置线（K18 已由 R8 退回待复核）。`docs/settings-inventory.md`
+  原为机制线孤儿 claim（pid 34636 已退出、心跳过期 +1611.8min、工作区无在途改动），
+  按 COORDINATION §6.1.4 2026-11-13 记录型接管，提交后已释放。
 - **根因复核（修正原判断）**：表**不是手写**的——块由
   `scripts/settings_inventory.py --write` 生成，`test_inventory_table_matches_script`
   整块比对脚本产出，手改即红。真实根因是 `config_schema` 两次变更
@@ -737,7 +755,22 @@ QT_QPA_PLATFORM=offscreen python -m pytest "<nodeid>" -q
 
 ---
 
-## K19 — 源码文本 pin 棘轮新增 33 条（2026-11-13 已转绿 · 提交 `748a2992` / `b00a73d3` / `ce31ff20`）
+## K19 — 源码文本 pin 棘轮新增 33 条（2026-11-13 实跑，待复核：原验证提交 `ce31ff20`）
+
+- **再检绑定**：验证提交 `ce31ff20`；文件集合 `tests/`、`docs/source-pin-ratchet-baseline.json`
+- **为什么失守（2026-11-13 在 HEAD 实跑）**：当时 `748a2992` / `b00a73d3` / `ce31ff20`
+  确实把 33 条清到 0，但后继提交又往同一批测试文件加回 4 条源码文本 pin：
+  - `cc2f8109`（恢复流程覆盖损坏 meta 前必须备份留证）→
+    `tests/test_file_source_robust.py::test_recover_backs_up_corrupt_meta_with_recovery_reason`
+    新增 `"不是用户删除"`、`"恢复流程触发"` 两条；
+  - `64b0b397`（接入运行期热插拔监听）→
+    `tests/test_usb_hotplug.py::test_module_has_no_reconnection_dependency`
+    新增 `"reconnect"`、`"reconnection"` 两条。
+  当前树单跑 `tests/test_source_pin_ratchet.py` → **1 failed, 2 passed**，失败首行
+  `AssertionError: 新增源码文本 pin（必须改成行为断言，或由 owner 在基线写明理由）：`。
+  不是当时写错，而是「已转绿」只核了一次：没有「验证提交之后同文件再变就退回
+  待复核」的机制。本条现由 R8 自动退回待复核；重跑并把验证提交更新到最新一次之前，
+  不得再写已转绿。
 
 - **nodeid**：`tests/test_source_pin_ratchet.py::test_no_new_source_text_pins`
 - **复跑命令**：
@@ -837,7 +870,22 @@ baseline 56 → 58（`BUILT_AT` 同步 58），每条带 owner + reason：
 
 ---
 
-## K20 — tooltip 守卫 4 条（2026-11-13 已转绿 · 提交 `294beef4`）
+## K20 — tooltip 守卫 4 条（2026-11-13 实跑，待复核：原验证提交 `294beef4`）
+
+- **再检绑定**：验证提交 `294beef4`；文件集合 `desktop/device_panel.py`、`desktop/control_panel.py`、`desktop/main_window.py`、`desktop/sat_track_panel.py`、`docs/tooltip-dynamic-baseline.json`、`docs/tooltip-baseline.json`、`tests/test_tooltip_guard.py`、`tests/test_tooltip_dynamic_runtime.py`
+- **为什么失守（2026-11-13 在 HEAD 实跑）**：`294beef4` 当时 7 passed，但后继提交
+  继续往同文件加透传 tooltip，登记表没跟：
+  - `64b0b397` → `desktop/device_panel.py` 的 5 处 `event.detail`
+    （`:570` / `:588` / `:594` / `:601` / `:605`）、`:710 :: text`、
+    `:896 :: identity_note` 未登记；
+  - `03fe46c0` → `desktop/device_panel.py`「重新读取设备占用登记」tooltip 长度 <12；
+  - 另有 `desktop/sat_track_panel.py:400 :: text` 未登记。
+  当前树单跑 `tests/test_tooltip_guard.py` → **3 failed, 4 passed**：
+  `test_every_passthrough_tooltip_is_registered` 点名 8 处未登记；
+  `test_tooltip_baseline_only_shrinks` 点名
+  `desktop/device_panel.py::重新读取设备占用登记::too_short`；
+  `test_baseline_file_stays_in_sync_with_counter` → `assert 3 == 4`。
+  与 K19 同因：当时真绿、后继提交打破、缺再检机制。本条现由 R8 自动退回待复核。
 
 **合并为一条而非四条**：同一文件、同一契约（`docs/discoverability.md` 三条规矩）、
 同一批转绿动作（补登记 / 改文案 / 删数值），拆开只会把一个修复批次记成 4 笔账。
@@ -886,5 +934,40 @@ baseline 56 → 58（`BUILT_AT` 同步 58），每条带 owner + reason：
   `tests/test_tooltip_dynamic_runtime.py` 除 `settings_panel` 外 16 passed /
   1 deselected。`test_settings_panel_passthrough_tooltips_self_describe` 在 HEAD
   独立 worktree 复跑即红（`settings_panel` 懒构建，构造期不生成 UI），属存量
-  问题，不在 K20 范围，未改该文件。
+  问题，不在 K20 范围，未改该文件。**该条已于 2026-11-13 升级为正式 K21**，
+  不再只写在正文里。
+
+---
+
+## K21 — 设置页透传 tooltip 运行时用例在懒构建下拿不到 UI（2026-11-13 实跑，存量·待复核）
+
+> 本条原为 K20 段末一句「属存量问题」，没有 K 编号：机检抓不到、下一班翻 K 表
+> 也看不到。2026-11-13 按正式条目补编号，结论（存量、非 K20 引入）不变。
+
+- **nodeid**：`tests/test_tooltip_dynamic_runtime.py::test_settings_panel_passthrough_tooltips_self_describe`
+- **复跑命令**：
+  ```bash
+  MBDSDR_OFFLINE=1 QT_QPA_PLATFORM=offscreen \
+    python -m pytest tests/test_tooltip_dynamic_runtime.py::test_settings_panel_passthrough_tooltips_self_describe -q -rf
+  ```
+- **失败消息首行**（2026-11-13 在 HEAD `66a43516` 实跑）：
+  `AssertionError: 以下透传条目在构造/触发后没有渲染出 tooltip（运行时兜底失效，请补触发步骤或从登记表移除）：`
+  实测缺 3 处：`desktop/settings_panel.py:1072`、`:1424`、`:1432`；结果 `1 failed`。
+- **首次记录**：2026-11-13（HEAD `66a43516` 工作树，持 Qt 锁单跑）。
+- **首次变红**：未逐提交 bisect；按 K15 的懒构建改动推定早于 K20 的 `294beef4`，
+  属存量。定位方式：读 `tests/test_tooltip_dynamic_runtime.py` 的 `_record`
+  （只构造面板、不 `show()`）与 K15 记录。
+- **分类**：存量（不是本轮引入）。
+- **根因**：`_record(SettingsPanel)` 只构造面板就比对 tooltip，而设置页是懒构建：
+  不 `show()`/不切分组时 UI 树尚未生成，`setToolTip` 调用为 0。K15 收口时只让
+  设置页自身用例先触发构建，这条跨页运行时用例没同步触发。
+- **转绿条件**（任一条即可）：
+  - 运行时用例对 `SettingsPanel` 先 `show()` + `processEvents()`（或切到对应分组）
+    再比对；
+  - 或设置页构造期就生成这 3 个控件的 tooltip（需评估懒构建的启动收益，不默认选）。
+  验收：该 nodeid `1 passed`；反证：去掉 `_record` 里的构建触发，必须重新变红。
+- **当前 owner**：`tests/test_tooltip_dynamic_runtime.py` 与
+  `desktop/settings_panel.py` 均无活跃 claim；按引入线归设置页线（K15）。
+- **再检**：本条从未写过「已转绿」，暂不需要再检绑定；修完若要写「已转绿」，
+  必须同时补 `再检绑定`，否则 R8 直接判红。
 
