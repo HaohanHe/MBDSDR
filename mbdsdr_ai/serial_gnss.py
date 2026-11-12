@@ -29,6 +29,7 @@ direwolf / RTKLIB 仅作为技术参考与致谢，本模块未包含其源代�
 from __future__ import annotations
 
 import os
+import logging
 import threading
 import time
 import socket
@@ -36,6 +37,8 @@ import base64
 import math
 from datetime import datetime, timezone
 from typing import Optional, Dict, Any, Callable, List, Tuple
+
+logger = logging.getLogger(__name__)
 
 try:
     import serial  # pyserial 3.5+
@@ -591,9 +594,11 @@ class SerialGNSSReader:
                             valid += 1
                             if valid >= _AUTODETECT_MIN_NMEA:
                                 return {"port": port, "baudrate": baud}
-                except Exception:
-                    # 端口被占用/无权限/非 GNSS：试下一个
-                    pass
+                except Exception as e:
+                    # 端口被占用/无权限/非 GNSS：试下一个，但原因要留痕，
+                    # 否则「全部探测失败」与「本机没有 GNSS」不可区分。
+                    logger.debug("探测 %s@%s 失败：%s: %s",
+                                 port, baud, type(e).__name__, e)
                 finally:
                     if ser is not None:
                         try:
