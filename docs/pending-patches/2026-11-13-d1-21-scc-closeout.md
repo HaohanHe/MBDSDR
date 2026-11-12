@@ -77,12 +77,16 @@
 `ade9380c` sat_tracker、`df7bd534` time_sync、`caf318c8` sdr_tools
 （本地显示）。
 
-私有名存量（口径：跨模块 import 语句条数）**137 → 129**（实测复扫）。
-其中 `orbit._network_disabled` 由 11 降到 3。剩余且仍被占：
-`agent.py` ×2、`solar_system.py` ×1、`decode_router.py`（`_read_wav_audio`）
-×3；`desktop/sat_track_panel.py` 的 `format_local` 是公共名，不计入存量。
-旧别名（`orbit._network_disabled`、`decoders._read_wav_audio`）**暂不删除**，
-上述文件仍在引用；等它们释放后迁完再删。
+私有名存量（口径：跨模块 import 语句条数）**137 → 129 → 123**（两次实测
+复扫）。第二批：`b8d6b570` solar_system、`d4c8dc2d` agent、
+`198cd49b` decode_router；至此 `orbit._network_disabled`、`decoders.`
+`_read_wav_audio` 的跨模块引用均归零。
+
+别名在 `baba826a` 删除，**与「把 `tests/test_tle_failure_visibility.py:143`
+的 patch 目标改成 `net_policy.network_disabled`」同一笔**，不留「别名已删、
+测试仍 patch 旧名」的中间红态。`time_basis.format_local` 的再导出**仍保留**：
+唯一 import 方 `desktop/sat_track_panel.py` 被异步不落地线持有；它是公共名、
+不计存量，等释放后与 sat_track_panel 迁移同一笔删除。
 
 ## 三、判据：跨模块导入私有名必须报（D1-private-import）
 
@@ -133,33 +137,33 @@
   ```
 - **结构反证**：在任一模块里临时加一行 `from .orbit import _bounded_urlopen`
   → 必须红；删掉 → 必须绿。只删注释不能变绿，否则规则退化。
-- **第二形态反证（现成样本）**：`tests/test_tle_failure_visibility.py:143`
-  的 `monkeypatch.setattr(orbit, "_network_disabled", lambda: False)` 必须
-  报 1 条。**现在不改这一行**——它是反证样本，改掉就失去证据；等别名真删
-  的那一笔一起改成 `monkeypatch.setattr(net_policy, "network_disabled", ...)`
-  （改成公共名后必须绿）。负例：`monkeypatch.setattr(obj, "_x", ...)`
-  （`obj` 是局部变量）不报。
+- **第二形态反证（样本已消费）**：`tests/test_tle_failure_visibility.py:143`
+  原为 `monkeypatch.setattr(orbit, "_network_disabled", lambda: False)`，判据
+  必须报 1 条；该行已在 `baba826a` 与别名删除同笔改成
+  `monkeypatch.setattr(net_policy, "network_disabled", lambda: False)`，按设计
+  变绿。selftest 里正例改用**内联代码片段**（等价形态，不依赖工作区现状），
+  负例：`monkeypatch.setattr(obj, "_x", ...)`（`obj` 是局部变量）不报。
 
 ### 3.4 现存量（2026-11-13 03:5x，口径：`mbdsdr_ai/` 全部 `.py`）
 
 - **137 处 / 70 个文件 / 97 个（目标模块, 符号）对**（口径：跨模块 import
   语句条数；上一版写的 138 无法复现，按实测 137 为准）。
-- 2026-11-13 04:0x 迁完调用点后复扫：**129 处**（减 8，全部来自
-  `_network_disabled`；`format_local` 是公共名，本就不计入）。
-- 头部集中（迁移后）：
-  `orbit._network_disabled` 3（原 11）、`mcp_server._TOOL_DOMAIN` 10、
-  `orbit._state_from_satrec` 4、`orbit._bounded_urlopen` 3、
-  `decoders._read_wav_audio` 3、`orbit_dynamics._rk4_step` 3、
+- 2026-11-13 04:0x 迁完第一二批调用点后复扫：**123 处**（137→129 减 8，
+  129→123 减 6；两批都全部来自 `_network_disabled` / `_read_wav_audio`）。
+- `orbit._network_disabled` 与 `decoders._read_wav_audio` 已归零，别名已删；
+  剩余头部：`mcp_server._TOOL_DOMAIN` 10、`orbit._state_from_satrec` 4、
+  `orbit._bounded_urlopen` 3、`orbit_dynamics._rk4_step` 3、
   `sat_passes._parse_tle` 3、`sat_passes._range_and_rate` 3、
   `sdr_tools._sky_view_visible` 3、`mcp_server._build_tool_table` 3。
-- 其中 `orbit` 一个模块贡献 11 处（迁移后；原 19）——它仍是 21 块里
+- 其中 `orbit` 一个模块贡献 8 处（两批迁移后；原 19）——它仍是块里
   「公共原语最密集」的地方，与 §一 的割点分析互相印证。
 - 落地时**必须重新扫一遍**再收基线；本清单只用于判断规模与优先级。
 
-### 3.5 第二形态现存量（2026-11-13 03:4x）
+### 3.5 第二形态现存量（2026-11-13 04:1x）
 
-- **148 处 / 71 个文件**（口径：AST 调用点，逐条计；扫描范围全仓 `.py`，
-  排除 `.git/.venv/__pycache__/build/dist/node_modules`）。
+- **147 处 / 71 个文件**（口径：AST 调用点，逐条计；扫描范围全仓 `.py`，
+  排除 `.git/.venv/__pycache__/build/dist/node_modules`）。原 148 处，
+  `test_tle_failure_visibility.py:143` 改公共名后按设计减 1。
 - 集中区：`orbit._CACHE_DIR` / `orbit._TLE_CACHE` / `orbit._TLE_FETCHER`
   （测试隔离缓存）、各模块 `_backup_corrupt*`（损坏恢复用例）、
   `_SD_AVAILABLE` / `_HAS_QT`（可选依赖桩）、`_bounded_requests_get`。
