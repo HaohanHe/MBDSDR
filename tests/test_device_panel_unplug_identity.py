@@ -214,3 +214,48 @@ def test_set_connected_true_registers_owner_without_panel_click(panel, monkeypat
     a = _dev(0, serial="A-0001", label="RTL-A")
     panel.set_connected(True, device=a)
     assert ("claim", dp._DESKTOP_OWNER, panel._current_dev_key) in calls
+
+
+# ------------------------------------------------ 枚举失败 != 没插设备（W92 patch）
+# 同一次枚举失败，module_panel 说「这不等于没插设备」，device_panel 却说
+# 「未检测到 SDR 设备」——用户会去拔插 USB，而真实原因可能是依赖缺失或驱动报错。
+def test_enum_failure_is_not_reported_as_no_device(panel, monkeypatch):
+    import desktop.device_panel as dp
+
+    def boom():
+        raise OSError("USB open timeout")
+
+    monkeypatch.setattr(dp, "_ENUM_OK", True)
+    monkeypatch.setattr(dp, "enumerate_all_sdr_devices", boom)
+    panel.refresh_devices()
+
+    text = panel.status_label.text()
+    assert "枚举失败" in text, f"枚举失败必须如实说，实际：{text!r}"
+    assert text != dp._NO_DEVICE_STATUS, "枚举失败不许说成「没插设备」"
+    assert "USB open timeout" in panel.status_label.toolTip()
+
+
+def test_empty_enum_still_says_no_device(panel, monkeypatch):
+    import desktop.device_panel as dp
+    monkeypatch.setattr(dp, "_ENUM_OK", True)
+    monkeypatch.setattr(dp, "enumerate_all_sdr_devices", lambda: [])
+    panel.refresh_devices()
+    assert panel.status_label.text() == dp._NO_DEVICE_STATUS
+
+
+def test_async_enum_error_is_propagated(panel):
+    """后台任务带回的 err 不许丢：丢了就退化成「没插设备」。"""
+    import desktop.device_panel as dp
+    panel._refresh_token = 7
+    panel._on_devices_refreshed(None, "OSError: USB open timeout", 7)
+    text = panel.status_label.text()
+    assert "枚举失败" in text
+    assert text != dp._NO_DEVICE_STATUS
+
+
+def test_missing_enum_dependency_is_explained(panel, monkeypatch):
+    import desktop.device_panel as dp
+    monkeypatch.setattr(dp, "_ENUM_OK", False)
+    panel.refresh_devices()
+    assert "枚举失败" in panel.status_label.text()
+    assert "依赖缺失" in panel.status_label.toolTip()

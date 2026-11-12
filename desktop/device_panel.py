@@ -329,12 +329,13 @@ class DevicePanel(QWidget):
     def refresh_devices(self) -> None:
         """同步枚举 SDR 设备（同步调用入口，测试与显式请求用）。"""
         if not _ENUM_OK or enumerate_all_sdr_devices is None:
-            self._apply_devices([])
+            self._apply_devices([], enum_err="设备枚举不可用（枚举依赖缺失）")
             return
         try:
             devices = list(enumerate_all_sdr_devices())
-        except Exception:  # noqa: BLE001 - 失败按空列表处理，不造假
-            devices = []
+        except Exception as e:  # noqa: BLE001 - 保留原因，不压成「没插设备」
+            self._apply_devices([], enum_err=f"{type(e).__name__}: {e}")
+            return
         self._apply_devices(devices)
 
     def refresh_devices_async(self) -> None:
@@ -344,7 +345,7 @@ class DevicePanel(QWidget):
         同步跑等于冻住界面。真实结果在 ``_on_devices_refreshed`` 里落到控件。
         """
         if not _ENUM_OK or enumerate_all_sdr_devices is None:
-            self._apply_devices([])
+            self._apply_devices([], enum_err="设备枚举不可用（枚举依赖缺失）")
             return
         if self._refresh_inflight or self._enum_inflight:
             return  # 上一拍还没回来，不堆积任务
@@ -361,13 +362,13 @@ class DevicePanel(QWidget):
             _DeviceEnumTask(self._refresh_signals, self._refresh_token))
 
     def _on_devices_refreshed(self, devices, err: str, token: int = 0) -> None:
-        """后台刷新回来了：GUI 线程里更新下拉框（失败按空列表处理，不造假）。"""
+        """后台刷新回来了：GUI 线程里更新下拉框（失败保留原因，不造假）。"""
         if token != self._refresh_token:
             return  # 超时后迟到的旧结果：不得清掉新一轮的 inflight
         self._refresh_inflight = False
         self._refresh_watchdog.stop()
         if err or devices is None:
-            self._apply_devices([])
+            self._apply_devices([], enum_err=err or "枚举任务未返回设备列表")
             return
         self._apply_devices(devices)
 
@@ -387,16 +388,30 @@ class DevicePanel(QWidget):
             "面板会自动重试；也可拔插设备后点「刷新」。"
             % (ENUM_TIMEOUT_MS / 1000.0))
 
-    def _apply_devices(self, devices) -> None:
-        """把一份已枚举到的设备列表落到控件上（不触发重新枚举）。"""
+    def _apply_devices(self, devices, enum_err: Optional[str] = None) -> None:
+        """把一份已枚举到的设备列表落到控件上（不触发重新枚举）。
+
+        ``enum_err`` 与空列表是**两件事**：枚举失败时设备可能插得好好的，
+        说成「未检测到 SDR 设备」会把用户赶去拔插 USB，而真实原因可能是
+        依赖缺失、USB open 卡死或驱动报错（module_panel 早已分开，两个面板
+        不能对同一次失败给出相反结论）。
+        """
         self._devices = list(devices or [])
         # 身份键与设备列表同序：撞键/无序列号时 resolve 会显式告警。
         self._identities = _req_store.resolve(self._devices)
         self.dev_combo.clear()
         if not self._devices:
             self.dev_combo.addItem(_NO_DEVICE_COMBO)
-            self.status_label.setText(_NO_DEVICE_STATUS)
-            self.status_label.setToolTip(_NO_DEVICE_TIP)
+            if enum_err:
+                # 枚举失败 != 没插设备：不要把用户赶去拔插 USB
+                self.status_label.setText("设备枚举失败 · 这不等于没插设备")
+                self.status_label.setToolTip(
+                    f"枚举设备时出错：{enum_err}\n"
+                    "设备可能已插好，只是本次枚举失败。请点「刷新」重试，"
+                    "或拔插设备后重试。")
+            else:
+                self.status_label.setText(_NO_DEVICE_STATUS)
+                self.status_label.setToolTip(_NO_DEVICE_TIP)
             self.connect_btn.setEnabled(False)
             self._last_poll_locs = set()
             return
