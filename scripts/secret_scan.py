@@ -9,9 +9,14 @@
 分档：
   * BLOCK（退出码 1）：已知凭据形状——GitHub / GitLab / Slack / AWS / JWT /
     PEM 私钥块。
-  * WARN（默认不拦）：熵告警（≥32 字符且 Shannon ≥ 4.2，只在源码/配置类
-    文本上跑、每个文件只报首条，承认会有误报）、CLI 选项接收凭据、argv 把
-    凭据类变量带进子进程、日志打印凭据类变量。
+  * MUST（必须看，默认不拦）：熵告警里**结构性**可疑的那一小撮——凭据文件
+    （`.env` / `.pem|key|...` / `secrets.yaml` 这类整名就是凭据面的文件），或
+    高熵串紧邻 `api_key=` / `"token": "` 这类字段名。判据只看位置与字段名，
+    **不看分数**（调阈值会把真命中一起调没）。
+  * SAMPLE（抽样看，默认不拦）：其余熵告警（普通源码/文档里的长串），每个
+    文件只报首条、终端只打 20 条代表，全量分布用 `--entropy-stats`。
+  * WARN（默认不拦）：CLI 选项接收凭据、argv 把凭据类变量带进子进程、
+    日志打印凭据类变量。
 
 豁免：命中行内必须出现 ``pragma: allowlist secret``（任何注释风格都行），
 **逐行**标注；不支持目录级 / 文件级豁免——豁免范围一大，检查器就成摆设。
@@ -27,6 +32,7 @@
     python scripts/secret_scan.py --history        # 扫 git 历史里的 blob + 提交信息（只跑形状规则）
     python scripts/secret_scan.py --artifact DIR   # 扫待发布目录（含二进制），BLOCK>0 退出 1
     python scripts/secret_scan.py --commit-msg F   # 扫提交信息文件（commit-msg 钩子用），BLOCK>0 退出 1
+    python scripts/secret_scan.py --entropy-stats  # 熵告警分层分布（只量不改判）
     python scripts/secret_scan.py --root D:\\some   # 指定扫描根
     python scripts/secret_scan.py path1 path2      # 只扫指定文件
 
@@ -96,6 +102,33 @@ KNOWN_BENIGN_HISTORY: Dict[str, str] = {
 #: 熵候选：不跨空格/引号，避免把整行代码当随机串。
 _CANDIDATE = re.compile(r"[A-Za-z0-9+/=_-]{32,}")
 ENTROPY_MIN = 4.2
+
+#: 熵告警分级（2026-11-13 降噪）：**结构性判据，不动分数阈值**。
+#:
+#: 「必须看」（must）——三选一：
+#:   ① 文件本身就是凭据面：`.env` / `.env.*` / `*.pem|key|pfx|p12|keystore|jks`，
+#:      或文件名里带 secret / credential / token / passwd / password；
+#:   ② 高熵串**紧邻**凭据字段名（`api_key=`、`"token": "` 这类，字段名与值之间
+#:      只允许 `: = " '` 与空白）——这是「值写在配置里」的典型形状；
+#:   ③ 其余一律「抽样看」（sample）：普通源码/文档里的长串只记一条，不逐条看。
+#: 判据只看位置与字段名，不看分数：调阈值能把真命中一起调没，结构判据不会。
+_CRED_NEAR = re.compile(
+    r"(?i)(token|passwd|password|secret|api[_-]?key|access[_-]?key|private[_-]?key)"
+    r"[A-Za-z0-9_.-]*[\"']?\s*[:=]\s*[\"']?$"
+)
+#: 文件名判据只认「整名就是凭据文件」，不做子串匹配——`test_secret_scan.py`、
+#: `2026-07-29-...-credentials.i18n.yaml` 这类名字里带 secret/token 的文档与测试
+#: 不是凭据面，按子串判会把「必须看」重新灌满。
+_SECRET_FILE_RE = re.compile(
+    r"(?i)^(\.netrc|\.npmrc|\.pypirc|\.pgpass|\.htpasswd"
+    r"|id_(rsa|dsa|ecdsa|ed25519)"
+    r"|(secrets?|credentials?|tokens?|passwords?)(\.(json|ya?ml|toml|ini|cfg|txt|env))?)$"
+)
+_SECRET_SUFFIXES = {".pem", ".key", ".pfx", ".p12", ".keystore", ".jks"}
+_ENV_NAME_RE = re.compile(r"(?i)^\.?env(\..+)?$")
+
+#: 分级统计用的分数区间（只用于「先量」的分层，不参与判定）。
+_SCORE_BUCKETS = ((4.2, 4.5), (4.5, 5.0), (5.0, 5.5), (5.5, 6.0))
 
 #: 熵规则只跑源码 / 配置类文本。构建产物、数据 dump、日志里天然全是哈希与
 #: 随机串：2026-11-13 全仓实测 2 382 625 条 WARN，真正的告警会被完全淹掉。
@@ -200,6 +233,8 @@ _BINARY_SUFFIXES = {
 #: 正则，**任何体积都跑**（3MB 的 CSV 里写一枚 token 也必须被拦）。
 _MAX_ENTROPY_BYTES = 2 * 1024 * 1024
 _MAX_WARN_PRINT = 200
+#: 「抽样看」就是抽样：只打一小撮代表，其余按计数省略（全量在 --entropy-stats）。
+_MAX_SAMPLE_PRINT = 20
 
 Finding = Tuple[str, int, str, str]  # (path, line, rule, tier)
 
@@ -332,10 +367,41 @@ def _scan_ast(path: str, text: str, lines: List[str]) -> List[Finding]:
     return hits
 
 
+def _entropy_tier(path: str, line: str, start: int) -> str:
+    """高熵串落在「必须看」还是「抽样看」。只读位置/文件名/字段名，不读分数。"""
+    name = Path(path).name
+    suffix = Path(path).suffix.lower()
+    if (
+        _ENV_NAME_RE.match(name)
+        or suffix in _SECRET_SUFFIXES
+        or _SECRET_FILE_RE.match(name)
+    ):
+        return "must"
+    # 只看候选串前面 48 字符：字段名必须紧邻值（允许 : = 引号 与空白）。
+    if _CRED_NEAR.search(line[max(0, start - 48):start]):
+        return "must"
+    return "sample"
+
+
+def _entropy_candidates(line: str) -> Iterator[Tuple[int, str, float]]:
+    """一行里第一个过阈值的高熵串：(列号, 候选串, 分数)。每行只取第一个。"""
+    for match in _CANDIDATE.finditer(line):
+        score = _shannon(match.group(0))
+        if score >= ENTROPY_MIN:
+            yield match.start(), match.group(0), score
+            return
+
+
 def scan_text(path: str, text: str) -> List[Finding]:
     lines = text.splitlines()
     name = Path(path).name
-    entropy_ok = Path(path).suffix.lower() in _ENTROPY_SUFFIXES or name in _ENTROPY_NAMES
+    # 坑：`Path(".env").suffix == ""`，只按 suffix 判会让 `.env` 永远不进熵检查
+    # （`.env` 曾写在 _ENTROPY_SUFFIXES 里却从未生效）。凭据面必须显式认名字。
+    entropy_ok = (
+        Path(path).suffix.lower() in _ENTROPY_SUFFIXES
+        or name in _ENTROPY_NAMES
+        or bool(_ENV_NAME_RE.match(name))
+    )
     hits: List[Finding] = []
     entropy_reported = False
     for lineno, line in enumerate(lines, 1):
@@ -348,11 +414,10 @@ def scan_text(path: str, text: str) -> List[Finding]:
                 shaped = True
         if shaped or not entropy_ok or entropy_reported:
             continue
-        for match in _CANDIDATE.finditer(line):
-            if _shannon(match.group(0)) >= ENTROPY_MIN:
-                hits.append((path, lineno, "high-entropy-string", "warn"))
-                entropy_reported = True
-                break
+        for start, _value, _score in _entropy_candidates(line):
+            hits.append((path, lineno, "high-entropy-string", _entropy_tier(path, line, start)))
+            entropy_reported = True
+            break
     hits.extend(_scan_ast(path, text, lines))
     return hits
 
@@ -984,20 +1049,135 @@ def _report_commit_msg(path: Path, hits: List[Tuple[int, str]], lines: int) -> i
     return 1 if hits else 0
 
 
+def _score_bucket(score: float) -> str:
+    for lo, hi in _SCORE_BUCKETS:
+        if score < hi:
+            return f"{lo:.1f}~{hi:.1f}"
+    return ">=6.0"
+
+
+def _top_dirs(rel: str, depth: int = 2) -> str:
+    return "/".join(rel.split("/")[:depth])
+
+
+def entropy_stats(root: Path, stats: "Counter[str]") -> int:
+    """熵告警分层（只量不改判）：文件类型 / 目录 / 分数区间 / 分级。
+
+    口径与 ``scan_text`` 完全一致：**每个文件只取首条**（``entropy_reported``），
+    所以这里也给出一条文件级记录，而不是逐行累加——否则统计数和实际告警数对不上。
+    """
+    by_suffix: "Counter[str]" = Counter()
+    by_dir: "Counter[str]" = Counter()
+    by_bucket: "Counter[str]" = Counter()
+    by_tier: "Counter[str]" = Counter()
+    must_rows: List[Tuple[str, int, str, str]] = []
+    entropy_files = 0
+    for path in _iter_files(root, stats):
+        try:
+            size = path.stat().st_size
+        except OSError:
+            stats["skip_unreadable"] += 1
+            continue
+        if size > _MAX_ENTROPY_BYTES:
+            stats["shape_only_large"] += 1
+            continue
+        try:
+            text = _decode(path.read_bytes())
+        except OSError:
+            stats["skip_unreadable"] += 1
+            continue
+        if text is None:
+            stats["skip_binary"] += 1
+            continue
+        if not (
+            path.suffix.lower() in _ENTROPY_SUFFIXES
+            or path.name in _ENTROPY_NAMES
+            or _ENV_NAME_RE.match(path.name)
+        ):
+            continue
+        entropy_files += 1
+        try:
+            rel = path.relative_to(root).as_posix()
+        except ValueError:
+            rel = path.as_posix()
+        hit: Optional[Tuple[int, int, float]] = None
+        for lineno, line in enumerate(text.splitlines(), 1):
+            if SPDX in line:
+                continue
+            if any(rx.search(line) for _rule, rx in SHAPE_RULES):
+                continue  # 与 scan_text 一致：命中形状的行不参与熵判定
+            found = next(_entropy_candidates(line), None)
+            if found is not None:
+                hit = (lineno, found[0], found[2])
+                break
+        if hit is None:
+            continue
+        lineno, start, score = hit
+        tier = _entropy_tier(rel, text.splitlines()[lineno - 1], start)
+        suffix = path.suffix.lower() or path.name
+        by_suffix[suffix] += 1
+        by_dir[_top_dirs(rel)] += 1
+        by_bucket[_score_bucket(score)] += 1
+        by_tier[tier] += 1
+        if tier == "must":
+            must_rows.append((rel, lineno, suffix, f"{score:.2f}"))
+
+    stats["entropy_files"] = entropy_files
+
+    def _dump(title: str, counter: "Counter[str]", limit: int = 15) -> None:
+        print(f"[secret-scan] {title}（共 {sum(counter.values())} 条）")
+        for key, count in counter.most_common(limit):
+            print(f"    {key:<28} {count}")
+
+    print(f"[secret-scan] 熵告警分层：{root}（每文件每规则一条，共 {sum(by_tier.values())} 条）")
+    print(f"[secret-scan] 参与熵检查的文件 {entropy_files} 个")
+    _dump("按后缀", by_suffix)
+    _dump("按目录（前两层）", by_dir)
+    _dump("按分数区间", by_bucket)
+    _dump("按分级", by_tier)
+    print(
+        f"[secret-scan] 分层合计：总={sum(by_tier.values())} "
+        f"must={by_tier['must']} sample={by_tier['sample']}"
+        "（每文件每规则一条）"
+    )
+    print(f"[secret-scan] 必须看明细（{len(must_rows)} 条，路径:行 + 类型 + 分数，不含值）")
+    for rel, lineno, suffix, score in sorted(must_rows)[:200]:
+        print(f"    MUST {rel}:{lineno} type={suffix} score={score}")
+    if len(must_rows) > 200:
+        print(f"    MUST 其余 {len(must_rows) - 200} 条省略（计数含全部）")
+    return 0
+
+
 def _report(findings: Iterable[Finding], stats: Optional["Counter[str]"] = None) -> int:
     unique = sorted(set(findings), key=lambda item: (item[0], item[1], item[2]))
     blocks = [f for f in unique if f[3] == "block"]
+    musts = [f for f in unique if f[3] == "must"]
+    samples = [f for f in unique if f[3] == "sample"]
     warns = [f for f in unique if f[3] == "warn"]
 
     for path, lineno, rule, _tier in blocks:
         print(f"BLOCK {path}:{lineno} {rule}")
+    for path, lineno, rule, _tier in musts[:_MAX_WARN_PRINT]:
+        print(f"MUST  {path}:{lineno} {rule}")
+    if len(musts) > _MAX_WARN_PRINT:
+        print(f"MUST  其余 {len(musts) - _MAX_WARN_PRINT} 条省略（计数含全部）")
+    for path, lineno, rule, _tier in samples[:_MAX_SAMPLE_PRINT]:
+        print(f"SAMPLE {path}:{lineno} {rule}")
+    if len(samples) > _MAX_SAMPLE_PRINT:
+        print(
+            f"SAMPLE 其余 {len(samples) - _MAX_SAMPLE_PRINT} 条省略"
+            "（抽样看：代表条数已打，全量分布用 --entropy-stats）"
+        )
     for path, lineno, rule, _tier in warns[:_MAX_WARN_PRINT]:
         print(f"WARN  {path}:{lineno} {rule}")
     if len(warns) > _MAX_WARN_PRINT:
         print(f"WARN  其余 {len(warns) - _MAX_WARN_PRINT} 条省略（计数含全部）")
 
     by_rule = Counter(rule for _p, _l, rule, _t in unique)
-    print(f"[secret-scan] BLOCK={len(blocks)} WARN={len(warns)}")
+    print(
+        f"[secret-scan] BLOCK={len(blocks)} MUST={len(musts)} "
+        f"SAMPLE={len(samples)} WARN={len(warns)}"
+    )
     print("[secret-scan] 按规则：" + ("，".join(f"{k}={v}" for k, v in sorted(by_rule.items())) or "无"))
     if stats is not None:
         print(
@@ -1033,9 +1213,19 @@ def main(argv: Optional[List[str]] = None) -> int:
         metavar="FILE",
         help="扫提交信息文件（commit-msg 钩子用），BLOCK>0 退出 1",
     )
+    parser.add_argument(
+        "--entropy-stats",
+        action="store_true",
+        help="只统计熵告警的分层分布（后缀/目录/分数区间/分级），不改判定、退出码 0",
+    )
     args = parser.parse_args(argv)
 
     stats: "Counter[str]" = Counter()
+    if args.entropy_stats:
+        roots = [Path(item) for item in args.paths] if args.paths else [Path(args.root)]
+        for root in roots:
+            entropy_stats(root, stats)
+        return 0
     if args.commit_msg is not None:
         msg_hits, msg_lines = scan_commit_msg(args.commit_msg)
         return _report_commit_msg(args.commit_msg, msg_hits, msg_lines)

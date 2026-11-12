@@ -12,6 +12,8 @@
 """
 from __future__ import annotations
 
+import base64
+import hashlib
 import os
 import shutil
 import subprocess
@@ -25,6 +27,12 @@ FAKE = "ghp_" + "A" * 36
 #: 提交信息通道用另一个值，避免和文件扫描用例串味。
 MSG_FAKE = "ghp_" + "C" * 36
 BLOB = "Qm9ndXNTdHJpbmdXaXRoRW5vdWdoRW50cm9weTEyMzQ1Njc4OTBhYmNkZWY"
+
+#: 真随机 32 字节的 base64（sha256 派生，运行期算，源码里不留长字面量）。
+#: 它必须被熵规则看见——降噪只改「分级」，不许把命中改没。
+RANDOM_B64 = base64.b64encode(
+    hashlib.sha256(b"mbdsdr-entropy-probe").digest()
+).decode()
 
 
 def _init_repo(tmp_path: Path) -> Path:
@@ -346,3 +354,82 @@ def test_commit_msg_hook_blocks_real_commit(tmp_path: Path) -> None:
         cwd=repo, capture_output=True, text=True, encoding="utf-8", env=env,
     )
     assert ok.returncode == 0, ok.stdout + ok.stderr
+
+
+# ----------------------------------------------------------------------
+# 熵告警降噪（2026-11-13）：分级只改「看不看」，一条命中都不许消失
+# ----------------------------------------------------------------------
+def test_entropy_still_hits_random_base64_in_python_source(tmp_path: Path) -> None:
+    """反证 (a)：普通 .py 里的 32 字节随机 base64 必须仍然命中（落 SAMPLE）。"""
+    src = tmp_path / "module.py"
+    src.write_text(f'PAYLOAD = "{RANDOM_B64}"\n', encoding="utf-8")
+
+    result = run_scan(tmp_path, "--root", str(tmp_path))
+    text = result.stdout + result.stderr
+    assert result.returncode == 0, text  # 熵档不拦提交
+    assert "module.py:1 high-entropy-string" in text, text
+    assert "SAMPLE " in text, text
+    assert "MUST=0" in text and "SAMPLE=1" in text, text
+    assert RANDOM_B64 not in text
+
+
+def test_entropy_env_file_is_must(tmp_path: Path) -> None:
+    """反证 (b)：.env 里的高熵值必须进「必须看」。"""
+    (tmp_path / ".env").write_text(f"API_KEY={RANDOM_B64}\n", encoding="utf-8")
+
+    result = run_scan(tmp_path, "--root", str(tmp_path))
+    text = result.stdout + result.stderr
+    assert ".env:1 high-entropy-string" in text, text
+    assert "MUST  " in text, text
+    assert "MUST=1" in text and "SAMPLE=0" in text, text
+    assert RANDOM_B64 not in text
+
+
+def test_entropy_json_api_key_is_must(tmp_path: Path) -> None:
+    """反证 (c)：.json 的 api_key 字段值必须进「必须看」（字段名紧邻）。"""
+    (tmp_path / "config.json").write_text(
+        '{"api_key": "%s"}\n' % RANDOM_B64, encoding="utf-8"
+    )
+
+    result = run_scan(tmp_path, "--root", str(tmp_path))
+    text = result.stdout + result.stderr
+    assert "config.json:1 high-entropy-string" in text, text
+    assert "MUST  " in text, text
+    assert "MUST=1" in text and "SAMPLE=0" in text, text
+    assert RANDOM_B64 not in text
+
+
+def test_long_blobs_in_assets_stay_sample(tmp_path: Path) -> None:
+    """minified JS 与 base64 图片数据必须仍在，但只落「抽样看」。"""
+    (tmp_path / "app.min.js").write_text(
+        f'var a={{data:"{RANDOM_B64 * 8}"}};\n', encoding="utf-8"
+    )
+    (tmp_path / "page.html").write_text(
+        f'<img src="data:image/png;base64,{RANDOM_B64 * 4}">\n', encoding="utf-8"
+    )
+
+    result = run_scan(tmp_path, "--root", str(tmp_path))
+    text = result.stdout + result.stderr
+    assert "app.min.js:1 high-entropy-string" in text, text
+    assert "page.html:1 high-entropy-string" in text, text
+    assert "SAMPLE " in text, text
+    assert "MUST=0" in text and "SAMPLE=2" in text, text
+
+
+def test_entropy_stats_reports_distribution(tmp_path: Path) -> None:
+    """`--entropy-stats` 的分层口径必须与扫描一致（每文件每规则一条）。"""
+    (tmp_path / "a.py").write_text(f'X = "{RANDOM_B64}"\n', encoding="utf-8")
+    (tmp_path / ".env").write_text(f"API_KEY={RANDOM_B64}\n", encoding="utf-8")
+    (tmp_path / "b.json").write_text('{"api_key": "%s"}\n' % RANDOM_B64, encoding="utf-8")
+    (tmp_path / "c.min.js").write_text(
+        f'var a={{data:"{RANDOM_B64 * 8}"}};\n', encoding="utf-8"
+    )
+
+    result = run_scan(tmp_path, "--entropy-stats", "--root", str(tmp_path))
+    text = result.stdout + result.stderr
+    assert result.returncode == 0, text
+    assert "每文件每规则一条" in text, text
+    assert "总=4 must=2 sample=2" in text, text
+    for section in ("按后缀", "按目录（前两层）", "按分数区间", "按分级"):
+        assert section in text, text
+    assert "MUST " in text and RANDOM_B64 not in text, text
