@@ -601,7 +601,7 @@ QT_QPA_PLATFORM=offscreen python -m pytest "<nodeid>" -q
 
 ---
 
-## K17 — 设置向前覆盖：3 个字段无 UI 入口也无理由（2026-11-13 实跑，存量·未修）
+## K17 — 设置向前覆盖：3 个字段无 UI 入口也无理由（2026-11-13 实跑，已转绿 `ffeeb7c5`）
 
 - **nodeid**：`tests/test_settings_ui_coverage.py::test_forward_every_field_has_ui_entry_or_reason`
 - **复跑命令**：
@@ -623,17 +623,29 @@ QT_QPA_PLATFORM=offscreen python -m pytest "<nodeid>" -q
   定位方式：`git log -S`（未逐提交 checkout 复跑）。
 - **根因**：盘点锚点跟着产品文案走，文案改了锚点没跟；内部持久化键入库时没有
   同步登记「为什么没有 UI」。
-- **当前 owner**：`desktop/config_schema.py`、`scripts/settings_inventory.py` 无活跃
-  claim；`desktop/settings_panel.py` = 设置三环线；`docs/settings-inventory.md` =
-  机制线。建议产品侧归 **设置三环线**，锚点同步归 **机制线**。
-- **转绿条件**：单跑 `1 passed` 且 `measure().missing == []`；`agc_enabled` 要么按
-  实际控件更新锚点（`硬件 AGC`），要么把控件文案改回；两个内部键在
-  `INTERNAL_REASONS` 写明「为什么没有 UI」。反证验收：临时删掉 `control_panel`
-  的 AGC 控件或删一条理由，该节点必须重新变红。
+- **当前 owner**：无（K17 关闭；`scripts/settings_inventory.py` 无活跃 claim；
+  `desktop/settings_panel.py` 仍属设置三环线，本笔未触碰）。
+- **收口判定（逐字段）**：
+  - `agc_enabled`：不是缺控件，是锚点过时。控件文案早在 `2a07f344` 改为
+    `QCheckBox("硬件 AGC")`，产品形态正确，**不补新控件/不改 UI**，按实际控件
+    更新 `INTERNAL_UI_ANCHORS`。
+  - `settings_expanded_groups` / `right_column_expanded_section`：持久化的是设置页
+    分组与右栏手风琴的「上次展开态」界面记忆——用户的表达方式就是点分组/节标题
+    本身；再补设置项会形成两个真相源，且没有可通过它表达的长期偏好。**不补入口**，
+    在 `INTERNAL_REASONS` 写明「为什么不该暴露」。
+- **转绿提交**：`ffeeb7c5`（`git cat-file -t ffeeb7c5` = commit）。
+- **验证（实跑）**：单跑该 nodeid → `1 passed`；
+  `python scripts/settings_inventory.py` → `字段 55 / 有 UI 入口 51 / 有理由 4 /
+  缺失 0 / 幽灵键 0`。
+- **反证（实跑）**：
+  - 删掉 `settings_expanded_groups` 理由 → 红，报
+    `missing=['settings_expanded_groups']`（`ui_entries=51, reasons=3`）；恢复后绿。
+  - 把 `agc_enabled` 锚点改回旧文案 `AGC 自动增益` → 红，报
+    `missing=['agc_enabled']`（`ui_entries=50, reasons=4`）；恢复后绿。
 
 ---
 
-## K18 — 设置盘点表与脚本读数不一致（2026-11-13 实跑，存量·未修）
+## K18 — 设置盘点表与脚本读数不一致（2026-11-13 实跑，已转绿 `a92d74c4`）
 
 - **nodeid**：`tests/test_settings_ui_coverage.py::test_inventory_table_matches_script`
 - **复跑命令**：
@@ -648,12 +660,21 @@ QT_QPA_PLATFORM=offscreen python -m pytest "<nodeid>" -q
 - **首次变红**：`2a07f344`（2026-11-11 22:14，UI 入口 51→50、缺失 0→1），随后
   `20652e90`（22:26，字段 53→55、缺失 1→3）；表最后一次生成在 `a2be554a`
   （2026-11-11）。定位方式 `git log -S`。
-- **当前 owner**：`docs/settings-inventory.md` = 机制线；`scripts/settings_inventory.py`
-  无活跃 claim；产品字段缺失另归设置三环线（见 K17）。
-- **转绿条件**：`python scripts/settings_inventory.py --write` 后单跑 `1 passed`，
-  且 diff 只来自脚本生成、`source_commit` 等于
-  `git log -1 --format=%h -- desktop/config_schema.py`。注意：K17 未修时也允许本条目
-  先绿——表如实记录 `缺失=3` 即可，不许为了表绿去改盘点口径。
+- **当前 owner**：无（K18 关闭）。`docs/settings-inventory.md` 原为机制线孤儿 claim
+  （pid 34636 已退出、心跳过期 +1611.8min、工作区无在途改动），按
+  COORDINATION §6.1.4 2026-11-13 记录型接管，提交后已释放。
+- **根因复核（修正原判断）**：表**不是手写**的——块由
+  `scripts/settings_inventory.py --write` 生成，`test_inventory_table_matches_script`
+  整块比对脚本产出，手改即红。真实根因是 `config_schema` 两次变更
+  （`2a07f344`、`20652e90`）后没有重新生成，块内数字停在 `a2be554a` 的快照。
+- **转绿提交**：`a92d74c4`（`git cat-file -t a92d74c4` = commit，含接管记录）。
+- **验证（实跑）**：`python scripts/settings_inventory.py --write` 后单跑 → `1 passed`；
+  整文件 `tests/test_settings_ui_coverage.py` → `67 passed`；
+  `python scripts/settings_inventory.py --check` → `文档块一致`；
+  `source_commit = ce1ed9ef` 与 `git log -1 --format=%h -- desktop/config_schema.py` 一致。
+- **反证（实跑）**：把块内 `55` 改成 `54` → 该 nodeid 红，diff 显示
+  `+ 字段数 | **54**` vs `- 字段数 | **55**`；还原后绿。
+- **残留说明**：§0 的 2026-11-05 取证表是历史快照，不在本守卫范围，未改。
 
 ---
 
@@ -711,6 +732,20 @@ QT_QPA_PLATFORM=offscreen python -m pytest "<nodeid>" -q
 | `test_every_passthrough_tooltip_is_registered` | `AssertionError: 以下透传 tooltip 没有进登记表（也就不可能有运行时兜底）：`（`control_panel.py:506` / `:1045` `_step_tooltip_text()`） | `b97b0cd1`（2026-11-11 23:34，步进 tooltip 随当前档位生成） |
 | `test_tooltip_baseline_only_shrinks` | `AssertionError: 新增了不合规 tooltip（长度 <12 或与控件可见文字逐字相同）：`（`main_window.py::收起右栏浮层（Esc）::too_short`） | `c204e945`（2026-11-12 11:20，右栏浮层临时展开按钮） |
 | `test_baseline_file_stays_in_sync_with_counter` | `AssertionError: assert 3 == 4`（基线 3 条 vs 当前 4 条） | `c204e945`（同上，出现第 4 条违规） |
+
+- **复跑命令**：
+  ```bash
+  MBDSDR_OFFLINE=1 QT_QPA_PLATFORM=offscreen \
+    python -m pytest tests/test_tooltip_guard.py -q -rf
+  ```
+- **当前 owner**：`desktop/device_panel.py`、`desktop/control_panel.py`、
+  `desktop/main_window.py`、`docs/tooltip-baseline.json` 均无活跃 claim。按引入线：
+  `ff7e3288` = 设备面板线、`b97b0cd1` = 控制面板线、`c204e945` = 右栏收窄线。
+- **转绿条件**：4 条全部通过——动态 tooltip 补「未确认 / 配置意图 / 以设备为准」
+  标注或删数值；透传 tooltip 进登记表；`收起右栏浮层（Esc）` 改写到 ≥12 字且不等于
+  可见文字；基线只降不升（当前 3 条，不许把第 4 条塞进去）。验收：整文件
+  `7 passed`；反证：恢复任一违规，对应节点必须红。
+ 当前 4 条） | `c204e945`（同上，出现第 4 条违规） |
 
 - **复跑命令**：
   ```bash
