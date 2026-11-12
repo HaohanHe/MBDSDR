@@ -72,10 +72,17 @@ MBDSDR_TEST_LOCK=0 QT_QPA_PLATFORM=offscreen \
 ## K05 — desktop 全量确定性红（2026-11-09 16:09–17:10 权威复跑）
 
 **本节取代上午那版 K05，上午的结论作废。** 上午用「日志点号序号 →
-collect 清单」映射 nodeid 得到 15 条，并判成「单跑全绿 = 顺序依赖假红」。
+collect 清单」映射 nodeid 得到 15 条，并判成「单跑全绿 = 顺序依赖假红」
+（历史判断，已在本段更正）。
 那套映射是错的：collect 顺序随代码变动整体偏移，跑的根本不是真失败的
 用例，所以 `15 passed` 证明不了任何事。**以后一律从 pytest `-rf` 汇总的
 `FAILED ...` 行取 nodeid，不许用点号序号猜。**
+
+- **转绿条件（本节销账判据）**：本节 20 条全部有结论——18 条真修/自然销账，
+  2 条顺序依赖单跑通过；未修的 2 条已转为 K06（静默吞噬棘轮）与 K07（UI 假活按钮），
+  以 K06/K07 自己的转绿条件为准。验收：`-rf` 汇总不再出现本节 nodeid，
+  且 K06/K07 仍如实标红。
+- **首次记录**：2026-11-09 16:09–17:10（权威复跑窗口）。
 
 ### 权威结果（汇总行完整、数字可信）
 
@@ -192,6 +199,11 @@ python -m pytest tests/test_swallow_guard.py -q -rf
 快照；K09 局部 `4 passed`。**K09 修复后的最终全量数字见 K09 节：
 `5573 passed / 0 failed`（`bundle_desktop_final2`）。**
 
+- **转绿条件（本节销账判据）**：表中 18 条各有实跑批次记录；K06/K07 未修项
+  保持 `xfail`，不算绿。验收：对应节点单跑或上下文批次通过，且汇总里
+  `xfailed` 不被计为 `passed`。
+- **记录日期**：2026-11-09 18:30（本节标题时刻）。
+
 ---
 
 ## K08 — 录音/回放跨线程竞态（2026-11-09 20:00，真 bug·本轮修）
@@ -223,6 +235,12 @@ python -m pytest tests/test_swallow_guard.py -q -rf
   `1 failed / 10 passed`、修后 `11 passed`，反证成立。
 - **转绿条件**：全量固定顺序重跑该节点转绿，且汇总行 `0 failed`。
   第二次 35:35 全量里该节点**已转绿**（两条红换成 K09），K08 销账。
+- **复跑命令**：
+
+  ```bash
+  MBDSDR_TEST_LOCK=0 QT_QPA_PLATFORM=offscreen python -m pytest \
+    tests/test_record_replay_config.py::test_start_recording_stops_replay_first -q -rf
+  ```
 
 ---
 
@@ -253,6 +271,16 @@ python -m pytest tests/test_swallow_guard.py -q -rf
   按钮）一处没修，只是按已知红登记；**全量 PASS 不等于没有欠账**。
   kernel 组本轮未重跑（上次 `2827 passed` 属改动前），真机 RTL2832U /
   GNSS 不在位、硬件项由套件自己 skip，均继续 `not_verified`。
+- **转绿条件**：`test_scenario_a_pass_to_archive` / `test_scenario_c_plan_and_degrade`
+  在任意运行时刻单跑与固定顺序全量均绿；`pass_case` 保持 function scope
+  （改回 module scope 必须红）。
+- **复跑命令**：
+
+  ```bash
+  MBDSDR_OFFLINE=1 QT_QPA_PLATFORM=offscreen python -m pytest \
+    tests/test_e2e_operation_scenarios.py -q -rf
+  ```
+- **首次记录日期**：2026-11-09。
 
 ---
 
@@ -371,6 +399,14 @@ listGains 失败（设备可能不支持分档）: 'SDRDevice' object has no att
 - **人工复核（谁/多久/看什么）**：硬件验收线（`scripts/hw_acceptance/*`；串口入口
   `scripts/real_hw_acceptance.py` 当前 claim=打包线），每个真机验收批次 + 发版前
   各 1 次，连真机后看日志是否仍出现上面两句；出现即条目保持打开。
+- **转绿条件**：① `RtlTcpBackend` 补 `set_offset_tuning` 委托到 adapter 并显式
+  返回「协议不支持」，或 `_connect_backend` 先做能力探测再跳过；② `gain_panel`
+  的 `listGains` 探测前先 `hasattr`；③ 离线静态断言（`hasattr(RtlTcpBackend,
+  "set_offset_tuning")`、探测前 `hasattr`）转绿，**且**真机批次日志不再出现
+  「Offset Tuning 下发异常」「listGains 失败」两句。
+- **仍红判据**：任一真机验收批次日志出现上述任一句，条目保持打开；离线静态断言
+  即使转绿也不单独销账（它证明不了运行期告警消失）。
+- **首次记录**：2026-11-09 22:15。
 
 ---
 
@@ -393,6 +429,12 @@ listGains 失败（设备可能不支持分档）: 'SDRDevice' object has no att
 - **人工复核（谁/多久/看什么）**：硬件验收线（该脚本无活跃 claim），每批真机验收
   跑一次 `python scripts/hw_acceptance/ring4_recording_playback.py --freq <Hz>`，
   看 `playback_ratio` 是否仍擦线（0.3 附近）；发版前至少 1 次。
+- **转绿条件**：R4 判据改为同一段 IQ 的「文件回放 vs 内存直解」对拍（消掉时间窗
+  变量），或改为「回放 RMS 有能量且与实时同量级」并写明依据；改后连续两批真机
+  验收判定稳定，`playback_ratio` 不再落在 0.3 擦线区。
+- **仍红判据**：任一真机批次 `playback_ratio ∈ [0.28, 0.33]` 或判 FAIL，条目保持
+  打开；只调阈值不算转绿。
+- **首次记录**：2026-11-09 22:20。
 
 ---
 
@@ -430,6 +472,7 @@ skyfield 参考：首场峰值 5.025°（贴 5° 门限的掠射场）
   （发版前必跑），固定 TLE + 固定观测时刻跑
   `python scripts/hw_acceptance/ring5_satellite_passes.py --lat 45 --lon 120 --alt 200`，
   专看 NOAA-19 的 5.025° 掠射场是否在列；连续两轮不在列即保持红。
+- **首次记录**：2026-11-09 22:46。
 
 ---
 
@@ -479,6 +522,10 @@ assert abs(elev - st["elevation"]) <= 0.2
     tests/test_e2e_operation_scenarios.py::test_scenario_b_sky_to_spectrum \
     tests/test_e2e_operation_scenarios.py::test_scenario_b_sky_guard_is_live -q
   ```
+- **转绿条件**：`test_scenario_b_sky_to_spectrum` 与 `test_scenario_b_sky_guard_is_live`
+  在**固定 epoch** 下确定性地「主用例绿 + 反证红」——主用例仰角差 ≤0.2°，反证把
+  工具时刻固定回退 60 s 时必须 `AssertionError`；任一运行时刻单跑不得因当天过境
+  几何在绿/红间摇摆。
 - **诚实边界**：用例仍依赖「24h 内有一场 NOAA 19 过境 + 本地有可用 TLE」，
   无 TLE 时 skip（环境前置条件，与本红无关）；但判据本身不再随当天过境几何
   在绿/红之间摇摆——1 秒级时间差已消除（改前/改后同刻差 0.2459° → 0.0001°）。
@@ -649,6 +696,10 @@ QT_QPA_PLATFORM=offscreen python -m pytest "<nodeid>" -q
     `missing=['settings_expanded_groups']`（`ui_entries=51, reasons=3`）；恢复后绿。
   - 把 `agc_enabled` 锚点改回旧文案 `AGC 自动增益` → 红，报
     `missing=['agc_enabled']`（`ui_entries=50, reasons=4`）；恢复后绿。
+- **转绿条件**：上述逐字段判定落地后，单跑该 nodeid `1 passed`，
+  `python scripts/settings_inventory.py` 报「字段 55 / 有 UI 入口 51 /
+  有理由 4 / 缺失 0」；反证：删任一 `INTERNAL_REASONS` 条目或把
+  `agc_enabled` 锚点改回旧文案，该节点必须红。
 
 ---
 
@@ -681,6 +732,8 @@ QT_QPA_PLATFORM=offscreen python -m pytest "<nodeid>" -q
   `source_commit = ce1ed9ef` 与 `git log -1 --format=%h -- desktop/config_schema.py` 一致。
 - **反证（实跑）**：把块内 `55` 改成 `54` → 该 nodeid 红，diff 显示
   `+ 字段数 | **54**` vs `- 字段数 | **55**`；还原后绿。
+- **转绿条件**：`python scripts/settings_inventory.py --write` 生成的数字块与
+  `--check` 一致，单跑该 nodeid `1 passed`；反证：手改块内任一数字必须红。
 - **残留说明**：§0 的 2026-11-05 取证表是历史快照，不在本守卫范围，未改。
 
 ---
@@ -769,6 +822,10 @@ baseline 56 → 58（`BUILT_AT` 同步 58），每条带 owner + reason：
 - 11 个相关测试文件同会话运行：**117 passed**（37.55s，持 Qt 锁）。
 - 中途另一会话（PID 24992）持锁时，单跑 ratchet 曾用 `MBDSDR_TEST_LOCK=0`
   得到 3 passed；最终结论以持锁的 117 passed 为准。
+- **转绿条件**：33 条逐条处置（删 16 / 改 15 / 留 2）后，
+  `test_no_new_source_text_pins` 与 11 个相关测试文件全绿；留下的 2 条必须继续
+  带 owner + reason，且基线只降不升（当前 56 → 58 是这 2 条的登记，不许再涨）。
+  反证：把任一「改」过的断言退回文本 pin，该节点必须红。
 - **判断**：33 条里只有 2 条真的在钉「产品必须给操作员看到的文档判据」，
   其余 31 条钉的是实现写法——4 条与既有行为用例/AST 硬闸重复、10 条改写为
   行为或运行时取值、2 条是注释文本、9 条是扫描器把运行期文件误判成源码、
