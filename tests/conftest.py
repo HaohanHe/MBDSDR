@@ -1037,6 +1037,35 @@ def _restore_time_engine():
         pass
 
 
+@pytest.fixture(autouse=True)
+def _restore_font_scale_globals():
+    """每个用例前后把 themes 的三个进程级全局复位。
+
+    `themes` 的裸名/包名已在 6c1064b1 合并为同一个模块对象，好处是"只有一个
+    真值源"，代价是 `fit_scale_to_screen()` / `set_font_scale_override()` 写入
+    的降档状态会留在进程里：前一个用例按 150% 请求被降到 100%，后一个用例
+    断言"平台默认倍率/无提示"就会莫名变红（顺序依赖随机红）。
+
+    复位放 function 级、且前后各一次：起点干净，失败用例也不把脏状态留给
+    下一个。只复位缓存与提示，不碰 `QApplication` 已设置的字体（那属于用例
+    自己负责的 UI 现场）。
+    """
+    try:
+        import themes
+    except Exception:  # noqa: BLE001 - 裁剪环境没有 themes 时跳过
+        yield
+        return
+
+    def _reset():
+        themes._FONT_SCALE_OVERRIDE = None
+        themes._FONT_SCALE_NOTE = None
+        themes._PLATFORM_FONT_PT = None
+
+    _reset()
+    yield
+    _reset()
+
+
 @pytest.fixture(autouse=True, scope="module")
 def _recycle_top_level_widgets():
     """每模块结束回收遗留顶层 widget（AGENTS.md 对策①）。
