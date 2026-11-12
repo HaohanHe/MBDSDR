@@ -1890,7 +1890,18 @@ No supported devices found），GNSS+SDR 同开复验没做成；离线那次
 > 命令：`python scripts/check_commit_residue.py <commit>`（也可 `--range A..B`、`--repo <临时 worktree>`）。
 > 判据：该提交新增的连续行块，若以删除形态逐字回到工作区未提交 diff，即判残留。
 > 取舍：只认 ≥2 行且非空的逐字相同段（`MIN_RUN=2`），宁漏不误——别人同文件的在途 hunk 不会命中。
-> 实例：`840d10ef` 在临时 worktree 重放，缺那 11 行 → 2 处 RESIDUE / RC 1，补回 → OK / RC 0。脚本是事后检查，不接钩子。
+> 实例：`840d10ef` 在临时 worktree 重放，缺那 11 行 → 2 处 RESIDUE / RC 1，补回 → OK / RC 0。
+> 2026-11-12 已接进 `post-commit`：每次提交后自动跑（约 0.35 s），命中时打显眼块并追加
+> `.locks/residue_commits.log`（JSONL：时间/commit/文件/行号/被删原文）；**只记录、不返回非 0**
+> ——提交已落地，卡下一笔只会把账算到别人头上。
+
+> **批次末手动跑的两道慢检查（2026-11-12；>3 s，不进钩子）**
+>
+> 命令与耗时：`python scripts/audit_evidence.py`（约 20.9 s）、`python scripts/check_red_lifecycle.py`（约 12.5 s）。
+> 不进钩子的理由：单次远超 3 s；塞进 pre-commit 只会让人开始用 `--no-verify`，门禁反而先失效。
+> 谁在什么时机跑：一次任务批次收尾时由当班 owner 跑一次，结果（红/绿 + 条数）记进本台账或对应 evidence 文档。
+> 第一个实例（2026-11-12）：两道都实跑——`audit_evidence.py` RC=1、2456 条数字断言无证据；
+> `check_red_lifecycle.py` RC=1、FAIL（样例 `docs/star-catalog.md:334`）。
 
 > **有活跃 claim ≠ 文件可运行（2026-11-11 立规；「空表 ≠ 无人占」的姊妹条）**
 >
