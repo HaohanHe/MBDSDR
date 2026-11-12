@@ -36,6 +36,8 @@ from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 
+from .jpeg_huffman_core import HuffmanTable, LrptJpegError, LrptJpegHuffmanError
+from .jpeg_k3_tables import build_k3_tables
 from .lrpt_dct import idct_8x8, unzigzag_order
 
 __all__ = [
@@ -68,21 +70,15 @@ __all__ = [
 
 # --------------------------------------------------------------------------- #
 # 异常族（带上下文，绝不静默半截数据）
+#   LrptJpegError / LrptJpegHuffmanError 定义在叶子模块 jpeg_huffman_core：
+#   HuffmanTable 会抛坏码异常，两者必须同源，否则 except 判断会跨模块失效。
 # --------------------------------------------------------------------------- #
-class LrptJpegError(Exception):
-    """LRPT JPEG 压缩域解码所有错误的基类。"""
-
-
 class LrptJpegMarkerError(LrptJpegError):
     """标记流异常（缺 SOI、未知/非法 marker 等）。"""
 
 
 class LrptJpegTruncatedError(LrptJpegError):
     """熵数据在块/MCU 中途被 EOF 或 marker 截断。"""
-
-
-class LrptJpegHuffmanError(LrptJpegError):
-    """坏 Huffman 码（16 bit 内无匹配）或 AC/DC 表缺失。"""
 
 
 class LrptJpegUnsupportedError(LrptJpegError):
@@ -212,56 +208,10 @@ class BitReader:
 
 
 # --------------------------------------------------------------------------- #
-# Huffman 查找表：由 DHT counts + HUFFVAL 生成（canonical decode）
+# Huffman 查找表：定义在叶子模块 jpeg_huffman_core（本文件原处再导出）。
+# jpeg_k3_tables 需要它，若留在这里就会与 jpeg_k3_tables -> lrpt_huffman 成环；
+# 它只依赖 BitReader 的 read_bit/pos，用 Protocol 注解，不下沉 BitReader。
 # --------------------------------------------------------------------------- #
-class HuffmanTable:
-    """DC/AC Huffman 解码表（JPEG Annex F mincode/maxcode/valptr）。
-
-    由 DHT 的 16 个“各长度的码数”与符号序列（HUFFVAL）构造。``table_class``
-    仅用于报错上下文（'DC'/'AC'），``table_id`` 为 DHT 高位半字节 Th。
-    """
-
-    def __init__(self, counts: List[int], huffval: List[int],
-                 table_class: str, table_id: int) -> None:
-        if len(counts) != 16:
-            raise LrptJpegHuffmanError(
-                f"{table_class} 表 {table_id} counts 须 16 项，收到 {len(counts)}")
-        if sum(counts) != len(huffval):
-            raise LrptJpegHuffmanError(
-                f"{table_class} 表 {table_id} counts 和 {sum(counts)} != HUFFVAL 数 {len(huffval)}")
-        self.table_class = table_class
-        self.table_id = table_id
-        self.huffval = list(huffval)
-        self.mincode = [0] * 17
-        self.maxcode = [-1] * 17
-        self.valptr = [-1] * 17
-        code = 0
-        k = 0
-        for length in range(1, 17):
-            cnt = counts[length - 1]
-            if cnt > 0:
-                if code + cnt - 1 >= (1 << length):
-                    raise LrptJpegHuffmanError(
-                        f"{table_class} 表 {table_id} 长度 {length} 码溢出（非法 DHT）")
-                self.valptr[length] = k
-                self.mincode[length] = code
-                code += cnt
-                self.maxcode[length] = code - 1
-                k += cnt
-            code <<= 1
-
-    def decode(self, reader: BitReader) -> int:
-        """逐位读入，命中即返回符号；16 bit 内无匹配则抛坏码异常。"""
-        code = 0
-        for length in range(1, 17):
-            code = (code << 1) | reader.read_bit()
-            mc = self.maxcode[length]
-            if mc >= 0 and code <= mc:
-                idx = self.valptr[length] + (code - self.mincode[length])
-                return self.huffval[idx]
-        raise LrptJpegHuffmanError(
-            f"坏 Huffman 码：16 bit 内在 {self.table_class} 表 {self.table_id} 无匹配"
-            f" (offset={reader.pos})")
 
 
 # --------------------------------------------------------------------------- #
@@ -749,8 +699,6 @@ def decode_meteor_scan(scan: MeteorScan,
         Q 字段现算（IJG）；空 dict 或显式 None 表缺项 -> 诚实抛错，
         不拿默认量化值糊弄。
     """
-    from .jpeg_k3_tables import build_k3_tables
-
     data = bytes(getattr(scan, "scan", b"") or b"")
     if not data:
         raise LrptJpegTruncatedError("空扫描：无 Meteor 熵数据")

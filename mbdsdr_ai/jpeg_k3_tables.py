@@ -4,7 +4,8 @@
 Meteor-M LRPT 的每个 Segment **不带 DHT**——DC/AC 表用 ITU T.81 Annex K.3
 的规范固定表（俗称 tables.h 的 JPEG 标准默认表）。本模块把四张表以规范
 公开数据（T.81 Annex K.3.1/K.3.2/K.3.3/K.3.4 的 bits/huffval）声明为纯数据，
-并用本仓 :mod:`mbdsdr_ai.lrpt_huffman` 的 ``HuffmanTable`` 构造可解码实例。
+并用本仓叶子模块 :mod:`mbdsdr_ai.jpeg_huffman_core` 的 ``HuffmanTable`` 构造
+可解码实例（该名字仍从 :mod:`mbdsdr_ai.lrpt_huffman` 原处再导出）。
 
 红线：表值来自公开规范文本（ITU T.81），非任何 GPL 源码转录；口径见
 docs/learn/phase63/lrpt-image-decode-eval.md。
@@ -13,7 +14,7 @@ from __future__ import annotations
 
 from typing import Dict, List, Tuple
 
-from .lrpt_huffman import HuffmanTable
+from .jpeg_huffman_core import HuffmanTable
 
 __all__ = [
     "K3_DC_LUMA_BITS",
