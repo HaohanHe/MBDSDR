@@ -1859,6 +1859,7 @@ No supported devices found），GNSS+SDR 同开复验没做成；离线那次
 | 文件 | 线名 | 开始时间 | 预计提交 hash |
 |---|---|---|---|
 | _（空）_ | | | |
+| `docs/settings-inventory.md` | K18收口线（孤儿 claim 接管；脚本重生成数字块，提交后即释放） | 2026-11-13 01:48 | 随本笔 |
 | `desktop/control_panel.py` | 参数治理线/59ca04d1（preset_combo 宽策略 + 静噪行拆行；pid 见 claim 记录） | 2026-11-06 06:23 | 待定 |
 | `docs/COORDINATION.md` | 参数治理线/59ca04d1（本文件 §6.1 备忘 + 尺寸登记） | 2026-11-06 06:23 | 同笔 |
 | **真机（USB SDR）** | 跑 `hw_acceptance/`、七环、`capture_throughput.py` 的线（资源独占） | 占用时段 | — |
@@ -2228,6 +2229,34 @@ No supported devices found），GNSS+SDR 同开复验没做成；离线那次
 - 引用：`docs/pending-patches/2026-11-12-ring-reader-stop-reference-loss.patch`；
   接管提交即包含本记录的那次提交（`fix(sdr_backend): stop() 超时后不再丢弃线程引用`）
 - 回退：`git checkout -- mbdsdr_ai/sdr_backend.py` 并恢复 xfail 标记，
+  或 `git revert <接管提交>`
+
+### 接管记录：docs/settings-inventory.md
+
+- 接管人 / 会话：K18收口线 / 6ae85f56a16a76df1598024e
+- 接管时间 / HEAD：2026-11-13 01:48 / `ffeeb7c5`
+- 原持有者：机制线
+- 原 claim 证据：acquired_at=2026-11-11 20:56:53 ttl=60min 心跳=2026-11-11 20:56:53，
+  接管时已过期 **+1611.8 分钟**（held=1671.8/60.0min），满足 ≥30 分钟
+- 原 owner 最后活跃证据（原始输出）：
+  - `file_claim.py status docs/settings-inventory.md`：
+    `owner=机制线 held=1671.8/60.0min EXPIRED(+1611.8min) pid=34636 since=2026-11-11 20:56:53`
+  - `git log --oneline --since="2026-11-11 00:00" -- docs/settings-inventory.md`：
+    该文件守卫块最后一次内容变更是 `a2be554a`（2026-11-11 18:33:56，早于 claim
+    20:56:53）；此后的 `e2cf9c20`（23:53:55）是别线的行号重定位，未改块内数字
+  - `git status --porcelain -- docs/settings-inventory.md`：空（无在途改动）
+  - `Get-Process -Id 34636`：无输出（进程已退出）；接管前 `git hash-object`
+    = `84da999b131af6a669d6656e266cb7a2e5268267`
+- 凭什么判定「已放弃」而不是「在忙」：
+  过期 ≥ 30min（+1611.8）✅；`git status` 为空 ✅；claim 之后该文件无内容提交
+  （仅别线行号重定位）✅；pid 34636 已不存在 ✅ —— 四条同时成立。
+- 本次改动范围：仅 §17 的 `settings-guard` 数字块（第 653–658 行），由
+  `python scripts/settings_inventory.py --write` 重生成；另含本记录与 §6.1 占用行。
+- 保留原改动的证明：接管前该路径 `git status` 为空、blob 为
+  `84da999b131af6a669d6656e266cb7a2e5268267`；接管提交 diff 只含块内数字
+  （55 / 51 / 4 / 0 / 0 / `ce1ed9ef`），不含原 owner 任何未提交内容。
+- 引用：接管提交即包含本记录的那次提交（`fix(settings-inventory): K18 …`）
+- 回退：`git checkout 84da999b131af6a669d6656e266cb7a2e5268267 -- docs/settings-inventory.md`
   或 `git revert <接管提交>`
 
 ### 等待项：AI SDR 会话显式注入（2026-11-12）
