@@ -15,7 +15,12 @@
      的字符串参数为前缀（`getattr(self, "_preset_" + n)` → `_preset_*` 全部可达）；
   D3 Qt 自动连接槽：`on_<对象>_<信号>` 命名；
   D4 装饰器是 `pyqtSlot` / `Slot`（含带参数的调用形态）；
-  D5 文档/配置按名引用：`docs/**/*.md` 里反引号包着的标识符，或名字后面紧跟 `(`。
+  D5a 运行时按名解析：名字出现在**代码真按路径读过**的配置文件里（命令表、
+      插件注册表、序列化字段名、配置键）。判据是结构性的——配置文件的相对
+      路径或文件名必须出现在某个代码字符串常量里，才算「运行时会被取到」；
+      没有任何代码引用的 JSON（死真值源）整份不收。
+  D5b 仅文档提及：只出现在 `docs/**/*.md` 的文字里，**不算可达**。
+      这类名字落回「真死候选」，reason 记 ``D5b`` 以便和「从未被提及」区分。
 
 **保留**（不删，理由必须落库）
   R1 `__*__`、`main`、`test_*`；
@@ -24,7 +29,10 @@
   R4 `docs/dead-symbols-waivers.json` 里逐条登记（必须写 reason + review_by）。
 
 **真死**：以下条件全不满足——无跨文件引用、无同文件引用（声明本身不算）、
-不在 D1–D5、不在 R1–R4。**只有这一类允许删。**
+不在 D1–D4 / D5a、不在 R1–R7。**只有这一类允许删。**
+
+覆盖缺口：解析失败的文件不进入引用源，会静默压低真死数。`--ratchet` 必须
+显式打印「N 个文件未纳入引用源」，缺口不许静默。
 
 棘轮：`docs/dead-symbols-baseline.json` 记真死总数与按文件分布，只许降不许升。
 
@@ -110,9 +118,12 @@ class Scanner:
         self.defs: list[dict] = []                 # 候选符号
         self.all_names: dict[str, set[str]] = defaultdict(set)
         self.string_consts: set[str] = set()
+        self.code_strings: set[str] = set()        # 全部代码字符串常量（判「配置真被读过」）
         self.dynamic_prefixes: set[str] = set()
-        self.doc_tokens: set[str] = set()
+        self.doc_tokens: set[str] = set()          # D5b 仅 .md 提及
+        self.config_tokens: set[str] = set()       # D5a 运行时按名解析
         self.exported: set[str] = set()
+        self.scanned = 0
         self.parse_errors: list[str] = []
 
     # ---------- 扫描 ----------
@@ -120,10 +131,15 @@ class Scanner:
         for path in _iter_py(self.root):
             rel = path.relative_to(self.root).as_posix()
             try:
-                tree = ast.parse(path.read_text(encoding="utf-8"))
+                # utf-8-sig：2026-11-13 实测 10 个文件带 BOM（U+FEFF），用 utf-8
+                # 解码后 ast.parse 直接报 invalid non-printable character，
+                # 这 10 个文件就静默退出了引用源。BOM 对解释器合法，所以不是
+                # 文件坏，是读法错——在这里兜住，别让缺口变成不可见。
+                tree = ast.parse(path.read_text(encoding="utf-8-sig"))
             except (SyntaxError, UnicodeDecodeError) as exc:
                 self.parse_errors.append(f"{rel}: {exc}")
                 continue
+            self.scanned += 1
             self._collect_refs(tree, rel)
             # 测试模块只当引用源，不当候选：测试里的辅助函数没人调是常态，
             # 计入棘轮只会稀释生产侧的真死数（测绘口径：生产代码）。
@@ -153,6 +169,11 @@ class Scanner:
                     if isinstance(target, ast.Name) and target.id == "__all__":
                         for text in _string_parts(node.value):
                             self.exported.add(text)
+            elif isinstance(node, ast.Constant) and isinstance(node.value, str):
+                # 全部字符串常量（不限调用参数）：判断「某个配置文件是否真被
+                # 代码按路径读过」要靠它，路径常量常写在模块级赋值里。
+                if len(node.value) <= 300:
+                    self.code_strings.add(node.value)
 
     def _add_prefix(self, text: str) -> None:
         """`_preset_` / `_preset_{n}` / `_preset_%s` 都归一成前缀 `_preset_`。"""
@@ -215,6 +236,10 @@ class Scanner:
                     and not d["qualname"].split(".")[0].startswith("_"):
                 reason = "R7 公开类的公开方法（外部调用面，删了会破 API）"
             if reason is None:
+                # D5b：只被 .md 文字提过，不算可达。仍按真死处理，但把原因
+                # 写进 reason，避免和「从未被任何地方提过」混成同一类。
+                reason = ("D5b 仅文档提及（不计可达）" if name in self.doc_tokens
+                          else None)
                 verdict = "dead"
             elif reason == "ref":
                 verdict = "used"
@@ -240,8 +265,8 @@ class Scanner:
             return "D7 HTTP 请求处理器按名回调（do_*/handle_*）"
         if d["decorators"] & {"pyqtSlot", "Slot", "slot"}:
             return "D4 pyqtSlot 装饰"
-        if name in self.doc_tokens:
-            return "D5 文档/配置按名引用"
+        if name in self.config_tokens:
+            return "D5a 运行时按名解析（代码按路径读取的配置/命令表）"
         return None
 
     def _reserved_reason(self, d: dict) -> str | None:
@@ -261,7 +286,12 @@ class Scanner:
         return None
 
 
-def _load_docs_tokens(root: Path) -> set[str]:
+def _load_doc_tokens(root: Path) -> set[str]:
+    """D5b：**只**扫 .md 文字里提到的标识符（反引号包着，或名字后紧跟 `(`）。
+
+    这些名字不算可达：文档写了名字不等于运行时按名取。收进来只是为了让
+    真死报告能区分「只被文档提过」与「从未被提过」。
+    """
     tokens: set[str] = set()
     ident = re.compile(r"`([A-Za-z_][A-Za-z0-9_.]*)`")
     call = re.compile(r"\b([A-Za-z_][A-Za-z0-9_]{2,})\(")
@@ -278,7 +308,30 @@ def _load_docs_tokens(root: Path) -> set[str]:
                 tokens.add(m.group(1).split(".")[-1])
             for m in call.finditer(text):
                 tokens.add(m.group(1))
-    for path in list(root.glob("*.json")) + list(root.glob("*/*.json")):
+    return tokens
+
+
+def _iter_json(root: Path):
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = [d for d in dirnames if d not in SKIP_DIRS]
+        for name in filenames:
+            if name.endswith(".json"):
+                yield Path(dirpath) / name
+
+
+def _load_config_tokens(root: Path, code_strings: set[str]) -> set[str]:
+    """D5a：只收「代码真按路径读过」的配置文件里的名字。
+
+    结构性判据：配置文件的相对路径或文件名必须出现在某个代码字符串常量
+    里，才认定运行时会被读到。没有任何代码引用的 JSON（死真值源）整份
+    不收——否则「文档/数据里写了名字」就会伪装成「运行时按名取」。
+    """
+    blob = "\n".join(code_strings)
+    tokens: set[str] = set()
+    for path in _iter_json(root):
+        rel = path.relative_to(root).as_posix()
+        if rel not in blob and path.name not in blob:
+            continue
         try:
             text = path.read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError):
@@ -292,14 +345,17 @@ def _load_waivers(root: Path) -> dict[str, dict]:
     path = root / "docs" / "dead-symbols-waivers.json"
     if not path.is_file():
         return {}
-    data = json.loads(path.read_text(encoding="utf-8"))
+    # utf-8-sig：豁免表/基线被编辑器存成带 BOM 时，utf-8 解码会把 U+FEFF
+    # 留在 JSON 文本里直接报错（同 .py 的 BOM 问题）。
+    data = json.loads(path.read_text(encoding="utf-8-sig"))
     return {f"{k}": v for k, v in (data.get("waivers") or {}).items()}
 
 
 def run(root: Path) -> dict:
     scanner = Scanner(root)
     scanner.scan()
-    scanner.doc_tokens = _load_docs_tokens(root)
+    scanner.doc_tokens = _load_doc_tokens(root)
+    scanner.config_tokens = _load_config_tokens(root, scanner.code_strings)
     rows = scanner.classify()
     waivers = _load_waivers(root)
     for row in rows:
@@ -315,6 +371,9 @@ def run(root: Path) -> dict:
         "root": str(root),
         "defs": len(rows),
         "dead": dead, "dynamic": dynamic, "reserved": reserved, "used": used,
+        "d5a": [r for r in rows if (r["reason"] or "").startswith("D5a")],
+        "d5b": [r for r in rows if (r["reason"] or "").startswith("D5b")],
+        "scanned": scanner.scanned,
         "parse_errors": scanner.parse_errors,
     }
 
@@ -332,8 +391,13 @@ def main(argv: list[str] | None = None) -> int:
     counts = {k: len(result[k]) for k in ("dead", "dynamic", "reserved", "used")}
     print(f"符号定义 {result['defs']}；真死 {counts['dead']}；动态可达 {counts['dynamic']}；"
           f"保留 {counts['reserved']}；已引用 {counts['used']}")
-    if result["parse_errors"]:
-        print(f"[warn] {len(result['parse_errors'])} 个文件解析失败（已跳过）")
+    print(f"D5a 运行时按名解析 {len(result['d5a'])} 条（不可删）；"
+          f"D5b 仅文档提及 {len(result['d5b'])} 条（计入真死候选）")
+    total_py = result["scanned"] + len(result["parse_errors"])
+    print(f"覆盖：共 {total_py} 个 .py，已解析 {result['scanned']}，"
+          f"{len(result['parse_errors'])} 个文件未纳入引用源")
+    for err in result["parse_errors"]:
+        print(f"[warn] 未纳入引用源：{err}")
 
     if args.show != "none":
         for row in result[args.show]:
@@ -347,11 +411,21 @@ def main(argv: list[str] | None = None) -> int:
             encoding="utf-8")
 
     if args.ratchet:
+        # 缺口不许静默：真死数只在「已纳入引用源」的文件上成立。有解析失败
+        # 就必须在棘轮输出里点名，否则「真死 0」会被读成「扫干净了」。
+        missing = len(result["parse_errors"])
+        print(f"[ratchet] 覆盖：{missing} 个文件未纳入引用源"
+              f"（已解析 {result['scanned']} / 共 {total_py} 个 .py）")
+        if missing:
+            for err in result["parse_errors"][:5]:
+                print(f"[ratchet]   缺口：{err}")
+            if missing > 5:
+                print(f"[ratchet]   缺口：…另有 {missing - 5} 个（见 --show 前的 [warn] 行）")
         base_path = root / "docs" / "dead-symbols-baseline.json"
         if not base_path.is_file():
             print(f"[ratchet] 基线缺失：{base_path}")
             return 0
-        baseline = json.loads(base_path.read_text(encoding="utf-8"))
+        baseline = json.loads(base_path.read_text(encoding="utf-8-sig"))
         limit = int(baseline.get("dead_total", 0))
         if counts["dead"] > limit:
             print(f"[ratchet] 红：真死 {counts['dead']} > 基线 {limit}"

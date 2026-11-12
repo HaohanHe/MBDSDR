@@ -1,6 +1,6 @@
 {
-  "_comment": "死符号棘轮基线：真死条数只许降不许升。2026-11-13 定版：删除 10 个真死符号（10 文件 10 笔）后剩 8 条，全部逐条登记在 docs/dead-symbols-waivers.json（公共 API / 决策记录 / 他线持有），因此棘轮口径下的真死为 0。改口径必须改 scripts/lint_dead_symbols.py 的 docstring，不许在别处另抄。",
-  "dead_total": 0,
+  "_comment": "死符号棘轮基线：真死条数只许降不许升。2026-11-13 口径变更：D5 拆成 D5a（运行时按名解析，不可删）/ D5b（仅 .md 提及，不算可达）。原来 99 条 D5 里 52 条只是文档提及，移回真死候选；棘轮口径真死由 0 抬到 52。这 52 条待逐条判定（含 Qt 兼容壳、插件实现、文档承诺的 API），本轮未删。覆盖缺口必须显式打印：当前 1631/1631 个 .py 全部纳入引用源。改口径必须改 scripts/lint_dead_symbols.py 的 docstring，不许在别处另抄。",
+  "dead_total": 52,
   "measured_at": "2026-11-13",
-  "defs_scanned": 11518
+  "defs_scanned": 11543
 }
