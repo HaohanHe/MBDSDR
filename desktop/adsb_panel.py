@@ -25,11 +25,14 @@ from __future__ import annotations
 
 import csv
 import json
+import logging
 import math
 import os
 import sys
 import time
 from typing import List, Optional, Tuple
+
+logger = logging.getLogger(__name__)
 
 # desktop 包无 __init__.py，靠 repo root 在 sys.path 上完成导入。
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -91,7 +94,12 @@ AIRCRAFT_TTL_SEC = 30.0
 
 
 def _load_station() -> Tuple[Optional[float], Optional[float]]:
-    """从 ~/.mbdsdr/config.json 读地面站 lat/lon；缺失或非法返回 (None, None)。"""
+    """从 ~/.mbdsdr/config.json 读地面站 lat/lon；缺失或非法返回 (None, None)。
+
+    两种「取不到」必须可分：文件不存在＝本来就没配（正常空态，不记日志）；
+    文件在但读不动/字段非法＝降级（地图会显示「未设置观测地点」，但原因
+    要留一条可查记录，否则和「没配」混成同一件事）。
+    """
     path = os.path.expanduser("~/.mbdsdr/config.json")
     try:
         with open(path, "r", encoding="utf-8") as f:
@@ -100,8 +108,11 @@ def _load_station() -> Tuple[Optional[float], Optional[float]]:
         lon = cfg.get("ground_station_lon")
         if lat is not None and lon is not None:
             return float(lat), float(lon)
-    except Exception:
+    except FileNotFoundError:
         pass
+    except (OSError, ValueError, TypeError, AttributeError) as exc:
+        logger.warning("地面站配置不可用，地图按未定位降级：%s | %s: %s",
+                       path, type(exc).__name__, exc)
     return (None, None)
 
 
