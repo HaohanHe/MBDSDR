@@ -40,6 +40,7 @@ from __future__ import annotations
 
 import importlib
 import importlib.util
+import logging
 import math
 import os
 import shutil
@@ -47,6 +48,8 @@ from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 from .error_catalog import user_message
+
+logger = logging.getLogger(__name__)
 
 # ---- 诚实错误码 ---------------------------------------------------------
 ERR_UNKNOWN_MODE = "unknown_mode"
@@ -868,7 +871,9 @@ def _input_sample_count(path: str, ext: str, fs: Optional[float]):
             import wave
             with wave.open(path, "rb") as wf:
                 return int(wf.getnframes()), float(wf.getframerate())
-        except Exception:
+        except Exception as e:
+            logger.warning("读 WAV 头失败（按 invalid_wav 处理）：%s: %s: %s",
+                           path, type(e).__name__, e)
             return None
     if ext in (".cf32", ".cfile") and fs:
         return os.path.getsize(path) // 8, float(fs)
@@ -912,7 +917,9 @@ def _wav_rms(path: str) -> Optional[float]:
         with wave.open(path, "rb") as wf:
             width = wf.getsampwidth()
             raw = wf.readframes(wf.getnframes())
-    except Exception:
+    except Exception as e:
+        logger.warning("读 WAV 能量失败（按「无能量证据」处理）：%s: %s: %s",
+                       path, type(e).__name__, e)
         return None
     dtype = {1: np.uint8, 2: np.int16, 4: np.int32}.get(width)
     if dtype is None or not raw:
