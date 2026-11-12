@@ -201,9 +201,9 @@ def test_watchdog_without_qt_raises_actionable_importerror(monkeypatch):
     """PySide6 缺失时必须抛含安装提示的 ImportError，不得裸 AttributeError。
 
     该守卫点随模块从 mbdsdr_ai 迁到 desktop（QThread 属界面层）后仍需保留，
-    这里直接翻 _HAS_QT 模拟缺失，避免再拉一个子进程。
+    这里替换官方判定入口 qt_available() 模拟缺失，避免再拉一个子进程。
     """
-    monkeypatch.setattr(watchdog_mod, "_HAS_QT", False)
+    monkeypatch.setattr(watchdog_mod, "qt_available", lambda: False)
     with pytest.raises(ImportError) as ei:
         DeviceWatchdog(None)
     assert "pip install" in str(ei.value)
