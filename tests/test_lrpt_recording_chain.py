@@ -102,7 +102,7 @@ def test_panel_prefers_real_chain_and_uses_its_png(monkeypatch, tmp_path):
     r = results[0]
     assert r["ok"] is True
     assert r["width"] == 32 and r["height"] == 16
-    assert "LRPT 真录链" in r["annotation"]
+    assert "链路：真录链" in r["annotation"]
     assert "VCDU 4" in r["annotation"] and "图像包 6" in r["annotation"]
     assert os.path.isfile(r["png"]), "真录链出图必须落盘"
     assert calls["legacy"] == 0, "真录链成功后不得再走旧链"
