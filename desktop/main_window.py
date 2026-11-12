@@ -7512,11 +7512,15 @@ class MainWindow(QMainWindow):
             self._worker.request_tool.emit("tune_am", {"freq_khz": freq})
 
     @Slot(float, str)
-    def _on_tune_sdr(self, freq_hz: float, mode: str) -> bool:
+    def _on_tune_sdr(self, freq_hz: float, mode: str,
+                     apply_mode: bool = True) -> bool:
         """调谐 + 解调模式。返回是否真的下发成功（False=界面已回滚）。
 
         调用方（天空视图「调到该星」等）必须据此决定能不能报「已调谐」；
         旧实现返回 None，调用方无条件写成功文案，把上一行失败提示覆盖掉。
+
+        ``apply_mode=False``：调用方已先行下发解调模式（书签按
+        模式→带宽→调谐的顺序应用），这里只调谐，避免重复切解调。
         """
         backend = self._active_sdr_backend
         if backend is not None:
@@ -7525,7 +7529,7 @@ class MainWindow(QMainWindow):
                     target_hz=freq_hz):
                 self._revert_tune_ui()
                 return False
-            if not self._apply_hw_action(
+            if apply_mode and not self._apply_hw_action(
                     "切换解调模式", lambda: backend.set_demod(mode)):
                 self._revert_tune_ui()
                 return False
@@ -7735,7 +7739,8 @@ class MainWindow(QMainWindow):
         except Exception:
             pass
 
-    def _on_mode_changed(self, mode: str) -> bool:
+    def _on_mode_changed(self, mode: str,
+                         apply_default_bandwidth: bool = True) -> bool:
         """模式切换（WFM/NFM/AM/USB/LSB/CW）：立刻切解调 + 改 VFO 带宽，音频不断。
 
         - backend.set_demod(mode) 同步下发硬件解调模式；
@@ -7743,6 +7748,9 @@ class MainWindow(QMainWindow):
           声卡流不重建、不中断（对标 SDR++ 切模式音频无缝）；
         - VFO 带宽按 MODE_VFO_BANDWIDTH 逐模式套用（CW 500Hz / SSB 2.4k /
           AM 6k / NBFM 12.5k / WFM 180k），推到已绑定的 DDC。
+
+        ``apply_default_bandwidth=False``：调用方随后会下发明确带宽
+        （书签带带宽时用书签值），这里不先套模式默认值，避免中间态。
 
         返回 False 表示硬件没接受模式（调用方据此决定是否还能说「已应用」）。
         """
@@ -7756,29 +7764,32 @@ class MainWindow(QMainWindow):
         # 同步到解调 worker 共享配置（后台线程下一帧生效，音频不中断）
         if self._demod_cfg is not None:
             self._demod_cfg.mode = str(mode).upper()
-        # 根据模式套用典型 VFO 带宽（MODE_VFO_BANDWIDTH，逐模式精确值）
-        try:
-            m = (mode or "FM").upper()
-            bw = float(default_bandwidth(m))
-            self._vfo_bw = bw
-            # 推到已绑定的主/次 VFO DSP（VfoManager.push_bandwidth → set_bandwidth）
-            if self._vfo_mgr is not None:
-                for vid in (self._main_vfo_id, self._vfo2_id):
-                    if vid is not None:
-                        try:
-                            self._vfo_mgr.push_bandwidth(vid, bw)
-                        except Exception:
-                            pass
-            elif self._vfo is not None and hasattr(self._vfo, "set_bandwidth"):
-                self._vfo.set_bandwidth(bw)
-            # 频谱 VFO 带宽高亮同步
+        # 根据模式套用典型 VFO 带宽（MODE_VFO_BANDWIDTH，逐模式精确值）。
+        # 书签路径传 False：它会紧接着下发明确带宽（书签值或模式默认），
+        # 这里再套一次只会多一次中间态。
+        if apply_default_bandwidth:
             try:
-                if hasattr(self.spectrum, "set_vfo_bandwidth"):
-                    self.spectrum.set_vfo_bandwidth(bw)
+                m = (mode or "FM").upper()
+                bw = float(default_bandwidth(m))
+                self._vfo_bw = bw
+                # 推到已绑定的主/次 VFO DSP（VfoManager.push_bandwidth → set_bandwidth）
+                if self._vfo_mgr is not None:
+                    for vid in (self._main_vfo_id, self._vfo2_id):
+                        if vid is not None:
+                            try:
+                                self._vfo_mgr.push_bandwidth(vid, bw)
+                            except Exception:
+                                pass
+                elif self._vfo is not None and hasattr(self._vfo, "set_bandwidth"):
+                    self._vfo.set_bandwidth(bw)
+                # 频谱 VFO 带宽高亮同步
+                try:
+                    if hasattr(self.spectrum, "set_vfo_bandwidth"):
+                        self.spectrum.set_vfo_bandwidth(bw)
+                except Exception:
+                    pass
             except Exception:
                 pass
-        except Exception:
-            pass
         # 持久化：解调模式
         try:
             self.settings.set("demod_mode", str(mode))
@@ -8203,21 +8214,47 @@ class MainWindow(QMainWindow):
     @Slot(float, str, float)
     def _on_bookmark_tune_requested(self, freq_hz: float, mode: str,
                                     bandwidth_hz: float):
-        """书签激活（频谱旗子 / 书签面板共用）→ 调谐 + 设模式 + 带宽。
+        """书签激活（频谱旗子 / 书签面板共用）→ 模式 → 带宽 → 调谐。
 
-        调谐没成功就到此为止：继续下发带宽等于在**另一个频率**上改设备状态，
-        UI 的 VFO 带宽会与设备实际带宽分叉。
+        顺序对齐 SDR++ ``applyBookmark``（mode → bandwidth → tune）：
+        先切解调、再设带宽、最后调谐，避免「已换频、带宽没落地」的中间态。
 
-        带宽缺省（0/None，旧四元组书签）时保留设备当前带宽，不臆造一档。
+        带宽缺省（0/None，旧四元组书签）时按该模式的默认带宽**下发**：
+        ``set_demod`` 已把解调链带宽记成模式默认值（sdr_backend.set_demod →
+        _invalidate_rx_chain），若这里不真下发，就会出现
+        status=模式默认、硬件/UI=旧档 的三份数分叉。
+
+        任一步失败即停：不把剩余步骤应用到一个半生效的状态上。
         """
         resolved = str(mode or "").strip()
         if not resolved:
             resolved = (self._demod_cfg.mode if self._demod_cfg is not None
                         else "NFM")
-        if not self._on_tune_sdr(float(freq_hz), resolved):
+        current = (self._demod_cfg.mode if self._demod_cfg is not None else "")
+        if str(current).upper() != resolved.upper():
+            if not self._on_mode_changed(resolved,
+                                         apply_default_bandwidth=False):
+                return
+        try:
+            bw = float(bandwidth_hz)
+        except (TypeError, ValueError):
+            bw = 0.0
+        if not math.isfinite(bw) or bw <= 0:
+            bw = float(default_bandwidth(resolved))
+        if not self._on_vfo_bandwidth_changed(bw):
             return
-        if bandwidth_hz and bandwidth_hz > 0:
-            self._on_vfo_bandwidth_changed(float(bandwidth_hz))
+        if not self._on_tune_sdr(float(freq_hz), resolved, apply_mode=False):
+            return
+        # 应用成功 → 界面与硬件/内存三处对齐（面板都 blockSignals，不回环）
+        try:
+            self.control_panel.set_mode(resolved)
+            self.control_panel.set_vfo_bandwidth(self._vfo_bw)
+        except Exception:
+            pass
+        try:
+            self.dock_mode_label.setText(resolved.upper())
+        except Exception:
+            pass
 
     @Slot(bool)
     def _on_dc_removal_changed(self, enabled: bool):
@@ -10967,18 +11004,6 @@ class MainWindow(QMainWindow):
                 f"应用解调未生效：{reason or self._hw_failure_detail() or '设备返回失败'}。"
                 "界面与已保存配置保持上次成功值。",
                 MSG_IMPORTANT)
-
-    def _on_bookmark_tune_requested(self, freq_hz: float, mode: str,
-                                    bandwidth_hz: float):
-        """书签点击 → 调谐 + 设模式 + 带宽。
-
-        调谐没成功就到此为止：继续下发带宽等于在**另一个频率**上改设备状态，
-        UI 的 VFO 带宽会与设备实际带宽分叉。
-        """
-        if not self._on_tune_sdr(float(freq_hz), mode or "NFM"):
-            return
-        if bandwidth_hz and bandwidth_hz > 0:
-            self._on_vfo_bandwidth_changed(float(bandwidth_hz))
 
     def _on_sky_tune_satellite(self, info: dict):
         """天空视图「调到该星」→ 用实时多普勒校正后的频率真正调谐。"""
