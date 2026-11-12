@@ -686,7 +686,7 @@ def register_tool_registry(registry) -> None:
     能力依据：Costas/PSK 相干解调后的相位模糊（n×π 镜像）标准解法就是
     差分编码（通信对抗材料 L20），与 costas_track 构成配对积木。
     """
-    from .tool_registry import ToolResult, clean_exc
+    from .tool_results import ToolResult, clean_exc
 
     def _bits_in(v, name):
         arr = np.asarray(v, dtype=float).flatten()

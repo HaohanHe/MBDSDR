@@ -338,7 +338,7 @@ def multistation_tdoa_fix(stations_m: Sequence[Sequence[float]],
 # ═══════════════════════════════════════════════════════════
 def register_tool_registry(registry) -> None:
     """注册 P0-4 测向/定位积木（阵列相关测向 + 多站 TDOA 定位）。"""
-    from .tool_registry import ToolResult, clean_exc
+    from .tool_results import ToolResult, clean_exc
     import json as _json
 
     def _array_df(args):

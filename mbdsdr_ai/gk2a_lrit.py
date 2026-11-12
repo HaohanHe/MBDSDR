@@ -1321,7 +1321,7 @@ def register_tool_registry(registry) -> None:
 def _tool_gk2a_decode(args):
     """handler：读 IQ raw → 解码 → 返回 ToolResult。"""
     import json as _json
-    from .tool_registry import ToolResult
+    from .tool_results import ToolResult
 
     iq_path = args["iq_path"]
     out_png = args["out_png"]

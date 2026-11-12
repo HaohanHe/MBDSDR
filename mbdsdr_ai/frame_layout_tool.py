@@ -293,7 +293,7 @@ def crc_check(frame: Union[bytes, bytearray, Sequence[int]],
 # ─────────────────────────────────────────────────────────────
 def register_tool_registry(registry) -> None:
     """注册 P1-2 帧布局配置注入积木。"""
-    from .tool_registry import ToolResult, clean_exc
+    from .tool_results import ToolResult, clean_exc
     import json as _json
 
     def _load(args):

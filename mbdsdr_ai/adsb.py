@@ -844,9 +844,9 @@ def register_adsb_tools(agent) -> None:
     if registry is None:
         return
     try:
-        from .tool_registry import ToolResult
+        from .tool_results import ToolResult
     except ImportError:  # 直接脚本运行时的兜底
-        from tool_registry import ToolResult  # type: ignore
+        from tool_results import ToolResult  # type: ignore
 
     def _decode_hex(args: Dict[str, Any]) -> "ToolResult":
         hx = str(args.get("hex", "")).replace(" ", "").replace("0x", "")

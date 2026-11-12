@@ -278,7 +278,7 @@ def bch_decode(received: List[int], gen: Dict[str, Any],
 # ═══════════════════════════════════════════════════════════
 def register_tool_registry(registry) -> None:
     """注册 BCH 干净室编解码积木（GF 推导，零标准表依赖）。"""
-    from .tool_registry import ToolResult, clean_exc
+    from .tool_results import ToolResult, clean_exc
     import json as _json
 
     def _gen(args):
