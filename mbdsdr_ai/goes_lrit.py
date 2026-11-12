@@ -34,6 +34,8 @@ import struct
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
 
+from .tool_results import ToolResult
+
 
 # ============================================================================
 # 帧层常量（CCSDS 遥测传输帧 / LRIT 接收标准）
@@ -855,7 +857,6 @@ def _hex_list(args, key: str):
     模型误传标量/非 hex 串时 ValueError 逃逸出 handler。此处按「错误:即失败」
     契约先校验，把可操作的参数错误回给模型。
     """
-    from .tool_results import ToolResult  # 延迟导入避免循环
 
     raw = args.get(key, [])
     if isinstance(raw, (str, bytes)) or not isinstance(raw, (list, tuple)):
@@ -885,7 +886,6 @@ def _hex_list(args, key: str):
 def ToolResult_goes(args, is_hrit: bool):
     """handler 辅助：解析 VCDU 流并返回文件头摘要。"""
     import json as _json
-    from .tool_results import ToolResult  # 延迟导入避免循环
 
     blobs, err = _hex_list(args, "vcdus")
     if err:
@@ -924,7 +924,6 @@ def ToolResult_goes(args, is_hrit: bool):
 def ToolResult_extract_image(args):
     """handler 辅助：重组图像段。"""
     import json as _json
-    from .tool_results import ToolResult
 
     blobs, err = _hex_list(args, "files")
     if err:
