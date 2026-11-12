@@ -80,7 +80,14 @@ DATE_RE = re.compile(r"(?:19|20)\d{2}-\d{1,2}-\d{1,2}")
 URL_RE = re.compile(r"https?://\S+")
 
 # ---- 五类分诊（只用于“无证据”行；分类不改变闸门退出码）----
-# ① 本来就不需要证据：参数/规格/判据、标准或外部引用、可推导常量
+# 文件级 E4 横幅：**显式**声明「本文件数字未验证」。只认写在文件开头（前 80 行）
+# 的这几种写法，不按目录名猜测——phase*/audit_r2 这类路径外延会变成看不见的
+# 全文件豁免。有了它，历史快照只需在文件头写一行，不必逐条贴标记。
+FILE_BANNER_RE = re.compile(
+    r"(?:本文件|全文|整篇|本页)[^\n]{0,24}(?:未验证|证据不足|E4)"
+    r"|证据状态\s*[:：]\s*E4"
+)
+#: ① 本来就不需要证据：参数/规格/判据、标准或外部引用、可推导常量
 BUCKET_SPEC_RE = re.compile(
     r"默认|阈值|上限|下限|范围|配置|设置项|可供|可选|步进|档位|分辨率|量程|枚举|标称|"
     r"规格|单位|换算|定义|公式|λ/4|λg|λ/2|频段|下行|上行|频道|判据|容差|≤|≥"
@@ -156,7 +163,8 @@ def _resolve(tok: str) -> Optional[Path]:
     return cand if cand.exists() else None
 
 
-def _classify(window: str, line: Optional[str] = None) -> Tuple[str, str]:
+def _classify(window: str, line: Optional[str] = None,
+              file_unverified: bool = False) -> Tuple[str, str]:
     """返回 (列名, 证据说明) 列名 ∈ 有证据/无证据/已显式标未验证。"""
     if UNVERIFIED_RE.search(window):
         # 表格块的“未验证”只写在表头/别行时，不自动给整表背书：
@@ -191,6 +199,9 @@ def _classify(window: str, line: Optional[str] = None) -> Tuple[str, str]:
             return "有证据", f"E2 可复跑（`{cmd.strip()}`）"
 
     commits = [t for t in COMMIT_TOKEN_RE.findall(window) if _is_commit(t)]
+    if file_unverified:
+        # 文件头横幅强于「仅 commit」：整份文档已声明是历史快照/未验证。
+        return "已显式标未验证", "文件级 E4 横幅（本文件数字未验证）"
     if commits:
         return "无证据", f"仅 commit {commits[0]}（E3 时点线索，非测量证据）"
 
@@ -317,6 +328,7 @@ def run(paths: Optional[List[str]] = None, classify: bool = False) -> Dict:
     files = _files(paths)
     rows: List[Dict] = []
     skipped_examples = 0
+    file_banners: List[str] = []
     for f in files:
         try:
             text = f.read_text(encoding="utf-8", errors="replace")
@@ -324,6 +336,9 @@ def run(paths: Optional[List[str]] = None, classify: bool = False) -> Dict:
             continue
         prose = list(_prose_lines(text))
         rel = str(f.relative_to(ROOT)) if f.is_relative_to(ROOT) else str(f)
+        file_unverified = bool(FILE_BANNER_RE.search("\n".join(text.splitlines()[:80])))
+        if file_unverified:
+            file_banners.append(rel)
         # 每个非空正文行的“上一非空行”：给表格找紧邻的表标题行用
         prev_nonblank: Dict[int, str] = {}
         last_text: Optional[str] = None
@@ -368,7 +383,7 @@ def run(paths: Optional[List[str]] = None, classify: bool = False) -> Dict:
                          and not (SPEC_LINE_RE.search(ln)
                                   and not MEASURED_LINE_RE.search(ln))]
             for lineno, line, window in lines:
-                col, why = _classify(window, line)
+                col, why = _classify(window, line, file_unverified)
                 for num in _numbers(line):
                     row = {"file": rel, "line": lineno, "number": num,
                            "column": col, "evidence": why}
@@ -381,7 +396,8 @@ def run(paths: Optional[List[str]] = None, classify: bool = False) -> Dict:
     files_with_none = sorted({r["file"] for r in rows if r["column"] == "无证据"})
     return {"files": len(files), "claims": len(rows), "counts": dict(counts),
             "buckets": dict(buckets), "rows": rows, "files_with_none": files_with_none,
-            "skipped_examples": skipped_examples}
+            "skipped_examples": skipped_examples,
+            "file_banners": sorted(file_banners)}
 
 
 def main(argv: Optional[List[str]] = None) -> int:
