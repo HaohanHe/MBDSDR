@@ -46,7 +46,6 @@
 """
 from __future__ import annotations
 
-import atexit
 import builtins
 import io
 import json
@@ -55,6 +54,8 @@ import sys
 import tempfile
 import threading
 import traceback
+
+import guard_common
 
 _RECORDS = []
 _PRINTED = set()
@@ -526,60 +527,19 @@ def report(prefix="[cfg-guard]"):
 
 def log_records(path=None):
     """数一数哨兵日志里有多少条真实配置写入（跨进程取证用）。"""
-    path = path or os.environ.get("MBDSDR_CFG_GUARD_LOG")
-    if not path or not os.path.exists(path):
-        return 0
-    try:
-        with open(path, "r", encoding="utf-8") as f:
-            return sum(1 for line in f if line.strip())
-    except OSError:
-        return 0
+    return guard_common.log_records(path or os.environ.get("MBDSDR_CFG_GUARD_LOG"))
 
 
 def install_exit_check():
     """本进程有真实写入 → 退出码 3（atexit 里 os._exit，能改退出码）。"""
-    if getattr(sys, "_mbdsdr_cfg_exit", False):
-        return False
-    sys._mbdsdr_cfg_exit = True
-
-    def _check():
-        recs = records()
-        if not recs:
-            return
-        report()
-        try:
-            sys.stdout.flush()
-            sys.stderr.flush()
-        except Exception:  # noqa: BLE001
-            pass
-        os._exit(3)
-
-    atexit.register(_check)
-    return True
+    return guard_common.install_exit_check("_mbdsdr_cfg_exit", records, report)
 
 
 def install_log_exit_check(path=None):
     """父进程（driver）按共享日志判定：子进程写过真实配置就非零退出。"""
     path = path or os.environ.get("MBDSDR_CFG_GUARD_LOG")
-    if not path or getattr(sys, "_mbdsdr_cfg_log_exit", False):
-        return False
-    sys._mbdsdr_cfg_log_exit = True
-
-    def _check():
-        count = log_records(path)
-        if not count:
-            return
-        print("[cfg-guard] %s 记录 %d 次对真实产品配置的写入，本脚本退出码置 3"
-              % (path, count), flush=True)
-        try:
-            sys.stdout.flush()
-            sys.stderr.flush()
-        except Exception:  # noqa: BLE001
-            pass
-        os._exit(3)
-
-    atexit.register(_check)
-    return True
+    return guard_common.install_log_exit_check(
+        "_mbdsdr_cfg_log_exit", path, "真实产品配置的写入", "[cfg-guard]")
 
 
 def main(argv=None):
@@ -587,15 +547,7 @@ def main(argv=None):
     if len(argv) < 2 or argv[0] != "--wrap":
         print(__doc__)
         return 2
-    target = os.path.abspath(argv[1])
-    sys.argv = [target] + argv[2:]
-    install()
-    import runpy
-    try:
-        runpy.run_path(target, run_name="__main__")
-    finally:
-        report()
-    return 0
+    return guard_common.run_wrapped(argv, install, report)
 
 
 if __name__ == "__main__":
