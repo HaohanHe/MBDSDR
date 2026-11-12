@@ -363,10 +363,20 @@ def test_discoverability_ports_are_findable_from_settings_tab():
     from PySide6.QtWidgets import QGroupBox, QLabel, QWidget
     from settings_panel import ServiceSettingsPanel, SettingsPanel
     panels = (SettingsPanel(), ServiceSettingsPanel())
-    blob = "\n".join(
-        [w.text() for p in panels for w in p.findChildren(QLabel)]
-        + [w.title() for p in panels for w in p.findChildren(QGroupBox)]
-        + [w.toolTip() for p in panels for w in p.findChildren(QWidget)])
+    # 3c23faa2 起设置页改为首次显示才建控件（_ui_built / showEvent）。
+    # 这里走产品自己的显示入口把面板显示出来再扫，而不是在测试里复刻一遍
+    # 构建条件或直接调私有构建函数：显示入口若再被挪动/改条件，show() 这条
+    # 路会跟着红，本用例仍然拦得住「文案又扫不到」的回归。
+    for panel in panels:
+        panel.show()
+    try:
+        blob = "\n".join(
+            [w.text() for p in panels for w in p.findChildren(QLabel)]
+            + [w.title() for p in panels for w in p.findChildren(QGroupBox)]
+            + [w.toolTip() for p in panels for w in p.findChildren(QWidget)])
+    finally:
+        for panel in panels:
+            panel.close()
     for needle in ("服务开关与端口见右栏「服务设置」一节。",
                    "远程控制 7356", "GQRX/hamlib",
                    "Web 8080", "HTTP/WS",

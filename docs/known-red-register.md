@@ -495,6 +495,28 @@ QT_QPA_PLATFORM=offscreen python -m pytest "<nodeid>" -q
   `show()` 时控件仍为零（惰性构建这个行为不能被改回去）。
 - **注意**：工作区 `desktop/settings_panel.py` 有他线未提交修改，修复需与其
   合并后复核，别用旧 blob 覆盖。
+- **收口（2026-11-13）**：只改用例，产品代码未动（工作区他线的
+  `desktop/settings_panel.py` 改动未碰、未覆盖）。
+  - 改动：`tests/test_copy_units_audit.py` 的用例在扫文案前对两个面板调用
+    `panel.show()`，走产品自己的 `showEvent → _ensure_ui_built()` 显示入口，
+    扫完再 `close()`；7 条 needle 断言一条没删、没放宽。
+  - 为什么不是「把断言改成能过」：`show()` 只是复现用户真正打开设置页的路径；
+    为证明用例仍依赖这条构建路径，做了行为级反证——在独立 worktree 里把
+    `showEvent` 首行的 `self._ensure_ui_built()` 临时换成 `pass`，同一节点立刻
+    回到 `1 failed`（仍是同一条断言消息）；恢复后 `1 passed`。若只是放宽断言，
+    这条反证不会红。
+  - 验证（独立 worktree 单跑该节点，不跑全量）：
+    - HEAD `a58dc94d`（worktree `d:\mbdsdr\_wt\k15-head`）改前：
+      `QT_QPA_PLATFORM=offscreen python -m pytest tests/test_copy_units_audit.py::test_discoverability_ports_are_findable_from_settings_tab -q`
+      → `1 failed`（断言消息与上面登记的首行一致）；
+    - `3c23faa2^` = `4d156159`（worktree `d:\mbdsdr\_wt\k15-parent`）同一命令
+      → `1 passed`；
+    - 改后同一 HEAD worktree：该节点 `1 passed`；另跑
+      `tests/test_settings_panel_lazy.py` → `3 passed`（构造后不 `show()` 时控件
+      仍为零，惰性构建契约没被改回去）。
+  - 提交：本条目所在提交（`git log -1 --format=%H -- docs/known-red-register.md`
+    可取）。`git cat-file -t` 可验证的引用：`3c23faa2`=commit、
+    `4d156159`=commit、`a58dc94d`=commit。
 
 ### K16 — 右栏收窄加了一层 host，splitter 断言仍按旧父件
 
