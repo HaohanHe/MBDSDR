@@ -200,11 +200,15 @@ class _AdsbMapCanvas(QWidget):
         cx, cy = w / 2.0, h / 2.0
         _, _, rng = self._project(slat, slon, w, h)
         for frac in (0.25, 0.5, 0.75, 1.0):
-            p.setPen(QPen(_GRID, 1))
+            # 距圈是非文本刻度线：light_grid 对纸面只有 1.36:1，看不清；
+            # 换岛内既有的站色（对纸面 3.94:1），且距圈本就以本站为圆心。
+            p.setPen(QPen(_STATION, 1))
             p.drawEllipse(QPointF(cx, cy),
                           (min(w, h) / 2.0 - 24.0) * frac,
                           (min(w, h) / 2.0 - 24.0) * frac)
-        p.setPen(QPen(_GRID))
+        # 量程是文字，必须按正文门槛取色：light_grid 对纸面 1.36:1 看不出来，
+        # 用岛内既有的文字色（5.11:1）。
+        p.setPen(QPen(_TEXT))
         p.drawText(QRectF(4, 4, 200, 18), Qt.AlignLeft, f"量程 ±{rng:.0f} km")
 
         # 本站标记（十字）

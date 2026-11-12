@@ -102,3 +102,19 @@ def test_new_spacetime_empty_axis_labels_are_not_watermarked():
     assert _hex(axis) == _hex(QColor(nsp.COLOR_TEXT_SEC)), (
         "轴名应取次色 gray_200，实际 %s" % _hex(axis))
     assert contrast_ratio(_hex(axis), nsp.COLOR_CARD) >= MIN_TEXT
+
+
+# ---------------------------------------------------------------- T1-6 / T1-8
+
+
+def test_adsb_range_rings_and_label_no_longer_use_grid_ink():
+    """距圈与量程文字不再拿 light_grid 当墨色（对纸面 1.36:1）。"""
+    import inspect
+
+    import adsb_panel as ap
+
+    src = inspect.getsource(ap._AdsbMapCanvas.paintEvent)
+    assert "QPen(_GRID" not in src, (
+        "距圈/量程又用回了网格色：light_grid 对 light_bg 只有 1.36:1")
+    assert contrast_ratio(ap._STATION.name(), ap._BG.name()) >= MIN_NON_TEXT
+    assert contrast_ratio(ap._TEXT.name(), ap._BG.name()) >= MIN_TEXT
