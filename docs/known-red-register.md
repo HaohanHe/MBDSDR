@@ -3,6 +3,8 @@
 > 目的：让"还没修"这件事**可见、可复跑、可销账**，而不是靠 `--deselect` 藏在命令行里。
 > 规则：只有**实跑复现**过的节点才能进本表；不按 `.pytest_cache` 或记忆猜。
 > 每条红必须带「转绿条件」，否则不许写成"已知红"。
+> 状态口径：写「已修」必须带一次**可复跑的验证记录**（命令 + 实际输出）；
+> 没有记录的只能写「实跑绿·待反证」，不得直接销账。
 
 字段说明：ID / nodeid / 首次记录 / 分类 / 症状 / 根因 / 转绿条件 / 复跑命令。
 分类只有两种：**存量**（不是本轮引入）、**自引入**（本轮改动导致，必须当轮修）。
@@ -359,6 +361,16 @@ listGains 失败（设备可能不支持分档）: 'SDRDevice' object has no att
   `gain_panel` 的 `listGains` 探测前先 `hasattr`。
 - **诚实边界**：真机 GUI 链路可用（帧推进 6575→7115、`finite_ratio=1.0`），
   但这两条告警会误导用户以为参数没生效。
+- **为什么没有 nodeid**：K10 描述的是真机 GUI 连接后的日志/状态栏现象，不是断言；
+  仓库没有对应的 pytest 节点，`RtlTcpBackend`（`mbdsdr_ai/rtltcp_client.py:655`）
+  只在真机连接路径触发。
+- **现在能否机检**：**否**。需要 RTL2832U + FC0012 真机与 `rtl_tcp` 服务；离线侧
+  只能另立静态断言（`hasattr(RtlTcpBackend, "set_offset_tuning")`、`gain_panel`
+  的 `listGains` 探测前 `hasattr`），但本条目记录的两句运行期告警仍无法离线复现
+  ——静态断言即使建立也不等于本条目可机检。
+- **人工复核（谁/多久/看什么）**：硬件验收线（`scripts/hw_acceptance/*`；串口入口
+  `scripts/real_hw_acceptance.py` 当前 claim=打包线），每个真机验收批次 + 发版前
+  各 1 次，连真机后看日志是否仍出现上面两句；出现即条目保持打开。
 
 ---
 
@@ -374,6 +386,13 @@ listGains 失败（设备可能不支持分档）: 'SDRDevice' object has no att
   消掉时间窗变量；或判据改为「回放 RMS 有能量且与实时同量级」并写明依据。
 - **诚实边界**：R4 在其他子项全绿（流式增长、完整性、改速跟随）。本轮
   单跑 `PASS`、全跑曾 `FAIL`，属判据抖动。
+- **为什么没有 nodeid**：实现在 `scripts/hw_acceptance/ring4_recording_playback.py`；
+  需要真机 SDR 录制 + 声卡回放，不是 pytest 节点。
+- **现在能否机检**：**否**。判据比较的是两个不同时间窗的 RMS，离线无射频/音频
+  输入无法复现，接 CI 只会得到环境噪声。
+- **人工复核（谁/多久/看什么）**：硬件验收线（该脚本无活跃 claim），每批真机验收
+  跑一次 `python scripts/hw_acceptance/ring4_recording_playback.py --freq <Hz>`，
+  看 `playback_ratio` 是否仍擦线（0.3 附近）；发版前至少 1 次。
 
 ---
 
@@ -402,6 +421,15 @@ skyfield 参考：首场峰值 5.025°（贴 5° 门限的掠射场）
   **不许拿「最后跑那次 PASS」说这条不存在**；它是窗口依赖的偶发漏检。
 - **诚实边界**：R5 PASS 的那几轮里其余 3 颗误差 0.01–0.05°、升起时刻
   1–5 s；FAIL 那轮同一批数字也是这个量级，差异只在 NOAA-19 这一场。
+- **为什么没有 nodeid**：实现在 `scripts/hw_acceptance/ring5_satellite_passes.py`；
+  不需射频硬件，但依赖 skyfield/TLE 与随墙钟滑动的 24h 窗口，仓库里没有固定
+  时刻/TLE 的 pytest 节点。
+- **现在能否机检**：**半可机检**。脚本可离线跑（`--lat/--lon/--alt/--out`），
+  但窗口与 TLE 可变，直接接 CI 会抖动；当前不满足「可复跑」的稳定性要求。
+- **人工复核（谁/多久/看什么）**：硬件验收线（该脚本无活跃 claim），每两周 1 次
+  （发版前必跑），固定 TLE + 固定观测时刻跑
+  `python scripts/hw_acceptance/ring5_satellite_passes.py --lat 45 --lon 120 --alt 200`，
+  专看 NOAA-19 的 5.025° 掠射场是否在列；连续两轮不在列即保持红。
 
 ---
 
@@ -543,3 +571,129 @@ QT_QPA_PLATFORM=offscreen python -m pytest "<nodeid>" -q
   **无人接手的孤儿改动**：需布局锁线确认后提交，或按接管规则另行处理。
 - **转绿条件**：提交工作区那份 `test_main_window.py`；验收单跑 `1 passed`，
   且断言仍点名 host 层（拆掉这层要能红）。不许为了让测试绿去改产品结构。
+
+---
+
+## K17 — 设置向前覆盖：3 个字段无 UI 入口也无理由（2026-11-13 实跑，存量·未修）
+
+- **nodeid**：`tests/test_settings_ui_coverage.py::test_forward_every_field_has_ui_entry_or_reason`
+- **复跑命令**：
+  ```bash
+  MBDSDR_OFFLINE=1 QT_QPA_PLATFORM=offscreen \
+    python -m pytest tests/test_settings_ui_coverage.py::test_forward_every_field_has_ui_entry_or_reason -q -rf
+  ```
+- **失败消息首行**：
+  `AssertionError: 以下 schema 字段既没有 UI 入口也没有登记理由（配置漂移源头）：`
+  实测 `Report(fields=55, ui_entries=50, reasons=2, missing=['agc_enabled',
+  'settings_expanded_groups', 'right_column_expanded_section'])`。
+- **首次记录**：2026-11-13（HEAD `99a61044`，独立 worktree
+  `d:\mbdsdr\_wt\kred-99a61044` 单跑）。
+- **首次变红**：`2a07f344`（2026-11-11 22:14「术语统一：扫频/书签」）。该提交把
+  `desktop/control_panel.py` 的 `self.agc_check = QCheckBox("AGC 自动增益")` 改成
+  `QCheckBox("硬件 AGC")`，而 `scripts/settings_inventory.py` 的 `agc_enabled` 锚点
+  仍是旧文案 → UI 入口 51→50。另两键由 `20652e90`（2026-11-11 22:26「登记两个
+  持久化键」）写入 `desktop/config_schema.py`，但无 UI 也未进 `INTERNAL_REASONS`。
+  定位方式：`git log -S`（未逐提交 checkout 复跑）。
+- **根因**：盘点锚点跟着产品文案走，文案改了锚点没跟；内部持久化键入库时没有
+  同步登记「为什么没有 UI」。
+- **当前 owner**：`desktop/config_schema.py`、`scripts/settings_inventory.py` 无活跃
+  claim；`desktop/settings_panel.py` = 设置三环线；`docs/settings-inventory.md` =
+  机制线。建议产品侧归 **设置三环线**，锚点同步归 **机制线**。
+- **转绿条件**：单跑 `1 passed` 且 `measure().missing == []`；`agc_enabled` 要么按
+  实际控件更新锚点（`硬件 AGC`），要么把控件文案改回；两个内部键在
+  `INTERNAL_REASONS` 写明「为什么没有 UI」。反证验收：临时删掉 `control_panel`
+  的 AGC 控件或删一条理由，该节点必须重新变红。
+
+---
+
+## K18 — 设置盘点表与脚本读数不一致（2026-11-13 实跑，存量·未修）
+
+- **nodeid**：`tests/test_settings_ui_coverage.py::test_inventory_table_matches_script`
+- **复跑命令**：
+  ```bash
+  MBDSDR_OFFLINE=1 QT_QPA_PLATFORM=offscreen \
+    python -m pytest tests/test_settings_ui_coverage.py::test_inventory_table_matches_script -q -rf
+  ```
+- **失败消息首行**：
+  `AssertionError: docs/settings-inventory.md 数字表与脚本盘点结果不一致：`
+  文档块实际为 `53 字段 / 51 有 UI / 0 缺失 / source_commit a2be554a`；
+  当前脚本盘点为 `55 / 50 / 3 / ce1ed9ef`。
+- **首次变红**：`2a07f344`（2026-11-11 22:14，UI 入口 51→50、缺失 0→1），随后
+  `20652e90`（22:26，字段 53→55、缺失 1→3）；表最后一次生成在 `a2be554a`
+  （2026-11-11）。定位方式 `git log -S`。
+- **当前 owner**：`docs/settings-inventory.md` = 机制线；`scripts/settings_inventory.py`
+  无活跃 claim；产品字段缺失另归设置三环线（见 K17）。
+- **转绿条件**：`python scripts/settings_inventory.py --write` 后单跑 `1 passed`，
+  且 diff 只来自脚本生成、`source_commit` 等于
+  `git log -1 --format=%h -- desktop/config_schema.py`。注意：K17 未修时也允许本条目
+  先绿——表如实记录 `缺失=3` 即可，不许为了表绿去改盘点口径。
+
+---
+
+## K19 — 源码文本 pin 棘轮新增 33 条（2026-11-13 实跑，存量·未修）
+
+- **nodeid**：`tests/test_source_pin_ratchet.py::test_no_new_source_text_pins`
+- **复跑命令**：
+  ```bash
+  MBDSDR_OFFLINE=1 QT_QPA_PLATFORM=offscreen \
+    python -m pytest tests/test_source_pin_ratchet.py::test_no_new_source_text_pins -q -rf
+  ```
+- **失败消息首行**：
+  `AssertionError: 新增源码文本 pin（必须改成行为断言，或由 owner 在基线写明理由）：`
+- **首次变红**：`469de07c`（2026-11-11 22:43，`test_tooltip_guard` 新增
+  `"配置意图，不是设备读数"` pin）。基线最后更新是 `01cf93de`（2026-11-06），
+  其后任何新增 pin 都会让该节点红；定位方式 `git log -S`（按文件取最早一条，
+  未逐提交 checkout 复跑）。
+- **新增 pin 清单（33 条 / 10 个文件）**：
+  - `test_config_persistence_safety.py`（3）：`"损坏"`、`str(path)`、
+    `text.count("\n")`
+  - `test_connect_request_store.py`（3）：`payload["_bandwidth"]`、
+    `payload["_gain"]`、`payload["_ppm"]`
+  - `test_device_owner_lock.py`（2）：`"JSON 读取/解析失败"`、`str(_registry)`
+  - `test_diagnostics_panel_pure_display.py`（7）：`".setText("`、
+    `"QApplication.clipboard"`、`"QDesktopServices"`、`"startfile"`、
+    `"QScrollArea"`、`"QTextEdit"`、`"setPlainText"`
+  - `test_hw_acceptance_contract.py`（7）：`"abs(f_p - 19000) < 100"`、
+    `"abs(f_p - 19000) < 300"`、`f"19000±{tol:.0f} Hz 且峰/邻域 >{snr:.0f} dB"`、
+    `ring3_src.count("PILOT_FREQ_TOL_HZ")`、`f"{lo} – {hi}"`、
+    `"此值不适用于产品立体声探测"`、`"此值不适用于硬件验收"`
+  - `test_island_contrast_batch1.py`（2）：`"QPen(_GRID"`、`"p.setPen(MUTED)"`
+  - `test_island_contrast_batch2.py`（2）：`"QPushButton:hover { border-color: #8f95a3; }"`、
+    `src.count("border: 1px solid #6A7284")`
+  - `test_safe_commit_exclude.py`（1）：`"line5 other"`
+  - `test_startup_selfcheck.py`（3）：`"延后导入失败"`、`"怎么修"`、`"缺了会怎样"`
+  - `test_tooltip_guard.py`（3）：`f"def {name}("`、`"配置意图，不是设备读数"`、
+    `"（默认 · 未确认）"`
+- **当前 owner**：`tests/test_source_pin_ratchet.py`、`docs/source-pin-ratchet-baseline.json`
+  均无活跃 claim；各 pin 由对应测试线引入。建议由引入线改成行为断言，确实必须钉
+  文本的由 **机制线** 在基线按现有 schema 登记 `reason`。
+- **转绿条件**：单跑 `1 passed`；每条 pin 要么改成行为断言，要么在
+  `docs/source-pin-ratchet-baseline.json` 写明理由。反证验收：再加一条未登记 pin，
+  节点必须红。
+
+---
+
+## K20 — tooltip 守卫 4 条（2026-11-13 实跑，存量·未修）
+
+**合并为一条而非四条**：同一文件、同一契约（`docs/discoverability.md` 三条规矩）、
+同一批转绿动作（补登记 / 改文案 / 删数值），拆开只会把一个修复批次记成 4 笔账。
+
+| nodeid | 失败消息首行 | 首次变红 |
+|---|---|---|
+| `test_dynamic_tooltips_are_honest` | `AssertionError: 动态 tooltip 有量纲却没写来源/置信标注：`（`device_panel.py:365` / `:494`） | `ff7e3288`（2026-11-12 22:36，设备枚举看门狗文案） |
+| `test_every_passthrough_tooltip_is_registered` | `AssertionError: 以下透传 tooltip 没有进登记表（也就不可能有运行时兜底）：`（`control_panel.py:506` / `:1045` `_step_tooltip_text()`） | `b97b0cd1`（2026-11-11 23:34，步进 tooltip 随当前档位生成） |
+| `test_tooltip_baseline_only_shrinks` | `AssertionError: 新增了不合规 tooltip（长度 <12 或与控件可见文字逐字相同）：`（`main_window.py::收起右栏浮层（Esc）::too_short`） | `c204e945`（2026-11-12 11:20，右栏浮层临时展开按钮） |
+| `test_baseline_file_stays_in_sync_with_counter` | `AssertionError: assert 3 == 4`（基线 3 条 vs 当前 4 条） | `c204e945`（同上，出现第 4 条违规） |
+
+- **复跑命令**：
+  ```bash
+  MBDSDR_OFFLINE=1 QT_QPA_PLATFORM=offscreen \
+    python -m pytest tests/test_tooltip_guard.py -q -rf
+  ```
+- **当前 owner**：`desktop/device_panel.py`、`desktop/control_panel.py`、
+  `desktop/main_window.py`、`docs/tooltip-baseline.json` 均无活跃 claim。按引入线：
+  `ff7e3288` = 设备面板线、`b97b0cd1` = 控制面板线、`c204e945` = 右栏收窄线。
+- **转绿条件**：4 条全部通过——动态 tooltip 补「未确认 / 配置意图 / 以设备为准」
+  标注或删数值；透传 tooltip 进登记表；`收起右栏浮层（Esc）` 改写到 ≥12 字且不等于
+  可见文字；基线只降不升（当前 3 条，不许把第 4 条塞进去）。验收：整文件
+  `7 passed`；反证：恢复任一违规，对应节点必须红。
