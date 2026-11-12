@@ -26,6 +26,7 @@ import json
 import logging
 import os
 import sys
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, List, Optional, Sequence
@@ -36,6 +37,14 @@ if _HERE not in sys.path:
 
 from shortcuts import SHORTCUTS  # noqa: E402
 from capability_catalog import build_catalog  # noqa: E402
+
+try:  # 常规：仓库根在 sys.path 上（main.py / 测试都这么进来）
+    from mbdsdr_ai.corrupt_evidence import write_reason
+except ImportError:  # pragma: no cover - 兼容只把 desktop/ 放进 sys.path 的调用方
+    _root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    if _root not in sys.path:
+        sys.path.insert(0, _root)
+    from mbdsdr_ai.corrupt_evidence import write_reason
 
 logger = logging.getLogger(__name__)
 
@@ -53,6 +62,14 @@ _FUZZY_BASE = 10
 
 _RECENT: Optional[List[str]] = None
 
+#: 上次读取失败的人话说明（None = 正常）。目前没有界面消费：命令面板只列
+#: 「可执行动作」，把这条错误硬塞进搜索框或结果列表会干扰语义。接线等
+#: main_window.py 的状态栏/诊断页。
+_LAST_ERROR: Optional[str] = None
+
+#: 最近使用文件读不了且无法备份时拒绝写盘：remember_recent 会覆盖同一个文件。
+_SAVE_BLOCKED = False
+
 
 def _recent_path() -> Path:
     """最近使用文件的绝对路径；测试可用 monkeypatch 覆盖本函数。"""
@@ -61,31 +78,101 @@ def _recent_path() -> Path:
     return Path(_desktop_settings.default_config_path()).parent / RECENT_FILENAME
 
 
+def recent_error() -> Optional[str]:
+    """最近使用文件的读取/写入错误（None = 正常）。"""
+    return _LAST_ERROR
+
+
+def _backup_corrupt_recent(path: Path) -> Optional[str]:
+    """把损坏的最近使用文件改名成 ``*.corrupt-时间戳``，返回备份路径（失败 None）。"""
+    backup = f"{path}.corrupt-{time.strftime('%Y%m%d-%H%M%S')}"
+    try:
+        os.replace(path, backup)
+    except OSError as exc:
+        logger.error("命令面板最近使用文件损坏备份失败：%s（%s）", path, exc)
+        return None
+    return backup
+
+
+def _mark_corrupt_recent(path: Path, reason: str) -> None:
+    """损坏：先备份原件再留人话错误；备份失败则拒绝后续写盘。"""
+    global _LAST_ERROR, _SAVE_BLOCKED
+    backup = _backup_corrupt_recent(path)
+    if backup is None:
+        _LAST_ERROR = (
+            f"命令面板最近使用文件损坏（{reason}）：{path}；"
+            "备份失败，本次不写入，避免覆盖唯一证据")
+        _SAVE_BLOCKED = True
+        return
+    _LAST_ERROR = (
+        f"命令面板最近使用文件损坏（{reason}）：{path}；"
+        f"原件已备份为 {backup}，本次按空列表启动")
+    _SAVE_BLOCKED = False
+    write_reason(backup, _LAST_ERROR, logger)
+
+
 def _read_recent_file() -> List[str]:
+    """读最近使用：缺失 = 空（首次启动）；损坏先备份；读不了不写。
+
+    这个文件只存入口 source，丢了不影响任何功能；但「当成空、下一次
+    remember_recent 覆盖」会连排查线索一起抹掉，所以仍按统一口径留证据。
+    """
+    global _LAST_ERROR, _SAVE_BLOCKED
     path = _recent_path()
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))
     except FileNotFoundError:
+        _LAST_ERROR = None
+        _SAVE_BLOCKED = False
         return []
-    except (OSError, ValueError) as exc:
-        logger.debug("命令面板最近使用读取失败（按空处理）：%s: %s",
-                     type(exc).__name__, exc)
+    except OSError as exc:
+        _LAST_ERROR = (
+            f"命令面板最近使用读取失败（{type(exc).__name__}）：{path}；"
+            "本次不写入，避免覆盖可能仍可恢复的列表")
+        _SAVE_BLOCKED = True
+        logger.warning("命令面板最近使用读取失败（非损坏，不备份）：%s", exc)
+        return []
+    except ValueError as exc:
+        _mark_corrupt_recent(path, f"解析失败（{type(exc).__name__}: {exc}）")
         return []
     if not isinstance(raw, list):
-        logger.debug("命令面板最近使用文件格式不是列表，按空处理：%s", path)
+        _mark_corrupt_recent(path, "根节点不是列表")
         return []
-    return [str(x) for x in raw if isinstance(x, str)][:RECENT_LIMIT]
+    if any(not isinstance(x, str) for x in raw):
+        _mark_corrupt_recent(path, "条目不是字符串")
+        return []
+    _LAST_ERROR = None
+    _SAVE_BLOCKED = False
+    return raw[:RECENT_LIMIT]
 
 
 def _write_recent_file(items: Sequence[str]) -> None:
+    global _LAST_ERROR
+    if _SAVE_BLOCKED:
+        _LAST_ERROR = (
+            "命令面板最近使用未保存：读不了且无法备份；"
+            "为避免覆盖唯一证据，本次不写入")
+        logger.error("命令面板最近使用写入被拒绝（文件不可用且未备份）")
+        return
     path = _recent_path()
+    tmp_path = f"{path}.tmp"
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(list(items), ensure_ascii=False),
-                        encoding="utf-8")
+        # 先写临时文件再原子替换：写到一半失败不会把原文件截成半截 JSON。
+        Path(tmp_path).write_text(json.dumps(list(items), ensure_ascii=False),
+                                  encoding="utf-8")
+        os.replace(tmp_path, path)
     except OSError as exc:
-        logger.debug("命令面板最近使用写入失败（不影响本次执行）：%s: %s",
-                     type(exc).__name__, exc)
+        try:
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+        except OSError as cleanup_exc:
+            logger.warning("命令面板最近使用临时文件清理失败：%s（%s）",
+                           tmp_path, cleanup_exc)
+        _LAST_ERROR = (
+            f"命令面板最近使用写入失败（{type(exc).__name__}）：{path}；"
+            "本次未写入，不影响本次执行")
+        logger.debug("%s", _LAST_ERROR)
 
 
 def load_recent() -> List[str]:
@@ -110,9 +197,11 @@ def remember_recent(source: str, *, persist: bool = True) -> None:
 
 
 def reset_recent() -> None:
-    """清空进程内缓存（测试隔离用；不动磁盘文件）。"""
-    global _RECENT
+    """清空进程内缓存与错误状态（测试隔离用；不动磁盘文件）。"""
+    global _RECENT, _LAST_ERROR, _SAVE_BLOCKED
     _RECENT = None
+    _LAST_ERROR = None
+    _SAVE_BLOCKED = False
 
 
 #: 状态 → 界面后缀
