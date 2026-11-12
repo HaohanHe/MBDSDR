@@ -143,3 +143,24 @@ def default_sample_rate_combo_index(items, preferred_hz=None) -> int:
                 return index
     return 0
 
+
+def cons_of_talker(talker: str, prn) -> str:
+    """NMEA talker 前缀 → 星座名（唯一实现，星座面板与天图共用）。"""
+    t = (talker or "").upper()
+    if t == "GP":
+        return "GPS"
+    if t == "GL":
+        return "GLONASS"
+    if t == "GA":
+        return "Galileo"
+    if t in ("GB", "BD"):
+        return "BeiDou"
+    if t == "GN":
+        try:
+            p = int(prn)
+        except (TypeError, ValueError):
+            return "未知"
+        if 65 <= p <= 96:
+            return "GLONASS"
+    return "未知"
+
