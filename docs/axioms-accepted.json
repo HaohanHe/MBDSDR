@@ -1,0 +1,589 @@
+{
+  "records": [
+    {
+      "accepted": [
+        {
+          "fingerprint": "674985eba97579cd",
+          "line": 479,
+          "path": "mbdsdr_ai/tests/test_constellations_data.py",
+          "rule": "A09",
+          "severity": "must-fix",
+          "snippet": "@pytest.mark.skipif(not REFERENCE.exists(), reason=\"本机无 Stellarium 参考数据\")"
+        },
+        {
+          "fingerprint": "ae852b63b6bbafa7",
+          "line": 777,
+          "path": "mbdsdr_ai/tests/test_lrpt_huffman.py",
+          "rule": "A09",
+          "severity": "must-fix",
+          "snippet": "@pytest.mark.skipif("
+        },
+        {
+          "fingerprint": "c1fe1564755849e6",
+          "line": 68,
+          "path": "mbdsdr_ai/tests/test_star_catalog_packaging.py",
+          "rule": "A09",
+          "severity": "must-fix",
+          "snippet": "@pytest.mark.skipif(os.environ.get(\"MBSDSR_SKIP_WHEEL_BUILD\") == \"1\","
+        },
+        {
+          "fingerprint": "5b752f9f0f02eab8",
+          "line": 91,
+          "path": "mbdsdr_ai/tests/test_star_catalog_packaging.py",
+          "rule": "A09",
+          "severity": "must-fix",
+          "snippet": "@pytest.mark.skipif(os.environ.get(\"MBSDSR_SKIP_WHEEL_BUILD\") == \"1\","
+        },
+        {
+          "fingerprint": "07a9a022a1d9afde",
+          "line": 169,
+          "path": "tests/test_device_owner_lock.py",
+          "rule": "A09",
+          "severity": "must-fix",
+          "snippet": "@pytest.mark.skipif(os.name != \"nt\", reason=\"错误码分流走的是 Windows 探活路径\")"
+        },
+        {
+          "fingerprint": "fcfab0c6df845a1c",
+          "line": 183,
+          "path": "tests/test_device_owner_lock.py",
+          "rule": "A09",
+          "severity": "must-fix",
+          "snippet": "@pytest.mark.skipif(os.name != \"nt\", reason=\"错误码分流走的是 Windows 探活路径\")"
+        },
+        {
+          "fingerprint": "9158cd009fb21103",
+          "line": 51,
+          "path": "tests/test_gui_real_hardware.py",
+          "rule": "A09",
+          "severity": "must-fix",
+          "snippet": "@pytest.mark.skipif(_find_rtl() is None, reason=\"无真实 RTL-SDR，跳过真机 GUI 端到端\")"
+        },
+        {
+          "fingerprint": "37806738e1fadb18",
+          "line": 261,
+          "path": "tests/test_hardcoded_parameter_registry.py",
+          "rule": "A09",
+          "severity": "must-fix",
+          "snippet": "@pytest.mark.skipif(not TOKENS_H.exists(), reason=\"C++ 源码不在当前检出\")"
+        },
+        {
+          "fingerprint": "8c0abeb5203164b4",
+          "line": 274,
+          "path": "tests/test_hardcoded_parameter_registry.py",
+          "rule": "A09",
+          "severity": "must-fix",
+          "snippet": "@pytest.mark.skipif(not TOKENS_H.exists(), reason=\"C++ 源码不在当前检出\")"
+        },
+        {
+          "fingerprint": "203bad8109bbefb8",
+          "line": 299,
+          "path": "tests/test_hardcoded_parameter_registry.py",
+          "rule": "A09",
+          "severity": "must-fix",
+          "snippet": "@pytest.mark.skipif(not TOKENS_H.exists(), reason=\"C++ 源码不在当前检出\")"
+        },
+        {
+          "fingerprint": "10354e348d38ad2e",
+          "line": 335,
+          "path": "tests/test_hardcoded_parameter_registry.py",
+          "rule": "A09",
+          "severity": "must-fix",
+          "snippet": "@pytest.mark.skipif(not TOKENS_H.exists(), reason=\"C++ 源码不在当前检出\")"
+        },
+        {
+          "fingerprint": "c393d917a5ea7156",
+          "line": 365,
+          "path": "tests/test_hardcoded_parameter_registry.py",
+          "rule": "A09",
+          "severity": "must-fix",
+          "snippet": "@pytest.mark.skipif(not TOKENS_H.exists(), reason=\"C++ 源码不在当前检出\")"
+        },
+        {
+          "fingerprint": "b9a9da3c13258b40",
+          "line": 390,
+          "path": "tests/test_hardcoded_parameter_registry.py",
+          "rule": "A09",
+          "severity": "must-fix",
+          "snippet": "@pytest.mark.skipif(not TOKENS_H.exists(), reason=\"C++ 源码不在当前检出\")"
+        },
+        {
+          "fingerprint": "a4fa9ec0cf6991d6",
+          "line": 466,
+          "path": "tests/test_hardcoded_parameter_registry.py",
+          "rule": "A09",
+          "severity": "must-fix",
+          "snippet": "@pytest.mark.skipif(not TOKENS_H.exists(), reason=\"C++ 源码不在当前检出\")"
+        },
+        {
+          "fingerprint": "f56bf0db6d99f4a4",
+          "line": 508,
+          "path": "tests/test_hardcoded_parameter_registry.py",
+          "rule": "A09",
+          "severity": "must-fix",
+          "snippet": "@pytest.mark.skipif(not TOKENS_H.exists(), reason=\"C++ 源码不在当前检出\")"
+        },
+        {
+          "fingerprint": "5de288174e933bf2",
+          "line": 27,
+          "path": "tests/test_moon_reference_acceptance.py",
+          "rule": "A09",
+          "severity": "must-fix",
+          "snippet": "pytestmark = pytest.mark.skipif("
+        },
+        {
+          "fingerprint": "54e5d4d87dd121e6",
+          "line": 18,
+          "path": "tests/test_planets.py",
+          "rule": "A09",
+          "severity": "must-fix",
+          "snippet": "@pytest.mark.skipif(not os.path.exists(BSP), reason=\"de440s.bsp not available\")"
+        },
+        {
+          "fingerprint": "b1b675b2898a166a",
+          "line": 97,
+          "path": "tests/test_spectrum_menu_tab_chain.py",
+          "rule": "A09",
+          "severity": "must-fix",
+          "snippet": "@pytest.mark.skip("
+        },
+        {
+          "fingerprint": "d4f26401584845c8",
+          "line": 275,
+          "path": "tests/test_usb_hotplug.py",
+          "rule": "A09",
+          "severity": "must-fix",
+          "snippet": "@pytest.mark.skipif(not sys.platform.startswith(\"win\"),"
+        },
+        {
+          "fingerprint": "ca2afa23f6a70e9b",
+          "line": 2378,
+          "path": "docs/COORDINATION.md",
+          "rule": "A10",
+          "severity": "must-fix",
+          "snippet": "> 背景：原报告称 `a4c4a0d5` 已落「`_ACTIVE_OWNER` + 占用 API」，实测该对象"
+        },
+        {
+          "fingerprint": "6703309bd6493cd5",
+          "line": 2444,
+          "path": "docs/COORDINATION.md",
+          "rule": "A10",
+          "severity": "must-fix",
+          "snippet": "**理由**：2026-11-12 出现过一次「报告了一笔并不存在的提交 `a4c4a0d5`」。"
+        },
+        {
+          "fingerprint": "948b4a59db3b4529",
+          "line": 2939,
+          "path": "docs/COORDINATION.md",
+          "rule": "A10",
+          "severity": "must-fix",
+          "snippet": "（`42831acb`、`439993a`），闸门正确报出 **9 条 EXTRA + 1 条幻影 DELETE**；"
+        },
+        {
+          "fingerprint": "2063857de0b8e9f8",
+          "line": 152,
+          "path": "docs/axioms.md",
+          "rule": "A10",
+          "severity": "must-fix",
+          "snippet": "| A10 | 证据必须可复核 | 文档反引号中的 7–40 位十六进制串必须 `git cat-file -t` 为 commit | `推进报告:141` 的 `5d09bb2`（示例，非真实提交）、`COORDINATION:3430` 的 `0d7e433e`（示例，非真实提交） | `evidence_commit_exists` | `推进报告:141` |"
+        },
+        {
+          "fingerprint": "ed7cf3d10ec8cfa6",
+          "line": 152,
+          "path": "docs/axioms.md",
+          "rule": "A10",
+          "severity": "must-fix",
+          "snippet": "| A10 | 证据必须可复核 | 文档反引号中的 7–40 位十六进制串必须 `git cat-file -t` 为 commit | `推进报告:141` 的 `5d09bb2`（示例，非真实提交）、`COORDINATION:3430` 的 `0d7e433e`（示例，非真实提交） | `evidence_commit_exists` | `推进报告:141` |"
+        },
+        {
+          "fingerprint": "81310deed0c8f3ec",
+          "line": 3,
+          "path": "docs/pending-patches/2026-11-06-handoff-mechanism-blob-writeback.md",
+          "rule": "A10",
+          "severity": "must-fix",
+          "snippet": "> 交接方：采样率真值线（`6ae85f56`，收件你我都不在 claim 表里，纯提报）。"
+        },
+        {
+          "fingerprint": "f95b5f1b552223cc",
+          "line": 3,
+          "path": "docs/pending-patches/2026-11-06-handoff-protocol-claim-ledger.md",
+          "rule": "A10",
+          "severity": "must-fix",
+          "snippet": "> 交接方：采样率真值线（`6ae85f56`）；收件方：协议线（`78420b4f`，`docs/parameter-unification.md` claim 持有方）。"
+        },
+        {
+          "fingerprint": "389f0164807ddad6",
+          "line": 3,
+          "path": "docs/pending-patches/2026-11-06-handoff-protocol-claim-ledger.md",
+          "rule": "A10",
+          "severity": "must-fix",
+          "snippet": "> 交接方：采样率真值线（`6ae85f56`）；收件方：协议线（`78420b4f`，`docs/parameter-unification.md` claim 持有方）。"
+        },
+        {
+          "fingerprint": "743b0ffc8ffabc9d",
+          "line": 626,
+          "path": "docs/research/2026-11-11-roadmap.md",
+          "rule": "A10",
+          "severity": "must-fix",
+          "snippet": "- 2026-11-11 21:40｜W78–W87 区块（owner 标记 `6ae85f56`，该标记为历史记录、未经核实）｜W82 完成 `8b09b8fa`；W78 由 HEAD 既有三路径测试覆盖；W79 前提消失（HEAD 无 `_sky_to_screen_opt`）；W80/W81 仍他人持有；W83/W84/W86 依赖未落库；W87 视觉冻结。另：`web/product/sr"
+        },
+        {
+          "fingerprint": "1b3a887187342189",
+          "line": 208,
+          "path": "docs/COORDINATION.md",
+          "rule": "A11",
+          "severity": "review",
+          "snippet": "至此 `tests/` 全量不再挂着「没有完整跑过」，但**不是全绿**。"
+        },
+        {
+          "fingerprint": "b823db7d7999bd2d",
+          "line": 914,
+          "path": "docs/COORDINATION.md",
+          "rule": "A11",
+          "severity": "review",
+          "snippet": "守卫巷道 41 passed 首次全绿（_wildcodes_lane.log）。"
+        },
+        {
+          "fingerprint": "84c7f0d7ee86a30d",
+          "line": 3976,
+          "path": "docs/COORDINATION.md",
+          "rule": "A11",
+          "severity": "review",
+          "snippet": "全量**未重跑**，不许拿那个数字说当前代码全绿。真机只验了 30 秒级链路，"
+        },
+        {
+          "fingerprint": "c50fa81fd1254264",
+          "line": 52,
+          "path": "docs/audit_r2/50_test_integration_part2.md",
+          "rule": "A11",
+          "severity": "review",
+          "snippet": "→ V2 这两条断言现在跑必然 `✗`。`tests/test_report_v2.txt` 里的 185/185 全绿是**旧快照**（特征数还是 24 维时留下的），后来源码加了第 25 维特征，V2 没跟着改。**这是\"实验室绿\"假象的直接证据。**"
+        },
+        {
+          "fingerprint": "bc004fd55cde50f8",
+          "line": 198,
+          "path": "docs/audit_r2/FINAL_REPORT_R2.md",
+          "rule": "A11",
+          "severity": "review",
+          "snippet": "- **问题**：V2 断言 `n_features == 24`，但源码 `amr.py:292` 硬编码 `\"n_features\": 25`，`AMRFeature.to_list()` 实返 25 维。当前跑 V2 必然红，`test_report_v2.txt` 的 185/185 全绿是旧快照。V2 还删掉了 V1 里所有有鉴别力的往返测试（SSTV 跨实现、ADS-B CRC 权威向"
+        },
+        {
+          "fingerprint": "cbc4dee784e5964c",
+          "line": 508,
+          "path": "docs/data-inventory.md",
+          "rule": "A11",
+          "severity": "review",
+          "snippet": "这 5 行已按模块重建，复查全绿（历史记录：2026-11 首跑后复查，未在现树复核）。"
+        },
+        {
+          "fingerprint": "ce185aa3c4cfb862",
+          "line": 778,
+          "path": "docs/hardcoded-parameters.md",
+          "rule": "A11",
+          "severity": "review",
+          "snippet": "新口径不再随带宽改变含义。静噪验收矩阵见 §10-1（6 模式 × 3 场景全绿）。"
+        },
+        {
+          "fingerprint": "9a697ba4a6ef985e",
+          "line": 75,
+          "path": "docs/known-red-register.md",
+          "rule": "A11",
+          "severity": "review",
+          "snippet": "collect 清单」映射 nodeid 得到 15 条，并判成「单跑全绿 = 顺序依赖假红」（历史判断，已在本段更正）。"
+        },
+        {
+          "fingerprint": "a2bae6d41050e277",
+          "line": 85,
+          "path": "docs/redundancy-register.md",
+          "rule": "A11",
+          "severity": "review",
+          "snippet": "| A12 | `cpp/src/core/tokens.h` 原 `kDbUpperDefault` **一个常量担两个语义** | **常量复用**（不是重复实现，也不是多份表） | 语义①「默认视窗上限」→ 现 `kDbViewUpperDefault=-20`（`cpp/src/ui/main_window.cpp:5644`、`cpp/src/ui/settings_dialog.cpp"
+        },
+        {
+          "fingerprint": "e2a2907084e3f02e",
+          "line": 103,
+          "path": "docs/reference-mechanisms.md",
+          "rule": "A11",
+          "severity": "review",
+          "snippet": "4. 2 Hz 缓存语义与 `max_peaks` 上限不变；现有频谱测试全绿（历史验收记录：2026-11，未在现树整体复核）。"
+        },
+        {
+          "fingerprint": "4b052a16aae9de3c",
+          "line": 48,
+          "path": "docs/推进报告-本轮排错.md",
+          "rule": "A11",
+          "severity": "review",
+          "snippet": "| 修复后 | **158/158 全绿**（历史快照：2026-11 报告日，未在现树复核；e2e_smoke 无硬件诚实 SKIP） |"
+        },
+        {
+          "fingerprint": "cc512edaf73f8cf8",
+          "line": 138,
+          "path": "docs/推进报告-本轮排错.md",
+          "rule": "A11",
+          "severity": "review",
+          "snippet": "**验证**：`cpp/build` 重新编译通过；`ctest` **158/158 全绿**（历史记录：2026-11 报告日，未在现树复核；`engine_audio_e2e` 70s 正常，"
+        },
+        {
+          "fingerprint": "865fde2190a2f0c6",
+          "line": 190,
+          "path": "mbdsdr_ai/hal.py",
+          "rule": "A13",
+          "severity": "must-fix",
+          "snippet": "name = result.get(\"label\", f\"{driver}-{i}\")"
+        },
+        {
+          "fingerprint": "6b1c61802962e577",
+          "line": 557,
+          "path": "scripts/file_claim.py",
+          "rule": "A13",
+          "severity": "must-fix",
+          "snippet": "if item.get(\"released_at\") is None and item[\"owner\"] == payload[\"owner\"]:"
+        },
+        {
+          "fingerprint": "5c936ed4c06dabbd",
+          "line": 0,
+          "path": "mbdsdr_ai/bladerf_params.py",
+          "rule": "D1-cycle",
+          "severity": "review",
+          "snippet": "21 个模块互相依赖"
+        },
+        {
+          "fingerprint": "3f38ced6b43dddb5",
+          "line": 0,
+          "path": "mbdsdr_ai/fengyun_sat.py",
+          "rule": "D1-cycle",
+          "severity": "review",
+          "snippet": "5 个模块互相依赖"
+        },
+        {
+          "fingerprint": "40ce1d14c2f50c8e",
+          "line": 0,
+          "path": "tests/",
+          "rule": "D1-test-reverse",
+          "severity": "review",
+          "snippet": "318 处 import"
+        },
+        {
+          "fingerprint": "cf8b8619d8190e00",
+          "line": 146,
+          "path": "docs/pending-patches/2026-11-13-d1-deferred-cycle-rule.md",
+          "rule": "D6-missing-path",
+          "severity": "review",
+          "snippet": "引用的 mbdsdr_ai/a.py 不存在"
+        },
+        {
+          "fingerprint": "a411e634b33a9361",
+          "line": 83,
+          "path": "docs/redundancy-register.md",
+          "rule": "D6-stale-line",
+          "severity": "review",
+          "snippet": "mbdsdr_ai/decoders.py:1157 超出文件行数 1038"
+        }
+      ],
+      "at": "2026-11-13 03:37:36",
+      "by": "xxhzb",
+      "escalated": [],
+      "head": "06751d15",
+      "reason": "7 条判据结构化后首次实跑：应修与复核条目按当前树接受，作为 c182aba4 基线的后继起点；新增来源是原先被名字/字样/改名放过的位置被看见，逐条指纹见本条记录",
+      "removed": [
+        {
+          "fingerprint": "11f263305d2c1ad9",
+          "line": 260,
+          "path": "desktop/modulation_panel.py",
+          "rule": "A01",
+          "snippet": "self.bw_label.setText(f\"{bw/1e3:.1f} kHz\" if bw > 0 else \"--\")"
+        },
+        {
+          "fingerprint": "165ee4fb57a97919",
+          "line": 1123,
+          "path": "scripts/file_claim.py",
+          "rule": "A13",
+          "snippet": "(\"--owner 与台账一致\", bool(holder) and holder == owner,"
+        },
+        {
+          "fingerprint": "16f62f7a493bac9c",
+          "line": 924,
+          "path": "mbdsdr_ai/rtltcp_client.py",
+          "rule": "A03",
+          "snippet": "except Exception:"
+        },
+        {
+          "fingerprint": "19a4eb5d8b7c970e",
+          "line": 300,
+          "path": "tools/hw_selfcheck/selfcheck.py",
+          "rule": "A03",
+          "snippet": "except Exception: # noqa: BLE001"
+        },
+        {
+          "fingerprint": "1c2cbbd551540772",
+          "line": 164,
+          "path": "mbdsdr_ai/skill_registry.py",
+          "rule": "A03",
+          "snippet": "except Exception:"
+        },
+        {
+          "fingerprint": "288c7afe6a468701",
+          "line": 597,
+          "path": "desktop/new_spacetime_panel.py",
+          "rule": "A01",
+          "snippet": "self.bw_label.setText(f\"{result.bandwidth_hz / 1e3:.1f} kHz\")"
+        },
+        {
+          "fingerprint": "2b3fbf904c6637ba",
+          "line": 594,
+          "path": "mbdsdr_ai/serial_gnss.py",
+          "rule": "A03",
+          "snippet": "except Exception:"
+        },
+        {
+          "fingerprint": "63f737400c73b099",
+          "line": 247,
+          "path": "mbdsdr_ai/solar_system.py",
+          "rule": "A03",
+          "snippet": "except Exception:"
+        },
+        {
+          "fingerprint": "706cd9cfa1db62bd",
+          "line": 203,
+          "path": "tools/hw_selfcheck/selfcheck.py",
+          "rule": "A03",
+          "snippet": "except Exception: # noqa: BLE001"
+        },
+        {
+          "fingerprint": "713aa0bb4b9a3327",
+          "line": 1188,
+          "path": "mbdsdr_ai/ax25.py",
+          "rule": "A03",
+          "snippet": "except Exception:"
+        },
+        {
+          "fingerprint": "7592354c9645c0bf",
+          "line": 377,
+          "path": "mbdsdr_ai/core/controller.py",
+          "rule": "A03",
+          "snippet": "except Exception:"
+        },
+        {
+          "fingerprint": "79d272aae7bf8118",
+          "line": 318,
+          "path": "mbdsdr_ai/plugin_system.py",
+          "rule": "A03",
+          "snippet": "except Exception:"
+        },
+        {
+          "fingerprint": "7b824a2343f543e6",
+          "line": 625,
+          "path": "docs/evidence-standard.md",
+          "rule": "D6-stale-line",
+          "snippet": "mbdsdr_ai/solar_system.py:1117 超出文件行数 1116"
+        },
+        {
+          "fingerprint": "87efd38bdaaf55c5",
+          "line": 1560,
+          "path": "desktop/rf_sky_view.py",
+          "rule": "A03",
+          "snippet": "except Exception:"
+        },
+        {
+          "fingerprint": "9023ca25b18a30be",
+          "line": 147,
+          "path": "tools/hw_selfcheck/selfcheck.py",
+          "rule": "A03",
+          "snippet": "except Exception: # noqa: BLE001"
+        },
+        {
+          "fingerprint": "948aa319592a22ad",
+          "line": 871,
+          "path": "mbdsdr_ai/decode_router.py",
+          "rule": "A03",
+          "snippet": "except Exception:"
+        },
+        {
+          "fingerprint": "9a61e53c5e6aa441",
+          "line": 83,
+          "path": "docs/redundancy-register.md",
+          "rule": "D6-stale-line",
+          "snippet": "mbdsdr_ai/decoders.py:1157 超出文件行数 1061"
+        },
+        {
+          "fingerprint": "9a9f50d97c64ae82",
+          "line": 915,
+          "path": "mbdsdr_ai/decode_router.py",
+          "rule": "A03",
+          "snippet": "except Exception:"
+        },
+        {
+          "fingerprint": "a3ab4fcae9ee6ea8",
+          "line": 924,
+          "path": "desktop/weather_panel.py",
+          "rule": "A01",
+          "snippet": "line = (f\"{self.freq_edit.text()} MHz | \""
+        },
+        {
+          "fingerprint": "c44955bfe797f856",
+          "line": 0,
+          "path": "tests/",
+          "rule": "D1-test-reverse",
+          "snippet": "314 处 import"
+        },
+        {
+          "fingerprint": "cc5334c493012289",
+          "line": 586,
+          "path": "mbdsdr_ai/hal.py",
+          "rule": "A03",
+          "snippet": "except Exception:"
+        },
+        {
+          "fingerprint": "cef1206594c3d9c9",
+          "line": 505,
+          "path": "mbdsdr_ai/mcp_client.py",
+          "rule": "A03",
+          "snippet": "except Exception: # pragma: no cover - 读体失败的极端情况"
+        },
+        {
+          "fingerprint": "d032472746cf6b3d",
+          "line": 0,
+          "path": "mbdsdr_ai/jpeg_k3_tables.py",
+          "rule": "D1-cycle",
+          "snippet": "2 个模块互相依赖"
+        },
+        {
+          "fingerprint": "eb3e355af91d2e55",
+          "line": 0,
+          "path": "mbdsdr_ai/adsb.py",
+          "rule": "D1-cycle",
+          "snippet": "60 个模块互相依赖"
+        },
+        {
+          "fingerprint": "eb61741f24163c95",
+          "line": 4556,
+          "path": "mbdsdr_ai/agent.py",
+          "rule": "A03",
+          "snippet": "except Exception:"
+        },
+        {
+          "fingerprint": "ed5a32ab0c8a1481",
+          "line": 0,
+          "path": "mbdsdr_ai/rtk_solver.py",
+          "rule": "D1-cycle",
+          "snippet": "2 个模块互相依赖"
+        },
+        {
+          "fingerprint": "f3862709a8511802",
+          "line": 597,
+          "path": "mbdsdr_ai/hal.py",
+          "rule": "A03",
+          "snippet": "except Exception:"
+        },
+        {
+          "fingerprint": "fb502c7c71bd276c",
+          "line": 402,
+          "path": "mbdsdr_ai/hooks.py",
+          "rule": "A03",
+          "snippet": "except Exception:"
+        }
+      ],
+      "session": ""
+    }
+  ],
+  "version": 1
+}

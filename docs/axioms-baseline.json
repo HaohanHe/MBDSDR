@@ -1,7 +1,7 @@
 {
   "entries": {
     "0045bbb467fdc82b": {
-      "line": 1959,
+      "line": 2026,
       "ordinal": 2,
       "path": "mbdsdr_ai/sdr_backend.py",
       "rule": "A03",
@@ -80,6 +80,14 @@
       "severity": "review",
       "snippet": "geodetic_to_ecef 与 mbdsdr_ai/orbit.py:176 同名但实现不同"
     },
+    "07a9a022a1d9afde": {
+      "line": 169,
+      "ordinal": 0,
+      "path": "tests/test_device_owner_lock.py",
+      "rule": "A09",
+      "severity": "must-fix",
+      "snippet": "@pytest.mark.skipif(os.name != \"nt\", reason=\"错误码分流走的是 Windows 探活路径\")"
+    },
     "08177c4e26d95727": {
       "line": 45,
       "ordinal": 0,
@@ -89,7 +97,7 @@
       "snippet": "FREQ_MIN_HZ 有 2 个不同取值（10_000.0, 325_000_000.0）"
     },
     "0895cdacf758997e": {
-      "line": 3269,
+      "line": 3336,
       "ordinal": 5,
       "path": "mbdsdr_ai/sdr_backend.py",
       "rule": "A04",
@@ -105,7 +113,7 @@
       "snippet": "**为什么判定不是视觉改动**：以上不新增/删除控件，不改布局、尺寸、颜色、层级、"
     },
     "0a3542f05df69c62": {
-      "line": 88,
+      "line": 91,
       "ordinal": 0,
       "path": "mbdsdr_ai/solar_system.py",
       "rule": "D3-no-contract",
@@ -177,7 +185,7 @@
       "snippet": "DEFAULT_SAMPLE_RATE_HZ 有 2 个不同取值（2_400_000, 1024000 # r）"
     },
     "0e43275e4f51c982": {
-      "line": 3840,
+      "line": 3907,
       "ordinal": 9,
       "path": "mbdsdr_ai/sdr_backend.py",
       "rule": "A04",
@@ -185,7 +193,7 @@
       "snippet": "except Exception:"
     },
     "0eb2a47114f6f9ef": {
-      "line": 120,
+      "line": 118,
       "ordinal": 0,
       "path": "mbdsdr_ai/rtklib_adapter.py",
       "rule": "D3-no-contract",
@@ -207,6 +215,14 @@
       "rule": "A11",
       "severity": "review",
       "snippet": "3. `tests/test_goto_anim_driver.py` 全绿（2026-11-13 于 `97fc5fc8` 复跑 → 9 passed），duration 语义不变；"
+    },
+    "10354e348d38ad2e": {
+      "line": 335,
+      "ordinal": 3,
+      "path": "tests/test_hardcoded_parameter_registry.py",
+      "rule": "A09",
+      "severity": "must-fix",
+      "snippet": "@pytest.mark.skipif(not TOKENS_H.exists(), reason=\"C++ 源码不在当前检出\")"
     },
     "106f56953f3ac4f0": {
       "line": 54,
@@ -247,14 +263,6 @@
       "rule": "D3-no-contract",
       "severity": "review",
       "snippet": "模块未声明 __all__"
-    },
-    "11f263305d2c1ad9": {
-      "line": 260,
-      "ordinal": 0,
-      "path": "desktop/modulation_panel.py",
-      "rule": "A01",
-      "severity": "must-fix",
-      "snippet": "self.bw_label.setText(f\"{bw/1e3:.1f} kHz\" if bw > 0 else \"--\")"
     },
     "12593bb713136354": {
       "line": 350,
@@ -328,14 +336,6 @@
       "severity": "review",
       "snippet": "引用的 tools/compute-ephemeris.py 不存在"
     },
-    "165ee4fb57a97919": {
-      "line": 1123,
-      "ordinal": 0,
-      "path": "scripts/file_claim.py",
-      "rule": "A13",
-      "severity": "must-fix",
-      "snippet": "(\"--owner 与台账一致\", bool(holder) and holder == owner,"
-    },
     "16f22660d4141e75": {
       "line": 294,
       "ordinal": 0,
@@ -351,14 +351,6 @@
       "rule": "D3-no-contract",
       "severity": "review",
       "snippet": "模块未声明 __all__"
-    },
-    "16f62f7a493bac9c": {
-      "line": 924,
-      "ordinal": 0,
-      "path": "mbdsdr_ai/rtltcp_client.py",
-      "rule": "A03",
-      "severity": "must-fix",
-      "snippet": "except Exception:"
     },
     "17802f52940d568e": {
       "line": 38,
@@ -400,14 +392,6 @@
       "severity": "review",
       "snippet": "模块未声明 __all__"
     },
-    "19a4eb5d8b7c970e": {
-      "line": 300,
-      "ordinal": 2,
-      "path": "tools/hw_selfcheck/selfcheck.py",
-      "rule": "A03",
-      "severity": "must-fix",
-      "snippet": "except Exception: # noqa: BLE001"
-    },
     "1a08492028413be0": {
       "line": 120,
       "ordinal": 0,
@@ -424,6 +408,14 @@
       "severity": "review",
       "snippet": "模块未声明 __all__"
     },
+    "1b3a887187342189": {
+      "line": 208,
+      "ordinal": 0,
+      "path": "docs/COORDINATION.md",
+      "rule": "A11",
+      "severity": "review",
+      "snippet": "至此 `tests/` 全量不再挂着「没有完整跑过」，但**不是全绿**。"
+    },
     "1b3b5b3c458f7ace": {
       "line": 109,
       "ordinal": 0,
@@ -439,14 +431,6 @@
       "rule": "D3-name-role",
       "severity": "review",
       "snippet": "bits_to_bytes 与 mbdsdr_ai/gk2a_lrit.py:607 同名但实现不同"
-    },
-    "1c2cbbd551540772": {
-      "line": 164,
-      "ordinal": 0,
-      "path": "mbdsdr_ai/skill_registry.py",
-      "rule": "A03",
-      "severity": "must-fix",
-      "snippet": "except Exception:"
     },
     "1c33cc6e9e8dbacf": {
       "line": 45,
@@ -512,6 +496,22 @@
       "severity": "review",
       "snippet": "file_to_vcdus 与 mbdsdr_ai/fengyun_sat.py:287 同名但实现不同"
     },
+    "203bad8109bbefb8": {
+      "line": 299,
+      "ordinal": 2,
+      "path": "tests/test_hardcoded_parameter_registry.py",
+      "rule": "A09",
+      "severity": "must-fix",
+      "snippet": "@pytest.mark.skipif(not TOKENS_H.exists(), reason=\"C++ 源码不在当前检出\")"
+    },
+    "2063857de0b8e9f8": {
+      "line": 152,
+      "ordinal": 0,
+      "path": "docs/axioms.md",
+      "rule": "A10",
+      "severity": "must-fix",
+      "snippet": "| A10 | 证据必须可复核 | 文档反引号中的 7–40 位十六进制串必须 `git cat-file -t` 为 commit | `推进报告:141` 的 `5d09bb2`（示例，非真实提交）、`COORDINATION:3430` 的 `0d7e433e`（示例，非真实提交） | `evidence_commit_exists` | `推进报告:141` |"
+    },
     "20a86e482e93df2a": {
       "line": 31,
       "ordinal": 0,
@@ -521,7 +521,7 @@
       "snippet": "模块未声明 __all__"
     },
     "2287208d42b3e116": {
-      "line": 3716,
+      "line": 3783,
       "ordinal": 7,
       "path": "mbdsdr_ai/sdr_backend.py",
       "rule": "A03",
@@ -545,7 +545,7 @@
       "snippet": "模块未声明 __all__"
     },
     "23ce3ba862ff41db": {
-      "line": 3716,
+      "line": 3783,
       "ordinal": 7,
       "path": "mbdsdr_ai/sdr_backend.py",
       "rule": "A04",
@@ -600,14 +600,6 @@
       "severity": "review",
       "snippet": "模块未声明 __all__"
     },
-    "288c7afe6a468701": {
-      "line": 597,
-      "ordinal": 0,
-      "path": "desktop/new_spacetime_panel.py",
-      "rule": "A01",
-      "severity": "must-fix",
-      "snippet": "self.bw_label.setText(f\"{result.bandwidth_hz / 1e3:.1f} kHz\")"
-    },
     "2931f4f62e203350": {
       "line": 170,
       "ordinal": 0,
@@ -647,14 +639,6 @@
       "rule": "D2-dual-constant",
       "severity": "review",
       "snippet": "DEFAULT_PARAMS 有 3 个不同取值（BladeRFParams(), HackRFParams(), LimeSDRParams()）"
-    },
-    "2b3fbf904c6637ba": {
-      "line": 594,
-      "ordinal": 0,
-      "path": "mbdsdr_ai/serial_gnss.py",
-      "rule": "A03",
-      "severity": "must-fix",
-      "snippet": "except Exception:"
     },
     "2b45ba8352a95e09": {
       "line": 90,
@@ -785,7 +769,7 @@
       "snippet": "- `test_shortcuts_guard.py` 全绿（含原先失败的 2 条；2026-11-13 于 `97fc5fc8` 复跑：`python -m pytest tests/test_shortcuts_guard.py -q` → 11 passed）。"
     },
     "339cbcfb8e7c27b5": {
-      "line": 145,
+      "line": 149,
       "ordinal": 0,
       "path": "mbdsdr_ai/decoders.py",
       "rule": "D3-no-contract",
@@ -815,6 +799,14 @@
       "rule": "D6-missing-path",
       "severity": "review",
       "snippet": "引用的 tests/test_report.txt 不存在"
+    },
+    "37806738e1fadb18": {
+      "line": 261,
+      "ordinal": 0,
+      "path": "tests/test_hardcoded_parameter_registry.py",
+      "rule": "A09",
+      "severity": "must-fix",
+      "snippet": "@pytest.mark.skipif(not TOKENS_H.exists(), reason=\"C++ 源码不在当前检出\")"
     },
     "379c4c40b9a0ad74": {
       "line": 58,
@@ -856,6 +848,14 @@
       "severity": "review",
       "snippet": "HERE 有 2 个不同取值（os.path.dirname(os.p, Path(os.path.abspath）"
     },
+    "389f0164807ddad6": {
+      "line": 3,
+      "ordinal": 1,
+      "path": "docs/pending-patches/2026-11-06-handoff-protocol-claim-ledger.md",
+      "rule": "A10",
+      "severity": "must-fix",
+      "snippet": "> 交接方：采样率真值线（`6ae85f56`）；收件方：协议线（`78420b4f`，`docs/parameter-unification.md` claim 持有方）。"
+    },
     "3928d60f9c740b0d": {
       "line": 44,
       "ordinal": 0,
@@ -889,7 +889,7 @@
       "snippet": "EARTH_RADIUS_M 有 2 个不同取值（6_371_000.0, 6371000.0）"
     },
     "39debf973752f07f": {
-      "line": 3049,
+      "line": 3116,
       "ordinal": 0,
       "path": "mbdsdr_ai/sdr_backend.py",
       "rule": "A07",
@@ -921,7 +921,7 @@
       "snippet": "≈1.02:1，仅触屏模式），与函数 docstring「只改 px/尺寸、不改颜色」不符。颜色早于"
     },
     "3b92d143fa175109": {
-      "line": 6800,
+      "line": 6867,
       "ordinal": 11,
       "path": "mbdsdr_ai/sdr_backend.py",
       "rule": "A03",
@@ -960,6 +960,14 @@
       "severity": "review",
       "snippet": "MPDU_DATA 有 2 个不同取值（884 # 892 - 6(VCDU头, 884）"
     },
+    "3f38ced6b43dddb5": {
+      "line": 0,
+      "ordinal": 0,
+      "path": "mbdsdr_ai/fengyun_sat.py",
+      "rule": "D1-cycle",
+      "severity": "review",
+      "snippet": "5 个模块互相依赖"
+    },
     "3fa15c3cbbb28214": {
       "line": 205,
       "ordinal": 0,
@@ -967,6 +975,14 @@
       "rule": "D3-no-contract",
       "severity": "review",
       "snippet": "模块未声明 __all__"
+    },
+    "40ce1d14c2f50c8e": {
+      "line": 0,
+      "ordinal": 0,
+      "path": "tests/",
+      "rule": "D1-test-reverse",
+      "severity": "review",
+      "snippet": "318 处 import"
     },
     "413fbf28c470e364": {
       "line": 46,
@@ -1096,6 +1112,14 @@
       "severity": "review",
       "snippet": "模块未声明 __all__"
     },
+    "4b052a16aae9de3c": {
+      "line": 48,
+      "ordinal": 0,
+      "path": "docs/推进报告-本轮排错.md",
+      "rule": "A11",
+      "severity": "review",
+      "snippet": "| 修复后 | **158/158 全绿**（历史快照：2026-11 报告日，未在现树复核；e2e_smoke 无硬件诚实 SKIP） |"
+    },
     "4b8a0c6e8a882fad": {
       "line": 40,
       "ordinal": 0,
@@ -1145,7 +1169,7 @@
       "snippet": "SAMPLE_RATE 有 2 个不同取值（8000 # 本实现默认音频采, 8000）"
     },
     "4def86df386a8027": {
-      "line": 8719,
+      "line": 8721,
       "ordinal": 0,
       "path": "desktop/rf_sky_view.py",
       "rule": "D2-dual-constant",
@@ -1273,7 +1297,7 @@
       "snippet": "模块未声明 __all__"
     },
     "54c90c8dd526fd49": {
-      "line": 8720,
+      "line": 8722,
       "ordinal": 0,
       "path": "desktop/rf_sky_view.py",
       "rule": "D2-dual-constant",
@@ -1287,6 +1311,14 @@
       "rule": "D3-no-contract",
       "severity": "review",
       "snippet": "模块未声明 __all__"
+    },
+    "54e5d4d87dd121e6": {
+      "line": 18,
+      "ordinal": 0,
+      "path": "tests/test_planets.py",
+      "rule": "A09",
+      "severity": "must-fix",
+      "snippet": "@pytest.mark.skipif(not os.path.exists(BSP), reason=\"de440s.bsp not available\")"
     },
     "54fee2194b21546f": {
       "line": 54,
@@ -1361,7 +1393,7 @@
       "snippet": "STD_PRESSURE_HPA 有 2 个不同取值（1013.25 # 标准气压（百帕）, 1010.0）"
     },
     "587ada973cbfe4ef": {
-      "line": 2089,
+      "line": 2156,
       "ordinal": 3,
       "path": "mbdsdr_ai/sdr_backend.py",
       "rule": "A04",
@@ -1384,6 +1416,14 @@
       "severity": "review",
       "snippet": "模块未声明 __all__"
     },
+    "5b752f9f0f02eab8": {
+      "line": 91,
+      "ordinal": 1,
+      "path": "mbdsdr_ai/tests/test_star_catalog_packaging.py",
+      "rule": "A09",
+      "severity": "must-fix",
+      "snippet": "@pytest.mark.skipif(os.environ.get(\"MBSDSR_SKIP_WHEEL_BUILD\") == \"1\","
+    },
     "5b77b2a09ea16191": {
       "line": 849,
       "ordinal": 0,
@@ -1399,6 +1439,14 @@
       "rule": "D6-missing-path",
       "severity": "review",
       "snippet": "引用的 tests/ft8_roundtrip.py 不存在"
+    },
+    "5c936ed4c06dabbd": {
+      "line": 0,
+      "ordinal": 0,
+      "path": "mbdsdr_ai/bladerf_params.py",
+      "rule": "D1-cycle",
+      "severity": "review",
+      "snippet": "21 个模块互相依赖"
     },
     "5cc670b9cc65a60d": {
       "line": 13,
@@ -1439,6 +1487,14 @@
       "rule": "D2-dual-constant",
       "severity": "review",
       "snippet": "STD_TEMPERATURE_C 有 2 个不同取值（10.0 # 标准温度（摄氏度）, 10.0）"
+    },
+    "5de288174e933bf2": {
+      "line": 27,
+      "ordinal": 0,
+      "path": "tests/test_moon_reference_acceptance.py",
+      "rule": "A09",
+      "severity": "must-fix",
+      "snippet": "pytestmark = pytest.mark.skipif("
     },
     "5e6245305c2e1409": {
       "line": 44,
@@ -1497,7 +1553,7 @@
       "snippet": "- 文案：`desktop/main_window.py:12091` 的「收起右栏浮层（Esc）」补全为完整"
     },
     "61d1c6881b6a93f1": {
-      "line": 2234,
+      "line": 2301,
       "ordinal": 4,
       "path": "mbdsdr_ai/sdr_backend.py",
       "rule": "A04",
@@ -1505,7 +1561,7 @@
       "snippet": "except Exception:"
     },
     "6289fdc891d0f410": {
-      "line": 380,
+      "line": 436,
       "ordinal": 0,
       "path": "mbdsdr_ai/sdr_backend.py",
       "rule": "A04",
@@ -1519,14 +1575,6 @@
       "rule": "D2-dual-constant",
       "severity": "review",
       "snippet": "WGS84_A_KM 有 2 个不同取值（6378.137 # , 6378.137）"
-    },
-    "63f737400c73b099": {
-      "line": 247,
-      "ordinal": 0,
-      "path": "mbdsdr_ai/solar_system.py",
-      "rule": "A03",
-      "severity": "must-fix",
-      "snippet": "except Exception:"
     },
     "63f9dbd5a6b24100": {
       "line": 27,
@@ -1600,6 +1648,14 @@
       "severity": "review",
       "snippet": "模块未声明 __all__"
     },
+    "6703309bd6493cd5": {
+      "line": 2444,
+      "ordinal": 0,
+      "path": "docs/COORDINATION.md",
+      "rule": "A10",
+      "severity": "must-fix",
+      "snippet": "**理由**：2026-11-12 出现过一次「报告了一笔并不存在的提交 `a4c4a0d5`」。"
+    },
     "670f292ac0bd762f": {
       "line": 37,
       "ordinal": 0,
@@ -1607,6 +1663,14 @@
       "rule": "D2-dual-constant",
       "severity": "review",
       "snippet": "C_LIGHT 有 6 个不同取值（299_792_458.0, 299792.458 # k, 299792458.0 , 299792.458 ）"
+    },
+    "674985eba97579cd": {
+      "line": 479,
+      "ordinal": 0,
+      "path": "mbdsdr_ai/tests/test_constellations_data.py",
+      "rule": "A09",
+      "severity": "must-fix",
+      "snippet": "@pytest.mark.skipif(not REFERENCE.exists(), reason=\"本机无 Stellarium 参考数据\")"
     },
     "678205627b9438a9": {
       "line": 107,
@@ -1617,7 +1681,7 @@
       "snippet": "CMD_SET_FREQUENCY 有 2 个不同取值（0x01 # rtl_tc, 0x01）"
     },
     "67a401b0febe825b": {
-      "line": 6881,
+      "line": 6948,
       "ordinal": 13,
       "path": "mbdsdr_ai/sdr_backend.py",
       "rule": "A03",
@@ -1625,7 +1689,7 @@
       "snippet": "except Exception:"
     },
     "682c3bbcd62b9b07": {
-      "line": 320,
+      "line": 323,
       "ordinal": 0,
       "path": "mbdsdr_ai/ax25.py",
       "rule": "D3-name-role",
@@ -1649,7 +1713,7 @@
       "snippet": "模块未声明 __all__"
     },
     "68f57fdb8528d9ee": {
-      "line": 3055,
+      "line": 3122,
       "ordinal": 0,
       "path": "mbdsdr_ai/sdr_backend.py",
       "rule": "A07",
@@ -1689,12 +1753,20 @@
       "snippet": "模块未声明 __all__"
     },
     "6a6d78668f8fd1fe": {
-      "line": 4026,
+      "line": 4093,
       "ordinal": 10,
       "path": "mbdsdr_ai/sdr_backend.py",
       "rule": "A04",
       "severity": "must-fix",
       "snippet": "except Exception:"
+    },
+    "6b1c61802962e577": {
+      "line": 557,
+      "ordinal": 0,
+      "path": "scripts/file_claim.py",
+      "rule": "A13",
+      "severity": "must-fix",
+      "snippet": "if item.get(\"released_at\") is None and item[\"owner\"] == payload[\"owner\"]:"
     },
     "6c3e21f7f49234c9": {
       "line": 24,
@@ -1784,14 +1856,6 @@
       "severity": "review",
       "snippet": "引用的 desktop/sdr_backend.py 不存在"
     },
-    "706cd9cfa1db62bd": {
-      "line": 203,
-      "ordinal": 1,
-      "path": "tools/hw_selfcheck/selfcheck.py",
-      "rule": "A03",
-      "severity": "must-fix",
-      "snippet": "except Exception: # noqa: BLE001"
-    },
     "706ddd802a6c4e06": {
       "line": 25,
       "ordinal": 0,
@@ -1800,16 +1864,8 @@
       "severity": "review",
       "snippet": "模块未声明 __all__"
     },
-    "713aa0bb4b9a3327": {
-      "line": 1188,
-      "ordinal": 0,
-      "path": "mbdsdr_ai/ax25.py",
-      "rule": "A03",
-      "severity": "must-fix",
-      "snippet": "except Exception:"
-    },
     "71ac0179743775c2": {
-      "line": 1959,
+      "line": 2026,
       "ordinal": 2,
       "path": "mbdsdr_ai/sdr_backend.py",
       "rule": "A04",
@@ -1856,6 +1912,14 @@
       "severity": "review",
       "snippet": "register_tool_registry 与 mbdsdr_ai/bch_codecs.py:279 同名但实现不同"
     },
+    "743b0ffc8ffabc9d": {
+      "line": 626,
+      "ordinal": 0,
+      "path": "docs/research/2026-11-11-roadmap.md",
+      "rule": "A10",
+      "severity": "must-fix",
+      "snippet": "- 2026-11-11 21:40｜W78–W87 区块（owner 标记 `6ae85f56`，该标记为历史记录、未经核实）｜W82 完成 `8b09b8fa`；W78 由 HEAD 既有三路径测试覆盖；W79 前提消失（HEAD 无 `_sky_to_screen_opt`）；W80/W81 仍他人持有；W83/W84/W86 依赖未落库；W87 视觉冻结。另：`web/product/sr"
+    },
     "743e1bf315c32186": {
       "line": 24,
       "ordinal": 0,
@@ -1881,20 +1945,12 @@
       "snippet": "MOON_RADIUS 有 2 个不同取值（1737.4e3 # m, 1737.4 ）"
     },
     "755bd1b714c6d508": {
-      "line": 1116,
+      "line": 1121,
       "ordinal": 0,
       "path": "mbdsdr_ai/solar_system.py",
       "rule": "D2-dual-constant",
       "severity": "review",
       "snippet": "SAMPLE_SITE 有 4 个不同取值（GroundStation(latitu, GroundStation(lat_de, GroundStation(lat_de, GroundStation(45.0, ）"
-    },
-    "7592354c9645c0bf": {
-      "line": 377,
-      "ordinal": 0,
-      "path": "mbdsdr_ai/core/controller.py",
-      "rule": "A03",
-      "severity": "must-fix",
-      "snippet": "except Exception:"
     },
     "75ba0cd70f6e4e2f": {
       "line": 79,
@@ -1936,14 +1992,6 @@
       "severity": "review",
       "snippet": "模块未声明 __all__"
     },
-    "79d272aae7bf8118": {
-      "line": 318,
-      "ordinal": 0,
-      "path": "mbdsdr_ai/plugin_system.py",
-      "rule": "A03",
-      "severity": "must-fix",
-      "snippet": "except Exception:"
-    },
     "79ef35d42e115499": {
       "line": 54,
       "ordinal": 0,
@@ -1960,16 +2008,8 @@
       "severity": "review",
       "snippet": "gain 与 gain_db 同时使用"
     },
-    "7b824a2343f543e6": {
-      "line": 625,
-      "ordinal": 0,
-      "path": "docs/evidence-standard.md",
-      "rule": "D6-stale-line",
-      "severity": "review",
-      "snippet": "mbdsdr_ai/solar_system.py:1117 超出文件行数 1116"
-    },
     "7bfa902d64d42412": {
-      "line": 6872,
+      "line": 6939,
       "ordinal": 12,
       "path": "mbdsdr_ai/sdr_backend.py",
       "rule": "A04",
@@ -2057,7 +2097,7 @@
       "snippet": "8 条已知红没有到期/复核条件：K01, K05, K05, K08, K09, K13, K17, K20"
     },
     "7e036ad2a6dc3698": {
-      "line": 826,
+      "line": 889,
       "ordinal": 0,
       "path": "mbdsdr_ai/sdr_backend.py",
       "rule": "A04",
@@ -2081,7 +2121,7 @@
       "snippet": "APT_VIDEO_RATE 有 2 个不同取值（4160 # 最终视频, 4_160.0）"
     },
     "806118612fa6ae64": {
-      "line": 2234,
+      "line": 2301,
       "ordinal": 4,
       "path": "mbdsdr_ai/sdr_backend.py",
       "rule": "A03",
@@ -2094,7 +2134,7 @@
       "path": "mbdsdr_ai/sstv_decoder.py",
       "rule": "D3-name-role",
       "severity": "review",
-      "snippet": "decode_sstv 与 mbdsdr_ai/decoders.py:442 同名但实现不同"
+      "snippet": "decode_sstv 与 mbdsdr_ai/decoders.py:446 同名但实现不同"
     },
     "80b94f1eb4a294e2": {
       "line": 48,
@@ -2104,8 +2144,16 @@
       "severity": "review",
       "snippet": "模块未声明 __all__"
     },
+    "81310deed0c8f3ec": {
+      "line": 3,
+      "ordinal": 0,
+      "path": "docs/pending-patches/2026-11-06-handoff-mechanism-blob-writeback.md",
+      "rule": "A10",
+      "severity": "must-fix",
+      "snippet": "> 交接方：采样率真值线（`6ae85f56`，收件你我都不在 claim 表里，纯提报）。"
+    },
     "818a14411c634acc": {
-      "line": 384,
+      "line": 440,
       "ordinal": 1,
       "path": "mbdsdr_ai/sdr_backend.py",
       "rule": "A03",
@@ -2160,6 +2208,14 @@
       "severity": "review",
       "snippet": "引用的 mbdsdr_ai/observe_scheduler.py 不存在"
     },
+    "84c7f0d7ee86a30d": {
+      "line": 3976,
+      "ordinal": 0,
+      "path": "docs/COORDINATION.md",
+      "rule": "A11",
+      "severity": "review",
+      "snippet": "全量**未重跑**，不许拿那个数字说当前代码全绿。真机只验了 30 秒级链路，"
+    },
     "850b656ef52e81f7": {
       "line": 30,
       "ordinal": 0,
@@ -2169,7 +2225,7 @@
       "snippet": "模块未声明 __all__"
     },
     "852de8db499d245d": {
-      "line": 304,
+      "line": 307,
       "ordinal": 0,
       "path": "mbdsdr_ai/ax25.py",
       "rule": "D3-name-role",
@@ -2177,12 +2233,20 @@
       "snippet": "stuff_bits 与 mbdsdr_ai/ais_decoder.py:377 同名但实现不同"
     },
     "85f5d9b56d511bc8": {
-      "line": 3269,
+      "line": 3336,
       "ordinal": 5,
       "path": "mbdsdr_ai/sdr_backend.py",
       "rule": "A03",
       "severity": "must-fix",
       "snippet": "except Exception:"
+    },
+    "865fde2190a2f0c6": {
+      "line": 190,
+      "ordinal": 0,
+      "path": "mbdsdr_ai/hal.py",
+      "rule": "A13",
+      "severity": "must-fix",
+      "snippet": "name = result.get(\"label\", f\"{driver}-{i}\")"
     },
     "871775a9c92831a6": {
       "line": 568,
@@ -2216,14 +2280,6 @@
       "severity": "review",
       "snippet": "模块未声明 __all__"
     },
-    "87efd38bdaaf55c5": {
-      "line": 1560,
-      "ordinal": 0,
-      "path": "desktop/rf_sky_view.py",
-      "rule": "A03",
-      "severity": "must-fix",
-      "snippet": "except Exception:"
-    },
     "889c7ba3e68edbea": {
       "line": 357,
       "ordinal": 0,
@@ -2233,7 +2289,7 @@
       "snippet": "except Exception:"
     },
     "889cc03249e25679": {
-      "line": 93,
+      "line": 96,
       "ordinal": 0,
       "path": "mbdsdr_ai/ax25.py",
       "rule": "D3-no-contract",
@@ -2336,6 +2392,14 @@
       "severity": "review",
       "snippet": "模块未声明 __all__"
     },
+    "8c0abeb5203164b4": {
+      "line": 274,
+      "ordinal": 1,
+      "path": "tests/test_hardcoded_parameter_registry.py",
+      "rule": "A09",
+      "severity": "must-fix",
+      "snippet": "@pytest.mark.skipif(not TOKENS_H.exists(), reason=\"C++ 源码不在当前检出\")"
+    },
     "8c50616a66f3dbe4": {
       "line": 26,
       "ordinal": 0,
@@ -2360,14 +2424,6 @@
       "severity": "review",
       "snippet": "bw 与 bandwidth 同时使用"
     },
-    "9023ca25b18a30be": {
-      "line": 147,
-      "ordinal": 0,
-      "path": "tools/hw_selfcheck/selfcheck.py",
-      "rule": "A03",
-      "severity": "must-fix",
-      "snippet": "except Exception: # noqa: BLE001"
-    },
     "913daaae0b8c7f23": {
       "line": 45,
       "ordinal": 0,
@@ -2383,6 +2439,14 @@
       "rule": "D3-no-contract",
       "severity": "review",
       "snippet": "模块未声明 __all__"
+    },
+    "9158cd009fb21103": {
+      "line": 51,
+      "ordinal": 0,
+      "path": "tests/test_gui_real_hardware.py",
+      "rule": "A09",
+      "severity": "must-fix",
+      "snippet": "@pytest.mark.skipif(_find_rtl() is None, reason=\"无真实 RTL-SDR，跳过真机 GUI 端到端\")"
     },
     "9171830594114173": {
       "line": 574,
@@ -2416,13 +2480,13 @@
       "severity": "review",
       "snippet": "test_tool_handlers_end_to_end 与 mbdsdr_ai/tests/test_bch_codecs.py:171 同名但实现不同"
     },
-    "948aa319592a22ad": {
-      "line": 871,
+    "948b4a59db3b4529": {
+      "line": 2939,
       "ordinal": 0,
-      "path": "mbdsdr_ai/decode_router.py",
-      "rule": "A03",
+      "path": "docs/COORDINATION.md",
+      "rule": "A10",
       "severity": "must-fix",
-      "snippet": "except Exception:"
+      "snippet": "（`42831acb`、`439993a`），闸门正确报出 **9 条 EXTRA + 1 条幻影 DELETE**；"
     },
     "949c2ad6538d51da": {
       "line": 98,
@@ -2497,7 +2561,7 @@
       "snippet": "模块未声明 __all__"
     },
     "98d52ad8b81a8920": {
-      "line": 2089,
+      "line": 2156,
       "ordinal": 3,
       "path": "mbdsdr_ai/sdr_backend.py",
       "rule": "A03",
@@ -2528,24 +2592,16 @@
       "severity": "review",
       "snippet": "模块未声明 __all__"
     },
-    "9a61e53c5e6aa441": {
-      "line": 83,
+    "9a697ba4a6ef985e": {
+      "line": 75,
       "ordinal": 0,
-      "path": "docs/redundancy-register.md",
-      "rule": "D6-stale-line",
+      "path": "docs/known-red-register.md",
+      "rule": "A11",
       "severity": "review",
-      "snippet": "mbdsdr_ai/decoders.py:1157 超出文件行数 1061"
-    },
-    "9a9f50d97c64ae82": {
-      "line": 915,
-      "ordinal": 1,
-      "path": "mbdsdr_ai/decode_router.py",
-      "rule": "A03",
-      "severity": "must-fix",
-      "snippet": "except Exception:"
+      "snippet": "collect 清单」映射 nodeid 得到 15 条，并判成「单跑全绿 = 顺序依赖假红」（历史判断，已在本段更正）。"
     },
     "9ae320ae55d2edfb": {
-      "line": 6800,
+      "line": 6867,
       "ordinal": 11,
       "path": "mbdsdr_ai/sdr_backend.py",
       "rule": "A04",
@@ -2688,6 +2744,14 @@
       "severity": "review",
       "snippet": "SYNC 有 3 个不同取值（64, SDRPPConstants.POCSA, Ft8CostasSync()）"
     },
+    "a2bae6d41050e277": {
+      "line": 85,
+      "ordinal": 0,
+      "path": "docs/redundancy-register.md",
+      "rule": "A11",
+      "severity": "review",
+      "snippet": "| A12 | `cpp/src/core/tokens.h` 原 `kDbUpperDefault` **一个常量担两个语义** | **常量复用**（不是重复实现，也不是多份表） | 语义①「默认视窗上限」→ 现 `kDbViewUpperDefault=-20`（`cpp/src/ui/main_window.cpp:5644`、`cpp/src/ui/settings_dialog.cpp"
+    },
     "a3537e19f4874c2b": {
       "line": 265,
       "ordinal": 0,
@@ -2704,14 +2768,6 @@
       "severity": "review",
       "snippet": "代价：与真实站址标记的颜色区分变弱。不改：白天示例站址基本看不见（夜里 3.73 尚可）。"
     },
-    "a3ab4fcae9ee6ea8": {
-      "line": 924,
-      "ordinal": 0,
-      "path": "desktop/weather_panel.py",
-      "rule": "A01",
-      "severity": "must-fix",
-      "snippet": "line = (f\"{self.freq_edit.text()} MHz | \""
-    },
     "a3ebd989e58a91ca": {
       "line": 2356,
       "ordinal": 0,
@@ -2720,6 +2776,14 @@
       "severity": "must-fix",
       "snippet": "引用的 mbdsdr_ai/desktop_sdr_session.py 不存在"
     },
+    "a411e634b33a9361": {
+      "line": 83,
+      "ordinal": 0,
+      "path": "docs/redundancy-register.md",
+      "rule": "D6-stale-line",
+      "severity": "review",
+      "snippet": "mbdsdr_ai/decoders.py:1157 超出文件行数 1038"
+    },
     "a431df473769f4d7": {
       "line": 31,
       "ordinal": 0,
@@ -2727,6 +2791,14 @@
       "rule": "D3-no-contract",
       "severity": "review",
       "snippet": "模块未声明 __all__"
+    },
+    "a4fa9ec0cf6991d6": {
+      "line": 466,
+      "ordinal": 6,
+      "path": "tests/test_hardcoded_parameter_registry.py",
+      "rule": "A09",
+      "severity": "must-fix",
+      "snippet": "@pytest.mark.skipif(not TOKENS_H.exists(), reason=\"C++ 源码不在当前检出\")"
     },
     "a52ab43338bc1627": {
       "line": 35,
@@ -2865,7 +2937,7 @@
       "snippet": "test_tool_handler_end_to_end 与 mbdsdr_ai/tests/test_df_position.py:179 同名但实现不同"
     },
     "ace8875bdd318be6": {
-      "line": 26,
+      "line": 30,
       "ordinal": 0,
       "path": "mbdsdr_ai/decoders.py",
       "rule": "D2-dual-constant",
@@ -2881,12 +2953,20 @@
       "snippet": "引用的 tests/test_replay_truncation_copy.py 不存在"
     },
     "ae49790369b734bd": {
-      "line": 384,
+      "line": 440,
       "ordinal": 1,
       "path": "mbdsdr_ai/sdr_backend.py",
       "rule": "A04",
       "severity": "must-fix",
       "snippet": "except Exception:"
+    },
+    "ae852b63b6bbafa7": {
+      "line": 777,
+      "ordinal": 0,
+      "path": "mbdsdr_ai/tests/test_lrpt_huffman.py",
+      "rule": "A09",
+      "severity": "must-fix",
+      "snippet": "@pytest.mark.skipif("
     },
     "aea0636d776946b0": {
       "line": 528,
@@ -2919,6 +2999,14 @@
       "rule": "A11",
       "severity": "review",
       "snippet": "scope（共用窗口），整文件 10 passed / 8.32s，随机顺序 7.78s 全绿；"
+    },
+    "b1b675b2898a166a": {
+      "line": 97,
+      "ordinal": 0,
+      "path": "tests/test_spectrum_menu_tab_chain.py",
+      "rule": "A09",
+      "severity": "must-fix",
+      "snippet": "@pytest.mark.skip("
     },
     "b2200dfc1c59989d": {
       "line": 51,
@@ -2976,6 +3064,14 @@
       "severity": "review",
       "snippet": "引用的 desktop/rtltcp_client.py 不存在"
     },
+    "b823db7d7999bd2d": {
+      "line": 914,
+      "ordinal": 0,
+      "path": "docs/COORDINATION.md",
+      "rule": "A11",
+      "severity": "review",
+      "snippet": "守卫巷道 41 passed 首次全绿（_wildcodes_lane.log）。"
+    },
     "b86ae7138da40e75": {
       "line": 54,
       "ordinal": 0,
@@ -2999,6 +3095,14 @@
       "rule": "A11",
       "severity": "review",
       "snippet": "- 快捷键真实性：Python `shortcuts.py` 的 42 条登记项由单一事实源生成，帮助页动态取键，快捷键 guard/焦点优先级测试 15 项全部通过（2026-11-13 于 `97fc5fc8` 复跑：`python -m pytest tests/test_shortcuts_guard.py tests/test_shortcut_focus_priority.py -q`"
+    },
+    "b9a9da3c13258b40": {
+      "line": 390,
+      "ordinal": 5,
+      "path": "tests/test_hardcoded_parameter_registry.py",
+      "rule": "A09",
+      "severity": "must-fix",
+      "snippet": "@pytest.mark.skipif(not TOKENS_H.exists(), reason=\"C++ 源码不在当前检出\")"
     },
     "b9aa375e4e927235": {
       "line": 162,
@@ -3040,6 +3144,14 @@
       "severity": "must-fix",
       "snippet": "except Exception:"
     },
+    "bc004fd55cde50f8": {
+      "line": 198,
+      "ordinal": 0,
+      "path": "docs/audit_r2/FINAL_REPORT_R2.md",
+      "rule": "A11",
+      "severity": "review",
+      "snippet": "- **问题**：V2 断言 `n_features == 24`，但源码 `amr.py:292` 硬编码 `\"n_features\": 25`，`AMRFeature.to_list()` 实返 25 维。当前跑 V2 必然红，`test_report_v2.txt` 的 185/185 全绿是旧快照。V2 还删掉了 V1 里所有有鉴别力的往返测试（SSTV 跨实现、ADS-B CRC 权威向"
+    },
     "bd09076fe57194af": {
       "line": 377,
       "ordinal": 0,
@@ -3049,7 +3161,7 @@
       "snippet": "引用的 desktop/a11y.py 不存在"
     },
     "bd2e0a09ac444b95": {
-      "line": 3825,
+      "line": 3892,
       "ordinal": 8,
       "path": "mbdsdr_ai/sdr_backend.py",
       "rule": "A04",
@@ -3065,7 +3177,7 @@
       "snippet": "模块未声明 __all__"
     },
     "be7036e5c2e30620": {
-      "line": 826,
+      "line": 889,
       "ordinal": 0,
       "path": "mbdsdr_ai/sdr_backend.py",
       "rule": "A03",
@@ -3120,6 +3232,14 @@
       "severity": "review",
       "snippet": "模块未声明 __all__"
     },
+    "c1fe1564755849e6": {
+      "line": 68,
+      "ordinal": 0,
+      "path": "mbdsdr_ai/tests/test_star_catalog_packaging.py",
+      "rule": "A09",
+      "severity": "must-fix",
+      "snippet": "@pytest.mark.skipif(os.environ.get(\"MBSDSR_SKIP_WHEEL_BUILD\") == \"1\","
+    },
     "c261625e94ce4dc1": {
       "line": 524,
       "ordinal": 0,
@@ -3129,7 +3249,7 @@
       "snippet": "rrc_filter 与 mbdsdr_ai/demod.py:23 同名但实现不同"
     },
     "c2c4ef1ffd10a02d": {
-      "line": 3705,
+      "line": 3772,
       "ordinal": 6,
       "path": "mbdsdr_ai/sdr_backend.py",
       "rule": "A04",
@@ -3144,6 +3264,14 @@
       "severity": "review",
       "snippet": "（`output/_legacy_red_lane3.log`）；身份门 3 全绿；污染+受害+behavior"
     },
+    "c393d917a5ea7156": {
+      "line": 365,
+      "ordinal": 4,
+      "path": "tests/test_hardcoded_parameter_registry.py",
+      "rule": "A09",
+      "severity": "must-fix",
+      "snippet": "@pytest.mark.skipif(not TOKENS_H.exists(), reason=\"C++ 源码不在当前检出\")"
+    },
     "c3bc0f8c4c639f8b": {
       "line": 32,
       "ordinal": 0,
@@ -3152,16 +3280,16 @@
       "severity": "review",
       "snippet": "POCSAG_SYNC 有 2 个不同取值（0x7CD215D8 #, 0x7CD215D8）"
     },
-    "c44955bfe797f856": {
-      "line": 0,
+    "c50fa81fd1254264": {
+      "line": 52,
       "ordinal": 0,
-      "path": "tests/",
-      "rule": "D1-test-reverse",
+      "path": "docs/audit_r2/50_test_integration_part2.md",
+      "rule": "A11",
       "severity": "review",
-      "snippet": "314 处 import"
+      "snippet": "→ V2 这两条断言现在跑必然 `✗`。`tests/test_report_v2.txt` 里的 185/185 全绿是**旧快照**（特征数还是 24 维时留下的），后来源码加了第 25 维特征，V2 没跟着改。**这是\"实验室绿\"假象的直接证据。**"
     },
     "c53136539f5de259": {
-      "line": 6872,
+      "line": 6939,
       "ordinal": 12,
       "path": "mbdsdr_ai/sdr_backend.py",
       "rule": "A03",
@@ -3185,7 +3313,7 @@
       "snippet": "except Exception:"
     },
     "c87c37e6fff12f35": {
-      "line": 94,
+      "line": 96,
       "ordinal": 0,
       "path": "mbdsdr_ai/goes_lrit.py",
       "rule": "D3-no-contract",
@@ -3232,8 +3360,16 @@
       "severity": "review",
       "snippet": "引用的 desktop/spyserver_client.py 不存在"
     },
+    "ca2afa23f6a70e9b": {
+      "line": 2378,
+      "ordinal": 0,
+      "path": "docs/COORDINATION.md",
+      "rule": "A10",
+      "severity": "must-fix",
+      "snippet": "> 背景：原报告称 `a4c4a0d5` 已落「`_ACTIVE_OWNER` + 占用 API」，实测该对象"
+    },
     "cad6a304ef52558b": {
-      "line": 53,
+      "line": 55,
       "ordinal": 0,
       "path": "mbdsdr_ai/rtl433_decoder.py",
       "rule": "D3-no-contract",
@@ -3264,6 +3400,14 @@
       "severity": "review",
       "snippet": "模块未声明 __all__"
     },
+    "cbc4dee784e5964c": {
+      "line": 508,
+      "ordinal": 0,
+      "path": "docs/data-inventory.md",
+      "rule": "A11",
+      "severity": "review",
+      "snippet": "这 5 行已按模块重建，复查全绿（历史记录：2026-11 首跑后复查，未在现树复核）。"
+    },
     "cc1399ebc526b604": {
       "line": 119,
       "ordinal": 0,
@@ -3272,13 +3416,21 @@
       "severity": "must-fix",
       "snippet": "be.set_frequency(float(center_hz))"
     },
-    "cc5334c493012289": {
-      "line": 586,
+    "cc512edaf73f8cf8": {
+      "line": 138,
       "ordinal": 0,
-      "path": "mbdsdr_ai/hal.py",
-      "rule": "A03",
-      "severity": "must-fix",
-      "snippet": "except Exception:"
+      "path": "docs/推进报告-本轮排错.md",
+      "rule": "A11",
+      "severity": "review",
+      "snippet": "**验证**：`cpp/build` 重新编译通过；`ctest` **158/158 全绿**（历史记录：2026-11 报告日，未在现树复核；`engine_audio_e2e` 70s 正常，"
+    },
+    "ce185aa3c4cfb862": {
+      "line": 778,
+      "ordinal": 0,
+      "path": "docs/hardcoded-parameters.md",
+      "rule": "A11",
+      "severity": "review",
+      "snippet": "新口径不再随带宽改变含义。静噪验收矩阵见 §10-1（6 模式 × 3 场景全绿）。"
     },
     "ceb2de9bf2762237": {
       "line": 23,
@@ -3288,14 +3440,6 @@
       "severity": "review",
       "snippet": "模块未声明 __all__"
     },
-    "cef1206594c3d9c9": {
-      "line": 505,
-      "ordinal": 0,
-      "path": "mbdsdr_ai/mcp_client.py",
-      "rule": "A03",
-      "severity": "must-fix",
-      "snippet": "except Exception: # pragma: no cover - 读体失败的极端情况"
-    },
     "cf4f4ab2f3f1c4fc": {
       "line": 0,
       "ordinal": 0,
@@ -3304,13 +3448,13 @@
       "severity": "review",
       "snippet": "sr 与 sample_rate 同时使用"
     },
-    "d032472746cf6b3d": {
-      "line": 0,
+    "cf8b8619d8190e00": {
+      "line": 146,
       "ordinal": 0,
-      "path": "mbdsdr_ai/jpeg_k3_tables.py",
-      "rule": "D1-cycle",
+      "path": "docs/pending-patches/2026-11-13-d1-deferred-cycle-rule.md",
+      "rule": "D6-missing-path",
       "severity": "review",
-      "snippet": "2 个模块互相依赖"
+      "snippet": "引用的 mbdsdr_ai/a.py 不存在"
     },
     "d054e979c3df0dd3": {
       "line": 31,
@@ -3329,7 +3473,7 @@
       "snippet": "模块未声明 __all__"
     },
     "d14636d36dc85c96": {
-      "line": 380,
+      "line": 436,
       "ordinal": 0,
       "path": "mbdsdr_ai/sdr_backend.py",
       "rule": "A03",
@@ -3375,6 +3519,14 @@
       "rule": "D3-name-role",
       "severity": "review",
       "snippet": "unpack77 与 mbdsdr_ai/ft8_codec.py:311 同名但实现不同"
+    },
+    "d4f26401584845c8": {
+      "line": 275,
+      "ordinal": 0,
+      "path": "tests/test_usb_hotplug.py",
+      "rule": "A09",
+      "severity": "must-fix",
+      "snippet": "@pytest.mark.skipif(not sys.platform.startswith(\"win\"),"
     },
     "d55276d5cf519432": {
       "line": 51,
@@ -3425,7 +3577,7 @@
       "snippet": "模块未声明 __all__"
     },
     "d8f02b64b386025a": {
-      "line": 4026,
+      "line": 4093,
       "ordinal": 10,
       "path": "mbdsdr_ai/sdr_backend.py",
       "rule": "A03",
@@ -3433,7 +3585,7 @@
       "snippet": "except Exception:"
     },
     "d93b0c60d72181dc": {
-      "line": 3840,
+      "line": 3907,
       "ordinal": 9,
       "path": "mbdsdr_ai/sdr_backend.py",
       "rule": "A03",
@@ -3481,7 +3633,7 @@
       "snippet": "EARTH_RADIUS_KM 有 2 个不同取值（6378.137 # WGS84 赤道, 6371.0088 # 地球平均半径（）"
     },
     "e08c78cdbbf44dbc": {
-      "line": 3825,
+      "line": 3892,
       "ordinal": 8,
       "path": "mbdsdr_ai/sdr_backend.py",
       "rule": "A03",
@@ -3503,6 +3655,14 @@
       "rule": "D3-name-role",
       "severity": "review",
       "snippet": "unpack_message 与 mbdsdr_ai/js8call_adapter.py:162 同名但实现不同"
+    },
+    "e2a2907084e3f02e": {
+      "line": 103,
+      "ordinal": 0,
+      "path": "docs/reference-mechanisms.md",
+      "rule": "A11",
+      "severity": "review",
+      "snippet": "4. 2 Hz 缓存语义与 `max_peaks` 上限不变；现有频谱测试全绿（历史验收记录：2026-11，未在现树整体复核）。"
     },
     "e4099500cba279ab": {
       "line": 155,
@@ -3616,14 +3776,6 @@
       "severity": "review",
       "snippet": "模块未声明 __all__"
     },
-    "eb3e355af91d2e55": {
-      "line": 0,
-      "ordinal": 0,
-      "path": "mbdsdr_ai/adsb.py",
-      "rule": "D1-cycle",
-      "severity": "review",
-      "snippet": "60 个模块互相依赖"
-    },
     "eb4a8268cad03dd0": {
       "line": 46,
       "ordinal": 0,
@@ -3631,14 +3783,6 @@
       "rule": "D2-dual-constant",
       "severity": "review",
       "snippet": "DEFAULT_SQUELCH_DBFS 有 2 个不同取值（-50.0, None # type: ignore）"
-    },
-    "eb61741f24163c95": {
-      "line": 4556,
-      "ordinal": 0,
-      "path": "mbdsdr_ai/agent.py",
-      "rule": "A03",
-      "severity": "must-fix",
-      "snippet": "except Exception:"
     },
     "ec56e76864485471": {
       "line": 26,
@@ -3656,13 +3800,13 @@
       "severity": "review",
       "snippet": "模块未声明 __all__"
     },
-    "ed5a32ab0c8a1481": {
-      "line": 0,
-      "ordinal": 0,
-      "path": "mbdsdr_ai/rtk_solver.py",
-      "rule": "D1-cycle",
-      "severity": "review",
-      "snippet": "2 个模块互相依赖"
+    "ed7cf3d10ec8cfa6": {
+      "line": 152,
+      "ordinal": 1,
+      "path": "docs/axioms.md",
+      "rule": "A10",
+      "severity": "must-fix",
+      "snippet": "| A10 | 证据必须可复核 | 文档反引号中的 7–40 位十六进制串必须 `git cat-file -t` 为 commit | `推进报告:141` 的 `5d09bb2`（示例，非真实提交）、`COORDINATION:3430` 的 `0d7e433e`（示例，非真实提交） | `evidence_commit_exists` | `推进报告:141` |"
     },
     "ed85ed049204ad14": {
       "line": 104,
@@ -3713,7 +3857,7 @@
       "snippet": "模块未声明 __all__"
     },
     "f191f2c793d89ebb": {
-      "line": 3705,
+      "line": 3772,
       "ordinal": 6,
       "path": "mbdsdr_ai/sdr_backend.py",
       "rule": "A03",
@@ -3736,14 +3880,6 @@
       "severity": "review",
       "snippet": "模块未声明 __all__"
     },
-    "f3862709a8511802": {
-      "line": 597,
-      "ordinal": 1,
-      "path": "mbdsdr_ai/hal.py",
-      "rule": "A03",
-      "severity": "must-fix",
-      "snippet": "except Exception:"
-    },
     "f4044b5f0880db6a": {
       "line": 197,
       "ordinal": 0,
@@ -3759,6 +3895,14 @@
       "rule": "D3-no-contract",
       "severity": "review",
       "snippet": "模块未声明 __all__"
+    },
+    "f56bf0db6d99f4a4": {
+      "line": 508,
+      "ordinal": 7,
+      "path": "tests/test_hardcoded_parameter_registry.py",
+      "rule": "A09",
+      "severity": "must-fix",
+      "snippet": "@pytest.mark.skipif(not TOKENS_H.exists(), reason=\"C++ 源码不在当前检出\")"
     },
     "f58f67e88b83bc48": {
       "line": 971,
@@ -3832,6 +3976,14 @@
       "severity": "review",
       "snippet": "FRAME_SAMPLES 有 3 个不同取值（FRAME_SYMBOLS * NSPS, N_SYMBOLS * NSPS , 162 * REFERENCE_SAMP）"
     },
+    "f95b5f1b552223cc": {
+      "line": 3,
+      "ordinal": 0,
+      "path": "docs/pending-patches/2026-11-06-handoff-protocol-claim-ledger.md",
+      "rule": "A10",
+      "severity": "must-fix",
+      "snippet": "> 交接方：采样率真值线（`6ae85f56`）；收件方：协议线（`78420b4f`，`docs/parameter-unification.md` claim 持有方）。"
+    },
     "f992fd7bbf08054f": {
       "line": 431,
       "ordinal": 2,
@@ -3847,14 +3999,6 @@
       "rule": "D3-no-contract",
       "severity": "review",
       "snippet": "模块未声明 __all__"
-    },
-    "fb502c7c71bd276c": {
-      "line": 402,
-      "ordinal": 0,
-      "path": "mbdsdr_ai/hooks.py",
-      "rule": "A03",
-      "severity": "must-fix",
-      "snippet": "except Exception:"
     },
     "fbbad262d900db80": {
       "line": 27,
@@ -3912,8 +4056,16 @@
       "severity": "review",
       "snippet": "模块未声明 __all__"
     },
+    "fcfab0c6df845a1c": {
+      "line": 183,
+      "ordinal": 1,
+      "path": "tests/test_device_owner_lock.py",
+      "rule": "A09",
+      "severity": "must-fix",
+      "snippet": "@pytest.mark.skipif(os.name != \"nt\", reason=\"错误码分流走的是 Windows 探活路径\")"
+    },
     "fd6ba745f4699bc1": {
-      "line": 6881,
+      "line": 6948,
       "ordinal": 13,
       "path": "mbdsdr_ai/sdr_backend.py",
       "rule": "A04",
@@ -3969,10 +4121,10 @@
       "snippet": "FREQS 有 3 个不同取值（[1209, 1336, 1477, 1, [2400, 1060, 1160, 1, [\"1000000\", \"1550000）"
     }
   },
-  "generated_at": "2026-11-13 02:52:21",
-  "head": "c182aba4",
-  "reason": "最终基线：对应提交 c182aba4（全量口径 + 结构性判据 + A14）",
+  "generated_at": "2026-11-13 03:37:36",
+  "head": "06751d15",
+  "reason": "7 条判据结构化后首次实跑：应修与复核条目按当前树接受，作为 c182aba4 基线的后继起点；新增来源是原先被名字/字样/改名放过的位置被看见，逐条指纹见本条记录",
   "schema": 2,
-  "total_active": 496,
+  "total_active": 515,
   "waived_not_tracked": 52
 }
