@@ -354,6 +354,162 @@ def rendered_settings_sections() -> dict[str, tuple[str, ...]]:
     return out
 
 
+#: 导航路径的根词：只有以它开头的链才继续核对「设置」页的分组名。
+_NAV_ROOT = "设置"
+
+#: 归属其他开发线 / 本次禁改的文件：扫到的问题只报告、不进闸门判定。
+#: 键是仓库相对路径；值是「为什么不能改」。这不是静默白名单：``check_
+#: settings_nav_paths`` 会把它们单独返回，测试与 CLI 都必须显式打印。
+_SCAN_DEFERRED = {
+    "desktop/main_window.py":
+        "归 G1 采样率线（本任务禁改），文案修正已登记 "
+        "docs/pending-patches/2026-11-11-mainwindow-copy-A6-A7-A10.md",
+    "desktop/rf_sky_view.py":
+        "归 A03 第一批线，claim 未释放",
+}
+
+#: 段尾切分：箭头段里常混着散文（「点「选择目录…」」），只取紧贴箭头的那个词。
+_SEG_TAIL_CUT = re.compile(r"[」』）)】\]\s，。；：,;:！？!?·]")
+_SEG_HEAD_CUT = re.compile(r"[「『（(【\[\s，。；：,;:！？!?·]")
+
+
+def _clean_head(raw: str) -> str:
+    """箭头**右侧**的一段：取该段开头、紧贴箭头的那个词。"""
+    return _SEG_TAIL_CUT.split(raw.strip(), 1)[0].strip(" 「『（(【[")
+
+
+def _clean_tail(raw: str) -> str:
+    """箭头**左侧**的一段：取该段结尾、紧贴箭头的那个词。"""
+    return _SEG_HEAD_CUT.split(raw.strip())[-1].strip().rstrip("」』）)】]")
+
+
+def _string_literals(text: str) -> list[tuple[int, str]]:
+    """文件里所有用户可见的字符串常量（跳过注释与 docstring）。
+
+    注释/文档字符串不是用户能看到的话；把它们算进来会把「改设置 → 重启」
+    这种说明文字误报成导航路径。
+    """
+    tree = ast.parse(text)
+    skip: set[int] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef,
+                             ast.AsyncFunctionDef)):
+            body = getattr(node, "body", [])
+            if (body and isinstance(body[0], ast.Expr)
+                    and isinstance(body[0].value, ast.Constant)
+                    and isinstance(body[0].value.value, str)):
+                skip.add(id(body[0].value))
+    out: list[tuple[int, str]] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.JoinedStr):
+            # f-string：已拼好的常量片段里出现整条路径才能核验
+            parts = [v.value for v in node.values
+                     if isinstance(v, ast.Constant) and isinstance(v.value, str)]
+            skip.update(id(v) for v in node.values
+                        if isinstance(v, ast.Constant))
+            joined = "".join(parts)
+            if "→" in joined:
+                out.append((node.lineno, joined))
+        elif (isinstance(node, ast.Constant) and isinstance(node.value, str)
+              and id(node) not in skip and "→" in node.value):
+            out.append((node.lineno, node.value))
+    return out
+
+
+def _arrow_files() -> list[str]:
+    """生产源码里含 ``→`` 的文件：只有它们可能有导航路径。"""
+    cmd = ["git", "grep", "-l", "-I", "-e", "→"]
+    if _SOURCE != "worktree":
+        cmd.append("HEAD")
+    # 与 ``_CODE_PATHSPECS`` 不同：帮助文案本体 troubleshooting.py 必须扫，
+    # 这里查的是「路径指向的分组存不存在」，不靠字面量自证，不存在自指漏洞。
+    cmd += ["--", "desktop", "mbdsdr_ai"]
+    proc = subprocess.run(cmd, cwd=_ROOT, capture_output=True, text=True,
+                          encoding="utf-8", errors="replace")
+    if proc.returncode not in (0, 1):
+        raise RuntimeError(proc.stderr.strip() or "git grep 失败")
+    out = []
+    for ln in proc.stdout.splitlines():
+        ln = ln.strip()
+        if ln.startswith("HEAD:"):
+            ln = ln[len("HEAD:"):]
+        if ln.endswith(".py"):
+            out.append(ln)
+    return out
+
+
+def scan_settings_nav_paths(literals=None) -> list[dict]:
+    """按结构解析文案里的「设置 → X …」链，返回每条路径的核验结果。
+
+    ``literals`` 可传 ``[(origin, lineno, text), ...]`` 注入反证文案；
+    不传则扫生产源码。判据是**位置**：``→`` 链的第一段必须是「设置」，
+    第二段才拿去核对设置页分组名——不是「文案里出现过某个分组词」。
+    """
+    groups = rendered_settings_sections()
+    if literals is None:
+        literals = []
+        for path in _arrow_files():
+            text = _read_text(path)
+            if not text:
+                continue
+            for line_no, value in _string_literals(text):
+                literals.append((path, line_no, value))
+    rows: list[dict] = []
+    seen: set[tuple] = set()
+    for origin, line_no, text in literals:
+        for piece in text.splitlines() or [text]:
+            if "→" not in piece:
+                continue
+            parts = piece.split("→")
+            segs = [_clean_tail(parts[0])] + [
+                _clean_head(p) for p in parts[1:]]
+            for idx, seg in enumerate(segs):
+                if seg != _NAV_ROOT or idx + 1 >= len(segs):
+                    continue
+                group = segs[idx + 1]
+                if not group:
+                    continue
+                chain = segs[idx:]
+                key = (origin, line_no, tuple(chain))
+                if key in seen:
+                    continue
+                seen.add(key)
+                rows.append({
+                    "origin": origin,
+                    "line": line_no,
+                    "chain": chain,
+                    "group": group,
+                    "ok": group in groups,
+                })
+    return rows
+
+
+def check_settings_nav_paths(literals=None):
+    """返回 ``(problems, deferred, rows)``。
+
+    problems  = 归属本线/无人占用文件里的过期路径（闸门判定）；
+    deferred  = 归属他人或禁改文件里的过期路径（只报告，带原因）；
+    rows      = 扫到的全部「设置 → …」路径（含通过项）。
+    """
+    groups = sorted(rendered_settings_sections())
+    problems: list[str] = []
+    deferred: list[str] = []
+    rows = scan_settings_nav_paths(literals)
+    for row in rows:
+        if row["ok"]:
+            continue
+        where = f"{row['origin']}:{row['line']}"
+        chain = " → ".join(row["chain"])
+        msg = (f"{where} 路径「{chain}」里的设置分组「{row['group']}」不存在；"
+               f"设置页现有分组：{' / '.join(groups)}")
+        reason = _SCAN_DEFERRED.get(row["origin"])
+        if reason:
+            deferred.append(f"{msg}（未纳入闸门：{reason}）")
+        else:
+            problems.append(msg)
+    return problems, deferred, rows
+
+
 def check_paths() -> list[str]:
     """返回所有问题；空列表 = 全绿。"""
     problems: list[str] = []
@@ -398,6 +554,13 @@ def main(argv: list[str] | None = None) -> int:
     problems = check_paths()
     problems += check_render_points()
     problems += check_mechanisms()
+    nav_problems, nav_deferred, nav_rows = check_settings_nav_paths()
+    problems += nav_problems
+    print(f"「设置 → …」路径：扫到 {len(nav_rows)} 条，"
+          f"对不上 {len(nav_problems) + len(nav_deferred)} 条"
+          f"（其中闸门内 {len(nav_problems)} 条、他人占用 {len(nav_deferred)} 条）")
+    for d in nav_deferred:
+        print("  [未纳入闸门] " + d)
     if args.markdown:
         print(_markdown_table())
         print()

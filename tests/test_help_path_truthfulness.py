@@ -24,6 +24,8 @@ import os
 import subprocess
 import sys
 
+import pytest
+
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, _ROOT)
 sys.path.insert(0, os.path.join(_ROOT, "desktop"))
@@ -168,3 +170,74 @@ def test_bare_path_line_out_of_range_turns_red(tmp_path, monkeypatch):
         assert any("越界" in p and ":99" in p for p in problems), problems
     finally:
         chp.set_source("head")
+
+
+# ---------------------------------------------------------------------------
+# 文案里的「设置 → X」导航路径：按结构解析，逐条核对设置页真实分组名
+# ---------------------------------------------------------------------------
+@pytest.fixture
+def worktree_source():
+    """扫工作树：反证要能在未提交的文案上生效。"""
+    chp.set_source("worktree")
+    try:
+        yield
+    finally:
+        chp.set_source("head")
+
+
+def test_settings_nav_paths_point_to_rendered_sections(worktree_source):
+    """帮助/文案里的「设置 → X …」链，X 必须是设置页真实渲染的分组。
+
+    分组名从 ``settings_panel.PANEL_SECTIONS`` 解析，不从这里手抄一份；
+    路径按 ``→`` 分段后看**位置**（第一段是「设置」才校验第二段），
+    不是「文案里出现过某个分组词」。
+    """
+    problems, deferred, rows = chp.check_settings_nav_paths()
+    groups = " / ".join(sorted(chp.rendered_settings_sections()))
+    origins = {row["origin"] for row in rows}
+    assert "desktop/troubleshooting.py" in origins, (
+        f"扫描器没覆盖帮助文案本体，实际来源：{sorted(origins)}")
+    assert any(row["ok"] for row in rows), "没有任何一条路径通过，扫描器很可能失效"
+    assert not problems, "\n".join(problems) + f"\n设置页现有分组：{groups}"
+    assert all("未纳入闸门" in d for d in deferred), (
+        f"被他人占用/禁改的过期路径必须显式标注原因：{deferred}")
+
+
+def test_counterexample_unknown_settings_group_turns_red():
+    """反证①：把某条文案的分组名改成不存在的名字 → 必须红并列出真实分组。"""
+    problems, _deferred, rows = chp.check_settings_nav_paths([
+        ("desktop/adsb_panel.py", 90,
+         "请在「设置 → 子虚乌有 → 观测地点纬度/经度」填写")])
+    assert len(rows) == 1 and rows[0]["group"] == "子虚乌有", rows
+    assert problems and "子虚乌有" in problems[0], problems
+    for real in ("外观与语言", "天文观测", "数据与操作"):
+        assert real in problems[0], (
+            f"报错必须列出设置页真实分组，实际：{problems[0]}")
+
+
+def test_counterexample_renamed_settings_group_turns_red(
+        worktree_source, monkeypatch):
+    """反证②：设置页某分组改名、帮助不改 → 必须红。
+
+    不改 ``desktop/settings_panel.py``（他线正在改），用等价的内存替换。
+    """
+    real = chp.rendered_settings_sections()
+    renamed = {("星辰观测" if k == "天文观测" else k): v
+               for k, v in real.items()}
+    assert "天文观测" in real
+    assert "天文观测" not in renamed and "星辰观测" in renamed
+    monkeypatch.setattr(chp, "rendered_settings_sections", lambda: renamed)
+    problems, _deferred, _rows = chp.check_settings_nav_paths()
+    assert any("天文观测" in p for p in problems), problems
+
+
+def test_old_group_mentioned_outside_a_path_is_not_reported():
+    """结构判据：不是「设置 → X」链的同名提及不算路径，不误报。
+
+    例如「在『设置』页『卫星与多普勒』核对」只是说明文字，没有箭头链；
+    把它按关键词报红，就是「扫到关键词就报」。
+    """
+    problems, _deferred, rows = chp.check_settings_nav_paths([
+        ("mbdsdr_ai/error_catalog.py", 175,
+         "在「设置」页「卫星与多普勒」核对「观测地点纬度」「观测地点经度」")])
+    assert rows == [] and problems == [], (rows, problems)
