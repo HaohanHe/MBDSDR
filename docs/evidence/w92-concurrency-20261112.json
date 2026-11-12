@@ -1,0 +1,87 @@
+[
+  {
+    "n_proc": 6,
+    "iters": 25,
+    "reads": 854,
+    "parse_errors": 0,
+    "empty_reads": 0,
+    "missing_reads": 3724,
+    "other_read_errors": 5,
+    "load_cache_ok": 858,
+    "load_cache_invalid": 0,
+    "load_cache_missing": 3725,
+    "bad_samples": [
+      "read:PermissionError:[Errno 13] Permission denied: 'D:\\\\mbdsdr\\\\tmp\\\\w92_degrade\\\\cwork\\\\a_atomic\\\\sat_links_machine.json'",
+      "read:PermissionError:[Errno 13] Permission denied: 'D:\\\\mbdsdr\\\\tmp\\\\w92_degrade\\\\cwork\\\\a_atomic\\\\sat_links_machine.json'",
+      "read:PermissionError:[Errno 13] Permission denied: 'D:\\\\mbdsdr\\\\tmp\\\\w92_degrade\\\\cwork\\\\a_atomic\\\\sat_links_machine.json'",
+      "read:PermissionError:[Errno 13] Permission denied: 'D:\\\\mbdsdr\\\\tmp\\\\w92_degrade\\\\cwork\\\\a_atomic\\\\sat_links_machine.json'",
+      "read:PermissionError:[Errno 13] Permission denied: 'D:\\\\mbdsdr\\\\tmp\\\\w92_degrade\\\\cwork\\\\a_atomic\\\\sat_links_machine.json'"
+    ],
+    "worker_ok": [
+      25,
+      25,
+      25,
+      25,
+      25,
+      25
+    ],
+    "worker_fail": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "final_json_valid": true,
+    "final_tx_count": 1,
+    "leftover_tmp": [],
+    "case": "A_多进程并发刷新_原子性"
+  },
+  {
+    "procs": [
+      [
+        33591,
+        "ok",
+        true
+      ],
+      [
+        25338,
+        "ok",
+        true
+      ]
+    ],
+    "final_valid": true,
+    "final_sat_keys": [
+      "25338",
+      "33591"
+    ],
+    "expected": 2,
+    "lost": 0,
+    "case": "B_双进程交叉刷新_丢更新"
+  },
+  {
+    "reader_handle_kept_open": true,
+    "state": "write_failed",
+    "written": false,
+    "detail": "拉取成功但本地缓存写入失败（PermissionError: [WinError 5] 拒绝访问。: 'D:\\\\mbdsdr\\\\tmp\\\\w92_degrade\\\\cwork\\\\c_reader_holds\\\\sat_links_machine.json.tmp.22456.30968' -> 'D:\\\\mbdsdr\\\\tmp\\\\w92_degrade\\\\cwork\\\\c_reader_holds\\\\sat_links_machine.json'）；旧缓存保留",
+    "cache_unchanged": true,
+    "disk_uuid": "before",
+    "case": "C_读者持有文件时写盘"
+  },
+  {
+    "icacls_deny_rc": 0,
+    "read_path": {
+      "state": "ok",
+      "text": "SatNOGS 发射机库：机器缓存 0 分钟前（1 颗）",
+      "freq": 137620000.0
+    },
+    "refresh_state": "write_failed",
+    "written": false,
+    "detail": "拉取成功但本地缓存写入失败（PermissionError: [Errno 13] Permission denied: 'D:\\\\mbdsdr\\\\tmp\\\\w92_degrade\\\\cwork\\\\d_readonly_dir\\\\sat_links_machine.json.tmp.22456.30968'）；旧缓存保留",
+    "status_text_after": "SatNOGS 发射机库：机器缓存 0 分钟前（1 颗）",
+    "manual_sats": 8,
+    "exceptions": "none",
+    "case": "D_只读目录_ACL拒绝写"
+  }
+]
