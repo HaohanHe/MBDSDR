@@ -24,11 +24,12 @@ repro 脚本都是「driver 进程 spawn 一个做 Qt 实测的子进程」。dr
 （``%TEMP%/mbdsdr-repro-sandbox-*``），产品代码即使直写用户目录也落不到真实
 环境。``MBDSDR_REPRO_SANDBOX=0`` 显式关闭（反证用）。
 ``MBDSDR_QS_ISOLATE=0`` 显式关闭 QSettings 重定向（哨兵仍记录）。
+真实根在 ``install()`` 之前由 ``MBDSDR_CFG_GUARD_REAL`` 显式钉住；若启动时
+HOME 已在临时/沙箱目录且未声明，直接打印原因并退出 2（不静默记账）。
 日志默认落 ``<repo>/work/`` 下。
 """
 from __future__ import annotations
 
-import json
 import os
 import sys
 import tempfile
@@ -143,7 +144,7 @@ def child_env(env=None):
     # 子进程的环境变量从出生起就是沙箱值；把 driver 进程（未沙箱化）的
     # 原始用户目录快照传过去，否则哨兵会把沙箱当真实目录。
     env.setdefault("MBDSDR_CFG_GUARD_REAL",
-                   json.dumps(_cfg_guard().real_user_dirs()))
+                   _cfg_guard().dump_real_declaration())
     sandbox = apply_sandbox(env)
     _guard().install_log_exit_check(log)
     _cfg_guard().install_log_exit_check(cfg_log)
@@ -167,6 +168,16 @@ def _run(target, args):
     if not os.environ.get("MBDSDR_CFG_GUARD_LOG"):
         cfg_log_path()
     cfg = _cfg_guard()
+    # 在任何 HOME 重定向之前把真实根钉成显式声明：install() 与稍后 spawn 的
+    # 子进程都认这一份，不再各自从运行时 HOME 推断。快照已是临时/沙箱目录
+    # 时这里直接报错退出 2——不静默记账，也不指望「再跑一次就自洽」。
+    try:
+        cfg.snapshot_user_dirs()
+    except cfg.SnapshotPolluted as exc:
+        print("[cfg-guard] %s" % exc, file=sys.stderr, flush=True)
+        raise SystemExit(2)
+    os.environ.setdefault("MBDSDR_CFG_GUARD_REAL",
+                          cfg.dump_real_declaration())
     # 先安装哨兵：它在安装那一刻快照原始用户目录，之后 apply_sandbox 再
     # 改 HOME/APPDATA 只会被登记成沙箱根，不会污染「真实」集合。
     cfg.install()
