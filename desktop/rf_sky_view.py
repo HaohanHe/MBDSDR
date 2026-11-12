@@ -89,6 +89,8 @@ from PySide6.QtGui import (
 )
 from PySide6.QtWidgets import QWidget, QFrame, QVBoxLayout, QLabel
 
+from constants import cons_of_talker
+
 # 交互控制复用 mbdsdr_ai/sky_interaction.py (Stellarium 视角模型独立重实现):
 from mbdsdr_ai.celestial_geometry import (
     AzimuthalEquidistantProjection,
@@ -2913,25 +2915,8 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
 
     @staticmethod
     def _talker_to_constellation(talker: str, prn: int) -> str:
-        """NMEA talker 前缀 -> 星座名。"""
-        t = (talker or "").upper()
-        if t == "GP":
-            return "GPS"
-        if t == "GL":
-            return "GLONASS"
-        if t == "GA":
-            return "Galileo"
-        if t in ("GB", "BD"):
-            return "BeiDou"
-        if t == "GN":
-            try:
-                p = int(prn)
-            except (TypeError, ValueError):
-                return "未知"
-            if 65 <= p <= 96:
-                return "GLONASS"
-            return "未知"
-        return "未知"
+        """NMEA talker 前缀 -> 星座名（口径见 desktop/constants.cons_of_talker）。"""
+        return cons_of_talker(talker, prn)
 
     def update_gnss_satellites(self, gsv_frames: List[Dict],
                                gsa_frame: Optional[Dict] = None):
