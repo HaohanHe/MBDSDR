@@ -43,12 +43,14 @@ from __future__ import annotations
 
 import argparse
 import ctypes
+import hashlib
 import json
 import os
 import re
 import subprocess
 import sys
 from ctypes import wintypes
+from datetime import date
 from importlib import metadata as im
 from pathlib import Path
 
@@ -119,6 +121,11 @@ VERSION_FILE = ROOT / "mbdsdr_ai" / "VERSION"
 #: 版本字面量：排除 IP（192.168.4.1）与四段版本后缀。
 VERSION_LITERAL_RE = re.compile(r"(?<![\d.])(\d+\.\d+\.\d+)(?![\d.])")
 STRICT_VERSION_RE = re.compile(r"\d+\.\d+\.\d+")
+#: 产物文件名形状 ``<name>-<x.y.z>``（sdist 解压目录、wheel、tar 包）。
+#: 这类版本是打包器从 VERSION 自动拼进文件名的片段，不是第二处手写版本；
+#: 按字面量报会把「历史 sdist 残留目录」和「排除规则」全部误伤，并且逼着
+#: 人把目录名改成不含版本的形式，反而丢掉「该目录是什么版本」的信息。
+ARTIFACT_VERSION_PREFIX_RE = re.compile(r"[A-Za-z0-9_.]+-$")
 
 #: (文件, [(必须命中的正则, 说明)], 用途, 是否执行「文件内禁止 x.y.z 字面量」)。
 #: 任一处正则失配 → FAIL（这是防止「删掉取值点」被当成变绿的唯一手段，
@@ -222,9 +229,13 @@ def scan_version_literals(root: Path, canonical: str,
         if b"\0" in data[:4096]:
             continue
         for lineno, line in enumerate(data.decode("utf-8", "replace").splitlines(), 1):
-            m = VERSION_LITERAL_RE.search(line)
-            if m and m.group(1) == canonical:
-                hits.append(f"{rel}:{lineno}")
+            for m in VERSION_LITERAL_RE.finditer(line):
+                # 只放过「文件名里的版本」；独立出现的 canonical 照旧拦。
+                if ARTIFACT_VERSION_PREFIX_RE.search(line[:m.start()]):
+                    continue
+                if m.group(1) == canonical:
+                    hits.append(f"{rel}:{lineno}")
+                    break
     return hits
 
 
@@ -432,6 +443,42 @@ def _artifact_imports(dist: Path) -> tuple[set[str], set[str], dict[str, list[st
     return names, modules, origin
 
 
+def _artifact_python_version(dist: Path) -> tuple[int, int] | None:
+    """产物自带的解释器版本（``_internal/python3XX.dll``）；取不到返回 ``None``。"""
+    internal = dist / "MBDSDR" / "_internal"
+    for p in sorted(internal.glob("python3*.dll")):
+        m = re.fullmatch(r"python(\d)(\d{2})(?:_d)?\.dll", p.name, re.I)
+        if m:
+            return int(m.group(1)), int(m.group(2))
+    return None
+
+
+def _marker_applies(line: str, py_ver: tuple[int, int] | None) -> bool | None:
+    """按**产物**解释器版本评估依赖行里的环境标记。
+
+    ``tomli>=2.0; python_version < "3.11"`` 这类声明是按目标解释器决定要不要装的：
+    产物是 3.14 时它本来就该缺席，按「声明了但产物没有」报 FAIL 是口径错误
+    （测试专用依赖同理）。返回 ``True`` 适用、``False`` 不适用、``None`` 无法判定
+    ——无法判定时照旧按声明面校验，宁可报缺也不静默放过。
+    """
+    _, sep, marker = line.partition(";")
+    if not sep or not marker.strip():
+        return True
+    if py_ver is None:
+        return None
+    try:
+        from packaging.markers import Marker, default_environment
+    except ImportError:  # pragma: no cover - 构建环境必有
+        return None
+    env = default_environment()
+    env["python_version"] = f"{py_ver[0]}.{py_ver[1]}"
+    env["python_full_version"] = f"{py_ver[0]}.{py_ver[1]}.0"
+    try:
+        return bool(Marker(marker.strip()).evaluate(env))
+    except Exception:
+        return None
+
+
 def _spec_modules() -> tuple[list[str], list[str]]:
     """spec 明确点名的模块与数据项（collect_submodules / datas 里的字面量）。"""
     text = _read(SPEC) if SPEC.exists() else ""
@@ -621,7 +668,15 @@ def check_deps(dist: Path) -> list[dict]:
                   f"spec 点名模块 {spec_mods or '（无）'}；数据项 {spec_datas or '（无）'}", items)
 
     missing: list[str] = []
+    not_applicable: list[str] = []
+    py_ver = _artifact_python_version(dist)
     for dist_name, line in sorted(declared.items()):
+        applies = _marker_applies(line, py_ver)
+        if applies is False:
+            not_applicable.append(dist_name)
+            _record(SKIP, f"{dist_name}  ← 「{line}」→ 产物 Python {py_ver[0]}.{py_ver[1]} "
+                          f"下环境标记为假，按设计不进产物，不计缺", items)
+            continue
         cand = [i for i in dist2imports.get(dist_name, []) if i in names]
         if cand:
             _record(PASS, f"{dist_name}  ← 「{line}」→ 产物 {cand[0]}"
@@ -631,6 +686,9 @@ def check_deps(dist: Path) -> list[dict]:
             missing.append(dist_name)
             _record(FAIL, f"{dist_name}  ← 「{line}」→ 未找到（期望 import 名 {expected}，"
                           f"_internal 与 PYZ 均无）", items)
+    if not_applicable:
+        _record(PASS, f"按产物解释器版本不适用 {len(not_applicable)} 个："
+                      f"{', '.join(sorted(not_applicable))}（环境标记为假，不是缺件）", items)
 
     # spec 点名模块
     for mod in spec_mods:
@@ -951,6 +1009,70 @@ def _secret_scan_module():
     return secret_scan
 
 
+#: 产物里「命中形状规则但已判定为误报」的二进制登记。
+#:
+#: 只允许二进制（DLL/PYD/EXE/SO），且必须同时钉住 **相对路径 + sha256 + 规则名**：
+#: 三者任一变化（升级 Qt/scipy、换构建）即重新 FAIL，强制重新判定。
+#: ``review_by`` 到期后条目自动失效，不能靠「以前判过」永久免检。
+ARTIFACT_SECRET_ALLOWLIST = (
+    {
+        "path": "MBDSDR/_internal/PySide6/Qt6Network.dll",
+        "sha256": "1c7c393b264ae78f4dee211656377a086c4be714bf768d3135f94f11c1d0be61",
+        "rules": ("pem-private-key",),
+        "reason": "Qt 网络模块内置的 PEM 头常量（命中的是 "
+                  "'-----BEGIN … PRIVATE KEY-----' 标记行本身，不含密钥正文；"
+                  "库要解析 PEM 必须带这些字符串）",
+        "review_by": "2027-03-31",
+    },
+    {
+        "path": "MBDSDR/_internal/PySide6/plugins/tls/qopensslbackend.dll",
+        "sha256": "94b3492bc4087da2818e2749a5a03f7d810611b2e3648bd8d580ad087363046f",
+        "rules": ("pem-private-key",),
+        "reason": "OpenSSL 后端的 PEM 头常量（同上，解析用字符串，非密钥）",
+        "review_by": "2027-03-31",
+    },
+    {
+        "path": "MBDSDR/_internal/PySide6/plugins/tls/qschannelbackend.dll",
+        "sha256": "2915a86a2531e65fd4905f0cc1c8dc353772a4f52aeda5100725dd9249db54d1",
+        "rules": ("pem-private-key",),
+        "reason": "Schannel 后端的 PEM 头常量（同上，解析用字符串，非密钥）",
+        "review_by": "2027-03-31",
+    },
+    {
+        "path": "MBDSDR/_internal/scipy/optimize/_highspy/_core.cp314-win_amd64.pyd",
+        "sha256": "564565e0809b47fd20acd530667e5dc32b14102cb10cbe23d10e1b49f617d5ac",
+        "rules": ("github-pat-classic",),
+        "reason": "6.4MB 二进制里 1 处 40 字符 base62 串恰好落在 'ghs_' 前缀上，"
+                  "前后都是标识符字符（是更长标识符的子串，不是独立 token）；"
+                  "GitHub PAT 长度为 4 前缀 + 36 字符且不会嵌在标识符中间",
+        "review_by": "2027-03-31",
+    },
+)
+
+
+def _artifact_secret_verdict(dist: Path, rel: str, rule: str,
+                             digests: dict[str, str]) -> tuple[bool, str]:
+    """命中是否属于已登记误报；返回 ``(放行, 说明)``。"""
+    entry = next((e for e in ARTIFACT_SECRET_ALLOWLIST if e["path"] == rel), None)
+    if entry is None:
+        return False, "未登记"
+    if rule not in entry["rules"]:
+        return False, f"登记规则为 {', '.join(entry['rules'])}，本次命中 {rule}"
+    try:
+        review_by = date.fromisoformat(entry["review_by"])
+    except ValueError:
+        return False, "登记日期非法"
+    if date.today() > review_by:
+        return False, f"登记已过期（review_by {entry['review_by']}），需重新判定"
+    digest = digests.get(rel)
+    if digest is None:
+        digest = hashlib.sha256((dist / rel).read_bytes()).hexdigest()
+        digests[rel] = digest
+    if digest != entry["sha256"]:
+        return False, "sha256 与登记不符（文件已变），需重新判定"
+    return True, f"已登记误报（{entry['reason']}；复核期限 {entry['review_by']}）"
+
+
 def check_secrets(dist: Path) -> list[dict]:
     """发布产物不得包含任何 BLOCK 命中的文件。
 
@@ -972,9 +1094,18 @@ def check_secrets(dist: Path) -> list[dict]:
     label = (f"产物 {stats['artifact_files']} 个文件 / "
              f"{stats['artifact_bytes'] / 1048576:.1f} MiB（按字节，含二进制）")
     if hits:
-        files = sorted({rel for rel, _rule in hits})
-        _record(FAIL, f"{label} 命中凭据形状：{', '.join(files)}"
-                      "（发布产物不得包含这些文件；输出不含命中的值）", items)
+        digests: dict[str, str] = {}
+        blocked: list[str] = []
+        allowed: list[str] = []
+        for rel, rule in sorted(set(hits)):
+            ok, why = _artifact_secret_verdict(dist, rel, rule, digests)
+            (allowed if ok else blocked).append(f"{rel}（{rule}：{why}）")
+        if blocked:
+            _record(FAIL, f"{label} 命中凭据形状：{'; '.join(blocked)}"
+                          "（发布产物不得包含这些文件；输出不含命中的值）", items)
+        if allowed:
+            _record(PASS, f"{label} 命中 {len(allowed)} 处已登记误报："
+                          f"{'; '.join(allowed)}", items)
     else:
         _record(PASS, f"{label} 无凭据形状命中", items)
     if stats["artifact_skip_unreadable"]:
