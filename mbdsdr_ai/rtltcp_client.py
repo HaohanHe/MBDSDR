@@ -723,10 +723,12 @@ class RtlTcpBackend(SDRBackend):
 
         # 对照 RTLSDRBackend.connect：打开后逐项显式下发设置，不停在出厂默认。
         # 1) 采样率（先吸附到 SDR++ 离散档，见 _apply_sample_rate）
-        self.set_sample_rate(self.status.sample_rate_hz)
+        if not self.set_sample_rate(self.status.sample_rate_hz):
+            return self._connect_init_failed("采样率")
         # 2) 中心频率：SDRStatus 默认 98 MHz（FM 广播段），用户可预设
         target_freq = self.status.frequency_hz or 98_000_000.0
-        self.set_frequency(target_freq)
+        if not self.set_frequency(target_freq):
+            return self._connect_init_failed("中心频率")
         # 3) 频偏校正 ppm（含 0，避免上次残留）
         self.set_ppm(self._ppm)
         # 4) 手动增益 20.0 dB（=200 个 0.1dB 单位），首启不聋也不过载
@@ -745,6 +747,24 @@ class RtlTcpBackend(SDRBackend):
             logger.warning("RtlTcpBackend 启动环形缓冲生产者失败: %s", e)
             self._ring_reader = None
         return True
+
+    def _connect_init_failed(self, what: str) -> bool:
+        """握手成功但初始化下发被拒：如实断开，不带半配置链路上线。
+
+        继续往下跑会让「已连接」的链路停留在上一档采样率/中心频率，而
+        status 里写的是新值——用户看到的调谐状态是假的。原因取自后端
+        写好的 status.error（含被拒的具体值），并通过连接失败返回给上层。
+        """
+        detail = self.status.error or "对端拒绝该设置"
+        try:
+            self.disconnect()
+        except Exception:
+            pass
+        self.status.connected = False
+        self.status.link_state = "failed"
+        self.status.error = f"连接初始化{what}下发失败: {detail}"
+        logger.warning("RtlTcpBackend %s", self.status.error)
+        return False
 
     def _ring_read(self, num_samples: int) -> Optional[np.ndarray]:
         """生产者读：把 stale / disconnected / failed 如实写进 status。"""
