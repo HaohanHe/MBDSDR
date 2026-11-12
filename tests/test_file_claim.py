@@ -10,6 +10,9 @@
     退化成按名字放行。
   * 旧格式 claim（占位文件无 token_sha256）不按名字放行：
     release 必须拒绝；只能 claim --adopt-legacy 显式迁移，或过期夺取/takeover。
+  * 续租必须带 --reason 并留痕（次数/旧新 TTL/理由/pid/cmdline），累计持有超过
+    上限（默认 6h，`--max-hold-min`/`MBDSDR_CLAIM_MAX_HOLD_MIN` 可改）即拒绝续租；
+    `audit-renew` 对「无续租记录但跨度 > 1.05×TTL」的老 claim 报「历史不可审计」。
 """
 from __future__ import annotations
 
@@ -131,7 +134,8 @@ def test_same_owner_claim_renews_with_token(tmp_path: Path) -> None:
     assert first.returncode == 0, first.stderr
     token = _token(first, locks)
     time.sleep(0.2)
-    again = run(locks, "claim", SHARED, "--owner", "线A", "--ttl-min", "10", "--token", token)
+    again = run(locks, "claim", SHARED, "--owner", "线A", "--ttl-min", "10",
+                "--token", token, "--reason", "测试续租")
     assert again.returncode == 0, again.stderr
     assert "CLAIM RENEWED" in again.stdout
     status = run(locks, "status", SHARED)
@@ -160,7 +164,8 @@ def test_same_owner_without_credential_cannot_renew(tmp_path: Path) -> None:
     assert wrong.returncode == 2, wrong.stdout + wrong.stderr
 
     # 真持有者凭据仍然有效，并会顺手把 sidecar 补回来
-    ok = run(locks, "claim", SHARED, "--owner", "同名线", "--ttl-min", "10", "--token", token)
+    ok = run(locks, "claim", SHARED, "--owner", "同名线", "--ttl-min", "10",
+             "--token", token, "--reason", "凭据有效，继续持有")
     assert ok.returncode == 0, ok.stderr
     assert "CLAIM RENEWED" in ok.stdout
     assert _sidecars(locks), "带正确 --token 续租时应补齐凭据文件"
@@ -319,10 +324,11 @@ def test_claim_persists_sidecar_and_release_reads_it(tmp_path: Path) -> None:
     assert "RELEASE OK" in released.stdout
     assert not _sidecars(locks), "release 成功后 sidecar 必须删除"
 
-    # 续租同样可以不带 --token
+    # 续租同样可以不带 --token（但必须带 --reason）
     again = run(locks, "claim", SHARED, "--owner", "线A")
-    run(locks, "claim", SHARED, "--owner", "线A", "--ttl-min", "10")
-    renewed = run(locks, "claim", SHARED, "--owner", "线A", "--ttl-min", "10")
+    run(locks, "claim", SHARED, "--owner", "线A", "--ttl-min", "10", "--reason", "测试续租")
+    renewed = run(locks, "claim", SHARED, "--owner", "线A", "--ttl-min", "10",
+                  "--reason", "测试续租")
     assert again.returncode == 0, again.stderr
     assert renewed.returncode == 0, renewed.stdout + renewed.stderr
     assert "CLAIM RENEWED" in renewed.stdout
@@ -684,3 +690,107 @@ def test_adopt_legacy_binds_credential_into_history(
         sidecar.unlink()
     denied = run(locks, "claim", SHARED, "--owner", "老格式线", "--ttl-min", "10")
     assert denied.returncode == 2, denied.stdout + denied.stderr
+
+
+def _marker_data(locks: Path) -> dict:
+    return json.loads(_markers(locks)[0].read_text(encoding="utf-8"))
+
+
+def test_renew_without_reason_is_denied_and_leaves_no_trace(tmp_path: Path) -> None:
+    """反证(a)：不带 --reason 的续租必须被拒，且不得留下「续过」的假记录。"""
+    locks = tmp_path / "locks"
+    first = run(locks, "claim", SHARED, "--owner", "线A", "--ttl-min", "10")
+    assert first.returncode == 0, first.stderr
+    token = _token(first, locks)
+
+    denied = run(locks, "claim", SHARED, "--owner", "线A", "--ttl-min", "20",
+                 "--token", token)
+    assert denied.returncode == 2, denied.stdout + denied.stderr
+    both = denied.stdout + denied.stderr
+    assert "续租必须带 --reason" in both, both
+    assert not _marker_data(locks).get("renewals"), "被拒的续租不得写记录"
+
+    ok = run(locks, "claim", SHARED, "--owner", "线A", "--ttl-min", "20",
+             "--token", token, "--reason", "K25 断言补证还没跑完")
+    assert ok.returncode == 0, ok.stdout + ok.stderr
+    marker = _marker_data(locks)
+    assert len(marker["renewals"]) == 1, marker.get("renewals")
+    rec = marker["renewals"][0]
+    assert rec["reason"] == "K25 断言补证还没跑完"
+    assert rec["old_ttl_min"] == 10 and rec["new_ttl_min"] == 20
+    assert rec["pid"] and "cmdline" in rec, rec
+    assert marker["renew_count"] == 1
+
+
+def test_renew_rejected_after_cumulative_cap_and_audit_shows_totals(tmp_path: Path) -> None:
+    """反证(b)：累计持有超上限即拒绝续租；台账/占位文件能查到次数、总时长、上限来源。"""
+    locks = tmp_path / "locks"
+    first = run(locks, "claim", SHARED, "--owner", "线A", "--ttl-min", "60",
+                "--max-hold-min", "0.02")  # 0.02min = 1.2s
+    assert first.returncode == 0, first.stderr
+    token = _token(first, locks)
+    assert _marker_data(locks)["max_hold_min"] == 0.02
+    assert _marker_data(locks)["max_hold_source"] == "--max-hold-min"
+
+    time.sleep(1.5)
+    denied = run(locks, "claim", SHARED, "--owner", "线A", "--ttl-min", "60",
+                 "--token", token, "--reason", "还想继续", "--max-hold-min", "0.02")
+    assert denied.returncode == 2, denied.stdout + denied.stderr
+    both = denied.stdout + denied.stderr
+    assert "已超上限" in both, both
+    assert not _marker_data(locks).get("renewals"), "被拒的续租不得写记录"
+
+    audit = run(locks, "audit-renew", "--json")
+    rows = json.loads(audit.stdout)["rows"]
+    assert len(rows) == 1
+    assert rows[0]["renew_count"] == 0
+    assert rows[0]["total_hold_s"] >= 1.2, rows[0]
+    assert rows[0]["cap_min"] == 0.02 and rows[0]["over_cap"] is True
+
+
+def test_audit_renew_flags_legacy_claim_as_unauditable_not_zero(tmp_path: Path) -> None:
+    """反证(c)：老 claim 没有续租记录、但跨度已超一个 TTL → 报「历史不可审计」。"""
+    locks = tmp_path / "locks"
+    claims_ttl = "10"
+    claimed = run(locks, "claim", SHARED, "--owner", "老格式线", "--ttl-min", claims_ttl)
+    assert claimed.returncode == 0, claimed.stderr
+
+    marker_path = _markers(locks)[0]
+    data = json.loads(marker_path.read_text(encoding="utf-8"))
+    now = time.time()
+    data.pop("renewals", None)
+    data.pop("renew_count", None)
+    data["acquired_at"] = now - 3600  # 已持有 1h，TTL 只有 10min → 必然续过
+    data["heartbeat_at"] = now
+    marker_path.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+
+    audit = run(locks, "audit-renew")
+    assert audit.returncode == 3, audit.stdout + audit.stderr
+    assert "UNAUDITABLE" in audit.stdout
+    assert "不是 0 次" in audit.stdout
+    assert "历史不可审计" in audit.stdout
+
+
+def test_audit_renew_reports_renew_count_and_reason(tmp_path: Path) -> None:
+    """续租留痕的可读面：次数 + 最后理由 + 累计持有，都能从机检里直接读出来。"""
+    locks = tmp_path / "locks"
+    first = run(locks, "claim", SHARED, "--owner", "线A", "--ttl-min", "10")
+    assert first.returncode == 0, first.stderr
+    token = _token(first, locks)
+    renewed = run(locks, "claim", SHARED, "--owner", "线A", "--ttl-min", "10",
+                  "--token", token, "--reason", "半途被别的事插队")
+    assert renewed.returncode == 0, renewed.stderr
+
+    audit = run(locks, "audit-renew", "--json")
+    assert audit.returncode == 0, audit.stdout + audit.stderr
+    payload = json.loads(audit.stdout)
+    assert payload["active"] == 1 and payload["renew_known"] == 1
+    row = payload["rows"][0]
+    assert row["renew_count"] == 1
+    assert row["last_reason"] == "半途被别的事插队"
+
+    reg = json.loads((locks / "claims.json").read_text(encoding="utf-8"))
+    hist = next(iter(reg["claims"].values()))["history"]
+    active = [h for h in hist if h["released_at"] is None]
+    assert active and active[0]["renewals"][0]["reason"] == "半途被别的事插队"
+    assert active[0]["renew_count"] == 1

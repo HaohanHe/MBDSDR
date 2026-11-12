@@ -15,6 +15,25 @@
     POSIX `flock`）里完成，不做「读 JSON 再写 JSON」的竞态写法。
   * TTL 心跳：同 owner 再 claim = 续租；超过 TTL 无续租视为过期，别人可以
     夺取，并打印原持有者与超时分钟数。
+  * **续租必须留痕、而且有累计上限**（2026-11-13 夜）：此前续租只刷新
+    `heartbeat_at`，`acquired_at` 与凭据哈希都不变，也不写 history——一个持有者
+    只要每 TTL 续一次，就能**无限期持有且不留任何痕迹**，TTL 对「一直续的人」
+    形同不存在（当晚发现 `docs/code-guards.md` 被同一 owner 从 TTL 60 续到 120，
+    靠人工盯才没有变成一张永远锁着的门）。现在的规则：
+      - 续租必须带 `--reason`（必填），每次追加一条记录：时间、旧 TTL、新 TTL、
+        理由、pid、cmdline；占位文件与台账各存一份（各保留最近 50 条）。
+      - 单条 claim 累计持有上限默认 **6 小时**（`MBDSDR_CLAIM_MAX_HOLD_MIN` 或
+        `--max-hold-min` 可改）；超过即**拒绝续租**，不是告警放行——原因：选
+        「告警 + 理由」等于把上限降级成减速带，仍允许无限持有，只是多写一行日志，
+        而本次要消灭的正是「无限持有且事后不可审计」。被拒后 claim 按原 TTL 自然
+        过期，想继续就 release 后重新 claim：那会开一条**新的取得记录**
+        （新的 acquired_at + 凭据），台账能看出「这是第二次取得」，不是同一笔
+        悄悄续了 8 小时。
+      - 上限被改（env/flag）不是静默生效：`max_hold_min` + 来源会写进占位文件与
+        每次续租记录，续租时打印 WARN——「临时放宽」必须留痕。
+      - `audit-renew` 子命令给出「续过几次 / 累计多久 / 是否超上限」；对**没有
+        续租记录**却有「跨度 > 1.5×TTL」的老 claim，报「历史不可审计」，
+        不按 0 次处理（那正是本次事故的形态）。
   * **判活只看心跳，不看 pid**（2026-11-13）：`claim` 是一次性 CLI，写完就
     退出，`pid` 记的是那个短命进程——「pid 已死」是默认状态，没有信息量。
     旧实现把 `pid_dead_or_reused` 当接管的硬前提，等于任何 claim 都能被接管
@@ -56,6 +75,9 @@
 用法：
   python scripts/file_claim.py claim desktop/main_window.py --owner 操作逻辑线
   python scripts/file_claim.py claim desktop/main_window.py --owner 操作逻辑线 --ttl-min 10
+  python scripts/file_claim.py claim desktop/main_window.py --owner 操作逻辑线 \
+      --ttl-min 30 --reason "K25 断言补证还没跑完"          # 续租（--reason 必填）
+  python scripts/file_claim.py audit-renew             # 续租次数 / 累计持有 / 超上限 / 老数据不可审计
   python scripts/file_claim.py claim desktop/main_window.py --owner 操作逻辑线 --token-file <凭据文件>
   python scripts/file_claim.py claim desktop/main_window.py --owner 操作逻辑线 --adopt-legacy
   python scripts/file_claim.py release desktop/main_window.py --owner 操作逻辑线          # 自动读 sidecar
@@ -105,6 +127,9 @@ REGISTRY_MUTEX = LOCKS_DIR / "claims.mutex"
 TAKEOVER_LOG = LOCKS_DIR / "claim_takeovers.log"
 
 LOCK_TIMEOUT_S = 15.0
+#: 单条 claim 的累计持有上限（分钟）。改它必须留痕：值 + 来源写进占位文件。
+DEFAULT_MAX_HOLD_MIN = 360.0
+MAX_HOLD_ENV = "MBDSDR_CLAIM_MAX_HOLD_MIN"
 EXIT_OK = 0
 EXIT_USAGE = 1
 EXIT_DENIED = 2
@@ -562,6 +587,8 @@ def _registry_record_claim(
                 "released_at": None,
                 "last_heartbeat_at": payload["heartbeat_at"],
                 "pid": payload.get("pid"),
+                "claim_reason": payload.get("claim_reason", ""),
+                "renewals": [],
             }
         )
         entry["history"] = entry["history"][-50:]
@@ -580,7 +607,7 @@ def _same_holder(item: Dict[str, Any], owner: str, token_hash: str) -> bool:
     return (item["owner"], item.get("token_sha256") or "") == (owner, token_hash)
 
 
-def _registry_renew(payload: Dict[str, Any]) -> None:
+def _registry_renew(payload: Dict[str, Any], renewal: Optional[Dict[str, Any]] = None) -> None:
     def mutate(data: Dict[str, Any]) -> None:
         entry = _entry(data, payload["key"])
         entry["path"] = payload["path"]
@@ -597,6 +624,14 @@ def _registry_renew(payload: Dict[str, Any]) -> None:
                 continue  # 无凭据的续租不按名字放行
             if _same_holder(item, payload["owner"], payload_token):
                 item["last_heartbeat_at"] = payload["heartbeat_at"]
+                if renewal is not None:
+                    # 续租留痕（2026-11-13）：与首次取得分开存，能回答
+                    # 「续过几次、每次为什么、合计持有多久」。
+                    trail = item.get("renewals")
+                    trail = trail if isinstance(trail, list) else []
+                    trail.append(renewal)
+                    item["renewals"] = trail[-50:]
+                    item["renew_count"] = len(item["renewals"])
                 break
             if item.get("token_sha256"):
                 continue  # 同名不同凭据：绝不续到别人的历史身份上
@@ -631,6 +666,17 @@ def _ttl(ttl_min: float, now: float) -> float:
     return ttl_min * 60.0
 
 
+def _resolve_max_hold(cli_value: Optional[float]) -> Tuple[float, str]:
+    """累计持有上限：命令行 > 环境变量 > 默认。改过的值必须带来源，便于留痕。"""
+    if cli_value is not None:
+        value, source = float(cli_value), "--max-hold-min"
+    elif os.environ.get(MAX_HOLD_ENV):
+        value, source = float(os.environ[MAX_HOLD_ENV]), f"env {MAX_HOLD_ENV}"
+    else:
+        value, source = DEFAULT_MAX_HOLD_MIN, "default"
+    return value, source
+
+
 def cmd_claim(
     path: str,
     owner: str,
@@ -638,6 +684,8 @@ def cmd_claim(
     quiet: bool = False,
     token: Optional[str] = None,
     adopt_legacy: bool = False,
+    reason: str = "",
+    max_hold_min: Optional[float] = None,
 ) -> int:
     owner = owner.strip()
     if not owner:
@@ -645,6 +693,14 @@ def cmd_claim(
         return EXIT_USAGE
     if ttl_min <= 0:
         print("--ttl-min 必须大于 0", file=sys.stderr)
+        return EXIT_USAGE
+    try:
+        cap_min, cap_source = _resolve_max_hold(max_hold_min)
+    except ValueError:
+        print(f"--max-hold-min / {MAX_HOLD_ENV} 必须是数字", file=sys.stderr)
+        return EXIT_USAGE
+    if cap_min <= 0:
+        print("--max-hold-min 必须大于 0", file=sys.stderr)
         return EXIT_USAGE
 
     key, display = canonical_path(path)
@@ -654,6 +710,13 @@ def cmd_claim(
     payload = _marker_payload(
         display, key, owner, ttl_min, now, _token_hash(fresh_token)
     )
+    payload["claim_reason"] = reason.strip()
+    payload["max_hold_min"] = cap_min
+    payload["max_hold_source"] = cap_source
+    # 空续租记录也显式写出来：否则「还没续过」与「老格式没留痕」在机检里
+    # 无法区分，后者会被误当成 0 次（本次事故正是这种沉默）。
+    payload["renewals"] = []
+    payload["renew_count"] = 0
     marker = _marker_for(key)
 
     if _create_marker(marker, payload):
@@ -698,7 +761,49 @@ def cmd_claim(
                 renewed = _marker_payload(
                     display, key, owner, ttl_min, now, holder_token_hash
                 )
-                renewed["acquired_at"] = float(data.get("acquired_at") or now)
+                acquired = float(data.get("acquired_at") or now)
+                renewed["acquired_at"] = acquired
+                old_ttl = float(data.get("ttl_min") or 0.0)
+                held_total_s = max(0.0, now - acquired)
+                prior = data.get("renewals")
+                prior_records = prior if isinstance(prior, list) else []
+                # ① 续租理由必填：没有理由的续租事后无法复核，等于无限续期不留痕。
+                if not reason.strip():
+                    raise ClaimDenied(
+                        f"CLAIM DENIED {display}\n"
+                        f"  续租必须带 --reason（写清这次为什么还要继续持有）。\n"
+                        f"  现状：owner={owner} 已持有={_minutes(held_total_s)}min，"
+                        f"续租记录={len(prior_records) if isinstance(prior, list) else 'NA（旧格式，不可审计）'}。\n"
+                        f"  为什么必填：续租过去只刷心跳、不写 history，TTL 对「一直续的人」"
+                        f"形同不存在（2026-11-13 事故）。"
+                    )
+                # ② 累计持有上限：超过即拒绝，不是告警放行（见模块文档的理由）。
+                if held_total_s > cap_min * 60.0:
+                    raise ClaimDenied(
+                        f"CLAIM DENIED {display}\n"
+                        f"  累计持有 {_minutes(held_total_s)}min 已超上限 {cap_min:g}min"
+                        f"（来源 {cap_source}）。\n"
+                        f"  单条 claim 不允许无限续期：请 release 后重新 claim"
+                        f"（会开一条新的取得记录，acquired_at 与新凭据都换）；\n"
+                        f"  或按 takeover 走审计路径。已记录的续租次数："
+                        f"{len(prior_records) if isinstance(prior, list) else 'NA（旧格式）'}。"
+                    )
+                renewal_record = {
+                    "at": now,
+                    "at_iso": _iso(now),
+                    "old_ttl_min": old_ttl,
+                    "new_ttl_min": ttl_min,
+                    "reason": reason.strip(),
+                    "pid": os.getpid(),
+                    "cmdline": _proc_snapshot(os.getpid())[2],
+                    "held_min_at_renew": round(held_total_s / 60.0, 1),
+                    "max_hold_min": cap_min,
+                    "max_hold_source": cap_source,
+                }
+                renewed["renewals"] = (prior_records + [renewal_record])[-50:]
+                renewed["renew_count"] = len(renewed["renewals"])
+                renewed["max_hold_min"] = cap_min
+                renewed["max_hold_source"] = cap_source
                 _write_fd(fd, json.dumps(renewed, ensure_ascii=False))
                 # 显式 --token 时顺手补齐/修复 sidecar，避免下次又只能靠记忆。
                 sidecar_err = _write_token_file(key, presented)
@@ -708,13 +813,21 @@ def cmd_claim(
                         file=sys.stderr,
                     )
                 try:
-                    _registry_renew(renewed)
+                    _registry_renew(renewed, renewal_record)
                 except ClaimDenied as exc:
                     print(f"WARN 台账写入失败（续租仍有效）：{exc}", file=sys.stderr)
                 if not quiet:
                     print(
                         f"CLAIM RENEWED {display} owner={owner} ttl={ttl_min:g}min "
-                        f"上次心跳={_iso(heartbeat)} 已持有={_minutes(held_s)}min"
+                        f"上次心跳={_iso(heartbeat)} 已持有={_minutes(held_total_s)}min "
+                        f"第 {len(renewed['renewals'])} 次续租 上限={cap_min:g}min"
+                    )
+                    print(f"  续租理由：{reason.strip()}")
+                if cap_source != "default":
+                    print(
+                        f"WARN 持有上限被改为 {cap_min:g}min（来源 {cap_source}）——"
+                        f"该值已写进占位文件与续租记录。",
+                        file=sys.stderr,
                     )
                 return EXIT_OK
             if adopt_legacy:
@@ -1250,11 +1363,99 @@ def _describe(payload: Dict[str, Any], now: float) -> str:
         state = f"剩余 {_minutes(ttl_s - held_s)}min"
     # 有凭据 = 身份可验证；没有 = 旧格式，只能靠过期/接管，不能按名字放行。
     ident = "token" if payload.get("token_sha256") else "legacy(名不可作身份)"
+    renewals = payload.get("renewals")
+    renew_txt = f"renew={len(renewals)}" if isinstance(renewals, list) else "renew=NA"
     return (
         f"{payload.get('path', '?'):<44} owner={owner:<18} held={_minutes(held_s)}/{_minutes(ttl_s)}min "
-        f"{state} pid={payload.get('pid')} id={ident} "
+        f"{state} pid={payload.get('pid')} id={ident} {renew_txt} "
         f"since={_iso(float(payload.get('acquired_at') or heartbeat))}"
     )
+
+
+def _renew_audit_rows(now: float) -> List[Dict[str, Any]]:
+    """活跃 claim 的续租审计行。
+
+    「老数据」判据：跨度（heartbeat − acquired）超过 1.05×TTL——正常 claim 不续
+    的话心跳会停在 TTL，超过就说明中途必然续租过，而旧格式没有 `renewals` 记录。
+    这类条目报「历史不可审计」，**不当 0 次**处理。
+    """
+    rows: List[Dict[str, Any]] = []
+    for marker in sorted(MARKER_DIR.glob("*.claim")):
+        data = _peek_marker(marker)
+        if not data:
+            continue
+        heartbeat = float(data.get("heartbeat_at") or data.get("acquired_at") or 0)
+        acquired = float(data.get("acquired_at") or heartbeat)
+        ttl_s = float(data.get("ttl_min") or 0.0) * 60.0
+        if heartbeat + ttl_s <= now:
+            continue  # 过期的不算当前占用
+        total_s = max(0.0, now - acquired)
+        renewals = data.get("renewals")
+        known = isinstance(renewals, list)
+        cap_min = float(data.get("max_hold_min") or DEFAULT_MAX_HOLD_MIN)
+        rows.append(
+            {
+                "path": data.get("path"),
+                "owner": data.get("owner"),
+                "key": data.get("key"),
+                "renew_known": known,
+                "renew_count": len(renewals) if known else None,
+                "total_hold_min": round(total_s / 60.0, 1),
+                "total_hold_s": round(total_s, 1),
+                "cap_min": cap_min,
+                "cap_source": data.get("max_hold_source") or "default(未记录)",
+                "legacy_unauditable": (not known) and (heartbeat - acquired) > ttl_s * 1.05,
+                "over_cap": total_s > cap_min * 60.0,
+                "last_reason": (renewals[-1].get("reason", "") if known and renewals else ""),
+            }
+        )
+    return rows
+
+
+def cmd_audit_renew(as_json: bool = False) -> int:
+    rows = _renew_audit_rows(_now())
+    known = [r for r in rows if r["renew_known"]]
+    legacy = [r for r in rows if r["legacy_unauditable"]]
+    over = [r for r in rows if r["over_cap"]]
+    if as_json:
+        print(
+            json.dumps(
+                {
+                    "active": len(rows),
+                    "renew_known": len(known),
+                    "legacy_unauditable": len(legacy),
+                    "over_cap": len(over),
+                    "rows": rows,
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
+    else:
+        print(
+            f"活跃 claim {len(rows)} 条：有续租记录 {len(known)} 条；"
+            f"历史不可审计（无续租记录但跨度 > 1.05×TTL）{len(legacy)} 条；"
+            f"超上限 {len(over)} 条"
+        )
+        for row in rows:
+            if row["legacy_unauditable"]:
+                print(
+                    f"  UNAUDITABLE(老数据) {row['path']} owner={row['owner']} "
+                    f"已持有={row['total_hold_min']}min 续租记录=不可知（不是 0 次）"
+                )
+            elif row["renew_known"]:
+                print(
+                    f"  RENEW {row['path']} owner={row['owner']} 续租={row['renew_count']} 次 "
+                    f"累计持有={row['total_hold_min']}min 上限={row['cap_min']:g}min "
+                    f"最后理由={row['last_reason'][:40]}"
+                )
+            if row["over_cap"]:
+                print(
+                    f"  OVER-CAP {row['path']} owner={row['owner']} "
+                    f"持有={row['total_hold_min']}min > 上限 {row['cap_min']:g}min"
+                    f"（{row['cap_source']}）"
+                )
+    return EXIT_FINDINGS if (legacy or over) else EXIT_OK
 
 
 def cmd_status(path: Optional[str]) -> int:
@@ -1390,6 +1591,18 @@ def build_parser() -> argparse.ArgumentParser:
         help="仅用于旧格式 claim 的一次性迁移：按 owner 名匹配并签发凭据（之后同名不再放行）",
     )
 
+    claim.add_argument(
+        "--reason",
+        default="",
+        help="续租必填：这次为什么继续持有（首次 claim 可当作取得目的记录）",
+    )
+    claim.add_argument(
+        "--max-hold-min",
+        type=float,
+        default=None,
+        help=f"累计持有上限（分钟），默认 {DEFAULT_MAX_HOLD_MIN:g}；改动会写进占位文件与续租记录",
+    )
+
     release = sub.add_parser("release", help="释放（仅原持有者，需 claim 时签发的 --token）")
     release.add_argument("path")
     release.add_argument("--owner", required=True)
@@ -1413,6 +1626,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="扫描「claim 已过期但文件 mtime 晚于 acquired_at」的漂移（只读，有命中退出码 3）",
     )
     audit.add_argument("--json", action="store_true", help="输出机器可读 JSON")
+
+    renew = sub.add_parser(
+        "audit-renew",
+        help="续租审计：次数 / 累计持有 / 超上限 / 老数据「历史不可审计」（有命中退出码 3）",
+    )
+    renew.add_argument("--json", action="store_true", help="输出机器可读 JSON")
 
     takeover = sub.add_parser(
         "takeover",
@@ -1475,11 +1694,15 @@ def main(argv: Optional[list[str]] = None) -> int:
                 args.ttl_min,
                 token=token,
                 adopt_legacy=args.adopt_legacy,
+                reason=getattr(args, "reason", "") or "",
+                max_hold_min=getattr(args, "max_hold_min", None),
             )
         if args.command == "release":
             return cmd_release(args.path, args.owner, token=token)
         if args.command == "audit-stale":
             return cmd_audit_stale(args.json)
+        if args.command == "audit-renew":
+            return cmd_audit_renew(args.json)
         if args.command == "takeover":
             return cmd_takeover(args.path, args.owner, args.ttl_min, args.reason)
         if args.command == "legacy-token-repair":
