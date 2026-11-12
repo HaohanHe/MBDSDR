@@ -1,7 +1,7 @@
 {
   "entries": {
     "0045bbb467fdc82b": {
-      "line": 1782,
+      "line": 1959,
       "ordinal": 2,
       "path": "mbdsdr_ai/sdr_backend.py",
       "rule": "A03",
@@ -64,14 +64,6 @@
       "severity": "review",
       "snippet": "模块未声明 __all__"
     },
-    "06a851fc66ba3918": {
-      "line": 0,
-      "ordinal": 0,
-      "path": "mbdsdr_ai/adsb.py",
-      "rule": "D1-cycle",
-      "severity": "review",
-      "snippet": "59 个模块互相依赖"
-    },
     "06b8e782c40c4e05": {
       "line": 67,
       "ordinal": 0,
@@ -97,7 +89,7 @@
       "snippet": "FREQ_MIN_HZ 有 2 个不同取值（10_000.0, 325_000_000.0）"
     },
     "0895cdacf758997e": {
-      "line": 3092,
+      "line": 3269,
       "ordinal": 5,
       "path": "mbdsdr_ai/sdr_backend.py",
       "rule": "A04",
@@ -185,7 +177,7 @@
       "snippet": "DEFAULT_SAMPLE_RATE_HZ 有 2 个不同取值（2_400_000, 1024000 # r）"
     },
     "0e43275e4f51c982": {
-      "line": 3663,
+      "line": 3840,
       "ordinal": 9,
       "path": "mbdsdr_ai/sdr_backend.py",
       "rule": "A04",
@@ -207,6 +199,14 @@
       "rule": "D6-missing-path",
       "severity": "review",
       "snippet": "引用的 mbdsdr_ai/data/_gpl_red_probe.json 不存在"
+    },
+    "0fd635e6a60421f9": {
+      "line": 94,
+      "ordinal": 0,
+      "path": "docs/reference-mechanisms.md",
+      "rule": "A11",
+      "severity": "review",
+      "snippet": "3. `tests/test_goto_anim_driver.py` 全绿（2026-11-13 于 `97fc5fc8` 复跑 → 9 passed），duration 语义不变；"
     },
     "106f56953f3ac4f0": {
       "line": 54,
@@ -521,7 +521,7 @@
       "snippet": "模块未声明 __all__"
     },
     "2287208d42b3e116": {
-      "line": 3539,
+      "line": 3716,
       "ordinal": 7,
       "path": "mbdsdr_ai/sdr_backend.py",
       "rule": "A03",
@@ -545,7 +545,7 @@
       "snippet": "模块未声明 __all__"
     },
     "23ce3ba862ff41db": {
-      "line": 3539,
+      "line": 3716,
       "ordinal": 7,
       "path": "mbdsdr_ai/sdr_backend.py",
       "rule": "A04",
@@ -680,6 +680,14 @@
       "severity": "review",
       "snippet": "dev 与 device 同时使用"
     },
+    "2cbb63cede18251e": {
+      "line": 0,
+      "ordinal": 0,
+      "path": "desktop/constellation_panel.py",
+      "rule": "D2-multi-producer",
+      "severity": "must-fix",
+      "snippet": "Hz 读数由 41 个文件产生"
+    },
     "2d49f8c5776bd995": {
       "line": 70,
       "ordinal": 0,
@@ -767,6 +775,14 @@
       "rule": "D3-no-contract",
       "severity": "review",
       "snippet": "模块未声明 __all__"
+    },
+    "3394619e0a2fc8eb": {
+      "line": 202,
+      "ordinal": 0,
+      "path": "docs/discoverability.md",
+      "rule": "A11",
+      "severity": "review",
+      "snippet": "- `test_shortcuts_guard.py` 全绿（含原先失败的 2 条；2026-11-13 于 `97fc5fc8` 复跑：`python -m pytest tests/test_shortcuts_guard.py -q` → 11 passed）。"
     },
     "339cbcfb8e7c27b5": {
       "line": 145,
@@ -873,7 +889,7 @@
       "snippet": "EARTH_RADIUS_M 有 2 个不同取值（6_371_000.0, 6371000.0）"
     },
     "39debf973752f07f": {
-      "line": 2872,
+      "line": 3049,
       "ordinal": 0,
       "path": "mbdsdr_ai/sdr_backend.py",
       "rule": "A07",
@@ -905,7 +921,7 @@
       "snippet": "≈1.02:1，仅触屏模式），与函数 docstring「只改 px/尺寸、不改颜色」不符。颜色早于"
     },
     "3b92d143fa175109": {
-      "line": 6623,
+      "line": 6800,
       "ordinal": 11,
       "path": "mbdsdr_ai/sdr_backend.py",
       "rule": "A03",
@@ -1024,6 +1040,14 @@
       "severity": "review",
       "snippet": "模块未声明 __all__"
     },
+    "454f8e751762ad73": {
+      "line": 825,
+      "ordinal": 0,
+      "path": "docs/known-red-register.md",
+      "rule": "A11",
+      "severity": "review",
+      "snippet": "`test_no_new_source_text_pins` 与 11 个相关测试文件全绿（当前树复核见下条 `97fc5fc8`）；留下的 2 条必须继续"
+    },
     "4628e71f2568e19f": {
       "line": 210,
       "ordinal": 0,
@@ -1064,14 +1088,6 @@
       "severity": "review",
       "snippet": "ecef_to_eci 与 mbdsdr_ai/orbit_determination.py:78 同名但实现不同"
     },
-    "4a76410b27687f80": {
-      "line": 0,
-      "ordinal": 0,
-      "path": "mbdsdr_ai/ft8_costas.py",
-      "rule": "D1-cycle",
-      "severity": "review",
-      "snippet": "2 个模块互相依赖"
-    },
     "4af2528d959d5326": {
       "line": 58,
       "ordinal": 0,
@@ -1097,7 +1113,7 @@
       "snippet": "模块未声明 __all__"
     },
     "4c05c7aad5e76ca9": {
-      "line": 60,
+      "line": 71,
       "ordinal": 0,
       "path": "desktop/device_panel.py",
       "rule": "D2-dual-constant",
@@ -1312,6 +1328,14 @@
       "severity": "review",
       "snippet": "PKG_ROOT 有 2 个不同取值（HERE.parent.parent, os.path.dirname(os.p）"
     },
+    "576502f72979ae11": {
+      "line": 883,
+      "ordinal": 0,
+      "path": "docs/PRD.md",
+      "rule": "A11",
+      "severity": "review",
+      "snippet": "- AC-R12（已有自动化）：`python -m pytest tests/test_doppler_readout.py -q` 全绿（2026-11-13 于 `97fc5fc8` 复跑 → 8 passed）。"
+    },
     "5784335e88e615df": {
       "line": 31,
       "ordinal": 0,
@@ -1337,7 +1361,7 @@
       "snippet": "STD_PRESSURE_HPA 有 2 个不同取值（1013.25 # 标准气压（百帕）, 1010.0）"
     },
     "587ada973cbfe4ef": {
-      "line": 1912,
+      "line": 2089,
       "ordinal": 3,
       "path": "mbdsdr_ai/sdr_backend.py",
       "rule": "A04",
@@ -1359,6 +1383,14 @@
       "rule": "D3-no-contract",
       "severity": "review",
       "snippet": "模块未声明 __all__"
+    },
+    "5b77b2a09ea16191": {
+      "line": 849,
+      "ordinal": 0,
+      "path": "docs/PRD.md",
+      "rule": "A11",
+      "severity": "review",
+      "snippet": "- AC-R4（已有自动化）：`python -m pytest tests/test_demod_worker_failure_visibility.py -q` 全绿（2026-11-13 于 `97fc5fc8` 复跑 → 4 passed；4 条：恰好 1 次上报且线程继续；helper 层编程错误原样上抛；`run()` 捕获后干净退出；连发 20 块只 1 条 warning）。"
     },
     "5c51c782b53f9988": {
       "line": 3,
@@ -1383,14 +1415,6 @@
       "rule": "D6-stale-line",
       "severity": "review",
       "snippet": "desktop/mcp_worker.py:347 超出文件行数 346"
-    },
-    "5cf790b55ee37789": {
-      "line": 0,
-      "ordinal": 0,
-      "path": "desktop/constellation_panel.py",
-      "rule": "D2-multi-producer",
-      "severity": "must-fix",
-      "snippet": "Hz 读数由 42 个文件产生"
     },
     "5cfee09bf701004e": {
       "line": 880,
@@ -1425,7 +1449,7 @@
       "snippet": "模块未声明 __all__"
     },
     "5eb8515ebe4fd7fc": {
-      "line": 809,
+      "line": 947,
       "ordinal": 0,
       "path": "desktop/device_panel.py",
       "rule": "A01",
@@ -1473,7 +1497,7 @@
       "snippet": "- 文案：`desktop/main_window.py:12091` 的「收起右栏浮层（Esc）」补全为完整"
     },
     "61d1c6881b6a93f1": {
-      "line": 2057,
+      "line": 2234,
       "ordinal": 4,
       "path": "mbdsdr_ai/sdr_backend.py",
       "rule": "A04",
@@ -1481,7 +1505,7 @@
       "snippet": "except Exception:"
     },
     "6289fdc891d0f410": {
-      "line": 371,
+      "line": 380,
       "ordinal": 0,
       "path": "mbdsdr_ai/sdr_backend.py",
       "rule": "A04",
@@ -1560,6 +1584,14 @@
       "severity": "review",
       "snippet": "WGS72_A 有 2 个不同取值（6378.135 # , 6378135.0 ）"
     },
+    "668de7ff1822b938": {
+      "line": 834,
+      "ordinal": 0,
+      "path": "docs/PRD.md",
+      "rule": "A11",
+      "severity": "review",
+      "snippet": "- AC-R1（已有自动化）：`QT_QPA_PLATFORM=offscreen python -m pytest tests/test_startup_log_policy.py -q` 全绿（2026-11-13 于 `97fc5fc8` 复跑 → 8 passed）。`test_runtime_dll_report_finds_and_misses` 用临时目录构造\"缺/不缺\"两种布局，精"
+    },
     "669ec09a57864bd3": {
       "line": 39,
       "ordinal": 0,
@@ -1585,7 +1617,7 @@
       "snippet": "CMD_SET_FREQUENCY 有 2 个不同取值（0x01 # rtl_tc, 0x01）"
     },
     "67a401b0febe825b": {
-      "line": 6704,
+      "line": 6881,
       "ordinal": 13,
       "path": "mbdsdr_ai/sdr_backend.py",
       "rule": "A03",
@@ -1617,7 +1649,7 @@
       "snippet": "模块未声明 __all__"
     },
     "68f57fdb8528d9ee": {
-      "line": 2878,
+      "line": 3055,
       "ordinal": 0,
       "path": "mbdsdr_ai/sdr_backend.py",
       "rule": "A07",
@@ -1657,7 +1689,7 @@
       "snippet": "模块未声明 __all__"
     },
     "6a6d78668f8fd1fe": {
-      "line": 3849,
+      "line": 4026,
       "ordinal": 10,
       "path": "mbdsdr_ai/sdr_backend.py",
       "rule": "A04",
@@ -1703,6 +1735,14 @@
       "rule": "D3-no-contract",
       "severity": "review",
       "snippet": "模块未声明 __all__"
+    },
+    "6d663edfdfc3f58b": {
+      "line": 866,
+      "ordinal": 0,
+      "path": "docs/PRD.md",
+      "rule": "A11",
+      "severity": "review",
+      "snippet": "- AC-R8（已有自动化）：`python -m pytest tests/test_backend_resilience.py -q` 全绿（2026-11-13 于 `97fc5fc8` 复跑，与 `test_s8_backend_loss.py` 合跑 → 38 passed）：loopback 假服务制造拒绝连接/半开/掉线/RST，断言 `link_state` 与真实数据流一致。"
     },
     "6d687078a4f33f1a": {
       "line": 29,
@@ -1769,7 +1809,7 @@
       "snippet": "except Exception:"
     },
     "71ac0179743775c2": {
-      "line": 1782,
+      "line": 1959,
       "ordinal": 2,
       "path": "mbdsdr_ai/sdr_backend.py",
       "rule": "A04",
@@ -1929,7 +1969,7 @@
       "snippet": "mbdsdr_ai/solar_system.py:1117 超出文件行数 1116"
     },
     "7bfa902d64d42412": {
-      "line": 6695,
+      "line": 6872,
       "ordinal": 12,
       "path": "mbdsdr_ai/sdr_backend.py",
       "rule": "A04",
@@ -2017,7 +2057,7 @@
       "snippet": "8 条已知红没有到期/复核条件：K01, K05, K05, K08, K09, K13, K17, K20"
     },
     "7e036ad2a6dc3698": {
-      "line": 649,
+      "line": 826,
       "ordinal": 0,
       "path": "mbdsdr_ai/sdr_backend.py",
       "rule": "A04",
@@ -2041,7 +2081,7 @@
       "snippet": "APT_VIDEO_RATE 有 2 个不同取值（4160 # 最终视频, 4_160.0）"
     },
     "806118612fa6ae64": {
-      "line": 2057,
+      "line": 2234,
       "ordinal": 4,
       "path": "mbdsdr_ai/sdr_backend.py",
       "rule": "A03",
@@ -2065,7 +2105,7 @@
       "snippet": "模块未声明 __all__"
     },
     "818a14411c634acc": {
-      "line": 375,
+      "line": 384,
       "ordinal": 1,
       "path": "mbdsdr_ai/sdr_backend.py",
       "rule": "A03",
@@ -2137,7 +2177,7 @@
       "snippet": "stuff_bits 与 mbdsdr_ai/ais_decoder.py:377 同名但实现不同"
     },
     "85f5d9b56d511bc8": {
-      "line": 3092,
+      "line": 3269,
       "ordinal": 5,
       "path": "mbdsdr_ai/sdr_backend.py",
       "rule": "A03",
@@ -2392,14 +2432,6 @@
       "severity": "review",
       "snippet": "lowpass_taps 与 mbdsdr_ai/channelizer.py:65 同名但实现不同"
     },
-    "957f23a833359825": {
-      "line": 0,
-      "ordinal": 0,
-      "path": "mbdsdr_ai/skyengine/constellations.py",
-      "rule": "D1-cycle",
-      "severity": "review",
-      "snippet": "2 个模块互相依赖"
-    },
     "960317aa9b550daa": {
       "line": 290,
       "ordinal": 0,
@@ -2407,6 +2439,14 @@
       "rule": "D6-missing-path",
       "severity": "review",
       "snippet": "引用的 tests/test_settings_apply_mode.py 不存在"
+    },
+    "97150d31f32b522f": {
+      "line": 898,
+      "ordinal": 0,
+      "path": "docs/PRD.md",
+      "rule": "A11",
+      "severity": "review",
+      "snippet": "- AC-R16（已有自动化）：`python -m pytest tests/test_ui_settings_isolation_guard.py tests/test_modal_dialog_guard.py -q` 全绿（2026-11-13 于 `97fc5fc8` 复跑 → 8 passed）。"
     },
     "972e9a5e8c2693e4": {
       "line": 86,
@@ -2457,7 +2497,7 @@
       "snippet": "模块未声明 __all__"
     },
     "98d52ad8b81a8920": {
-      "line": 1912,
+      "line": 2089,
       "ordinal": 3,
       "path": "mbdsdr_ai/sdr_backend.py",
       "rule": "A03",
@@ -2505,7 +2545,7 @@
       "snippet": "except Exception:"
     },
     "9ae320ae55d2edfb": {
-      "line": 6623,
+      "line": 6800,
       "ordinal": 11,
       "path": "mbdsdr_ai/sdr_backend.py",
       "rule": "A04",
@@ -2632,6 +2672,14 @@
       "severity": "review",
       "snippet": "模块未声明 __all__"
     },
+    "a2acd0448c435965": {
+      "line": 35,
+      "ordinal": 0,
+      "path": "docs/error-code-visibility.md",
+      "rule": "A11",
+      "severity": "review",
+      "snippet": "- `mapping_gaps() == []`、`mapping_overlaps() == []`（复跑 `tests/test_error_remedy_links.py` 全绿；2026-11-13 于 `97fc5fc8` 复跑 → 17 passed）。"
+    },
     "a2b2393ad0b38131": {
       "line": 300,
       "ordinal": 0,
@@ -2744,6 +2792,14 @@
       "severity": "review",
       "snippet": "模块未声明 __all__"
     },
+    "a9a8e57dcd011ba5": {
+      "line": 72,
+      "ordinal": 0,
+      "path": "docs/star-catalog.md",
+      "rule": "A11",
+      "severity": "review",
+      "snippet": "新增测试共 **32 项**（星表/守卫 29 + 打包 3），全部通过（2026-11-13 于 `97fc5fc8` 复跑相关星表文件 `tests/test_sky_catalog_sync.py tests/test_sky_full_catalog.py` → 15 passed；原 32 项的逐项映射未留存，按文件级复核）。"
+    },
     "a9b8df7d43c3f5c0": {
       "line": 48,
       "ordinal": 0,
@@ -2825,7 +2881,7 @@
       "snippet": "引用的 tests/test_replay_truncation_copy.py 不存在"
     },
     "ae49790369b734bd": {
-      "line": 375,
+      "line": 384,
       "ordinal": 1,
       "path": "mbdsdr_ai/sdr_backend.py",
       "rule": "A04",
@@ -2936,6 +2992,14 @@
       "severity": "review",
       "snippet": "NSPS 有 2 个不同取值（576, 1920 # 每符号采样数 @）"
     },
+    "b9490d920009d933": {
+      "line": 225,
+      "ordinal": 0,
+      "path": "docs/copy-audit.md",
+      "rule": "A11",
+      "severity": "review",
+      "snippet": "- 快捷键真实性：Python `shortcuts.py` 的 42 条登记项由单一事实源生成，帮助页动态取键，快捷键 guard/焦点优先级测试 15 项全部通过（2026-11-13 于 `97fc5fc8` 复跑：`python -m pytest tests/test_shortcuts_guard.py tests/test_shortcut_focus_priority.py -q`"
+    },
     "b9aa375e4e927235": {
       "line": 162,
       "ordinal": 0,
@@ -2985,7 +3049,7 @@
       "snippet": "引用的 desktop/a11y.py 不存在"
     },
     "bd2e0a09ac444b95": {
-      "line": 3648,
+      "line": 3825,
       "ordinal": 8,
       "path": "mbdsdr_ai/sdr_backend.py",
       "rule": "A04",
@@ -3001,7 +3065,7 @@
       "snippet": "模块未声明 __all__"
     },
     "be7036e5c2e30620": {
-      "line": 649,
+      "line": 826,
       "ordinal": 0,
       "path": "mbdsdr_ai/sdr_backend.py",
       "rule": "A03",
@@ -3023,6 +3087,14 @@
       "rule": "D6-missing-path",
       "severity": "review",
       "snippet": "引用的 tests/test_layout_persist_honesty.py 不存在"
+    },
+    "bef47517189c4b73": {
+      "line": 865,
+      "ordinal": 0,
+      "path": "docs/PRD.md",
+      "rule": "A11",
+      "severity": "review",
+      "snippet": "- AC-R7（已有自动化）：`python -m pytest tests/test_reconnection.py tests/test_reconnection_e2e.py -q` 全绿（2026-11-13 于 `97fc5fc8` 复跑 → 18 passed）；`test_default_reconnect_is_bounded_not_infinite` 断言总等待有上限且必然 `"
     },
     "c0a7924a0019ed8a": {
       "line": 44,
@@ -3057,7 +3129,7 @@
       "snippet": "rrc_filter 与 mbdsdr_ai/demod.py:23 同名但实现不同"
     },
     "c2c4ef1ffd10a02d": {
-      "line": 3528,
+      "line": 3705,
       "ordinal": 6,
       "path": "mbdsdr_ai/sdr_backend.py",
       "rule": "A04",
@@ -3071,14 +3143,6 @@
       "rule": "A11",
       "severity": "review",
       "snippet": "（`output/_legacy_red_lane3.log`）；身份门 3 全绿；污染+受害+behavior"
-    },
-    "c3a78e603d7dbab5": {
-      "line": 353,
-      "ordinal": 0,
-      "path": "desktop/ai_panel.py",
-      "rule": "A03",
-      "severity": "must-fix",
-      "snippet": "except Exception:"
     },
     "c3bc0f8c4c639f8b": {
       "line": 32,
@@ -3097,12 +3161,20 @@
       "snippet": "314 处 import"
     },
     "c53136539f5de259": {
-      "line": 6695,
+      "line": 6872,
       "ordinal": 12,
       "path": "mbdsdr_ai/sdr_backend.py",
       "rule": "A03",
       "severity": "must-fix",
       "snippet": "except Exception:"
+    },
+    "c5826ae4f492b251": {
+      "line": 590,
+      "ordinal": 0,
+      "path": "docs/packaging.md",
+      "rule": "A11",
+      "severity": "review",
+      "snippet": "子集命令现可独立复现全绿（2026-11-13 于 `97fc5fc8` 复跑：`python -m pytest tests/test_settings_schema.py -k \"record_dir or corrupt or write_failure\" -q` → 6 passed, 130 deselected），不依赖全量顺序。"
     },
     "c6f186a792485609": {
       "line": 14246,
@@ -3257,7 +3329,7 @@
       "snippet": "模块未声明 __all__"
     },
     "d14636d36dc85c96": {
-      "line": 371,
+      "line": 380,
       "ordinal": 0,
       "path": "mbdsdr_ai/sdr_backend.py",
       "rule": "A03",
@@ -3353,7 +3425,7 @@
       "snippet": "模块未声明 __all__"
     },
     "d8f02b64b386025a": {
-      "line": 3849,
+      "line": 4026,
       "ordinal": 10,
       "path": "mbdsdr_ai/sdr_backend.py",
       "rule": "A03",
@@ -3361,7 +3433,7 @@
       "snippet": "except Exception:"
     },
     "d93b0c60d72181dc": {
-      "line": 3663,
+      "line": 3840,
       "ordinal": 9,
       "path": "mbdsdr_ai/sdr_backend.py",
       "rule": "A03",
@@ -3409,7 +3481,7 @@
       "snippet": "EARTH_RADIUS_KM 有 2 个不同取值（6378.137 # WGS84 赤道, 6371.0088 # 地球平均半径（）"
     },
     "e08c78cdbbf44dbc": {
-      "line": 3648,
+      "line": 3825,
       "ordinal": 8,
       "path": "mbdsdr_ai/sdr_backend.py",
       "rule": "A03",
@@ -3455,6 +3527,22 @@
       "rule": "D2-dual-constant",
       "severity": "review",
       "snippet": "GM_EARTH 有 2 个不同取值（398600.4418 km^3/s^2, 398600.4418 ）"
+    },
+    "e5d37ed92d7a6a30": {
+      "line": 885,
+      "ordinal": 0,
+      "path": "docs/PRD.md",
+      "rule": "A11",
+      "severity": "review",
+      "snippet": "- AC-R14（已有自动化）：`python -m pytest tests/test_tune_failure_no_commit.py -q` 全绿（2026-11-13 于 `97fc5fc8` 复跑 → 4 passed；原始修复 `d0445ba`）。"
+    },
+    "e6ff0a7dccd07ac9": {
+      "line": 850,
+      "ordinal": 0,
+      "path": "docs/PRD.md",
+      "rule": "A11",
+      "severity": "review",
+      "snippet": "- AC-R5（已有自动化）：`python -m pytest tests/test_s8_backend_loss.py tests/test_backend_resilience.py -q` 全绿（2026-11-13 于 `97fc5fc8` 复跑 → 38 passed）。`test_s8_backend_loss.py` 覆盖：后端异常上报为断开、陈旧数据不依赖信号、未连接态、新鲜数"
     },
     "e78a66b84fee8d7b": {
       "line": 17,
@@ -3527,6 +3615,14 @@
       "rule": "D3-no-contract",
       "severity": "review",
       "snippet": "模块未声明 __all__"
+    },
+    "eb3e355af91d2e55": {
+      "line": 0,
+      "ordinal": 0,
+      "path": "mbdsdr_ai/adsb.py",
+      "rule": "D1-cycle",
+      "severity": "review",
+      "snippet": "60 个模块互相依赖"
     },
     "eb4a8268cad03dd0": {
       "line": 46,
@@ -3617,7 +3713,7 @@
       "snippet": "模块未声明 __all__"
     },
     "f191f2c793d89ebb": {
-      "line": 3528,
+      "line": 3705,
       "ordinal": 6,
       "path": "mbdsdr_ai/sdr_backend.py",
       "rule": "A03",
@@ -3817,7 +3913,7 @@
       "snippet": "模块未声明 __all__"
     },
     "fd6ba745f4699bc1": {
-      "line": 6704,
+      "line": 6881,
       "ordinal": 13,
       "path": "mbdsdr_ai/sdr_backend.py",
       "rule": "A04",
@@ -3873,10 +3969,10 @@
       "snippet": "FREQS 有 3 个不同取值（[1209, 1336, 1477, 1, [2400, 1060, 1160, 1, [\"1000000\", \"1550000）"
     }
   },
-  "generated_at": "2026-11-13 02:38:27",
-  "head": "749391f9",
-  "reason": "2026-11-13 全量口径 + 结构性判据 + A14 落地后重建；基线对应提交 749391f9",
+  "generated_at": "2026-11-13 02:52:21",
+  "head": "c182aba4",
+  "reason": "最终基线：对应提交 c182aba4（全量口径 + 结构性判据 + A14）",
   "schema": 2,
-  "total_active": 484,
+  "total_active": 496,
   "waived_not_tracked": 52
 }
