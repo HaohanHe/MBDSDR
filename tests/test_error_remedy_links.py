@@ -172,6 +172,48 @@ def test_status_link_shows_and_opens_help_at_code(qapp, monkeypatch):
     bar.deleteLater()
 
 
+def test_status_link_is_keyboard_reachable_and_enter_opens(qapp, monkeypatch):
+    """红线：不碰鼠标也能打开「查看怎么办」。
+
+    改回 ``Qt.LinksAccessibleByMouse`` 时第一条断言红（链接不在 Tab 链上 /
+    不认键盘）；删掉 ``keyPressEvent`` 里的 Enter 分支时第二条红（回车没反应）。
+    """
+    from PySide6.QtCore import Qt
+    from PySide6.QtTest import QTest
+    from PySide6.QtWidgets import QStatusBar
+
+    opened = []
+    monkeypatch.setattr(error_remedy, "open_remedy",
+                        lambda parent, code: opened.append(code) or True)
+
+    bar = QStatusBar()
+    label = error_remedy.build_link_label(bar)
+    bar.addPermanentWidget(label)
+    bar.show()
+    assert label.set_code("device_busy") is True
+    qapp.processEvents()
+
+    # 1) 键盘可达：链接声明键盘可激活，标签本身能进 Tab 链
+    assert label.textInteractionFlags() & Qt.LinksAccessibleByKeyboard, \
+        "链接只允许鼠标：键盘用户看得见却点不开"
+    assert label.focusPolicy() & Qt.TabFocus, "标签不在 Tab 链上"
+
+    # 2) 回车 = 点击：焦点落到链接后按 Return 必须触发
+    label.setFocus(Qt.OtherFocusReason)
+    qapp.processEvents()
+    assert bar.focusWidget() is label, "焦点没落到链接上"
+    QTest.keyClick(label, Qt.Key_Return)
+    qapp.processEvents()
+    assert opened == ["device_busy"], f"回车没打开「怎么办」: {opened}"
+
+    # 没有条目的 code 不得凭回车凭空打开
+    label.clear_code()
+    QTest.keyClick(label, Qt.Key_Return)
+    qapp.processEvents()
+    assert opened == ["device_busy"]
+    bar.deleteLater()
+
+
 def test_dialog_link_keeps_buttons_and_default_focus(qapp):
     from PySide6.QtWidgets import QAbstractButton, QLabel, QMessageBox
 
