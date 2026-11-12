@@ -24,8 +24,17 @@
 
     python scripts/secret_scan.py                  # 扫 D:\\mbdsdr（跳过目录逐条打印）
     python scripts/secret_scan.py --staged         # 只扫暂存区内容（pre-commit 用）
+    python scripts/secret_scan.py --history        # 扫 git 历史里的 blob（只跑形状规则）
     python scripts/secret_scan.py --root D:\\some   # 指定扫描根
     python scripts/secret_scan.py path1 path2      # 只扫指定文件
+
+历史口径（``--history``）：工作树 0 BLOCK 只能证明「现在没有」，不能证明「从没
+提交过」。历史模式对 ``git rev-list --all`` 可达的每个 blob 跑同一组形状规则
+（不跑熵：全量历史里熵告警没有信号），报告「命中 blob / 路径 / 提交」三个数，
+并逐个提交用 ``git merge-base --is-ancestor <commit> HEAD`` 判断是否仍可从 HEAD
+到达（不靠 ``git log`` 的主观印象）。同样只打印路径、行号、规则名、提交号。
+非 blob 对象、首 8KB 含 NUL 的二进制 blob、以及 ``--all`` 之外（dangling /
+仅 reflog 可达）的对象不在扫描范围内，逐类计数后打印。
 
 跳过目录写在 ``SKIP_DIRS`` 里并逐条打印原因，不静默少扫。
 """
@@ -38,9 +47,10 @@ import os
 import re
 import subprocess
 import sys
+import threading
 from collections import Counter
 from pathlib import Path
-from typing import Iterable, Iterator, List, Optional, Tuple
+from typing import Dict, Iterable, Iterator, List, Optional, Tuple
 
 SPDX = "pragma: allowlist secret"
 
@@ -406,6 +416,256 @@ def _scan_staged(stats: "Counter[str]") -> List[Finding]:
     return findings
 
 
+def _read_exact(stream, size: int) -> bytes:
+    chunks: List[bytes] = []
+    remaining = size
+    while remaining > 0:
+        chunk = stream.read(remaining)
+        if not chunk:
+            break
+        chunks.append(chunk)
+        remaining -= len(chunk)
+    return b"".join(chunks)
+
+
+def _history_tips() -> List[str]:
+    """所有 worktree 的 HEAD。
+
+    链接工作树处于 detached HEAD 时，该提交不在任何 ref 下，``--all`` 看不见
+    它（``.git/worktrees/<name>/HEAD`` 不是 ref）。巡检历史时把它补进去。
+    """
+    proc = _git("worktree", "list", "--porcelain")
+    tips: List[str] = []
+    for raw in proc.stdout.splitlines():
+        if raw.startswith("HEAD "):
+            sha = raw[5:].strip()
+            if sha and sha not in tips:
+                tips.append(sha)
+    return tips
+
+
+def _all_blob_shas() -> List[str]:
+    """对象库里的全部 blob（含 --all/reflog 之外的对象），不只是可达的那部分。"""
+    proc = _git(
+        "cat-file", "--batch-all-objects", "--batch-check=%(objectname) %(objecttype)"
+    )
+    if proc.returncode != 0:
+        print(f"[secret-scan] 读取对象库失败：{proc.stderr.strip()}")
+        return []
+    return [
+        fields[0]
+        for fields in (line.split() for line in proc.stdout.splitlines())
+        if len(fields) == 2 and fields[1] == "blob"
+    ]
+
+
+def _history_blob_paths(tips: List[str]) -> Dict[str, List[str]]:
+    """``git rev-list --objects``：blob → 曾用过的路径（可能多个）。"""
+    proc = _git(
+        "-c", "core.quotepath=false", "rev-list", "--objects", "--all", "--reflog", *tips
+    )
+    if proc.returncode != 0:
+        print(f"[secret-scan] 读取历史对象失败：{proc.stderr.strip()}")
+        return {}
+    out: Dict[str, List[str]] = {}
+    for raw in proc.stdout.splitlines():
+        sha, sep, path = raw.partition(" ")
+        if not sep or not path.strip():
+            continue
+        out.setdefault(sha, []).append(path.strip())
+    return out
+
+
+def _history_blob_commits(tips: List[str]) -> Dict[str, List[str]]:
+    """``git log --raw`` 的「新增态 blob」→ 引入它的提交。
+
+    一次 git 调用建反向索引，避免对每个命中 blob 再跑一次 ``git log
+    --find-object``（命中一多就是几百次进程启动）。
+    """
+    proc = _git(
+        "-c", "core.quotepath=false", "log", "--all", "--reflog", *tips, "--raw",
+        "--no-abbrev", "--root", "--format=C %H",
+    )
+    if proc.returncode != 0:
+        print(f"[secret-scan] 读取历史提交失败：{proc.stderr.strip()}")
+        return {}
+    out: Dict[str, List[str]] = {}
+    commit = ""
+    for raw in proc.stdout.splitlines():
+        if raw.startswith("C "):
+            commit = raw[2:].strip()
+            continue
+        if not raw.startswith(":") or not commit:
+            continue
+        fields = raw.split("\t")
+        meta = fields[0].split()
+        if len(fields) < 2 or len(meta) < 5:
+            continue
+        new_sha = meta[3]
+        if set(new_sha) == {"0"}:
+            continue
+        out.setdefault(new_sha, []).append(commit)
+    return out
+
+
+def _scan_history_blobs(
+    shas: List[str], stats: "Counter[str]"
+) -> Dict[str, List[Tuple[int, str]]]:
+    """流式读 ``git cat-file --batch``：blob → [(行号, 规则)]，只跑形状规则。"""
+    hits: Dict[str, List[Tuple[int, str]]] = {}
+    if not shas:
+        return hits
+    proc = subprocess.Popen(
+        ["git", "cat-file", "--batch"],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+    )
+    payload = ("\n".join(shas) + "\n").encode("ascii")
+
+    def _feed() -> None:
+        try:
+            assert proc.stdin is not None
+            proc.stdin.write(payload)
+            proc.stdin.close()
+        except OSError:
+            pass
+
+    threading.Thread(target=_feed, daemon=True).start()
+    stream = proc.stdout
+    assert stream is not None
+    while True:
+        header = stream.readline()
+        if not header:
+            break
+        fields = header.split()
+        if len(fields) < 3:
+            # "<sha> missing" 之类：没有内容段，不需要对齐
+            stats["history_skip_missing"] += 1
+            continue
+        sha = fields[0].decode("ascii", errors="replace")
+        otype = fields[1]
+        size = int(fields[2])
+        if otype != b"blob":
+            _read_exact(stream, size)
+            stream.read(1)
+            stats["history_skip_non_blob"] += 1
+            continue
+        blob = _read_exact(stream, size)
+        stream.read(1)
+        stats["history_blobs"] += 1
+        stats["history_bytes"] += len(blob)
+        if b"\0" in blob[:8192]:
+            stats["history_skip_binary"] += 1
+            continue
+        text = blob.decode("utf-8", errors="ignore")
+        blob_hits = [
+            (lineno, rule) for _p, lineno, rule, _t in _shape_hits("", text.splitlines())
+        ]
+        if blob_hits:
+            hits[sha] = blob_hits
+    proc.wait()
+    return hits
+
+
+def _head_blob_map() -> Dict[str, str]:
+    proc = _git("-c", "core.quotepath=false", "ls-tree", "-r", "HEAD")
+    out: Dict[str, str] = {}
+    if proc.returncode != 0:
+        return out
+    for raw in proc.stdout.splitlines():
+        meta, _sep, path = raw.partition("\t")
+        fields = meta.split()
+        if len(fields) >= 3 and fields[1] == "blob":
+            out[path] = fields[2]
+    return out
+
+
+def _ancestor_of_head(commit: str) -> bool:
+    proc = subprocess.run(
+        ["git", "merge-base", "--is-ancestor", commit, "HEAD"], capture_output=True
+    )
+    return proc.returncode == 0
+
+
+def _history_report(
+    stats: "Counter[str]",
+    hits: Dict[str, List[Tuple[int, str]]],
+    blob_paths: Dict[str, List[str]],
+    blob_commits: Dict[str, List[str]],
+) -> int:
+    head_blobs = _head_blob_map()
+    hit_commits: set = set()
+    hit_paths: set = set()
+    still_at_head = 0
+    unattributed = 0
+    for sha in sorted(hits):
+        paths = sorted(set(blob_paths.get(sha, [])))
+        commits = sorted(set(blob_commits.get(sha, [])))
+        if not commits:
+            unattributed += 1
+        if not paths:
+            paths = ["<路径未知>"]
+        hit_paths.update(paths)
+        hit_commits.update(commits)
+        shown = ",".join(c[:12] for c in commits[:5]) or "未知"
+        if len(commits) > 5:
+            shown += f"+{len(commits) - 5}"
+        more = f" paths={len(paths)}" if len(paths) > 1 else ""
+        for lineno, rule in hits[sha]:
+            print(
+                f"HISTORY {paths[0]}:{lineno} {rule} blob={sha[:12]} "
+                f"commits={shown}{more}"
+            )
+        if any(head_blobs.get(path) == sha for path in paths):
+            still_at_head += 1
+
+    from_head = sorted(c for c in hit_commits if _ancestor_of_head(c))
+    only_other_refs = len(hit_commits) - len(from_head)
+
+    print(f"[secret-scan] 历史扫描：对象库全部 blob；形状规则 {len(SHAPE_RULES)} 条，不做熵")
+    print(
+        "[secret-scan] 历史覆盖："
+        f"blob 扫描 {stats['history_blobs']} 个 / {stats['history_bytes'] / 1048576:.1f} MiB"
+        f"；非 blob 跳过 {stats['history_skip_non_blob']} 个（tree/commit，无文本内容）"
+        f"；二进制跳过 {stats['history_skip_binary']} 个（首 8KB 含 NUL）"
+        f"；读取失败 {stats['history_skip_missing']} 个"
+    )
+    print(
+        "[secret-scan] 历史命中："
+        f"blob={len(hits)} 个，路径={len(hit_paths)} 个，提交={len(hit_commits)} 个"
+    )
+    print(
+        "[secret-scan] 历史命中提交："
+        f"仍可从 HEAD 到达 {len(from_head)} 个；仅存在于其它 ref 或不可达 {only_other_refs} 个"
+        + (f"（HEAD 可达：{','.join(c[:12] for c in from_head[:10])}）" if from_head else "")
+    )
+    print(
+        f"[secret-scan] 历史命中 blob：仍以同一 blob 出现在 HEAD 的路径 {still_at_head} 个"
+        + (f"；归属索引查不到提交的 {unattributed} 个" if unattributed else "")
+    )
+    print(
+        "[secret-scan] 未扫范围：非 blob 对象；二进制 blob（首 8KB 含 NUL，不做文本扫描）；"
+        "熵规则不跑（全量历史里没有信号）。"
+    )
+    print("[secret-scan] 输出只含路径:行 + 规则名 + 提交号，不含命中的值。")
+    return 0
+
+
+def _scan_history(stats: "Counter[str]") -> int:
+    top = _git("rev-parse", "--show-toplevel")
+    if top.returncode != 0:
+        print("[secret-scan] --history 需要 git 仓库；当前目录不在仓库里。")
+        return 0
+    print(f"[secret-scan] 历史扫描范围：{top.stdout.strip()}（对象库全部 blob）")
+    tips = _history_tips()
+    print(f"[secret-scan] 归属索引：refs=--all + reflog + {len(tips)} 个 worktree HEAD")
+    blob_paths = _history_blob_paths(tips)
+    blob_commits = _history_blob_commits(tips)
+    hits = _scan_history_blobs(_all_blob_shas(), stats)
+    return _history_report(stats, hits, blob_paths, blob_commits)
+
+
 def _report(findings: Iterable[Finding], stats: Optional["Counter[str]"] = None) -> int:
     unique = sorted(set(findings), key=lambda item: (item[0], item[1], item[2]))
     blocks = [f for f in unique if f[3] == "block"]
@@ -437,9 +697,16 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument("paths", nargs="*", help="只扫指定文件/目录（默认扫扫描根）")
     parser.add_argument("--root", default=os.environ.get("MBDSDR_SECRET_SCAN_ROOT") or r"D:\mbdsdr")
     parser.add_argument("--staged", action="store_true", help="只扫 git 暂存区内容")
+    parser.add_argument(
+        "--history",
+        action="store_true",
+        help="扫 git 历史里的 blob（只跑形状规则，不跑熵；不拦提交，退出码 0）",
+    )
     args = parser.parse_args(argv)
 
     stats: "Counter[str]" = Counter()
+    if args.history:
+        return _scan_history(stats)
     if args.staged:
         return _report(_scan_staged(stats), stats)
 
