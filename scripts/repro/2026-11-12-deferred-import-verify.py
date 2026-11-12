@@ -7,10 +7,11 @@
   ② defer_broken：模拟「文件在但加载失败」→ 首帧已出，延后导入必须报出且不崩；
   ③ frame_gap  ：生产原样，量首帧后延后导入期间的最坏单帧间隔。
 
-另有两臂只服务「−962 ms 必须在改后代码上复现」这一条：
+另有两臂只服务「收益必须在改后代码上复现」这一条：
   * frame_gap_nodefer：延后导入整段不跑，量同一窗口里的掉帧底噪；
-  * t2_baseline     ：**HEAD 的 main.py**（老代码：smoke + scipy 真 import 都在
-                       splash 之后、主窗之前）跑同一条 T2 量法，作为改前基线。
+  * t2_baseline     ：**baseline_rev 的 main.py**（老代码：smoke + scipy 真 import 都在
+                       splash 之后、主窗之前）+ HEAD 的界面模块，作为改前基线。
+                      两臂只差 main.py，避免 HEAD 演进的界面代码污染对比。
 
 不修改产品代码：只 patch main 模块里的清单/报告函数与本进程的
 importlib.import_module（用来给每片计时）。
@@ -42,6 +43,9 @@ LOW_LOAD_PCT = 200.0
 CASES = ("gate_missing", "defer_broken", "frame_gap", "frame_gap_nodefer",
          "t2_baseline")
 OUT_NAME = "deferred-import-verify.json"
+#: 落地提交 d91f7b14 之前的 desktop/main.py（52622845 之后没人再动过它）。
+BASELINE_REV = "52622845"
+baseline_rev = BASELINE_REV
 KEEP_ALIVE_MS = 9000
 
 
@@ -107,30 +111,34 @@ _HEAD_FILES = ("main_window.py", "module_panel.py", "device_panel.py",
                "bookmark_panel.py")
 
 
-def _head_snapshot() -> tuple[str, str, str]:
-    """返回 (core_snap, old_main_snap, head)。
+def _head_snapshot(baseline_rev: str) -> tuple[str, str, str, str]:
+    """返回 (core_snap, old_main_snap, head, baseline_rev)。
 
     core_snap：只钉 desktop 的四个界面模块（main.py 用工作树的**改后**代码）；
-    old_main_snap：在 core_snap 基础上再放一份 HEAD 的 main.py，用来量改前基线。
+    old_main_snap：界面模块与 main.py 都取 ``baseline_rev``（改前代码），用来量基线。
+    必须按提交号钉，不能按 HEAD——落地提交之后 HEAD 就是新代码了。
     """
     head = subprocess.run(["git", "-C", ROOT, "rev-parse", "--short", "HEAD"],
+                          capture_output=True, text=True).stdout.strip()
+    base = subprocess.run(["git", "-C", ROOT, "rev-parse", "--short", baseline_rev],
                           capture_output=True, text=True).stdout.strip()
     snap = os.path.join(tempfile.gettempdir(), "kilo", f"defer_head_{head}")
     os.makedirs(snap, exist_ok=True)
 
-    def _dump(name, out_dir):
-        out = subprocess.run(["git", "-C", ROOT, "show", f"HEAD:desktop/{name}"],
+    def _dump(rev, name, out_dir):
+        out = subprocess.run(["git", "-C", ROOT, "show", f"{rev}:desktop/{name}"],
                              capture_output=True).stdout
         with open(os.path.join(out_dir, name), "wb") as f:
             f.write(out)
 
     for name in _HEAD_FILES:
-        _dump(name, snap)
-    snap_old = snap + "_oldmain"
+        _dump("HEAD", name, snap)
+    snap_old = os.path.join(tempfile.gettempdir(), "kilo", f"defer_base_{base}")
     os.makedirs(snap_old, exist_ok=True)
-    for name in _HEAD_FILES + ("main.py",):
-        _dump(name, snap_old)
-    return snap, snap_old, head
+    for name in _HEAD_FILES:
+        _dump("HEAD", name, snap_old)      # 界面模块与改后臂同源，只让 main.py 有差别
+    _dump(base, "main.py", snap_old)
+    return snap, snap_old, head, base
 
 
 def _one() -> int:
@@ -308,11 +316,17 @@ def _one() -> int:
         def check():
             w = M.get("mw")
             timer = getattr(w, "_deferred_import_timer", None)
-            if timer is not None and not timer.isActive():
+            thread = getattr(w, "_deferred_import_thread", None)
+            # 只有「线程起过、且已经结束、且 drain 定时器停了」才算延后导入完成。
+            # 早先只看 timer.isActive()：定时器在 _start_deferred_imports 里就建好、
+            # 但要等首帧 Paint 之后才 start()，检查点会把它误判成「已完成」并提前退出，
+            # 2/3 run 因此只量到首帧后 100 ms 就收工（延后导入压根没进测量窗口）。
+            if (thread is not None and not thread.is_alive()
+                    and timer is not None and not timer.isActive()):
                 M["t_deferred_done"] = time.perf_counter()
                 d.stop()
                 QTimer.singleShot(0, QApplication.instance().quit)
-            elif timer is None and M.get("t_first_frame"):
+            elif thread is None and timer is None and M.get("t_first_frame"):
                 # t2_baseline：改前代码没有延后导入。首帧后再放 300 ms 让心跳
                 # 收几个样就收工，别白等 KEEP_ALIVE_MS。
                 if not M.get("_quit_scheduled"):
@@ -419,8 +433,8 @@ def _gap_attribution(r: dict, top_n: int = 3) -> list[dict]:
 
 def _driver(runs: int, cases: list[str]) -> int:
     import psutil
-    snap, snap_old, head = _head_snapshot()
-    print(f"[snapshot] HEAD {head} -> {snap} / {snap_old}")
+    snap, snap_old, head, base_rev = _head_snapshot(baseline_rev)
+    print(f"[snapshot] HEAD {head} -> {snap} / baseline {base_rev} -> {snap_old}")
     rows = []
     for i in range(runs):
         for case in cases:
@@ -498,7 +512,7 @@ def _driver(runs: int, cases: list[str]) -> int:
     out = {
         "kind": "延后导入（scipy 私有子树）三条反证 + 最坏帧间隔 + T2 前后对比",
         "date": "2026-11-12", "head": head, "snapshot": snap,
-        "snapshot_old_main": snap_old,
+        "snapshot_old_main": snap_old, "baseline_rev": base_rev,
         "cases": list(cases), "runs_per_case": runs,
         "load_rule": "规则 10：每 run 前 2 s 低负载门（python 总占比 <200%）",
         "definition": {
@@ -507,9 +521,9 @@ def _driver(runs: int, cases: list[str]) -> int:
             "first_frame_ms": "子进程 T0 → 主窗首个 Paint 派发完毕",
             "worst_frame_gap_ms": "首帧后 16 ms 心跳定时器相邻两次回调的最大间隔；"
                                   "间隔里主线程没机会回到事件循环，就是一次掉帧",
-            "deferred_total_ms": "首帧 → 延后导入全部完成（_deferred_import_timer 停止）",
-            "t2_baseline": "HEAD 的 desktop/main.py（老代码：smoke + scipy 真 import "
-                           "都在 splash 后、主窗前）；frame_gap 是改后代码，两者同一量法",
+            "deferred_total_ms": "首帧 → 延后导入全部完成（工作线程结束且 drain 定时器停止）",
+            "t2_baseline": "baseline_rev（52622845，落地提交 d91f7b14 之前的 main.py）"
+                           "+ HEAD 的界面模块；两臂只差 main.py，同一量法",
         },
         "delta_t2_vs_baseline_ms": delta_t2,
         "summary": summary,
@@ -541,6 +555,9 @@ def main() -> int:
         elif a == "--out" and i + 1 < len(argv):
             global OUT_NAME
             OUT_NAME = argv[i + 1]
+        elif a == "--baseline-rev" and i + 1 < len(argv):
+            global baseline_rev
+            baseline_rev = argv[i + 1]
     if "--one" in argv:
         return _one()
     return _driver(runs, cases)

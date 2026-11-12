@@ -1,9 +1,10 @@
 {
  "kind": "延后导入（scipy 私有子树）三条反证 + 最坏帧间隔 + T2 前后对比",
  "date": "2026-11-12",
- "head": "afd449fa",
- "snapshot": "C:\\Users\\xxhzb\\AppData\\Local\\Temp\\kilo\\defer_head_afd449fa",
- "snapshot_old_main": "C:\\Users\\xxhzb\\AppData\\Local\\Temp\\kilo\\defer_head_afd449fa_oldmain",
+ "head": "699dcb92",
+ "snapshot": "C:\\Users\\xxhzb\\AppData\\Local\\Temp\\kilo\\defer_head_699dcb92",
+ "snapshot_old_main": "C:\\Users\\xxhzb\\AppData\\Local\\Temp\\kilo\\defer_base_52622845",
+ "baseline_rev": "52622845",
  "cases": [
   "gate_missing",
   "defer_broken",
@@ -18,22 +19,22 @@
   "t2_ms": "splash 首个 paintEvent 返回 → 主窗顶层首个 Paint 派发完毕",
   "first_frame_ms": "子进程 T0 → 主窗首个 Paint 派发完毕",
   "worst_frame_gap_ms": "首帧后 16 ms 心跳定时器相邻两次回调的最大间隔；间隔里主线程没机会回到事件循环，就是一次掉帧",
-  "deferred_total_ms": "首帧 → 延后导入全部完成（_deferred_import_timer 停止）",
-  "t2_baseline": "HEAD 的 desktop/main.py（老代码：smoke + scipy 真 import 都在 splash 后、主窗前）；frame_gap 是改后代码，两者同一量法"
+  "deferred_total_ms": "首帧 → 延后导入全部完成（工作线程结束且 drain 定时器停止）",
+  "t2_baseline": "baseline_rev（52622845，落地提交 d91f7b14 之前的 main.py）+ HEAD 的界面模块；两臂只差 main.py，同一量法"
  },
- "delta_t2_vs_baseline_ms": -647.6,
+ "delta_t2_vs_baseline_ms": -1105.5,
  "summary": {
   "gate_missing": {
    "t1_splash_paint_ms": {
     "runs": [
-     1587.2,
-     1585.4,
-     1585.5
+     1586.0,
+     1593.7,
+     1591.2
     ],
-    "median": 1585.5,
-    "min": 1585.4,
-    "max": 1587.2,
-    "range": 1.8
+    "median": 1591.2,
+    "min": 1586.0,
+    "max": 1593.7,
+    "range": 7.7
    },
    "t2_ms": null,
    "first_frame_ms": null,
@@ -63,129 +64,129 @@
    "phase_ms": {
     "_startup_dependency_problems": {
      "runs": [
-      568.8,
-      458.9,
-      454.6
+      469.7,
+      500.6,
+      376.8
      ],
-     "median": 458.9,
-     "min": 454.6,
-     "max": 568.8,
-     "range": 114.2
+     "median": 469.7,
+     "min": 376.8,
+     "max": 500.6,
+     "range": 123.8
     }
    }
   },
   "defer_broken": {
    "t1_splash_paint_ms": {
     "runs": [
-     1594.7,
-     1585.8,
-     1586.1
+     1617.9,
+     1615.8,
+     1595.9
     ],
-    "median": 1586.1,
-    "min": 1585.8,
-    "max": 1594.7,
-    "range": 8.9
+    "median": 1615.8,
+    "min": 1595.9,
+    "max": 1617.9,
+    "range": 22.0
    },
    "t2_ms": {
     "runs": [
-     2364.5,
-     2364.8,
-     2297.1
+     2476.2,
+     2381.5,
+     2339.7
     ],
-    "median": 2364.5,
-    "min": 2297.1,
-    "max": 2364.8,
-    "range": 67.7
+    "median": 2381.5,
+    "min": 2339.7,
+    "max": 2476.2,
+    "range": 136.5
    },
    "first_frame_ms": {
     "runs": [
-     3959.2,
-     3950.6,
-     3883.2
+     4094.1,
+     3997.3,
+     3935.6
     ],
-    "median": 3950.6,
-    "min": 3883.2,
-    "max": 3959.2,
-    "range": 76.0
+    "median": 3997.3,
+    "min": 3935.6,
+    "max": 4094.1,
+    "range": 158.5
    },
    "deferred_total_ms": {
     "runs": [
-     220.1,
-     224.3,
-     222.1
+     320.4,
+     329.7,
+     320.4
     ],
-    "median": 222.1,
-    "min": 220.1,
-    "max": 224.3,
-    "range": 4.2
+    "median": 320.4,
+    "min": 320.4,
+    "max": 329.7,
+    "range": 9.3
    },
    "worst_frame_gap_ms": {
     "runs": [
-     95.0,
-     91.7,
-     92.1
+     130.1,
+     112.3,
+     96.6
     ],
-    "median": 92.1,
-    "min": 91.7,
-    "max": 95.0,
-    "range": 3.3
+    "median": 112.3,
+    "min": 96.6,
+    "max": 130.1,
+    "range": 33.5
    },
    "worst_gap_attribution": [
     {
-     "gap_ms": 95.0,
-     "gap_at_ms": 95.0,
+     "gap_ms": 130.1,
+     "gap_at_ms": 130.2,
      "imports_in_gap": [
       "mbdsdr_broken_probe"
      ]
     },
     {
-     "gap_ms": 19.5,
-     "gap_at_ms": 114.5,
+     "gap_ms": 27.3,
+     "gap_at_ms": 157.4,
      "imports_in_gap": [
       "mbdsdr_broken_probe"
      ]
     },
     {
-     "gap_ms": 16.0,
-     "gap_at_ms": 143.9,
+     "gap_ms": 17.2,
+     "gap_at_ms": 208.8,
      "imports_in_gap": []
     },
     {
-     "gap_ms": 91.7,
-     "gap_at_ms": 91.8,
+     "gap_ms": 112.3,
+     "gap_at_ms": 112.3,
+     "imports_in_gap": [
+      "mbdsdr_broken_probe"
+     ]
+    },
+    {
+     "gap_ms": 24.6,
+     "gap_at_ms": 136.9,
      "imports_in_gap": [
       "mbdsdr_broken_probe"
      ]
     },
     {
      "gap_ms": 18.2,
-     "gap_at_ms": 110.0,
-     "imports_in_gap": [
-      "mbdsdr_broken_probe"
-     ]
-    },
-    {
-     "gap_ms": 16.7,
-     "gap_at_ms": 209.3,
+     "gap_at_ms": 243.2,
      "imports_in_gap": []
     },
     {
-     "gap_ms": 92.1,
-     "gap_at_ms": 92.2,
+     "gap_ms": 96.6,
+     "gap_at_ms": 96.7,
      "imports_in_gap": [
       "mbdsdr_broken_probe"
      ]
     },
     {
-     "gap_ms": 19.5,
-     "gap_at_ms": 111.6,
+     "gap_ms": 21.3,
+     "gap_at_ms": 117.9,
      "imports_in_gap": [
       "mbdsdr_broken_probe"
      ]
     },
     {
-     "gap_ms": 16.2,
-     "gap_at_ms": 144.5,
+     "gap_ms": 16.5,
+     "gap_at_ms": 144.6,
      "imports_in_gap": []
     }
    ],
@@ -227,100 +228,97 @@
    "per_slice_ms": {
     "mbdsdr_broken_probe": {
      "runs": [
-      4.2,
-      4.7,
-      4.8
+      10.0,
+      6.5,
+      4.7
      ],
-     "median": 4.7,
-     "min": 4.2,
-     "max": 4.8,
-     "range": 0.6
+     "median": 6.5,
+     "min": 4.7,
+     "max": 10.0,
+     "range": 5.3
     }
    },
    "phase_ms": {
     "_startup_dependency_problems": {
      "runs": [
-      443.5,
-      449.2,
-      449.6
+      357.1,
+      364.5,
+      354.2
      ],
-     "median": 449.2,
-     "min": 443.5,
-     "max": 449.6,
-     "range": 6.1
+     "median": 357.1,
+     "min": 354.2,
+     "max": 364.5,
+     "range": 10.3
     }
    }
   },
   "frame_gap": {
    "t1_splash_paint_ms": {
     "runs": [
-     1620.0,
-     1601.8,
-     1619.3
+     1605.5,
+     1586.9,
+     1626.2
     ],
-    "median": 1619.3,
-    "min": 1601.8,
-    "max": 1620.0,
-    "range": 18.2
+    "median": 1605.5,
+    "min": 1586.9,
+    "max": 1626.2,
+    "range": 39.3
    },
    "t2_ms": {
     "runs": [
-     2421.7,
-     2523.2,
-     2530.6
+     2587.5,
+     2478.0,
+     2484.1
     ],
-    "median": 2523.2,
-    "min": 2421.7,
-    "max": 2530.6,
-    "range": 108.9
+    "median": 2484.1,
+    "min": 2478.0,
+    "max": 2587.5,
+    "range": 109.5
    },
    "first_frame_ms": {
     "runs": [
-     4041.7,
-     4125.0,
-     4149.9
+     4192.9,
+     4065.0,
+     4110.3
     ],
-    "median": 4125.0,
-    "min": 4041.7,
-    "max": 4149.9,
-    "range": 108.2
+    "median": 4110.3,
+    "min": 4065.0,
+    "max": 4192.9,
+    "range": 127.9
    },
    "deferred_total_ms": {
     "runs": [
-     973.5,
-     988.9,
-     988.3
+     1313.0,
+     1312.1,
+     1423.4
     ],
-    "median": 988.3,
-    "min": 973.5,
-    "max": 988.9,
-    "range": 15.4
+    "median": 1313.0,
+    "min": 1312.1,
+    "max": 1423.4,
+    "range": 111.3
    },
    "worst_frame_gap_ms": {
     "runs": [
-     87.0,
-     88.8,
-     90.1
+     97.0,
+     117.2,
+     111.8
     ],
-    "median": 88.8,
-    "min": 87.0,
-    "max": 90.1,
-    "range": 3.1
+    "median": 111.8,
+    "min": 97.0,
+    "max": 117.2,
+    "range": 20.2
    },
    "worst_gap_attribution": [
     {
-     "gap_ms": 87.0,
-     "gap_at_ms": 87.0,
+     "gap_ms": 97.0,
+     "gap_at_ms": 97.0,
      "imports_in_gap": [
-      "scipy._external.array_api_compat.numpy.fft",
-      "scipy._external.array_api_compat.numpy.linalg",
-      "scipy._external.array_api_compat.common",
-      "scipy._external.array_api_extra"
+      "scipy._external.array_api_compat.numpy.fft"
      ]
     },
     {
-     "gap_ms": 34.6,
-     "gap_at_ms": 690.6,
+     "gap_ms": 51.4,
+     "gap_at_ms": 991.0,
      "imports_in_gap": [
       "scipy.stats",
       "scipy.stats",
@@ -328,68 +326,57 @@
      ]
     },
     {
-     "gap_ms": 27.6,
-     "gap_at_ms": 861.5,
-     "imports_in_gap": [
-      "scipy.signal",
-      "scipy.special",
-      "scipy.fft",
-      "scipy.interpolate",
-      "scipy.optimize",
-      "numpy._core._multiarray_umath"
-     ]
-    },
-    {
-     "gap_ms": 88.8,
-     "gap_at_ms": 88.8,
-     "imports_in_gap": [
-      "scipy._external.array_api_compat.numpy.fft",
-      "scipy._external.array_api_compat.numpy.linalg",
-      "scipy._external.array_api_compat.common",
-      "scipy._external.array_api_extra"
-     ]
-    },
-    {
-     "gap_ms": 42.1,
-     "gap_at_ms": 874.6,
+     "gap_ms": 40.6,
+     "gap_at_ms": 1176.5,
      "imports_in_gap": [
       "scipy.signal"
      ]
     },
     {
-     "gap_ms": 36.3,
-     "gap_at_ms": 698.7,
+     "gap_ms": 117.2,
+     "gap_at_ms": 117.2,
      "imports_in_gap": [
+      "scipy._external.array_api_compat.numpy.fft"
+     ]
+    },
+    {
+     "gap_ms": 82.8,
+     "gap_at_ms": 999.7,
+     "imports_in_gap": [
+      "scipy.stats",
+      "scipy.stats",
+      "scipy.stats",
       "scipy.stats",
       "scipy.stats",
       "scipy.signal"
      ]
     },
     {
-     "gap_ms": 90.1,
-     "gap_at_ms": 90.1,
+     "gap_ms": 49.0,
+     "gap_at_ms": 1187.4,
      "imports_in_gap": [
-      "scipy._external.array_api_compat.numpy.fft",
-      "scipy._external.array_api_compat.numpy.linalg",
-      "scipy._external.array_api_compat.common",
-      "scipy._external.array_api_extra"
+      "scipy.signal"
      ]
     },
     {
-     "gap_ms": 43.6,
-     "gap_at_ms": 751.2,
+     "gap_ms": 111.8,
+     "gap_at_ms": 111.8,
      "imports_in_gap": [
-      "scipy.stats",
+      "scipy._external.array_api_compat.numpy.fft"
+     ]
+    },
+    {
+     "gap_ms": 79.7,
+     "gap_at_ms": 1014.1,
+     "imports_in_gap": [
       "scipy.stats",
       "scipy.signal"
      ]
     },
     {
-     "gap_ms": 42.9,
-     "gap_at_ms": 927.6,
-     "imports_in_gap": [
-      "scipy.signal"
-     ]
+     "gap_ms": 64.7,
+     "gap_at_ms": 1476.2,
+     "imports_in_gap": []
     }
    ],
    "reports": [],
@@ -409,7 +396,7 @@
    ],
    "window_imported_despite_missing": false,
    "per_slice_ms": {
-    "scipy._external.array_api_compat.numpy.fft": {
+    "numpy": {
      "runs": [
       0.0,
       0.0,
@@ -419,6 +406,39 @@
      "min": 0.0,
      "max": 0.0,
      "range": 0.0
+    },
+    "numpy.linalg": {
+     "runs": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "median": 0.0,
+     "min": 0.0,
+     "max": 0.0,
+     "range": 0.0
+    },
+    "numpy.fft": {
+     "runs": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "median": 0.0,
+     "min": 0.0,
+     "max": 0.0,
+     "range": 0.0
+    },
+    "scipy._external.array_api_compat.numpy.fft": {
+     "runs": [
+      158.9,
+      147.4,
+      175.3
+     ],
+     "median": 158.9,
+     "min": 147.4,
+     "max": 175.3,
+     "range": 27.9
     },
     "scipy._external.array_api_compat.numpy.linalg": {
      "runs": [
@@ -444,13 +464,13 @@
     },
     "scipy._external.array_api_extra": {
      "runs": [
-      23.6,
-      19.5,
-      23.5
+      10.3,
+      12.9,
+      14.4
      ],
-     "median": 23.5,
-     "min": 19.5,
-     "max": 23.6,
+     "median": 12.9,
+     "min": 10.3,
+     "max": 14.4,
      "range": 4.1
     },
     "scipy._external.packaging_version": {
@@ -466,67 +486,67 @@
     },
     "scipy._lib._array_api": {
      "runs": [
-      12.7,
-      12.9,
-      17.9
+      10.1,
+      8.9,
+      9.3
      ],
-     "median": 12.9,
-     "min": 12.7,
-     "max": 17.9,
-     "range": 5.2
+     "median": 9.3,
+     "min": 8.9,
+     "max": 10.1,
+     "range": 1.2
     },
     "scipy._lib._util": {
      "runs": [
-      1.7,
-      2.1,
-      3.2
+      1.3,
+      1.4,
+      1.8
      ],
-     "median": 2.1,
-     "min": 1.7,
-     "max": 3.2,
-     "range": 1.5
+     "median": 1.4,
+     "min": 1.3,
+     "max": 1.8,
+     "range": 0.5
     },
     "scipy.linalg": {
      "runs": [
-      50.4,
-      51.4,
-      50.1
+      49.9,
+      45.0,
+      54.5
      ],
-     "median": 50.4,
-     "min": 50.1,
-     "max": 51.4,
-     "range": 1.3
+     "median": 49.9,
+     "min": 45.0,
+     "max": 54.5,
+     "range": 9.5
     },
     "scipy.special": {
      "runs": [
       0.0,
-      42.0,
+      65.4,
       0.0,
       0.0,
-      55.9,
+      61.2,
       0.0,
       0.0,
-      58.2,
+      71.2,
       0.0
      ],
      "median": 0.0,
      "min": 0.0,
-     "max": 58.2,
-     "range": 58.2
+     "max": 71.2,
+     "range": 71.2
     },
     "scipy.fft": {
      "runs": [
-      36.2,
+      33.0,
       0.0,
-      24.8,
+      24.7,
       0.0,
-      22.7,
+      31.0,
       0.0
      ],
-     "median": 11.3,
+     "median": 12.3,
      "min": 0.0,
-     "max": 36.2,
-     "range": 36.2
+     "max": 33.0,
+     "range": 33.0
     },
     "scipy.sparse": {
      "runs": [
@@ -575,25 +595,25 @@
     },
     "scipy.ndimage": {
      "runs": [
-      30.0,
-      30.6,
-      38.8
+      48.7,
+      37.2,
+      52.5
      ],
-     "median": 30.6,
-     "min": 30.0,
-     "max": 38.8,
-     "range": 8.8
+     "median": 48.7,
+     "min": 37.2,
+     "max": 52.5,
+     "range": 15.3
     },
     "scipy.integrate": {
      "runs": [
-      36.2,
-      35.2,
-      36.2
+      45.9,
+      58.4,
+      50.0
      ],
-     "median": 36.2,
-     "min": 35.2,
-     "max": 36.2,
-     "range": 1.0
+     "median": 50.0,
+     "min": 45.9,
+     "max": 58.4,
+     "range": 12.5
     },
     "scipy.stats": {
      "runs": [
@@ -601,6 +621,7 @@
       0.0,
       0.0,
       0.0,
+      0.1,
       0.0,
       0.0,
       0.0,
@@ -612,6 +633,7 @@
       0.0,
       0.0,
       0.0,
+      0.1,
       0.0,
       0.0,
       0.0,
@@ -649,6 +671,7 @@
       0.0,
       0.0,
       0.0,
+      1.6,
       0.0,
       0.0,
       0.0,
@@ -668,11 +691,8 @@
       0.0,
       0.0,
       0.0,
-      0.0,
-      0.0,
-      0.0,
-      0.0,
-      0.0,
+      2.0,
+      0.1,
       0.0,
       0.0,
       0.0,
@@ -687,19 +707,19 @@
      ],
      "median": 0.0,
      "min": 0.0,
-     "max": 0.0,
-     "range": 0.0
+     "max": 2.0,
+     "range": 2.0
     },
     "scipy.signal": {
      "runs": [
-      712.6,
-      756.7,
-      800.6
+      902.4,
+      907.5,
+      975.1
      ],
-     "median": 756.7,
-     "min": 712.6,
-     "max": 800.6,
-     "range": 88.0
+     "median": 907.5,
+     "min": 902.4,
+     "max": 975.1,
+     "range": 72.7
     },
     "scipy.interpolate": {
      "runs": [
@@ -727,107 +747,107 @@
    "phase_ms": {
     "_startup_dependency_problems": {
      "runs": [
-      566.7,
-      549.3,
-      556.6
+      486.7,
+      465.6,
+      450.8
      ],
-     "median": 556.6,
-     "min": 549.3,
-     "max": 566.7,
-     "range": 17.4
+     "median": 465.6,
+     "min": 450.8,
+     "max": 486.7,
+     "range": 35.9
     }
    }
   },
   "frame_gap_nodefer": {
    "t1_splash_paint_ms": {
     "runs": [
-     1579.9,
-     1577.0,
-     1600.1
+     1580.2,
+     1631.8,
+     1585.9
     ],
-    "median": 1579.9,
-    "min": 1577.0,
-    "max": 1600.1,
-    "range": 23.1
+    "median": 1585.9,
+    "min": 1580.2,
+    "max": 1631.8,
+    "range": 51.6
    },
    "t2_ms": {
     "runs": [
-     2354.3,
-     2308.6,
-     2295.2
+     2407.0,
+     2394.5,
+     2501.4
     ],
-    "median": 2308.6,
-    "min": 2295.2,
-    "max": 2354.3,
-    "range": 59.1
+    "median": 2407.0,
+    "min": 2394.5,
+    "max": 2501.4,
+    "range": 106.9
    },
    "first_frame_ms": {
     "runs": [
-     3934.2,
-     3885.6,
-     3895.3
+     3987.2,
+     4026.3,
+     4087.3
     ],
-    "median": 3895.3,
-    "min": 3885.6,
-    "max": 3934.2,
-    "range": 48.6
+    "median": 4026.3,
+    "min": 3987.2,
+    "max": 4087.3,
+    "range": 100.1
    },
    "deferred_total_ms": null,
    "worst_frame_gap_ms": {
     "runs": [
-     93.0,
-     89.0,
-     88.7
+     112.4,
+     108.7,
+     97.3
     ],
-    "median": 89.0,
-    "min": 88.7,
-    "max": 93.0,
-    "range": 4.3
+    "median": 108.7,
+    "min": 97.3,
+    "max": 112.4,
+    "range": 15.1
    },
    "worst_gap_attribution": [
     {
-     "gap_ms": 93.0,
-     "gap_at_ms": 93.2,
-     "imports_in_gap": []
-    },
-    {
-     "gap_ms": 19.2,
+     "gap_ms": 112.4,
      "gap_at_ms": 112.4,
      "imports_in_gap": []
     },
     {
-     "gap_ms": 18.9,
-     "gap_at_ms": 275.3,
+     "gap_ms": 25.7,
+     "gap_at_ms": 138.1,
      "imports_in_gap": []
     },
     {
-     "gap_ms": 89.0,
-     "gap_at_ms": 89.1,
+     "gap_ms": 16.9,
+     "gap_at_ms": 257.7,
      "imports_in_gap": []
     },
     {
-     "gap_ms": 18.2,
-     "gap_at_ms": 179.4,
+     "gap_ms": 108.7,
+     "gap_at_ms": 108.7,
      "imports_in_gap": []
     },
     {
-     "gap_ms": 17.7,
-     "gap_at_ms": 106.7,
+     "gap_ms": 28.1,
+     "gap_at_ms": 136.8,
      "imports_in_gap": []
     },
     {
-     "gap_ms": 88.7,
-     "gap_at_ms": 88.7,
+     "gap_ms": 16.8,
+     "gap_at_ms": 176.4,
      "imports_in_gap": []
     },
     {
-     "gap_ms": 18.4,
-     "gap_at_ms": 107.1,
+     "gap_ms": 97.3,
+     "gap_at_ms": 97.3,
+     "imports_in_gap": []
+    },
+    {
+     "gap_ms": 27.0,
+     "gap_at_ms": 124.2,
      "imports_in_gap": []
     },
     {
      "gap_ms": 17.3,
-     "gap_at_ms": 177.0,
+     "gap_at_ms": 385.0,
      "imports_in_gap": []
     }
    ],
@@ -851,107 +871,107 @@
    "phase_ms": {
     "_startup_dependency_problems": {
      "runs": [
-      458.5,
-      451.6,
-      454.3
+      457.0,
+      359.1,
+      451.5
      ],
-     "median": 454.3,
-     "min": 451.6,
-     "max": 458.5,
-     "range": 6.9
+     "median": 451.5,
+     "min": 359.1,
+     "max": 457.0,
+     "range": 97.9
     }
    }
   },
   "t2_baseline": {
    "t1_splash_paint_ms": {
     "runs": [
-     1578.7,
-     1616.2,
-     1617.6
+     1608.9,
+     1615.5,
+     1599.2
     ],
-    "median": 1616.2,
-    "min": 1578.7,
-    "max": 1617.6,
-    "range": 38.9
+    "median": 1608.9,
+    "min": 1599.2,
+    "max": 1615.5,
+    "range": 16.3
    },
    "t2_ms": {
     "runs": [
-     3263.0,
-     3170.8,
-     3123.0
+     3589.6,
+     3650.5,
+     3475.4
     ],
-    "median": 3170.8,
-    "min": 3123.0,
-    "max": 3263.0,
-    "range": 140.0
+    "median": 3589.6,
+    "min": 3475.4,
+    "max": 3650.5,
+    "range": 175.1
    },
    "first_frame_ms": {
     "runs": [
-     4841.7,
-     4787.0,
-     4740.6
+     5198.5,
+     5266.0,
+     5074.6
     ],
-    "median": 4787.0,
-    "min": 4740.6,
-    "max": 4841.7,
-    "range": 101.1
+    "median": 5198.5,
+    "min": 5074.6,
+    "max": 5266.0,
+    "range": 191.4
    },
    "deferred_total_ms": null,
    "worst_frame_gap_ms": {
     "runs": [
-     92.3,
-     85.6,
-     89.0
+     97.3,
+     129.1,
+     107.8
     ],
-    "median": 89.0,
-    "min": 85.6,
-    "max": 92.3,
-    "range": 6.7
+    "median": 107.8,
+    "min": 97.3,
+    "max": 129.1,
+    "range": 31.8
    },
    "worst_gap_attribution": [
     {
-     "gap_ms": 92.3,
-     "gap_at_ms": 92.3,
+     "gap_ms": 97.3,
+     "gap_at_ms": 97.3,
      "imports_in_gap": []
     },
     {
-     "gap_ms": 18.8,
-     "gap_at_ms": 111.1,
+     "gap_ms": 23.1,
+     "gap_at_ms": 120.4,
+     "imports_in_gap": []
+    },
+    {
+     "gap_ms": 17.2,
+     "gap_at_ms": 257.5,
+     "imports_in_gap": []
+    },
+    {
+     "gap_ms": 129.1,
+     "gap_at_ms": 129.1,
+     "imports_in_gap": []
+    },
+    {
+     "gap_ms": 22.8,
+     "gap_at_ms": 152.0,
+     "imports_in_gap": []
+    },
+    {
+     "gap_ms": 17.1,
+     "gap_at_ms": 241.6,
+     "imports_in_gap": []
+    },
+    {
+     "gap_ms": 107.8,
+     "gap_at_ms": 107.8,
+     "imports_in_gap": []
+    },
+    {
+     "gap_ms": 29.3,
+     "gap_at_ms": 137.1,
      "imports_in_gap": []
     },
     {
      "gap_ms": 17.0,
-     "gap_at_ms": 193.2,
-     "imports_in_gap": []
-    },
-    {
-     "gap_ms": 85.6,
-     "gap_at_ms": 85.6,
-     "imports_in_gap": []
-    },
-    {
-     "gap_ms": 16.7,
-     "gap_at_ms": 241.2,
-     "imports_in_gap": []
-    },
-    {
-     "gap_ms": 16.7,
-     "gap_at_ms": 305.0,
-     "imports_in_gap": []
-    },
-    {
-     "gap_ms": 89.0,
-     "gap_at_ms": 89.0,
-     "imports_in_gap": []
-    },
-    {
-     "gap_ms": 18.7,
-     "gap_at_ms": 107.6,
-     "imports_in_gap": []
-    },
-    {
-     "gap_ms": 17.8,
-     "gap_at_ms": 274.1,
+     "gap_at_ms": 320.9,
      "imports_in_gap": []
     }
    ],
@@ -975,25 +995,25 @@
    "phase_ms": {
     "_run_import_smoke": {
      "runs": [
-      949.0,
-      970.2,
-      930.8
+      994.3,
+      971.9,
+      959.0
      ],
-     "median": 949.0,
-     "min": 930.8,
-     "max": 970.2,
-     "range": 39.4
+     "median": 971.9,
+     "min": 959.0,
+     "max": 994.3,
+     "range": 35.3
     },
     "_startup_dependency_problems": {
      "runs": [
-      259.3,
-      273.7,
-      303.4
+      184.5,
+      320.3,
+      285.9
      ],
-     "median": 273.7,
-     "min": 259.3,
-     "max": 303.4,
-     "range": 44.1
+     "median": 285.9,
+     "min": 184.5,
+     "max": 320.3,
+     "range": 135.8
     }
    }
   }
@@ -1001,7 +1021,7 @@
  "samples": [
   {
    "case": "gate_missing",
-   "head": "afd449fa",
+   "head": "699dcb92",
    "exit_code": 3,
    "error": null,
    "failure_dialog": {
@@ -1010,11 +1030,11 @@
    },
    "window_imported_despite_missing": false,
    "t_first_frame_ms": null,
-   "t_splash_paint_ms": 1587.2,
+   "t_splash_paint_ms": 1586.0,
    "t2_ms": null,
    "t_first_frame_abs": null,
    "phase_ms": {
-    "_startup_dependency_problems": 568.8
+    "_startup_dependency_problems": 469.7
    },
    "repaint_before_first_frame_ms": null,
    "deferred_done_after_first_frame_ms": null,
@@ -1029,20 +1049,20 @@
   },
   {
    "case": "defer_broken",
-   "head": "afd449fa",
+   "head": "699dcb92",
    "exit_code": 0,
    "error": null,
    "failure_dialog": null,
    "window_imported_despite_missing": false,
-   "t_first_frame_ms": 3959.2,
-   "t_splash_paint_ms": 1594.7,
-   "t2_ms": 2364.5,
-   "t_first_frame_abs": 3112.8879048,
+   "t_first_frame_ms": 4094.1,
+   "t_splash_paint_ms": 1617.9,
+   "t2_ms": 2476.2,
+   "t_first_frame_abs": 4552.2792024,
    "phase_ms": {
-    "_startup_dependency_problems": 443.5
+    "_startup_dependency_problems": 357.1
    },
    "repaint_before_first_frame_ms": null,
-   "deferred_done_after_first_frame_ms": 220.1,
+   "deferred_done_after_first_frame_ms": 320.4,
    "deferred_timeout": false,
    "reports": [
     {
@@ -1055,44 +1075,64 @@
    "status_bar": "",
    "frame_gaps": [
     {
-     "t": 3112.9829127,
-     "gap": 95.0
+     "t": 4552.4093821,
+     "gap": 130.1
     },
     {
-     "t": 3113.0023946,
-     "gap": 19.5
+     "t": 4552.4366338,
+     "gap": 27.3
     },
     {
-     "t": 3113.0158133,
-     "gap": 13.4
+     "t": 4552.4443094,
+     "gap": 7.7
     },
     {
-     "t": 3113.0318153,
-     "gap": 16.0
+     "t": 4552.4554623,
+     "gap": 11.2
     },
     {
-     "t": 3113.047632,
+     "t": 4552.4708018,
+     "gap": 15.3
+    },
+    {
+     "t": 4552.4879833,
+     "gap": 17.2
+    },
+    {
+     "t": 4552.5033712,
+     "gap": 15.4
+    },
+    {
+     "t": 4552.519854,
+     "gap": 16.5
+    },
+    {
+     "t": 4552.5356111,
      "gap": 15.8
     },
     {
-     "t": 3113.0635795,
-     "gap": 15.9
-    },
-    {
-     "t": 3113.0791903,
-     "gap": 15.6
-    },
-    {
-     "t": 3113.0949756,
+     "t": 4552.5513619,
      "gap": 15.8
+    },
+    {
+     "t": 4552.5667691,
+     "gap": 15.4
+    },
+    {
+     "t": 4552.5838367,
+     "gap": 17.1
+    },
+    {
+     "t": 4552.5995355,
+     "gap": 15.7
     }
    ],
    "import_spans": [
     {
      "name": "mbdsdr_broken_probe",
      "thread": "mbdsdr-deferred-import",
-     "ms": 4.2,
-     "t": 3112.9827521
+     "ms": 10.0,
+     "t": 4552.40913
     }
    ],
    "numpy_imported_before_first_frame": true,
@@ -1101,565 +1141,655 @@
   },
   {
    "case": "frame_gap",
-   "head": "afd449fa",
+   "head": "699dcb92",
    "exit_code": 0,
    "error": null,
    "failure_dialog": null,
    "window_imported_despite_missing": false,
-   "t_first_frame_ms": 4041.7,
-   "t_splash_paint_ms": 1620.0,
-   "t2_ms": 2421.7,
-   "t_first_frame_abs": 3119.5184477,
+   "t_first_frame_ms": 4192.9,
+   "t_splash_paint_ms": 1605.5,
+   "t2_ms": 2587.5,
+   "t_first_frame_abs": 4559.1768377,
    "phase_ms": {
-    "_startup_dependency_problems": 566.7
+    "_startup_dependency_problems": 486.7
    },
    "repaint_before_first_frame_ms": null,
-   "deferred_done_after_first_frame_ms": 973.5,
+   "deferred_done_after_first_frame_ms": 1313.0,
    "deferred_timeout": false,
    "reports": [],
    "status_bar": "",
    "frame_gaps": [
     {
-     "t": 3119.6054548,
-     "gap": 87.0
+     "t": 4559.273886,
+     "gap": 97.0
     },
     {
-     "t": 3119.628761,
-     "gap": 23.3
+     "t": 4559.306739,
+     "gap": 32.9
     },
     {
-     "t": 3119.638451,
-     "gap": 9.7
+     "t": 4559.3219529,
+     "gap": 15.2
     },
     {
-     "t": 3119.6462555,
-     "gap": 7.8
+     "t": 4559.3374357,
+     "gap": 15.5
     },
     {
-     "t": 3119.6619454,
-     "gap": 15.7
-    },
-    {
-     "t": 3119.6779939,
-     "gap": 16.0
-    },
-    {
-     "t": 3119.6947353,
-     "gap": 16.7
-    },
-    {
-     "t": 3119.7211511,
-     "gap": 26.4
-    },
-    {
-     "t": 3119.7287267,
-     "gap": 7.6
-    },
-    {
-     "t": 3119.742723,
-     "gap": 14.0
-    },
-    {
-     "t": 3119.7688895,
-     "gap": 26.2
-    },
-    {
-     "t": 3119.7738102,
-     "gap": 4.9
-    },
-    {
-     "t": 3119.7897564,
-     "gap": 15.9
-    },
-    {
-     "t": 3119.8061023,
-     "gap": 16.3
-    },
-    {
-     "t": 3119.8223402,
-     "gap": 16.2
-    },
-    {
-     "t": 3119.8380422,
-     "gap": 15.7
-    },
-    {
-     "t": 3119.8538752,
-     "gap": 15.8
-    },
-    {
-     "t": 3119.8714519,
-     "gap": 17.6
-    },
-    {
-     "t": 3119.8865012,
-     "gap": 15.0
-    },
-    {
-     "t": 3119.9019114,
-     "gap": 15.4
-    },
-    {
-     "t": 3119.9186039,
-     "gap": 16.7
-    },
-    {
-     "t": 3119.9418217,
-     "gap": 23.2
-    },
-    {
-     "t": 3119.9499201,
-     "gap": 8.1
-    },
-    {
-     "t": 3119.9662332,
-     "gap": 16.3
-    },
-    {
-     "t": 3119.9818794,
-     "gap": 15.6
-    },
-    {
-     "t": 3119.9977894,
-     "gap": 15.9
-    },
-    {
-     "t": 3120.0151925,
-     "gap": 17.4
-    },
-    {
-     "t": 3120.0326841,
-     "gap": 17.5
-    },
-    {
-     "t": 3120.0461349,
-     "gap": 13.5
-    },
-    {
-     "t": 3120.0625503,
+     "t": 4559.3538359,
      "gap": 16.4
     },
     {
-     "t": 3120.0777174,
-     "gap": 15.2
-    },
-    {
-     "t": 3120.0939573,
+     "t": 4559.3700274,
      "gap": 16.2
     },
     {
-     "t": 3120.1202187,
-     "gap": 26.3
-    },
-    {
-     "t": 3120.1434246,
-     "gap": 23.2
-    },
-    {
-     "t": 3120.15942,
-     "gap": 16.0
-    },
-    {
-     "t": 3120.1744617,
+     "t": 4559.3850094,
      "gap": 15.0
     },
     {
-     "t": 3120.2090163,
-     "gap": 34.6
+     "t": 4559.4015868,
+     "gap": 16.6
     },
     {
-     "t": 3120.2091708,
-     "gap": 0.2
+     "t": 4559.4176941,
+     "gap": 16.1
     },
     {
-     "t": 3120.2220551,
-     "gap": 12.9
+     "t": 4559.4331198,
+     "gap": 15.4
     },
     {
-     "t": 3120.2419094,
-     "gap": 19.9
+     "t": 4559.4496844,
+     "gap": 16.6
     },
     {
-     "t": 3120.2553281,
-     "gap": 13.4
+     "t": 4559.4653565,
+     "gap": 15.7
     },
     {
-     "t": 3120.2713481,
-     "gap": 16.0
-    },
-    {
-     "t": 3120.286527,
-     "gap": 15.2
-    },
-    {
-     "t": 3120.303698,
-     "gap": 17.2
-    },
-    {
-     "t": 3120.3300794,
-     "gap": 26.4
-    },
-    {
-     "t": 3120.3523696,
-     "gap": 22.3
-    },
-    {
-     "t": 3120.3799379,
-     "gap": 27.6
-    },
-    {
-     "t": 3120.3955382,
-     "gap": 15.6
-    },
-    {
-     "t": 3120.4022871,
-     "gap": 6.7
-    },
-    {
-     "t": 3120.4155449,
-     "gap": 13.3
-    },
-    {
-     "t": 3120.4303771,
-     "gap": 14.8
-    },
-    {
-     "t": 3120.4463466,
-     "gap": 16.0
-    },
-    {
-     "t": 3120.4621762,
+     "t": 4559.4811186,
      "gap": 15.8
     },
     {
-     "t": 3120.4835162,
-     "gap": 21.3
+     "t": 4559.4977328,
+     "gap": 16.6
+    },
+    {
+     "t": 4559.5156022,
+     "gap": 17.9
+    },
+    {
+     "t": 4559.5318226,
+     "gap": 16.2
+    },
+    {
+     "t": 4559.5617839,
+     "gap": 30.0
+    },
+    {
+     "t": 4559.5623188,
+     "gap": 0.5
+    },
+    {
+     "t": 4559.5771621,
+     "gap": 14.8
+    },
+    {
+     "t": 4559.5935786,
+     "gap": 16.4
+    },
+    {
+     "t": 4559.6121411,
+     "gap": 18.6
+    },
+    {
+     "t": 4559.625022,
+     "gap": 12.9
+    },
+    {
+     "t": 4559.6412022,
+     "gap": 16.2
+    },
+    {
+     "t": 4559.6574994,
+     "gap": 16.3
+    },
+    {
+     "t": 4559.6771087,
+     "gap": 19.6
+    },
+    {
+     "t": 4559.6890337,
+     "gap": 11.9
+    },
+    {
+     "t": 4559.7099659,
+     "gap": 20.9
+    },
+    {
+     "t": 4559.7207612,
+     "gap": 10.8
+    },
+    {
+     "t": 4559.7373981,
+     "gap": 16.6
+    },
+    {
+     "t": 4559.7537575,
+     "gap": 16.4
+    },
+    {
+     "t": 4559.768673,
+     "gap": 14.9
+    },
+    {
+     "t": 4559.7854468,
+     "gap": 16.8
+    },
+    {
+     "t": 4559.8013513,
+     "gap": 15.9
+    },
+    {
+     "t": 4559.8212793,
+     "gap": 19.9
+    },
+    {
+     "t": 4559.8354322,
+     "gap": 14.2
+    },
+    {
+     "t": 4559.8489054,
+     "gap": 13.5
+    },
+    {
+     "t": 4559.8655448,
+     "gap": 16.6
+    },
+    {
+     "t": 4559.8817494,
+     "gap": 16.2
+    },
+    {
+     "t": 4559.8973035,
+     "gap": 15.6
+    },
+    {
+     "t": 4559.9249719,
+     "gap": 27.7
+    },
+    {
+     "t": 4559.9423117,
+     "gap": 17.3
+    },
+    {
+     "t": 4559.9457473,
+     "gap": 3.4
+    },
+    {
+     "t": 4559.9615215,
+     "gap": 15.8
+    },
+    {
+     "t": 4559.9773461,
+     "gap": 15.8
+    },
+    {
+     "t": 4559.9936557,
+     "gap": 16.3
+    },
+    {
+     "t": 4560.0099124,
+     "gap": 16.3
+    },
+    {
+     "t": 4560.0409479,
+     "gap": 31.0
+    },
+    {
+     "t": 4560.0658057,
+     "gap": 24.9
+    },
+    {
+     "t": 4560.0851573,
+     "gap": 19.4
+    },
+    {
+     "t": 4560.0891516,
+     "gap": 4.0
+    },
+    {
+     "t": 4560.116462,
+     "gap": 27.3
+    },
+    {
+     "t": 4560.1678193,
+     "gap": 51.4
+    },
+    {
+     "t": 4560.178671,
+     "gap": 10.9
+    },
+    {
+     "t": 4560.1961634,
+     "gap": 17.5
+    },
+    {
+     "t": 4560.2069036,
+     "gap": 10.7
+    },
+    {
+     "t": 4560.2218186,
+     "gap": 14.9
+    },
+    {
+     "t": 4560.2458739,
+     "gap": 24.1
+    },
+    {
+     "t": 4560.2650334,
+     "gap": 19.2
+    },
+    {
+     "t": 4560.2658773,
+     "gap": 0.8
+    },
+    {
+     "t": 4560.2822347,
+     "gap": 16.4
+    },
+    {
+     "t": 4560.2983237,
+     "gap": 16.1
+    },
+    {
+     "t": 4560.3127454,
+     "gap": 14.4
+    },
+    {
+     "t": 4560.3533062,
+     "gap": 40.6
+    },
+    {
+     "t": 4560.3613436,
+     "gap": 8.0
+    },
+    {
+     "t": 4560.3772755,
+     "gap": 15.9
+    },
+    {
+     "t": 4560.3934495,
+     "gap": 16.2
+    },
+    {
+     "t": 4560.4089573,
+     "gap": 15.5
+    },
+    {
+     "t": 4560.4257202,
+     "gap": 16.8
+    },
+    {
+     "t": 4560.4414183,
+     "gap": 15.7
+    },
+    {
+     "t": 4560.4565639,
+     "gap": 15.1
+    },
+    {
+     "t": 4560.473027,
+     "gap": 16.5
+    },
+    {
+     "t": 4560.4896645,
+     "gap": 16.6
     }
    ],
    "import_spans": [
     {
-     "name": "scipy._external.array_api_compat.numpy.fft",
+     "name": "numpy",
      "thread": "mbdsdr-deferred-import",
      "ms": 0.0,
-     "t": 3119.6049569
+     "t": 4559.3206438
+    },
+    {
+     "name": "numpy.linalg",
+     "thread": "mbdsdr-deferred-import",
+     "ms": 0.0,
+     "t": 4559.4305128
+    },
+    {
+     "name": "numpy.fft",
+     "thread": "mbdsdr-deferred-import",
+     "ms": 0.0,
+     "t": 4559.4314573
+    },
+    {
+     "name": "scipy._external.array_api_compat.numpy.fft",
+     "thread": "mbdsdr-deferred-import",
+     "ms": 158.9,
+     "t": 4559.2736959
     },
     {
      "name": "scipy._external.array_api_compat.numpy.linalg",
      "thread": "mbdsdr-deferred-import",
      "ms": 0.0,
-     "t": 3119.6049861
+     "t": 4559.4326599
     },
     {
      "name": "scipy._external.array_api_compat.common",
      "thread": "mbdsdr-deferred-import",
      "ms": 0.0,
-     "t": 3119.6049937
+     "t": 4559.4326662
     },
     {
      "name": "scipy._external.array_api_extra",
      "thread": "mbdsdr-deferred-import",
-     "ms": 23.6,
-     "t": 3119.6049975
+     "ms": 10.3,
+     "t": 4559.4326692
     },
     {
      "name": "scipy._external.packaging_version",
      "thread": "mbdsdr-deferred-import",
      "ms": 0.0,
-     "t": 3119.6286219
+     "t": 4559.4429496
     },
     {
      "name": "scipy._lib._array_api",
      "thread": "mbdsdr-deferred-import",
-     "ms": 12.7,
-     "t": 3119.6286277
+     "ms": 10.1,
+     "t": 4559.4429548
     },
     {
      "name": "scipy._lib._util",
      "thread": "mbdsdr-deferred-import",
-     "ms": 1.7,
-     "t": 3119.6413178
+     "ms": 1.3,
+     "t": 4559.4530792
     },
     {
      "name": "scipy.linalg",
      "thread": "mbdsdr-deferred-import",
-     "ms": 50.4,
-     "t": 3119.6466436
+     "ms": 49.9,
+     "t": 4559.4576972
     },
     {
      "name": "scipy.special",
      "thread": "mbdsdr-deferred-import",
      "ms": 0.0,
-     "t": 3119.7090006
+     "t": 4559.5391013
     },
     {
      "name": "scipy.special",
      "thread": "mbdsdr-deferred-import",
-     "ms": 42.0,
-     "t": 3119.697078
+     "ms": 65.4,
+     "t": 4559.5075864
     },
     {
      "name": "scipy.fft",
      "thread": "mbdsdr-deferred-import",
-     "ms": 36.2,
-     "t": 3119.7390927
+     "ms": 33.0,
+     "t": 4559.5730343
     },
     {
      "name": "scipy.sparse",
      "thread": "mbdsdr-deferred-import",
      "ms": 0.0,
-     "t": 3119.7920915
+     "t": 4559.6248574
     },
     {
      "name": "scipy.spatial",
      "thread": "mbdsdr-deferred-import",
      "ms": 0.0,
-     "t": 3119.8306974
+     "t": 4559.669186
     },
     {
      "name": "scipy.spatial",
      "thread": "mbdsdr-deferred-import",
      "ms": 0.0,
-     "t": 3119.831556
+     "t": 4559.6700599
     },
     {
      "name": "scipy.spatial",
      "thread": "mbdsdr-deferred-import",
      "ms": 0.0,
-     "t": 3119.8435563
+     "t": 4559.6857743
     },
     {
      "name": "scipy.spatial",
      "thread": "mbdsdr-deferred-import",
      "ms": 0.0,
-     "t": 3119.8444344
+     "t": 4559.6872178
     },
     {
      "name": "scipy.optimize",
      "thread": "mbdsdr-deferred-import",
      "ms": 0.0,
-     "t": 3119.9365039
+     "t": 4559.7918649
     },
     {
      "name": "scipy.ndimage",
      "thread": "mbdsdr-deferred-import",
-     "ms": 30.0,
-     "t": 3120.0046732
+     "ms": 48.7,
+     "t": 4559.8742083
     },
     {
      "name": "scipy.integrate",
      "thread": "mbdsdr-deferred-import",
-     "ms": 36.2,
-     "t": 3120.0591547
+     "ms": 45.9,
+     "t": 4559.9594669
     },
     {
      "name": "scipy.stats",
      "thread": "mbdsdr-deferred-import",
      "ms": 0.0,
-     "t": 3120.0959255
+     "t": 4560.0062096
     },
     {
      "name": "scipy.stats",
      "thread": "mbdsdr-deferred-import",
      "ms": 0.0,
-     "t": 3120.0959488
+     "t": 4560.0062354
     },
     {
      "name": "scipy.stats",
      "thread": "mbdsdr-deferred-import",
      "ms": 0.0,
-     "t": 3120.107096
+     "t": 4560.0210669
     },
     {
      "name": "scipy.stats",
      "thread": "mbdsdr-deferred-import",
      "ms": 0.0,
-     "t": 3120.1644488
+     "t": 4560.0954931
+    },
+    {
+     "name": "scipy.stats",
+     "thread": "mbdsdr-deferred-import",
+     "ms": 0.1,
+     "t": 4560.1014847
     },
     {
      "name": "scipy.stats",
      "thread": "mbdsdr-deferred-import",
      "ms": 0.0,
-     "t": 3120.1674769
+     "t": 4560.1016795
     },
     {
      "name": "scipy.stats",
      "thread": "mbdsdr-deferred-import",
      "ms": 0.0,
-     "t": 3120.1675026
+     "t": 4560.1169446
     },
     {
      "name": "scipy.stats",
      "thread": "mbdsdr-deferred-import",
      "ms": 0.0,
-     "t": 3120.1762598
+     "t": 4560.1169835
     },
     {
      "name": "scipy.stats",
      "thread": "mbdsdr-deferred-import",
      "ms": 0.0,
-     "t": 3120.1762895
+     "t": 4560.1771502
     },
     {
      "name": "scipy.stats",
      "thread": "mbdsdr-deferred-import",
      "ms": 0.0,
-     "t": 3120.2139775
+     "t": 4560.1772017
     },
     {
      "name": "scipy.stats",
      "thread": "mbdsdr-deferred-import",
      "ms": 0.0,
-     "t": 3120.2140106
+     "t": 4560.1795839
     },
     {
      "name": "scipy.stats",
      "thread": "mbdsdr-deferred-import",
      "ms": 0.0,
-     "t": 3120.2153553
+     "t": 4560.1796389
     },
     {
      "name": "scipy.stats",
      "thread": "mbdsdr-deferred-import",
      "ms": 0.0,
-     "t": 3120.2153821
+     "t": 4560.1893598
     },
     {
      "name": "scipy.stats",
      "thread": "mbdsdr-deferred-import",
      "ms": 0.0,
-     "t": 3120.2227721
+     "t": 4560.1894062
     },
     {
      "name": "scipy.stats",
      "thread": "mbdsdr-deferred-import",
      "ms": 0.0,
-     "t": 3120.2228053
+     "t": 4560.2015742
     },
     {
      "name": "scipy.stats",
      "thread": "mbdsdr-deferred-import",
      "ms": 0.0,
-     "t": 3120.2283022
+     "t": 4560.2016106
+    },
+    {
+     "name": "scipy.stats",
+     "thread": "mbdsdr-deferred-import",
+     "ms": 0.1,
+     "t": 4560.2272426
     },
     {
      "name": "scipy.stats",
      "thread": "mbdsdr-deferred-import",
      "ms": 0.0,
-     "t": 3120.2283305
+     "t": 4560.2273465
     },
     {
      "name": "scipy.stats",
      "thread": "mbdsdr-deferred-import",
      "ms": 0.0,
-     "t": 3120.2434588
+     "t": 4560.2293795
     },
     {
      "name": "scipy.stats",
      "thread": "mbdsdr-deferred-import",
      "ms": 0.0,
-     "t": 3120.2434881
+     "t": 4560.2703213
     },
     {
      "name": "scipy.stats",
      "thread": "mbdsdr-deferred-import",
      "ms": 0.0,
-     "t": 3120.245206
+     "t": 4560.2703463
     },
     {
      "name": "scipy.stats",
      "thread": "mbdsdr-deferred-import",
      "ms": 0.0,
-     "t": 3120.2754399
+     "t": 4560.2726532
     },
     {
      "name": "scipy.stats",
      "thread": "mbdsdr-deferred-import",
      "ms": 0.0,
-     "t": 3120.2754703
+     "t": 4560.2726994
     },
     {
      "name": "scipy.stats",
      "thread": "mbdsdr-deferred-import",
      "ms": 0.0,
-     "t": 3120.2780454
+     "t": 4560.2769665
     },
     {
      "name": "scipy.stats",
      "thread": "mbdsdr-deferred-import",
      "ms": 0.0,
-     "t": 3120.2780704
+     "t": 4560.2769939
     },
     {
      "name": "scipy.stats",
      "thread": "mbdsdr-deferred-import",
      "ms": 0.0,
-     "t": 3120.282196
+     "t": 4560.2818456
     },
     {
      "name": "scipy.stats",
      "thread": "mbdsdr-deferred-import",
      "ms": 0.0,
-     "t": 3120.2822248
+     "t": 4560.2818973
     },
     {
      "name": "scipy.stats",
      "thread": "mbdsdr-deferred-import",
      "ms": 0.0,
-     "t": 3120.2863458
+     "t": 4560.3054309
     },
     {
      "name": "scipy.stats",
      "thread": "mbdsdr-deferred-import",
      "ms": 0.0,
-     "t": 3120.286388
-    },
-    {
-     "name": "scipy.stats",
-     "thread": "mbdsdr-deferred-import",
-     "ms": 0.0,
-     "t": 3120.3074428
-    },
-    {
-     "name": "scipy.stats",
-     "thread": "mbdsdr-deferred-import",
-     "ms": 0.0,
-     "t": 3120.3075014
+     "t": 4560.3054754
     },
     {
      "name": "scipy.signal",
      "thread": "mbdsdr-deferred-import",
-     "ms": 712.6,
-     "t": 3119.6429859
+     "ms": 902.4,
+     "t": 4559.4544098
     },
     {
      "name": "scipy.special",
      "thread": "mbdsdr-deferred-import",
      "ms": 0.0,
-     "t": 3120.3555664
+     "t": 4560.3568484
     },
     {
      "name": "scipy.fft",
      "thread": "mbdsdr-deferred-import",
      "ms": 0.0,
-     "t": 3120.3555718
+     "t": 4560.3568535
     },
     {
      "name": "scipy.interpolate",
      "thread": "mbdsdr-deferred-import",
      "ms": 0.0,
-     "t": 3120.3555752
+     "t": 4560.3568569
     },
     {
      "name": "scipy.optimize",
      "thread": "mbdsdr-deferred-import",
      "ms": 0.0,
-     "t": 3120.3555782
+     "t": 4560.3568595
     },
     {
      "name": "numpy._core._multiarray_umath",
      "thread": "mbdsdr-deferred-import",
      "ms": 0.0,
-     "t": 3120.3555816
+     "t": 4560.3568624
     }
    ],
    "numpy_imported_before_first_frame": true,
@@ -1668,17 +1798,17 @@
   },
   {
    "case": "frame_gap_nodefer",
-   "head": "afd449fa",
+   "head": "699dcb92",
    "exit_code": 0,
    "error": null,
    "failure_dialog": null,
    "window_imported_despite_missing": false,
-   "t_first_frame_ms": 3934.2,
-   "t_splash_paint_ms": 1579.9,
-   "t2_ms": 2354.3,
-   "t_first_frame_abs": 3127.019504,
+   "t_first_frame_ms": 3987.2,
+   "t_splash_paint_ms": 1580.2,
+   "t2_ms": 2407.0,
+   "t_first_frame_abs": 4566.9899765,
    "phase_ms": {
-    "_startup_dependency_problems": 458.5
+    "_startup_dependency_problems": 457.0
    },
    "repaint_before_first_frame_ms": null,
    "deferred_done_after_first_frame_ms": null,
@@ -1687,203 +1817,84 @@
    "status_bar": "",
    "frame_gaps": [
     {
-     "t": 3127.1127339,
-     "gap": 93.0
+     "t": 4567.1023639,
+     "gap": 112.4
     },
     {
-     "t": 3127.1319237,
-     "gap": 19.2
+     "t": 4567.1280633,
+     "gap": 25.7
     },
     {
-     "t": 3127.148155,
-     "gap": 16.2
+     "t": 4567.1372236,
+     "gap": 9.2
     },
     {
-     "t": 3127.1643898,
-     "gap": 16.2
+     "t": 4567.1502943,
+     "gap": 13.1
     },
     {
-     "t": 3127.1805386,
-     "gap": 16.1
-    },
-    {
-     "t": 3127.1960315,
-     "gap": 15.5
-    },
-    {
-     "t": 3127.2115185,
-     "gap": 15.5
-    },
-    {
-     "t": 3127.228826,
-     "gap": 17.3
-    },
-    {
-     "t": 3127.2445831,
-     "gap": 15.8
-    },
-    {
-     "t": 3127.2598192,
-     "gap": 15.2
-    },
-    {
-     "t": 3127.2759106,
-     "gap": 16.1
-    },
-    {
-     "t": 3127.2948384,
-     "gap": 18.9
-    },
-    {
-     "t": 3127.3078798,
-     "gap": 13.0
-    },
-    {
-     "t": 3127.3242922,
-     "gap": 16.4
-    },
-    {
-     "t": 3127.3392447,
-     "gap": 15.0
-    },
-    {
-     "t": 3127.3555911,
-     "gap": 16.3
-    },
-    {
-     "t": 3127.3718775,
-     "gap": 16.3
-    },
-    {
-     "t": 3127.387982,
-     "gap": 16.1
-    },
-    {
-     "t": 3127.4037469,
-     "gap": 15.8
-    },
-    {
-     "t": 3127.4195379,
-     "gap": 15.8
-    },
-    {
-     "t": 3127.4362494,
-     "gap": 16.7
-    }
-   ],
-   "import_spans": [],
-   "numpy_imported_before_first_frame": true,
-   "load_before_python_pct": 0.0,
-   "run": 0
-  },
-  {
-   "case": "t2_baseline",
-   "head": "afd449fa",
-   "exit_code": 0,
-   "error": null,
-   "failure_dialog": null,
-   "window_imported_despite_missing": false,
-   "t_first_frame_ms": 4841.7,
-   "t_splash_paint_ms": 1578.7,
-   "t2_ms": 3263.0,
-   "t_first_frame_abs": 3134.7348219,
-   "phase_ms": {
-    "_run_import_smoke": 949.0,
-    "_startup_dependency_problems": 259.3
-   },
-   "repaint_before_first_frame_ms": null,
-   "deferred_done_after_first_frame_ms": null,
-   "deferred_timeout": false,
-   "reports": [],
-   "status_bar": "",
-   "frame_gaps": [
-    {
-     "t": 3134.8271186,
-     "gap": 92.3
-    },
-    {
-     "t": 3134.8459436,
-     "gap": 18.8
-    },
-    {
-     "t": 3134.8527288,
-     "gap": 6.8
-    },
-    {
-     "t": 3134.8634561,
-     "gap": 10.7
-    },
-    {
-     "t": 3134.8792337,
-     "gap": 15.8
-    },
-    {
-     "t": 3134.8953049,
-     "gap": 16.1
-    },
-    {
-     "t": 3134.9110167,
-     "gap": 15.7
-    },
-    {
-     "t": 3134.9279765,
-     "gap": 17.0
-    },
-    {
-     "t": 3134.9434139,
-     "gap": 15.4
-    },
-    {
-     "t": 3134.9595001,
-     "gap": 16.1
-    },
-    {
-     "t": 3134.975095,
-     "gap": 15.6
-    },
-    {
-     "t": 3134.99208,
-     "gap": 17.0
-    },
-    {
-     "t": 3135.0077377,
-     "gap": 15.7
-    },
-    {
-     "t": 3135.0235367,
-     "gap": 15.8
-    },
-    {
-     "t": 3135.0389555,
-     "gap": 15.4
-    },
-    {
-     "t": 3135.05499,
-     "gap": 16.0
-    },
-    {
-     "t": 3135.0715076,
+     "t": 4567.1668177,
      "gap": 16.5
     },
     {
-     "t": 3135.0874155,
-     "gap": 15.9
+     "t": 4567.1823275,
+     "gap": 15.5
     },
     {
-     "t": 3135.1033358,
-     "gap": 15.9
+     "t": 4567.1980404,
+     "gap": 15.7
     },
     {
-     "t": 3135.1196512,
-     "gap": 16.3
+     "t": 4567.2142374,
+     "gap": 16.2
     },
     {
-     "t": 3135.1356063,
+     "t": 4567.2308434,
+     "gap": 16.6
+    },
+    {
+     "t": 4567.2477075,
+     "gap": 16.9
+    },
+    {
+     "t": 4567.2620712,
+     "gap": 14.4
+    },
+    {
+     "t": 4567.2780709,
      "gap": 16.0
     },
     {
-     "t": 3135.1514757,
+     "t": 4567.2940619,
+     "gap": 16.0
+    },
+    {
+     "t": 4567.3107976,
+     "gap": 16.7
+    },
+    {
+     "t": 4567.3264356,
+     "gap": 15.6
+    },
+    {
+     "t": 4567.3429613,
+     "gap": 16.5
+    },
+    {
+     "t": 4567.3588394,
      "gap": 15.9
+    },
+    {
+     "t": 4567.3741946,
+     "gap": 15.4
+    },
+    {
+     "t": 4567.3908117,
+     "gap": 16.6
+    },
+    {
+     "t": 4567.4061236,
+     "gap": 15.3
     }
    ],
    "import_spans": [],
@@ -1892,8 +1903,119 @@
    "run": 0
   },
   {
+   "case": "t2_baseline",
+   "head": "699dcb92",
+   "exit_code": 0,
+   "error": null,
+   "failure_dialog": null,
+   "window_imported_despite_missing": false,
+   "t_first_frame_ms": 5198.5,
+   "t_splash_paint_ms": 1608.9,
+   "t2_ms": 3589.6,
+   "t_first_frame_abs": 4574.9732482,
+   "phase_ms": {
+    "_run_import_smoke": 994.3,
+    "_startup_dependency_problems": 184.5
+   },
+   "repaint_before_first_frame_ms": null,
+   "deferred_done_after_first_frame_ms": null,
+   "deferred_timeout": false,
+   "reports": [],
+   "status_bar": "",
+   "frame_gaps": [
+    {
+     "t": 4575.0705616,
+     "gap": 97.3
+    },
+    {
+     "t": 4575.0936852,
+     "gap": 23.1
+    },
+    {
+     "t": 4575.1022116,
+     "gap": 8.5
+    },
+    {
+     "t": 4575.1181757,
+     "gap": 16.0
+    },
+    {
+     "t": 4575.134366,
+     "gap": 16.2
+    },
+    {
+     "t": 4575.1496819,
+     "gap": 15.3
+    },
+    {
+     "t": 4575.1663111,
+     "gap": 16.6
+    },
+    {
+     "t": 4575.1822289,
+     "gap": 15.9
+    },
+    {
+     "t": 4575.1981504,
+     "gap": 15.9
+    },
+    {
+     "t": 4575.2135088,
+     "gap": 15.4
+    },
+    {
+     "t": 4575.2307351,
+     "gap": 17.2
+    },
+    {
+     "t": 4575.2458326,
+     "gap": 15.1
+    },
+    {
+     "t": 4575.2617137,
+     "gap": 15.9
+    },
+    {
+     "t": 4575.2788642,
+     "gap": 17.2
+    },
+    {
+     "t": 4575.2946364,
+     "gap": 15.8
+    },
+    {
+     "t": 4575.3105558,
+     "gap": 15.9
+    },
+    {
+     "t": 4575.3262829,
+     "gap": 15.7
+    },
+    {
+     "t": 4575.3418477,
+     "gap": 15.6
+    },
+    {
+     "t": 4575.3577885,
+     "gap": 15.9
+    },
+    {
+     "t": 4575.3742467,
+     "gap": 16.5
+    },
+    {
+     "t": 4575.3897564,
+     "gap": 15.5
+    }
+   ],
+   "import_spans": [],
+   "numpy_imported_before_first_frame": true,
+   "load_before_python_pct": 0.0,
+   "run": 0
+  },
+  {
    "case": "gate_missing",
-   "head": "afd449fa",
+   "head": "699dcb92",
    "exit_code": 3,
    "error": null,
    "failure_dialog": {
@@ -1902,11 +2024,11 @@
    },
    "window_imported_despite_missing": false,
    "t_first_frame_ms": null,
-   "t_splash_paint_ms": 1585.4,
+   "t_splash_paint_ms": 1593.7,
    "t2_ms": null,
    "t_first_frame_abs": null,
    "phase_ms": {
-    "_startup_dependency_problems": 458.9
+    "_startup_dependency_problems": 500.6
    },
    "repaint_before_first_frame_ms": null,
    "deferred_done_after_first_frame_ms": null,
@@ -1916,25 +2038,25 @@
    "frame_gaps": [],
    "import_spans": [],
    "numpy_imported_before_first_frame": true,
-   "load_before_python_pct": 0.8,
+   "load_before_python_pct": 0.0,
    "run": 1
   },
   {
    "case": "defer_broken",
-   "head": "afd449fa",
+   "head": "699dcb92",
    "exit_code": 0,
    "error": null,
    "failure_dialog": null,
    "window_imported_despite_missing": false,
-   "t_first_frame_ms": 3950.6,
-   "t_splash_paint_ms": 1585.8,
-   "t2_ms": 2364.8,
-   "t_first_frame_abs": 3145.9274087,
+   "t_first_frame_ms": 3997.3,
+   "t_splash_paint_ms": 1615.8,
+   "t2_ms": 2381.5,
+   "t_first_frame_abs": 4586.146771,
    "phase_ms": {
-    "_startup_dependency_problems": 449.2
+    "_startup_dependency_problems": 364.5
    },
    "repaint_before_first_frame_ms": null,
-   "deferred_done_after_first_frame_ms": 224.3,
+   "deferred_done_after_first_frame_ms": 329.7,
    "deferred_timeout": false,
    "reports": [
     {
@@ -1947,40 +2069,1026 @@
    "status_bar": "",
    "frame_gaps": [
     {
-     "t": 3146.0191792,
-     "gap": 91.7
+     "t": 4586.2590562,
+     "gap": 112.3
     },
     {
-     "t": 3146.0373623,
+     "t": 4586.2836988,
+     "gap": 24.6
+    },
+    {
+     "t": 4586.2926841,
+     "gap": 9.0
+    },
+    {
+     "t": 4586.3077019,
+     "gap": 15.0
+    },
+    {
+     "t": 4586.3232764,
+     "gap": 15.6
+    },
+    {
+     "t": 4586.3388091,
+     "gap": 15.5
+    },
+    {
+     "t": 4586.3553057,
+     "gap": 16.5
+    },
+    {
+     "t": 4586.3717939,
+     "gap": 16.5
+    },
+    {
+     "t": 4586.3899468,
      "gap": 18.2
     },
     {
-     "t": 3146.0432731,
-     "gap": 5.9
+     "t": 4586.4027695,
+     "gap": 12.8
     },
     {
-     "t": 3146.0562077,
-     "gap": 12.9
+     "t": 4586.4193738,
+     "gap": 16.6
     },
     {
-     "t": 3146.0726465,
-     "gap": 16.4
-    },
-    {
-     "t": 3146.0882755,
-     "gap": 15.6
-    },
-    {
-     "t": 3146.1038736,
-     "gap": 15.6
-    },
-    {
-     "t": 3146.1200579,
+     "t": 4586.4356169,
      "gap": 16.2
     },
     {
-     "t": 3146.136714,
+     "t": 4586.4511711,
+     "gap": 15.6
+    },
+    {
+     "t": 4586.4673487,
+     "gap": 16.2
+    }
+   ],
+   "import_spans": [
+    {
+     "name": "mbdsdr_broken_probe",
+     "thread": "mbdsdr-deferred-import",
+     "ms": 6.5,
+     "t": 4586.2587903
+    }
+   ],
+   "numpy_imported_before_first_frame": true,
+   "load_before_python_pct": 0.0,
+   "run": 1
+  },
+  {
+   "case": "frame_gap",
+   "head": "699dcb92",
+   "exit_code": 0,
+   "error": null,
+   "failure_dialog": null,
+   "window_imported_despite_missing": false,
+   "t_first_frame_ms": 4065.0,
+   "t_splash_paint_ms": 1586.9,
+   "t2_ms": 2478.0,
+   "t_first_frame_abs": 4592.9297262,
+   "phase_ms": {
+    "_startup_dependency_problems": 465.6
+   },
+   "repaint_before_first_frame_ms": null,
+   "deferred_done_after_first_frame_ms": 1312.1,
+   "deferred_timeout": false,
+   "reports": [],
+   "status_bar": "",
+   "frame_gaps": [
+    {
+     "t": 4593.0469672,
+     "gap": 117.2
+    },
+    {
+     "t": 4593.0723557,
+     "gap": 25.4
+    },
+    {
+     "t": 4593.0744647,
+     "gap": 2.1
+    },
+    {
+     "t": 4593.0999798,
+     "gap": 25.5
+    },
+    {
+     "t": 4593.1063789,
+     "gap": 6.4
+    },
+    {
+     "t": 4593.1213427,
+     "gap": 15.0
+    },
+    {
+     "t": 4593.1373267,
+     "gap": 16.0
+    },
+    {
+     "t": 4593.1566868,
+     "gap": 19.4
+    },
+    {
+     "t": 4593.1700555,
+     "gap": 13.4
+    },
+    {
+     "t": 4593.1851703,
+     "gap": 15.1
+    },
+    {
+     "t": 4593.2030462,
+     "gap": 17.9
+    },
+    {
+     "t": 4593.2181091,
+     "gap": 15.1
+    },
+    {
+     "t": 4593.2348826,
+     "gap": 16.8
+    },
+    {
+     "t": 4593.2495974,
+     "gap": 14.7
+    },
+    {
+     "t": 4593.2657221,
+     "gap": 16.1
+    },
+    {
+     "t": 4593.2883664,
+     "gap": 22.6
+    },
+    {
+     "t": 4593.3149977,
+     "gap": 26.6
+    },
+    {
+     "t": 4593.315855,
+     "gap": 0.9
+    },
+    {
+     "t": 4593.3291436,
+     "gap": 13.3
+    },
+    {
+     "t": 4593.3457679,
+     "gap": 16.6
+    },
+    {
+     "t": 4593.3618359,
+     "gap": 16.1
+    },
+    {
+     "t": 4593.377806,
+     "gap": 16.0
+    },
+    {
+     "t": 4593.3935925,
+     "gap": 15.8
+    },
+    {
+     "t": 4593.4100369,
+     "gap": 16.4
+    },
+    {
+     "t": 4593.426058,
+     "gap": 16.0
+    },
+    {
+     "t": 4593.4416149,
+     "gap": 15.6
+    },
+    {
+     "t": 4593.4577395,
+     "gap": 16.1
+    },
+    {
+     "t": 4593.4732987,
+     "gap": 15.6
+    },
+    {
+     "t": 4593.4894543,
+     "gap": 16.2
+    },
+    {
+     "t": 4593.5057104,
+     "gap": 16.3
+    },
+    {
+     "t": 4593.5229602,
+     "gap": 17.2
+    },
+    {
+     "t": 4593.5377209,
+     "gap": 14.8
+    },
+    {
+     "t": 4593.5536845,
+     "gap": 16.0
+    },
+    {
+     "t": 4593.5713184,
+     "gap": 17.6
+    },
+    {
+     "t": 4593.5889085,
+     "gap": 17.6
+    },
+    {
+     "t": 4593.6029725,
+     "gap": 14.1
+    },
+    {
+     "t": 4593.6335429,
+     "gap": 30.6
+    },
+    {
+     "t": 4593.6351714,
+     "gap": 1.6
+    },
+    {
+     "t": 4593.6494233,
+     "gap": 14.3
+    },
+    {
+     "t": 4593.666043,
+     "gap": 16.6
+    },
+    {
+     "t": 4593.6820711,
+     "gap": 16.0
+    },
+    {
+     "t": 4593.697962,
+     "gap": 15.9
+    },
+    {
+     "t": 4593.7143338,
+     "gap": 16.4
+    },
+    {
+     "t": 4593.7401914,
+     "gap": 25.9
+    },
+    {
+     "t": 4593.7612603,
+     "gap": 21.1
+    },
+    {
+     "t": 4593.7938548,
+     "gap": 32.6
+    },
+    {
+     "t": 4593.8290011,
+     "gap": 35.1
+    },
+    {
+     "t": 4593.8466644,
+     "gap": 17.7
+    },
+    {
+     "t": 4593.9294278,
+     "gap": 82.8
+    },
+    {
+     "t": 4593.9551161,
+     "gap": 25.7
+    },
+    {
+     "t": 4593.9860096,
+     "gap": 30.9
+    },
+    {
+     "t": 4594.0022797,
+     "gap": 16.3
+    },
+    {
+     "t": 4594.0173121,
+     "gap": 15.0
+    },
+    {
+     "t": 4594.0340558,
      "gap": 16.7
+    },
+    {
+     "t": 4594.0500483,
+     "gap": 16.0
+    },
+    {
+     "t": 4594.0681855,
+     "gap": 18.1
+    },
+    {
+     "t": 4594.1171534,
+     "gap": 49.0
+    },
+    {
+     "t": 4594.1291976,
+     "gap": 12.0
+    },
+    {
+     "t": 4594.1466663,
+     "gap": 17.5
+    },
+    {
+     "t": 4594.1626397,
+     "gap": 16.0
+    },
+    {
+     "t": 4594.1806084,
+     "gap": 18.0
+    },
+    {
+     "t": 4594.1931012,
+     "gap": 12.5
+    },
+    {
+     "t": 4594.2095218,
+     "gap": 16.4
+    },
+    {
+     "t": 4594.2259424,
+     "gap": 16.4
+    },
+    {
+     "t": 4594.2418652,
+     "gap": 15.9
+    }
+   ],
+   "import_spans": [
+    {
+     "name": "numpy",
+     "thread": "mbdsdr-deferred-import",
+     "ms": 0.0,
+     "t": 4593.0914407
+    },
+    {
+     "name": "numpy.linalg",
+     "thread": "mbdsdr-deferred-import",
+     "ms": 0.0,
+     "t": 4593.1921452
+    },
+    {
+     "name": "numpy.fft",
+     "thread": "mbdsdr-deferred-import",
+     "ms": 0.0,
+     "t": 4593.1930999
+    },
+    {
+     "name": "scipy._external.array_api_compat.numpy.fft",
+     "thread": "mbdsdr-deferred-import",
+     "ms": 147.4,
+     "t": 4593.0467705
+    },
+    {
+     "name": "scipy._external.array_api_compat.numpy.linalg",
+     "thread": "mbdsdr-deferred-import",
+     "ms": 0.0,
+     "t": 4593.1941895
+    },
+    {
+     "name": "scipy._external.array_api_compat.common",
+     "thread": "mbdsdr-deferred-import",
+     "ms": 0.0,
+     "t": 4593.1941956
+    },
+    {
+     "name": "scipy._external.array_api_extra",
+     "thread": "mbdsdr-deferred-import",
+     "ms": 12.9,
+     "t": 4593.1941986
+    },
+    {
+     "name": "scipy._external.packaging_version",
+     "thread": "mbdsdr-deferred-import",
+     "ms": 0.0,
+     "t": 4593.2070944
+    },
+    {
+     "name": "scipy._lib._array_api",
+     "thread": "mbdsdr-deferred-import",
+     "ms": 8.9,
+     "t": 4593.2071025
+    },
+    {
+     "name": "scipy._lib._util",
+     "thread": "mbdsdr-deferred-import",
+     "ms": 1.4,
+     "t": 4593.2159867
+    },
+    {
+     "name": "scipy.linalg",
+     "thread": "mbdsdr-deferred-import",
+     "ms": 45.0,
+     "t": 4593.2213997
+    },
+    {
+     "name": "scipy.special",
+     "thread": "mbdsdr-deferred-import",
+     "ms": 0.0,
+     "t": 4593.2951198
+    },
+    {
+     "name": "scipy.special",
+     "thread": "mbdsdr-deferred-import",
+     "ms": 61.2,
+     "t": 4593.2663686
+    },
+    {
+     "name": "scipy.fft",
+     "thread": "mbdsdr-deferred-import",
+     "ms": 24.7,
+     "t": 4593.3276088
+    },
+    {
+     "name": "scipy.sparse",
+     "thread": "mbdsdr-deferred-import",
+     "ms": 0.0,
+     "t": 4593.3714103
+    },
+    {
+     "name": "scipy.spatial",
+     "thread": "mbdsdr-deferred-import",
+     "ms": 0.0,
+     "t": 4593.4105983
+    },
+    {
+     "name": "scipy.spatial",
+     "thread": "mbdsdr-deferred-import",
+     "ms": 0.0,
+     "t": 4593.4113126
+    },
+    {
+     "name": "scipy.spatial",
+     "thread": "mbdsdr-deferred-import",
+     "ms": 0.0,
+     "t": 4593.4258691
+    },
+    {
+     "name": "scipy.spatial",
+     "thread": "mbdsdr-deferred-import",
+     "ms": 0.0,
+     "t": 4593.427082
+    },
+    {
+     "name": "scipy.optimize",
+     "thread": "mbdsdr-deferred-import",
+     "ms": 0.0,
+     "t": 4593.5226121
+    },
+    {
+     "name": "scipy.ndimage",
+     "thread": "mbdsdr-deferred-import",
+     "ms": 37.2,
+     "t": 4593.6024999
+    },
+    {
+     "name": "scipy.integrate",
+     "thread": "mbdsdr-deferred-import",
+     "ms": 58.4,
+     "t": 4593.6674858
+    },
+    {
+     "name": "scipy.stats",
+     "thread": "mbdsdr-deferred-import",
+     "ms": 0.0,
+     "t": 4593.7328832
+    },
+    {
+     "name": "scipy.stats",
+     "thread": "mbdsdr-deferred-import",
+     "ms": 0.0,
+     "t": 4593.7329472
+    },
+    {
+     "name": "scipy.stats",
+     "thread": "mbdsdr-deferred-import",
+     "ms": 0.0,
+     "t": 4593.7714219
+    },
+    {
+     "name": "scipy.stats",
+     "thread": "mbdsdr-deferred-import",
+     "ms": 0.0,
+     "t": 4593.8691438
+    },
+    {
+     "name": "scipy.stats",
+     "thread": "mbdsdr-deferred-import",
+     "ms": 0.0,
+     "t": 4593.873775
+    },
+    {
+     "name": "scipy.stats",
+     "thread": "mbdsdr-deferred-import",
+     "ms": 0.0,
+     "t": 4593.8738234
+    },
+    {
+     "name": "scipy.stats",
+     "thread": "mbdsdr-deferred-import",
+     "ms": 0.0,
+     "t": 4593.886564
+    },
+    {
+     "name": "scipy.stats",
+     "thread": "mbdsdr-deferred-import",
+     "ms": 0.0,
+     "t": 4593.8866024
+    },
+    {
+     "name": "scipy.stats",
+     "thread": "mbdsdr-deferred-import",
+     "ms": 0.0,
+     "t": 4593.939797
+    },
+    {
+     "name": "scipy.stats",
+     "thread": "mbdsdr-deferred-import",
+     "ms": 0.0,
+     "t": 4593.9398486
+    },
+    {
+     "name": "scipy.stats",
+     "thread": "mbdsdr-deferred-import",
+     "ms": 0.0,
+     "t": 4593.9436276
+    },
+    {
+     "name": "scipy.stats",
+     "thread": "mbdsdr-deferred-import",
+     "ms": 0.0,
+     "t": 4593.94369
+    },
+    {
+     "name": "scipy.stats",
+     "thread": "mbdsdr-deferred-import",
+     "ms": 0.0,
+     "t": 4593.9562354
+    },
+    {
+     "name": "scipy.stats",
+     "thread": "mbdsdr-deferred-import",
+     "ms": 0.0,
+     "t": 4593.9562796
+    },
+    {
+     "name": "scipy.stats",
+     "thread": "mbdsdr-deferred-import",
+     "ms": 0.0,
+     "t": 4593.9635881
+    },
+    {
+     "name": "scipy.stats",
+     "thread": "mbdsdr-deferred-import",
+     "ms": 0.0,
+     "t": 4593.9636219
+    },
+    {
+     "name": "scipy.stats",
+     "thread": "mbdsdr-deferred-import",
+     "ms": 0.0,
+     "t": 4593.9852143
+    },
+    {
+     "name": "scipy.stats",
+     "thread": "mbdsdr-deferred-import",
+     "ms": 0.0,
+     "t": 4593.9852593
+    },
+    {
+     "name": "scipy.stats",
+     "thread": "mbdsdr-deferred-import",
+     "ms": 0.0,
+     "t": 4593.987103
+    },
+    {
+     "name": "scipy.stats",
+     "thread": "mbdsdr-deferred-import",
+     "ms": 0.0,
+     "t": 4594.032202
+    },
+    {
+     "name": "scipy.stats",
+     "thread": "mbdsdr-deferred-import",
+     "ms": 0.0,
+     "t": 4594.0322322
+    },
+    {
+     "name": "scipy.stats",
+     "thread": "mbdsdr-deferred-import",
+     "ms": 0.0,
+     "t": 4594.034886
+    },
+    {
+     "name": "scipy.stats",
+     "thread": "mbdsdr-deferred-import",
+     "ms": 0.0,
+     "t": 4594.0349105
+    },
+    {
+     "name": "scipy.stats",
+     "thread": "mbdsdr-deferred-import",
+     "ms": 0.0,
+     "t": 4594.0393011
+    },
+    {
+     "name": "scipy.stats",
+     "thread": "mbdsdr-deferred-import",
+     "ms": 0.0,
+     "t": 4594.0393372
+    },
+    {
+     "name": "scipy.stats",
+     "thread": "mbdsdr-deferred-import",
+     "ms": 1.6,
+     "t": 4594.0440286
+    },
+    {
+     "name": "scipy.stats",
+     "thread": "mbdsdr-deferred-import",
+     "ms": 0.0,
+     "t": 4594.0456138
+    },
+    {
+     "name": "scipy.stats",
+     "thread": "mbdsdr-deferred-import",
+     "ms": 0.0,
+     "t": 4594.0654818
+    },
+    {
+     "name": "scipy.stats",
+     "thread": "mbdsdr-deferred-import",
+     "ms": 0.0,
+     "t": 4594.0655116
+    },
+    {
+     "name": "scipy.signal",
+     "thread": "mbdsdr-deferred-import",
+     "ms": 907.5,
+     "t": 4593.2173929
+    },
+    {
+     "name": "scipy.special",
+     "thread": "mbdsdr-deferred-import",
+     "ms": 0.0,
+     "t": 4594.1249214
+    },
+    {
+     "name": "scipy.fft",
+     "thread": "mbdsdr-deferred-import",
+     "ms": 0.0,
+     "t": 4594.1249319
+    },
+    {
+     "name": "scipy.interpolate",
+     "thread": "mbdsdr-deferred-import",
+     "ms": 0.0,
+     "t": 4594.1249382
+    },
+    {
+     "name": "scipy.optimize",
+     "thread": "mbdsdr-deferred-import",
+     "ms": 0.0,
+     "t": 4594.1249441
+    },
+    {
+     "name": "numpy._core._multiarray_umath",
+     "thread": "mbdsdr-deferred-import",
+     "ms": 0.0,
+     "t": 4594.1249497
+    }
+   ],
+   "numpy_imported_before_first_frame": true,
+   "load_before_python_pct": 0.8,
+   "run": 1
+  },
+  {
+   "case": "frame_gap_nodefer",
+   "head": "699dcb92",
+   "exit_code": 0,
+   "error": null,
+   "failure_dialog": null,
+   "window_imported_despite_missing": false,
+   "t_first_frame_ms": 4026.3,
+   "t_splash_paint_ms": 1631.8,
+   "t2_ms": 2394.5,
+   "t_first_frame_abs": 4600.7277387,
+   "phase_ms": {
+    "_startup_dependency_problems": 359.1
+   },
+   "repaint_before_first_frame_ms": null,
+   "deferred_done_after_first_frame_ms": null,
+   "deferred_timeout": false,
+   "reports": [],
+   "status_bar": "",
+   "frame_gaps": [
+    {
+     "t": 4600.8364415,
+     "gap": 108.7
+    },
+    {
+     "t": 4600.8645302,
+     "gap": 28.1
+    },
+    {
+     "t": 4600.8722282,
+     "gap": 7.7
+    },
+    {
+     "t": 4600.8873353,
+     "gap": 15.1
+    },
+    {
+     "t": 4600.9041099,
+     "gap": 16.8
+    },
+    {
+     "t": 4600.9200281,
+     "gap": 15.9
+    },
+    {
+     "t": 4600.935757,
+     "gap": 15.7
+    },
+    {
+     "t": 4600.9519007,
+     "gap": 16.1
+    },
+    {
+     "t": 4600.9672772,
+     "gap": 15.4
+    },
+    {
+     "t": 4600.9833291,
+     "gap": 16.1
+    },
+    {
+     "t": 4601.0001014,
+     "gap": 16.8
+    },
+    {
+     "t": 4601.0154025,
+     "gap": 15.3
+    },
+    {
+     "t": 4601.0315286,
+     "gap": 16.1
+    },
+    {
+     "t": 4601.0473452,
+     "gap": 15.8
+    },
+    {
+     "t": 4601.0641537,
+     "gap": 16.8
+    },
+    {
+     "t": 4601.0794588,
+     "gap": 15.3
+    },
+    {
+     "t": 4601.0955104,
+     "gap": 16.1
+    },
+    {
+     "t": 4601.1113354,
+     "gap": 15.8
+    },
+    {
+     "t": 4601.1281691,
+     "gap": 16.8
+    },
+    {
+     "t": 4601.1439488,
+     "gap": 15.8
+    }
+   ],
+   "import_spans": [],
+   "numpy_imported_before_first_frame": true,
+   "load_before_python_pct": 0.8,
+   "run": 1
+  },
+  {
+   "case": "t2_baseline",
+   "head": "699dcb92",
+   "exit_code": 0,
+   "error": null,
+   "failure_dialog": null,
+   "window_imported_despite_missing": false,
+   "t_first_frame_ms": 5266.0,
+   "t_splash_paint_ms": 1615.5,
+   "t2_ms": 3650.5,
+   "t_first_frame_abs": 4608.7786101,
+   "phase_ms": {
+    "_run_import_smoke": 971.9,
+    "_startup_dependency_problems": 320.3
+   },
+   "repaint_before_first_frame_ms": null,
+   "deferred_done_after_first_frame_ms": null,
+   "deferred_timeout": false,
+   "reports": [],
+   "status_bar": "",
+   "frame_gaps": [
+    {
+     "t": 4608.9077554,
+     "gap": 129.1
+    },
+    {
+     "t": 4608.9305826,
+     "gap": 22.8
+    },
+    {
+     "t": 4608.9398649,
+     "gap": 9.3
+    },
+    {
+     "t": 4608.9548927,
+     "gap": 15.0
+    },
+    {
+     "t": 4608.9718349,
+     "gap": 16.9
+    },
+    {
+     "t": 4608.9872469,
+     "gap": 15.4
+    },
+    {
+     "t": 4609.003047,
+     "gap": 15.8
+    },
+    {
+     "t": 4609.0201635,
+     "gap": 17.1
+    },
+    {
+     "t": 4609.0356886,
+     "gap": 15.5
+    },
+    {
+     "t": 4609.0513717,
+     "gap": 15.7
+    },
+    {
+     "t": 4609.0677522,
+     "gap": 16.4
+    },
+    {
+     "t": 4609.0836961,
+     "gap": 15.9
+    },
+    {
+     "t": 4609.0991467,
+     "gap": 15.5
+    },
+    {
+     "t": 4609.1161213,
+     "gap": 17.0
+    },
+    {
+     "t": 4609.1320084,
+     "gap": 15.9
+    },
+    {
+     "t": 4609.148397,
+     "gap": 16.4
+    },
+    {
+     "t": 4609.1631363,
+     "gap": 14.7
+    },
+    {
+     "t": 4609.1790524,
+     "gap": 15.9
+    },
+    {
+     "t": 4609.1950254,
+     "gap": 16.0
+    }
+   ],
+   "import_spans": [],
+   "numpy_imported_before_first_frame": true,
+   "load_before_python_pct": 0.0,
+   "run": 1
+  },
+  {
+   "case": "gate_missing",
+   "head": "699dcb92",
+   "exit_code": 3,
+   "error": null,
+   "failure_dialog": {
+    "summary": "启动自检失败：缺少必需组件（已中止启动）",
+    "detail": "下面这些是应用正常工作的必需项，缺一项都无法继续：\n\n• SciPy 完整性探针（模拟缺件）（scipy._mbdsdr_missing_probe）\n  缺了会怎样：模拟：相关功能不可用\n  怎么修：模拟：重新解压完整安装包\n\n请按每项的「怎么修」处理后重新启动。"
+   },
+   "window_imported_despite_missing": false,
+   "t_first_frame_ms": null,
+   "t_splash_paint_ms": 1591.2,
+   "t2_ms": null,
+   "t_first_frame_abs": null,
+   "phase_ms": {
+    "_startup_dependency_problems": 376.8
+   },
+   "repaint_before_first_frame_ms": null,
+   "deferred_done_after_first_frame_ms": null,
+   "deferred_timeout": false,
+   "reports": [],
+   "status_bar": "",
+   "frame_gaps": [],
+   "import_spans": [],
+   "numpy_imported_before_first_frame": true,
+   "load_before_python_pct": 0.0,
+   "run": 2
+  },
+  {
+   "case": "defer_broken",
+   "head": "699dcb92",
+   "exit_code": 0,
+   "error": null,
+   "failure_dialog": null,
+   "window_imported_despite_missing": false,
+   "t_first_frame_ms": 3935.6,
+   "t_splash_paint_ms": 1595.9,
+   "t2_ms": 2339.7,
+   "t_first_frame_abs": 4619.8002081,
+   "phase_ms": {
+    "_startup_dependency_problems": 354.2
+   },
+   "repaint_before_first_frame_ms": null,
+   "deferred_done_after_first_frame_ms": 320.4,
+   "deferred_timeout": false,
+   "reports": [
+    {
+     "module": "mbdsdr_broken_probe",
+     "detail": "ImportError: 模拟：文件在但 .pyd 加载失败",
+     "after_first_frame": true,
+     "status_bar": "mbdsdr_broken_probe 加载失败，相关功能不可用；详见启动日志（D:\\mbdsdr\\logs\\mbdsdr_startup.log）"
+    }
+   ],
+   "status_bar": "",
+   "frame_gaps": [
+    {
+     "t": 4619.8968593,
+     "gap": 96.6
+    },
+    {
+     "t": 4619.9181447,
+     "gap": 21.3
+    },
+    {
+     "t": 4619.9283305,
+     "gap": 10.2
+    },
+    {
+     "t": 4619.9448383,
+     "gap": 16.5
+    },
+    {
+     "t": 4619.9604745,
+     "gap": 15.6
+    },
+    {
+     "t": 4619.9764349,
+     "gap": 16.0
+    },
+    {
+     "t": 4619.9927501,
+     "gap": 16.3
+    },
+    {
+     "t": 4620.008782,
+     "gap": 16.0
+    },
+    {
+     "t": 4620.0248437,
+     "gap": 16.1
+    },
+    {
+     "t": 4620.0409946,
+     "gap": 16.2
+    },
+    {
+     "t": 4620.0569821,
+     "gap": 16.0
+    },
+    {
+     "t": 4620.0721704,
+     "gap": 15.2
+    },
+    {
+     "t": 4620.0882397,
+     "gap": 16.1
+    },
+    {
+     "t": 4620.1044413,
+     "gap": 16.2
+    },
+    {
+     "t": 4620.1204783,
+     "gap": 16.0
     }
    ],
    "import_spans": [
@@ -1988,1579 +3096,777 @@
      "name": "mbdsdr_broken_probe",
      "thread": "mbdsdr-deferred-import",
      "ms": 4.7,
-     "t": 3146.0189789
+     "t": 4619.8966509
     }
    ],
    "numpy_imported_before_first_frame": true,
    "load_before_python_pct": 0.0,
-   "run": 1
+   "run": 2
   },
   {
    "case": "frame_gap",
-   "head": "afd449fa",
+   "head": "699dcb92",
    "exit_code": 0,
    "error": null,
    "failure_dialog": null,
    "window_imported_despite_missing": false,
-   "t_first_frame_ms": 4125.0,
-   "t_splash_paint_ms": 1601.8,
-   "t2_ms": 2523.2,
-   "t_first_frame_abs": 3152.6654021,
+   "t_first_frame_ms": 4110.3,
+   "t_splash_paint_ms": 1626.2,
+   "t2_ms": 2484.1,
+   "t_first_frame_abs": 4626.5732995,
    "phase_ms": {
-    "_startup_dependency_problems": 549.3
+    "_startup_dependency_problems": 450.8
    },
    "repaint_before_first_frame_ms": null,
-   "deferred_done_after_first_frame_ms": 988.9,
+   "deferred_done_after_first_frame_ms": 1423.4,
    "deferred_timeout": false,
    "reports": [],
    "status_bar": "",
    "frame_gaps": [
     {
-     "t": 3152.7541881,
-     "gap": 88.8
+     "t": 4626.6850887,
+     "gap": 111.8
     },
     {
-     "t": 3152.7763209,
-     "gap": 22.1
+     "t": 4626.7137835,
+     "gap": 28.7
     },
     {
-     "t": 3152.7870943,
-     "gap": 10.8
+     "t": 4626.7301465,
+     "gap": 16.4
     },
     {
-     "t": 3152.7933469,
-     "gap": 6.3
+     "t": 4626.7356473,
+     "gap": 5.5
     },
     {
-     "t": 3152.8105522,
+     "t": 4626.749512,
+     "gap": 13.9
+    },
+    {
+     "t": 4626.7666967,
      "gap": 17.2
     },
     {
-     "t": 3152.8263307,
-     "gap": 15.8
-    },
-    {
-     "t": 3152.8416474,
+     "t": 4626.781973,
      "gap": 15.3
     },
     {
-     "t": 3152.8578303,
-     "gap": 16.2
+     "t": 4626.7981036,
+     "gap": 16.1
     },
     {
-     "t": 3152.8904122,
-     "gap": 32.6
-    },
-    {
-     "t": 3152.8904775,
-     "gap": 0.1
-    },
-    {
-     "t": 3152.9059522,
-     "gap": 15.5
-    },
-    {
-     "t": 3152.9216981,
-     "gap": 15.7
-    },
-    {
-     "t": 3152.9383654,
-     "gap": 16.7
-    },
-    {
-     "t": 3152.9549502,
-     "gap": 16.6
-    },
-    {
-     "t": 3152.9696901,
-     "gap": 14.7
-    },
-    {
-     "t": 3152.9854716,
+     "t": 4626.8138677,
      "gap": 15.8
     },
     {
-     "t": 3153.0015149,
-     "gap": 16.0
+     "t": 4626.8295509,
+     "gap": 15.7
     },
     {
-     "t": 3153.0178385,
-     "gap": 16.3
-    },
-    {
-     "t": 3153.0338324,
-     "gap": 16.0
-    },
-    {
-     "t": 3153.0503771,
-     "gap": 16.5
-    },
-    {
-     "t": 3153.0669724,
-     "gap": 16.6
-    },
-    {
-     "t": 3153.0828921,
+     "t": 4626.8454062,
      "gap": 15.9
     },
     {
-     "t": 3153.0975987,
-     "gap": 14.7
+     "t": 4626.8612222,
+     "gap": 15.8
     },
     {
-     "t": 3153.1140647,
-     "gap": 16.5
-    },
-    {
-     "t": 3153.132824,
-     "gap": 18.8
-    },
-    {
-     "t": 3153.1459658,
-     "gap": 13.1
-    },
-    {
-     "t": 3153.1629703,
+     "t": 4626.8782563,
      "gap": 17.0
     },
     {
-     "t": 3153.1863422,
-     "gap": 23.4
+     "t": 4626.8937759,
+     "gap": 15.5
     },
     {
-     "t": 3153.1936983,
-     "gap": 7.4
-    },
-    {
-     "t": 3153.2099442,
+     "t": 4626.909936,
      "gap": 16.2
     },
     {
-     "t": 3153.2255042,
+     "t": 4626.9258755,
+     "gap": 15.9
+    },
+    {
+     "t": 4626.9411336,
+     "gap": 15.3
+    },
+    {
+     "t": 4626.9576954,
+     "gap": 16.6
+    },
+    {
+     "t": 4627.0022293,
+     "gap": 44.5
+    },
+    {
+     "t": 4627.0086043,
+     "gap": 6.4
+    },
+    {
+     "t": 4627.021343,
+     "gap": 12.7
+    },
+    {
+     "t": 4627.0374181,
+     "gap": 16.1
+    },
+    {
+     "t": 4627.0533885,
+     "gap": 16.0
+    },
+    {
+     "t": 4627.0690214,
      "gap": 15.6
     },
     {
-     "t": 3153.2426734,
-     "gap": 17.2
+     "t": 4627.0860488,
+     "gap": 17.0
     },
     {
-     "t": 3153.257449,
-     "gap": 14.8
+     "t": 4627.103886,
+     "gap": 17.8
     },
     {
-     "t": 3153.2895011,
-     "gap": 32.1
-    },
-    {
-     "t": 3153.2949427,
-     "gap": 5.4
-    },
-    {
-     "t": 3153.3065667,
-     "gap": 11.6
-    },
-    {
-     "t": 3153.3278531,
-     "gap": 21.3
-    },
-    {
-     "t": 3153.3641417,
-     "gap": 36.3
-    },
-    {
-     "t": 3153.3658507,
-     "gap": 1.7
-    },
-    {
-     "t": 3153.3719708,
-     "gap": 6.1
-    },
-    {
-     "t": 3153.3866064,
-     "gap": 14.6
-    },
-    {
-     "t": 3153.404466,
-     "gap": 17.9
-    },
-    {
-     "t": 3153.419053,
-     "gap": 14.6
-    },
-    {
-     "t": 3153.4361576,
-     "gap": 17.1
-    },
-    {
-     "t": 3153.4599929,
-     "gap": 23.8
-    },
-    {
-     "t": 3153.4936136,
-     "gap": 33.6
-    },
-    {
-     "t": 3153.4978332,
-     "gap": 4.2
-    },
-    {
-     "t": 3153.5399823,
-     "gap": 42.1
-    },
-    {
-     "t": 3153.5685715,
-     "gap": 28.6
-    },
-    {
-     "t": 3153.5775266,
-     "gap": 9.0
-    },
-    {
-     "t": 3153.5956556,
+     "t": 4627.121975,
      "gap": 18.1
     },
     {
-     "t": 3153.6095623,
-     "gap": 13.9
+     "t": 4627.1331857,
+     "gap": 11.2
     },
     {
-     "t": 3153.6255816,
-     "gap": 16.0
-    },
-    {
-     "t": 3153.6418701,
-     "gap": 16.3
-    }
-   ],
-   "import_spans": [
-    {
-     "name": "scipy._external.array_api_compat.numpy.fft",
-     "thread": "mbdsdr-deferred-import",
-     "ms": 0.0,
-     "t": 3152.7538755
-    },
-    {
-     "name": "scipy._external.array_api_compat.numpy.linalg",
-     "thread": "mbdsdr-deferred-import",
-     "ms": 0.0,
-     "t": 3152.753894
-    },
-    {
-     "name": "scipy._external.array_api_compat.common",
-     "thread": "mbdsdr-deferred-import",
-     "ms": 0.0,
-     "t": 3152.7538991
-    },
-    {
-     "name": "scipy._external.array_api_extra",
-     "thread": "mbdsdr-deferred-import",
-     "ms": 19.5,
-     "t": 3152.7539027
-    },
-    {
-     "name": "scipy._external.packaging_version",
-     "thread": "mbdsdr-deferred-import",
-     "ms": 0.0,
-     "t": 3152.7733737
-    },
-    {
-     "name": "scipy._lib._array_api",
-     "thread": "mbdsdr-deferred-import",
-     "ms": 12.9,
-     "t": 3152.7733793
-    },
-    {
-     "name": "scipy._lib._util",
-     "thread": "mbdsdr-deferred-import",
-     "ms": 2.1,
-     "t": 3152.7862742
-    },
-    {
-     "name": "scipy.linalg",
-     "thread": "mbdsdr-deferred-import",
-     "ms": 51.4,
-     "t": 3152.7945187
-    },
-    {
-     "name": "scipy.special",
-     "thread": "mbdsdr-deferred-import",
-     "ms": 0.0,
-     "t": 3152.8595771
-    },
-    {
-     "name": "scipy.special",
-     "thread": "mbdsdr-deferred-import",
-     "ms": 55.9,
-     "t": 3152.8459655
-    },
-    {
-     "name": "scipy.fft",
-     "thread": "mbdsdr-deferred-import",
-     "ms": 24.8,
-     "t": 3152.9018765
-    },
-    {
-     "name": "scipy.sparse",
-     "thread": "mbdsdr-deferred-import",
-     "ms": 0.0,
-     "t": 3152.9426987
-    },
-    {
-     "name": "scipy.spatial",
-     "thread": "mbdsdr-deferred-import",
-     "ms": 0.0,
-     "t": 3152.9801346
-    },
-    {
-     "name": "scipy.spatial",
-     "thread": "mbdsdr-deferred-import",
-     "ms": 0.0,
-     "t": 3152.9809073
-    },
-    {
-     "name": "scipy.spatial",
-     "thread": "mbdsdr-deferred-import",
-     "ms": 0.0,
-     "t": 3152.9926661
-    },
-    {
-     "name": "scipy.spatial",
-     "thread": "mbdsdr-deferred-import",
-     "ms": 0.0,
-     "t": 3152.9935408
-    },
-    {
-     "name": "scipy.optimize",
-     "thread": "mbdsdr-deferred-import",
-     "ms": 0.0,
-     "t": 3153.0900773
-    },
-    {
-     "name": "scipy.ndimage",
-     "thread": "mbdsdr-deferred-import",
-     "ms": 30.6,
-     "t": 3153.158031
-    },
-    {
-     "name": "scipy.integrate",
-     "thread": "mbdsdr-deferred-import",
-     "ms": 35.2,
-     "t": 3153.2109569
-    },
-    {
-     "name": "scipy.stats",
-     "thread": "mbdsdr-deferred-import",
-     "ms": 0.0,
-     "t": 3153.2466797
-    },
-    {
-     "name": "scipy.stats",
-     "thread": "mbdsdr-deferred-import",
-     "ms": 0.0,
-     "t": 3153.2467006
-    },
-    {
-     "name": "scipy.stats",
-     "thread": "mbdsdr-deferred-import",
-     "ms": 0.0,
-     "t": 3153.2590475
-    },
-    {
-     "name": "scipy.stats",
-     "thread": "mbdsdr-deferred-import",
-     "ms": 0.0,
-     "t": 3153.3153034
-    },
-    {
-     "name": "scipy.stats",
-     "thread": "mbdsdr-deferred-import",
-     "ms": 0.0,
-     "t": 3153.3198365
-    },
-    {
-     "name": "scipy.stats",
-     "thread": "mbdsdr-deferred-import",
-     "ms": 0.0,
-     "t": 3153.3198737
-    },
-    {
-     "name": "scipy.stats",
-     "thread": "mbdsdr-deferred-import",
-     "ms": 0.0,
-     "t": 3153.3300537
-    },
-    {
-     "name": "scipy.stats",
-     "thread": "mbdsdr-deferred-import",
-     "ms": 0.0,
-     "t": 3153.3300866
-    },
-    {
-     "name": "scipy.stats",
-     "thread": "mbdsdr-deferred-import",
-     "ms": 0.0,
-     "t": 3153.3730891
-    },
-    {
-     "name": "scipy.stats",
-     "thread": "mbdsdr-deferred-import",
-     "ms": 0.0,
-     "t": 3153.3731237
-    },
-    {
-     "name": "scipy.stats",
-     "thread": "mbdsdr-deferred-import",
-     "ms": 0.0,
-     "t": 3153.3744989
-    },
-    {
-     "name": "scipy.stats",
-     "thread": "mbdsdr-deferred-import",
-     "ms": 0.0,
-     "t": 3153.3745237
-    },
-    {
-     "name": "scipy.stats",
-     "thread": "mbdsdr-deferred-import",
-     "ms": 0.0,
-     "t": 3153.3817499
-    },
-    {
-     "name": "scipy.stats",
-     "thread": "mbdsdr-deferred-import",
-     "ms": 0.0,
-     "t": 3153.3817802
-    },
-    {
-     "name": "scipy.stats",
-     "thread": "mbdsdr-deferred-import",
-     "ms": 0.0,
-     "t": 3153.38868
-    },
-    {
-     "name": "scipy.stats",
-     "thread": "mbdsdr-deferred-import",
-     "ms": 0.0,
-     "t": 3153.3887087
-    },
-    {
-     "name": "scipy.stats",
-     "thread": "mbdsdr-deferred-import",
-     "ms": 0.0,
-     "t": 3153.4063109
-    },
-    {
-     "name": "scipy.stats",
-     "thread": "mbdsdr-deferred-import",
-     "ms": 0.0,
-     "t": 3153.4063492
-    },
-    {
-     "name": "scipy.stats",
-     "thread": "mbdsdr-deferred-import",
-     "ms": 0.0,
-     "t": 3153.4078145
-    },
-    {
-     "name": "scipy.stats",
-     "thread": "mbdsdr-deferred-import",
-     "ms": 0.0,
-     "t": 3153.4479284
-    },
-    {
-     "name": "scipy.stats",
-     "thread": "mbdsdr-deferred-import",
-     "ms": 0.0,
-     "t": 3153.4479601
-    },
-    {
-     "name": "scipy.stats",
-     "thread": "mbdsdr-deferred-import",
-     "ms": 0.0,
-     "t": 3153.4508908
-    },
-    {
-     "name": "scipy.stats",
-     "thread": "mbdsdr-deferred-import",
-     "ms": 0.0,
-     "t": 3153.4509187
-    },
-    {
-     "name": "scipy.stats",
-     "thread": "mbdsdr-deferred-import",
-     "ms": 0.0,
-     "t": 3153.4551965
-    },
-    {
-     "name": "scipy.stats",
-     "thread": "mbdsdr-deferred-import",
-     "ms": 0.0,
-     "t": 3153.4552329
-    },
-    {
-     "name": "scipy.stats",
-     "thread": "mbdsdr-deferred-import",
-     "ms": 0.0,
-     "t": 3153.4597386
-    },
-    {
-     "name": "scipy.stats",
-     "thread": "mbdsdr-deferred-import",
-     "ms": 0.0,
-     "t": 3153.4597876
-    },
-    {
-     "name": "scipy.stats",
-     "thread": "mbdsdr-deferred-import",
-     "ms": 0.0,
-     "t": 3153.4906351
-    },
-    {
-     "name": "scipy.stats",
-     "thread": "mbdsdr-deferred-import",
-     "ms": 0.0,
-     "t": 3153.4906828
-    },
-    {
-     "name": "scipy.signal",
-     "thread": "mbdsdr-deferred-import",
-     "ms": 756.7,
-     "t": 3152.7883848
-    },
-    {
-     "name": "scipy.special",
-     "thread": "mbdsdr-deferred-import",
-     "ms": 0.0,
-     "t": 3153.5450753
-    },
-    {
-     "name": "scipy.fft",
-     "thread": "mbdsdr-deferred-import",
-     "ms": 0.0,
-     "t": 3153.5450811
-    },
-    {
-     "name": "scipy.interpolate",
-     "thread": "mbdsdr-deferred-import",
-     "ms": 0.0,
-     "t": 3153.5450843
-    },
-    {
-     "name": "scipy.optimize",
-     "thread": "mbdsdr-deferred-import",
-     "ms": 0.0,
-     "t": 3153.5450884
-    },
-    {
-     "name": "numpy._core._multiarray_umath",
-     "thread": "mbdsdr-deferred-import",
-     "ms": 0.0,
-     "t": 3153.5450914
-    }
-   ],
-   "numpy_imported_before_first_frame": true,
-   "load_before_python_pct": 0.8,
-   "run": 1
-  },
-  {
-   "case": "frame_gap_nodefer",
-   "head": "afd449fa",
-   "exit_code": 0,
-   "error": null,
-   "failure_dialog": null,
-   "window_imported_despite_missing": false,
-   "t_first_frame_ms": 3885.6,
-   "t_splash_paint_ms": 1577.0,
-   "t2_ms": 2308.6,
-   "t_first_frame_abs": 3160.1448748,
-   "phase_ms": {
-    "_startup_dependency_problems": 451.6
-   },
-   "repaint_before_first_frame_ms": null,
-   "deferred_done_after_first_frame_ms": null,
-   "deferred_timeout": false,
-   "reports": [],
-   "status_bar": "",
-   "frame_gaps": [
-    {
-     "t": 3160.2339634,
-     "gap": 89.0
-    },
-    {
-     "t": 3160.2516151,
-     "gap": 17.7
-    },
-    {
-     "t": 3160.2576675,
-     "gap": 6.1
-    },
-    {
-     "t": 3160.2748665,
-     "gap": 17.2
-    },
-    {
-     "t": 3160.2899424,
-     "gap": 15.1
-    },
-    {
-     "t": 3160.3060546,
-     "gap": 16.1
-    },
-    {
-     "t": 3160.3242593,
-     "gap": 18.2
-    },
-    {
-     "t": 3160.3372745,
-     "gap": 13.0
-    },
-    {
-     "t": 3160.3538176,
-     "gap": 16.5
-    },
-    {
-     "t": 3160.3701165,
-     "gap": 16.3
-    },
-    {
-     "t": 3160.3853894,
-     "gap": 15.3
-    },
-    {
-     "t": 3160.4015011,
-     "gap": 16.1
-    },
-    {
-     "t": 3160.4172301,
-     "gap": 15.7
-    },
-    {
-     "t": 3160.4344118,
-     "gap": 17.2
-    },
-    {
-     "t": 3160.4494221,
-     "gap": 15.0
-    },
-    {
-     "t": 3160.4664361,
-     "gap": 17.0
-    },
-    {
-     "t": 3160.4812289,
-     "gap": 14.8
-    },
-    {
-     "t": 3160.4978027,
-     "gap": 16.6
-    },
-    {
-     "t": 3160.5134941,
-     "gap": 15.7
-    },
-    {
-     "t": 3160.5292996,
-     "gap": 15.8
-    },
-    {
-     "t": 3160.5459208,
-     "gap": 16.6
-    }
-   ],
-   "import_spans": [],
-   "numpy_imported_before_first_frame": true,
-   "load_before_python_pct": 0.8,
-   "run": 1
-  },
-  {
-   "case": "t2_baseline",
-   "head": "afd449fa",
-   "exit_code": 0,
-   "error": null,
-   "failure_dialog": null,
-   "window_imported_despite_missing": false,
-   "t_first_frame_ms": 4787.0,
-   "t_splash_paint_ms": 1616.2,
-   "t2_ms": 3170.8,
-   "t_first_frame_abs": 3167.7263425,
-   "phase_ms": {
-    "_run_import_smoke": 970.2,
-    "_startup_dependency_problems": 273.7
-   },
-   "repaint_before_first_frame_ms": null,
-   "deferred_done_after_first_frame_ms": null,
-   "deferred_timeout": false,
-   "reports": [],
-   "status_bar": "",
-   "frame_gaps": [
-    {
-     "t": 3167.8119316,
-     "gap": 85.6
-    },
-    {
-     "t": 3167.8277504,
-     "gap": 15.8
-    },
-    {
-     "t": 3167.8431316,
-     "gap": 15.4
-    },
-    {
-     "t": 3167.8547242,
-     "gap": 11.6
-    },
-    {
-     "t": 3167.8707234,
-     "gap": 16.0
-    },
-    {
-     "t": 3167.8864142,
-     "gap": 15.7
-    },
-    {
-     "t": 3167.9030383,
-     "gap": 16.6
-    },
-    {
-     "t": 3167.9189009,
-     "gap": 15.9
-    },
-    {
-     "t": 3167.9351889,
-     "gap": 16.3
-    },
-    {
-     "t": 3167.9507852,
-     "gap": 15.6
-    },
-    {
-     "t": 3167.9675208,
-     "gap": 16.7
-    },
-    {
-     "t": 3167.9827851,
-     "gap": 15.3
-    },
-    {
-     "t": 3167.9986729,
-     "gap": 15.9
-    },
-    {
-     "t": 3168.0146447,
-     "gap": 16.0
-    },
-    {
-     "t": 3168.0313362,
-     "gap": 16.7
-    },
-    {
-     "t": 3168.046229,
-     "gap": 14.9
-    },
-    {
-     "t": 3168.0629117,
-     "gap": 16.7
-    },
-    {
-     "t": 3168.0788118,
-     "gap": 15.9
-    },
-    {
-     "t": 3168.0949654,
-     "gap": 16.2
-    },
-    {
-     "t": 3168.1108151,
-     "gap": 15.8
-    },
-    {
-     "t": 3168.1271662,
-     "gap": 16.4
-    },
-    {
-     "t": 3168.1422987,
-     "gap": 15.1
-    },
-    {
-     "t": 3168.1588014,
-     "gap": 16.5
-    }
-   ],
-   "import_spans": [],
-   "numpy_imported_before_first_frame": true,
-   "load_before_python_pct": 0.0,
-   "run": 1
-  },
-  {
-   "case": "gate_missing",
-   "head": "afd449fa",
-   "exit_code": 3,
-   "error": null,
-   "failure_dialog": {
-    "summary": "启动自检失败：缺少必需组件（已中止启动）",
-    "detail": "下面这些是应用正常工作的必需项，缺一项都无法继续：\n\n• SciPy 完整性探针（模拟缺件）（scipy._mbdsdr_missing_probe）\n  缺了会怎样：模拟：相关功能不可用\n  怎么修：模拟：重新解压完整安装包\n\n请按每项的「怎么修」处理后重新启动。"
-   },
-   "window_imported_despite_missing": false,
-   "t_first_frame_ms": null,
-   "t_splash_paint_ms": 1585.5,
-   "t2_ms": null,
-   "t_first_frame_abs": null,
-   "phase_ms": {
-    "_startup_dependency_problems": 454.6
-   },
-   "repaint_before_first_frame_ms": null,
-   "deferred_done_after_first_frame_ms": null,
-   "deferred_timeout": false,
-   "reports": [],
-   "status_bar": "",
-   "frame_gaps": [],
-   "import_spans": [],
-   "numpy_imported_before_first_frame": true,
-   "load_before_python_pct": 0.0,
-   "run": 2
-  },
-  {
-   "case": "defer_broken",
-   "head": "afd449fa",
-   "exit_code": 0,
-   "error": null,
-   "failure_dialog": null,
-   "window_imported_despite_missing": false,
-   "t_first_frame_ms": 3883.2,
-   "t_splash_paint_ms": 1586.1,
-   "t2_ms": 2297.1,
-   "t_first_frame_abs": 3178.7766615,
-   "phase_ms": {
-    "_startup_dependency_problems": 449.6
-   },
-   "repaint_before_first_frame_ms": null,
-   "deferred_done_after_first_frame_ms": 222.1,
-   "deferred_timeout": false,
-   "reports": [
-    {
-     "module": "mbdsdr_broken_probe",
-     "detail": "ImportError: 模拟：文件在但 .pyd 加载失败",
-     "after_first_frame": true,
-     "status_bar": "mbdsdr_broken_probe 加载失败，相关功能不可用；详见启动日志（D:\\mbdsdr\\logs\\mbdsdr_startup.log）"
-    }
-   ],
-   "status_bar": "",
-   "frame_gaps": [
-    {
-     "t": 3178.868816,
-     "gap": 92.1
-    },
-    {
-     "t": 3178.8882815,
-     "gap": 19.5
-    },
-    {
-     "t": 3178.8940323,
-     "gap": 5.8
-    },
-    {
-     "t": 3178.9050129,
-     "gap": 11.0
-    },
-    {
-     "t": 3178.9211791,
-     "gap": 16.2
-    },
-    {
-     "t": 3178.9363557,
-     "gap": 15.2
-    },
-    {
-     "t": 3178.9523902,
-     "gap": 16.0
-    },
-    {
-     "t": 3178.9682411,
-     "gap": 15.9
-    },
-    {
-     "t": 3178.9844619,
-     "gap": 16.2
-    }
-   ],
-   "import_spans": [
-    {
-     "name": "mbdsdr_broken_probe",
-     "thread": "mbdsdr-deferred-import",
-     "ms": 4.8,
-     "t": 3178.8687048
-    }
-   ],
-   "numpy_imported_before_first_frame": true,
-   "load_before_python_pct": 0.0,
-   "run": 2
-  },
-  {
-   "case": "frame_gap",
-   "head": "afd449fa",
-   "exit_code": 0,
-   "error": null,
-   "failure_dialog": null,
-   "window_imported_despite_missing": false,
-   "t_first_frame_ms": 4149.9,
-   "t_splash_paint_ms": 1619.3,
-   "t2_ms": 2530.6,
-   "t_first_frame_abs": 3185.5279132,
-   "phase_ms": {
-    "_startup_dependency_problems": 556.6
-   },
-   "repaint_before_first_frame_ms": null,
-   "deferred_done_after_first_frame_ms": 988.3,
-   "deferred_timeout": false,
-   "reports": [],
-   "status_bar": "",
-   "frame_gaps": [
-    {
-     "t": 3185.6180158,
-     "gap": 90.1
-    },
-    {
-     "t": 3185.6416242,
-     "gap": 23.6
-    },
-    {
-     "t": 3185.6633789,
-     "gap": 21.8
-    },
-    {
-     "t": 3185.6719003,
-     "gap": 8.5
-    },
-    {
-     "t": 3185.6882087,
-     "gap": 16.3
-    },
-    {
-     "t": 3185.7042733,
-     "gap": 16.1
-    },
-    {
-     "t": 3185.7210811,
-     "gap": 16.8
-    },
-    {
-     "t": 3185.7606531,
-     "gap": 39.6
-    },
-    {
-     "t": 3185.7668588,
-     "gap": 6.2
-    },
-    {
-     "t": 3185.7710445,
-     "gap": 4.2
-    },
-    {
-     "t": 3185.7862523,
-     "gap": 15.2
-    },
-    {
-     "t": 3185.8049337,
-     "gap": 18.7
-    },
-    {
-     "t": 3185.8164887,
-     "gap": 11.6
-    },
-    {
-     "t": 3185.8323952,
-     "gap": 15.9
-    },
-    {
-     "t": 3185.847876,
-     "gap": 15.5
-    },
-    {
-     "t": 3185.8662368,
-     "gap": 18.4
-    },
-    {
-     "t": 3185.8805975,
-     "gap": 14.4
-    },
-    {
-     "t": 3185.896095,
-     "gap": 15.5
-    },
-    {
-     "t": 3185.9127333,
-     "gap": 16.6
-    },
-    {
-     "t": 3185.928517,
-     "gap": 15.8
-    },
-    {
-     "t": 3185.9439741,
-     "gap": 15.5
-    },
-    {
-     "t": 3185.9603659,
-     "gap": 16.4
-    },
-    {
-     "t": 3185.9764975,
-     "gap": 16.1
-    },
-    {
-     "t": 3185.9928029,
-     "gap": 16.3
-    },
-    {
-     "t": 3186.0083742,
-     "gap": 15.6
-    },
-    {
-     "t": 3186.0251875,
-     "gap": 16.8
-    },
-    {
-     "t": 3186.0409298,
-     "gap": 15.7
-    },
-    {
-     "t": 3186.0723131,
-     "gap": 31.4
-    },
-    {
-     "t": 3186.0742136,
-     "gap": 1.9
-    },
-    {
-     "t": 3186.0882684,
-     "gap": 14.1
-    },
-    {
-     "t": 3186.106033,
-     "gap": 17.8
-    },
-    {
-     "t": 3186.1199607,
-     "gap": 13.9
-    },
-    {
-     "t": 3186.1366929,
-     "gap": 16.7
-    },
-    {
-     "t": 3186.1518828,
-     "gap": 15.2
-    },
-    {
-     "t": 3186.1848722,
-     "gap": 33.0
-    },
-    {
-     "t": 3186.1882245,
-     "gap": 3.4
-    },
-    {
-     "t": 3186.2031271,
-     "gap": 14.9
-    },
-    {
-     "t": 3186.221824,
-     "gap": 18.7
-    },
-    {
-     "t": 3186.2355112,
-     "gap": 13.7
-    },
-    {
-     "t": 3186.2790884,
-     "gap": 43.6
-    },
-    {
-     "t": 3186.3064047,
-     "gap": 27.3
-    },
-    {
-     "t": 3186.3398667,
-     "gap": 33.5
-    },
-    {
-     "t": 3186.3435494,
-     "gap": 3.7
-    },
-    {
-     "t": 3186.3691724,
-     "gap": 25.6
-    },
-    {
-     "t": 3186.3765242,
-     "gap": 7.4
-    },
-    {
-     "t": 3186.404565,
-     "gap": 28.0
-    },
-    {
-     "t": 3186.4126023,
-     "gap": 8.0
-    },
-    {
-     "t": 3186.4554643,
-     "gap": 42.9
-    },
-    {
-     "t": 3186.4629053,
-     "gap": 7.4
-    },
-    {
-     "t": 3186.4719457,
-     "gap": 9.0
-    },
-    {
-     "t": 3186.4886265,
-     "gap": 16.7
-    },
-    {
-     "t": 3186.5038029,
-     "gap": 15.2
-    }
-   ],
-   "import_spans": [
-    {
-     "name": "scipy._external.array_api_compat.numpy.fft",
-     "thread": "mbdsdr-deferred-import",
-     "ms": 0.0,
-     "t": 3185.6178601
-    },
-    {
-     "name": "scipy._external.array_api_compat.numpy.linalg",
-     "thread": "mbdsdr-deferred-import",
-     "ms": 0.0,
-     "t": 3185.6178849
-    },
-    {
-     "name": "scipy._external.array_api_compat.common",
-     "thread": "mbdsdr-deferred-import",
-     "ms": 0.0,
-     "t": 3185.6178912
-    },
-    {
-     "name": "scipy._external.array_api_extra",
-     "thread": "mbdsdr-deferred-import",
-     "ms": 23.5,
-     "t": 3185.6178946
-    },
-    {
-     "name": "scipy._external.packaging_version",
-     "thread": "mbdsdr-deferred-import",
-     "ms": 0.0,
-     "t": 3185.6414253
-    },
-    {
-     "name": "scipy._lib._array_api",
-     "thread": "mbdsdr-deferred-import",
-     "ms": 17.9,
-     "t": 3185.6414316
-    },
-    {
-     "name": "scipy._lib._util",
-     "thread": "mbdsdr-deferred-import",
-     "ms": 3.2,
-     "t": 3185.6593577
-    },
-    {
-     "name": "scipy.linalg",
-     "thread": "mbdsdr-deferred-import",
-     "ms": 50.1,
-     "t": 3185.6687603
-    },
-    {
-     "name": "scipy.special",
-     "thread": "mbdsdr-deferred-import",
-     "ms": 0.0,
-     "t": 3185.7347625
-    },
-    {
-     "name": "scipy.special",
-     "thread": "mbdsdr-deferred-import",
-     "ms": 58.2,
-     "t": 3185.7188337
-    },
-    {
-     "name": "scipy.fft",
-     "thread": "mbdsdr-deferred-import",
-     "ms": 22.7,
-     "t": 3185.7770853
-    },
-    {
-     "name": "scipy.sparse",
-     "thread": "mbdsdr-deferred-import",
-     "ms": 0.0,
-     "t": 3185.8169785
-    },
-    {
-     "name": "scipy.spatial",
-     "thread": "mbdsdr-deferred-import",
-     "ms": 0.0,
-     "t": 3185.8556856
-    },
-    {
-     "name": "scipy.spatial",
-     "thread": "mbdsdr-deferred-import",
-     "ms": 0.0,
-     "t": 3185.8563847
-    },
-    {
-     "name": "scipy.spatial",
-     "thread": "mbdsdr-deferred-import",
-     "ms": 0.0,
-     "t": 3185.8685394
-    },
-    {
-     "name": "scipy.spatial",
-     "thread": "mbdsdr-deferred-import",
-     "ms": 0.0,
-     "t": 3185.8696235
-    },
-    {
-     "name": "scipy.optimize",
-     "thread": "mbdsdr-deferred-import",
-     "ms": 0.0,
-     "t": 3185.9691443
-    },
-    {
-     "name": "scipy.ndimage",
-     "thread": "mbdsdr-deferred-import",
-     "ms": 38.8,
-     "t": 3186.039539
-    },
-    {
-     "name": "scipy.integrate",
-     "thread": "mbdsdr-deferred-import",
-     "ms": 36.2,
-     "t": 3186.1030597
-    },
-    {
-     "name": "scipy.stats",
-     "thread": "mbdsdr-deferred-import",
-     "ms": 0.0,
-     "t": 3186.139898
-    },
-    {
-     "name": "scipy.stats",
-     "thread": "mbdsdr-deferred-import",
-     "ms": 0.0,
-     "t": 3186.1399198
-    },
-    {
-     "name": "scipy.stats",
-     "thread": "mbdsdr-deferred-import",
-     "ms": 0.0,
-     "t": 3186.1527792
-    },
-    {
-     "name": "scipy.stats",
-     "thread": "mbdsdr-deferred-import",
-     "ms": 0.0,
-     "t": 3186.2112052
-    },
-    {
-     "name": "scipy.stats",
-     "thread": "mbdsdr-deferred-import",
-     "ms": 0.0,
-     "t": 3186.2263374
-    },
-    {
-     "name": "scipy.stats",
-     "thread": "mbdsdr-deferred-import",
-     "ms": 0.0,
-     "t": 3186.2264008
-    },
-    {
-     "name": "scipy.stats",
-     "thread": "mbdsdr-deferred-import",
-     "ms": 0.0,
-     "t": 3186.238365
-    },
-    {
-     "name": "scipy.stats",
-     "thread": "mbdsdr-deferred-import",
-     "ms": 0.0,
-     "t": 3186.2384042
-    },
-    {
-     "name": "scipy.stats",
-     "thread": "mbdsdr-deferred-import",
-     "ms": 0.0,
-     "t": 3186.2868923
-    },
-    {
-     "name": "scipy.stats",
-     "thread": "mbdsdr-deferred-import",
-     "ms": 0.0,
-     "t": 3186.2869418
-    },
-    {
-     "name": "scipy.stats",
-     "thread": "mbdsdr-deferred-import",
-     "ms": 0.0,
-     "t": 3186.2884064
-    },
-    {
-     "name": "scipy.stats",
-     "thread": "mbdsdr-deferred-import",
-     "ms": 0.0,
-     "t": 3186.2884314
-    },
-    {
-     "name": "scipy.stats",
-     "thread": "mbdsdr-deferred-import",
-     "ms": 0.0,
-     "t": 3186.2968421
-    },
-    {
-     "name": "scipy.stats",
-     "thread": "mbdsdr-deferred-import",
-     "ms": 0.0,
-     "t": 3186.2968875
-    },
-    {
-     "name": "scipy.stats",
-     "thread": "mbdsdr-deferred-import",
-     "ms": 0.0,
-     "t": 3186.3085801
-    },
-    {
-     "name": "scipy.stats",
-     "thread": "mbdsdr-deferred-import",
-     "ms": 0.0,
-     "t": 3186.3086175
-    },
-    {
-     "name": "scipy.stats",
-     "thread": "mbdsdr-deferred-import",
-     "ms": 0.0,
-     "t": 3186.3287643
-    },
-    {
-     "name": "scipy.stats",
-     "thread": "mbdsdr-deferred-import",
-     "ms": 0.0,
-     "t": 3186.3288082
-    },
-    {
-     "name": "scipy.stats",
-     "thread": "mbdsdr-deferred-import",
-     "ms": 0.0,
-     "t": 3186.3303484
-    },
-    {
-     "name": "scipy.stats",
-     "thread": "mbdsdr-deferred-import",
-     "ms": 0.0,
-     "t": 3186.3727138
-    },
-    {
-     "name": "scipy.stats",
-     "thread": "mbdsdr-deferred-import",
-     "ms": 0.0,
-     "t": 3186.3727536
-    },
-    {
-     "name": "scipy.stats",
-     "thread": "mbdsdr-deferred-import",
-     "ms": 0.0,
-     "t": 3186.3759628
-    },
-    {
-     "name": "scipy.stats",
-     "thread": "mbdsdr-deferred-import",
-     "ms": 0.0,
-     "t": 3186.3759955
-    },
-    {
-     "name": "scipy.stats",
-     "thread": "mbdsdr-deferred-import",
-     "ms": 0.0,
-     "t": 3186.3813001
-    },
-    {
-     "name": "scipy.stats",
-     "thread": "mbdsdr-deferred-import",
-     "ms": 0.0,
-     "t": 3186.38134
-    },
-    {
-     "name": "scipy.stats",
-     "thread": "mbdsdr-deferred-import",
-     "ms": 0.0,
-     "t": 3186.3866585
-    },
-    {
-     "name": "scipy.stats",
-     "thread": "mbdsdr-deferred-import",
-     "ms": 0.0,
-     "t": 3186.3867082
-    },
-    {
-     "name": "scipy.stats",
-     "thread": "mbdsdr-deferred-import",
-     "ms": 0.0,
-     "t": 3186.4090959
-    },
-    {
-     "name": "scipy.stats",
-     "thread": "mbdsdr-deferred-import",
-     "ms": 0.0,
-     "t": 3186.4091379
-    },
-    {
-     "name": "scipy.signal",
-     "thread": "mbdsdr-deferred-import",
-     "ms": 800.6,
-     "t": 3185.6625821
-    },
-    {
-     "name": "scipy.special",
-     "thread": "mbdsdr-deferred-import",
-     "ms": 0.0,
-     "t": 3186.4632104
-    },
-    {
-     "name": "scipy.fft",
-     "thread": "mbdsdr-deferred-import",
-     "ms": 0.0,
-     "t": 3186.4632178
-    },
-    {
-     "name": "scipy.interpolate",
-     "thread": "mbdsdr-deferred-import",
-     "ms": 0.0,
-     "t": 3186.4632218
-    },
-    {
-     "name": "scipy.optimize",
-     "thread": "mbdsdr-deferred-import",
-     "ms": 0.0,
-     "t": 3186.4632255
-    },
-    {
-     "name": "numpy._core._multiarray_umath",
-     "thread": "mbdsdr-deferred-import",
-     "ms": 0.0,
-     "t": 3186.463229
-    }
-   ],
-   "numpy_imported_before_first_frame": true,
-   "load_before_python_pct": 0.0,
-   "run": 2
-  },
-  {
-   "case": "frame_gap_nodefer",
-   "head": "afd449fa",
-   "exit_code": 0,
-   "error": null,
-   "failure_dialog": null,
-   "window_imported_despite_missing": false,
-   "t_first_frame_ms": 3895.3,
-   "t_splash_paint_ms": 1600.1,
-   "t2_ms": 2295.2,
-   "t_first_frame_abs": 3192.9822572,
-   "phase_ms": {
-    "_startup_dependency_problems": 454.3
-   },
-   "repaint_before_first_frame_ms": null,
-   "deferred_done_after_first_frame_ms": null,
-   "deferred_timeout": false,
-   "reports": [],
-   "status_bar": "",
-   "frame_gaps": [
-    {
-     "t": 3193.070957,
-     "gap": 88.7
-    },
-    {
-     "t": 3193.0893625,
-     "gap": 18.4
-    },
-    {
-     "t": 3193.0957791,
-     "gap": 6.4
-    },
-    {
-     "t": 3193.1106517,
-     "gap": 14.9
-    },
-    {
-     "t": 3193.1256468,
-     "gap": 15.0
-    },
-    {
-     "t": 3193.1419611,
-     "gap": 16.3
-    },
-    {
-     "t": 3193.1592198,
-     "gap": 17.3
-    },
-    {
-     "t": 3193.1749003,
-     "gap": 15.7
-    },
-    {
-     "t": 3193.1899539,
-     "gap": 15.1
-    },
-    {
-     "t": 3193.2058485,
-     "gap": 15.9
-    },
-    {
-     "t": 3193.2221889,
-     "gap": 16.3
-    },
-    {
-     "t": 3193.2379617,
-     "gap": 15.8
-    },
-    {
-     "t": 3193.2538636,
-     "gap": 15.9
-    },
-    {
-     "t": 3193.2705074,
-     "gap": 16.6
-    },
-    {
-     "t": 3193.2860319,
-     "gap": 15.5
-    },
-    {
-     "t": 3193.30245,
-     "gap": 16.4
-    },
-    {
-     "t": 3193.3178958,
-     "gap": 15.4
-    },
-    {
-     "t": 3193.3339046,
-     "gap": 16.0
-    },
-    {
-     "t": 3193.3508015,
+     "t": 4627.1500762,
      "gap": 16.9
     },
     {
-     "t": 3193.366601,
+     "t": 4627.16577,
+     "gap": 15.7
+    },
+    {
+     "t": 4627.1817319,
+     "gap": 16.0
+    },
+    {
+     "t": 4627.1979644,
+     "gap": 16.2
+    },
+    {
+     "t": 4627.2136545,
+     "gap": 15.7
+    },
+    {
+     "t": 4627.2293646,
+     "gap": 15.7
+    },
+    {
+     "t": 4627.245154,
      "gap": 15.8
     },
     {
-     "t": 3193.3824757,
+     "t": 4627.2618884,
+     "gap": 16.7
+    },
+    {
+     "t": 4627.2772539,
+     "gap": 15.4
+    },
+    {
+     "t": 4627.2939274,
+     "gap": 16.7
+    },
+    {
+     "t": 4627.3090989,
+     "gap": 15.2
+    },
+    {
+     "t": 4627.3270947,
+     "gap": 18.0
+    },
+    {
+     "t": 4627.3417124,
+     "gap": 14.6
+    },
+    {
+     "t": 4627.3570738,
+     "gap": 15.4
+    },
+    {
+     "t": 4627.3741433,
+     "gap": 17.1
+    },
+    {
+     "t": 4627.400665,
+     "gap": 26.5
+    },
+    {
+     "t": 4627.4235363,
+     "gap": 22.9
+    },
+    {
+     "t": 4627.4511469,
+     "gap": 27.6
+    },
+    {
+     "t": 4627.4624844,
+     "gap": 11.3
+    },
+    {
+     "t": 4627.4692505,
+     "gap": 6.8
+    },
+    {
+     "t": 4627.4852188,
+     "gap": 16.0
+    },
+    {
+     "t": 4627.5077341,
+     "gap": 22.5
+    },
+    {
+     "t": 4627.5873978,
+     "gap": 79.7
+    },
+    {
+     "t": 4627.6130838,
+     "gap": 25.7
+    },
+    {
+     "t": 4627.6631179,
+     "gap": 50.0
+    },
+    {
+     "t": 4627.6779848,
+     "gap": 14.9
+    },
+    {
+     "t": 4627.7045365,
+     "gap": 26.6
+    },
+    {
+     "t": 4627.7094062,
+     "gap": 4.9
+    },
+    {
+     "t": 4627.7317738,
+     "gap": 22.4
+    },
+    {
+     "t": 4627.743326,
+     "gap": 11.6
+    },
+    {
+     "t": 4627.7591944,
      "gap": 15.9
     },
     {
-     "t": 3193.3980557,
+     "t": 4627.7732738,
+     "gap": 14.1
+    },
+    {
+     "t": 4627.7920238,
+     "gap": 18.7
+    },
+    {
+     "t": 4627.8068887,
+     "gap": 14.9
+    },
+    {
+     "t": 4627.8516952,
+     "gap": 44.8
+    },
+    {
+     "t": 4627.8617596,
+     "gap": 10.1
+    },
+    {
+     "t": 4627.8695845,
+     "gap": 7.8
+    },
+    {
+     "t": 4627.8856312,
+     "gap": 16.0
+    },
+    {
+     "t": 4627.9022672,
+     "gap": 16.6
+    },
+    {
+     "t": 4627.9172049,
+     "gap": 14.9
+    },
+    {
+     "t": 4627.9337291,
+     "gap": 16.5
+    },
+    {
+     "t": 4627.9494116,
+     "gap": 15.7
+    },
+    {
+     "t": 4627.9654131,
+     "gap": 16.0
+    },
+    {
+     "t": 4627.9848718,
+     "gap": 19.5
+    },
+    {
+     "t": 4628.0495357,
+     "gap": 64.7
+    }
+   ],
+   "import_spans": [
+    {
+     "name": "numpy",
+     "thread": "mbdsdr-deferred-import",
+     "ms": 0.0,
+     "t": 4626.7334066
+    },
+    {
+     "name": "numpy.linalg",
+     "thread": "mbdsdr-deferred-import",
+     "ms": 0.0,
+     "t": 4626.858135
+    },
+    {
+     "name": "numpy.fft",
+     "thread": "mbdsdr-deferred-import",
+     "ms": 0.0,
+     "t": 4626.8588057
+    },
+    {
+     "name": "scipy._external.array_api_compat.numpy.fft",
+     "thread": "mbdsdr-deferred-import",
+     "ms": 175.3,
+     "t": 4626.6845619
+    },
+    {
+     "name": "scipy._external.array_api_compat.numpy.linalg",
+     "thread": "mbdsdr-deferred-import",
+     "ms": 0.0,
+     "t": 4626.8598438
+    },
+    {
+     "name": "scipy._external.array_api_compat.common",
+     "thread": "mbdsdr-deferred-import",
+     "ms": 0.0,
+     "t": 4626.8598502
+    },
+    {
+     "name": "scipy._external.array_api_extra",
+     "thread": "mbdsdr-deferred-import",
+     "ms": 14.4,
+     "t": 4626.8598531
+    },
+    {
+     "name": "scipy._external.packaging_version",
+     "thread": "mbdsdr-deferred-import",
+     "ms": 0.0,
+     "t": 4626.8743169
+    },
+    {
+     "name": "scipy._lib._array_api",
+     "thread": "mbdsdr-deferred-import",
+     "ms": 9.3,
+     "t": 4626.8743227
+    },
+    {
+     "name": "scipy._lib._util",
+     "thread": "mbdsdr-deferred-import",
+     "ms": 1.8,
+     "t": 4626.8836803
+    },
+    {
+     "name": "scipy.linalg",
+     "thread": "mbdsdr-deferred-import",
+     "ms": 54.5,
+     "t": 4626.8902225
+    },
+    {
+     "name": "scipy.special",
+     "thread": "mbdsdr-deferred-import",
+     "ms": 0.0,
+     "t": 4626.9643561
+    },
+    {
+     "name": "scipy.special",
+     "thread": "mbdsdr-deferred-import",
+     "ms": 71.2,
+     "t": 4626.9447747
+    },
+    {
+     "name": "scipy.fft",
+     "thread": "mbdsdr-deferred-import",
+     "ms": 31.0,
+     "t": 4627.0159398
+    },
+    {
+     "name": "scipy.sparse",
+     "thread": "mbdsdr-deferred-import",
+     "ms": 0.0,
+     "t": 4627.0739546
+    },
+    {
+     "name": "scipy.spatial",
+     "thread": "mbdsdr-deferred-import",
+     "ms": 0.0,
+     "t": 4627.1150321
+    },
+    {
+     "name": "scipy.spatial",
+     "thread": "mbdsdr-deferred-import",
+     "ms": 0.0,
+     "t": 4627.1157797
+    },
+    {
+     "name": "scipy.spatial",
+     "thread": "mbdsdr-deferred-import",
+     "ms": 0.0,
+     "t": 4627.1297227
+    },
+    {
+     "name": "scipy.spatial",
+     "thread": "mbdsdr-deferred-import",
+     "ms": 0.0,
+     "t": 4627.1306617
+    },
+    {
+     "name": "scipy.optimize",
+     "thread": "mbdsdr-deferred-import",
+     "ms": 0.0,
+     "t": 4627.2532803
+    },
+    {
+     "name": "scipy.ndimage",
+     "thread": "mbdsdr-deferred-import",
+     "ms": 52.5,
+     "t": 4627.3537275
+    },
+    {
+     "name": "scipy.integrate",
+     "thread": "mbdsdr-deferred-import",
+     "ms": 50.0,
+     "t": 4627.4467825
+    },
+    {
+     "name": "scipy.stats",
+     "thread": "mbdsdr-deferred-import",
+     "ms": 0.0,
+     "t": 4627.497439
+    },
+    {
+     "name": "scipy.stats",
+     "thread": "mbdsdr-deferred-import",
+     "ms": 0.0,
+     "t": 4627.4974657
+    },
+    {
+     "name": "scipy.stats",
+     "thread": "mbdsdr-deferred-import",
+     "ms": 0.0,
+     "t": 4627.5187104
+    },
+    {
+     "name": "scipy.stats",
+     "thread": "mbdsdr-deferred-import",
+     "ms": 0.0,
+     "t": 4627.5988216
+    },
+    {
+     "name": "scipy.stats",
+     "thread": "mbdsdr-deferred-import",
+     "ms": 0.0,
+     "t": 4627.6023932
+    },
+    {
+     "name": "scipy.stats",
+     "thread": "mbdsdr-deferred-import",
+     "ms": 0.0,
+     "t": 4627.6024393
+    },
+    {
+     "name": "scipy.stats",
+     "thread": "mbdsdr-deferred-import",
+     "ms": 0.0,
+     "t": 4627.6133753
+    },
+    {
+     "name": "scipy.stats",
+     "thread": "mbdsdr-deferred-import",
+     "ms": 0.0,
+     "t": 4627.613415
+    },
+    {
+     "name": "scipy.stats",
+     "thread": "mbdsdr-deferred-import",
+     "ms": 0.0,
+     "t": 4627.664441
+    },
+    {
+     "name": "scipy.stats",
+     "thread": "mbdsdr-deferred-import",
+     "ms": 0.0,
+     "t": 4627.6644749
+    },
+    {
+     "name": "scipy.stats",
+     "thread": "mbdsdr-deferred-import",
+     "ms": 0.0,
+     "t": 4627.6679996
+    },
+    {
+     "name": "scipy.stats",
+     "thread": "mbdsdr-deferred-import",
+     "ms": 0.0,
+     "t": 4627.6680382
+    },
+    {
+     "name": "scipy.stats",
+     "thread": "mbdsdr-deferred-import",
+     "ms": 0.0,
+     "t": 4627.6794906
+    },
+    {
+     "name": "scipy.stats",
+     "thread": "mbdsdr-deferred-import",
+     "ms": 0.0,
+     "t": 4627.6795263
+    },
+    {
+     "name": "scipy.stats",
+     "thread": "mbdsdr-deferred-import",
+     "ms": 0.0,
+     "t": 4627.6873154
+    },
+    {
+     "name": "scipy.stats",
+     "thread": "mbdsdr-deferred-import",
+     "ms": 0.0,
+     "t": 4627.6873566
+    },
+    {
+     "name": "scipy.stats",
+     "thread": "mbdsdr-deferred-import",
+     "ms": 2.0,
+     "t": 4627.7136771
+    },
+    {
+     "name": "scipy.stats",
+     "thread": "mbdsdr-deferred-import",
+     "ms": 0.1,
+     "t": 4627.7156874
+    },
+    {
+     "name": "scipy.stats",
+     "thread": "mbdsdr-deferred-import",
+     "ms": 0.0,
+     "t": 4627.7173157
+    },
+    {
+     "name": "scipy.stats",
+     "thread": "mbdsdr-deferred-import",
+     "ms": 0.0,
+     "t": 4627.7641943
+    },
+    {
+     "name": "scipy.stats",
+     "thread": "mbdsdr-deferred-import",
+     "ms": 0.0,
+     "t": 4627.7642369
+    },
+    {
+     "name": "scipy.stats",
+     "thread": "mbdsdr-deferred-import",
+     "ms": 0.0,
+     "t": 4627.7699397
+    },
+    {
+     "name": "scipy.stats",
+     "thread": "mbdsdr-deferred-import",
+     "ms": 0.0,
+     "t": 4627.7699885
+    },
+    {
+     "name": "scipy.stats",
+     "thread": "mbdsdr-deferred-import",
+     "ms": 0.0,
+     "t": 4627.7784993
+    },
+    {
+     "name": "scipy.stats",
+     "thread": "mbdsdr-deferred-import",
+     "ms": 0.0,
+     "t": 4627.7785328
+    },
+    {
+     "name": "scipy.stats",
+     "thread": "mbdsdr-deferred-import",
+     "ms": 0.0,
+     "t": 4627.7827139
+    },
+    {
+     "name": "scipy.stats",
+     "thread": "mbdsdr-deferred-import",
+     "ms": 0.0,
+     "t": 4627.7827587
+    },
+    {
+     "name": "scipy.stats",
+     "thread": "mbdsdr-deferred-import",
+     "ms": 0.0,
+     "t": 4627.8043379
+    },
+    {
+     "name": "scipy.stats",
+     "thread": "mbdsdr-deferred-import",
+     "ms": 0.0,
+     "t": 4627.8043705
+    },
+    {
+     "name": "scipy.signal",
+     "thread": "mbdsdr-deferred-import",
+     "ms": 975.1,
+     "t": 4626.8854753
+    },
+    {
+     "name": "scipy.special",
+     "thread": "mbdsdr-deferred-import",
+     "ms": 0.0,
+     "t": 4627.8606132
+    },
+    {
+     "name": "scipy.fft",
+     "thread": "mbdsdr-deferred-import",
+     "ms": 0.0,
+     "t": 4627.8606231
+    },
+    {
+     "name": "scipy.interpolate",
+     "thread": "mbdsdr-deferred-import",
+     "ms": 0.0,
+     "t": 4627.8606306
+    },
+    {
+     "name": "scipy.optimize",
+     "thread": "mbdsdr-deferred-import",
+     "ms": 0.0,
+     "t": 4627.8606405
+    },
+    {
+     "name": "numpy._core._multiarray_umath",
+     "thread": "mbdsdr-deferred-import",
+     "ms": 0.0,
+     "t": 4627.8606464
+    }
+   ],
+   "numpy_imported_before_first_frame": true,
+   "load_before_python_pct": 0.0,
+   "run": 2
+  },
+  {
+   "case": "frame_gap_nodefer",
+   "head": "699dcb92",
+   "exit_code": 0,
+   "error": null,
+   "failure_dialog": null,
+   "window_imported_despite_missing": false,
+   "t_first_frame_ms": 4087.3,
+   "t_splash_paint_ms": 1585.9,
+   "t2_ms": 2501.4,
+   "t_first_frame_abs": 4634.5808852,
+   "phase_ms": {
+    "_startup_dependency_problems": 451.5
+   },
+   "repaint_before_first_frame_ms": null,
+   "deferred_done_after_first_frame_ms": null,
+   "deferred_timeout": false,
+   "reports": [],
+   "status_bar": "",
+   "frame_gaps": [
+    {
+     "t": 4634.6781663,
+     "gap": 97.3
+    },
+    {
+     "t": 4634.7051326,
+     "gap": 27.0
+    },
+    {
+     "t": 4634.7124311,
+     "gap": 7.3
+    },
+    {
+     "t": 4634.7249117,
+     "gap": 12.5
+    },
+    {
+     "t": 4634.7406956,
+     "gap": 15.8
+    },
+    {
+     "t": 4634.7573834,
+     "gap": 16.7
+    },
+    {
+     "t": 4634.7730068,
      "gap": 15.6
+    },
+    {
+     "t": 4634.7892662,
+     "gap": 16.3
+    },
+    {
+     "t": 4634.8045268,
+     "gap": 15.3
+    },
+    {
+     "t": 4634.8207834,
+     "gap": 16.3
+    },
+    {
+     "t": 4634.8369311,
+     "gap": 16.1
+    },
+    {
+     "t": 4634.8531253,
+     "gap": 16.2
+    },
+    {
+     "t": 4634.8686847,
+     "gap": 15.6
+    },
+    {
+     "t": 4634.8846659,
+     "gap": 16.0
+    },
+    {
+     "t": 4634.901307,
+     "gap": 16.6
+    },
+    {
+     "t": 4634.9171861,
+     "gap": 15.9
+    },
+    {
+     "t": 4634.9341339,
+     "gap": 16.9
+    },
+    {
+     "t": 4634.9485294,
+     "gap": 14.4
+    },
+    {
+     "t": 4634.9658606,
+     "gap": 17.3
+    },
+    {
+     "t": 4634.9815727,
+     "gap": 15.7
+    },
+    {
+     "t": 4634.9972292,
+     "gap": 15.7
     }
    ],
    "import_spans": [],
@@ -3570,18 +3876,18 @@
   },
   {
    "case": "t2_baseline",
-   "head": "afd449fa",
+   "head": "699dcb92",
    "exit_code": 0,
    "error": null,
    "failure_dialog": null,
    "window_imported_despite_missing": false,
-   "t_first_frame_ms": 4740.6,
-   "t_splash_paint_ms": 1617.6,
-   "t2_ms": 3123.0,
-   "t_first_frame_abs": 3200.5626655,
+   "t_first_frame_ms": 5074.6,
+   "t_splash_paint_ms": 1599.2,
+   "t2_ms": 3475.4,
+   "t_first_frame_abs": 4642.4886052,
    "phase_ms": {
-    "_run_import_smoke": 930.8,
-    "_startup_dependency_problems": 303.4
+    "_run_import_smoke": 959.0,
+    "_startup_dependency_problems": 285.9
    },
    "repaint_before_first_frame_ms": null,
    "deferred_done_after_first_frame_ms": null,
@@ -3590,92 +3896,80 @@
    "status_bar": "",
    "frame_gaps": [
     {
-     "t": 3200.651659,
-     "gap": 89.0
+     "t": 4642.5964207,
+     "gap": 107.8
     },
     {
-     "t": 3200.6703117,
-     "gap": 18.7
+     "t": 4642.6257151,
+     "gap": 29.3
     },
     {
-     "t": 3200.6767525,
-     "gap": 6.4
+     "t": 4642.633875,
+     "gap": 8.2
     },
     {
-     "t": 3200.6918579,
-     "gap": 15.1
+     "t": 4642.6500779,
+     "gap": 16.2
     },
     {
-     "t": 3200.7075295,
-     "gap": 15.7
+     "t": 4642.6645749,
+     "gap": 14.5
     },
     {
-     "t": 3200.7235669,
-     "gap": 16.0
-    },
-    {
-     "t": 3200.7389763,
-     "gap": 15.4
-    },
-    {
-     "t": 3200.7562797,
-     "gap": 17.3
-    },
-    {
-     "t": 3200.7717573,
-     "gap": 15.5
-    },
-    {
-     "t": 3200.7875511,
-     "gap": 15.8
-    },
-    {
-     "t": 3200.8038318,
-     "gap": 16.3
-    },
-    {
-     "t": 3200.818982,
-     "gap": 15.2
-    },
-    {
-     "t": 3200.8367396,
-     "gap": 17.8
-    },
-    {
-     "t": 3200.8518286,
-     "gap": 15.1
-    },
-    {
-     "t": 3200.8679406,
+     "t": 4642.6806975,
      "gap": 16.1
     },
     {
-     "t": 3200.8834603,
+     "t": 4642.6972256,
+     "gap": 16.5
+    },
+    {
+     "t": 4642.7133228,
+     "gap": 16.1
+    },
+    {
+     "t": 4642.7293491,
+     "gap": 16.0
+    },
+    {
+     "t": 4642.7453048,
+     "gap": 16.0
+    },
+    {
+     "t": 4642.7611102,
+     "gap": 15.8
+    },
+    {
+     "t": 4642.7767332,
+     "gap": 15.6
+    },
+    {
+     "t": 4642.7925391,
+     "gap": 15.8
+    },
+    {
+     "t": 4642.8095538,
+     "gap": 17.0
+    },
+    {
+     "t": 4642.8250505,
      "gap": 15.5
     },
     {
-     "t": 3200.8997688,
+     "t": 4642.8406005,
+     "gap": 15.6
+    },
+    {
+     "t": 4642.8568694,
      "gap": 16.3
     },
     {
-     "t": 3200.9152975,
+     "t": 4642.87331,
+     "gap": 16.4
+    },
+    {
+     "t": 4642.8887651,
      "gap": 15.5
-    },
-    {
-     "t": 3200.9312716,
-     "gap": 16.0
-    },
-    {
-     "t": 3200.9485922,
-     "gap": 17.3
-    },
-    {
-     "t": 3200.9633158,
-     "gap": 14.7
-    },
-    {
-     "t": 3200.9793634,
-     "gap": 16.0
     }
    ],
    "import_spans": [],
