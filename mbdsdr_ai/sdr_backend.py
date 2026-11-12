@@ -124,23 +124,30 @@ class AmbiguousOwners:
 
 
 def owner_conflict_text(holder: Union[Dict[str, Any], AmbiguousOwners]) -> str:
-    """占用冲突的可执行提示：谁占着、它还活着、下一步能做什么。"""
+    """占用冲突的可执行提示：谁占着、它还活着、下一步能做什么。
+
+    **措辞刻意避开桌面的连接错误分类关键词**（``usb`` / ``占用`` /
+    ``断开`` / ``权限`` / ``驱动`` 等，见 ``desktop/error_remedy.py`` 的
+    ``CONNECT_ERROR_RULES``）：这条消息本身就是结论，如果被二次分类成
+    ``usb_permission``，用户会被告知去改 udev / 装 WinUSB——而真正要做的是
+    去另一个进程里释放设备，照着改一百遍也不会好。措辞一旦命中关键词，
+    ``tests/test_owner_conflict_before_open.py`` 会当场红。
+    """
     if isinstance(holder, AmbiguousOwners):
         dev = holder.device_id
         shown = ", ".join(holder.candidates[:3])
         if len(holder.candidates) > 3:
             shown += f" 等 {len(holder.candidates)} 条"
-        return (f"无法唯一确定设备：键 {dev} 同时匹配多条占用记录（{shown}）。"
+        return (f"无法唯一确定设备：键 {dev} 同时对应多条登记（{shown}）。"
                 f"这通常是两根同型号设备同时插着——枚举读不到序列号时只能靠"
-                f"序号/总线位置区分，此时无法判断是哪一台（本机未引入额外的 "
-                f"USB 枚举依赖，不会替你猜）。"
-                f"你可以：① 在桌面端/AI 侧断开其中一台后重试；"
+                f"序号/总线位置区分，此时无法判断是哪一台（不会替你猜）。"
+                f"你可以：① 在桌面端或 AI 侧释放其中一台后重试；"
                 f"② 只想用其中一根时，先拔掉另一根再点「刷新」；"
                 f"③ 或改用带独立地址的设备（如 rtl_tcp / SpyServer）。")
     dev = holder.get("device_id") or ""
     who = owner_label(holder.get("owner", ""))
-    return (f"设备 {dev} 当前由{who}占用（pid {holder.get('pid')}，进程仍在运行）。"
-            f"请先在{who}侧断开该设备，或改用其他设备"
+    return (f"设备 {dev} 当前由{who}持有（pid {holder.get('pid')}，进程仍在运行）。"
+            f"请先在{who}侧释放该设备，或改用其他设备"
             f"（先用 sdr_list_devices 查看）。")
 
 
@@ -578,6 +585,36 @@ def release_active_owner(owner: str, device_id: str = "") -> bool:
     for dev in released:
         _OWNED_HERE.discard((str(owner), dev))
     return bool(released)
+
+
+def peer_owner_message(device_id: str,
+                       allow_alias_match: bool = True) -> Optional[str]:
+    """**开设备之前**查登记：被别的进程持有就返回可执行提示，否则 ``None``。
+
+    互斥判据的顺序必须是「登记优先、libusb 错误靠后」：占用是我们自己的
+    确定状态，libusb 的 ACCESS 错误只是现象。反过来先 open、失败后再解释，
+    用户会被引去改 udev / 装 WinUSB，而真正要做的是去另一个进程里释放设备。
+
+    本进程自己登记的（桌面面板 claim 后自己 connect、AI claim 后自己 connect）
+    不算冲突。登记文件读不了时按「无法证明被占」继续——不能让登记表自身的
+    I/O 故障把所有硬件都锁死。
+    """
+    try:
+        holder = get_active_owner(device_id, allow_alias_match)
+    except Exception as e:  # noqa: BLE001 - 登记读不了不拦硬件
+        logger.debug("连接前读取占用登记失败（按未占用继续）: %s", e)
+        return None
+    if holder is None:
+        return None
+    if isinstance(holder, AmbiguousOwners):
+        return owner_conflict_text(holder)
+    try:
+        pid = int(holder.get("pid") or 0)
+    except (TypeError, ValueError):
+        pid = 0
+    if pid and pid == _SELF_PID:
+        return None             # 自己占的（本进程已 claim），放行
+    return owner_conflict_text(holder)
 
 
 def _release_owned_here_at_exit() -> None:
@@ -2627,6 +2664,19 @@ class RTLSDRBackend(SDRBackend):
                 self.disconnect()
             except Exception as _e:
                 logger.debug("重连前释放旧句柄失败(忽略): %s", _e)
+        # 互斥判据：先查占用登记，再碰硬件。顺序不能反——先 open 失败后再
+        # 解释，libusb 的 ACCESS 错误会被桌面端的分类表判成「权限不足」，
+        # 把用户引去改 udev / 装 WinUSB，而真实原因是另一个进程持有设备。
+        if self._host is None:
+            _conflict = peer_owner_message(
+                f"rtlsdr|index:{int(self._device_index)}")
+            if _conflict:
+                self.status.connected = False
+                self.status.link_state = "failed"
+                self.status.error_category = "busy"
+                self.status.error = _conflict
+                logger.warning("设备已被其他进程持有，未发起 open：%s", _conflict)
+                return False
         try:
             if self._host is not None:
                 # rtl_tcp 网络模式统一走本仓库自研、MIT、无 GPL 的 RtlTcpClient

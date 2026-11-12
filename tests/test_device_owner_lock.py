@@ -119,7 +119,7 @@ def test_live_holder_is_refused_then_released_after_death(_registry):
         ok, holder = sb.claim_active_owner(sb.AI_OWNER, "rtl_0")
         assert ok is False
         text = sb.owner_conflict_text(holder)
-        assert "桌面端" in text and "断开" in text, text
+        assert "桌面端" in text and "释放" in text, text
         assert "pid" in text
     finally:
         _kill(child)
@@ -293,7 +293,7 @@ def test_connect_refused_when_live_holder_exists(_registry):
         mgr = _manager_with(be)
         assert mgr.connect("rtl_0") is False
         assert be.connect_calls == 0, "被占用时不许碰硬件"
-        assert "占用" in mgr.last_connect_notice
+        assert "持有" in mgr.last_connect_notice
         assert "桌面端" in mgr.last_connect_notice
     finally:
         _kill(child)
@@ -413,7 +413,7 @@ def test_ambiguous_alias_refuses_instead_of_guessing(_registry):
         assert "无法唯一确定设备" in text
         assert "AAA" in text and "BBB" in text
         # 拒绝之外必须给出路，不能只说「无法唯一确定」让用户卡死。
-        assert "断开其中一台" in text and "拔掉另一根" in text
+        assert "释放其中一台" in text and "拔掉另一根" in text
 
         # 读侧同样不猜：返回同一类标记（真值），调用方一律按被占用处理。
         seen = sb.get_active_owner("rtlsdr|index:0")
