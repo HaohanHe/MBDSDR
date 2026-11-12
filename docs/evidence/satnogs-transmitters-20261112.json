@@ -1,5 +1,6 @@
 {
  "_note": "W92 对照用 SatNOGS DB 发射机原始响应快照（逐星原样保存 response，未裁剪；仅供 docs/research 对照表离线复算）",
+ "_redaction_note": "2026-11-13 身份红线脱敏：一处 citation 原含真实邮箱地址（AMSAT 公共邮件列表），已替换为 <redacted-email-2026-11-13>，保留 URL 结构与 message ID，可按 ID 在 AMSAT 归档检索；其余 downlink/uplink 数字是频率（Hz），非个人数据，未改动。",
  "_source": "SatNOGS DB transmitters API",
  "_endpoint": "https://db.satnogs.org/api/transmitters/?format=json&satellite__norad_cat_id=<NORAD>",
  "fetched_at_utc": "2026-11-12T10:58:24Z",
@@ -1415,7 +1416,7 @@
      "norad_follow_id": null,
      "status": "inactive",
      "updated": "2021-06-27T19:12:30.381829Z",
-     "citation": "https://mailman.amsat.org/hyperkitty/list/amsat-bb@amsat.org/message/B3MHCHMEVFXEJ7UXW4FXIHYLDH5KZGLD/",
+     "citation": "https://mailman.amsat.org/hyperkitty/list/<redacted-email-2026-11-13>/message/B3MHCHMEVFXEJ7UXW4FXIHYLDH5KZGLD/",
      "service": "Amateur",
      "iaru_coordination": "N/A",
      "iaru_coordination_url": "",

@@ -10,7 +10,8 @@
   服务邮箱名单内即命中（域首标签须字母开头，避免 iOS 资产文件名伪影）；
 · 手机号：11 位大陆号段；两侧不得再邻小数分隔点，排除实测数据里
   小数位恰为 11 位号码形态的 S11/S21 测量值（如 0.148…9825 这类
-  小数位形似手机号的数）——真实手机号不会与小数点相邻；
+  小数位形似手机号的数）——真实手机号不会与小数点相邻；卫星链路
+  频率字段（downlink/uplink_*）的纯数值是 Hz，不是号码；
 · 就业意向类措辞：只收无歧义的三个中文词（见下方 _JOB* 字面量）；
   英文 "resume" 在本仓是"恢复扫描/会话"的技术用法，"投递"在本仓是
   "论文投递"，误报率高，均不入门禁；
@@ -112,6 +113,23 @@ def _embedded_in_data_blob(text: str, start: int, end: int) -> bool:
     return (le - ls) >= 16
 
 
+def _is_satellite_frequency_value(text: str, start: int) -> bool:
+    """命中是否为 JSON 里卫星链路频率字段的纯数值（Hz）。
+
+    2026-11-13 实测假警报：
+    ``docs/evidence/satnogs-transmitters-20261112.json`` 的
+    ``downlink_low/high/drifted = 15,003,400,000``（15.0034 GHz）被 11 位
+    手机号规则咬中。手机号不会以 ``"(downlink|uplink)_(low|high|drift|
+    drifted)":`` 作为 JSON 键出现；这里只豁免「该键 + 纯数字」这一形状，
+    其它键或散文里的真号照常命中（见
+    ``test_phone_rule_flags_non_frequency_json_value``）。
+    """
+    line_start = text.rfind("\n", 0, start) + 1
+    prefix = text[line_start:start]
+    return bool(re.search(
+        r'"(?:downlink|uplink)_(?:low|high|drift|drifted)"\s*:\s*$', prefix))
+
+
 def test_no_personal_info_in_tracked_files():
     hits = []
     for rel in _tracked_files():
@@ -131,8 +149,9 @@ def test_no_personal_info_in_tracked_files():
                         continue
                     if m.group(0).lower() in ALLOWED_EMAIL_EXACT:
                         continue
-                if label == "手机号" and _embedded_in_data_blob(
-                        text, m.start(), m.end()):
+                if label == "手机号" and (
+                        _embedded_in_data_blob(text, m.start(), m.end())
+                        or _is_satellite_frequency_value(text, m.start())):
                     continue
                 hits.append(f"{rel}: {label} -> {m.group(0)[:40]}")
     assert not hits, "身份红线命中（AGENTS.md 第 1 条）:\n" + "\n".join(hits[:30])
@@ -152,6 +171,24 @@ def test_phone_rule_ignores_hashes_but_flags_prose():
     assert m and m.group(0) == "138" + "1234" + "5678", "散文里的真手机号必须命中"
     assert not _embedded_in_data_blob(real, m.start(), m.end()), \
         "散文手机号不得被误判为数据巧合"
+
+
+def test_phone_rule_flags_non_frequency_json_value():
+    """手机号规则双向钉扎：频率字段的纯数值不咬，其它键里的真号照咬。"""
+    phone = dict(RULES)["手机号"]
+    freq = '     "downlink_low": ' + "1500340" + "0000" + ',\n'
+    m = phone.search(freq)
+    assert m and _is_satellite_frequency_value(freq, m.start()), \
+        "卫星链路频率字段的数字不应判为手机号"
+    # 拼接构造，避免门禁自咬（同 _JOB 姿势）
+    other = '     "serial": ' + "138" + "1234" + "5678" + ",\n"
+    m2 = phone.search(other)
+    assert m2 and not _is_satellite_frequency_value(other, m2.start()), \
+        "非频率键里的 11 位号码必须照常命中"
+    prose = "请联系 " + "138" + "1234" + "5678" + " 咨询"
+    m3 = phone.search(prose)
+    assert m3 and not _is_satellite_frequency_value(prose, m3.start()), \
+        "散文里的真手机号必须照常命中"
 
 
 def test_redline_gate_is_not_self_triggering():
