@@ -42,6 +42,7 @@ import tempfile
 import threading
 import time
 import types
+from contextlib import contextmanager
 
 import pytest
 
@@ -930,9 +931,16 @@ def _snapshot_real_config():
     _REAL_CONFIG_GUARD["gui_observer_before"] = _gui_observer(gui)
 
 
-#: 会话开始时备份真实配置**内容**的目录（仓库外 .locks，与 file_claim 令牌同级）。
+#: 会话开始时备份真实配置**内容**、以及写保护协调数据的目录。
+#:
+#: 必须挂在**全仓共享**的锁目录（``_shared_locks_dir()``）下，不能按工作树分：
+#: 2026-11-13 体检实证，旧写法 ``本文件上两级/.locks`` 让 worktree 落到
+#: ``.tmp/.locks``、主工作区落到 ``.locks``，于是两棵树的写保护标记互相看不见
+#: ——先退出的会话以为「没有别的会话」，当场把真实配置恢复成可写，另一棵树
+#: 剩下的整个会话都在裸奔（1414→1207 字节的时间窗就是这么来的）。
+#: 现在标记、状态、互斥锁、内容备份四者同处一个跨工作树共享目录。
 _REAL_CONFIG_BACKUP_ROOT = os.path.join(
-    os.path.dirname(_ROOT_DIR), ".locks", "real_config_snapshots")
+    _shared_locks_dir(), "real_config_snapshots")
 #: 只留最近 N 个会话的备份，避免无限增长。
 _REAL_CONFIG_BACKUP_KEEP = 20
 
@@ -1017,12 +1025,108 @@ def _restore_real_config_from_backup():
             if os.path.exists(target):
                 # 会话期间真实配置是被写保护的，还原前先临时放开。
                 os.chmod(target, stat.S_IWRITE | stat.S_IREAD)
-            shutil.copy2(src, target)
+            _WRITE_GUARD["bypass"] = True      # 守卫自己的还原口，唯一放行点
+            try:
+                shutil.copy2(src, target)
+            finally:
+                _WRITE_GUARD["bypass"] = False
         except OSError as exc:
             restored.append(f"  {key}: {target} 还原失败：{exc}")
         else:
             restored.append(f"  {key}: {target} 已按会话备份还原")
     return restored
+
+
+# ---------------------------------------------------------------------------
+# 防线 4c：真实 gui_config / bookmarks 的写入拦截（2026-11-13）
+#
+# 4b 把真实配置设成只读，能挡住写，但报出来的是裸 PermissionError，看不出
+# 「该怎么做才对」。这里在 Python 层再挡一道：命中真实路径的写操作直接失败，
+# 错误信息点名 ``isolated_profile`` fixture（它把 HOME/APPDATA 重定向到临时
+# 目录，重定向之后的路径与这里记录的**真实**路径不同，自然放行）。
+#
+# 只拦「写」和「原子替换的目标」，读一律放行——守卫自己结束时要读备份、
+# 判哈希，那些路径不能被自己挡住。``_WRITE_GUARD["bypass"]`` 是守卫收尾
+# 还原内容时的唯一放行口，别在别处打开它。
+# ---------------------------------------------------------------------------
+_WRITE_GUARD = {"paths": frozenset(), "active": False, "bypass": False,
+                "saved": {}}
+
+
+def _write_guard_hit(file, mode):
+    if not _WRITE_GUARD["active"] or _WRITE_GUARD["bypass"]:
+        return False
+    if mode is None:
+        return False
+    mode = mode if isinstance(mode, str) else str(mode)
+    if not any(ch in mode for ch in "wax+"):
+        return False
+    try:
+        key = _path_key(os.fspath(file))
+    except TypeError:                 # 文件描述符 / 非路径对象
+        return False
+    return key in _WRITE_GUARD["paths"]
+
+
+def _deny_real_config_write(file):
+    raise PermissionError(
+        "[mbdsdr-guard] 测试会话试图写入用户真实配置：%s\n"
+        "请给用例请求 isolated_profile fixture（重定向 HOME/APPDATA 到临时"
+        "目录），或把路径显式指向 tmp_path。真实配置只属于用户。" % (file,))
+
+
+def _install_real_config_write_guard():
+    """把三个真实配置文件列入写黑名单，并挂到 open/io.open/os.replace 上。"""
+    if _WRITE_GUARD["active"]:
+        return
+    paths = {_path_key(p) for p in
+             (_REAL_CONFIG_GUARD.get("path"),
+              _REAL_CONFIG_GUARD.get("bm_path"),
+              _REAL_CONFIG_GUARD.get("gui_path")) if p}
+    if not paths:
+        return
+    import builtins
+    import io
+
+    real_open = builtins.open
+    real_replace = os.replace
+    real_rename = os.rename
+
+    def guarded_open(file, mode="r", *args, **kwargs):
+        if _write_guard_hit(file, mode):
+            _deny_real_config_write(file)
+        return real_open(file, mode, *args, **kwargs)
+
+    def guarded_replace(src, dst, *args, **kwargs):
+        if _write_guard_hit(dst, "w"):
+            _deny_real_config_write(dst)
+        return real_replace(src, dst, *args, **kwargs)
+
+    def guarded_rename(src, dst, *args, **kwargs):
+        if _write_guard_hit(dst, "w"):
+            _deny_real_config_write(dst)
+        return real_rename(src, dst, *args, **kwargs)
+
+    _WRITE_GUARD.update(paths=frozenset(paths), active=True, saved={
+        "builtins.open": real_open, "io.open": io.open,
+        "os.replace": real_replace, "os.rename": real_rename})
+    builtins.open = guarded_open
+    io.open = guarded_open
+    os.replace = guarded_replace
+    os.rename = guarded_rename
+
+
+def _uninstall_real_config_write_guard():
+    saved = _WRITE_GUARD.get("saved") or {}
+    if not saved:
+        return
+    import builtins
+    import io
+    builtins.open = saved["builtins.open"]
+    io.open = saved["io.open"]
+    os.replace = saved["os.replace"]
+    os.rename = saved["os.rename"]
+    _WRITE_GUARD.update(active=False, saved={})
 
 
 def pytest_configure(config):
@@ -1034,6 +1138,7 @@ def pytest_configure(config):
     _recover_stale_write_protection()
     _backup_real_config_contents()
     _protect_real_config()
+    _install_real_config_write_guard()
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -1043,6 +1148,7 @@ def _real_config_guard_fixture():
         _assert_real_config_untouched()
     finally:
         _unprotect_real_config()
+        _uninstall_real_config_write_guard()
 
 
 def _assert_real_config_untouched():
@@ -1108,6 +1214,13 @@ def _assert_real_config_untouched():
 # 守卫因此降级为兜底：不再指认凶手，只在「居然有人写成功了」时喊一声。
 # ---------------------------------------------------------------------------
 _REAL_CONFIG_PROTECT_PREFIX = "write-protection-"
+#: 共享的原属性台账：谁第一个上保护谁写，只有**全局**最后一个退出者才删。
+#: 名字刻意不带 ``write-protection-`` 前缀（那是标记的通配），免得被当成标记扫。
+_REAL_CONFIG_STATE_NAME = "protect-state.json"
+#: 协调「删标记 / 查存活 / 恢复属性」的互斥文件（字节锁，进程被杀由内核释放）。
+_REAL_CONFIG_MUTEX_NAME = "protect-mutex.lock"
+#: 临界区只有几毫秒的目录操作；等不到说明别的会话卡在 IO，不该无限等。
+_PROTECT_MUTEX_TIMEOUT_S = 10.0
 
 
 def _protect_marker_path():
@@ -1115,106 +1228,335 @@ def _protect_marker_path():
                         f"{_REAL_CONFIG_PROTECT_PREFIX}{os.getpid()}.json")
 
 
-def _live_protect_markers():
-    """仍在运行的其他会话留下的保护记录（死进程的残留不算）。
+def _protect_state_path():
+    return os.path.join(_REAL_CONFIG_BACKUP_ROOT, _REAL_CONFIG_STATE_NAME)
 
-    并发跑两个 pytest 时，谁先结束谁都想把只读属性改回去——那样另一个
-    会话剩下的时间里真实配置就是可写的。所以「收尾」必须看还有没有别的
-    活会话：只要有一个活着，保护就不拆。
+
+def _read_json(path):
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, ValueError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def _pid_alive(pid, pid_start=None):
+    """pid 是否仍活着；给了记录的启动时刻就一并核对，防 PID 复用误判。
+
+    PID 复用会让「上上次会话的残留标记」看起来永远活着，于是最后一个退出者
+    永远不敢恢复属性——真实配置被别人持续只读，且没有任何会话还会去拆。
     """
+    try:
+        pid = int(pid)
+    except (TypeError, ValueError):
+        return False
+    if pid <= 0:
+        return False
+    actual = _process_start_time(pid)
+    if actual is None:
+        return False
+    if pid_start is not None:
+        try:
+            if abs(float(actual) - float(pid_start)) > 2.0:
+                return False          # 同号不同命：这是复用后的新进程
+        except (TypeError, ValueError):
+            pass
+    return True
+
+
+def _live_markers():
+    """除本进程外，仍被**活会话**持有的保护标记（含其他工作树）。
+
+    标记目录挂在全仓共享锁目录下，所以 worktree A 的会话能看见 worktree B
+    的标记——「引用计数跨树共享」就是这个函数存在的理由。
+    """
+    out = []
     try:
         names = os.listdir(_REAL_CONFIG_BACKUP_ROOT)
     except OSError:
-        return []
-    mine = os.path.basename(_protect_marker_path())
-    out = []
+        return out
+    own = os.path.abspath(_protect_marker_path())
     for name in names:
-        if not name.startswith(_REAL_CONFIG_PROTECT_PREFIX) or name == mine:
+        if not (name.startswith(_REAL_CONFIG_PROTECT_PREFIX)
+                and name.endswith(".json")):
             continue
-        try:
-            with open(os.path.join(_REAL_CONFIG_BACKUP_ROOT, name),
-                      "r", encoding="utf-8") as f:
-                info = json.load(f)
-        except (OSError, ValueError):
-            continue
-        pid = info.get("pid")
-        if pid and _process_start_time(pid) is not None:
+        path = os.path.join(_REAL_CONFIG_BACKUP_ROOT, name)
+        if os.path.abspath(path) == own:
+            continue                  # 自己的标记由自己删，不算「别人」
+        info = _read_json(path)
+        if info and _pid_alive(info.get("pid"), info.get("pid_start_time")):
             out.append(info)
     return out
 
 
-def _recover_stale_write_protection():
-    """恢复上次崩溃会话留下的只读属性（只动它自己记录过的文件）。"""
+def _write_marker(entries):
+    """记下本会话的身份与原属性台账（原子替换，读者看不到半个 JSON）。"""
+    marker = _protect_marker_path()
+    tmp = marker + f".{os.getpid()}.tmp"
     try:
-        names = os.listdir(_REAL_CONFIG_BACKUP_ROOT)
+        os.makedirs(_REAL_CONFIG_BACKUP_ROOT, exist_ok=True)
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump({"pid": os.getpid(),
+                       "pid_start_time": _process_start_time(os.getpid()),
+                       "entries": entries}, f, ensure_ascii=False, indent=2)
+        os.replace(tmp, marker)
     except OSError:
-        return
-    for name in names:
-        if not name.startswith(_REAL_CONFIG_PROTECT_PREFIX):
-            continue
-        marker = os.path.join(_REAL_CONFIG_BACKUP_ROOT, name)
         try:
-            with open(marker, "r", encoding="utf-8") as f:
-                info = json.load(f)
-        except (OSError, ValueError):
-            continue
-        pid = info.get("pid")
-        if pid and _process_start_time(pid) is not None:
-            continue          # 那个会话还活着，别动它的保护
-        for entry in (info.get("entries") or {}).values():
-            if entry.get("readonly"):
-                continue      # 用户本来就设了只读：保持原样
-            try:
-                os.chmod(entry.get("path"), stat.S_IWRITE | stat.S_IREAD)
-            except (OSError, TypeError):
-                pass
-        try:
-            os.remove(marker)
+            os.unlink(tmp)
         except OSError:
             pass
 
 
-def _protect_real_config():
-    """真实配置设只读：写入失败会发生在真正的写入者进程里。"""
-    others = _live_protect_markers()
-    entries = {}
-    for key, path in _real_config_files().items():
-        try:
-            readonly = not (os.stat(path).st_mode & stat.S_IWRITE)
-        except OSError:
-            continue
-        # 另一个会话可能已经替我们上了只读：此刻看到的属性是「它改的」，
-        # 不是用户原值。原值只能从它的记录里继承，否则收尾时会替用户
-        # 永久保留只读（或提前拆掉别人的保护）。
-        for info in others:
-            inherited = (info.get("entries") or {}).get(key) or {}
-            if "readonly" in inherited:
-                readonly = bool(inherited["readonly"])
-                break
-        entries[key] = {"path": path, "readonly": readonly}
-        if not readonly:
-            try:
-                os.chmod(path, stat.S_IREAD)
-            except OSError as exc:
-                sys.stderr.write(
-                    f"[mbdsdr-guard] 真实配置写保护失败（{path}）：{exc}\n")
-    _REAL_CONFIG_GUARD["write_protected"] = entries
-    if not entries:
-        return
+def _load_protect_state():
+    state = _read_json(_protect_state_path())
+    entries = (state or {}).get("entries")
+    return entries if isinstance(entries, dict) and entries else None
+
+
+def _save_protect_state(entries):
+    path = _protect_state_path()
+    tmp = path + f".{os.getpid()}.tmp"
     try:
         os.makedirs(_REAL_CONFIG_BACKUP_ROOT, exist_ok=True)
-        with open(_protect_marker_path(), "w", encoding="utf-8") as f:
-            json.dump({"pid": os.getpid(), "entries": entries}, f,
-                      ensure_ascii=False, indent=2)
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump({"entries": entries}, f, ensure_ascii=False, indent=2)
+        os.replace(tmp, path)
+        return True
+    except OSError as exc:
+        sys.stderr.write(f"[mbdsdr-guard] 写保护台账写入失败，本次不上写保护"
+                         f"（上不了也拆不掉，比永久只读安全）：{exc}\n")
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        return False
+
+
+def _drop_protect_state():
+    try:
+        os.remove(_protect_state_path())
     except OSError:
         pass
 
 
-def _unprotect_real_config():
-    """会话结束恢复原属性；用户自己设的只读一律不碰。
+def _path_key(path):
+    """台账键 = 归一化绝对路径。
 
-    还有别的会话在跑时只删自己的标记、不动属性——收尾交给最后一个
-    退出的会话，否则中间那段窗口真实配置是可写的。
+    不能用「逻辑键（path/bm_path/gui_path）」做键：``MBDSDR_SETTINGS_DIR`` 会把
+    ``path`` 指到临时目录，父会话与子会话的同名逻辑键是**不同文件**；共用一格
+    会让子会话把父会话的路径改掉，收尾时恢复错文件、真文件永久只读。
+    """
+    return os.path.normcase(os.path.abspath(path))
+
+
+def _restore_entry(entry):
+    """按台账把一份文件的属性还回原样；用户自己设的只读一律不碰。"""
+    if not isinstance(entry, dict) or entry.get("readonly"):
+        return
+    path = entry.get("path")
+    if not path:
+        return
+    try:
+        os.chmod(path, stat.S_IWRITE | stat.S_IREAD)
+    except (OSError, TypeError):
+        pass
+
+
+def _restore_unreferenced(ledger, live_paths):
+    """只恢复「没有活会话再指着它」的条目，返回仍需保留的台账。
+
+    ``live_paths is None`` 表示有活会话的标记没带条目（旧版），此时无法细分，
+    整份台账都不许动——宁可晚一点恢复，也不拆别人正在用的保护。
+    """
+    if live_paths is None:
+        return ledger
+    kept = {}
+    for key, entry in ledger.items():
+        path = entry.get("path") if isinstance(entry, dict) else None
+        if path and _path_key(path) in live_paths:
+            kept[key] = entry
+        else:
+            _restore_entry(entry)
+    return kept
+
+
+def _live_protected_paths():
+    """活会话仍要求保持只读的路径集合；None = 无法细分（整份台账都别动）。"""
+    paths = set()
+    for info in _live_markers():
+        entries = info.get("entries")
+        if not isinstance(entries, dict) or not entries:
+            return None
+        for entry in entries.values():
+            if isinstance(entry, dict) and entry.get("path"):
+                paths.add(_path_key(entry["path"]))
+    return paths
+
+
+def _try_byte_lock(fh):
+    fh.seek(0)
+    if sys.platform == "win32":
+        import msvcrt
+        msvcrt.locking(fh.fileno(), msvcrt.LK_NBLCK, 1)
+    else:
+        import fcntl
+        fcntl.flock(fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+
+
+def _unbyte_lock(fh):
+    try:
+        fh.seek(0)
+        if sys.platform == "win32":
+            import msvcrt
+            msvcrt.locking(fh.fileno(), msvcrt.LK_UNLCK, 1)
+        else:
+            import fcntl
+            fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
+    except OSError:
+        pass
+
+
+@contextmanager
+def _protect_mutex(timeout=_PROTECT_MUTEX_TIMEOUT_S):
+    """串行化「删自己标记 → 查存活标记 → 恢复属性 → 删台账」。
+
+    没有这把互斥，两个会话同时退出会各自看见对方还活着的标记，于是都不恢复；
+    可两边都已经删掉了自己的标记——属性永久只读，事后 ``_recover_stale``
+    也没有标记可依。锁是字节锁，进程被杀时内核自动释放。
+    """
+    fh = None
+    acquired = False
+    try:
+        try:
+            os.makedirs(_REAL_CONFIG_BACKUP_ROOT, exist_ok=True)
+            fh = open(os.path.join(_REAL_CONFIG_BACKUP_ROOT,
+                                   _REAL_CONFIG_MUTEX_NAME), "a+b")
+            if os.fstat(fh.fileno()).st_size == 0:
+                fh.write(b"\0")
+                fh.flush()
+            deadline = time.monotonic() + timeout
+            while True:
+                try:
+                    _try_byte_lock(fh)
+                    acquired = True
+                    break
+                except OSError:
+                    if time.monotonic() >= deadline:
+                        break
+                    time.sleep(0.05)
+        except OSError as exc:
+            sys.stderr.write(f"[mbdsdr-guard] 写保护互斥锁不可用：{exc}\n")
+            if fh is not None:
+                fh.close()
+                fh = None
+        yield acquired
+    finally:
+        if fh is not None:
+            if acquired:
+                _unbyte_lock(fh)
+            fh.close()
+
+
+def _recover_stale_write_protection():
+    """清掉死会话留下的标记与只读属性（只动台账/标记记录过的文件）。
+
+    跨工作树生效：任何一棵树的会话启动，都会替整仓收拾上次崩溃的残局。
+    """
+    if not os.path.isdir(_REAL_CONFIG_BACKUP_ROOT):
+        return
+    with _protect_mutex():
+        ledger = dict(_load_protect_state() or {})
+        try:
+            names = os.listdir(_REAL_CONFIG_BACKUP_ROOT)
+        except OSError:
+            names = []
+        for name in names:
+            if not (name.startswith(_REAL_CONFIG_PROTECT_PREFIX)
+                    and name.endswith(".json")):
+                continue
+            marker = os.path.join(_REAL_CONFIG_BACKUP_ROOT, name)
+            info = _read_json(marker)
+            if info is None:
+                continue
+            if _pid_alive(info.get("pid"), info.get("pid_start_time")):
+                continue              # 那个会话还活着，别动它的保护
+            # 旧版会话只写标记、不写台账：按标记记录补进台账再统一恢复。
+            for inherited in (info.get("entries") or {}).values():
+                if (isinstance(inherited, dict) and inherited.get("path")
+                        and "readonly" in inherited):
+                    ledger.setdefault(_path_key(inherited["path"]), {
+                        "path": inherited["path"],
+                        "readonly": bool(inherited["readonly"])})
+            try:
+                os.remove(marker)
+            except OSError:
+                pass
+        kept = _restore_unreferenced(ledger, _live_protected_paths())
+        if kept:
+            _save_protect_state(kept)
+        else:
+            _drop_protect_state()
+
+
+def _protect_real_config():
+    """真实配置设只读：写入失败会发生在真正的写入者进程里。
+
+    台账与标记都在**全仓共享**目录，且按**绝对路径**记账：别的会话（含别的
+    worktree）先上了只读时，这里继承的是它台账里的**用户原值**，不是「此刻
+    看到的只读」——否则最后退出者会把别人的保护误当成用户设置永久保留。
+    """
+    files = _real_config_files()
+    if not files:
+        return
+    with _protect_mutex():
+        ledger = dict(_load_protect_state() or {})
+        if not ledger:
+            # 兼容旧版会话：只写标记、没写台账，原值从标记里继承（按路径对齐）。
+            for info in _live_markers():
+                for inherited in (info.get("entries") or {}).values():
+                    if (isinstance(inherited, dict) and inherited.get("path")
+                            and "readonly" in inherited):
+                        ledger.setdefault(_path_key(inherited["path"]), {
+                            "path": inherited["path"],
+                            "readonly": bool(inherited["readonly"])})
+        entries = {}
+        for key, path in files.items():
+            entry = ledger.get(_path_key(path))
+            if entry is None:
+                try:
+                    readonly = not (os.stat(path).st_mode & stat.S_IWRITE)
+                except OSError:
+                    continue
+                entry = {"path": path, "readonly": readonly}
+                ledger[_path_key(path)] = entry
+            entry["path"] = path      # 保留最初记录的 readonly 原值
+            entries[key] = entry      # 诊断/测试仍按逻辑键取
+        _REAL_CONFIG_GUARD["write_protected"] = entries
+        if not _save_protect_state(ledger):
+            # 台账落不了盘就等于收尾时不知道该恢复成什么：宁可不设只读，
+            # 也不留下一个没人拆的永久只读。
+            _write_marker(entries)
+            return
+        for entry in ledger.values():
+            if entry.get("readonly"):
+                continue
+            try:
+                os.chmod(entry["path"], stat.S_IREAD)
+            except OSError as exc:
+                sys.stderr.write(
+                    f"[mbdsdr-guard] 真实配置写保护失败（{entry['path']}）：{exc}\n")
+        _write_marker(entries)
+
+
+def _unprotect_real_config():
+    """恢复可写由**全局最后一个还指着该文件的会话**执行，不是「我结束了」。
+
+    判据：还有没有别的会话（任何工作树）的保护标记里记着这个路径。只要
+    还剩一个活会话指着它，就不许恢复——否则先退出的会话一收尾，另一个
+    会话剩下的时间全是裸奔窗口（1414→1207 的时间窗就是这么来的）。
+    删除 + 查询 + 恢复必须在共享互斥锁内完成，否则两个会话同时退出会
+    互相看见对方，都不恢复；而两边标记都已删掉，属性就成了永久只读。
     """
     entries = _REAL_CONFIG_GUARD.get("write_protected") or {}
     _REAL_CONFIG_GUARD["write_protected"] = {}
@@ -1222,15 +1564,24 @@ def _unprotect_real_config():
         os.remove(_protect_marker_path())
     except OSError:
         pass
-    if _live_protect_markers():
-        return
-    for entry in entries.values():
-        if entry.get("readonly"):
-            continue
-        try:
-            os.chmod(entry["path"], stat.S_IWRITE | stat.S_IREAD)
-        except OSError:
-            pass
+    with _protect_mutex() as locked:
+        if not locked:
+            sys.stderr.write(
+                "[mbdsdr-guard] 写保护互斥等不到（别的会话卡在 IO？）：本次不恢复"
+                "属性，留给下一个会话的 _recover_stale_write_protection 收尾。\n")
+            return
+        ledger = _load_protect_state()
+        if ledger is None:
+            # 台账丢了就退回本会话内存里的记录（按路径键重建）。
+            ledger = {_path_key(v["path"]): {"path": v["path"],
+                                             "readonly": bool(v.get("readonly"))}
+                      for v in entries.values()
+                      if isinstance(v, dict) and v.get("path")}
+        kept = _restore_unreferenced(ledger, _live_protected_paths())
+        if kept:
+            _save_protect_state(kept)
+        else:
+            _drop_protect_state()
 
 
 def _qt_lock_held_elsewhere():
