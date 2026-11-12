@@ -97,6 +97,37 @@ def test_amr_update_with_result(qapp):
 
 
 # ---------------------------------------------------------------------------
+# 3b. A01：带宽读数只有一个产生点（desktop/readouts.py）
+# ---------------------------------------------------------------------------
+def test_bw_readout_uses_readouts_single_source(qapp):
+    """就地拼 `f"{bw/1e3:.1f} kHz"` 时 500 Hz 显示 0.5 kHz、2.5 MHz 显示
+    2500.0 kHz、0 显示 0.0 kHz；唯一口径分别是 500 Hz / 2.500 MHz / ``--``。
+    """
+    import readouts
+
+    panel = NewSpacetimePanel()
+    try:
+        for bw in (0.0, 500.0, 12_500.0, 2_500_000.0):
+            panel.update_amr_result(AMRStreamResult(
+                signal_detected=True,
+                modulation="FM",
+                confidence=0.9,
+                bandwidth_hz=bw,
+                peak_count=1,
+                center_offset_hz=0.0,
+                noise_floor_db=-90.0,
+                signal_power_db=-30.0,
+                snr_db=60.0,
+                spectral_features={},
+                raw_label="FM",
+            ))
+            assert panel.bw_label.text() == readouts.format_bandwidth_hz(
+                bw, zero_text="--"), f"bw={bw} 的读数必须来自 readouts"
+    finally:
+        panel.close()
+
+
+# ---------------------------------------------------------------------------
 # 4. update_iq 喂合成 FM 音调，AMR 区域不再是"未检测到信号"
 # ---------------------------------------------------------------------------
 def test_feed_iq_triggers_analysis(qapp):

@@ -68,6 +68,9 @@ except ImportError:  # pragma: no cover - 直接以脚本方式运行时
         TimeSyncStatus, FreqOrbitPoint,
     )
 
+# 带宽读数唯一口径（≥1 kHz 一位小数 kHz，≥1 MHz 三位小数 MHz）。
+from readouts import format_bandwidth_hz  # noqa: E402
+
 # 采样步长引用 sat_passes 的单一事实源（不在本面板另写 60/2 之类字面量）。
 from mbdsdr_ai.sat_passes import PASS_COARSE_STEP_S  # noqa: E402
 
@@ -594,7 +597,8 @@ class NewSpacetimePanel(QWidget):
                 f"font-size: 20pt; font-weight: 700; color: {COLOR_PRIMARY};"
                 f"padding: 6px;")
             self.amr_conf_bar.setValue(int(round(max(0.0, min(1.0, result.confidence)) * 100)))
-            self.bw_label.setText(f"{result.bandwidth_hz / 1e3:.1f} kHz")
+            self.bw_label.setText(
+                format_bandwidth_hz(result.bandwidth_hz, zero_text="--"))
             self.peak_label.setText(str(result.peak_count))
             self.snr_label.setText(f"{result.snr_db:.1f} dB")
             self.offset_label.setText(f"{result.center_offset_hz:+.0f} Hz")
