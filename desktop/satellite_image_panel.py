@@ -24,9 +24,12 @@ NOAA APT / METEOR LRPT 云图解码面板：图像显示区 + 解码控制 + 统
 from __future__ import annotations
 
 import os
+import logging
 import sys
 import time
 from typing import List, Optional
+
+logger = logging.getLogger(__name__)
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -261,8 +264,11 @@ class SatelliteImagePanel(QWidget):
                     sr = float(json.load(f)["global"]["core:sample_rate"])
                 if sr > 0:
                     return sr, f"SigMF meta {sr / 1e6:.3f} MS/s"
-            except Exception:  # noqa: BLE001（meta 损坏/缺字段 → 诚实降级）
-                pass
+            except Exception as exc:  # noqa: BLE001（meta 损坏/缺字段 → 诚实降级）
+                # 状态行已明写「文件无有效 SigMF meta」，但「没有 meta」和
+                # 「meta 坏了」在界面上是同一句话——原因留在日志里供排查。
+                logger.warning("SigMF meta 不可用，回退手动采样率：%s | %s: %s",
+                               meta_path, type(exc).__name__, exc)
         sr = float(self.sr_spin.value()) * 1e6
         return sr, f"手动输入 {sr / 1e6:.3f} MS/s（文件无有效 SigMF meta）"
 
