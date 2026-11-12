@@ -119,13 +119,27 @@ class TestThreeColumnSplitter:
         assert main_window._main_splitter.handleWidth() == expect
 
     def test_three_panes_present(self, main_window):
-        """左栏 / 中栏 / 右栏三个子 widget 都在。"""
-        children = main_window._main_splitter.children()
-        widgets = [c for c in children if isinstance(c, QSplitter)]
+        """左栏 / 中栏 / 右栏三个子 widget 都在。
+
+        右栏外面还有一层 ``rightColumnHost``（c204e945 引入的两种形态容器：
+        QStackedLayout 里 0=展开态长列、1=48px 图标条）。这里必须点名这一层
+        本身：若只断言「right_tab 的父件就是 splitter 第 2 栏」，把这层拆掉
+        也照样绿，回归就被吃掉了。
+        """
         # addWidget 的三个直接子 widget
         sp = main_window._main_splitter
+        assert sp.count() == 3
         assert sp.widget(0) is main_window.left_tab
-        assert sp.widget(2) is main_window.right_tab.parent()
+        host = sp.widget(2)
+        assert host is main_window._right_stack_host
+        assert host.objectName() == "rightColumnHost"
+        assert host.layout() is main_window._right_stack
+        # 两种形态都在这一层里，顺序固定：展开态长列 / 收窄态图标条
+        assert main_window._right_stack.count() == 2
+        assert main_window._right_stack.widget(0) is main_window._right_col
+        assert main_window._right_stack.widget(1) is main_window.right_strip
+        # right_tab 不是 splitter 的直接子件：host → rightColumn → right_tab
+        assert main_window.right_tab.parent() is main_window._right_col
 
     def test_left_tab_has_sky_tabs(self, main_window):
         texts = [main_window.left_tab.tabText(i)
