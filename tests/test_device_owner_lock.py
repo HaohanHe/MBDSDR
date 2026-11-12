@@ -31,8 +31,10 @@ def _registry(tmp_path, monkeypatch):
     path = tmp_path / "device_owner.json"
     monkeypatch.setenv(sb.OWNER_REGISTRY_ENV, str(path))
     sb._OWNED_HERE.clear()
+    sb.set_process_owner("desktop")      # 进程级 owner 不跨用例泄漏
     yield path
     sb._OWNED_HERE.clear()
+    sb.set_process_owner("desktop")
 
 
 def _seed(path, device_id: str, pid: int, proc_start, owner: str = "desktop",
@@ -135,6 +137,23 @@ def test_pid_reuse_is_not_mistaken_for_same_holder(_registry):
     assert ok is True, f"pid 复用被误判为活持有者: {rec}"
 
 
+def test_same_owner_name_from_another_process_is_still_refused(_registry):
+    """owner 名相同 ≠ 同一进程：另一个桌面实例活着时也必须拒绝。
+
+    2026-11-12 实测：旧实现只要 owner 字符串相等就跳过判活，两个桌面进程
+    同时打开同一根 USB 棒而不报错。放行条件只能是「同 pid」。
+    """
+    child = _spawn_child()
+    try:
+        _seed(_registry, "rtl_0", child.pid,
+              sb._proc_start_time(child.pid), owner="desktop")
+        ok, holder = sb.claim_active_owner("desktop", "rtl_0")
+        assert ok is False, f"另一个桌面进程还活着却让位了: {holder}"
+        assert holder["pid"] == child.pid
+    finally:
+        _kill(child)
+
+
 # ------------------------------------------ 判活：没权限查 ≠ 进程不存在
 def test_open_process_error_classification():
     """只有 ERROR_INVALID_PARAMETER(87) 说明「进程不存在」。
@@ -218,36 +237,37 @@ def test_corrupt_registry_shows_up_in_evidence_scan(_registry):
 
 
 # ------------------------------------------------------------ manager 接线
-class _StubDevice:
-    def __init__(self, device_id: str) -> None:
-        self.device_id = device_id
-        self.name = device_id
-        self.type = "stub"
+class _StubBackend(sb.SDRBackend):
+    """真后端同构的假后端：占用判据走基类 ``connect()``，不碰任何硬件。
 
+    ``open_calls`` 只在通过占用判据之后才自增——「不许碰硬件」由此可断言，
+    而不是靠「connect 一次都没被调用」（判据已经下移到 connect 里面了）。
+    """
 
-class _StubStatus:
-    def __init__(self) -> None:
-        self.connected = False
-        self.error = ""
-
-
-class _StubBackend:
     def __init__(self, device_id: str, connect_ok: bool = True) -> None:
-        self.device = _StubDevice(device_id)
-        self.status = _StubStatus()
+        super().__init__(sb.SDRDevice(
+            device_type="stub",
+            device_id=device_id,
+            name=device_id,
+            frequency_range=(1.0e6, 6.0e9),
+            sample_rate_range=(1.0e5, 3.2e6),
+            max_gain=0.0,
+        ))
         self._connect_ok = connect_ok
         self.connect_calls = 0
+        self.open_calls = 0
 
-    def connect(self) -> bool:
-        self.connect_calls += 1
+    def _open_hardware(self) -> bool:
+        self.open_calls += 1
         if not self._connect_ok:
             self.status.error = "模拟连接失败"
             return False
         self.status.connected = True
         return True
 
-    def disconnect(self) -> None:
-        self.status.connected = False
+    def connect(self) -> bool:
+        self.connect_calls += 1
+        return super().connect()
 
     def readback_hw_state(self) -> None:
         return None
@@ -255,6 +275,7 @@ class _StubBackend:
 
 def _manager_with(*backends: _StubBackend) -> sb.SDRBackendManager:
     """不经 _discover（避免真开 USB），只装好切换所需的最小状态。"""
+    sb.set_process_owner(sb.AI_OWNER)
     mgr = sb.SDRBackendManager.__new__(sb.SDRBackendManager)
     mgr.backends = {b.device.device_id: b for b in backends}
     mgr.active_backend = None
@@ -292,7 +313,8 @@ def test_connect_refused_when_live_holder_exists(_registry):
         be = _StubBackend("rtl_0")
         mgr = _manager_with(be)
         assert mgr.connect("rtl_0") is False
-        assert be.connect_calls == 0, "被占用时不许碰硬件"
+        assert be.connect_calls == 1
+        assert be.open_calls == 0, "被占用时不许碰硬件"
         assert "持有" in mgr.last_connect_notice
         assert "桌面端" in mgr.last_connect_notice
     finally:
@@ -302,6 +324,7 @@ def test_connect_refused_when_live_holder_exists(_registry):
     mgr2 = _manager_with(be2)
     assert mgr2.connect("rtl_0") is True, "持有者已死，开流必须立即成功"
     assert be2.connect_calls == 1
+    assert be2.open_calls == 1
 
 
 def test_failed_connect_leaves_no_claim():

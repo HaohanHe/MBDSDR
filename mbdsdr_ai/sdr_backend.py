@@ -97,6 +97,22 @@ _OWNER_LABELS = {"desktop": "桌面端", "mbdsdr-ai": "AI/MCP 进程"}
 #: AI/MCP 侧登记占用时使用的 owner 名（桌面端用 "desktop"）。
 AI_OWNER = "mbdsdr-ai"
 
+#: 本进程登记占用时用的 owner 名。默认桌面端；AI/MCP 进程构造
+#: ``SDRBackendManager`` 时改为 ``AI_OWNER``。放在模块级是因为登记发生在
+#: ``SDRBackend.connect()``（开硬件的那一处），那里拿不到「谁在调我」。
+_PROCESS_OWNER = "desktop"
+
+
+def process_owner() -> str:
+    """本进程在占用登记里的 owner 名。"""
+    return _PROCESS_OWNER
+
+
+def set_process_owner(owner: str) -> None:
+    """声明本进程的 owner 名（AI/MCP 侧在构造后端管理器时调用一次）。"""
+    global _PROCESS_OWNER
+    _PROCESS_OWNER = str(owner or "desktop")
+
 
 class AmbiguousOwners:
     """「同一组备用标识命中多条登记」的结果标记。
@@ -527,7 +543,10 @@ def claim_active_owner(owner: str, device_id: str,
             owners, device_id, allow_alias_match)
         if kind == "ambiguous":
             return False, AmbiguousOwners(device_id, candidates)
-        if cur is not None and str(cur.get("owner")) != str(owner):
+        if cur is not None:
+            # 放行条件只有「同 pid」（本进程自己 claim 自己）。**不能**按
+            # owner 名相等放行：两个桌面实例 owner 都是 "desktop"，按名放行
+            # 会让它们同时打开同一根 USB 棒（2026-11-12 实测）。
             try:
                 cur_pid = int(cur.get("pid") or 0)
             except (TypeError, ValueError):
@@ -585,36 +604,6 @@ def release_active_owner(owner: str, device_id: str = "") -> bool:
     for dev in released:
         _OWNED_HERE.discard((str(owner), dev))
     return bool(released)
-
-
-def peer_owner_message(device_id: str,
-                       allow_alias_match: bool = True) -> Optional[str]:
-    """**开设备之前**查登记：被别的进程持有就返回可执行提示，否则 ``None``。
-
-    互斥判据的顺序必须是「登记优先、libusb 错误靠后」：占用是我们自己的
-    确定状态，libusb 的 ACCESS 错误只是现象。反过来先 open、失败后再解释，
-    用户会被引去改 udev / 装 WinUSB，而真正要做的是去另一个进程里释放设备。
-
-    本进程自己登记的（桌面面板 claim 后自己 connect、AI claim 后自己 connect）
-    不算冲突。登记文件读不了时按「无法证明被占」继续——不能让登记表自身的
-    I/O 故障把所有硬件都锁死。
-    """
-    try:
-        holder = get_active_owner(device_id, allow_alias_match)
-    except Exception as e:  # noqa: BLE001 - 登记读不了不拦硬件
-        logger.debug("连接前读取占用登记失败（按未占用继续）: %s", e)
-        return None
-    if holder is None:
-        return None
-    if isinstance(holder, AmbiguousOwners):
-        return owner_conflict_text(holder)
-    try:
-        pid = int(holder.get("pid") or 0)
-    except (TypeError, ValueError):
-        pid = 0
-    if pid and pid == _SELF_PID:
-        return None             # 自己占的（本进程已 claim），放行
-    return owner_conflict_text(holder)
 
 
 def _release_owned_here_at_exit() -> None:
@@ -1008,8 +997,100 @@ class SDRBackend:
         self._doppler_comp_enabled = False
         self._doppler_error = ""
 
+        # ── 跨进程占用登记：claim 在 connect（开硬件的那一处），release 在 disconnect ──
+        self._claimed_device_id = ""
+        self._claimed_owner = ""
+        #: 正在开硬件（连接过程内的清理性 disconnect 不提前归还占用）。
+        self._opening_hardware = False
+        #: 最近一次 connect 因占用被拒的原始文案（空=不是占用冲突）。
+        self.last_claim_conflict = ""
+        # 身份元数据：枚举 ``_discover`` 与工厂 ``build_backend_for_device``
+        # 按统一身份键填好；缺省时退回 device_id + 精确匹配。
+        self._owner_device_id = ""
+        self._identity_aliases: Optional[List[str]] = None
+        self._identity_quality: Optional[str] = None
+
+    # ── 开硬件前的占用判据：唯一入口，不在各 UI 入口各自 claim ──
+    # 桌面端四条路（设备面板 / 连接对话框 / 自动枚举 / 模块面板）与 AI 侧
+    # （SDRBackendManager._activate）最终都收敛到 ``connect()``。判据放这里，
+    # 以后新增第五个入口也不必记得做什么；放回某个 UI 槽函数则必然漏掉别的
+    # 入口（2026-11-12 实测：面板那条有 claim，另外三条直接 open，双开）。
+    def hardware_owner_identity(self) -> Optional[Tuple[str, Optional[List[str]], bool]]:
+        """要打开的硬件身份：(主键, 别名, 是否允许别名匹配)；``None``=不参与互斥。
+
+        默认用 ``device.device_id``。网络源（rtl_tcp / SpyServer / IQ 文件）不
+        占用本地硬件，由子类返回 ``None``。
+        """
+        key = getattr(self, "_owner_device_id", "") or self.device.device_id
+        if not key:
+            return None
+        return (key,
+                getattr(self, "_identity_aliases", None),
+                # serial/uri 可得时它就是身份：换 USB 口不该变成另一台设备，
+                # 这种身份只按主键匹配，别名不参与（只在读不到 serial 时才用别名）。
+                getattr(self, "_identity_quality", None) != IDENTITY_STABLE)
+
+    def _claim_hardware(self) -> bool:
+        """开硬件前声明占用；被别的进程持有时写 status 并返回 ``False``。
+
+        本进程自己已登记的占用不需要额外放行判据：``claim_active_owner``
+        对同 pid 直接允许覆盖，所以「自己 claim 自己 connect」天然成立。
+        """
+        identity = self.hardware_owner_identity()
+        self.last_claim_conflict = ""
+        if identity is None:
+            return True
+        key, aliases, allow_alias_match = identity
+        owner = process_owner()
+        ok, holder = claim_active_owner(
+            owner, key, aliases=aliases, allow_alias_match=allow_alias_match)
+        if not ok:
+            text = owner_conflict_text(holder)
+            self.last_claim_conflict = text
+            self.status.connected = False
+            self.status.link_state = "failed"
+            self.status.error_category = "busy"
+            self.status.error = text
+            logger.warning("设备已被其他进程持有，未发起 open：%s", text)
+            return False
+        self._claimed_device_id, self._claimed_owner = key, owner
+        return True
+
+    def _release_hardware(self) -> None:
+        """归还占用登记；没持有过则什么都不做（幂等）。"""
+        key, owner = self._claimed_device_id, self._claimed_owner
+        if not key:
+            return
+        self._claimed_device_id, self._claimed_owner = "", ""
+        try:
+            release_active_owner(owner, key)
+        except Exception as e:  # noqa: BLE001 - 释放失败不阻塞断开
+            logger.debug("释放设备占用登记失败(忽略): %s", e)
+
     def connect(self) -> bool:
-        """连接设备。"""
+        """统一入口：**先声明占用、再开硬件**，任何失败路径都归还占用。
+
+        判据顺序不能反：占用是我们自己的确定状态；先 open、失败后再解释，
+        libusb 的 ACCESS 错误会被桌面端分类表判成「权限不足」，把用户引去
+        改 udev / 装 WinUSB，而真实原因是另一个进程持有设备。
+        """
+        if not self._claim_hardware():
+            return False
+        self._opening_hardware = True
+        try:
+            ok = self._open_hardware()
+        except Exception:
+            self._opening_hardware = False
+            self._release_hardware()
+            raise
+        self._opening_hardware = False
+        if not ok:
+            # 一次失败的连接不能把这台设备锁到进程退出。
+            self._release_hardware()
+        return ok
+
+    def _open_hardware(self) -> bool:
+        """真正打开硬件的实现（子类覆写）；由 :meth:`connect` 统一加占用判据。"""
         raise NotImplementedError
 
     def disconnect(self):
@@ -1034,6 +1115,10 @@ class SDRBackend:
         # 校准的，复用会把旧静噪口径带进新流（热插拔实测第 2 轮即残留）。
         # 重连由 _ensure_receive_chain() 按当时 status 全新构建。
         self._receive_chain = None
+        # 归还跨进程占用登记（只有 connect 成功才持有）。连接过程中的清理性
+        # disconnect 不在这里抢着归还——那个占用属于正在进行的 connect。
+        if not self._opening_hardware:
+            self._release_hardware()
 
     def set_frequency(self, freq_hz: float) -> bool:
         """设置中心频率。失败时回滚 status，不留"已设置"假状态。"""
@@ -2656,7 +2741,20 @@ class RTLSDRBackend(SDRBackend):
             "自研 TCP 客户端；disconnect 时回收该进程。", port)
         return True
 
-    def connect(self) -> bool:
+    def hardware_owner_identity(self) -> Optional[Tuple[str, Optional[List[str]], bool]]:
+        # rtl_tcp 网络源不占用本机 USB 设备，不参与设备互斥。
+        if self._host is not None:
+            return None
+        if getattr(self, "_owner_device_id", ""):
+            return super().hardware_owner_identity()
+        # 直接构造（未经枚举/工厂）时只能按枚举序号算键——与
+        # ``device_identity_key`` 在无序列号时的口径一致。
+        key = f"rtlsdr|index:{int(self._device_index)}"
+        return key, [key], True
+
+    def _open_hardware(self) -> bool:
+        # 占用判据在基类 ``connect()`` 里、先于本方法执行（见
+        # ``SDRBackend.connect``）；这里只管真正打开硬件。
         # 重连/热插拔前先干净释放旧句柄与旧生产者线程：绝不带着已失效的
         # usb 句柄去 open 新设备（否则会出现"重插后连上但收不到数据"的假状态）。
         if self._ring_reader is not None or self._sdr is not None:
@@ -2664,19 +2762,6 @@ class RTLSDRBackend(SDRBackend):
                 self.disconnect()
             except Exception as _e:
                 logger.debug("重连前释放旧句柄失败(忽略): %s", _e)
-        # 互斥判据：先查占用登记，再碰硬件。顺序不能反——先 open 失败后再
-        # 解释，libusb 的 ACCESS 错误会被桌面端的分类表判成「权限不足」，
-        # 把用户引去改 udev / 装 WinUSB，而真实原因是另一个进程持有设备。
-        if self._host is None:
-            _conflict = peer_owner_message(
-                f"rtlsdr|index:{int(self._device_index)}")
-            if _conflict:
-                self.status.connected = False
-                self.status.link_state = "failed"
-                self.status.error_category = "busy"
-                self.status.error = _conflict
-                logger.warning("设备已被其他进程持有，未发起 open：%s", _conflict)
-                return False
         try:
             if self._host is not None:
                 # rtl_tcp 网络模式统一走本仓库自研、MIT、无 GPL 的 RtlTcpClient
@@ -3664,7 +3749,19 @@ class HackRFBackend(SDRBackend):
         # （GQRX ioconfig 里 HackRF start_sample_rate=8e6）。
         self.status.sample_rate_hz = 8_000_000.0
 
-    def connect(self) -> bool:
+    def hardware_owner_identity(self) -> Optional[Tuple[str, Optional[List[str]], bool]]:
+        if getattr(self, "_owner_device_id", ""):
+            return super().hardware_owner_identity()
+        key = f"hackrf|index:{int(self._device_index)}"
+        return key, [key], True
+
+    def _open_hardware(self) -> bool:
+        """真正打开 HackRF。
+
+        占用判据由基类 ``connect()`` 先做（**假后端已验**：判据生效、不进入
+        libhackrf、冲突文案不被桌面二次分类）。真机上的收发链路
+        **代码已接、真机未验**。
+        """
         from .hackrf_params import HackRFBackend as _CtlsBackend
         if self._hackrf is None:
             self._hackrf = _CtlsBackend(self._device_index, self._params)
@@ -4248,7 +4345,20 @@ class SoapySDRBackend(SDRBackend):
     # ------------------------------------------------------------------
     # 连接 / 断开：真实打开，失败返回 False（绝不切 mock 报成功）
     # ------------------------------------------------------------------
-    def connect(self) -> bool:
+    def hardware_owner_identity(self) -> Optional[Tuple[str, Optional[List[str]], bool]]:
+        if getattr(self, "_owner_device_id", ""):
+            return super().hardware_owner_identity()
+        if self._serial:
+            return f"{self._driver}|serial:{self._serial}", None, False
+        return f"{self._driver}|label:{self.device.name}", None, True
+
+    def _open_hardware(self) -> bool:
+        """真正打开 SoapySDR 设备。
+
+        占用判据由基类 ``connect()`` 先做（**假后端已验**：判据生效、不进入
+        SoapySDR.Device、冲突文案不被桌面二次分类）。经 Soapy 打开的具体
+        硬件驱动（hackrf/usrp/...）**代码已接、真机未验**。
+        """
         try:
             import SoapySDR
         except Exception as e:
@@ -4647,7 +4757,19 @@ class USRPBackend(SDRBackend):
         # （GQRX ioconfig 里 USRP start_sample_rate=1e6）。
         self.status.sample_rate_hz = 1_000_000.0
 
-    def connect(self) -> bool:
+    def hardware_owner_identity(self) -> Optional[Tuple[str, Optional[List[str]], bool]]:
+        if getattr(self, "_owner_device_id", ""):
+            return super().hardware_owner_identity()
+        key = f"usrp|label:{self._device_args or 'auto'}"
+        return key, [key], True
+
+    def _open_hardware(self) -> bool:
+        """真正打开 USRP。
+
+        占用判据由基类 ``connect()`` 先做（**假后端已验**：判据生效、不进入
+        uhd.MultiUSRP、冲突文案不被桌面二次分类）。真机 UHD 链路
+        **代码已接、真机未验**。
+        """
         try:
             import uhd
             self._usrp = uhd.usrp.MultiUSRP(self._device_args)
@@ -6032,6 +6154,9 @@ class SDRBackendManager:
     _DISCOVER_TTL_S = 5.0
 
     def __init__(self):
+        # 本进程是 AI/MCP 侧：后端 connect 里的占用登记要记在 AI 名下，
+        # 否则桌面端会看到「由其他程序持有」而不知道该去哪释放。
+        set_process_owner(AI_OWNER)
         self.backends: Dict[str, SDRBackend] = {}
         self.active_backend: Optional[SDRBackend] = None
         # VFO（可变频率振荡器）管理：当前中心频点 + 多个监听频率预设
@@ -6319,27 +6444,8 @@ class SDRBackendManager:
                 self.last_conflict = ""
                 return True
             self._switch_in_progress = True
-            claimed_id = ""
             try:
-                # 先声明占用、再碰硬件：别的进程（桌面端/另一个 AI）占着这台
-                # 设备时必须在这里拒绝，不能等 USB open 失败再猜原因。
-                new_did = backend.device.device_id
-                claimed, holder = claim_active_owner(
-                    AI_OWNER, new_did,
-                    aliases=getattr(backend, "_identity_aliases", None),
-                    # serial/uri 可得时它就是身份：换 USB 口不该变成另一台设备，
-                    # 所以这种身份只按主键匹配，别名不参与。
-                    allow_alias_match=(getattr(backend, "_identity_quality", None)
-                                       != IDENTITY_STABLE))
-                if not claimed:
-                    self.last_conflict = owner_conflict_text(holder)
-                    self.last_connect_notice = self.last_conflict
-                    logger.warning("激活被拒：%s", self.last_conflict)
-                    return False
-                claimed_id = new_did
                 old = self.active_backend
-                old_did = (old.device.device_id
-                           if old is not None and old is not backend else "")
                 if old is not None and old is not backend:
                     detail = ""
                     try:
@@ -6354,8 +6460,17 @@ class SDRBackendManager:
                         return False
                     self.active_backend = None
                 if not backend.connect():
-                    reason = backend.status.error or "connect 返回 False"
+                    # 占用判据在下移到 ``SDRBackend.connect()`` 之后：被别的
+                    # 进程持有时这里拿到的是那条「谁占着、怎么办」的原文，
+                    # 必须原样交给工具层，不能包成泛化的「激活失败」。
+                    conflict = getattr(backend, "last_claim_conflict", "")
                     self.active_backend = None
+                    if conflict:
+                        self.last_conflict = conflict
+                        self.last_connect_notice = conflict
+                        logger.warning("激活被拒：%s", conflict)
+                        return False
+                    reason = backend.status.error or "connect 返回 False"
                     self.last_conflict = (f"激活 {backend.device.device_id} 失败: "
                                           f"{reason}")
                     logger.warning(self.last_conflict)
@@ -6363,9 +6478,8 @@ class SDRBackendManager:
                 self.active_backend = backend
                 self.switch_generation += 1
                 self.last_conflict = ""
-                claimed_id = ""          # 已生效：占用保持到 disconnect/切换
-                if old_did:
-                    release_active_owner(AI_OWNER, old_did)
+                # 旧源的占用由它自己的 disconnect（_release_backend）归还，
+                # 这里不再二次 release——两层都留，将来改一层会悄悄不一致。
                 # 连接成功后从硬件回读实际参数，对齐软件状态与硬件实际
                 try:
                     backend.readback_hw_state()
@@ -6373,9 +6487,6 @@ class SDRBackendManager:
                     logger.warning(f"硬件回读失败（不影响连接）: {e}")
                 return True
             finally:
-                if claimed_id:
-                    # 任何失败路径都不留占用记录，否则下一个进程会被自己人挡。
-                    release_active_owner(AI_OWNER, claimed_id)
                 self._switch_in_progress = False
 
     def disconnect(self):
@@ -6387,8 +6498,7 @@ class SDRBackendManager:
                 if not self._release_backend(old):
                     # 句柄未释放 = 设备可能还开着：保留占用登记，别让别人接手。
                     self.last_conflict = f"旧源 {did} 未完全释放"
-                else:
-                    release_active_owner(AI_OWNER, did)
+                # 释放成功时占用由 backend.disconnect() 自己归还（唯一一处）。
             self.active_backend = None
 
     def switch_device(self, device_id: str) -> bool:
@@ -6433,10 +6543,7 @@ class SDRBackendManager:
                 old.disconnect()
             except Exception:
                 pass
-            # 从真实硬件切到离线回放：硬件句柄已释放，占用登记也要还回去
-            # （IQ 文件不是硬件，不上报占用）。
-            if getattr(old.device, "device_type", "") != "iq_file":
-                release_active_owner(AI_OWNER, old.device.device_id)
+            # 硬件占用由 old.disconnect() 自己归还（IQ 文件不是硬件，不登记）。
         self.backends[be.device.device_id] = be
         self.active_backend = be
         return be
@@ -6771,6 +6878,28 @@ def enumerate_all_sdr_devices() -> List[Dict[str, Any]]:
 
 
 def build_backend_for_device(dev: Dict[str, Any]) -> Optional[SDRBackend]:
+    """按枚举条目构造后端，并把**统一身份键/别名**交给后端。
+
+    占用判据在 ``SDRBackend.connect()``（开硬件的那一处）。后端必须知道
+    「这台设备在登记表里叫什么」：桌面端四条路与 AI 侧都从同一个
+    ``device_identity_key`` 算键，这里一次填好，各入口不必记得做什么。
+    撞键加 ``#n`` 用的是整份枚举的结果；单条构造拿不到 ``#n``，撞键时只会
+    退化成更保守的粗粒度互斥（宁可多拦，不可双开）。
+    """
+    backend = _build_backend_raw(dev)
+    if backend is None:
+        return None
+    try:
+        key, quality, _warning = device_identity_key(dev)
+        backend._owner_device_id = key
+        backend._identity_aliases = device_identity_aliases(dev)
+        backend._identity_quality = quality
+    except Exception as e:  # noqa: BLE001 - 身份元数据缺了仍可连（退回 device_id）
+        logger.debug("填充设备身份元数据失败(忽略): %s", e)
+    return backend
+
+
+def _build_backend_raw(dev: Dict[str, Any]) -> Optional[SDRBackend]:
     """根据 enumerate_all_sdr_devices() 产出的设备 dict 构造对应后端实例。
 
     真正 connect 的成败由后端自己负责，本函数不假装成功。

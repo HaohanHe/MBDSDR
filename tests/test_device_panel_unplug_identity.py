@@ -134,24 +134,16 @@ def test_panel_connect_identity_comes_from_request_not_combo(panel):
     assert seen, "身份应绑定实际连接的 A，而不是后来选中的 B"
 
 
-# ---------------------------------------------------- 跨进程占用登记（连/断）
-def _record_owner_calls(monkeypatch, dp, claim_result=(True, {}), ):
-    """把占用登记的 claim/release 换成记录器，不碰真实登记文件。"""
-    calls = []
-    monkeypatch.setattr(
-        dp, "_claim_owner",
-        lambda owner, dev, aliases=None, allow_alias_match=True: (
-            calls.append(("claim", owner, dev)) or claim_result))
-    monkeypatch.setattr(
-        dp, "_release_owner",
-        lambda owner, dev: (calls.append(("release", owner, dev)) or True))
-    return calls
+# ------------------------------------ 跨进程占用：面板不再自己 claim（唯一判据在后端）
+# 2026-11-12 缺陷：claim 放在 UI 入口（本面板）时，另外三条连接路径（连接
+# 对话框 / 自动枚举 / 模块面板）不经过它，同一台设备会被打开两次而且不报错。
+# 判据已下移到 ``SDRBackend.connect()``；这里锁死「面板不再写登记」——
+# 若有人把 claim 加回面板，两层会在改一层时悄悄不一致。
+def test_panel_connect_does_not_claim_owner(panel, monkeypatch, tmp_path):
+    import mbdsdr_ai.sdr_backend as sb
+    monkeypatch.setenv(sb.OWNER_REGISTRY_ENV, str(tmp_path / "owner.json"))
+    sb._OWNED_HERE.clear()
 
-
-def test_connect_claims_owner_and_disconnect_releases(panel, monkeypatch):
-    """连上必须登记占用；断开必须释放——否则设备被锁到进程退出。"""
-    import desktop.device_panel as dp
-    calls = _record_owner_calls(monkeypatch, dp)
     panel._apply_devices([_dev(0, serial="A-0001", label="RTL-A")])
     key = panel._identities[0].key
     panel.sr_edit.setText("2048000")
@@ -161,59 +153,26 @@ def test_connect_claims_owner_and_disconnect_releases(panel, monkeypatch):
         lambda dev: panel.set_connected(True, dev.get("label", ""), dev))
 
     panel._on_connect_clicked()
-    assert ("claim", dp._DESKTOP_OWNER, key) in calls
+    assert panel._current_dev_key == key
+    assert sb.get_active_owner(key) is None, \
+        "UI 入口不许再写占用登记（判据只在后端 connect）"
 
     panel.set_connected(False)
-    assert ("release", dp._DESKTOP_OWNER, key) in calls
+    assert sb.get_active_owner(key) is None
+    sb._OWNED_HERE.clear()
 
 
-def test_claim_conflict_refuses_connect_and_says_who_holds(panel, monkeypatch, caplog):
-    """占用登记被别的进程持有时：不发起连接，并把「谁占着」原样说明。"""
-    import desktop.device_panel as dp
-    holder = {"owner": "mbdsdr-ai", "device_id": "rtlsdr|serial:A-0001", "pid": 4242}
-    _record_owner_calls(monkeypatch, dp, claim_result=(False, holder))
-    warned = []
-    monkeypatch.setattr(dp.QMessageBox, "warning",
-                        lambda *args, **kwargs: warned.append(args))
-    panel._apply_devices([_dev(0, serial="A-0001", label="RTL-A")])
-    panel.sr_edit.setText("2048000")
-    panel.gain_edit.setText("20")
-    panel.ppm_edit.setText("0")
-    requested = []
-    panel.connect_requested.connect(requested.append)
+def test_set_connected_true_does_not_claim_owner(panel, monkeypatch, tmp_path):
+    """模块面板发起的连接同样由后端登记，面板不补登记。"""
+    import mbdsdr_ai.sdr_backend as sb
+    monkeypatch.setenv(sb.OWNER_REGISTRY_ENV, str(tmp_path / "owner.json"))
+    sb._OWNED_HERE.clear()
 
-    with caplog.at_level("WARNING"):
-        panel._on_connect_clicked()
-
-    assert not requested, "占用冲突时必须拒绝发起连接"
-    assert "被占用" in panel.status_label.text()
-    assert warned, "占用冲突必须弹窗说明，不能只写日志"
-    assert "AI" in str(warned[0]) and "4242" in str(warned[0])
-
-
-def test_failed_connect_releases_claim(panel, monkeypatch):
-    """连不上（没人回调 set_connected(True)）时必须立刻释放占用，不许锁死。"""
-    import desktop.device_panel as dp
-    calls = _record_owner_calls(monkeypatch, dp)
-    panel._apply_devices([_dev(0, serial="A-0001", label="RTL-A")])
-    key = panel._identities[0].key
-    panel.sr_edit.setText("2048000")
-    panel.gain_edit.setText("20")
-    panel.ppm_edit.setText("0")
-    panel.connect_requested.connect(lambda dev: None)   # 主窗口连接失败
-
-    panel._on_connect_clicked()
-    assert ("claim", dp._DESKTOP_OWNER, key) in calls
-    assert ("release", dp._DESKTOP_OWNER, key) in calls
-
-
-def test_set_connected_true_registers_owner_without_panel_click(panel, monkeypatch):
-    """模块面板发起的连接不经 _on_connect_clicked，set_connected(True) 要补登记。"""
-    import desktop.device_panel as dp
-    calls = _record_owner_calls(monkeypatch, dp)
     a = _dev(0, serial="A-0001", label="RTL-A")
     panel.set_connected(True, device=a)
-    assert ("claim", dp._DESKTOP_OWNER, panel._current_dev_key) in calls
+    assert panel._current_dev_key
+    assert sb.get_active_owner(panel._current_dev_key) is None
+    sb._OWNED_HERE.clear()
 
 
 # ------------------------------------------------ 枚举失败 != 没插设备（W92 patch）
