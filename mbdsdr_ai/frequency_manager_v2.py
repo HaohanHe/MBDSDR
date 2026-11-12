@@ -34,13 +34,56 @@ import json
 import logging
 import os
 import tempfile
+import time
 from dataclasses import dataclass, field, asdict
 from typing import Dict, List, Optional, Tuple
+
+from .corrupt_evidence import REASON_SUFFIX, write_reason
 
 logger = logging.getLogger(__name__)
 
 #: v2 文件格式的版本号；写入与读取必须一致。
 FILE_VERSION = 2
+
+
+def _same_content_backup(path: str) -> Optional[str]:
+    """同目录下是否已有一份与当前文件字节相同的 ``*.corrupt-*`` 备份。"""
+    directory = os.path.dirname(os.path.abspath(path))
+    prefix = os.path.basename(path) + ".corrupt-"
+    try:
+        names = sorted(
+            (n for n in os.listdir(directory)
+             if n.startswith(prefix) and not n.endswith(REASON_SUFFIX)),
+            reverse=True)
+        if not names:
+            return None
+        candidate = os.path.join(directory, names[0])
+        if os.path.getsize(candidate) != os.path.getsize(path):
+            return None
+        with open(candidate, "rb") as a, open(path, "rb") as b:
+            return candidate if a.read() == b.read() else None
+    except OSError:
+        return None
+
+
+def _backup_corrupt(path: str) -> Optional[str]:
+    """把损坏书签文件改名为 ``*.corrupt-<时间戳>``，返回备份路径（失败 None）。
+
+    同一份内容只保留一份副本；改名后原路径不再被读取，也不会被整表写回覆盖。
+    """
+    dst = _same_content_backup(path)
+    if dst is None:
+        stamp = time.strftime("%Y%m%d-%H%M%S")
+        dst = f"{path}.corrupt-{stamp}"
+        n = 0
+        while os.path.exists(dst):
+            n += 1
+            dst = f"{path}.corrupt-{stamp}-{n}"
+    try:
+        os.replace(path, dst)
+    except OSError:
+        return None
+    return dst
 
 
 class UnsupportedBookmarkVersion(ValueError):
@@ -100,6 +143,12 @@ class FrequencyManagerV2:
         self.groups: Dict[str, Dict[str, str]] = json.loads(json.dumps(DEFAULT_GROUPS))
         # group_key -> list[BookmarkV2]
         self.bookmarks: Dict[str, List[BookmarkV2]] = {g: [] for g in self.groups}
+        #: 读不了/损坏的证据；为空表示本次读取没有异常。
+        self.last_error: Optional[str] = None
+        #: 已落盘的损坏备份路径。
+        self.corrupt_backups: List[str] = []
+        #: 读失败且无法备份时置位：整表写回必须拒绝，避免拿空库盖掉原件。
+        self._save_blocked = False
         self.load()
 
     # ------------------------------------------------------------------
@@ -107,17 +156,26 @@ class FrequencyManagerV2:
     # ------------------------------------------------------------------
     def load(self) -> None:
         if not os.path.exists(self.path):
-            return
+            return  # 首次运行：空库是正常状态，不是损坏
         try:
             with open(self.path, "r", encoding="utf-8") as f:
                 data = json.load(f)
-        except (json.JSONDecodeError, OSError) as exc:
-            # 读失败不静默：保留证据、保持空库，而且绝不回写覆盖原文件。
-            logger.warning("书签文件读取失败（%s）：%s；保持空库，不覆盖原文件",
-                           exc.__class__.__name__, self.path)
+        except FileNotFoundError:
+            return  # 竞态：判存在后刚被删，等价于首次运行
+        except OSError as exc:
+            # 读不了 ≠ 损坏：不备份、不改名，但本次绝不允许整表写回。
+            self._save_blocked = True
+            self.last_error = f"{type(exc).__name__}: {exc}"
+            logger.error("书签文件读取失败（%s）：%s；保持空库，且本次拒绝写回，"
+                         "避免覆盖可能仍可恢复的文件", type(exc).__name__, self.path)
+            return
+        except ValueError as exc:
+            # 真损坏（JSON 解析失败/编码错误）：先备份 + 理由。
+            self._quarantine(exc)
             return
         if not isinstance(data, dict):
-            logger.warning("书签文件根节点不是对象，拒绝读取：%s", self.path)
+            self._quarantine(
+                TypeError(f"根节点不是对象，而是 {type(data).__name__}"))
             return
 
         version = data.get("version")
@@ -125,7 +183,11 @@ class FrequencyManagerV2:
             # 旧文件没有 version 字段：按 v1 语义读取，读出后补写 version=2，
             # 让下一次读取走显式校验而不是再次猜测。
             logger.info("书签文件缺少 version 字段，按 v1 语义读取：%s", self.path)
-            self._apply_payload(data)
+            skipped = self._apply_payload(data)
+            if skipped:
+                self._quarantine(ValueError(f"{skipped} 条书签/分组无法解析"))
+                if self._save_blocked:
+                    return
             try:
                 self.save()
                 logger.info("已补写 version=%s：%s", FILE_VERSION, self.path)
@@ -139,25 +201,100 @@ class FrequencyManagerV2:
             message = (f"书签文件 version={version!r} 不受支持（只接受 "
                        f"{FILE_VERSION}）：{self.path}；已拒绝读取，原文件保持不动")
             logger.error(message)
+            # 拒绝读取之后任何 save() 都不得整表覆盖这个更新版本的文件。
+            self._save_blocked = True
+            self.last_error = message
             raise UnsupportedBookmarkVersion(message)
 
-        self._apply_payload(data)
+        skipped = self._apply_payload(data)
+        if skipped:
+            self._quarantine(ValueError(f"{skipped} 条书签/分组无法解析"))
 
-    def _apply_payload(self, data: dict) -> None:
-        """把已通过版本校验（或 v1 迁移）的载荷装入内存。"""
-        for g, meta in data.get("groups", {}).items():
-            self.groups[g] = dict(meta)
+    def _quarantine(self, exc: Exception) -> bool:
+        """备份损坏原文并写一行理由；备份失败则置位拒写并返回 False。"""
+        backup = _backup_corrupt(self.path)
+        reason = f"{type(exc).__name__}: {exc}"
+        if backup is None:
+            self._save_blocked = True
+            self.last_error = f"{reason}（无法备份：{self.path}）"
+            logger.error("书签文件损坏且备份失败，本次拒绝写回：%s | %s",
+                         self.path, reason)
+            return False
+        write_reason(backup, f"书签文件读取失败（{reason}）：{self.path}", logger)
+        self.corrupt_backups.append(backup)
+        self.last_error = reason
+        logger.warning("书签文件损坏/不可解析，已备份为 %s | %s", backup, reason)
+        return True
+
+    def _apply_payload(self, data: dict) -> int:
+        """把已通过版本校验（或 v1 迁移）的载荷装入内存，返回无法解析的条目数。"""
+        skipped = 0
+        groups = data.get("groups", {})
+        if not isinstance(groups, dict):
+            skipped += 1
+            groups = {}
+        for g, meta in groups.items():
+            if isinstance(meta, dict):
+                self.groups[g] = dict(meta)
+            else:
+                skipped += 1
         self.bookmarks = {g: [] for g in self.groups}
-        for bm in data.get("bookmarks", []):
+        raw_bookmarks = data.get("bookmarks", [])
+        if not isinstance(raw_bookmarks, list):
+            skipped += 1
+            raw_bookmarks = []
+        for bm in raw_bookmarks:
             try:
                 b = BookmarkV2.from_dict(bm)
-            except KeyError:
+            except (KeyError, TypeError, ValueError):
+                # 解析不了的条目不能悄悄丢掉：由 load() 备份原件并留理由。
+                skipped += 1
                 continue
             if b.group not in self.bookmarks:
                 self.bookmarks[b.group] = []
             self.bookmarks[b.group].append(b)
+        return skipped
+
+    def _ensure_save_target_healthy(self) -> None:
+        """写回前再确认目标文件可读；损坏则先备份，备份失败拒绝写回。"""
+        if not os.path.exists(self.path):
+            return
+        try:
+            with open(self.path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        except FileNotFoundError:
+            return
+        except OSError as exc:
+            self._save_blocked = True
+            self.last_error = f"{type(exc).__name__}: {exc}"
+            message = (f"书签文件读取失败（{type(exc).__name__}: {exc}）：{self.path}；"
+                       "本次不写入，避免覆盖可能仍可恢复的文件")
+            logger.error(message)
+            raise OSError(message) from exc
+        except ValueError as exc:
+            if not self._quarantine(exc):
+                message = (f"书签文件损坏且无法备份（{type(exc).__name__}: {exc}）："
+                           f"{self.path}；本次不写入，避免覆盖唯一证据")
+                logger.error(message)
+                raise OSError(message) from exc
+        else:
+            if isinstance(data, dict):
+                version = data.get("version")
+                if version is not None and version != FILE_VERSION:
+                    self._save_blocked = True
+                    message = (f"书签文件 version={version!r} 与当前 "
+                               f"{FILE_VERSION} 不兼容，拒绝整表覆盖：{self.path}")
+                    self.last_error = message
+                    logger.error(message)
+                    raise OSError(message)
 
     def save(self) -> None:
+        if self._save_blocked:
+            message = (f"书签文件读取失败且未备份，拒绝整表写回：{self.path}"
+                       f"（{self.last_error}）")
+            logger.error(message)
+            raise OSError(message)
+        self._ensure_save_target_healthy()
         os.makedirs(os.path.dirname(self.path), exist_ok=True)
         data = {
             "version": FILE_VERSION,
