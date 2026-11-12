@@ -147,3 +147,27 @@ def test_fallback_valid_config_still_reads(monkeypatch, tmp_path, caplog):
         assert ai_panel.AIPanel._load_config() == {"api_key": "sk-x"}
 
     assert caplog.records == []
+
+
+def test_configstore_read_failure_is_attributable(monkeypatch, tmp_path, caplog):
+    """ConfigStore 读盘失败同样不得与「没配过」同貌：路径与异常类型要可查。"""
+    cfg = str(tmp_path / "config.json")
+
+    class _BoomStore:
+        def __init__(self, path):
+            self.path = path
+
+        def read(self):
+            raise OSError("config locked by another process")
+
+    monkeypatch.setattr(ai_panel, "ConfigStore", _BoomStore)
+    monkeypatch.setattr(ai_panel.AIPanel, "CONFIG_FILE", cfg, raising=False)
+
+    with caplog.at_level(logging.WARNING, logger="ai_panel"):
+        assert ai_panel.AIPanel._load_config() == {}
+
+    assert len(caplog.records) == 1
+    msg = caplog.records[0].getMessage()
+    assert "读取配置失败" in msg
+    assert "OSError" in msg
+    assert cfg in msg

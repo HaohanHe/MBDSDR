@@ -350,7 +350,11 @@ class AIPanel(QWidget):
         store = ConfigStore(cls.CONFIG_FILE)
         try:
             data = store.read()
-        except Exception:
+        except Exception as exc:
+            # 读盘失败（损坏/权限/IO）与「还没配过」不能同貌：界面仍按空配置
+            # 降级（调用方拿 {} 走未配置态），但路径与异常类型必须可查。
+            logger.warning("读取配置失败，按空配置继续：%s | %s: %s",
+                           cls.CONFIG_FILE, type(exc).__name__, exc)
             return {}
         if normalize_config_keys is None:
             return data
