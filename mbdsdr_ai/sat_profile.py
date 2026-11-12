@@ -10,7 +10,8 @@
 
 诚实纪律：
   * 未知星名/布局名**如实报错**并给出可用名单，不猜、不静默回退默认值；
-  * 布局表里逐条标注 honesty（哪些是公开标准、哪些是示例布局）；
+  * 布局表里逐条标注 honesty（人读的自由文本）与 verification（机器可检的
+    验证等级：schema_only / spec_example / ota）；
   * 表里每个数值带 source（材料名/公开标准名），可追溯到公开来源。
 """
 from __future__ import annotations
@@ -72,6 +73,37 @@ def _check_duplicate_fields(fields: Sequence[Dict[str, Any]],
             "（同一列表内不允许重名，避免静默覆盖）")
 
 
+#: 验证等级（强度递进）。三档之外一律非法。
+VERIFICATION_LEVELS = ("schema_only", "spec_example", "ota")
+#: 高于 schema_only 的等级必须同时给出证据文件路径。
+_EVIDENCE_REQUIRED_LEVELS = ("spec_example", "ota")
+
+
+def _require_verification(entry: Dict[str, Any], layout_name: str) -> None:
+    """每个顶层布局必须声明 verification；高等级必须配证据文件路径。
+
+    schema_only  = 仅通过结构/字段表校验，未与任何真实或规范样例对上；
+    spec_example = 用规范给出的示例数据逐字段对拍通过；
+    ota          = 用真实接收数据验证过。
+    """
+    level = entry.get("verification")
+    if level is None:
+        raise ValueError(
+            f"帧布局 {layout_name} 缺 verification（必填，取值: "
+            f"{' / '.join(VERIFICATION_LEVELS)}）")
+    if level not in VERIFICATION_LEVELS:
+        raise ValueError(
+            f"帧布局 {layout_name} 的 verification={level!r} 非法"
+            f"（只允许: {' / '.join(VERIFICATION_LEVELS)}）")
+    if level in _EVIDENCE_REQUIRED_LEVELS:
+        evidence = str(entry.get("verification_evidence", "")).strip()
+        if not evidence:
+            raise ValueError(
+                f"帧布局 {layout_name} 声明 verification={level!r}，但缺 "
+                "verification_evidence 证据文件路径——声称强于 schema 校验"
+                "就必须有可复跑证据")
+
+
 def _merge_fields(parent_fields: Sequence[Dict[str, Any]],
                   child_fields: Sequence[Dict[str, Any]],
                   layout_name: str) -> List[Dict[str, Any]]:
@@ -116,8 +148,11 @@ def _resolve_layout(table: Dict[str, Any], name: str,
       1. 递归解析父布局；``derived_from`` 成环 → ValueError；
       2. fields：父字段按原序为基底，子字段同名整体覆盖（子胜、位置不变），
          子字段新名追加到末尾；同一 fields 列表内重名 → ValueError；
-      3. 子条目的 sync/crc/honesty/source 覆盖父条目；fields 只按名合并；
-      4. 派生布局必须自带 source.url + source.retrieved_at，缺失拒载。
+      3. 子条目的 sync/crc/honesty/verification/source 覆盖父条目；
+         fields 只按名合并；
+      4. 派生布局必须自带 source.url + source.retrieved_at，缺失拒载；
+      5. 每个顶层条目必须带 verification（三档之一），spec_example / ota
+         还必须带 verification_evidence 证据文件路径，否则拒载。
     无 ``derived_from`` 的条目原样返回（与 v1 行为逐字一致，只多
     ``_layout_name``），旧 JSON 不受影响。
     """
@@ -133,6 +168,7 @@ def _resolve_layout(table: Dict[str, Any], name: str,
     entry = table[key]
     if not isinstance(entry, dict):
         raise ValueError(f"帧布局 {key} 条目必须是对象")
+    _require_verification(entry, key)
     _check_duplicate_fields(entry.get("fields", []) or [], key)
     parent_name = str(entry.get("derived_from") or "").strip()
     if not parent_name:
