@@ -53,7 +53,7 @@ from .noaa_apt_lite import decode_apt as lite_decode_apt, save_apt_png as lite_s
 from .wfm_stereo_lite import decode_stereo as lite_decode_stereo
 from .fm_scan import (
     scan_fm_band, analyze_fm_frequency, synthesize_fm_station,
-    load_presets, save_presets, compare_with_last_scan,
+    load_presets, save_presets, compare_with_last_scan, presets_last_error,
 )
 from .decoders import (
     decode_noaa_apt, decode_sstv, decode_digital_mode,
@@ -8576,6 +8576,7 @@ def _fm_scan_tool(mgr, args) -> "ToolResult":
     if do_save:
         scan_meta = mgr._last_fm_scan["meta"]
         saved_path = save_presets(stations_dicts, scan_meta)
+    preset_error = presets_last_error()
 
     # 格式化输出
     lines = [
@@ -8601,6 +8602,12 @@ def _fm_scan_tool(mgr, args) -> "ToolResult":
                      ", ".join(f"{s['freq_mhz']:.1f}" for s in comparison["gone"][:10]))
     if saved_path:
         lines.append(f"已保存到预设: {saved_path}")
+        if preset_error:
+            lines.append(f"警告: 上次读取预设时文件损坏：{preset_error}")
+    elif do_save:
+        lines.append(f"警告: FM 预设未保存：{preset_error or '未知原因'}")
+    elif preset_error:
+        lines.append(f"警告: 上次读取预设时文件损坏：{preset_error}")
     acquire_state = getattr(acquire, "state", None) or {}
     if acquire_state.get("failures"):
         lines.append(f"警告: {acquire_state['failures']} 个频点调谐/采集失败"
@@ -8623,6 +8630,7 @@ def _fm_preset_tool(mgr, args) -> "ToolResult":
 
     if action == "list":
         data = load_presets()
+        preset_error = presets_last_error()
         stations = data.get("stations", [])
         lines = [f"=== FM 电台预设（共 {len(stations)} 个）==="]
         if data.get("updated_at"):
@@ -8633,6 +8641,8 @@ def _fm_preset_tool(mgr, args) -> "ToolResult":
                          f"(噪声底 {ls.get('noise_floor_db','?')}dB)")
         if not stations:
             lines.append("  （空，先用 sdr_fm_scan save=true 或 sdr_fm_preset action=save 保存）")
+        if preset_error:
+            lines.append(f"警告: 上次读取预设时文件损坏：{preset_error}")
         for k, s in enumerate(stations, 1):
             name = s.get("name", "")
             stereo = "立体声" if s.get("stereo") else "单声道"
@@ -8664,6 +8674,11 @@ def _fm_preset_tool(mgr, args) -> "ToolResult":
 
     scan_meta = getattr(mgr, "_last_fm_scan", {}).get("meta", {}) if hasattr(mgr, "_last_fm_scan") else {}
     path = save_presets(stations, scan_meta)
+    if not path:
+        return ToolResult(
+            success=False,
+            content=f"FM 预设未保存：{presets_last_error() or '未知原因'}",
+            data={"stations": stations, "path": ""})
     return ToolResult(success=True,
                       content=f"已保存 {len(stations)} 个 FM 电台预设到 {path}",
                       data={"stations": stations, "path": path})
