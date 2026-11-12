@@ -1,5 +1,6 @@
 # 限制总账（Limitations Register）
 
+> 证据状态：E4——本文件数字未逐条绑定原始件/复跑命令，引用前须复核（判据见 docs/evidence-standard.md）。
 > 本篇结论未经 commit 取证，引用前须复核（判据见 `scripts/verify_claims.py`；补齐四元组 `<结论> — <hash> — <path>:<line> — <改动后字面量>` 后可摘除本行）。
 
 > 维护口径：**P11 集成体检（2026-11-04）汇总**。本表只回答一个问题：
