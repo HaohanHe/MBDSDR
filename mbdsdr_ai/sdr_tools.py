@@ -7355,6 +7355,74 @@ def _satdump_compose_image(args):
     if result.get('size'):
         lines.append(f"图像尺寸: {result['size']}")
 
+    if result.get('success'):
+        sel = result.get('selection') or {}
+        lines.append("")
+        if sel.get('source') == 'dataset.json':
+            lines.append("产物来源: 按 dataset.json 清单选取")
+        else:
+            reason = sel.get('fallback_reason')
+            if reason == 'no_manifest':
+                lines.append("产物来源: 清单缺失，已退回按文件名选取")
+            elif reason == 'bad_manifest':
+                lines.append("产物来源: 清单不可读，已退回按文件名选取")
+            elif reason == 'no_images':
+                lines.append("产物来源: 清单无可用图像，已退回按文件名选取")
+            else:
+                lines.append("产物来源: 未按清单选取，已退回按文件名选取")
+
+        lines.append(f"产品: {sel.get('product') or '—'}")
+        lines.append(f"卫星: {sel.get('satellite') or '—'}")
+
+        ts = sel.get('timestamp')
+        if isinstance(ts, (int, float)) and not isinstance(ts, bool):
+            try:
+                ts_text = (time.strftime("%Y-%m-%d %H:%M:%S UTC", time.gmtime(ts))
+                           + f" ({ts})")
+            except (OSError, ValueError, OverflowError):
+                ts_text = str(ts)
+        elif ts not in (None, ""):
+            ts_text = str(ts)
+        else:
+            ts_text = "—"
+        lines.append(f"时间戳: {ts_text}")
+
+        input_image = result.get('input_image') or ''
+        lines.append(
+            f"实际选中文件: {os.path.basename(input_image) if input_image else '—'}")
+        lines.append(
+            f"绝对路径: {os.path.abspath(input_image) if input_image else '—'}")
+
+        count = sel.get('image_count')
+        if isinstance(count, int) and count > 1:
+            index = sel.get('image_index') or 1
+            if sel.get('picked_by') == 'product_cbor':
+                abs_index = sel.get('abs_index')
+                suffix = (f"（abs_index={abs_index}）"
+                          if abs_index is not None else "")
+                lines.append(
+                    f"产品内共 {count} 张，选中 images 列表第 {index} 项{suffix}")
+            elif sel.get('source') == 'dataset.json':
+                lines.append(f"产品内共 {count} 张，按文件名排序取第 {index} 个")
+            else:
+                lines.append(f"候选图共 {count} 张，按文件名排序取第 {index} 个")
+
+        meta = []
+        if sel.get('channel'):
+            meta.append(f"通道：{sel['channel']}")
+        if sel.get('instrument'):
+            meta.append(f"仪器：{sel['instrument']}")
+        if sel.get('type'):
+            meta.append(f"类型：{sel['type']}")
+        for label, key in (
+                ('序号', 'abs_index'), ('位深', 'bit_depth'),
+                ('波长', 'wavenumber'), ('极化', 'polarization'),
+                ('带宽', 'bandwidth'), ('定标', 'calibration_type')):
+            if sel.get(key) not in (None, ''):
+                meta.append(f"{label}：{sel[key]}")
+        if meta:
+            lines.append("通道元数据 ▸ " + " · ".join(meta))
+
     return ToolResult(
         success=bool(result.get('success')),
         content='\n'.join(lines),
