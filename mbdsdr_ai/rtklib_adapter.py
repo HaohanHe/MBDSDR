@@ -40,6 +40,9 @@ from .geodesy import (
 # 环已断（本模块 -> rtk_solver -> geodesy，无回路），原先函数体内的延迟
 # import 提到模块级：不再把一条真实依赖藏在检测器看不见的地方。
 from .rtk_solver import RTKFloatSolver, RTKInput, RTKObs
+# rtcm3_decoder 只依赖 numpy，与 rtklib_adapter 之间没有反向边；原先函数体内的
+# 延迟 import 不隐藏任何环，提到模块级。
+from .rtcm3_decoder import RTCM3Decoder
 
 # ============================================================
 # 物理与几何常数 —— 逐字抄自 RTKLIB 源码，禁止改动数值
@@ -999,8 +1002,6 @@ class GNSSPipeline:
     """
 
     def __init__(self) -> None:
- # 延迟导入避免循环依赖
-        from .rtcm3_decoder import RTCM3Decoder
         self.decoder = RTCM3Decoder()
         self.base_ecef: Optional[np.ndarray] = None
         self.base_obs_by_sys: Dict[str, List[Dict[str, Any]]] = {}
