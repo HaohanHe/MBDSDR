@@ -125,6 +125,7 @@
 - 我们的落点：`mbdsdr_ai/sat_links.py` + `mbdsdr_ai/data/sat_links.json`（现 8 颗星、每条只有一个 `freq_hz`；容差默认值见 `` `HEAD:mbdsdr_ai/sat_links.py:61` ``：`def identify_by_freq(freq_hz: float, tolerance_hz: float = 3000.0) -> List[Dict[str, Any]]:`）。
 - 该不该搬：**搬字段形状，不搬上行**。带宽区间 `low/high` 能让「点星即听」自动给出合适的 FFT 带宽，也让 `identify_by_freq` 的容差从全局常量变成「按条目带宽」；`invert`（线性转发器倒置）**本地不存在**——封闭集证据 `` `HEAD:mbdsdr_ai/data/sat_links.json:14-15` ``：link 字面量字段只有 `direction/freq_hz/mode/baud/note`，无 `low/high/invert`；溯源只到卫星级（`:18` 的 `source`），未到每条带宽。上行仍只走 `tc_uplink` 的确认 token，不进表。
 - 搬的代价：8 条数据要补 low/high（需公开文档逐条溯源，属数据工作量）；`identify_by_freq` 签名要接受每条的带宽；星空页链路卡片加一行带宽/极性标签。
+- **代价下调（2026-11-12 线上复核）**：SDRangel 的 SatNOGS 集成证明存在机器可读来源（`f4exb/sdrangel@1ec7cea:plugins/feature/satellitetracker/satnogs.h:28-41`，含 `uplink_low/high`、`downlink_low/high`、`mode`、`baud`、`status`、`service`），「逐条人工溯源」可改为「拉库缓存 + 落盘」；字段形状结论不变。
 
 **机制 B：极坐标雷达多星同盘（`feature/radar/RadarView.kt` + `RadarState.kt:57` `satTrack: List<OrbitalPos>`）**
 一屏画出所有在跟踪卫星的当前方位/仰角点，并保留一串历史点作拖尾；顺带 `shouldUseCompass` / `shouldShowSweep` 两个开关把「罗盘刻度」和「扫描线」解耦。
@@ -237,9 +238,10 @@ gpredict 没有频率预设或书签概念（它是跟踪器，不是接收机�
 
 `QTableView.activated` → `DockBookmarks::activated`（`dockbookmarks.cpp:104`）→ `emit newBookmarkActivated(freq, modulation, bandwidth)`（`:107`）→ `MainWindow::onBookmarkActivated`（`mainwindow.cpp:2275`）→ `setNewFrequency(freq)` + `selectDemod(demod)`，然后**带宽不硬居中**，而是按当前滤波预设的锚点落位：`lo+hi==0` 居中、`lo>=0&&hi>=0` 抬上边、`lo<=0&&hi<=0` 压下边（`:2287-2301`）。
 - 我们的落点：`desktop/bookmark_panel.py:63` `tune_requested = Signal(float, str, float)`、`main_window.py:10917` `_on_bookmark_tune_requested(freq_hz, mode, ...)` —— **面板路径与 gqrx 同构**（三参数 + 带宽）。
-- **缺口（确凿，2026-11-12 对 HEAD 核，已按封闭集复核）**：内部书签元组是 **4 元组 `(freq_hz, name, mode, builtin)`，根本没有带宽字段**——写入 `main_window.py:8118-8119` 追加 `(float(freq_hz), str(name), str(mode), False)`，加载 `:2056-2057` 取 `(b.freq_hz, b.name, b.mode, bool(b.builtin))`，持久化走 `FrequencyManager.add(name, freq, mode=...)`（`:8123-8125`，无带宽参数）。因此 `:8159` 的 `_b` 是 `builtin`，不是带宽；旧表述「旗子路径丢带宽」不准确：**两条路径都没有带宽可丢**，缺的是数据模型字段，不是某条链路。`spectrum_widget.py:2542` 仍是单参数 `Signal(float)`。
-- 该不该搬：**搬「三参数 + 锚点带宽」**。旗子路径也携带 (freq, mode, bandwidth)，复用 `_on_bookmark_tune_requested`，不要再留降级路径。
-- 代价：低。信号签名加参数 + 合并槽函数，约 20–30 行；前置工作是把书签元组从 4 元组扩成 5 元组（带宽字段），并同步写入/加载/`FrequencyManager.add` 三处。
+- **已实现（2026-11-12 复核）**：书签元组已扩成 **5 元组 `(freq_hz, name, mode, builtin, bandwidth_hz)`**——`_normalize_bookmark` 返回 5 元组并兼容旧 4 元组（`main_window.py:142-143`、`:2089-2091`），写入端补带宽（`:8159-8171`），`FrequencyEntry.bandwidth_hz` 与 `FrequencyManager.add(..., bandwidth_hz=...)` 已落盘（`frequency_manager.py:36`、`:322-329`）。旗子路径也已跟上：`spectrum_widget.py:1233` `bookmarks: List[Tuple[float, str, str, float]]`、`:2561` `bookmark_activated = Signal(float, str, float)`。
+- 原判（保留痕迹）：「内部书签元组是 **4 元组 `(freq_hz, name, mode, builtin)`，根本没有带宽字段**……缺的是数据模型字段，不是某条链路。」——**原判基于 4 元组时期的代码**；2026-11-12 复核时字段已补齐，原缺口关闭。
+- 该不该搬：**已搬**（三参数 + 锚点带宽；面板与旗子两条路径同一参数集）。
+- 代价：已付讫。
 
 **机制 C：未选源时不进主界面（`src/applications/gqrx/main.cpp:157-167` + `mainwindow.cpp:372-396`）**
 
@@ -364,6 +366,8 @@ for (auto const& [name, _vfo] : vfos) {
 
 > **口径对账（102 vs 33）**：`102` 是 §2.4 时间源普查的**行级命中数**（10 时间基准 + 46 动画节流 + 29 日志耗时 + 17 其他 = 102，覆盖 20 个文件），与本节 33 条**结论条目**不是同一张表；§0 项目清单是 45 个项目（21 + 24）。文件历史只有两次提交：`fc5d0876` 新建 410 行、`2e35798a` +35/−14，均为文本替换，**没有机制/专项条目被删**。
 
+> **线上对照（2026-11-12）**：本地 33 条 + 线上 10 条（见 §4）。线上条目不计入本地 33，理由见 §4 开头。
+
 ### 3.1 已核（33 条）
 
 **Look4Sat（5）**
@@ -386,7 +390,7 @@ for (auto const& [name, _vfo] : vfos) {
 **gqrx（4）**
 14. 机制 A 书签数据结构 —— 频率/名字/调制/带宽/共享标签 + CSV 明文。
 15. 机制 B 面板激活路径 —— 三参数（freq/mode/bandwidth）同构。
-16. 机制 B 旗子激活路径 —— 单参数 `Signal(float)`；且内部书签元组为 4 元组、无带宽字段（`main_window.py:8118-8119/2056-2057/8123-8125`）。
+16. 机制 B 旗子激活路径 —— **改判：已 3 参数** `Signal(float, str, float)`（`spectrum_widget.py:2561`），书签元组 5 字段含带宽；原判（单参数 + 4 元组）基于旧代码，见 §2.3。
 17. 机制 C 未选源 —— 配置未完成不进主界面，无空态。
 
 **satdump（5）**
@@ -409,7 +413,7 @@ for (auto const& [name, _vfo] : vfos) {
 
 **补充核验（4）**
 30. gpredict 专项④-2 —— 面板启动全量构造、无懒创建（`main_window.py:2246/10387/1888`）。
-31. gqrx 机制 B 带宽持久化 —— 元组 4 字段无带宽，`FrequencyManager.add` 无带宽参数，**带宽不持久化**（`main_window.py:8118-8119/2056-2057/8123-8125`）。
+31. gqrx 机制 B 带宽持久化 —— **改判：已持久化**（5 元组，`main_window.py:142-143/2089-2091/8159-8171`；`frequency_manager.py:36/322-329`）；原「带宽不持久化」结论作废。
 32. Look4Sat 机制 A `low/high` 与 `invert` —— link 字面量字段封闭集无 `low/high/invert`（`sat_links.json:14-15`）；`source` 只到卫星级（`:18`），逐条带宽溯源未做。
 33. gpredict 专项③ 我方占用态 —— 会话期间被禁控件只有 `connect_btn`/`disconnect_btn`，**确无第三档**（`device_panel.py:499-506`）。
 
@@ -421,7 +425,6 @@ for (auto const& [name, _vfo] : vfos) {
 
 - gpredict 专项③ 占用态（设备会话置灰 + 断开写回）—— 采纳与否待定。
 - satdump E 类型声明（排 C 之后）。
-- gqrx B 书签模型补带宽字段并合并旗子路径。
 - sdrpp A 窄带 CW/USB 回归用例。
 
 ### 3.4 5 条待查的结案记录
@@ -431,5 +434,139 @@ for (auto const& [name, _vfo] : vfos) {
 | 高 | Look4Sat B 多星同盘 | **已核：其实已落地**（天空图多星） | `rf_sky_view.py:8928/8995` |
 | 高 | gpredict ③ 我方占用态空档 | **已核：确无第三档** | `device_panel.py:499-506` |
 | 中 | gpredict ④-2 面板懒创建 | **已核：启动全量构造，非懒创建** | `main_window.py:2246/10387/1888` |
-| 中 | gqrx B 带宽持久化 | **已核：未持久化（模型无该字段）** | `main_window.py:8118-8119/2056-2057/8123-8125` |
+| 中 | gqrx B 带宽持久化 | **改判：已持久化（原判作废，见 §2.3）** | `main_window.py:142-143/2089-2091/8159-8171` |
 | 低 | Look4Sat A `low/high` + `invert` | **已核：字段不存在；逐条带宽溯源未做** | `sat_links.json:14-15/18` |
+
+## 4. 线上同类项目对照（2026-11-12）
+
+> **证据口径（先读这段再读条目）**
+> - 线上条目格式固定为 `仓库@提交:路径:行`，附抓取时间与可复核 URL；提交是抓取当日各仓库默认分支 HEAD。
+> - **线上条目证据等级低于 §2**：§2 用的是本仓 `HEAD:` 行号，可直接支撑「已核」；§4 只能证明「对方实现了什么」，**不得反向给 §2 的否定结论背书**。
+> - 因此 §4 单开一节、不并入 §2；§3 的本地 33 条计数不含本节。
+> - README/官网宣传语不算机制证据；只看得到宣传的一律写「宣称 X，未见实现」。
+> - 只学机制、不抄代码（`AGENTS.md` §3）。参考项目均 GPL 系，未逐仓库核 LICENSE 版本。
+> - 抓取时间统一为 **2026-11-12（Asia/Shanghai）**。
+
+### 4.0 通道自证（谁再想用 WebFetch 抓 raw 先看这里）
+
+- WebSearch：可用。
+- WebFetch → `github.com` 仓库页/目录页：可用（返回渲染后的 README/目录）。
+- GitHub REST API（`contents` / `git/trees` / `commits`）：可用。
+- WebFetch → `raw.githubusercontent.com`：**返回空**（local crawler returned empty content）。
+- `curl` → `raw.githubusercontent.com`：**实测 200**，可下载全文后本地 grep 取行号——本节所有 `:行` 均由此获得。
+- 闭源项目（SDR#、SDRuno、SDR-Console、Orbitron、SatPC32）：无源码/配置可查，只在 §4.4 单列，不进机制表。
+
+### 4.1 逐项目条目（10 条）
+
+**条目 1｜SDRangel `f4exb/sdrangel@1ec7cea`（master，2026-11-10）— AOS/LOS 生命周期动作**
+- 机制：过境边界触发一整套动作——开始/停止采集、开始/停止录制、执行外部命令、语音播报、加载预设。出处 `plugins/feature/satellitetracker/satellitetrackersettings.h:48-53`（`m_startOnAOS` / `m_stopOnLOS` / `m_startStopFileSink` / `m_aosCommand` / `m_losCommand`）、`:82-83`（`m_aosSpeech` / `m_losSpeech`）。<https://github.com/f4exb/sdrangel/blob/1ec7cea/plugins/feature/satellitetracker/satellitetrackersettings.h#L48-L53>
+- 我方：闭环自动跟踪已有（`main_window.py:13105` 注释、`:13306` 过境结束自动停、`:13353` 仰角 <5° 停止），**无**外部命令/录制自动启停/语音/过境加载预设。
+- 差距判断：**部分缺**。否定证据（封闭集）：设置唯一事实源 `SCHEMA`（`config_schema.py:602`），卫星组只有 `observer_lat/lon`、`pass_min_elevation_deg`、`pass_window_hours`、`show_low_elevation_passes`；AOS 命令与录制钩子不在该集合内。
+- 可搬性：命令钩子 **能搬**（过境事件订阅 + 受控子进程，沿用 `tc_uplink` 确认门思路）；语音 **不该搬**（TTS 依赖 + 占音频链路）；预设加载 **需重写**（无 SDRangel preset 概念，等价物是书签/设备参数）。
+
+**条目 2｜SDRangel — 每星每设备参数表**
+- 机制：`QHash<QString, QList<SatelliteDeviceSettings*>*> m_deviceSettings`（`satellitetrackersettings.h:87`），按卫星 × device set 保存设备参数；控制入口 `satelliteradiocontroldialog.h:50`。
+- 我方：单设备模型，无按卫星保存设备参数的等价物。
+- 差距判断：**故意不做，不记缺口**（理由见 §4.2.3）。
+- 可搬性：若将来有多设备需求，**需重写**（要先有 device set 概念）。
+
+**条目 3｜SDRangel — SatNOGS 发射机库**
+- 机制：下载 SatNOGS DB，发射机含 `uplink_low/high`、`downlink_low/high`、`mode`、`baud`、`status`、`service`——`plugins/feature/satellitetracker/satnogs.h:28-41`，带宽区间 `:49-52`。
+- 我方：`sat_links.json` 8 颗星，link 字段只有 `direction/freq_hz/mode/baud/note`（`sat_links.json:14-15`），`source` 只到卫星级（`:18`）。
+- 差距判断：**缺**（数据源 + 带宽区间 + 状态）。
+- 可搬性：**能搬**（HTTP 拉库 + 落盘缓存，schema 增可选 `low/high/status`）；这条同时把 §2.1 Look4Sat A 的搬运代价从「人工溯源」降为「拉库」。
+
+**条目 4｜SDRangel — 预测窗口 / 地面轨迹 / 过境回放**
+- 机制：`m_predictionPeriod`（按天）、`m_groundTrackPoints`（地面轨迹点数）、`m_replayEnabled`（把时间拨回过去过境回放）——`satellitetrackersettings.h:71`、`:76`、`:88`。
+- 我方：窗口按小时 1–72（`config_schema.py:465-468`）；地面轨迹 **已核缺**（封闭集见 §4.5）；回放只有 IQ/SigMF 录制回放（`baseband_io.py:3`），不是「回到过去过境」。
+- 差距判断：窗口单位是设计差异不记缺口；地面轨迹缺；过境回放缺。
+- 可搬性：地面轨迹 **能搬**（SGP4 与方位投影已有，只差地固线）；过境回放 **需重写且建议不搬**（要改写时间源，冲突于单一时间基准）。
+- 附：位置轮询与多普勒计时分离（`satellitetrackerworker.cpp:92` 轮询、`:99-100` 每星 `m_dopplerTimer`）——我方 500 ms 多普勒调谐（`rf_sky_view.py:2031`）+ 1 s 倒计时，**已同构**，不记缺口。
+
+**条目 5｜SDR++ `AlexandreRouma/SDRPlusPlus@ea6f755`（master，2026-11-07）— 书签带带宽**
+- 机制：`FrequencyBookmark{frequency, bandwidth, mode, name}`（`misc_modules/frequency_manager/src/main.cpp:25-28`）；`applyBookmark` 依次设模式、带宽、调谐（`:107-122`）。
+- 我方：**已同构**（5 元组含 `bandwidth_hz`，`main_window.py:142-143`；旗子路径 `spectrum_widget.py:1233/2561`）。
+- 差距判断：**无**（对应 §2.3 的改判，原判作废）。
+- 可搬性：不适用。
+
+**条目 6｜SDR++ — 内置频段带（含 QO-100 分段）**
+- 机制：`root/res/bandplans/qo-100.json:7-13` 用 `name/type/start/end` 描述频段与转发器分段，`bandplan.cpp` 渲染。
+- 我方：频段彩带 + `desktop/bandplan.json`（`spectrum_widget.py:1236/1525`）。
+- 差距判断：**机制无缺**；`bandplan.json` 有卫星子带（`:29` 137–138、`:31` 145.8–146、`:35` 435–438），**无转发器级分段**（无 QO-100、无 per-transponder 起止）——数据粒度差异，不是机制缺口。
+- 可搬性：只可补数据；机制不搬。
+
+**条目 7｜gr-satellites `daniestevez/gr-satellites@0ff8b61`（main，2026-11-06）— 声明式遥测布局**
+- 机制：每星一份 `construct` `Struct`，60+ 颗星（`python/telemetry/aausat4.py:11,17`；AX.25 位域 `ax25.py:14`）。
+- 我方：声明式帧布局 JSON（`data/frame_layouts.json:2`）+ `verify_chain.extract_fields`，仅 2 个 profile（`astu_1`、`ccsds_tc_classic`）。
+- 差距判断：**机制同构、覆盖差**。
+- 可搬性：**能搬数据不搬代码**（补 profile）；不直接吃它的 Python 定义（依赖 + 许可证边界）。
+
+**条目 8｜Direwolf `wb2osz/direwolf@eda1383`（master，2026-05-19）— APRS 解析 + 中继去重**
+- 机制：`aprs_telemetry`（`src/decode_aprs.c:2795,2815`）、无位置气象（`:2956`）；中继去重 `dedupe_init(p_digi_config->dedupe_time)`（`src/digipeater.c:123`）、`dedupe_check`（`:406`）。
+- 我方：APRS 解析已覆盖位置/压缩位置/Mic-E/气象/报文/遥测（`aprs_parser.py:304` 及上列各函数）。
+- 差距判断：解析 **无缺**；去重 **故意不做**（只收不发）。
+- 可搬性：去重不该搬。
+
+**条目 9｜OpenWebRX+ `luarvique/openwebrx@4541625`（master，2026-11-07）— 解码器作为外部进程**
+- 机制：`from csdr.module.satellite import SatDumpModule`（`csdr/chain/satellite.py:2`），NOAA APT 传 `mode="noaa_apt"`、50 kS/s（`:19-28`）；命令 `satdump live <mode> <out> --source file --file_path /dev/stdin`（`csdr/module/satellite.py:16-21`），输出 COMPLEX_FLOAT→CHAR（`:30`）。
+- 我方：解码器进程内（`decoders.py:355` APT、`:580` SSTV、`:1174` 数字模式、`meteor_sat.py:553` LRPT）。
+- 差距判断：机制不同，**不记缺口**；外部进程是代价取舍。
+- 可搬性：能搬但不急（进程契约成本 > 当前收益）。
+
+**条目 10｜CubicSDR `cjcliffe/CubicSDR@fd82cd9`（master，2026-10-27）— 书签=解调器实例快照 + 加载回退**
+- 机制：书签存 `frequency, bandwidth`（`src/BookmarkMgr.cpp:57-58`）并 `saveInstance` 整条解调链（`:62`）；保存前拷 `.backup`（`:94-97`），加载失败留 `.failedload/.lastloaded`（`:111-119`）。
+- 我方：书签 5 元组不含增益/解调参数；配置已有原子写 + 防抖。
+- 差距判断：带宽已覆盖；**整链快照是粒度差异**，不记缺口。
+- 可搬性：整链快照 **需重写且不建议**（与参数单一事实源冲突）；加载失败回退思路可借鉴。
+
+### 4.2 三张表
+
+**4.2.1 他们有、我们缺（2 条真缺口）**
+
+| # | 机制 | 我方位置 | 可搬性 |
+|---|---|---|---|
+| 1 | SatNOGS 发射机库（带宽区间/状态/service） | `sat_links.json:14-15/18` | 能搬（拉库缓存） |
+| 2 | AOS/LOS 外部命令钩子 | `config_schema.py:602` 封闭集无此键 | 能搬（事件订阅 + 受控子进程） |
+
+另：地面轨迹为**可视化缺口**（已核，见 §4.5），是否补由裁定；预测窗口单位、书签带宽、bandplan 均不是缺口。
+
+**4.2.2 我们有、他们缺（4 条）**
+
+| # | 机制 | 我方证据 |
+|---|---|---|
+| 1 | 单一时间基准 + `ClockGuard` | `time_basis.py:215` |
+| 2 | Agent 工具层（APRS 解调、rotctld 云台） | `agent.py:1162/1702` |
+| 3 | 恒星/星座/行星/卫星/天线/热力图/GNSS 同盘 | `rf_sky_view.py:119-120`、`paintEvent:4203-4263` |
+| 4 | 声明式帧布局 + CRC 注册表（配置注入） | `data/frame_layouts.json:2` |
+
+**4.2.3 我们故意不做（5 条，附理由）**
+
+| # | 不做的事 | 理由 |
+|---|---|---|
+| 1 | 多 device set / 每星每设备参数（SDRangel） | 单设备模型 + 单一事实源；无真实多设备需求前不引入 |
+| 2 | AOS/LOS 语音播报（SDRangel） | TTS 依赖 + 占用音频链路 |
+| 3 | APRS 中继/iGate 去重（Direwolf） | 只收不发，无重复转发问题 |
+| 4 | 外部解码器子进程（OpenWebRX+） | 进程契约、格式协商、崩溃隔离成本高于自研收益 |
+| 5 | 过境「时间旅行」回放（SDRangel） | 要改写时间源，冲突于单一时间基准 |
+
+### 4.3 原 33 条的改判（2 条）
+
+1. **gqrx 机制 B 书签带宽** → **已实现（2026-11-12 复核）**：5 元组含 `bandwidth_hz`，旗子路径同为 3 参数。已写回 §2.3 并保留原判原文；§3.1 第 16/31 条同步改判。
+2. **Look4Sat 机制 A 搬运代价下调**：SatNOGS DB 机器可读（条目 3 引用），不再需要逐条人工溯源；字段形状结论不变。已写回 §2.1。
+
+### 4.4 「宣称，未见实现」单列（不进机制表）
+
+- **Orbitron**（闭源；官网 <http://www.stoff.pl/>，2026-11-12 抓取）：宣称「NORAD SGP4/SDP4」「20000 颗卫星同时跟踪」「Simulation mode（自由时间控制）」「Rotor/radio control」「Internet TLE updater」「NTP 校时」。**未见实现**；且官网最新版本停留在 3.71 / 2005，无源码或配置可复核 → 只作宣传记录。
+- **SDR-Console**（闭源；官网 <https://www.sdr-radio.com/>，2026-11-12 抓取）：首页仅宣传 SDR 接收/收发与 SDR Television，未列可复核的卫星跟踪条目 → **不列入机制表（待查）**；若要写，需先找到它的功能文档页。
+
+### 4.5 三条待查的收口
+
+1. **每星每设备参数** → 归「故意不做」，理由见 §4.2.3 第 1 条；从缺口表移除，**不再查**。
+2. **地面轨迹** → **已核：缺**。封闭集 = 天空图唯一绘制入口 `paintEvent`（`rf_sky_view.py:4203`）的调用序列 `:4209-4263`（背景/恒星/星座/DSO/辉光/地平线/地景/方位网格/赤道网格/轨迹/天线波束/天体/行星/卫星对象/天线指针/GNSS/HUD/信息卡/过境/GNSS 叠加/数据源/空态/夜视）；`_draw_trajectories`（`:7176`）画的是 az/el 天空轨迹，不是地固轨迹。该序列内无地图或地固线绘制入口。
+3. **`bandplan.json` 是否含卫星转发器级分段** → **已核：不含**。文件含三条卫星子带（`desktop/bandplan.json:29` 低轨下行 137–138 MHz、`:31` 业余卫星上行 145.8–146 MHz、`:35` 业余卫星下行 435–438 MHz），无 QO-100、无 per-transponder 起止字段（全部条目只有 `label/start_hz/stop_hz/category/priority/modulation/desc`）。
+
+### 4.6 下一批（只查两个）
+
+- **FoxTelem**（遥测 UI）：先定位可以访问的仓库/发行物，再按实现层取证。
+- **PreviSat**（过境预测 UI）：SourceForge 主体，先确认能否拉到源码或发行说明。
+- 不查：SatNOGS server（定位不同）；SDR-Console/Orbitron 已按 §4.4 单列。
