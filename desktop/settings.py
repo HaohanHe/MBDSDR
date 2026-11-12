@@ -140,7 +140,7 @@ def record_dir_needs_confirmation(directory: str, acked: bool) -> bool:
 def default_record_dir() -> str:
     """录音目录默认值：用户目录下 ``MBDSDR/recordings``。
 
-    历史（0.2.0 及更早）默认是「程序目录同级 ``recordings``」——便携包按
+    历史（0.2 系列及更早）默认是「程序目录同级 ``recordings``」——便携包按
     「删目录即卸载」分发时，删程序目录会把用户录音一起删掉。改为用户目录后，
     删/升级程序目录不再影响录音；旧配置的迁移见 :func:`resolve_record_dir`。
     """
