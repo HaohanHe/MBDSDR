@@ -11,7 +11,9 @@
   ③ 台账坏 JSON → 拒，不能放行；
   ④ claim 占位文件坏 JSON → 拒；
   ⑤ 同一 owner 提交自己持有的文件 → 放行（身份用 `MBDSDR_CLAIM_OWNER` 声明）；
-  ⑥ takeover 没写理由 → 不认（拒）；写了理由 → 新 owner 放行。
+  ⑥ takeover 没写理由 → 不认（拒）；写了理由 → 新 owner 放行；
+  ⑦ `action=audit_replay` 的审计行不算 takeover（写审计不能给自己发凭证），
+    未知 action 失败关闭。
 """
 import hashlib
 import json
@@ -265,6 +267,60 @@ def test_unclaimed_commit_passes(repo_env):
     out = proc.stdout + proc.stderr
     assert proc.returncode == 0, out
     assert "通过" in out, out
+
+
+def test_audit_replay_row_does_not_excuse_foreign_claim(repo_env):
+    """审计行（action=audit_replay）不能当接管凭证：别人仍持有就仍要拒。
+
+    审计回放要把「某笔接管被判不合规」写回 `claim_takeovers.log`，那行同样带
+    path/new_owner；若闸门把它当 takeover，任何人写一行审计就能给自己的持有效力。
+    """
+    repo, env, locks = repo_env
+    acquired = time.time() - 60.0
+    _write_claim(locks, "a.txt", "A03静默降级线/other", pid=os.getpid(), acquired_at=acquired)
+    locks.mkdir(parents=True, exist_ok=True)
+    (locks / "claim_takeovers.log").write_text(
+        json.dumps(
+            {
+                "action": "audit_replay",
+                "logged_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+                "epoch": acquired,
+                "path": "a.txt",
+                "new_owner": "我这条线",
+                "reason": "审计回放：此次接管不合规",
+            },
+            ensure_ascii=False,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    env = dict(env, MBDSDR_CLAIM_OWNER="我这条线")
+    _stage(repo, env)
+
+    proc = _commit(repo, env)
+    out = proc.stdout + proc.stderr
+    assert proc.returncode != 0, out
+    assert "持有者：A03静默降级线/other" in out, out
+
+
+def test_unknown_action_in_takeover_log_is_rejected(repo_env):
+    """takeover 日志出现不认识的 action → 失败关闭，不能当「没人持有」。"""
+    repo, env, locks = repo_env
+    locks.mkdir(parents=True, exist_ok=True)
+    (locks / "claim_takeovers.log").write_text(
+        json.dumps(
+            {"action": "weird_action", "path": "a.txt", "new_owner": "谁"},
+            ensure_ascii=False,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    _stage(repo, env)
+
+    proc = _commit(repo, env)
+    out = proc.stdout + proc.stderr
+    assert proc.returncode != 0, out
+    assert "action=" in out and "失败关闭" in out, out
 
 
 def test_real_file_claim_cli_is_seen(repo_env):

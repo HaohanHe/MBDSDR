@@ -66,6 +66,13 @@
   python scripts/file_claim.py audit-stale --json
   python scripts/file_claim.py takeover desktop/main_window.py --owner 接管线 \
       --reason "原持有者进程已死，工作区干净"
+  python scripts/file_claim.py legacy-token-repair desktop/main_window.py \
+      --owner <台账 owner 原文> --reason "确认持有者已不在改；sidecar 上线前签发、明文从未落盘"
+
+`legacy-token-repair` 是**有审计的一次性修复**，不是通用后门：只对「有
+token_sha256 + sidecar 缺失 + 签发早于 sidecar 引入版 028f390f」的 claim 有效，
+且 --owner 必须与台账原文一致、--reason 非空；日志写 action=legacy_token_repair
+（文件 / 原 owner / 签发时间 / 修复人 / 理由）。
 
 退出码：0 成功；2 被拒绝（被他人占用 / 非持有者 / 本就没有 claim / 接管判据不足）；
 1 用法错误；3 = `audit-stale` 发现「claim 已过期但文件 mtime 晚于 acquired_at」的漂移。
@@ -1008,6 +1015,161 @@ def cmd_takeover(path: str, owner: str, ttl_min: float, reason: str = "") -> int
     return EXIT_OK
 
 
+#: sidecar 引入版本：早于它的 claim 签发时还没有「明文凭据落盘」这回事，
+#: 所以「有 token_sha256、没有 sidecar」在那之前是正常形态，之后是异常。
+SIDECAR_INTRO_COMMIT = "028f390f"
+
+
+def _sidecar_intro_ts() -> float:
+    raw = os.environ.get("MBDSDR_SIDECAR_INTRO_TS")
+    if raw:
+        try:
+            return float(raw)
+        except ValueError:
+            raise ClaimDenied(f"REPAIR DENIED\n  MBDSDR_SIDECAR_INTRO_TS 不是数字：{raw!r}") from None
+    commit = os.environ.get("MBDSDR_SIDECAR_INTRO_COMMIT") or SIDECAR_INTRO_COMMIT
+    try:
+        proc = subprocess.run(
+            ["git", "log", "-1", "--format=%ct", commit],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=20,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise ClaimDenied(
+            f"REPAIR DENIED\n  取不到 sidecar 引入版本 {commit} 的时间"
+            f"（{exc.__class__.__name__}）；判不了是不是 legacy，按失败关闭拒绝。"
+        ) from None
+    if proc.returncode != 0 or not proc.stdout.strip():
+        raise ClaimDenied(
+            f"REPAIR DENIED\n  取不到 sidecar 引入版本 {commit} 的时间（git log 失败）；"
+            "判不了是不是 legacy，按失败关闭拒绝。"
+        )
+    return float(proc.stdout.strip())
+
+
+def _registry_close_repair(key: str, display: str, now: float) -> None:
+    def mutate(data: Dict[str, Any]) -> None:
+        entry = _entry(data, key)
+        entry["path"] = display
+        _close_active(entry, now, "legacy_token_repair")
+        entry["current"] = None
+
+    _update_registry(mutate)
+
+
+def cmd_legacy_token_repair(path: str, owner: str, reason: str, by: str = "") -> int:
+    """修复「有凭据哈希、但明文从没落过盘」的 legacy claim（一次性、有审计）。
+
+    只对同时满足下面三条的 claim 有效，任一不满足即拒（fail-closed）：
+      ① 占位文件里有 `token_sha256`（说明它已经是凭据时代）；
+      ② `.token` sidecar 不存在（明文凭据从没落盘，谁都出示不了）；
+      ③ 签发时间早于 sidecar 引入版（`028f390f`）——那之前「无 sidecar」是正常形态。
+    另加：`--owner` 必须与台账 owner 原文一致，`--reason` 必须非空。
+
+    为什么不是通用后门：这三条把范围钉死在「sidecar 上线前签发、之后没人再动过」
+    的一批 claim 上；正常 claim 有 sidecar、之后签发的 claim 一定该有 sidecar，
+    都被条件②③ 挡住。
+    """
+    owner = owner.strip()
+    reason = (reason or "").strip()
+    if not owner:
+        print("OWNER 不能为空", file=sys.stderr)
+        return EXIT_USAGE
+    if not reason:
+        raise ClaimDenied(
+            f"REPAIR DENIED {path}\n  必须用 --reason 写明为什么可以修（谁确认持有者已不在改这个文件）。"
+        )
+
+    key, display = canonical_path(path)
+    marker = _marker_for(key)
+    if not marker.exists():
+        raise ClaimDenied(f"REPAIR DENIED {display}\n  该文件当前没有 claim，无需修复。")
+
+    introduced = _sidecar_intro_ts()
+    with _locked_fd(marker, create=False) as fd:
+        data = _read_marker_fd(fd)
+
+    holder = str(data.get("owner") or "").strip()
+    acquired = float(data.get("acquired_at") or 0)
+    heartbeat = float(data.get("heartbeat_at") or acquired)
+    token_hash = str(data.get("token_sha256") or "")
+    sidecar = _token_path(key)
+    sidecar_exists = sidecar.exists()
+
+    checks = [
+        ("有 token_sha256（属凭据时代）", bool(token_hash),
+         "该 claim 连凭据哈希都没有（更早的旧格式）：只能等 TTL 过期，或按新判据 takeover"),
+        ("sidecar 缺失", not sidecar_exists,
+         f"sidecar 在（{sidecar}）：持有者自己能 release/续租，不走 repair"),
+        ("签发早于 sidecar 引入版", acquired < introduced,
+         f"签发 {_iso(acquired)} 不早于 sidecar 引入 {_iso(introduced)}；"
+         "本该有 sidecar 却缺失，属异常，需人工查因，不由本命令放行"),
+        ("--owner 与台账一致", bool(holder) and holder == owner,
+         f"台账持有者={holder or '<空>'}，你声明的是 {owner}"),
+    ]
+    failed = [item for item in checks if not item[1]]
+    if failed:
+        lines = [f"REPAIR DENIED {display}"]
+        for name, ok, detail in checks:
+            lines.append(f"  [{'PASS' if ok else 'FAIL'}] {name}：{detail}")
+        raise ClaimDenied("\n".join(lines))
+
+    now = _now()
+    inflight = _inflight_lines(display)
+    record = {
+        "action": "legacy_token_repair",
+        "logged_at": _iso(now),
+        "epoch": now,
+        "path": display,
+        "old_owner": holder,
+        "old_acquired_at": _iso(acquired),
+        "old_heartbeat_at": _iso(heartbeat),
+        "token_sha256_prefix": token_hash[:12],
+        "sidecar_missing": True,
+        "sidecar_intro_commit": os.environ.get("MBDSDR_SIDECAR_INTRO_COMMIT") or SIDECAR_INTRO_COMMIT,
+        "sidecar_intro_at": _iso(introduced),
+        "repaired_by": by.strip() or "<未声明>",
+        "reason": reason,
+        "inflight": "none" if inflight == [] else ("unknown" if inflight is None else "dirty"),
+    }
+    # 先落审计：审计写不进去就一字节都不动。
+    try:
+        _append_takeover_log(record)
+    except OSError as exc:
+        raise ClaimDenied(
+            f"REPAIR DENIED {display}\n  审计日志写入失败，claim 原状未动：{exc}"
+        ) from None
+    try:
+        marker.unlink()
+    except FileNotFoundError:
+        pass
+    except OSError as exc:
+        raise ClaimDenied(
+            f"REPAIR DENIED {display}\n  审计已记录，但占位文件删除失败（{exc}）；"
+            "claim 仍是原状（完整保留），可直接重跑本命令"
+        ) from None
+    _remove_token_file(key)
+    try:
+        _registry_close_repair(key, display, now)
+    except (ClaimDenied, OSError) as exc:
+        print(
+            f"WARN 台账写入失败（claim 已删除，闸门按「无 claim」处理）：{exc}",
+            file=sys.stderr,
+        )
+    print(
+        f"REPAIR OK {display} 原持有者={holder} 签发={_iso(acquired)} "
+        f"（早于 sidecar 引入 {_iso(introduced)}）\n"
+        f"  claim 已完整删除（无半截状态）；台账 current 已置空（closed_reason=legacy_token_repair）\n"
+        f"  审计：{TAKEOVER_LOG}（action=legacy_token_repair，含 repaired_by 与 reason）\n"
+        f"  修复人：{record['repaired_by']}；理由：{reason}"
+    )
+    return EXIT_OK
+
+
 def _describe(payload: Dict[str, Any], now: float) -> str:
     owner = payload.get("owner", "<unknown>")
     ttl_s = float(payload.get("ttl_min") or 0.0) * 60.0
@@ -1185,7 +1347,39 @@ def build_parser() -> argparse.ArgumentParser:
         help="接管理由（必填，可复核证据：过期多久 + 工作区干净 + 为什么该你接）",
     )
 
+    repair = sub.add_parser(
+        "legacy-token-repair",
+        help="一次性修复 legacy claim：有 token_sha256、无 sidecar、签发早于 028f390f（有审计）",
+    )
+    repair.add_argument("path")
+    repair.add_argument("--owner", required=True, help="必须与台账 owner 原文完全一致")
+    repair.add_argument("--reason", required=True, help="修复理由（必填，写进审计日志）")
+    repair.add_argument(
+        "--by",
+        default="",
+        help="修复人（缺省取 MBDSDR_CLAIM_OWNER / git config mbdsdr.owner）",
+    )
+
     return parser
+
+
+def _repairer(args) -> str:
+    by = (args.by or "").strip() or (os.environ.get("MBDSDR_CLAIM_OWNER") or "").strip()
+    if by:
+        return by
+    try:
+        proc = subprocess.run(
+            ["git", "config", "--get", "mbdsdr.owner"],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=20,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    return proc.stdout.strip() if proc.returncode == 0 else ""
 
 
 def main(argv: Optional[list[str]] = None) -> int:
@@ -1205,6 +1399,8 @@ def main(argv: Optional[list[str]] = None) -> int:
             return cmd_audit_stale(args.json)
         if args.command == "takeover":
             return cmd_takeover(args.path, args.owner, args.ttl_min, args.reason)
+        if args.command == "legacy-token-repair":
+            return cmd_legacy_token_repair(args.path, args.owner, args.reason, _repairer(args))
         return cmd_status(args.path)
     except ClaimDenied as exc:
         print(str(exc), file=sys.stderr)

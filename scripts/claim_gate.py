@@ -32,6 +32,10 @@ import file_claim as fc  # noqa: E402  （复用台账路径、占位文件锁�
 IDENTITY_ENV = "MBDSDR_CLAIM_OWNER"
 #: takeover 记录与当前 claim 的 acquired_at 允许的时间差（同一台机器，正常 < 1s）。
 TAKEOVER_MATCH_WINDOW_S = 300.0
+#: `claim_takeovers.log` 里允许出现、但**不是** takeover 的记录类型（审计回放、
+#: legacy 凭据修复）。它们不参与「这笔 claim 是否被有效接管」的判定；
+#: 其它 action 一律按「格式不认识」失败关闭——避免随便一行 JSON 就能当接管凭证。
+NON_TAKEOVER_ACTIONS = frozenset({"audit_replay", "legacy_token_repair"})
 
 
 class LedgerError(RuntimeError):
@@ -127,8 +131,10 @@ def _load_takeover_log() -> List[Dict[str, Any]]:
             rec = json.loads(line)
         except json.JSONDecodeError as exc:
             raise LedgerError(f"takeover 日志格式不认识：{path} 第 {lineno} 行（{exc}）")
-        if not isinstance(rec, dict) or "path" not in rec or "new_owner" not in rec:
-            raise LedgerError(f"takeover 日志格式不认识：{path} 第 {lineno} 行缺 path/new_owner")
+        if not isinstance(rec, dict) or "path" not in rec:
+            raise LedgerError(f"takeover 日志格式不认识：{path} 第 {lineno} 行缺 path")
+        if rec.get("action") not in NON_TAKEOVER_ACTIONS and "new_owner" not in rec:
+            raise LedgerError(f"takeover 日志格式不认识：{path} 第 {lineno} 行缺 new_owner")
         rows.append(rec)
     return rows
 
@@ -137,6 +143,13 @@ def _takeover_rows(registry: Dict[str, Any], log_rows: List[Dict[str, Any]]) -> 
     """合并两个来源的 takeover 记录：`claim_takeovers.log`（主）+ 台账 history（次）。"""
     rows: List[Dict[str, Any]] = []
     for rec in log_rows:
+        action = rec.get("action")
+        if action in NON_TAKEOVER_ACTIONS:
+            continue
+        if action not in (None, "orphan_takeover"):
+            raise LedgerError(
+                f"takeover 日志格式不认识：action={action!r}（{rec.get('path')}）"
+            )
         rows.append(
             {
                 "path": _key(str(rec.get("path") or "")),
