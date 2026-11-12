@@ -405,6 +405,27 @@ def _build_dialog_class():
         QDialog, QLabel, QLineEdit, QListWidget, QListWidgetItem, QVBoxLayout,
     )
 
+    def _first_focusable(root):
+        """主窗焦点链上第一个可聚焦、可见、可用的控件（兜底落点）。
+
+        打开面板前那颗控件若已被销毁（设置页重建、面板被隐藏等），不能
+        把焦点丢给系统——那等于让键盘用户从头数 Tab。这里按 Qt 自己的
+        焦点链顺序取第一颗能停的控件，结果稳定、与面板内部实现无关。
+        """
+        chain = root.nextInFocusChain()
+        for _ in range(4096):
+            if chain is None or chain is root:
+                return None
+            try:
+                usable = (chain.isVisible() and chain.isEnabled()
+                          and int(chain.focusPolicy()) & int(Qt.TabFocus))
+            except RuntimeError:      # C++ 对象已销毁
+                usable = False
+            if usable:
+                return chain
+            chain = chain.nextInFocusChain()
+        return None
+
     class CommandPalette(QDialog):
         """全局命令面板（非模态；Esc 关闭，回车执行选中项）。"""
 
@@ -414,6 +435,8 @@ def _build_dialog_class():
             self.resize(760, 520)
             self.setModal(False)
             self._window = window
+            # 打开前的焦点控件：执行成功后要还回去，不能让用户重新数 Tab。
+            self._return_focus = self._capture_return_focus()
             self._commands = build_index(window)
             self._results: List[Command] = []
             self.last_result: dict = {}
@@ -438,6 +461,54 @@ def _build_dialog_class():
 
             self._refresh("")
             self.search_edit.setFocus()
+
+        # ---------------- 焦点返还 ----------------
+        def _capture_return_focus(self):
+            """记下打开面板时的焦点控件；取不到就交给主窗的兜底落点。"""
+            from PySide6.QtWidgets import QApplication
+            cur = QApplication.focusWidget()
+            if cur is None or cur is self or self.isAncestorOf(cur):
+                cur = self._window.focusWidget() if self._window is not None else None
+            if cur is None or cur is self or self.isAncestorOf(cur):
+                return None
+            return cur
+
+        @staticmethod
+        def _still_usable(widget) -> bool:
+            """控件还在、可见、可用（面板开着时设置页可能已重建）。"""
+            try:
+                import shiboken6
+                if not shiboken6.isValid(widget):
+                    return False
+            except ImportError:      # 没有 shiboken 时退回 Qt 侧判断
+                pass
+            try:
+                return widget.isVisible() and widget.isEnabled()
+            except RuntimeError:     # C++ 对象已销毁
+                return False
+
+        def _restore_return_focus(self) -> None:
+            """把焦点还回打开前那颗控件；它没了就落到主窗确定的第一颗。"""
+            target, self._return_focus = self._return_focus, None
+            if target is not None and self._still_usable(target):
+                # 非模态窗口关闭后系统不一定把主窗重新激活（实测 offscreen
+                # 平台就停在「无活动窗口」），所以这里显式把目标所在窗口拉回
+                # 前台，再落焦点。
+                try:
+                    target.window().activateWindow()
+                except RuntimeError:     # 目标窗口已销毁
+                    return
+                target.setFocus(Qt.OtherFocusReason)
+                return
+            if self._window is None:
+                return
+            try:
+                self._window.activateWindow()
+                fallback = _first_focusable(self._window)
+            except RuntimeError:     # 主窗已销毁
+                return
+            if fallback is not None:
+                fallback.setFocus(Qt.OtherFocusReason)
 
         # ---------------- 列表 ----------------
         def _refresh(self, text: str) -> None:
@@ -502,6 +573,9 @@ def _build_dialog_class():
             if result.get("ok"):
                 remember_recent(cmd.source)
                 self.hide()
+                # 命令本身可能把焦点挪走（如「设置」会 tab.setFocus()），
+                # 关闭后要还回用户原来所在的位置。
+                self._restore_return_focus()
             else:
                 self.reason_label.setText(
                     str(result.get("reason") or f"「{cmd.title}」执行失败"))
