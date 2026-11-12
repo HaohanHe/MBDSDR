@@ -34,6 +34,7 @@ PluginSystem：动态加载第三方插件，支持即插即用。
 """
 
 import json
+import logging
 import time
 import os
 import importlib
@@ -41,6 +42,8 @@ import importlib.util
 from dataclasses import dataclass, field
 from typing import Dict, List, Any, Optional
 from enum import Enum
+
+logger = logging.getLogger(__name__)
 
 
 class PluginStatus(str, Enum):
@@ -315,8 +318,9 @@ class PluginManager:
                     if auto_enable:
                         self.enable_plugin(name)
                     loaded.append(name)
-            except Exception:
-                pass
+            except Exception as e:
+                # 静默跳过会让「插件不存在」与「插件坏了」不可区分。
+                logger.warning("加载插件 %s 失败：%s: %s", name, type(e).__name__, e)
         return loaded
 
     def list_plugins(self) -> List[Dict[str, Any]]:
