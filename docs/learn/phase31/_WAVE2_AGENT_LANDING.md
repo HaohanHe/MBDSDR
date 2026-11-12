@@ -1,5 +1,6 @@
 # Phase31 Wave2 落地映射（Agent 层改造，C++）
 
+> 证据状态：E4——本文件数字未逐条绑定原始件/复跑命令，引用前须复核（判据见 docs/evidence-standard.md）。
 > 根：`cpp/src/ai/`。把 Wave1 四篇冻结结论（`context-compaction.md` / `multi-session.md` /
 > `streaming.md` / `tool-calling-boundary.md`）落到代码。无结构改动、不新增工具、35 工具
 > 清单与写门测试为冻结契约（`test_tool_registry.cpp` 未改）。

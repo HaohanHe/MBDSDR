@@ -1,5 +1,6 @@
 # Phase20 步骤一+二 — SDR++ 剩余 5 个 decoder 精读笔记（atv / dab / falcon9 / kg_sstv / ryfi）
 
+> 证据状态：E4——本文件数字未逐条绑定原始件/复跑命令，引用前须复核（判据见 docs/evidence-standard.md）。
 > 范围：`repos/sdrpp/decoder_modules/{atv_decoder,dab_decoder,falcon9_decoder,kg_sstv_decoder,ryfi_decoder}/src` 全部源码逐文件精读。
 >
 > **版权声明**：SDR++ 为 GPLv3。下列引用仅为机制学习的注释性短片段（≤3 行，锚定 `file:line`），**不复制实现代码进 MBDSDR**；MBDSDR 落地走独立实现（自有命名/结构，MIT）。

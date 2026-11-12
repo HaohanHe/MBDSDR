@@ -1,5 +1,6 @@
 # SDR++ `weather_sat_decoder` 精读笔记（Phase19-B）
 
+> 证据状态：E4——本文件数字未逐条绑定原始件/复跑命令，引用前须复核（判据见 docs/evidence-standard.md）。
 > 范围：`repos/sdrpp/decoder_modules/weather_sat_decoder/src/`（真读源码原文）。
 >  GPL 声明：同 SDR++ 整体 **GPLv3**（`repos/sdrpp/license`）。本笔记只学机制，不复制代码；MBDSDR 侧 MIT 独立实现。
 

@@ -1,5 +1,6 @@
 # Phase16-Wave1-BatchD：SDR++ 统一 Source 抽象精读笔记
 
+> 证据状态：E4——本文件数字未逐条绑定原始件/复跑命令，引用前须复核（判据见 docs/evidence-standard.md）。
 > 本笔记只落 `docs/learn/phase16/sdrpp-source.md`，不改生产代码、不 commit/push。
 > 对照目标：`repos/sdrpp`（**SDR++，GPLv3**，源码只学机制、不入库）。凡引用 SDR++ 原文片段均标注 `[GPLv3]` 与 file:line；片段为注释性短引用，未复制成段逻辑。
 > 对照基线：MBDSDR 自身代码（MIT）位于 `cpp/src/dsp/`。ctest 基线 **104/104**。

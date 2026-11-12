@@ -1,5 +1,6 @@
 # A1 渲染器差异审计报告（只读）
 
+> 证据状态：E4——本文件数字未逐条绑定原始件/复跑命令，引用前须复核（判据见 docs/evidence-standard.md）。
 > 范围：桌面 `cpp/src/ui/spectrum_widget.{h,cpp}`（容器 441 行）+ `cpp/src/ui/spectrum_display.{h,cpp}`（统一画布 1018 行）；移动 `mobile/lib/widgets/spectrum_display.dart`（CustomPainter 914 行）+ 调用方 `mobile/lib/pages/spectrum_page.dart`。
 > 依据：`docs/learn/phase3/_PHASE3_SPEC.md` §0/§1/§3。
 > 原则：全部证据带 `file:line`；拿不准标「推断」；原文未给标「原文未给」。本报告只给差异与修复建议，不写实现代码。

@@ -1,5 +1,6 @@
 # A3 UI 设计语言审计 + 触屏/窄窗/多窗口适配复查（只读）
 
+> 证据状态：E4——本文件数字未逐条绑定原始件/复跑命令，引用前须复核（判据见 docs/evidence-standard.md）。
 > 范围：phase3 §3 红线（A3，只读、不写代码、不动 git、一切走 token、禁魔法像素）。
 > 证据基线：Figma 解压预览 4 张 jpg（`cpp/scratch/figma_unzip/preview/`）；桌面 `cpp/src/ui/`（A1 已拥有 `spectrum_widget.{h,cpp}`/`spectrum_display.{h,cpp}`，本报告不重复审渲染器内部几何，仅取其设计语言/适配相关行）；Flutter `mobile/lib/pages/` + `mobile/lib/widgets/` + `mobile/lib/app/tokens.dart`。
 > 拿不准标「推断」；原文未给标「原文未给」。所有 file:line 均已实地核读。

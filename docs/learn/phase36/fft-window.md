@@ -2,6 +2,7 @@
 
 # Phase36 G4：GNU Radio FFT 窗口与频谱处理
 
+> 证据状态：E4——本文件数字未逐条绑定原始件/复跑命令，引用前须复核（判据见 docs/evidence-standard.md）。
 > 精读对象：`repos/gnuradio/gr-fft/`（真读源码：`include/gnuradio/fft/window.h`、`lib/window.cc`、`fft.h`、`lib/fft.cc`）
 > 我方对照：`cpp/src/dsp/fft.{h,cpp}`、`cpp/src/dsp/power_spectrum.{h,cpp}`（Hann/Flattop/Blackman 已暴露）、`cpp/src/ui/spectrum_render.h`
 > 红线：只学机制，不抄 GPL 代码；file:line 留痕。

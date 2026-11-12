@@ -1,5 +1,6 @@
 # SDR++ `meteor_demodulator` 精读笔记（Phase19-B）
 
+> 证据状态：E4——本文件数字未逐条绑定原始件/复跑命令，引用前须复核（判据见 docs/evidence-standard.md）。
 > 范围：`repos/sdrpp/decoder_modules/meteor_demodulator/src/`（真读源码原文，非 README）。
 >  GPL 声明：SDR++ 整体为 **GPLv3**（`repos/sdrpp/license` 文件即 GPL-3.0 全文，第 1-2 行）。
 >  本笔记只做机制学习，**不复制任何代码**；MBDSDR 侧一律 MIT 独立重写。
