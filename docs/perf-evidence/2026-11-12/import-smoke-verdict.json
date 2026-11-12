@@ -1,0 +1,146 @@
+{
+ "kind": "import smoke ≈1030–1110 ms 的模块归属、可延后性与隔离反证",
+ "date": "2026-11-12",
+ "head": "8019dc27（4 臂会话）/ e6895071（spec_gate 会话）；两次会话之间 HEAD 被别的线推进，各自快照落在 %TEMP%\\kilo\\smoke_head_<hash>",
+ "answer": "这 1110 ms 不是 smoke 自己的开销，是「本进程第一次 import scipy」的一次性成本：13 项探针里只有 2 项真的掏钱（scipy.signal ≈750、scipy._external.array_api_compat.numpy.fft ≈355），另外 11 项全是缓存命中（0.0 ms）。因此删掉/挪走 smoke 端到端省不到钱——紧接其后的 _startup_dependency_problems 会 import 同一批模块（30 ms 后），只是把钱换个人付。实测：只删一项 −3.2 ms，整段不跑 −595/+700 ms（在噪声内、方向还是变慢）。真正能拿回的是把「硬门槛里的 scipy 真 import」改成 find_spec：3 次实测端到端 −962 ms（2750.7–2962.4 vs base 3707.5–3867.0，区间不重叠）。",
+ "ruler": {
+  "definition_t2": "splash 首帧 paintEvent 返回 → 主窗顶层 Paint 在 QApplication.notify 中派发完毕",
+  "definition_smoke": "包住 desktop/main.py:_run_import_smoke 的墙钟",
+  "load_rule": "规则 10：每 run 前 2 s 低负载门（python 进程总占比 <200%），跑完再采一次",
+  "runs_per_arm": 3,
+  "env": "QT_QPA_PLATFORM=windows, QT_SCALE_FACTOR=1, 独立临时 profile, MBDSDR_OFFLINE/NO_HW/NULL_AUDIO=1"
+ },
+ "what_smoke_imports": {
+  "direct_probe_cost_ms": [
+   {"item": "scipy._external.array_api_compat.numpy.fft", "ms": 354.8, "cached": false,
+    "pulls": "numpy 134.3（含 numpy.testing/f2py）、scipy 包 __init__ 167.9、scipy._external 167.9"},
+   {"item": "scipy._external.array_api_compat.numpy.linalg", "ms": 0.0, "cached": true},
+   {"item": "scipy._external.array_api_compat.common", "ms": 0.0, "cached": true},
+   {"item": "scipy._external.array_api_extra", "ms": 11.6, "cached": false},
+   {"item": "scipy._external.packaging_version", "ms": 0.0, "cached": true},
+   {"item": "scipy._lib._array_api", "ms": 16.1, "cached": false},
+   {"item": "scipy._lib._util", "ms": 1.4, "cached": false},
+   {"item": "scipy.signal", "ms": 748.8, "cached": false,
+    "pulls": "scipy.stats 281.0、scipy.interpolate 167.4、scipy.optimize 120.7（经 interpolate._bsplines）、scipy.linalg 54.5、scipy.ndimage 35.9、scipy.spatial、scipy.sparse、scipy.signal.windows 127.9"},
+   {"item": "scipy.special", "ms": 0.0, "cached": true},
+   {"item": "scipy.fft", "ms": 0.0, "cached": true},
+   {"item": "scipy.interpolate", "ms": 0.0, "cached": true},
+   {"item": "scipy.optimize", "ms": 0.0, "cached": true},
+   {"item": "numpy._core._multiarray_umath", "ms": 0.0, "cached": true}
+  ],
+  "top20_by_cumulative_in_smoke": [
+   {"rank": 1, "module": "scipy.signal", "cumulative_ms": 748.8, "self_ms": 1.3, "parent": null, "who": "smoke 清单第 8 项（直接）"},
+   {"rank": 2, "module": "scipy.signal._support_alternative_backends", "cumulative_ms": 744.5, "self_ms": 33.2, "parent": "scipy.signal", "who": "传递依赖"},
+   {"rank": 3, "module": "scipy.signal._signal_api", "cumulative_ms": 710.7, "self_ms": 4.5, "parent": "scipy.signal._support_alternative_backends", "who": "传递依赖"},
+   {"rank": 4, "module": "scipy._external.array_api_compat.numpy.fft", "cumulative_ms": 354.8, "self_ms": 0.1, "parent": null, "who": "smoke 清单第 1 项（直接）"},
+   {"rank": 5, "module": "scipy._external.array_api_compat.numpy", "cumulative_ms": 354.7, "self_ms": 3.1, "parent": "scipy._external.array_api_compat.numpy.fft", "who": "传递依赖"},
+   {"rank": 6, "module": "scipy.signal._spline_filters", "cumulative_ms": 286.9, "self_ms": 1.9, "parent": "scipy.signal._signal_api", "who": "传递依赖"},
+   {"rank": 7, "module": "scipy.signal._signaltools", "cumulative_ms": 284.9, "self_ms": 2.6, "parent": "scipy.signal._spline_filters", "who": "传递依赖"},
+   {"rank": 8, "module": "scipy.signal._peak_finding", "cumulative_ms": 283.1, "self_ms": 0.9, "parent": "scipy.signal._signal_api", "who": "传递依赖"},
+   {"rank": 9, "module": "scipy.stats", "cumulative_ms": 281.0, "self_ms": 12.0, "parent": "scipy.signal._peak_finding", "who": "传递依赖"},
+   {"rank": 10, "module": "scipy._external.array_api_compat", "cumulative_ms": 173.4, "self_ms": 1.1, "parent": "scipy._external.array_api_compat.numpy", "who": "传递依赖"},
+   {"rank": 11, "module": "scipy.signal._ltisys", "cumulative_ms": 173.0, "self_ms": 2.6, "parent": "scipy.signal._signaltools", "who": "传递依赖"},
+   {"rank": 12, "module": "scipy.stats._stats_py", "cumulative_ms": 172.4, "self_ms": 40.3, "parent": "scipy.stats", "who": "传递依赖"},
+   {"rank": 13, "module": "scipy._external", "cumulative_ms": 167.9, "self_ms": 0.0, "parent": "scipy._external.array_api_compat", "who": "传递依赖"},
+   {"rank": 14, "module": "scipy", "cumulative_ms": 167.9, "self_ms": 3.6, "parent": "scipy._external", "who": "传递依赖"},
+   {"rank": 15, "module": "scipy.interpolate", "cumulative_ms": 167.4, "self_ms": 6.6, "parent": "scipy.signal._ltisys", "who": "传递依赖"},
+   {"rank": 16, "module": "scipy.interpolate._interpolate", "cumulative_ms": 138.8, "self_ms": 3.5, "parent": "scipy.interpolate", "who": "传递依赖"},
+   {"rank": 17, "module": "numpy", "cumulative_ms": 134.3, "self_ms": 6.5, "parent": "scipy", "who": "传递依赖"},
+   {"rank": 18, "module": "scipy.interpolate._fitpack_py", "cumulative_ms": 132.4, "self_ms": 3.6, "parent": "scipy.interpolate._interpolate", "who": "传递依赖"},
+   {"rank": 19, "module": "scipy.signal.windows", "cumulative_ms": 127.9, "self_ms": 1.6, "parent": "scipy.signal._signal_api", "who": "传递依赖"},
+   {"rank": 20, "module": "scipy.signal.windows._windows", "cumulative_ms": 125.8, "self_ms": 8.0, "parent": "scipy.signal.windows", "who": "传递依赖"}
+  ],
+  "top_self_ms": [
+   {"module": "scipy.stats._continuous_distns", "self_ms": 43.8},
+   {"module": "scipy.stats._stats_py", "self_ms": 40.3},
+   {"module": "numpy.testing._private.utils", "self_ms": 38.4},
+   {"module": "scipy.signal._support_alternative_backends", "self_ms": 33.2},
+   {"module": "scipy.special._support_alternative_backends", "self_ms": 18.1},
+   {"module": "scipy.ndimage._support_alternative_backends", "self_ms": 17.0},
+   {"module": "scipy.stats._morestats", "self_ms": 14.5}
+  ],
+  "module_count": 760,
+  "profiler_note": "_find_and_load 包装只在一条 run 上开；它给每次 import 加一层 Python 调用，因此该 run 的 smoke 总时长高于计时臂（探针合计 1132.7 vs 计时中位 1030.5），结构有效、绝对值只作相对比较。"
+ },
+ "what_it_checks": {
+  "list_source": "硬编码，不是目录扫描也不是配置：desktop/main.py:73-87 的 _RISKY_IMPORTS（13 项）。",
+  "runner": "desktop/main.py:233-241 _run_import_smoke：逐项 importlib.import_module（desktop/main.py:112-119 _probe_import），把 `[smoke] 私有模块导入自检 n/13 通过；失败：...` 写进启动日志 + stderr。",
+  "purpose": "PyInstaller 冻结包里 scipy 私有子树以 .pyc 落盘（MBDSDR_NOARCHIVE=1）：删掉 _internal/scipy/_external 不会让 `import scipy` 失败，却会在运行期懒加载时报 ModuleNotFoundError。smoke 把这批「静态分析容易漏掉」的模块在启动时探一遍。",
+  "hard_gate": "desktop/main.py:190-219 _startup_dependency_problems：_REQUIRED_DEPENDENCIES（127-154，9 项）+ _REQUIRED_DATA_FILES（157-161，1 项）任一缺失即返回问题清单。desktop/main.py:698-706 命中后关 splash、_report_startup_failure 弹原生窗口「MBDSDR 启动失败 / 启动自检失败：缺少必需组件（已中止启动）」，正文逐项给「缺了会怎样 / 怎么修」，附日志路径，return 3 退出。",
+  "optional": "desktop/main.py:164-173 + 210-218：可选依赖（sgp4/skyfield/pymap3d/serial/sounddevice/PIL/requests/websockets）缺失只写 `[selfcheck] 可选依赖缺失（不拦启动）：...` 到日志与 stderr，不弹窗、不拦启动。",
+  "packaging_verdict": "desktop/main.py:223-230 _packaging_verdict 用 _PACKAGING_SIBLINGS（90-109）区分「整棵子树没打进去（defect）」与「只缺单文件（incomplete）」，只被 _import_error_text（283-314）在 frozen 下使用。",
+  "doc_drift": [
+   "docs/PRD.md:824 写「在创建 QApplication 之前逐项 import」——实际在 QApplication 之后（main.py:674 建 app，693 跑 smoke），a52ce510 起如此。",
+   "docs/packaging.md:142 写 17 项、:520 写 13 项——以代码为准是 13 项（len(_RISKY_IMPORTS)=13）。"
+  ]
+ },
+ "defer_classification": {
+  "smoke_13_items": {
+   "verdict": "可完全取消（纯日志自检，不参与任何 UI 状态/能力声明/面板内容）",
+   "saving": "0 ms（实测）",
+   "why": "smoke 只是提前 30 ms 付同一笔 import 账；_startup_dependency_problems 紧接着 import scipy、scipy.signal、scipy._external.array_api_compat.numpy.fft，钱换人付。"
+  },
+  "gate_scipy_trio": {
+   "verdict": "可延后（改成存在性检查）",
+   "items": ["scipy", "scipy.signal", "scipy._external.array_api_compat.common", "scipy._external.array_api_compat.numpy.fft"],
+   "saving_ms_median": -962.0,
+   "saving_detail": "spec_gate 臂：T2 2754.1（2750.7–2962.4）vs base 3716.1（3707.5–3867.0），3/3 不重叠。构成：smoke 整段 1150 移出首帧前，gate 的 scipy find_spec 反涨 ≈300（find_spec 子模块要先 import 父包 scipy+numpy）。",
+   "cost": "find_spec 只能证明「文件在」，证明不了「.pyd 能加载」。文档记录的真实故障（_internal 子树被删）仍能拦住；DLL/VC++ 运行库坏掉这类会漏检——那类只能靠真 import。若要把这部分检测保住，得保留 numpy._core._multiarray_umath 与 PySide6 三个真 import（本臂已保留）。"
+  },
+  "gate_real_imports": {
+   "verdict": "首帧必需，不可延后",
+   "items": ["numpy._core._multiarray_umath", "PySide6.QtCore", "PySide6.QtGui", "PySide6.QtWidgets"],
+   "why": "二进制加载失败只有真 import 能发现；且建窗本身依赖 PySide6。"
+  },
+  "background_thread": {
+   "verdict": "未验证（且既有证据说无效）",
+   "why": "docs/performance-baseline.md:613-618：后台线程 import 后，硬门槛会同步 import 同一模块并等 import lock，总时间不变。"
+  }
+ },
+ "counter_test": {
+  "arm_base_4arm_session": {"t2_ms": {"runs": [3981.6, 3477.4, 3667.2], "median": 3667.2, "range": 504.2},
+                            "import_smoke_ms": {"runs": [1133.5, 1030.5, 1028.4], "median": 1030.5, "range": 105.1},
+                            "dependency_probe_ms": {"runs": [211.3, 350.6, 293.2], "median": 293.2, "range": 139.3}},
+  "skip_one_scipy_optimize": {"t2_ms": {"runs": [3664.0, 3305.6, 6139.7], "median": 3664.0, "range": 2834.1},
+                              "import_smoke_ms": {"runs": [1052.8, 996.5, 1448.6], "median": 1052.8, "range": 452.1},
+                              "delta_smoke_ms_median": 22.3,
+                              "reached_first_frame": true,
+                              "verdict": "省 0：scipy.optimize 在探针之前已作为 scipy.signal→scipy.interpolate._bsplines 的依赖被导入（profile 里 scipy.optimize cum=120.7、parent=scipy.interpolate._bsplines，而探针本身 0.0 ms）。中位差 +22.3 ms 比该臂自身极差 452 ms 小两个数量级，判为噪声，不记收益。"},
+  "defer_smoke": {"t2_ms": {"runs": [4367.0, 3302.6, 5299.7], "median": 4367.0, "range": 1997.1},
+                  "dependency_probe_ms": {"runs": [2104.9, 1319.7, 1495.9], "median": 1495.9, "range": 785.2},
+                  "deferred_smoke_ms": [0.8, 0.8, 1.5],
+                  "reached_first_frame": true,
+                  "verdict": "没省：smoke 的 1030 全数转移到 30 ms 后的硬门槛（293→1496）。"},
+  "skip_smoke": {"t2_ms": {"runs": [3585.3, 4262.2, 5346.8], "median": 4262.2, "range": 1761.5},
+                 "dependency_probe_ms": {"runs": [1467.3, 1556.9, 1764.1], "median": 1556.9, "range": 296.8},
+                 "delta_t2_ms_median": 595.0,
+                 "reached_first_frame": true,
+                 "verdict": "没省（中位反而 +595，方向与噪声一致：首帧前的 scipy import 一次没少，只是从 smoke 挪到 gate）。"},
+  "spec_gate": {"session_head": "e6895071",
+                "base_t2_ms": {"runs": [3867.0, 3716.1, 3707.5], "median": 3716.1, "range": 159.5},
+                "spec_gate_t2_ms": {"runs": [2962.4, 2754.1, 2750.7], "median": 2754.1, "range": 211.7},
+                "delta_t2_ms_median": -962.0,
+                "base_import_smoke_ms": {"runs": [1005.3, 1151.4, 1176.3], "median": 1151.4},
+                "spec_gate_dependency_probe_ms": {"runs": [644.3, 610.3, 624.5], "median": 624.5},
+                "base_dependency_probe_ms": {"runs": [284.2, 325.9, 399.6], "median": 325.9},
+                "deferred_smoke_ms": [2.3, 2.2, 2.7],
+                "first_frame_reached": "3/3，error 均为 null",
+                "verdict": "唯一在反证里真的出现过的收益：−962 ms，且三对区间不重叠（spec_gate 最大 2962.4 < base 最小 3707.5）。"}
+ },
+ "unverified": [
+  "把 scipy 真 import 挪到后台线程能省多少 —— 未验证；既有证据（docs/performance-baseline.md:613-618）判定为 0（硬门槛等 import lock）。",
+  "find_spec 在「文件在但 .pyd 加载失败」时的漏检率 —— 未验证；本轮没有构造坏二进制样本。",
+  "smoke 挪到首帧后是否会让首帧之后出现可感知卡顿 —— 未测（defer 臂里它跑在 paint 派发之后、quit 之前，0.8–1.5 ms / spec_gate 2.2–2.7 ms，量级不足以卡顿，但未做窗口交互采样）。"
+ ],
+ "conclusion": "1110 ms 的归属是清楚的：scipy.signal ≈750 + scipy._external.array_api_compat.numpy.fft ≈355，其余 11 项缓存命中。它不是 smoke 的「自检开销」，而是本进程第一次 import scipy 的成本；smoke 只是第一个碰它的人。因此「删/挪 smoke」这条路上没有钱（实测 −3 / +595 / +700，全在噪声内）。有钱的是把硬门槛里 scipy 系的真 import 换成 find_spec（+ smoke 挪首帧后），实测 −962 ms，代价是漏检「文件在但二进制坏」这一类。要落这 962，需改 desktop/main.py 的两处探针 + smoke 调用时机（产品代码，待授权），并承认该漏检。",
+ "scripts": [
+  "scripts/repro/2026-11-12-import-smoke-attrib.py --runs 3 --arms base,skip_one,defer_smoke,skip_smoke --skip-mod scipy.optimize --out import-smoke-attrib.json",
+  "scripts/repro/2026-11-12-import-smoke-attrib.py --runs 3 --arms base,spec_gate --profile-arms _none --out import-smoke-spec-gate.json"
+ ],
+ "sources": [
+  "docs/perf-evidence/2026-11-12/import-smoke-attrib.json",
+  "docs/perf-evidence/2026-11-12/import-smoke-spec-gate.json",
+  "docs/perf-evidence/2026-11-12/splash-t1-t2.json",
+  "desktop/main.py:73-87（清单）、112-119（_probe_import）、190-219（硬门槛）、233-241（smoke）、693-706（调用点）"
+ ]
+}

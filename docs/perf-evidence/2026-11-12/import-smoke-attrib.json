@@ -1,0 +1,3800 @@
+{
+ "kind": "import smoke（1100 ms）的模块归属、可延后性与隔离反证",
+ "date": "2026-11-12",
+ "head": "8019dc27",
+ "snapshot": "C:\\Users\\xxhzb\\AppData\\Local\\Temp\\kilo\\smoke_head_8019dc27",
+ "arms": {
+  "base": "生产原样：_run_import_smoke 在 splash 之后、主窗构造之前同步跑",
+  "skip_one": "只从 _RISKY_IMPORTS 去掉 scipy.optimize（其余不变）",
+  "defer_smoke": "smoke 不跑；主窗首个 Paint 派发完毕后同步补跑（首帧之后）",
+  "skip_smoke": "smoke 完全不跑（上界；依赖探针仍在首帧前）",
+  "spec_gate": "硬门槛保留但 scipy 系探针改 find_spec（只查文件在不在）+ smoke 挪到首帧后；numpy 二进制与 PySide6 仍真 import"
+ },
+ "definition": {
+  "T2": "splash 首帧 paintEvent 返回 → 主窗顶层 Paint 派发完毕",
+  "entry_to_first_frame": "T0（本脚本第一行）→ 主窗首个 Paint 派发完毕",
+  "import_smoke_ms": "包住 appmain._run_import_smoke 的墙钟"
+ },
+ "load_rule": "规则 10：每 run 前父进程采 2 s（python 总占比 <200%），子进程跑完再采一次。",
+ "runs": 3,
+ "summary": {
+  "base": {
+   "t1_ms": {
+    "runs": [
+     1742.0,
+     1686.6,
+     1674.0
+    ],
+    "median": 1686.6,
+    "min": 1674.0,
+    "max": 1742.0,
+    "range": 68.0
+   },
+   "t2_ms": {
+    "runs": [
+     3981.6,
+     3477.4,
+     3667.2
+    ],
+    "median": 3667.2,
+    "min": 3477.4,
+    "max": 3981.6,
+    "range": 504.2
+   },
+   "entry_to_first_frame_ms": {
+    "runs": [
+     5723.6,
+     5164.0,
+     5341.2
+    ],
+    "median": 5341.2,
+    "min": 5164.0,
+    "max": 5723.6,
+    "range": 559.6
+   },
+   "import_smoke_ms": {
+    "runs": [
+     1133.5,
+     1030.5,
+     1028.4
+    ],
+    "median": 1030.5,
+    "min": 1028.4,
+    "max": 1133.5,
+    "range": 105.1
+   },
+   "dependency_probe_ms": {
+    "runs": [
+     211.3,
+     350.6,
+     293.2
+    ],
+    "median": 293.2,
+    "min": 211.3,
+    "max": 350.6,
+    "range": 139.3
+   },
+   "mw_import_ms": {
+    "runs": [
+     658.9,
+     358.2,
+     445.4
+    ],
+    "median": 445.4,
+    "min": 358.2,
+    "max": 658.9,
+    "range": 300.7
+   },
+   "mw_ctor_ms": {
+    "runs": [
+     1352.7,
+     1130.1,
+     1189.4
+    ],
+    "median": 1189.4,
+    "min": 1130.1,
+    "max": 1352.7,
+    "range": 222.6
+   },
+   "deferred_smoke_ms": null,
+   "errors": [],
+   "reached_first_frame": true
+  },
+  "skip_one": {
+   "t1_ms": {
+    "runs": [
+     1761.2,
+     1777.1,
+     1719.2
+    ],
+    "median": 1761.2,
+    "min": 1719.2,
+    "max": 1777.1,
+    "range": 57.9
+   },
+   "t2_ms": {
+    "runs": [
+     3664.0,
+     3305.6,
+     6139.7
+    ],
+    "median": 3664.0,
+    "min": 3305.6,
+    "max": 6139.7,
+    "range": 2834.1
+   },
+   "entry_to_first_frame_ms": {
+    "runs": [
+     5425.2,
+     5082.7,
+     7858.9
+    ],
+    "median": 5425.2,
+    "min": 5082.7,
+    "max": 7858.9,
+    "range": 2776.2
+   },
+   "import_smoke_ms": {
+    "runs": [
+     1052.8,
+     996.5,
+     1448.6
+    ],
+    "median": 1052.8,
+    "min": 996.5,
+    "max": 1448.6,
+    "range": 452.1
+   },
+   "dependency_probe_ms": {
+    "runs": [
+     341.5,
+     306.6,
+     340.4
+    ],
+    "median": 340.4,
+    "min": 306.6,
+    "max": 341.5,
+    "range": 34.9
+   },
+   "mw_import_ms": {
+    "runs": [
+     475.8,
+     362.9,
+     465.4
+    ],
+    "median": 465.4,
+    "min": 362.9,
+    "max": 475.8,
+    "range": 112.9
+   },
+   "mw_ctor_ms": {
+    "runs": [
+     1153.8,
+     1053.0,
+     1291.1
+    ],
+    "median": 1153.8,
+    "min": 1053.0,
+    "max": 1291.1,
+    "range": 238.1
+   },
+   "deferred_smoke_ms": null,
+   "errors": [],
+   "reached_first_frame": true
+  },
+  "defer_smoke": {
+   "t1_ms": {
+    "runs": [
+     1815.4,
+     1666.3,
+     1652.2
+    ],
+    "median": 1666.3,
+    "min": 1652.2,
+    "max": 1815.4,
+    "range": 163.2
+   },
+   "t2_ms": {
+    "runs": [
+     4367.0,
+     3302.6,
+     5299.7
+    ],
+    "median": 4367.0,
+    "min": 3302.6,
+    "max": 5299.7,
+    "range": 1997.1
+   },
+   "entry_to_first_frame_ms": {
+    "runs": [
+     6182.4,
+     4968.9,
+     6951.9
+    ],
+    "median": 6182.4,
+    "min": 4968.9,
+    "max": 6951.9,
+    "range": 1983.0
+   },
+   "import_smoke_ms": {
+    "runs": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "median": 0.0,
+    "min": 0.0,
+    "max": 0.0,
+    "range": 0.0
+   },
+   "dependency_probe_ms": {
+    "runs": [
+     2104.9,
+     1319.7,
+     1495.9
+    ],
+    "median": 1495.9,
+    "min": 1319.7,
+    "max": 2104.9,
+    "range": 785.2
+   },
+   "mw_import_ms": {
+    "runs": [
+     415.8,
+     357.9,
+     376.6
+    ],
+    "median": 376.6,
+    "min": 357.9,
+    "max": 415.8,
+    "range": 57.9
+   },
+   "mw_ctor_ms": {
+    "runs": [
+     1177.8,
+     1032.9,
+     1142.7
+    ],
+    "median": 1142.7,
+    "min": 1032.9,
+    "max": 1177.8,
+    "range": 144.9
+   },
+   "deferred_smoke_ms": {
+    "runs": [
+     0.8,
+     0.8,
+     1.5
+    ],
+    "median": 0.8,
+    "min": 0.8,
+    "max": 1.5,
+    "range": 0.7
+   },
+   "errors": [],
+   "reached_first_frame": true
+  },
+  "skip_smoke": {
+   "t1_ms": {
+    "runs": [
+     1616.5,
+     1643.5,
+     1861.3
+    ],
+    "median": 1643.5,
+    "min": 1616.5,
+    "max": 1861.3,
+    "range": 244.8
+   },
+   "t2_ms": {
+    "runs": [
+     3585.3,
+     4262.2,
+     5346.8
+    ],
+    "median": 4262.2,
+    "min": 3585.3,
+    "max": 5346.8,
+    "range": 1761.5
+   },
+   "entry_to_first_frame_ms": {
+    "runs": [
+     5201.8,
+     5905.7,
+     7208.1
+    ],
+    "median": 5905.7,
+    "min": 5201.8,
+    "max": 7208.1,
+    "range": 2006.3
+   },
+   "import_smoke_ms": {
+    "runs": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "median": 0.0,
+    "min": 0.0,
+    "max": 0.0,
+    "range": 0.0
+   },
+   "dependency_probe_ms": {
+    "runs": [
+     1467.3,
+     1556.9,
+     1764.1
+    ],
+    "median": 1556.9,
+    "min": 1467.3,
+    "max": 1764.1,
+    "range": 296.8
+   },
+   "mw_import_ms": {
+    "runs": [
+     366.6,
+     406.0,
+     389.1
+    ],
+    "median": 389.1,
+    "min": 366.6,
+    "max": 406.0,
+    "range": 39.4
+   },
+   "mw_ctor_ms": {
+    "runs": [
+     1139.5,
+     1493.8,
+     1237.8
+    ],
+    "median": 1237.8,
+    "min": 1139.5,
+    "max": 1493.8,
+    "range": 354.3
+   },
+   "deferred_smoke_ms": null,
+   "errors": [],
+   "reached_first_frame": true
+  }
+ },
+ "delta_vs_base_t2_ms": {
+  "skip_one": -3.2,
+  "defer_smoke": 699.8,
+  "skip_smoke": 595.0
+ },
+ "samples": [
+  {
+   "head": "8019dc27",
+   "arm": "base",
+   "removed": null,
+   "mw_file": "C:\\Users\\xxhzb\\AppData\\Local\\Temp\\kilo\\smoke_head_8019dc27\\main_window.py",
+   "t0_abs": 745.4471796,
+   "t_import_done_abs": 745.6579727,
+   "t_app_created_abs": 745.6983864,
+   "t_splash_show_abs": 746.1624812,
+   "t_splash_paint_done_abs": 747.1891707,
+   "t_mw_created_abs": 750.6151641,
+   "t_mw_show_abs": 750.8082157,
+   "t_mw_paint_done_abs": 751.170771,
+   "import_smoke_ms": 1133.5,
+   "dependency_probe_ms": 211.3,
+   "theme_apply_ms": null,
+   "mw_import_ms": 658.9,
+   "mw_ctor_ms": 1352.7,
+   "mw_paint_ms": 0.2,
+   "deferred_smoke_ms": null,
+   "deferred_smoke_error": null,
+   "risky_imports": [
+    "scipy._external.array_api_compat.numpy.fft",
+    "scipy._external.array_api_compat.numpy.linalg",
+    "scipy._external.array_api_compat.common",
+    "scipy._external.array_api_extra",
+    "scipy._external.packaging_version",
+    "scipy._lib._array_api",
+    "scipy._lib._util",
+    "scipy.signal",
+    "scipy.special",
+    "scipy.fft",
+    "scipy.interpolate",
+    "scipy.optimize",
+    "numpy._core._multiarray_umath"
+   ],
+   "smoke_probes": [
+    {
+     "name": "scipy._external.array_api_compat.numpy.fft",
+     "ok": true,
+     "ms": 354.838,
+     "phase": "_run_import_smoke",
+     "cached": false
+    },
+    {
+     "name": "scipy._external.array_api_compat.numpy.linalg",
+     "ok": true,
+     "ms": 0.014,
+     "phase": "_run_import_smoke",
+     "cached": true
+    },
+    {
+     "name": "scipy._external.array_api_compat.common",
+     "ok": true,
+     "ms": 0.006,
+     "phase": "_run_import_smoke",
+     "cached": true
+    },
+    {
+     "name": "scipy._external.array_api_extra",
+     "ok": true,
+     "ms": 11.556,
+     "phase": "_run_import_smoke",
+     "cached": false
+    },
+    {
+     "name": "scipy._external.packaging_version",
+     "ok": true,
+     "ms": 0.008,
+     "phase": "_run_import_smoke",
+     "cached": true
+    },
+    {
+     "name": "scipy._lib._array_api",
+     "ok": true,
+     "ms": 16.068,
+     "phase": "_run_import_smoke",
+     "cached": false
+    },
+    {
+     "name": "scipy._lib._util",
+     "ok": true,
+     "ms": 1.368,
+     "phase": "_run_import_smoke",
+     "cached": false
+    },
+    {
+     "name": "scipy.signal",
+     "ok": true,
+     "ms": 748.845,
+     "phase": "_run_import_smoke",
+     "cached": false
+    },
+    {
+     "name": "scipy.special",
+     "ok": true,
+     "ms": 0.009,
+     "phase": "_run_import_smoke",
+     "cached": true
+    },
+    {
+     "name": "scipy.fft",
+     "ok": true,
+     "ms": 0.005,
+     "phase": "_run_import_smoke",
+     "cached": true
+    },
+    {
+     "name": "scipy.interpolate",
+     "ok": true,
+     "ms": 0.006,
+     "phase": "_run_import_smoke",
+     "cached": true
+    },
+    {
+     "name": "scipy.optimize",
+     "ok": true,
+     "ms": 0.003,
+     "phase": "_run_import_smoke",
+     "cached": true
+    },
+    {
+     "name": "numpy._core._multiarray_umath",
+     "ok": true,
+     "ms": 0.003,
+     "phase": "_run_import_smoke",
+     "cached": true
+    },
+    {
+     "name": "numpy",
+     "ok": true,
+     "ms": 0.022,
+     "phase": "_startup_dependency_problems",
+     "cached": true
+    },
+    {
+     "name": "numpy._core._multiarray_umath",
+     "ok": true,
+     "ms": 0.005,
+     "phase": "_startup_dependency_problems",
+     "cached": true
+    },
+    {
+     "name": "scipy",
+     "ok": true,
+     "ms": 0.004,
+     "phase": "_startup_dependency_problems",
+     "cached": true
+    },
+    {
+     "name": "scipy._external.array_api_compat.common",
+     "ok": true,
+     "ms": 0.016,
+     "phase": "_startup_dependency_problems",
+     "cached": true
+    },
+    {
+     "name": "scipy._external.array_api_compat.numpy.fft",
+     "ok": true,
+     "ms": 0.004,
+     "phase": "_startup_dependency_problems",
+     "cached": true
+    },
+    {
+     "name": "scipy.signal",
+     "ok": true,
+     "ms": 0.003,
+     "phase": "_startup_dependency_problems",
+     "cached": true
+    },
+    {
+     "name": "PySide6.QtCore",
+     "ok": true,
+     "ms": 0.004,
+     "phase": "_startup_dependency_problems",
+     "cached": true
+    },
+    {
+     "name": "PySide6.QtGui",
+     "ok": true,
+     "ms": 0.004,
+     "phase": "_startup_dependency_problems",
+     "cached": true
+    },
+    {
+     "name": "PySide6.QtWidgets",
+     "ok": true,
+     "ms": 0.004,
+     "phase": "_startup_dependency_problems",
+     "cached": true
+    },
+    {
+     "name": "sgp4",
+     "ok": true,
+     "ms": 0.819,
+     "phase": "_startup_dependency_problems",
+     "cached": false
+    },
+    {
+     "name": "skyfield",
+     "ok": true,
+     "ms": 0.712,
+     "phase": "_startup_dependency_problems",
+     "cached": false
+    },
+    {
+     "name": "pymap3d",
+     "ok": true,
+     "ms": 36.05,
+     "phase": "_startup_dependency_problems",
+     "cached": false
+    },
+    {
+     "name": "serial",
+     "ok": true,
+     "ms": 4.899,
+     "phase": "_startup_dependency_problems",
+     "cached": false
+    },
+    {
+     "name": "sounddevice",
+     "ok": true,
+     "ms": 57.994,
+     "phase": "_startup_dependency_problems",
+     "cached": false
+    },
+    {
+     "name": "PIL",
+     "ok": true,
+     "ms": 2.079,
+     "phase": "_startup_dependency_problems",
+     "cached": false
+    },
+    {
+     "name": "requests",
+     "ok": true,
+     "ms": 106.089,
+     "phase": "_startup_dependency_problems",
+     "cached": false
+    },
+    {
+     "name": "websockets",
+     "ok": true,
+     "ms": 2.445,
+     "phase": "_startup_dependency_problems",
+     "cached": false
+    }
+   ],
+   "scipy_loaded_before_app_main": false,
+   "numpy_loaded_before_app_main": false,
+   "timeout": false,
+   "error": null,
+   "load_after": {
+    "sys_cpu_pct": 46.2,
+    "python_proc_count": 2,
+    "python_total_cpu_pct": 1.6,
+    "python_top": [
+     {
+      "pid": 23116,
+      "cpu_pct": 1.6
+     },
+     {
+      "pid": 872,
+      "cpu_pct": 0.0
+     }
+    ],
+    "cpu_count": 12
+   },
+   "interpreter_ms": 37.7,
+   "load_gate_before_python_pct": 1.6,
+   "_t1": 1742.0,
+   "_t2": 3981.6,
+   "_entry": 5723.6
+  },
+  {
+   "head": "8019dc27",
+   "arm": "skip_one",
+   "removed": "scipy.optimize",
+   "mw_file": "C:\\Users\\xxhzb\\AppData\\Local\\Temp\\kilo\\smoke_head_8019dc27\\main_window.py",
+   "t0_abs": 755.8093837,
+   "t_import_done_abs": 756.0035639,
+   "t_app_created_abs": 756.0464995,
+   "t_splash_show_abs": 756.5432383,
+   "t_splash_paint_done_abs": 757.5706225,
+   "t_mw_created_abs": 760.6586054,
+   "t_mw_show_abs": 760.8716678,
+   "t_mw_paint_done_abs": 761.2346284,
+   "import_smoke_ms": 1052.8,
+   "dependency_probe_ms": 341.5,
+   "theme_apply_ms": null,
+   "mw_import_ms": 475.8,
+   "mw_ctor_ms": 1153.8,
+   "mw_paint_ms": 0.1,
+   "deferred_smoke_ms": null,
+   "deferred_smoke_error": null,
+   "risky_imports": [
+    "scipy._external.array_api_compat.numpy.fft",
+    "scipy._external.array_api_compat.numpy.linalg",
+    "scipy._external.array_api_compat.common",
+    "scipy._external.array_api_extra",
+    "scipy._external.packaging_version",
+    "scipy._lib._array_api",
+    "scipy._lib._util",
+    "scipy.signal",
+    "scipy.special",
+    "scipy.fft",
+    "scipy.interpolate",
+    "scipy.optimize",
+    "numpy._core._multiarray_umath"
+   ],
+   "smoke_probes": [
+    {
+     "name": "scipy._external.array_api_compat.numpy.fft",
+     "ok": true,
+     "ms": 298.056,
+     "phase": "_run_import_smoke",
+     "cached": false
+    },
+    {
+     "name": "scipy._external.array_api_compat.numpy.linalg",
+     "ok": true,
+     "ms": 0.009,
+     "phase": "_run_import_smoke",
+     "cached": true
+    },
+    {
+     "name": "scipy._external.array_api_compat.common",
+     "ok": true,
+     "ms": 0.003,
+     "phase": "_run_import_smoke",
+     "cached": true
+    },
+    {
+     "name": "scipy._external.array_api_extra",
+     "ok": true,
+     "ms": 10.967,
+     "phase": "_run_import_smoke",
+     "cached": false
+    },
+    {
+     "name": "scipy._external.packaging_version",
+     "ok": true,
+     "ms": 0.009,
+     "phase": "_run_import_smoke",
+     "cached": true
+    },
+    {
+     "name": "scipy._lib._array_api",
+     "ok": true,
+     "ms": 13.767,
+     "phase": "_run_import_smoke",
+     "cached": false
+    },
+    {
+     "name": "scipy._lib._util",
+     "ok": true,
+     "ms": 1.379,
+     "phase": "_run_import_smoke",
+     "cached": false
+    },
+    {
+     "name": "scipy.signal",
+     "ok": true,
+     "ms": 727.919,
+     "phase": "_run_import_smoke",
+     "cached": false
+    },
+    {
+     "name": "scipy.special",
+     "ok": true,
+     "ms": 0.007,
+     "phase": "_run_import_smoke",
+     "cached": true
+    },
+    {
+     "name": "scipy.fft",
+     "ok": true,
+     "ms": 0.003,
+     "phase": "_run_import_smoke",
+     "cached": true
+    },
+    {
+     "name": "scipy.interpolate",
+     "ok": true,
+     "ms": 0.003,
+     "phase": "_run_import_smoke",
+     "cached": true
+    },
+    {
+     "name": "numpy._core._multiarray_umath",
+     "ok": true,
+     "ms": 0.002,
+     "phase": "_run_import_smoke",
+     "cached": true
+    },
+    {
+     "name": "numpy",
+     "ok": true,
+     "ms": 0.012,
+     "phase": "_startup_dependency_problems",
+     "cached": true
+    },
+    {
+     "name": "numpy._core._multiarray_umath",
+     "ok": true,
+     "ms": 0.003,
+     "phase": "_startup_dependency_problems",
+     "cached": true
+    },
+    {
+     "name": "scipy",
+     "ok": true,
+     "ms": 0.002,
+     "phase": "_startup_dependency_problems",
+     "cached": true
+    },
+    {
+     "name": "scipy._external.array_api_compat.common",
+     "ok": true,
+     "ms": 0.002,
+     "phase": "_startup_dependency_problems",
+     "cached": true
+    },
+    {
+     "name": "scipy._external.array_api_compat.numpy.fft",
+     "ok": true,
+     "ms": 0.003,
+     "phase": "_startup_dependency_problems",
+     "cached": true
+    },
+    {
+     "name": "scipy.signal",
+     "ok": true,
+     "ms": 0.002,
+     "phase": "_startup_dependency_problems",
+     "cached": true
+    },
+    {
+     "name": "PySide6.QtCore",
+     "ok": true,
+     "ms": 0.003,
+     "phase": "_startup_dependency_problems",
+     "cached": true
+    },
+    {
+     "name": "PySide6.QtGui",
+     "ok": true,
+     "ms": 0.003,
+     "phase": "_startup_dependency_problems",
+     "cached": true
+    },
+    {
+     "name": "PySide6.QtWidgets",
+     "ok": true,
+     "ms": 0.002,
+     "phase": "_startup_dependency_problems",
+     "cached": true
+    },
+    {
+     "name": "sgp4",
+     "ok": true,
+     "ms": 0.872,
+     "phase": "_startup_dependency_problems",
+     "cached": false
+    },
+    {
+     "name": "skyfield",
+     "ok": true,
+     "ms": 0.817,
+     "phase": "_startup_dependency_problems",
+     "cached": false
+    },
+    {
+     "name": "pymap3d",
+     "ok": true,
+     "ms": 34.955,
+     "phase": "_startup_dependency_problems",
+     "cached": false
+    },
+    {
+     "name": "serial",
+     "ok": true,
+     "ms": 7.048,
+     "phase": "_startup_dependency_problems",
+     "cached": false
+    },
+    {
+     "name": "sounddevice",
+     "ok": true,
+     "ms": 202.512,
+     "phase": "_startup_dependency_problems",
+     "cached": false
+    },
+    {
+     "name": "PIL",
+     "ok": true,
+     "ms": 1.853,
+     "phase": "_startup_dependency_problems",
+     "cached": false
+    },
+    {
+     "name": "requests",
+     "ok": true,
+     "ms": 91.107,
+     "phase": "_startup_dependency_problems",
+     "cached": false
+    },
+    {
+     "name": "websockets",
+     "ok": true,
+     "ms": 2.105,
+     "phase": "_startup_dependency_problems",
+     "cached": false
+    }
+   ],
+   "scipy_loaded_before_app_main": false,
+   "numpy_loaded_before_app_main": false,
+   "timeout": false,
+   "error": null,
+   "load_after": {
+    "sys_cpu_pct": 48.4,
+    "python_proc_count": 2,
+    "python_total_cpu_pct": 0.8,
+    "python_top": [
+     {
+      "pid": 29456,
+      "cpu_pct": 0.8
+     },
+     {
+      "pid": 872,
+      "cpu_pct": 0.0
+     }
+    ],
+    "cpu_count": 12
+   },
+   "interpreter_ms": 35.8,
+   "load_gate_before_python_pct": 0.0,
+   "_t1": 1761.2,
+   "_t2": 3664.0,
+   "_entry": 5425.2
+  },
+  {
+   "head": "8019dc27",
+   "arm": "defer_smoke",
+   "removed": null,
+   "mw_file": "C:\\Users\\xxhzb\\AppData\\Local\\Temp\\kilo\\smoke_head_8019dc27\\main_window.py",
+   "t0_abs": 765.9252065,
+   "t_import_done_abs": 766.1258018,
+   "t_app_created_abs": 766.169243,
+   "t_splash_show_abs": 766.7097834,
+   "t_splash_paint_done_abs": 767.7406232,
+   "t_mw_created_abs": 771.5179075,
+   "t_mw_show_abs": 771.7248151,
+   "t_mw_paint_done_abs": 772.1075887,
+   "import_smoke_ms": 0.0,
+   "dependency_probe_ms": 2104.9,
+   "theme_apply_ms": null,
+   "mw_import_ms": 415.8,
+   "mw_ctor_ms": 1177.8,
+   "mw_paint_ms": 0.1,
+   "deferred_smoke_ms": 0.8,
+   "deferred_smoke_error": null,
+   "risky_imports": [
+    "scipy._external.array_api_compat.numpy.fft",
+    "scipy._external.array_api_compat.numpy.linalg",
+    "scipy._external.array_api_compat.common",
+    "scipy._external.array_api_extra",
+    "scipy._external.packaging_version",
+    "scipy._lib._array_api",
+    "scipy._lib._util",
+    "scipy.signal",
+    "scipy.special",
+    "scipy.fft",
+    "scipy.interpolate",
+    "scipy.optimize",
+    "numpy._core._multiarray_umath"
+   ],
+   "smoke_probes": [
+    {
+     "name": "numpy",
+     "ok": true,
+     "ms": 184.789,
+     "phase": "_startup_dependency_problems",
+     "cached": false
+    },
+    {
+     "name": "numpy._core._multiarray_umath",
+     "ok": true,
+     "ms": 0.017,
+     "phase": "_startup_dependency_problems",
+     "cached": true
+    },
+    {
+     "name": "scipy",
+     "ok": true,
+     "ms": 41.18,
+     "phase": "_startup_dependency_problems",
+     "cached": false
+    },
+    {
+     "name": "scipy._external.array_api_compat.common",
+     "ok": true,
+     "ms": 4.687,
+     "phase": "_startup_dependency_problems",
+     "cached": false
+    },
+    {
+     "name": "scipy._external.array_api_compat.numpy.fft",
+     "ok": true,
+     "ms": 304.053,
+     "phase": "_startup_dependency_problems",
+     "cached": false
+    },
+    {
+     "name": "scipy.signal",
+     "ok": true,
+     "ms": 1192.707,
+     "phase": "_startup_dependency_problems",
+     "cached": false
+    },
+    {
+     "name": "PySide6.QtCore",
+     "ok": true,
+     "ms": 0.007,
+     "phase": "_startup_dependency_problems",
+     "cached": true
+    },
+    {
+     "name": "PySide6.QtGui",
+     "ok": true,
+     "ms": 0.003,
+     "phase": "_startup_dependency_problems",
+     "cached": true
+    },
+    {
+     "name": "PySide6.QtWidgets",
+     "ok": true,
+     "ms": 0.003,
+     "phase": "_startup_dependency_problems",
+     "cached": true
+    },
+    {
+     "name": "sgp4",
+     "ok": true,
+     "ms": 0.774,
+     "phase": "_startup_dependency_problems",
+     "cached": false
+    },
+    {
+     "name": "skyfield",
+     "ok": true,
+     "ms": 0.748,
+     "phase": "_startup_dependency_problems",
+     "cached": false
+    },
+    {
+     "name": "pymap3d",
+     "ok": true,
+     "ms": 33.941,
+     "phase": "_startup_dependency_problems",
+     "cached": false
+    },
+    {
+     "name": "serial",
+     "ok": true,
+     "ms": 6.283,
+     "phase": "_startup_dependency_problems",
+     "cached": false
+    },
+    {
+     "name": "sounddevice",
+     "ok": true,
+     "ms": 209.222,
+     "phase": "_startup_dependency_problems",
+     "cached": false
+    },
+    {
+     "name": "PIL",
+     "ok": true,
+     "ms": 2.186,
+     "phase": "_startup_dependency_problems",
+     "cached": false
+    },
+    {
+     "name": "requests",
+     "ok": true,
+     "ms": 121.239,
+     "phase": "_startup_dependency_problems",
+     "cached": false
+    },
+    {
+     "name": "websockets",
+     "ok": true,
+     "ms": 2.828,
+     "phase": "_startup_dependency_problems",
+     "cached": false
+    },
+    {
+     "name": "scipy._external.array_api_compat.numpy.fft",
+     "ok": true,
+     "ms": 0.028,
+     "phase": "smoke_after_frame",
+     "cached": true
+    },
+    {
+     "name": "scipy._external.array_api_compat.numpy.linalg",
+     "ok": true,
+     "ms": 0.004,
+     "phase": "smoke_after_frame",
+     "cached": true
+    },
+    {
+     "name": "scipy._external.array_api_compat.common",
+     "ok": true,
+     "ms": 0.003,
+     "phase": "smoke_after_frame",
+     "cached": true
+    },
+    {
+     "name": "scipy._external.array_api_extra",
+     "ok": true,
+     "ms": 0.002,
+     "phase": "smoke_after_frame",
+     "cached": true
+    },
+    {
+     "name": "scipy._external.packaging_version",
+     "ok": true,
+     "ms": 0.003,
+     "phase": "smoke_after_frame",
+     "cached": true
+    },
+    {
+     "name": "scipy._lib._array_api",
+     "ok": true,
+     "ms": 0.003,
+     "phase": "smoke_after_frame",
+     "cached": true
+    },
+    {
+     "name": "scipy._lib._util",
+     "ok": true,
+     "ms": 0.003,
+     "phase": "smoke_after_frame",
+     "cached": true
+    },
+    {
+     "name": "scipy.signal",
+     "ok": true,
+     "ms": 0.003,
+     "phase": "smoke_after_frame",
+     "cached": true
+    },
+    {
+     "name": "scipy.special",
+     "ok": true,
+     "ms": 0.003,
+     "phase": "smoke_after_frame",
+     "cached": true
+    },
+    {
+     "name": "scipy.fft",
+     "ok": true,
+     "ms": 0.003,
+     "phase": "smoke_after_frame",
+     "cached": true
+    },
+    {
+     "name": "scipy.interpolate",
+     "ok": true,
+     "ms": 0.003,
+     "phase": "smoke_after_frame",
+     "cached": true
+    },
+    {
+     "name": "scipy.optimize",
+     "ok": true,
+     "ms": 0.003,
+     "phase": "smoke_after_frame",
+     "cached": true
+    },
+    {
+     "name": "numpy._core._multiarray_umath",
+     "ok": true,
+     "ms": 0.002,
+     "phase": "smoke_after_frame",
+     "cached": true
+    }
+   ],
+   "scipy_loaded_before_app_main": false,
+   "numpy_loaded_before_app_main": false,
+   "timeout": false,
+   "error": null,
+   "load_after": {
+    "sys_cpu_pct": 34.8,
+    "python_proc_count": 2,
+    "python_total_cpu_pct": 3.1,
+    "python_top": [
+     {
+      "pid": 30692,
+      "cpu_pct": 3.1
+     },
+     {
+      "pid": 872,
+      "cpu_pct": 0.0
+     }
+    ],
+    "cpu_count": 12
+   },
+   "interpreter_ms": 36.9,
+   "load_gate_before_python_pct": 1.6,
+   "_t1": 1815.4,
+   "_t2": 4367.0,
+   "_entry": 6182.4
+  },
+  {
+   "head": "8019dc27",
+   "arm": "skip_smoke",
+   "removed": null,
+   "mw_file": "C:\\Users\\xxhzb\\AppData\\Local\\Temp\\kilo\\smoke_head_8019dc27\\main_window.py",
+   "t0_abs": 776.8049808,
+   "t_import_done_abs": 776.96205,
+   "t_app_created_abs": 776.9935703,
+   "t_splash_show_abs": 777.3943987,
+   "t_splash_paint_done_abs": 778.4214839,
+   "t_mw_created_abs": 781.4554375,
+   "t_mw_show_abs": 781.6389289,
+   "t_mw_paint_done_abs": 782.0068265,
+   "import_smoke_ms": 0.0,
+   "dependency_probe_ms": 1467.3,
+   "theme_apply_ms": null,
+   "mw_import_ms": 366.6,
+   "mw_ctor_ms": 1139.5,
+   "mw_paint_ms": 0.1,
+   "deferred_smoke_ms": null,
+   "deferred_smoke_error": null,
+   "risky_imports": [
+    "scipy._external.array_api_compat.numpy.fft",
+    "scipy._external.array_api_compat.numpy.linalg",
+    "scipy._external.array_api_compat.common",
+    "scipy._external.array_api_extra",
+    "scipy._external.packaging_version",
+    "scipy._lib._array_api",
+    "scipy._lib._util",
+    "scipy.signal",
+    "scipy.special",
+    "scipy.fft",
+    "scipy.interpolate",
+    "scipy.optimize",
+    "numpy._core._multiarray_umath"
+   ],
+   "smoke_probes": [
+    {
+     "name": "numpy",
+     "ok": true,
+     "ms": 120.526,
+     "phase": "_startup_dependency_problems",
+     "cached": false
+    },
+    {
+     "name": "numpy._core._multiarray_umath",
+     "ok": true,
+     "ms": 0.01,
+     "phase": "_startup_dependency_problems",
+     "cached": true
+    },
+    {
+     "name": "scipy",
+     "ok": true,
+     "ms": 30.688,
+     "phase": "_startup_dependency_problems",
+     "cached": false
+    },
+    {
+     "name": "scipy._external.array_api_compat.common",
+     "ok": true,
+     "ms": 4.808,
+     "phase": "_startup_dependency_problems",
+     "cached": false
+    },
+    {
+     "name": "scipy._external.array_api_compat.numpy.fft",
+     "ok": true,
+     "ms": 162.771,
+     "phase": "_startup_dependency_problems",
+     "cached": false
+    },
+    {
+     "name": "scipy.signal",
+     "ok": true,
+     "ms": 829.404,
+     "phase": "_startup_dependency_problems",
+     "cached": false
+    },
+    {
+     "name": "PySide6.QtCore",
+     "ok": true,
+     "ms": 0.007,
+     "phase": "_startup_dependency_problems",
+     "cached": true
+    },
+    {
+     "name": "PySide6.QtGui",
+     "ok": true,
+     "ms": 0.003,
+     "phase": "_startup_dependency_problems",
+     "cached": true
+    },
+    {
+     "name": "PySide6.QtWidgets",
+     "ok": true,
+     "ms": 0.002,
+     "phase": "_startup_dependency_problems",
+     "cached": true
+    },
+    {
+     "name": "sgp4",
+     "ok": true,
+     "ms": 0.7,
+     "phase": "_startup_dependency_problems",
+     "cached": false
+    },
+    {
+     "name": "skyfield",
+     "ok": true,
+     "ms": 0.644,
+     "phase": "_startup_dependency_problems",
+     "cached": false
+    },
+    {
+     "name": "pymap3d",
+     "ok": true,
+     "ms": 26.916,
+     "phase": "_startup_dependency_problems",
+     "cached": false
+    },
+    {
+     "name": "serial",
+     "ok": true,
+     "ms": 4.004,
+     "phase": "_startup_dependency_problems",
+     "cached": false
+    },
+    {
+     "name": "sounddevice",
+     "ok": true,
+     "ms": 187.725,
+     "phase": "_startup_dependency_problems",
+     "cached": false
+    },
+    {
+     "name": "PIL",
+     "ok": true,
+     "ms": 2.611,
+     "phase": "_startup_dependency_problems",
+     "cached": false
+    },
+    {
+     "name": "requests",
+     "ok": true,
+     "ms": 94.135,
+     "phase": "_startup_dependency_problems",
+     "cached": false
+    },
+    {
+     "name": "websockets",
+     "ok": true,
+     "ms": 2.124,
+     "phase": "_startup_dependency_problems",
+     "cached": false
+    }
+   ],
+   "scipy_loaded_before_app_main": false,
+   "numpy_loaded_before_app_main": false,
+   "timeout": false,
+   "error": null,
+   "load_after": {
+    "sys_cpu_pct": 29.3,
+    "python_proc_count": 2,
+    "python_total_cpu_pct": 0.8,
+    "python_top": [
+     {
+      "pid": 17492,
+      "cpu_pct": 0.8
+     },
+     {
+      "pid": 872,
+      "cpu_pct": 0.0
+     }
+    ],
+    "cpu_count": 12
+   },
+   "interpreter_ms": 34.3,
+   "load_gate_before_python_pct": 0.0,
+   "_t1": 1616.5,
+   "_t2": 3585.3,
+   "_entry": 5201.8
+  },
+  {
+   "head": "8019dc27",
+   "arm": "base",
+   "removed": null,
+   "mw_file": "C:\\Users\\xxhzb\\AppData\\Local\\Temp\\kilo\\smoke_head_8019dc27\\main_window.py",
+   "t0_abs": 786.6108833,
+   "t_import_done_abs": 786.7686392,
+   "t_app_created_abs": 786.8095338,
+   "t_splash_show_abs": 787.2691508,
+   "t_splash_paint_done_abs": 788.2974589,
+   "t_mw_created_abs": 791.2314359,
+   "t_mw_show_abs": 791.4195518,
+   "t_mw_paint_done_abs": 791.7748478,
+   "import_smoke_ms": 1030.5,
+   "dependency_probe_ms": 350.6,
+   "theme_apply_ms": null,
+   "mw_import_ms": 358.2,
+   "mw_ctor_ms": 1130.1,
+   "mw_paint_ms": 0.1,
+   "deferred_smoke_ms": null,
+   "deferred_smoke_error": null,
+   "risky_imports": [
+    "scipy._external.array_api_compat.numpy.fft",
+    "scipy._external.array_api_compat.numpy.linalg",
+    "scipy._external.array_api_compat.common",
+    "scipy._external.array_api_extra",
+    "scipy._external.packaging_version",
+    "scipy._lib._array_api",
+    "scipy._lib._util",
+    "scipy.signal",
+    "scipy.special",
+    "scipy.fft",
+    "scipy.interpolate",
+    "scipy.optimize",
+    "numpy._core._multiarray_umath"
+   ],
+   "smoke_probes": [
+    {
+     "name": "scipy._external.array_api_compat.numpy.fft",
+     "ok": true,
+     "ms": 318.008,
+     "phase": "_run_import_smoke",
+     "cached": false
+    },
+    {
+     "name": "scipy._external.array_api_compat.numpy.linalg",
+     "ok": true,
+     "ms": 0.009,
+     "phase": "_run_import_smoke",
+     "cached": true
+    },
+    {
+     "name": "scipy._external.array_api_compat.common",
+     "ok": true,
+     "ms": 0.003,
+     "phase": "_run_import_smoke",
+     "cached": true
+    },
+    {
+     "name": "scipy._external.array_api_extra",
+     "ok": true,
+     "ms": 10.32,
+     "phase": "_run_import_smoke",
+     "cached": false
+    },
+    {
+     "name": "scipy._external.packaging_version",
+     "ok": true,
+     "ms": 0.007,
+     "phase": "_run_import_smoke",
+     "cached": true
+    },
+    {
+     "name": "scipy._lib._array_api",
+     "ok": true,
+     "ms": 17.246,
+     "phase": "_run_import_smoke",
+     "cached": false
+    },
+    {
+     "name": "scipy._lib._util",
+     "ok": true,
+     "ms": 1.302,
+     "phase": "_run_import_smoke",
+     "cached": false
+    },
+    {
+     "name": "scipy.signal",
+     "ok": true,
+     "ms": 682.824,
+     "phase": "_run_import_smoke",
+     "cached": false
+    },
+    {
+     "name": "scipy.special",
+     "ok": true,
+     "ms": 0.007,
+     "phase": "_run_import_smoke",
+     "cached": true
+    },
+    {
+     "name": "scipy.fft",
+     "ok": true,
+     "ms": 0.003,
+     "phase": "_run_import_smoke",
+     "cached": true
+    },
+    {
+     "name": "scipy.interpolate",
+     "ok": true,
+     "ms": 0.003,
+     "phase": "_run_import_smoke",
+     "cached": true
+    },
+    {
+     "name": "scipy.optimize",
+     "ok": true,
+     "ms": 0.002,
+     "phase": "_run_import_smoke",
+     "cached": true
+    },
+    {
+     "name": "numpy._core._multiarray_umath",
+     "ok": true,
+     "ms": 0.002,
+     "phase": "_run_import_smoke",
+     "cached": true
+    },
+    {
+     "name": "numpy",
+     "ok": true,
+     "ms": 0.014,
+     "phase": "_startup_dependency_problems",
+     "cached": true
+    },
+    {
+     "name": "numpy._core._multiarray_umath",
+     "ok": true,
+     "ms": 0.003,
+     "phase": "_startup_dependency_problems",
+     "cached": true
+    },
+    {
+     "name": "scipy",
+     "ok": true,
+     "ms": 0.002,
+     "phase": "_startup_dependency_problems",
+     "cached": true
+    },
+    {
+     "name": "scipy._external.array_api_compat.common",
+     "ok": true,
+     "ms": 0.003,
+     "phase": "_startup_dependency_problems",
+     "cached": true
+    },
+    {
+     "name": "scipy._external.array_api_compat.numpy.fft",
+     "ok": true,
+     "ms": 0.002,
+     "phase": "_startup_dependency_problems",
+     "cached": true
+    },
+    {
+     "name": "scipy.signal",
+     "ok": true,
+     "ms": 0.002,
+     "phase": "_startup_dependency_problems",
+     "cached": true
+    },
+    {
+     "name": "PySide6.QtCore",
+     "ok": true,
+     "ms": 0.002,
+     "phase": "_startup_dependency_problems",
+     "cached": true
+    },
+    {
+     "name": "PySide6.QtGui",
+     "ok": true,
+     "ms": 0.002,
+     "phase": "_startup_dependency_problems",
+     "cached": true
+    },
+    {
+     "name": "PySide6.QtWidgets",
+     "ok": true,
+     "ms": 0.002,
+     "phase": "_startup_dependency_problems",
+     "cached": true
+    },
+    {
+     "name": "sgp4",
+     "ok": true,
+     "ms": 0.942,
+     "phase": "_startup_dependency_problems",
+     "cached": false
+    },
+    {
+     "name": "skyfield",
+     "ok": true,
+     "ms": 0.863,
+     "phase": "_startup_dependency_problems",
+     "cached": false
+    },
+    {
+     "name": "pymap3d",
+     "ok": true,
+     "ms": 27.773,
+     "phase": "_startup_dependency_problems",
+     "cached": false
+    },
+    {
+     "name": "serial",
+     "ok": true,
+     "ms": 5.104,
+     "phase": "_startup_dependency_problems",
+     "cached": false
+    },
+    {
+     "name": "sounddevice",
+     "ok": true,
+     "ms": 202.345,
+     "phase": "_startup_dependency_problems",
+     "cached": false
+    },
+    {
+     "name": "PIL",
+     "ok": true,
+     "ms": 2.959,
+     "phase": "_startup_dependency_problems",
+     "cached": false
+    },
+    {
+     "name": "requests",
+     "ok": true,
+     "ms": 108.133,
+     "phase": "_startup_dependency_problems",
+     "cached": false
+    },
+    {
+     "name": "websockets",
+     "ok": true,
+     "ms": 2.249,
+     "phase": "_startup_dependency_problems",
+     "cached": false
+    }
+   ],
+   "scipy_loaded_before_app_main": false,
+   "numpy_loaded_before_app_main": false,
+   "timeout": false,
+   "error": null,
+   "load_after": {
+    "sys_cpu_pct": 45.4,
+    "python_proc_count": 2,
+    "python_total_cpu_pct": 0.8,
+    "python_top": [
+     {
+      "pid": 26236,
+      "cpu_pct": 0.8
+     },
+     {
+      "pid": 872,
+      "cpu_pct": 0.0
+     }
+    ],
+    "cpu_count": 12
+   },
+   "interpreter_ms": 33.4,
+   "load_gate_before_python_pct": 0.0,
+   "_t1": 1686.6,
+   "_t2": 3477.4,
+   "_entry": 5164.0
+  },
+  {
+   "head": "8019dc27",
+   "arm": "skip_one",
+   "removed": "scipy.optimize",
+   "mw_file": "C:\\Users\\xxhzb\\AppData\\Local\\Temp\\kilo\\smoke_head_8019dc27\\main_window.py",
+   "t0_abs": 796.4769381,
+   "t_import_done_abs": 796.656974,
+   "t_app_created_abs": 796.6986116,
+   "t_splash_show_abs": 797.2279256,
+   "t_splash_paint_done_abs": 798.2540424,
+   "t_mw_created_abs": 801.038453,
+   "t_mw_show_abs": 801.2143942,
+   "t_mw_paint_done_abs": 801.5596031,
+   "import_smoke_ms": 996.5,
+   "dependency_probe_ms": 306.6,
+   "theme_apply_ms": null,
+   "mw_import_ms": 362.9,
+   "mw_ctor_ms": 1053.0,
+   "mw_paint_ms": 0.1,
+   "deferred_smoke_ms": null,
+   "deferred_smoke_error": null,
+   "risky_imports": [
+    "scipy._external.array_api_compat.numpy.fft",
+    "scipy._external.array_api_compat.numpy.linalg",
+    "scipy._external.array_api_compat.common",
+    "scipy._external.array_api_extra",
+    "scipy._external.packaging_version",
+    "scipy._lib._array_api",
+    "scipy._lib._util",
+    "scipy.signal",
+    "scipy.special",
+    "scipy.fft",
+    "scipy.interpolate",
+    "scipy.optimize",
+    "numpy._core._multiarray_umath"
+   ],
+   "smoke_probes": [
+    {
+     "name": "scipy._external.array_api_compat.numpy.fft",
+     "ok": true,
+     "ms": 284.804,
+     "phase": "_run_import_smoke",
+     "cached": false
+    },
+    {
+     "name": "scipy._external.array_api_compat.numpy.linalg",
+     "ok": true,
+     "ms": 0.007,
+     "phase": "_run_import_smoke",
+     "cached": true
+    },
+    {
+     "name": "scipy._external.array_api_compat.common",
+     "ok": true,
+     "ms": 0.002,
+     "phase": "_run_import_smoke",
+     "cached": true
+    },
+    {
+     "name": "scipy._external.array_api_extra",
+     "ok": true,
+     "ms": 8.932,
+     "phase": "_run_import_smoke",
+     "cached": false
+    },
+    {
+     "name": "scipy._external.packaging_version",
+     "ok": true,
+     "ms": 0.006,
+     "phase": "_run_import_smoke",
+     "cached": true
+    },
+    {
+     "name": "scipy._lib._array_api",
+     "ok": true,
+     "ms": 14.267,
+     "phase": "_run_import_smoke",
+     "cached": false
+    },
+    {
+     "name": "scipy._lib._util",
+     "ok": true,
+     "ms": 1.19,
+     "phase": "_run_import_smoke",
+     "cached": false
+    },
+    {
+     "name": "scipy.signal",
+     "ok": true,
+     "ms": 686.716,
+     "phase": "_run_import_smoke",
+     "cached": false
+    },
+    {
+     "name": "scipy.special",
+     "ok": true,
+     "ms": 0.006,
+     "phase": "_run_import_smoke",
+     "cached": true
+    },
+    {
+     "name": "scipy.fft",
+     "ok": true,
+     "ms": 0.002,
+     "phase": "_run_import_smoke",
+     "cached": true
+    },
+    {
+     "name": "scipy.interpolate",
+     "ok": true,
+     "ms": 0.002,
+     "phase": "_run_import_smoke",
+     "cached": true
+    },
+    {
+     "name": "numpy._core._multiarray_umath",
+     "ok": true,
+     "ms": 0.002,
+     "phase": "_run_import_smoke",
+     "cached": true
+    },
+    {
+     "name": "numpy",
+     "ok": true,
+     "ms": 0.015,
+     "phase": "_startup_dependency_problems",
+     "cached": true
+    },
+    {
+     "name": "numpy._core._multiarray_umath",
+     "ok": true,
+     "ms": 0.003,
+     "phase": "_startup_dependency_problems",
+     "cached": true
+    },
+    {
+     "name": "scipy",
+     "ok": true,
+     "ms": 0.002,
+     "phase": "_startup_dependency_problems",
+     "cached": true
+    },
+    {
+     "name": "scipy._external.array_api_compat.common",
+     "ok": true,
+     "ms": 0.002,
+     "phase": "_startup_dependency_problems",
+     "cached": true
+    },
+    {
+     "name": "scipy._external.array_api_compat.numpy.fft",
+     "ok": true,
+     "ms": 0.002,
+     "phase": "_startup_dependency_problems",
+     "cached": true
+    },
+    {
+     "name": "scipy.signal",
+     "ok": true,
+     "ms": 0.002,
+     "phase": "_startup_dependency_problems",
+     "cached": true
+    },
+    {
+     "name": "PySide6.QtCore",
+     "ok": true,
+     "ms": 0.002,
+     "phase": "_startup_dependency_problems",
+     "cached": true
+    },
+    {
+     "name": "PySide6.QtGui",
+     "ok": true,
+     "ms": 0.002,
+     "phase": "_startup_dependency_problems",
+     "cached": true
+    },
+    {
+     "name": "PySide6.QtWidgets",
+     "ok": true,
+     "ms": 0.002,
+     "phase": "_startup_dependency_problems",
+     "cached": true
+    },
+    {
+     "name": "sgp4",
+     "ok": true,
+     "ms": 0.685,
+     "phase": "_startup_dependency_problems",
+     "cached": false
+    },
+    {
+     "name": "skyfield",
+     "ok": true,
+     "ms": 0.596,
+     "phase": "_startup_dependency_problems",
+     "cached": false
+    },
+    {
+     "name": "pymap3d",
+     "ok": true,
+     "ms": 27.088,
+     "phase": "_startup_dependency_problems",
+     "cached": false
+    },
+    {
+     "name": "serial",
+     "ok": true,
+     "ms": 3.419,
+     "phase": "_startup_dependency_problems",
+     "cached": false
+    },
+    {
+     "name": "sounddevice",
+     "ok": true,
+     "ms": 181.649,
+     "phase": "_startup_dependency_problems",
+     "cached": false
+    },
+    {
+     "name": "PIL",
+     "ok": true,
+     "ms": 1.629,
+     "phase": "_startup_dependency_problems",
+     "cached": false
+    },
+    {
+     "name": "requests",
+     "ok": true,
+     "ms": 88.792,
+     "phase": "_startup_dependency_problems",
+     "cached": false
+    },
+    {
+     "name": "websockets",
+     "ok": true,
+     "ms": 2.607,
+     "phase": "_startup_dependency_problems",
+     "cached": false
+    }
+   ],
+   "scipy_loaded_before_app_main": false,
+   "numpy_loaded_before_app_main": false,
+   "timeout": false,
+   "error": null,
+   "load_after": {
+    "sys_cpu_pct": 25.7,
+    "python_proc_count": 2,
+    "python_total_cpu_pct": 0.0,
+    "python_top": [
+     {
+      "pid": 872,
+      "cpu_pct": 0.0
+     },
+     {
+      "pid": 12156,
+      "cpu_pct": 0.0
+     }
+    ],
+    "cpu_count": 12
+   },
+   "interpreter_ms": 35.5,
+   "load_gate_before_python_pct": 0.0,
+   "_t1": 1777.1,
+   "_t2": 3305.6,
+   "_entry": 5082.7
+  },
+  {
+   "head": "8019dc27",
+   "arm": "defer_smoke",
+   "removed": null,
+   "mw_file": "C:\\Users\\xxhzb\\AppData\\Local\\Temp\\kilo\\smoke_head_8019dc27\\main_window.py",
+   "t0_abs": 806.1437481,
+   "t_import_done_abs": 806.3137702,
+   "t_app_created_abs": 806.3447175,
+   "t_splash_show_abs": 806.7860267,
+   "t_splash_paint_done_abs": 807.8100545,
+   "t_mw_created_abs": 810.5864379,
+   "t_mw_show_abs": 810.7759244,
+   "t_mw_paint_done_abs": 811.1126599,
+   "import_smoke_ms": 0.0,
+   "dependency_probe_ms": 1319.7,
+   "theme_apply_ms": null,
+   "mw_import_ms": 357.9,
+   "mw_ctor_ms": 1032.9,
+   "mw_paint_ms": 0.1,
+   "deferred_smoke_ms": 0.8,
+   "deferred_smoke_error": null,
+   "risky_imports": [
+    "scipy._external.array_api_compat.numpy.fft",
+    "scipy._external.array_api_compat.numpy.linalg",
+    "scipy._external.array_api_compat.common",
+    "scipy._external.array_api_extra",
+    "scipy._external.packaging_version",
+    "scipy._lib._array_api",
+    "scipy._lib._util",
+    "scipy.signal",
+    "scipy.special",
+    "scipy.fft",
+    "scipy.interpolate",
+    "scipy.optimize",
+    "numpy._core._multiarray_umath"
+   ],
+   "smoke_probes": [
+    {
+     "name": "numpy",
+     "ok": true,
+     "ms": 114.057,
+     "phase": "_startup_dependency_problems",
+     "cached": false
+    },
+    {
+     "name": "numpy._core._multiarray_umath",
+     "ok": true,
+     "ms": 0.008,
+     "phase": "_startup_dependency_problems",
+     "cached": true
+    },
+    {
+     "name": "scipy",
+     "ok": true,
+     "ms": 26.181,
+     "phase": "_startup_dependency_problems",
+     "cached": false
+    },
+    {
+     "name": "scipy._external.array_api_compat.common",
+     "ok": true,
+     "ms": 4.268,
+     "phase": "_startup_dependency_problems",
+     "cached": false
+    },
+    {
+     "name": "scipy._external.array_api_compat.numpy.fft",
+     "ok": true,
+     "ms": 162.705,
+     "phase": "_startup_dependency_problems",
+     "cached": false
+    },
+    {
+     "name": "scipy.signal",
+     "ok": true,
+     "ms": 730.263,
+     "phase": "_startup_dependency_problems",
+     "cached": false
+    },
+    {
+     "name": "PySide6.QtCore",
+     "ok": true,
+     "ms": 0.006,
+     "phase": "_startup_dependency_problems",
+     "cached": true
+    },
+    {
+     "name": "PySide6.QtGui",
+     "ok": true,
+     "ms": 0.003,
+     "phase": "_startup_dependency_problems",
+     "cached": true
+    },
+    {
+     "name": "PySide6.QtWidgets",
+     "ok": true,
+     "ms": 0.002,
+     "phase": "_startup_dependency_problems",
+     "cached": true
+    },
+    {
+     "name": "sgp4",
+     "ok": true,
+     "ms": 0.679,
+     "phase": "_startup_dependency_problems",
+     "cached": false
+    },
+    {
+     "name": "skyfield",
+     "ok": true,
+     "ms": 0.689,
+     "phase": "_startup_dependency_problems",
+     "cached": false
+    },
+    {
+     "name": "pymap3d",
+     "ok": true,
+     "ms": 30.955,
+     "phase": "_startup_dependency_problems",
+     "cached": false
+    },
+    {
+     "name": "serial",
+     "ok": true,
+     "ms": 4.251,
+     "phase": "_startup_dependency_problems",
+     "cached": false
+    },
+    {
+     "name": "sounddevice",
+     "ok": true,
+     "ms": 147.652,
+     "phase": "_startup_dependency_problems",
+     "cached": false
+    },
+    {
+     "name": "PIL",
+     "ok": true,
+     "ms": 2.003,
+     "phase": "_startup_dependency_problems",
+     "cached": false
+    },
+    {
+     "name": "requests",
+     "ok": true,
+     "ms": 93.899,
+     "phase": "_startup_dependency_problems",
+     "cached": false
+    },
+    {
+     "name": "websockets",
+     "ok": true,
+     "ms": 1.867,
+     "phase": "_startup_dependency_problems",
+     "cached": false
+    },
+    {
+     "name": "scipy._external.array_api_compat.numpy.fft",
+     "ok": true,
+     "ms": 0.028,
+     "phase": "smoke_after_frame",
+     "cached": true
+    },
+    {
+     "name": "scipy._external.array_api_compat.numpy.linalg",
+     "ok": true,
+     "ms": 0.004,
+     "phase": "smoke_after_frame",
+     "cached": true
+    },
+    {
+     "name": "scipy._external.array_api_compat.common",
+     "ok": true,
+     "ms": 0.002,
+     "phase": "smoke_after_frame",
+     "cached": true
+    },
+    {
+     "name": "scipy._external.array_api_extra",
+     "ok": true,
+     "ms": 0.002,
+     "phase": "smoke_after_frame",
+     "cached": true
+    },
+    {
+     "name": "scipy._external.packaging_version",
+     "ok": true,
+     "ms": 0.002,
+     "phase": "smoke_after_frame",
+     "cached": true
+    },
+    {
+     "name": "scipy._lib._array_api",
+     "ok": true,
+     "ms": 0.002,
+     "phase": "smoke_after_frame",
+     "cached": true
+    },
+    {
+     "name": "scipy._lib._util",
+     "ok": true,
+     "ms": 0.003,
+     "phase": "smoke_after_frame",
+     "cached": true
+    },
+    {
+     "name": "scipy.signal",
+     "ok": true,
+     "ms": 0.003,
+     "phase": "smoke_after_frame",
+     "cached": true
+    },
+    {
+     "name": "scipy.special",
+     "ok": true,
+     "ms": 0.003,
+     "phase": "smoke_after_frame",
+     "cached": true
+    },
+    {
+     "name": "scipy.fft",
+     "ok": true,
+     "ms": 0.002,
+     "phase": "smoke_after_frame",
+     "cached": true
+    },
+    {
+     "name": "scipy.interpolate",
+     "ok": true,
+     "ms": 0.003,
+     "phase": "smoke_after_frame",
+     "cached": true
+    },
+    {
+     "name": "scipy.optimize",
+     "ok": true,
+     "ms": 0.002,
+     "phase": "smoke_after_frame",
+     "cached": true
+    },
+    {
+     "name": "numpy._core._multiarray_umath",
+     "ok": true,
+     "ms": 0.002,
+     "phase": "smoke_after_frame",
+     "cached": true
+    }
+   ],
+   "scipy_loaded_before_app_main": false,
+   "numpy_loaded_before_app_main": false,
+   "timeout": false,
+   "error": null,
+   "load_after": {
+    "sys_cpu_pct": 31.0,
+    "python_proc_count": 2,
+    "python_total_cpu_pct": 0.8,
+    "python_top": [
+     {
+      "pid": 14184,
+      "cpu_pct": 0.8
+     },
+     {
+      "pid": 872,
+      "cpu_pct": 0.0
+     }
+    ],
+    "cpu_count": 12
+   },
+   "interpreter_ms": 36.9,
+   "load_gate_before_python_pct": 0.0,
+   "_t1": 1666.3,
+   "_t2": 3302.6,
+   "_entry": 4968.9
+  },
+  {
+   "head": "8019dc27",
+   "arm": "skip_smoke",
+   "removed": null,
+   "mw_file": "C:\\Users\\xxhzb\\AppData\\Local\\Temp\\kilo\\smoke_head_8019dc27\\main_window.py",
+   "t0_abs": 815.6898772,
+   "t_import_done_abs": 815.8677793,
+   "t_app_created_abs": 815.9019756,
+   "t_splash_show_abs": 816.3129457,
+   "t_splash_paint_done_abs": 817.3333537,
+   "t_mw_created_abs": 820.864827,
+   "t_mw_show_abs": 821.1535757,
+   "t_mw_paint_done_abs": 821.5955776,
+   "import_smoke_ms": 0.0,
+   "dependency_probe_ms": 1556.9,
+   "theme_apply_ms": null,
+   "mw_import_ms": 406.0,
+   "mw_ctor_ms": 1493.8,
+   "mw_paint_ms": 0.1,
+   "deferred_smoke_ms": null,
+   "deferred_smoke_error": null,
+   "risky_imports": [
+    "scipy._external.array_api_compat.numpy.fft",
+    "scipy._external.array_api_compat.numpy.linalg",
+    "scipy._external.array_api_compat.common",
+    "scipy._external.array_api_extra",
+    "scipy._external.packaging_version",
+    "scipy._lib._array_api",
+    "scipy._lib._util",
+    "scipy.signal",
+    "scipy.special",
+    "scipy.fft",
+    "scipy.interpolate",
+    "scipy.optimize",
+    "numpy._core._multiarray_umath"
+   ],
+   "smoke_probes": [
+    {
+     "name": "numpy",
+     "ok": true,
+     "ms": 141.136,
+     "phase": "_startup_dependency_problems",
+     "cached": false
+    },
+    {
+     "name": "numpy._core._multiarray_umath",
+     "ok": true,
+     "ms": 0.007,
+     "phase": "_startup_dependency_problems",
+     "cached": true
+    },
+    {
+     "name": "scipy",
+     "ok": true,
+     "ms": 24.696,
+     "phase": "_startup_dependency_problems",
+     "cached": false
+    },
+    {
+     "name": "scipy._external.array_api_compat.common",
+     "ok": true,
+     "ms": 3.708,
+     "phase": "_startup_dependency_problems",
+     "cached": false
+    },
+    {
+     "name": "scipy._external.array_api_compat.numpy.fft",
+     "ok": true,
+     "ms": 174.602,
+     "phase": "_startup_dependency_problems",
+     "cached": false
+    },
+    {
+     "name": "scipy.signal",
+     "ok": true,
+     "ms": 859.977,
+     "phase": "_startup_dependency_problems",
+     "cached": false
+    },
+    {
+     "name": "PySide6.QtCore",
+     "ok": true,
+     "ms": 0.006,
+     "phase": "_startup_dependency_problems",
+     "cached": true
+    },
+    {
+     "name": "PySide6.QtGui",
+     "ok": true,
+     "ms": 0.003,
+     "phase": "_startup_dependency_problems",
+     "cached": true
+    },
+    {
+     "name": "PySide6.QtWidgets",
+     "ok": true,
+     "ms": 0.002,
+     "phase": "_startup_dependency_problems",
+     "cached": true
+    },
+    {
+     "name": "sgp4",
+     "ok": true,
+     "ms": 0.84,
+     "phase": "_startup_dependency_problems",
+     "cached": false
+    },
+    {
+     "name": "skyfield",
+     "ok": true,
+     "ms": 1.453,
+     "phase": "_startup_dependency_problems",
+     "cached": false
+    },
+    {
+     "name": "pymap3d",
+     "ok": true,
+     "ms": 40.467,
+     "phase": "_startup_dependency_problems",
+     "cached": false
+    },
+    {
+     "name": "serial",
+     "ok": true,
+     "ms": 4.373,
+     "phase": "_startup_dependency_problems",
+     "cached": false
+    },
+    {
+     "name": "sounddevice",
+     "ok": true,
+     "ms": 162.223,
+     "phase": "_startup_dependency_problems",
+     "cached": false
+    },
+    {
+     "name": "PIL",
+     "ok": true,
+     "ms": 3.156,
+     "phase": "_startup_dependency_problems",
+     "cached": false
+    },
+    {
+     "name": "requests",
+     "ok": true,
+     "ms": 135.56,
+     "phase": "_startup_dependency_problems",
+     "cached": false
+    },
+    {
+     "name": "websockets",
+     "ok": true,
+     "ms": 4.51,
+     "phase": "_startup_dependency_problems",
+     "cached": false
+    }
+   ],
+   "scipy_loaded_before_app_main": false,
+   "numpy_loaded_before_app_main": false,
+   "timeout": false,
+   "error": null,
+   "load_after": {
+    "sys_cpu_pct": 31.1,
+    "python_proc_count": 2,
+    "python_total_cpu_pct": 0.8,
+    "python_top": [
+     {
+      "pid": 28068,
+      "cpu_pct": 0.8
+     },
+     {
+      "pid": 872,
+      "cpu_pct": 0.0
+     }
+    ],
+    "cpu_count": 12
+   },
+   "interpreter_ms": 35.0,
+   "load_gate_before_python_pct": 0.0,
+   "_t1": 1643.5,
+   "_t2": 4262.2,
+   "_entry": 5905.7
+  },
+  {
+   "head": "8019dc27",
+   "arm": "base",
+   "removed": null,
+   "mw_file": "C:\\Users\\xxhzb\\AppData\\Local\\Temp\\kilo\\smoke_head_8019dc27\\main_window.py",
+   "t0_abs": 826.2597762,
+   "t_import_done_abs": 826.4422162,
+   "t_app_created_abs": 826.4762609,
+   "t_splash_show_abs": 826.909748,
+   "t_splash_paint_done_abs": 827.9337648,
+   "t_mw_created_abs": 830.954837,
+   "t_mw_show_abs": 831.1674623,
+   "t_mw_paint_done_abs": 831.6009878,
+   "import_smoke_ms": 1028.4,
+   "dependency_probe_ms": 293.2,
+   "theme_apply_ms": null,
+   "mw_import_ms": 445.4,
+   "mw_ctor_ms": 1189.4,
+   "mw_paint_ms": 0.1,
+   "deferred_smoke_ms": null,
+   "deferred_smoke_error": null,
+   "risky_imports": [
+    "scipy._external.array_api_compat.numpy.fft",
+    "scipy._external.array_api_compat.numpy.linalg",
+    "scipy._external.array_api_compat.common",
+    "scipy._external.array_api_extra",
+    "scipy._external.packaging_version",
+    "scipy._lib._array_api",
+    "scipy._lib._util",
+    "scipy.signal",
+    "scipy.special",
+    "scipy.fft",
+    "scipy.interpolate",
+    "scipy.optimize",
+    "numpy._core._multiarray_umath"
+   ],
+   "smoke_probes": [
+    {
+     "name": "scipy._external.array_api_compat.numpy.fft",
+     "ok": true,
+     "ms": 302.468,
+     "phase": "_run_import_smoke",
+     "cached": false
+    },
+    {
+     "name": "scipy._external.array_api_compat.numpy.linalg",
+     "ok": true,
+     "ms": 0.009,
+     "phase": "_run_import_smoke",
+     "cached": true
+    },
+    {
+     "name": "scipy._external.array_api_compat.common",
+     "ok": true,
+     "ms": 0.003,
+     "phase": "_run_import_smoke",
+     "cached": true
+    },
+    {
+     "name": "scipy._external.array_api_extra",
+     "ok": true,
+     "ms": 9.767,
+     "phase": "_run_import_smoke",
+     "cached": false
+    },
+    {
+     "name": "scipy._external.packaging_version",
+     "ok": true,
+     "ms": 0.007,
+     "phase": "_run_import_smoke",
+     "cached": true
+    },
+    {
+     "name": "scipy._lib._array_api",
+     "ok": true,
+     "ms": 14.29,
+     "phase": "_run_import_smoke",
+     "cached": false
+    },
+    {
+     "name": "scipy._lib._util",
+     "ok": true,
+     "ms": 1.158,
+     "phase": "_run_import_smoke",
+     "cached": false
+    },
+    {
+     "name": "scipy.signal",
+     "ok": true,
+     "ms": 699.936,
+     "phase": "_run_import_smoke",
+     "cached": false
+    },
+    {
+     "name": "scipy.special",
+     "ok": true,
+     "ms": 0.008,
+     "phase": "_run_import_smoke",
+     "cached": true
+    },
+    {
+     "name": "scipy.fft",
+     "ok": true,
+     "ms": 0.003,
+     "phase": "_run_import_smoke",
+     "cached": true
+    },
+    {
+     "name": "scipy.interpolate",
+     "ok": true,
+     "ms": 0.007,
+     "phase": "_run_import_smoke",
+     "cached": true
+    },
+    {
+     "name": "scipy.optimize",
+     "ok": true,
+     "ms": 0.002,
+     "phase": "_run_import_smoke",
+     "cached": true
+    },
+    {
+     "name": "numpy._core._multiarray_umath",
+     "ok": true,
+     "ms": 0.003,
+     "phase": "_run_import_smoke",
+     "cached": true
+    },
+    {
+     "name": "numpy",
+     "ok": true,
+     "ms": 0.015,
+     "phase": "_startup_dependency_problems",
+     "cached": true
+    },
+    {
+     "name": "numpy._core._multiarray_umath",
+     "ok": true,
+     "ms": 0.004,
+     "phase": "_startup_dependency_problems",
+     "cached": true
+    },
+    {
+     "name": "scipy",
+     "ok": true,
+     "ms": 0.002,
+     "phase": "_startup_dependency_problems",
+     "cached": true
+    },
+    {
+     "name": "scipy._external.array_api_compat.common",
+     "ok": true,
+     "ms": 0.002,
+     "phase": "_startup_dependency_problems",
+     "cached": true
+    },
+    {
+     "name": "scipy._external.array_api_compat.numpy.fft",
+     "ok": true,
+     "ms": 0.003,
+     "phase": "_startup_dependency_problems",
+     "cached": true
+    },
+    {
+     "name": "scipy.signal",
+     "ok": true,
+     "ms": 0.002,
+     "phase": "_startup_dependency_problems",
+     "cached": true
+    },
+    {
+     "name": "PySide6.QtCore",
+     "ok": true,
+     "ms": 0.003,
+     "phase": "_startup_dependency_problems",
+     "cached": true
+    },
+    {
+     "name": "PySide6.QtGui",
+     "ok": true,
+     "ms": 0.003,
+     "phase": "_startup_dependency_problems",
+     "cached": true
+    },
+    {
+     "name": "PySide6.QtWidgets",
+     "ok": true,
+     "ms": 0.002,
+     "phase": "_startup_dependency_problems",
+     "cached": true
+    },
+    {
+     "name": "sgp4",
+     "ok": true,
+     "ms": 0.737,
+     "phase": "_startup_dependency_problems",
+     "cached": false
+    },
+    {
+     "name": "skyfield",
+     "ok": true,
+     "ms": 0.676,
+     "phase": "_startup_dependency_problems",
+     "cached": false
+    },
+    {
+     "name": "pymap3d",
+     "ok": true,
+     "ms": 31.231,
+     "phase": "_startup_dependency_problems",
+     "cached": false
+    },
+    {
+     "name": "serial",
+     "ok": true,
+     "ms": 4.369,
+     "phase": "_startup_dependency_problems",
+     "cached": false
+    },
+    {
+     "name": "sounddevice",
+     "ok": true,
+     "ms": 160.899,
+     "phase": "_startup_dependency_problems",
+     "cached": false
+    },
+    {
+     "name": "PIL",
+     "ok": true,
+     "ms": 1.714,
+     "phase": "_startup_dependency_problems",
+     "cached": false
+    },
+    {
+     "name": "requests",
+     "ok": true,
+     "ms": 91.147,
+     "phase": "_startup_dependency_problems",
+     "cached": false
+    },
+    {
+     "name": "websockets",
+     "ok": true,
+     "ms": 2.191,
+     "phase": "_startup_dependency_problems",
+     "cached": false
+    }
+   ],
+   "scipy_loaded_before_app_main": false,
+   "numpy_loaded_before_app_main": false,
+   "timeout": false,
+   "error": null,
+   "load_after": {
+    "sys_cpu_pct": 26.5,
+    "python_proc_count": 2,
+    "python_total_cpu_pct": 0.0,
+    "python_top": [
+     {
+      "pid": 872,
+      "cpu_pct": 0.0
+     },
+     {
+      "pid": 26980,
+      "cpu_pct": 0.0
+     }
+    ],
+    "cpu_count": 12
+   },
+   "interpreter_ms": 39.3,
+   "load_gate_before_python_pct": 0.0,
+   "_t1": 1674.0,
+   "_t2": 3667.2,
+   "_entry": 5341.2
+  },
+  {
+   "head": "8019dc27",
+   "arm": "skip_one",
+   "removed": "scipy.optimize",
+   "mw_file": "C:\\Users\\xxhzb\\AppData\\Local\\Temp\\kilo\\smoke_head_8019dc27\\main_window.py",
+   "t0_abs": 836.5433209,
+   "t_import_done_abs": 836.7335705,
+   "t_app_created_abs": 836.7738272,
+   "t_splash_show_abs": 837.2353706,
+   "t_splash_paint_done_abs": 838.2625394,
+   "t_mw_created_abs": 841.873532,
+   "t_mw_show_abs": 842.0624415,
+   "t_mw_paint_done_abs": 844.4021963,
+   "import_smoke_ms": 1448.6,
+   "dependency_probe_ms": 340.4,
+   "theme_apply_ms": null,
+   "mw_import_ms": 465.4,
+   "mw_ctor_ms": 1291.1,
+   "mw_paint_ms": 0.1,
+   "deferred_smoke_ms": null,
+   "deferred_smoke_error": null,
+   "risky_imports": [
+    "scipy._external.array_api_compat.numpy.fft",
+    "scipy._external.array_api_compat.numpy.linalg",
+    "scipy._external.array_api_compat.common",
+    "scipy._external.array_api_extra",
+    "scipy._external.packaging_version",
+    "scipy._lib._array_api",
+    "scipy._lib._util",
+    "scipy.signal",
+    "scipy.special",
+    "scipy.fft",
+    "scipy.interpolate",
+    "scipy.optimize",
+    "numpy._core._multiarray_umath"
+   ],
+   "smoke_probes": [
+    {
+     "name": "scipy._external.array_api_compat.numpy.fft",
+     "ok": true,
+     "ms": 439.633,
+     "phase": "_run_import_smoke",
+     "cached": false
+    },
+    {
+     "name": "scipy._external.array_api_compat.numpy.linalg",
+     "ok": true,
+     "ms": 0.015,
+     "phase": "_run_import_smoke",
+     "cached": true
+    },
+    {
+     "name": "scipy._external.array_api_compat.common",
+     "ok": true,
+     "ms": 0.003,
+     "phase": "_run_import_smoke",
+     "cached": true
+    },
+    {
+     "name": "scipy._external.array_api_extra",
+     "ok": true,
+     "ms": 17.057,
+     "phase": "_run_import_smoke",
+     "cached": false
+    },
+    {
+     "name": "scipy._external.packaging_version",
+     "ok": true,
+     "ms": 0.208,
+     "phase": "_run_import_smoke",
+     "cached": true
+    },
+    {
+     "name": "scipy._lib._array_api",
+     "ok": true,
+     "ms": 24.895,
+     "phase": "_run_import_smoke",
+     "cached": false
+    },
+    {
+     "name": "scipy._lib._util",
+     "ok": true,
+     "ms": 1.465,
+     "phase": "_run_import_smoke",
+     "cached": false
+    },
+    {
+     "name": "scipy.signal",
+     "ok": true,
+     "ms": 964.411,
+     "phase": "_run_import_smoke",
+     "cached": false
+    },
+    {
+     "name": "scipy.special",
+     "ok": true,
+     "ms": 0.007,
+     "phase": "_run_import_smoke",
+     "cached": true
+    },
+    {
+     "name": "scipy.fft",
+     "ok": true,
+     "ms": 0.003,
+     "phase": "_run_import_smoke",
+     "cached": true
+    },
+    {
+     "name": "scipy.interpolate",
+     "ok": true,
+     "ms": 0.003,
+     "phase": "_run_import_smoke",
+     "cached": true
+    },
+    {
+     "name": "numpy._core._multiarray_umath",
+     "ok": true,
+     "ms": 0.002,
+     "phase": "_run_import_smoke",
+     "cached": true
+    },
+    {
+     "name": "numpy",
+     "ok": true,
+     "ms": 0.014,
+     "phase": "_startup_dependency_problems",
+     "cached": true
+    },
+    {
+     "name": "numpy._core._multiarray_umath",
+     "ok": true,
+     "ms": 0.004,
+     "phase": "_startup_dependency_problems",
+     "cached": true
+    },
+    {
+     "name": "scipy",
+     "ok": true,
+     "ms": 0.002,
+     "phase": "_startup_dependency_problems",
+     "cached": true
+    },
+    {
+     "name": "scipy._external.array_api_compat.common",
+     "ok": true,
+     "ms": 0.003,
+     "phase": "_startup_dependency_problems",
+     "cached": true
+    },
+    {
+     "name": "scipy._external.array_api_compat.numpy.fft",
+     "ok": true,
+     "ms": 0.002,
+     "phase": "_startup_dependency_problems",
+     "cached": true
+    },
+    {
+     "name": "scipy.signal",
+     "ok": true,
+     "ms": 0.002,
+     "phase": "_startup_dependency_problems",
+     "cached": true
+    },
+    {
+     "name": "PySide6.QtCore",
+     "ok": true,
+     "ms": 0.003,
+     "phase": "_startup_dependency_problems",
+     "cached": true
+    },
+    {
+     "name": "PySide6.QtGui",
+     "ok": true,
+     "ms": 0.003,
+     "phase": "_startup_dependency_problems",
+     "cached": true
+    },
+    {
+     "name": "PySide6.QtWidgets",
+     "ok": true,
+     "ms": 0.002,
+     "phase": "_startup_dependency_problems",
+     "cached": true
+    },
+    {
+     "name": "sgp4",
+     "ok": true,
+     "ms": 0.888,
+     "phase": "_startup_dependency_problems",
+     "cached": false
+    },
+    {
+     "name": "skyfield",
+     "ok": true,
+     "ms": 1.013,
+     "phase": "_startup_dependency_problems",
+     "cached": false
+    },
+    {
+     "name": "pymap3d",
+     "ok": true,
+     "ms": 31.535,
+     "phase": "_startup_dependency_problems",
+     "cached": false
+    },
+    {
+     "name": "serial",
+     "ok": true,
+     "ms": 4.565,
+     "phase": "_startup_dependency_problems",
+     "cached": false
+    },
+    {
+     "name": "sounddevice",
+     "ok": true,
+     "ms": 177.706,
+     "phase": "_startup_dependency_problems",
+     "cached": false
+    },
+    {
+     "name": "PIL",
+     "ok": true,
+     "ms": 3.081,
+     "phase": "_startup_dependency_problems",
+     "cached": false
+    },
+    {
+     "name": "requests",
+     "ok": true,
+     "ms": 117.196,
+     "phase": "_startup_dependency_problems",
+     "cached": false
+    },
+    {
+     "name": "websockets",
+     "ok": true,
+     "ms": 4.149,
+     "phase": "_startup_dependency_problems",
+     "cached": false
+    }
+   ],
+   "scipy_loaded_before_app_main": false,
+   "numpy_loaded_before_app_main": false,
+   "timeout": false,
+   "error": null,
+   "load_after": {
+    "sys_cpu_pct": 41.2,
+    "python_proc_count": 2,
+    "python_total_cpu_pct": 1.6,
+    "python_top": [
+     {
+      "pid": 30584,
+      "cpu_pct": 1.6
+     },
+     {
+      "pid": 872,
+      "cpu_pct": 0.0
+     }
+    ],
+    "cpu_count": 12
+   },
+   "interpreter_ms": 61.2,
+   "load_gate_before_python_pct": 0.0,
+   "_t1": 1719.2,
+   "_t2": 6139.7,
+   "_entry": 7858.9
+  },
+  {
+   "head": "8019dc27",
+   "arm": "defer_smoke",
+   "removed": null,
+   "mw_file": "C:\\Users\\xxhzb\\AppData\\Local\\Temp\\kilo\\smoke_head_8019dc27\\main_window.py",
+   "t0_abs": 850.7572799,
+   "t_import_done_abs": 850.9242565,
+   "t_app_created_abs": 850.9564771,
+   "t_splash_show_abs": 851.3867528,
+   "t_splash_paint_done_abs": 852.4094429,
+   "t_mw_created_abs": 855.4939226,
+   "t_mw_show_abs": 855.6851186,
+   "t_mw_paint_done_abs": 857.7091418,
+   "import_smoke_ms": 0.0,
+   "dependency_probe_ms": 1495.9,
+   "theme_apply_ms": null,
+   "mw_import_ms": 376.6,
+   "mw_ctor_ms": 1142.7,
+   "mw_paint_ms": 0.1,
+   "deferred_smoke_ms": 1.5,
+   "deferred_smoke_error": null,
+   "risky_imports": [
+    "scipy._external.array_api_compat.numpy.fft",
+    "scipy._external.array_api_compat.numpy.linalg",
+    "scipy._external.array_api_compat.common",
+    "scipy._external.array_api_extra",
+    "scipy._external.packaging_version",
+    "scipy._lib._array_api",
+    "scipy._lib._util",
+    "scipy.signal",
+    "scipy.special",
+    "scipy.fft",
+    "scipy.interpolate",
+    "scipy.optimize",
+    "numpy._core._multiarray_umath"
+   ],
+   "smoke_probes": [
+    {
+     "name": "numpy",
+     "ok": true,
+     "ms": 117.805,
+     "phase": "_startup_dependency_problems",
+     "cached": false
+    },
+    {
+     "name": "numpy._core._multiarray_umath",
+     "ok": true,
+     "ms": 0.014,
+     "phase": "_startup_dependency_problems",
+     "cached": true
+    },
+    {
+     "name": "scipy",
+     "ok": true,
+     "ms": 25.631,
+     "phase": "_startup_dependency_problems",
+     "cached": false
+    },
+    {
+     "name": "scipy._external.array_api_compat.common",
+     "ok": true,
+     "ms": 3.653,
+     "phase": "_startup_dependency_problems",
+     "cached": false
+    },
+    {
+     "name": "scipy._external.array_api_compat.numpy.fft",
+     "ok": true,
+     "ms": 191.045,
+     "phase": "_startup_dependency_problems",
+     "cached": false
+    },
+    {
+     "name": "scipy.signal",
+     "ok": true,
+     "ms": 804.325,
+     "phase": "_startup_dependency_problems",
+     "cached": false
+    },
+    {
+     "name": "PySide6.QtCore",
+     "ok": true,
+     "ms": 0.008,
+     "phase": "_startup_dependency_problems",
+     "cached": true
+    },
+    {
+     "name": "PySide6.QtGui",
+     "ok": true,
+     "ms": 0.003,
+     "phase": "_startup_dependency_problems",
+     "cached": true
+    },
+    {
+     "name": "PySide6.QtWidgets",
+     "ok": true,
+     "ms": 0.003,
+     "phase": "_startup_dependency_problems",
+     "cached": true
+    },
+    {
+     "name": "sgp4",
+     "ok": true,
+     "ms": 0.893,
+     "phase": "_startup_dependency_problems",
+     "cached": false
+    },
+    {
+     "name": "skyfield",
+     "ok": true,
+     "ms": 0.715,
+     "phase": "_startup_dependency_problems",
+     "cached": false
+    },
+    {
+     "name": "pymap3d",
+     "ok": true,
+     "ms": 31.467,
+     "phase": "_startup_dependency_problems",
+     "cached": false
+    },
+    {
+     "name": "serial",
+     "ok": true,
+     "ms": 4.925,
+     "phase": "_startup_dependency_problems",
+     "cached": false
+    },
+    {
+     "name": "sounddevice",
+     "ok": true,
+     "ms": 209.637,
+     "phase": "_startup_dependency_problems",
+     "cached": false
+    },
+    {
+     "name": "PIL",
+     "ok": true,
+     "ms": 2.282,
+     "phase": "_startup_dependency_problems",
+     "cached": false
+    },
+    {
+     "name": "requests",
+     "ok": true,
+     "ms": 100.807,
+     "phase": "_startup_dependency_problems",
+     "cached": false
+    },
+    {
+     "name": "websockets",
+     "ok": true,
+     "ms": 2.432,
+     "phase": "_startup_dependency_problems",
+     "cached": false
+    },
+    {
+     "name": "scipy._external.array_api_compat.numpy.fft",
+     "ok": true,
+     "ms": 0.033,
+     "phase": "smoke_after_frame",
+     "cached": true
+    },
+    {
+     "name": "scipy._external.array_api_compat.numpy.linalg",
+     "ok": true,
+     "ms": 0.008,
+     "phase": "smoke_after_frame",
+     "cached": true
+    },
+    {
+     "name": "scipy._external.array_api_compat.common",
+     "ok": true,
+     "ms": 0.006,
+     "phase": "smoke_after_frame",
+     "cached": true
+    },
+    {
+     "name": "scipy._external.array_api_extra",
+     "ok": true,
+     "ms": 0.005,
+     "phase": "smoke_after_frame",
+     "cached": true
+    },
+    {
+     "name": "scipy._external.packaging_version",
+     "ok": true,
+     "ms": 0.005,
+     "phase": "smoke_after_frame",
+     "cached": true
+    },
+    {
+     "name": "scipy._lib._array_api",
+     "ok": true,
+     "ms": 0.006,
+     "phase": "smoke_after_frame",
+     "cached": true
+    },
+    {
+     "name": "scipy._lib._util",
+     "ok": true,
+     "ms": 0.005,
+     "phase": "smoke_after_frame",
+     "cached": true
+    },
+    {
+     "name": "scipy.signal",
+     "ok": true,
+     "ms": 0.006,
+     "phase": "smoke_after_frame",
+     "cached": true
+    },
+    {
+     "name": "scipy.special",
+     "ok": true,
+     "ms": 0.006,
+     "phase": "smoke_after_frame",
+     "cached": true
+    },
+    {
+     "name": "scipy.fft",
+     "ok": true,
+     "ms": 0.004,
+     "phase": "smoke_after_frame",
+     "cached": true
+    },
+    {
+     "name": "scipy.interpolate",
+     "ok": true,
+     "ms": 0.006,
+     "phase": "smoke_after_frame",
+     "cached": true
+    },
+    {
+     "name": "scipy.optimize",
+     "ok": true,
+     "ms": 0.005,
+     "phase": "smoke_after_frame",
+     "cached": true
+    },
+    {
+     "name": "numpy._core._multiarray_umath",
+     "ok": true,
+     "ms": 0.005,
+     "phase": "smoke_after_frame",
+     "cached": true
+    }
+   ],
+   "scipy_loaded_before_app_main": false,
+   "numpy_loaded_before_app_main": false,
+   "timeout": false,
+   "error": null,
+   "load_after": {
+    "sys_cpu_pct": 33.5,
+    "python_proc_count": 2,
+    "python_total_cpu_pct": 3.1,
+    "python_top": [
+     {
+      "pid": 30600,
+      "cpu_pct": 3.1
+     },
+     {
+      "pid": 872,
+      "cpu_pct": 0.0
+     }
+    ],
+    "cpu_count": 12
+   },
+   "interpreter_ms": 47.0,
+   "load_gate_before_python_pct": 0.0,
+   "_t1": 1652.2,
+   "_t2": 5299.7,
+   "_entry": 6951.9
+  },
+  {
+   "head": "8019dc27",
+   "arm": "skip_smoke",
+   "removed": null,
+   "mw_file": "C:\\Users\\xxhzb\\AppData\\Local\\Temp\\kilo\\smoke_head_8019dc27\\main_window.py",
+   "t0_abs": 863.1115951,
+   "t_import_done_abs": 863.2975104,
+   "t_app_created_abs": 863.3593574,
+   "t_splash_show_abs": 863.9539531,
+   "t_splash_paint_done_abs": 864.9729016,
+   "t_mw_created_abs": 868.4308157,
+   "t_mw_show_abs": 868.6225165,
+   "t_mw_paint_done_abs": 870.3196566,
+   "import_smoke_ms": 0.0,
+   "dependency_probe_ms": 1764.1,
+   "theme_apply_ms": null,
+   "mw_import_ms": 389.1,
+   "mw_ctor_ms": 1237.8,
+   "mw_paint_ms": 0.1,
+   "deferred_smoke_ms": null,
+   "deferred_smoke_error": null,
+   "risky_imports": [
+    "scipy._external.array_api_compat.numpy.fft",
+    "scipy._external.array_api_compat.numpy.linalg",
+    "scipy._external.array_api_compat.common",
+    "scipy._external.array_api_extra",
+    "scipy._external.packaging_version",
+    "scipy._lib._array_api",
+    "scipy._lib._util",
+    "scipy.signal",
+    "scipy.special",
+    "scipy.fft",
+    "scipy.interpolate",
+    "scipy.optimize",
+    "numpy._core._multiarray_umath"
+   ],
+   "smoke_probes": [
+    {
+     "name": "numpy",
+     "ok": true,
+     "ms": 124.596,
+     "phase": "_startup_dependency_problems",
+     "cached": false
+    },
+    {
+     "name": "numpy._core._multiarray_umath",
+     "ok": true,
+     "ms": 0.009,
+     "phase": "_startup_dependency_problems",
+     "cached": true
+    },
+    {
+     "name": "scipy",
+     "ok": true,
+     "ms": 28.564,
+     "phase": "_startup_dependency_problems",
+     "cached": false
+    },
+    {
+     "name": "scipy._external.array_api_compat.common",
+     "ok": true,
+     "ms": 3.846,
+     "phase": "_startup_dependency_problems",
+     "cached": false
+    },
+    {
+     "name": "scipy._external.array_api_compat.numpy.fft",
+     "ok": true,
+     "ms": 289.979,
+     "phase": "_startup_dependency_problems",
+     "cached": false
+    },
+    {
+     "name": "scipy.signal",
+     "ok": true,
+     "ms": 938.302,
+     "phase": "_startup_dependency_problems",
+     "cached": false
+    },
+    {
+     "name": "PySide6.QtCore",
+     "ok": true,
+     "ms": 0.007,
+     "phase": "_startup_dependency_problems",
+     "cached": true
+    },
+    {
+     "name": "PySide6.QtGui",
+     "ok": true,
+     "ms": 0.002,
+     "phase": "_startup_dependency_problems",
+     "cached": true
+    },
+    {
+     "name": "PySide6.QtWidgets",
+     "ok": true,
+     "ms": 0.002,
+     "phase": "_startup_dependency_problems",
+     "cached": true
+    },
+    {
+     "name": "sgp4",
+     "ok": true,
+     "ms": 0.705,
+     "phase": "_startup_dependency_problems",
+     "cached": false
+    },
+    {
+     "name": "skyfield",
+     "ok": true,
+     "ms": 1.049,
+     "phase": "_startup_dependency_problems",
+     "cached": false
+    },
+    {
+     "name": "pymap3d",
+     "ok": true,
+     "ms": 37.802,
+     "phase": "_startup_dependency_problems",
+     "cached": false
+    },
+    {
+     "name": "serial",
+     "ok": true,
+     "ms": 6.352,
+     "phase": "_startup_dependency_problems",
+     "cached": false
+    },
+    {
+     "name": "sounddevice",
+     "ok": true,
+     "ms": 219.639,
+     "phase": "_startup_dependency_problems",
+     "cached": false
+    },
+    {
+     "name": "PIL",
+     "ok": true,
+     "ms": 2.717,
+     "phase": "_startup_dependency_problems",
+     "cached": false
+    },
+    {
+     "name": "requests",
+     "ok": true,
+     "ms": 106.699,
+     "phase": "_startup_dependency_problems",
+     "cached": false
+    },
+    {
+     "name": "websockets",
+     "ok": true,
+     "ms": 3.547,
+     "phase": "_startup_dependency_problems",
+     "cached": false
+    }
+   ],
+   "scipy_loaded_before_app_main": false,
+   "numpy_loaded_before_app_main": false,
+   "timeout": false,
+   "error": null,
+   "load_after": {
+    "sys_cpu_pct": 40.5,
+    "python_proc_count": 2,
+    "python_total_cpu_pct": 2.3,
+    "python_top": [
+     {
+      "pid": 20704,
+      "cpu_pct": 2.3
+     },
+     {
+      "pid": 872,
+      "cpu_pct": 0.0
+     }
+    ],
+    "cpu_count": 12
+   },
+   "interpreter_ms": 41.3,
+   "load_gate_before_python_pct": 0.0,
+   "_t1": 1861.3,
+   "_t2": 5346.8,
+   "_entry": 7208.1
+  }
+ ],
+ "profile_run": {
+  "arm": "base",
+  "note": "profile 只在一条 run 上开（_find_and_load 包装会给每次 import 加 Python 层开销，绝对值略高于计时臂，只用来看结构与父子关系）。",
+  "scipy_loaded_before_app_main": false,
+  "numpy_loaded_before_app_main": false,
+  "module_count_in_smoke": 760,
+  "smoke_probes": [
+   {
+    "name": "scipy._external.array_api_compat.numpy.fft",
+    "ok": true,
+    "ms": 354.838,
+    "phase": "_run_import_smoke",
+    "cached": false
+   },
+   {
+    "name": "scipy._external.array_api_compat.numpy.linalg",
+    "ok": true,
+    "ms": 0.014,
+    "phase": "_run_import_smoke",
+    "cached": true
+   },
+   {
+    "name": "scipy._external.array_api_compat.common",
+    "ok": true,
+    "ms": 0.006,
+    "phase": "_run_import_smoke",
+    "cached": true
+   },
+   {
+    "name": "scipy._external.array_api_extra",
+    "ok": true,
+    "ms": 11.556,
+    "phase": "_run_import_smoke",
+    "cached": false
+   },
+   {
+    "name": "scipy._external.packaging_version",
+    "ok": true,
+    "ms": 0.008,
+    "phase": "_run_import_smoke",
+    "cached": true
+   },
+   {
+    "name": "scipy._lib._array_api",
+    "ok": true,
+    "ms": 16.068,
+    "phase": "_run_import_smoke",
+    "cached": false
+   },
+   {
+    "name": "scipy._lib._util",
+    "ok": true,
+    "ms": 1.368,
+    "phase": "_run_import_smoke",
+    "cached": false
+   },
+   {
+    "name": "scipy.signal",
+    "ok": true,
+    "ms": 748.845,
+    "phase": "_run_import_smoke",
+    "cached": false
+   },
+   {
+    "name": "scipy.special",
+    "ok": true,
+    "ms": 0.009,
+    "phase": "_run_import_smoke",
+    "cached": true
+   },
+   {
+    "name": "scipy.fft",
+    "ok": true,
+    "ms": 0.005,
+    "phase": "_run_import_smoke",
+    "cached": true
+   },
+   {
+    "name": "scipy.interpolate",
+    "ok": true,
+    "ms": 0.006,
+    "phase": "_run_import_smoke",
+    "cached": true
+   },
+   {
+    "name": "scipy.optimize",
+    "ok": true,
+    "ms": 0.003,
+    "phase": "_run_import_smoke",
+    "cached": true
+   },
+   {
+    "name": "numpy._core._multiarray_umath",
+    "ok": true,
+    "ms": 0.003,
+    "phase": "_run_import_smoke",
+    "cached": true
+   }
+  ],
+  "top20_by_cumulative_in_smoke": [
+   {
+    "name": "scipy.signal",
+    "parent": null,
+    "cumulative_ms": 748.836,
+    "self_ms": 1.257,
+    "depth": 0,
+    "phase": "_run_import_smoke"
+   },
+   {
+    "name": "scipy.signal._support_alternative_backends",
+    "parent": "scipy.signal",
+    "cumulative_ms": 744.482,
+    "self_ms": 33.178,
+    "depth": 1,
+    "phase": "_run_import_smoke"
+   },
+   {
+    "name": "scipy.signal._signal_api",
+    "parent": "scipy.signal._support_alternative_backends",
+    "cumulative_ms": 710.735,
+    "self_ms": 4.542,
+    "depth": 2,
+    "phase": "_run_import_smoke"
+   },
+   {
+    "name": "scipy._external.array_api_compat.numpy.fft",
+    "parent": null,
+    "cumulative_ms": 354.781,
+    "self_ms": 0.091,
+    "depth": 0,
+    "phase": "_run_import_smoke"
+   },
+   {
+    "name": "scipy._external.array_api_compat.numpy",
+    "parent": "scipy._external.array_api_compat.numpy.fft",
+    "cumulative_ms": 354.69,
+    "self_ms": 3.11,
+    "depth": 1,
+    "phase": "_run_import_smoke"
+   },
+   {
+    "name": "scipy.signal._spline_filters",
+    "parent": "scipy.signal._signal_api",
+    "cumulative_ms": 286.851,
+    "self_ms": 1.924,
+    "depth": 3,
+    "phase": "_run_import_smoke"
+   },
+   {
+    "name": "scipy.signal._signaltools",
+    "parent": "scipy.signal._spline_filters",
+    "cumulative_ms": 284.927,
+    "self_ms": 2.584,
+    "depth": 4,
+    "phase": "_run_import_smoke"
+   },
+   {
+    "name": "scipy.signal._peak_finding",
+    "parent": "scipy.signal._signal_api",
+    "cumulative_ms": 283.065,
+    "self_ms": 0.88,
+    "depth": 3,
+    "phase": "_run_import_smoke"
+   },
+   {
+    "name": "scipy.stats",
+    "parent": "scipy.signal._peak_finding",
+    "cumulative_ms": 280.984,
+    "self_ms": 12.032,
+    "depth": 4,
+    "phase": "_run_import_smoke"
+   },
+   {
+    "name": "scipy._external.array_api_compat",
+    "parent": "scipy._external.array_api_compat.numpy",
+    "cumulative_ms": 173.359,
+    "self_ms": 1.069,
+    "depth": 2,
+    "phase": "_run_import_smoke"
+   },
+   {
+    "name": "scipy.signal._ltisys",
+    "parent": "scipy.signal._signaltools",
+    "cumulative_ms": 172.952,
+    "self_ms": 2.558,
+    "depth": 5,
+    "phase": "_run_import_smoke"
+   },
+   {
+    "name": "scipy.stats._stats_py",
+    "parent": "scipy.stats",
+    "cumulative_ms": 172.438,
+    "self_ms": 40.336,
+    "depth": 5,
+    "phase": "_run_import_smoke"
+   },
+   {
+    "name": "scipy._external",
+    "parent": "scipy._external.array_api_compat",
+    "cumulative_ms": 167.876,
+    "self_ms": 0.013,
+    "depth": 3,
+    "phase": "_run_import_smoke"
+   },
+   {
+    "name": "scipy",
+    "parent": "scipy._external",
+    "cumulative_ms": 167.863,
+    "self_ms": 3.581,
+    "depth": 4,
+    "phase": "_run_import_smoke"
+   },
+   {
+    "name": "scipy.interpolate",
+    "parent": "scipy.signal._ltisys",
+    "cumulative_ms": 167.418,
+    "self_ms": 6.559,
+    "depth": 6,
+    "phase": "_run_import_smoke"
+   },
+   {
+    "name": "scipy.interpolate._interpolate",
+    "parent": "scipy.interpolate",
+    "cumulative_ms": 138.781,
+    "self_ms": 3.452,
+    "depth": 7,
+    "phase": "_run_import_smoke"
+   },
+   {
+    "name": "numpy",
+    "parent": "scipy",
+    "cumulative_ms": 134.335,
+    "self_ms": 6.548,
+    "depth": 5,
+    "phase": "_run_import_smoke"
+   },
+   {
+    "name": "scipy.interpolate._fitpack_py",
+    "parent": "scipy.interpolate._interpolate",
+    "cumulative_ms": 132.367,
+    "self_ms": 3.646,
+    "depth": 8,
+    "phase": "_run_import_smoke"
+   },
+   {
+    "name": "scipy.signal.windows",
+    "parent": "scipy.signal._signal_api",
+    "cumulative_ms": 127.88,
+    "self_ms": 1.606,
+    "depth": 3,
+    "phase": "_run_import_smoke"
+   },
+   {
+    "name": "scipy.signal.windows._windows",
+    "parent": "scipy.signal.windows",
+    "cumulative_ms": 125.757,
+    "self_ms": 8.029,
+    "depth": 4,
+    "phase": "_run_import_smoke"
+   }
+  ],
+  "top20_by_self_in_smoke": [
+   {
+    "name": "scipy.stats._continuous_distns",
+    "parent": "scipy.stats.distributions",
+    "cumulative_ms": 47.854,
+    "self_ms": 43.774,
+    "depth": 7,
+    "phase": "_run_import_smoke"
+   },
+   {
+    "name": "scipy.stats._stats_py",
+    "parent": "scipy.stats",
+    "cumulative_ms": 172.438,
+    "self_ms": 40.336,
+    "depth": 5,
+    "phase": "_run_import_smoke"
+   },
+   {
+    "name": "numpy.testing._private.utils",
+    "parent": "numpy.testing",
+    "cumulative_ms": 51.6,
+    "self_ms": 38.408,
+    "depth": 3,
+    "phase": "_run_import_smoke"
+   },
+   {
+    "name": "scipy.signal._support_alternative_backends",
+    "parent": "scipy.signal",
+    "cumulative_ms": 744.482,
+    "self_ms": 33.178,
+    "depth": 1,
+    "phase": "_run_import_smoke"
+   },
+   {
+    "name": "scipy.special._support_alternative_backends",
+    "parent": "scipy.special",
+    "cumulative_ms": 19.329,
+    "self_ms": 18.099,
+    "depth": 6,
+    "phase": "_run_import_smoke"
+   },
+   {
+    "name": "scipy.ndimage._support_alternative_backends",
+    "parent": "scipy.ndimage",
+    "cumulative_ms": 35.884,
+    "self_ms": 17.032,
+    "depth": 6,
+    "phase": "_run_import_smoke"
+   },
+   {
+    "name": "scipy.stats._morestats",
+    "parent": "scipy.stats",
+    "cumulative_ms": 28.408,
+    "self_ms": 14.54,
+    "depth": 5,
+    "phase": "_run_import_smoke"
+   },
+   {
+    "name": "scipy.stats",
+    "parent": "scipy.signal._peak_finding",
+    "cumulative_ms": 280.984,
+    "self_ms": 12.032,
+    "depth": 4,
+    "phase": "_run_import_smoke"
+   },
+   {
+    "name": "scipy.stats._new_distributions",
+    "parent": "scipy.stats",
+    "cumulative_ms": 10.781,
+    "self_ms": 10.781,
+    "depth": 5,
+    "phase": "_run_import_smoke"
+   },
+   {
+    "name": "numpy.f2py.crackfortran",
+    "parent": "numpy.f2py.capi_maps",
+    "cumulative_ms": 27.088,
+    "self_ms": 9.673,
+    "depth": 5,
+    "phase": "_run_import_smoke"
+   },
+   {
+    "name": "scipy.optimize",
+    "parent": "scipy.interpolate._bsplines",
+    "cumulative_ms": 120.709,
+    "self_ms": 8.767,
+    "depth": 10,
+    "phase": "_run_import_smoke"
+   },
+   {
+    "name": "scipy.stats._discrete_distns",
+    "parent": "scipy.stats.distributions",
+    "cumulative_ms": 9.605,
+    "self_ms": 8.702,
+    "depth": 7,
+    "phase": "_run_import_smoke"
+   },
+   {
+    "name": "scipy.ndimage._nd_image",
+    "parent": "scipy.ndimage._filters",
+    "cumulative_ms": 8.233,
+    "self_ms": 8.233,
+    "depth": 9,
+    "phase": "_run_import_smoke"
+   },
+   {
+    "name": "scipy.linalg",
+    "parent": "scipy.signal.windows._windows",
+    "cumulative_ms": 54.535,
+    "self_ms": 8.105,
+    "depth": 5,
+    "phase": "_run_import_smoke"
+   },
+   {
+    "name": "scipy.signal.windows._windows",
+    "parent": "scipy.signal.windows",
+    "cumulative_ms": 125.757,
+    "self_ms": 8.029,
+    "depth": 4,
+    "phase": "_run_import_smoke"
+   },
+   {
+    "name": "scipy.stats._resampling",
+    "parent": "scipy.stats._stats_py",
+    "cumulative_ms": 7.318,
+    "self_ms": 6.884,
+    "depth": 6,
+    "phase": "_run_import_smoke"
+   },
+   {
+    "name": "scipy.interpolate",
+    "parent": "scipy.signal._ltisys",
+    "cumulative_ms": 167.418,
+    "self_ms": 6.559,
+    "depth": 6,
+    "phase": "_run_import_smoke"
+   },
+   {
+    "name": "numpy",
+    "parent": "scipy",
+    "cumulative_ms": 134.335,
+    "self_ms": 6.548,
+    "depth": 5,
+    "phase": "_run_import_smoke"
+   },
+   {
+    "name": "scipy.sparse",
+    "parent": "scipy.spatial._ckdtree",
+    "cumulative_ms": 28.13,
+    "self_ms": 6.131,
+    "depth": 8,
+    "phase": "_run_import_smoke"
+   },
+   {
+    "name": "numpy.ma.core",
+    "parent": "numpy.ma",
+    "cumulative_ms": 5.975,
+    "self_ms": 5.975,
+    "depth": 3,
+    "phase": "_run_import_smoke"
+   }
+  ],
+  "risky_imports": [
+   "scipy._external.array_api_compat.numpy.fft",
+   "scipy._external.array_api_compat.numpy.linalg",
+   "scipy._external.array_api_compat.common",
+   "scipy._external.array_api_extra",
+   "scipy._external.packaging_version",
+   "scipy._lib._array_api",
+   "scipy._lib._util",
+   "scipy.signal",
+   "scipy.special",
+   "scipy.fft",
+   "scipy.interpolate",
+   "scipy.optimize",
+   "numpy._core._multiarray_umath"
+  ]
+ }
+}
