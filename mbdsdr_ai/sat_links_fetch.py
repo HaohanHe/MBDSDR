@@ -52,6 +52,15 @@ import urllib.request
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 
+try:                                    # 跨进程缓存锁（Windows）
+    import msvcrt
+except ImportError:                     # pragma: no cover - 非 Windows
+    msvcrt = None                       # type: ignore
+try:                                    # 跨进程缓存锁（POSIX）
+    import fcntl
+except ImportError:                     # pragma: no cover - Windows
+    fcntl = None                        # type: ignore
+
 logger = logging.getLogger(__name__)
 
 __all__ = [
@@ -97,6 +106,7 @@ FAILURE_LABELS: Dict[str, str] = {
     "empty_response": "返回内容为空",
     "schema_mismatch": "库结构变了（不是发射机数组/缺关键字段）",
     "offline": "离线模式（MBDSDR_OFFLINE），未联网",
+    "write_failed": "本地缓存写入失败（只读目录/文件被占用/权限）",
 }
 
 
@@ -212,11 +222,13 @@ def clear_cache_memo() -> None:
     _MEMO["state"] = None
 
 
-def _empty_state(path: Optional[str], state: str, detail: str) -> Dict[str, Any]:
+def _empty_state(path: Optional[str], state: str, detail: str,
+                 reason: str = "") -> Dict[str, Any]:
     return {
         "state": state,
         "path": path,
         "detail": detail,
+        "reason": reason,
         "fetched_at": None,
         "fetched_at_utc": "",
         "age_s": None,
@@ -261,16 +273,32 @@ def load_cache(path: Optional[str] = None,
                                       age_s=(None if _MEMO["state"]["fetched_at"]
                                              is None else
                                              ref - _MEMO["state"]["fetched_at"]))
-    try:
-        with open(target, "r", encoding="utf-8") as fh:
-            payload = json.load(fh)
-    except (OSError, ValueError) as e:
-        state = _empty_state(target, "invalid", f"缓存读取失败：{e}")
-        _MEMO.update(key=key, payload=None, state=state)
-        return None, state
+    payload = None
+    last_os_error: Optional[OSError] = None
+    for attempt in range(3):
+        try:
+            with open(target, "r", encoding="utf-8") as fh:
+                payload = json.load(fh)
+            last_os_error = None
+            break
+        except ValueError as e:
+            state = _empty_state(target, "invalid",
+                                 f"内容不是合法 JSON：{e}", "unreadable")
+            _MEMO.update(key=key, payload=None, state=state)
+            return None, state
+        except OSError as e:
+            # Windows 上另一进程正在 os.replace 时会短暂共享冲突；
+            # 退避重试，仍失败也不写 memo（下次调用会重新读盘）。
+            last_os_error = e
+            if attempt < 2:
+                time.sleep(0.03 * (attempt + 1))
+    if last_os_error is not None:
+        return None, _empty_state(target, "invalid",
+                                  f"缓存读取失败：{last_os_error}",
+                                  "unreadable")
     ok, why = _validate(payload)
     if not ok:
-        state = _empty_state(target, "invalid", why)
+        state = _empty_state(target, "invalid", why, "schema")
         _MEMO.update(key=key, payload=None, state=state)
         return None, state
     fetched_at = payload.get("fetched_at")
@@ -379,19 +407,98 @@ def _trim_tx(item: Dict[str, Any]) -> Dict[str, Any]:
     return {k: item.get(k) for k in keys if k in item}
 
 
-def _write_cache(payload: Dict[str, Any], path: str) -> bool:
+def _cleanup_tmp(tmp: str) -> None:
+    try:
+        os.unlink(tmp)
+    except OSError:
+        pass
+
+
+def _write_cache(payload: Dict[str, Any], path: str) -> Tuple[bool, str]:
+    """原子写盘 -> ``(成功?, 失败原因)``；失败绝不装作成功。"""
+    tmp = f"{path}.tmp.{os.getpid()}.{threading.get_ident()}"
     try:
         os.makedirs(os.path.dirname(path), exist_ok=True)
-        tmp = f"{path}.tmp.{os.getpid()}.{threading.get_ident()}"
         with open(tmp, "w", encoding="utf-8") as fh:
             json.dump(payload, fh, ensure_ascii=False, indent=2)
             fh.write("\n")
-        os.replace(tmp, path)
-        clear_cache_memo()
-        return True
     except OSError as e:
         logger.warning("卫星发射机缓存写入失败：%s", e)
-        return False
+        _cleanup_tmp(tmp)
+        return False, f"{type(e).__name__}: {e}"
+    # Windows：读者/杀软短暂持有目标文件时 os.replace 会抛共享冲突，
+    # 退避重试；仍失败就保留旧缓存并把原因交给上层如实上报。
+    last = ""
+    for attempt in range(3):
+        try:
+            os.replace(tmp, path)
+            clear_cache_memo()
+            return True, ""
+        except OSError as e:
+            last = f"{type(e).__name__}: {e}"
+            if attempt < 2:
+                time.sleep(0.05 * (attempt + 1))
+    logger.warning("卫星发射机缓存替换失败：%s", last)
+    _cleanup_tmp(tmp)
+    return False, last
+
+
+class _CacheLock:
+    """跨进程缓存锁：只罩住「重读 + 合并 + 写盘」，不罩网络请求。
+
+    拿不到锁不阻断刷新（结果里 ``lock_acquired`` 如实为 False），
+    但写盘仍走原子替换，最坏是后写者覆盖，不会写出半个 JSON。
+    """
+
+    def __init__(self, path: Optional[str], deadline_s: float = 10.0):
+        self.path = f"{path}.lock" if path else None
+        self.deadline_s = deadline_s
+        self._fh = None
+
+    def acquire(self) -> bool:
+        if not self.path:
+            return False
+        try:
+            os.makedirs(os.path.dirname(self.path), exist_ok=True)
+            fh = open(self.path, "a+b")
+            if fh.seek(0, os.SEEK_END) == 0:
+                fh.write(b"\0")
+                fh.flush()
+        except OSError as e:
+            logger.warning("卫星发射机缓存锁打不开：%s", e)
+            return False
+        end = time.monotonic() + self.deadline_s
+        while True:
+            try:
+                fh.seek(0)
+                if msvcrt is not None:
+                    msvcrt.locking(fh.fileno(), msvcrt.LK_NBLCK, 1)
+                else:
+                    fcntl.flock(fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                self._fh = fh
+                return True
+            except OSError:
+                if time.monotonic() >= end:
+                    fh.close()
+                    logger.warning("卫星发射机缓存锁超时（%.0fs）",
+                                   self.deadline_s)
+                    return False
+                time.sleep(0.05)
+
+    def release(self) -> None:
+        fh, self._fh = self._fh, None
+        if fh is None:
+            return
+        try:
+            fh.seek(0)
+            if msvcrt is not None:
+                msvcrt.locking(fh.fileno(), msvcrt.LK_UNLCK, 1)
+            else:
+                fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
+        except OSError:
+            pass
+        finally:
+            fh.close()
 
 
 def refresh(targets: Iterable[Any],
@@ -464,29 +571,63 @@ def refresh(targets: Iterable[Any],
         }
         fresh_written = True
 
-    # 旧缓存里未被本轮目标覆盖的星原样保留，避免刷新把目录缩水。
-    for key, rec in old_sats.items():
-        satellites.setdefault(key, rec)
-
-    result["satellites"] = satellites
-    result["failures"] = failures
     if not fresh_written:
+        # 旧缓存里未被本轮目标覆盖的星原样保留，避免刷新把目录缩水。
+        for key, rec in old_sats.items():
+            satellites.setdefault(key, rec)
+        result["satellites"] = satellites
+        result["failures"] = failures
         result["state"] = "failed"
         result["detail"] = ("本轮全部目标拉取失败；"
                             + ("旧缓存原样保留" if old_payload else "且无旧缓存"))
         logger.warning("卫星发射机库刷新全失败：%s", result["detail"])
         return result
 
-    payload = {
-        "_schema": CACHE_SCHEMA,
-        "_source": "SatNOGS DB",
-        "_source_url": DEFAULT_SOURCE_URL,
-        "fetched_at": ref,
-        "fetched_at_utc": _iso_utc(ref),
-        "satellites": satellites,
-        "failures": failures,
-    }
-    result["written"] = bool(target_path) and _write_cache(payload, target_path)
+    # 只锁「重读 + 合并 + 写盘」：网络请求已经做完，锁内不留 I/O 等待。
+    lock = _CacheLock(target_path)
+    acquired = lock.acquire()
+    result["lock_acquired"] = acquired
+    try:
+        if acquired:
+            clear_cache_memo()
+            current, _ = load_cache(target_path)
+            current_sats = dict(((current or {}).get("satellites")) or {})
+            target_keys = {str(e["norad_cat_id"]) for e in todo}
+            # 失败的星：优先采用临界区内较新的旧记录，只把失败原因挂上去。
+            for norad_s, failure in failures.items():
+                rec = current_sats.get(norad_s)
+                if isinstance(rec, dict):
+                    satellites[norad_s] = dict(
+                        rec, last_refresh_failure=dict(failure))
+            # 本轮没碰的星：以临界区内的当前缓存为准，避免覆盖并发写入。
+            for key, rec in current_sats.items():
+                if key not in target_keys:
+                    satellites.setdefault(key, rec)
+        result["satellites"] = satellites
+        result["failures"] = failures
+        payload = {
+            "_schema": CACHE_SCHEMA,
+            "_source": "SatNOGS DB",
+            "_source_url": DEFAULT_SOURCE_URL,
+            "fetched_at": ref,
+            "fetched_at_utc": _iso_utc(ref),
+            "satellites": satellites,
+            "failures": failures,
+        }
+        written, write_err = ((False, "无缓存路径") if not target_path
+                              else _write_cache(payload, target_path))
+    finally:
+        lock.release()
+
+    result["written"] = written
+    if not written:
+        result["state"] = "write_failed"
+        result["detail"] = (f"拉取成功但本地缓存写入失败（{write_err}）；"
+                            "旧缓存保留"
+                            + (f"，另有 {len(failures)} 颗拉取失败"
+                               if failures else ""))
+        logger.warning("卫星发射机库刷新写盘失败：%s", result["detail"])
+        return result
     result["state"] = "ok" if not failures else "partial"
     result["detail"] = ("" if not failures
                         else f"{len(failures)} 颗拉取失败，其余已更新")
@@ -582,11 +723,18 @@ def status_text(state: Dict[str, Any]) -> str:
     if kind == "offline":
         return ("SatNOGS 发射机库：未取到（"
                 f"{FAILURE_LABELS['offline']}），沿用人工目录")
+    if kind == "write_failed":
+        return ("SatNOGS 发射机库：拉取成功但本地缓存写入失败"
+                "（只读目录/文件被占用/权限），沿用旧缓存")
     if kind == "missing":
         return "SatNOGS 发射机库：未取到（无本地缓存），沿用人工目录"
     if kind == "invalid":
-        return ("SatNOGS 发射机库：未取到（缓存结构不符："
-                f"{state.get('detail') or '未知原因'}），沿用人工目录")
+        why = state.get("detail") or "未知原因"
+        if state.get("reason") == "schema":
+            return ("SatNOGS 发射机库：未取到（缓存结构不符："
+                    f"{why}），沿用人工目录")
+        return ("SatNOGS 发射机库：未取到（缓存不可用："
+                f"{why}），沿用人工目录")
     return "SatNOGS 发射机库：未取到，沿用人工目录"
 
 
