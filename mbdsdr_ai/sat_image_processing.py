@@ -725,7 +725,7 @@ def register_tool_registry(registry) -> None:
     """
     def _handler(args: Dict[str, Any]):
         import json as _json
-        from mbdsdr_ai.tool_registry import ToolResult
+        from mbdsdr_ai.tool_results import ToolResult
 
         try:
             # 输入图像：支持 2D/3D list（JSON）或文件路径

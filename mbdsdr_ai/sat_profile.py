@@ -233,7 +233,7 @@ def profile_to_rx_chain_args(profile: Dict[str, Any]) -> Dict[str, Any]:
 # ═══════════════════════════════════════════════════════════
 def register_tool_registry(registry) -> None:
     """注册参数库积木：查名单 / 取剖面 / 取帧布局（全只读，纯数据）。"""
-    from .tool_registry import ToolResult, clean_exc
+    from .tool_results import ToolResult, clean_exc
     import json as _json
 
     def _list_profiles(args):

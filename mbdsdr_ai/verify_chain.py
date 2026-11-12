@@ -252,7 +252,7 @@ def verify_sample(bits: Sequence[int], *,
 # ═══════════════════════════════════════════════════════════
 def register_tool_registry(registry) -> None:
     """注册协议级解码验证链工具（真值钉扎链的可编排形态）。"""
-    from .tool_registry import ToolResult, clean_exc
+    from .tool_results import ToolResult, clean_exc
     import json as _json
 
     def _verify(args):

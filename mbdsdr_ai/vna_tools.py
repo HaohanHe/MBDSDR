@@ -17,7 +17,7 @@ from __future__ import annotations
 import json
 from typing import Any, Dict, List
 
-from .tool_registry import ToolResult
+from .tool_results import ToolResult
 from .nanovna_client import NanoVNADriverError, find_nanovna_ports
 from .nanovna_dump import run_dump
 from .vna_pipeline import analyze_one_port, analyze_two_port

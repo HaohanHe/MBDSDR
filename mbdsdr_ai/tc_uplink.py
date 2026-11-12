@@ -363,7 +363,7 @@ def tc_uplink_transmit(*, arm_manual: bool = False,
 # ═══════════════════════════════════════════════════════════
 def register_tool_registry(registry) -> None:
     """注册 P0-5 上行链路积木（帧构建/解析/调制为纯计算，发射走人工门）。"""
-    from .tool_registry import ToolResult, clean_exc
+    from .tool_results import ToolResult, clean_exc
     import json as _json
 
     def _build(args):

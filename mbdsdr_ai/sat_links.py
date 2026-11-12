@@ -217,7 +217,7 @@ def machine_entry_text(entry: Dict[str, Any]) -> str:
 
 def register_tool_registry(registry) -> None:
     """注册链路目录工具：查名单 / 取条目 / 频率反查（全只读，纯数据）。"""
-    from .tool_registry import ToolResult, clean_exc
+    from .tool_results import ToolResult, clean_exc
     import json as _json
 
     def _list(args):
