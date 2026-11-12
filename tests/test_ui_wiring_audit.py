@@ -182,6 +182,10 @@ class TestModulePanelParamsReachBackend:
             "label": "FakeSDR", "driver": "fake",
             "sample_rate_range": (250_000.0, 3_200_000.0),
             "gain_range": (0.0, 40.0),
+            # 16042e4b 起量程缺来源即按未知：不标来源时范围校验整段被跳过，
+            # 本用例就只剩「载荷带了个数」，验不到设备面板真正的写入口路径。
+            "capability_status": {"sample_rate_range": "declared",
+                                  "gain_range": "declared"},
         }]
         dp.dev_combo.clear()
         dp.dev_combo.addItem("FakeSDR")
