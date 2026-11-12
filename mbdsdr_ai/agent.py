@@ -600,8 +600,8 @@ class MBDSDRAgent:
             url = (args.get("url") or "").strip()
             if not url:
                 return ToolResult(False, "url 不能为空")
-            from mbdsdr_ai.orbit import _network_disabled
-            if _network_disabled():
+            from mbdsdr_ai.net_policy import network_disabled
+            if network_disabled():
                 return ToolResult(
                     False,
                     "离线模式（MBDSDR_OFFLINE）：web_fetch_url 需要联网，已拒绝；"
@@ -650,8 +650,8 @@ class MBDSDRAgent:
             url = (args.get("url") or "").strip()
             if not url:
                 return ToolResult(False, "url 不能为空")
-            from mbdsdr_ai.orbit import _network_disabled
-            if _network_disabled():
+            from mbdsdr_ai.net_policy import network_disabled
+            if network_disabled():
                 return ToolResult(
                     False,
                     "离线模式（MBDSDR_OFFLINE）：git clone 需要联网，已拒绝；"
