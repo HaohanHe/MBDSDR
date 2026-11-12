@@ -68,7 +68,7 @@
 - **[复核]** `D1-test-reverse` `tests/:0` — 294 处 import
   - 为什么：tests 反向依赖 desktop，测试/工具会被 UI 生命周期绑住。
   - 怎么修：只依赖 mbdsdr_ai 的纯接口；确需 UI 的用例放在 tests/ui 并显式标注。
-- **[应修]** `D1-qt-in-core` `mbdsdr_ai/desktop_sdr_session.py:38` — import PySide6.QtCore
+- **[已消解]** `D1-qt-in-core` `mbdsdr_ai/desktop_sdr_session.py:38` — import PySide6.QtCore（该文件已整体迁至 `desktop/ai_sdr_session.py`，不再属 mbdsdr_ai 层）
   - 为什么：纯 Python 层（mbdsdr_ai）直接 import 了 Qt；这层一旦被 CLI/MCP 复用就会拖入 GUI 依赖。
   - 怎么修：把 Qt 相关实现移到 desktop/，mbdsdr_ai 只保留可注入的接口。
 - **[应修]** `D1-qt-in-core` `mbdsdr_ai/device_watchdog.py:25` — import PySide6.QtCore
