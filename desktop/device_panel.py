@@ -34,6 +34,31 @@ except Exception:  # noqa: BLE001
     enumerate_all_sdr_devices = None  # type: ignore
     _ENUM_OK = False
 
+# 跨进程设备占用登记：桌面端连上/断开时登记，AI 侧据此拒绝重复占用。
+# 不可用时降级成 no-op（面板仍可连），但绝不假装"已登记"。
+try:  # pragma: no cover
+    from mbdsdr_ai.sdr_backend import (
+        claim_active_owner as _claim_owner,
+        device_identity_aliases as _device_identity_aliases,
+        owner_conflict_text as _owner_conflict_text,
+        release_active_owner as _release_owner,
+    )
+except Exception:  # noqa: BLE001
+    def _claim_owner(owner, device_id, aliases=None):
+        return True, {}
+
+    def _release_owner(owner, device_id):
+        return False
+
+    def _owner_conflict_text(holder):
+        return "设备被其他程序占用"
+
+    def _device_identity_aliases(device):
+        return []
+
+#: 桌面端在占用登记里的 owner 名（与 AI 侧 ``AI_OWNER`` 对应）。
+_DESKTOP_OWNER = "desktop"
+
 from constants import DEFAULT_SAMPLE_RATE_HZ, format_sample_rate
 # 连接请求的唯一持有者：本面板只渲染/写回，不再自持 _sample_rate/_gain 副本。
 import connect_request_store as _req_store
@@ -632,6 +657,15 @@ class DevicePanel(QWidget):
                 # 登记 store 侧会话占用（第三档）：数据层靠它冻结本次生效值，
                 # 重复调用不覆盖首次快照，所以两次 set_connected(True) 无副作用。
                 _req_store.begin_session(self._current_dev_key)
+                # 兜底登记跨进程占用：模块面板也能发起连接，那条路不经
+                # _on_connect_clicked；连接已成立时这里只补登记，不做拒绝。
+                _claimed, _holder = _claim_owner(
+                    _DESKTOP_OWNER, self._current_dev_key,
+                    _device_identity_aliases(dev) if isinstance(dev, dict) else None)
+                if not _claimed:
+                    logger.warning(
+                        "连接已成立，但设备 %s 的占用登记被其他进程持有：%s",
+                        self._current_dev_key, _owner_conflict_text(_holder))
             else:
                 self._connected_device = None
                 self._current_dev_key = None
@@ -648,8 +682,9 @@ class DevicePanel(QWidget):
             self.disconnect_btn.setEnabled(True)
             self.status_label.setText(f"已连接: {dev_label or '设备'}")
         else:
-            # 先注销会话占用，再清 key——清完就拿不到是哪个请求要解锁了。
+            # 先注销会话占用与跨进程占用登记，再清 key——清完就不知道是哪台要解锁。
             if self._current_dev_key:
+                _release_owner(_DESKTOP_OWNER, self._current_dev_key)
                 _req_store.end_session(self._current_dev_key)
             self._connected_device = None
             self._pending_connect_device = None
@@ -746,10 +781,24 @@ class DevicePanel(QWidget):
         _req_store.update(ident.key, sample_rate_hz=sr,
                           gain_db=gain, ppm=ppm)
         _req_store.fill_payload(dev, ident.key)
+        # 跨进程互斥：连之前先登记占用。AI/MCP 进程按同一个身份键判占用，
+        # 拿不到就把「谁占着、该怎么办」原样告诉用户，不装作连接失败是硬件问题。
+        claimed, holder = _claim_owner(_DESKTOP_OWNER, ident.key,
+                                       _device_identity_aliases(dev))
+        if not claimed:
+            conflict = _owner_conflict_text(holder)
+            self.status_label.setText("设备被占用，未发起连接")
+            logger.warning("设备占用冲突（%s）：%s", ident.key, conflict)
+            QMessageBox.warning(self, "设备被占用", conflict)
+            return
         # 记下「这次真要连的是哪台」：连接成功后 set_connected 用它确认身份，
         # 而不是等回调时再看下拉框（那时选中项可能已经不是这台了）。
         self._pending_connect_device = dev
         self.connect_requested.emit(dev)
+        if self._current_dev_key != ident.key:
+            # 没连上（主窗口没回调 set_connected(True)）：当场释放刚拿到的占用，
+            # 否则一次失败的连接会把这台设备锁到进程退出。
+            _release_owner(_DESKTOP_OWNER, ident.key)
         # 信号是同一线程的直连：emit 返回时连接流程已经走完。若 pending 还在，
         # 说明这次连接失败、没人调 set_connected(True)——必须立刻作废，
         # 否则下一次无关的连接会误用这台设备的身份，把别人的拔出算到它头上。
