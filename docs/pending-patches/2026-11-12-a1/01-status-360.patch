@@ -1,0 +1,12 @@
+diff --git a/desktop/status_panel.py b/desktop/status_panel.py
+--- a/desktop/status_panel.py
++++ b/desktop/status_panel.py
+@@ -357,7 +357,7 @@
+ 
+         self.conn_indicator = QLabel("OFF")
+         self.conn_indicator.setStyleSheet(
+-            "color: " + tokens().COLORS["danger"] + "; font-size: 16pt;")
++            "color: " + tokens().status_color("danger") + "; font-size: 16pt;")
+         conn_layout.addWidget(self.conn_indicator)
+ 
+         self.conn_status = QLabel("未连接")

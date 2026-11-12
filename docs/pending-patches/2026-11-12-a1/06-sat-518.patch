@@ -1,0 +1,12 @@
+diff --git a/desktop/sat_track_panel.py b/desktop/sat_track_panel.py
+--- a/desktop/sat_track_panel.py
++++ b/desktop/sat_track_panel.py
+@@ -515,7 +515,7 @@
+             # 用户设置的「过境最低仰角」是峰值筛选门，**不用在这里**——
+             # 25° 时卫星仍可跟踪，不能因为用户想少列过境就假装跟踪结束。
+             _t = tokens()
+-            self._set_el_color(_t.COLORS["danger"])
++            self._set_el_color(_t.status_color("danger"))
+             self.state_label.setText(
+                 f"跟踪已停止（仰角低于设定门限 {VISIBLE_MIN_ALT_DEG:g}°；"
+                 "卫星尚未落下）")

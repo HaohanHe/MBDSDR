@@ -1,0 +1,12 @@
+diff --git a/desktop/status_panel.py b/desktop/status_panel.py
+--- a/desktop/status_panel.py
++++ b/desktop/status_panel.py
+@@ -864,7 +864,7 @@
+         elif dbfs > -70:
+             self.rssi_value.setStyleSheet("color: " + _t.COLORS["accent"] + ";")
+         else:
+-            self.rssi_value.setStyleSheet("color: " + _t.COLORS["danger"] + ";")
++            self.rssi_value.setStyleSheet("color: " + _t.status_color("danger") + ";")
+ 
+     def set_sdr_connected(self, connected: bool):
+         """连接状态切换：连接时正常显示；断开时把 SDR 相关字段全部 "—" 并整组置灰。"""

@@ -1,0 +1,23 @@
+diff --git a/desktop/ntrip_panel.py b/desktop/ntrip_panel.py
+--- a/desktop/ntrip_panel.py
++++ b/desktop/ntrip_panel.py
+@@ -45,7 +45,6 @@
+ # 指示灯颜色固定取全局 COLORS（深色一套），模块导入时求值一次：
+ # **切主题不会更新**，浅色主题下这三个值也不达标注（见 a11y 清单 A 类）。
+ _t = tokens()
+-_COLOR_IDLE = _t.COLORS["danger"]          # 低饱和红 = 未连接/未配置
+ _COLOR_BUSY = _t.COLORS["status_busy"]     # 低饱和黄 = 连接中
+ _COLOR_OK = _t.COLORS["success"]           # 低饱和青绿 = 已连接
+ 
+@@ -364,9 +363,9 @@
+         elif state == "busy":
+             color, text = _COLOR_BUSY, "连接中..."
+         elif state == "unconfigured":
+-            color, text = _COLOR_IDLE, "未配置"
++            color, text = tokens().status_color("danger"), "未配置"
+         else:
+-            color, text = _COLOR_IDLE, "未连接"
++            color, text = tokens().status_color("danger"), "未连接"
+         self._dot_label.setPixmap(_make_dot(color))
+         self._state_label.setText(text)
+         self._state_label.setStyleSheet(f"color: {color}; font-weight: 600;")

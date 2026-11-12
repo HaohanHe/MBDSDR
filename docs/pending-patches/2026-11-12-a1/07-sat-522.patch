@@ -1,0 +1,12 @@
+diff --git a/desktop/sat_track_panel.py b/desktop/sat_track_panel.py
+--- a/desktop/sat_track_panel.py
++++ b/desktop/sat_track_panel.py
+@@ -519,7 +519,7 @@
+             self.state_label.setText(
+                 f"跟踪已停止（仰角低于设定门限 {VISIBLE_MIN_ALT_DEG:g}°；"
+                 "卫星尚未落下）")
+-            self.state_label.setStyleSheet("color:" + _t.COLORS["danger"]
++            self.state_label.setStyleSheet("color:" + _t.status_color("danger")
+                                            + "; font-weight:600;")
+         else:
+             _t = tokens()

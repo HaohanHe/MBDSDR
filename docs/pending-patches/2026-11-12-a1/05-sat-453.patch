@@ -1,0 +1,12 @@
+diff --git a/desktop/sat_track_panel.py b/desktop/sat_track_panel.py
+--- a/desktop/sat_track_panel.py
++++ b/desktop/sat_track_panel.py
+@@ -450,7 +450,7 @@
+         if key == "warning":
+             return tokens().status_color("warning")
+         if key == "danger":
+-            return tokens().COLORS["danger"]
++            return tokens().status_color("danger")
+         return tokens().text("tertiary")
+ 
+     def set_tracking_state(self, tracking: bool):

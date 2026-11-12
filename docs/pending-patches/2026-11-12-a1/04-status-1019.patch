@@ -1,0 +1,12 @@
+diff --git a/desktop/status_panel.py b/desktop/status_panel.py
+--- a/desktop/status_panel.py
++++ b/desktop/status_panel.py
+@@ -1016,7 +1016,7 @@
+                         "color: " + _t.COLORS["accent"] + ";")    # 中等-强调
+                 else:
+                     self.rssi_value.setStyleSheet(
+-                        "color: " + _t.COLORS["danger"] + ";")   # 弱-红
++                        "color: " + _t.status_color("danger") + ";")   # 弱-红
+             except TypeError:
+                 pass
+ 

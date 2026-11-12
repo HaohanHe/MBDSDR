@@ -1,0 +1,142 @@
+diff --git a/desktop/ntrip_panel.py b/desktop/ntrip_panel.py
+--- a/desktop/ntrip_panel.py
++++ b/desktop/ntrip_panel.py
+@@ -42,11 +42,9 @@
+ from mbdsdr_ai.tool_registry import clean_exc as _clean_exc  # noqa: E402
+ from tokens import tokens
+ 
+-# 指示灯颜色固定取全局 COLORS（深色一套），模块导入时求值一次：
+-# **切主题不会更新**，浅色主题下这三个值也不达标注（见 a11y 清单 A 类）。
++# 指示灯颜色：IDLE/BUSY 在调用点用 tokens().status_color(...) 求值，随主题刷新；
++# OK 仍固定取全局 COLORS（深色一套，A2 未定，见解冻单第 3 条）。
+ _t = tokens()
+-_COLOR_IDLE = _t.COLORS["danger"]          # 低饱和红 = 未连接/未配置
+-_COLOR_BUSY = _t.COLORS["status_busy"]     # 低饱和黄 = 连接中
+ _COLOR_OK = _t.COLORS["success"]           # 低饱和青绿 = 已连接
+ 
+ 
+@@ -362,11 +360,11 @@
+         if state == "connected":
+             color, text = _COLOR_OK, "已连接"
+         elif state == "busy":
+-            color, text = _COLOR_BUSY, "连接中..."
++            color, text = tokens().status_color("warning"), "连接中..."
+         elif state == "unconfigured":
+-            color, text = _COLOR_IDLE, "未配置"
++            color, text = tokens().status_color("danger"), "未配置"
+         else:
+-            color, text = _COLOR_IDLE, "未连接"
++            color, text = tokens().status_color("danger"), "未连接"
+         self._dot_label.setPixmap(_make_dot(color))
+         self._state_label.setText(text)
+         self._state_label.setStyleSheet(f"color: {color}; font-weight: 600;")
+diff --git a/desktop/sat_track_panel.py b/desktop/sat_track_panel.py
+--- a/desktop/sat_track_panel.py
++++ b/desktop/sat_track_panel.py
+@@ -450,7 +450,7 @@
+         if key == "warning":
+             return tokens().status_color("warning")
+         if key == "danger":
+-            return tokens().COLORS["danger"]
++            return tokens().status_color("danger")
+         return tokens().text("tertiary")
+ 
+     def set_tracking_state(self, tracking: bool):
+@@ -515,11 +515,11 @@
+             # 用户设置的「过境最低仰角」是峰值筛选门，**不用在这里**——
+             # 25° 时卫星仍可跟踪，不能因为用户想少列过境就假装跟踪结束。
+             _t = tokens()
+-            self._set_el_color(_t.COLORS["danger"])
++            self._set_el_color(_t.status_color("danger"))
+             self.state_label.setText(
+                 f"跟踪已停止（仰角低于设定门限 {VISIBLE_MIN_ALT_DEG:g}°；"
+                 "卫星尚未落下）")
+-            self.state_label.setStyleSheet("color:" + _t.COLORS["danger"]
++            self.state_label.setStyleSheet("color:" + _t.status_color("danger")
+                                            + "; font-weight:600;")
+         else:
+             _t = tokens()
+diff --git a/desktop/status_panel.py b/desktop/status_panel.py
+--- a/desktop/status_panel.py
++++ b/desktop/status_panel.py
+@@ -357,7 +357,7 @@
+ 
+         self.conn_indicator = QLabel("OFF")
+         self.conn_indicator.setStyleSheet(
+-            "color: " + tokens().COLORS["danger"] + "; font-size: 16pt;")
++            "color: " + tokens().status_color("danger") + "; font-size: 16pt;")
+         conn_layout.addWidget(self.conn_indicator)
+ 
+         self.conn_status = QLabel("未连接")
+@@ -864,7 +864,7 @@
+         elif dbfs > -70:
+             self.rssi_value.setStyleSheet("color: " + _t.COLORS["accent"] + ";")
+         else:
+-            self.rssi_value.setStyleSheet("color: " + _t.COLORS["danger"] + ";")
++            self.rssi_value.setStyleSheet("color: " + _t.status_color("danger") + ";")
+ 
+     def set_sdr_connected(self, connected: bool):
+         """连接状态切换：连接时正常显示；断开时把 SDR 相关字段全部 "—" 并整组置灰。"""
+@@ -962,7 +962,7 @@
+             self.conn_status.setText(message)
+         else:
+             self.conn_indicator.setStyleSheet(
+-                "color: " + tokens().COLORS["danger"]
++                "color: " + tokens().status_color("danger")
+                 + "; font-size: 12pt; font-weight: 600;")
+             self.conn_indicator.setText("OFF")
+             self.conn_status.setText(message)
+@@ -1016,7 +1016,7 @@
+                         "color: " + _t.COLORS["accent"] + ";")    # 中等-强调
+                 else:
+                     self.rssi_value.setStyleSheet(
+-                        "color: " + _t.COLORS["danger"] + ";")   # 弱-红
++                        "color: " + _t.status_color("danger") + ";")   # 弱-红
+             except TypeError:
+                 pass
+ 
+diff --git a/desktop/vfo_panel.py b/desktop/vfo_panel.py
+--- a/desktop/vfo_panel.py
++++ b/desktop/vfo_panel.py
+@@ -229,7 +229,7 @@
+             del_btn = QPushButton("删")
+             del_btn.setMinimumHeight(20)
+             del_btn.setMaximumHeight(28)
+-            del_btn.setStyleSheet("color:" + tokens().COLORS["danger"] + ";")
++            del_btn.setStyleSheet("color:" + tokens().status_color("danger") + ";")
+             del_btn.clicked.connect(
+                 lambda _=False, vid=v.vfo_id: self.vfo_removed.emit(vid))
+             ol.addWidget(primary_btn)
+diff --git a/tests/test_ui_contrast.py b/tests/test_ui_contrast.py
+--- a/tests/test_ui_contrast.py
++++ b/tests/test_ui_contrast.py
+@@ -213,17 +213,7 @@
+ #: 门禁按 `==` 判定（不是 `<=`）：漏降上限 → 红，漏删基线行 → 也红（见
+ #: 「基线里已不存在的直读」那条断言）。否则棘轮会退化成「11 就对了」。
+ _BASELINE = (
+-    # ---- A1 待迁（11 个单元 / 12 行）----
+-    ("desktop/status_panel.py", 360, "danger", "A1", "status:360"),
+-    ("desktop/status_panel.py", 867, "danger", "A1", "status:867"),
+-    ("desktop/status_panel.py", 965, "danger", "A1", "status:965"),
+-    ("desktop/status_panel.py", 1019, "danger", "A1", "status:1019"),
+-    ("desktop/sat_track_panel.py", 453, "danger", "A1", "sat:453"),
+-    ("desktop/sat_track_panel.py", 518, "danger", "A1", "sat:518"),
+-    ("desktop/sat_track_panel.py", 522, "danger", "A1", "sat:522"),
+-    ("desktop/vfo_panel.py", 232, "danger", "A1", "vfo:232"),
+-    ("desktop/ntrip_panel.py", 48, "danger", "A1", "ntrip:48"),
+-    ("desktop/ntrip_panel.py", 49, "status_busy", "A1", "ntrip:49"),
++    # ---- A1 待迁（仅剩 control:invalid 1 个单元 / 2 行；其余 10 个单元已由 00-all.patch 迁完）----
+     ("desktop/control_panel.py", 999, "danger", "A1", "control:invalid"),
+     ("desktop/control_panel.py", 1007, "danger", "A1", "control:invalid"),
+     # ---- A2 等拍板（success/accent 当正文/填充）----
+@@ -278,8 +268,8 @@
+     ("tests/test_theme_tokens.py", 65, "accent", "TEST", ""),
+ )
+ 
+-#: A1 单元数上限（只许降）：当前 11 = status 4 + sat 3 + vfo 1 + ntrip 2 + control 1。
+-_BASELINE_CEILING = 11
++#: A1 单元数上限（只许降）：当前 1 = control:invalid（status 4 + sat 3 + vfo 1 + ntrip 2 已迁）。
++_BASELINE_CEILING = 1
+ 
+ 
+ def _scan_semantic_reads():

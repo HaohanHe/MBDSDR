@@ -1,0 +1,12 @@
+diff --git a/desktop/vfo_panel.py b/desktop/vfo_panel.py
+--- a/desktop/vfo_panel.py
++++ b/desktop/vfo_panel.py
+@@ -229,7 +229,7 @@
+             del_btn = QPushButton("删")
+             del_btn.setMinimumHeight(20)
+             del_btn.setMaximumHeight(28)
+-            del_btn.setStyleSheet("color:" + tokens().COLORS["danger"] + ";")
++            del_btn.setStyleSheet("color:" + tokens().status_color("danger") + ";")
+             del_btn.clicked.connect(
+                 lambda _=False, vid=v.vfo_id: self.vfo_removed.emit(vid))
+             ol.addWidget(primary_btn)

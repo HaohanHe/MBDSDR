@@ -1,0 +1,12 @@
+diff --git a/desktop/status_panel.py b/desktop/status_panel.py
+--- a/desktop/status_panel.py
++++ b/desktop/status_panel.py
+@@ -962,7 +962,7 @@
+             self.conn_status.setText(message)
+         else:
+             self.conn_indicator.setStyleSheet(
+-                "color: " + tokens().COLORS["danger"]
++                "color: " + tokens().status_color("danger")
+                 + "; font-size: 12pt; font-weight: 600;")
+             self.conn_indicator.setText("OFF")
+             self.conn_status.setText(message)
