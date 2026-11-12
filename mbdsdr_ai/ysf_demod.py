@@ -162,10 +162,6 @@ def byte_to_bits_be(b: int) -> List[int]:
     return _byte_to_bits_be(b)
 
 
-def bits_to_byte_be(bits: Sequence[int], off: int = 0) -> int:
-    return _bits_to_byte_be(bits, off)
-
-
 def bytes_to_bits_be(data: Sequence[int]) -> List[int]:
     return _bytes_to_bits_be(data)
 
