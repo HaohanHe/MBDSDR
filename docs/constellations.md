@@ -631,6 +631,7 @@ C++/GPU 着色器，可不计入 Python 预算。
 `QGuiApplication` 与 8 pt 系统字体，标签用锚点屏幕位置 `drawText`：
 
 > 证据等级 E4：本段数字未验证，引用前须复核（判据见 docs/evidence-standard.md）。
+
 | T2 + N 个标签 | 实测 |
 | --- | --- |
 | 0 | 6.86 ms |

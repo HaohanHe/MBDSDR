@@ -47,6 +47,7 @@
 ## 清零表（12 组）
 
 > 证据等级 E4：本段数字未验证，引用前须复核（判据见 docs/evidence-standard.md）。
+
 | 组 | 涉及位置（文件:符号） | 是否统一 | 统一到哪个值 | 负责线 | 剩余风险（面向用户的错误现象） | 验证方法 | 状态 |
 |---|---|---|---|---|---|---|---|
 | 1 静噪 | `desktop/receive_pipeline.py:DemodWorker.run`（`_cfg.squelch_db`→`BaselineSquelch.set_threshold`→`margin_threshold_db()`）；`mbdsdr_ai/squelch.py:DEFAULT_SQUELCH_DBFS/SQUELCH_MIN_DBFS/SQUELCH_MAX_DBFS/margin_threshold_db`；`desktop/config_schema.py:squelch_default_db`；`desktop/control_panel.py:squelch_changed`；`desktop/main_window.py:_squelch_db/_replay_squelch_gate`；`mbdsdr_ai/sdr_backend.py:set_squelch/SQUELCH_APPLIED_BY_VALUES`；`mbdsdr_ai/receive_chain.py:_make_squelch/set_squelch`（`BaselineSquelch`）；`cpp/src/core/tokens.h:kSquelchMinDb/kSquelchMaxDb/kSquelchDefaultDb/kSquelchAutoMarginDb`；`cpp/src/dsp/spectrum_engine.cpp:setSquelchThreshold`；`cpp/src/control/control_hub.cpp:cmdSetSquelch/cmdGetSquelchStatus`；`cpp/src/ui/main_window.cpp:squelchAutoBtn_/squelchSlider_`；`mbdsdr_ai/analog_demod.py:_MODE_DEFAULTS/squelch_db`（信道 IQ 域，有意分开） | 部分（桌面/后端余量语义归并到 `BaselineSquelch`（取证 `0d6d465` — `mbdsdr_ai/receive_chain.py:80` — `BaselineSquelch`）；原 4 处拦点全落地 `0d6d465`+`e501555`；控制层仍剩 1 处绝对门可绕过 auto） | 桌面/`BaselineSquelch`/`ReceiveChain`/`sdr_backend` 全走余量刻度（`-100→0`、`-50→6`、`-20→16` dB）；C++ 音频 RMS 域绝对 dBFS 门，靠 `domain` 守卫与余量值隔离；`analog_demod` 保持信道 IQ 域绝对（`am/fm -40`、`wfm -30`、`usb/lsb/cw -60`，初值 `-150`），不与桌面滑杆互通 | 操作逻辑线（`desktop/main_window.py`、`desktop/receive_pipeline.py`）；后端线（`mbdsdr_ai/sdr_backend.py`、`mbdsdr_ai/receive_chain.py`、`mbdsdr_ai/analog_demod.py`）；C++ 内核线（`cpp/src/core/tokens.h`、`cpp/src/dsp/spectrum_engine.cpp`、`cpp/src/control/control_hub.cpp`、`cpp/src/ui/main_window.cpp`） | 已无“同一滑杆数字两端反语义”路径：`sdr_backend.set_squelch` 只记余量（`applied_by=desktop-margin`，不填绝对门）；`receive_chain` 解调前绝对 RMS 门已删，改 `BaselineSquelch`；`cmdSetSquelch` 对 `domain=margin/auto` 且带 `threshold_db` 直接报错不改门限；C++ 勾“自动门限”会显式 `setSquelchAuto(true)` 并禁用滑杆。**剩余 1 处**：legacy 绝对门命令 `cpp/src/control/control_hub.cpp:cmdSetSquelchThreshold`（以及 `cmdSetSquelch` 未带 `domain` 但带 `threshold_db`）仍调用 `cpp/src/dsp/spectrum_engine.cpp:setSquelchThreshold`，后者静默 `squelchAuto_.store(false)`，而 `cpp/src/ui/main_window.cpp:squelchAutoBtn_/squelchSlider_` 仍显示“自动”已勾、滑杆仍禁用 → UI 与内核状态分叉。`analog_demod` 仍是信道 IQ 域绝对门（AI 无头 `demod_analog` 工具，有意分开，界面不暴露） | 跑 `tests/test_squelch_domain.py`（`0d6d465` 新增）；再对同一段 88.1M OTA IQ，桌面 `-50`/`-20` 各一次，开门帧占比应随余量升高而下降；C++ `get_squelch_status` 应回 `none/cpp-auto/cpp-manual` | 部分统一（拦点还剩 1 处：legacy 绝对门命令绕过 auto 状态，UI 不跟随） |
@@ -143,6 +144,7 @@
 口径：差值为算术差，倍数按较大/较小；全部由常量或状态机直接读数/计算，不含估算。
 
 > 证据等级 E4：本段数字未验证，引用前须复核（判据见 docs/evidence-standard.md）。
+
 | # | 物理量 | A 位置与值 | B 位置与值 | 实测差值 | 后果 | 现状态 |
 |---|---|---|---|---|---|---|
 | B1 | 采样率 | `desktop/main_window.py` 采样率兜底项文案 `"2.048 MS/s"`（`addItem` 绑 `DEFAULT_SAMPLE_RATE_HZ`） | `desktop/constants.py:DEFAULT_SAMPLE_RATE_HZ` 与 `mbdsdr_ai/sdr_backend.py:DEFAULT_SAMPLE_RATE_HZ` = **2,400,000 Hz**；C++ `tokens.h:kSampleRatesHz` 含 2.048e6/2.4e6 | **352,000 Hz（17.19%，1.172×）**；档位 11 vs 4，差 **7 档** | 该项显示 2.048 实际下发 2.4；旧配置 2.048 与状态栏 2.4 并存直到手动切一次 | 默认值统一（取证 `6ed9ee7` — `desktop/constants.py:25` — `DEFAULT_SAMPLE_RATE_HZ = 2_400_000`）；文案与档位集合未统一 |
@@ -501,6 +503,7 @@ constexpr double kCandidateRatesHz[] = {
 > 后续归属以此注记为准。
 
 > 证据等级 E4：本段数字未验证，引用前须复核（判据见 docs/evidence-standard.md）。
+
 | 日期 | 基线 | 变更 | 操作人 |
 |---|---|---|---|
 | 2026-11-05 | `5ece441` | 建账：11 组逐条落表，状态按当时实测填写 | 参数治理线 |

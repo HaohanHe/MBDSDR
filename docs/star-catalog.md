@@ -287,6 +287,7 @@ python -m mbdsdr_ai.skyengine.build_full_sky_catalog `
 数组单独测量。
 
 > 证据等级 E4：本段数字未验证，引用前须复核（判据见 docs/evidence-standard.md）。
+
 | 场景 | 命中星数 | 取数中位 | 排序中位 | 30fps 结论 |
 | --- | --- | --- | --- | --- |
 | 120°，alt=45°，常态极限 6.5 | **1,230** | **2.5 ms** | 0.05 ms（n≈1.2k） | 远低于 33 ms |
