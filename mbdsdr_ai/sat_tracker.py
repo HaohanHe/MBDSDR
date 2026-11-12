@@ -162,14 +162,14 @@ def _bounded_requests_get(url: str, timeout_s: float, hard_deadline_s: float):
 
 
 def _tle_cache_dir() -> str:
-    """TLE 磁盘缓存目录的唯一来源：复用 orbit 的 ``_CACHE_DIR``。
+    """TLE 磁盘缓存目录的唯一来源：复用 orbit 的官方入口。
 
     与 :mod:`tle_fetch` 共用同一目录与文件格式（``<NORAD>.tle``，内容
-    ``name\\nline1\\nline2``）。每次调用时读取模块属性，测试 monkeypatch
-    ``orbit._CACHE_DIR`` 才会生效——本模块不再写第二份路径字面量。
+    ``name\\nline1\\nline2``）。每次调用时读取 ``MBDSDR_TLE_CACHE_DIR`` /
+    orbit 默认目录——本模块不再写第二份路径字面量，也不碰私有名。
     """
-    from .orbit import _CACHE_DIR
-    return _CACHE_DIR
+    from .orbit import tle_cache_dir
+    return tle_cache_dir()
 
 
 def _engine_now_unix() -> Optional[float]:
