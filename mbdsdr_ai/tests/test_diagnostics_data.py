@@ -11,12 +11,14 @@
 本文件不导入 PySide6，可在没有 QApplication 的进程里直接跑。
 """
 
+import json
 import os
 import sys
 
 _ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, _ROOT)
 
+import mbdsdr_ai.config as mbdsdr_config  # noqa: E402
 import mbdsdr_ai.corrupt_evidence as ce  # noqa: E402
 import mbdsdr_ai.diagnostics as diag  # noqa: E402
 from desktop import startup_paths as sp  # noqa: E402
@@ -92,3 +94,55 @@ def test_unwired_objects_are_named_not_faked():
     unwired = {u["name"] for u in diag._collect_errors()["unwired"]}
     assert {"desktop_settings", "layout_store", "bookmarks",
             "frequency_manager", "version_store"} <= unwired
+
+
+#: 反证用的假 key：形状与真实 key 一致，但不可能被误当成有效凭证。
+_FAKE_KEY = "sk-abcdef1234567890"
+
+
+def test_redact_secrets_keeps_labels_and_hides_values():
+    assert diag.redact_secrets(f"api_key={_FAKE_KEY}") == "api_key=***"
+    assert diag.redact_secrets(f"Authorization: Bearer {_FAKE_KEY}") == \
+        "Authorization: Bearer ***"
+    assert diag.redact_secrets(f"解析失败：{_FAKE_KEY}") == "解析失败：sk-***"
+    # 正常文案不能被吞掉
+    assert diag.redact_secrets("书签文件读取失败：测试") == "书签文件读取失败：测试"
+
+
+def test_api_key_never_leaks_from_collected_structure(tmp_path, monkeypatch):
+    """完整流程反证：含 ``sk-`` 假 key 的损坏配置跑完后，返回结构里没有它。
+
+    三个真实通道同时打开：
+    1. 配置目录名带 key 形状串 → 备份路径、理由里的路径都带上它；
+    2. 理由文件是自由文本 → 模拟未来的 writer 把值本身写进去；
+    3. 注册实例的 ``last_error`` 与内存日志缓冲 → 典型「写失败原因」。
+    """
+    leak_dir = tmp_path / f"{_FAKE_KEY}-leak"
+    leak_dir.mkdir()
+    cfg_path = leak_dir / "config.json"
+    cfg_path.write_text(
+        f'{{"api_key": "{_FAKE_KEY}", "model": ', encoding="utf-8")
+
+    mbdsdr_config.load_config(str(cfg_path))
+    reason_file = next(leak_dir.glob("*.reason.txt"))
+    reason_file.write_text(f"解析失败片段：api_key={_FAKE_KEY}\n",
+                           encoding="utf-8")
+    assert _FAKE_KEY in reason_file.read_text(encoding="utf-8"), \
+        "前提失效：理由里根本没有 key，这条反证证明不了脱敏"
+
+    store = _Store(f"保存失败：token={_FAKE_KEY}")
+    diag.register_store("memory", store)
+    monkeypatch.setattr(sp, "last_log_path", lambda: "")
+    monkeypatch.setattr(sp, "buffered_log",
+                        lambda: [f"Authorization: Bearer {_FAKE_KEY}"])
+    monkeypatch.setattr(diag, "_scan_directories", lambda: [str(leak_dir)])
+
+    data = diag.collect_diagnostics()
+    blob = json.dumps(data, ensure_ascii=False)
+
+    assert _FAKE_KEY not in blob, "诊断结构里仍能拿到完整 API key"
+    assert "api_key=***" in blob
+    assert "token=***" in blob
+    assert "Bearer ***" in blob
+    assert data["backups"]["total"] == 1, "脱敏把证据本身弄丢了"
+    mbdsdr_config._set_error(None)

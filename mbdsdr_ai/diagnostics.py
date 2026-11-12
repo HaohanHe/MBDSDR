@@ -15,10 +15,15 @@
   并进来会让「一个坏文件」在页面上出现两次；
 * **不编造**：实例类对象（DesktopSettings / LayoutStore / BookmarkManager /
   FrequencyManager / VersionStore）在诊断页拿到窗口之前取不到，清单里明确
-  标 ``unwired``，不拿空值冒充「无错误」。
+  标 ``unwired``，不拿空值冒充「无错误」；
+* **不泄露密钥**：返回结构在**数据层**统一脱敏。理由文件是自由文本通道
+  （写的是异常消息与路径），路径本身可能被用户/环境变量带进 key 形状的串，
+  日志缓冲与 ``last_error`` 更是什么都可能出现。用户会把这一段截图发出去
+  求助——面板里遮只保护一个出口，数据层遮保护所有出口（面板 / 日志 / 导出）。
 """
 
 import importlib
+import re
 import weakref
 from typing import Any, Dict, List, Optional
 
@@ -46,6 +51,42 @@ _UNWIRED = (
 )
 
 _REGISTERED: Dict[str, List["weakref.ref"]] = {}
+
+#: 常见密钥形状。只覆盖**可识别**的三种：``sk-`` 前缀、``Bearer <token>``、
+#: 带标签的赋值（``api_key=`` / ``token:`` / ``password=``…）。没有标签的
+#: 高熵随机串识别不了——这是已知残余风险，不能声称「绝不泄露」。
+_SK_RE = re.compile(r"sk-[A-Za-z0-9_\-]{6,}")
+_BEARER_RE = re.compile(r"(?i)\bbearer\b(\s+)[A-Za-z0-9._\-+/=]{6,}")
+_SECRET_KV_RE = re.compile(
+    r"(?i)\b(api[_-]?key|access[_-]?key|secret|token|password)\b"
+    r"(\s*[:=]\s*)([\"']?)([^\s\"',;}\]]+)")
+
+
+def redact_secrets(text: str) -> str:
+    """把疑似密钥替换成 ``***``（纯函数，便于单独测试）。
+
+    顺序：先切 ``Bearer`` 头（token 可能不是 ``sk-`` 形状），再切带标签的
+    赋值，最后切裸 ``sk-`` 串。宁可多遮一点，也不让一段能直接拿去调用
+    接口的串留在截图里。
+    """
+    if not text:
+        return text
+    text = _BEARER_RE.sub(lambda m: f"Bearer{m.group(1)}***", text)
+    text = _SECRET_KV_RE.sub(
+        lambda m: f"{m.group(1)}{m.group(2)}{m.group(3)}***", text)
+    text = _SK_RE.sub("sk-***", text)
+    return text
+
+
+def _redact_tree(value: Any) -> Any:
+    """递归脱敏结构里的所有字符串；dict 键名是代码里的固定字段，不处理。"""
+    if isinstance(value, str):
+        return redact_secrets(value)
+    if isinstance(value, dict):
+        return {key: _redact_tree(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_redact_tree(item) for item in value]
+    return value
 
 
 def register_store(name: str, store: Any) -> None:
@@ -154,9 +195,11 @@ def collect_diagnostics() -> Dict[str, Any]:
     """无参、只读：返回 ``{"backups", "log", "errors"}`` 三块完整结构。
 
     任何一块取数失败都不抛异常——诊断页拿到空块也总比整页打不开有用。
+    返回前在**数据层**统一脱敏：面板、日志、导出、截图都走同一份结构，
+    不依赖调用方各自记得遮。
     """
-    return {
+    return _redact_tree({
         "backups": _collect_backups(),
         "log": _collect_log(),
         "errors": _collect_errors(),
-    }
+    })
