@@ -1910,8 +1910,6 @@ No supported devices found），GNSS+SDR 同开复验没做成；离线那次
 | `scripts/check_dist_head_parity.py` | 守卫账本线（目的未声明） | 2026-11-13 06:23 | 未声明 |
 | `scripts/check_banner_coverage.py` | 守卫账本线（目的未声明） | 2026-11-13 06:23 | 未声明 |
 | `desktop/sat_track_panel.py` | K20sat收口线/6ae85f56（修 sat_track_panel.py:400 动态 tooltip 未登记导致 test_every_passthrough_tooltip_is_registered 红） | 2026-11-13 06:23 | 未声明 |
-| `docs/known-red-register.md` | 残留收口线/6ae85f56（K20 重绑到 d4277a3d） | 2026-11-13 06:32 | 未声明 |
-| `docs/COORDINATION.md` | 残留收口线/6ae85f56（补 K20 重绑的 §6.1 行并收口） | 2026-11-13 06:32 | 未声明 |
 | **真机（USB SDR）** | 跑 `hw_acceptance/`、七环、`capture_throughput.py` 的线（资源独占） | 占用时段 | — |
 
 > 上表各行均由 `claim` 台账推导：owner 原文与 `acquired_at` 直接取自台账，
