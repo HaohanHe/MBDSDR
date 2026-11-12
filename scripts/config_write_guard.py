@@ -99,13 +99,6 @@ def _norm(path):
     return os.path.normcase(os.path.abspath(os.path.expanduser(path)))
 
 
-def _under(path, root):
-    try:
-        return os.path.commonpath([path, root]) == root
-    except ValueError:          # Windows 跨盘符
-        return False
-
-
 def _temp_roots():
     roots = [tempfile.gettempdir()]
     for var in ("MBDSDR_SCRATCH_ROOT", "MBDSDR_REPRO_SANDBOX_DIR"):
