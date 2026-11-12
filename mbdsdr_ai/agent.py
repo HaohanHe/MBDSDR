@@ -4553,9 +4553,10 @@ class MBDSDRAgent:
                 content = response.get("content", "")
                 if content and content.strip():
                     return content
-        except Exception:
-            pass
-        return f"[自动压缩] 已裁剪早期对话历史"
+        except Exception as e:
+            logger.warning("上下文压缩调用失败，退化为直接裁剪（未生成摘要）：%s: %s",
+                           type(e).__name__, e)
+        return "[上下文压缩失败] 已直接裁剪早期对话历史（未生成摘要）"
 
     # ── 对话管理（多会话持久化）──────────────────────────
 
