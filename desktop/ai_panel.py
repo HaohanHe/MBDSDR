@@ -370,15 +370,17 @@ class AIPanel(QWidget):
         title_bar = QHBoxLayout()
         _t = _tok()
         title_label = QLabel(self.tr("AI 智能体"))
+        # 标题/内核状态/常驻状态条三处随主题走（palette 角色）：浅色主题下
+        # 原来的白字只有 1.11:1。对话区仍是固定深底，见 _chat_colors。
         title_label.setStyleSheet(
-            f"font-size: 11pt; font-weight: 600; color: {_t.COLORS['text_primary']};")
+            "font-size: 11pt; font-weight: 600; color: palette(window-text);")
         title_bar.addWidget(title_label)
         title_bar.addStretch()
 
         # AI 内核状态指示
         self.ai_status_label = QLabel()
         self.ai_status_label.setStyleSheet(
-            f"font-size: 8pt; color: {_t.COLORS['text_muted']};")
+            "font-size: 8pt; color: palette(placeholder-text);")
         self._update_ai_status()
         title_bar.addWidget(self.ai_status_label)
 
@@ -400,8 +402,9 @@ class AIPanel(QWidget):
         # 显示成空方框；真正的空框是下面 padding 被子类样式吃掉造成的。
         self.pop_btn.setToolTip("把这个面板弹出成可拖动的自由窗口（也能再归位）")
         self.pop_btn.setStyleSheet(
-            "font-size:10pt;background:transparent;color:#B9C7DB;"
-            "border:1px solid rgba(160,190,225,0.25);border-radius:5px;"
+            "font-size:10pt;background:transparent;"
+            "color:palette(placeholder-text);"
+            "border:1px solid palette(mid);border-radius:5px;"
             "padding:0px;")  # 全局 QSS 的 8px/18px 内边距会把这个 26px 窄按钮的
                               # 内容区压成负宽度——文字一个像素都画不出来（实拍空方框）
         self.pop_btn.clicked.connect(self._pop_out)
@@ -418,10 +421,10 @@ class AIPanel(QWidget):
         self.live_btn.setMaximumHeight(30)
         self.live_btn.setStyleSheet(
             "QPushButton { text-align: left; padding: 2px 8px;"
-            " background-color: rgba(60,90,130,0.16);"
-            " color: #CFE0F5; border: 1px solid rgba(160,190,225,0.22);"
+            " background-color: palette(alternate-base);"
+            " color: palette(window-text); border: 1px solid palette(mid);"
             " border-radius: 5px; font-size: 8pt; }"
-            "QPushButton:hover { background-color: rgba(60,90,130,0.30); }")
+            "QPushButton:hover { background-color: palette(button); }")
         self.live_btn.clicked.connect(self._toggle_live_details)
         layout.addWidget(self.live_btn)
         self.live_details = QLabel("")
@@ -429,8 +432,9 @@ class AIPanel(QWidget):
         self.live_details.setTextFormat(Qt.RichText)
         self.live_details.setVisible(False)
         self.live_details.setStyleSheet(
-            "color: #B8C6D9; font-size: 8pt; padding: 4px 8px;"
-            " background: rgba(14,17,24,0.55); border-radius: 4px;")
+            "color: palette(placeholder-text); font-size: 8pt;"
+            " padding: 4px 8px; background: palette(alternate-base);"
+            " border-radius: 4px;")
         layout.addWidget(self.live_details)
         self._refresh_live_bar()
 

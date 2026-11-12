@@ -278,3 +278,66 @@ def test_constellation_sdr_hint_uses_theme_secondary():
         assert ratio >= 4.5, (
             f"{theme}: text_secondary {colors['text_secondary']} on bg "
             f"{colors['bg']} 对比度 {ratio:.2f} < 4.5")
+
+
+_AI_PANEL_THEMED = ("title_label", "ai_status_label", "pop_btn",
+                    "live_btn", "live_details")
+
+
+def _ai_panel_css(name: str) -> str:
+    """取 ai_panel 里某个控件 ``setStyleSheet(...)`` 的实参（括号配对扫描）。"""
+    path = os.path.join(_ROOT, "desktop", "ai_panel.py")
+    with open(path, encoding="utf-8") as fh:
+        src = fh.read()
+    start = -1
+    for prefix in (f"self.{name}.setStyleSheet(", f"{name}.setStyleSheet("):
+        start = src.find(prefix)
+        if start >= 0:
+            break
+    assert start >= 0, f"ai_panel.{name}.setStyleSheet 不见了（改名/删除？）"
+    i = src.index("(", start)
+    depth = 0
+    for j in range(i, len(src)):
+        if src[j] == "(":
+            depth += 1
+        elif src[j] == ")":
+            depth -= 1
+            if depth == 0:
+                return src[i + 1:j]
+    raise AssertionError(f"{name}.setStyleSheet 括号未闭合")
+
+
+def test_ai_panel_header_follows_theme():
+    """AI 面板标题/内核状态/常驻状态条/状态详情随主题；对话区保持固定深底。
+
+    2026-11-12 实测（半透明底按真实叠底算合成值，不拿字面色当结论）：
+    浅色主题下标题白字 1.11:1、弹出按钮 1.55:1、状态条 1.04:1、
+    状态详情 2.59:1。改走 palette 角色后最差 text_secondary/bg_alt
+    = 4.85:1（default）。对话区 ``#1f1f1f`` 是已声明的固定深底，不在
+    本用例范围。
+
+    反证：任一处改回原值（#B9C7DB / rgba(60,90,130,0.16) / #CFE0F5 /
+    rgba(14,17,24,0.55) / ``_t.COLORS[...]``）→ 本用例必须红。
+    """
+    for name in _AI_PANEL_THEMED:
+        css = _ai_panel_css(name)
+        literal = _HINT_LITERAL.search(css)
+        assert literal is None, (
+            f"{name} 仍写死颜色 {literal.group(0)}：{css!r}")
+        assert "COLORS[" not in css, (
+            f"{name} 仍直读全局 COLORS（深色主题值，切主题不变）：{css!r}")
+        assert "palette(" in css, f"{name} 没走主题角色：{css!r}"
+
+    for theme in _ALL:
+        c = tokens().theme_colors(theme)
+        pairs = (
+            ("标题/状态条", c["text"], c["bg"]),
+            ("内核状态", c["text_secondary"], c["bg"]),
+            ("弹出按钮", c["text_secondary"], c["bg"]),
+            ("状态条", c["text"], c["bg_alt"]),
+            ("状态详情", c["text_secondary"], c["bg_alt"]),
+        )
+        for label, fg, bg in pairs:
+            ratio = contrast_ratio(fg, bg)
+            assert ratio >= 4.5, (
+                f"{theme}/{label}: {fg} on {bg} = {ratio:.2f} < 4.5")
