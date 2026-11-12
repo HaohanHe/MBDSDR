@@ -30,7 +30,8 @@ _WORKSPACE_STANDARDS = (
     / "etsi-en-302-307-1"
 )
 # Golden search order: repo copy first (what CI sees), workspace standards
-# copy as fallback. Both are SHA-pinned; absent both → honest skip.
+# copy as fallback. Both are SHA-pinned; the repo copy is git-tracked, so
+# absence means a broken checkout — that must be red, not skip (A09).
 _EXTRACT_CANDIDATES = (
     _PROJECT_ROOT / "tests" / "golden" / "dvbs2_fec_parameters.json",
     _WORKSPACE_STANDARDS / "dvbs2_fec_parameters.json",
@@ -52,9 +53,11 @@ def _lf_sha256(raw: bytes) -> str:
     return hashlib.sha256(raw.replace(b"\r\n", b"\n")).hexdigest()
 
 
-def _load_independent_kat() -> dict | None:
+def _load_independent_kat() -> dict:
     if not _KAT_PATH.is_file():
-        return None
+        raise FileNotFoundError(
+            f"独立 DVB-S2 BCH KAT 未随仓提供：{_KAT_PATH}（该文件由 git 跟踪，"
+            "缺失说明检出损坏，属回归，不得按环境缺失跳过）")
     raw = _KAT_PATH.read_bytes()
     if _lf_sha256(raw) != _KAT_SHA256:
         raise ValueError("independent DVB-S2 BCH KAT identity changed")
@@ -75,21 +78,7 @@ def _load_independent_kat() -> dict | None:
 
 
 _KAT_DOCUMENT = _load_independent_kat()
-_KAT_SKIP = pytest.mark.skipif(
-    _KAT_DOCUMENT is None,
-    reason="external independent DVB-S2 BCH KAT is not available",
-)
-_KAT_CASES = (
-    _KAT_DOCUMENT["vectors"]
-    if _KAT_DOCUMENT is not None
-    else [
-        pytest.param(
-            None,
-            id="missing-external-kat",
-            marks=pytest.mark.skip(reason="external independent DVB-S2 BCH KAT is not available"),
-        )
-    ]
-)
+_KAT_CASES = _KAT_DOCUMENT["vectors"]
 _RUNTIME = json.loads(_RUNTIME_PATH.read_text(encoding="utf-8"))
 _MODES = bch_modes()
 _REPRESENTATIVE_MODES = (("normal", "9/10"), ("normal", "2/3"), ("short", "1/4"))
@@ -191,8 +180,9 @@ def examples() -> dict[tuple[str, str], tuple[np.ndarray, np.ndarray]]:
 
 
 def test_runtime_data_matches_verified_extract() -> None:
-    if not _EXTRACT_PATH.is_file():
-        pytest.skip("verified standard-parameter extract is not available")
+    assert _EXTRACT_PATH.is_file(), (
+        f"标准参数提取未随仓提供：{_EXTRACT_PATH}（该文件由 git 跟踪，"
+        "缺失说明检出损坏，属回归，不得按环境缺失跳过）")
     raw = _EXTRACT_PATH.read_bytes()
     extract = json.loads(raw)
     assert _lf_sha256(raw) == "982b26f3166ccf35237d6a4bbfbda00a932b6a99d155095ddbb8071c62011330"
@@ -443,7 +433,6 @@ def _hex_bits(payload: str) -> np.ndarray:
     return np.unpackbits(np.frombuffer(bytes.fromhex(payload), dtype=np.uint8))
 
 
-@_KAT_SKIP
 def test_independent_kat_identity_and_coverage() -> None:
     assert _KAT_DOCUMENT is not None
     assert _KAT_DOCUMENT["scope"] == "BCH outer code only; LDPC is not encoded, decoded, or validated by these vectors."
@@ -459,11 +448,10 @@ def test_independent_kat_identity_and_coverage() -> None:
     assert sum(case["frame"] == "short" for case in _KAT_DOCUMENT["vectors"]) == 10
 
 
-@_KAT_SKIP
 @pytest.mark.parametrize(
     "case",
     _KAT_CASES,
-    ids=lambda case: case["id"] if case is not None else "missing-external-kat",
+    ids=lambda case: case["id"],
 )
 def test_independent_bch_known_answers(case: dict) -> None:
     """Compare encoding and both independent decodes bit-for-bit per mode."""
