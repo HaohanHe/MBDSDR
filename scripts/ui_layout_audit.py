@@ -148,7 +148,7 @@ def main() -> int:
                   "reason 必须点名以下声明之一，且提交说明同样点名：")
             for token, desc in ui_baseline.DESIGN_CHANGES.items():
                 prov = ui_baseline.BASELINE_PROVENANCE.get(token, {})
-                print(f"  - {token}：{desc}")
+                print(f"  - {token}：{desc}")  # pragma: allowlist secret — UI 元素标识，非凭据
                 print(f"    provenance: source_commit={prov.get('source_commit')}"
                       f"；authorized_by={prov.get('authorized_by')}"
                       f"；formula={prov.get('formula')}")
