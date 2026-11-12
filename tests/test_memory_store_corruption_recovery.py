@@ -192,3 +192,25 @@ class _LegacyMemoryStore:
 def test_legacy_silent_fallback_turns_red(tmp_path):
     with pytest.raises(AssertionError):
         _assert_corrupt_evidence_kept(_LegacyMemoryStore, tmp_path)
+
+
+# ---------------------------------------------------------------------------
+# 5. 文本口径：last_error 必须进 get_status_text，无错时必须消失
+# ---------------------------------------------------------------------------
+def test_status_text_carries_and_drops_persistence_error(tmp_path):
+    db = tmp_path / "memory.json"
+    db.write_bytes(_CORRUPT_BYTES)
+    store = MemoryStore(storage_path=str(db))
+
+    text = store.get_status_text()
+    assert store.last_error, "损坏后 last_error 为空，这条用例前提不成立"
+    assert "持久化错误" in text
+    assert store.last_error in text, "有错误字段但状态文本看不到，等于没有提示通道"
+    assert "已备份为" in text
+
+    # 损坏文件已改名备份：新实例看到的是「缺失」= 干净状态，旧句子不能残留
+    clean = MemoryStore(storage_path=str(db))
+    assert clean.last_error is None
+    clean_text = clean.get_status_text()
+    assert "持久化错误" not in clean_text
+    assert "已备份为" not in clean_text

@@ -365,4 +365,8 @@ class MemoryStore:
         ]
         for cat, count in sorted(stats["by_category"].items()):
             lines.append(f"  [{cat}] {count} 条")
+        if self.last_error:
+            # 已有文本通道：状态查询能看到损坏/拒写原因，不新建界面。
+            # 与 scheduler / guardian 同口径（同一行前缀），方便以后统一接线。
+            lines.append(f"持久化错误: {self.last_error}")
         return "\n".join(lines)
