@@ -78,6 +78,12 @@ SHORTCUTS: Tuple[Shortcut, ...] = (
              note="帮助菜单常驻入口；低频操作，不占系统帮助键 F1"),
     Shortcut("help.catalog", None, "能力目录",
              note="帮助菜单常驻入口；从注册表实时生成，低频操作"),
+    Shortcut("help.howto", None, "怎么办",
+             note="帮助面板第三页的菜单入口；错误提示也可直达，"
+                  "补此入口让用户能主动排查"),
+    Shortcut("help.diagnostics", None, "诊断…",
+             note="只读诊断页：损坏备份与理由/日志落点/最近一次持久化错误；"
+                  "低频自查，不占快捷键"),
     Shortcut("help.shortcuts", None, "快捷键一览",
              note="帮助菜单常驻入口；内容由本表生成，低频操作"),
     Shortcut("help.command_palette", "Ctrl+K", "命令面板",

@@ -1655,6 +1655,19 @@ class MainWindow(QMainWindow):
         catalog_action.triggered.connect(lambda: self._show_help_panel(1))
         help_menu.addAction(catalog_action)
 
+        # U23：第三页「怎么办」功能早就在，只是菜单上没有入口——用户想主动
+        # 排查时找不到。补一行菜单项，不改帮助面板本身。
+        howto_action = QAction("怎么办", self)
+        howto_action.triggered.connect(lambda: self._show_help_panel(2))
+        help_menu.addAction(howto_action)
+
+        # W106：只读诊断页。入口属 FZ-04 新增可见入口，已列入解冻申请第 5 条。
+        diagnostics_action = QAction("诊断…", self)
+        diagnostics_action.setToolTip(
+            "查看配置损坏备份与理由、启动日志落点、各模块最近一次持久化错误（只读）")
+        diagnostics_action.triggered.connect(self._show_diagnostics_panel)
+        help_menu.addAction(diagnostics_action)
+
         shortcuts_action = QAction("快捷键一览", self)
         shortcuts_action.triggered.connect(self._show_shortcuts_panel)
         help_menu.addAction(shortcuts_action)
@@ -12722,6 +12735,17 @@ class MainWindow(QMainWindow):
         dlg.raise_()
         dlg.activateWindow()
         self._help_dialog = dlg
+
+    def _show_diagnostics_panel(self) -> None:
+        """打开只读诊断页（模态；页面本身不提供任何写操作）。
+
+        「打开帮助面板」挂点落在第三页「怎么办」——诊断出问题后下一步就是
+        照那一页处理，不在这里另写一份排查文案。
+        """
+        from diagnostics_panel import DiagnosticsPanel
+        dlg = DiagnosticsPanel(
+            self, open_help=lambda: self._show_help_panel(2))
+        dlg.exec()
 
     def _show_shortcuts_panel(self) -> None:
         """打开快捷键一览（键位实时来自 desktop/shortcuts.py）。"""
