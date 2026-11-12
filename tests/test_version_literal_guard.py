@@ -63,3 +63,18 @@ def test_guard_skips_binary(tmp_path):
     (tmp_path / "blob.bin").write_bytes(b"\x00\x01" + CANONICAL.encode())
     hits = rm.scan_version_literals(tmp_path, CANONICAL, ["blob.bin"])
     assert hits == []
+
+
+def test_guard_ignores_artifact_filename_version(tmp_path):
+    """``<name>-<x.y.z>`` 是 sdist 目录名，不是第二处手写版本。"""
+    (tmp_path / "notes.md").write_text(
+        f"残留目录 mbdsdr_ai-{CANONICAL}/ 与排除规则 mbdsdr_ai-{CANONICAL}\n",
+        encoding="utf-8")
+    assert rm.scan_version_literals(tmp_path, CANONICAL, ["notes.md"]) == []
+
+
+def test_guard_still_hits_standalone_literal_next_to_filename(tmp_path):
+    """同一行里既有目录名又有独立字面量时，独立那处照旧要报。"""
+    (tmp_path / "notes.md").write_text(
+        f"目录 mbdsdr_ai-{CANONICAL}/，手写版本 {CANONICAL}\n", encoding="utf-8")
+    assert rm.scan_version_literals(tmp_path, CANONICAL, ["notes.md"]) == ["notes.md:1"]
