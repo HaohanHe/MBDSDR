@@ -952,6 +952,15 @@ python -c "from mbdsdr_ai.sdr_backend import HackRFBackend as K;be=K(device_inde
 | 怎么验 | ①看真实枚举里到底有什么：`python -c "from mbdsdr_ai.sdr_backend import enumerate_all_sdr_devices as e;[print(d) for d in e()]"`，再用 `python -c "from mbdsdr_ai.device_identity import describe;import json;print(describe(json.loads(input())))"` 逐条喂入；通过=`serial` 存在时 `grade=serial`、`port_key` 仅在条目含 `uri:usb:` 或 `bus`/`port` 时非空；不通过=`port_key` 凭空出现或 `grade` 与字段不符。②换口（需要条目同时有序列号与端口，如 `iio_info -s` 列出 `usb:1.2.5` 的 Pluto）：记下 `describe(...).key` 与 `port_key`，把线换到另一个口后重跑同一命令；通过=`key` 逐字不变、`port_key` 变化。③双开对抗：进程 1 连接该设备；进程 2 跑 `python -c "from mbdsdr_ai.sdr_backend import claim_active_owner;print(claim_active_owner('ai','<步骤②的 key>'))"`；通过=`(False, ...)` 且原因含占用方 pid；换口后重跑仍为 False；不通过=换口后返回 True（即按端口算身份的双开）。④面板：连接后换口，通过=状态行为「换到了另一个 USB 口（旧 → 新）· 仍是同一台设备」，采样率/增益输入框数值不变，点「刷新」后新端口可重新连接；不通过=状态仍为「已连接」或参数被重置。⑤DeviceManager 拼写对照：`python -c "from mbdsdr_ai.device_manager import DeviceManager;print([d.device_key for d in DeviceManager().list_devices()])"` 与 `describe(...).manager_key` 逐台比对；通过=同一台两个拼写都指向同一 `serial`。每项把设备型号 + 命令 + 实际输出贴回本行才算真机已验；只跑合成用例不算 |
 
 
+### U.11 CLI 占用闸门的最终文案（`device_manager.py:_claim_owner` 尚未传渠道）
+
+| 问题 | 答案 |
+| --- | --- |
+| 哪条路径 | `mbdsdr_ai/device_manager.py:_claim_owner()`（`DeviceManager.open()` 的占用前置）→ `mbdsdr_ai/core/cli.py:run()` 的 `错误:` / `建议:` 排版；结论文本唯一来源 `mbdsdr_ai/sdr_backend.py:owner_conflict_text()` |
+| 验了什么（假设备 + 临时登记） | 闸门四条（活 pid 拒绝且不进入打开/枚举、登记不可读按 unknown 拒绝、打开前登记且 close 归还、打开失败归还）见 `tests/test_cli_open_owner_gate.py`；两种拒绝文案可区分、渠道只替换「可执行提示」一句见 `tests/test_cli_owner_conflict_text.py`；`0934ec8c` 实测相关四文件 56 passed |
+| 没验什么 | **真实装配下的 CLI 最终文案**：`_claim_owner` 尚未给 `acquire_hardware_owner` 传 `channel=OWNER_CHANNEL_CLI`（该文件此刻被其它线持有），真实路径仍输出 MCP 工具名 `sdr_list_devices`。端到端用例已写成骨架并标 `xfail(strict=True)`；`--runxfail` 下实测失败，红在 `sdr_list_devices` 出现，不是空转 |
+| 怎么验 | ①`device_manager.py` 的 claim 释放后（或心跳超 TTL + 30 分钟宽限后）先 `python scripts/file_claim.py claim mbdsdr_ai/device_manager.py --owner <线名>`；②`_claim_owner` 里 `acquire_hardware_owner(...)` 补 `channel=OWNER_CHANNEL_CLI`；③`python -m pytest tests/test_cli_open_owner_gate.py -q`——strict xfail 会先以 `XPASS(strict)` 报出，摘掉标记后应 `5 passed`；④手动：进程 A 跑 `python -c "from mbdsdr_ai import sdr_backend as sb;from mbdsdr_ai.sdr_backend import RTLSDRBackend as K;b=K(device_index=0);k=b.hardware_owner_identity()[0];print('KEY',k);sb.claim_active_owner('desktop',k);import time;time.sleep(120)"` 占住设备，进程 B 跑 `python -m mbdsdr_ai --connect rtlsdr:<序列号>`；通过=stderr 的 `建议:` 行含 `--list-devices` 且全文无 `sdr_list_devices`；不通过=出现 `sdr_list_devices`（即渠道未接线） |
+
 ## 附 V：RTL-SDR 3.2 MS/s 标称上限（代码照写、不二次确认；2026-11-13，G1采样率线追加）
 
 **一句话结论：RTL-SDR 的 3.2 MS/s 是 librtlsdr 声明的合法区间上限，不是「这一档一定不丢样」的保证。代码层按驱动声明照写并如实回报请求值/吸附值，不做二次确认（不测丢样、不做时钟回读校验）；硬件侧是否丢样、丢多少，本仓尚未在 3.2 MS/s 档单独实测。这是已知边界，不是待修缺陷。**

@@ -29,6 +29,7 @@ if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
 from mbdsdr_ai import sdr_backend as sb
+from mbdsdr_ai.core import cli
 from mbdsdr_ai.core.errors import DeviceBusyError, OwnerRegistryUnavailableError
 from mbdsdr_ai.device_manager import DeviceInfo, DeviceManager, OpenDevice
 
@@ -199,3 +200,53 @@ def test_cli_open_releases_claim_when_open_fails(registry, monkeypatch):
     with pytest.raises(RuntimeError):
         DeviceManager().open(info)
     assert KEY not in _owners(registry), "打开失败后必须归还登记"
+
+
+class _CtrlWithError:
+    """只实现 connect：把真实 DeviceManager 造出来的异常交给 CLI 排版。"""
+
+    def __init__(self, exc: Exception):
+        self._exc = exc
+
+    def connect(self, device_id: str):
+        raise self._exc
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason="device_manager.py 的 _claim_owner 尚未传 channel=OWNER_CHANNEL_CLI"
+           "（该文件此刻被其它线持有）；放开后本用例转绿，strict 会以 XPASS "
+           "强制摘掉本标记，别让它长期挂着")
+def test_real_device_manager_conflict_prints_cli_hint(registry, monkeypatch,
+                                                      capsys):
+    """端到端：真 DeviceManager 被拒 → 异常交给 CLI → 用户看到 CLI 命令。
+
+    上面四条验的是闸门本身；本条验**真实装配下**的最终文案，防止「各层
+    单测都绿、接起来仍打印 MCP 工具名」。当前 `_claim_owner` 缺
+    ``channel=OWNER_CHANNEL_CLI``，所以本条是红的（附 U.11）。
+    """
+    holder = subprocess.Popen([sys.executable, "-c",
+                               "import time; time.sleep(30)"])
+    try:
+        registry.write_text(json.dumps({
+            "version": 1,
+            "owners": {KEY: {"owner": "desktop", "pid": holder.pid,
+                             "device_id": KEY, "aliases": []}},
+        }), encoding="utf-8")
+        _forbid_open(monkeypatch)
+        _forbid_probe(monkeypatch)
+
+        with pytest.raises(DeviceBusyError) as ei:
+            DeviceManager().open(_info())
+
+        code = cli.run(["--connect", "rtlsdr:CLI-SN-1"],
+                       controller=_CtrlWithError(ei.value))
+        err = capsys.readouterr().err
+
+        assert code == 1
+        assert str(holder.pid) in err, err
+        assert "--list-devices" in err, err
+        assert "sdr_list_devices" not in err, err
+    finally:
+        holder.terminate()
+        holder.wait(timeout=10)
