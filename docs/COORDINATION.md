@@ -4468,4 +4468,9 @@ action 只跳该行且给可读原因、`NON_TAKEOVER_ACTIONS` 白名单逐 acti
 `pytest tests/test_app_global_state_isolation.py tests/test_audio_route_anr.py` 与反序
 均 8 passed。
 
+**待落库（`tests/conftest.py` 的 P2 修复）**：该改动目前在**工作树**、尚未提交——文件由
+`G1采样率线/6ae85f56` 持有（claim 未到期）。持有方提交 `tests/conftest.py` 时请**一并带上**
+`isolated_profile` 里的 `previous_store` 保存/还原两处（第 1884、1889 行附近），**不要回滚成**
+`reset_layout_store_singleton()`。回滚后反序跑法会重新变红。
+
 
