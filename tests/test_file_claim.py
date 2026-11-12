@@ -804,6 +804,11 @@ def test_audit_renew_legacy_overdue_is_blocking_not_permanent(tmp_path: Path, mo
     assert payload["legacy_days_left"] < 0
     assert payload["rows"][0]["legacy_due"] == "2000-01-01"
 
+    # 第二个来源：--legacy-due 优先级高于 env，且来源必须打印出来（放宽要看得到）
+    lifted = run(locks, "audit-renew", "--legacy-due", "2099-01-01")
+    assert lifted.returncode == 3, lifted.stdout + lifted.stderr
+    assert "2099-01-01" in lifted.stdout and "--legacy-due" in lifted.stdout
+
 
 def test_audit_renew_reports_renew_count_and_reason(tmp_path: Path) -> None:
     """续租留痕的可读面：次数 + 最后理由 + 累计持有，都能从机检里直接读出来。"""

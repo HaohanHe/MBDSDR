@@ -168,3 +168,47 @@ docs: 重生成 settings-inventory 数字块（新增 log_level 后 48→49 / 47
   或改用行为断言；本线不动它，避免跨线改同一函数。
 
 复现：`python -m pytest tests/test_settings_convergence.py::test_satellite_tune_updates_control_panel -q`
+
+## 6. 老 claim 的「历史不可审计」与清账到期（2026-11-13）
+
+续租从 2026-11-13 起必须留痕，但此前取得的 claim 没有 `renewals` 记录。这类
+老数据不能当「续租 0 次」，也不能靠补记录把历史补齐——按下面三条处理。
+
+### 6.1 到期日与两个可改来源
+
+- **默认到期日：2026-11-20**（`DEFAULT_LEGACY_AUDIT_DUE`）。
+- 两个可改来源，优先级从高到低：
+  1. CLI：`python scripts/file_claim.py audit-renew --legacy-due 2026-12-01`
+  2. 环境变量：`MBDSDR_LEGACY_AUDIT_DUE=2026-12-01`
+- 改动**不会被静默吸收**：`audit-renew` 每次打印实际生效的到期日与来源
+  （`default` / `env MBDSDR_LEGACY_AUDIT_DUE` / `--legacy-due`），`--json`
+  里对应 `legacy_due` / `legacy_due_source` / `legacy_days_left`。放宽到期日
+  也必须看得见，理由同续租上限：留痕优先于方便。
+
+### 6.2 到期前退出码 3，到期后退出码 4
+
+- **到期前**：`audit-renew` 退出码 **3**，逐条打印
+  `UNAUDITABLE(老数据) <path> owner=… 已持有=…min 续租记录=不可知（不是 0 次） 清账到期=…`。
+  这是「报账」，不是免罪：账还在。
+- **到期后**：退出码 **4**，打印 `OVERDUE(到期未清) … 按到期处理，不许当永久状态`。
+  不接受「报账即了事」——到期未清就是阻塞，回到 0 的唯一方式是让那条 claim
+  不再是「没有续租记录的老数据」（见 6.3）。
+
+### 6.3 补记录不许造历史
+
+- **禁止**手工往占位文件/台账的 `renewals` 里补条目来「补齐」老 claim 的续租史；
+  时间、旧新 TTL、理由、pid 都无法从当时的事实里还原，补出来的就是伪造记录。
+- **唯一正确动作**：`release` 该 claim，再重新 `claim`（带 `--reason`）。这样
+  `acquired_at` 与凭据链从**重新取得的那一刻**开始，台账里看得见「这是第二次
+  取得」；此前那段跨度仍然以「历史不可审计」留在台账里，作为已发生的事实，
+  不因重新 claim 而消失。
+- 因此「历史不可审计」是**只减不增**的账：新发生的持有都带续租记录；老账只能
+  靠 release + 重新 claim 逐条转出。
+
+### 6.4 当前账面（快照，2026-11-13 06:50）
+
+4 条，全部为公理棘轮线旧 claim：`docs/axioms.md`（85.5min）、
+`tools/axioms/survey.py`、`tools/axioms/checks.py`、`tools/axioms/selftest.py`
+（后三条各 264min）。到期日 2026-11-20，剩 7 天；到期仍未转出则 `audit-renew`
+退出码 4。
+

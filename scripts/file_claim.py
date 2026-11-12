@@ -34,7 +34,7 @@
       - `audit-renew` 子命令给出「续过几次 / 累计多久 / 是否超上限」；对**没有
         续租记录**却有「跨度 > 1.05×TTL」的老 claim，报「历史不可审计」，
         不按 0 次处理（那正是本次事故的形态）。这类老数据**有清账到期日**
-        （默认 2026-11-20，`MBDSDR_LEGACY_AUDIT_DUE` 可改、来源会打印）：到期前
+        （默认 2026-11-20，`--legacy-due` 或 `MBDSDR_LEGACY_AUDIT_DUE` 可改、来源会打印）：到期前
         退出码 3（报账），到期后退出码 4（到期未清）——不允许它一直挂着当永久状态。
   * **判活只看心跳，不看 pid**（2026-11-13）：`claim` 是一次性 CLI，写完就
     退出，`pid` 记的是那个短命进程——「pid 已死」是默认状态，没有信息量。
@@ -1419,21 +1419,25 @@ def _renew_audit_rows(now: float) -> List[Dict[str, Any]]:
     return rows
 
 
-def _resolve_legacy_due() -> Tuple[Any, str]:
-    """老数据清账到期日：环境变量 > 默认。来源随输出打印（放宽也要看得见）。"""
-    raw = os.environ.get(LEGACY_AUDIT_DUE_ENV) or DEFAULT_LEGACY_AUDIT_DUE
-    source = f"env {LEGACY_AUDIT_DUE_ENV}" if os.environ.get(LEGACY_AUDIT_DUE_ENV) else "default"
+def _resolve_legacy_due(cli_value: Optional[str] = None) -> Tuple[Any, str]:
+    """老数据清账到期日：CLI > 环境变量 > 默认。来源随输出打印（放宽也要看得见）。"""
+    if cli_value is not None:
+        raw, source = cli_value, "--legacy-due"
+    elif os.environ.get(LEGACY_AUDIT_DUE_ENV):
+        raw, source = os.environ[LEGACY_AUDIT_DUE_ENV], f"env {LEGACY_AUDIT_DUE_ENV}"
+    else:
+        raw, source = DEFAULT_LEGACY_AUDIT_DUE, "default"
     try:
         due = datetime.strptime(raw, "%Y-%m-%d").date()
     except ValueError as exc:
-        raise ValueError(f"清账到期日必须是 yyyy-mm-dd（{LEGACY_AUDIT_DUE_ENV}={raw}）") from exc
+        raise ValueError(f"清账到期日必须是 yyyy-mm-dd（{source}={raw}）") from exc
     return due, source
 
 
-def cmd_audit_renew(as_json: bool = False) -> int:
+def cmd_audit_renew(as_json: bool = False, legacy_due: Optional[str] = None) -> int:
     rows = _renew_audit_rows(_now())
     try:
-        due, due_source = _resolve_legacy_due()
+        due, due_source = _resolve_legacy_due(legacy_due)
     except ValueError as exc:
         print(str(exc), file=sys.stderr)
         return EXIT_USAGE
@@ -1675,6 +1679,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="续租审计：次数 / 累计持有 / 超上限 / 老数据「历史不可审计」（有命中退出码 3）",
     )
     renew.add_argument("--json", action="store_true", help="输出机器可读 JSON")
+    renew.add_argument(
+        "--legacy-due",
+        default=None,
+        help=f"老数据清账到期日 yyyy-mm-dd，默认 {DEFAULT_LEGACY_AUDIT_DUE}"
+        f"（也可用 env {LEGACY_AUDIT_DUE_ENV}）；改动来源会打印",
+    )
 
     takeover = sub.add_parser(
         "takeover",
@@ -1745,7 +1755,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         if args.command == "audit-stale":
             return cmd_audit_stale(args.json)
         if args.command == "audit-renew":
-            return cmd_audit_renew(args.json)
+            return cmd_audit_renew(args.json, legacy_due=args.legacy_due)
         if args.command == "takeover":
             return cmd_takeover(args.path, args.owner, args.ttl_min, args.reason)
         if args.command == "legacy-token-repair":
