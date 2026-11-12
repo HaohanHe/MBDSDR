@@ -8462,7 +8462,7 @@ class RFSkyViewPanel(QFrame):
             lb = QPushButton(label)
             lb.setCheckable(True)
             lb.setChecked(bool(getattr(self.sky_view, attr)))
-            lb.setToolTip(f"显示/隐藏{label}图层")
+            lb.setToolTip("勾选后叠加到天空画面；取消勾选即隐藏")
             lb.clicked.connect(
                 lambda _c=False, s=setter, btn=lb: s(btn.isChecked()))
             bar.addWidget(lb)
