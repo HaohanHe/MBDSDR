@@ -83,6 +83,7 @@ from .device_identity import (
     serial_from_key,
     usb_port_path,
 )
+from .error_catalog import suggestion as error_suggestion, user_message as error_user_message
 
 logger = logging.getLogger(__name__)
 
@@ -191,7 +192,11 @@ class Presence:
         if self.status == PROBE_PERMISSION:
             return f"读取 USB 设备列表被拒绝（权限不足：{self.detail or '拒绝访问'}）"
         if self.status == PROBE_FAILED:
-            return f"USB 在位探针调用失败（{self.detail or '未知错误'}）"
+            # 探针失败是「读不到物理在位信息」，用户能据此拔插/重启/查日志：
+            # 走正式条目（含下一步），不用「未知错误」这种零信息兜底。
+            return error_user_message(
+                "usb_probe_failed",
+                detail=_text(self.detail) or "系统没有返回失败原因")
         return ""
 
 
@@ -612,8 +617,13 @@ class HotplugMonitor:
                       "不会把设备判成已拔出（避免把权限问题误判成拔掉）。")
         else:
             user_text = "USB 在位探针调用失败 · 不会据此断定设备已拔出"
-            detail = (f"{presence.detail or '未知错误'}。"
-                      "热插拔仍按枚举更新，但在拿到物理证据前"
+            # 原因走正式条目：缺原因时也如实写「系统没有返回」，不写「未知错误」。
+            detail = (error_user_message(
+                          "usb_probe_failed",
+                          detail=_text(presence.detail) or "系统没有返回失败原因")
+                      + "。"
+                      + error_suggestion("usb_probe_failed")
+                      + "热插拔仍按枚举更新，但在拿到物理证据前"
                       "不会把设备判成已拔出。")
         return [HotplugEvent(kind=EVENT_PROBE_PROBLEM, verified=False,
                              user_text=user_text, detail=detail)]

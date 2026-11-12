@@ -422,6 +422,12 @@ _SPECS = (
           "USB 已断开",
           "USB 设备已断开：{detail}",
           "重新插拔设备并重新连接。"),
+    _spec("usb_probe_failed", LAYER_ACCESS, True,
+          "USB 物理在位探针调用失败",
+          "USB 物理在位探针调用失败：{detail}",
+          "拔插一次设备或重启程序后看状态行是否恢复；持续失败时拔插只能按"
+          "枚举判断（可能把「被占用」误报成「已拔出」），请把诊断页日志反馈"
+          "开发者。"),
     # ── 网络链路（rtl_tcp / SpyServer 接入层）──────────────────────────
     _spec("link_timeout", LAYER_ACCESS, True,
           "链路超时（连接/握手）",
