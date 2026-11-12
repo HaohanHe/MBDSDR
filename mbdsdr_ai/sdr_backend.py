@@ -2293,19 +2293,25 @@ class SDRBackend:
         except Exception as e:
             print(f"录制线程错误: {e}")
         finally:
+            close_error = None
             try:
                 if wf is not None:
                     wf.close()
                 if fh is not None:
                     fh.close()
-            except Exception:
-                pass
+            except Exception as e:
+                # 收尾失败 = 文件尾部（WAV 头 / 最后一块）可能没落盘。这里不能吞：
+                # 后面照样会写 sidecar，不标出来等于告诉回放方「这份文件完整」。
+                close_error = e
+                logger.warning("录制文件收尾关闭失败，文件可能不完整: %s", e)
             self.status.recording = False
             self._write_recording_sidecar(path, fmt_l, effective_rate,
-                                          samples_total, decimation)
+                                          samples_total, decimation,
+                                          close_error=close_error)
 
     def _write_recording_sidecar(self, path: str, fmt: str, effective_rate: int,
-                                 samples_total: int, decimation: int):
+                                 samples_total: int, decimation: int,
+                                 close_error: Optional[BaseException] = None):
         """写 sidecar 元数据；键名与 FileIQBackend 对齐，录完即可回放。"""
         try:
             metadata = {
@@ -2328,6 +2334,8 @@ class SDRBackend:
                 "note": "cu8=rtl_sdr unsigned8 interleaved; cf32=float32 interleaved; "
                         "cs16=int16 interleaved; wav I=ch1 Q=ch2",
             }
+            if close_error is not None:
+                metadata["close_error"] = f"{type(close_error).__name__}: {close_error}"
             with open(path + ".json", "w", encoding="utf-8") as f:
                 json.dump(metadata, f, indent=2, ensure_ascii=False)
         except Exception as e:
@@ -3333,8 +3341,11 @@ class RTLSDRBackend(SDRBackend):
         if self._sdr:
             try:
                 self._sdr.close()
-            except Exception:
-                pass
+            except Exception as e:
+                # 关不掉 = USB 设备可能仍被本进程占用（与下面 rtl_tcp 同一后果：
+                # 棒子锁死、别的程序枚举不到）。直接把句柄置 None 会把这个事实
+                # 抹掉，下次 connect 只看到「设备不存在」，查不到真因。
+                logger.warning("关闭 RTL-SDR 句柄失败（USB 设备可能仍被占用）: %s", e)
             self._sdr = None
         # 回收自动拉起的 rtl_tcp。rtl_tcp 是单客户端且独占 USB 设备，
         # 留着会把棒子锁死——其它程序（含本应用下次枚举）都再也看不到设备。
@@ -6925,27 +6936,34 @@ class SDRBackendManager:
             if vfo_id not in self.vfos:
                 return False
             vfo = self.vfos[vfo_id]
-            # 切换时把之前 active 的 VFO 标记为非 active
-            for vid, v in self.vfos.items():
-                v["active"] = (vid == vfo_id)
-            self.active_vfo_id = vfo_id
-            # 应用到当前激活后端（若存在且已连接）
+            # 先真正下发到硬件，成功后才改 active 标记：否则切频被拒绝时「当前
+            # VFO」已经指向一个硬件没切过去的频率，读数与实际不一致。
             be = self.active_backend
             if be is not None:
                 connected = getattr(getattr(be, "status", None), "connected", False)
                 if connected and hasattr(be, "set_frequency"):
                     try:
-                        be.set_frequency(vfo["frequency_hz"])
-                    except Exception:
-                        pass
+                        applied = be.set_frequency(vfo["frequency_hz"])
+                    except Exception as e:
+                        logger.warning("VFO 切换下发频率异常(%s): %s", vfo_id, e)
+                        return False
+                    if applied is False:
+                        logger.warning("VFO 切换被后端拒绝(%s): %.3f Hz",
+                                       vfo_id, vfo["frequency_hz"])
+                        return False
                 # set_demod 不存在时只设频率
                 if connected and hasattr(be, "set_demod"):
                     try:
                         be.set_demod(vfo["demod_mode"])
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.warning("VFO 切换设置解调模式失败(%s): %s", vfo_id, e)
+            # 切换时把之前 active 的 VFO 标记为非 active
+            for vid, v in self.vfos.items():
+                v["active"] = (vid == vfo_id)
+            self.active_vfo_id = vfo_id
             return True
-        except Exception:
+        except Exception as e:
+            logger.warning("VFO 切换失败(%s): %s", vfo_id, e)
             return False
 
     def vfo_get_active(self) -> Optional[Dict]:
