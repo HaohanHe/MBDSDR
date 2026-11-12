@@ -54,11 +54,17 @@ def test_corrupt_template_backed_up_with_reason(tmp_path):
     backups = [p for p in template_dir.glob("bad.json.corrupt-*")
                if not p.name.endswith(".reason.txt")]
     assert len(backups) == 1
-    assert backups[0].read_text(encoding="utf-8") == "{ broken"
+    assert backups[0].read_bytes() == b"{ broken"
     reasons = list(template_dir.glob("bad.json.corrupt-*.reason.txt"))
     assert len(reasons) == 1 and "JSONDecodeError" in reasons[0].read_text(encoding="utf-8")
     assert not bad.exists()
     assert rec.corrupt_backups == [str(backups[0])]
+
+    # 之后加载继续可用：坏文件移走后新模板能写入，并被下一次加载读回。
+    rec._save_template(WorkflowTemplate(template_id="fresh", name="恢复"))
+    reloaded = WorkflowRecorder(storage_dir=str(tmp_path))
+    assert "fresh" in reloaded.templates
+    assert reloaded.load_errors == []
 
 
 def test_backup_failure_blocks_save_to_same_template(tmp_path, monkeypatch):
@@ -67,7 +73,7 @@ def test_backup_failure_blocks_save_to_same_template(tmp_path, monkeypatch):
     template_dir.mkdir()
     bad = template_dir / "bad.json"
     bad.write_text("{ broken", encoding="utf-8")
-    monkeypatch.setattr(wf_mod, "_backup_corrupt", lambda _p: None)
+    monkeypatch.setattr(wf_mod, "backup_corrupt", lambda _p: None)
 
     rec = WorkflowRecorder(storage_dir=str(tmp_path))
     rec._save_template(WorkflowTemplate(template_id="bad", name="新模板"))
@@ -99,7 +105,7 @@ def test_save_target_backup_failure_blocks_write(tmp_path, monkeypatch):
     rec = WorkflowRecorder(storage_dir=str(tmp_path))
     target = tmp_path / "late.json"
     target.write_text("{ broken", encoding="utf-8")
-    monkeypatch.setattr(wf_mod, "_backup_corrupt", lambda _p: None)
+    monkeypatch.setattr(wf_mod, "backup_corrupt", lambda _p: None)
 
     assert rec._write_json(str(target), {"ok": 1}) is False
     assert target.read_text(encoding="utf-8") == "{ broken"
