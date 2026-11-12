@@ -10,8 +10,12 @@ from __future__ import annotations
 import importlib
 import subprocess
 import sys
-import tomllib
 from pathlib import Path
+
+try:  # Python 3.11+ 标准库
+    import tomllib
+except ImportError:  # pragma: no cover - 3.10：tomli 按 python_version marker 装在依赖里
+    import tomli as tomllib  # type: ignore
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _PYPROJECT = _REPO_ROOT / "pyproject.toml"

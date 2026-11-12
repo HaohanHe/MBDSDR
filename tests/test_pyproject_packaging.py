@@ -18,7 +18,11 @@ import ast
 import pathlib
 import re
 import sys
-import tomllib
+
+try:  # Python 3.11+ 标准库
+    import tomllib
+except ImportError:  # pragma: no cover - 3.10：tomli 按 python_version marker 装在依赖里
+    import tomli as tomllib  # type: ignore
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 PKG_DIR = ROOT / "mbdsdr_ai"

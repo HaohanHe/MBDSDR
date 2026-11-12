@@ -10,6 +10,12 @@ tests/test_star_catalog_packaging.py — 保证“装上了确实可用”
 
 设置 MBSDSR_SKIP_WHEEL_BUILD=1 可跳过真构建（分钟级，纯逻辑调试时用；缺
 pip/setuptools 不再 skip——两者都是本仓声明要装的，见文件内断言）。
+
+关于 tomllib：解析 pyproject.toml 的**只有测试**（本文件、tests/test_pyproject_packaging.py、
+mbdsdr_ai/tests/test_cli_entrypoint.py），产品代码一处都不解析。所以 tomli 在
+requirements.txt 里按 `python_version < "3.11"` 条件声明，而不是把
+requires-python 提到 >=3.11——提下限等于把「支持哪些 Python」这个产品承诺改小，
+不该为了一个测试依赖顺手做；条件依赖对 3.11+ 用户是零成本。
 """
 
 from __future__ import annotations
@@ -41,10 +47,10 @@ except ImportError:  # pragma: no cover
 def _load_pyproject():
     if tomllib is None:
         pytest.fail(
-            "tomllib 不可用（Python < 3.11 且没装 tomli）：本仓 pyproject 声明 "
-            "requires-python>=3.10，但「解析自身 pyproject」依赖 3.11+ 标准库，"
-            "这是契约问题，不该 skip（docs/evidence-standard.md §2 附则）。"
-            "要么把 tomli 写进依赖，要么把 requires-python 提到 >=3.11。"
+            "tomllib 不可用（Python < 3.11 且没装 tomli）：tomli 已在 requirements.txt "
+            "按 python_version<\"3.11\" 条件声明，缺它说明依赖没装全"
+            "（pip install -r requirements.txt），或解释器异常——按 "
+            "docs/evidence-standard.md §2 附则必须红。"
         )
     with open(ROOT / "pyproject.toml", "rb") as fh:
         return tomllib.load(fh)

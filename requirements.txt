@@ -13,6 +13,12 @@ skyfield>=1.45.0        # 高精度天文计算(卫星轨道/多普勒/过境预
 pyserial>=3.5           # GNSS 串口 NMEA 读取（CH340/PL2303 等 USB 转串口）
 Pillow>=9.0.0           # 图像处理(NOAA APT/SSTV 解码输出 PNG)
 
+# ===== 测试/开发专用（不进产品依赖 metadata） =====
+# 解析 pyproject.toml 的只有 3 个测试文件（产品代码不解析），3.11+ 由标准库
+# tomllib 提供。这里用条件依赖而不是把 requires-python 提到 >=3.11：提下限是把
+# 「支持哪些 Python」这个产品承诺改小，属于产品决定；带 marker 对 3.11+ 零成本。
+tomli>=2.0; python_version < "3.11"
+
 # ===== 推荐依赖（可选，缺失时自动降级） =====
 # pysstv>=0.5.0         # SSTV 慢扫描电视编码
 #                        缺失时：用内置sstv_decoder.py
