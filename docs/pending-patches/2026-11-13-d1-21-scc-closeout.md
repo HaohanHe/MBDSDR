@@ -64,6 +64,20 @@
 存量**本轮都不减**。要减，需下一轮把 `mbdsdr_ai` 内部调用点改指叶子（涉及
 `agent.py`、`decode_router.py` 等被占文件），可一次性消掉约 25 个站点。
 
+**调用点迁移（2026-11-13 04:0x，已兑现一部分）**：上段「本轮都不减」只对
+下沉那一笔成立；随后单独做了调用点迁移，一文件一笔：
+`261221ce` model_manager ×3、`2bc1bdfe` new_spacetime ×2（离线门 + 本地
+显示）、`97ca23c7` new_spacetime_tle、`f11ab517` openapi_integration、
+`ade9380c` sat_tracker、`df7bd534` time_sync、`caf318c8` sdr_tools
+（本地显示）。
+
+私有名存量（口径：跨模块 import 语句条数）**137 → 129**（实测复扫）。
+其中 `orbit._network_disabled` 由 11 降到 3。剩余且仍被占：
+`agent.py` ×2、`solar_system.py` ×1、`decode_router.py`（`_read_wav_audio`）
+×3；`desktop/sat_track_panel.py` 的 `format_local` 是公共名，不计入存量。
+旧别名（`orbit._network_disabled`、`decoders._read_wav_audio`）**暂不删除**，
+上述文件仍在引用；等它们释放后迁完再删。
+
 ## 三、判据：跨模块导入私有名必须报（D1-private-import）
 
 ### 3.1 规则正文
@@ -103,15 +117,18 @@
 
 ### 3.4 现存量（2026-11-13 03:5x，口径：`mbdsdr_ai/` 全部 `.py`）
 
-- **138 处 / 70 个文件 / 97 个（目标模块, 符号）对**。
-- 头部集中：
-  `orbit._network_disabled` 11、`mcp_server._TOOL_DOMAIN` 10、
+- **137 处 / 70 个文件 / 97 个（目标模块, 符号）对**（口径：跨模块 import
+  语句条数；上一版写的 138 无法复现，按实测 137 为准）。
+- 2026-11-13 04:0x 迁完调用点后复扫：**129 处**（减 8，全部来自
+  `_network_disabled`；`format_local` 是公共名，本就不计入）。
+- 头部集中（迁移后）：
+  `orbit._network_disabled` 3（原 11）、`mcp_server._TOOL_DOMAIN` 10、
   `orbit._state_from_satrec` 4、`orbit._bounded_urlopen` 3、
   `decoders._read_wav_audio` 3、`orbit_dynamics._rk4_step` 3、
   `sat_passes._parse_tle` 3、`sat_passes._range_and_rate` 3、
   `sdr_tools._sky_view_visible` 3、`mcp_server._build_tool_table` 3。
-- 其中 `orbit` 一个模块贡献 19 处——它是 21 块里「公共原语最密集」的地方，
-  与 §一 的割点分析互相印证。
+- 其中 `orbit` 一个模块贡献 11 处（迁移后；原 19）——它仍是 21 块里
+  「公共原语最密集」的地方，与 §一 的割点分析互相印证。
 - 落地时**必须重新扫一遍**再收基线；本清单只用于判断规模与优先级。
 
 ## 四、落地步骤（照抄）
@@ -120,7 +137,8 @@
    `D1-private-import`，按 §3.2。
 2. `tools/axioms/selftest.py`：加 §3.3 的正例/负例/结构反证三个 Case。
 3. `docs/axioms.md`：D1 行追加检查名，贴 §3.1 规则正文。
-4. `python scripts/axioms.py --rule D1` → 确认 138 处全报 → `--accept-current`。
+4. `python scripts/axioms.py --rule D1` → 确认当前存量全报 → `--accept-current`
+   （落地时重扫，基线以当时实测为准，不要照抄本文件的 129）。
 5. 之后每轮清账只减不增；清账顺序按「原语下沉」优先（下沉后改调用点，
    私有名自然消失），不要直接改 import 名字绕过。
 
