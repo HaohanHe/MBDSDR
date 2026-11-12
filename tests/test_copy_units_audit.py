@@ -76,6 +76,40 @@ def test_n01_freq_precision_is_constant_within_unit():
     assert fmt(float("nan")) == "—"
 
 
+def test_a02_old_inline_precision_loses_1hz_at_boundaries():
+    """A02：旧 3/4 位小数 MHz 在边界值上把读数变成另一个数；改后必须到 1 Hz。
+
+    这里同时钉住「旧行为确实错」——否则改完无法证明修的是显示失真而不是口味。
+    """
+    from readouts import format_frequency_range_hz
+
+    # 145.5125 MHz：旧 .3f 因半末位舍入写成 145.512（差 500 Hz），读者会按错调谐。
+    hz = 145_512_500
+    assert f"{hz / 1e6:.3f} MHz" == "145.512 MHz"       # 旧行为（错 500 Hz）
+    assert readouts.format_frequency_hz(hz) == "145.512500 MHz"
+
+    # 旧 .4f 在 145.51254 上舍成 145.5125（差 40 Hz）。
+    hz4 = 145_512_540
+    assert f"{hz4 / 1e6:.4f} MHz" == "145.5125 MHz"
+    assert readouts.format_frequency_hz(hz4) == "145.512540 MHz"
+
+    # 1090 MHz 中心边界：旧 .3f 把 1089.9996 写成 1090.000，
+    # 「不在 1090±1.5 MHz」的诊断会拿一个假中心值说理。
+    edge = 1_089_999_600
+    assert f"{edge / 1e6:.3f} MHz" == "1090.000 MHz"
+    assert readouts.format_frequency_hz(edge) == "1089.999600 MHz"
+
+    # 范围两端都到 1 Hz；同单位只写一次单位，跨单位两端各自带单位。
+    assert format_frequency_range_hz(145_000_000, 146_000_000) == (
+        "145.000000–146.000000 MHz")
+    assert format_frequency_range_hz(455_000, 1_200_000) == (
+        "455.000 kHz–1.200000 MHz")
+
+    # 带宽的 2400 Hz 边界：一位小数 kHz 才保住 2.4（0 位小数会变成 2 kHz）。
+    assert readouts.format_bandwidth_hz(2400) == "2.4 kHz"
+    assert f"{2400 / 1e3:.0f} kHz" == "2 kHz"            # 旧口径（丢 400 Hz）
+
+
 def test_u02_rssi_is_dbfs_and_missing_is_dash_not_zero():
     """U-02：引擎/IQ 路径 dBFS；缺值/NaN 显「—」，绝不用 0 兜底。"""
     from readouts import format_dbfs

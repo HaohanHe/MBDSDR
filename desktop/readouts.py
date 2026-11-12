@@ -50,6 +50,24 @@ def format_frequency_hz(hz) -> str:
     return f"{v:.0f} Hz"
 
 
+def format_frequency_range_hz(start_hz, end_hz) -> str:
+    """频率范围读数：两端都到 1 Hz，同单位时只写一次单位。
+
+    扫频结果、频段边界这类「范围」不是两个独立读数拼串：分别格式化后
+    重复写两次 ``MHz`` 会把窄面板里的条目撑长，并让读者以为两端单位
+    可能不同。分档与精度仍由 :func:`format_frequency_hz` 决定。
+    """
+    start = format_frequency_hz(start_hz)
+    end = format_frequency_hz(end_hz)
+    if start == EMPTY or end == EMPTY:
+        return f"{start}–{end}"
+    start_value, start_unit = start.rsplit(" ", 1)
+    end_value, end_unit = end.rsplit(" ", 1)
+    if start_unit == end_unit:
+        return f"{start_value}–{end_value} {start_unit}"
+    return f"{start}–{end}"
+
+
 def format_bandwidth_hz(hz, *, zero_text: str = EMPTY) -> str:
     """带宽读数。
 
