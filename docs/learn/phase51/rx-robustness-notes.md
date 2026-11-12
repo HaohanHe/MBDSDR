@@ -1,5 +1,6 @@
 # Phase51 块1：接收链全场景健壮性实验
 
+> 证据状态：E4——本文件数字未逐条绑定原始件/复跑命令，引用前须复核（判据见 docs/evidence-standard.md）。
 > 云内合成 CCSDS/BPSK 链路（`synthesize_ssdv_ccsds_iq` + `ccsds_iq_to_result`，
 > 盲 CFO 平方环 + Gardner 眼心 seed），注入真实退化场景，固定种子（seed=5101）。
 > 复跑：`python3 mbdsdr_ai/tests/exp_phase51_robustness.py`；回归断言见

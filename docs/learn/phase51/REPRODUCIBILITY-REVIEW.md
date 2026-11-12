@@ -1,5 +1,6 @@
 # Phase51 块3：experiments/ 实验可复现性复核报告
 
+> 证据状态：E4——本文件数字未逐条绑定原始件/复跑命令，引用前须复核（判据见 docs/evidence-standard.md）。
 > 复核时间：2026-10-06（UTC+8）。基线 HEAD = `31d7b34`（manifest 实测 `code_version=31d7b34`）。
 > 环境：Python 3.12.11 / numpy 1.26.4 / scipy 1.13.1；`mbdsdr_ai` 可导入。云内**无** `MBDSDR_LLM_API_KEY`。
 > 方法：按 `paper_submission_package/MANIFEST.txt` 与 `SELFCHECK.txt` 记录的口径（seed/trials）逐脚本重跑，

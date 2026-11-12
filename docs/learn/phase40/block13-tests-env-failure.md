@@ -1,5 +1,6 @@
 # Phase40 块1+3 — tests/src 域：环境性失败复核 + 启动健壮性
 
+> 证据状态：E4——本文件数字未逐条绑定原始件/复跑命令，引用前须复核（判据见 docs/evidence-standard.md）。
 日期：2026-10-05（offscreen CI 容器，无显示器 / 无 PulseAudio / 无 SDR）
 
 ## 0. 环境基线

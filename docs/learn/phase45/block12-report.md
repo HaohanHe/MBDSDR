@@ -1,5 +1,6 @@
 # Phase45 块1+2（Python 域）交付报告：CCSDS Viterbi + RS 级联全链
 
+> 证据状态：E4——本文件数字未逐条绑定原始件/复跑命令，引用前须复核（判据见 docs/evidence-standard.md）。
 > 范围：仅 Python 域。云内合成、确定性；独立实现按公开 CCSDS 标准重写，未复制任何 GPL/Karn 源码。
 > 基线 HEAD 未动（不 commit/push）；只改动 `mbdsdr_ai/`、`mbdsdr_ai/tests/`、本目录。
 

@@ -1,5 +1,6 @@
 # 第五十三阶段实现规格：接收链精载波恢复 + 稳定性定位 + 性能基线
 
+> 证据状态：E4——本文件数字未逐条绑定原始件/复跑命令，引用前须复核（判据见 docs/evidence-standard.md）。
 > 基线：HEAD = 5002be9（已推送）。Phase52 诚实遗留三个缺口，把项目本体做厚。
 > 遗留：陡扫频（0→200Hz 线性）仅 ~21/36 MCU（分段 AFC 小窗分辨率 vs 跟踪带宽矛盾）；RSS +4.8MB/min 慢漂移未定位（无 heaptrack/valgrind、OOM 预算）；主程序启动 ~11s 无系统基线。
 > 复用：Phase52 afc_correct / notch_cw / _demod_resync（ssdv_phy.py、ccsds_ssdv.py）；Phase51 stress_iq_stream.sh + soak_rss.csv（RSS 89.5→137.6MB）；P38 曾测 MainWindow 构造 ~218ms。

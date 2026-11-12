@@ -1,5 +1,6 @@
 # 第五十四阶段实现规格：接收链能力包络量化 + 级联软判决 + 接收能力工具化
 
+> 证据状态：E4——本文件数字未逐条绑定原始件/复跑命令，引用前须复核（判据见 docs/evidence-standard.md）。
 > 基线：HEAD = 704e035（已推送）。把接收能力从"单点验证"升级为"完整包络可量化、可被 Agent 调用"。
 > 现有接收能力：盲 CFO（平方环）、Gardner 定时、CCSDS 级联（Viterbi 硬判决+RS）、实时多普勒补偿、分段 AFC、CW notch、多缓冲 resync、二阶 PLL；单点失效边界已实测（弱信号 sd≈1.3-1.6、CW amp≈0.5-0.8、陡扫频低 SNR 失锁）。
 > **架构事实（防虚构）**：PLL/AFC/notch/resync/软判决实现位于 **Python（mbdsdr_ai，onboard 链）**；桌面 C++ 有 DopplerStepLimiter（多普勒补偿）但无 PLL/notch/软 Viterbi。工具化必须落在能力真实所在，不虚构 C++↔Python 桥接。

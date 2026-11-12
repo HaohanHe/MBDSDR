@@ -1,5 +1,6 @@
 # Phase55 软判决全链闭环
 
+> 证据状态：E4——本文件数字未逐条绑定原始件/复跑命令，引用前须复核（判据见 docs/evidence-standard.md）。
 HEAD=cfb5e02 接手。把 Phase54 只在卷积隔离验证的软判决（14× BER 增益）串进全链。
 
 ## 软全链机制（可复用层，ccsds_ssdv，非 onboard 重写）

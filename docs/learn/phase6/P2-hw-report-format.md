@@ -4,6 +4,7 @@ SPDX-License-Identifier: MIT
 
 # P2 · 真机结果回传格式与云侧解析
 
+> 证据状态：E4——本文件数字未逐条绑定原始件/复跑命令，引用前须复核（判据见 docs/evidence-standard.md）。
 > 适用范围：第六阶段 P2。目标是让真机用户**把两条命令的 `--json` 输出直接贴回聊天**，
 > 云侧（或本地）用 `tools/onboarding/parse_hw_report.py` 一键得到结构化结论。
 >

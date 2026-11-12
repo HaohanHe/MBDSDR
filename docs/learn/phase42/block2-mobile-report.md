@@ -1,5 +1,6 @@
 # Phase42 块2 · mobile 域（纯 Dart + 测试）交付报告
 
+> 证据状态：E4——本文件数字未逐条绑定原始件/复跑命令，引用前须复核（判据见 docs/evidence-standard.md）。
 > 生成：2026-10-05。范围：open-items E 类 G2–G5。红线：只写 mobile/lib/ + mobile/test/ + 本目录；不碰 cpp/（A 域，只读对齐）。
 
 ## 基线与终态

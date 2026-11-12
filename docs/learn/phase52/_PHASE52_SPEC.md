@@ -1,5 +1,6 @@
 # 第五十二阶段实现规格：接收链真机级健壮性升级
 
+> 证据状态：E4——本文件数字未逐条绑定原始件/复跑命令，引用前须复核（判据见 docs/evidence-standard.md）。
 > 基线：HEAD = b4e1d85（已推送）。把 Phase51 三个"未实现"补齐为真实能力：弱信号/干扰/扫频从"已知失效"变"可应对"。**要项目本体能力，不是写论文文本。**
 > Phase51 实测失效边界：突发遮挡 clean|gap|clean → 0 帧（单缓冲无重同步）；线性扫频 0→200Hz 整段盲估落中点 +99.4Hz、ASM=0（需分段 AFC）；窄带 CW amp≥1.5 盲 CFO 被骗锁 +600Hz（需 notch）。
 > 复用：Phase49 实时多普勒补偿引擎（DopplerStepLimiter 限幅/冻结/回零状态机，cpp 桌面）；盲 CFO 平方环 estimate_cfo_bpsk；Gardner 眼心 seed；ccsds_ssdv 全链；onboard --ssdv-mode ccsds。

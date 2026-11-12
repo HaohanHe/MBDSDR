@@ -1,5 +1,6 @@
 # 第五十五阶段实现规格：软判决全链闭环 + C++ 接收状态可观测/可控
 
+> 证据状态：E4——本文件数字未逐条绑定原始件/复跑命令，引用前须复核（判据见 docs/evidence-standard.md）。
 > 基线：HEAD = cfb5e02（已推送）。Phase54 软判决 14× 增益仅隔离链验证（孤儿风险），串进全链真正提升弱信号出图；补齐 C++ 两个诚实遗留。
 > 遗留：软判决全链未串（demod_bpsk_soft→decode_soft→解扰→RS 只到卷积 BER 未到全图）；C++ Costas PLL+AGC+MM（digital_demod.h 经 vfo_manager 接入）锁定状态 carrierLocked/EVM 未透出；多普勒补偿三通道未暴露（执行器只接 SpectrumEngine*，够不到 MainWindow 状态）。
 

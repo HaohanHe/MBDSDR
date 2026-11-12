@@ -1,5 +1,6 @@
 # Phase 53 块2+块3：RSS 慢漂移定位 + 性能基线
 
+> 证据状态：E4——本文件数字未逐条绑定原始件/复跑命令，引用前须复核（判据见 docs/evidence-standard.md）。
 HEAD = 5002be9（未 commit/push）。构建目录 cpp/build，Qt 6.8.2，offscreen 合成源
 （MBDSDR_TEST_SOURCE=1，无硬件）。所有数字为本机实测，不虚构。
 

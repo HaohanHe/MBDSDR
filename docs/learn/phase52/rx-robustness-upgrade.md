@@ -1,5 +1,6 @@
 # Phase52：接收链真机级健壮性升级
 
+> 证据状态：E4——本文件数字未逐条绑定原始件/复跑命令，引用前须复核（判据见 docs/evidence-standard.md）。
 > 把 Phase51 实测的三个"未实现"补齐：分段 AFC 多普勒跟踪、CW 对消、多缓冲重同步。
 > 全部云内合成、固定种子。复跑见 `mbdsdr_ai/tests/test_phase52_upgrades.py`。
 

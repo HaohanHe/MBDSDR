@@ -1,5 +1,6 @@
 # Phase57 校准工具链 + 真机一键验收
 
+> 证据状态：E4——本文件数字未逐条绑定原始件/复跑命令，引用前须复核（判据见 docs/evidence-standard.md）。
 HEAD=5e94140 接手。
 
 ## 块1：校准工具 `tools/calibration.py`（参数化参考，零硬编码）
