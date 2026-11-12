@@ -42,12 +42,13 @@ except Exception:  # pragma: no cover - 单独打包/工具脚本下的安全回
     constants = None  # type: ignore[assignment]
     CONNECT_SAMPLE_RATE_KEY = "_sample_rate"
 
-# 身份键实现只有一份，在 AI 内核里（桌面端与 AI 必须算出同一个字符串）。
-from mbdsdr_ai.sdr_backend import (  # noqa: E402
+# 身份键实现只有一份：统一入口在 ``mbdsdr_ai/device_identity``（桌面端与 AI
+# 必须算出同一个字符串；键的字符串规则再委托给 ``sdr_backend``）。
+from mbdsdr_ai.device_identity import (  # noqa: E402
     IDENTITY_PROVISIONAL as _SB_PROVISIONAL,
     IDENTITY_STABLE as _SB_STABLE,
-    device_identity_key,
-    resolve_device_identities,
+    describe as _describe_identity,
+    describe_all as _describe_identities,
 )
 
 
@@ -96,14 +97,15 @@ def _text(value: Any) -> str:
 
 
 def _identity_of(device: Dict[str, Any]) -> DeviceIdentity:
-    """从设备字典派生身份键（实现只有一份，在 AI 内核里）。
+    """从设备字典派生身份键（唯一入口 ``device_identity.describe``）。
 
     AI 侧 ``device_id`` 与这里的键必须逐字相同，否则「桌面端占着、AI 被拒」
-    这条互斥永远不成立。规范实现放 ``mbdsdr_ai.sdr_backend``（纯 Python、
-    无 Qt，本模块本来就与它同仓）；这里只做类型转换，不另写一套口径。
+    这条互斥永远不成立。规范实现放 ``mbdsdr_ai/device_identity``（纯 Python、
+    无 Qt）；这里只做类型转换，不另写一套口径。``warning`` 用 canonical
+    措辞（参数记忆要的是「参数会不会跟丢」，不是热插拔的等级说明）。
     """
-    key, quality, warning = device_identity_key(device)
-    return DeviceIdentity(key, quality, warning)
+    ident = _describe_identity(device)
+    return DeviceIdentity(ident.key, ident.quality, ident.warning)
 
 
 def _warn_once(text: str) -> None:
@@ -122,10 +124,10 @@ def resolve(devices) -> List[DeviceIdentity]:
     """
     items = list(devices or [])
     out: List[DeviceIdentity] = []
-    for key, quality, warning in resolve_device_identities(items):
-        if warning:
-            _warn_once(warning)
-        out.append(DeviceIdentity(key, quality, warning))
+    for ident in _describe_identities(items):
+        if ident.warning:
+            _warn_once(ident.warning)
+        out.append(DeviceIdentity(ident.key, ident.quality, ident.warning))
     return out
 
 

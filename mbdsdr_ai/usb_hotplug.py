@@ -23,6 +23,18 @@ SigDigger / URH / ka9q-radio 都只在启动时枚举设备，运行期拔插靠
    ``driver|label:<name>``。**枚举序号会随插拔顺序前移、显示名可能重名**，
    所以这类身份只报歧义（``ambiguous``），绝不据此判定某台设备被拔出。
 
+身份与等级的计算已收进 ``mbdsdr_ai/device_identity``（唯一入口）：本模块
+只消费 ``describe_all()`` 的结论，不再自己算键。两者问的不是同一个问题——
+占用登记问「是不是同一台」（serial 级），热插拔问「还在不在这条链路上」
+（serial 级 + 端口级）。
+
+序列号身份换口
+--------------
+同一台设备（序列号不变）从 A 口挪到 B 口：稳定键不变，所以**不报拔出、
+也不报插入**；但旧口的连接确实断了、枚举里的端口变了。``observe()`` 会出
+一条 ``unplugged``（``port_changed=True``，文案写明「仍是同一台设备」），
+既让调用方断开死链路，又不会让用户以为换了台设备。
+
 单台拔出只影响单台
 ------------------
 ``observe()`` 按身份逐台出事件，调用方只处理与「当前连接那台」匹配的
@@ -57,18 +69,25 @@ from __future__ import annotations
 
 import logging
 import os
-import re
 import sys
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
+from .device_identity import (
+    GRADE_ENDPOINT,
+    GRADE_PROVISIONAL,
+    GRADE_SERIAL,
+    GRADE_USB_PATH,
+    describe as describe_identity,
+    describe_all as describe_identities,
+    serial_from_key,
+    usb_port_path,
+)
+
 logger = logging.getLogger(__name__)
 
 # ------------------------------------------------------------------ 身份分级
-GRADE_SERIAL = "serial"
-GRADE_USB_PATH = "usb_path"
-GRADE_ENDPOINT = "endpoint"
-GRADE_PROVISIONAL = "provisional"
+# 值与 ``device_identity.GRADE_*`` 相同；``__all__`` 保留原名，调用方不必改。
 
 # ------------------------------------------------------------------ 探针状态
 PROBE_OK = "ok"
@@ -99,6 +118,8 @@ class HotplugIdentity:
     key: str
     grade: str
     note: str = ""
+    #: 端口身份（``<bus>-<port>``）；空 = 枚举没提供端口，不做换口判定。
+    port_key: str = ""
 
 
 @dataclass(frozen=True)
@@ -114,6 +135,9 @@ class HotplugEvent:
     user_text: str = ""
     detail: str = ""
     device: Optional[Dict[str, Any]] = None
+    #: ``unplugged`` 的细分：True = 同一台设备换了 USB 口（序列号未变），
+    #: 旧口链路断了但不是另一台设备。
+    port_changed: bool = False
 
 
 def _text(value: Any) -> str:
@@ -125,69 +149,10 @@ def _label(device: Optional[Dict[str, Any]]) -> str:
     return _text(device.get("label")) or _text(device.get("driver")) or "未知设备"
 
 
-def _strip_ordinal(key: str) -> str:
-    """去掉 ``resolve_device_identities`` 为撞键加的 ``#n``。"""
-    return re.sub(r"#\d+$", "", str(key or ""))
-
-
-def serial_from_key(key: str) -> str:
-    """从 ``driver|serial:<serial>`` 里取出序列号；取不到返回空串。"""
-    base = _strip_ordinal(key)
-    marker = "|serial:"
-    if marker not in base:
-        return ""
-    return base.split(marker, 1)[1].strip()
-
-
-def usb_port_path(value: str) -> Optional[str]:
-    """把 libiio 的 ``usb:<bus>.<port>`` / 身份键转成 sysfs 风格路径 ``<bus>-<port>``。
-
-    ``usb:1.2.5`` → ``1-2.5``。拿不到端口拓扑时返回 None（不做猜测）。
-    """
-    v = _text(value)
-    if not v:
-        return None
-    if v.startswith("uri:"):
-        v = v[4:]
-    low = v.lower()
-    if low.startswith("usb:"):
-        v = v[4:]
-    elif "|" in v:
-        return None
-    if "." not in v:
-        return None
-    bus, port = v.split(".", 1)
-    if not bus or not port:
-        return None
-    return f"{bus}-{port}"
-
-
 def hotplug_grade(device: Dict[str, Any]) -> Tuple[str, str]:
-    """``(grade, note)``。note 是给用户看的「这个身份为什么会变」。"""
-    device = device or {}
-    driver = _text(device.get("driver")) or "?"
-    label = _label(device)
-    serial = _text(device.get("serial"))
-    if serial:
-        return GRADE_SERIAL, ""
-    args = device.get("device_args") or {}
-    uri = _text(device.get("uri")) or _text(args.get("uri"))
-    if uri:
-        if uri.lower().startswith("usb:"):
-            return (GRADE_USB_PATH,
-                    f"设备「{label}」没有序列号，按 USB 口路径 {uri} 识别；"
-                    "换到另一个 USB 口会被当成另一台设备，旧口那台会被判定为已拔出。")
-        return (GRADE_ENDPOINT,
-                f"设备「{label}」按网络/文件地址 {uri} 识别；地址变了就是另一台。")
-    index = _text(args.get("index", device.get("index")))
-    if index:
-        return (GRADE_PROVISIONAL,
-                f"设备「{label}」没有序列号，按枚举序号 {index} 识别；"
-                "插拔同类设备或换口后序号会前移，可能被当成另一台。"
-                "这类设备只报歧义，不判定拔出。")
-    return (GRADE_PROVISIONAL,
-            f"设备「{label}」既无序列号也无枚举序号，按显示名识别；"
-            "同名设备无法区分。这类设备只报歧义，不判定拔出。")
+    """``(grade, note)``。等级与说明都来自统一入口，不再本地重算。"""
+    ident = describe_identity(device or {})
+    return ident.grade, ident.ambiguity
 
 
 def resolve_hotplug_identities(devices: Sequence[Dict[str, Any]]
@@ -195,22 +160,12 @@ def resolve_hotplug_identities(devices: Sequence[Dict[str, Any]]
     """整份枚举逐台算身份。键与 ``connect_request_store.resolve`` 逐字一致。
 
     撞键时沿用 ``resolve_device_identities`` 的 ``#n`` 口径，保证面板里
-    「连接时记的键」和这里「每拍算的键」是同一种字符串。
+    「连接时记的键」和这里「每拍算的键」是同一种字符串。实现收在
+    ``device_identity.describe_all``（唯一入口）。
     """
-    items = list(devices or [])
-    try:
-        from .sdr_backend import resolve_device_identities
-    except Exception as exc:  # noqa: BLE001 - 内核不可用时仍要如实降级
-        logger.warning("无法导入统一身份解析，热插拔身份全部降级为 provisional：%s", exc)
-        return [HotplugIdentity(f"unknown|index:{i}", GRADE_PROVISIONAL,
-                                "统一身份解析不可用，本拍身份无法核对。")
-                for i in range(len(items))]
-    base = resolve_device_identities(items)
-    out: List[HotplugIdentity] = []
-    for device, (key, _quality, warning) in zip(items, base):
-        grade, note = hotplug_grade(device)
-        out.append(HotplugIdentity(key, grade, note or warning))
-    return out
+    return [HotplugIdentity(ident.key, ident.grade, ident.ambiguity,
+                            ident.port_key)
+            for ident in describe_identities(list(devices or []))]
 
 
 # ------------------------------------------------------------------ 在位探针
@@ -476,6 +431,8 @@ class HotplugMonitor:
         self._ambiguous_reported: set = set()
         self._present_unopenable: set = set()
         self._unverified_reported: set = set()
+        #: 已报过的换口 token ``(key, 旧口, 新口)``；同一对端口只提醒一次。
+        self._port_reported: set = set()
         self._poll_problem: Optional[Tuple[str, str]] = None
         self._probe_problem: Optional[Tuple[str, str]] = None
         self._baseline_done = False
@@ -494,8 +451,12 @@ class HotplugMonitor:
         key = _text(key)
         if not key:
             return
-        grade, note = hotplug_grade(device or {}) if device else (GRADE_PROVISIONAL, "")
-        self._seen[key] = (HotplugIdentity(key, grade, note), dict(device or {}))
+        if device:
+            ident = describe_identity(device, key=key)
+            self._seen[key] = (HotplugIdentity(key, ident.grade, ident.ambiguity,
+                                               ident.port_key), dict(device))
+        else:
+            self._seen[key] = (HotplugIdentity(key, GRADE_PROVISIONAL, ""), {})
         self._missing.pop(key, None)
         self._ambiguous_reported.discard(key)
         self._present_unopenable.discard(key)
@@ -553,6 +514,14 @@ class HotplugMonitor:
             ident, device = self._seen[key]
             events.extend(self._handle_absent(ident, device, presence))
 
+        if not first:
+            # 键没变但端口变了：同一台设备换了 USB 口（序列号身份才有意义）。
+            for key in sorted(now_keys & prev_keys):
+                old_ident, _old_device = self._seen[key]
+                new_ident, device = now[key]
+                events.extend(
+                    self._port_change_events(old_ident, new_ident, device))
+
         for key in now_keys:
             self._seen[key] = now[key]
 
@@ -568,6 +537,36 @@ class HotplugMonitor:
         return events
 
     # --------------------------------------------------------------- 内部
+    def _port_change_events(self, old: HotplugIdentity,
+                            new: HotplugIdentity,
+                            device: Dict[str, Any]) -> List[HotplugEvent]:
+        """序列号没变、USB 口变了：报「换口」而不是「换了台设备」。
+
+        只在两边端口都已知时判定（``port_key`` 为空 = 枚举没给端口，
+        不做猜测）。``usb_path`` 级身份换口时键本身会变，走拔出/插入路径，
+        这里不重复报。
+        """
+        if new.grade != GRADE_SERIAL:
+            return []
+        if not old.port_key or not new.port_key:
+            return []
+        if old.port_key == new.port_key:
+            return []
+        token = (new.key, old.port_key, new.port_key)
+        if token in self._port_reported:
+            return []
+        self._port_reported.add(token)
+        label = _label(device)
+        return [HotplugEvent(
+            kind=EVENT_UNPLUGGED, key=new.key, grade=new.grade, label=label,
+            verified=True, port_changed=True,
+            user_text=(f"设备「{label}」换到了另一个 USB 口"
+                       f"（{old.port_key} → {new.port_key}）· 仍是同一台设备"),
+            detail=("序列号没变，只是 USB 口变了：连接参数跟着序列号走，"
+                    "不会当成另一台设备。旧口上的连接已失效，"
+                    "点「刷新」后重新连接即可。"),
+            device=device)]
+
     @staticmethod
     def _needs_probe(ident: HotplugIdentity) -> bool:
         return ident.grade in (GRADE_SERIAL, GRADE_USB_PATH)
@@ -644,7 +643,7 @@ class HotplugMonitor:
         if ident.grade == GRADE_USB_PATH:
             if not presence.ports_known:
                 return "unknown", "该平台的探针只能读序列号，读不到 USB 口路径"
-            path = usb_port_path(ident.key)
+            path = ident.port_key or usb_port_path(ident.key)
             if not path:
                 return "unknown", "身份键里没有可解析的 USB 口路径"
             if path in presence.ports:
@@ -700,6 +699,8 @@ class HotplugMonitor:
             return []
         self._seen.pop(key, None)
         self._missing.pop(key, None)
+        # 设备真的没了：清掉它的换口 token，重新插回/再换口时还能再提醒。
+        self._port_reported = {t for t in self._port_reported if t[0] != key}
         verified = state == "absent"
         if verified:
             user_text = "设备已拔出"

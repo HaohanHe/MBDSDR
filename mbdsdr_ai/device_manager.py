@@ -109,10 +109,14 @@ class DeviceInfo:
         序列号可用时 = `driver:serial`（稳定身份）；读不到时复用
         sdr_backend.device_identity_key 的临时写法 `driver|index:n`，
         并在 has_stable_identity 上明确标为不可分辨。
+
+        拼写与 canonical 键（``driver|serial:<sn>``）不同：这是面向用户/CLI
+        的标识（``--device rtlsdr:SN`` 已被脚本使用），且 ``DeviceManager``
+        **不参与跨进程占用比较**，拼写不同不会让同一台被当成两台去抢设备。
+        唯一定义在 ``device_identity.manager_key``，此处不再写第二份 f-string。
         """
-        if self.has_stable_identity:
-            return f"{self.driver}:{self.serial}"
-        return f"{self.driver}|index:{self.enum_index}"
+        from .device_identity import manager_key
+        return manager_key(self.driver, self.serial, self.enum_index)
 
 
 # ---------------------------------------------------------------------------
