@@ -12,6 +12,8 @@
 > （`git log <sha>..HEAD -- <path>`），不用行号、不用 mtime。
 > 机检命令：`python scripts/check_red_lifecycle.py --paths docs/known-red-register.md`
 > ——在提交前/CI 手动跑，**不挂 pre-commit**（钩子只留便宜检查）。
+> **绑定不可静默改写**：再检只许「重跑 → 写实际输出 → 把验证提交换成当次 HEAD」；
+> 不许为了过检查只改 sha、不许删绑定文件集合、不许把「待复核」直接改回「已转绿」。
 > **编号规矩：K 编号一旦分配不得复用、收口记录不得再占用同号。** 新条目的编号
 > 只能取「现有最大值 + 1」；某条红的后续进展/销账记录要么并回该条目本节，要么
 > 另起一个**不带 K 号**的标题（如「收口记录（原 Kxx，日期）」）——同一编号在
@@ -734,7 +736,13 @@ QT_QPA_PLATFORM=offscreen python -m pytest "<nodeid>" -q
 
 ## K18 — 设置盘点表与脚本读数不一致（2026-11-13 实跑，已转绿 `dad6324f`）
 
-- **再检绑定**：验证提交 `8199fcd2`；文件集合 `docs/settings-inventory.md`、`scripts/settings_inventory.py`、`tests/test_settings_ui_coverage.py`、`desktop/config_schema.py`
+- **再检绑定**：验证提交 `20d71e92`；文件集合 `docs/settings-inventory.md`、`scripts/settings_inventory.py`、`tests/test_settings_ui_coverage.py`、`desktop/config_schema.py`
+- **再检（2026-11-13 晨，R8 三次清账）**：`docs/settings-inventory.md` 在 `8199fcd2`
+  之后又被 `b6b2bb34`（块级标记后补空行）与 `cda691ae`（块级 E4 标记第 2 批）
+  改动，R8 再次退回待复核。本次在 `20d71e92` 工作树实跑
+  `python -m pytest tests/test_settings_ui_coverage.py::test_inventory_table_matches_script -q`
+  → `1 passed`，`python scripts/settings_inventory.py --check` → `文档块一致`；
+  两笔改动只加块级标记，未动盘点数字。绑定更新为 `20d71e92`。
 - **再检（2026-11-13 深夜，R8 二次清账）**：`docs/settings-inventory.md` 又被
   `8199fcd2`（12 条行号按 HEAD 重定位）改动，R8 把本条退回待复核；在当前
   工作树实跑 `pytest tests/test_settings_ui_coverage.py::test_inventory_table_matches_script`
@@ -1104,7 +1112,7 @@ baseline 56 → 58（`BUILT_AT` 同步 58），每条带 owner + reason：
 
 ---
 
-## K23 — `audit_evidence` 2701 条数字断言无证据：分层、收敛机制与残量（2026-11-13 实测，存量·分层已定）
+## K23 — `audit_evidence` 2703 条数字断言无证据：分层、收敛机制与残量（2026-11-13 实测并落地，终值 905）
 
 - **首次记录**：2026-11-13（工作树 HEAD `90452159`，`python scripts/audit_evidence.py`）。
 - **分类**：存量。扫描 643 个文件 / 3470 条数字断言
@@ -1133,35 +1141,47 @@ baseline 56 → 58（`BUILT_AT` 同步 58），每条带 owner + reason：
      「证据状态：E4」），命中后整份文件的无证据行记「已显式标未验证」；
      **不按目录名猜**。反证见 `tests/test_audit_evidence.py`
      （有横幅→整份标记；无横幅→照旧无证据；本行自带工件→仍算有证据）。
-     对历史快照类 187 个文件各加一行横幅，预计覆盖 1291 条。
+     对历史快照类 187 个文件各加一行横幅（12 批、每批 ≤20 文件、逐文件 claim；
+     实写 183 个文件，现存 182）。实测 2703 → 1349（−1354），比估算 −1291 多降
+     63 条：+241 块级标记带出、−162 沿旧口径已计、−16 为两条 pending-patch 的
+     横幅被并行进程回写覆盖（自本笔起由 `scripts/check_banner_coverage.py` 机检）。
   2. **R2/R5 块级标记（用现有窗口分类，不改代码）**：表格块的证据窗口是
      「表标题 + 表头 + 本行」，所以表头写一行「未验证（E4）」即可覆盖整表；
      正文窗口是同一段 ±2 行，段首标记只覆盖到第 3 行，长段落要按段切分。
      按真实窗口模拟：块内 ≥5 行覆盖 356 条，再对 ≥3 行覆盖 153 条
-     （一次性脚本按块插入，不逐条贴）。
-  3. **R0/R3/R4 按分诊桶一次性处理**：桶①「定义/规格/判据无需证据」573 条不计红；
-     桶③「有工件缺路径」14 条批量补 `path:line`；桶⑤「删除/改写」6 条。
-  - 合计收掉 573 + 1291 + 356 + 14 + 6 + 153 = 2393 条，
-    **2701 → 约 308（−89%）**。
-- **残量（308 条，必须逐条补证）**：`COORDINATION.md` 31、
-  `parameter-unification.md` 21、`hardcoded-parameters.md` 19、`PRD.md` 13、
-  `performance-baseline.md` 12、`redundancy-register.md` 12、
-  `learn/kalibrate.md` 11、`learn/wsjtx.md` 11…（全部桶②「必须补测/补原始件」）。
-  这 308 条不再享有块/文件级批量豁免，一条一证。
-- **转绿条件**：`无证据` 只降不升；机制落地后 ≤308，再按文件逐项清零；退出 0。
+     （一次性脚本按块插入，不逐条贴）。**实测落地 26 处标记 / 18 个文件 / 3 笔
+     提交 + 1 笔修正**（表格标记后补空行，恢复表头跳过语义）：1349 → 905
+     （−444：②−226、①−197、④−21）。
+  3. **R0/R3/R4 按分诊桶一次性处理**：桶①「定义/规格/判据无需证据」164 条不计红
+     （判据单一事实源：`docs/evidence-standard.md` §6.1，扫描器直接读该清单）；
+     桶③「有工件缺路径」70 条补 `path:line`；桶⑤「删除/改写」6 条。
+  - **实测终值 905 条**（2703 → 905，−1798 / −66.5%）：
+    桶①164 / ②640 / ③70 / ④25 / ⑤6；有证据 630、已显式标未验证 1935、
+    file_banners 182。自本条起口径一律用实测，不再保留「约 308」的估算。
+    收工后他线并行的新断言使复算升到 **908**（②+3），这 3 条由新增方补证，
+    **不回填**本条 −1798 的收口数。
+- **残量（905 条，必须逐条补证）**：桶②640 条是主体（`performance-baseline.md`、
+  `research/2026-11-11-roadmap.md`、`parameter-unification.md`、
+  `limitations-register.md`、`hw-acceptance.md` 等，完整清单见
+  `output/audit_final.json` 的 `buckets`/`rows`）；其余为桶③70 / 桶④25 / 桶⑤6。
+  桶②这 640 条不再享有块/文件级批量豁免，一条一证。
+- **转绿条件**：`无证据` 只降不升（收工快照 905；复算 908 = 905 + 他线新增 3）；
+  按文件逐项清零；退出 0。
   禁止把脚本排除出守卫清单、禁止把阈值写死成当前值。
 - **复跑命令**：
   ```bash
   python scripts/audit_evidence.py --json --classify > output/audit_evidence_classified.json
-  # counts: 有证据 636 / 无证据 2701（复算 2703）/ 已显式标未验证 131
-  # file_banners: 0 —— 机制已实现，横幅尚未批量写入文档（下一笔按文件分批写）
+  # counts: 有证据 630 / 无证据 905（基线 2703）/ 已显式标未验证 1935
+  # buckets: ①164 / ②640 / ③70 / ④25 / ⑤6
+  # file_banners: 182
   ```
 - **owner / 复核**：证据标准 owner；复核期限 2026-12。
 
 ---
 
-## K24 — `release_manifest` 发布清单 5 项 FAIL：逐项定性与处置（2026-11-13，3 类已修·待登记表落库）
+## K24 — `release_manifest` 发布清单 5 项 FAIL：逐项定性与处置（2026-11-13，3 类已修 `aaf98c44`/`686f8313`/`cb5602f4`·登记表已落库）
 
+- **再检绑定**：验证提交 `20d71e92`；文件集合 `scripts/release_manifest.py`、`desktop/settings.py`、`pyproject.toml`、`desktop/requirements.txt`、`desktop/MBDSDR.spec`
 - **首次记录**：2026-11-13（工作树 HEAD `90452159`，`python scripts/release_manifest.py`，
   自动取到 `.tmp/pyi-dist16`）。
 - **复跑口径**：产物 `pyi-dist16` 由 HEAD `6b19aa89` 构建，**比当前 HEAD 旧**；
@@ -1170,17 +1190,29 @@ baseline 56 → 58（`BUILT_AT` 同步 58），每条带 owner + reason：
 | # | FAIL 原文 | 定性 | 处置 |
 |---|---|---|---|
 | 1 | `pyproject.toml` 写死版本字面量：第 70/75 行 | **误报**：两处都是 sdist 残留目录名 `mbdsdr_ai-<canonical>`，不是版本声明 | **按误报销账**：第 75 行现为 `"mbdsdr_ai-[0-9]*"`（排除任意版本残留目录），注释同步；改动 `686f8313` |
-| 2 | 全仓手写 canonical 字面量（先 4 处、后 6 处） | **5 处误报 + 1 处文案**：`pyproject`/`.gitignore`/`COORDINATION` 4 处同为 `<name>-<x.y.z>` 目录名；`desktop/settings.py` 第 143 行是「0.2 系列及更早」的历史文案；另 2 处是**本 K24 段落自己**引用 canonical | 已修：扫描器只跳过「紧跟在 `name-` 后的版本」（文件名片段），独立字面量照旧拦（`aaf98c44` — `scripts/release_manifest.py:128` — `ARTIFACT_VERSION_PREFIX_RE`）；文案改「0.2 系列」（`cb5602f4` — `desktop/settings.py:143` — `0.2 系列及更早`）；本段改写消除自触发 2 处 |
-| 3 | `tomli` ← 声明了但产物没有 | **口径缺陷，不是产品缺陷**：`tomli` 只在 `requirements.txt` 以 `python_version < "3.11"` 声明，产物解释器是 3.14；产品代码零导入，仅 3.10 测试用 | 已修：依赖检查按**产物解释器版本**评估环境标记（`aaf98c44` — `scripts/release_manifest.py:674` — `_marker_applies`），标记为假记 SKIP；取不到产物版本时仍按声明面校验（宁可报缺，不静默放过） |
+| 2 | 全仓手写 canonical 字面量（先 4 处、后 6 处） | **5 处误报 + 1 处文案**：`pyproject`/`.gitignore`/`COORDINATION` 4 处同为 `<name>-<x.y.z>` 目录名；`desktop/settings.py` 第 143 行是「0.2 系列及更早」的历史文案；另 2 处是**本 K24 段落自己**引用 canonical | 已修：扫描器只跳过「紧跟在 `name-` 后的版本」（文件名片段），独立字面量照旧拦（`aaf98c44` — `scripts/release_manifest.py:128` — `ARTIFACT_VERSION_PREFIX_RE`）；文案改「0.2 系列」（`cb5602f4` — `desktop/settings.py:143` — `0.2 系列及更早`）；本段改写消除自触发 2 处；复跑 `--only version` → PASS 16 / FAIL 0 |
+| 3 | `tomli` ← 声明了但产物没有 | **口径缺陷，不是产品缺陷**：`tomli` 只在 `requirements.txt` 以 `python_version < "3.11"` 声明，产物解释器是 3.14；产品代码零导入，仅 3.10 测试用 | 已修：依赖检查按**产物解释器版本**评估环境标记（`aaf98c44` — `scripts/release_manifest.py:674` — `_marker_applies`），标记为假记 SKIP；取不到产物版本时仍按声明面校验（宁可报缺，不静默放过）；复跑 `--only deps` → tomli SKIP（环境标记为假） |
 | 4 | 差集①「声明了但产物没有」：tomli | 与 #3 同一根因的第二条计数 | 同 #3 |
-| 5 | 产物凭据形状 4 个第三方二进制 | **误报**，逐条核定：3 个 Qt TLS 模块命中的是 PEM **头标记字符串**（`-----BEGIN … PRIVATE KEY-----`，无密钥正文）；scipy `.pyd` 的 `ghs_` 是 40 字符 base62 串嵌在更长标识符中（GitHub PAT 不会嵌在标识符内部） | 已修：新增产物二进制登记（`aaf98c44` — `scripts/release_manifest.py:1017` — `ARTIFACT_SECRET_ALLOWLIST`），**路径 + sha256 + 规则名 + review_by** 四元组；sha 变、规则变、过期任一发生即重新 FAIL |
+| 5 | 产物凭据形状 4 个第三方二进制 | **误报**，逐条核定：3 个 Qt TLS 模块命中的是 PEM **头标记字符串**（`-----BEGIN … PRIVATE KEY-----`，无密钥正文）；scipy `.pyd` 的 `ghs_` 是 40 字符 base62 串嵌在更长标识符中（GitHub PAT 不会嵌在标识符内部） | 已修：新增产物二进制登记（`aaf98c44` — `scripts/release_manifest.py:1017` — `ARTIFACT_SECRET_ALLOWLIST`），**路径 + sha256 + 规则名 + review_by** 四元组；sha 变、规则变、过期任一发生即重新 FAIL；复跑 `--only secrets` → PASS（4 处登记误报命中） |
 
-- **当前结果**：`--only version` FAIL=1（唯一残留是本文件 1127/1144 引用 canonical，
-  本段落库即消失）；`--only deps` PASS（SKIP=1 为 tomli）；
-  `--only secrets` PASS（4 处登记误报，复核期限 2027-03-31）。
-- **缺什么才能全绿**：① 本段替换落库（消除自触发 2 处）；
-  ② 用**当前 HEAD** 重建产物后复跑一次，替换 dist16 的旧包口径
-  （`check_dist_head_parity` 同因，属 pipeline 债不是缺陷）。
+- **当前结果（2026-11-13，产物 `pyi-dist19` / 构建 HEAD `c9bb1572`）**：
+  `--only version` **PASS（16 项，0 FAIL）**；`--only secrets` **PASS**
+  （4 处登记误报，复核期限 2027-03-31）；`--only deps` **PASS（0 FAIL）**——
+  差集②「产物里有但没声明」22 个**全部已归因**（Requires-Dist 传递 8 /
+  pyproject optional 14 / import 链 0），差集①空。
+  处置：`pandas`/`openpyxl`/`lxml`/`xlsxwriter` 属纯过度收集（产品零 import，
+  且实测 `import matplotlib.pyplot` 不加载 pandas），已在 `desktop/MBDSDR.spec`
+  的 `excludes` 移除；`matplotlib`/`psutil`/`zstandard` 与 `brotli`/`cryptography`
+  是运行期按需导入且有 guard/降级，按 optional 声明（`viz`/`net` 组注释写明
+  guard 行号；新增 `http = ["brotli", "cryptography"]`）；`setuptools` 是
+  pyrtlsdr 导入期 `pkg_resources` 的硬需求（`rtlsdr/__init__.py:19`），补进
+  `desktop/requirements.txt` 作为运行期必需依赖。
+- **同批产物口径（`pyi-dist19`）**：`check_dist_head_parity --dist <dist>\MBDSDR`
+  → **0 缺失 / 0 哈希不一致 / 0 禁止路径**；`release_check --steps smoke --skip-build`
+  → 窗口起、`[smoke]` 13/13；`MBDSDR.exe --resource-probe` → 版本 / locale /
+  `data/dso_catalog.json`(117 条) / `data/moon_albedo_*.npz` / `assets/icon.ico`
+  五项全 OK。
+- **缺什么才能全绿**：无——五类已全 PASS（安装器为 BY-DESIGN）。
 - **复跑命令**：
   ```bash
   python scripts/release_manifest.py --only version
