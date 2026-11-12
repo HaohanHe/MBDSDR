@@ -4173,7 +4173,7 @@ pid 3484 已退出，属 K16 同形的「孤儿改动」。配套测试
 
 **依赖方向实测（按 import 图，不按目录名）**：
 - 底层（纯逻辑，无 Qt、无 desktop）：`mbdsdr_ai`（4078 条内部边）；
-- 上层：`desktop`（514 条边指向 mbdsdr_ai）、`scripts`（269 条）、`tools`（65 条）；
+- 上层：`desktop`（516 条边指向 mbdsdr_ai）、`scripts`（269 条）、`tools`（65 条）；
 - 验收层：`tests`（3319 条指向 mbdsdr_ai、305 条指向 desktop，规则判 review 级）；
 - `mbdsdr_ai -> tools` 6 条为 HEAD 既有边，D1 未判应修，不在本次范围。
 
