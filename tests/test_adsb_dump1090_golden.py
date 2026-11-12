@@ -46,6 +46,7 @@ from __future__ import annotations
 import hashlib
 import os
 import sys
+import urllib.error
 import urllib.request
 
 import numpy as np
@@ -102,8 +103,11 @@ def _ensure_bin() -> str:
     os.makedirs(os.path.dirname(path), exist_ok=True)
     try:
         urllib.request.urlretrieve(WAV_URL, path)
-    except Exception as e:  # noqa: BLE001
-        pytest.skip(f"dump1090 modes1.bin 下载失败（无网络？）: {e}；"
+    except (urllib.error.URLError, TimeoutError, ConnectionError) as e:
+        # 只吞「下载这一外部动作」的传输失败（DNS/连接/超时/HTTP 4xx5xx）。
+        # 磁盘写失败、URL 拼错（ValueError）等是本仓/本机问题，必须让测试红。
+        pytest.skip(f"dump1090 modes1.bin 下载失败（无网络？）: "
+                    f"{type(e).__name__}: {e}；"
                     f"可手动下载 {WAV_URL} 放到 {path} 后重跑")
     with open(path, "rb") as f:
         digest = hashlib.sha256(f.read()).hexdigest()
