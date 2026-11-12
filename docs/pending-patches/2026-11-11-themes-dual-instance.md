@@ -1,12 +1,12 @@
 # themes 双实例：裸导入 × 包导入 = 两套全局状态
 
-日期：2026-11-11
+日期：2026-11-11（2026-11-12 补记入仓与归属）
 状态：**只出单 + 只加测试，未改任何产品文件**（`desktop/themes.py` 一步未碰）
 复现脚本：`D:\mbdsdr\output\tmp\repro_dual_themes_orders.py`、`verify_alias_patch.py`、
 `probe_desktop_keys.py`、`test_prefix_order_repro.py`
-配套测试（本次新增）：
-`tests/test_import_identity_guard.py`（全局复位 + `desktop.*` 白名单守卫）、
-`tests/test_font_scale_note_contract.py`（字号提示契约，当前有意保持红）
+配套测试（本线新增，已入仓，见 §7）：
+`tests/test_import_identity_guard.py`（全局复位 + `desktop.*` 白名单守卫，`ba87bba4`）、
+`tests/test_font_scale_note_contract.py`（字号提示契约，`53196a75`，`xfail(strict=True)`）
 适用：任何后续接手 themes / 字号带 / 设置页提示的人
 
 ---
@@ -306,6 +306,12 @@ assert '' == '当前屏幕不足以按 150% 渲染，已按 100% 显示。'
 （加 wrapper、手动调 `refresh_font_scale_note()`、补 `showEvent` 都算绕，
 都会把"产品没广播"这件事藏起来）。
 
+**入仓裁定（2026-11-12，`53196a75`）**：上图的红作为证据保留，但用例本身标了
+`pytest.mark.xfail(strict=True)` 并入仓，不再以裸红挂在测试集里。`strict=True`
+让它在产品侧补上广播那天变成 **XPASS 失败**——那时必须来摘标，这正是提醒方式；
+不标 xfail 直接进红仓会让「红」变成常态，比不进库更糟。理由与范围同步写进
+该提交说明。实跑 `1 xfailed`。
+
 ### 5.3 结构守卫：`desktop.*` 包名键白名单
 
 文件：`tests/test_import_identity_guard.py::test_desktop_package_import_whitelist`。
@@ -429,3 +435,33 @@ except ImportError:
 2. 结构性修法只有一条：**统一成一种导入名**。短期用 `sys.modules` 别名止血（每模块 3 行），
    长期把桌面端改成包相对导入（`from .themes import ...`），并删掉 `desktop/__init__.py`
    的路径垫片 —— 但那是跨 61 个模块的改动，必须单独立项、单独回归。
+
+---
+
+## 7. 归属：哪些是实现、哪些是本线测试
+
+2026-11-12 清账时补记。**docstring / 提交说明里出现的提交号是「实现出处」，
+不是作者归属依据**——本单曾因为测试注释里带着 `6c1064b1` / `3a04ee8b`，被误认为
+那两次提交也属于本线。实际分工如下，以后按这张表判，不要再按提交号猜。
+
+| 文件 / 片段 | 落地提交 | 谁写的 | 本线做了什么 |
+|---|---|---|---|
+| `desktop/themes.py` 的 `sys.modules` 别名块（§3.0，21 行） | `6c1064b1` | **不是本线**（主题线） | 只复验：两种导入顺序 `same object: True`，并把证据记进 §1.3、§3.0 |
+| `tests/test_themes_single_instance.py` | `6c1064b1` | **不是本线** | 只跑，记 `2 passed` |
+| `desktop/settings_panel.py::refresh_font_scale_note()` + 构造时先刷一次（`:1202/:1222`） | `3a04ee8b` | **不是本线**（字号降档线） | 只认它是唯一入口，据此撤掉 wrapper/showEvent 方案（§5.1） |
+| `desktop/main.py:779-783` 唯一刷新点 | `3a04ee8b` | **不是本线** | 同上；本单不提供任何产品侧补丁 |
+| `tests/conftest.py::_restore_font_scale_globals`（`+1040,29`） | `ba87bba4` | **本线** | 新增 autouse 复位三个进程级全局 |
+| `tests/test_import_identity_guard.py` | `ba87bba4` | **本线** | 新增；`desktop.*` 包名白名单 + 全局起点干净 + 写脏反证 |
+| `tests/test_font_scale_note_contract.py` | `53196a75` | **本线** | 新增；`xfail(strict=True)` 入仓，理由见 §5.2「入仓裁定」 |
+
+「测试跟着实现走、实现不由本线写」这句话的**准确覆盖范围**：
+
+- 覆盖：上表后三行（`conftest.py` 的复位 fixture 与两个新测试文件）。
+  它们依附于 `6c1064b1`（单实例前提）与 `3a04ee8b`（唯一入口前提）而存在，
+  是给那两次实现配的回归/契约；实现改了，这三份要跟着改。
+- 不覆盖：`desktop/themes.py`、`desktop/settings_panel.py`、`desktop/main.py`
+  与 `tests/test_themes_single_instance.py` —— 本线一行未改、也未提交。
+
+提交纪律（本线）：单文件串行、私有 index、`MBDSDR_EXCLUDE_HUNKS` 排除他线 hunk、
+不用 `--no-verify`。`ba87bba4` 与 `53196a75` 均由 pre-commit 闸门放行（各 1 个
+活跃 owner，声明清单与实际暂存一致）。
