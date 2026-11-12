@@ -340,6 +340,10 @@ class SDRController:
             raise DeviceNotFoundError(f"设备 {device_id!r} 不在枚举列表中")
         try:
             opened = dm.open(target)
+        except SDRUserError:
+            # 占用冲突 / 登记不可读已经有各自的用户结论与建议，别包成
+            # 「打开设备失败」——那会把 pid 和修复动作一起埋进 technical_detail。
+            raise
         except Exception as e:
             raise DeviceNotFoundError(
                 f"打开设备 {device_id!r} 失败", technical_detail=e
@@ -374,8 +378,9 @@ class SDRController:
             self._device_name = ""
             try:
                 opened.disconnect()
-            except Exception:
-                pass
+            except Exception as e:
+                # 初始化失败后的回滚也失败：设备可能仍被占用，必须留痕。
+                logger.warning("回滚 disconnect 失败：%s: %s", type(e).__name__, e)
             raise SDRUserError(
                 "设备已打开但初始参数未能生效：" + "；".join(failures),
                 suggestion=(
