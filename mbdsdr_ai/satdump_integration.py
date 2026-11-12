@@ -16,6 +16,11 @@ import json
 from typing import Dict, List, Optional, Tuple
 from pathlib import Path
 
+try:  # 可选依赖：仅用于读取 product.cbor 的通道/投影元数据
+    import cbor2 as _cbor2
+except ImportError:  # pragma: no cover - 取决于运行环境
+    _cbor2 = None
+
 
 # ========================================================================
 # SatDump 路径检测
@@ -197,10 +202,205 @@ def list_satdump_satellites() -> List[Dict]:
 # 图像合成工具
 # ========================================================================
 
+# 与历史 glob 口径一致：只认 png / jpg，不扩面
+_IMAGE_SUFFIXES = (".png", ".jpg")
+
+#: 允许随 selection 透出的 product.cbor 图像级键
+_IMAGE_METADATA_KEYS = (
+    "abs_index", "bit_depth", "wavenumber", "polarization",
+    "bandwidth", "calibration_type",
+)
+
+
+def _read_dataset_manifest(
+        input_dir: Path) -> Tuple[Optional[Tuple[Path, Dict]], str]:
+    """定位并解析 SatDump 的 dataset.json。
+
+    SatDump 的 DataSet.load() 读的就是这个文件（satellite / timestamp /
+    products 相对路径列表）。返回 ((清单目录, 清单内容), "") 或
+    (None, 原因)；原因取值 no_manifest / bad_manifest，供调用方如实说明
+    退回 glob 的理由（旧版产物没有清单）。
+    """
+    root_manifest = input_dir / "dataset.json"
+    if root_manifest.is_file():
+        candidates: List[Path] = [root_manifest]
+    else:
+        try:
+            candidates = sorted(
+                p for p in input_dir.glob("**/dataset.json") if p.is_file()
+            )
+        except OSError:
+            candidates = []
+        if not candidates:
+            return None, "no_manifest"
+
+    for manifest_path in candidates:
+        try:
+            data = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if isinstance(data, dict) and isinstance(data.get("products"), list):
+            return (manifest_path.parent, data), ""
+    return None, "bad_manifest"
+
+
+def _load_product_metadata(product_dir: Path) -> Optional[Dict]:
+    """读取 product.cbor 元数据；cbor2 未装 / 文件缺失 / 解析失败 → None。
+
+    这是纯增强项：任何失败都退回文件名规则，不允许影响选图或抛错，
+    也不把 cbor2 变成硬依赖。
+    """
+    if _cbor2 is None:
+        return None
+    try:
+        data = _cbor2.loads((product_dir / "product.cbor").read_bytes())
+    except Exception:  # noqa: BLE001 - 可选增强，坏文件一律忽略
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def _metadata_image_entries(
+        product_dir: Path, metadata: Optional[Dict]) -> List[Tuple[Path, Dict]]:
+    """按 product.cbor 的 images 顺序返回磁盘上确实存在的图像条目。"""
+    entries: List[Tuple[Path, Dict]] = []
+    if not isinstance(metadata, dict):
+        return entries
+    images = metadata.get("images")
+    if not isinstance(images, list):
+        return entries
+
+    base = product_dir.resolve()
+    for item in images:
+        if not isinstance(item, dict):
+            continue
+        filename = item.get("file")
+        if not isinstance(filename, str) or not filename:
+            continue
+        path = (product_dir / filename).resolve()
+        try:
+            path.relative_to(base)
+        except ValueError:
+            continue
+        try:
+            if path.is_file() and path.suffix.lower() in _IMAGE_SUFFIXES:
+                entries.append((path, item))
+        except OSError:
+            continue
+    return entries
+
+
+def _files_by_suffix(product_dir: Path) -> Dict[str, List[Path]]:
+    """按扩展名分组并排序（png 先于 jpg，同类文件名升序）。"""
+    grouped: Dict[str, List[Path]] = {}
+    try:
+        entries = list(product_dir.iterdir())
+    except OSError:
+        return grouped
+    for p in entries:
+        suffix = p.suffix.lower()
+        if suffix in _IMAGE_SUFFIXES:
+            try:
+                if p.is_file():
+                    grouped.setdefault(suffix, []).append(p)
+            except OSError:
+                continue
+    for group in grouped.values():
+        group.sort(key=lambda q: q.name)
+    return grouped
+
+
+def _pick_image_in_product(
+        product_dir: Path, metadata: Optional[Dict] = None
+) -> Tuple[Optional[Path], Optional[Dict], int]:
+    """在产品目录内选图，返回 (图像路径, 图像元数据, 可选图像总数)。
+
+    有 product.cbor 时遵循 SatDump 的 images 顺序（images[0] 优先），元数据
+    与所选文件一一对应；没有 CBOR 时用「png 先于 jpg、同类文件名升序」的
+    确定性规则——行为与历史实现一致。
+    """
+    meta_entries = _metadata_image_entries(product_dir, metadata)
+    if meta_entries:
+        return meta_entries[0][0], meta_entries[0][1], len(meta_entries)
+
+    grouped = _files_by_suffix(product_dir)
+    total = sum(len(group) for group in grouped.values())
+    for suffix in _IMAGE_SUFFIXES:
+        group = grouped.get(suffix, [])
+        if group:
+            return group[0], None, total
+    return None, None, 0
+
+
+def _select_image_by_manifest(
+        input_dir: Path) -> Tuple[Optional[Tuple[Path, Dict]], str]:
+    """按 dataset.json 的 products 清单选图（与 SatDump 遍历 products_list 同构）。
+
+    清单顺序即 SatDump 的写盘顺序，第一个含图产品的第一张图即选中项；
+    产品内若装了 cbor2 则再按 product.cbor 的 images 顺序精确取图，并把
+    仪器/产品类型/通道/波段/投影等元数据一并带出。清单不可用时不猜，
+    返回 (None, 原因) 让调用方走 glob 兜底。
+    """
+    found, reason = _read_dataset_manifest(input_dir)
+    if found is None:
+        return None, reason
+    manifest_dir, data = found
+
+    base_dir = manifest_dir.resolve()
+    for entry in data.get("products") or []:
+        if not isinstance(entry, str) or not entry:
+            continue
+        product_dir = (manifest_dir / entry).resolve()
+        try:
+            # 清单项必须落在数据集目录内，越界视为坏清单项
+            product_dir.relative_to(base_dir)
+        except ValueError:
+            continue
+        if not product_dir.is_dir():
+            continue
+
+        metadata = _load_product_metadata(product_dir)
+        chosen, image_meta, image_count = _pick_image_in_product(
+            product_dir, metadata)
+        if chosen is None:
+            continue
+
+        selection: Dict = {
+            "source": "dataset.json",
+            "manifest": str(manifest_dir / "dataset.json"),
+            "product": entry,
+            "satellite": data.get("satellite"),
+            "timestamp": data.get("timestamp"),
+            "image_count": image_count,
+            "image_index": 1,
+            # 序号来自 images 列表位置还是文件名排序，输出文案必须区分
+            "picked_by": "product_cbor" if isinstance(image_meta, dict) else "filename",
+        }
+        if isinstance(metadata, dict):
+            for key in ("instrument", "type"):
+                value = metadata.get(key)
+                if isinstance(value, str) and value:
+                    selection[key] = value
+            if "product_timestamp" in metadata:
+                selection["product_timestamp"] = metadata.get("product_timestamp")
+        if isinstance(image_meta, dict):
+            channel = image_meta.get("name")
+            if isinstance(channel, str) and channel:
+                selection["channel"] = channel
+            for key in _IMAGE_METADATA_KEYS:
+                if key in image_meta:
+                    selection[key] = image_meta.get(key)
+        return (chosen, selection), ""
+    return None, "no_images"
+
+
 def compose_cloud_image(input_dir: str, output_file: str,
                         enhance: bool = True) -> Dict:
     """
     从 SatDump 输出目录合成云图。
+
+    选图规则：优先读 SatDump 的 dataset.json 清单，按 products 顺序取第一个
+    含图产品的第一张图（可复现）；无清单 / 清单坏 / 清单无图时退回历史
+    glob 行为，兼容旧版产物。
 
     参数:
         input_dir: SatDump输出目录
@@ -212,13 +412,26 @@ def compose_cloud_image(input_dir: str, output_file: str,
 
     # 查找输出图像
     output_path = Path(input_dir)
-    images = list(output_path.glob("**/*.png")) + list(output_path.glob("**/*.jpg"))
 
-    if not images:
-        return {"success": False, "error": "未找到输出图像"}
+    selected, fallback_reason = _select_image_by_manifest(output_path)
+    if selected is not None:
+        image_path, selection = selected
+    else:
+        # 旧版 SatDump 产物没有 dataset.json：沿用历史 glob 逻辑（不改语义）
+        images = list(output_path.glob("**/*.png")) + list(output_path.glob("**/*.jpg"))
+        if not images:
+            return {"success": False, "error": "未找到输出图像"}
+        image_path = images[0]
+        selection = {
+            "source": "glob",
+            "fallback_reason": fallback_reason,
+            "image_count": len(images),
+            "image_index": 1,
+            "picked_by": "filename",
+        }
 
-    # 取第一个图像
-    img = Image.open(images[0])
+    # 取选中的图像
+    img = Image.open(image_path)
 
     # 图像增强
     if enhance:
@@ -239,7 +452,8 @@ def compose_cloud_image(input_dir: str, output_file: str,
 
     return {
         "success": True,
-        "input_image": str(images[0]),
+        "input_image": str(image_path),
         "output_image": output_file,
         "size": img.size,
+        "selection": selection,
     }
