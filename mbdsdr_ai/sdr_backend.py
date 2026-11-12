@@ -54,6 +54,15 @@ logger = logging.getLogger(__name__)
 
 from .error_catalog import user_message
 
+from .device_identity import (
+    IDENTITY_PROVISIONAL, IDENTITY_STABLE, device_identity_aliases,
+    device_identity_key, resolve_device_identities,
+)
+from .sdr_status import (
+    DEFAULT_SAMPLE_RATE_HZ, SQUELCH_APPLIED_BY_VALUES, SDRStatus,
+    format_sample_rate,
+)
+
 # 进程内"环境缺失"类告警只报一次用的键集合。
 # 仅用于**进程生命周期内不会变化**的事实（库没装 / CLI 不存在）；
 # 每次调用都可能不同的真实失败不在此列，仍按次如实上报。
@@ -893,125 +902,9 @@ def _release_owned_here_at_exit() -> None:
 atexit.register(_release_owned_here_at_exit)
 
 
-# ─────────────────── 设备身份键（桌面端与 AI 共用同一口径） ───────────────────
-# 桌面端按身份键存连接参数与会话占用（desktop/connect_request_store.py），
-# AI 按 device_id 持有后端。两边必须**对同一台物理设备算出同一个字符串**，
-# 否则「两个进程抢同一根 USB 棒」的互斥只是各说各话：桌面端说占着 A，
-# AI 说连的是 B，谁也没拦住谁。
-#
-# 原始材料是同一个 enumerate_all_sdr_devices()，所以键只能从它的 dict 算。
-# 旧口径下 AI 用 f"rtl_{index}" 把序列号丢了，而桌面端恰恰把「无序列号的
-# 序号键」标成 provisional 并告警拔插后会变——同一台设备，一边当稳定身份、
-# 一边当不稳定身份。这是本次要消灭的矛盾。
-#
-# 语法逐字沿用桌面端既有实现，改动会让已存的连接请求失配：
-#   driver|serial:<serial> > uri:<uri> > driver|index:<index> > driver|label:<label>
-IDENTITY_STABLE = "stable"
-IDENTITY_PROVISIONAL = "provisional"
-
-
-def _identity_text(value: Any) -> str:
-    return "" if value is None else str(value).strip()
-
-
-def device_identity_key(device: Dict[str, Any]) -> Tuple[str, str, str]:
-    """``(键, 质量, 告警文案)``；质量见 ``IDENTITY_*``。
-
-    只有序列号/URI 这类**跟着设备走**的标识算稳定；枚举序号拔插会变、
-    显示名可能重名，都如实标 provisional 并给出可读告警。
-    """
-    driver = _identity_text(device.get("driver")) or "?"
-    serial = _identity_text(device.get("serial"))
-    args = device.get("device_args") or {}
-    uri = _identity_text(device.get("uri")) or _identity_text(args.get("uri"))
-    label = _identity_text(device.get("label")) or driver
-    if serial:
-        return f"{driver}|serial:{serial}", IDENTITY_STABLE, ""
-    if uri:
-        return f"uri:{uri}", IDENTITY_STABLE, ""
-    index_text = _identity_text(args.get("index", device.get("index")))
-    if index_text:
-        return (f"{driver}|index:{index_text}", IDENTITY_PROVISIONAL,
-                f"设备「{label}」没有序列号，按枚举序号 {index_text} 暂记连接参数；"
-                "拔插或重新枚举后序号可能变化，参数不会跟随设备。")
-    return (f"{driver}|label:{label}", IDENTITY_PROVISIONAL,
-            f"设备「{label}」既无序列号也无枚举序号，按显示名暂记连接参数；"
-            "同名设备的参数可能互相覆盖。")
-
-
-def _identity_fingerprint(device: Dict[str, Any]) -> Tuple[str, ...]:
-    # 与桌面端历史实现逐字一致（不 strip）：只影响撞键时 #n 的分配顺序。
-    args = device.get("device_args") or {}
-    return (str(device.get("driver") or ""), str(device.get("serial") or ""),
-            str(device.get("uri") or ""), str(args.get("index", "")),
-            str(device.get("label") or ""))
-
-
-def resolve_device_identities(devices: List[Dict[str, Any]]
-                              ) -> List[Tuple[str, str, str]]:
-    """对**整份枚举**逐台算键；撞键按指纹排序加 ``#n``（与桌面端逐字一致）。
-
-    键必须整份算：``#n`` 的去重结果依赖同一批设备的相对顺序，逐台算永远
-    对不上（AI 旧的逐台 _keep 就拿不到这份上下文）。
-    """
-    items = list(devices or [])
-    base = [device_identity_key(d) for d in items]
-    groups: Dict[str, List[int]] = {}
-    for i, (key, _quality, _warning) in enumerate(base):
-        groups.setdefault(key, []).append(i)
-    out: List[Tuple[str, str, str]] = [base[i] for i in range(len(items))]
-    for key, idxs in groups.items():
-        if len(idxs) < 2:
-            continue
-        warning = (f"设备身份键冲突：{len(idxs)} 台设备都映射到「{key}」；"
-                   "已按枚举顺序加 #n 临时区分，拔插后参数可能错位。")
-        order = sorted(idxs, key=lambda j: _identity_fingerprint(items[j]))
-        for n, i in enumerate(order, 1):
-            out[i] = (f"{key}#{n}", base[i][1], warning)
-    return out
-
-
-def device_identity_aliases(device: Dict[str, Any]) -> List[str]:
-    """同一台设备可被认出的全部键（主键在前），用于跨进程占用匹配。
-
-    为什么需要别名（2026-11-12 端到端实测发现）：**占着设备的那一方能读到
-    序列号，来抢的那一方读不到**——RTL-SDR 被别的进程打开时，枚举拿不到
-    serial（libusb 打不开），只能退到 ``driver|index:n``。于是持有者登记在
-    ``rtlsdr|serial:...``，竞争者算出 ``rtlsdr|index:0``，两边对不上，互斥
-    形同虚设（实测 AI 直接去 open，拿到的是 LIBUSB_ERROR_ACCESS）。
-
-    所以登记时把「不依赖打开设备就能算出的其它身份」一并记下，判定占用时
-    任一命中即视为同一台设备。
-    """
-    primary = device_identity_key(device)
-    out = [primary[0]]
-    driver = _identity_text(device.get("driver")) or "?"
-    args = device.get("device_args") or {}
-    index_text = _identity_text(args.get("index", device.get("index")))
-    if index_text:
-        out.append(f"{driver}|index:{index_text}")
-    # USB 总线位置：设备被占用时**不需要 open 也读得到**（libusb 枚举即可），
-    # 是 serial 读不到时最接近「物理那一台」的替代依据。只在枚举方提供了
-    # bus/port 时才存在：原生 RTL 的 librtlsdr 不导出该信息，而 Python 侧的
-    # pyusb/libusb 绑定**不在本项目依赖里**（requirements.txt 无此项、运行期
-    # import 也失败）。为「插两根同型号」这一个场景新增运行期依赖，代价大于
-    # 收益，故不引入——同型号多台时只能告警歧义、无法分辨是哪一台，
-    # 该限制写在 docs/limitations-register.md 附 T 并出现在占用冲突文案里。
-    bus = _identity_text(device.get("bus") or device.get("usb_bus")
-                         or args.get("bus") or args.get("usb_bus"))
-    port = _identity_text(device.get("port") or device.get("usb_port")
-                          or args.get("usb_port"))
-    if bus and port:
-        out.append(f"{driver}|bus:{bus}|port:{port}")
-    label = _identity_text(device.get("label"))
-    if label:
-        out.append(f"{driver}|label:{label}")
-    seen, deduped = set(), []
-    for key in out:
-        if key not in seen:
-            seen.add(key)
-            deduped.append(key)
-    return deduped
+# 设备身份键（IDENTITY_* / device_identity_key / resolve_device_identities /
+# device_identity_aliases）已下沉到叶子模块 ``mbdsdr_ai.device_identity``
+# （2026-11-13）；本模块在顶部 import 并原处再导出，既有调用方不变。
 
 
 # rtl_tcp 网络源的环境变量登记口（comma-separated host[:port]，默认端口 1234）。
@@ -1093,33 +986,9 @@ def parse_network_iq_env(value: str) -> List[Dict[str, Any]]:
             logger.debug(f"网络 IQ 配置无法解析（已跳过）: {item!r}: {e}")
     return out
 
-# 项目统一默认采样率（Hz）。
-# 产品口径（2026-11-05 裁定）：取 RTL-SDR 类上限常见值 2.4 MS/s（SDR++ 新设备
-# 默认也是 2.4M，main.cpp:202）。"默认"只是**首选**，不是保证：设备若不支持该档，
-# 由 nearest_sample_rate() / 各后端能力表回落到最接近的支持值，并把**实际生效值**
-# 如实写进 SDRStatus.sample_rate_hz。desktop / agent 等上层一律引用本常量，
-# 不要再写裸字面量；数字链路（ADS-B 等）自己声明所需采样率，不依赖此默认。
-DEFAULT_SAMPLE_RATE_HZ = 2_400_000
-
-
-def format_sample_rate(hz) -> str:
-    """采样率唯一显示口径（U-03）：``MS/s``、固定 3 位小数、空格分隔。
-
-    采样率是每秒样本数，量纲是 MS/s（样本/秒），不是 MHz（频率/带宽）；
-    ``<1 MS/s`` 也写 ``0.250 MS/s``。缺失/NaN 显「—」，不拿 0 或默认值冒充读数。
-
-    本函数是内核侧唯一实现；``desktop/constants.format_sample_rate`` 与
-    ``mbdsdr_ai.sdr_tools._fmt_sample_rate`` 均从这里派生（内核 → 桌面）。
-    """
-    if hz is None:
-        return "—"
-    try:
-        v = float(hz)
-    except (TypeError, ValueError):
-        return "—"
-    if not math.isfinite(v):
-        return "—"
-    return f"{v / 1e6:.3f} MS/s"
+# 默认采样率与采样率显示口径（DEFAULT_SAMPLE_RATE_HZ / format_sample_rate）
+# 已下沉到叶子模块 ``mbdsdr_ai.sdr_status``（2026-11-13）；本模块顶部 import
+# 并原处再导出，既有调用方不变。
 
 
 # 实时接收链 + 声卡输出（可选依赖，导入失败时音频路径安全降级，不崩）
@@ -1157,76 +1026,8 @@ class SDRDevice:
     capability_note: Dict[str, str] = field(default_factory=dict)
 
 
-#: ``SDRStatus.squelch_applied_by`` 的合法取值（Python 与 C++ 回写共用同一组
-#: 字面量；中文文档见 docs/limitations-register.md 附 H）。
-SQUELCH_APPLIED_BY_VALUES = ("desktop-margin", "cpp-auto", "cpp-manual", "none")
-
-
-@dataclass
-class SDRStatus:
-    """SDR 当前状态。"""
-    connected: bool = False
-    # 来源: gqrx/src/applications/gqrx/receiver.cpp:66 —— GQRX 默认守 144.8 MHz 业余段；
-    # 我们面向普通用户首启体验，落在 98 MHz FM 广播段，一上来就能听到东西。
-    frequency_hz: float = 98_000_000.0
-    # 频率读数来源：request=只下发了请求值，设备未回执；readback=刚从驱动
-    # 接口回读；空串=尚未调谐/未观测。界面与工具据此区分「设备确认」与
-    # 「请求值」，不得把 request 冒充成设备实际频率。
-    frequency_source: str = ""
-    # None 表示"未选定，由后端子类决定"。各后端在 __init__ 里设自己的甜点档
-    # （RTL 2.048M / HackRF 8M / USRP 1M / Pluto 2M，来源 gqrx ioconfig.cpp:266,279-302）；
-    # connect() 时若仍为 None，用 2.048M 兜底。
-    sample_rate_hz: Optional[float] = None
-    gain_db: float = 0.0
-    agc_enabled: bool = True
-    bandwidth_hz: float = 0.0  # 0=自动
-    demod_mode: str = "FM"  # FM/AM/SSB/LSB/USB/CW/NFM/WFM
-    # 来源: gqrx/src/qtgui/dockrxopt.cpp:697 —— reset 到 -150 = 完全开门，
-    # 与 analog_demod.py 静噪默认对齐。
-    # **语义固定为「余量刻度」**（-100≈0 dB、-50≈6 dB、-20≈16 dB，见
-    # mbdsdr_ai/squelch.py 顶部裁定）：它不是绝对 dBFS 门，禁止原样下发给
-    # 解调链；换算只在 margin_threshold_db()/BaselineSquelch 里做。
-    squelch_db: float = -150.0
-    # 谁最后写的静噪值、按什么语义应用：
-    # desktop-margin / cpp-auto / cpp-manual / none（空值=从未设置）。
-    squelch_applied_by: str = "none"
-    # 只有真正下发**绝对门**时才填（dBFS，由 margin_threshold_db + 实测底噪
-    # 推导）；Python 路径按余量口径门控时保持 None。
-    squelch_threshold_dbfs: Optional[float] = None
-    volume: float = 0.5
-    # 信号强度：None=从未采到，**不许拿 0/-100 冒充读数**（U-02）。
-    # 物理量随后端而定，读 rssi_db 时必须连 rssi_unit 一起读：
-    #   - 本地 IQ 链（RTL/HackRF/USRP…）：dBFS（相对 ADC 满量程）
-    #   - ai-sdr mini（SI4732，MCP get_status）：dBµV（0–127）
-    rssi_db: Optional[float] = None
-    rssi_unit: str = "dBFS"
-    snr_db: Optional[float] = None
-    recording: bool = False
-    recording_path: str = ""
-    recording_duration: float = 0.0
-    device_temp: float = 0.0
-    samples_read: int = 0
-    uptime_seconds: float = 0.0
-    error: str = ""  # 最近一次 setter 失败/硬件回读失败的错误描述，空串=正常
-    # ── 接入层可观测性（网络源/热插拔/独占场景；默认值=未知/未接入）──
-    # link_state: connecting / connected / stale / disconnected / failed，空串=未接入观测
-    link_state: str = ""
-    error_category: str = ""       # 与 link_state.py 的错误词表一致（refused/timeout/reset/idle/...）
-    error_code: str = ""           # error_catalog 稳定码（link_timeout/link_refused/link_half_open/link_reset/buffer_overflow）
-    dropped_samples: int = 0       # 环形缓冲覆盖/流速率不足导致的丢样估计
-    buffer_fill: int = 0           # 环形缓冲当前未读样点数（缓冲水位）
-    buffer_capacity: int = 0       # 环形缓冲容量（样点），0=未知/无环形缓冲
-    buffer_level: str = ""         # empty/low/ok/high（见 link_state.classify_buffer_level）
-    underruns: int = 0             # 读侧因缓冲空而等待超时的次数（真实欠读）
-    reconnect_count: int = 0       # 自进程启动以来的重连次数
-    last_data_age_s: Optional[float] = None  # 距最后一次真实数据的时间（None=从未收到）
-    # ── 采样率/带宽切换瞬态（idle/switching/completed/failed）──
-    retune_state: str = "idle"       # 当前切换阶段；completed 表示新流已接管
-    retune_kind: str = ""            # sample_rate / bandwidth
-    retune_generation: int = 0       # 成功切换次数（单调递增，供消费方判新旧流）
-    retune_dropped_samples: int = 0  # 切换时丢弃的旧缓冲样点数（如实计数）
-    retune_elapsed_ms: float = 0.0   # 最近一次切换耗时
-    retune_error: str = ""           # 切换失败原因（空=无）
+# SDRStatus / SQUELCH_APPLIED_BY_VALUES 已下沉到叶子模块
+# ``mbdsdr_ai.sdr_status``（2026-11-13）；本模块顶部 import 并原处再导出。
 
 
 class SDRBackend:
