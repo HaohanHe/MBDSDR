@@ -34,6 +34,12 @@ def main():
     for name in names:
         print(f"  {name}")
 
+    if not names:
+        # 标记以 tree 命名：空暂存也写标记时，会覆盖同名 tree 的正常标记，
+        # 让一笔真提交被消费方误判为「已审计」（2026-11-12，98d95982 实例）。
+        print("[pre-commit] 暂存内容为空，不写闸门标记。")
+        return 0
+
     if not scope.exists():
         print(f"[pre-commit] 拒绝：找不到 {scope}，无法执行 claim 闸门。")
         return 1
