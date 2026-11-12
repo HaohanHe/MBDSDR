@@ -110,8 +110,14 @@ def test_moon():
     assert -90 <= moon.dec_deg <= 90, f"赤纬越界: {moon.dec_deg}"
     assert -90 <= moon.alt_deg <= 90, f"仰角越界: {moon.alt_deg}"
     assert 0 <= moon.az_deg < 360, f"方位角越界: {moon.az_deg}"
-    # 月球距离 356000 ~ 407000 km
-    assert 356000 <= moon.distance_km <= 407000, f"月距异常: {moon.distance_km}"
+    # 月球距离：NASA Moon Fact Sheet 的地心距离约为 357,000–407,000 km
+    # （https://nssdc.gsfc.nasa.gov/planetary/factsheet/moonfact.html，
+    # 2026-11-13 取；原文 "roughly ranges from 357,000 km to 407,000 km"）。
+    # get_moon_position() 返回的是观测者到月球的距离
+    # （observer = earth + topos，见 solar_system.py:541），与地心距最多相差
+    # 地球体积平均半径 6,371 km（同页 Earth 行）。因此按
+    # 357000-6371≈350629、407000+6371≈413371 向外取整为 350000–414000 km。
+    assert 350000 <= moon.distance_km <= 414000, f"月距异常: {moon.distance_km}"
     assert 0.0 <= moon.illumination <= 1.0, f"照度越界: {moon.illumination}"
     assert 0.0 <= moon.phase_angle_deg <= 180.0, f"相位角越界: {moon.phase_angle_deg}"
     # 角直径 0.48 ~ 0.56°
