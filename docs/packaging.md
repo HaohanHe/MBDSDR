@@ -708,7 +708,7 @@ canonical 拍定为 `0.2.0`；唯一手抄点是 `mbdsdr_ai/VERSION`，其余全
 | `mobile/pubspec.yaml` | Flutter 移动端独立版本流（`0.2.0+2`，含构建号） | 不随桌面产物派生；要统一需单独立项 |
 | `docs/packaging.md` | 版本口径文档 | 按设计列出 canonical 与派生清单，说明性文字不是取值点 |
 
-**反证**（必须红）：往未跟踪文件 `tests/_reverse_probe_literal.py` 写
+**反证**（必须红）：往运行时临时创建的未跟踪文件（示例路径 tests/_reverse_probe_literal.py，不在仓库中）写
 `TEMP_VERSION = "0.2.0"`，机检报
 `FAIL 全仓出现手写 canonical 字面量 1 处：tests/_reverse_probe_literal.py:2`；
 删除后复原 PASS。单测 `tests/test_version_literal_guard.py` 钉住「11 个派生点」、
