@@ -111,7 +111,7 @@ MBDSDR 移植版简化为单载波 DBPSK 以验证往返正确性。
 |------|------|
 | `mbdsdr_ai/codec2_lite.py` | LPC分析器、基音检测器、Codec2Lite 1600编解码 |
 | `mbdsdr_ai/freedv_modem.py` | FreeDV700DModem (OFDM)、FreeDV1600Modem (DBPSK) |
-| `tests/codec2_freedv_roundtrip.py` | 往返验证测试 |
+| `tests/test_codec2_freedv_roundtrip.py` | 往返验证测试 |
 
 ## 6. 验证结果
 

@@ -19,7 +19,7 @@ class TestKnownAnswers:
     """标准 check 值 "123456789"（Williams CRC catalogue）。"""
 
     def test_crc16_x25(self):
-        # 既有 ax25_aprs_roundtrip 钉扎值
+        # 既有 test_ax25_aprs_roundtrip 钉扎值
         assert crc.crc_generic(b"123456789", crc.CRC16_X25) == 0x906E
 
     def test_crc16_ccitt_false(self):

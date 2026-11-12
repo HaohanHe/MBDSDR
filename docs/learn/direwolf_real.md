@@ -92,7 +92,7 @@ alt = 1.002^((c-33)*91 + (s-33))                                              (l
 
 ## 7. 往返验证结果
 
-`python3 tests/ax25_aprs_roundtrip.py`：
+`python3 -m pytest tests/test_ax25_aprs_roundtrip.py -q`：
 - CRC 矢量 `0x906E` ✓
 - 帧构建→FCS→解帧 ✓
 - HDLC 位填充/去填充 ✓

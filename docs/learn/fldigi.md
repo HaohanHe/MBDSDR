@@ -3,7 +3,7 @@
 > 来源仓库: [w1hkj/fldigi](https://github.com/w1hkj/fldigi) (GPLv3)
 > 本地镜像: `repos/fldigi/`
 > 移植模块: `mbdsdr_ai/fldigi_modes.py`
-> 往返测试: `tests/fldigi_roundtrip.py`
+> 往返测试: `tests/test_fldigi_roundtrip.py`
 
 fldigi 是业余无线电最全面的多模式数字通信软件，支持 PSK31/63/125、RTTY、
 MFSK、Olivia、FeldHell/Hellschreiber、Thor、MT63、Throb、Contestia 等数十种模式。
@@ -127,7 +127,7 @@ bit=0 → sym=0 → sym*4=0 → sym_vec_pos[0]=-1 (相位翻转 π)
 ## 8. 往返测试
 
 ```bash
-python3 tests/fldigi_roundtrip.py
+python3 -m pytest tests/test_fldigi_roundtrip.py -q
 ```
 
 全部通过：

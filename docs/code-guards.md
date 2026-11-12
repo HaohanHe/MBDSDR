@@ -235,7 +235,7 @@ rtty **1,198 → 179MB**；耗时 feldhell +16%、psk31 +10%，rtty 反而 -12%
   （上限必须出现在工具 schema 描述里，不能偷偷截断）。
 - `tests/test_tool_param_fuzz_guard.py::test_over_limit_boundary_is_rejected_instantly`
   （`limit + 1` 字符即拒绝，`data.limit` 等于常量）。
-- `tests/fldigi_roundtrip.py`（优化前后往返结果仍然正确）。
+- `tests/test_fldigi_roundtrip.py`（优化前后往返结果仍然正确）。
 
 #### D.1 `rtty_decode` 长帧往返失配：是编解码缺陷，不是测试期望错（已修）
 
@@ -260,7 +260,7 @@ rtty **1,198 → 179MB**；耗时 feldhell +16%、psk31 +10%，rtty 反而 -12%
 
 失败语义：若将来再出现不匹配，`rtty_decode` 返回 `error=decode_error`，正文明确写
 「该长度下的 RTTY 解码结果不可信，请缩短或改用 psk31_decode」，不再只回
-`handler_error`。回归锁：`tests/fldigi_roundtrip.py::test_rtty_long_frame_no_clock_drift`。
+`handler_error`。回归锁：`tests/test_fldigi_roundtrip.py::test_rtty_long_frame_no_clock_drift`。
 
 ## 附录 A：按文件分布（256 个文件）
 

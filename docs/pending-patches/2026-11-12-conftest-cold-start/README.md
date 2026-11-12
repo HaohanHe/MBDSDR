@@ -125,7 +125,8 @@
   `apt_meteor_roundtrip.py` 7 个……）。pytest 默认只收 `test_*.py` /
   `*_test.py`，这些**永远不会被收集**，只能靠 `__main__` 里手写
   `test_xxx()` 逐个调（`tests/ax25_aprs_roundtrip.py:135-143`、
-  `tests/fldigi_roundtrip.py:186-195`）。
+  `tests/fldigi_roundtrip.py:186-195`）。**首批三个（ax25_aprs / fldigi /
+  codec2_freedv）已改名纳管**，其余分批处理。
 - `tools/hw_selfcheck/test_selfcheck.py:257`、`tools/test_paste_block.py:318`、
   `tools/test_acceptance_run.py:680`、`tools/onboarding/test_parse_hw_report.py:364`
   用 `pytest.main([__file__])`；`mbdsdr_ai/tests/` 有 10 处同样写法。
@@ -148,3 +149,47 @@ python D:\mbdsdr\output\tmp\time_conftest_segments.py
 python scripts/file_claim.py status            # 文件 claim
 Get-Content D:\mbdsdr\.locks\qt_test.lock.owner   # Qt 锁持有者（补丁 P1 之后才有）
 ```
+
+## 七、给布局线的合并顺序与位置（P1 补丁）
+
+`01-lock-visibility.patch` **不要单独立一笔**，由持有 `tests/conftest.py`
+claim 的布局线在落「每用例一份 `desktop_settings.json`」隔离补丁时一并吸收。
+
+**顺序（不可颠倒）**
+
+1. 先落隔离补丁（每用例独立 profile / ini）。它会改
+   `pytest_collection_finish`、`_isolate_backing_config`、`isolated_profile`。
+2. 再应用本补丁。两者在 `pytest_collection_finish` 同一函数里相邻，直接
+   `git apply` 可能冲突；**按下面的锚点手工合并，不要 `-3` 强行覆盖隔离改动**。
+
+**改动位置（6 处，全部在锁相关代码内，不碰任何隔离逻辑）**
+
+| 位置 | 改动 |
+|---|---|
+| `_qt_lock_path()` 之后 | 新增 `_qt_owner_path()` / `_write_qt_owner()` / `_read_qt_owner()` |
+| `_acquire_qt_lock()` 抢锁成功分支 | 成功时 `_write_qt_owner(path)` |
+| `_acquire_qt_lock()` `except OSError` 分支 | 首次失败打一行 `[mbdsdr-lock] 等锁中：<持有者>；最多等 Ns（路径）` |
+| `_release_qt_lock()` | 增 `path` 参数，释放后删 `.owner` |
+| `_LOCK` | 增 `"path"` 键 |
+| `pytest_collection_finish()` | ① `_install_qsettings_write_guard()` **之后**，`collectonly` 为真直接 return；② 超时消息里带上 `_read_qt_owner(path)` |
+
+**合并顺序上的关键一句**：collect-only 早退必须放在隔离安装之后——收集阶段
+仍要装 QSettings 隔离与写守卫，只是不抢执行锁；反过来会把隔离也一起跳过。
+
+**语义边界**
+
+- `--collect-only` 不建 `QApplication`、不执行用例，所以不需要执行锁；
+  若将来收集期出现 module 级建窗，必须恢复抢锁。
+- `.owner` 只是提示，字节锁才是权威；写失败/残留/过期都不影响互斥正确性。
+- 若 `.owner` 里的 PID 已不存在却仍拿不到锁（`taskkill`/`Stop-Process` 报
+  「无实例」），按**僵尸持锁**处理（另一线实测需 CIM `Terminate`），不要
+  当成「别人正在跑」。
+
+**验收（三条同时成立才算落地）**
+
+1. 无争用：`python -m pytest tests/test_s_meter.py -q` ≈ 1.4 s；
+2. 有争用：先打「等锁中：持有者 PID <pid>（<HH:MM:SS> 启动）」，
+   获锁后打「已获得…（等待 Ns）」；
+3. 等锁超时：RC=2，消息含持有者 PID 与启动时刻；进程退出后
+   `D:\mbdsdr\.locks\qt_test.lock.owner` 不存在。
+
