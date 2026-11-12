@@ -130,6 +130,19 @@ def _is_satellite_frequency_value(text: str, start: int) -> bool:
         r'"(?:downlink|uplink)_(?:low|high|drift|drifted)"\s*:\s*$', prefix))
 
 
+def _is_escaped_newline_email(text: str, start: int, matched: str) -> bool:
+    """命中是否来自「反斜杠 + n + @」的换行转义假象。
+
+    2026-11-13 实测假警报：``tools/axioms/selftest.py`` 的示例字符串里
+    有换行转义后紧跟 ``@pytest.mark.xfail`` 的片段，其中单字符 local
+    part ``n`` 被邮箱规则咬中。它前面是反斜杠且 local part 只有 1 个
+    字符，是转义序列不是邮箱；真实邮箱不会紧跟在反斜杠后且 local part
+    恰为单字符。
+    """
+    local = matched.split("@", 1)[0]
+    return start > 0 and text[start - 1] == "\\" and len(local) == 1
+
+
 def test_no_personal_info_in_tracked_files():
     hits = []
     for rel in _tracked_files():
@@ -148,6 +161,8 @@ def test_no_personal_info_in_tracked_files():
                     if any(dom.endswith(d) for d in ALLOWED_EMAIL_DOMAINS):
                         continue
                     if m.group(0).lower() in ALLOWED_EMAIL_EXACT:
+                        continue
+                    if _is_escaped_newline_email(text, m.start(), m.group(0)):
                         continue
                 if label == "手机号" and (
                         _embedded_in_data_blob(text, m.start(), m.end())
@@ -191,6 +206,20 @@ def test_phone_rule_flags_non_frequency_json_value():
         "散文里的真手机号必须照常命中"
 
 
+def test_email_rule_flags_real_address_but_not_escape_artifact():
+    """邮箱规则双向钉扎：转义假象不咬，普通真地址照咬。"""
+    email = dict(RULES)["邮箱(非 example 域)"]
+    fake = ("import pytest" + "\\" + "n" + "@"
+            + "pytest.mark.xfail(reason='known')")
+    m = email.search(fake)
+    assert m and _is_escaped_newline_email(fake, m.start(), m.group(0)), \
+        "换行转义紧接 @pytest 的文本不应判为邮箱"
+    real = "联系 " + "x" + "@" + "foobar" + ".org"
+    m2 = email.search(real)
+    assert m2 and not _is_escaped_newline_email(
+        real, m2.start(), m2.group(0)), "普通真实地址必须照常命中"
+
+
 def test_redline_gate_is_not_self_triggering():
     """门禁文件自身不得命中自己的规则（否则改规则就得改门禁）。"""
     p = os.path.join(REPO, "tests", "test_identity_redline.py")
@@ -203,6 +232,8 @@ def test_redline_gate_is_not_self_triggering():
                 if any(dom.endswith(d) for d in ALLOWED_EMAIL_DOMAINS):
                     continue
                 if m.group(0).lower() in ALLOWED_EMAIL_EXACT:
+                    continue
+                if _is_escaped_newline_email(text, m.start(), m.group(0)):
                     continue
             if label == "手机号" and _embedded_in_data_blob(
                     text, m.start(), m.end()):
