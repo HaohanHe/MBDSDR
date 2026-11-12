@@ -19,12 +19,27 @@ Workflow Engine：JSON 定义的多步骤工具调用序列。
 
 import os
 import json
+import logging
 import re
 import time
 from dataclasses import dataclass, field
 from typing import List, Dict, Any, Optional, Callable
 
+from .corrupt_evidence import write_reason
 from .error_catalog import user_message
+
+logger = logging.getLogger(__name__)
+
+
+def _backup_corrupt_workflow(path: str) -> Optional[str]:
+    """把损坏的工作流文件改名成 ``*.corrupt-时间戳``，返回备份路径（失败 None）。"""
+    backup = f"{path}.corrupt-{time.strftime('%Y%m%d-%H%M%S')}"
+    try:
+        os.replace(path, backup)
+    except OSError as exc:
+        logger.error("工作流文件损坏备份失败：%s（%s）", path, exc)
+        return None
+    return backup
 
 
 @dataclass
@@ -166,34 +181,141 @@ class WorkflowEngine:
         self.workflows_dir = os.path.expanduser(workflows_dir)
         self.workflows: Dict[str, Workflow] = {}
         self.tool_executor: Optional[Callable[[str, Dict[str, Any]], Any]] = None
+        #: 加载失败的人话说明（None = 正常）。目前没有独立界面消费，
+        #: 完整提示接线等 main_window.py 那一笔。
+        self.last_error: Optional[str] = None
+        #: 文件名 stem（去掉 .json）→ 不能同名的原因：损坏被跳过、或读不了。
+        #: save_workflow 遇到这些名字一律拒绝，避免把用户原来那份顶掉。
+        self._blocked_names: Dict[str, str] = {}
+        self._load_errors: List[str] = []
         os.makedirs(self.workflows_dir, exist_ok=True)
         self._load_user_workflows()
 
     # ── 用户工作流加载/保存 ─────────────────────────────
 
+    def _note_error(self, message: str) -> None:
+        """追加一条加载错误；``last_error`` 始终是全部错误的合并文本。"""
+        self._load_errors.append(message)
+        self.last_error = "；".join(self._load_errors)
+        logger.error(message)
+
+    def _mark_corrupt_file(self, path: str, stem: str, reason: str) -> None:
+        """单个工作流文件损坏：先备份原件，再拒绝同名覆盖。"""
+        backup = _backup_corrupt_workflow(path)
+        if backup:
+            write_reason(backup, f"{path} 加载失败：{reason}", logger)
+            self._blocked_names[stem] = f"原文件已损坏，已备份为 {backup}"
+            self._note_error(
+                f"工作流文件损坏（{reason}）：{path}；原件已备份为 {backup}，"
+                "同名保存会被拒绝（请改名新建，或先处理备份）")
+        else:
+            self._blocked_names[stem] = "原文件已损坏且备份失败（文件保留在原位）"
+            self._note_error(
+                f"工作流文件损坏（{reason}）：{path}；备份失败，原文件保留未动，"
+                "同名保存会被拒绝")
+
     def _load_user_workflows(self):
-        """从 workflows_dir 加载用户/AI 自定义工作流（引擎不内置任何流程）。"""
+        """从 workflows_dir 加载用户/AI 自定义工作流（引擎不内置任何流程）。
+
+        单个文件坏了不拖垮其它工作流，但坏文件必须留证据：先备份原件，再把
+        名字记进 ``_blocked_names``——同名保存等于把用户原来那份删掉。
+        """
         if not os.path.exists(self.workflows_dir):
             return
-        for fname in os.listdir(self.workflows_dir):
-            if fname.endswith(".json"):
-                try:
-                    with open(os.path.join(self.workflows_dir, fname), "r", encoding="utf-8") as f:
-                        data = json.load(f)
-                    wf = Workflow.from_dict(data)
-                    if wf.source not in ("user", "ai_evolved"):
-                        wf.source = "user"
-                    self.workflows[wf.name] = wf
-                except Exception as e:
-                    print(f"警告: 加载工作流 {fname} 失败: {e}")
+        try:
+            names = sorted(os.listdir(self.workflows_dir))
+        except OSError as exc:
+            self._note_error(
+                f"工作流目录读取失败（{exc.__class__.__name__}）："
+                f"{self.workflows_dir}；本次按无用户工作流启动")
+            return
+        # 先登记「只剩损坏备份、没有正式文件」的名字：重启后仍拒绝同名覆盖，
+        # 否则用户下次启动就能无声地把备份对应的那个名字重新占掉。
+        for fname in names:
+            if fname.endswith(".reason.txt"):
+                continue
+            stem, sep, _stamp = fname.partition(".json.corrupt-")
+            if sep:
+                backup = os.path.join(self.workflows_dir, fname)
+                self._blocked_names.setdefault(
+                    stem, f"原文件已损坏，已备份为 {backup}")
+        for fname in names:
+            if not fname.endswith(".json"):
+                continue
+            path = os.path.join(self.workflows_dir, fname)
+            stem = fname[:-len(".json")]
+            try:
+                with open(path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+            except OSError as exc:
+                self._blocked_names[stem] = (
+                    f"读取失败（{exc.__class__.__name__}），文件保留在原位")
+                self._note_error(
+                    f"工作流 {fname} 读取失败（{exc.__class__.__name__}）：{path}；"
+                    "未改动该文件，也拒绝用同名新工作流覆盖")
+                continue
+            except ValueError as exc:
+                self._mark_corrupt_file(
+                    path, stem, f"解析失败（{exc.__class__.__name__}: {exc}）")
+                continue
+            try:
+                wf = Workflow.from_dict(data)
+                if not isinstance(wf.name, str) or not wf.name.strip():
+                    raise ValueError("缺少 name")
+            except (TypeError, KeyError, ValueError, AttributeError) as exc:
+                self._mark_corrupt_file(
+                    path, stem, f"条目非法（{exc.__class__.__name__}: {exc}）")
+                continue
+            if wf.source not in ("user", "ai_evolved"):
+                wf.source = "user"
+            self.workflows[wf.name] = wf
+            # 正式文件能读且合法：这个名字可以被正常覆盖（备份另有归属）
+            self._blocked_names.pop(stem, None)
 
-    def save_workflow(self, workflow: Workflow):
-        """保存工作流到文件。"""
-        self.workflows[workflow.name] = workflow
+    def save_workflow(self, workflow: Workflow) -> bool:
+        """保存工作流到文件。同名目标不安全时拒绝，返回是否真的写盘。
+
+        触发语义是「用户已经有一份 foo，我要写新的 foo」：若原文件损坏被
+        跳过，写回 ``foo.json`` 等于把用户原来那份删掉换成新的，而界面只认
+        名字，用户看不出区别。所以拒绝，让用户改名新建或先处理备份。
+        """
+        stem = workflow.name
+        if not isinstance(stem, str) or not stem.strip():
+            self.last_error = "工作流未保存：名称为空，无法确定文件路径"
+            logger.error(self.last_error)
+            return False
+        blocked_reason = self._blocked_names.get(stem)
+        if blocked_reason:
+            self.last_error = (
+                f"工作流「{stem}」未保存：{blocked_reason}；"
+                "同名覆盖会顶替用户原来那份，已拒绝。请换一个名字新建，"
+                "或先手工处理备份。")
+            logger.error(self.last_error)
+            return False
         workflow.updated_at = time.time()
-        path = os.path.join(self.workflows_dir, f"{workflow.name}.json")
-        with open(path, "w", encoding="utf-8") as f:
-            json.dump(workflow.to_dict(), f, indent=2, ensure_ascii=False)
+        path = os.path.join(self.workflows_dir, f"{stem}.json")
+        tmp_path = path + ".tmp"
+        try:
+            # 先写临时文件再原子替换：写到一半失败（磁盘满 / 被占用）时，
+            # 用户原来那份不会被截断成半截 JSON。
+            with open(tmp_path, "w", encoding="utf-8") as f:
+                json.dump(workflow.to_dict(), f, indent=2, ensure_ascii=False)
+            os.replace(tmp_path, path)
+        except OSError as exc:
+            try:
+                if os.path.exists(tmp_path):
+                    os.remove(tmp_path)
+            except OSError as cleanup_exc:
+                logger.warning("工作流临时文件清理失败：%s（%s）",
+                               tmp_path, cleanup_exc)
+            self.last_error = (
+                f"工作流「{stem}」写入失败（{exc.__class__.__name__}）：{path}；"
+                "本次未写入，内存中也未登记")
+            logger.error(self.last_error)
+            return False
+        # 先落盘再登记：写失败的版本不能留在内存里冒充「已保存」
+        self.workflows[stem] = workflow
+        return True
 
     # ── 工具执行器 ──────────────────────────────────────
 
