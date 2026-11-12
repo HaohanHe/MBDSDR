@@ -590,8 +590,16 @@ class DockLayoutManager:
     # 状态持久化（QSettings + layout_store JSON）
     # ------------------------------------------------------------------
     def _notify_store_error(self, message: str) -> None:
-        """把布局持久化错误贴到主窗口状态栏（复用既有界面，不新建控件）。"""
+        """把布局持久化错误贴到主窗口状态栏（复用既有界面，不新建控件）。
+
+        优先走主窗口的持久化错误入口：除消息外还会挂上「查看诊断 →」，
+        提示超时后用户仍知道该去哪查；老窗口没有该方法时退回裸消息。
+        """
         try:
+            show = getattr(self.mw, "_show_persistence_error_status", None)
+            if callable(show):
+                show(message, 15000)
+                return
             bar = self.mw.statusBar()
             if bar is not None:
                 bar.showMessage(message, 15000)

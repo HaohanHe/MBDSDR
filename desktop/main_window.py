@@ -546,8 +546,8 @@ from spectrum_widget import (
 from control_panel import ControlPanel
 # 错误码 → 帮助「怎么办」入口（无对应条目的 code 不出链接，见 error_remedy）
 from error_remedy import (
-    RemedyLinkLabel, attach_remedy_link, classify_connect_error,
-    classify_record_dir_error, humanize_connect_error,
+    RemedyLinkLabel, attach_remedy_link, build_diagnostics_link,
+    classify_connect_error, classify_record_dir_error, humanize_connect_error,
 )
 from mode_registry import (
     default_bandwidth,
@@ -4950,8 +4950,28 @@ class MainWindow(QMainWindow):
         # 普通瞬态消息（messageChanged）自动清掉旧链接，绝不指向过期错误。
         self._remedy_link = RemedyLinkLabel(status_bar)
         status_bar.addPermanentWidget(self._remedy_link)
+        # 「查看诊断 →」：持久化错误（配置/书签/布局…）写盘失败时出现。
+        # 与「查看怎么办」共用同一套链接机制与键盘回车路径。
+        self._diagnostics_link = build_diagnostics_link(status_bar)
+        status_bar.addPermanentWidget(self._diagnostics_link)
         status_bar.messageChanged.connect(
-            lambda _text: self._remedy_link.clear_code())
+            lambda _text: self._clear_status_links())
+
+    def _clear_status_links(self) -> None:
+        self._remedy_link.clear_code()
+        self._diagnostics_link.clear_code()
+
+    def _show_persistence_error_status(self, text: str,
+                                       timeout: int = MSG_IMPORTANT) -> None:
+        """持久化错误 → 状态栏 + 「查看诊断 →」，两步内可到诊断页。
+
+        这类错误不会弹窗，提示超时后消息就没了；必须在提示还在时给一个
+        可点入口，否则用户看到「已备份为 …」也无处继续查。
+        """
+        self.statusBar().showMessage(text, timeout)  # 先触发 messageChanged 清旧链接
+        link = getattr(self, "_diagnostics_link", None)
+        if link is not None:
+            link.set_diagnostics(self._show_diagnostics_panel)
 
     def _show_error_status(self, text: str, code=None, timeout: int = MSG_IMPORTANT):
         """状态栏错误消息 + 可点的「查看怎么办」入口（无条目则不出链接）。"""
@@ -8196,7 +8216,7 @@ class MainWindow(QMainWindow):
                         "收藏写入收藏文件失败（本次会话仍可见）: %s", persist_error)
             self._sync_spectrum_bookmarks()
             if persist_error:
-                self.statusBar().showMessage(
+                self._show_persistence_error_status(
                     f"已收藏 {float(freq_hz) / 1e6:.3f} MHz {name}"
                     f"（仅本次会话：写入收藏文件失败 {persist_error}，重启后会丢失）",
                     MSG_IMPORTANT)
@@ -14528,7 +14548,7 @@ class MainWindow(QMainWindow):
         self._gui_config_corrupt_backup = backup
         logger.warning("gui_config.json 损坏（%s），已备份到 %s", why, backup)
         try:
-            self.statusBar().showMessage(
+            self._show_persistence_error_status(
                 f"配置文件损坏（{why}），已备份为 {os.path.basename(backup)}；"
                 "本次按默认值启动，原文件未删除。", MSG_IMPORTANT)
         except Exception:

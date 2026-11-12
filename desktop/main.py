@@ -961,7 +961,11 @@ def main():
 
         def _on_settings_error(message, _window=window, _previous=previous_handler):
             try:
-                _window.statusBar().showMessage(str(message), 15000)
+                show = getattr(_window, "_show_persistence_error_status", None)
+                if callable(show):
+                    show(str(message), 15000)
+                else:
+                    _window.statusBar().showMessage(str(message), 15000)
             except AttributeError:
                 print(str(message), file=sys.stderr)
             if callable(_previous):

@@ -244,6 +244,10 @@ def _build_link_label_class():
         def __init__(self, parent=None):
             super().__init__(parent)
             self._code = ""
+            #: 当前链接目标：``remedy:<code>`` 或 ``diagnostics:open``。
+            #: 键盘回车与鼠标点击共用这一个值，避免两条路各判一套状态。
+            self._href = ""
+            self._diagnostics_open = None
             self.setTextFormat(Qt.RichText)
             self.setOpenExternalLinks(False)
             # 鼠标可点 + 键盘可达：Tab 能停到这里，回车等同点击。
@@ -262,9 +266,9 @@ def _build_link_label_class():
             选中」时生效；这里显式兜底，保证 Tab 到标签后按一次回车一定打开。
             自己处理后不再交给基类，避免同一次按键触发两遍。
             """
-            if self._code and event.key() in (Qt.Key_Return, Qt.Key_Enter):
+            if self._href and event.key() in (Qt.Key_Return, Qt.Key_Enter):
                 event.accept()
-                self.linkActivated.emit(f"remedy:{self._code}")
+                self.linkActivated.emit(self._href)
                 return
             super().keyPressEvent(event)
 
@@ -277,25 +281,54 @@ def _build_link_label_class():
                 self.clear_code()
                 return False
             self._code = code
+            self._href = f"remedy:{code}"
+            self._diagnostics_open = None
             self.setText(f'<a href="remedy:{code}">查看怎么办 →</a>')
             self.setToolTip(f"打开帮助「怎么办」并定位到：{entry_name(code)}")
             self.setVisible(True)
             return True
 
+        def set_diagnostics(self, on_open) -> None:
+            """把同一个链接机制换成「查看诊断 →」，复用键盘/鼠标两条路。
+
+            诊断页不是错误目录条目，不能走 ``set_code``；但入口行为必须与
+            「查看怎么办」完全一致（Tab 可达、回车即开），否则持久化错误
+            唯一的出路又只剩鼠标。
+            """
+            self._code = ""
+            self._href = "diagnostics:open"
+            self._diagnostics_open = on_open
+            self.setText('<a href="diagnostics:open">查看诊断 →</a>')
+            self.setToolTip("打开只读诊断页：损坏备份、日志落点、最近一次持久化错误")
+            self.setVisible(True)
+
         def clear_code(self) -> None:
             self._code = ""
+            self._href = ""
+            self._diagnostics_open = None
             self.setText("")
             self.setVisible(False)
 
         def _open(self, _href: str = "") -> None:
             if self._code:
                 open_remedy(self.window(), self._code)
+            elif self._diagnostics_open is not None:
+                self._diagnostics_open()
 
     return RemedyLinkLabel
 
 
 def build_link_label(parent=None):
     """构造一个「查看怎么办 →」链接标签（默认隐藏）。"""
+    return _build_link_label_class()(parent)
+
+
+def build_diagnostics_link(parent=None):
+    """构造一个「查看诊断 →」链接标签（默认隐藏）。
+
+    与 ``build_link_label`` 同一个类、同一套键盘可达性；由调用方
+    ``set_diagnostics(callback)`` 决定何时出现、打开哪个页面。
+    """
     return _build_link_label_class()(parent)
 
 

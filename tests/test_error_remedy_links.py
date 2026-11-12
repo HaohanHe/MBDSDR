@@ -214,6 +214,58 @@ def test_status_link_is_keyboard_reachable_and_enter_opens(qapp, monkeypatch):
     bar.deleteLater()
 
 
+def test_diagnostics_link_keyboard_and_click(qapp):
+    """「查看诊断」与「查看怎么办」共用一套键盘路径：Tab 可达、回车即开。"""
+    from PySide6.QtCore import Qt
+    from PySide6.QtTest import QTest
+    from PySide6.QtWidgets import QStatusBar
+
+    opened = []
+    bar = QStatusBar()
+    label = error_remedy.build_diagnostics_link(bar)
+    bar.addPermanentWidget(label)
+    bar.show()
+    assert label.isHidden()
+
+    label.set_diagnostics(lambda: opened.append("open"))
+    qapp.processEvents()
+    assert not label.isHidden()
+    assert "查看诊断" in label.text()
+    assert label.textInteractionFlags() & Qt.LinksAccessibleByKeyboard
+    assert label.focusPolicy() & Qt.TabFocus
+
+    label.setFocus(Qt.OtherFocusReason)
+    qapp.processEvents()
+    QTest.keyClick(label, Qt.Key_Return)
+    qapp.processEvents()
+    assert opened == ["open"], f"回车没打开诊断页: {opened}"
+
+    label.linkActivated.emit("diagnostics:open")
+    assert opened == ["open", "open"], "鼠标点击路径没打开诊断页"
+    bar.deleteLater()
+
+
+def test_persistence_error_status_offers_diagnostics(
+        qapp, isolated_profile, monkeypatch):
+    """持久化错误 → 状态栏 + 「查看诊断」；普通消息一到链接就消失。"""
+    from main_window import MainWindow
+
+    win = MainWindow()
+    opened = []
+    monkeypatch.setattr(win, "_show_diagnostics_panel",
+                        lambda: opened.append(True))
+
+    win._show_persistence_error_status("收藏写入失败：磁盘已满", 6000)
+    assert not win._diagnostics_link.isHidden(), "持久化错误没有诊断入口"
+    assert "查看诊断" in win._diagnostics_link.text()
+    win._diagnostics_link.linkActivated.emit("diagnostics:open")
+    assert opened == [True], "链接没有打开诊断页"
+
+    win.statusBar().showMessage("已连接", 1000)
+    assert win._diagnostics_link.isHidden(), "普通消息没有清掉旧链接"
+    win.close()
+
+
 def test_dialog_link_keeps_buttons_and_default_focus(qapp):
     from PySide6.QtWidgets import QAbstractButton, QLabel, QMessageBox
 

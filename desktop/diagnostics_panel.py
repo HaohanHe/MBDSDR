@@ -55,6 +55,17 @@ def _backup_rows(block: Dict[str, Any]) -> List[Dict[str, str]]:
             "kind": "error",
             "title": item.get("backup", ""),
             "text": item.get("reason", ""),
+            # 面板据此提供「复制路径」；没有这个字段的行不出按钮。
+            "path": item.get("backup", ""),
+        })
+    if block.get("items"):
+        # 只在真有备份时提示：空清单下这句会和「没有找到损坏备份」互相打架。
+        rows.append({
+            "kind": "note",
+            "title": "这些备份可以手动删除，本页不会替你删",
+            "text": ("备份与理由文件都留在原文件旁边（*.corrupt-时间戳 与 "
+                     "*.reason.txt）。本页只读：不删除、不打开文件管理器、"
+                     "不启动外部程序；确认无用后你可以复制路径自行清理。"),
         })
     if block.get("stale"):
         rows.append({
@@ -116,8 +127,9 @@ def _error_rows(block: Dict[str, Any]) -> List[Dict[str, str]]:
 def build_pages(data: Dict[str, Any]) -> Dict[str, List[Dict[str, str]]]:
     """把 ``collect_diagnostics()`` 的结果转成三页的展示行（纯数据，无 Qt）。
 
-    每行 ``{"kind", "title", "text"}``：``kind`` 只用于排序/强调，
-    文案里的「查不到」必须由行本身说清，不能依赖颜色。
+    每行 ``{"kind", "title", "text"}``，备份行另带 ``path`` 供「复制路径」：
+    ``kind`` 只用于排序/强调，文案里的「查不到」必须由行本身说清，
+    不能依赖颜色。
     """
     return {
         "backups": _backup_rows(data.get("backups") or {}),
@@ -129,12 +141,12 @@ def build_pages(data: Dict[str, Any]) -> Dict[str, List[Dict[str, str]]]:
 def _build_dialog_class():
     from PySide6.QtCore import Qt
     from PySide6.QtWidgets import (
-        QDialog, QHBoxLayout, QLabel, QPushButton, QScrollArea, QTabWidget,
-        QTextEdit, QVBoxLayout, QWidget,
+        QApplication, QDialog, QHBoxLayout, QLabel, QPushButton, QScrollArea,
+        QTabWidget, QTextEdit, QVBoxLayout, QWidget,
     )
 
     class DiagnosticsPanel(QDialog):
-        """只读诊断页（非模态）。本类不含任何写盘 / 删除路径。"""
+        """只读诊断页（非模态）。本类不含写盘 / 删除 / 启动外部程序的路径。"""
 
         def __init__(self, parent=None,
                      open_help: Optional[Callable[[], None]] = None):
@@ -145,8 +157,9 @@ def _build_dialog_class():
             self._pages = build_pages(collect_diagnostics())
 
             root = QVBoxLayout(self)
-            intro = QLabel("本页只读：不删除备份、不写配置、不创建目录。"
-                           "查不到的内容会逐行写明原因。", self)
+            intro = QLabel("本页只读：不删除备份、不写配置、不创建目录、"
+                           "不启动外部程序；需要处理文件时用「复制路径」"
+                           "自行前往。查不到的内容会逐行写明原因。", self)
             intro.setWordWrap(True)
             root.addWidget(intro)
 
@@ -178,6 +191,17 @@ def _build_dialog_class():
                 title.setWordWrap(True)
                 title.setTextInteractionFlags(Qt.TextSelectableByMouse)
                 lay.addWidget(title)
+                path = row.get("path")
+                if path:
+                    # 只复制路径，不打开文件管理器：用户自己去文件管理器粘贴。
+                    # 打开目录会启动外部程序，越过本页只读边界。
+                    copy_btn = QPushButton("复制路径", body)
+                    copy_btn.setToolTip(
+                        "复制备份文件路径到剪贴板（不打开文件管理器）")
+                    copy_btn.clicked.connect(
+                        lambda _checked=False, p=path:
+                        QApplication.clipboard().setText(p))
+                    lay.addWidget(copy_btn)
                 if row["text"]:
                     # 长理由（异常堆栈）整段放进去，靠控件自身滚动；
                     # 不截断、不省略——切掉的可能正是异常类型。
