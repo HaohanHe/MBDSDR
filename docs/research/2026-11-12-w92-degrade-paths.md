@@ -9,11 +9,15 @@
 > 证据级别：E2（可复跑的命令 + 入库原始输出）。原始件：
 > - `docs/evidence/w92-degrade-paths-20261112.json`
 >   SHA256 `CCC0C435BC7DA56B2286722E5A49C2B84BDFD8FDA9C2618919596EB6B73651D4`
-> - `docs/evidence/w92-concurrency-20261112.json`
+> - `docs/evidence/w92-concurrency-20261112.json`（首轮 150/150、load_cache 858/0）
 >   SHA256 `47B6FB25C470F2F6F757C6882F92E1F16BA0CD5051FDD59F6610A488FF81B50E`
+> - `docs/evidence/w92-concurrency-rerun-20261112.json`（复跑 149/150、load_cache 921/0）
+>   SHA256 `87821ABC6BC97D14EB4DD922869AE3A477BC36B6312D1D8C723B4D9B4A9397C7`
 >
-> 采集条件：Windows 10、本机 Python、`MBDSDR_OFFLINE` 未置位；
-> 网络场景用代理黑洞模拟，未真拔网线。
+> 采集条件：2026-11-12、Windows 10、本机 Python、`MBDSDR_OFFLINE` 未置位；
+> 网络场景用代理黑洞模拟，未真拔网线（本地文件证据，无外网 URL）。
+> **唯一例外**：§3「修复前实测」的 85/150、2 个 `.tmp` 属 E3
+> （`time-point-only`：只有当时终端输出，未入库；代码修复后已无法原样复现）。
 
 ## 1. 模拟方式（不是推理）
 
@@ -29,7 +33,12 @@
 | 缓存文件不可读 | `icacls <cache> /deny "<whoami>:(R)"`，`finally` 里 `/remove:d` 恢复 |
 
 网络模拟说明：这是**连接被拒绝**路径，不是 DNS 黑洞/丢包。8 颗星串行失败，
-实测总耗时 16.5 s（每颗约 2 s），全程在后台/同步工具调用内完成，不碰首帧。
+实测总耗时 16.5 s（每颗约 2 s；原始件
+`docs/evidence/w92-degrade-paths-20261112.json` 的
+`case=4_网络不可达_代理黑洞`，`elapsed_s=16.587`），全程在后台/同步工具调用内
+完成，不碰首帧。
+该墙钟数只作**本轮单次量级观测**：未同时记录系统 CPU 占用与本机 python
+进程数，按证据标准 §10 不跨轮比较、不据此下性能结论。
 
 ## 2. 四条降级路径（修复后实测）
 
@@ -41,31 +50,49 @@
 | 3 缓存过期 30 天 | `ok` + `stale=true`，文案「30.0 天前…已超 168h 未刷新」 | 8 颗/9 条 | NOAA-15 仍 137.62；机器 `low_hz=137.62 MHz`、`status=inactive` **不覆盖人工值** | 无 |
 | 4 网络不可达 | `failed`，`written=false`，8 颗全 `network_unreachable` | 8 颗/9 条 | NOAA-15 137.62；旧缓存字节**逐字节未变** | 无 |
 
+「8 颗/9 条」复算（E2）：
+
+```powershell
+python -c "import json; d=json.load(open('mbdsdr_ai/data/sat_links.json',encoding='utf-8')); s={k:v for k,v in d.items() if not k.startswith('_')}; print(len(s), sum(len(v.get('links',[])) for v in s.values()))"
+# 输出：8 9
+```
+
 场景 4 的状态文案仍是「机器缓存 0 分钟前（1 颗），7 颗最近拉取失败」——因为
 本轮没写盘，磁盘状态没变。刷新结果本身如实是 `failed`；界面那行要不要补一句
 「本次刷新失败」属于展示层，本轮未改（`desktop/rf_sky_view.py` 正被另一条线占用）。
 
 ## 3. 原子写盘在并发下（实测）
 
-原始件：`docs/evidence/w92-concurrency-20261112.json`。
+原始件：`docs/evidence/w92-concurrency-20261112.json`（首轮）与
+`docs/evidence/w92-concurrency-rerun-20261112.json`（复跑）。
 
-**修复前实测**（无跨进程锁）：
+**修复前实测（E3 / `time-point-only`，只有当时终端输出，未入库）**：
 
 - 6 进程 × 25 轮同时刷新，150 次写里 **85 次 `os.replace` 失败**
   （WinError 5 拒绝访问；读者/写者共享冲突），`refresh()` 却仍返回
   `state=ok`，只有 `written=false`；磁盘留下 2 个 `.tmp` 文件。
+  这组数字当前不可复跑（无锁实现已被替换），只作历史线索，**不当现状引用**。
 - 双进程 barrier 交叉：A 只写 25338、B 只写 33591，双方都报 `written=true`，
-  最终缓存**只剩 33591**，25338 被覆盖丢失。
+  最终缓存只剩一颗，另一颗被覆盖丢失。现象已由回归测试
+  `test_legacy_unlocked_write_loses_a_star`（E2）确定性复现；
+  「当时剩的是 33591」这个具体值只有终端输出。
 - 读者持有缓存文件时写盘：`written=false`，旧缓存完好，但仍报 `state=ok`。
+  该路径修复后仍可复跑：`docs/evidence/w92-concurrency-20261112.json` 的
+  `case=C_读者持有文件时写盘`。
 
-**修复后实测**：
+**修复后实测（E2）**：
 
-- 6 进程 × 25 轮：入库那轮 **150/150 写成功**，最终 JSON 合法、无半截、
-  无 `.tmp` 残留；复跑一次为 **149/150**（有 1 轮被读者短占导致 3 次退避后仍
-  失败，如实报 `write_failed`，旧缓存保留，没有写坏）。
-- 双进程 barrier 交叉：最终 `['25338','33591']` 都在，**丢星 0**。
-- 并发读：原始 `read_bytes()` 仍有 5 次瞬时 PermissionError；走应用真实读路径
-  `load_cache()` 为 **921 次 ok / 0 次 invalid**（读盘 OSError 退避重试 3 次，
+- 6 进程 × 25 轮：`w92-concurrency-20261112.json` 为 **150/150 写成功**，
+  最终 JSON 合法、无半截、无 `.tmp` 残留；
+  `w92-concurrency-rerun-20261112.json` 复跑为 **149/150**（1 轮被读者短占，
+  3 次退避后仍失败，如实报 `write_failed`，旧缓存保留，没有写坏）。
+- 双进程 barrier 交叉：最终 `['25338','33591']` 都在，**丢星 0**
+  （两份原始件的 `case=B_双进程交叉刷新_丢更新` 均为 `lost=0`）。
+- 并发读：首轮原始 `read_bytes()` 有 5 次瞬时 PermissionError；走应用真实读路径
+  `load_cache()`，首轮 **858 次 ok / 0 次 invalid**（916 次读循环里其余为
+  文件尚未建立的 `missing`），复跑 **921 次 ok / 0 次 invalid**
+  （原始件：`docs/evidence/w92-concurrency-rerun-20261112.json`，
+  `load_cache_ok=921`、`load_cache_invalid=0`；读盘 OSError 退避重试三次，
   仍失败不写进程内 memo，下次自动恢复）。
 - 读者持有文件时写盘：`state=write_failed`、`written=false`、旧缓存未变。
 
@@ -109,9 +136,10 @@ python -m pytest mbdsdr_ai/tests/test_sat_links_machine.py -q
 ```
 
 两个探针把结果写到系统临时目录（`w92-degrade-results.json` /
-`w92-concurrency-results.json`），不覆盖入库证据。并发轮次的写成功数会有
-±1 抖动（取决于读者/写者抢占），但下列断言稳定：最终 JSON 合法、丢星 0、
-`load_cache` 不出现 `invalid`、失败必报 `write_failed`。
+`w92-concurrency-results.json`），不覆盖入库证据。并发轮次的写成功数
+**已观测**为 149–150/150（取决于读者/写者抢占，未做多次统计，不构成保证值），
+但下列断言稳定：最终 JSON 合法、丢星 0、`load_cache` 不出现 `invalid`、
+失败必报 `write_failed`。
 
 ## 7. 剩余边界：单轮 `write_failed` 仍可能出现
 
@@ -121,9 +149,12 @@ python -m pytest mbdsdr_ai/tests/test_sat_links_machine.py -q
    Windows 上 `os.replace` 要求目标文件允许 delete 共享，而 Python 普通
    `open()` 不带 `FILE_SHARE_DELETE`；读者恰好打开缓存文件的瞬间，写者的
    `os.replace` 会 WinError 5。
-2. **极端抢占**：写者已退避重试 3 次（约 0.15 s 总窗口），仍撞上持续读者
-   （例如连续重绘反复读同一文件、杀软扫描）时，本轮就失败。6 进程 × 25 轮
-   的复跑里出现过 1/150。
+2. **极端抢占**：写者已退避重试三次（约 0.15 s 总窗口，代码常量见
+   `sat_links_fetch.py:_write_cache`），仍撞上持续读者
+   （例如连续重绘反复读同一文件、杀软扫描）时，本轮就失败。
+   **已观测**：6 进程 × 25 轮的复跑里出现过 1/150
+   （`docs/evidence/w92-concurrency-rerun-20261112.json`，`worker_fail` 合计 1）；
+   发生频率未做统计，不能外推成固定概率。
 3. 目录只读/文件只读/磁盘满等**持续性**权限问题不属于「偶发」，它们每轮
    都失败，但同样只报 `write_failed`，不会伪装成功。
 
