@@ -133,7 +133,7 @@ harness），要求"深度调研学习完，再根据它看我们 agent 有什�
 翻车"的硬机制，逐条对照我们的 agent 层。完整报告
 `docs/learn/agent-harness-gap-audit.md`。
 
-- **P0（已修）模型对话通道没有写入门**：`tool_registry.call()` 全段不看 — `da7eebee` — `mbdsdr_ai/tool_registry.py:529` — `MODEL_HARD_GATE_PATTERNS`（基准 `da7eebee`）
+- **P0（已修）模型对话通道没有写入门**：`tool_registry.call()` 全段不看 — `da7eebee` — `mbdsdr_ai/tool_registry.py:369` — `MODEL_HARD_GATE_PATTERNS`（基准 `da7eebee`）
   write 标记；`WRITE_TOOL_NAME_PATTERNS` 列了几十个写/发射工具，全仓
   `resolve_write_authorization` 只有 6 处。结果：同一工具走 MCP 通道会被
   拦，走 `agent.chat()` 直接执行——`radio_ptt` / `radio_send_cw` 裸奔。
@@ -445,7 +445,7 @@ astronomicalDuskJD)`，时刻由 `getRTSTime(core, altitude)` 按**真实太阳�
 - **示例站**：复用 `mbdsdr_ai.solar_system.SAMPLE_SITE`（中性 45°N/120°E，
   源码明写「不指向任何真实默认站址」）。UI 层不写死城市坐标 ——
   防回潮守卫专禁硬编码假坐标（39.9042 / 116.4074 等作者城市变体），
-  第一版就撞了这条已改。示例坐标不写配置、不参与过境，GNSS/手填立即 — `c6805f7c` — `mbdsdr_ai/solar_system.py:1116` — `SAMPLE_SITE`
+  第一版就撞了这条已改。示例坐标不写配置、不参与过境，GNSS/手填立即 — `c6805f7c` — `mbdsdr_ai/solar_system.py:1121` — `SAMPLE_SITE`（基准 `c6805f7c`）
   覆盖；全程标注「非你的位置 / 未校准」。
 - **示例态历表**：点示例才建 SatelliteTracker，太阳/月亮按该点真算；
   `_stars_hidden_by_daylight` 加保守门（示例态太阳高度未知 → 不画星），
