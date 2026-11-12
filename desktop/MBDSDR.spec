@@ -90,10 +90,43 @@ datas = [
     (os.path.join(root, 'NOTICE.md'), '.'),
     (os.path.join(root, 'third_party_licenses'), 'third_party_licenses'),
 ]
-# 开发资产不进发行物：mbdsdr_ai/tests/ 只服务 pytest 与构建期脚本，
-# 运行期无人读它。Path 先按 os.sep 归一，避免 Windows 上漏判。
+#
+# 每一项为什么进/不进包（改这里必须同步 scripts/check_dist_head_parity.py 的判据）：
+#
+#   合规 · 不可省（不是“可选资源”，缺件即发布不合规）：
+#     LICENSE / NOTICE.md / third_party_licenses/ —— MIT 与第三方许可要求随
+#     二进制分发。
+#
+#   功能 · 运行期按文件路径读取（静态分析看不见，漏了不报错、只是静默降级）：
+#     assets/                —— QIcon/QPixmap 直接读 desktop/assets/icon.*。
+#     mbdsdr_ai/locale/      —— mbdsdr_ai/i18n.py:22 用 <pkg>/locale/<lang>.json
+#                               惰性加载；缺文件时 tr() 静默回退原文，文案不生效。
+#     mbdsdr_ai/data/        —— astronomy/dso.py:47、astronomy/moon_albedo.py:39
+#                               等按 <pkg>/data/*.json|npz 读星表/月球反照率。
+#     mbdsdr_ai/web/static/  —— WebBridge 面板加载的 index.html/app.js/style.css。
+#     mbdsdr_ai/VERSION      —— version.py:12 运行期读它算 __version__
+#                               （QApplication/MCP serverInfo），不是纯构建期文件。
+#
+#   排除 · 既非合规也非功能（别塞进包，会撑体积并让 parity 读出陈旧件）：
+#     mbdsdr_ai/tests/       —— pytest 资产。
+#     mbdsdr_ai/artifacts/   —— 实验产物（未跟踪 PNG/NPY），不属于任何一次 HEAD。
+#     mbdsdr_ai/README.md    —— 开发文档；全仓库无运行期读取点（已按 *.py 搜过）。
+#       （包内 README 若将来要发到 PyPI，走 wheel 的 package-data，不经 PyInstaller。）
+#
+# Path 先按 os.sep 归一，避免 Windows 上漏判。
+_EXCLUDED_PKG_DIRS = ('/tests/', '/artifacts/')
+_EXCLUDED_PKG_FILES = ('/mbdsdr_ai/README.md',)
+
+
+def _keep_package_data(item):
+    src = item[0].replace(os.sep, '/')
+    if any(part in src for part in _EXCLUDED_PKG_DIRS):
+        return False
+    return not any(src.endswith(name) for name in _EXCLUDED_PKG_FILES)
+
+
 datas += [item for item in collect_data_files('mbdsdr_ai')
-          if '/tests/' not in item[0].replace(os.sep, '/')]
+          if _keep_package_data(item)]
 
 # mbdsdr_ai/astronomy/__init__.py 用 importlib.spec_from_file_location 按**文件路径**
 # 加载被同名 package 遮住的 ../astronomy.py（改名 mbdsdr_ai._astronomy_legacy）。

@@ -25,8 +25,11 @@
    ``desktop/assets/``（spec 的 datas 源）、``third_party_licenses/``、
    根 ``LICENSE``/``NOTICE.md``、``mbdsdr_ai/`` 下的数据文件，外加 spec
    显式声明的 ``mbdsdr_ai/astronomy.py``。缺件按别名映射回 dist 侧比对。
-5. **``mbdsdr_ai/tests/`` 不得出现在产物里**：spec 的 ``datas`` 已过滤开发
-   资产；产物里命中该前缀即 FAIL（防止 spec 被改回去没人发现）。
+   ``mbdsdr_ai/tests/``、``mbdsdr_ai/artifacts/``、``mbdsdr_ai/README.md``
+   不算数据文件——spec 显式排除（判据与 spec 的 _EXCLUDED_PKG_* 同源）。
+5. **``mbdsdr_ai/tests/`` 与 ``mbdsdr_ai/artifacts/`` 不得出现在产物里**：
+   spec 的 ``datas`` 已过滤开发资产与实验产物；产物里命中该前缀即 FAIL
+   （防止 spec 被改回去没人发现）。
 
 豁免（不参与任何清单，只在报告里给计数）:
 
@@ -63,9 +66,12 @@ PROJECT_TOP = {"assets", "mbdsdr_ai", "third_party_licenses"}
 PROJECT_ROOT_FILES = {"LICENSE", "NOTICE.md"}
 # spec 显式当 data 带进来的源文件（静态分析看不见的动态加载路径）。
 EXPLICIT_DATAS = {"mbdsdr_ai/astronomy.py"}
-HEAD_ONLY_EXCLUDE_DIRS = ("mbdsdr_ai/tests/",)
-# 发行物里不得出现的项目路径（spec 已过滤的开发资产）。
-FORBIDDEN_DIST_PREFIXES = ("mbdsdr_ai/tests/",)
+HEAD_ONLY_EXCLUDE_DIRS = ("mbdsdr_ai/tests/", "mbdsdr_ai/artifacts/")
+# 不是 datas 的 mbdsdr_ai 文件：README.md 是开发文档，全仓库无运行期读取点
+# （与 desktop/MBDSDR.spec 的 _EXCLUDED_PKG_FILES 保持同一份判据）。
+HEAD_ONLY_EXCLUDE_FILES = {"mbdsdr_ai/README.md"}
+# 发行物里不得出现的项目路径（spec 已过滤的开发资产/实验产物）。
+FORBIDDEN_DIST_PREFIXES = ("mbdsdr_ai/tests/", "mbdsdr_ai/artifacts/")
 
 
 def _run(cmd, cwd=None, check=True):
@@ -142,6 +148,8 @@ def expected_head_paths(inv):
             yield path
             continue
         if path.startswith(HEAD_ONLY_EXCLUDE_DIRS):
+            continue
+        if path in HEAD_ONLY_EXCLUDE_FILES:
             continue
         if not path.startswith("mbdsdr_ai/"):
             continue
