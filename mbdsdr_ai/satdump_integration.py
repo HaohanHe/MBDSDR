@@ -13,8 +13,11 @@ MBDSDR AI - SatDump 外部工具集成层
 import os
 import subprocess
 import json
+import logging
 from typing import Dict, List, Optional, Tuple
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 try:  # 可选依赖：仅用于读取 product.cbor 的通道/投影元数据
     import cbor2 as _cbor2
@@ -255,7 +258,11 @@ def _load_product_metadata(product_dir: Path) -> Optional[Dict]:
         return None
     try:
         data = _cbor2.loads((product_dir / "product.cbor").read_bytes())
-    except Exception:  # noqa: BLE001 - 可选增强，坏文件一律忽略
+    except Exception as exc:  # noqa: BLE001 - 可选增强，坏文件一律忽略
+        # 仍退回文件名规则（不抛错、不把 cbor2 变硬依赖），但原因必须可查：
+        # 否则「按清单取图没生效」看起来和「本来就没有 product.cbor」一样。
+        logger.warning("product.cbor 不可用，退回文件名规则：%s | %s: %s",
+                       product_dir / "product.cbor", type(exc).__name__, exc)
         return None
     return data if isinstance(data, dict) else None
 
