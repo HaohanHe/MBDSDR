@@ -19,7 +19,7 @@
 | --- | --- |
 | 真验过 | RTL-SDR（FC0012）七环验收 R1–R5/R7；NanoVNA 真机 SOLT；FT8 外采 WSJT-X 官方样本；ADS-B 外采 dump1090 全量清单；LRPT 外采 TU Berlin 实录；GPS C/A IS-GPS-200E 矢量；DVB-S2 BCH/LDPC KAT |
 | 仅自测 | 全量工具面与 schema 一致性；AI 上下文预算/工具裁剪/并发取消/错误恢复；录音库 P9 全系列；TLE 编号三方校验；发射门/状态机/半双工互斥（假后端）；天空/云台编排；端到端场景 A/B/C（假模型 + 合成 IQ/音频 + 时间拨盘，跨模块数值自洽） |
-| 未验证 | 真实发射（PlutoSDR）；云台/rotator 闭环；真过境 APRS/NOAA-APT/Meteor OTA；真实 LLM 联调（工具选择/流式取消/token 计数）；celestrak/NTP/open API 实时网络；arm64 Chromebook 真机；听感验收 |
+| 未验证 | 真实发射（PlutoSDR）；云台/rotator 闭环；真过境 APRS/NOAA-APT/Meteor OTA；真实 LLM 联调（工具选择/流式取消/token 计数）；celestrak/NTP/open API 实时网络；arm64 Chromebook 真机；听感验收；HackRF / USRP / Soapy / Pluto / BladeRF / LimeSDR 六个后端的**真机链路**（跨进程占用判据只用假后端验过，见附 U） |
 
 ## 1. 待真机（有代码、无硬件）
 
@@ -830,6 +830,99 @@ python -c "from mbdsdr_ai.core.mcp_server import MCPToolSet; print(len(MCPToolSe
 复跑条件：`pytest tests/test_device_owner_lock.py -q`（`test_ambiguous_alias_refuses_instead_of_guessing`
 钉住「拒绝而不猜」+「文案给出路」）；若将来 pyusb 进入依赖，再用 libusb 设备
 列表按 serial 反查 bus/port 补进 `device_identity_aliases`，届时本附录删除。
+
+
+## 附 U：未验证能力清单（「代码已接、真机未验」落账，2026-11-12，接入层线）
+
+**纪律（自本附录起）：代码注释、提交说明或汇报里写「代码已接、真机未验」，必须同时在
+本附录加一行**——写清①哪条路径②验了什么③没验什么④怎么验。缺这一行，那句话不算数。
+本附录只记「有代码、没真机」的部分；判据本身（先登记再 open）已用假后端验过，不在此列。
+
+**背景**：跨进程设备占用判据已集中到 `mbdsdr_ai/sdr_backend.py:SDRBackend.connect()`
+（先 `_claim_hardware()` 再 `_open_hardware()`，失败在 finally 归还，`disconnect()` 归还）。
+六个硬件后端都在「真 open 之前」登记；`unverified` 的是**真机行为**，不是判据本身。
+
+### U.0 通用复现骨架（U.1–U.6 只换「构造」与「通过判据」）
+
+```powershell
+# 终端 A：占住设备（保持 600 s；看到 KEY/CLAIM True 后用 Ctrl+C 结束）
+python -c "import os,time;from mbdsdr_ai import sdr_backend as sb;from mbdsdr_ai.sdr_backend import HackRFBackend as K;be=K(device_index=0);key=be.hardware_owner_identity()[0];print('HOLDER',os.getpid(),'KEY',key);print('CLAIM',sb.claim_active_owner('desktop',key));time.sleep(600)"
+
+# 终端 B：同一构造再 connect，必须拦在 open 之前
+python -c "from mbdsdr_ai.sdr_backend import HackRFBackend as K;be=K(device_index=0);print('CONNECT',be.connect());print('ERR',be.status.error)"
+
+# 终端 B（A 结束后）：应能真开并收流
+python -c "from mbdsdr_ai.sdr_backend import HackRFBackend as K;be=K(device_index=0);assert be.connect();be.set_frequency(100e6);be.set_sample_rate(2e6);x=be.read_samples(65536);print('SAMPLES',0 if x is None else len(x));be.disconnect()"
+```
+
+**A 仍在跑时 B 的通过判据（六条通用）**：`CONNECT False`；`ERR` 含
+「设备当前由桌面端持有（pid <A 的 HOLDER>，进程仍在运行）」；`be.last_claim_conflict`
+非空；**期间设备没有任何 open 迹象**（无收流、系统 USB 无新 handle、A 的流不中断）。
+若出现的是驱动自己的英文错（`LIBUSB_ERROR` / `no devices found` / `Device busy`）或
+「检查 USB 棒」这类改写，即为**不通过**。
+
+### U.1 HackRF（`sdr_backend.HackRFBackend._open_hardware`）
+
+| 问题 | 答案 |
+| --- | --- |
+| 哪条路径 | `mbdsdr_ai/sdr_backend.py:HackRFBackend._open_hardware()`（内层 `mbdsdr_ai/hackrf_params.HackRFBackend` 的 ctypes/libhackrf） |
+| 验了什么（假后端） | 占用命中时 `_open_hardware` 不被调用、`hackrf_params.HackRFBackend` 未被构造（libhackrf 未加载）；冲突文案分类为 None 且原文透传（`tests/test_owner_conflict_before_open.py::test_hackrf_refuses_before_libhackrf`）；反证：摘掉判据该用例立刻真进入 open |
+| 没验什么 | 真机打开/收流；真机「A 已开流时 B 被拒且 A 不断流」；拔插后身份键从 `hackrf|index:0` 升到 `hackrf|serial:...` 的切换 |
+| 怎么验 | 插 HackRF One（USB 2.0）。A 端用 U.0 骨架；B 端同骨架。通过判据见 U.0。A 结束后 B 应 `CONNECT True`、`SAMPLES ≥ 65536`；再 `python -c "from mbdsdr_ai import sdr_backend as sb;print(sb.get_active_owner('hackrf|index:0'))"` 应为 `None`。若 `sdr_list_devices` 显示带序列号，键以实际输出为准重复一遍 |
+
+### U.2 USRP（`sdr_backend.USRPBackend._open_hardware`）
+
+| 问题 | 答案 |
+| --- | --- |
+| 哪条路径 | `mbdsdr_ai/sdr_backend.py:USRPBackend._open_hardware()`（`uhd.usrp.MultiUSRP`） |
+| 验了什么（假后端） | 占用命中时不构造 `uhd.MultiUSRP`（`sys.modules["uhd"]` 注入记录器）；文案不被二次分类（`test_usrp_refuses_before_uhd`）；反证同上 |
+| 没验什么 | 真机（B210/N310 等）打开、收流、双进程互斥；`usrp|label:{args}` 在真实 args 串下的匹配 |
+| 怎么验 | 插 USRP（USB3 或 1GbE），先 `uhd_find_devices` 必须列出。A 端把 U.0 的构造换成 `from mbdsdr_ai.sdr_backend import USRPBackend as K;be=K()`；B 端同。通过判据：B 的 `ERR` 是「设备当前由桌面端持有（pid N）」，**不是** UHD 的 `no devices found` / `Device busy`——UHD 自己也会拦，但只有这条判据能在开设备前给出中文结论。A 结束后 B 收流 `SAMPLES ≥ 65536` |
+
+### U.3 SoapySDR（`sdr_backend.SoapySDRBackend._open_hardware`）
+
+| 问题 | 答案 |
+| --- | --- |
+| 哪条路径 | `mbdsdr_ai/sdr_backend.py:SoapySDRBackend._open_hardware()`（`SoapySDR.Device`；具体驱动 rtlsdr/hackrf/airspy 等由 `device_args` 决定） |
+| 验了什么（假后端） | 占用命中时不构造 `SoapySDR.Device`（`test_soapy_refuses_before_device_open`）；身份键规则 `{driver}|serial:...`（有序列号，精确匹配）> `{driver}|label:{name}`（无序列号，别名匹配） |
+| 没验什么 | 任一真实 Soapy 驱动的打开/收流；无序列号时 label 匹配在真机的唯一性；双进程互斥 |
+| 怎么验 | 先 `SoapySDRUtil --info`、`SoapySDRUtil --probe=driver=hackrf` 能列出设备。A/B 端构造 `SoapySDRBackend(device_args={"driver":"hackrf"}, device_info={"label":"..."})`（`label` 填 `SoapySDRUtil` 打印的名字）。通过判据见 U.0；A 结束后收流 `SAMPLES ≥ 65536`。**若两进程都没有序列号**，键会退到 label——必须在结论里写明「此设备无序列号，只能按名字匹配」 |
+
+### U.4 PlutoSDR（`sdr_backend.PlutoSDRBackend._open_hardware`）
+
+| 问题 | 答案 |
+| --- | --- |
+| 哪条路径 | `mbdsdr_ai/sdr_backend.py:PlutoSDRBackend._open_hardware()`（优先 `iio.Context`，回退 `SoapySDR.Device(driver="plutosdr")`） |
+| 验了什么（假后端） | 占用命中时不进入 `iio.Context`（`test_plutosdr_refuses_before_iio_open`，走 `build_backend_for_device` 顺带验工厂填的 `uri:usb:...` 键与直接构造一致）；`ip:`/`host:` 网络 URI 的 `hardware_owner_identity()` 为 None、不被本机登记拦（`test_plutosdr_network_uri_does_not_claim`） |
+| 没验什么 | 真机 USB 打开/收流；真机双进程互斥；网络 URI 下**两台机器**同时连（本机登记表管不到别的机器，这是一条已知边界，不是待修 bug） |
+| 怎么验 | 插 ADALM-PLUTO，`iio_info -s` 能列出（USB 会打印 `usb:x.y.z`）。A 端构造 `PlutoSDRBackend()`（`uri=None` 会自动枚举）；B 端同。通过判据见 U.0，且冲突键应为 `uri:usb:...`。A 结束后 B 应 `CONNECT True`、`SAMPLES ≥ 65536`。网络机：`PlutoSDRBackend("ip:192.168.2.1")` 的 `hardware_owner_identity()` 必须返回 None（不登记），并记录两台机器同连时实际能否同时收流到数据 |
+
+### U.5 bladeRF（`bladerf_params.BladeRFBackend.connect`）
+
+| 问题 | 答案 |
+| --- | --- |
+| 哪条路径 | `mbdsdr_ai/bladerf_params.py:BladeRFBackend.connect()`（ctypes/libbladeRF；不是 `SDRBackend` 子类，显式调用 `sdr_backend.acquire_hardware_owner`） |
+| 验了什么（假后端） | 占用命中时 `_load_lib` 不被调用（libbladeRF 未加载），`last_claim_conflict`/`get_status().error` 原样（`test_bladerf_refuses_before_lib_load`）；开成功后占用保留到 `disconnect()` 才归还（`test_bladerf_claim_held_until_disconnect`）；反证：摘掉判据立刻 `仍加载了 libbladeRF` |
+| 没验什么 | 真机 bladeRF 1.0/2.0 打开、收流、双进程互斥；`device_identifier` 非空时的打开串 |
+| 怎么验 | 插 bladeRF（USB3），`bladeRF-cli -p`（probe）能列出。A 端 `from mbdsdr_ai.bladerf_params import BladeRFBackend as K;be=K()`（键 `bladerf|label:auto`）；B 端同；A 结束后 `be.connect()` 为 True，`be.start_rx()` 后 `read_samples(65536)` 非空，`be.disconnect()` 后 `get_active_owner("bladerf|label:auto")` 为 None。另在 B 拒绝期间用 `bladeRF-cli -p` 确认设备未被 B 打开 |
+
+### U.6 LimeSDR（`limesuite_params.LimeSDRBackend.connect`）
+
+| 问题 | 答案 |
+| --- | --- |
+| 哪条路径 | `mbdsdr_ai/limesuite_params.py:LimeSDRBackend.connect()`（ctypes/libLimeSuite；同样不是 `SDRBackend` 子类） |
+| 验了什么（假后端） | 占用命中时 `_load_lib` 不被调用（libLimeSuite 未加载）、文案原样（`test_limesdr_refuses_before_lib_load`）；反证：摘掉判据立刻 `仍加载了 libLimeSuite` |
+| 没验什么 | 真机 LimeSDR-USB/Mini 打开、收流、双进程互斥；`limesdr|index:N` 在拔插后序号变化的后果（多台同型号时会退化成「按序号区分」） |
+| 怎么验 | 插 LimeSDR，`LimeUtil --find` 能列出。A 端 `from mbdsdr_ai.limesuite_params import LimeSDRBackend as K;be=K(device_index=0)`；B 端同（键 `limesdr|index:0`）。A 结束后 `connect()` True、`start_rx()` 后 `read_samples(65536)` 非空、`disconnect()` 后 `get_active_owner("limesdr|index:0")` 为 None |
+
+### U.7 待立项：`hal.SoapySDRBackend` 与 RX 共用设备时的占用引用计数
+
+| 问题 | 答案 |
+| --- | --- |
+| 哪条路径 | `mbdsdr_ai/hal.py:SoapySDRBackend.connect()`（继承 `SDRBackendBase`；TX/HAL 通用层，当前无生产接线，`grep` 不到 `hal.SoapySDRBackend` 的 import） |
+| 验了什么 | 只做了代码审计：它与 `sdr_backend.SoapySDRBackend` 可能打开**同一台物理设备**（同进程 TX/RX）。因此**故意没有**直接套用登记：同 pid 的第二次 claim 会覆盖第一条记录，先 disconnect 的一方会把另一方的占用提前释放 —— 那会把「互斥」变成「看起来有」 |
+| 没验什么 | 同进程 TX/RX 共用设备时的占用生命周期；跨进程 TX 持有 vs RX 连接 |
+| 怎么验（先实现再验） | ①实现引用计数（key → 本进程 hold 计数，计数归零才 release）；②假后端测试：同进程两个实例先后 connect 同一 key，第一个 disconnect 后 `get_active_owner(key)` 仍非 None，第二个 disconnect 后才为 None；③跨进程：TX 侧持有期间，另一进程 RX `connect()` 必须 False 且文案表明是占用；④真机：一台 Pluto/HackRF 同时走 RX 与 HAL TX 通道，两端各自收/发不互相踢掉。未实现前，见到「TX 能开、RX 也能开」不算 bug 结论，只是未覆盖 |
 
 
 
