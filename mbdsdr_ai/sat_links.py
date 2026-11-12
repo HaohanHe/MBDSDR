@@ -22,11 +22,15 @@ import json
 import os
 from typing import Any, Dict, List, Optional
 
+from . import sat_links_fetch
+
 _DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
 
 __all__ = [
     "list_link_sats", "load_sat_link", "identify_by_freq",
-    "register_tool_registry",
+    "find_tuning_for", "register_tool_registry",
+    "machine_targets", "machine_status", "machine_status_text",
+    "machine_entry_text", "refresh_machine_links", "start_machine_refresh",
 ]
 
 
@@ -55,7 +59,9 @@ def load_sat_link(name: str) -> Dict[str, Any]:
             "新增请往 mbdsdr_ai/data/sat_links.json 增条目）")
     entry = dict(table[key])
     entry["_link_name"] = key
-    return entry
+    # 机器库只做增量（low/high/status/service + _machine 说明），
+    # freq_hz/mode/baud/note 永远保留人工值；无缓存时 _machine.state=absent。
+    return sat_links_fetch.merge_entry(entry)
 
 
 def identify_by_freq(freq_hz: float, tolerance_hz: float = 3000.0) -> List[Dict[str, Any]]:
@@ -76,12 +82,36 @@ def identify_by_freq(freq_hz: float, tolerance_hz: float = 3000.0) -> List[Dict[
     for name in list_link_sats():
         entry = load_sat_link(name)
         for link in entry.get("links", []):
-            if abs(float(link["freq_hz"]) - freq) <= tol:
+            if _link_contains(link, freq, tol):
                 merged = dict(entry)
                 merged["_link_name"] = name
                 merged["_matched_link"] = dict(link)
+                merged["_matched_source"] = (
+                    "satnogs" if link.get("low_hz") is not None else "manual")
+                hits.append(merged)
+        # 机器库收录、人工表未收录的发射机：作为额外命中，不改人工表。
+        machine = entry.get("_machine") or {}
+        for mlink in machine.get("machine_only") or []:
+            if _link_contains(mlink, freq, tol):
+                merged = dict(entry)
+                merged["_link_name"] = name
+                merged["_matched_link"] = dict(mlink)
+                merged["_matched_source"] = "satnogs"
+                merged["_matched_machine_only"] = True
                 hits.append(merged)
     return hits
+
+
+def _link_contains(link: Dict[str, Any], freq: float, tol: float) -> bool:
+    """带宽优先：机器给了 low/high 就按区间判，否则退回人工频点 ±tol。"""
+    low = link.get("low_hz")
+    high = link.get("high_hz")
+    if low is not None:
+        low = float(low)
+        if high is not None:
+            return (low - tol) <= freq <= (float(high) + tol)
+        return abs(low - freq) <= tol
+    return abs(float(link["freq_hz"]) - freq) <= tol
 
 
 def _norm_name(s: str) -> str:
@@ -110,6 +140,58 @@ def find_tuning_for(sat_name: str) -> Optional[Dict[str, Any]]:
             if links:
                 return {"entry": entry, "downlink": links[0]}
     return None
+
+
+# ------------------------------------------------- 机器数据源（W92，SatNOGS）
+def machine_targets() -> List[Dict[str, Any]]:
+    """人工目录里声明了 ``norad_cat_id`` 的星（拉库目标，去重保序）。"""
+    out: List[Dict[str, Any]] = []
+    for name in list_link_sats():
+        entry = _load_table().get(name) or {}
+        norad = entry.get("norad_cat_id")
+        if norad is None:
+            continue
+        out.append({"norad_cat_id": int(norad), "key": name,
+                    "norad_name": entry.get("norad_name")})
+    return out
+
+
+def refresh_machine_links(now: Optional[float] = None,
+                          path: Optional[str] = None,
+                          opener=None) -> Dict[str, Any]:
+    """同步拉库（测试/工具用）；界面请走 :func:`start_machine_refresh`。"""
+    return sat_links_fetch.refresh(machine_targets(), path=path,
+                                   opener=opener, now=now)
+
+
+def start_machine_refresh(path: Optional[str] = None) -> None:
+    """后台拉库，立即返回；失败只记日志，状态由 :func:`machine_status_text` 读。"""
+    sat_links_fetch.start_background_refresh(machine_targets(), path=path)
+
+
+def machine_status(now: Optional[float] = None,
+                   path: Optional[str] = None) -> Dict[str, Any]:
+    """机器缓存状态（只读，零网络）：state/age_s/stale/text 等。"""
+    return sat_links_fetch.catalog_status(path=path, now=now)
+
+
+def machine_status_text(now: Optional[float] = None,
+                        path: Optional[str] = None) -> str:
+    """界面唯一一处状态文案（失败也只在这里说一句，不弹窗）。"""
+    return machine_status(now=now, path=path)["text"]
+
+
+def machine_entry_text(entry: Dict[str, Any]) -> str:
+    """单颗星的数据龄文案（信息卡用）；无机器数据时如实说未取到。"""
+    machine = entry.get("_machine") or {}
+    state = str(machine.get("state") or "absent")
+    if state == "ok":
+        age = sat_links_fetch.age_text(machine.get("age_s"))
+        return f"SatNOGS（{age}前）"
+    if state == "empty":
+        return "SatNOGS：该星无发射机记录"
+    detail = str(machine.get("detail") or "无机器缓存")
+    return f"未取到（{detail}）"
 
 
 def register_tool_registry(registry) -> None:
