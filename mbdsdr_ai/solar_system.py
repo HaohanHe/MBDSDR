@@ -148,12 +148,12 @@ def _file_valid(path: str) -> bool:
 
 
 def _network_disabled() -> bool:
-    """与 TLE 链路同一离线门（延迟导入避免模块环）。"""
+    """与 TLE 链路同一离线门（叶子模块 net_policy，无反向依赖）。"""
     try:
-        from .orbit import _network_disabled as _nd
+        from .net_policy import network_disabled
     except ImportError:  # 独立脚本运行
-        from orbit import _network_disabled as _nd
-    return _nd()
+        from net_policy import network_disabled
+    return network_disabled()
 
 
 def download_de421(timeout: int = 60) -> Optional[str]:
