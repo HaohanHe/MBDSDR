@@ -513,7 +513,11 @@ class LimeSDRBackend:
         key = getattr(self, "_owner_device_id", "")
         if key:
             return str(key)
-        return f"limesdr|index:{int(self.device_index)}"
+        # 键不许在这里手拼：统一入口算（无序列号时落到
+        # ``limesdr|index:<n>``，provisional 口径由 canonical 决定）。
+        from .device_identity import describe
+        return describe({"driver": "limesdr",
+                         "device_args": {"index": int(self.device_index)}}).key
 
     def _claim_hardware(self) -> bool:
         """先登记，冲突时**连库都不加载**。"""

@@ -479,7 +479,11 @@ class BladeRFBackend:
         key = getattr(self, "_owner_device_id", "")
         if key:
             return str(key)
-        return f"bladerf|label:{self.device_identifier or 'auto'}"
+        # 键不许在这里手拼：统一入口算（无序列号/URI/序号时落到
+        # ``bladerf|label:<打开串>``，provisional 口径由 canonical 决定）。
+        from .device_identity import describe
+        return describe({"driver": "bladerf",
+                         "label": self.device_identifier or "auto"}).key
 
     def _claim_hardware(self) -> bool:
         """先登记，冲突时**连库都不加载**。"""

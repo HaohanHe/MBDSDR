@@ -21,8 +21,10 @@
 故不扫；这与 ``tests/test_error_catalog_guard.py`` 「生产代码里不得出现
 野码」同一口径。
 
-已知未迁移的两处按「计数白名单」登记：归属线未改，本线只报不改；同一
-文件里**再**多拼一处照样红（白名单记的是允许处数，不是布尔豁免）。
+已知未迁移的登记已清零：``bladerf_params.py`` 与 ``limesuite_params.py``
+原先各有一处手拼占用键，已改调 ``device_identity.describe()``。白名单保留
+机制（按文件计处数、必须写理由），但当前为空——它的意义是「暂时登记、
+有归属线、有迁移方向」，不是长期允许两套实现。
 """
 from __future__ import annotations
 
@@ -39,17 +41,9 @@ IMPL_BASENAMES = frozenset({"device_identity.py", "sdr_backend.py"})
 SHAPES = ("|serial:", "|index:", "|label:", "uri:usb:")
 
 #: 已知未迁移：相对路径 -> (允许处数, 理由)。处数而不是布尔，防止白名单
-#: 变成黑洞：同文件新增第二处会红。
-_PRE_EXISTING = {
-    "mbdsdr_ai/bladerf_params.py": (
-        1,
-        "bladerf 参数线：无稳定标识时手拼 `bladerf|label:` 作占用键，"
-        "待其改调 device_identity.manager_key()/describe()（本线只报不改）"),
-    "mbdsdr_ai/limesuite_params.py": (
-        1,
-        "lime 参数线：无序列号时手拼 `limesdr|index:` 作占用键，"
-        "待其改调 device_identity.manager_key()/describe()（本线只报不改）"),
-}
+#: 变成黑洞：同文件新增第二处会红。当前已清零（bladerf/lime 两处已改调
+#: ``describe()``）；以后登记必须带归属线与迁移方向，不许长期挂着。
+_PRE_EXISTING: dict = {}
 
 
 # ------------------------------------------------------------------ 静态扫描
