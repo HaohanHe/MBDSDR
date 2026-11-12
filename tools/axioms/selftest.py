@@ -224,11 +224,19 @@ CASES: List[Case] = [
          {"mbdsdr_ai/core.py": "import PySide6\n"},
          {"mbdsdr_ai/core.py": "import json\n"},
          match="D1-qt-in-core"),
-    Case("D1", "desktop 内部裸模块名成环",
-         "desktop 用 sys.path 垫片裸名导入（from tokens import ...）；"
-         "环检测必须按裸名归一，且函数内延迟 import 也算边",
-         {"desktop/a.py": "from b import thing\n", "desktop/b.py": "def f():\n    from a import other\n"},
+    Case("D1", "模块级 import 环（裸名归一）",
+         "desktop 用 sys.path 垫片裸名导入（from tokens import ...）；环检测必须按裸名归一。"
+         "模块顶层两个方向都有 import 才算初始化顺序环",
+         {"desktop/a.py": "from b import thing\n", "desktop/b.py": "from a import other\n"},
          {"desktop/a.py": "from b import thing\n", "desktop/b.py": "thing = 1\n"},
+         match="D1-cycle"),
+    Case("D1", "顶层 import 与延迟 import 互指",
+         "把真环的一条边挪进函数体不能把环藏起来：A -> B 顶层、B -> A 延迟时仍必须报；"
+         "两个方向都延迟则不报（延迟 import 不参与模块初始化顺序）",
+         {"desktop/a.py": "from b import thing\n",
+          "desktop/b.py": "def f():\n    from a import other\n    return other\n"},
+         {"desktop/a.py": "def f():\n    from b import thing\n    return thing\n",
+          "desktop/b.py": "def g():\n    from a import other\n    return other\n"},
          match="D1-cycle"),
     Case("D1", "核心库反向依赖开发工具",
          "mbdsdr_ai 不得 import tools/（pip 装核心包的人拿不到开发工具）；"

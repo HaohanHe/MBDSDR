@@ -23,6 +23,7 @@ from .model import (
     _read,
     line_of,
     parse,
+    walk_with_parents,
 )
 
 #: 本检查器自己的产物。它们「是否存在于工作区」取决于有没有跑过，
@@ -94,9 +95,35 @@ def _imports(unit: Unit) -> List[Tuple[str, int]]:
 
 def _imports_of(path: str, tree: ast.Module) -> List[Tuple[str, int]]:
     """从已解析的语法树取 import 边（避免再读一次空文本的 ``Unit``）。"""
+    return _imports_of_impl(path, tree, module_level_only=False)
+
+
+def _module_level_imports(path: str, tree: ast.Module) -> List[Tuple[str, int]]:
+    """只在模块顶层执行的 import 边。
+
+    函数/类体内的延迟 import 不参与「初始化顺序」环：它们只在被调用时执行，
+    不会在模块导入阶段形成相互等待。把它们算成环，会把正常的延迟导入误报成
+    不可解的结构问题（实测 16 模块与 5 模块两个 SCC 的闭环边全部是这种）。
+    """
+    return _imports_of_impl(path, tree, module_level_only=True)
+
+
+def _imports_of_impl(path: str, tree: ast.Module, module_level_only: bool) -> List[Tuple[str, int]]:
     mod_parts = _rel_module(path).split(".")
+    parents = {id(n): p for n, p in walk_with_parents(tree)} if module_level_only else {}
     out: List[Tuple[str, int]] = []
+
+    def nested(node: ast.AST) -> bool:
+        p = parents.get(id(node))
+        while p is not None:
+            if isinstance(p, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Lambda)):
+                return True
+            p = parents.get(id(p))
+        return False
+
     for node in ast.walk(tree):
+        if module_level_only and nested(node):
+            continue
         if isinstance(node, ast.Import):
             for a in node.names:
                 out.append((a.name, node.lineno))
@@ -186,20 +213,25 @@ def collect_d1(repo: Repo) -> Dimension:
             "把 Qt 相关实现移到 desktop/，mbdsdr_ai 只保留可注入的接口。",
         ))
 
-    # 模块级环。三个口径缺一不可，否则环会被系统性漏报：
+    # 环的口径：只认**模块顶层执行**的 import。
+    #   * 函数体内的延迟 import 不算边：它们只在被调用时执行，不参与模块初始化
+    #     顺序；把它们算成环会把正常写法误报成不可解的结构问题（实测
+    #     builtin_tle_meta 16 模块、fengyun_sat 5 模块两个 SCC 的闭环边
+    #     全部来自函数体内 import）。
     #   * desktop 内部大量用裸模块名（``from tokens import tokens``），由
     #     desktop/__init__.py 的 sys.path 垫片支持；只认 ``desktop.`` 前缀
-    #     等于漏掉大半内部边（实测 62 条 vs 158 条）。
+    #     等于漏掉大半内部边。
     #   * 先建齐所有节点再加边：原实现边加边建图，指向「尚未入图节点」的边
     #     会被静默丢弃，环检测随文件遍历顺序漂移。
-    #   * 函数体内的延迟 import 同样算边：依赖关系没有变，只是检查器看不见。
     graph: Dict[str, Set[str]] = {}
+    lazy_graph: Dict[str, Set[str]] = {}
     desktop_bare: Dict[str, str] = {}
     for rel in modules:
         if not rel.startswith(("desktop/", "mbdsdr_ai/")):
             continue
         mod = _rel_module(rel)
         graph.setdefault(mod, set())
+        lazy_graph.setdefault(mod, set())
         if mod.startswith("desktop.") and mod.count(".") == 1:
             desktop_bare[mod.split(".", 1)[1]] = mod
 
@@ -210,33 +242,79 @@ def collect_d1(repo: Repo) -> Dimension:
             return desktop_bare[root] + ("." + rest if rest else "")
         return module
 
+    def _add_edges(dest: Dict[str, Set[str]], edges: List[Tuple[str, int]]) -> None:
+        for module, _ in edges:
+            target = _target(module)
+            if target.startswith(("desktop.", "mbdsdr_ai.")) and target in dest:
+                dest[mod].add(target)
+
     for rel in modules:
         if not rel.startswith(("desktop/", "mbdsdr_ai/")):
             continue
         mod = _rel_module(rel)
-        for module, _ in _imports_of(rel, modules[rel]):
-            target = _target(module)
-            if target.startswith(("desktop.", "mbdsdr_ai.")) and target in graph:
-                graph[mod].add(target)
+        _add_edges(graph, _module_level_imports(rel, modules[rel]))
+        _add_edges(lazy_graph, _imports_of(rel, modules[rel]))
     sccs = _tarjan(graph)
     # 环的「代表模块」必须稳定：集合/字典迭代顺序受字符串哈希随机化影响，
     # 同一棵树两次跑会选到不同成员，棘轮就会把一个环报成「新增 + 消失」。
     cycles = [sorted(c) for c in sccs if len(c) > 1]
+    covered = {m for c in cycles for m in c}
+    # 顶层/延迟混指：A -> B 是模块顶层 import，而 B -> A 只出现在函数体内。
+    # 这是「把真环的一条边挪进函数体」的痕迹——依赖仍在两个方向，延迟 import
+    # 只是把失败从导入期推迟到第一次调用，不能让环从报告里消失。
+    mixed: Dict[Tuple[str, str], Tuple[str, str]] = {}
+    for a in sorted(graph):
+        for b in sorted(graph[a]):
+            if a != b and a in lazy_graph.get(b, ()):
+                mixed[(a, b) if a < b else (b, a)] = (a, b)
+    mixed = {k: v for k, v in mixed.items() if not (k[0] in covered and k[1] in covered)}
+    for key, direction in sorted(mixed.items()):
+        cycles.append(list(key))
     cycles.sort(key=lambda c: c[0])
-    dim.facts.append(f"模块级强连通分量：{len(cycles)} 个")
+    lazy_cycles = [sorted(c) for c in _tarjan(lazy_graph) if len(c) > 1]
+    lazy_cycles.sort(key=lambda c: c[0])
+    dim.facts.append(
+        f"模块级 import 环：{len(cycles) - len(mixed)} 个；"
+        f"顶层/延迟互指对：{len(mixed)} 个；"
+        f"含函数内延迟 import 的强连通组：{len(lazy_cycles)} 个"
+        "（不构成初始化顺序环，列出供核对）"
+    )
+    for idx, comp in enumerate(lazy_cycles, 1):
+        members = set(comp)
+        inner = {(a, b) for a in comp for b in lazy_graph.get(a, ()) if b in members}
+        dim.facts.append(
+            f"延迟 import 强连通组 {idx}：{len(comp)} 成员 / {len(inner)} 条内部边 / "
+            f"最小割 {_min_edge_cut(comp, lazy_graph)}；成员：" + "、".join(comp)
+        )
     for comp in cycles:
+        top_src, top_dst = mixed.get((comp[0], comp[1]), ("", "")) if len(comp) == 2 else ("", "")
+        if top_src:
+            snippet = "顶层 import 与延迟 import 互指"
+            why = (
+                f"{top_src} -> {top_dst} 是模块顶层 import，而 {top_dst} -> {top_src} "
+                "只出现在函数体内。同一对模块两个方向都有依赖：延迟 import 只是把"
+                "失败从导入期推迟到第一次调用，不能让环消失；导入期一旦调到它，"
+                "就会读到半初始化的模块。"
+            )
+            fix = "把其中一个方向下沉到共同下层，或改成回调/依赖注入；不要靠把边挪进函数体。"
+        else:
+            snippet = "模块级 import 环"
+            why = (
+                f"与另外 {len(comp) - 1} 个模块互相依赖（代表模块取字典序最小者）："
+                + "、".join(comp[1:]) + "。任何一侧的初始化顺序都会影响另一侧；"
+                "单独改一处无法预测影响面。"
+            )
+            fix = (
+                "把常量/状态下沉到下层，或改依赖注入；不得用函数体内延迟 import "
+                "掩盖——依赖没有变，只是检查器看不见。"
+            )
         dim.findings.append(Finding(
             "D1-cycle", comp[0].replace(".", "/") + ".py", 0,
             # 指纹片段必须稳定：成员数量会随「修掉一个模块」变化，把它写进
             # snippet 会让同一个环在缩小一成员时被记成「消失 + 新增」。
             # 环的身份 = 代表模块（path）；成员数只写进 why 供人读。
-            "模块级 import 环",
-            f"与另外 {len(comp) - 1} 个模块互相依赖（代表模块取字典序最小者）："
-            + "、".join(comp[1:]) + "。任何一侧的初始化顺序都会影响另一侧；"
-            "单独改一处无法预测影响面。",
-            "把常量/状态下沉到下层，或改依赖注入；不得用函数体内延迟 import "
-            "掩盖——依赖没有变，只是检查器看不见。",
-            severity="review",
+            snippet,
+            why, fix, severity="review",
         ))
     return dim
 
@@ -274,6 +352,63 @@ def _tarjan(graph: Dict[str, Set[str]]) -> List[List[str]]:
         if node not in index:
             strong(node)
     return result
+
+
+def _maxflow(edges: Set[Tuple[str, str]], src: str, dst: str) -> int:
+    """单位容量最大流（Edmonds-Karp）。SCC 规模很小（≤16），够用。"""
+    flow: Dict[Tuple[str, str], int] = {}
+    cap: Dict[Tuple[str, str], int] = {}
+    for a, b in edges:
+        cap[(a, b)] = cap.get((a, b), 0) + 1
+        flow.setdefault((a, b), 0)
+        cap.setdefault((b, a), 0)
+        flow.setdefault((b, a), 0)
+    total = 0
+    while True:
+        parent: Dict[str, Optional[str]] = {src: None}
+        queue = [src]
+        while queue and dst not in parent:
+            u = queue.pop(0)
+            for (a, b), c in cap.items():
+                if a != u or c - flow[(a, b)] <= 0 or b in parent:
+                    continue
+                parent[b] = u
+                queue.append(b)
+                if b == dst:
+                    break
+        if dst not in parent:
+            return total
+        # 沿增广路推 1 单位
+        v = dst
+        while parent[v] is not None:
+            u = parent[v]
+            flow[(u, v)] = flow.get((u, v), 0) + 1
+            flow[(v, u)] = flow.get((v, u), 0) - 1
+            v = u
+        total += 1
+    return total
+
+
+def _min_edge_cut(comp: Sequence[str], graph: Dict[str, Set[str]]) -> int:
+    """把这一块打断最少需要删几条边（全局最小有向边割）。
+
+    ``min over s≠t maxflow(s,t)``：割集必须切断所有 s→t 路径；取所有点对的最小值
+    就是全局最小边割。这给出「环有多难拆」的可复核数字，而不是一句「有环」。
+    """
+    nodes = list(comp)
+    edges: Set[Tuple[str, str]] = {
+        (a, b) for a in nodes for b in graph.get(a, ()) if b in set(nodes)
+    }
+    if len(nodes) < 2:
+        return 0
+    out_deg = min(len([b for b in graph.get(a, ()) if b in set(nodes)]) for a in nodes)
+    best = out_deg
+    for i, s in enumerate(nodes):
+        for t in nodes[i + 1:]:
+            if best <= 1:
+                return best
+            best = min(best, _maxflow(edges, s, t))
+    return best
 
 
 # ────────────────────────────── D2 ──────────────────────────────
