@@ -104,6 +104,9 @@ class StationFix:
 
     ``source``: ``gnss`` / ``user`` / ``config`` / ``default`` / ``none``。
     ``accuracy_m``: 定位精度（米），可缺省；缺省表示「来源未提供」。
+    ``error``: 非空表示「配置在，但读不出来」（文件损坏/不可读/字段类型错）；
+    与「真没配」（source="none" 且 error 为空）区分开——前者应提示修复配置，
+    后者才提示去设置里配置。
     """
 
     lat: Optional[float] = None
@@ -113,12 +116,14 @@ class StationFix:
     accuracy_m: Optional[float] = None
     origin: str = ""
     captured_at: Optional[float] = None
+    error: str = ""
 
     def to_dict(self) -> Dict[str, Any]:
         return {
             "lat": self.lat, "lon": self.lon, "alt_m": self.alt_m,
             "source": self.source, "accuracy_m": self.accuracy_m,
             "origin": self.origin, "captured_at": self.captured_at,
+            "error": self.error,
         }
 
 
@@ -167,14 +172,24 @@ def station_from_config(path: Optional[str] = None) -> StationFix:
     """从 ``~/.mbdsdr/config.json`` 读取站址（source=config）。
 
     未配置/字段缺失返回 ``StationFix(source="none")``，绝不回退到任何城市。
+    文件存在但读不出来（损坏/不可读/字段类型错）时 ``error`` 非空，
+    调用方据此区分「真没配」与「配置坏了」。
     可选的 ``ground_station_accuracy_m`` 作为精度元数据。
     """
     cfg_path = path or os.path.expanduser("~/.mbdsdr/config.json")
     try:
         with open(cfg_path, "r", encoding="utf-8") as f:
             cfg = json.load(f)
-    except (OSError, ValueError, TypeError):
+    except FileNotFoundError:
         return StationFix(source="none", origin=cfg_path)
+    except (OSError, ValueError, TypeError) as exc:
+        return StationFix(
+            source="none", origin=cfg_path,
+            error=f"配置读取失败（{type(exc).__name__}: {exc}）")
+    if not isinstance(cfg, dict):
+        return StationFix(
+            source="none", origin=cfg_path,
+            error=f"配置顶层不是 JSON 对象，而是 {type(cfg).__name__}")
     lat = cfg.get("ground_station_lat")
     lon = cfg.get("ground_station_lon")
     if lat is None or lon is None:
@@ -186,8 +201,10 @@ def station_from_config(path: Optional[str] = None) -> StationFix:
             source="config", accuracy_m=cfg.get("ground_station_accuracy_m"),
             origin=cfg_path,
         )
-    except (TypeError, ValueError):
-        return StationFix(source="none", origin=cfg_path)
+    except (TypeError, ValueError) as exc:
+        return StationFix(
+            source="none", origin=cfg_path,
+            error=f"站址字段类型非法（{type(exc).__name__}: {exc}）")
 
 
 def resolve_station(gnss: Any = None, user: Any = None,
