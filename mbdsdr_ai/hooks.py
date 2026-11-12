@@ -26,10 +26,13 @@ Hooks：事件驱动的钩子系统，让 AI 可以监听和响应各种事件�
 
 import time
 import json
+import logging
 import threading
 from dataclasses import dataclass, field
 from typing import Dict, List, Any, Callable, Optional
 from enum import Enum
+
+logger = logging.getLogger(__name__)
 
 
 class EventType(str, Enum):
@@ -399,8 +402,9 @@ def create_logging_hook(log_file: str = None) -> Callable[[Event], Any]:
             try:
                 with open(log_file, 'a', encoding='utf-8') as f:
                     f.write(log_entry + '\n')
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning("事件日志写入失败（%s）：%s: %s",
+                               log_file, type(e).__name__, e)
         else:
             print(log_entry)
         return log_entry
