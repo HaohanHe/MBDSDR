@@ -924,5 +924,15 @@ python -c "from mbdsdr_ai.sdr_backend import HackRFBackend as K;be=K(device_inde
 | 没验什么 | 同进程 TX/RX 共用设备时的占用生命周期；跨进程 TX 持有 vs RX 连接 |
 | 怎么验（先实现再验） | ①实现引用计数（key → 本进程 hold 计数，计数归零才 release）；②假后端测试：同进程两个实例先后 connect 同一 key，第一个 disconnect 后 `get_active_owner(key)` 仍非 None，第二个 disconnect 后才为 None；③跨进程：TX 侧持有期间，另一进程 RX `connect()` 必须 False 且文案表明是占用；④真机：一台 Pluto/HackRF 同时走 RX 与 HAL TX 通道，两端各自收/发不互相踢掉。未实现前，见到「TX 能开、RX 也能开」不算 bug 结论，只是未覆盖 |
 
+### U.8 解码器长尾 MCP 工具（`mcp_server._lt_*` 共 7 个 handler）
+
+| 问题 | 答案 |
+| --- | --- |
+| 哪条路径 | `mbdsdr_ai/core/mcp_server.py:_lt_dab_fic()`、`mbdsdr_ai/core/mcp_server.py:_lt_nrsc5_parse()`、`mbdsdr_ai/core/mcp_server.py:_lt_rtl433_list()`、`mbdsdr_ai/core/mcp_server.py:_lt_rtl433_decode()`、`mbdsdr_ai/core/mcp_server.py:_lt_gk2a_headers()`、`mbdsdr_ai/core/mcp_server.py:_lt_fst4_encode()`、`mbdsdr_ai/core/mcp_server.py:_lt_bladerf_params()`；登记在 `_build_tool_table()`「解码器长尾」段，工具名为 `decoder_dab_fic_decode` / `decoder_nrsc5_frame_parse` / `decoder_rtl433_list` / `decoder_rtl433_decode` / `decoder_gk2a_parse_headers` / `decoder_fst4_encode_text` / `device_bladerf_params_query` |
+| 验了什么（合成钉扎） | `docs/learn/phase63/python-decoder-longtail.md` §2 记「合成钉扎可过」；§6 记 7 个长尾工具在表内且归属扩展域「解码器长尾」、该扩展域独立于冻结 8 域、默认/domain/detailed 三分支不丢工具、坏 hex/空输入/未知 device_type 返回诚实错误，`python3 -m pytest mbdsdr_ai/tests/ -q` 335 → 342 passed。handler 末尾仍固定回 `real_hardware_verified: false`（`mcp_server.py` 各 `_lt_*` 的 return），未因合成用例通过而改写 |
+| 没验什么 | §5 PENDING 原文逐项：DAB 需真实 DAB 信号 + 已分帧 ETI；NRSC-5 需真实 HD Radio 信号；rtl433 需真实 433.92MHz 设备报文（`decoder_rtl433_list` 只返回协议元数据，不碰硬件）；GK-2A 需真实 LRIT 下行；FST4 需真机收发并待 WSJT-X 互操作；bladeRF 参数表未与真机 libbladeRF 读数逐项比对（设备连接由 `BladeRFBackend` 另判，见 U.5）。以上全部未在真机上跑过 |
+| 怎么验 | 通用调用（已实测可调用）：`echo '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"<工具名>","arguments":{...}}}' \| python -m mbdsdr_ai.core.mcp_server`。①DAB：RTL-SDR 调本地 DAB 复用（如 12B/225.648MHz），`rtl_tcp -f 225648000 -s 2048000` 录 IQ 后按 EN 300 401 取 FIC 字节 hex → `decoder_dab_fic_decode`；通过=`ensemble.label`/`services` 与同频商用 DAB 收音机显示的台名/服务列表一致且无 `error`；不通过=返回 `bad_hex`、服务列表为空或台名不符。②NRSC-5：RTL-SDR 调本地 HD Radio 台，取一帧 L3/HDLC 字节 hex → `decoder_nrsc5_frame_parse`；通过=PSD 节目文字与收音机显示一致；不通过=空 PSD 或字段不符。③rtl433：真实 433.92MHz 传感器（如 Oregon 天气站）在场，`rtl_433 -f 433920000 -F json` 能收到同一设备；把该报文原始字节 hex 与 `decoder_rtl433_list` 给出的 device_type 传给 `decoder_rtl433_decode`；通过=设备 id/温度/湿度与传感器本体显示或 `rtl_433` 输出一致；不通过=`message_not_matched` 或数值不一致。④GK-2A：SDR 在 1692.14MHz 收 GK-2A LRIT 下行，取文件头缓冲 hex → `decoder_gk2a_parse_headers`；通过=输出的列数/行数/位深/分段数与随后落盘的 LRIT 图像实际尺寸一致且图像能按该尺寸打开；不通过=尺寸与落盘文件不符或字段异常。⑤FST4：用本工具生成 160 tones，按 FST4 时序在 15s 时隙内由 HF 电台（或声卡回环）发出，另一台接收机用 WSJT-X 解码；通过=WSJT-X 解出原文（如 `CQ BI1AAA OM74`）且无 CRC 错误；不通过=无解码或文本不一致。⑥bladeRF：接 bladeRF 2.0 micro（或 1.0），用 `bladeRF-cli -e "info"` 及 libbladeRF 的 `bladerf_get_frequency_range`/`bladerf_get_sample_rate_range` 读数与 `device_bladerf_params_query` 返回值逐项比对；通过=各 min/max 一致；不通过=任一量程不符。每项必须把「设备型号 + 命令 + 实际输出」贴回本条目才算验过，只跑合成用例不算 |
+
+
 
 

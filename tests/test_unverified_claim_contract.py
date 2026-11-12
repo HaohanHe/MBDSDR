@@ -18,11 +18,14 @@
     匹配（必须指名道姓，存在任意一条 U 不算覆盖）；标「待立项」的 U.7 记录的是
     还没接线的待办，不能给「代码已接」背书，不计入覆盖；
   * 每条 U 条目还必须写全①哪条路径②验了什么③没验什么④怎么验，缺项即红；
-  * 附 U 标题与纪律段、本检查自身是规则原文，显式豁免并写明理由。
+  * 附 U 标题与纪律段、本检查自身是规则原文，显式豁免并写明理由；
+  * 模块级注释按所在连续段落（前后空行之间）里的函数名判定——一处注释可能
+    同时声明整段工具，必须对上一个登记的真实 handler；一条 U 登记多个 handler
+    时（U.8 的 7 个 `_lt_*`）允许在所在函数范围内对上登记名，单符号条目不放宽。
 
-现状中已存在的缺口不为了变绿去改它们（按任务要求只报不动），逐条列在
-`_PENDING` 里并写明缺什么；该条必须仍然存在且仍未覆盖，补上 U 条目后本检查
-会红并提示销账（棘轮）。新增缺口不在 `_PENDING` 里 → 红。
+历史缺口（`mcp_server.py` 解码器长尾）已由 U.8 补齐，`_PENDING` 现为空；
+新缺口不再给白名单，直接红。`_PENDING` 机制保留给将来「先报后补」的存量缺口：
+条目必须仍然存在且仍未覆盖，补上 U 后本检查会红并提示销账（棘轮）。
 """
 import ast
 import os
@@ -40,13 +43,10 @@ CELL_KEYS = ("哪条路径", "验了什么", "没验什么", "怎么验")
 _PATH_RE = re.compile(r"([\w./]+\.py):([A-Za-z_][\w.]*)")
 _TOKEN_RE = re.compile(r"[A-Za-z][A-Za-z0-9_]{3,}")
 
-# 现状缺口（不修改原文件，只登记待补）。锚点是该行必须包含的字面量，
-# 行号会漂，字面量不会；条目消失或变得「已被 U 覆盖」都说明该销账了。
-_PENDING = [
-    ("mbdsdr_ai/core/mcp_server.py", "真机未验 -> PENDING",
-     "缺：附 U 条目（decoder 长尾工具「合成钉扎可过、真机未验」；该处引用的验证"
-     "状态在 docs/learn/phase63/python-decoder-longtail.md，不在附 U）"),
-]
+# 存量缺口白名单（棘轮）。当前为空：mcp_server 解码器长尾已由 U.8 补齐。
+# 将来「先报后补」时在此登记：(文件, 该行锚点, 缺什么)。锚点是字面量，行号会漂；
+# 条目消失或变得「已被 U 覆盖」都说明该销账了。
+_PENDING = []
 
 # 显式豁免：文件/区段 + 理由（必须能打印出来，不是默默跳过）。
 _SELF_EXEMPT = "检查自身的判据文本与规则说明，不是能力声明"
@@ -95,16 +95,18 @@ def _u_entries():
     parsed = []
     for e in claims:
         path_line = next((ln for ln in e["body"] if ln.startswith("| 哪条路径")), "")
-        m = _PATH_RE.search(path_line)
-        assert m, (
+        matches = list(_PATH_RE.finditer(path_line))
+        assert matches, (
             f"附 U {e['id']}（{REGISTER}:{e['at']}）的「哪条路径」解析不到 "
             f"`file.py:符号`，无法按路径对账：{path_line[:80]!r}")
-        symbol = m.group(2).split(".")[0]
+        # 一条 U 可以登记同文件里的多个 handler（如 U.8 的 7 个 _lt_*）。
+        symbols = [m.group(2).split(".")[0] for m in matches]
         missing = [k for k in CELL_KEYS
                    if not any(ln.startswith(f"| {k}") for ln in e["body"])]
         parsed.append({
-            "id": e["id"], "file": m.group(1), "symbol": symbol,
-            "aliases": _aliases(symbol), "missing_cells": missing, "at": e["at"],
+            "id": e["id"], "file": matches[0].group(1), "symbols": symbols,
+            "aliases": set().union(*(_aliases(s) for s in symbols)),
+            "missing_cells": missing, "at": e["at"],
             # 「待立项」记录的是还没接线的待办，不能给「代码已接」背书。
             "covers": "待立项" not in e["title"],
         })
@@ -138,7 +140,10 @@ def _py_context(rel, lines, lineno):
     """命中行的判定上下文：命中行本身；若落在 docstring 内，取整段 docstring。
 
     不取整个函数体——大函数里顺带出现的别的后端名会把「这里没点名」洗成
-    「已覆盖」（mcp_server 的注释块就是这种形态）。
+    「已覆盖」。模块级注释例外：取前后最近空行之间的整段（段落），这样一处
+    注释声明整段工具时能对上一个真实 handler。
+    返回 (别名匹配上下文, 行/类级符号, 所在函数或段落内符号)；第三项只对登记了
+    多个 handler 的 U 条目开放（例 U.8），单符号条目仍只认行/类级符号。
     """
     src = "\n".join(lines)
     try:
@@ -148,6 +153,23 @@ def _py_context(rel, lines, lineno):
                              "无法判定所在后端，按失败处理") from e
     symbols = set(_enclosing_names(tree, lineno))
     context = lines[lineno - 1]
+    enclosing = [node for node in ast.walk(tree)
+                 if isinstance(node, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef))
+                 and node.lineno <= lineno
+                 <= getattr(node, "end_lineno", node.lineno)]
+    if not enclosing:
+        lo = lineno - 1
+        while lo > 0 and lines[lo - 1].strip():
+            lo -= 1
+        hi = lineno
+        while hi < len(lines) and lines[hi].strip():
+            hi += 1
+        paragraph = "\n".join(lines[lo:hi])
+        scope = symbols | set(re.findall(r"[A-Za-z_]\w*", paragraph))
+        return context, scope, scope
+    innermost = max(enclosing, key=lambda n: n.lineno)
+    scope = set(re.findall(r"[A-Za-z_]\w*",
+                           ast.get_source_segment(src, innermost) or ""))
     for node in ast.walk(tree):
         if not isinstance(node, (ast.Module, ast.ClassDef,
                                  ast.FunctionDef, ast.AsyncFunctionDef)):
@@ -163,7 +185,7 @@ def _py_context(rel, lines, lineno):
                 context = "\n".join(lines[first.lineno - 1:hi])
                 break
     symbols |= set(re.findall(r"([A-Za-z_]\w*Backend)\b", context))
-    return context, symbols
+    return context, symbols, scope
 
 
 def _entry_matches(entry, token):
@@ -184,7 +206,12 @@ def _verdict(occ, entries):
     usable = [e for e in entries if e["covers"]]
     same_file = [e for e in usable if e["file"] == occ["rel"]]
     if same_file:
-        hit = [e["id"] for e in same_file if e["symbol"] in occ["symbols"]]
+        hit = [e["id"] for e in same_file
+               if set(e["symbols"]) & occ["symbols"]
+               # 一条 U 登记多个 handler 时（如 U.8 的 7 个 _lt_*），
+               # 允许在其所在函数范围内找登记过的名字；单符号条目不放宽。
+               or (len(e["symbols"]) > 1
+                   and set(e["symbols"]) & occ["scope_symbols"])]
         if hit:
             return True, hit, ""
         return False, [], (
@@ -223,11 +250,11 @@ def _scan(entries):
                 exemptions.append((rel, i, _RULE_TEXT_EXEMPT))
                 continue
             if rel.endswith(".py"):
-                context, symbols = _py_context(rel, file_lines, i)
+                context, symbols, scope = _py_context(rel, file_lines, i)
             else:
-                context, symbols = line, set()
+                context, symbols, scope = line, set(), set()
             occ = {"rel": rel, "line": i, "text": line.strip(),
-                   "context": context, "symbols": symbols}
+                   "context": context, "symbols": symbols, "scope_symbols": scope}
             ok, hit, why = _verdict(occ, entries)
             if ok:
                 covered.append((rel, i, hit))
