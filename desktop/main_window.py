@@ -506,7 +506,7 @@ from PySide6.QtWidgets import (
     QFrame, QSizePolicy, QDialog, QDialogButtonBox, QLineEdit,
     QGroupBox, QFormLayout, QSlider, QSpinBox, QCheckBox,
     QDoubleSpinBox, QProgressDialog, QDockWidget, QScrollArea,
-    QStackedWidget, QToolButton, QStyle, QToolTip, QGridLayout,
+    QStackedWidget, QStackedLayout, QToolButton, QStyle, QToolTip, QGridLayout,
 )
 
 # 确保能导入同目录模块
@@ -2148,12 +2148,31 @@ class MainWindow(QMainWindow):
         _rc.addWidget(self.right_nav, 0, Qt.AlignRight)
         _rc.addWidget(right_tab, 1)
 
+        # 右栏两态：展开态整根 right_col / 收窄态 48px 图标条。QStackedLayout
+        # 的最小尺寸只取当前页，所以收起后第三栏硬下限自然从 326 降到 48，
+        # 不需要改窗口最小宽公式（那条已在构造期按展开态算完并冻结）。
+        self._right_col = right_col
+        self._right_stack_host = QWidget()
+        self._right_stack_host.setObjectName("rightColumnHost")
+        self._right_stack = QStackedLayout(self._right_stack_host)
+        self._right_stack.setContentsMargins(0, 0, 0, 0)
+        self._right_stack.addWidget(right_col)
+        self.right_strip = self._build_right_strip()
+        self._right_stack.addWidget(self.right_strip)
+        self._right_collapsed = False
+        self._right_overlay = None
+        self._right_strip_expanded = False
+        self._expanded_column_sizes = None
+        self._saving_state = False
+        self._mode_update_pending = False
+        self._right_collapse_breakpoint = 0  # 构造期末尾按 _need 冻结
+
         self._main_splitter = QSplitter(Qt.Horizontal)
         self._main_splitter.setHandleWidth(tokens().SIZE["splitter_handle"])
         self._main_splitter.setChildrenCollapsible(False)
         self._main_splitter.addWidget(left_tab)
         self._main_splitter.addWidget(center_widget)
-        self._main_splitter.addWidget(right_col)
+        self._main_splitter.addWidget(self._right_stack_host)
         # 权重来源（截图三栏均分死黑事故）：增量由左栏与中栏平分——左栏是
         # 天空/频谱工作面，中栏是时空底图；右栏控制台固定基线。原先增量
         # 只给左栏，宽屏上把中栏地图压成 240px（2026-11-10 实测）。
@@ -2168,15 +2187,22 @@ class MainWindow(QMainWindow):
         # 窗口不允许窄于三栏的真实下限：否则右栏会被窗口右边缘直接裁掉，
         # 只剩一条边（2026-11-10 用户截图「有的东西没展示全」就是这样）。
         # 屏幕放得下就按三栏下限兜底；屏幕更小则退回可用区 94%，不超屏。
+        # 这里的 _need 同时是**收窄断点**：内容宽 < _need 时三栏连各自的
+        # 舒适最小宽都排不下，右栏收成 48px 图标条。断点只在此处算一次并
+        # 冻结——收窄后第三栏显式最小宽变 48，若按显式下限重算会得到约
+        # 700，于是「852 ≥ 700 展开 → 852 < 978 收窄」来回打摆。
         try:
             _g = QGuiApplication.primaryScreen().availableGeometry()
             _need = (sum(self._main_splitter.widget(i).minimumSizeHint().width()
                          for i in range(3))
                      + self._main_splitter.handleWidth() * 2)
+            if _need > 0:
+                self._right_collapse_breakpoint = int(_need)
             self.setMinimumWidth(max(
                 self.minimumWidth(), min(int(_need), int(_g.width() * 0.94))))
         except (AttributeError, RuntimeError):
             pass
+        self._main_splitter.splitterMoved.connect(self._on_main_splitter_moved)
 
         # ------------------------------------------------------------------
         # root：顶栏 + 三栏 + 底坞
@@ -3902,6 +3928,20 @@ class MainWindow(QMainWindow):
                     and (obj is card or obj.parentWidget() is card)):
                 card.setVisible(False)
                 return True
+            # 右栏浮层：点外部收起；点窄条本身不关（那一下是「展开/收起」
+            # 的开关，关了又开等于没反应）。
+            ov = getattr(self, "_right_overlay", None)
+            if ov is not None and ov.isVisible() and isinstance(obj, QWidget):
+                strip = getattr(self, "right_strip", None)
+                on_strip = strip is not None and (
+                    obj is strip or strip.isAncestorOf(obj))
+                if not on_strip and obj is not ov and not ov.isAncestorOf(obj):
+                    self._close_right_overlay()
+        elif etype == QEvent.KeyPress:
+            # Esc 关闭右栏浮层（浮层不抢焦点，所以只能在这里拦）。
+            if (event.key() == Qt.Key_Escape
+                    and self._close_right_overlay_if_open()):
+                return True
         elif etype == QEvent.WindowStateChange:
             if obj is getattr(self, "_planetarium_window", None):
                 self._sync_fullscreen_btn()
@@ -3918,6 +3958,8 @@ class MainWindow(QMainWindow):
     def resizeEvent(self, event):  # noqa: N802 (Qt 命名)
         super().resizeEvent(event)
         self._apply_responsive_chrome()
+        self._schedule_right_column_mode_update()
+        self._position_right_overlay()
 
     def changeEvent(self, event):  # noqa: N802 (Qt 命名)
         """窗口状态变化（全屏/最大化）后同步星象仪按钮文案。
@@ -5675,6 +5717,7 @@ class MainWindow(QMainWindow):
         scr = QGuiApplication.primaryScreen()
         if scr is None or self.isFullScreen() or self.isMaximized():
             self._apply_pending_column_sizes()
+            self._schedule_right_column_mode_update()
             return
         g = scr.availableGeometry()
         w = min(self.width(), int(g.width() * 0.96), max(1, g.width() - 8))
@@ -5690,6 +5733,7 @@ class MainWindow(QMainWindow):
             self.move(x, y)
         # 尺寸收口之后再落三栏比例：构造期拿不到真实可用宽，这里才有。
         self._apply_pending_column_sizes()
+        self._schedule_right_column_mode_update()
 
     def showEvent(self, event) -> None:  # noqa: N802 (Qt 命名)
         """首次显示后再收一次口：QSettings 恢复几何发生在 show 之后，
@@ -7173,6 +7217,8 @@ class MainWindow(QMainWindow):
 
     @Slot(bool, str)
     def _on_connection_for_ui(self, connected: bool, message: str):
+        # 窄条状态灯跟着真实连接态走（颜色/可访问名/tooltip 三处同步）。
+        self._sync_right_strip_link(bool(connected))
         if connected:
             self.conn_label.setText(f"  状态: {message}  ")
             self.conn_label.setStyleSheet(self._conn_label_qss(True))
@@ -8585,6 +8631,8 @@ class MainWindow(QMainWindow):
         # 对齐按钮时触发的 record_toggled 会被 _record_guard 挡回（回声），
         # 因此 _apply_recording 只在下面执行一次——成功与失败都不会重复执行。
         self._apply_recording(target)
+        # 窄条录音键不在 record_toggled 的回声链里，按真实状态单独对齐。
+        self._sync_right_strip_record()
 
     # ========================================================================
     # (A/B/C) 真实 IQ 数据流：频谱 / baseband 录制 / 声卡解调输出
@@ -9727,11 +9775,14 @@ class MainWindow(QMainWindow):
     def _apply_recording(self, on: bool):
         """统一录制状态切换（幂等）。on=True 开始，on=False 停止并存盘。"""
         if on == self._recording:
+            self._sync_right_strip_record()
             return
         if on:
             self._start_recording()
         else:
             self._stop_recording()
+        # 开始/停止的所有出口（含内部中止）都经过这里，窄条录音键一次对齐。
+        self._sync_right_strip_record()
 
     def _open_record_segment(self, path: str, sr: float, center_hz: float,
                              start_time: str, index: int) -> bool:
@@ -11644,17 +11695,346 @@ class MainWindow(QMainWindow):
             return
         self._pending_column_sizes = None
         widths, reason = self._scale_three_column_sizes(pending, avail)
-        if widths is None:
-            logger.warning(
-                "三栏比例无法落地（原值=%r，可用宽=%d）：%s；改用默认三栏 %r",
-                pending, avail, reason, list(self._DEFAULT_THREE_COLUMN_SIZES))
-            sp.setSizes(list(self._DEFAULT_THREE_COLUMN_SIZES))
+        # 程序化落地不算「用户拖动」：屏蔽 splitterMoved，否则收窄记忆会
+        # 被归一化后的宽度覆盖（右栏原宽就此作废）。
+        sp.blockSignals(True)
+        try:
+            if widths is None:
+                logger.warning(
+                    "三栏比例无法落地（原值=%r，可用宽=%d）：%s；改用默认三栏 %r",
+                    pending, avail, reason,
+                    list(self._DEFAULT_THREE_COLUMN_SIZES))
+                sp.setSizes(list(self._DEFAULT_THREE_COLUMN_SIZES))
+            else:
+                if widths != list(pending):
+                    logger.info(
+                        "三栏比例超出可用宽度（原值=%r，可用宽=%d）：等比缩放为 %r",
+                        pending, avail, widths)
+                sp.setSizes(widths)
+        finally:
+            sp.blockSignals(False)
+
+    # ------------------------------------------------------------------
+    # 右栏窄宽收窄（用户裁定候选 A）：内容宽不足时右栏收成 48px 图标条
+    # ------------------------------------------------------------------
+    #: 窄条宽度 = 44（touch_manager.TOUCH_TARGET_MIN，对标 Apple HIG 44pt）
+    #: + 左右各 2px 余量（与星象仪浮层宽度注释同一口径：「留 2px 余量」）。
+    #: 4 < 触控手柄 10，命中区不会压过 splitter handle。
+    _RIGHT_STRIP_W = 48
+
+    def _right_content_width(self) -> int:
+        """三栏真实可用宽 = splitter 宽 − 2×handleWidth（口径同落地函数）。"""
+        sp = getattr(self, "_main_splitter", None)
+        if sp is None:
+            return 0
+        return max(0, int(sp.width()) - int(sp.handleWidth()) * 2)
+
+    @staticmethod
+    def _right_should_collapse(content_width: int, breakpoint: int) -> bool:
+        """收窄判定（纯函数）：内容宽严格小于断点才收窄，等于时够放三栏。"""
+        return 0 < content_width < breakpoint
+
+    def _build_right_strip(self) -> QWidget:
+        """48px 图标条：只保留连接状态灯 / 录音键 / 展开入口。"""
+        strip = QFrame()
+        strip.setObjectName("rightCollapseStrip")
+        strip.setFixedWidth(self._RIGHT_STRIP_W)
+        strip.setAttribute(Qt.WA_StyledBackground, True)
+        strip.setStyleSheet(
+            "QFrame#rightCollapseStrip {"
+            f" background-color: {self._tok('card_1', '#1f1f1f')};"
+            f" border: 1px solid {self._tok('gray_400', '#585c63')};"
+            " border-radius: 8px; }"
+            "QToolButton { border: none; background: transparent; }")
+        lay = QVBoxLayout(strip)
+        lay.setContentsMargins(2, 2, 2, 2)   # 44 + 2×2 = 48
+        lay.setSpacing(4)
+        lay.setAlignment(Qt.AlignTop)
+
+        self.right_strip_lamp = QToolButton()
+        self.right_strip_lamp.setObjectName("rightStripLamp")
+        self.right_strip_lamp.setFixedSize(44, 44)
+        self.right_strip_lamp.setToolButtonStyle(Qt.ToolButtonTextOnly)
+        self.right_strip_lamp.clicked.connect(self._toggle_right_overlay)
+
+        self.right_strip_record = QToolButton()
+        self.right_strip_record.setObjectName("rightStripRecord")
+        self.right_strip_record.setFixedSize(44, 44)
+        self.right_strip_record.setCheckable(True)
+        self.right_strip_record.clicked.connect(self._toggle_record)
+
+        self.right_strip_expand = QToolButton()
+        self.right_strip_expand.setObjectName("rightStripExpand")
+        self.right_strip_expand.setFixedSize(44, 44)
+        self.right_strip_expand.setText("◀")
+        self.right_strip_expand.setAccessibleName("展开右栏")
+        self.right_strip_expand.setToolTip("展开右栏面板（临时浮层，Esc 关闭）")
+        self.right_strip_expand.clicked.connect(self._toggle_right_overlay)
+
+        for btn in (self.right_strip_lamp, self.right_strip_record,
+                    self.right_strip_expand):
+            lay.addWidget(btn)
+        self._sync_right_strip_link(False)
+        self._sync_right_strip_record()
+        return strip
+
+    def _sync_right_strip_link(self, connected: bool) -> None:
+        """状态灯只说真话：颜色 + 可访问名 + tooltip 同时更新。"""
+        lamp = getattr(self, "right_strip_lamp", None)
+        if lamp is None:
             return
-        if widths != list(pending):
-            logger.info(
-                "三栏比例超出可用宽度（原值=%r，可用宽=%d）：等比缩放为 %r",
-                pending, avail, widths)
-        sp.setSizes(widths)
+        state = "已连接" if connected else "未连接"
+        lamp.setText("●")
+        lamp.setStyleSheet(
+            "QToolButton#rightStripLamp { border: none;"
+            f" color: {self._tok('success' if connected else 'disabled_gray', '#599788')};"
+            " font-size: 18pt; }")
+        lamp.setAccessibleName(f"连接状态：{state}")
+        lamp.setToolTip(f"连接状态：{state}（点击展开右栏）")
+
+    def _sync_right_strip_record(self) -> None:
+        """录音键的可访问状态：不靠红点，读屏也能知道在不在录。"""
+        btn = getattr(self, "right_strip_record", None)
+        if btn is None:
+            return
+        rec = bool(getattr(self, "_recording", False))
+        btn.setChecked(rec)
+        btn.setText("■" if rec else "●")
+        btn.setAccessibleName("录音")
+        btn.setAccessibleDescription("录制中" if rec else "未录制")
+        btn.setToolTip("停止录音（录制中）" if rec else "开始录音")
+        btn.setStyleSheet(
+            "QToolButton#rightStripRecord { border: none;"
+            f" color: {self._tok('danger', '#B85C5C') if rec else self._tok('text_primary', '#FFFFFF')};"
+            " font-size: 16pt; }")
+
+    def _schedule_right_column_mode_update(self) -> None:
+        """把收窄判定推迟到本次 resize 落地之后。
+
+        resizeEvent 里直接判定会读到**尚未重排**的三栏尺寸（实测 852 时
+        读到 [286,240,326]，Qt 落定后是 [268,245,339]），一旦用这个值
+        当基准，宽窗恢复时整条分布都会和旧版差十几像素，5 张基线全部漂移。
+        """
+        if getattr(self, "_mode_update_pending", False):
+            return
+        self._mode_update_pending = True
+        QTimer.singleShot(0, self._run_right_column_mode_update)
+
+    def _run_right_column_mode_update(self) -> None:
+        self._mode_update_pending = False
+        self._update_right_column_mode()
+
+    def _update_right_column_mode(self) -> None:
+        """按内容宽切换右栏展开/窄条（唯一入口，幂等；未上屏不动）。"""
+        breakpoint = getattr(self, "_right_collapse_breakpoint", 0)
+        if breakpoint <= 0 or not self.isVisible():
+            return
+        if getattr(self, "_main_splitter", None) is None:
+            return
+        want = self._right_should_collapse(
+            self._right_content_width(), breakpoint)
+        if want == getattr(self, "_right_collapsed", False):
+            if not want:
+                # 展开态每次落地都把 Qt 的真实分配记成基准：窗口变宽后
+                # 左:中比例会随 sizeHint 微调，收窄/展开来回应保住它。
+                sizes = [int(v) for v in self._main_splitter.sizes()]
+                if len(sizes) == 3 and all(v > self._RIGHT_STRIP_W
+                                           for v in sizes):
+                    self._expanded_column_sizes = sizes
+            return
+        if want:
+            self._collapse_right_column()
+        else:
+            self._expand_right_column_inline()
+
+    def _collapse_right_column(self) -> None:
+        # 收窄发生在内容宽 < 断点的窗口上，此刻三栏已被 Qt 压到下限，
+        # [286,240,326] 这种比例不是宽窗的自然分配——记成基准会把
+        # 0.5437 当默认左:中比例，展开后 5 张基线全部漂移。基准只由
+        # 展开态落地（_update_right_column_mode）与用户拖动维护。
+        self._close_right_overlay()
+        self._right_collapsed = True
+        self._right_stack.setCurrentWidget(self.right_strip)
+        # QStackedLayout 的 minimumSizeHint 取所有页的最大值（实测仍是 326），
+        # 只有显式 minimumWidth 才能让 splitter 真的收到 48。
+        self._right_stack_host.setMinimumWidth(self._RIGHT_STRIP_W)
+        self._apply_strip_sizes()
+        logger.info(
+            "右栏收窄：内容宽=%d < 断点 %d，第三栏 %dpx 图标条（记忆右栏宽=%s）",
+            self._right_content_width(), self._right_collapse_breakpoint,
+            self._RIGHT_STRIP_W,
+            (self._expanded_column_sizes or ["默认"])[2])
+
+    def _apply_strip_sizes(self) -> None:
+        """让出的 278px 按原左:中比例分给左/中，不改窗口最小宽。"""
+        sp = self._main_splitter
+        avail = self._right_content_width()
+        if avail <= 0:
+            return
+        rest = max(1, avail - self._RIGHT_STRIP_W)
+        base = self._expanded_column_sizes or list(
+            self._DEFAULT_THREE_COLUMN_SIZES)
+        total = max(1, base[0] + base[1])
+        left = int(round(rest * base[0] / total))
+        mins = self._three_column_min_widths()
+        left = max(mins[0], min(left, rest - mins[1]))
+        sp.blockSignals(True)
+        try:
+            sp.setSizes([left, rest - left, self._RIGHT_STRIP_W])
+        finally:
+            sp.blockSignals(False)
+
+    def _expand_right_column_inline(self) -> None:
+        """内容宽够放下三栏时内联恢复；宽度取持久化/上次拖动的三值。"""
+        sp = self._main_splitter
+        avail = self._right_content_width()
+        self._close_right_overlay()
+        self._right_collapsed = False
+        self._right_stack.setCurrentWidget(self._right_col)
+        # 还原成「显式最小宽 0」，splitter 才会重新按右栏 326 的 minimumSizeHint 兜底。
+        self._right_stack_host.setMinimumWidth(0)
+        base = [int(v) for v in (self._expanded_column_sizes
+                                 or self._DEFAULT_THREE_COLUMN_SIZES)]
+        mins = self._three_column_min_widths()
+        # 复刻收窄上线前 Qt 的分配结果（实测 HEAD：1000→[391,275,326]、
+        # 1600→[744,522,326]、1920→[932,654,326]）：右栏 stretch=0、停在
+        # 自身宽度（不低于其硬下限），左/中按基准三值里的比例切分剩余宽度。
+        # 「按当前收窄几何比例分」会得到 [688,578,326]，宽窗 5 张基线整体漂移。
+        right = max(base[2], mins[2])
+        rest = max(1, avail - right)
+        pool = max(1, base[0] + base[1])
+        left = int(round(rest * base[0] / pool))
+        left = max(mins[0], min(left, rest - mins[1]))
+        widths = [left, rest - left, right]
+        sp.blockSignals(True)
+        try:
+            sp.setSizes(widths)
+        finally:
+            sp.blockSignals(False)
+        logger.info("右栏展开：内容宽=%d，基准三值=%r → %r",
+                    avail, base, widths)
+
+    def _on_main_splitter_moved(self, _pos: int, _index: int) -> None:
+        """展开态拖动即记住三值；收窄态的 48 绝不写进记忆。"""
+        if getattr(self, "_right_collapsed", False):
+            return
+        sizes = [int(v) for v in self._main_splitter.sizes()]
+        if len(sizes) == 3 and all(v > 0 for v in sizes):
+            self._expanded_column_sizes = sizes
+
+    # ---- 收窄态下的一键展开：临时浮层（不持久化、不动 three_column_sizes）----
+    def _toggle_right_overlay(self) -> None:
+        if self._right_overlay is not None and self._right_overlay.isVisible():
+            self._close_right_overlay()
+            return
+        if getattr(self, "_right_collapsed", False):
+            self._open_right_overlay()
+
+    def _open_right_overlay(self) -> None:
+        """把整根右栏临时搬进贴右缘的浮层：不改 splitter 尺寸。
+
+        内容宽 < 978 时内联展开物理上不可行（404+240+326 = 970 > 可用宽），
+        Qt 会把刚展开的栏再压回去。浮层是唯一能真的看到整根右栏的方式。
+        """
+        if self._right_overlay is not None:
+            return
+        host = self.centralWidget() or self
+        ov = QFrame(host)
+        ov.setObjectName("rightOverlay")
+        ov.setFrameShape(QFrame.NoFrame)
+        ov.setAttribute(Qt.WA_StyledBackground, True)
+        # 不抢焦点：浮层本身不接受焦点，也不主动 setFocus。
+        ov.setFocusPolicy(Qt.NoFocus)
+        ov.setStyleSheet(
+            "QFrame#rightOverlay {"
+            f" background-color: {self._tok('card_2', '#2b2c2f')};"
+            f" border: 1px solid {self._tok('gray_400', '#585c63')};"
+            " border-radius: 10px; }")
+        lay = QVBoxLayout(ov)
+        lay.setContentsMargins(6, 6, 6, 6)
+        lay.setSpacing(4)
+        head = QHBoxLayout()
+        title = QLabel("右栏")
+        close = QToolButton()
+        close.setText("收起 ›")
+        close.setAccessibleName("收起右栏")
+        close.setToolTip("收起右栏浮层（Esc）")
+        close.clicked.connect(self._close_right_overlay)
+        head.addWidget(title, 1)
+        head.addWidget(close)
+        lay.addLayout(head)
+        self._right_stack.removeWidget(self._right_col)
+        self._right_col.setParent(ov)
+        lay.addWidget(self._right_col, 1)
+        self._right_overlay = ov
+        self._position_right_overlay()
+        ov.show()
+        ov.raise_()
+        self._right_strip_expanded = True
+
+    def _position_right_overlay(self) -> None:
+        ov = getattr(self, "_right_overlay", None)
+        sp = getattr(self, "_main_splitter", None)
+        if ov is None or sp is None or not ov.isVisible():
+            return
+        host = ov.parentWidget() or self
+        origin = sp.mapTo(host, QPoint(0, 0))
+        want = int((self._expanded_column_sizes
+                    or self._DEFAULT_THREE_COLUMN_SIZES)[2])
+        width = max(260, min(want, max(260, self.width() - 80)))
+        ov.setGeometry(origin.x() + sp.width() - width, origin.y(),
+                       width, max(120, sp.height()))
+
+    def _close_right_overlay_if_open(self) -> bool:
+        ov = getattr(self, "_right_overlay", None)
+        if ov is None or not ov.isVisible():
+            return False
+        self._close_right_overlay()
+        return True
+
+    def _close_right_overlay(self) -> None:
+        ov = getattr(self, "_right_overlay", None)
+        if ov is None:
+            return
+        self._right_overlay = None
+        self._right_strip_expanded = False
+        lay = ov.layout()
+        if lay is not None:
+            lay.removeWidget(self._right_col)
+        self._right_col.setParent(self._right_stack_host)
+        self._right_stack.insertWidget(0, self._right_col)
+        if getattr(self, "_right_collapsed", False):
+            self._right_stack.setCurrentWidget(self.right_strip)
+        else:
+            self._right_stack.setCurrentWidget(self._right_col)
+        ov.hide()
+        ov.deleteLater()
+
+    @staticmethod
+    def _encode_three_column_sizes(widths) -> Optional[bytes]:
+        """把三栏宽度编码成 ``saveState()`` 字节，不动主 splitter 的几何。
+
+        收窄态若直接在主 splitter 上 ``setSizes(展开值)``，会被当前可用宽
+        夹取（852 装不下 1130，Qt 会压缩左栏），存回去的就不是用户那两个值
+        ——正好把右栏原宽作废。临时 splitter 足够宽、无 stretch 权重，
+        写进去的宽度原样保留。
+        """
+        from PySide6.QtCore import Qt as _Qt
+        from PySide6.QtWidgets import QSplitter, QWidget
+        tmp = QSplitter(_Qt.Horizontal)
+        try:
+            for _ in range(3):
+                cell = QWidget()
+                cell.setMinimumWidth(0)
+                tmp.addWidget(cell)
+            total = max(3, sum(int(v) for v in widths))
+            tmp.resize(total + tmp.handleWidth() * 2, 100)
+            tmp.setSizes([int(v) for v in widths])
+            return tmp.saveState()
+        except Exception:  # noqa: BLE001 - 编码失败按不可保存处理
+            return None
+        finally:
+            tmp.deleteLater()
 
     def _restore_three_column_sizes(self, sizes) -> None:
         """读入三栏比例：结构非法回默认（warning），合法则上屏后归一化。"""
@@ -11678,6 +12058,10 @@ class MainWindow(QMainWindow):
                 original, reason, list(self._DEFAULT_THREE_COLUMN_SIZES))
             sp.setSizes(list(self._DEFAULT_THREE_COLUMN_SIZES))
             return
+        # 持久化的三值先原样记住（含右栏 326）：收窄发生在上屏之后，
+        # 归一化只影响本次落地几何，绝不能改写这份记忆——否则窄窗口下
+        # 归一化把右栏压到下限以下回默认，用户存的原宽就真被作废了。
+        self._expanded_column_sizes = list(vals)
         # 构造期拿不到三栏的真实可用宽（窗口未上屏，splitter 还是初始几何），
         # 先只记下比例；等 _fit_window_to_screen 按真实宽度落地。否则窗口
         # 随后被夹进屏幕时，Qt 会按 stretch 权重重新分配，比例走样。
@@ -11692,31 +12076,60 @@ class MainWindow(QMainWindow):
     _THREE_COLUMN_LAYOUT_VERSION = 5
 
     def _save_window_state(self):
-        s = QSettings("MBDSDR", "Desktop")
-        s.setValue("window_geometry", self.saveGeometry())
-        # 三栏 splitter 比例持久化（替代旧 dock_state）。
-        # 保存前与读入同一道结构校验：当前值不可落地（≤0 / 非三栏）时先
-        # 归位默认再落盘。总量变化（换屏）不在这里拒绝——那是读入侧归一化
-        # 的职责，保存的就是本机当时的真实宽度。
-        sp = getattr(self, "_main_splitter", None)
-        if sp is None:
+        if getattr(self, "_saving_state", False):
             return
-        if getattr(self, "_pending_column_sizes", None):
-            self._apply_pending_column_sizes()
+        self._saving_state = True
         try:
-            widths = [int(v) for v in sp.sizes()]
-            vals, reason = self._three_column_structure(widths)
-            if vals is None:
-                logger.warning(
-                    "三栏比例当前值不可用（实际=%r）：%s；拒绝保存该值，"
-                    "先归位默认三栏 %r 再落盘",
-                    widths, reason, list(self._DEFAULT_THREE_COLUMN_SIZES))
-                sp.setSizes(list(self._DEFAULT_THREE_COLUMN_SIZES))
-            s.setValue("three_column_sizes", sp.saveState())
-            s.setValue("three_column_layout_version",
-                       self._THREE_COLUMN_LAYOUT_VERSION)
-        except Exception:
-            pass
+            s = QSettings("MBDSDR", "Desktop")
+            s.setValue("window_geometry", self.saveGeometry())
+            # 三栏 splitter 比例持久化（替代旧 dock_state）。
+            # 保存前与读入同一道结构校验：当前值不可落地（≤0 / 非三栏）时先
+            # 归位默认再落盘。总量变化（换屏）不在这里拒绝——那是读入侧归一化
+            # 的职责，保存的就是本机当时的真实宽度。
+            sp = getattr(self, "_main_splitter", None)
+            if sp is None:
+                return
+            if getattr(self, "_pending_column_sizes", None):
+                self._apply_pending_column_sizes()
+            if getattr(self, "_right_collapsed", False):
+                # 收窄态落盘的必须是展开态三值（48 绝不入库）。不临时
+                # setSizes 主 splitter：窄窗口装不下展开值，Qt 会压缩左栏，
+                # 存回去的就不是用户那组宽度（右栏原宽被作废）。改在临时
+                # splitter 上编码；_saving_state 挡住重入。
+                widths = [int(v) for v in (self._expanded_column_sizes
+                                           or self._DEFAULT_THREE_COLUMN_SIZES)]
+                vals, reason = self._three_column_structure(widths)
+                if vals is None:
+                    logger.warning(
+                        "右栏收窄态记忆值不可用（实际=%r）：%s；改用默认三栏 %r",
+                        widths, reason, list(self._DEFAULT_THREE_COLUMN_SIZES))
+                    vals = list(self._DEFAULT_THREE_COLUMN_SIZES)
+                raw = self._encode_three_column_sizes(vals)
+                if raw is not None:
+                    s.setValue("three_column_sizes", raw)
+                    s.setValue("three_column_layout_version",
+                               self._THREE_COLUMN_LAYOUT_VERSION)
+                return
+            try:
+                widths = [int(v) for v in sp.sizes()]
+                vals, reason = self._three_column_structure(widths)
+                if vals is None:
+                    logger.warning(
+                        "三栏比例当前值不可用（实际=%r）：%s；拒绝保存该值，"
+                        "先归位默认三栏 %r 再落盘",
+                        widths, reason, list(self._DEFAULT_THREE_COLUMN_SIZES))
+                    sp.blockSignals(True)
+                    try:
+                        sp.setSizes(list(self._DEFAULT_THREE_COLUMN_SIZES))
+                    finally:
+                        sp.blockSignals(False)
+                s.setValue("three_column_sizes", sp.saveState())
+                s.setValue("three_column_layout_version",
+                           self._THREE_COLUMN_LAYOUT_VERSION)
+            except Exception:
+                pass
+        finally:
+            self._saving_state = False
 
     def _start_sweep(self):
         """启动宽带扫频找台（真实后端步进调谐 → 拼接 PSD → 提取活动信号）。
