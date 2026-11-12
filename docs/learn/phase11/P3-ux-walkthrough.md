@@ -3,7 +3,7 @@
 > **历史快照，不作现状依据**。本文记录当时的阶段状态，其中的「已修 / 未修 / 已完成」等结论不得作为现状依据；现状以代码、测试与最新台账为准。
 
 > 方法：以"第一次打开软件的新人，无任何说明书，5 分钟内能否从空屏走到一个可用调谐/解码/卫星视图"为脚本，逐屏走查**真实代码**（不是 mock）。
-> 基线：HEAD `469e48e`。验证：`QT_QPA_PLATFORM=offscreen ctest` = **95/95 全绿**（基线 94 + 本轮新增 `spectrum_tune`）。
+> 基线：HEAD `462ac87c`（历史快照，2026-10-02）。验证：`QT_QPA_PLATFORM=offscreen ctest` = **95/95 全绿**（基线 94 + 本轮新增 `spectrum_tune`）。
 > 环境诚实：云 VM 无硬件/无 GNSS/无音频设备，所有"无硬件"路径即新人开箱路径；真硬件行为标注为「真机待验」。
 > 口径：行号为改动后；函数名锚点不受行号漂移影响。
 
@@ -120,7 +120,7 @@ QT_QPA_PLATFORM=offscreen ctest   →  100% tests passed, 0 failed out of 95
 ```
 - 基线 94 不破；新增 `spectrum_tune`（7 纯函数槽）；`spectrum_interaction` 增 `bareClickTunesDialWithoutVfo`。
 - 全量构建 0 错误（仅既有 QCheckBox::stateChanged deprecated 警告，与本轮无关）。
-- 注：基线观察到 `device_ui`/`engine_hotplug` 在 `-j4` 下曾因 rtl_tcp drop 检测时序/并发出现环境性抖动；本轮全量 95 全绿时未复现。
+- 注：基线观察到 `device_ui`/`engine_hotplug` 在 `-j4` 下曾因 rtl_tcp drop 检测时序/并发出现环境性抖动；本轮全量 95 全绿时未复现（历史快照，2026-10-02）。
 
 ## 6. 未完成项（诚实披露）
 

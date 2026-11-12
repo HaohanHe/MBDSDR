@@ -1,6 +1,6 @@
 # 47 金集全量对账（只读审计 + 落档）
 
-- 仓库：MBDSDR（C++ Qt 桌面 SDR），对账基线 HEAD = `6a7ad7b`（main）
+- 仓库：MBDSDR（C++ Qt 桌面 SDR），对账基线 HEAD = `6b6287a8`（main）
 - 交付方式：**只读落档**。仅新增本文件；跑了既有测试二进制（offscreen），未改任何 `cpp/src/**`、未改任何测试、未 `git add/commit/push`。
 - 环境：`QT_QPA_PLATFORM=offscreen`，`LD_LIBRARY_PATH=/home/user/Qt/6.8.2/gcc_64/lib`，复用 `cpp/build` 既有二进制（未增量重编译）。
 - 工作树跑完测试后复核：与开跑前完全一致（仅三条既有未跟踪文件：`cpp/scratch/regen_tool_doc*`、`cpp/tests/ui_diag_freeze.cpp`，均未触碰）。
@@ -65,7 +65,7 @@
 
 **零不一致 → 零待修。**
 
-- 六个金集二进制实跑全绿（106/0），其钉死的 47=29+18、CH 66=43+23、dispatch==spec==catalog 47 集合均与本次独立 grep 实测逐名一致。
+- 六个金集二进制实跑全绿（106/0，历史快照，2026-10-08），其钉死的 47=29+18、CH 66=43+23、dispatch==spec==catalog 47 集合均与本次独立 grep 实测逐名一致。
 - 源 1↔3 的命名漂移 4 对、Agent 独有 2、CH 独有 21，均为上轮（`tool-three-channel-47.md` §2）已登记且被金集冻结的**架构性设计差异**，本轮复核未新增、未扩大，不构成新缺陷，不重复展开。
 - 未发现任何需要改码的真缺陷（无标志错、无 dispatch 缺行/孤儿、无 HTTP 不可达的已暴露工具）。
 
@@ -78,7 +78,7 @@
 
 ## 5. 诚实未完成项与边界
 
-- 测试二进制为 `cpp/build` 既有产物（对应 HEAD `6a7ad7b`），本轮**未增量重编译**；二进制与源码的一致性由"working tree 跑完前后 `git status` 不变 + 全绿"间接保证。
+- 测试二进制为 `cpp/build` 既有产物（对应 HEAD `6b6287a8`，历史快照，2026-10-08），本轮**未增量重编译**；二进制与源码的一致性由"working tree 跑完前后 `git status` 不变 + 全绿"间接保证。
 - HTTP 侧"66 命令自动覆盖"为**架构断言**（统一委托、无 per-route handler），测试只钉代表路由，未枚举跑 66 条命令——与上轮口径一致。
 - offscreen 环境无 pipewire（multimedia 符号解析告警）：仅 QINFO，未影响断言；若后续需 audio 链路测试可在有 pipewire 环境复核，但与本轮 47 工具对账无关。
 - 未触碰 `cpp/tests/ui_diag_freeze.cpp` 等任何在途/隔离文件；未执行任何 `git add/commit/push`。

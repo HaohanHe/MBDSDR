@@ -50,7 +50,7 @@ result.record("特征提取（24维）", len(feature.to_list()) == 24)
 n_features from get_stats = 25
 len(to_list()) = 25
 ```
-→ V2 这两条断言现在跑必然 `✗`。`tests/test_report_v2.txt` 里的 185/185 全绿是**旧快照**（特征数还是 24 维时留下的），后来源码加了第 25 维特征，V2 没跟着改。**这是"实验室绿"假象的直接证据。**
+→ V2 这两条断言现在跑必然 `✗`。`tests/test_report_v2.txt` 里的 185/185 全绿是**旧快照**（2026-10-04；特征数还是 24 维时留下的），后来源码加了第 25 维特征，V2 没跟着改。**这是"实验室绿"假象的直接证据。**
 
 对比 V1 对应断言 `test_full_integration.py:954` `stats["n_features"] == 25` —— V1 是对的。
 
@@ -264,7 +264,7 @@ V1 `main()` 调用 34 个测试函数（L1372-1405）；V2 `main()` 只调 23 �
 |---|---|---|
 | P0 | B1 V2 AMR `==24` 断言（`test_full_integration_v2.py:693,702`） | 改回 `==25`，重跑 V2，删旧假报告 |
 | P0 | E1 RDS-CT 空壳（`test_full_integration.py:1228-1241`） | 改为真喂 `_parse_group` bits，断言 ct_mjd/hour/minute |
-| P0 | 废弃/合并 V2（第 8 节） | V2 不该作为独立"全绿"报告存在；把 API 修正回填 V1 |
+| P0 | 废弃/合并 V2（第 8 节） | V2 不该作为独立"全绿"报告存在（该报告为 2026-10-04 旧快照）；把 API 修正回填 V1 |
 | P1 | B2 V2 memory.add 误用（`test_full_integration_v2.py:839`） | 改为 `mem.add("这是测试内容", category="general", ...)` |
 | P1 | E4 astronomy 方位角方向无锚点（源码 `astronomy.py:290` 有 TODO） | 固定 JD + 已知恒星 alt/az 基准值；先定方位角约定 |
 | P1 | E5 AMR 不验证分类类别（`test_full_integration.py:971` / V2:707） | 断言 `predicted_modulation == ModulationType.FM` |

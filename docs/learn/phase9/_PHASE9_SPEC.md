@@ -1,6 +1,6 @@
 # 第九阶段实现规格：真机即战力 + 论文可投终稿 + 新时空可演示 + 自动化稳定
 
-> 基线：远端 main = d82247f（本地已同步）。第八阶段已交付：真机回填闭环（exp_ota_run）、论文 v0.3、桌面/移动端打磨。验证基线：cpp 93/93、flutter 298、python 全绿（mbdsdr_ai/test_solar_system 7 项为历表不可用环境性失败，本阶段修复）。
+> 基线：远端 main = d82247f（本地已同步；历史快照，2026-10-02）。第八阶段已交付：真机回填闭环（exp_ota_run）、论文 v0.3、桌面/移动端打磨。验证基线：cpp 93/93、flutter 298、python 全绿（mbdsdr_ai/test_solar_system 7 项为历表不可用环境性失败，本阶段修复）。
 >
 > 环境事实：云 VM 无硬件/无凭据（推送由用户外部）；paper/experiments 被忽略；桌面 main_window.cpp 已有 centerTabs_（QTabWidget，频谱/世界/气象）可加新 tab；test_solar_system.py:26-28 硬断言历表可用；无 .github/workflows、无统一测试脚本。
 
@@ -14,9 +14,9 @@
 | **P4 自动化与稳定** | ①本地一键测试脚本 `scripts/run_all_tests.sh`（cpp ctest offscreen + flutter test/analyze + python pytest 全量，逐项退出码汇总，缺依赖项标注 SKIP）；②.github/workflows/ci.yml（结构完整、诚实标注：runner 需 Qt/Flutter 环境配置、无硬件项 skip，可先建脚本+workflow 骨架待配置）；③修 test_solar_system.py：历表不可用时**优雅 skip 带原因**（保留可用时的完整断言），消除环境性失败；④测试脚本自验证。 | 一键测试脚本 + workflow + 历表修复 |
 
 ## 2. 验收（每批必过）
-- cpp：ctest **93/93 基线不破** + 新增全绿（P3）；全量构建 0 错误。
+- cpp：ctest **93/93 基线不破** + 新增全绿（P3，验收判据）；全量构建 0 错误。
 - Flutter：**298 基线不破**（P4 跑脚本验证）。
-- Python：pytest 新增全绿；test_solar_system 不再硬失败（skip 带原因）。
+- Python：pytest 新增全绿（验收判据）；test_solar_system 不再硬失败（skip 带原因）。
 - 论文：v0.4 图表自洽、baseline 对比明确、PENDING 诚实；LaTeX 骨架可用/指引清晰。
 - git：只暂存相关文件（禁 add -A）；paper/ 根继续忽略；无"比赛/competition"、无密钥、无敏感信息。
 - 推送：云环境无凭据——本地建好提交，推送待用户/外部。

@@ -1,9 +1,9 @@
 # HTTP 通道端点契约审计
 
 > 证据状态：E4——本文件数字未逐条绑定原始件/复跑命令，引用前须复核（判据见 docs/evidence-standard.md）。
-**HEAD**: `ae0effb`
+**HEAD**: `a752f1bc`
 **范围**: `cpp/src/control/control_http_server.{h,cpp}` 全部路由、方法语义、参数名、错误码、响应形状 vs ControlHub 命令面
-**金集**: test_control_http 14/14, test_control_hub 29/29, test_agent 34/34（全绿）
+**金集**: test_control_http 14/14, test_control_hub 29/29, test_agent 34/34（历史快照，2026-10-09，全绿）
 
 ---
 
@@ -23,7 +23,7 @@
 | 8 | GET | `/navtex_messages` | `channel=N`（可选） | `get_navtex_messages` | Read |
 | 9 | POST | `/command` | 无 | 统一入口：`{tool:"...", args:{...}}` → `ControlHub::execute()` | 读+写（唯一写入口） |
 
-**共 9 个路由**（含 OPTIONS 预检和 `/` 发现文档）。用户预期的 `/telemetry`、`/snapshot`、`/gains`、`/vfos`、`/recordings` 等**无独立 GET 路由**——它们全部通过 `POST /command` 统一入口访问（CH 完整命令面约 40 条命令全部可达）。
+**共 9 个路由**（含 OPTIONS 预检和 `/` 发现文档）。用户预期的 `/telemetry`、`/snapshot`、`/gains`、`/vfos`、`/recordings` 等**无独立 GET 路由**——它们全部通过 `POST /command` 统一入口访问（CH 完整命令面约 40 条命令全部可达；历史快照，2026-10-09）。
 
 ---
 

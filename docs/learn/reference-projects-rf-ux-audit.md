@@ -135,7 +135,7 @@ Harness 管能力缝合与默认最小化（profile 默认不开重能力），�
 ## 五、not_verified
 
 - 本轮改动后**桌面全量 pytest 未重跑**（上一权威全量 `f9c3bb92`
-  5573 passed 已过期）；已跑改动相关更大子集并全绿：身份红线 + 设置
+  5573 passed 已过期）；已跑改动相关更大子集并全绿（2026-11-10 当时实跑）：身份红线 + 设置
   schema/ui_coverage/convergence/corruption + 主题切换 + audio/sdr_pipeline/
   touch + 新契约（233 + 127 + 24 passed），顺带诚实追平 6 个陈旧测试
   （theme 出厂默认 d509a4db 已改 dark_car、volume 平方律），不声称桌面全量绿。

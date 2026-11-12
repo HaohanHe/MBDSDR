@@ -176,8 +176,8 @@ QString ControlHub::execute(const QString& command, const QJsonObject& args) {
 | `test_control_http` | **14** | 0 | 0 | 42 ms | 0 |
 | **合计** | **74** | **0** | **0** | — | — |
 
-三金集全绿，无回归。HTTP 用例回环端口 `QWARN` 横幅为正常提示，非失败。
-（对比上轮 HEAD `bda5e48`：`test_agent` 30→32、`test_control_hub` 27→28、合计 71→74，增量来自并行会话在途用例，非本轮改动。）
+三金集全绿，无回归（历史快照，2026-10-09）。HTTP 用例回环端口 `QWARN` 横幅为正常提示，非失败。
+（对比上轮 HEAD `ae7a5b75`：`test_agent` 30→32、`test_control_hub` 27→28、合计 71→74，增量来自并行会话在途用例，非本轮改动。）
 
 ---
 
