@@ -15,7 +15,7 @@
     {
       "path": "scripts/hw_acceptance/ring6_sky_mode.py",
       "symbol": "_moon_reference",
-      "line": 104,
+      "line": 105,
       "reason": "外部边界：JPL DE421 真值必须经 skyfield（可选第三方库）与仓库外的 de421.bsp 读取；库缺失、星历文件缺失/损坏/版本不兼容都属环境边界，不是本仓算法缺陷。",
       "user_visible": "R6 检查项 moon_ephemeris_match 标 skipped=True / UNVERIFIED，文案「缺 de421.bsp 或 skyfield，月球绝对位置 UNVERIFIED（未补数）」；不补数、不伪造星位。",
       "test": "tests/test_hw_ring6_degradation.py",
