@@ -1051,10 +1051,22 @@ def _sidecar_intro_ts() -> float:
     return float(proc.stdout.strip())
 
 
-def _registry_close_repair(key: str, display: str, now: float) -> None:
+def _registry_close_repair(key: str, display: str, now: float, payload: Dict[str, Any]) -> None:
     def mutate(data: Dict[str, Any]) -> None:
         entry = _entry(data, key)
         entry["path"] = display
+        # 手工写的占位文件可能没进过台账（本命令正是用来修这类状态的），
+        # 补一条 history 再关闭，避免「台账里查不到这笔持有」。
+        if not any(item.get("released_at") is None for item in entry["history"]):
+            entry["history"].append(
+                {
+                    "owner": payload.get("owner"),
+                    "acquired_at": payload.get("acquired_at"),
+                    "heartbeat_at": payload.get("heartbeat_at"),
+                    "ttl_min": payload.get("ttl_min"),
+                    "pid": payload.get("pid"),
+                }
+            )
         _close_active(entry, now, "legacy_token_repair")
         entry["current"] = None
 
@@ -1154,7 +1166,7 @@ def cmd_legacy_token_repair(path: str, owner: str, reason: str, by: str = "") ->
         ) from None
     _remove_token_file(key)
     try:
-        _registry_close_repair(key, display, now)
+        _registry_close_repair(key, display, now, data)
     except (ClaimDenied, OSError) as exc:
         print(
             f"WARN 台账写入失败（claim 已删除，闸门按「无 claim」处理）：{exc}",
