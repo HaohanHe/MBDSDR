@@ -6,6 +6,12 @@
 2. ``skip_result`` 的结果永远是 ``SKIP`` + 码，不可能变成 ``PASS``。
 3. ``run_all._normalize`` 必须把 ``UNVERIFIED`` 降级为 ``SKIP``（缺省 ``NO_DATA``），
    否则「没验的项」会从汇总里消失。
+
+另：本文件里的硬件阈值断言（``PILOT_CENTER_HZ`` / ``PILOT_FREQ_TOL_HZ`` /
+``PILOT_SNR_MIN_DB`` / ``PLAYBACK_RMS_RATIO_MIN/MAX``）是**冻结的硬件导出值**，
+改动必须在提交说明里给出新证据（真机读数及其测量不确定度），不允许先改数后补理由。
+两类断言分工不同：拼装测试只证「代码与人工卡没有手抄走样」，冻结测试才证
+「这个数还是当时认定的那个数」——两者都不可或缺。
 """
 
 import sys
@@ -226,14 +232,17 @@ RING3 = ROOT / "scripts" / "hw_acceptance" / "ring3_demod_audio.py"
 
 
 def test_pilot_acceptance_thresholds_match_doc_card():
-    """导频判据只有一处真值源：ring3 常量 = 人工卡原文 = 两条路径共用。
+    """拼装层：ring3 两条路径与人工卡共用同一份常量，不许手抄走样。
 
-    反证：改 ring3.PILOT_FREQ_TOL_HZ（100→300）或文档卡里的 ±值，本用例红；
-    把任一路径写回裸字面量（`abs(f_p - 19000) < 100/300`）也红。
+    本用例**不判断数值对错**，那是 ``test_hardware_thresholds_are_frozen_*`` 的事。
+    这里只证明：夹具路径与真机路径引用同一个容差常量、没有一处写回裸字面量，
+    且人工卡里的判据串与常量拼出的串逐字一致。
+
+    反证：把任一路径写回裸字面量（`abs(f_p - 19000) < 100/300`）→ 红；
+    只改文档卡、不改常量（或反过来）→ 红。
     """
     tol = ring3.PILOT_FREQ_TOL_HZ
     snr = ring3.PILOT_SNR_MIN_DB
-    assert (tol, snr) == (100.0, 10.0)
     text = DOC.read_text(encoding="utf-8")
     assert f"19000±{tol:.0f} Hz 且峰/邻域 >{snr:.0f} dB" in text, (
         "人工卡与 ring3 导频阈值已分叉：文档里找不到由常量拼出的判据串")
@@ -246,15 +255,36 @@ def test_pilot_acceptance_thresholds_match_doc_card():
 
 
 def test_playback_ratio_thresholds_match_doc_card():
-    """回放比只有一处真值源：ring4 常量 = 人工卡原文。
+    """拼装层：ring4 常量与人工卡逐字一致（数值对错由冻结测试负责）。
 
-    反证：改 ring4.PLAYBACK_RMS_RATIO_MAX（3.0→0.8）或文档卡，本用例红。
+    反证：只改常量或只改文档卡（两者不同步）→ 本用例红。
     """
     lo, hi = ring4.PLAYBACK_RMS_RATIO_MIN, ring4.PLAYBACK_RMS_RATIO_MAX
-    assert (lo, hi) == (0.3, 3.0)
     text = DOC.read_text(encoding="utf-8")
     assert f"{lo} – {hi}" in text, (
         "人工卡与 ring4 回放比阈值已分叉：文档里找不到由常量拼出的区间串")
+
+
+def test_hardware_thresholds_are_frozen_with_recorded_provenance():
+    """冻结层：硬件导出的具体数值，改动必须带新证据，不许先改数后补理由。
+
+    出处（均为代码或实测来源，不是从常量反推出来的）：
+      * ``PILOT_CENTER_HZ = 19000``：FM 立体声导频标称频率（19 kHz）。
+      * ``PILOT_FREQ_TOL_HZ = 100``：源自 ring3 真机路径统一前的硬编码
+        ``abs(f_p - 19000) < 100``；现判定点见 ring3_demod_audio.py:340–342。
+        同一路径 `_analyze_mpx` 用 65536 点 Welch + 抛物线插值，频率不确定度约
+        ±1 Hz，故 100 Hz 是约 100 倍的安全裕度，不是拟合/试出来的边界。
+      * ``PILOT_SNR_MIN_DB = 10``：同真机路径统一前的硬编码 ``snr_p > 10``。
+      * ``PLAYBACK_RMS_RATIO_MIN/MAX = 0.3/3.0``：ring4 的「文件回放/实时 RMS 比」
+        区间；产品运行时链路不做这项判定，故此值只属于硬件验收口径。
+
+    反证：100→300（同步改人工卡也一样）→ 本用例红；回放比上限 3.0→0.8 → 红。
+    """
+    assert ring3.PILOT_CENTER_HZ == 19000.0
+    assert ring3.PILOT_FREQ_TOL_HZ == 100.0
+    assert ring3.PILOT_SNR_MIN_DB == 10.0
+    assert ring4.PLAYBACK_RMS_RATIO_MIN == 0.3
+    assert ring4.PLAYBACK_RMS_RATIO_MAX == 3.0
 
 
 def test_runtime_pilot_detection_is_a_distinct_named_threshold():
