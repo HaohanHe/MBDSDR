@@ -100,8 +100,13 @@ def claim_state(claims: dict, path: str, now: float) -> tuple[str, str]:
         return "none", "无活跃 claim"
     hb = cur.get("heartbeat_at")
     ttl = cur.get("ttl_min")
-    if not isinstance(hb, (int, float)) or not isinstance(ttl, (int, float)):
-        raise ValueError(f"{path} 的 claim 缺 heartbeat_at/ttl_min")
+    missing = [name for name, val in (("heartbeat_at", hb), ("ttl_min", ttl))
+               if not isinstance(val, (int, float))]
+    if missing:
+        # 缺字段只让**这一条**降级为「无法判断」，不再整次中断：跳过必须可见，
+        # 所以把持有者与缺失字段名一起带出去（在 UNKNOWN 段逐行打印）。
+        owner = cur.get("owner") or "<未写 owner>"
+        return "unknown", f"无法判断：claim 缺 {'/'.join(missing)}（owner={owner}）"
     age_min = (now - hb) / 60
     if now < hb + ttl * 60:
         return "active", f"活跃 claim（{age_min:.1f} min 前心跳，TTL {ttl:.0f} min）"
@@ -157,15 +162,22 @@ def evaluate(wo: dict, rows: dict[str, dict], decisions: dict[str, dict],
         elif claims is None:
             hits.append(("UNKNOWN", "claim/在途", f"claim 依据不可读：{claims_error}"))
         else:
-            try:
-                now = time.time()
-                states = [(p,) + claim_state(claims, p, now) for p in paths]
-            except Exception as exc:  # 结构变化 → UNKNOWN
-                hits.append(("UNKNOWN", "claim/在途", f"claim 依据解析失败：{exc}"))
-            else:
-                if not any(s == "active" for _, s, _ in states):
-                    note = "；".join(f"{p}: {msg}" for p, _, msg in states)
-                    hits.append(("CLAIM_GONE", "、".join(paths), note))
+            now = time.time()
+            states: list[tuple[str, str, str]] = []
+            for p in paths:
+                try:
+                    state, msg = claim_state(claims, p, now)
+                except Exception as exc:  # 结构变化 → 该标的 UNKNOWN，其余照常
+                    state, msg = "unknown", f"无法判断：claim 依据解析失败（{exc}）"
+                states.append((p, state, msg))
+            # 无法判断的逐条可见（持有者、缺哪个字段都在 msg 里），不静默丢弃。
+            for p, state, msg in states:
+                if state == "unknown":
+                    hits.append(("UNKNOWN", p, msg))
+            judged = [(p, s, m) for p, s, m in states if s != "unknown"]
+            if judged and not any(s == "active" for _, s, _ in judged):
+                note = "；".join(f"{p}: {msg}" for p, _, msg in judged)
+                hits.append(("CLAIM_GONE", "、".join(p for p, _, _ in judged), note))
 
     if DECISION_HINT.search(reason):
         ids = D_RE.findall(reason) or D_RE.findall(wo.get("dep", ""))
