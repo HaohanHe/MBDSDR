@@ -173,7 +173,7 @@ def test_backup_failure_blocks_whole_table_save(tmp_path, monkeypatch):
     """A04 反证：备份失败则整表写回必须被挡住，原件字节保持原样。"""
     path = tmp_path / "bookmarks_v2.json"
     path.write_text("{ broken", encoding="utf-8")
-    monkeypatch.setattr(fmv2_mod, "backup_corrupt", lambda _p: None)
+    monkeypatch.setattr(fmv2_mod, "backup_corrupt_frequency", lambda _p: None)
 
     fm = FrequencyManagerV2(path=str(path))
     assert fm._save_blocked is True
