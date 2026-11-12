@@ -287,15 +287,19 @@ def test_connect_and_record_dir_classification():
         "No module named 'SoapySDR'") == "missing_dependency"
     assert error_remedy.classify_connect_error(
         "[Errno 111] Connection refused") == "network_unreachable"
+    # EACCES（libusb ACCESS / errno 13）优先于同串里的泛化 "busy"：
+    # 权限不足要改系统设置，判成占用会让用户去关别人的程序。
     assert error_remedy.classify_connect_error(
-        "LIBUSB_ERROR_ACCESS device busy") == "device_busy"
+        "LIBUSB_ERROR_ACCESS device busy") == "usb_permission"
+    assert error_remedy.classify_connect_error(
+        "Resource busy: device is used by another program") == "device_busy"
     assert error_remedy.classify_connect_error(
         "No devices found") == "device_not_found"
     assert error_remedy.classify_connect_error(
         "librtlsdr.dll not found") == "driver_not_found"
-    # 权限不足在 error_catalog 里没有独立条目 → 不出链接（None）
+    # 权限不足现在有独立条目，补救链接指向 udev/WinUSB 而不是「设备被占用」
     assert error_remedy.classify_connect_error(
-        "permission denied") is None
+        "permission denied") == "usb_permission"
 
     assert error_remedy.classify_record_dir_error(
         "No space left on device") == "disk_full"

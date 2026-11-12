@@ -135,41 +135,91 @@ def _low(text: str) -> str:
     return (text or "").lower()
 
 
-def classify_connect_error(raw_err: str) -> Optional[str]:
-    """连接/枚举失败的原始错误 → error_catalog 码；认不出返回 None。
+#: 连接/枚举错误的唯一判定顺序（``_humanize_error`` 与
+#: ``classify_connect_error`` 共用这一张表，顺序即优先级）。
+#:
+#: 顺序原则：**具体诊断先于泛化关键词**。permission 与 busy 是两种完全不同的
+#: 用户动作——前者要改系统权限（udev / WinUSB），后者要关掉占用设备的程序；
+#: 判错会让用户关掉别人的软件后仍然连不上。因此带 EACCES 线索的必须先判为
+#: 权限。裸 ``errno`` 不能作为占用关键词（``errno 13`` 就是 EACCES），只保留
+#: 明确的 ``errno 16`` / ``EBUSY``。
+CONNECT_ERROR_RULES: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("missing_dependency",
+     ("no module named", "importerror", "no module")),
+    ("network_unreachable",
+     ("connection refused", "timeout", "timed out", "network",
+      "unreachable", "连接失败", "refused")),
+    ("usb_permission",
+     ("permission", "access denied", "libusb_error_access", "eacces",
+      "errno 13", "errno -13", "udev", "uid", "root", "权限")),
+    ("device_busy",
+     ("busy", "ebusy", "already in use", "could not open",
+      "errno 16", "errno -16", "device is used", "resource", "占用")),
+    ("device_not_found",
+     ("0bda", "2838", "no device", "no devices", "找不到",
+      "cannot find device")),
+    ("driver_not_found",
+     ("no such file", "not found", "soapy", "librtlsdr", "dll", "driver",
+      "驱动", "未找到", "no backend")),
+    ("usb_disconnected",
+     ("disconnect", "lost", "usb", "stall", "epipe", "no such device", "断开")),
+    ("sample_rate_not_supported",
+     ("sample rate", "samplerate", "invalid rate", "不支持", "采样率")),
+)
 
-    顺序与 ``main_window._humanize_error`` 的判定顺序保持一致：
-    socket 的 "errno" 文案必须先走网络分支，否则会被「设备被占用」误命中。
-    """
+#: 码 → 人话文案。与 ``CONNECT_ERROR_RULES`` 同源，改一处必须改另一处；
+#: ``tests/test_connect_error_ordering.py`` 断言文案与码永远来自同一分支。
+CONNECT_ERROR_TEXT: Dict[str, str] = {
+    "missing_dependency": (
+        "未安装 SDR Python 库：本机 USB 默认装 SoapySDR(SoapyRTLSDR)；"
+        "pyrtlsdr 为可选 GPL-3.0，按需自装"),
+    "network_unreachable": (
+        "无法连接远程 rtl_tcp 源：请检查 host:port 是否正确、"
+        "网络是否连通、远端 rtl_tcp 服务是否在运行（默认端口 1234）。"),
+    "usb_permission": (
+        "USB 权限不足：Linux 执行 sudo cp rtl-sdr.rules "
+        "/etc/udev/rules.d/ 并重插；Windows 用 zadig 安装 WinUSB 驱动。"),
+    "device_busy": "设备被其他软件占用，请关闭 SDR#/GQRX/HDSDR 后重试。",
+    "device_not_found": (
+        "未检测到 RTL-SDR 硬件，请确认 USB 棒已插入并识别"
+        "（设备管理器中应为 RTL2838UHIDIR）。"),
+    "driver_not_found": (
+        "未找到设备驱动，请安装 librtlsdr / SoapySDR 驱动"
+        "（Linux: sudo apt install librtlsdr0 soapy-sdk）。"),
+    "usb_disconnected": "设备已断开，请检查 USB 连接（可换个 USB 口）后点刷新。",
+    "sample_rate_not_supported": "该采样率不被设备支持，已自动切换到最近合法档位。",
+}
+
+_EMPTY_ERROR_TEXT = "设备无响应（请检查 USB 棒、驱动与设备占用）"
+
+
+def _connect_error_code(raw_err: str) -> Optional[str]:
     low = _low(raw_err)
     if not low:
         return None
-    if any(k in low for k in ("no module named", "importerror", "no module")):
-        return "missing_dependency"
-    if any(k in low for k in ("connection refused", "timed out", "timeout",
-                              "network", "unreachable", "连接失败", "refused")):
-        return "network_unreachable"
-    if any(k in low for k in ("busy", "already in use", "could not open",
-                              "device is used", "resource", "errno", "占用")):
-        return "device_busy"
-    if any(k in low for k in ("permission", "access denied", "errno 13",
-                              "uid", "root", "权限")):
-        # error_catalog 没有「USB 权限不足」独立条目，不硬套别的码。
-        return None
-    if any(k in low for k in ("0bda", "2838", "no device", "no devices",
-                              "找不到", "cannot find device")):
-        return "device_not_found"
-    if any(k in low for k in ("no such file", "not found", "soapy",
-                              "librtlsdr", "dll", "driver", "驱动", "未找到",
-                              "no backend")):
-        return "driver_not_found"
-    if any(k in low for k in ("disconnect", "lost", "stall", "epipe",
-                              "no such device", "断开")):
-        return "usb_disconnected"
-    if any(k in low for k in ("sample rate", "samplerate", "invalid rate",
-                              "不支持", "采样率")):
-        return "sample_rate_not_supported"
+    for code, keys in CONNECT_ERROR_RULES:
+        if any(k in low for k in keys):
+            return code
     return None
+
+
+def humanize_connect_error(raw_err: str) -> str:
+    """连接错误的原始文本 → 人话提示；未命中保留原文（绝不吞错误）。"""
+    if not raw_err:
+        return _EMPTY_ERROR_TEXT
+    code = _connect_error_code(raw_err)
+    if code is None:
+        return raw_err
+    return CONNECT_ERROR_TEXT[code]
+
+
+def classify_connect_error(raw_err: str) -> Optional[str]:
+    """连接/枚举失败的原始错误 → error_catalog 码；认不出返回 None。
+
+    与 :func:`humanize_connect_error` 共用 ``CONNECT_ERROR_RULES``：同一输入
+    在「文案」和「补救链接」两条路径上必然同分类。
+    """
+    return _connect_error_code(raw_err)
 
 
 def classify_record_dir_error(text: str) -> str:

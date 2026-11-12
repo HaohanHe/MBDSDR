@@ -406,6 +406,11 @@ _SPECS = (
           "设备被占用",
           "设备被其它进程占用：{detail}",
           "关闭占用进程后重试；不要并发打开同一设备。"),
+    _spec("usb_permission", LAYER_ACCESS, False,
+          "USB 权限不足",
+          "没有权限打开 SDR 设备：{detail}",
+          "Linux 装 udev 规则（sudo cp rtl-sdr.rules /etc/udev/rules.d/）"
+          "并重插设备；Windows 用 Zadig 给 RTL2838 装 WinUSB 驱动。"),
     _spec("usb_disconnected", LAYER_ACCESS, True,
           "USB 已断开",
           "USB 设备已断开：{detail}",

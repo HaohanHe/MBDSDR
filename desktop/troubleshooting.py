@@ -38,6 +38,7 @@ CURATED_CODES: Tuple[str, ...] = (
     "not_connected",
     "device_not_found",
     "device_busy",
+    "usb_permission",
     "usb_disconnected",
     "no_audio_output",
     "sample_rate_not_supported",
@@ -57,6 +58,7 @@ GROUP_OF: Dict[str, str] = {
     "not_connected": "连接",
     "device_not_found": "连接",
     "device_busy": "连接",
+    "usb_permission": "连接",
     "usb_disconnected": "连接",
     "no_audio_output": "音频",
     "sample_rate_not_supported": "设置",
@@ -82,6 +84,10 @@ NEXT_STEPS: Dict[str, str] = {
     "device_busy": (
         "先关掉占用设备的其它程序（SDR++ / SDR# / rtl_tcp 服务），再点"
         "「连接设备...」；仍失败就拔插 USB 后重新枚举。"),
+    "usb_permission": (
+        "Linux 在终端执行 sudo cp rtl-sdr.rules /etc/udev/rules.d/ 后拔插 "
+        "USB，再点「连接设备...」；Windows 打开 Zadig 给 RTL2838 装 WinUSB "
+        "驱动，装完在「连接设备...」里重新枚举。"),
     "usb_disconnected": (
         "重新插好 USB 线，等两秒后点「连接设备...」重新枚举；连接恢复后"
         "再点「开始/停止录音」。"),
@@ -126,6 +132,7 @@ ALIASES: Dict[str, Tuple[str, ...]] = {
     "not_connected": ("连不上", "没连上", "灰色的"),
     "device_not_found": ("找不到设备", "没有设备", "识别不到"),
     "device_busy": ("设备被占用", "打不开设备"),
+    "usb_permission": ("没权限", "权限不足", "打不开设备"),
     "usb_disconnected": ("掉了", "掉线", "拔了"),
     "no_audio_output": ("没声音", "没有声音", "听不到声音"),
     "sample_rate_not_supported": ("采样率", "改采样率失败"),

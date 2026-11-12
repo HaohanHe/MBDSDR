@@ -547,7 +547,7 @@ from control_panel import ControlPanel
 # 错误码 → 帮助「怎么办」入口（无对应条目的 code 不出链接，见 error_remedy）
 from error_remedy import (
     RemedyLinkLabel, attach_remedy_link, classify_connect_error,
-    classify_record_dir_error,
+    classify_record_dir_error, humanize_connect_error,
 )
 from mode_registry import (
     default_bandwidth,
@@ -6892,54 +6892,12 @@ class MainWindow(QMainWindow):
     def _humanize_error(raw_err: str) -> str:
         """把后端原始错误信息翻译成用户可理解的人话提示。
 
-        通过错误消息关键词匹配常见故障类别；未命中时回退显示原始信息。
-        绝不因为翻译而吞掉错误——原始信息作为附注保留。
+        分类与文案都来自 ``error_remedy.humanize_connect_error``，与补救链接
+        （``classify_connect_error``）共用同一张有序规则表——同一输入不可能
+        一边说「权限不足」、一边指向「设备被占用」。未命中时回退原始信息，
+        绝不因为翻译而吞掉错误。
         """
-        if not raw_err:
-            return "设备无响应（请检查 USB 棒、驱动与设备占用）"
-        low = raw_err.lower()
-        # Python 库缺失（SoapySDR 未装；pyrtlsdr 为可选 GPL-3.0）
-        if any(k in low for k in ("no module named", "importerror", "no module")):
-            return ("未安装 SDR Python 库：本机 USB 默认装 SoapySDR(SoapyRTLSDR)；"
-                    "pyrtlsdr 为可选 GPL-3.0，按需自装")
-        # 网络连接失败（远程 rtl_tcp 源连不上）。
-        # 注意必须排在"设备被占用"分支之前：socket 错误常带 "[Errno 111] Connection refused"，
-        # 里面的 "errno" 会被占用分支的裸词误命中。
-        if any(k in low for k in ("connection refused", "timeout", "timed out",
-                                  "network", "unreachable", "连接失败", "refused")):
-            return ("无法连接远程 rtl_tcp 源：请检查 host:port 是否正确、"
-                    "网络是否连通、远端 rtl_tcp 服务是否在运行（默认端口 1234）。")
-        # 权限不足（udev 规则 / 需要 root / WinUSB 驱动）
-        if any(k in low for k in ("permission", "access denied", "errno 13",
-                                  "uid", "root", "权限")):
-            return ("USB 权限不足：Linux 执行 sudo cp rtl-sdr.rules "
-                    "/etc/udev/rules.d/ 并重插；Windows 用 zadig 安装 WinUSB 驱动。")
-        # 设备被占用（另一 SDR 软件/rtl_tcp 仍开着）
-        if any(k in low for k in ("busy", "resource", "already in use",
-                                  "could not open", "errno", "device is used",
-                                  "占用")):
-            return "设备被其他软件占用，请关闭 SDR#/GQRX/HDSDR 后重试。"
-        # 未检测到 RTL-SDR 硬件（USB VID/PID 找不到）
-        if any(k in low for k in ("0bda", "2838", "no device", "no devices",
-                                  "找不到", "cannot find device")):
-            return ("未检测到 RTL-SDR 硬件，请确认 USB 棒已插入并识别"
-                    "（设备管理器中应为 RTL2838UHIDIR）。")
-        # 驱动缺失（librtlsdr/SoapySDR 未安装）
-        if any(k in low for k in ("no such file", "not found", "soapy",
-                                  "librtlsdr", "dll", "driver", "驱动",
-                                  "未找到", "no backend")):
-            return ("未找到设备驱动，请安装 librtlsdr / SoapySDR 驱动"
-                    "（Linux: sudo apt install librtlsdr0 soapy-sdk）。")
-        # 设备拔插 / USB 断开
-        if any(k in low for k in ("disconnect", "lost", "usb", "stall",
-                                  "epipe", "no such device", "断开")):
-            return "设备已断开，请检查 USB 连接（可换个 USB 口）后点刷新。"
-        # 采样率不被支持
-        if any(k in low for k in ("sample rate", "samplerate", "invalid rate",
-                                  "不支持", "采样率")):
-            return "该采样率不被设备支持，已自动切换到最近合法档位。"
-        # 其他：保留原始信息
-        return f"{raw_err}"
+        return humanize_connect_error(raw_err)
 
     def _connect_real(self, host: str, port: int):
         """连接真实硬件（ai-sdr Mini WebSocket）。"""
