@@ -1,5 +1,6 @@
 # 重复实现审计：库 vs 面板内联，谁是超集（只判定，2026-11-12）
 
+> 证据状态：E4——本文件数字未逐条绑定原始件/复跑命令，引用前须复核（判据见 docs/evidence-standard.md）。
 > 结论：五组「库 vs 面板内联」逐一比完，**三组该删库、一组该接库、一组要带前置条件接**；
 > 另有 `spacetime_predict` 与 `orbit.predict_passes_report` 的同名实现，**不是「没人用」，
 > 是 `tle.status` 的阈值算错了**。
