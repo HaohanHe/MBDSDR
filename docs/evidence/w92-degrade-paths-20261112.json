@@ -1,0 +1,519 @@
+[
+  {
+    "cache_exists": false,
+    "state": "missing",
+    "text": "SatNOGS 发射机库：未取到（无本地缓存），沿用人工目录",
+    "sat_count": 8,
+    "manual": {
+      "ao91_fox1b": [
+        [
+          145960000.0,
+          "fm"
+        ]
+      ],
+      "funcube_1": [
+        [
+          145935000.0,
+          "bpsk"
+        ]
+      ],
+      "iss_zarya": [
+        [
+          145800000.0,
+          "nfm"
+        ],
+        [
+          145825000.0,
+          "packet"
+        ]
+      ],
+      "meteor_m_n2": [
+        [
+          137100000.0,
+          "lrpt"
+        ]
+      ],
+      "noaa_15": [
+        [
+          137620000.0,
+          "apt"
+        ]
+      ],
+      "noaa_18": [
+        [
+          137912500.0,
+          "apt"
+        ]
+      ],
+      "noaa_19": [
+        [
+          137100000.0,
+          "apt"
+        ]
+      ],
+      "so_50": [
+        [
+          436795000.0,
+          "fm"
+        ]
+      ]
+    },
+    "noaa15_freq": 137620000.0,
+    "machine_state": "absent",
+    "identify_137_1": [
+      "meteor_m_n2",
+      "noaa_19"
+    ],
+    "case": "1_无缓存"
+  },
+  {
+    "state": "invalid",
+    "detail": "内容不是合法 JSON：Expecting property name enclosed in double quotes: line 1 column 3 (char 2)",
+    "text": "SatNOGS 发射机库：未取到（缓存不可用：内容不是合法 JSON：Expecting property name enclosed in double quotes: line 1 column 3 (char 2)），沿用人工目录",
+    "manual": {
+      "ao91_fox1b": [
+        [
+          145960000.0,
+          "fm"
+        ]
+      ],
+      "funcube_1": [
+        [
+          145935000.0,
+          "bpsk"
+        ]
+      ],
+      "iss_zarya": [
+        [
+          145800000.0,
+          "nfm"
+        ],
+        [
+          145825000.0,
+          "packet"
+        ]
+      ],
+      "meteor_m_n2": [
+        [
+          137100000.0,
+          "lrpt"
+        ]
+      ],
+      "noaa_15": [
+        [
+          137620000.0,
+          "apt"
+        ]
+      ],
+      "noaa_18": [
+        [
+          137912500.0,
+          "apt"
+        ]
+      ],
+      "noaa_19": [
+        [
+          137100000.0,
+          "apt"
+        ]
+      ],
+      "so_50": [
+        [
+          436795000.0,
+          "fm"
+        ]
+      ]
+    },
+    "noaa18_freq": 137912500.0,
+    "machine_state": "absent",
+    "exceptions": [],
+    "case": "2a_坏JSON"
+  },
+  {
+    "state": "invalid",
+    "detail": "_schema 不符（找到 'someone-elses-v9'，期望 'mbdsdr sat_links machine cache v1'）",
+    "text": "SatNOGS 发射机库：未取到（缓存结构不符：_schema 不符（找到 'someone-elses-v9'，期望 'mbdsdr sat_links machine cache v1'）），沿用人工目录",
+    "iss_links": 2,
+    "iss_freqs": [
+      145800000.0,
+      145825000.0
+    ],
+    "manual": {
+      "ao91_fox1b": [
+        [
+          145960000.0,
+          "fm"
+        ]
+      ],
+      "funcube_1": [
+        [
+          145935000.0,
+          "bpsk"
+        ]
+      ],
+      "iss_zarya": [
+        [
+          145800000.0,
+          "nfm"
+        ],
+        [
+          145825000.0,
+          "packet"
+        ]
+      ],
+      "meteor_m_n2": [
+        [
+          137100000.0,
+          "lrpt"
+        ]
+      ],
+      "noaa_15": [
+        [
+          137620000.0,
+          "apt"
+        ]
+      ],
+      "noaa_18": [
+        [
+          137912500.0,
+          "apt"
+        ]
+      ],
+      "noaa_19": [
+        [
+          137100000.0,
+          "apt"
+        ]
+      ],
+      "so_50": [
+        [
+          436795000.0,
+          "fm"
+        ]
+      ]
+    },
+    "case": "2b_结构不符"
+  },
+  {
+    "state": "ok",
+    "age_days": 30.0,
+    "stale": true,
+    "text": "SatNOGS 发射机库：机器缓存 30.0 天前（1 颗），已超 168h 未刷新，7 颗最近拉取失败",
+    "machine_state": "ok",
+    "noaa15_freq": 137620000.0,
+    "noaa15_low": 137620000.0,
+    "noaa15_status": "inactive",
+    "manual": {
+      "ao91_fox1b": [
+        [
+          145960000.0,
+          "fm"
+        ]
+      ],
+      "funcube_1": [
+        [
+          145935000.0,
+          "bpsk"
+        ]
+      ],
+      "iss_zarya": [
+        [
+          145800000.0,
+          "nfm"
+        ],
+        [
+          145825000.0,
+          "packet"
+        ]
+      ],
+      "meteor_m_n2": [
+        [
+          137100000.0,
+          "lrpt"
+        ]
+      ],
+      "noaa_15": [
+        [
+          137620000.0,
+          "apt"
+        ]
+      ],
+      "noaa_18": [
+        [
+          137912500.0,
+          "apt"
+        ]
+      ],
+      "noaa_19": [
+        [
+          137100000.0,
+          "apt"
+        ]
+      ],
+      "so_50": [
+        [
+          436795000.0,
+          "fm"
+        ]
+      ]
+    },
+    "case": "3_缓存过期"
+  },
+  {
+    "proxy": "HTTPS_PROXY/HTTP_PROXY/ALL_PROXY=http://127.0.0.1:9, NO_PROXY=''",
+    "elapsed_s": 16.587,
+    "state": "failed",
+    "written": false,
+    "failure_kinds": [
+      "network_unreachable"
+    ],
+    "failure_count": 8,
+    "old_cache_unchanged": true,
+    "status_text": "SatNOGS 发射机库：机器缓存 0 分钟前（1 颗），7 颗最近拉取失败",
+    "manual": {
+      "ao91_fox1b": [
+        [
+          145960000.0,
+          "fm"
+        ]
+      ],
+      "funcube_1": [
+        [
+          145935000.0,
+          "bpsk"
+        ]
+      ],
+      "iss_zarya": [
+        [
+          145800000.0,
+          "nfm"
+        ],
+        [
+          145825000.0,
+          "packet"
+        ]
+      ],
+      "meteor_m_n2": [
+        [
+          137100000.0,
+          "lrpt"
+        ]
+      ],
+      "noaa_15": [
+        [
+          137620000.0,
+          "apt"
+        ]
+      ],
+      "noaa_18": [
+        [
+          137912500.0,
+          "apt"
+        ]
+      ],
+      "noaa_19": [
+        [
+          137100000.0,
+          "apt"
+        ]
+      ],
+      "so_50": [
+        [
+          436795000.0,
+          "fm"
+        ]
+      ]
+    },
+    "noaa15_freq": 137620000.0,
+    "noaa15_low": 137620000.0,
+    "case": "4_网络不可达_代理黑洞"
+  },
+  {
+    "state": "write_failed",
+    "written": false,
+    "detail": "拉取成功但本地缓存写入失败（FileNotFoundError: [WinError 3] 系统找不到指定的路径。: 'D:\\\\mbdsdr\\\\tmp\\\\w92_degrade\\\\work\\\\s5_blocker\\\\cache'）；旧缓存保留，另有 7 颗拉取失败",
+    "status_text": "SatNOGS 发射机库：未取到（无本地缓存），沿用人工目录",
+    "manual": {
+      "ao91_fox1b": [
+        [
+          145960000.0,
+          "fm"
+        ]
+      ],
+      "funcube_1": [
+        [
+          145935000.0,
+          "bpsk"
+        ]
+      ],
+      "iss_zarya": [
+        [
+          145800000.0,
+          "nfm"
+        ],
+        [
+          145825000.0,
+          "packet"
+        ]
+      ],
+      "meteor_m_n2": [
+        [
+          137100000.0,
+          "lrpt"
+        ]
+      ],
+      "noaa_15": [
+        [
+          137620000.0,
+          "apt"
+        ]
+      ],
+      "noaa_18": [
+        [
+          137912500.0,
+          "apt"
+        ]
+      ],
+      "noaa_19": [
+        [
+          137100000.0,
+          "apt"
+        ]
+      ],
+      "so_50": [
+        [
+          436795000.0,
+          "fm"
+        ]
+      ]
+    },
+    "case": "5_缓存目录不可创建"
+  },
+  {
+    "state": "write_failed",
+    "written": false,
+    "detail": "拉取成功但本地缓存写入失败（PermissionError: [WinError 5] 拒绝访问。: 'D:\\\\mbdsdr\\\\tmp\\\\w92_degrade\\\\work\\\\s6_readonly_file\\\\sat_links_machine.json.tmp.24652.16832' -> 'D:\\\\mbdsdr\\\\tmp\\\\w92_degrade\\\\work\\\\s6_readonly_file\\\\sat_links_machine.json'）；旧缓存保留，另有 7 颗拉取失败",
+    "cache_unchanged": true,
+    "status_text": "SatNOGS 发射机库：机器缓存 0 分钟前（1 颗），7 颗最近拉取失败",
+    "manual": {
+      "ao91_fox1b": [
+        [
+          145960000.0,
+          "fm"
+        ]
+      ],
+      "funcube_1": [
+        [
+          145935000.0,
+          "bpsk"
+        ]
+      ],
+      "iss_zarya": [
+        [
+          145800000.0,
+          "nfm"
+        ],
+        [
+          145825000.0,
+          "packet"
+        ]
+      ],
+      "meteor_m_n2": [
+        [
+          137100000.0,
+          "lrpt"
+        ]
+      ],
+      "noaa_15": [
+        [
+          137620000.0,
+          "apt"
+        ]
+      ],
+      "noaa_18": [
+        [
+          137912500.0,
+          "apt"
+        ]
+      ],
+      "noaa_19": [
+        [
+          137100000.0,
+          "apt"
+        ]
+      ],
+      "so_50": [
+        [
+          436795000.0,
+          "fm"
+        ]
+      ]
+    },
+    "noaa15_freq": 137620000.0,
+    "noaa15_low": 137620000.0,
+    "case": "6_缓存文件只读"
+  },
+  {
+    "state": "invalid",
+    "detail": "缓存读取失败：[Errno 13] Permission denied: 'D:\\\\mbdsdr\\\\tmp\\\\w92_degrade\\\\work\\\\s7_unreadable_file\\\\sat_links_machine.json'",
+    "text": "SatNOGS 发射机库：未取到（缓存不可用：缓存读取失败：[Errno 13] Permission denied: 'D:\\\\mbdsdr\\\\tmp\\\\w92_degrade\\\\work\\\\s7_unreadable_file\\\\sat_links_machine.json'），沿用人工目录",
+    "machine_state": "absent",
+    "noaa15_freq": 137620000.0,
+    "manual": {
+      "ao91_fox1b": [
+        [
+          145960000.0,
+          "fm"
+        ]
+      ],
+      "funcube_1": [
+        [
+          145935000.0,
+          "bpsk"
+        ]
+      ],
+      "iss_zarya": [
+        [
+          145800000.0,
+          "nfm"
+        ],
+        [
+          145825000.0,
+          "packet"
+        ]
+      ],
+      "meteor_m_n2": [
+        [
+          137100000.0,
+          "lrpt"
+        ]
+      ],
+      "noaa_15": [
+        [
+          137620000.0,
+          "apt"
+        ]
+      ],
+      "noaa_18": [
+        [
+          137912500.0,
+          "apt"
+        ]
+      ],
+      "noaa_19": [
+        [
+          137100000.0,
+          "apt"
+        ]
+      ],
+      "so_50": [
+        [
+          436795000.0,
+          "fm"
+        ]
+      ]
+    },
+    "icacls_deny_rc": 0,
+    "case": "7_缓存文件不可读"
+  }
+]
