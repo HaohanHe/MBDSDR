@@ -185,16 +185,38 @@ def _build_link_label_class():
     from PySide6.QtWidgets import QLabel
 
     class RemedyLinkLabel(QLabel):
-        """「查看怎么办 →」链接；没有对应条目时保持隐藏，绝不出现假链接。"""
+        """「查看怎么办 →」链接；没有对应条目时保持隐藏，绝不出现假链接。
+
+        鼠标与键盘两条路都必须能打开：只允许鼠标时，键盘用户看得见这句
+        「查看怎么办」却点不开——错误发生后唯一给出路的入口就废了。
+        """
 
         def __init__(self, parent=None):
             super().__init__(parent)
             self._code = ""
             self.setTextFormat(Qt.RichText)
             self.setOpenExternalLinks(False)
-            self.setTextInteractionFlags(Qt.LinksAccessibleByMouse)
+            # 鼠标可点 + 键盘可达：Tab 能停到这里，回车等同点击。
+            self.setTextInteractionFlags(
+                Qt.LinksAccessibleByMouse | Qt.LinksAccessibleByKeyboard)
+            # setTextInteractionFlags 只在部分 Qt 版本上自动放宽焦点策略，
+            # 这里显式钉住，保证链接一定在 Tab 链上。
+            self.setFocusPolicy(Qt.StrongFocus)
             self.linkActivated.connect(self._open)
             self.clear_code()
+
+        def keyPressEvent(self, event):  # noqa: N802 (Qt 命名)
+            """回车/Return 激活唯一那条链接。
+
+            QLabel 内部的 QTextControl 也能用键盘激活，但只在「当前链接已被
+            选中」时生效；这里显式兜底，保证 Tab 到标签后按一次回车一定打开。
+            自己处理后不再交给基类，避免同一次按键触发两遍。
+            """
+            if self._code and event.key() in (Qt.Key_Return, Qt.Key_Enter):
+                event.accept()
+                self.linkActivated.emit(f"remedy:{self._code}")
+                return
+            super().keyPressEvent(event)
 
         def code(self) -> str:
             return self._code
