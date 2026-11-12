@@ -19,6 +19,7 @@ MBDSDR 设备选择 / 热插拔面板（desktop/device_panel.py）
 from __future__ import annotations
 
 import logging
+import weakref
 from pathlib import Path
 from typing import Optional, List, Dict
 
@@ -213,6 +214,15 @@ class DevicePanel(QWidget):
         self._last_poll_locs: set = set()
         self._build_ui()
         _req_store.subscribe(self._on_request_changed)
+        # 退订必须真的接上：面板被 Qt 销毁后 Python 包装对象仍可能存活，订阅
+        # 里的弱引用不会自动失效，通知会打到已删除的控件上（RuntimeError）。
+        # 只能挂到 destroyed 上——面板被关（close）只是隐藏，仍应继续收更新。
+        # 注意别写成 self.destroyed.connect(self._method)：PySide6 在对象销毁
+        # 前会先拆掉绑方法连接，那种写法永远不会被调用（本仓实测）。这里只
+        # 捕获弱引用，避免钩子反过来把面板吊住。
+        owner_ref = weakref.ref(self)
+        self.destroyed.connect(
+            lambda *_args: _req_store.unsubscribe_owner(owner_ref()))
         # 首次枚举延后到首帧之后：enumerate_all_sdr_devices 本机实测 1.0–1.8 s
         # （rtlsdr_open + Pluto 网络探测 0.5 s），压在构造函数里等于让首帧等它。
         # 期间界面如实显示「正在枚举」，不假装「未检测到设备」。
@@ -477,6 +487,12 @@ class DevicePanel(QWidget):
             self.dev_combo.addItem(label)
         self.status_label.setText(f"检测到 {len(self._devices)} 台设备")
         self.status_label.setToolTip("")
+        # 告警回看出口：_warn_once 只往日志写一次，用户在面板上再也看不到。
+        # 把本进程内出现过的身份告警挂到状态行 tooltip（枚举后仍在）。
+        warnings = _req_store.recent_warnings()
+        if warnings:
+            self.status_label.setToolTip(
+                "身份告警（本进程内出现过）：\n" + "\n".join(warnings[-3:]))
         self.connect_btn.setEnabled(not self._connected)
         # 手动刷新/初始刷新后，轮询基准同步到最新列表：刷新本身不算“新插入”。
         self._last_poll_locs = {self._locator_of(d) for d in self._devices}

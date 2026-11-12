@@ -295,9 +295,32 @@ def subscribe(listener: Callable[[str], None]) -> None:
 
 
 def unsubscribe(listener: Callable[[str], None]) -> None:
+    """退订请求变更（幂等；订阅方销毁/重建时必须调用）。
+
+    订阅用弱引用持有，但面板被 Qt 销毁后 Python 包装对象仍可能存活，
+    弱引用不会自动失效——不显式退订的话，通知会打到已删除的控件上。
+    因此订阅方在 ``destroyed`` 时必须调这里，用例见
+    ``tests/test_connect_request_store.py::test_unsubscribe_stops_callbacks``。
+    """
     for ref in list(_listeners):
         callback = ref()
         if callback is None or callback == listener:
+            try:
+                _listeners.remove(ref)
+            except ValueError:
+                pass
+
+
+def unsubscribe_owner(owner: object) -> None:
+    """按订阅方对象退订，供 Qt ``destroyed`` 钩子使用。
+
+    ``destroyed`` 触发时对象已处于销毁中：PySide6 会把绑方法连接先行拆掉，
+    且拿销毁中的对象去比较绑方法并不可靠。这里按 ``__self__`` 认出订阅方，
+    不碰控件属性，因此可以在销毁回调里安全执行。
+    """
+    for ref in list(_listeners):
+        callback = ref()
+        if callback is None or getattr(callback, "__self__", None) is owner:
             try:
                 _listeners.remove(ref)
             except ValueError:

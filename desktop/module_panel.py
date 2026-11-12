@@ -27,6 +27,7 @@ from __future__ import annotations
 import os
 import sys
 import math
+import weakref
 from typing import Dict, List, Optional
 
 import logging
@@ -290,6 +291,14 @@ class ModulePanel(QWidget):
         self._enum_watchdog.timeout.connect(self._on_enum_timeout)
         self._build_ui()
         _req_store.subscribe(self._on_request_changed)
+        # 退订必须真的接上（订阅成对）：面板被 Qt 销毁后 Python 包装对象仍可能
+        # 存活，订阅弱引用不会失效，通知会打到已删除的控件上（RuntimeError）。
+        # 挂 destroyed 而不是 close：关面板只是隐藏，仍应继续收更新。不能写成
+        # self.destroyed.connect(self._method)——PySide6 会先拆绑方法连接，
+        # 那种写法永远不触发（本仓实测）。只捕获弱引用，避免钩子吊住面板。
+        owner_ref = weakref.ref(self)
+        self.destroyed.connect(
+            lambda *_args: _req_store.unsubscribe_owner(owner_ref()))
         # 设备枚举放到后台：实测本机 enumerate_all_sdr_devices 1.03 s
         # （含 rtlsdr_open + 0.5 s 网络探测），压在 GUI 线程里首帧得等它。
         self.refresh_devices_async()

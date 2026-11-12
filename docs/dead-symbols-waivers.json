@@ -1,14 +1,6 @@
 {
   "_comment": "死符号检测器允许不删的条目：每条必须写 reason（为什么不能删）与 review_by（到期必须复核，缺一即判不合格）。键格式 <path>::<qualname>。文档见 scripts/lint_dead_symbols.py 的模块 docstring。",
   "waivers": {
-    "desktop/connect_request_store.py::unsubscribe": {
-      "reason": "公开 API：订阅/退订是成对契约，退订点未接线属「告警只看最新一条」的缺陷登记，删除会让缺陷变成不可修",
-      "review_by": "2026-12"
-    },
-    "desktop/connect_request_store.py::recent_warnings": {
-      "reason": "公开 API：告警回看出口，UI 尚未接线（同属缺陷登记）；删除等于把「没有回看」固化成设计",
-      "review_by": "2026-12"
-    },
     "desktop/right_column.py::_TabBarShim.setElideMode": {
       "reason": "QTabBar 兼容壳的成对 API（与 setUsesScrollButtons/setExpanding 同批），单删一个会破坏壳的接口完整性；文件当前有他线在途改动，本线不动",
       "review_by": "2026-12"

@@ -249,6 +249,69 @@ def test_store_fills_every_connect_payload_key():
     assert payload["_bandwidth"] == pytest.approx(150_000), payload
 
 
+# ------------------------------------------------------- 订阅成对：退订真接线
+def test_unsubscribe_stops_callbacks():
+    """退订之后回调不再被调用——这是「订阅成对」的关键断言，不是「调过就算」。
+
+    正反两侧都要证：订阅后必须收到（正向对照），退订后必须收不到。
+    """
+    calls = []
+
+    def listener(key):
+        calls.append(key)
+
+    key = store.resolve([_rtl(0, serial="REAL-0001")])[0].key
+    store.subscribe(listener)
+    store.update(key, sample_rate_hz=1_024_000)
+    assert calls == [key], "订阅后回调没被调用（正向对照失败）"
+
+    store.unsubscribe(listener)
+    store.update(key, sample_rate_hz=2_048_000)
+    assert calls == [key], "退订之后回调仍被调用"
+
+
+@pytest.mark.parametrize(("modname", "clsname"), [
+    ("desktop.device_panel", "DevicePanel"),
+    ("desktop.module_panel", "ModulePanel"),
+])
+def test_panel_destroy_unsubscribes(qapp, monkeypatch, modname, clsname):
+    """面板销毁（Qt 对象真删）必须退订；否则通知会打到已删除的控件上。"""
+    import importlib
+
+    from shiboken6 import delete
+
+    panel_cls = getattr(importlib.import_module(modname), clsname)
+    monkeypatch.setattr(panel_cls, "refresh_devices_async", lambda self: None)
+    calls = []
+    monkeypatch.setattr(panel_cls, "_on_request_changed",
+                        lambda self, key: calls.append(key))
+
+    listeners_before = len(store._live_listeners())
+    panel = panel_cls()
+    key = store.resolve([_rtl(0, serial="REAL-0001")])[0].key
+    store.update(key, sample_rate_hz=1_024_000)
+    assert calls == [key], "面板订阅没生效（正向对照失败）"
+    assert len(store._live_listeners()) == listeners_before + 1
+
+    delete(panel)  # 真销毁 C++ 对象 → destroyed 信号
+    assert len(store._live_listeners()) == listeners_before, (
+        "面板销毁后订阅仍在：回调会拽着已删控件渲染")
+    store.update(key, sample_rate_hz=2_048_000)
+    assert calls == [key], "面板销毁（退订）之后回调仍被调用"
+
+
+def test_recent_warnings_surface_on_device_panel(panels):
+    """告警回看出口：身份告警不能只写一次日志，面板上要留得下。"""
+    dp, _mp = panels
+    dp._apply_devices([_rtl(0, serial=""), _rtl(1, serial="")])
+
+    warnings = store.recent_warnings()
+    assert warnings, "无序列号设备没有产生身份告警"
+    tip = dp.status_label.toolTip()
+    assert "身份告警" in tip
+    assert warnings[-1] in tip, "身份告警没有在面板上留痕，用户只能去翻日志"
+
+
 # ------------------------------------------------ 桌面端与 AI 必须算出同一个键
 def test_desktop_and_ai_compute_the_same_identity_key():
     """同一份枚举，桌面端 store 与 AI sdr_backend 的键/质量/告警逐字相同。
