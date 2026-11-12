@@ -19,12 +19,15 @@ MBDSDR AI 内核 - FM 广播自动搜台
 from __future__ import annotations
 
 import json
+import logging
 import os
 import time
 from dataclasses import dataclass, asdict
 from typing import Callable, List, Optional, Dict, Any
 
 import numpy as np
+
+logger = logging.getLogger(__name__)
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -361,17 +364,78 @@ def self_test() -> Dict[str, Any]:
 PRESETS_DIR = os.path.expanduser("~/.mbdsdr")
 PRESETS_FILE = os.path.join(PRESETS_DIR, "fm_presets.json")
 
+#: 最近一次读/写失败的人话说明（None = 正常）；供 UI 取来提示用户。
+_LAST_ERROR: Optional[str] = None
+#: 损坏文件的备份路径（None = 未损坏或备份失败）。
+_CORRUPT_BACKUP: Optional[str] = None
+#: 损坏且备份失败时拒绝写盘：此时写新文件会覆盖唯一证据。
+_SAVE_BLOCKED = False
+
+
+def presets_last_error() -> Optional[str]:
+    """返回上一次预设读/写失败的人话原因（正常时为 None）。"""
+    return _LAST_ERROR
+
+
+def _backup_corrupt_presets(path: str) -> Optional[str]:
+    """把损坏的预设文件改名成 ``*.corrupt-时间戳``，返回备份路径。
+
+    只改名不删除：原件字节必须原样留在备份里，后续写新文件才不会吞掉证据。
+    改名失败返回 None，调用方据此拒绝写盘。
+    """
+    backup = f"{path}.corrupt-{time.strftime('%Y%m%d-%H%M%S')}"
+    try:
+        os.replace(path, backup)
+    except OSError as exc:
+        logger.error("FM 预设损坏文件备份失败：%s（%s）", path, exc)
+        return None
+    return backup
+
+
+def _fallback_corrupt(reason: str) -> Dict[str, Any]:
+    """损坏文件：备份原件、留人话错误；备份失败则禁止后续写盘。"""
+    global _LAST_ERROR, _CORRUPT_BACKUP, _SAVE_BLOCKED
+    _CORRUPT_BACKUP = _backup_corrupt_presets(PRESETS_FILE)
+    _SAVE_BLOCKED = _CORRUPT_BACKUP is None
+    _LAST_ERROR = (
+        f"FM 预设读取失败（{reason}）：{PRESETS_FILE}；"
+        f"原文件已备份为 {_CORRUPT_BACKUP or '（备份失败）'}，"
+        "本次按空预设启动"
+    )
+    logger.warning("FM 预设文件不可用（%s）；备份=%s", reason,
+                   _CORRUPT_BACKUP or "（备份失败）")
+    return {"stations": [], "last_scan": None, "updated_at": None}
+
 
 def load_presets() -> Dict[str, Any]:
-    """加载 ~/.mbdsdr/fm_presets.json，不存在则返回空结构。"""
+    """加载 ~/.mbdsdr/fm_presets.json，不存在则返回空结构。
+
+    文件损坏时先备份原件再按空预设返回；备份失败则禁止后续保存，
+    绝不让「下一次保存」把唯一证据整文件覆盖掉。
+    """
+    global _LAST_ERROR, _CORRUPT_BACKUP, _SAVE_BLOCKED
     if not os.path.exists(PRESETS_FILE):
+        _LAST_ERROR = None
+        _CORRUPT_BACKUP = None
+        _SAVE_BLOCKED = False
         return {"stations": [], "last_scan": None, "updated_at": None}
     try:
         with open(PRESETS_FILE, "r", encoding="utf-8") as f:
             data = json.load(f)
-        return data
-    except Exception:
+    except FileNotFoundError:
+        # 探测后被别处删掉：不是损坏，别备份别拦保存。
+        _LAST_ERROR = None
+        _CORRUPT_BACKUP = None
+        _SAVE_BLOCKED = False
         return {"stations": [], "last_scan": None, "updated_at": None}
+    except (ValueError, OSError) as exc:
+        return _fallback_corrupt(f"{exc.__class__.__name__}：{exc}")
+    if not isinstance(data, dict):
+        return _fallback_corrupt(f"顶层不是对象（{type(data).__name__}）")
+    _LAST_ERROR = None
+    _CORRUPT_BACKUP = None
+    _SAVE_BLOCKED = False
+    return data
 
 
 def save_presets(stations: List[Dict[str, Any]], scan_meta: Optional[Dict] = None) -> str:
@@ -379,8 +443,17 @@ def save_presets(stations: List[Dict[str, Any]], scan_meta: Optional[Dict] = Non
 
     stations: [{freq_mhz, strength_db, stereo, active, name?}]
     scan_meta: 可选的扫描元信息（范围、时间等）。
-    返回保存的文件路径。
+    返回保存的文件路径；损坏且未能备份时返回空串并拒绝写入。
     """
+    global _LAST_ERROR
+    if _SAVE_BLOCKED:
+        _LAST_ERROR = (
+            f"FM 预设未保存：{PRESETS_FILE} 已损坏且备份失败；"
+            "为避免覆盖唯一证据，本次不写入。"
+            "请检查目录权限或手动移走该文件后重试"
+        )
+        logger.error("FM 预设保存被拒绝（损坏文件未能备份）：%s", PRESETS_FILE)
+        return ""
     os.makedirs(PRESETS_DIR, exist_ok=True)
     data = {
         "stations": stations,
