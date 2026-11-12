@@ -363,6 +363,12 @@ DVB-S2 BCH/LDPC 表、月面反照率），另有 `desktop/bandplan.json` 频段
    验证，仅通过 schema 校验**。测试里的 256 字节帧是字段抽取机制的用例，
    不是规范样例，不能当验证证据。此结论同步写在 `funcube1_ao73_frame` 与
    `funcube1_ao73_fitter` 的 `honesty` 字段中。
+7. **验证等级口径（机器字段）**：每个顶层布局必填 `verification`，只允许
+   `schema_only`（仅过结构校验）/ `spec_example`（用规范示例数据逐字段
+   对上）/ `ota`（真实接收数据验证过）；`spec_example` 与 `ota` 必须同时
+   给 `verification_evidence` 证据文件路径，否则加载即报错。`honesty`
+   保留为人读说明，`verification` 才是可机检口径。当前 5 条布局全部为
+   `schema_only`——没有任何一条做过规范示例逐字段对拍或 OTA 验证。
 
 ## 3b. Web 产品生成产物（`web/product/build/*.json`）
 

@@ -527,9 +527,10 @@ for (auto const& [name, _vfo] : vfos) {
 **条目 11｜FoxTelem `ac2cz/FoxTelem@537b7cc`（master，2026-06）— 每星多帧型遥测布局**
 - 机制：布局在程序启动时从 CSV 加载，帧型固定为 `RT / MAX / MIN / WOD / EXP / CAN_*`，并支持 `parentLayout / secondaryLayout` 派生——`src/telemetry/BitArrayLayout.java:34-36`、`:42-52`、`:58-70`；主 CSV 生成器 `genSpacecraft/genSpacecraft.py:80-104`。<https://github.com/ac2cz/FoxTelem/blob/537b7cc/src/telemetry/BitArrayLayout.java#L34-L70>
 - 我方（2026-11-12 复核，**下面两句必须同时读**）：
-  1. **机制已支持**：帧布局 schema 已升 v2，有帧型标签 `frame_type` 与派生关系 `derived_from`；派生规则写死在 `mbdsdr_ai/sat_profile.py:75-152`，缺 `source` 的派生布局拒载（`:96-107`、`:142`）。位级字段路径也已支持（`bit_offset` 以帧首为 0、MSB-first、越界报错不截断），见 `mbdsdr_ai/verify_chain.py:109-146`。
+  1. **机制已支持**：帧布局 schema 已升 v3，有帧型标签 `frame_type`、派生关系 `derived_from` 与机器字段 `verification`；派生规则写死在 `mbdsdr_ai/sat_profile.py:107-190`，缺 `source` 的派生布局拒载（`:128-141`），验证等级校验在 `:77-104`。位级字段路径也已支持（`bit_offset` 以帧首为 0、MSB-first、越界报错不截断），见 `mbdsdr_ai/verify_chain.py:109-146`。
   2. **数据已上 1 颗**：`ccsds_tc_segmented`（`data/frame_layouts.json:31-33`）属**通用协议帧**、不是任何一颗星的遥测，不计入星覆盖；星上遥测新增 FUNcube-1（AO-73）`funcube1_ao73_frame` 与其 Fitter 派生 `funcube1_ao73_fitter`（同文件，出处为 AMSAT-UK 公开 PDF + SHA-256 + 抓取时间），**星覆盖 1 颗 = 达下限，其余待公开规范**。
   3. **FUNcube 布局的验证边界**：AMSAT-UK 规范全文只有位宽表，**没有示例帧字节或字段取值示例**（§6 为「To be added」），因此该布局**无法做端到端验证，仅通过 schema 校验**；测试字节属机制用例，不作规范样例。
+  4. **验证等级口径**：布局新增机器字段 `verification`（必填，三档：`schema_only` / `spec_example` / `ota`）；后两档必须同时给 `verification_evidence` 证据文件路径，否则加载即报错。当前 5 条布局全部为 `schema_only`，`honesty` 仅作人读说明。
   **机制通 ≠ 覆盖扩**：W91 的判据是「扩遥测覆盖」，`ccsds_tc_segmented` 不得据此计入，W91 是否完成只看星上遥测布局数与出处。
 - 差距判断：**缺**，缺的是**数据**。差距本质不是「布局格式不同」，而是我们遥测能覆盖的星太少——库内为 1 条示例布局 + 2 条 CCSDS 通用协议布局 + 2 条 FUNcube-1 星上遥测（1 基座 + 1 派生）；对方有帧型变体 + 派生，覆盖几十颗。按「**只是缺数据、不是缺代码**」定性。
 - roadmap：**W91 数据侧 1 颗、达下限，其余待公开规范**（2026-11-12 复核）。已尝试并停止：NOAA KLM 手册本环境不可取得；ESEO 文档标注 `Distribution: Confidential`，不满足公开可引用红线；Fox-1A 字段位表仅存于 GPL 项目；FUNcube-2/Nayif-1 的同类规范「正在准备」但从未发布。**停止扩星**，不为凑数造字段。
