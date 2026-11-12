@@ -32,7 +32,8 @@ def _isolated_tle_disk_cache(tmp_path, monkeypatch):
     ``tests/test_sat_tracker_persistence.py`` 用独立目录验证。
     """
     from mbdsdr_ai import orbit
-    monkeypatch.setattr(orbit, "_CACHE_DIR", str(tmp_path / "tle_cache"))
+    monkeypatch.setenv("MBDSDR_TLE_CACHE_DIR", str(tmp_path / "tle_cache"))
+    orbit.reset_tle_cache()
 
 
 # 北京附近观测站（39.9N 116.4E，海拔 50m）。
