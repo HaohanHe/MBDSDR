@@ -495,7 +495,7 @@ class AIPanel(QWidget):
         self.input_field.setStyleSheet(f"""
             QLineEdit {{
                 padding: 6px 10px;
-                border: 1px solid {_t.COLORS['gray_400']};
+                border: 1px solid {_t.COLORS['gray_200']};
                 border-radius: 6px;
                 font-size: 9pt;
                 background: {_t.COLORS['card_1']};

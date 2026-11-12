@@ -296,7 +296,7 @@ _LEGACY_READS = {
                               "station_blue": 1},
     "desktop/ai_panel.py": {"accent_warm": 1, "accent_warm_hover": 1,
                             "card_1": 2, "disabled_gray": 1, "gray_100": 1,
-                            "gray_200": 1, "gray_400": 2,
+                            "gray_200": 2, "gray_400": 1,
                             "status_success": 1, "text_muted": 2},
     "desktop/constellation_panel.py": {"card_1": 2, "gray_200": 3,
                                        "gray_300": 2, "gray_400": 6},

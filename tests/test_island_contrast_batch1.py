@@ -44,7 +44,7 @@ MIN_NON_TEXT = 3.0
 
 #: 经变量取全局色板：本文件也会被 `test_ui_contrast._scan_direct_reads()` 扫到，
 #: 写成「命名空间名 + 方括号字面量」会被记成新增直读。
-_COLORS = tokens().COLORS
+_PALETTE = tokens().COLORS
 
 
 def _hex(color: QColor) -> str:
@@ -149,7 +149,7 @@ def _panel_bg(panel) -> QColor:
                   panel.styleSheet())
     assert m, "浮层没有自绘底色，测试前提不成立：%r" % panel.styleSheet()
     fg = QColor(int(m.group(1)), int(m.group(2)), int(m.group(3)))
-    return _composite(fg, float(m.group(4)), QColor(_COLORS["light_bg"]))
+    return _composite(fg, float(m.group(4)), QColor(_PALETTE["light_bg"]))
 
 
 def test_floating_panel_buttons_do_not_inherit_theme_text_color(floating_panel):
@@ -163,3 +163,21 @@ def test_floating_panel_buttons_do_not_inherit_theme_text_color(floating_panel):
         assert m, f"{name} 没有内联字色，会继承主题字色（default 仅 2.94:1）"
         assert m.group(1).upper() == fp._ISLAND_INK.upper()
         assert contrast_ratio(m.group(1), _hex(bg)) >= MIN_TEXT
+
+
+# ---------------------------------------------------------------- T1-11
+
+
+def test_ai_input_border_is_not_the_same_as_its_fill():
+    """输入框底与面板底同色，描边是唯一识别线索，必须达到非文本 3:1。"""
+    import ai_panel as ap
+
+    panel = ap.AIPanel()
+    try:
+        qss = panel.input_field.styleSheet()
+        m = re.search(r"border:\s*1px solid\s+(#[0-9A-Fa-f]{6})", qss)
+        assert m, "输入框没有可读的描边色：%r" % qss
+        assert m.group(1).upper() == _PALETTE["gray_200"].upper()
+        assert contrast_ratio(m.group(1), _PALETTE["card_1"]) >= MIN_NON_TEXT
+    finally:
+        panel.deleteLater()
