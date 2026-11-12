@@ -553,14 +553,18 @@ for (auto const& [name, _vfo] : vfos) {
 
 预测窗口单位、书签带宽、bandplan 均不是缺口。
 
-**4.2.2 我们有、他们缺（4 条）**
+**4.2.2 我们有、他们缺（证伪后：保留 1、降级 2、删除 1）**
 
-| # | 机制 | 我方证据 |
-|---|---|---|
-| 1 | 单一时间基准 + `ClockGuard` | `time_basis.py:215` |
-| 2 | Agent 工具层（APRS 解调、rotctld 云台） | `agent.py:1162/1702` |
-| 3 | 恒星/星座/行星/卫星/天线/热力图/GNSS 同盘 | `rf_sky_view.py:119-120`、`paintEvent:4203-4263` |
-| 4 | 声明式帧布局 + CRC 注册表（配置注入） | `data/frame_layouts.json:2` |
+> 证伪方法（2026-11-12）：对已查的 6 个项目——SDRangel `f4exb/sdrangel@1ec7cea`、SDR++ `AlexandreRouma/SDRPlusPlus@ea6f755`、gr-satellites `daniestevez/gr-satellites@0ff8b61`、Direwolf `wb2osz/direwolf@eda1383`、OpenWebRX+ `luarvique/openwebrx@4541625`、CubicSDR `cjcliffe/CubicSDR@fd82cd9`——拉取全量文件树（blob 合计 **28,051** 个），按机制关键词检索文件名并抽读命中文件。判据：**别人有没有解决同一个问题的东西，哪怕叫法不同、实现更简陋**。**「我没看到」不等于「他们没有」**：判不动的进「待查」，不留在强项列。
+
+| # | 机制 | 我方证据 | 结论 | 线上等价物 / 封闭集说明 |
+|---|---|---|---|---|
+| 1 | 单一时间基准 + `ClockGuard` | `time_basis.py:215` | **保留** | 已查 6 项目 **28,051** 个 blob，按 `clock/timebase/ntp/timesource` 命中 **49** 处，逐一核对均为 DSP 时钟恢复（`core/src/dsp/clock_recovery/`）、无线电时钟解码插件（`plugins/channelrx/radioclock/`）、外部参考时钟 UI（`sdrgui/gui/externalclockbutton.cpp`）、前端 UTC 显示（`htdocs/lib/Clock.js`，仅 `new Date()` 显示）；**未见全应用统一时间源抽象或时间源守卫** |
+| 2 | Agent 工具层（APRS 解调、rotctld 云台） | `agent.py:1162/1702` | **降级：他们以另一种形态有** | SDRangel WebAPI 有逐特性 swagger schema（`sdrbase/resources/webapi/doc/swagger/include/APRS.yaml`、`.../SatelliteTracker.yaml`），是机器可调用的工具面；Direwolf 有 AGW/KISS 网络接口（`src/agwlib.c`、`src/kissnet.c`）。差异只剩「面向 LLM 的工具清单/参数校验/编排」，不再是能力空白 |
+| 3 | 恒星/星座/行星/卫星/天线/热力图/GNSS 同盘 | `rf_sky_view.py:119-120`、`paintEvent:4203-4263` | **降级：他们以另一种形态有（更窄）** | SDRangel 用 `QPolarChart` 画 az/el 极坐标过境图（`plugins/feature/satellitetracker/satellitetrackergui.cpp:813-854`）；**仅卫星**，无恒星/行星/GNSS/天线波束/热力图叠加。我们强的是叠层广度，不是「有没有方位投影」 |
+| 4 | 声明式帧布局 + CRC 注册表（配置注入） | `data/frame_layouts.json:2` | **删除（不作强项）** | gr-satellites 用 `construct` 声明式定义字段（`python/telemetry/aausat4.py:11,17-30`），CRC 预设成表（`python/crcs.py:22-49`，含 crc16_arc / ccitt_x25 / ccitt_false / ccitt_zero / cc11xx / crc32c）；等价物存在，差别只是「代码内声明 vs 外部 JSON 注入」 |
+
+**本轮证伪结果**：删 **1** 条（#4 声明式帧布局 + CRC 注册表）、降级 **2** 条（#2 Agent 工具层、#3 同盘方位投影）、保留 **1** 条（#1 单一时间基准 + `ClockGuard`）、待查 **0** 条。
 
 **4.2.3 我们故意不做（5 条，附理由）**
 
@@ -605,5 +609,6 @@ for (auto const& [name, _vfo] : vfos) {
 - **第一批（2026-11-12）**：SDRangel / SDR++ / gr-satellites / Direwolf / OpenWebRX+ / CubicSDR，共 10 条（条目 1–10）。
 - **第二批（2026-11-12）**：FoxTelem（条目 11）、PreviSat（条目 12），已完成。
 - **接入 roadmap（2026-11-12）**：§4.2.1 四条缺口按派单方优先级接入——W91（FoxTelem 多帧型布局，最高）、W92（SatNOGS 发射机库，次高）、W93（地面轨迹，中）、W94（AOS/LOS 外部命令钩子，低），状态均「未开工」。§4.2.4 候选「是否受照标签」**不进 roadmap**。
+- **证伪「我们有、他们缺」（2026-11-12）**：原 4 条 → **保留 1、降级 2、删除 1**。方法：6 个已查仓库全树（blob 合计 28,051 个）按名检索 + 抽读；结论见 §4.2.2。
 - 不查：SatNOGS server（定位不同）；SDR-Console/Orbitron 已按 §4.4 单列。
 - 下一批：待裁定。
