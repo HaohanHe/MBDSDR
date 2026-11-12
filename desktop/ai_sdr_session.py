@@ -1,6 +1,11 @@
 # SPDX-License-Identifier: MIT
 """桌面 SDR 会话的 AI 侧委托（单权威接线第 2 步）。
 
+所属层：desktop。本模块的写路径必须 marshal 回 GUI 线程（QObject + Signal
+跨线程投递），是「真的需要 Qt 类型贯穿」，无法用无 Qt 的回调替代；原先是
+mbdsdr_ai 里的一个 Qt 岛，D1 收口时整模块迁到界面层，避免纯逻辑包依赖 Qt
+（守卫见 tests/test_import_direction_contract.py）。
+
 为什么需要
 ----------
 桌面 ``MainWindow._active_sdr_backend`` 与 ``agent.sdr_manager`` 原本是

@@ -57,7 +57,7 @@ class _FakeLocal:
 
 
 def _session(window, backends=None):
-    from mbdsdr_ai.desktop_sdr_session import DesktopSdrSession
+    from desktop.ai_sdr_session import DesktopSdrSession
 
     return DesktopSdrSession(window=window, local_manager=_FakeLocal(backends))
 

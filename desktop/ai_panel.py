@@ -272,7 +272,7 @@ class AIPanel(QWidget):
         self._tool_log: List[ai_steps.StepRecord] = []
         self.agent: Optional["MBDSDRAgent"] = None
         #: AI 侧 SDR 会话（桌面委托）。惰性解析宿主窗口，首次工具调用才取，
-        #: 见 mbdsdr_ai/desktop_sdr_session.py 与 docs/COORDINATION.md 等待项。
+        #: 见 desktop/ai_sdr_session.py 与 docs/COORDINATION.md 等待项。
         self._sdr_session_obj = None
         self._worker_thread: Optional[QThread] = None
         self._worker: Optional[AIWorker] = None
@@ -714,7 +714,10 @@ class AIPanel(QWidget):
         """
         session = self._sdr_session_obj
         if session is None:
-            from mbdsdr_ai.desktop_sdr_session import DesktopSdrSession
+            try:  # 包上下文（测试 / 其它 desktop 模块）
+                from .ai_sdr_session import DesktopSdrSession
+            except ImportError:  # 脚本上下文（python desktop/main.py）
+                from ai_sdr_session import DesktopSdrSession
             session = DesktopSdrSession(window=lambda: self.window())
             self._sdr_session_obj = session
         return session
