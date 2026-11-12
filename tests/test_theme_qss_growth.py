@@ -17,7 +17,8 @@
      ``QApplication.styleSheet`` 记录调用栈，只允许 themes.py 的前缀判定与
      main_window.py 的两处相等判定这三个「只比较」的读点；
   4. 后缀只生成一次：连切 3 个主题后标记串出现 1 次，且总长恒为
-     ``len(theme._qss()) + 528``。
+     ``len(theme._qss()) + len(main_window._touch_stylesheet_extra(...))``
+     ——后缀长度取自唯一生成点，不在测试里写死。
 
 **量测前提：必须 ``MBDSDR_OFFLINE=1``。** 本文件在模块顶部显式 setdefault，
 不只依赖 ``tests/conftest.py``（那里也是 setdefault，被外部环境覆盖就失效）。
@@ -130,15 +131,11 @@ def test_touch_mode_theme_switches_do_not_grow_app_stylesheet(mw, qapp):
         tm.set_override(old_override)
 
 
-#: 触控后缀长度（2026-11-12 实测 20655 − 20127 = 528）。这是契约不是魔法数：
-#: 后缀内容真的改了长度，就更新这里并在提交信息里写明原因。
-TOUCH_SUFFIX_LEN = 528
-
 #: 允许读取 ``app.styleSheet()`` 的调用点，全部是**只比较、不拼接**：
 #:   themes.py:Theme.apply          ``current == qss or current.startswith(qss)``
 #:   main_window.py:_apply_theme    ``app.styleSheet() == self._theme_qss`` 复位判定
 #:   main_window.py:_apply_touch_stylesheet  ``app.styleSheet() != target`` 幂等判定
-#: 基串唯一来源是 ``MainWindow._theme_qss``（由 ``theme._qss()`` 赋值）。
+#: 基串唯一来源是 ``MainWindow._theme_qss``（由 ``Theme.apply`` 的返回值赋值）。
 _ALLOWED_STYLESHEET_READERS = {
     ("themes.py", "apply"),
     ("main_window.py", "_apply_theme"),
@@ -193,13 +190,19 @@ def test_app_stylesheet_is_never_read_as_base_for_concatenation(mw, qapp):
 
 
 def test_touch_suffix_is_composed_exactly_once_after_three_switches(mw, qapp):
-    """连切 3 个主题：后缀标记 1 份，总长 = 基串 + 528。
+    """连切 3 个主题：基串只推导一次、后缀 1 份、总长 = 基串 + 后缀。
 
     长度恒定只能证明「没变长」，证明不了「后缀只有一份」：若有人把后缀
     复制成两段等长的文本，长度同样恒定。这里同时钉标记串出现次数。
+
+    后缀长度从 ``main_window._touch_stylesheet_extra``（唯一生成点）取，
+    不在测试里写死 528——写死就等于把实现细节复制一份。基串侧同时钉
+    ``mw._theme_qss == theme._qss()``：``Theme.apply`` 的返回值与主题自身
+    推导必须逐字相同，否则就是「两处算出不同串」的回归起点。
     """
-    from touch_manager import touch_manager
+    import main_window as mw_module
     import themes as th
+    from touch_manager import touch_manager
 
     tm = touch_manager()
     old_override = tm._mode_override
@@ -208,23 +211,30 @@ def test_touch_suffix_is_composed_exactly_once_after_three_switches(mw, qapp):
         names = THEME_CYCLE[:3]
         for name in names:
             mw._apply_theme(name)
+            base_qss = th.get_theme(name)._qss()
+            assert mw._theme_qss == base_qss, (
+                f"切到 {name} 后 _theme_qss 与 theme._qss() 不同："
+                f"{len(mw._theme_qss)} vs {len(base_qss)} 字符——两处推导分叉")
 
         sheet = qapp.styleSheet()
-        base_sheet = th.get_theme(names[-1])._qss()
-        base = len(base_sheet)
+        base = len(mw._theme_qss)
+        suffix = mw_module._touch_stylesheet_extra(tm.scrollbar_width())
         assert sheet.count("min-height: 44px") == 1, (
             f"触控后缀重复了 {sheet.count('min-height: 44px')} 份；"
             f"总长 {len(sheet)}，基串 {base}")
         # 该选择器在主题基串里本来就有 2 处（QSS 自身规则），只能用「相对基串
         # 多出 1 处」判重，不能直接数绝对值。
         sel = "QScrollBar::handle:vertical"
-        assert sheet.count(sel) == base_sheet.count(sel) + 1, (
-            f"滚动条规则比基串多出 {sheet.count(sel) - base_sheet.count(sel)} 处"
-            f"（基串 {base_sheet.count(sel)} 处），说明后缀被叠了一层以上")
-        assert len(sheet) == base + TOUCH_SUFFIX_LEN, (
-            f"总长 {len(sheet)} != 基串 {base} + 后缀 {TOUCH_SUFFIX_LEN}"
-            f"（实际差值 {len(sheet) - base}）；"
-            "若后缀内容真的改了长度，更新 TOUCH_SUFFIX_LEN 并说明原因")
+        assert sheet.count(sel) == mw._theme_qss.count(sel) + 1, (
+            f"滚动条规则比基串多出 {sheet.count(sel) - mw._theme_qss.count(sel)} 处"
+            f"（基串 {mw._theme_qss.count(sel)} 处），说明后缀被叠了一层以上")
+        # 前缀逐字相同（不是「看起来像」）：切掉基串长度后必须恰好等于后缀。
+        assert sheet[:base] == mw._theme_qss, "样式表前缀与 _theme_qss 不逐字相同"
+        assert sheet[base:] == suffix, (
+            f"基串之后的内容与生成点不一致：{sheet[base:base + 40]!r}…")
+        assert len(sheet) == base + len(suffix), (
+            f"总长 {len(sheet)} != 基串 {base} + 后缀 {len(suffix)}"
+            f"（实际差值 {len(sheet) - base}）")
     finally:
         tm.set_override(old_override)
 
