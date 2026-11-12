@@ -13,6 +13,7 @@
 """
 from __future__ import annotations
 
+import ast
 import json
 import os
 import subprocess
@@ -394,6 +395,55 @@ def test_takeover_replaces_sidecar_and_invalidates_old_token(tmp_path: Path) -> 
     ok = run(locks, "release", SHARED, "--owner", "线B", root=root)
     assert ok.returncode == 0, ok.stdout + ok.stderr
     assert not _sidecars(locks)
+
+
+def test_allowlisted_claim_hints_print_paths_not_values() -> None:
+    """9 行侧通道提示的窄豁免只许打印 sidecar 路径，不许打印凭据值。
+
+    这 9 行带 `# pragma: allowlist secret — 打印的是 sidecar 路径，非凭据值`，
+    因此扫描器不再报 `log-credential-value`。豁免的理由必须由测试守住：
+
+      * 结构侧：每个带理由的 print 调用里都不许出现凭据变量（本用例）；
+      * 行为侧：claim 的 stdout/stderr 不含凭据值（`_token()` 里的
+        `assert token not in output`）。
+
+    反证：把任一行改成打印 `token` / `fresh_token` / `new_token` 等变量，
+    本用例先红——这条路径（sidecar 写入失败）平时跑不出来，只能静态守。
+    """
+    source = SCRIPT.read_text(encoding="utf-8")
+    marked = {
+        index + 1
+        for index, line in enumerate(source.splitlines())
+        if "pragma: allowlist secret" in line and "打印的是 sidecar 路径" in line
+    }
+    assert marked, "file_claim.py 里应当仍有带理由的行内豁免"
+
+    cred_names = {
+        "token",
+        "fresh_token",
+        "upgraded_token",
+        "new_token",
+        "presented",
+        "stored",
+    }
+    covered: set[int] = set()
+    for node in ast.walk(ast.parse(source)):
+        if not isinstance(node, ast.Call):
+            continue
+        if not isinstance(node.func, ast.Name) or node.func.id != "print":
+            continue
+        span = range(node.lineno, (node.end_lineno or node.lineno) + 1)
+        hit = marked.intersection(span)
+        if not hit:
+            continue
+        covered.update(hit)
+        names = {n.id for n in ast.walk(node) if isinstance(n, ast.Name)}
+        leaked = sorted(names & cred_names)
+        assert not leaked, (
+            f"第 {node.lineno} 行的豁免 print 用到了凭据变量 {leaked}；"
+            "这里只能打印 sidecar 路径"
+        )
+    assert covered == marked, f"未落到 print 调用上的豁免行：{sorted(marked - covered)}"
 
 
 def test_release_without_claim_fails(tmp_path: Path) -> None:
