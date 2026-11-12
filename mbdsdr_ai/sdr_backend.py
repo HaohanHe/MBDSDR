@@ -139,8 +139,64 @@ class AmbiguousOwners:
                 f"candidates={list(self.candidates)!r})")
 
 
-def owner_conflict_text(holder: Union[Dict[str, Any], AmbiguousOwners]) -> str:
+#: 占用冲突文案的渠道。除「可执行提示」那一句外，三个渠道的正文逐字相同——
+#: 同一个概念只能有一个真值源，渠道差异只允许落在「用户接下来敲什么」上。
+OWNER_CHANNEL_MCP = "mcp"
+OWNER_CHANNEL_CLI = "cli"
+OWNER_CHANNEL_DESKTOP = "desktop"
+
+#: busy 分支的「备选设备」提示。CLI 用户照做要能敲出命令，所以写标志本身。
+_CHANNEL_ALTERNATIVE_HINT = {
+    OWNER_CHANNEL_MCP: "或改用其他设备（先用 sdr_list_devices 查看）。",
+    OWNER_CHANNEL_CLI: "或改用其他设备（先用 --list-devices 查看）。",
+    OWNER_CHANNEL_DESKTOP: "或改用其他设备（先刷新设备列表）。",
+}
+
+#: AmbiguousOwners 分支的「查看完整信息」提示。
+_CHANNEL_AMBIGUOUS_HINT = {
+    OWNER_CHANNEL_MCP: "也可用 sdr_list_devices 查看。",
+    OWNER_CHANNEL_CLI: "也可用 --list-devices 查看。",
+    OWNER_CHANNEL_DESKTOP: "也可刷新设备列表查看。",
+}
+
+
+def owner_conflict_hints(channel: str = OWNER_CHANNEL_MCP) -> Tuple[str, str]:
+    """``(备选设备提示, 歧义查看提示)`` 在指定渠道下的文字。
+
+    未知渠道按 MCP 处理：宁可用错一个工具名，也不能凭空猜出一条命令让用户
+    照着敲。
+    """
+    if channel not in _CHANNEL_ALTERNATIVE_HINT:
+        channel = OWNER_CHANNEL_MCP
+    return _CHANNEL_ALTERNATIVE_HINT[channel], _CHANNEL_AMBIGUOUS_HINT[channel]
+
+
+def owner_conflict_channel() -> str:
+    """本进程默认的文案渠道：桌面端 / AI(MCP) 由 :func:`process_owner` 决定。"""
+    return (OWNER_CHANNEL_DESKTOP if process_owner() == "desktop"
+            else OWNER_CHANNEL_MCP)
+
+
+def owner_conflict_untrusted(
+        holder: Union[Dict[str, Any], AmbiguousOwners]) -> bool:
+    """holder 是否只是「登记不可信」的占位：没有真实持有者，只有 reason。
+
+    这类结果既不是「空闲」也不是「被某程序占用」，而更接近「读不出来」：
+    补救动作是修/移除登记文件，不是去关别的软件。判定只此一份，
+    ``owner_conflict_text`` / ``SDRBackend._claim_hardware`` /
+    ``acquire_hardware_owner`` 都调它，避免三处各判一次后走样。
+    """
+    return (isinstance(holder, dict) and not holder.get("owner")
+            and bool(holder.get("reason")))
+
+
+def owner_conflict_text(holder: Union[Dict[str, Any], AmbiguousOwners],
+                        channel: str = OWNER_CHANNEL_MCP) -> str:
     """占用冲突的可执行提示：谁占着、它还活着、下一步能做什么。
+
+    ``channel`` 只替换**用户接下来要敲/要点的那个提示句**，其余正文逐字相同
+    （反证见 ``tests/test_cli_owner_conflict_text.py``：两个渠道的输出把那一句
+    换回去后必须完全相等）。
 
     **正文里不放登记键**（2026-11-12 补裁）：键是任意字符串——Pluto 的 USB
     键就是 ``uri:usb:1.2.5``，序列号里也可能带 ``timeout`` / ``busy`` /
@@ -155,6 +211,7 @@ def owner_conflict_text(holder: Union[Dict[str, Any], AmbiguousOwners]) -> str:
     ``usb_permission`` 会让用户去改 udev / 装 WinUSB——而真正要做的是去
     另一个进程里释放设备，照着改一百遍也不会好。
     """
+    alternative_hint, ambiguous_hint = owner_conflict_hints(channel)
     if isinstance(holder, AmbiguousOwners):
         logger.warning(
             "设备占用歧义：键 %s 同时命中 %d 条登记：%s",
@@ -166,9 +223,9 @@ def owner_conflict_text(holder: Union[Dict[str, Any], AmbiguousOwners]) -> str:
                 f"你可以：① 在桌面端或 AI 侧释放其中一台后重试；"
                 f"② 只想用其中一根时，先拔掉另一根再点「刷新」；"
                 f"③ 或改用带独立地址的设备（如 rtl_tcp / SpyServer）。"
-                f"完整键已写入运行日志，也可用 sdr_list_devices 查看。")
+                f"完整键已写入运行日志，{ambiguous_hint}")
     who = owner_label(holder.get("owner", ""))
-    if not holder.get("owner") and holder.get("reason"):
+    if owner_conflict_untrusted(holder):
         # 「登记不可信」不是占用冲突：holder 里没有真实持有者，拼成
         # 「其他程序（pid 0）」就是假信息。另外这段文字会进 status.error，
         # 桌面端按关键词二次分类（error_remedy.CONNECT_ERROR_RULES），
@@ -178,8 +235,7 @@ def owner_conflict_text(holder: Union[Dict[str, Any], AmbiguousOwners]) -> str:
                 "程序持有。这是登记文件本身的问题，不是硬件故障。请到"
                 "「设备」面板点「查看诊断」，按提示修复或移除登记文件后重试。")
     return (f"设备当前由{who}持有（pid {holder.get('pid')}，进程仍在运行）。"
-            f"请先在{who}侧释放该设备后重试，或改用其他设备"
-            f"（先用 sdr_list_devices 查看）。")
+            f"请先在{who}侧释放该设备后重试，{alternative_hint}")
 
 
 def owner_registry_path() -> str:
@@ -398,7 +454,8 @@ def _backup_corrupt_registry(reason: str) -> Optional[str]:
     try:
         os.replace(path, backup)
     except OSError as e:
-        logger.warning("设备占用登记损坏，备份失败（本次按无占用处理）: %s", e)
+        logger.warning("设备占用登记损坏，备份失败（原文件保留；读侧按状态未知"
+                       "处理，写回被拒绝）: %s", e)
         return None
     try:
         from .corrupt_evidence import write_reason
@@ -407,8 +464,8 @@ def _backup_corrupt_registry(reason: str) -> Optional[str]:
         write_reason(backup, f"{path}：{reason}", logger)
     except Exception:  # noqa: BLE001 - 理由写失败不影响已落好的备份
         pass
-    logger.warning("设备占用登记损坏（%s），原文件已备份为 %s；本次按无占用处理",
-                   reason, backup)
+    logger.warning("设备占用登记损坏（%s），原文件已备份为 %s；本次读到的内容"
+                   "不可信，按状态未知处理", reason, backup)
     return backup
 
 
@@ -790,22 +847,28 @@ def release_active_owner(owner: str, device_id: str = "") -> bool:
 
 
 def acquire_hardware_owner(key: str, aliases: Optional[List[str]] = None,
-                           allow_alias_match: bool = True
-                           ) -> Tuple[bool, str]:
-    """非 ``SDRBackend`` 硬件后端（bladeRF / LimeSDR）共用的占用登记入口。
+                           allow_alias_match: bool = True,
+                           channel: str = OWNER_CHANNEL_MCP
+                           ) -> Tuple[bool, str, bool]:
+    """非 ``SDRBackend`` 的打开路径（bladeRF / LimeSDR / CLI ``DeviceManager``）
+    共用的占用登记入口。
 
-    这两个后端是 ctypes 直连的真实 USB 设备，**不走**
+    这些路径是 ctypes/驱动直连或另一套句柄模型，**不走**
     ``SDRBackend.connect()`` 模板方法；判据只写在模板方法里，它们就会静默地
     少一层保护——不报错，也没人发现（没插设备的人永远走不到这条路径）。
 
-    返回 ``(ok, conflict_text)``。成功时调用方必须记住 ``key``，并在
-    ``disconnect()`` 里调 :func:`release_hardware_owner` 归还。
+    返回 ``(ok, conflict_text, untrusted)``。成功时调用方必须记住 ``key``，
+    并在关闭设备时调 :func:`release_hardware_owner` 归还。``untrusted`` 只在
+    失败时有意义：True 表示「登记不可读」，不是「被某个程序占用」——两者的
+    用户结论与补救动作必须不同。``channel`` 只决定提示句里的工具名/界面
+    动作，调用方按自己那条路径传（CLI 传 ``OWNER_CHANNEL_CLI``）。
     """
     ok, holder = claim_active_owner(process_owner(), key, aliases=aliases,
                                     allow_alias_match=allow_alias_match)
     if ok:
-        return True, ""
-    return False, owner_conflict_text(holder)
+        return True, "", False
+    return (False, owner_conflict_text(holder, channel=channel),
+            owner_conflict_untrusted(holder))
 
 
 def release_hardware_owner(key: str) -> None:
@@ -1257,13 +1320,17 @@ class SDRBackend:
         ok, holder = claim_active_owner(
             owner, key, aliases=aliases, allow_alias_match=allow_alias_match)
         if not ok:
-            text = owner_conflict_text(holder)
+            # 「登记不可读」不是「被占用」：这种 holder 里没有持有者，只有
+            # reason。标成 busy 会让用户去关别的软件，而真正要做的是修/移除
+            # 登记文件。两句结论必须不同，后者才给得出修复动作。
+            untrusted = owner_conflict_untrusted(holder)
+            text = owner_conflict_text(holder, channel=owner_conflict_channel())
             self.last_claim_conflict = text
             self.status.connected = False
             self.status.link_state = "failed"
-            self.status.error_category = "busy"
+            self.status.error_category = "unknown" if untrusted else "busy"
             self.status.error = text
-            logger.warning("设备已被其他进程持有，未发起 open：%s", text)
+            logger.warning("设备占用判据未通过，未发起 open：%s", text)
             return False
         self._claimed_device_id, self._claimed_owner = key, owner
         return True
@@ -6895,6 +6962,40 @@ class SDRBackendManager:
 # 模块级：合并枚举所有 SDR 设备（SoapySDR + 原生 RTL-SDR / HackRF）
 # ======================================================================
 
+def rtlsdr_native_entry(dev: Dict[str, Any]) -> Dict[str, Any]:
+    """``RTLSDRBackend.list_devices()`` 的一条 → 统一枚举里的 canonical 条目。
+
+    **单一来源**：``enumerate_all_sdr_devices`` 与 CLI 的 ``DeviceManager``
+    都调本函数。若两边各自拼条目，同一根棒会算出两个身份键，占用登记各说
+    各话——看着都在判，实际互不拦。
+    """
+    index = dev.get("index", 0)
+    return {
+        "driver": "rtlsdr",
+        "source": "rtl_native",  # 原生 pyrtlsdr 条目：build_backend 走 RTLSDRBackend
+        "label": f"RTL-SDR #{index} ({dev.get('tuner', '?')})",
+        "serial": dev.get("serial", ""),
+        "manufacturer": "",
+        "product": dev.get("tuner", ""),
+        "gain_range": (0.0, 49.6),
+        # 来源: SoapyRTLSDR/Settings.cpp:489-497 —— RTL-SDR 两段合法采样率
+        "sample_rate_range": (225001, 3_200_000),
+        # 来源: SoapyRTLSDR/Settings.cpp:410-427 —— R820T 类默认 24MHz~1.764GHz
+        "freq_range": (24e6, 1764e6),
+        "capability_status": {
+            "freq_range": "declared", "sample_rate_range": "declared",
+            "gain_range": "declared", "bandwidth_range": "unknown",
+            "tx": "unknown", "antenna": "unknown",
+        },
+        "capability_note": {
+            "bandwidth_range": "原生枚举未查询带宽",
+            "tx": "原生枚举未查询 TX 通道",
+            "antenna": "原生枚举未查询天线口",
+        },
+        "device_args": {"driver": "rtlsdr", "index": index},
+    }
+
+
 def enumerate_all_sdr_devices() -> List[Dict[str, Any]]:
     """枚举本机所有可用 SDR 设备并去重合并。
 
@@ -6932,30 +7033,7 @@ def enumerate_all_sdr_devices() -> List[Dict[str, Any]]:
             key = serial or f"rtl_index_{dev.get('index', 0)}"
             if key in merged:
                 continue  # SoapySDR 已识别同 serial 设备，保留信息更全的那条
-            merged[key] = {
-                "driver": "rtlsdr",
-                "source": "rtl_native",  # 原生 pyrtlsdr 条目：build_backend 走 RTLSDRBackend
-                "label": f"RTL-SDR #{dev.get('index', 0)} ({dev.get('tuner', '?')})",
-                "serial": serial,
-                "manufacturer": "",
-                "product": dev.get("tuner", ""),
-                "gain_range": (0.0, 49.6),
-                # 来源: SoapyRTLSDR/Settings.cpp:489-497 —— RTL-SDR 两段合法采样率
-                "sample_rate_range": (225001, 3_200_000),
-                # 来源: SoapyRTLSDR/Settings.cpp:410-427 —— R820T 类默认 24MHz~1.764GHz
-                "freq_range": (24e6, 1764e6),
-                "capability_status": {
-                    "freq_range": "declared", "sample_rate_range": "declared",
-                    "gain_range": "declared", "bandwidth_range": "unknown",
-                    "tx": "unknown", "antenna": "unknown",
-                },
-                "capability_note": {
-                    "bandwidth_range": "原生枚举未查询带宽",
-                    "tx": "原生枚举未查询 TX 通道",
-                    "antenna": "原生枚举未查询天线口",
-                },
-                "device_args": {"driver": "rtlsdr", "index": dev.get("index", 0)},
-            }
+            merged[key] = rtlsdr_native_entry(dev)
     except Exception as e:
         logger.warning(f"原生 RTL-SDR 枚举异常: {e}")
 

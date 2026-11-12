@@ -497,7 +497,7 @@ class BladeRFBackend:
                 self._owner_guard_warned = True
                 logger.warning("无包上下文（脚本直跑），跳过设备占用登记")
             return True
-        ok, conflict = acquire_hardware_owner(key)
+        ok, conflict, _untrusted = acquire_hardware_owner(key)
         if ok:
             self._claimed_device_id = key
             self.last_claim_conflict = ""
@@ -505,7 +505,8 @@ class BladeRFBackend:
         self.last_claim_conflict = conflict
         self.last_error = conflict
         self.connected = False
-        logger.warning("设备已被其他进程持有，未发起 open：%s", conflict)
+        # conflict 里已区分「被谁持有」与「登记不可读」，日志不要替它下结论。
+        logger.warning("设备占用判据未通过，未发起 open：%s", conflict)
         return False
 
     def _release_hardware_claim(self) -> None:

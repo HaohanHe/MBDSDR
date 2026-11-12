@@ -98,14 +98,37 @@ class DeviceNotFoundError(SDRUserError):
 
 
 class DeviceBusyError(SDRUserError):
-    """设备已被其它进程占用。"""
+    """设备已被其它进程占用。
+
+    **只用于「登记里有真实持有者」的拒绝**：能指认是谁、pid 多少。
+    登记读不出来（没有可指认的持有者）是
+    :class:`OwnerRegistryUnavailableError`，两者的下一步动作完全不同。
+    """
 
     code = "device_busy"
 
     def _default_suggestion(self) -> str:
         return (
-            "请关闭正在使用该设备的其它程序（如 GQRX/SDR#/另一个 mbdsdr 实例），"
-            "或拔插一次 USB 后重试。"
+            "请先关闭正在使用该设备的程序，或在那个程序里释放该设备后重试"
+            "（如桌面端、GQRX、SDR#、另一个 mbdsdr 实例）；"
+            "也可以换用其它可用设备。"
+        )
+
+
+class OwnerRegistryUnavailableError(SDRUserError):
+    """设备占用登记不可读，无法判断设备是否被占用。
+
+    与 :class:`DeviceBusyError` **不是同一件事**：这里没有可指认的持有者，
+    说的是「读不出来」。补救动作是修/移除登记文件，不是去关别的软件——
+    所以单独一个错误码，别让上层按 busy 去引导用户。
+    """
+
+    code = "owner_registry_unavailable"
+
+    def _default_suggestion(self) -> str:
+        return (
+            "请检查运行日志里的设备占用登记路径：文件损坏就修复或移除它"
+            "（下次启动会重建），或到桌面端「设备」面板点「查看诊断」按提示处理。"
         )
 
 
@@ -204,6 +227,7 @@ __all__ = [
     "DriverNotFoundError",
     "DeviceNotFoundError",
     "DeviceBusyError",
+    "OwnerRegistryUnavailableError",
     "USBDisconnectedError",
     "NoAudioOutputError",
     "SampleRateNotSupportedError",

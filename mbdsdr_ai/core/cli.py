@@ -365,6 +365,13 @@ def run(argv: Optional[Sequence[str]] = None,
         return 0
 
     except SDRUserError as e:
+        # 排版与退出码是 CLI 唯一的职责：结论（谁占着 / 读不出来）由
+        # sdr_backend 单一来源给出（``owner_conflict_text``），这里逐字打印，
+        # 不按 code 再判一次，也不改写措辞。
+        # 退出码：设备被占用与「登记不可读」共用 1。两者对用户都是「本次连接
+        # 被拒」，既有契约只有 1=用户错误（docs/cli_usage.md），另开专用码会
+        # 凭空改掉 --connect 的契约且无脚本消费；区分靠文案本身——一个有
+        # 持有者与 pid，一个说登记表不可用、读不出来。
         print(f"错误: {e.message}", file=sys.stderr)
         if e.suggestion:
             print(f"建议: {e.suggestion}", file=sys.stderr)

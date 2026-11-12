@@ -145,6 +145,31 @@ def test_empty_registry_does_not_block_connect(_registry):
     assert be.opened == 1
 
 
+def test_unreadable_registry_refuses_as_unknown_not_busy(_registry,
+                                                         monkeypatch):
+    """登记不可读：同样拒绝，但结论必须是「读不出来」而不是「被程序占用」。
+
+    两者都 fail-closed，补救动作却不同：前者要修/移除登记文件，后者要去
+    关另一个程序。反证：把 ``_claim_hardware`` 的失败判据改成「未知当空闲」，
+    本用例立刻红（``connect() True``、``opened == 1``）。
+    """
+    _registry.write_bytes(b'{"owners": ')
+    monkeypatch.setattr(sb, "_backup_corrupt_registry", lambda reason: None)
+
+    be = _FakeHardware("rtlsdr|index:0")
+    assert be.connect() is False, "登记不可读时必须 fail-closed"
+    assert be.opened == 0, "判据未通过仍进入了 open 路径"
+
+    err = be.status.error
+    assert "登记表不可用" in err and "无法判断" in err, err
+    assert "进程仍在运行" not in err, f"没读出来却被说成有持有者：{err}"
+    assert "pid" not in err, err
+    # 不是占用冲突：报 busy 会让界面引导去关 SDR#/GQRX，方向正好相反。
+    assert be.status.error_category == "unknown", be.status.error_category
+    assert error_remedy.classify_connect_error(err) is None, err
+    assert error_remedy.humanize_connect_error(err) == err
+
+
 def test_ambiguous_alias_message_survives_desktop_classification(_registry):
     """歧义结论（无法唯一确定）同样不能被分类表改写成「权限不足」。"""
     child = _spawn_child()
