@@ -4076,3 +4076,13 @@ pid 3484 已退出，属 K16 同形的「孤儿改动」。配套测试
   读改写后失败文案变为「配置读取失败」，测试仍断言「保存失败」；
 - `test_settings_semantics` ×3：带宽 tooltip 未区分 VFO、device_panel
   两条采样率能力校验（该文件归参数治理线）。
+
+**补记（01:19）claim 释放方式（工具死结，建议另立 K）**：这两个 claim 的
+`<claim_id>.token` sidecar 均不存在，而 marker 已绑定 `token_sha256`，于是
+`release` 无凭据、`claim` 同名无凭据、`takeover` 同名义被拒——三条路全堵。
+实际处置：原 pid（3308 / 3788）已退出且文件无在途改动，按 §6.1.2 用
+`--owner 设置三环线-收口` 走 takeover（日志 `D:\mbdsdr\.locks\claim_takeovers.log`），
+拿到新 token 后立即 release，`status` 已无残留。
+**建议**：`claim` 的 sidecar 写失败目前只打 WARN，一次 WARN 就会制造一个
+「同名 + 凭据丢失」的不可释放 claim；应把 sidecar 写失败升级为拒绝 claim
+（或至少让 release 在同名且 pid 已死时可用）。
