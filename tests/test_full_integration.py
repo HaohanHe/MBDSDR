@@ -20,6 +20,7 @@ import os
 import json
 import time
 import math
+import shutil
 import tempfile
 import traceback
 
@@ -37,6 +38,20 @@ def result():
     return TestResult()
 
 
+@pytest.fixture(scope="module", autouse=True)
+def _fail_if_any_recorded_failure(result):
+    """收集器不是断言：模块结束时 result.failed 非空，必须让 pytest 真的红。
+
+    脚本模式由 ``main()`` 自己打印报告并返回非零；pytest 模式下没有这一步，
+    所有 ``result.record(False)`` 都会被静默吞掉。本 fixture 补上收尾断言。
+    """
+    yield
+    assert not result.failures, (
+        "集成测试记录到失败项（收集器不会自动判红，这里补上）：\n"
+        + "\n".join(f"  - {name}: {detail[:200]}"
+                    for name, detail in result.failures))
+
+
 @pytest.fixture(scope="module")
 def agent(isolated_profile):
     """pytest 兼容：与 main() 一致地构造一个测试用 Agent。
@@ -46,7 +61,16 @@ def agent(isolated_profile):
     只给用例加隔离仍会写脏 ~/.mbdsdr/bookmarks.json）。
     """
     config = AgentConfig(api_key="sk-test", model="test-model")
-    return MBDSDRAgent(config)
+    a = MBDSDRAgent(config)
+    yield a
+    # 本模块的 SDR 用例会真连设备。不断开就会把 ring-producer 线程和 USB
+    # 句柄留到同一 pytest 进程里的后续模块——test_backend_resilience 的
+    # 「重连后只应有一个生产者线程」会数到 2 个而假红（2026-11-12 实测）。
+    try:
+        if a.tool_registry.has_tool("sdr_disconnect"):
+            a.tool_registry.call("sdr_disconnect", {})
+    except Exception as exc:  # noqa: BLE001 - 收尾失败必须留证，不静默
+        print(f"  ! 模块收尾 sdr_disconnect 失败: {type(exc).__name__}: {exc}")
 
 
 class TestResult:
@@ -202,14 +226,33 @@ def test_fake_tool_face_removed(result: TestResult, agent: MBDSDRAgent):
         result.record(f"D1 录制工具仍注册 {n}", tr.has_tool(n))
 
 
+def _sdr_connect_or_skip(tr) -> None:
+    """SDR 工具链只在真的连上设备时才有意义；连不上按 NO_HW 跳过，不记失败。
+
+    ``sdr_connect`` 空参依赖「上次使用的设备」记录，隔离 profile 下没有；
+    第二个参数用本机枚举号。两者都失败即判定为环境依赖（缺设备/未连接）。
+    """
+    errs = []
+    for args in ({}, {"device_id": "rtl_0"}):
+        try:
+            r = tr.call("sdr_connect", args)
+        except Exception as e:  # noqa: BLE001 - 连接异常同样按环境依赖处理
+            errs.append(f"{args}: {type(e).__name__}: {e}")
+            continue
+        if r.success:
+            return
+        errs.append(f"{args}: {(r.content or '')[:160]}")
+    pytest.skip("NO_HW: SDR 未连接，跳过 SDR 工具链（" + " | ".join(errs) + "）")
+
+
 def test_sdr_tools(result: TestResult, agent: MBDSDRAgent):
     """测试 SDR 核心工具。"""
     print("\n[4] SDR 核心工具测试")
     tr = agent.tool_registry
+    _sdr_connect_or_skip(tr)
 
-    # 设备控制
+    # 设备控制（连接已由 _sdr_connect_or_skip 完成，这里不重复 connect）
     tests = [
-        ("sdr_connect", {}, "连接 SDR"),
         ("sdr_status", {}, "获取状态"),
         ("sdr_set_frequency", {"frequency_hz": 98500000}, "设置频率"),
         ("sdr_set_sample_rate", {"sample_rate": 2048000}, "设置采样率"),
@@ -1240,12 +1283,13 @@ def test_tool_callability(result: TestResult, agent: MBDSDRAgent,
            "math domain")
     crashes = []
     tr = agent.tool_registry
-    # dry-call 通用字符串值必须落在 tmp：曾用仓库内真实文件 "README.md"
-    # （读类工具能真跑）——但写类工具会把它当真路径落盘，tracked 文件被
-    # 写坏后又被 code_git_commit（git add -A）自动提交（phase64 实测）。
-    # tmp 探针同样满足"存在的小文件"语义；写工具现已带外部确认 token 门，
-    # 这里是纵深防御。
-    probe = os.path.join(tempfile.gettempdir(), "mbdsdr_drycall_probe.txt")
+    # dry-call 通用字符串值必须落在**项目根内**：读类工具的安全边界会拒绝
+    # 根目录外的路径（PermissionError）——那是设计行为，不是崩溃。曾放系统
+    # 临时目录，code_read_file 每次都因此判红。这里在项目根下建临时子目录，
+    # 跑完删除；写类工具仍有 confirm_token 门，不会留下真实改动。
+    probe_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    probe_dir = tempfile.mkdtemp(dir=probe_root, prefix=".drycall_probe_")
+    probe = os.path.join(probe_dir, "mbdsdr_drycall_probe.txt")
     with open(probe, "w", encoding="utf-8") as f:
         f.write("dry-call 探针文件（读类工具的真跑目标）\n")
     # 门存在性回归：四个写工具必须都声明 confirm_token 门（AGENTS.md §3）。
@@ -1281,6 +1325,7 @@ def test_tool_callability(result: TestResult, agent: MBDSDRAgent,
             crashes.append((name, repr(e)[:120]))
     result.record("全部工具无硬件不崩溃", len(crashes) == 0,
                   "" if not crashes else "; ".join(f"{n}:{m}" for n, m in crashes[:5]))
+    shutil.rmtree(probe_dir, ignore_errors=True)
 
 
 def test_sstv_robot72_roundtrip(result: TestResult):
