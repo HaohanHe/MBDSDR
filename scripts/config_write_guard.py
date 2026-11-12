@@ -13,6 +13,17 @@
 ``APPDATA`` / ``LOCALAPPDATA`` / ``XDG_CONFIG_HOME``）；之后这些变量被
 改到别处（隔离 fixture、repro 沙箱）只会把新值登记为沙箱根，其下路径
 一律不记——否则沙箱会被当成真实目录，哨兵误报（2026-11-12 实测）。
+
+「真实」可以被**显式声明**：``MBDSDR_CFG_GUARD_REAL``（JSON 对象 / JSON
+数组 / 分号列表）一旦设置，就直接用它当真实根，不再从运行时 ``HOME``
+推断。启动段必须在任何人改 ``HOME`` 之前把它设好，否则子进程出生即沙箱，
+再把快照传给下一代就是「沙箱传沙箱」。
+
+**快照被污染时出声，不静默记账**：没有 ``MBDSDR_CFG_GUARD_REAL``、而安装
+时的用户目录已经落在临时路径或本仓库自有沙箱命名（``mbdsdr-repro-sandbox-``
+等）下时，``install()`` 打印原因并以**退出码 2** 终止。静默记账正是
+2026-11-12 那次误报的来源；「同目录再跑一次就自洽」是假绿，比不修更糟——
+它会让后来人以为第一次红是正常的。
 产品配置根：
 
   * ``~/.mbdsdr``（gui_config.json / config.json / bookmarks.json /
@@ -71,6 +82,14 @@ _SNAPSHOT_VARS = ("HOME", "USERPROFILE", "APPDATA", "LOCALAPPDATA",
 _REAL_ENV = None            # dict: var -> 安装时的原始值
 _REAL_ROOTS = None          # list: 由快照推导出的真实产品配置根
 
+#: 本仓库自己造出来的沙箱目录命名。快照里出现这些，说明「真实」已被污染。
+_SANDBOX_MARKERS = ("mbdsdr-repro-sandbox-", "mbdsdr-cfg-guard-",
+                    "mbdsdr-cfg-proof-", "mbdsdr-qsettings-")
+
+
+class SnapshotPolluted(RuntimeError):
+    """安装时快照到的用户目录是临时/沙箱目录，且没有显式声明真实根。"""
+
 
 # ----------------------------------------------------------------------
 # 路径判定
@@ -113,6 +132,15 @@ def _normalize_roots(roots):
     return out
 
 
+def _looks_sandboxed(path):
+    """该目录是否明显是临时目录或本仓库自己的沙箱命名。"""
+    p = _norm(path).rstrip("\\/")
+    for root in _temp_roots():
+        if p == root or p.startswith(root + "\\") or p.startswith(root + "/"):
+            return True
+    return any(marker in p for marker in _SANDBOX_MARKERS)
+
+
 def _config_roots_from(env):
     """按给定环境快照推导产品配置根（不再读运行时 ``os.environ``）。"""
     roots = []
@@ -146,23 +174,107 @@ def snapshot_user_dirs(env=None):
     """快照「原始用户目录」，作为判定“真实配置”的唯一依据。
 
     必须在任何 HOME/APPDATA 重定向**之前**调用（``install()`` 会调）。
-    子进程可由 ``MBDSDR_CFG_GUARD_REAL``（JSON）继承父进程的快照，避免
-    自己启动时环境已被父进程改成沙箱、把沙箱当真实目录。
+
+    真实根来源按优先级：
+      1. ``MBDSDR_CFG_GUARD_REAL`` 显式声明（JSON 对象 / JSON 数组 / 分号
+         列表）——设了就只用它，不再从运行时 ``HOME`` 推断。子进程靠它继承
+         父进程的真实根（子进程出生时环境已经是沙箱，自己推断必错）。
+      2. 否则取当前环境快照；若快照里的用户目录落在临时路径或本仓库沙箱
+         命名下，抛 :class:`SnapshotPolluted`——不静默记账。
     """
     global _REAL_ENV, _REAL_ROOTS
     payload = os.environ.get("MBDSDR_CFG_GUARD_REAL")
     if payload:
-        try:
-            data = json.loads(payload)
-        except ValueError:
-            data = None
-        if isinstance(data, dict):
-            _REAL_ENV = _user_env(data)
-            _REAL_ROOTS = _config_roots_from(dict(_REAL_ENV))
-            return dict(_REAL_ENV)
-    _REAL_ENV = _user_env(env)
+        env_map, declared = _parse_real_declaration(payload)
+        if not env_map and not declared:
+            raise SnapshotPolluted(
+                "MBDSDR_CFG_GUARD_REAL 已设置但解析不出真实根：%r\n"
+                "支持三种写法：JSON 对象 {\"HOME\": \"...\"}、JSON 数组 "
+                "[\"D:\\\\path\\\\.mbdsdr\"]、分号列表 "
+                "\"HOME=C:\\\\Users\\\\x;APPDATA=C:\\\\Users\\\\x\\\\AppData\\\\Roaming\"。"
+                % payload)
+        _REAL_ENV = _user_env(env_map)
+        roots = list(declared)
+        if env_map:
+            roots += _config_roots_from(dict(_REAL_ENV))
+        elif not roots:
+            roots = _config_roots_from(dict(_REAL_ENV))
+        _REAL_ROOTS = _normalize_roots(roots)
+        if not _REAL_ROOTS:
+            raise SnapshotPolluted(
+                "MBDSDR_CFG_GUARD_REAL=%r 解析出的真实根为空，无法判定真实配置。"
+                % payload)
+        return dict(_REAL_ENV)
+
+    candidate = _user_env(env)
+    bad = [
+        (var, candidate[var])
+        for var in _SNAPSHOT_VARS
+        if candidate.get(var) and _looks_sandboxed(candidate[var])
+    ]
+    if bad:
+        detail = "；".join("%s=%s" % (var, value) for var, value in bad)
+        raise SnapshotPolluted(
+            "安装哨兵时用户目录已在临时/沙箱路径下：%s\n"
+            "把它当「真实」会让首次运行写配置被记成「改了真实配置」，"
+            "同目录再跑一次才变干净——那是假绿，不能当作通过。\n"
+            "处置：在任何人改 HOME 之前用 MBDSDR_CFG_GUARD_REAL 显式声明真实根，"
+            "例如 HOME=C:\\Users\\<你>;APPDATA=C:\\Users\\<你>\\AppData\\Roaming。"
+            % detail)
+    _REAL_ENV = candidate
     _REAL_ROOTS = _config_roots_from(dict(_REAL_ENV))
     return dict(_REAL_ENV)
+
+
+def _parse_real_declaration(payload):
+    """解析 ``MBDSDR_CFG_GUARD_REAL`` → ``(env 映射, 显式真实根列表)``。
+
+    支持三种写法：
+      * JSON 对象：``{"HOME": "...", "APPDATA": "..."}``；也接受
+        ``{"env": {...}, "roots": [...]}``（``dump_real_declaration()`` 的格式）；
+      * JSON 数组：``["D:\\\\Users\\\\x\\\\.mbdsdr", ...]``，直接当真实根；
+      * 分号列表：``HOME=C:\\\\Users\\\\x;APPDATA=...`` 或纯路径列表。
+    """
+    text = (payload or "").strip()
+    if not text:
+        return {}, []
+    try:
+        data = json.loads(text)
+    except ValueError:
+        data = None
+    if isinstance(data, dict):
+        if "env" in data or "roots" in data:
+            env = data.get("env") or {}
+            roots = data.get("roots") or []
+            return (dict(env) if isinstance(env, dict) else {},
+                    [str(item) for item in roots] if isinstance(roots, list) else [])
+        return {str(k): str(v) for k, v in data.items()}, []
+    if isinstance(data, list):
+        return {}, [str(item) for item in data]
+    if data is not None:
+        return {}, []
+    env_map, roots = {}, []
+    for token in text.split(";"):
+        token = token.strip().strip('"')
+        if not token:
+            continue
+        if "=" in token:
+            var, value = token.split("=", 1)
+            var, value = var.strip(), value.strip().strip('"')
+            if var and value:
+                env_map[var] = os.path.expandvars(value)
+        else:
+            roots.append(os.path.expandvars(token))
+    return env_map, roots
+
+
+def dump_real_declaration():
+    """把当前真实根序列化成可传给子进程的 ``MBDSDR_CFG_GUARD_REAL``。"""
+    if _REAL_ENV is None or _REAL_ROOTS is None:
+        snapshot_user_dirs()
+    return json.dumps({"env": dict(_REAL_ENV or {}),
+                       "roots": list(_REAL_ROOTS or [])},
+                      ensure_ascii=False)
 
 
 def real_user_dirs():
@@ -355,13 +467,20 @@ def _wrap_move(original, op):
 def install():
     """包裹 open/io.open/os.replace/os.rename；重复调用无副作用。
 
-    安装这一刻的环境是「真实用户目录」的唯一来源：之后 HOME/APPDATA 被
-    改到沙箱，只说明“现在写的是沙箱”，不再影响真实集合。
+    安装这一刻的环境是「真实用户目录」的来源：之后 HOME/APPDATA 被改到
+    沙箱，只说明“现在写的是沙箱”，不再影响真实集合。若环境里已有
+    ``MBDSDR_CFG_GUARD_REAL``，则只用它，不读运行时环境。
     """
     global _INSTALLED
     if _INSTALLED or os.environ.get("MBDSDR_CFG_GUARD", "1") == "0":
         return False
-    snapshot_user_dirs()
+    try:
+        snapshot_user_dirs()
+    except SnapshotPolluted as exc:
+        # 快照本身就是沙箱时不能静默继续：那会把沙箱当真实目录记账，
+        # 首次运行报红、再跑一次变绿，等于用一个假绿掩盖判定失效。
+        print("[cfg-guard] %s" % exc, file=sys.stderr, flush=True)
+        raise SystemExit(2)
     if getattr(builtins.open, "_mbdsdr_cfgguard", False):
         _INSTALLED = True
         return False
