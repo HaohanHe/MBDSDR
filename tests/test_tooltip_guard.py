@@ -237,12 +237,27 @@ def test_dynamic_baseline_entries_still_exist():
 
 
 def test_every_passthrough_tooltip_is_registered():
-    """零常量片段的透传 tooltip 必须全部登记，否则运行时兜底无从挂载。"""
+    """零常量片段的透传 tooltip 必须全部登记，否则运行时兜底无从挂载。
+
+    按**调用点**逐处配对，不按表达式去重：同一表达式出现在两处时，运行时
+    兜底要逐处核对渲染文本（``test_tooltip_dynamic_runtime._check_file`` 就是
+    按条数配对的），登记表也必须有同样多的条目；少一条就有一个调用点没有
+    运行时兜底。删掉任意一条登记，本用例必须红。
+    """
     items, _ = scan_dynamic_tooltips()
-    registered = {(e["file"], e["expr"]) for e in _load_dynamic_baseline()}
-    unregistered = [f"{i['file']}:{i['line']} :: {i['expr']}"
-                    for i in items
-                    if not i["text"] and (i["file"], i["expr"]) not in registered]
+    budget = {}
+    for e in _load_dynamic_baseline():
+        key = (e["file"], e["expr"])
+        budget[key] = budget.get(key, 0) + 1
+    unregistered = []
+    for i in items:
+        if i["text"]:
+            continue
+        key = (i["file"], i["expr"])
+        if budget.get(key, 0) > 0:
+            budget[key] -= 1
+        else:
+            unregistered.append(f"{i['file']}:{i['line']} :: {i['expr']}")
     assert not unregistered, (
         "以下透传 tooltip 没有进登记表（也就不可能有运行时兜底）：\n  "
         + "\n  ".join(unregistered))
@@ -300,6 +315,9 @@ def test_upgraded_tooltips_meet_the_rules():
         "设备中心频率（MHz）；改完立即生效，实际可调范围看左侧设备信息。当前调谐未接入后端时控件禁用，显示值不是设备读数",
         "跟踪时调谐到的下行频率（MHz）；实际可调范围以当前 SDR 设备为准；先用所选制式的默认值，通联确认后再微调",
         "拖动调节收听音量；与控制面板的音量是同一个值，需要静音可按 Ctrl+M",
+        # K20：右栏浮层「收起 ›」按钮原 tooltip 只有 11 字（不足 12），改写后
+        # 必须逐字落地；退回空字符串等于没有提示，同样必须红。
+        "收起右栏浮层，回到右栏边缘的窄条；需要时再点窄条展开，也可以按 Esc 收起",
     ]
     for text in upgraded:
         assert text in texts, f"文案未落地：{text}"

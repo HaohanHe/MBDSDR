@@ -363,7 +363,8 @@ class DevicePanel(QWidget):
             ENUM_TIMEOUT_MS / 1000.0)
         self.status_label.setText("设备枚举超时 · 稍后自动重试")
         self.status_label.setToolTip(
-            "枚举设备超过 %.0f 秒没有返回，通常是设备/驱动无响应（USB open 无超时）。"
+            "枚举设备超过 %.0f 秒没有返回（这是本程序设置的等待上限，不是设备读数），"
+            "通常是设备/驱动无响应（USB open 无超时）。"
             "面板会自动重试；也可拔插设备后点「刷新」。"
             % (ENUM_TIMEOUT_MS / 1000.0))
 
@@ -492,7 +493,8 @@ class DevicePanel(QWidget):
         self.status_label.setText(
             f"设备枚举超时 · 已自动重试 {self._enum_timeout_count} 次")
         self.status_label.setToolTip(
-            "枚举设备超过 %.0f 秒没有返回，通常是设备/驱动无响应（USB open 无超时）。"
+            "枚举设备超过 %.0f 秒没有返回（这是本程序设置的等待上限，不是设备读数），"
+            "通常是设备/驱动无响应（USB open 无超时）。"
             "热插拔检测会在下一拍自动重试；也可拔插设备后点「刷新」。"
             % (ENUM_TIMEOUT_MS / 1000.0))
 

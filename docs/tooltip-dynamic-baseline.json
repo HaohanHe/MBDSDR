@@ -110,6 +110,18 @@
       "runtime_test": "tests/test_tooltip_dynamic_runtime.py::test_control_panel_passthrough_tooltips_self_describe"
     },
     {
+      "file": "desktop/control_panel.py",
+      "expr": "self._step_tooltip_text()",
+      "reason": "passthrough",
+      "runtime_test": "tests/test_tooltip_dynamic_runtime.py::test_control_panel_passthrough_tooltips_self_describe"
+    },
+    {
+      "file": "desktop/control_panel.py",
+      "expr": "self._step_tooltip_text()",
+      "reason": "passthrough",
+      "runtime_test": "tests/test_tooltip_dynamic_runtime.py::test_control_panel_passthrough_tooltips_self_describe"
+    },
+    {
       "file": "desktop/device_panel.py",
       "expr": "_NO_DEVICE_TIP",
       "reason": "passthrough",

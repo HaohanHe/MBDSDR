@@ -195,6 +195,9 @@ def test_control_panel_passthrough_tooltips_self_describe(qapp):
         p.set_frequency_hz(145_500_000)
         p.set_mode("WFM")
         p.set_gain(20)
+        # 步进 tooltip 在构造时写一次（control_panel.py:506），切档位时
+        # 再按新档位重写一次（:1045）；两处都登记为 passthrough，必须都渲染。
+        p._on_step_combo_changed(p.step_combo.currentIndex())
 
     _, calls = _record(ControlPanel, [triggers])
     _check_file(calls, "desktop/control_panel.py")

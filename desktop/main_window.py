@@ -12088,7 +12088,8 @@ class MainWindow(QMainWindow):
         close = QToolButton()
         close.setText("收起 ›")
         close.setAccessibleName("收起右栏")
-        close.setToolTip("收起右栏浮层（Esc）")
+        close.setToolTip(
+            "收起右栏浮层，回到右栏边缘的窄条；需要时再点窄条展开，也可以按 Esc 收起")
         close.clicked.connect(self._close_right_overlay)
         head.addWidget(title, 1)
         head.addWidget(close)
