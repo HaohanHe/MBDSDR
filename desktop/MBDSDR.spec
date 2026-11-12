@@ -149,7 +149,15 @@ a = Analysis(
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=['pytest', '_pytest', 'pluggy', 'iniconfig', 'mbdsdr_ai.tests'],
+    # pandas 不是产品依赖：PyInstaller 的 xref 里出现 matplotlib.pyplot → pandas
+    # 这条边，但实测 `import matplotlib.pyplot` 并不加载 pandas（py3.14 验证）。
+    # pandas 一旦进包，它的可选 IO 面又会把 openpyxl / lxml / xlsxwriter 整棵拖进来
+    # （`pandas.io.excel._openpyxl`、`pandas.io.xml`、`pandas.io.excel._xlsxwriter`）。
+    # 产品代码对四者零 import，属纯过度收集，显式排除以免白占几十 MB。
+    excludes=[
+        'pytest', '_pytest', 'pluggy', 'iniconfig', 'mbdsdr_ai.tests',
+        'pandas', 'openpyxl', 'lxml', 'xlsxwriter',
+    ],
     win_no_prefer_redirects=False,
     win_private_assemblies=False,
     cipher=block_cipher,
