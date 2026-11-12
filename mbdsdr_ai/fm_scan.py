@@ -111,12 +111,19 @@ def _carrier_strength(iq: np.ndarray, sample_rate: float,
     return round(strength_db, 1), round(noise_db, 1)
 
 
+# 运行时立体声探测口径（扫描用启发式，只决定 stereo 标志）。
+# 此值不适用于硬件验收：scripts/hw_acceptance/ring3_demod_audio.py 用
+# PILOT_SNR_MIN_DB=10 dB、PILOT_FREQ_TOL_HZ=±300 Hz 做合格/不合格判定。
+PILOT_DETECT_BAND_HZ = 500.0
+PILOT_DETECT_SNR_DB = -18.0
+
+
 def _detect_pilot_19k(iq: np.ndarray, sample_rate: float,
-                       threshold_db: float = -18.0) -> tuple:
+                       threshold_db: float = PILOT_DETECT_SNR_DB) -> tuple:
     """检测 FM 复合基带中的 19kHz 立体声导频。
 
     返回 (stereo: bool, pilot_snr_db: float)。
-    流程：正交鉴频 -> mpx -> 19kHz ±500Hz 带通能量 vs mpx 总能量。
+    流程：正交鉴频 -> mpx -> 19kHz ±PILOT_DETECT_BAND_HZ 带通能量 vs mpx 总能量。
     无 scipy 时用 FFT 掩码做带通。
     """
     n = len(iq)
@@ -132,11 +139,12 @@ def _detect_pilot_19k(iq: np.ndarray, sample_rate: float,
     if m < 64:
         return False, None
 
-    # FFT 带通：19kHz ±500Hz
+    # FFT 带通：19kHz ±PILOT_DETECT_BAND_HZ
     freqs = np.fft.rfftfreq(m, 1.0 / sample_rate)
     spec = np.fft.rfft(mpx * np.hanning(m))
     power = np.abs(spec) ** 2
-    pilot_mask = (freqs >= 18500.0) & (freqs <= 19500.0)
+    pilot_mask = ((freqs >= 19000.0 - PILOT_DETECT_BAND_HZ)
+                  & (freqs <= 19000.0 + PILOT_DETECT_BAND_HZ))
     if not np.any(pilot_mask):
         return False, None
     pilot_pwr = float(np.sum(power[pilot_mask]))

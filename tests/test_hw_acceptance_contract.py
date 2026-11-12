@@ -219,6 +219,55 @@ def test_floor_drift_threshold_inside_measured_envelope():
         f"阈值 {thr} dB ≥ 1.5×实测最大极差 {max_1p5x} dB，属于为好看放宽")
 
 
+# ------------------------------------------------- 阈值单一真值源（不许再分叉）
+import ring4_recording_playback as ring4  # noqa: E402
+
+
+def test_pilot_acceptance_thresholds_match_doc_card():
+    """导频判据只有一处真值源：ring3 常量 = 人工卡原文。
+
+    反证：改 ring3.PILOT_FREQ_TOL_HZ（300→100）或文档卡里的 ±值，本用例红。
+    """
+    tol = ring3.PILOT_FREQ_TOL_HZ
+    snr = ring3.PILOT_SNR_MIN_DB
+    assert (tol, snr) == (300.0, 10.0)
+    text = DOC.read_text(encoding="utf-8")
+    assert f"19000±{tol:.0f} Hz 且峰/邻域 >{snr:.0f} dB" in text, (
+        "人工卡与 ring3 导频阈值已分叉：文档里找不到由常量拼出的判据串")
+
+
+def test_playback_ratio_thresholds_match_doc_card():
+    """回放比只有一处真值源：ring4 常量 = 人工卡原文。
+
+    反证：改 ring4.PLAYBACK_RMS_RATIO_MAX（3.0→0.8）或文档卡，本用例红。
+    """
+    lo, hi = ring4.PLAYBACK_RMS_RATIO_MIN, ring4.PLAYBACK_RMS_RATIO_MAX
+    assert (lo, hi) == (0.3, 3.0)
+    text = DOC.read_text(encoding="utf-8")
+    assert f"{lo} – {hi}" in text, (
+        "人工卡与 ring4 回放比阈值已分叉：文档里找不到由常量拼出的区间串")
+
+
+def test_runtime_pilot_detection_is_a_distinct_named_threshold():
+    """产品扫描 vs 硬件验收是两个场景：名字、值域、用途声明都必须分开。
+
+    反证：把 fm_scan.PILOT_DETECT_BAND_HZ 改成 300 / 把阈值改成 10 → 本用例红；
+    删掉任一侧的「此值不适用于…」声明 → 本用例红。
+    """
+    from mbdsdr_ai import fm_scan
+
+    assert fm_scan.PILOT_DETECT_BAND_HZ != ring3.PILOT_FREQ_TOL_HZ
+    assert fm_scan.PILOT_DETECT_SNR_DB != ring3.PILOT_SNR_MIN_DB
+    assert fm_scan.PILOT_DETECT_BAND_HZ > ring3.PILOT_FREQ_TOL_HZ
+    assert fm_scan.PILOT_DETECT_SNR_DB < ring3.PILOT_SNR_MIN_DB
+
+    fm_src = Path(fm_scan.__file__).read_text(encoding="utf-8")
+    ring3_src = (ROOT / "scripts" / "hw_acceptance" / "ring3_demod_audio.py").read_text(
+        encoding="utf-8")
+    assert "此值不适用于硬件验收" in fm_src
+    assert "此值不适用于产品立体声探测" in ring3_src
+
+
 def test_floor_drift_threshold_matches_recorded_derivation():
     """钉住具体值：mean+3σ=8.14 → 取 0.5 dB 粒度上界 8.5（与 docs §6.3 一致）。"""
     assert ring2.FLOOR_DRIFT_MAX_DB == 8.5

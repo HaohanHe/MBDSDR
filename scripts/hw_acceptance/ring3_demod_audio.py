@@ -27,6 +27,13 @@ PILOT_SEG = 65536
 PILOT_BLOCK = 262144          # 读线程每次 USB 块读的复样本数（实测吞吐最好）
 PILOT_QUEUE_MAX = 6           # 队列上限 6 块 ≈ 12 MB，满则读线程阻塞，内存有界
 
+# 硬件验收口径（本文件的唯一真值源，文档人工卡只能引用这三个常量）。
+# 此值不适用于产品立体声探测：mbdsdr_ai/fm_scan.py 的 PILOT_DETECT_SNR_DB /
+# PILOT_DETECT_BAND_HZ 是扫描时「这个台是不是立体声」的启发式，口径不同。
+PILOT_CENTER_HZ = 19000.0
+PILOT_FREQ_TOL_HZ = 300.0
+PILOT_SNR_MIN_DB = 10.0
+
 
 def _mpx_200k(x: np.ndarray, fs: float) -> np.ndarray:
     """IQ → MPX（瞬时频偏），用 ``resample_poly`` 带抗混叠滤波降到 200 kHz。
@@ -220,7 +227,8 @@ def _offline(skip_code: str = "NO_HW", why: str = "") -> dict:
     else:
         f_p, snr_p, segs = pilot
         checks.append(common.check("stereo_pilot_19k",
-                                   abs(f_p - 19000) < 300 and snr_p > 10,
+                                   abs(f_p - PILOT_CENTER_HZ) < PILOT_FREQ_TOL_HZ
+                                   and snr_p > PILOT_SNR_MIN_DB,
                                    f"导频 {f_p:.0f} Hz，高于邻域 {snr_p:.1f} dB"
                                    f"（Welch {segs} 段，离线夹具固定时长）"))
 

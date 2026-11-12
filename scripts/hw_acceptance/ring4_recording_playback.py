@@ -19,6 +19,11 @@ import numpy as np
 
 import common
 
+# 硬件验收口径（本文件的唯一真值源，文档人工卡只能引用这两个常量）。
+# 此值不适用于产品运行时：产品链路不做「文件回放/实时 RMS 比」这项判定。
+PLAYBACK_RMS_RATIO_MIN = 0.3
+PLAYBACK_RMS_RATIO_MAX = 3.0
+
 
 def _fm_audio(iq: np.ndarray, fs: float, target_fs: float = 48000) -> np.ndarray:
     x = np.asarray(iq, dtype=np.complex128)
@@ -90,7 +95,8 @@ def run(freq_hz: float) -> dict:
                 rms_file = float(np.sqrt(np.mean(file_audio ** 2))) if len(file_audio) else 0.0
                 rms_live = float(np.sqrt(np.mean(lv ** 2))) if len(lv) else 0.0
                 ratio = (rms_file + 1e-9) / (rms_live + 1e-9)
-                checks.append(common.check("playback_audio", 0.3 < ratio < 3.0,
+                checks.append(common.check("playback_audio",
+                                           PLAYBACK_RMS_RATIO_MIN < ratio < PLAYBACK_RMS_RATIO_MAX,
                                            f"文件回放/实时 RMS 比={ratio:.2f}"
                                            f"（{rms_file:.4f}/{rms_live:.4f}）"))
                 metrics["playback_rms_ratio"] = round(ratio, 2)
