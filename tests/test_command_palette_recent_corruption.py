@@ -136,7 +136,7 @@ def test_oserror_is_not_corruption_but_blocks(tmp_path):
 def test_backup_failure_blocks_writes(tmp_path, monkeypatch):
     path = tmp_path / "recent.json"
     path.write_bytes(_CORRUPT_BYTES)
-    monkeypatch.setattr(cp, "_backup_corrupt_recent", lambda _p: None)
+    monkeypatch.setattr(cp, "backup_corrupt_recent", lambda _p: None)
 
     assert cp.load_recent() == []
     assert "备份失败" in (cp.recent_error() or "")

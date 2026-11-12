@@ -49,7 +49,7 @@ except ImportError:  # pragma: no cover - 兼容只把 desktop/ 放进 sys.path 
 logger = logging.getLogger(__name__)
 
 #: 分组顺序（界面上按此顺序排；搜索命中后按相关度重排）
-GROUPS = ("菜单", "页签", "能力", "快捷键")
+GROUPS = ("菜单", "页签", "面板", "能力", "快捷键")
 
 #: 「最近使用」落盘文件名（与 desktop_settings.json 同目录，独立小文件不碰用户设置）
 RECENT_FILENAME = "command_palette_recent.json"
@@ -83,8 +83,12 @@ def recent_error() -> Optional[str]:
     return _LAST_ERROR
 
 
-def _backup_corrupt_recent(path: Path) -> Optional[str]:
-    """把损坏的最近使用文件改名成 ``*.corrupt-时间戳``，返回备份路径（失败 None）。"""
+def backup_corrupt_recent(path: Path) -> Optional[str]:
+    """把损坏的最近使用文件改名成 ``*.corrupt-时间戳``，返回备份路径（失败 None）。
+
+    这是损坏留证的**公共接缝**：测试模拟「备份失败」时替换本函数返回
+    ``None``，不再改模块私有名。
+    """
     backup = f"{path}.corrupt-{time.strftime('%Y%m%d-%H%M%S')}"
     try:
         os.replace(path, backup)
@@ -97,7 +101,7 @@ def _backup_corrupt_recent(path: Path) -> Optional[str]:
 def _mark_corrupt_recent(path: Path, reason: str) -> None:
     """损坏：先备份原件再留人话错误；备份失败则拒绝后续写盘。"""
     global _LAST_ERROR, _SAVE_BLOCKED
-    backup = _backup_corrupt_recent(path)
+    backup = backup_corrupt_recent(path)
     if backup is None:
         _LAST_ERROR = (
             f"命令面板最近使用文件损坏（{reason}）：{path}；"
@@ -402,10 +406,166 @@ def _shortcut_commands(window, existing: Sequence[Command]) -> List[Command]:
     return out
 
 
+def _expand_fold(panel, title: str) -> bool:
+    """展开面板内某个可折叠分组（如控制面板的「接收」）。找到返回 True。"""
+    for header, _group, name in getattr(panel, "_fold_sections", ()):
+        if title in name:
+            header.setChecked(True)   # checkable 头 → 触发展开 + 手风琴收起其它组
+            return True
+    return False
+
+
+def _attr_target(panel_attr: str, widget_attr: str):
+    """按「面板属性 + 控件属性」取目标控件；纯读取，构建索引时调用无副作用。"""
+    def resolve(window):
+        panel = getattr(window, panel_attr, None)
+        return getattr(panel, widget_attr, None) if panel is not None else None
+    return resolve
+
+
+def _fold_opener(panel_attr: str, title: str):
+    """执行时展开面板内的折叠组（手风琴），否则组内控件不可见也落不到焦点。"""
+    def prepare(window):
+        panel = getattr(window, panel_attr, None)
+        if panel is not None:
+            _expand_fold(panel, title)
+    return prepare
+
+
+def _jump_to_right(window, tab_key: str, label: str, *, resolve,
+                   prepare=None) -> dict:
+    """切到右栏目标节、按需展开折叠组，并把焦点落到指定控件。
+
+    窄窗折叠态先开临时浮层：此时右栏在 QStackedLayout 的非当前页里，
+    不搬出来 setFocus 也落不到可见控件上。
+    """
+    if window is None:
+        return {"ok": False, "status": "UNAVAILABLE",
+                "reason": "没有主窗口，无法定位右栏"}
+    if getattr(window, "_right_collapsed", False):
+        opener = getattr(window, "_open_right_overlay", None)
+        if callable(opener):
+            opener()
+    res = _select_tab(window, tab_key)
+    if not res.get("ok"):
+        return res
+    if prepare is not None:
+        prepare(window)
+    target = resolve(window)
+    if target is None:
+        return {"ok": False, "status": "UNAVAILABLE",
+                "reason": f"「{label}」所在面板当前不可用"}
+
+    def _focus() -> None:
+        try:
+            if not target.isVisible():
+                return
+            target.setFocus()
+            # setCurrentIndex 的 reveal 只会滚到节标题，节内深处的控件会留在
+            # 视口外（如「设置 → 数据与操作」的导出按钮）；落焦后再滚一次。
+            w = target.parentWidget()
+            while w is not None:
+                ensure = getattr(w, "ensureWidgetVisible", None)
+                if callable(ensure):
+                    ensure(target, 0, 24)
+                    break
+                w = w.parentWidget()
+        except RuntimeError:     # 面板已销毁
+            pass
+
+    # run_command 成功后会隐藏面板并把焦点还给「打开前那颗」；下一帧再落目标，
+    # 否则这次定位刚设的焦点会被返还逻辑覆盖。
+    from PySide6.QtCore import QTimer
+    QTimer.singleShot(0, _focus)
+    return {"ok": True, "status": "DONE",
+            "reason": f"已展开右栏并聚焦「{label}」"}
+
+
+#: 设置面板里「导出配置」按钮所在的分组（与 settings_panel.PANEL_SECTIONS 同名）。
+_SETTINGS_EXPORT_GROUP = "数据与操作"
+
+
+def _settings_first_control(window):
+    """设置节里的第一个可操作控件：搜索框（可直接打字过滤任一项）。"""
+    panel = getattr(window, "settings_dock", None)
+    return getattr(panel, "search_edit", None)
+
+
+def _settings_export_button(window):
+    panel = getattr(window, "settings_dock", None)
+    return getattr(panel, "export_btn", None)
+
+
+def _reveal_settings_export(window) -> None:
+    """展开「数据与操作」组并把它滚进视口，否则导出按钮不可见、焦点落不上。"""
+    panel = getattr(window, "settings_dock", None)
+    if panel is None:
+        return
+    group = getattr(panel, "_group_sections", {}).get(_SETTINGS_EXPORT_GROUP)
+    if group is None:
+        return
+    if not group.is_expanded():
+        group.set_expanded(True)
+    reveal = getattr(panel, "_reveal_group", None)
+    if callable(reveal):
+        reveal(group, True)
+
+
+#: 「跳到/打开」入口的声明：(标题, 页签身份, 显示名, 取目标控件, 执行前准备,
+#: 说明, 触发方式)
+_PANEL_JUMPS = (
+    ("跳到设备", "device", "设备", _attr_target("device_panel", "dev_combo"),
+     None,
+     "展开右栏「设备」节并聚焦设备下拉，省去 Tab 穿过整条右栏",
+     "命令面板 · 右栏「设备」"),
+    ("跳到增益", "control", "增益滑杆",
+     _attr_target("control_panel", "gain_slider"),
+     _fold_opener("control_panel", "接收"),
+     "展开右栏「控制 → 接收」并聚焦增益滑杆，省去先找折叠组",
+     "命令面板 · 右栏「控制 → 接收」"),
+    ("打开设置", "settings", "设置搜索框", _settings_first_control, None,
+     "展开右栏「设置」并聚焦设置搜索框，可直接打字过滤任一项",
+     "命令面板 · 右栏「设置」"),
+    ("导出", "settings", "导出按钮", _settings_export_button,
+     _reveal_settings_export,
+     "展开右栏「设置 → 数据与操作」并聚焦「导出配置」按钮",
+     "命令面板 · 右栏「设置 → 数据与操作」"),
+)
+
+
+def _panel_commands(window) -> List[Command]:
+    """右栏深处的直接入口（设备/增益/设置/导出）。
+
+    不新增全局快捷键（要过冲突检查，且键位越多越难记）：命令面板已有
+    Ctrl+K 与模糊搜索，这几条把「右栏定位」接成可执行入口，可发现性更好。
+    """
+    if window is None:
+        return []
+    out: List[Command] = []
+    for title, key, label, resolve, prepare, desc, trig in _PANEL_JUMPS:
+        ok = resolve(window) is not None
+        out.append(Command(
+            title=title,
+            group="面板",
+            description=desc,
+            trigger=trig,
+            status="available" if ok else "unavailable",
+            reason="" if ok else f"「{label}」所在面板当前不可用",
+            source=f"panel:{key}",
+            run=(lambda w=window, k=key, l=label, r=resolve, p=prepare:
+                 _jump_to_right(w, k, l, resolve=r, prepare=p)) if ok else None,
+        ))
+    return out
+
+
 def build_index(window=None) -> List[Command]:
-    """构建统一索引：菜单动作 + 页签 + 能力目录 + 快捷键（无窗口时只有后两类）。"""
+    """构建统一索引：菜单动作 + 页签 + 右栏定位 + 能力目录 + 快捷键。
+
+    无窗口时只有能力与快捷键两类（菜单/页签/右栏定位都需要真实窗口）。
+    """
     menu = _menu_commands(window)
-    commands = menu + _tab_commands(window) + _capability_commands(window)
+    commands = (menu + _tab_commands(window) + _panel_commands(window)
+                + _capability_commands(window))
     commands += _shortcut_commands(window, commands)
     return commands
 
