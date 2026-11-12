@@ -25,10 +25,13 @@ from .corrupt_evidence import write_reason
 logger = logging.getLogger(__name__)
 
 
-def _backup_corrupt_memory(path: str) -> Optional[str]:
+def backup_corrupt_memory(path: str) -> Optional[str]:
     """把损坏的记忆文件改名成 ``*.corrupt-时间戳``，返回备份路径（失败 None）。
 
     改名保字节、不删除；失败时调用方拒绝写盘，避免空记忆覆盖唯一证据。
+
+    这是损坏留证的**公共接缝**：测试模拟「备份失败」时替换本函数返回
+    ``None``，不再改模块私有名。
     """
     backup = f"{path}.corrupt-{time.strftime('%Y%m%d-%H%M%S')}"
     try:
@@ -139,7 +142,7 @@ class MemoryStore:
 
     def _mark_corrupt(self, reason: str) -> None:
         """损坏：先备份原件再留人话错误；备份失败则禁止后续写盘。"""
-        self.corrupt_backup = _backup_corrupt_memory(self.storage_path)
+        self.corrupt_backup = backup_corrupt_memory(self.storage_path)
         self._save_blocked = self.corrupt_backup is None
         message = (
             f"记忆文件损坏（{reason}）：{self.storage_path}；"

@@ -115,7 +115,7 @@ def test_second_write_does_not_create_an_extra_backup(tmp_path):
 def test_backup_failure_blocks_memory_writes(tmp_path, monkeypatch):
     path = tmp_path / "memory.json"
     path.write_bytes(_CORRUPT_BYTES)
-    monkeypatch.setattr(memory_module, "_backup_corrupt_memory", lambda _p: None)
+    monkeypatch.setattr(memory_module, "backup_corrupt_memory", lambda _p: None)
 
     store = MemoryStore(storage_path=str(path))
     assert store._save_blocked is True, "备份失败后没有挂 blocked 状态"
