@@ -117,7 +117,7 @@ def test_well_formed_table_passes(tmp_path: Path) -> None:
         "good.md",
         "| 用例 | 状态 | 复跑 |\n"
         "|---|---|---|\n"
-        f"| `display::reRenderHistoryOnPaletteSwitch` | 已修 `{sha}` | "
+        f"| `display::reRenderHistoryOnPaletteSwitch` | 已修 `{sha}`（1 passed） | "
         '`ctest -R "^(spectrum_display|spectrum_autorange)$"` |\n',
     )
     proc = _run(root, "--paths", path)
@@ -254,7 +254,7 @@ def test_r3_auto_maps_pytest_by_test_name(tmp_path: Path) -> None:
     """R3 自动映射：测试函数名唯一 → pytest <file>::<name>，不再记 WARN。"""
     root = _repo(tmp_path)
     sha = _commit(root, {"tests/test_sample.py": "def test_alpha():\n    assert True\n"})
-    path = _write(root, "r3.md", f"已修复 `{sha}`，`test_alpha` 已绿。\n")
+    path = _write(root, "r3.md", f"已修复 `{sha}`，`test_alpha` 已绿（1 passed）。\n")
     proc = _run(root, "--paths", path, "--json")
     assert proc.returncode == 0, proc.stdout + proc.stderr
     payload = json.loads(proc.stdout)
@@ -272,7 +272,7 @@ def test_r3_ctest_slot_maps_to_ctest(tmp_path: Path) -> None:
             "cpp/build/CTestTestfile.cmake": 'add_test(spectrum_display "D:/build/test_spectrum_display.exe")\n',
         },
     )
-    path = _write(root, "r3c.md", f"| display::FooSlot | 已修 `{sha}` |\n")
+    path = _write(root, "r3c.md", f"| display::FooSlot | 已修 `{sha}`（1 passed） |\n")
     proc = _run(root, "--paths", path, "--json")
     assert proc.returncode == 0, proc.stdout + proc.stderr
     assert json.loads(proc.stdout)["r3_skips"] == []
@@ -385,3 +385,121 @@ def test_snapshot_count_is_rechecked_after_file_is_rewritten(tmp_path: Path) -> 
     assert "[R7]" in second.stdout
     assert "声明 2 条，实际 3 条" in second.stdout
     assert "[R1]" in second.stdout
+
+
+def _binding_doc(sha: str, target: str, status: str = "已转绿") -> str:
+    return (
+        f"## K19 — 样例（{status} `{sha}`）\n\n"
+        f"- **再检绑定**：验证提交 `{sha}`；文件集合 `{target}`\n"
+        "- **验证（实跑）**：`1 passed`。\n"
+    )
+
+
+def test_r8_later_change_after_verification_goes_pending(tmp_path: Path) -> None:
+    """反证 (f)：验证 sha 之后同一文件又被改 → R8 待复核，并点名文件与提交。"""
+    root = _repo(tmp_path)
+    sha_a = _commit(
+        root, {"tests/test_pin.py": "def test_pin():\n    assert True\n"}, "A"
+    )
+    sha_b = _commit(
+        root,
+        {"tests/test_pin.py": "def test_pin():\n    assert True\n# 后继改动\n"},
+        "B 又改了同一个文件",
+    )
+    path = _write(root, "r8-later.md", _binding_doc(sha_a, "tests/test_pin.py"))
+    proc = _run(root, "--paths", path)
+    assert proc.returncode == 1, proc.stdout + proc.stderr
+    assert "[R8]" in proc.stdout
+    assert "待复核" in proc.stdout
+    assert "tests/test_pin.py" in proc.stdout
+    assert sha_b[:7] in proc.stdout
+    assert "B 又改了同一个文件" in proc.stdout
+
+
+def test_r8_directory_binding_names_the_changed_file(tmp_path: Path) -> None:
+    """目录绑定（tests/）：后继提交碰目录内任一文件 → 点名那个文件。"""
+    root = _repo(tmp_path)
+    sha_a = _commit(
+        root, {"tests/test_one.py": "def test_one():\n    assert True\n"}, "A"
+    )
+    sha_b = _commit(
+        root, {"tests/test_two.py": "def test_two():\n    assert True\n"}, "B 新增"
+    )
+    path = _write(root, "r8-dir.md", _binding_doc(sha_a, "tests/"))
+    proc = _run(root, "--paths", path)
+    assert proc.returncode == 1, proc.stdout + proc.stderr
+    assert "[R8]" in proc.stdout
+    assert "tests/test_two.py" in proc.stdout
+    assert sha_b[:7] in proc.stdout
+
+
+def test_r8_deleted_bound_file_goes_pending(tmp_path: Path) -> None:
+    """反证 (g)：声称已绿的文件被删掉 → R8 必须报。"""
+    root = _repo(tmp_path)
+    sha = _commit(
+        root, {"tests/test_pin.py": "def test_pin():\n    assert True\n"}, "A"
+    )
+    path = _write(root, "r8-gone.md", _binding_doc(sha, "tests/test_gone.py"))
+    proc = _run(root, "--paths", path)
+    assert proc.returncode == 1, proc.stdout + proc.stderr
+    assert "[R8]" in proc.stdout
+    assert "tests/test_gone.py" in proc.stdout
+    assert "已不存在" in proc.stdout
+
+
+def test_green_without_commit_hash_uses_the_record_wording(tmp_path: Path) -> None:
+    """反证 (h)：「已转绿」没有任何提交号 → R1，文案固定为可复跑记录要求。"""
+    root = _repo(tmp_path)
+    path = _write(root, "green-no-sha.md", "## K20 — 样例（已转绿）\n\n正文。\n")
+    proc = _run(root, "--paths", path)
+    assert proc.returncode == 1, proc.stdout + proc.stderr
+    assert "[R1]" in proc.stdout
+    assert "已修必须带一次可复跑的验证记录（命令 + 实际输出）" in proc.stdout
+
+
+def test_r8_clean_binding_passes(tmp_path: Path) -> None:
+    """正例：验证 sha 之后文件没再变 → 不报 R8，待复核计数为 0。"""
+    root = _repo(tmp_path)
+    sha = _commit(
+        root, {"tests/test_pin.py": "def test_pin():\n    assert True\n"}, "A"
+    )
+    path = _write(root, "r8-clean.md", _binding_doc(sha, "tests/test_pin.py"))
+    proc = _run(root, "--paths", path)
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert "[R8]" not in proc.stdout
+    assert "再检：待复核/缺绑定 0 条" in proc.stdout
+
+
+def test_green_entry_without_binding_is_red(tmp_path: Path) -> None:
+    """反证 (i)：账本里「已转绿」但没有再检绑定 → R8 FAIL。"""
+    root = _repo(tmp_path)
+    sha = _commit(
+        root, {"tests/test_pin.py": "def test_pin():\n    assert True\n"}, "A"
+    )
+    path = _write(
+        root,
+        "known-red-register.md",
+        f"## K20 — 样例（已转绿 `{sha}`）\n\n"
+        "复跑：`pytest tests/test_pin.py`（1 passed）。\n",
+    )
+    proc = _run(root, "--paths", path)
+    assert proc.returncode == 1, proc.stdout + proc.stderr
+    assert "[R8]" in proc.stdout
+    assert "没有「再检绑定」" in proc.stdout
+
+
+def test_fixed_with_command_but_no_output_is_red(tmp_path: Path) -> None:
+    """反证 (j)：已修 + hash + 命令，但没写实际输出 → R9 FAIL（表头规矩机检）。"""
+    root = _repo(tmp_path)
+    sha = _commit(
+        root, {"tests/test_pin.py": "def test_pin():\n    assert True\n"}, "A"
+    )
+    path = _write(
+        root,
+        "known-red-register.md",
+        f"已修复 `{sha}`：复跑 `pytest tests/test_pin.py`。\n",
+    )
+    proc = _run(root, "--paths", path)
+    assert proc.returncode == 1, proc.stdout + proc.stderr
+    assert "[R9]" in proc.stdout
+    assert "缺「实际输出」" in proc.stdout
