@@ -217,7 +217,12 @@ def collect_d1(repo: Repo) -> Dimension:
     for comp in cycles:
         dim.findings.append(Finding(
             "D1-cycle", comp[0].replace(".", "/") + ".py", 0,
-            f"{len(comp)} 个模块互相依赖",
+            # 指纹片段必须稳定：成员数量会随「修掉一个模块」变化，把它写进
+            # snippet 会让同一个环在缩小一成员时被记成「消失 + 新增」。
+            # 环的身份 = 代表模块（path）；成员数只写进 why 供人读。
+            "模块级 import 环",
+            f"与另外 {len(comp) - 1} 个模块互相依赖（代表模块取字典序最小者）："
+            + "、".join(comp[1:]) + "。",
             "存在 import 环，任何一侧的初始化顺序都会影响另一侧；单独改一处无法预测影响面。",
             "把常量/状态下沉到下层，或改依赖注入；不得用函数体内延迟 import "
             "掩盖——依赖没有变，只是检查器看不见。",
