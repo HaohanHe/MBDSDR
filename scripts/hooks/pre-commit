@@ -1,5 +1,14 @@
 #!/usr/bin/env python
-"""pre-commit 机械闸：提交涉及 ≥2 个仍在 TTL 内的 claim owner 时拒绝提交。
+"""pre-commit 机械闸：①跨线范围检查 ②逐个文件查 claim 台账。
+
+① `scripts/check_commit_scope.py --staged`：暂存区涉及 ≥2 个仍在 TTL 内的
+   claim owner 时拒绝。
+② `scripts/claim_gate.py --staged`：**逐文件**查台账——某文件仍被别的 owner
+   持有、未过期、且没有有效 takeover 时拒绝（同一 owner 提交自己持有的文件放行；
+   台账读不到/格式不认识/pid 存活判不了一律拒）。② 是 ① 的补丁：① 只拦
+   「一次提交里出现 ≥2 个 owner」，单文件夹带别人的 claim 时 ① 看不见。
+   提交者身份用 `MBDSDR_CLAIM_OWNER`（或 `git config mbdsdr.owner`）声明，
+   必须与台账 owner 原文一致。
 
 安装：python scripts/install_git_hooks.py
 绕过：git commit --no-verify（会由 post-commit 写入 bypass 日志）
@@ -61,6 +70,33 @@ def main():
         return 1
     if proc.returncode != 0:
         print(f"[pre-commit] claim 检查失败，退出码 {proc.returncode}，按失败关闭。")
+        return proc.returncode
+
+    # claim 闸脚本解析顺序：显式 override → hooks 目录里的安装副本 → 本树 scripts/。
+    # hooks 是 common-dir 共享的，旧工作树里没有 scripts/claim_gate.py，只有安装副本
+    # 才能保证「每棵树都能跑」而不是每棵树都失败关闭。
+    candidates = [os.environ.get("MBDSDR_CLAIM_GATE")]
+    common = _git("rev-parse", "--git-common-dir").stdout.strip()
+    if common:
+        common_dir = Path(common)
+        if not common_dir.is_absolute():
+            common_dir = root / common_dir
+        candidates.append(str(common_dir / "hooks" / "claim_gate.py"))
+    candidates.append(str(root / "scripts" / "claim_gate.py"))
+    gate = next((Path(c) for c in candidates if c and Path(c).exists()), None)
+    if gate is None:
+        print(
+            "[pre-commit] 拒绝：找不到 claim 闸（试试 python scripts/install_git_hooks.py），"
+            "按失败关闭。"
+        )
+        return 1
+    sys.stdout.flush()
+    proc = subprocess.run([sys.executable, str(gate), "--staged"], cwd=str(root))
+    if proc.returncode != 0:
+        print(
+            f"[pre-commit] claim 闸拒绝/失败（退出码 {proc.returncode}），按失败关闭；"
+            "台账读不到、格式不认识、pid 存活判不了一律拒。"
+        )
         return proc.returncode
 
     tree = _git("write-tree")

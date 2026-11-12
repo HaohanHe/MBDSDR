@@ -42,18 +42,21 @@ def _sidecars(locks: Path) -> list[Path]:
     return sorted((locks / "claims").glob("*.token"))
 
 
-def _env(locks: Path) -> dict:
+def _env(locks: Path, root: Path = REPO) -> dict:
     env = os.environ.copy()
     env["MBDSDR_LOCKS_DIR"] = str(locks)
+    env["MBDSDR_CLAIM_ROOT"] = str(root)
     env.pop("PYTHONPATH", None)
     return env
 
 
-def run(locks: Path, *args: str, timeout: float = 60.0) -> subprocess.CompletedProcess:
+def run(
+    locks: Path, *args: str, timeout: float = 60.0, root: Path = REPO
+) -> subprocess.CompletedProcess:
     return subprocess.run(
         [sys.executable, str(SCRIPT), *args],
-        cwd=REPO,
-        env=_env(locks),
+        cwd=root,
+        env=_env(locks, root),
         capture_output=True,
         text=True,
         encoding="utf-8",
@@ -308,13 +311,25 @@ def test_missing_sidecar_denies_release_and_says_what_to_do(tmp_path: Path) -> N
 
 
 def test_takeover_replaces_sidecar_and_invalidates_old_token(tmp_path: Path) -> None:
-    """takeover 后旧 token 与旧 sidecar 都作废，新持有者不带 --token 也能释放。"""
+    """takeover 后旧 token 与旧 sidecar 都作废，新持有者不带 --token 也能释放。
+
+    用独立 tmp 仓库：接管的新硬条件是「无在途改动」，跑在主仓里会读到别的线
+    正在编辑的 `desktop/main_window.py`（那是真实的在途改动，不该接管），
+    测试结果会随别人的工作状态漂移。
+    """
+    root = tmp_path / "repo"
+    (root / "desktop").mkdir(parents=True)
+    (root / "desktop" / "main_window.py").write_text("base\n", encoding="utf-8")
+    for args in (("init", "-q"), ("config", "user.email", "t@example.invalid"),
+                 ("config", "user.name", "t"), ("add", "."),
+                 ("commit", "-q", "-m", "base")):
+        subprocess.run(["git", *args], cwd=root, check=True, capture_output=True)
     locks = tmp_path / "locks"
-    claimed = run(locks, "claim", SHARED, "--owner", "线A")
+    claimed = run(locks, "claim", SHARED, "--owner", "线A", root=root)
     assert claimed.returncode == 0, claimed.stderr
     old_token = _token(claimed)
 
-    # 伪造孤儿条件：pid 已死 + 心跳过期
+    # 伪造孤儿条件：心跳过期（pid 已不参与判定，写成死号只验证它不影响结果）
     marker = _markers(locks)[0]
     data = json.loads(marker.read_text(encoding="utf-8"))
     data["pid"] = 99999999
@@ -324,17 +339,17 @@ def test_takeover_replaces_sidecar_and_invalidates_old_token(tmp_path: Path) -> 
     data["ttl_min"] = 1
     marker.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
 
-    taken = run(locks, "takeover", SHARED, "--owner", "线B", "--reason", "原进程已死")
+    taken = run(locks, "takeover", SHARED, "--owner", "线B", "--reason", "原 claim 已过期 60min，工作区干净", root=root)
     assert taken.returncode == 0, taken.stdout + taken.stderr
     new_token = _token(taken)
     assert new_token != old_token
     assert _sidecars(locks)[0].read_text(encoding="utf-8").strip() == new_token
 
-    stale = run(locks, "release", SHARED, "--owner", "线A", "--token", old_token)
+    stale = run(locks, "release", SHARED, "--owner", "线A", "--token", old_token, root=root)
     assert stale.returncode == 2, "旧 token 在 takeover 后必须失效"
     assert "RELEASE DENIED" in stale.stdout + stale.stderr
 
-    ok = run(locks, "release", SHARED, "--owner", "线B")
+    ok = run(locks, "release", SHARED, "--owner", "线B", root=root)
     assert ok.returncode == 0, ok.stdout + ok.stderr
     assert not _sidecars(locks)
 

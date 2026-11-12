@@ -12,7 +12,13 @@
   * 钩子源文件在 scripts/hooks/，安装到 `git rev-parse --git-common-dir` 的
     hooks 目录（linked worktree 也共享同一套）。
   * pre-commit 调 scripts/check_commit_scope.py --staged；≥2 个活跃 owner 直接
-    拒绝提交。通过时在 D:\\mbdsdr\\.locks\\hook_ok\\<tree>.json 留标记。
+    拒绝提交。再调 claim 闸（逐文件查台账，见下）拒绝「别人仍持有的文件」。
+    通过时在 D:\\mbdsdr\\.locks\\hook_ok\\<tree>.json 留标记。
+  * claim 闸逻辑在 scripts/claim_gate.py（依赖 scripts/file_claim.py 读台账）。
+    这两个文件会**一并复制到 hooks 目录**：hooks 是 common-dir 共享的，而
+    `root/scripts/claim_gate.py` 只存在于已更新到本提交的工作树；旧工作树里
+    没有它，若只在 root 下找，那些工作树的每次提交都会因「找不到闸脚本」被
+    失败关闭挡住。安装副本 = 每棵树都有一份可用实现。
   * post-commit 消费标记；没有标记的提交（--no-verify 或钩子未执行）追加到
     D:\\mbdsdr\\.locks\\git_hook_bypass.log，便于事后定位绕过者。
   * 状态与日志默认只写 D 盘，可用 MBDSDR_HOOK_MARKER_DIR / MBDSDR_HOOK_LOG
@@ -32,6 +38,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 HOOKS_SRC = ROOT / "scripts" / "hooks"
 HOOK_NAMES = ("pre-commit", "post-commit")
+#: claim 闸的运行时依赖：装到 hooks 目录，保证旧工作树也能跑（见模块 docstring）。
+SUPPORT_FILES = ("claim_gate.py", "file_claim.py")
 SIGNATURE = "MBDSDR-MANAGED-HOOK"
 
 
@@ -83,6 +91,11 @@ def install(force: bool) -> int:
         mode = dst.stat().st_mode
         os.chmod(dst, mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
         print(f"[install] {dst}  <-  {src.relative_to(ROOT)}  sha256={_sha256(dst)[:16]}")
+    for name in SUPPORT_FILES:
+        src = ROOT / "scripts" / name
+        dst = target_dir / name
+        shutil.copy2(src, dst)
+        print(f"[install] {dst}  <-  scripts/{name}  sha256={_sha256(dst)[:16]}")
     Path(r"D:\mbdsdr\.locks\hook_ok").mkdir(parents=True, exist_ok=True)
     print(f"[info] bypass 日志：{os.environ.get('MBDSDR_HOOK_LOG') or r'D:\mbdsdr\.locks\git_hook_bypass.log'}")
     return 1 if failed else 0
@@ -103,6 +116,17 @@ def check() -> int:
             bad += 1
             continue
         print(f"[ok] {dst} sha256={_sha256(dst)[:16]}")
+    for name in SUPPORT_FILES:
+        src = ROOT / "scripts" / name
+        dst = target_dir / name
+        if not dst.exists():
+            print(f"[miss] {dst}")
+            bad += 1
+        elif _sha256(src) != _sha256(dst):
+            print(f"[diff] {dst} 与 scripts/{name} 不一致（重新安装即可）")
+            bad += 1
+        else:
+            print(f"[ok] {dst} sha256={_sha256(dst)[:16]}")
     return 1 if bad else 0
 
 
@@ -111,6 +135,11 @@ def uninstall() -> int:
     for name in HOOK_NAMES:
         dst = target_dir / name
         if dst.exists() and _is_managed(dst):
+            dst.unlink()
+            print(f"[remove] {dst}")
+    for name in SUPPORT_FILES:
+        dst = target_dir / name
+        if dst.exists():
             dst.unlink()
             print(f"[remove] {dst}")
     return 0

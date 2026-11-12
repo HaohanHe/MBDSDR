@@ -15,6 +15,21 @@
     POSIX `flock`）里完成，不做「读 JSON 再写 JSON」的竞态写法。
   * TTL 心跳：同 owner 再 claim = 续租；超过 TTL 无续租视为过期，别人可以
     夺取，并打印原持有者与超时分钟数。
+  * **判活只看心跳，不看 pid**（2026-11-13）：`claim` 是一次性 CLI，写完就
+    退出，`pid` 记的是那个短命进程——「pid 已死」是默认状态，没有信息量。
+    旧实现把 `pid_dead_or_reused` 当接管的硬前提，等于任何 claim 都能被接管
+    （2026-11-13 01:39 `desktop/ai_panel.py`、`desktop/ai_sdr_session.py`
+    在 TTL 还剩 160+ 分钟时被 orphan_takeover 抢走）。现在：
+      - 不选「父进程/shell pid」：本机每个工具调用常是新的短命 shell，父 pid
+        同样不新鲜；换个工具调用继续工作也会被误判为「会话结束」。
+      - 不选「显式 --session-id」：那只是一个名字，不唯一（两条线可同名），
+        也无法证明「还在工作」；能证明身份的是凭据 token，能证明活跃的是心跳。
+      - 所以判据 = `heartbeat_at + ttl_min`（新鲜且唯一）；pid 仅作诊断。
+    两种边界情况的答案：
+      - 同一 shell 连跑两条命令：第二条 claim/续租自动读 sidecar 凭据 → 心跳
+        刷新 → 仍有效；pid 不参与，所以不会因为「换了条命令」而放宽接管。
+      - 两个不同会话同名：名字只用于展示；续租/释放要凭 token，同名不同 token
+        不能互相 release；takeover 只看 TTL/在途，不因同名变松或变紧。
   * **身份不是名字**（2026-11-13）：claim 成功时签发一次性 `--token`，占位文件
     只存它的 sha256。续租/释放必须带这份凭据——两条同名线（如两条都叫
     `W81线`）各自持有不同凭据，互相 release 会失败，同名不再等于同一持有者。
@@ -617,7 +632,7 @@ def cmd_claim(
                         f"  持有者名同为 {owner}，但无法证明是同一持有者：该 claim 已绑定凭据，\n"
                         f"  本次未带匹配的 --token，凭据文件 {_token_path(key)} 也缺失/不匹配。\n"
                         f"  处理：① 有 --token 就带上；② 等 TTL 过期后重新 claim（会签发新凭据）；\n"
-                        f"        ③ 走 takeover（需 pid 已死 + 过期/无在途之一）。\n"
+                        f"        ③ 走 takeover（需心跳已过期 + 无在途改动 + --reason，见 §6.1.2）。\n"
                         f"  不会按 owner 名放行——同名不等于同一会话。"
                     )
                 renewed = _marker_payload(
@@ -753,7 +768,7 @@ def cmd_release(path: str, owner: str, token: Optional[str] = None) -> int:
             f"本次未带 --token，凭据文件 {_token_path(key)} 也缺失/不匹配。\n"
             f"  不会按 owner 名放行（同名可以是另一条线，互相解锁等于没有锁）。\n"
             f"  处理：① 用 claim 时输出过的 --token；② 等 TTL 过期后重新 claim；"
-            f"③ 走 takeover（需 pid 已死 + 过期/无在途之一）。"
+            f"③ 走 takeover（需心跳已过期 + 无在途改动 + --reason；pid 不参与判定）。"
         )
 
     try:
@@ -787,36 +802,32 @@ def _inflight_lines(display: str) -> Optional[List[str]]:
 
 
 def _orphan_criteria(payload: Dict[str, Any], display: str, now: float) -> Dict[str, Any]:
-    """逐条判定孤儿 claim：心跳过期 / 原进程已死或 pid 被复用 / 无在途改动。"""
+    """判定 claim 是否可被接管：只看「心跳过期」+「无在途改动」。
+
+    **pid 不是判据**：`claim` 是一次性 CLI，写完就退出，`pid` 记的是那个短命
+    进程——「pid 已死」是默认状态，不是异常状态（旧实现把它当接管硬前提，等于
+    任何 claim 都能被接管：2026-11-13 01:39 的 `desktop/ai_panel.py` /
+    `desktop/ai_sdr_session.py` 就是这样在 TTL 还剩 160+ 分钟时被抢走的）。
+    pid 现在只作诊断展示，不参与 `allowed` 判定；持有者是否还在工作，唯一
+    新鲜且唯一的信号是心跳（`heartbeat_at` + `ttl_min`）。
+    """
     heartbeat = float(payload.get("heartbeat_at") or payload.get("acquired_at") or now)
     ttl_s = float(payload.get("ttl_min") or 0.0) * 60.0
     held_s = max(0.0, now - heartbeat)
-    expired = held_s > ttl_s
-
-    pid = payload.get("pid")
-    recorded_create = payload.get("pid_create_time")
-    if pid is None:
-        state, current_create, cmdline = "unknown", None, None
+    expired_s = held_s - ttl_s
+    # §6.1.4：刚过期的 claim 可能只是没来得及续租，过期 < 30min 一律不许接管。
+    grace_s = float(os.environ.get("MBDSDR_TAKEOVER_GRACE_MIN") or 30.0) * 60.0
+    past_grace = expired_s >= grace_s
+    if expired_s > 0:
+        expired_detail = (
+            f"心跳 {_iso(heartbeat)}，已 {_minutes(held_s)}min / TTL {_minutes(ttl_s)}min，"
+            f"过期 {_minutes(expired_s)}min"
+            + ("" if past_grace else f"（不足 {_minutes(grace_s)}min 宽限，§6.1.4）")
+        )
     else:
-        state, current_create, cmdline = _proc_snapshot(int(pid))
-
-    if state == "gone":
-        pid_ok, pid_detail = True, f"pid {pid} 已不存在"
-    elif state == "alive":
-        if recorded_create is None or current_create is None:
-            pid_ok = False
-            pid_detail = f"pid {pid} 仍存活，且无法排除 pid 复用（claim 未记录/取不到创建时间）"
-        elif abs(float(current_create) - float(recorded_create)) > 0.5:
-            pid_ok = True
-            pid_detail = (
-                f"pid {pid} 号已活着但创建时间不同（{recorded_create:.0f} vs {current_create:.0f}）"
-                " = 原进程已死、号被复用"
-            )
-        else:
-            pid_ok = False
-            pid_detail = f"pid {pid} 仍是原进程（创建时间一致），疑似繁忙而非死亡"
-    else:
-        pid_ok, pid_detail = False, f"无法确认 pid {pid} 的状态"
+        expired_detail = (
+            f"心跳 {_iso(heartbeat)}，已 {_minutes(held_s)}min / TTL {_minutes(ttl_s)}min（未过期）"
+        )
 
     lines = _inflight_lines(display)
     if lines is None:
@@ -827,13 +838,27 @@ def _orphan_criteria(payload: Dict[str, Any], display: str, now: float) -> Dict[
         inflight_ok = False
         inflight_detail = "有在途改动：" + "；".join(lines[:5])
 
+    pid = payload.get("pid")
+    if pid is None:
+        pid_note = "台账未记录 pid（不影响判定）"
+    else:
+        try:
+            state, _create, _cmd = _proc_snapshot(int(pid))
+        except (TypeError, ValueError, OSError) as exc:
+            state = f"取不到（{exc.__class__.__name__}）"
+        pid_note = (
+            f"pid {pid} 状态={state}（仅诊断，不参与判定：claim 是短命 CLI，"
+            "它退出不代表持有会话结束）"
+        )
+
     return {
-        "expired": {"ok": expired, "detail": f"心跳 {_iso(heartbeat)}，已 {_minutes(held_s)}min / TTL {_minutes(ttl_s)}min"},
-        "pid_dead_or_reused": {"ok": pid_ok, "detail": pid_detail},
+        "expired": {
+            "ok": past_grace,
+            "raw": expired_s > 0,
+            "detail": expired_detail,
+        },
         "no_inflight": {"ok": inflight_ok, "detail": inflight_detail},
-        "state": state,
-        "create_time": current_create,
-        "cmdline": cmdline,
+        "pid_note": pid_note,
         "heartbeat": heartbeat,
         "ttl_s": ttl_s,
         "held_s": held_s,
@@ -862,6 +887,15 @@ def cmd_takeover(path: str, owner: str, ttl_min: float, reason: str = "") -> int
     if not marker.exists():
         raise ClaimDenied(f"TAKEOVER DENIED {display}\n  该文件当前没有 claim；直接 claim 即可。")
 
+    reason = (reason or "").strip()
+    if not reason:
+        raise ClaimDenied(
+            f"TAKEOVER DENIED {display}\n"
+            f"  必须用 --reason 写明接管理由（可复核证据，不是「需要改这个文件」）。\n"
+            f"  没理由的接管事后无法审计，本仓不认。例：\n"
+            f'    --reason "原 claim 心跳 01:26 起已停，过期 42min；git status 无在途改动；K16 断言已提交"'
+        )
+
     now = _now()
     with _locked_fd(marker, create=False) as fd:
         data = _read_marker_fd(fd)
@@ -874,24 +908,33 @@ def cmd_takeover(path: str, owner: str, ttl_min: float, reason: str = "") -> int
             )
 
         criteria = _orphan_criteria(data, display, now)
-        passed = [name for name in ("expired", "pid_dead_or_reused", "no_inflight") if criteria[name]["ok"]]
-        # pid 死亡/复用是硬前提；其余两条至少再满足一条（总计 ≥2 条）。
-        allowed = criteria["pid_dead_or_reused"]["ok"] and (
-            criteria["expired"]["ok"] or criteria["no_inflight"]["ok"]
-        )
+        # 两条都是硬条件：心跳过期（持有者已停止续租）+ 无在途改动（工作区干净）。
+        # pid 不参与判定——claim 是一次性 CLI，pid 已死是默认状态。
+        allowed = criteria["expired"]["ok"] and criteria["no_inflight"]["ok"]
         if not allowed:
-            lines = [f"TAKEOVER DENIED {display}", f"  当前持有者={holder} pid={data.get('pid')}"]
-            for name, label in (
-                ("expired", "心跳过期"),
-                ("pid_dead_or_reused", "pid 已死/被复用"),
-                ("no_inflight", "无在途改动"),
-            ):
+            lines = [
+                f"TAKEOVER DENIED {display}",
+                f"  当前持有者={holder}（{criteria['pid_note']}）",
+            ]
+            for name, label in (("expired", "心跳过期"), ("no_inflight", "无在途改动")):
                 mark = "PASS" if criteria[name]["ok"] else "FAIL"
                 lines.append(f"  [{mark}] {label}：{criteria[name]['detail']}")
-            lines.append(
-                f"  通过 {len(passed)}/3 条（需 pid 条件 + 过期/无在途之一）；"
-                "缺的条目见上。pid 仍存活时一律拒绝，疑似繁忙请等它续租或人工协调。"
-            )
+            if not criteria["expired"]["ok"]:
+                if criteria["expired"]["raw"]:
+                    lines.append(
+                        "  刚过期、未满 30 分钟宽限（§6.1.4）：可能只是没来得及续租，先别碰；"
+                        "等宽限过完再来。"
+                    )
+                else:
+                    lines.append(
+                        "  未过期：持有者可能仍在工作。claim 是一次性 CLI，pid 已退出是默认状态，"
+                        "不能据此接管；等 TTL 到期，或让对方 release。"
+                    )
+            if not criteria["no_inflight"]["ok"]:
+                lines.append(
+                    "  有在途改动：先让原持有者提交/清理（或等它 release），不得接管——"
+                    "接管会让对方未提交的 hunk 无处可去。"
+                )
             raise ClaimDenied("\n".join(lines))
 
         old = dict(data)
@@ -902,8 +945,9 @@ def cmd_takeover(path: str, owner: str, ttl_min: float, reason: str = "") -> int
         takeover_note = {
             "old_owner": holder,
             "old_pid": old.get("pid"),
-            "criteria": {name: criteria[name]["ok"] for name in ("expired", "pid_dead_or_reused", "no_inflight")},
-            "detail": {name: criteria[name]["detail"] for name in ("expired", "pid_dead_or_reused", "no_inflight")},
+            "criteria": {name: criteria[name]["ok"] for name in ("expired", "no_inflight")},
+            "detail": {name: criteria[name]["detail"] for name in ("expired", "no_inflight")},
+            "pid_note": criteria["pid_note"],
             "reason": reason,
             "at": _iso(now),
         }
@@ -921,6 +965,7 @@ def cmd_takeover(path: str, owner: str, ttl_min: float, reason: str = "") -> int
             "reason": reason,
             "criteria": takeover_note["criteria"],
             "detail": takeover_note["detail"],
+            "pid_note": criteria["pid_note"],
         }
         try:
             _append_takeover_log(record)
@@ -947,20 +992,16 @@ def cmd_takeover(path: str, owner: str, ttl_min: float, reason: str = "") -> int
         _registry_record_claim(payload, old, close_reason="orphan_takeover", takeover=takeover_note)
     except ClaimDenied as exc:
         print(f"WARN 台账写入失败（接管仍有效）：{exc}", file=sys.stderr)
-    if not criteria["no_inflight"]["ok"]:
-        print(
-            "WARN 工作区有在途改动：接管后只能按 hunk 进 index 或私有 index，"
-            "禁止整文件 add / --only 提交（§6.1.1）",
-            file=sys.stderr,
-        )
     print(
         f"TAKEOVER OK {display} 原持有者={holder} 新持有者={owner} "
         f"到期={_iso(now + _ttl(ttl_min, now))}\n"
         f"  判据："
         + " ".join(
             f"{name}={'PASS' if criteria[name]['ok'] else 'FAIL'}"
-            for name in ("expired", "pid_dead_or_reused", "no_inflight")
+            for name in ("expired", "no_inflight")
         )
+        + f"\n  {criteria['pid_note']}"
+        + f"\n  理由：{reason}"
         + f"\n  日志：{TAKEOVER_LOG}"
     )
     print(_TOKEN_HINT.format(token=new_token, path=_token_path(key)))
@@ -1133,12 +1174,16 @@ def build_parser() -> argparse.ArgumentParser:
 
     takeover = sub.add_parser(
         "takeover",
-        help="接管孤儿 claim（原进程已死/pid 被复用 + 心跳过期/无在途改动），强制写日志",
+        help="接管孤儿 claim（硬条件：心跳已过期 + 无在途改动 + --reason 非空）",
     )
     takeover.add_argument("path")
     takeover.add_argument("--owner", required=True, help="接管方线名")
     takeover.add_argument("--ttl-min", type=float, default=10.0, help="新租期（分钟），默认 10")
-    takeover.add_argument("--reason", default="", help="接管原因（写入日志）")
+    takeover.add_argument(
+        "--reason",
+        required=True,
+        help="接管理由（必填，可复核证据：过期多久 + 工作区干净 + 为什么该你接）",
+    )
 
     return parser
 

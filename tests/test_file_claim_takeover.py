@@ -1,6 +1,19 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
-"""孤儿 claim 接管的反证：进程已死才许接管，进程活着一律拒绝。"""
+"""孤儿 claim 接管的判据：只看「心跳过期 + 无在途改动 + 有理由」，pid 不参与。
+
+背景（2026-11-13）：`claim` 是一次性 CLI，写完就退出，`pid` 记的是那个短命
+进程——「pid 已死」是默认状态。旧实现把它当接管硬前提，等于任何 claim 都能被
+接管：`desktop/ai_panel.py`、`desktop/ai_sdr_session.py` 就是在 TTL 还剩 160+
+分钟时被 orphan_takeover 抢走的。
+
+本文件钉住新判据：
+  (a) 事故形态：pid 已死、心跳未过期、工作区干净 → 拒绝接管；
+  (b) 心跳过期 + 干净 + 写了理由 → 允许，日志记录判据与理由；
+  (c) 心跳过期 + 有在途改动 → 拒绝（理由：在途改动）；
+  (d) 不允许无理由接管；
+  (e) pid 活着但心跳过期 → 允许（pid 不是判据，避免把「pid 存活」当忙碌信号）。
+"""
 from __future__ import annotations
 
 import hashlib
@@ -73,51 +86,82 @@ def _dead_pid() -> int:
     return child.pid
 
 
-def _self_create_time():
-    try:
-        import psutil
-
-        return psutil.Process(os.getpid()).create_time()
-    except Exception:
-        return None
-
-
 def _claim(locks: Path, root: Path, owner: str = "线A") -> None:
     claimed = run(locks, root, "claim", TARGET, "--owner", owner, "--ttl-min", "60")
     assert claimed.returncode == 0, claimed.stdout + claimed.stderr
 
 
-def test_dead_pid_and_expired_heartbeat_allows_takeover_and_logs(tmp_path: Path) -> None:
-    """反证 (a)：pid 死 + 心跳过期 → 允许接管，且日志逐条记录判据。"""
+def test_incident_shape_early_takeover_is_denied(tmp_path: Path) -> None:
+    """(a) 事故形态：pid 已死、心跳未过期、工作区干净 → 必须拒绝接管。"""
     root = _repo(tmp_path)
     locks = tmp_path / "locks"
     _claim(locks, root)
 
     now = time.time()
-    _rewrite(locks, pid=_dead_pid(), acquired_at=now - 180, heartbeat_at=now - 120, ttl_min=1)
+    _rewrite(locks, pid=_dead_pid(), acquired_at=now - 60, heartbeat_at=now - 60, ttl_min=60)
 
-    taken = run(locks, root, "takeover", TARGET, "--owner", "线B", "--reason", "原进程已死")
+    denied = run(
+        locks, root, "takeover", TARGET, "--owner", "线B",
+        "--reason", "需要改这个文件",
+    )
+    text = denied.stdout + denied.stderr
+    assert denied.returncode == 2, text
+    assert "TAKEOVER DENIED" in text
+    assert "[PASS] 无在途改动" in text
+    assert "[FAIL] 心跳过期" in text
+    assert "未过期" in text
+    assert "仅诊断" in text, "pid 只能作诊断，不能当接管信号"
+    assert not (locks / "claim_takeovers.log").exists(), "被拒绝的接管不得留成功日志"
+
+    status = run(locks, root, "status", TARGET)
+    assert "owner=线A" in status.stdout, "原持有者必须保持不动"
+
+
+def test_expired_clean_with_reason_allows_takeover(tmp_path: Path) -> None:
+    """(b) 过期 ≥30min + 干净 + 理由 → 允许；刚过期的宽限期内仍拒绝。"""
+    root = _repo(tmp_path)
+    locks = tmp_path / "locks"
+    _claim(locks, root)
+
+    now = time.time()
+    # 刚过期 2 分钟（TTL 60）→ 落在 §6.1.4 的 30 分钟宽限里，仍不许接管。
+    _rewrite(locks, pid=_dead_pid(), acquired_at=now - 90 * 60, heartbeat_at=now - 62 * 60, ttl_min=60)
+    early = run(locks, root, "takeover", TARGET, "--owner", "线B", "--reason", "等不及了")
+    text = early.stdout + early.stderr
+    assert early.returncode == 2, text
+    assert "[FAIL] 心跳过期" in text
+    assert "宽限" in text
+    assert not (locks / "claim_takeovers.log").exists()
+
+    # 过期 119 分钟 → 过完宽限，允许接管。
+    _rewrite(locks, pid=_dead_pid(), acquired_at=now - 180 * 60, heartbeat_at=now - 120 * 60, ttl_min=1)
+    taken = run(
+        locks, root, "takeover", TARGET, "--owner", "线B",
+        "--reason", "原 claim 心跳停在 120min 前，TTL 1min；工作区无改动",
+    )
     assert taken.returncode == 0, taken.stdout + taken.stderr
     assert "TAKEOVER OK" in taken.stdout
-    assert "原持有者=线A" in taken.stdout
-    assert "新持有者=线B" in taken.stdout
+    assert "expired=PASS" in taken.stdout
+    assert "no_inflight=PASS" in taken.stdout
+    assert "原持有者=线A" in taken.stdout and "新持有者=线B" in taken.stdout
 
     status = run(locks, root, "status", TARGET)
     assert "owner=线B" in status.stdout
     assert "线A" not in status.stdout
 
-    log_path = locks / "claim_takeovers.log"
-    assert log_path.exists(), "接管必须强制留痕"
-    records = [json.loads(line) for line in log_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    records = [
+        json.loads(line)
+        for line in (locks / "claim_takeovers.log").read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
     assert len(records) == 1
     record = records[0]
     assert record["action"] == "orphan_takeover"
     assert record["old_owner"] == "线A"
     assert record["new_owner"] == "线B"
-    assert record["reason"] == "原进程已死"
-    assert record["criteria"]["pid_dead_or_reused"] is True
-    assert record["criteria"]["expired"] is True
-    assert record["criteria"]["no_inflight"] is True
+    assert record["reason"].strip(), "接管记录必须带理由"
+    assert record["criteria"] == {"expired": True, "no_inflight": True}
+    assert "pid" in record["pid_note"] and "仅诊断" in record["pid_note"]
     assert record["logged_at"]
 
     registry = json.loads((locks / "claims.json").read_text(encoding="utf-8"))
@@ -125,76 +169,64 @@ def test_dead_pid_and_expired_heartbeat_allows_takeover_and_logs(tmp_path: Path)
     first = entry["history"][0]
     assert first["owner"] == "线A"
     assert first["closed_reason"] == "orphan_takeover"
-    assert first["takeover"]["old_owner"] == "线A"
+    assert first["takeover"]["reason"].strip()
     assert entry["history"][1]["owner"] == "线B"
 
 
-def test_alive_pid_but_expired_heartbeat_is_denied(tmp_path: Path) -> None:
-    """反证 (b)：pid 活着但心跳过期（疑似繁忙）→ 必须拒绝，且不写日志。"""
-    root = _repo(tmp_path)
-    locks = tmp_path / "locks"
-    _claim(locks, root)
-
-    now = time.time()
-    data = _rewrite(locks, pid=os.getpid(), acquired_at=now - 180, heartbeat_at=now - 120, ttl_min=1)
-    create = _self_create_time()
-    if create is not None:
-        data["pid_create_time"] = create
-        _marker(locks).write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
-
-    denied = run(locks, root, "takeover", TARGET, "--owner", "线B")
-    assert denied.returncode == 2, denied.stdout + denied.stderr
-    text = denied.stdout + denied.stderr
-    assert "TAKEOVER DENIED" in text
-    assert "[FAIL] pid 已死/被复用" in text
-    assert "pid 仍" in text or "疑似繁忙" in text
-
-    assert not (locks / "claim_takeovers.log").exists(), "被拒绝的接管不得留成功日志"
-    status = run(locks, root, "status", TARGET)
-    assert "owner=线A" in status.stdout
-
-
-def test_inflight_changes_takeover_warns_hunks_only(tmp_path: Path) -> None:
-    """pid 死 + 过期可接管，但在途改动必须告警「只能按 hunk 进 index」（对齐 §6.1.1）。"""
+def test_expired_but_inflight_is_denied(tmp_path: Path) -> None:
+    """(c) 心跳过期但有未提交改动 → 拒绝，并报「有在途改动」。"""
     root = _repo(tmp_path)
     locks = tmp_path / "locks"
     _claim(locks, root)
 
     (root / TARGET).write_text("modified\n", encoding="utf-8")
     now = time.time()
-    _rewrite(locks, pid=_dead_pid(), acquired_at=now - 180, heartbeat_at=now - 120, ttl_min=1)
+    _rewrite(locks, pid=_dead_pid(), acquired_at=now - 180 * 60, heartbeat_at=now - 120 * 60, ttl_min=1)
 
-    taken = run(locks, root, "takeover", TARGET, "--owner", "线B")
-    assert taken.returncode == 0, taken.stdout + taken.stderr
-    text = taken.stdout + taken.stderr
-    assert "no_inflight=FAIL" in taken.stdout
-    assert "WARN 工作区有在途改动" in text
-    assert "禁止整文件 add" in text
+    denied = run(locks, root, "takeover", TARGET, "--owner", "线B", "--reason", "接一下")
+    text = denied.stdout + denied.stderr
+    assert denied.returncode == 2, text
+    assert "[FAIL] 无在途改动" in text
+    assert "有在途改动" in text
+    assert not (locks / "claim_takeovers.log").exists()
 
-    record = json.loads((locks / "claim_takeovers.log").read_text(encoding="utf-8").splitlines()[0])
-    assert record["criteria"]["no_inflight"] is False
-    assert "有在途改动" in record["detail"]["no_inflight"]
+    status = run(locks, root, "status", TARGET)
+    assert "owner=线A" in status.stdout
 
 
-def test_dead_pid_and_clean_workspace_allows_early_takeover(tmp_path: Path) -> None:
-    """pid 死 + 无在途改动（心跳未过期）也满足「至少两条」→ 允许接管。"""
+def test_takeover_requires_reason(tmp_path: Path) -> None:
+    """(d) 无 --reason → 参数层直接拒（没理由的接管不认）。"""
+    root = _repo(tmp_path)
+    locks = tmp_path / "locks"
+    _claim(locks, root)
+    now = time.time()
+    _rewrite(locks, pid=_dead_pid(), acquired_at=now - 180 * 60, heartbeat_at=now - 120 * 60, ttl_min=1)
+
+    denied = run(locks, root, "takeover", TARGET, "--owner", "线B")
+    text = denied.stdout + denied.stderr
+    assert denied.returncode == 2, text
+    assert "--reason" in text
+    assert not (locks / "claim_takeovers.log").exists()
+
+
+def test_alive_pid_with_expired_heartbeat_allows_takeover(tmp_path: Path) -> None:
+    """(e) pid 活着但心跳过期 + 干净 + 理由 → 允许（pid 不参与判定）。"""
     root = _repo(tmp_path)
     locks = tmp_path / "locks"
     _claim(locks, root)
 
     now = time.time()
-    _rewrite(locks, pid=_dead_pid(), acquired_at=now, heartbeat_at=now, ttl_min=60)
+    _rewrite(locks, pid=os.getpid(), acquired_at=now - 180 * 60, heartbeat_at=now - 120 * 60, ttl_min=1)
 
-    taken = run(locks, root, "takeover", TARGET, "--owner", "线B")
+    taken = run(locks, root, "takeover", TARGET, "--owner", "线B", "--reason", "过期 120min，工作区干净")
     assert taken.returncode == 0, taken.stdout + taken.stderr
-    assert "expired=FAIL" in taken.stdout
-    assert "pid_dead_or_reused=PASS" in taken.stdout
+    assert "expired=PASS" in taken.stdout
     assert "no_inflight=PASS" in taken.stdout
 
 
 def test_takeover_without_claim_is_denied(tmp_path: Path) -> None:
     root = _repo(tmp_path)
     locks = tmp_path / "locks"
-    denied = run(locks, root, "takeover", TARGET, "--owner", "线B")
+    denied = run(locks, root, "takeover", TARGET, "--owner", "线B", "--reason", "x")
     assert denied.returncode == 2
     assert "没有 claim" in (denied.stdout + denied.stderr)
