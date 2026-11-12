@@ -319,7 +319,7 @@ DVB-S2 BCH/LDPC 表、月面反照率），另有 `desktop/bandplan.json` 频段
 |---|---|---|---|
 | `sat_links.json` | 无条数声明；每条带 `source`/`culture`，只含下行 | 8 星 / 9 条链路，全部 `direction=downlink`；卫星级 `source` 8/8、`culture` 8/8；频点 137.1–436.795 MHz | 0 |
 | `sat_profiles.json` | 7 剖面，逐条带 `source` | 7 剖面，`source` 7/7；`baud` 缺 5、`coding` 缺 5（DVB-S2/模拟体制本就不适用） | 0 |
-| `frame_layouts.json` | 无条数声明；逐条 `honesty`；`_note` 解释 `len=-1` 与位级字段 | 5 顶层 = 示例 1（`astu_1_tm_example`，非真实星）+ 通用协议帧 2（`ccsds_tc_classic` 基座 / `ccsds_tc_segmented` 派生）+ 星上遥测 2（`funcube1_ao73_frame` 基座 / `funcube1_ao73_fitter` 派生）；派生共 2 条；`source` 3/5（既有 2 条无 `source`，按红线冻结）；字段字节/位段不重叠；声明 CRC 的布局均可解析 | 0（W91 星覆盖仅 FUNcube-1 1 颗，待扩） |
+| `frame_layouts.json` | 无条数声明；逐条 `honesty`；`_note` 解释 `len=-1` 与位级字段 | 5 顶层 = 示例 1（`astu_1_tm_example`，非真实星）+ 通用协议帧 2（`ccsds_tc_classic` 基座 / `ccsds_tc_segmented` 派生）+ 星上遥测 2（`funcube1_ao73_frame` 基座 / `funcube1_ao73_fitter` 派生）；派生共 2 条；`source` 3/5（既有 2 条无 `source`，按红线冻结）；字段字节/位段不重叠；声明 CRC 的布局均可解析 | 0（W91 星覆盖仅 FUNcube-1 1 颗；NOAA KLM 手册 37.4MB 本环境实测 1.8KB/s，5 分钟时限内不可取得） |
 | `dvbs2_bch.json` | 21 模式码 | normal 11 + short 10；short 的 9/10 标 `unavailable` 并带原因（表 5b 全 NA、表 7b 无 q 条目） | 0 |
 | `dvbs2_ldpc_tables.json` | 21 张表 + `source_files.sha256` | 21 = normal 11 + short 10；`n>k>0`、`q>0` 全部成立；短帧缺 9/10 与 BCH 一致 | 0（外部源不可复核，见下） |
 | `moon_albedo_lola_2ppd.npz` | LRO-L-LOLA-4-GDR-V1.0，Public Domain | `albedo` (360,720) float32，范围 [0.1359, 0.4716] | 0 |
@@ -350,7 +350,8 @@ DVB-S2 BCH/LDPC 表、月面反照率），另有 `desktop/bandplan.json` 频段
    与频段条数无关；`bandplan.json` 历史只有 19 条（`4d23308f`）→ 30 条
    （`a72996fb`）两档，从未有过 38 条。因此两边都不过期，是两件事被混称。
 5. **位级字段口径**：声明 `bit_len` 的字段走 `bit_offset`（以帧首为 0、
-   MSB-first）+ `bit_len` 的位级路径，`type` 须为 `uint`；未声明 `bit_len`
+   MSB-first）+ `bit_len` 的位级路径，`type` 须为 `uint`；`bit_offset +
+   bit_len` 超出载荷位数必须报错，**绝不截断或补零**；未声明 `bit_len`
    的字段仍走原字节路径，旧布局行为不变。`funcube1_ao73_frame` 的 60 个
    位字段 + 1 个载荷字段按 AMSAT-UK《FUNcube-1 Downlink Data》§4 表逐段
    累加（头 8bit + 实时遥测 440bit + 载荷 200 字节 = 2048bit），源 PDF 的
