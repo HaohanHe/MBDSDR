@@ -90,6 +90,34 @@ python scripts/lint_swallow_all.py --write-baseline docs/code-guards-baseline.js
 python -m pytest tests/test_swallow_guard.py -q            # 全绿（棘轮不越线）
 ```
 
+## 门禁脚本入口登记（D4）
+
+`axioms.py --rule D4` 只认两种入口：git 钩子，或本文件的登记。以下 11 个
+`scripts/check_*` / `audit_*` / `report_*` 原先两者都没有（静默失效），现逐一
+给出「谁跑、什么时候跑」。**不放 pre-commit**：pre-commit 目前只跑 claim 范围
+检查（约 0.2s），而这里最便宜的也要 0.17s、最贵的 18.5s；逐个挂上去会让每次
+提交慢几十倍，然后大家开始用 `--no-verify`，把 claim 闸一起废掉。值得自动化的
+只进发版前的 `release_check.py` 分组（一次发版多花约 2s）。
+
+| 脚本 | 入口 | 什么时候跑 | 谁跑 | 复核 |
+| --- | --- | --- | --- | --- |
+| `scripts/check_rollback_table.py` | 自动：`release_check.py --steps docs`（本次接入） | 发版前随 docs 组；`COORDINATION.md` §6.10.2 表格改动后本地跑（约 1.7s） | 发版人 / 表格改动者 | 2027-01 |
+| `scripts/check_action_duplication.py` | 自动：`release_check.py --steps action_dup` | 发版前；菜单/QAction 增改后本地先跑 `--gate`（约 3.8s） | 发版人 / UI 改动者 | 2027-01 |
+| `scripts/check_help_paths.py` | 自动：`release_check.py --steps docs`（渲染点）+ 手动全量 | 发版前自动跑渲染点；帮助文案增删后本地跑全量核验（约 13s） | 发版人 / 帮助文案改动者 | 2027-01 |
+| `scripts/audit_source_text_pins.py` | 测试内调用 + 手动全量 | `tests/test_source_pin_ratchet.py` 每条测试即调用扫描器；基线更新或批次末跑 `--report`（约 8.7s） | 测试线 | 2027-01 |
+| `scripts/check_data_licenses.py` | 手动 | 新增/替换数据文件（星表、TLE、金标）后与发版前（约 10s） | 数据改动者 | 2027-01 |
+| `scripts/check_card_links.py` | 手动 | `COORDINATION.md` 章节增删/改号后由文档 owner 跑 `--fix-anchors`；改号的节要人工裁决。**当前 16 处漂移**（含 §6.9.3 已改号 6.1.5），先修再谈自动化 | 文档 owner | 2026-12 |
+| `scripts/check_destructive_ops.py` | 手动 | 发生 reset/clean/branch -D 等破坏性操作当天由执行人跑；批次末复核。当前退出码 1（有候选未放行），需逐条对账或补日志 | 操作执行人 | 2026-12 |
+| `scripts/check_dist_head_parity.py` | 手动 | 出安装包后必跑，`--dist <产物目录>` 为必填，无 dist 时无法执行 | 发版人 | 2027-01 |
+| `scripts/check_roadmap_blocking.py` | 手动 | 路线图/阻塞理由变更后跑；**仅提示**（命中仍退出 0），必须人读输出 | 路线图维护者 | 2027-01 |
+| `scripts/check_test_version.py` | 手动 | 怀疑「改测试销红」时，对具体测试路径跑一次（内部跑两遍 pytest，只在事件调查时用） | 复核人 | 2027-01 |
+| `scripts/report_token_dual_values.py` | 手动 | 主题令牌/双值治理改动后重生成报告（约 18.5s），结论写回 `docs/a11y/` | 主题维护者 | 2027-01 |
+
+删除判定：**0 个**。11 个每个都有活调用方（pytest 直接 import/调用，或
+`release_check.py` 的步骤）或活文档流程；没有一个是「结论已无人使用」。
+`check_card_links.py` 与 `check_destructive_ops.py` 当前是红的，属于待修项，
+不是死代码——正因如此才把它们的执行时机和责任人写死。
+
 ### 复核记录（2026-11-05，HEAD `d41591b`，工作区含他线在途改动）
 
 - 扫描：1,069 文件 / catch-all 1,896 / 静默 1,392 / 须修 1,391（基线 1,398，总量仍**只降**）。
