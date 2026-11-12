@@ -196,6 +196,11 @@
 - **`spacetime_predict`：缺陷已修（`16b78489`），C 类删除理由仅剩零引用。**
   §7 的「算错」描述的是修复前的代码；不要再据此认为线上还有一套错算在跑。
   但它仍无生产消费者，是否删除仍按 §7/§8 的 C 判定走——修复不改变「没人用」。
-- **验证口径**：`s_meter` 的 8 条测试是用临时脚本（`%TEMP%`）直接调用测试函数，
-  **未经 pytest 收集验证**——`tests/conftest.py` 导入超 2 分钟，另案处理；
+- **验证口径**：`s_meter` 的 8 条与后续新增的 6 条（连接错误有序表 3 条、
+  增益夹值告警 3 条）均已在**正常 pytest** 下收集运行并通过：
+  `pytest tests/test_s_meter.py tests/test_connect_error_ordering.py
+  tests/test_module_panel_gain_warning.py -q` → **14 passed（2026-11-12）**，
+  实测 Qt 锁等待 0.0s。
+  更正此前记录：conftest 导入本身只需 0.21–0.24s，早先看到的 185s 是**等 Qt
+  锁**，不是导入；等待期间无输出导致误归因为「卡在导入」。
   `spacetime_predict` 的 8 条是常规 `pytest mbdsdr_ai/tests/test_tle_freshness_predict.py`。

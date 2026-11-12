@@ -354,3 +354,19 @@ RSSI 也有一对：`main_window._fmt_rssi_mcp`
 6. **§6 带宽**：把 `status_panel._fmt_bw` 的「整数 kHz」改成 1 位小数，
    其余三处已经是对的。
 7. 一致重复（§10）与同名不同职（§11）暂不处理，只在新增代码时引用现有实现。
+
+---
+
+## 15. 验证口径（本文两笔修复）
+
+两笔修复的测试均已在**正常 pytest**下收集运行并通过（2026-11-12）：
+
+```powershell
+pytest tests/test_connect_error_ordering.py tests/test_module_panel_gain_warning.py -q
+# 6 passed
+```
+
+同批连同 `tests/test_s_meter.py` 一起跑为 **14 passed**，实测 Qt 锁等待 0.0s。
+此前「conftest 导入超 2 分钟」的观察归因有误：导入仅需 0.21–0.24s，耗时来自
+等待 Qt 测试互斥锁，且等待期间无输出。两笔修复提交说明中的「未经 pytest 收集」
+免责声明已由本次验证作废（历史提交说明不改写，以本节为准）。
