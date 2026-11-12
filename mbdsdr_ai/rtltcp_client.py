@@ -46,8 +46,8 @@ from .sdr_backend import (
     SDRDevice,
     _ThreadedRingReader,
     RTLSDRBackend,
-    DEFAULT_SAMPLE_RATE_HZ,
 )
+from .sdr_status import DEFAULT_SAMPLE_RATE_HZ
 from .link_state import (
     DataHealthTracker,
     STATE_CONNECTED,
