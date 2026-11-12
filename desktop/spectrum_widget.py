@@ -1227,10 +1227,10 @@ class _PlotState:
         self.mouse_x_ratio: Optional[float] = None     # 鼠标悬停 x 比例
         self.mouse_in_spectrum = False
         self.markers: List[float] = []                 # 固定 marker 频率 Hz
-        # ---- 书签标签（gqrx 书签竖旗；[(freq_hz, name), ...]）----
-        # 与固定 marker 是两套系统：marker 是扫频结果的瞬时标注，
-        # 书签是用户收藏的持久频点，点击药丸直接调谐。
-        self.bookmarks: List[Tuple[float, str]] = []
+        # ---- 书签标签（gqrx 书签竖旗；[(freq_hz, name, mode, bandwidth_hz)]）----
+        # 带宽是后加字段（0.0=未记录）；与固定 marker 是两套系统：marker 是
+        # 扫频结果的瞬时标注，书签是用户收藏的持久频点，点击药丸直接调谐。
+        self.bookmarks: List[Tuple[float, str, str, float]] = []
         self.show_bookmarks = True
         # ---- 频段彩带（SDR++ bandplan 仿妆；皮进 bandplan.json）----
         self.bandplan: List[Dict[str, object]] = _load_bandplan()
@@ -2006,6 +2006,24 @@ def _draw_bandplan_wf_strip(painter, state, rect):
         painter.drawRect(QRectF(x0, rect.y(), x1 - x0, 4.0))
 
 
+def _bookmark_fields(entry) -> tuple:
+    """书签条目 → ``(freq_hz, name, mode, bandwidth_hz)``。
+
+    兼容旧数据：2 元组 ``(freq, name)`` / 3 元组按缺省 mode=""、bw=0.0 补齐。
+    bw=0.0 表示「未记录带宽」，不是 0 Hz 滤波——点击时不去改设备带宽。
+    """
+    freq_hz = float(entry[0])
+    name = str(entry[1])
+    mode = str(entry[2]) if len(entry) > 2 else ""
+    try:
+        bw = float(entry[3]) if len(entry) > 3 else 0.0
+    except (TypeError, ValueError):
+        bw = 0.0
+    if not math.isfinite(bw) or bw <= 0:
+        bw = 0.0
+    return (freq_hz, name, mode, bw)
+
+
 def _draw_bookmark_tags(painter, state, rect):
     """书签竖旗（gqrx 书签签名）：谱面顶部暗金药丸 + 贯顶虚线。
 
@@ -2025,7 +2043,8 @@ def _draw_bookmark_tags(painter, state, rect):
     fm = painter.fontMetrics()
     painter.setBrush(QBrush(color))
     entries = []
-    for freq_hz, name in state.bookmarks:
+    for freq_hz, name, _mode, _bw in (_bookmark_fields(e)
+                                      for e in state.bookmarks):
         x = rect.x() + (float(freq_hz) - f_left) / span * rect.width()
         if x < rect.x() or x > rect.x() + rect.width():
             continue
@@ -2539,7 +2558,9 @@ class SpectrumPanel(QWidget):
     vfo_selected = Signal(str)                # vfo_id（用户点击设为主听）
     vfo_removed = Signal(str)                 # vfo_id（用户右键删除）
     mode_hotkey_requested = Signal(str)       # 键盘单键切解调（gqrx A/N/W/S/C）
-    bookmark_activated = Signal(float)        # 点击书签竖旗 (freq_hz) → 主窗口调谐
+    bookmark_activated = Signal(float, str, float)
+    # 点击书签竖旗 (freq_hz, mode, bandwidth_hz) → 主窗口调谐；
+    # 与书签面板 tune_requested 同一参数集，主窗口接同一个槽。
 
     def __init__(self, parent=None, prefer_opengl: bool = False):
         super().__init__(parent)
@@ -3211,13 +3232,17 @@ class SpectrumPanel(QWidget):
         self._redraw()
 
     def set_bookmarks(self, bookmarks):
-        """外部批量设置书签标签 [(freq_hz, name), ...]；空列表/None 清空。
+        """外部批量设置书签标签 ``[(freq_hz, name[, mode, bandwidth_hz])]``。
 
-        与 marker 两套系统：书签是用户收藏的持久频点，点击药丸发
-        bookmark_activated 调谐；marker 是扫频瞬时标注。
+        缺省字段容错：旧调用给的 2 元组按 mode=""、bandwidth_hz=0.0 归一化
+        （``mode`` 空时主窗口用当前解调模式；带宽 0 表示未记录，不去改设备）。
+        书签是用户收藏的持久频点，点击药丸发 bookmark_activated 调谐；
+        marker 是扫频瞬时标注，两套系统互不影响。
         """
-        self._state.bookmarks = [
-            (float(hz), str(name)) for hz, name in (bookmarks or [])]
+        normalized = []
+        for item in (bookmarks or []):
+            normalized.append(_bookmark_fields(item))
+        self._state.bookmarks = normalized
         self._redraw()
 
     def clear_markers(self):
@@ -3566,9 +3591,10 @@ class _TuningPlotMixin:
                 return vfo, 'body'
         return None, None
 
-    def _bookmark_tag_at(self, x_px: float):
-        """命中谱面顶部书签药丸 → 返回其 freq_hz；未命中 None。
+    def _bookmark_entry_at(self, x_px: float):
+        """命中谱面顶部书签药丸 → 返回整条 ``(freq, name, mode, bw)``；否则 None。
 
+        点击要用完整条目（模式/带宽一起下发），所以命中判定返回条目本身；
         与 _draw_bookmark_tags 同一几何：±30px 容差，视口外不算。
         """
         state = self.state
@@ -3581,13 +3607,19 @@ class _TuningPlotMixin:
         f_left = view_center - span / 2.0
         best = None
         best_d = 30.0
-        for freq_hz, _name in state.bookmarks:
-            x = (float(freq_hz) - f_left) / span * w
+        for entry in state.bookmarks:
+            entry = _bookmark_fields(entry)
+            x = (float(entry[0]) - f_left) / span * w
             d = abs(x - x_px)
             if d <= best_d:
                 best_d = d
-                best = float(freq_hz)
+                best = entry
         return best
+
+    def _bookmark_tag_at(self, x_px: float):
+        """命中书签药丸 → 返回其 freq_hz；未命中 None（几何见 _bookmark_entry_at）。"""
+        entry = self._bookmark_entry_at(x_px)
+        return float(entry[0]) if entry is not None else None
 
     def _band_at(self, x_px: float) -> Optional[int]:
         """命中频段彩带：返回最窄包含光标频率的频段索引（子带比母带更具体，
@@ -3879,10 +3911,11 @@ class _TuningPlotMixin:
                 # 不进 VFO 拖拽 / 橡皮筋 / 平移。
                 if y <= _BM_TAG_H and not (
                         event.modifiers() & Qt.ShiftModifier):
-                    bm_freq = self._bookmark_tag_at(x)
-                    if bm_freq is not None:
-                        self.state.panel.bookmark_activated.emit(bm_freq)
-                        self._show_tune_tip(f"书签 {bm_freq / 1e6:.4f} MHz")
+                    bm = self._bookmark_entry_at(x)
+                    if bm is not None:
+                        self.state.panel.bookmark_activated.emit(
+                            float(bm[0]), str(bm[2]), float(bm[3]))
+                        self._show_tune_tip(f"书签 {bm[0] / 1e6:.4f} MHz")
                         return
                 # dB 轴热区（左缘竖条）：按住拖动 = 平移量程，不进调谐/VFO；
                 # Ctrl+竖拖 = 以按下处 dB 为锚缩放跨度。
