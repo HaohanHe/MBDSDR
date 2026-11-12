@@ -1,5 +1,6 @@
 # LRPT 第②步：卷积内码 + RS 外码（落地对照）
 
+> 证据状态：E4——本文件数字未逐条绑定原始件/复跑命令，引用前须复核（判据见 docs/evidence-standard.md）。
 > 日期：2026-10-10  作者：MBDSDR 工程轮（phase63）
 > 配套：`weather-sat-digital-study.md`（机制笔记）、`lrpt-step1.md`（第①步解调+同步）
 > 本步范围：Viterbi K7 r1/2 软判决译码 + CCSDS 解扰 + RS(255,223)×4 交织解码。

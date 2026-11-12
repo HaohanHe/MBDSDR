@@ -1,5 +1,6 @@
 # Phase63 — MBDSDR 数值参数边界一致性抽查（只读审计 + 落档）
 
+> 证据状态：E4——本文件数字未逐条绑定原始件/复跑命令，引用前须复核（判据见 docs/evidence-standard.md）。
 - **HEAD**: `9950cf8`（审计前后未变）
 - **仓库根**: `/path/to/MBDSDR/MBDSDR`
 - **范围**: 47 工具三通道（Agent / ControlHub / HTTP）中的 **6 个数值类工具**，聚焦「越界/非法参数在三通道是 clamp 还是拒绝」的一致性。

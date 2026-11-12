@@ -1,5 +1,6 @@
 # Phase63 · 调谐历史（最近频率快速回跳）+ 频率单位格式化收口
 
+> 证据状态：E4——本文件数字未逐条绑定原始件/复跑命令，引用前须复核（判据见 docs/evidence-standard.md）。
 - 仓库 HEAD：`8dfcaa1`；全程 offscreen（`QT_QPA_PLATFORM=offscreen`，
   `LD_LIBRARY_PATH=/home/user/Qt/6.8.2/gcc_64/lib`），未操控 GUI，未 git add/commit/push。
 - 数据源：只接真实回读；无历史时如实显示"无调谐记录"；零 mock。

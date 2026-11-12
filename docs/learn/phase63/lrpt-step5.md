@@ -1,5 +1,6 @@
 # LRPT 线 A 第⑤轮：QPSK 前段 C++ 移植（IQ→CADU 全链闭环）
 
+> 证据状态：E4——本文件数字未逐条绑定原始件/复跑命令，引用前须复核（判据见 docs/evidence-standard.md）。
 HEAD=f7e7874。独立实现 MIT，规范 `mbdsdr_ai/lrpt_modem.py` + `lrpt_pipeline.py`。
 
 ## 1. 落地 file:line

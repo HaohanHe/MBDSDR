@@ -1,5 +1,6 @@
 # NanoVNA 第②轮·线 A：C++ VNA 状态层 + 三通道工具
 
+> 证据状态：E4——本文件数字未逐条绑定原始件/复跑命令，引用前须复核（判据见 docs/evidence-standard.md）。
 > HEAD=b312abc 起。本轮在 C++ 侧建 NanoVNA 独立实现客户端 + 状态层，并接三通道工具
 > （`set_vna_sweep`/`get_vna_data`/`get_vna_status`）。**不做 UI tab（线 B 另一 agent 做，未碰 main_window）**。
 > 协议事实学自公开上游（ttrftech/NanoVNA 固件、nanovna-saver）的机制（命令字/数据格式/提示符时序），

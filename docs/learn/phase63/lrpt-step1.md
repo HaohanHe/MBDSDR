@@ -1,5 +1,6 @@
 # LRPT 第①步：QPSK 解调 + 帧同步（落地对照）
 
+> 证据状态：E4——本文件数字未逐条绑定原始件/复跑命令，引用前须复核（判据见 docs/evidence-standard.md）。
 > 日期：2026-10-10  作者：MBDSDR 工程轮（phase63）
 > 配套：`weather-sat-digital-study.md`（机制学习）、`weather-sat-landing-path.md`（落地路径）
 > 本步范围：Python 原型——QPSK 复基带合成 + 解调 + 64-bit 帧同步；**不做 Viterbi/RS**（第②步）。

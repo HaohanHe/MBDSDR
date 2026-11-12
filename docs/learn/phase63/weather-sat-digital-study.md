@@ -1,5 +1,6 @@
 # 气象卫星数字云图机制学习笔记（LRPT / HRPT / LRIT-HRIT，独立实现）
 
+> 证据状态：E4——本文件数字未逐条绑定原始件/复跑命令，引用前须复核（判据见 docs/evidence-standard.md）。
 > 日期：2026-10-10  作者：MBDSDR 工程轮（phase63）
 > 仓库：MBDSDR（MIT）
 > 学习源（均为 GPL/AGPL，只读机制，不抄代码）：

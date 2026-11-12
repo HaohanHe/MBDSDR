@@ -1,5 +1,6 @@
 # LRPT 第③步：端到端 IQ 闭环（落地对照）
 
+> 证据状态：E4——本文件数字未逐条绑定原始件/复跑命令，引用前须复核（判据见 docs/evidence-standard.md）。
 > 日期：2026-10-10  作者：MBDSDR 工程轮（phase63）
 > 配套：`lrpt-step1.md`（解调+帧同步）、`lrpt-step2.md`（Viterbi+RS）
 > 本步范围：端到端 IQ 管道串联——合成 → 传输 → 解调 → Viterbi → RS → payload 校验。

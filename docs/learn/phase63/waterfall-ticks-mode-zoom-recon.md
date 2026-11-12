@@ -1,5 +1,6 @@
 # Phase63 — Waterfall 时间轴刻度 / 解调模式快捷切换 / 频谱-瀑布联动缩放 复核
 
+> 证据状态：E4——本文件数字未逐条绑定原始件/复跑命令，引用前须复核（判据见 docs/evidence-standard.md）。
 HEAD = `abf5cc4`。只读复核轮（不改码）。全程 CLI/offscreen
 （`QT_QPA_PLATFORM=offscreen`，`LD_LIBRARY_PATH=/home/user/Qt/6.8.2/gcc_64/lib`），零 GUI
 操控、零 mock，真实数据源 + 诚实空态。三候选先侦察核实，预期均非缺口，本轮给证据定案，

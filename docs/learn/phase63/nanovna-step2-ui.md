@@ -1,5 +1,6 @@
 # NanoVNA 第②轮·线 B：仪器 tab + VNA 面板 + 三档快照
 
+> 证据状态：E4——本文件数字未逐条绑定原始件/复跑命令，引用前须复核（判据见 docs/evidence-standard.md）。
 > 范围：把线 A 的 `vna::NanoVnaClient` 接到桌面右栏「仪器」tab；真实串口连接流程；
 > S11(VSWR)/S21(增益) 最小可视化；MBD_VNASHOT 三档快照。纯 UI/测试层，
 > 不碰 `cpp/*` 冻结面之外的既有逻辑、不改 tool_schema/agent_tools/control_hub。

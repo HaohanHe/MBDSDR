@@ -1,5 +1,6 @@
 # Phase63 · RX 统计与冻结机制三候选侦察（只读）
 
+> 证据状态：E4——本文件数字未逐条绑定原始件/复跑命令，引用前须复核（判据见 docs/evidence-standard.md）。
 - 仓库 HEAD：`6a7ad7b`（与题面一致；侦察全程未改动任何跟踪文件）。
 - 范围：三候选逐项侦察判定，**本轮不落地改码**；产出供主 agent 冻结下一轮规格。
 - 方法：源码 `Read`/`grep` 取证 + 既有 harness `cpp/tests/ui_screenshot_narrow.cpp`（offscreen，`LD_LIBRARY_PATH=/home/user/Qt/6.8.2/gcc_64/lib`，`QT_QPA_PLATFORM=offscreen`，增量构建 `ui_shot_narrow`）拍快照并逐图 `Read` 核查。未跟踪文件 `cpp/tests/ui_diag_freeze.cpp` 未触碰。
