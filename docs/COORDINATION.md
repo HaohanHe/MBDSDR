@@ -2257,6 +2257,83 @@ No supported devices found），GNSS+SDR 同开复验没做成；离线那次
 - 守门：`tests/test_ai_sdr_single_authority.py`（10 条，含「桌面返回 True
   但未生效 → 委托必须报失败」「解析不到窗口 → 显式拒绝」）。
 
+### 6.1.5 等待项收口：设备占用登记（2026-11-12）
+
+> 背景：原报告称 `a4c4a0d5` 已落「`_ACTIVE_OWNER` + 占用 API」，实测该对象
+> 在仓库里不存在（`git cat-file -t` 失败；`git log --all -S'_ACTIVE_OWNER'`
+> 零命中；341 个 unreachable commit 里也没有任何一棵树含该符号；全盘 37 份
+> `sdr_backend.py` 副本同样零命中）。判定为「报告与实际不符」，本次重做，
+> 不是回退事故，`--intent-delete` 无关。
+
+- 已落（AI 侧 `mbdsdr_ai/sdr_backend.py`，`5957e3d6`）：
+  - 登记表落在 `~/.mbdsdr/device_owner.json`（`MBDSDR_OWNER_REGISTRY` 可改，
+    测试用 `tmp_path`），加锁 + 原子替换；
+  - 判活口径 **pid + 进程启动时间**（Windows 用 `GetExitCodeProcess`，
+    已退出但句柄仍被 Popen 持有的进程不能算活着；启动时间防 pid 复用）；
+  - **判活三态**：只有 `ERROR_INVALID_PARAMETER(87)` 判死，`ACCESS_DENIED(5)`
+    等一律 `unknown` 按活着处理（「查不到」≠「不存在」，误清活记录会让两个
+    进程同抢一根棒）；
+  - `release_stale_owners()` 在 `claim/get` 之前先清失效记录——不靠 TTL，
+    持有者被杀后下一位申请者**立即**能占用；
+  - `SDRBackendManager._activate` 先 claim 再碰硬件；`disconnect` /
+    跨设备切换 / 切到 IQ 文件时释放；连接失败回滚占用；
+  - atexit 兜底释放本进程登记（正常 teardown 走 `disconnect`）。
+- 已落（身份键统一，`9c63a91b`）：
+  - 身份键实现只有一份（`device_identity_key` / `resolve_device_identities`，
+    `driver|serial:` > `uri:` > `driver|index:` > `driver|label:`，撞键按指纹
+    排序加 `#n`）；桌面 `connect_request_store` 直接委托，不再各写一套；
+  - AI `_discover` 改为 `enumerate_all_sdr_devices()` 驱动（键必须对整份枚举
+    算），并删掉「装了库就登记一台 HackRF/USRP」的假设备；
+  - **别名匹配**（真机端到端逼出来的）：设备被占用时枚举读不到 serial
+    （libusb 打不开），竞争者只能算出 `rtlsdr|index:0`，而持有者登记在
+    `rtlsdr|serial:…`；登记带 `aliases`，claim/get/release 任一命中即视为
+    同一台设备。不这么做，「桌面端占着 → AI 被拒」在真实占用下直接失效
+    （实测 AI 越过登记去 open，拿到 `LIBUSB_ERROR_ACCESS`）。
+- 已落（桌面侧 `device_panel`，`14b9d819`）：连接前
+  `claim_active_owner("desktop", key)`，被占用时拒绝发起连接并原样显示
+  「谁占着、pid、下一步做什么」；连不上当场释放、断开释放，模块面板发起的
+  连接在 `set_connected(True)` 补登记。
+- 端到端验收（真机 RTL-SDR #0 FC0012，跨进程 + 真实登记表）：
+  桌面连上 → AI 子进程被拒且写明「设备 `rtlsdr|serial:77771111153705700`
+  当前由桌面端占用（pid 29008，进程仍在运行）……」；桌面断开 → AI 连上。
+  脚本输出 `E2E_PASS`。
+- 顺带修掉的测试空转（`9c63a91b`）：`test_full_integration{,_v2}` 里把
+  `device_id` 写死 `rtl_0`、连不上就 `pytest.skip` —— 换 id 后必然 skip，
+  用例是绿的、整条 SDR 工具链空转。现改为从 `sdr_list_devices` 取第一个
+  id，**只有枚举为空才 skip**；枚举失败 / 条目缺 `device_id` / 枚举到却连不上
+  必须红（`tests/sdr_toolchain.py`）。反证：写死 `rtl_0` 时 8 条契约用例
+  7 条红，不是 skip。
+- 全仓 `pytest.skip` 判据（2026-11-12 清点）：`tests/` + `mbdsdr_ai/tests/`
+  共 **76 处、45 个文件**；其中依赖真实硬件/枚举的 **14 处**（音频设备 4、
+  `rtl_tcp` env/服务 4、本机无 RTL 1、枚举为空 1、屏幕宽度 2、音频 start 1、
+  SatDump 环境 1）。另有 2 处属「依赖缺失」型静默跳过
+  （`test_no_sim_regression` 的 MainWindow 导入/实例化），不属硬件但同病，
+  留给该线。**判据：拿不到硬件可以 skip；拿不到 id / 接口契约变了必须红。**
+- 守门：`tests/test_device_owner_lock.py` 21 条、`test_connect_request_store.py`
+  跨侧键一致性 2 条、`tests/sdr_toolchain.py` 契约 8 条、`device_panel`
+  占用登记 4 条。反证逐条见各提交说明。
+- 平台实测坑（单独记一条）：**Windows 上进程被杀后，只要 Popen 句柄没关，
+  `OpenProcess` + `GetProcessTimes` 仍然成功并返回原值**——「看起来最权威
+  的 API」在这里给的是错答案。必须再查 `GetExitCodeProcess` 且等于
+  `STILL_ACTIVE(259)` 才算活着。另外 ctypes 必须给私有 `WinDLL` 设
+  `argtypes`/`restype`，否则 64 位 HANDLE 被按 int 截断，判活永远失败。
+
+### 流程规则：已提交的报告必须自带可验证凭据（2026-11-12）
+
+任何「已提交 / 已落库」的报告，必须附**能被别人独立验证**的凭据：
+
+- 最低要求：提交号能被 `git cat-file -t <sha>` 取到（输出 `commit`）；
+- 更好：附 `git show --stat <sha>` 的头两行（提交摘要 + 改动文件）。
+
+**理由**：2026-11-12 出现过一次「报告了一笔并不存在的提交 `a4c4a0d5`」。
+`git cat-file -t` 当场失败，`git log --all -S'_ACTIVE_OWNER'` 零命中，341 个
+unreachable commit 逐棵读也没有——它从未落地。而后续判断（包括「是不是被
+某笔提交卷掉了」这种排查方向）差点全部建立在空上。只惩罚人不解决问题：
+让凭据本身可验证，下一个人一条命令就能证伪，比「下次注意」有用。
+
+**适用范围**：本台账每条结论、每次交接、每份对外报告。取不到的 hash 一律
+写成「未落地」，不许写成「已提交但找不到」。
+
 ### 6.2 共享文件清单（今天实际撞过的）
 
 - `desktop/main_window.py`
