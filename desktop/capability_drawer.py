@@ -36,16 +36,21 @@ class CapabilityDrawer(QWidget):
         self._host = host
         self.setObjectName("capabilityDrawer")
         self.setAttribute(Qt.WA_StyledBackground, True)
+        # 岛内单元格的边框是它**唯一**的可见轮廓（单元格填充 0.045 白叠在
+        # 面板上只有 1.13:1），所以按 WCAG 1.4.11 对底 ≥3:1：0.18 → 0.50
+        # （合成 #687280，对面板 3.39 / 对单元格自身填充 3.18），悬停 0.70
+        # （4.85）。面板底固定 rgba(14,17,24,0.94)，最坏（浅色 app 底）合成
+        # #1C1F25，见 tests/test_ui_contrast.py 的同名门禁。
         self.setStyleSheet(
             "background-color: rgba(14,17,24,0.94);"
             "QScrollArea { background: transparent; }"
             "QScrollArea > QWidget > QWidget { background: transparent; }"
             "QToolButton#capCell { text-align: left; padding: 8px 10px;"
             " background-color: rgba(255,255,255,0.045);"
-            " color: #E4EAF4; border: 1px solid rgba(180,196,220,0.18);"
+            " color: #E4EAF4; border: 1px solid rgba(180,196,220,0.50);"
             " border-radius: 10px; font-size: 11px; }"
             "QToolButton#capCell:hover { background-color: rgba(255,255,255,0.12);"
-            " border-color: rgba(180,196,220,0.45); }"
+            " border-color: rgba(180,196,220,0.70); }"
             "QLabel#capHint { color: #9AA8BC; font-size: 10px; }")
 
         root = QVBoxLayout(self)

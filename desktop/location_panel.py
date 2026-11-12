@@ -68,6 +68,11 @@ __all__ = ["LocationPanel"]
 _BG = "#14161c"
 _PANEL = "#1b1e26"
 _LINE = "#333845"
+# 2026-11-12 WCAG 1.4.11（非文本 3:1）：_LINE 是分层用的细线（面板框、
+# 禁用按钮底），作**控件边界**只有 1.42:1——输入框/列表/按钮的填充与面板
+# 几乎同色，描边看不见就等于控件不存在。控件边界另取 _EDGE：对面板
+# 3.45、对页底 3.75，色相沿用同一族冷灰。
+_EDGE = "#6A7284"
 _TEXT = "#e8eaf0"
 _DIM = "#8f95a3"
 
@@ -452,7 +457,10 @@ class LocationPanel(QFrame):
             "QListWidget { background: %s; color: #d8deea;"
             " border: 1px solid %s; border-radius: 7px; padding: 3px; }"
             "QListWidget::item { padding: 4px 6px; border-radius: 5px; }"
-            "QListWidget::item:selected { background: rgba(90,140,255,0.35);"
+            # 选中行没有第二线索（文字色只从 #d8deea 变 #ffffff），选中态
+            # 全靠这块底：0.35 叠出来只有 1.75:1，按 WCAG 1.4.11 提到 0.70
+            # （合成 #476BBE，对未选中底 3.26:1）。
+            "QListWidget::item:selected { background: rgba(90,140,255,0.70);"
             " color: #ffffff; }"
             "QPushButton { background: %s; color: #d3d7e0;"
             " border: 1px solid %s; border-radius: 7px; padding: 5px 12px; }"
@@ -465,8 +473,8 @@ class LocationPanel(QFrame):
             "QPushButton#lpGo:disabled { background: %s; border-color: %s;"
             " color: #5b6478; }"
             "QPushButton#lpMapTool { padding: 1px 8px; font-size: 12px; }"
-            % (_BG, _LINE, _TEXT, _DIM, _TEXT, _PANEL, _TEXT, _LINE,
-               _PANEL, _LINE, _PANEL, _LINE, _PANEL, _LINE))
+            % (_BG, _LINE, _TEXT, _DIM, _TEXT, _PANEL, _TEXT, _EDGE,
+               _PANEL, _EDGE, _PANEL, _EDGE, _PANEL, _LINE))
 
     # ------------------------------------------------------------- 对外 API
     def set_current(self, lat: Optional[float], lon: Optional[float],

@@ -157,7 +157,13 @@ class DesignTokens:
                 "text": "#4F6B79",
                 "text_secondary": "#5F707A",
                 "text_disabled": "#A0A0A0",
-                "border": "#C8C0B4", "grid": "#D8D2C8",
+                # 2026-11-12 WCAG 1.4.11（非文本 3:1）：border 是 Mid，承载
+                # 输入框/勾选框/单选框/下拉框的**唯一**边界（这些控件填充与
+                # 底色差 1.0–1.1，描边看不见就等于控件不存在）。原 #C8C0B4
+                # on card 只有 1.80:1。沿明度压暗、色相不动，到四邻面
+                # （card/bg/bg_alt/button）均 ≥3.0（最差 3.01）。
+                # 代价：卡片/分组框描边一并变深——它们不是识别手段，可接受。
+                "border": "#918B82", "grid": "#D8D2C8",
                 # 2026-11-09 WCAG 审计：强调色 2.79、成功色 2.46 都低于
                 # 非文本可辨门槛 3:1（图标/描边/状态点用它们时看不见边界）。
                 # 按同色相压暗到 3.10 / 3.05，色相与饱和度不动。
@@ -182,7 +188,10 @@ class DesignTokens:
                 "text_disabled": "#555555",
                 # 2026-11-09 WCAG 审计：卡片描边 1.30 低于"能看出边界"的 1.5。
                 # 提到 #44444A（on card 1.52 / on bg 1.72），明暗关系不变。
-                "border": "#44444A", "grid": "#44444A",
+                # 2026-11-12：按 WCAG 1.4.11 再提到 3:1——#44444A 作控件边界
+                # 只有 1.52（card）/1.30（button），勾选框描边在深底上几乎不见。
+                # 沿明度提亮到四邻面均 ≥3.0（最差 3.03）。
+                "border": "#7D7D81", "grid": "#44444A",
                 "primary": "#7A9CAC", "accent": "#D4956A",
                 "accent_hover": "#C4845C",
                 "success": "#6BA89A", "danger": "#D47070",
@@ -216,7 +225,9 @@ class DesignTokens:
                 "bg": "#000000", "bg_alt": "#1f1f1f", "card": "#2b2c2f",
                 "text": "#ffffff", "text_secondary": "#c7c7c7",
                 "text_disabled": "#666666",
-                "border": "#585c63", "grid": "#35373c",
+                # 2026-11-12：控件边界按 WCAG 1.4.11 提到 3:1（原 #585c63
+                # on card 2.08 / on button 1.77），沿明度提亮，色相不动。
+                "border": "#7E8186", "grid": "#35373c",
                 "primary": "#919cac", "accent": "#919cac",
                 "accent_hover": "#a8b3c2",
                 "success": "#6BA89A", "danger": "#B85C5C",
@@ -235,7 +246,9 @@ class DesignTokens:
                 # 0.78 白叠在 #1f1f1f 上的等效实色；10.58:1
                 "text_secondary": "#CFCFCF",
                 "text_disabled": "#707070",   # 0.3 白叠卡底（禁用态豁免）
-                "border": "#404040", "grid": "#2C2C2C",
+                # 2026-11-12：控件边界按 WCAG 1.4.11 提到 3:1（原 #404040
+                # on card 1.59 / on button 1.35），沿明度提亮，色相不动。
+                "border": "#757575", "grid": "#2C2C2C",
                 "primary": "#D9D9D9",         # 导出稿的占位灰语法
                 "accent": "#D9D9D9",
                 "accent_hover": "#E6E6E6",

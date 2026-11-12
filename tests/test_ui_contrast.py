@@ -341,3 +341,141 @@ def test_ai_panel_header_follows_theme():
             ratio = contrast_ratio(fg, bg)
             assert ratio >= 4.5, (
                 f"{theme}/{label}: {fg} on {bg} = {ratio:.2f} < 4.5")
+
+
+# ---------------------------------------------------------------- 非文本 3:1
+#
+# 2026-11-12 非文本普查（WCAG 1.4.11，门槛 3:1）的口径：
+#   ② 信息承载（本段逐条门禁）：控件边界 border（输入框/勾选框/单选框/
+#      下拉框的唯一轮廓）、焦点环、单选选中圆点、能力抽屉单元格边框、
+#      定位面板输入/列表/按钮边界与列表选中底色。
+#   ③ 状态指示：单选选中、列表选中（与 ② 重叠，按"状态"这一面计入）。
+#   ① 纯装饰（不进结论）：卡片/分组框/工具栏/状态栏的 1px 描边（内容分组
+#      靠布局与底色已能读出）、按钮填充 vs 页底（按钮靠文字标签识别，
+#      WCAG 明确豁免有文字标签的控件边界）、浮动面板外框、滑动条轨道
+#      （轨道提到 3:1 会迫使手柄只能取近黑/近白，属重排配色，另行立项）。
+_NON_TEXT_SURFACES = ("card", "bg", "bg_alt", "button")
+
+
+@pytest.mark.parametrize("theme", _ALL)
+def test_control_outline_meets_non_text_contrast(theme):
+    """控件边界（border = QPalette::Mid）对四个相邻面都 ≥3:1。
+
+    这些控件的填充与底色的对比只有 1.0–1.2（QLineEdit/勾选框填 button 或
+    card），描边是**唯一**能看出控件存在的信息，按 1.4.11 必须 3:1。
+    改造前实测（border on card，括号内为 on button）：default 1.80(1.80)、
+    dark 1.52(1.30)、dark_car 2.08(1.77)、figma 1.59(1.35)；改后最差
+    3.03（figma on button）。
+
+    反证：把任一套主题的 border 改回上述旧值 → 本用例必红。
+    """
+    c = tokens().theme_colors(theme)
+    for surface in _NON_TEXT_SURFACES:
+        ratio = contrast_ratio(c["border"], c[surface])
+        assert ratio >= 3.0, (
+            f"{theme}: border {c['border']} on {surface} {c[surface]} "
+            f"= {ratio:.2f} < 3.0（控件边界看不见）")
+
+
+def test_focus_ring_meets_non_text_contrast():
+    """焦点环用 palette(link)（= primary_text），五套主题 ≥3:1。
+
+    改造前用 palette(highlight)：default 对页底只有 2.79:1——焦点框比
+    未聚焦描边还淡。primary_text 对 card/bg/bg_alt 均 ≥4.67。
+
+    反证：把 QSS 里任一条 ``:focus`` 改回 palette(highlight) → 必红。
+    """
+    from themes import THEMES
+
+    qss = THEMES["default"]._qss()
+    blocks = re.findall(r"[^{}]*:focus[^{}]*\{([^}]*)\}", qss)
+    assert blocks, "QSS 里找不到 :focus 规则（选择器改名？）"
+    for block in blocks:
+        assert "palette(link)" in block, (
+            f"焦点环没走 palette(link)：{block!r}")
+        assert "palette(highlight)" not in block, (
+            f"焦点环又用回 highlight（default 仅 2.79:1）：{block!r}")
+
+    for theme in _ALL:
+        c = tokens().theme_colors(theme)
+        for surface in _NON_TEXT_SURFACES:
+            ratio = contrast_ratio(c["primary_text"], c[surface])
+            assert ratio >= 3.0, (
+                f"{theme}: 焦点环 {c['primary_text']} on {surface} "
+                f"{c[surface]} = {ratio:.2f} < 3.0")
+
+
+def test_radio_checked_uses_gated_role():
+    """单选选中圆点没有第二线索（无对勾），圆点自身必须 ≥3:1。"""
+    from themes import THEMES
+
+    qss = THEMES["default"]._qss()
+    match = re.search(r"QRadioButton::indicator:checked\s*\{([^}]*)\}", qss)
+    assert match, "QRadioButton::indicator:checked 规则不见了"
+    block = match.group(1)
+    assert "palette(link)" in block, (
+        f"单选选中态没走 palette(link)（highlight 在 default 只有 2.79:1）：{block!r}")
+
+
+def _composite(fg: str, alpha: float, bg: str) -> str:
+    """把半透明前景按 alpha 合成到 bg 上（WCAG 判对比度前必须先合成）。"""
+    f = [int(fg.lstrip("#")[i:i + 2], 16) for i in (0, 2, 4)]
+    b = [int(bg.lstrip("#")[i:i + 2], 16) for i in (0, 2, 4)]
+    return "#%02X%02X%02X" % tuple(
+        round(alpha * f[i] + (1 - alpha) * b[i]) for i in range(3))
+
+
+def _read_source(rel: str) -> str:
+    with open(os.path.join(_ROOT, "desktop", rel), encoding="utf-8") as fh:
+        return fh.read()
+
+
+def test_capability_cell_outline_meets_non_text_contrast():
+    """能力抽屉单元格的边框 ≥3:1（单元格填充只有 1.13:1，边框是唯一轮廓）。
+
+    面板底 rgba(14,17,24,0.94) 最坏叠在浅色 app 底 #F5F3EF 上 → #1C1F25；
+    单元格自身填充 rgba(255,255,255,0.045) → #26292F（更亮，取更严的那个）。
+    反证：把边框 alpha 改回 0.18（合成 #373D46，1.51:1）→ 必红。
+    """
+    src = _read_source("capability_drawer.py")
+    alphas = [float(a) for a in re.findall(
+        r"rgba\(180,196,220,([0-9.]+)\)", src)]
+    assert len(alphas) >= 2, f"单元格边框没找到两档 alpha：{alphas}"
+    panel = _composite("#0E1118", 0.94, "#F5F3EF")
+    cell = _composite("#FFFFFF", 0.045, panel)
+    for alpha in alphas:
+        for bg, label in ((panel, "面板底"), (cell, "单元格填充")):
+            color = _composite("#B4C4DC", alpha, bg)
+            ratio = contrast_ratio(color, bg)
+            assert ratio >= 3.0, (
+                f"能力抽屉单元格边框 alpha={alpha} on {label} "
+                f"= {ratio:.2f} < 3.0")
+
+
+def test_location_panel_control_edges_meet_non_text_contrast():
+    """定位面板（固定深底 Qt.Tool）的控件边界与选中底色 ≥3:1。
+
+    输入框/列表/按钮填 _PANEL(#1b1e26) 或 _BG(#14161c)，与描边 _LINE
+    (#333845) 只差 1.42:1；选中行没有第二线索，选中底 0.35 叠出来只
+    1.75:1。现取 _EDGE(#6A7284) 与选中 alpha 0.70。
+    反证：控件边界改回 _LINE / 选中 alpha 改回 0.35 → 必红。
+    """
+    src = _read_source("location_panel.py")
+    consts = dict(re.findall(r'^(_[A-Z]+) = "(#[0-9A-Fa-f]{6})"', src, re.M))
+    for key in ("_BG", "_PANEL", "_LINE", "_EDGE"):
+        assert key in consts, f"location_panel 缺常量 {key}"
+    for surface in ("_PANEL", "_BG"):
+        ratio = contrast_ratio(consts["_EDGE"], consts[surface])
+        assert ratio >= 3.0, (
+            f"定位面板控件边界 {consts['_EDGE']} on {surface} "
+            f"{consts[surface]} = {ratio:.2f} < 3.0")
+
+    alphas = [float(a) for a in re.findall(
+        r"QListWidget::item:selected \{ background: rgba\(90,140,255,([0-9.]+)\)", src)]
+    assert alphas, "定位面板列表选中底色没找到"
+    for alpha in alphas:
+        color = _composite("#5A8CFF", alpha, consts["_PANEL"])
+        ratio = contrast_ratio(color, consts["_PANEL"])
+        assert ratio >= 3.0, (
+            f"列表选中底 alpha={alpha} 合成 {color} 对未选中底 "
+            f"= {ratio:.2f} < 3.0")

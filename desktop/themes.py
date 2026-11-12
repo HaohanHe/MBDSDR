@@ -539,10 +539,13 @@ def _control_coverage_qss() -> str:
            圆点必须与 button 底色形成对比，而 button 底在浅色主题是白、深色
            主题是 #2c–#35 灰，没有任何一个定色能在两边都看清（实测最低
            3.02:1）；位图颜色又不能随主题变（见文件顶部的图标说明）。
-           实心圆的颜色由 palette(highlight) 供给，天然跟主题走。 */
+           颜色取 palette(link)（= primary_text）而不是 highlight：单选的
+           **状态就是这块圆点本身**，没有对勾之类第二线索，所以圆点对底色
+           必须自己达到 WCAG 1.4.11 的 3:1——highlight 在 default 只有
+           2.79:1，primary_text 五套主题均 ≥4.67:1。 */
         QRadioButton::indicator:checked {{
-            border: 1px solid palette(highlight);
-            background-color: palette(highlight);
+            border: 1px solid palette(link);
+            background-color: palette(link);
         }}
         QRadioButton::indicator:disabled {{
             border-color: palette(midlight);
@@ -936,8 +939,13 @@ class Theme:
             padding: 7px 12px;
             font-size: {qss_font_size(10)};
         }}
+        /* 焦点环取 palette(link)（= primary_text）而不是 palette(highlight)：
+           highlight 在 default 主题对页底只有 2.79:1，低于 WCAG 1.4.11 的
+           非文本 3:1——焦点框比未聚焦描边还淡。primary_text 五套主题对
+           card/bg/bg_alt 均 ≥4.67:1，门禁见 tests/test_ui_contrast.py 的
+           test_focus_ring_meets_non_text_contrast。 */
         QLineEdit:focus {{
-            border-color: palette(highlight);
+            border-color: palette(link);
         }}
         QTextEdit, QPlainTextEdit {{
             background-color: palette(base);
@@ -1049,7 +1057,7 @@ class Theme:
             font-size: {qss_font_size(10)};
         }}
         QSpinBox:focus, QDoubleSpinBox:focus {{
-            border-color: palette(highlight);
+            border-color: palette(link);
         }}
         QSpinBox::up-button, QSpinBox::down-button,
         QDoubleSpinBox::up-button, QDoubleSpinBox::down-button {{
