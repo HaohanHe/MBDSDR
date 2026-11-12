@@ -37,11 +37,15 @@ import errno
 import json
 import logging
 import os
+import shutil
+import time
 import wave as _wave
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
 import numpy as np
+
+from .corrupt_evidence import REASON_SUFFIX, write_reason
 
 logger = logging.getLogger(__name__)
 
@@ -352,17 +356,94 @@ def inspect_recording(data_path: str) -> Dict[str, Any]:
     return out
 
 
+class MetaRecoveryAborted(RuntimeError):
+    """恢复中止：无法在覆盖前安全留证（或 meta 存在但不可读）。
+
+    恢复流程会重写 ``.sigmf-meta``；如果损坏原件备份不下来还继续写，
+    就等于用“恢复”这个动作销毁唯一的原始元数据。此时必须中止并让调用方
+    把原因显示给用户，而不是返回一个会被当成“数据字节不完整”的 None。
+    """
+
+
+def _same_content_backup(path: str) -> Optional[str]:
+    """同目录下是否已有一份与当前文件字节相同的 ``*.corrupt-*`` 备份。"""
+    directory = os.path.dirname(os.path.abspath(path))
+    prefix = os.path.basename(path) + ".corrupt-"
+    try:
+        names = sorted(
+            (n for n in os.listdir(directory)
+             if n.startswith(prefix) and not n.endswith(REASON_SUFFIX)),
+            reverse=True)
+        if not names:
+            return None
+        candidate = os.path.join(directory, names[0])
+        if os.path.getsize(candidate) != os.path.getsize(path):
+            return None
+        with open(candidate, "rb") as a, open(path, "rb") as b:
+            return candidate if a.read() == b.read() else None
+    except OSError:
+        return None
+
+
+def _backup_corrupt_meta(path: str, reason: str) -> Optional[str]:
+    """把损坏的 meta 复制成 ``*.corrupt-<时间戳>`` 并写理由。
+
+    复制而非改名：原文件留到原子替换那一步，用户中途取消也不会少一个文件。
+    返回备份路径；备份失败返回 None（调用方必须据此中止恢复）。
+    """
+    dst = _same_content_backup(path)
+    if dst is None:
+        stamp = time.strftime("%Y%m%d-%H%M%S")
+        dst = f"{path}.corrupt-{stamp}"
+        n = 0
+        while os.path.exists(dst):
+            n += 1
+            dst = f"{path}.corrupt-{stamp}-{n}"
+        try:
+            shutil.copy2(path, dst)
+        except OSError:
+            return None
+    write_reason(dst, reason, logger)
+    return dst
+
+
 def recover_recording_meta(data_path: str, sample_rate_hz: float = 0.0,
                            center_freq_hz: float = 0.0) -> Optional[str]:
     """为录制中断留下的孤立数据文件补写诚实的 meta（complete=false）。
 
     只在数据字节完整（8 的整数倍、非空）时执行；无法判定则返回 None。
     采样率未知时写 0 并在 meta 中标注 unknown，绝不编造一个速率。
+
+    若已有 meta 但损坏：先复制一份 ``*.corrupt-*``（理由里注明“恢复流程
+    触发，不是用户删除”）再重建；**备份失败则抛**
+    :class:`MetaRecoveryAborted`，绝不“没留证也照样重建”。
     """
     info = inspect_recording(data_path)
     if info["integrity"] not in ("missing-meta", "meta-corrupt"):
         return None
     paths = _sigmf_paths(data_path)
+    if info["integrity"] == "meta-corrupt":
+        meta_path = paths["meta"]
+        try:
+            with open(meta_path, "r", encoding="utf-8") as f:
+                json.load(f)
+        except FileNotFoundError:
+            pass                      # 竞态：判损坏后刚被删，等同没有 meta
+        except OSError as exc:
+            # 三分法：OSError 不是“内容损坏”，读不了就不写、不改名。
+            raise MetaRecoveryAborted(
+                f"恢复中止：meta 存在但不可读（{type(exc).__name__}: {exc}）："
+                f"{meta_path}；不覆盖无法读取的文件") from exc
+        except (json.JSONDecodeError, UnicodeDecodeError, ValueError) as exc:
+            reason = (f"{meta_path}：恢复流程触发（不是用户删除）："
+                      f"inspect 判定 meta 损坏（{type(exc).__name__}: {exc}）；"
+                      "重建前已复制原件留证")
+            backup = _backup_corrupt_meta(meta_path, reason)
+            if backup is None:
+                raise MetaRecoveryAborted(
+                    f"恢复中止：损坏 meta 备份失败（{meta_path}）；"
+                    "不重建，以免用恢复动作销毁唯一原始元数据") from exc
+            logger.warning("恢复流程：损坏 meta 已备份到 %s，继续重建", backup)
     n = int(info["samples_on_disk"])
     meta: Dict[str, Any] = {
         "global": {

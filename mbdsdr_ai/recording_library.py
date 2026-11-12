@@ -39,7 +39,8 @@ from datetime import datetime, timezone
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from .error_catalog import user_message
-from .recorder import inspect_recording, recover_recording_meta
+from .recorder import (
+    MetaRecoveryAborted, inspect_recording, recover_recording_meta)
 from .recording_meta import metadata_for_display, read_sigmf_meta, sigmf_meta_path
 
 logger = logging.getLogger(__name__)
@@ -1688,10 +1689,18 @@ class RecordingLibrary:
                 else:
                     unknown_fields.append("start_time")
 
-                meta_path = recover_recording_meta(
-                    abs_path, sample_rate_hz=float(sr or 0.0),
-                    center_freq_hz=float(cf or 0.0),
-                )
+                try:
+                    meta_path = recover_recording_meta(
+                        abs_path, sample_rate_hz=float(sr or 0.0),
+                        center_freq_hz=float(cf or 0.0),
+                    )
+                except MetaRecoveryAborted as exc:
+                    # 有损坏 meta 但无法留证：中止恢复并原样告知，
+                    # 不能伪装成“数据字节不完整”。
+                    return LibraryResult(
+                        False, "meta_recovery_aborted", str(exc),
+                        {"integrity": integrity, "data_path": abs_path},
+                    )
                 if not meta_path:
                     return LibraryResult(
                         False, "unrecoverable",

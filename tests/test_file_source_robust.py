@@ -13,9 +13,10 @@ import numpy as np
 import pytest
 
 from mbdsdr_ai import playback
+from mbdsdr_ai import recorder as recorder_mod
 from mbdsdr_ai.playback import IQPlayback, PlaybackSource
-from mbdsdr_ai.recorder import (IQRecorder, inspect_recording,
-                                recover_recording_meta)
+from mbdsdr_ai.recorder import (IQRecorder, MetaRecoveryAborted,
+                                inspect_recording, recover_recording_meta)
 
 
 def _write_sigmf(root: str, values: np.ndarray,
@@ -292,6 +293,82 @@ def test_recover_refuses_truncated_bytes(tmp_path):
     with open(data, "wb") as f:
         f.write(b"\x00" * 12)
     assert recover_recording_meta(data, 2_048_000.0) is None
+
+
+# ----------------------------------------------------------------------
+# A04：恢复流程不得销毁唯一的损坏 meta
+# ----------------------------------------------------------------------
+
+def _write_orphan_with_bad_meta(tmp_path, bad: bytes):
+    data = str(tmp_path / "orphan.sigmf-data")
+    np.zeros(100, dtype=np.complex64).tofile(data)
+    meta = tmp_path / "orphan.sigmf-meta"
+    meta.write_bytes(bad)
+    return data, meta
+
+
+def test_recover_backs_up_corrupt_meta_with_recovery_reason(tmp_path):
+    data, meta = _write_orphan_with_bad_meta(tmp_path, b'{"global": ')
+
+    new_meta = recover_recording_meta(data, sample_rate_hz=2_048_000.0)
+
+    assert new_meta is not None
+    backups = [p for p in tmp_path.glob("orphan.sigmf-meta.corrupt-*")
+               if not p.name.endswith(".reason.txt")]
+    assert len(backups) == 1
+    assert backups[0].read_bytes() == b'{"global": ', "备份必须与原件逐字节一致"
+    reasons = list(tmp_path.glob("orphan.sigmf-meta.corrupt-*.reason.txt"))
+    assert len(reasons) == 1
+    text = reasons[0].read_text(encoding="utf-8")
+    assert "恢复流程触发" in text
+    assert "不是用户删除" in text
+    with open(new_meta, "r", encoding="utf-8") as f:
+        assert json.load(f)["global"]["mbdsdr:recovered"] is True
+
+
+def test_recover_aborts_when_backup_fails(tmp_path, monkeypatch):
+    """反证：备份失败时恢复必须中止，原件一个字节都不能动。"""
+    bad = b'{"global": '
+    data, meta = _write_orphan_with_bad_meta(tmp_path, bad)
+    monkeypatch.setattr(
+        recorder_mod.shutil, "copy2",
+        lambda *a, **k: (_ for _ in ()).throw(OSError("disk full")))
+
+    with pytest.raises(MetaRecoveryAborted) as ei:
+        recover_recording_meta(data, sample_rate_hz=2_048_000.0)
+
+    assert "备份失败" in str(ei.value)
+    assert meta.read_bytes() == bad, "备份失败后不得重建/覆盖"
+    assert list(tmp_path.glob("orphan.sigmf-meta.corrupt-*")) == []
+
+
+def test_recover_oserror_on_meta_aborts_without_backup(tmp_path, monkeypatch):
+    """三分法：meta 存在但读不了（OSError）→ 不备份、不改名、不写。"""
+    data, meta = _write_orphan_with_bad_meta(tmp_path, b'{"global": {}}')
+    real_load = recorder_mod.json.load
+    monkeypatch.setattr(
+        recorder_mod.json, "load",
+        lambda f: (_ for _ in ()).throw(OSError("device not ready")))
+
+    with pytest.raises(MetaRecoveryAborted) as ei:
+        recover_recording_meta(data, sample_rate_hz=2_048_000.0)
+
+    assert "不可读" in str(ei.value)
+    monkeypatch.setattr(recorder_mod.json, "load", real_load)
+    assert meta.read_bytes() == b'{"global": {}}'
+    assert list(tmp_path.glob("orphan.sigmf-meta.corrupt-*")) == []
+
+
+def test_same_corrupt_meta_keeps_single_backup(tmp_path):
+    """同一份损坏内容只留一份副本，避免反复恢复把目录堆满。"""
+    _, meta = _write_orphan_with_bad_meta(tmp_path, b'{"broken": ')
+
+    first = recorder_mod._backup_corrupt_meta(str(meta), "恢复流程触发")
+    second = recorder_mod._backup_corrupt_meta(str(meta), "恢复流程触发")
+
+    assert first == second
+    assert len([p for p in tmp_path.glob("orphan.sigmf-meta.corrupt-*")
+                if not p.name.endswith(".reason.txt")]) == 1
 
 
 def test_inspect_detects_truncated_against_declared(tmp_path):
