@@ -113,7 +113,8 @@ def extract_fields(payload: bytes, *,
 
     字段若声明 ``bit_len``，则走位级路径：``bit_offset``（以帧首为 0 的
     绝对位偏移，MSB-first）+ ``bit_len`` 取无符号整数，``type`` 须为
-    ``uint``；未声明 ``bit_len`` 的旧字段仍走原字节路径，行为不变。
+    ``uint``；``bit_offset + bit_len`` 超出载荷位数即报错，**绝不截断或
+    补零**。未声明 ``bit_len`` 的旧字段仍走原字节路径，行为不变。
     """
     layout = load_frame_layout(layout_name)
     fields: Dict[str, Any] = {}
