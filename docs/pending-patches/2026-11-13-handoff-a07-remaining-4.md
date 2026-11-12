@@ -190,4 +190,75 @@
   正在被别线编辑，**落补丁时按文本定位**。
 - `docs/COMMIT-INCIDENT-CARD.md` 上另有一条他线在途改动（第 ⑬ 行「三条件全绿」→
   「三条件都满足」），本单的锚点修复提交用 `--exclude-hunk` 把它挡在提交之外，
-  工作区原样保留。
+  工作区原样保留。**（后续：该改动已由归属线自行提交，本单那次提交最终只含锚点。）**
+
+## 6. 机制补丁：把锚点检查接进 pre-commit（待 `scripts/hooks/pre-commit` 解锁）
+
+锚点检查现在能挡「指错」和「编号歧义」，但**没人跑就等于没有**。接到 pre-commit，
+触发条件只限「本轮提交动了卡片或长文」，跑一次毫秒级。
+
+`scripts/hooks/pre-commit` 在 02:44:05 被 **A13身份线/6ae85f56** claim
+（TTL 60 min，03:44:05 到期），且该文件上已有一笔**未提交**的 ③ 凭据扫描改动。
+按协议不抢、不押着别人的在途改动，所以下面这段是**纯追加补丁**：
+
+① 文件头 docstring 补一行：
+
+```python
+"""pre-commit 机械闸：①跨线范围检查 ②逐个文件查 claim 台账 ③明文凭据扫描
+④速查卡锚点检查（仅当本次提交涉及卡片或长文）。
+```
+
+并在 ③ 的说明之后追加：
+
+```
+④ `scripts/check_card_links.py`：**只在暂存区出现
+   `docs/COMMIT-INCIDENT-CARD.md` 或 `docs/COORDINATION.md` 时跑**。卡片里每条
+   `[§x](./COORDINATION.md#Ln)` 必须落在长文里那个编号的标题上；长文增量编辑后
+   锚点会安静指错，只靠人工记得去跑等于没有检查。毫秒级，不会拖慢无关提交。
+```
+
+② `tree = _git("write-tree")` **之前**插入：
+
+```python
+    # 锚点闸：只在这笔提交动了卡片或长文时跑。检查器读的是工作树内容——本仓
+    # 的提交路径（safe_commit）暂存的正是工作树，两者一致；若绕过 safe_commit
+    # 手工构造「暂存区与工作树不同」的提交，这条闸看的是工作树那一份。
+    anchor_watch = {"docs/COMMIT-INCIDENT-CARD.md", "docs/COORDINATION.md"}
+    anchors_touched = [n for n in names if n in anchor_watch]
+    if anchors_touched:
+        checker = root / "scripts" / "check_card_links.py"
+        if not checker.exists():
+            print(f"[pre-commit] 拒绝：暂存了 {', '.join(anchors_touched)}，"
+                  f"但找不到 {checker}，无法校验锚点。")
+            return 1
+        print(f"[pre-commit] 涉及 {', '.join(anchors_touched)}，跑卡片锚点检查")
+        sys.stdout.flush()
+        proc = subprocess.run([sys.executable, str(checker)], cwd=str(root))
+        if proc.returncode != 0:
+            print("[pre-commit] 拒绝提交：速查卡的 § 锚点与长文标题对不上。")
+            print("[pre-commit] 上面每条 FAIL 都点名了 §编号、行号与原因；")
+            print("[pre-commit] 只是行号漂移时跑 `python scripts/check_card_links.py --fix-anchors`，")
+            print("[pre-commit] 编号重复或指向了别的节则必须人工判断，别用 --fix-anchors 盖过去。")
+            return proc.returncode
+```
+
+**反证（已在装好 ④ 的钩子上实测，测完把源码退回原样）**：
+
+- 手改卡片：`§6.9.6` 的锚点 `#L2787` → `#L2814`（§6.9.7 的行，范围内但指错），
+  只暂存卡片 → `git commit` 被拒，`HEAD` 未动：
+
+  ```
+  [pre-commit] 涉及 docs/COMMIT-INCIDENT-CARD.md，跑卡片锚点检查
+  FAIL §6.9.6 -> L2814：实际标题编号是 6.9.7：'#### 6.9.7 PowerShell 环境变量没落到子进程…'
+  FAIL links=16 errors=1
+  [pre-commit] 拒绝提交：速查卡的 § 锚点与长文标题对不上。
+  commit_exit=1
+  ```
+
+- 暂存无关文件、卡片同样坏在工作树里 → 钩子不走锚点检查，正常通过。
+
+**再次踩到的坑（记下来）**：我动手时没先查 claim，改到一半才发现这个文件 9 分钟前
+已被 A13 线签走——已把**自己的**那两段完整退回，只保留对方原有的 ③ 改动
+（`git diff` 回到 29 insertions/1 deletion），并重新 `install_git_hooks.py`
+让装好的钩子与源一致（否则本地闸会领先源码，别人一重装就静默消失）。
+教训：**改任何共享文件前先 `file_claim.py status`，不是先看自己手快不快。**
