@@ -1,5 +1,6 @@
 # R2-58 剩余模块审查报告
 
+> 证据状态：E4——本文件数字未逐条绑定原始件/复跑命令，引用前须复核（判据见 docs/evidence-standard.md）。
 > 审查范围：此前 57 个子 agent 未专门覆盖的模块
 > - `mbdsdr_ai/satdump_integration.py`（240 行）
 > - `mbdsdr_ai/scheduler.py`（337 行）

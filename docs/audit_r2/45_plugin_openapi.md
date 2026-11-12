@@ -1,5 +1,6 @@
 # R2 深度审查：插件系统 & OpenAPI 集成
 
+> 证据状态：E4——本文件数字未逐条绑定原始件/复跑命令，引用前须复核（判据见 docs/evidence-standard.md）。
 - 审查范围：`mbdsdr_ai/plugin_system.py`（433 行）、`mbdsdr_ai/openapi_integration.py`（183 行）
 - 交叉参照：`tool_registry.py`、`sandbox.py`、`hooks.py`、`subagents.py`、`agent.py`、`sdr_tools.py`、`mbdsdr_ai_mcp_server.py`、`tests/test_full_integration.py`
 - 审查方式：只读，逐行读真实代码 + 追接线调用链

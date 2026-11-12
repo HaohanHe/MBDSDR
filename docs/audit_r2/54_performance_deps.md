@@ -1,5 +1,6 @@
 # MBDSDR 第二轮深度审查 — 性能与工程依赖
 
+> 证据状态：E4——本文件数字未逐条绑定原始件/复跑命令，引用前须复核（判据见 docs/evidence-standard.md）。
 > 审查人：子agent（性能/依赖专项）
 > 日期：2026-09-24
 > 范围：dsp.py / sdr_backend.py / spectrum_processor.py / sstv_decoder.py / ft8_*.py / desktop/ / requirements.txt

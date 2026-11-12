@@ -1,5 +1,6 @@
 # 47 · MCP 客户端 & 仿真服务器 第二轮深度审查
 
+> 证据状态：E4——本文件数字未逐条绑定原始件/复跑命令，引用前须复核（判据见 docs/evidence-standard.md）。
 - 审查范围：`mbdsdr_mcp_client.py`（712 行，约 25 KB）、`mbdsdr_sim_server.py`（395 行，约 15 KB）
 - 交叉参照：`mbdsdr_ai/agent.py`、`mbdsdr_ai/sdr_backend.py`、`desktop/mcp_worker.py`、`mbdsdr_ai/tool_registry.py`
 - 审查方式：只读，已通读两个文件全文并实际运行了关键路径的复现脚本

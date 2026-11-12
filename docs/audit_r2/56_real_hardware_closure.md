@@ -1,5 +1,6 @@
 # R2 审查 #56 — RTL-SDR 真实硬件闭环 & Chromebook Crostini USB 透传
 
+> 证据状态：E4——本文件数字未逐条绑定原始件/复跑命令，引用前须复核（判据见 docs/evidence-standard.md）。
 > 审查范围：`mbdsdr_ai/sdr_backend.py`、`mbdsdr_ai/hal.py`、`mbdsdr_ai/sdr_tools.py`、`desktop/mcp_worker.py`、`desktop/spectrum_widget.py`、`desktop/main_window.py`、`requirements.txt`、`docs/CHROMEOS_CROSTINI_SDR.md`、`scripts/chromebook_setup.sh`、`tests/`。
 > 结论先行：**从 MBDSDR 桌面 UI 出发、经过 AI 内核到真实 RTL-SDR 棒的完整链路目前是断的。** RTLSDRBackend 本身能独立工作（被 `scripts/rtl_selfcheck.py` 直接调用时），但它没有被桌面端、也没有被 hal.py 的 SoapySDR 路径真正接上；桌面频谱 100% 是合成高斯峰；hal.py 的 SoapySDR 流从未 setupStream；两个 HardwareManager 实例不共享状态。Crostini 文档是齐全的，但运行时代码零环境检测、零 USB 权限提示。
 

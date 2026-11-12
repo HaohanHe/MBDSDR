@@ -1,5 +1,6 @@
 # R2 深度审查：astronomy.py / gnss_monitor.py
 
+> 证据状态：E4——本文件数字未逐条绑定原始件/复跑命令，引用前须复核（判据见 docs/evidence-standard.md）。
 - 审查范围：`mbdsdr_ai/astronomy.py`（634 行）、`mbdsdr_ai/gnss_monitor.py`（357 行）
 - 交叉参照：`mbdsdr_ai/orbit.py`、`mbdsdr_ai/new_spacetime.py`、`mbdsdr_ai/sdr_tools.py`
 - 审查日期：2026-09-24

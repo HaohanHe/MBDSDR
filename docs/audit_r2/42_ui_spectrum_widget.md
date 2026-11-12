@@ -1,5 +1,6 @@
 # 42 · desktop/spectrum_widget.py 深度审查（R2）
 
+> 证据状态：E4——本文件数字未逐条绑定原始件/复跑命令，引用前须复核（判据见 docs/evidence-standard.md）。
 - 审查对象：`desktop/spectrum_widget.py`（658 行）
 - 审查日期：2026-09-24
 - 审查范围：实时频谱/瀑布图渲染、数据源、缩放/平移、性能、空槽、主题、与 main_window 集成、星座图

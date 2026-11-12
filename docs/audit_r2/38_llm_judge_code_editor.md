@@ -1,5 +1,6 @@
 # R2 深度审查：llm_judge.py 与 code_editor.py
 
+> 证据状态：E4——本文件数字未逐条绑定原始件/复跑命令，引用前须复核（判据见 docs/evidence-standard.md）。
 > 审查范围：`mbdsdr_ai/llm_judge.py`（422 行）、`mbdsdr_ai/code_editor.py`（515 行）
 > 审查方式：只读，逐行通读 + 跨文件调用链追踪
 > 审查日期：2026-09-24

@@ -1,5 +1,6 @@
 # 50 — 集成测试审查 Part 2
 
+> 证据状态：E4——本文件数字未逐条绑定原始件/复跑命令，引用前须复核（判据见 docs/evidence-standard.md）。
 **审查范围**
 - `tests/test_full_integration.py` 第 701–1421 行（自 `test_code_editor_module` 尾部起，含 astronomy / ADS-B / SSTV / AMR / self_evolution / plugin / context&model / memory / FT8 / tool_callability / SSTV-Robot72 / RDS-CT / AX.25 / APRS / HDLC / KISS / AFSK 及 `main()`）
 - `tests/test_full_integration_v2.py` 全文（907 行）

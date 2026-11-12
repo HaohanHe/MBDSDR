@@ -1,5 +1,6 @@
 # R2 审查 29：time_sync.py & desktop/rf_sky_view.py
 
+> 证据状态：E4——本文件数字未逐条绑定原始件/复跑命令，引用前须复核（判据见 docs/evidence-standard.md）。
 - 审查范围：`mbdsdr_ai/time_sync.py`（51 行）、`desktop/rf_sky_view.py`（1156 行）
 - 交叉对照：`mbdsdr_ai/orbit.py`（294 行）、`mbdsdr_ai/decoders.py`、`mbdsdr_ai/new_spacetime.py`、`mbdsdr_ai/sdr_backend.py`、`desktop/main_window.py`
 - 审查方式：只读，通读全部目标文件 + 全仓 grep 调用方

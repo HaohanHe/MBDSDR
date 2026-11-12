@@ -1,5 +1,6 @@
 # R2 深度审查：`mbdsdr_ai/new_spacetime.py`（728 行）
 
+> 证据状态：E4——本文件数字未逐条绑定原始件/复跑命令，引用前须复核（判据见 docs/evidence-standard.md）。
 - 审查范围：`/path/to/MBDSDR/mbdsdr_ai/new_spacetime.py`
 - 审查方式：只读静态审查 + 全仓 grep 调用方 + 对照 `orbit.py` / `astronomy.py` / `decoders.py` 真实代码
 - 审查日期：2026-09-24

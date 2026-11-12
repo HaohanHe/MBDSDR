@@ -1,5 +1,6 @@
 # R2 审查：UI 状态面板 / 主题系统 / 入口 / MCP Worker
 
+> 证据状态：E4——本文件数字未逐条绑定原始件/复跑命令，引用前须复核（判据见 docs/evidence-standard.md）。
 - 审查范围：`desktop/status_panel.py`、`desktop/themes.py`、`desktop/main.py`、`desktop/mcp_worker.py`
 - 交叉参照：`desktop/main_window.py`、`desktop/control_panel.py`、`mbdsdr_mcp_client.py`
 - 审查方式：只读，逐行阅读真实代码

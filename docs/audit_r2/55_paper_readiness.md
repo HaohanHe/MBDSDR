@@ -1,5 +1,6 @@
 # R2 深度代码审查：投 IEEE WCL 论文就绪度评估
 
+> 证据状态：E4——本文件数字未逐条绑定原始件/复跑命令，引用前须复核（判据见 docs/evidence-standard.md）。
 **审查对象**：MBDSDR 项目投 IEEE Wireless Communications Letters (WCL) 的论文就绪度
 **审查范围**：`MBDSDR-IEEE论文初稿-v0.1.md`、`paper/` 目录、`experiments/` 全部实验文件、已知测试报告
 **审查日期**：2026-09-24

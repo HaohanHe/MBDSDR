@@ -1,5 +1,6 @@
 # 51. 工具测试文件审查（第二轮深度审查）
 
+> 证据状态：E4——本文件数字未逐条绑定原始件/复跑命令，引用前须复核（判据见 docs/evidence-standard.md）。
 > 审查范围：`tests/tool_selftest.py`、`tests/tool_health_check.py`、`tests/tool_param_smoke.py`、`tests/smoke_live_tools.py`、`tests/test_infra_units.py`、`tests/ft8_roundtrip.py`
 > 审查方式：只读，逐行阅读真实代码 + 实际运行 + 对照 `mbdsdr_ai/sdr_tools.py` / `sdr_backend.py` / `sandbox.py` / `radio_control.py` 实现交叉验证。
 

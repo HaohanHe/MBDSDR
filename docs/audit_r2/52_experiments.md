@@ -1,5 +1,6 @@
 # R2 深度代码审查：experiments/ 目录（9 个实验文件）
 
+> 证据状态：E4——本文件数字未逐条绑定原始件/复跑命令，引用前须复核（判据见 docs/evidence-standard.md）。
 **审查范围**：`experiments/` 下全部 9 个实验脚本及其产物（`paper/experiments/*.csv`）
 **审查日期**：2026-09-24
 **审查方式**：逐行阅读实验脚本 + 追踪 `mbdsdr_ai/` 产品内核 + 读取已生成 CSV 结果交叉验证
