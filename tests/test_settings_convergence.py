@@ -96,9 +96,12 @@ def test_service_keys_registered_with_correct_types():
 
 def test_port_keys_never_coerced_to_str():
     """端口键不登记进 _INT_KEYS 会被 _coerce 落成字符串，下游 int() 再炸一次。"""
-    assert isinstance(_coerce("rc_port", "9000"), int)
-    assert isinstance(_coerce("web_port", 9001), int)
-    assert isinstance(_coerce("rc_enabled", 1), bool)
+    assert _coerce("rc_port", "9000") == 9000
+    assert _coerce("web_port", 9001) == 9001
+    assert _coerce("rc_enabled", 1) is True
+    assert _coerce("web_enabled", 0) is False
+    # 坏端口必须回默认值，而不是回 0 / 字符串（否则「任何输入返回 0」也会绿）
+    assert _coerce("rc_port", "not-a-port") == DEFAULTS["rc_port"]
 
 
 def test_service_switch_and_port_roundtrip(tmp_path):
