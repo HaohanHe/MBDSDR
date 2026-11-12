@@ -629,9 +629,9 @@ for (auto const& [name, _vfo] : vfos) {
 | # | 机制 | 线上出处 | roadmap 覆盖状态 | 说明 |
 |---|---|---|---|---|
 | 1 | **SigMF sidecar 双层元数据**：global 存 `author/description/sample_rate/hw/recorder`，capture 存 `frequency/sample_start/length/datetime/tsms`，录制中反复回写 meta | `f4exb/sdrangel@1ec7cea:sdrbase/dsp/sigmffilerecord.cpp:240-244`、`:267-279` | **roadmap 未覆盖：新条目**（§6 D-9 只定了目标态 C，未派工） | 标准格式 + 每段 capture 带起止样本与时刻，回放端可精确切片；我们的 sidecar 可逐字段对照 |
-| 2 | **静噪触发录制 + 预录/后录**：`preRecordTime`、`squelchPostRecordTime`、`squelchRecordingEnable` 三个独立参数 | `f4exb/sdrangel@1ec7cea:plugins/channelrx/sigmffilesink/sigmffilesink.cpp:533-545` | **roadmap 未覆盖：新条目** | 只在有信号时落盘，预录缓冲保住前导；和「录整段再挑」是两种形态 |
-| 3 | **录制参数装配**：WAV 容器、样本类型（Uint8/Int16/Int32/Float32）、文件名模板、时区选择、baseband/audio 双模式 | `AlexandreRouma/SDRPlusPlus@ea6f755:misc_modules/recorder/src/main.cpp:57-67`、`:249-256`、`:276-284` | **roadmap 未覆盖：新条目**（D-9 的「位深选择」仍停在产品决定） | 成本最低的一组 UX；文件名模板 + 时区直接解重名与时间对不上 |
-| 4 | **回放即数据源**：file source 从 WAV 头读采样率，再喂同一条 DSP 链 | `AlexandreRouma/SDRPlusPlus@ea6f755:source_modules/file_source/src/main.cpp:133-134` | **roadmap 未覆盖：新条目** | 不需要单独回放管线；打开外部文件时速率自动对齐 |
+| 2 | **静噪触发录制 + 预录/后录**：`preRecordTime`、`squelchPostRecordTime`、`squelchRecordingEnable` 三个独立参数 | `f4exb/sdrangel@1ec7cea:plugins/channelrx/sigmffilesink/sigmffilesink.cpp:533-545` | **roadmap 已覆盖：W95** | 只在有信号时落盘，预录缓冲保住前导；和「录整段再挑」是两种形态 |
+| 3 | **录制参数装配**：WAV 容器、样本类型（Uint8/Int16/Int32/Float32）、文件名模板、时区选择、baseband/audio 双模式 | `AlexandreRouma/SDRPlusPlus@ea6f755:misc_modules/recorder/src/main.cpp:57-67`、`:249-256`、`:276-284` | **roadmap 部分覆盖：W96**（只收文件名模板 + 时区）；容器/样本类型/双模式未覆盖：新条目 | 成本最低的一组 UX；文件名模板 + 时区直接解重名与时间对不上 |
+| 4 | **回放即数据源**：file source 从 WAV 头读采样率，再喂同一条 DSP 链 | `AlexandreRouma/SDRPlusPlus@ea6f755:source_modules/file_source/src/main.cpp:133-134` | **roadmap 已覆盖：W97**（阻塞：等 D-9 格式边界） | 不需要单独回放管线；打开外部文件时速率自动对齐 |
 | 5 | **多 capture 回放按段切率 + 实时节流**：逐 track 切采样率，按 `QElapsedTimer` 控制喂样节奏 | `f4exb/sdrangel@1ec7cea:plugins/samplesource/sigmffileinput/sigmffileinputworker.cpp:116-120`、`:227-231`、`:194` | **roadmap 部分覆盖：W37**（回放上限/传输控制，且被 D-9 阻塞）；**按段切率与节流未覆盖：新条目** | 回放不抢 CPU、不「一秒放完一小时」 |
 
 **否定结论（限定范围）**：SDR++ recorder 模块的 include 只有 `recorder_interface.h` ＋ `utils/wav.h`（`:20-23`），写盘只经 wav writer，**未见** sidecar 元数据写入；判断范围仅该模块，标「未见」不标「没有」。
@@ -648,3 +648,12 @@ for (auto const& [name, _vfo] : vfos) {
 
 **独立结论（热插拔）**：6 个项目、**28,051** 个 blob，按 `hotplug|udev|devicemonitor|device_monitor|devicewatch` 检索路径，命中 **1 处**且为 Direwolf 的构建期 `cmake/modules/Findudev.cmake`；**运行期设备监听 0 处**。因此「运行中拔插的诚实状态机」在已查范围内**没有可搬参照，属自研**——这是「没有参照」，不是「我们没有」。
 **roadmap 覆盖状态**：**roadmap 未覆盖：新条目**。
+
+### 5.3 工单候选与去向（2026-11-12）
+
+| 候选 | 内容 | 去向 |
+|---|---|---|
+| R1 | 静噪触发录制 + 预录/后录 | **roadmap 已覆盖：W95**（未开工；串行链在 `main_window.py` 录音状态机段，W38→W40 之后、W94 之后排队） |
+| R2 | 录音文件名模板 + 时区 | **roadmap 已覆盖：W96**（未开工；排在 W95 之后） |
+| R3 | 回放读头（WAV/SigMF） | **roadmap 已覆盖：W97**（**阻塞：等 D-9 格式边界**） |
+| R4 | 多 capture 回放按段切率 + 实时节流 | **不立项**——**暂不立项：场景窄 + 被 W37/D-9 阻塞**；留在本节当候选，不进 roadmap 统计 |
