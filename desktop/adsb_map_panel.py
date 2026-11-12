@@ -49,6 +49,9 @@ from PySide6.QtWidgets import (  # noqa: E402
 
 from tokens import tokens as _tok  # noqa: E402
 
+# 频率读数唯一口径（6 位小数 MHz = 1 Hz），面板不再就地拼小数位。
+from readouts import format_frequency_hz  # noqa: E402
+
 # 触屏：表格按像素滚动、地图捏合由 OsmMapView 自己处理
 try:  # noqa: E402
     from touch_helpers import enable_touch_events
@@ -234,7 +237,7 @@ class AdsbMapPanel(QWidget):
             if (abs(frame.center_hz - self.ADSB_CENTER_HZ) > self.ADSB_TOLERANCE_HZ
                     or frame.sample_rate < self.ADSB_MIN_SAMPLE_RATE):
                 self._set_diag(
-                    f"当前 {frame.center_hz / 1e6:.3f} MHz / "
+                    f"当前 {format_frequency_hz(frame.center_hz)} / "
                     f"{frame.sample_rate / 1e6:.3f} MS/s，"
                     "不在 1090±1.5 MHz 或采样率不足；未解码")
                 return

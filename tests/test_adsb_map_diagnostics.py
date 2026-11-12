@@ -106,7 +106,7 @@ class TestBusDiagnostics:
         bus.publish(np.zeros(1024, dtype=np.complex64), 2_400_000.0, 98.5e6)
         p._poll_iq_bus()
         diag = p.diag_text
-        assert "98.500 MHz" in diag, diag
+        assert "98.500000 MHz" in diag, diag
         assert "不在 1090" in diag, diag
         assert p.decoded_frames_total() == 0
 
