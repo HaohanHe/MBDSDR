@@ -1,5 +1,6 @@
 # 解码器 × UI 能力矩阵（只读缺口调研）
 
+> 证据状态：E4——本文件数字未逐条绑定原始件/复跑命令，引用前须复核（判据见 docs/evidence-standard.md）。
 - 日期：2026-11-11
 - 范围：`mbdsdr_ai/decode_router.py`、各解码器后端、`desktop` 侧解码面板与 `satellite_image_panel` / `weather_panel`
 - 方式：只读静态核查（grep/read），未改任何产品代码，未运行真机

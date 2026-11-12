@@ -1,5 +1,6 @@
 # 设备连接 / 能力协商 / 空态诚实性 —— 只读缺口调研
 
+> 证据状态：E4——本文件数字未逐条绑定原始件/复跑命令，引用前须复核（判据见 docs/evidence-standard.md）。
 - 日期：2026-11-11
 - 范围：`desktop/device_panel.py`、`desktop/control_panel.py`、`desktop/module_panel.py`（面板落点）、`desktop/main_window.py`（连接/回读路径）、`desktop/status_panel.py`（读数落点）、`mbdsdr_ai/sdr_backend.py`、`mbdsdr_ai/device_capabilities.py`、`mbdsdr_ai/rtlsdr_params.py`、`mbdsdr_ai/rtltcp_client.py`、`mbdsdr_ai/spyserver_client.py`、`mbdsdr_ai/bladerf_params.py`、`mbdsdr_ai/reconnection.py`、`mbdsdr_ai/module_graph.py`
 - 性质：**只读**。未修改任何产品代码。

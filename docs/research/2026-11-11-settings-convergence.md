@@ -1,5 +1,6 @@
 # 配置一致性收敛方案（草案，未改任何代码）
 
+> 证据状态：E4——本文件数字未逐条绑定原始件/复跑命令，引用前须复核（判据见 docs/evidence-standard.md）。
 > 性质：**只读设计**。本文只给收敛方案、改动点与反证设计，不含任何代码修改。
 > 输入证据：[2026-11-11-gap-settings.md](file:///d:/mbdsdr/MBDSDR/docs/research/2026-11-11-gap-settings.md) §3（三条 P1 已端到端实测复现）。
 

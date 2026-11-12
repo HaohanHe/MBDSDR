@@ -1,5 +1,6 @@
 # 设置与配置体系：只读缺口调研（2026-11-11）
 
+> 证据状态：E4——本文件数字未逐条绑定原始件/复跑命令，引用前须复核（判据见 docs/evidence-standard.md）。
 > 性质：**只读调研**，未修改任何产品代码。所有结论附 `path:line`，可用文末命令复跑。
 > 范围：`desktop/config_schema.py`、`desktop/settings_panel.py`、`desktop/tokens.py`、
 > `desktop/startup_paths.py`、`desktop/settings.py`、`mbdsdr_ai/config.py`、`desktop/ai_panel.py`（config.json 写入方）、

@@ -1,5 +1,6 @@
 # 录音、回放与文件管理：只读缺口调研（2026-11-11）
 
+> 证据状态：E4——本文件数字未逐条绑定原始件/复跑命令，引用前须复核（判据见 docs/evidence-standard.md）。
 > 性质：**只读调研**，未修改任何产品代码。
 > 范围：`desktop` 的录音/回放链路（`_start_recording` / `_confirm_record_dir_safe` / `_record_write_chunk` /
 > `_stop_recording` / `_replay_recording` / `audio_out`）+ `mbdsdr_ai` 的录段、sidecar、`recording_library`、`recorder`。

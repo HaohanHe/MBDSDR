@@ -1,5 +1,6 @@
 # 参考项目对标清单（2026-11-11）
 
+> 证据状态：E4——本文件数字未逐条绑定原始件/复跑命令，引用前须复核（判据见 docs/evidence-standard.md）。
 扫描口径：本机 `D:\`、`C:\Users\xxhzb` 下所有含 `.git` 的目录（深度 ≤3）＋已知参考根目录（`D:\mbdsdr\reference`、`D:\OpATA\参考`、`D:\agent\参考`、`D:\beifen`、`D:\glassback`、`D:\kejio`、`C:\Users\xxhzb\src`、`C:\Users\xxhzb\AndroidStudioProjects`）。
 体量为**排除 `.git` / `node_modules` / `build` / `dist` / `third_party` 后的源码文件数与主要语言行数**（行数为可解码文本行计数，量级参考）。
 

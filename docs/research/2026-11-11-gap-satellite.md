@@ -1,5 +1,6 @@
 # 卫星过境与追踪 · 只读缺口调研
 
+> 证据状态：E4——本文件数字未逐条绑定原始件/复跑命令，引用前须复核（判据见 docs/evidence-standard.md）。
 - 日期：2026-11-11
 - 范围：`desktop/sat_track_panel.py`、`desktop/new_spacetime_panel.py`、`desktop/rf_sky_view.py`、`desktop/main_window.py`（卫星段）、`mbdsdr_ai/{sat_passes,new_spacetime_timeline,new_spacetime_tle,tle_integrity,sat_tracker,orbit,sat_links}.py`
 - 性质：**只读**。未改动任何产品代码，未写用户配置，全程 `MBDSDR_OFFLINE=1`，无联网请求。

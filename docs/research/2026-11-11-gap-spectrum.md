@@ -1,5 +1,6 @@
 # 频谱 / 瀑布显示层缺口调研（只读）
 
+> 证据状态：E4——本文件数字未逐条绑定原始件/复跑命令，引用前须复核（判据见 docs/evidence-standard.md）。
 - 日期：2026-11-11
 - 基线：`MBDSDR@b6bc856c`（工作区另有他线未提交改动，本次未触碰）
 - 范围：`desktop/spectrum_widget.py`（4233 行）、`desktop/config_schema.py`、`desktop/settings_panel.py`、`desktop/main_window.py` 的显示接线，以及 `mbdsdr_ai` 侧对应 DSP。

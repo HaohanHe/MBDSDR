@@ -1,5 +1,6 @@
 # 右栏信息架构缺口调研（只读）
 
+> 证据状态：E4——本文件数字未逐条绑定原始件/复跑命令，引用前须复核（判据见 docs/evidence-standard.md）。
 - 日期：2026-11-11
 - 范围：`desktop/right_column.py`、`desktop/control_panel.py`、`desktop/settings_panel.py`，含 `main_window.py` 的装配点与 `status_panel.py` 的被装内容
 - 设计基准：`docs/design-basis.md` §2:123、§4:161；原型 `web/product/prototype/index.html:414-490`（专业形态三栏）、`:245-272`（列宽 CSS）
