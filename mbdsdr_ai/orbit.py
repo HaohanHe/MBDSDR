@@ -114,14 +114,14 @@ _CTX = ssl.create_default_context()
 #     避免 dry-call/全量套件因联网挂死（2026-10-20 实测 CI 全量 pytest 永久卡死）。
 #   - 在线时用 _bounded_urlopen：urllib 的 timeout 不覆盖 getaddrinfo(DNS)，
 #     无网/黑洞网络下 DNS 解析可无限阻塞；线程 join 硬截止覆盖含 DNS 的全链路。
-_OFFLINE_ENV = "MBDSDR_OFFLINE"
 _FETCH_TIMEOUT_S = 15.0          # socket 层（连接/读）软超时
 _FETCH_HARD_DEADLINE_S = 20.0    # 含 DNS 的墙钟硬截止
 
 
-def _network_disabled() -> bool:
-    """是否禁网（MBDSDR_OFFLINE=1/true/yes/on）。"""
-    return os.environ.get(_OFFLINE_ENV, "").strip().lower() in ("1", "true", "yes", "on")
+# 禁网判定是通用策略：它被 agent / model_manager / new_spacetime /
+# openapi_integration 等跨模块引用私有名，说明放错了地方。定义下沉到叶子
+# net_policy；原处保留同名别名，既有调用方不变。
+from .net_policy import network_disabled as _network_disabled
 
 
 def _bounded_urlopen(req, timeout_s: float, hard_deadline_s: float):
