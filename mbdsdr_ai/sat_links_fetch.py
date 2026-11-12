@@ -60,6 +60,7 @@ __all__ = [
     "DEFAULT_TX_URL",
     "FAILURE_LABELS",
     "cache_path",
+    "offline",
     "load_cache",
     "clear_cache_memo",
     "refresh",
@@ -128,6 +129,11 @@ def age_text(seconds: Optional[float]) -> str:
 def _offline() -> bool:
     return (os.environ.get(OFFLINE_ENV, "").strip().lower()
             in ("1", "true", "yes", "on"))
+
+
+def offline() -> bool:
+    """当前是否离线模式（测试/CI 默认置位，界面据此不起后台拉库）。"""
+    return _offline()
 
 
 def cache_path() -> Optional[str]:
