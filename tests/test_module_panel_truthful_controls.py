@@ -74,3 +74,46 @@ def test_disconnect_hides_previous_gain(panel):
     panel.set_sdr_connected(False)
     assert panel.gain_val.text() == "—", "断开后仍显示上次增益=把历史值当读数"
     assert panel.freq_spin.isEnabled() is False
+
+
+# ---------------------------------------------------------------- 枚举落地
+# 注入失败路径：让后台枚举永不返回（等价于 USB open 卡死），界面必须自己
+# 离开「正在枚举」并把原因和可做的下一步写出来，而不是永久转。
+
+
+def test_enum_timeout_leaves_in_progress_and_allows_retry(qapp, monkeypatch):
+    import desktop.module_panel as mp
+
+    monkeypatch.setattr(mp._ModuleEnumTask, "run", lambda self: None)
+    panel = mp.ModulePanel()
+    try:
+        assert panel._enum_inflight is True
+        assert panel.refresh_btn.isEnabled() is False, "枚举中刷新按钮应禁用"
+
+        panel._on_enum_timeout()
+
+        assert panel._enum_inflight is False, "超时后 inflight 必须复位"
+        assert panel.refresh_btn.isEnabled() is True, "超时后必须能再次刷新"
+        assert "超时" in panel.device_info.text()
+        assert "刷新" in panel.device_info.text(), "要写清现在能做什么"
+        assert "正在枚举设备…" not in panel.device_combo.currentText()
+    finally:
+        panel.close()
+
+
+def test_late_enum_result_after_timeout_is_dropped(qapp, monkeypatch):
+    import desktop.module_panel as mp
+
+    monkeypatch.setattr(mp._ModuleEnumTask, "run", lambda self: None)
+    panel = mp.ModulePanel()
+    try:
+        panel._on_enum_timeout()
+        stale_token = panel._enum_token - 1
+        panel._on_devices_enumerated(
+            [{"driver": "rtl_sdr", "label": "迟到的 RTL-SDR"}], None, stale_token)
+
+        assert panel._devices == [], "超时后迟到的旧结果不得回写设备列表"
+        assert "超时" in panel.device_info.text()
+        assert panel.refresh_btn.isEnabled() is True
+    finally:
+        panel.close()

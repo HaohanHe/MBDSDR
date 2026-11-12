@@ -221,18 +221,29 @@ class FlowCanvas(QWidget):
 # ======================================================================
 #  模块面板主体
 # ======================================================================
+#: 单次后台枚举的最长等待（毫秒）。枚举链路里有同步 USB open（与
+#: device_panel 同一实现，见 mbdsdr_ai/sdr_backend.py），没有超时参数；
+#: 设备/驱动卡死时任务永不返回，``finished`` 也就永不发射——本面板的
+#: ``_enum_inflight`` 会永久为 True、刷新按钮永久禁用，用户只能重启程序。
+#: 5 s 覆盖本机实测最慢 2.4 s，只在真卡住时触发（与 device_panel 同一上限）。
+ENUM_TIMEOUT_MS = 5000
+
+
 class _ModuleEnumSignals(QObject):
     """跨线程设备枚举结果（不挂父对象，生命周期由在跑的任务持有）。"""
 
-    finished = Signal(object, object)  # (devices: list | None, error_text | None)
+    #: (devices | None, error_text | None, token)。token 用于丢弃超时后迟到
+    #: 的结果，避免它清掉下一轮枚举的 inflight（见 ModulePanel._on_enum_timeout）。
+    finished = Signal(object, object, int)
 
 
 class _ModuleEnumTask(QRunnable):
     """后台枚举 SDR 设备，避免 GUI 线程付 1 s 枚举成本。"""
 
-    def __init__(self, signals: _ModuleEnumSignals):
+    def __init__(self, signals: _ModuleEnumSignals, token: int = 0):
         super().__init__()
         self._signals = signals
+        self._token = int(token)
 
     def run(self):  # noqa: D102 - Qt 接口
         try:
@@ -241,7 +252,7 @@ class _ModuleEnumTask(QRunnable):
         except Exception as exc:  # noqa: BLE001 - 失败必须回传，不静默
             devices, err = None, _clean_exc(exc)
         try:
-            self._signals.finished.emit(devices, err)
+            self._signals.finished.emit(devices, err, self._token)
         except RuntimeError:
             pass  # 面板已销毁，结果无人接收
 
@@ -270,6 +281,13 @@ class ModulePanel(QWidget):
         self._enum_signals = _ModuleEnumSignals()
         self._enum_signals.finished.connect(self._on_devices_enumerated)
         self._enum_inflight = False
+        #: 本轮枚举的 token；超时/完成后自增，迟到结果按 token 丢弃。
+        self._enum_token = 0
+        #: 枚举看门狗：USB open 无超时，卡死时 finished 永不发射，
+        #: 没有它刷新按钮会永久禁用（见 ENUM_TIMEOUT_MS 处的说明）。
+        self._enum_watchdog = QTimer(self)
+        self._enum_watchdog.setSingleShot(True)
+        self._enum_watchdog.timeout.connect(self._on_enum_timeout)
         self._build_ui()
         _req_store.subscribe(self._on_request_changed)
         # 设备枚举放到后台：实测本机 enumerate_all_sdr_devices 1.03 s
@@ -533,17 +551,58 @@ class ModulePanel(QWidget):
         if self._enum_inflight:
             return  # 上一拍还没回来，不堆积任务
         self._enum_inflight = True
+        self._enum_token += 1
+        self._enum_watchdog.start(ENUM_TIMEOUT_MS)
         self.refresh_btn.setEnabled(False)
         self.device_info.setText("正在枚举设备…")
         if self.device_combo.count() == 0:
             self.device_combo.addItem("正在枚举设备…")
-        QThreadPool.globalInstance().start(_ModuleEnumTask(self._enum_signals))
+        QThreadPool.globalInstance().start(
+            _ModuleEnumTask(self._enum_signals, self._enum_token))
 
-    def _on_devices_enumerated(self, devices, enum_err):
+    def _on_devices_enumerated(self, devices, enum_err, token: int = 0):
         """后台枚举回来了：在 GUI 线程里更新下拉框与提示。"""
+        if token != self._enum_token:
+            return  # 超时后迟到的旧结果：不得清掉新一轮的 inflight
         self._enum_inflight = False
+        self._enum_watchdog.stop()
         self.refresh_btn.setEnabled(True)
         self._apply_devices(devices, enum_err)
+
+    def _on_enum_timeout(self) -> None:
+        """枚举超过上限仍未返回：必须让界面离开「正在枚举」并能重试。
+
+        枚举没有可判定完成之外的手段（同步 USB open 不返回就是卡死），
+        因此这里用看门狗兜底；它不修改任何设备结论——只把界面从
+        「正在枚举」挪到「超时/未确认」，并保留上一份可用列表。
+        """
+        if not self._enum_inflight:
+            return
+        self._enum_inflight = False
+        self._enum_token += 1  # 迟到结果作废
+        logger.warning(
+            "模块面板设备枚举超时（>%.1fs）：enumerate_all_sdr_devices 未返回，"
+            "已复位 inflight，界面转为「超时/未确认」并允许重试",
+            ENUM_TIMEOUT_MS / 1000.0)
+        self.refresh_btn.setEnabled(True)
+        self.refresh_btn.setText("刷新")
+        if not self._devices:
+            # 上一份列表为空：下拉里可能只剩「正在枚举设备…」占位项，
+            # 必须换成可判断的状态，否则用户看到的是一个永远在转的面板。
+            self.device_combo.clear()
+            self.device_combo.addItem("设备枚举超时（未确认有无设备）")
+            self.device_info.setText(
+                f"设备枚举超时：{ENUM_TIMEOUT_MS / 1000.0:.0f} 秒内没拿到设备列表。\n"
+                "这不等于没插设备（USB 打开卡住时同样会超时）。\n"
+                "现在可以：点「刷新」重试；反复超时就拔插设备后重启程序。")
+            self.connect_btn.setEnabled(False)
+        else:
+            # 上一份列表仍然可用：保留设备项，只说明这次刷新没成功，
+            # 不把旧列表悄悄当成最新结论。
+            self.device_info.setText(
+                f"刷新超时：仍显示上次枚举到的 {len(self._devices)} 台设备"
+                "（插拔过设备的话，这份列表可能已过期）。\n"
+                "现在可以：点「刷新」重试；连接前先确认列表与手上的设备一致。")
 
     def _apply_devices(self, devices, enum_err=None):
         """把一份设备列表落到界面（同步/异步/测试共用同一套显示规则）。"""
