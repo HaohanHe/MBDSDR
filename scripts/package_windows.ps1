@@ -145,6 +145,16 @@ if (-not (Test-Path $snap) -or (Get-Item $snap).Length -eq 0) {
 }
 Write-Host ("冒烟通过：--snapshot PNG {0} 字节（干净 PATH，包内运行库自洽）" -f (Get-Item $snap).Length)
 
+# ---- 发布产物凭据硬门（打包前）：任何 BLOCK 命中的文件都不许进 zip ----
+# 与 release_manifest.py 的第 5 项同一判据（scripts/secret_scan.py），这里放在
+# 压包之前，保证「打出来的包」本身干净；找不到 python 也按失败关闭，不静默跳过。
+$scanner = Join-Path (Split-Path -Parent $PSScriptRoot) "scripts\secret_scan.py"
+if (-not (Test-Path $scanner)) { throw "凭据扫描器缺失：$scanner（拒绝打包）" }
+python $scanner --artifact $stage
+if ($LASTEXITCODE -ne 0) {
+    throw "发布产物凭据扫描未通过：$stage（删除或移出命中文件后重跑，不许绕过）"
+}
+
 # ---- 压 zip + SHA256 ----
 $zip = Join-Path $dist "mbdsdr-$ver-win64-portable.zip"
 if (Test-Path $zip) { Remove-Item $zip -Force }
