@@ -28,6 +28,11 @@ pre-commit 通过时会在 hook_ok/<tree>.json 留标记，本钩子消费标记
 编辑），记 STALE_INDEX_SUSPECT。判断口径是「提交后 5 秒内的剩余改动」，
 只看本次提交的路径、不看别线文件；提交已经发生，本钩子只记录不阻断。
 
+另对本次提交跑一次事后 hunk 残留检查（`scripts/check_commit_residue.py`，
+约 0.35 s）：提交新增的行若以删除形态回到工作区未提交 diff，打印显眼块并追加
+`.locks/residue_commits.log`（JSONL）。**只记录、不改退出码**——提交已落地，
+卡下一笔只会把账算到别人头上。
+
 最后把共享 index 同步到新 HEAD（`scripts/git_sync_index.py`）：私有
 GIT_INDEX_FILE 提交后，共享 index 仍停在旧 HEAD，本次提交的每个文件都会
 显示成「反向暂存」。同步失败只打印警告，不阻塞。
@@ -271,6 +276,88 @@ def _shared_index_residue(root):
     return [line.strip() for line in proc.stdout.splitlines() if line.strip()]
 
 
+def _residue_records(root, head):
+    """跑事后 hunk 残留检查（scripts/check_commit_residue.py --json）。
+
+    返回记录列表；脚本不存在 / 退出码异常 / 输出不可解析时返回 None（不假报）。
+    单次约 0.35 s（只读 git 对象与工作区 diff）。
+    """
+    script = root / "scripts" / "check_commit_residue.py"
+    if not script.exists():
+        return None
+    proc = subprocess.run(
+        [sys.executable, str(script), "--repo", str(root), "--json", head],
+        cwd=str(root),
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+    if proc.returncode not in (0, 1):
+        return None
+    try:
+        payload = json.loads(proc.stdout)
+    except (json.JSONDecodeError, TypeError):
+        return None
+    records = []
+    for item in payload.get("commits") or []:
+        for rec in item.get("records") or []:
+            records.append(rec)
+    return records
+
+
+def _report_residue(records):
+    """打印显眼块 + 追加 JSONL 台账。**只记录，不阻断**：提交已经落地。
+
+    残留常是别人未提交的 hunk 被整文件提交顺带抹掉；此时阻止下一笔只会把
+    账算到错的人头上。可见 + 台账足够。
+    """
+    log_path = Path(
+        os.environ.get("MBDSDR_RESIDUE_LOG") or r"D:\mbdsdr\.locks\residue_commits.log"
+    )
+    bar = "=" * 68
+    print(f"[post-commit] {bar}")
+    print(
+        "[post-commit] ⚠ RESIDUE：本次提交新增的行，以删除形态回到工作区未提交"
+        f" diff（{len(records)} 处）"
+    )
+    for rec in records:
+        print(
+            "[post-commit]   %s  %s:%d 起删 %d 行"
+            % (
+                str(rec.get("commit", ""))[:8],
+                rec.get("path", "?"),
+                int(rec.get("worktree_line") or 0),
+                int(rec.get("matched_lines") or 0),
+            )
+        )
+        for line in (rec.get("sample") or [])[:3]:
+            print(f"[post-commit]     - {line}")
+    print(f"[post-commit] 台账：{log_path}（只记录，不阻断提交结果）")
+    print(f"[post-commit] {bar}")
+    try:
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        with log_path.open("a", encoding="utf-8") as fh:
+            for rec in records:
+                fh.write(
+                    json.dumps(
+                        {
+                            "ts": datetime.now().isoformat(timespec="seconds"),
+                            "type": "COMMIT_RESIDUE",
+                            "commit": rec.get("commit"),
+                            "path": rec.get("path"),
+                            "worktree_line": rec.get("worktree_line"),
+                            "matched_lines": rec.get("matched_lines"),
+                            "sample": rec.get("sample"),
+                        },
+                        ensure_ascii=False,
+                    )
+                    + "\n"
+                )
+    except OSError as exc:
+        print(f"[post-commit] 残留台账写入失败：{exc}", file=sys.stderr)
+
+
 def main():
     started_at = time.time()
     root = Path(_git("rev-parse", "--show-toplevel").stdout.strip() or ".")
@@ -322,6 +409,15 @@ def main():
                 f"（STALE_INDEX_SUSPECT，剩余 diff {rec['diff_lines']} 行）",
                 file=sys.stderr,
             )
+
+    # 提交后 hunk 残留（形态⑭的机械判据）：只打印 + 记账，不改退出码。
+    try:
+        residue = _residue_records(root, head)
+    except Exception as exc:  # noqa: BLE001 —— 自检异常不许影响提交结果
+        print(f"[post-commit] 残留检查异常（忽略）：{exc}", file=sys.stderr)
+        residue = None
+    if residue:
+        _report_residue(residue)
 
     marker_dir = Path(
         os.environ.get("MBDSDR_HOOK_MARKER_DIR") or r"D:\mbdsdr\.locks\hook_ok"
