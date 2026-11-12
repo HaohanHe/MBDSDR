@@ -675,8 +675,21 @@ QT_QPA_PLATFORM=offscreen python -m pytest "<nodeid>" -q
 
 ## K17 — 设置向前覆盖：3 个字段无 UI 入口也无理由（2026-11-13 实跑，已转绿 `dad6324f`）
 
-- **再检绑定**：验证提交 `d7448d2d`；文件集合 `scripts/settings_inventory.py`、`tests/test_settings_ui_coverage.py`、`desktop/config_schema.py`、`desktop/control_panel.py`、`desktop/settings_panel.py`
-- **再检（2026-11-13，R8 清账）**：旧验证提交 `ffeeb7c5` 之后
+- **再检绑定**：验证提交 `f549f78a`；文件集合 `scripts/settings_inventory.py`、`tests/test_settings_ui_coverage.py`、`desktop/config_schema.py`、`desktop/control_panel.py`、`desktop/settings_panel.py`
+- **再检（2026-11-13，R8 第二轮清账）**：`d7448d2d` 之后绑定文件又被两笔 tooltip 去重改动
+  碰过——`01ce69f9` 改 `desktop/control_panel.py`（折叠头 tooltip 去掉重复分组标题，未动
+  `AGC` 控件文案/锚点）、`ec2e20f5` 改 `desktop/settings_panel.py`（删与相邻注释逐字重复的
+  tooltip 并缩 baseline，未动任何字段入口控件）。两笔都不改变本条判据，但按 R8 必须重跑并换绑定。
+  在干净 worktree `D:\mbdsdr\.wt-k17rebind`（`f549f78a`，不含其他线未提交改动）重跑：
+  - `MBDSDR_OFFLINE=1 QT_QPA_PLATFORM=offscreen python -m pytest tests/test_settings_ui_coverage.py::test_forward_every_field_has_ui_entry_or_reason -q`
+    → `1 passed in 1.24s`；
+  - `python scripts/settings_inventory.py` →
+    `字段 55 / 有 UI 入口 51 / 有理由 4 / 缺失 0 / 幽灵键 0 / source_commit ce1ed9ef`
+    （与 `d7448d2d` 时点逐项相同，即上述两笔改动对盘点结论无影响）。
+  绑定验证提交已从 `d7448d2d` 更新为本次跑绿的 `f549f78a`（`f549f78a..HEAD` 期间新增的
+  `fe870899`/`d6bd34d0` 只碰 `docs/COORDINATION.md` 与 `tests/test_safe_commit_exclude.py`，
+  不在本文件集合内，绑定仍成立）。
+- **再检（2026-11-13，R8 首轮清账）**：旧验证提交 `ffeeb7c5` 之后
   `desktop/control_panel.py` / `desktop/settings_panel.py` 又有改动，曾被 R8 退回
   待复核；改用 `dad6324f` 复跑后，`desktop/control_panel.py` 又被 `08e61bd5`
   （AGC/增益能力探测改「真是否实现」）碰过，R8 再次退回。本次在干净 worktree
@@ -1043,11 +1056,20 @@ baseline 56 → 58（`BUILT_AT` 同步 58），每条带 owner + reason：
 > 本条原为 K20 段末一句「属存量问题」，没有 K 编号：机检抓不到、下一班翻 K 表
 > 也看不到。2026-11-13 按正式条目补编号，结论（存量、非 K20 引入）不变。
 
-- **再检绑定**：验证提交 `d3b91c19`；文件集合 `tests/test_tooltip_dynamic_runtime.py`、`desktop/settings_panel.py`
+- **再检绑定**：验证提交 `f549f78a`；文件集合 `tests/test_tooltip_dynamic_runtime.py`、`desktop/settings_panel.py`
+- **再检（2026-11-13，R8 第二轮清账）**：`d3b91c19` 之后 `desktop/settings_panel.py` 被
+  `ec2e20f5`（删与相邻注释逐字重复的 tooltip、同步缩 baseline）碰过，按 R8 重跑换绑定。
+  在干净 worktree `D:\mbdsdr\.wt-k17rebind`（`f549f78a`）实跑：
+  - `python -m pytest tests/test_tooltip_dynamic_runtime.py::test_settings_panel_passthrough_tooltips_self_describe -q`
+    → `1 passed in 2.99s`；
+  - `tests/test_tooltip_guard.py` + `tests/test_tooltip_dynamic_runtime.py` 两套 → `17 passed`。
+  **登记条数已变**：baseline 里 `settings_panel` 只剩 1 条（`purpose`，现落在
+  `desktop/settings_panel.py:1072` 的 `section.header.setToolTip(purpose)`），原 `:1424`/`:1432`
+  两条随去重删除；下文「登记的 3 条」只在 `d3b91c19` 时点成立，不是当前事实。
 - **判定（2026-11-13，不是产品缺陷）**：设置页在 `showEvent → _ensure_ui_built()`
-  时才建控件；用户打开设置页后 tooltip 正常渲染——补 `show()` 触发后，登记的 3 条
-  `:1072` / `:1424` / `:1432` 全部拿到非空文本并通过自描述校验。用户不会「看不到
-  tooltip」，因此按转绿条件第 1 条**修测试，不改产品**。
+  时才建控件；用户打开设置页后 tooltip 正常渲染——补 `show()` 触发后，当时登记的 3 条
+  `:1072` / `:1424` / `:1432` 全部拿到非空文本并通过自描述校验（现仅剩 `:1072` 一条，
+  见上方第二轮再检）。用户不会「看不到 tooltip」，因此按转绿条件第 1 条**修测试，不改产品**。
 - **收口与反证**：
   - `_record` 的 triggers 增加 `p.show()` + `processEvents()`；实跑
     `python -m pytest tests/test_tooltip_dynamic_runtime.py::test_settings_panel_passthrough_tooltips_self_describe -q`
