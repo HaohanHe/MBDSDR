@@ -126,3 +126,39 @@ def test_brand_fill_meets_ui_component_threshold():
     assert 3.0 <= on_accent < 4.5, (
         f"default accent 上的白字对比度变为 {on_accent:.2f}，"
         f"请重新核算并更新本登记项")
+
+
+#: 状态色 token：原先只在全局 COLORS 里、不随主题 remap。2026-11-12 实测
+#: 浅底上 warning 2.21:1、danger 4.21:1，连图标级 3:1 都不够，于是每套
+#: 主题各自持有同名键（只动明度，色相与饱和度不变）。
+_STATUS_TOKENS = ("status_warning", "status_danger")
+_STATUS_BG_ROLES = ("bg", "bg_alt", "card")
+
+
+def _tightest_bg(colors, fg):
+    """取与字色亮度最接近的背景 = 该配色下对比度最低的那个。
+
+    浅色主题是 bg（#F5F3EF，比 card 白底暗）；深色主题是 card（最亮的
+    卡片）。比固定取 bg 更严：将来新增主题换了明暗关系也不会漏检。
+    """
+    return min((colors[r] for r in _STATUS_BG_ROLES),
+               key=lambda c: abs(luminance(c) - luminance(fg)))
+
+
+@pytest.mark.parametrize("theme", _ALL)
+@pytest.mark.parametrize("token_name", _STATUS_TOKENS)
+def test_status_colors_readable_on_theme(theme, token_name):
+    """每套主题的状态色在最严苛背景上 ≥4.5:1（正文级，不是 3:1）。
+
+    阈值口径：这两个 token 当前全部用于状态**文字**（AI 状态标签、步骤卡
+    状态字、工具卡状态字、TLE 日期行、PTT 能力提示），没有纯圆点/边框
+    用法，所以按 WCAG AA 正文 4.5:1 卡，而不是非文本 3:1。
+    """
+    colors = tokens().theme_colors(theme)
+    assert token_name in colors, f"{theme} 缺 {token_name} 键"
+    fg = colors[token_name]
+    bg = _tightest_bg(colors, fg)
+    ratio = contrast_ratio(fg, bg)
+    assert ratio >= 4.5, (
+        f"{theme}: {token_name} {fg} on {bg} 对比度 {ratio:.2f} < 4.5"
+        f"（状态文字，按正文级）")
