@@ -31,6 +31,64 @@ def _clean_env(monkeypatch):
     yield
 
 
+# ----------------------------------------------------------------------
+# A04：损坏且备份失败时，写回必须被拒绝，而且用户要看得见
+# ----------------------------------------------------------------------
+
+class TestBackupFailureBlocksWrite:
+    def test_update_refuses_and_surfaces_reason(self, tmp_path, monkeypatch):
+        """反证：备份失败 → update 返回 False、文件逐字节不变、last_error 可读。"""
+        path = tmp_path / "config.json"
+        bad = b'{"api_key": "sk-live", '
+        path.write_bytes(bad)
+        monkeypatch.setattr(cfg_mod, "_backup_corrupt", lambda *a, **k: None)
+
+        ok = cfg_mod.ConfigStore(str(path)).update(
+            lambda d: d.update({"model": "gpt-x"}))
+
+        assert ok is False, "备份失败时不得写回"
+        assert path.read_bytes() == bad, "唯一原件一个字节都不能动"
+        msg = last_error() or ""
+        assert "备份失败" in msg
+        assert "拒绝保存" in msg
+        assert str(path) in msg
+        assert "手动" in msg, "必须给出可执行的修复建议，而不是静默失败"
+
+    def test_save_config_returns_false_and_keeps_original(self, tmp_path,
+                                                          monkeypatch):
+        """用户改设置走 save_config：明确返回失败，供设置面板显示。"""
+        path = tmp_path / "config.json"
+        bad = b'{"api_key": "sk-live", '
+        path.write_bytes(bad)
+        monkeypatch.setattr(cfg_mod, "_backup_corrupt", lambda *a, **k: None)
+
+        assert save_config(AgentConfig(api_key="sk-new"), str(path)) is False
+        assert path.read_bytes() == bad
+        assert "拒绝保存" in (last_error() or "")
+
+    def test_read_still_degrades_without_freezing_program(self, tmp_path,
+                                                          monkeypatch):
+        """高频读不能被坏文件卡死：read() 仍返回空配置，只记原因。"""
+        path = tmp_path / "config.json"
+        path.write_bytes(b'{ broken')
+        monkeypatch.setattr(cfg_mod, "_backup_corrupt", lambda *a, **k: None)
+
+        assert cfg_mod.ConfigStore(str(path)).read() == {}
+        assert "备份失败" in (last_error() or "")
+
+    def test_block_clears_after_user_fixes_file(self, tmp_path, monkeypatch):
+        """用户手动删/修坏文件后，写回恢复正常，不会永久只读。"""
+        path = tmp_path / "config.json"
+        path.write_bytes(b'{ broken')
+        monkeypatch.setattr(cfg_mod, "_backup_corrupt", lambda *a, **k: None)
+        store = cfg_mod.ConfigStore(str(path))
+        assert store.update(lambda d: d.update({"model": "blocked"})) is False
+
+        path.unlink()                     # 用户手动移除坏文件
+        assert store.update(lambda d: d.update({"model": "recovered"})) is True
+        assert json.loads(path.read_text(encoding="utf-8"))["model"] == "recovered"
+
+
 def _seed(path, **extra):
     data = {"api_key": "original-secret", "base_url": "https://file/v1",
             "model": "file-model", "custom_keep": 42}

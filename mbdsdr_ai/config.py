@@ -197,6 +197,12 @@ class AgentConfig:
 #: 「配置没读进来 / 没写下去」变成可见状态（tx_guard、设置面板等）。
 _LAST_ERROR: Optional[str] = None
 
+#: 损坏且**备份失败**的配置文件路径：这些路径禁止写回。
+#: 备份失败的损坏文件是唯一原件，覆盖它等于把证据和用户配置一起销毁；
+#: 但读取仍按空配置降级（不能因为坏文件把全程序卡成只读），
+#: 保存时由 :meth:`ConfigStore.update` 明确拒绝并通过 ``last_error()`` 告知。
+_SAVE_BLOCKED: set = set()
+
 
 def last_error() -> Optional[str]:
     """返回最近一次配置 IO 的失败原因（成功或从未发生过则返回 None）。"""
@@ -366,18 +372,34 @@ def _exclusive_lock(lock_path: str, timeout: float = LOCK_TIMEOUT_S) -> Iterator
 
 
 def _read_disk(path: str) -> Dict[str, Any]:
-    """读 config.json 现值：缺失返回 {}；损坏先备份证据再返回 {}。"""
+    """读 config.json 现值：缺失返回 {}；损坏先备份证据再返回 {}。
+
+    备份**失败**时把路径记入 :data:`_SAVE_BLOCKED`：读取照旧降级（``tx_guard``
+    等高频读不能被一张坏文件卡死），但写回会被 :meth:`ConfigStore.update`
+    拒绝，避免用空结构覆盖唯一原件。备份成功则解除该路径的写禁（证据已留）。
+    """
     if not os.path.exists(path):
+        _SAVE_BLOCKED.discard(path)
         return {}
     try:
         with open(path, "r", encoding="utf-8") as f:
             data = json.load(f)
+        _SAVE_BLOCKED.discard(path)
         return data if isinstance(data, dict) else {}
     except (OSError, json.JSONDecodeError, UnicodeDecodeError) as exc:
         backup = _backup_corrupt(
             path, f"config.json 读取失败（{type(exc).__name__}: {exc}）：{path}")
-        logger.warning("config.json 读取失败（%s），已备份到 %s；按空配置处理",
-                       exc, backup or "（备份失败）")
+        if backup is None:
+            _SAVE_BLOCKED.add(path)
+            _set_error(
+                f"配置文件损坏且备份失败（{type(exc).__name__}: {exc}）：{path}；"
+                "已拒绝保存以免覆盖唯一原件。请手动复制/修复该文件后重试"
+                "（本次读取按空配置处理）")
+            logger.error("config.json 损坏且备份失败，已禁止写回：%s", path)
+        else:
+            _SAVE_BLOCKED.discard(path)
+            logger.warning("config.json 读取失败（%s），已备份到 %s；按空配置处理",
+                           exc, backup)
         return {}
 
 
@@ -408,6 +430,11 @@ class ConfigStore:
                     "可能有其他进程正在写；本次未写入")
                 return False
             data = _read_disk(self.path)      # 锁内重读，基线永远是磁盘
+            if self.path in _SAVE_BLOCKED:
+                # 损坏且备份失败：``_read_disk`` 已把原因写进 last_error。
+                # 明确返回 False（设置面板/AI 面板会把它显示出来），
+                # 而不是静默不保存——静默比覆盖更难被发现。
+                return False
             try:
                 decision = mutator(data)
             except Exception as exc:  # noqa: BLE001 - 回调错误不落盘，但要可见
