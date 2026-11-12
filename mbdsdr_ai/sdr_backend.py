@@ -3573,10 +3573,18 @@ class AISDRMiniBackend(SDRBackend):
         self._ws = None
         self._ws_lock = threading.Lock()
         self._current_mode = "fm"  # fm / am / sw
+        # 「设备未响应/超时/帧坏」的可归因信息：MCP 调用失败时非空，
+        # 调用方拿到 None 时能知道是哪一步、因为什么失败。
+        self._last_rpc_error: Optional[str] = None
 
     def _send_mcp(self, method: str, params: Optional[Dict] = None) -> Optional[Dict]:
-        """发送 MCP JSON-RPC 请求并等待响应。"""
+        """发送 MCP JSON-RPC 请求并等待响应。
+
+        失败返回 ``None``，原因写入 ``_last_rpc_error`` 并记 warning：
+        不能把「未连接 / 超时 / 帧坏」一律折叠成同一个 None。
+        """
         if not self._ws:
+            self._last_rpc_error = f"{method}: 未连接（_ws 为空）"
             return None
         try:
             with self._ws_lock:
@@ -3590,8 +3598,11 @@ class AISDRMiniBackend(SDRBackend):
                 # 等待响应（最多 2 秒）
                 self._ws.settimeout(2.0)
                 result = json.loads(self._ws.recv())
+                self._last_rpc_error = None
                 return result.get("result") or result.get("params", {}).get("result")
-        except Exception:
+        except Exception as exc:
+            self._last_rpc_error = f"{method}: {type(exc).__name__}: {exc}"
+            logger.warning("MCP 请求失败（%s）", self._last_rpc_error)
             return None
 
     def connect(self) -> bool:
