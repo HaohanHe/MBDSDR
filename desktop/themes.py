@@ -746,6 +746,8 @@ class Theme:
         主题，N 个窗口累计 O(N²)，20+ 个窗口后单次构造从 1.7 s 恶化到 30 s+，
         pytest 套件直接在 UI 线程挂死。状态完全相同时跳过重抛光是安全的。
         """
+        # 幂等早退也要记：早退说明这套主题本来就是当前生效的那个。
+        set_active_theme(self.name)
         palette = _build_palette(self.colors)
         font = get_app_font()
         qss = self._qss()
@@ -1275,3 +1277,21 @@ def get_theme(name: str) -> Theme:
     """按名称获取主题，不存在则返回默认。"""
     name = _THEME_ALIASES.get(name, name)
     return THEMES.get(name, THEMES[DEFAULT_THEME])
+
+
+# 当前生效主题名。Theme.apply() 每次落地时更新，供 tokens.status_color()
+# 解析「这一套主题下的状态色」。还没应用过任何主题时按默认主题算。
+_ACTIVE_THEME = DEFAULT_THEME
+
+
+def set_active_theme(name: str) -> None:
+    """记录当前生效主题（只认 THEMES 里存在的名字，别名先归一）。"""
+    global _ACTIVE_THEME
+    name = _THEME_ALIASES.get(name, name)
+    if name in THEMES:
+        _ACTIVE_THEME = name
+
+
+def active_theme_name() -> str:
+    """当前生效的主题名。"""
+    return _ACTIVE_THEME
