@@ -18,7 +18,19 @@
   * **身份不是名字**（2026-11-13）：claim 成功时签发一次性 `--token`，占位文件
     只存它的 sha256。续租/释放必须带这份凭据——两条同名线（如两条都叫
     `W81线`）各自持有不同凭据，互相 release 会失败，同名不再等于同一持有者。
-    凭据只显示一次，丢了只能等 TTL 过期后重新 claim / takeover。
+  * **凭据持久化**：claim/takeover 会把 token 写到与占位文件同目录的
+    `<claim_id>.token`（best-effort chmod 0600），release / 续租不带 `--token`
+    时自动读取，进程退出后仍能用——不用指望会话记得住输出。release 成功后删
+    sidecar；takeover/过期夺取会用新 token 覆盖旧 sidecar，旧凭据同时作废。
+    sidecar 存**明文**而占位文件只存 sha256，原因：占位文件是长期留档的权威
+    记录（status/audit/其他工具都会读），泄露它不能等同于拿到可用凭据；sidecar
+    的唯一用途就是替持有者出示凭据，存哈希既挡不住同账户进程（能读 sidecar
+    就有能力出示），又会让 `--token` 这条显式通道失效。Windows 同账户下
+    ACL 无法区分不同线，chmod 只是误读减速带，不是安全边界；因此靠缩短
+    生命周期（release 删除、takeover/夺取覆盖）而不是靠文件权限兜底。
+  * **凭据缺失不做名字兜底**：sidecar 被删、旧格式、takeover 之后拿旧 token，
+    一律拒绝并提示「等 TTL 过期后重新 claim / takeover / 带 --token」；
+    绝不会退化成「同名就放行」。
   * 旧格式 claim（落地前写入、没有凭据）**不按名字放行**：用
     `claim --adopt-legacy` 显式迁移一次（会签发凭据），或等 TTL 过期后
     重新 claim / takeover。
@@ -31,6 +43,7 @@
   python scripts/file_claim.py claim desktop/main_window.py --owner 操作逻辑线 --ttl-min 10
   python scripts/file_claim.py claim desktop/main_window.py --owner 操作逻辑线 --token <凭据>
   python scripts/file_claim.py claim desktop/main_window.py --owner 操作逻辑线 --adopt-legacy
+  python scripts/file_claim.py release desktop/main_window.py --owner 操作逻辑线          # 自动读 sidecar
   python scripts/file_claim.py release desktop/main_window.py --owner 操作逻辑线 --token <凭据>
   python scripts/file_claim.py status
   python scripts/file_claim.py status desktop/main_window.py
@@ -285,7 +298,10 @@ def _marker_for(key: str) -> Path:
 # ---------------------------------------------------------------------------
 
 _TOKEN_DOMAIN = b"mbdsdr/file_claim/token/v1:"
-_TOKEN_HINT = "  凭据：--token {token}（释放/续租必须带；只显示这一次，同名不代表同一持有者）"
+_TOKEN_HINT = (
+    "  凭据：--token {token}\n"
+    "  已存到 {path}（release/续租不带 --token 时会自动读取；该文件是持有者凭据，勿外传）"
+)
 
 
 def _token_hash(token: str) -> str:
@@ -297,6 +313,54 @@ def _token_matches(token: Optional[str], expected_hash: str) -> bool:
     if not token or not expected_hash:
         return False
     return hmac.compare_digest(_token_hash(token), expected_hash)
+
+
+def _token_path(key: str) -> Path:
+    """凭据 sidecar：与占位文件同目录同 claim_id，扩展名 .token。
+
+    sidecar 存**明文**凭据（而不是哈希），理由见模块 docstring：
+    它的唯一用途就是替持有者跨进程记住凭据，必须能直接出示；存哈希既挡不住
+    同账户进程（能读 sidecar 就能用），又让 --token 这条显式通道失效。
+    """
+    return _marker_for(key).with_suffix(".token")
+
+
+def _write_token_file(key: str, token: str) -> Optional[str]:
+    """落 sidecar；成功返回 None，失败返回原因（调用方必须显式告警）。"""
+    path = _token_path(key)
+    tmp = path.with_suffix(".token.tmp")
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp.write_text(str(token).strip() + "\n", encoding="utf-8")
+        try:
+            # best-effort：Windows 上 os.chmod 只影响只读位，同一账户进程仍可读，
+            # 因此不把它当安全边界，只当误读/误提交的减速带。
+            os.chmod(tmp, 0o600)
+        except OSError:
+            pass
+        os.replace(tmp, path)
+        return None
+    except OSError as exc:
+        try:
+            tmp.unlink()
+        except OSError:
+            pass
+        return str(exc)
+
+
+def _read_token_file(key: str) -> Optional[str]:
+    try:
+        value = _token_path(key).read_text(encoding="utf-8").strip()
+    except OSError:
+        return None
+    return value or None
+
+
+def _remove_token_file(key: str) -> None:
+    try:
+        _token_path(key).unlink()
+    except OSError:
+        pass
 
 
 # ---------------------------------------------------------------------------
@@ -523,8 +587,15 @@ def cmd_claim(
             _registry_record_claim(payload, None)
         except ClaimDenied as exc:  # 台账只是记录，占位文件才是权威
             print(f"WARN 台账写入失败（claim 仍有效）：{exc}", file=sys.stderr)
+        sidecar_err = _write_token_file(key, fresh_token)
+        if sidecar_err:
+            print(
+                f"WARN 凭据文件写入失败（{_token_path(key)}）：{sidecar_err}\n"
+                f"     本次 release/续租必须显式带 --token；丢了只能等 TTL 过期或 takeover。",
+                file=sys.stderr,
+            )
         print(f"CLAIM OK {display} owner={owner} ttl={ttl_min:g}min 到期={_iso(now + _ttl(ttl_min, now))}")
-        print(_TOKEN_HINT.format(token=fresh_token))
+        print(_TOKEN_HINT.format(token=fresh_token, path=_token_path(key)))
         return EXIT_OK
 
     with _locked_fd(marker, create=False) as fd:
@@ -539,19 +610,28 @@ def cmd_claim(
             # 名字相等只说明「标签一样」，不说明是同一个持有者（两条线可以都
             # 叫 W81线）。身份由 claim 时签发的一次性凭据证明。
             if holder_token_hash:
-                if not _token_matches(token, holder_token_hash):
+                presented = token or _read_token_file(key)
+                if not _token_matches(presented, holder_token_hash):
                     raise ClaimDenied(
                         f"CLAIM DENIED {display}\n"
-                        f"  持有者名同为 {owner}，但这不是同一持有者：该 claim 已绑定凭据，\n"
-                        f"  本次调用没有提供匹配的 --token（同名不等于同一会话）。\n"
-                        f"  处理：用 claim 时输出的 --token 续租；凭据丢了就等 TTL 过期后\n"
-                        f"  重新 claim（会签发新凭据），或走 takeover。"
+                        f"  持有者名同为 {owner}，但无法证明是同一持有者：该 claim 已绑定凭据，\n"
+                        f"  本次未带匹配的 --token，凭据文件 {_token_path(key)} 也缺失/不匹配。\n"
+                        f"  处理：① 有 --token 就带上；② 等 TTL 过期后重新 claim（会签发新凭据）；\n"
+                        f"        ③ 走 takeover（需 pid 已死 + 过期/无在途之一）。\n"
+                        f"  不会按 owner 名放行——同名不等于同一会话。"
                     )
                 renewed = _marker_payload(
                     display, key, owner, ttl_min, now, holder_token_hash
                 )
                 renewed["acquired_at"] = float(data.get("acquired_at") or now)
                 _write_fd(fd, json.dumps(renewed, ensure_ascii=False))
+                # 显式 --token 时顺手补齐/修复 sidecar，避免下次又只能靠记忆。
+                sidecar_err = _write_token_file(key, presented)
+                if sidecar_err:
+                    print(
+                        f"WARN 凭据文件写入失败（{_token_path(key)}）：{sidecar_err}",
+                        file=sys.stderr,
+                    )
                 try:
                     _registry_renew(renewed)
                 except ClaimDenied as exc:
@@ -572,6 +652,12 @@ def cmd_claim(
                 renewed["acquired_at"] = float(data.get("acquired_at") or now)
                 renewed["legacy_upgraded_at"] = now
                 _write_fd(fd, json.dumps(renewed, ensure_ascii=False))
+                sidecar_err = _write_token_file(key, upgraded_token)
+                if sidecar_err:
+                    print(
+                        f"WARN 凭据文件写入失败（{_token_path(key)}）：{sidecar_err}",
+                        file=sys.stderr,
+                    )
                 try:
                     _registry_renew(renewed)
                 except ClaimDenied as exc:
@@ -581,7 +667,7 @@ def cmd_claim(
                     f"  旧格式 claim（只记名字）已迁移为凭据绑定；"
                     f"这次按 owner 名匹配是唯一一次，之后同名也不再放行。"
                 )
-                print(_TOKEN_HINT.format(token=upgraded_token))
+                print(_TOKEN_HINT.format(token=upgraded_token, path=_token_path(key)))
                 return EXIT_OK
             raise ClaimDenied(
                 f"CLAIM DENIED {display}\n"
@@ -610,7 +696,14 @@ def cmd_claim(
             display, key, owner, ttl_min, now, _token_hash(fresh_token)
         )
         _write_fd(fd, json.dumps(renewed, ensure_ascii=False))
+        # 覆盖旧 sidecar：原持有者手里的旧凭据随 marker 哈希一起作废。
+        sidecar_err = _write_token_file(key, fresh_token)
 
+    if sidecar_err:
+        print(
+            f"WARN 凭据文件写入失败（{_token_path(key)}）：{sidecar_err}",
+            file=sys.stderr,
+        )
     try:
         _registry_record_claim(payload, old)
     except ClaimDenied as exc:
@@ -620,7 +713,7 @@ def cmd_claim(
         f"CLAIM OK (steal) {display} owner={owner} ttl={ttl_min:g}min "
         f"（原持有者开始于 {_iso(float(old.get('acquired_at') or 0))}，上次心跳 {_iso(heartbeat)}）"
     )
-    print(_TOKEN_HINT.format(token=fresh_token))
+    print(_TOKEN_HINT.format(token=fresh_token, path=_token_path(key)))
     return EXIT_OK
 
 
@@ -650,21 +743,25 @@ def cmd_release(path: str, owner: str, token: Optional[str] = None) -> int:
             f"        ② 等 TTL 过期后重新 claim；③ 走 takeover。"
         )
 
-    if not _token_matches(token, holder_token_hash):
+    presented = token or (_read_token_file(key) if owner == holder else None)
+    if not _token_matches(presented, holder_token_hash):
         raise ClaimDenied(
             f"RELEASE DENIED {display}\n"
             f"  当前持有者={holder}（你声明的是 {owner}）\n"
             f"  已持有={_minutes(held_s)}min\n"
-            f"  同名 holder 不构成身份：该 claim 绑定了 claim 时签发的 --token，"
-            f"本次调用缺少匹配凭据。\n"
-            f"  只有原持有者能释放；互相解锁等于没有锁。凭据丢了只能等过期后"
-            f"重新 claim 或走 takeover。"
+            f"  凭据缺失或不匹配：该 claim 绑定了 claim 时签发的凭据，"
+            f"本次未带 --token，凭据文件 {_token_path(key)} 也缺失/不匹配。\n"
+            f"  不会按 owner 名放行（同名可以是另一条线，互相解锁等于没有锁）。\n"
+            f"  处理：① 用 claim 时输出过的 --token；② 等 TTL 过期后重新 claim；"
+            f"③ 走 takeover（需 pid 已死 + 过期/无在途之一）。"
         )
 
     try:
         marker.unlink()
     except FileNotFoundError:
         pass
+    # 释放后凭据不再有意义：删 sidecar，避免残留文件被误当成下一次的持有凭据。
+    _remove_token_file(key)
     _registry_release(key, display, _now())
     print(f"RELEASE OK {display} owner={holder}")
     return EXIT_OK
@@ -838,7 +935,14 @@ def cmd_takeover(path: str, owner: str, ttl_min: float, reason: str = "") -> int
             raise ClaimDenied(
                 f"TAKEOVER DENIED {display}\n  占位文件写入失败，已回滚原持有者：{exc}"
             ) from None
+        # 覆盖旧 sidecar：marker 哈希已换，原持有者手里的旧凭据和旧 sidecar 一并作废。
+        sidecar_err = _write_token_file(key, new_token)
 
+    if sidecar_err:
+        print(
+            f"WARN 凭据文件写入失败（{_token_path(key)}）：{sidecar_err}",
+            file=sys.stderr,
+        )
     try:
         _registry_record_claim(payload, old, close_reason="orphan_takeover", takeover=takeover_note)
     except ClaimDenied as exc:
@@ -859,7 +963,7 @@ def cmd_takeover(path: str, owner: str, ttl_min: float, reason: str = "") -> int
         )
         + f"\n  日志：{TAKEOVER_LOG}"
     )
-    print(_TOKEN_HINT.format(token=new_token))
+    print(_TOKEN_HINT.format(token=new_token, path=_token_path(key)))
     return EXIT_OK
 
 
