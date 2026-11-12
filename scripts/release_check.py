@@ -35,8 +35,21 @@
 
 用法::
 
+    # 日常闸（11 步）：源码级判据 + 对最近一次产物的启动/缺件探针
     python scripts/release_check.py
-    python scripts/release_check.py --skip-build --steps smoke,optional,log
+
+    # 发版前完整闸门（15 步）：另加 build / subtree / single / signal
+    python scripts/release_check.py --release
+
+    # 临时只跑某几步
+    python scripts/release_check.py --steps smoke,optional,log
+
+两条命令的分工（2026-11-13 裁定）：``build`` 产主包（实测 201.5–280.6s），
+``subtree`` 产并消费 noarchive 诊断包（实测 237.4–347.0s，其中 ~233–343s 是
+第二次 PyInstaller 构建，检测本体仅数秒），``single``/``signal`` 复用同一
+诊断包（各约 3–4s）。四步合计占整条命令 54%–66% 的墙钟，且判据只在「真包」
+上成立；日常闸不跑它们，但保留 smoke/optional/qt——那三步消费上一次
+``--release`` 产出的 dist，缺包时如实 FAIL，不会假绿。
 """
 
 from __future__ import annotations
@@ -64,14 +77,13 @@ WINDOW_TITLE = "MBDSDR - AI 定义无线电"
 #: 三类缺件的期望弹窗原文（逐字全匹配；{log} 是本次启动日志的已知落点）。
 EXPECT_TITLE_FAIL = "MBDSDR 启动失败"
 EXPECT_TITLE_DLL = "MBDSDR 运行库缺失"
+#: ``subtree`` 删的是 ``_internal/scipy/_external`` 整棵目录；``scipy`` 与
+#: ``scipy.signal`` 的目录仍在，所以自检**只报** _external 下的两个探针。
+#: （2026-11-13 前的期望列了 scipy/scipy.signal，是目录行走探测生效前的旧文本。）
 EXPECT_SUBTREE_BODY = (
     "启动自检失败：缺少必需组件（已中止启动）\n"
     "\n"
     "下面这些是应用正常工作的必需项，缺一项都无法继续：\n"
-    "\n"
-    "• SciPy 科学计算库（scipy）\n"
-    "  缺了会怎样：滤波 / 重采样 / 频谱整条链路不可用\n"
-    "  怎么修：pip install scipy（打包版请重新解压完整安装包）\n"
     "\n"
     "• SciPy 私有子树 _external（完整性探针）"
     "（scipy._external.array_api_compat.common）\n"
@@ -84,10 +96,6 @@ EXPECT_SUBTREE_BODY = (
     "  缺了会怎样：FFT / 频谱计算在运行期懒加载时报 ModuleNotFoundError\n"
     "  怎么修：安装包解压不完整：重新解压/重装完整包，"
     "不要删 _internal 里的文件\n"
-    "\n"
-    "• SciPy 信号处理子包（scipy.signal）\n"
-    "  缺了会怎样：滤波器、解调链、重采样不可用\n"
-    "  怎么修：重装 scipy（pip install --force-reinstall scipy）\n"
     "\n"
     "请按每项的「怎么修」处理后重新启动。\n"
     "\n"
@@ -103,6 +111,18 @@ EXPECT_SINGLE_BODY = (
     "  缺了会怎样：FFT / 频谱计算在运行期懒加载时报 ModuleNotFoundError\n"
     "  怎么修：安装包解压不完整：重新解压/重装完整包，"
     "不要删 _internal 里的文件\n"
+    "\n"
+    "请按每项的「怎么修」处理后重新启动。\n"
+    "\n"
+    "日志：{log}"
+)
+#: ``signal`` 删的是整棵 ``_internal/scipy/signal`` 目录。这是「目录行走探测」
+#: （517d050b）换掉旧期望时**必须补上**的断言：删期望可以，被删掉的那条被测
+#: 行为要另有用例兜住，否则就是拿「少测一条」换绿。
+EXPECT_SIGNAL_BODY = (
+    "启动自检失败：缺少必需组件（已中止启动）\n"
+    "\n"
+    "下面这些是应用正常工作的必需项，缺一项都无法继续：\n"
     "\n"
     "• SciPy 信号处理子包（scipy.signal）\n"
     "  缺了会怎样：滤波器、解调链、重采样不可用\n"
@@ -136,8 +156,16 @@ DEFAULT_DIAG_DIST = os.path.join(TMP_ROOT, "pyi-dist12-noarchive")
 DEFAULT_DIAG_WORK = os.path.join(TMP_ROOT, "pyi-build12-noarchive")
 
 ALL_STEPS = ("docs", "claims", "gen_reconcile", "action_dup", "guards", "build",
-             "smoke", "subtree", "single", "optional", "qt", "narrow", "overlap",
-             "log")
+             "smoke", "subtree", "single", "signal", "optional", "qt", "narrow",
+             "overlap", "log")
+
+#: 日常闸：去掉四个「产物步」——build 产主包，subtree 产 noarchive 诊断包并
+#: 删 _external，single/signal 复用同一诊断包删单文件/单目录。这四步的判据
+#: 只在真包上成立，且合计占整条命令 54%–66% 墙钟；日常改代码不需要每次重打包。
+#: 保留 smoke/optional/qt 是对**最近一次 release 产物**的探针：缺包会 FAIL，
+#: 不会用旧包冒充 HEAD 的打包结论（打包结论以 ``--release`` 为准）。
+DAILY_STEPS = ("docs", "claims", "gen_reconcile", "action_dup", "guards", "smoke",
+               "optional", "qt", "narrow", "overlap", "log")
 
 #: 廉价机检清单（无 Qt、不写盘、单次实测 < 15s，2026-11-13 逐条实跑）：
 #: 这些闸门原先只写在 docs/code-guards.md 里，没有任何入口覆盖——即「登记了但
@@ -245,6 +273,9 @@ FAIL_HINTS = {
                "查 Analysis-00.toc 的 scipy._external.* 条目",
     "single": "确认诊断包里存在 fft.pyc；"
               "查 _packaging_verdict 是否把单文件缺失判成「解压不完整」",
+    "signal": "确认 noarchive 诊断包里有 _internal/scipy/signal 整棵目录；"
+              "删整目录必须报「SciPy 信号处理子包（scipy.signal）」——"
+              "目录行走探测生效后，这是唯一能证明 scipy.signal 仍被检查的用例",
     "optional": "确认 _internal/librtlsdr.dll 存在；"
                 "对照 desktop/startup_paths.py 的 runtime_dll_report()",
     "qt": "确认 _internal/PySide6/plugins/platforms/qwindows.dll 存在；"
@@ -533,6 +564,13 @@ def _step_dialog(exe: str, log_path: str, expected_title: str,
             return False, (f"标题不符：期望「{expected_title}」"
                            f"实际「{actual_title}」")
         actual = _normalize_text(_dialog_body(found[0]))
+        # MessageBox 先建窗再填正文；标题一出现就取会读到空 Static（实测：
+        # 连续跑 subtree→single 时 single 偶发空正文）。这里只等正文出现，
+        # 判据仍是逐字全匹配，等不到照旧按空正文判 FAIL。
+        deadline = time.time() + 3
+        while not actual and time.time() < deadline:
+            time.sleep(0.1)
+            actual = _normalize_text(_dialog_body(found[0]))
         expected = _normalize_text(expected_body.format(log=log_path))
         if actual != expected:
             diff = "\n".join(difflib.unified_diff(
@@ -772,19 +810,79 @@ def _diff_snapshot(before: dict[str, int], after: dict[str, int]) -> list[str]:
     return sorted(changed)
 
 
-def _scan_userprofile_log_writes(since: float) -> tuple[list[str], int]:
-    """全盘扫 C:\\Users\\<user>，只认**本产品**的日志类文件（*.log / 名字含 startup）。
+def _is_log_file_name(name: str) -> bool:
+    """``*.log`` 与轮转形态 ``*.log.1`` / ``*.log.2``（不认 ``startup`` 这类词）。"""
+    low = name.lower()
+    if low.endswith(".log"):
+        return True
+    _head, sep, tail = low.rpartition(".log.")
+    return bool(sep) and bool(_head) and tail.isdigit()
+
+
+def _looks_like_product_log(path: str) -> bool:
+    """产品日志 = ``.log`` 后缀 **且**（文件名或任一目录段带 ``mbdsdr``）。
+
+    2026-11-13 收紧：旧判据是「路径含 mbdsdr 且文件名含 startup / mbdsdr_desktop」，
+    会把别的会话从 ``%TEMP%`` 复制的 ``mbdsdr_ai/startup_sequence.py`` 误判成
+    产品日志。日志就是日志：先要求 ``.log`` 后缀，再要求产品归属，两条同时成立
+    才算。``gui_config.json`` 等用户数据与 ``.py`` 源码都不在池子里。
+    """
+    name = os.path.basename(path).lower()
+    if not _is_log_file_name(name):
+        return False
+    if "mbdsdr" in name:
+        return True
+    parts = [p.lower() for p in
+             os.path.dirname(path).replace("/", "\\").split("\\") if p]
+    return any(p == "mbdsdr" or p.startswith("mbdsdr.") for p in parts)
+
+
+def _step_warmup(exe: str, timeout: float = 90) -> tuple[bool, str]:
+    """预热启动：只把 exe 拉起来一次，等任意顶层窗口出现后关掉。
+
+    目的不是判据，而是把「冷启动 49.5s / 热启动 2.3s」两种事实分开：文件
+    缓存与首次 DLL 加载留给这一次，随后的 smoke（45s 窗口）与 qt（40s 窗口）
+    才在同一状态下读秒。预热失败不影响 PASS/FAIL，只如实打印耗时供归因。
+    """
+    started = time.time()
+    proc = _launch(exe)
+    try:
+        found = None
+        deadline = started + timeout
+        while time.time() < deadline:
+            # 只认产品窗口（主窗口或三类失败弹窗）；输入法会先建一个
+            # "Default IME" 顶层窗口，拿它当预热完成会提前到 0.6s，
+            # 文件缓存还没热，读出来的 smoke 秒数不可信。
+            rows = [w for w in _windows_of_pid(proc.pid) if "MBDSDR" in w[1]]
+            if rows:
+                found = rows[0]
+                break
+            if proc.poll() is not None:
+                break
+            time.sleep(0.2)
+        elapsed = time.time() - started
+        if found is None:
+            alive = proc.poll() is None
+            return False, (f"{elapsed:.1f}s 内没等到窗口"
+                           f"（进程{'存活' if alive else '已退出'}）")
+        return True, f"{elapsed:.1f}s 出现窗口「{found[1][:40]}」"
+    finally:
+        _kill(proc)
+
+
+def _scan_userprofile_log_writes(since: float,
+                                 home: str | None = None) -> tuple[list[str], int]:
+    """全盘扫用户目录，只认**产品日志**（``*.log`` 后缀 + 产品归属，见上）。
 
     不把整个用户目录的 mtime 都算成 FAIL：运行期间浏览器/系统也会写缓存，
     别的 MBDSDR 会话还会写 gui_config.json（用户数据，不是日志），
-    那些噪声不能算到本次运行头上。本项要证明的是「产品日志不落 C 盘用户目录」，
-    所以按日志文件名过滤；其余用户数据由产品设计决定，另行说明。
+    那些噪声不能算到本次运行头上。本项要证明的是「产品日志不落 C 盘用户目录」。
 
     另外排除 IDE / Agent 会话日志目录（``.workbuddy`` / ``.trae*`` /
     ``.vscode`` / ``.cursor``）：它们的文件名会带工作区名 ``mbdsdr``
     （如 ``mbdsdr__<session>.log``），但那是编辑器写的会话记录，不是产品日志。
     """
-    home = os.path.expanduser("~")
+    home = home or os.path.expanduser("~")
     hits: list[str] = []
     lock = threading.Lock()
     counter = [0]
@@ -802,15 +900,10 @@ def _scan_userprofile_log_writes(since: float) -> tuple[list[str], int]:
             if _is_tool_dir(dirpath):
                 dirnames[:] = []
                 continue
-            app_dir = "mbdsdr" in dirpath.lower()
             for name in filenames:
                 scanned += 1
-                lowered = name.lower()
                 full = os.path.join(dirpath, name)
-                if not app_dir and "mbdsdr" not in lowered:
-                    continue
-                if not (lowered.endswith(".log") or "startup" in lowered
-                        or "mbdsdr_desktop" in lowered):
+                if not _looks_like_product_log(full):
                     continue
                 try:
                     if os.stat(full).st_mtime >= since:
@@ -838,8 +931,11 @@ def _scan_userprofile_log_writes(since: float) -> tuple[list[str], int]:
 # ----------------------------------------------------------------------
 def main() -> int:
     ap = argparse.ArgumentParser(description="MBDSDR 发布前自检")
-    ap.add_argument("--steps", default=",".join(ALL_STEPS),
-                    help=f"逗号分隔，可选：{','.join(ALL_STEPS)}")
+    ap.add_argument("--release", action="store_true",
+                    help="发版前完整闸门：在 11 步日常闸之外加 "
+                         "build/subtree/single/signal（产物四步）")
+    ap.add_argument("--steps", default=None,
+                    help=f"逗号分隔，覆盖默认步骤集；可选：{','.join(ALL_STEPS)}")
     ap.add_argument("--skip-build", action="store_true",
                     help="复用已有 dist，不重新构建")
     ap.add_argument("--dist-dir", default=DEFAULT_DIST)
@@ -856,7 +952,10 @@ def main() -> int:
                     help="FAIL 后继续跑剩余步骤（只用于出完整报告；默认失败即停）")
     args = ap.parse_args()
 
-    wanted = {s.strip() for s in args.steps.split(",") if s.strip()}
+    profile = "release" if args.release else "daily"
+    defaults = ALL_STEPS if args.release else DAILY_STEPS
+    raw_steps = args.steps if args.steps is not None else ",".join(defaults)
+    wanted = {s.strip() for s in raw_steps.split(",") if s.strip()}
     unknown = wanted - set(ALL_STEPS)
     if unknown:
         print(f"未知步骤：{sorted(unknown)}", file=sys.stderr)
@@ -865,6 +964,8 @@ def main() -> int:
         wanted.discard("build")
 
     os.makedirs(RC_DIR, exist_ok=True)
+    print(f"闸门：{profile}（{len(wanted)} 步："
+          + ",".join(s for s in ALL_STEPS if s in wanted) + "）", flush=True)
 
     # 环境预检：DSO 数据不一致是环境问题，不是 UI 红灯，单独退出码 3。
     env_ok, env_msg = _preflight_env()
@@ -1183,6 +1284,24 @@ def main() -> int:
             if not os.path.isfile(target):
                 raise RuntimeError(f"复原失败：{target}")
 
+    def do_signal() -> tuple[bool, str]:
+        """删整棵 ``scipy/signal`` 目录：目录行走探测生效后，这是唯一能证明
+        ``scipy.signal`` 仍被启动自检覆盖的用例（旧期望已随 subtree/single
+        的陈旧文本一起删掉，不能拿「少测一条」换绿）。"""
+        exe = diag_exe()
+        target = os.path.join(args.diag_dist_dir, "MBDSDR", "_internal",
+                              "scipy", "signal")
+        if not os.path.isdir(target):
+            return False, f"找不到 {target}"
+        backup = _rename_away(target)
+        try:
+            return _step_dialog(exe, log_path, EXPECT_TITLE_FAIL,
+                                EXPECT_SIGNAL_BODY, None)
+        finally:
+            _restore(backup, target)
+            if not os.path.isdir(target):
+                raise RuntimeError(f"复原失败：{target}")
+
     def do_optional() -> tuple[bool, str]:
         exe = _exe_of(args.dist_dir)
         target = os.path.join(args.dist_dir, "MBDSDR", "_internal",
@@ -1224,10 +1343,11 @@ def main() -> int:
             return True, f"~/.config/MBDSDR 无新增/变化（全盘扫描已跳过）；日志={log_path}"
         hits, scanned = _scan_userprofile_log_writes(run_start)
         if hits:
-            return False, f"C 盘用户目录出现本次写入的日志文件：\n" + \
+            return False, f"C 盘用户目录出现本次写入的产品日志：\n" + \
                 "\n".join(hits[:20])
-        return True, (f"C:\\Users 全盘 {scanned} 个文件里无本次写入的日志"
-                      f"（*.log/startup，mtime 过滤）；日志={log_path}")
+        return True, (f"C:\\Users 全盘 {scanned} 个文件里无本次写入的产品日志"
+                      f"（*.log/.log.N 且文件名或目录含 mbdsdr，mtime 过滤）；"
+                      f"日志={log_path}")
 
     steps = (
         ("docs", do_docs),
@@ -1239,16 +1359,39 @@ def main() -> int:
         ("smoke", do_smoke),
         ("subtree", do_subtree),
         ("single", do_single),
+        ("signal", do_signal),
         ("optional", do_optional),
         ("qt", do_qt),
         ("narrow", _step_narrow),
         ("overlap", _step_overlap),
         ("log", do_log),
     )
+    warmed = [False]
+
+    def warm_once() -> None:
+        """预热一次（不计入判据）：build 成功后或 smoke 之前执行。"""
+        if warmed[0]:
+            return
+        warmed[0] = True
+        exe = _exe_of(args.dist_dir)
+        if not os.path.isfile(exe):
+            print(f"[预热] 跳过：{exe} 不存在（先跑 --release 出包）",
+                  flush=True)
+            return
+        ok, detail = _step_warmup(exe)
+        print(f"[预热] {'完成' if ok else '未完成'}：{detail}（不计入判据）",
+              flush=True)
+
     fail_step: str | None = None
     for name, fn in steps:
+        if name not in wanted:
+            continue
+        if name in ("smoke", "qt"):
+            warm_once()
         run(name, fn)
-        if results and results[-1]["status"] == "FAIL":
+        if name == "build" and results[-1]["status"] == "PASS":
+            warm_once()
+        if results[-1]["status"] == "FAIL":
             fail_step = name
             if not args.keep_going:
                 # 失败即停：后面的步骤只会被同一缺陷污染，先修当前这条。
