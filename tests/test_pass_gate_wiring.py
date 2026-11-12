@@ -51,7 +51,13 @@ def _fixed_datetime_class():
 
 
 def _refresh(panel, monkeypatch, settings: dict):
-    """在固定时刻跑一次 refresh_passes，返回 [(name, peak_deg)]。
+    """在固定时刻跑一次 refresh_passes，返回 {key: (name, peak_deg)}。
+
+    ``key`` 取左列第二行的**中天时刻**（``升起 → 中天 → 落下`` 的中间段）：
+    同一条过境在「显示低仰角」开/关、5°/10° 两种门限下，升起/落下时刻会
+    因粗扫网格差 1 分钟，中天时刻不变；名字行则会多出「（低仰角）」标记。
+    **按 key 判存在性**，不按整行文本判——否则只改标记就能让「门限没生效」
+    的列表差异看起来像真的（2026-11-13 抓到的假绿）。
 
     `_settings` 直接注入：修前代码不读它（于是红），修后读它。
     """
@@ -68,14 +74,14 @@ def _refresh(panel, monkeypatch, settings: dict):
                                         line2=ISS_L2, catnr=25544))
     monkeypatch.setattr(nst, "datetime", _fixed_datetime_class())
     panel.refresh_passes()
-    out = []
+    out = {}
     for row in range(panel.passes_table.rowCount()):
-        # 左列两行：卫星名（可能带「低仰角」）\n过境时刻。集合比较
-        # 只能取名字行，否则 5°/10° 的分钟差会让每一行都算「多出来」。
-        name = panel.passes_table.item(row, 0).text().splitlines()[0]
+        # 左列两行：卫星名（可能带「低仰角」）/ 升起 → 中天 → 落下 · 多普勒
+        left = panel.passes_table.item(row, 0).text().splitlines()
+        key = left[1].split("→")[1].split("·")[0].strip()
         # 2026-11-11 表格压成 2 列：右列两行「峰值仰角°\n持续分」
         alt = panel.passes_table.item(row, 1).text().splitlines()[0]
-        out.append((name, float(alt.rstrip("°"))))
+        out[key] = (left[0], float(alt.rstrip("°")))
     return out
 
 
@@ -97,18 +103,23 @@ def test_refresh_passes_respects_user_min_elevation(qapp, monkeypatch):
     assert at5 != at10, (
         "设 5° 与设 10° 返回了同一集合：说明 refresh_passes 没有消费 "
         "settings.effective_pass_min_elevation_deg，仍在用写死的 10°")
-    extra = [row for row in at5 if row not in at10]
+    extra = sorted(set(at5) - set(at10))
     assert len(extra) == 1, (
         f"5° 应比 10° 恰好多列 1 条 5–10° 过境，实际多出 {extra}（5°={at5}，10°={at10}）")
-    peak = extra[0][1]
+    peak = at5[extra[0]][1]
     assert (_LOW_BAND_DEG[0] - _PEAK_TOLERANCE_DEG
             <= peak < _LOW_BAND_DEG[1] + _PEAK_TOLERANCE_DEG), (
         f"多出的过境应是 5–10° 的低仰角过境"
-        f"（显示容差 ±{_PEAK_TOLERANCE_DEG}°），实际 {extra[0]}")
+        f"（显示容差 ±{_PEAK_TOLERANCE_DEG}°），实际 {at5[extra[0]]}")
 
 
 def test_show_low_elevation_passes_lists_and_marks_5_to_10(qapp, monkeypatch):
-    """开关打开后 5–10° 过境出现，并在卫星名上标注「低仰角」。"""
+    """开关打开后 5–10° 过境出现，并在卫星名上标注「低仰角」。
+
+    判据是**过境 key 的存在性**（升起/中天/落下时刻），不是整行文本：
+    「低仰角」标记会让开/关两行文本天然不同，若按整行比，把门限改成
+    无条件包含（gate=0°）时用例依旧绿——那等于这条用例没有守卫门限。
+    """
     from desktop.new_spacetime_panel import NewSpacetimePanel
 
     panel = NewSpacetimePanel()
@@ -123,17 +134,19 @@ def test_show_low_elevation_passes_lists_and_marks_5_to_10(qapp, monkeypatch):
     finally:
         panel.close()
 
-    assert off != on, "「显示低仰角过境」开关没有生效，两次列表相同"
-    extra = [row for row in on if row not in off]
+    extra = sorted(set(on) - set(off))
     assert len(extra) == 1, (
-        f"开关打开后应恰好多列 1 条 5–10° 过境，实际多出 {extra}（关={off}，开={on}）")
-    peak = extra[0][1]
+        f"开关打开后应恰好多列 1 条 5–10° 过境（按过境时刻 key 比较），"
+        f"实际多出 {extra}（关={sorted(off)}，开={sorted(on)}）")
+    name, peak = on[extra[0]]
     assert (_LOW_BAND_DEG[0] - _PEAK_TOLERANCE_DEG
             <= peak < _LOW_BAND_DEG[1] + _PEAK_TOLERANCE_DEG), (
         f"多出的过境应是 5–10° 的低仰角过境"
-        f"（显示容差 ±{_PEAK_TOLERANCE_DEG}°），实际 {extra[0]}")
-    low_on = [row for row in on if "低仰角" in row[0]]
-    assert low_on, f"开关打开后低仰角过境未在表格里标注「低仰角」，实际 {on}"
+        f"（显示容差 ±{_PEAK_TOLERANCE_DEG}°），实际 {(name, peak)}")
+    assert "低仰角" in name, (
+        f"多出的那条过境应在卫星名上标注「低仰角」，实际 {name}")
+    assert all("低仰角" not in n for n, _peak in off.values()), (
+        f"开关关闭时不该出现「低仰角」标记，实际 {sorted(off.values())}")
     assert "峰值仰角" in label and "10" in label, (
         f"筛选口径文案没有写清「峰值仰角 ≥ N°」，实际：{label}")
     assert "低仰角" in label, f"文案没有解释低仰角开关，实际：{label}"
