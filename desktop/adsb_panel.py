@@ -87,7 +87,7 @@ ADSB_DEMOD_GATE_TEXT = (
     "当前解调 {demod}，ADS-B 需要 AM —— 请切到 AM 再解"
 )
 NO_STATION_TEXT = ("未设置观测地点\n"
-                   "请在「设置 → 卫星与多普勒 → 观测地点纬度/经度」填写")
+                   "请在「设置 → 天文观测 → 观测地点纬度/经度」填写")
 
 # 飞机超时 30 秒未更新即移除。
 AIRCRAFT_TTL_SEC = 30.0

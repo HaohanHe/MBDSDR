@@ -128,7 +128,7 @@ def probe_dir_writable_async(directory: str, callback) -> None:
             os.remove(probe)
         except OSError as exc:
             error = (f"录音目录不可写（{directory}）：{exc}。"
-                     "请在「设置 → 存储与日志」改到可写目录。")
+                     "请在「设置 → 数据与操作」改到可写目录。")
         callback(error)
 
     threading.Thread(target=_run, name="mbdsdr-writable-probe",
