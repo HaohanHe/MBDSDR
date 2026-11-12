@@ -3906,3 +3906,18 @@ time_input_guard 4 处裸时钟）；等对方收工、工作区静止后重跑�
   1095 字节（4 条 Temp 探针书签）。隔离缺陷在本线修掉，按个人文件安全
   规矩**没有擅自清理**，需用户确认才动。
 - 队列 2（权威桌面全量）顺延到对方收工、工作区静止后重跑；队列 1、3 不变。
+
+---
+
+## 订正（2026-11-12 22:50）：`9b8b6c69` 提交信息取错源，不改历史
+
+`9b8b6c69`（设置三环线，corrupt-evidence 启动清点）的提交信息是**误取的源文件
+内容**：私有 index 提交助手把 `-F` 的参数错位成了 `mbdsdr_ai/corrupt_evidence.py`。
+该提交内容本身正确（`desktop/main.py` 注释、`test_corruption_evidence.py`、
+pending-patches README），**只缺主体源文件**；主体改动已在子提交 `4655458f`
+补齐，工作树与 HEAD 一致（`git status` 干净对应这三份文件）。
+
+**决定：不 amend。** `4655458f` 已是它的子提交，改写 `9b8b6c69` 必须 rebase
+子孙；当前多线并行提交，rebase 掉的会是别人的提交。保留错 message 并在此
+留一行更正，代价最小。后续私有 index 提交一律用显式 Python `subprocess`
+传 `GIT_INDEX_FILE`，并核对 `git log -1` 的 subject。

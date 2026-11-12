@@ -1,0 +1,53 @@
+Subject: [PATCH 04] main_window: 站址镜像写入失败时给出用户可见提示
+
+落点：desktop/main_window.py
+  1) import 区 station_sync 导入块（生成时 569-571）
+  2) _save_gui_config 的站址镜像 try 块（生成时 14456-14466）
+
+依赖字段（已存在）：
+  - desktop/station_sync.py::last_error()
+  - write_config_site / clear_config_site 的 bool 返回值
+  - main_window 模块级 MSG_IMPORTANT
+
+---
+diff --git a/desktop/main_window.py b/desktop/main_window.py
+--- a/desktop/main_window.py
++++ b/desktop/main_window.py
+@@ -566,8 +566,9 @@
+ from right_column import RightColumn
+ from floating_panel import FloatingPanel
+ from time_machine import TimeMachineDialog, format_offset
+ from station_sync import (
+-    clear_config_site, gui_site_from, read_config_site, write_config_site,
++    clear_config_site, gui_site_from, last_error as station_sync_last_error,
++    read_config_site, write_config_site,
+ )
+ from location_panel import LocationPanel
+ from panel_registry import registry
+@@ -14456,12 +14456,21 @@
+             # 站址镜像：agent / controller / MCP 读的是 ~/.mbdsdr/config.json。
+             # 只由这里单向下发（用户权威位置），别处只读；GNSS 实时 fix 不落盘，
+             # 所以也不会被镜像成"旧位置冒充当前"。
+             try:
+                 if self._observer_lat is not None \
+                         and self._observer_lon is not None:
+-                    write_config_site(self._observer_lat, self._observer_lon)
++                    mirrored = write_config_site(self._observer_lat,
++                                                 self._observer_lon)
+                 else:
+-                    clear_config_site()
+-            except Exception:  # noqa: BLE001
+-                pass
++                    mirrored = clear_config_site()
++            except Exception as e:  # noqa: BLE001
++                mirrored = False
++                logger.warning("站址镜像写入异常：%s", e)
++            if not mirrored:
++                # 用户权威位置已写进 gui_config.json，但 agent 读的是
++                # config.json：镜像失败会让天空图与跟踪各用一套位置。
++                self.statusBar().showMessage(
++                    "位置已保存，但同步给 agent / 跟踪失败："
++                    f"{station_sync_last_error() or '原因未知'}",
++                    MSG_IMPORTANT)
+         except Exception as e:  # noqa: BLE001
+             logger.warning("保存 GUI 配置失败: %s", e)

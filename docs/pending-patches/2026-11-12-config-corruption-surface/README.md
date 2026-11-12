@@ -2,7 +2,7 @@
 
 > **状态：只写草稿，不应用。** `desktop/main_window.py` 由卫星线独占，本目录一行未改。
 > 生成基线：`e908937d`（`fix(command-palette): …`），生成时 `desktop/main_window.py` 无本地改动。
-> 校验：三份 patch 均通过 `git apply --check`（对生成时工作区）。
+> 校验：四份 patch 均通过 `git apply --check`（对生成时工作区）。
 
 ## 为什么现在写
 
@@ -18,6 +18,7 @@ guardian / version_store / workflow_engine / command_palette）都做到「备�
 | 01 | `01-bookmark-panel-status.patch` | `desktop/bookmark_panel.py` | 136-138、163-164 | 可直接 apply（不属卫星线文件） |
 | 02 | `02-main-window-freq-mgr-status.patch` | `desktop/main_window.py` | 2097-2099 | **等卫星线锁** |
 | 03 | `03-capability-drawer-agent-stores.patch` | `desktop/capability_drawer.py` | 35、90、153-162、178-182 | 可直接 apply |
+| 04 | `04-main-window-station-mirror-status.patch` | `desktop/main_window.py` | 569-571、14456-14466 | **等卫星线锁** |
 
 数据源字段（草稿依赖，均已存在）：
 
@@ -104,9 +105,30 @@ guardian / version_store / workflow_engine / command_palette）都做到「备�
 - **同一行被改动后怎么判断**：
   1. 能力位元组是否仍是 `(attr, title)` 二元组、渲染是否仍用 `name + "\n" + note`；
   2. 若 `_collect` 被改成返回 3 元组/数据类 → 本 patch 放弃，按新结构重写（不要硬改）；
-  3. 若抽屉已改为读 `get_status_text()` 展示 → 优先用它，但仍要先确认
-     `memory.get_status_text()` 已包含错误（当前不含）；
+  3. 若抽屉已改为读 `get_status_text()` 展示 → 优先用它（`memory.get_status_text()`
+     已在 `1db672b3` 补上 `last_error`，scheduler / guardian 同口径）；
   4. `git log -L 153,164:desktop/capability_drawer.py` 确认这段没有他线改动。
+
+## 04 主窗口：站址镜像写入失败贴一次状态栏
+
+- **落点**：`main_window.py` 的 `station_sync` 导入块（569-571）；`_save_gui_config`
+  里 `write_config_site` / `clear_config_site` 的 `try` 块（14456-14466）。
+- **插入内容**：导入 `last_error as station_sync_last_error`；把两个调用的返回值收成
+  `mirrored`，`False` 时用 `statusBar().showMessage(..., MSG_IMPORTANT)` 报出
+  `station_sync.last_error()`（含路径与原因）。**不新建控件、不改保存流程。**
+- **落完用户会看到**：改完位置后若 `config.json` 镜像写失败，状态栏出现
+  「位置已保存，但同步给 agent / 跟踪失败：站址镜像备份失败（…）：路径 → .bak；
+  本次未写入，避免覆盖唯一证据」，8 秒后消失。
+- **为什么必须报**：`gui_config.json` 已写入新位置，但 agent / controller 读的是
+  `config.json` 镜像——不报就是「天空图按新位置、跟踪按旧位置」，两边都不报错。
+- **诚实说明**：仍是**一次性、会消失**的提示；`station_sync` 的失败原因没有
+  常驻位。`.bak` 备份不是 `*.corrupt-*`，不会进启动清点的「损坏备份」数。
+- **同一行被改动后怎么判断**：
+  1. `_save_gui_config` 是否仍在这处单向下发站址（`grep -n "write_config_site" desktop/`）；
+  2. `write_config_site` 是否仍返回 bool、`last_error()` 是否仍存在；
+  3. 若卫星线已给镜像失败加了状态栏/弹窗 → **放弃本 patch**，不重复显示；
+  4. 若只是行号漂移、`try` 块与两个调用仍在 → 重新生成 patch，不手改行号；
+  5. **禁止** `git apply -3`、禁止按行号盲贴。
 
 ---
 
