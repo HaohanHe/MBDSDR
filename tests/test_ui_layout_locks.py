@@ -177,6 +177,10 @@ def main_window(request, isolated_profile):
     import tempfile
     tmp_dir = tempfile.mkdtemp(prefix="mbdsdr_ui_baseline_")
     restore = _isolate_environment(tmp_dir)
+    # 先挂 finalizer 再做后续 setup：下面任何一步（含尺寸断言）抛异常时，
+    # 写在 yield 之后的 restore() 都不会执行，HOME/APPDATA/QSettings 会
+    # 漏给同一进程里的后续文件。finalizer 在 setup 失败时也会跑。
+    request.addfinalizer(restore)
     from main_window import MainWindow
     win = MainWindow()
     for t in getattr(win, "_startup_timers", []):
@@ -229,7 +233,6 @@ def main_window(request, isolated_profile):
     win.close()
     win.deleteLater()
     app.sendPostedEvents(None, QEvent.DeferredDelete)
-    restore()
 
 
 def test_baseline_environment_is_isolated(main_window):
