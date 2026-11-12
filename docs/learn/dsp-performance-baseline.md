@@ -126,9 +126,9 @@ python scripts/soak_receive_chain.py --minutes 3 --speed 10 --sr 192000
 | VFO 旋转子按 (块长, 频偏) 缓存 | `mbdsdr_ai/dsp.py` `VFO.process` | 0.751 ms | 0.467 ms | 约 −38%。**前后均为旧时点，本轮未复跑** |
 
 > 上表两处微基准的「前 / 后」都是旧时点读数，本轮没有复跑，**不构成「本轮核过」**。
-> 本轮同条件可复跑的当前值在 `rates[].stages.*.median_ms`（例：0.96 MS/s 档
-> `fft_2048` 0.196 ms、`vfo_nbfm` 0.494 ms），指标定义与表中各行不完全相同，
-> 不要直接相减。
+> 本轮同条件可复跑的当前值在 `docs/perf-evidence/2026-11-12/dsp-throughput-2p4ms-head-run1.json`
+> 的 `rates[].stages.*.median_ms`（例：0.96 MS/s 档 `fft_2048` 0.196 ms、`vfo_nbfm`
+> 0.494 ms），指标定义与表中各行不完全相同，不要直接相减。
 
 **端到端可持续速率为啥不在这张表里**：文档旧记「3.75 → 6.83 MS/s（1.8x 提速）」，
 本轮在独立 worktree 里把旧码 `06e42a69`（2026-11-06 01:41，正是那批数字被测出来时的
