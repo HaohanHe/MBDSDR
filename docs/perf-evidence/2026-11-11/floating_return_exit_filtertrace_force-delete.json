@@ -1,0 +1,1222 @@
+{
+ "snapshot": "1e90b7f6",
+ "platform": "offscreen",
+ "variant": "force-delete",
+ "counter_by_type_valid": [
+  {
+   "type": "QWidget",
+   "valid": true,
+   "count": 16613
+  },
+  {
+   "type": "QLabel",
+   "valid": true,
+   "count": 8232
+  },
+  {
+   "type": "QScrollBar",
+   "valid": true,
+   "count": 4648
+  },
+  {
+   "type": "QGroupBox",
+   "valid": true,
+   "count": 2665
+  },
+  {
+   "type": "QListView",
+   "valid": true,
+   "count": 2543
+  },
+  {
+   "type": "QMenu",
+   "valid": true,
+   "count": 2157
+  },
+  {
+   "type": "QPushButton",
+   "valid": true,
+   "count": 2130
+  },
+  {
+   "type": "QFrame",
+   "valid": true,
+   "count": 2080
+  },
+  {
+   "type": "QToolButton",
+   "valid": true,
+   "count": 1683
+  },
+  {
+   "type": "QLineEdit",
+   "valid": true,
+   "count": 1262
+  },
+  {
+   "type": "QComboBox",
+   "valid": true,
+   "count": 1193
+  },
+  {
+   "type": "QCheckBox",
+   "valid": true,
+   "count": 783
+  },
+  {
+   "type": "QAction",
+   "valid": true,
+   "count": 756
+  },
+  {
+   "type": "RightSection",
+   "valid": true,
+   "count": 656
+  },
+  {
+   "type": "QAbstractButton",
+   "valid": true,
+   "count": 648
+  },
+  {
+   "type": "_SectionHeader",
+   "valid": true,
+   "count": 471
+  },
+  {
+   "type": "QHeaderView",
+   "valid": true,
+   "count": 453
+  },
+  {
+   "type": "QDoubleSpinBox",
+   "valid": true,
+   "count": 339
+  },
+  {
+   "type": "QAbstractScrollArea",
+   "valid": true,
+   "count": 296
+  },
+  {
+   "type": "QSlider",
+   "valid": true,
+   "count": 293
+  },
+  {
+   "type": "QSpinBox",
+   "valid": true,
+   "count": 248
+  },
+  {
+   "type": "QSplitterHandle",
+   "valid": true,
+   "count": 244
+  },
+  {
+   "type": "QProgressBar",
+   "valid": true,
+   "count": 208
+  },
+  {
+   "type": "QTableWidget",
+   "valid": true,
+   "count": 208
+  },
+  {
+   "type": "QListWidget",
+   "valid": true,
+   "count": 169
+  },
+  {
+   "type": "QSplitter",
+   "valid": true,
+   "count": 148
+  },
+  {
+   "type": "QScrollArea",
+   "valid": true,
+   "count": 121
+  },
+  {
+   "type": "_CollapsibleGroupBox",
+   "valid": true,
+   "count": 112
+  },
+  {
+   "type": "QObject",
+   "valid": true,
+   "count": 106
+  },
+  {
+   "type": "QVBoxLayout",
+   "valid": true,
+   "count": 96
+  },
+  {
+   "type": "QTextEdit",
+   "valid": true,
+   "count": 91
+  },
+  {
+   "type": "_StageSlider",
+   "valid": true,
+   "count": 90
+  },
+  {
+   "type": "QAbstractSpinBox",
+   "valid": true,
+   "count": 84
+  },
+  {
+   "type": "QAbstractEventDispatcher",
+   "valid": true,
+   "count": 84
+  },
+  {
+   "type": "QToolBar",
+   "valid": true,
+   "count": 76
+  },
+  {
+   "type": "_DragHandle",
+   "valid": true,
+   "count": 75
+  },
+  {
+   "type": "QAbstractItemView",
+   "valid": true,
+   "count": 68
+  },
+  {
+   "type": "CapabilityDrawer",
+   "valid": true,
+   "count": 56
+  },
+  {
+   "type": "FreqOrbitChart",
+   "valid": true,
+   "count": 53
+  },
+  {
+   "type": "MainWindow",
+   "valid": true,
+   "count": 51
+  },
+  {
+   "type": "SettingsPanel",
+   "valid": true,
+   "count": 50
+  },
+  {
+   "type": "AIPanel",
+   "valid": true,
+   "count": 48
+  },
+  {
+   "type": "FloatingPanel",
+   "valid": true,
+   "count": 46
+  },
+  {
+   "type": "RFSkyView",
+   "valid": true,
+   "count": 45
+  },
+  {
+   "type": "ControlPanel",
+   "valid": true,
+   "count": 45
+  },
+  {
+   "type": "QTreeWidget",
+   "valid": true,
+   "count": 45
+  },
+  {
+   "type": "BookmarkPanel",
+   "valid": true,
+   "count": 44
+  },
+  {
+   "type": "QStatusBar",
+   "valid": true,
+   "count": 44
+  },
+  {
+   "type": "SatTrackPanel",
+   "valid": true,
+   "count": 43
+  },
+  {
+   "type": "QStackedWidget",
+   "valid": true,
+   "count": 41
+  },
+  {
+   "type": "ScannerPanel",
+   "valid": true,
+   "count": 38
+  },
+  {
+   "type": "StatusPanel",
+   "valid": true,
+   "count": 37
+  },
+  {
+   "type": "NewSpacetimePanel",
+   "valid": true,
+   "count": 37
+  },
+  {
+   "type": "ServiceSettingsPanel",
+   "valid": true,
+   "count": 35
+  },
+  {
+   "type": "VfoPanel",
+   "valid": true,
+   "count": 35
+  },
+  {
+   "type": "ConstellationPanel",
+   "valid": true,
+   "count": 35
+  },
+  {
+   "type": "SpectrumCurveWidget",
+   "valid": true,
+   "count": 33
+  },
+  {
+   "type": "SpectrumPanel",
+   "valid": true,
+   "count": 31
+  },
+  {
+   "type": "QTextDocument",
+   "valid": true,
+   "count": 31
+  },
+  {
+   "type": "ModulePanel",
+   "valid": true,
+   "count": 30
+  },
+  {
+   "type": "AprsPanel",
+   "valid": true,
+   "count": 30
+  },
+  {
+   "type": "WeatherPanel",
+   "valid": true,
+   "count": 28
+  },
+  {
+   "type": "WaterfallWidget",
+   "valid": true,
+   "count": 27
+  },
+  {
+   "type": "_CapabilitySampleRateCombo",
+   "valid": true,
+   "count": 27
+  },
+  {
+   "type": "DevicePanel",
+   "valid": true,
+   "count": 27
+  },
+  {
+   "type": "QBoxLayout",
+   "valid": true,
+   "count": 27
+  },
+  {
+   "type": "RightColumn",
+   "valid": true,
+   "count": 26
+  },
+  {
+   "type": "AdsbPanel",
+   "valid": true,
+   "count": 26
+  },
+  {
+   "type": "AdsbMapPanel",
+   "valid": true,
+   "count": 25
+  },
+  {
+   "type": "FreqDisplay",
+   "valid": true,
+   "count": 25
+  },
+  {
+   "type": "ModulationPanel",
+   "valid": true,
+   "count": 24
+  },
+  {
+   "type": "AnrPanel",
+   "valid": true,
+   "count": 24
+  },
+  {
+   "type": "GainPanel",
+   "valid": true,
+   "count": 24
+  },
+  {
+   "type": "SatelliteImagePanel",
+   "valid": true,
+   "count": 24
+  },
+  {
+   "type": "QSizeGrip",
+   "valid": true,
+   "count": 23
+  },
+  {
+   "type": "QTimer",
+   "valid": true,
+   "count": 21
+  },
+  {
+   "type": "OsmMapView",
+   "valid": true,
+   "count": 20
+  },
+  {
+   "type": "_GnssSkyView",
+   "valid": true,
+   "count": 20
+  },
+  {
+   "type": "_ConstellationView",
+   "valid": true,
+   "count": 20
+  },
+  {
+   "type": "_AdsbMapCanvas",
+   "valid": true,
+   "count": 20
+  },
+  {
+   "type": "FlowCanvas",
+   "valid": true,
+   "count": 19
+  },
+  {
+   "type": "QAbstractTextDocumentLayout",
+   "valid": true,
+   "count": 18
+  },
+  {
+   "type": "QTabWidget",
+   "valid": true,
+   "count": 17
+  },
+  {
+   "type": "QTabBar",
+   "valid": true,
+   "count": 17
+  },
+  {
+   "type": "QMenuBar",
+   "valid": true,
+   "count": 16
+  },
+  {
+   "type": "QTableView",
+   "valid": true,
+   "count": 15
+  },
+  {
+   "type": "QWidgetAction",
+   "valid": true,
+   "count": 11
+  },
+  {
+   "type": "QHBoxLayout",
+   "valid": true,
+   "count": 9
+  },
+  {
+   "type": "_NightVeil",
+   "valid": true,
+   "count": 9
+  },
+  {
+   "type": "RemedyLinkLabel",
+   "valid": true,
+   "count": 7
+  },
+  {
+   "type": "QApplication",
+   "valid": true,
+   "count": 5
+  },
+  {
+   "type": "QFormLayout",
+   "valid": true,
+   "count": 5
+  },
+  {
+   "type": "TileLoader",
+   "valid": true,
+   "count": 3
+  },
+  {
+   "type": "QCommonStyle",
+   "valid": true,
+   "count": 3
+  },
+  {
+   "type": "QThread",
+   "valid": true,
+   "count": 3
+  },
+  {
+   "type": "QStyleHints",
+   "valid": true,
+   "count": 3
+  },
+  {
+   "type": "QThreadPool",
+   "valid": true,
+   "count": 1
+  },
+  {
+   "type": "QTreeView",
+   "valid": true,
+   "count": 1
+  }
+ ],
+ "invalid_count": 0,
+ "invalid": [],
+ "panel_layouts": {
+  "2568490402944": "QVBoxLayout",
+  "2568472236288": "QHBoxLayout",
+  "2568471917888": "QVBoxLayout",
+  "2568471917952": "QHBoxLayout",
+  "2568471261056": "QVBoxLayout",
+  "2568471814144": "QHBoxLayout",
+  "2568470450624": "QHBoxLayout",
+  "2568471764928": "QHBoxLayout",
+  "2568512170752": "QBoxLayout",
+  "2568512170688": "QBoxLayout",
+  "2568512170816": "QBoxLayout",
+  "2568472021696": "QHBoxLayout",
+  "2568512170880": "QBoxLayout",
+  "2568512170944": "QBoxLayout",
+  "2568512171008": "QBoxLayout",
+  "2568472022272": "QHBoxLayout",
+  "2568512171072": "QBoxLayout",
+  "2568512171136": "QBoxLayout",
+  "2568512171200": "QBoxLayout",
+  "2568472022912": "QHBoxLayout",
+  "2568512171264": "QBoxLayout",
+  "2568512171328": "QBoxLayout",
+  "2568512171392": "QBoxLayout",
+  "2568472023552": "QHBoxLayout",
+  "2568512171456": "QBoxLayout",
+  "2568512171520": "QBoxLayout",
+  "2568512171584": "QBoxLayout",
+  "2568472025600": "QHBoxLayout",
+  "2568472025664": "QHBoxLayout",
+  "2568472025920": "QHBoxLayout",
+  "2568472026560": "QHBoxLayout",
+  "2568472027328": "QHBoxLayout",
+  "2568472029184": "QVBoxLayout",
+  "2568472029632": "QHBoxLayout",
+  "2568472030208": "QHBoxLayout",
+  "2568470556160": "QHBoxLayout"
+ },
+ "panel_layout_filter_hits": [
+  {
+   "phase": "return",
+   "type": "QWidget",
+   "valid": true,
+   "event_type": 71,
+   "py_id": 2568512171584,
+   "panel_layout": "QBoxLayout"
+  },
+  {
+   "phase": "return",
+   "type": "QWidget",
+   "valid": true,
+   "event_type": 71,
+   "py_id": 2568490402944,
+   "panel_layout": "QVBoxLayout"
+  },
+  {
+   "phase": "return",
+   "type": "QWidget",
+   "valid": true,
+   "event_type": 16,
+   "py_id": 2568472236288,
+   "panel_layout": "QHBoxLayout"
+  },
+  {
+   "phase": "return",
+   "type": "QWidget",
+   "valid": true,
+   "event_type": 16,
+   "py_id": 2568490402944,
+   "panel_layout": "QVBoxLayout"
+  },
+  {
+   "phase": "return",
+   "type": "QWidget",
+   "valid": true,
+   "event_type": 16,
+   "py_id": 2568472236288,
+   "panel_layout": "QHBoxLayout"
+  },
+  {
+   "phase": "return",
+   "type": "QWidget",
+   "valid": true,
+   "event_type": 16,
+   "py_id": 2568490402944,
+   "panel_layout": "QVBoxLayout"
+  },
+  {
+   "phase": "return",
+   "type": "QBoxLayout",
+   "valid": true,
+   "event_type": 170,
+   "py_id": 2568471917952,
+   "panel_layout": "QHBoxLayout"
+  },
+  {
+   "phase": "return",
+   "type": "QBoxLayout",
+   "valid": true,
+   "event_type": 71,
+   "py_id": 2568471917952,
+   "panel_layout": "QHBoxLayout"
+  },
+  {
+   "phase": "return",
+   "type": "QWidget",
+   "valid": true,
+   "event_type": 71,
+   "py_id": 2568471814144,
+   "panel_layout": "QHBoxLayout"
+  },
+  {
+   "phase": "return",
+   "type": "QWidget",
+   "valid": true,
+   "event_type": 71,
+   "py_id": 2568471814144,
+   "panel_layout": "QHBoxLayout"
+  },
+  {
+   "phase": "return",
+   "type": "QMenu",
+   "valid": true,
+   "event_type": 71,
+   "py_id": 2568471814144,
+   "panel_layout": "QHBoxLayout"
+  },
+  {
+   "phase": "return",
+   "type": "QLineEdit",
+   "valid": true,
+   "event_type": 39,
+   "py_id": 2568470450624,
+   "panel_layout": "QHBoxLayout"
+  },
+  {
+   "phase": "return",
+   "type": "QLineEdit",
+   "valid": true,
+   "event_type": 170,
+   "py_id": 2568471814144,
+   "panel_layout": "QHBoxLayout"
+  },
+  {
+   "phase": "return",
+   "type": "QLineEdit",
+   "valid": true,
+   "event_type": 97,
+   "py_id": 2568470450624,
+   "panel_layout": "QHBoxLayout"
+  },
+  {
+   "phase": "return",
+   "type": "QLineEdit",
+   "valid": true,
+   "event_type": 97,
+   "py_id": 2568471814144,
+   "panel_layout": "QHBoxLayout"
+  }
+ ],
+ "tail": [
+  {
+   "phase": "exit",
+   "type": "QToolButton",
+   "valid": true,
+   "event_type": 97,
+   "py_id": 2568472460480
+  },
+  {
+   "phase": "exit",
+   "type": "QToolButton",
+   "valid": true,
+   "event_type": 97,
+   "py_id": 2568472460480
+  },
+  {
+   "phase": "exit",
+   "type": "QToolButton",
+   "valid": true,
+   "event_type": 97,
+   "py_id": 2568472460480
+  },
+  {
+   "phase": "exit",
+   "type": "QToolButton",
+   "valid": true,
+   "event_type": 97,
+   "py_id": 2568472460480
+  },
+  {
+   "phase": "exit",
+   "type": "QToolButton",
+   "valid": true,
+   "event_type": 39,
+   "py_id": 2568472460480
+  },
+  {
+   "phase": "exit",
+   "type": "QToolButton",
+   "valid": true,
+   "event_type": 100,
+   "py_id": 2568472460480
+  },
+  {
+   "phase": "exit",
+   "type": "QToolButton",
+   "valid": true,
+   "event_type": 184,
+   "py_id": 2568472460480
+  },
+  {
+   "phase": "exit",
+   "type": "QToolButton",
+   "valid": true,
+   "event_type": 184,
+   "py_id": 2568472034112
+  },
+  {
+   "phase": "exit",
+   "type": "QToolButton",
+   "valid": true,
+   "event_type": 184,
+   "py_id": 2568472459648
+  },
+  {
+   "phase": "exit",
+   "type": "QToolButton",
+   "valid": true,
+   "event_type": 184,
+   "py_id": 2568472460480
+  },
+  {
+   "phase": "exit",
+   "type": "QToolButton",
+   "valid": true,
+   "event_type": 39,
+   "py_id": 2568472460480
+  },
+  {
+   "phase": "exit",
+   "type": "QToolButton",
+   "valid": true,
+   "event_type": 97,
+   "py_id": 2568472460480
+  },
+  {
+   "phase": "exit",
+   "type": "QToolButton",
+   "valid": true,
+   "event_type": 97,
+   "py_id": 2568472460480
+  },
+  {
+   "phase": "exit",
+   "type": "QToolButton",
+   "valid": true,
+   "event_type": 97,
+   "py_id": 2568472460480
+  },
+  {
+   "phase": "exit",
+   "type": "QToolButton",
+   "valid": true,
+   "event_type": 97,
+   "py_id": 2568472460480
+  },
+  {
+   "phase": "exit",
+   "type": "QToolButton",
+   "valid": true,
+   "event_type": 39,
+   "py_id": 2568472460480
+  },
+  {
+   "phase": "exit",
+   "type": "QToolButton",
+   "valid": true,
+   "event_type": 100,
+   "py_id": 2568472460480
+  },
+  {
+   "phase": "exit",
+   "type": "QToolButton",
+   "valid": true,
+   "event_type": 184,
+   "py_id": 2568472460480
+  },
+  {
+   "phase": "exit",
+   "type": "QToolButton",
+   "valid": true,
+   "event_type": 184,
+   "py_id": 2568472034112
+  },
+  {
+   "phase": "exit",
+   "type": "QLabel",
+   "valid": true,
+   "event_type": 39,
+   "py_id": 2568471817664
+  },
+  {
+   "phase": "exit",
+   "type": "QLabel",
+   "valid": true,
+   "event_type": 97,
+   "py_id": 2568471817664
+  },
+  {
+   "phase": "exit",
+   "type": "QLabel",
+   "valid": true,
+   "event_type": 97,
+   "py_id": 2568471817664
+  },
+  {
+   "phase": "exit",
+   "type": "QLabel",
+   "valid": true,
+   "event_type": 39,
+   "py_id": 2568471817664
+  },
+  {
+   "phase": "exit",
+   "type": "QLabel",
+   "valid": true,
+   "event_type": 100,
+   "py_id": 2568471817664
+  },
+  {
+   "phase": "exit",
+   "type": "QComboBox",
+   "valid": true,
+   "event_type": 184,
+   "py_id": 2568472107264
+  },
+  {
+   "phase": "exit",
+   "type": "QLineEdit",
+   "valid": true,
+   "event_type": 184,
+   "py_id": 2568472031552
+  },
+  {
+   "phase": "exit",
+   "type": "FreqDisplay",
+   "valid": true,
+   "event_type": 184,
+   "py_id": 2568472106944
+  },
+  {
+   "phase": "exit",
+   "type": "QPushButton",
+   "valid": true,
+   "event_type": 184,
+   "py_id": 2568471870336
+  },
+  {
+   "phase": "exit",
+   "type": "QComboBox",
+   "valid": true,
+   "event_type": 184,
+   "py_id": 2568472110784
+  },
+  {
+   "phase": "exit",
+   "type": "QComboBox",
+   "valid": true,
+   "event_type": 184,
+   "py_id": 2568472101568
+  },
+  {
+   "phase": "exit",
+   "type": "QSlider",
+   "valid": true,
+   "event_type": 184,
+   "py_id": 2568472113728
+  },
+  {
+   "phase": "exit",
+   "type": "QPushButton",
+   "valid": true,
+   "event_type": 184,
+   "py_id": 2568472206464
+  },
+  {
+   "phase": "exit",
+   "type": "_CapabilitySampleRateCombo",
+   "valid": true,
+   "event_type": 184,
+   "py_id": 2568472115072
+  },
+  {
+   "phase": "exit",
+   "type": "QComboBox",
+   "valid": true,
+   "event_type": 184,
+   "py_id": 2568472108544
+  },
+  {
+   "phase": "exit",
+   "type": "QComboBox",
+   "valid": true,
+   "event_type": 184,
+   "py_id": 2568472200768
+  },
+  {
+   "phase": "exit",
+   "type": "QCheckBox",
+   "valid": true,
+   "event_type": 184,
+   "py_id": 2568472200448
+  },
+  {
+   "phase": "exit",
+   "type": "QComboBox",
+   "valid": true,
+   "event_type": 184,
+   "py_id": 2568472200064
+  },
+  {
+   "phase": "exit",
+   "type": "QSpinBox",
+   "valid": true,
+   "event_type": 184,
+   "py_id": 2568472199744
+  },
+  {
+   "phase": "exit",
+   "type": "QCheckBox",
+   "valid": true,
+   "event_type": 184,
+   "py_id": 2568472101312
+  },
+  {
+   "phase": "exit",
+   "type": "QCheckBox",
+   "valid": true,
+   "event_type": 184,
+   "py_id": 2568472199424
+  },
+  {
+   "phase": "exit",
+   "type": "QCheckBox",
+   "valid": true,
+   "event_type": 184,
+   "py_id": 2568470559104
+  },
+  {
+   "phase": "exit",
+   "type": "QPushButton",
+   "valid": true,
+   "event_type": 184,
+   "py_id": 2568472102720
+  },
+  {
+   "phase": "exit",
+   "type": "QSlider",
+   "valid": true,
+   "event_type": 184,
+   "py_id": 2568472200576
+  },
+  {
+   "phase": "exit",
+   "type": "QSlider",
+   "valid": true,
+   "event_type": 184,
+   "py_id": 2568472202752
+  },
+  {
+   "phase": "exit",
+   "type": "QPushButton",
+   "valid": true,
+   "event_type": 184,
+   "py_id": 2568471814080
+  },
+  {
+   "phase": "exit",
+   "type": "QPushButton",
+   "valid": true,
+   "event_type": 184,
+   "py_id": 2568472109376
+  },
+  {
+   "phase": "exit",
+   "type": "QLabel",
+   "valid": true,
+   "event_type": 184,
+   "py_id": 2568472110272
+  },
+  {
+   "phase": "exit",
+   "type": "QPushButton",
+   "valid": true,
+   "event_type": 184,
+   "py_id": 2568471814080
+  },
+  {
+   "phase": "exit",
+   "type": "QPushButton",
+   "valid": true,
+   "event_type": 184,
+   "py_id": 2568472109376
+  },
+  {
+   "phase": "exit",
+   "type": "QPushButton",
+   "valid": true,
+   "event_type": 184,
+   "py_id": 2568472102720
+  },
+  {
+   "phase": "exit",
+   "type": "QProgressBar",
+   "valid": true,
+   "event_type": 39,
+   "py_id": 2568472197888
+  },
+  {
+   "phase": "exit",
+   "type": "QProgressBar",
+   "valid": true,
+   "event_type": 97,
+   "py_id": 2568472197888
+  },
+  {
+   "phase": "exit",
+   "type": "QProgressBar",
+   "valid": true,
+   "event_type": 97,
+   "py_id": 2568472197888
+  },
+  {
+   "phase": "exit",
+   "type": "QProgressBar",
+   "valid": true,
+   "event_type": 39,
+   "py_id": 2568472197888
+  },
+  {
+   "phase": "exit",
+   "type": "QProgressBar",
+   "valid": true,
+   "event_type": 100,
+   "py_id": 2568472197888
+  },
+  {
+   "phase": "exit",
+   "type": "QLabel",
+   "valid": true,
+   "event_type": 184,
+   "py_id": 2568509527360
+  },
+  {
+   "phase": "exit",
+   "type": "QLabel",
+   "valid": true,
+   "event_type": 184,
+   "py_id": 2568509527616
+  },
+  {
+   "phase": "exit",
+   "type": "QLabel",
+   "valid": true,
+   "event_type": 184,
+   "py_id": 2568509528576
+  },
+  {
+   "phase": "exit",
+   "type": "QPushButton",
+   "valid": true,
+   "event_type": 39,
+   "py_id": 2568470764544
+  },
+  {
+   "phase": "exit",
+   "type": "QPushButton",
+   "valid": true,
+   "event_type": 97,
+   "py_id": 2568470764544
+  },
+  {
+   "phase": "exit",
+   "type": "QPushButton",
+   "valid": true,
+   "event_type": 97,
+   "py_id": 2568470764544
+  },
+  {
+   "phase": "exit",
+   "type": "QPushButton",
+   "valid": true,
+   "event_type": 39,
+   "py_id": 2568470764544
+  },
+  {
+   "phase": "exit",
+   "type": "QPushButton",
+   "valid": true,
+   "event_type": 100,
+   "py_id": 2568470764544
+  },
+  {
+   "phase": "exit",
+   "type": "QLabel",
+   "valid": true,
+   "event_type": 39,
+   "py_id": 2568470763392
+  },
+  {
+   "phase": "exit",
+   "type": "QLabel",
+   "valid": true,
+   "event_type": 97,
+   "py_id": 2568470763392
+  },
+  {
+   "phase": "exit",
+   "type": "QLabel",
+   "valid": true,
+   "event_type": 97,
+   "py_id": 2568470763392
+  },
+  {
+   "phase": "exit",
+   "type": "QLabel",
+   "valid": true,
+   "event_type": 39,
+   "py_id": 2568470763392
+  },
+  {
+   "phase": "exit",
+   "type": "QLabel",
+   "valid": true,
+   "event_type": 100,
+   "py_id": 2568470763392
+  },
+  {
+   "phase": "exit",
+   "type": "QToolButton",
+   "valid": true,
+   "event_type": 184,
+   "py_id": 2568472460480
+  },
+  {
+   "phase": "exit",
+   "type": "QToolButton",
+   "valid": true,
+   "event_type": 39,
+   "py_id": 2568472460480
+  },
+  {
+   "phase": "exit",
+   "type": "QToolButton",
+   "valid": true,
+   "event_type": 97,
+   "py_id": 2568472460480
+  },
+  {
+   "phase": "exit",
+   "type": "QToolButton",
+   "valid": true,
+   "event_type": 97,
+   "py_id": 2568472460480
+  },
+  {
+   "phase": "exit",
+   "type": "QToolButton",
+   "valid": true,
+   "event_type": 97,
+   "py_id": 2568472460480
+  },
+  {
+   "phase": "exit",
+   "type": "QToolButton",
+   "valid": true,
+   "event_type": 97,
+   "py_id": 2568472460480
+  },
+  {
+   "phase": "exit",
+   "type": "QToolButton",
+   "valid": true,
+   "event_type": 39,
+   "py_id": 2568472460480
+  },
+  {
+   "phase": "exit",
+   "type": "QToolButton",
+   "valid": true,
+   "event_type": 100,
+   "py_id": 2568472460480
+  },
+  {
+   "phase": "exit",
+   "type": "QToolButton",
+   "valid": true,
+   "event_type": 184,
+   "py_id": 2568472460480
+  },
+  {
+   "phase": "exit",
+   "type": "QToolButton",
+   "valid": true,
+   "event_type": 184,
+   "py_id": 2568472034112
+  },
+  {
+   "phase": "exit",
+   "type": "QTimer",
+   "valid": true,
+   "event_type": 170,
+   "py_id": 2568470762048
+  },
+  {
+   "phase": "exit",
+   "type": "QStatusBar",
+   "valid": true,
+   "event_type": 71,
+   "py_id": 2568471407168
+  }
+ ],
+ "verdict": "在「弹出 → 归位 → 关闭退出」序列里，事件过滤器收到 0 个 isValid=False 的对象"
+}
