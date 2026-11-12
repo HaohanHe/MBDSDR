@@ -45,9 +45,10 @@ def _angle_diff(a: float, b: float) -> float:
 
 # 月球对拍阈值：**外部星历真值**（JPL DE421，经 skyfield 读取），
 # 不是「两套自家实现的最大分歧」。120″ = DE421 月球精度（约 1″ 量级）
-# + 本仓 Meeus 截断级数的模型余量（实测 26.6″）；阈值取外部真值口径。
+# + 本仓 Meeus 截断级数的模型余量（实测 26–51″，随日期变、非回归；基准 JD
+# 2461356.898138 下 50.4″，见 docs/hw-acceptance.md §一 R6 行与注）；阈值取外部真值口径。
 MOON_TOL_ARCSEC = 120.0
-# 视直径：本仓用简化地月距离，实测差 4.8″，留 12″ 余量。
+# 视直径：本仓用简化地月距离，实测差 4.2–6.4″，留 12″ 余量。
 MOON_DIA_TOL_ARCSEC = 12.0
 # 反证门槛：把参考时刻故意拨快 1 小时（月球约 0.55°/h ≈ 1980″），
 # 断言必须红。要求错位误差 ≥600″ 才算「确实能红」。
@@ -131,14 +132,15 @@ def _render_sky(out_dir: str, lat: float, lon: float) -> tuple[bool, str]:
     return nonblank, path
 
 
-def run(lat: float, lon: float) -> dict:
+def run(lat: float, lon: float, jd: float | None = None) -> dict:
     out = common.artifact_dir("r6_sky_mode")
     from mbdsdr_ai.astronomy.planets import compute_moon, compute_planet
     from mbdsdr_ai.atmosphere import _sun_ra_dec_deg
     from mbdsdr_ai import station
 
-    now = datetime.datetime.now(datetime.timezone.utc)
-    jd = now.timestamp() / 86400.0 + 2440587.5
+    if jd is None:
+        now = datetime.datetime.now(datetime.timezone.utc)
+        jd = now.timestamp() / 86400.0 + 2440587.5
     ra_s, dec_s = _sun_ra_dec_deg(jd)
     ra_ref, dec_ref = _meeus_sun_ra_dec(jd)
     sun_err = max(_angle_diff(ra_s, ra_ref),
@@ -261,12 +263,15 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser(description="R6 星象仪模式")
     ap.add_argument("--lat", type=float, default=43.88)
     ap.add_argument("--lon", type=float, default=125.32)
+    ap.add_argument("--jd", type=float, default=None,
+                    help="固定 UT 儒略日（复跑用；缺省取当前时刻）")
     ap.add_argument("--out", default="")
     args = ap.parse_args()
     if args.out:
         os.environ["MBDSDR_HW_ACCEPTANCE_DIR"] = args.out
     out = common.artifact_dir("r6_sky_mode")
-    res = common.guarded("R6", "星象仪模式", lambda: run(args.lat, args.lon),
+    res = common.guarded("R6", "星象仪模式",
+                         lambda: run(args.lat, args.lon, args.jd),
                          device_required=False,
                          human_required=["星空布局/交互观感"])
     raise SystemExit(common.emit(res, out))
