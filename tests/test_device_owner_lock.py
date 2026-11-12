@@ -131,6 +131,83 @@ def test_pid_reuse_is_not_mistaken_for_same_holder(_registry):
     assert ok is True, f"pid 复用被误判为活持有者: {rec}"
 
 
+# ------------------------------------------ 判活：没权限查 ≠ 进程不存在
+def test_open_process_error_classification():
+    """只有 ERROR_INVALID_PARAMETER(87) 说明「进程不存在」。
+
+    ACCESS_DENIED(5) 是「没权限查」——低完整性进程查高完整性持有者就是这一种;
+    其余失败码同样「查不到」。把这些判死会清掉活着的持有者记录。
+    """
+    assert sb._open_process_failure_means_dead(87) is True
+    for err in (5, 0, None, 6, 87_000):
+        assert sb._open_process_failure_means_dead(err) is False, err
+
+
+@pytest.mark.skipif(os.name != "nt", reason="错误码分流走的是 Windows 探活路径")
+def test_access_denied_keeps_live_holder_record(_registry, monkeypatch):
+    """反证：没权限查（ACCESS_DENIED）时记录不被清，claim 必须被拒。"""
+    _seed(_registry, "rtl_0", 424242, None)
+    monkeypatch.setattr(sb, "_open_process_for_query", lambda pid: (0, 5))
+
+    assert sb._proc_probe(424242) == (sb.PROC_UNKNOWN, None)
+    assert sb.release_stale_owners() == [], "没权限查不能当成持有者已死"
+    assert sb.get_active_owner("rtl_0") is not None
+    ok, holder = sb.claim_active_owner(sb.AI_OWNER, "rtl_0")
+    assert ok is False, "查不到 ≠ 不存在：不能让第二个进程抢进同一根棒"
+    assert holder["pid"] == 424242
+
+
+@pytest.mark.skipif(os.name != "nt", reason="错误码分流走的是 Windows 探活路径")
+def test_invalid_parameter_still_releases_dead_holder(_registry, monkeypatch):
+    """反证的另一半（别为了安全把功能锁死）：确证进程不存在时仍必须让位。"""
+    _seed(_registry, "rtl_0", 424242, None)
+    monkeypatch.setattr(sb, "_open_process_for_query", lambda pid: (0, 87))
+
+    assert sb._proc_probe(424242) == (sb.PROC_DEAD, None)
+    ok, _ = sb.claim_active_owner(sb.AI_OWNER, "rtl_0")
+    assert ok is True, "ERROR_INVALID_PARAMETER 已证明进程不存在，记录必须清掉"
+
+
+# ------------------------------------------ 登记表损坏：留证据，不静默丢
+def test_corrupt_registry_is_backed_up_with_reason(_registry):
+    """损坏 → ``.corrupt-<时间戳>`` + 成对的 ``.reason.txt``（复用统一模板）。"""
+    _registry.write_text("{not json", encoding="utf-8")
+
+    assert sb.get_active_owner() is None          # 按空处理，不抛、不阻塞连接
+    backups = [p for p in _registry.parent.glob("device_owner.json.corrupt-*")
+               if not p.name.endswith(".reason.txt")]
+    assert len(backups) == 1, backups
+    reason = backups[0].with_name(backups[0].name + ".reason.txt")
+    assert reason.exists(), "损坏备份必须与理由文件成对"
+    assert reason.read_text(encoding="utf-8").strip()
+
+
+def test_non_object_registry_is_also_treated_as_corrupt(_registry):
+    """JSON 合法但顶层不是对象，同样算损坏（不能静默当成「无占用」）。"""
+    _registry.write_text("[]", encoding="utf-8")
+
+    assert sb.get_active_owner() is None
+    assert list(_registry.parent.glob("device_owner.json.corrupt-*"))
+
+
+def test_missing_registry_is_not_corruption(_registry):
+    """首次运行/用户手动删除 ≠ 损坏：不留备份，否则每次首启都多一个文件。"""
+    assert sb.get_active_owner() is None
+    assert not list(_registry.parent.glob("*.corrupt-*"))
+
+
+def test_corrupt_registry_shows_up_in_evidence_scan(_registry):
+    """统一模板的验收：备份能被 ``corrupt_evidence`` 清点到（诊断页可见）。"""
+    from mbdsdr_ai.corrupt_evidence import scan_corruption_evidence
+
+    _registry.write_text("{not json", encoding="utf-8")
+    sb.get_active_owner()
+
+    report = scan_corruption_evidence([str(_registry.parent)])
+    assert report["total"] == 1, report
+    assert report["recent"], report
+
+
 # ------------------------------------------------------------ manager 接线
 class _StubDevice:
     def __init__(self, device_id: str) -> None:

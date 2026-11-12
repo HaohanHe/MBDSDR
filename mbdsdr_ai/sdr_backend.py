@@ -117,53 +117,118 @@ def owner_label(owner: str) -> str:
     return _OWNER_LABELS.get(str(owner or ""), str(owner or "其他程序"))
 
 
-def _proc_start_time(pid: int) -> Optional[float]:
-    """进程启动时间（秒，平台无关的相对量）；进程不存在/查不到返回 None。"""
+#: ``OpenProcess`` 失败码：ERROR_INVALID_PARAMETER(87) = 进程真的不存在。
+_ERROR_INVALID_PARAMETER = 87
+#: ``PROCESS_QUERY_LIMITED_INFORMATION``（能查退出码/启动时间的最低权限）。
+_PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+_STILL_ACTIVE = 259
+
+#: 进程探活三态。**「查不到」不等于「不存在」**：没有查询权限时不能判死。
+PROC_ALIVE = "alive"
+PROC_DEAD = "dead"
+PROC_UNKNOWN = "unknown"
+
+
+def _open_process_failure_means_dead(err: Optional[int]) -> bool:
+    """``OpenProcess`` 失败码是否说明「进程真的不存在」。
+
+    只有 ``ERROR_INVALID_PARAMETER``(87) 是这个意思。``ERROR_ACCESS_DENIED``(5)
+    是「没权限查」——低完整性进程查高完整性进程就是这一种。把它判死会清掉
+    **活着**的持有者记录，两个进程随后同时打开同一根 USB 棒、分同一条流
+    （WinUSB/usbfs 都不拦），这是最不该 fail-open 的地方。其余失败码一律
+    按「查不到」处理。
+    """
+    return err == _ERROR_INVALID_PARAMETER
+
+
+def _kernel32():
+    """带完整 argtypes/restype 的 kernel32（HANDLE 是 64 位指针，不设会被截断）。"""
+    import ctypes
+    import ctypes.wintypes as wt
+    k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    k32.OpenProcess.restype = wt.HANDLE
+    k32.OpenProcess.argtypes = (wt.DWORD, wt.BOOL, wt.DWORD)
+    k32.GetExitCodeProcess.argtypes = (wt.HANDLE, ctypes.POINTER(wt.DWORD))
+    k32.GetProcessTimes.argtypes = (
+        wt.HANDLE, ctypes.POINTER(wt.FILETIME), ctypes.POINTER(wt.FILETIME),
+        ctypes.POINTER(wt.FILETIME), ctypes.POINTER(wt.FILETIME))
+    k32.CloseHandle.argtypes = (wt.HANDLE,)
+    return k32
+
+
+def _open_process_for_query(pid: int):
+    """Windows：打开进程查询句柄，返回 ``(handle, GetLastError())``。
+
+    失败时 handle 为 0；错误码交给 :func:`_open_process_failure_means_dead`
+    分流出「真死」和「查不到」。单独拆出来是为了让测试能注入 ACCESS_DENIED，
+    而不必真去搞一个高完整性进程。
+    """
+    import ctypes
+    k32 = _kernel32()
+    handle = k32.OpenProcess(_PROCESS_QUERY_LIMITED_INFORMATION, False, int(pid))
+    if handle:
+        return handle, 0
+    return 0, int(ctypes.get_last_error() or 0)
+
+
+def _proc_probe(pid: int) -> Tuple[str, Optional[float]]:
+    """返回 ``(状态, 启动时间)``；状态见 ``PROC_*``。
+
+    这是判活的**唯一入口**。判死必须拿到正面证据（进程不存在 / 退出码不是
+    STILL_ACTIVE）；没权限、读不到、任何意外一律 ``PROC_UNKNOWN``——把
+    「查不到」当「死了」会清掉活着的持有者记录。
+    """
     if not pid or pid <= 0:
-        return None
+        return PROC_DEAD, None
     try:
         if os.name == "nt":
             import ctypes
             import ctypes.wintypes as wt
-            # 用私有 DLL 对象设 argtypes：HANDLE 是 64 位指针，按默认 int 传会
-            # 被截断（真机上 OpenProcess 拿到的句柄无效，判活会永远失败）。
-            k32 = ctypes.WinDLL("kernel32", use_last_error=True)
-            k32.OpenProcess.restype = wt.HANDLE
-            k32.OpenProcess.argtypes = (wt.DWORD, wt.BOOL, wt.DWORD)
-            k32.GetExitCodeProcess.argtypes = (wt.HANDLE, ctypes.POINTER(wt.DWORD))
-            k32.GetProcessTimes.argtypes = (
-                wt.HANDLE, ctypes.POINTER(wt.FILETIME), ctypes.POINTER(wt.FILETIME),
-                ctypes.POINTER(wt.FILETIME), ctypes.POINTER(wt.FILETIME))
-            k32.CloseHandle.argtypes = (wt.HANDLE,)
-            STILL_ACTIVE = 259
-            PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
-            handle = k32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, int(pid))
+            handle, err = _open_process_for_query(int(pid))
             if not handle:
-                return None
+                return ((PROC_DEAD if _open_process_failure_means_dead(err)
+                         else PROC_UNKNOWN), None)
             try:
+                k32 = _kernel32()
                 # 已退出但句柄仍被 Popen 持有的进程，OpenProcess 依然成功、
                 # GetProcessTimes 也返回原值——必须用退出码区分「还活着」。
                 code = wt.DWORD()
                 if not k32.GetExitCodeProcess(handle, ctypes.byref(code)):
-                    return None
-                if code.value != STILL_ACTIVE:
-                    return None
+                    return PROC_UNKNOWN, None
+                if code.value != _STILL_ACTIVE:
+                    return PROC_DEAD, None
                 creation, exit_t = wt.FILETIME(), wt.FILETIME()
                 kernel, user = wt.FILETIME(), wt.FILETIME()
                 ok = k32.GetProcessTimes(
                     handle, ctypes.byref(creation), ctypes.byref(exit_t),
                     ctypes.byref(kernel), ctypes.byref(user))
                 if not ok:
-                    return None
+                    return PROC_UNKNOWN, None
                 ticks = (creation.dwHighDateTime << 32) | creation.dwLowDateTime
-                return ticks / 1e7          # 100ns → 秒
+                return PROC_ALIVE, ticks / 1e7          # 100ns → 秒
             finally:
                 k32.CloseHandle(handle)
-        data = open(f"/proc/{int(pid)}/stat", encoding="utf-8", errors="replace").read()
+        try:
+            data = open(f"/proc/{int(pid)}/stat",
+                        encoding="utf-8", errors="replace").read()
+        except FileNotFoundError:
+            return PROC_DEAD, None          # /proc 里没有 = 进程不存在
+        except PermissionError:
+            return PROC_UNKNOWN, None       # 没权限读 = 查不到，不等于不存在
         fields = data[data.rindex(")") + 2:].split()
-        return float(fields[19]) / float(os.sysconf("SC_CLK_TCK"))
+        return PROC_ALIVE, float(fields[19]) / float(os.sysconf("SC_CLK_TCK"))
     except Exception:
-        return None
+        # 任何意外都按「未知」：宁可拒连，也不能清掉活着的持有者。
+        return PROC_UNKNOWN, None
+
+
+def _proc_start_time(pid: int) -> Optional[float]:
+    """进程启动时间（秒，平台无关的相对量）；不存在/查不到返回 None。
+
+    注意：``None`` 只代表「拿不到」，**不能**据此判死——判活请用
+    :func:`_pid_alive`（它会区分「真死」和「查不到」）。
+    """
+    return _proc_probe(int(pid or 0))[1]
 
 
 def _self_start() -> Optional[float]:
@@ -174,11 +239,17 @@ def _self_start() -> Optional[float]:
 
 
 def _pid_alive(pid: int, recorded_start: Optional[float]) -> bool:
-    """持有者是否仍活着：进程在 + 启动时间对得上（防 pid 复用）。"""
+    """持有者是否**仍可能活着**：进程在 + 启动时间对得上（防 pid 复用）。
+
+    「查不到」一律按活着处理：误判「死」会清掉活着的持有者记录、两个进程
+    同抢一根棒；误判「活」最坏只是让人去看一眼占用登记。
+    """
     if not pid or pid <= 0:
         return False
-    start = _proc_start_time(pid)
-    if start is None:
+    state, start = _proc_probe(int(pid))
+    if state == PROC_UNKNOWN:
+        return True
+    if state != PROC_ALIVE or start is None:
         return False
     if recorded_start is None:
         # 旧格式记录没有启动时间：只能退化为「进程还在」，如实按活着处理。
@@ -239,17 +310,45 @@ def _registry_lock():
                 pass
 
 
+def _backup_corrupt_registry(reason: str) -> Optional[str]:
+    """登记文件损坏：改名成 ``<path>.corrupt-<时间戳>`` 并写理由文件。
+
+    复用 ``corrupt_evidence`` 的统一模板（与设置/书签/布局同一套命名与
+    ``.reason.txt`` 配对），这样它会自动出现在启动日志的损坏备份清点里，
+    不另开一套。调用方必须已持有登记文件锁；改名失败只告警，仍按空登记继续。
+    """
+    path = owner_registry_path()
+    stamp = time.strftime("%Y%m%d-%H%M%S")
+    backup = f"{path}.corrupt-{stamp}"
+    try:
+        os.replace(path, backup)
+    except OSError as e:
+        logger.warning("设备占用登记损坏，备份失败（本次按无占用处理）: %s", e)
+        return None
+    try:
+        from .corrupt_evidence import write_reason
+        write_reason(backup, reason, logger)
+    except Exception:  # noqa: BLE001 - 理由写失败不影响已落好的备份
+        pass
+    logger.warning("设备占用登记损坏（%s），原文件已备份为 %s；本次按无占用处理",
+                   reason, backup)
+    return backup
+
+
 def _read_registry() -> Dict[str, Dict[str, Any]]:
     try:
         with open(owner_registry_path(), encoding="utf-8") as f:
             data = json.load(f)
     except FileNotFoundError:
+        # 首次运行 / 用户手动删掉：都按「当前无占用」。删除与首次运行无法
+        # 区分，所以不告警；但删掉一个**活持有者**的记录等于放弃互斥。
         return {}
-    except Exception as e:  # noqa: BLE001 - 登记损坏按空处理，不阻塞连接
-        logger.warning("设备占用登记读取失败（按空处理）: %s", e)
+    except Exception as e:  # noqa: BLE001 - 损坏先留证据，再按空处理
+        _backup_corrupt_registry(f"JSON 读取/解析失败：{e.__class__.__name__}: {e}")
         return {}
     owners = data.get("owners") if isinstance(data, dict) else None
     if not isinstance(owners, dict):
+        _backup_corrupt_registry("顶层结构非法（缺少 owners 对象）")
         return {}
     return {str(k): v for k, v in owners.items() if isinstance(v, dict)}
 
@@ -301,7 +400,9 @@ def release_stale_owners() -> List[Dict[str, Any]]:
 def get_active_owner(device_id: str = "") -> Optional[Dict[str, Any]]:
     """当前占用者（先清失效记录再判）。device_id 为空时返回唯一的记录。"""
     release_stale_owners()
-    with _OWNER_LOCK:
+    # 与写路径同锁：读到的如果是损坏文件，这里会改名留证，不能在无锁时与
+    # 别的进程的原子替换交错（否则可能把刚写好的好文件当成损坏备份走）。
+    with _OWNER_LOCK, _registry_lock():
         owners = _read_registry()
         _ACTIVE_OWNER.clear()
         _ACTIVE_OWNER.update(owners)
