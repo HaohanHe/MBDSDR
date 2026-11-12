@@ -17,11 +17,27 @@ Guardian Snapshots：修改前自动备份，失败自动回滚。
 
 import os
 import json
+import logging
 import time
 import shutil
 
 from dataclasses import dataclass, field
 from typing import List, Dict, Any, Optional, Callable, Tuple
+
+from .corrupt_evidence import write_reason
+
+logger = logging.getLogger(__name__)
+
+
+def _backup_corrupt_snapshots(path: str) -> Optional[str]:
+    """把损坏的快照索引改名成 ``*.corrupt-时间戳``，返回备份路径（失败 None）。"""
+    backup = f"{path}.corrupt-{time.strftime('%Y%m%d-%H%M%S')}"
+    try:
+        os.replace(path, backup)
+    except OSError as exc:
+        logger.error("守护者快照索引损坏备份失败：%s（%s）", path, exc)
+        return None
+    return backup
 
 
 @dataclass
@@ -90,32 +106,90 @@ class Guardian:
         self.snapshots_file = os.path.join(self.store_path, "snapshots.json")
         self.snapshots: Dict[str, Snapshot] = {}
         self._snap_counter = 0
+        #: 上次读取失败的人话说明（None = 正常）。目前无独立界面消费，
+        #: 会进 get_status_text()，完整提示接线等 main_window.py 那一笔。
+        self.last_error: Optional[str] = None
+        #: 损坏索引的备份路径（None = 未损坏或备份失败）。
+        self.corrupt_backup: Optional[str] = None
+        #: 读失败/损坏且备份失败时拒绝写盘：create_snapshot/commit/rollback
+        #: 都会 _save，一旦放行就会把「无快照」写成唯一索引。
+        self._save_blocked = False
         os.makedirs(self.store_path, exist_ok=True)
         self._load()
 
     # ── 持久化 ──────────────────────────────────────────
 
     def _load(self):
-        """加载快照记录。"""
-        if os.path.exists(self.snapshots_file):
-            try:
-                with open(self.snapshots_file, "r", encoding="utf-8") as f:
-                    data = json.load(f)
-                for item in data:
-                    snap = Snapshot(**item)
-                    self.snapshots[snap.snap_id] = snap
-                # 恢复计数器
-                if self.snapshots:
-                    max_id = max(int(s.snap_id.split("_")[-1]) for s in self.snapshots.values())
-                    self._snap_counter = max_id + 1
-            except Exception as e:
-                print(f"警告: 守护者快照加载失败: {e}")
+        """加载快照记录：缺失 = 空索引；损坏先备份；读不了不写。
 
-    def _save(self):
-        """保存快照记录。"""
+        注意：索引损坏时磁盘上的快照备份目录仍在，但 ``rollback`` 依赖索引
+        找到 backup_path，所以这里必须保住原件、禁止用空索引覆盖，否则那些
+        目录会永远变成不可达的孤儿。
+        """
+        if not os.path.exists(self.snapshots_file):
+            return
+        try:
+            with open(self.snapshots_file, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        except OSError as exc:
+            self.last_error = (
+                f"守护者快照索引读取失败（{exc.__class__.__name__}）："
+                f"{self.snapshots_file}；本次不写入，避免覆盖可能仍可恢复的索引")
+            self._save_blocked = True
+            logger.warning("守护者快照索引读取失败（非损坏，不备份）：%s", exc)
+            return
+        except ValueError as exc:
+            self._mark_corrupt(f"解析失败（{exc.__class__.__name__}: {exc}）")
+            return
+        try:
+            if not isinstance(data, list):
+                raise ValueError("根节点不是列表")
+            loaded: Dict[str, Snapshot] = {}
+            for item in data:
+                snap = Snapshot(**item)
+                loaded[snap.snap_id] = snap
+            next_counter = 0
+            if loaded:
+                max_id = max(int(s.snap_id.split("_")[-1])
+                             for s in loaded.values())
+                next_counter = max_id + 1
+        except (TypeError, KeyError, ValueError, AttributeError) as exc:
+            self._mark_corrupt(f"条目非法（{exc.__class__.__name__}: {exc}）")
+            return
+        self.snapshots = loaded
+        self._snap_counter = next_counter
+        self.last_error = None
+        self.corrupt_backup = None
+        self._save_blocked = False
+
+    def _mark_corrupt(self, reason: str) -> None:
+        """损坏：先备份原件再留人话错误；备份失败则禁止后续写盘。"""
+        self.corrupt_backup = _backup_corrupt_snapshots(self.snapshots_file)
+        self._save_blocked = self.corrupt_backup is None
+        message = (
+            f"守护者快照索引损坏（{reason}）：{self.snapshots_file}；"
+            f"原文件已备份为 {self.corrupt_backup or '（备份失败）'}，"
+            "本次按无快照启动（磁盘上的快照目录未删除，但暂时无法回滚）")
+        if self.corrupt_backup:
+            write_reason(self.corrupt_backup, message, logger)
+        self.last_error = message
+        logger.warning("守护者快照索引不可用（%s）：%s；备份=%s",
+                       self.snapshots_file, reason,
+                       self.corrupt_backup or "（备份失败）")
+
+    def _save(self) -> bool:
+        """保存快照记录。读失败/损坏未备份时拒绝写盘。"""
+        if self._save_blocked:
+            self.last_error = (
+                f"守护者快照索引未保存：{self.snapshots_file} 读取失败或已损坏"
+                "且无法备份；为避免覆盖唯一证据，本次不写入")
+            logger.error("守护者快照索引写入被拒绝（文件不可用且未备份）：%s",
+                         self.snapshots_file)
+            return False
         data = [s.to_dict() for s in self.snapshots.values()]
         with open(self.snapshots_file, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=2, ensure_ascii=False)
+        return True
 
     # ── 创建快照 ────────────────────────────────────────
 
@@ -389,6 +463,9 @@ class Guardian:
             f"备份文件总数: {stats['total_files_backed_up']}",
             f"存储路径: {stats['store_path']}",
         ]
+        if self.last_error:
+            # 已有文本通道：状态查询能看到损坏/拒写原因，不新建界面。
+            lines.append(f"持久化错误: {self.last_error}")
         return "\n".join(lines)
 
     def cleanup_old(self, keep: int = 50):
