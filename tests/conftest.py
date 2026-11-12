@@ -32,9 +32,11 @@ import importlib.util
 import inspect
 import json
 import os
+import shlex
 import shutil
 import sys
 import tempfile
+import threading
 import time
 import types
 
@@ -92,30 +94,176 @@ def _qt_owner_path(path):
     return path + ".owner"
 
 
-def _write_qt_owner(path):
-    """记下持有者身份，供后来者判断「在等谁」。
+#: 持锁期间刷新 owner 心跳的间隔（秒）。心跳只用于展示与告警，
+#: 永不作为接管依据——这个锁的释放由内核负责（进程退出/被杀即自动释放）。
+_HEARTBEAT_S = 10.0
 
-    字节锁才是权威（进程死/被杀由内核释放）；这份 owner 只是提示信息，
-    写失败、残留、过期都不影响互斥正确性。
+
+def _fmt_elapsed(seconds):
+    """秒数 → 「3 分 12 秒」这样的人话（只用于提示，不参与任何判定）。"""
+    try:
+        s = int(max(0.0, float(seconds)))
+    except (TypeError, ValueError):
+        return "未知"
+    if s < 60:
+        return "%d 秒" % s
+    m, s = divmod(s, 60)
+    if m < 60:
+        return "%d 分 %d 秒" % (m, s)
+    h, m = divmod(m, 60)
+    return "%d 小时 %d 分" % (h, m)
+
+
+def _process_start_time(pid):
+    """进程启动时刻（epoch 秒）；取不到返回 None。
+
+    只用于把「已跑多久」和「持锁多久」分开说清楚——旧实现把拿锁时刻
+    标成「启动」，是本文件自己犯的「用错字段回答时长」的错。
     """
     try:
-        with open(_qt_owner_path(path), "w", encoding="utf-8") as fh:
-            json.dump({"pid": os.getpid(), "at": time.time(),
-                       "argv": " ".join(sys.argv)[:300]},
-                      fh, ensure_ascii=False)
+        if sys.platform == "win32":
+            from ctypes import wintypes
+
+            k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+            handle = k32.OpenProcess(0x1000, False, int(pid))  # QUERY_LIMITED_INFORMATION
+            if not handle:
+                return None
+            try:
+                created = wintypes.FILETIME()
+                exited = wintypes.FILETIME()
+                kernel = wintypes.FILETIME()
+                user = wintypes.FILETIME()
+                if not k32.GetProcessTimes(handle, ctypes.byref(created),
+                                           ctypes.byref(exited),
+                                           ctypes.byref(kernel),
+                                           ctypes.byref(user)):
+                    return None
+                ticks = (created.dwHighDateTime << 32) | created.dwLowDateTime
+                return ticks / 1e7 - 11644473600.0   # FILETIME 纪元 → Unix 纪元
+            finally:
+                k32.CloseHandle(handle)
+        with open("/proc/%d/stat" % int(pid), "rb") as fh:
+            fields = fh.read().rsplit(b")", 1)[-1].split()
+        start_ticks = int(fields[19])          # 第 22 个字段（comm 之后）
+        hz = os.sysconf("SC_CLK_TCK")
+        with open("/proc/stat", "rb") as fh:
+            btime = next(int(line.split()[1]) for line in fh
+                         if line.startswith(b"btime"))
+        return btime + start_ticks / float(hz)
+    except (OSError, ValueError, IndexError, AttributeError):
+        return None
+
+
+def _argv_targets_tests(argv):
+    """命令行是否指定了具体测试路径（没指定 = 一次全量跑）。只用于措辞。"""
+    try:
+        tokens = shlex.split(argv)
+    except ValueError:
+        tokens = argv.split()
+    for tok in tokens[1:]:                     # 首个 token 是 pytest 自身脚本
+        if tok.startswith("-"):
+            continue
+        if (tok.endswith(".py") or "/" in tok or "\\" in tok
+                or tok == "tests" or tok.startswith("tests/")
+                or tok.startswith("test_")):
+            return True
+    return False
+
+
+def _write_qt_owner(path):
+    """记下持有者身份与心跳，供后来者判断「在等谁、等了多久」。
+
+    字节锁才是权威（进程死/被杀由内核释放）；这份 owner 只是诊断信息，
+    写失败、残留、过期都不影响互斥正确性。
+    """
+    now = time.time()
+    info = {
+        "pid": os.getpid(),
+        "pid_start_time": _LOCK.get("pid_start_time"),
+        "acquired_at": _LOCK.get("acquired_at") or now,
+        "heartbeat_at": now,
+        "argv": " ".join(sys.argv)[:300],
+    }
+    tmp = "%s.%d.tmp" % (_qt_owner_path(path), os.getpid())
+    try:
+        with open(tmp, "w", encoding="utf-8") as fh:
+            json.dump(info, fh, ensure_ascii=False)
+        os.replace(tmp, _qt_owner_path(path))   # 读者不会看到半个 JSON
     except OSError:
-        pass
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+
+
+def _start_qt_heartbeat(path):
+    """持锁期间定期刷新 heartbeat_at；返回 (stop_event, thread)。
+
+    红线：**心跳只证明进程没退出，不证明用例在推进**。它是独立线程，
+    主线程卡在某个用例里时它照跳。三个月后别拿它当「还活着」的证据--
+    判「长跑」还是「卡死」要看 CPU / 临时目录 / 进度输出；锁是否释放
+    只看内核（进程退出即放）。心跳只用于展示和告警，永不作为接管依据。
+    """
+    stop = threading.Event()
+
+    def _beat():
+        while not stop.wait(_HEARTBEAT_S):
+            _write_qt_owner(path)
+
+    th = threading.Thread(target=_beat, name="mbdsdr-qt-lock-heartbeat",
+                          daemon=True)
+    th.start()
+    return stop, th
 
 
 def _read_qt_owner(path):
-    """持有者描述；读不到就诚实说不知道（旧进程没写 / 已释放）。"""
+    """持有者诊断：谁、已持锁多久、心跳多久前、在跑什么。
+
+    读不到就诚实说不知道（旧进程没写 / 已释放）。心跳缺失或停跳都
+    不等于锁坏了——锁的释放只看内核，pid 与心跳只是诊断信息。
+    """
     try:
         with open(_qt_owner_path(path), encoding="utf-8") as fh:
             info = json.load(fh)
-        stamp = time.strftime("%H:%M:%S", time.localtime(float(info.get("at") or 0)))
-        return "持有者 PID %s（%s 启动）" % (info.get("pid", "?"), stamp)
     except (OSError, ValueError, TypeError):
-        return "持有者未知（未写 owner 文件）"
+        return "持有者未知（无 owner 文件；锁仍可能被占用，只是不知道该问谁）"
+    now = time.time()
+    parts = ["持有者 PID %s" % info.get("pid", "?")]
+    acquired = info.get("acquired_at", info.get("at"))  # 旧版只有 at（拿锁时刻）
+    try:
+        parts.append("已持锁 %s" % _fmt_elapsed(now - float(acquired)))
+    except (TypeError, ValueError):
+        parts.append("持锁时长未知")
+    pid_start = info.get("pid_start_time")
+    if pid_start is not None:
+        try:
+            parts.append("进程启动于 %s 前"
+                         % _fmt_elapsed(now - float(pid_start)))
+        except (TypeError, ValueError):
+            pass
+    hb = info.get("heartbeat_at")
+    if hb is None:
+        parts.append("无心跳记录（旧版 owner，无法区分「在跑长用例」与「卡住」）")
+    else:
+        try:
+            age = now - float(hb)
+        except (TypeError, ValueError):
+            age = None
+        if age is None:
+            parts.append("心跳时间不可读")
+        elif age > 5 * _HEARTBEAT_S:
+            parts.append("心跳已 %s 未刷新（可能卡住；但锁是否释放只看内核）"
+                         % _fmt_elapsed(age))
+        else:
+            parts.append("心跳 %s 前（只证明进程没退出，不代表用例在推进）"
+                         % _fmt_elapsed(age))
+    argv = str(info.get("argv") or "")
+    if argv:
+        parts.append("命令行：%s" % argv)
+        if not _argv_targets_tests(argv):
+            parts.append("命令行没指定测试路径 → 这是一次全量长跑，"
+                         "不是你本地环境的问题")
+    return "；".join(parts)
 
 
 def _acquire_qt_lock(path, timeout):
@@ -139,7 +287,10 @@ def _acquire_qt_lock(path, timeout):
             else:
                 import fcntl
                 fcntl.flock(fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            _LOCK["acquired_at"] = time.time()
+            _LOCK["pid_start_time"] = _process_start_time(os.getpid())
             _write_qt_owner(path)
+            _LOCK["hb_stop"], _LOCK["hb_thread"] = _start_qt_heartbeat(path)
             return fh, time.monotonic() - started
         except OSError:
             if time.monotonic() - started >= timeout:
@@ -149,6 +300,8 @@ def _acquire_qt_lock(path, timeout):
                 announced = True
                 sys.stderr.write(
                     "[mbdsdr-lock] 等锁中：%s；最多等 %.0fs（%s）\n"
+                    "（Qt 用例串行执行：同一时刻只允许一个进程，避免内存挤穿；"
+                    "排队不是你的环境问题。）\n"
                     % (_read_qt_owner(path), timeout, path)
                 )
                 sys.stderr.flush()
@@ -156,6 +309,13 @@ def _acquire_qt_lock(path, timeout):
 
 
 def _release_qt_lock(fh, path=None):
+    stop, th = _LOCK.get("hb_stop"), _LOCK.get("hb_thread")
+    if stop is not None:
+        stop.set()
+    if th is not None:
+        th.join(timeout=2.0)
+    _LOCK["hb_stop"] = None
+    _LOCK["hb_thread"] = None
     if fh is None:
         return
     try:
@@ -177,7 +337,9 @@ def _release_qt_lock(fh, path=None):
             pass
 
 
-_LOCK = {"fh": None, "waited": 0.0, "path": None}
+_LOCK = {"fh": None, "waited": 0.0, "path": None,
+         "acquired_at": None, "pid_start_time": None,
+         "hb_stop": None, "hb_thread": None}
 
 # conftest 自己在 pytest_configure 里为了「真实配置快照」会 import desktop/settings，
 # 而 settings.py 顶部就 `from PySide6.QtCore import QTimer`。这份基线把「守卫自己
@@ -376,8 +538,10 @@ def pytest_collection_finish(session):
     if fh is None:
         pytest.exit(
             "[mbdsdr-lock] 等待 %.0fs 仍未拿到 Qt 测试互斥锁：%s\n"
-            "（%s；另一条会话正在跑 Qt 用例。本机 commit 上限 38GB，并发会把内存"
-            "预算挤穿。稍后重试，或设 MBDSDR_TEST_LOCK_TIMEOUT 加长等待。）"
+            "%s\n"
+            "（Qt 用例必须串行：本机 commit 上限 38GB，并发会把内存预算挤穿。"
+            "持有者进程退出/被杀时内核会自动放锁，所以等不到只说明它还在跑。"
+            "稍后重试，或设 MBDSDR_TEST_LOCK_TIMEOUT 加长等待。）"
             % (waited, path, _read_qt_owner(path)),
             returncode=2,
         )
