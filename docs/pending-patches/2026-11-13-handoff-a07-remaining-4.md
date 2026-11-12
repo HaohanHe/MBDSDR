@@ -77,10 +77,11 @@
 `set_sample_rate` / `set_frequency` 返回 `bool`（`sdr_backend.py:1448`、`1335`），
 失败时已把原因写进 `status.error`，helper 直接取用。
 
-**同文件还有第三处（修完上面两条它才会露出来）**：`sdr_backend.py:6871`
-`be.set_frequency(vfo["frequency_hz"])` 后面紧跟 `except Exception: pass`——
-切换 VFO 时调谐失败仍然 `return True`，这是**真吞**，建议同一批收：
-失败时把 `status.error` 带上并返回 `False`，别让上层以为切过去了。
+**同文件还有第三处（修完上面两条它才会露出来）**：`sdr_backend.py` 里
+`be.set_frequency(vfo["frequency_hz"])` 后面紧跟 `except Exception: pass`
+（02:3x 快照在 6871，02:4x 已漂到 6877——**认文本**）。切换 VFO 时调谐失败仍然
+`return True`，这是**真吞**，不是形状问题，建议同一批收：失败时把 `status.error`
+带上并返回 `False`，别让上层以为切过去了。
 
 ### 2.2 `desktop/scanner_panel.py:119`：调谐被拒不能当成"这个频点没信号"
 
@@ -137,7 +138,52 @@
 | 补 §2.3 的"直觉改法"（`if not _run(...): pass`） | 4，**一条没清**（证明它不是"少个 if"） |
 | 补 §2.3 的"提 lambda" | `main_window:7503` 消失，`main_window:8376` 冒出来（同形有多处） |
 
-## 4. 边界声明
+## 4. 机制补丁：A07 的去重口径在藏东西（待 `checks.py` 解锁）
+
+`scan_a07` 末尾有一段 `seen_files`：**同一文件同一方法只报第一条**。所以「4 条」
+从来不是「只有 4 处」——修一处，下一处才冒出来（§3 表格里 `6871`/`8376` 就是这么
+浮出来的）。这和「报告只给你看前 30 名」是同一个病：**看不到全貌，就没法判断还有多少**。
+
+**改法**（计数口径不动，棘轮基线不变；把同形态其余位置全部写进理由）：
+
+```python
+            seen_files.add(unit.path)
+            # 同一文件同一方法的多处：只报第一条会让「修一处、浮一处」永远看不到
+            # 全貌。计数口径仍是一文件一方法一条（棘轮基线不动），但把其余同形态
+            # 的行号全部写进理由——读者不用再跑一遍才挤出下一个。
+            siblings = sorted(
+                n.lineno for u, n in sites
+                if u.path == unit.path and n is not node
+                and not WIDGET_RECEIVER.search(_receiver_text(u, n)))
+            tail = ""
+            if siblings:
+                tail = (f"同一文件同一方法另有 {len(siblings)} 处同形态未展开："
+                        f"L{', L'.join(str(n) for n in siblings)}；"
+                        "修掉本处只会让它换一处冒出来，请一并看。")
+            _add(
+                findings, "A07", unit, node.lineno,
+                f"{method} 的数值前置条件只出现在 {example} 等入口，{unit.path} 这条调用路径没有同一约束；"
+                "真正执行动作的地方也没有，所以这条路径能绕过去。" + tail,
+```
+
+**实测数（02:47 快照，临时副本上打补丁后跑，仓库文件未动）**：
+
+- 条目数 **4 → 4**（`main_window:7503`、`scanner_panel:119`、`sdr_backend:3055`
+  set_sample_rate、`sdr_backend:3061` set_frequency）——注意 `3049/3055` 已漂到
+  `3055/3061`。
+- **展开后共 8 个站点**：`main_window` set_bandwidth 另有 3 处（`L7990, L8357,
+  L8374`，全是 `self._vfo.set_bandwidth`，VFO 转发不是硬件写入）；`sdr_backend`
+  set_frequency 另有 1 处（`L6877`，就是 §2.1 说的那个真吞）。
+- 反证：合成一个文件塞三处同形态的 `try: be.set_frequency(f) / except Exception: pass`，
+  **改前**只出一条且不提另外两处（`另有` 检测为 False）；**改后**一条 + 明写
+  「同一文件同一方法另有 2 处同形态未展开：L13, L19」。
+
+**为什么没落进仓库**：`tools/axioms/checks.py` 在 02:15:09 被 **公理棘轮线** claim
+（pid 37812，TTL 60 min，03:15:09 到期），`file_claim.py claim` 直接 `CLAIM DENIED
+当前持有者=公理棘轮线`。按协议不抢、不 checkout 别人的改动，所以只交上面这段可直接
+粘贴的补丁；解锁后 `python scripts/axioms.py --rule A07 --no-ratchet` 复核条目仍是 4。
+
+## 5. 边界声明
 
 - 本单**没有**写上述三个源码文件、没有提交它们、没有 claim/release/takeover。
 - 上面行号是 2026-11-13 02:3x 工作区快照；`main_window.py` 与 `sdr_backend.py`
