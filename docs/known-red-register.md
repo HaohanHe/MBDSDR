@@ -920,12 +920,18 @@ baseline 56 → 58（`BUILT_AT` 同步 58），每条带 owner + reason：
 
 ## K20 — tooltip 守卫 4 条（2026-11-13 收口，已转绿 `5e0bb563`）
 
-- **再检绑定**：验证提交 `a33eca46`；文件集合 `desktop/device_panel.py`、`desktop/control_panel.py`、`docs/tooltip-dynamic-baseline.json`、`tests/test_tooltip_dynamic_runtime.py`
+- **再检绑定**：验证提交 `d4277a3d`；文件集合 `desktop/sat_track_panel.py`、`tests/test_tooltip_guard.py`、`tests/test_tooltip_dynamic_runtime.py`、`tests/test_sat_track_tle_landing.py`、`tests/test_sat_track_panel_timer_lifecycle.py`
+- **再检（2026-11-13，R8 三次清账）**：`d4277a3d` 只改 `desktop/sat_track_panel.py`
+  （删掉逐字复写可见文字的冗余透传 tooltip）。在该 sha 的干净 worktree 上实跑：
+  `pytest tests/test_tooltip_guard.py tests/test_tooltip_dynamic_runtime.py`
+  → **17 passed（38.08s）**；
+  `pytest tests/test_sat_track_tle_landing.py tests/test_sat_track_panel_timer_lifecycle.py`
+  → **9 passed（1.76s）**。绑定更新为 `d4277a3d`。
 - **再检（2026-11-13 深夜，R8 二次清账）**：`desktop/device_panel.py` 被
   `a33eca46`（采样率输入收 Hz 与 MS/s）改动，R8 退回待复核；在干净 worktree
   `D:\mbdsdr\_wt\kcheck-a33eca46`（`a33eca46`）实跑
   `pytest tests/test_tooltip_guard.py tests/test_tooltip_dynamic_runtime.py`
-  → **17 passed**，绑定更新为 `a33eca46`。主工作树当前那 1 条红是
+  → **17 passed**，当次绑定 `a33eca46`（已被上面的三次清账覆盖）。主工作树当前那 1 条红是
   `desktop/sat_track_panel.py:400 :: text`（卫星过境线**未提交**改动），
   按本节下方「未处理并点名」不计入本条。
 - **收口（2026-11-13，验证提交 `5e0bb563`）**：逐处判定（不是整批豁免），并把
