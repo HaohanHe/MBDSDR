@@ -32,10 +32,52 @@ import logging
 import time
 import os
 from dataclasses import dataclass, field
-from typing import Dict, List, Any, Optional
+from typing import Dict, List, Any, Optional, Set
 from enum import Enum
 
+from .corrupt_evidence import REASON_SUFFIX, write_reason
+
 logger = logging.getLogger(__name__)
+
+
+def _same_content_backup(path: str) -> Optional[str]:
+    """同目录下是否已有一份与当前文件字节相同的 ``*.corrupt-*`` 备份。"""
+    directory = os.path.dirname(os.path.abspath(path))
+    prefix = os.path.basename(path) + ".corrupt-"
+    try:
+        names = sorted(
+            (n for n in os.listdir(directory)
+             if n.startswith(prefix) and not n.endswith(REASON_SUFFIX)),
+            reverse=True)
+        if not names:
+            return None
+        candidate = os.path.join(directory, names[0])
+        if os.path.getsize(candidate) != os.path.getsize(path):
+            return None
+        with open(candidate, "rb") as a, open(path, "rb") as b:
+            return candidate if a.read() == b.read() else None
+    except OSError:
+        return None
+
+
+def _backup_corrupt(path: str) -> Optional[str]:
+    """把损坏的学习数据改名为 ``*.corrupt-<时间戳>``，返回备份路径（失败 None）。
+
+    同一份内容只留一份副本；改名后原路径不再被扫描，也不会被下一次保存覆盖。
+    """
+    dst = _same_content_backup(path)
+    if dst is None:
+        stamp = time.strftime("%Y%m%d-%H%M%S")
+        dst = f"{path}.corrupt-{stamp}"
+        n = 0
+        while os.path.exists(dst):
+            n += 1
+            dst = f"{path}.corrupt-{stamp}-{n}"
+    try:
+        os.replace(path, dst)
+    except OSError:
+        return None
+    return dst
 
 
 class ExperienceType(str, Enum):
@@ -135,6 +177,12 @@ class SelfLearningEngine:
         # 降级可见：加载失败的经验/模式文件记在这里（kind + path + 原因）。
         # 「经验本来就是空的」与「经验文件读不出来」不再等价。
         self.load_errors: List[Dict[str, str]] = []
+        #: 已落盘的损坏备份路径。
+        self.corrupt_backups: List[str] = []
+        #: 写回被拒绝的记录（读失败未备份/备份失败），避免静默丢数据。
+        self.save_warnings: List[Dict[str, str]] = []
+        #: 读失败且未备份的路径：后续写入这些路径必须 fail-closed。
+        self._save_blocked_paths: Set[str] = set()
 
         # 加载历史经验和模式
         self._load_experiences()
@@ -146,6 +194,57 @@ class SelfLearningEngine:
         self.load_errors.append({"kind": kind, "path": path, "error": reason})
         logger.warning("学习数据读取失败（%s），已记入 load_errors：%s | %s",
                        kind, path, reason)
+
+    def _quarantine_corrupt(self, kind: str, path: str, exc: Exception) -> bool:
+        """备份损坏文件并写理由；备份失败则登记该路径禁止后续写回。"""
+        backup = _backup_corrupt(path)
+        reason = f"{type(exc).__name__}: {exc}"
+        if kind == "save-target":
+            self.save_warnings.append(
+                {"path": path, "error": reason, "backup": backup or ""})
+        else:
+            self.load_errors.append({
+                "kind": kind, "path": path, "error": reason,
+                "backup": backup or "",
+            })
+        if backup is None:
+            self._save_blocked_paths.add(path)
+            logger.error("学习数据损坏且备份失败，后续写入该路径将被拒绝：%s | %s",
+                         path, reason)
+            return False
+        write_reason(backup, f"学习数据读取失败（{reason}）：{path}", logger)
+        self.corrupt_backups.append(backup)
+        logger.warning("学习数据损坏/不可读，已备份为 %s | %s", backup, reason)
+        return True
+
+    def _write_json(self, path: str, payload: Dict[str, Any]) -> bool:
+        """写回前确认目标可读且已备份；不许写回时返回 False（不抛异常）。
+
+        说明：真正的磁盘写失败仍按原行为向上抛 OSError；返回 False 仅表示
+        「为了保护原件而主动拒绝写回」，原因已记入 ``save_warnings``。
+        """
+        if path in self._save_blocked_paths:
+            self.save_warnings.append({
+                "path": path, "error": "读取失败未备份，拒绝写回", "backup": "",
+            })
+            logger.error("学习数据未写入（此前读取失败且未备份）：%s", path)
+            return False
+        if os.path.exists(path):
+            try:
+                with open(path, 'r', encoding='utf-8') as f:
+                    json.load(f)
+            except FileNotFoundError:
+                pass  # 竞态：判存在后刚被删，等价于首次创建
+            except OSError as exc:
+                self._save_blocked_paths.add(path)
+                self._record_load_error("save-target", path, exc)
+                return False
+            except ValueError as exc:
+                if not self._quarantine_corrupt("save-target", path, exc):
+                    return False
+        with open(path, 'w', encoding='utf-8') as f:
+            json.dump(payload, f, ensure_ascii=False, indent=2)
+        return True
 
     def record_experience(
         self,
@@ -323,6 +422,9 @@ class SelfLearningEngine:
             "storage_dir": self.storage_dir,
             # 加载降级条数：非 0 表示「统计里少了东西」，不是「本来就没有」。
             "load_error_count": len(self.load_errors),
+            # 写回被拒绝条数：非 0 表示有数据没落盘，原件被保护但本次保存失败。
+            "save_error_count": len(self.save_warnings),
+            "corrupt_backup_count": len(self.corrupt_backups),
         }
 
     def get_experiences(self, limit: int = 20, min_score: float = 0) -> List[Dict[str, Any]]:
@@ -345,16 +447,14 @@ class SelfLearningEngine:
         day_dir = os.path.join(self.storage_dir, "experiences", date_str)
         os.makedirs(day_dir, exist_ok=True)
         path = os.path.join(day_dir, f"{experience.experience_id}.json")
-        with open(path, 'w', encoding='utf-8') as f:
-            json.dump(experience.to_dict(), f, ensure_ascii=False, indent=2)
+        self._write_json(path, experience.to_dict())
 
     def _save_pattern(self, pattern: LearnedPattern):
         """保存模式到文件。"""
         pattern_dir = os.path.join(self.storage_dir, "patterns")
         os.makedirs(pattern_dir, exist_ok=True)
         path = os.path.join(pattern_dir, f"{pattern.pattern_id}.json")
-        with open(path, 'w', encoding='utf-8') as f:
-            json.dump(pattern.to_dict(), f, ensure_ascii=False, indent=2)
+        self._write_json(path, pattern.to_dict())
 
     def _load_experiences(self):
         """加载历史经验（只加载元数据）。"""
@@ -383,8 +483,14 @@ class SelfLearningEngine:
                     )
                 except FileNotFoundError:
                     continue  # 竞态：列目录后刚被删，与「本来就没有」同义
-                except (OSError, ValueError, KeyError, TypeError) as exc:
+                except OSError as exc:
+                    # 读不了 ≠ 损坏：不备份不改名，但禁止后续写回该路径。
                     self._record_load_error("experience", path, exc)
+                    self._save_blocked_paths.add(path)
+                    continue
+                except (ValueError, KeyError, TypeError) as exc:
+                    # 真损坏：先落备份 + 理由，原件移出扫描路径。
+                    self._quarantine_corrupt("experience", path, exc)
                     continue
                 self.experiences[exp.experience_id] = exp
                 try:
@@ -419,7 +525,13 @@ class SelfLearningEngine:
                 )
             except FileNotFoundError:
                 continue  # 竞态：列目录后刚被删，与「本来就没有」同义
-            except (OSError, ValueError, KeyError, TypeError) as exc:
+            except OSError as exc:
+                # 读不了 ≠ 损坏：不备份不改名，但禁止后续写回该路径。
                 self._record_load_error("pattern", path, exc)
+                self._save_blocked_paths.add(path)
+                continue
+            except (ValueError, KeyError, TypeError) as exc:
+                # 真损坏：先落备份 + 理由，原件移出扫描路径。
+                self._quarantine_corrupt("pattern", path, exc)
                 continue
             self.patterns[pattern.pattern_id] = pattern
