@@ -297,7 +297,13 @@ class TestThreeColumnLayout:
         # 钳成同一个最小宽，增量恒为 0——那是屏幕的事实，不是布局的缺陷。
         # 800x800 的 offscreen 平台就是这种情形；此时跳过并说明原因。
         if scr is None or scr.availableGeometry().width() < 1700:
-            pytest.skip("屏幕宽 < 1700px，窗口被收口到最小宽，无法比较两档增量")
+            avail_w = 0 if scr is None else scr.availableGeometry().width()
+            pytest.skip(
+                f"缺：屏幕可用宽 {avail_w}px < 1700px，两档窗口都被 "
+                "_fit_window_to_screen 钳成同一最小宽，增量恒为 0｜"
+                "可跑：在可用宽 ≥1700px 的屏幕上跑；offscreen 平台需换更大的虚拟屏｜"
+                "区分：这是屏幕尺寸的事实，不是布局增量漂移——真漂移在够宽的屏上会红"
+            )
         s1 = self._sizes_at(qapp, 1000, 600)
         s2 = self._sizes_at(qapp, 1600, 900)
         d_left = s2[0] - s1[0]

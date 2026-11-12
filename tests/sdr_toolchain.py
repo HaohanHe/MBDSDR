@@ -73,7 +73,14 @@ def connect_first_device_or_skip(tr) -> str:
     """
     device_id = first_enumerated_device_id(tr)
     if device_id is None:
-        pytest.skip("NO_HW: sdr_list_devices 枚举为空（本机无可用 SDR 设备）")
+        pytest.skip(
+            "缺：sdr_list_devices 枚举为空——本机没有可用 SDR"
+            "（RTL-SDR 0bda:2838/2832 与 SoapySDR 均未命中）｜"
+            "可跑：插上 RTL-SDR 后先 `rtl_test -t` 确认能枚举；Linux 还需 udev 规则"
+            "（/etc/udev/rules.d/99-rtlsdr.rules）并把用户加进 plugdev 组｜"
+            "区分：「枚举为空」= 没插或没权限；「插了但打不开」要到下一步 sdr_connect "
+            "才暴露，那条路径本函数判红、不 skip"
+        )
     try:
         r = tr.call("sdr_connect", {"device_id": device_id})
     except Exception as e:  # noqa: BLE001

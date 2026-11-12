@@ -56,7 +56,14 @@ def test_real_device_enumeration_shape():
     """真机在位时字段契约成立；无设备是诚实空态，skip 而非失败。"""
     devices = RTLSDRBackend.list_devices()
     if not devices:
-        pytest.skip("本机无 RTL-SDR 设备（诚实空态，非失败）")
+        pytest.skip(
+            "缺：RTLSDRBackend.list_devices() 返回空——本机没有可枚举的 RTL-SDR"
+            "（USB 未插 / 缺驱动 / 无 udev 权限三者之一）｜"
+            "可跑：插上 RTL-SDR 后用 `rtl_test -t` 复核；Linux 装 udev 规则并入 "
+            "plugdev 组｜"
+            "区分：枚举为空只说明「没插或没权限」；「插了但打不开」是 open 阶段失败，"
+            "本用例只核枚举字段契约，不覆盖那条路径"
+        )
 
     for dev in devices:
         assert {"index", "serial", "tuner"} <= set(dev)

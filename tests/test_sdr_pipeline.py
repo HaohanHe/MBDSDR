@@ -225,11 +225,22 @@ class TestAudioPlayerDegrade:
         """有可用设备时：能开流就断言可用，打不开（CI 无声卡）就 skip。"""
         import mbdsdr_ai.audio_out as ao
         if not ao._SD_AVAILABLE:
-            pytest.skip("本机无 sounddevice，跳过可用路径")
+            pytest.fail(
+                "sounddevice 未安装或导入失败：它在 requirements.txt:39 声明，属"
+                "「本仓该有」的依赖——按 docs/evidence-standard.md §2 附则，"
+                "本仓该有的依赖导不进来必须红，不能当环境问题 skip。"
+                "装上 sounddevice（含 PortAudio 系统库）后重跑。"
+            )
         p = ao.AudioPlayer(sample_rate=48000, channels=1, gain=0.5)
         started = p.start()
         if not started:
-            pytest.skip("无可用音频设备（CI 环境常见），跳过")
+            pytest.skip(
+                "缺：AudioPlayer 找不到可用的输出设备（start() 返回 False）｜"
+                "可跑：启用一个默认输出设备——Windows 插耳机/启用扬声器；Linux 启动 "
+                "PulseAudio/ALSA（容器里常用 `pulseaudio --start`）｜"
+                "区分：这是「设备在但打不开」（独占/被静音/权限不足）；"
+                "「sounddevice 没装」已在上一条按依赖缺失判红，不会走到这里"
+            )
         try:
             assert p.available is True
             assert p.is_playing is True

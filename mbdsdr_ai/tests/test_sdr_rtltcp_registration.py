@@ -98,7 +98,13 @@ def test_registered_backend_connects_to_live_rtl_tcp():
     """
     entries = parse_rtl_tcp_env(os.environ.get(RTL_TCP_ENV, ""))
     if not entries:
-        pytest.skip("MBDSDR_RTL_TCP 未配置")
+        pytest.skip(
+            "缺：环境变量 MBDSDR_RTL_TCP 未配置，没有可连的 rtl_tcp 端点｜"
+            "可跑：在跑着 rtl_tcp 的机器上设 "
+            "MBDSDR_RTL_TCP=127.0.0.1:1234 后重跑｜"
+            "区分：这是「没给端点」；「端点给了但服务不在跑」是下一条 skip，"
+            "两者修法不同——前者配 env，后者起服务"
+        )
     mgr = SDRBackendManager()
     rtl_ids = _rtl_tcp_ids()
     # env 已配置 → 登记是确定性的，算不出 id 就是契约坏了，必须红（不许 skip）
@@ -112,7 +118,13 @@ def test_registered_backend_connects_to_live_rtl_tcp():
         _probe = socket.create_connection((_host, _port), timeout=2)
         _probe.close()
     except OSError as e:
-        pytest.skip(f"rtl_tcp 服务不在跑（honest skip）: {e}")
+        pytest.skip(
+            f"缺：MBDSDR_RTL_TCP 已配为 {_host}:{_port}，但该端口连不上"
+            f"（rtl_tcp 服务没起）: {e}｜"
+            f"可跑：先在该机启动 `rtl_tcp -a {_host} -p {_port}` 再重跑｜"
+            "区分：端点已给、服务未起 = skip；服务在跑但握手/收发失败会在下面的 "
+            "assert 里红，不会落到这条"
+        )
     assert mgr.connect(dev[0]["device_id"]) is True
     try:
         assert mgr.get_active() is not None
@@ -153,7 +165,13 @@ def test_device_manager_garbage_env_registers_nothing(monkeypatch):
 def test_device_manager_open_rtl_tcp_live():
     """端到端（rtl_tcp 服务在跑时）：DeviceManager.open -> OpenDevice 读到 IQ。"""
     if not parse_rtl_tcp_env(os.environ.get(RTL_TCP_ENV, "")):
-        pytest.skip("MBDSDR_RTL_TCP 未配置")
+        pytest.skip(
+            "缺：环境变量 MBDSDR_RTL_TCP 未配置，没有可连的 rtl_tcp 端点｜"
+            "可跑：在跑着 rtl_tcp 的机器上设 "
+            "MBDSDR_RTL_TCP=127.0.0.1:1234 后重跑｜"
+            "区分：这是「没给端点」；「端点给了但服务不在跑」是下面那条 skip，"
+            "两者修法不同——前者配 env，后者起服务"
+        )
     from mbdsdr_ai.device_manager import DeviceManager
     dm = DeviceManager()
     target = [d for d in dm.list_devices() if d.driver == "rtltcp"]
@@ -161,8 +179,15 @@ def test_device_manager_open_rtl_tcp_live():
     assert target, "MBDSDR_RTL_TCP 已配置但 DeviceManager 未登记 rtl_tcp 源（契约问题）"
     try:
         dev = dm.open(target[0])
-    except Exception as e:
-        pytest.skip(f"rtl_tcp 服务不在跑（honest skip）: {e}")
+    except (OSError, ConnectionError, TimeoutError) as e:
+        pytest.skip(
+            f"缺：MBDSDR_RTL_TCP={os.environ.get(RTL_TCP_ENV)} 指向的服务开不出流"
+            f"（连接层失败）: {e}｜"
+            "可跑：确认 rtl_tcp 在监听该端口、且没被别的客户端独占"
+            "（rtl_tcp 是单客户端服务）｜"
+            "区分：连不上/端口不可达 = skip（服务没起）；连上之后的契约性错误"
+            "（字段缺失、类型不对等）不在上面捕获范围内，会直接红"
+        )
     try:
         dev.set_sample_rate(2_048_000)
         dev.set_frequency(435_000_000)

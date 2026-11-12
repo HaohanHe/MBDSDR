@@ -84,5 +84,11 @@ def test_missing_satdump_is_failure_not_success(tmp_path):
     # 本机 find_satdump 若真装了则跳过此断言环境差异
     if si.find_satdump():
         import pytest
-        pytest.skip("本机装有 SatDump")
+        pytest.skip(
+            "缺：本机装了 satdump（si.find_satdump() 命中），而本用例要验的正是"
+            "「没装时 rc!=0 → success=False」｜"
+            "可跑：把 satdump 从 PATH 移开（或临时改 PATH）后重跑｜"
+            "区分：这是「环境多了它」，不是「缺依赖」——缺 satdump 的行为正是"
+            "本用例要断言的对象"
+        )
     assert res.success is False

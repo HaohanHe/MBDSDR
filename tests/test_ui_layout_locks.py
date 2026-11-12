@@ -268,8 +268,13 @@ def test_window_size_is_run_order_independent(main_window):
     scr = QGuiApplication.primaryScreen()
     req_w = int(str(requested).split("x")[0])
     if scr is not None and req_w > scr.availableGeometry().width() * 0.96:
-        pytest.skip(f"屏幕 {scr.availableGeometry().width()}px 放不下 "
-                    f"{req_w}px 请求宽，窗口被收口到最小宽")
+        avail_w = scr.availableGeometry().width()
+        pytest.skip(
+            f"缺：屏幕可用宽 {avail_w}px 放不下请求宽 {req_w}px（超 96% 上限），"
+            "show() 必然被收口到最小宽｜"
+            "可跑：在可用宽 ≥ 请求宽/0.96 的屏幕上跑；offscreen 平台需换更大的虚拟屏｜"
+            "区分：这是屏幕尺寸不足，不是窗口尺寸漂移——漂移会在够宽的屏上红"
+        )
     assert after_show == expected, (
         f"{requested}: show() 后窗口被撑成 {after_show}，声明尺寸是 "
         f"{expected}；尺寸漂移会让截图按 live 尺寸取基线键并误报缺失")
