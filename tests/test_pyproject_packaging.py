@@ -65,7 +65,9 @@ def _import_names() -> set[str]:
 def _third_party() -> set[str]:
     local = {p.stem for p in PKG_DIR.glob("*.py")}
     local |= {p.name for p in PKG_DIR.iterdir() if p.is_dir()}
-    local |= {"mbdsdr_ai"}
+    # 「mbdsdr_ai」是扫描根自身；「desktop」是本仓顶层包名（桌面应用），不是外部依赖——
+    # mbdsdr_ai/diagnostics.py 只在函数内惰性导入它，打包后由同仓的 desktop 提供。
+    local |= {"mbdsdr_ai", "desktop"}
     return {n for n in _import_names()
             if n not in sys.stdlib_module_names and n not in local}
 

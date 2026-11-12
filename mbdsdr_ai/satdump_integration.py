@@ -248,7 +248,8 @@ def _load_product_metadata(product_dir: Path) -> Optional[Dict]:
     """读取 product.cbor 元数据；cbor2 未装 / 文件缺失 / 解析失败 → None。
 
     这是纯增强项：任何失败都退回文件名规则，不允许影响选图或抛错，
-    也不把 cbor2 变成硬依赖。
+    也不把 cbor2 变成硬依赖。要启用按清单取图，装 extras 即可：
+    ``pip install "mbdsdr-ai[satdump]"``（pyproject [project.optional-dependencies].satdump）。
     """
     if _cbor2 is None:
         return None

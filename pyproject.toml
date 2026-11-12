@@ -40,6 +40,9 @@ dependencies = [
 # classic osmocom librtlsdr builds lack (AttributeError on RtlSdr()).
 hardware = ["pyserial", "pyrtlsdr<0.4", "pylibiio", "pyvisa", "sounddevice"]
 satellite = ["sgp4", "skyfield", "jplephem", "astropy"]
+# product.cbor 元数据（可选增强）：satdump_integration 已做 try/except 降级，
+# 缺 cbor2 只少「按 product.cbor 的 images 清单精确取图」，仍走文件名规则。
+satdump = ["cbor2>=5.0"]
 viz = ["matplotlib", "Pillow", "psutil"]
 desktop = ["PySide6"]
 llm = ["tiktoken"]

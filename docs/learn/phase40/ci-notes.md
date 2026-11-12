@@ -110,3 +110,36 @@ YAML 校验：`python3 -c "yaml.safe_load(...)"` 通过；jobs = [python, flutte
    - ctest 收尾应见 `100% tests passed, 0 tests failed out of 127`（基线），
      无音频/无硬件用例为 skipped 而非 failed。
 5. 三者全绿后，把本文件第 4 节对应条目标记为"已 runner 验证（日期/run 链接）"。
+
+## 附：2026-11-12 —— HEAD 上有一条红，CI 为什么没发现
+
+现象：`tests/test_pyproject_packaging.py::test_declared_deps_cover_imports`
+在本地 HEAD 上红（`导入了但 pyproject 未声明: ['cbor2', 'desktop']`），而 CI 徽章是绿的。
+
+三条可能都排除了：
+
+1. **不是没被收集**：`python scripts/ci_pytest_groups.py --group 0 --total 2`
+   的输出里有 `tests/test_pyproject_packaging.py`（group 0 共 325 个文件），
+   CI 的 `tests/ (A)` job 每次都会跑到它；
+2. **不是被 skip**：整条用例没有 skip 分支，纯 AST 扫描源码 import 名，
+   与 runner 上装了什么包无关；
+3. **不是 CI 装了 cbor2 恰好覆盖**：它扫的是源码里的 import 名，不是
+   `importlib` 实际可用性，装没装 cbor2 都不改变结论。
+
+真因：**CI 没见过这些提交。** 本地 `main` 领先 `origin/main` **747 个提交**
+（`git rev-list --count origin/main..HEAD`），而 `origin/main` 停在
+`9836b98b`（2026-11-11 19:34）；`ci.yml` 只在 push 到 main / 对 main 的 PR 时触发。
+也就是说「CI 绿」反映的是昨天的树，不是当前 HEAD。
+
+结论（采信顺序）：**在本仓，「CI 绿」目前不能单独当覆盖证据**，除非同时给出
+对应的 push 与 run 记录。判断一条红是否真的没人管，先跑
+`git rev-list --count origin/main..HEAD`：差得越多，CI 徽章越没有信息量。
+
+当天顺带修掉的两个红（都是这条用例抓出来的）：
+
+* `cbor2`：`mbdsdr_ai/satdump_integration.py` 里是 `try: import cbor2 ... except
+  ImportError: _cbor2 = None` 的**可选增强**（缺它只少「按 product.cbor 的 images
+  清单精确取图」，仍走文件名规则），不在启动路径的硬依赖上——因此进
+  `[project.optional-dependencies].satdump`，**不进** `dependencies`；
+* `desktop`：本仓顶层包名（桌面应用），不是第三方依赖，测试里显式排除并写明理由。
+
