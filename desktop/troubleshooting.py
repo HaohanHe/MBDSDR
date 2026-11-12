@@ -312,8 +312,8 @@ CODE_NEXT_STEPS: Dict[str, str] = {
         ".iq/.wav 文件离线解码；要实时流式只能切到「ADS-B 航路」或「APRS "
         "数据包」面板用 adsb/rds 两种模式，其余模式走 `--decode-file` 命令行。"),
     "station_config_unreadable": (
-        "先分清「坏了」与「没配」：到「设置」页「卫星与多普勒」把"
-        "「观测地点纬度」「观测地点经度」重新填成合法数字；"
+        "先分清“坏了”与“没配”：到「设置」页「天文观测」把"
+        "「观测地点纬度」「观测地点经度」输入框重新填成合法数字；"
         "若配置文件本身损坏（JSON 语法错/不是对象/字段类型非法），"
         "修好 ~/.mbdsdr/config.json 或删掉损坏文件后再重填。"),
     # ── TLE 抓取族：逐码与 tle_fetch.failure_copy 的 action 对齐 ──────
