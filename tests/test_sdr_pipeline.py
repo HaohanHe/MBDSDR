@@ -211,7 +211,7 @@ class TestAudioPlayerDegrade:
         """降级契约：无音频后端时全部方法安全降级（不抛异常、不假装在放）。"""
         import mbdsdr_ai.audio_out as ao
         # 显式强制降级路径：与开发机有没有声卡无关（否则有声卡即假红）
-        monkeypatch.setattr(ao, "_SD_AVAILABLE", False)
+        monkeypatch.setattr(ao, "sd_available", lambda: False)
         p = ao.AudioPlayer(sample_rate=48000, channels=1, gain=0.5)
         started = p.start()
         assert started is False
@@ -224,7 +224,7 @@ class TestAudioPlayerDegrade:
     def test_available_path_when_device_present(self):
         """有可用设备时：能开流就断言可用，打不开（CI 无声卡）就 skip。"""
         import mbdsdr_ai.audio_out as ao
-        if not ao._SD_AVAILABLE:
+        if not ao.sd_available():
             pytest.fail(
                 "sounddevice 未安装或导入失败：它在 requirements.txt:39 声明，属"
                 "「本仓该有」的依赖——按 docs/evidence-standard.md §2 附则，"
