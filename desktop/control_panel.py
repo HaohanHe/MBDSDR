@@ -165,15 +165,12 @@ _PANEL_MODE_ORDER = ["FM", "WFM", "NFM", "AM", "USB", "LSB", "CW"]
 
 
 def _format_frequency_hz(hz: float) -> str:
-    """频率的人读口径（提示文案用）：按量级选 GHz/MHz/kHz/Hz，``:g`` 去尾零。"""
-    v = float(hz)
-    if abs(v) >= 1e9:
-        return f"{v / 1e9:g} GHz"
-    if abs(v) >= 1e6:
-        return f"{v / 1e6:g} MHz"
-    if abs(v) >= 1e3:
-        return f"{v / 1e3:g} kHz"
-    return f"{v:g} Hz"
+    """频率读数统一走 readouts（与状态/模块/VFO 面板同一份实现）。
+
+    旧实现用 ``:g``：默认 6 位有效数字，1089.9996 MHz 会印成 ``1090``
+    （丢 400 Hz）。这里保留函数名只为兼容旧调用点，不再自己分档。
+    """
+    return format_frequency_hz(hz)
 
 
 class ControlPanel(QWidget):
