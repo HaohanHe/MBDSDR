@@ -224,9 +224,9 @@ class TimeEngine:
     def local_display(self) -> Dict[str, Any]:
         """当前仿真时刻的本地时区显示（带偏移，仅显示；计算仍用 UTC）。"""
         try:
-            from .time_basis import format_local
+            from .time_format import format_local
         except ImportError:
-            from time_basis import format_local
+            from time_format import format_local
         utc = self.now_utc()
         return {
             "utc_iso": utc.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
@@ -315,10 +315,10 @@ def get_ntp_time(server: str = "ntp.aliyun.com", timeout: float = 3.0) -> Tuple[
     调用方应回退系统时间并如实标注时间源。
     """
     try:
-        from .orbit import _network_disabled
+        from .net_policy import network_disabled
     except ImportError:  # 独立脚本运行
-        from orbit import _network_disabled
-    if _network_disabled():
+        from net_policy import network_disabled
+    if network_disabled():
         raise NTPError("离线模式（MBDSDR_OFFLINE）：NTP 授时需要联网，"
                        "已拒绝（时间源保持系统时钟）")
     try:
@@ -406,9 +406,9 @@ def get_time_info(prefer_ntp: bool = True) -> TimeInfo:
     info.utc_iso = info.utc_time.astimezone(timezone.utc).strftime(
         "%Y-%m-%dT%H:%M:%SZ")
     try:
-        from .time_basis import format_local
+        from .time_format import format_local
     except ImportError:
-        from time_basis import format_local
+        from time_format import format_local
     info.local_iso = format_local(info.utc_time)
     return info
 
