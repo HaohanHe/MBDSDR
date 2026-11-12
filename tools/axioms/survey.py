@@ -579,17 +579,62 @@ def _hook_files(repo: Repo) -> List[str]:
     return [os.path.join(hooks_dir, f) for f in os.listdir(hooks_dir) if not f.endswith(".sample")]
 
 
-def _gate_scripts(repo: Repo) -> List[str]:
+def _script_names(repo: Repo) -> List[str]:
     base = os.path.join(repo.root, "scripts")
     if not os.path.isdir(base):
         return []
-    names = []
-    for f in os.listdir(base):
-        if not f.endswith(".py"):
+    return sorted(
+        f for f in os.listdir(base)
+        if f.endswith(".py")
+        and re.match(r"(check_|lint_|audit_|guard|gate|verify_|report_)", f)
+    )
+
+
+def _has_main(repo: Repo, name: str) -> bool:
+    return bool(re.search(r"^def main\s*\(", _read(os.path.join(repo.root, "scripts", name)), re.M))
+
+
+def _gate_scripts(repo: Repo) -> Tuple[List[str], List[str]]:
+    """scripts/ 下按命名收进来的脚本，再按「有没有 main()」分成门禁与共享库。
+
+    `guard_common.py` 只有被复用的函数、没有自己的入口，是**共享库不是门禁**：
+    对它要求「谁跑它」只能逼人编一行假登记。门禁才需要入口；库只需要被某个
+    已登记脚本引用（见 collect_d4 的 D4-unreferenced-lib）。
+    """
+    gates: List[str] = []
+    libs: List[str] = []
+    for f in _script_names(repo):
+        (gates if _has_main(repo, f) else libs).append(f)
+    return gates, libs
+
+
+def _executed_by_test(gate: str, test_text: str) -> bool:
+    """测试里真的出现了这个脚本的可执行引用，而不是只提到名字。
+
+    认三种形态：`check_x.py` 文件名、`scripts.check_x` 模块路径、
+    `from scripts import check_x`。只在注释里写一句名字不算入口。
+    """
+    stem = gate[:-3]
+    return (
+        gate in test_text
+        or f"scripts.{stem}" in test_text
+        or f"from scripts import {stem}" in test_text
+    )
+
+
+def _tests_text(repo: Repo) -> str:
+    """tests/ 下的源码文本：门禁被测试实际执行（subprocess 或 import）算真入口。"""
+    parts: List[str] = []
+    for rel_root in ("tests", "mbdsdr_ai/tests"):
+        base = os.path.join(repo.root, rel_root)
+        if not os.path.isdir(base):
             continue
-        if re.match(r"(check_|lint_|audit_|guard|gate|verify_|report_)", f):
-            names.append(f)
-    return sorted(names)
+        for dp, dn, fn in os.walk(base):
+            dn[:] = [d for d in dn if d != "__pycache__"]
+            for f in fn:
+                if f.endswith(".py"):
+                    parts.append(_read(os.path.join(dp, f)))
+    return "\n".join(parts)
 
 
 #: 文档里的可执行入口：脚本路径 / release_check 步名 / 钩子名。
@@ -643,19 +688,23 @@ def collect_d4(repo: Repo, base: Sequence[Finding]) -> Dimension:
     dim.findings.extend(f for f in base if _dimension_of(f.rule) == "D4")
 
     hooks = _hook_files(repo)
-    gates = _gate_scripts(repo)
+    gates, libs = _gate_scripts(repo)
     hook_text = "\n".join(_read(h) for h in hooks)
     docs_text = "\n".join(_read(os.path.join(repo.root, p)) for p in (
         "docs/code-guards.md", "docs/evidence-standard.md", "AGENTS.md",
     ))
+    test_text = _tests_text(repo)
     wired = [g for g in gates if g in hook_text]
+    # 被测试实际执行（subprocess 跑或 import 调用）也是真入口：它挂在
+    # pytest 的必经路径上，不是一句文档里的承诺。
+    tested = [g for g in gates if _executed_by_test(g, test_text)]
     # 「门禁名出现在文档任意位置」曾经就是登记的全部条件：写一行
     # 「这个门禁不能用」也能绿。登记必须指名可执行入口，且入口要能解析到真实存在。
     registered: List[str] = []
     unresolved: List[Tuple[str, str]] = []
     silent: List[str] = []
     for g in gates:
-        if g in wired:
+        if g in wired or g in tested:
             continue
         if g not in docs_text:
             silent.append(g)
@@ -671,11 +720,30 @@ def collect_d4(repo: Repo, base: Sequence[Finding]) -> Dimension:
             registered.append(g)
         else:
             unresolved.append((g, entries[0]))
+
+    # 共享库没有自己的入口，不能要求「谁跑它」——那只能逼人编一行假登记。
+    # 它只要求被某个「已经真的有入口」的脚本引用，否则就是死代码或漏接线。
+    active: Set[str] = set(wired) | set(registered) | set(tested)
+    for m in _ENTRY_SCRIPT.finditer(docs_text):
+        active.add(os.path.basename(m.group(1)))
+    for h in hooks:
+        active.add(os.path.basename(h))
+    unreferenced: List[str] = []
+    for lib in libs:
+        stem = lib[:-3]
+        users = [
+            s for s in sorted(active)
+            if s != lib and stem in _read(os.path.join(repo.root, "scripts", s))
+        ]
+        if not users:
+            unreferenced.append(lib)
+
     dim.facts.append(f"已安装 git 钩子：{len(hooks)} 个")
     dim.facts.append(
-        f"门禁类脚本：{len(gates)} 个；钩子直接调用 {len(wired)} 个；"
-        f"文档登记且入口可解析 {len(registered)} 个；登记不可解析 {len(unresolved)} 个；"
-        f"无任何入口 {len(silent)} 个"
+        f"门禁类脚本：{len(gates)} 个（另有共享库 {len(libs)} 个）；"
+        f"钩子直接调用 {len(wired)} 个；文档登记且入口可解析 {len(registered)} 个；"
+        f"被测试实际执行 {len(tested)} 个；登记不可解析 {len(unresolved)} 个；"
+        f"无任何入口 {len(silent)} 个；库无人引用 {len(unreferenced)} 个"
     )
 
     if not any("pre-commit" in os.path.basename(h) for h in hooks):
@@ -699,6 +767,14 @@ def collect_d4(repo: Repo, base: Sequence[Finding]) -> Dimension:
             "D4-silent-gate", f"scripts/{g}", 0, "未接入钩子，也未在文档登记",
             "门禁脚本存在但没有任何入口，也没有说明它是批次末手动执行；等于静默失效。",
             "接入钩子，或在 docs/code-guards.md 登记「手动执行 + 执行时机」。",
+            "review",
+        ))
+    for lib in unreferenced:
+        dim.findings.append(Finding(
+            "D4-unreferenced-lib", f"scripts/{lib}", 0, "没有任何已登记脚本引用",
+            "共享库没有自己的入口，也没有被任何已登记/已接线/被测试执行的脚本引用；"
+            "等于死代码或漏接线。",
+            "把它接到某个已登记门禁，或删除；不要给它编一行「谁跑」的登记。",
             "review",
         ))
 

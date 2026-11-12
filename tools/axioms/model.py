@@ -52,6 +52,27 @@ class Finding:
     waiver_reason: str = ""
     waiver_expired: bool = False
 
+    def __post_init__(self) -> None:
+        """判据对象的字段类型就是判据的一部分，构造时立即校验。
+
+        历史事故：D1-cycle 构造时多传一个位置参数，`waived` 被赋成字符串
+        "review"（真值），于是所有模块级 import 环一直被当成「已豁免」，
+        同时从报告和棘轮里消失——判据看上去在跑，实际什么都没判。
+        这里不再依赖调用点自觉：`waived` 只接受 bool，`severity` 只接受两个
+        合法值，任何字符串/数字等非布尔真值一律报错退出。
+        """
+        if not isinstance(self.waived, bool):
+            raise TypeError(
+                f"Finding.waived 只接受 bool，收到 {type(self.waived).__name__}="
+                f"{self.waived!r}（rule={self.rule}, path={self.path}, line={self.line}）。"
+                "位置参数错位会把非布尔真值当成「已豁免」，让判据静默失效。"
+            )
+        if self.severity not in ("must-fix", "review"):
+            raise ValueError(
+                f"Finding.severity 只接受 'must-fix' / 'review'，收到 "
+                f"{self.severity!r}（rule={self.rule}, path={self.path}）。"
+            )
+
     def key(self) -> Tuple[str, str, int]:
         return (self.rule, self.path, self.line)
 

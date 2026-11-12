@@ -16,7 +16,7 @@ python scripts/axioms.py --prioritize \
 
 | 用法 | 作用 |
 |---|---|
-| `python scripts/axioms.py` | 八维合规报告（含 40 条反证自检 + 棘轮） |
+| `python scripts/axioms.py` | 八维合规报告（含 47 条反证自检 + 棘轮） |
 | `--prioritize` | 追加按派活规则排序的清单 |
 | `--self-test-only` | 只验"反证是否空过" |
 | `--rule A03` | 只看某条规则 / 某个维度 |
@@ -129,6 +129,13 @@ A03/A04（关键字当行为）、A14（行号当位置）。
   `.git/hooks/<hook>`（钩子文件存在且内容提到该门禁）。一个入口成立即算登记；
   一个都解析不到报 `D4-gate-unresolvable`（应修），只有名字没有入口也报同一条。
   反证：只写名字 → 红；写真实脚本路径 → 绿；写不存在的路径 → 红。
+- **D4 门禁 / 共享库分家**（`survey.py`）。`scripts/` 下按命名收进来的脚本先按
+  「有没有 `def main(`」分成**门禁**与**共享库**：门禁必须有入口（钩子 / 可解析的文档登记 /
+  被测试以 subprocess 或 import 实际执行），共享库（如 `guard_common.py`）没有自己的入口，
+  不能要求「谁跑它」——那只能逼人编一行假登记。库的判据是「必须被某个已真的
+  有入口的脚本引用」，否则报 `D4-unreferenced-lib`（复核）。
+  「被测试执行」只认测试文本里出现 `xxx.py` / `scripts.xxx` / `from scripts import xxx`
+  三种可执行引用，注释里提一句名字不算。反证：库无人引用 → 红；被已登记门禁 import → 绿。
 - **A11 历史快照**（`checks.py`）。删掉 `ARCHIVE_DOC` 目录正则与 `docs/learn/` 整篇跳过，
   路径不再决定是否免检。确实属于历史快照的文件在 `docs/axioms-waivers.json` 逐文件登记
   （文件 + 理由 + 到期 + 批准人），走现成豁免机制：未过期 → 绿，过期 → 应修。
@@ -144,6 +151,21 @@ A03/A04（关键字当行为）、A14（行号当位置）。
 从报告与棘轮里消失。修正后首次看到 2 个真实环（`mbdsdr_ai/builtin_tle_meta.py`、
 `mbdsdr_ai/fengyun_sat.py`）。教训同属「判据必须可自证」：`Finding` 的位置参数一旦错位，
 判定结果会以「豁免」的形态静默消失，比报错更难发现。
+
+### 判据对象的字段类型就是判据（2026-11-13 第三轮）
+
+**规矩：`Finding` 构造时 `waived` 只接受 `bool`，任何非布尔值（字符串、数字、其他真值）
+一律抛 `TypeError` 并让检查器报错退出；`severity` 只接受 `must-fix` / `review`，
+其他值抛 `ValueError`。**
+
+这条不是只修 `D1-cycle` 那一处调用：对于「豁免」这种会让条目从报告和棘轮里一起消失的
+字段，不能依赖调用点自觉按关键字传参。硬断言落在 `Finding.__post_init__`（`model.py`），
+覆盖所有构造点——包括未来新增的检查。把字符串 `"review"` 当成 `waived=True` 之所以危险，
+是因为它产生的不是错误，而是一份**看起来在跑、实际什么都没判**的报告。
+
+反证（`selftest.py`，必须全部抛错）：`waived` 传字符串 → `TypeError`；`waived` 传 `1` → `TypeError`；
+`severity` 传 `True`（把第 7 个位置参数写成布尔）→ `ValueError`。这条与棘轮同属 R1 级自证：
+判据对象的构造必须先于判据本身被验证。
 
 ### 登记表必须由检查器执行
 
@@ -194,7 +216,7 @@ A03/A04（关键字当行为）、A14（行号当位置）。
 | D1 分层与依赖 | `mbdsdr_ai` 不得 import `desktop`/Qt；`tests` 反向依赖 `desktop` 只允许在显式 UI 用例 | `D1-reverse` `D1-qt-in-core` `D1-test-reverse` |
 | D2 真值源 | 同一事实只允许一个产生点；同名常量不得多值；消费点必须走 `desktop/readouts.py`；产生点由 `docs/truth-sources.json` 登记并执行 | `D2-multi-producer` `D2-truth-source-stale` `D2-dual-constant` + A01–A04/A12/A13 |
 | D3 接口与命名 | 公开函数 ≥8 的模块必须有 `__all__`；同名不得不同职；同一概念不得两名 | `D3-no-contract` `D3-name-role` `D3-concept-alias` |
-| D4 门禁与验收 | 守卫必须接入某个入口；门禁的文档登记必须指名**可解析**的入口；skip 只能表环境缺失；断言必须可成立；xfail 必须 strict | `D4-silent-gate` `D4-gate-unresolvable` + A05–A09 |
+| D4 门禁与验收 | 守卫必须接入某个入口；门禁的文档登记必须指名**可解析**的入口；共享库必须被真的有入口的脚本引用；skip 只能表环境缺失；断言必须可成立；xfail 必须 strict | `D4-silent-gate` `D4-gate-unresolvable` `D4-unreferenced-lib` + A05–A09 |
 | D5 流程与协作 | 已知红必须带转绿条件/复跑命令；文档提交号必须 `cat-file` 可见；绿必须绑定当前树；位置引用必须落到符号 | `D5-known-red-incomplete` + A10/A11/A14 |
 | D6 目录与文档 | 文档引用的仓内路径必须存在；行号必须落在文件内；主题冻结声明必须与代码一致 | `D6-missing-path` `D6-path-moved` `D6-stale-line` `D6-color-claim` |
 | D7 任务分派 | 按固定公式算优先级，不由"谁最后汇报"决定 | `priority_score` |
@@ -359,7 +381,7 @@ D1 5 / D2 69 / D3 33 / D4 42 / D5 40 / D6 39 / D7 0 / D8 1
 这些**没有**做批量豁免：豁免需要理由、到期、批准人三要素，批量豁免会把真实漂移藏起来。
 它们保留在报告里，按季度复核。
 
-## 反证自检（45 条，必须全部 PASS）
+## 反证自检（47 条，必须全部 PASS）
 
 `python scripts/axioms.py --self-test-only` 会为每条规则在临时目录重建：
 

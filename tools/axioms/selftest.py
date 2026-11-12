@@ -272,23 +272,33 @@ CASES: List[Case] = [
          match="D3-concept-alias"),
     Case("D4", "门禁脚本没有任何入口",
          "scripts/check_*.py 既未接入钩子也未在文档登记",
-         {"scripts/check_foo.py": "print('gate')\n"},
-         {"scripts/check_foo.py": "print('gate')\n", "docs/code-guards.md": "运行 `scripts/check_foo.py`。\n"},
+         {"scripts/check_foo.py": "def main():\n    return 0\n"},
+         {"scripts/check_foo.py": "def main():\n    return 0\n",
+          "docs/code-guards.md": "运行 `scripts/check_foo.py`。\n"},
          match="D4-silent-gate"),
     Case("D4", "登记只写名字、没有可执行入口",
          "旧判据「门禁名出现在文档任意位置」就算登记：写一行「这个门禁不能用」也能绿",
-         {"scripts/check_foo.py": "print('gate')\n",
+         {"scripts/check_foo.py": "def main():\n    return 0\n",
           "docs/code-guards.md": "`check_foo.py` 这个门禁不能用，先别接钩子。\n"},
-         {"scripts/check_foo.py": "print('gate')\n",
+         {"scripts/check_foo.py": "def main():\n    return 0\n",
           "docs/code-guards.md": "手动执行：`python scripts/check_foo.py`。\n"},
          match="D4-gate-unresolvable"),
     Case("D4", "登记指向不存在的脚本",
          "docs/code-guards.md 写 `python scripts/check_missing.py`，该入口在本仓不存在",
-         {"scripts/check_foo.py": "print('gate')\n",
+         {"scripts/check_foo.py": "def main():\n    return 0\n",
           "docs/code-guards.md": "门禁 `check_foo.py` 由 `python scripts/check_missing.py` 执行。\n"},
-         {"scripts/check_foo.py": "print('gate')\n",
+         {"scripts/check_foo.py": "def main():\n    return 0\n",
           "docs/code-guards.md": "门禁 `check_foo.py` 由 `python scripts/check_foo.py` 执行。\n"},
          match="D4-gate-unresolvable"),
+    Case("D4", "共享库没有任何已登记脚本引用",
+         "scripts/guard_common.py 这类只有函数、没有 main() 的共享库：要求它「谁跑」只能逼人编假登记",
+         {"scripts/guard_shared.py": "def helper():\n    return 1\n",
+          "scripts/check_foo.py": "def main():\n    return 0\n",
+          "docs/code-guards.md": "手动执行：`python scripts/check_foo.py`。\n"},
+         {"scripts/guard_shared.py": "def helper():\n    return 1\n",
+          "scripts/check_foo.py": "from scripts.guard_shared import helper\n\ndef main():\n    return helper()\n",
+          "docs/code-guards.md": "手动执行：`python scripts/check_foo.py`。\n"},
+         match="D4-unreferenced-lib"),
     Case("D5", "已知红缺转绿条件",
          "docs/known-red-register.md 要求每条红必须带转绿条件",
          {"docs/known-red-register.md": "## K01 坏\n\n- 症状：x\n"},
@@ -421,7 +431,35 @@ def _extra_checks() -> List[dict]:
     results.append(_ratchet_check())
     results.append(_locator_drift_check())
     results.append(_cycle_representative_check())
+    results.append(_finding_type_check())
     return results
+
+
+def _finding_type_check() -> dict:
+    """Finding 构造时 waived/severity 必须类型正确，否则立即报错。
+
+    历史事故：D1-cycle 多传一个位置参数，waived 变成字符串 "review"（真值），
+    所有 import 环被当成已豁免，报告与棘轮同时看不见。这里用「必须抛错」来反证。
+    """
+    rejected: List[str] = []
+    cases = [
+        ("waived 传字符串", lambda: Finding("D1-cycle", "mbdsdr_ai/x.py", 1, "", "", "", "review", "review")),
+        ("waived 传 1", lambda: Finding("D1-cycle", "mbdsdr_ai/x.py", 1, "", "", "", "must-fix", 1)),
+        ("severity 传真值", lambda: Finding("D1-cycle", "mbdsdr_ai/x.py", 1, "", "", "", True)),
+    ]
+    for name, build in cases:
+        try:
+            build()
+        except (TypeError, ValueError):
+            rejected.append(name)
+    ok = len(rejected) == len(cases)
+    return {
+        "rule": "R1", "name": "Finding 字段类型硬校验",
+        "provenance": "D1-cycle 参数错位导致整类判据被当成已豁免",
+        "positive_hits": len(rejected), "negative_hits": 0,
+        "ok": ok,
+        "detail": "" if ok else f"这些非法构造没有报错：{sorted(set(c[0] for c in cases) - set(rejected))}",
+    }
 
 
 def _cycle_representative_check() -> dict:
