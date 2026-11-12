@@ -39,7 +39,7 @@ def test_absolute_readouts_use_dbfs_and_relative_notes_basis():
     power_dbfs = -73.25
     snr_db = power_dbfs - floor_dbfs                    # 口径 = 峰 − 本帧中位
     text = _fmt_peak_text(145.0e6, power_dbfs, snr_db)
-    assert "145.0000 MHz" in text
+    assert "145.000000 MHz" in text
     assert "-73.2 dBFS" in text                          # 绝对量带单位
     assert f"SNR（相对本帧中位）{snr_db:.1f} dB" in text  # 相对量带基准
     assert snr_db == pytest.approx(6.25)

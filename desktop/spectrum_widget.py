@@ -21,6 +21,14 @@ _log = logging.getLogger(__name__)
 
 from constants import DEFAULT_SAMPLE_RATE_HZ
 
+# 频率读数唯一口径（6 位小数 MHz = 1 Hz）。谱面标签/悬停/频段气泡都不再
+# 就地拼小数位——同一峰在两处显示成不同精度比少显示一位更难解释。
+from readouts import (
+    format_bandwidth_hz,
+    format_frequency_hz,
+    format_frequency_range_hz,
+)
+
 from PySide6.QtCore import Qt, QRectF, QPointF, Signal, Slot, QTimer
 from PySide6.QtGui import (
     QPainter, QColor, QPen, QBrush, QFont, QFontMetricsF, QLinearGradient,
@@ -1066,7 +1074,7 @@ def _draw_vfo_band(painter: QPainter, state: "_PlotState", rect: QRectF):
         painter.setBrush(Qt.NoBrush)
         painter.drawRect(QRectF(x0, rect.y(), x1 - x0, rect.height()))
         # 标签：矩形顶部内部
-        label = f"VFO {letter}  {center_hz/1e6:.3f} MHz"
+        label = f"VFO {letter}  {format_frequency_hz(center_hz)}"
         painter.setPen(QPen(edge, 1))
         painter.drawText(QPointF(x0 + 3, rect.y() + 12), label)
 
@@ -2185,7 +2193,7 @@ def _peak_annotations(state):
     gen = state.panel.generator
     if not state.show_peaks or not gen.has_data():
         return []
-    return [(freq_hz, db, snr, f"{freq_hz/1e6:.3f} MHz")
+    return [(freq_hz, db, snr, format_frequency_hz(freq_hz))
             for freq_hz, db, snr in gen.find_peaks_with_snr(state.peak_rel_db)]
 
 
@@ -2237,7 +2245,7 @@ def _fmt_axis_tick(db: float) -> str:
 def _fmt_peak_text(freq_hz: float, power_db: float, snr_db: float,
                    verb: str = "峰值") -> str:
     """峰值提示唯一出口：绝对量标 dBFS，SNR 标「相对本帧中位」。"""
-    return (f"{verb} {freq_hz / 1e6:.4f} MHz"
+    return (f"{verb} {format_frequency_hz(freq_hz)}"
             f"（{power_db:.1f} {_DBFS_UNIT} · "
             f"SNR（{_REL_BASE}）{snr_db:.1f} dB）")
 
@@ -2251,7 +2259,7 @@ def _fmt_hover_text(freq_hz: float, val_db: Optional[float],
     「两个都正确但数值不同」的读数，比只显示频率更糟（2026-11-12 裁定）。
     无电平 / 无底噪 → 次行返回空串（不编造 SNR）。
     """
-    first = (f"{freq_hz / 1e6:.4f} MHz   "
+    first = (f"{format_frequency_hz(freq_hz)}   "
              + (_fmt_abs_db(val_db) if val_db is not None else "--"))
     if val_db is None or noise_floor_db is None:
         return first, ""
@@ -2296,7 +2304,7 @@ def _draw_fixed_markers(painter, state, rect, color):
         painter.setFont(f)
         db_txt = f"{val:.1f}{_DBFS_UNIT}" if val is not None else "--"
         painter.drawText(QPointF(x + 4, rect.y() + 26),
-                         f"{freq_hz/1e6:.3f}MHz {db_txt}")
+                         f"{format_frequency_hz(freq_hz)} {db_txt}")
 
 
 def _wf_build_lut(state: "_PlotState"):
@@ -3541,7 +3549,7 @@ class _TuningPlotMixin:
         gen.center_freq_hz = new_view_center - self.state.view_offset_hz
         self._emit_tuned(gen.center_freq_hz)
         self.state.panel.sync_span_slider()
-        self._show_tune_tip(f"缩放 {new_span / 1e6:.3f} MHz")
+        self._show_tune_tip(f"缩放 {format_bandwidth_hz(new_span)}")
 
     def _zoom_span_keyboard(self, factor: float) -> None:
         """键盘缩放：锚点固定取谱面中心（见 :meth:`_zoom_span` 的约定）。"""
@@ -3706,8 +3714,7 @@ class _TuningPlotMixin:
     def _band_tip_text(b: Dict[str, object]) -> str:
         """频段气泡/提示文案：名称 · 频率范围 · 调制 · 描述（缺省字段不编造）。"""
         parts = [str(b["label"]),
-                 f"{float(b['start_hz']) / 1e6:.4f}–"
-                 f"{float(b['stop_hz']) / 1e6:.4f} MHz"]
+                 format_frequency_range_hz(b["start_hz"], b["stop_hz"])]
         if b.get("modulation"):
             parts.append(str(b["modulation"]))
         if b.get("desc"):
@@ -3808,7 +3815,7 @@ class _TuningPlotMixin:
                         vfo.vfo_id, float(new_center))
                     self.update()
                     self._show_tune_tip(
-                        f"VFO {new_center / 1e6:.4f} MHz"
+                        f"VFO {format_frequency_hz(new_center)}"
                         f"（搬移 {step / 1e3:g} kHz）")
                     return
 
@@ -3819,7 +3826,7 @@ class _TuningPlotMixin:
             gen.center_freq_hz = nfreq
             self._emit_tuned(nfreq)
             self._show_tune_tip(
-                f"{nfreq / 1e6:.4f} MHz（步进 {step / 1e3:g} kHz）")
+                f"{format_frequency_hz(nfreq)}（步进 {step / 1e3:g} kHz）")
         self.update()
 
     # ------------------------------------------------------------------ 键盘
@@ -3865,7 +3872,7 @@ class _TuningPlotMixin:
             gen.center_freq_hz = nfreq
             self._emit_tuned(nfreq)
             self._show_tune_tip(
-                f"{nfreq / 1e6:.4f} MHz（步进 {interval / 1e3:g} kHz）")
+                f"{format_frequency_hz(nfreq)}（步进 {interval / 1e3:g} kHz）")
             self.update()
             return
         # 滤波宽窄档（, 窄 / . 宽，gqrx </./> 惯例；按模式预设表步进）
@@ -3967,7 +3974,7 @@ class _TuningPlotMixin:
                     if bm is not None:
                         self.state.panel.bookmark_activated.emit(
                             float(bm[0]), str(bm[2]), float(bm[3]))
-                        self._show_tune_tip(f"书签 {bm[0] / 1e6:.4f} MHz")
+                        self._show_tune_tip(f"书签 {format_frequency_hz(bm[0])}")
                         return
                 # dB 轴热区（左缘竖条）：按住拖动 = 平移量程，不进调谐/VFO；
                 # Ctrl+竖拖 = 以按下处 dB 为锚缩放跨度。

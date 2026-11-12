@@ -522,7 +522,8 @@ def test_peak_snr_baseline_is_median_and_kept_out_of_label(qapp):
     assert hit is not None and len(hit) == 3, f"命中没带 SNR：{hit}"
     assert hit[2] == pytest.approx(60.0, abs=0.2)
     # 标签文案必须由同一份数据生成：命中频率与图上标签同源
-    assert any(s.startswith(f"{hit[0] / 1e6:.3f} MHz") for s in labels), \
+    from readouts import format_frequency_hz
+    assert any(s.startswith(format_frequency_hz(hit[0])) for s in labels), \
         f"图上标签与命中峰不是同一份数据：{labels}"
 
 
