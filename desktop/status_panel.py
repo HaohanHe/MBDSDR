@@ -10,6 +10,7 @@ SDR 设备信息、UTC 时钟。
 """
 
 import datetime
+import logging
 import math
 
 from PySide6.QtCore import Qt, Signal, Slot, QTimer
@@ -22,9 +23,20 @@ from PySide6.QtGui import QFont
 from tokens import tokens
 from mbdsdr_ai.squelch import margin_threshold_db
 from constants import format_sample_rate
+from readouts import (
+    EMPTY as _EMPTY,
+    format_bandwidth_hz,
+    format_dbfs,
+    format_frequency_hz,
+    format_gain_db,
+    gain_differs,
+    gain_not_applied_hint,
+)
 
 # 空态唯一记号（N-03）：不可用/未测到一律「—」，不再混用两套横线。
-_EMPTY = "—"
+# 频率/带宽/电平/增益的格式化统一在 readouts（单一来源），这里不再内联。
+
+logger = logging.getLogger(__name__)
 
 
 def _fmt_number(value, digits: int, unit: str = "") -> str:
@@ -44,12 +56,6 @@ def _fmt_number(value, digits: int, unit: str = "") -> str:
     if abs(v) < 0.5 * 10 ** (-digits):
         v = 0.0
     return f"{v:.{digits}f}{unit}"
-
-
-def _fmt_dbfs(value) -> str:
-    """引擎/IQ 路径电平：dBFS、1 位小数，缺值「—」（从不拿 0 兜底）。"""
-    txt = _fmt_number(value, 1)
-    return _EMPTY if txt == _EMPTY else txt + " dBFS"
 
 
 # MCP 固件状态里的 RSSI 是 SI4732 的 dBµV（0–127），不是 dBFS：
@@ -79,51 +85,9 @@ _LEVEL_MIN = -120.0
 _LEVEL_MAX = 0.0
 
 
-def _fmt_freq(hz):
-    """把 Hz 格式化为易读频率字符串（N-01：≥1 MHz 固定 6 位小数）。"""
-    if hz is None:
-        return _EMPTY
-    try:
-        hz = float(hz)
-    except (TypeError, ValueError):
-        return _EMPTY
-    if not math.isfinite(hz):
-        return _EMPTY
-    if hz >= 1e6:
-        return f"{hz / 1e6:.6f} MHz"
-    if hz >= 1e3:
-        return f"{hz / 1e3:.3f} kHz"
-    return f"{hz:.0f} Hz"
-
-
 def _fmt_rate(hz):
     """采样率显示：唯一口径「MS/s」固定 3 位小数（U-03）。"""
     return format_sample_rate(hz)
-
-
-def _fmt_bw(hz):
-    """解调带宽格式化。0/None 视为自动。
-
-    ≥1 kHz 必须是 1 位小数 kHz，不足 1 kHz 用整 Hz——与 VFO 面板
-    ``vfo_panel._fmt_bw_hz`` 同一口径。旧实现把 kHz 舍到整数，2400 Hz
-    显示成 "2 kHz"：既不是 2.4 也不是 2400，是个谁也不认识的数（读数
-    失真，不是精度取舍）。500 Hz 更会被舍成 "0 kHz"。
-    """
-    if hz is None:
-        return _EMPTY
-    try:
-        hz = float(hz)
-    except (TypeError, ValueError):
-        return _EMPTY
-    if not math.isfinite(hz):
-        return _EMPTY
-    if hz <= 0:
-        return "自动"
-    if hz >= 1e6:
-        return f"{hz / 1e6:.3f} MHz"
-    if hz >= 1e3:
-        return f"{hz / 1e3:.1f} kHz"
-    return f"{hz:.0f} Hz"
 
 
 def _fmt_squelch(squelch_db, applied_by="none", threshold_dbfs=None):
@@ -344,6 +308,10 @@ class StatusPanel(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._sdr_connected = False
+        # 增益「配置意图」只由主窗口注入（用户拖滑杆/AI 设增益的落点），
+        # 面板自己不读配置、不读别的面板——否则就是第三个真值源。
+        self._gain_intent_db = None
+        self._last_gain_db = None        # 最近一次后端回读值，供意图变化时重判
         self.decode_last = None          # 最近一次解码结果的显示快照（测试可查）
         self._build_ui()
         self._start_utc_clock()
@@ -690,6 +658,36 @@ class StatusPanel(QWidget):
     # 统一后端驱动入口（新增）
     # ========================================================================
 
+    def set_gain_intent(self, db) -> None:
+        """注入用户「配置意图」增益（dB）。只存不读。
+
+        来源只能是主窗口：它在用户拖滑杆（``_on_gain_changed``）、启动恢复、
+        连接下发、AI 设增益四个落点知道意图。本面板**不得**自读
+        desktop_settings.json（配置可能落后于正在生效的意图，会造出第三个
+        真值源），也**不得**读控制面板滑杆（AI 改增益后滑杆是陈旧值，会
+        误报「未生效」，比不报更坏）。
+        """
+        if db is None:
+            self._gain_intent_db = None
+        else:
+            try:
+                self._gain_intent_db = float(db)
+            except (TypeError, ValueError):
+                self._gain_intent_db = None
+        self._apply_gain_readout(self._last_gain_db)
+
+    def _apply_gain_readout(self, gain_db) -> None:
+        """渲染增益读数；有意图且与后端回读不一致时标「未生效」。"""
+        self._last_gain_db = gain_db
+        self.rx_gain.setText(format_gain_db(gain_db))
+        if (gain_db is None or self._gain_intent_db is None
+                or not gain_differs(gain_db, self._gain_intent_db)):
+            self.rx_gain.setToolTip("")
+            return
+        hint = gain_not_applied_hint(gain_db, self._gain_intent_db)
+        logger.warning("%s", hint)
+        self.rx_gain.setToolTip(f"⚠ {hint}")
+
     def update_from_backend(self, backend):
         """从 SDRBackend 读取全部可用字段并刷新本面板。
 
@@ -709,16 +707,19 @@ class StatusPanel(QWidget):
             self.rx_bw.setText("—")
             self.rx_demod.setText("—")
             self.rx_gain.setText("—")
+            self.rx_gain.setToolTip("")
+            self._last_gain_db = None
             self.rx_agc.setText("—")
             self.rx_squelch.setText("—")
             self.rx_volume.setText("—")
         else:
-            self.rx_freq.setText(_fmt_freq(self._safe_get(status, "frequency_hz")))
+            self.rx_freq.setText(format_frequency_hz(self._safe_get(status, "frequency_hz")))
             self.rx_srate.setText(_fmt_rate(self._safe_get(status, "sample_rate_hz")))
-            self.rx_bw.setText(_fmt_bw(self._safe_get(status, "bandwidth_hz")))
+            self.rx_bw.setText(format_bandwidth_hz(
+                self._safe_get(status, "bandwidth_hz"), zero_text="自动"))
             self.rx_demod.setText(self._safe_get(status, "demod_mode") or "—")
             gain = self._safe_get(status, "gain_db")
-            self.rx_gain.setText(f"{gain:.1f} dB" if gain is not None else "—")
+            self._apply_gain_readout(gain)
             agc = self._safe_get(status, "agc_enabled")
             self.rx_agc.setText("开" if agc else ("关" if agc is False else "—"))
             squelch = self._safe_get(status, "squelch_db")
@@ -745,7 +746,7 @@ class StatusPanel(QWidget):
             # 频率/模式同步到信号质量组（避免主窗口重复槽函数）
             freq = self._safe_get(status, "frequency_hz")
             if freq is not None:
-                self.freq_value.setText(_fmt_freq(freq))
+                self.freq_value.setText(format_frequency_hz(freq))
             demod = self._safe_get(status, "demod_mode")
             if demod:
                 self.mode_value.setText(str(demod))
@@ -849,7 +850,7 @@ class StatusPanel(QWidget):
             self._set_level_bar_color(tokens().COLORS["gray_300"])
             return
 
-        self.rssi_value.setText(_fmt_dbfs(dbfs))
+        self.rssi_value.setText(format_dbfs(dbfs))
         self.smeter_value.setText(_dbfs_to_smeter(dbfs))
 
         # 电平条映射：[-120, 0] -> [0, 120]

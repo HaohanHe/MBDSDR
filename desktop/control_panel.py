@@ -85,6 +85,14 @@ from mode_registry import (
     get as get_mode,
 )
 
+# 读数格式化与「未生效」文案的唯一来源（与控制/模块/状态面板同字）。
+from readouts import (
+    format_dbfs,
+    format_gain_db,
+    gain_differs,
+    gain_not_applied_hint,
+)
+
 
 # 预设电台（FM，MHz）
 # 不预存地区性广播台：FM 频率随城市/地区不同，硬编码其他城市的电台没有意义。
@@ -1097,7 +1105,7 @@ class ControlPanel(QWidget):
         self.volume_changed.emit(value)
 
     def _on_gain_changed(self, db: int):
-        self.gain_val.setText(f"{db} dB")
+        self.gain_val.setText(format_gain_db(db))
         self.gain_val.setToolTip("已连接：增益请求已下发，等待设备回执")
         # 用户手动调增益即采纳当前值，清掉恢复/收放期"配置请求被替换"提示
         self.gain_slider.setToolTip(self._gain_base_tip)
@@ -1427,7 +1435,7 @@ class ControlPanel(QWidget):
             return
         v = max(-120.0, min(0.0, v))
         self.smeter_bar.setValue(int(v))
-        self.smeter_label.setText(f"{v:.0f} dBFS")
+        self.smeter_label.setText(format_dbfs(v))
 
     def update_record_time(self, seconds: int):
         """更新录音时长显示。"""
@@ -1471,7 +1479,7 @@ class ControlPanel(QWidget):
             self.gain_slider.setToolTip(f"{base}\n⚠ {hint}")
             # 标签是读数：已连接才写设备真实值；未连接保持「—」，不编造。
             if self._sdr_connected:
-                self.gain_val.setText(f"{applied} dB")
+                self.gain_val.setText(format_gain_db(applied))
                 self.gain_val.setToolTip(f"⚠ {hint}")
 
     # ========================================================================
@@ -1588,11 +1596,10 @@ class ControlPanel(QWidget):
             return False
         if not math.isfinite(value):
             return False
-        self.gain_val.setText(f"{value:g} dB")
+        self.gain_val.setText(format_gain_db(value))
         requested = self.gain_slider.value()
-        if abs(value - requested) > 1e-9:
-            hint = (f"后端报告增益 {value:g} dB，配置意图 {requested} dB 未生效"
-                    "（配置文件未改）")
+        if gain_differs(value, requested):
+            hint = gain_not_applied_hint(value, requested)
             logger.warning("%s", hint)
             self.gain_val.setToolTip(f"⚠ {hint}")
         elif readback_source:

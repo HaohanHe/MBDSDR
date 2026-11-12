@@ -31,6 +31,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtGui import QBrush, QColor
 
 from tokens import tokens
+from readouts import format_bandwidth_hz, format_frequency_hz
 
 try:  # pragma: no cover - 内核缺失时面板降级
     from mbdsdr_ai.vfo_manager import VfoManager
@@ -41,19 +42,13 @@ except Exception:  # noqa: BLE001
 
 
 def _fmt_freq_hz(hz: float) -> str:
-    """Hz → 可读字符串。"""
-    if abs(hz) >= 1e6:
-        return f"{hz/1e6:.3f} MHz"
-    if abs(hz) >= 1e3:
-        return f"{hz/1e3:.1f} kHz"
-    return f"{hz:.0f} Hz"
+    """频率读数统一走 readouts（与状态面板同一份实现）。"""
+    return format_frequency_hz(hz)
 
 
 def _fmt_bw_hz(hz: float) -> str:
-    """Hz → 带宽可读字符串（单位与 _fmt_freq_hz 一致，不裸显 k）。"""
-    if abs(hz) >= 1e3:
-        return f"{hz/1e3:.1f} kHz"
-    return f"{hz:.0f} Hz"
+    """带宽读数统一走 readouts（与状态面板同一份实现）。"""
+    return format_bandwidth_hz(hz)
 
 
 class VfoPanel(QWidget):

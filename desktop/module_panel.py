@@ -49,6 +49,11 @@ from PySide6.QtWidgets import (
 
 from tokens import tokens as _tok
 from mode_registry import get as _get_mode
+from readouts import (
+    format_gain_db as _format_gain_db,
+    gain_differs as _gain_differs,
+    gain_not_applied_hint as _gain_not_applied_hint,
+)
 from constants import (
     DEFAULT_SAMPLE_RATE_HZ, DEFAULT_SR_UNCONFIRMED,
     FREQ_MIN_HZ, FREQ_MAX_HZ, format_sample_rate,
@@ -352,7 +357,7 @@ class ModulePanel(QWidget):
             "设备能力动态收放，实际档位以设备为准（设备不支持的值由后端钳位）")
         self.gain_val = QLabel("—")
         self.gain_slider.valueChanged.connect(
-            lambda v: self.gain_val.setText(f"{v} dB"))
+            lambda v: self.gain_val.setText(_format_gain_db(v)))
         self.gain_slider.valueChanged.connect(self._push_gain)
         grow = QHBoxLayout()
         grow.addWidget(self.gain_slider)
@@ -441,7 +446,7 @@ class ModulePanel(QWidget):
         if self._confirmed_gain_db is None:
             self.gain_val.setText("—")
         else:
-            self.gain_val.setText(f"{int(round(self._confirmed_gain_db))} dB")
+            self.gain_val.setText(_format_gain_db(self._confirmed_gain_db))
         if self._tune_wired:
             self.params_hint.setText(
                 "频率已接入后端：改频率走真实调谐（失败会回滚到上次成功值）")
@@ -467,13 +472,12 @@ class ModulePanel(QWidget):
         if not math.isfinite(value):
             return False
         self._confirmed_gain_db = value
-        self.gain_val.setText(f"{int(round(value))} dB")
-        # 与控制面板同一条底线：后端夹值/写入失败时必须告警。
-        # 格式（这里是整数、控制面板是 :g）暂不统一，但「未生效」不能静默。
+        self.gain_val.setText(_format_gain_db(value))
+        # 与控制面板/状态面板同一条底线：后端夹值或写入失败时必须告警，
+        # 文案也来自 readouts 的同一份实现（此前三处各写一句）。
         requested = float(self.gain_slider.value())
-        if abs(value - requested) > 1e-9:
-            hint = (f"后端报告增益 {value:g} dB，配置意图 {requested:g} dB 未生效"
-                    "（配置文件未改）")
+        if _gain_differs(value, requested):
+            hint = _gain_not_applied_hint(value, requested)
             logger.warning("%s", hint)
             self.gain_val.setToolTip(f"⚠ {hint}")
         return True
@@ -501,7 +505,7 @@ class ModulePanel(QWidget):
                 blocker = QSignalBlocker(self.gain_slider)
                 self.gain_slider.setValue(int(round(value_db)))
                 del blocker
-                self.gain_val.setText(f"{int(round(value_db))} dB")
+                self.gain_val.setText(_format_gain_db(value_db))
 
     # ------------------------------------------------------------------
     def refresh_devices(self):
@@ -628,7 +632,7 @@ class ModulePanel(QWidget):
             self.gain_slider.blockSignals(True)
             self.gain_slider.setValue(value)
             self.gain_slider.blockSignals(False)
-            self.gain_val.setText(f"{value} dB")
+            self.gain_val.setText(_format_gain_db(value))
 
         if req.bandwidth_hz is not None and not self.bw_spin.hasFocus():
             self.bw_spin.blockSignals(True)

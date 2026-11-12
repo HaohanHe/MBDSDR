@@ -5943,7 +5943,11 @@ class MainWindow(QMainWindow):
         except Exception:
             pass
         try:
-            self.control_panel.set_gain(float(s.get("gain_db", 20.0)))
+            _restore_gain = float(s.get("gain_db", 20.0))
+            self.control_panel.set_gain(_restore_gain)
+            # 启动恢复也是「意图」落点：与滑杆位置同源（同一个 key），
+            # 状态面板据此在连上前就能显示「意图 vs 回读」。
+            self._set_gain_intent(_restore_gain)
         except Exception:
             pass
         try:
@@ -7161,6 +7165,8 @@ class MainWindow(QMainWindow):
         except Exception:
             pass
         self._panels_set_sdr_connected(False)
+        # 断开后没有可比对的「配置意图」：清空，避免下次连接前挂着旧意图误报。
+        self._set_gain_intent(None)
         if self._worker_manager:
             self._worker_manager.stop()
         self._worker = None
@@ -7362,6 +7368,9 @@ class MainWindow(QMainWindow):
         _run("AGC", lambda: backend.set_agc(agc))
         if not agc:
             _run("增益", lambda: backend.set_gain(gain))
+        # 意图跟着连接参数走；AGC 打开时手动增益不生效，清空意图以免三块
+        # 面板把「AGC 自动增益」误报成「配置意图未生效」。
+        self._set_gain_intent(gain if not agc else None)
         if failures:
             logger.warning("连接后参数未全部生效: %s", "、".join(failures))
             self.statusBar().showMessage(
@@ -7567,6 +7576,23 @@ class MainWindow(QMainWindow):
         except Exception:
             pass
 
+    def _set_gain_intent(self, db) -> None:
+        """把「配置意图」推给状态面板（唯一来源是本类，面板只存不读）。
+
+        落点四处：用户拖滑杆（``_on_gain_changed``）、启动恢复、连接下发、
+        AI 设增益（``_sync_ui_for_tool``）；断开时传 None 清空。
+        不能让状态面板自读配置或控制面板滑杆——前者是第三个真值源，
+        后者在 AI 改过增益后是陈旧值，会误报「未生效」。
+        """
+        try:
+            value = None if db is None else float(db)
+        except (TypeError, ValueError):
+            value = None
+        self._gain_intent_db = value
+        sp = getattr(self, "status_panel", None)
+        if sp is not None and hasattr(sp, "set_gain_intent"):
+            sp.set_gain_intent(value)
+
     def _show_real_gain(self, backend) -> None:
         """把设备真实增益读回标签（成功/失败都读）；读不到退回最后一次读回值。"""
         try:
@@ -7601,9 +7627,22 @@ class MainWindow(QMainWindow):
         mp = getattr(self, "module_panel", None)
         if mp is not None and hasattr(mp, "set_gain_applied"):
             mp.set_gain_applied(real_db)
+        # 状态面板也显示同一个读数：不推给它就只能等下一次 IQ 轮询（约 500ms），
+        # 中间会出现「两块面板一个已更新、一个还是旧值」。这里用 backend 的
+        # 同一次回读刷新，不再单独读一次硬件。
+        sp = getattr(self, "status_panel", None)
+        if sp is not None and hasattr(sp, "update_from_backend"):
+            try:
+                sp.update_from_backend(backend)
+            except Exception as e:  # noqa: BLE001 - 刷新失败不影响其余面板
+                logger.debug("状态面板增益回填失败: %s: %s",
+                             type(e).__name__, e)
 
     @Slot(int)
     def _on_gain_changed(self, db: int):
+        # 用户拖动滑杆 = 意图产生点：先记下来，再碰硬件。失败时读数会回到
+        # 设备真实值，而意图仍是 db，三块面板据此一起标「未生效」。
+        self._set_gain_intent(float(db))
         backend = self._active_sdr_backend
         if backend is not None:
             if not self._apply_hw_action(
@@ -8428,6 +8467,27 @@ class MainWindow(QMainWindow):
             except (TypeError, ValueError):
                 v63 = 30
             self.control_panel.set_volume(volume_hw_to_pct(v63))
+        elif tool_name == "sdr_set_gain":
+            # AI 改增益：滑杆（意图的 UI 副本）与三块面板的意图必须一起跟上。
+            # 只更新读数不更新意图，会让滑杆停在旧值、设备是新值，三块面板
+            # 各说各话；清空意图则是把用户配的值悄悄丢掉，更糟。
+            try:
+                requested = float(params.get("gain_db"))
+            except (TypeError, ValueError):
+                return
+            slider = getattr(self.control_panel, "gain_slider", None)
+            if slider is not None:
+                slider.blockSignals(True)
+                slider.setValue(int(round(requested)))
+                slider.blockSignals(False)
+            mp = getattr(self, "module_panel", None)
+            if mp is not None and hasattr(mp, "set_rf_params"):
+                mp.set_rf_params(gain_db=requested)
+            self._set_gain_intent(requested)
+            backend = getattr(self, "_active_sdr_backend", None)
+            if backend is not None:
+                # 读回值走与控制/模块面板同一套比对；夹值就标「未生效」。
+                self._show_real_gain(backend)
 
     @Slot(str, dict)
     def _on_ai_tool_call(self, tool_name: str, params: dict):
