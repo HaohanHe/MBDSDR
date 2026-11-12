@@ -135,7 +135,7 @@ def run(argv: Optional[Sequence[str]] = None,
         if args.connect:
             ctrl.connect(args.connect)
             print(f"已连接: {ctrl.get_status().device}")
-        elif args.freq or args.demod or args.spectrum or args.scan \
+        elif args.freq is not None or args.demod or args.spectrum or args.scan \
                 or args.decode or args.record or args.start_audio:
             # 需要后端的动作但未连接 -> 明确报错（不造假）
             print("错误: 未连接设备。", file=sys.stderr)
@@ -145,9 +145,24 @@ def run(argv: Optional[Sequence[str]] = None,
             return 2
 
         # ---- 参数下发 ----
+        def _apply(label: str, apply_fn, describe) -> bool:
+            """下发一项设置并如实报告结果。
+
+            后端返回 False 表示「拒绝了这个值」（越界/不支持），此时打印的是
+            请求值 + 失败原因，不是把请求值当成就绪状态播报一遍。
+            """
+            ok = apply_fn()
+            if ok is False:
+                print(f"错误: {label}未生效：{ctrl.setter_failure_text(label)}",
+                      file=sys.stderr)
+                return False
+            print(f"{label} -> {describe()}")
+            return True
+
         if args.freq is not None:
-            ctrl.set_frequency(args.freq)
-            print(f"频率 -> {args.freq:.0f} Hz")
+            if not _apply("频率", lambda: ctrl.set_frequency(args.freq),
+                          lambda: f"{ctrl.get_frequency():.0f} Hz"):
+                return 4
         if args.demod:
             ctrl.set_demod(args.demod)
             print(f"解调 -> {ctrl.get_demod()}")
@@ -155,10 +170,13 @@ def run(argv: Optional[Sequence[str]] = None,
             ctrl.set_gain(args.gain)
             print(f"增益 -> {args.gain} dB")
         if args.sample_rate is not None:
-            ctrl.set_sample_rate(args.sample_rate)
-            print(f"采样率 -> {args.sample_rate:.0f} Hz")
+            if not _apply("采样率", lambda: ctrl.set_sample_rate(args.sample_rate),
+                          lambda: f"{ctrl.get_sample_rate():.0f} Hz"):
+                return 4
         if args.bandwidth is not None:
-            ctrl.set_bandwidth(args.bandwidth)
+            if not _apply("带宽", lambda: ctrl.set_bandwidth(args.bandwidth),
+                          lambda: f"{args.bandwidth:.0f} Hz"):
+                return 4
         if args.squelch is not None:
             ctrl.set_squelch(args.squelch)
         if args.audio_out is not None:
@@ -185,6 +203,11 @@ def run(argv: Optional[Sequence[str]] = None,
                 time.sleep(0.1)
                 if ctrl._scans[handle]["done"]:  # noqa: SLF001 - CLI 内部轮询
                     break
+            state = ctrl._scans[handle]  # noqa: SLF001 - CLI 内部轮询
+            if state.get("error"):
+                # 扫描中止时结果为空，不能把「没扫成」播报成「没发现信号」。
+                print(f"错误: 扫频失败：{state['error']}", file=sys.stderr)
+                return 3
             segs = ctrl.get_scan_results(handle)
             print(f"扫频 {start:.0f}-{stop:.0f} Hz (step {step:.0f}): "
                   f"发现 {len(segs)} 个活动段")
