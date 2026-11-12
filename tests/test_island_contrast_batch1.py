@@ -20,6 +20,7 @@
 import os
 import re
 import sys
+import tempfile
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -28,8 +29,9 @@ sys.path.insert(0, _ROOT)
 sys.path.insert(0, os.path.join(_ROOT, "desktop"))
 
 import pytest  # noqa: E402
+from PySide6.QtCore import QSettings  # noqa: E402
 from PySide6.QtGui import QColor, QImage, QPainter, QPen  # noqa: E402
-from PySide6.QtWidgets import QApplication  # noqa: E402
+from PySide6.QtWidgets import QApplication, QWidget  # noqa: E402
 
 app = QApplication.instance() or QApplication(sys.argv)
 
@@ -118,3 +120,46 @@ def test_adsb_range_rings_and_label_no_longer_use_grid_ink():
         "距圈/量程又用回了网格色：light_grid 对 light_bg 只有 1.36:1")
     assert contrast_ratio(ap._STATION.name(), ap._BG.name()) >= MIN_NON_TEXT
     assert contrast_ratio(ap._TEXT.name(), ap._BG.name()) >= MIN_TEXT
+
+
+# ---------------------------------------------------------------- T1-10
+
+
+@pytest.fixture(scope="module")
+def floating_panel():
+    """构造一次浮层；QSettings 重定向到临时 ini，不写用户注册表。"""
+    import floating_panel as fp
+
+    previous_format = QSettings.defaultFormat()
+    QSettings.setDefaultFormat(QSettings.IniFormat)
+    QSettings.setPath(QSettings.IniFormat, QSettings.UserScope,
+                      tempfile.mkdtemp(prefix="mbdsdr-island-"))
+    host = QWidget()
+    panel = fp.FloatingPanel("island-contrast-test", "标题",
+                             QWidget(), host, lambda: None)
+    yield panel
+    panel.deleteLater()
+    host.deleteLater()
+    QSettings.setDefaultFormat(previous_format)
+
+
+def _panel_bg(panel) -> QColor:
+    """浮层自身 QSS 里的半透明底色，按最坏宿主（浅色 app 底）合成。"""
+    m = re.search(r"background-color:\s*rgba\((\d+),\s*(\d+),\s*(\d+),\s*([\d.]+)\)",
+                  panel.styleSheet())
+    assert m, "浮层没有自绘底色，测试前提不成立：%r" % panel.styleSheet()
+    fg = QColor(int(m.group(1)), int(m.group(2)), int(m.group(3)))
+    return _composite(fg, float(m.group(4)), QColor(_COLORS["light_bg"]))
+
+
+def test_floating_panel_buttons_do_not_inherit_theme_text_color(floating_panel):
+    """三个标题按钮必须带内联字色；缺了就吃主题 palette(window-text)。"""
+    import floating_panel as fp
+
+    bg = _panel_bg(floating_panel)
+    for name in ("_collapse_btn", "_detach_btn", "_return_btn"):
+        btn = getattr(floating_panel, name)
+        m = re.search(r"color\s*:\s*(#[0-9A-Fa-f]{6})", btn.styleSheet())
+        assert m, f"{name} 没有内联字色，会继承主题字色（default 仅 2.94:1）"
+        assert m.group(1).upper() == fp._ISLAND_INK.upper()
+        assert contrast_ratio(m.group(1), _hex(bg)) >= MIN_TEXT

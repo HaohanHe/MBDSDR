@@ -28,6 +28,11 @@ from PySide6.QtWidgets import (
     QFrame, QHBoxLayout, QLabel, QToolButton, QVBoxLayout, QWidget,
 )
 
+#: 岛内文字色：浮层底色固定为 rgba(14,17,24,0.94)，不随主题变，孩子不能
+#: 继承主题的 palette(window-text)——default 浅色主题的深字压在深底上只有
+#: 2.94:1。这个值是标题原本就在用的岛内字色，不新增颜色。
+_ISLAND_INK = "#DCE4EF"
+
 
 class _DragHandle(QFrame):
     """标题条：按住拖动，双击折叠/展开。"""
@@ -109,7 +114,7 @@ class FloatingPanel(QFrame):
         self._title_label = QLabel(title)
         self._title_label.setObjectName("floatingPanelTitle")
         self._title_label.setStyleSheet(
-            "color: #DCE4EF; background: transparent; font-size: 12px;")
+            "color: %s; background: transparent; font-size: 12px;" % _ISLAND_INK)
         hl.addWidget(self._title_label, 1)
 
         self._collapse_btn = QToolButton()
@@ -129,6 +134,10 @@ class FloatingPanel(QFrame):
         self._return_btn.setToolTip("归位：把面板放回原来的三栏位置")
         self._return_btn.clicked.connect(self.request_return)
         hl.addWidget(self._return_btn)
+        # 三个按钮原先都没有字色，吃主题 QSS 的 palette(window-text)；面板底
+        # 固定深色，只有 default 浅色主题掉到 2.94:1。统一成岛内字色。
+        for _btn in (self._collapse_btn, self._detach_btn, self._return_btn):
+            _btn.setStyleSheet("color: %s;" % _ISLAND_INK)
         root.addWidget(self._handle)
 
         payload.setParent(self)
