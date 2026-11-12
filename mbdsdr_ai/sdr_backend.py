@@ -168,6 +168,15 @@ def owner_conflict_text(holder: Union[Dict[str, Any], AmbiguousOwners]) -> str:
                 f"③ 或改用带独立地址的设备（如 rtl_tcp / SpyServer）。"
                 f"完整键已写入运行日志，也可用 sdr_list_devices 查看。")
     who = owner_label(holder.get("owner", ""))
+    if not holder.get("owner") and holder.get("reason"):
+        # 「登记不可信」不是占用冲突：holder 里没有真实持有者，拼成
+        # 「其他程序（pid 0）」就是假信息。另外这段文字会进 status.error，
+        # 桌面端按关键词二次分类（error_remedy.CONNECT_ERROR_RULES），
+        # 所以措辞避开 usb/占用/权限/驱动/断开/找不到 等词，否则会被
+        # 改写成「其它软件占着」或「权限不足」，补救方向正好相反。
+        return ("本机的设备登记表不可用，因此无法判断这台设备是否已被别的"
+                "程序持有。这是登记文件本身的问题，不是硬件故障。请到"
+                "「设备」面板点「查看诊断」，按提示修复或移除登记文件后重试。")
     return (f"设备当前由{who}持有（pid {holder.get('pid')}，进程仍在运行）。"
             f"请先在{who}侧释放该设备后重试，或改用其他设备"
             f"（先用 sdr_list_devices 查看）。")
@@ -403,22 +412,119 @@ def _backup_corrupt_registry(reason: str) -> Optional[str]:
     return backup
 
 
-def _read_registry() -> Dict[str, Dict[str, Any]]:
+class RegistryUntrustedError(RuntimeError):
+    """设备占用登记损坏且无法留证：写回会伪造「设备空闲」，必须拒绝。
+
+    与配置/书签那套「损坏先备份再降级」的区别在于：登记表被覆盖的后果不是
+    丢一条本地记录，而是让**另一个进程**以为设备没人用，从而两个进程同时
+    打开同一根硬件。所以这里宁可让本次 claim 失败，也不写一个看起来正常的空表。
+    """
+
+
+# ──────────────────────── 设备占用三态（读侧） ────────────────────────
+# 「读不到」和「没人占」是两件事。旧实现把两者都压成 ``None``，界面据此
+# 显示「设备空闲」，用户点连接却被拒（登记不可读时 claim 必须失败）——
+# 界面在说一件与实际不符的话。这里把读侧结论显式分成四个值，未知绝不落进
+# 空闲分支。
+OWNER_STATE_FREE = "free"
+OWNER_STATE_OWNED = "owned"
+OWNER_STATE_UNKNOWN = "unknown"
+OWNER_STATE_AMBIGUOUS = "ambiguous"
+
+
+@dataclass(frozen=True)
+class OwnerState:
+    """设备占用三态结论。
+
+    * ``free``      —— 登记可读且没有匹配的持有者（**只有这一种能说"空着"**）；
+    * ``owned``     —— 有持有者，``record`` 是那条登记；
+    * ``ambiguous`` —— 同一组别名命中多条，无法唯一确定；
+    * ``unknown``   —— 登记存在但读不出可信内容，**无法判断**是否被占用。
+
+    ``bool()`` 只有 ``free`` 为 False：未知必须按「不能确认空闲」处理。
+    故意没有 ``.get()``/``[]``——误当 holder 用会当场 ``AttributeError``，
+    而不是显示出「owner 空、pid 0」这种看着像真数据的假信息。
+    """
+
+    state: str
+    device_id: str = ""
+    record: Optional[Dict[str, Any]] = None
+    reason: str = ""
+    candidates: Tuple[str, ...] = ()
+
+    def __bool__(self) -> bool:
+        return self.state != OWNER_STATE_FREE
+
+
+def owner_state_text(state: OwnerState) -> str:
+    """占用三态的用户可见文案（界面与工具共用同一份措辞）。"""
+    if state.state == OWNER_STATE_FREE:
+        return "设备空闲（占用登记可读，无持有者）"
+    if state.state == OWNER_STATE_OWNED:
+        rec = state.record or {}
+        return (f"设备正被{owner_label(rec.get('owner', ''))}占用"
+                f"（pid {rec.get('pid')}，进程仍在运行）")
+    if state.state == OWNER_STATE_AMBIGUOUS:
+        return (f"无法唯一确定设备占用：同一组标识命中了 "
+                f"{len(state.candidates)} 条登记")
+    return ("无法读取设备占用登记，无法判断是否被占用"
+            + (f"（{state.reason}）" if state.reason else ""))
+
+
+def _read_registry_state() -> Tuple[Dict[str, Dict[str, Any]], str, bool]:
+    """读登记表并给出「本次内容是否可信、还能不能写回」。
+
+    返回 ``(owners, unreadable_reason, writable)``：
+
+    * ``unreadable_reason`` 非空 = **本次读到的内容不可信**（文件存在但
+      JSON 坏 / 顶层结构非法）。调用方必须按「状态未知」处理，不能当成
+      一张空表——那会把「不知道谁占着」显示成「没人占」。
+    * ``writable`` = 是否还能安全写回。损坏但已成功备份移走时为 True
+      （坏内容已留证、读取路径已腾空）；损坏且备份失败时为 False
+      （写回会覆盖唯一原件，并让别的进程误判设备空闲）。
+    """
+    path = owner_registry_path()
     try:
-        with open(owner_registry_path(), encoding="utf-8") as f:
+        with open(path, encoding="utf-8") as f:
             data = json.load(f)
     except FileNotFoundError:
         # 首次运行 / 用户手动删掉：都按「当前无占用」。删除与首次运行无法
         # 区分，所以不告警；但删掉一个**活持有者**的记录等于放弃互斥。
-        return {}
-    except Exception as e:  # noqa: BLE001 - 损坏先留证据，再按空处理
-        _backup_corrupt_registry(f"JSON 读取/解析失败：{e.__class__.__name__}: {e}")
-        return {}
+        return {}, "", True
+    except Exception as e:  # noqa: BLE001 - 先留证据，再把结论交给调用方
+        reason = f"JSON 读取/解析失败：{e.__class__.__name__}: {e}"
+        backup = _backup_corrupt_registry(reason)
+        if backup is None:
+            return {}, f"{reason}；备份失败，原文件仍在，拒绝写回", False
+        return {}, f"{reason}；原件已备份到 {backup}", True
     owners = data.get("owners") if isinstance(data, dict) else None
     if not isinstance(owners, dict):
-        _backup_corrupt_registry("顶层结构非法（缺少 owners 对象）")
+        reason = "顶层结构非法（缺少 owners 对象）"
+        backup = _backup_corrupt_registry(reason)
+        if backup is None:
+            return {}, f"{reason}；备份失败，原文件仍在，拒绝写回", False
+        return {}, f"{reason}；原件已备份到 {backup}", True
+    return ({str(k): v for k, v in owners.items() if isinstance(v, dict)},
+            "", True)
+
+
+def _read_registry(strict: bool = False) -> Dict[str, Dict[str, Any]]:
+    """读登记表（会写回的调用方用 ``strict=True``）。
+
+    ``strict=True`` 在「损坏且备份失败」时抛
+    :class:`RegistryUntrustedError`，禁止把不可信内容当成空表写回。
+    非 strict 仍降级为空表以兼容旧调用；界面该用 :func:`get_owner_state`，
+    它会把「不可读」如实报成 ``unknown``，而不是 ``None``（= 空着）。
+    """
+    owners, reason, writable = _read_registry_state()
+    if not writable:
+        if strict:
+            raise RegistryUntrustedError(
+                f"设备占用登记损坏且无法备份：{owner_registry_path()}；"
+                f"{reason}。拒绝写入，以免其他进程误判设备空闲。"
+                "请手动修复或移除该文件后重试")
         return {}
-    return {str(k): v for k, v in owners.items() if isinstance(v, dict)}
+    return owners
 
 
 def _write_registry(owners: Dict[str, Dict[str, Any]]) -> None:
@@ -444,25 +550,41 @@ def release_stale_owners() -> List[Dict[str, Any]]:
     """
     removed: List[Dict[str, Any]] = []
     with _OWNER_LOCK, _registry_lock():
-        owners = _read_registry()
-        for dev, rec in list(owners.items()):
-            try:
-                pid = int(rec.get("pid") or 0)
-            except (TypeError, ValueError):
-                pid = 0
-            if _pid_alive(pid, rec.get("proc_start")):
-                continue
-            owners.pop(dev, None)
-            removed.append(dict(rec))
+        try:
+            owners = _read_registry(strict=True)
+        except RegistryUntrustedError as e:
+            # 登记不可信 → 一条都不清（清 = 写回）。claim 随后会明确失败。
+            logger.error("%s", e)
+            return []
+        removed = _drop_stale(owners)
         if removed:
             _write_registry(owners)
-            for rec in removed:
-                logger.warning(
-                    "清理失效设备占用：%s 原由 %s（pid %s，启动于 %s）持有，"
-                    "该进程已不存在", rec.get("device_id"),
-                    owner_label(rec.get("owner", "")), rec.get("pid"),
-                    rec.get("proc_start"))
+            _log_stale_removed(removed)
     return removed
+
+
+def _drop_stale(owners: Dict[str, Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """从 ``owners`` 里剔除持有者进程已不存在的记录（原地修改）。"""
+    removed: List[Dict[str, Any]] = []
+    for dev, rec in list(owners.items()):
+        try:
+            pid = int(rec.get("pid") or 0)
+        except (TypeError, ValueError):
+            pid = 0
+        if _pid_alive(pid, rec.get("proc_start")):
+            continue
+        owners.pop(dev, None)
+        removed.append(dict(rec))
+    return removed
+
+
+def _log_stale_removed(removed: List[Dict[str, Any]]) -> None:
+    for rec in removed:
+        logger.warning(
+            "清理失效设备占用：%s 原由 %s（pid %s，启动于 %s）持有，"
+            "该进程已不存在", rec.get("device_id"),
+            owner_label(rec.get("owner", "")), rec.get("pid"),
+            rec.get("proc_start"))
 
 
 def _match_owner_record(owners: Dict[str, Dict[str, Any]], device_id: str,
@@ -494,30 +616,72 @@ def _match_owner_record(owners: Dict[str, Dict[str, Any]], device_id: str,
     return "none", "", None, []
 
 
-def get_active_owner(device_id: str = "",
-                     allow_alias_match: bool = True
-                     ) -> Optional[Union[Dict[str, Any], AmbiguousOwners]]:
-    """当前占用者（先清失效记录再判）。device_id 为空时返回唯一的记录。
+def get_owner_state(device_id: str = "",
+                    allow_alias_match: bool = True) -> OwnerState:
+    """当前设备占用的**三态**结论（只读，先清失效记录再判）。
 
-    命中多条登记（别名有歧义）时返回 :class:`AmbiguousOwners`，**不是**
-    一条记录——它连 ``.get()`` 都没有，误当 holder 用会立刻 AttributeError。
+    这是界面唯一该用的读侧入口。要点：
+
+    * ``device_id`` 为空时，登记里只有一条就报 ``owned``；零条 ``free``；
+      多条 ``ambiguous``（不知道问的是哪台，绝不挑一条）；
+    * **登记存在但读不出可信内容时返回 ``unknown``**，不是 ``free``。
+      用户不知道能不能连，比直接说不能连更糟——界面必须能说出「无法判断」，
+      并给出重试/诊断的入口；
+    * 本次读取若触发「损坏后备份移走」，仍是 ``unknown``：原件里的持有者
+      已经读不出来了，不能替它宣布空闲。下一次读取会自然变成 ``free``。
     """
-    release_stale_owners()
-    # 与写路径同锁：读到的如果是损坏文件，这里会改名留证，不能在无锁时与
-    # 别的进程的原子替换交错（否则可能把刚写好的好文件当成损坏备份走）。
     with _OWNER_LOCK, _registry_lock():
-        owners = _read_registry()
+        owners, reason, _writable = _read_registry_state()
+        if reason:
+            # 不可信：不清失效记录（那是写回），也不落进空闲分支。
+            return OwnerState(OWNER_STATE_UNKNOWN, str(device_id), reason=reason)
+        removed = _drop_stale(owners)
+        if removed:
+            _write_registry(owners)
+            _log_stale_removed(removed)
         _ACTIVE_OWNER.clear()
         _ACTIVE_OWNER.update(owners)
         if device_id:
             kind, _key, rec, candidates = _match_owner_record(
                 owners, device_id, allow_alias_match)
             if kind == "ambiguous":
-                return AmbiguousOwners(device_id, candidates)
-            return dict(rec) if rec is not None else None
+                return OwnerState(OWNER_STATE_AMBIGUOUS, str(device_id),
+                                  candidates=tuple(candidates))
+            if rec is not None:
+                return OwnerState(OWNER_STATE_OWNED, str(device_id),
+                                  record=dict(rec))
+            return OwnerState(OWNER_STATE_FREE, str(device_id))
         if len(owners) == 1:
-            return dict(next(iter(owners.values())))
+            rec = next(iter(owners.values()))
+            return OwnerState(OWNER_STATE_OWNED,
+                              str(rec.get("device_id") or ""), record=dict(rec))
+        if owners:
+            return OwnerState(OWNER_STATE_AMBIGUOUS, "",
+                              candidates=tuple(str(k) for k in owners))
+        return OwnerState(OWNER_STATE_FREE, "")
+
+
+def get_active_owner(device_id: str = "",
+                     allow_alias_match: bool = True
+                     ) -> Optional[Union[Dict[str, Any], AmbiguousOwners,
+                                        OwnerState]]:
+    """当前占用者（兼容入口；新代码请用 :func:`get_owner_state`）。
+
+    **只有确定空闲才返回 ``None``**。登记不可读时返回
+    ``OwnerState(state="unknown")``——调用方按「无法判断」展示，绝不能
+    落进「设备空闲」分支。命中多条登记（别名有歧义）时返回
+    :class:`AmbiguousOwners`，它连 ``.get()`` 都没有，误当 holder 用会立刻
+    ``AttributeError``。
+    """
+    state = get_owner_state(device_id, allow_alias_match)
+    if state.state == OWNER_STATE_FREE:
         return None
+    if state.state == OWNER_STATE_UNKNOWN:
+        return state
+    if state.state == OWNER_STATE_AMBIGUOUS:
+        return AmbiguousOwners(state.device_id or device_id,
+                               list(state.candidates))
+    return dict(state.record or {})
 
 
 def claim_active_owner(owner: str, device_id: str,
@@ -544,7 +708,14 @@ def claim_active_owner(owner: str, device_id: str,
                        "reason": "device_id 为空"}
     release_stale_owners()
     with _OWNER_LOCK, _registry_lock():
-        owners = _read_registry()
+        try:
+            owners = _read_registry(strict=True)
+        except RegistryUntrustedError as e:
+            # 本次 claim 直接失败：登记写着什么已不可信，写回「只有我」的表
+            # 会让别的进程以为设备空着。提示里给出人工修复路径，不静默。
+            logger.error("%s", e)
+            return False, {"owner": "", "device_id": str(device_id), "pid": 0,
+                           "reason": str(e)}
         kind, matched_key, cur, candidates = _match_owner_record(
             owners, device_id, allow_alias_match)
         if kind == "ambiguous":
@@ -584,7 +755,13 @@ def release_active_owner(owner: str, device_id: str = "") -> bool:
     """释放 ``owner`` 的占用（只释放自己的；device_id 为空则释放本进程全部）。"""
     released: List[str] = []
     with _OWNER_LOCK, _registry_lock():
-        owners = _read_registry()
+        try:
+            owners = _read_registry(strict=True)
+        except RegistryUntrustedError as e:
+            # 释放也要写回：登记不可信时宁可不释放（本进程退出时 atexit
+            # 仍会再试一次），也不写一张会误导其他进程的表。
+            logger.error("%s", e)
+            return False
         targets = ([device_id] if device_id
                    else [d for d, r in owners.items()
                          if str(r.get("owner")) == str(owner)])

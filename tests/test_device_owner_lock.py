@@ -196,7 +196,11 @@ def test_corrupt_registry_is_backed_up_with_reason(_registry):
     """损坏 → ``.corrupt-<时间戳>`` + 成对的 ``.reason.txt``（复用统一模板）。"""
     _registry.write_text("{not json", encoding="utf-8")
 
-    assert sb.get_active_owner() is None          # 按空处理，不抛、不阻塞连接
+    # 读不出来就是「不知道」，不能报成 None（= 设备空闲）。损坏原件已
+    # 备份移走，下一次读会变成 free，但这一次不能替它宣布空闲。
+    state = sb.get_owner_state()
+    assert state.state == sb.OWNER_STATE_UNKNOWN
+    assert bool(state) is True
     backups = [p for p in _registry.parent.glob("device_owner.json.corrupt-*")
                if not p.name.endswith(".reason.txt")]
     assert len(backups) == 1, backups
@@ -215,7 +219,7 @@ def test_non_object_registry_is_also_treated_as_corrupt(_registry):
     """JSON 合法但顶层不是对象，同样算损坏（不能静默当成「无占用」）。"""
     _registry.write_text("[]", encoding="utf-8")
 
-    assert sb.get_active_owner() is None
+    assert sb.get_owner_state().state == sb.OWNER_STATE_UNKNOWN
     assert list(_registry.parent.glob("device_owner.json.corrupt-*"))
 
 
@@ -508,3 +512,125 @@ def test_stable_identity_does_not_fall_back_to_aliases(_registry):
         assert holder.get("device_id") == "rtlsdr|serial:999"
     finally:
         _kill(child)
+
+
+# ----------------------------------------------------------------------
+# A04：登记不可信时，绝不能写回一个「看起来正常」的空表
+# ----------------------------------------------------------------------
+
+def test_corrupt_registry_backup_failure_refuses_claim(_registry, monkeypatch):
+    """反证：备份失败 → claim 直接失败，登记文件逐字节不变。"""
+    bad = b'{"owners": '
+    _registry.write_bytes(bad)
+    monkeypatch.setattr(sb, "_backup_corrupt_registry", lambda reason: None)
+
+    ok, rec = sb.claim_active_owner(sb.AI_OWNER, "rtl_0")
+
+    assert ok is False, "不可信登记不能写回成「只有我」的正常表"
+    assert "拒绝写入" in rec["reason"]
+    assert _registry.read_bytes() == bad, "唯一原件不得被覆盖"
+
+
+def test_non_object_registry_backup_failure_refuses_claim(_registry,
+                                                          monkeypatch):
+    """结构损坏（顶层不是对象）与 JSON 损坏同等对待。"""
+    bad = b'[1, 2, 3]'
+    _registry.write_bytes(bad)
+    monkeypatch.setattr(sb, "_backup_corrupt_registry", lambda reason: None)
+
+    ok, rec = sb.claim_active_owner(sb.AI_OWNER, "rtl_0")
+
+    assert ok is False
+    assert "结构非法" in rec["reason"]
+    assert _registry.read_bytes() == bad
+
+
+def test_corrupt_registry_backup_success_preserves_evidence(_registry):
+    """备份成功 → 留证后按新登记继续，claim 正常工作。"""
+    bad = b'{"owners": '
+    _registry.write_bytes(bad)
+
+    ok, _rec = sb.claim_active_owner(sb.AI_OWNER, "rtl_0")
+
+    assert ok is True
+    backups = [p for p in _registry.parent.glob("device_owner.json.corrupt-*")
+               if not p.name.endswith(".reason.txt")]
+    assert len(backups) == 1
+    assert backups[0].read_bytes() == bad
+    assert list(_registry.parent.glob(
+        "device_owner.json.corrupt-*.reason.txt"))
+    assert "rtl_0" in json.loads(
+        _registry.read_text(encoding="utf-8"))["owners"]
+
+
+def test_untrusted_registry_is_not_permanently_locked(_registry, monkeypatch):
+    """权衡验证：备份失败只锁「本次/当前坏文件」，不会永久锁死设备。"""
+    _registry.write_bytes(b'{"owners": ')
+    monkeypatch.setattr(sb, "_backup_corrupt_registry", lambda reason: None)
+    ok, _ = sb.claim_active_owner(sb.AI_OWNER, "rtl_0")
+    assert ok is False
+
+    _registry.unlink()                    # 用户手动移除坏文件
+    ok2, rec = sb.claim_active_owner(sb.AI_OWNER, "rtl_0")
+    assert ok2 is True, "坏文件被处理后必须能恢复 claim，不能永久锁死"
+    assert rec.get("owner") == sb.AI_OWNER
+
+
+def test_untrusted_registry_blocks_release_and_stale_cleanup(_registry,
+                                                             monkeypatch):
+    """释放/清失效也要写回：同样拒绝，避免写出误导性的空表。"""
+    bad = b'{"owners": '
+    _registry.write_bytes(bad)
+    monkeypatch.setattr(sb, "_backup_corrupt_registry", lambda reason: None)
+
+    assert sb.release_active_owner(sb.AI_OWNER, "rtl_0") is False
+    assert sb.release_stale_owners() == []
+    assert _registry.read_bytes() == bad
+
+
+def test_get_active_owner_degrades_without_raising(_registry, monkeypatch):
+    """只读查询不能让界面崩，也不能把「读不了」说成「空着」。
+
+    真正的拦截仍发生在 claim；但读侧必须能回答「不知道」——旧实现返回
+    None，界面据此显示「设备空闲」，用户点连接才被拒，界面在说假话。
+    """
+    _registry.write_bytes(b'{ broken')
+    monkeypatch.setattr(sb, "_backup_corrupt_registry", lambda reason: None)
+
+    state = sb.get_active_owner("rtl_0")
+    assert isinstance(state, sb.OwnerState), "「不知道」不能被压成 None"
+    assert state.state == sb.OWNER_STATE_UNKNOWN
+    assert "无法读取设备占用登记" in sb.owner_state_text(state)
+    assert "空闲" not in sb.owner_state_text(state)
+
+
+def test_owner_state_three_values(_registry, monkeypatch):
+    """free / owned(pid) / unknown 三态各走各的分支。"""
+    free = sb.get_owner_state("rtl_0")
+    assert free.state == sb.OWNER_STATE_FREE
+    assert bool(free) is False
+    assert sb.get_active_owner("rtl_0") is None
+
+    assert sb.claim_active_owner("desktop", "rtl_0")[0] is True
+    owned = sb.get_owner_state("rtl_0")
+    assert owned.state == sb.OWNER_STATE_OWNED
+    assert bool(owned) is True
+    assert owned.record["pid"] == os.getpid()
+    assert "pid" in sb.owner_state_text(owned)
+
+    _registry.write_bytes(b'{"owners": ')
+    # 备份失败：坏文件留在原地，claim 会失败，所以状态必须是持久 unknown。
+    monkeypatch.setattr(sb, "_backup_corrupt_registry", lambda reason: None)
+    unknown = sb.get_owner_state("rtl_0")
+    assert unknown.state == sb.OWNER_STATE_UNKNOWN
+    assert unknown.reason and "拒绝写回" in unknown.reason
+
+
+def test_unknown_state_has_no_holder_get(_registry, monkeypatch):
+    """unknown 不能长得像一条 holder：否则会显示成「owner 空、pid 0」。"""
+    _registry.write_bytes(b'{ broken')
+    monkeypatch.setattr(sb, "_backup_corrupt_registry", lambda reason: None)
+
+    state = sb.get_active_owner("rtl_0")
+    assert not hasattr(state, "get")
+    assert not hasattr(state, "__getitem__")
