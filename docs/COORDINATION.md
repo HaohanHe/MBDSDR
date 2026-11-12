@@ -4432,4 +4432,40 @@ pid 3484 已退出，属 K16 同形的「孤儿改动」。配套测试
 **本笔的行号引用自查**：本条登记、`tests/conftest.py` 与两个测试文件均不写行号，
 引用一律落到函数/判断。
 
+---
+
+## 2026-11-13 claim 台账：读取端行级容错 + **已有克隆必须重跑 install**（回执）
+
+**改了什么**：`scripts/claim_gate.py` 读 `claim_takeovers.log` 由「任一行不认识 → 整本台账
+判死」改为**行级容错**：未知 `action`、缺 `new_owner`、空 owner、坏 `epoch` 只跳过该行并
+打印 `[claim-gate] 注意：…`，其余行照常判定。跳过 = 该行不授予接管凭证 = 对应 claim 仍按
+「别人持有」拒绝；`claims.json` 坏 JSON、日志缺 `path` 仍失败关闭。
+
+**为什么**：2026-11-13 事故——`legacy_token_repair` 的审计行不带 `new_owner`，旧判据把
+整本台账判成不可信，**全新克隆上每一次提交全被拒**（闸门自己的修复工具废掉了闸门）。
+补丁（`NON_TAKEOVER_ACTIONS`）只救了这一个 action；改成行级容错后，下一个往日志里写新
+动作的人也不会再把所有人的提交挡死。
+
+**机检**：`tests/test_claim_ledger_schema_contract.py`——已知 action 逐一走
+writer→reader 回放（`orphan_takeover` / `legacy_token_repair` 用真实 CLI 产出）、未知
+action 只跳该行且给可读原因、`NON_TAKEOVER_ACTIONS` 白名单逐 action 冻结。反证：真实台账
+下旧闸门 `57635488` rc=1、新闸门 rc=0；从白名单移走 `audit_replay` / `legacy_token_repair`
+会红并点名。提交：`49050b7a`（读取端）、`d9b6754d`（闸门用例）、`198f206f`（契约用例）、
+`2c540e8d`（限制登记 L65）。
+
+**所有已有克隆（含临时 worktree）必须重跑 `python scripts/install_git_hooks.py`**：钩子是
+**拷贝**安装的（`claim_gate.py` / `file_claim.py` 被复制到 `git rev-parse --git-common-dir`
+的 hooks 目录），不重跑就还是旧行为——「我修了」和「别人机器上是修复后的」不是一回事。
+自查一行：`.git/hooks/claim_gate.py` 与 `scripts/claim_gate.py` 的内容哈希必须相同。
+
+**历史遗留无凭据 claim（缺 `token_sha256`）**：不开「凭 owner 名 release」的后门（凭名字
+判身份等于没有判据）。快照 67 条、**全部已过 TTL（最晚 2026-11-12 23:14:44）**，过期后走
+正常 takeover；细则见 `docs/limitations-register.md` 附 W / L65。
+
+**隔离护栏根因（P2 结案）**：`isolated_profile` 收尾把 `layout_store._default_store` reset
+成 `None`，而 `tests/test_app_global_state_isolation.py` 抓的是**对象身份** → 谁先跑决定
+红绿。改为 teardown **还原保存的对象**（不放宽护栏判据）。反证：
+`pytest tests/test_app_global_state_isolation.py tests/test_audio_route_anr.py` 与反序
+均 8 passed。
+
 
