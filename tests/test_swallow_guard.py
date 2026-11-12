@@ -273,7 +273,7 @@ def test_audio_player_degrades_without_sounddevice(monkeypatch):
     monkeypatch.setitem(sys.modules, "sounddevice", None)
     reloaded = importlib.reload(audio_out)
     try:
-        assert reloaded._SD_AVAILABLE is False
+        assert reloaded.sd_available() is False
         player = reloaded.AudioPlayer(sample_rate=48000)
         assert player.available is False
         assert player.start() is False
