@@ -73,6 +73,9 @@ class ConnectRequest:
 
 
 _requests: Dict[str, ConnectRequest] = {}
+#: 第三档「会话占用态」（gpredict 语义）：key -> 会话开始时冻结的生效值。
+#: 与 ``_requests`` 分开存：请求是「想要什么」，会话快照是「这次实际下发了什么」。
+_sessions: Dict[str, ConnectRequest] = {}
 #: 订阅者用弱引用持有：面板销毁后不会因为“监听列表还拽着它”而泄漏，
 #: 也不会在 C++ 对象已删后仍被回调。
 _listeners: List[Any] = []
@@ -162,6 +165,40 @@ def resolve(devices) -> List[DeviceIdentity]:
 def request_for(key: str) -> ConnectRequest:
     """读取某台设备的连接请求（无记录时各字段为 None）。"""
     return _requests.get(key, ConnectRequest())
+
+
+# ---------------------------------------------------------------- 会话占用态
+# 第三档（gpredict 「占用即置灰，退出占用才写回」）的**数据源**：
+# 这里只回答「这台设备是否在会话中 / 会话生效值是什么」，不决定 UI 怎么
+# 显示、也不决定退出时是否回滚。显示方案见
+# docs/research/2026-11-12-gpredict-occupancy-decision.md。
+def begin_session(key: str) -> ConnectRequest:
+    """登记设备会话开始，冻结当前请求值作为「本次会话生效值」。
+
+    重复调用**不覆盖**首次快照：会话期间 store 被另一面板改过，也不能把
+    正在生效的值换掉。返回不可变快照。
+    """
+    if key not in _sessions:
+        _sessions[key] = request_for(key)
+    return _sessions[key]
+
+
+def end_session(key: str) -> Optional[ConnectRequest]:
+    """登记会话结束；返回被冻结的生效值（未占用返回 None）。
+
+    只清占用态，不写回 ``_requests``——退出时是否回滚/写回属产品决策。
+    """
+    return _sessions.pop(key, None)
+
+
+def session_values(key: str) -> Optional[ConnectRequest]:
+    """会话占用期间实际生效的参数快照；未占用返回 None。"""
+    return _sessions.get(key)
+
+
+def is_occupied(key: str) -> bool:
+    """该设备是否处于会话占用态（第三档）。"""
+    return key in _sessions
 
 
 def update(key: str, *, sample_rate_hz=_UNSET, gain_db=_UNSET,
@@ -289,5 +326,6 @@ def recent_warnings() -> List[str]:
 def reset() -> None:
     """清空进程级状态（测试隔离用；产品路径不调用）。"""
     _requests.clear()
+    _sessions.clear()
     _warned.clear()
     _recent_warnings.clear()
