@@ -461,6 +461,32 @@ def register_sdr_tools(agent):
     )
 
     agent.tool_registry.register(
+        name="sdr_preconnect",
+        description="查看/设置/清除「下次怎么连」的预配置，设备没连上时也能用。四项：device_id（设备）、sample_rate_hz（采样率）、gain_db（增益）、attempts+interval_s（重连次数与间隔）。action=show 查看（默认）、set 设置（只改传入字段）、clear 清除。配置持久化到 config.json，跨重启保留；未配置时连接行为与默认完全一致。重试次数硬上限 3 次、间隔上限 5s，超限会钳位并在返回文案里说明，不存在无限静默重试。"
+                    "能力边界: 只影响之后发起的 sdr_connect，不改当前已连接设备的参数。",
+        parameters={
+            "type": "object",
+            "properties": {
+                "action": {"type": "string", "enum": ["show", "set", "clear"],
+                           "description": "默认 show"},
+                "device_id": {"type": "string",
+                              "description": "设备 ID（来自 sdr_list_devices）；空串=清除该项"},
+                "sample_rate_hz": {"type": "number",
+                                   "description": "连接成功后自动下发的采样率（Hz，正数）"},
+                "gain_db": {"type": "number",
+                            "description": "连接成功后自动下发的增益（dB，非负）"},
+                "attempts": {"type": "integer",
+                             "description": "连接失败重试次数（1=不重试，上限 3）"},
+                "interval_s": {"type": "number",
+                               "description": "重试间隔秒（0–5，超限钳位）"},
+            },
+            "required": [],
+        },
+        handler=lambda args: _sdr_preconnect(mgr, args),
+        category="sdr_device",
+    )
+
+    agent.tool_registry.register(
         name="sdr_disconnect",
         description="断开当前 SDR 设备，同时停止所有进行中的接收与录制（副作用）。前置条件: 无（未连接时调用也安全，幂等，返回已断开而非报错）。能力边界: 仅释放本进程对该设备的占用，不影响其他程序。",
         parameters={"type": "object", "properties": {}, "required": []},
@@ -3070,14 +3096,65 @@ def _vfo_select_tool(mgr, args) -> "ToolResult":
                 f"BW={active['bandwidth_hz']:.0f} Hz",
     )
 
-def _sdr_connect(mgr, device_id):
-    """连接 SDR，并把「沿用了哪台 / 为何拒绝 / 可选哪些」写进文案。
+def _preconnect_store(store=None):
+    """预配置的读写入口：默认 ``~/.mbdsdr/config.json``，测试可注入。"""
+    if store is not None:
+        return store
+    try:
+        from .config import ConfigStore
+        return ConfigStore()
+    except Exception as e:  # noqa: BLE001 - 配置不可用只是没有预配置，不阻断连接
+        logger.debug("ConfigStore 不可用（预配置功能不可用）: %s", e)
+        return None
+
+
+def _sdr_connect(mgr, device_id, store=None):
+    """连接 SDR，并把「沿用了哪台 / 为何拒绝 / 可选哪些 / 预配置是否生效」写清。
 
     不传 device_id 时后端**不会**自动挑枚举到的第一台（顺序随机器与插拔
     顺序变化，选错设备用户无从察觉）。因此这里的文案必须带设备名与索引：
     只说「未指定设备」会让模型和用户都无从下一步。
+
+    断连可预配置（W44 行为组）：没有预配置时走的是和以前**完全相同**的单次
+    连接；有预配置时按其设备/采样率/增益/重连策略执行，重试次数与间隔在
+    ``preconnect`` 里硬钳位，不存在无限静默重试。
     """
-    ok = mgr.connect(device_id)
+    from . import preconnect
+
+    store = _preconnect_store(store)
+    profile, issues = preconnect.load(store)
+    attempts, interval = preconnect.policy(profile)
+    notes = list(issues)
+
+    target = device_id
+    if not target and profile.get("device_id"):
+        target = profile["device_id"]
+        notes.append(f"按预配置连接设备 {target}")
+
+    # 设备不在枚举表里时失败是确定结果，重试没有意义，只试一次。
+    if target:
+        try:
+            known = {d.get("device_id") for d in mgr.list_devices()}
+        except Exception as e:  # noqa: BLE001 - 枚举失败不应改变连接语义
+            logger.debug("list_devices 失败（仅影响重试裁剪）: %s", e)
+            known = None
+        if known is not None and target not in known:
+            attempts = 1
+
+    ok = False
+    tried = 0
+    for i in range(attempts):
+        tried += 1
+        ok = mgr.connect(target)
+        if ok:
+            break
+        if i + 1 < attempts:
+            logger.warning("连接 %s 第 %d/%d 次失败：%s；%.1fs 后重试",
+                           target, tried, attempts,
+                           getattr(mgr, "last_connect_notice", ""), interval)
+            if interval > 0:
+                time.sleep(interval)
+
     note = getattr(mgr, "last_connect_notice", "") or ""
     if ok:
         be = mgr.get_active()
@@ -3086,23 +3163,95 @@ def _sdr_connect(mgr, device_id):
         content = f"已连接: {name}"
         if did:
             content += f"（{did}）"
+        applied, warnings = preconnect.apply_to(be, profile)
+        if applied:
+            content += "；已应用预配置：" + "、".join(applied)
+        if warnings:
+            content += "；预配置未生效：" + "；".join(warnings)
         if note:
             content += f"；{note}"
+        if notes:
+            content += "；" + "；".join(notes)
         return ToolResult(success=True, content=content)
 
     reason = note or getattr(mgr, "last_conflict", "") or "连接失败"
+    content = f"连接失败：{reason}"
+    if attempts > 1:
+        content += (f"（已尝试 {tried} 次、间隔 {interval:g}s，已停止重试；"
+                    f"不会无限静默重试）")
     try:
         devices = mgr.list_devices()
     except Exception as e:  # noqa: BLE001 - 枚举失败不能盖住真实失败原因
         logger.debug("list_devices 失败（仅影响提示里的可选清单）: %s", e)
         devices = []
-    content = f"连接失败：{reason}"
     if devices:
         choices = "；".join(
             f"{i}) {d.get('name')}（{d.get('device_id')}）"
             for i, d in enumerate(devices, 1))
         content += f"。可用设备：{choices}。请显式传 device_id 指定要连哪台。"
+    if notes:
+        content += "；" + "；".join(notes)
     return ToolResult(success=False, content=content)
+
+
+def _sdr_preconnect(mgr, args):
+    """查看/设置/清除「下次怎么连」的预配置（W44 行为组）。"""
+    from . import preconnect
+
+    store = _preconnect_store()
+    action = (args.get("action") or "show").strip().lower()
+
+    if action == "clear":
+        ok, notes = preconnect.clear(store)
+        profile, issues = preconnect.load(store)
+        if ok:
+            content = "已清除预配置" + ("；" + "；".join(notes) if notes else "")
+            if profile:
+                content += "；仍有：" + preconnect.describe(profile)
+            return ToolResult(success=True, content=content)
+        return ToolResult(success=False,
+                          content="清除失败：" + "；".join(notes or ["未知原因"]))
+
+    if action == "set":
+        changes = {k: args[k] for k in preconnect.WRITABLE if k in args}
+        if not changes:
+            return ToolResult(
+                success=False,
+                content="没有要设置的字段。可设：device_id / sample_rate_hz / "
+                        "gain_db / attempts / interval_s。")
+        ok, notes = preconnect.save(store, changes)
+        profile, issues = preconnect.load(store)
+        if not ok:
+            return ToolResult(success=False,
+                              content="保存失败：" + "；".join(notes or ["未知原因"]))
+        content = "已保存预配置：" + (preconnect.describe(profile) or "（空）")
+        if notes:
+            content += "；" + "；".join(notes)
+        if issues:
+            content += "；" + "；".join(issues)
+        did = profile.get("device_id")
+        if did:
+            try:
+                known = {d.get("device_id") for d in mgr.list_devices()}
+            except Exception:  # noqa: BLE001 - 仅影响提示
+                known = None
+            if known is not None and did not in known:
+                content += (f"；注意：设备 {did} 当前不在枚举列表中，"
+                            f"下次 connect 时会重新核对并如实报错")
+        return ToolResult(success=True, content=content)
+
+    # 默认 show
+    profile, issues = preconnect.load(store)
+    if not profile and not issues:
+        return ToolResult(
+            success=True,
+            content="未配置预配置：连接行为与默认完全一致（不指定设备、不重试、"
+                    "不额外下发参数）。可用 action=set 预先配置 device_id / "
+                    "sample_rate_hz / gain_db / attempts / interval_s。")
+    return ToolResult(success=True,
+                      content="当前预配置：" +
+                      (preconnect.describe(profile) or "（空）") +
+                      ("；" + "；".join(issues) if issues else ""))
 
 
 def _disconnect_sdr(mgr):
