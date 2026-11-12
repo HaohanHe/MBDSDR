@@ -3562,6 +3562,7 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
             "ra": None, "dec": None, "mag": None,
             "rise": None, "set": None,
             "downlink_mhz": None, "downlink_mode": "",
+            "downlink_machine": "",
             "culture": "",
         }
         meta = self._sat_catalog.get(obj.name)
@@ -3576,15 +3577,21 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         # 链路目录 sat_links：下行频点/体制 + 一句话星性注记（点星即听
         # 的文化层；目录没有的星如实缺省，不编造）。
         try:
-            from mbdsdr_ai.sat_links import find_tuning_for
-            link = find_tuning_for(obj.name)
+            from mbdsdr_ai import sat_links as _sat_links
+            link = _sat_links.find_tuning_for(obj.name)
         except Exception:
+            _sat_links = None
             link = None
         if link is not None:
             dl = link["downlink"]
             info["downlink_mhz"] = float(dl["freq_hz"]) / 1e6
             info["downlink_mode"] = dl.get("mode", "")
             info["culture"] = link["entry"].get("culture", "")
+            # 机器库数据龄：界面唯一一处状态，失败也只在信息卡说一句
+            info["downlink_machine"] = _sat_links.machine_entry_text(
+                link["entry"])
+            # 首次用到机器库时补一次后台刷新；离线/已有新鲜缓存则不起线程
+            _sat_links.ensure_machine_refresh()
         # Ra/Dec: 地平 -> 当前赤道 -> J2000
         gs = self._ground_station()
         if gs is not None:
@@ -6128,6 +6135,8 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
             if info.get("downlink_mode"):
                 dl += f" ({info['downlink_mode']})"
             kv.append(("Downlink", dl))
+        if info.get("downlink_machine"):
+            kv.append(("发射机库", str(info["downlink_machine"])))
         # TLE 可追溯（B2）：来源 + 历元（有则画，无则如实缺省不画）
         if info.get("tle_epoch"):
             kv.append(("TLE 历元", str(info["tle_epoch"])))
