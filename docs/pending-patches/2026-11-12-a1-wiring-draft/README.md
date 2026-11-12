@@ -1,9 +1,19 @@
-# A1 预置补丁集（2026-11-12）
+# A1 接线草稿（2026-11-12）
 
-> 用途：FZ-04 解冻后**直接落地**，不产生任何新的配色决定——只把取值路径从
-> 直读全局 `COLORS[...]` 换成 `tokens().status_color(...)`。
+> **状态：草稿。追认（FZ-04 解冻单）未批，本目录任何一片都不得应用。**
+> 用途：把 11 个 A1 单元的接线 diff 先固化下来——只把取值路径从直读全局
+> `COLORS[...]` 换成 `tokens().status_color(...)`，不产生任何新的配色决定。
+> 每片的应用前提都是同一句：**等 A2 拍板后才应用；拍板前只做 `git apply --check`。**
 > 现状基线：A1 = 11 个单元 / 12 行，棘轮 `_BASELINE_CEILING = 11`。
 > 本轮只写补丁与文档，未改 `themes.py` / `tokens.py` / 任何产品代码。
+
+## 0. 为什么叫「草稿」而不是「待落地」
+
+- A1 只换取值路径，但换完之后**渲染出来的颜色会变**（`danger` 从全局 `#B85C5C`
+  变成各主题的 `status_danger`），这仍属视觉改动，必须等追认。
+- 第 11 片（`control` 无效输入红底）还要等解冻单第 2 条选底色令牌，本目录只留
+  草案说明，不提供可直接应用的 patch。
+- 目录名带 `-wiring-draft` 就是为了让后来的人一眼看出：**这里的东西不能直接打。**
 
 ## 1. 目录
 
@@ -20,15 +30,19 @@
 | `08-vfo-232.patch` | `desktop/vfo_panel.py:232`（「删」按钮字） |
 | `09-ntrip-48.patch` | `desktop/ntrip_panel.py:48`（未连接/未配置圆点） |
 | `10-ntrip-49.patch` | `desktop/ntrip_panel.py:49`（连接中圆点） |
-| `11-control-invalid.BLOCKED.md` | `control_panel:999/1007`，**阻塞**，等解冻单第 2 条 |
+| `11-control-invalid.DRAFT.md` | `control_panel:999/1007`，**阻塞**，等解冻单第 2 条 |
+
+> 上表 12 个文件的共同状态：**草案 · 等 A2 拍板**。01–10 是可直接 `--check` 的
+> 纯产品代码 diff；`00-all` 是合并版（含棘轮同步）；11 只有说明、没有 patch。
 
 ## 2. 应用方式
 
 单片（每片都要先验后打）：
 
 ```powershell
-git apply --check docs/pending-patches/2026-11-12-a1/01-status-360.patch
-git apply        docs/pending-patches/2026-11-12-a1/01-status-360.patch
+git apply --check docs/pending-patches/2026-11-12-a1-wiring-draft/01-status-360.patch
+# 拍板后才允许：
+git apply        docs/pending-patches/2026-11-12-a1-wiring-draft/01-status-360.patch
 # 然后按 §3 表删掉对应基线行，并把 _BASELINE_CEILING 减 1
 $env:MBDSDR_TEST_LOCK="0"; python -m pytest tests/test_ui_contrast.py -q
 ```
@@ -36,7 +50,7 @@ $env:MBDSDR_TEST_LOCK="0"; python -m pytest tests/test_ui_contrast.py -q
 全部批准（含棘轮同步，落地即绿，不用手工改测试）：
 
 ```powershell
-git apply docs/pending-patches/2026-11-12-a1/00-all.patch
+git apply docs/pending-patches/2026-11-12-a1-wiring-draft/00-all.patch
 $env:MBDSDR_TEST_LOCK="0"; python -m pytest tests/test_ui_contrast.py tests/test_theme_contrast_gate.py -q
 ```
 
@@ -49,6 +63,17 @@ $env:MBDSDR_TEST_LOCK="0"; python -m pytest tests/test_ui_contrast.py tests/test
 **单片只含产品代码，故意不带测试改动**：两片合用时，棘轮基线行与上限会被各改一次，
 diff 必冲突；产品代码本身不冲突（不同文件 / 同一文件里互不重叠的行）。所以：
 要么用 `00-all`，要么单片 + 手工同步。
+
+**2026-11-12 复核（本目录移动后实测，正好撞上前提条款）**：
+
+- `01`–`10`：对当前工作树 `git apply --check` **全部 OK**；4 个产品文件未被他人改动。
+- `00-all`：对工作树 **FAIL** —— `tests/test_ui_contrast.py` 有他线未提交改动
+  （+126 行，棘轮扩面到全部 token），补丁上下文对不上；
+  对索引 `git apply --check --cached` **OK**（即对 HEAD 仍然有效）。
+- 处理方式按本节前提执行：**不手工合并、不改补丁**，等该文件落定后重跑
+  `git apply --check`；届时仍失败就把冲突报给 W92 派发方。
+- 这是「5 个文件必须都是 HEAD 原样」条款的真实样例：产品文件干净、测试文件被改，
+  合并版就会先坏。
 
 ## 3. 逐片期望（应用后必须成立）
 
