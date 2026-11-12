@@ -4478,18 +4478,37 @@ class MBDSDRAgent:
         text = _re.sub(r"<\s*tool_call\s*>.*?<\s*/\s*tool_call\s*>",
                        "", text, flags=_re.DOTALL)
         # 2) ```json ... ``` 代码块，仅当其中引用了真实工具名
+        def _tool_name(o):
+            """从工具调用对象中取工具名；结构不符返回 None（不抛）。
+
+            模型输出不可信：name/tool/function 可能是数字、对象或字符串，
+            统一收敛为「非空字符串才算工具名」，避免 `in set` 抛 TypeError。
+            """
+            if not isinstance(o, dict):
+                return None
+            name = o.get("name") or o.get("tool")
+            if isinstance(name, str) and name:
+                return name
+            func = o.get("function")
+            if isinstance(func, dict):
+                name = func.get("name")
+                if isinstance(name, str) and name:
+                    return name
+            return None
+
         def _drop_fence(m):
             body = m.group(1)
             try:
                 obj = json.loads(body)
-                objs = obj if isinstance(obj, list) else [obj]
-                names = [o.get("name") or o.get("tool") or
-                         (o.get("function") or {}).get("name")
-                         for o in objs if isinstance(o, dict)]
-                if any(n in valid for n in names):
-                    return ""
-            except Exception:
-                pass
+            except ValueError as exc:
+                # 正文不是 JSON → 保留围栏属正常控制流（不是工具调用），
+                # 但原因要可查：否则「模型吐了坏 JSON、原样留在正文」无人得知。
+                logger.debug("代码块正文不是 JSON，保留原文：%s", exc)
+                return m.group(0)
+            objs = obj if isinstance(obj, list) else [obj]
+            names = [_tool_name(o) for o in objs]
+            if any(n in valid for n in names if n):
+                return ""
             return m.group(0)
         text = _re.sub(r"```(?:json)?\s*(.*?)```", _drop_fence,
                        text, flags=_re.DOTALL)
@@ -4498,12 +4517,12 @@ class MBDSDRAgent:
         if stripped.startswith("{") and stripped.endswith("}"):
             try:
                 obj = json.loads(stripped)
-                name = (obj.get("name") or obj.get("tool") or
-                        (obj.get("function") or {}).get("name"))
-                if name in valid:
+            except ValueError as exc:
+                # 同上：解析不了就按普通正文保留，但留一条可查记录。
+                logger.debug("裸 JSON 解析失败，保留原文：%s", exc)
+            else:
+                if _tool_name(obj) in valid:
                     return ""
-            except Exception:
-                pass
         return text.strip()
 
     def _compaction_callback(self, history_text: str,
