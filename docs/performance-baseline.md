@@ -33,6 +33,7 @@ python scripts/perf_probe.py --section dsp       # 复用 scripts/bench_dsp_thro
 
 > **先读 §1.1**：下表每一项的等级（能进验收栏 / 仅参考 / 无出处）在那里逐行标出。**表里的绝对值不等于验收基线**——大多数行没有逐次负载记录，只作量级参考。
 
+> 证据等级 E4：本段数字未验证，引用前须复核（判据见 docs/evidence-standard.md）。
 | # | 指标 | 测量命令 | 当前值（本机） | 目标值 | 差距 |
 |---|---|---|---|---|---|
 | 1 | `import main_window`（`-X importtime` 累计） | `perf_probe.py --section startup` | **1.81 s**（改前 6.58 s / 满载时 12.53 s） | ≤ 2 s | ✅ 达标 |
@@ -66,6 +67,7 @@ python scripts/perf_probe.py --section dsp       # 复用 scripts/bench_dsp_thro
 - **仅参考**：有测量命令与文件出处，但**无逐次负载记录**。只能写「量级为 X」，不得当作验收基线，也不得跨窗口比较。
 - **无出处**：找不到原始测量文件或窗口条件，不得再引用。
 
+> 证据等级 E4：本段数字未验证，引用前须复核（判据见 docs/evidence-standard.md）。
 | §1 行 | 数字 | 等级 | 依据 |
 |---|---|---|---|
 | 1 | `import main_window` 1.81 s（改前 6.58 / 满载 12.53） | **仅参考** | `-X importtime` 有命令与历史值，但三次读数未逐次记负载；「满载 12.53 s」只是叙述 |
@@ -120,6 +122,7 @@ python scripts/perf_probe.py --section dsp       # 复用 scripts/bench_dsp_thro
 
 ## 2. 已做的优化与前后数字
 
+> 证据等级 E4：本段数字未验证，引用前须复核（判据见 docs/evidence-standard.md）。
 | 改动 | 文件 | 改前 | 改后 | 验证 |
 |---|---|---|---|---|
 | **设备枚举移出 GUI 线程**：2 s/次的热插拔轮询改为 `QThreadPool` 后台枚举 + 信号回主线程做判定 | `desktop/device_panel.py` | 10 s 窗口内 GUI 线程 **63%** 时间在同步枚举（`rtlsdr_open` 0.2–2.4 s、Pluto 网络探测固定 0.5 s） | 派发 **0.14 ms**，枚举在后台 251.7 ms | `tests/test_device_switch_flow.py` 6 passed；`perf_probe.py --section ui` 的 dispatch_ms |
@@ -332,6 +335,7 @@ tracemalloc delta **+342 KB**、gc 对象 **+2**、pen 缓存 397 条、brush �
 
 > **口径说明（2026-11-11）**：上面这行是 **balanced 档**（`set_performance_mode(1)`）的手测快照，**不是产品默认档**。`perf_profile.py` 默认档是 `eco` → `set_performance_mode(2)`：曲线定时器 **100 ms**（名义 10 fps）、谱线 **256 bin**、FFT 256。所以本节 66 ms / 13.0 fps / 384 bin 只能读作「balanced 档」的数字，**不得再当作默认帧率基线**。`eco` 档真机实测 **9.33 fps**、曲线单帧中位 **6.59 ms**、0.6 s 首帧 122 ms（见 `docs/research/2026-11-11-gap-performance.md` §5）。
 
+> 证据等级 E4：本段数字未验证，引用前须复核（判据见 docs/evidence-standard.md）。
 | 指标 | 实测 |
 |---|---|
 | 6.001 s 内曲线 paint | **78 帧 → 13.0 fps**（名义 15.15 的 86%） |
@@ -512,6 +516,7 @@ GUI 线程「忙」区间定义：同步版 `enum_worker_start → connect_backe
 
 配置同 §7.3（2.4 MS/s、FFT 1024、384 bin、曲线定时器 66 ms、控件 858×283、每 50 ms 推 120,000 样本）。
 
+> 证据等级 E4：本段数字未验证，引用前须复核（判据见 docs/evidence-standard.md）。
 | 项 | 实测 | 来源 |
 |---|---:|---|
 | 6.003 s 内 paint | 79 帧 → **13.16 fps**（名义 15.15） | `measured.paints/elapsed_s/fps` |
@@ -582,6 +587,7 @@ GUI 线程「忙」区间定义：同步版 `enum_worker_start → connect_backe
 
 **同会话拆账（真机，`--section startup --runs 1`）**
 
+> 证据等级 E4：本段数字未验证，引用前须复核（判据见 docs/evidence-standard.md）。
 | 子项 | 未预热（本次） | 预热 `scipy.signal` 后 | 旧观测（§8.2） | 说明 |
 |---|---:|---:|---:|---|
 | `_start_iq_streams` 整段 | 1214.0 ms | **119.5 ms** | 844.0–1013.5 | 含声卡打开 |

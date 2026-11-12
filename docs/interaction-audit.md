@@ -41,6 +41,7 @@
 
 ## 附：全量明细
 
+> 证据等级 E4：本段数字未验证，引用前须复核（判据见 docs/evidence-standard.md）。
 | 动作 | 类型 | 所在面板 | 启用 | 可见 | 有槽 | 可观察结果 | 结论 |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | ADS-B | 菜单项 | MainWindow | 是 | 是 | 是 | 界面变化：_SectionHeader(rightSectionHeader): text='ADS-B' checked=0 enabled=1 visible=0 -> text='ADS-B' checked=1 enabled=1 visible=0 | 可用 |
