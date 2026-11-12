@@ -121,12 +121,72 @@ def _probe_import(name: str) -> bool:
         return False
 
 
+def _module_exists_without_import(name: str):
+    """只查目录：确定找到返回 True；认不准（zip/PYZ、命名空间父包）返回 None 交兜底。
+
+    ``importlib.util.find_spec("scipy.signal")`` 会先把 scipy 父包 import 进来，
+    4 项合计实测 287.6–335.3 ms；这条路径只做目录查找，4 项合计 3.0–4.9 ms
+    （docs/perf-evidence/2026-11-12/find-spec-pyc.json）。
+    找不到时不硬判缺失——可能是 zip/PYZ 之类不按目录组织的装载器，交给标准
+    ``find_spec`` 复核：宁可多花一次钱，也不能在产物上误报缺件、误中止启动。
+    """
+    from importlib.machinery import PathFinder
+    parts = name.split(".")
+    try:
+        spec = PathFinder.find_spec(parts[0])
+        if spec is None or len(parts) == 1:
+            return True if spec is not None else None
+        dirs = list(getattr(spec, "submodule_search_locations", None) or [])
+        if not dirs:
+            return None
+        for i in range(1, len(parts)):
+            part = parts[i]
+            try:
+                spec = PathFinder.find_spec(".".join(parts[:i + 1]), dirs)
+            except KeyError:
+                # 命名空间包（如 scipy._external）没有 __init__，父包未 import 时
+                # 它的 _NamespacePath 取不到父模块 → 直接按目录判定
+                spec = None
+            if spec is None:
+                ns = [os.path.join(d, part) for d in dirs
+                      if os.path.isdir(os.path.join(d, part))]
+                if not ns:
+                    return None
+                if i == len(parts) - 1:
+                    return True
+                dirs = ns
+                continue
+            if i == len(parts) - 1:
+                return True
+            if spec.loader is None:
+                # 命名空间包：PathFinder 给的是 _NamespacePath，父包未 import 时
+                # 连 list() 都会抛 KeyError，直接按「父目录/本段名」拼
+                dirs = [os.path.join(d, part) for d in dirs
+                        if os.path.isdir(os.path.join(d, part))]
+            else:
+                locs = getattr(spec, "submodule_search_locations", None)
+                dirs = (list(locs) if locs is not None
+                        else [os.path.dirname(spec.origin or "")])
+            if not dirs:
+                return None
+    except (ImportError, AttributeError, ValueError, KeyError):
+        return None
+    return True
+
+
 def _probe_module_spec(name: str) -> bool:
     """只判断「文件在不在」：不执行模块体、不加载 .pyd（≈0 ms vs 真 import）。
 
     用于 scipy 系：「缺件/没打进去」是启动前必须拦住的那一类，find_spec 足够；
     「文件在但加载失败」留给首帧后的延后真 import 报（见 _start_deferred_imports）。
+
+    能看见只留 ``.pyc`` 的子树：``compileall -b`` 落盘后 ``find_spec`` 给的是
+    ``SourcelessFileLoader``（实测见 docs/perf-evidence/2026-11-12/find-spec-pyc.json），
+    只有 ``__pycache__/*.pyc`` 而没有 legacy ``.pyc`` 的形态 Python 3 本来就导入不了，
+    判缺件是对的。
     """
+    if _module_exists_without_import(name):
+        return True
     import importlib.util
     try:
         return importlib.util.find_spec(name) is not None
