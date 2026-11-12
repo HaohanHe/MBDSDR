@@ -48,7 +48,7 @@
 ## 3. 新增解码器接入步骤
 
 **走 tool_registry（当前真实生效路径）：**
-1. 写解码器模块（如 `mbdsdr_ai/my_decoder.py`，导出 `decode(...)`）。
+1. 写解码器模块（示例名 mbdsdr_ai/my_decoder.py，仓库中不存在，按实际模块命名；导出 `decode(...)`）。
 2. 在 `sdr_tools.py`（或新 `register_my_tools.py`）里调一次
    `agent.tool_registry.register(name="my_decode", description=..., parameters={...}, handler=lambda args: ...)`。
 3. 完成。agent / orchestrator 经 `tool_registry.call("my_decode", args)` 自动可发现、可调用，无需改调度。
