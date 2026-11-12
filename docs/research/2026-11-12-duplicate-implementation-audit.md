@@ -185,3 +185,17 @@
   `mbdsdr_ai/tests/test_tle_freshness_predict.py`；`device_watchdog` 没有对应测试。
 - `hal_enhanced` / `s_meter` 的接线都属于 FZ-04 解冻后；`s_meter` 还会改读数，
   必须先定校准口径。
+
+## 10. 修复跟进（2026-11-12）
+
+| 缺陷 | 提交 | 现状 |
+| --- | --- | --- |
+| `s_meter` 非有限读数会崩且静默污染状态 | `550f3752` | 已修：`dbm_to_s_unit(NaN/±Inf)` → `(nan, "—")`；`push` 短路，不写平滑值/峰值/历史 |
+| `spacetime_predict` 的 `status`/`tier` 阈值矛盾 + 吞异常 | `16b78489` | 已修：`status` 由 `tier` 投影、`threshold_days` 同源；异常存 `predict_error` |
+
+- **`spacetime_predict`：缺陷已修（`16b78489`），C 类删除理由仅剩零引用。**
+  §7 的「算错」描述的是修复前的代码；不要再据此认为线上还有一套错算在跑。
+  但它仍无生产消费者，是否删除仍按 §7/§8 的 C 判定走——修复不改变「没人用」。
+- **验证口径**：`s_meter` 的 8 条测试是用临时脚本（`%TEMP%`）直接调用测试函数，
+  **未经 pytest 收集验证**——`tests/conftest.py` 导入超 2 分钟，另案处理；
+  `spacetime_predict` 的 8 条是常规 `pytest mbdsdr_ai/tests/test_tle_freshness_predict.py`。
