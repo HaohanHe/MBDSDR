@@ -254,9 +254,13 @@ def _section_bodies(lines: List[Tuple[int, str]]) -> Dict[int, str]:
         for match in [HEADING_RE.match(raw.strip())]
         if match
     ]
+    # 结尾边界必须用「实际行号」而不是「已读行数」：代码块会被跳过，
+    # 两者不相等；用行数当行号会把文末章节的正文截成空串，进而误报
+    # 「已转绿却没有再检绑定」「没有可比改动对象」。
+    last_number = lines[-1][0] if lines else 0
     bodies: Dict[int, str] = {}
     for index, (number, level) in enumerate(heads):
-        end = len(lines) + 1
+        end = last_number + 1
         for later, later_level in heads[index + 1:]:
             if later_level <= level:
                 end = later

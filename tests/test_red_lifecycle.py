@@ -470,6 +470,33 @@ def test_r8_clean_binding_passes(tmp_path: Path) -> None:
     assert "再检：待复核/缺绑定 0 条" in proc.stdout
 
 
+def test_r8_binding_survives_code_fences_before_entry(tmp_path: Path) -> None:
+    """反证 (k)：前置代码块被跳过会让「已读行数」小于实际行号。
+
+    章节结尾若拿行数当行号，文末条目的正文会被截成空串，于是已转绿的条目
+    被误报「没有再检绑定」+「没有可比改动对象」。
+    """
+    root = _repo(tmp_path)
+    sha = _commit(
+        root, {"tests/test_pin.py": "def test_pin():\n    assert True\n"}, "A"
+    )
+    path = _write(
+        root,
+        "known-red-register.md",
+        "# 台账\n\n"
+        "```bash\npytest -q\n```\n\n"
+        "```bash\npytest -q\n```\n\n"
+        f"## K19 — 样例（已转绿 `{sha}`）\n\n"
+        f"- **再检绑定**：验证提交 `{sha}`；文件集合 `tests/test_pin.py`\n"
+        "- **验证（实跑）**：`1 passed`。\n",
+    )
+    proc = _run(root, "--paths", path)
+    out = proc.stdout + proc.stderr
+    assert proc.returncode == 0, out
+    assert "没有「再检绑定」" not in out
+    assert "没有可比的改动对象" not in out
+
+
 def test_green_entry_without_binding_is_red(tmp_path: Path) -> None:
     """反证 (i)：账本里「已转绿」但没有再检绑定 → R8 FAIL。"""
     root = _repo(tmp_path)
