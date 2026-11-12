@@ -201,6 +201,77 @@ notes 0 条，命中 0 条**。
 `ci_watch71.sh:4`、`ci_watch72.sh:3`，同一枚 PAT）：它们不在仓库里，所以既进不了
 产物、也不受 pre-commit 管，只能人工处理（删文件或把 token 移出），不在本批次范围。
 
+## 熵告警分级（2026-11-13，降噪）
+
+告警洪水等于没有告警：降噪前全仓 WARN 8558 条，其中熵告警 8499 条（**口径：每文件
+每规则一条**——`scan_text` 里 `entropy_reported` 让一个文件最多出一条熵告警）。
+
+### 先量：8499/8502 条都在哪
+
+`python scripts/secret_scan.py --entropy-stats`（只量不改判）：
+
+| 维度 | 分布（前几项） |
+| --- | --- |
+| 后缀 | `.md` 4740（55.8%）、`.yaml` 1274（15.0%）、`.py` 1066、`.cpp` 544、`.json` 230、`.txt` 202、`.ts` 157、`.h` 66、其余 <50 |
+| 目录（前两层） | `scratch/refs` 3751（44.1%）、`output/tmp` 3609（42.4%）、`output/_wt_head_attr` 223、`output/_wt_crashprv` 221、`MBDSDR/docs` 192、`output/remote_snapshot` 161、其余 <40 |
+| 分数区间 | 4.2~4.5 **7633（89.8%）**、4.5~5.0 604、5.0~5.5 249、5.5~6.0 7、≥6.0 9 |
+
+两个结论：**86.5% 来自两棵非产品树**（第三方参照克隆 `scratch/refs` + 旧 worktree
+副本 `output/tmp`）；**89.8% 贴着下限**（4.2~4.5）。第二条正是不能靠调阈值的原因：
+把下限抬到 4.5 能砍掉九成，但会把「刚好过线」的真凭据一起砍掉。所以按**结构**分级。
+
+### 分级（判据只看位置/文件名/字段名，不动阈值）
+
+**MUST（必须看）**——三选一，命中即必须人工过目：
+
+1. 整名就是凭据文件：`.env` / `.env.*` / `*.pem|key|pfx|p12|keystore|jks`、
+   `secrets.yaml`、`credentials.json`、`id_rsa`、`.netrc` 这类；
+2. 高熵串**紧邻**凭据字段名：字段名与值之间只允许 `: = " '` 与空白（只看候选串
+   前 48 字符窗口），如 `api_key = "…"`、`"token": "…"`、`APPLE_API_KEY: '…'`；
+3. 其余一律 SAMPLE。
+
+文件名判据只认**整名**、不做子串匹配：`test_secret_scan.py`、
+`2026-07-29-...-credentials.i18n.yaml` 这类名字里带 secret/token 的测试与文档不是
+凭据面——按子串判会把「必须看」重新灌满（第一版就是这么错的）。
+
+**SAMPLE（抽样看）**——普通源码/文档/第三方树里的长串：计数全量保留，终端只打 20
+条代表，全量分布用 `--entropy-stats`。**WARN** 档（argv 22 / log 37）维持原样。
+
+### 反证（降噪之后仍拦得住，全在 `tests/test_secret_scan.py`）
+
+| 用例 | 内容 | 期望 |
+| --- | --- | --- |
+| `test_entropy_still_hits_random_base64_in_python_source` | 普通 `.py` 里 32 字节随机 base64 | 仍命中，落 SAMPLE |
+| `test_entropy_env_file_is_must` | `.env` 里 `API_KEY=<随机>` | 仍命中，落 MUST |
+| `test_entropy_json_api_key_is_must` | `.json` 的 `"api_key": "<随机>"` | 仍命中，落 MUST |
+| `test_long_blobs_in_assets_stay_sample` | minified JS 长串 + `data:image/png;base64,…` | 仍命中，落 SAMPLE |
+| `test_entropy_stats_reports_distribution` | 4 个样本文件跑 `--entropy-stats` | `总=4 must=2 sample=2`，分层口径与扫描一致 |
+
+随机值在测试里由 `sha256` 派生（`base64.b64encode(hashlib.sha256(...).digest())`），
+源码里不留长字面量——否则测试自己就成了新的样本噪音。
+
+### 降噪后实测（2026-11-13，`D:\mbdsdr`，同口径）
+
+| 档 | 条数 |
+| --- | --- |
+| BLOCK | 4（不变：`output\` 4 个未入库文件，同一枚 PAT） |
+| MUST | **2** |
+| SAMPLE | 8500（终端打 20 条代表） |
+| WARN | 59（argv 22 + log 37） |
+
+MUST 只剩 2 条，都是第三方参照克隆里的测试夹具：
+`scratch/refs/OnAir/tests/mesh/test_mesh_proto_rs.cpp:125`（`kSecretB64 = "…"`）、
+`scratch/refs/deepseek-harness/apps/desktop/tests/macos-signature.spec.ts:29`
+（`APPLE_API_KEY: '….p8'`）。两条都符合「字段名紧邻高熵值」，该看。
+
+### 顺带修掉的真缺口
+
+`Path(".env").suffix == ""`——`.env` 虽然写在 `_ENTROPY_SUFFIXES` 里，却**从未**
+参与熵检查（suffix 永远匹配不上）。反证 (b) 先红后绿：先按「`.env` 必须命中」写
+用例（失败，0 命中），才补 `_ENV_NAME_RE.match(name)` 让凭据面按**名字**入列。
+当前仓库里没有任何 `.env` 文件（全仓 `-Filter ".env*"` 0 个），所以计数没变，但
+通道现在是通的。
+
 ## 分布
 
 按目录：`mbdsdr_ai` 692 / `desktop` 574 / `tests` 62 / `experiments` 32 / `scripts` 26 / `tools` 8 / 根脚本 3 / `docs` 1。
@@ -258,11 +329,11 @@ pre-commit**：pre-commit 现在只跑 claim 范围 + claim 台账 + 暂存区�
 （每次提交约 0.2s×3），而机检脚本最便宜的 0.2s、最贵的 112s；逐个挂上去会让
 每次提交慢几十倍，然后大家开始用 `--no-verify`，把 claim 闸一起废掉。
 
-2026-11-13 全量测绘口径（43 个机检脚本，`scripts/` 下 `check_*`/`audit_*`/
+2026-11-13 全量测绘口径（44 个机检脚本，`scripts/` 下 `check_*`/`audit_*`/
 `verify_*`/`lint_*`/`*_scan`/带 `--check` 的生成器，排除 bench/硬件/一次性工具）：
 逐条实跑 1 次、`QT_QPA_PLATFORM=offscreen`、取墙钟秒；**没有一个脚本自己取
 `qt_test.lock`**，所以下表的「Qt」一栏只有「是否 import/启动 Qt」的区别，不是锁。
-按覆盖分为三档：**A 自动入口（26 条）**、**B 只有测试入口、仓库现状无人跑（12 条）**、
+按覆盖分为三档：**A 自动入口（26 条）**、**B 只有测试入口、仓库现状无人跑（13 条）**、
 **C 无任何入口（5 条，漏网）**。
 
 ### A. 已接入自动入口（覆盖当前仓库）
@@ -313,13 +384,17 @@ pre-commit**：pre-commit 现在只跑 claim 范围 + claim 台账 + 暂存区�
 
 这些脚本的 CLI 在 `tests/` 里对**临时夹具**跑过，逻辑有回归保护；但没有任何
 入口对**本仓当前状态**执行，所以「仓库现在是红的」它抓不到。它们的红/绿
-只在有人手动跑时才可见——这就是「一条命令输出合规状态」在这 12 条上**不成立**。
+只在有人手动跑时才可见——这就是「一条命令输出合规状态」在这 13 条上**不成立**。
+
+**B 档不是「没人跑」的抽屉**（2026-11-13 裁定）：每行必须写清「什么时候跑 / 谁跑」；
+写不出责任人与触发时机的条目直接进 C 档并写明原因，不许用「反正有人会跑」占位。
 
 | 脚本 | 现有入口 | 缺什么 | 什么时候跑 | 谁跑 | 复核 |
 | --- | --- | --- | --- | --- | --- |
-| `scripts/release_manifest.py` | `tests/test_release_secrets.py`、`tests/test_version_literal_guard.py` 只 `import` 函数并对**临时 dist** 断言 | 没有命令对**本仓/真 dist** 跑 CLI；`scripts/package_windows.ps1:149` 只是在注释里提到同判据，`docs/known-red-register.md:1136` 是人工复跑命令 | 出安装包后手动 `--dist`；当前 `known-red-register` 记为红 | 发版人 | 2027-01 |
+| `scripts/release_manifest.py` | `tests/test_release_secrets.py`、`tests/test_version_literal_guard.py` 只 `import` 函数并对**临时 dist** 断言 | 没有命令对**本仓/真 dist** 跑 CLI；`scripts/package_windows.ps1:149` 只是在注释里提到同判据，`docs/known-red-register.md:1136` 是人工复跑命令 | **每次 `python scripts/release_check.py --release` 构建成功后、压 zip 之前**：发版人对真 dist 跑 `python scripts/release_manifest.py --dist D:\mbdsdr\.tmp\pyi-dist12\MBDSDR`（`--only` 默认含 `secrets`）；`package_windows.ps1` 的 owner 应在落盘后调用同一命令，不能只留注释。当前对本仓是红的（`known-red-register.md:1136`），所以暂不接进日常闸 | 发版人（出包脚本 owner 共同承担） | 2027-01 |
 | `scripts/lint_swallow_all.py` | `tests/test_swallow_guard.py`（棘轮） | 仓库现状（37.0s，实测 rc=1：越线中） | 批次末与发版前手动；越线必须当天归因 | 吞噬治理线 | 2026-12 |
-| `scripts/check_red_lifecycle.py` | `tests/test_red_lifecycle.py` | 仓库现状（27.3s，实测 rc=1：有到期/无证据红项） | 批次末手动；红项状态变更后 | 红项 owner | 2026-12 |
+| `scripts/check_red_lifecycle.py` | `tests/test_red_lifecycle.py` | 仓库现状（27.3s，**不进 pre-commit**；2026-11-13 05:54 实测 **rc=1：FAIL 9 / WARN 0 / SKIP 0**＝R8 待复核 3 条＋「已修缺 hash」6 条；红项清单交各 owner，不在扫描时顺带改别人的段落） | **触发条件**：① 每个批次收口前至少 1 次；② 任何 K 条目新增/改绑定/改状态后立即；③ 发版前必跑。**谁跑**：红项 owner（当前 `守卫账本线`）；谁改 K 账谁负责跑。 | 2026-12 |
+| `scripts/check_red_accounting.py` | `tests/test_red_accounting.py`（8 条反证，含「rc=1 且无条目必须报无账红」） | 守卫账本 `docs/guard-accounting.json`；`--fast` 约 60s，全量约 5min（含 audit_evidence / release_manifest） | 批次末与发版前；任一守卫改退出码语义或新增守卫后 | 红项 owner（守卫账本线） | 2026-12 |
 | `scripts/check_destructive_ops.py` | `tests/test_destructive_audit.py` | 仓库 reflog（0.5s，实测 rc=1：27 笔未审计） | 发生 reset/clean/branch -D 当天 | 操作执行人 | 2026-12 |
 | `scripts/check_test_version.py` | `tests/test_check_test_version.py` | 只在事件调查时对具体路径跑（内部两次 pytest） | 怀疑「改测试销红」时 | 复核人 | 2027-01 |
 | `scripts/find_blob_reverts.py` | `tests/test_find_blob_reverts.py` | 仓库历史 | 发现「刚修又被改回」时 | 事件调查人 | 2027-01 |
@@ -344,11 +419,13 @@ pre-commit**：pre-commit 现在只跑 claim 范围 + claim 台账 + 暂存区�
 | `scripts/sample_rate_readback_check.py` | 需要真实 SDR 硬件，CI/无硬件环境不可执行 | 有硬件的验收机，采样率路径改动后 | 硬件验收人 | 2027-01 |
 | `scripts/secret_scan.py --history`（全量模式） | 单次 >300s（实测超时）；钩子只覆盖暂存区 | 发版前或季度一次，人工跑并留结论 | 安全 owner | 2027-01 |
 
-删除判定：**0 个**。43 个都有活调用方、活文档流程或明确待接条件；C 档没有一个是
+删除判定：**0 个**。44 个都有活调用方、活文档流程或明确待接条件；C 档没有一个是
 「结论已无人使用」的死代码，只是**入口缺失**。`check_card_links.py` 已于
 2026-11-13 转绿（links=16 全 PASS），`make_decode_fixtures.py --check` 同日修绿并
-接入 `guards`；`check_destructive_ops.py` / `audit_evidence.py` /
-`lint_swallow_all.py` / `check_red_lifecycle.py` 当前仍是红的，属于待修项，不是死代码。
+接入 `guards`；`check_destructive_ops.py` / `audit_evidence.py` / `lint_swallow_all.py` 当前仍是红的，
+已分别入 K22 / K23 / K06，属于待修项，不是死代码；`check_red_lifecycle.py`
+2026-11-13 05:54 实测 rc=1（FAIL 9：R8 待复核 3 条＋「已修缺 hash」6 条），
+触发条件见上表，红项交各 owner，尚未转绿。
 
 ### 零引用核查（2026-11-13）：两条「写不出责任人」的处置
 
