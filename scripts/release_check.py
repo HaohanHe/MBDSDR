@@ -5,6 +5,10 @@
 设计口径：
 * 第一步就是 ``docs``：跑 ``scripts/verify_claims.py --check-lines --strict-lines``，
   文档行号断言不通过则整个发布检查 FAIL——闸门接在这里，「忘了跑」变成不可能；
+* ``claims`` 步是 ``docs`` 的另一半：跑 ``tests/test_claims_guard.py``（白名单只减
+  不增 + 新增/改写断言必须有四元组 + 已登记红出口）。``docs`` 只看「写了四元组的
+  行是否还指得准」，看不见「新写了一条没有四元组的断言」——那条判据在 pytest 里，
+  两半都在 ``ALL_STEPS`` 里才算闭合；
 * ``guards`` 步把「只在 docs/code-guards.md 登记、没有任何入口」的廉价机检统一
   接进来（无 Qt、不写盘、单项实测 < 15s；清单与不接入理由见 ``GUARD_CHECKS``），
   任一非 0 即 FAIL——闸门不接入口等于没有；
@@ -131,8 +135,9 @@ DEFAULT_WORK = os.path.join(TMP_ROOT, "pyi-build12")
 DEFAULT_DIAG_DIST = os.path.join(TMP_ROOT, "pyi-dist12-noarchive")
 DEFAULT_DIAG_WORK = os.path.join(TMP_ROOT, "pyi-build12-noarchive")
 
-ALL_STEPS = ("docs", "gen_reconcile", "action_dup", "guards", "build", "smoke",
-             "subtree", "single", "optional", "qt", "narrow", "overlap", "log")
+ALL_STEPS = ("docs", "claims", "gen_reconcile", "action_dup", "guards", "build",
+             "smoke", "subtree", "single", "optional", "qt", "narrow", "overlap",
+             "log")
 
 #: 廉价机检清单（无 Qt、不写盘、单次实测 < 15s，2026-11-13 逐条实跑）：
 #: 这些闸门原先只写在 docs/code-guards.md 里，没有任何入口覆盖——即「登记了但
@@ -214,6 +219,11 @@ FAIL_HINTS = {
             "不许把基准写成 HEAD，也不许为了过闸而扩大白名单；"
             "渲染点漂移跑 `python scripts/check_help_paths.py` 看「文档行号漂移」，"
             "按 §三/§四 的真实渲染行改坐标（先确认该行含锚点字面量）",
+    "claims": "跑 `python -m pytest tests/test_claims_guard.py -q -rf` 看 FAILED 明细："
+              "未带四元组的新断言 → 补 <hash> — <path>:<line> — <字面量> 或删断言；"
+              "白名单失效行 → 删行并同步调小 waived-total（只减不增）；"
+              "确实不可复核的历史结论 → 登记 docs/known-red-register.md 的 K 编号"
+              "并加 claims-gate-exempt 标记（K 必须真实存在，悬空直接红）",
     "gen_reconcile": "跑 `python scripts/check_generated_artifacts.py` 看哪些生成物"
                      "与生成器不一致：按行内「重生成」命令重跑（不要手改产物），"
                      "再 `--list` 核对豁免理由是否仍然成立；不要在 pre-commit 加这道闸"
@@ -962,6 +972,34 @@ def main() -> int:
         return True, "；".join(p for p in (dist, step4, "渲染点 0 处",
                                            rb_detail) if p)
 
+    def do_claims() -> tuple[bool, str]:
+        """文档断言闸门的另一半：``tests/test_claims_guard.py``。
+
+        ``docs`` 步跑 ``verify_claims --check-lines``，只判「已写四元组的行是否
+        还指得准」；「新写了一条没有四元组的断言」不在它的输入集里（裸断言没有
+        hash，进不了它的池子）。这里跑 pytest 判据：白名单只减不增、失效行必须
+        销账、新增/改写断言必须带四元组、已登记红出口必须绑真实 K 编号。
+        两半都必须在 ``ALL_STEPS`` 里，缺一半就等于放行另一半。
+        """
+        proc = subprocess.run(
+            [sys.executable, "-m", "pytest", "tests/test_claims_guard.py",
+             "-q", "-rf", "-p", "no:cacheprovider"],
+            cwd=ROOT, capture_output=True, text=True, timeout=900)
+        lines = [ln.strip() for ln in
+                 ((proc.stdout or "") + "\n" + (proc.stderr or "")).splitlines()
+                 if ln.strip()]
+        summary = next((ln for ln in reversed(lines)
+                        if ln[:1].isdigit() and " in " in ln
+                        and (" passed" in ln or " failed" in ln)),
+                       "（未产出汇总行）")
+        failed = [ln for ln in lines if ln.startswith("FAILED ")]
+        if proc.returncode == 0:
+            return True, summary
+        detail = f"{summary}；{len(failed)} 条失败"
+        if failed:
+            detail += "：" + " / ".join(failed[:3])
+        return False, detail
+
     def do_gen_reconcile() -> tuple[bool, str]:
         """生成物对账：重跑文档/表格/清单生成器，比对产物是否同步。
 
@@ -1193,6 +1231,7 @@ def main() -> int:
 
     steps = (
         ("docs", do_docs),
+        ("claims", do_claims),
         ("gen_reconcile", do_gen_reconcile),
         ("action_dup", do_action_dup),
         ("guards", do_guards),
