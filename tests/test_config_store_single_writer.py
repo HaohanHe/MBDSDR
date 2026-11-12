@@ -94,14 +94,15 @@ def test_mutator_exception_leaves_file_untouched(tmp_path):
 # ---------------------------------------------------------------------------
 # 2. 写盘失败：原文件字节不变、不留 .tmp
 # ---------------------------------------------------------------------------
-def test_atomic_failure_keeps_original_bytes_and_no_tmp(tmp_path, monkeypatch):
+def test_atomic_failure_keeps_original_bytes_and_no_tmp(tmp_path):
     path = str(tmp_path / "config.json")
     _write(path, {"api_key": "sk-keep"})
     before = open(path, "rb").read()
 
-    monkeypatch.setattr(ai_config, "_atomic_write_json", lambda p, d: False)
+    # 原子写是注入点：测试传替身，不再 patch 模块私有名。
+    store = ai_config.ConfigStore(path, writer=lambda p, d: False)
 
-    assert ai_config.ConfigStore(path).update(
+    assert store.update(
         lambda d: d.update({"api_key": "sk-lost"})) is False
     assert open(path, "rb").read() == before
     leftovers = [n for n in os.listdir(str(tmp_path)) if n.endswith(".tmp")]

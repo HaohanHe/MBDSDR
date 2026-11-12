@@ -277,12 +277,15 @@ def _same_content_backup(path: str) -> Optional[str]:
         return None
 
 
-def _backup_corrupt(path: str, reason: str) -> Optional[str]:
+def backup_corrupt(path: str, reason: str) -> Optional[str]:
     """把损坏配置复制成 ``*.corrupt-<时间戳>`` 并在旁边写一行理由。
 
     原文件保持不动（读操作不擅自删除用户文件）。理由文件
     （``*.reason.txt``）不是装饰：启动清点只认这种成对的证据，不写它备份
     就只是目录里一个没人知道的文件。返回备份路径；备份也失败时返回 None。
+
+    这是损坏留证的**公共接缝**：测试模拟「备份失败」时替换本函数返回
+    ``None``，不再改模块私有名；正常的损坏路径不替换它，直接验证备份文件。
     """
     dst = _same_content_backup(path)
     if dst is None:
@@ -387,7 +390,7 @@ def _read_disk(path: str) -> Dict[str, Any]:
         _SAVE_BLOCKED.discard(path)
         return data if isinstance(data, dict) else {}
     except (OSError, json.JSONDecodeError, UnicodeDecodeError) as exc:
-        backup = _backup_corrupt(
+        backup = backup_corrupt(
             path, f"config.json 读取失败（{type(exc).__name__}: {exc}）：{path}")
         if backup is None:
             _SAVE_BLOCKED.add(path)
@@ -410,8 +413,14 @@ class ConfigStore:
     刚写的键（典型：api_key）顶掉。``update()`` 的合并基线永远是锁内的磁盘值。
     """
 
-    def __init__(self, path: Optional[str] = None):
+    def __init__(self, path: Optional[str] = None,
+                 writer: Callable[[str, Dict[str, Any]], bool] = _atomic_write_json):
+        """``writer`` 是原子写的**注入点**：测试模拟「写盘失败」时传入返回
+        ``False`` 的替身即可，不必替换模块私有名。生产调用方一律用默认值，
+        避免有人把原子写当成可绕过的公共工具。
+        """
         self.path = os.path.expanduser(path or CONFIG_PATH)
+        self._writer = writer
 
     def read(self) -> Dict[str, Any]:
         """只读现值（不写盘、不加锁）；损坏先备份。"""
@@ -443,7 +452,7 @@ class ConfigStore:
                 return False
             if decision is False:
                 return False
-            if not _atomic_write_json(self.path, data):
+            if not self._writer(self.path, data):
                 return False
             _set_error(None)
             return True
@@ -504,7 +513,7 @@ def load_config(path: str = "~/.mbdsdr/config.json") -> AgentConfig:
         _set_error(None)
         return config
     except (json.JSONDecodeError, UnicodeDecodeError, OSError, ValueError) as exc:
-        backup = _backup_corrupt(
+        backup = backup_corrupt(
             path,
             f"配置文件损坏或不可读（{type(exc).__name__}: {exc}）：{path}")
         where = f"，已备份到 {os.path.basename(backup)}" if backup else \

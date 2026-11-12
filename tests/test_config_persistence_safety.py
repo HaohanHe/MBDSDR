@@ -41,7 +41,7 @@ class TestBackupFailureBlocksWrite:
         path = tmp_path / "config.json"
         bad = b'{"api_key": "sk-live", '
         path.write_bytes(bad)
-        monkeypatch.setattr(cfg_mod, "_backup_corrupt", lambda *a, **k: None)
+        monkeypatch.setattr(cfg_mod, "backup_corrupt", lambda *a, **k: None)
 
         ok = cfg_mod.ConfigStore(str(path)).update(
             lambda d: d.update({"model": "gpt-x"}))
@@ -60,7 +60,7 @@ class TestBackupFailureBlocksWrite:
         path = tmp_path / "config.json"
         bad = b'{"api_key": "sk-live", '
         path.write_bytes(bad)
-        monkeypatch.setattr(cfg_mod, "_backup_corrupt", lambda *a, **k: None)
+        monkeypatch.setattr(cfg_mod, "backup_corrupt", lambda *a, **k: None)
 
         assert save_config(AgentConfig(api_key="sk-new"), str(path)) is False
         assert path.read_bytes() == bad
@@ -71,7 +71,7 @@ class TestBackupFailureBlocksWrite:
         """高频读不能被坏文件卡死：read() 仍返回空配置，只记原因。"""
         path = tmp_path / "config.json"
         path.write_bytes(b'{ broken')
-        monkeypatch.setattr(cfg_mod, "_backup_corrupt", lambda *a, **k: None)
+        monkeypatch.setattr(cfg_mod, "backup_corrupt", lambda *a, **k: None)
 
         assert cfg_mod.ConfigStore(str(path)).read() == {}
         assert "备份失败" in (last_error() or "")
@@ -80,7 +80,7 @@ class TestBackupFailureBlocksWrite:
         """用户手动删/修坏文件后，写回恢复正常，不会永久只读。"""
         path = tmp_path / "config.json"
         path.write_bytes(b'{ broken')
-        monkeypatch.setattr(cfg_mod, "_backup_corrupt", lambda *a, **k: None)
+        monkeypatch.setattr(cfg_mod, "backup_corrupt", lambda *a, **k: None)
         store = cfg_mod.ConfigStore(str(path))
         assert store.update(lambda d: d.update({"model": "blocked"})) is False
 
@@ -179,8 +179,13 @@ class TestMergeAndCorrupt:
         assert path.read_bytes() == bad, "读操作不许删用户文件"
         backups = _corrupt_backups(tmp_path, "config.json")
         assert len(backups) == 1 and backups[0].read_bytes() == bad
+        reasons = list(tmp_path.glob("config.json.corrupt-*.reason.txt"))
+        assert len(reasons) == 1, "备份必须留下可查的理由"
         msg = last_error() or ""
         assert "损坏" in msg and "备份" in msg and "默认配置启动" in msg
+        # 之后加载继续可用：保存一份干净配置后能正常读回。
+        assert save_config(AgentConfig(api_key="fresh"), str(path)) is True
+        assert load_config(str(path)).api_key == "fresh"
 
     def test_save_after_corrupt_keeps_backup_evidence(self, tmp_path):
         path = tmp_path / "config.json"
