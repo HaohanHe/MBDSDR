@@ -42,7 +42,8 @@ from mbdsdr_ai.rtklib_adapter import NTRIPManager, NTRIP_DEFAULT_PORT  # noqa: E
 from mbdsdr_ai.tool_registry import clean_exc as _clean_exc  # noqa: E402
 from tokens import tokens
 
-# 默认低饱和主题里的指示灯颜色（从 tokens.py 语义化取色）
+# 指示灯颜色固定取全局 COLORS（深色一套），模块导入时求值一次：
+# **切主题不会更新**，浅色主题下这三个值也不达标注（见 a11y 清单 A 类）。
 _t = tokens()
 _COLOR_IDLE = _t.COLORS["danger"]          # 低饱和红 = 未连接/未配置
 _COLOR_BUSY = _t.COLORS["status_busy"]     # 低饱和黄 = 连接中

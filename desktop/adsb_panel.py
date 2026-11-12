@@ -53,7 +53,8 @@ except Exception:  # pragma: no cover - 内核解码器缺失时面板降级
     _adsb_lite = None
     _HAS_ADSB = False
 
-# 与现有 adsb_map_panel 一致的米白三色系（从 tokens 取色，主题联动）。
+# 与现有 adsb_map_panel 一致的米白三色系。**固定取全局 COLORS，不随主题变**：
+# 面板自绘一张浅色「地图纸」，换主题不会刷新这里（模块导入时求值一次）。
 _t = _tok()
 _BG = QColor(_t.COLORS["light_bg"])
 _TEXT = QColor(_t.COLORS["light_text"])

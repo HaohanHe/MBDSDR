@@ -316,7 +316,10 @@ class LocationPanel(QFrame):
                 pass
 
     def set_map_style(self, key: str) -> None:
-        """外部（主题联动）设定底图风格；下拉跟着走，不重复设一次。"""
+        """外部设定底图风格；下拉跟着走，不重复设一次。
+
+        当前没有调用方，也没有接到主题切换——底图风格由用户在下拉里自选。
+        """
         idx = self.style_combo.findData(str(key))
         if idx < 0:
             return
