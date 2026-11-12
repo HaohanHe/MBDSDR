@@ -16,6 +16,7 @@
 - 正向（真实钩子）：真删 + 意图声明能提交成功；
 - `safe_commit.py --files` 自动导出意图删除集，正常删文件不用手写声明。
 """
+import importlib.util
 import os
 import shutil
 import subprocess
@@ -25,7 +26,6 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 SCOPE = ROOT / "scripts" / "check_commit_scope.py"
 SAFE_COMMIT = ROOT / "scripts" / "safe_commit.py"
-PRE_COMMIT = ROOT / "scripts" / "hooks" / "pre-commit"
 
 _CLEAN_ENV = (
     "GIT_INDEX_FILE",
@@ -175,13 +175,33 @@ def test_declared_manifest_covers_delete(tmp_path):
     assert proc.returncode == 0, (proc.returncode, out)
 
 
+def _installer():
+    """加载真实的安装脚本，钩子依赖清单只有它一处定义。"""
+    spec = importlib.util.spec_from_file_location(
+        "_install_git_hooks_for_test", ROOT / "scripts" / "install_git_hooks.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 def _install_hooks(repo):
+    """按 install_git_hooks 的同一份清单给临时仓装钩子。
+
+    以前这里手抄要装的文件，漏了 claim_gate.py / file_claim.py，钩子
+    找不到依赖就按 fail-closed 拒掉一切提交。现在钩子清单与支持文件
+    清单都从 install_git_hooks 导入，补依赖不会再漏下一个。
+    """
+    installer = _installer()
     scripts = repo / "scripts"
     scripts.mkdir(exist_ok=True)
     shutil.copy2(SCOPE, scripts / "check_commit_scope.py")
     hooks = repo / ".git" / "hooks"
-    shutil.copy2(PRE_COMMIT, hooks / "pre-commit")
-    os.chmod(hooks / "pre-commit", 0o755)
+    for name in installer.HOOK_NAMES:
+        dst = hooks / name
+        shutil.copy2(installer.HOOKS_SRC / name, dst)
+        os.chmod(dst, 0o755)
+    for name in installer.SUPPORT_FILES:
+        shutil.copy2(installer.ROOT / "scripts" / name, hooks / name)
 
 
 def test_hook_blocks_phantom_delete_from_stale_index(tmp_path):
