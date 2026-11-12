@@ -66,10 +66,13 @@ def _same_content_backup(path: str) -> Optional[str]:
         return None
 
 
-def _backup_corrupt(path: str) -> Optional[str]:
+def backup_corrupt(path: str) -> Optional[str]:
     """把损坏书签文件改名为 ``*.corrupt-<时间戳>``，返回备份路径（失败 None）。
 
     同一份内容只保留一份副本；改名后原路径不再被读取，也不会被整表写回覆盖。
+
+    这是损坏留证的**公共接缝**：测试模拟「备份失败」时替换本函数返回
+    ``None``，不再改模块私有名。
     """
     dst = _same_content_backup(path)
     if dst is None:
@@ -212,7 +215,7 @@ class FrequencyManagerV2:
 
     def _quarantine(self, exc: Exception) -> bool:
         """备份损坏原文并写一行理由；备份失败则置位拒写并返回 False。"""
-        backup = _backup_corrupt(self.path)
+        backup = backup_corrupt(self.path)
         reason = f"{type(exc).__name__}: {exc}"
         if backup is None:
             self._save_blocked = True

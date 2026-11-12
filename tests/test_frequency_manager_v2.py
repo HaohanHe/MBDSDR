@@ -157,21 +157,23 @@ def test_corrupt_file_backed_up_with_reason_on_first_read(tmp_path):
     backups = [p for p in tmp_path.glob("bookmarks_v2.json.corrupt-*")
                if not p.name.endswith(".reason.txt")]
     assert len(backups) == 1
-    assert backups[0].read_text(encoding="utf-8") == "{ not json"
+    assert backups[0].read_bytes() == b"{ not json"
     reasons = list(tmp_path.glob("bookmarks_v2.json.corrupt-*.reason.txt"))
     assert len(reasons) == 1 and "JSONDecodeError" in reasons[0].read_text(encoding="utf-8")
     assert not path.exists(), "原件必须移出读取路径，避免后续整表覆写"
 
-    # 备份之后，新的空库可以正常落盘（原件已在备份里）。
+    # 备份之后，新的空库可以正常落盘（原件已在备份里），下次加载能读回。
     fm.add(BookmarkV2(name="new", freq_hz=100e6, group="ham"))
     assert json.loads(path.read_text(encoding="utf-8"))["version"] == 2
+    reloaded = FrequencyManagerV2(path=str(path))
+    assert [b.name for b in reloaded.list()] == ["new"]
 
 
 def test_backup_failure_blocks_whole_table_save(tmp_path, monkeypatch):
     """A04 反证：备份失败则整表写回必须被挡住，原件字节保持原样。"""
     path = tmp_path / "bookmarks_v2.json"
     path.write_text("{ broken", encoding="utf-8")
-    monkeypatch.setattr(fmv2_mod, "_backup_corrupt", lambda _p: None)
+    monkeypatch.setattr(fmv2_mod, "backup_corrupt", lambda _p: None)
 
     fm = FrequencyManagerV2(path=str(path))
     assert fm._save_blocked is True
