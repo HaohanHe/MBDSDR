@@ -12,8 +12,9 @@
   ④ claim 占位文件坏 JSON → 拒；
   ⑤ 同一 owner 提交自己持有的文件 → 放行（身份用 `MBDSDR_CLAIM_OWNER` 声明）；
   ⑥ takeover 没写理由 → 不认（拒）；写了理由 → 新 owner 放行；
-  ⑦ `action=audit_replay` 的审计行不算 takeover（写审计不能给自己发凭证），
-    未知 action 失败关闭。
+  ⑦ `action=audit_replay` 的审计行不算 takeover（写审计不能给自己发凭证）；
+    未知 action 只忽略该行并打印原因，**不判死整本台账**（否则闸门自己的
+    修复/审计动作就能让整个仓库变只读，2026-11-13 事故）。
 """
 import hashlib
 import json
@@ -32,6 +33,13 @@ GATE_SRC = ROOT / "scripts" / "claim_gate.py"
 
 #: 范围检查的替身：本文件只测 claim 闸，跨线/范围判据由 check_commit_scope 自己覆盖。
 SCOPE_STUB = '''#!/usr/bin/env python
+import sys
+sys.exit(0)
+'''
+
+#: 凭据扫描器的替身：同上，凭据规则由 test_secret_scan.py 自己覆盖。不装替身时
+#: 钩子会因「找不到凭据扫描器」失败关闭，把这些用例全变成与 claim 无关的假红。
+SECRET_STUB = '''#!/usr/bin/env python
 import sys
 sys.exit(0)
 '''
@@ -96,6 +104,8 @@ def repo_env(tmp_path):
     locks = tmp_path / "locks"
     scope = tmp_path / "scope.py"
     scope.write_text(SCOPE_STUB, encoding="utf-8")
+    scanner = tmp_path / "scanner.py"
+    scanner.write_text(SECRET_STUB, encoding="utf-8")
 
     env = os.environ.copy()
     env.pop("MBDSDR_CLAIM_OWNER", None)
@@ -103,6 +113,7 @@ def repo_env(tmp_path):
     env["MBDSDR_CLAIM_ROOT"] = str(repo)
     env["MBDSDR_HOOK_MARKER_DIR"] = str(tmp_path / "hook_ok")
     env["MBDSDR_SCOPE_SCRIPT"] = str(scope)
+    env["MBDSDR_SECRET_SCAN"] = str(scanner)
     env["MBDSDR_CLAIM_GATE"] = str(GATE_SRC)
 
     _git(repo, env, "init", "-q")
@@ -303,8 +314,13 @@ def test_audit_replay_row_does_not_excuse_foreign_claim(repo_env):
     assert "持有者：A03静默降级线/other" in out, out
 
 
-def test_unknown_action_in_takeover_log_is_rejected(repo_env):
-    """takeover 日志出现不认识的 action → 失败关闭，不能当「没人持有」。"""
+def test_unknown_action_row_is_ignored_not_ledger_fatal(repo_env):
+    """未知 action → 只忽略这一行并打印原因，不得判死整本台账（否则全仓只读）。
+
+    2026-11-13 事故形态：`legacy_token_repair` 写了合法审计行却没有 `new_owner`，
+    旧判据把整本 `claim_takeovers.log` 判成不可信，于是全新克隆上每一次提交全被拒。
+    这里钉住新契约：不认识的 action 不授予任何接管效力，但台账其余部分照常可用。
+    """
     repo, env, locks = repo_env
     locks.mkdir(parents=True, exist_ok=True)
     (locks / "claim_takeovers.log").write_text(
@@ -319,8 +335,29 @@ def test_unknown_action_in_takeover_log_is_rejected(repo_env):
 
     proc = _commit(repo, env)
     out = proc.stdout + proc.stderr
-    assert proc.returncode != 0, out
-    assert "action=" in out and "失败关闭" in out, out
+    assert proc.returncode == 0, out
+    assert "weird_action" in out and "不认识" in out, out
+    assert "已忽略这一行" in out, out
+
+
+def test_unknown_action_without_new_owner_does_not_kill_ledger(repo_env):
+    """事故原形复刻：只有 path、没有 new_owner、action=新名字 → 只拒这一行。
+
+    这是「闸门自己的修复工具废掉闸门」的准确形态：一行新审计不得让整个仓库只读。
+    """
+    repo, env, locks = repo_env
+    locks.mkdir(parents=True, exist_ok=True)
+    (locks / "claim_takeovers.log").write_text(
+        json.dumps({"action": "brand_new_audit", "path": "a.txt"}, ensure_ascii=False) + "\n",
+        encoding="utf-8",
+    )
+    _stage(repo, env)
+
+    proc = _commit(repo, env)
+    out = proc.stdout + proc.stderr
+    assert proc.returncode == 0, out
+    assert "brand_new_audit" in out and "不认识" in out, out
+    assert "失败关闭" not in out, out
 
 
 def test_real_file_claim_cli_is_seen(repo_env):
