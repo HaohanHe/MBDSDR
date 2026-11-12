@@ -129,6 +129,18 @@
     「区间 + 条件」。反例（2026-11-12）：`docs/learn/dsp-performance-baseline.md`
     §5 曾把 3.75 → 6.83 MS/s 记成优化收益，实为高负载与低负载两次读数——旧码
     `06e42a69` 在低负载下同为 9.54 MS/s，且两侧 bench 脚本字节一致。
+16. **「物理上不可能绿的断言」不许当断言。** 断言必须存在一个可成立的通过态；
+    否则它只会长期挂红，把真正的新红淹掉，并让人习惯「反正它是红的」。
+    写法：把不可能绿的部分降为**显式前置条件**（`assert` 里写明为什么它永远不会
+    绿），真正要守的不变量换成**可修的子断言**。
+    正例（2026-11-12，`tests/test_network_resource_leaks.py`
+    `test_ring_reader_stop_timeout_keeps_thread_reference`）：read_fn 不被外部
+    唤醒时线程不可能退出——「stop 返回后线程仍存活」只作前置条件；断言改为
+    「join 超时后 `_thread` 引用仍保留」+「重复 `start()` 不出第二个生产者」，
+    后者可通过补丁变绿，当前以 `xfail(strict=True)` 立案。
+    反例：在 `stop()` 返回后直接写
+    `assert not any(t.name == "mbdsdr-ring-producer" ...)`——线程物理上不可能
+    退出，这条断言永远红，等于没有断言。
 
 ## 3. 反例（出现即判不合规）
 
@@ -141,6 +153,7 @@
 | 只给 commit hash 就声称“已验证” | commit 只证明改过代码，不证明测过硬件 | commit 只能支撑 E2（可复跑代码）或作为 E3 的时点线索 |
 | “约 0.5s 传完”只有文档自述 | 无计时日志 | “未验证（no-artifact）；帧体积 153600B 有 E1 存档，耗时不详” |
 | 证据原件用 `.log`（或任何被 `.gitignore` 拦掉的扩展名），提交成功但原件不在版本里 | `git add` 静默跳过被忽略文件，台账有、原件无，等于没证据 | 换成白名单扩展名（`.txt`/`.json` 等）或确认落在 `!docs/evidence/**` 放行范围内；提交后 `git ls-files docs/evidence` 复核 |
+| 在 `_ThreadedRingReader.stop()` 后断言「生产者线程已退出」（read_fn 只能外部唤醒） | 物理上不可能绿：线程醒不来就不会退，这条断言永远红，等于没有断言 | 降为显式前置条件（注释写明为何永不绿），断言改为「`_thread` 引用仍保留」+「重复 `start()` 不出第二个生产者」；见 §2 规则 16 |
 
 ## 4. 工具口径（`scripts/audit_evidence.py`）
 

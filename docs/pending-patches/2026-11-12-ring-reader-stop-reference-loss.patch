@@ -1,0 +1,24 @@
+# 待应用：_ThreadedRingReader.stop() join 超时后丢线程引用
+#
+# 基准：79e1d297（2026-11-12）。应用前先 `git apply --check`。
+# 复现（当前为红）：python -m pytest --runxfail -q tests/test_network_resource_leaks.py -k ring_reader
+# 应用步骤与判定见同目录 2026-11-12-ring-reader-stop-reference-loss.md。
+diff --git a/mbdsdr_ai/sdr_backend.py b/mbdsdr_ai/sdr_backend.py
+--- a/mbdsdr_ai/sdr_backend.py
++++ b/mbdsdr_ai/sdr_backend.py
+@@ -1515,10 +1515,14 @@ class _ThreadedRingReader:
+     def stop(self):
+         self._stop = True
+         with self._cond:
+             self._cond.notify_all()
+         if self._thread is not None:
+             self._thread.join(timeout=2.0)
+-            self._thread = None
++            # join 超时 ≠ 线程已退出：保留引用，下一次 stop()/调用方还能 join
++            # 收尸；置 None 会让越界线程永远无法 join，再 start() 还会多起一个
++            # 生产者（start() 只在 _thread 为 None 时新建）。
++            if not self._thread.is_alive():
++                self._thread = None
+ 
+ 
+ class RTLSDRBackend(SDRBackend):
