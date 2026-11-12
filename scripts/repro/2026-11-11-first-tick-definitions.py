@@ -54,15 +54,36 @@ def _prepare_env() -> str:
 
 
 def _load_marker(psutil) -> dict:
-    n = 0
-    for p in psutil.process_iter(["name"]):
+    """规则 10 口径：系统 CPU + python 进程数/总占比（采样 1 s）。"""
+    procs = []
+    for p in psutil.process_iter(["pid", "name"]):
         try:
             if "python" in (p.info["name"] or "").lower():
-                n += 1
+                procs.append(p)
         except Exception:
             continue
-    return {"sys_cpu_pct": round(psutil.cpu_percent(interval=0.5), 1),
-            "python_proc_count": n}
+    before = {}
+    for p in procs:
+        try:
+            before[p.pid] = p.cpu_times()
+        except Exception:
+            continue
+    sys_pct = psutil.cpu_percent(interval=1.0)
+    rows = []
+    for p in procs:
+        try:
+            if p.pid not in before:
+                continue
+            a, b = p.cpu_times(), before[p.pid]
+            delta = (a.user - b.user) + (a.system - b.system)
+            rows.append({"pid": p.pid, "cpu_pct": round(delta * 100.0, 1)})
+        except Exception:
+            continue
+    rows.sort(key=lambda r: -r["cpu_pct"])
+    return {"sys_cpu_pct": round(sys_pct, 1),
+            "python_proc_count": len(rows),
+            "python_total_cpu_pct": round(sum(r["cpu_pct"] for r in rows), 1),
+            "python_top": rows[:5]}
 
 
 def _main() -> int:
