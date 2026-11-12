@@ -123,6 +123,13 @@ SHORTCUTS: Tuple[Shortcut, ...] = (
              note="频谱获焦时生效；按当前模式的带宽预设表步进"),
     Shortcut("spectrum.filter.wide", ".", "滤波放宽一档", scope="spectrum",
              note="频谱获焦时生效；按当前模式的带宽预设表步进"),
+    # 跨度缩放只有滚轮/右键时是纯键盘硬缺口（2026-11-12 普查）。这两个键
+    # 走与滚轮完全相同的缩放数学（×1.1、锚点、48 kHz–采样率上下限），
+    # 区别只是键盘没有光标，锚点固定取谱面中心（中心频率不动，只改跨度）。
+    Shortcut("spectrum.zoom.in", "Ctrl+=", "频谱跨度放大", scope="spectrum",
+             note="频谱获焦时生效；与滚轮缩放同一路径，锚点取谱面中心"),
+    Shortcut("spectrum.zoom.out", "Ctrl+-", "频谱跨度缩小", scope="spectrum",
+             note="频谱获焦时生效；下限 48 kHz，上限为采样率"),
 )
 
 #: id -> Shortcut（构建期按 id 取键）

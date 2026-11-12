@@ -81,6 +81,15 @@ _LOCAL_MODE_SHORTCUTS = (
     ("spectrum.sideband.usb", "USB"),
 )
 
+#: 登记 id -> 跨度缩放倍率。
+#: 注意本仓约定：`new_span = span * factor`，factor > 1 = **跨度变大**（视野
+#: 变宽 / 放大倍数变小），factor < 1 = 跨度变小（看得更细）。滚轮是上滚
+#: → 1.1，键盘必须同向：Ctrl+= 看得更细（1/1.1），Ctrl+- 看得更宽（1.1）。
+_LOCAL_ZOOM_FACTORS = (
+    ("spectrum.zoom.in", 1 / 1.1),
+    ("spectrum.zoom.out", 1.1),
+)
+
 #: 登记 id -> Qt 键码（keyPressEvent 用；键位串只在 shortcuts.py 维护）
 _LOCAL_KEY_CODES = {
     _sid: QKeySequence(_bind_shortcut(_sid))[0].key()
@@ -3397,6 +3406,7 @@ class _TuningPlotMixin:
         # 同时打上作用域标记，供主窗槽内兜底判断（见 owns_local_shortcuts）。
         setattr(self, LOCAL_SHORTCUT_SCOPE_ATTR, True)
         self._local_mode_shortcuts: List[QShortcut] = []
+        self._local_zoom_shortcuts: List[QShortcut] = []
         self._rebuild_local_shortcuts()
         self.setMinimumHeight(300)
         self.setMouseTracking(True)
@@ -3429,23 +3439,43 @@ class _TuningPlotMixin:
 
     # ------------------------------------------------------------------ 工具
     def _rebuild_local_shortcuts(self) -> None:
-        """按 shortcuts.py 的**当前生效**键位重建解调模式局部键。
+        """按 shortcuts.py 的**当前生效**键位重建局部键。
 
-        改键界面保存后由主窗转调（见 apply_shortcut_overrides）：
-        局部键是 QShortcut 对象，键位在构造时就固定了，不重建就还是旧键。
+        两类：
+          * 解调模式（``_LOCAL_MODE_SHORTCUTS``）；
+          * 跨度缩放（``_LOCAL_ZOOM_FACTORS``，Ctrl+= / Ctrl+-）。
+
+        改键界面保存后由主窗转调（见 apply_shortcut_overrides）：局部键是
+        QShortcut 对象，键位在构造时就固定了，不重建就还是旧键。
+        键位为空（登记表里 ``key=None`` 或用户主动解绑）则不建 —— 这样
+        「摘掉键位」是真的摘掉，而不是留一个空序列的快捷键。
         """
-        for sc in getattr(self, "_local_mode_shortcuts", []):
+        for sc in (getattr(self, "_local_mode_shortcuts", [])
+                   + getattr(self, "_local_zoom_shortcuts", [])):
             try:
                 sc.setParent(None)
                 sc.deleteLater()
             except RuntimeError:
                 pass        # 已随控件销毁：忽略，不影响后续重建
         self._local_mode_shortcuts = []
+        self._local_zoom_shortcuts = []
         for _sid, _mode in _LOCAL_MODE_SHORTCUTS:
-            _sc = QShortcut(QKeySequence(_bind_shortcut(_sid)), self)
+            _key = _bind_shortcut(_sid)
+            if not _key:
+                continue
+            _sc = QShortcut(QKeySequence(_key), self)
             _sc.setContext(Qt.WidgetShortcut)
             _sc.activated.connect(lambda m=_mode: self._apply_mode_hotkey(m))
             self._local_mode_shortcuts.append(_sc)
+        for _sid, _factor in _LOCAL_ZOOM_FACTORS:
+            _key = _bind_shortcut(_sid)
+            if not _key:
+                continue
+            _sc = QShortcut(QKeySequence(_key), self)
+            _sc.setContext(Qt.WidgetShortcut)
+            _sc.activated.connect(
+                lambda f=_factor: self._zoom_span_keyboard(f))
+            self._local_zoom_shortcuts.append(_sc)
 
     def apply_shortcut_overrides(self) -> int:
         """热更新本控件的局部键，返回改动条数（主窗改键后调用）。
@@ -3461,9 +3491,12 @@ class _TuningPlotMixin:
                 _LOCAL_KEY_CODES[sid] = new
                 changed += 1
         before = [sc.key().toString()
-                  for sc in getattr(self, "_local_mode_shortcuts", [])]
+                  for sc in (getattr(self, "_local_mode_shortcuts", [])
+                             + getattr(self, "_local_zoom_shortcuts", []))]
         self._rebuild_local_shortcuts()
-        after = [sc.key().toString() for sc in self._local_mode_shortcuts]
+        after = [sc.key().toString()
+                 for sc in (self._local_mode_shortcuts
+                            + self._local_zoom_shortcuts)]
         changed += sum(1 for a, b in zip(before, after) if a != b)
         return changed
 
@@ -3480,6 +3513,39 @@ class _TuningPlotMixin:
         gen = self.state.panel.generator
         return _px_to_freq(x_px, self.width(),
                            _view_center_hz(self.state), gen.span_hz)
+
+    # ------------------------------------------------------------------ 跨度缩放
+    def _zoom_span(self, factor: float, x_ratio: float) -> None:
+        """以 ``x_ratio`` 处为锚缩放显示跨度；滚轮与键盘共用这一条路径。
+
+        参数含义与滚轮分支完全一致（倍率 1.1、48 kHz–采样率钳位、锚点处
+        绝对频率保持不变）。**锚点约定**：
+          * 滚轮：取光标位置（缩放前后光标下的频率不动）；
+          * 键盘：没有光标可取，固定取 ``0.5``（谱面中心）——此时
+            ``anchor_freq == view_center``，结果就是中心频率不动、只改跨度，
+            这是键盘操作唯一可预期的锚点。
+        """
+        gen = self.state.panel.generator
+        sr = float(gen.sample_rate_hz)
+        span = float(gen.span_hz)
+        new_span = max(48_000.0, min(sr, span * factor))
+        r = max(0.0, min(1.0, float(x_ratio)))
+        view_center = _view_center_hz(self.state)
+        anchor_freq = view_center + (r - 0.5) * span
+        # 保持锚点频率不变：new_view_center = anchor - (r-0.5)*new_span
+        new_view_center = anchor_freq - (r - 0.5) * new_span
+        # 缩放是**显示跨度**，不是硬件采样率：采样率每帧被 push_iq 覆写，
+        # 写在那里等于下一帧就被抹掉（真机缩放失灵的根因）。
+        gen.set_span(new_span)
+        # view_offset 保持不变，反解出真调谐中心
+        gen.center_freq_hz = new_view_center - self.state.view_offset_hz
+        self._emit_tuned(gen.center_freq_hz)
+        self.state.panel.sync_span_slider()
+        self._show_tune_tip(f"缩放 {new_span / 1e6:.3f} MHz")
+
+    def _zoom_span_keyboard(self, factor: float) -> None:
+        """键盘缩放：锚点固定取谱面中心（见 :meth:`_zoom_span` 的约定）。"""
+        self._zoom_span(factor, 0.5)
 
     # ------------------------------------------------------------------ dB 轴拖动
     def _begin_db_drag(self, y_px: float, zoom: bool = False) -> None:
@@ -3717,24 +3783,10 @@ class _TuningPlotMixin:
                 return
             # Ctrl+滚轮 = 以光标为中心缩放 span（对标 SDR++ waterfall.cpp
             # processInputs 的鼠标锚点缩放：缩放前后光标处绝对频率不变）。
-            factor = 1.1 if dy > 0 else 1 / 1.1
-            span = gen.span_hz
-            # 缩放是**显示跨度**，不是硬件采样率：采样率每帧被 push_iq
-            # 覆写，写在这里等于下一帧就被抹掉（真机缩放失灵的根因）。
-            new_span = max(48_000.0, min(float(gen.sample_rate_hz), span * factor))
-            # 光标处绝对频率（含 Ctrl 拖动的视图平移偏移）
-            r = event.position().x() / max(1, self.width())
-            view_center = _view_center_hz(self.state)
-            anchor_freq = view_center + (r - 0.5) * span
-            # 保持光标频率不变：new_view_center = anchor - (r-0.5)*new_span
-            new_view_center = anchor_freq - (r - 0.5) * new_span
-            gen.set_span(new_span)
-            # view_offset 保持不变，反解出真调谐中心
-            gen.center_freq_hz = new_view_center - self.state.view_offset_hz
-            self._emit_tuned(gen.center_freq_hz)
-            self.state.panel.sync_span_slider()
-            self._show_tune_tip(
-                f"缩放 {new_span / 1e6:.3f} MHz")
+            # 缩放数学统一在 _zoom_span 里，键盘 Ctrl+= / Ctrl+- 走同一条路径。
+            self._zoom_span(1.1 if dy > 0 else 1 / 1.1,
+                            event.position().x() / max(1, self.width()))
+            return
         else:
             if vfo is not None:
                 if edge_region in ('left', 'right'):

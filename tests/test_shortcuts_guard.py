@@ -128,6 +128,9 @@ _SPECTRUM_KEYPRESS_IDS = (
     "spectrum.filter.narrow", "spectrum.filter.wide",
 )
 
+#: 频谱跨度缩放键（QShortcut 装配，触发后按倍率改 span）
+_SPECTRUM_ZOOM_IDS = ("spectrum.zoom.in", "spectrum.zoom.out")
+
 
 @pytest.fixture(scope="module")
 def qtapp():
@@ -143,7 +146,9 @@ def test_spectrum_scoped_ids_are_owned_by_spectrum_widget(qtapp):
       * 模式键（A/N/F/W/C/S/Shift+S）：控件实际持有的 QShortcut 覆盖登记键位，
         触发 activated 后 ``mode_hotkey_requested`` 必须发出对应模式；
       * 调谐/滤波键（←→↑↓ , .）：把登记键位做成真实 KeyPress 送进绘图控件，
-        中心频率按方向移动、主听 VFO 带宽按宽窄档变化。
+        中心频率按方向移动、主听 VFO 带宽按宽窄档变化；
+      * 跨度缩放键（Ctrl+= / Ctrl+-）：QShortcut 实际装配，触发后 span 按
+        ×1.1 同一条缩放数学变小/变大。
     """
     from PySide6.QtCore import QEvent, Qt
     from PySide6.QtGui import QKeyEvent, QKeySequence, QShortcut
@@ -151,7 +156,8 @@ def test_spectrum_scoped_ids_are_owned_by_spectrum_widget(qtapp):
     import spectrum_widget as sw
 
     declared = {s.id for s in SHORTCUTS if s.scope == "spectrum"}
-    covered = set(_SPECTRUM_MODE_IDS) | set(_SPECTRUM_KEYPRESS_IDS)
+    covered = (set(_SPECTRUM_MODE_IDS) | set(_SPECTRUM_KEYPRESS_IDS)
+               | set(_SPECTRUM_ZOOM_IDS))
     assert covered == declared, (
         "登记表的 spectrum 条目与行为断言不匹配（新增条目需补实测）: "
         f"未覆盖 {sorted(declared - covered)} / 多出 {sorted(covered - declared)}")
@@ -207,6 +213,21 @@ def test_spectrum_scoped_ids_are_owned_by_spectrum_widget(qtapp):
         press("spectrum.filter.wide")
         assert vfo.bw_hz > 6000.0, (
             f"按 . 没放宽滤波：{vfo.bw_hz} Hz")
+
+        # 4) 跨度缩放键：QShortcut 实际装配 + 触发后 span 按方向缩放。
+        gen.sample_rate_hz = 2_400_000.0
+        gen.set_span(2_400_000.0)
+        base_span = gen.span_hz
+        for sid in _SPECTRUM_ZOOM_IDS:
+            seq = QKeySequence(BY_ID[sid].key).toString()
+            assert seq in bound, (
+                f"{sid}（{BY_ID[sid].key}）没在频谱控件装配成局部 QShortcut")
+        bound[QKeySequence(BY_ID["spectrum.zoom.in"].key).toString()].activated.emit()
+        assert gen.span_hz < base_span, (
+            f"触发 spectrum.zoom.in 后跨度没变小：{gen.span_hz} >= {base_span}")
+        bound[QKeySequence(BY_ID["spectrum.zoom.out"].key).toString()].activated.emit()
+        assert abs(gen.span_hz - base_span) < 1.0, (
+            f"触发 spectrum.zoom.out 后跨度没回到 {base_span}：{gen.span_hz}")
     finally:
         panel.deleteLater()
 
