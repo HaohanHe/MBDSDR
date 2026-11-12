@@ -3539,7 +3539,7 @@ class MainWindow(QMainWindow):
         elif getattr(self, "_link_degraded", False):
             text = "数据流中断"
             color = self._tok('danger', '#E5484D')
-            tip = ("数据流中断：连接仍在但收不到 IQ 数据，正在等待恢复；"
+            tip = ("连接仍在但收不到 IQ 数据，正在等待恢复；"
                    "持续 10 秒会按断开处理（不会自动重连）。")
         else:
             text = "SDR 已连接"
@@ -3549,7 +3549,7 @@ class MainWindow(QMainWindow):
                 name = str(getattr(backend.device, "name", "") or "")
             except Exception:
                 name = ""
-            tip = "SDR 已连接，频谱与瀑布来自设备实时采样" + (
+            tip = "频谱与瀑布来自设备实时采样" + (
                 f"（{name}）" if name else "")
         if getattr(self, "_planetarium_link_cache", None) == (text, color):
             return
