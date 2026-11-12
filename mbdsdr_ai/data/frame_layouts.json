@@ -1,6 +1,6 @@
 {
   "_schema": "mbdsdr frame_layout_spec v2 —— 帧布局库（同步字/字段布局/CRC 一律配置注入；可选帧型变体 + 派生）",
-  "_note": "字段定义支持：name/offset(字节)/len(字节)/type(uint8..uint64/int8..int64_be|_le/hex/ascii)/scale/offset_val/unit/bit_offset/bit_len(可选位级)。CRC 由 crc 字段指名（名字必须能在 mbdsdr_ai.crc 预设表里找到）。len=-1 是哨兵值，含义为「从该 offset 到帧尾的剩余全部字节」，不是「长度未知」也不是「长度非法」；当前解释器（mbdsdr_ai/verify_chain.py::extract_fields）只展开 name=data 的字段，其它字段名写 -1 会按越界报错。实例：ccsds_tc_classic 的 data 字段 offset=5、len=-1 → 从第 6 字节到帧尾；该帧帧尾固定 2 字节 FECF，所以这个「剩余全部」含 FECF，取纯数据需去掉末 2 字节。派生布局 ccsds_tc_segmented 的 data 为 offset=6、len=-1（同一条「到帧尾剩余全部、含 FECF」口径，只是起点后移到 Segment Header 之后）。变体/派生：条目可选 frame_type（帧型标签）与 derived_from（父布局名）；父布局提供基础字段，子布局 fields 同名整体覆盖（子胜、位置不变）、新名追加；同一 fields 内重名直接报错；派生布局必须自带 source.url + source.retrieved_at，无出处不入库。",
+  "_note": "字段定义支持：name/offset(字节)/len(字节)/type(uint8..uint64/int8..int64_be|_le/hex/ascii)/scale/offset_val/unit/bit_offset/bit_len(可选位级)。位级字段：声明 bit_len 时走位级路径，bit_offset 以帧首为 0（绝对位偏移，MSB-first），bit_len 为位数，type 须为 uint，offset/len 不再参与；未声明 bit_len 的字段仍走字节路径。CRC 由 crc 字段指名（名字必须能在 mbdsdr_ai.crc 预设表里找到）。len=-1 是哨兵值，含义为「从该 offset 到帧尾的剩余全部字节」，不是「长度未知」也不是「长度非法」；当前解释器（mbdsdr_ai/verify_chain.py::extract_fields）只展开 name=data 的字段，其它字段名写 -1 会按越界报错。实例：ccsds_tc_classic 的 data 字段 offset=5、len=-1 → 从第 6 字节到帧尾；该帧帧尾固定 2 字节 FECF，所以这个「剩余全部」含 FECF，取纯数据需去掉末 2 字节。派生布局 ccsds_tc_segmented 的 data 为 offset=6、len=-1（同一条「到帧尾剩余全部、含 FECF」口径，只是起点后移到 Segment Header 之后）。变体/派生：条目可选 frame_type（帧型标签）与 derived_from（父布局名）；父布局提供基础字段，子布局 fields 同名整体覆盖（子胜、位置不变）、新名追加；同一 fields 内重名直接报错；派生布局必须自带 source.url + source.retrieved_at，无出处不入库。",
   "astu_1_tm_example": {
     "profile": "astu_1",
     "honesty": "ASRTU-1 教程只给到 CCSDS TM 体制（ASM+卷积+扰码），未公开帧内字段布局——本布局是示例布局，用于验证字段抽取引擎，不是该星真实遥测格式",
@@ -42,6 +42,94 @@
     "fields": [
       {"name": "segment_header_hex", "offset": 5, "len": 1, "type": "hex"},
       {"name": "data", "offset": 6, "len": -1, "type": "hex"}
+    ]
+  },
+  "funcube1_ao73_frame": {
+    "honesty": "FUNcube-1（AO-73）256 字节下行帧：1 字节帧头（2bit Sat Id + 6bit Frame Type）+ 55 字节实时遥测 + 200 字节载荷，依据 AMSAT-UK《FUNcube-1 Downlink Data》Issue 1.0 Final as flown（05/03/2015，Distribution: Unlimited public release）§1–§4。位序按文档对 Frame Type 明示的 MSB-first，其余字段沿用同一 MSB-first 口径（文档未逐字段另行声明）。文档未给换算系数与单位，故全部输出原始计数、不造标度；载荷内容随 Frame Type 变化，本布局按 hex 透传，不解释 WOD/HR 采样。该帧的同步与 RS/卷积编码在解调/FEC 层完成，本布局不含 sync/crc，不能直接用于 verify_sample。未做 OTA 或上星验证",
+    "source": {
+      "document": "FUNcube-1 Downlink Data, Issue 1.0 Final as flown, 05/03/2015 (AMSAT-UK; Distribution: Unlimited public release)",
+      "url": "https://funcube.org.uk/wp-content/uploads/2010/11/funcube-1-downlink-data-spec_ver1-as_flown.pdf",
+      "section": "§1 Overview (frame structure), §2 Sat Id, §3 Frame types, §4 Real Time Telemetry table",
+      "sha256": "86e12bc7b882726d47e69b4834379e042c309a95e58c0b1920ce9281a87d90cd",
+      "retrieved_at": "2026-11-12T19:10:56+08:00"
+    },
+    "fields": [
+      {"name": "sat_id", "type": "uint", "bit_offset": 0, "bit_len": 2},
+      {"name": "frame_type_id", "type": "uint", "bit_offset": 2, "bit_len": 6},
+      {"name": "photo_voltage_1", "type": "uint", "bit_offset": 8, "bit_len": 16},
+      {"name": "photo_voltage_2", "type": "uint", "bit_offset": 24, "bit_len": 16},
+      {"name": "photo_voltage_3", "type": "uint", "bit_offset": 40, "bit_len": 16},
+      {"name": "total_photo_current", "type": "uint", "bit_offset": 56, "bit_len": 16},
+      {"name": "battery_voltage", "type": "uint", "bit_offset": 72, "bit_len": 16},
+      {"name": "total_system_current", "type": "uint", "bit_offset": 88, "bit_len": 16},
+      {"name": "reboot_count", "type": "uint", "bit_offset": 104, "bit_len": 16},
+      {"name": "eps_software_errors", "type": "uint", "bit_offset": 120, "bit_len": 16},
+      {"name": "boost_converter_temp_1", "type": "uint", "bit_offset": 136, "bit_len": 8},
+      {"name": "boost_converter_temp_2", "type": "uint", "bit_offset": 144, "bit_len": 8},
+      {"name": "boost_converter_temp_3", "type": "uint", "bit_offset": 152, "bit_len": 8},
+      {"name": "battery_temp", "type": "uint", "bit_offset": 160, "bit_len": 8},
+      {"name": "latchup_count_5v1", "type": "uint", "bit_offset": 168, "bit_len": 8},
+      {"name": "latchup_count_3v3", "type": "uint", "bit_offset": 176, "bit_len": 8},
+      {"name": "reset_cause", "type": "uint", "bit_offset": 184, "bit_len": 8},
+      {"name": "ppt_mode", "type": "uint", "bit_offset": 192, "bit_len": 8},
+      {"name": "sun_sensor_xp", "type": "uint", "bit_offset": 200, "bit_len": 10},
+      {"name": "sun_sensor_yp", "type": "uint", "bit_offset": 210, "bit_len": 10},
+      {"name": "sun_sensor_zp", "type": "uint", "bit_offset": 220, "bit_len": 10},
+      {"name": "solar_panel_temp_xp", "type": "uint", "bit_offset": 230, "bit_len": 10},
+      {"name": "solar_panel_temp_xm", "type": "uint", "bit_offset": 240, "bit_len": 10},
+      {"name": "solar_panel_temp_yp", "type": "uint", "bit_offset": 250, "bit_len": 10},
+      {"name": "solar_panel_temp_ym", "type": "uint", "bit_offset": 260, "bit_len": 10},
+      {"name": "bus_3v3_voltage", "type": "uint", "bit_offset": 270, "bit_len": 10},
+      {"name": "bus_3v3_current", "type": "uint", "bit_offset": 280, "bit_len": 10},
+      {"name": "bus_5v_voltage", "type": "uint", "bit_offset": 290, "bit_len": 10},
+      {"name": "receiver_doppler", "type": "uint", "bit_offset": 300, "bit_len": 8},
+      {"name": "receiver_rssi", "type": "uint", "bit_offset": 308, "bit_len": 8},
+      {"name": "rf_temperature", "type": "uint", "bit_offset": 316, "bit_len": 8},
+      {"name": "receive_current", "type": "uint", "bit_offset": 324, "bit_len": 8},
+      {"name": "transmit_current_3v3", "type": "uint", "bit_offset": 332, "bit_len": 8},
+      {"name": "transmit_current_5v", "type": "uint", "bit_offset": 340, "bit_len": 8},
+      {"name": "pa_reverse_power", "type": "uint", "bit_offset": 348, "bit_len": 8},
+      {"name": "pa_forward_power", "type": "uint", "bit_offset": 356, "bit_len": 8},
+      {"name": "pa_board_temperature", "type": "uint", "bit_offset": 364, "bit_len": 8},
+      {"name": "pa_board_current", "type": "uint", "bit_offset": 372, "bit_len": 8},
+      {"name": "antenna_temp_0", "type": "uint", "bit_offset": 380, "bit_len": 8},
+      {"name": "antenna_temp_1", "type": "uint", "bit_offset": 388, "bit_len": 8},
+      {"name": "antenna_deployment_0", "type": "uint", "bit_offset": 396, "bit_len": 1},
+      {"name": "antenna_deployment_1", "type": "uint", "bit_offset": 397, "bit_len": 1},
+      {"name": "antenna_deployment_2", "type": "uint", "bit_offset": 398, "bit_len": 1},
+      {"name": "antenna_deployment_3", "type": "uint", "bit_offset": 399, "bit_len": 1},
+      {"name": "sequence_number", "type": "uint", "bit_offset": 400, "bit_len": 24},
+      {"name": "dtmf_command_count", "type": "uint", "bit_offset": 424, "bit_len": 6},
+      {"name": "dtmf_last_command", "type": "uint", "bit_offset": 430, "bit_len": 5},
+      {"name": "dtmf_command_success", "type": "uint", "bit_offset": 435, "bit_len": 1},
+      {"name": "data_valid_asib", "type": "uint", "bit_offset": 436, "bit_len": 1},
+      {"name": "data_valid_eps", "type": "uint", "bit_offset": 437, "bit_len": 1},
+      {"name": "data_valid_pa", "type": "uint", "bit_offset": 438, "bit_len": 1},
+      {"name": "data_valid_rf", "type": "uint", "bit_offset": 439, "bit_len": 1},
+      {"name": "data_valid_mse", "type": "uint", "bit_offset": 440, "bit_len": 1},
+      {"name": "data_valid_ants_bus_b", "type": "uint", "bit_offset": 441, "bit_len": 1},
+      {"name": "data_valid_ants_bus_a", "type": "uint", "bit_offset": 442, "bit_len": 1},
+      {"name": "in_eclipse_mode", "type": "uint", "bit_offset": 443, "bit_len": 1},
+      {"name": "in_safe_mode", "type": "uint", "bit_offset": 444, "bit_len": 1},
+      {"name": "hardware_abf_on", "type": "uint", "bit_offset": 445, "bit_len": 1},
+      {"name": "software_abf_on", "type": "uint", "bit_offset": 446, "bit_len": 1},
+      {"name": "deployment_wait_next_boot", "type": "uint", "bit_offset": 447, "bit_len": 1},
+      {"name": "payload", "offset": 56, "len": 200, "type": "hex"}
+    ]
+  },
+  "funcube1_ao73_fitter": {
+    "frame_type": "FM",
+    "derived_from": "funcube1_ao73_frame",
+    "honesty": "由 funcube1_ao73_frame 派生：Frame Type 值 14–24 为 Fitter 消息帧（FUNcube-1 Downlink Data §3、§5 传输调度表），200 字节载荷按文档「copied out verbatim」语义透传为 ASCII；同名 payload 字段由 hex 覆盖为 ascii，帧头与实时遥测字段全部继承。非 ASCII 字节按替换字符呈现，不猜测编码。未做 OTA 或上星验证",
+    "source": {
+      "document": "FUNcube-1 Downlink Data, Issue 1.0 Final as flown, 05/03/2015 (AMSAT-UK; Distribution: Unlimited public release)",
+      "url": "https://funcube.org.uk/wp-content/uploads/2010/11/funcube-1-downlink-data-spec_ver1-as_flown.pdf",
+      "section": "§3 Frame types (Fitter Messages), §5 Transmission Schedule, §4 Fitter Messages",
+      "sha256": "86e12bc7b882726d47e69b4834379e042c309a95e58c0b1920ce9281a87d90cd",
+      "retrieved_at": "2026-11-12T19:10:56+08:00"
+    },
+    "fields": [
+      {"name": "payload", "offset": 56, "len": 200, "type": "ascii"}
     ]
   }
 }
