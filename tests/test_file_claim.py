@@ -15,7 +15,6 @@ from __future__ import annotations
 
 import json
 import os
-import re
 import subprocess
 import sys
 import time
@@ -25,14 +24,6 @@ REPO = Path(__file__).resolve().parents[1]
 SCRIPT = REPO / "scripts" / "file_claim.py"
 SHARED = "desktop/main_window.py"
 
-_TOKEN_RE = re.compile(r"--token ([0-9a-f]{32})")
-
-
-def _token(result: subprocess.CompletedProcess) -> str:
-    match = _TOKEN_RE.search(result.stdout)
-    assert match, f"claim 输出里没有一次性凭据：{result.stdout}{result.stderr}"
-    return match.group(1)
-
 
 def _markers(locks: Path) -> list[Path]:
     return sorted((locks / "claims").glob("*.claim"))
@@ -40,6 +31,27 @@ def _markers(locks: Path) -> list[Path]:
 
 def _sidecars(locks: Path) -> list[Path]:
     return sorted((locks / "claims").glob("*.token"))
+
+
+def _token(result: subprocess.CompletedProcess, locks: Path, path: str = SHARED) -> str:
+    """凭据值只能从 sidecar 读：stdout 里不许出现凭据。
+
+    claim 输出改成「凭据已写入 <path>」之后，测试拿凭据就绕 sidecar；
+    顺便把「不回显凭据」变成断言——否则这个泄露面会悄悄长回来。
+    """
+    hits = []
+    for marker in _markers(locks):
+        data = json.loads(marker.read_text(encoding="utf-8"))
+        if str(data.get("path", "")).replace("\\", "/").endswith(path):
+            token_path = marker.with_suffix(".token")
+            if token_path.exists():
+                hits.append(token_path)
+    assert len(hits) == 1, f"{path} 应当恰好有一条 sidecar：{hits}"
+    token = hits[0].read_text(encoding="utf-8").strip()
+    assert token, "sidecar 是空的"
+    output = result.stdout + result.stderr
+    assert token not in output, "凭据不得回显到 stdout/stderr"
+    return token
 
 
 def _env(locks: Path, root: Path = REPO) -> dict:
@@ -116,7 +128,7 @@ def test_same_owner_claim_renews_with_token(tmp_path: Path) -> None:
     locks = tmp_path / "locks"
     first = run(locks, "claim", SHARED, "--owner", "线A", "--ttl-min", "0.01")
     assert first.returncode == 0, first.stderr
-    token = _token(first)
+    token = _token(first, locks)
     time.sleep(0.2)
     again = run(locks, "claim", SHARED, "--owner", "线A", "--ttl-min", "10", "--token", token)
     assert again.returncode == 0, again.stderr
@@ -133,7 +145,7 @@ def test_same_owner_without_credential_cannot_renew(tmp_path: Path) -> None:
     locks = tmp_path / "locks"
     first = run(locks, "claim", SHARED, "--owner", "同名线")
     assert first.returncode == 0, first.stderr
-    token = _token(first)
+    token = _token(first, locks)
     for sidecar in _sidecars(locks):
         sidecar.unlink()  # 模拟另一条同名线：拿不到本 claim 的凭据
 
@@ -178,7 +190,7 @@ def test_release_by_non_owner_is_denied(tmp_path: Path) -> None:
     locks = tmp_path / "locks"
     claimed = run(locks, "claim", SHARED, "--owner", "线A")
     assert claimed.returncode == 0
-    token = _token(claimed)
+    token = _token(claimed, locks)
 
     denied = run(locks, "release", SHARED, "--owner", "线B")
     assert denied.returncode == 2
@@ -207,7 +219,7 @@ def test_same_name_holders_cannot_release_each_other(tmp_path: Path) -> None:
     second = run(locks, "claim", other, "--owner", "W81线")
     assert first.returncode == 0, first.stderr
     assert second.returncode == 0, second.stderr
-    token_a, token_b = _token(first), _token(second)
+    token_a, token_b = _token(first, locks, SHARED), _token(second, locks, other)
     assert token_a != token_b, "同名 holder 必须拿到不同凭据"
 
     # A 用 B 的凭据去释放 B 的文件：凭据哈希不匹配，必须拒绝
@@ -252,10 +264,40 @@ def test_legacy_claim_requires_explicit_migration(tmp_path: Path) -> None:
     )
     assert upgraded.returncode == 0, upgraded.stderr
     assert "CLAIM UPGRADED" in upgraded.stdout
-    token = _token(upgraded)
+    token = _token(upgraded, locks)
     assert "id=token" in run(locks, "status", SHARED).stdout
 
     assert run(locks, "release", SHARED, "--owner", "老格式线", "--token", token).returncode == 0
+
+
+def test_token_file_channel_replaces_argv(tmp_path: Path) -> None:
+    """凭据走 --token-file：命令行与输出都不出现凭据；两个通道同时给直接拒。"""
+    locks = tmp_path / "locks"
+    claimed = run(locks, "claim", SHARED, "--owner", "文件通道线")
+    assert claimed.returncode == 0, claimed.stderr
+    token = _token(claimed, locks)
+
+    token_file = tmp_path / "presented.token"
+    token_file.write_text(token, encoding="utf-8")
+    released = run(
+        locks, "release", SHARED, "--owner", "文件通道线", "--token-file", str(token_file)
+    )
+    assert released.returncode == 0, released.stdout + released.stderr
+    assert token not in released.stdout + released.stderr
+
+    both = run(
+        locks,
+        "claim",
+        SHARED,
+        "--owner",
+        "文件通道线",
+        "--token",
+        token,
+        "--token-file",
+        str(token_file),
+    )
+    assert both.returncode == 1, both.stdout + both.stderr
+    assert "--token 与 --token-file 只能给一个" in both.stdout + both.stderr
 
 
 def test_claim_persists_sidecar_and_release_reads_it(tmp_path: Path) -> None:
@@ -263,7 +305,7 @@ def test_claim_persists_sidecar_and_release_reads_it(tmp_path: Path) -> None:
     locks = tmp_path / "locks"
     claimed = run(locks, "claim", SHARED, "--owner", "线A")
     assert claimed.returncode == 0, claimed.stderr
-    token = _token(claimed)
+    token = _token(claimed, locks)
 
     sidecars = _sidecars(locks)
     assert len(sidecars) == 1, "claim 必须把凭据落到 sidecar"
@@ -293,7 +335,7 @@ def test_missing_sidecar_denies_release_and_says_what_to_do(tmp_path: Path) -> N
     locks = tmp_path / "locks"
     claimed = run(locks, "claim", SHARED, "--owner", "线A")
     assert claimed.returncode == 0, claimed.stderr
-    token = _token(claimed)
+    token = _token(claimed, locks)
     for sidecar in _sidecars(locks):
         sidecar.unlink()
 
@@ -327,7 +369,7 @@ def test_takeover_replaces_sidecar_and_invalidates_old_token(tmp_path: Path) -> 
     locks = tmp_path / "locks"
     claimed = run(locks, "claim", SHARED, "--owner", "线A", root=root)
     assert claimed.returncode == 0, claimed.stderr
-    old_token = _token(claimed)
+    old_token = _token(claimed, locks)
 
     # 伪造孤儿条件：心跳过期（pid 已不参与判定，写成死号只验证它不影响结果）
     marker = _markers(locks)[0]
@@ -341,7 +383,7 @@ def test_takeover_replaces_sidecar_and_invalidates_old_token(tmp_path: Path) -> 
 
     taken = run(locks, "takeover", SHARED, "--owner", "线B", "--reason", "原 claim 已过期 60min，工作区干净", root=root)
     assert taken.returncode == 0, taken.stdout + taken.stderr
-    new_token = _token(taken)
+    new_token = _token(taken, locks)
     assert new_token != old_token
     assert _sidecars(locks)[0].read_text(encoding="utf-8").strip() == new_token
 
