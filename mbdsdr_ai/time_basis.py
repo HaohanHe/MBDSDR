@@ -25,6 +25,11 @@ try:
 except ImportError:  # 旧脚本以扁平模块方式 import time_basis
     from new_spacetime_tle import parse_tle_epoch
 
+# 显示格式化是叶子能力（time_format 不依赖任何 mbdsdr_ai 模块），放在本模块
+# 会让「只要一个 ISO 字符串」的调用方拖上整块时间系统。原处再导出，保持
+# `from .time_basis import format_local` 的既有调用方不变。
+from .time_format import as_utc as _as_utc, format_local, resolve_tz as _resolve_tz
+
 __all__ = [
     "UTC",
     "LEAP_SECOND_TABLE",
@@ -71,11 +76,6 @@ LEAP_SECOND_TABLE: Tuple[Tuple[datetime, int], ...] = (
 )
 
 _GPS_EPOCH = datetime(1980, 1, 6, tzinfo=UTC)
-
-
-def _as_utc(dt: datetime) -> datetime:
-    """无时区的 datetime 按 UTC 解释（不按本地时区猜）。"""
-    return dt.replace(tzinfo=UTC) if dt.tzinfo is None else dt.astimezone(UTC)
 
 
 def leap_seconds_at(dt_utc: datetime) -> int:
@@ -164,22 +164,6 @@ def tle_epoch_report(line1: str, now: Optional[datetime] = None,
         "plausible": plausible,
         "reason": reason,
     }
-
-
-def _resolve_tz(tz: Optional[Any]) -> Any:
-    if tz is not None:
-        return tz
-    return datetime.now().astimezone().tzinfo
-
-
-def format_local(dt_utc: datetime, tz: Optional[Any] = None) -> str:
-    """UTC → 本地时区 ISO 字符串（带偏移，可往返验证）。
-
-    例：``2026-11-04T20:00:00+08:00``。``tz`` 缺省用系统本地时区。
-    轨道计算永远用输入 UTC；本函数只做显示变换。
-    """
-    dt = _as_utc(dt_utc).astimezone(_resolve_tz(tz))
-    return dt.isoformat()
 
 
 def local_to_utc(dt_local: datetime, tz: Optional[Any] = None) -> datetime:
