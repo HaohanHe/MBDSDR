@@ -367,7 +367,7 @@ class SDRController:
                 failures.append(f"{what}下发失败（{e}）")
                 continue
             if ok is False:
-                failures.append(self._setter_failure_text(what))
+                failures.append(self.setter_failure_text(what))
         if failures:
             self._backend = None
             self._connected = False
@@ -425,7 +425,12 @@ class SDRController:
                     logger.warning("%s 读取失败: %s", name, e)
         return fallback
 
-    def _setter_failure_text(self, what: str) -> str:
+    def setter_failure_text(self, what: str) -> str:
+        """最近一次设值被拒的如实原因（后端 status.error；无则说明未生效）。
+
+        CLI / MCP 的调用方必须把这句话展示给用户：只写日志等于用户看不见，
+        「设了但没生效」与「设成功」在使用者侧无法区分。
+        """
         status = getattr(self._backend, "status", None)
         err = getattr(status, "error", "") if status is not None else ""
         return err or f"{what}未生效（后端返回 False）"
@@ -440,7 +445,7 @@ class SDRController:
                 logger.warning("set_frequency 失败: %s", e)
                 return False
             if ok is False:
-                logger.warning("set_frequency 未生效: %s", self._setter_failure_text("调谐"))
+                logger.warning("set_frequency 未生效: %s", self.setter_failure_text("调谐"))
                 return False
         self._freq_hz = hz
         return True
@@ -476,7 +481,7 @@ class SDRController:
                     return False
                 if ok is False:
                     logger.warning("set_bandwidth 未生效: %s",
-                                   self._setter_failure_text("带宽"))
+                                   self.setter_failure_text("带宽"))
                     return False
         self._bandwidth_hz = hz
         return True
@@ -491,7 +496,7 @@ class SDRController:
                 logger.warning("set_gain 失败: %s", e)
                 return False
             if ok is False:
-                logger.warning("set_gain 未生效: %s", self._setter_failure_text("增益"))
+                logger.warning("set_gain 未生效: %s", self.setter_failure_text("增益"))
                 return False
         self._gain_db = db
         return True
@@ -523,7 +528,7 @@ class SDRController:
             if ok is False:
                 raise SampleRateNotSupportedError(
                     f"设备未接受采样率 {sr}",
-                    technical_detail=self._setter_failure_text("采样率"),
+                    technical_detail=self.setter_failure_text("采样率"),
                 )
         self._sample_rate = sr
         return True
@@ -862,7 +867,14 @@ class SDRController:
         def psd_provider(center_hz: float, bw_hz: float):
             if state["stop"].is_set():
                 raise RuntimeError("scan stopped")
-            self._backend.set_frequency(center_hz)
+            # 调谐被拒还继续采数，会把「旧频点的信号」标成新中心频率，
+            # 用户看到的是编出来的频谱。失败就在这里断掉整轮扫描并说明原因。
+            if self._backend.set_frequency(center_hz) is False:
+                raise SDRUserError(
+                    f"扫频调谐 {center_hz / 1e6:.6f} MHz 失败："
+                    f"{self.setter_failure_text('调谐')}",
+                    suggestion="确认扫频区间在设备可调范围内，或先用 get_status 查看可调上下限。",
+                )
             state["last_center"] = center_hz
             iq = self._backend.read_samples(8192)
             iq = np.asarray(iq, dtype=np.complex128)
