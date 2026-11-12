@@ -205,3 +205,18 @@ def test_rf_sky_overlay_text_adapts_to_day_and_night():
     for fn in (rv.RFSkyView._draw_fov_control, rv.RFSkyView._draw_gnss_overlay):
         assert hardcoded not in inspect.getsource(fn), (
             f"{fn.__name__} 又把天光上的字写死成固定灰阶了")
+
+
+# ---------------------------------------------------------------- T1-5
+
+
+def test_module_canvas_empty_state_uses_canvas_ink():
+    """画布空态文字不能用主题表面的 MUTED（gray_300 对 card_1 仅 2.62:1）。"""
+    import inspect
+
+    import module_panel as mp
+
+    assert contrast_ratio(mp.CANVAS_MUTED.name(), mp.PAPER.name()) >= MIN_TEXT
+    src = inspect.getsource(mp.FlowCanvas.paintEvent)
+    assert "p.setPen(MUTED)" not in src, (
+        "画布空态又用回主题表面的 MUTED：对 card_1 只有 2.62:1")

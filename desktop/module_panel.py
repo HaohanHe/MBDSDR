@@ -18,8 +18,9 @@ MBDSDR 桌面端 - SDR++ 式模块面板（信号流图 + 设备选择 + 参数 
 
 无设备时下拉显示"未发现SDR设备"，绝不写死假设备（用户红线）。
 
-配色（低饱和浅色默认主题）：
-  纸底 #F5F3EF / 青灰 #5B7B8C / 赭石 #C4845C
+配色（固定深色画布，不随主题）：
+  画布底 card_1 #1f1f1f / 主结构 gray_200 / 强调 accent / 占位 gray_300
+  画布内的取色是模块级常量，换主题不会重绘配色。
 """
 from __future__ import annotations
 
@@ -69,7 +70,10 @@ PAPER = QColor(_t.COLORS["card_1"])       # 画布底
 STEEL = QColor(_t.COLORS["gray_200"])     # 连线/主结构
 OCHRE = QColor(_t.COLORS["accent"])       # 强调/选中/sink
 INK = QColor(_t.COLORS["text_primary"])   # 节点文字
-MUTED = QColor(_t.COLORS["gray_300"])     # 占位/次要文字
+MUTED = QColor(_t.COLORS["gray_300"])     # 占位/次要文字（主题表面）
+#: 画布（PAPER）上的空态文字：MUTED 的 gray_300 对 card_1 只有 2.62:1，
+#: 只够主题表面用；画布上取 gray_200（复用 STEEL 的取值，不新增直读）。
+CANVAS_MUTED = QColor(STEEL)
 
 # 模块节点按类型上色（source/processing/decoder/sink）
 _TYPE_COLORS = {
@@ -142,7 +146,7 @@ class FlowCanvas(QWidget):
         p.fillRect(self.rect(), PAPER)
 
         if not self.nodes:
-            p.setPen(MUTED)
+            p.setPen(CANVAS_MUTED)
             f = QFont(self.font()); f.setPointSize(11)
             p.setFont(f)
             p.drawText(self.rect(), Qt.AlignCenter,
@@ -380,7 +384,7 @@ class ModulePanel(QWidget):
         self.bw_spin.setSuffix(" Hz")
         self.bw_spin.setToolTip(
             "设备射频带宽（硬件滤波），0 = 自动（跟随后端默认）。"
-            "注意与 VFO 信道带宽（控制面板「VFO 带宽」）不同")
+            "注意与解调带宽（控制面板「解调带宽」）不同")
         form.addRow("硬件带宽", self.bw_spin)
         self.bw_spin.valueChanged.connect(self._push_bandwidth)
 
@@ -538,7 +542,7 @@ class ModulePanel(QWidget):
         self.device_combo.clear()
         if not self._devices:
             # 红线：无设备不造假，如实显示
-            self.device_combo.addItem("未发现SDR设备")
+            self.device_combo.addItem("未检测到 SDR 设备")
             if enum_err is not None:
                 # 枚举失败 ≠ 没插设备：错误信息不得被空态文案覆盖
                 # （旧实现先 setText(异常) 再被"未发现SDR设备"盖掉，失败被吞）
@@ -546,7 +550,7 @@ class ModulePanel(QWidget):
                     f"设备枚举失败: {enum_err}\n（这不等于没插设备）")
             else:
                 self.device_info.setText(
-                    "未发现SDR设备\n插上 RTL-SDR/HackRF 后点刷新。")
+                    "未检测到 SDR 设备\n插上 RTL-SDR/HackRF 后点刷新。")
             self.connect_btn.setEnabled(False)
             self._fill_sample_rate_options(None)
         else:
