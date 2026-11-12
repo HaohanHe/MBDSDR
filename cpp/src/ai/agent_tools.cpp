@@ -2260,11 +2260,18 @@ QString execTuneToBookmark(const QJsonObject& args, dsp::SpectrumEngine* engine,
                          .arg(i).arg(bookmarks->count()));
     const ui::Bookmark b = bookmarks->list().at(i);
     const int vfoId = engine->selectedVfoId();
+    // mode -> bandwidth -> offset, mirroring the ControlHub path: vfoSetMode
+    // resets the VFO bandwidth to the new mode's default, so the bookmarked
+    // bandwidth has to be applied after the mode or it is overwritten.
+    // bandwidthHz == 0 is "not recorded" (legacy entry) -> keep the mode default.
+    if (!b.mode.isEmpty()) engine->vfoSetMode(vfoId, b.mode);
+    if (b.bandwidthHz > 0.0) engine->vfoSetBandwidth(vfoId, b.bandwidthHz);
     engine->vfoSetOffset(vfoId, b.frequencyHz);
     QJsonObject o;
     o["ok"] = true;
     o["freq_hz"] = b.frequencyHz;
     o["vfo_index"] = vfoId;
+    o["bandwidth_hz"] = b.bandwidthHz;
     o["message"] = QString::fromUtf8("已按书签 %1 调谐至 %2 Hz").arg(i).arg(b.frequencyHz);
     addSourceFields(o, src);
     return compact(o);
