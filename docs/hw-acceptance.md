@@ -74,7 +74,7 @@ python scripts\hw_acceptance\check_ring_labels.py
 | R2 频谱与瀑布 | 第一帧耗时、32 帧噪声底/SNR、噪声底漂移、NaN、瀑布矩阵 | RTL-SDR + 天线 + 88–108 MHz 已知强台 | **部分**：用真实 OTA 录音回放可验 DSP 数据面（SNR/漂移/NaN）；**不能**验实时流、第一帧、调谐精度 | **PASS**：94.30 MHz 台，SNR 22.02 dB、噪声底 −48.61 dB、漂移 4.79 dB、32/32 帧、NaN=0 | **SKIP** / `NO_HW`；离线替代 **PASS**：SNR 36.31 dB、漂移 3.68 dB |
 | R3 解调与音频 | 音频帧数、声道、RMS、<15k/>15k 能量比、19 kHz 导频 | RTL-SDR + 强台；听感需声卡/人耳（脚本不出声） | **部分**：真实 OTA → 产品解调链可验数据面；**不能**验声卡、实时流、听感 | **PASS**：7680 帧/2 声道、RMS 0.6334、能量比 34.7；导频按**旧测法**读 19006 Hz/7.3 dB（旧法无抗混叠，读数不可信，见 §6.2）；修正后真机 98.0 MHz 实测 **19003.0 Hz / 37.7 dB** | **SKIP** / `NO_HW`；离线替代 **PASS**：RMS 0.2306、能量比 57.4、导频 19000 Hz/47.3 dB |
 | R4 录音与回放 | 流式写盘字节增长、样本数、SigMF `integrity`、文件回放/实时 RMS 比、改采样率后 sidecar | RTL-SDR + D 盘可写 | **不能**：要真实实时流、写盘时钟与 SigMF 落盘 | **PASS**：2,359,296→4,718,592 B、598,016 样本、integrity=ok、回放比 0.46、改速后 1.2 MS/s 写入 sidecar | **SKIP** / `NO_HW`（无替代样本可证实时写盘） |
-| R5 卫星追踪与过境 | 过境升起时刻/峰值仰角、TLE 完整性、跨午夜排序、仰角门 | TLE + skyfield（**不需要射频硬件**） | **可以**：纯计算，离线可复跑 | **PASS**：32 条过境；NOAA15/18/19/ISS 峰值仰角误差 0.00–0.05°，升起时刻差 0.3–5.3 s；TLE 校验和全部合法；排序升序 | **PASS**（离线纯算）；缺 TLE → `NO_DATA` |
+| R5 卫星追踪与过境 | 过境升起时刻/峰值仰角、TLE 完整性、跨午夜排序、仰角门 | TLE + skyfield（**不需要射频硬件**） | **可以**：纯计算，离线可复跑 | **PASS（当时）**：32 条过境；NOAA15/18/19/ISS 峰值仰角误差 0.00–0.05°，升起时刻差 0.3–5.3 s；TLE 校验和全部合法；排序升序。**可跑、不可复现——当次 TLE 未入库**（当次 `result.json` 在 `.tmp-tool-results/hw_acceptance/20261106_025741/`，E3 不可复跑） | **PASS**（离线纯算）；缺 TLE → `NO_DATA` |
 | R6 星象仪模式 | 太阳 RA/Dec、月球 RA/Dec 与视直径、1 h 错位反证、offscreen 渲染字节/非空白 | skyfield + `de421.bsp`（**不需要射频硬件**） | **可以**：纯计算 + 离屏渲染，离线可复跑 | **PASS**：太阳误差 0.0053°；月球 vs JPL DE421 **26–51″（随日期变，非回归）**、视直径差 **4.2–6.4″**；1 h 反证 **1822.7″** → 拨回 50.4″；PNG 约 93–94 KB（原始件 `docs/perf-evidence/2026-11-12/r6-sky-mode-jd2461356.898138.json`） | **PASS**（离线纯算）；缺星历 → `NO_DATA` |
 | R7 发射（含安全闸） | 7 种门语义（手工 arm、伪造 token、一次性 token、动作不符、过期、撤销）、审计 JSONL | 纯软件；**不产生射频** | **可以**：门逻辑离线可复跑 | **PASS**：7 种判定全部符合预期，审计 11 条 JSONL，`rf_emitted=false` | **PASS**（离线纯算）；**真实发射**见「永久不可复跑」 |
 
@@ -91,12 +91,20 @@ python scripts\hw_acceptance\check_ring_labels.py
 > **R5 的 32 条过境是历史值，不可复核**：当次使用的 TLE 快照没有进版本库，
 > 过境条数与升起时刻随 TLE 时龄变化，无法用今天的 TLE 复现同一组数；
 > 该行只作「门逻辑与排序当时成立」的记录，复跑会得到当天的新值。
+> **2026-11-12 查找结果（已逐一查过，不是默认没有）**：① 日志/产物
+> `.tmp-tool-results/hw_acceptance/20261106_025741/` 与 `D:\mbdsdr\tmp\final_hw_014420/`
+> 只存 `pass_count` 与误差值，**不存 TLE 两行与历元**；② 缓存
+> `~/.mbdsdr/tle_cache/{25338,28654,33591,25544}.tle` 已在 2026-11-11/12 刷新覆盖，
+> 当次文件不存在；③ `git log --all -- '*tle*'` 只有 2026-10-25 的实验数据与
+> 2026-07 的测试夹具，**无当次快照**。另：当次观测站为脚本内置的 43.88/125.32
+> （2026-11-09 起改为中性站），今天即便拿到同一份 TLE 也复现不出同一组过境。
+> 结论：**可跑、不可复现——当次 TLE 未入库**。
 
 ## 二、离线替代与参考值出处（不写出处 = 自己给自己判卷）
 
 | 项 | 参考/夹具 | 出处 | 属于哪种 |
 |---|---|---|---|
-| R2/R3 数据面回放 | `tests/fixtures/real_fm_88m1/`（88.1 MHz 空口实录） | `provenance.json` 声明 `external-truth / real_ota`，含采集设备（RTL2832U+FC0012）、时间、sha256；每次运行重新校验 sha256 | **真实外部数据**（不是合成波形） |
+| R2/R3 数据面回放 | `tests/fixtures/real_fm_88m1/`（88.1 MHz 空口实录） | `tests/fixtures/real_fm_88m1/provenance.json` 声明 `external-truth / real_ota`，含采集设备（RTL2832U+FC0012）、时间、sha256，`center_hz` 即 88.1 MHz；每次运行重新校验 sha256 | **真实外部数据**（不是合成波形） |
 | R6 月球绝对位置 | JPL DE421 | `de421.bsp`（仓库根，约 17 MB，**不入库**）经 skyfield 读取；DE421 月球星历精度约 1″ 量级 | **外部星历真值** |
 | R6 太阳位置 | Meeus《Astronomical Algorithms》(1998) 第 25 章低精度太阳公式 | `ring6_sky_mode.py::_sun_reference` 独立实现 | **外部公开算法**，不是本仓同一实现 |
 | R5 TLE 完整性 | NORAD TLE 校验和（数字相加、`-` 记 1、模 10） | 公开 TLE 格式规范；见 `_tle_checksum` | **外部标准** |
@@ -133,6 +141,8 @@ python scripts\hw_acceptance\check_ring_labels.py
 2. 观察瀑布 10 s：滚动是否连续、有无整屏跳变/撕裂；
 3. （可选，校准）信号源输出 100.000 MHz / −60 dBm，记录峰值偏差。
 
+> 判据来源（与脚本常量核对）：SNR ≥10 dB ↔ `scripts/hw_acceptance/ring2_spectrum_waterfall.py:121` 的 `snr >= 10.0`；8.5 dB ↔ `:31` 的 `FLOOR_DRIFT_MAX_DB`；32/32 帧 ↔ `:200` 的 `len(frames) == 32`。100 MHz 峰偏 ≤5 kHz 是人工校准项，脚本无此常量（仅在有信号源时判）。
+
 | 记录项 | 实测 | 合格判据 |
 |---|---|---|
 | SNR | | ≥10 dB |
@@ -149,6 +159,8 @@ python scripts\hw_acceptance\check_ring_labels.py
 2. 打开产物 `wfm_audio.wav` 播放 30 s；
 3. 记录是否有周期性爆音/金属声/静音段。
 
+> 判据来源：≥4096 帧 / RMS 1e-4–1.0 / 能量比 >2 ↔ `scripts/hw_acceptance/ring3_demod_audio.py:208–210` 一致；19 kHz 导频脚本判据是 `abs(f_p - 19000) < 300 and snr_p > 10`（`:222–223`），人工卡写 19000±100 Hz **更严**，两者不一致，按人工卡验收线判。
+
 | 记录项 | 实测 | 合格判据 |
 |---|---|---|
 | 音频帧数 / 声道 | | ≥4096 / 1 或 2 |
@@ -163,6 +175,8 @@ python scripts\hw_acceptance\check_ring_labels.py
 2. 播放产物 `rec_2p4m.sigmf-data`（或同名 WAV 导出）；
 3. 记录文件增长、完整性、回放声音。
 
+> 判据来源：回放/实时 RMS 比人工卡为 0.2–0.8，脚本 `scripts/hw_acceptance/ring4_recording_playback.py:93` 内置线是 `0.3 < ratio < 3.0`，两者不一致（人工卡上限更严、下限略松），按人工卡判。
+
 | 记录项 | 实测 | 合格判据 |
 |---|---|---|
 | 写盘字节增长 | | 单调增长且 >0 |
@@ -176,6 +190,8 @@ python scripts\hw_acceptance\check_ring_labels.py
 离线部分（无需硬件）：
 1. `python scripts\hw_acceptance\ring5_satellite_passes.py`；
 2. 记录各星 `elevation_error_deg` / `rise_error_s` / TLE 校验和 / 是否升序。
+
+> 判据来源：峰值仰角误差 ≤1.0° ↔ `scripts/hw_acceptance/ring5_satellite_passes.py:232`；升起时刻 ≤60 s ↔ `:234`；仰角门 ↔ `MIN_EL = 5.0`（`:33`）。
 
 | 记录项 | 实测 | 合格判据 |
 |---|---|---|
@@ -193,6 +209,8 @@ python scripts\hw_acceptance\check_ring_labels.py
 1. `python scripts\hw_acceptance\ring6_sky_mode.py`；
 2. 打开 `sky_render.png`，检查星空布局、地平线、方位标注；
 3. 若在桌面端，实际操作缩放/拖动/切换时间。
+
+> 判据来源：太阳 ≤0.5° ↔ `scripts/hw_acceptance/ring6_sky_mode.py:157`；月球 120″ / 视直径差 12″ / 反证 600″ ↔ `:50/:52/:55`。
 
 | 记录项 | 实测 | 合格判据 |
 |---|---|---|
@@ -251,7 +269,9 @@ python scripts\hw_acceptance\check_ring_labels.py
 > 耗时口径：以上均为 **2026-11-06 01:44–02:00 本机实测**（RTL2832U + FC0012，
 > 串行跑，未与其他采集进程并发）。设备被其他进程并发占用时，硬件环会
 > `SKIP(NEEDS_OPERATOR)` 而不是 FAIL——串行跑多环时上一句柄的 USB 释放有
-> 延迟，`common.transient_open_error()` 会做 4 次（≈1.8 s）瞬时重试，
+> 延迟，`common.transient_open_error()` 会做 4 次（≈1.8 s）瞬时重试
+> （与 `scripts/hw_acceptance/common.py:185` 的 `attempts: int = 4`、`:207` 的
+> `0.3 × (i + 1)` 退避常量一致，0.3+0.6+0.9 s 合计 ≈1.8 s），
 > R1 的五次开关另记 `cycle_transient_retries`，重试次数不隐藏。
 
 > `scripts/release_check.py` 本轮仍未改动（该文件工作区含机制线未提交改动）。
@@ -305,8 +325,8 @@ python scripts\hw_acceptance\check_ring_labels.py
 | R3 | 19 kHz 导频 | 19006 Hz / 7.3 dB | 18841 Hz / 8.9 dB | >10 dB 才算 | 两次都 `skipped`。**旧法读数不作数（历史值，不可复核）**：无抗混叠抽取把 181159 Hz 的杂散折到 18841 Hz，幅度也被折叠底压低（§6.2）；修正后同台 98.0 MHz 为 19003 Hz / 37.7 dB → `PASS` |
 | R4 | 写盘 / 样本 / integrity | +2.36 MB / 598,016 / ok | +2.49 MB / 589,824 / ok | 增长>0 / >0 / ok | 两次一致 |
 | R4 | 回放比 | 0.46 | 0.61 | 0.2–0.8 | 均通过；02:57 更靠近上限 |
-| R5 | 过境条数 / 升起误差 | 32 / 0.3–5.3 s | 33 / 2.2–3.2 s | ≤60 s | 两次一致（时段不同故条数不同） |
-| R5 | 仰角误差 | 0.00–0.05° | 0.01–0.05° | ≤1.0° | 两次一致 |
+| R5 | 过境条数 / 升起误差 | 32 / 0.3–5.3 s | 33 / 2.2–3.2 s | ≤60 s | 两次一致（时段不同故条数不同）。**可跑、不可复现——当次 TLE 未入库**（E3 不可复跑；查找结果见 §一 R5 注） |
+| R5 | 仰角误差 | 0.00–0.05° | 0.01–0.05° | ≤1.0° | 两次一致。**可跑、不可复现——当次 TLE 未入库**（E3 不可复跑） |
 | R6 | 月球 vs DE421 / 视直径 | 26.2″ / 4.5″ | 25.8″ / 4.2″ | ≤120″ / ≤12″ | 两次一致（**均为当日值**；同一代码换日期会变，见 §一 R6 注） |
 | R6 | 1 h 反证 | 1980.1″ | 1978.2″ | ≥600″ | 两次都红得预期 |
 | R7 | 7 种门语义 / `rf_emitted` | 全符合 / false | 全符合 / false | 全符合 / false | 两次一致 |
@@ -342,7 +362,7 @@ python scripts\hw_acceptance\check_ring_labels.py
    吞吐 2.27 MS/s，判据才在量设备而不是量解释器。
 3. R1 五次开关与跨环串行打开：上一句柄 USB 释放有延迟，会瞬时「枚举不到设备」。
    新增 `common.transient_open_error()`（device-not-found / access-denied 统一按瞬时处理），
-   最多 4 次 ≈1.8 s 重试；重试次数记入 `cycle_transient_retries` 与注释，
+   最多 4 次 ≈1.8 s 重试（与 `scripts/hw_acceptance/common.py:185` / `:207` 常量一致）；重试次数记入 `cycle_transient_retries` 与注释，
    **不是**把失败藏起来——真拔线时重试耗尽仍会 FAIL/SKIP。
 
 ### 6.2 19 kHz 导频：同台重复性实验（判「台侧差异」还是「我们侧误差」）
@@ -496,8 +516,13 @@ python scripts\hw_acceptance\ring3_demod_audio.py --freq 93.305e6
 
 1. **处理没有占住读循环**：audio 与 fft 订阅者 `dropped` 都是 **0.0 s**；WFM 解调
    每 16384 块 1.8–2.1 ms（对应信号 6.83 ms，约占 30% 单核），ring 积压 ≤6.8 ms
+   （复跑 `python scripts\hw_acceptance\capture_throughput.py --seconds 6 --blocks 16384 --modes product`）
    ——读线程与处理线程互不阻塞。若按旧 ring3 的串行读法，转换期间没有在途 bulk
    传输，丢样会回到 12–16%。
+   **本轮复跑（2026-11-12）**：`python scripts\hw_acceptance\capture_throughput.py --seconds 6 --blocks 16384 --modes product --mode-runs product=3`
+   → 每块中位 **1.88–1.95 ms**、ring 积压 max **3.41–6.83 ms**、audio/fft `dropped` **0.0 s**；
+   条件三件套：**12 逻辑核**、系统 CPU **28.4%（前）/21.3%（后）**、
+   本进程 **42.7–49.7% 单核**（2.562–2.984 CPU·s / 6 s 窗口；复跑入口 `scripts/hw_acceptance/capture_throughput.py`）。
 2. **残留 0.0–1.7% 是 USB 供给差，不是处理丢样**：ring 生产者 6 s 实际写入
    5.888–6.001 s（2.355–2.403 MS/s），与 §6.2.1 的 sync_only 同一边界；解调消费
    与供给差 ≤10 ms。`drop_pct` 沿用 ring3 的 `max(0, 1 − captured/6)`，把供给差
@@ -514,12 +539,18 @@ python scripts\hw_acceptance\ring3_demod_audio.py --freq 93.305e6
    三个订阅者 dropped 全 0。换成 6 s 窗口更好算：按请求 2.4 MS/s 满速写作
    14.4 M 样点、默认 `read()` 一次没调时，`_count` 涨满 1 M 之后其余
    **13.4 M 样点（≈5.6 s，占窗口约 93%）全被记成丢弃**；本机 USB 实际供给
+   （复跑 `python scripts\hw_acceptance\capture_throughput.py --seconds 6 --blocks 16384 --modes product`）
    5.62–6.00 s（13.5–14.4 M）时，旧口径会报 **12.5–13.4 M（≈5.2–5.6 s，
    87–93%）**，新口径下同一场景为 0
    （`tests/test_fake_rtl_chain.py::test_following_subscriber_not_counted_as_dropped`
    与 `test_two_subscribers_each_read_half_no_drop` 钉住）。
    注意合计口径的边界：同一样点被 N 个订阅者各跳过一次会计 N 次，它回答
    「订阅者视角丢了多少」，不是「设备少产了多少」——供给差看 `produced_s`。
+   **本轮复跑同源（2026-11-12）**：`produced_s` **5.973–5.977 s**
+   （2.389–2.391 MS/s，14.336–14.369 M 样点），与上条 1 的
+   `python scripts\hw_acceptance\capture_throughput.py --seconds 6 --blocks 16384 --modes product` 同一次运行；
+   旧口径的 12.5–13.4 M（≈5.2–5.6 s）是「−1 M 窗口封顶」后的算术反推，不是可测值；
+   条件同条 1（12 逻辑核、系统 CPU 28.4%/21.3%、本进程 42.7–49.7% 单核）。
 
 结论：**产品没有这个病**。验收脚本会踩，是因为它用 `DeviceManager.open()` 返回的
 `OpenDevice`（裸 pyrtlsdr，一次调用一次同步 bulk 读，没有常驻读线程），旧
@@ -698,9 +729,12 @@ python scripts\hw_acceptance\capture_throughput.py --seconds 6 --blocks 16384 `
   回到 6.0 会红），不是靠这段文字保证。
 - 旧阈值 6 dB 低于这个统计量本身的自然范围：10 次里 **2 次**（6.81、6.49）
   会假红——说明 6 dB 是从单次观测拍的，不是从分布来的。
-- 按分布重定：**mean + 3σ = 8.14 → 取 8.5 dB**（覆盖实测最大值 6.81，余量 1.7 dB）。
-- **不采用**「1.5×实测最大极差 = 10.2 dB」这个更松的口径；取更严的 8.5，
-  不存在为了让数字好看而放宽。
+- 按分布重定：**mean + 3σ = 8.14 → 取 8.5 dB**（覆盖最大值 6.81，余量 1.7 dB）。
+  **这是历史派生值**：派生自同台 10 次漂移读数（上表），原始值未入库，**不可复核（未验证）**；
+  派生式 `5.67 + 3 × 0.82 = 8.14`，`8.5 − 6.81 = 1.69 ≈ 1.7 dB`。
+- **不采用**「1.5 × 最大极差 = 10.2 dB」这个更松的口径；取更严的 8.5，
+  不存在为了让数字好看而放宽。该 10.2 dB 同样是**历史派生值**
+  （`1.5 × 6.81 = 10.215`），原始值未入库、不可复核（未验证）。
 - 反证（测试锁定）：回到 6.0 时同一批分布里 2 次观测 FAIL；阈值必须
   `> 6.81` 且 `< 10.2`（=1.5×6.81 取到 0.1 dB）。A2 与 R2 直接用同一个常量
   `FLOOR_DRIFT_MAX_DB`。
@@ -708,6 +742,10 @@ python scripts\hw_acceptance\capture_throughput.py --seconds 6 --blocks 16384 `
   变化，阈值按最坏台（98.0）的分布取，不能按最舒服的台取。
 - 说明：另有两批（帧间未加 20 ms 间隔）观测到 4.34–7.59 dB；口径与 `ring2`
   不同，**不作为定阈依据**，仅记录。
+- **是否值得重测这十次换可复核值**：成本 = 需独占设备做十次连接-断开、量级几分钟，
+  且今天重测得到的是**新一天的新分布**，不能替换当次的十个读数；
+  收益 = 只把定阈依据从 E3 历史值升到可复核档，而阈值本身已被契约测试锁住。
+  结论：**暂不重测**——除非有人要改阈值，否则收益不抵占用设备的成本。
 
 **这条结论是被测试锁住的，不是文档里的一句声明**：
 
