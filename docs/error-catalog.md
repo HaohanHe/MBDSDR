@@ -42,11 +42,11 @@ AI 层各自拼中文。守卫测试 `tests/test_error_catalog_guard.py` 校验�
 
 | `gimbal_stop_failed` | tool | 云台停止失败 | 云台停止指令未执行（{detail}）。 | 确认云台后端可用后重试。 | 是 |
 | `handler_error` | tool | handler 返回失败 | 工具 '{tool}' 执行失败：{detail} | 按报错修正参数或换工具；不要把失败当成已执行。 | 否 |
-| `invalid_arguments` | tool | 参数内容不合法 | 工具 '{tool}' 参数不合法：{detail} | 按参数说明修正后重试；不要原样重发同一组坏参数。 | 否 |
+| `invalid_arguments` | tool | 参数内容不合法 | 工具 '{tool}' 参数不合法：{detail} | 按参数说明修正后重试；detail 已列出具体参数名与允许范围。 | 否 |
 | `invalid_arguments_type` | tool | 调用参数不是 JSON 对象 | 工具 '{tool}' 的调用参数必须是 JSON 对象，收到 {actual}；未执行该工具。 | 重新生成键值对形式的 JSON 对象（参数名作键、数值作值，单位按参数说明）；不要传数组、字符串或裸标量。 | 否 |
 | `invalid_json_arguments` | tool | 工具调用参数 JSON 非法 | 工具 '{tool}' 的参数不是合法 JSON，未执行。收到原文（前 200 字符）：{preview} | 重新生成完整、闭合的 JSON 对象参数；不要截断字符串，不要用单引号/尾逗号/Python 字面量。 | 否 |
 | `invalid_rs_shape` | tool | RS 矩阵形状错误 | 参数 '{param}' 的形状不符合要求：{detail} | 按说明传入二维 RS 矩阵后重试。 | 否 |
-| `missing_required_params` | tool | 缺少必填参数 | 工具 '{tool}' 缺少必填参数：{missing}。参数说明：{hints} | 按上面的参数说明补齐必填项后重试；可选参数不确定时省略即可，不要编造取值。 | 否 |
+| `missing_required_params` | tool | 缺少必填参数 | 工具 '{tool}' 缺少必填参数：{missing}；各项允许范围见 {hints} | 按上面的参数说明补齐必填项后重试；可选参数不确定时省略即可，不要编造取值。 | 否 |
 | `no_rssi` | tool | 未采到 RSSI | 本次扫描没有采到任何 RSSI 样本。 | 检查 SDR 连接与增益后重试。 | 是 |
 | `not_connected` | tool | 未连接设备 | 尚未连接设备，无法执行 {action}。 | 先调用连接工具，连接成功后再执行。 | 否 |
 | `offline_or_api_error` | tool | 联网接口失败或离线 | 联网接口未返回数据（{detail}）。 | 联网后重试；离线时改用本地数据并标注来源。 | 否 |
@@ -141,9 +141,9 @@ AI 层各自拼中文。守卫测试 `tests/test_error_catalog_guard.py` 校验�
 | `link_reset` | access | 链路被对端重置 | 远端重置了连接：{detail} | 确认服务端未重启/未踢出本机后重新连接。 | 是 |
 | `link_timeout` | access | 链路超时（连接/握手） | 与远端 SDR 的连接超时：{detail} | 检查网络、防火墙与对端服务是否在监听；对端无响应时不要反复立即重试。 | 是 |
 | `already_exists` | recorder | 同名文件已存在，拒绝覆盖 | 同名文件已存在，拒绝覆盖：{detail} | 换一个文件名/路径，或显式指定 overwrite=True 再录制。 | 是 |
-| `bad_field` | recorder | 字段不合法 | 字段不合法：{detail} | 按字段说明修正后重试。 | 否 |
-| `bad_param` | recorder | 参数不合法（录音库） | 参数不合法：{detail} | 修正参数后重试。 | 否 |
-| `bad_parameter` | recorder | 参数不合法 | 参数不合法：{detail} | 修正参数后重试。 | 否 |
+| `bad_field` | recorder | 字段不合法 | 录音库字段不合法：{detail}；只允许字段说明里列出的字段 | 按字段说明改用允许的字段名后重试。 | 否 |
+| `bad_param` | recorder | 参数不合法（录音库） | 录音库参数不合法：{detail}；允许范围见该参数说明 | 修正参数取值后重试。 | 否 |
+| `bad_parameter` | recorder | 参数不合法 | 发射/回放参数不合法：{detail}；具体参数名与允许范围见 detail | 按参数说明修正取值后重试。 | 否 |
 | `corrupt` | recorder | 文件损坏 | 文件损坏：{detail} | 换一个完整的录制文件。 | 否 |
 | `datatype` | recorder | SigMF 数据类型不支持 | SigMF 数据类型不支持：{detail} | 使用 cf32/complex64 录制。 | 否 |
 | `deleted` | recorder | 回放文件被删除 | 回放文件在读取过程中被删除或移走。 | 恢复文件或改用其他文件。 | 否 |
