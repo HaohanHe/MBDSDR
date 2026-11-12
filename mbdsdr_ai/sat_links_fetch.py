@@ -706,9 +706,11 @@ def merge_entry(entry: Dict[str, Any],
             dist = _tx_distance(freq, tx)
             if dist is None or dist > MATCH_TOL_HZ:
                 continue
-            # 同频多发射机：状态 active 优先，其次体制一致，再按条目顺序
-            key = (0 if str(tx.get("status")) == "active" else 1,
-                   0 if _mode_compatible(link.get("mode"), tx.get("mode")) else 1,
+            # 同频多发射机：体制一致优先（NOAA-18 同频有 FSK「IQ Recording」
+            # 与 APT「Downlink」，不能因为前者 active 就配错体制），
+            # 其次状态 active，再按距离与条目顺序。
+            key = (0 if _mode_compatible(link.get("mode"), tx.get("mode")) else 1,
+                   0 if str(tx.get("status")) == "active" else 1,
                    dist, idx)
             if best_key is None or key < best_key:
                 best, best_key = tx, key
