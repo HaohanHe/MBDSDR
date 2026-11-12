@@ -767,6 +767,17 @@ class TestDeviceExclusivityAndHotplug:
             assert be.status.link_state == "connected"
             assert be.status.error == ""
 
+            # 拆成两条判据：新生产者必须已起；旧生产者必须真的退出（有界等待）。
+            # 不能靠「connect 返回时旧线程刚好已收尾」这种时序，也不用 sleep 蒙。
+            new_ring = be._ring_reader._thread if be._ring_reader else None
+            assert new_ring is not None and new_ring.is_alive(), (
+                "重连后没有新的环形缓冲生产者线程")
+            assert new_ring not in old_rings, "重连复用了旧生产者线程，应新建"
+            gone = _wait_until(
+                lambda: not any(t.is_alive() for t in old_rings), 3.0)
+            assert gone, (
+                "重连后旧生产者线程 3.0s 内未退出："
+                f"{[t.name + '#' + str(t.ident) for t in old_rings if t.is_alive()]}")
             alive = [
                 t for t in threading.enumerate()
                 if t.name == "mbdsdr-ring-producer" and t.is_alive()
