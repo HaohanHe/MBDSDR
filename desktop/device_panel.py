@@ -825,7 +825,8 @@ class DevicePanel(QWidget):
         req = _req_store.request_for(ident.key)
         # 会话期间锁定的是「本次会话实际生效值」：store 若被另一面板改过，
         # 也不许把置灰的控件拉走（gpredict 第三档）；断开时再统一写回。
-        if not self._connected:
+        # 只对「正在连接的那台」渲染：连接中切到别的设备不改写生效值读数。
+        if not self._connected or ident.key == self._current_dev_key:
             # 正在输入的控件不抢：用户还在改的时候被另一侧的旧值覆盖是更坏的行为。
             if req.sample_rate_hz is not None and not self.sr_edit.hasFocus():
                 self.sr_edit.setText(f"{req.sample_rate_hz:g}")
@@ -873,6 +874,63 @@ class DevicePanel(QWidget):
             return
         self._render_request(self.dev_combo.currentIndex())
 
+    def _set_params_editable(self, editable: bool) -> None:
+        """第三档：会话期间参数控件置灰，断开后恢复可编辑。"""
+        for widget in (self.sr_edit, self.gain_edit, self.ppm_edit):
+            widget.setEnabled(bool(editable))
+
+    def _render_session_values(self) -> None:
+        """会话期间回显本次生效值。
+
+        只读 ``request_for``（占用期间返回冻结快照），不在面板另存一份
+        ``_session_values`` 副本——那会变成与 store 不一致的第二份真值。
+        """
+        key = self._current_dev_key
+        if not key:
+            return
+        req = _req_store.request_for(key)
+        if req.sample_rate_hz is not None:
+            self.sr_edit.setText(f"{req.sample_rate_hz:g}")
+        if req.gain_db is not None:
+            self.gain_edit.setText(f"{req.gain_db:g}")
+        if req.ppm is not None:
+            self.ppm_edit.setText(f"{int(req.ppm)}")
+
+    def _write_back_session(self, key: str, dev: Optional[Dict]) -> str:
+        """会话结束：把本次会话实际生效的值一次性写回唯一请求存储。
+
+        只在断开路径调用一次；返回空串表示已写回，否则返回可读提示（不写回）。
+        采样率走 ``parse_sample_rate`` 这唯一解析入口：解析失败或非正数一律
+        不写回，避免把 0 Hz / 非法值塞进 store。
+        """
+        snap = _req_store.session_values(key)
+        if snap is None:
+            return ""
+        values: Dict[str, object] = {}
+        if snap.sample_rate_hz is not None:
+            text = self.sr_edit.text().strip()
+            try:
+                sr = parse_sample_rate(text)
+            except (TypeError, ValueError):
+                logger.warning("会话写回：采样率 %r 无法解析，未写回", text)
+                return f"采样率“{text}”无法解析，本次会话参数未写回 · 已断开"
+            if sr <= 0:
+                logger.warning("会话写回：采样率 %r 非正数，未写回", text)
+                return f"采样率必须为正数（收到“{text}”），本次会话参数未写回 · 已断开"
+            values["sample_rate_hz"] = sr
+        if snap.gain_db is not None:
+            values["gain_db"] = snap.gain_db
+        if snap.ppm is not None:
+            values["ppm"] = snap.ppm
+        if snap.bandwidth_hz is not None:
+            values["bandwidth_hz"] = snap.bandwidth_hz
+        if not values:
+            return ""
+        _req_store.update(key, **values)
+        if dev is not None:
+            _req_store.fill_payload(dev, key)
+        return ""
+
     def set_connected(self, connected: bool, dev_label: str = "",
                       device: Optional[Dict] = None) -> None:
         """主窗口连接成功/断开后调用。
@@ -908,12 +966,17 @@ class DevicePanel(QWidget):
                 # 登记 store 侧会话占用（第三档）：数据层靠它冻结本次生效值，
                 # 重复调用不覆盖首次快照，所以两次 set_connected(True) 无副作用。
                 _req_store.begin_session(self._current_dev_key)
+                # 身份确认成功才置灰；置灰期间回显冻结的本次生效值。
+                self._set_params_editable(False)
+                self._render_session_values()
                 # 跨进程占用不在这里补登记：后端 connect() 已按同一身份键 claim，
                 # UI 入口再补一层只会让「改一层、另一层悄悄不一致」。
             else:
                 self._connected_device = None
                 self._current_dev_key = None
                 self._current_dev_locator = None
+                # 身份确认不了 = 这台设备没进会话：不置灰、也不产生会话。
+                self._set_params_editable(True)
                 self.status_label.setToolTip(
                     "本次连接无法确认设备身份，拔出不会被自动检测。"
                     "从本面板选择设备重新连接可恢复检测。")
@@ -934,9 +997,16 @@ class DevicePanel(QWidget):
             self.status_label.setText(text)
         else:
             # 先注销会话占用，再清 key——清完就不知道是哪台要解锁。
-            if self._current_dev_key:
+            key = self._current_dev_key
+            write_back_note = ""
+            if key:
+                if _req_store.is_occupied(key):
+                    # 第三档：断开时把本次会话实际生效值写回唯一请求存储。
+                    write_back_note = self._write_back_session(
+                        key, self._connected_device)
                 # 跨进程占用由后端 disconnect() 归还（与 claim 同一层）。
-                _req_store.end_session(self._current_dev_key)
+                _req_store.end_session(key)
+            self._set_params_editable(True)
             self._connected_device = None
             self._pending_connect_device = None
             self._unplug_identity_warned = False
@@ -946,7 +1016,9 @@ class DevicePanel(QWidget):
             self.connect_btn.setEnabled(bool(self._devices))
             self.disconnect_btn.setEnabled(False)
             self.status_label.setToolTip("")
-            if self.status_label.text() != "设备已拔出":
+            if write_back_note:
+                self.status_label.setText(write_back_note)
+            elif self.status_label.text() != "设备已拔出":
                 self.status_label.setText("已断开")
             # 断开后占用登记已归还：重读一次，别让上一轮的占用结论留在界面上。
             self._refresh_owner_state()

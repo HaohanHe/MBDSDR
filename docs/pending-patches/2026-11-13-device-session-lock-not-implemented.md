@@ -79,3 +79,35 @@ gpredict 的第三档占用行为：**一台设备连着的时候，参数控件
 - 不要为了「先占位」再往 `__init__` 里加字段：字段必须和消费点同一笔提交。
 - 不要新加全局开关或环境变量来切这套行为；它是产品行为，不是实验特性。
 - 不要在这里补跨进程占用登记：后端 `connect()` 已按同一身份键 claim。
+
+## 四、已知边界（2026-11-13 实现时确认）
+
+- **快照里没有的字段不写回。** 会话快照的 `sample_rate_hz` / `gain_db` / `ppm`
+  为 `None` 时，断开写回跳过该字段，不拿界面预填默认值顶替——预填值不是本次
+  实际下发值，写回去等于伪造意图。快照里有的字段仍按生效值写回，只跳过缺失
+  字段，不整笔放弃。覆盖用例：
+  `tests/test_device_panel_session_lock.py::test_write_back_skips_fields_missing_from_snapshot`。
+- **模块面板没有连接态。** `desktop/module_panel.py` 收不到 `set_connected`，
+  读侧只靠 `connect_request_store.request_for()` 在占用期间返回冻结快照来保护
+  （其回调渲染不会把会话生效值拉走）。要在模块面板也置灰，得先给它新增连接态
+  与 `set_connected` 通道，属另一笔，不在本单范围。
+
+### 离屏实跑记录（2026-11-13，非单测复述）
+
+环境：`QT_QPA_PLATFORM=offscreen`，临时 HOME/APPDATA 与 QSettings/布局目录（与
+`tests/conftest.py::isolated_profile` 同口径）；起真实 `DevicePanel`，走真实的
+`_on_connect_clicked → connect_requested → set_connected(True/False)` 路径。
+两处替身：设备枚举置空（无真机），`connect_requested` 由本地处理器按主窗口语义
+回填 `set_connected(True, label, dev)`（身份经 pending 设备确认）。设备：
+`rtlsdr|serial:A-0001`，采样率 2.048M、增益 30、PPM 0。
+
+1. 连接后 `isEnabled()`：`sr_edit=false, gain_edit=false, ppm_edit=false`，
+   `is_occupied(key)=true`。
+2. 会话中面板采样率文本 `"2.048e+06"` = 2 048 000 Hz，与
+   `request_for(key).sample_rate_hz` 一致；期间另一处把意图改成 1 536 000 Hz，
+   面板文本不变（仍 `"2.048e+06"`），`request_for` 仍为 2 048 000，意图为
+   1 536 000——显示读的是冻结值，不是新意图。
+3. 断开后 store 落值：`sample_rate_hz=2 048 000`、`gain_db=30`、`ppm=0`、
+   `is_occupied=false`，三个控件恢复 `true`。
+4. 第二次 `set_connected(False)`：`update` 调用 0 次、`fill_payload` 调用 0 次，
+   store 落值不变——断开写回只发生一次。
