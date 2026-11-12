@@ -139,6 +139,27 @@ def _snr_signal_present(snr_db, was_present: bool,
     return bool(was_present)
 
 
+def _normalize_bookmark(raw) -> tuple:
+    """书签条目 → ``(freq_hz, name, mode, builtin, bandwidth_hz)``。
+
+    带宽是后加字段：历史条目只有 ``(freq, name, mode, builtin)`` 四元组，
+    缺带宽时记 0.0。0 的语义是「未记录带宽」——调谐侧据此不碰设备带宽，
+    绝不拿当前带宽冒充书签带宽。旧四元组必须照读，不能因多一列读不出来。
+    """
+    item = tuple(raw)
+    try:
+        bw = float(item[4]) if len(item) > 4 else 0.0
+    except (TypeError, ValueError):
+        bw = 0.0
+    if not math.isfinite(bw) or bw <= 0:
+        bw = 0.0
+    return (float(item[0]),
+            str(item[1]) if len(item) > 1 else "",
+            str(item[2]) if len(item) > 2 else "",
+            bool(item[3]) if len(item) > 3 else False,
+            bw)
+
+
 def _fmt_dbfs(value) -> str:
     """引擎/IQ 路径电平：dBFS、1 位小数；缺失/NaN 显「—」（U-02/N-03）。
 
@@ -837,6 +858,31 @@ class _NightVeil(QWidget):
         p.end()
 
 
+def _touch_stylesheet_extra(scrollbar_width: int) -> str:
+    """触屏模式追加的 QSS 后缀（**唯一生成点**，鼠标模式不调用）。
+
+    只改 px/尺寸、不改颜色，所以它可以安全地追加在主题基串之后而不破坏
+    A′（五套主题 QSS 逐字相同）的前缀判定。测试从这里取长度，不在测试里
+    另抄一份字符串——抄一份就等于把实现细节复制出去。
+    """
+    return (
+        f"QScrollBar:vertical {{ width: {scrollbar_width}px; }}"
+        f"QScrollBar:horizontal {{ height: {scrollbar_width}px; }}"
+        "QScrollBar::handle:vertical { min-height: 44px; }"
+        "QScrollBar::handle:horizontal { min-width: 44px; }"
+        "QSlider::handle:horizontal {"
+        " width: 24px; height: 24px; margin: -8px 0; }"
+        "QSlider::handle:vertical {"
+        " height: 24px; width: 24px; margin: 0 -8px; }"
+        "QPushButton#iconButton:pressed {"
+        " background-color: rgba(255,255,255,0.25); }"
+        "QPushButton#iconButton:checked {"
+        " background-color: rgba(145,156,172,0.5); }"
+        "QPushButton:pressed {"
+        " background-color: rgba(0,0,0,0.18); }"
+    )
+
+
 class MainWindow(QMainWindow):
     """MBDSDR 主窗口。"""
 
@@ -1138,7 +1184,8 @@ class MainWindow(QMainWindow):
         self._tx_button_guard: bool = False  # 程序改按钮选中态时防重入
 
         # ---- 产品体验集成：状态栏信息密度 / 无设备引导 / 书签 ----
-        # 书签内存表（freq_hz, name, mode）；持久化走 FrequencyManager（见下方）
+        # 书签内存表（freq_hz, name, mode, builtin, bandwidth_hz）；
+        # 带宽是后加字段（0.0=未记录），持久化走 FrequencyManager（见下方）。
         self._bookmarks: list = []
         # IQ 前端校正链（DC 去除 / IQ 平衡 / 抗混叠抽取）。
         # 懒加载：后端不可用时置 None，所有调用点 try/except 守卫，绝不崩。
@@ -1332,23 +1379,7 @@ class MainWindow(QMainWindow):
             return
         extra = ""
         if touch_on:
-            sb_w = tm.scrollbar_width()       # 触屏 14 / 鼠标 10
-            extra = (
-                f"QScrollBar:vertical {{ width: {sb_w}px; }}"
-                f"QScrollBar:horizontal {{ height: {sb_w}px; }}"
-                "QScrollBar::handle:vertical { min-height: 44px; }"
-                "QScrollBar::handle:horizontal { min-width: 44px; }"
-                "QSlider::handle:horizontal {"
-                " width: 24px; height: 24px; margin: -8px 0; }"
-                "QSlider::handle:vertical {"
-                " height: 24px; width: 24px; margin: 0 -8px; }"
-                "QPushButton#iconButton:pressed {"
-                " background-color: rgba(255,255,255,0.25); }"
-                "QPushButton#iconButton:checked {"
-                " background-color: rgba(145,156,172,0.5); }"
-                "QPushButton:pressed {"
-                " background-color: rgba(0,0,0,0.18); }"
-            )
+            extra = _touch_stylesheet_extra(tm.scrollbar_width())
         # 追加到当前 app 级 QSS 之上；_apply_theme 设置的基础 QSS 保持不变。
         try:
             from PySide6.QtWidgets import QApplication
@@ -1969,8 +2000,10 @@ class MainWindow(QMainWindow):
         # 带宽预设 + 后端 set_demod）
         self.spectrum.mode_hotkey_requested.connect(self._on_mode_hotkey)
         if hasattr(self.spectrum, "bookmark_activated"):
+            # 与书签面板共用同一个槽：两条激活路径参数集一致
+            # （freq_hz, mode, bandwidth_hz），没有「只调频不设带宽」的降级路径。
             self.spectrum.bookmark_activated.connect(
-                self._on_bookmark_activated)
+                self._on_bookmark_tune_requested)
         self._cycle_vfo_shortcut = self._make_shortcut("vfo.cycle")
         self._cycle_vfo_shortcut.activated.connect(self._on_cycle_vfo)
         spectrum_layout.addWidget(self.spectrum, stretch=1)
@@ -2053,8 +2086,10 @@ class MainWindow(QMainWindow):
         try:
             if self._freq_mgr is not None and hasattr(
                     self.control_panel, "load_bookmarks_from_list"):
-                bm_list = [(b.freq_hz, b.name, b.mode, bool(b.builtin))
-                           for b in self._freq_mgr.list() if b.freq_hz > 0]
+                bm_list = [_normalize_bookmark(
+                    (b.freq_hz, b.name, b.mode, bool(b.builtin),
+                     getattr(b, "bandwidth_hz", 0.0)))
+                    for b in self._freq_mgr.list() if b.freq_hz > 0]
                 self.control_panel.load_bookmarks_from_list(bm_list)
                 # 同一批收藏同时灌进内存表（频谱书签标签的数据源）
                 self._bookmarks.extend(bm_list)
@@ -5468,11 +5503,12 @@ class MainWindow(QMainWindow):
             # 构造期窗口还不可见，没有可落屏的对象，不刷，避免构造期重入。
             if self.isVisible():
                 QApplication.processEvents()
-            theme.apply(_app)
-            # 只记**主题基串**（theme._qss()）。绝不记 app.styleSheet()：触屏模式下
-            # 后者已经含触控后缀，记成基串会让 _apply_touch_stylesheet 每次都把
-            # 后缀再叠一遍（实测 20832 → 22944，+528 字节/次）。
-            self._theme_qss = theme._qss()
+            # 只记**主题基串**：由 theme.apply 返回它本次实际生效的 qss，绝不
+            # 自己再调一次 _qss()（两处推导一旦分叉，_apply_touch_stylesheet
+            # 每次都会回退到全量 setStyleSheet，2–3 s，且只慢不坏），也绝不
+            # 记 app.styleSheet()（触屏模式后者已含后缀，记成基串会让后缀每次
+            # 再叠一遍：实测 +528 字节/次）。
+            self._theme_qss = theme.apply(_app)
             # theme.apply 若真的重设过样式表（当前五套主题 QSS 逐字相同，正常
             # 不会），已挂的触控后缀就被冲掉了——此时样式表恰等于基串，必须
             # 允许 _apply_touch_stylesheet 重挂一次，否则触屏尺寸会静默丢失。
@@ -8113,16 +8149,26 @@ class MainWindow(QMainWindow):
 
     @Slot(float, str, str)
     def _on_bookmark_added(self, freq_hz: float, name: str, mode: str):
-        """控制面板书签按钮 → 内存保存 + FrequencyManager 持久化 + 频谱标签。"""
+        """控制面板书签按钮 → 内存保存 + FrequencyManager 持久化 + 频谱标签。
+
+        书签必须连当前 VFO 带宽一起存：只存频率/模式时，下次点书签调谐
+        只能猜带宽（设备停在上一档），所以写入端在这里就把带宽补齐。
+        """
         try:
-            self._bookmarks.append(
-                (float(freq_hz), str(name), str(mode), False))
+            try:
+                bandwidth_hz = float(self._vfo_bw)
+            except (TypeError, ValueError):
+                bandwidth_hz = 0.0
+            if not math.isfinite(bandwidth_hz) or bandwidth_hz <= 0:
+                bandwidth_hz = 0.0
+            self._bookmarks.append(_normalize_bookmark(
+                (float(freq_hz), str(name), str(mode), False, bandwidth_hz)))
             persist_error = ""
             if self._freq_mgr is not None:
                 try:
                     self._freq_mgr.add(
                         str(name), float(freq_hz), mode=str(mode),
-                        category="自定义")
+                        category="自定义", bandwidth_hz=bandwidth_hz)
                 except Exception as e:  # noqa: BLE001 - 写收藏文件失败不能再报「已收藏」了事
                     persist_error = f"{type(e).__name__}: {e}"
                     logger.warning(
@@ -8140,30 +8186,38 @@ class MainWindow(QMainWindow):
             pass
 
     def _sync_spectrum_bookmarks(self):
-        """内存书签表 → 频谱书签竖旗（[(freq_hz, name), ...]）。"""
+        """内存书签表 → 频谱书签竖旗 [(freq_hz, name, mode, bandwidth_hz)]。
+
+        逐条过 ``_normalize_bookmark``：旧四元组（无带宽）也能同步，
+        不会因为多一列在读侧崩掉。带宽 0.0 = 未记录。
+        """
         try:
             if hasattr(self.spectrum, "set_bookmarks"):
                 self.spectrum.set_bookmarks(
-                    [(float(hz), str(name))
-                     for hz, name, _m, _b in self._bookmarks])
+                    [(_hz, _name, _m, _bw)
+                     for _hz, _name, _m, _b, _bw in
+                     (_normalize_bookmark(b) for b in self._bookmarks)])
         except Exception:
             pass
 
-    @Slot(float)
-    def _on_bookmark_activated(self, freq_hz: float):
-        """点频谱书签竖旗 → 调到该书签频率（gqrx 书签点击调谐）。
+    @Slot(float, str, float)
+    def _on_bookmark_tune_requested(self, freq_hz: float, mode: str,
+                                    bandwidth_hz: float):
+        """书签激活（频谱旗子 / 书签面板共用）→ 调谐 + 设模式 + 带宽。
 
-        书签带模式则一并切过去；否则保持当前解调模式。
+        调谐没成功就到此为止：继续下发带宽等于在**另一个频率**上改设备状态，
+        UI 的 VFO 带宽会与设备实际带宽分叉。
+
+        带宽缺省（0/None，旧四元组书签）时保留设备当前带宽，不臆造一档。
         """
-        mode = None
-        for hz, _name, m, _b in self._bookmarks:
-            if abs(float(hz) - float(freq_hz)) < 1.0:
-                mode = str(m) if m else None
-                break
-        if not mode:
-            mode = (self._demod_cfg.mode if self._demod_cfg is not None
-                    else "FM")
-        self._on_tune_sdr(float(freq_hz), mode)
+        resolved = str(mode or "").strip()
+        if not resolved:
+            resolved = (self._demod_cfg.mode if self._demod_cfg is not None
+                        else "NFM")
+        if not self._on_tune_sdr(float(freq_hz), resolved):
+            return
+        if bandwidth_hz and bandwidth_hz > 0:
+            self._on_vfo_bandwidth_changed(float(bandwidth_hz))
 
     @Slot(bool)
     def _on_dc_removal_changed(self, enabled: bool):
