@@ -2353,7 +2353,7 @@ No supported devices found），GNSS+SDR 同开复验没做成；离线那次
 > 正在收的那台仍开着（状态说成功、物理世界没变）。
 
 - 已落：
-  - `mbdsdr_ai/desktop_sdr_session.py`：`agent.sdr_manager` 的桌面委托。
+  - `desktop/ai_sdr_session.py`：`agent.sdr_manager` 的桌面委托。
     `get_active()` 直通桌面；`connect`/`disconnect`/`switch_device` 回 GUI
     线程走桌面的 `_connect_backend`/`_teardown_connection`，**桌面确认生效
     后才返回 True**；VFO/扫描/IQ 等仍委托内部真 `SDRBackendManager`。
