@@ -30,7 +30,8 @@ __all__ = [
     "list_link_sats", "load_sat_link", "identify_by_freq",
     "find_tuning_for", "register_tool_registry",
     "machine_targets", "machine_status", "machine_status_text",
-    "machine_entry_text", "refresh_machine_links", "start_machine_refresh",
+    "machine_entry_text", "machine_only_links", "refresh_machine_links",
+    "start_machine_refresh",
 ]
 
 
@@ -73,6 +74,9 @@ def identify_by_freq(freq_hz: float, tolerance_hz: float = 3000.0) -> List[Dict[
     同一频点可能被多颗星共用（本表实测：137.100 MHz 同属 NOAA-19 APT 与
     METEOR-M N2 LRPT），命中按列表**并列返回**、不强行裁决——**只取第一条
     的调用方会漏掉其余命中**，展示/调谐建议必须遍历整个列表。
+
+    机器库独有、人工表未收录的发射机**不自动注入本函数**（避免把 ISS 的
+    50 条机器记录变成频谱反查噪音）；需要时用 :func:`machine_only_links` 取。
     """
     freq = float(freq_hz)
     tol = float(tolerance_hz)
@@ -88,16 +92,6 @@ def identify_by_freq(freq_hz: float, tolerance_hz: float = 3000.0) -> List[Dict[
                 merged["_matched_link"] = dict(link)
                 merged["_matched_source"] = (
                     "satnogs" if link.get("low_hz") is not None else "manual")
-                hits.append(merged)
-        # 机器库收录、人工表未收录的发射机：作为额外命中，不改人工表。
-        machine = entry.get("_machine") or {}
-        for mlink in machine.get("machine_only") or []:
-            if _link_contains(mlink, freq, tol):
-                merged = dict(entry)
-                merged["_link_name"] = name
-                merged["_matched_link"] = dict(mlink)
-                merged["_matched_source"] = "satnogs"
-                merged["_matched_machine_only"] = True
                 hits.append(merged)
     return hits
 
@@ -179,6 +173,11 @@ def machine_status_text(now: Optional[float] = None,
                         path: Optional[str] = None) -> str:
     """界面唯一一处状态文案（失败也只在这里说一句，不弹窗）。"""
     return machine_status(now=now, path=path)["text"]
+
+
+def machine_only_links(name: str) -> List[Dict[str, Any]]:
+    """机器库有、人工表未收录的发射机（只读；不写回目录、不进 identify）。"""
+    return sat_links_fetch.machine_only_links(load_sat_link(name))
 
 
 def machine_entry_text(entry: Dict[str, Any]) -> str:
