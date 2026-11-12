@@ -241,9 +241,20 @@ class TestSpectrumSplitter:
         expect = int(tokens().SIZE["splitter_handle"])
         assert main_window.spectrum._splitter.handleWidth() == expect
 
-    def test_double_click_reset_does_not_crash(self, main_window):
+    def test_double_click_reset_restores_token_ratio(self, main_window):
+        """双击复位必须真的按 tokens 的 FFT/瀑布比例重排，不是「不崩就算过」。"""
+        from tokens import tokens
+        sp = main_window.spectrum._splitter
+        sp.setSizes([10, max(10, sp.height() - 10)])   # 先拨成明显偏离的比例
         main_window.spectrum.reset_splitter()
-        assert True
+        sizes = sp.sizes()
+        assert len(sizes) == 2 and sum(sizes) > 0, sizes
+        fft = float(tokens().RATIO["spectrum_fft"])
+        wf = float(tokens().RATIO["spectrum_wf"])
+        want = fft / (fft + wf)
+        got = sizes[0] / sum(sizes)
+        assert abs(got - want) < 0.1, (
+            f"复位后 FFT 占比 {got:.3f} ≠ tokens {want:.3f}（sizes={sizes}）")
 
 
 # ---------------------------------------------------------------------------
