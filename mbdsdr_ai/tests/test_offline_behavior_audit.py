@@ -100,7 +100,8 @@ def test_offline_sat_tracker_refresh_keeps_builtin_tle(monkeypatch, offline, tmp
     真实 ``~/.mbdsdr/tle_cache`` 里已刷新的 TLE 影响。
     """
     from mbdsdr_ai import orbit
-    monkeypatch.setattr(orbit, "_CACHE_DIR", str(tmp_path / "tle_cache"))
+    monkeypatch.setenv("MBDSDR_TLE_CACHE_DIR", str(tmp_path / "tle_cache"))
+    orbit.reset_tle_cache()
     tr = SatelliteTracker(GroundStation(39.9, 116.4))
     monkeypatch.setitem(sys.modules, "requests", SimpleNamespace(get=_boom))
     assert tr.update_tle_from_celestrak(timeout=1.0) == 0
