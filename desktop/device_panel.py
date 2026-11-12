@@ -154,6 +154,9 @@ class DevicePanel(QWidget):
         self._current_dev_locator: Optional[tuple] = None
         self._last_capability_report: Dict = {}
         self._last_verdict: tuple = (None, "尚未连接")
+        #: 本次连接中「设备未申报量程、未做能力校验」的字段与请求值。
+        #: 连上之后仍要能在面板上看到，不能随 set_connected(True) 消失。
+        self._unverified_capabilities: list = []
         #: 面板最后一次发起的连接（用户点「连接」时的设备字典）。它是
         #: 「实际连上的那台设备」的第一手证据——不能用下拉框当前选中项推断：
         #: 下拉选 B、实际连 A 时，按选中项会把身份记成 B，A 拔掉永远检测不到。
@@ -738,7 +741,14 @@ class DevicePanel(QWidget):
                         "本次不检测拔出，也不按下拉框选中项猜设备。", dev_label)
             self.connect_btn.setEnabled(False)
             self.disconnect_btn.setEnabled(True)
-            self.status_label.setText(f"已连接: {dev_label or '设备'}")
+            text = f"已连接: {dev_label or '设备'}"
+            if self._unverified_capabilities:
+                # 连上之后仍留在面板上：不是一闪而过的状态栏提示。
+                # RTL 这类「接受高采样率但可能丢样」不会有失败事件，
+                # 只有持续可见的「未校验」才能覆盖到。
+                text += (" · 本次能力未校验（"
+                         + "、".join(self._unverified_capabilities) + "）")
+            self.status_label.setText(text)
         else:
             # 先注销会话占用，再清 key——清完就不知道是哪台要解锁。
             if self._current_dev_key:
@@ -747,6 +757,7 @@ class DevicePanel(QWidget):
             self._connected_device = None
             self._pending_connect_device = None
             self._unplug_identity_warned = False
+            self._unverified_capabilities = []
             self._current_dev_key = None
             self._current_dev_locator = None
             self.connect_btn.setEnabled(bool(self._devices))
@@ -764,6 +775,8 @@ class DevicePanel(QWidget):
             QMessageBox.information(self, "提示", "未选择 SDR 设备")
             return
         dev = dict(self._devices[idx])
+        # 新的连接请求重新计「未校验」清单，避免上一次连接的标记残留。
+        self._unverified_capabilities = []
         # 把面板上的参数塞进 dev，供主窗口连接时读取。
         # 不合法输入一律拒绝并提示，绝不静默改写成默认值（用户以为连的是
         # 自己填的参数，实际拿到默认值 = 撒谎）。
@@ -794,6 +807,7 @@ class DevicePanel(QWidget):
         if verdict is None:
             # 未知范围：不能假装校验通过，也不能凭空填默认范围；如实说明后放行。
             self.status_label.setText(f"采样率范围未知，无法校验；将以 {sr:.0f} Hz 下发")
+            self._unverified_capabilities.append(f"采样率 {sr:.0f} Hz")
         # 采样率留在局部变量里，连接前与增益/PPM 一起写入唯一请求存储；
         # 连接载荷由 fill_payload 统一落键，本面板不再直接写载荷副本。
         text = self.gain_edit.text().strip()
@@ -815,6 +829,7 @@ class DevicePanel(QWidget):
         if gverdict is None:
             self.status_label.setText(
                 f"增益范围未知，无法校验；将以 {gain:g} dB 下发")
+            self._unverified_capabilities.append(f"增益 {gain:g} dB")
 
         text = self.ppm_edit.text().strip()
         try:

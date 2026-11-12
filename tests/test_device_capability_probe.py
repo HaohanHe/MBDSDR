@@ -358,6 +358,38 @@ def test_device_panel_unknown_range_does_not_block_and_records_unknown(monkeypat
     panel.close()
 
 
+def test_device_panel_unknown_marker_survives_connect(monkeypatch):
+    """连接后仍要看得见「本次能力未校验」——不能只闪在连接前的状态行。"""
+    _app()
+    import desktop.device_panel as dp
+
+    monkeypatch.setattr(dp, "enumerate_all_sdr_devices",
+                        lambda: [{"driver": "fake", "label": "Fake"}])
+    panel = dp.DevicePanel()
+    panel.refresh_devices()
+    seen = []
+    panel.connect_requested.connect(lambda d: seen.append(d))
+    panel.sr_edit.setText("3200000")
+    panel._on_connect_clicked()
+    assert seen, "范围未知时不应阻断连接"
+    assert panel.last_capability_verdict()[0] is None
+
+    # 连接完成（主窗口回调）——标记必须活过 set_connected(True)。
+    panel.set_connected(True, "Fake")
+    text = panel.status_label.text()
+    assert "已连接" in text and "未校验" in text, text
+    assert "3200000" in text, f"未校验标记没带请求值: {text!r}"
+
+    # set_connected(True) 是幂等的：再次回调不能把标记抹掉。
+    panel.set_connected(True, "Fake")
+    assert "未校验" in panel.status_label.text()
+
+    # 断开后才清；下一次连接若能力已申报也不该残留旧标记。
+    panel.set_connected(False)
+    assert "未校验" not in panel.status_label.text()
+    panel.close()
+
+
 def test_device_panel_known_range_rejects_out_of_range(monkeypatch):
     _app()
     import desktop.device_panel as dp
