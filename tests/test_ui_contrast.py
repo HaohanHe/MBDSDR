@@ -15,6 +15,7 @@
     QT_QPA_PLATFORM=offscreen python -m pytest tests/test_ui_contrast.py -q
 """
 import os
+import re
 import sys
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -162,3 +163,65 @@ def test_status_colors_readable_on_theme(theme, token_name):
     assert ratio >= 4.5, (
         f"{theme}: {token_name} {fg} on {bg} 对比度 {ratio:.2f} < 4.5"
         f"（状态文字，按正文级）")
+
+
+def test_status_color_follows_theme():
+    """统一取色入口要真的跟着主题走，不能仍返回全局旧值。"""
+    t = tokens()
+    assert t.status_color("warning", theme="default") == "#876B27"
+    assert t.status_color("danger", theme="dark_car") == "#CF7B7B"
+    # 缺键回落全局：构造一个没有该键的主题名（theme_colors 会退到 default）
+    assert t.status_color("status_warning", theme="no-such-theme") == "#876B27"
+    assert t.status_color("warning", theme="default") == \
+        t.theme_colors("default")["status_warning"]
+
+
+#: AI 对话面板是不随主题变的固定深色岛屿（见 ai_panel._chat_colors 与卡片样式）。
+#: 三个底：系统消息 #241f16、面板/步骤卡 card_1 #1f1f1f、工具卡 rgba 叠深底后的
+#: 合成值 #181C22。状态色必须按这些真实底色算，不能套主题的 bg。
+_AI_PANEL_SURFACES = ("#241f16", "#1f1f1f", "#181C22")
+
+
+@pytest.mark.parametrize("theme", _ALL)
+@pytest.mark.parametrize("kind", _STATUS_TOKENS)
+@pytest.mark.parametrize("bg", _AI_PANEL_SURFACES)
+def test_status_color_readable_on_dark_panel(theme, kind, bg):
+    """任何主题下，深色岛屿上的状态色都要 ≥4.5:1（浅色主题的压暗档会掉到 3.2）。"""
+    color = tokens().status_color(kind, bg=bg, theme=theme)
+    ratio = contrast_ratio(color, bg)
+    assert ratio >= 4.5, (
+        f"{theme}: {kind} {color} on 深色面板 {bg} 对比度 {ratio:.2f} < 4.5")
+
+
+#: 直接读全局状态色 = 绕过主题 remap。已迁点必须走 tokens().status_color()。
+#: 例外只收已登记待迁移的点位；迁移时连同这里一起删。
+_ALLOWED_DIRECT_READS = {
+    "desktop/main_window.py":
+        "PTT 提示条已登记下一批；必须与同处 rgba(200,160,64,0.18) 的琥珀底一起改",
+}
+_DIRECT_READ = re.compile(r"""COLORS\s*\[\s*['"]status_(?:warning|danger)['"]\s*\]""")
+
+
+def test_no_direct_status_token_reads():
+    """全仓不允许再直接读 COLORS["status_warning"/"status_danger"]。"""
+    hits = {}
+    for dirpath, dirnames, filenames in os.walk(_ROOT):
+        # 跳过隐藏目录（.git/.audit_tmp/.trae 等临时副本）与缓存目录：
+        # 只对入库源码负责。
+        dirnames[:] = [d for d in dirnames
+                       if not d.startswith(".") and d not in {"__pycache__", "tmp"}]
+        for name in filenames:
+            if not name.endswith(".py"):
+                continue
+            path = os.path.join(dirpath, name)
+            with open(path, encoding="utf-8") as fh:
+                count = len(_DIRECT_READ.findall(fh.read()))
+            if count:
+                hits[os.path.relpath(path, _ROOT).replace(os.sep, "/")] = count
+
+    unexpected = {k: v for k, v in hits.items() if k not in _ALLOWED_DIRECT_READS}
+    assert not unexpected, (
+        f"仍有直接读全局状态色的点位：{unexpected}；"
+        f"请改走 tokens().status_color(kind[, bg=真实底色])")
+    assert hits.get("desktop/main_window.py") == 1, (
+        "main_window 的登记例外变了（已迁移就把 _ALLOWED_DIRECT_READS 里这条删掉）")
