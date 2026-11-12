@@ -577,6 +577,30 @@ class ConstellationLayer:
             getattr(i, "abbr", None) or getattr(i, "key", "") for i in self.items)
 
 
+# 中国星官体系的具体实现由 ``skyengine/__init__`` 在两边都导入后注入。
+# constellations 是 xingguan 的基类来源，不能再反向 import xingguan；之前用
+# 函数体内 ``from . import xingguan`` 绕开，依赖并没有消失，只是从模块级图里
+# 消失，环检测器再也数不到。
+_CHINESE_ADAPTER: Optional[Any] = None
+
+
+def bind_chinese_adapter(adapter: Any) -> None:
+    """绑定中国星官体系实现（由 ``skyengine/__init__`` 调用）。
+
+    只接受模块对象，不做任何包装：两套体系各自读自己的数据文件，
+    但对外仍是同一份实现。
+    """
+    global _CHINESE_ADAPTER
+    _CHINESE_ADAPTER = adapter
+
+
+def _chinese_adapter() -> Any:
+    if _CHINESE_ADAPTER is None:
+        raise RuntimeError(
+            "中国星官体系未绑定：请通过 mbdsdr_ai.skyengine 包导入，勿直接 reload 子模块")
+    return _CHINESE_ADAPTER
+
+
 def system_ids() -> Tuple[str, str]:
     return (SYSTEM_IAU, SYSTEM_CHINESE)
 
@@ -597,8 +621,7 @@ def system_info(system_id: str) -> Dict[str, Any]:
             "count": len(ds),
         }
     if system_id == SYSTEM_CHINESE:
-        from . import xingguan  # 延迟导入，避免两套体系循环依赖
-        return xingguan.system_info()
+        return _chinese_adapter().system_info()
     raise KeyError(f"未知天空文化体系: {system_id!r}")
 
 
@@ -614,8 +637,7 @@ def constellation_layer(system_id: str) -> ConstellationLayer:
             items=ds.constellations,
         )
     if system_id == SYSTEM_CHINESE:
-        from . import xingguan
-        return xingguan.xingguan_layer()
+        return _chinese_adapter().xingguan_layer()
     raise KeyError(f"未知天空文化体系: {system_id!r}")
 
 

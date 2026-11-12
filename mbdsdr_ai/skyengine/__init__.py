@@ -42,6 +42,15 @@ from .satellites import (SatelliteMeta, SATELLITE_INDEX, cospar_from_tle,
                          norad_from_tle, next_rise_set)
 from . import jtime
 
+# 中国星官体系的分派在这里接线：constellations 不能再 import xingguan
+# （xingguan 的基类来自 constellations，反向 import 就是环）。两边都导入后
+# 注入同一份实现，对外 ``constellations.system_info`` / ``constellation_layer``
+# 签名与返回不变。
+from . import constellations as _constellations
+from . import xingguan as _xingguan
+
+_constellations.bind_chinese_adapter(_xingguan)
+
 __all__ = [
     "BrightStar", "BRIGHT_STARS", "mag_to_lux", "star_draw", "bv_to_rgb",
     "StarCatalog", "StarSelection", "get_catalog", "load_catalog",
