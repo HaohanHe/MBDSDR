@@ -61,6 +61,15 @@ class TestInstantiation:
     def test_instantiates(self, mw):
         assert mw is not None
         assert mw._main_splitter is not None
+        assert mw._main_splitter.count() == 3, "主分栏必须是左/中/右三栏"
+        sizes = mw._main_splitter.sizes()
+        assert len(sizes) == 3 and all(s > 0 for s in sizes), (
+            f"三栏宽度必须都 > 0（全 0 等于骨架没立住）：{sizes}")
+        # 左/中比例必须是设计值 470:330。右栏在本窗口被夹到最小值（实测 48 px），
+        # 不能按三栏总和算；只查 >0 拦不住「默认比例没落地」。
+        left_share = sizes[0] / (sizes[0] + sizes[1])
+        assert abs(left_share - 470 / 800) < 0.05, (
+            f"左/中比例偏离设计 470:330：sizes={sizes}")
 
 
 class TestThreeColumnGeometry:
