@@ -1,5 +1,6 @@
 # P2 — IEEE WCL 投稿前 checklist 逐项核对（pre-submission reviewer pass）
 
+> 证据状态：E4——本文件数字未逐条绑定原始件/复跑命令，引用前须复核（判据见 docs/evidence-standard.md）。
 - 日期：2026-10-02（Asia/Shanghai, UTC+8）
 - 对象：`docs/learn/phase7/paper/main.md`（**DRAFT v0.4**，唯一事实源）+ `main.tex`（IEEEtran 镜像骨架）
 - 核对基准：`paper/experiments/*.csv`、`manifest_*.json`、`paper/experiments/figures/*.png`（该目录 gitignored）

@@ -1,5 +1,6 @@
 # 第十三阶段实现规格：渲染深度 + 解调增强 + 信号处理参数化 + 用户视角收尾
 
+> 证据状态：E4——本文件数字未逐条绑定原始件/复跑命令，引用前须复核（判据见 docs/evidence-standard.md）。
 > 基线：远端 main = 779335a（本地已同步）。第十二阶段已交付：六子系统笔记 + 17 条差距清单 + 四项落地（有理重采样/tune 重试/工具注册表/UI 交互）。验证基线：cpp 98/98（上轮约 60 个 UI 截图 target 因 make 未收尾显示 Not Run，需本轮收尾确认）、flutter 305、python 225+7skip。
 >
 > 差距清单：docs/learn/phase12/sdrpp-gap-analysis.md（暂缓表：L6 doZoom 峰保持、L7 重染历史、L8 JSON 色板、L9 链内 AGC、L10 NFM FIR、L11 VOLK、L12 RxVFO 参数化、L13 GFSK）。上游 = repos/sdrpp（GPLv3，只学机制；笔记更新时 file:line 可查）。

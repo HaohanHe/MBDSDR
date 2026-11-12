@@ -1,5 +1,6 @@
 # SDR++ 设备抽象与后端子系统 — 源码精读笔记（Phase12 Wave1-B）
 
+> 证据状态：E4——本文件数字未逐条绑定原始件/复跑命令，引用前须复核（判据见 docs/evidence-standard.md）。
 > 上游：`repos/sdrpp/`（GPLv3，见 `license` 目录）。本笔记**只学机制/契约/交互范式**，
 > 不逐字复制代码；落地到 MBDSDR 时一律用自有独立实现。
 > 所有上游引用均为 `repos/sdrpp/<path>:<line>`；MBDSDR 引用均为 `cpp/<path>:<line>`。

@@ -1,5 +1,6 @@
 # Gpredict 卫星轨道与指向算法设计笔记
 
+> 证据状态：E4——本文件数字未逐条绑定原始件/复跑命令，引用前须复核（判据见 docs/evidence-standard.md）。
 > 源码快照：`repos/gpredict/`（csete/gpredict，depth=1）。
 > 关键目录：`src/sgpsdp/`（SGP4/SDP4 内核，Dr. T.S. Kelso → N. Kyriazis → A. Csete 移植版）、
 > `src/predict-tools.c`、`src/sat-vis.c`、`src/orbit-tools.c`、`src/time-tools.c`。

@@ -1,5 +1,6 @@
 # librtlsdr 真实硬件参数移植笔记
 
+> 证据状态：E4——本文件数字未逐条绑定原始件/复跑命令，引用前须复核（判据见 docs/evidence-standard.md）。
 > 本笔记记录从 `repos/librtlsdr` **C 源码**（非 README）逐条核对后，移植进
 > `mbdsdr_ai/rtlsdr_params.py` 的真实驱动参数。每条都标注 `文件:行号`。
 > 红线：增益表是 `rtlsdr_get_tuner_gains()` 里的**真实离散档**，不是按物理量程线性铺开的假数据。

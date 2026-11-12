@@ -2,6 +2,7 @@
 
 # 外部 agent 带用户玩转 MBDSDR 真机（可复现剧本）
 
+> 证据状态：E4——本文件数字未逐条绑定原始件/复跑命令，引用前须复核（判据见 docs/evidence-standard.md）。
 > 角色分工：**外部 agent** = 能跑 shell、能调 MCP 工具的智能体，负责一切敲键盘的事；
 > **用户** = 照本宣科做物理操作（插线、手持天线、按确认键）的人。素材：NanoVNA-H（固件 1.2.50，Windows COM 口）+ RTL2832U/FC0012 电视棒 + RH770 拉杆天线，来自 2026-10-13 与 2026-10-23 两次真机会话，命令均可直接复制执行。
 > **证据分级（2026-11-05 复核）**：NanoVNA 扫频与截图有入库采集件（`experiments/nanovna_rh770/`），可离线复算；10-13 当次的 TCXO 回读、435.25MHz PSD、435.274 FM RMS、419.5MHz 谐振、串口 PermissionError 复现率、天线 408.2/419.5MHz 标定表**无原始日志/采集件留存，一律按「未验证」引用**，见 `docs/limitations-register.md` 附 P。

@@ -1,5 +1,6 @@
 # 第十一阶段实现规格：真机端到端演练 + 论文投递包 + 产品体验深化 + 移动端对齐
 
+> 证据状态：E4——本文件数字未逐条绑定原始件/复跑命令，引用前须复核（判据见 docs/evidence-standard.md）。
 > 基线：远端 main = 469e48e（本地已同步）。第十阶段已交付：--paste 回传块（45 测试）、15 分钟验收手册、WCL checklist + paper_package.sh（36 文件）、时空产品化（ctest 94/flutter 304）、稳定性收尾（AMR 特征提取根因文档化）。验证基线：cpp 94/94、flutter 304、python 197+7skip。
 >
 > 环境事实：云 VM 无硬件/无凭据（推送由用户外部）；paper/experiments 被忽略；refs 待核实清单在 main.md:311-321（6 类，refs.bib 未建）；spectrum_display 已有 mousePress/Grab/wheel 交互（826-858 行附近）；Flutter AndroidManifest 已有 USB host（required=false）+ Info.plist 定位权限（无 RECORD_AUDIO 有意）；桌面增益空表回退 25.4dB（_UNKNOWN_TUNER_FALLBACK_GAIN_DB）。

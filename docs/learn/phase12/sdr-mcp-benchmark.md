@@ -1,5 +1,6 @@
 # SDR × LLM / MCP 生态对照（feature-parity）
 
+> 证据状态：E4——本文件数字未逐条绑定原始件/复跑命令，引用前须复核（判据见 docs/evidence-standard.md）。
 > 核实日期：**2026-10-13**。本文对照三个公开参照项：sandraschi/sdr-mcp（RTL-SDR 专用 MCP server）、GNU Radio MCP server 生态（社区多个实现）、RadioMaster（arXiv 2606.01862，多智能体信号生成论文）。
 > MBDSDR 基线：83 工具三通道（schema / executor / hub）+ headless MCP 10 域（SDR 调谐/VFO、亚音数字解码、VNA 测量、VNA 分析、VNA 校准、导出演制、书签扫描卫星、系统设备、记忆编排、工作台编排）；零 LLM 依赖（stdio JSON-RPC 通用 client 即可用）；写工具 `arm_manual` 手动 gate；诚实空态纪律。
 > 纪律：GPL 项目仅对照机制描述，不抄代码；本文不做优劣评判，只登记能力形状与来源；检索不到/存疑项如实标注。
