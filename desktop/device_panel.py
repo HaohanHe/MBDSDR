@@ -64,6 +64,34 @@ _NO_DEVICE_STATUS = "未检测到设备 · 插上后点「刷新」"
 _NO_DEVICE_TIP = ("可能原因：USB 没插好、缺驱动，或设备被其他程序占用。"
                   "RTL-SDR 需要先用 Zadig 安装 WinUSB 驱动。")
 
+#: 采样率输入的单位后缀（按长度降序匹配，避免 "ms/s" 被 "m" 截掉）。
+_SR_SUFFIX_SCALE = (
+    ("ms/s", 1e6), ("msps", 1e6), ("mhz", 1e6), ("m", 1e6),
+    ("ks/s", 1e3), ("ksps", 1e3), ("khz", 1e3), ("k", 1e3),
+    ("hz", 1.0),
+)
+
+
+def parse_sample_rate(text: str) -> float:
+    """把采样率输入解析成 Hz。
+
+    标签写「Hz 或 MS/s」就必须真收这两种写法：``2048000`` 与 ``2.048M``
+    等价。纯数字按 Hz（后端按 Hz 下发）；带 M/MS/s/MHz 或 k/kHz 时按倍数
+    换算。无法解析时抛 ValueError，由调用方给出可执行提示。
+    """
+    s = (text or "").strip().replace(" ", "")
+    low = s.lower()
+    scale = 1.0
+    for suffix, factor in _SR_SUFFIX_SCALE:
+        if low.endswith(suffix):
+            scale = factor
+            s = s[: -len(suffix)]
+            break
+    if not s:
+        raise ValueError(text)
+    return float(s) * scale
+
+
 try:
     from perf_profile import sample_rate_for as _profile_rate
     from config_schema import SCHEMA as _SCHEMA
@@ -258,7 +286,7 @@ class DevicePanel(QWidget):
         sr_row.setContentsMargins(0, 0, 0, 0)
         sr_row.addWidget(self.sr_edit, 1)
         sr_row.addWidget(self.sr_equiv)
-        form.addRow("采样率(Hz)", sr_row)
+        form.addRow("采样率(Hz 或 MS/s)", sr_row)
         self.sr_edit.textChanged.connect(self._update_sr_equiv)
         self._update_sr_equiv()
 
@@ -333,14 +361,14 @@ class DevicePanel(QWidget):
         self._refresh_audio_devices()
 
     def _update_sr_equiv(self) -> None:
-        """采样率等价值：2048000 → 「= 2.048 MS/s」；空/非数字/非正 → 「—」。
+        """采样率等价值：2048000 / 2.048M → 「= 2.048 MS/s」；空/非数字/非正 → 「—」。
 
         Hz 输入不截断精度（后端按 Hz 下发），等价值只按项目读数口径展示，
         不改写输入框，也不参与连接载荷。
         """
         text = self.sr_edit.text().strip()
         try:
-            hz = float(text)
+            hz = parse_sample_rate(text)
         except (TypeError, ValueError):
             self.sr_equiv.setText("—")
             return
@@ -779,13 +807,16 @@ class DevicePanel(QWidget):
             return
         ident = self._identities[idx]
         req = _req_store.request_for(ident.key)
-        # 正在输入的控件不抢：用户还在改的时候被另一侧的旧值覆盖是更坏的行为。
-        if req.sample_rate_hz is not None and not self.sr_edit.hasFocus():
-            self.sr_edit.setText(f"{req.sample_rate_hz:g}")
-        if req.gain_db is not None and not self.gain_edit.hasFocus():
-            self.gain_edit.setText(f"{req.gain_db:g}")
-        if req.ppm is not None and not self.ppm_edit.hasFocus():
-            self.ppm_edit.setText(f"{int(req.ppm)}")
+        # 会话期间锁定的是「本次会话实际生效值」：store 若被另一面板改过，
+        # 也不许把置灰的控件拉走（gpredict 第三档）；断开时再统一写回。
+        if not self._connected:
+            # 正在输入的控件不抢：用户还在改的时候被另一侧的旧值覆盖是更坏的行为。
+            if req.sample_rate_hz is not None and not self.sr_edit.hasFocus():
+                self.sr_edit.setText(f"{req.sample_rate_hz:g}")
+            if req.gain_db is not None and not self.gain_edit.hasFocus():
+                self.gain_edit.setText(f"{req.gain_db:g}")
+            if req.ppm is not None and not self.ppm_edit.hasFocus():
+                self.ppm_edit.setText(f"{int(req.ppm)}")
 
         if ident.warning:
             # 身份不可靠时必须在状态行说出来，不许静默共用/错位。
@@ -920,15 +951,15 @@ class DevicePanel(QWidget):
         # 自己填的参数，实际拿到默认值 = 撒谎）。
         text = self.sr_edit.text().strip()
         try:
-            sr = float(text)
+            sr = parse_sample_rate(text)
         except (TypeError, ValueError):
             QMessageBox.warning(
                 self, "采样率无效",
-                f"“{text}”不是数字。请填写采样率（Hz），如 2048000。")
+                f"“{text}”不是数字。可填 2048000（Hz）或 2.048M（MS/s）。")
             return
         if sr <= 0:
             QMessageBox.warning(
-                self, "采样率无效", f"采样率必须为正数（Hz），收到 {sr}。")
+                self, "采样率无效", f"采样率必须为正数（Hz 或 MS/s），收到“{text}”。")
             return
         from mbdsdr_ai.device_capabilities import build_capability_report, check_range
         report = build_capability_report(dev)
