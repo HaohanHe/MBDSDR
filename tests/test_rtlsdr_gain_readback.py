@@ -136,7 +136,7 @@ class TestGainPanelProvenance:
             panel.set_gain(25.0)
             assert panel.set_gain_applied(
                 25.0, "驱动确认档位（librtlsdr 实际写入的离散档）") is True
-            assert panel.gain_val.text() == "25 dB"
+            assert panel.gain_val.text() == "25.0 dB"
             tip = panel.gain_val.toolTip()
             assert "驱动确认" in tip, "有回读通道时必须标明读数来源"
             assert "未回读" not in tip
@@ -150,7 +150,7 @@ class TestGainPanelProvenance:
             panel.set_sdr_connected(True)
             panel.set_gain(28.0)          # 用户意图
             panel.set_gain_applied(25.0)  # 驱动实际
-            assert panel.gain_val.text() == "25 dB", \
+            assert panel.gain_val.text() == "25.0 dB", \
                 "面板必须显示 25，不得显示请求的 28"
             assert "28 dB" in panel.gain_val.toolTip(), "滑杆意图仍要可解释"
             assert "未生效" in panel.gain_val.toolTip()

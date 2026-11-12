@@ -61,7 +61,7 @@ def test_clamped_backend_reading_wins_label_intent_stays(qapp):
         panel.set_sdr_connected(True)
         panel.set_gain(25.0)                       # 配置意图 25
         assert panel.set_gain_applied(20.0) is True  # 设备实际 20
-        assert panel.gain_val.text() == "20 dB", "标签必须是设备真实值"
+        assert panel.gain_val.text() == "20.0 dB", "标签必须是设备真实值"
         assert panel.gain_slider.value() == 25, "滑杆仍是用户意图，不被回写"
         assert "⚠" in panel.gain_val.toolTip()
         assert "未生效" in panel.gain_val.toolTip()
@@ -75,7 +75,7 @@ def test_disconnect_clears_stale_reading(qapp):
     try:
         panel.set_sdr_connected(True)
         panel.set_gain_applied(20.0)
-        assert panel.gain_val.text() == "20 dB"
+        assert panel.gain_val.text() == "20.0 dB"
         panel.set_sdr_connected(False)
         assert panel.gain_val.text() == "—"
         assert panel.set_gain_applied(20.0) is False

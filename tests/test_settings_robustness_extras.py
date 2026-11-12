@@ -253,7 +253,7 @@ def test_capability_gain_clamp_does_not_write_back_and_is_flagged(qapp, caplog):
             panel.set_gain_range(0.0, 30.0)
 
         assert panel.gain_slider.value() == 30, "滑杆按设备上限收放"
-        assert panel.gain_val.text() == "30 dB"
+        assert panel.gain_val.text() == "30.0 dB"
         assert emitted == [], "夹出来的值不许发 gain_changed（否则会回写配置）"
         tip = panel.gain_slider.toolTip()
         assert "⚠" in tip and "超出所连设备能力" in tip, tip

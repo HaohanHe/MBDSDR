@@ -62,7 +62,7 @@ def test_real_params_backfill_does_not_reemit_tune(panel):
     panel.tune_requested.connect(emitted.append)
     panel.set_rf_params(145_800_000.0, 30.0)
     assert panel.freq_spin.value() == pytest.approx(145.8)
-    assert panel.gain_val.text() == "30 dB"
+    assert panel.gain_val.text() == "30.0 dB"
     assert emitted == [], (
         "设备回执的频率又被当成用户调谐发回去，形成调谐回环")
 
@@ -70,7 +70,7 @@ def test_real_params_backfill_does_not_reemit_tune(panel):
 def test_disconnect_hides_previous_gain(panel):
     panel.set_sdr_connected(True, tune_wired=True)
     panel.set_rf_params(100_000_000.0, 30.0)
-    assert panel.gain_val.text() == "30 dB"
+    assert panel.gain_val.text() == "30.0 dB"
     panel.set_sdr_connected(False)
     assert panel.gain_val.text() == "—", "断开后仍显示上次增益=把历史值当读数"
     assert panel.freq_spin.isEnabled() is False

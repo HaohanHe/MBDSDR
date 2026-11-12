@@ -99,7 +99,7 @@ class TestModulePanelParamsReachBackend:
         _process_events(10)
         assert p.selected_gain_db() == pytest.approx(37.0)
         # 标签同步（原有行为，保留）
-        assert p.gain_val.text() == "37 dB"
+        assert p.gain_val.text() == "37.0 dB"
 
     def test_connect_payload_follows_widgets(self, monkeypatch):
         """点连接：dev 里必须带上当前采样率与增益，而不是默认常量。"""

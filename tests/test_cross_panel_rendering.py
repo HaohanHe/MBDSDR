@@ -42,6 +42,7 @@ import os
 import re
 import sys
 import time
+import ast
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -73,7 +74,7 @@ class _FakeDevice:
 
 
 class _FakeBackend:
-    """只实现状态面板读到的字段，不伪造任何硬件能力。"""
+    """只实现状态面板/增益回读真正用到的字段，不伪造任何硬件能力。"""
 
     def __init__(self, *, gain_db=GAIN_DB):
         self.device = _FakeDevice()
@@ -83,6 +84,12 @@ class _FakeBackend:
         self._samples_read = 2_400_000
         self._start_time = time.time() - 12.0
         self._gain_db = gain_db
+
+    def get_gain(self):
+        return self._gain_db
+
+    def gain_readback_source(self):
+        return "driver"
 
     def get_status(self):
         return SDRStatus(
@@ -146,39 +153,41 @@ def _vfo_panel():
 # ===========================================================================
 # 1. 频率：同一频率，三处必须是同一个字符串
 # ===========================================================================
-@pytest.mark.xfail(
-    strict=True,
-    reason="跨面板频率格式未统一（145.500000 MHz / 145.5 / 145.500 MHz）；"
-           "待「频率格式化收口」那一笔修好后删本标记")
 def test_frequency_is_the_same_string_in_all_three_panels():
     _ensure_app()
+    from freq_display import digits_of
+
     st = _status_panel()
     cp = _control_panel()
     vp, _mgr = _vfo_panel()
 
-    shown = {
-        "状态面板 rx_freq": st.rx_freq.text(),
-        "状态面板 freq_value": st.freq_value.text(),
-        "控制面板 freq_input": cp.freq_input.text(),
-        "VFO 面板 列1": vp.table.item(0, 1).text(),
-    }
-    unique = set(shown.values())
-    assert len(unique) == 1, (
-        "同一频率 145.5 MHz 在不同面板显示成了不同字符串：\n"
-        + "\n".join(f"  {k}: {v!r}" for k, v in shown.items())
-    )
+    status_text = st.rx_freq.text()
+    vfo_text = vp.table.item(0, 1).text()
+    # 控制面板的大数字盘是 paintEvent 绘制的 9 位网格（…1 Hz），没有 text()；
+    # 取同分辨率的数字串比对。
+    dial_digits = digits_of(cp.freq_display.frequency())
+
+    # freq_input 是**输入控件**（可编辑优先，允许简写），不参与读数一致性
+    # 比较——要求输入框显示 145.500000 是拿可编辑性换一致性。
+    assert status_text == vfo_text, (
+        "同一频率 145.5 MHz 在两处读数不同：\n"
+        f"  状态面板 rx_freq: {status_text!r}\n"
+        f"  VFO 面板 列1:     {vfo_text!r}")
+    assert status_text == "145.500000 MHz", (
+        f"频率读数精度不是 1 Hz（六位小数 MHz）：{status_text!r}")
+    assert dial_digits == re.sub(r"\D", "", status_text), (
+        "控制面板数字盘与状态面板读数不是同一个数：\n"
+        f"  数字盘 digits: {dial_digits!r}\n"
+        f"  状态面板文本:  {status_text!r}")
 
 
 # ===========================================================================
 # 2. 增益：同一读数两处字符串必须一致
 # ===========================================================================
-@pytest.mark.xfail(
-    strict=True,
-    reason="增益字符串格式未统一（状态 f'{gain:.1f} dB' / 控制 f'{value:g} dB'）；"
-           "待「增益格式统一」那一笔修好后删本标记")
 def test_gain_is_the_same_string_in_both_panels_that_render_it():
     _ensure_app()
     st = _status_panel()
+    st.set_gain_intent(GAIN_DB)
     cp = _control_panel(slider_gain_db=GAIN_DB)
 
     shown = {
@@ -189,16 +198,18 @@ def test_gain_is_the_same_string_in_both_panels_that_render_it():
         "同一后端读数 20 dB 在两块面板显示成了不同字符串：\n"
         + "\n".join(f"  {k}: {v!r}" for k, v in shown.items())
     )
+    assert st.rx_gain.text() == "20.0 dB", (
+        f"增益读数不是一位小数：{st.rx_gain.text()!r}")
+    # 意图与回读一致时不许出现「未生效」——告警必须只在真不一致时出现。
+    assert "未生效" not in st.rx_gain.toolTip()
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="状态面板没有接收「配置意图」的入口，后端夹值时不标未生效；"
-           "待主窗口向状态面板注入意图（不得由面板自读配置）那一笔修好后删本标记")
 def test_gain_backend_clamped_is_flagged_in_both_panels():
     """后端回读 20 dB、配置意图 30 dB：两处都必须让用户看见「未生效」。"""
     _ensure_app()
     st = _status_panel(gain_db=GAIN_DB)
+    # 意图由主窗口注入（面板自己不读配置/不读滑杆），这里模拟主窗口的落点。
+    st.set_gain_intent(30)
     cp = _control_panel(slider_gain_db=30)
 
     flags = {
@@ -217,10 +228,6 @@ def test_gain_backend_clamped_is_flagged_in_both_panels():
 # ===========================================================================
 # 3. S 值：同一电平，两处 dBFS 文本必须一致；口径必须自证
 # ===========================================================================
-@pytest.mark.xfail(
-    strict=True,
-    reason="S 值 dBFS 格式未统一（状态 1 位小数 / 控制 0 位小数）；"
-           "待「电平格式统一」那一笔修好后删本标记")
 def test_s_level_is_the_same_dbfs_string_in_both_panels():
     _ensure_app()
     st = _status_panel()
@@ -234,6 +241,8 @@ def test_s_level_is_the_same_dbfs_string_in_both_panels():
         "同一电平 -73 dBFS 在两块面板显示成了不同字符串：\n"
         + "\n".join(f"  {k}: {v!r}" for k, v in shown.items())
     )
+    assert st.rssi_value.text() == "-73.0 dBFS", (
+        f"电平读数不是一位小数：{st.rssi_value.text()!r}")
 
 
 def test_s_readouts_declare_their_scale():
@@ -285,3 +294,77 @@ def test_bandwidth_is_the_same_string_where_rendered():
         "同一带宽 2400 Hz 在不同面板显示成了不同字符串：\n"
         + "\n".join(f"  {k}: {v!r} → {tokens[k]!r}" for k, v in shown.items())
     )
+
+
+# ===========================================================================
+# 5. 守卫：配置意图只能由主窗口注入，状态面板不得自读配置
+# ===========================================================================
+def test_status_panel_does_not_import_config_or_settings():
+    """AST 守卫：防止以后有人图省事让状态面板直接读配置文件。
+
+    面板自读配置会造出第三个真值源（配置 / 主窗口内存 / 后端回读），
+    配置还可能落后于正在生效的意图。
+    """
+    path = os.path.join(_ROOT, "desktop", "status_panel.py")
+    with open(path, encoding="utf-8") as f:
+        tree = ast.parse(f.read(), filename=path)
+    bad = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            names = [a.name for a in node.names]
+        elif isinstance(node, ast.ImportFrom):
+            names = [node.module or ""]
+        else:
+            continue
+        for name in names:
+            low = name.lower()
+            if "settings" in low or "config" in low:
+                bad.append(name)
+    assert not bad, (
+        "status_panel.py 不得 import 配置/设置模块（意图只能由主窗口注入）："
+        f"{bad}")
+
+
+# ===========================================================================
+# 6. AI 改增益：滑杆、意图、三块面板读数必须一起跟上
+# ===========================================================================
+@pytest.fixture(scope="module")
+def main_window(isolated_profile):
+    """真实 MainWindow（offscreen），用来验证 AI 改增益的编排路径。"""
+    QApplication.instance() or QApplication([])
+    from main_window import MainWindow
+
+    w = MainWindow()
+    yield w
+    try:
+        w._disconnect()
+    except Exception:  # noqa: BLE001 - 收尾失败不掩盖测试结论
+        pass
+    w.close()
+
+
+def test_ai_set_gain_syncs_slider_and_intent_without_false_warning(main_window):
+    """AI 把增益改到 20：滑杆显示 20，三块面板都不许误报「未生效」。
+
+    反证的是「清空意图」那种做法：滑杆停在旧值、设备是新值，谁都不提。
+    """
+    w = main_window
+    backend = _FakeBackend(gain_db=20.0)
+    w._active_sdr_backend = backend
+    w._panels_set_sdr_connected(True)
+
+    w._sync_ui_for_tool("sdr_set_gain", {"gain_db": 20.0})
+
+    assert w.control_panel.gain_slider.value() == 20, (
+        f"AI 改了增益，滑杆还停在 {w.control_panel.gain_slider.value()}")
+    assert w.module_panel.gain_slider.value() == 20, (
+        f"AI 改了增益，模块面板滑杆还停在 {w.module_panel.gain_slider.value()}")
+    for label, widget in (
+        ("控制面板 gain_val", w.control_panel.gain_val),
+        ("模块面板 gain_val", w.module_panel.gain_val),
+        ("状态面板 rx_gain", w.status_panel.rx_gain),
+    ):
+        assert widget.text() == "20.0 dB", (
+            f"{label} 读数不是 20.0 dB：{widget.text()!r}")
+        assert "未生效" not in widget.toolTip(), (
+            f"{label} 对一致的回读误报「未生效」：{widget.toolTip()!r}")

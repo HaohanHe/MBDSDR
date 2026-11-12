@@ -205,7 +205,7 @@ def test_gain_success_shows_device_value_keeps_user_intent(window):
     w._on_gain_changed(49)
 
     assert "未生效" not in w.statusBar().currentMessage(), "成功路径误报失败"
-    assert w.control_panel.gain_val.text() == "33 dB", \
+    assert w.control_panel.gain_val.text() == "33.0 dB", \
         "标签仍显示请求值 49 dB（后端夹值被藏起来）"
     assert float(w.settings.get("gain_db")) == 49.0, \
         "配置被写成设备值，用户意图丢失"

@@ -12,6 +12,7 @@ sys.path.insert(0, os.path.join(_ROOT, "desktop"))
 from constants import format_sample_rate  # noqa: E402
 import status_panel as sp  # noqa: E402
 import main_window as mw  # noqa: E402
+import readouts  # noqa: E402
 from mbdsdr_ai import error_catalog  # noqa: E402
 
 _MAIN = open(os.path.join(_ROOT, "desktop", "main_window.py"),
@@ -66,19 +67,21 @@ def test_u03_sample_rate_is_msps_three_decimals():
 
 
 def test_n01_freq_precision_is_constant_within_unit():
-    """N-01：同一单位内精度恒定，不随数值大小跳变。"""
-    assert sp._fmt_freq(145_800_000.0) == "145.800000 MHz"
-    assert sp._fmt_freq(98_500_000.0) == "98.500000 MHz"
-    assert sp._fmt_freq(500_000.0) == "500.000 kHz"
-    assert sp._fmt_freq(None) == "—"
-    assert sp._fmt_freq(float("nan")) == "—"
+    """N-01：同一单位内精度恒定，不随数值大小跳变（单一实现在 readouts）。"""
+    from readouts import format_frequency_hz as fmt
+    assert fmt(145_800_000.0) == "145.800000 MHz"
+    assert fmt(98_500_000.0) == "98.500000 MHz"
+    assert fmt(500_000.0) == "500.000 kHz"
+    assert fmt(None) == "—"
+    assert fmt(float("nan")) == "—"
 
 
 def test_u02_rssi_is_dbfs_and_missing_is_dash_not_zero():
     """U-02：引擎/IQ 路径 dBFS；缺值/NaN 显「—」，绝不用 0 兜底。"""
-    assert sp._fmt_dbfs(None) == "—"
-    assert sp._fmt_dbfs(float("nan")) == "—"
-    assert sp._fmt_dbfs(12.34) == "12.3 dBFS"
+    from readouts import format_dbfs
+    assert format_dbfs(None) == "—"
+    assert format_dbfs(float("nan")) == "—"
+    assert format_dbfs(12.34) == "12.3 dBFS"
     assert mw._fmt_dbfs(None) == "—"
     assert mw._fmt_dbfs(float("nan")) == "—"
     assert mw._fmt_dbfs(12.34) == "12.3 dBFS"
@@ -108,7 +111,7 @@ def test_u02_mcp_rssi_is_dbuV_and_missing_has_no_digits():
     assert mw._fmt_rssi_mcp(None) == "—"
     assert mw._fmt_rssi_mcp(42.4) == "42 dBµV"
     # 无读数输出里不许有阿拉伯数字（0 / 0.0 都会被读成真实读数）
-    for dash in (sp._fmt_rssi_mcp(None), sp._fmt_dbfs(None),
+    for dash in (sp._fmt_rssi_mcp(None), readouts.format_dbfs(None),
                  mw._fmt_rssi_mcp(None), mw._fmt_dbfs(None)):
         assert not any(ch.isdigit() for ch in dash), dash
 
@@ -116,7 +119,7 @@ def test_u02_mcp_rssi_is_dbuV_and_missing_has_no_digits():
 def test_u02_same_screen_has_one_rssi_unit_and_never_dBm():
     """U-02：单次渲染只出现一种 RSSI 单位；任何 RSSI 文案不得写 dBm。"""
     mcp_out = sp._fmt_rssi_mcp(42)
-    engine_out = sp._fmt_dbfs(-45.2)
+    engine_out = readouts.format_dbfs(-45.2)
     assert "dBµV" in mcp_out and "dBFS" not in mcp_out
     assert "dBFS" in engine_out and "dBµV" not in engine_out
     for out in (mcp_out, engine_out):
@@ -162,7 +165,7 @@ def test_u02_cli_has_no_minus_one_fake_rssi_and_labels_dbuV():
 
 def test_n02_negative_zero_displays_as_zero():
     """N-02：-0.0 / -0 Hz 一律显示为 0，不得让用户读成反向偏移。"""
-    assert sp._fmt_dbfs(-0.04) == "0.0 dBFS"
+    assert readouts.format_dbfs(-0.04) == "0.0 dBFS"
     txt = mw.format_doppler_status(
         {"applied_by": "python", "applied_hz": -0.04})
     assert "-0.0 Hz" not in txt and "0.0 Hz" in txt
@@ -176,8 +179,8 @@ def test_n02_negative_zero_displays_as_zero():
 def test_n03_nan_none_never_leak_raw_text():
     """N-03：NaN/None 只能显式空态，不得把 "nan"/"None" 画到界面上。"""
     outputs = [
-        sp._fmt_dbfs(float("nan")), sp._fmt_dbfs(None),
-        sp._fmt_freq(float("nan")), sp._fmt_rate(None),
+        readouts.format_dbfs(float("nan")), readouts.format_dbfs(None),
+        readouts.format_frequency_hz(float("nan")), sp._fmt_rate(None),
         mw._fmt_dbfs(float("nan")), mw.format_tx_doppler(None),
         mw.format_doppler_status({"applied_by": "python", "applied_hz": None}),
     ]
@@ -334,7 +337,7 @@ def test_u07_gain_unit_has_a_space_but_combo_stays_layout_locked():
     assert not any("2.4 kHz (SSB)" in t for t in bw), bw
     # 增益标签走真实信号处理路径：数字与单位之间必须有空格
     panel._on_gain_changed(0)
-    assert panel.gain_val.text() == "0 dB"
+    assert panel.gain_val.text() == "0.0 dB"
     # 移动端是跨语言文案：解析「一位小数 + 数字与单位间必须有空格」
     import re
     gain = re.findall(

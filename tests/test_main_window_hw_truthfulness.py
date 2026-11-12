@@ -138,9 +138,9 @@ def test_backfill_only_real_values(window):
     w._backfill_real_rf_readings()
 
     assert abs(w.module_panel.freq_spin.value() - 101.0) < 1e-6
-    assert w.module_panel.gain_val.text() == "20 dB"
+    assert w.module_panel.gain_val.text() == "20.0 dB"
     if hasattr(w.control_panel, "set_gain_applied"):
-        assert w.control_panel.gain_val.text() == "20 dB"
+        assert w.control_panel.gain_val.text() == "20.0 dB"
 
     # 设备不报增益/频率：保持「—」，不得回填 0
     w.module_panel.gain_val.setText("—")
@@ -165,8 +165,8 @@ def test_gain_failure_rolls_back_real_value(window):
     w._on_gain_changed(25)
 
     assert be.calls == [("set_gain", 25.0)]
-    assert w.module_panel.gain_val.text() == "20 dB"
-    assert w.control_panel.gain_val.text() == "20 dB", "控制面板必须显示真实读数"
+    assert w.module_panel.gain_val.text() == "20.0 dB"
+    assert w.control_panel.gain_val.text() == "20.0 dB", "控制面板必须显示真实读数"
     assert w.control_panel.gain_slider.value() == 25, "配置意图必须留在滑杆上"
     assert w.settings.get("gain_db") == 25.0, \
         "失败后不许把真实值 20 回写配置（配置仍是用户意图）"
