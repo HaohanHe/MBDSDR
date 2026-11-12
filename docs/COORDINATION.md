@@ -4473,4 +4473,67 @@ action 只跳该行且给可读原因、`NON_TAKEOVER_ACTIONS` 白名单逐 acti
 `isolated_profile` 里的 `previous_store` 保存/还原两处（第 1884、1889 行附近），**不要回滚成**
 `reset_layout_store_singleton()`。回滚后反序跑法会重新变红。
 
+---
+
+## 2026-11-13 写保护的跨工作树引用计数 + 真实配置写入拦截
+
+**结论**：`1414→1207` 那条「先退出的会话让真实配置变可写、另一个会话裸奔」的时间窗，
+机械原理是 `tests/conftest.py` 两处，且两处错法一样——**判断范围小于保护范围**：
+
+1. 写保护协调数据（备份根/标记台账）按 `dirname(__file__)` 落在**本工作树**，链接工作树
+   与主工作区分家，两个会话互相看不见对方的标记；
+2. `_unprotect_real_config()` 的退出判据是「我这个会话结束了，把配置恢复成可写」，不是
+   「全局最后一个持有者退出了」。
+
+**修法与判据**：
+
+- `_REAL_CONFIG_BACKUP_ROOT` 改挂 `_shared_locks_dir()`（按 git common dir 解析，所有
+  工作树同一处）。
+- 退出改成**按绝对路径的引用计数**：删自己标记 → 进共享字节锁（`protect-mutex.lock`）→
+  读共享台账 `protect-state.json` → 只把「没有任何工作树/会话存活标记引用」的路径恢复
+  原属性。最后一个走的锁门。
+- 互斥锁串行化「删标记 + 查剩余 + 恢复属性」整组：否则两个会话同时退出、互相看见对方
+  → 都不恢复 → 标记已删、配置永久只读（`_recover_stale_write_protection` 也救不回来）。
+- 台账按**绝对路径**（`normcase(abspath(...))`）记账，不按 `path`/`bm_path`/`gui_path`
+  逻辑键：`MBDSDR_SETTINGS_DIR` 重定向后同名逻辑键是两个不同文件，按逻辑键共用一格会让
+  子会话改掉父会话的路径、恢复错文件。
+- PID 复用防护：标记里记 `pid_start_time`，`_pid_alive` 同时校验启动时刻。
+- 新增防线 4c：`gui_config.json` / `bookmarks.json` / `desktop_settings.json` 三个真实
+  路径的写（`builtins.open` / `io.open` / `os.replace` / `os.rename`，只拦写模式与替换
+  目标）默认拒绝，报错点名「请求 `isolated_profile` fixture 或指向 `tmp_path`」。守卫
+  自己收尾还原时走 `_WRITE_GUARD["bypass"]` 唯一放行口。
+
+**反证（原文，必须一起保留——后人不该只看到结论）**：
+
+```text
+修复前（HEAD conftest）  A 退出后配置立刻变可写，写探针 WROTE-OK（rc=1，红）
+修复后                  B 仍活时写探针 REFUSED（rc=0）；B 退出后才恢复可写
+```
+
+现场：两个不同工作树各起一个 pytest 会话，A 在 main 树先启动并先退出，B 在深层 worktree
+后启动、A 退出时仍存活。隔离副本在 `%TEMP%\bugclone`（嵌套 worktree
+`%TEMP%\bugclone\.tmp\wt`），`MBDSDR_SETTINGS_DIR`/HOME/APPDATA 全部指向临时目录。修复前
+A 一退 B 就裸奔（探针 WROTE-OK）；修复后 B 存活期间一律 REFUSED，B 退出后属性才恢复可写
+（无永久只读）。
+
+**4c 扫出的拦截面（已修，无棘轮）**：定向子集 69 passed / 1 skipped / 6 errors，错误全部
+来自 `tests/test_ui_hard_defects.py::clean_window_settings` 直写真实
+`~/.mbdsdr/gui_config.json`（只重定向了 APPDATA、没重定向 HOME）。已改为请求
+`isolated_profile`；同文件复跑 15 passed / 1 skipped（skip 是屏幕可用宽 <1700px，与本次
+无关）。其余候选文件全绿。
+
+**附带修复（子会话锁）**：`tests/test_ui_settings_isolation_guard.py` 的子进程原先被塞
+`MBDSDR_TEST_LOCK=0`，锁判据修正后父会话不持锁，子会话建窗口即被判「绕锁碰 Qt」。改为给
+子会话一把**私有** `MBDSDR_TEST_LOCK_PATH`（不是关检查）：同文件 10 passed（此前
+3 failed / 7 passed；基线 HEAD 4 failed / 6 passed）。
+
+**提交**：`d210e281`（`tests/conftest.py` 写保护/4c 主体，私有 index 排除了 `isolated_profile`
+的 `previous_store` hunk）、`6a0fa901`（子会话私有锁）、`b69f9932`（`clean_window_settings`
+改用 `isolated_profile`）。`tests/conftest.py` 的 claim 已由 `G1采样率线/6ae85f56` 释放，
+`previous_store` 两处由体检线自行提交。
+
+**诚实边界**：验证过程中本线自己的模拟曾把三个真实配置留成只读，已手动
+`chmod S_IWRITE|S_IREAD` 恢复并在会话中如实上报；能全量证明的只有上表三条探针结论，
+未重跑 37 分钟全量套件。
+
 
