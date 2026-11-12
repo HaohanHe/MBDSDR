@@ -7,6 +7,7 @@
 import json
 import os
 import time
+from pathlib import Path
 
 import pytest
 
@@ -255,6 +256,60 @@ def test_parse_failure_and_empty_transmitter_list_are_distinguished():
     assert res["written"] is True
     assert "该星无发射机记录" in SL.machine_entry_text(
         SL.load_sat_link("noaa_18"))
+
+
+# ------------------------------------------------ 真实快照对照（可离线复跑）
+SNAPSHOT = (Path(__file__).resolve().parents[2]
+            / "docs/evidence/satnogs-transmitters-20261112.json")
+
+
+def _snapshot_payload():
+    snap = json.loads(SNAPSHOT.read_text(encoding="utf-8"))
+    payload = {"_schema": SF.CACHE_SCHEMA, "fetched_at": 0,
+               "fetched_at_utc": snap["fetched_at_utc"],
+               "satellites": {}, "failures": {}}
+    for nid, rec in snap["satellites"].items():
+        payload["satellites"][nid] = {
+            "norad_cat_id": int(nid), "key": rec["key"], "state": "ok",
+            "fetched_at": 0, "fetched_at_utc": snap["fetched_at_utc"],
+            "transmitters": rec["response"],
+        }
+    return snap, payload
+
+
+def test_snapshot_crosscheck_matches_report_numbers():
+    """2026-11-12T10:58:24Z 快照：9/9 人工链路精确命中，0 冲突，74 条机器独有。"""
+    snap, payload = _snapshot_payload()
+    assert snap["fetched_at_utc"] == "2026-11-12T10:58:24Z"
+    assert sum(len(r["response"]) for r in snap["satellites"].values()) == 83
+
+    expected = {
+        "noaa_15": [(137620000, 137620000, "inactive", "APT")],
+        "noaa_18": [(137912500, 137912500, "inactive", "APT")],
+        "noaa_19": [(137100000, 137100000, "inactive", "APT")],
+        "meteor_m_n2": [(137100000, 137100000, "active", "LRPT")],
+        "iss_zarya": [(145800000, None, "active", "FM"),
+                      (145825000, None, "active", "AFSK")],
+        "funcube_1": [(145935000, 145935000, "active", "BPSK")],
+        "ao91_fox1b": [(145960000, None, "active", "FM")],
+        "so_50": [(436795000, None, "active", "FM")],
+    }
+    only_counts = {"ao91_fox1b": 1, "funcube_1": 2, "iss_zarya": 48,
+                   "meteor_m_n2": 2, "noaa_15": 6, "noaa_18": 7,
+                   "noaa_19": 7, "so_50": 1}
+    links = 0
+    machine_only = 0
+    for name, rows in expected.items():
+        merged = SF.merge_entry(SL.load_sat_link(name), payload=payload, now=0)
+        got = [(link["low_hz"], link["high_hz"], link["status"],
+                link["machine"]["mode"]) for link in merged["links"]]
+        assert got == rows, f"{name}: {got}"
+        assert merged["_machine"]["conflicts"] == []
+        links += len(rows)
+        machine_only += len(merged["_machine"]["machine_only"])
+        assert len(merged["_machine"]["machine_only"]) == only_counts[name]
+    assert links == 9
+    assert machine_only == 74
 
 
 # --------------------------------------------------------------- 后台不阻塞
