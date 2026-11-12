@@ -1,5 +1,5 @@
 {
- "ctor_ms": 3696.2,
+ "ctor_ms": 3799.2,
  "rounds": [
   {
    "mode": "mouse",
@@ -11,9 +11,9 @@
      "app_setStyleSheet": 0,
      "widget_setStyleSheet": 3,
      "build_palette": 1,
-     "repolish_ms": 296.9,
-     "wall_ms": 360.9,
-     "cpu_ms": 421.9,
+     "repolish_ms": 218.8,
+     "wall_ms": 236.6,
+     "cpu_ms": 265.6,
      "touch": false,
      "qss_len": 19031
     },
@@ -22,11 +22,11 @@
      "widgets_before": 1620,
      "widgets_after": 1620,
      "app_setStyleSheet": 0,
-     "widget_setStyleSheet": 3,
+     "widget_setStyleSheet": 2,
      "build_palette": 1,
-     "repolish_ms": 265.6,
-     "wall_ms": 311.5,
-     "cpu_ms": 312.5,
+     "repolish_ms": 187.5,
+     "wall_ms": 208.8,
+     "cpu_ms": 250.0,
      "touch": false,
      "qss_len": 19031
     },
@@ -35,11 +35,11 @@
      "widgets_before": 1620,
      "widgets_after": 1620,
      "app_setStyleSheet": 0,
-     "widget_setStyleSheet": 2,
+     "widget_setStyleSheet": 3,
      "build_palette": 1,
-     "repolish_ms": 250.0,
-     "wall_ms": 290.3,
-     "cpu_ms": 312.5,
+     "repolish_ms": 171.9,
+     "wall_ms": 212.4,
+     "cpu_ms": 203.1,
      "touch": false,
      "qss_len": 19031
     },
@@ -48,11 +48,11 @@
      "widgets_before": 1620,
      "widgets_after": 1620,
      "app_setStyleSheet": 0,
-     "widget_setStyleSheet": 3,
+     "widget_setStyleSheet": 2,
      "build_palette": 1,
-     "repolish_ms": 218.8,
-     "wall_ms": 255.0,
-     "cpu_ms": 250.0,
+     "repolish_ms": 203.1,
+     "wall_ms": 225.0,
+     "cpu_ms": 234.4,
      "touch": false,
      "qss_len": 19031
     },
@@ -63,9 +63,9 @@
      "app_setStyleSheet": 0,
      "widget_setStyleSheet": 3,
      "build_palette": 1,
-     "repolish_ms": 218.8,
-     "wall_ms": 264.6,
-     "cpu_ms": 312.5,
+     "repolish_ms": 187.5,
+     "wall_ms": 223.3,
+     "cpu_ms": 218.8,
      "touch": false,
      "qss_len": 19031
     }
@@ -78,71 +78,141 @@
      "theme": "dark",
      "widgets_before": 1620,
      "widgets_after": 1620,
-     "app_setStyleSheet": 2,
+     "app_setStyleSheet": 1,
      "widget_setStyleSheet": 3,
      "build_palette": 1,
-     "repolish_ms": 0.0,
-     "wall_ms": 5286.3,
-     "cpu_ms": 5312.5,
+     "repolish_ms": 203.1,
+     "wall_ms": 2098.3,
+     "cpu_ms": 2109.4,
      "touch": true,
-     "qss_len": 19559
+     "qss_len": 20087
     },
     {
      "theme": "high_contrast",
      "widgets_before": 1620,
      "widgets_after": 1620,
-     "app_setStyleSheet": 2,
+     "app_setStyleSheet": 1,
      "widget_setStyleSheet": 3,
      "build_palette": 1,
-     "repolish_ms": 0.0,
-     "wall_ms": 5386.8,
-     "cpu_ms": 5484.4,
+     "repolish_ms": 281.2,
+     "wall_ms": 2707.8,
+     "cpu_ms": 2765.6,
      "touch": true,
-     "qss_len": 19559
+     "qss_len": 20615
     },
     {
      "theme": "dark_car",
      "widgets_before": 1620,
      "widgets_after": 1620,
-     "app_setStyleSheet": 2,
+     "app_setStyleSheet": 1,
      "widget_setStyleSheet": 3,
      "build_palette": 1,
-     "repolish_ms": 0.0,
-     "wall_ms": 4424.0,
-     "cpu_ms": 4578.1,
+     "repolish_ms": 250.0,
+     "wall_ms": 2169.0,
+     "cpu_ms": 2156.2,
      "touch": true,
-     "qss_len": 19559
+     "qss_len": 21143
     },
     {
      "theme": "figma",
      "widgets_before": 1620,
      "widgets_after": 1620,
-     "app_setStyleSheet": 2,
+     "app_setStyleSheet": 1,
      "widget_setStyleSheet": 3,
      "build_palette": 1,
-     "repolish_ms": 0.0,
-     "wall_ms": 3560.5,
-     "cpu_ms": 3734.4,
+     "repolish_ms": 203.1,
+     "wall_ms": 2074.3,
+     "cpu_ms": 2156.2,
      "touch": true,
-     "qss_len": 19559
+     "qss_len": 21671
     },
     {
      "theme": "default",
      "widgets_before": 1620,
      "widgets_after": 1620,
-     "app_setStyleSheet": 2,
+     "app_setStyleSheet": 1,
      "widget_setStyleSheet": 3,
      "build_palette": 1,
-     "repolish_ms": 0.0,
-     "wall_ms": 4281.6,
-     "cpu_ms": 4453.1,
+     "repolish_ms": 218.8,
+     "wall_ms": 2144.0,
+     "cpu_ms": 2171.9,
      "touch": true,
-     "qss_len": 19559
+     "qss_len": 22199
+    }
+   ]
+  },
+  {
+   "mode": "touch_fixed",
+   "rows": [
+    {
+     "theme": "dark",
+     "widgets_before": 1620,
+     "widgets_after": 1620,
+     "app_setStyleSheet": 0,
+     "widget_setStyleSheet": 2,
+     "build_palette": 1,
+     "repolish_ms": 281.2,
+     "wall_ms": 271.9,
+     "cpu_ms": 359.4,
+     "touch": true,
+     "qss_len": 22199
+    },
+    {
+     "theme": "high_contrast",
+     "widgets_before": 1620,
+     "widgets_after": 1620,
+     "app_setStyleSheet": 0,
+     "widget_setStyleSheet": 3,
+     "build_palette": 1,
+     "repolish_ms": 234.4,
+     "wall_ms": 249.0,
+     "cpu_ms": 296.9,
+     "touch": true,
+     "qss_len": 22199
+    },
+    {
+     "theme": "dark_car",
+     "widgets_before": 1620,
+     "widgets_after": 1620,
+     "app_setStyleSheet": 0,
+     "widget_setStyleSheet": 3,
+     "build_palette": 1,
+     "repolish_ms": 250.0,
+     "wall_ms": 260.9,
+     "cpu_ms": 296.9,
+     "touch": true,
+     "qss_len": 22199
+    },
+    {
+     "theme": "figma",
+     "widgets_before": 1620,
+     "widgets_after": 1620,
+     "app_setStyleSheet": 0,
+     "widget_setStyleSheet": 2,
+     "build_palette": 1,
+     "repolish_ms": 218.8,
+     "wall_ms": 230.0,
+     "cpu_ms": 265.6,
+     "touch": true,
+     "qss_len": 22199
+    },
+    {
+     "theme": "default",
+     "widgets_before": 1620,
+     "widgets_after": 1620,
+     "app_setStyleSheet": 0,
+     "widget_setStyleSheet": 3,
+     "build_palette": 1,
+     "repolish_ms": 203.1,
+     "wall_ms": 241.1,
+     "cpu_ms": 234.4,
+     "touch": true,
+     "qss_len": 22199
     }
    ]
   }
  ],
  "load": {
-  "cpu_pct": 38.2
+  "cpu_pct": 33.5
  }
 }
