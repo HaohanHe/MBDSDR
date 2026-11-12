@@ -27,6 +27,9 @@ from PySide6.QtWidgets import (
 
 from mode_registry import get as _get_mode
 
+# 频率读数唯一口径（6 位小数 MHz = 1 Hz），面板不再就地拼小数位。
+from readouts import format_frequency_hz
+
 try:  # pragma: no cover
     from mbdsdr_ai.bookmark_manager import BookmarkManager, Bookmark
     _KERNEL_AVAILABLE = True
@@ -300,7 +303,7 @@ class BookmarkPanel(QWidget):
             return
         if QMessageBox.question(
                 self, "删除书签",
-                f"删除 {sel['name']} @ {sel['frequency_hz']/1e6:.4f} MHz？",
+                f"删除 {sel['name']} @ {format_frequency_hz(sel['frequency_hz'])}？",
                 QMessageBox.Yes | QMessageBox.No) != QMessageBox.Yes:
             return
         try:
@@ -339,7 +342,7 @@ class BookmarkPanel(QWidget):
             return
         QMessageBox.information(
             self, "最近书签",
-            f"{best.name} @ {best.frequency_hz/1e6:.4f} MHz\n"
+            f"{best.name} @ {format_frequency_hz(best.frequency_hz)}\n"
             f"距当前 {best_d/1e3:.1f} kHz · 模式 {best.modulation}")
         self._emit_tune(self._bookmark_to_dict(best))
 
