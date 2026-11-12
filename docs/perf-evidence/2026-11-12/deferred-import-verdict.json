@@ -1,26 +1,30 @@
 {
- "kind": "落地验收：scipy 系 find_spec 前置 + 真 import 延后（三条反证 + 最坏帧间隔 + T2 前后对比）",
+ "kind": "落地验收：scipy 系 find_spec 前置 + 真 import 延后（三条反证 + 最坏帧间隔 + T2 前后对比 + .pyc-only 门槛依据）",
  "date": "2026-11-12",
- "head": "afd449fa",
+ "head": "699dcb92",
+ "worktree_note": "本轮读数用工作树 desktop/main.py（门槛改为目录遍历优先，见 gate_design.probe_cost），HEAD 里落的是 d91f7b14 的版本；两者只差探针实现，门槛语义一致",
  "authorization": {
   "accepted": "快门槛前置 + 真 import 延后，不接受单纯把 import 换成 find_spec",
   "gate": "scipy 系 4 项用 find_spec；numpy._core._multiarray_umath 与 PySide6 3 项保持真 import",
   "defer": "scipy 系真 import 挪到首帧之后，空闲时分片、一次一个模块；任一片造成 >100 ms 掉帧就要再切细或换路子",
   "failure_path": "find_spec 找不到 → 启动前中止 + 原缺件窗；能找到但真 import 失败 → 首帧后不阻塞提示 + 日志",
-  "criterion": "报出的可省 X ms 必须在反证/改后代码上真的出现；同一臂至少 3 次、报中位与极差"
+  "criterion": "报出的可省 X ms 必须在反证/改后代码上真的出现；同一臂至少 3 次、报中位与极差",
+  "record_rule": "按实测记，不按授权值记"
  },
  "sources": {
   "script": "scripts/repro/2026-11-12-deferred-import-verify.py",
-  "main_evidence": "docs/perf-evidence/2026-11-12/deferred-import-verify.json（每臂 3 次）",
-  "pairing": "docs/perf-evidence/2026-11-12/deferred-import-pairing-{1,2,3}.json（frame_gap 与 frame_gap_nodefer 背靠背配对，每次 1 run）",
+  "main_evidence": "docs/perf-evidence/2026-11-12/deferred-import-verify.json（5 臂 × 3 次，head 699dcb92，baseline_rev 52622845）",
+  "gate_evidence": "docs/perf-evidence/2026-11-12/find-spec-pyc.json（.pyc-only 可见性 + 探针耗时，每项 3 次）",
+  "unit_tests": "tests/test_startup_selfcheck.py + tests/test_startup_first_frame.py（13 passed）",
   "load_rule": "规则 10：每 run 前 2 s 低负载门（python 总占比 <200%），实测每 run 前 0.0–0.8%"
  },
  "definition": {
   "t1_splash_paint_ms": "子进程 T0 → splash 首个 paintEvent 返回",
   "t2_ms": "splash 首个 paintEvent 返回 → 主窗顶层首个 Paint 派发完毕（与 first-tick-definitions 的定义 C 同一端点）",
   "worst_frame_gap_ms": "首帧后 16 ms 心跳定时器相邻两次回调的最大间隔",
-  "t2_baseline": "HEAD afd449fa 的 desktop/main.py（老代码：13 项真 import 冒烟 + 硬门槛都在 splash 后、主窗前）",
-  "frame_gap": "工作树 desktop/main.py（改后代码）+ HEAD 快照的 main_window 等界面模块"
+  "t2_baseline": "baseline_rev = 52622845 的 desktop/main.py（落地提交 d91f7b14 之前，之后没人再动过 main.py）+ HEAD 的界面模块；两臂只差 main.py",
+  "frame_gap": "工作树 desktop/main.py（改后代码）+ HEAD 快照的 main_window 等界面模块",
+  "frame_gap_nodefer": "改后代码，但延后导入整段不跑：同一窗口的掉帧底噪"
  },
  "criteria": [
   {
@@ -29,6 +33,7 @@
    "result": "PASS",
    "evidence": {
     "arm": "gate_missing（把 scipy._mbdsdr_missing_probe 追加进 _SPEC_FIRST_DEPENDENCIES）",
+    "t1_splash_paint_ms": [1586.0, 1593.7, 1591.2],
     "exit_codes": [3, 3, 3],
     "first_frame_ms": [null, null, null],
     "window_imported_despite_missing": false,
@@ -43,78 +48,126 @@
    "result": "PASS",
    "evidence": {
     "arm": "defer_broken（_RISKY_IMPORTS 替换为 mbdsdr_broken_probe，模块体 raise ImportError）",
-    "first_frame_ms": {"runs": [3959.2, 3950.6, 3883.2], "median": 3950.6},
-    "reports_per_run": 1,
+    "t2_ms": {"runs": [2476.2, 2381.5, 2339.7], "median": 2381.5},
+    "first_frame_ms": {"runs": [4094.1, 3997.3, 3935.6], "median": 3997.3},
+    "reports_per_run": [1, 1, 1],
     "report_after_first_frame": true,
     "status_bar": "mbdsdr_broken_probe 加载失败，相关功能不可用；详见启动日志（D:\\mbdsdr\\logs\\mbdsdr_startup.log）",
-    "deferred_total_ms": {"runs": [220.1, 224.3, 222.1], "median": 222.1},
+    "deferred_total_ms": {"runs": [320.4, 329.7, 320.4], "median": 320.4},
     "exit_codes": [0, 0, 0],
     "errors": [],
-    "note": "首帧已出后 3/3 报出；不弹窗、不阻断，进程正常退出"
+    "note": "首帧已出后 3/3 报出；不弹窗、不阻断，进程正常退出。顶层 status_bar 字段在 main() 返回（窗口已关）后采样，恒为空；文案以 reports[].status_bar 为准——那是 _report_deferred_import_failure 返回后立即读的"
    }
   },
   {
    "id": "③",
    "need": "给延后期间的最坏单帧间隔；任一片造成 >100 ms 掉帧 → 再切细或换路子",
-   "result": "PASS（无 ≥100 ms）",
+   "result": "PASS（分片自身可归因的最大增量 +14.5 ms；>100 ms 的掉帧出现在所有臂、含对照与改前基线）",
    "evidence": {
-    "frame_gap": {"runs": [87.0, 88.8, 90.1], "median": 88.8, "max": 90.1},
-    "frame_gap_nodefer": {"runs": [93.0, 89.0, 88.7], "median": 89.0, "max": 93.0},
-    "t2_baseline": {"runs": [92.3, 85.6, 89.0], "median": 89.0, "max": 92.3},
-    "attribution": "最坏那一次（87.0 ms，首帧后 +87 ms）在无延后对照里同样出现（93.0 ms，同位置、无 import 重叠）→ 属产品首帧地板；真正与分片重叠的最大掉帧是 34.6 ms（+690 ms 处，scipy.stats）与 27.6 ms（+861 ms 处，scipy.signal/scipy.special）",
-    "largest_slice": {"scipy.signal": [712.6, 756.7, 800.6], "note": "单次 import scipy.signal 无法再按模块边界切分；分片期间 GUI 线程最坏只被压 27.6 ms"},
-    "deferred_total_ms": {"runs": [973.5, 988.9, 988.3], "median": 988.3}
+    "frame_gap_worst_gap_ms": {"runs": [97.0, 117.2, 111.8], "median": 111.8},
+    "frame_gap_nodefer_worst_gap_ms": {"runs": [112.4, 108.7, 97.3], "median": 108.7},
+    "t2_baseline_worst_gap_ms": {"runs": [97.3, 129.1, 107.8], "median": 107.8},
+    "per_run_delta_vs_control_ms": [-15.4, 8.5, 14.5],
+    "floor_note": "首帧后 97–117 ms 那一次掉帧，在延后臂里与 scipy._external.array_api_compat.numpy.fft（147–175 ms）重叠，但在无延后对照与改前基线的同一位置同样出现 97–129 ms 且窗口里没有任何 import → 属产品自己的首帧地板，不是分片造成的",
+    "slice_own_gaps_ms": [51.4, 82.8, 79.7, 40.6, 49.0],
+    "slice_note": "真正与 scipy.stats / scipy.signal 分片重叠的掉帧最大 82.8 ms，全部 <100 ms；scipy.signal 单片 902.4–975.1 ms 无法再按模块边界切分，但期间 GUI 线程只被压 ≤82.8 ms",
+    "deferred_total_ms": {"runs": [1313.0, 1312.1, 1423.4], "median": 1313.0},
+    "largest_slice": {"scipy.signal": [902.4, 907.5, 975.1], "scipy._external...numpy.fft": [147.4, 158.9, 175.3]}
    }
   },
   {
    "id": "T2",
-   "need": "授权 962 ms 必须在改后代码上真的出现",
-   "result": "PARTIAL：实测 −647.6 ms",
+   "need": "授权的 −962 ms 必须在改后代码上真的出现",
+   "result": "本轮实测 −1105.5 ms（最保守配对 −887.9）；上一轮同量法 −647.6。取两者交集之外的保守值见 verdict",
    "evidence": {
-    "frame_gap_t2_ms": {"runs": [2421.7, 2523.2, 2530.6], "median": 2523.2},
-    "t2_baseline_ms": {"runs": [3263.0, 3170.8, 3123.0], "median": 3170.8},
-    "delta_median_ms": -647.6,
+    "frame_gap_t2_ms": {"runs": [2478.0, 2484.1, 2587.5], "median": 2484.1},
+    "t2_baseline_ms": {"runs": [3475.4, 3589.6, 3650.5], "median": 3589.6},
+    "delta_median_ms": -1105.5,
+    "conservative_pair_ms": -887.9,
     "non_overlapping": true,
-    "first_frame_delta_ms": -662.0
+    "previous_round": {"delta_median_ms": -647.6, "conservative_pair_ms": -592.4, "frame_gap_t2": [2421.7, 2523.2, 2530.6], "t2_baseline": [3263.0, 3170.8, 3123.0]}
    }
   }
  ],
  "decomposition": {
-  "old_pre_frame_work_ms": {"run_import_smoke": [949.0, 970.2, 930.8], "startup_dependency_problems": [259.3, 273.7, 303.4], "total_median": 1223.0},
-  "new_pre_frame_work_ms": {"startup_dependency_problems_find_spec": [566.7, 549.3, 556.6], "total_median": 557.0},
-  "expected_saving_ms": 666.0,
-  "measured_t2_delta_ms": -647.6,
-  "why_not_962": [
-   "962 来自 import-smoke-spec-gate.json 的隔离臂：那次 base T2 为 3716.1，本会话同一量法只有 3170.8，机器/文件缓存状态不同；",
-   "本会话老代码压在首帧前的真 import 实测 0.93–0.97 s（不是 1.11 s），新门槛 find_spec 实测 0.55–0.57 s 而不是 0.62 s；",
-   "find_spec 子模块要先把 scipy 父包 import 进来（≈0.28 s），这是「保留完整性检查」的固定代价，不能算进收益；",
-   "两项相抵后的可复现实收益是 0.65 s 量级；−647.6 与 666 的理论值差 18 ms，在臂内极差（53–140 ms）之内。"
+  "baseline_pre_frame_work_ms": {"_run_import_smoke": {"runs": [994.3, 971.9, 959.0], "median": 971.9}, "_startup_dependency_problems": {"runs": [184.5, 320.3, 285.9], "median": 285.9}, "total_median": 1257.8},
+  "new_pre_frame_work_ms": {"_startup_dependency_problems_find_spec": {"runs": [486.7, 465.6, 450.8], "median": 465.6}, "total_median": 465.6},
+  "arithmetic_saving_ms": 792.2,
+  "measured_t2_delta_ms": -1105.5,
+  "why_numbers_disagree": [
+   "拆账只能解释 792 ms：老代码首帧前 971.9 + 285.9，新代码只剩 465.6；",
+   "本轮改后臂 T2 与上一轮持平（2484.1 vs 2523.2），差异全在 baseline 臂（3589.6 vs 3170.8）：本会话机器整体更慢（同一臂的 scipy.signal 分片 902–975 ms，上一轮 712–800 ms；所有臂最坏帧间隔 97–129 ms，上一轮 87–96 ms），而 baseline 臂首帧前多扛 1.26 s 真 import，负载越高吃亏越多；",
+   "因此 −1105.5 不能当成精确收益，只能当下界用：3/3 非重叠，最保守配对 −887.9；跨两轮的共同下界是 −592.4；",
+   "授权的 −962 落在本轮区间 [−887.9, −1105.5] 的延长线上（略高于 −887.9），但两轮差 458 ms，不能宣称已精确复现。"
   ]
  },
+ "gate_design": {
+  "question": "find_spec 面对 .pyc-only 子树到底看得见吗（冻结包 scipy 私有子树只剩 .pyc 是常态）",
+  "method": "scripts/repro/2026-11-12-find-spec-pyc.py：compileall 后删源码，造 legacy .pyc / 只剩 __pycache__ / 叶子 .pyc 截断 / 目录缺失四种形态，用产品门槛 _probe_module_spec 与标准 importlib.util.find_spec 各探一遍",
+  "results": {
+   "legacy_pyc": {"product_gate": true, "find_spec": true, "loader": "SourcelessFileLoader", "real_import_ok": true},
+   "pycache_pyc": {"product_gate": false, "find_spec": false, "real_import_ok": false, "note": "Python 3 不认只有 __pycache__ 的形态，判缺件是对的"},
+   "corrupt_pyc": {"product_gate": true, "find_spec": true, "real_import_ok": false, "real_import_error": "EOFError: marshal data too short", "note": "门槛放行、延后真 import 抛错并报到状态栏+日志——正是设计意图"},
+   "missing": {"product_gate": false, "find_spec": false, "note": "真缺件仍被拦住"}
+  },
+  "conclusion": "find_spec 看得见 legacy .pyc（SourcelessFileLoader），门槛可以保持「只查存在性」的语义，不必退回真 import；损坏 .pyc 由首帧后的延后 import 报出，不崩",
+  "unit_test_pins": [
+   "test_probe_sees_pyc_only_package_without_importing_it：legacy .pyc-only 必须 True 且不得把包 import 进来",
+   "test_probe_rejects_pycache_only_package：只剩 __pycache__ 判 False",
+   "test_probe_handles_namespace_package_without_importing：scipy._external 这种 PEP 420 包也要能判且不 import 父包",
+   "test_probe_falls_back_to_stdlib_find_spec：目录遍历认不出时交给标准 find_spec，不能直接判缺件"
+  ],
+  "probe_cost": {
+   "product_gate_ms": {"runs": [4.89, 3.02, 3.96], "median": 3.96},
+   "stdlib_find_spec_ms": {"runs": [335.31, 287.62, 291.25], "median": 291.25},
+   "scipy_imported": {"product_gate": [false, false, false], "stdlib_find_spec": [true, true, true]},
+   "arms": ["scipy", "scipy.signal", "scipy._external.array_api_compat.common", "scipy._external.array_api_compat.numpy.fft"],
+   "note": "标准 find_spec 探 scipy.signal 会先把 scipy 父包 import 进来（≈125 ms），再探 _external 子模块又走了同一份父包（≈160 ms）；目录遍历把这两笔全省掉"
+  }
+ },
+ "optional_work": [
+  {
+   "item": "绕开 find_spec 先 import scipy 父包的 ~280 ms",
+   "decision": "做了",
+   "how": "_module_exists_without_import：用 PathFinder 逐级查目录，命中即 True；认不准（zip/PYZ、命名空间父包）返回 None，交标准 find_spec 复核——宁可多花一次钱也不误报缺件",
+   "effect": "4 项探针 3.02–4.89 ms（中位 3.96）vs 标准 find_spec 287.62–335.31 ms（中位 291.25），且 scipy 不再被提前 import",
+   "bugs_fixed_on_the_way": [
+    "命名空间包（scipy._external 没有 __init__）在父包未 import 时 PathFinder.find_spec 抛 KeyError（_NamespacePath._get_parent_path 查 sys.modules）→ 加 except KeyError 退回按目录判断",
+    "目录遍历不下降：命中子目录后把父目录而不是 join(父, 段名) 塞回 dirs，下一级仍在父目录找 → 返回 None 并回退 import scipy（探针 136 ms）"
+   ]
+  },
+  {
+   "item": "在冻结产物上把 §4.1「删 fft.pyc」手工步骤真跑一遍",
+   "decision": "不做",
+   "why": [
+    "仓库里没有现成冻结产物：build/ 只有 bdist.win-amd64 与 lib，没有 _internal、没有 exe；要复现必须整包跑一次 PyInstaller（构建 + 产物体积 + 时间都超出本轮收口窗口）",
+    "这一步要验证的机制已经被两条更直接的证据覆盖：.pyc-only 可见性有 find-spec-pyc.json（源码环境造出与产物同形的 legacy .pyc 树）+ 4 条单测；损坏 .pyc 的失败路径有 corrupt_pyc 用例（门槛放行、真 import 抛错）",
+    "产物上仍需注意的唯一差异是 PYZ/zlib 归档形态，那种形态下目录遍历会返回 None 并回退标准 find_spec，行为等价于改前"
+   ],
+   "residual_risk": "低；若后续有冻结产物可用，跑一次 §4.1 即可关闭"
+  }
+ ],
  "bugs_found_during_verification": [
   {
    "bug": "事件过滤器在 Paint **派发之前**被调用，直接 start() 让导入线程抢在首帧绘制前拿到 GIL",
-   "symptom": "frame_gap T2 2443.9 vs 无延后对照 2319.8；最坏帧间隔 108.0 / 114.9 / 116.1 ms（>100 ms 判据被打破）",
+   "symptom": "frame_gap T2 2443.9 vs 无延后对照 2319.8；最坏帧间隔 108.0 / 114.9 / 116.1 ms",
    "fix": "改成 QTimer.singleShot(0, start)，等这次 Paint 走完再起线程",
-   "after": "最坏帧间隔 87.0 / 88.8 / 90.1 ms，与对照 88.7 / 89.0 / 93.0 同级"
+   "after": "本轮最坏帧间隔 97.0–117.2 ms，与同轮对照 97.3–112.4 ms 同级"
   },
   {
    "bug": "_report_deferred_import_failure 用了未定义的 MSG_IMPORTANT",
    "symptom": "NameError 被 Qt 槽吞掉：日志写到了、状态栏一个字都没有（反证 ② 第一次跑出来 status_bar 为空）",
    "fix": "改成 showMessage(message, 60000)；补 tests/test_startup_selfcheck.py::test_deferred_failure_reports_to_status_bar_and_log"
+  },
+  {
+   "bug": "反证脚本自己误判「延后导入已完成」：只看 _deferred_import_timer.isActive()，而该定时器在 _start_deferred_imports 里就建好、要等首帧 Paint 之后才 start()",
+   "symptom": "上一轮 sweep 里 frame_gap 2/3 run 在首帧后 +104/+106 ms 就退出，延后导入压根没进测量窗口，最坏帧间隔只量到 107.7/109.3 ms 的首帧地板；deferred_total 出现 104 ms 这种不可能的值",
+   "fix": "改成「工作线程起过 且 已结束 且 drain 定时器停了」才算完成；本轮 3/3 的 deferred_total 回到 1312–1423 ms，跨线程 import span 也全部记录到"
   }
  ],
- "supplementary": {
-  "deferred_launch_cost_on_t2": {
-   "method": "frame_gap 与 frame_gap_nodefer 背靠背配对 3 次（deferred-import-pairing-{1,2,3}.json）",
-   "pairs_ms": [[2555.3, 2417.5], [2445.6, 2386.1], [2488.0, 3024.5]],
-   "deltas_ms": [137.8, 59.5, -536.5],
-   "note": "第 3 对的对照臂自身异常（它的门槛耗时 720.4 ms，其余 545–549 ms），不参与判定；中位增量 +59.5 ms，属「线程起来后与首帧剩余绘制抢 GIL」的残余成本，已计入 −647.6 的实测结果"
-  }
- },
  "not_verified": [
-  "冻结版（PyInstaller 产物）里 find_spec 对 .pyc-only 子树的行为——本会话只在源码环境验证；§4.1 的手工步骤（删 fft.pyc）仍需在产物上复跑一次",
-  "低温/机械盘等慢存储下 find_spec 的门槛耗时会上升多少（本次所有读数均在 0.55–0.57 s）"
+  "低温/机械盘等慢存储下门槛耗时会上升多少（本次 3.02–4.89 ms，改前同一调用 287.62–335.31 ms）",
+  "冻结产物上 §4.1 手工步骤（本轮决定不做，见 optional_work 第 2 项）"
  ],
- "verdict": "按授权组合落地并验收通过：①缺件仍中止并弹原窗、②文件在但加载失败首帧后报出且不崩、③延后期间最坏帧间隔 87.0–90.1 ms，与无延后对照同级且无切片 >100 ms。T2 收益在改后代码上实测 −647.6 ms（3/3 区间不重叠），低于授权时引用的 −962 ms；差额已拆分：旧冒烟本会话只有 0.93–0.97 s、find_spec 门槛固定花 0.55–0.57 s（其中 ≈0.28 s 是 import scipy 父包）。"
+ "verdict": "按授权组合落地并验收通过：①缺件 3/3 中止并弹原窗（exit 3、首帧未产生、主窗未导入）；②文件在但加载失败 3/3 在首帧后报出，状态栏与日志都有「缺了会怎样 / 怎么修」，进程正常退出；③延后期间分片自身可归因的最大增量 +14.5 ms，与 scipy.stats/scipy.signal 重叠的掉帧最大 82.8 ms（<100 ms）；>100 ms 的那几次（97–129 ms）在同轮无延后对照与改前基线的同一位置同样出现，属机器底噪与首帧地板，不是分片造成的。find_spec 面对 .pyc-only 子树看得见（SourcelessFileLoader），门槛保持现状即可，损坏 .pyc 由延后 import 报出。T2 收益按实测记：本轮同会话 −1105.5 ms（3/3 非重叠，最保守配对 −887.9），上一轮同量法 −647.6（最保守 −592.4）；差 458 ms 全部落在 baseline 臂（3589.6 vs 3170.8，机器整体变慢），改后臂两轮一致（2484.1 vs 2523.2），所以对外只宣称共同下界，不取单点，也不宣称授权的 −962 已精确复现。"
 }
