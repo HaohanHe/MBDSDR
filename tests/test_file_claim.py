@@ -1,10 +1,18 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
-"""file_claim.py 行为测试：真实起进程，不用同进程调两次冒充并发。"""
+"""file_claim.py 行为测试：真实起进程，不用同进程调两次冒充并发。
+
+契约（2026-11-13 起）：
+  * 身份 = claim 时签发的一次性 --token，不是 owner 名字。
+    两条同名线各自占文件时，互相 release 必须失败；只有凭据匹配才能释放/续租。
+  * 旧格式 claim（占位文件无 token_sha256）不按名字放行：
+    release 必须拒绝；只能 claim --adopt-legacy 显式迁移，或过期夺取/takeover。
+"""
 from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import sys
 import time
@@ -13,6 +21,18 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[1]
 SCRIPT = REPO / "scripts" / "file_claim.py"
 SHARED = "desktop/main_window.py"
+
+_TOKEN_RE = re.compile(r"--token ([0-9a-f]{32})")
+
+
+def _token(result: subprocess.CompletedProcess) -> str:
+    match = _TOKEN_RE.search(result.stdout)
+    assert match, f"claim 输出里没有一次性凭据：{result.stdout}{result.stderr}"
+    return match.group(1)
+
+
+def _markers(locks: Path) -> list[Path]:
+    return sorted((locks / "claims").glob("*.claim"))
 
 
 def _env(locks: Path) -> dict:
@@ -82,16 +102,42 @@ def test_two_processes_race_exactly_one_wins(tmp_path: Path) -> None:
     assert loser_owner not in status.stdout
 
 
-def test_same_owner_claim_renews(tmp_path: Path) -> None:
+def test_same_owner_claim_renews_with_token(tmp_path: Path) -> None:
     locks = tmp_path / "locks"
     first = run(locks, "claim", SHARED, "--owner", "线A", "--ttl-min", "0.01")
     assert first.returncode == 0, first.stderr
+    token = _token(first)
     time.sleep(0.2)
-    again = run(locks, "claim", SHARED, "--owner", "线A", "--ttl-min", "10")
+    again = run(locks, "claim", SHARED, "--owner", "线A", "--ttl-min", "10", "--token", token)
     assert again.returncode == 0, again.stderr
     assert "CLAIM RENEWED" in again.stdout
     status = run(locks, "status", SHARED)
     assert "owner=线A" in status.stdout
+
+
+def test_same_owner_without_token_cannot_renew(tmp_path: Path) -> None:
+    """反证：同名不等于同一持有者——没有凭据（或凭据错）时不能续租别人的 claim。
+
+    把 cmd_claim 里的 _token_matches 判据删掉后，本用例必须变红（同名即可续租）。
+    """
+    locks = tmp_path / "locks"
+    first = run(locks, "claim", SHARED, "--owner", "同名线")
+    assert first.returncode == 0, first.stderr
+    token = _token(first)
+
+    no_token = run(locks, "claim", SHARED, "--owner", "同名线", "--ttl-min", "10")
+    assert no_token.returncode == 2, no_token.stdout + no_token.stderr
+    assert "同名不等于同一会话" in no_token.stdout + no_token.stderr
+
+    wrong = run(
+        locks, "claim", SHARED, "--owner", "同名线", "--ttl-min", "10", "--token", "0" * 32
+    )
+    assert wrong.returncode == 2, wrong.stdout + wrong.stderr
+
+    # 真持有者凭据仍然有效
+    ok = run(locks, "claim", SHARED, "--owner", "同名线", "--ttl-min", "10", "--token", token)
+    assert ok.returncode == 0, ok.stderr
+    assert "CLAIM RENEWED" in ok.stdout
 
 
 def test_expired_claim_can_be_stolen(tmp_path: Path) -> None:
@@ -117,7 +163,9 @@ def test_expired_claim_can_be_stolen(tmp_path: Path) -> None:
 
 def test_release_by_non_owner_is_denied(tmp_path: Path) -> None:
     locks = tmp_path / "locks"
-    assert run(locks, "claim", SHARED, "--owner", "线A").returncode == 0
+    claimed = run(locks, "claim", SHARED, "--owner", "线A")
+    assert claimed.returncode == 0
+    token = _token(claimed)
 
     denied = run(locks, "release", SHARED, "--owner", "线B")
     assert denied.returncode == 2
@@ -128,10 +176,73 @@ def test_release_by_non_owner_is_denied(tmp_path: Path) -> None:
     still = run(locks, "status", SHARED)
     assert "owner=线A" in still.stdout
 
-    ok = run(locks, "release", SHARED, "--owner", "线A")
+    ok = run(locks, "release", SHARED, "--owner", "线A", "--token", token)
     assert ok.returncode == 0, ok.stderr
     assert "RELEASE OK" in ok.stdout
     assert run(locks, "status", SHARED).stdout.find("未占用") >= 0
+
+
+def test_same_name_holders_cannot_release_each_other(tmp_path: Path) -> None:
+    """A13 反证：两条同名 holder 各占一个文件，互相 release 必须被拒绝。
+
+    这是「用名字当身份」的原始缺陷：删掉 cmd_release 里的凭据判据后，
+    同名即可互释，本用例必须变红。
+    """
+    locks = tmp_path / "locks"
+    other = "desktop/spectrum_widget.py"
+    first = run(locks, "claim", SHARED, "--owner", "W81线")
+    second = run(locks, "claim", other, "--owner", "W81线")
+    assert first.returncode == 0, first.stderr
+    assert second.returncode == 0, second.stderr
+    token_a, token_b = _token(first), _token(second)
+    assert token_a != token_b, "同名 holder 必须拿到不同凭据"
+
+    # A 用 B 的凭据去释放 B 的文件：凭据哈希不匹配，必须拒绝
+    cross = run(locks, "release", other, "--owner", "W81线", "--token", token_a)
+    assert cross.returncode == 2, cross.stdout + cross.stderr
+    assert "RELEASE DENIED" in cross.stdout + cross.stderr
+    assert run(locks, "status", other).stdout.find("owner=W81线") >= 0
+
+    cross_back = run(locks, "release", SHARED, "--owner", "W81线", "--token", token_b)
+    assert cross_back.returncode == 2, cross_back.stdout + cross_back.stderr
+
+    # 各自用自己的凭据都能释放
+    assert run(locks, "release", SHARED, "--owner", "W81线", "--token", token_a).returncode == 0
+    assert run(locks, "release", other, "--owner", "W81线", "--token", token_b).returncode == 0
+    assert "未占用" in run(locks, "status", SHARED).stdout
+    assert "未占用" in run(locks, "status", other).stdout
+
+
+def test_legacy_claim_requires_explicit_migration(tmp_path: Path) -> None:
+    """旧格式占位文件（无凭据）不按名字放行；--adopt-legacy 可显式迁移一次。"""
+    locks = tmp_path / "locks"
+    claimed = run(locks, "claim", SHARED, "--owner", "老格式线")
+    assert claimed.returncode == 0, claimed.stderr
+
+    # 模拟落地前写入的占位文件：去掉凭据字段，只留 owner/pid/心跳
+    marker = _markers(locks)[0]
+    payload = json.loads(marker.read_text(encoding="utf-8"))
+    payload.pop("token_sha256")
+    marker.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+    assert "id=legacy(名不可作身份)" in run(locks, "status", SHARED).stdout
+
+    no_token = run(locks, "release", SHARED, "--owner", "老格式线")
+    assert no_token.returncode == 2, no_token.stdout + no_token.stderr
+    assert "旧格式" in no_token.stdout + no_token.stderr
+
+    plain_renew = run(locks, "claim", SHARED, "--owner", "老格式线", "--ttl-min", "10")
+    assert plain_renew.returncode == 2, plain_renew.stdout + plain_renew.stderr
+    assert "同名不等于同一持有者" in plain_renew.stdout + plain_renew.stderr
+
+    upgraded = run(
+        locks, "claim", SHARED, "--owner", "老格式线", "--ttl-min", "10", "--adopt-legacy"
+    )
+    assert upgraded.returncode == 0, upgraded.stderr
+    assert "CLAIM UPGRADED" in upgraded.stdout
+    token = _token(upgraded)
+    assert "id=token" in run(locks, "status", SHARED).stdout
+
+    assert run(locks, "release", SHARED, "--owner", "老格式线", "--token", token).returncode == 0
 
 
 def test_release_without_claim_fails(tmp_path: Path) -> None:
