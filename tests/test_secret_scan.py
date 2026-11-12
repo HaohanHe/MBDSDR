@@ -124,3 +124,39 @@ def test_staged_mode_checks_index_not_worktree(tmp_path: Path) -> None:
     assert result.returncode == 1, text
     assert "leaky.py:1 github-pat-classic" in text
     assert FAKE not in text
+
+
+def test_history_mode_still_sees_secret_deleted_from_head(tmp_path: Path) -> None:
+    """工作树 0 BLOCK ≠ 没泄露过：凭据提交过再删掉，历史模式必须仍报。
+
+    反证同时钉住两件事：命中提交仍可从 HEAD 到达（删掉内容的提交是 HEAD
+    的祖先），以及输出里仍然只有路径/行号/规则/提交号，没有值。
+    """
+    repo = tmp_path / "repo"
+    repo.mkdir()
+
+    def git(*args: str) -> None:
+        subprocess.run(["git", *args], cwd=repo, check=True, capture_output=True)
+
+    git("init", "-q")
+    git("config", "user.email", "t@example.invalid")
+    git("config", "user.name", "t")
+    leaky = repo / "leaky.py"
+    leaky.write_text(f'TOKEN = "{FAKE}"\n', encoding="utf-8")
+    git("add", "leaky.py")
+    git("commit", "-q", "-m", "leak")
+    leaky.write_text("TOKEN = None\n", encoding="utf-8")
+    git("add", "leaky.py")
+    git("commit", "-q", "-m", "fix")
+
+    clean = run_scan(repo, "--root", str(repo), cwd=repo)
+    assert clean.returncode == 0, clean.stdout + clean.stderr
+
+    history = run_scan(repo, "--history", cwd=repo)
+    text = history.stdout + history.stderr
+    assert history.returncode == 0, text
+    assert "HISTORY leaky.py:1 github-pat-classic" in text
+    assert "blob 扫描 2 个" in text
+    assert "路径=1 个，提交=1 个" in text
+    assert "仍可从 HEAD 到达 1 个" in text
+    assert FAKE not in text
