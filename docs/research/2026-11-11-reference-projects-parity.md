@@ -628,11 +628,11 @@ for (auto const& [name, _vfo] : vfos) {
 
 | # | 机制 | 线上出处 | roadmap 覆盖状态 | 说明 |
 |---|---|---|---|---|
-| 1 | **SigMF sidecar 双层元数据**：global 存 `author/description/sample_rate/hw/recorder`，capture 存 `frequency/sample_start/length/datetime/tsms`，录制中反复回写 meta | `f4exb/sdrangel@1ec7cea:sdrbase/dsp/sigmffilerecord.cpp:240-244`、`:267-279` | **roadmap 未覆盖：新条目**（§6 D-9 只定了目标态 C，未派工） | 标准格式 + 每段 capture 带起止样本与时刻，回放端可精确切片；我们的 sidecar 可逐字段对照 |
+| 1 | **SigMF sidecar 双层元数据**：global 存 `author/description/sample_rate/hw/recorder`，capture 存 `frequency/sample_start/length/datetime/tsms`，录制中反复回写 meta | `f4exb/sdrangel@1ec7cea:sdrbase/dsp/sigmffilerecord.cpp:240-244`、`:267-279` | **roadmap 未覆盖：新条目**（§6 D-9 已裁决「只定界」，SigMF 双轨 C **不立项**） | 标准格式 + 每段 capture 带起止样本与时刻，回放端可精确切片；我们的 sidecar 可逐字段对照 |
 | 2 | **静噪触发录制 + 预录/后录**：`preRecordTime`、`squelchPostRecordTime`、`squelchRecordingEnable` 三个独立参数 | `f4exb/sdrangel@1ec7cea:plugins/channelrx/sigmffilesink/sigmffilesink.cpp:533-545` | **roadmap 已覆盖：W95** | 只在有信号时落盘，预录缓冲保住前导；和「录整段再挑」是两种形态 |
 | 3 | **录制参数装配**：WAV 容器、样本类型（Uint8/Int16/Int32/Float32）、文件名模板、时区选择、baseband/audio 双模式 | `AlexandreRouma/SDRPlusPlus@ea6f755:misc_modules/recorder/src/main.cpp:57-67`、`:249-256`、`:276-284` | **roadmap 部分覆盖：W96**（只收文件名模板 + 时区）；容器/样本类型/双模式未覆盖：新条目 | 成本最低的一组 UX；文件名模板 + 时区直接解重名与时间对不上 |
-| 4 | **回放即数据源**：file source 从 WAV 头读采样率，再喂同一条 DSP 链 | `AlexandreRouma/SDRPlusPlus@ea6f755:source_modules/file_source/src/main.cpp:133-134` | **roadmap 已覆盖：W97**（阻塞：等 D-9 格式边界） | 不需要单独回放管线；打开外部文件时速率自动对齐 |
-| 5 | **多 capture 回放按段切率 + 实时节流**：逐 track 切采样率，按 `QElapsedTimer` 控制喂样节奏 | `f4exb/sdrangel@1ec7cea:plugins/samplesource/sigmffileinput/sigmffileinputworker.cpp:116-120`、`:227-231`、`:194` | **roadmap 部分覆盖：W37**（回放上限/传输控制，且被 D-9 阻塞）；**按段切率与节流未覆盖：新条目** | 回放不抢 CPU、不「一秒放完一小时」 |
+| 4 | **回放即数据源**：file source 从 WAV 头读采样率，再喂同一条 DSP 链 | `AlexandreRouma/SDRPlusPlus@ea6f755:source_modules/file_source/src/main.cpp:133-134` | **roadmap 已覆盖：W97（已实现/关闭，2026-11-12 复核）**；遗留仅对话框过滤器缺 `*.sigmf-data` | 不需要单独回放管线；打开外部文件时速率自动对齐 |
+| 5 | **多 capture 回放按段切率 + 实时节流**：逐 track 切采样率，按 `QElapsedTimer` 控制喂样节奏 | `f4exb/sdrangel@1ec7cea:plugins/samplesource/sigmffileinput/sigmffileinputworker.cpp:116-120`、`:227-231`、`:194` | **roadmap 部分覆盖：W37**（回放上限/传输控制；**不被 D-9 阻塞**，卡点是 `REPLAY_MAX_SAMPLES` 整文件读入、约 10 s 上限）；**按段切率与节流未覆盖：新条目** | 回放不抢 CPU、不「一秒放完一小时」 |
 
 **否定结论（限定范围）**：SDR++ recorder 模块的 include 只有 `recorder_interface.h` ＋ `utils/wav.h`（`:20-23`），写盘只经 wav writer，**未见** sidecar 元数据写入；判断范围仅该模块，标「未见」不标「没有」。
 
@@ -655,5 +655,37 @@ for (auto const& [name, _vfo] : vfos) {
 |---|---|---|
 | R1 | 静噪触发录制 + 预录/后录 | **roadmap 已覆盖：W95**（未开工；串行链在 `main_window.py` 录音状态机段，W38→W40 之后、W94 之后排队） |
 | R2 | 录音文件名模板 + 时区 | **roadmap 已覆盖：W96**（未开工；排在 W95 之后） |
-| R3 | 回放读头（WAV/SigMF） | **roadmap 已覆盖：W97**（**阻塞：等 D-9 格式边界**） |
-| R4 | 多 capture 回放按段切率 + 实时节流 | **不立项**——**暂不立项：场景窄 + 被 W37/D-9 阻塞**；留在本节当候选，不进 roadmap 统计 |
+| R3 | 回放读头（WAV/SigMF） | **已实现/关闭（2026-11-12 复核）**：W97 读侧封闭集与 SigMF `global` 解析已成立，不再从候选转工单；遗留 `*.sigmf-data` 过滤器随 `main_window.py` 下次批次补 |
+| R4 | 多 capture 回放按段切率 + 实时节流 | **不立项**——**场景窄 + 依赖 W37 的流式回放**（W37 **不被 D-9 阻塞**，卡点是 `REPLAY_MAX_SAMPLES` 整文件读入与约 10 s 上限）；留在本节当候选，不进 roadmap 统计 |
+
+---
+
+## 6. 能力维度补查：远程控制 / 网络接口、插件与脚本扩展（2026-11-12）
+
+> **为什么单开一节**：同 §5，按**能力维度**切，补「这个领域我们到底对照过没有」这一类判断；§0–§4 的「按项目」表看不到它。
+> **口径**：沿用 §4/§5——`仓库@提交:路径:行` ＋ 抓取时间 **2026-11-12（Asia/Shanghai）**＋ 可复核 URL；线上证据等级低于 §2，不得反向给 §2 背书；否定结论给封闭集；README 宣传语不算机制；**注释掉的功能不计入机制**。
+> **自我约束（本节最重要的一条）**：**本轮没做全量封闭集，因此不对任何项目下「他们没有」结论**。下表只记「有出处的机制」与「我们未见等价物」；这条约束比结论本身值钱——它防止下一次有人把「我没搜到」读成「对方不存在」。
+> **不产出工单候选**：本节只做对照，不提 roadmap 候选。
+
+### 6.1 远程控制与网络接口
+
+**判断：此前未对照（跨项目对照 0 次）**。按机制价值排序：
+
+| # | 机制 | 线上出处 | 我们这一侧 | 说明 |
+|---|---|---|---|---|
+| 1 | **内嵌 HTTP WebAPI**：`HttpListener` 起在可配置 host/port，供外部控制与状态读取 | `f4exb/sdrangel@1ec7cea:sdrbase/webapi/webapiserver.cpp:28-47` | 我们未见等价物 | 远程控制的最小可移植形态；只记机制，不判优劣 |
+| 2 | **RemoteSink：UDP 把 IQ 发到另一实例** | `f4exb/sdrangel@1ec7cea:plugins/channelrx/remotesink/remotesink.h:5-8` | 我们未见等价物 | 「接收端没有硬件」的跨机方案 |
+| 3 | **浏览器即客户端 + 进程内 WebSocket**：前端不装原生客户端，服务端直接推流 | `luarvique/openwebrx@4541625:owrx/websocket.py:35-45`、`:49`、`:174-197` | 我们未见等价物 | 部署成本最低的远程形态 |
+| 4 | **SoapyRemote 当数据源**：远端 SDR 在本机呈现为普通 Soapy 设备（0.5–20 MS/s），宿主侧按 Add/Remove 管理远端设备 | `luarvique/openwebrx@4541625:owrx/source/soapy_remote.py:9-22`、`:46-47`；`cjcliffe/CubicSDR@fd82cd9:src/forms/SDRDevices/SDRDevicesForm.cpp:289-304` | 我们未见等价物 | 「设备在别处、处理在本机」，与 §5.2 的设备列表机制相邻 |
+
+### 6.2 插件与脚本扩展
+
+**判断：此前未对照（跨项目对照 0 次）**。
+
+| # | 机制 | 线上出处 | 我们这一侧 | 说明 |
+|---|---|---|---|---|
+| 1 | **插件目录扫描 + 按接口类型注册**：`PluginManager` 扫 `.so`，按插件接口类型分发到对应槽位 | `f4exb/sdrangel@1ec7cea:sdrbase/plugin/pluginmanager.cpp:68-122`、`:144-171` | 我们未见等价物 | 运行期扩展而不改主程序 |
+| 2 | **C ABI 模块契约**：`_INFO_/_INIT_/_CREATE_INSTANCE_/_DELETE_INSTANCE_/_END_` 导出符号 + `maxInstances` 上限 | `AlexandreRouma/SDRPlusPlus@ea6f755:core/src/module.cpp:5-101` | 我们未见等价物 | ABI 稳定即可跨编译器分发 |
+| 3 | **每星一个遥测脚本文件**：`python/telemetry/*.py` 单星定义解码器，框架按名加载 | `daniestevez/gr-satellites@0ff8b61:python/telemetry/aausat4.py:11`、`:17-30` | 我们未见等价物（W91 走 schema/数据路线，不是脚本插件路线） | 扩覆盖靠加文件，与 W91「扩遥测覆盖」是两条不同路径 |
+
+**说明**：以上「我们未见等价物」只描述本次检索范围内的事实，**不构成「我们不做」的产品决定**；是否要做、何时做，不在本节裁定。
