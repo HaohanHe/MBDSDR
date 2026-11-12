@@ -8,6 +8,7 @@
   可达 blob 或另一个 sha 照旧报（解除条件不能靠人记）。
 """
 
+import hashlib
 import sys
 from pathlib import Path
 
@@ -61,6 +62,42 @@ def test_artifact_gate_scans_binaries_by_bytes(tmp_path: Path) -> None:
 
     hits, _stats = ss.scan_artifact(dist)
     assert ("payload.dll", "github-pat-classic") in hits
+
+
+def test_artifact_allowlist_needs_path_sha_rule_and_unexpired_review(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """二进制误报登记只对「同路径 + 同 sha256 + 同规则 + 未过期」放行。"""
+    dist = _dist(tmp_path)
+    payload = dist / "vendor" / "lib.dll"
+    payload.parent.mkdir()
+    payload.write_bytes(b"MZ" + b"ghp_" + b"C" * 36)
+    digest = hashlib.sha256(payload.read_bytes()).hexdigest()
+    entry = {
+        "path": "vendor/lib.dll",
+        "sha256": digest,
+        "rules": ("github-pat-classic",),
+        "reason": "测试用假二进制",
+        "review_by": "2999-12-31",
+    }
+    monkeypatch.setattr(rm, "ARTIFACT_SECRET_ALLOWLIST", (entry,))
+    statuses = [it["status"] for it in rm.check_secrets(dist)]
+    assert rm.FAIL not in statuses and rm.PASS in statuses
+
+    # 文件变了（sha 不符）→ 重新红
+    payload.write_bytes(payload.read_bytes() + b"x")
+    assert any(it["status"] == rm.FAIL for it in rm.check_secrets(dist))
+
+    # 登记过期 → 重新红
+    payload.write_bytes(b"MZ" + b"ghp_" + b"C" * 36)
+    monkeypatch.setattr(rm, "ARTIFACT_SECRET_ALLOWLIST",
+                        ({**entry, "review_by": "2000-01-01"},))
+    assert any(it["status"] == rm.FAIL for it in rm.check_secrets(dist))
+
+    # 规则不符 → 重新红
+    monkeypatch.setattr(rm, "ARTIFACT_SECRET_ALLOWLIST",
+                        ({**entry, "rules": ("aws-access-key",)},))
+    assert any(it["status"] == rm.FAIL for it in rm.check_secrets(dist))
 
 
 def test_known_benign_requires_registered_sha_rule_and_unreachable() -> None:
