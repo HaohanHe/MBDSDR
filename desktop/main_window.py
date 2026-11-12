@@ -7563,8 +7563,33 @@ class MainWindow(QMainWindow):
             if prev_mode:
                 cp.set_mode(prev_mode)
 
+    def _replay_blocks_tune(self, target_hz=None) -> bool:
+        """回放中拦下调谐：离线回放固定从文件中心频率解码，改设备频率不会改变
+        听到的内容，只会让频率读数与耳朵里的内容对不上（时间轴没错位，但
+        「这一秒听到的是哪个频点」会被读错）。
+
+        返回 True 表示已拦下，调用方必须立即 return / return False。
+        """
+        if getattr(self, "_replay_timer", None) is None:
+            return False
+        center = float(getattr(self, "_replay_center_hz", 0.0) or 0.0)
+        if center > 0:
+            self.freq_label.setText(f"{center / 1e6:.3f} MHz")
+            self.status_freq.setText(f"频率: {center / 1e6:.3f} MHz")
+        if not getattr(self, "_replay_tune_notice_shown", False):
+            self._replay_tune_notice_shown = True
+            QMessageBox.information(
+                self, "回放中",
+                f"回放中不支持调谐：录音固定从文件中心 {center / 1e6:.6f} MHz "
+                f"（{format_sample_rate(self._replay_sr)}）解码。\n"
+                "调谐只会改设备频率，不会改变你听到的内容，频率读数还会与"
+                "回放内容对不上；请先停止回放再调谐。")
+        return True
+
     @Slot(float)
     def _on_tune_fm(self, freq: float):
+        if self._replay_blocks_tune(freq * 1e6):
+            return
         backend = self._active_sdr_backend
         if backend is not None:
             if not self._apply_hw_action(
@@ -7585,6 +7610,8 @@ class MainWindow(QMainWindow):
 
     @Slot(int)
     def _on_tune_am(self, freq: int):
+        if self._replay_blocks_tune(freq * 1e3):
+            return
         backend = self._active_sdr_backend
         if backend is not None:
             if not self._apply_hw_action(
@@ -7606,6 +7633,8 @@ class MainWindow(QMainWindow):
         ``apply_mode=False``：调用方已先行下发解调模式（书签按
         模式→带宽→调谐的顺序应用），这里只调谐，避免重复切解调。
         """
+        if self._replay_blocks_tune(freq_hz):
+            return False
         backend = self._active_sdr_backend
         if backend is not None:
             if not self._apply_hw_action(
@@ -7643,6 +7672,8 @@ class MainWindow(QMainWindow):
     @Slot(float)
     def _on_module_tune(self, freq_hz: float):
         """模块面板改频率 → 真实调谐；失败回滚，绝不只改界面。"""
+        if self._replay_blocks_tune(freq_hz):
+            return
         backend = self._active_sdr_backend
         if backend is not None:
             if not self._apply_hw_action(
@@ -7954,6 +7985,39 @@ class MainWindow(QMainWindow):
         # 在主线程上就是用户说的「调采样率有时原地不动」。同值直接返回；
         # 真要重建时先给一句人话，再 processEvents 让提示真的画出来。
         if not self._recording and abs(rate - float(self._record_sr)) < 1.0:
+            return
+        # 回放中（离线）：改采样率只更新「回放结束后要用的设备设置」，绝不
+        # stop/start 接收链。_stop_iq_streams 会停声卡、_start_iq_streams 会把
+        # 实时数据接进来，而回放定时器还在按文件推进——结果是进度条继续走、
+        # 耳朵里没声或混入实时噪声，时间轴与音频从此脱节。回放本身按文件
+        # 速率解码，与这个设置无关。
+        if not self._recording and getattr(self, "_replay_timer", None) is not None:
+            applied = rate
+            if self._active_sdr_backend is not None:
+                try:
+                    ok = self._active_sdr_backend.set_sample_rate(rate)
+                    applied = float(self._active_sdr_backend.get_sample_rate())
+                except Exception as e:
+                    logger.warning("回放中切换采样率失败: %s", e)
+                    self._sync_sample_rate_display_from_backend(self._record_sr)
+                    QMessageBox.warning(
+                        self, "回放中",
+                        f"设备采样率切换失败（保持 "
+                        f"{format_sample_rate(self._record_sr)}）：{e}\n"
+                        "本次回放不受影响，仍按文件自身速率解码。")
+                    return
+                if ok is False or abs(applied - rate) > 1.0:
+                    self.control_panel.set_sample_rate(applied)
+            self._record_sr = applied
+            try:
+                self.settings.set("sample_rate_hz", applied)
+            except Exception:
+                pass
+            QMessageBox.information(
+                self, "回放中",
+                f"设备采样率已记为 {format_sample_rate(applied)}，回放结束后生效。\n"
+                f"本次回放仍按文件自身的 {format_sample_rate(self._replay_sr)} "
+                "解码：不会停止声卡、也不会接入实时数据，时间轴保持不变。")
             return
         if not self._recording:
             self.statusBar().showMessage(
@@ -8629,6 +8693,8 @@ class MainWindow(QMainWindow):
 
     @Slot(float)
     def _on_spectrum_freq_changed(self, freq: float):
+        if self._replay_blocks_tune(freq * 1e6):
+            return
         self.control_panel.set_freq_fm(freq)
         if self._worker:
             self._worker.request_tool.emit("tune_fm", {"freq_mhz": freq})
@@ -12806,6 +12872,8 @@ class MainWindow(QMainWindow):
         self._replay_sr = sr
         self._replay_center_hz = center_hz
         self._replay_total = int(iq.size)
+        # 每次回放只提示一次「调谐被拦下」，避免拖频谱时刷屏
+        self._replay_tune_notice_shown = False
         # 每 50ms 推一块（按采样率换算样本数），与实时 20fps 观感一致
         self._replay_block = max(1024, int(sr * 0.05))
         self._replay_timer = QTimer(self)
@@ -12880,6 +12948,7 @@ class MainWindow(QMainWindow):
             self._replay_timer = None
         self._replay_iq = None
         self._replay_pos = 0
+        self._replay_tune_notice_shown = False
         # 回放结束：若实时后端仍连着，恢复统一 IQ 轮询；否则保持未连接空白
         if self._replay_resume_poll and self._active_sdr_backend is not None:
             self._start_iq_streams()
