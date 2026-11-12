@@ -4160,3 +4160,48 @@ pid 3484 已退出，属 K16 同形的「孤儿改动」。配套测试
 **建议**：`claim` 的 sidecar 写失败目前只打 WARN，一次 WARN 就会制造一个
 「同名 + 凭据丢失」的不可释放 claim；应把 sidecar 写失败升级为拒绝 claim
 （或至少让 release 在同名且 pid 已死时可用）。
+
+---
+
+## 处理记录（2026-11-13 01:40）：D1 分层与依赖方向收口（D1分层收口线）
+
+**收口前实测**（grep + `python scripts/axioms.py --rule D1`）：
+- `mbdsdr_ai` 内 3 处直接 import Qt：`optional_deps.py:40`、`device_watchdog.py:25`、
+  `desktop_sdr_session.py:38`（均为模块级 import，非函数体内）；
+- `mbdsdr_ai -> desktop` 反向边 8 条，来自 4 条 import 语句（D1 按 import 名计边：
+  `diagnostics.py` 2 行、`mbdsdr_ai/tests` 2 个文件各 1 行）。
+
+**依赖方向实测（按 import 图，不按目录名）**：
+- 底层（纯逻辑，无 Qt、无 desktop）：`mbdsdr_ai`（4078 条内部边）；
+- 上层：`desktop`（514 条边指向 mbdsdr_ai）、`scripts`（269 条）、`tools`（65 条）；
+- 验收层：`tests`（3319 条指向 mbdsdr_ai、305 条指向 desktop，规则判 review 级）；
+- `mbdsdr_ai -> tools` 6 条为 HEAD 既有边，D1 未判应修，不在本次范围。
+
+**逐处决策**：
+
+| 点位 | 原写法 | 采用方案 | 为什么不是延迟 import |
+|---|---|---|---|
+| `optional_deps.py:40` | `import PySide6` 取版本号 | `importlib.util.find_spec` + `importlib.metadata.version` | 只是「是否安装」探测，不需要 Qt 对象；换机制后进程内不再出现 PySide6 |
+| `device_watchdog.py:25` | 类本身即 QThread + Signal | 整模块迁 `desktop/device_watchdog.py` | Qt 类型贯穿，无法用回调替代；延迟 import 依赖关系不变 |
+| `desktop_sdr_session.py:38` | QObject + Signal 跨线程 marshal | 整模块迁 `desktop/ai_sdr_session.py` | 写路径必须回 GUI 线程确认，Qt 类型贯穿 |
+| `diagnostics.py` 反向 import | 取 `desktop.settings` / `desktop.startup_paths` | 桌面取数整块下沉 `desktop/diagnostics_data.py`，核心层只留脱敏 + 注册表 | 掰回依赖方向；顺带消掉同文件 `importlib.import_module("desktop.station_sync")` / `("desktop.command_palette")` 两条 AST 看不见的动态反向边 |
+| `mbdsdr_ai/tests` ×2 | 测试直接 import desktop | `test_diagnostics_data` 迁 `tests/`；`test_corruption_evidence` 的单条用例迁 `tests/test_startup_log_policy.py` | 验证桌面行为的用例属 tests -> desktop 正向依赖 |
+
+`mbdsdr_ai/tests/test_corruption_evidence.py` 的 claim 由设置三环线持有且已过期
+5h+，按 §6.1.4 接管（记录见本文件「接管记录：mbdsdr_ai/tests/test_corruption_evidence.py」）。
+
+**反证 / 验证**：
+- `python scripts/axioms.py --rule D1` → 应修 0；仅剩 HEAD 既有的
+  `D1-test-reverse tests/`（305 处，review 级）；
+- `tests/test_import_direction_contract.py`：在 `mbdsdr_ai` 里注入函数体内的
+  `from PySide6.QtCore import QObject`、`import desktop.settings` 与
+  `importlib.import_module("desktop.startup_paths")` 后 2 failed，点名
+  `mbdsdr_ai/_d1_probe.py:2 / :3 / :5`；删除探针后 3 passed；
+- 相关用例：optional_deps 9 passed、ai_sdr 10 passed、diagnostics/startup 23 passed、
+  ADS-B/watchdog 9 passed。
+
+**提交**：b792878f（optional_deps）、a3a54a7b（device_watchdog）、5823c6a1
+（ai_sdr_session）、48882abc（diagnostics 拆分）、b06789d1（方向守卫）。
+
+**遗留**：`mbdsdr_ai -> tools` 6 条为 HEAD 既有；`tests -> desktop` 305 条属 review
+级既有量，按规则「确需 UI 的用例放 tests/ui 并显式标注」另立 K 单，本次未动。
