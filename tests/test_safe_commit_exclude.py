@@ -74,6 +74,45 @@ def test_exclude_hunk_keeps_other_change_out(tmp_path):
     assert "别线" in log
 
 
+def test_exclude_pure_deletion_hunk(tmp_path):
+    """别人的 hunk 是纯删除（``@@ … +b,0``）也要能排除。
+
+    纯删除没有新版行，声明按删除点 b 定位（``+b,0`` 的 b，new 行号语义）；
+    排除后提交里应保留被删的那行，工作树仍保持删掉的状态。
+    """
+    repo = _make_repo(tmp_path)
+    lines = [f"line{i}" for i in range(1, 7)]
+    lines[1] = "line2 mine"
+    del lines[4]                       # 别线：删掉第 5 行 → @@ … +4,0 @@
+    (repo / "doc.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    msg = tmp_path / "msg.txt"
+    msg.write_text("test: exclude pure deletion\n", encoding="utf-8")
+    env = os.environ.copy()
+    env.pop("GIT_INDEX_FILE", None)
+    env["MBDSDR_REPO_ROOT"] = str(repo)
+
+    proc = subprocess.run(
+        [
+            sys.executable, str(SAFE),
+            "--files", "doc.md",
+            "--message-file", str(msg),
+            "--exclude-hunk", "doc.md:4-4",
+            "--exclude-owner", "别线",
+        ],
+        cwd=str(repo), env=env, capture_output=True, text=True,
+        encoding="utf-8", errors="replace",
+    )
+    out = proc.stdout + proc.stderr
+    assert proc.returncode == 0, out
+
+    committed = _git(repo, "show", "HEAD:doc.md").stdout
+    assert "line2 mine" in committed
+    assert "line5\n" in committed, "别人的删除不能被带走"
+    tree = (repo / "doc.md").read_text(encoding="utf-8")
+    assert "line5\n" not in tree, "工作树不能被动"
+    assert "line6" in tree
+
+
 def test_exclude_range_must_cover_whole_hunk(tmp_path):
     """声明范围必须完整覆盖 hunk；跨边界/对不上 → 前置失败、不提交。"""
     repo = _make_repo(tmp_path)

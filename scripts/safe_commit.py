@@ -117,11 +117,10 @@ def _revert_index_hunks(env: dict, path: str, ranges: list[dict]) -> None:
             raise ValueError(f"{path} 的 hunk 头无法解析：{hunk['head'].strip()}")
         hunk["start"] = int(match.group(1))
         count = int(match.group(2) or 1)
-        if count == 0:
-            raise ValueError(
-                f"{path} 含纯删除 hunk（@@ … +{hunk['start']},0），暂不支持 --exclude-hunk"
-            )
-        hunk["end"] = hunk["start"] + count - 1
+        # 纯删除 hunk（@@ … +b,0）在新版没有行，锚在删除点 b：按 [b, b]
+        # 参与覆盖检查（与「声明范围按 new 行号」同一条规则）。反向撤销已验证：
+        # --unidiff-zero 下能把删掉的行精确加回私有 index。
+        hunk["end"] = hunk["start"] + count - 1 if count else hunk["start"]
 
     selected: list[dict] = []
     for item in ranges:
