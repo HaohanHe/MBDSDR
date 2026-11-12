@@ -9,10 +9,11 @@ AI 是技能触发入口（用户对模型说才触发），不是功能按钮�
 """
 
 import json
+import logging
 import re
 from datetime import datetime
 from html import escape as _esc
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Tuple
 
 from PySide6.QtCore import Qt, Signal, Slot, QTimer, QThread, QObject
 from PySide6.QtWidgets import (
@@ -21,6 +22,8 @@ from PySide6.QtWidgets import (
     QSplitter, QSizePolicy, QMessageBox, QScrollArea
 )
 from PySide6.QtGui import QFont, QTextCursor
+
+logger = logging.getLogger(__name__)
 
 # 尝试导入 AI 内核
 try:
@@ -248,6 +251,31 @@ class AIWorker(QObject):
             self.error.emit(_clean_exc(e))
 
 
+def _forwardable_args(raw_args: Any) -> Tuple[Optional[Dict[str, Any]], str]:
+    """把 tool_call 的 arguments 归一成可下发的 dict。
+
+    返回 ``(args, "")`` 表示可下发；``(None, 原因)`` 表示参数不可用、不得下发。
+    None / 空白串视为「这次调用本来就没参数」（可下发空 dict）；字符串按 JSON
+    解析，解析失败或结果不是对象都算参数坏——转发的是硬件指令，宁可不下发
+    也不拿空参数去猜。
+    """
+    if raw_args is None:
+        return {}, ""
+    if isinstance(raw_args, dict):
+        return raw_args, ""
+    if isinstance(raw_args, str):
+        if not raw_args.strip():
+            return {}, ""
+        try:
+            parsed = json.loads(raw_args)
+        except ValueError as exc:
+            return None, f"参数不是合法 JSON（{type(exc).__name__}: {exc}）"
+        if not isinstance(parsed, dict):
+            return None, f"参数解析结果不是 JSON 对象（{type(parsed).__name__}）"
+        return parsed, ""
+    return None, f"参数类型不受支持（{type(raw_args).__name__}）"
+
+
 class AIPanel(QWidget):
     """AI 对话面板。"""
 
@@ -313,8 +341,11 @@ class AIPanel(QWidget):
                 if os.path.exists(cls.CONFIG_FILE):
                     with open(cls.CONFIG_FILE, "r", encoding="utf-8") as f:
                         return json.load(f)
-            except Exception:
-                pass
+            except Exception as exc:
+                # 兜底路径（AI 内核不可用时）：读坏了仍按空配置继续，但原因要
+                # 可查——否则「没配过」和「配置坏了」在界面上是同一件事。
+                logger.warning("兜底读配置失败，按空配置继续：%s | %s: %s",
+                               cls.CONFIG_FILE, type(exc).__name__, exc)
             return {}
         store = ConfigStore(cls.CONFIG_FILE)
         try:
@@ -917,6 +948,30 @@ class AIPanel(QWidget):
             return
         self._append_step_card(step)
 
+    def _forward_unexecuted_mcp_calls(self, tool_calls: List[Dict[str, Any]],
+                                     executed: int) -> None:
+        """把「模型请求但工具环未执行」的 MCP 硬件调用转给桌面执行。
+
+        参数不可用时**不下发**：转发的是一条硬件指令，拿空参数去执行会让设备
+        在「看起来执行了」的名义下做错动作，比不执行更糟。跳过时必须在对话里
+        明说「这次没执行」，否则用户只看到一张停在「运行中」的步骤卡，分不清
+        是没跑还是跑了没效果。
+        """
+        for i, tc in enumerate(tool_calls):
+            if i < executed:
+                continue
+            name = tc.get("name", "")
+            if name not in self._mcp_tool_names:
+                continue
+            args, why = _forwardable_args(tc.get("arguments", {}))
+            if args is None:
+                note = (f"未执行工具 {name}：{why}。"
+                        f"已跳过本次硬件转发，未向设备下发任何指令。")
+                logger.warning(note)
+                self._add_system_message(note)
+                continue
+            self.tool_call_requested.emit(name, args)
+
     def _append_to_view(self, html: str):
         cursor = self.conversation_view.textCursor()
         cursor.movePosition(QTextCursor.End)
@@ -1307,24 +1362,7 @@ class AIPanel(QWidget):
             # 转发链只服务「模型请求但工具环未执行」的硬件调用（MCP 注册名）：
             # 已执行的调用在工具环内已经走 MCP handler 落到硬件，不再事后转发
             # （"先执行再转发"是被拆除的坏结构）；软件工具一律不过二次转发。
-            executed = len(tool_results)
-            for i, tc in enumerate(tool_calls):
-                if i < executed:
-                    continue
-                name = tc.get("name", "")
-                if name in self._mcp_tool_names:
-                    raw_args = tc.get("arguments", {})
-                    args = {}
-                    if isinstance(raw_args, dict):
-                        args = raw_args          # 已是对象：原样带参数转发
-                    elif isinstance(raw_args, str):
-                        try:
-                            args = json.loads(raw_args)
-                        except Exception:
-                            pass
-                    if not isinstance(args, dict):
-                        args = {}                # 其它类型一律不做猜测
-                    self.tool_call_requested.emit(name, args)
+            self._forward_unexecuted_mcp_calls(tool_calls, len(tool_results))
 
         # 配了 API Key 走的是模型链路，但工具调用同样要进真实编排器 /
         # Hooks —— 两条入口、一份事实源，状态条数字才不会一半真一半假。

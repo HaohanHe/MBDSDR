@@ -438,7 +438,12 @@ class TestAiFinishedSemantics:
         assert emitted == [], "工具环已执行过的调用不得再转发一次: %r" % emitted
         assert panel._tool_log[0].elapsed_ms == 3.0
 
-    def test_bad_arguments_json_falls_back_to_empty_args(self, panel):
+    def test_bad_arguments_json_is_not_forwarded(self, panel):
+        """契约：参数解析失败就不下发（空参数打硬件比不执行更糟），并告知用户。
+
+        旧契约是「解析失败按空参数转发」，等于让设备在「看起来执行了」的名义下
+        收到一条没参数的指令；A03 收口后改为拒发 + 对话区明示「未执行」。
+        """
         panel.register_mcp_tools([{"name": "sdr_set_frequency"}],
                                  lambda n, p: None)
         emitted = []
@@ -449,7 +454,8 @@ class TestAiFinishedSemantics:
                             "arguments": "{not json"}],
             "tool_results": [],
         })
-        assert emitted == [("sdr_set_frequency", {})]
+        assert emitted == [], "参数坏了仍向硬件转发了: %r" % emitted
+        assert "未执行工具 sdr_set_frequency" in _view_text(panel)
 
     def test_streaming_content_is_not_duplicated(self, panel):
         panel._on_stream_delta("正在调谐…")
@@ -663,7 +669,11 @@ class TestConversationAndConfig:
 
 
 class TestForwardedToolCallArguments:
-    """转发给硬件的参数不许被静默吞掉（吞了就用空参数打真硬件）。"""
+    """转发给硬件的参数不许被静默吞掉：拿不到可用参数就不下发。
+
+    旧契约是「解析失败按空参数转发」，那正是「吞掉参数去打真硬件」；现在
+    统一为：可下发就给确切参数，不可下发就跳过并在对话区说明未执行。
+    """
 
     def _emit(self, panel, arguments):
         panel.register_mcp_tools([{"name": "sdr_set_frequency"}],
@@ -688,13 +698,19 @@ class TestForwardedToolCallArguments:
         emitted = self._emit(panel, '{"freq_mhz": 435.0}')
         assert emitted == [("sdr_set_frequency", {"freq_mhz": 435.0})]
 
-    def test_unparseable_arguments_fall_back_to_empty_params(self, panel):
-        """真解析不了才给空参数（不猜、不伪造默认值）——弹药必须显式。"""
-        assert self._emit(panel, "{not json") == [("sdr_set_frequency", {})]
+    def test_unparseable_arguments_are_not_forwarded(self, panel):
+        """真解析不了就拒发（不猜、不伪造默认值），并让用户看见未执行。"""
+        assert self._emit(panel, "{not json") == []
+        assert "未执行工具 sdr_set_frequency" in _view_text(panel)
 
-    def test_list_or_number_arguments_fall_back_to_empty_params(self, panel):
-        for bad in ([1, 2], 435.0, None, True):
-            assert self._emit(panel, bad) == [("sdr_set_frequency", {})]
+    def test_list_or_number_arguments_are_not_forwarded(self, panel):
+        """解析结果不是对象、或类型根本不受支持：同样拒发，不降级成空参数。"""
+        for bad in ([1, 2], 435.0, True):
+            assert self._emit(panel, bad) == [], "坏参数被转发了: %r" % (bad,)
+
+    def test_explicit_null_arguments_mean_no_params(self, panel):
+        """显式 null 是「这次调用没参数」，不是坏参数：照常以空参数下发。"""
+        assert self._emit(panel, None) == [("sdr_set_frequency", {})]
 
     def test_missing_arguments_key_is_empty_params(self, panel):
         emitted = []
