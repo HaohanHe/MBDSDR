@@ -468,6 +468,14 @@ class ModulePanel(QWidget):
             return False
         self._confirmed_gain_db = value
         self.gain_val.setText(f"{int(round(value))} dB")
+        # 与控制面板同一条底线：后端夹值/写入失败时必须告警。
+        # 格式（这里是整数、控制面板是 :g）暂不统一，但「未生效」不能静默。
+        requested = float(self.gain_slider.value())
+        if abs(value - requested) > 1e-9:
+            hint = (f"后端报告增益 {value:g} dB，配置意图 {requested:g} dB 未生效"
+                    "（配置文件未改）")
+            logger.warning("%s", hint)
+            self.gain_val.setToolTip(f"⚠ {hint}")
         return True
 
     def set_rf_params(self, freq_hz: Optional[float] = None,
