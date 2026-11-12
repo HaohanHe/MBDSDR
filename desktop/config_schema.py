@@ -10,6 +10,17 @@ MBDSDR 桌面端设置单一事实源（desktop/config_schema.py）
 设计红线：
   * 默认值必须有出处：每条 ``source`` 写清取自哪个文件/哪一行/哪个上游约定，
     不允许"拍脑袋"。
+  * source 机检口径（tests/test_config_schema_source_symbols.py）：该检查
+    **只钉「引用的符号还在不在」**，不比对整句文案——
+      - 能证明：写到的 ``desktop/xxx.py`` 里的 ``SYM`` / C++ 文件里的
+        ``kFoo`` 此刻确实存在（改成不存在的名字会立刻红）；
+      - 不能证明：这条 source 对默认值的描述仍然准确。数值/语义可能已经
+        改过、符号名没跟着变，机检照样绿；
+      - 「符号还在、语义已变」只能人工复核：改默认值或改语义时顺手读一眼
+        source 指向的代码，别把机检绿灯当成描述正确的证据。
+    纯散文（历史沿革等确无符号可判定的段落）须显式标注
+    「历史说明，不参与机检」，机检据此跳过；没标注的散文会进
+    unverifiable_mentions() 清单等人工处理。
   * 答不出"用户何时想改 / 默认依据 / 改错怎么办"的项，不进 exposed，
     在本文件底部 LOCKED 区登记原因（文档 docs/settings-inventory.md 同步）。
   * 越界/坏值绝不崩：数值夹到范围、未知枚举回默认，并让调用方能看见原因
@@ -421,7 +432,8 @@ ALL_ITEMS: Tuple[SettingItem, ...] = (
               "MBDSDR/recordings（删/升级程序目录不会连带删除录音）。"
               "改目录只影响新录音，已有录音不动。"),
         apply_note="只影响新录音；当前录音会话与已有文件不受影响",
-        source=("desktop/main_window.py 旧实现写死 ~/mbdsdr_recordings（历史说明）；"
+        source=("desktop/main_window.py 旧实现写死 ~/mbdsdr_recordings"
+                "（历史说明，不参与机检）；"
                 "新唯一来源 desktop/settings.py resolve_record_dir()"),
     ),
     SettingItem(

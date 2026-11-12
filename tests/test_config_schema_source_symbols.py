@@ -13,9 +13,13 @@
   * 模块点写（`desktop.themes.DEFAULT_THEME`、`mbdsdr_ai.sdr_backend.
     RTLSDRBackend.SAMPLE_RATES`）→ 按最长可 import 前缀拆开再 `getattr`。
 
-只钉「符号存在」，不比对整句文案（文案改写不该红）。
+只钉「符号存在」，不比对整句文案（文案改写不该红）。完整口径（能证明
+什么 / 不能证明什么 / 符号还在但语义已变需人工复核）见
+``desktop/config_schema.py`` 模块 docstring。
 纯散文里的提及（没有可判定符号）不猜、不判红；用
-``unverifiable_mentions()`` 打清单人工核对。
+``unverifiable_mentions()`` 打清单人工核对。确属历史沿革、无符号可判定的
+段落须显式标注 ``历史说明，不参与机检``，本检查据此跳过——标记不是豁免
+符号检查的护身符，只是把「已归档的说明」和「待补符号的欠账」分开。
 """
 import importlib
 import os
@@ -58,6 +62,9 @@ NATIVE_SYMBOL = re.compile(r"\bk[A-Z][A-Za-z0-9_]*\b")
 #: C++ / Dart 的方法调用写法（spectrum_engine.h 的 setWindowType()）。
 #: 有些落点只有方法没有 k 常量，文本 grep 方法名同样能钉住「符号存在」。
 NATIVE_CALL = re.compile(r"\b([A-Za-z_][A-Za-z0-9_]*)\s*\(")
+
+#: 历史沿革段落的显式标记：写了它就从散文清单跳过（见模块 docstring）。
+HISTORICAL_NOTE = "历史说明，不参与机检"
 
 #: 不是符号的字面量/缩写（日志级别、字面量、单位、协议名）。
 NOISE = frozenset({
@@ -155,6 +162,8 @@ def scan(items):
             continue
         claimed = False
         for path, is_py, segment in _segments(source):
+            if HISTORICAL_NOTE in segment:
+                continue
             symbols = _python_symbols(segment) if is_py else _native_symbols(segment)
             if not symbols:
                 prose.append((item.key, path, segment.strip()[:70]))
@@ -226,6 +235,17 @@ def test_scan_covers_most_items():
     assert len(covered) >= 30, (
         f"{len(ALL_ITEMS)} 个 item 里只有 {len(covered)} 条抽到了可核实符号，"
         "抽取规则需复查")
+
+
+def test_historical_note_skips_prose_todo():
+    """标了「历史说明，不参与机检」的段落不进散文清单；抹掉标记就回来。"""
+    item = next(i for i in ALL_ITEMS if i.key == "record_dir")
+    assert HISTORICAL_NOTE in item.source, "record_dir 的历史段落没写标记"
+    assert all(k != "record_dir" for k, _p, _t in scan([item])[2]), \
+        "标了历史说明仍被当成散文欠账"
+    plain = replace(item, source=item.source.replace(HISTORICAL_NOTE, ""))
+    assert any(k == "record_dir" for k, _p, _t in scan([plain])[2]), \
+        "抹掉标记后仍不判散文：这条规则没有实际作用"
 
 
 # ---------------------------------------------------------------- 变异反证
