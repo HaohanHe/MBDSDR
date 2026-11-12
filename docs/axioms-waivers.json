@@ -1,0 +1,27 @@
+{
+  "version": 1,
+  "note": "豁免三要素：reason（为什么暂时不做）、review_by（到期复核日）、approver（谁批准）。缺任意一项由 D8 直接判违规；到期后自动重新计入违规。",
+  "waivers": [
+    {
+      "rule": "A01",
+      "path": "desktop/main_window.py",
+      "reason": "main_window.py 处于冻结期，禁止修改；读数迁移排到解冻后统一做，当前先在 readouts.py 建唯一产生点。",
+      "review_by": "2027-06-30",
+      "approver": "user（冻结决定）"
+    },
+    {
+      "rule": "A02",
+      "path": "desktop/main_window.py",
+      "reason": "同上：冻结文件内的 3 位小数 MHz 读数不能在本轮改，解冻后统一改为 readouts.format_frequency_hz。",
+      "review_by": "2027-06-30",
+      "approver": "user（冻结决定）"
+    },
+    {
+      "rule": "A12",
+      "path": "desktop/main_window.py",
+      "reason": "同上：main_window 内的 _fmt_* 与 readouts.py 重复，冻结期内只能登记不能合并。",
+      "review_by": "2027-06-30",
+      "approver": "user（冻结决定）"
+    }
+  ]
+}
