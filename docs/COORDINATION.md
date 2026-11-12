@@ -1917,7 +1917,7 @@ No supported devices found），GNSS+SDR 同开复验没做成；离线那次
 > 实例：`840d10ef` 在临时 worktree 重放，缺那 11 行 → 2 处 RESIDUE / RC 1，补回 → OK / RC 0。
 > 2026-11-12 已接进 `post-commit`：每次提交后自动跑（约 0.35 s），命中时打显眼块并追加
 > `.locks/residue_commits.log`（JSONL：时间/commit/文件/行号/被删原文）；**只记录、不返回非 0**
-> ——提交已落地，卡下一笔只会把账算到别人头上。
+> ——提交落地后，卡下一笔只会把账算到别人头上。
 
 > **批次末手动跑的三道检查（2026-11-12，全部不进钩子）**
 >
@@ -2106,7 +2106,7 @@ No supported devices found），GNSS+SDR 同开复验没做成；离线那次
    （§6.1.4 宽限：刚过期可能只是没来得及续租）。
 2. `no_inflight`：`git status --porcelain -- <该文件>` 为空。
 
-**放行条件**：两条**同时**满足，且 `--reason` 非空（已改为必填）。`pid` 不参与判定。
+**放行条件**：两条**同时**满足，且 `--reason` 非空（现为必填）。`pid` 不参与判定。
 
 **为什么 pid 不能当判据（2026-11-13 收口）**：`claim` 是一次性 CLI，写完即退出，
 `pid` 记的就是那个短命进程——「pid 已死」是默认状态，不是异常状态。旧判据把
@@ -2250,7 +2250,7 @@ No supported devices found），GNSS+SDR 同开复验没做成；离线那次
   - `mbdsdr_ai/sdr_backend.py` `_ThreadedRingReader.stop()`：join 超时后只在
     `_thread.is_alive()` 为假时置 `None`（5 行增 / 1 行删）；
   - `tests/test_network_resource_leaks.py`：删除 `xfail(strict=True)` 立案标记，
-    转为普通断言（缺陷已修，按 strict 设计自动变红后转正）；
+    转为普通断言（缺陷修好后按 strict 设计自动变红再转正）；
   - 本文件这条记录。
 - 保留原改动的证明：接管前 `git hash-object mbdsdr_ai/sdr_backend.py`
   = `f5886177031b1ac60bc6aca46717b1f83f8593a2`；接管前该路径 `git status` 为空，
@@ -2436,7 +2436,7 @@ No supported devices found），GNSS+SDR 同开复验没做成；离线那次
 
 ### 流程规则：已提交的报告必须自带可验证凭据（2026-11-12）
 
-任何「已提交 / 已落库」的报告，必须附**能被别人独立验证**的凭据：
+任何「提交完成 / 落库」口径的报告，必须附**能被别人独立验证**的凭据：
 
 - 最低要求：提交号能被 `git cat-file -t <sha>` 取到（输出 `commit`）；
 - 更好：附 `git show --stat <sha>` 的头两行（提交摘要 + 改动文件）。
@@ -2448,7 +2448,7 @@ unreachable commit 逐棵读也没有——它从未落地。而后续判断（�
 让凭据本身可验证，下一个人一条命令就能证伪，比「下次注意」有用。
 
 **适用范围**：本台账每条结论、每次交接、每份对外报告。取不到的 hash 一律
-写成「未落地」，不许写成「已提交但找不到」。
+写成「未落地」，不许写成「提交过但找不到」。
 
 ### 6.2 共享文件清单（今天实际撞过的）
 
@@ -3792,7 +3792,7 @@ HEAD `2f83f482` 实测：白名单 103 行，`test_waivers_are_not_stale` 红 **
 | `docs/PRD.md:869` | `4abde1a` | 引用测试文件，提交改的是 `desktop/main_window.py` | 改引用 + 复跑 | WorkBuddy | 2026-11-13 | done：hash 未错（删假 0 Hz 回填）；补 `desktop/main_window.py:4213` — `绝不用 0 Hz`（R11 本体仍是「待补」） |
 
 > **外挂交接单（不计入 R1 条数）**：`docs/pending-patches/2026-11-06-audit-ft8-get-colorder-stale.md`（`86ae9807`）→ 审计线。
-> `docs/audit_r2/08_ft8_full.md:36` 称 `reorder_to_ldpc` 调用 `get_colorder`，但 `285a9863` 起已改为恒等映射、全仓零调用；待持有方修订。
+> `docs/audit_r2/08_ft8_full.md:36` 称 `reorder_to_ldpc` 调用 `get_colorder`，但该函数现为恒等映射 — `285a9863` — `mbdsdr_ai/ft8_decode.py:81` — `return list(llr_cw)`，且全仓零调用；待持有方修订。
 
 机检复跑：`python scripts/check_red_lifecycle.py` → 本轮实测 `FAIL 66 / R1 实修 71 条 / SNAPSHOT 0 条 / 历史横幅 123 条`（派发表落库时为 109，两数随各线提交浮动，以复跑为准）；派发完成后总账里的 `SNAPSHOT` 必须上升、`FAIL` 必须相应下降，不允许两边都不动。
 
@@ -4183,7 +4183,7 @@ pending-patches README），**只缺主体源文件**；主体改动已在子提
 
 **决定：不 amend。** `4655458f` 已是它的子提交，改写 `9b8b6c69` 必须 rebase
 子孙；当前多线并行提交，rebase 掉的会是别人的提交。保留错 message 并在此
-留一行更正，代价最小。后续私有 index 提交一律用显式 Python `subprocess`
+留一行修订，代价最小。后续私有 index 提交一律用显式 Python `subprocess`
 传 `GIT_INDEX_FILE`，并核对 `git log -1` 的 subject。
 
 ---
@@ -4207,7 +4207,7 @@ pid 3484 已退出，属 K16 同形的「孤儿改动」。配套测试
    已补 `write_reason`，理由含「解析失败 / 顶层不是对象」与异常原文。
 3. **补齐的缺口二（测试）**：变异反证原是空跑——`_check_unknown_keys_kept`
    连续两次 `setValue(0.42)`，值不变不发 `valueChanged`，写回根本不发生，
-   把合并改成整体覆盖也照样绿。已改为每次投不同值并用 `disk.get()` 断言；
+   把合并改成整体覆盖也照样绿。改为每次投不同值并用 `disk.get()` 断言 — `8406ab93` — `tests/test_config_single_writer.py:65` — `disk.get("api_key")`；
    现在「改回整体覆盖」必抛 `AssertionError`。
 4. **验证**：`tests/test_settings_panel_corrupt_config.py` 7 passed；
    16 文件批次 `7 failed / 369 passed`，7 条红与 HEAD 基线逐一对应。
@@ -4516,10 +4516,10 @@ action 只跳该行且给可读原因、`NON_TAKEOVER_ACTIONS` 白名单逐 acti
 A 一退 B 就裸奔（探针 WROTE-OK）；修复后 B 存活期间一律 REFUSED，B 退出后属性才恢复可写
 （无永久只读）。
 
-**4c 扫出的拦截面（已修，无棘轮）**：定向子集 69 passed / 1 skipped / 6 errors，错误全部
+**4c 扫出的拦截面（修复批次，无棘轮）**：定向子集 69 passed / 1 skipped / 6 errors，错误全部
 来自 `tests/test_ui_hard_defects.py::clean_window_settings` 直写真实
-`~/.mbdsdr/gui_config.json`（只重定向了 APPDATA、没重定向 HOME）。已改为请求
-`isolated_profile`；同文件复跑 15 passed / 1 skipped（skip 是屏幕可用宽 <1700px，与本次
+`~/.mbdsdr/gui_config.json`（只重定向了 APPDATA、没重定向 HOME）。改为请求 `isolated_profile`，连 HOME 一起重定向 — `7d19ea90` — `tests/conftest.py:1870` — `USERPROFILE`；
+同文件复跑 15 passed / 1 skipped（skip 是屏幕可用宽 <1700px，与本次
 无关）。其余候选文件全绿。
 
 **附带修复（子会话锁）**：`tests/test_ui_settings_isolation_guard.py` 的子进程原先被塞
