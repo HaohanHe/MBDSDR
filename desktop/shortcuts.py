@@ -135,6 +135,11 @@ SHORTCUTS: Tuple[Shortcut, ...] = (
 #: id -> Shortcut（构建期按 id 取键）
 BY_ID = {s.id: s for s in SHORTCUTS}
 
+#: 局部 scope：只在某个控件自身获焦 / 某个形态下生效。不在此集合里的 scope
+#: 视为「全局生效」——两个全局 scope 绑同一序列是真冲突（谁生效取决于装配
+#: 顺序）；局部与全局同键则是设计允许的（局部优先）。
+LOCAL_SCOPES = frozenset({"spectrum", "planetarium"})
+
 # ---------------------------------------------------------------------------
 # 用户覆写层（「设置 → 快捷键」可改键）
 # ---------------------------------------------------------------------------
@@ -227,26 +232,65 @@ def clear_all_overrides() -> None:
     load_overrides(force=True)
 
 
-def conflicts(overrides: Optional[Dict[str, str]] = None) -> List[Tuple[str, str, str]]:
-    """同一 scope 内的键位冲突：返回 [(scope, 键序列, id 甲, id 乙)...] 的简化表。
+def conflicts(overrides: Optional[Dict[str, str]] = None) -> List[Tuple[str, str, str, str]]:
+    """键位冲突：同 scope 重复，或两个**非局部** scope 抢同一序列。
 
-    只查同 scope —— 跨 scope 同键是**设计允许**的（见文件顶部「焦点在哪，
-    局部优先」：A 归全天模式，频谱获焦时归 AM）。
+    返回 ``[(scope, 键序列, id 甲, id 乙)...]``，甲 = 先登记的、乙 = 后登记的。
+
+    判据（2026-11-12 W104）：
+      * **同一 scope** 下同一序列登记两次 → 冲突：后登记的那条永远收不到键；
+      * **两个 scope 都不在** ``LOCAL_SCOPES`` **里**却绑同一序列 → 冲突：两份
+        全局绑定抢同一次按键，谁生效取决于装配顺序，不可预期；
+      * 局部 scope 与全局 scope 同键**不算冲突**——这是设计允许的（见文件
+        顶部「焦点在哪，局部优先」：``A`` 频谱获焦归 AM，否则归全天模式）。
+        这类重叠用 :func:`scope_overlaps` 单独列，别混进冲突。
     没配键（None/空）的动作不参与，避免「多个解绑」被算成冲突。
     """
     ov = load_overrides() if overrides is None else overrides
     seen: Dict[Tuple[str, str], str] = {}
-    out: List[Tuple[str, str, str]] = []
+    out: List[Tuple[str, str, str, str]] = []
     for s in SHORTCUTS:
         key = (ov.get(s.id, s.key) or "").strip()
         if not key:
             continue
-        norm = key.upper().replace(" ", "")
+        norm = _normalize_key(key)
         slot = (s.scope, norm)
         if slot in seen:
             out.append((s.scope, key, seen[slot], s.id))
-        else:
-            seen[slot] = s.id
+            continue
+        if s.scope not in LOCAL_SCOPES:
+            for (other_scope, other_norm), other_id in seen.items():
+                if other_norm == norm and other_scope not in LOCAL_SCOPES:
+                    out.append((s.scope, key, other_id, s.id))
+        seen[slot] = s.id
     return out
+
+
+def scope_overlaps(overrides: Optional[Dict[str, str]] = None
+                   ) -> List[Tuple[str, str, str, str]]:
+    """跨 scope 同键但**被规则允许**的重叠（局部优先），供文档/报告如实列出。
+
+    与 :func:`conflicts` 互补：``conflicts`` 只报真冲突，这里报「设计上允许、
+    但值得知道」的重叠，避免把「A 在频谱里是 AM」误当成冲突去改键。
+    """
+    ov = load_overrides() if overrides is None else overrides
+    seen: Dict[Tuple[str, str], Tuple[str, str]] = {}
+    out: List[Tuple[str, str, str, str]] = []
+    for s in SHORTCUTS:
+        key = (ov.get(s.id, s.key) or "").strip()
+        if not key:
+            continue
+        norm = _normalize_key(key)
+        for (other_scope, other_norm), (other_id, _other_key) in seen.items():
+            if other_norm == norm and other_scope != s.scope:
+                if other_scope in LOCAL_SCOPES or s.scope in LOCAL_SCOPES:
+                    out.append((s.scope, key, other_id, s.id))
+        seen[(s.scope, norm)] = (s.id, key)
+    return out
+
+
+def _normalize_key(key: str) -> str:
+    """比较用归一化：大小写、空格不影响「是不是同一个键」。"""
+    return key.strip().upper().replace(" ", "")
 
 
