@@ -9,7 +9,7 @@
   5. DTMF：合成 8 个双音 -> Goertzel/正交能量法识别正确按键。
   6. ZVEI-1：合成 5 音调选呼序列 -> 解出 5 位 hex 选呼码。
 
-运行:  python3 tests/multimon_roundtrip.py
+运行:  python3 -m pytest tests/test_multimon_roundtrip.py -q
 退出码 0 全部通过；非 0 有失败。
 """
 from __future__ import annotations

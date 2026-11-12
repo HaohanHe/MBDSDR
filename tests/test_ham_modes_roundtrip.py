@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
 """
-tests/ham_modes_roundtrip.py
-=============================
+tests/test_ham_modes_roundtrip.py
+==================================
 MBDSDR 5 个业余无线电模式适配器的往返验证。
 
 覆盖：
@@ -12,7 +12,7 @@ MBDSDR 5 个业余无线电模式适配器的往返验证。
   4. Xastir  —— APRS 对象帧编解码往返 + 地理围栏
   5. minimodem —— Bell103 300baud FSK 调制/解调往返（不破坏现有接口）
 
-运行：python3 tests/ham_modes_roundtrip.py
+运行：python3 -m pytest tests/test_ham_modes_roundtrip.py -q
 """
 
 import os

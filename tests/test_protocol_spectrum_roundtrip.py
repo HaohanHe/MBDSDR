@@ -3,7 +3,7 @@
 """
 MBDSDR AI - 协议/频谱分析往返测试
 ==================================
-tests/protocol_spectrum_roundtrip.py
+tests/test_protocol_spectrum_roundtrip.py
 
 覆盖（对应完成标准）：
   1. URH 符号判决往返：已知位流 → ASK/FSK 调制 → 解调 → 位流一致

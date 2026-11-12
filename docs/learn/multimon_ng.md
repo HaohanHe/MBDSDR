@@ -2,7 +2,7 @@
 
 > 本地参考克隆：`repos/multimon-ng/`（EliasOenal/multimon-ng）
 > 配套实现：`mbdsdr_ai/multimon_decoders.py`
-> 往返验证：`tests/multimon_roundtrip.py`（6 项全过）
+> 往返验证：`tests/test_multimon_roundtrip.py`（6 项全过）
 >
 > 本文件只记录**这次真读 .c 源码后逐行对齐到 Python 的常量与位域**，
 > 每条都给 `file:line`。覆盖 POCSAG(BCH 纠错)、AFSK1200、DTMF、ZVEI-1。
@@ -138,7 +138,7 @@ Python 里 `_POCSAGBCH` 完全照搬这两张表的构建过程（多项式除�
 
 ## 6. 往返验证结论
 
-`tests/multimon_roundtrip.py` 6 项全过：
+`tests/test_multimon_roundtrip.py` 6 项全过：
 
 1. BCH 校验矢量：SYNC/IDLE 伴随=0，1/2bit 必纠。
 2. POCSAG 全链路：同步+地址(12345)+BCD 消息 "12345" 解出一致。

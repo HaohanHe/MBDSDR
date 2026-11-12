@@ -4,7 +4,7 @@
 > 源码克隆在 `repos/urh`、`repos/inspectrum`、`repos/SigDigger`、`repos/sigutils`。
 > 移植产物：`mbdsdr_ai/urh_adapter.py`、`inspectrum_adapter.py`、`sigdigger_adapter.py`、
 > `protocol_stack.py`，以及对 `spectrum_processor.py` 的追加方法。
-> 测试：`tests/protocol_spectrum_roundtrip.py`（全绿）。
+> 测试：`tests/test_protocol_spectrum_roundtrip.py`（全绿）。
 
 ---
 
@@ -167,7 +167,7 @@ GLOBAL_STACK.register_protocol_layer(
 | `mbdsdr_ai/sigdigger_adapter.py` | sigutils 信道检测/峰值检测/AMR + `register_sigdigger_tools` |
 | `mbdsdr_ai/protocol_stack.py` | 三层抽象 + 注册表 + 现有解码器适配器 + `register_protocol_stack_tools` |
 | `mbdsdr_ai/spectrum_processor.py` | 追加 `peak_detect()` / `measure_cursors()` |
-| `tests/protocol_spectrum_roundtrip.py` | 16 项全绿 |
+| `tests/test_protocol_spectrum_roundtrip.py` | 6 项全绿 |
 
 ## 7. 完成标准核对
 - [x] 所有模块可 import

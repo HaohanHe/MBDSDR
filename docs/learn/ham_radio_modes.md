@@ -4,13 +4,13 @@
 >
 > | 模式 | 上游 | 本地克隆 | Python 移植 | 测试 |
 > |------|------|----------|-------------|------|
-> | pat (Winlink B2F) | la5nta/pat | `repos/pat/` | `mbdsdr_ai/pat_adapter.py` | `tests/ham_modes_roundtrip.py` |
+> | pat (Winlink B2F) | la5nta/pat | `repos/pat/` | `mbdsdr_ai/pat_adapter.py` | `tests/test_ham_modes_roundtrip.py` |
 > | ARDOP OFDM | hamarituc/ardop | `repos/ardop/` | `mbdsdr_ai/ardop_adapter.py` | 同上 |
 > | JS8Call | js8call/js8call | `repos/js8call/` | `mbdsdr_ai/js8call_adapter.py` | 同上 |
 > | Xastir APRS | xastir/xastir | `repos/xastir/` | `mbdsdr_ai/xastir_adapter.py` | 同上 |
 > | minimodem Bell103 | kamalmostafa/minimodem | `repos/minimodem/` | `mbdsdr_ai/minimodem_adapter.py`(追加) | 同上 + `tests/minimodem_test.py` |
 >
-> 运行：`python3 tests/ham_modes_roundtrip.py`（全绿）。
+> 运行：`python3 -m pytest tests/test_ham_modes_roundtrip.py -q`（全绿）。
 
 ---
 
@@ -162,7 +162,7 @@ BaudotCodec），本次**追加** Bell103 专用模式，不改动现有 Bell202
 - 模块级 `register_minimodem_tools(registry)` 注册 `bell103_modulate_text` /
   `bell103_demodulate_text` 两个新工具
 
-回归保护：`tests/ham_modes_roundtrip.py` 同时验证 Bell202 (1200/2200Hz) 与
+回归保护：`tests/test_ham_modes_roundtrip.py` 同时验证 Bell202 (1200/2200Hz) 与
 Baudot 字母/数字换档仍正常。
 
 ---
