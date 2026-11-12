@@ -658,9 +658,12 @@ class SpyServerBackend(SDRBackend):
         # 再下发初始化命令，避免用 RTL-SDR 假设去要求一台 Airspy/HF 服务端。
         self._apply_server_capabilities(client.server_info)
 
-        # 初始化下发（失败不掩盖：set_* 会把原因写进 status.error）
-        self.set_sample_rate(self.status.sample_rate_hz)
-        self.set_frequency(self.status.frequency_hz or 98_000_000.0)
+        # 初始化下发：失败必须让连接失败。半配置链路上线会让 status 写新值、
+        # 实际仍在上一档频率/采样率——用户看到的调谐状态是假的。
+        if not self.set_sample_rate(self.status.sample_rate_hz):
+            return self._connect_init_failed("采样率")
+        if not self.set_frequency(self.status.frequency_hz or 98_000_000.0):
+            return self._connect_init_failed("中心频率")
         self.set_gain(20.0)
 
         self._ring_reader = _ThreadedRingReader(
@@ -674,6 +677,19 @@ class SpyServerBackend(SDRBackend):
             logger.warning("SpyServerBackend 启动环形缓冲生产者失败: %s", e)
             self._ring_reader = None
         return True
+
+    def _connect_init_failed(self, what: str) -> bool:
+        """握手成功但初始化下发被拒：如实断开，不带半配置链路上线。"""
+        detail = self.status.error or "对端拒绝该设置"
+        try:
+            self.disconnect()
+        except Exception:
+            pass
+        self.status.connected = False
+        self.status.link_state = STATE_FAILED
+        self.status.error = f"连接初始化{what}下发失败: {detail}"
+        logger.warning("SpyServerBackend %s", self.status.error)
+        return False
 
     def _ring_read(self, num_samples: int) -> Optional[np.ndarray]:
         if self._client is None:
