@@ -1,5 +1,6 @@
 # 第二轮深度代码审查 — 频谱与信号分析模块
 
+> 证据状态：E4——本文件数字未逐条绑定原始件/复跑命令，引用前须复核（判据见 docs/evidence-standard.md）。
 审查范围：
 - `mbdsdr_ai/spectrum_processor.py`（438 行）
 - `mbdsdr_ai/signal_spectrum.py`（114 行）

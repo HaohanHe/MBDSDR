@@ -1,5 +1,6 @@
 # R2 深度审查：FT8 完整链路
 
+> 证据状态：E4——本文件数字未逐条绑定原始件/复跑命令，引用前须复核（判据见 docs/evidence-standard.md）。
 审查范围：`mbdsdr_ai/ft8_decode.py`、`ft8_lite.py`、`ft8_ldpc.py`、`ft8_callsign.py`、`ft8_unpack.py`。
 对照基准：`repos/wsjtx/lib/ft8/*.f90`、`repos/wsjtx/lib/77bit/packjt77.f90`。
 

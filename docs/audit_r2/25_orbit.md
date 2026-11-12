@@ -1,5 +1,6 @@
 # 25 — orbit.py（卫星轨道力学 / SGP4）审查
 
+> 证据状态：E4——本文件数字未逐条绑定原始件/复跑命令，引用前须复核（判据见 docs/evidence-standard.md）。
 - 文件：`mbdsdr_ai/orbit.py`（294 行）
 - 审查方式：逐行 + 真实 ISS TLE 数值验证（sgp4 2.27）
 - 结论速览：**不是空壳**——真的调用了 `sgp4` 库、真的拉 celestrak TLE、真的做 TEME→ECEF→ENU。但有 **1 个物理符号错误（Coriolis/坐标系变换速度项符号反了）**，导致多普勒视线速度存在 ~0.5 km/s 量级系统偏差；另有 **1 条并行的残废路径 `decoders.py`**（不做 GMST 旋转 + 速度硬编码 0），这才是"真机红"的主要来源。

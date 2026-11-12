@@ -1,5 +1,6 @@
 # R2 代码审查：`mbdsdr_ai/sstv_decoder.py`
 
+> 证据状态：E4——本文件数字未逐条绑定原始件/复跑命令，引用前须复核（判据见 docs/evidence-standard.md）。
 - 审查对象：`mbdsdr_ai/sstv_decoder.py`（1027 行）
 - 审查方式：只读，逐行核对时序常量；并用 `real_sstv.wav` / `syn_robot36.wav` 实测验证
 - 实测环境：两 wav 均为 44100 Hz mono int16；syn 时长 36.9s，real 时长 72.9s

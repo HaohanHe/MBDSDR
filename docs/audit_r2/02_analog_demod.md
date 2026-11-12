@@ -1,5 +1,6 @@
 # 02 · 模拟解调审查（AM / FM / SSB）
 
+> 证据状态：E4——本文件数字未逐条绑定原始件/复跑命令，引用前须复核（判据见 docs/evidence-standard.md）。
 > 审查范围：`mbdsdr_ai/demod.py`（486 行）、`mbdsdr_ai/analog_demod.py`（72 行）
 > 只读审查，未修改任何代码。所有结论均附 `file:line` 与复现方式。
 

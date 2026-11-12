@@ -1,5 +1,6 @@
 # R2-18 QPSK 数字解调器审查（mbdsdr_ai/demod.py）
 
+> 证据状态：E4——本文件数字未逐条绑定原始件/复跑命令，引用前须复核（判据见 docs/evidence-standard.md）。
 - 审查文件：`mbdsdr_ai/demod.py`（487 行）
 - 审查方式：逐行通读 + numpy 只读复算（不修改源码）
 - 链路：RRC 匹配滤波 → QPSK Costas 环 → Gardner 位同步 → 硬判决 → （独立）K=7 r=1/2 Viterbi 解码 + CCSDS/NRZ-M 解扰

@@ -1,5 +1,6 @@
 # MBDSDR 第二轮深度代码审查 — sdr_tools.py 第 1–2000 行
 
+> 证据状态：E4——本文件数字未逐条绑定原始件/复跑命令，引用前须复核（判据见 docs/evidence-standard.md）。
 > **审查范围**: `mbdsdr_ai/sdr_tools.py` 第 1–2000 行（工具注册层）
 > **审查日期**: 2026-09-24
 > **审查人**: 子 agent 23（MCP 工具注册层 part1）

@@ -1,5 +1,6 @@
 # 第二轮深度代码审查：`mbdsdr_ai/amr.py`（自动调制识别 AMR）
 
+> 证据状态：E4——本文件数字未逐条绑定原始件/复跑命令，引用前须复核（判据见 docs/evidence-standard.md）。
 - 审查对象：`mbdsdr_ai/amr.py`（572 行）
 - 关联实验：`experiments/exp_amr.py`（100 行）
 - 实验产物：`paper/experiments/amr_accuracy_vs_snr.csv`、`amr_confusion_matrix_snr10.csv`

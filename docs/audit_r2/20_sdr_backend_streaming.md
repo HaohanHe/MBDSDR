@@ -1,5 +1,6 @@
 # R2 深度审查：sdr_backend.py 流式采样与后端层（后半部分 600–1196 行）
 
+> 证据状态：E4——本文件数字未逐条绑定原始件/复跑命令，引用前须复核（判据见 docs/evidence-standard.md）。
 > 审查范围：`mbdsdr_ai/sdr_backend.py` 第 600–1196 行
 > 审查日期：2026-09-24
 > 审查人：R2 子 agent（流式采样 / IQ 管道 / 模拟·文件·SpyServer 后端）

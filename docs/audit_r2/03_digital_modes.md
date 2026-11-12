@@ -1,5 +1,6 @@
 # 第二轮深度审查 — mbdsdr_ai/digital_modes.py
 
+> 证据状态：E4——本文件数字未逐条绑定原始件/复跑命令，引用前须复核（判据见 docs/evidence-standard.md）。
 - 文件：`/path/to/MBDSDR/mbdsdr_ai/digital_modes.py`
 - 行数：199（实际读到 199 行，与题面一致）
 - 审查方式：逐行通读

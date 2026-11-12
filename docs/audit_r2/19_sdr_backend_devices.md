@@ -1,5 +1,6 @@
 # 19 · sdr_backend.py 设备管理 / 后端抽象 / RTL-SDR 审查（R2）
 
+> 证据状态：E4——本文件数字未逐条绑定原始件/复跑命令，引用前须复核（判据见 docs/evidence-standard.md）。
 - 审查对象：`mbdsdr_ai/sdr_backend.py`（1196 行）
 - 审查范围：1–600 行（抽象基类、Mock、RTL-SDR、ai-sdr Mini 开头），并为"设备管理/枚举/热插拔"补读 `SDRBackendManager`（1078–1196）做交叉确认。
 - 结论概览：抽象骨架清晰、RTL-SDR 主链路可用；存在 **状态与硬件不一致**、**采样率不校验**、** setter 异常处理不一致** 三类真问题；HackRF/USRP 为半实现占位；**无任何热插拔机制**；已知问题 #5/#6 已逐条确认。

@@ -1,5 +1,6 @@
 # 第二轮深度代码审查 · 06 星座图 / 信号质量 / 频谱感知
 
+> 证据状态：E4——本文件数字未逐条绑定原始件/复跑命令，引用前须复核（判据见 docs/evidence-standard.md）。
 - 审查范围：`mbdsdr_ai/constellation.py`（70 行）、`mbdsdr_ai/signal_quality.py`（76 行）、`mbdsdr_ai/spectrum_sensing.py`（174 行）
 - 行数核验（`wc -l`）：constellation.py=70、signal_quality.py=76、spectrum_sensing.py=174，与任务书一致。
 - 审查方式：只读，通读全部真实代码 + 全局 grep 追调用方 + 本地 Python 实跑复现。

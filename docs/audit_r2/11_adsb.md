@@ -1,5 +1,6 @@
 # ADS-B / Mode-S (1090 ES) 深度代码审查 — 第二轮
 
+> 证据状态：E4——本文件数字未逐条绑定原始件/复跑命令，引用前须复核（判据见 docs/evidence-standard.md）。
 **审查范围**: `mbdsdr_ai/adsb.py` (239行), `mbdsdr_ai/adsb_lite.py` (368行)
 **参考基准**: `repos/dump1090/` (demod_2400.c, crc.c, ais_charset.c, cpr.c, mode_s.c)
 **审查日期**: 2026-09-24

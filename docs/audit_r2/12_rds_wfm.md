@@ -1,5 +1,6 @@
 # RDS / WFM 立体声 Lite 深度审查（第二轮）
 
+> 证据状态：E4——本文件数字未逐条绑定原始件/复跑命令，引用前须复核（判据见 docs/evidence-standard.md）。
 审查对象：
 - `mbdsdr_ai/rds_lite.py`（323 行）
 - `mbdsdr_ai/wfm_stereo_lite.py`（137 行）

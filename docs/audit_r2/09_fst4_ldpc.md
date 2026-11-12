@@ -1,5 +1,6 @@
 # 09 · mbdsdr_ai/fst4_ldpc.py 第二轮深度审查
 
+> 证据状态：E4——本文件数字未逐条绑定原始件/复跑命令，引用前须复核（判据见 docs/evidence-standard.md）。
 - 审查对象：`mbdsdr_ai/fst4_ldpc.py`（80 行，wc -l 实测）
 - 参考基线：`repos/wsjtx/lib/fst4/`（fst4_params.f90 / bpdecode240_101.f90 / decode240_101.f90 / genfst4.f90 / get_fst4_bitmetrics.f90 / fst4_decode.f90 / ldpc_240_101_parity.f90）
 - 执行验证：`python3 mbdsdr_ai/fst4_ldpc.py` 实跑通过（N=240 M=139，全零码字迭代=1，翻 6 位后残留错=0）
