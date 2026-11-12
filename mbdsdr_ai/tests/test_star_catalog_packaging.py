@@ -8,7 +8,8 @@ tests/test_star_catalog_packaging.py — 保证“装上了确实可用”
   2. 真构建层: 实际构建 wheel 与 sdist，并在压缩包里找到该 npz
      （防止只在源码树里能跑、安装后缺表）。
 
-设置 MBSDSR_SKIP_WHEEL_BUILD=1 可跳过真构建（例如无 pip/setuptools 的环境）。
+设置 MBSDSR_SKIP_WHEEL_BUILD=1 可跳过真构建（分钟级，纯逻辑调试时用；缺
+pip/setuptools 不再 skip——两者都是本仓声明要装的，见文件内断言）。
 """
 
 from __future__ import annotations
@@ -39,7 +40,12 @@ except ImportError:  # pragma: no cover
 
 def _load_pyproject():
     if tomllib is None:
-        pytest.skip("缺少 tomllib/tomli，无法解析 pyproject.toml")
+        pytest.fail(
+            "tomllib 不可用（Python < 3.11 且没装 tomli）：本仓 pyproject 声明 "
+            "requires-python>=3.10，但「解析自身 pyproject」依赖 3.11+ 标准库，"
+            "这是契约问题，不该 skip（docs/evidence-standard.md §2 附则）。"
+            "要么把 tomli 写进依赖，要么把 requires-python 提到 >=3.11。"
+        )
     with open(ROOT / "pyproject.toml", "rb") as fh:
         return tomllib.load(fh)
 
@@ -79,8 +85,11 @@ def test_wheel_contains_star_catalog(tmp_path):
 @pytest.mark.skipif(os.environ.get("MBSDSR_SKIP_WHEEL_BUILD") == "1",
                     reason="MBSDSR_SKIP_WHEEL_BUILD=1")
 def test_sdist_contains_star_catalog(tmp_path):
-    if importlib.util.find_spec("setuptools") is None:
-        pytest.skip("缺少 setuptools，无法构建 sdist")
+    assert importlib.util.find_spec("setuptools") is not None, (
+        "缺少 setuptools：它在 pyproject.toml 的 [build-system] requires 里声明"
+        "（setuptools>=68），属本仓声明要装的依赖——按 docs/evidence-standard.md "
+        "§2 附则必须红，不 skip。`pip install setuptools` 后重跑。"
+    )
     from setuptools import build_meta
     name = build_meta.build_sdist(str(tmp_path))
     archive = tmp_path / name

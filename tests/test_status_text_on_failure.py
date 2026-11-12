@@ -222,8 +222,11 @@ def test_satellite_save_png_success_says_saved(qtapp, tmp_path, monkeypatch):
 def _ai_panel_with_stubbed_side_effects(monkeypatch, tmp_path):
     """构造 AIPanel 并把落盘目标/状态刷新都隔离（不碰真实用户配置）。"""
     import ai_panel as ap
-    if not ap.AI_CORE_AVAILABLE:
-        pytest.skip("mbdsdr_ai 不可用，跳过 AI 面板配置用例")
+    assert ap.AI_CORE_AVAILABLE, (
+        "ai_panel.AI_CORE_AVAILABLE 为 False：mbdsdr_ai 是本仓代码，导不进来是回归，"
+        "不是「这台机器不具备条件」（docs/evidence-standard.md §2 附则），不在这里 "
+        "skip。先查 mbdsdr_ai 为什么导不进来。"
+    )
     monkeypatch.setattr(ap.AIPanel, "CONFIG_DIR", str(tmp_path))
     monkeypatch.setattr(ap.AIPanel, "CONFIG_FILE",
                         str(tmp_path / "absent-config.json"))
