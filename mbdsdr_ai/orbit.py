@@ -118,10 +118,8 @@ _FETCH_TIMEOUT_S = 15.0          # socket 层（连接/读）软超时
 _FETCH_HARD_DEADLINE_S = 20.0    # 含 DNS 的墙钟硬截止
 
 
-# 禁网判定是通用策略：它被 agent / model_manager / new_spacetime /
-# openapi_integration 等跨模块引用私有名，说明放错了地方。定义下沉到叶子
-# net_policy；原处保留同名别名，既有调用方不变。
-from .net_policy import network_disabled as _network_disabled
+# 禁网判定是通用策略，定义在叶子 net_policy；这里直接用公开名。
+from .net_policy import network_disabled
 
 
 def _bounded_urlopen(req, timeout_s: float, hard_deadline_s: float):
@@ -226,7 +224,7 @@ def _get_fetcher():
             opener=_tle_opener,
             cache_dir_provider=lambda: _CACHE_DIR,
             memory_provider=lambda: _TLE_CACHE,
-            offline_provider=_network_disabled,
+            offline_provider=network_disabled,
             clock=time.time,
             error_cls=TLEUnavailableError,
             source="celestrak",

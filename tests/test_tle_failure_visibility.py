@@ -137,10 +137,10 @@ def test_panel_hint_renders_failure_code(qapp, monkeypatch, isolated_profile,
 def test_status_bar_renders_failure_code(monkeypatch, tmp_path, case):
     """状态栏走同一条链路：真实 tracker 失败 → MainWindow 只渲染失败文案。"""
     import mbdsdr_ai.sat_tracker as st_mod
-    from mbdsdr_ai import orbit
+    from mbdsdr_ai import net_policy
     from mbdsdr_ai.sat_tracker import SatelliteTracker
 
-    monkeypatch.setattr(orbit, "_network_disabled", lambda: False)
+    monkeypatch.setattr(net_policy, "network_disabled", lambda: False)
     if case == "parse_failure":
         monkeypatch.setattr(st_mod, "_bounded_requests_get",
                             _resp_opener("这不是 TLE\n<garbage> 数据损坏\n"))

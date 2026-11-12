@@ -20,9 +20,8 @@ import numpy as np
 from typing import Dict, Any, List, Optional, Sequence, Tuple
 from dataclasses import dataclass
 
-# WAV 读取是通用音频原语（decode_router 等直接引用），定义在叶子 audio_io；
-# 原处保留同名别名，内部调用与既有调用方不变。
-from .audio_io import read_wav_audio as _read_wav_audio
+# WAV 读取是通用音频原语，定义在叶子 audio_io。
+from .audio_io import read_wav_audio
 
 # sgp4 卫星轨道计算
 try:
@@ -746,7 +745,7 @@ def _decode_ft4_wav(input_path: str, ext: str, result: Dict[str, Any],
             f"FT4 窄带入口仅支持 .wav 实音频，收到 {ext or '无扩展名'}；"
             "不支持把原始 IQ 或宽带 FM 鉴频当作已验证的 FT4 输入。",
         )
-    audio, audio_rate, error = _read_wav_audio(input_path)
+    audio, audio_rate, error = read_wav_audio(input_path)
     if error:
         return _narrowband_reject(result, "ft4", "invalid_wav", error)
     result["audio_sample_rate_hz"] = float(audio_rate)
@@ -912,7 +911,7 @@ def _decode_wspr_wav(input_path: str, ext: str, result: Dict[str, Any],
             f"WSPR 窄带入口仅支持 .wav 实音频，收到 {ext or '无扩展名'}；"
             "不支持把原始 IQ 或宽带 FM 鉴频当作已验证的 WSPR 输入。",
         )
-    audio, audio_rate, error = _read_wav_audio(input_path)
+    audio, audio_rate, error = read_wav_audio(input_path)
     if error:
         return _narrowband_reject(result, "wspr", "invalid_wav", error)
     result["audio_sample_rate_hz"] = float(audio_rate)
