@@ -8,6 +8,10 @@
 
 原则：不猜。文件缺失、JSON 结构变化、解析不出标的，一律 UNKNOWN 并写明原因，
 绝不静默当成「没命中」。退出码恒 0——这是提醒器，不是闸门。
+
+2026-11-12 补：`--include-partial` 把「部分完成 / 进行中」也扫一遍（此前只扫状态
+以「阻塞」开头的行，W11/W25 这类理由句藏在状态列别处，整行扫才抓得到）。该模式
+的输出一律走 `advice` / 「提示（不改变状态）」，不进 hits、不改状态，默认关闭。
 """
 from __future__ import annotations
 
@@ -26,7 +30,7 @@ CLAIM_HINT = re.compile(r"claim|在途|他人|重写中|持有", re.I)
 DECISION_HINT = re.compile(r"待\s*(?:D-\d+|产品决定|§\s*6)")
 PREREQ_HINT = re.compile(r"前置.*(?:未落库|未完成)")
 FILE_RE = re.compile(r"[A-Za-z0-9_./\\-]+\.py")
-W_RE = re.compile(r"W\d{2}")
+W_RE = re.compile(r"W\d{2,3}")
 D_RE = re.compile(r"D-\d+")
 DECIDED_RE = re.compile(r"已(?:经)?(?:裁|定|拍板|决定)|已裁决|已裁定|采纳|按此落")
 OPTION_RE = re.compile(r"^[ABC](?:\s|（|\(|：|:)")
@@ -41,7 +45,7 @@ def split_row(line: str) -> list[str]:
 def parse_work_orders(text: str) -> dict[str, dict]:
     rows: dict[str, dict] = {}
     for no, line in enumerate(text.splitlines(), 1):
-        if not re.match(r"^\|\s*W\d{2}\s*\|", line):
+        if not re.match(r"^\|\s*W\d{2,3}\s*\|", line):
             continue
         cells = split_row(line)
         if len(cells) < 5:
@@ -216,14 +220,40 @@ def load_context() -> tuple[dict, dict, dict | None, str | None, str | None]:
     return rows, decisions, claims, claims_error, None
 
 
-def scan_live(rows: dict, decisions: dict, claims: dict | None, claims_error: str | None):
-    scanned = [w for w in rows.values() if w["status"].startswith("阻塞")]
-    hits, unknown = [], []
-    for wo in scanned:
+def scope_of(status: str) -> str | None:
+    """按状态列首词定范围：blocked=阻塞，advice=部分完成/进行中，其余不扫。
+
+    状态列可能以 `**部分完成**` / `**进行中：…` 这类加粗前缀开头，先剥掉标记
+    再判首词，否则整行会被跳过（W86/W89/W91 就是这种情况）。
+    """
+    s = status.strip().lstrip("*").strip()
+    if s.startswith("阻塞"):
+        return "blocked"
+    if s.startswith("部分完成") or s.startswith("进行中"):
+        return "advice"
+    return None
+
+
+def scan_live(rows: dict, decisions: dict, claims: dict | None, claims_error: str | None,
+              include_partial: bool = False):
+    blocked = [w for w in rows.values() if scope_of(w["status"]) == "blocked"]
+    hinted = ([w for w in rows.values() if scope_of(w["status"]) == "advice"]
+              if include_partial else [])
+    hits, advice, unknown = [], [], []
+    for wo in blocked:
         for code, target, note in evaluate(wo, rows, decisions, claims, claims_error):
             item = {"work_order": wo["id"], "target": target, "code": code, "note": note}
             (unknown if code == "UNKNOWN" else hits).append(item)
-    return scanned, hits, unknown
+    for wo in hinted:
+        for code, target, note in evaluate(wo, rows, decisions, claims, claims_error):
+            item = {"work_order": wo["id"], "target": target, "code": code,
+                    "note": note, "scope": "advice"}
+            if code == "UNKNOWN":
+                item["note"] = "[提示] " + note
+                unknown.append(item)
+            else:
+                advice.append(item)
+    return blocked, hinted, hits, advice, unknown
 
 
 FIXTURES = [
@@ -236,15 +266,23 @@ FIXTURES = [
     ("W49", "W48", "阻塞：视觉冻结未解冻（FZ-04 尺寸类，用户未发解冻指令）；W48 已落库。解除条件：书面解冻尺寸类改动", "desktop/right_column.py", None),
     ("W55", "W25", "阻塞：视觉冻结未解冻（FZ-04）", "desktop/themes.py", None),
     ("W56", "W55", "阻塞：视觉冻结未解冻（FZ-04）", "desktop/themes.py", None),
+    # --include-partial 的反证：两条必中、一条必须不中（W50 只有「W31 未落库」
+    # 的陈述，没有「前置…未落库」的理由句式，属已知未完成，不该被提示）
+    ("W11", "W10、D-2", "部分完成（`224b2952` 导入预览「变化/缺失/清空」三段 + 逐项勾选已落库；merge/replace 语义仍待 D-2 拍板）", "", "DECISION_MADE"),
+    ("W25", "无", "部分完成（反馈测试 `tests/test_theme_switch_feedback.py` 未跟踪，`启动工单线/W25` 持有）", "tests/test_theme_switch_feedback.py", "CLAIM_GONE"),
+    ("W50", "W46、W31", "部分完成（**缺**菜单 20/20——该断言为 `xfail(strict)`，原因写明「W31 未落库，菜单只有后 13 节，前 7 节缺失」）", "", None),
 ]
 
 
 def self_test(rows, decisions, claims, claims_error) -> int:
     print("== 反证（修复前原文重放）==")
+    # claim 类 fixture 用空 claims 判：反证针对的是「解析 + 判据」，
+    # 不能因为另一条会话刚好持有某个 claim 就红/绿翻转（W45 曾这样飘过）。
+    fixture_claims = {}
     failed = 0
     for wid, dep, status, files, expected in FIXTURES:
         wo = {"id": wid, "files": files, "dep": dep, "status": status}
-        codes = [c for c, _, _ in evaluate(wo, rows, decisions, claims, claims_error)]
+        codes = [c for c, _, _ in evaluate(wo, rows, decisions, fixture_claims, None)]
         ok = (expected in codes) if expected else (not codes)
         if not ok:
             failed += 1
@@ -256,6 +294,8 @@ def self_test(rows, decisions, claims, claims_error) -> int:
 def main() -> int:
     ap = argparse.ArgumentParser(description="抓 roadmap 里的纸面阻塞（提醒器，退出码恒 0）")
     ap.add_argument("--json", action="store_true", help="输出 JSON")
+    ap.add_argument("--include-partial", action="store_true",
+                    help="连带扫「部分完成 / 进行中」，命中降级为提示（不改变状态）")
     ap.add_argument("--self-test", action="store_true", help="重放 2026-11-12 修复前原文做反证")
     args = ap.parse_args()
 
@@ -273,19 +313,28 @@ def main() -> int:
                 print(json.dumps(payload, ensure_ascii=False, indent=2))
             return 0
 
-        scanned, hits, unknown = scan_live(rows, decisions, claims, claims_error)
+        scanned, hinted, hits, advice, unknown = scan_live(
+            rows, decisions, claims, claims_error, args.include_partial)
         counts = {}
         for item in hits:
             counts[item["code"]] = counts.get(item["code"], 0) + 1
 
         if args.json:
-            print(json.dumps({
+            payload = {
                 "notice": NOTICE,
                 "scanned_blocked": len(scanned),
                 "hits": hits,
                 "unknown": unknown,
                 "counts": counts,
-            }, ensure_ascii=False, indent=2))
+            }
+            if args.include_partial:
+                advice_counts = {}
+                for item in advice:
+                    advice_counts[item["code"]] = advice_counts.get(item["code"], 0) + 1
+                payload["scanned_advice"] = len(hinted)
+                payload["advice"] = advice
+                payload["advice_counts"] = advice_counts
+            print(json.dumps(payload, ensure_ascii=False, indent=2))
             return 0
 
         print(f"扫描阻塞工单：{len(scanned)} 条（roadmap: {ROADMAP}）")
@@ -296,11 +345,20 @@ def main() -> int:
                 print(f"{it['work_order']:<6} {it['target'][:32]:<34} {it['code']:<14} {it['note']}")
         else:
             print("没有命中的纸面阻塞。")
+        if args.include_partial:
+            print(f"\n提示（不改变状态）：{len(advice)} 条"
+                  f"（扫「部分完成 / 进行中」{len(hinted)} 条）")
+            for it in advice:
+                print(f"{it['work_order']:<6} {it['target'][:32]:<34} {it['code']:<14} {it['note']}")
+            print("提示只说明「理由分句可能过期」，不代表条目可完工；改状态须单独批准。")
         if unknown:
             print(f"\nUNKNOWN（依据不足，不计入命中）：{len(unknown)} 条")
             for it in unknown:
                 print(f"  {it['work_order']}  {it['target']}  {it['note']}")
-        print(f"\n计数：命中 {len(hits)} 条；UNKNOWN {len(unknown)} 条；扫描 {len(scanned)} 条。")
+        tail = f"计数：命中 {len(hits)} 条；UNKNOWN {len(unknown)} 条；扫描 {len(scanned)} 条。"
+        if args.include_partial:
+            tail += f" 提示 {len(advice)} 条（不改状态）。"
+        print(f"\n{tail}")
         return 0
     except Exception as exc:  # 提醒器永不阻断
         msg = f"UNKNOWN: 检查器自身失败：{exc}"
