@@ -27,7 +27,7 @@ KNOWN_RED = ROOT / "docs" / "known-red-register.md"
 CAP_RE = re.compile(r"<!--\s*waived-total:\s*(\d+)\s*-->")
 ROW_RE = re.compile(r"^\|\s*(\d+)\s*\|")
 #: 「已登记红」出口：白名单只减不增，确实不可复核的结论改走 K 编号登记。
-#: 标记格式固定为 `<!-- claims-gate-exempt: K20 docs/x.md#<12位指纹> -->`。
+#: 标记格式固定为 `<!-- claims-gate-exempt: K25 docs/x.md#<12位指纹> -->`。
 EXEMPT_RE = re.compile(
     r"<!--\s*claims-gate-exempt:\s*(K\d+)\s+([\w./-]+)#([0-9a-f]{12})\s*-->")
 #: 建表时（2026-11-06）HEAD 的未证实断言数；只许往下减。
@@ -39,15 +39,49 @@ def _exempt_fps(text: str) -> set[str]:
 
     这条出口只负责「已登记」的那几条，不放行「还没登记」的新断言——否则它就是
     白名单 2.0，会把闸门重新变回摆设。
+
+    光校验「存在同名小节」不够：K20 曾同时被「tooltip 契约收口」和一条历史手测
+    占用，悬空校验照样放行。所以出口还要求：
+    * 该 K 的小节标题**有且只有一个**（重号 → 无法确定指向哪一节，fail closed）；
+    * 标记必须**落在该小节正文里**，不能挂在别的小节下；
+    * 该小节正文必须提到被登记的文档路径（锚点对得上，不是只借了个号）。
     """
-    headings = set(re.findall(r"^#+\s+(K\d+)\b", text, re.M))
+    lines = text.splitlines()
+    heads: list[tuple[int, str]] = []
+    for i, line in enumerate(lines):
+        m = re.match(r"^#{1,6}\s+(K\d+)\b", line)
+        if m:
+            heads.append((i, m.group(1)))
+    starts: dict[str, list[int]] = {}
+    for index, k in heads:
+        starts.setdefault(k, []).append(index)
+
     out: set[str] = set()
-    for m in EXEMPT_RE.finditer(text):
-        k, _doc, fp = m.group(1), m.group(2), m.group(3)
-        if k not in headings:
+    for i, line in enumerate(lines):
+        m = EXEMPT_RE.search(line)
+        if not m:
+            continue
+        k, doc, fp = m.group(1), m.group(2), m.group(3)
+        if k not in starts:
             raise AssertionError(
                 f"claims-gate-exempt 指向的 {k} 在 known-red-register 里没有小节标题；"
                 "出口必须绑一条正式登记的已知红（K 编号不可为空/不可悬空）")
+        if len(starts[k]) > 1:
+            where = "、".join(str(x + 1) for x in starts[k])
+            raise AssertionError(
+                f"claims-gate-exempt 的 {k} 有 {len(starts[k])} 个同名小节标题"
+                f"（第 {where} 行），无法确定指向哪一节；重号必须消歧后才许登记")
+        start = starts[k][0]
+        end = next((j for j, _ in heads if j > start), len(lines))
+        if not start < i < end:
+            raise AssertionError(
+                f"claims-gate-exempt 的 {k} 标记不在 {k} 小节内"
+                f"（小节为第 {start + 1}–{end} 行，标记在第 {i + 1} 行）")
+        body = "\n".join(ln for ln in lines[start + 1:end] if not EXEMPT_RE.search(ln))
+        if doc not in body:
+            raise AssertionError(
+                f"{k} 小节正文没有提到 {doc}；出口登记的文档与该小节对不上"
+                "（只借了号，不是这一条的登记）")
         out.add(fp)
     return out
 
@@ -110,10 +144,12 @@ def test_no_new_or_modified_unverified_claims():
 
 def test_registered_red_exit_requires_k_id():
     """出口必须带非空且真实存在的 K 编号：悬空的 K 直接红，不许当白名单用。"""
-    ok = "## K20 — x\n<!-- claims-gate-exempt: K20 docs/a.md#0123456789ab -->\n"
+    ok = ("## K20 — x\n\n本条登记 docs/a.md。\n\n"
+          "<!-- claims-gate-exempt: K20 docs/a.md#0123456789ab -->\n")
     assert _exempt_fps(ok) == {"0123456789ab"}
     for bad in (
-        "## K20 — x\n<!-- claims-gate-exempt: K99 docs/a.md#0123456789ab -->\n",
+        "## K20 — x\n\n见 docs/a.md。\n"
+        "<!-- claims-gate-exempt: K99 docs/a.md#0123456789ab -->\n",
         "<!-- claims-gate-exempt: K20 docs/a.md#0123456789ab -->\n",
     ):
         try:
@@ -121,6 +157,29 @@ def test_registered_red_exit_requires_k_id():
         except AssertionError:
             continue
         raise AssertionError("悬空/无小节的 claims-gate-exempt 没有被拒绝")
+
+
+def test_registered_red_exit_fails_closed_on_duplicate_or_misplaced_marker():
+    """K 编号重号 / 标记挂错小节 / 正文没有锚点 → 出口必须红。"""
+    cases = {
+        "两个小节同号": (
+            "## K20 — tooltip 契约\n\n见 docs/a.md。\n\n"
+            "## K20 — 录音落盘\n\n见 docs/b.md。\n\n"
+            "<!-- claims-gate-exempt: K20 docs/b.md#0123456789ab -->\n"),
+        "标记挂在别的小节下": (
+            "## K20 — 录音落盘\n\n见 docs/a.md。\n\n"
+            "## K21 — tooltip 契约\n\n"
+            "<!-- claims-gate-exempt: K20 docs/a.md#0123456789ab -->\n"),
+        "小节正文没有登记的文档": (
+            "## K20 — 录音落盘\n\n"
+            "<!-- claims-gate-exempt: K20 docs/a.md#0123456789ab -->\n"),
+    }
+    for why, text in cases.items():
+        try:
+            _exempt_fps(text)
+        except AssertionError:
+            continue
+        raise AssertionError(f"{why} 时出口没有 fail closed：{why}")
 
 
 def test_waivers_are_not_stale():
