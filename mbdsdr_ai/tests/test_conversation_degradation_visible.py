@@ -97,11 +97,15 @@ def test_corrupt_first_read_writes_backup_and_reason(tmp_path):
     backups = list(tmp_path.glob("conv_bad.json.corrupt-*"))
     backups = [p for p in backups if not p.name.endswith(".reason.txt")]
     assert len(backups) == 1, "首次读取必须产出且只产出一份备份"
-    assert backups[0].read_text(encoding="utf-8") == "{ not json"
+    assert backups[0].read_bytes() == b"{ not json"
     assert not path.exists(), "原件必须从列表路径移走，避免后续整文件覆写"
     reasons = list(tmp_path.glob("conv_bad.json.corrupt-*.reason.txt"))
     assert len(reasons) == 1, "备份必须留下可查的理由"
     assert "JSONDecodeError" in reasons[0].read_text(encoding="utf-8")
+
+    # 之后加载继续可用：坏文件移走后，新会话能正常写入并读回。
+    store.save("conv_bad", [{"role": "user", "content": "恢复"}])
+    assert store.load("conv_bad") == [{"role": "user", "content": "恢复"}]
 
 
 def test_backup_failure_blocks_save(tmp_path, monkeypatch):
@@ -109,7 +113,7 @@ def test_backup_failure_blocks_save(tmp_path, monkeypatch):
     store = ConversationStore(directory=str(tmp_path))
     path = tmp_path / "conv_block.json"
     path.write_text("{ broken", encoding="utf-8")
-    monkeypatch.setattr(conversation_mod, "_backup_corrupt", lambda _p: None)
+    monkeypatch.setattr(conversation_mod, "backup_corrupt", lambda _p: None)
 
     try:
         store.save("conv_block", [{"role": "user", "content": "新内容"}])
