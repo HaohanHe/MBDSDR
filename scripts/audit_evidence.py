@@ -87,17 +87,12 @@ FILE_BANNER_RE = re.compile(
     r"(?:本文件|全文|整篇|本页)[^\n]{0,24}(?:未验证|证据不足|E4)"
     r"|证据状态\s*[:：]\s*E4"
 )
-#: ① 本来就不需要证据：参数/规格/判据、标准或外部引用、可推导常量
-BUCKET_SPEC_RE = re.compile(
-    r"默认|阈值|上限|下限|范围|配置|设置项|可供|可选|步进|档位|分辨率|量程|枚举|标称|"
-    r"规格|单位|换算|定义|公式|λ/4|λg|λ/2|频段|下行|上行|频道|判据|容差|≤|≥"
-)
-BUCKET_REF_RE = re.compile(
-    r"标准|规范|教程|材料给出|协议|文献|论文|参考|引用|ITU|CCSDS|3GPP|IEC|GB/T|"
-    r"EN 302|教材|实测口径"
-)
-BUCKET_DERIVE_RE = re.compile(r"bin 宽|由 ?fs|推导|核算|= ?fs|fs/?N|N ?= ?\d|相干增益")
-MEASURE_VERB_RE = re.compile(r"实测|测得|读数|真机(?!红|绿)|现场|当晚|复跑|验证|测量")
+#: ①「无需证据」的判据不写在这里：单一事实源是 docs/evidence-standard.md §6.1 的
+#: ``<!-- no-evidence-rules:begin -->`` 区块，由 _no_evidence_rules() 读取。
+STANDARD_PATH = ROOT / "docs" / "evidence-standard.md"
+_RULES_BEGIN = "<!-- no-evidence-rules:begin -->"
+_RULES_END = "<!-- no-evidence-rules:end -->"
+_rules_cache: Optional[Tuple[re.Pattern, List[Tuple[str, str, re.Pattern]]]] = None
 # ④ 验收/性能结论：载荷性数字，标“未验证”不够，必须补测留件
 BUCKET_ACCEPT_FILE_RE = re.compile(
     r"docs/hw-acceptance\.md|docs/real_hw_acceptance_|dsp-performance-baseline"
@@ -233,6 +228,38 @@ def _has_sibling_data(rel: str) -> bool:
     return any(p.is_file() and p.suffix.lower() not in {".md", ".py"} for p in d.iterdir())
 
 
+def _no_evidence_rules() -> Tuple[re.Pattern, List[Tuple[str, str, re.Pattern]]]:
+    """读 ``docs/evidence-standard.md`` §6.1 的桶①明文清单（唯一判据）。
+
+    代码里不再保留第二份正则：文档怎么判，扫描器就怎么判。区块缺失/JSON 坏
+    直接退出（2），不做“读不到就放行”的静默降级——那样会让欠账凭空消失。
+    """
+    global _rules_cache
+    if _rules_cache is not None:
+        return _rules_cache
+    try:
+        text = STANDARD_PATH.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise SystemExit(f"读不到判据清单 {STANDARD_PATH}：{exc}")
+    begin = text.find(_RULES_BEGIN)
+    end = text.find(_RULES_END, begin + 1)
+    if begin < 0 or end < 0:
+        raise SystemExit(f"{STANDARD_PATH} 缺少 {_RULES_BEGIN} … {_RULES_END} 区块")
+    chunk = text[begin + len(_RULES_BEGIN):end]
+    match = re.search(r"```json\s*(.*?)```", chunk, re.S)
+    if not match:
+        raise SystemExit(f"{STANDARD_PATH} 的判据区块里没有 ```json 代码块")
+    try:
+        data = json.loads(match.group(1))
+        verb = re.compile(data["measure_verb"])
+        rules = [(str(item["bucket"]), str(item["reason"]), re.compile(item["pattern"]))
+                 for item in data["rules"]]
+    except (json.JSONDecodeError, KeyError, TypeError, re.error) as exc:
+        raise SystemExit(f"{STANDARD_PATH} 的判据清单不可解析：{exc}")
+    _rules_cache = (verb, rules)
+    return _rules_cache
+
+
 def _is_table_sep(line: str) -> bool:
     t = line.strip()
     return t.startswith("|") and "-" in t and not any(ch.isalnum() for ch in t)
@@ -255,14 +282,13 @@ def _bucket(rel: str, line: str) -> Tuple[str, str]:
         return "③", f"可复跑实验脚本存在未引路径（{sc[0]}）"
     if EXPERIMENT_README_RE.match(rel) and _has_sibling_data(rel):
         return "③", "同目录 data/ 有采集件，未逐条写路径"
-    # ① 本来就不需要证据（只对没有测量动作的行生效）
-    if not MEASURE_VERB_RE.search(line):
-        if BUCKET_SPEC_RE.search(line):
-            return "①", "参数/规格/判据定义"
-        if BUCKET_REF_RE.search(line):
-            return "①", "标准或外部引用"
-        if BUCKET_DERIVE_RE.search(line):
-            return "①", "可推导常量"
+    # ① 本来就不需要证据（只对没有测量动作的行生效）；判据读
+    # docs/evidence-standard.md §6.1，代码里不留第二份正则。
+    measure_verb, no_evidence_rules = _no_evidence_rules()
+    if not measure_verb.search(line):
+        for bucket, reason, pattern in no_evidence_rules:
+            if pattern.search(line):
+                return bucket, reason
     # ④ 验收/性能结论：必须补测并留原始件
     if BUCKET_ACCEPT_FILE_RE.search(rel) and BUCKET_ACCEPT_LINE_RE.search(line):
         return "④", "验收/性能结论，须补测留件"
