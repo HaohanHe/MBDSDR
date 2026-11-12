@@ -552,6 +552,21 @@ def _build_tool_table(toolset: Optional["MCPToolSet"] = None) -> List[Dict[str, 
             }
         return ack(c, **extra)
 
+    def _set_frequency(c: SDRController, a: Dict[str, Any]) -> Dict[str, Any]:
+        hz = float(a["hz"])
+        ok = c.set_frequency(hz)
+        return applied(c, ok, "调谐", requested_hz=hz)
+
+    def _set_sample_rate(c: SDRController, a: Dict[str, Any]) -> Dict[str, Any]:
+        sr = float(a["sr"])
+        ok = c.set_sample_rate(sr)
+        return applied(c, ok, "采样率", requested_sr_hz=sr)
+
+    def _set_bandwidth(c: SDRController, a: Dict[str, Any]) -> Dict[str, Any]:
+        hz = float(a["hz"])
+        ok = c.set_bandwidth(hz)
+        return applied(c, ok, "带宽", requested_hz=hz)
+
     # ---- 设备 ----
     add("list_devices", "枚举可见 SDR 设备（无硬件返回空，含 debug 调试源）。",
         _schema({}), lambda c, a: [d.to_dict() if hasattr(d, "to_dict") else {
@@ -572,9 +587,7 @@ def _build_tool_table(toolset: Optional["MCPToolSet"] = None) -> List[Dict[str, 
 
     # ---- 接收参数 ----
     add("set_frequency", "调谐中心频率（Hz）。",
-        _schema({"hz": _NUM}, ["hz"]),
-        lambda c, a: applied(c, c.set_frequency(float(a["hz"])), "调谐",
-                             requested_hz=float(a["hz"])), write=True)
+        _schema({"hz": _NUM}, ["hz"]), _set_frequency, write=True)
 
     add("get_frequency", "读取当前中心频率（Hz）。", _schema({}),
         lambda c, a: {
@@ -606,14 +619,10 @@ def _build_tool_table(toolset: Optional["MCPToolSet"] = None) -> List[Dict[str, 
                       ack(c, requested_db=float(a["db"])))[1], write=True)
 
     add("set_sample_rate", "设置基带采样率（Hz）。",
-        _schema({"sr": _NUM}, ["sr"]),
-        lambda c, a: applied(c, c.set_sample_rate(float(a["sr"])), "采样率",
-                             requested_sr_hz=float(a["sr"])), write=True)
+        _schema({"sr": _NUM}, ["sr"]), _set_sample_rate, write=True)
 
     add("set_bandwidth", "设置信道带宽（Hz）。",
-        _schema({"hz": _NUM}, ["hz"]),
-        lambda c, a: applied(c, c.set_bandwidth(float(a["hz"])), "带宽",
-                             requested_hz=float(a["hz"])), write=True)
+        _schema({"hz": _NUM}, ["hz"]), _set_bandwidth, write=True)
 
     add("set_squelch", "设置静噪门限（dB）。",
         _schema({"db": _NUM}, ["db"]),
