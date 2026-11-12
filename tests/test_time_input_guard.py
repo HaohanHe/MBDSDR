@@ -26,6 +26,7 @@ from __future__ import annotations
 import ast
 import os
 import re
+import warnings
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SCAN_DIRS = ("tests", os.path.join("mbdsdr_ai", "tests"))
@@ -46,6 +47,9 @@ _CLOCK_ATTRS = {
     ("QDateTime", "currentDateTimeUtc"),
     ("QDate", "currentDate"),
     ("QTime", "currentTime"),
+    # 取「此刻」的 epoch 变体：同样是墙钟，只是返回类型不同。
+    ("QDateTime", "currentSecsSinceEpoch"),
+    ("QDateTime", "currentMSecsSinceEpoch"),
 }
 
 #: Qt 取时刻的类名：from-import 后是普通 Name（``QDateTime.currentDateTime()``）。
@@ -79,19 +83,37 @@ def _imports(tree: ast.AST) -> tuple[set[str], set[str]]:
     return mods, names
 
 
+#: 允许出现在链根的名字：模块名（含别名）、``datetime`` 模块、Qt 时间类。
+_CLOCK_ROOTS = ("time", "datetime", "date") + _QT_CLOCK_CLASSES
+
+
+def _attr_chain(node: ast.AST) -> list[str]:
+    """``a.b.c`` → ["a", "b", "c"]；链根不是 Name 时返回空表（如 ``self.x``）。"""
+    out: list[str] = []
+    while isinstance(node, ast.Attribute):
+        out.append(node.attr)
+        node = node.value
+    if isinstance(node, ast.Name):
+        out.append(node.id)
+        out.reverse()
+        return out
+    return []
+
+
 def _is_clock_call(node: ast.Call, mods: set[str], names: set[str]) -> bool:
     f = node.func
-    if isinstance(f, ast.Attribute) and isinstance(f.value, ast.Name):
-        base = f.value.id
-        if base in mods or base in ("time", "datetime", "date") + _QT_CLOCK_CLASSES:
-            return (base, f.attr) in _CLOCK_ATTRS or (
-                base == "date" and f.attr == "today")
-        # datetime.datetime.now() / datetime.date.today()
-        if isinstance(f.value, ast.Attribute) and f.value.attr in ("datetime", "date"):
-            if f.value.attr == "datetime" and f.attr in ("now", "utcnow", "today"):
-                return True
-            if f.value.attr == "date" and f.attr == "today":
-                return True
+    if isinstance(f, ast.Attribute):
+        # 两段 mod.fn()、三段 mod.Cls.fn()（datetime.datetime.now()）、
+        # 四段 pkg.mod.Cls.fn()（PySide6.QtCore.QDateTime.currentDateTime()）。
+        # 旧实现把三段式判断嵌在「f.value 是 Name」的分支里，永远进不去——
+        # 声称覆盖、实际一行也管不到（2026-11-12 修，见守卫契约测试）。
+        chain = _attr_chain(f)
+        if len(chain) < 2:
+            return False
+        if chain[0] not in mods and chain[0] not in _CLOCK_ROOTS:
+            return False
+        cls, attr = chain[-2], chain[-1]
+        return (cls, attr) in _CLOCK_ATTRS or (cls == "date" and attr == "today")
     if isinstance(f, ast.Name) and f.id in names and f.id in ("now", "utcnow", "today"):
         return True
     if isinstance(f, ast.Name) and f.id == "time" and "time" in names:
@@ -133,12 +155,18 @@ def _is_feeding_call(call: ast.Call, parent: dict[int, ast.AST]) -> bool:
     return False
 
 
-def violations_in_source(path: str, source: str) -> list[tuple[int, str]]:
+def scan_source(path: str, source: str
+                ) -> tuple[list[tuple[int, str]], list[tuple[int, str, str]]]:
+    """扫一份源码，返回 (违规, 豁免)。
+
+    豁免不静默跳过：连同理由一起返回，调用方必须打印出来（见扫描用例）。
+    """
     tree = ast.parse(source, filename=path)
     mods, names = _imports(tree)
     parent = _ancestors(tree)
     lines = source.splitlines()
-    out: list[tuple[int, str]] = []
+    bad: list[tuple[int, str]] = []
+    exempt: list[tuple[int, str, str]] = []
     for node in ast.walk(tree):
         if not isinstance(node, ast.Call) or not _is_clock_call(node, mods, names):
             continue
@@ -146,9 +174,15 @@ def violations_in_source(path: str, source: str) -> list[tuple[int, str]]:
             continue
         line = lines[node.lineno - 1] if node.lineno <= len(lines) else ""
         if ALLOW_MARKER in line:
+            reason = line.split(ALLOW_MARKER, 1)[1].lstrip(" :—-").strip()
+            exempt.append((node.lineno, line.strip(), reason or "（未写理由）"))
             continue
-        out.append((node.lineno, line.strip()))
-    return out
+        bad.append((node.lineno, line.strip()))
+    return bad, exempt
+
+
+def violations_in_source(path: str, source: str) -> list[tuple[int, str]]:
+    return scan_source(path, source)[0]
 
 
 def test_no_bare_clock_as_test_input():
@@ -159,12 +193,17 @@ def test_no_bare_clock_as_test_input():
                 src = fh.read()
         except (OSError, UnicodeDecodeError):
             continue
-        for lineno, text in violations_in_source(path, src):
-            rel = os.path.relpath(path, ROOT)
+        hits, exempt = scan_source(path, src)
+        rel = os.path.relpath(path, ROOT)
+        for lineno, text, reason in exempt:
+            # 豁免必须可见：pytest 默认捕获输出，故同时写进 warnings summary。
+            warnings.warn(f"[timeguard] 豁免 {rel}:{lineno} — {reason}｜{text}",
+                          stacklevel=1)
+        for lineno, text in hits:
             bad.append(f"{rel}:{lineno}: {text}")
     assert not bad, (
         "测试把裸系统时钟当被测输入（请改为显式 start_unix/at_unix 注入，"
-        "或确属与墙钟比较的接线层则加 `# timeguard: allow`）：\n  "
+        "或确属与墙钟比较的接线层则加 `# timeguard: allow — 理由`）：\n  "
         + "\n  ".join(bad)
     )
 
@@ -201,6 +240,8 @@ def test_qt_clock_attrs_are_covered():
         ("QDateTime", "currentDateTimeUtc"),
         ("QDate", "currentDate"),
         ("QTime", "currentTime"),
+        ("QDateTime", "currentSecsSinceEpoch"),
+        ("QDateTime", "currentMSecsSinceEpoch"),
     }
     assert pinned <= _CLOCK_ATTRS
 
@@ -210,8 +251,10 @@ def test_qt_clock_attrs_are_covered():
         "f(QDateTime.currentDateTimeUtc())\n"
         "f(QDate.currentDate())\n"
         "f(QTime.currentTime())\n"
+        "f(QDateTime.currentSecsSinceEpoch())\n"
+        "f(QDateTime.currentMSecsSinceEpoch())\n"
     )
-    assert [n for n, _ in violations_in_source("qt.py", src)] == [2, 3, 4, 5]
+    assert sorted(n for n, _ in violations_in_source("qt.py", src)) == [2, 3, 4, 5, 6, 7]
 
     parse_src = (
         "from PySide6.QtCore import QDate, QTime\n"
@@ -219,6 +262,23 @@ def test_qt_clock_attrs_are_covered():
         "f(QTime.fromString('12:00', 'HH:mm'))\n"
     )
     assert violations_in_source("qt_parse.py", parse_src) == []
+
+
+def test_three_part_clock_call_is_detected():
+    """三段式 ``datetime.datetime.now()`` 落在 feeding 位置必须报。
+
+    回归钉扎：这段判断曾嵌在 ``isinstance(f.value, ast.Name)`` 分支内，永远
+    进不去——注释声称覆盖三段式，实际一行也管不到。把 ``_attr_chain`` 退化成
+    「只看 f.value 是不是 Name」即可复现该漏报（反证见提交说明）。
+    """
+    src = (
+        "import datetime\n"
+        "f(datetime.datetime.now())\n"
+        "g(when=datetime.datetime.now(datetime.timezone.utc))\n"
+        "h(datetime.date.today())\n"
+        "k(datetime.datetime.utcnow())\n"
+    )
+    assert sorted(n for n, _ in violations_in_source("three.py", src)) == [2, 3, 4, 5]
 
 
 def test_no_guard_marker_abuse():
