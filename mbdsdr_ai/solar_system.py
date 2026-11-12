@@ -29,6 +29,7 @@ Stellarium 仅作为技术参考与致谢，本模块未包含其源代码。
 
 from __future__ import annotations
 
+import logging
 import math
 import os
 import shutil
@@ -38,6 +39,8 @@ import urllib.request
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional, Tuple, Union
+
+logger = logging.getLogger(__name__)
 
 # ── 常量 ──────────────────────────────────────────────
 
@@ -244,7 +247,9 @@ def load_de421_bsp(path: str) -> Optional["_EphemerisHandle"]:
         handle.engine = "jplephem"
         handle.spk = SPK.open(path)
         return handle
-    except Exception:
+    except Exception as e:
+        # 星历打不开会让所有天体位置降级，调用方有权知道是路径/格式/依赖哪一类。
+        logger.warning("打开星历 %s 失败：%s: %s", path, type(e).__name__, e)
         return None
 
 
