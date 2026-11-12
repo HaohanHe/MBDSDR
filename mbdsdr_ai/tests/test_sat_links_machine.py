@@ -419,3 +419,85 @@ def test_transient_read_error_recovers_and_is_not_memoized(monkeypatch):
     monkeypatch.setattr(builtins, "open", real_open)
     payload2, state2 = SF.load_cache()
     assert payload2 is not None and state2["state"] == "ok"
+
+
+# --------------------------------------------- 并发回归（旧实现做反证）
+# 进程内函数，供 spawn 子进程导入；两边都用同一份磁盘缓存。
+def _race_legacy(cache_dir, norad, barrier, q):
+    """修复前的实现副本：无锁，先读旧缓存，再直写；读改写留交叉窗口。"""
+    os.environ["MBDSDR_CACHE_DIR"] = cache_dir
+    try:
+        from mbdsdr_ai import sat_links_fetch as SF
+        old, _ = SF.load_cache()
+        sats = dict(((old or {}).get("satellites")) or {})
+        barrier.wait(timeout=30)        # 两进程都读完旧缓存后才继续
+        sats[str(norad)] = {
+            "norad_cat_id": norad, "fetched_at": time.time(),
+            "transmitters": [tx(f"legacy-{norad}", 137620000)]}
+        payload = {"_schema": SF.CACHE_SCHEMA, "_source": "legacy",
+                   "_source_url": "", "fetched_at": time.time(),
+                   "fetched_at_utc": "", "satellites": sats, "failures": {}}
+        path = SF.cache_path()
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        tmp = f"{path}.legacy.{os.getpid()}"
+        with open(tmp, "w", encoding="utf-8") as fh:
+            json.dump(payload, fh, ensure_ascii=False)
+        os.replace(tmp, path)           # 旧实现：无锁直写
+        q.put((norad, "ok", True))
+    except BaseException as e:          # noqa: BLE001 - 子进程需回报
+        q.put((norad, "EXC", f"{type(e).__name__}: {e}"))
+
+
+def _race_fixed(cache_dir, norad, barrier, q):
+    os.environ["MBDSDR_CACHE_DIR"] = cache_dir
+    try:
+        from mbdsdr_ai import sat_links_fetch as SF
+
+        def opener(url, timeout_s, deadline_s):
+            barrier.wait(timeout=30)    # 旧缓存读完、网络返回处对齐
+            return json.dumps([tx(f"fixed-{norad}", 137620000)])
+
+        res = SF.refresh([{"norad_cat_id": norad, "key": f"k{norad}"}],
+                         opener=opener)
+        q.put((norad, res["state"], res["written"]))
+    except BaseException as e:          # noqa: BLE001
+        q.put((norad, "EXC", f"{type(e).__name__}: {e}"))
+
+
+def _run_race(cache_dir, worker):
+    import multiprocessing as mp
+    ctx = mp.get_context("spawn")
+    barrier, q = ctx.Barrier(2), ctx.Queue()
+    procs = [ctx.Process(target=worker,
+                         args=(str(cache_dir), n, barrier, q))
+             for n in (25338, 33591)]
+    for p in procs:
+        p.start()
+    outs = []
+    for _ in procs:
+        outs.append(q.get(timeout=90))
+    for p in procs:
+        p.join(timeout=90)
+    path = Path(cache_dir) / SF.CACHE_FILENAME
+    sats = sorted((json.loads(path.read_text(encoding="utf-8"))
+                   .get("satellites") or {})) if path.exists() else []
+    return outs, sats
+
+
+def test_concurrent_refresh_keeps_both_stars(tmp_path):
+    """修复版：两进程交叉刷新不同星，锁内重读合并，谁都不丢。"""
+    outs, sats = _run_race(tmp_path / "race_fixed", _race_fixed)
+    assert [o[2] for o in outs] == [True, True], outs
+    assert sats == ["25338", "33591"], (sats, outs)
+
+
+def test_legacy_unlocked_write_loses_a_star(tmp_path):
+    """反证：把无锁旧实现放同一场景，必须复现丢星或写失败。
+
+    这条测试在旧实现上是「绿」（证明缺陷真实存在），修复版若被回退成
+    无锁直写，则 `test_concurrent_refresh_keeps_both_stars` 会红。
+    """
+    outs, sats = _run_race(tmp_path / "race_legacy", _race_legacy)
+    assert sats != ["25338", "33591"], (sats, outs)
+    assert len(sats) == 1, (sats, outs)          # 后写者覆盖前者
+    assert any(o[1] == "ok" for o in outs), outs  # 至少一方真写成功
