@@ -142,6 +142,24 @@
     `assert not any(t.name == "mbdsdr-ring-producer" ...)`——线程物理上不可能
     退出，这条断言永远红，等于没有断言。
 
+**§2 附则：skip 判据（2026-11-12 定，不另立编号）**
+
+**skip 是「这台机器不具备条件」，不是「这条断言现在不成立」。** 两者混在一起，
+被跳过的用例就变成长期假绿：CI 绿、本地也绿，但那条断言其实已经在红。
+
+- **可以 skip**：拿不到硬件（无 RTL-SDR 枚举、无音频设备、无 GPS 串口、无 SatDump
+  环境、屏幕宽度不足等），且 skip 消息必须写明**缺什么**；
+- **必须红**：拿不到 id（`rtl_0` 之类标识符对不上）、接口契约变了、
+  **本仓该有的依赖导不进来**。判断「该不该有」的口径：这份依赖是本仓自己的代码，
+  还是本仓在 `requirements.txt` / `desktop/requirements.txt` 里声明要装的？
+  任一为是 → 导入失败就是回归，不许 skip。
+
+实例（2026-11-12）：`tests/test_no_sim_regression.py` 的 T3 原本对
+`from desktop.main_window import MainWindow` 与 `MainWindow()` 各写了一句
+`pytest.skip(f"依赖缺失: {e}")`。`MainWindow` 是本仓代码、PySide6 在
+`desktop/requirements.txt` 里声明，两者都属「本仓该有」——已删掉 skip，
+改成导入/实例化失败直接红。
+
 ## 3. 反例（出现即判不合规）
 
 | 反例 | 为什么错 | 正确写法 |

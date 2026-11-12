@@ -20,7 +20,13 @@
 设计要点：
   - T1/T2 用 ast 解析而非纯 grep，自动跳过注释/docstring/字符串字面量，
     避免把"绝不回退模拟"这类负向注释误报为违规。
-  - T3 用 QT_QPA_PLATFORM=offscreen，无显示器/无硬件跑 GUI；实例化失败则 skip。
+  - T3 用 QT_QPA_PLATFORM=offscreen，无显示器/无硬件跑 GUI。
+
+skip 判据（2026-11-12 定）：**本文件没有「依赖缺失」型 skip。** `MainWindow`
+是本仓代码，它要的 PySide6 写在 `desktop/requirements.txt` 里——两者都不是
+「这台机器不具备条件」，所以导入失败/实例化失败一律红。在这里写
+`pytest.skip(f"依赖缺失: {e}")` 等于把「产品被改坏了」登记成「环境不凑巧」，
+正是长期的假绿。判据全文见 `docs/evidence-standard.md` §2 附则。
 """
 
 import os
@@ -278,15 +284,11 @@ def test_offscreen_no_hardware_zero_fake(qapp, monkeypatch, tmp_path):
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setenv("USERPROFILE", str(tmp_path))
 
-    try:
-        from desktop.main_window import MainWindow
-    except Exception as e:  # pragma: no cover
-        pytest.skip(f"MainWindow 无法导入（依赖缺失）: {e}")
+    # 不 skip：MainWindow 是本仓代码、PySide6 在 desktop/requirements.txt 里
+    # 声明。导入失败 = 产品被改坏了，必须红（见文件顶部 skip 判据）。
+    from desktop.main_window import MainWindow
 
-    try:
-        w = MainWindow()
-    except Exception as e:  # pragma: no cover
-        pytest.skip(f"MainWindow 实例化失败: {e}")
+    w = MainWindow()
 
     w.show()
     # 让 GNSS auto_detect 超时、所有定时器各触发至少一次
