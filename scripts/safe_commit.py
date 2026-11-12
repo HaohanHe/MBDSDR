@@ -20,6 +20,14 @@
 ② 追加到提交说明的 ``excluded-hunks:`` 段，写明路径、行号范围与 owner（可空）。
 声明范围必须完整覆盖 diff 的 hunk，跨 hunk 边界或对不上任何改动一律拒绝。
 
+意图删除（2026-11-12）
+----------------------
+
+pre-commit 闸门对**任何未声明的删除条目**一律拒绝（幻影删除 fail-closed）。
+私有 index 里「HEAD 有、新索引没有」的路径就是本次真删的文件，本脚本把它们
+自动导出为 ``MBDSDR_INTENT_DELETIONS``，正常删文件不用手写声明；``--files``
+清单之外的路径根本不会进索引，因此不会被误声明。
+
 用法::
 
     python scripts/safe_commit.py --files a.py b.md --message-file msg.txt
@@ -46,6 +54,7 @@ ROOT = Path(
 )
 
 EXCLUDE_ENV = "MBDSDR_EXCLUDE_HUNKS"
+INTENT_ENV = "MBDSDR_INTENT_DELETIONS"
 _HUNK_RE = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@")
 
 
@@ -295,6 +304,13 @@ def _attempt(
                 "（把不该提交的 hunk 全排除了，或声明范围过大）"
             )
         return 1, f"文件集不符：多 {extra} 缺 {missing}"
+
+    # 2c) 意图删除集：私有 index 里「HEAD 有、新索引没有」的路径就是本次真删
+    #     的文件，自动导出给 pre-commit 闸门（闸门对未声明的删除一律拒绝）。
+    deletions = [line.split("\t", 1)[1] for line in staged if line.startswith("D\t")]
+    if deletions:
+        env[INTENT_ENV] = "\n".join(deletions)
+        print(f"[intent-delete] 自动声明 {len(deletions)} 个删除：{', '.join(deletions)}")
 
     # 3) 记录待提交 blob，供提交后复核（形态⑩）
     #    用 --verify --quiet 取：删除项（index/HEAD 都没有该路径）返回空，

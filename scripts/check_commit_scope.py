@@ -44,9 +44,13 @@
   「PowerShell `$env:GIT_INDEX_FILE` 没落到子进程」（事故 `16f075f3`：
   计划只提交 10 个文件，闸门读共享 index，一次夹带 26 个别线文件）。
 
-  暂存里的删除条目（`D`）同样受声明清单约束：私有 index 若基于旧 HEAD
-  `read-tree`，旧 HEAD 之后入库的文件会表现为「删除」，闸门对清单外的删除
-  条目直接拒并打印 `DELETE <path>`（未声明清单时只告警）。
+  暂存里的删除条目（`D`）必须逐条声明为**意图删除**（`--intent-delete <路径>`，
+  可重复；或环境变量 `MBDSDR_INTENT_DELETIONS`，换行 / `;` 分隔；`--expect`
+  声明清单里出现的删除条目同样算已声明）。未声明的删除条目一律拒并打印
+  `DELETE <path>`——fail-closed：全仓带删除的提交占比极低，声明成本可接受；
+  而漏掉这一条，陈旧私有 index 的幻影删除就会直接进库（`35db7a13` 等 4 起）。
+  `safe_commit.py` 会把 `--files` 里「HEAD 有、新索引没有」的路径自动导出为
+  意图删除集，正常删文件不需要手写声明。
 
   `--staged` 还有一道**内容一致性**闸：每个非删除的暂存条目，index 里的 blob
   必须与工作树当前内容一致；只要 `git diff --quiet -- <path>` 报 1 就拒，
@@ -84,6 +88,7 @@ DEFAULT_LOCKS_DIR = Path(r"D:\mbdsdr\.locks")
 LOCKS_DIR = Path(os.environ.get("MBDSDR_LOCKS_DIR") or DEFAULT_LOCKS_DIR)
 REGISTRY_PATH = LOCKS_DIR / "claims.json"
 EXCLUDE_ENV = "MBDSDR_EXCLUDE_HUNKS"
+INTENT_ENV = "MBDSDR_INTENT_DELETIONS"
 
 
 def _git(*args: str) -> str:
@@ -378,6 +383,23 @@ def _declared_paths(cli_expect: Optional[List[str]]) -> Optional[List[str]]:
     return [_canonical(x.strip()) for x in raw if x.strip()]
 
 
+def _intent_deletions(cli_intent: Optional[List[str]]) -> Optional[List[str]]:
+    """本次提交显式声明的**意图删除**路径集。
+
+    来源优先级：`--intent-delete`（可重复）> 环境变量
+    `MBDSDR_INTENT_DELETIONS`（换行 / `;` 分隔）。两者都没有 → 返回 None
+    （未声明），此时暂存里任何删除条目都按「未解释」拒绝（fail-closed）。
+    """
+    raw: List[str] = list(cli_intent or [])
+    if not raw:
+        env_val = os.environ.get(INTENT_ENV, "")
+        if env_val.strip():
+            raw = [x for x in env_val.replace(";", "\n").splitlines()]
+    if not raw:
+        return None
+    return [_canonical(x.strip()) for x in raw if x.strip()]
+
+
 def _index_abs(path: str) -> str:
     """把 index 路径归一成绝对路径（只用于显示与比较，不改大小写）。"""
     raw = (path or "").strip()
@@ -499,10 +521,11 @@ def check_staged(
     as_json: bool,
     expect: Optional[List[str]] = None,
     declared_index_arg: Optional[str] = None,
+    intent_arg: Optional[List[str]] = None,
 ) -> int:
     """检查暂存区：①跨线（≥2 个活跃 owner）拒；②超出声明清单的文件拒；
     ③声明的私有 index 与实际读到的 index 不一致拒；
-    ④出现「声明清单里没有的删除条目」时拒（陈旧私有 index 的幻影删除）；
+    ④出现「未声明为意图删除」的删除条目时拒（陈旧私有 index 的幻影删除）；
     ⑤暂存 blob 与工作树不一致时拒（共享 index 里的旧快照会被一起提交）；
     私有 index 例外：必须在 `MBDSDR_EXCLUDE_HUNKS` 里逐文件声明排除了哪些
     hunk，声明为空又存在差异一律拒（2026-11-12 裁定，见模块 docstring）。
@@ -514,7 +537,10 @@ def check_staged(
     并打出两个路径对比。
     第 ④ 条是「陈旧私有 index 制造幻影删除」的机械闸：私有 index 若基于旧 HEAD
     `read-tree`，旧 HEAD 之后入库的文件在它看来就是删除（`D`），会被计入暂存。
-    删除条目必须逐条落在声明清单内，否则拒；未声明清单时只告警（保持旧行为）。
+    删除条目必须逐条落进意图删除集（`--intent-delete` /
+    `MBDSDR_INTENT_DELETIONS`，或 `--expect` 清单），否则拒——**未声明时也拒**
+    （2026-11-12 起 fail-closed；此前未声明清单时只告警，`35db7a13` 正是从
+    这个缺口把守卫测试删掉的）。
     第 ⑤ 条是「旧 blob 被提交」的机械闸（事故 `bc0c75e1`）：共享 index 里留着
     别人文档的旧快照、工作树是新内容时，提交会把旧内容写回库并整体回退重定位。
     这一条逐 path 比对 index 与工作树，**无 claim 的文件同样适用**。
@@ -574,12 +600,15 @@ def check_staged(
         )
 
     declared = _declared_paths(expect)
+    intent = _intent_deletions(intent_arg)
+    allowed_deletions = set(declared or []) | set(intent or [])
     extras: List[str] = []
-    unexplained_deletions: List[str] = []
     if declared is not None:
         allowed = set(declared)
         extras = [p for p in paths if _canonical(p) not in allowed]
-        unexplained_deletions = [p for p in deletions if _canonical(p) not in allowed]
+    unexplained_deletions = [
+        p for p in deletions if _canonical(p) not in allowed_deletions
+    ]
 
     dirty = _worktree_dirty([p for p in paths if not status_of[p].startswith("D")])
     private_index = _private_index()
@@ -594,6 +623,7 @@ def check_staged(
                 {
                     "staged": paths,
                     "deletions": deletions,
+                    "intent_deletions": intent,
                     "unexplained_deletions": unexplained_deletions,
                     "owners": owners,
                     "multi_owner": multi,
@@ -655,21 +685,23 @@ def check_staged(
         failed = True
     if unexplained_deletions:
         print(
-            f"拒绝：暂存区有 {len(unexplained_deletions)} 条删除，声明清单里没有对应路径"
-            "（陈旧私有 index 制造的幻影删除）："
+            f"拒绝：暂存区有 {len(unexplained_deletions)} 条删除，但没有声明为意图删除"
+            "（fail-closed：删除必须逐条声明，幻影删除正是这样进库的）："
         )
         for path in unexplained_deletions:
             print(f"  DELETE  {path}")
-        print("  原因：私有 index 基于旧 HEAD `read-tree`——旧 HEAD 之后入库的文件，")
-        print("        在这份索引里表现为删除（D），会被一起计入本次提交。")
-        print("  修法：不要复用旧索引文件；`git read-tree HEAD` 基于当前 HEAD 重建后再 add。")
+        print("  原因一（真删）：你确实要删这些文件，只是没有声明。")
+        print("  原因二（幻影删除）：私有 index 基于旧 HEAD `read-tree`——旧 HEAD 之后")
+        print("        入库的文件在这份索引里表现为删除（D），会被一起计入本次提交。")
+        print("  真删的过法（任选其一，都在同一次提交里）：")
+        print("    python scripts/check_commit_scope.py --staged --intent-delete <path>"
+              " [--intent-delete <path> ...]")
+        print('    $env:MBDSDR_INTENT_DELETIONS = "<path>;<path>"   # 换行或 ; 分隔')
+        print("    python scripts/safe_commit.py --files ... --message-file ...")
+        print("      （safe_commit 会把「HEAD 有、新索引没有」的路径自动导出为意图删除集）")
+        print("  幻影删除的修法：不要复用旧索引文件——`git read-tree HEAD` 基于当前 HEAD")
+        print("        重建私有 index 后重新 add；上面这些文件就不该出现在暂存里。")
         failed = True
-    if not unexplained_deletions and deletions and declared is None:
-        print("WARN 暂存区有删除条目（本次未声明清单，未据此拒绝）：")
-        for path in deletions:
-            print(f"  DELETE  {path}")
-        print("  删除条目必须逐条能解释来源；若是私有 index 基于旧 HEAD 建出的，")
-        print("  先 `git read-tree HEAD` 重建私有 index，再提交。")
     if allowed_dirty:
         print(
             f"DIRTY(allowed)：{len(allowed_dirty)} 个文件在私有 index 里与工作树不一致，"
@@ -741,6 +773,14 @@ def main(argv: Optional[List[str]] = None) -> int:
         help="本次提交的声明路径清单；暂存区出现清单外的文件即拒绝（多一个就拒）",
     )
     parser.add_argument(
+        "--intent-delete",
+        action="append",
+        default=[],
+        metavar="PATH",
+        help="本次提交显式声明要删除的路径（可重复）；暂存里的删除条目不在其中即拒绝"
+        "（也可用环境变量 MBDSDR_INTENT_DELETIONS，换行 / ; 分隔）",
+    )
+    parser.add_argument(
         "--declared-index",
         default=None,
         help="操作者声明的私有 index 路径；与实际读到的 index 不一致即拒绝"
@@ -760,7 +800,10 @@ def main(argv: Optional[List[str]] = None) -> int:
     try:
         if args.staged:
             return check_staged(
-                args.json, expect=args.expect, declared_index_arg=args.declared_index
+                args.json,
+                expect=args.expect,
+                declared_index_arg=args.declared_index,
+                intent_arg=args.intent_delete,
             )
         if args.post_commit:
             return check_post_commit(
