@@ -1,12 +1,14 @@
 # SPDX-License-Identifier: MIT
 """
-Q2 时空对齐：GNSS 授时 → SigMF captures[0] 写读一致性（确定性离线测试）
+Q2 时空对齐：GNSS 授时 → 解析为 UTC 时刻（确定性离线测试）
 
 不联网、不接串口：
-  - 注入**固定** NMEA 语句（带正确 XOR 校验和）+ **固定**时钟；
-  - 断言 onboard.record 写出的 captures[0].core:datetime 与 mbdsdr:time_source，
-    再用 playback.parse_sigmf_meta 读回，写读一致；
-  - 无 GNSS 时退化为系统时间并标 time_source="system"（诚实空态）。
+  - 注入**固定** NMEA 语句（带正确 XOR 校验和）；
+  - 断言 NMEA → UTC 时刻的解析与回退口径（无日期就不猜）。
+
+只测核心库的解析结果。「经 onboarding 写出 SigMF 再读回」的端到端
+用例在 ``tests/test_onboarding_gnss_timestamp.py``：那几条要走开发工具
+``tools/onboarding``，放在这里会让 ``mbdsdr_ai`` 反向依赖 ``tools``（D1）。
 
 运行：python3 -m pytest mbdsdr_ai/tests/test_gnss_timestamp_alignment.py -v
 """
@@ -14,8 +16,6 @@ from __future__ import annotations
 
 import os
 import sys
-import json
-import numpy as np
 from datetime import datetime, timezone
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -78,73 +78,5 @@ def test_to_sigmf_iso_utc_z():
     assert to_sigmf_iso(dt) == "2026-01-02T03:04:05Z"
 
 
-def _write_raw_uint8(path: str, n: int = 1000):
-    """写一个最小 interleaved uint8 I/Q 录制（任意值）。"""
-    rng = np.random.default_rng(0)
-    raw = rng.integers(0, 256, size=2 * n, dtype=np.uint8)
-    raw.tofile(path)
-
-
-def test_onboard_record_gnss_writes_and_reads_back(tmp_path):
-    """端到端：--gnss NMEA 日志 → captures[0].core:datetime=GNSS UTC，读回一致。"""
-    from tools.onboarding.onboard import step_record
-
-    raw = tmp_path / "raw.bin"
-    _write_raw_uint8(str(raw))
-    out = tmp_path / "out"
-
-    gnss_file = tmp_path / "gnss.nmea"
-    gnss_file.write_text("\n".join([GGA, RMC]) + "\n", encoding="utf-8")
-
-    fixed = lambda: datetime(2026, 10, 2, 8, 0, 0, tzinfo=timezone.utc)
-    res = step_record(str(raw), str(out), 1090e6, 2_400_000.0, 24.0, "adsb",
-                      gnss_file=str(gnss_file), clock=fixed)
-    assert res.status == "PASS", res.message
-    meta_path = res.detail["sigmf_meta"]
-    with open(meta_path, encoding="utf-8") as f:
-        meta = json.load(f)
-    cap = meta["captures"][0]
-    # GNSS 时间写入 core:datetime，并显式标注来源
-    assert cap["core:datetime"] == "2026-10-02T07:25:45Z"
-    assert cap["mbdsdr:time_source"] == "gnss"
-
-    # 读取端 playback.parse_sigmf_meta 对齐
-    from mbdsdr_ai.playback import parse_sigmf_meta
-    parsed = parse_sigmf_meta(meta_path)
-    assert parsed["datetime"] == "2026-10-02T07:25:45Z"
-    assert parsed["time_source"] == "gnss"
-
-
-def test_onboard_record_no_gnss_falls_back_system(tmp_path):
-    """无 --gnss：core:datetime=注入的系统时钟，标 time_source=system。"""
-    from tools.onboarding.onboard import step_record
-
-    raw = tmp_path / "raw.bin"
-    _write_raw_uint8(str(raw))
-    out = tmp_path / "out"
-    fixed = lambda: datetime(2026, 10, 2, 8, 0, 0, tzinfo=timezone.utc)
-    res = step_record(str(raw), str(out), 1090e6, 2_400_000.0, 24.0, "adsb",
-                      clock=fixed)
-    assert res.status == "PASS", res.message
-    with open(res.detail["sigmf_meta"], encoding="utf-8") as f:
-        cap = json.load(f)["captures"][0]
-    assert cap["core:datetime"] == "2026-10-02T08:00:00Z"
-    assert cap["mbdsdr:time_source"] == "system"
-
-
-def test_onboard_record_gga_only_falls_back_system(tmp_path):
-    """--gnss 只有 GGA（无日期）→ 不能锚定日期，诚实退回系统时间。"""
-    from tools.onboarding.onboard import step_record
-
-    raw = tmp_path / "raw.bin"
-    _write_raw_uint8(str(raw))
-    out = tmp_path / "out"
-    gnss_file = tmp_path / "gga.nmea"
-    gnss_file.write_text(GGA + "\n", encoding="utf-8")
-    fixed = lambda: datetime(2026, 10, 2, 8, 0, 0, tzinfo=timezone.utc)
-    res = step_record(str(raw), str(out), 1090e6, 2_400_000.0, 24.0, "adsb",
-                      gnss_file=str(gnss_file), clock=fixed)
-    assert res.status == "PASS"
-    with open(res.detail["sigmf_meta"], encoding="utf-8") as f:
-        cap = json.load(f)["captures"][0]
-    assert cap["mbdsdr:time_source"] == "system"
+# 端到端（经 onboarding 写 SigMF）用例已迁至 tests/test_onboarding_gnss_timestamp.py，
+# 见模块 docstring 的 D1 说明。
