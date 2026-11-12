@@ -132,3 +132,21 @@ def test_no_orphan_declared_deps():
     imported_dist = {_IMPORT2DIST.get(n, n).lower() for n in _import_names()}
     orphans = {d for d in hard if d not in imported_dist}
     assert not orphans, f"声明了但无人导入的死依赖: {sorted(orphans)}"
+
+
+def test_env_marker_evaluated_against_artifact_python(tmp_path):
+    """``python_version`` 标记要按产物解释器判，不能把「按设计缺席」当成缺件。"""
+    sys.path.insert(0, str(ROOT / "scripts"))
+    import release_manifest as rm
+
+    internal = tmp_path / "dist" / "MBDSDR" / "_internal"
+    internal.mkdir(parents=True)
+    (internal / "python314.dll").write_bytes(b"MZ")
+    assert rm._artifact_python_version(tmp_path / "dist") == (3, 14)
+
+    line = 'tomli>=2.0; python_version < "3.11"'
+    assert rm._marker_applies(line, (3, 14)) is False
+    assert rm._marker_applies(line, (3, 10)) is True
+    assert rm._marker_applies("requests>=2", (3, 14)) is True
+    # 拿不到产物版本 → 不判定，照旧按声明面校验（宁可报缺也不静默放过）
+    assert rm._marker_applies(line, None) is None
