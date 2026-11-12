@@ -458,9 +458,13 @@ def _is_known_benign_entropy(path: str, value: str) -> bool:
     return False
 
 
-def scan_text(path: str, text: str) -> List[Finding]:
+def scan_text(
+    path: str, text: str, *, entropy_all: bool = False
+) -> List[Finding]:
+    """扫一段文本。``entropy_all=True`` 时不给熵检查设后缀门槛（诊断包/日志用：
+    `.log` / `.csv` 不在仓库源码后缀里，但正是最容易带出密钥的产物）。"""
     lines = text.splitlines()
-    entropy_ok = _entropy_eligible(path)
+    entropy_ok = entropy_all or _entropy_eligible(path)
     hits: List[Finding] = []
     # SAMPLE 仍按「每文件一条」抽样；MUST **不截断**：同一文件有几处报几处。
     sample_reported = False
