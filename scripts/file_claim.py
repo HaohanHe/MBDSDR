@@ -15,7 +15,13 @@
     POSIX `flock`）里完成，不做「读 JSON 再写 JSON」的竞态写法。
   * TTL 心跳：同 owner 再 claim = 续租；超过 TTL 无续租视为过期，别人可以
     夺取，并打印原持有者与超时分钟数。
-  * `release` 只有原持有者能执行，别人 release 一律失败。
+  * **身份不是名字**（2026-11-13）：claim 成功时签发一次性 `--token`，占位文件
+    只存它的 sha256。续租/释放必须带这份凭据——两条同名线（如两条都叫
+    `W81线`）各自持有不同凭据，互相 release 会失败，同名不再等于同一持有者。
+    凭据只显示一次，丢了只能等 TTL 过期后重新 claim / takeover。
+  * 旧格式 claim（落地前写入、没有凭据）**不按名字放行**：用
+    `claim --adopt-legacy` 显式迁移一次（会签发凭据），或等 TTL 过期后
+    重新 claim / takeover。
   * 状态文件：`D:\\mbdsdr\\.locks\\claims.json`（与既有 `qt_test.lock` 同目录），
     占位文件在 `D:\\mbdsdr\\.locks\\claims\\`。不写 C 盘。
     `MBDSDR_LOCKS_DIR` 仅供测试指向临时目录，日常不要设。
@@ -23,7 +29,9 @@
 用法：
   python scripts/file_claim.py claim desktop/main_window.py --owner 操作逻辑线
   python scripts/file_claim.py claim desktop/main_window.py --owner 操作逻辑线 --ttl-min 10
-  python scripts/file_claim.py release desktop/main_window.py --owner 操作逻辑线
+  python scripts/file_claim.py claim desktop/main_window.py --owner 操作逻辑线 --token <凭据>
+  python scripts/file_claim.py claim desktop/main_window.py --owner 操作逻辑线 --adopt-legacy
+  python scripts/file_claim.py release desktop/main_window.py --owner 操作逻辑线 --token <凭据>
   python scripts/file_claim.py status
   python scripts/file_claim.py status desktop/main_window.py
   python scripts/file_claim.py audit-stale            # 定期跑：过期 claim 却仍在改文件
@@ -38,8 +46,10 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import hmac
 import json
 import os
+import secrets
 import subprocess
 import sys
 import time
@@ -271,6 +281,25 @@ def _marker_for(key: str) -> Path:
 
 
 # ---------------------------------------------------------------------------
+# 持有者身份凭据（同名 ≠ 同一持有者）
+# ---------------------------------------------------------------------------
+
+_TOKEN_DOMAIN = b"mbdsdr/file_claim/token/v1:"
+_TOKEN_HINT = "  凭据：--token {token}（释放/续租必须带；只显示这一次，同名不代表同一持有者）"
+
+
+def _token_hash(token: str) -> str:
+    """占位文件只存凭据哈希：文件对同机其他会话可读，存明文等于没有身份。"""
+    return hashlib.sha256(_TOKEN_DOMAIN + str(token).encode("utf-8")).hexdigest()
+
+
+def _token_matches(token: Optional[str], expected_hash: str) -> bool:
+    if not token or not expected_hash:
+        return False
+    return hmac.compare_digest(_token_hash(token), expected_hash)
+
+
+# ---------------------------------------------------------------------------
 # 占位文件读写（占位文件本身即权威状态）
 # ---------------------------------------------------------------------------
 
@@ -307,9 +336,16 @@ def _peek_marker(path: Path) -> Optional[Dict[str, Any]]:
         return None
 
 
-def _marker_payload(display: str, key: str, owner: str, ttl_min: float, now: float) -> Dict[str, Any]:
+def _marker_payload(
+    display: str,
+    key: str,
+    owner: str,
+    ttl_min: float,
+    now: float,
+    token_hash: str = "",
+) -> Dict[str, Any]:
     state, create_time, cmdline = _proc_snapshot(os.getpid())
-    return {
+    payload = {
         "path": display,
         "key": key,
         "owner": owner,
@@ -321,6 +357,10 @@ def _marker_payload(display: str, key: str, owner: str, ttl_min: float, now: flo
         "pid_create_time": create_time,
         "pid_cmdline": cmdline,
     }
+    if token_hash:
+        # 只存凭据哈希；明文只在 claim/takeover 输出里出现一次。
+        payload["token_sha256"] = token_hash
+    return payload
 
 
 def _create_marker(path: Path, payload: Dict[str, Any]) -> bool:
@@ -453,7 +493,14 @@ def _ttl(ttl_min: float, now: float) -> float:
     return ttl_min * 60.0
 
 
-def cmd_claim(path: str, owner: str, ttl_min: float, quiet: bool = False) -> int:
+def cmd_claim(
+    path: str,
+    owner: str,
+    ttl_min: float,
+    quiet: bool = False,
+    token: Optional[str] = None,
+    adopt_legacy: bool = False,
+) -> int:
     owner = owner.strip()
     if not owner:
         print("OWNER 不能为空", file=sys.stderr)
@@ -465,7 +512,10 @@ def cmd_claim(path: str, owner: str, ttl_min: float, quiet: bool = False) -> int
     key, display = canonical_path(path)
     MARKER_DIR.mkdir(parents=True, exist_ok=True)
     now = _now()
-    payload = _marker_payload(display, key, owner, ttl_min, now)
+    fresh_token = secrets.token_hex(16)
+    payload = _marker_payload(
+        display, key, owner, ttl_min, now, _token_hash(fresh_token)
+    )
     marker = _marker_for(key)
 
     if _create_marker(marker, payload):
@@ -474,6 +524,7 @@ def cmd_claim(path: str, owner: str, ttl_min: float, quiet: bool = False) -> int
         except ClaimDenied as exc:  # 台账只是记录，占位文件才是权威
             print(f"WARN 台账写入失败（claim 仍有效）：{exc}", file=sys.stderr)
         print(f"CLAIM OK {display} owner={owner} ttl={ttl_min:g}min 到期={_iso(now + _ttl(ttl_min, now))}")
+        print(_TOKEN_HINT.format(token=fresh_token))
         return EXIT_OK
 
     with _locked_fd(marker, create=False) as fd:
@@ -482,21 +533,64 @@ def cmd_claim(path: str, owner: str, ttl_min: float, quiet: bool = False) -> int
         heartbeat = float(data.get("heartbeat_at") or data.get("acquired_at") or now)
         held_s = max(0.0, now - heartbeat)
         ttl_holder = float(data.get("ttl_min") or 0.0) * 60.0
+        holder_token_hash = str(data.get("token_sha256") or "")
 
         if holder == owner:
-            renewed = _marker_payload(display, key, owner, ttl_min, now)
-            renewed["acquired_at"] = float(data.get("acquired_at") or now)
-            _write_fd(fd, json.dumps(renewed, ensure_ascii=False))
-            try:
-                _registry_renew(renewed)
-            except ClaimDenied as exc:
-                print(f"WARN 台账写入失败（续租仍有效）：{exc}", file=sys.stderr)
-            if not quiet:
-                print(
-                    f"CLAIM RENEWED {display} owner={owner} ttl={ttl_min:g}min "
-                    f"上次心跳={_iso(heartbeat)} 已持有={_minutes(held_s)}min"
+            # 名字相等只说明「标签一样」，不说明是同一个持有者（两条线可以都
+            # 叫 W81线）。身份由 claim 时签发的一次性凭据证明。
+            if holder_token_hash:
+                if not _token_matches(token, holder_token_hash):
+                    raise ClaimDenied(
+                        f"CLAIM DENIED {display}\n"
+                        f"  持有者名同为 {owner}，但这不是同一持有者：该 claim 已绑定凭据，\n"
+                        f"  本次调用没有提供匹配的 --token（同名不等于同一会话）。\n"
+                        f"  处理：用 claim 时输出的 --token 续租；凭据丢了就等 TTL 过期后\n"
+                        f"  重新 claim（会签发新凭据），或走 takeover。"
+                    )
+                renewed = _marker_payload(
+                    display, key, owner, ttl_min, now, holder_token_hash
                 )
-            return EXIT_OK
+                renewed["acquired_at"] = float(data.get("acquired_at") or now)
+                _write_fd(fd, json.dumps(renewed, ensure_ascii=False))
+                try:
+                    _registry_renew(renewed)
+                except ClaimDenied as exc:
+                    print(f"WARN 台账写入失败（续租仍有效）：{exc}", file=sys.stderr)
+                if not quiet:
+                    print(
+                        f"CLAIM RENEWED {display} owner={owner} ttl={ttl_min:g}min "
+                        f"上次心跳={_iso(heartbeat)} 已持有={_minutes(held_s)}min"
+                    )
+                return EXIT_OK
+            if adopt_legacy:
+                # 旧格式迁移：一次性把「只有名字」的 claim 升级成凭据绑定。
+                # 这是显式动作（--adopt-legacy），不默认按名字放行。
+                upgraded_token = secrets.token_hex(16)
+                renewed = _marker_payload(
+                    display, key, owner, ttl_min, now, _token_hash(upgraded_token)
+                )
+                renewed["acquired_at"] = float(data.get("acquired_at") or now)
+                renewed["legacy_upgraded_at"] = now
+                _write_fd(fd, json.dumps(renewed, ensure_ascii=False))
+                try:
+                    _registry_renew(renewed)
+                except ClaimDenied as exc:
+                    print(f"WARN 台账写入失败（迁移仍有效）：{exc}", file=sys.stderr)
+                print(
+                    f"CLAIM UPGRADED {display} owner={owner} ttl={ttl_min:g}min\n"
+                    f"  旧格式 claim（只记名字）已迁移为凭据绑定；"
+                    f"这次按 owner 名匹配是唯一一次，之后同名也不再放行。"
+                )
+                print(_TOKEN_HINT.format(token=upgraded_token))
+                return EXIT_OK
+            raise ClaimDenied(
+                f"CLAIM DENIED {display}\n"
+                f"  该 claim 是旧格式：只记录了 owner 名，没有可验证的身份凭据。\n"
+                f"  同名不等于同一持有者，因此不能按名字续租。\n"
+                f"  处理：① 确认原持有者是你 → 用 --adopt-legacy 显式迁移一次"
+                f"（会签发 --token）；\n"
+                f"        ② 等 TTL 过期后重新 claim；③ 走 takeover。"
+            )
 
         expired_s = held_s - ttl_holder
         if expired_s <= 0:
@@ -512,7 +606,9 @@ def cmd_claim(path: str, owner: str, ttl_min: float, quiet: bool = False) -> int
         # 过期夺取：在占位文件自身的锁里完成，避免与续租并发写坏。
         stolen_from = holder
         old = dict(data)
-        renewed = _marker_payload(display, key, owner, ttl_min, now)
+        renewed = _marker_payload(
+            display, key, owner, ttl_min, now, _token_hash(fresh_token)
+        )
         _write_fd(fd, json.dumps(renewed, ensure_ascii=False))
 
     try:
@@ -524,10 +620,11 @@ def cmd_claim(path: str, owner: str, ttl_min: float, quiet: bool = False) -> int
         f"CLAIM OK (steal) {display} owner={owner} ttl={ttl_min:g}min "
         f"（原持有者开始于 {_iso(float(old.get('acquired_at') or 0))}，上次心跳 {_iso(heartbeat)}）"
     )
+    print(_TOKEN_HINT.format(token=fresh_token))
     return EXIT_OK
 
 
-def cmd_release(path: str, owner: str) -> int:
+def cmd_release(path: str, owner: str, token: Optional[str] = None) -> int:
     owner = owner.strip()
     key, display = canonical_path(path)
     marker = _marker_for(key)
@@ -537,15 +634,31 @@ def cmd_release(path: str, owner: str) -> int:
     with _locked_fd(marker, create=False) as fd:
         data = _read_marker_fd(fd)
     holder = str(data.get("owner", "<unknown>"))
-    if holder != owner:
-        now = _now()
-        heartbeat = float(data.get("heartbeat_at") or data.get("acquired_at") or now)
-        held_s = max(0.0, now - heartbeat)
+    holder_token_hash = str(data.get("token_sha256") or "")
+    now = _now()
+    heartbeat = float(data.get("heartbeat_at") or data.get("acquired_at") or now)
+    held_s = max(0.0, now - heartbeat)
+
+    if not holder_token_hash:
+        raise ClaimDenied(
+            f"RELEASE DENIED {display}\n"
+            f"  当前持有者={holder}（你声明的是 {owner}）\n"
+            f"  该 claim 是旧格式：没有可验证的身份凭据，无法确认你就是原持有者。\n"
+            f"  按 owner 名放行正是本次要消灭的误判（同名可以是另一条线）。\n"
+            f"  处理：① 原持有者先 claim --adopt-legacy 迁移并拿到 --token，"
+            f"再带 --token release；\n"
+            f"        ② 等 TTL 过期后重新 claim；③ 走 takeover。"
+        )
+
+    if not _token_matches(token, holder_token_hash):
         raise ClaimDenied(
             f"RELEASE DENIED {display}\n"
             f"  当前持有者={holder}（你声明的是 {owner}）\n"
             f"  已持有={_minutes(held_s)}min\n"
-            f"  只有原持有者能释放；互相解锁等于没有锁。"
+            f"  同名 holder 不构成身份：该 claim 绑定了 claim 时签发的 --token，"
+            f"本次调用缺少匹配凭据。\n"
+            f"  只有原持有者能释放；互相解锁等于没有锁。凭据丢了只能等过期后"
+            f"重新 claim 或走 takeover。"
         )
 
     try:
@@ -553,7 +666,7 @@ def cmd_release(path: str, owner: str) -> int:
     except FileNotFoundError:
         pass
     _registry_release(key, display, _now())
-    print(f"RELEASE OK {display} owner={owner}")
+    print(f"RELEASE OK {display} owner={holder}")
     return EXIT_OK
 
 
@@ -656,9 +769,11 @@ def cmd_takeover(path: str, owner: str, ttl_min: float, reason: str = "") -> int
     with _locked_fd(marker, create=False) as fd:
         data = _read_marker_fd(fd)
         holder = str(data.get("owner", "<unknown>"))
-        if holder == owner:
+        if holder == owner and str(data.get("token_sha256") or ""):
             raise ClaimDenied(
-                f"TAKEOVER DENIED {display}\n  当前持有者就是你（{owner}）；用 claim 续租，不用 takeover。"
+                f"TAKEOVER DENIED {display}\n"
+                f"  当前持有者名同为 {owner}，且该 claim 已绑定凭据；"
+                f"用 claim --token 续租，不用 takeover。"
             )
 
         criteria = _orphan_criteria(data, display, now)
@@ -683,7 +798,10 @@ def cmd_takeover(path: str, owner: str, ttl_min: float, reason: str = "") -> int
             raise ClaimDenied("\n".join(lines))
 
         old = dict(data)
-        payload = _marker_payload(display, key, owner, ttl_min, now)
+        new_token = secrets.token_hex(16)
+        payload = _marker_payload(
+            display, key, owner, ttl_min, now, _token_hash(new_token)
+        )
         takeover_note = {
             "old_owner": holder,
             "old_pid": old.get("pid"),
@@ -741,6 +859,7 @@ def cmd_takeover(path: str, owner: str, ttl_min: float, reason: str = "") -> int
         )
         + f"\n  日志：{TAKEOVER_LOG}"
     )
+    print(_TOKEN_HINT.format(token=new_token))
     return EXIT_OK
 
 
@@ -754,9 +873,12 @@ def _describe(payload: Dict[str, Any], now: float) -> str:
         state = f"EXPIRED(+{_minutes(expired_s)}min)"
     else:
         state = f"剩余 {_minutes(ttl_s - held_s)}min"
+    # 有凭据 = 身份可验证；没有 = 旧格式，只能靠过期/接管，不能按名字放行。
+    ident = "token" if payload.get("token_sha256") else "legacy(名不可作身份)"
     return (
         f"{payload.get('path', '?'):<44} owner={owner:<18} held={_minutes(held_s)}/{_minutes(ttl_s)}min "
-        f"{state} pid={payload.get('pid')} since={_iso(float(payload.get('acquired_at') or heartbeat))}"
+        f"{state} pid={payload.get('pid')} id={ident} "
+        f"since={_iso(float(payload.get('acquired_at') or heartbeat))}"
     )
 
 
@@ -876,10 +998,25 @@ def build_parser() -> argparse.ArgumentParser:
     claim.add_argument("path", help="仓库相对路径，如 desktop/main_window.py")
     claim.add_argument("--owner", required=True, help="线名/会话名")
     claim.add_argument("--ttl-min", type=float, default=10.0, help="租期（分钟），默认 10")
+    claim.add_argument(
+        "--token",
+        default=None,
+        help="续租已绑定凭据的 claim；必须等于 claim 时输出的一次性凭据",
+    )
+    claim.add_argument(
+        "--adopt-legacy",
+        action="store_true",
+        help="仅用于旧格式 claim 的一次性迁移：按 owner 名匹配并签发凭据（之后同名不再放行）",
+    )
 
-    release = sub.add_parser("release", help="释放（仅原持有者）")
+    release = sub.add_parser("release", help="释放（仅原持有者，需 claim 时签发的 --token）")
     release.add_argument("path")
     release.add_argument("--owner", required=True)
+    release.add_argument(
+        "--token",
+        default=None,
+        help="claim 时输出的一次性凭据；同名不等于同一持有者，没有凭据不能释放",
+    )
 
     status = sub.add_parser("status", help="查看占用状态")
     status.add_argument("path", nargs="?")
@@ -906,9 +1043,15 @@ def main(argv: Optional[list[str]] = None) -> int:
     args = build_parser().parse_args(argv)
     try:
         if args.command == "claim":
-            return cmd_claim(args.path, args.owner, args.ttl_min)
+            return cmd_claim(
+                args.path,
+                args.owner,
+                args.ttl_min,
+                token=args.token,
+                adopt_legacy=args.adopt_legacy,
+            )
         if args.command == "release":
-            return cmd_release(args.path, args.owner)
+            return cmd_release(args.path, args.owner, token=args.token)
         if args.command == "audit-stale":
             return cmd_audit_stale(args.json)
         if args.command == "takeover":
