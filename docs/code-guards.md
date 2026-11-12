@@ -148,31 +148,95 @@ python -m pytest tests/test_swallow_guard.py -q            # 24 passed + 1 xfail
 
 ## 门禁脚本入口登记（D4）
 
-`axioms.py --rule D4` 只认两种入口：git 钩子，或本文件的登记。以下 11 个
-`scripts/check_*` / `audit_*` / `report_*` 原先两者都没有（静默失效），现逐一
-给出「谁跑、什么时候跑」。**不放 pre-commit**：pre-commit 目前只跑 claim 范围
-检查（约 0.2s），而这里最便宜的也要 0.17s、最贵的 18.5s；逐个挂上去会让每次
-提交慢几十倍，然后大家开始用 `--no-verify`，把 claim 闸一起废掉。值得自动化的
-只进发版前的 `release_check.py` 分组（一次发版多花约 2s）。
+`axioms.py --rule D4` 只认两种入口：git 钩子，或本文件的登记。**不放
+pre-commit**：pre-commit 现在只跑 claim 范围 + claim 台账 + 暂存区凭据扫描
+（每次提交约 0.2s×3），而机检脚本最便宜的 0.2s、最贵的 112s；逐个挂上去会让
+每次提交慢几十倍，然后大家开始用 `--no-verify`，把 claim 闸一起废掉。
+
+2026-11-13 全量测绘口径（43 个机检脚本，`scripts/` 下 `check_*`/`audit_*`/
+`verify_*`/`lint_*`/`*_scan`/带 `--check` 的生成器，排除 bench/硬件/一次性工具）：
+逐条实跑 1 次、`QT_QPA_PLATFORM=offscreen`、取墙钟秒；**没有一个脚本自己取
+`qt_test.lock`**，所以下表的「Qt」一栏只有「是否 import/启动 Qt」的区别，不是锁。
+按覆盖分为三档：**A 自动入口（24 条）**、**B 只有测试入口、仓库现状无人跑（11 条）**、
+**C 无任何入口（8 条，漏网）**。
+
+### A. 已接入自动入口（覆盖当前仓库）
+
+`release_check.py` 新增 `guards` 步（本次接入 13 条 + 1 条只提示），加上原有
+`docs`/`gen_reconcile`/`action_dup` 步与 3 个 git 钩子。`guards` 连跑 3 次墙钟
+**77.8s / 43.2s / 44.9s，中位 44.9s**（首跑含冷缓存）；单项超时 120s，任一非 0
+即整步 FAIL，明细点名到脚本。
 
 | 脚本 | 入口 | 什么时候跑 | 谁跑 | 复核 |
 | --- | --- | --- | --- | --- |
-| `scripts/check_rollback_table.py` | 自动：`release_check.py --steps docs`（本次接入） | 发版前随 docs 组；`COORDINATION.md` §6.10.2 表格改动后本地跑（约 1.7s） | 发版人 / 表格改动者 | 2027-01 |
-| `scripts/check_action_duplication.py` | 自动：`release_check.py --steps action_dup` | 发版前；菜单/QAction 增改后本地先跑 `--gate`（约 3.8s） | 发版人 / UI 改动者 | 2027-01 |
-| `scripts/check_help_paths.py` | 自动：`release_check.py --steps docs`（渲染点）+ 手动全量 | 发版前自动跑渲染点；帮助文案增删后本地跑全量核验（约 13s） | 发版人 / 帮助文案改动者 | 2027-01 |
-| `scripts/audit_source_text_pins.py` | 测试内调用 + 手动全量 | `tests/test_source_pin_ratchet.py` 每条测试即调用扫描器；基线更新或批次末跑 `--report`（约 8.7s） | 测试线 | 2027-01 |
-| `scripts/check_data_licenses.py` | 手动 | 新增/替换数据文件（星表、TLE、金标）后与发版前（约 10s） | 数据改动者 | 2027-01 |
-| `scripts/check_card_links.py` | 手动 | `COORDINATION.md` 章节增删/改号后由文档 owner 跑 `--fix-anchors`；改号的节要人工裁决。**当前 16 处漂移**（含 §6.9.3 已改号 6.1.5），先修再谈自动化 | 文档 owner | 2026-12 |
-| `scripts/check_destructive_ops.py` | 手动 | 发生 reset/clean/branch -D 等破坏性操作当天由执行人跑；批次末复核。当前退出码 1（有候选未放行），需逐条对账或补日志 | 操作执行人 | 2026-12 |
-| `scripts/check_dist_head_parity.py` | 手动 | 出安装包后必跑，`--dist <产物目录>` 为必填，无 dist 时无法执行 | 发版人 | 2027-01 |
-| `scripts/check_roadmap_blocking.py` | 手动 | 路线图/阻塞理由变更后跑；**仅提示**（命中仍退出 0），必须人读输出 | 路线图维护者 | 2027-01 |
-| `scripts/check_test_version.py` | 手动 | 怀疑「改测试销红」时，对具体测试路径跑一次（内部跑两遍 pytest，只在事件调查时用） | 复核人 | 2027-01 |
-| `scripts/report_token_dual_values.py` | 手动 | 主题令牌/双值治理改动后重生成报告（约 18.5s），结论写回 `docs/a11y/` | 主题维护者 | 2027-01 |
+| `scripts/verify_claims.py` | 自动：`release_check.py --steps docs` | 每次发版第一步；`--check-lines --strict-lines` 不通过即 FAIL（实测 59.4s；2026-11-13 当前红：38 条未豁免） | 发版人 | 2027-01 |
+| `scripts/check_rollback_table.py` | 自动：`release_check.py --steps docs` | 发版前；§6.10.2 表格改动后本地跑（2.3s） | 发版人 / 表格改动者 | 2027-01 |
+| `scripts/check_generated_artifacts.py` | 自动：`release_check.py --steps gen_reconcile` | 发版前（3.7s），同时覆盖 `gen_mcp_tools_doc` 的产物 | 发版人 | 2027-01 |
+| `scripts/check_action_duplication.py` | 自动：`release_check.py --steps action_dup` | 发版前；菜单/QAction 增改后本地跑 `--gate`（5.9s，需 Qt/offscreen） | 发版人 / UI 改动者 | 2027-01 |
+| `scripts/check_help_paths.py` | 自动：`release_check.py --steps docs`（**仅渲染点**；全量 CLI 无自动入口） | 发版前自动跑渲染点；帮助文案增删后手动跑全量（**112.4s**，原登记写 13s 已更正） | 发版人 / 帮助文案改动者 | 2027-01 |
+| `scripts/check_card_links.py` | 自动：`guards` + `tests/test_card_links.py` | 发版前（0.2s）；§ 章节增删/改号后由文档 owner 跑 `--fix-anchors` | 发版人 / 文档 owner | 2027-01 |
+| `scripts/check_data_licenses.py` | 自动：`guards` + `tests/test_data_licenses.py` | 发版前（12.6s）；新增/替换数据文件后本地先跑 | 发版人 / 数据改动者 | 2027-01 |
+| `scripts/audit_source_text_pins.py` | 自动：`guards` + `tests/test_source_pin_ratchet.py` | 发版前（9.1s）；基线更新或批次末跑 `--report` | 测试线 / 发版人 | 2027-01 |
+| `scripts/gen_shortcut_table.py` | 自动：`guards --check` + `tests/test_shortcut_table.py` | 发版前（0.2s）；快捷键注册表改动后本地 `--check` | 发版人 / UI 改动者 | 2027-01 |
+| `scripts/settings_inventory.py` | 自动：`guards --check` + `tests/test_settings_ui_coverage.py` | 发版前（1.4s）；设置项增删后重建文档块 | 发版人 / 设置页 owner | 2027-01 |
+| `scripts/theme_contrast.py` | 自动：`guards` + `tests/test_theme_contrast_gate.py` | 发版前（0.3s）；主题色改动后本地跑 | 发版人 / 主题维护者 | 2027-01 |
+| `scripts/install_git_hooks.py` | 自动：`guards --check` | 发版前（0.3s）核对本机钩子是不是最新副本——**「我修了」≠「别人机器上是修复后的」**；不一致直接 FAIL，跑一次安装即可 | 发版人 | 2027-01 |
+| `scripts/fetch_constellation_names_cc0.py` | 自动：`guards --check` | 发版前（0.2s，离线核对 payload 哈希，不联网） | 发版人 | 2027-01 |
+| `scripts/fetch_dso_supplement.py` | 自动：`guards --check` | 发版前（0.2s，离线核对补字段哈希） | 发版人 | 2027-01 |
+| `scripts/ai_intent_regression.py` | 自动：`guards --limit 40` + `tests/test_ai_tool_budget.py` | 发版前（5.5s）；语料/工具注册表改动后本地跑 | 发版人 / AI 工具线 | 2027-01 |
+| `scripts/ai_tool_consistency.py` | 自动：`guards --limit 40` + `tests/test_ai_tool_consistency.py` | 发版前（2.6s）；工具名/描述改动后本地跑 | 发版人 / AI 工具线 | 2027-01 |
+| `scripts/tool_honesty_scan.py` | 自动：`guards` | 发版前（4.9s）；工具描述声称与实际能力一致性 | 发版人 | 2027-01 |
+| `scripts/access_layer_fault_injection.py` | 自动：`guards` | 发版前（5.0s）：无硬件/无声卡/无外网三条降级链 | 发版人 / 接入层 owner | 2027-01 |
+| `scripts/check_roadmap_blocking.py` | 自动（只提示，恒退出 0）：`guards` | 发版前附结论行；路线图/阻塞理由变更后由维护者人读输出（0.2s） | 路线图维护者 | 2027-01 |
+| `scripts/check_commit_scope.py` | 自动：`scripts/hooks/pre-commit` | 每次 `git commit` 前（暂存区，约 0.1s） | 全体提交者（钩子自动） | 2027-01 |
+| `scripts/claim_gate.py` | 自动：`scripts/hooks/pre-commit` | 每次 `git commit` 前逐文件查 claim 台账（约 0.2s） | 全体提交者（钩子自动） | 2027-01 |
+| `scripts/secret_scan.py` | 自动：`scripts/hooks/pre-commit`（**仅 `--staged`**） | 每次提交前扫暂存区；全量 `--history`/全树扫描**无自动入口**（实测 >300s，见 C 档） | 全体提交者（钩子自动） | 2027-01 |
+| `scripts/release_manifest.py` | 自动：`tests/test_import_probe.py` 等 + `docs/packaging.md` 流程 | 出安装包后手动 `--dist`；测试内覆盖版本/依赖/许可证断言（需 Qt） | 发版人 | 2027-01 |
+| `scripts/git_sync_index.py` | 自动：`post-commit` 钩子 + `tests/test_git_sync_index.py` | 每次提交后同步共享 index（钩子自动） | 全体提交者（钩子自动） | 2027-01 |
 
-删除判定：**0 个**。11 个每个都有活调用方（pytest 直接 import/调用，或
-`release_check.py` 的步骤）或活文档流程；没有一个是「结论已无人使用」。
-`check_card_links.py` 与 `check_destructive_ops.py` 当前是红的，属于待修项，
-不是死代码——正因如此才把它们的执行时机和责任人写死。
+### B. 只有测试入口：扫描器被测，但「当前仓库」没人跑
+
+这些脚本的 CLI 在 `tests/` 里对**临时夹具**跑过，逻辑有回归保护；但没有任何
+入口对**本仓当前状态**执行，所以「仓库现在是红的」它抓不到。它们的红/绿
+只在有人手动跑时才可见——这就是「一条命令输出合规状态」在这 11 条上**不成立**。
+
+| 脚本 | 现有入口 | 缺什么 | 什么时候跑 | 谁跑 | 复核 |
+| --- | --- | --- | --- | --- | --- |
+| `scripts/lint_swallow_all.py` | `tests/test_swallow_guard.py`（棘轮） | 仓库现状（37.0s，实测 rc=1：越线中） | 批次末与发版前手动；越线必须当天归因 | 吞噬治理线 | 2026-12 |
+| `scripts/check_red_lifecycle.py` | `tests/test_red_lifecycle.py` | 仓库现状（27.3s，实测 rc=1：有到期/无证据红项） | 批次末手动；红项状态变更后 | 红项 owner | 2026-12 |
+| `scripts/check_destructive_ops.py` | `tests/test_destructive_audit.py` | 仓库 reflog（0.5s，实测 rc=1：27 笔未审计） | 发生 reset/clean/branch -D 当天 | 操作执行人 | 2026-12 |
+| `scripts/check_test_version.py` | `tests/test_check_test_version.py` | 只在事件调查时对具体路径跑（内部两次 pytest） | 怀疑「改测试销红」时 | 复核人 | 2027-01 |
+| `scripts/find_blob_reverts.py` | `tests/test_find_blob_reverts.py` | 仓库历史 | 发现「刚修又被改回」时 | 事件调查人 | 2027-01 |
+| `scripts/tool_param_fuzz.py` | `tests/test_tool_param_fuzz_guard.py` | 全量工具参数（测试只覆盖守卫逻辑） | 工具 schema 改动后 | AI 工具线 | 2027-01 |
+| `scripts/tool_availability_audit.py` | 间接：`tool_param_fuzz.py` 调用 | 495 工具逐个可执行性（人工判读） | 工具批量增删后 | AI 工具线 | 2027-01 |
+| `scripts/qsettings_guard.py` | `tests/conftest.py` | 只在 pytest 进程内生效；产品真机启动不覆盖 | 涉及 QSettings 写入的改动 + 发版前 | 桌面线 | 2027-01 |
+| `scripts/gen_mcp_tools_doc.py` | 间接：产物由 `check_generated_artifacts.py` 对账 | 生成器本身无测试 | 工具注册表改动后重生成 | AI 工具线 | 2027-01 |
+| `scripts/report_token_dual_values.py` | 手动（`docs/a11y/`） | 无自动对账；18.5s | 主题令牌/双值治理改动后 | 主题维护者 | 2027-01 |
+| `scripts/release_check.py` | 本体入口 + `tests/test_narrow_gate_selfcheck.py` | —（其余步骤的汇总器） | 发版前 | 发版人 | 2027-01 |
+
+### C. 无任何入口（漏网）
+
+**这 8 条脚本（外加 1 个无入口的 `--history` 全量模式）谁也跑不到**。要么缺
+必填参数（dist/commit 范围），要么要真机/GUI，要么根本没定责任人——「写不出
+谁跑」的，直接写原因，不编。
+
+| 脚本 | 为什么没有入口 | 建议触发条件 | 谁跑 | 复核 |
+| --- | --- | --- | --- | --- |
+| `scripts/audit_evidence.py` | 51.5s 且**当前红**（2,702 条数字断言无证据）；接入会立刻把发版闸门变成常红 | 证据标准改版 / 批次末；先清库存再谈接入 | 证据标准 owner | 2026-12 |
+| `scripts/make_decode_fixtures.py --check` | 4.2s，但**当前红**（fixture 与 `manifest.json` 不一致），谁改的未定 | 解码 fixture 变更后；先修红再接入 | 解码线 | 2026-12 |
+| `scripts/check_commit_residue.py` | 需要「某提交」范围参数，属提交后检查；**没有任何调用方，也没定责任人（写不出谁跑）** | 建议接 `post-commit`：对 HEAD 跑一次（待提交后钩子 owner 评估耗时） | 提交工具链 owner（待认领） | 2027-01 |
+| `scripts/ci_pytest_groups.py --check` | 只服务 CI 并行分组，本仓无 CI 配置引用它；**写不出谁跑**（没有 CI 维护者这一角色） | 接入 CI 或删除；二选一 | 未定（需产品/工程负责人指定） | 2027-01 |
+| `scripts/config_write_guard.py` | 哨兵脚本，需挂在真实配置写点；目前只被 `scripts/repro/` 引用 | 配置写入路径改动时 + 发版前 | 桌面线 | 2027-01 |
+| `scripts/check_dist_head_parity.py` | `--dist` 必填，无产物无法执行；实测未跑 | 每次出安装包后（与 release_manifest 同批） | 发版人 | 2027-01 |
+| `scripts/ui_layout_audit.py` | 需要起 GUI 并对比几何基线（Qt），耗时与稳定性都不适合闸门 | UI 布局/尺寸改动后手动，基线更新必须给 `--reason` | UI 线 | 2027-01 |
+| `scripts/sample_rate_readback_check.py` | 需要真实 SDR 硬件，CI/无硬件环境不可执行 | 有硬件的验收机，采样率路径改动后 | 硬件验收人 | 2027-01 |
+| `scripts/secret_scan.py --history`（全量模式） | 单次 >300s（实测超时）；钩子只覆盖暂存区 | 发版前或季度一次，人工跑并留结论 | 安全 owner | 2027-01 |
+
+删除判定：**0 个**。43 个都有活调用方、活文档流程或明确待接条件；C 档没有一个是
+「结论已无人使用」的死代码，只是**入口缺失**。`check_card_links.py` 已于
+2026-11-13 转绿（links=16 全 PASS），`check_destructive_ops.py` /
+`make_decode_fixtures.py` / `audit_evidence.py` / `lint_swallow_all.py` /
+`check_red_lifecycle.py` 当前仍是红的，属于待修项，不是死代码。
 
 ### 复核记录（2026-11-05，HEAD `d41591b`，工作区含他线在途改动）
 
