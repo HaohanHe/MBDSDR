@@ -583,6 +583,31 @@
         }
       ],
       "session": ""
+    },
+    {
+      "accepted": [],
+      "at": "2026-11-13 03:55:16",
+      "by": "xxhzb",
+      "escalated": [],
+      "head": "afd93ef4",
+      "reason": "D1-cycle 指纹去掉成员数：两个环已由并行线登记豁免，重建后无新增、消失 2 条（原 21/20 成员口径的指纹被豁免覆盖）",
+      "removed": [
+        {
+          "fingerprint": "3f38ced6b43dddb5",
+          "line": 0,
+          "path": "mbdsdr_ai/fengyun_sat.py",
+          "rule": "D1-cycle",
+          "snippet": "5 个模块互相依赖"
+        },
+        {
+          "fingerprint": "5c936ed4c06dabbd",
+          "line": 0,
+          "path": "mbdsdr_ai/bladerf_params.py",
+          "rule": "D1-cycle",
+          "snippet": "21 个模块互相依赖"
+        }
+      ],
+      "session": ""
     }
   ],
   "version": 1

@@ -960,14 +960,6 @@
       "severity": "review",
       "snippet": "MPDU_DATA 有 2 个不同取值（884 # 892 - 6(VCDU头, 884）"
     },
-    "3f38ced6b43dddb5": {
-      "line": 0,
-      "ordinal": 0,
-      "path": "mbdsdr_ai/fengyun_sat.py",
-      "rule": "D1-cycle",
-      "severity": "review",
-      "snippet": "5 个模块互相依赖"
-    },
     "3fa15c3cbbb28214": {
       "line": 205,
       "ordinal": 0,
@@ -1439,14 +1431,6 @@
       "rule": "D6-missing-path",
       "severity": "review",
       "snippet": "引用的 tests/ft8_roundtrip.py 不存在"
-    },
-    "5c936ed4c06dabbd": {
-      "line": 0,
-      "ordinal": 0,
-      "path": "mbdsdr_ai/bladerf_params.py",
-      "rule": "D1-cycle",
-      "severity": "review",
-      "snippet": "21 个模块互相依赖"
     },
     "5cc670b9cc65a60d": {
       "line": 13,
@@ -4121,10 +4105,10 @@
       "snippet": "FREQS 有 3 个不同取值（[1209, 1336, 1477, 1, [2400, 1060, 1160, 1, [\"1000000\", \"1550000）"
     }
   },
-  "generated_at": "2026-11-13 03:37:36",
-  "head": "06751d15",
-  "reason": "7 条判据结构化后首次实跑：应修与复核条目按当前树接受，作为 c182aba4 基线的后继起点；新增来源是原先被名字/字样/改名放过的位置被看见，逐条指纹见本条记录",
+  "generated_at": "2026-11-13 03:55:16",
+  "head": "afd93ef4",
+  "reason": "D1-cycle 指纹去掉成员数：两个环已由并行线登记豁免，重建后无新增、消失 2 条（原 21/20 成员口径的指纹被豁免覆盖）",
   "schema": 2,
-  "total_active": 515,
-  "waived_not_tracked": 52
+  "total_active": 513,
+  "waived_not_tracked": 54
 }
