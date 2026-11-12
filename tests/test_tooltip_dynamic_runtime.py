@@ -247,7 +247,14 @@ def test_rf_sky_view_passthrough_tooltips_self_describe(qapp):
 def test_settings_panel_passthrough_tooltips_self_describe(qapp):
     from settings_panel import SettingsPanel
 
-    _, calls = _record(SettingsPanel)
+    def triggers(p):
+        # 设置页是懒构建：控件在 _ensure_ui_built() 里才建，而它由 showEvent
+        # 触发。只构造不 show 的话一条透传 tooltip 都不会落地，运行时兜底
+        # 会被「空转」骗过（K21）。
+        p.show()
+        qapp.processEvents()
+
+    _, calls = _record(SettingsPanel, [triggers])
     _check_file(calls, "desktop/settings_panel.py")
 
 
