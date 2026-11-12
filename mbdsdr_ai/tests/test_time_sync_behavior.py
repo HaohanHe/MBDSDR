@@ -75,7 +75,7 @@ def test_ntp_uses_transmit_timestamp_not_receive():
     assert r["ntp_time"] == time.strftime(
         "%Y-%m-%d %H:%M:%S", time.gmtime(want_ntp_sec))
     # 偏差 = 应答传输时刻 - 本地收发中点（量级由 TX 决定，与 RX 无关）
-    assert abs(r["local_clock_skew_s"] - (want_ntp_sec - time.time())) < 5.0  # timeguard: allow
+    assert abs(r["local_clock_skew_s"] - (want_ntp_sec - time.time())) < 5.0  # timeguard: allow — 被测对象就是 NTP 校时偏差：期望值按本地墙钟现算，容忍 5s
     assert r["round_trip_s"] >= 0.0
 
 

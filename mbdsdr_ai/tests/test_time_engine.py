@@ -63,7 +63,7 @@ class TestTimeEngineDefaultBehavior(unittest.TestCase):
         eng = get_time_engine()
         self.assertTrue(eng.is_following_system())
         # now_unix() 应接近 time.time()
-        self.assertLess(abs(eng.now_unix() - time.time()), 1.0)  # timeguard: allow
+        self.assertLess(abs(eng.now_unix() - time.time()), 1.0)  # timeguard: allow — 被测对象就是「默认跟随系统时钟」：now_unix 必须贴住 time.time()
         self.assertEqual(eng.get_rate(), 1.0)
 
     def test_tick_when_following_system_is_noop(self):
@@ -72,7 +72,7 @@ class TestTimeEngineDefaultBehavior(unittest.TestCase):
         eng.tick(10.0)  # 不应抛错，也不应跳变
         after = eng.now_unix()
         # 跟随系统时间时 tick 不改 sim_jd，仍返回系统时间
-        self.assertLess(abs(after - time.time()), 1.0)  # timeguard: allow
+        self.assertLess(abs(after - time.time()), 1.0)  # timeguard: allow — 被测对象就是「跟随态 tick 不改变系统时间」：tick 后仍贴住 time.time()
 
 
 class TestTimeEngineRate(unittest.TestCase):

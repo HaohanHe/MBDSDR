@@ -34,6 +34,13 @@ SELF = os.path.abspath(__file__)
 
 ALLOW_MARKER = "timeguard: allow"
 
+#: 未写理由的豁免上限：只许降不许涨。
+#: 2026-11-12 起点 6 条，逐条核实语义后降到 1：TimeEngine 跟随墙钟 ×4 + NTP 偏差
+#: 已补理由，剩 ``tests/test_full_integration_v2.py`` 一处——该文件有另一条线未提交
+#: 的在途改动，不碰对方工作树，故保持无理由、计数钉在 1。等对方落库后补理由并把
+#: 上限下调到 0。新增无理由豁免必须红。
+_UNVERIFIED_EXEMPTION_CEILING = 1
+
 # 裸时钟：模块.函数 或 from-import 后的本地名
 _CLOCK_ATTRS = {
     ("time", "time"),
@@ -175,7 +182,7 @@ def scan_source(path: str, source: str
         line = lines[node.lineno - 1] if node.lineno <= len(lines) else ""
         if ALLOW_MARKER in line:
             reason = line.split(ALLOW_MARKER, 1)[1].lstrip(" :—-").strip()
-            exempt.append((node.lineno, line.strip(), reason or "（未写理由）"))
+            exempt.append((node.lineno, line.strip(), reason))
             continue
         bad.append((node.lineno, line.strip()))
     return bad, exempt
@@ -185,26 +192,64 @@ def violations_in_source(path: str, source: str) -> list[tuple[int, str]]:
     return scan_source(path, source)[0]
 
 
-def test_no_bare_clock_as_test_input():
-    bad: list[str] = []
+def _iter_sources():
+    """遍历受管测试文件，产出 (路径, 源码)。"""
     for path in _module_files():
         try:
             with open(path, encoding="utf-8-sig") as fh:
-                src = fh.read()
+                yield path, fh.read()
         except (OSError, UnicodeDecodeError):
             continue
+
+
+def test_no_bare_clock_as_test_input():
+    bad: list[str] = []
+    verified = 0
+    unverified = 0
+    for path, src in _iter_sources():
         hits, exempt = scan_source(path, src)
         rel = os.path.relpath(path, ROOT)
         for lineno, text, reason in exempt:
             # 豁免必须可见：pytest 默认捕获输出，故同时写进 warnings summary。
-            warnings.warn(f"[timeguard] 豁免 {rel}:{lineno} — {reason}｜{text}",
+            if reason:
+                verified += 1
+                tag = "有理由"
+            else:
+                unverified += 1
+                tag = "未核实"
+            warnings.warn(f"[timeguard] 豁免（{tag}）{rel}:{lineno}"
+                          f"{' — ' + reason if reason else ''}｜{text}",
                           stacklevel=1)
         for lineno, text in hits:
             bad.append(f"{rel}:{lineno}: {text}")
+    warnings.warn(f"[timeguard] 豁免合计 {verified + unverified} 条："
+                  f"有理由 {verified} / 未核实 {unverified}", stacklevel=1)
     assert not bad, (
         "测试把裸系统时钟当被测输入（请改为显式 start_unix/at_unix 注入，"
         "或确属与墙钟比较的接线层则加 `# timeguard: allow — 理由`）：\n  "
         + "\n  ".join(bad)
+    )
+
+
+def test_unverified_exemption_count_does_not_grow():
+    """无理由的豁免是「谁也删不掉、也不知道在保护什么」的开关：只许降，不许涨。
+
+    新增豁免必须写清具体理由；确实判不出来的写
+    ``# timeguard: allow — 原因未核实（所属：<线/文件>，2026-11-12）``，
+    并在同一提交里下调 ``_UNVERIFIED_EXEMPTION_CEILING``。
+    """
+    unverified: list[str] = []
+    total = 0
+    for path, src in _iter_sources():
+        _, exempt = scan_source(path, src)
+        for lineno, _text, reason in exempt:
+            total += 1
+            if not reason:
+                unverified.append(f"{os.path.relpath(path, ROOT)}:{lineno}")
+    assert len(unverified) <= _UNVERIFIED_EXEMPTION_CEILING, (
+        f"未写理由的豁免 {len(unverified)} 条 > 上限 "
+        f"{_UNVERIFIED_EXEMPTION_CEILING}（共 {total} 条豁免）：\n  "
+        + "\n  ".join(unverified)
     )
 
 
