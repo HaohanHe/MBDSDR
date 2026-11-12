@@ -262,7 +262,7 @@ pre-commit**：pre-commit 现在只跑 claim 范围 + claim 台账 + 暂存区�
 `verify_*`/`lint_*`/`*_scan`/带 `--check` 的生成器，排除 bench/硬件/一次性工具）：
 逐条实跑 1 次、`QT_QPA_PLATFORM=offscreen`、取墙钟秒；**没有一个脚本自己取
 `qt_test.lock`**，所以下表的「Qt」一栏只有「是否 import/启动 Qt」的区别，不是锁。
-按覆盖分为三档：**A 自动入口（27 条）**、**B 只有测试入口、仓库现状无人跑（11 条）**、
+按覆盖分为三档：**A 自动入口（26 条）**、**B 只有测试入口、仓库现状无人跑（12 条）**、
 **C 无任何入口（5 条，漏网）**。
 
 ### A. 已接入自动入口（覆盖当前仓库）
@@ -273,9 +273,16 @@ pre-commit**：pre-commit 现在只跑 claim 范围 + claim 台账 + 暂存区�
 `scripts/secret_scan.py`，`install_git_hooks --check` 因工作树与钩子副本不一致
 瞬时红）；单项超时 120s，任一非 0 即整步 FAIL，明细点名到脚本。
 
+**2026-11-13 A 档复核**：原 27 条逐条 `git grep` 调用方/钩子配置，26 条有真实触发点
+（`release_check.py` 的 `GUARD_CHECKS`/`do_docs`/`do_gen_reconcile`/`do_action_dup`、
+`scripts/hooks/pre-commit`、`scripts/hooks/post-commit`、`.github/workflows/ci.yml`、
+`scripts/run_all_tests.sh`）。**1 条是假入口**：`release_manifest.py` 只在测试里被
+`import` 函数、`package_windows.ps1` 只在注释里提到，没有任何命令跑本仓或真 dist，
+已移入 B 档。以后新增 A 档条目必须同时留下「可 grep 到的调用方」。
+
 | 脚本 | 入口 | 什么时候跑 | 谁跑 | 复核 |
 | --- | --- | --- | --- | --- |
-| `scripts/verify_claims.py` | 自动：`release_check.py --steps docs` | 每次发版第一步；`--check-lines --strict-lines` 不通过即 FAIL（实测 33.7–40.6s；2026-11-13 已把 38 条坐标漂移逐条真修，现绿、豁免 0） | 发版人 | 2027-01 |
+| `scripts/verify_claims.py` | 自动：`release_check.py --steps docs` | 每次发版第一步；`--check-lines --strict-lines` 不通过即 FAIL（实测 33.7–59.8s，随并发提交数上涨；2026-11-13 已把 38 条坐标漂移逐条真修，豁免 0） | 发版人 | 2027-01 |
 | `scripts/check_rollback_table.py` | 自动：`release_check.py --steps docs` | 发版前；§6.10.2 表格改动后本地跑（2.3s） | 发版人 / 表格改动者 | 2027-01 |
 | `scripts/check_generated_artifacts.py` | 自动：`release_check.py --steps gen_reconcile` | 发版前（3.7s），同时覆盖 `gen_mcp_tools_doc` 的产物 | 发版人 | 2027-01 |
 | `scripts/check_action_duplication.py` | 自动：`release_check.py --steps action_dup` | 发版前；菜单/QAction 增改后本地跑 `--gate`（5.9s，需 Qt/offscreen） | 发版人 / UI 改动者 | 2027-01 |
@@ -297,7 +304,6 @@ pre-commit**：pre-commit 现在只跑 claim 范围 + claim 台账 + 暂存区�
 | `scripts/check_commit_scope.py` | 自动：`scripts/hooks/pre-commit` | 每次 `git commit` 前（暂存区，约 0.1s） | 全体提交者（钩子自动） | 2027-01 |
 | `scripts/claim_gate.py` | 自动：`scripts/hooks/pre-commit` | 每次 `git commit` 前逐文件查 claim 台账（约 0.2s） | 全体提交者（钩子自动） | 2027-01 |
 | `scripts/secret_scan.py` | 自动：`scripts/hooks/pre-commit`（**仅 `--staged`**） | 每次提交前扫暂存区；全量 `--history`/全树扫描**无自动入口**（实测 >300s，见 C 档） | 全体提交者（钩子自动） | 2027-01 |
-| `scripts/release_manifest.py` | 自动：`tests/test_import_probe.py` 等 + `docs/packaging.md` 流程 | 出安装包后手动 `--dist`；测试内覆盖版本/依赖/许可证断言（需 Qt） | 发版人 | 2027-01 |
 | `scripts/git_sync_index.py` | 自动：`post-commit` 钩子 + `tests/test_git_sync_index.py` | 每次提交后同步共享 index（钩子自动） | 全体提交者（钩子自动） | 2027-01 |
 | `scripts/make_decode_fixtures.py --check` | 自动：`release_check.py --steps guards` | 发版前（4.2s）：生成器与 8 个 cf32/wav + `manifest.json` 逐字对账；2026-11-13 生成器补 `provenance: self-generated` 后转绿 | 发版人 / 解码 fixture 改动者 | 2027-01 |
 | `scripts/check_commit_residue.py` | 自动：`scripts/hooks/post-commit`（`--repo <root> --json HEAD`） | **每次提交后**（实测 0.68–0.85s）：本次提交新增的连续行块若以「删除」形态回到工作区未提交 diff → 打印 RESIDUE 并追加 `D:\mbdsdr\.locks\residue_commits.log`；只记录不阻断（提交已落地） | 全体提交者（钩子自动） | 2027-01 |
@@ -307,10 +313,11 @@ pre-commit**：pre-commit 现在只跑 claim 范围 + claim 台账 + 暂存区�
 
 这些脚本的 CLI 在 `tests/` 里对**临时夹具**跑过，逻辑有回归保护；但没有任何
 入口对**本仓当前状态**执行，所以「仓库现在是红的」它抓不到。它们的红/绿
-只在有人手动跑时才可见——这就是「一条命令输出合规状态」在这 11 条上**不成立**。
+只在有人手动跑时才可见——这就是「一条命令输出合规状态」在这 12 条上**不成立**。
 
 | 脚本 | 现有入口 | 缺什么 | 什么时候跑 | 谁跑 | 复核 |
 | --- | --- | --- | --- | --- | --- |
+| `scripts/release_manifest.py` | `tests/test_release_secrets.py`、`tests/test_version_literal_guard.py` 只 `import` 函数并对**临时 dist** 断言 | 没有命令对**本仓/真 dist** 跑 CLI；`scripts/package_windows.ps1:149` 只是在注释里提到同判据，`docs/known-red-register.md:1136` 是人工复跑命令 | 出安装包后手动 `--dist`；当前 `known-red-register` 记为红 | 发版人 | 2027-01 |
 | `scripts/lint_swallow_all.py` | `tests/test_swallow_guard.py`（棘轮） | 仓库现状（37.0s，实测 rc=1：越线中） | 批次末与发版前手动；越线必须当天归因 | 吞噬治理线 | 2026-12 |
 | `scripts/check_red_lifecycle.py` | `tests/test_red_lifecycle.py` | 仓库现状（27.3s，实测 rc=1：有到期/无证据红项） | 批次末手动；红项状态变更后 | 红项 owner | 2026-12 |
 | `scripts/check_destructive_ops.py` | `tests/test_destructive_audit.py` | 仓库 reflog（0.5s，实测 rc=1：27 笔未审计） | 发生 reset/clean/branch -D 当天 | 操作执行人 | 2026-12 |
