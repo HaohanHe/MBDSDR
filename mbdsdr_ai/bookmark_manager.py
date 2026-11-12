@@ -60,6 +60,11 @@ class Bookmark:
     color: str = DEFAULT_COLOR
     tags: List[str] = field(default_factory=list)
     group: str = ""
+    # 以下三项来自 FrequencyManager 的旧条目：同一份 bookmarks.json 由两个
+    # 组件共用，缺了它们 FrequencyManager 一保存就会把区间/备注丢掉。
+    start_hz: float = 0.0
+    end_hz: float = 0.0
+    note: str = ""
 
     def __lt__(self, other: "Bookmark") -> bool:  # 按频率排序
         return self.frequency_hz < other.frequency_hz
@@ -79,6 +84,9 @@ def _from_legacy_entry(d: dict) -> "Bookmark":
         modulation=str(d.get("modulation") or d.get("mode") or "FM"),
         bandwidth_hz=_num("bandwidth_hz", 12500) or 12500,
         group=str(d.get("group") or d.get("category") or ""),
+        start_hz=float(_num("start_hz") or 0.0),
+        end_hz=float(_num("end_hz") or 0.0),
+        note=str(d.get("note", "")),
     )
 
 
@@ -101,12 +109,15 @@ def _backup_corrupt_bookmarks(path: Path) -> Optional[str]:
 class BookmarkManager:
     """书签管理器：增删改查、分组树、标签、搜索、CSV 导入导出、JSON 持久化。"""
 
-    def __init__(self, config_dir: Optional[os.PathLike] = None):
+    def __init__(self, config_dir: Optional[os.PathLike] = None,
+                 bookmarks_path: Optional[os.PathLike] = None):
         if config_dir is None:
             config_dir = Path.home() / ".mbdsdr"
         self.config_dir = Path(config_dir)
         self.config_dir.mkdir(parents=True, exist_ok=True)
-        self.bookmarks_path = self.config_dir / "bookmarks.json"
+        self.bookmarks_path = (Path(bookmarks_path) if bookmarks_path
+                               else self.config_dir / "bookmarks.json")
+        self.bookmarks_path.parent.mkdir(parents=True, exist_ok=True)
         self._bookmarks: List[Bookmark] = []
         self._tag_colors: Dict[str, str] = {UNTAGGED: DEFAULT_COLOR}
         #: 上次读取失败的人话说明（None = 正常）；调用方可据此提示用户。

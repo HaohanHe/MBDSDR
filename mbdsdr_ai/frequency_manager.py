@@ -17,12 +17,14 @@ AI 可经工具：列出/搜索书签、按名称或频率跳转（同时设置�
 
 from __future__ import annotations
 
-import json
 import logging
 import math
 import os
 from dataclasses import dataclass, asdict, field
 from typing import List, Optional
+
+from .bookmark_manager import Bookmark as StoreBookmark
+from .bookmark_manager import BookmarkManager
 
 logger = logging.getLogger(__name__)
 
@@ -203,70 +205,64 @@ class FrequencyManager:
                                      "bookmarks.json")
         self.user_path = user_path
         self.bookmarks: List[Bookmark] = _default_bookmarks()
-        #: 上次读取用户书签的失败原因（""=无错）。供 UI 出 UNAVAILABLE，
-        #: 而不是把「读不出来」静默成「没有书签」。
+        #: 上次读取用户书签的失败原因（""=无错）。损坏时由 BookmarkManager
+        #: 给出「已备份为 X / 备份失败拒绝写」的人话，而不是静默成空列表。
         self.load_error = ""
-        self._load_user()
+        #: 损坏文件的备份路径（None = 未损坏或备份失败）。
+        self.corrupt_backup: Optional[str] = None
+        self._reload_from_store()
 
-    def _load_user(self):
-        """读取用户书签；失败留痕，缺频率的条目跳过而不是落成 0.0。
+    # ------------------------------------------------------- 共用书签存储
+    # `bookmarks.json` 由书签面板（BookmarkManager）和本模块共用。读写一律
+    # 走 BookmarkManager，绝不在这里另写一份 json.dump：两个真值源正是
+    # 「书签面板刚修好备份、这边一保存又把用户书签写成只剩内置项」的根。
+    def _open_store(self) -> BookmarkManager:
+        """每次操作重新打开：读盘拿到书签面板刚写的最新状态，不用缓存。"""
+        return BookmarkManager(
+            config_dir=os.path.dirname(os.path.abspath(self.user_path)) or ".",
+            bookmarks_path=self.user_path)
 
-        0 Hz 单点书签在 nearest()/get_bookmarks_in_range() 里永远匹配不到，
-        用户只会看到「书签没了」却无任何报错——那是假数据，不是降级。
-        """
-        self.load_error = ""
-        try:
-            with open(self.user_path, "r", encoding="utf-8") as f:
-                data = json.load(f)
-        except FileNotFoundError:
-            return                      # 首次运行：没有文件不是错误
-        except (json.JSONDecodeError, OSError, UnicodeDecodeError) as exc:
-            self.load_error = f"{type(exc).__name__}: {exc}"
-            logger.warning("书签文件读取失败（%s）：%s", self.user_path, self.load_error)
-            return
-        if isinstance(data, dict):
-            # BookmarkManager 写的是 {"tag_colors": ..., "bookmarks": [...]}；
-            # 同一个人口文件，两种格式都得能读，否则书签面板一存就互相踢死。
-            data = data.get("bookmarks", [])
-        if not isinstance(data, list):
-            self.load_error = f"书签文件顶层不是列表：{type(data).__name__}"
-            logger.warning("%s（%s）", self.load_error, self.user_path)
-            return
+    def _reload_from_store(self) -> None:
+        """从共享存储重建用户书签；损坏/备份状态原样透传给 UI。"""
+        store = self._open_store()
+        self.corrupt_backup = store.corrupt_backup
+        self.load_error = store.last_error or ""
+        self.bookmarks = _default_bookmarks()
         skipped = 0
-        for d in data:
-            if not isinstance(d, dict):
-                skipped += 1
-                continue
-            freq = _num(d.get("freq_hz", d.get("frequency_hz")))
+        for b in store.all():
+            freq = _num(b.frequency_hz)
+            start = _num(b.start_hz) or 0.0
+            end = _num(b.end_hz) or 0.0
             if freq is not None and freq <= 0:
-                # 0 Hz / 负频率不是可调谐书签：旧版测试曾把 0 Hz 写进真实
-                # 书签库，启动时被当成「上次频率」回填 → 三条硬件 WARNING
-                # （2026-11-10 真机实证）。这里一律当作无效丢弃。
+                # 0 Hz / 负频率不是可调谐书签：历史上会被当成「上次频率」
+                # 回填并触发三条硬件 WARNING，这里一律按无效丢弃。
                 freq = None
-            start = _num(d.get("start_hz")) or 0.0
-            end = _num(d.get("end_hz")) or 0.0
             if freq is None and not end > start > 0:
                 skipped += 1
                 continue
             self.bookmarks.append(Bookmark(
-                name=str(d.get("name", "")),
+                name=b.name,
                 freq_hz=freq if freq is not None else 0.0,
-                mode=str(d.get("mode", d.get("modulation", ""))),
-                category=str(d.get("category", d.get("group", "自定义"))),
-                bandwidth_hz=_num(d.get("bandwidth_hz")) or 0.0,
+                mode=b.modulation,
+                category=b.group or "自定义",
+                bandwidth_hz=float(b.bandwidth_hz or 0.0),
                 start_hz=start, end_hz=end,
-                note=str(d.get("note", "")), builtin=False))
+                note=b.note, builtin=False))
         if skipped:
-            self.load_error = f"跳过 {skipped} 条缺少有效频率/字段非法的书签"
-            logger.warning("%s（%s）", self.load_error, self.user_path)
+            note = f"跳过 {skipped} 条缺少有效频率/字段非法的书签"
+            self.load_error = (f"{self.load_error}；{note}"
+                               if self.load_error else note)
+            logger.warning("%s（%s）", note, self.user_path)
 
-    def _save_user(self):
-        users = [b.to_dict() for b in self.bookmarks if not b.builtin]
-        os.makedirs(os.path.dirname(self.user_path), exist_ok=True)
-        tmp = self.user_path + ".tmp"
-        with open(tmp, "w", encoding="utf-8") as f:
-            json.dump(users, f, ensure_ascii=False, indent=2)
-        os.replace(tmp, self.user_path)
+    @staticmethod
+    def _to_store(b: Bookmark) -> StoreBookmark:
+        return StoreBookmark(
+            frequency_hz=int(round(b.freq_hz)),
+            name=b.name, modulation=b.mode or "",
+            bandwidth_hz=int(round(b.bandwidth_hz)),
+            group=b.category, note=b.note,
+            start_hz=float(b.start_hz), end_hz=float(b.end_hz))
+
 
     def categories(self) -> List[str]:
         seen = []
@@ -325,17 +321,19 @@ class FrequencyManager:
         bm = Bookmark(name=name, freq_hz=float(freq_hz), mode=mode.upper(),
                       category=category, bandwidth_hz=float(bandwidth_hz),
                       note=note, builtin=False)
-        self.bookmarks.append(bm)
-        self._save_user()
+        store = self._open_store()
+        store.add(self._to_store(bm))
+        self._reload_from_store()
         return bm
 
     def remove(self, name: str) -> bool:
-        for i, b in enumerate(self.bookmarks):
-            if not b.builtin and b.name == name:
-                self.bookmarks.pop(i)
-                self._save_user()
-                return True
-        return False
+        store = self._open_store()
+        hit = next((x for x in store.all() if x.name == name), None)
+        if hit is None:
+            return False
+        ok = store.remove(hit.frequency_hz, hit.name)
+        self._reload_from_store()
+        return ok
 
     def get_bookmarks_in_range(self, low_hz: float, high_hz: float
                                ) -> List[Bookmark]:

@@ -39,6 +39,13 @@ _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, _ROOT)
 sys.path.insert(0, os.path.join(_ROOT, "desktop"))
 
+
+def _saved_entries(raw):
+    """bookmarks.json 可能是 BookmarkManager 的 dict 格式，也可能是旧的裸列表。"""
+    if isinstance(raw, dict):
+        raw = raw.get("bookmarks", [])
+    return [d for d in raw if isinstance(d, dict)]
+
 import pytest  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
@@ -129,7 +136,7 @@ def test_add_bookmark_persists_bandwidth(mw):
     path = mw._freq_mgr.user_path
     with open(path, "r", encoding="utf-8") as f:
         raw = json.load(f)
-    saved = [d for d in raw if d.get("name") == "带宽持久化"]
+    saved = _saved_entries(raw)
     assert saved and saved[-1]["bandwidth_hz"] == pytest.approx(BW)
 
     from mbdsdr_ai.frequency_manager import FrequencyManager
