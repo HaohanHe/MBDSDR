@@ -1597,9 +1597,6 @@ class _ThreadedRingReader:
                 sub.read_seq = self._produced
             # 各订阅者的历史 dropped 保留（监控用，不清零）。
 
-    def producer_alive(self) -> bool:
-        return self._thread is not None and self._thread.is_alive()
-
     def dropped_total(self) -> int:
         """各订阅者累计丢弃样点数之和（监控用，不清零）。
 
