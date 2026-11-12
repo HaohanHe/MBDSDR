@@ -10,6 +10,7 @@ weshu/direwolf (https://github.com/wb2osz/direwolf) 仅作技术参考与致谢�
 公开 AX.25/TAPR 规范规定的事实。
 """
 
+import logging
 import struct
 import math
 import time
@@ -17,6 +18,8 @@ import numpy as np
 from dataclasses import dataclass, field
 from typing import List, Optional, Tuple, Dict, Any
 from enum import Enum
+
+logger = logging.getLogger(__name__)
 
 
 # ============================================================
@@ -1185,5 +1188,7 @@ def save_ax25_to_wav(frame: AX25Frame, output_path: str,
             wf.writeframes(audio_int16.tobytes())
 
         return True
-    except Exception:
+    except Exception as e:
+        logger.warning("写 AX.25 WAV 失败：%s: %s: %s",
+                       output_path, type(e).__name__, e)
         return False
