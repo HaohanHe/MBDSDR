@@ -230,6 +230,69 @@ def test_set_connected_true_does_not_claim_owner(panel, monkeypatch, tmp_path):
     sb._OWNED_HERE.clear()
 
 
+# ------------------------------------ 跨进程占用三态：未知不许显示成空闲
+# 旧行为：get_active_owner 读坏登记时返回 None，面板据此当「设备空闲」，
+# 用户点连接才被拒——界面在说一件与实际不符的话。现在第三态单独展示，
+# 并给出「重试 / 查看诊断」入口。
+def test_owner_unreadable_registry_is_shown_as_unknown_not_free(
+        panel, monkeypatch, tmp_path):
+    import mbdsdr_ai.sdr_backend as sb
+
+    reg = tmp_path / "device_owner.json"
+    monkeypatch.setenv(sb.OWNER_REGISTRY_ENV, str(reg))
+    # 备份失败：坏文件留在原地，claim 必然失败——这正是「说空闲却连不上」的场景。
+    monkeypatch.setattr(sb, "_backup_corrupt_registry", lambda reason: None)
+    reg.write_bytes(b'{"owners": ')
+
+    panel._apply_devices([_dev(0, serial="A-0001", label="RTL-A")])
+    assert panel._identities and panel._identities[0].key, \
+        "面板应已解析出设备身份"
+
+    text = panel.owner_state_label.text()
+    assert "无法读取设备占用登记" in text
+    assert "无法判断是否被占用" in text
+    assert "空闲" not in text, f"第三态不许说成空闲：{text!r}"
+    assert panel.owner_state_label.isHidden() is False
+    assert panel.owner_retry_btn.isHidden() is False
+    assert panel.owner_diag_btn.isHidden() is False
+
+    # 「重试」真的会重读：登记被修好/移除后，状态回到空闲并收起整行。
+    reg.unlink()
+    panel.owner_retry_btn.click()
+    assert panel.owner_state_label.isHidden() is True
+
+
+def test_owner_free_state_hides_row(panel, monkeypatch, tmp_path):
+    import mbdsdr_ai.sdr_backend as sb
+
+    monkeypatch.setenv(sb.OWNER_REGISTRY_ENV, str(tmp_path / "owner.json"))
+    panel._apply_devices([_dev(0, serial="A-0001", label="RTL-A")])
+
+    assert panel.owner_state_label.text() == ""
+    assert panel.owner_state_label.isHidden() is True
+    assert panel.owner_retry_btn.isHidden() is True
+    assert panel.owner_diag_btn.isHidden() is True
+
+
+def test_owner_occupied_state_shows_pid(panel, monkeypatch, tmp_path):
+    import mbdsdr_ai.sdr_backend as sb
+
+    monkeypatch.setenv(sb.OWNER_REGISTRY_ENV, str(tmp_path / "owner.json"))
+    sb._OWNED_HERE.clear()
+    panel._apply_devices([_dev(0, serial="A-0001", label="RTL-A")])
+    key = panel._identities[0].key
+    assert sb.claim_active_owner("desktop", key)[0] is True
+
+    panel._refresh_owner_state()
+    text = panel.owner_state_label.text()
+    assert "占用" in text and "pid" in text, text
+    assert "空闲" not in text
+    # 被占用时应给「重试」（对方可能已释放），但不把人引到诊断。
+    assert panel.owner_retry_btn.isHidden() is False
+    assert panel.owner_diag_btn.isHidden() is True
+    sb.release_active_owner("desktop", key)
+
+
 # ------------------------------------------------ 枚举失败 != 没插设备（W92 patch）
 # 同一次枚举失败，module_panel 说「这不等于没插设备」，device_panel 却说
 # 「未检测到 SDR 设备」——用户会去拔插 USB，而真实原因可能是依赖缺失或驱动报错。

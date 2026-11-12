@@ -19,6 +19,7 @@ MBDSDR 设备选择 / 热插拔面板（desktop/device_panel.py）
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 from typing import Optional, List, Dict
 
 from PySide6.QtCore import Qt, Signal, QTimer, QObject, QRunnable, QThreadPool
@@ -28,13 +29,23 @@ from PySide6.QtWidgets import (
 )
 
 try:  # pragma: no cover
-    from mbdsdr_ai.sdr_backend import enumerate_all_sdr_devices
+    from mbdsdr_ai.sdr_backend import (
+        OWNER_STATE_UNKNOWN as _OWNER_STATE_UNKNOWN,
+        enumerate_all_sdr_devices,
+        get_owner_state as _get_owner_state,
+        owner_registry_path as _owner_registry_path,
+        owner_state_text as _owner_state_text,
+    )
     from mbdsdr_ai import usb_hotplug
     _ENUM_OK = True
 except Exception:  # noqa: BLE001
     enumerate_all_sdr_devices = None  # type: ignore
     usb_hotplug = None  # type: ignore
     _ENUM_OK = False
+    _OWNER_STATE_UNKNOWN = "unknown"
+    _get_owner_state = None  # type: ignore
+    _owner_registry_path = None  # type: ignore
+    _owner_state_text = None  # type: ignore
 
 # 跨进程设备占用**不在这里登记**：判据只有一个地方——后端 connect()（真正
 # 开硬件的那一处）。面板 / 连接对话框 / 自动枚举 / 模块面板最终都走它，
@@ -154,6 +165,9 @@ class DevicePanel(QWidget):
         self._current_dev_locator: Optional[tuple] = None
         self._last_capability_report: Dict = {}
         self._last_verdict: tuple = (None, "尚未连接")
+        #: 最近一次占用三态结论（诊断弹窗复用）：不在弹窗时再读一遍，
+        #: 否则「损坏已备份移走」会让两次结论前后不一致。
+        self._last_owner_state = None
         #: 本次连接中「设备未申报量程、未做能力校验」的字段与请求值。
         #: 连上之后仍要能在面板上看到，不能随 set_connected(True) 消失。
         self._unverified_capabilities: list = []
@@ -279,6 +293,31 @@ class DevicePanel(QWidget):
         self.status_label.setToolTip(_NO_DEVICE_TIP)
         form.addRow("", self.status_label)
 
+        # 跨进程占用三态：空闲时不占地方；「被占用 / 状态未知」必须显式说
+        # 出来。第三态尤其不能显示成空闲——点连接才发现被拒，界面此前一直
+        # 在说假话（与「被占用却提示 USB 权限不足」是同一个病）。
+        self.owner_state_label = QLabel("")
+        self.owner_state_label.setObjectName("statusValue")
+        self.owner_state_label.setWordWrap(True)
+        self.owner_state_label.setVisible(False)
+        owner_row = QHBoxLayout()
+        owner_row.setContentsMargins(0, 0, 0, 0)
+        owner_row.addWidget(self.owner_state_label, 1)
+        self.owner_retry_btn = QPushButton("重试")
+        self.owner_retry_btn.setToolTip("重新读取设备占用登记")
+        self.owner_retry_btn.clicked.connect(
+            lambda: self._refresh_owner_state())
+        self.owner_retry_btn.setVisible(False)
+        owner_row.addWidget(self.owner_retry_btn)
+        self.owner_diag_btn = QPushButton("查看诊断")
+        self.owner_diag_btn.setToolTip(
+            "查看占用登记文件、损坏证据与修复办法")
+        self.owner_diag_btn.clicked.connect(
+            lambda: self._show_owner_diagnostics())
+        self.owner_diag_btn.setVisible(False)
+        owner_row.addWidget(self.owner_diag_btn)
+        form.addRow("", owner_row)
+
         root.addWidget(sdr_box)
 
         # 音频输出组
@@ -402,6 +441,7 @@ class DevicePanel(QWidget):
                 self.status_label.setToolTip(_NO_DEVICE_TIP)
             self.connect_btn.setEnabled(False)
             self._last_poll_locs = set()
+            self._set_owner_state(None)
             return
         for d in self._devices:
             label = d.get("label") or d.get("driver") or "未知设备"
@@ -412,6 +452,8 @@ class DevicePanel(QWidget):
         # 手动刷新/初始刷新后，轮询基准同步到最新列表：刷新本身不算“新插入”。
         self._last_poll_locs = {self._locator_of(d) for d in self._devices}
         self._render_request(self.dev_combo.currentIndex())
+        # 设备列表变化后占用状态也可能变（别的进程连上/释放）：重读一次。
+        self._refresh_owner_state()
 
     def _refresh_audio_devices(self) -> None:
         self.audio_combo.blockSignals(True)
@@ -590,6 +632,98 @@ class DevicePanel(QWidget):
                 logger.warning("设备能力摘要生成失败：%s", e)
             self.status_label.setToolTip(tip)
             self._render_request(idx)
+        self._refresh_owner_state()
+
+    # ------------------------------------------------------ 跨进程占用三态
+    def _refresh_owner_state(self) -> None:
+        """重新读取当前设备的跨进程占用状态（空闲/被占用/状态未知）。
+
+        第三态**不显示成空闲**：登记读不出来时如实说「无法判断」，并把
+        「重试」「查看诊断」摆在同一条状态行上。用户不知道能不能连，比
+        直接说不能连更糟；界面先宣称空闲、点连接才被拒，就是在说假话。
+        """
+        if self._connected:
+            # 已连上时登记里的持有者就是本进程，显示「被占用」只会误导。
+            self._set_owner_state(None)
+            return
+        ident = self._current_identity()
+        if ident is None or _get_owner_state is None:
+            self._set_owner_state(None)
+            return
+        try:
+            state = _get_owner_state(ident.key)
+        except Exception as e:  # noqa: BLE001 - 查询失败同样不能说成空闲
+            self._last_owner_state = None
+            self._show_owner_unknown(
+                f"查询设备占用状态失败：{type(e).__name__}: {e}")
+            return
+        self._last_owner_state = state
+        self._set_owner_state(state)
+
+    def _set_owner_state(self, state) -> None:
+        """渲染三态；``None``/``free`` 隐藏整行（空闲不必占地方）。"""
+        if state is None or not bool(state):
+            self.owner_state_label.setText("")
+            self.owner_state_label.setToolTip("")
+            self.owner_state_label.setVisible(False)
+            self.owner_retry_btn.setVisible(False)
+            self.owner_diag_btn.setVisible(False)
+            return
+        if getattr(state, "state", "") == _OWNER_STATE_UNKNOWN:
+            self._show_owner_unknown(self._owner_state_text_value(state))
+            return
+        text = self._owner_state_text_value(state)
+        self.owner_state_label.setText(text)
+        self.owner_state_label.setToolTip(text)
+        self.owner_state_label.setVisible(True)
+        # 被占用也可能随时被对方释放：同样给「重试」，但不引到诊断。
+        self.owner_retry_btn.setVisible(True)
+        self.owner_diag_btn.setVisible(False)
+
+    @staticmethod
+    def _owner_state_text_value(state) -> str:
+        if _owner_state_text is None:
+            return str(getattr(state, "state", "") or "")
+        return _owner_state_text(state)
+
+    def _show_owner_unknown(self, text: str) -> None:
+        """第三态：明确写「无法判断」，并把重试/诊断入口一起摆出来。"""
+        self.owner_state_label.setText(f"⚠ {text}")
+        self.owner_state_label.setToolTip(
+            f"{text}\n点「重试」重新读取登记；点「查看诊断」查看登记文件、"
+            "损坏证据与修复办法。")
+        self.owner_state_label.setVisible(True)
+        self.owner_retry_btn.setVisible(True)
+        self.owner_diag_btn.setVisible(True)
+
+    def _show_owner_diagnostics(self) -> None:
+        """「查看诊断」：把登记路径、本次结论/原因、损坏证据摊开。"""
+        path = _owner_registry_path() if _owner_registry_path else ""
+        lines = [f"占用登记文件：{path or '（不可用）'}"]
+        ident = self._current_identity()
+        if ident is not None:
+            lines.append(f"当前设备键：{ident.key}")
+        state = self._last_owner_state
+        if state is not None:
+            lines.append(f"本次结论：{self._owner_state_text_value(state)}")
+            reason = getattr(state, "reason", "")
+            if reason:
+                lines.append(f"原因：{reason}")
+        evidence: List[str] = []
+        if path:
+            try:
+                evidence = sorted(
+                    str(p) for p in Path(path).parent.glob(
+                        Path(path).name + ".corrupt-*.reason.txt"))
+            except Exception:  # noqa: BLE001 - 诊断信息不全也不能崩
+                evidence = []
+        lines.append("损坏证据：" + ("无" if not evidence else ""))
+        lines.extend(evidence)
+        lines.append("")
+        lines.append("修复办法：把该文件修成合法的 JSON 对象（含 owners 对象），"
+                     "或确认没有别的程序在用这台设备后移除/改名该文件，"
+                     "再点「重试」。")
+        QMessageBox.information(self, "设备占用登记诊断", "\n".join(lines))
 
     # ------------------------------------------------------ 连接请求（唯一存储）
     def _resolve_connected_device(self, dev_label: str, device: Optional[Dict]):
@@ -704,6 +838,8 @@ class DevicePanel(QWidget):
         """
         self._connected = bool(connected)
         if connected:
+            # 已连上：登记里的持有者就是本进程，占用行不再显示。
+            self._set_owner_state(None)
             dev, ident = self._resolve_connected_device(dev_label, device)
             if dev is not None and ident is not None:
                 self._connected_device = dev
@@ -765,6 +901,8 @@ class DevicePanel(QWidget):
             self.status_label.setToolTip("")
             if self.status_label.text() != "设备已拔出":
                 self.status_label.setText("已断开")
+            # 断开后占用登记已归还：重读一次，别让上一轮的占用结论留在界面上。
+            self._refresh_owner_state()
         # 「默认 · 未确认」标记随连接态切换：断开后重新标，连上后去掉。
         self._update_sr_equiv()
 
