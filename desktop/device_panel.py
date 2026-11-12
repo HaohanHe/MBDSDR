@@ -304,7 +304,8 @@ class DevicePanel(QWidget):
         owner_row.setContentsMargins(0, 0, 0, 0)
         owner_row.addWidget(self.owner_state_label, 1)
         self.owner_retry_btn = QPushButton("重试")
-        self.owner_retry_btn.setToolTip("重新读取设备占用登记")
+        self.owner_retry_btn.setToolTip(
+            "重新读取设备占用登记：确认这台设备是否被其它程序占用")
         self.owner_retry_btn.clicked.connect(
             lambda: self._refresh_owner_state())
         self.owner_retry_btn.setVisible(False)
@@ -674,7 +675,6 @@ class DevicePanel(QWidget):
             return
         text = self._owner_state_text_value(state)
         self.owner_state_label.setText(text)
-        self.owner_state_label.setToolTip(text)
         self.owner_state_label.setVisible(True)
         # 被占用也可能随时被对方释放：同样给「重试」，但不引到诊断。
         self.owner_retry_btn.setVisible(True)

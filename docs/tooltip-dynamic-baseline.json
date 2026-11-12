@@ -140,6 +140,48 @@
       "runtime_test": "tests/test_tooltip_dynamic_runtime.py::test_device_panel_passthrough_tooltips_self_describe"
     },
     {
+      "file": "desktop/device_panel.py",
+      "expr": "event.detail",
+      "reason": "passthrough",
+      "note": "监听失败（poll/probe problem）的 detail 是 usb_hotplug 生成的完整原因，标签只放短句 user_text，悬停看完整因果；不是裸值。解除条件：detail 退化成裸数值或常量短语时，改为在调用点补「监听原始信息：」前缀并删本条。",
+      "runtime_test": "tests/test_tooltip_dynamic_runtime.py::test_device_panel_passthrough_tooltips_self_describe"
+    },
+    {
+      "file": "desktop/device_panel.py",
+      "expr": "event.detail",
+      "reason": "passthrough",
+      "note": "拔出事件的 detail 说明判定依据（按序号消失 / 探针确认 / 换口不算另一台），标签放短句；拔出本身不产生连接动作。解除条件：detail 不再带判定依据时删本条并在调用点补说明。",
+      "runtime_test": "tests/test_tooltip_dynamic_runtime.py::test_device_panel_passthrough_tooltips_self_describe"
+    },
+    {
+      "file": "desktop/device_panel.py",
+      "expr": "event.detail",
+      "reason": "passthrough",
+      "note": "同一个拔出 detail 在 set_connected(False) 复写状态后再落一次，保证拔出结论留在界面上；文案来源同上。解除条件同第一条。",
+      "runtime_test": "tests/test_tooltip_dynamic_runtime.py::test_device_panel_passthrough_tooltips_self_describe"
+    },
+    {
+      "file": "desktop/device_panel.py",
+      "expr": "event.detail",
+      "reason": "passthrough",
+      "note": "present_unopenable 的 detail 说明「物理探针确认还在，只是这一拍枚举读不到」及其原因（被本程序占用 / 权限）。解除条件同第一条。",
+      "runtime_test": "tests/test_tooltip_dynamic_runtime.py::test_device_panel_passthrough_tooltips_self_describe"
+    },
+    {
+      "file": "desktop/device_panel.py",
+      "expr": "event.detail",
+      "reason": "passthrough",
+      "note": "ambiguous / disappeared_unverified 只提示不断开，detail 说明为什么不能判定（同名设备无法区分 / 探针不可信）。解除条件同第一条。",
+      "runtime_test": "tests/test_tooltip_dynamic_runtime.py::test_device_panel_passthrough_tooltips_self_describe"
+    },
+    {
+      "file": "desktop/device_panel.py",
+      "expr": "identity_note",
+      "reason": "passthrough",
+      "note": "identity_note 由 usb_hotplug.hotplug_grade 生成，是完整句子（按序列号/口路径/显示名识别，以及换口/重启后被当成另一台设备的后果）。解除条件：若改为按等级拼短串、丢掉因果说明，改为在调用点补固定说明并删本条。",
+      "runtime_test": "tests/test_tooltip_dynamic_runtime.py::test_device_panel_passthrough_tooltips_self_describe"
+    },
+    {
       "file": "desktop/main_window.py",
       "expr": "tip",
       "reason": "passthrough",

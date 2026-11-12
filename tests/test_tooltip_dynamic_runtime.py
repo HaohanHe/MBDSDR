@@ -219,15 +219,58 @@ def test_main_window_passthrough_tooltips_self_describe(qapp):
 
 def test_device_panel_passthrough_tooltips_self_describe(qapp):
     from device_panel import DevicePanel
+    from mbdsdr_ai import usb_hotplug
+
+    device = {
+        "label": "FakeSDR", "driver": "rtlsdr",
+        "sample_rate_range": (1_000_000, 2_560_000),
+        "capability_status": {"sample_rate_range": "declared"},
+    }
+
+    class _Monitor:
+        """只回放指定事件，不碰真探针。"""
+
+        def __init__(self):
+            self.events = []
+
+        def expect(self, key, dev):
+            pass
+
+        def observe(self, now, err):
+            return list(self.events)
+
+    def fire(panel, monitor, *events):
+        monitor.events = list(events)
+        panel._enum_inflight = True
+        panel._on_hotplug_devices([], "", token=panel._enum_token)
 
     def triggers(p):
         p._apply_devices([])
-        p._apply_devices([{
-            "label": "FakeSDR", "driver": "rtlsdr",
-            "sample_rate_range": (1_000_000, 2_560_000),
-            "capability_status": {"sample_rate_range": "declared"},
-        }])
+        p._apply_devices([device])
         p._on_device_selected(0)
+        monitor = _Monitor()
+        p._hotplug_mon = monitor
+        # 连接：无序列号 → 身份说明走「按显示名识别」那一支（identity_note）。
+        p.set_connected(True, device=device)
+        # 监听失败、拔出（含 set_connected(False) 复写后的第二次落文案）、
+        # 「在位但打不开」、歧义，四支各来一发，逐处验证 detail 渲染。
+        fire(p, monitor, usb_hotplug.HotplugEvent(
+            kind=usb_hotplug.EVENT_POLL_PROBLEM,
+            user_text="热插拔监听不可用",
+            detail="热插拔轮询不可用（枚举依赖缺失） · 设备状态暂不更新"))
+        fire(p, monitor, usb_hotplug.HotplugEvent(
+            kind=usb_hotplug.EVENT_UNPLUGGED, key=p._current_dev_key,
+            user_text="设备已拔出",
+            detail="序列号没变，只是 USB 口变了：旧口链路断了，不是另一台设备"))
+        p.set_connected(True, device=device)
+        fire(p, monitor, usb_hotplug.HotplugEvent(
+            kind=usb_hotplug.EVENT_PRESENT_UNOPENABLE, key=p._current_dev_key,
+            user_text="设备在位但这一拍读不到",
+            detail="物理探针确认还在，只是这一拍枚举读不到（可能被本程序占用）"))
+        fire(p, monitor, usb_hotplug.HotplugEvent(
+            kind=usb_hotplug.EVENT_AMBIGUOUS, key=p._current_dev_key,
+            user_text="无法确认设备是否还在",
+            detail="同名设备无法区分：只报歧义，不判定拔出"))
 
     _, calls = _record(DevicePanel, [triggers])
     _check_file(calls, "desktop/device_panel.py")
