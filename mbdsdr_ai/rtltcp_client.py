@@ -921,7 +921,9 @@ class RtlTcpBackend(SDRBackend):
         if self._ring_reader is not None:
             try:
                 samples = self._ring_reader.read(num_samples, timeout=1.0)
-            except Exception:
+            except Exception as e:
+                # 与「缓冲里暂时没数据（None）」区分：这里是读挂了。
+                logger.debug("环形缓冲读失败：%s: %s", type(e).__name__, e)
                 return None
             if samples is None:
                 return None
