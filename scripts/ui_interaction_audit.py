@@ -607,6 +607,16 @@ def _probe(win, row, evidence, volatile_global=()) -> dict:
     from PySide6.QtWidgets import QApplication
 
     obj = row["obj"]
+    # 可勾选控件点完要还原：它们背后连着持久化配置（专注/瀑布/主题…），
+    # 留在点击后的状态既改了用户偏好，也会跨用例泄漏。实测「详细」按钮
+    # 被点一次即写入 focus_mode=false，后续布局锁用例凭空多出 95px chrome
+    # （detail 56 + 主工具栏 39），8 张基线图全部对不上。
+    checkable_before = None
+    try:
+        if obj.isCheckable():
+            checkable_before = obj.isChecked()
+    except RuntimeError:
+        pass
     # 先空跑一段事件循环，把"自己会变的字段"（UTC 时钟、SNR 读数、谱线状态）
     # 识别为 volatile 并从证据里剔除，别拿时钟跳动冒充按钮有效果。
     quiet1 = _snapshot(win)
@@ -653,6 +663,15 @@ def _probe(win, row, evidence, volatile_global=()) -> dict:
     catcher.restore()
 
     after = _snapshot(win)
+    # 观测完再还原勾选态：setChecked 走 toggled 槽把配置写回旧值（与用户
+    # 手动点回去同一条路径），不额外引入「审计专用」复位逻辑。
+    if checkable_before is not None:
+        try:
+            if obj.isChecked() != checkable_before:
+                obj.setChecked(checkable_before)
+                QApplication.processEvents()
+        except RuntimeError:
+            pass        # 点击已销毁该控件（关面板/退出），无从还原
     changed = _diff(before, after, exclude=volatile | set(volatile_global),
                     before_widgets=before_widgets)
     if not changed:
