@@ -245,7 +245,7 @@
 
 | 闸门 | 管什么 | 判据 | 不能替谁 |
 | --- | --- | --- | --- |
-| `scripts/audit_evidence.py` | **数字级** | 每个测量数字能否落到 E1–E4 | 不能证明结论词（“已修复”）为真 |
+| `scripts/audit_evidence.py` | **数字级** | 每个测量数字能否落到 E1–E4 | 不能证明结论词本身为真 |
 | `scripts/check_red_lifecycle.py` | **结论词级** | 完成态谓词有没有红榜处置与复跑命令 | 不能证明完成态句里的数字为真 |
 | `scripts/verify_claims.py` | **引用漂移** | 四元组的 hash / `path:N` / 字面量是否仍成立 | 不能证明数字是测出来的（见 4.2） |
 
