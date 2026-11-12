@@ -83,3 +83,45 @@
 - [ ] 一切只读：不删备份、不写配置、不创建目录。
 
 非目标：不做日志查看器、不做自动修复、不在诊断页里改配置。
+
+## 口径裁定（2026-11-12，数据层落地前）
+
+**1. 「只认 `*.reason.txt`」是设计口径，不是漏。**
+
+- 理由文件是唯一记录「为什么坏」的东西；裸 `*.corrupt-*` 说不出原因，
+  可能是旧版本遗留、也可能是用户手抄的副本，无法证明是本次损坏；
+- `station_sync` 的 `.bak` 是**冲突快照**，语义与「损坏备份」不同，并进来
+  会让同一次故障在两个栏目各出现一次；
+- 因此读取端**不放宽**。writer 缺口（`settings_panel._report_bad_config`、
+  `main_window._backup_corrupt_gui_config` 尚无理由）单独修，修完自然进清单。
+- 已知代价：加理由文件之前产生的裸备份**永远不显示**；这是有意的，
+  不为了「看起来全」把无证据的文件算成损坏。
+
+**2. 「只扫一级目录」实测不漏，但要守住不变量。**
+
+2026-11-12 实查 `~/.mbdsdr/`：
+
+| 目录 | 实际结构 | 备份位置 | 结论 |
+|---|---|---|---|
+| `evolution/` | `objects/`（内容寻址目录）+ `versions.json` | `versions.json.corrupt-*` 在**一级** | 不漏 |
+| `guardian_snapshots/` | 空（快照与备份都在一级） | 一级 | 不漏 |
+| `workflows/` | `recordings/`（音频）+ `*.json` | 备份在**一级** | 不漏 |
+
+不变量：**备份必须与源文件同目录，且源目录要登记进
+`default_scan_directories`**。以后若有 store 改成「按 id 建子目录放源文件」，
+必须同步登记，否则一级扫描会漏——这是约束，不是当前缺陷。
+
+## 数据层（已落地，`mbdsdr_ai/diagnostics.py`）
+
+`collect_diagnostics()`：无参、只读，返回三块：
+
+- `backups`：`directories` / `total` / `stale` / `items`（每条含 `backup`、
+  `reason_file`、`reason` 全文）/ `unreadable`；
+- `log`：`path`（来自 `startup_paths.last_log_path()`，**不调**会 `makedirs`
+  的 `startup_log_path()`）/ `candidates` / `buffered`（末 20 行）/ `notice`；
+- `errors`：`items`（模块级 `last_error()` + 实例弱引用注册表，空错误不列）/
+  `unwired`（DesktopSettings、LayoutStore、BookmarkManager、
+  FrequencyManager、VersionStore——需要窗口实例，等 W106 面板接线）。
+
+实例注册：`Agent.__init__` 把 memory / guardian / workflow_engine / scheduler
+弱引用登记，不改变生命周期；同一进程取最近存活实例。

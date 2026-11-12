@@ -24,6 +24,10 @@ _STARTUP_LOG_NAME = "mbdsdr_startup.log"
 #: 落点全部不可写时的内存缓冲（最多 200 行，仅本次进程有效）。
 _LOG_BUFFER = collections.deque(maxlen=200)
 
+#: 最近一次**实际写成功**的持久日志路径（空串 = 本次进程还没写成过）。
+#: 诊断页只能读这个值：``startup_log_path()`` 会 ``makedirs``，展示不能有副作用。
+_LAST_LOG_PATH = ""
+
 #: 打包版 ``_internal`` 必须随包的运行库：缺 = 打包缺陷（不是用户操作问题）。
 _PACKAGED_DLLS = ("librtlsdr.dll", "libusb-1.0.dll")
 #: 环境级运行库：缺只影响对应硬件后端，不算打包缺陷。
@@ -71,6 +75,7 @@ def startup_log_path() -> str:
 
 def append_startup_log(text: str) -> str:
     """写一行启动日志；无持久落点时进内存缓冲并返回空字符串。"""
+    global _LAST_LOG_PATH
     line = text.rstrip()
     path = startup_log_path()
     if not path:
@@ -79,10 +84,20 @@ def append_startup_log(text: str) -> str:
     try:
         with open(path, "a", encoding="utf-8", errors="replace") as f:
             f.write(line + "\n")
+        _LAST_LOG_PATH = path
         return path
     except OSError:
         _LOG_BUFFER.append(line)
         return ""
+
+
+def last_log_path() -> str:
+    """最近一次实际写入的日志路径；本次进程尚未写成过时返回空串。
+
+    只读、无副作用。诊断页必须用这个而不是 ``startup_log_path()``
+    （后者会创建目录，展示动作不该改磁盘）。
+    """
+    return _LAST_LOG_PATH
 
 
 def buffered_log() -> "list[str]":

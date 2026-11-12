@@ -43,6 +43,7 @@ from .self_evolution import SelfEvolutionEngine
 from .guardian import Guardian
 from .workflow_engine import WorkflowEngine
 from .scheduler import Scheduler
+from .diagnostics import register_store
 from .sdr_backend import SDRBackendManager
 from .spectrum_processor import SpectrumProcessor
 from .sdr_tools import register_sdr_tools
@@ -239,6 +240,14 @@ class MBDSDRAgent:
 
         # 调度器（定时任务）
         self.scheduler = Scheduler()
+
+        # 诊断数据层（W106）：无参聚合要能拿到这些实例的 last_error。
+        # 弱引用登记，不改变对象生命周期。
+        for _name, _store in (("memory", self.memory),
+                              ("guardian", self.guardian),
+                              ("workflow_engine", self.workflow_engine),
+                              ("scheduler", self.scheduler)):
+            register_store(_name, _store)
 
         # Hook 事件钩子系统（白皮书第四章 4.4）
         self.hook_manager = HookManager(max_history=2000)
