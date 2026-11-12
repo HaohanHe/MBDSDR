@@ -50,22 +50,31 @@ def test_sgp4_position_regression(tracker):
 
 
 def test_sgp4_crosscheck_skyfield(tracker):
-    """若环境有 skyfield，独立参考解对比 <1km。无则跳过。"""
-    sf = pytest.importorskip("skyfield")
+    """skyfield 独立参考解对比 <1km；只有网络/时标数据缺失才跳过。
+
+    skyfield 声明在 requirements.txt 里：导入失败是本仓依赖回归，直接红。
+    只有 ``Loader.timescale()`` 去网上取 IERS 时标时的 OSError 才是环境缺失；
+    装配期间其它异常（API 误用、我们自己的调用写错）不接，直接红。
+    """
     from skyfield.api import Loader, EarthSatellite, wgs84
     import datetime
     import tempfile
     try:
         loader = Loader(tempfile.mkdtemp(prefix="sf_"))
         ts = loader.timescale()
-        sat = EarthSatellite(TLE_L1, TLE_L2, "N19", ts)
-        dt = datetime.datetime(1970, 1, 1) + datetime.timedelta(seconds=T_TEST)
-        t = ts.utc(dt.year, dt.month, dt.day, dt.hour, dt.minute, dt.second)
-        gs = wgs84.latlon(BEIJING.lat, BEIJING.lon, BEIJING.alt_km * 1000)
-        obs = (sat - gs).at(t)
-        el, az, _ = obs.altaz()
-    except Exception as e:  # 无网/缺星历文件则跳过
-        pytest.skip(f"skyfield 参考解不可用: {e}")
+    except OSError as exc:
+        pytest.skip(
+            f"缺：联网可取的 skyfield/IERS 时标数据（Loader.timescale 失败："
+            f"{type(exc).__name__}）"
+            f"｜可跑：联网后重跑，或把 IERS 时标文件预置到 ~/.skyfield 后重跑"
+            f"｜区分：只有 OSError（网络/文件不可达）才跳过；平台/代码侧装配异常"
+            f"一律直接红，不会落到这条 skip")
+    sat = EarthSatellite(TLE_L1, TLE_L2, "N19", ts)
+    dt = datetime.datetime(1970, 1, 1) + datetime.timedelta(seconds=T_TEST)
+    t = ts.utc(dt.year, dt.month, dt.day, dt.hour, dt.minute, dt.second)
+    gs = wgs84.latlon(BEIJING.lat, BEIJING.lon, BEIJING.alt_km * 1000)
+    obs = (sat - gs).at(t)
+    el, az, _ = obs.altaz()
     st = tracker.position_at(T_TEST, BEIJING)
     assert st["range_km"] == pytest.approx(obs.distance().km, abs=1.0)
     assert st["elevation"] == pytest.approx(el.degrees, abs=0.1)
