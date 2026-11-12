@@ -566,7 +566,9 @@ class ConstellationPanel(QWidget):
             "SDR 这一层画的是当前信道 I/Q，不是卫星信号；"
             "全向天线收不到卫星，收卫星要等定向天线/锅子。")
         self.sdr_hint.setWordWrap(True)
-        self.sdr_hint.setStyleSheet("color: #8A93A6;")
+        # 说明字不是状态色，走主题的 text_secondary（= palette placeholder-text）：
+        # 写死 #8A93A6 时浅色 bg 上只有 2.79:1，且切主题不会跟着变。
+        self.sdr_hint.setStyleSheet("color: palette(placeholder-text);")
         sdr.addWidget(self.sdr_hint)
 
         self.sdr_box.setVisible(False)

@@ -225,3 +225,56 @@ def test_no_direct_status_token_reads():
         f"请改走 tokens().status_color(kind[, bg=真实底色])")
     assert hits.get("desktop/main_window.py") == 1, (
         "main_window 的登记例外变了（已迁移就把 _ALLOWED_DIRECT_READS 里这条删掉）")
+
+
+def _sdr_hint_css() -> str:
+    """取 constellation_panel 里 ``sdr_hint.setStyleSheet(...)`` 的实参。
+
+    括号配对扫描而不是正则截断：``palette(placeholder-text)`` 自带右括号，
+    用 ``.*?\\)`` 会在角色名后提前收尾，等于没检查到后面的规则。
+    """
+    path = os.path.join(_ROOT, "desktop", "constellation_panel.py")
+    with open(path, encoding="utf-8") as fh:
+        src = fh.read()
+    start = src.find("self.sdr_hint.setStyleSheet(")
+    assert start >= 0, "constellation_panel.sdr_hint 的 setStyleSheet 不见了（改名/删除？）"
+    i = src.index("(", start)
+    depth = 0
+    for j in range(i, len(src)):
+        if src[j] == "(":
+            depth += 1
+        elif src[j] == ")":
+            depth -= 1
+            if depth == 0:
+                return src[i + 1:j]
+    raise AssertionError("sdr_hint.setStyleSheet 括号未闭合")
+
+
+_HINT_LITERAL = re.compile(r"#[0-9A-Fa-f]{3,8}\b|rgba?\s*\([^)]*\)")
+
+
+def test_constellation_sdr_hint_uses_theme_secondary():
+    """SDR 层说明字必须走主题 text_secondary，并在每套主题的底上 ≥4.5:1。
+
+    该标签是普通提示文字（不是状态），所在表面是右栏普通 QWidget 底
+    （``palette(window)`` = 主题 ``bg``），所以按 ``bg`` 算对比度。
+    ``palette(placeholder-text)`` 在 themes._THEME_ROLE_MAP 里正好映射
+    ``text_secondary``，因此切主题会随 QPalette 一起重解析。
+
+    反证：把该行改回 ``"color: #8A93A6;"`` → 本用例必须红
+    （浅色 bg 上只有 2.79:1）。
+    """
+    css = _sdr_hint_css()
+    literal = _HINT_LITERAL.search(css)
+    assert literal is None, (
+        f"sdr_hint 仍写死颜色 {literal.group(0)}；"
+        f"请改走 palette(placeholder-text)（= 主题 text_secondary）")
+    assert "palette(placeholder-text)" in css, (
+        f"sdr_hint 样式没走主题入口：{css!r}")
+
+    for theme in _ALL:
+        colors = tokens().theme_colors(theme)
+        ratio = contrast_ratio(colors["text_secondary"], colors["bg"])
+        assert ratio >= 4.5, (
+            f"{theme}: text_secondary {colors['text_secondary']} on bg "
+            f"{colors['bg']} 对比度 {ratio:.2f} < 4.5")
