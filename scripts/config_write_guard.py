@@ -8,7 +8,11 @@
 的子进程照样直连真实用户目录。规则 13 要求「用户真实环境状态不得作为
 实验对象」，本文件把这条规则变成机械拦截。
 
-判据：**只对用户目录下的产品配置、且不在临时路径内的写入记账**。
+判据：**只对用户目录下的产品配置、且不在临时路径/沙箱内的写入记账**。
+「用户目录」取 ``install()`` 那一刻的快照（``HOME`` / ``USERPROFILE`` /
+``APPDATA`` / ``LOCALAPPDATA`` / ``XDG_CONFIG_HOME``）；之后这些变量被
+改到别处（隔离 fixture、repro 沙箱）只会把新值登记为沙箱根，其下路径
+一律不记——否则沙箱会被当成真实目录，哨兵误报（2026-11-12 实测）。
 产品配置根：
 
   * ``~/.mbdsdr``（gui_config.json / config.json / bookmarks.json /
@@ -59,6 +63,14 @@ _CONFIG_NAMES = frozenset({
     "bookmarks.json", "approval_audit.jsonl",
 })
 
+#: 安装哨兵那一刻快照的「原始用户目录」。“真实”只认这个快照——运行时再改
+#: ``HOME`` 等变量（隔离 fixture / repro 沙箱）只说明“现在写的是沙箱”，不能
+#: 反过来把沙箱当成真实目录（2026-11-12 误报根因）。
+_SNAPSHOT_VARS = ("HOME", "USERPROFILE", "APPDATA", "LOCALAPPDATA",
+                  "XDG_CONFIG_HOME")
+_REAL_ENV = None            # dict: var -> 安装时的原始值
+_REAL_ROOTS = None          # list: 由快照推导出的真实产品配置根
+
 
 # ----------------------------------------------------------------------
 # 路径判定
@@ -91,32 +103,7 @@ def _temp_roots():
     return out
 
 
-def _is_temp(path):
-    p = _norm(path).rstrip("\\/")
-    for root in _temp_roots():
-        if p == root or p.startswith(root + "\\") or p.startswith(root + "/"):
-            return True
-    return ("mbdsdr-repro-sandbox-" in p or "mbdsdr-qsettings-" in p
-            or "mbdsdr-cfg-guard-" in p)
-
-
-def _config_roots():
-    roots = []
-    home = os.path.expanduser("~")
-    if home and not home.startswith("~"):
-        roots.append(os.path.join(home, ".mbdsdr"))
-    for var in ("APPDATA", "LOCALAPPDATA"):
-        base = os.environ.get(var)
-        if base:
-            roots.append(os.path.join(base, "mbdsdr"))
-    xdg = os.environ.get("XDG_CONFIG_HOME")
-    if not xdg and home and not home.startswith("~"):
-        xdg = os.path.join(home, ".config")
-    if xdg:
-        roots.append(os.path.join(xdg, "mbdsdr"))
-    override = os.environ.get("MBDSDR_SETTINGS_DIR")
-    if override:
-        roots.append(override)
+def _normalize_roots(roots):
     out = []
     for root in roots:
         try:
@@ -126,17 +113,118 @@ def _config_roots():
     return out
 
 
+def _config_roots_from(env):
+    """按给定环境快照推导产品配置根（不再读运行时 ``os.environ``）。"""
+    roots = []
+    home = env.get("HOME") or env.get("USERPROFILE")
+    if home and not home.startswith("~"):
+        roots.append(os.path.join(home, ".mbdsdr"))
+    for var in ("APPDATA", "LOCALAPPDATA"):
+        base = env.get(var)
+        if base:
+            roots.append(os.path.join(base, "mbdsdr"))
+    xdg = env.get("XDG_CONFIG_HOME")
+    if not xdg and home and not home.startswith("~"):
+        xdg = os.path.join(home, ".config")
+    if xdg:
+        roots.append(os.path.join(xdg, "mbdsdr"))
+    override = env.get("MBDSDR_SETTINGS_DIR")
+    if override:
+        roots.append(override)
+    return _normalize_roots(roots)
+
+
+def _user_env(env=None):
+    env = os.environ if env is None else env
+    out = {var: env[var] for var in _SNAPSHOT_VARS if env.get(var)}
+    if env.get("MBDSDR_SETTINGS_DIR"):
+        out["MBDSDR_SETTINGS_DIR"] = env["MBDSDR_SETTINGS_DIR"]
+    return out
+
+
+def snapshot_user_dirs(env=None):
+    """快照「原始用户目录」，作为判定“真实配置”的唯一依据。
+
+    必须在任何 HOME/APPDATA 重定向**之前**调用（``install()`` 会调）。
+    子进程可由 ``MBDSDR_CFG_GUARD_REAL``（JSON）继承父进程的快照，避免
+    自己启动时环境已被父进程改成沙箱、把沙箱当真实目录。
+    """
+    global _REAL_ENV, _REAL_ROOTS
+    payload = os.environ.get("MBDSDR_CFG_GUARD_REAL")
+    if payload:
+        try:
+            data = json.loads(payload)
+        except ValueError:
+            data = None
+        if isinstance(data, dict):
+            _REAL_ENV = _user_env(data)
+            _REAL_ROOTS = _config_roots_from(dict(_REAL_ENV))
+            return dict(_REAL_ENV)
+    _REAL_ENV = _user_env(env)
+    _REAL_ROOTS = _config_roots_from(dict(_REAL_ENV))
+    return dict(_REAL_ENV)
+
+
+def real_user_dirs():
+    """当前生效的「真实用户目录」快照（没快照过就先快照）。"""
+    if _REAL_ENV is None:
+        snapshot_user_dirs()
+    return dict(_REAL_ENV)
+
+
+def _sandbox_user_dirs():
+    """运行时被改指到别处的用户目录 = 沙箱根；其下路径一律不记账。"""
+    real = real_user_dirs()
+    out = []
+    for var in _SNAPSHOT_VARS:
+        value = os.environ.get(var)
+        if value and value != real.get(var):
+            out.append(value)
+    override = os.environ.get("MBDSDR_SETTINGS_DIR")
+    if override and override != real.get("MBDSDR_SETTINGS_DIR"):
+        out.append(override)
+    return _normalize_roots(out)
+
+
+def _is_temp(path):
+    p = _norm(path).rstrip("\\/")
+    for root in _temp_roots() + _sandbox_user_dirs():
+        if p == root or p.startswith(root + "\\") or p.startswith(root + "/"):
+            return True
+    return ("mbdsdr-repro-sandbox-" in p or "mbdsdr-qsettings-" in p
+            or "mbdsdr-cfg-guard-" in p)
+
+
+def _config_roots():
+    """真实产品配置根——只来自安装时快照，不读运行时 HOME。"""
+    if _REAL_ROOTS is None:
+        snapshot_user_dirs()
+    return list(_REAL_ROOTS)
+
+
+def _under_real_user_dir(path):
+    """路径是否落在快照中的原始用户目录下（同名文件兜底用）。"""
+    p = _norm(path).rstrip("\\/")
+    for value in real_user_dirs().values():
+        root = os.path.normcase(os.path.abspath(value)).rstrip("\\/")
+        if p == root or p.startswith(root + "\\") or p.startswith(root + "/"):
+            return True
+    return False
+
+
 def _product_config(path):
-    """该路径是否「用户目录下的产品配置且非临时/非仓库」。"""
+    """该路径是否「用户目录下的产品配置且非临时/非沙箱/非仓库」。"""
     p = _norm(path).rstrip("\\/")
     if _is_temp(p):
         return False
     if p == _ROOT_NORM or p.startswith(_ROOT_NORM + "\\"):
         return False
     for root in _config_roots():
-        if p == root or p.startswith(root + "\\"):
+        if p == root or p.startswith(root + "\\") or p.startswith(root + "/"):
             return True
-    return os.path.basename(p) in _CONFIG_NAMES
+    # 同名兜底：真实用户目录下的任意同名文件也算（HOME/USERPROFILE 分歧等）。
+    return (os.path.basename(p) in _CONFIG_NAMES
+            and _under_real_user_dir(p))
 
 
 # ----------------------------------------------------------------------
@@ -265,10 +353,15 @@ def _wrap_move(original, op):
 
 
 def install():
-    """包裹 open/io.open/os.replace/os.rename；重复调用无副作用。"""
+    """包裹 open/io.open/os.replace/os.rename；重复调用无副作用。
+
+    安装这一刻的环境是「真实用户目录」的唯一来源：之后 HOME/APPDATA 被
+    改到沙箱，只说明“现在写的是沙箱”，不再影响真实集合。
+    """
     global _INSTALLED
     if _INSTALLED or os.environ.get("MBDSDR_CFG_GUARD", "1") == "0":
         return False
+    snapshot_user_dirs()
     if getattr(builtins.open, "_mbdsdr_cfgguard", False):
         _INSTALLED = True
         return False

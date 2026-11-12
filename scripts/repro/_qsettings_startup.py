@@ -28,6 +28,7 @@ repro 脚本都是「driver 进程 spawn 一个做 Qt 实测的子进程」。dr
 """
 from __future__ import annotations
 
+import json
 import os
 import sys
 import tempfile
@@ -139,6 +140,10 @@ def child_env(env=None):
     env["MBDSDR_QS_GUARD_LOG"] = log
     cfg_log = env.get("MBDSDR_CFG_GUARD_LOG") or cfg_log_path()
     env["MBDSDR_CFG_GUARD_LOG"] = cfg_log
+    # 子进程的环境变量从出生起就是沙箱值；把 driver 进程（未沙箱化）的
+    # 原始用户目录快照传过去，否则哨兵会把沙箱当真实目录。
+    env.setdefault("MBDSDR_CFG_GUARD_REAL",
+                   json.dumps(_cfg_guard().real_user_dirs()))
     sandbox = apply_sandbox(env)
     _guard().install_log_exit_check(log)
     _cfg_guard().install_log_exit_check(cfg_log)
@@ -157,14 +162,16 @@ def child_cmd(script, args=()):
 
 
 def _run(target, args):
-    apply_sandbox()
     os.environ.setdefault("MBDSDR_CFG_GUARD", "1")
     os.environ.setdefault("MBDSDR_CFG_GUARD_BLOCK", "1")
     if not os.environ.get("MBDSDR_CFG_GUARD_LOG"):
         cfg_log_path()
     cfg = _cfg_guard()
+    # 先安装哨兵：它在安装那一刻快照原始用户目录，之后 apply_sandbox 再
+    # 改 HOME/APPDATA 只会被登记成沙箱根，不会污染「真实」集合。
     cfg.install()
     cfg.install_exit_check()
+    apply_sandbox()
 
     guard = _guard()
     guard.install_meta_hook()
