@@ -47,14 +47,15 @@ def _exempt_fps(text: str) -> set[str]:
     * 该小节正文必须提到被登记的文档路径（锚点对得上，不是只借了个号）。
     """
     lines = text.splitlines()
-    heads: list[tuple[int, str]] = []
+    boundaries: list[int] = []
+    starts: dict[str, list[int]] = {}
     for i, line in enumerate(lines):
         m = re.match(r"^#{1,6}\s+(K\d+)\b", line)
-        if m:
-            heads.append((i, m.group(1)))
-    starts: dict[str, list[int]] = {}
-    for index, k in heads:
-        starts.setdefault(k, []).append(index)
+        if not m:
+            continue
+        boundaries.append(i)  # 任何标题都是小节边界
+        if not re.match(r"^#{1,6}\s*K\d+\s*[–\-~—]\s*K?\d+", line):
+            starts.setdefault(m.group(1), []).append(i)  # 区间标题（K14–K16）不算单条
 
     out: set[str] = set()
     for i, line in enumerate(lines):
@@ -72,7 +73,7 @@ def _exempt_fps(text: str) -> set[str]:
                 f"claims-gate-exempt 的 {k} 有 {len(starts[k])} 个同名小节标题"
                 f"（第 {where} 行），无法确定指向哪一节；重号必须消歧后才许登记")
         start = starts[k][0]
-        end = next((j for j, _ in heads if j > start), len(lines))
+        end = next((j for j in boundaries if j > start), len(lines))
         if not start < i < end:
             raise AssertionError(
                 f"claims-gate-exempt 的 {k} 标记不在 {k} 小节内"
