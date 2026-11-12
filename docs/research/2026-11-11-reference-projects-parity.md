@@ -697,7 +697,7 @@ for (auto const& [name, _vfo] : vfos) {
 > **范围**：只列 §0/§2/§4 未收的项目；已收的 SDRangel / SDR++ / gr-satellites / Direwolf / OpenWebRX+ / CubicSDR / FoxTelem / PreviSat，以及本地已克隆的 satdump / gpredict / gqrx 不重复。
 > **口径**：仓库地址 + 许可证 + 最近提交 + 抓取时间 **2026-11-12（Asia/Shanghai）**；许可证以仓库许可证文件或 GitLab 项目页标识为准，取不到就写「未标」，不按印象补。
 > **自我约束**：本轮仍未做全量封闭集，**不对任何项目下「他们没有」结论**；本节只回答「有没有值得看的、有没有可搬的」。
-> **不产出工单**：本节不改 roadmap、不加 W 编号。
+> **不产出工单**：本节本身不改 roadmap、不加 W 编号；两条「高」后续已由 roadmap 第四十五笔落成 **W99 / W100**（2026-11-12）。
 
 ### 7.1 补查项目表
 
@@ -716,8 +716,8 @@ for (auto const& [name, _vfo] : vfos) {
 
 | 优先级 | 机制 | 对应我们的缺口 | 搬的代价 | 出处（抓取 2026-11-12） |
 |---|---|---|---|---|
-| **高** | **观测对象驱动自动录制**：一次观测 = `start/end + tle0/1/2 + frequency + mode + baud + max_altitude`，结束后按 `payload/waterfall/demoddata` 三类产物归档 | **W94**（AOS/LOS 钩子，低优先级）；「按过境自动录」**无工单** | **动 `main_window.py`：是**（启停要接现有录音状态机，该文件被卫星线独占，排在 W95/W96/W98 之后）；**FZ-04：否**（不加可见控件）；改动面：新增调度模块 + 1 处启停调用 | `satnogs-client@master:satnogsclient/scheduler/tasks.py`（`spawn_observer`，obj 字段与 `DATA_TYPE_MAP`）：https://gitlab.com/librespacefoundation/satnogs/satnogs-client/-/blob/master/satnogsclient/scheduler/tasks.py |
-| **高** | **SigMF `captures[]` + `annotations[]`**：`captures` 记分段频点（`core:sample_start` + `core:frequency`），`annotations` 记时间区间内的信号/事件标注 | **无工单**：W97 关闭时只核了 `global`；写侧 W98 未开工 | **动 `main_window.py`：写侧是**（现有 `.json` 写在 `:10015` 一带）；读侧否（`baseband_io` 可独立加）；**FZ-04：否**；改动面：`baseband_io` 增 captures/annotations 解析 + 录制写侧扩字段 | `sigmf/SigMF@main:README.md`（最小 `.sigmf-meta` 示例含 `global/captures/annotations`）：https://github.com/sigmf/SigMF |
+| **高** | **观测对象驱动自动录制**：一次观测 = `start/end + tle0/1/2 + frequency + mode + baud + max_altitude`，结束后按 `payload/waterfall/demoddata` 三类产物归档 | **W99**（2026-11-12 立条）；**W94**（AOS/LOS 钩子，低优先级） | **动 `main_window.py`：是**（启停要接现有录音状态机，该文件被卫星线独占，排在 W95/W96/W98 之后，见 W99）；**FZ-04：否**（不加可见控件）；改动面：新增调度模块 + 1 处启停调用 | `satnogs-client@master:satnogsclient/scheduler/tasks.py`（`spawn_observer`，obj 字段与 `DATA_TYPE_MAP`）：https://gitlab.com/librespacefoundation/satnogs/satnogs-client/-/blob/master/satnogsclient/scheduler/tasks.py |
+| **高** | **SigMF `captures[]` + `annotations[]`**：`captures` 记分段频点（`core:sample_start` + `core:frequency`），`annotations` 记时间区间内的信号/事件标注 | **W100**（2026-11-12 立条）；W97 关闭时只核了 `global`，写侧 W98 未开工 | **动 `main_window.py`：写侧是**（现有 `.json` 写在 `:10015` 一带）；读侧否（`baseband_io` 可独立加）；**FZ-04：否**；改动面：`baseband_io` 增 captures/annotations 解析 + 录制写侧扩字段 | `sigmf/SigMF@main:README.md`（最小 `.sigmf-meta` 示例含 `global/captures/annotations`）：https://github.com/sigmf/SigMF |
 | **中** | **每星 Kaitai 解码定义 / 字段表**：解码器按卫星组织，新增卫星靠加定义 | **W91 / W92**，但**只借数据与字段表，不搬运行时**——我们的 schema v2 已能表达布局，缺的是数据 | **动 `main_window.py`：否**；**FZ-04：否**；改动面：数据转换/字段映射，解析层可独立 | `satnogs-decoders@master`（项目页自述 "SatNOGS Kaitai Struct decoders"，283 tags）：https://gitlab.com/librespacefoundation/satnogs/satnogs-decoders |
 | **低** | **Hamlib rotator / rig 统一 API**：`rotator` 与 `rig` 走同一套后端抽象，另有网络 daemon | **无工单**（roadmap 没有 rotator 控制条目） | **动 `main_window.py`：否**（可做独立 adapter）；**FZ-04：加设置控件才会触发**；改动面：新增 adapter + 配置项 | `Hamlib/Hamlib@master:README.md`（"functions for radio, rotator and amplifier control"、network daemon）：https://github.com/Hamlib/Hamlib |
 
@@ -737,9 +737,9 @@ for (auto const& [name, _vfo] : vfos) {
 
 ### 7.4 与现有工单的关系
 
-- 本节**没有新增工单**；上表「无工单」的三项（自动录制、SigMF captures/annotations、rotator）留作候选，等产品决定。
-- 唯一直接挂到现有条目上的是 **W94**（自动录制可复用其 AOS/LOS 触发点），但 W94 本身是低优先级，不等于自动录制也该低。
-- 任何要动 `main_window.py` 的机制（自动录制、SigMF 写侧）都受卫星线独占约束，**排 W95/W96/W98 之后**；读侧（`baseband_io`）可先行。
+- 两条「高」已落成 **W99**（观测对象驱动自动录制）、**W100**（SigMF `captures[]` / `annotations[]`），见 roadmap 第四十五笔；**仅 Hamlib rotator 仍无工单**，留候选等产品决定。
+- 自动录制可复用 **W94** 的 AOS/LOS 触发点，但 W94 本身是低优先级，已明确**不作为 W99 的前置**。
+- 任何要动 `main_window.py` 的机制（自动录制、SigMF 写侧）都受卫星线独占约束，位置已由 roadmap 串行链写死：**W94→W95→W96→W98→W99→W100**；读侧（`baseband_io`）可先行。
 
 ### 7.5 抓取记录
 
