@@ -129,7 +129,7 @@ FEC 链回收，非本机自采；1 块边缘发散未深追（1/35178，两独�
 
 用户指向 `D:\mbdsdr\deepseek-harness-master`（DSH，Cordis 插件化 agent
 harness），要求"深度调研学习完，再根据它看我们 agent 有什么问题"。读了
-它的 `docs/architecture.zh.md` + 17 个子系统中文文档，抽出 8 条"没有就会
+它的 docs/architecture.zh.md（外部 DSH 仓库内文件，不在本仓）+ 17 个子系统中文文档，抽出 8 条"没有就会
 翻车"的硬机制，逐条对照我们的 agent 层。完整报告
 `docs/learn/agent-harness-gap-audit.md`。
 
@@ -1124,7 +1124,7 @@ No supported devices found），GNSS+SDR 同开复验没做成；离线那次
   AST/正则解析 mcp_server.py（14 工具域 / 82 工具→域 / 79 写工具模式）、
   desktop/tokens.py（figma 主题令牌）、rf_sky_view.py（5 档时间倍率）、
   tokens.h（ControlHub :50732）、sat_tracker.py（内置 TLE/下行频率/禁用
-  精确过境策略）→ 生成 `src/05-repo-facts.js` 与 `docs/09-repo-alignment.md`。
+  精确过境策略）→ 生成 `src/05-repo-facts.js` 与 `web/product/docs/09-repo-alignment.md`。
   产品全链对齐：能力矩阵由真实域生成（规划项标「规划·未验证」且禁用）、
   DataSource 走 ControlHub + arm_manual 人在环门（gated 与失败分开）、
   中性站点 0.0,0.0 且不可信拒给结论、频谱/瀑布改诚实空态、工具名换
@@ -1865,7 +1865,7 @@ No supported devices found），GNSS+SDR 同开复验没做成；离线那次
 | **真机（USB SDR）** | 跑 `hw_acceptance/`、七环、`capture_throughput.py` 的线（资源独占） | 占用时段 | — |
 
 > **真机独占（硬规则，优先于文件归属）**：谁在跑 `docs/hw-acceptance.md` 的七环、
-> `scripts/hw_acceptance/**`、`scripts/capture_throughput.py`（含 `--mode product`），
+> `scripts/hw_acceptance/**`、`scripts/hw_acceptance/capture_throughput.py`（含 `--mode product`），
 > 其它线不得同时跑压测/性能探针（如 `perf_probe_deep.py` 的 startup + spectrum）。
 > 本次实测：探针全程并发时，供给掉到 2.246–2.302 MS/s（空载 2.355–2.403）、
 > 读块中位 4.44–4.71 ms（空载 1.8–2.1 ms），drop 从约 1.7% 被推到 4.0–6.4%，
