@@ -11,7 +11,7 @@
   - 缓存有效期 24 小时；网络失败时即便缓存过期也尽量回退（旧数据好过没有）
 
 注意：不做轨道传播；取数/缓存统一委托 mbdsdr_ai.tle_fetch（P12），离线判定
-复用 orbit._network_disabled（延迟导入，避免模块加载期循环依赖）。
+复用 net_policy.network_disabled（叶子模块，无反向依赖）。
 """
 from dataclasses import dataclass, field
 from typing import List, Optional, Tuple, Dict, Any
@@ -95,11 +95,11 @@ class TLEManager:
         """P12：TLE 取数统一走 tle_fetch（24h 门槛 + 退避 + 离线标注）。"""
         if self._tle_store is None:
             from .tle_fetch import FetchPolicy, TleFetcher
-            from .orbit import _network_disabled
+            from .net_policy import network_disabled
             self._tle_store = TleFetcher(
                 opener=lambda url, t, d: self._http_get(url),
                 cache_dir_provider=lambda: self.cache_dir,
-                offline_provider=_network_disabled,
+                offline_provider=network_disabled,
                 policy=FetchPolicy(
                     fresh_max_hours=_CACHE_TTL / 3600.0,
                     request_timeout_s=self.timeout,
