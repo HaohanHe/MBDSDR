@@ -155,6 +155,7 @@ GUARD_CHECKS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("ai_intent_regression.py", ("--limit", "40")),    # 5.5s
     ("audit_source_text_pins.py", ()),                 # 9.1s
     ("check_data_licenses.py", ("--check",)),          # 12.6s
+    ("make_decode_fixtures.py", ("--check",)),         # 4.2s 生成器与 fixture/manifest 一致
 )
 
 #: 只提示、不改判的检查：退出码恒 0（如路线图阻塞提醒器），输出要人读，
