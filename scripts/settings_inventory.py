@@ -79,7 +79,7 @@ INTERNAL_UI_ANCHORS: Dict[str, Tuple[str, str]] = {
     "callsign": ("desktop/main_window.py", "self.callsign_edit = QLineEdit()"),
     "gnss_port": ("desktop/main_window.py", "port_edit = QLineEdit(self._gnss_port)"),
     "gnss_baudrate": ("desktop/main_window.py", "baud_combo.addItem(str(b), b)"),
-    "agc_enabled": ("desktop/control_panel.py", 'self.agc_check = QCheckBox("AGC 自动增益")'),
+    "agc_enabled": ("desktop/control_panel.py", 'self.agc_check = QCheckBox("硬件 AGC")'),
     "agc_speed": ("desktop/control_panel.py", "self.agc_speed_combo = QComboBox()"),
     "volume": ("desktop/control_panel.py", "self.volume_slider = QSlider"),
     "app_mode": ("desktop/main_window.py", 'planetarium_action = QAction("星象仪模式", self)'),
@@ -95,6 +95,18 @@ INTERNAL_REASONS: Dict[str, str] = {
         "录制目录落在程序目录内的一次性确认标记；只由 "
         "main_window.py:8290 的运行时对话框在用户点「仍用当前目录」时写入，"
         "不是可在设置里表达的长期偏好，故无设置控件；用户入口是该对话框本身"),
+    "settings_expanded_groups": (
+        "设置页 6 个用途分组的手风琴展开态，持久化的是「上次展开了哪几组」这一"
+        "界面状态，不是可枚举的长期偏好：用户的表达方式就是点分组标题本身，"
+        "再给一个设置项会形成两个真相源，且没有任何用户意图需要通过它表达。"
+        "写入点 settings_panel.py:_persist_expanded_state，读取点 "
+        "_restore_expanded_state（坏值/未知标题一律回落「只展开首组」）"),
+    "right_column_expanded_section": (
+        "右栏 20 节手风琴当前展开节的稳定 id（由 right_column.py 的 section_key "
+        "生成），与 settings_expanded_groups 同类：这是「上次看到哪一节」的界面"
+        "状态记忆，用户的表达方式就是点节标题本身；把内部 id 做成设置页文本项"
+        "既不可读也不该由人手填，故不暴露。读取点 right_column.py:_restore_expanded"
+        "（坏值/未知 id 回落只展开首节），本键只负责持久化"),
 }
 
 #: 服务页签（独立 ServiceSettingsPanel）里的键 → 控件属性名。
