@@ -5,6 +5,9 @@
 
   * 台账（`claims.json` / `claim_takeovers.log` / `claims/*.claim`）读不到、
     JSON 解析失败、字段类型不认识 → 拒绝。**只有「文件不存在」才算没有 claim。**
+  * 但 `claim_takeovers.log` 是**行级**容错：某一行不认识（未知 action、缺
+    `new_owner`、坏 `epoch`）只跳过该行并打印原因，**不判死整本台账**——
+    否则「往日志里写一行新审计」就能让整个仓库变只读（2026-11-13 事故）。
   * 判活 = 心跳（`heartbeat_at` + `ttl_min`）。**pid 不参与判定**：`claim` 是
     一次性 CLI，pid 记的是那个短命进程，「已死」是默认状态，拿它当放行条件
     等于闸门对真实台账全放行（2026-11-13 的 `orphan_takeover` 事故同源）。
@@ -32,9 +35,14 @@ import file_claim as fc  # noqa: E402  （复用台账路径、占位文件锁�
 IDENTITY_ENV = "MBDSDR_CLAIM_OWNER"
 #: takeover 记录与当前 claim 的 acquired_at 允许的时间差（同一台机器，正常 < 1s）。
 TAKEOVER_MATCH_WINDOW_S = 300.0
-#: `claim_takeovers.log` 里允许出现、但**不是** takeover 的记录类型（审计回放、
-#: legacy 凭据修复）。它们不参与「这笔 claim 是否被有效接管」的判定；
-#: 其它 action 一律按「格式不认识」失败关闭——避免随便一行 JSON 就能当接管凭证。
+#: `claim_takeovers.log` 的写方（`scripts/file_claim.py`）目前会产出的全部 action。
+#: 新增写方动作必须同时登记在这份清单里；`tests/test_claim_ledger_schema_contract.py`
+#: 逐条断言「写方产出的行读方能接受」，并冻结这份集合（增删都会红并点名）。
+KNOWN_ACTIONS = frozenset({"orphan_takeover", "audit_replay", "legacy_token_repair"})
+#: 已知 action 里**算接管凭证**的那一个。
+TAKEOVER_ACTIONS = frozenset({"orphan_takeover"})
+#: 已知但**不是** takeover 的记录类型（审计回放、legacy 凭据修复）。它们不参与
+#: 「这笔 claim 是否被有效接管」的判定，但仍然是被承认的日志行。
 NON_TAKEOVER_ACTIONS = frozenset({"audit_replay", "legacy_token_repair"})
 
 
@@ -115,7 +123,23 @@ def _load_registry() -> Dict[str, Any]:
     return data
 
 
-def _load_takeover_log() -> List[Dict[str, Any]]:
+def _note(warnings: Optional[List[str]], message: str) -> None:
+    """记一条「只影响这一行」的可读原因；不抛异常，不判死整本台账。"""
+    if warnings is not None:
+        warnings.append(message)
+
+
+def _load_takeover_log(warnings: Optional[List[str]] = None) -> List[Dict[str, Any]]:
+    """读 `claim_takeovers.log`，按**行级**容错装载。
+
+    2026-11-13 事故：`legacy_token_repair` 行不带 `new_owner`，旧实现直接抛
+    LedgerError 把整本台账判成不可信 → 全新克隆上每一次提交全被拒（闸门自己的
+    修复工具废掉了闸门）。所以：
+
+      * 「这一行不能当接管凭证」→ 只跳过这一行 + 给可读原因，台账其余照常；
+      * 只有「整份文件不可读 / 坏 JSON / 不是对象 / 缺 path」才失败关闭——正常
+        写方（`file_claim._append_takeover_log`）永远写不出这类行。
+    """
     path = fc.TAKEOVER_LOG
     if not path.exists():
         return []
@@ -133,29 +157,71 @@ def _load_takeover_log() -> List[Dict[str, Any]]:
             raise LedgerError(f"takeover 日志格式不认识：{path} 第 {lineno} 行（{exc}）")
         if not isinstance(rec, dict) or "path" not in rec:
             raise LedgerError(f"takeover 日志格式不认识：{path} 第 {lineno} 行缺 path")
-        if rec.get("action") not in NON_TAKEOVER_ACTIONS and "new_owner" not in rec:
-            raise LedgerError(f"takeover 日志格式不认识：{path} 第 {lineno} 行缺 new_owner")
+        action = rec.get("action")
+        if action is not None and action not in KNOWN_ACTIONS:
+            # 未知 action 不是「没人持有」，也不是「台账坏了」：这一行不授予任何
+            # 接管效力，其余行照常判定。这是「新增写方动作」的正常升级路径。
+            _note(
+                warnings,
+                f"{path} 第 {lineno} 行 action={action!r} 不认识，已忽略这一行"
+                "（该行不能当接管凭证；其余台账照常。若这是新增写方动作，"
+                "请登记到 claim_gate.KNOWN_ACTIONS）",
+            )
+            continue
+        if action in NON_TAKEOVER_ACTIONS:
+            rows.append(rec)
+            continue
+        if "new_owner" not in rec:
+            _note(
+                warnings,
+                f"{path} 第 {lineno} 行 action={action or 'orphan_takeover'!r} 缺 new_owner，"
+                "已忽略这一行（该行不能当接管凭证；其余台账照常）",
+            )
+            continue
         rows.append(rec)
     return rows
 
 
-def _takeover_rows(registry: Dict[str, Any], log_rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """合并两个来源的 takeover 记录：`claim_takeovers.log`（主）+ 台账 history（次）。"""
+def _takeover_rows(
+    registry: Dict[str, Any],
+    log_rows: List[Dict[str, Any]],
+    warnings: Optional[List[str]] = None,
+) -> List[Dict[str, Any]]:
+    """合并两个来源的 takeover 记录：`claim_takeovers.log`（主）+ 台账 history（次）。
+
+    同样按行级容错：单行缺/坏 `epoch`、空 `new_owner` → 跳过该行并记原因。
+    跳过 = 这笔接管不成立 = 该 claim 仍按「别人持有」处理（对单个文件仍是失败关闭）。
+    """
     rows: List[Dict[str, Any]] = []
     for rec in log_rows:
         action = rec.get("action")
         if action in NON_TAKEOVER_ACTIONS:
             continue
-        if action not in (None, "orphan_takeover"):
-            raise LedgerError(
-                f"takeover 日志格式不认识：action={action!r}（{rec.get('path')}）"
+        if action not in TAKEOVER_ACTIONS and action is not None:
+            _note(
+                warnings,
+                f"takeover 日志有 action={action!r}（{rec.get('path')}）未登记，已忽略这一行",
             )
+            continue
+        new_owner = str(rec.get("new_owner") or "").strip()
+        if not new_owner:
+            _note(
+                warnings,
+                f"takeover 日志 action={action or 'orphan_takeover'!r}（{rec.get('path')}）"
+                "的 new_owner 为空，已忽略这一行",
+            )
+            continue
+        try:
+            epoch = _num(rec, "epoch")
+        except LedgerError as exc:
+            _note(warnings, f"takeover 日志（{rec.get('path')}）epoch 不可用，已忽略这一行：{exc}")
+            continue
         rows.append(
             {
                 "path": _key(str(rec.get("path") or "")),
-                "new_owner": str(rec.get("new_owner") or "").strip(),
+                "new_owner": new_owner,
                 "reason": str(rec.get("reason") or ""),
-                "epoch": _num(rec, "epoch"),
+                "epoch": epoch,
                 "source": "claim_takeovers.log",
             }
         )
@@ -326,13 +392,18 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     me = _identity(root)
     now = time.time()
+    warnings: List[str] = []
     try:
         registry = _load_registry()
-        takeovers = _takeover_rows(registry, _load_takeover_log())
+        takeovers = _takeover_rows(registry, _load_takeover_log(warnings), warnings)
         inspected = [(rel, _inspect(rel, me, takeovers, now)) for rel in names]
     except LedgerError as exc:
         print(f"[claim-gate] 拒绝：台账不可用/不可信，按失败关闭 —— {exc}")
         return 2
+
+    # 行级降级必须可见：被忽略的行逐条打印原因，但不影响其余台账与本次提交。
+    for message in warnings:
+        print(f"[claim-gate] 注意：{message}")
 
     blocked = [(rel, row) for rel, row in inspected if row and row["state"] == "blocked"]
     counts = {"self": 0, "expired": 0, "blocked": len(blocked)}
