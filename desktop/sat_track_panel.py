@@ -448,7 +448,7 @@ class SatTrackPanel(QFrame):
     @staticmethod
     def _tle_color(key: str) -> str:
         if key == "warning":
-            return tokens().COLORS["status_warning"]
+            return tokens().status_color("warning")
         if key == "danger":
             return tokens().COLORS["danger"]
         return tokens().text("tertiary")
