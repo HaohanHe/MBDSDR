@@ -31,7 +31,7 @@ __all__ = [
     "find_tuning_for", "register_tool_registry",
     "machine_targets", "machine_status", "machine_status_text",
     "machine_entry_text", "machine_only_links", "refresh_machine_links",
-    "start_machine_refresh",
+    "start_machine_refresh", "ensure_machine_refresh",
 ]
 
 
@@ -161,6 +161,28 @@ def refresh_machine_links(now: Optional[float] = None,
 def start_machine_refresh(path: Optional[str] = None) -> None:
     """后台拉库，立即返回；失败只记日志，状态由 :func:`machine_status_text` 读。"""
     sat_links_fetch.start_background_refresh(machine_targets(), path=path)
+
+
+_AUTO_REFRESH_DONE = False
+
+
+def ensure_machine_refresh(path: Optional[str] = None) -> bool:
+    """首次用到机器库时补一次后台刷新（每进程最多一次）。
+
+    缓存新鲜就直接用；离线模式不起线程；已刷新/已尝试过则不再重复。
+    返回值只表示本次是否真的起了后台线程，不代表拉取成功。
+    """
+    global _AUTO_REFRESH_DONE
+    if _AUTO_REFRESH_DONE:
+        return False
+    _AUTO_REFRESH_DONE = True
+    if sat_links_fetch.offline():
+        return False
+    state = machine_status(path=path)
+    if state.get("state") == "ok" and not state.get("stale"):
+        return False
+    start_machine_refresh(path=path)
+    return True
 
 
 def machine_status(now: Optional[float] = None,
