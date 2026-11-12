@@ -69,7 +69,11 @@ def test_set_bookmarks_normalizes_and_clears(qapp):
     from spectrum_widget import SpectrumPanel
     panel = SpectrumPanel()
     panel.set_bookmarks([(98.5e6, "电台"), (145e6, 42)])   # 名字非 str 也收
-    assert panel._state.bookmarks == [(98.5e6, "电台"), (145e6, "42")]
+    # 旧 2 元组按 mode=""、bandwidth=0.0（未记录）补齐
+    assert panel._state.bookmarks == [
+        (98.5e6, "电台", "", 0.0), (145e6, "42", "", 0.0)]
+    panel.set_bookmarks([(145e6, "带带宽", "NFM", 12_500.0)])
+    assert panel._state.bookmarks == [(145e6, "带带宽", "NFM", 12_500.0)]
     panel.set_bookmarks(None)
     assert panel._state.bookmarks == []
 
@@ -111,17 +115,21 @@ def test_tag_hit_geometry(qapp):
 def test_click_tag_emits_activation_not_tune(qapp):
     panel, freq, xc = _panel_with_bookmark()
     activated, tuned = [], []
-    panel.bookmark_activated.connect(activated.append)
+    panel.bookmark_activated.connect(lambda *args: activated.append(args))
     panel.freq_changed.connect(tuned.append)
     _press(panel._plot, xc, 5.0)
-    assert activated == [pytest.approx(freq)]
+    # 与书签面板同一参数集：(freq_hz, mode, bandwidth_hz)
+    assert len(activated) == 1
+    assert activated[0][0] == pytest.approx(freq)
+    assert activated[0][1] == ""
+    assert activated[0][2] == 0.0
     assert tuned == []           # 药丸带内点击不调谐、不拖 VFO
 
 
 def test_click_below_tag_band_is_normal(qapp):
     panel, _freq, xc = _panel_with_bookmark()
     activated = []
-    panel.bookmark_activated.connect(activated.append)
+    panel.bookmark_activated.connect(lambda *args: activated.append(args))
     _press(panel._plot, xc, 60.0)        # 药丸带以下 → 普通交互
     assert activated == []
 
@@ -138,12 +146,18 @@ def test_tag_render_smoke_no_data(qapp):
 # ---------------------------------------------------------------------------
 # 主窗口接线
 # ---------------------------------------------------------------------------
+#: 本模块会写这些配置键（app_mode / 调谐后的频率与模式）；模块结束一律
+#: 还原，否则同会话后面的模块会读到「上一个测试留下的模式」。
+_STATE_KEYS = ("app_mode", "demod_mode", "frequency_hz", "bandwidth_hz")
+
+
 @pytest.fixture(scope="module")
 def mw(isolated_profile, qapp):
     # isolated_profile 见 tests/conftest.py：本夹具写 app_mode 与书签，
     # 不隔离就会写进用户真实配置 / 书签库。
     from main_window import MainWindow
     w = MainWindow()
+    saved = {k: w.settings.get(k) for k in _STATE_KEYS}
     w.settings.set("app_mode", "ide")
     w.set_app_mode("ide")
     yield w
@@ -155,21 +169,34 @@ def mw(isolated_profile, qapp):
     # 清掉本测试收藏，不污染真实书签库
     w._bookmarks.clear()
     w._sync_spectrum_bookmarks()
+    # 不给别的模块留状态：写回进入本模块前的值并立即落盘。
+    for k, v in saved.items():
+        w.settings.set(k, v)
+    try:
+        w.settings.flush()
+    except Exception:
+        pass
 
 
 def test_main_window_add_syncs_tag(mw):
+    before = len(mw._bookmarks)
     mw._on_bookmark_added(98.5e6, "同步测试", "AM")
-    assert (98.5e6, "同步测试", "AM", False) in mw._bookmarks
+    added = mw._bookmarks[before:]
+    assert len(added) == 1
+    hz, name, mode, builtin, bw = added[0]
+    assert (hz, name, mode, builtin) == (98.5e6, "同步测试", "AM", False)
+    assert bw == pytest.approx(float(mw._vfo_bw))   # 写入端带带宽
     tags = mw.spectrum._state.bookmarks
-    assert any(abs(hz - 98.5e6) < 1 and name == "同步测试"
-               for hz, name in tags)
+    assert any(abs(t[0] - 98.5e6) < 1 and t[1] == "同步测试"
+               and t[2] == "AM" and t[3] == pytest.approx(bw)
+               for t in tags)
 
 
 def test_main_window_tag_activation_tunes_with_mode(mw):
-    mw._bookmarks.append((145.0e6, "激活测试", "NFM", False))
+    mw._bookmarks.append((145.0e6, "激活测试", "NFM", False, 0.0))
     mw._sync_spectrum_bookmarks()
     before = mw.spectrum.generator.center_freq_hz
-    mw._on_bookmark_activated(145.0e6)
+    mw._on_bookmark_tune_requested(145.0e6, "NFM", 0.0)
     assert mw.spectrum.generator.center_freq_hz == pytest.approx(145.0e6)
     assert mw.spectrum.generator.center_freq_hz != before
     if mw._demod_cfg is not None:
@@ -178,7 +205,8 @@ def test_main_window_tag_activation_tunes_with_mode(mw):
 
 def test_main_window_tag_activation_unknown_freq_keeps_mode(mw):
     """未收录频点（防御）：按当前模式调谐，不崩。"""
-    mw._on_bookmark_activated(433.0e6)
+    mode = mw._demod_cfg.mode if mw._demod_cfg is not None else "NFM"
+    mw._on_bookmark_tune_requested(433.0e6, mode, 0.0)
     assert mw.spectrum.generator.center_freq_hz == pytest.approx(433.0e6)
 
 
