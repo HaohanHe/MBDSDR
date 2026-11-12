@@ -439,10 +439,10 @@ python -c "from mbdsdr_ai.core.mcp_server import MCPToolSet; print(len(MCPToolSe
 
 **反证测试写法（四条，任一失败即方案 ② 失效）**
 
-1. 新增 `tests/test_squelch_applied_by.py`：fake backend 记录"是否收到绝对门"。
+1. 新增 `tests/test_squelch_domain.py`（原计划名 test_squelch_applied_by.py，未单独建文件）：fake backend 记录"是否收到绝对门"。
    滑杆 -50→-20 后断言 `status.squelch_db == -20`、`applied_by == "desktop-margin"`、
    绝对门下发记录为空、`squelch_threshold_dbfs` 只可能等于"底噪 + 16"而不是 -20。
-2. 新增 `tests/test_receive_chain_squelch_domain.py`：同一段噪声 IQ 用 -50 与 -20
+2. 同文件 `test_margin_scale_gates_noise_but_opens_weak_signal`（原计划名 test_receive_chain_squelch_domain.py，未单独建文件）：同一段噪声 IQ 用 -50 与 -20
    各跑一次 `ReceiveChain`，断言 -20 的**开门帧数严格更少**（今天会更开放门，
    这条会红，正是要修的）。
 3. C++ 侧在现有静噪测试里加：`cmdSetSquelch({auto:true, threshold_db:-20})` 之后
@@ -719,7 +719,7 @@ python -c "from mbdsdr_ai.core.mcp_server import MCPToolSet; print(len(MCPToolSe
 | NanoVNA RH770 半拉谐振（深坑） | 408MHz / -28dB | 文档自述（侦察细扫，未入 24 平均存档） | `experiments/nanovna_rh770/README.md:32,50,53` | 否：无原始单扫数据，且需 VNA+手持 | **未验证（证据不足）** |
 | NanoVNA RH770 全展谐振 | ≈419.5MHz | 文档自述，无采集件 | `docs/learn/agent-onboarding-runbook.md:192`；`docs/learn/sdr-rtltcp-agent-path.md:48` | 否 | **与存档矛盾**：存档 400–455MHz 总体单调下降（|S11| 全局最小在 400.0MHz 端 = 0.1786，RL 14.96dB；455MHz 最差 RL 4.94dB），仅 418–419MHz 有 0.1dB 级浅平台（418.0MHz |S11|=0.3046、RL 10.32dB、VSWR≈1.86），未见 419.5MHz 谐振；1MHz 步长也无法分辨 419.5 |
 | RH770 430 段回损（全展，24 平均存档） | 400MHz 14.96dB；418MHz 10.32dB；419MHz 10.32dB；435MHz 6.66dB；455MHz 4.94dB | 入库扫频 JSON | `experiments/nanovna_rh770/data/rh770.json`（seg1，400–500MHz，101 点/1MHz，前 56 点 400–455） | 是（自动化：`pytest experiments/tests/test_measured_archive_evidence.py::test_rh770_419_5mhz_resonance_is_untrusted`；容差由数据二阶差分 MAD 推出） | **有证据**（不支持 419.5MHz 谐振） |
-| 馈线 TDR 单程时延 | 4.89ns（复算 4.885–4.886ns） | 入库 S11 相位斜率 + 分析脚本 | `experiments/nanovna_rh770/data/cable_open.json`；`scripts/vna_cable_analyze.py` | 是（`python -m experiments.nanovna_rh770.scripts.vna_cable_analyze`；自动化 `…::test_cable_tau_electrical_and_physical_length`，τ=4.866ns→Le=1.459m→L=0.963–1.021m） | **有证据（时延本体）**；长度换算两口径矛盾，见下注 |
+| 馈线 TDR 单程时延 | 4.89ns（复算 4.885–4.886ns） | 入库 S11 相位斜率 + 分析脚本 | `experiments/nanovna_rh770/data/cable_open.json`；`experiments/nanovna_rh770/scripts/vna_cable_analyze.py` | 是（`python -m experiments.nanovna_rh770.scripts.vna_cable_analyze`；自动化 `…::test_cable_tau_electrical_and_physical_length`，τ=4.866ns→Le=1.459m→L=0.963–1.021m） | **有证据（时延本体）**；长度换算两口径矛盾，见下注 |
 | 相位残差 | 0.033rad | 无脚本、无输出记录 | 仅见于论文/说明文档 | 部分：复核复算 max 0.037rad / std 0.0155rad（段1） | **未核实** |
 | NanoVNA TCXO 回读 | 26000000Hz | 文档自述 + 回放夹具 | `docs/learn/nanovna/feature-parity.md:674,705`；`mbdsdr_ai/nanovna_dump.py:247`（夹具） | 否：无原始串口日志 | **未验证（证据不足）**（夹具不算真机证据） |
 | 设备抓帧 | 4 帧 320×240、每帧 153600B | 二进制采集件 + PNG | `experiments/nanovna_rh770/data/vna_screen_{live,detail,wide,2m}.{rgb,png}` | 是（自动化：`…::test_capture_frames_size_content_and_bmp_derivation`；尺寸/非空白比例/BMP=54+W·H·3） | **有证据** |
@@ -755,7 +755,7 @@ python -c "from mbdsdr_ai.core.mcp_server import MCPToolSet; print(len(MCPToolSe
 | `docs/learn/phase63/windows-core-refactor-check.md:6` | Linux 侧已验证 | clean configure + 133/133 ctest | **无原始件**（构建日志未入库）；可复跑，已加注 |
 | `docs/doppler-compensation.md:293,328,352` | 真机已验证（UI 文案） | `verified=true` 时的按钮文案 | **不可达文案**（当前无 `verified=True` 后端，`docs/PRD.md:919`）；不构成对外事实，无需改代码 |
 | `docs/hw-acceptance.md:66`；`docs/real_hw_acceptance_20261103.md:68` | 已验证（数据面） | R4 导频/音频 RMS/频谱 | **有原始件（当时）**：`.tmp-tool-results/hw_acceptance/20261103_191805/`；人耳听感仍**无原始件**，原文已标「需人工放行」 |
-| `experiments/nanovna_rh770/README.md:37`；`scripts/vna_screenshot.py:10` | 真机验证 | `capture_screen()` 代码路径 | **有原始件**：`data/vna_screen_*.rgb/.png` |
+| `experiments/nanovna_rh770/README.md:37`；`experiments/nanovna_rh770/scripts/vna_screenshot.py:10` | 真机验证 | `capture_screen()` 代码路径 | **有原始件**：`data/vna_screen_*.rgb/.png` |
 
 > 其余「已验证」均为测试/静态引用（如 `test_acars_consistency.py`、`network-layer.md` 46 用例、
 > `redsea_real.md` 1024 双射、`protocol_analysis.md` 往返测试、`audit_r2` 源码事实），
