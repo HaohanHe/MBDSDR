@@ -510,19 +510,19 @@ def test_reconnect_storm_50_rounds_bounded_with_backoff(monkeypatch, kind):
     _assert_no_growth([baseline] + samples, f"storm:{kind}")
 
     # 退避真实发生：上次 connect 返回到下一次 on_reconnecting 的间隔，
-    # 第 2/3 次尝试前应分别为 compute_backoff(1)=1×base、compute_backoff(2)=2×base
+    # 第 attempt 次尝试前应已达到声明的退避值 compute_backoff(attempt-1)。
+    #
+    # 判据只做「间隔 ≥ 声明值 × 0.9」，**不判相邻两次的墙钟比值**：间隔 =
+    # sleep + 调度开销，开销只会让间隔变长；而比值是在拿 CPU 忙闲当判据
+    # （本机满载时 sleep(0.05) 实测 0.086–0.100s，真 1×/2× 退避被压成 1.3
+    # 倍，换台机器/CI 必随机红，红了以后所有人都会学会无视它）。
+    # 「不是固定间隔」由第 3 次尝试的下界保证：固定 0.05s 低于 0.10×0.9。
     for round_idx in range(50):
         start = round_idx * max_attempts
         for attempt in range(2, max_attempts + 1):
             wait = stamps[start + attempt - 1] - backend.connect_returns[start + attempt - 2]
             # 第 attempt 次尝试前的等待 = 上一次（attempt-1）失败后的退避
             expected = compute_backoff(attempt - 1, base_delay, max_delay)
-            assert wait >= expected * 0.7, (
+            assert wait >= expected * 0.9, (
                 f"第 {round_idx + 1} 轮第 {attempt} 次重试前只等了 {wait:.3f}s，"
                 f"退避应为 {expected:.3f}s（未退避 = 风暴式重试）")
-        # 退避必须递增（不是固定间隔）
-        wait1 = stamps[start + 1] - backend.connect_returns[start]
-        wait2 = stamps[start + 2] - backend.connect_returns[start + 1]
-        assert wait2 >= wait1 * 1.4, (
-            f"第 {round_idx + 1} 轮退避未增长："
-            f"wait1={wait1:.3f}s wait2={wait2:.3f}s")
