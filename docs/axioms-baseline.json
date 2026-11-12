@@ -96,6 +96,14 @@
       "severity": "review",
       "snippet": "FREQ_MIN_HZ 有 2 个不同取值（10_000.0, 325_000_000.0）"
     },
+    "0835b3d397b1268a": {
+      "line": 0,
+      "ordinal": 0,
+      "path": "desktop/control_panel.py",
+      "rule": "D2-multi-producer",
+      "severity": "must-fix",
+      "snippet": "电平读数在本文件自行拼装"
+    },
     "0895cdacf758997e": {
       "line": 3336,
       "ordinal": 5,
@@ -664,14 +672,6 @@
       "severity": "review",
       "snippet": "dev 与 device 同时使用"
     },
-    "2cbb63cede18251e": {
-      "line": 0,
-      "ordinal": 0,
-      "path": "desktop/constellation_panel.py",
-      "rule": "D2-multi-producer",
-      "severity": "must-fix",
-      "snippet": "Hz 读数由 41 个文件产生"
-    },
     "2d49f8c5776bd995": {
       "line": 70,
       "ordinal": 0,
@@ -1079,6 +1079,14 @@
       "rule": "D3-name-role",
       "severity": "review",
       "snippet": "histogram_equalize 与 mbdsdr_ai/image_enhance.py:151 同名但实现不同"
+    },
+    "48e8f626b0bb145a": {
+      "line": 0,
+      "ordinal": 0,
+      "path": "desktop/main_window.py",
+      "rule": "D2-multi-producer",
+      "severity": "must-fix",
+      "snippet": "增益读数在本文件自行拼装"
     },
     "492349a3c99c3ac6": {
       "line": 159,
@@ -3592,6 +3600,14 @@
       "severity": "review",
       "snippet": "模块未声明 __all__"
     },
+    "db49b78de783961d": {
+      "line": 0,
+      "ordinal": 0,
+      "path": "desktop/main_window.py",
+      "rule": "D2-multi-producer",
+      "severity": "must-fix",
+      "snippet": "频率读数在本文件自行拼装"
+    },
     "dd8e47803e72a581": {
       "line": 91,
       "ordinal": 0,
@@ -3984,6 +4000,22 @@
       "severity": "review",
       "snippet": "模块未声明 __all__"
     },
+    "fa5e3154ae5a126e": {
+      "line": 0,
+      "ordinal": 0,
+      "path": "desktop/main_window.py",
+      "rule": "D2-multi-producer",
+      "severity": "must-fix",
+      "snippet": "电平读数在本文件自行拼装"
+    },
+    "fb901ad2bf644dee": {
+      "line": 0,
+      "ordinal": 0,
+      "path": "desktop/control_panel.py",
+      "rule": "D2-multi-producer",
+      "severity": "must-fix",
+      "snippet": "增益读数在本文件自行拼装"
+    },
     "fbbad262d900db80": {
       "line": 27,
       "ordinal": 0,
@@ -4105,10 +4137,10 @@
       "snippet": "FREQS 有 3 个不同取值（[1209, 1336, 1477, 1, [2400, 1060, 1160, 1, [\"1000000\", \"1550000）"
     }
   },
-  "generated_at": "2026-11-13 03:55:16",
+  "generated_at": "2026-11-13 04:40:19",
   "head": "afd93ef4",
-  "reason": "D1-cycle 指纹去掉成员数：两个环已由并行线登记豁免，重建后无新增、消失 2 条（原 21/20 成员口径的指纹被豁免覆盖）",
+  "reason": "D2 判据重写（报全部产生点并执行 docs/truth-sources.json 登记语义）后接受 5 条 D2-multi-producer：增益/电平各在 control_panel.py 与 main_window.py，频率在 main_window.py，均属旧「按字母序报一个」口径看不见的其余产生点。接受树为 afd93ef4 + commit 50710e71 的同一补丁，未包含并行线在 afd93ef4 之后引入的 device_owner/known-red/redundancy 新增，那部分保留为红由归属线处理。",
   "schema": 2,
-  "total_active": 513,
+  "total_active": 517,
   "waived_not_tracked": 54
 }
