@@ -2040,21 +2040,6 @@ class MCPToolSet(ToolCallGate):
     # ------------------------------------------------------------------
     # 二级域分组视图（P1 #64，与 C++ mcp_server.cpp 同形状）
     # ------------------------------------------------------------------
-    def _bucketed(self, full: bool) -> Dict[str, List[Dict[str, Any]]]:
-        """按 _TOOL_DOMAIN 把本表工具分桶。full=True 放完整 schema，否则只放名。"""
-        buckets: Dict[str, List[Dict[str, Any]]] = {
-            n: [] for n in ALL_DOMAIN_NAMES}
-        for t in self._table:
-            dom = _TOOL_DOMAIN.get(t["name"])
-            if dom is None:
-                continue  # 未分配工具：测试会钉死不发生
-            if full:
-                buckets[dom].append(
-                    {"name": t["name"], "description": t["description"],
-                     "inputSchema": t["inputSchema"]})
-            else:
-                buckets[dom].append({"name": t["name"]})
-        return buckets
 
     def tools_list_result(self, params: Optional[Dict[str, Any]] = None):
         """tools/list 的 result 体；带错误串时返回 (None, errmsg)。
