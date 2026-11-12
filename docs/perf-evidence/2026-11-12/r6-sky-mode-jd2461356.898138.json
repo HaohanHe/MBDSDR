@@ -1,0 +1,96 @@
+{
+  "ring": "R6",
+  "name": "星象仪模式",
+  "status": "PASS",
+  "skip_code": "",
+  "metrics": {
+    "jd_ut": 2461356.898138,
+    "sun_mbdsdr_ra_dec_deg": [
+      227.5607,
+      -17.7395
+    ],
+    "sun_reference_ra_dec_deg": [
+      227.566,
+      -17.7428
+    ],
+    "sun_error_deg": 0.0053,
+    "station_resolved": true,
+    "station_warning": "",
+    "moon_ra_dec_deg": [
+      263.4745,
+      -27.6891
+    ],
+    "moon_ref_ra_dec_deg": [
+      263.4866,
+      -27.6802
+    ],
+    "moon_sep_arcsec": 50.4,
+    "moon_dia_err_arcsec": 6.4,
+    "moon_neg_ctrl_1h_arcsec": 1822.7,
+    "moon_neg_ctrl_back_arcsec": 50.4,
+    "moon_ref": "JPL DE421（外部星历真值，非自家分歧）",
+    "moon_ephemeris": "D:\\mbdsdr\\MBDSDR\\de421.bsp",
+    "ephemeris": "D:\\mbdsdr\\MBDSDR\\de421.bsp",
+    "offline_substitute": "PASS"
+  },
+  "checks": [
+    {
+      "name": "sun_ra_dec_matches_reference",
+      "ok": true,
+      "detail": "太阳误差 0.005°（独立 Meeus 参考）",
+      "skipped": false
+    },
+    {
+      "name": "moon_ra_dec_plausible",
+      "ok": true,
+      "detail": "RA=263.47° Dec=-27.69° dist=0.003AU",
+      "skipped": false
+    },
+    {
+      "name": "planet_sanity",
+      "ok": true,
+      "detail": "Mars RA=146.71° Dec=+15.35°",
+      "skipped": false
+    },
+    {
+      "name": "moon_ra_dec_matches_ephemeris",
+      "ok": true,
+      "detail": "50.4″ <= 120″（JPL DE421 外部真值）",
+      "skipped": false
+    },
+    {
+      "name": "moon_angular_diameter_matches",
+      "ok": true,
+      "detail": "视直径差 6.4″ <= 12″",
+      "skipped": false
+    },
+    {
+      "name": "negative_control_hour_shift_goes_red",
+      "ok": true,
+      "detail": "拨快 1h 后 1822.7″（应 ≥600″），拨回后 50.4″（应 ≤120″）",
+      "skipped": false
+    },
+    {
+      "name": "honest_empty_state",
+      "ok": true,
+      "detail": "未设置站点时禁止过境计算：已拒绝",
+      "skipped": false
+    },
+    {
+      "name": "offscreen_render_non_blank",
+      "ok": true,
+      "detail": "PNG 像素起伏>10，文件 92965 字节",
+      "skipped": false
+    }
+  ],
+  "user_message_on_failure": "星象仪模式数据异常：请检查观测站坐标与系统时间（时间/坐标错会导致星位全错）。",
+  "human_required": [
+    "星空布局、卫星标记与交互手感（观感）"
+  ],
+  "device_required": false,
+  "artifacts": [
+    "D:\\mbdsdr\\MBDSDR\\.tmp-tool-results/hw_acceptance/20261112_r6_jd\\r6_sky_mode\\sky_render.png"
+  ],
+  "notes": "月球绝对位置对拍 JPL DE421（外部星历真值，非自家分歧）；含 1 小时错位反证。本环完全离线可复跑（不需射频硬件）。",
+  "red_line": "红线：无真机 → SKIP(NO_HW) 且原因码可见；禁止用模拟/合成/debug 源数据判 PASS。本结果的所有数字均来自真实设备或真实计算，未取到即 SKIP/标 UNVERIFIED。"
+}
