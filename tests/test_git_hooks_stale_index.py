@@ -11,6 +11,7 @@ STALE_INDEX_SUSPECT（只记录、不阻断）。
 """
 import json
 import os
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -24,14 +25,19 @@ HOOK_SRC = ROOT / "scripts" / "hooks" / "post-commit"
 #: 让 post-commit 的故障证据判定认出这是本仓管理的钩子）。
 STUB_PRE_COMMIT = '''#!/usr/bin/env python
 """MBDSDR-MANAGED-HOOK pre-commit（测试桩：只登记通过标记）"""
+import json
 import os
 import subprocess
 from pathlib import Path
 
 tree = subprocess.run(["git", "write-tree"], capture_output=True, text=True).stdout.strip()
+# post-commit 只认「files 非空」的标记，空标记一律按钩子故障处理（记为 UNAUDITED）。
+# 所以桩必须带出本次暂存的文件名，只写 {} 会把自己判成未审计。
+files = subprocess.run(["git", "diff", "--cached", "--name-only"],
+                       capture_output=True, text=True).stdout.split()
 d = Path(os.environ.get("MBDSDR_HOOK_MARKER_DIR") or r"D:\\mbdsdr\\.locks\\hook_ok")
 d.mkdir(parents=True, exist_ok=True)
-(d / f"{tree}.json").write_text("{}", encoding="utf-8")
+(d / f"{tree}.json").write_text(json.dumps({"files": files}), encoding="utf-8")
 '''
 
 
@@ -59,6 +65,7 @@ def repo_env(tmp_path):
     env["MBDSDR_UNAUDITED_LOG"] = str(tmp_path / "unaudited.log")
     env["MBDSDR_HOOK_MARKER_DIR"] = str(tmp_path / "hook_ok")
     env["MBDSDR_LOCKS_DIR"] = str(tmp_path / "locks")
+    env["MBDSDR_RESIDUE_LOG"] = str(tmp_path / "residue.log")
     _git(repo, env, "init", "-q")
     _git(repo, env, "config", "user.email", "hook-test@example.invalid")
     _git(repo, env, "config", "user.name", "hook-test")
@@ -217,3 +224,26 @@ def test_hook_error_is_classified_by_evidence(tmp_path, repo_env):
     assert rec["bypass_kind"] == "hook_error"
     assert any("不存在" in item for item in rec["hook_evidence"]), rec
     assert _unaudited_records(tmp_path) == []
+
+
+def test_all_hook_state_paths_are_redirected(tmp_path, repo_env):
+    """钩子读的每个 `MBDSDR_*_LOG` / `MBDSDR_*_DIR` 都必须被改写到 tmp_path。
+
+    钩子的默认值是 `D:\\mbdsdr\\.locks\\...` 这类绝对路径，本机同时存在二十多个
+    工作树：只要有一条线跑钩子时漏设一个变量，记录就会写进主仓的共享目录，
+    之后所有审计类判定在并行开发时都不可信（"这条记录是谁写的" 变得不可区分）。
+
+    机械化这条不变量，而不是靠人记得：新增一个状态路径却忘了在 `repo_env` 里
+    改写，这里就红，并点名那个变量。
+    """
+    src = HOOK_SRC.read_text(encoding="utf-8")
+    names = {n for n in re.findall(r"MBDSDR_[A-Z_]+", src)
+             if n.endswith(("_LOG", "_DIR"))}
+    assert names, "钩子里没找到任何状态路径变量，正则或钩子结构变了"
+    _repo, env = repo_env
+    leaked = sorted(n for n in names
+                    if not Path(env.get(n, "")).is_relative_to(tmp_path))
+    assert not leaked, (
+        "钩子会写主仓共享位置（repo_env 未把下列变量改写到 tmp_path）："
+        f"{leaked}"
+    )
