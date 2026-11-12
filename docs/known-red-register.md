@@ -721,7 +721,7 @@ QT_QPA_PLATFORM=offscreen python -m pytest "<nodeid>" -q
 
 ---
 
-## K20 — tooltip 守卫 4 条（2026-11-13 实跑，存量·未修）
+## K20 — tooltip 守卫 4 条（2026-11-13 已转绿 · 提交 `294beef4`）
 
 **合并为一条而非四条**：同一文件、同一契约（`docs/discoverability.md` 三条规矩）、
 同一批转绿动作（补登记 / 改文案 / 删数值），拆开只会把一个修复批次记成 4 笔账。
@@ -745,17 +745,30 @@ QT_QPA_PLATFORM=offscreen python -m pytest "<nodeid>" -q
   标注或删数值；透传 tooltip 进登记表；`收起右栏浮层（Esc）` 改写到 ≥12 字且不等于
   可见文字；基线只降不升（当前 3 条，不许把第 4 条塞进去）。验收：整文件
   `7 passed`；反证：恢复任一违规，对应节点必须红。
- 当前 4 条） | `c204e945`（同上，出现第 4 条违规） |
 
-- **复跑命令**：
-  ```bash
-  MBDSDR_OFFLINE=1 QT_QPA_PLATFORM=offscreen \
-    python -m pytest tests/test_tooltip_guard.py -q -rf
-  ```
-- **当前 owner**：`desktop/device_panel.py`、`desktop/control_panel.py`、
-  `desktop/main_window.py`、`docs/tooltip-baseline.json` 均无活跃 claim。按引入线：
-  `ff7e3288` = 设备面板线、`b97b0cd1` = 控制面板线、`c204e945` = 右栏收窄线。
-- **转绿条件**：4 条全部通过——动态 tooltip 补「未确认 / 配置意图 / 以设备为准」
-  标注或删数值；透传 tooltip 进登记表；`收起右栏浮层（Esc）` 改写到 ≥12 字且不等于
-  可见文字；基线只降不升（当前 3 条，不许把第 4 条塞进去）。验收：整文件
-  `7 passed`；反证：恢复任一违规，对应节点必须红。
+- **转绿记录**（2026-11-13，提交 `294beef4`，`git cat-file -t` 可验）：
+  - 动态 tooltip：`desktop/device_panel.py` 两处枚举看门狗文案补「这是本程序设置
+    的等待上限，不是设备读数」，`test_dynamic_tooltips_are_honest` 绿。
+  - 透传登记：`desktop/control_panel.py:506` / `:1045` 的 `_step_tooltip_text()`
+    逐处进 `docs/tooltip-dynamic-baseline.json`（passthrough，复用现有运行时
+    兜底用例）；运行时用例补一次切档位触发，让 `:1045` 也被实际渲染校验。
+  - 文案：`desktop/main_window.py:12091` 的「收起右栏浮层（Esc）」补全为完整
+    说明，并钉进 `test_upgraded_tooltips_meet_the_rules`；基线仍为 3 条，
+    未上调。
+  - 守卫收紧：透传登记由「(file, expr) 集合去重」改为按调用点计数，与运行时
+    逐处配对一致；同一表达式两处只登记一条不再能蒙绿。
+  - 本段此前有一截重复粘贴的尾巴（含孤儿行），已在同一笔登记表提交中删除，
+    此处为唯一版本。
+- **反证（均实跑）**：
+  - 删掉 `:1045` 一条登记 → `test_every_passthrough_tooltip_is_registered` 红，
+    点名 `desktop/control_panel.py:1045 :: self._step_tooltip_text()`。
+  - `main_window` tooltip 改回空字符串 → `test_upgraded_tooltips_meet_the_rules`
+    红（文案未落地）。
+  - 去掉 `device_panel.py:529` 的来源标注 → `test_dynamic_tooltips_are_honest`
+    红，点名 `desktop/device_panel.py:528`。
+- **验证**：`tests/test_tooltip_guard.py` 7 passed；
+  `tests/test_tooltip_dynamic_runtime.py` 除 `settings_panel` 外 16 passed /
+  1 deselected。`test_settings_panel_passthrough_tooltips_self_describe` 在 HEAD
+  独立 worktree 复跑即红（`settings_panel` 懒构建，构造期不生成 UI），属存量
+  问题，不在 K20 范围，未改该文件。
+
