@@ -1,0 +1,142 @@
+﻿diff --git a/tests/conftest.py b/tests/conftest.py
+index bcaf0372..55c231d9 100644
+--- a/tests/conftest.py
++++ b/tests/conftest.py
+@@ -88,14 +88,55 @@ def _qt_lock_path():
+     )
+ 
+ 
++def _qt_owner_path(path):
++    return path + ".owner"
++
++
++def _write_qt_owner(path):
++    """记下持有者身份，供后来者判断「在等谁」。
++
++    字节锁才是权威（进程死/被杀由内核释放）；这份 owner 只是提示信息，
++    写失败、残留、过期都不影响互斥正确性。
++    """
++    try:
++        with open(_qt_owner_path(path), "w", encoding="utf-8") as fh:
++            json.dump(
++                {
++                    "pid": os.getpid(),
++                    "at": time.time(),
++                    "argv": " ".join(sys.argv)[:300],
++                },
++                fh,
++                ensure_ascii=False,
++            )
++    except OSError:
++        pass
++
++
++def _read_qt_owner(path):
++    """持有者描述；读不到就诚实说不知道（旧进程没写 / 已释放）。"""
++    try:
++        with open(_qt_owner_path(path), encoding="utf-8") as fh:
++            info = json.load(fh)
++        stamp = time.strftime("%H:%M:%S", time.localtime(float(info.get("at") or 0)))
++        return "持有者 PID %s（%s 启动）" % (info.get("pid", "?"), stamp)
++    except (OSError, ValueError, TypeError):
++        return "持有者未知（未写 owner 文件）"
++
++
+ def _acquire_qt_lock(path, timeout):
+-    """返回 (fileobj, waited_seconds)；超时返回 (None, waited_seconds)。"""
++    """返回 (fileobj, waited_seconds)；超时返回 (None, waited_seconds)。
++
++    抢不到时立刻打一行「在等谁」，而不是安静等满超时——此前并发会话只看到
++    「卡在 conftest 导入」，实际是等另一个 pytest 跑完。
++    """
+     os.makedirs(os.path.dirname(path), exist_ok=True)
+     fh = open(path, "a+b")
+     if os.fstat(fh.fileno()).st_size == 0:
+         fh.write(b"\0")
+         fh.flush()
+     started = time.monotonic()
++    announced = False
+     while True:
+         try:
+             fh.seek(0)
+@@ -105,15 +146,23 @@ def _acquire_qt_lock(path, timeout):
+             else:
+                 import fcntl
+                 fcntl.flock(fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
++            _write_qt_owner(path)
+             return fh, time.monotonic() - started
+         except OSError:
++            if not announced:
++                announced = True
++                sys.stderr.write(
++                    "[mbdsdr-lock] 等锁中：%s；最多等 %.0fs（%s）\n"
++                    % (_read_qt_owner(path), timeout, path)
++                )
++                sys.stderr.flush()
+             if time.monotonic() - started >= timeout:
+                 fh.close()
+                 return None, time.monotonic() - started
+             time.sleep(0.5)
+ 
+ 
+-def _release_qt_lock(fh):
++def _release_qt_lock(fh, path=None):
+     if fh is None:
+         return
+     try:
+@@ -128,9 +177,14 @@ def _release_qt_lock(fh):
+         pass
+     finally:
+         fh.close()
++        if path:
++            try:
++                os.unlink(_qt_owner_path(path))
++            except OSError:
++                pass
+ 
+ 
+-_LOCK = {"fh": None, "waited": 0.0}
++_LOCK = {"fh": None, "waited": 0.0, "path": None}
+ 
+ # conftest 自己在 pytest_configure 里为了「真实配置快照」会 import desktop/settings，
+ # 而 settings.py 顶部就 `from PySide6.QtCore import QTimer`。这份基线把「守卫自己
+@@ -307,6 +361,11 @@ def pytest_collection_finish(session):
+     _install_qsettings_write_guard()
+     if os.environ.get("MBDSDR_TEST_LOCK", "1") == "0":
+         return
++    if getattr(session.config.option, "collectonly", False):
++        # 收集阶段不执行用例、不建 QApplication；此时抢锁只会把 `--collect-only`
++        # 变成「等另一个会话跑完」（实测被并发会话挡住 184s）。锁的目的是防
++        # 并发执行用例挤穿内存，不是防并发读文件。
++        return
+     trigger = _qt_trigger(session.items)
+     if trigger is None:
+         return
+@@ -323,13 +382,14 @@ def pytest_collection_finish(session):
+     if fh is None:
+         pytest.exit(
+             "[mbdsdr-lock] 等待 %.0fs 仍未拿到 Qt 测试互斥锁：%s\n"
+-            "（另一条会话正在跑 Qt 用例；本机 commit 上限 38GB，并发会把内存"
++            "（%s；另一条会话正在跑 Qt 用例。本机 commit 上限 38GB，并发会把内存"
+             "预算挤穿。稍后重试，或设 MBDSDR_TEST_LOCK_TIMEOUT 加长等待。）"
+-            % (waited, path),
++            % (waited, path, _read_qt_owner(path)),
+             returncode=2,
+         )
+     _LOCK["fh"] = fh
+     _LOCK["waited"] = waited
++    _LOCK["path"] = path
+     sys.stderr.write(
+         "[mbdsdr-lock] 已获得 Qt 测试互斥锁（等待 %.1fs，触发：%s）：%s\n"
+         % (waited, trigger, path)
+@@ -1170,8 +1230,9 @@ def pytest_unconfigure(config):
+     _restore_qsettings_isolation()
+     sys.stdout.flush()
+     sys.stderr.flush()
+-    _release_qt_lock(_LOCK["fh"])       # 硬退出前先交锁，否则其它会话要等满超时
++    _release_qt_lock(_LOCK["fh"], _LOCK["path"])   # 硬退出前先交锁，否则其它会话要等满超时
+     _LOCK["fh"] = None
++    _LOCK["path"] = None
+     code = _RESULT["exitstatus"]
+     if sys.platform == "win32":
+         kernel32 = ctypes.windll.kernel32
