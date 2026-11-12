@@ -23,10 +23,39 @@ sys.path.insert(0, str(ROOT / "scripts"))
 import verify_claims as vc  # noqa: E402
 
 WAIVERS = ROOT / "docs" / "claim-waivers.md"
+KNOWN_RED = ROOT / "docs" / "known-red-register.md"
 CAP_RE = re.compile(r"<!--\s*waived-total:\s*(\d+)\s*-->")
 ROW_RE = re.compile(r"^\|\s*(\d+)\s*\|")
+#: 「已登记红」出口：白名单只减不增，确实不可复核的结论改走 K 编号登记。
+#: 标记格式固定为 `<!-- claims-gate-exempt: K20 docs/x.md#<12位指纹> -->`。
+EXEMPT_RE = re.compile(
+    r"<!--\s*claims-gate-exempt:\s*(K\d+)\s+([\w./-]+)#([0-9a-f]{12})\s*-->")
 #: 建表时（2026-11-06）HEAD 的未证实断言数；只许往下减。
 BUILT_AT = 142
+
+
+def _exempt_fps(text: str) -> set[str]:
+    """解析「已登记红」出口。K 编号必须非空且在同一文件里有对应小节，否则 fail closed。
+
+    这条出口只负责「已登记」的那几条，不放行「还没登记」的新断言——否则它就是
+    白名单 2.0，会把闸门重新变回摆设。
+    """
+    headings = set(re.findall(r"^#+\s+(K\d+)\b", text, re.M))
+    out: set[str] = set()
+    for m in EXEMPT_RE.finditer(text):
+        k, _doc, fp = m.group(1), m.group(2), m.group(3)
+        if k not in headings:
+            raise AssertionError(
+                f"claims-gate-exempt 指向的 {k} 在 known-red-register 里没有小节标题；"
+                "出口必须绑一条正式登记的已知红（K 编号不可为空/不可悬空）")
+        out.add(fp)
+    return out
+
+
+def _registered_red_fps() -> set[str]:
+    if not KNOWN_RED.exists():
+        return set()
+    return _exempt_fps(KNOWN_RED.read_text(encoding="utf-8"))
 
 
 def _fp(doc: str, text: str) -> str:
@@ -64,17 +93,34 @@ def test_waiver_count_matches_cap_and_never_increases():
 
 
 def test_no_new_or_modified_unverified_claims():
-    """新增/改写的断言没有四元组 → 红。"""
+    """新增/改写的断言没有四元组 → 红（已登记到 K 编号的除外）。"""
     measured, claims = _measured()
     waived, _ = _waived()
-    added = measured - waived
+    added = set(measured) - set(waived) - _registered_red_fps()
     if added:
         detail = [f"{c.doc}:{c.line} [{c.status}] {c.reason}\n    {c.text[:120]}"
                   for c in claims if _fp(c.doc, c.text) in added]
         raise AssertionError(
             "docs/ 有新增或改写的断言未带完整四元组（也不在白名单里）：\n  "
             + "\n  ".join(detail)
-            + "\n修复：补 <hash> — <path>:<line> — <改动后字面量>，或删除断言。")
+            + "\n修复：补 <hash> — <path>:<line> — <改动后字面量>，或删除断言；"
+              "确实不可复核的，登记到 docs/known-red-register.md 的 K 编号并加"
+              " claims-gate-exempt 标记。")
+
+
+def test_registered_red_exit_requires_k_id():
+    """出口必须带非空且真实存在的 K 编号：悬空的 K 直接红，不许当白名单用。"""
+    ok = "## K20 — x\n<!-- claims-gate-exempt: K20 docs/a.md#0123456789ab -->\n"
+    assert _exempt_fps(ok) == {"0123456789ab"}
+    for bad in (
+        "## K20 — x\n<!-- claims-gate-exempt: K99 docs/a.md#0123456789ab -->\n",
+        "<!-- claims-gate-exempt: K20 docs/a.md#0123456789ab -->\n",
+    ):
+        try:
+            _exempt_fps(bad)
+        except AssertionError:
+            continue
+        raise AssertionError("悬空/无小节的 claims-gate-exempt 没有被拒绝")
 
 
 def test_waivers_are_not_stale():
