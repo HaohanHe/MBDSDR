@@ -1,7 +1,8 @@
 # 待落库：docs/code-guards.md 的两行守卫登记（2026-11-13）
 
 **为什么不直接改**：`docs/code-guards.md` 当前被 `合规入口线/6ae85f56` 持有
-（claim 2026-11-13 05:02:31 起，TTL 60min；pid 36100）。按本线约定，
+（claim 2026-11-13 05:02:31 起；05:58 复测时已续租为 TTL 120min，剩余 116.4min，
+即到 **07:02 左右**）。05:58 本线 `claim` 复测被拒（CLAIM DENIED）。按本线约定，
 被他人持有的文件不抢、不并发改；等持有人释放后由 owner 按下面的原文落库。
 
 **落库位置**：`docs/code-guards.md` 第 389–399 行的 C 档登记表。
@@ -17,7 +18,7 @@
 替换为：
 
 ```markdown
-| `scripts/check_red_lifecycle.py` | `tests/test_red_lifecycle.py` | 仓库现状（27.3s，**不进 pre-commit**；2026-11-13 深夜实测 rc=0：`FAIL 0 / WARN 0 / SKIP 0`） | **触发条件**：① 每个批次收口前至少 1 次；② 任何 K 条目新增/改绑定/改状态后立即；③ 发版前必跑。**谁跑**：红项 owner（当前 `守卫账本线`）；谁改 K 账谁负责跑。 | 2026-12 |
+| `scripts/check_red_lifecycle.py` | `tests/test_red_lifecycle.py` | 仓库现状（27.3s，**不进 pre-commit**；2026-11-13 05:54 实测 **rc=1：FAIL 9 / WARN 0 / SKIP 0**＝R8 待复核 3 条＋「已修缺 hash」6 条；红项清单交各 owner，不在扫描时顺带改别人的段落） | **触发条件**：① 每个批次收口前至少 1 次；② 任何 K 条目新增/改绑定/改状态后立即；③ 发版前必跑。**谁跑**：红项 owner（当前 `守卫账本线`）；谁改 K 账谁负责跑。 | 2026-12 |
 ```
 
 ## 2. 在 `check_red_lifecycle.py` 行之后新增一行
@@ -40,7 +41,8 @@
 ```markdown
 `check_destructive_ops.py` / `audit_evidence.py` / `lint_swallow_all.py` 当前仍是红的，
 已分别入 K22 / K23 / K06，属于待修项，不是死代码；`check_red_lifecycle.py`
-已于 2026-11-13 深夜转绿（rc=0），触发条件见上表。
+2026-11-13 05:54 实测 rc=1（FAIL 9：R8 待复核 3 条＋「已修缺 hash」6 条），
+触发条件见上表，红项交各 owner，尚未转绿。
 ```
 
 ## 附录：2026-11-13 非 0 守卫扫描表（落库时可留在本文件或迁到 code-guards.md）
@@ -51,14 +53,32 @@
 | `install_git_hooks.py --check` | rc=1（`.git/hooks/secret_scan.py` 与工作区不一致）→ 跑安装器后 rc=0 | 该修（本机跑一次安装） | 无需账 | 安装器已追平；`scripts/secret_scan.py` 仍被他线编辑，可能再次漂移 |
 | `lint_swallow_all.py` | rc=1（越基线） | 已入账 | **K06** | 存量静默吞噬棘轮，113+ 处未修 |
 | `check_destructive_ops.py` | rc=1（27 笔未审计） | 做 K 条目 | **K22**（复核 2026-12） | reflog 不能自证 no-op，需操作人逐笔补审计 |
-| `audit_evidence.py` | rc=1（2701 条无证据 / 131 条已标未验证） | 做 K 条目 | **K23**（复核 2026-12） | 历史文档数字断言缺证据，总数只降不升 |
-| `release_manifest.py` | rc=1（FAIL=5） | 做 K 条目 | **K24**（复核 2026-12） | 版本字面量 6 处 / tomli 未随包 / 4 个第三方二进制命中凭据形状 |
+| `audit_evidence.py` | rc=1（2703 条无证据 / 131 条已标未验证） | 做 K 条目 | **K23**（复核 2026-12） | 历史文档数字断言缺证据，总数只降不升 |
+| `release_manifest.py` | **`--only version` 05:59 rc=0（PASS 16 / FAIL 0）**；全量仍有 secrets 的 4 条带期限豁免 | 部分转绿 | **K24**（复核 2026-12） | 版本字面量 / tomli / 二进制凭据三类已分笔修；全量 secrets 仍靠 2026-12 豁免 |
 | `secret_scan.py`（全树） | rc=1（BLOCK=4） | 带期限豁免 | **豁免至 2026-12**（安全 owner） | 4 个 BLOCK 全在仓库外 `D:\mbdsdr\output\`，钩子/产物都碰不到，只能人工删或轮换 |
-| `check_dist_head_parity.py --dist` | rc=1（dist16 缺 34 个当前文件） | 带期限豁免 | **豁免至 2026-12**（发版人） | 现有 `.tmp/pyi-dist16` 是 `6b19aa89` 旧包，非当前 HEAD；出下一个包后重跑 |
+| `check_dist_head_parity.py --dist` | 05:58 用当前 HEAD `cc2f366d` 新建 `pyi-dist17`（156.1s，4447 文件）仍 **rc=1：HEAD 有而 dist 无 34 个 / dist 有而 HEAD 无 0 / 哈希不一致 0** | 不是过期，是 **spec/datas 打包缺口** | 待发版人补 spec（2026-12 前） | 34 个＝LICENSE、NOTICE.md、desktop/assets/*、mbdsdr_ai/{VERSION,README.md,astronomy.py}、mbdsdr_ai/data/*、locale、web/static、third_party_licenses/*；同 spec 重建不会消失 |
 | `make_decode_fixtures.py --check` | 04:47 rc=1 → 04:5x 连跑两次 rc=0 | 该修（他线同日修绿，未复现） | 无需账 | 两次复跑均 `PASS`，不下结论为可复现红 |
 | `release_check.py --steps guards` | rc=1（仅因 `install_git_hooks`） | 同 `install_git_hooks` | 不重复计 | 汇总器，所辖 13 条已逐条登记 |
 
-## 4. 落库时的协调规矩（2026-11-13 派单方明确）
+## 4. K23 收敛实测（2026-11-13 05:30–05:55，落库时引用）
+
+基线：HEAD `8862b803`，`audit_evidence --classify` = **2703 无证据**（①573 / ②1878 / ③145 / ④48 / ⑤59）。
+
+- **R1 文件级横幅**：12 笔提交、183 个文件（每批 ≤20，逐文件 claim；被占的
+  `docs/reference-mechanisms.md` 跳过并点名）。**实测 2703 → 1349（−1354）**。
+  与估算 −1291 的差额 +63 可完全分解：① 估算把横幅文件里的 241 条桶①记在 R0，
+  实际横幅同样把它们转成「已标未验证」（+241）；② 按文件性质排除 162 条不横幅
+  （hw-acceptance 79／nanovna README 56／evidence-standard 6／reference-mechanisms 21）（−162）；
+  ③ 两个 pending-patch 的横幅被并行进程回写覆盖 16 条（−16）。+241−162−16 = +63。
+- **块级标记**：18 个文件、26 处标记、3 笔提交（第 4 批 experiments 的 nanovna
+  README 有真实 data/ 工件，属桶③，不标）。**实测 1349 → 983（−366）**，
+  其中桶② −175、桶① −180、桶④ −11；桶①被表级标记顺带覆盖，已如实计入。
+- **终值 983**，桶分布：①181 / ②691 / ③70 / ④35 / ⑤6。
+  桶②残量前几名：`docs/dsp-performance-baseline.md` 123、
+  `docs/audit_r2/*` 与 `docs/measurements-*.md` 等零散段落（逐条补测清单见
+  `d:\mbdsdr\output\audit_final.json` 的 `rows[].bucket=="②"`）。
+
+## 5. 落库时的协调规矩（2026-11-13 派单方明确）
 
 `docs/code-guards.md` 是共享工作树，工作区里现在同时躺着**两段**待落库改动：
 
