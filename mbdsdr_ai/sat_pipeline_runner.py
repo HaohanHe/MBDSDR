@@ -101,11 +101,56 @@ def prepare_params(stage_params: Dict[str, Any],
 # 返回 {"output": Any, "stats": dict, "success": bool, "error": str?}
 STAGE_HANDLERS: Dict[str, Callable[[Any, Dict[str, Any]], Dict[str, Any]]] = {}
 
+# stage 数据契约（对照 SatDump ProcessingModule::getInputTypes/getOutputTypes）：
+# {module: {"inputs": (...), "outputs": (...)}}。只在注册时显式声明才登记；
+# 未声明的旧 handler 不参与校验，行为与以前逐字一致。
+STAGE_CONTRACTS: Dict[str, Dict[str, Tuple[str, ...]]] = {}
 
-def register_stage_handler(module: str,
-                          fn: Callable[[Any, Dict[str, Any]], Dict[str, Any]]) -> None:
-    """把一个处理函数注册到某个 stage.module 名下。"""
+
+def register_stage_handler(
+        module: str,
+        fn: Callable[[Any, Dict[str, Any]], Dict[str, Any]],
+        *,
+        inputs: Tuple[str, ...] = None,
+        outputs: Tuple[str, ...] = None) -> None:
+    """把一个处理函数注册到某个 stage.module 名下。
+
+    ``inputs`` / ``outputs`` 是该 stage 的数据类型声明（如 ``("iq",)`` ->
+    ``("cadu",)``）。声明后 ``run_pipeline`` 会在执行前校验相邻 stage 是否
+    接得上：前一 stage 的 outputs 与后一 stage 的 inputs 无交集即报错，不再
+    等到运行期才炸。两者都不传时保持旧行为（只绑定、不校验）。
+    """
     STAGE_HANDLERS[module] = fn
+    if inputs is None and outputs is None:
+        STAGE_CONTRACTS.pop(module, None)
+        return
+    STAGE_CONTRACTS[module] = {
+        "inputs": tuple(str(t) for t in (inputs or ())),
+        "outputs": tuple(str(t) for t in (outputs or ())),
+    }
+
+
+def _check_stage_contracts(stages: List[PipelineStage]) -> str:
+    """执行前校验相邻 stage 的类型声明；接不上返回错误串，否则返回 ""。
+
+    只有前后两个 stage 都声明了类型时才校验；任一未声明即跳过（增量兼容）。
+    """
+    prev_outputs: Tuple[str, ...] = ()
+    prev_label = ""
+    for stage in stages:
+        contract = STAGE_CONTRACTS.get(stage.module)
+        if contract is None:
+            prev_outputs, prev_label = (), ""
+            continue
+        label = f"{stage.level} ({stage.module})"
+        if prev_outputs and contract["inputs"]:
+            if not set(prev_outputs) & set(contract["inputs"]):
+                return (f"stage 类型不兼容：{prev_label} 输出 "
+                        f"{sorted(prev_outputs)}，{label} 需要 "
+                        f"{sorted(contract['inputs'])}")
+        prev_outputs = contract["outputs"]
+        prev_label = label
+    return ""
 
 
 def _handle_noaa_apt_decode(input_data: Any, params: Dict[str, Any]) -> Dict[str, Any]:
@@ -173,9 +218,12 @@ def _handle_gk2a_lrit_decode(input_data: Any, params: Dict[str, Any]) -> Dict[st
             "success": bool(res.success)}
 
 
-register_stage_handler("noaa_apt_decode", _handle_noaa_apt_decode)
-register_stage_handler("meteor_lrpt_demod", _handle_meteor_lrpt_demod)
-register_stage_handler("gk2a_lrit_decode", _handle_gk2a_lrit_decode)
+register_stage_handler("noaa_apt_decode", _handle_noaa_apt_decode,
+                       inputs=("audio",), outputs=("images",))
+register_stage_handler("meteor_lrpt_demod", _handle_meteor_lrpt_demod,
+                       inputs=("iq",), outputs=("cadu",))
+register_stage_handler("gk2a_lrit_decode", _handle_gk2a_lrit_decode,
+                       inputs=("iq",), outputs=("images",))
 
 
 def run_pipeline(pipeline_id: str,
@@ -195,6 +243,8 @@ def run_pipeline(pipeline_id: str,
     返回:
         {"success": bool, "output": Any, "stats": dict, "error": str}
         未挂接处理函数的 stage 不抛异常，直接返回 success=False。
+        相邻 stage 都声明了数据契约但接不上时，在执行前即返回失败
+        （error 以「stage 类型不兼容」开头），不跑任何 handler。
     """
     try:
         pipe: SatellitePipeline = get_pipeline(pipeline_id)
@@ -211,6 +261,11 @@ def run_pipeline(pipeline_id: str,
     todo: List[PipelineStage] = [s for s in pipe.stages
                                  if level_index(s.level) > start_idx]
     total = max(1, len(todo))
+
+    contract_err = _check_stage_contracts(todo)
+    if contract_err:
+        return {"success": False, "output": input_data, "stats": {},
+                "error": contract_err}
 
     eta = EtaEstimator()
     eta.start()
