@@ -14,9 +14,9 @@ Qt 的 Tab 遍历会跳过不可见控件 —— 所以**键盘用户在没有�
   * 它们确实仍挂在 ``_more_menu`` 下（结构前提，若哪天改回工具条本测试失效）；
   * 对照组：「更多」「显示」两个按钮在焦点链里，证明遍历本身没走空。
 
-**不测的那一半**（见文件末尾 skip 用例）：菜单弹出后这些开关到底能不能用
+**不测的那一半**（见文件末尾 ``test_menu_opens_and_is_visible`` 的 docstring）：菜单弹出后这些开关到底能不能用
 Tab / 方向键走到，offscreen 平台测不了（菜单弹层不是普通窗口，没有真实窗口
-激活与键盘 grab），真机上也**未实测**。写了 skip 而不是假装断言通过。
+激活与键盘 grab），真机上也**未实测**。不写断言，也不假装测过。
 """
 import os
 import sys
@@ -94,11 +94,12 @@ def test_toolbar_entry_buttons_are_reachable_for_contrast(panel):
         assert btn.isVisible() and btn.focusPolicy() & Qt.TabFocus
 
 
-@pytest.mark.skip(
-    reason="offscreen 下菜单弹层没有真实键盘 grab，测不了「菜单打开后能否 Tab 到"
-           "开关」；真机未实测。只用可见性/焦点链钉住能测的那一半，不许假装测过。")
-def test_menu_switches_reachable_by_tab_after_menu_opens(panel):
-    """待真机实测：菜单弹出后，Tab / 方向键能否在开关之间移动。"""
+def test_menu_opens_and_is_visible(panel):
+    """菜单弹出后可测的那一半：弹层真的可见。
+
+    Tab / 方向键能否在开关之间移动，offscreen 平台没有真实键盘 grab、真机上
+    也未实测，本用例不断言那一半，也不假装测过。
+    """
     panel._more_menu.popup(panel._more_btn.mapToGlobal(panel._more_btn.rect().bottomLeft()))
     app.processEvents()
     assert panel._more_menu.isVisible()
