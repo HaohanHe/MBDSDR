@@ -1,5 +1,6 @@
 # P2-submission-check.md — IEEE WCL 投稿自检清单（Phase33 块2+3 重建）
 
+> 证据状态：E4——本文件数字未逐条绑定原始件/复跑命令，引用前须复核（判据见 docs/evidence-standard.md）。
 - 重建日期：2026-10-05（Asia/Shanghai）
 - 对象：`docs/learn/phase7/paper/main.tex`（IEEEtran journal letter）
 - 说明：本文件在 paper/ 目录下**原缺失/未找到**，按任务要求据真实编译结果重建。

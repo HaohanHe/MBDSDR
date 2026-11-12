@@ -1,5 +1,6 @@
 # 参考对标研究 02 — SDR++ 与 gqrx 的 UI 观感对标（Spectrum / Waterfall / 工具栏 / 调谐 / 模块面板）
 
+> 证据状态：E4——本文件数字未逐条绑定原始件/复跑命令，引用前须复核（判据见 docs/evidence-standard.md）。
 > 研究报告（只读，未修改 `/workspace/MBDSDR` 任何代码）
 > 研究对象：`/workspace/reference/SDRPlusPlus`（SDR++ v0.x，C++/Dear ImGui/OpenGL）、`/workspace/reference/gqrx`（Qt6，与 MBDSDR 同工具链）
 > 参照物：`/workspace/MBDSDR`（C++17/Qt6，三栏 QSplitter + 自绘 SpectrumDisplay）

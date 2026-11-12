@@ -1,5 +1,6 @@
 # 参考对标研究 03 — SatDump 卫星流水线 / 调度器 / Autotrack / L1b 定标
 
+> 证据状态：E4——本文件数字未逐条绑定原始件/复跑命令，引用前须复核（判据见 docs/evidence-standard.md）。
 > 研究报告（只读，未修改 `/workspace/MBDSDR` 任何代码）
 > 研究对象：`/workspace/reference/satdump/SatDump-master`（SatDump，C++17/Qt6，GPL-3.0）
 > 参照物：`/workspace/MBDSDR`（C++17/Qt6 无线电接收机）

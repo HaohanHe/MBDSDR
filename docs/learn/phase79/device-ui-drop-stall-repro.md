@@ -1,5 +1,6 @@
 # device_ui drop 停摆复现固证（phase79，2026-10-24）
 
+> 证据状态：E4——本文件数字未逐条绑定原始件/复跑命令，引用前须复核（判据见 docs/evidence-standard.md）。
 ## 触发经过
 
 - 动作：`make test_device_ui` 重建（phase79 慢路径告警版）后，**隔离单跑第一轮**

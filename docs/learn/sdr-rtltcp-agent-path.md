@@ -1,5 +1,6 @@
 # rtl_tcp 网络源的 agent 通路（MBDSDR_RTL_TCP）
 
+> 证据状态：E4——本文件数字未逐条绑定原始件/复跑命令，引用前须复核（判据见 docs/evidence-standard.md）。
 > 2026-10-13 真机在环（RTL2832U + FC0012，官方 Osmocom rtl-sdr 20261011 Windows
 > 构建，本机 Zadig/WinUSB 已绑）。目标：让外部 agent（MCP 客户端）能像枚举 USB
 > 棒一样枚举并驱动 rtl_tcp 网络源——补上"RTLSDRBackend(host=...) 存在于 backend

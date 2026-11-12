@@ -1,5 +1,6 @@
 # P1 依赖完备性核对表（真机）
 
+> 证据状态：E4——本文件数字未逐条绑定原始件/复跑命令，引用前须复核（判据见 docs/evidence-standard.md）。
 > 范围：`tools/hw_selfcheck/selfcheck.py`、`tools/onboarding/onboard.py`、
 > `experiments/exp_ota_run.py` 三者在**真机（Linux + RTL-SDR）**上跑通一条完整链路
 > 所需的全部依赖。逐项给出：缺失症状 → 影响哪一步 → 修复命令。

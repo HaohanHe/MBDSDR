@@ -1,5 +1,6 @@
 # MBDSDR Paper — Phase 7 Draft
 
+> 证据状态：E4——本文件数字未逐条绑定原始件/复跑命令，引用前须复核（判据见 docs/evidence-standard.md）。
 > 受控论文初稿目录。本目录被 `.gitignore` 显式例外纳入版本控制；
 > 仓库根 `paper/`（含早期草稿与实验产物）**仍整体忽略**，不在此目录。
 

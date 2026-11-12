@@ -4,6 +4,7 @@ venue: "IEEE Wireless Communications Letters (WCL) — submission draft"
 status: DRAFT v0.5 (2026-10-02, refs.bib verified + honest author/ack/funding PENDING; see CHANGES.md)
 authors: "Bi4MIB (open-source, call for co-authors)"
 # --- Honest placeholders (red line: no fabricated identity/affiliation) ---
+> 证据状态：E4——本文件数字未逐条绑定原始件/复跑命令，引用前须复核（判据见 docs/evidence-standard.md）。
 author_names:      "PENDING — real individual author name(s) to be added by the human author"
 affiliation:       "PENDING — institutional affiliation unknown in this environment"
 corresponding_email: "PENDING — no e-mail address to be invented"

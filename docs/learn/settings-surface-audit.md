@@ -1,5 +1,6 @@
 # 设置面前后端对拍审计（settings surface audit）
 
+> 证据状态：E4——本文件数字未逐条绑定原始件/复跑命令，引用前须复核（判据见 docs/evidence-standard.md）。
 日期：2026-10-30 · 范围：desktop/（Python/PySide6 原型桌面端）+ cpp/src/（C++/Qt6 主力端）
 方法：控件创建 / signal.connect / 槽定义脚本化扫描 + 逐条肉眼复核；`set_*` 工具面与 UI 控件双向对拍。
 纪律：不编造缺陷；核实不成立的项**如实记入"不成立"**，不留假缺口；C++ 侧无工具链，只审计不改。

@@ -1,5 +1,6 @@
 # P1 真机首次运行手册：插上 SDR，一条命令出成果
 
+> 证据状态：E4——本文件数字未逐条绑定原始件/复跑命令，引用前须复核（判据见 docs/evidence-standard.md）。
 > 目标读者：第一次在真机（Linux 桌面/笔记本）上跑通 MBDSDR 的人。
 > 全程只敲文中给出的命令；每一步都告诉你"看到什么算成功"。
 > 配套依赖细节见同目录 [P1-dependency-checklist.md](./P1-dependency-checklist.md)。
