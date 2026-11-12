@@ -5,14 +5,16 @@
 
 ## 一、21 块：不再整体拆（结论）
 
-当前全图（模块级 + 函数体内 import）SCC：**21 模块**与 **5 模块**。
+当前全图（模块级 + 函数体内 import）SCC：**20 模块**与 **5 模块**
+（调用点迁移前为 21；`openapi_integration` 的离线门改指 `net_policy` 后
+不再依赖 `orbit`，已退出该块）。
 
-- 21 块 = SDR 后端（`sdr_backend`/`spyserver_client`/`rtltcp_client`/
+- 20 块 = SDR 后端（`sdr_backend`/`spyserver_client`/`rtltcp_client`/
   `bladerf_params`/`limesuite_params`/`device_identity`/`error_handler`/
   `sdr_tools`）+ 解码（`decoders`/`decode_router`）+ 轨道/时间
   （`orbit`/`new_spacetime`/`new_spacetime_tle`/`tle_integrity`/
   `sat_passes`/`sat_tracker`/`sat_illumination`/`doppler_link`）+
-  `time_basis`/`openapi_integration`/`builtin_tle_meta`。
+  `time_basis`/`builtin_tle_meta`。
 - 5 块 = `tool_registry` / `fengyun_sat` / `orbit_determination` /
   `orbit_dynamics` / `orbit_perturbation`。
 
@@ -27,8 +29,12 @@
 | 2 | `orbit + sdr_backend` | `[3,2,2]` | 37 |
 | 3 | `decode_router + orbit + sdr_backend` | `[2,2,2]` | 43 |
 
+2026-11-13 04:0x 复测（调用点迁移后，块内 20 模块）：割 1 `orbit` 站点
+15→**11**、`new_spacetime` 27→**24**；割 2 `orbit+sdr_backend` 37→**33**；
+割 3 `decode_router+orbit+sdr_backend` 43→**39**；其余不变。
+
 **没有第二个 `tool_registry` 级门面。** 门面判据是「入边极多 + 几乎只取几个
-叶子符号 + 可原位再导出」；21 块里入边最多的 `sdr_backend` 只有 8 个来源 /
+叶子符号 + 可原位再导出」；块内入边最多的 `sdr_backend` 只有 8 个来源 /
 14 站点，且一半取真业务类（`FileIQBackend`/`SDRBackend`/
 `SDRBackendManager`）；`new_spacetime` 的 19 个站点全是同一个
 `get_time_engine` 访问器，拆不出叶子。**结论：21 块不值得整体再拆。**
