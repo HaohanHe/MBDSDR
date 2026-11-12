@@ -107,6 +107,19 @@
 5. 排除：目标模块 == 当前模块；`__init__.py` 再导出**同包**子模块的私有名
    （包内私有是正常封装）。
 6. 输出：`D1-private-import`，detail 写 `src -> target :: _name`。
+7. **第二形态（import 语句扫不到）**：测试夹具直接改别的模块的私有名。
+   `setattr(M, "_x", ...)` / `monkeypatch.setattr(M, "_x", ...)` /
+   `patch.object(M, "_x", ...)` / `mock.patch.object(M, "_x", ...)`，判据：
+   - 首参是 `ast.Name`，且该名字在本文件中由 `import`/`from ... import`
+     绑定为**模块**（用「`pkg/name.py` 或 `pkg/name/__init__.py` 是否存在」
+     解析，不靠命名猜测）；
+   - 第二参是字符串字面量，`startswith("_") and not startswith("__")`。
+   - **不算**：首参是 `self` / 局部变量 / 类对象（`patch.object(SomeClass,
+     "_method")` 属类封装内部，按 §3.1 同口径放行）。
+   - 输出 rule id 复用 `D1-private-import`，detail 标 `setattr:M._x`。
+   - 为什么必须加：`.monkeypatch.setattr(orbit, "_network_disabled", ...)` 在
+     别名删除后会 AttributeError，而只用 import 判据的守卫看不见它——守卫
+     看不见的地方正是最容易出事的地方。
 
 ### 3.3 棘轮与反证
 
@@ -120,6 +133,12 @@
   ```
 - **结构反证**：在任一模块里临时加一行 `from .orbit import _bounded_urlopen`
   → 必须红；删掉 → 必须绿。只删注释不能变绿，否则规则退化。
+- **第二形态反证（现成样本）**：`tests/test_tle_failure_visibility.py:143`
+  的 `monkeypatch.setattr(orbit, "_network_disabled", lambda: False)` 必须
+  报 1 条。**现在不改这一行**——它是反证样本，改掉就失去证据；等别名真删
+  的那一笔一起改成 `monkeypatch.setattr(net_policy, "network_disabled", ...)`
+  （改成公共名后必须绿）。负例：`monkeypatch.setattr(obj, "_x", ...)`
+  （`obj` 是局部变量）不报。
 
 ### 3.4 现存量（2026-11-13 03:5x，口径：`mbdsdr_ai/` 全部 `.py`）
 
@@ -137,11 +156,27 @@
   「公共原语最密集」的地方，与 §一 的割点分析互相印证。
 - 落地时**必须重新扫一遍**再收基线；本清单只用于判断规模与优先级。
 
+### 3.5 第二形态现存量（2026-11-13 03:4x）
+
+- **148 处 / 71 个文件**（口径：AST 调用点，逐条计；扫描范围全仓 `.py`，
+  排除 `.git/.venv/__pycache__/build/dist/node_modules`）。
+- 集中区：`orbit._CACHE_DIR` / `orbit._TLE_CACHE` / `orbit._TLE_FETCHER`
+  （测试隔离缓存）、各模块 `_backup_corrupt*`（损坏恢复用例）、
+  `_SD_AVAILABLE` / `_HAS_QT`（可选依赖桩）、`_bounded_requests_get`。
+- 这条判据会把这些**全部**报出来——它们多数是「测试为了隔离去拨模块级
+  全局」，不是越界借 API。棘轮按 148 收基线，之后只减不增；真正的病灶
+  （如 `_network_disabled`）由「原语下沉 + 改调用点」自然消失，不靠改
+  import 名字绕过。
+- 已知覆盖缺口（诚实标注）：`monkeypatch.setattr("pkg.mod._x", ...)` 字符串
+  形态、`del module._x`、`getattr(module, "_x")` 均未纳入；落地时若发现新的
+  绕过手法，先补判据再加例外。
+
 ## 四、落地步骤（照抄）
 
 1. `tools/axioms/survey.py`：加 `collect_d1_private()`，rule id
-   `D1-private-import`，按 §3.2。
-2. `tools/axioms/selftest.py`：加 §3.3 的正例/负例/结构反证三个 Case。
+   `D1-private-import`，按 §3.2（**含 §3.2.7 的 setattr 第二形态**）。
+2. `tools/axioms/selftest.py`：加 §3.3 的正例/负例/结构反证三个 Case，
+   外加第二形态反证 Case（`test_tle_failure_visibility.py:143` 必须命中）。
 3. `docs/axioms.md`：D1 行追加检查名，贴 §3.1 规则正文。
 4. `python scripts/axioms.py --rule D1` → 确认当前存量全报 → `--accept-current`
    （落地时重扫，基线以当时实测为准，不要照抄本文件的 129）。
