@@ -93,16 +93,19 @@ except ImportError:
     _WEB_OK = False
 
 try:  # pragma: no cover
-    from settings import DesktopSettings, backup_corrupt_config, resolve_record_dir
+    from settings import (
+        DesktopSettings, backup_corrupt_config, resolve_record_dir, write_reason)
 except ImportError:  # 包内导入
     try:
         from .settings import (
-            DesktopSettings, backup_corrupt_config, resolve_record_dir)
+            DesktopSettings, backup_corrupt_config, resolve_record_dir,
+            write_reason)
     except ImportError:
         _log.warning("settings 模块不可用：设置面板无法持久化，改动只存内存")
         DesktopSettings = None  # type: ignore
         backup_corrupt_config = None  # type: ignore
         resolve_record_dir = None  # type: ignore
+        write_reason = None  # type: ignore
 
 #: 端口默认值同样取自 schema（UI 不另写一份默认值）
 DEFAULT_RC_PORT = int(SCHEMA["rc_port"].default)
@@ -593,25 +596,105 @@ GUI_CONFIG_PATH = os.path.expanduser("~/.mbdsdr/gui_config.json")
 
 
 def _load_json_dict(path: str, on_error=None) -> Dict[str, Any]:
-    """读 JSON 对象；缺失/损坏返回 {}。损坏时先备份证据（复用既有机制）。
+    """读 JSON 对象；缺失返回 {}。损坏分三档显式处理，绝不静默吞。
 
-    只捕获文件/解析边界（OSError/ValueError）；损坏会被改名备份并通过
-    ``on_error`` 上报，绝不静默把用户配置当成"从来没写过"。
+    三档判定与处理（严重度从高到低）：
+
+    1. **解析失败**（JSON 语法错 / 非 UTF-8）：文件已不可用，改名备份为
+       ``*.corrupt-时间戳`` 留证，WARNING 日志 + ``on_error`` 上报，内存按
+       空配置继续——用户能从状态行看出「配置坏了、原文件在哪」。
+    2. **顶层不是对象**（数组 / 字符串 / 数字）：文件是合法 JSON 但结构
+       不符；同样备份留证 + 日志 + 上报，内存按空配置继续。不能静默当成
+       「配置为空」，否则下一次保存就把用户文件换成只含一个键的对象。
+    3. **关键键类型不对**：由 :func:`_load_ai_config` 处理——**不备份、不删
+       原文件**（其余键仍有效），只把类型不符的键从内存视图剔除按默认值
+       显示；写回时其余键原样保留（见 ``_merge_ai_config``）。
     """
     try:
         if not os.path.exists(path):
             return {}
         with open(path, "r", encoding="utf-8") as f:
             data = json.load(f)
-        return data if isinstance(data, dict) else {}
     except (OSError, ValueError) as exc:
-        backup = None
-        if backup_corrupt_config is not None:
-            backup = backup_corrupt_config(path)
-        if on_error is not None:
-            on_error(f"配置读取失败（{path}）：{exc}；"
-                     f"已备份为 {backup or '（备份失败）'}，相关参数按默认值显示")
+        _report_bad_config(path, "解析失败", str(exc), on_error=on_error)
         return {}
+    if not isinstance(data, dict):
+        _report_bad_config(
+            path, "顶层不是对象", f"实际类型 {type(data).__name__}",
+            on_error=on_error)
+        return {}
+    return data
+
+
+def _report_bad_config(path: str, reason: str, detail: str, on_error=None) -> None:
+    """坏配置留证 + 日志 + 用户可见提示（1/2 档共用）。
+
+    备份成功后必须同时写 ``.reason.txt``：诊断页只认成对的理由文件，
+    只备份不写理由等于「当时能看到、事后查不到」（见
+    docs/2026-11-12-diagnostics-page-requirements.md §一）。
+    """
+    backup = None
+    if backup_corrupt_config is not None:
+        backup = backup_corrupt_config(path)
+    if backup is not None and write_reason is not None:
+        write_reason(
+            backup, f"AI 配置不可用（{reason}）：{detail}；已按默认值启动",
+            logger)
+    logger.warning("配置不可用（%s）：%s（%s）；备份=%s",
+                   path, reason, detail, backup or "（备份失败）")
+    if on_error is not None:
+        on_error(f"配置读取失败（{path}）：{reason}（{detail}）；"
+                 f"已备份为 {backup or '（备份失败）'}，相关参数按默认值显示")
+
+
+def _ai_value_type_ok(item, value: Any) -> bool:
+    """AI 配置键的磁盘值类型是否与 schema 一致（bool 不算数字）。"""
+    if isinstance(value, bool):
+        return item.kind == "bool"
+    if item.kind == "int":
+        return isinstance(value, int)
+    if item.kind == "float":
+        return isinstance(value, (int, float))
+    return isinstance(value, str)
+
+
+def _load_ai_config(on_error=None) -> Dict[str, Any]:
+    """读 ``~/.mbdsdr/config.json``：1/2 档交给 _load_json_dict，3 档在此处理。
+
+    类型不对的键只从**内存视图**剔除（界面按默认值显示），不碰磁盘原值；
+    用户之后保存任一项时，其余键（含本程序不认识的键）由合并写回原样保留。
+    """
+    data = _load_json_dict(AI_CONFIG_PATH, on_error)
+    bad: List[str] = []
+    for item in ALL_ITEMS:
+        if item.storage != "ai_config":
+            continue
+        disk_key = item.key[3:] if item.key.startswith("ai_") else item.key
+        if disk_key in data and not _ai_value_type_ok(item, data[disk_key]):
+            bad.append(f"{disk_key}（应为{'数字' if item.kind in ('int', 'float') else '文本'}）")
+            data.pop(disk_key, None)
+    if bad:
+        names = "、".join(bad)
+        logger.warning("AI 配置键类型不符（%s）：%s；按默认值显示，原文件未改动",
+                       AI_CONFIG_PATH, names)
+        if on_error is not None:
+            on_error(f"AI 配置有 {len(bad)} 个键类型不对：{names}；"
+                     "已按默认值显示，原文件未改动")
+    return data
+
+
+def _merge_ai_config(disk: Dict[str, Any], values: Dict[str, Any],
+                     deletes=()) -> None:
+    """写回合并（原地改 ``disk``，mutator 交给 ConfigStore 锁内执行）。
+
+    * 本程序认识的键：按内存值更新；
+    * 本程序不认识的键（用户/新版本写的）：原样保留；
+    * 删除语义显式：只删 ``deletes`` 点名的键，绝不从「没出现在 values 里」
+      推断该删——那会把别处刚写的键静默清掉。
+    """
+    disk.update(values)
+    for key in deletes:
+        disk.pop(key, None)
 
 
 def _atomic_write_json(path: str, data: Dict[str, Any], mode: Optional[int] = None):
@@ -671,7 +754,7 @@ class SettingsPanel(QWidget):
         #: 「重启后生效 / 需要重连」提示标签。字色随主题走（status_warning），
         #: 切主题后必须重刷，否则深色档位留在浅底上反而更看不清。
         self._note_labels: List[QLabel] = []
-        self._ai = _load_json_dict(AI_CONFIG_PATH)
+        self._ai = _load_ai_config(self._notify)
         #: 字号降档提示。主题的变更广播可能在设置页首次显示前就回调刷新它，
         #: 所以这个标签随面板一起建（一个空 QLabel，很便宜），不随外观块延迟。
         self._font_scale_note = QLabel("")
@@ -866,21 +949,22 @@ class SettingsPanel(QWidget):
             return item.default
         return self._ai.get(self._ai_file_key(item), item.default)
 
-    def _write_ai_values(self, values: Dict[str, Any]) -> str:
-        """把 AI 参数写进 config.json（唯一写入口 ConfigStore）；空串=成功。
+    def _write_ai_values(self, values: Dict[str, Any], deletes=()) -> str:
+        """把 AI 参数合并写进 config.json（唯一写入口 ConfigStore）；空串=成功。
 
         只提交**本面板拥有的采样参数键**。``api_key`` / ``base_url`` / ``model``
-        归 AI 面板所有，整份快照回写会把它们顶掉（历史事故：api_key 被旧快照
-        回滚成空）。合并基线由 ConfigStore 在锁内从磁盘重读。
+        归 AI 面板所有。合并基线由 ConfigStore 在锁内从磁盘重读：本程序不认识
+        的键原样保留，认识但不在此次 values 里的键也不动——删除只认显式
+        ``deletes``，绝不从「没出现在内存里」推断。
         """
-        if not values:
+        if not values and not deletes:
             return ""
         self._ai.update(values)          # 内存缓存只作显示，不作为写盘基线
         if ConfigStore is None:
             return "AI 配置内核不可用（本次修改仅存在内存中）"
 
         def _submit(disk: Dict[str, Any]) -> None:
-            disk.update(values)
+            _merge_ai_config(disk, values, deletes)
 
         try:
             if ConfigStore(AI_CONFIG_PATH).update(_submit):
@@ -1472,7 +1556,7 @@ class SettingsPanel(QWidget):
     # ------------------------------------------------------------ 刷新
     def _refresh_from_storage(self):
         self._ensure_ui_built()      # 外部可在首次显示前调（测试/复现脚本）
-        self._ai = _load_json_dict(AI_CONFIG_PATH)
+        self._ai = _load_ai_config(self._notify)
         self._building = True
         try:
             for key, w in self._rows.items():

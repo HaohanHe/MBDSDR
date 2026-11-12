@@ -4041,3 +4041,38 @@ pending-patches README），**只缺主体源文件**；主体改动已在子提
 子孙；当前多线并行提交，rebase 掉的会是别人的提交。保留错 message 并在此
 留一行更正，代价最小。后续私有 index 提交一律用显式 Python `subprocess`
 传 `GIT_INDEX_FILE`，并核对 `git log -1` 的 subject。
+
+---
+
+## 处理记录（2026-11-13 01:15）：`desktop/settings_panel.py` 孤儿改动收口（设置三环线）
+
+**现象**：`desktop/settings_panel.py` 有未提交改动，claim 已过期 222 分钟、
+pid 3484 已退出，属 K16 同形的「孤儿改动」。配套测试
+`tests/test_settings_panel_corrupt_config.py` 也是未跟踪文件。
+
+**判定：完整可提交（补齐两处缺口后），走路径 1。**
+
+1. **基线对比证明「改动本身 0 新增红」**：
+   - HEAD worktree（`d:\mbdsdr\_wt\w15-head`，不含该改动）跑 15 个设置相关
+     文件：`7 failed / 362 passed`；
+   - 主工作区（含该改动 + 新配套文件）跑同一批：`7 failed / 369 passed`；
+   - 失败节点集合与 HEAD 基线一致，全部是 HEAD 既有红，与本改动无关。
+2. **补齐的缺口一（产品）**：`_report_bad_config` 备份后未写 `.reason.txt`，
+   诊断页只认成对理由 → AI 配置损坏事后永远查不到（
+   `docs/2026-11-12-diagnostics-page-requirements.md` §一 点名「只差这一行」）。
+   已补 `write_reason`，理由含「解析失败 / 顶层不是对象」与异常原文。
+3. **补齐的缺口二（测试）**：变异反证原是空跑——`_check_unknown_keys_kept`
+   连续两次 `setValue(0.42)`，值不变不发 `valueChanged`，写回根本不发生，
+   把合并改成整体覆盖也照样绿。已改为每次投不同值并用 `disk.get()` 断言；
+   现在「改回整体覆盖」必抛 `AssertionError`。
+4. **验证**：`tests/test_settings_panel_corrupt_config.py` 7 passed；
+   16 文件批次 `7 failed / 369 passed`，7 条红与 HEAD 基线逐一对应。
+   claim 已随本笔释放。
+
+**遗留（HEAD 既有红，不属本笔，需各自 owner 立 K 单）**：
+- `test_settings_panel_observability` ×3：测试仍在 patch `_atomic_write_json`，
+  而 AI 配置写盘早已迁到 `ConfigStore`，patch 不生效；
+- `test_settings_schema::test_write_failure_calls_on_error`：`DesktopSettings`
+  读改写后失败文案变为「配置读取失败」，测试仍断言「保存失败」；
+- `test_settings_semantics` ×3：带宽 tooltip 未区分 VFO、device_panel
+  两条采样率能力校验（该文件归参数治理线）。
