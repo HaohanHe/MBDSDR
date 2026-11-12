@@ -805,7 +805,15 @@ QT_QPA_PLATFORM=offscreen python -m pytest "<nodeid>" -q
 
 ## K19 — 源码文本 pin 棘轮（2026-11-13 收口，已转绿 `d3b91c19`）
 
-- **再检绑定**：验证提交 `d3b91c19`；文件集合 `tests/test_usb_hotplug.py`、`tests/test_file_source_robust.py`、`tests/test_safe_commit_exclude.py`、`tests/test_source_pin_ratchet.py`
+- **再检绑定**：验证提交 `d0881d80`；文件集合 `tests/test_usb_hotplug.py`、`tests/test_file_source_robust.py`、`tests/test_safe_commit_exclude.py`、`tests/test_source_pin_ratchet.py`
+- **再检（2026-11-13 07:05，R8 清账）**：`tests/test_safe_commit_exclude.py` 在验证提交
+  `d3b91c19` 之后又被三笔改动——`c18976f4`（`--files` 重复传参合并）、`d6bd34d0`
+  （计时探针行误带入）、`d0881d80`（把探针行移除），R8 退回待复核。本次在 `d0881d80`
+  工作树按下方复跑命令重跑四个文件：
+  `python -m pytest tests/test_source_pin_ratchet.py tests/test_file_source_robust.py
+  tests/test_usb_hotplug.py tests/test_safe_commit_exclude.py -q -rf`
+  → **49 passed in 20.83s**（比上次 48 passed 多 1 条：本轮新增的
+  `test_repeated_files_flag_commits_every_declared_file`，不属于源码文本 pin）。
 - **收口（2026-11-13，验证提交 `d3b91c19`）**：4 条回加的 pin 逐条判定后全部改写，
   不再靠再删一遍（`cc2f8109` 已证明删了会被加回来）：
   - `test_usb_hotplug.py::test_module_has_no_reconnection_dependency` 的
