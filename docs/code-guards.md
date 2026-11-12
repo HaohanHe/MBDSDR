@@ -87,14 +87,60 @@
 
 - **命中提交 0 个、命中路径 0 个**——可达历史干净；
 - 另有 **1 个不可达 blob**（`c20bd082d638…`，69 字节）命中 `github-pat-classic`，
-  但 token 体 36 位字符全同（合成值），且没有任何提交/路径引用它；
-- 处置待定，见 `docs/pending-patches/2026-11-13-git-history-secret-dangling-blob.md`
-  （路 A 保留 / 路 B `git gc --prune=now`；**不改写历史**）。
+  但 token 体 36 位字符全同（合成值），且没有任何提交/路径引用它；2026-11-13 裁定
+  **保留、不清理**，按下面的「已知良性登记」处理（**不改写历史**）。
 
 这个「干净」的边界（不许当成无漏洞宣传）：二进制 blob 679 个没做文本扫描；
 不可达对象（`git fsck --unreachable`：103 commit / 303 tree / 112 blob）里除上面
 那 1 个 blob 外也扫了，但归属只能给出「未知」；`D:\mbdsdr` 根目录**不是** git 仓库，
 所以 `output/`、`.tmp` 下工作树里命中的 4 处 BLOCK 没有历史可查（它们从未入库）。
+
+### 已知良性登记（1 个 blob；2026-11-13 裁定 A：保留，不清理）
+
+| 项 | 值 |
+| --- | --- |
+| 对象 | `c20bd082d6382e0d498f029151e10e305a39ef12`（不可达 blob） |
+| 打码指纹 | `ghp_` + 36 个**同一字符**（`distinct=1`）；69 字节 / 2 行；内容 sha256 `c9e65a6ebb1860f75f6aab662f941ed5d0c1fc695ecc3f450373e9e462a4e459` |
+| 判据 | ① 不可达（没有任何提交引用它）；② 36 位 token 体字符全同 → 占位值；③ 命中规则与登记一致 |
+| 落点 | `scripts/secret_scan.py::KNOWN_BENIGN_HISTORY`（只放 sha→规则名，不放正文） |
+| 解除条件 | 同一规则命中**可达** blob、或命中**另一个 sha**、或该 blob 落入任何路径 → 照旧报 `HISTORY`（`_split_known_benign` 的三个条件缺一即不生效） |
+| 裁定记录 | `docs/pending-patches/2026-11-13-git-history-secret-dangling-blob.md`（只记裁定与代价，事实以本节为准） |
+
+不清理的理由：`git gc --prune=now` 会连 103 个 unreachable commit 一起不可逆删掉，
+代价大于收益。若以后判成真值，正确动作是**轮换**——该值从未进入任何可达提交，
+不需要改写历史。
+
+### 发布产物门禁（2026-11-13）
+
+发布产物不得包含任何 BLOCK 命中的文件。两个打包入口共用同一判据（
+`scripts/secret_scan.py` 的 7 条形状规则，不另抄一份正则）：
+
+| 入口 | 位置 | 时机 |
+| --- | --- | --- |
+| Python onedir | `scripts/release_manifest.py` 第 5 项 `secrets`（`--only` 默认含） | 发版前跑清单机检时 |
+| C++ 便携包 | `scripts/package_windows.ps1` → `python scripts/secret_scan.py --artifact $stage` | 压 zip 之前，红就 `throw`，不出包 |
+
+产物扫描按**字节**跑（exe/dll/pyc 里内嵌的字符串同样算），不跑熵、不认 pragma；
+命中即 FAIL 并点名相对路径，输出不含值。反证：`tests/test_release_secrets.py`
+往临时「待打包目录」塞含假 PAT 的文本文件与二进制壳，检查必须红并点名文件，
+删掉即绿。
+
+### `D:\mbdsdr\output\` 那 4 个未入库文件会不会进发布物
+
+结论：**不会**。依据是三条互相独立的包含面，不是「应该不会」：
+
+| 层 | 规则 | 为什么排除 |
+| --- | --- | --- |
+| git | 仓库根是 `D:\mbdsdr\MBDSDR`，`D:\mbdsdr\output\` 在根之外；无 `.gitmodules`（没有子模块指过去） | git 不跟踪根目录之外的文件，任何提交 / `git archive` 都不含它 |
+| PyInstaller | `desktop/MBDSDR.spec`：入口 `desktop/main.py`；`datas` 是显式清单（`assets/`、`LICENSE`、`NOTICE.md`、`third_party_licenses/`、`mbdsdr_ai/astronomy.py`、`collect_data_files('mbdsdr_ai')`），`binaries=[]` | 显式清单里没有 `output/`，也没有对仓库根做通配；产物落在 `.tmp\pyi-distN` |
+| C++ 便携包 | `scripts/package_windows.ps1`：`$stage` 只来自 `cmake --install $BuildDir`（默认 `cpp/build-local`）+ Qt DLL，`$zip` 只压 `$stage` | stage 的输入是构建树，不扫 `D:\mbdsdr` |
+
+上传/分发面：全仓（`*.py/*.ps1/*.bat/*.md/*.spec/*.yml`）搜 `MBDSDR/output`、
+`../output`、`..\output` **0 处命中**——没有任何脚本把该目录当输入。
+
+但这 4 个文件仍是工作树 BLOCK（`output\api_push.py:18`、`ci_watch.sh:4`、
+`ci_watch71.sh:4`、`ci_watch72.sh:3`，同一枚 PAT）：它们不在仓库里，所以既进不了
+产物、也不受 pre-commit 管，只能人工处理（删文件或把 token 移出），不在本批次范围。
 
 ## 分布
 
