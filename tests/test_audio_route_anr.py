@@ -40,7 +40,7 @@ class _FakeStream:
 
 def test_preferred_device_forwarded(monkeypatch):
     monkeypatch.setattr(ao, "sd", types.SimpleNamespace(OutputStream=_FakeStream))
-    monkeypatch.setattr(ao, "_SD_AVAILABLE", True)
+    monkeypatch.setattr(ao, "sd_available", lambda: True)
     p = ao.AudioPlayer(sample_rate=48000)
     p.preferred_device = 3
     assert p.start() is True
@@ -51,7 +51,7 @@ def test_preferred_device_forwarded(monkeypatch):
 def test_default_device_not_forced(monkeypatch):
     _FakeStream.kwargs_seen.clear()
     monkeypatch.setattr(ao, "sd", types.SimpleNamespace(OutputStream=_FakeStream))
-    monkeypatch.setattr(ao, "_SD_AVAILABLE", True)
+    monkeypatch.setattr(ao, "sd_available", lambda: True)
     p = ao.AudioPlayer(sample_rate=48000)
     assert p.start() is True
     assert "device" not in _FakeStream.kwargs_seen[-1]
