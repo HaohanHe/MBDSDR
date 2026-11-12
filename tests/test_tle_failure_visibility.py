@@ -172,6 +172,11 @@ def test_status_bar_renders_failure_code(monkeypatch, tmp_path, case):
             self.date = date_str
             self.age_days = age_days
 
+        def invalidate_passes(self):
+            # 真实面板有这个方法（sat_track_panel.py）：TLE 变了，旧过境列表
+            # 必须作废。替身只补状态，不替生产逻辑兜底。
+            self.invalidated = getattr(self, "invalidated", 0) + 1
+
     class _Holder:
         pass
 
@@ -204,6 +209,8 @@ def test_status_bar_renders_failure_code(monkeypatch, tmp_path, case):
     assert not worker.is_alive()
     assert len(sent) == 1, "后台线程没有把结果发回 UI"
     MainWindow._on_tle_update_result(holder, sent[0])
+    assert holder.sat_track_panel.invalidated == 1, (
+        "TLE 已变但过境缓存没作废（倒计时会继续按旧星历走）")
     text = holder._status.msg
     _assert_failure_copy(text, case)
 
