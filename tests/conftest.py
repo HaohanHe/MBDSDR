@@ -1079,6 +1079,10 @@ def _recycle_top_level_widgets():
     app.processEvents()
 
 
+#: pytest 自己在每个 phase 增删的变量，不属于测试泄漏，兜底不碰。
+_PYTEST_MANAGED_ENV = frozenset({"PYTEST_CURRENT_TEST"})
+
+
 @pytest.fixture(autouse=True, scope="module")
 def _restore_os_environ_at_module_boundary(request):
     """模块结束时把 ``os.environ`` 还回本模块建立时的样子（跨文件不串味）。
@@ -1096,9 +1100,11 @@ def _restore_os_environ_at_module_boundary(request):
     if os.environ.get("MBDSDR_ENV_GUARD", "1") == "0":
         yield
         return
-    before = dict(os.environ)
+    before = {k: v for k, v in os.environ.items()
+              if k not in _PYTEST_MANAGED_ENV}
     yield
-    after = dict(os.environ)
+    after = {k: v for k, v in os.environ.items()
+             if k not in _PYTEST_MANAGED_ENV}
     changed = sorted(
         (set(after) - set(before))
         | (set(before) - set(after))
