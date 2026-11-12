@@ -1,0 +1,28 @@
+--- a/desktop/bookmark_panel.py
++++ b/desktop/bookmark_panel.py
+@@ -134,8 +134,10 @@
+         right.addLayout(io_row)
+ 
+         self.status_label = QLabel("")
+         self.status_label.setObjectName("hintLabel")
++        # 损坏说明是一整句人话，不换行会把右侧栏撑宽、后段被截掉。
++        self.status_label.setWordWrap(True)
+         right.addWidget(self.status_label)
+         body.addLayout(right, stretch=1)
+ 
+         root.addLayout(body, stretch=1)
+@@ -160,8 +162,14 @@
+                 "仍失败请备份后删除书签文件再重启。")
+             self._set_ops_enabled(False)
+             return
+         self.refresh_list()
++        # 损坏已备份 / 拒写时 BookmarkManager 不再抛异常，而是留 last_error：
++        # 复用上面这条既有状态行如实说明，不弹窗、不新建控件。
++        err = getattr(self._mgr, "last_error", None)
++        if err:
++            self.status_label.setText(str(err))
++            self.status_label.setToolTip(str(err))
+ 
+     def _set_ops_enabled(self, en: bool):
+         self._ops_enabled = en
+         for b in (self.add_btn, self.edit_btn, self.del_btn,

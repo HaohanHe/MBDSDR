@@ -1,0 +1,70 @@
+--- a/desktop/capability_drawer.py
++++ b/desktop/capability_drawer.py
+@@ -33,8 +33,10 @@
+ 
+     def __init__(self, host: Optional[Any] = None, parent=None):
+         super().__init__(parent)
+         self._host = host
++        #: 能力名 → 内核 last_error；_collect 填，refresh 用（tooltip 全文）。
++        self._error_notes = {}
+         self.setObjectName("capabilityDrawer")
+         self.setAttribute(Qt.WA_StyledBackground, True)
+         # 岛内单元格的边框是它**唯一**的可见轮廓（单元格填充 0.045 白叠在
+         # 面板上只有 1.13:1），所以按 WCAG 1.4.11 对底 ≥3:1：0.18 → 0.50
+@@ -87,8 +89,9 @@
+     def _collect(self):
+         """返回 [(能力名, 副说明)]；全部来自运行时真实对象。"""
+         agent = self._agent()
+         rows = []
++        self._error_notes = {}
+         if agent is None:
+             return rows, "AI 内核未装载；不显示占位能力（拒绝示例值）。"
+ 
+         tr = getattr(agent, "tool_registry", None)
+@@ -149,18 +152,28 @@
+                                 st.get("constellation_culture"))))
+             except Exception:
+                 rows.append(("本地能力协商", "状态读取失败"))
+ 
++        # guardian 也在这张表里：它同样是常驻能力，只是之前没列出来，
++        # 而「索引损坏但能用」的错误只有它能报。
+         for attr, title in (("plugin_manager", "插件系统"),
+                             ("subagent_manager", "子代理"),
+                             ("workflow_engine", "工作流引擎"),
+                             ("scheduler", "调度器"),
+-                            ("memory", "长期记忆")):
++                            ("memory", "长期记忆"),
++                            ("guardian", "自进化守护")):
+             obj = getattr(agent, attr, None)
+             if obj is None:
+                 rows.append((title, "未装载"))
+-            else:
+-                rows.append((title, "常驻 · %s" % type(obj).__name__))
++                continue
++            note = "常驻 · %s" % type(obj).__name__
++            err = str(getattr(obj, "last_error", "") or "")
++            if err:
++                # 42px 高的格子放不下整句人话：这里只给可见标记，
++                # 全文进 tooltip，绝不截断成「看起来没事」的半句。
++                self._error_notes[title] = err
++                note += "；持久化异常（悬停看详情）"
++            rows.append((title, note))
+         return rows, ("事实源自动生成 · 共 %d 个能力位 · 点一下把名字送进 AI 输入栏"
+                       % len(rows))
+ 
+     # ---------------------------------------------------------------- 渲染
+@@ -178,9 +191,13 @@
+         for i, (name, note) in enumerate(rows):
+             btn = QToolButton()
+             btn.setObjectName("capCell")
+             btn.setText(name + "\n" + note)
+-            btn.setToolTip("把「%s」送进 AI 输入栏（不会自动执行）" % name)
++            tip = "把「%s」送进 AI 输入栏（不会自动执行）" % name
++            err = self._error_notes.get(name)
++            if err:
++                tip += "\n\n持久化异常：%s" % err
++            btn.setToolTip(tip)
+             btn.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+             btn.setMinimumHeight(42)
+             btn.clicked.connect(
+                 lambda _c=False, n=name: self.capability_activated.emit(n))

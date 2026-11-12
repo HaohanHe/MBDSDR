@@ -1,0 +1,18 @@
+--- a/desktop/main_window.py
++++ b/desktop/main_window.py
+@@ -2095,8 +2095,15 @@
+                 self._bookmarks.extend(bm_list)
+                 self._sync_spectrum_bookmarks()
+         except Exception:
+             pass
++        # 频率管理器加载失败/损坏恢复会留 load_error（人话，含备份路径）：
++        # 启动时走既有错误出口贴一次状态栏。这里没有更合适的常驻位，
++        # 且本文件由卫星线独占，不在这一笔里新建面板。
++        if self._freq_mgr is not None and getattr(
++                self._freq_mgr, "load_error", ""):
++            self._show_error_status(
++                f"书签索引异常：{self._freq_mgr.load_error}")
+         self._add_right_tab("控制", self.control_panel, "control_dock")
+ 
+         # 状态面板
+         self.status_panel = StatusPanel()
