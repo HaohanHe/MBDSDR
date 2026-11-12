@@ -32,8 +32,10 @@
       - 上限被改（env/flag）不是静默生效：`max_hold_min` + 来源会写进占位文件与
         每次续租记录，续租时打印 WARN——「临时放宽」必须留痕。
       - `audit-renew` 子命令给出「续过几次 / 累计多久 / 是否超上限」；对**没有
-        续租记录**却有「跨度 > 1.5×TTL」的老 claim，报「历史不可审计」，
-        不按 0 次处理（那正是本次事故的形态）。
+        续租记录**却有「跨度 > 1.05×TTL」的老 claim，报「历史不可审计」，
+        不按 0 次处理（那正是本次事故的形态）。这类老数据**有清账到期日**
+        （默认 2026-11-20，`MBDSDR_LEGACY_AUDIT_DUE` 可改、来源会打印）：到期前
+        退出码 3（报账），到期后退出码 4（到期未清）——不允许它一直挂着当永久状态。
   * **判活只看心跳，不看 pid**（2026-11-13）：`claim` 是一次性 CLI，写完就
     退出，`pid` 记的是那个短命进程——「pid 已死」是默认状态，没有信息量。
     旧实现把 `pid_dead_or_reused` 当接管的硬前提，等于任何 claim 都能被接管
@@ -130,10 +132,15 @@ LOCK_TIMEOUT_S = 15.0
 #: 单条 claim 的累计持有上限（分钟）。改它必须留痕：值 + 来源写进占位文件。
 DEFAULT_MAX_HOLD_MIN = 360.0
 MAX_HOLD_ENV = "MBDSDR_CLAIM_MAX_HOLD_MIN"
+#: 「历史不可审计」老数据的清账到期日。到期前 `audit-renew` 只报账（退出码 3），
+#: 到期后升级为「到期未清」（退出码 4）——不允许一条不可审计的老 claim 变成永久状态。
+DEFAULT_LEGACY_AUDIT_DUE = "2026-11-20"
+LEGACY_AUDIT_DUE_ENV = "MBDSDR_LEGACY_AUDIT_DUE"
 EXIT_OK = 0
 EXIT_USAGE = 1
 EXIT_DENIED = 2
 EXIT_FINDINGS = 3
+EXIT_OVERDUE = 4
 
 
 class ClaimDenied(RuntimeError):
@@ -1412,11 +1419,31 @@ def _renew_audit_rows(now: float) -> List[Dict[str, Any]]:
     return rows
 
 
+def _resolve_legacy_due() -> Tuple[Any, str]:
+    """老数据清账到期日：环境变量 > 默认。来源随输出打印（放宽也要看得见）。"""
+    raw = os.environ.get(LEGACY_AUDIT_DUE_ENV) or DEFAULT_LEGACY_AUDIT_DUE
+    source = f"env {LEGACY_AUDIT_DUE_ENV}" if os.environ.get(LEGACY_AUDIT_DUE_ENV) else "default"
+    try:
+        due = datetime.strptime(raw, "%Y-%m-%d").date()
+    except ValueError as exc:
+        raise ValueError(f"清账到期日必须是 yyyy-mm-dd（{LEGACY_AUDIT_DUE_ENV}={raw}）") from exc
+    return due, source
+
+
 def cmd_audit_renew(as_json: bool = False) -> int:
     rows = _renew_audit_rows(_now())
+    try:
+        due, due_source = _resolve_legacy_due()
+    except ValueError as exc:
+        print(str(exc), file=sys.stderr)
+        return EXIT_USAGE
+    days_left = (due - datetime.now().date()).days
     known = [r for r in rows if r["renew_known"]]
     legacy = [r for r in rows if r["legacy_unauditable"]]
     over = [r for r in rows if r["over_cap"]]
+    for row in legacy:
+        row["legacy_due"] = due.isoformat()
+    overdue = bool(legacy) and days_left < 0
     if as_json:
         print(
             json.dumps(
@@ -1424,6 +1451,10 @@ def cmd_audit_renew(as_json: bool = False) -> int:
                     "active": len(rows),
                     "renew_known": len(known),
                     "legacy_unauditable": len(legacy),
+                    "legacy_due": due.isoformat(),
+                    "legacy_due_source": due_source,
+                    "legacy_days_left": days_left,
+                    "legacy_overdue": overdue,
                     "over_cap": len(over),
                     "rows": rows,
                 },
@@ -1437,11 +1468,16 @@ def cmd_audit_renew(as_json: bool = False) -> int:
             f"历史不可审计（无续租记录但跨度 > 1.05×TTL）{len(legacy)} 条；"
             f"超上限 {len(over)} 条"
         )
+        print(
+            f"老数据清账到期 {due.isoformat()}（{due_source}，"
+            f"{'已逾期 ' + str(-days_left) + ' 天' if days_left < 0 else '剩 ' + str(days_left) + ' 天'}）"
+        )
         for row in rows:
             if row["legacy_unauditable"]:
                 print(
                     f"  UNAUDITABLE(老数据) {row['path']} owner={row['owner']} "
-                    f"已持有={row['total_hold_min']}min 续租记录=不可知（不是 0 次）"
+                    f"已持有={row['total_hold_min']}min 续租记录=不可知（不是 0 次） "
+                    f"清账到期={row['legacy_due']}"
                 )
             elif row["renew_known"]:
                 print(
@@ -1455,6 +1491,13 @@ def cmd_audit_renew(as_json: bool = False) -> int:
                     f"持有={row['total_hold_min']}min > 上限 {row['cap_min']:g}min"
                     f"（{row['cap_source']}）"
                 )
+    if overdue:
+        print(
+            f"OVERDUE(到期未清) 清账到期日 {due.isoformat()} 已过 {days_left * -1} 天，"
+            f"{len(legacy)} 条老 claim 仍未补续租记录：按到期处理，不许当永久状态。",
+            file=sys.stderr if as_json else sys.stdout,
+        )
+        return EXIT_OVERDUE
     return EXIT_FINDINGS if (legacy or over) else EXIT_OK
 
 

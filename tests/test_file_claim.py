@@ -748,8 +748,14 @@ def test_renew_rejected_after_cumulative_cap_and_audit_shows_totals(tmp_path: Pa
     assert rows[0]["cap_min"] == 0.02 and rows[0]["over_cap"] is True
 
 
-def test_audit_renew_flags_legacy_claim_as_unauditable_not_zero(tmp_path: Path) -> None:
-    """反证(c)：老 claim 没有续租记录、但跨度已超一个 TTL → 报「历史不可审计」。"""
+def test_audit_renew_flags_legacy_claim_as_unauditable_not_zero(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """反证(c)：老 claim 没有续租记录、但跨度已超一个 TTL → 报「历史不可审计」。
+
+    到期日钉到很远的未来：这条只验「报账」，不因跑测试的日期而变红。
+    """
+    monkeypatch.setenv("MBDSDR_LEGACY_AUDIT_DUE", "2099-01-01")
     locks = tmp_path / "locks"
     claims_ttl = "10"
     claimed = run(locks, "claim", SHARED, "--owner", "老格式线", "--ttl-min", claims_ttl)
@@ -769,6 +775,34 @@ def test_audit_renew_flags_legacy_claim_as_unauditable_not_zero(tmp_path: Path) 
     assert "UNAUDITABLE" in audit.stdout
     assert "不是 0 次" in audit.stdout
     assert "历史不可审计" in audit.stdout
+    assert "清账到期 2099-01-01" in audit.stdout, audit.stdout
+
+
+def test_audit_renew_legacy_overdue_is_blocking_not_permanent(tmp_path: Path, monkeypatch) -> None:
+    """到期未清：过了清账到期日，退出码从 3 升到 4，老数据不能一直「报账」下去。"""
+    monkeypatch.setenv("MBDSDR_LEGACY_AUDIT_DUE", "2000-01-01")
+    locks = tmp_path / "locks"
+    claimed = run(locks, "claim", SHARED, "--owner", "老格式线", "--ttl-min", "10")
+    assert claimed.returncode == 0, claimed.stderr
+    marker_path = _markers(locks)[0]
+    data = json.loads(marker_path.read_text(encoding="utf-8"))
+    now = time.time()
+    data.pop("renewals", None)
+    data.pop("renew_count", None)
+    data["acquired_at"] = now - 3600
+    data["heartbeat_at"] = now
+    marker_path.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+
+    audit = run(locks, "audit-renew")
+    assert audit.returncode == 4, audit.stdout + audit.stderr
+    assert "到期未清" in audit.stdout + audit.stderr
+    assert "清账到期 2000-01-01" in audit.stdout + audit.stderr
+
+    payload = json.loads(run(locks, "audit-renew", "--json").stdout)
+    assert payload["legacy_overdue"] is True
+    assert payload["legacy_due"] == "2000-01-01"
+    assert payload["legacy_days_left"] < 0
+    assert payload["rows"][0]["legacy_due"] == "2000-01-01"
 
 
 def test_audit_renew_reports_renew_count_and_reason(tmp_path: Path) -> None:
