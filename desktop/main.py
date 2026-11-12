@@ -16,6 +16,8 @@ AI 定义无线电全栈开源平台 - 桌面客户端。
 import sys
 import os
 import argparse
+import queue
+import threading
 
 _here = os.path.dirname(os.path.abspath(__file__))
 if _here not in sys.path:
@@ -119,11 +121,23 @@ def _probe_import(name: str) -> bool:
         return False
 
 
-#: 启动自检的**必需项**（模块探针, 人话名称, 缺了会怎样, 怎么修）。
-#: 只列「缺了应用就不能正常工作」的项；可选依赖在 _OPTIONAL_DEPENDENCIES 里只记日志。
-#: 打包版把 scipy 私有子树以 .pyc 落盘（MBDSDR_NOARCHIVE=1），删掉
-#: ``_internal/scipy/_external`` 不会让 ``import scipy`` 失败，却在运行期懒加载时
-#: 报 ModuleNotFoundError——所以必须逐个探针，不能等 ImportError 出口。
+def _probe_module_spec(name: str) -> bool:
+    """只判断「文件在不在」：不执行模块体、不加载 .pyd（≈0 ms vs 真 import）。
+
+    用于 scipy 系：「缺件/没打进去」是启动前必须拦住的那一类，find_spec 足够；
+    「文件在但加载失败」留给首帧后的延后真 import 报（见 _start_deferred_imports）。
+    """
+    import importlib.util
+    try:
+        return importlib.util.find_spec(name) is not None
+    except (ImportError, ModuleNotFoundError, ValueError):
+        return False
+
+
+#: 启动自检里**必须真 import** 的必需项（模块, 人话名称, 缺了会怎样, 怎么修）。
+#: 只列「缺了应用就不能正常工作」且「只有真加载才能判定」的项：numpy 的
+#: 二进制扩展和 PySide6 的动态库，文件在但 DLL 加载失败时 find_spec 看不出来。
+#: scipy 系放到 _SPEC_FIRST_DEPENDENCIES（先查存在、真加载延后到首帧之后）。
 _REQUIRED_DEPENDENCIES = [
     ("numpy", "NumPy 数值运算库",
      "所有 DSP / 频谱 / 解调计算都不可用",
@@ -131,9 +145,29 @@ _REQUIRED_DEPENDENCIES = [
     ("numpy._core._multiarray_umath", "NumPy 核心二进制（_multiarray_umath）",
      "读取 IQ 样点或做 FFT 时直接崩溃",
      "重装完整的 numpy wheel；打包版重新解压安装包"),
+    ("PySide6.QtCore", "PySide6 核心二进制", "界面完全无法创建",
+     "pip install PySide6"),
+    ("PySide6.QtGui", "PySide6 GUI 二进制", "界面完全无法创建",
+     "pip install PySide6"),
+    ("PySide6.QtWidgets", "PySide6 控件二进制", "界面完全无法创建",
+     "pip install PySide6"),
+]
+
+#: scipy 系必需项：启动前只做存在性检查（find_spec），真 import 延后到首帧之后。
+#: 依据（2026-11-12 实测，docs/perf-evidence/2026-11-12/import-smoke-verdict.json）：
+#: 本进程第一次 import scipy 实测 1030–1258 ms，其中 scipy.signal 单独 ≈750 ms；
+#: 压在首帧前等于让用户对着 splash 多等一秒，而缺件判定的信息量完全由
+#: 「文件在不在」提供。打包版把 scipy 私有子树以 .pyc 落盘（MBDSDR_NOARCHIVE=1），
+#: 删掉 ``_internal/scipy/_external`` 时 find_spec 一样返回 None，所以仍能拦住。
+#: 局限：find_spec 不能发现「文件在但 .pyd 加载失败」，这一类由首帧后的
+#: 延后真 import 报出来（不阻塞，见 _report_deferred_import_failure）。
+_SPEC_FIRST_DEPENDENCIES = [
     ("scipy", "SciPy 科学计算库",
      "滤波 / 重采样 / 频谱整条链路不可用",
      "pip install scipy（打包版请重新解压完整安装包）"),
+    ("scipy.signal", "SciPy 信号处理子包",
+     "滤波器、解调链、重采样不可用",
+     "重装 scipy（pip install --force-reinstall scipy）"),
     ("scipy._external.array_api_compat.common",
      "SciPy 私有子树 _external（完整性探针）",
      "运行期懒加载 scipy 公共子模块时报 ModuleNotFoundError",
@@ -142,15 +176,6 @@ _REQUIRED_DEPENDENCIES = [
      "SciPy array API 兼容层 numpy.fft（完整性探针）",
      "FFT / 频谱计算在运行期懒加载时报 ModuleNotFoundError",
      "安装包解压不完整：重新解压/重装完整包，不要删 _internal 里的文件"),
-    ("scipy.signal", "SciPy 信号处理子包",
-     "滤波器、解调链、重采样不可用",
-     "重装 scipy（pip install --force-reinstall scipy）"),
-    ("PySide6.QtCore", "PySide6 核心二进制", "界面完全无法创建",
-     "pip install PySide6"),
-    ("PySide6.QtGui", "PySide6 GUI 二进制", "界面完全无法创建",
-     "pip install PySide6"),
-    ("PySide6.QtWidgets", "PySide6 控件二进制", "界面完全无法创建",
-     "pip install PySide6"),
 ]
 
 #: 必需数据件（相对仓库/安装包的路径, 人话名称, 缺了会怎样, 怎么修）。
@@ -200,6 +225,12 @@ def _startup_dependency_problems() -> list[str]:
                 f"• {name}（{module}）\n"
                 f"  缺了会怎样：{consequence}\n"
                 f"  怎么修：{fix}")
+    for module, name, consequence, fix in _SPEC_FIRST_DEPENDENCIES:
+        if not _probe_module_spec(module):
+            problems.append(
+                f"• {name}（{module}）\n"
+                f"  缺了会怎样：{consequence}\n"
+                f"  怎么修：{fix}")
     for rel, name, consequence, fix in _REQUIRED_DATA_FILES:
         if not os.path.exists(_required_data_path(rel)):
             problems.append(
@@ -230,15 +261,122 @@ def _packaging_verdict(missing: str) -> "tuple[str, str]":
     return "unknown", ""
 
 
-def _run_import_smoke() -> None:
-    """启动自检：把易漏的私有模块逐个导入，结果写进启动日志。"""
-    failed = [name for name in _RISKY_IMPORTS if not _probe_import(name)]
-    total = len(_RISKY_IMPORTS)
-    line = f"[smoke] 私有模块导入自检 {total - len(failed)}/{total} 通过"
-    if failed:
-        line += "；失败：" + ", ".join(failed)
-    _append_startup_log(line)
-    print(line, file=sys.stderr)
+def _deferred_import_plan() -> list[str]:
+    """首帧之后要真 import 的 scipy 私有子模块（沿用冒烟清单，顺序即依赖顺序）。"""
+    return list(_RISKY_IMPORTS)
+
+
+#: 延后导入失败时给用户的「缺了会怎样 / 怎么修」（与硬门槛同一套三段式）。
+_DEFERRED_CONSEQUENCE = (
+    "这些 scipy 私有子模块只在运行期被懒加载时才用到；"
+    "它们缺失/加载失败时，频谱、滤波、统计等相关功能会在使用的那一刻报错")
+_DEFERRED_FIX = (
+    "重新解压或重装完整安装包，不要删 _internal 下的文件；"
+    "源码环境执行 pip install --force-reinstall scipy")
+
+
+def _deferred_import_worker(plan: list[str], results) -> None:
+    """工作线程里一次只 import 一个模块（GIL 每 5 ms 让出，GUI 线程不被长事务卡死）。"""
+    import importlib
+    for module in plan:
+        try:
+            importlib.import_module(module)
+            results.put((module, None))
+        except Exception as exc:  # noqa: BLE001 - 加载失败要如实报出，不能崩
+            results.put((module, f"{type(exc).__name__}: {exc}"))
+
+
+def _report_deferred_import_failure(window, module: str, detail: str) -> None:
+    """首帧后加载失败：窗口已在，用**不阻塞**的提示 + 日志，文案沿用硬门槛那套。"""
+    text = (f"[selfcheck] 延后导入失败：{module}\n"
+            f"  缺了会怎样：{_DEFERRED_CONSEQUENCE}\n"
+            f"  怎么修：{_DEFERRED_FIX}\n"
+            f"  详情：{detail}")
+    _append_startup_log(text.replace("\n", " "))
+    print(text, file=sys.stderr)
+    log_path = _startup_log_path()
+    message = (f"{module} 加载失败，相关功能不可用；"
+               f"详见启动日志（{log_path or '控制台'}）")
+    try:
+        # 60 s 足够用户读完；不阻塞、不弹窗，界面照用（缺的只是懒加载相关功能）。
+        window.statusBar().showMessage(message, 60000)
+    except (AttributeError, RuntimeError):
+        pass
+
+
+def _start_deferred_imports(window) -> None:
+    """首帧之后再把 scipy 私有子树真 import（本进程首次导入实测 1030–1258 ms）。
+
+    起跑点必须钉在**主窗首个 Paint 派发之后**，不能是 show() 之后：实测
+    show() 之后立刻起工作线程，线程的 import 会与首帧抢 GIL，把首帧推后
+    ≈1 s（2026-11-12 反证，scripts/repro/2026-11-12-deferred-import-verify.py）。
+    收结果用主线程定时器——一次一个模块，任何一片失败都只降级到状态栏 + 日志，
+    不拦启动、不崩。无头/未收到 Paint 的环境用 3 s 兜底。
+    """
+    results = queue.Queue()
+    plan = _deferred_import_plan()
+    state = {"done": 0, "failed": [], "started": False}
+    from PySide6.QtCore import QEvent, QObject, QTimer
+
+    timer = QTimer(window)
+    timer.setInterval(120)
+
+    def drain() -> None:
+        while True:
+            try:
+                module, detail = results.get_nowait()
+            except queue.Empty:
+                break
+            state["done"] += 1
+            if detail is not None:
+                state["failed"].append(module)
+                _report_deferred_import_failure(window, module, detail)
+        if state["done"] >= len(plan):
+            timer.stop()
+            ok = len(plan) - len(state["failed"])
+            line = (f"[smoke] 私有模块导入自检 {ok}/{len(plan)} 通过"
+                    "（首帧后延后导入）")
+            if state["failed"]:
+                line += "；失败：" + ", ".join(state["failed"])
+            _append_startup_log(line)
+            print(line, file=sys.stderr)
+
+    timer.timeout.connect(drain)
+
+    def start() -> None:
+        if state["started"]:
+            return
+        state["started"] = True
+        thread = threading.Thread(
+            target=_deferred_import_worker, args=(plan, results),
+            name="mbdsdr-deferred-import", daemon=True)
+        window._deferred_import_thread = thread
+        timer.start()
+        thread.start()
+
+    class _FirstPaintGate(QObject):
+        """只负责一件事：主窗第一次 Paint 派发完之后才放开延后导入。
+
+        事件过滤器是在事件**交给控件处理之前**被调用的，直接 start() 会让
+        工作线程抢在这次 Paint 真正绘制之前拿到 GIL，把首帧推后（实测 T2 从
+        2.32 s 涨到 2.44 s）。投递到下一轮事件循环，等这次 Paint 走完再起。
+        """
+
+        def eventFilter(self, obj, event):      # noqa: N802 (Qt 命名)
+            if event.type() == QEvent.Paint:
+                obj.removeEventFilter(self)
+                QTimer.singleShot(0, start)
+            return False
+
+    gate = _FirstPaintGate(window)
+    try:
+        window.installEventFilter(gate)
+    except (AttributeError, RuntimeError):
+        start()                                  # 无事件过滤能力的假窗口
+    # 过滤器/定时器都要有引用活到起跑；挂在窗口上随窗口销毁。
+    window._deferred_import_gate = gate
+    window._deferred_import_timer = timer
+    QTimer.singleShot(3000, start)               # 没等到 Paint 的兜底
 
 
 def _run_import_probe(spec: str) -> int:
@@ -686,15 +824,12 @@ def main():
     # 之前，是因为那些步骤也在吃首屏前的空白期，没必要等它们。
     splash = _show_startup_splash(app)
 
-    # 启动自检（导入探针 + 必需依赖）挪到 splash 之后：这两步实测合计约 2 s
-    # （scipy 私有子树逐个探针 ~1.0 s、必需依赖探针 ~1.0 s），原先排在
-    # QApplication 之前，等于把 2 s 全扔进「屏幕上什么都没有」的空白期。
-    # 顺序不变：自检仍在主窗口构造之前，缺件照样中止启动。
-    _run_import_smoke()
-
     # 启动自检（硬门槛）：必需依赖/数据件逐项探针。缺件立即中止并弹
     # 「MBDSDR 启动失败 + 缺什么 + 怎么修」，绝不照常开一个半残窗口。
     # 覆盖「import 成功、运行期懒加载才崩」的场景（如 _internal/scipy/_external 被删）。
+    # numpy 二进制与 PySide6 真 import（DLL 坏掉只有真加载能发现）；
+    # scipy 系只做 find_spec 存在性检查，真 import 推迟到首帧之后
+    # （_start_deferred_imports，实测首次导入 1.0–1.3 s）。
     dep_problems = _startup_dependency_problems()
     if dep_problems:
         _close_splash(splash)
@@ -795,6 +930,11 @@ def main():
             splash.finish(window)
         except Exception:  # noqa: BLE001 - 收尾失败不得拦启动
             pass
+
+    # scipy 私有子树的真 import 放到首帧之后（_start_deferred_imports 钉在主窗
+    # 首个 Paint 派发完毕之后才起工作线程）：实测首次导入 1.0–1.3 s，压在首帧前
+    # 等于让用户对着 splash 多等一秒。失败只降级到状态栏 + 日志，不拦启动。
+    _start_deferred_imports(window)
 
     # 控制台 Ctrl+C 走优雅退出（SIGINT→退出标志→QTimer 收口），
     # 不让 KeyboardInterrupt 抛进 Qt 回调里被吞掉。
