@@ -22,11 +22,9 @@ import math
 import os
 import platform
 import sys
-import time
 import uuid
-from contextlib import contextmanager
 from datetime import datetime
-from typing import Any, Dict, Iterator, Optional
+from typing import Any, Dict, Optional
 
 from PySide6.QtCore import QTimer
 
@@ -37,11 +35,13 @@ except ImportError:  # pragma: no cover - 兼容 desktop 目录直接上 sys.pat
 
 try:  # 常规：仓库根在 sys.path 上（main.py / 测试都这么进来）
     from mbdsdr_ai.corrupt_evidence import write_reason
+    from mbdsdr_ai.config import _exclusive_lock
 except ImportError:  # pragma: no cover - 兼容只把 desktop/ 放进 sys.path 的调用方
     _root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     if _root not in sys.path:
         sys.path.insert(0, _root)
     from mbdsdr_ai.corrupt_evidence import write_reason
+    from mbdsdr_ai.config import _exclusive_lock
 
 
 #: 全部可持久化字段及其默认值——**唯一来源是 config_schema.py**。
@@ -281,68 +281,8 @@ def _coerce(key: str, value: Any, notes: Optional[list] = None) -> Any:
 LOCK_TIMEOUT_S = 2.0
 
 
-@contextmanager
-def _exclusive_lock(lock_path: str, timeout: float = LOCK_TIMEOUT_S) -> Iterator[bool]:
-    """跨进程互斥（Windows msvcrt / POSIX flock），yield 是否拿到锁。
-
-    锁文件自身常驻（不删）：删锁文件会让"锁到另一个 inode"竞态重现。
-    进程被杀时内核自动释放字节锁，不需要过期判定。
-    """
-    directory = os.path.dirname(lock_path)
-    if directory:
-        os.makedirs(directory, exist_ok=True)
-    acquired = False
-    fh = None
-    deadline = time.monotonic() + timeout
-    try:
-        # Windows 下两个进程同时以 a+b 打开同一个 .lock 会抛 PermissionError。
-        # 它和字节锁竞争一样是「暂时拿不到锁」，必须重试到超时后按
-        # 「没拿到锁」降级（写锁等待文案），不能冒泡成「设置保存失败」，
-        # 否则用户只看到一串文件路径，看不到「别的进程正在写」这个原因。
-        while True:
-            try:
-                fh = open(lock_path, "a+b")
-                break
-            except OSError:
-                if time.monotonic() >= deadline:
-                    break
-                time.sleep(0.01)
-        if fh is None:
-            yield False
-            return
-        if os.fstat(fh.fileno()).st_size == 0:
-            fh.write(b"\0")
-            fh.flush()
-        while True:
-            try:
-                fh.seek(0)
-                if sys.platform == "win32":
-                    import msvcrt
-                    msvcrt.locking(fh.fileno(), msvcrt.LK_NBLCK, 1)
-                else:
-                    import fcntl
-                    fcntl.flock(fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-                acquired = True
-                break
-            except OSError:
-                if time.monotonic() >= deadline:
-                    break
-                time.sleep(0.01)
-        yield acquired
-    finally:
-        if acquired and fh is not None:
-            try:
-                fh.seek(0)
-                if sys.platform == "win32":
-                    import msvcrt
-                    msvcrt.locking(fh.fileno(), msvcrt.LK_UNLCK, 1)
-                else:
-                    import fcntl
-                    fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
-            except OSError:
-                pass
-        if fh is not None:
-            fh.close()
+# 跨进程互斥的唯一实现在 ``mbdsdr_ai.config._exclusive_lock``（见顶部导入）。
+# 依赖方向 desktop → 内核，反向禁止；两边不再各写一份等价实现。
 
 
 def backup_corrupt_config(path: str) -> Optional[str]:
