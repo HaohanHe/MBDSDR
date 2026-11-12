@@ -1,6 +1,11 @@
 # shell 脚本必须 LF：CRLF 会咬断 bash here-doc（acceptance_run.sh 检查表组装失败实证）
 *.sh text eol=lf
 
+# git 钩子必须 LF：CRLF 会让 shebang 变成 `python\r`，git 报
+# "cannot spawn .git/hooks/pre-commit: No such file or directory"（2026-11-12 实证）。
+# install_git_hooks.py 按字节复制，源文件行尾即安装结果，因此必须钉在 LF。
+scripts/hooks/* text eol=lf
+
 # golden 金样字节冻结：SHA 钉子以文件字节为准，autocrlf 的 CRLF 转换会让
 # Windows 工作副本与 Linux CI checkout 的 SHA 悄悄分叉（2026-11-03 实证：
 # dvbs2_bch_vectors.json 钉 CRLF 工作副本 SHA，CI LF checkout 收集期炸红）。
