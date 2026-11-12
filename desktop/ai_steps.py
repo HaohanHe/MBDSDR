@@ -23,11 +23,14 @@ subagent_execute 的多步 JSON 结果，投影成步骤卡字段（StepRecord�
 from __future__ import annotations
 
 import json
+import logging
 import re
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
 from tokens import tokens as _tok  # noqa: E402  # 截断长度收口在 tokens 层
+
+logger = logging.getLogger(__name__)
 
 # 状态语义：与 cpp StepState（Running/Succeeded/Failed/Pending-Aborted）和
 # mobile TaskStepStatus（running/success/failed）对齐；skipped 对应
@@ -126,6 +129,12 @@ def summarize_result(text: str) -> str:
 # ── 投影：agent.chat() 结果 ────────────────────────────────────────
 
 def _parse_args(raw: Any) -> Dict[str, Any]:
+    """把 tool_calls 里的 arguments 归一成 dict；解析不了按空参数投影。
+
+    空参数是「展示层降级」而不是工具真收到空参数：模型/上游给的字符串不是
+    JSON 时，步骤卡只能显示「无参数」，但原因必须可查（否则坏参数看起来
+    和「本来就没参数」一模一样）。
+    """
     if isinstance(raw, dict):
         return raw
     if isinstance(raw, str) and raw.strip():
@@ -133,7 +142,8 @@ def _parse_args(raw: Any) -> Dict[str, Any]:
             parsed = json.loads(raw)
             if isinstance(parsed, dict):
                 return parsed
-        except Exception:
+        except ValueError as exc:
+            logger.debug("工具调用参数不是 JSON，步骤卡按空参数投影：%s", exc)
             return {}
     return {}
 
@@ -146,7 +156,11 @@ def _payload_from_content(content: Any) -> Optional[Dict[str, Any]]:
         return None
     try:
         parsed = json.loads(content)
-    except Exception:
+    except ValueError as exc:
+        # 只有「自称是 JSON 却坏了」（以 { / [ 开头）才算降级事件；
+        # 纯自然语言结果本来就是这样，记日志等于给常规路径刷噪音。
+        if content.lstrip()[:1] in ("{", "["):
+            logger.debug("工具结果 content 声称是 JSON 但解析失败，按原文透传：%s", exc)
         return None
     return parsed if isinstance(parsed, dict) else None
 
