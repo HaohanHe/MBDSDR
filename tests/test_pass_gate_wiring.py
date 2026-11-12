@@ -9,7 +9,8 @@
 - TLE：ISS，epoch 2008-264（确定性）
 - 站点：39.9°N / 116.4°E / 0 km
 - 基准时刻：2008-09-20 06:00:00 UTC
-- 该 24h 窗口内：5° 门 6 条、10° 门 5 条；唯一差异是 15:30 峰值 9.8° 的低仰角过境
+- 该 24h 窗口内：5° 门 6 条、10° 门 5 条；唯一差异是 15:30 峰值 9.8° 的低仰角
+  过境（表格按 1° 显示，所以断言表达「落在 5–10° 区间」而非钉死显示值）
 """
 import os
 import sys
@@ -28,8 +29,10 @@ ISS_NAME = "ISS (ZARYA)"
 ISS_L1 = "1 25544U 98067A   08264.51780074  .00016553  00000-0  10270-3 0  2897"
 ISS_L2 = "2 25544  51.6400 247.4627 0006703 130.5360 325.0288 15.72125391563530"
 FIXED_UTC = datetime(2008, 9, 20, 6, 0, 0, tzinfo=timezone.utc)
-# 该窗口内 5° 门比 10° 门多出的唯一一条过境（表格里显示为 9.8°）
-LOW_PEAK_DEG = 9.8
+# 该窗口内 5° 门比 10° 门多出的唯一一条过境：峰值落在 5–10° 区间。
+# 表格按 1° 显示，9.8° 会显示成 10.0°，所以按区间 + 显示容差断言，不钉数字。
+_LOW_BAND_DEG = (5.0, 10.0)
+_PEAK_TOLERANCE_DEG = 0.5
 
 
 @pytest.fixture(scope="session")
@@ -97,8 +100,11 @@ def test_refresh_passes_respects_user_min_elevation(qapp, monkeypatch):
     extra = [row for row in at5 if row not in at10]
     assert len(extra) == 1, (
         f"5° 应比 10° 恰好多列 1 条 5–10° 过境，实际多出 {extra}（5°={at5}，10°={at10}）")
-    assert abs(extra[0][1] - LOW_PEAK_DEG) <= 0.1, (
-        f"多出的过境应是峰值 ≈{LOW_PEAK_DEG}° 的低仰角过境，实际 {extra[0]}")
+    peak = extra[0][1]
+    assert (_LOW_BAND_DEG[0] - _PEAK_TOLERANCE_DEG
+            <= peak < _LOW_BAND_DEG[1] + _PEAK_TOLERANCE_DEG), (
+        f"多出的过境应是 5–10° 的低仰角过境"
+        f"（显示容差 ±{_PEAK_TOLERANCE_DEG}°），实际 {extra[0]}")
 
 
 def test_show_low_elevation_passes_lists_and_marks_5_to_10(qapp, monkeypatch):
@@ -121,8 +127,11 @@ def test_show_low_elevation_passes_lists_and_marks_5_to_10(qapp, monkeypatch):
     extra = [row for row in on if row not in off]
     assert len(extra) == 1, (
         f"开关打开后应恰好多列 1 条 5–10° 过境，实际多出 {extra}（关={off}，开={on}）")
-    assert abs(extra[0][1] - LOW_PEAK_DEG) <= 0.1, (
-        f"多出的过境应是峰值 ≈{LOW_PEAK_DEG}° 的低仰角过境，实际 {extra[0]}")
+    peak = extra[0][1]
+    assert (_LOW_BAND_DEG[0] - _PEAK_TOLERANCE_DEG
+            <= peak < _LOW_BAND_DEG[1] + _PEAK_TOLERANCE_DEG), (
+        f"多出的过境应是 5–10° 的低仰角过境"
+        f"（显示容差 ±{_PEAK_TOLERANCE_DEG}°），实际 {extra[0]}")
     low_on = [row for row in on if "低仰角" in row[0]]
     assert low_on, f"开关打开后低仰角过境未在表格里标注「低仰角」，实际 {on}"
     assert "峰值仰角" in label and "10" in label, (
