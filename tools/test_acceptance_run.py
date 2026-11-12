@@ -13,6 +13,11 @@ tools/test_acceptance_run.py — phase11 P1 一键演练脚本的纯逻辑/CLI/�
 ``checks[0].detail.target_hits`` 读；fixture 全绿报告是"有设备"形状，云内真跑
 脚本时 selfcheck 自己会报无设备，二者分开测。
 
+收件状态：**在 CI 收件范围内**——`.github/workflows/ci.yml` 的 python matrix
+以文件级 root `tools/test_acceptance_run.py` 显式收集本文件。末尾的
+``pytest.main([__file__])`` 只是本地手跑快捷方式，不是唯一入口。CI 侧依赖
+bash 与 selfcheck 的「无 lsusb 时降级扫 /sys」分支，均为 ubuntu-latest 默认行为。
+
 跑法：
   python3 -m pytest tools/test_acceptance_run.py -v
 """

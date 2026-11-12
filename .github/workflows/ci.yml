@@ -78,6 +78,16 @@ jobs:
           - root: tools/hw_selfcheck
             timeout: 20
             label: ""
+          # tools/ 顶层两个文件不属于上面任何根，默认不会被收集。它们都是
+          # 离线确定性测试（无硬件、无网络），故以「文件级 root」显式收件，
+          # 而不是靠 pytest.main([__file__]) 手工跑——「手工能跑」不等于
+          # 「CI 在跑」。本地合跑实测：65 passed in 11.56s。
+          - root: tools/test_paste_block.py
+            timeout: 15
+            label: ""
+          - root: tools/test_acceptance_run.py
+            timeout: 15
+            label: ""
           # 根 tests/ 是大套件（200 个测试文件：test_*.py / *_test.py /
           # *roundtrip*.py 三种命名，分组脚本自动收件）：跨文件的单例 QApplication
           # 累积是主要耗时，整跑本地约 48 分钟（CI 侧历史实测约 40 分钟），

@@ -17,6 +17,10 @@ phase10 P1 交付物：diag_wizard.py 新增 ``--paste`` 模式（人类可读�
   * 主入口：--paste 输出含围栏标记与回传块；不带 --paste 不含标记；退出码；
   * 回归：既有 selfcheck/onboard fixture 的分类与解析行为不变。
 
+收件状态：**在 CI 收件范围内**——`.github/workflows/ci.yml` 的 python matrix
+以文件级 root `tools/test_paste_block.py` 显式收集本文件。文件末尾的
+``pytest.main([__file__])`` 只是本地手跑快捷方式，不是唯一入口。
+
 跑法：
   python3 -m pytest tools/test_paste_block.py -v
 """
