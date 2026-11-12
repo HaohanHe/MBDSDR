@@ -188,7 +188,7 @@ Python 标签数取 **6**；C++ 仍为 12，因为它只画三角形不画文字
 | D-5 | 瀑布行数 | 固定 `256` vs 可选 `128..4096` | `spectrum_widget.py:161` vs `tokens.h:698` |
 | D-6 | 过境预测采样 | 粗 `60 s` / 细 `2 s` vs 粗 `300 s` / 细 `30 s` | `sat_passes.py:88-90` vs `rf_sky_view`（`PASS_COARSE_STEP_S`/`PASS_FINE_STEP_S`） |
 | D-7 | "光谱空值"哨兵 | `-120.0` vs 无哨兵 | `spectrum_widget.py:419` vs C++ 用 `-100` 只作**安静带默认读数**（真实值） |
-| D-7b | RTL 设备基线采样率 | 三套：`2.048` / `1.024` / `2.048` 硬编码 | `sdr_backend.py` / `osmosdr_source.py` / `rtltcp_client.py`。**已统一为 2.4 MS/s 首选**（§10-3）；证据 `6ed9ee7d` — `mbdsdr_ai/sdr_backend.py:159` — `DEFAULT_SAMPLE_RATE_HZ = 2_400_000`（基准 `6ed9ee7d`）（2.048 只作基类最后兜底 `_FALLBACK_SAMPLE_RATE_HZ`） |
+| D-7b | RTL 设备基线采样率 | 三套：`2.048` / `1.024` / `2.048` 硬编码 | `sdr_backend.py` / `osmosdr_source.py` / `rtltcp_client.py`。**已统一为 2.4 MS/s 首选**（§10-3）；证据 `bb7dda23` — `mbdsdr_ai/sdr_status.py:21` — `DEFAULT_SAMPLE_RATE_HZ = 2_400_000`（基准 `bb7dda23`；原始落地 `6ed9ee7d`）（2.048 只作基类最后兜底 `_FALLBACK_SAMPLE_RATE_HZ`） |
 | D-8 | 状态提示时长 | `3000/4000/6000/8000 ms` 散落 20+ 处 | `main_window.py:2061,2490-2624` 等 |
 | D-9-AI | AI 工具重试 | 2 次 / 0.4 s vs 3 次 / 1 s→8 s | `agent.py:4050-4061` vs `tokens.h:1335-1337` |
 | D-10 | AI 上下文 | Python 8192（`max_context_tokens`） vs C++ `32768×0.75` | `config.py:20` / `config_schema.py:237` vs `tokens.h:1321-1322` |
@@ -396,7 +396,7 @@ spin `-140..20`）才是 B 类锁死项，各写清理由。
 | A7 | `waterfall_depth_rows` | 瀑布历史行数 | `256` | 128–4096（2 的幂） | 行 | 频谱与解码 | "瀑布能回看多久；越大越吃内存。" | C++ 侧已可选（`tokens.h:698`），Python 固定 256，建议对齐。 |
 | A8 | `sky_extinction_k` | 大气消光系数 | `0.2` | 0.0–0.5 | mag/airmass | 星象仪（高级） | "低仰角星光被大气削弱的程度；城郊 0.2–0.3，高山 0.15。" | 影响地平附近恒星的可见性判断；有物理定义的合理默认。**低优先**（Bortle 尚被锁，先解锁 Bortle 更值）。 |
 | A9 | `show_low_elevation_passes` | 显示低仰角过境 | `关` | 布尔 | — | 卫星与多普勒 | "默认只列峰值 ≥10° 的过境；开启后连 5–10° 的一起显示（更适合固定天线/低噪环境）。" | 决策人要求：列表筛选必须可见且可放宽。与 A1 联动（A1 是门槛值，A9 是"是否显示门槛以下"）。 |
-| A10 | `default_sample_rate_msps` | 默认采样率 | `2.4` | 设备支持档位 | MS/s | 设备与后端 | "启动时优先用 2.4 MS/s；设备不支持就自动取最接近的支持值，并在状态栏显示实际值。" | 决策人裁定 3。**内核默认与能力回落已落地**（§10-3）；设置在 schema 里只写首选值，实际值以后端状态为准，不要复制一份"默认 2.4"的字面量。 取证 `6ed9ee7d` — `mbdsdr_ai/sdr_backend.py:159` — `DEFAULT_SAMPLE_RATE_HZ = 2_400_000`（基准 `6ed9ee7d`） |
+| A10 | `default_sample_rate_msps` | 默认采样率 | `2.4` | 设备支持档位 | MS/s | 设备与后端 | "启动时优先用 2.4 MS/s；设备不支持就自动取最接近的支持值，并在状态栏显示实际值。" | 决策人裁定 3。**内核默认与能力回落已落地**（§10-3）；设置在 schema 里只写首选值，实际值以后端状态为准，不要复制一份"默认 2.4"的字面量。 取证 `bb7dda23` — `mbdsdr_ai/sdr_status.py:21` — `DEFAULT_SAMPLE_RATE_HZ = 2_400_000`（基准 `bb7dda23`；原始落地 `6ed9ee7d`） |
 | A11 | `tuning_step_hz` | 调谐步进 | `10 kHz` | 10 Hz–1 MHz | Hz | 频谱与解码 | "与频谱吸附网格同值；滚轮/箭头按它走。" | 已一致（§D-2 撤回），只需把三步（视图吸附 / 工具面 / 默认档）确认共用一处。 |
 
 > **A-备注（受阻项，不重复报）**：Bortle 等级、调谐吸附步进、dB 量程、录音目录
@@ -545,7 +545,7 @@ star_catalog.naked_eye_limit_mag is stars.naked_eye_limit_mag: True
 | 静噪默认 | `-50`（`squelch.py`） | `-50`（`tokens.h:396`） | ✓ | 见 2.1 二次裁定 |
 | **峰值门限基准** | `median + rel_db`（`spectrum_widget.py:487-488`） | `dB above median`（`tokens.h:365`） | ✓（同一基准） | 统一检测器定义（P-1） |
 | 峰值门限值 | `6.0`（裁定值） | `6.0`（`kPeakRelDb`，显示门；校准门 15 另计） | ✓ | 裁定 `rel 6.0 / abs -100 / 3 帧 / 5 bin / 10 帧`；15 dB 实测 24 帧 0 峰 |
-| 默认采样率 | 2.4 MS/s（`6ed9ee7d` — `mbdsdr_ai/sdr_backend.py:159` — `DEFAULT_SAMPLE_RATE_HZ = 2_400_000`（基准 `6ed9ee7d`）） | 2.4 MS/s（`tokens.h:301`，C++ 常量由 `12610725` 引入 `kDefaultSampleRateHz = 2.4e6`） | ✓ | 已统一；两端都按设备能力回落（本行 HEAD:518；工作区 :536 是别线未提交插入导致的漂移，不是现状行号） |
+| 默认采样率 | 2.4 MS/s（`bb7dda23` — `mbdsdr_ai/sdr_status.py:21` — `DEFAULT_SAMPLE_RATE_HZ = 2_400_000`（基准 `bb7dda23`；原始落地 `6ed9ee7d`）） | 2.4 MS/s（`tokens.h:301`，C++ 常量由 `12610725` 引入 `kDefaultSampleRateHz = 2.4e6`） | ✓ | 已统一；两端都按设备能力回落（本行 HEAD:518；工作区 :536 是别线未提交插入导致的漂移，不是现状行号） |
 | 默认调谐步进 | 10 kHz | 10 kHz（`kFreqCoarseStepHz`） | ✓（D-2 撤回） | 保持；100 kHz 是扫描步进 |
 | 无数据哨兵 | `-120.0`（待改 NaN） | 无哨兵（`-100` 是真实读数） | ✗ → 待 P-8c | 哨兵必须落在量程外 |
 | 上下文窗口 | 8192 | 32768（×0.75 预算） | ✗（有意） | 按模型能力，登记 |
@@ -567,7 +567,7 @@ star_catalog.naked_eye_limit_mag is stars.naked_eye_limit_mag: True
 |---|---|---|
 | 1 | 静噪门限统一到「相对该模式噪声基线的余量」（刻度 `-100..-20`，默认 `-50` ≈ 6 dB 余量） | **已落地**（§10-1）。剩余：`main_window` 初值 `-80` 需 1 行 patch（P-8a），`gain_db` 写入需设置线接 1 行。 取证 `12a43a00` — `mbdsdr_ai/squelch.py:56` — `DEFAULT_SQUELCH_DBFS = -50.0` |
 | 2 | 过境仰角拆成 `VISIBLE=5°` / `PASS=10°`，`next_pass()` 用 10° | **已落地**（§10-2）。剩余：`rf_sky_view` 的 `PASS_MIN_ALT_DEG` 改引用常量（P-2b）。 取证 `12a43a00` — `mbdsdr_ai/sat_passes.py:296` — `PASS_MIN_ALT_DEG = 10.0`（基准 `12a43a00`） |
-| 3 | 默认采样率 2.4 MS/s（按设备能力回落） | **已落地**（§10-3）：内核默认 2.4M + `nearest_sample_rate()` 回落 + 状态回报实际值；三套 RTL 基线收口；`test` 100 passed。 取证 `6ed9ee7d` — `mbdsdr_ai/sdr_backend.py:159` — `DEFAULT_SAMPLE_RATE_HZ = 2_400_000`（基准 `6ed9ee7d`） |
+| 3 | 默认采样率 2.4 MS/s（按设备能力回落） | **已落地**（§10-3）：内核默认 2.4M + `nearest_sample_rate()` 回落 + 状态回报实际值；三套 RTL 基线收口；`test` 100 passed。 取证 `bb7dda23` — `mbdsdr_ai/sdr_status.py:21` — `DEFAULT_SAMPLE_RATE_HZ = 2_400_000`（基准 `bb7dda23`；原始落地 `6ed9ee7d`） |
 | 3b | 调谐步进统一 10 kHz | **前提不成立，撤回**（§D-2）：C++ 调谐步进本就是 `kFreqCoarseStepHz=10 kHz`；100 kHz 是扫描步进。 |
 | 4 | 峰值 6 dB vs 15 dB | **裁定：统一检测器定义 `rel 6.0 / abs -100 dBFS / 3 帧 / 5 bin / 10 帧`**；Python 6.0 保留，C++ 显示门新增 `kPeakRelDb=6.0`（校准参考门 15 保留不合并）。15 dB + 绝对底 = -85 dBFS，+8 dB 弱载波 -92 dBFS → 24 帧 0 峰，故不取 15。 |
 | 5 | "无数据"哨兵 | **结论：改用 NaN/None，禁止用落在量程内的 dB 数**；改 Python 侧 → P-8c。C++ `-100` 是真实安静读数，加注释区分。 |
