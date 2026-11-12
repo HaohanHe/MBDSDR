@@ -109,7 +109,7 @@ fallback = self.COLORS[key]
 - 接线：`tokens.py` 的 `THEME_COLORS` 5 处各删 1 行；`scripts/theme_contrast.py:48`
   删 `("success","bg",3.0,"成功色")` 一行。
 - 视觉：**0 变化**（没有任何读取点）。
-- 门禁：会少 5 条检查（5 套主题 × `success/bg`），当前全部通过。
+- 门禁：会少 5 条检查（5 套主题 × `success/bg`），当前全部达标（2026-11-13 复跑 `python scripts/theme_contrast.py` → 全部达标（60 项））。
   必须同笔删 `PAIRS` 那一行——因为 `audit()` 对缺失键是 `continue`
   （`theme_contrast.py:59-60`），只删字典不删配对的话不会红，会**静默少检**。
 - `_BASELINE` 不动：那里读的是全局 `success`，与主题副本无关。
