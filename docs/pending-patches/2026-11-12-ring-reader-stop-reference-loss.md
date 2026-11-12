@@ -1,6 +1,7 @@
 # 待应用补丁：`_ThreadedRingReader.stop()` join 超时后丢线程引用
 
-- 状态：**未应用**（产品代码本轮零改动）
+- 状态：**已应用**（2026-11-12 21:20，记录型接管后应用；见
+  `docs/COORDINATION.md` §6.1.4「接管记录：mbdsdr_ai/sdr_backend.py」）
 - 补丁：`docs/pending-patches/2026-11-12-ring-reader-stop-reference-loss.patch`
 - 基准提交：`79e1d297`（2026-11-12）
 - 影响文件：`mbdsdr_ai/sdr_backend.py`（1 处，4 行）

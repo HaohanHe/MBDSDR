@@ -2197,6 +2197,39 @@ No supported devices found），GNSS+SDR 同开复验没做成；离线那次
 
 **填不出「最后活跃证据」就不许接管**——那说明你只是不想再等。
 
+### 接管记录：mbdsdr_ai/sdr_backend.py
+
+- 接管人 / 会话：接入层资源线 / 6ae85f56a16a76df1598024e
+- 接管时间 / HEAD：2026-11-12 21:20 / `9fc500fe`
+- 原持有者：书签应用顺序线
+- 原 claim 证据：acquired_at=2026-11-12 18:49:35 ttl=120min 心跳=18:49:35，
+  当前已过期 **+30.2 分钟**（21:19:47 实测），满足 ≥30 分钟
+- 原 owner 最后活跃证据（原始输出）：
+  - `file_claim.py status mbdsdr_ai/sdr_backend.py`：
+    `owner=书签应用顺序线 held=150.2/120.0min EXPIRED(+30.2min) pid=22396 since=2026-11-12 18:49:35`
+  - `git log --oneline --since="2026-11-12 12:00" -- mbdsdr_ai/sdr_backend.py`：
+    `2b72f987 fix(demod): set_demod 先下发模式默认带宽再写 status`（18:49:53，即
+    claim 后 18 秒完成提交）；此后 150 分钟无新提交
+  - `git status --porcelain -- mbdsdr_ai/sdr_backend.py`：空（无在途改动）
+  - `Get-Process -Id 22396`：无输出（进程已退出）；文件 mtime 18:47:50 早于 claim，
+    claim 期内零写入
+- 凭什么判定「已放弃」而不是「在忙」：
+  过期 ≥ 30min（+30.2）✅；`git status` 为空 ✅；18:49:53 后无提交 ✅；
+  pid 22396 已不存在且创建时间无法复用 ✅ —— 四条同时成立。
+- 本次改动范围：
+  - `mbdsdr_ai/sdr_backend.py` `_ThreadedRingReader.stop()`：join 超时后只在
+    `_thread.is_alive()` 为假时置 `None`（5 行增 / 1 行删）；
+  - `tests/test_network_resource_leaks.py`：删除 `xfail(strict=True)` 立案标记，
+    转为普通断言（缺陷已修，按 strict 设计自动变红后转正）；
+  - 本文件这条记录。
+- 保留原改动的证明：接管前 `git hash-object mbdsdr_ai/sdr_backend.py`
+  = `f5886177031b1ac60bc6aca46717b1f83f8593a2`；接管前该路径 `git status` 为空，
+  接管提交 diff 只含上面列出的改动，不含原 owner 任何未提交内容。
+- 引用：`docs/pending-patches/2026-11-12-ring-reader-stop-reference-loss.patch`；
+  接管提交即包含本记录的那次提交（`fix(sdr_backend): stop() 超时后不再丢弃线程引用`）
+- 回退：`git checkout -- mbdsdr_ai/sdr_backend.py` 并恢复 xfail 标记，
+  或 `git revert <接管提交>`
+
 ### 6.2 共享文件清单（今天实际撞过的）
 
 - `desktop/main_window.py`

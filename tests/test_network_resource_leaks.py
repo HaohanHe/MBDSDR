@@ -354,15 +354,10 @@ def test_disconnect_while_producer_blocked_returns_promptly(
 #          一个生产者 → 两个生产者并发写同一 ring（_write 有锁不致撕裂，但
 #          重复读数/重复丢样记账，且线程数越堆越多）。
 #
-# 编码方式：xfail(strict=True)。理由——本轮不准改 sdr_backend.py，若写成普通
-# 红用例会让文件长期挂红、把以后真正的新红淹掉；strict 让它在缺陷修好那一刻
-# 变成 XPASS→失败，强迫接手的人删标记、转成普通断言。复现「现在确实是红的」：
-#     python -m pytest --runxfail -q tests/test_network_resource_leaks.py -k ring_reader
-@pytest.mark.xfail(
-    strict=True,
-    reason="sdr_backend.py 的 _ThreadedRingReader.stop() 在 join 超时后丢弃"
-           "_thread 引用；该文件被书签应用顺序线占用，待释放后修复",
-)
+# 编码方式：2026-11-12 曾用 xfail(strict=True) 立案（当时不许改 sdr_backend.py）。
+# 该文件按 docs/COORDINATION.md 6.1.4 记录型接管后，stop() 已改为「join 超时
+# 只在 _thread 确实退出时才置 None」，本用例随之转成普通断言：
+#     python -m pytest -q tests/test_network_resource_leaks.py -k ring_reader
 def test_ring_reader_stop_timeout_keeps_thread_reference():
     """join 超时的 stop() 必须保留线程引用（否则越界线程无法收尸/会双生产者）。"""
     gate = threading.Event()

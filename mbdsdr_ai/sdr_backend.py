@@ -1518,7 +1518,11 @@ class _ThreadedRingReader:
             self._cond.notify_all()
         if self._thread is not None:
             self._thread.join(timeout=2.0)
-            self._thread = None
+            # join 超时 ≠ 线程已退出：保留引用，下一次 stop()/调用方还能 join
+            # 收尸；置 None 会让越界线程永远无法 join，再 start() 还会多起一个
+            # 生产者（start() 只在 _thread 为 None 时新建）。
+            if not self._thread.is_alive():
+                self._thread = None
 
 
 class RTLSDRBackend(SDRBackend):
