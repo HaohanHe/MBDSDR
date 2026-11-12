@@ -40,12 +40,14 @@ def _derived_table(fields, *, parent="base_layout", source=_GOOD_SOURCE, **extra
             "sync": {"type": "asm", "hex": "1ACFFC1D"},
             "crc": {"name": "crc16_ccitt_false", "cover": "payload"},
             "honesty": "parent honesty",
+            "verification": "schema_only",
             "fields": [_field("a", 0, 1), _field("b", 1, 2)],
         },
         "child": {
             "frame_type": "RT",
             "derived_from": parent,
             "honesty": "child honesty",
+            "verification": "schema_only",
             **({"source": source} if source is not None else {}),
             "fields": fields,
             **extra,
@@ -91,8 +93,10 @@ def test_unknown_parent_honest_error():
 def test_derivation_cycle_rejected():
     table = {
         "_schema": "test",
-        "x": {"derived_from": "y", "source": _GOOD_SOURCE, "fields": []},
-        "y": {"derived_from": "x", "source": _GOOD_SOURCE, "fields": []},
+        "x": {"derived_from": "y", "source": _GOOD_SOURCE,
+              "verification": "schema_only", "fields": []},
+        "y": {"derived_from": "x", "source": _GOOD_SOURCE,
+              "verification": "schema_only", "fields": []},
     }
     with pytest.raises(ValueError, match="成环"):
         SP._resolve_layout(table, "x")
@@ -141,6 +145,62 @@ def test_only_grandfathered_layouts_may_lack_source():
             f"{name} 的 source.url 不是公开 URL")
         assert str(src.get("retrieved_at", "")).strip(), (
             f"{name} 的 source 缺抓取时间")
+
+
+# ── 验证等级（机器字段 verification）────────────────────────────
+def test_repo_layouts_all_declare_schema_only():
+    """截至 2026-11-12 无任何布局做过规范示例逐字段对拍或 OTA 验证。
+
+    因此库内只允许 schema_only；谁把某条改成 spec_example / ota，必须
+    同时给出 verification_evidence，否则本测试与加载器都会红。
+    """
+    names = [n for n in TABLE if not n.startswith("_")]
+    assert names, "库里应有布局条目"
+    for name in names:
+        assert TABLE[name].get("verification") == "schema_only", (
+            f"{name} 的 verification 必须是 schema_only：当前没有规范示例或 "
+            "OTA 证据；声称更高等级必须同时给 verification_evidence")
+
+
+def test_missing_verification_rejected():
+    table = _derived_table([])
+    del table["child"]["verification"]
+    with pytest.raises(ValueError, match="缺 verification"):
+        SP._resolve_layout(table, "child")
+    table = _derived_table([])
+    del table["base_layout"]["verification"]
+    with pytest.raises(ValueError, match="缺 verification"):
+        SP._resolve_layout(table, "child")
+
+
+def test_invalid_verification_rejected():
+    table = _derived_table([])
+    table["child"]["verification"] = "looks_good"
+    with pytest.raises(ValueError, match="非法"):
+        SP._resolve_layout(table, "child")
+
+
+@pytest.mark.parametrize("level", ["spec_example", "ota"])
+def test_claiming_one_level_up_requires_evidence_path(level):
+    table = _derived_table([])
+    table["child"]["verification"] = level
+    with pytest.raises(ValueError, match="verification_evidence"):
+        SP._resolve_layout(table, "child")
+    table["child"]["verification_evidence"] = "  "
+    with pytest.raises(ValueError, match="verification_evidence"):
+        SP._resolve_layout(table, "child")
+    table["child"]["verification_evidence"] = (
+        "mbdsdr_ai/tests/evidence/spec_example.json")
+    layout = SP._resolve_layout(table, "child")
+    assert layout["verification"] == level
+
+
+def test_repo_layout_claiming_ota_without_evidence_is_rejected():
+    """反证：把真实条目改成 ota 但不配证据 → 加载即红。"""
+    table = json.loads(json.dumps(TABLE))
+    table["funcube1_ao73_frame"]["verification"] = "ota"
+    with pytest.raises(ValueError, match="verification_evidence"):
+        SP._resolve_layout(table, "funcube1_ao73_frame")
 
 
 # ── 兼容性：旧条目解析逐字不变 ─────────────────────────────────
