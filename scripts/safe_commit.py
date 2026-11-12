@@ -500,9 +500,16 @@ def _commit_locked(
     return 0, f"已提交 {head}，blob 逐文件复核一致"
 
 
-def main(argv: list[str] | None = None) -> int:
+def _build_parser() -> argparse.ArgumentParser:
+    """命令行。``--files`` 用 extend：重复传参合并，绝不「只取最后一个」。"""
     ap = argparse.ArgumentParser(description="私有 index 安全提交（形态⑪）")
-    ap.add_argument("--files", nargs="+", required=True, help="本笔要提交的文件（精确清单）")
+    ap.add_argument(
+        "--files",
+        nargs="+",
+        action="extend",
+        required=True,
+        help="本笔要提交的文件（精确清单）；可重复传，按出现顺序合并",
+    )
     ap.add_argument("--message-file", required=True, help="提交信息文件（UTF-8）")
     ap.add_argument("--retries", type=int, default=3, help="撞锁/基线变化时的重建次数")
     ap.add_argument(
@@ -513,12 +520,24 @@ def main(argv: list[str] | None = None) -> int:
         help="从私有 index 排除的 hunk（可重复）；工作树保持原样",
     )
     ap.add_argument("--exclude-owner", default="", help="排除 hunk 的归属线（可留空）")
+    return ap
+
+
+def main(argv: list[str] | None = None) -> int:
+    ap = _build_parser()
     args = ap.parse_args(argv)
 
     # 只剥掉真正的 "./" 前缀：lstrip("./") 会把点文件削成无点名字
     # （.gitattributes → gitattributes），这类文件根本提交不了。
     files = [f.replace("\\", "/") for f in args.files]
     files = [f[2:] if f.startswith("./") else f for f in files]
+    # 重复声明按首次出现顺序去重；声明集合必须原样打出——这份清单就是作用域
+    # 断言的全部依据，静默截短一次就会「内容没丢、分两笔」地骗过所有检查。
+    uniq = list(dict.fromkeys(files))
+    if len(uniq) != len(files):
+        print(f"[files] 重复路径已合并：{len(files)} → {len(uniq)} 个")
+    print(f"[files] 本次声明 {len(uniq)} 个文件：{', '.join(uniq)}")
+    files = uniq
     message = Path(args.message_file).read_bytes()
     try:
         exclusions = _parse_exclusions(args.exclude_hunk, files)

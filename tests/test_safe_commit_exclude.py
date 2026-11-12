@@ -142,3 +142,47 @@ def test_exclude_range_must_cover_whole_hunk(tmp_path):
     assert proc.returncode != 0, out
     assert "未完整覆盖" in out
     assert _git(repo, "rev-parse", "HEAD").stdout.strip() == before
+
+
+def test_repeated_files_flag_commits_every_declared_file(tmp_path):
+    """反证：``--files A --files B`` 不许只提交最后一个。
+
+    ``nargs='+'`` 的默认语义是「重复传参只取最后一次」，而 ``--files`` 清单就是
+    作用域断言的全部依据——被悄悄截短的声明集合会让「只交了一个文件」也全绿。
+    现在用 ``action='extend'`` 合并：两个文件必须都进这一笔。
+    """
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-q", check=True)
+    _git(repo, "config", "user.email", "safe-commit@example.invalid", check=True)
+    _git(repo, "config", "user.name", "safe-commit", check=True)
+    _git(repo, "config", "commit.gpgsign", "false", check=True)
+    (repo / "a.txt").write_text("a\n", encoding="utf-8")
+    (repo / "b.txt").write_text("b\n", encoding="utf-8")
+    _git(repo, "add", "a.txt", "b.txt", check=True)
+    _git(repo, "commit", "-q", "-m", "base", check=True)
+    (repo / "a.txt").write_text("a2\n", encoding="utf-8")
+    (repo / "b.txt").write_text("b2\n", encoding="utf-8")
+
+    msg = tmp_path / "msg.txt"
+    msg.write_text("test: repeated --files\n", encoding="utf-8")
+    env = os.environ.copy()
+    env.pop("GIT_INDEX_FILE", None)
+    env["MBDSDR_REPO_ROOT"] = str(repo)
+
+    proc = subprocess.run(
+        [
+            sys.executable, str(SAFE),
+            "--files", "a.txt",
+            "--files", "b.txt",
+            "--message-file", str(msg),
+        ],
+        cwd=str(repo), env=env, capture_output=True, text=True,
+        encoding="utf-8", errors="replace",
+    )
+    out = proc.stdout + proc.stderr
+    assert proc.returncode == 0, out
+    assert "本次声明 2 个文件" in out, out
+    names = _git(repo, "show", "--pretty=", "--name-only", "HEAD").stdout.split()
+    assert sorted(names) == ["a.txt", "b.txt"], out
+
