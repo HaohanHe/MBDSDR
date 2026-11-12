@@ -188,14 +188,14 @@ def _report_hooks(proc: subprocess.CompletedProcess, env: dict) -> None:
     """成功路径也把钩子交代清楚：跑没跑、scope 结果、标记去哪了。
 
     钩子的输出由 git 转发进 commit 的 stdout/stderr，而 ``_run`` 一直在捕获，
-    所以这里主动回放 pre-commit / post-commit 的关键行，再补一条结论——
+    所以这里主动回放 pre-commit / post-commit / 凭据扫描的关键行，再补一条结论——
     「通过了」本身必须可见，否则不可见的门禁等于没有。
     """
     text = (proc.stdout + proc.stderr).decode("utf-8", "replace")
     lines = [
         line.rstrip()
         for line in text.splitlines()
-        if line.lstrip().startswith(("[pre-commit]", "[post-commit]"))
+        if line.lstrip().startswith(("[pre-commit]", "[post-commit]", "[secret-scan]"))
     ]
     for line in lines:
         print(line)
