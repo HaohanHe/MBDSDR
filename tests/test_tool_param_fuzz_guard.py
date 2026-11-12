@@ -291,8 +291,14 @@ def test_fuzz_memory_cap_aborts_case():
 
     import tool_param_fuzz as fuzz
 
-    if fuzz._mem_probe() is None:
-        pytest.skip("当前平台拿不到进程内存，内存闸不可用")
+    if not fuzz._mem_probe_supported():
+        pytest.skip(
+            "缺：当前平台没有进程内存探针（非 Windows 且无 /proc/self/status）"
+            "｜可跑：在 Windows 或带 /proc 的 Linux 上重跑"
+            "｜区分：只有平台判定不支持才跳过；平台支持但 _mem_probe() 返回 None "
+            "或抛错都会直接红")
+    assert fuzz._mem_probe() is not None, (
+        "平台应支持进程内存探针，但 _mem_probe() 返回 None：探针代码回归")
 
     held = []
 
