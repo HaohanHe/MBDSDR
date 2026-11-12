@@ -15,10 +15,10 @@
 | 判据 | `SHAPE_RULES` 7 条：GitHub classic / fine-grained PAT、GitLab PAT、Slack token、AWS access key、JWT、PEM 私钥块 |
 | 不跑的规则 | 熵（全量历史 700+ MiB，熵告警没有信号，只会淹掉形状命中）；AST 的 argv/日志规则也不跑 |
 | 豁免 | 行内 `# pragma: allowlist secret` 同样生效（逐行） |
-| 扫描对象 | `git cat-file --batch-all-objects` 列出的**对象库全部 blob**，13 622 个 / 757.2 MiB |
+| 扫描对象 | `git cat-file --batch-all-objects` 列出的**对象库全部 blob**，13 648 个 / 759.5 MiB |
 | 二进制跳过 | 679 个（首 8 KB 含 NUL，不做文本扫描） |
 | 非 blob | 0（只把 blob 喂给扫描器） |
-| 归属索引 | `rev-list --objects --all --reflog <25 个 worktree HEAD>` + `git log --raw` 反向索引（blob → 引入它的提交） |
+| 归属索引 | `rev-list --objects --all --reflog <26 个 worktree HEAD>` + `git log --raw` 反向索引（blob → 引入它的提交） |
 | HEAD 可达性 | 逐个命中提交跑 `git merge-base --is-ancestor <commit> HEAD`，不靠 `git log` 印象 |
 | 输出纪律 | 只打印路径、行号、规则名、提交号；任何分支都不打印命中的值 |
 
