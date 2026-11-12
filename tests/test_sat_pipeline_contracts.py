@@ -135,6 +135,27 @@ class TestStageContracts(_Base):
                 self.assertEqual(err, "",
                                  f"{pipe.pipeline_id} 的 stage 契约接不上: {err}")
 
+    def test_every_registered_handler_declares_real_types(self):
+        """已注册的 handler 必须声明非空类型，且不许用 ``*`` 绕过校验。
+
+        机制 E 允许「未声明 = 不参与校验」以兼容旧 handler，但这条会被
+        用来逃避补类型：新 handler 忘写或随手写 ``*``，错配链路依旧静默
+        跑通。这里把「声明且真实」变成注册面的硬门禁。
+        """
+        self.assertTrue(STAGE_HANDLERS)
+        for module in STAGE_HANDLERS:
+            with self.subTest(module=module):
+                self.assertIn(module, STAGE_CONTRACTS,
+                              f"{module} 未声明 inputs/outputs")
+                contract = STAGE_CONTRACTS[module]
+                self.assertTrue(contract["inputs"],
+                                f"{module} 的 inputs 为空声明")
+                self.assertTrue(contract["outputs"],
+                                f"{module} 的 outputs 为空声明")
+                self.assertNotIn(
+                    "*", contract["inputs"] + contract["outputs"],
+                    f"{module} 用通配符 * 绕过类型校验")
+
 
 if __name__ == "__main__":
     unittest.main()
