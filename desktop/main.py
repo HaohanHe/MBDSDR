@@ -465,6 +465,75 @@ def _run_import_probe(spec: str) -> int:
     return 0 if not failed else 2
 
 
+def _run_resource_probe() -> int:
+    """产物解释器内的运行期资源自检：``--resource-probe``。
+
+    清单对拍（``scripts/check_dist_head_parity.py``）只证明「文件在产物里」，
+    不证明「冻结后按 ``__file__`` 相对路径读得到」。这里逐类真读一次：
+
+    * 版本：``version.py`` 按 ``__file__`` 相对读 ``mbdsdr_ai/VERSION``；
+    * 语言：i18n 加载 ``locale/en.json``，同一个键打印中文/英文两份文案
+      （换 locale 文案必须变，否则是文件没进包）；
+    * 数据：``data/dso_catalog.json`` 解析成条目、``data/moon_albedo_*.npz``
+      能打开；
+    * 图标：``assets/icon.ico`` 存在且非空。
+
+    任一类失败返回 2。洁净约束同 ``--import-probe``：不建窗口、不初始化
+    Qt、不写任何文件/配置，只输出到 stdout/stderr。
+    """
+    from pathlib import Path
+
+    stream = sys.stdout if sys.stdout is not None else sys.stderr
+    failed: list[str] = []
+
+    def report(ok: bool, line: str) -> None:
+        if not ok:
+            failed.append(line)
+        if stream is not None:
+            print(("[probe] OK " if ok else "[probe] FAIL ") + line,
+                  file=stream, flush=True)
+
+    try:
+        from mbdsdr_ai.version import __version__ as ver
+        report(bool(ver), f"version {ver}")
+    except Exception as exc:  # noqa: BLE001 - 自检要把失败如实报出
+        report(False, f"version: {type(exc).__name__}: {exc}")
+
+    try:
+        from mbdsdr_ai import i18n
+        zh = i18n.tr("tool.nav_bit_sync.description", lang="zh")
+        en = i18n.tr("tool.nav_bit_sync.description", lang="en")
+        report(bool(en) and en != zh,
+               f"locale en={en[:48]!r} zh={zh[:48]!r}")
+    except Exception as exc:  # noqa: BLE001
+        report(False, f"locale: {type(exc).__name__}: {exc}")
+
+    try:
+        from mbdsdr_ai.astronomy.dso import load_dso_catalog
+        count = len(load_dso_catalog())
+        report(count > 0, f"data dso_catalog entries={count}")
+    except Exception as exc:  # noqa: BLE001
+        report(False, f"data dso_catalog: {type(exc).__name__}: {exc}")
+
+    try:
+        import numpy as np
+        from mbdsdr_ai.astronomy.moon_albedo import DATA_PATH
+        with np.load(DATA_PATH, allow_pickle=False) as npz:
+            report(len(npz.files) > 0, f"data moon_albedo keys={len(npz.files)}")
+    except Exception as exc:  # noqa: BLE001
+        report(False, f"data moon_albedo: {type(exc).__name__}: {exc}")
+
+    try:
+        base = Path(getattr(sys, "_MEIPASS", None)
+                    or Path(__file__).resolve().parent)
+        icon = base / "assets" / "icon.ico"
+        report(icon.is_file() and icon.stat().st_size > 0, f"assets icon.ico {icon}")
+    except Exception as exc:  # noqa: BLE001
+        report(False, f"assets: {type(exc).__name__}: {exc}")
+
+    return 0 if not failed else 2
+
+
 def _import_probe_spec(argv: list[str]) -> str | None:
     """只识别 ``--import-probe``（空格/等号两种写法）；值缺失/为空返回 None，
     交给 argparse 按普通非法参数报错。其余开关一律不看，保持既有入口不变。"""
@@ -601,6 +670,9 @@ def _ensure_stdio_for_pythonw():
 # 探针入口必须在任何日志/Qt/界面模块初始化之前判掉：它只做 import 并退出。
 # 放在 _ensure_stdio_for_pythonw() 之前，保证「不写日志文件」；放在 PySide6 /
 # themes / main_window 导入之前，保证「不初始化 Qt」。
+if "--resource-probe" in sys.argv[1:]:
+    raise SystemExit(_run_resource_probe())
+
 _probe_spec = _import_probe_spec(sys.argv[1:])
 if _probe_spec is not None:
     raise SystemExit(_run_import_probe(_probe_spec))
