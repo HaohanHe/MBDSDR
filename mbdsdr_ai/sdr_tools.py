@@ -35,7 +35,7 @@ from datetime import datetime, timezone
 from typing import Dict, Any, Optional
 
 from .error_catalog import exception_code, user_message
-from .tool_registry import ToolResult
+from .tool_results import ToolResult
 from . import orbit
 from . import doppler_link
 from .sdr_backend import (SDRBackendManager, SDRStatus, format_sample_rate,
@@ -3870,7 +3870,7 @@ def _meteor_viterbi_decode_fn_tool(args) -> "ToolResult":
     """Meteor Viterbi 解码：coded_bits -> decoded info bits。"""
     import json as _json
     from .meteor_sat import meteor_viterbi_decode
-    from .tool_registry import numeric_array
+    from .tool_results import numeric_array
     coded, err = numeric_array(args, "coded_bits")
     if err:
         return ToolResult(success=False, content=f"错误: {err}")
