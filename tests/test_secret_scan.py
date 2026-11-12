@@ -15,10 +15,13 @@ from __future__ import annotations
 import base64
 import hashlib
 import os
+import re
 import shutil
 import subprocess
 import sys
 from pathlib import Path
+
+import pytest
 
 REPO = Path(__file__).resolve().parents[1]
 SCRIPT = REPO / "scripts" / "secret_scan.py"
@@ -379,7 +382,7 @@ def test_entropy_env_file_is_must(tmp_path: Path) -> None:
 
     result = run_scan(tmp_path, "--root", str(tmp_path))
     text = result.stdout + result.stderr
-    assert ".env:1 high-entropy-string" in text, text
+    assert ".env:1:" in text, text
     assert "MUST  " in text, text
     assert "MUST=1" in text and "SAMPLE=0" in text, text
     assert RANDOM_B64 not in text
@@ -393,7 +396,7 @@ def test_entropy_json_api_key_is_must(tmp_path: Path) -> None:
 
     result = run_scan(tmp_path, "--root", str(tmp_path))
     text = result.stdout + result.stderr
-    assert "config.json:1 high-entropy-string" in text, text
+    assert "config.json:1:" in text, text
     assert "MUST  " in text, text
     assert "MUST=1" in text and "SAMPLE=0" in text, text
     assert RANDOM_B64 not in text
@@ -416,8 +419,20 @@ def test_long_blobs_in_assets_stay_sample(tmp_path: Path) -> None:
     assert "MUST=0" in text and "SAMPLE=2" in text, text
 
 
+def test_prose_file_path_before_colon_is_not_must(tmp_path: Path) -> None:
+    """`tokens.h:<长串>` 是文档里的「文件路径 + 标识符」，不是 `token:` 字段。"""
+    (tmp_path / "notes.md").write_text(
+        f"see `cpp/src/core/tokens.h:{RANDOM_B64}`\n", encoding="utf-8"
+    )
+
+    result = run_scan(tmp_path, "--root", str(tmp_path))
+    text = result.stdout + result.stderr
+    assert "notes.md:1 high-entropy-string" in text, text
+    assert "MUST=0" in text and "SAMPLE=1" in text, text
+
+
 def test_entropy_stats_reports_distribution(tmp_path: Path) -> None:
-    """`--entropy-stats` 的分层口径必须与扫描一致（每文件每规则一条）。"""
+    """`--entropy-stats` 的分层口径必须与扫描一致（SAMPLE 每文件一条 / MUST 每命中一条）。"""
     (tmp_path / "a.py").write_text(f'X = "{RANDOM_B64}"\n', encoding="utf-8")
     (tmp_path / ".env").write_text(f"API_KEY={RANDOM_B64}\n", encoding="utf-8")
     (tmp_path / "b.json").write_text('{"api_key": "%s"}\n' % RANDOM_B64, encoding="utf-8")
@@ -428,8 +443,105 @@ def test_entropy_stats_reports_distribution(tmp_path: Path) -> None:
     result = run_scan(tmp_path, "--entropy-stats", "--root", str(tmp_path))
     text = result.stdout + result.stderr
     assert result.returncode == 0, text
-    assert "每文件每规则一条" in text, text
+    assert "SAMPLE 每文件一条 / MUST 每命中一条" in text, text
     assert "总=4 must=2 sample=2" in text, text
     for section in ("按后缀", "按目录（前两层）", "按分数区间", "按分级"):
         assert section in text, text
     assert "MUST " in text and RANDOM_B64 not in text, text
+
+
+# ----------------------------------------------------------------------
+# MUST 破例（2026-11-13）：同一文件命中几处就报几处
+# ----------------------------------------------------------------------
+def test_must_reports_every_value_in_one_file(tmp_path: Path) -> None:
+    """同一个 .json 里两枚 api_key 值都必须出现：分行、同行两种写法都不许吞。"""
+    first = base64.b64encode(hashlib.sha256(b"probe-one").digest()).decode()
+    second = base64.b64encode(hashlib.sha256(b"probe-two").digest()).decode()
+    (tmp_path / "two_lines.json").write_text(
+        '{"api_key": "%s"}\n{"api_key": "%s"}\n' % (first, second), encoding="utf-8"
+    )
+    (tmp_path / "one_line.json").write_text(
+        '{"api_key": "%s", "api_key": "%s"}\n' % (first, second), encoding="utf-8"
+    )
+
+    result = run_scan(tmp_path, "--root", str(tmp_path))
+    text = result.stdout + result.stderr
+    assert result.returncode == 0, text
+    assert "two_lines.json:1:" in text and "two_lines.json:2:" in text, text
+    # 同一行两枚值靠列号区分，不能被 set() 去重成一条。
+    assert text.count("one_line.json:1:") == 2, text
+    assert "MUST=4" in text and "SAMPLE=0" in text, text
+    assert first not in text and second not in text, text
+
+
+# ----------------------------------------------------------------------
+# 无后缀凭据面（.env 洞的同类出口）：整名必须进 MUST
+# ----------------------------------------------------------------------
+NO_SUFFIX_CREDENTIAL_FILES = (
+    ".netrc",
+    ".npmrc",
+    ".pypirc",
+    "id_rsa",
+    "id_ed25519",
+    "credentials",
+    ".htpasswd",
+)
+
+
+def test_no_suffix_credential_files_are_all_must(tmp_path: Path) -> None:
+    """七个无后缀凭据面逐个进 MUST：文件名判据不能只靠 `Path(...).suffix`。"""
+    for name in NO_SUFFIX_CREDENTIAL_FILES:
+        # 内容故意不带凭据字段名，逼着分级只能靠「文件名」
+        (tmp_path / name).write_text(f'PAYLOAD = "{RANDOM_B64}"\n', encoding="utf-8")
+
+    result = run_scan(tmp_path, "--root", str(tmp_path))
+    text = result.stdout + result.stderr
+    assert result.returncode == 0, text
+    for name in NO_SUFFIX_CREDENTIAL_FILES:
+        assert f"{name}:1:" in text, f"{name} 未进 MUST\n{text}"
+    assert f"MUST={len(NO_SUFFIX_CREDENTIAL_FILES)}" in text, text
+    assert "SAMPLE=0" in text, text
+
+
+# ----------------------------------------------------------------------
+# 两条 MUST 的归宿：已知良性登记（路径 + 规则名 + 值 sha256 三项匹配）
+# ----------------------------------------------------------------------
+_BENIGN_FIXTURES = (
+    REPO.parent / "scratch/refs/OnAir/tests/mesh/test_mesh_proto_rs.cpp",
+    REPO.parent / "scratch/refs/deepseek-harness/apps/desktop/tests/macos-signature.spec.ts",
+)
+
+
+def test_known_benign_entropy_needs_all_three(tmp_path: Path) -> None:
+    """登记放行要求路径/规则/值三项同时匹配；路径挪走或值改了必须重新进 MUST。"""
+    missing = [p for p in _BENIGN_FIXTURES if not p.exists()]
+    if missing:
+        pytest.skip("第三方参照克隆不在本机：" + ", ".join(str(p) for p in missing))
+
+    for fixture in _BENIGN_FIXTURES:
+        rel = fixture.relative_to(REPO.parent)
+        scanned = run_scan(REPO, str(fixture))
+        scanned_text = scanned.stdout + scanned.stderr
+        assert "MUST " not in scanned_text, f"{fixture.name} 登记未生效\n{scanned_text}"
+
+        # 解除条件 ①：值改了（sha256 不同）→ 路径仍是登记路径也必须重新报 MUST。
+        mutated = tmp_path / "mutated" / rel
+        mutated.parent.mkdir(parents=True, exist_ok=True)
+        mutated.write_text(
+            re.sub(
+                r"[A-Za-z0-9+/=_-]{32,}",
+                lambda m: m.group(0)[:-1] + ("A" if m.group(0)[-1] != "A" else "B"),
+                fixture.read_text(encoding="utf-8"),
+            ),
+            encoding="utf-8",
+        )
+        changed = run_scan(REPO, str(mutated))
+        assert "MUST " in (changed.stdout + changed.stderr), f"{fixture.name} 改值后未报"
+
+    # 解除条件 ②：同值挪到登记路径之外 → 必须重新报 MUST。
+    rel = "scratch/refs/OnAir/tests/mesh/test_mesh_proto_rs.cpp"
+    moved = tmp_path / "elsewhere" / "test_mesh_proto_rs.cpp"
+    moved.parent.mkdir(parents=True, exist_ok=True)
+    moved.write_text((REPO.parent / rel).read_text(encoding="utf-8"), encoding="utf-8")
+    moved_result = run_scan(REPO, str(moved))
+    assert "MUST " in (moved_result.stdout + moved_result.stderr), moved_result.stdout
