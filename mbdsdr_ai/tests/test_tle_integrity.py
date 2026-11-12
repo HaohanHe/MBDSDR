@@ -229,8 +229,8 @@ class TestFetchRecord:
     def test_fresh_cache_is_reported_as_cache(self, monkeypatch, tmp_path):
         import mbdsdr_ai.orbit as orbit
         import time as _time
-        monkeypatch.setattr(orbit, "_CACHE_DIR", str(tmp_path))
-        monkeypatch.setattr(orbit, "_TLE_CACHE", {})
+        monkeypatch.setenv("MBDSDR_TLE_CACHE_DIR", str(tmp_path))
+        orbit.reset_tle_cache()
         self._write_cache(tmp_path, mtime=_time.time() - 3600.0)
         rec = orbit.fetch_tle_record(40069)
         assert rec["refresh_status"] == "cache"
@@ -241,8 +241,8 @@ class TestFetchRecord:
                                                      tmp_path):
         import mbdsdr_ai.orbit as orbit
         import time as _time
-        monkeypatch.setattr(orbit, "_CACHE_DIR", str(tmp_path))
-        monkeypatch.setattr(orbit, "_TLE_CACHE", {})
+        monkeypatch.setenv("MBDSDR_TLE_CACHE_DIR", str(tmp_path))
+        orbit.reset_tle_cache()
         monkeypatch.setenv("MBDSDR_OFFLINE", "1")
         old = _time.time() - 10 * 86400.0
         self._write_cache(tmp_path, mtime=old)
@@ -259,8 +259,8 @@ class TestFetchRecord:
     def test_no_data_no_network_is_honest_error(self, monkeypatch, tmp_path):
         import mbdsdr_ai.orbit as orbit
         from mbdsdr_ai.orbit import TLEUnavailableError
-        monkeypatch.setattr(orbit, "_CACHE_DIR", str(tmp_path))
-        monkeypatch.setattr(orbit, "_TLE_CACHE", {})
+        monkeypatch.setenv("MBDSDR_TLE_CACHE_DIR", str(tmp_path))
+        orbit.reset_tle_cache()
         monkeypatch.setenv("MBDSDR_OFFLINE", "1")
         with pytest.raises(TLEUnavailableError):
             orbit.fetch_tle_record(99999999)
