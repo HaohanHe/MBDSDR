@@ -1822,6 +1822,19 @@ void TestAgent::bookmarkToolsRealExecutionWithInjectedStore() {
         if (m.selected) { QCOMPARE(m.freqHz, 98.5e6); saw = true; }
     QVERIFY(saw);
 
+    // Bookmark #1 stores (NFM, 12500 Hz). Tuning it must re-apply the stored
+    // mode+bandwidth, not just move the VFO: same mode -> bandwidth -> tune
+    // order as the ControlHub path (vfoSetMode resets bandwidth to the default).
+    {
+        QJsonObject t1; t1["index"] = 1;
+        QJsonObject r1b = run("tune_to_bookmark", t1);
+        QVERIFY2(r1b.value("ok").toBool(), qPrintable(QString::fromUtf8(
+            QJsonDocument(r1b).toJson(QJsonDocument::Compact))));
+        QCOMPARE(r1b.value("bandwidth_hz").toDouble(), 12500.0);
+        QCOMPARE(engine.demodMode(), QString("NFM"));
+        QCOMPARE(engine.bandwidth(), 12500.0);
+    }
+
     // out-of-range index -> honest error; null store -> honest error.
     QJsonObject oob; oob["index"] = 99;
     QJsonObject roob = run("tune_to_bookmark", oob);
