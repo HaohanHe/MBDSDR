@@ -142,28 +142,34 @@ class AmbiguousOwners:
 def owner_conflict_text(holder: Union[Dict[str, Any], AmbiguousOwners]) -> str:
     """占用冲突的可执行提示：谁占着、它还活着、下一步能做什么。
 
-    **措辞刻意避开桌面的连接错误分类关键词**（``usb`` / ``占用`` /
-    ``断开`` / ``权限`` / ``驱动`` 等，见 ``desktop/error_remedy.py`` 的
-    ``CONNECT_ERROR_RULES``）：这条消息本身就是结论，如果被二次分类成
-    ``usb_permission``，用户会被告知去改 udev / 装 WinUSB——而真正要做的是
-    去另一个进程里释放设备，照着改一百遍也不会好。措辞一旦命中关键词，
-    ``tests/test_owner_conflict_before_open.py`` 会当场红。
+    **正文里不放登记键**（2026-11-12 补裁）：键是任意字符串——Pluto 的 USB
+    键就是 ``uri:usb:1.2.5``，序列号里也可能带 ``timeout`` / ``busy`` /
+    ``soapy`` 之类的字样。桌面端对 ``status.error`` 按关键词二次分类
+    （``desktop/error_remedy.py`` 的 ``CONNECT_ERROR_RULES``），键里恰好含
+    这些字样时，这条结论会被改写成「权限不足 / 设备已断开」——补救方向正好
+    相反。键本身留在登记表与日志里（可查可复制），正文只放不会撞词的部分：
+    动作、持有者与 pid。
+
+    措辞同样刻意避开桌面分类表的关键词（``usb`` / ``占用`` / ``断开`` /
+    ``权限`` / ``驱动`` 等）：这条消息本身就是结论，被二次分类成
+    ``usb_permission`` 会让用户去改 udev / 装 WinUSB——而真正要做的是去
+    另一个进程里释放设备，照着改一百遍也不会好。
     """
     if isinstance(holder, AmbiguousOwners):
-        dev = holder.device_id
-        shown = ", ".join(holder.candidates[:3])
-        if len(holder.candidates) > 3:
-            shown += f" 等 {len(holder.candidates)} 条"
-        return (f"无法唯一确定设备：键 {dev} 同时对应多条登记（{shown}）。"
-                f"这通常是两根同型号设备同时插着——枚举读不到序列号时只能靠"
-                f"序号/总线位置区分，此时无法判断是哪一台（不会替你猜）。"
+        logger.warning(
+            "设备占用歧义：键 %s 同时命中 %d 条登记：%s",
+            holder.device_id, len(holder.candidates),
+            ", ".join(holder.candidates))
+        return (f"无法唯一确定设备：同一组标识命中了 {len(holder.candidates)} 条"
+                f"登记。这通常是两根同型号设备同时插着——枚举读不到序列号时"
+                f"只能靠序号/总线位置区分，此时无法判断是哪一台（不会替你猜）。"
                 f"你可以：① 在桌面端或 AI 侧释放其中一台后重试；"
                 f"② 只想用其中一根时，先拔掉另一根再点「刷新」；"
-                f"③ 或改用带独立地址的设备（如 rtl_tcp / SpyServer）。")
-    dev = holder.get("device_id") or ""
+                f"③ 或改用带独立地址的设备（如 rtl_tcp / SpyServer）。"
+                f"完整键已写入运行日志，也可用 sdr_list_devices 查看。")
     who = owner_label(holder.get("owner", ""))
-    return (f"设备 {dev} 当前由{who}持有（pid {holder.get('pid')}，进程仍在运行）。"
-            f"请先在{who}侧释放该设备，或改用其他设备"
+    return (f"设备当前由{who}持有（pid {holder.get('pid')}，进程仍在运行）。"
+            f"请先在{who}侧释放该设备后重试，或改用其他设备"
             f"（先用 sdr_list_devices 查看）。")
 
 
@@ -604,6 +610,35 @@ def release_active_owner(owner: str, device_id: str = "") -> bool:
     for dev in released:
         _OWNED_HERE.discard((str(owner), dev))
     return bool(released)
+
+
+def acquire_hardware_owner(key: str, aliases: Optional[List[str]] = None,
+                           allow_alias_match: bool = True
+                           ) -> Tuple[bool, str]:
+    """非 ``SDRBackend`` 硬件后端（bladeRF / LimeSDR）共用的占用登记入口。
+
+    这两个后端是 ctypes 直连的真实 USB 设备，**不走**
+    ``SDRBackend.connect()`` 模板方法；判据只写在模板方法里，它们就会静默地
+    少一层保护——不报错，也没人发现（没插设备的人永远走不到这条路径）。
+
+    返回 ``(ok, conflict_text)``。成功时调用方必须记住 ``key``，并在
+    ``disconnect()`` 里调 :func:`release_hardware_owner` 归还。
+    """
+    ok, holder = claim_active_owner(process_owner(), key, aliases=aliases,
+                                    allow_alias_match=allow_alias_match)
+    if ok:
+        return True, ""
+    return False, owner_conflict_text(holder)
+
+
+def release_hardware_owner(key: str) -> None:
+    """归还 :func:`acquire_hardware_owner` 登记的占用（空键直接返回）。"""
+    if not key:
+        return
+    try:
+        release_active_owner(process_owner(), key)
+    except Exception as e:  # noqa: BLE001 - 释放失败不阻塞断开
+        logger.debug("释放设备占用登记失败(忽略): %s", e)
 
 
 def _release_owned_here_at_exit() -> None:
@@ -5185,11 +5220,44 @@ class PlutoSDRBackend(SDRBackend):
             logger.debug(f"网络 PlutoSDR 探测失败: {e}")
         return None
 
+    def hardware_owner_identity(self) -> Optional[Tuple[str, Optional[List[str]], bool]]:
+        """Pluto 的占用身份；**纯网络 URI 不参与本机设备互斥**。
+
+        ``ip:...`` / ``host:...`` 是网络设备：本机登记表拦不住别的机器，
+        与本机第二进程争同一条流也属于「配置层面该由用户决定」的事——
+        口径与 rtl_tcp 主机模式一致（``RTLSDRBackend`` 里 host 模式返回
+        None），不在这里登记。
+
+        其余（含未指定 URI 的自动枚举）一律登记：自动枚举优先走 USB，
+        同一根 Pluto 被两个进程同时打开时 AD9361 只会把流分给先开的那方，
+        后开的那方拿到的是「连上了但收不到」——正是本判据要避免的假状态。
+        """
+        uri = str(self._uri or "").strip()
+        if uri.lower().startswith(("ip:", "host:")):
+            return None
+        if getattr(self, "_owner_device_id", ""):
+            return super().hardware_owner_identity()
+        # 直接构造（未经枚举/工厂）时按 URI 算键——与 ``device_identity_key``
+        # 对带 uri 的条目口径一致（``uri:<uri>``）；没有 URI 时只能按 auto 记。
+        key = f"uri:{uri}" if uri else "plutosdr|label:auto"
+        return key, [key], True
+
     # ------------------------------------------------------------------
     # open / close（connect/disconnect 别名）
     # ------------------------------------------------------------------
-    def connect(self) -> bool:
-        """打开 PlutoSDR。优先 pylibiio，回退 SoapySDR，都没有则返回 False。"""
+    def _open_hardware(self) -> bool:
+        """打开 PlutoSDR。优先 pylibiio，回退 SoapySDR，都没有则返回 False。
+
+        占用判据在基类 ``connect()`` 里、先于本方法执行（见
+        ``SDRBackend.connect``），判据命中时**根本不会走到这里**。
+
+        验证状态（两档，不含糊）：
+        - 假后端已验：登记冲突时 ``_open_hardware`` 不被调用、iio/Soapy
+          都不被碰、冲突文案不被桌面分类改写
+          （tests/test_owner_conflict_before_open.py）。
+        - **代码已接、真机未验**：需真实 ADALM-PLUTO（USB 或 ip:）才能验证
+          「宿主进程开着时第二进程被拒」与真机收流。
+        """
         # 先探测驱动
         iio_mod = self._try_import_iio()
         soapy_mod = self._try_import_soapy()

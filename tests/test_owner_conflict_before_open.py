@@ -170,7 +170,9 @@ def test_ambiguous_alias_message_survives_desktop_classification(_registry):
 
         msg = sb.owner_conflict_text(holder)
         assert "无法唯一确定设备" in msg, msg
-        assert "AAA" in msg and "BBB" in msg, msg
+        # 正文不嵌登记键：键是任意字符串，撞上分类关键词会被改写成相反的补救。
+        assert "AAA" not in msg and "BBB" not in msg, msg
+        assert "2 条" in msg, msg
         assert error_remedy.classify_connect_error(msg) is None, msg
         assert error_remedy.humanize_connect_error(msg) == msg
     finally:
@@ -324,5 +326,145 @@ def test_soapy_refuses_before_device_open(_registry, monkeypatch):
         assert backend.connect() is False
         assert opened == [], "占用命中后仍进入了 SoapySDR.Device"
         _assert_conflict_text(backend.status.error, child.pid)
+    finally:
+        _kill(child)
+
+
+# ───────────── PlutoSDR：同一判据；USB 登记、网络 URI 不登记 ─────────────
+def _fake_iio(monkeypatch, opened) -> None:
+    """把 pylibiio 换成记录器；``opened`` 非空即证明真的进了 open 路径。"""
+    import types
+
+    class _Context:
+        def __init__(self, uri):
+            opened.append(uri)
+
+    monkeypatch.setattr(sb.PlutoSDRBackend, "_try_import_iio",
+                        classmethod(lambda cls: types.SimpleNamespace(Context=_Context)))
+    monkeypatch.setattr(sb.PlutoSDRBackend, "_try_import_soapy",
+                        classmethod(lambda cls: None))
+
+
+def test_plutosdr_refuses_before_iio_open(_registry, monkeypatch):
+    """Pluto（USB）：假后端已验（判据生效、不进入 iio.Context）。真机未验。
+
+    走工厂构造，顺带验证 ``build_backend_for_device`` 给它填的身份键
+    （``uri:usb:1.2.5``）与直接构造时算出的键一致——否则两方各说各话，
+    互斥只在纸面上成立。
+    """
+    opened = []
+    _fake_iio(monkeypatch, opened)
+
+    child = _spawn_child()
+    try:
+        start = sb._proc_start_time(child.pid)
+        _seed(_registry, "uri:usb:1.2.5", child.pid, start, owner=sb.AI_OWNER)
+
+        backend = sb.build_backend_for_device({
+            "driver": "plutosdr", "uri": "usb:1.2.5", "label": "PlutoSDR",
+            "serial": "", "device_args": {"uri": "usb:1.2.5"}})
+        assert isinstance(backend, sb.PlutoSDRBackend)
+        assert backend.connect() is False
+        assert opened == [], "占用命中后仍进入了 iio.Context"
+        _assert_conflict_text(backend.status.error, child.pid)
+    finally:
+        _kill(child)
+
+
+def test_plutosdr_network_uri_does_not_claim(_registry, monkeypatch):
+    """``ip:`` 网络 URI 不参与本机互斥：不因本机登记被拦，也不登记。
+
+    口径与 rtl_tcp 主机模式一致（网络设备由对端决定谁能连）；这条用例钉住
+    「不登记」不是忘写，而是选择——否则第二个本机进程会拿到一条假冲突。
+    """
+    opened = []
+    _fake_iio(monkeypatch, opened)
+
+    child = _spawn_child()
+    try:
+        start = sb._proc_start_time(child.pid)
+        _seed(_registry, "uri:ip:192.168.2.1", child.pid, start, owner=sb.AI_OWNER)
+
+        backend = sb.PlutoSDRBackend(uri="ip:192.168.2.1")
+        assert backend.hardware_owner_identity() is None
+        # 无真机时 connect 必定失败，但失败原因必须是「没驱动/没设备」，
+        # 不能是「被占用」。
+        assert backend.connect() is False
+        assert opened != [], "网络 URI 被放在 open 之前拦住了"
+        assert backend.last_claim_conflict == ""
+        assert "持有" not in backend.status.error, backend.status.error
+    finally:
+        _kill(child)
+
+
+# ───── bladeRF / LimeSDR：不是 SDRBackend 子类，也走同一组登记函数 ─────
+def test_bladerf_refuses_before_lib_load(_registry, monkeypatch):
+    """bladeRF：假后端已验（判据生效、连 libbladeRF 都不加载）。真机未验。"""
+    import mbdsdr_ai.bladerf_params as bp
+
+    loaded = []
+    monkeypatch.setattr(bp.BladeRFBackend, "_load_lib",
+                        lambda self: loaded.append("libbladeRF") or None)
+
+    child = _spawn_child()
+    try:
+        start = sb._proc_start_time(child.pid)
+        _seed(_registry, "bladerf|label:auto", child.pid, start, owner=sb.AI_OWNER)
+
+        be = bp.BladeRFBackend()
+        assert be.connect() is False
+        assert loaded == [], "占用命中后仍加载了 libbladeRF"
+        _assert_conflict_text(be.last_error, child.pid)
+        # 桌面端失败提示读的就是这条通道；没有它冲突文案会被泛化成别的原因。
+        assert be.get_status().error == be.last_error
+        # 拒绝时不得把占用写到自己名下（登记里仍应是那条 AI 记录）。
+        holder = sb.get_active_owner("bladerf|label:auto")
+        assert holder is not None and holder["pid"] == child.pid, holder
+    finally:
+        _kill(child)
+
+
+def test_bladerf_claim_held_until_disconnect(_registry, monkeypatch):
+    """开成功后占用留在登记里，disconnect 才归还（同一层的成对操作）。"""
+    import mbdsdr_ai.bladerf_params as bp
+
+    class _Lib:
+        def bladerf_open(self, dev_ref, ident):
+            dev_ref._obj.value = 0x1234     # c_void_p 被 byref 传入
+            return bp.BLADERF_OK
+
+        def bladerf_close(self, dev):
+            return bp.BLADERF_OK
+
+    monkeypatch.setattr(bp.BladeRFBackend, "_load_lib", lambda self: _Lib())
+
+    be = bp.BladeRFBackend()
+    assert be.connect() is True
+    holder = sb.get_active_owner("bladerf|label:auto")
+    assert holder is not None and holder["pid"] == os.getpid(), holder
+    be.disconnect()
+    assert sb.get_active_owner("bladerf|label:auto") is None
+
+
+def test_limesdr_refuses_before_lib_load(_registry, monkeypatch):
+    """LimeSDR：假后端已验（判据生效、连 libLimeSuite 都不加载）。真机未验。"""
+    import mbdsdr_ai.limesuite_params as lp
+
+    loaded = []
+    monkeypatch.setattr(lp.LimeSDRBackend, "_load_lib",
+                        lambda self: loaded.append("libLimeSuite") or None)
+
+    child = _spawn_child()
+    try:
+        start = sb._proc_start_time(child.pid)
+        _seed(_registry, "limesdr|index:0", child.pid, start, owner=sb.AI_OWNER)
+
+        be = lp.LimeSDRBackend(device_index=0)
+        assert be.connect() is False
+        assert loaded == [], "占用命中后仍加载了 libLimeSuite"
+        _assert_conflict_text(be.last_error, child.pid)
+        assert be.get_status().error == be.last_error
+        holder = sb.get_active_owner("limesdr|index:0")
+        assert holder is not None and holder["pid"] == child.pid, holder
     finally:
         _kill(child)

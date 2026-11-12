@@ -434,7 +434,11 @@ def test_ambiguous_alias_refuses_instead_of_guessing(_registry):
 
         text = sb.owner_conflict_text(holder)
         assert "无法唯一确定设备" in text
-        assert "AAA" in text and "BBB" in text
+        # 正文不嵌登记键：键是任意字符串（Pluto 的 ``uri:usb:...``、序列号里
+        # 可能带 ``timeout``），撞上桌面分类表的关键词会被改写成相反的补救。
+        # 完整键在日志与登记表里，正文只放结论与动作。
+        assert "AAA" not in text and "BBB" not in text
+        assert "2 条" in text
         # 拒绝之外必须给出路，不能只说「无法唯一确定」让用户卡死。
         assert "释放其中一台" in text and "拔掉另一根" in text
 

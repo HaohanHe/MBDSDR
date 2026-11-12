@@ -409,6 +409,11 @@ class LimeSDRBackend:
         self._dev: Optional[ctypes.c_void_p] = None
         self._stream: Optional[_LMSStream] = None
         self.connected = False
+        # 设备占用登记（跨进程）：本类不是 SDRBackend 子类，判据在这里显式做。
+        self.last_error: str = ""
+        self.last_claim_conflict: str = ""
+        self._claimed_device_id: str = ""
+        self._owner_guard_warned: bool = False
         self._rx_running: bool = False
         self._freq_hz: float = 100_000_000.0
         self._sample_rate_hz: float = float(self.params.default_sr_hz)
@@ -496,14 +501,72 @@ class LimeSDRBackend:
         ]
         lib.LMS_RecvStream.restype = ctypes.c_int
 
+    # ── 跨进程占用登记（与 SDRBackend.connect() 同一套判据）──────────────
+    def _owner_identity(self) -> str:
+        """占用登记里的身份键。
+
+        工厂 ``build_backend_for_device`` 会把枚举算出的键填进
+        ``_owner_device_id``（有序列号时是 ``limesdr|serial:...``）。直接构造
+        （未经枚举）时只能按枚举序号记，属 provisional——拔插后序号会变，
+        与 ``device_identity_key`` 在无序列号时的口径一致。
+        """
+        key = getattr(self, "_owner_device_id", "")
+        if key:
+            return str(key)
+        return f"limesdr|index:{int(self.device_index)}"
+
+    def _claim_hardware(self) -> bool:
+        """先登记，冲突时**连库都不加载**。"""
+        key = self._owner_identity()
+        try:
+            from .sdr_backend import acquire_hardware_owner
+        except ImportError:
+            # 直接以脚本方式运行本文件时没有包上下文，登记接口不可用。
+            # 那不是应用路径，放行并告警一次。
+            if not self._owner_guard_warned:
+                self._owner_guard_warned = True
+                logger.warning("无包上下文（脚本直跑），跳过设备占用登记")
+            return True
+        ok, conflict = acquire_hardware_owner(key)
+        if ok:
+            self._claimed_device_id = key
+            self.last_claim_conflict = ""
+            return True
+        self.last_claim_conflict = conflict
+        self.last_error = conflict
+        self.connected = False
+        logger.warning("设备已被其他进程持有，未发起 open：%s", conflict)
+        return False
+
+    def _release_hardware_claim(self) -> None:
+        key, self._claimed_device_id = self._claimed_device_id, ""
+        if not key:
+            return
+        try:
+            from .sdr_backend import release_hardware_owner
+        except ImportError:
+            return
+        release_hardware_owner(key)
+
     # ── 连接 / 断开 ────────────────────────────────────────────────────
     def connect(self) -> bool:
-        """真实打开 libLimeSuite 设备；失败（无库/无硬件）返回 False，不造假。"""
-        lib = self._load_lib()
-        if lib is None:
-            self.connected = False
+        """真实打开 libLimeSuite 设备；失败（无库/无硬件）返回 False，不造假。
+
+        占用判据在真正 open 之前（``_claim_hardware``），与
+        ``SDRBackend.connect()`` 同一组登记函数——漏掉的判据不会报错，只会
+        静默少一层保护。
+
+        验证状态（两档）：假后端已验（登记冲突时 ``_load_lib`` 不被调用、
+        ``last_claim_conflict`` 原样保留）；**代码已接、真机未验**（需真实
+        LimeSDR + libLimeSuite 才能验证跨进程互斥与真机收流）。
+        """
+        if not self._claim_hardware():
             return False
         try:
+            lib = self._load_lib()
+            if lib is None:
+                self.connected = False
+                return False
             dev = ctypes.c_void_p()
             rc = lib.LMS_Open(ctypes.byref(dev), None, None)  # LimeSuite.h:103
             if rc != LMS_SUCCESS or dev.value is None:
@@ -519,11 +582,16 @@ class LimeSDRBackend:
             lib.LMS_EnableChannel(dev, LMS_CH_RX, 0, True)  # LimeSuite.h:189
             self._dev = dev
             self.connected = True
+            self.last_error = ""
             return True
         except Exception as e:  # pragma: no cover - 依赖硬件环境
             logger.warning("LimeSDR connect 异常: %s", e)
             self.connected = False
             return False
+        finally:
+            # 没开成功就把登记还回去；开成功则留到 disconnect() 归还。
+            if not self.connected:
+                self._release_hardware_claim()
 
     def disconnect(self) -> None:
         if self._rx_running:
@@ -535,6 +603,18 @@ class LimeSDRBackend:
                 pass
         self._dev = None
         self.connected = False
+        self._release_hardware_claim()
+
+    def get_status(self):
+        """最小状态（``connected`` / ``error`` 真实，其余不伪造）。
+
+        桌面端连接失败时读 ``get_status().error`` 作为提示来源；本类没有
+        ``SDRStatus``，若不给这条通道，占用冲突会被改写成「请检查 USB 棒」
+        这种错误建议——恰恰是最不该发生的二次改写。
+        """
+        from types import SimpleNamespace
+        return SimpleNamespace(connected=bool(self.connected),
+                               error=self.last_error or "")
 
     # ── 频率 / 采样率 ──────────────────────────────────────────────────
     def set_frequency(self, freq_hz: float) -> bool:
