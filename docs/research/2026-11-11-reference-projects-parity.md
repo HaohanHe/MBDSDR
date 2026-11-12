@@ -526,10 +526,13 @@ for (auto const& [name, _vfo] : vfos) {
 
 **条目 11｜FoxTelem `ac2cz/FoxTelem@537b7cc`（master，2026-06）— 每星多帧型遥测布局**
 - 机制：布局在程序启动时从 CSV 加载，帧型固定为 `RT / MAX / MIN / WOD / EXP / CAN_*`，并支持 `parentLayout / secondaryLayout` 派生——`src/telemetry/BitArrayLayout.java:34-36`、`:42-52`、`:58-70`；主 CSV 生成器 `genSpacecraft/genSpacecraft.py:80-104`。<https://github.com/ac2cz/FoxTelem/blob/537b7cc/src/telemetry/BitArrayLayout.java#L34-L70>
-- 我方：`data/frame_layouts.json` 每星单布局、无帧型变体维度，仅 2 个 profile（`sat_profile.py:58-70`）。
-- 差距判断：**缺**。差距本质**不是「布局格式不同」，而是我们遥测能覆盖的星太少**——每星单布局、只有 2 个 profile；对方有帧型变体 + 派生，覆盖几十颗。按「**只是缺数据、不是缺代码**」定性。
-- roadmap：**已覆盖：W91**（2026-11-12 接入 roadmap）。
-- 可搬性：**能搬**（schema 加 `variant` + `parent/secondary`，解释器骨架不动）。**优先级高于 SatNOGS 那条**：成本更低，且直接扩遥测覆盖。
+- 我方（2026-11-12 复核，**下面两句必须同时读**）：
+  1. **机制已支持**：帧布局 schema 已升 v2，有帧型标签 `frame_type` 与派生关系 `derived_from`；派生规则写死在 `mbdsdr_ai/sat_profile.py:75-152`，缺 `source` 的派生布局拒载（`:96-107`、`:142`）。
+  2. **数据仍缺**：新增的那一个派生布局是 `ccsds_tc_segmented`（`data/frame_layouts.json:31-33`），属**通用协议帧**、不是任何一颗星的遥测；所以「只认得 2 颗星的遥测」这个症结没变，**星覆盖仍是零**。
+  **机制通 ≠ 覆盖扩**：W91 的判据是「扩遥测覆盖」，机制落地不得据此把 W91 记完成。
+- 差距判断：**缺**，缺的是**数据**。差距本质不是「布局格式不同」，而是我们遥测能覆盖的星太少——库内仍是 1 条示例布局 + 2 条 CCSDS 通用协议布局；对方有帧型变体 + 派生，覆盖几十颗。按「**只是缺数据、不是缺代码**」定性。
+- roadmap：**W91 进行中：机制已落、数据未上**（2026-11-12 复核）。
+- 可搬性：**能搬数据**（机制与派生骨架已具备，解释器骨架不动；只差逐星布局与出处）。**优先级高于 SatNOGS 那条**：成本更低，且直接扩遥测覆盖。
 
 **条目 12｜PreviSat `mconsidine/previsat-git@6bf04c7`（master，2026-11-02）— 可见过境筛选**
 - 机制：候选过境先过高度门，再算地影与星等，最后按 `magnitudeLimite` 过滤——`src/previsions/prevision.cpp:196-232`；频率表为 6 字段 `FrequenceRadio{nom, frequenceMontante, frequenceDescendante, balise, mode, signalAppel}`（`src/configuration/frequencesradio.h:57-64`）。<https://github.com/mconsidine/previsat-git/blob/6bf04c7/src/previsions/prevision.cpp#L196-L232>
@@ -543,7 +546,7 @@ for (auto const& [name, _vfo] : vfos) {
 
 | # | 机制 | 我方位置 | roadmap 覆盖 | 可搬性 |
 |---|---|---|---|---|
-| 1 | FoxTelem 每星多帧型布局（数据覆盖） | `frame_layouts.json` 每星单布局、2 个 profile（`sat_profile.py:58-70`） | **已覆盖：W91** | 能搬；**优先级最高**（成本低、直接扩覆盖） |
+| 1 | FoxTelem 每星多帧型布局（数据覆盖） | `frame_layouts.json` 库内仅 1 条示例 + 2 条 CCSDS 通用；schema v2 派生已支持（`sat_profile.py:75-152`） | **W91 进行中：机制已落、数据未上** | 能搬数据；**优先级最高**（成本低、直接扩覆盖） |
 | 2 | SatNOGS 发射机库（带宽区间/状态/service） | `sat_links.json:14-15/18` | **已覆盖：W92** | 能搬（拉库缓存） |
 | 3 | AOS/LOS 外部命令钩子 | `config_schema.py:602` 封闭集无此键 | **已覆盖：W94** | 能搬（事件订阅 + 受控子进程） |
 | 4 | 地面轨迹（可视化缺口） | `paintEvent` `rf_sky_view.py:4203-4263` 无地固线入口 | **已覆盖：W93** | 能搬（SGP4 与方位投影已有） |
