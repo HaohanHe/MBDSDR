@@ -55,6 +55,9 @@ DOTTED_SLASH = re.compile(
     r"(?:\.[A-Za-z0-9_]+)*")
 #: C++ 常量命名习惯（kStepValuesHz / kWaterfallDepthChoices）。
 NATIVE_SYMBOL = re.compile(r"\bk[A-Z][A-Za-z0-9_]*\b")
+#: C++ / Dart 的方法调用写法（spectrum_engine.h 的 setWindowType()）。
+#: 有些落点只有方法没有 k 常量，文本 grep 方法名同样能钉住「符号存在」。
+NATIVE_CALL = re.compile(r"\b([A-Za-z_][A-Za-z0-9_]*)\s*\(")
 
 #: 不是符号的字面量/缩写（日志级别、字面量、单位、协议名）。
 NOISE = frozenset({
@@ -110,7 +113,7 @@ def _python_symbols(segment: str):
 
 def _native_symbols(segment: str):
     out = []
-    for sym in NATIVE_SYMBOL.findall(segment):
+    for sym in NATIVE_SYMBOL.findall(segment) + NATIVE_CALL.findall(segment):
         if sym not in NOISE and sym not in out:
             out.append(sym)
     return out

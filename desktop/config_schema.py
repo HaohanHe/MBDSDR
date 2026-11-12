@@ -141,7 +141,8 @@ ALL_ITEMS: Tuple[SettingItem, ...] = (
         key="ui_language", group="通用", kind="enum",
         label="界面语言", default="zh",
         help="切换界面语言。译文未构建时保持简体中文，不会出现半坏翻译。",
-        source="desktop/settings.py:59；源语言约定见 desktop/l10n.py:5",
+        source="desktop/settings.py DEFAULTS['ui_language']；源语言约定见 "
+               "desktop/l10n.py SUPPORTED_UI_LANGUAGES（zh/en/ja）",
         choices=(_e("zh", "简体中文"), _e("en", "English"), _e("ja", "日本語")),
         requires_restart=True,
         restart_note="Qt 翻译器必须在窗口创建前安装，切换后重启应用才生效。",
@@ -150,7 +151,7 @@ ALL_ITEMS: Tuple[SettingItem, ...] = (
         key="touch_mode", group="通用", kind="enum",
         label="触屏适配", default="auto",
         help="自动检测触屏设备；强制触屏会放大按钮/滚动条，强制鼠标则保持桌面手感。",
-        source="desktop/settings.py:49；检测语义见 desktop/touch_manager.py",
+        source="desktop/settings.py DEFAULTS['touch_mode']；检测语义见 desktop/touch_manager.py TouchManager.set_override",
         choices=(_e("auto", "自动检测"), _e("on", "强制触屏"), _e("off", "强制鼠标")),
     ),
 
@@ -178,8 +179,9 @@ ALL_ITEMS: Tuple[SettingItem, ...] = (
         label="GNSS 波特率", default=9600,
         help="与 GNSS 接收机一致的波特率；多数模块出厂为 9600。",
         apply_note="改完需重新连接 GNSS 才生效（不必重启应用）",
-        source="desktop/main_window.py GNSS 连接对话框 baud_combo 构建处"
-               "（9600/19200/38400/57600/115200）",
+        source="desktop/main_window.py baud_combo（GNSS 连接对话框，"
+               "9600/19200/38400/57600/115200）；默认值取 desktop/settings.py "
+               "DEFAULTS['gnss_baudrate']",
         choices=tuple(_e(b, str(b)) for b in
                       (9600, 19200, 38400, 57600, 115200)),
     ),
@@ -209,7 +211,8 @@ ALL_ITEMS: Tuple[SettingItem, ...] = (
         help=("开启时主界面只保留频谱/天空与最小状态行：频率/采样率/GNSS/"
               "多普勒/发射/增益等工程读数收进「详细」按钮，点开即见。"
               "功能一个不删，只是不再占用户注意力——极简的是页面，不是软件。"),
-        source="本轮新增（用户 2026-11-07 口径：页面极简，不是整个软件极简）",
+        source="desktop/main_window.py set_focus_mode()"
+               "（用户 2026-11-07 口径：页面极简，不是整个软件极简）",
     ),
     SettingItem(
         key="free_float_panels", group="显示与主题", kind="bool",
@@ -217,7 +220,8 @@ ALL_ITEMS: Tuple[SettingItem, ...] = (
         help=("开启时顶栏出现「⧉」：左栏/右栏可弹出成自由浮层，"
               "标题条按住即拖、可折叠、可提升为独立窗口、可归位，"
               "位置随窗口状态记住。关闭则退回固定三栏。"),
-        source="本轮新增（对齐原型 index.html 的 position:absolute 浮层 / 自由窗口）",
+        source="desktop/main_window.py set_free_float_enabled()"
+               "（对齐原型 index.html 的 position:absolute 浮层 / 自由窗口）",
     ),
     SettingItem(
         key="theme", group="显示与主题", kind="enum",
@@ -238,7 +242,7 @@ ALL_ITEMS: Tuple[SettingItem, ...] = (
         help=("关闭后只保留频谱曲线，可省一点绘制开销。"
               "联动：关闭时「瀑布历史深度」与「瀑布时间平滑」不再可见，"
               "但两项取值仍保留，重新打开即恢复。"),
-        source="desktop/settings.py:45（show_waterfall=True）",
+        source="desktop/settings.py DEFAULTS['show_waterfall']；消费点 desktop/spectrum_widget.py show_waterfall",
     ),
 
     # ---------------------------------------------------------------- 星象仪
@@ -282,7 +286,10 @@ ALL_ITEMS: Tuple[SettingItem, ...] = (
               "1024/2048/4096，越界会被回退 2048（分辨率骤降 4×/8×），"
               "因此这里只暴露三档。"
               "联动：与「频谱平均帧数」叠加——点数越大单帧越慢，再平均多帧会更迟钝。"),
-        source="desktop/spectrum_widget.py:151 默认 2048；档位与 C++ settings_dialog 对齐",
+        source="desktop/spectrum_widget.py SpectrumDataGenerator.FFT_SIZES"
+               "（1024/2048/4096，默认 2048）；C++ 档位见 "
+               "cpp/src/ui/settings_dialog.h displayFftSize()"
+               "（与 cpp/src/dsp/spectrum_engine.h setFftSize() 同三档）",
         choices=(_e(1024, "1024（快）"), _e(2048, "2048（均衡）"),
                  _e(4096, "4096")),
     ),
@@ -290,7 +297,10 @@ ALL_ITEMS: Tuple[SettingItem, ...] = (
         key="fft_window", group="频谱与解码", kind="enum",
         label="频谱窗函数", default="Nuttall",
         help="抑制频谱泄漏；Nuttall 旁瓣最低，Flattop 更适合测幅度。",
-        source="desktop/spectrum_widget.py:150；上游 iq_frontend.h:17-21 / main_window.cpp:91",
+        source="desktop/spectrum_widget.py SpectrumDataGenerator.WINDOWS"
+               "（Nuttall/Hann/Hamming/Blackman/Flattop/None）；上游 "
+               "cpp/src/dsp/spectrum_engine.h setWindowType()"
+               "（0=Hann 1=Flattop 2=Blackman）",
         choices=tuple((w, w) for w in
                       ("Nuttall", "Hann", "Hamming", "Blackman", "Flattop", "None")),
     ),
@@ -442,7 +452,7 @@ ALL_ITEMS: Tuple[SettingItem, ...] = (
         storage="gui_config",
         help=("北纬为正。未设置时卫星过境/天空图保持空状态，不编造位置。"
               "联动：需与「观测地点经度」一起填写，缺任一项过境列表都为空。"),
-        source="desktop/main_window.py:447 初始 None；:7768 从 gui_config.json 读回",
+        source="desktop/main_window.py _observer_lat（初始 None；从 gui_config.json 读回）",
     ),
     SettingItem(
         key="observer_lon", group="卫星与多普勒", kind="float",
@@ -450,7 +460,7 @@ ALL_ITEMS: Tuple[SettingItem, ...] = (
         storage="gui_config",
         help=("东经为正。与纬度一起决定过境时刻与多普勒曲线。"
               "联动：需与「观测地点纬度」一起填写，缺任一项过境列表都为空。"),
-        source="desktop/main_window.py:447 初始 None；:7769 从 gui_config.json 读回",
+        source="desktop/main_window.py _observer_lon（初始 None；从 gui_config.json 读回）",
     ),
     SettingItem(
         key="pass_min_elevation_deg", group="卫星与多普勒", kind="float",
@@ -521,40 +531,40 @@ ALL_ITEMS: Tuple[SettingItem, ...] = (
 
     # ---------------------------------------------------------------- 内部键（不暴露）
     SettingItem(key="frequency_hz", group="", kind="float", label="", help="",
-                default=98_000_000.0, source="desktop/settings.py:29", exposed=False),
+                default=98_000_000.0, source="desktop/settings.py DEFAULTS['frequency_hz']", exposed=False),
     SettingItem(key="gain_db", group="", kind="float", label="", help="",
-                default=20.0, source="desktop/settings.py:30", exposed=False),
+                default=20.0, source="desktop/settings.py DEFAULTS['gain_db']", exposed=False),
     SettingItem(key="demod_mode", group="", kind="enum", label="", help="",
                 default="FM",
-                source="desktop/mode_registry.py 的 analog 模式 ∩ "
+                source="desktop/mode_registry.py mode_names(\"analog\") ∩ "
                        "mbdsdr_ai/core/controller.py:43 VALID_MODES"
-                       "（下拉项见 desktop/control_panel.py:314）",
+                       "（下拉项见 desktop/control_panel.py:314 _PANEL_MODE_ORDER）",
                 choices=tuple(_e(m, m) for m in _LEGAL_DEMOD_MODES),
                 exposed=False),
     SettingItem(key="bandwidth_hz", group="", kind="float", label="", help="",
-                default=0.0, source="desktop/settings.py:32", exposed=False),
+                default=0.0, source="desktop/settings.py DEFAULTS['bandwidth_hz']", exposed=False),
     SettingItem(key="sample_rate_hz", group="", kind="float", label="", help="",
                 default=float(_DEFAULT_SAMPLE_RATE_HZ),
                 source="desktop/constants.py: DEFAULT_SAMPLE_RATE_HZ"
                        "（派生自 mbdsdr_ai/sdr_backend.DEFAULT_SAMPLE_RATE_HZ，2.4 MS/s）",
                 exposed=False),
     SettingItem(key="agc_enabled", group="", kind="bool", label="", help="",
-                default=True, source="desktop/settings.py:37", exposed=False),
+                default=True, source="desktop/settings.py DEFAULTS['agc_enabled']", exposed=False),
     SettingItem(key="agc_speed", group="", kind="enum", label="", help="",
                 default="medium",
-                source="desktop/control_panel.py:1332 与 desktop/main_window.py:3319 "
-                       "共同认的四档（off/fast/medium/slow）",
+                source="desktop/control_panel.py agc_speed_combo 与 "
+                       "desktop/main_window.py:3319 共同认的四档（off/fast/medium/slow）",
                 choices=(_e("off", "off"), _e("fast", "fast"),
                          _e("medium", "medium"), _e("slow", "slow")),
                 exposed=False),
     SettingItem(key="volume", group="", kind="int", label="", help="",
                 default=48, minimum=0, maximum=100,
-                source="desktop/settings.py:39；0–100 人类量纲见 "
-                       "settings.py volume_pct_to_hw/volume_hw_to_pct"
+                source="desktop/settings.py DEFAULTS['volume']；0–100 人类量纲见 "
+                       "desktop/settings.py volume_pct_to_hw / volume_hw_to_pct"
                        "（0–63 只是硬件寄存器量纲）",
                 exposed=False),
     SettingItem(key="volume_scale_v2", group="", kind="bool", label="", help="",
-                default=True, source="desktop/settings.py:44", exposed=False),
+                default=True, source="desktop/settings.py DEFAULTS['volume_scale_v2']", exposed=False),
     SettingItem(key="app_mode", group="", kind="enum", label="", help="",
                 default="ide",
                 source="desktop/main_window.py:2190 _restore_app_mode 只认 "
@@ -565,12 +575,12 @@ ALL_ITEMS: Tuple[SettingItem, ...] = (
                 help="", default="",
                 source="W51（D-10 裁定）：设置面板 6 个用途分组的展开态，"
                        "逗号分隔的分组标题；空/坏值/未知标题一律回落「只展开首组」"
-                       "（settings_panel.SettingsPanel._restore_expanded_state）",
+                       "（desktop/settings_panel.py SettingsPanel._restore_expanded_state）",
                 exposed=False),
     SettingItem(key="right_column_expanded_section", group="", kind="text",
                 label="", help="", default="",
                 source="区块 8（右栏手风琴）：右栏当前展开节的 id（稳定 id 取自 "
-                       "right_column.setTabData）；空串 = 未设置，坏值/未知 id 由"
+                       "desktop/right_column.py setTabData()）；空串 = 未设置，坏值/未知 id 由"
                        "消费方回落「只展开首节」，本键只负责持久化",
                 exposed=False),
     # 服务开关（既有面板，保留）
@@ -578,7 +588,7 @@ ALL_ITEMS: Tuple[SettingItem, ...] = (
                 label="启用远程控制（TCP）", default=False,
                 help=("hamlib rigctld 风格；只监听 127.0.0.1，默认关闭。"
                       "联动：启用后才监听「远程控制端口」，改端口需重启该服务。"),
-                source="desktop/settings.py:53"),
+                source="desktop/settings.py DEFAULTS['rc_enabled']"),
     SettingItem(key="rc_port", group="服务与远程访问", kind="int",
                 label="远程控制端口", default=7356, minimum=1, maximum=65535,
                 step=1, help=("hamlib/rigctld 兼容端口；仅本机监听，改完需重启服务。"
@@ -589,7 +599,7 @@ ALL_ITEMS: Tuple[SettingItem, ...] = (
                 label="启用 Web 服务", default=False,
                 help=("HTTP + WebSocket 频谱/音频流；只监听 127.0.0.1，默认关闭。"
                       "联动：启用后才监听「Web 服务端口」。"),
-                source="desktop/settings.py:55"),
+                source="desktop/settings.py DEFAULTS['web_enabled']"),
     SettingItem(key="web_port", group="服务与远程访问", kind="int",
                 label="Web 服务端口", default=8080, minimum=1, maximum=65535,
                 step=1, help=("浏览器访问 http://127.0.0.1:端口/ 的端口；仅本机监听。"
