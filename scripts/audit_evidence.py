@@ -3,11 +3,11 @@
 
 判据见 docs/evidence-standard.md（E1 有原始件 / E2 可复跑 / E3 不可复跑 / E4 未验证）。
 
-分类逻辑（同一段 ±2 行窗口）：
+分类逻辑（散文：同一段 ±2 行窗口；表格：本行 + 表头 + 紧邻表标题行）：
   * 有 ``未验证`` / ``证据不足`` / ``待核实`` 等标记 -> 已显式标未验证；
   * 命中仓内存在的原始件路径（非 .md）-> E1 有原始件；
   * 命中可执行脚本命令（python/pytest/ctest/make/scripts 路径）-> E2 可复跑；
-  * 只命中 commit -> E3 不可复跑（时点线索，不构成测量证据，仍计入“无证据”的提示项）；
+  * 只命中 commit -> 无证据（E3 时点线索，不构成测量证据）；
   * 只命中 ``.tmp-tool-results`` 历史产物 -> E3 不可复跑；
   * 都没有 -> 无证据（红）。
 
@@ -170,7 +170,7 @@ def _classify(window: str, line: Optional[str] = None) -> Tuple[str, str]:
                     return "有证据", f"E3 不可复跑（历史产物 {tok}；块级标记不覆盖本行）"
                 if p.suffix.lower() != ".md":
                     return "有证据", f"E1 有原始件（{tok}；块级标记不覆盖本行）"
-            return "已显式标未验证", "仅同表他行标未验证（本行无标注，需核）"
+            return "已显式标未验证", "仅窗口内他行标未验证（本行无标注，需核）"
         return "已显式标未验证", "有未验证/证据不足标记"
 
     paths = PATH_RE.findall(window)
@@ -323,6 +323,14 @@ def run(paths: Optional[List[str]] = None, classify: bool = False) -> Dict:
             continue
         prose = list(_prose_lines(text))
         rel = str(f.relative_to(ROOT)) if f.is_relative_to(ROOT) else str(f)
+        # 每个非空正文行的“上一非空行”：给表格找紧邻的表标题行用
+        prev_nonblank: Dict[int, str] = {}
+        last_text: Optional[str] = None
+        for no, ln in prose:
+            if ln.strip():
+                if last_text is not None:
+                    prev_nonblank[no] = last_text
+                last_text = ln
         for block in _blocks(prose):
             block_text = "\n".join(ln for _, ln in block)
             is_table = block[0][1].strip().startswith("|")
@@ -330,15 +338,25 @@ def run(paths: Optional[List[str]] = None, classify: bool = False) -> Dict:
                 # 表格按整块判定：表头写“谐振/实测”，整张表都是测量断言
                 if not CLAIM_VERB_RE.search(block_text):
                     continue
+                # 证据窗口（2026-11-12）：本行 + 表头 + 紧邻表标题行；
+                # 其他数据单元格里的路径不给整表背书（evidence-standard §2.6）
+                title = prev_nonblank.get(block[0][0], "")
+                header = block[0][1]
+                base = "\n".join(x for x in (title, header) if x)
                 # 表头与 |---|---| 分隔行不是断言（否则“90% 档”这类列名会入账）
                 skip = {block[0][0]}
                 if len(block) > 1 and _is_table_sep(block[1][1]):
                     skip.add(block[1][0])
-                lines = [(no, ln, block_text) for no, ln in block
+                lines = [(no, ln, f"{base}\n{ln}" if base else ln)
+                         for no, ln in block
                          if no not in skip and not _is_table_sep(ln)]
             else:
-                # 散文按句/行判定，避免一段里一个“验证”把整段参数数字都算断言
-                lines = [(no, ln, ln) for no, ln in block
+                # 散文按句/行判定，避免一段里一个“验证”把整段参数数字都算断言；
+                # 证据窗口是同一段 ±2 行（2026-11-12 对齐规范 §4.1）
+                block_map = {no: ln for no, ln in block}
+                lines = [(no, ln, "\n".join(block_map[n] for n in range(no - 2, no + 3)
+                                            if n in block_map))
+                         for no, ln in block
                          if CLAIM_VERB_RE.search(ln)
                          and not (SPEC_LINE_RE.search(ln)
                                   and not MEASURED_LINE_RE.search(ln))]
