@@ -266,7 +266,7 @@ tracemalloc delta **+342 KB**、gc 对象 **+2**、pen 缓存 397 条、brush �
 
 **第一条用户可感知的空白期（2026-11-11 真机复测，Windows 可见窗口计时）**：进程启动 → 第一个可见窗口 **中位 6916 ms**（12 次基线 5891–8029；外部 `EnumWindows` + `IsWindowVisible` 5 ms 轮询，同一脚本 `startup_visible_probe.py`），**这段时间屏幕上没有任何窗口**（当时无 splash）。另两条同机口径：应用内「进程 → 可交互」**4365 ms**（3 次 4200–4601），主窗口完整首帧 **4621 ms**。证据 `docs/perf-evidence/2026-11-11/startup_1..3.json`。下表是 offscreen 探针口径（DPR=1 软件光栅），与真机可见窗口计时**不可直接相减**。
 
-> 已改（`c44302d5`）：`main.py` 在 `QApplication` 建好后先显示 splash，主窗口 `show()` 后 `finish()`。同一脚本配对 A/B（n=4）：第一个可见窗口 **6800 → 4417 ms（-2699 ms）**；主窗口可见 **6800 → 8551 ms**，其中 splash 首个原生窗口自身约 **1.0 s**（同进程拆解：`splash.show()` 1022–1068 ms，与窗口标志无关），扣掉它后到「主窗口已绘制」的净代价 **+0.2–0.7 s**。原始计时：`docs/perf-evidence/2026-11-11/startup_visible_before.json`、`startup_visible_after_splash.json`、`startup_splash_ab.json`。
+> 已改 — `c44302d5` — `desktop/main.py:784` — `_show_startup_splash`：`main.py` 在 `QApplication` 建好后先显示 splash，主窗口 `show()` 后 `finish()`。同一脚本配对 A/B（n=4）：第一个可见窗口 **6800 → 4417 ms（-2699 ms）**；主窗口可见 **6800 → 8551 ms**，其中 splash 首个原生窗口自身约 **1.0 s**（同进程拆解：`splash.show()` 1022–1068 ms，与窗口标志无关），扣掉它后到「主窗口已绘制」的净代价 **+0.2–0.7 s**。原始计时：`docs/perf-evidence/2026-11-11/startup_visible_before.json`、`startup_visible_after_splash.json`、`startup_splash_ab.json`。
 
 | 阶段 | 中位 ms | 3 次范围 |
 |---|---|---|
@@ -330,7 +330,7 @@ tracemalloc delta **+342 KB**、gc 对象 **+2**、pen 缓存 397 条、brush �
 
 配置（`set_performance_mode(1)` + `set_fft_size(1024)`）：FFT **1024**、谱线 bin **384**、曲线定时器 **66 ms**（名义 15.15 fps）、瀑布 100 ms、控件 858×283；输入每 50 ms 推 120,000 样本（2.4 MS/s）。
 
-> **口径更正（2026-11-11）**：上面这行是 **balanced 档**（`set_performance_mode(1)`）的手测快照，**不是产品默认档**。`perf_profile.py` 默认档是 `eco` → `set_performance_mode(2)`：曲线定时器 **100 ms**（名义 10 fps）、谱线 **256 bin**、FFT 256。所以本节 66 ms / 13.0 fps / 384 bin 只能读作「balanced 档」的数字，**不得再当作默认帧率基线**。`eco` 档真机实测 **9.33 fps**、曲线单帧中位 **6.59 ms**、0.6 s 首帧 122 ms（见 `docs/research/2026-11-11-gap-performance.md` §5）。
+> **口径说明（2026-11-11）**：上面这行是 **balanced 档**（`set_performance_mode(1)`）的手测快照，**不是产品默认档**。`perf_profile.py` 默认档是 `eco` → `set_performance_mode(2)`：曲线定时器 **100 ms**（名义 10 fps）、谱线 **256 bin**、FFT 256。所以本节 66 ms / 13.0 fps / 384 bin 只能读作「balanced 档」的数字，**不得再当作默认帧率基线**。`eco` 档真机实测 **9.33 fps**、曲线单帧中位 **6.59 ms**、0.6 s 首帧 122 ms（见 `docs/research/2026-11-11-gap-performance.md` §5）。
 
 | 指标 | 实测 |
 |---|---|
