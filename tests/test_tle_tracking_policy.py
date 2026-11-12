@@ -94,7 +94,7 @@ def _tracker_with(name: str, epoch: datetime) -> SatelliteTracker:
 
 
 def test_tracker_dead_tle_blocks_tuning():
-    tr = _tracker_with("TEST DEAD", datetime.now(timezone.utc) - timedelta(days=47))
+    tr = _tracker_with("TEST DEAD", datetime.now(timezone.utc) - timedelta(days=47))  # timeguard: allow — 与该链路生产实现同一时钟语义（TLE 年龄），不参与指向/多普勒/录制对齐
     pol = tr.tracking_policy_for("TEST DEAD")
     assert pol["level"] == "dead"
     assert pol["allow_tune"] is False
@@ -102,7 +102,7 @@ def test_tracker_dead_tle_blocks_tuning():
 
 
 def test_tracker_fresh_tle_allows_tuning():
-    tr = _tracker_with("TEST FRESH", datetime.now(timezone.utc) - timedelta(hours=2))
+    tr = _tracker_with("TEST FRESH", datetime.now(timezone.utc) - timedelta(hours=2))  # timeguard: allow — 与该链路生产实现同一时钟语义（TLE 年龄），不参与指向/多普勒/录制对齐
     pol = tr.tracking_policy_for("TEST FRESH")
     assert pol["level"] == "fresh"
     assert pol["allow_tune"] is True
@@ -118,7 +118,7 @@ def test_tracker_unknown_name_is_blocked():
 
 def test_tracker_policy_matches_pure_function():
     """唯一事实源：目录条目算出来的策略必须与纯函数逐键一致。"""
-    tr = _tracker_with("TEST DEAD", datetime.now(timezone.utc) - timedelta(days=47))
+    tr = _tracker_with("TEST DEAD", datetime.now(timezone.utc) - timedelta(days=47))  # timeguard: allow — 与该链路生产实现同一时钟语义（TLE 年龄），不参与指向/多普勒/录制对齐
     entry = next(c for c in tr._catalog if c["name"] == "TEST DEAD")
     expected = tracking_policy(
         {"tier": entry["tle_tier"], "age_days": entry["tle_age_days"],
@@ -130,7 +130,13 @@ def test_tracker_policy_matches_pure_function():
 def test_current_position_exposes_policy():
     tr = SatelliteTracker()
     assert tr.current_position()["policy"]["level"] == "unknown"
-    tr = _tracker_with("TEST DEAD", datetime.now(timezone.utc) - timedelta(days=47))
+    # 本条会走到 current_position()，那条链的时间源是 TimeEngine（self._ts.now()）：
+    # 历元必须从同一个「现在」构造，否则用例里同时存在墙钟与引擎两个现在，
+    # 一旦补上位置/过境断言就会随回放漂移。
+    from mbdsdr_ai.new_spacetime import get_time_engine
+    engine_now = datetime.fromtimestamp(
+        float(get_time_engine().now_unix()), tz=timezone.utc)
+    tr = _tracker_with("TEST DEAD", engine_now - timedelta(days=47))
     assert tr.select_satellite("TEST DEAD") is True
     pos = tr.current_position()
     assert "policy" in pos

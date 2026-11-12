@@ -204,6 +204,10 @@ def test_no_guard_marker_abuse():
         # 首次打开的「选位置不跳时间 / 流速循环后回到此刻」两条，
         # 被测对象就是引擎是否仍实时跟随墙钟，属设计允许的对照场景。
         os.path.join("tests", "test_first_open_welcome.py"),
+        # TLE 新鲜度：被测对象就是「历元年龄 vs 墙钟」，生产侧 freshness()
+        # 本身用墙钟（tle_integrity.py）。改用 TimeEngine 会造出生产侧不存在
+        # 的口径；该值不参与指向/多普勒/录制对齐。
+        os.path.join("tests", "test_tle_tracking_policy.py"),
     }
     misplaced = [o for o in offenders
                  if os.path.normpath(o.split(":")[0]) not in
