@@ -1121,7 +1121,7 @@ baseline 56 → 58（`BUILT_AT` 同步 58），每条带 owner + reason：
   `limitations-register.md` 100、`hw-acceptance.md` 79、
   `learn/decoder-capability-matrix.md` 66、`experiments/nanovna_rh770/README.md` 56、
   `hardcoded-parameters.md` 55。
-- **收敛机制**（1 条已落地，其余为一次性规则）：
+- **收敛机制**（1 条落成脚本闸门 + 测试，其余为一次性规则）：
   1. **R1 文件级 E4 横幅（已实现）**：`scripts/audit_evidence.py` 新增
      `FILE_BANNER_RE`，只认文件前 80 行的显式写法（「本文件…未验证」
      「证据状态：E4」），命中后整份文件的无证据行记「已显式标未验证」；
@@ -1163,11 +1163,11 @@ baseline 56 → 58（`BUILT_AT` 同步 58），每条带 owner + reason：
 
 | # | FAIL 原文 | 定性 | 处置 |
 |---|---|---|---|
-| 1 | `pyproject.toml` 写死版本字面量：第 70/75 行 | **误报**：两处都是 sdist 残留目录名 `mbdsdr_ai-<canonical>`，不是版本声明 | 已修：改成 `mbdsdr_ai-[0-9]*`（注释同步），排除任意版本残留目录，也不再写死版本 |
-| 2 | 全仓手写 canonical 字面量（先 4 处、后 6 处） | **5 处误报 + 1 处文案**：`pyproject`/`.gitignore`/`COORDINATION` 4 处同为 `<name>-<x.y.z>` 目录名；`desktop/settings.py:143` 是「0.2 系列及更早」的历史文案；另 2 处是**本 K24 段落自己**引用 canonical | 已修：扫描器只跳过「紧跟在 `name-` 后的版本」（文件名片段），独立字面量照旧拦；文案改「0.2 系列」；本段改写消除自触发 2 处 |
-| 3 | `tomli` ← 声明了但产物没有 | **口径缺陷，不是产品缺陷**：`tomli` 只在 `requirements.txt` 以 `python_version < "3.11"` 声明，产物解释器是 3.14；产品代码零导入，仅 3.10 测试用 | 已修：依赖检查按**产物解释器版本**评估环境标记，标记为假记 SKIP；取不到产物版本时仍按声明面校验（宁可报缺，不静默放过） |
+| 1 | `pyproject.toml` 写死版本字面量：第 70/75 行 | **误报**：两处都是 sdist 残留目录名 `mbdsdr_ai-<canonical>`，不是版本声明 | **按误报销账**：第 75 行现为 `"mbdsdr_ai-[0-9]*"`（排除任意版本残留目录），注释同步；改动 `686f8313` |
+| 2 | 全仓手写 canonical 字面量（先 4 处、后 6 处） | **5 处误报 + 1 处文案**：`pyproject`/`.gitignore`/`COORDINATION` 4 处同为 `<name>-<x.y.z>` 目录名；`desktop/settings.py` 第 143 行是「0.2 系列及更早」的历史文案；另 2 处是**本 K24 段落自己**引用 canonical | 已修：扫描器只跳过「紧跟在 `name-` 后的版本」（文件名片段），独立字面量照旧拦（`aaf98c44` — `scripts/release_manifest.py:128` — `ARTIFACT_VERSION_PREFIX_RE`）；文案改「0.2 系列」（`cb5602f4` — `desktop/settings.py:143` — `0.2 系列及更早`）；本段改写消除自触发 2 处 |
+| 3 | `tomli` ← 声明了但产物没有 | **口径缺陷，不是产品缺陷**：`tomli` 只在 `requirements.txt` 以 `python_version < "3.11"` 声明，产物解释器是 3.14；产品代码零导入，仅 3.10 测试用 | 已修：依赖检查按**产物解释器版本**评估环境标记（`aaf98c44` — `scripts/release_manifest.py:674` — `_marker_applies`），标记为假记 SKIP；取不到产物版本时仍按声明面校验（宁可报缺，不静默放过） |
 | 4 | 差集①「声明了但产物没有」：tomli | 与 #3 同一根因的第二条计数 | 同 #3 |
-| 5 | 产物凭据形状 4 个第三方二进制 | **误报**，逐条核定：3 个 Qt TLS 模块命中的是 PEM **头标记字符串**（`-----BEGIN … PRIVATE KEY-----`，无密钥正文）；scipy `.pyd` 的 `ghs_` 是 40 字符 base62 串嵌在更长标识符中（GitHub PAT 不会嵌在标识符内部） | 已修：新增产物二进制登记，**路径 + sha256 + 规则名 + review_by** 四元组；sha 变、规则变、过期任一发生即重新 FAIL |
+| 5 | 产物凭据形状 4 个第三方二进制 | **误报**，逐条核定：3 个 Qt TLS 模块命中的是 PEM **头标记字符串**（`-----BEGIN … PRIVATE KEY-----`，无密钥正文）；scipy `.pyd` 的 `ghs_` 是 40 字符 base62 串嵌在更长标识符中（GitHub PAT 不会嵌在标识符内部） | 已修：新增产物二进制登记（`aaf98c44` — `scripts/release_manifest.py:1017` — `ARTIFACT_SECRET_ALLOWLIST`），**路径 + sha256 + 规则名 + review_by** 四元组；sha 变、规则变、过期任一发生即重新 FAIL |
 
 - **当前结果**：`--only version` FAIL=1（唯一残留是本文件 1127/1144 引用 canonical，
   本段落库即消失）；`--only deps` PASS（SKIP=1 为 tomli）；
