@@ -8,7 +8,8 @@
 3. 面向用户的字符串不出现「未知错误」类空话 —— 白名单必须写理由。
 
 扫描范围：``mbdsdr_ai/`` 下的生产代码（排除 ``tests/``、``__pycache__``
-与目录模块自身）。``desktop/`` 不在 Python 侧纪律范围内，不扫描。
+与目录模块自身）。``desktop/`` 不整体扫描，只对
+``_CROSS_LAYER_CONSUMERS`` 里显式登记的跨层码回查其消费文件。
 """
 
 from __future__ import annotations
@@ -50,6 +51,14 @@ _WILD_CODE_ALLOW = {
     # 错误码；模型可见事件都要有常量，故不能改写成 catalog 里的码。
     ("session_log.py", "error"):
         "会话日志事件类型 EV_ERROR，非错误码（Sprint 3 状态面新增）",
+}
+
+#: 跨层码：由桌面接入层消费、``mbdsdr_ai`` 生产代码不再产生。逐码显式
+#: 声明消费文件，检查时回查该文件里确有这个字面量；消费方删掉后判据照样红，
+#: 不是无条件豁免。``usb_permission`` 是 dd0a47f8 从 device_busy 拆出的
+#: 接入层码，AI 层仍把权限错误归为 device_busy（行为未改）。
+_CROSS_LAYER_CONSUMERS = {
+    "usb_permission": ROOT / "desktop" / "troubleshooting.py",
 }
 
 _EMPTY_PHRASE_ALLOW = {
@@ -157,6 +166,12 @@ def test_every_catalog_code_is_used() -> None:
         prefix = FAMILY_PREFIXES.get(code)
         quoted = (f'"{code}"' in blobs) or (f"'{code}'" in blobs)
         used = quoted or (prefix is not None and prefix in blobs)
+        consumer = _CROSS_LAYER_CONSUMERS.get(code)
+        if not used and consumer is not None:
+            consumer_text = consumer.read_text(
+                encoding="utf-8", errors="replace")
+            used = (f'"{code}"' in consumer_text) or (
+                f"'{code}'" in consumer_text)
         if not used:
             dead.append(code)
     assert not dead, f"目录里有未被任何代码引用的死条目: {dead}"

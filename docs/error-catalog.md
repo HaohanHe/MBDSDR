@@ -133,6 +133,7 @@ AI 层各自拼中文。守卫测试 `tests/test_error_catalog_guard.py` 校验�
 | `unknown_server` | access | 未知服务器 | 未知服务器 '{detail}'。 | 从已配置服务器列表中选择。 | 否 |
 | `unsupported` | access | 不支持的操作 | 不支持的操作：{detail} | 改用受支持的操作。 | 否 |
 | `usb_disconnected` | access | USB 已断开 | USB 设备已断开：{detail} | 重新插拔设备并重新连接。 | 是 |
+| `usb_permission` | access | USB 权限不足 | 没有权限打开 SDR 设备：{detail} | Linux 装 udev 规则（sudo cp rtl-sdr.rules /etc/udev/rules.d/）并重插设备；Windows 用 Zadig 给 RTL2838 装 WinUSB 驱动。 | 否 |
 | `buffer_overflow` | access | 环形缓冲积压丢样 | 环形缓冲积压接近上限，旧样本被覆盖：{detail} | 降低采样率或减少订阅者，让读侧跟上；积压不降时会持续丢样。 | 否 |
 | `link_half_open` | access | 链路半开 | 链路半开（连接仍在但没有 IQ 数据）：{detail} | 确认对端仍在采数、网络未丢包；连续两倍心跳仍无数据会自动断开，届时重新连接。 | 是 |
 | `link_refused` | access | 远端拒绝连接 | 远端 SDR 拒绝连接：{detail} | 确认 rtl_tcp/SpyServer 服务已启动、地址与端口正确后重试。 | 否 |
