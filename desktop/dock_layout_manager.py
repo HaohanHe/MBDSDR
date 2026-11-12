@@ -92,6 +92,9 @@ class DockLayoutManager:
         #: 最近一次 save_state 的可见失败原因；成功时为 None。GUI 无控制台，
         #: 至少留一条可查询状态 + warning 日志，不许把「写盘失败」吞成无事发生。
         self.last_save_error: Optional[str] = None
+        #: 最近一次从 layouts.json 读到的损坏/读失败说明；启动时贴状态栏后保留，
+        #: 便于没有控制台的 GUI 事后查询。
+        self.last_load_error: Optional[str] = None
 
     # ------------------------------------------------------------------
     # 引用便捷访问
@@ -425,6 +428,13 @@ class DockLayoutManager:
             if ok:
                 self.current_preset = name
                 self.store.set_active(name)
+            else:
+                self.last_save_error = (
+                    getattr(self.store, "last_error", None)
+                    or f"布局「{name}」未能写入 "
+                       f"{getattr(self.store, 'path', 'layouts.json')}")
+                logger.warning("%s", self.last_save_error)
+                self._notify_store_error(self.last_save_error)
             return ok
         except Exception:  # noqa: BLE001
             logger.warning("保存布局 %s 失败", name, exc_info=True)
@@ -579,6 +589,29 @@ class DockLayoutManager:
     # ------------------------------------------------------------------
     # 状态持久化（QSettings + layout_store JSON）
     # ------------------------------------------------------------------
+    def _notify_store_error(self, message: str) -> None:
+        """把布局持久化错误贴到主窗口状态栏（复用既有界面，不新建控件）。"""
+        try:
+            bar = self.mw.statusBar()
+            if bar is not None:
+                bar.showMessage(message, 15000)
+        except Exception:  # noqa: BLE001 - 状态栏不可用时至少留日志
+            logger.warning("布局错误无法显示到状态栏：%s", message)
+
+    def _surface_store_error(self) -> bool:
+        """store 若记录了读/写失败，贴状态栏并返回 True。
+
+        ``LayoutStore`` 每次操作都重新 ``_load()``，损坏/读失败状态挂在 store
+        实例上；这里只在启动恢复与保存失败时把它交给已有状态栏，不新建界面。
+        """
+        message = getattr(self.store, "last_error", None)
+        if not message:
+            return False
+        self.last_load_error = message
+        logger.warning("布局持久化异常：%s", message)
+        self._notify_store_error(message)
+        return True
+
     def _store_mtime(self) -> float:
         """layouts.json 的最后修改时间；文件不存在/不可读时返回 0。"""
         try:
@@ -605,10 +638,14 @@ class DockLayoutManager:
             if ok is False:
                 raise OSError("layout_store.set_active 返回 False（原子写失败）")
         except Exception as exc:  # noqa: BLE001
+            # store 的 last_error 说明根因（损坏已备份 / 备份失败拒绝写），
+            # 比「set_active 返回 False」更能让用户知道该去处理哪个文件。
             self.last_save_error = (
-                f"布局名写入 layouts.json 失败（{type(exc).__name__}: {exc}）："
-                "本次布局仍生效，但重启可能回到上一次的布局")
+                getattr(self.store, "last_error", None)
+                or f"布局名写入 layouts.json 失败（{type(exc).__name__}: {exc}）："
+                   "本次布局仍生效，但重启可能回到上一次的布局")
             logger.warning("%s", self.last_save_error)
+            self._notify_store_error(self.last_save_error)
             return False
         return True
 
@@ -670,3 +707,5 @@ class DockLayoutManager:
             except Exception:  # noqa: BLE001
                 logger.warning("启动恢复布局 %s 失败",
                                self.current_preset, exc_info=True)
+        # 读盘发生过损坏/读失败：贴到已有状态栏（不新建界面）。
+        self._surface_store_error()
