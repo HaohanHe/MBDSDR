@@ -9,8 +9,9 @@
 分档：
   * BLOCK（退出码 1）：已知凭据形状——GitHub / GitLab / Slack / AWS / JWT /
     PEM 私钥块。
-  * WARN（默认不拦）：熵告警（≥32 字符且 Shannon ≥ 4.2，承认会有误报）、
-    CLI 选项接收凭据、argv 把凭据类变量带进子进程、日志打印凭据类变量。
+  * WARN（默认不拦）：熵告警（≥32 字符且 Shannon ≥ 4.2，只在源码/配置类
+    文本上跑、每个文件只报首条，承认会有误报）、CLI 选项接收凭据、argv 把
+    凭据类变量带进子进程、日志打印凭据类变量。
 
 豁免：命中行内必须出现 ``pragma: allowlist secret``（任何注释风格都行），
 **逐行**标注；不支持目录级 / 文件级豁免——豁免范围一大，检查器就成摆设。
@@ -54,6 +55,19 @@ SHAPE_RULES: Tuple[Tuple[str, "re.Pattern[str]"], ...] = (
 _CANDIDATE = re.compile(r"[A-Za-z0-9+/=_-]{32,}")
 ENTROPY_MIN = 4.2
 
+#: 熵规则只跑源码 / 配置类文本。构建产物、数据 dump、日志里天然全是哈希与
+#: 随机串：2026-11-13 全仓实测 2 382 625 条 WARN，真正的告警会被完全淹掉。
+#: 只收紧熵规则，形状规则（BLOCK）仍然对全量文件生效。
+_ENTROPY_SUFFIXES = {
+    ".py", ".pyw", ".sh", ".bash", ".zsh", ".ps1", ".bat", ".cmd",
+    ".js", ".jsx", ".ts", ".tsx", ".vue", ".svelte",
+    ".json", ".yaml", ".yml", ".toml", ".ini", ".cfg", ".conf", ".properties",
+    ".md", ".rst", ".txt", ".c", ".h", ".hpp", ".cpp", ".cc", ".cs",
+    ".java", ".kt", ".rb", ".php", ".go", ".rs", ".swift", ".m", ".mm",
+    ".sql", ".html", ".css", ".scss", ".xml", ".gradle", ".spec", ".env",
+}
+_ENTROPY_NAMES = {"Dockerfile", "Makefile", "CMakeLists.txt"}
+
 #: argv / 日志规则用到的标识符形状。
 _CRED_NAME = re.compile(
     r"(?i)(token|passwd|password|secret|api[_-]?key|access[_-]?key|private[_-]?key)"
@@ -94,6 +108,9 @@ SKIP_DIRS = {
     ".pytest_cache": "测试缓存",
     "build": "构建产物",
     "dist": "构建产物",
+    "build-local": "构建产物",
+    "CMakeFiles": "构建产物",
+    "_meteor_build": "构建产物",
     "reference": "第三方上游源码（gpredict）",
     "deepseek-harness-master": "第三方工具源码副本",
     ".qoder": "生成的仓 wiki（占位文本）",
@@ -202,7 +219,25 @@ def _cred_refs(node: ast.AST) -> bool:
     return False
 
 
+def _is_subprocess_call(func: ast.AST) -> bool:
+    """只认 ``subprocess.run/Popen/...``。
+
+    按方法名匹配会打到 ``registry.call(...)`` 这类同名方法上（全仓实测 2 条
+    误报），所以要求接收者链的根是 ``subprocess``。
+    """
+    if not isinstance(func, ast.Attribute) or func.attr not in _SUBPROCESS_FUNCS:
+        return False
+    node = func.value
+    while isinstance(node, ast.Attribute):
+        node = node.value
+    return isinstance(node, ast.Name) and node.id == "subprocess"
+
+
 def _scan_ast(path: str, text: str, lines: List[str]) -> List[Finding]:
+    # 只对 Python 源码做 AST：对 .sh/.txt 调 ast.parse 只会刷一屏 SyntaxWarning，
+    # 还白等解析时间。
+    if Path(path).suffix.lower() not in {".py", ".pyw", ".pyi"}:
+        return []
     try:
         tree = ast.parse(text, filename=path)
     except SyntaxError:
@@ -235,7 +270,7 @@ def _scan_ast(path: str, text: str, lines: List[str]) -> List[Finding]:
                 hits.append((path, lineno, "argv-cli-credential-option", "warn"))
             continue
 
-        if isinstance(func, ast.Attribute) and func.attr in _SUBPROCESS_FUNCS:
+        if _is_subprocess_call(func):
             segment = ast.get_source_segment(text, node) or ""
             shaped = any(rx.search(segment) for _, rx in SHAPE_RULES)
             has_cred = _cred_refs(node)
@@ -258,7 +293,10 @@ def _scan_ast(path: str, text: str, lines: List[str]) -> List[Finding]:
 
 def scan_text(path: str, text: str) -> List[Finding]:
     lines = text.splitlines()
+    name = Path(path).name
+    entropy_ok = Path(path).suffix.lower() in _ENTROPY_SUFFIXES or name in _ENTROPY_NAMES
     hits: List[Finding] = []
+    entropy_reported = False
     for lineno, line in enumerate(lines, 1):
         if SPDX in line:
             continue
@@ -267,11 +305,12 @@ def scan_text(path: str, text: str) -> List[Finding]:
             if rx.search(line):
                 hits.append((path, lineno, rule, "block"))
                 shaped = True
-        if shaped:
+        if shaped or not entropy_ok or entropy_reported:
             continue
         for match in _CANDIDATE.finditer(line):
             if _shannon(match.group(0)) >= ENTROPY_MIN:
                 hits.append((path, lineno, "high-entropy-string", "warn"))
+                entropy_reported = True
                 break
     hits.extend(_scan_ast(path, text, lines))
     return hits
