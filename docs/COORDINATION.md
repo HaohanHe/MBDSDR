@@ -1899,21 +1899,20 @@ No supported devices found），GNSS+SDR 同开复验没做成；离线那次
 | `docs/settings-inventory.md` | 守卫账本线（目的未声明） | 2026-11-13 05:52 | 未声明 |
 | `docs/star-catalog.md` | 守卫账本线（目的未声明） | 2026-11-13 05:52 | 未声明 |
 | `docs/tool-availability.md` | 守卫账本线（目的未声明） | 2026-11-13 05:52 | 未声明 |
-| `docs/COORDINATION.md` | 残留收口线/6ae85f56（目的未声明） | 2026-11-13 06:03 | 未声明 |
-| `docs/known-red-register.md` | 残留收口线/6ae85f56（目的未声明） | 2026-11-13 06:03 | 未声明 |
-| `docs/redundancy-register.md` | 残留收口线/6ae85f56（目的未声明） | 2026-11-13 06:03 | 未声明 |
-| `scripts/check_claim_coordination.py` | 残留收口线/6ae85f56（目的未声明） | 2026-11-13 06:03 | 未声明 |
-| `scripts/hooks/pre-commit` | 残留收口线/6ae85f56（目的未声明） | 2026-11-13 06:03 | 未声明 |
-| `scripts/file_claim.py` | 残留收口线/6ae85f56（续租留痕与累计上限） | 2026-11-13 06:17 | 未声明 |
-| `tests/test_file_claim.py` | 残留收口线/6ae85f56（续租反证三条） | 2026-11-13 06:17 | 未声明 |
-| `tests/test_claim_coordination.py` | 残留收口线/6ae85f56（staged 模式反证） | 2026-11-13 06:17 | 未声明 |
 | `docs/axioms-waivers.json` | 公理棘轮线（目的未声明） | 2026-11-13 06:18 | 未声明 |
 | `desktop/device_panel.py` | 设备会话锁线（目的未声明） | 2026-11-13 06:12 | 未声明 |
 | `tests/test_device_panel_session_lock.py` | 设备会话锁线（目的未声明） | 2026-11-13 06:12 | 未声明 |
 | `docs/pending-patches/2026-11-13-device-session-lock-not-implemented.md` | 设备会话锁线（目的未声明） | 2026-11-13 06:17 | 未声明 |
+| `scripts/audit_evidence.py` | 守卫账本线（目的未声明） | 2026-11-13 05:31 | 未声明 |
+| `docs/evidence-standard.md` | 守卫账本线（目的未声明） | 2026-11-13 06:23 | 未声明 |
+| `desktop/mbdsdr.spec` | 守卫账本线（目的未声明） | 2026-11-13 06:23 | 未声明 |
+| `desktop/main.py` | 守卫账本线（目的未声明） | 2026-11-13 06:23 | 未声明 |
+| `scripts/check_dist_head_parity.py` | 守卫账本线（目的未声明） | 2026-11-13 06:23 | 未声明 |
+| `scripts/check_banner_coverage.py` | 守卫账本线（目的未声明） | 2026-11-13 06:23 | 未声明 |
+| `desktop/sat_track_panel.py` | K20sat收口线/6ae85f56（修 sat_track_panel.py:400 动态 tooltip 未登记导致 test_every_passthrough_tooltip_is_registered 红） | 2026-11-13 06:23 | 未声明 |
 | **真机（USB SDR）** | 跑 `hw_acceptance/`、七环、`capture_throughput.py` 的线（资源独占） | 占用时段 | — |
 
-> 上表 31 条由 `claim` 台账推导的行：owner 原文与 `acquired_at` 直接取自台账，
+> 上表各行均由 `claim` 台账推导：owner 原文与 `acquired_at` 直接取自台账，
 > 目的优先用台账里的 `claim_reason`，没有就如实写「未声明」，不补编。时间列只是
 > 快照，重新 claim 会刷新，以台账为准；owner 对不上才报警。
 
