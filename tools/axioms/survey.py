@@ -71,7 +71,12 @@ def _imports(unit: Unit) -> List[Tuple[str, int]]:
     tree = parse(unit)
     if tree is None:
         return []
-    mod_parts = _rel_module(unit.path).split(".")
+    return _imports_of(unit.path, tree)
+
+
+def _imports_of(path: str, tree: ast.Module) -> List[Tuple[str, int]]:
+    """从已解析的语法树取 import 边（避免再读一次空文本的 ``Unit``）。"""
+    mod_parts = _rel_module(path).split(".")
     out: List[Tuple[str, int]] = []
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
@@ -126,8 +131,23 @@ def collect_d1(repo: Repo) -> Dimension:
     dim.facts.append(f"模块 {len(units)} 个；包间依赖边 {sum(edges.values())} 条")
     for (src, dst), n in sorted(edges.items(), key=lambda kv: -kv[1])[:12]:
         dim.facts.append(f"依赖 {src} -> {dst}：{n} 条")
+    # 判据（避免再出现「规则不管的灰区」）：
+    #   tests/scripts -> tools 允许（用例与治理脚本本来就用开发工具）；
+    #   desktop -> mbdsdr_ai 允许（界面层单向依赖核心）；
+    #   mbdsdr_ai -> tools 一律应修——pip 安装 mbdsdr_ai 的人拿不到 tools，
+    #   核心库会因此不可导入。测试放错包时把用例迁到 tests/，不许延迟 import。
+    dim.facts.append("允许方向：tests/scripts -> tools、desktop -> mbdsdr_ai；"
+                     "mbdsdr_ai -> tools 一律应修。")
 
     for (src, dst), n in sorted(edges.items()):
+        if src == "mbdsdr_ai" and dst == "tools":
+            dim.findings.append(Finding(
+                "D1-core-depends-tools", "mbdsdr_ai/", 0, f"{n} 处 import",
+                "依赖方向反了：核心库反向依赖开发工具层；pip 安装 mbdsdr_ai 的人"
+                "拿不到 tools/，核心包会直接不可导入。",
+                "把被依赖的常量/函数下沉到 mbdsdr_ai；端到端用例迁到 tests/"
+                "（tests -> tools 是允许方向）；不得用函数体内延迟 import 掩盖。",
+            ))
         if src == "mbdsdr_ai" and dst == "desktop":
             dim.findings.append(Finding(
                 "D1-reverse", "mbdsdr_ai/", 0, f"{n} 处 import",
@@ -148,20 +168,38 @@ def collect_d1(repo: Repo) -> Dimension:
             "把 Qt 相关实现移到 desktop/，mbdsdr_ai 只保留可注入的接口。",
         ))
 
-    # 模块级环
+    # 模块级环。三个口径缺一不可，否则环会被系统性漏报：
+    #   * desktop 内部大量用裸模块名（``from tokens import tokens``），由
+    #     desktop/__init__.py 的 sys.path 垫片支持；只认 ``desktop.`` 前缀
+    #     等于漏掉大半内部边（实测 62 条 vs 158 条）。
+    #   * 先建齐所有节点再加边：原实现边加边建图，指向「尚未入图节点」的边
+    #     会被静默丢弃，环检测随文件遍历顺序漂移。
+    #   * 函数体内的延迟 import 同样算边：依赖关系没有变，只是检查器看不见。
     graph: Dict[str, Set[str]] = {}
-    for rel, tree in modules.items():
+    desktop_bare: Dict[str, str] = {}
+    for rel in modules:
         if not rel.startswith(("desktop/", "mbdsdr_ai/")):
             continue
         mod = _rel_module(rel)
         graph.setdefault(mod, set())
-        for module, _ in _imports(Unit(rel, "")):
-            if module.startswith(("desktop.", "mbdsdr_ai.")) and module in graph:
-                graph[mod].add(module)
-    # 先补全所有节点再判环
+        if mod.startswith("desktop.") and mod.count(".") == 1:
+            desktop_bare[mod.split(".", 1)[1]] = mod
+
+    def _target(module: str) -> str:
+        """裸模块名（垫片可见的 desktop 顶层模块）归一成 ``desktop.*``。"""
+        root, _, rest = module.partition(".")
+        if root in desktop_bare:
+            return desktop_bare[root] + ("." + rest if rest else "")
+        return module
+
     for rel in modules:
-        if rel.startswith(("desktop/", "mbdsdr_ai/")):
-            graph.setdefault(_rel_module(rel), set())
+        if not rel.startswith(("desktop/", "mbdsdr_ai/")):
+            continue
+        mod = _rel_module(rel)
+        for module, _ in _imports_of(rel, modules[rel]):
+            target = _target(module)
+            if target.startswith(("desktop.", "mbdsdr_ai.")) and target in graph:
+                graph[mod].add(target)
     sccs = _tarjan(graph)
     cycles = [c for c in sccs if len(c) > 1]
     dim.facts.append(f"模块级强连通分量：{len(cycles)} 个")
@@ -170,7 +208,8 @@ def collect_d1(repo: Repo) -> Dimension:
             "D1-cycle", comp[0].replace(".", "/") + ".py", 0,
             f"{len(comp)} 个模块互相依赖",
             "存在 import 环，任何一侧的初始化顺序都会影响另一侧；单独改一处无法预测影响面。",
-            "按依赖方向拆出接口模块，环内至少一条边改为依赖注入或延迟 import。",
+            "把常量/状态下沉到下层，或改依赖注入；不得用函数体内延迟 import "
+            "掩盖——依赖没有变，只是检查器看不见。",
             "review",
         ))
     return dim

@@ -130,6 +130,18 @@ CASES: List[Case] = [
          {"mbdsdr_ai/core.py": "import PySide6\n"},
          {"mbdsdr_ai/core.py": "import json\n"},
          match="D1-qt-in-core"),
+    Case("D1", "desktop 内部裸模块名成环",
+         "desktop 用 sys.path 垫片裸名导入（from tokens import ...）；"
+         "环检测必须按裸名归一，且函数内延迟 import 也算边",
+         {"desktop/a.py": "from b import thing\n", "desktop/b.py": "def f():\n    from a import other\n"},
+         {"desktop/a.py": "from b import thing\n", "desktop/b.py": "thing = 1\n"},
+         match="D1-cycle"),
+    Case("D1", "核心库反向依赖开发工具",
+         "mbdsdr_ai 不得 import tools/（pip 装核心包的人拿不到开发工具）；"
+         "tests/scripts -> tools 才是允许方向",
+         {"mbdsdr_ai/x.py": "from tools.onboarding.onboard import step_record\n"},
+         {"mbdsdr_ai/x.py": "from mbdsdr_ai.playback import parse_sigmf_meta\n"},
+         match="D1-core-depends-tools"),
     Case("D2", "同一读数多文件产生",
          "desktop 多处各自拼 Hz 读数，未登记真值源",
          {"desktop/a.py": "def f(x):\n    return f\"{x} Hz\"\n",
