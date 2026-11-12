@@ -1370,6 +1370,11 @@ class SDRBackend:
         """设置增益。失败时回滚 status。"""
         if not self.status.connected:
             return False
+        if not self.supports_gain():
+            # 不支持 ≠ 这次没做成：直接拒绝并留人话，绝不因为基类 _apply_gain
+            # 是空操作就返回 True，把从未下发的请求值写进 status.gain_db。
+            self.status.error = "本设备/后端不支持增益调节（未下发）"
+            return False
         clamped = max(0, min(gain_db, self.device.max_gain))
         old = self.status.gain_db
         self.status.error = ""
@@ -1419,6 +1424,9 @@ class SDRBackend:
         """设置 AGC 开关。失败时回滚 status（与 set_gain 同纪律）。"""
         if not self.status.connected:
             return False
+        if not self.supports_agc():
+            self.status.error = "本设备/后端不支持 AGC（未下发）"
+            return False
         old = self.status.agc_enabled
         self.status.error = ""
         try:
@@ -1440,6 +1448,29 @@ class SDRBackend:
     def _apply_agc(self, enabled: bool) -> bool:
         """子类覆写：把 AGC 开关真正写入硬件。默认无操作直接成功。"""
         return True
+
+    def supports_gain(self) -> bool:
+        """本后端是否真能把增益写入硬件（能力探测，不改状态）。
+
+        判据 = 子类是否覆写了 ``_apply_gain`` 或 ``set_gain``：基类实现是
+        空操作，若把空操作当成功，不支持增益的后端会把从未下发的请求值写进
+        ``status.gain_db``（假成功）。``set_gain`` 入口按这个判据拒绝。
+        """
+        return (type(self)._apply_gain is not SDRBackend._apply_gain
+                or type(self).set_gain is not SDRBackend.set_gain)
+
+    def supports_agc(self) -> bool:
+        """同 :meth:`supports_gain`，判据换成 ``_apply_agc`` / ``set_agc``。"""
+        return (type(self)._apply_agc is not SDRBackend._apply_agc
+                or type(self).set_agc is not SDRBackend.set_agc)
+
+    def supports_ppm(self) -> bool:
+        """默认按是否实现 ``set_ppm`` 判断（基类没有该方法）。"""
+        return callable(getattr(self, "set_ppm", None))
+
+    def supports_offset_tuning(self) -> bool:
+        """默认按是否实现 ``set_offset_tuning`` 判断；能力有条件的后端覆写。"""
+        return callable(getattr(self, "set_offset_tuning", None))
 
     def _apply_bandwidth(self, bw_hz: float) -> bool:
         """子类覆写：把模拟/信道带宽真正写入硬件。默认无操作直接成功。"""

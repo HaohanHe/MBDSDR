@@ -7414,18 +7414,36 @@ class MainWindow(QMainWindow):
         采样率被拒时把下拉回填成设备实际生效值——界面不许停在被拒的请求值。
         """
         failures = []
+        skipped = []
 
-        def _supports(name: str) -> bool:
-            """后端是否有这个方法（没有 = 设备不支持该项，不是参数未生效）。
+        def _supports(kind: str) -> bool:
+            """设备是否真支持某项能力（不是「有没有 set_* 这个方法」）。
 
-            K10（真机 rtl_tcp）：``RtlTcpBackend`` 没有 ``set_offset_tuning``，
+            优先问后端自己的 ``supports_*()``：基类的 ``_apply_gain`` /
+            ``_apply_agc`` 是空操作返回 True，只看方法在不在会把「继承来的
+            空操作」当成支持——那正是「设备不支持却被报成功」的根。后端没有
+            探测方法时退回「有没有 set_*」，给鸭子类型的假后端留同口径。
+
+            K10（真机 rtl_tcp）：``supports_offset_tuning()`` 为 False，
             旧实现把它当异常记进失败清单，状态栏于是报「连接后参数未全部
             生效：Offset Tuning」——链路完全正常，是措辞在撒谎。
             """
-            return callable(getattr(backend, name, None))
+            probe = getattr(backend, f"supports_{kind}", None)
+            if callable(probe):
+                try:
+                    return bool(probe())
+                except Exception as e:  # noqa: BLE001 - 探测失败按不支持，留证
+                    logger.warning("能力探测 %s 失败（按不支持处理）: %s: %s",
+                                   kind, type(e).__name__, e)
+                    return False
+            return callable(getattr(backend, f"set_{kind}", None))
 
         def _skip(label: str) -> None:
+            skipped.append(label)
             logger.info("连接后参数 %s：设备不支持该项，已跳过（不计失败）", label)
+
+        caps = {kind: _supports(kind)
+                for kind in ("gain", "agc", "ppm", "offset_tuning")}
 
         def _run(label, fn) -> bool:
             try:
@@ -7468,19 +7486,16 @@ class MainWindow(QMainWindow):
                                    type(e).__name__, e)
         # 只有设备接受的连接值才算「最后生效值」；被拒时记 None，失败回填
         # 会退到连接默认（PPM 0 / Offset 关），而不是一个设备没接受过的数。
-        if not _supports("set_ppm"):
+        if not caps["ppm"]:
             _skip("PPM")
             self._last_ppm_applied = None
         else:
             self._last_ppm_applied = (int(ppm) if
                                       _run("PPM", lambda: backend.set_ppm(ppm))
                                       else None)
-        # 「不支持」≠「未生效」：能探测到驱动没有该能力就直接跳过，既不下发
-        # 也不记失败——否则本地 RTL（pyrtlsdr 无该方法）/ rtl_tcp 每次连接都
-        # 刷一条假失败。
-        _supports_ot = getattr(backend, "supports_offset_tuning", None)
-        if (not _supports("set_offset_tuning")
-                or (callable(_supports_ot) and not _supports_ot())):
+        # 「不支持」≠「未生效」：能力探测为假就直接跳过，既不下发也不记失败，
+        # 并把控件置灰写明原因——不许留一个能点、点了没反应的开关。
+        if not caps["offset_tuning"]:
             _skip("Offset Tuning")
             self._last_offset_applied = None
         else:
@@ -7488,23 +7503,52 @@ class MainWindow(QMainWindow):
                 bool(offset) if
                 _run("Offset Tuning", lambda: backend.set_offset_tuning(offset))
                 else None)
-        if _supports("set_agc"):
+        if caps["agc"]:
             _run("AGC", lambda: backend.set_agc(agc))
         else:
             _skip("AGC")
         if not agc:
-            if _supports("set_gain"):
+            if caps["gain"]:
                 _run("增益", lambda: backend.set_gain(gain))
             else:
                 _skip("增益")
         # 意图跟着连接参数走；AGC 打开时手动增益不生效，清空意图以免三块
         # 面板把「AGC 自动增益」误报成「配置意图未生效」。
         self._set_gain_intent(gain if not agc else None)
+        cp = getattr(self, "control_panel", None)
+        if cp is not None:
+            set_caps = getattr(cp, "set_device_capabilities", None)
+            if callable(set_caps):
+                set_caps(**caps)
+        if skipped:
+            self.statusBar().showMessage(
+                f"本设备不支持：{'、'.join(skipped)}（已跳过，不计失败）",
+                MSG_NORMAL)
         if failures:
             logger.warning("连接后参数未全部生效: %s", "、".join(failures))
             self.statusBar().showMessage(
                 f"连接后参数未全部生效：{'、'.join(failures)}", MSG_IMPORTANT)
         return failures
+
+    def _backend_capability(self, kind: str) -> bool:
+        """当前后端是否真支持某项能力（交互入口与连接下发同一判据）。
+
+        与 ``_apply_connect_params`` 内的 ``_supports`` 同口径：优先问后端
+        ``supports_*()``（基类按「子类是否覆写 _apply_*」判定，继承来的空
+        操作不算支持）；没有探测方法的假后端退回「有没有 set_*」。
+        """
+        backend = getattr(self, "_active_sdr_backend", None)
+        if backend is None:
+            return False
+        probe = getattr(backend, f"supports_{kind}", None)
+        if callable(probe):
+            try:
+                return bool(probe())
+            except Exception as e:  # noqa: BLE001 - 探测失败按不支持，留证
+                logger.warning("能力探测 %s 失败（按不支持处理）: %s: %s",
+                               kind, type(e).__name__, e)
+                return False
+        return callable(getattr(backend, f"set_{kind}", None))
 
     def _apply_hw_action(self, action: str, fn, target_hz=None) -> bool:
         """执行硬件写入；失败只提示并返回 False，不抛、不提交 UI。
@@ -7805,6 +7849,14 @@ class MainWindow(QMainWindow):
         self._set_gain_intent(float(db))
         backend = self._active_sdr_backend
         if backend is not None:
+            if not self._backend_capability("gain"):
+                # 不支持 ≠ 本次没做成：清掉意图、读数回到设备值，并明确说“跳过”，
+                # 也不落盘——设备从未接受的增益不该被下次启动当成配置意图。
+                self._set_gain_intent(None)
+                self._show_real_gain(backend)
+                self.statusBar().showMessage(
+                    "本设备不支持增益调节（已跳过，未下发）", MSG_NORMAL)
+                return
             if not self._apply_hw_action(
                     "设置增益", lambda: backend.set_gain(float(db))):
                 # 失败后读数必须回到设备真实值；停在新值就是把失败装成成功。
@@ -8186,6 +8238,17 @@ class MainWindow(QMainWindow):
                 logger.warning("保存 AGC 开关失败（仅本次会话生效）: %s: %s",
                                type(e).__name__, e)
             return
+        if not self._backend_capability("agc"):
+            # 设备没有 AGC：不进 _apply_hw_action（那里会把「没这个能力」报成
+            # 「这次没做成」），开关退回关并直说跳过。
+            try:
+                self.control_panel.set_agc(False)
+            except Exception as e:  # noqa: BLE001
+                logger.warning("恢复 AGC 开关失败: %s: %s",
+                               type(e).__name__, e)
+            self.statusBar().showMessage(
+                "本设备不支持 AGC（已跳过，未下发）", MSG_NORMAL)
+            return
         before = self.settings.get("agc_enabled", None)
         if not self._apply_hw_action(
                 "设置 AGC", lambda: backend.set_agc(bool(enabled))):
@@ -8226,6 +8289,11 @@ class MainWindow(QMainWindow):
         backend = self._active_sdr_backend
         if backend is None:
             return
+        if not self._backend_capability("ppm"):
+            self.statusBar().showMessage(
+                "本设备不支持 PPM 校正（已跳过，未下发）", MSG_NORMAL)
+            self._restore_ppm_display()
+            return
         set_ppm = getattr(backend, "set_ppm", None)
         if not callable(set_ppm):
             self.statusBar().showMessage(
@@ -8258,10 +8326,13 @@ class MainWindow(QMainWindow):
         backend = self._active_sdr_backend
         if backend is None:
             return
+        if not self._backend_capability("offset_tuning"):
+            self.statusBar().showMessage(
+                "本设备不支持 Offset Tuning（已跳过，未下发）", MSG_NORMAL)
+            self._restore_offset_tuning_display()
+            return
         set_ot = getattr(backend, "set_offset_tuning", None)
-        supports_ot = getattr(backend, "supports_offset_tuning", None)
-        unsupported = callable(supports_ot) and not supports_ot()
-        if not callable(set_ot) or unsupported:
+        if not callable(set_ot):
             self.statusBar().showMessage(
                 "Offset tuning 未下发：当前设备/驱动不支持该能力", MSG_IMPORTANT)
             self._restore_offset_tuning_display()

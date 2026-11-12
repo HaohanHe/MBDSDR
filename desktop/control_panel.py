@@ -363,6 +363,47 @@ class ControlPanel(QWidget):
         # 不能把预填档位当成设备正在跑的速率。
         self._apply_sample_rate_unconfirmed_marker()
 
+    def set_device_capabilities(self, *, gain: bool, agc: bool, ppm: bool,
+                                offset_tuning: bool) -> None:
+        """按所连设备的真实能力收紧控件：不支持就置灰并写明原因。
+
+        与 :meth:`set_sdr_connected` 分工：后者只管「有没有设备」，这里管
+        「这台设备有没有这个能力」。两者都真控件才可用——否则就是一个能点、
+        点了没反应（或后台空操作假成功）的开关。断开时 ``set_sdr_connected``
+        统一置灰并还原 tooltip，重连后由 ``_apply_connect_params`` 重新收紧。
+        """
+        reason = "本设备不支持该项（已跳过，不会下发）"
+
+        # 状态先落：设备做不到的项不许停在「已勾选/已生效」。
+        if not agc:
+            self.set_agc(False)
+        if not offset_tuning:
+            self.set_offset_tuning_applied(False)
+        if not gain:
+            self.gain_val.setText("—")
+            self.gain_val.setToolTip(
+                "本设备不支持增益调节：滑杆位置只是配置意图，不会下发")
+
+        def _apply(widget, supported: bool, base_tip: str) -> None:
+            if widget is None:
+                return
+            widget.setEnabled(self._sdr_connected and supported)
+            if supported:
+                widget.setToolTip(base_tip)
+            else:
+                widget.setToolTip(f"{base_tip}\n{reason}" if base_tip
+                                  else reason)
+
+        # tooltip 最后写，避免被上面 set_*_applied 里的"还原基础说明"覆盖。
+        _apply(getattr(self, "gain_slider", None), gain,
+               self._gain_base_tip)
+        agc_check = getattr(self, "agc_check", None)
+        _apply(agc_check, agc,
+               getattr(agc_check, "_base_tip", "") if agc_check else "")
+        _apply(getattr(self, "ppm_spin", None), ppm, self._ppm_base_tip)
+        _apply(getattr(self, "offset_check", None), offset_tuning,
+               self._offset_base_tip)
+
     def set_connected(self, connected: bool):
         """主窗口在连接/断开时调用（hasattr 守卫，方法名固定为 set_connected）。
 
