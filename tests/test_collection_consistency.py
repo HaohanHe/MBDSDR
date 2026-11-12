@@ -12,6 +12,10 @@
 方法）；实际集合来自 `pytest --collect-only -q tests/` 的**真实输出**。
 用文件名正则去猜收集结果会漏掉类内测试——正是这次漏掉 77 条的同一个原因。
 
+两类缺失必须分开报：**「收集失败」**（文件 import 就炸 / 语法错）与
+**「未被收集」**（文件本身能显式收集，但裸目录收集不到，属命名或收集口径）。
+混成一句的后果是：真因是 `ImportError` 的人会去改文件名。
+
 容器根目录的收集范围见 `.github/workflows/ci.yml` 的 matrix：
 `tests/`（A/B 分组）、`mbdsdr_ai/tests`、`experiments/tests`、`tools/onboarding`、
 `tools/hw_selfcheck`。本守卫只管 `tests/`（其余根的收集一致性另案）。
@@ -66,24 +70,83 @@ def _collected():
     return files, proc
 
 
+# pytest 的报错行形如 "E   ImportError: No module named 'foo'"
+_ERR_LINE = re.compile(r"^\s*E\s{2,}(\S.*)$", re.M)
+_ERR_WORD = re.compile(r"(ImportError|SyntaxError|ModuleNotFoundError|\b\w*Error\b)")
+
+
+def _first_error_line(text):
+    """从收集输出里取「原始错误首行」；取不到就诚实说取不到。"""
+    m = _ERR_LINE.search(text)
+    if m:
+        return m.group(1).strip()
+    for line in text.splitlines():
+        if _ERR_WORD.search(line) and not line.startswith("="):
+            return line.strip()
+    for line in reversed(text.splitlines()):
+        if line.strip():
+            return line.strip()
+    return "（无输出）"
+
+
+def _recheck_file(rel):
+    """对单个缺失文件用**显式路径**重跑收集，区分「坏了」与「没被收」。
+
+    显式路径不受 python_files 限制：能收 = 文件本身没毛病，问题在命名/口径；
+    收不了（RC≠0 或出现 ERROR）= 文件在收集阶段就炸了。
+    返回 (ok, 原始错误首行)。
+    """
+    env = dict(os.environ)
+    env["MBDSDR_TEST_LOCK"] = "0"
+    env["PYTHONDONTWRITEBYTECODE"] = "1"
+    proc = subprocess.run(
+        [sys.executable, "-m", "pytest", "--collect-only", "-q", rel,
+         "-p", "no:cacheprovider"],
+        cwd=ROOT, env=env, capture_output=True, text=True,
+        encoding="utf-8", errors="replace", timeout=300,
+    )
+    text = (proc.stdout or "") + "\n" + (proc.stderr or "")
+    broken = proc.returncode != 0 or re.search(r"^ERROR ", text, re.M)
+    return (not broken), ("" if not broken else _first_error_line(text))
+
+
 def test_every_file_with_test_functions_is_collected():
     expected = _files_with_tests()
     collected, proc = _collected()
 
     missing = {f: n for f, n in expected.items() if f not in collected}
-    detail = "\n".join(
-        "  - %s（%d 条 test_ 函数）" % (f, n) for f, n in sorted(missing.items())
-    )
+    if not missing:
+        return
+
+    not_collected, broken = {}, {}
+    for f, n in sorted(missing.items()):
+        ok, err = _recheck_file(f)
+        (not_collected if ok else broken)[f] = (n, err)
+
+    sections = []
+    if broken:
+        sections.append(
+            "收集失败（先修这个文件的错误，不要改名）：\n"
+            + "\n".join("  - %s：%s" % (f, err) for f, (_, err) in broken.items())
+        )
+    if not_collected:
+        sections.append(
+            "未被收集（文件本身能被显式收集，但裸 `pytest tests/` 收不到）：\n"
+            + "\n".join("  - %s（%d 条 test_ 函数）" % (f, n)
+                        for f, (n, _) in not_collected.items())
+        )
+
     tail = "\n".join(
         line for line in (proc.stdout + proc.stderr).splitlines()[-25:]
         if line.strip()
     )
-    assert not missing, (
-        "以下文件含 test_ 函数（含类内），但裸 `pytest --collect-only -q tests/` "
-        "收不到它们：\n%s\n"
-        "修法：文件名改成 test_*.py；确属手工脚本则移出 tests/ 或在文件顶部写明"
-        "为什么不被收集。\n"
-        "收集命令 RC=%s，末尾输出：\n%s" % (detail, proc.returncode, tail)
+    assert False, (
+        "以下文件含 test_ 函数（含类内），却没有出现在裸 "
+        "`pytest --collect-only -q tests/` 的收集结果里：\n\n"
+        + "\n\n".join(sections)
+        + "\n\n修法：收集失败 → 修 import/语法；未被收集 → 文件名改成 "
+        "test_*.py，确属手工脚本则移出 tests/ 或在文件顶部写明为什么不被收集。\n"
+        "收集命令 RC=%s，末尾输出：\n%s" % (proc.returncode, tail)
     )
 
 
