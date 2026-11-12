@@ -329,13 +329,16 @@ class SpyServerClient:
             self._fail_from_network(e, "stream")
             raise SpyServerError(f"命令下发失败: {self.error}") from e
 
-    def set_frequency(self, freq_hz: int) -> None:
+    def set_frequency(self, freq_hz: int) -> bool:
+        """下发中心频率；失败抛 SpyServerError，返回 True 表示命令已发出。"""
         self._send_cmd(self.CMD_SET_FREQUENCY, int(freq_hz))
+        return True
 
-    def set_sample_rate(self, rate_hz: int) -> None:
+    def set_sample_rate(self, rate_hz: int) -> bool:
         self._send_cmd(self.CMD_SET_SAMPLERATE, int(rate_hz))
         self.sample_rate_hz = float(rate_hz)
         self._health.sample_rate_hz = float(rate_hz)
+        return True
 
     def set_gain(self, gain_db: float) -> None:
         """设置增益 dB。先切手动模式，再下发增益（与 rtl_tcp 一致）。"""
@@ -728,8 +731,10 @@ class SpyServerBackend(SDRBackend):
         if self._client is None:
             return False
         try:
-            self._client.set_frequency(int(freq_hz))
+            ok = self._client.set_frequency(int(freq_hz))
         except SpyServerError:
+            return False
+        if ok is False:
             return False
         if self._ring_reader is not None:
             self._ring_reader.clear()
@@ -739,8 +744,10 @@ class SpyServerBackend(SDRBackend):
         if self._client is None:
             return False
         try:
-            self._client.set_sample_rate(int(rate_hz))
+            ok = self._client.set_sample_rate(int(rate_hz))
         except SpyServerError:
+            return False
+        if ok is False:
             return False
         if self._ring_reader is not None:
             self._ring_reader.clear()
