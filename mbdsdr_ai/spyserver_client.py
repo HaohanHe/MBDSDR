@@ -94,8 +94,20 @@ class SpyServerClient:
 
     # server 首包：1024 字节 ASCII 配置串
     _HANDSHAKE_BYTES = 1024
+    #: 合法 SpyServer 配置串里至少会出现其中一个键。握手串必须命中至少一个，
+    #: 否则视为「不是 SpyServer」——二进制/新协议头里碰巧出现的 '=' 不算数。
+    _HANDSHAKE_KNOWN_KEYS = (
+        "Name", "DeviceType", "Serial", "Version",
+        "SampleRate", "MinSampleRate", "MaxSampleRate",
+        "MinFrequency", "MaxFrequency", "MaxGain", "Gain",
+    )
     # 单次 read_samples 最大字节数（防止无限阻塞）
     _DEFAULT_CHUNK = 8192
+    #: 握手总时限 = max(1.0, timeout × 本系数)。逐字节 recv 各自有超时，
+    #: 但对端只要每字节都赶在超时前到达就能把 1024 字节的握手拖到 1024×timeout
+    #: （默认 5s → 约 85 分钟），表现就是永远卡在「连接中」。总时限封顶。
+    _HANDSHAKE_DEADLINE_FACTOR = 2.0
+
     #: 连续多少次 idle 超时才把"半开连接"硬判为断开（与 rtl_tcp 同口径）：
     #: 1 次=stale（网络抖动仍可能恢复）；2 次=累计 2×idle_timeout 无数据。
     _STALE_ESCALATE_AFTER = 2
@@ -128,6 +140,8 @@ class SpyServerClient:
         self.error_code: str = ""
         self.suggestion: str = ""
         self.sample_rate_hz: Optional[float] = None
+        #: 最近一次 _recvexactly 实际收到的字节数（半包/半帧时用于如实报数）。
+        self._last_recv_bytes = 0
 
     # -- 连接 / 握手 --------------------------------------------------------
     def start(self, host: Optional[str] = None, port: Optional[int] = None) -> None:
@@ -161,10 +175,13 @@ class SpyServerClient:
                 self._fail_from_network(e, "connect")
                 raise SpyServerError(self.error) from e
 
-        # 2) 读 1024 字节握手配置串
+        # 2) 读 1024 字节握手配置串（带总时限，慢滴对端不能把 connect 拖成分钟级）
         try:
             self._sock.settimeout(self._timeout)
-            raw = self._recvexactly(self._HANDSHAKE_BYTES, phase="handshake")
+            deadline = time.monotonic() + max(
+                1.0, self._timeout * self._HANDSHAKE_DEADLINE_FACTOR)
+            raw = self._recvexactly(
+                self._HANDSHAKE_BYTES, phase="handshake", deadline=deadline)
         except OSError as e:
             self._fail_from_network(e, "handshake")
             self._close_sock()
@@ -172,17 +189,22 @@ class SpyServerClient:
 
         if raw is None or len(raw) < self._HANDSHAKE_BYTES:
             cat, msg, sug = classify_handshake_reason(
-                f"握手串不完整（{len(raw) if raw else 0}/{self._HANDSHAKE_BYTES} "
+                f"握手串不完整（{self._last_recv_bytes}/{self._HANDSHAKE_BYTES} "
                 "字节，对端关闭或半开），不是可用的 SpyServer")
             self._fail(cat, msg, sug)
             self._close_sock()
             raise SpyServerError(self.error)
 
-        # 3) 解析 ASCII key=value\\0 串
+        # 3) 解析 ASCII key=value\\0 串，并校验它**确实像** SpyServer 配置串。
+        #    只解析出 key=value 不够：二进制协议头里碰巧出现的 '=' 也会被切成
+        #    键值对（键里带控制字符），照单全收就会把非 IQ 流当成 IQ 播出去。
         self.server_info = self._parse_handshake(raw)
-        if not self.server_info:
+        if not self._looks_like_config(self.server_info):
             cat, msg, sug = classify_handshake_reason(
-                f"握手串未解析到任何 key=value（{self.host}:{self.port} 不是 SpyServer）")
+                f"握手串不是 SpyServer 配置（解析到 {len(self.server_info)} 个 "
+                f"key=value，未命中 Name/SampleRate 等已知键），"
+                f"{self.host}:{self.port} 不是 SpyServer")
+            self.server_info = {}
             self._fail(cat, msg, sug)
             self._close_sock()
             raise SpyServerError(self.error)
@@ -268,6 +290,27 @@ class SpyServerClient:
                 continue
         return out
 
+    @classmethod
+    def _looks_like_config(cls, info: Dict[str, str]) -> bool:
+        """握手串是否真的是 SpyServer 配置串（而不是碰巧含 '=' 的二进制）。
+
+        三条都要满足：
+          1. 至少解析出一个键；
+          2. 键/值里没有替换字符（非 ASCII 解码失败的痕迹）或控制字符；
+          3. 至少命中一个已知配置键（Name/SampleRate/...）。
+        """
+        if not info:
+            return False
+        for k, v in info.items():
+            if not k:
+                return False
+            for text in (k, v):
+                if "\ufffd" in text:
+                    return False
+                if any(ord(ch) < 0x20 and ch != "\t" for ch in text):
+                    return False
+        return any(k in info for k in cls._HANDSHAKE_KNOWN_KEYS)
+
     # -- 命令下发 -----------------------------------------------------------
     def _send_cmd(self, cmd: int, param: int) -> None:
         """发 5 字节命令包 = struct.pack(">BI", cmd, param)。
@@ -304,12 +347,26 @@ class SpyServerClient:
         self._send_cmd(self.CMD_SET_GAIN_MODE, 0 if enabled else 1)
 
     # -- IQ 流读取 ----------------------------------------------------------
-    def _recvexactly(self, n: int, phase: str = "stream") -> Optional[bytes]:
-        """读满 n 字节；三种结局必须可区分（超时/对端关闭/IO 错误）。"""
+    def _recvexactly(self, n: int, phase: str = "stream",
+                     deadline: Optional[float] = None) -> Optional[bytes]:
+        """读满 n 字节；三种结局必须可区分（超时/对端关闭/IO 错误）。
+
+        ``deadline``（monotonic 时间戳）只用于握手：每次 recv 前把本步超时
+        收紧到「总时限剩余」，避免逐字节慢滴把握手拖到 1024×timeout。
+        """
         if self._sock is None:
             return None
+        self._last_recv_bytes = 0
         buf = bytearray()
         while len(buf) < n:
+            if deadline is not None:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise socket.timeout("握手超过总时限")
+                try:
+                    self._sock.settimeout(min(self._timeout, remaining))
+                except OSError:
+                    pass
             try:
                 chunk = self._sock.recv(n - len(buf))
             except (TimeoutError, socket.timeout) as e:
@@ -341,6 +398,7 @@ class SpyServerClient:
                     CATEGORY_EOF, "读取 IQ 失败: 连接已被对端关闭（服务停止或掉线）")
                 return None
             buf.extend(chunk)
+            self._last_recv_bytes = len(buf)
         return bytes(buf)
 
     def read_samples(self, n: int) -> np.ndarray:
@@ -361,7 +419,7 @@ class SpyServerClient:
         if raw is None or len(raw) < n * 2:
             self._mark_disconnected(
                 CATEGORY_EOF,
-                f"读样本不足（{len(raw) if raw else 0}/{n*2} 字节），连接断开",
+                f"读样本不足（{self._last_recv_bytes}/{n*2} 字节），连接断开",
             )
             raise SpyServerError(self.error)
         iq = np.frombuffer(raw, dtype=np.uint8).reshape(-1, 2)

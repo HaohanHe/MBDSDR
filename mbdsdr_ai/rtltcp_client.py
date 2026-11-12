@@ -119,7 +119,12 @@ class RtlTcpClient:
     #: 连续多少次 idle 超时才把"半开连接"硬判为断开。1 次=只降级 stale
     #: （网络抖动仍可能恢复）；2 次=累计 2×idle_timeout 无任何数据，
     #: 视为对端已死（socket 关闭，交给重连管理器/用户重连）。
+    #: 握手总时限 = max(1.0, CONNECT_TIMEOUT × 本系数)。逐字节 recv 各有超时，
+    #: 但对端每字节都赶在超时前到达就能把 12 字节握手拖到 12×CONNECT_TIMEOUT；
+    #: 默认 5s → 最长 60s 挂在 connect 里。总时限封顶。
+    HANDSHAKE_DEADLINE_FACTOR = 2.0
     _STALE_ESCALATE_AFTER = 2
+
 
     def __init__(self, host: str, port: int = 1234,
                  idle_timeout: float = 5.0):
@@ -246,7 +251,10 @@ class RtlTcpClient:
         # 读满 12 字节 dongle_info_t（rtl_tcp.c:79-83）：
         #   magic[4] "RTL0" | tuner_type u32 BE | tuner_gain_count u32 BE
         try:
-            hdr = self._recvexactly(self._DONGLE_INFO_LEN, phase="handshake")
+            deadline = time.monotonic() + max(
+                1.0, self.CONNECT_TIMEOUT * self.HANDSHAKE_DEADLINE_FACTOR)
+            hdr = self._recvexactly(
+                self._DONGLE_INFO_LEN, phase="handshake", deadline=deadline)
         except OSError as e:
             cat, msg, sug = classify_network_error(
                 e, phase="handshake", host=self.host, port=self.port)
@@ -343,7 +351,8 @@ class RtlTcpClient:
         return self._send_cmd(self.CMD_SET_GAIN_MODE, 0 if enabled else 1)
 
     # ── IQ 流读取 ───────────────────────────────────────────────────────
-    def _recvexactly(self, n: int, phase: str = "stream") -> Optional[bytes]:
+    def _recvexactly(self, n: int, phase: str = "stream",
+                     deadline: Optional[float] = None) -> Optional[bytes]:
         """从 socket 读满 n 字节（可能多次 recv）。
 
         三种结局必须可区分：
@@ -351,11 +360,21 @@ class RtlTcpClient:
         - 对端关闭（recv 返回 b''）→ ``disconnected``（EOF）；
         - IO 错误（RST 等）→ 按 errno 归类为 reset/unknown。
         ``phase="handshake"`` 时超时/EOF 都算握手失败（不再降级为 stale）。
+        ``deadline``（monotonic 时间戳）只用于握手：每次 recv 前把本步超时
+        收紧到「总时限剩余」，防止慢滴对端把 connect 拖到分钟级。
         """
         if self._sock is None:
             return None
         buf = bytearray()
         while len(buf) < n:
+            if deadline is not None:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise socket.timeout("握手超过总时限")
+                try:
+                    self._sock.settimeout(min(self.CONNECT_TIMEOUT, remaining))
+                except OSError:
+                    pass
             try:
                 chunk = self._sock.recv(n - len(buf))
             except (TimeoutError, socket.timeout) as e:
