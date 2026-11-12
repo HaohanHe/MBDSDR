@@ -166,7 +166,10 @@
       "script": "scripts/check_red_lifecycle.py",
       "args": ["--paths", "docs/known-red-register.md"],
       "mode": "run",
-      "slow": true
+      "slow": true,
+      "trigger": "批次收口前至少 1 次；任何 K 条目新增/改绑定/改状态后立即；发版前必跑（27s 量级，不进 pre-commit）",
+      "owner": "红项 owner（当前 守卫账本线）",
+      "review_by": "2026-12"
     },
     {
       "id": "check_destructive_ops",
