@@ -381,6 +381,8 @@ def _commit_mb():
 
 
 def pytest_runtest_setup(item):
+    # 每条用例开始前换一份全新的桌面配置（在 module 级 fixture 构造窗口之前）。
+    _advance_backing_config()
     # 真模态开关按用例的 marker 翻转：默认禁止，只有显式 allow_modal 才放行。
     _MODAL_GUARD["allow"] = item.get_closest_marker("allow_modal") is not None
     limit = int(os.environ.get("MBDSDR_TEST_COMMIT_LIMIT_MB", "4096"))
@@ -644,6 +646,26 @@ def real_config_snapshot(_real_config_guard_fixture):
     return _REAL_CONFIG_GUARD
 
 
+#: 兜底隔离的「当前用例」配置路径。
+#: 2026-11-12 实测：配置是进程级共享文件，前面用例把 focus_mode 写成 False 后，
+#: 后面 8 条布局锁基线全部少 95px（详细栏 56 + 主工具栏 39）。所以每条用例
+#: 换一份全新的 desktop_settings.json，谁也别读上一条用例写下的状态。
+_BACKING_CONFIG = {"root": None, "path": None, "seq": 0, "real_appdata": None,
+                   "real_default_path": None, "enabled": True}
+
+
+def _advance_backing_config():
+    """为「当前用例」分配一份全新的 desktop_settings.json。"""
+    root = _BACKING_CONFIG["root"]
+    if root is None or not _BACKING_CONFIG["enabled"]:
+        return None
+    _BACKING_CONFIG["seq"] += 1
+    d = root / ("case%05d" % _BACKING_CONFIG["seq"])
+    d.mkdir(parents=True, exist_ok=True)
+    _BACKING_CONFIG["path"] = str(d / "desktop_settings.json")
+    return _BACKING_CONFIG["path"]
+
+
 @pytest.fixture(scope="session", autouse=True)
 def _isolate_backing_config(tmp_path_factory):
     """兜底隔离：不管用例有没有请求 isolated_profile，配置都写不到真实文件。
@@ -667,13 +689,34 @@ def _isolate_backing_config(tmp_path_factory):
     import settings as settings_mod
 
     root = tmp_path_factory.mktemp("realcfg")
-    target = str(root / "desktop_settings.json")
+    _BACKING_CONFIG.update(
+        root=root,
+        path=None,
+        seq=0,
+        real_appdata=os.environ.get("APPDATA"),
+        real_default_path=settings_mod.default_config_path,
+        enabled=os.environ.get("MBDSDR_BACKING_ISOLATE", "1") != "0",
+    )
+
+    def _current_path():
+        # isolated_profile 已把 APPDATA/HOME 重定向到临时 profile：让配置跟随
+        # profile（否则 test_default_path_stays_inside_isolated_profile 会红）。
+        if os.environ.get("APPDATA") != _BACKING_CONFIG["real_appdata"]:
+            return _BACKING_CONFIG["real_default_path"]()
+        if _BACKING_CONFIG["root"] is None:
+            return _BACKING_CONFIG["real_default_path"]()
+        if not _BACKING_CONFIG["enabled"]:
+            # 反证开关（MBDSDR_BACKING_ISOLATE=0）：退回旧的「全会话共用一个文件」。
+            return str(root / "desktop_settings.json")
+        return _BACKING_CONFIG["path"] or _advance_backing_config()
+
     mp = pytest.MonkeyPatch()
-    mp.setattr(settings_mod, "default_config_path", lambda: target)
+    mp.setattr(settings_mod, "default_config_path", _current_path)
     try:
         yield root
     finally:
         mp.undo()
+        _BACKING_CONFIG.update(root=None, path=None, seq=0)
 
 
 # ---------------------------------------------------------------------------
