@@ -10,6 +10,7 @@ import pytest  # noqa: E402
 
 import settings_panel as sp  # noqa: E402
 from config_schema import SCHEMA  # noqa: E402
+from settings import DesktopSettings  # noqa: E402
 
 _ENV_KEYS = ("rc_enabled", "rc_port", "web_enabled", "web_port")
 
@@ -116,19 +117,32 @@ def test_reset_defaults_really_restores_when_dirty(qapp):
 # 写盘成败可见性：AI 配置写失败不得被「已保存/已恢复默认」冲掉
 # ---------------------------------------------------------------------- #
 def _ai_panel(monkeypatch, tmp_path):
-    # 隔离真实 ~/.mbdsdr/config.json：只读也不该碰用户文件
+    # 两条真实路径都要隔离：AI 配置 + 桌面设置。reset_all 会逐项写
+    # DesktopSettings，settings=None 时它落的是用户真实配置（守门已抓到过）。
     monkeypatch.setattr(sp, "AI_CONFIG_PATH", str(tmp_path / "config.json"))
-    return sp.SettingsPanel(settings=None)
+    return sp.SettingsPanel(
+        settings=DesktopSettings(path=str(tmp_path / "desktop_settings.json")))
 
 
-def _fail_write(*_a, **_k):
-    raise OSError("disk full")
+class _FailingConfigStore:
+    """AI 配置的真实写入口是 ``ConfigStore.update``。
+
+    旧用例 patch ``_atomic_write_json`` 已不生效（AI 写盘迁到 ConfigStore 后
+    那个函数不再参与），于是失败注入空跑、用例永远报「已保存」。这里从
+    真实接缝注入：构造可过，``update`` 必抛。
+    """
+
+    def __init__(self, *_a, **_k):
+        pass
+
+    def update(self, _fn):
+        raise OSError("disk full")
 
 
 def test_ai_config_write_failure_is_not_overwritten_by_saved(qapp, monkeypatch,
                                                              tmp_path):
     panel = _ai_panel(monkeypatch, tmp_path)
-    monkeypatch.setattr(sp, "_atomic_write_json", _fail_write)
+    monkeypatch.setattr(sp, "ConfigStore", _FailingConfigStore)
 
     panel._on_changed("ai_temperature", 0.55)
 
@@ -140,7 +154,6 @@ def test_ai_config_write_failure_is_not_overwritten_by_saved(qapp, monkeypatch,
 
 def test_ai_config_write_success_still_says_saved(qapp, monkeypatch, tmp_path):
     panel = _ai_panel(monkeypatch, tmp_path)
-    monkeypatch.setattr(sp, "_atomic_write_json", lambda *_a, **_k: None)
 
     panel._on_changed("ai_temperature", 0.55)
 
@@ -150,7 +163,7 @@ def test_ai_config_write_success_still_says_saved(qapp, monkeypatch, tmp_path):
 def test_ai_config_reset_failure_is_not_reported_as_done(qapp, monkeypatch,
                                                          tmp_path):
     panel = _ai_panel(monkeypatch, tmp_path)
-    monkeypatch.setattr(sp, "_atomic_write_json", _fail_write)
+    monkeypatch.setattr(sp, "ConfigStore", _FailingConfigStore)
 
     panel._reset_one("ai_temperature")
 
@@ -161,7 +174,7 @@ def test_ai_config_reset_failure_is_not_reported_as_done(qapp, monkeypatch,
 
 def test_reset_all_reports_partial_persist_failure(qapp, monkeypatch, tmp_path):
     panel = _ai_panel(monkeypatch, tmp_path)
-    monkeypatch.setattr(sp, "_atomic_write_json", _fail_write)
+    monkeypatch.setattr(sp, "ConfigStore", _FailingConfigStore)
 
     panel.reset_all(confirm=False)
 
