@@ -8,6 +8,8 @@
 3. 7 组备份、其中 2 组超过 30 天 → 清点报 2 个可清理，14 个文件全在
    （只读，不删）。
 4. 启动日志落点全不可写 → 不崩、不额外造文件、退化成内存缓冲。
+   该用例要碰 ``desktop/startup_paths``，已随桌面模块迁到
+   ``tests/test_startup_log_policy.py``（mbdsdr_ai 不反向依赖 desktop）。
 
 本文件不导入 PySide6，可在没有 QApplication 的进程里直接跑。
 """
@@ -23,7 +25,6 @@ sys.path.insert(0, _ROOT)
 
 import mbdsdr_ai.bookmark_manager as bm  # noqa: E402
 import mbdsdr_ai.corrupt_evidence as ce  # noqa: E402
-from desktop import startup_paths as sp  # noqa: E402
 
 CORRUPT = b'{"bookmarks": [{"frequency_hz": 145000000, "name": "half'
 
@@ -124,25 +125,8 @@ def test_stale_backups_are_counted_not_deleted(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# 4. 日志落点全不可写 → 内存缓冲，不造文件
+# 5. 清点目录覆盖书签 / 设置 / 已知数据子目录
 # ---------------------------------------------------------------------------
-def test_unwritable_log_falls_back_to_memory_buffer(tmp_path, monkeypatch):
-    backup = tmp_path / "fm_presets.json.corrupt-20261112-210000"
-    backup.write_bytes(b"evidence")
-    (tmp_path / (backup.name + ce.REASON_SUFFIX)).write_text(
-        "boom\n", encoding="utf-8")
-    before = sorted(os.listdir(tmp_path))
-
-    monkeypatch.setattr(sp, "startup_log_path", lambda: "")
-    report = ce.corruption_startup_report(
-        [str(tmp_path)], append_line=sp.append_startup_log)
-
-    assert report["message"]
-    assert sp.buffered_log()[-1].startswith("[配置] ")
-    assert "已备份" in sp.buffered_log()[-1]
-    assert sorted(os.listdir(tmp_path)) == before, "无持久落点时仍造了文件"
-
-
 def test_default_scan_directories_covers_bookmarks_and_settings():
     base = os.path.join(os.path.expanduser("~"), ".mbdsdr")
     dirs = ce.default_scan_directories("/data/config/desktop_settings.json")

@@ -2286,6 +2286,37 @@ No supported devices found），GNSS+SDR 同开复验没做成；离线那次
 - 回退：`git checkout 4df52a6f6c37f1ff12ba07a8c068b6645675ee38 -- tests/test_config_persistence_safety.py`
   或 `git revert <接管提交>`
 
+### 接管记录：mbdsdr_ai/tests/test_corruption_evidence.py
+
+- 接管人 / 会话：D1分层收口线 / 6ae85f56a16a76df1598024e
+- 接管时间 / HEAD：2026-11-13 01:29 / `7c4969d5`
+- 原持有者：设置三环线
+- 原 claim 证据：acquired_at=2026-11-12 21:08:08 ttl=45min 心跳=2026-11-12 22:19:59，
+  接管时已过期 **+269.2 分钟**（last_heartbeat→release 189.2min，再减 ttl 45min），
+  满足 ≥30 分钟；`claims.json` 该条 `closed_reason` 为 `expired_steal`
+- 原 owner 最后活跃证据（原始输出）：
+  - `claims.json` history：`{"owner":"设置三环线","acquired_at":1794488888.84,
+    "last_heartbeat_at":1794493199.60,"pid":30952,"closed_reason":"expired_steal"}`
+  - `git log -1 -- mbdsdr_ai/tests/test_corruption_evidence.py`：`9b8b6c69`
+    （2026-11-12 22:20:08，即最后心跳 9 秒后随改动提交，此后无新内容）
+  - `git status --porcelain -- mbdsdr_ai/tests/test_corruption_evidence.py`：空（无在途改动）
+  - `Get-Process -Id 30952`：无输出（进程已退出）；接管前 `git rev-parse
+    HEAD:mbdsdr_ai/tests/test_corruption_evidence.py` =
+    `09a9199a3cd485bb367c2f66bf280fdd97e757d9`
+- 凭什么判定「已放弃」而不是「在忙」：
+  过期 ≥ 30min（+269.2）✅；`git status` 为空 ✅；claim 之后该文件无新内容提交 ✅；
+  pid 30952 已不存在 ✅ —— 四条同时成立。
+- 本次改动范围：仅移除该文件里唯一依赖 `desktop.startup_paths` 的用例
+  `test_unwritable_log_falls_back_to_memory_buffer` 及其 import，用例原样迁到
+  `tests/test_startup_log_policy.py`（mbdsdr_ai 不得反向依赖 desktop，D1 收口）；
+  另含本记录。
+- 保留原改动的证明：接管前该路径 `git status` 为空、blob 为
+  `09a9199a3cd485bb367c2f66bf280fdd97e757d9`；接管提交 diff 只删该用例与 import
+  （外加文档头部一行指向新位置），不含原 owner 任何未提交内容。
+- 引用：接管提交即包含本记录的那次提交（`refactor(d1): mbdsdr_ai 去掉对 desktop/Qt 的反向依赖`）
+- 回退：`git checkout 09a9199a3cd485bb367c2f66bf280fdd97e757d9 -- mbdsdr_ai/tests/test_corruption_evidence.py`
+  或 `git revert <接管提交>`
+
 ### 等待项：AI SDR 会话显式注入（2026-11-12）
 
 > 背景：桌面 `MainWindow._active_sdr_backend` 与 `agent.sdr_manager` 原本是

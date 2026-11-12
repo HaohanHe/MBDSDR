@@ -13,7 +13,12 @@ import pytest
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)),
                                 "..", "desktop"))
 
+_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _ROOT not in sys.path:
+    sys.path.insert(0, _ROOT)
+
 import startup_paths as sp  # noqa: E402
+from mbdsdr_ai import corrupt_evidence as ce  # noqa: E402
 
 
 def _only_c_drive(monkeypatch):
@@ -153,3 +158,28 @@ def test_probe_dir_writable_async_denied(tmp_path):
     assert done.wait(10), "后台探测线程未回报"
     assert "录音目录不可写" in result["error"]
     assert str(target) in result["error"]
+
+
+# ---------------------------------------------------------------------------
+# 与损坏证据的联调：启动日志落点全不可写 → 内存缓冲，不造文件
+# ---------------------------------------------------------------------------
+def test_corruption_report_falls_back_to_memory_buffer(tmp_path, monkeypatch):
+    """理由写入走 ``startup_paths.append_startup_log`` 时不得额外造文件。
+
+    原在 ``mbdsdr_ai/tests/test_corruption_evidence.py``；该用例要碰 desktop
+    模块，迁到这里，避免 mbdsdr_ai 反向依赖 desktop（D1）。
+    """
+    backup = tmp_path / "fm_presets.json.corrupt-20261112-210000"
+    backup.write_bytes(b"evidence")
+    (tmp_path / (backup.name + ce.REASON_SUFFIX)).write_text(
+        "boom\n", encoding="utf-8")
+    before = sorted(os.listdir(tmp_path))
+
+    monkeypatch.setattr(sp, "startup_log_path", lambda: "")
+    report = ce.corruption_startup_report(
+        [str(tmp_path)], append_line=sp.append_startup_log)
+
+    assert report["message"]
+    assert sp.buffered_log()[-1].startswith("[配置] ")
+    assert "已备份" in sp.buffered_log()[-1]
+    assert sorted(os.listdir(tmp_path)) == before, "无持久落点时仍造了文件"

@@ -24,9 +24,9 @@ if _ROOT not in sys.path:
 
 import mbdsdr_ai.bookmark_manager as bookmark_manager  # noqa: E402
 import mbdsdr_ai.config as agent_config  # noqa: E402
-import mbdsdr_ai.diagnostics as diag  # noqa: E402
 import mbdsdr_ai.memory as memory_module  # noqa: E402
 import mbdsdr_ai.sdr_backend as sdr_backend  # noqa: E402
+import desktop.diagnostics_data as diag  # noqa: E402
 from desktop import diagnostics_panel  # noqa: E402
 from desktop import layout_store  # noqa: E402
 

@@ -2,7 +2,7 @@
 """只读诊断页（路线图 W106）。
 
 三页，一页看完：损坏备份（含理由全文）/ 日志 / 持久化错误。数据全部来自
-``mbdsdr_ai.diagnostics.collect_diagnostics()``，本模块只做渲染。
+``desktop.diagnostics_data.collect_diagnostics()``，本模块只做渲染。
 
 三条硬约束：
 
@@ -31,7 +31,10 @@ _ROOT = os.path.dirname(_HERE)
 if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
-from mbdsdr_ai.diagnostics import collect_diagnostics  # noqa: E402
+try:  # 包上下文（测试 / 其它 desktop 模块）
+    from .diagnostics_data import collect_diagnostics  # noqa: E402
+except ImportError:  # 脚本上下文（python desktop/main.py）
+    from diagnostics_data import collect_diagnostics  # noqa: E402
 
 
 def _backup_rows(block: Dict[str, Any]) -> List[Dict[str, str]]:
