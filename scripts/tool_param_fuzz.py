@@ -373,47 +373,21 @@ class _ProcessMemoryCountersEx:
     """Windows PROCESS_MEMORY_COUNTERS_EX（此处只用到 WS/PrivateUsage）。"""
 
 
+def _mem_probe_supported() -> bool:
+    """当前平台是否应能取到进程内存（只判平台，不依赖探针实现）。"""
+    return sys.platform == "win32" or Path("/proc/self/status").exists()
+
+
 def _make_mem_probe():
-    """构造内存探针：Windows 走 psapi，其它平台读 /proc/self/status。"""
-    try:
-        import ctypes
-        from ctypes import wintypes
+    """构造内存探针：Windows 走 psapi，其它平台读 /proc/self/status。
 
-        class _PMC(ctypes.Structure):
-            _fields_ = [
-                ("cb", ctypes.c_ulong),
-                ("PageFaultCount", ctypes.c_ulong),
-                ("PeakWorkingSetSize", ctypes.c_size_t),
-                ("WorkingSetSize", ctypes.c_size_t),
-                ("QuotaPeakPagedPoolUsage", ctypes.c_size_t),
-                ("QuotaPagedPoolUsage", ctypes.c_size_t),
-                ("QuotaPeakNonPagedPoolUsage", ctypes.c_size_t),
-                ("QuotaNonPagedPoolUsage", ctypes.c_size_t),
-                ("PagefileUsage", ctypes.c_size_t),
-                ("PeakPagefileUsage", ctypes.c_size_t),
-                ("PrivateUsage", ctypes.c_size_t),
-            ]
-
-        psapi = ctypes.WinDLL("psapi.dll")
-        kernel32 = ctypes.WinDLL("kernel32.dll")
-        kernel32.GetCurrentProcess.restype = wintypes.HANDLE
-        psapi.GetProcessMemoryInfo.argtypes = [
-            wintypes.HANDLE, ctypes.POINTER(_PMC), ctypes.c_ulong]
-        psapi.GetProcessMemoryInfo.restype = wintypes.BOOL
-        hproc = kernel32.GetCurrentProcess()
-
-        def _win():
-            pmc = _PMC()
-            pmc.cb = ctypes.sizeof(_PMC)
-            if not psapi.GetProcessMemoryInfo(hproc, ctypes.byref(pmc), pmc.cb):
-                return None
-            return (pmc.WorkingSetSize / 1048576.0,
-                    pmc.PrivateUsage / 1048576.0)
-
-        return _win
-    except (AttributeError, OSError, ValueError):
-        # 非 Windows 或 psapi 不可用：退回 /proc（Linux CI）。
+    平台不支持返回 None；平台支持但构造失败直接抛出——不得把「探针代码坏了」
+    静默降级成「平台不支持」。
+    """
+    if sys.platform != "win32":
         status = Path("/proc/self/status")
+        if not status.exists():
+            return None
 
         def _linux():
             try:
@@ -425,9 +399,43 @@ def _make_mem_probe():
                 return None
             return None
 
-        if status.exists():
-            return _linux
-        return None
+        return _linux
+
+    import ctypes
+    from ctypes import wintypes
+
+    class _PMC(ctypes.Structure):
+        _fields_ = [
+            ("cb", ctypes.c_ulong),
+            ("PageFaultCount", ctypes.c_ulong),
+            ("PeakWorkingSetSize", ctypes.c_size_t),
+            ("WorkingSetSize", ctypes.c_size_t),
+            ("QuotaPeakPagedPoolUsage", ctypes.c_size_t),
+            ("QuotaPagedPoolUsage", ctypes.c_size_t),
+            ("QuotaPeakNonPagedPoolUsage", ctypes.c_size_t),
+            ("QuotaNonPagedPoolUsage", ctypes.c_size_t),
+            ("PagefileUsage", ctypes.c_size_t),
+            ("PeakPagefileUsage", ctypes.c_size_t),
+            ("PrivateUsage", ctypes.c_size_t),
+        ]
+
+    psapi = ctypes.WinDLL("psapi.dll")
+    kernel32 = ctypes.WinDLL("kernel32.dll")
+    kernel32.GetCurrentProcess.restype = wintypes.HANDLE
+    psapi.GetProcessMemoryInfo.argtypes = [
+        wintypes.HANDLE, ctypes.POINTER(_PMC), ctypes.c_ulong]
+    psapi.GetProcessMemoryInfo.restype = wintypes.BOOL
+    hproc = kernel32.GetCurrentProcess()
+
+    def _win():
+        pmc = _PMC()
+        pmc.cb = ctypes.sizeof(_PMC)
+        if not psapi.GetProcessMemoryInfo(hproc, ctypes.byref(pmc), pmc.cb):
+            return None
+        return (pmc.WorkingSetSize / 1048576.0,
+                pmc.PrivateUsage / 1048576.0)
+
+    return _win
 
 
 def _mem_probe():
