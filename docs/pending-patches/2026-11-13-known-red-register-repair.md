@@ -1,11 +1,12 @@
 # 待落库补丁：`docs/known-red-register.md`（`check_red_lifecycle` 7 条 FAIL 清账）
 
-> **状态**：**未落库**。`docs/known-red-register.md` 当前由 `残留收口线/6ae85f56` 持有
-> （claim 续租 120min），本线 05:58 / 06:02 两次 claim 被拒。按约定不抢改、不 split-brain，
-> 先把补丁备在这里；释放后**一笔**落库（同一笔只改这一个文件）。
+> **状态**：**已落库**（register 提交 `b4e06787`，`APPLY_HEAD=20d71e92`）。
+> 实际执行 §0、§3、§4：K18 的绑定在落库前又被并行更新推进，已按当次 HEAD
+> `20d71e92` 重跑并更新（`1 passed` / `文档块一致`）；K20 已由另一条线以
+> `d4277a3d` 实跑 `17 passed` 转绿，本笔不再降级，§2 未执行。
 >
-> 依据：2026-11-13 `python scripts/check_red_lifecycle.py --paths docs/known-red-register.md`
-> → FAIL 7（R8×3、R1×1、R9×3），输出见 `output/red_lifecycle_now.json`。
+> 落库后自检：`python scripts/check_red_lifecycle.py --paths docs/known-red-register.md`
+> → **FAIL 0**（R8/R1/R9 全部归零）。
 
 ## 0. 新增规矩（插到文件头「再检义务」段之后，锚点唯一）
 
@@ -115,9 +116,17 @@ FAILED tests/test_tooltip_guard.py::test_every_passthrough_tooltip_is_registered
   `tests/test_tooltip_guard.py::test_every_passthrough_tooltip_is_registered`：
   透传 tooltip `desktop/sat_track_panel.py:400 :: text` 未进登记表。
   该文件改动已在 `cfcc9878` 内（干净 worktree 同样复现），不再是“未提交”豁免。
-- **转绿条件**：把 `desktop/sat_track_panel.py:400` 的透传 tooltip 登记进
-  `docs/tooltip-dynamic-baseline.json`（或用 `# tooltip: allow` 给出理由），复跑
-  上述两条用例 → `17 passed`，再把绑定更新到当次验证提交。
+- **真缺陷**（2026-11-13 更正）：`_show_tle_status` 把标签的可见文字逐字复写进
+  tooltip —— 零新增信息，还多一条未登记透传；标签本身 `setWordWrap(True)`，
+  全文已经可见。该行已删除，`desktop/sat_track_panel.py` 由另一条线提交。
+- **原转绿条件作废**：`# tooltip: allow` 这个机制在仓库里**不存在**；登记进
+  `docs/tooltip-dynamic-baseline.json` 也不行 —— `tle_refresh_status_text` 那几条
+  共享文案是「带数值却无量纲、无来源标注」，登记完运行时兜底会直接红。
+  两条都做不到，不再作为出路。
+- **转绿条件**：删冗余透传（已由 `desktop/sat_track_panel.py` 那条线执行）；
+  被删文案的落地行为由 `tests/test_sat_track_tle_landing.py` 的 `text()` /
+  `isVisibleTo` 断言兜住。复跑上述两条用例 → `17 passed`，再把绑定更新到当次
+  验证提交。
 ```
 
 ## 3. R1/R8/R9 · L1157–1177（K24 发布清单）
@@ -147,7 +156,7 @@ FAILED tests/test_tooltip_guard.py::test_every_passthrough_tooltip_is_registered
 **替换为**
 
 ```
-- **再检绑定**：验证提交 `<APPLY_HEAD>`；文件集合 `scripts/release_manifest.py`、`desktop/settings.py`
+- **再检绑定**：验证提交 `<APPLY_HEAD>`；文件集合 `scripts/release_manifest.py`、`desktop/settings.py`、`pyproject.toml`、`desktop/requirements.txt`、`desktop/MBDSDR.spec`
 - **首次记录**：2026-11-13（工作树 HEAD `90452159`，`python scripts/release_manifest.py`，
 ```
 
@@ -175,25 +184,24 @@ FAILED tests/test_tooltip_guard.py::test_every_passthrough_tooltip_is_registered
 **替换为**
 
 ```
-- **当前结果（2026-11-13，产物 `pyi-dist18` / HEAD `cfcc9878`）**：
+- **当前结果（2026-11-13，产物 `pyi-dist19` / 构建 HEAD `c9bb1572`）**：
   `--only version` **PASS（16 项，0 FAIL）**；`--only secrets` **PASS**
-  （4 处登记误报，复核期限 2027-03-31）；`--only deps` **FAIL 22**——
-  差集②「产物里有但没声明」29 个，已归因 8 / **未归因 21**：
-  `brotli`、`contourpy`、`cryptography`、`cycler`、`et-xmlfile`、`fonttools`、
-  `kiwisolver`、`lxml`、`matplotlib`、`openpyxl`、`packaging`、`pandas`、`psutil`、
-  `pyparsing`、`python-dateutil`、`setuptools`、`six`、`typing-extensions`、
-  `tzdata`、`xlsxwriter`、`zstandard`。
-  其中 `matplotlib`/`pandas`/`lxml`/`openpyxl`/`xlsxwriter`/`psutil`/`zstandard` 在
-  `mbdsdr_ai/{sdr_tools,baseband_io,orbit_determination,core/controller}.py`
-  有真实 import，属**声明面缺失**（不是误报）；其余为它们的传递依赖。
-  按「未归因不可发布」记红——这是**新的 FAIL 面**，与原 5 项不是同一批。
-- **同批产物口径**：`check_dist_head_parity --dist <dist>\\MBDSDR` →
-  **0 缺失 / 0 哈希不一致 / 0 禁止路径**；`release_check --steps smoke --skip-build`
+  （4 处登记误报，复核期限 2027-03-31）；`--only deps` **PASS（0 FAIL）**——
+  差集②「产物里有但没声明」22 个**全部已归因**（Requires-Dist 传递 8 /
+  pyproject optional 14 / import 链 0），差集①空。
+  处置：`pandas`/`openpyxl`/`lxml`/`xlsxwriter` 属纯过度收集（产品零 import，
+  且实测 `import matplotlib.pyplot` 不加载 pandas），已在 `desktop/MBDSDR.spec`
+  的 `excludes` 移除；`matplotlib`/`psutil`/`zstandard` 与 `brotli`/`cryptography`
+  是运行期按需导入且有 guard/降级，按 optional 声明（`viz`/`net` 组注释写明
+  guard 行号；新增 `http = ["brotli", "cryptography"]`）；`setuptools` 是
+  pyrtlsdr 导入期 `pkg_resources` 的硬需求（`rtlsdr/__init__.py:19`），补进
+  `desktop/requirements.txt` 作为运行期必需依赖。
+- **同批产物口径（`pyi-dist19`）**：`check_dist_head_parity --dist <dist>\\MBDSDR`
+  → **0 缺失 / 0 哈希不一致 / 0 禁止路径**；`release_check --steps smoke --skip-build`
   → 窗口起、`[smoke]` 13/13；`MBDSDR.exe --resource-probe` → 版本 / locale /
   `data/dso_catalog.json`(117 条) / `data/moon_albedo_*.npz` / `assets/icon.ico`
   五项全 OK。
-- **缺什么才能全绿**：把上述 21 个包写进 `requirements.txt`（或给出
-  `Requires-Dist` 上游并登记），复跑 `--only deps`；版本与凭据两类已绿。
+- **缺什么才能全绿**：无——五类已全 PASS（安装器为 BY-DESIGN）。
 ```
 
 ## 4. K23 段：把估算替换为实测（`2701 → 约 308` 作废）
