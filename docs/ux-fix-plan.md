@@ -365,7 +365,7 @@ assert lbl is not None and "未发现 SDR 设备" in lbl.text()      # 当前没
 - 唯一真值仍是 `self._recording` 与 `self._record_seconds`；指示标签只读不写，绝不自己起第二套计时。
 
 **反证（修前必红）**
-- 测试文件：`tests/test_planetarium_status.py`（新建）。
+- 测试文件：`tests/test_planetarium_entry_visibility.py`（原计划名 test_planetarium_status.py 未落地；已落地等价用例见该文件的 `test_planetarium_exit_entry_is_readable` 与 `test_planetarium_recording_indicator_reads_state`）。
 - 断言：
 ```python
 w._recording = True
