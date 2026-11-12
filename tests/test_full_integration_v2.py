@@ -75,11 +75,34 @@ def result():
     return TestResult()
 
 
+@pytest.fixture(scope="module", autouse=True)
+def _fail_if_any_recorded_failure(result):
+    """收集器不是断言：模块结束时 result.failed 非空，必须让 pytest 真的红。
+
+    脚本模式由 ``main()`` 自己打印报告并返回非零；pytest 模式下没有这一步，
+    所有 ``result.record(False)`` 都会被静默吞掉。本 fixture 补上收尾断言。
+    """
+    yield
+    assert not result.failures, (
+        "集成测试记录到失败项（收集器不会自动判红，这里补上）：\n"
+        + "\n".join(f"  - {name}: {detail[:200]}"
+                    for name, detail in result.failures))
+
+
 @pytest.fixture(scope="module")
 def agent():
     """pytest 兼容：与 main() 一致地构造测试用 Agent。"""
     config = AgentConfig(api_key="sk-test", model="test-model")
-    return MBDSDRAgent(config)
+    a = MBDSDRAgent(config)
+    yield a
+    # 本模块的 SDR 用例会真连设备。不断开就会把 ring-producer 线程和 USB
+    # 句柄留到同一 pytest 进程里的后续模块——test_backend_resilience 的
+    # 「重连后只应有一个生产者线程」会数到 2 个而假红（2026-11-12 实测）。
+    try:
+        if a.tool_registry.has_tool("sdr_disconnect"):
+            a.tool_registry.call("sdr_disconnect", {})
+    except Exception as exc:  # noqa: BLE001 - 收尾失败必须留证，不静默
+        print(f"  ! 模块收尾 sdr_disconnect 失败: {type(exc).__name__}: {exc}")
 
 
 def test_module_imports(result):
@@ -143,11 +166,26 @@ def test_meta_tools(result, agent):
             result.record(f"{tool_name}", False, str(e))
 
 
+def _sdr_connect_or_skip(tr) -> None:
+    """SDR 工具链只在真的连上设备时才有意义；连不上按 NO_HW 跳过，不记失败。"""
+    errs = []
+    for args in ({}, {"device_id": "rtl_0"}):
+        try:
+            r = tr.call("sdr_connect", args)
+        except Exception as e:  # noqa: BLE001 - 连接异常同样按环境依赖处理
+            errs.append(f"{args}: {type(e).__name__}: {e}")
+            continue
+        if r.success:
+            return
+        errs.append(f"{args}: {(r.content or '')[:160]}")
+    pytest.skip("NO_HW: SDR 未连接，跳过 SDR 工具链（" + " | ".join(errs) + "）")
+
+
 def test_sdr_tools(result, agent):
     print("\n[4] SDR 核心工具测试")
     tr = agent.tool_registry
+    _sdr_connect_or_skip(tr)
     tests = [
-        ("sdr_connect", {}, "连接 SDR"),
         ("sdr_status", {}, "获取状态"),
         ("sdr_set_frequency", {"frequency_hz": 98500000}, "设置频率"),
         ("sdr_get_frequency", {}, "获取频率"),
@@ -662,7 +700,8 @@ def test_astronomy_module(result, agent):
     )
 
     obs = Observer(latitude_deg=45.0, longitude_deg=120.0, height_m=250)
-    result.record("创建观测者", obs.latitude_deg == 43.88)
+    result.record("创建观测者", obs.latitude_deg == 45.0,
+                  f"读回 {obs.latitude_deg}（应等于构造值 45.0，不是旧站点 43.88）")
 
     jd = unix_to_jd()
     result.record("Unix→JD", jd > 2460000)
