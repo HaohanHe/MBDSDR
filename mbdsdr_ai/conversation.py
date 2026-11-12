@@ -43,7 +43,7 @@ def _same_content_backup(path: str) -> Optional[str]:
         return None
 
 
-def backup_corrupt(path: str) -> Optional[str]:
+def backup_corrupt_conversations(path: str) -> Optional[str]:
     """把损坏会话改名为 ``*.corrupt-<时间戳>``，返回备份路径（失败 None）。
 
     改名而不是复制：原件字节完整留在备份里，原路径不再被列表扫到，也不会被
@@ -114,7 +114,7 @@ class ConversationStore:
         备份失败返回 False：调用方必须据此拒绝写回，宁可这次保存失败，
         也不能拿默认结构盖掉唯一证据。
         """
-        backup = backup_corrupt(path)
+        backup = backup_corrupt_conversations(path)
         reason = f"{type(exc).__name__}: {exc}"
         if backup is None:
             self.save_warnings.append({
