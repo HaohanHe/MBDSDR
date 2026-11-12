@@ -5,6 +5,9 @@
 设计口径：
 * 第一步就是 ``docs``：跑 ``scripts/verify_claims.py --check-lines --strict-lines``，
   文档行号断言不通过则整个发布检查 FAIL——闸门接在这里，「忘了跑」变成不可能；
+* ``guards`` 步把「只在 docs/code-guards.md 登记、没有任何入口」的廉价机检统一
+  接进来（无 Qt、不写盘、单项实测 < 15s；清单与不接入理由见 ``GUARD_CHECKS``），
+  任一非 0 即 FAIL——闸门不接入口等于没有；
 * 所有产物（build/dist/config/日志 diff）只落 D 盘；落点若在 C 盘直接判 FAIL；
 * 缺件场景不是「看有没有弹窗」，而是**弹窗标题 + 正文逐字全匹配**
   （整棵子树缺失 / 只缺单文件 / 可选件缺失 三类各一份期望原文）；
@@ -128,8 +131,37 @@ DEFAULT_WORK = os.path.join(TMP_ROOT, "pyi-build12")
 DEFAULT_DIAG_DIST = os.path.join(TMP_ROOT, "pyi-dist12-noarchive")
 DEFAULT_DIAG_WORK = os.path.join(TMP_ROOT, "pyi-build12-noarchive")
 
-ALL_STEPS = ("docs", "gen_reconcile", "action_dup", "build", "smoke", "subtree",
-             "single", "optional", "qt", "narrow", "overlap", "log")
+ALL_STEPS = ("docs", "gen_reconcile", "action_dup", "guards", "build", "smoke",
+             "subtree", "single", "optional", "qt", "narrow", "overlap", "log")
+
+#: 廉价机检清单（无 Qt、不写盘、单次实测 < 15s，2026-11-13 逐条实跑）：
+#: 这些闸门原先只写在 docs/code-guards.md 里，没有任何入口覆盖——即「登记了但
+#: 没人跑」。发版前统一跑一遍，单项超时 120s；任一非 0 即整步 FAIL。
+#: 口径（为什么不把慢的/红的塞进来）：单次 > 30s 或有已知未清库存（如
+#: lint_swallow_all 37s、audit_evidence 51s、check_red_lifecycle 27s、
+#: check_help_paths 全量 112s）只登记触发条件，不挂这里——把发版闸门变成
+#: 「反正一直红」只会教人跳过它。
+GUARD_CHECKS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("check_card_links.py", ()),                       # 0.2s
+    ("gen_shortcut_table.py", ("--check",)),           # 0.2s
+    ("fetch_constellation_names_cc0.py", ("--check",)),  # 0.2s 离线核对
+    ("fetch_dso_supplement.py", ("--check",)),         # 0.2s 离线核对
+    ("settings_inventory.py", ("--check",)),           # 1.4s
+    ("theme_contrast.py", ()),                         # 0.3s
+    ("install_git_hooks.py", ("--check",)),            # 0.3s 钩子是否为本机最新
+    ("ai_tool_consistency.py", ("--limit", "40")),     # 2.6s
+    ("tool_honesty_scan.py", ()),                      # 4.9s
+    ("access_layer_fault_injection.py", ()),           # 5.0s
+    ("ai_intent_regression.py", ("--limit", "40")),    # 5.5s
+    ("audit_source_text_pins.py", ()),                 # 9.1s
+    ("check_data_licenses.py", ("--check",)),          # 12.6s
+)
+
+#: 只提示、不改判的检查：退出码恒 0（如路线图阻塞提醒器），输出要人读，
+#: 因此只把结论行附在 detail 里，绝不让它把整步判 FAIL。
+ADVISORY_CHECKS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("check_roadmap_blocking.py", ()),                 # 0.2s，恒 0
+)
 
 #: 窄屏验收：两套指纹各自独立判（任一越线整步 FAIL），不换算、不互相代表。
 #: 两套**都跑 windows 平台插件**（要有真字体；offscreen 下 QFontDatabase
@@ -190,6 +222,10 @@ FAIL_HINTS = {
                   "只在「他线正在改、本线这轮动不了」时才挂 "
                   "docs/action-duplication-waivers.md，且必须带 owner + 到期 + 原因，"
                   "到期自动 FAIL，不许加整体放水开关",
+    "guards": "按 detail 点名的脚本逐个单跑看明细：谁红修谁，不许把脚本从"
+              "GUARD_CHECKS 里删掉来变绿；若某个脚本长期红且属于待清库存，"
+              "按 docs/code-guards.md 的登记写清「暂不接入 + 触发条件」，"
+              "而不是让它常年红着挡住发版",
     "build": "查 PyInstaller 输出与 --workpath 下的 warn-MBDSDR.txt；"
              "对照 desktop/MBDSDR.spec 的 datas/hiddenimports",
     "smoke": "看启动日志 [smoke] 行的失败模块名；"
@@ -974,6 +1010,54 @@ def main() -> int:
                                           else f"退出码 {proc.returncode}")
         return True, detail
 
+    def do_guards() -> tuple[bool, str]:
+        """廉价机检统一入口：把「只在文档里登记、没人跑」的闸门接进来。
+
+        每个脚本单进程、单次超时 120s；输出只留最后一非空行，避免把发版
+        日志刷满。``ADVISORY_CHECKS`` 只附结论、不参与判定（如路线图提醒器
+        恒退出 0）。任何一项非 0 即整步 FAIL，明细点名到脚本。
+        """
+        env = os.environ.copy()
+        env["QT_QPA_PLATFORM"] = "offscreen"
+        env["PYTHONIOENCODING"] = "utf-8"
+        bad: list[str] = []
+        parts: list[str] = []
+
+        def _tail(proc: subprocess.CompletedProcess) -> str:
+            lines = [ln.strip() for ln in
+                     ((proc.stdout or "") + "\n" + (proc.stderr or "")).splitlines()
+                     if ln.strip()]
+            return (lines[-1] if lines else "")[:150]
+
+        for script, extra in GUARD_CHECKS:
+            path = os.path.join(ROOT, "scripts", script)
+            try:
+                proc = subprocess.run([sys.executable, path, *extra], cwd=ROOT,
+                                      capture_output=True, text=True,
+                                      errors="replace", env=env, timeout=120)
+            except subprocess.TimeoutExpired:
+                bad.append(f"{script}(超时>120s)")
+                parts.append(f"{script}: TIMEOUT")
+                continue
+            if proc.returncode != 0:
+                bad.append(f"{script}(rc={proc.returncode})")
+                parts.append(f"{script}: FAIL {_tail(proc)}")
+            else:
+                parts.append(f"{script}: PASS")
+        for script, extra in ADVISORY_CHECKS:
+            path = os.path.join(ROOT, "scripts", script)
+            try:
+                proc = subprocess.run([sys.executable, path, *extra], cwd=ROOT,
+                                      capture_output=True, text=True,
+                                      errors="replace", env=env, timeout=120)
+                parts.append(f"{script}: 提示 {_tail(proc)}")
+            except subprocess.TimeoutExpired:
+                parts.append(f"{script}: 提示（超时>120s，未参与判定）")
+        detail = "；".join(parts)
+        if bad:
+            return False, "红：" + "、".join(bad) + "｜" + detail
+        return True, detail
+
     def do_build() -> tuple[bool, str]:
         exe = _build(args.dist_dir, args.work_dir, noarchive=False)
         count, size, _files = _dist_stats(args.dist_dir)
@@ -1104,6 +1188,7 @@ def main() -> int:
         ("docs", do_docs),
         ("gen_reconcile", do_gen_reconcile),
         ("action_dup", do_action_dup),
+        ("guards", do_guards),
         ("build", do_build),
         ("smoke", do_smoke),
         ("subtree", do_subtree),
