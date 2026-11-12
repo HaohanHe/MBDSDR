@@ -691,3 +691,67 @@ for (auto const& [name, _vfo] : vfos) {
 | 3 | **每星一个遥测脚本文件**：`python/telemetry/*.py` 单星定义解码器，框架按名加载 | `daniestevez/gr-satellites@0ff8b61:python/telemetry/aausat4.py:11`、`:17-30` | 我们未见等价物（W91 走 schema/数据路线，不是脚本插件路线） | 扩覆盖靠加文件，与 W91「扩遥测覆盖」是两条不同路径 |
 
 **说明**：以上「我们未见等价物」只描述本次检索范围内的事实，**不构成「我们不做」的产品决定**；是否要做、何时做，不在本节裁定。
+
+## 7. 线上同类项目补查（第二轮，2026-11-12）
+
+> **范围**：只列 §0/§2/§4 未收的项目；已收的 SDRangel / SDR++ / gr-satellites / Direwolf / OpenWebRX+ / CubicSDR / FoxTelem / PreviSat，以及本地已克隆的 satdump / gpredict / gqrx 不重复。
+> **口径**：仓库地址 + 许可证 + 最近提交 + 抓取时间 **2026-11-12（Asia/Shanghai）**；许可证以仓库许可证文件或 GitLab 项目页标识为准，取不到就写「未标」，不按印象补。
+> **自我约束**：本轮仍未做全量封闭集，**不对任何项目下「他们没有」结论**；本节只回答「有没有值得看的、有没有可搬的」。
+> **不产出工单**：本节不改 roadmap、不加 W 编号。
+
+### 7.1 补查项目表
+
+| 项目 | 重合模块 | 仓库 | 许可证 | 最近提交（抓取时） | 重合点一句话 |
+|---|---|---|---|---|---|
+| **SatNOGS Client** | 过境调度 / 录制 | `https://gitlab.com/librespacefoundation/satnogs/satnogs-client` | **AGPL-3.0**（项目页 LICENSE 链接） | **2026-10-02**（893 commits） | 用「观测对象」（TLE + 频率 + 模式 + 波特率 + start/end）驱动一次录制，产物分 payload / waterfall / demoddata 三类 |
+| **SatNOGS Decoders** | 遥测解析 / 卫星解码 | `https://gitlab.com/librespacefoundation/satnogs/satnogs-decoders` | **AGPL-3.0** | **2026-10-29**（591 commits，283 tags） | 每星一套 Kaitai Struct 解码定义，按星加载 |
+| **SoapySDR** | SDR 客户端 / 设备抽象 | `https://github.com/pothosware/SoapySDR` | **BSL-1.0**（GitHub API `license.spdx_id`） | **2023-09-27**（`pushed_at`） | 厂商中立的设备枚举/流接口；SoapyRemote 同生态，把远端 SDR 变成本机设备 |
+| **SigMF** | 录音回放 | `https://github.com/sigmf/SigMF` | **未标**：仓库根无 `LICENSE`（`/blob/main/LICENSE` 抓取 404），引用前需单独确认 | **2026-01-13**（commits atom） | `.sigmf-data` + `.sigmf-meta`，元数据分 `global` / `captures` / `annotations` 三块 |
+| **Hamlib** | 过境追踪 / 设备控制 | `https://github.com/Hamlib/Hamlib` | **COPYING 为 GPL-2.0 文本**；README 未标 SPDX，LGPL 双许可待复核 | **2026-11-11**（commits atom） | 收音机与 rotator 的统一控制 API，带网络 daemon |
+| ~~satnogs-network~~ | 远程共享 | `https://github.com/satnogs/satnogs-network` | **无**（GitHub API `license=null`） | **2018-12-17**，**已归档** | 全局观测网络；SatNOGS 组织 2018 年整体迁往 GitLab。**不建议投入时间** |
+
+补充事实：`satnogs/satnogs-client` 的 GitHub 仓库同样在 **2018-12-17 归档**，README 明确写「All SatNOGS repositories have been moved to GitLab」，因此**以 GitLab 为准**，GitHub 上的提交数/活跃度不代表现状。
+
+### 7.2 机制清单（按「用户能不能马上感觉到」排序）
+
+| 优先级 | 机制 | 对应我们的缺口 | 搬的代价 | 出处（抓取 2026-11-12） |
+|---|---|---|---|---|
+| **高** | **观测对象驱动自动录制**：一次观测 = `start/end + tle0/1/2 + frequency + mode + baud + max_altitude`，结束后按 `payload/waterfall/demoddata` 三类产物归档 | **W94**（AOS/LOS 钩子，低优先级）；「按过境自动录」**无工单** | **动 `main_window.py`：是**（启停要接现有录音状态机，该文件被卫星线独占，排在 W95/W96/W98 之后）；**FZ-04：否**（不加可见控件）；改动面：新增调度模块 + 1 处启停调用 | `satnogs-client@master:satnogsclient/scheduler/tasks.py`（`spawn_observer`，obj 字段与 `DATA_TYPE_MAP`）：https://gitlab.com/librespacefoundation/satnogs/satnogs-client/-/blob/master/satnogsclient/scheduler/tasks.py |
+| **高** | **SigMF `captures[]` + `annotations[]`**：`captures` 记分段频点（`core:sample_start` + `core:frequency`），`annotations` 记时间区间内的信号/事件标注 | **无工单**：W97 关闭时只核了 `global`；写侧 W98 未开工 | **动 `main_window.py`：写侧是**（现有 `.json` 写在 `:10015` 一带）；读侧否（`baseband_io` 可独立加）；**FZ-04：否**；改动面：`baseband_io` 增 captures/annotations 解析 + 录制写侧扩字段 | `sigmf/SigMF@main:README.md`（最小 `.sigmf-meta` 示例含 `global/captures/annotations`）：https://github.com/sigmf/SigMF |
+| **中** | **每星 Kaitai 解码定义 / 字段表**：解码器按卫星组织，新增卫星靠加定义 | **W91 / W92**，但**只借数据与字段表，不搬运行时**——我们的 schema v2 已能表达布局，缺的是数据 | **动 `main_window.py`：否**；**FZ-04：否**；改动面：数据转换/字段映射，解析层可独立 | `satnogs-decoders@master`（项目页自述 "SatNOGS Kaitai Struct decoders"，283 tags）：https://gitlab.com/librespacefoundation/satnogs/satnogs-decoders |
+| **低** | **Hamlib rotator / rig 统一 API**：`rotator` 与 `rig` 走同一套后端抽象，另有网络 daemon | **无工单**（roadmap 没有 rotator 控制条目） | **动 `main_window.py`：否**（可做独立 adapter）；**FZ-04：加设置控件才会触发**；改动面：新增 adapter + 配置项 | `Hamlib/Hamlib@master:README.md`（"functions for radio, rotator and amplifier control"、network daemon）：https://github.com/Hamlib/Hamlib |
+
+**排序理由（不按「看起来高级」）**：
+- 自动录制是**用户当天就能感觉到**的：不用守着过境手动点开始/停止；
+- SigMF `captures/annotations` 让录下来的文件**自带频点变化与事件标注**，直接影响回放与事后分析；
+- Kaitai 解码器本身不解决我们的问题（schema v2 已够），**只有字段表/数据**能扩 W91/W92 的覆盖，所以排中；
+- Hamlib 只对**有 rotator 的用户**有价值，且 roadmap 连条目都没有，排低。
+
+### 7.3 明确不搬的
+
+| 对象 | 不搬的理由 |
+|---|---|
+| **SoapySDR 运行时** | 引入 C++ ABI + 驱动生态，代价远大于收益；「远端设备当本机设备」的形态 §6.1 已记，不重复立项 |
+| **SatNOGS Client 整机** | 它是「地面站守护进程」，不是桌面工作台；只借观测对象与产物分类，不搬进程模型 |
+| **satnogs-network** | 已归档、无许可证，且是服务端网络，不是同类客户端 |
+
+### 7.4 与现有工单的关系
+
+- 本节**没有新增工单**；上表「无工单」的三项（自动录制、SigMF captures/annotations、rotator）留作候选，等产品决定。
+- 唯一直接挂到现有条目上的是 **W94**（自动录制可复用其 AOS/LOS 触发点），但 W94 本身是低优先级，不等于自动录制也该低。
+- 任何要动 `main_window.py` 的机制（自动录制、SigMF 写侧）都受卫星线独占约束，**排 W95/W96/W98 之后**；读侧（`baseband_io`）可先行。
+
+### 7.5 抓取记录
+
+| 证据 | URL | 抓取时间 |
+|---|---|---|
+| SatNOGS Client 项目页（AGPL-3.0、893 commits、LICENSE 链接） | https://gitlab.com/librespacefoundation/satnogs/satnogs-client | 2026-11-12 |
+| SatNOGS Client 调度源码（`spawn_observer`、`DATA_TYPE_MAP`） | https://gitlab.com/librespacefoundation/satnogs/satnogs-client/-/blob/master/satnogsclient/scheduler/tasks.py | 2026-11-12 |
+| SatNOGS Decoders 项目页（AGPL-3.0、591 commits、Kaitai 自述） | https://gitlab.com/librespacefoundation/satnogs/satnogs-decoders | 2026-11-12 |
+| SoapySDR（BSL-1.0、`pushed_at=2023-09-27`） | https://api.github.com/repos/pothosware/SoapySDR | 2026-11-12 |
+| SigMF README（`global/captures/annotations` 示例） | https://github.com/sigmf/SigMF | 2026-11-12 |
+| SigMF 提交 feed（最新 2026-01-13）；`LICENSE` 404 | https://github.com/sigmf/SigMF/commits/main.atom；https://github.com/sigmf/SigMF/blob/main/LICENSE | 2026-11-12 |
+| Hamlib README（rotator/rig/网络 daemon） | https://github.com/Hamlib/Hamlib | 2026-11-12 |
+| Hamlib 提交 feed（最新 2026-11-11）；COPYING = GPL-2.0 文本 | https://github.com/Hamlib/Hamlib/commits/master.atom；https://raw.githubusercontent.com/Hamlib/Hamlib/master/COPYING | 2026-11-12 |
+| satnogs-network 归档（2018-12-17，license=null） | https://api.github.com/repos/satnogs/satnogs-network | 2026-11-12 |
+| satnogs-client GitHub 归档页（"moved to GitLab"） | https://github.com/satnogs/satnogs-client | 2026-11-12 |
