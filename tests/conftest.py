@@ -990,6 +990,34 @@ def _protect_marker_path():
                         f"{_REAL_CONFIG_PROTECT_PREFIX}{os.getpid()}.json")
 
 
+def _live_protect_markers():
+    """仍在运行的其他会话留下的保护记录（死进程的残留不算）。
+
+    并发跑两个 pytest 时，谁先结束谁都想把只读属性改回去——那样另一个
+    会话剩下的时间里真实配置就是可写的。所以「收尾」必须看还有没有别的
+    活会话：只要有一个活着，保护就不拆。
+    """
+    try:
+        names = os.listdir(_REAL_CONFIG_BACKUP_ROOT)
+    except OSError:
+        return []
+    mine = os.path.basename(_protect_marker_path())
+    out = []
+    for name in names:
+        if not name.startswith(_REAL_CONFIG_PROTECT_PREFIX) or name == mine:
+            continue
+        try:
+            with open(os.path.join(_REAL_CONFIG_BACKUP_ROOT, name),
+                      "r", encoding="utf-8") as f:
+                info = json.load(f)
+        except (OSError, ValueError):
+            continue
+        pid = info.get("pid")
+        if pid and _process_start_time(pid) is not None:
+            out.append(info)
+    return out
+
+
 def _recover_stale_write_protection():
     """恢复上次崩溃会话留下的只读属性（只动它自己记录过的文件）。"""
     try:
@@ -1023,12 +1051,21 @@ def _recover_stale_write_protection():
 
 def _protect_real_config():
     """真实配置设只读：写入失败会发生在真正的写入者进程里。"""
+    others = _live_protect_markers()
     entries = {}
     for key, path in _real_config_files().items():
         try:
             readonly = not (os.stat(path).st_mode & stat.S_IWRITE)
         except OSError:
             continue
+        # 另一个会话可能已经替我们上了只读：此刻看到的属性是「它改的」，
+        # 不是用户原值。原值只能从它的记录里继承，否则收尾时会替用户
+        # 永久保留只读（或提前拆掉别人的保护）。
+        for info in others:
+            inherited = (info.get("entries") or {}).get(key) or {}
+            if "readonly" in inherited:
+                readonly = bool(inherited["readonly"])
+                break
         entries[key] = {"path": path, "readonly": readonly}
         if not readonly:
             try:
@@ -1049,8 +1086,19 @@ def _protect_real_config():
 
 
 def _unprotect_real_config():
-    """会话结束恢复原属性；用户自己设的只读一律不碰。"""
+    """会话结束恢复原属性；用户自己设的只读一律不碰。
+
+    还有别的会话在跑时只删自己的标记、不动属性——收尾交给最后一个
+    退出的会话，否则中间那段窗口真实配置是可写的。
+    """
     entries = _REAL_CONFIG_GUARD.get("write_protected") or {}
+    _REAL_CONFIG_GUARD["write_protected"] = {}
+    try:
+        os.remove(_protect_marker_path())
+    except OSError:
+        pass
+    if _live_protect_markers():
+        return
     for entry in entries.values():
         if entry.get("readonly"):
             continue
@@ -1058,11 +1106,6 @@ def _unprotect_real_config():
             os.chmod(entry["path"], stat.S_IWRITE | stat.S_IREAD)
         except OSError:
             pass
-    _REAL_CONFIG_GUARD["write_protected"] = {}
-    try:
-        os.remove(_protect_marker_path())
-    except OSError:
-        pass
 
 
 def _qt_lock_held_elsewhere():

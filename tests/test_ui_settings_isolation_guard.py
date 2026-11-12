@@ -28,7 +28,9 @@ tests/test_ui_settings_isolation_guard.py
     QT_QPA_PLATFORM=offscreen python -m pytest tests/test_ui_settings_isolation_guard.py -v
 """
 import hashlib
+import json
 import os
+import stat
 import subprocess
 import sys
 
@@ -265,3 +267,61 @@ def test_lock_bypass_constructing_qapp_is_red(tmp_path):
         f"不是绕锁机检判的红：\n{text[-3000:]}")
     assert "test_creates_qapplication_without_lock" in text, (
         f"机检红了但没点名用例：\n{text[-3000:]}")
+
+
+def _load_conftest_module():
+    """按文件路径加载 tests/conftest.py，只为取内部函数做单元级反证。
+
+    不注册成 pytest 插件（模块级 hook 函数只有 conftest 加载器会认），
+    所以不会重复接管线；也正因为如此，测试里改它的模块级状态是安全的。
+    """
+    import importlib.util
+    path = os.path.join(_ROOT, "tests", "conftest.py")
+    spec = importlib.util.spec_from_file_location("_mbdsdr_conftest_unit", path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def test_write_protection_survives_concurrent_sessions(tmp_path):
+    """两个 pytest 会话并存：先退出的那个不许拆保护，也不许把只读留成永久。
+
+    现场：6+ 个会话并发跑全量。旧实现看到「文件此刻只读」就记成用户原值，
+    于是先退出的会话一收尾就把属性改回可写——另一个会话剩下的时间里真实
+    配置又变成可写的；反过来，最后一个会话也会把别人上的只读当成用户设置
+    而永远不还原。保护装了却有时效窗口，等于没装。
+    """
+    mod = _load_conftest_module()
+    root = tmp_path / "snaps"
+    root.mkdir()
+    mod._REAL_CONFIG_BACKUP_ROOT = str(root)
+
+    target = tmp_path / "desktop_settings.json"
+    target.write_text("{}", encoding="utf-8")
+    # 另一个**活着的**会话先上了只读；它的记录里写着「用户原值 = 可写」。
+    # pid 用本进程（活着），文件名与本次会话自己的标记不同，故算「别的会话」。
+    foreign = root / "write-protection-999999.json"
+    foreign.write_text(json.dumps({
+        "pid": os.getpid(),
+        "entries": {"path": {"path": str(target), "readonly": False}},
+    }), encoding="utf-8")
+    os.chmod(target, stat.S_IREAD)
+
+    mod._REAL_CONFIG_GUARD = {"path": str(target), "bm_path": None, "gui_path": None}
+    mod._protect_real_config()
+    assert mod._REAL_CONFIG_GUARD["write_protected"]["path"]["readonly"] is False, (
+        "把别的会话设的只读当成了用户原值：收尾时会提前拆保护，或永久保留只读")
+
+    mod._unprotect_real_config()
+    assert not os.access(target, os.W_OK), (
+        "另一个会话还在跑，先退出的会话却把写保护拆了（中间窗口可写）")
+
+    # 另一个会话退出后，最后一个会话收尾必须按继承的原属性还原成可写。
+    foreign.unlink()
+    mod._REAL_CONFIG_GUARD = {
+        "path": str(target), "bm_path": None, "gui_path": None,
+        "write_protected": {"path": {"path": str(target), "readonly": False}},
+    }
+    mod._unprotect_real_config()
+    assert os.access(target, os.W_OK), (
+        "最后一个会话退出后没有把属性还原，用户文件被永久设成只读")
