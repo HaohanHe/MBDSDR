@@ -12,14 +12,36 @@
 """
 from __future__ import annotations
 
+import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
 SCRIPT = REPO / "scripts" / "secret_scan.py"
+HOOK = REPO / "scripts" / "hooks" / "commit-msg"
 FAKE = "ghp_" + "A" * 36
+#: 提交信息通道用另一个值，避免和文件扫描用例串味。
+MSG_FAKE = "ghp_" + "C" * 36
 BLOB = "Qm9ndXNTdHJpbmdXaXRoRW5vdWdoRW50cm9weTEyMzQ1Njc4OTBhYmNkZWY"
+
+
+def _init_repo(tmp_path: Path) -> Path:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+
+    def git(*args: str) -> str:
+        proc = subprocess.run(
+            ["git", *args], cwd=repo, check=True, capture_output=True,
+            text=True, encoding="utf-8",
+        )
+        return proc.stdout
+
+    git("init", "-q")
+    git("config", "user.email", "t@example.invalid")
+    git("config", "user.name", "t")
+    return repo
 
 
 def run_scan(root: Path, *args: str, cwd: Path | None = None) -> subprocess.CompletedProcess:
@@ -160,3 +182,167 @@ def test_history_mode_still_sees_secret_deleted_from_head(tmp_path: Path) -> Non
     assert "路径=1 个，提交=1 个" in text
     assert "仍可从 HEAD 到达 1 个" in text
     assert FAKE not in text
+
+
+# ----------------------------------------------------------------------
+# 提交信息通道：commit message / annotated tag / notes
+# ----------------------------------------------------------------------
+def test_history_mode_sees_secret_in_commit_message(tmp_path: Path) -> None:
+    """`git commit -m "ghp_…"` 不产生 blob：blob 扫描看不见，消息扫描必须看见。"""
+    repo = _init_repo(tmp_path)
+    (repo / "a.txt").write_text("a\n", encoding="utf-8")
+    subprocess.run(["git", "add", "a.txt"], cwd=repo, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "commit", "-q", "-m", f"rotate token {MSG_FAKE}"],
+        cwd=repo, check=True, capture_output=True,
+    )
+    leaked = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=repo, check=True, capture_output=True,
+        text=True,
+    ).stdout.strip()
+    (repo / "a.txt").write_text("b\n", encoding="utf-8")
+    subprocess.run(
+        ["git", "commit", "-q", "-am", "clean follow-up"],
+        cwd=repo, check=True, capture_output=True,
+    )
+
+    clean = run_scan(repo, "--root", str(repo), cwd=repo)
+    assert clean.returncode == 0, clean.stdout + clean.stderr
+
+    history = run_scan(repo, "--history", cwd=repo)
+    text = history.stdout + history.stderr
+    assert history.returncode == 0, text
+    # 报出的是提交号 + 行号 + 规则名，不是路径（消息不属于任何文件）
+    assert f"HISTORY-MSG {leaked[:12]}:1 github-pat-classic" in text, text
+    assert "commit message 2 条" in text, text
+    assert "提交信息命中：1 条" in text, text
+    assert MSG_FAKE not in text
+
+
+def test_history_mode_sees_secret_in_annotated_tag(tmp_path: Path) -> None:
+    """annotated tag 的 message 是独立对象，blob 扫描同样看不见。"""
+    repo = _init_repo(tmp_path)
+    (repo / "a.txt").write_text("a\n", encoding="utf-8")
+    subprocess.run(["git", "add", "a.txt"], cwd=repo, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "commit", "-q", "-m", "clean message"],
+        cwd=repo, check=True, capture_output=True,
+    )
+    subprocess.run(
+        ["git", "tag", "-a", "v1.0", "-m", f"release {MSG_FAKE}"],
+        cwd=repo, check=True, capture_output=True,
+    )
+
+    history = run_scan(repo, "--history", cwd=repo)
+    text = history.stdout + history.stderr
+    assert history.returncode == 0, text
+    assert "HISTORY-MSG tag:v1.0:1 github-pat-classic" in text, text
+    assert "annotated tag 1 个" in text, text
+    assert "提交信息命中：1 条" in text, text
+    assert MSG_FAKE not in text
+
+
+def test_history_mode_sees_secret_in_notes(tmp_path: Path) -> None:
+    """`git notes` 也是独立 blob，且不在 rev-list 的路径索引里。"""
+    repo = _init_repo(tmp_path)
+    (repo / "a.txt").write_text("a\n", encoding="utf-8")
+    subprocess.run(["git", "add", "a.txt"], cwd=repo, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "commit", "-q", "-m", "clean message"],
+        cwd=repo, check=True, capture_output=True,
+    )
+    head = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=repo, check=True, capture_output=True, text=True,
+    ).stdout.strip()
+    subprocess.run(
+        ["git", "notes", "add", "-m", f"deploy {MSG_FAKE}", "HEAD"],
+        cwd=repo, check=True, capture_output=True,
+    )
+
+    history = run_scan(repo, "--history", cwd=repo)
+    text = history.stdout + history.stderr
+    assert history.returncode == 0, text
+    assert f"HISTORY-MSG note:{head[:12]}:1 github-pat-classic" in text, text
+    assert "notes 1 条" in text, text
+    assert "提交信息命中：1 条" in text, text
+    assert MSG_FAKE not in text
+
+
+def test_history_mode_message_scan_is_zero_when_clean(tmp_path: Path) -> None:
+    """清干净后必须是 0 条：证明上面三条命中不是「有消息就报」。"""
+    repo = _init_repo(tmp_path)
+    (repo / "a.txt").write_text("a\n", encoding="utf-8")
+    subprocess.run(["git", "add", "a.txt"], cwd=repo, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "commit", "-q", "-m", "clean message"],
+        cwd=repo, check=True, capture_output=True,
+    )
+    subprocess.run(
+        ["git", "tag", "-a", "v1.0", "-m", "release notes"],
+        cwd=repo, check=True, capture_output=True,
+    )
+
+    history = run_scan(repo, "--history", cwd=repo)
+    text = history.stdout + history.stderr
+    assert history.returncode == 0, text
+    assert "HISTORY-MSG" not in text, text
+    assert "提交信息命中：0 条" in text, text
+    assert "commit message 1 条" in text, text
+    assert "annotated tag 1 个" in text, text
+
+
+# ----------------------------------------------------------------------
+# commit-msg 闸：写入侧拦截（pre-commit 看不见这条通道）
+# ----------------------------------------------------------------------
+def test_commit_msg_mode_blocks_value_and_no_false_positive_on_prose(
+    tmp_path: Path,
+) -> None:
+    msg = tmp_path / "COMMIT_EDITMSG"
+    msg.write_text(f"fix: rotate token\n\nleaked {MSG_FAKE}\n", encoding="utf-8")
+
+    bad = run_scan(tmp_path, "--commit-msg", str(msg))
+    text = bad.stdout + bad.stderr
+    assert bad.returncode == 1, text
+    assert ":3 github-pat-classic" in text, text
+    assert MSG_FAKE not in text
+
+    # 只写「不要用 ghp_ 开头」这类说明文字：形状规则要求完整 token，不该误报。
+    msg.write_text(
+        "docs: 说明不要用 ghp_ 开头的明文凭据，也不要贴 AKIA 样例全串\n",
+        encoding="utf-8",
+    )
+    prose = run_scan(tmp_path, "--commit-msg", str(msg))
+    assert prose.returncode == 0, prose.stdout + prose.stderr
+    assert "BLOCK=0" in prose.stdout
+
+
+def test_commit_msg_hook_blocks_real_commit(tmp_path: Path) -> None:
+    """把钩子真的装进临时仓库：`git commit -m "ghp_…"` 必须被拒绝。"""
+    repo = _init_repo(tmp_path)
+    hook = repo / ".git" / "hooks" / "commit-msg"
+    hook.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(HOOK, hook)
+    os.chmod(hook, 0o755)
+    (repo / "a.txt").write_text("a\n", encoding="utf-8")
+    subprocess.run(["git", "add", "a.txt"], cwd=repo, check=True, capture_output=True)
+
+    env = dict(os.environ, MBDSDR_SECRET_SCAN=str(SCRIPT))
+    blocked = subprocess.run(
+        ["git", "commit", "-q", "-m", f"leak {MSG_FAKE}"],
+        cwd=repo, capture_output=True, text=True, encoding="utf-8", env=env,
+    )
+    assert blocked.returncode != 0
+    assert "拒绝提交" in (blocked.stdout + blocked.stderr)
+    assert MSG_FAKE not in (blocked.stdout + blocked.stderr)
+    count = subprocess.run(
+        ["git", "rev-list", "--count", "HEAD"], cwd=repo, capture_output=True,
+        check=False, text=True,
+    )
+    # 没有任何提交被创建（HEAD 还不存在）
+    assert count.returncode != 0
+
+    ok = subprocess.run(
+        ["git", "commit", "-q", "-m", "clean message"],
+        cwd=repo, capture_output=True, text=True, encoding="utf-8", env=env,
+    )
+    assert ok.returncode == 0, ok.stdout + ok.stderr

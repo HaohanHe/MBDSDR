@@ -24,8 +24,9 @@
 
     python scripts/secret_scan.py                  # 扫 D:\\mbdsdr（跳过目录逐条打印）
     python scripts/secret_scan.py --staged         # 只扫暂存区内容（pre-commit 用）
-    python scripts/secret_scan.py --history        # 扫 git 历史里的 blob（只跑形状规则）
+    python scripts/secret_scan.py --history        # 扫 git 历史里的 blob + 提交信息（只跑形状规则）
     python scripts/secret_scan.py --artifact DIR   # 扫待发布目录（含二进制），BLOCK>0 退出 1
+    python scripts/secret_scan.py --commit-msg F   # 扫提交信息文件（commit-msg 钩子用），BLOCK>0 退出 1
     python scripts/secret_scan.py --root D:\\some   # 指定扫描根
     python scripts/secret_scan.py path1 path2      # 只扫指定文件
 
@@ -36,6 +37,18 @@
 到达（不靠 ``git log`` 的主观印象）。同样只打印路径、行号、规则名、提交号。
 非 blob 对象、首 8KB 含 NUL 的二进制 blob、以及 ``--all`` 之外（dangling /
 仅 reflog 可达）的对象不在扫描范围内，逐类计数后打印。
+
+提交信息口径（2026-11-13 补的通道）：``git commit -m "ghp_…"`` 不产生 blob，
+上面的 blob 扫描**看不见**它；annotated tag 的 message 与 ``git notes`` 同理。
+所以 ``--history`` 同时扫三类对象：
+  * commit message：``git log --all --reflog <worktree HEAD> --format=%H%x00%B``，
+    一条提交一条，行号按消息正文计；
+  * annotated tag message：``refs/tags`` 里 ``objecttype=tag`` 的对象，
+    ``git cat-file tag <sha>`` 取头部之后的正文（轻量 tag 没有独立 message，只计数）；
+  * notes：``refs/notes/*`` 每个 ref 跑 ``git notes list`` 再 ``cat-file -p``。
+命中打印 ``HISTORY-MSG <提交号|tag:名称|note:对象>：<行> <规则>``，仍然不打印值。
+提交信息写进 commit/tag 对象后，改它必须重写历史——所以这条通道有独立的
+写入闸（``scripts/hooks/commit-msg`` → ``--commit-msg``），见 docs/code-guards.md。
 
 跳过目录写在 ``SKIP_DIRS`` 里并逐条打印原因，不静默少扫。
 """
@@ -603,6 +616,128 @@ def _ancestor_of_head(commit: str) -> bool:
     return proc.returncode == 0
 
 
+#: ``git log --format`` 的记录分隔符（``%x1e``）。提交信息里不会出现 NUL/0x1e，
+#: 用它切记录比按行切安全（``%B`` 本身是多行）。
+_MSG_SEP = "\x1e"
+
+
+def _shape_line_hits(lines: Iterable[str]) -> List[Tuple[int, str]]:
+    """只要 (行号, 规则)，路径由调用方补。``pragma: allowlist secret`` 逐行生效。"""
+    return [
+        (lineno, rule)
+        for _path, lineno, rule, _tier in _shape_hits("", lines)
+    ]
+
+
+def _history_commit_messages(
+    tips: List[str], stats: "Counter[str]"
+) -> List[Tuple[str, int, str]]:
+    """commit message → [(提交号, 行号, 规则)]。
+
+    ``git commit -m "ghp_…"`` 不产生 blob，blob 扫描完全看不见它；这里对
+    ``--all`` + reflog + 各 worktree HEAD 覆盖到的提交逐个跑形状规则。
+    """
+    proc = _git(
+        "-c", "core.quotepath=false", "log", "--all", "--reflog", *tips,
+        "--format=%x1e%H%x00%B",
+    )
+    if proc.returncode != 0:
+        print(f"[secret-scan] 读取提交信息失败：{proc.stderr.strip()}")
+        return []
+    hits: List[Tuple[str, int, str]] = []
+    seen: set = set()
+    for record in proc.stdout.split(_MSG_SEP):
+        record = record.lstrip("\r\n")
+        if not record:
+            continue
+        sha, sep, body = record.partition("\x00")
+        sha = sha.strip()
+        if not sep or not sha or sha in seen:
+            continue
+        seen.add(sha)
+        stats["history_msgs"] += 1
+        body_lines = body.splitlines()
+        stats["history_msg_lines"] += len(body_lines)
+        for lineno, rule in _shape_line_hits(body_lines):
+            hits.append((sha, lineno, rule))
+    return hits
+
+
+def _history_tag_messages(stats: "Counter[str]") -> List[Tuple[str, int, str]]:
+    """annotated tag 的 message → [(tag 名, 行号, 规则)]。
+
+    轻量 tag 指向 commit、没有独立 message（正文就是被指向提交的 message，
+    已在 commit message 里扫过），只计数不重复扫。
+    """
+    proc = _git(
+        "-c", "core.quotepath=false", "for-each-ref",
+        "--format=%(refname)%00%(objectname)%00%(objecttype)", "refs/tags",
+    )
+    if proc.returncode != 0:
+        print(f"[secret-scan] 读取 tag 失败：{proc.stderr.strip()}")
+        return []
+    hits: List[Tuple[str, int, str]] = []
+    for raw in proc.stdout.splitlines():
+        fields = raw.split("\x00")
+        if len(fields) != 3:
+            continue
+        ref, sha, otype = fields
+        if otype != "tag":
+            stats["history_skip_lightweight_tag"] += 1
+            continue
+        stats["history_tags"] += 1
+        obj = subprocess.run(
+            ["git", "cat-file", "tag", sha], capture_output=True
+        )
+        if obj.returncode != 0:
+            stats["history_skip_missing"] += 1
+            continue
+        _headers, sep, body = obj.stdout.decode(
+            "utf-8", errors="replace"
+        ).partition("\n\n")
+        if not sep:
+            continue
+        body_lines = body.splitlines()
+        stats["history_tag_lines"] += len(body_lines)
+        name = ref[len("refs/tags/"):] if ref.startswith("refs/tags/") else ref
+        for lineno, rule in _shape_line_hits(body_lines):
+            hits.append((name, lineno, rule))
+    return hits
+
+
+def _history_note_messages(stats: "Counter[str]") -> List[Tuple[str, int, str]]:
+    """``git notes`` 的正文 → [(被注释对象, 行号, 规则)]。
+
+    ``notes`` 是独立 blob，且默认不在 ``rev-list --objects`` 的路径索引里
+    （ref 名前缀 ``refs/notes/`` 下没有 tree），blob 扫描可能命中却报不出路径。
+    这里按 ref 逐个 ``notes list`` 再读正文。
+    """
+    refs = _git("for-each-ref", "--format=%(refname)", "refs/notes")
+    hits: List[Tuple[str, int, str]] = []
+    for ref in [line.strip() for line in refs.stdout.splitlines() if line.strip()]:
+        listing = _git("notes", f"--ref={ref}", "list")
+        if listing.returncode != 0:
+            print(f"[secret-scan] 读取 notes 失败（{ref}）：{listing.stderr.strip()}")
+            continue
+        for raw in listing.stdout.splitlines():
+            fields = raw.split()
+            if len(fields) < 2:
+                continue
+            note_blob, target = fields[0], fields[1]
+            stats["history_notes"] += 1
+            obj = subprocess.run(
+                ["git", "cat-file", "-p", note_blob], capture_output=True
+            )
+            if obj.returncode != 0:
+                stats["history_skip_missing"] += 1
+                continue
+            for lineno, rule in _shape_line_hits(
+                obj.stdout.decode("utf-8", errors="replace").splitlines()
+            ):
+                hits.append((target, lineno, rule))
+    return hits
+
+
 def _split_known_benign(
     sha: str, rules: Iterable[str], commits: List[str]
 ) -> Tuple[List[str], List[str]]:
@@ -695,11 +830,41 @@ def _history_report(
         + (f"；归属索引查不到提交的 {unattributed} 个" if unattributed else "")
     )
     print(
-        "[secret-scan] 未扫范围：非 blob 对象；二进制 blob（首 8KB 含 NUL，不做文本扫描）；"
+        "[secret-scan] 未扫范围：二进制 blob（首 8KB 含 NUL，不做文本扫描）；"
+        "tree 对象（无文本内容，commit message 见下段独立扫描）；"
         "熵规则不跑（全量历史里没有信号）。"
     )
     print("[secret-scan] 输出只含路径:行 + 规则名 + 提交号，不含命中的值。")
     return 0
+
+
+def _report_history_messages(
+    stats: "Counter[str]",
+    msg_hits: List[Tuple[str, int, str]],
+    tag_hits: List[Tuple[str, int, str]],
+    note_hits: List[Tuple[str, int, str]],
+) -> None:
+    """打印 commit message / tag / notes 的命中。只报位置与规则名。"""
+    for sha, lineno, rule in sorted(msg_hits):
+        print(f"HISTORY-MSG {sha[:12]}:{lineno} {rule}")
+    for name, lineno, rule in sorted(tag_hits):
+        print(f"HISTORY-MSG tag:{name}:{lineno} {rule}")
+    for target, lineno, rule in sorted(note_hits):
+        print(f"HISTORY-MSG note:{target[:12]}:{lineno} {rule}")
+    print(
+        "[secret-scan] 提交信息扫描："
+        f"commit message {stats['history_msgs']} 条 / {stats['history_msg_lines']} 行；"
+        f"annotated tag {stats['history_tags']} 个 / {stats['history_tag_lines']} 行"
+        f"（轻量 tag 跳过 {stats['history_skip_lightweight_tag']} 个，无独立 message）；"
+        f"notes {stats['history_notes']} 条"
+    )
+    total = len(msg_hits) + len(tag_hits) + len(note_hits)
+    print(f"[secret-scan] 提交信息命中：{total} 条")
+    if total:
+        print(
+            "[secret-scan] 提交信息已写进 commit/tag/note 对象，删除字面量必须重写历史；"
+            "先轮换凭据，再按 docs/code-guards.md 的裁定处理。"
+        )
 
 
 def _scan_history(stats: "Counter[str]") -> int:
@@ -713,7 +878,14 @@ def _scan_history(stats: "Counter[str]") -> int:
     blob_paths = _history_blob_paths(tips)
     blob_commits = _history_blob_commits(tips)
     hits = _scan_history_blobs(_all_blob_shas(), stats)
-    return _history_report(stats, hits, blob_paths, blob_commits)
+    code = _history_report(stats, hits, blob_paths, blob_commits)
+    msg_hits = _history_commit_messages(tips, stats)
+    tag_hits = _history_tag_messages(stats)
+    note_hits = _history_note_messages(stats)
+    _report_history_messages(stats, msg_hits, tag_hits, note_hits)
+    # 历史模式一直是「只报不拦」（退出码 0）：它是巡检，不是提交闸；
+    # 写入闸在 scripts/hooks/commit-msg（--commit-msg）。
+    return code
 
 
 def scan_artifact(root: Path) -> Tuple[List[Tuple[str, str]], "Counter[str]"]:
@@ -788,6 +960,30 @@ def _report_artifact(
     return 1 if hits else 0
 
 
+def scan_commit_msg(path: Path) -> Tuple[List[Tuple[int, str]], int]:
+    """扫提交信息文件（commit-msg 钩子传进来的那个），返回 ([(行号, 规则)], 行数)。
+
+    只跑形状规则：消息是纯文本，熵规则在这里只会对「一长串 hash/URL」报噪音。
+    ``pragma: allowlist secret`` 仍按行生效——说明性文字里要保留整串示例时用它，
+    与源码豁免同一纪律（逐行，不做文件级豁免）。
+    """
+    text = Path(path).read_text(encoding="utf-8", errors="replace")
+    lines = text.splitlines()
+    return _shape_line_hits(lines), len(lines)
+
+
+def _report_commit_msg(path: Path, hits: List[Tuple[int, str]], lines: int) -> int:
+    for lineno, rule in hits:
+        print(f"BLOCK {path}:{lineno} {rule}")
+    print(f"[secret-scan] commit-msg 扫描：{path}（{lines} 行，只跑形状规则）")
+    print(
+        f"[secret-scan] 提交信息门禁：BLOCK={len(hits)}"
+        + ("（删掉消息里的凭据后重新提交）" if hits else "（无凭据形状）")
+    )
+    print("[secret-scan] 输出只含行号 + 规则名，不含命中的值。")
+    return 1 if hits else 0
+
+
 def _report(findings: Iterable[Finding], stats: Optional["Counter[str]"] = None) -> int:
     unique = sorted(set(findings), key=lambda item: (item[0], item[1], item[2]))
     blocks = [f for f in unique if f[3] == "block"]
@@ -822,7 +1018,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument(
         "--history",
         action="store_true",
-        help="扫 git 历史里的 blob（只跑形状规则，不跑熵；不拦提交，退出码 0）",
+        help="扫 git 历史里的 blob + commit/tag/note 信息（只跑形状规则；不拦提交，退出码 0）",
     )
     parser.add_argument(
         "--artifact",
@@ -830,9 +1026,19 @@ def main(argv: Optional[List[str]] = None) -> int:
         default=None,
         help="扫一个待发布目录的全部文件（含二进制），BLOCK>0 退出 1",
     )
+    parser.add_argument(
+        "--commit-msg",
+        type=Path,
+        default=None,
+        metavar="FILE",
+        help="扫提交信息文件（commit-msg 钩子用），BLOCK>0 退出 1",
+    )
     args = parser.parse_args(argv)
 
     stats: "Counter[str]" = Counter()
+    if args.commit_msg is not None:
+        msg_hits, msg_lines = scan_commit_msg(args.commit_msg)
+        return _report_commit_msg(args.commit_msg, msg_hits, msg_lines)
     if args.artifact is not None:
         hits, artifact_stats = scan_artifact(args.artifact)
         return _report_artifact(args.artifact, hits, artifact_stats)

@@ -78,12 +78,12 @@
 | --- | --- |
 | 判据 | 7 条形状规则（GitHub classic/fine-grained PAT、GitLab PAT、Slack、AWS、JWT、PEM 私钥），**不跑熵**，也不跑 argv/日志 AST 规则 |
 | 豁免 | 行内 `# pragma: allowlist secret` 同样生效（逐行） |
-| 扫描对象 | `git cat-file --batch-all-objects` 的 13 648 个 blob / 759.5 MiB（含 `--all`/reflog 之外的对象；数字随提交增长，判据不变） |
+| 扫描对象 | `git cat-file --batch-all-objects` 的 13 731 个 blob / 762.6 MiB（含 `--all`/reflog 之外的对象；数字随提交增长，判据不变） |
 | 二进制跳过 | 679 个（首 8 KB 含 NUL，未做文本扫描） |
 | 归属索引 | `rev-list --objects --all --reflog <各 worktree HEAD>` + `git log --raw` 反向索引；detached 的 worktree HEAD 不在 refs 下，必须单独补 |
 | HEAD 可达性 | 逐个命中提交 `git merge-base --is-ancestor <commit> HEAD` |
 
-结果（2026-11-13，HEAD `81bef3bd`，26 个 worktree HEAD）：
+结果（2026-11-13，HEAD `c483222d`，27 个 worktree HEAD）：
 
 - **命中提交 0 个、命中路径 0 个**——可达历史干净；
 - 另有 **1 个不可达 blob**（`c20bd082d638…`，69 字节）命中 `github-pat-classic`，
@@ -94,6 +94,65 @@
 不可达对象（`git fsck --unreachable`：103 commit / 303 tree / 112 blob）里除上面
 那 1 个 blob 外也扫了，但归属只能给出「未知」；`D:\mbdsdr` 根目录**不是** git 仓库，
 所以 `output/`、`.tmp` 下工作树里命中的 4 处 BLOCK 没有历史可查（它们从未入库）。
+
+### 提交信息通道（commit message / annotated tag / notes，2026-11-13）
+
+blob 扫描有个结构性盲区：`git commit -m "ghp_…"` **不产生 blob**，消息写在 commit
+对象里；annotated tag 的 message、`git notes` 的正文同理。`--history` 现在同时扫
+这三类（同一组 7 条形状规则，只跑形状不跑熵）：
+
+| 对象 | 取法 | 计数单位 | 命中格式 |
+| --- | --- | --- | --- |
+| commit message | `git log --all --reflog <各 worktree HEAD> --format=%x1e%H%x00%B` | 提交条数 / 消息行数 | `HISTORY-MSG <提交号12>:<行> <规则>` |
+| annotated tag | `refs/tags` 里 `objecttype=tag`，`git cat-file tag <sha>` 取头部之后正文 | tag 个数 / 消息行数 | `HISTORY-MSG tag:<名称>:<行> <规则>` |
+| notes | `refs/notes/*` 逐个 `git notes list` + `cat-file -p` | note 条数 | `HISTORY-MSG note:<对象号12>:<行> <规则>` |
+
+轻量 tag 指向 commit、没有独立 message（正文就是被指向提交的消息，已在 commit
+message 里扫过），只计数不重复扫；行内 `pragma: allowlist secret` 同样生效。
+
+结果（同上 HEAD）：**commit message 3 460 条 / 43 597 行，annotated tag 0 个，
+notes 0 条，命中 0 条**。
+
+反证（临时仓库 `D:\mbdsdr\.tmp\msg-probe`，跑完已删除，未进主线）：
+
+| 步 | 动作 | 结果 |
+| --- | --- | --- |
+| 1 | 2 条干净提交 + 1 个干净 annotated tag | `提交信息命中：0 条` |
+| 2 | `git commit --allow-empty --no-verify -m "leak ghp_…"` | `HISTORY-MSG 7ae87ed07ecd:1 github-pat-classic` |
+| 3 | `git tag -a v9.9 -m "tag leak ghp_…"` | `HISTORY-MSG tag:v9.9:1 github-pat-classic` |
+| 4 | `git notes add -m "note leak ghp_…" HEAD` | `HISTORY-MSG note:7ae87ed07ecd:1 github-pat-classic` |
+| 5 | 删分支/tag/note + `reflog expire --expire=now --all` + `gc --prune=now` | 回到 `提交信息命中：0 条` |
+
+第 2 步用 `--no-verify` 是故意的：临时仓库要先证明「消息扫描看得见一条**真存在**的
+提交」，再单独证明写入闸能拦住新提交（见下）。探针提交只存在于临时仓库，主线
+`git log --oneline -3` 未受影响。
+
+边界：消息写进 commit/tag/note 对象后，删字面量**没用**——只能重写历史。正因如此，
+这条通道配了独立的写入闸。
+
+### 提交信息写入闸（`commit-msg`，2026-11-13）
+
+| 项 | 值 |
+| --- | --- |
+| 入口 | `scripts/hooks/commit-msg`（由 `scripts/install_git_hooks.py` 与 `secret_scan.py` 一起装到 common-dir 的 hooks 目录，旧工作树也能跑） |
+| 判据 | `python scripts/secret_scan.py --commit-msg <消息文件>`：同一组 7 条形状规则，只跑形状不跑熵，BLOCK>0 退出 1 |
+| 豁免 | 命中行内 `pragma: allowlist secret`（逐行；不做消息级/仓库级豁免） |
+| 绕过 | `git commit --no-verify` 会同时跳过 pre-commit 与 commit-msg，post-commit 记 bypass 日志 |
+| 反证 | `tests/test_secret_scan.py::test_commit_msg_hook_blocks_real_commit`：临时仓库装钩子后 `git commit -m "leak ghp_…"` 被拒且**不产生提交**，改干净消息后成功；`::test_commit_msg_mode_blocks_value_and_no_false_positive_on_prose` 钉住「只写『不要用 ghp_ 开头』不误报」 |
+
+误报评估（决定「接」的依据）：
+
+1. 规则要完整 token 形状（`gh[pousr]_` + 36 位、`AKIA` + 16 位等），正文里写「不要
+   用 ghp_ 开头」**不命中**——已由上面的用例钉住；
+2. 只有贴整串示例值才命中，出口是那一行的 pragma；
+3. 已知误报面：`git revert` 自动带回被回滚提交的原文、`--amend` 与 squash 会拼接
+   旧消息，旧消息里本就有凭据时会被拦——正确动作是改消息，不是 `--no-verify`；
+4. 成本：每次提交多一个本地 python 进程（无网络、不写仓库），与 pre-commit 的扫描
+   同量级；钩子缺失时按失败关闭（与 pre-commit 同一策略）。
+
+解除条件：`commit-msg` 因**说明性文字**拦了正常提交且 pragma 出口不适用时，先补
+反证用例再放宽判据；禁止改成「消息里出现 ghp_ 就放行」这类降级，也禁止把它做成
+默认关闭 / 可选安装的软闸。
 
 ### 已知良性登记（1 个 blob；2026-11-13 裁定 A：保留，不清理）
 

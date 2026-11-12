@@ -1,0 +1,82 @@
+#!/usr/bin/env python
+"""commit-msg 机械闸：提交信息里不得出现凭据形状。
+
+为什么单开一道：pre-commit 只看**暂存区内容**，看不见 ``git commit -m "ghp_…"``；
+消息一旦写进 commit 对象，想删就得重写历史（rebase/filter-repo + 所有克隆重拉）。
+``commit-msg`` 是 git 的标准钩子，在 commit 对象生成**之前**拿到消息文件，拦下
+即中止提交，是这条通道上成本最低的闸。
+
+判据复用 ``scripts/secret_scan.py --commit-msg`` 的 7 条形状规则（不另抄一份
+正则，单一真值源）。只跑形状、不跑熵：消息里全是 URL/哈希，熵告警只会有噪音。
+
+误报与出口（2026-11-13 评估）：
+  * 形状规则要求完整 token 形状（如 ``ghp_`` + 36 位），正文里写「不要用 ghp_
+    开头」**不会**命中；只有贴整串示例值才会。
+  * 说明性文字确实需要保留整串示例时，在**那一行**写 ``pragma: allowlist secret``
+    （与源码豁免同一纪律：逐行，不做消息级豁免）。
+  * 已知误报面：``git revert`` 自动带上被回滚提交的原文、``git commit --amend``
+    与 squash 会拼接旧消息——若旧消息里本就有凭据，这里会拦。此时正确动作是
+    改消息，不是 ``--no-verify``。
+  * ``git commit --no-verify`` 会同时跳过 pre-commit 和本钩子；post-commit 会把
+    无标记的提交记进 bypass 日志。
+
+安装：python scripts/install_git_hooks.py（本文件与 secret_scan.py 一起复制到
+       `git rev-parse --git-common-dir`/hooks，旧工作树也能跑）
+"""
+import os
+import subprocess
+import sys
+from pathlib import Path
+
+MANAGED = "MBDSDR-MANAGED-HOOK commit-msg"
+
+
+def _root():
+    proc = subprocess.run(
+        ["git", "rev-parse", "--show-toplevel"],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+    return Path(proc.stdout.strip()) if proc.returncode == 0 else Path.cwd()
+
+
+def _scanner(root):
+    """扫描器解析顺序：显式 override → hooks 目录里的安装副本 → 本树 scripts/。"""
+    candidates = [
+        os.environ.get("MBDSDR_SECRET_SCAN"),
+        str(Path(__file__).resolve().parent / "secret_scan.py"),
+        str(root / "scripts" / "secret_scan.py"),
+    ]
+    return next((Path(c) for c in candidates if c and Path(c).exists()), None)
+
+
+def main():
+    msg_file = sys.argv[1] if len(sys.argv) > 1 else ""
+    if not msg_file or not Path(msg_file).exists():
+        print("[commit-msg] 拒绝：git 未传可读的提交信息文件（按失败关闭）。")
+        return 1
+    root = _root()
+    scanner = _scanner(root)
+    if scanner is None:
+        print(
+            "[commit-msg] 拒绝：找不到凭据扫描器（试试 python scripts/install_git_hooks.py），"
+            "按失败关闭。"
+        )
+        return 1
+    sys.stdout.flush()
+    proc = subprocess.run(
+        [sys.executable, str(scanner), "--commit-msg", msg_file], cwd=str(root)
+    )
+    if proc.returncode != 0:
+        print("[commit-msg] 拒绝提交：提交信息命中凭据形状规则。")
+        print("[commit-msg] 报告只有「行号 + 规则名」，不含命中的值；删掉凭据后重新提交。")
+        print("[commit-msg] 说明性文字要保留整串示例时，在**那一行**写 `pragma: allowlist secret`。")
+        print("[commit-msg] 消息已进 commit 对象就只能重写历史，别用 --no-verify 绕过。")
+        return proc.returncode
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
