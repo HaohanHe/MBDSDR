@@ -38,8 +38,9 @@ from .error_catalog import exception_code, user_message
 from .tool_results import ToolResult
 from . import orbit
 from . import doppler_link
-from .sdr_backend import (SDRBackendManager, SDRStatus, format_sample_rate,
-                           DEFAULT_SAMPLE_RATE_HZ)
+from .sdr_backend import SDRBackendManager
+from .sdr_status import (SDRStatus, format_sample_rate,
+                         DEFAULT_SAMPLE_RATE_HZ)
 from .spectrum_processor import SpectrumProcessor
 from .dsp import front_end, demodulate, DCBlocker, IQCalibrator, compute_snr, estimate_bandwidth, wfm_broadcast_demod, rds_decode_from_wfm, audio_to_playback
 from .audio_out import AudioPlayer
