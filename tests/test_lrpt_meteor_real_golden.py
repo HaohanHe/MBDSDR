@@ -38,6 +38,7 @@ from __future__ import annotations
 import hashlib
 import os
 import sys
+import urllib.error
 import urllib.request
 
 import numpy as np
@@ -85,8 +86,11 @@ def _ensure_wav() -> str:
             return path
     try:
         urllib.request.urlretrieve(WAV_URL, path)
-    except Exception as exc:  # noqa: BLE001
-        pytest.skip(f"LRPT 真实样本不可用（离线？）: {exc}")
+    except (urllib.error.URLError, TimeoutError, ConnectionError) as exc:
+        # 只吞「下载这一外部动作」的传输失败（DNS/连接/超时/HTTP 4xx5xx）。
+        # 磁盘写失败、URL 拼错（ValueError）等是本仓/本机问题，必须让测试红。
+        pytest.skip(f"LRPT 真实样本不可用（离线？）: "
+                    f"{type(exc).__name__}: {exc}")
     h = hashlib.sha256()
     with open(path, "rb") as f:
         for chunk in iter(lambda: f.read(1 << 20), b""):
