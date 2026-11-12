@@ -57,7 +57,9 @@ def _parse_exclusions(specs: list[str], files: list[str]) -> list[dict]:
         match = re.fullmatch(r"\s*(\d+)\s*-\s*(\d+)\s*", rng or "")
         if not sep or not match:
             raise ValueError(f"--exclude-hunk 格式应为 <path>:<start-end>，收到 {spec!r}")
-        norm = path.replace("\\", "/").lstrip("./")
+        norm = path.replace("\\", "/")
+        if norm.startswith("./"):
+            norm = norm[2:]
         if norm not in files:
             raise ValueError(f"--exclude-hunk 的路径不在 --files 清单内：{norm}")
         start, end = int(match.group(1)), int(match.group(2))
@@ -348,7 +350,10 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--exclude-owner", default="", help="排除 hunk 的归属线（可留空）")
     args = ap.parse_args(argv)
 
-    files = [f.replace("\\", "/").lstrip("./") for f in args.files]
+    # 只剥掉真正的 "./" 前缀：lstrip("./") 会把点文件削成无点名字
+    # （.gitattributes → gitattributes），这类文件根本提交不了。
+    files = [f.replace("\\", "/") for f in args.files]
+    files = [f[2:] if f.startswith("./") else f for f in files]
     message = Path(args.message_file).read_bytes()
     try:
         exclusions = _parse_exclusions(args.exclude_hunk, files)
