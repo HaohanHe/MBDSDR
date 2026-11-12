@@ -2378,16 +2378,30 @@ unreachable commit 逐棵读也没有——它从未落地。而后续判断（�
 
 ```
 python scripts/file_claim.py claim   desktop/main_window.py --owner 操作逻辑线 [--ttl-min 10]
-python scripts/file_claim.py release desktop/main_window.py --owner 操作逻辑线
+python scripts/file_claim.py claim   desktop/main_window.py --owner 操作逻辑线 --token <凭据>   # 续租
+python scripts/file_claim.py claim   desktop/main_window.py --owner 操作逻辑线 --adopt-legacy  # 旧格式迁移
+python scripts/file_claim.py release desktop/main_window.py --owner 操作逻辑线 --token <凭据>
 python scripts/file_claim.py status  [desktop/main_window.py]
 ```
 
 - **claim 在第一次 Edit 之前**（不是"看完代码准备改"，是动手那一刻）。
+- **claim 成功时签发一次性凭据**：`--token <32 位十六进制>`。它只在 claim 成功时
+  打印这一次，占位文件里只存它的 sha256（`token_sha256`）。凭据丢了没有找回入口，
+  只能等 TTL 过期后重新 claim（会签发新凭据）或走 takeover。
+- **续租必须带凭据**：再次 `claim` 同一路径并带 `--token` 才刷新心跳。不带凭据时
+  即使 owner 名相同也会被拒绝——**同名不等于同一持有者**。
+- **release 必须带凭据**：`release --owner X --token <凭据>`，凭据的 sha256 与占位
+  文件里登记的一致才放行（`hmac.compare_digest`）。**同名不再能互相释放**：两条都
+  叫 `W81线` 的线各自持有不同凭据，A 用 B 的名字释放 B 的 claim 会失败。只有凭据
+  持有者能释放；互相解锁等于没有锁。
 - **release 在 `git commit` 成功之后**（commit 失败就还持有着，别提前放）。
-- 每次写该文件前可再 `claim` 一次续租（同 owner 直接成功，并刷新心跳）。
+- **旧格式 claim 迁移**：落地前写入的 claim 只有 owner 名、没有凭据，`status` 会显示
+  `id=legacy(名不可作身份)`。这种 claim 的 `claim`/`release` 都不按名字放行。原持有者
+  需显式执行 `claim <path> --owner <原 owner> --adopt-legacy` 迁移一次：打印
+  `CLAIM UPGRADED` 并签发新凭据，**这是唯一一次按 owner 名匹配**；之后续租/释放都要
+  带新凭据。不迁移就只能等 TTL 过期后重新 claim 或 takeover。
 - 超过 TTL 没续租视为过期，别人可夺取；夺取会打印
-  「原持有者 X 已超时 N，请确认它真的停了」。
-- `release` 只有原持有者能执行；别人 release 必失败（互相解锁等于没有锁）。
+  「原持有者 X 已超时 N，请确认它真的停了」，并给新持有者签发新凭据（旧凭据作废）。
 - 状态文件 `D:\mbdsdr\.locks\claims.json`，占位文件 `D:\mbdsdr\.locks\claims\*.claim`，
   与既有 `qt_test.lock` 同目录；不写 C 盘。
 - 互斥由操作系统裁决：占位文件 `O_CREAT|O_EXCL` 原子创建，续租/夺取/释放都在
