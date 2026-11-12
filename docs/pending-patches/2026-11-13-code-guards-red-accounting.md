@@ -58,6 +58,24 @@
 | `make_decode_fixtures.py --check` | 04:47 rc=1 → 04:5x 连跑两次 rc=0 | 该修（他线同日修绿，未复现） | 无需账 | 两次复跑均 `PASS`，不下结论为可复现红 |
 | `release_check.py --steps guards` | rc=1（仅因 `install_git_hooks`） | 同 `install_git_hooks` | 不重复计 | 汇总器，所辖 13 条已逐条登记 |
 
+## 4. 落库时的协调规矩（2026-11-13 派单方明确）
+
+`docs/code-guards.md` 是共享工作树，工作区里现在同时躺着**两段**待落库改动：
+
+1. 凭据线的「**熵告警分级**」章节（`## 熵告警分级（2026-11-13，降噪）` 及其 5 个子节，
+   含 `release_manifest.py` 从 B 档移到 A 档的表格行）；
+2. 本文件的第 1–3 节（`check_red_lifecycle` 行改写 + 新增 `check_red_accounting` 行 +
+   第 418–422 行现状句）。
+
+**谁先拿到 claim，就把两段一起提交**：先 `git diff docs/code-guards.md` 看全，
+确认「熵告警分级」章节与本文三处替换都在，再一笔提交；提交信息里分别写明
+「熵告警分级（凭据线）」与「无账红守卫登记（守卫账本线）」。**不许只提交自己那段、
+把别人那段留在工作区**——那会变成一笔「消息与内容不符」。
+
+> 附录表里 K24 那行是 05:0x 的快照。截至 05:4x，版本字面量 / tomli / 二进制凭据
+> 三类已修并分笔提交，逐项定性见
+> `docs/pending-patches/2026-11-13-k23-k24-layering-and-verdicts.md`。
+
 **合计**：非 0 守卫 9 条（汇总器同因不重复计）；已入账 1 条（K06）；新建 K 3 条
 （K22/K23/K24）；带期限豁免 2 条（均 2026-12）；已修/自愈 3 条（verify_claims、
 install_git_hooks、make_decode_fixtures）。另有 13 条守卫无法从当前仓库独立执行
