@@ -154,9 +154,9 @@ def _utc_local(when: float) -> tuple:
     """返回 (UTC 字符串, 本地带偏移 ISO 字符串)，统一工具输出的时刻显示口径。"""
     dt = datetime.fromtimestamp(float(when), tz=timezone.utc)
     try:
-        from mbdsdr_ai.time_basis import format_local
+        from mbdsdr_ai.time_format import format_local
     except ImportError:
-        from time_basis import format_local
+        from time_format import format_local
     return dt.strftime("%Y-%m-%d %H:%M:%SZ"), format_local(dt)
 
 
