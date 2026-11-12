@@ -34,6 +34,8 @@ from typing import List, Tuple, Dict, Any, Optional
 
 import numpy as np
 
+from .station import station_from_config
+
 # 课件/物理常数（统一 km-s 单位制）
 C_LIGHT_MS = 299792458.0          # m/s
 C_LIGHT_KMS = 299792.458          # km/s
@@ -1036,19 +1038,20 @@ def register_tool_registry(registry) -> None:
 
     def _latlon(args: Dict[str, Any]):
         """地面站坐标：优先用 args 显式传入；否则从 ~/.mbdsdr/config.json 读；
-        都没有就报错，绝不默认写死北京坐标。"""
+        都没有就报错，绝不默认写死北京坐标。配置坏了与没配置给不同提示。"""
         lat = args.get("rx_lat")
         lon = args.get("rx_lon")
+        fix = None
         if lat is None or lon is None:
-            try:
-                import json, os
-                with open(os.path.expanduser("~/.mbdsdr/config.json"), encoding="utf-8") as f:
-                    cfg = json.load(f)
-                lat = lat if lat is not None else cfg.get("ground_station_lat")
-                lon = lon if lon is not None else cfg.get("ground_station_lon")
-            except Exception:
-                pass
+            fix = station_from_config()
+            lat = lat if lat is not None else fix.lat
+            lon = lon if lon is not None else fix.lon
         if lat is None or lon is None:
+            if fix is not None and fix.error:
+                raise ValueError(
+                    f"地面站配置读取失败：{fix.error}。请修复 {fix.origin}，"
+                    "或传 rx_lat/rx_lon。"
+                )
             raise ValueError(
                 "未提供地面站坐标：请在设置里配置地面站，或传 rx_lat/rx_lon。"
             )
@@ -1116,20 +1119,17 @@ def register_tool_registry(registry) -> None:
     def _lro_track(args: Dict[str, Any]) -> ToolResult:
         hours = float(args.get("hours", 24.0))
         # 地面站坐标：优先用参数，否则从配置读取；都没有则报错
-        cfg_lat = cfg_lon = None
-        cfg_path = os.path.expanduser("~/.mbdsdr/config.json")
-        try:
-            if os.path.exists(cfg_path):
-                import json as _cfg_json
-                with open(cfg_path, "r", encoding="utf-8") as f:
-                    _cfg = _cfg_json.load(f)
-                cfg_lat = _cfg.get("ground_station_lat")
-                cfg_lon = _cfg.get("ground_station_lon")
-        except Exception:
-            pass
-        rx_lat = args.get("rx_lat", cfg_lat)
-        rx_lon = args.get("rx_lon", cfg_lon)
+        fix = station_from_config()
+        rx_lat = args.get("rx_lat", fix.lat)
+        rx_lon = args.get("rx_lon", fix.lon)
         if rx_lat is None or rx_lon is None:
+            if fix.error:
+                return ToolResult(
+                    success=False,
+                    content=f"地面站配置读取失败：{fix.error}。请修复 {fix.origin}，"
+                            "或在参数中传入 rx_lat/rx_lon。",
+                    error="station_config_unreadable",
+                )
             return ToolResult(
                 success=False,
                 content="未配置地面站坐标。请在参数中传入 rx_lat/rx_lon，"
