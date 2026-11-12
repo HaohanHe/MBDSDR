@@ -32,13 +32,12 @@ STATIONS = [{"freq_mhz": 98.0, "strength_db": 12.0, "stereo": True,
 
 @pytest.fixture(autouse=True)
 def presets(monkeypatch, tmp_path):
-    """预设文件指到临时目录，并重置模块级损坏状态。"""
+    """预设文件指到临时目录；用真实加载路径复位模块级状态。"""
     path = tmp_path / "fm_presets.json"
     monkeypatch.setattr(fm, "PRESETS_DIR", str(tmp_path))
     monkeypatch.setattr(fm, "PRESETS_FILE", str(path))
-    monkeypatch.setattr(fm, "_LAST_ERROR", None)
-    monkeypatch.setattr(fm, "_CORRUPT_BACKUP", None)
-    monkeypatch.setattr(fm, "_SAVE_BLOCKED", False)
+    # 文件不存在 → load_presets() 走公共复位分支，不直接改私有状态。
+    fm.load_presets()
     return path
 
 
@@ -70,11 +69,14 @@ def _legacy_refusal_result(stations):
 # ---------------------------------------------------------------------------
 # 1. 拒绝保存：不许说谎
 # ---------------------------------------------------------------------------
-def test_refused_save_reports_failure_without_saved_claim(presets):
+def test_refused_save_reports_failure_without_saved_claim(presets, monkeypatch):
     presets.write_bytes(CORRUPT)
-    fm.load_presets()                       # 损坏 → 备份 → 本次禁止写盘
-    fm._SAVE_BLOCKED = True
-    fm._LAST_ERROR = "FM 预设未保存：文件已损坏且备份失败"
+    fm.load_presets()                       # 第一次：真备份成功，状态回到干净
+    presets.write_bytes(CORRUPT)
+    # 第二次损坏且备份失败 → 走公共加载路径进入「拒写」状态。
+    monkeypatch.setattr(fm, "backup_corrupt_presets", lambda _p: None)
+    fm.load_presets()
+    assert fm.preset_state().save_blocked is True
 
     result = _fm_preset_tool(types.SimpleNamespace(), {"action": "save",
                                                        "stations": STATIONS})

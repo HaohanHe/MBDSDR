@@ -374,9 +374,27 @@ _CORRUPT_BACKUP: Optional[str] = None
 _SAVE_BLOCKED = False
 
 
+@dataclass(frozen=True)
+class PresetState:
+    """预设加载状态的只读快照（见 :func:`preset_state`）。"""
+    last_error: Optional[str]
+    corrupt_backup: Optional[str]
+    save_blocked: bool
+
+
+def preset_state() -> "PresetState":
+    """返回预设加载状态的只读快照。
+
+    界面与测试只读这一个入口，不再直接摸 ``_LAST_ERROR`` /
+    ``_CORRUPT_BACKUP`` / ``_SAVE_BLOCKED``；状态只能由
+    :func:`load_presets` / :func:`save_presets` 的真实路径改写。
+    """
+    return PresetState(_LAST_ERROR, _CORRUPT_BACKUP, _SAVE_BLOCKED)
+
+
 def presets_last_error() -> Optional[str]:
     """返回上一次预设读/写失败的人话原因（正常时为 None）。"""
-    return _LAST_ERROR
+    return preset_state().last_error
 
 
 def backup_corrupt_presets(path: str) -> Optional[str]:

@@ -28,13 +28,12 @@ EMPTY = {"stations": [], "last_scan": None, "updated_at": None}
 
 @pytest.fixture(autouse=True)
 def presets(monkeypatch, tmp_path):
-    """把预设文件指到临时目录，并重置模块级损坏状态。"""
+    """把预设文件指到临时目录；用真实加载路径复位模块级状态。"""
     path = tmp_path / "fm_presets.json"
     monkeypatch.setattr(fm, "PRESETS_DIR", str(tmp_path))
     monkeypatch.setattr(fm, "PRESETS_FILE", str(path))
-    monkeypatch.setattr(fm, "_LAST_ERROR", None)
-    monkeypatch.setattr(fm, "_CORRUPT_BACKUP", None)
-    monkeypatch.setattr(fm, "_SAVE_BLOCKED", False)
+    # 文件不存在 → load_presets() 走公共复位分支，不直接改私有状态。
+    fm.load_presets()
     return path
 
 
@@ -53,7 +52,7 @@ def _assert_backup_intact(presets):
     assert backups[0].read_bytes() == CORRUPT, "备份内容与原件不一致"
     assert list(presets.parent.glob(presets.name + ".corrupt-*.reason.txt")), \
         "备份旁没有成对的损坏理由"
-    assert "已备份" in (fm.presets_last_error() or "")
+    assert "已备份" in (fm.preset_state().last_error or "")
     return backups
 
 
