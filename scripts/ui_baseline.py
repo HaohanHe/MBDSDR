@@ -295,22 +295,6 @@ def diff_stats(cur, old):
     return max(diffs), sum(diffs) / len(diffs)
 
 
-def changed_pixel_ratio(cur: QImage, old: QImage, threshold: int = 8) -> float:
-    """RGB 任一通道差 > threshold 的像素占比（0~1）。"""
-    if cur.width() != old.width() or cur.height() != old.height():
-        raise BaselineUpdateRefused("像素统计要求尺寸一致")
-    total = cur.width() * cur.height()
-    changed = 0
-    for y in range(cur.height()):
-        for x in range(cur.width()):
-            a = QColor(cur.pixel(x, y))
-            b = QColor(old.pixel(x, y))
-            if max(abs(a.red() - b.red()), abs(a.green() - b.green()),
-                   abs(a.blue() - b.blue())) > threshold:
-                changed += 1
-    return changed / total if total else 0.0
-
-
 def _changed_regions(cur: QImage, old: QImage, threshold: int = 8):
     """尺寸不一致时把旧图缩到新图尺寸再统计；返回
     (变化像素占比, bbox, 变化行带)。行带用于定位刻度/标签带。"""
