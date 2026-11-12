@@ -1877,12 +1877,16 @@ def isolated_profile(tmp_path_factory):
         QSettings.setPath(QSettings.IniFormat, scope, str(home / "qsettings"))
 
     import layout_store as ls
-    ls.reset_layout_store_singleton()
+    # 收尾必须**还原这个对象本身**，不能 reset 成 None：跨用例隔离护栏
+    # （tests/test_app_global_state_isolation.py）在 import 期抓的是
+    # ``layout_store()`` 的**对象身份**，reset 会让它下次新建一个对象，
+    # 于是「谁先跑」决定护栏红绿（不是谁泄漏，是这里把会话基线弄丢了）。
+    previous_store = getattr(ls, "_default_store", None)  # noqa: SLF001
     ls._default_store = ls.LayoutStore(str(home / "layouts.json"))  # noqa: SLF001
 
     yield home
 
-    ls.reset_layout_store_singleton()
+    ls._default_store = previous_store  # noqa: SLF001
     QSettings.setDefaultFormat(old_format)
     mp.undo()
 
