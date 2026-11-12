@@ -36,6 +36,7 @@ import os
 import shlex
 import shutil
 import stat
+import subprocess
 import sys
 import tempfile
 import threading
@@ -74,17 +75,76 @@ _RESULT = {"exitstatus": 0}
 # 「过期判定」问题。可用 MBDSDR_TEST_LOCK=0 显式关闭（明确知道自己在做并发
 # 压测时），或用 MBDSDR_TEST_LOCK_TIMEOUT 调等待秒数。
 #
+# 锁路径必须**全仓唯一**（2026-11-13 体检修正）：链接工作树的 __file__ 在它
+# 自己的目录里，旧实现按「本文件上两级/.locks」解析，于是 worktree 得到
+# .tmp/.locks/qt_test.lock、主工作区得到 .locks/qt_test.lock——同名不同文件，
+# 两棵树各持一把锁同时跑（当晚全量体检就是这样，同时写同一份用户真实配置
+# 才有两条证据），互斥等于不存在。现在统一按 git common dir（所有工作树共享
+# 的那个 .git）反推锁目录，任何工作树都落到同一个文件。
+#
 # 门控（2026-11-13 再修正）：判据只看「这个用例会不会构造 QWidget /
 # QApplication」，不看「有没有 import PySide6」。旧判据「收集阶段 sys.modules
 # 里新增 PySide6」恒为真——conftest 自己拍 app 样式基线时就 import 了
 # QtWidgets——结果纯逻辑用例也被拖进队列。明细见下方「锁判据」注释。
 # ---------------------------------------------------------------------------
-def _qt_lock_path():
-    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    return os.environ.get(
-        "MBDSDR_TEST_LOCK_PATH",
-        os.path.join(os.path.dirname(root), ".locks", "qt_test.lock"),
+_LOCKS_DIR = {}
+
+
+def _git_common_root():
+    """所有工作树共享的仓库根；解析不出返回 None（非 git 目录 / 无 git）。"""
+    for path_format in (["--path-format=absolute"], []):
+        try:
+            proc = subprocess.run(
+                ["git", "rev-parse"] + path_format + ["--git-common-dir"],
+                cwd=_ROOT_DIR, stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL, timeout=5,
+            )
+        except (OSError, subprocess.SubprocessError):
+            return None
+        if proc.returncode != 0:
+            continue
+        out = proc.stdout.decode("utf-8", "replace").strip()
+        if not out:
+            continue
+        common = os.path.abspath(os.path.join(_ROOT_DIR, out))
+        if os.path.basename(common) == ".git":
+            return os.path.dirname(common)
+        return None          # bare / GIT_DIR 另置：不猜，交给调用处告警
+    return None
+
+
+def _shared_locks_dir():
+    """全仓共享的锁目录：所有工作树必须解析到同一处。
+
+    优先级：MBDSDR_LOCKS_DIR（测试/CI 显式指定）→ git common dir 反推 →
+    本工作树上一级的 ``.locks``，并在 stderr 明确告警「只在本工作树生效」。
+    目录沿用既有约定（仓库根的同级 ``.locks``，与 file_claim 台账同处），
+    只是「仓库根」必须取 common dir，不能取 ``__file__`` 所在工作树。
+    """
+    if "dir" in _LOCKS_DIR:
+        return _LOCKS_DIR["dir"]
+    env = os.environ.get("MBDSDR_LOCKS_DIR")
+    if env:
+        _LOCKS_DIR["dir"] = os.path.abspath(env)
+        return _LOCKS_DIR["dir"]
+    root = _git_common_root()
+    if root:
+        _LOCKS_DIR["dir"] = os.path.join(os.path.dirname(root), ".locks")
+        return _LOCKS_DIR["dir"]
+    fallback = os.path.join(os.path.dirname(_ROOT_DIR), ".locks")
+    _LOCKS_DIR["dir"] = fallback
+    sys.stderr.write(
+        "[mbdsdr-lock] 无法从 git common dir 解析共享锁目录（不是 git 仓库？），"
+        "回退到 %s：该锁只在本工作树内生效，与其他工作树不互斥。\n" % fallback
     )
+    return fallback
+
+
+def _qt_lock_path():
+    override = os.environ.get("MBDSDR_TEST_LOCK_PATH")
+    if override:
+        return override
+    return os.path.join(_shared_locks_dir(), "qt_test.lock")
 
 
 def _qt_owner_path(path):
