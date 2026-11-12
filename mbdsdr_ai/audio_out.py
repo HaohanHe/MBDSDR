@@ -39,6 +39,16 @@ except Exception:  # pragma: no cover - 取决于运行环境
     _SD_AVAILABLE = False
 
 
+def sd_available() -> bool:
+    """实时音频后端（sounddevice）是否可用的**唯一判定入口**。
+
+    生产代码一律经本函数读取；测试要伪造「有声卡 / 无声卡」时替换本函数
+    （``monkeypatch.setattr(audio_out, "sd_available", lambda: False)``），
+    不再改写模块私有名 ``_SD_AVAILABLE``。
+    """
+    return _SD_AVAILABLE
+
+
 def soft_limit(data, threshold: float = 0.9):
     """软限幅：阈值以下原样，之上按有理函数渐近压到 ±1 但**永不到达 1**。
 
@@ -105,7 +115,7 @@ class AudioPlayer:
         self.gain = float(gain)
 
         #: sounddevice 是否可用（False 时所有方法安全降级）
-        self.available = _SD_AVAILABLE
+        self.available = sd_available()
 
         #: 用户偏好的输出设备（sounddevice device 参数；None=系统默认）。
         #: 由设备面板选择注入，start() 时真传给 OutputStream。
