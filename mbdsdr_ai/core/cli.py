@@ -145,13 +145,12 @@ def run(argv: Optional[Sequence[str]] = None,
             return 2
 
         # ---- 参数下发 ----
-        def _apply(label: str, apply_fn, describe) -> bool:
-            """下发一项设置并如实报告结果。
+        def _report(label: str, ok, describe) -> bool:
+            """如实报告一项设置的结果。
 
-            后端返回 False 表示「拒绝了这个值」（越界/不支持），此时打印的是
-            请求值 + 失败原因，不是把请求值当成就绪状态播报一遍。
+            后端返回 False 表示「拒绝了这个值」（越界/不支持），此时打印原因
+            并非零退出；只有真正生效了才播报实际值。
             """
-            ok = apply_fn()
             if ok is False:
                 print(f"错误: {label}未生效：{ctrl.setter_failure_text(label)}",
                       file=sys.stderr)
@@ -160,8 +159,8 @@ def run(argv: Optional[Sequence[str]] = None,
             return True
 
         if args.freq is not None:
-            if not _apply("频率", lambda: ctrl.set_frequency(args.freq),
-                          lambda: f"{ctrl.get_frequency():.0f} Hz"):
+            ok = ctrl.set_frequency(args.freq)
+            if not _report("频率", ok, lambda: f"{ctrl.get_frequency():.0f} Hz"):
                 return 4
         if args.demod:
             ctrl.set_demod(args.demod)
@@ -170,12 +169,12 @@ def run(argv: Optional[Sequence[str]] = None,
             ctrl.set_gain(args.gain)
             print(f"增益 -> {args.gain} dB")
         if args.sample_rate is not None:
-            if not _apply("采样率", lambda: ctrl.set_sample_rate(args.sample_rate),
-                          lambda: f"{ctrl.get_sample_rate():.0f} Hz"):
+            ok = ctrl.set_sample_rate(args.sample_rate)
+            if not _report("采样率", ok, lambda: f"{ctrl.get_sample_rate():.0f} Hz"):
                 return 4
         if args.bandwidth is not None:
-            if not _apply("带宽", lambda: ctrl.set_bandwidth(args.bandwidth),
-                          lambda: f"{args.bandwidth:.0f} Hz"):
+            ok = ctrl.set_bandwidth(args.bandwidth)
+            if not _report("带宽", ok, lambda: f"{args.bandwidth:.0f} Hz"):
                 return 4
         if args.squelch is not None:
             ctrl.set_squelch(args.squelch)
