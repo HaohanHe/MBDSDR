@@ -410,6 +410,37 @@ class DesignTokens:
         base = self.THEME_COLORS.get(name, self.THEME_COLORS["default"])
         return dict(base)
 
+    def status_color(self, kind: str, bg: str = "", theme: str = "") -> str:
+        """状态色统一入口（status_warning / status_danger / status_success）。
+
+        业务代码只调这里，不直接读 ``COLORS["status_*"]``：
+        * 不传 ``bg``：取当前生效主题的 ``THEME_COLORS[...][key]``；主题没这个
+          键就回落全局 ``COLORS[key]``（旧主题/新增键时的兜底）。
+        * 传 ``bg``：用于不随主题变的异形表面（AI 对话面板是固定深色岛屿）。
+          浅色主题的压暗档放到深底上只有 3.2:1，所以在「主题值 + 全局值 +
+          其它主题的同名值」里取对该背景对比度最高的一个——候选全是设计过
+          的状态色，不新造颜色，也不需要调用点各写一遍 if。
+        """
+        key = kind if kind.startswith("status_") else f"status_{kind}"
+        if key not in self.COLORS:
+            raise KeyError(f"未知状态色 token: {key}")
+        fallback = self.COLORS[key]
+        if not theme:
+            try:
+                from themes import active_theme_name
+                theme = active_theme_name()
+            except Exception:
+                theme = ""
+        base = self.theme_colors(theme).get(key, fallback) if theme else fallback
+        if not bg:
+            return base
+        from themes import contrast_ratio
+        candidates = {base, fallback}
+        for palette in self.THEME_COLORS.values():
+            if key in palette:
+                candidates.add(palette[key])
+        return max(candidates, key=lambda color: contrast_ratio(color, bg))
+
     @staticmethod
     def _px_to_pt(px_str: str) -> float:
         """'39px' -> 29.25pt（QSS font-size 用 pt），并按界面字号倍率缩放。
