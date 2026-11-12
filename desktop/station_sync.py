@@ -25,19 +25,39 @@ GUI 手填只写前者，后者保持旧值，于是会出现「天空图按新�
 from __future__ import annotations
 
 import json
+import logging
 import os
 import shutil
 from typing import Any, Dict, Optional
 
 from mbdsdr_ai.config import ConfigStore
 
+logger = logging.getLogger("mbdsdr.station_sync")
+
 __all__ = [
     "GUI_LAT_KEY", "GUI_LON_KEY",
     "CFG_LAT_KEY", "CFG_LON_KEY", "CFG_ALT_KEY",
     "gui_config_path", "config_path",
     "read_gui_site", "gui_site_from", "read_config_site", "merge_sites",
-    "write_config_site", "clear_config_site",
+    "write_config_site", "clear_config_site", "last_error",
 ]
+
+#: 最近一次站址镜像写入的失败原因（None = 正常或未发生过）。
+#: 备份失败时绝不能静默：否则用户以为有 ``.bak`` 可找，出事时却找不到。
+_LAST_ERROR: Optional[str] = None
+
+
+def last_error() -> Optional[str]:
+    """返回最近一次站址镜像写入的失败原因（成功或未发生则 None）。"""
+    return _LAST_ERROR
+
+
+def _set_error(message: Optional[str]) -> None:
+    global _LAST_ERROR
+    _LAST_ERROR = message
+    if message:
+        logger.warning("%s", message)
+
 
 GUI_LAT_KEY = "observer_lat"
 GUI_LON_KEY = "observer_lon"
@@ -139,17 +159,22 @@ def write_config_site(lat: float, lon: float, alt_m: Optional[float] = 0.0,
     except (TypeError, ValueError):
         return False
 
-    def _mirror(data: Dict[str, Any]) -> None:
+    def _mirror(data: Dict[str, Any]) -> Optional[bool]:
         old = _site_from(data, CFG_LAT_KEY, CFG_LON_KEY)
         conflict = old is not None and (
             abs(old["lat"] - new_lat) > 1e-9 or abs(old["lon"] - new_lon) > 1e-9)
         if conflict:
+            backup = target + ".bak"
             try:
-                shutil.copy2(target, target + ".bak")
-            except OSError:
-                # 备份失败不阻断写入：本来就是在写"用户明确选的"位置，
-                # 但要让调用方能从返回值之外的日志看出没留证据。
-                pass
+                shutil.copy2(target, backup)
+            except OSError as exc:
+                # 备份失败 ≠ 没有备份：说「留了 .bak」而实际没有，比不备份
+                # 更坏——用户出事时会去找一个不存在的文件。此时继续写会覆盖
+                # 旧站址这唯一证据，所以必须留痕并放弃本次写入。
+                _set_error(
+                    f"站址镜像备份失败（{type(exc).__name__}: {exc}）："
+                    f"{target} → {backup}；本次未写入，避免覆盖唯一证据")
+                return False
         data[CFG_LAT_KEY] = new_lat
         data[CFG_LON_KEY] = new_lon
         if alt_m is not None:
@@ -157,11 +182,17 @@ def write_config_site(lat: float, lon: float, alt_m: Optional[float] = 0.0,
                 data[CFG_ALT_KEY] = float(alt_m)
             except (TypeError, ValueError):
                 pass
+        return True
 
     try:
-        return ConfigStore(target).update(_mirror)
-    except OSError:
+        ok = ConfigStore(target).update(_mirror)
+    except OSError as exc:
+        _set_error(
+            f"站址镜像写入失败（{type(exc).__name__}: {exc}）：{target}")
         return False
+    if ok:
+        _set_error(None)
+    return ok
 
 
 def clear_config_site(path: Optional[str] = None) -> bool:

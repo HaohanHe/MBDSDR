@@ -13,10 +13,20 @@ import sys  # noqa: E402
 sys.path.insert(0, os.path.join(_ROOT, "desktop"))
 
 import station_sync as ss  # noqa: E402
+from mbdsdr_ai.config import ConfigStore  # noqa: E402
 
 
 _STATION_KEYS = ("ground_station_lat", "ground_station_lon",
                   "ground_station_alt_m")
+
+
+@pytest.fixture(autouse=True)
+def _reset_last_error():
+    """模块级 last_error 不跨用例残留。"""
+    ss._set_error(None)
+    yield
+    ss._set_error(None)
+
 
 def _write(path, data):
     os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -148,3 +158,97 @@ def test_clear_removes_only_station_keys(tmp_path):
 
 def test_clear_on_missing_file_is_ok(tmp_path):
     assert ss.clear_config_site(str(tmp_path / "nope.json")) is True
+
+
+# ---------------------------------------------------------------------------
+# 冲突备份失败：必须留痕并阻断写入（禁止「以为有 .bak，其实没有」）
+# ---------------------------------------------------------------------------
+class _NoCopy:
+    """模拟备份失败（磁盘满 / 权限 / 目标被占）。"""
+
+    @staticmethod
+    def copy2(_src, _dst):
+        raise OSError("磁盘满，无法复制")
+
+
+def _assert_backup_failure_blocks(write_fn, cfg):
+    before = ss.read_config_site(cfg)
+    assert before == {"lat": 31.2, "lon": 121.5}
+    assert write_fn(45.0, 120.0, path=cfg) is False, "备份失败后仍然写了盘"
+    with open(cfg, encoding="utf-8") as f:
+        after = json.load(f)
+    assert after["ground_station_lat"] == 31.2, "旧站址这唯一证据被覆盖"
+    assert after["ground_station_lon"] == 121.5
+    assert not os.path.exists(cfg + ".bak"), "失败时不该留下半份假备份"
+    msg = ss.last_error() or ""
+    assert "备份失败" in msg, f"备份失败没有留痕：{msg!r}"
+    assert cfg in msg, f"错误说明没写清路径：{msg!r}"
+    assert cfg + ".bak" in msg, f"错误说明没写清备份目标：{msg!r}"
+
+
+def test_backup_failure_is_not_silent_and_blocks_write(tmp_path, monkeypatch):
+    cfg = str(tmp_path / "config.json")
+    _write(cfg, {"ground_station_lat": 31.2, "ground_station_lon": 121.5})
+    monkeypatch.setattr(ss, "shutil", _NoCopy)
+
+    _assert_backup_failure_blocks(ss.write_config_site, cfg)
+
+
+def test_backup_failure_logs_one_visible_line(tmp_path, monkeypatch, caplog):
+    cfg = str(tmp_path / "config.json")
+    _write(cfg, {"ground_station_lat": 31.2, "ground_station_lon": 121.5})
+    monkeypatch.setattr(ss, "shutil", _NoCopy)
+
+    with caplog.at_level("WARNING", logger="mbdsdr.station_sync"):
+        assert ss.write_config_site(45.0, 120.0, path=cfg) is False
+
+    hits = [r for r in caplog.records if r.name == "mbdsdr.station_sync"]
+    assert len(hits) == 1, f"应恰好一行日志，实际 {len(hits)} 行"
+    assert "备份失败" in hits[0].getMessage()
+    assert cfg in hits[0].getMessage()
+
+
+def test_successful_write_clears_last_error(tmp_path, monkeypatch):
+    cfg = str(tmp_path / "config.json")
+    _write(cfg, {"ground_station_lat": 31.2, "ground_station_lon": 121.5})
+    monkeypatch.setattr(ss, "shutil", _NoCopy)
+    assert ss.write_config_site(45.0, 120.0, path=cfg) is False
+    assert ss.last_error()
+
+    monkeypatch.undo()
+    assert ss.write_config_site(45.0, 120.0, path=cfg) is True
+    assert ss.last_error() is None, "恢复正常后旧的失败说明仍在"
+    assert os.path.exists(cfg + ".bak")
+
+
+# ---------------------------------------------------------------------------
+# 反证：把 `except OSError: pass` 放回去 → 同一组断言必须红
+# ---------------------------------------------------------------------------
+def _legacy_write_config_site(lat, lon, alt_m=0.0, path=None):
+    """旧实现：备份失败只 pass，然后照常覆盖写入。"""
+    target = path or ss.config_path()
+    new_lat, new_lon = float(lat), float(lon)
+
+    def _mirror(data):
+        old = ss._site_from(data, ss.CFG_LAT_KEY, ss.CFG_LON_KEY)
+        conflict = old is not None and (
+            abs(old["lat"] - new_lat) > 1e-9 or abs(old["lon"] - new_lon) > 1e-9)
+        if conflict:
+            try:
+                ss.shutil.copy2(target, target + ".bak")
+            except OSError:
+                pass
+        data[ss.CFG_LAT_KEY] = new_lat
+        data[ss.CFG_LON_KEY] = new_lon
+        data[ss.CFG_ALT_KEY] = float(alt_m)
+
+    return ConfigStore(target).update(_mirror)
+
+
+def test_legacy_silent_pass_turns_red(tmp_path, monkeypatch):
+    cfg = str(tmp_path / "config.json")
+    _write(cfg, {"ground_station_lat": 31.2, "ground_station_lon": 121.5})
+    monkeypatch.setattr(ss, "shutil", _NoCopy)
+
+    with pytest.raises(AssertionError):
+        _assert_backup_failure_blocks(_legacy_write_config_site, cfg)
