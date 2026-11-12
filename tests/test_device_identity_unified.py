@@ -61,13 +61,14 @@ class _OkProbe:
 @pytest.fixture(autouse=True)
 def _registry(tmp_path, monkeypatch):
     """占用登记指到临时文件，并清掉进程级 owner。"""
+    import mbdsdr_ai.device_owner as own
     import mbdsdr_ai.sdr_backend as sb
-    monkeypatch.setenv(sb.OWNER_REGISTRY_ENV, str(tmp_path / "device_owner.json"))
-    sb._OWNED_HERE.clear()
-    sb.set_process_owner("desktop")
+    monkeypatch.setenv(own.OWNER_REGISTRY_ENV, str(tmp_path / "device_owner.json"))
+    own._OWNED_HERE.clear()
+    own.set_process_owner("desktop")
     yield
-    sb._OWNED_HERE.clear()
-    sb.set_process_owner("desktop")
+    own._OWNED_HERE.clear()
+    own.set_process_owner("desktop")
 
 
 def _seed(path, device_id: str, pid: int, proc_start, owner: str = "desktop",
@@ -97,6 +98,7 @@ def _kill(child: subprocess.Popen) -> None:
 def test_identity_keys_are_the_same_string_in_every_system():
     """四套系统算出的**稳定键**必须是同一个字符串（否则互斥永远对不上）。"""
     from mbdsdr_ai import device_identity as di
+    from mbdsdr_ai import device_owner as own
     from mbdsdr_ai import sdr_backend as sb
 
     devices = [
@@ -166,11 +168,12 @@ def test_same_device_moved_port_three_answers(tmp_path):
     assert id_before.port_key != id_after.port_key       # 换了口
 
     # ① 占用：另一个活进程持有旧口上的同一台，换口后仍拒绝（不许双开）
+    import mbdsdr_ai.device_owner as own
     import mbdsdr_ai.sdr_backend as sb
     child = _spawn_child()
     try:
         _seed(tmp_path / "device_owner.json", id_before.key, child.pid,
-              sb._proc_start_time(child.pid), aliases=list(id_before.aliases))
+              own._proc_start_time(child.pid), aliases=list(id_before.aliases))
         backend = sb.build_backend_for_device(dict(after))
         assert backend is not None
         assert backend.hardware_owner_identity()[0] == id_before.key
@@ -179,7 +182,7 @@ def test_same_device_moved_port_three_answers(tmp_path):
         # 反证：若按端口算身份（旧 watchdog 的做法），同一个登记表会放行
         # 第二个进程——那才是真正的双开。端口键与序列号键必须不同。
         assert id_before.port_key != id_after.port_key
-        assert sb.claim_active_owner("ai", f"uri:{id_after.port_key or '?'}")[0] is True
+        assert own.claim_active_owner("ai", f"uri:{id_after.port_key or '?'}")[0] is True
     finally:
         _kill(child)
 

@@ -195,9 +195,9 @@ def test_panel_connect_identity_comes_from_request_not_combo(panel):
 # 判据已下移到 ``SDRBackend.connect()``；这里锁死「面板不再写登记」——
 # 若有人把 claim 加回面板，两层会在改一层时悄悄不一致。
 def test_panel_connect_does_not_claim_owner(panel, monkeypatch, tmp_path):
-    import mbdsdr_ai.sdr_backend as sb
-    monkeypatch.setenv(sb.OWNER_REGISTRY_ENV, str(tmp_path / "owner.json"))
-    sb._OWNED_HERE.clear()
+    import mbdsdr_ai.device_owner as own
+    monkeypatch.setenv(own.OWNER_REGISTRY_ENV, str(tmp_path / "owner.json"))
+    own._OWNED_HERE.clear()
 
     panel._apply_devices([_dev(0, serial="A-0001", label="RTL-A")])
     key = panel._identities[0].key
@@ -209,25 +209,25 @@ def test_panel_connect_does_not_claim_owner(panel, monkeypatch, tmp_path):
 
     panel._on_connect_clicked()
     assert panel._current_dev_key == key
-    assert sb.get_active_owner(key) is None, \
+    assert own.get_active_owner(key) is None, \
         "UI 入口不许再写占用登记（判据只在后端 connect）"
 
     panel.set_connected(False)
-    assert sb.get_active_owner(key) is None
-    sb._OWNED_HERE.clear()
+    assert own.get_active_owner(key) is None
+    own._OWNED_HERE.clear()
 
 
 def test_set_connected_true_does_not_claim_owner(panel, monkeypatch, tmp_path):
     """模块面板发起的连接同样由后端登记，面板不补登记。"""
-    import mbdsdr_ai.sdr_backend as sb
-    monkeypatch.setenv(sb.OWNER_REGISTRY_ENV, str(tmp_path / "owner.json"))
-    sb._OWNED_HERE.clear()
+    import mbdsdr_ai.device_owner as own
+    monkeypatch.setenv(own.OWNER_REGISTRY_ENV, str(tmp_path / "owner.json"))
+    own._OWNED_HERE.clear()
 
     a = _dev(0, serial="A-0001", label="RTL-A")
     panel.set_connected(True, device=a)
     assert panel._current_dev_key
-    assert sb.get_active_owner(panel._current_dev_key) is None
-    sb._OWNED_HERE.clear()
+    assert own.get_active_owner(panel._current_dev_key) is None
+    own._OWNED_HERE.clear()
 
 
 # ------------------------------------ 跨进程占用三态：未知不许显示成空闲
@@ -236,12 +236,12 @@ def test_set_connected_true_does_not_claim_owner(panel, monkeypatch, tmp_path):
 # 并给出「重试 / 查看诊断」入口。
 def test_owner_unreadable_registry_is_shown_as_unknown_not_free(
         panel, monkeypatch, tmp_path):
-    import mbdsdr_ai.sdr_backend as sb
+    import mbdsdr_ai.device_owner as own
 
     reg = tmp_path / "device_owner.json"
-    monkeypatch.setenv(sb.OWNER_REGISTRY_ENV, str(reg))
+    monkeypatch.setenv(own.OWNER_REGISTRY_ENV, str(reg))
     # 备份失败：坏文件留在原地，claim 必然失败——这正是「说空闲却连不上」的场景。
-    monkeypatch.setattr(sb, "_backup_corrupt_registry", lambda reason: None)
+    monkeypatch.setattr(own, "_backup_corrupt_registry", lambda reason: None)
     reg.write_bytes(b'{"owners": ')
 
     panel._apply_devices([_dev(0, serial="A-0001", label="RTL-A")])
@@ -263,9 +263,9 @@ def test_owner_unreadable_registry_is_shown_as_unknown_not_free(
 
 
 def test_owner_free_state_hides_row(panel, monkeypatch, tmp_path):
-    import mbdsdr_ai.sdr_backend as sb
+    import mbdsdr_ai.device_owner as own
 
-    monkeypatch.setenv(sb.OWNER_REGISTRY_ENV, str(tmp_path / "owner.json"))
+    monkeypatch.setenv(own.OWNER_REGISTRY_ENV, str(tmp_path / "owner.json"))
     panel._apply_devices([_dev(0, serial="A-0001", label="RTL-A")])
 
     assert panel.owner_state_label.text() == ""
@@ -275,13 +275,13 @@ def test_owner_free_state_hides_row(panel, monkeypatch, tmp_path):
 
 
 def test_owner_occupied_state_shows_pid(panel, monkeypatch, tmp_path):
-    import mbdsdr_ai.sdr_backend as sb
+    import mbdsdr_ai.device_owner as own
 
-    monkeypatch.setenv(sb.OWNER_REGISTRY_ENV, str(tmp_path / "owner.json"))
-    sb._OWNED_HERE.clear()
+    monkeypatch.setenv(own.OWNER_REGISTRY_ENV, str(tmp_path / "owner.json"))
+    own._OWNED_HERE.clear()
     panel._apply_devices([_dev(0, serial="A-0001", label="RTL-A")])
     key = panel._identities[0].key
-    assert sb.claim_active_owner("desktop", key)[0] is True
+    assert own.claim_active_owner("desktop", key)[0] is True
 
     panel._refresh_owner_state()
     text = panel.owner_state_label.text()
@@ -290,7 +290,7 @@ def test_owner_occupied_state_shows_pid(panel, monkeypatch, tmp_path):
     # 被占用时应给「重试」（对方可能已释放），但不把人引到诊断。
     assert panel.owner_retry_btn.isHidden() is False
     assert panel.owner_diag_btn.isHidden() is True
-    sb.release_active_owner("desktop", key)
+    own.release_active_owner("desktop", key)
 
 
 # ------------------------------------------------ 枚举失败 != 没插设备（W92 patch）

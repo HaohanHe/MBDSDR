@@ -23,18 +23,20 @@ import time
 
 import pytest
 
+import mbdsdr_ai.device_owner as own
+
 import mbdsdr_ai.sdr_backend as sb
 
 
 @pytest.fixture(autouse=True)
 def _registry(tmp_path, monkeypatch):
     path = tmp_path / "device_owner.json"
-    monkeypatch.setenv(sb.OWNER_REGISTRY_ENV, str(path))
-    sb._OWNED_HERE.clear()
-    sb.set_process_owner("desktop")      # 进程级 owner 不跨用例泄漏
+    monkeypatch.setenv(own.OWNER_REGISTRY_ENV, str(path))
+    own._OWNED_HERE.clear()
+    own.set_process_owner("desktop")      # 进程级 owner 不跨用例泄漏
     yield path
-    sb._OWNED_HERE.clear()
-    sb.set_process_owner("desktop")
+    own._OWNED_HERE.clear()
+    own.set_process_owner("desktop")
 
 
 def _seed(path, device_id: str, pid: int, proc_start, owner: str = "desktop",
@@ -64,76 +66,76 @@ def _kill(child: subprocess.Popen) -> None:
 
 # ------------------------------------------------------------ 登记表基本行为
 def test_claim_get_release_roundtrip():
-    ok, rec = sb.claim_active_owner("desktop", "rtl_0")
+    ok, rec = own.claim_active_owner("desktop", "rtl_0")
     assert ok is True
     assert rec["pid"] == os.getpid()
-    assert sb.get_active_owner("rtl_0")["owner"] == "desktop"
+    assert own.get_active_owner("rtl_0")["owner"] == "desktop"
 
-    assert sb.release_active_owner("desktop", "rtl_0") is True
-    assert sb.get_active_owner("rtl_0") is None
+    assert own.release_active_owner("desktop", "rtl_0") is True
+    assert own.get_active_owner("rtl_0") is None
 
 
 def test_release_does_not_drop_other_owners_record():
-    sb.claim_active_owner("desktop", "rtl_0")
-    assert sb.release_active_owner(sb.AI_OWNER, "rtl_0") is False
-    assert sb.get_active_owner("rtl_0")["owner"] == "desktop"
+    own.claim_active_owner("desktop", "rtl_0")
+    assert own.release_active_owner(own.AI_OWNER, "rtl_0") is False
+    assert own.get_active_owner("rtl_0")["owner"] == "desktop"
 
 
 def test_same_process_can_hand_over_ownership():
-    sb.claim_active_owner("desktop", "rtl_0")
-    ok, _ = sb.claim_active_owner(sb.AI_OWNER, "rtl_0")
+    own.claim_active_owner("desktop", "rtl_0")
+    ok, _ = own.claim_active_owner(own.AI_OWNER, "rtl_0")
     assert ok is True
-    assert sb.get_active_owner("rtl_0")["owner"] == sb.AI_OWNER
+    assert own.get_active_owner("rtl_0")["owner"] == own.AI_OWNER
 
 
 def test_exit_hook_releases_this_process_claims():
-    sb.claim_active_owner(sb.AI_OWNER, "rtl_0")
-    assert sb.get_active_owner("rtl_0") is not None
-    sb._release_owned_here_at_exit()
-    assert sb.get_active_owner("rtl_0") is None
+    own.claim_active_owner(own.AI_OWNER, "rtl_0")
+    assert own.get_active_owner("rtl_0") is not None
+    own._release_owned_here_at_exit()
+    assert own.get_active_owner("rtl_0") is None
 
 
 # ------------------------------------------------------- 判活：死进程必须让位
 def test_dead_holder_is_released_immediately_without_ttl(_registry):
     child = _spawn_child()
     try:
-        start = sb._proc_start_time(child.pid)
+        start = own._proc_start_time(child.pid)
         assert start is not None, "拿不到子进程启动时间，判活口径不成立"
         _seed(_registry, "rtl_0", child.pid, start)
     finally:
         _kill(child)
 
     t0 = time.monotonic()
-    ok, rec = sb.claim_active_owner(sb.AI_OWNER, "rtl_0")
+    ok, rec = own.claim_active_owner(own.AI_OWNER, "rtl_0")
     elapsed = time.monotonic() - t0
     assert ok is True, f"持有者已死仍被拒: {rec}"
     assert elapsed < 1.0, f"不应依赖 TTL 过期（实际等待 {elapsed:.2f}s）"
-    assert sb.get_active_owner("rtl_0")["owner"] == sb.AI_OWNER
+    assert own.get_active_owner("rtl_0")["owner"] == own.AI_OWNER
 
 
 def test_live_holder_is_refused_then_released_after_death(_registry):
     child = _spawn_child()
     try:
-        start = sb._proc_start_time(child.pid)
+        start = own._proc_start_time(child.pid)
         assert start is not None
         _seed(_registry, "rtl_0", child.pid, start)
 
-        ok, holder = sb.claim_active_owner(sb.AI_OWNER, "rtl_0")
+        ok, holder = own.claim_active_owner(own.AI_OWNER, "rtl_0")
         assert ok is False
-        text = sb.owner_conflict_text(holder)
+        text = own.owner_conflict_text(holder)
         assert "桌面端" in text and "释放" in text, text
         assert "pid" in text
     finally:
         _kill(child)
 
-    ok, _ = sb.claim_active_owner(sb.AI_OWNER, "rtl_0")
+    ok, _ = own.claim_active_owner(own.AI_OWNER, "rtl_0")
     assert ok is True, "持有者进程消失后必须立即能占用"
 
 
 def test_pid_reuse_is_not_mistaken_for_same_holder(_registry):
     # 同一个 pid（本进程）但启动时间对不上：典型 pid 复用，必须判失效
-    _seed(_registry, "rtl_0", os.getpid(), (sb._self_start() or 0.0) - 10_000.0)
-    ok, rec = sb.claim_active_owner(sb.AI_OWNER, "rtl_0")
+    _seed(_registry, "rtl_0", os.getpid(), (own._self_start() or 0.0) - 10_000.0)
+    ok, rec = own.claim_active_owner(own.AI_OWNER, "rtl_0")
     assert ok is True, f"pid 复用被误判为活持有者: {rec}"
 
 
@@ -146,8 +148,8 @@ def test_same_owner_name_from_another_process_is_still_refused(_registry):
     child = _spawn_child()
     try:
         _seed(_registry, "rtl_0", child.pid,
-              sb._proc_start_time(child.pid), owner="desktop")
-        ok, holder = sb.claim_active_owner("desktop", "rtl_0")
+              own._proc_start_time(child.pid), owner="desktop")
+        ok, holder = own.claim_active_owner("desktop", "rtl_0")
         assert ok is False, f"另一个桌面进程还活着却让位了: {holder}"
         assert holder["pid"] == child.pid
     finally:
@@ -161,21 +163,21 @@ def test_open_process_error_classification():
     ACCESS_DENIED(5) 是「没权限查」——低完整性进程查高完整性持有者就是这一种;
     其余失败码同样「查不到」。把这些判死会清掉活着的持有者记录。
     """
-    assert sb._open_process_failure_means_dead(87) is True
+    assert own._open_process_failure_means_dead(87) is True
     for err in (5, 0, None, 6, 87_000):
-        assert sb._open_process_failure_means_dead(err) is False, err
+        assert own._open_process_failure_means_dead(err) is False, err
 
 
 @pytest.mark.skipif(os.name != "nt", reason="错误码分流走的是 Windows 探活路径")
 def test_access_denied_keeps_live_holder_record(_registry, monkeypatch):
     """反证：没权限查（ACCESS_DENIED）时记录不被清，claim 必须被拒。"""
     _seed(_registry, "rtl_0", 424242, None)
-    monkeypatch.setattr(sb, "_open_process_for_query", lambda pid: (0, 5))
+    monkeypatch.setattr(own, "_open_process_for_query", lambda pid: (0, 5))
 
-    assert sb._proc_probe(424242) == (sb.PROC_UNKNOWN, None)
-    assert sb.release_stale_owners() == [], "没权限查不能当成持有者已死"
-    assert sb.get_active_owner("rtl_0") is not None
-    ok, holder = sb.claim_active_owner(sb.AI_OWNER, "rtl_0")
+    assert own._proc_probe(424242) == (own.PROC_UNKNOWN, None)
+    assert own.release_stale_owners() == [], "没权限查不能当成持有者已死"
+    assert own.get_active_owner("rtl_0") is not None
+    ok, holder = own.claim_active_owner(own.AI_OWNER, "rtl_0")
     assert ok is False, "查不到 ≠ 不存在：不能让第二个进程抢进同一根棒"
     assert holder["pid"] == 424242
 
@@ -184,10 +186,10 @@ def test_access_denied_keeps_live_holder_record(_registry, monkeypatch):
 def test_invalid_parameter_still_releases_dead_holder(_registry, monkeypatch):
     """反证的另一半（别为了安全把功能锁死）：确证进程不存在时仍必须让位。"""
     _seed(_registry, "rtl_0", 424242, None)
-    monkeypatch.setattr(sb, "_open_process_for_query", lambda pid: (0, 87))
+    monkeypatch.setattr(own, "_open_process_for_query", lambda pid: (0, 87))
 
-    assert sb._proc_probe(424242) == (sb.PROC_DEAD, None)
-    ok, _ = sb.claim_active_owner(sb.AI_OWNER, "rtl_0")
+    assert own._proc_probe(424242) == (own.PROC_DEAD, None)
+    ok, _ = own.claim_active_owner(own.AI_OWNER, "rtl_0")
     assert ok is True, "ERROR_INVALID_PARAMETER 已证明进程不存在，记录必须清掉"
 
 
@@ -198,8 +200,8 @@ def test_corrupt_registry_is_backed_up_with_reason(_registry):
 
     # 读不出来就是「不知道」，不能报成 None（= 设备空闲）。损坏原件已
     # 备份移走，下一次读会变成 free，但这一次不能替它宣布空闲。
-    state = sb.get_owner_state()
-    assert state.state == sb.OWNER_STATE_UNKNOWN
+    state = own.get_owner_state()
+    assert state.state == own.OWNER_STATE_UNKNOWN
     assert bool(state) is True
     backups = [p for p in _registry.parent.glob("device_owner.json.corrupt-*")
                if not p.name.endswith(".reason.txt")]
@@ -219,13 +221,13 @@ def test_non_object_registry_is_also_treated_as_corrupt(_registry):
     """JSON 合法但顶层不是对象，同样算损坏（不能静默当成「无占用」）。"""
     _registry.write_text("[]", encoding="utf-8")
 
-    assert sb.get_owner_state().state == sb.OWNER_STATE_UNKNOWN
+    assert own.get_owner_state().state == own.OWNER_STATE_UNKNOWN
     assert list(_registry.parent.glob("device_owner.json.corrupt-*"))
 
 
 def test_missing_registry_is_not_corruption(_registry):
     """首次运行/用户手动删除 ≠ 损坏：不留备份，否则每次首启都多一个文件。"""
-    assert sb.get_active_owner() is None
+    assert own.get_active_owner() is None
     assert not list(_registry.parent.glob("*.corrupt-*"))
 
 
@@ -234,7 +236,7 @@ def test_corrupt_registry_shows_up_in_evidence_scan(_registry):
     from mbdsdr_ai.corrupt_evidence import scan_corruption_evidence
 
     _registry.write_text("{not json", encoding="utf-8")
-    sb.get_active_owner()
+    own.get_active_owner()
 
     report = scan_corruption_evidence([str(_registry.parent)])
     assert report["total"] == 1, report
@@ -280,7 +282,7 @@ class _StubBackend(sb.SDRBackend):
 
 def _manager_with(*backends: _StubBackend) -> sb.SDRBackendManager:
     """不经 _discover（避免真开 USB），只装好切换所需的最小状态。"""
-    sb.set_process_owner(sb.AI_OWNER)
+    own.set_process_owner(own.AI_OWNER)
     mgr = sb.SDRBackendManager.__new__(sb.SDRBackendManager)
     mgr.backends = {b.device.device_id: b for b in backends}
     mgr.active_backend = None
@@ -301,17 +303,17 @@ def _manager_with(*backends: _StubBackend) -> sb.SDRBackendManager:
 def test_open_hardware_claims_and_disconnect_releases():
     mgr = _manager_with(_StubBackend("rtl_0"))
     assert mgr.connect("rtl_0") is True
-    owner = sb.get_active_owner("rtl_0")
-    assert owner and owner["owner"] == sb.AI_OWNER
+    owner = own.get_active_owner("rtl_0")
+    assert owner and owner["owner"] == own.AI_OWNER
 
     mgr.disconnect()
-    assert sb.get_active_owner("rtl_0") is None
+    assert own.get_active_owner("rtl_0") is None
 
 
 def test_connect_refused_when_live_holder_exists(_registry):
     child = _spawn_child()
     try:
-        start = sb._proc_start_time(child.pid)
+        start = own._proc_start_time(child.pid)
         assert start is not None
         _seed(_registry, "rtl_0", child.pid, start)
 
@@ -335,7 +337,7 @@ def test_connect_refused_when_live_holder_exists(_registry):
 def test_failed_connect_leaves_no_claim():
     mgr = _manager_with(_StubBackend("rtl_0", connect_ok=False))
     assert mgr.connect("rtl_0") is False
-    assert sb.get_active_owner("rtl_0") is None, "失败路径不能留占用记录"
+    assert own.get_active_owner("rtl_0") is None, "失败路径不能留占用记录"
 
 
 def test_switch_moves_claim_to_new_device():
@@ -343,11 +345,11 @@ def test_switch_moves_claim_to_new_device():
     mgr = _manager_with(a, b)
     assert mgr.connect("usb") is True
     assert mgr.switch_device("rtl_tcp") is True
-    assert sb.get_active_owner("usb") is None
-    owner = sb.get_active_owner("rtl_tcp")
-    assert owner and owner["owner"] == sb.AI_OWNER
+    assert own.get_active_owner("usb") is None
+    owner = own.get_active_owner("rtl_tcp")
+    assert owner and owner["owner"] == own.AI_OWNER
     mgr.disconnect()
-    assert sb.get_active_owner("rtl_tcp") is None
+    assert own.get_active_owner("rtl_tcp") is None
 
 
 # ------------------------------------------------ 别名键：设备被占用时读不到序列号
@@ -358,27 +360,27 @@ def test_switch_moves_claim_to_new_device():
 def test_alias_key_finds_live_holder(_registry):
     child = _spawn_child()
     try:
-        start = sb._proc_start_time(child.pid)
+        start = own._proc_start_time(child.pid)
         _seed(_registry, "rtlsdr|serial:777", child.pid, start,
               aliases=["rtlsdr|index:0"])
 
-        holder = sb.get_active_owner("rtlsdr|index:0")
+        holder = own.get_active_owner("rtlsdr|index:0")
         assert holder and holder["owner"] == "desktop", "别名键必须能查到持有者"
 
-        ok, holder = sb.claim_active_owner(sb.AI_OWNER, "rtlsdr|index:0")
+        ok, holder = own.claim_active_owner(own.AI_OWNER, "rtlsdr|index:0")
         assert ok is False, "只算出序号键的竞争者仍必须被拒"
-        assert "桌面端" in sb.owner_conflict_text(holder)
+        assert "桌面端" in own.owner_conflict_text(holder)
     finally:
         _kill(child)
 
 
 def test_release_by_alias_key(_registry):
     """持有者按序列号登记、释放时只拿到序号键（换进程后重算不出 serial）。"""
-    start = sb._self_start()
+    start = own._self_start()
     _seed(_registry, "rtlsdr|serial:777", os.getpid(), start,
           aliases=["rtlsdr|index:0"])
-    assert sb.release_active_owner("desktop", "rtlsdr|index:0") is True
-    assert sb.get_active_owner("rtlsdr|serial:777") is None
+    assert own.release_active_owner("desktop", "rtlsdr|index:0") is True
+    assert own.get_active_owner("rtlsdr|serial:777") is None
 
 
 def test_aliases_include_serial_index_and_label():
@@ -408,7 +410,7 @@ def _seed_many(path, records) -> None:
 
 def _live_record(child, device_id, aliases):
     return {"owner": "desktop", "pid": child.pid,
-            "proc_start": sb._proc_start_time(child.pid),
+            "proc_start": own._proc_start_time(child.pid),
             "device_id": device_id, "aliases": list(aliases),
             "claimed_at": time.time()}
 
@@ -425,9 +427,9 @@ def test_ambiguous_alias_refuses_instead_of_guessing(_registry):
             ("rtlsdr|serial:AAA", _live_record(child, "rtlsdr|serial:AAA", aliases)),
             ("rtlsdr|serial:BBB", _live_record(child, "rtlsdr|serial:BBB", aliases)),
         ])
-        ok, holder = sb.claim_active_owner(sb.AI_OWNER, "rtlsdr|index:0")
+        ok, holder = own.claim_active_owner(own.AI_OWNER, "rtlsdr|index:0")
         assert ok is False
-        assert isinstance(holder, sb.AmbiguousOwners)
+        assert isinstance(holder, own.AmbiguousOwners)
         assert len(holder.candidates) == 2
         # 它不是一条占用记录：当 holder 用必须当场炸，而不是显示假的
         # 「owner 空、pid 0」。类型上就堵住，不靠文档提醒。
@@ -437,7 +439,7 @@ def test_ambiguous_alias_refuses_instead_of_guessing(_registry):
         with pytest.raises((AttributeError, TypeError)):
             holder["owner"]
 
-        text = sb.owner_conflict_text(holder)
+        text = own.owner_conflict_text(holder)
         assert "无法唯一确定设备" in text
         # 正文不嵌登记键：键是任意字符串（Pluto 的 ``uri:usb:...``、序列号里
         # 可能带 ``timeout``），撞上桌面分类表的关键词会被改写成相反的补救。
@@ -448,12 +450,12 @@ def test_ambiguous_alias_refuses_instead_of_guessing(_registry):
         assert "释放其中一台" in text and "拔掉另一根" in text
 
         # 读侧同样不猜：返回同一类标记（真值），调用方一律按被占用处理。
-        seen = sb.get_active_owner("rtlsdr|index:0")
-        assert isinstance(seen, sb.AmbiguousOwners)
+        seen = own.get_active_owner("rtlsdr|index:0")
+        assert isinstance(seen, own.AmbiguousOwners)
         assert bool(seen) is True
 
         # 别名有歧义时也不许释放任何一条（避免放错人）。
-        assert sb.release_active_owner("desktop", "rtlsdr|index:0") is False
+        assert own.release_active_owner("desktop", "rtlsdr|index:0") is False
     finally:
         _kill(child)
 
@@ -470,16 +472,16 @@ def test_serial_identity_survives_usb_port_change(_registry):
         assert "rtlsdr|bus:1|port:6" in sb.device_identity_aliases(moved)
 
         _seed(_registry, "rtlsdr|serial:777", child.pid,
-              sb._proc_start_time(child.pid),
+              own._proc_start_time(child.pid),
               aliases=sb.device_identity_aliases(old)[1:])
 
         # serial 可得：只按主键认，换口后仍命中原记录。
-        holder = sb.get_active_owner("rtlsdr|serial:777",
+        holder = own.get_active_owner("rtlsdr|serial:777",
                                      allow_alias_match=False)
         assert holder and holder["owner"] == "desktop"
 
-        ok, holder = sb.claim_active_owner(
-            sb.AI_OWNER, "rtlsdr|serial:777",
+        ok, holder = own.claim_active_owner(
+            own.AI_OWNER, "rtlsdr|serial:777",
             aliases=sb.device_identity_aliases(moved),
             allow_alias_match=False)
         assert ok is False, "换 USB 口不能把同一台设备变成第二台（否则会双开）"
@@ -500,14 +502,14 @@ def test_stable_identity_does_not_fall_back_to_aliases(_registry):
         # 故意让旧记录的别名里出现另一个 stable 键（登记内容异常/旧版本遗留
         # 都可能是这种形状）：stable 查询若回落去翻别名，就会误拦这台设备。
         _seed(_registry, "rtlsdr|serial:777", child.pid,
-              sb._proc_start_time(child.pid),
+              own._proc_start_time(child.pid),
               aliases=["rtlsdr|serial:999", "rtlsdr|index:0"])
 
         # 对照：默认（允许别名回落）确实会撞上——说明下面那条不是空过。
-        assert sb.get_active_owner("rtlsdr|serial:999")["owner"] == "desktop"
+        assert own.get_active_owner("rtlsdr|serial:999")["owner"] == "desktop"
 
-        ok, holder = sb.claim_active_owner(
-            sb.AI_OWNER, "rtlsdr|serial:999", allow_alias_match=False)
+        ok, holder = own.claim_active_owner(
+            own.AI_OWNER, "rtlsdr|serial:999", allow_alias_match=False)
         assert ok is True, "serial 可得时不该靠别名去撞别人的记录"
         assert holder.get("device_id") == "rtlsdr|serial:999"
     finally:
@@ -522,9 +524,9 @@ def test_corrupt_registry_backup_failure_refuses_claim(_registry, monkeypatch):
     """反证：备份失败 → claim 直接失败，登记文件逐字节不变。"""
     bad = b'{"owners": '
     _registry.write_bytes(bad)
-    monkeypatch.setattr(sb, "_backup_corrupt_registry", lambda reason: None)
+    monkeypatch.setattr(own, "_backup_corrupt_registry", lambda reason: None)
 
-    ok, rec = sb.claim_active_owner(sb.AI_OWNER, "rtl_0")
+    ok, rec = own.claim_active_owner(own.AI_OWNER, "rtl_0")
 
     assert ok is False, "不可信登记不能写回成「只有我」的正常表"
     assert "拒绝写入" in rec["reason"]
@@ -536,9 +538,9 @@ def test_non_object_registry_backup_failure_refuses_claim(_registry,
     """结构损坏（顶层不是对象）与 JSON 损坏同等对待。"""
     bad = b'[1, 2, 3]'
     _registry.write_bytes(bad)
-    monkeypatch.setattr(sb, "_backup_corrupt_registry", lambda reason: None)
+    monkeypatch.setattr(own, "_backup_corrupt_registry", lambda reason: None)
 
-    ok, rec = sb.claim_active_owner(sb.AI_OWNER, "rtl_0")
+    ok, rec = own.claim_active_owner(own.AI_OWNER, "rtl_0")
 
     assert ok is False
     assert "结构非法" in rec["reason"]
@@ -550,7 +552,7 @@ def test_corrupt_registry_backup_success_preserves_evidence(_registry):
     bad = b'{"owners": '
     _registry.write_bytes(bad)
 
-    ok, _rec = sb.claim_active_owner(sb.AI_OWNER, "rtl_0")
+    ok, _rec = own.claim_active_owner(own.AI_OWNER, "rtl_0")
 
     assert ok is True
     backups = [p for p in _registry.parent.glob("device_owner.json.corrupt-*")
@@ -566,14 +568,14 @@ def test_corrupt_registry_backup_success_preserves_evidence(_registry):
 def test_untrusted_registry_is_not_permanently_locked(_registry, monkeypatch):
     """权衡验证：备份失败只锁「本次/当前坏文件」，不会永久锁死设备。"""
     _registry.write_bytes(b'{"owners": ')
-    monkeypatch.setattr(sb, "_backup_corrupt_registry", lambda reason: None)
-    ok, _ = sb.claim_active_owner(sb.AI_OWNER, "rtl_0")
+    monkeypatch.setattr(own, "_backup_corrupt_registry", lambda reason: None)
+    ok, _ = own.claim_active_owner(own.AI_OWNER, "rtl_0")
     assert ok is False
 
     _registry.unlink()                    # 用户手动移除坏文件
-    ok2, rec = sb.claim_active_owner(sb.AI_OWNER, "rtl_0")
+    ok2, rec = own.claim_active_owner(own.AI_OWNER, "rtl_0")
     assert ok2 is True, "坏文件被处理后必须能恢复 claim，不能永久锁死"
-    assert rec.get("owner") == sb.AI_OWNER
+    assert rec.get("owner") == own.AI_OWNER
 
 
 def test_untrusted_registry_blocks_release_and_stale_cleanup(_registry,
@@ -581,10 +583,10 @@ def test_untrusted_registry_blocks_release_and_stale_cleanup(_registry,
     """释放/清失效也要写回：同样拒绝，避免写出误导性的空表。"""
     bad = b'{"owners": '
     _registry.write_bytes(bad)
-    monkeypatch.setattr(sb, "_backup_corrupt_registry", lambda reason: None)
+    monkeypatch.setattr(own, "_backup_corrupt_registry", lambda reason: None)
 
-    assert sb.release_active_owner(sb.AI_OWNER, "rtl_0") is False
-    assert sb.release_stale_owners() == []
+    assert own.release_active_owner(own.AI_OWNER, "rtl_0") is False
+    assert own.release_stale_owners() == []
     assert _registry.read_bytes() == bad
 
 
@@ -595,42 +597,42 @@ def test_get_active_owner_degrades_without_raising(_registry, monkeypatch):
     None，界面据此显示「设备空闲」，用户点连接才被拒，界面在说假话。
     """
     _registry.write_bytes(b'{ broken')
-    monkeypatch.setattr(sb, "_backup_corrupt_registry", lambda reason: None)
+    monkeypatch.setattr(own, "_backup_corrupt_registry", lambda reason: None)
 
-    state = sb.get_active_owner("rtl_0")
-    assert isinstance(state, sb.OwnerState), "「不知道」不能被压成 None"
-    assert state.state == sb.OWNER_STATE_UNKNOWN
-    assert "无法读取设备占用登记" in sb.owner_state_text(state)
-    assert "空闲" not in sb.owner_state_text(state)
+    state = own.get_active_owner("rtl_0")
+    assert isinstance(state, own.OwnerState), "「不知道」不能被压成 None"
+    assert state.state == own.OWNER_STATE_UNKNOWN
+    assert "无法读取设备占用登记" in own.owner_state_text(state)
+    assert "空闲" not in own.owner_state_text(state)
 
 
 def test_owner_state_three_values(_registry, monkeypatch):
     """free / owned(pid) / unknown 三态各走各的分支。"""
-    free = sb.get_owner_state("rtl_0")
-    assert free.state == sb.OWNER_STATE_FREE
+    free = own.get_owner_state("rtl_0")
+    assert free.state == own.OWNER_STATE_FREE
     assert bool(free) is False
-    assert sb.get_active_owner("rtl_0") is None
+    assert own.get_active_owner("rtl_0") is None
 
-    assert sb.claim_active_owner("desktop", "rtl_0")[0] is True
-    owned = sb.get_owner_state("rtl_0")
-    assert owned.state == sb.OWNER_STATE_OWNED
+    assert own.claim_active_owner("desktop", "rtl_0")[0] is True
+    owned = own.get_owner_state("rtl_0")
+    assert owned.state == own.OWNER_STATE_OWNED
     assert bool(owned) is True
     assert owned.record["pid"] == os.getpid()
-    assert "pid" in sb.owner_state_text(owned)
+    assert "pid" in own.owner_state_text(owned)
 
     _registry.write_bytes(b'{"owners": ')
     # 备份失败：坏文件留在原地，claim 会失败，所以状态必须是持久 unknown。
-    monkeypatch.setattr(sb, "_backup_corrupt_registry", lambda reason: None)
-    unknown = sb.get_owner_state("rtl_0")
-    assert unknown.state == sb.OWNER_STATE_UNKNOWN
+    monkeypatch.setattr(own, "_backup_corrupt_registry", lambda reason: None)
+    unknown = own.get_owner_state("rtl_0")
+    assert unknown.state == own.OWNER_STATE_UNKNOWN
     assert unknown.reason and "拒绝写回" in unknown.reason
 
 
 def test_unknown_state_has_no_holder_get(_registry, monkeypatch):
     """unknown 不能长得像一条 holder：否则会显示成「owner 空、pid 0」。"""
     _registry.write_bytes(b'{ broken')
-    monkeypatch.setattr(sb, "_backup_corrupt_registry", lambda reason: None)
+    monkeypatch.setattr(own, "_backup_corrupt_registry", lambda reason: None)
 
-    state = sb.get_active_owner("rtl_0")
+    state = own.get_active_owner("rtl_0")
     assert not hasattr(state, "get")
     assert not hasattr(state, "__getitem__")

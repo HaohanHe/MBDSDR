@@ -29,18 +29,19 @@ sys.path.insert(0, _ROOT)
 sys.path.insert(0, os.path.join(_ROOT, "desktop"))
 
 import error_remedy  # noqa: E402
+import mbdsdr_ai.device_owner as own
 import mbdsdr_ai.sdr_backend as sb  # noqa: E402
 
 
 @pytest.fixture(autouse=True)
 def _registry(tmp_path, monkeypatch):
     path = tmp_path / "device_owner.json"
-    monkeypatch.setenv(sb.OWNER_REGISTRY_ENV, str(path))
-    sb._OWNED_HERE.clear()
-    sb.set_process_owner("desktop")
+    monkeypatch.setenv(own.OWNER_REGISTRY_ENV, str(path))
+    own._OWNED_HERE.clear()
+    own.set_process_owner("desktop")
     yield path
-    sb._OWNED_HERE.clear()
-    sb.set_process_owner("desktop")
+    own._OWNED_HERE.clear()
+    own.set_process_owner("desktop")
 
 
 def _seed(path, device_id: str, pid: int, proc_start, owner: str,
@@ -74,7 +75,7 @@ def test_ai_owned_device_is_refused_before_open(_registry, monkeypatch):
         # AI 侧按序列号登记（它 open 之前读得到），别名里带枚举序号——
         # 桌面端此刻读不到序列号，只能按 rtlsdr|index:0 去问。
         _seed(_registry, "rtlsdr|serial:777", child.pid,
-              sb._proc_start_time(child.pid), owner=sb.AI_OWNER,
+              own._proc_start_time(child.pid), owner=own.AI_OWNER,
               aliases=["rtlsdr|index:0"])
 
         setup_calls = []
@@ -130,7 +131,7 @@ def _assert_conflict_text(err: str, pid: int) -> None:
 def test_device_owned_by_this_process_is_allowed(_registry):
     """自己登记的占用不算冲突：同 pid 再 claim 天然覆盖，直接开硬件。"""
     _seed(_registry, "rtlsdr|serial:777", os.getpid(),
-          sb._proc_start_time(os.getpid()), owner=sb.process_owner(),
+          own._proc_start_time(os.getpid()), owner=own.process_owner(),
           aliases=["rtlsdr|index:0"])
 
     be = _FakeHardware("rtlsdr|index:0")
@@ -154,7 +155,7 @@ def test_unreadable_registry_refuses_as_unknown_not_busy(_registry,
     本用例立刻红（``connect() True``、``opened == 1``）。
     """
     _registry.write_bytes(b'{"owners": ')
-    monkeypatch.setattr(sb, "_backup_corrupt_registry", lambda reason: None)
+    monkeypatch.setattr(own, "_backup_corrupt_registry", lambda reason: None)
 
     be = _FakeHardware("rtlsdr|index:0")
     assert be.connect() is False, "登记不可读时必须 fail-closed"
@@ -176,24 +177,24 @@ def test_ambiguous_alias_message_survives_desktop_classification(_registry):
     try:
         aliases = ["rtlsdr|index:0"]
         _seed(_registry, "rtlsdr|serial:AAA", child.pid,
-              sb._proc_start_time(child.pid), owner="desktop", aliases=aliases)
+              own._proc_start_time(child.pid), owner="desktop", aliases=aliases)
         # 第二条：同一组别名 → 歧义
         path = _registry
         data = json.loads(path.read_text(encoding="utf-8"))
         data["owners"]["rtlsdr|serial:BBB"] = {
             "owner": "desktop", "pid": child.pid,
-            "proc_start": sb._proc_start_time(child.pid),
+            "proc_start": own._proc_start_time(child.pid),
             "device_id": "rtlsdr|serial:BBB", "claimed_at": time.time(),
             "aliases": list(aliases),
         }
         path.write_text(json.dumps(data), encoding="utf-8")
 
-        ok, holder = sb.claim_active_owner(
-            sb.process_owner(), "rtlsdr|index:0", aliases=aliases)
+        ok, holder = own.claim_active_owner(
+            own.process_owner(), "rtlsdr|index:0", aliases=aliases)
         assert ok is False
-        assert isinstance(holder, sb.AmbiguousOwners), holder
+        assert isinstance(holder, own.AmbiguousOwners), holder
 
-        msg = sb.owner_conflict_text(holder)
+        msg = own.owner_conflict_text(holder)
         assert "无法唯一确定设备" in msg, msg
         # 正文不嵌登记键：键是任意字符串，撞上分类关键词会被改写成相反的补救。
         assert "AAA" not in msg and "BBB" not in msg, msg
@@ -257,10 +258,10 @@ def test_all_entry_paths_refuse_before_open(_registry, monkeypatch):
     """
     child = _spawn_child()
     try:
-        start = sb._proc_start_time(child.pid)
+        start = own._proc_start_time(child.pid)
         assert start is not None
         _seed(_registry, "hackrf|serial:HACKRF-1", child.pid, start,
-              owner=sb.AI_OWNER)
+              owner=own.AI_OWNER)
 
         opened = []
         dev = _fake_hackrf(monkeypatch, opened)
@@ -289,8 +290,8 @@ def test_hackrf_refuses_before_libhackrf(_registry, monkeypatch):
     """HackRF：假后端已验（判据生效、不构造 libhackrf 层）。真机未验。"""
     child = _spawn_child()
     try:
-        start = sb._proc_start_time(child.pid)
-        _seed(_registry, "hackrf|index:0", child.pid, start, owner=sb.AI_OWNER)
+        start = own._proc_start_time(child.pid)
+        _seed(_registry, "hackrf|index:0", child.pid, start, owner=own.AI_OWNER)
 
         opened = []
         _fake_hackrf(monkeypatch, opened)
@@ -317,8 +318,8 @@ def test_usrp_refuses_before_uhd(_registry, monkeypatch):
 
     child = _spawn_child()
     try:
-        start = sb._proc_start_time(child.pid)
-        _seed(_registry, "usrp|label:auto", child.pid, start, owner=sb.AI_OWNER)
+        start = own._proc_start_time(child.pid)
+        _seed(_registry, "usrp|label:auto", child.pid, start, owner=own.AI_OWNER)
 
         backend = sb.USRPBackend()
         assert backend.connect() is False
@@ -342,8 +343,8 @@ def test_soapy_refuses_before_device_open(_registry, monkeypatch):
 
     child = _spawn_child()
     try:
-        start = sb._proc_start_time(child.pid)
-        _seed(_registry, "rtlsdr|serial:S1", child.pid, start, owner=sb.AI_OWNER)
+        start = own._proc_start_time(child.pid)
+        _seed(_registry, "rtlsdr|serial:S1", child.pid, start, owner=own.AI_OWNER)
 
         backend = sb.SoapySDRBackend(
             device_args={"driver": "rtlsdr", "serial": "S1"},
@@ -382,8 +383,8 @@ def test_plutosdr_refuses_before_iio_open(_registry, monkeypatch):
 
     child = _spawn_child()
     try:
-        start = sb._proc_start_time(child.pid)
-        _seed(_registry, "uri:usb:1.2.5", child.pid, start, owner=sb.AI_OWNER)
+        start = own._proc_start_time(child.pid)
+        _seed(_registry, "uri:usb:1.2.5", child.pid, start, owner=own.AI_OWNER)
 
         backend = sb.build_backend_for_device({
             "driver": "plutosdr", "uri": "usb:1.2.5", "label": "PlutoSDR",
@@ -407,8 +408,8 @@ def test_plutosdr_network_uri_does_not_claim(_registry, monkeypatch):
 
     child = _spawn_child()
     try:
-        start = sb._proc_start_time(child.pid)
-        _seed(_registry, "uri:ip:192.168.2.1", child.pid, start, owner=sb.AI_OWNER)
+        start = own._proc_start_time(child.pid)
+        _seed(_registry, "uri:ip:192.168.2.1", child.pid, start, owner=own.AI_OWNER)
 
         backend = sb.PlutoSDRBackend(uri="ip:192.168.2.1")
         assert backend.hardware_owner_identity() is None
@@ -433,8 +434,8 @@ def test_bladerf_refuses_before_lib_load(_registry, monkeypatch):
 
     child = _spawn_child()
     try:
-        start = sb._proc_start_time(child.pid)
-        _seed(_registry, "bladerf|label:auto", child.pid, start, owner=sb.AI_OWNER)
+        start = own._proc_start_time(child.pid)
+        _seed(_registry, "bladerf|label:auto", child.pid, start, owner=own.AI_OWNER)
 
         be = bp.BladeRFBackend()
         assert be.connect() is False
@@ -443,7 +444,7 @@ def test_bladerf_refuses_before_lib_load(_registry, monkeypatch):
         # 桌面端失败提示读的就是这条通道；没有它冲突文案会被泛化成别的原因。
         assert be.get_status().error == be.last_error
         # 拒绝时不得把占用写到自己名下（登记里仍应是那条 AI 记录）。
-        holder = sb.get_active_owner("bladerf|label:auto")
+        holder = own.get_active_owner("bladerf|label:auto")
         assert holder is not None and holder["pid"] == child.pid, holder
     finally:
         _kill(child)
@@ -465,10 +466,10 @@ def test_bladerf_claim_held_until_disconnect(_registry, monkeypatch):
 
     be = bp.BladeRFBackend()
     assert be.connect() is True
-    holder = sb.get_active_owner("bladerf|label:auto")
+    holder = own.get_active_owner("bladerf|label:auto")
     assert holder is not None and holder["pid"] == os.getpid(), holder
     be.disconnect()
-    assert sb.get_active_owner("bladerf|label:auto") is None
+    assert own.get_active_owner("bladerf|label:auto") is None
 
 
 def test_limesdr_refuses_before_lib_load(_registry, monkeypatch):
@@ -481,15 +482,15 @@ def test_limesdr_refuses_before_lib_load(_registry, monkeypatch):
 
     child = _spawn_child()
     try:
-        start = sb._proc_start_time(child.pid)
-        _seed(_registry, "limesdr|index:0", child.pid, start, owner=sb.AI_OWNER)
+        start = own._proc_start_time(child.pid)
+        _seed(_registry, "limesdr|index:0", child.pid, start, owner=own.AI_OWNER)
 
         be = lp.LimeSDRBackend(device_index=0)
         assert be.connect() is False
         assert loaded == [], "占用命中后仍加载了 libLimeSuite"
         _assert_conflict_text(be.last_error, child.pid)
         assert be.get_status().error == be.last_error
-        holder = sb.get_active_owner("limesdr|index:0")
+        holder = own.get_active_owner("limesdr|index:0")
         assert holder is not None and holder["pid"] == child.pid, holder
     finally:
         _kill(child)

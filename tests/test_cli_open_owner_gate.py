@@ -28,7 +28,7 @@ _ROOT = Path(__file__).resolve().parents[1]
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
-from mbdsdr_ai import sdr_backend as sb
+from mbdsdr_ai import device_owner as own
 from mbdsdr_ai.core import cli
 from mbdsdr_ai.core.errors import DeviceBusyError, OwnerRegistryUnavailableError
 from mbdsdr_ai.device_manager import DeviceInfo, DeviceManager, OpenDevice
@@ -48,7 +48,7 @@ KEY = "rtlsdr|serial:CLI-SN-1"
 def registry(tmp_path, monkeypatch):
     """把占用登记指到临时文件，避免碰用户真实的 ~/.mbdsdr/device_owner.json。"""
     path = tmp_path / "device_owner.json"
-    monkeypatch.setenv(sb.OWNER_REGISTRY_ENV, str(path))
+    monkeypatch.setenv(own.OWNER_REGISTRY_ENV, str(path))
     return path
 
 
@@ -142,7 +142,7 @@ def test_cli_open_refuses_unreadable_registry_as_unknown(registry,
     反证：把 unknown 当 free，``_open_rtlsdr`` 会被调用 → 本用例红。
     """
     registry.write_bytes(b'{"owners": ')
-    monkeypatch.setattr(sb, "_backup_corrupt_registry", lambda reason: None)
+    monkeypatch.setattr(own, "_backup_corrupt_registry", lambda reason: None)
     opened = _forbid_open(monkeypatch)
     probed = _forbid_probe(monkeypatch)
 
