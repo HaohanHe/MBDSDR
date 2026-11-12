@@ -28,6 +28,7 @@ parity 里说的「三档」：
   `_render_request` 从 store 拉值写进输入框（`:441` `req = _req_store.request_for(ident.key)`，
   `:443-450` 三处 `setText`），**没有 `if not self._connected` 门**。另一面板在会话中改了
   store，本面板输入框会被拉成新值——用户看到的数字与后端实际下发值脱钩，且没有任何提示。
+  （该缺陷已在数据层修复：占用期间 `request_for` 返回冻结快照，见 §5；面板代码本身未动。）
 
 ## 2. 数据从哪来
 
@@ -84,15 +85,25 @@ parity 里说的「三档」：
   `begin_session(key)`（冻结首次生效值，重复调用不覆盖） /
   `end_session(key)`（清占用并返回快照，不写回请求） /
   `session_values(key)` / `is_occupied(key)`；`reset()` 一并清理。
-- 证据：`tests/test_connect_request_session.py`（7 用例）。反证：把 `session_values`
-  改成返回 `request_for`（活引用）后，快照冻结用例立即变红。
+- **读侧门禁（`_render_request` 无 `_connected` 门的修复）**：`request_for(key)`
+  在占用期间返回冻结快照，写侧 (`update`) 仍按意图值记录到 `intent_for(key)`；
+  `end_session` 后 `request_for` 恢复正常。所有渲染/载荷调用点（含
+  `HEAD:desktop/device_panel.py:441` 的 `_render_request`）自动受这条门约束，
+  无需在面板里再加判断。
+- 证据：`tests/test_connect_request_session.py`（8 用例）。反证两条：① 摘掉
+  `request_for` 的占用门后「会话中喂不同请求」用例立即变红；② 会话结束后
+  同一请求正常生效，证明门不是「永远拒写」。
 
 **未做（按协调规则阻塞，不是遗漏）**
 
-- 生产者接线点：`device_panel.set_connected(True/False)` 各调一次
-  `begin_session` / `end_session`；模块面板的连接/断开入口同。两处所在文件当前有
-  他线在途改动与 claim（`desktop/device_panel.py` 被「接入层资源线」claim），
-  按 COORDINATION §6「未提交 hunk 不得追加」本笔不碰。
+- 生产者接线点：`HEAD:desktop/device_panel.py:489`
+  `def set_connected(self, connected: bool, dev_label: str = "")`——连接分支
+  在确认身份后（HEAD `:494-495` 写入 `_current_dev_key`）调
+  `begin_session(self._current_dev_key)`；断开分支在清空 `_current_dev_key`
+  **之前**（HEAD `:504` 起）调 `end_session(self._current_dev_key)`。模块面板的
+  连接/断开入口同理。两处所在文件当前有他线在途改动与 claim
+  （`desktop/device_panel.py` 被「接入层资源线」claim），按 COORDINATION §6
+  「未提交 hunk 不得追加」本笔不碰。
 - 显示方案：选项 A / B 待决策。
 
 ## 6. 判定口径

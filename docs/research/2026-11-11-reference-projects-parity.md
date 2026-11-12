@@ -427,10 +427,11 @@ for (auto const& [name, _vfo] : vfos) {
 
 ### 3.3 待办（不计入上表）
 
-- gpredict 专项③ 占用态（设备会话置灰 + 断开写回）—— **数据源已落**
-  （`connect_request_store.begin_session/end_session/session_values/is_occupied`，
-  证据 `tests/test_connect_request_session.py`）；显示方案待决策、面板生产者接线
-  被 `desktop/device_panel.py` 的活跃 claim 阻塞。决策页：
+- gpredict 专项③ 占用态（设备会话置灰 + 断开写回）—— **数据源 + 读侧门禁已落**
+  （`connect_request_store.begin_session/end_session/session_values/is_occupied`；
+  `request_for` 在占用期间返回冻结快照，修复 `_render_request` 无 `_connected` 门
+  导致的会话中反向覆盖，证据 `tests/test_connect_request_session.py`）；显示方案
+  待决策、面板生产者接线被 `desktop/device_panel.py` 的活跃 claim 阻塞。决策页：
   `docs/research/2026-11-12-gpredict-occupancy-decision.md`。
 
 已办（2026-11-12，原两条待办结案）：

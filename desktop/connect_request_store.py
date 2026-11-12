@@ -162,8 +162,22 @@ def resolve(devices) -> List[DeviceIdentity]:
     return [ident for ident in out if ident is not None]
 
 
+def intent_for(key: str) -> ConnectRequest:
+    """最近一次写入的意图值（不受会话占用态影响；诊断/测试用）。"""
+    return _requests.get(key, ConnectRequest())
+
+
 def request_for(key: str) -> ConnectRequest:
-    """读取某台设备的连接请求（无记录时各字段为 None）。"""
+    """渲染读侧：无记录时各字段为 None。
+
+    会话占用期间返回**冻结的会话生效值**，不返回最新意图——面板与
+    ``fill_payload`` 都经这里取值，这样另一面板在会话中改了 store，也
+    无法把正在生效的值改回去（gpredict 第三档读侧门禁）。会话结束后
+    恢复正常，最新意图立即可见。
+    """
+    locked = _sessions.get(key)
+    if locked is not None:
+        return locked
     return _requests.get(key, ConnectRequest())
 
 
@@ -179,7 +193,7 @@ def begin_session(key: str) -> ConnectRequest:
     正在生效的值换掉。返回不可变快照。
     """
     if key not in _sessions:
-        _sessions[key] = request_for(key)
+        _sessions[key] = intent_for(key)
     return _sessions[key]
 
 
@@ -207,8 +221,11 @@ def update(key: str, *, sample_rate_hz=_UNSET, gain_db=_UNSET,
 
     非法值（非数/NaN/<=0 的采样率）保持原值不变并记日志，不把 0 Hz 这类
     会让后端崩掉的假值存进来。
+
+    写侧以**意图值**为底，不以渲染读侧为底：会话占用期间写入照常记录，
+    但 ``request_for`` 继续返回冻结快照，直到 ``end_session`` 才可见。
     """
-    current = request_for(key)
+    current = intent_for(key)
     changes: Dict[str, Any] = {}
 
     if sample_rate_hz is not _UNSET:

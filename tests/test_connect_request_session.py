@@ -29,7 +29,7 @@ def _clean_store():
 
 
 def test_begin_session_freezes_values_used_for_connect():
-    """会话开始冻结当前请求；会话期间 store 被改，快照不跟着变。"""
+    """会话开始冻结当前请求；会话期间写入照常记录，但渲染读侧不跟着变。"""
     store.update("dev-a", sample_rate_hz=2_048_000.0, gain_db=30.0, ppm=0)
     snap = store.begin_session("dev-a")
 
@@ -38,10 +38,22 @@ def test_begin_session_freezes_values_used_for_connect():
     assert snap.gain_db == 30.0
     assert snap.ppm == 0
 
-    # 反证保护：快照若是活引用（返回 request_for），这里会一起变成 1.024M。
+    # 反证①：会话中喂一条不同的请求 → 渲染读侧必须仍是生效值。
+    # 若摘掉 request_for 的占用门（直接返回 intent），这里会变成 1.024M。
     store.update("dev-a", sample_rate_hz=1_024_000.0)
+    assert store.intent_for("dev-a").sample_rate_hz == 1_024_000.0
+    assert store.request_for("dev-a").sample_rate_hz == 2_048_000.0
+
+
+def test_render_view_resumes_after_session():
+    """反证②：会话结束后同一请求正常生效，证明门不是「永远拒写」。"""
+    store.update("dev-a", sample_rate_hz=2_048_000.0)
+    store.begin_session("dev-a")
+    store.update("dev-a", sample_rate_hz=1_024_000.0)
+    assert store.request_for("dev-a").sample_rate_hz == 2_048_000.0
+
+    store.end_session("dev-a")
     assert store.request_for("dev-a").sample_rate_hz == 1_024_000.0
-    assert store.session_values("dev-a").sample_rate_hz == 2_048_000.0
 
 
 def test_begin_session_keeps_first_snapshot():
