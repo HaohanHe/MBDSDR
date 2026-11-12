@@ -21,12 +21,16 @@ from __future__ import annotations
 
 import csv
 import json
+import logging
 import os
 import re
 import bisect
 from dataclasses import dataclass, field, asdict
+from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional
+
+logger = logging.getLogger(__name__)
 
 
 DEFAULT_COLOR = "#888888"
@@ -76,6 +80,22 @@ def _from_legacy_entry(d: dict) -> "Bookmark":
     )
 
 
+def _backup_corrupt_bookmarks(path: Path) -> Optional[str]:
+    """把损坏的书签文件改名成 ``*.corrupt-时间戳``，返回备份路径。
+
+    只改名不删除：原件字节必须原样留在备份里，后续写新文件才不会吞掉证据。
+    改名失败返回 None，调用方据此拒绝写盘。
+    """
+    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    backup = path.with_name(f"{path.name}.corrupt-{stamp}")
+    try:
+        os.replace(path, backup)
+    except OSError as exc:
+        logger.error("书签损坏文件备份失败：%s（%s）", path, exc)
+        return None
+    return str(backup)
+
+
 class BookmarkManager:
     """书签管理器：增删改查、分组树、标签、搜索、CSV 导入导出、JSON 持久化。"""
 
@@ -87,6 +107,12 @@ class BookmarkManager:
         self.bookmarks_path = self.config_dir / "bookmarks.json"
         self._bookmarks: List[Bookmark] = []
         self._tag_colors: Dict[str, str] = {UNTAGGED: DEFAULT_COLOR}
+        #: 上次读取失败的人话说明（None = 正常）；调用方可据此提示用户。
+        self.last_error: Optional[str] = None
+        #: 损坏文件的备份路径（None = 未损坏或备份失败）。
+        self.corrupt_backup: Optional[str] = None
+        #: 损坏且备份失败时拒绝写盘：此时写新文件会覆盖唯一证据。
+        self._save_blocked = False
         self.load()
 
     # ------------------------------------------------------------------ CRUD
@@ -167,11 +193,14 @@ class BookmarkManager:
     def load(self) -> bool:
         if not self.bookmarks_path.exists():
             self._bookmarks = []
+            self.last_error = None
+            self.corrupt_backup = None
+            self._save_blocked = False
             return False
         try:
             data = json.loads(self.bookmarks_path.read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, OSError):
-            self._bookmarks = []
+        except (json.JSONDecodeError, OSError) as exc:
+            self._mark_corrupt(f"解析失败（{exc.__class__.__name__}：{exc}）")
             return False
         if isinstance(data, list):
             # 兼容 FrequencyManager 写入的旧格式（裸列表，字段名不同）。
@@ -180,16 +209,45 @@ class BookmarkManager:
             self._bookmarks = [_from_legacy_entry(d) for d in data
                                if isinstance(d, dict)]
             self._bookmarks.sort()
+            self.last_error = None
+            self.corrupt_backup = None
+            self._save_blocked = False
             return True
         if not isinstance(data, dict):
-            self._bookmarks = []
+            self._mark_corrupt(f"顶层不是对象（{type(data).__name__}）")
             return False
         self._tag_colors = data.get("tag_colors", {UNTAGGED: DEFAULT_COLOR})
         self._bookmarks = [Bookmark(**b) for b in data.get("bookmarks", [])]
         self._bookmarks.sort()
+        self.last_error = None
+        self.corrupt_backup = None
+        self._save_blocked = False
         return True
 
-    def save(self) -> None:
+    def _mark_corrupt(self, reason: str) -> None:
+        """损坏文件：备份原件、留人话错误；备份失败则禁止后续写盘。"""
+        self._bookmarks = []
+        self._tag_colors = {UNTAGGED: DEFAULT_COLOR}
+        self.corrupt_backup = _backup_corrupt_bookmarks(self.bookmarks_path)
+        self._save_blocked = self.corrupt_backup is None
+        self.last_error = (
+            f"书签文件读取失败（{reason}）：{self.bookmarks_path}；"
+            f"原文件已备份为 {self.corrupt_backup or '（备份失败）'}，"
+            "本次按空书签列表启动"
+        )
+        logger.warning("书签文件不可用（%s）：%s；备份=%s", self.bookmarks_path,
+                       reason, self.corrupt_backup or "（备份失败）")
+
+    def save(self) -> bool:
+        """写回书签；损坏且未能备份时拒绝写入，避免覆盖唯一证据。"""
+        if self._save_blocked:
+            self.last_error = (
+                f"书签未保存：{self.bookmarks_path} 已损坏且备份失败；"
+                "为避免覆盖唯一证据，本次不写入。"
+                "请检查目录权限或手动移走该文件后重试")
+            logger.error("书签保存被拒绝（损坏文件未能备份）：%s",
+                         self.bookmarks_path)
+            return False
         data = {
             "tag_colors": self._tag_colors,
             "bookmarks": [asdict(b) for b in self._bookmarks],
@@ -197,6 +255,7 @@ class BookmarkManager:
         self.bookmarks_path.write_text(
             json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8"
         )
+        return True
 
     # ------------------------------------------------------------ CSV import/export
     def import_csv_text(self, text: str) -> int:
