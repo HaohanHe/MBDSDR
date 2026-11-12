@@ -40,6 +40,62 @@
 
 其余 1398 处**没有一处能同时回答三问**：绝大多数连日志都没有，更谈不上覆盖降级路径的测试。因此不把「可选依赖 = 自动豁免」当作批量白名单——豁免必须逐条给出三问，否则就是静默丢功能。
 
+## 凭据扫描器豁免登记（2026-11-13）
+
+`scripts/secret_scan.py` 的命中里有 11 行是「变量名撞上凭据词、实际打印的不是凭据值」的误伤。它们只走**逐行摘牌**：`# pragma: allowlist secret — <理由>` 贴在命中那一行，扫描器整行跳过。**没有**目录级/文件级豁免，也**没有**关掉某条规则的开关。
+
+判据（三条同时满足才算合规豁免）：
+
+1. **逐行**：pragma 只作用于它所在的那一行，不给相邻行、同一函数的其他 `print`、同文件其他命中放行（反证：`tests/test_secret_scan.py::test_inline_allowlist_silences_only_that_line`——同一文件另外 4 条命中仍然 BLOCK）；
+2. **理由可核**：理由必须写成「打印的是 X，非凭据值」，且 X 能被测试静态或行为验证，不能只是一句自述；
+3. **有测试先红**：理由一旦不成立（该行改成打印变量值），必须有一条测试先失败——宁可红在本地，也不要等泄露。
+
+| 位置 | 规则 | 理由 | 谁守着它 |
+| --- | --- | --- | --- |
+| `scripts/file_claim.py` 9 处（633 / 639 / 673 / 699 / 712 / 746 / 759 / 1016 / 1036） | `log-credential-value` | 打印的是 sidecar 路径（`_token_path(key)`）或「凭据文件写入失败」的错误文本（`sidecar_err`），非凭据值 | ① 静态：`tests/test_file_claim.py::test_allowlisted_claim_hints_print_paths_not_values` 用 AST 取每个带理由的 `print` 调用，断言其中不出现 `token` / `fresh_token` / `upgraded_token` / `new_token` / `presented` / `stored`；② 行为：`tests/test_file_claim.py::_token` 的 `assert token not in output`，claim/takeover 的 stdout+stderr 不得含凭据 |
+| `scripts/ui_baseline.py:630` | `log-credential-value` | 打印的是设计变更里的 UI 元素标识（`gdiff["text"]`），非凭据 | 无专门测试；值是设计变更清单里的界面文本，不含凭据形状。**本表最弱的一条**，见解除条件 |
+| `scripts/ui_layout_audit.py:151` | `log-credential-value` | 打印的是 UI 元素标识（`token` 是布局审计里的元素名），非凭据 | 无专门测试，同上 |
+
+另有 2 条 `argv-cli-credential-option`（`scripts/file_claim.py:1343/1363`，即 `--token` / `--token-file` 选项）**不在豁免内**：它只是 WARN、不拦提交，属于「CLI 上有凭据参数」的常态告警，留着提醒别把值写进命令行。
+
+### 解除条件（任一触发即撤豁免，不许延期）
+
+1. **该行开始打印凭据值**：撤 pragma，让扫描器 BLOCK。`file_claim.py` 那 9 处由上面的静态测试先红——本轮已反证：把第 1036 行改成 `+ new_token`，静态测试与 `_token()` 的行为断言同时失败（2 failed）。
+2. **删掉/绕过行为断言**：`tests/test_file_claim.py::_token` 里的 `assert token not in output` 一旦被删或改成恒真，`file_claim.py` 的 9 条豁免立即作废，必须重新评审——这条断言就是豁免的对价。
+3. **豁免行数变化**：`file_claim.py` 里带理由的 pragma 不再是 9 行时，本表与静态测试同步改；新增豁免要重新走上面三条判据，不许「反正在同一个文件里」顺手加。
+4. **只豁免行，不豁免规则**：禁止在 `secret_scan.py` 里给 `log-credential-value` 加文件白名单、变量名前缀白名单，或让 pragma 支持「整段 / 整文件」形态。
+
+复核：**2027-05**（与其他豁免同一节奏）。
+
+## 凭据历史扫描（`--history`，2026-11-13）
+
+工作树 0 BLOCK 只证明「现在没有」，不证明「从没提交过」。`scripts/secret_scan.py --history`
+对**对象库里的全部 blob** 跑同一组形状规则，报「命中 blob / 路径 / 提交」三个数。
+
+口径（复跑命令：`python scripts/secret_scan.py --history`，cwd 为仓库根）：
+
+| 项 | 值 |
+| --- | --- |
+| 判据 | 7 条形状规则（GitHub classic/fine-grained PAT、GitLab PAT、Slack、AWS、JWT、PEM 私钥），**不跑熵**，也不跑 argv/日志 AST 规则 |
+| 豁免 | 行内 `# pragma: allowlist secret` 同样生效（逐行） |
+| 扫描对象 | `git cat-file --batch-all-objects` 的 13 622 个 blob / 757.2 MiB（含 `--all`/reflog 之外的对象） |
+| 二进制跳过 | 679 个（首 8 KB 含 NUL，未做文本扫描） |
+| 归属索引 | `rev-list --objects --all --reflog <各 worktree HEAD>` + `git log --raw` 反向索引；detached 的 worktree HEAD 不在 refs 下，必须单独补 |
+| HEAD 可达性 | 逐个命中提交 `git merge-base --is-ancestor <commit> HEAD` |
+
+结果（2026-11-13，HEAD `b8c89d57`）：
+
+- **命中提交 0 个、命中路径 0 个**——可达历史干净；
+- 另有 **1 个不可达 blob**（`c20bd082d638…`，69 字节）命中 `github-pat-classic`，
+  但 token 体 36 位字符全同（合成值），且没有任何提交/路径引用它；
+- 处置待定，见 `docs/pending-patches/2026-11-13-git-history-secret-dangling-blob.md`
+  （路 A 保留 / 路 B `git gc --prune=now`；**不改写历史**）。
+
+这个「干净」的边界（不许当成无漏洞宣传）：二进制 blob 679 个没做文本扫描；
+不可达对象（`git fsck --unreachable`：103 commit / 303 tree / 112 blob）里除上面
+那 1 个 blob 外也扫了，但归属只能给出「未知」；`D:\mbdsdr` 根目录**不是** git 仓库，
+所以 `output/`、`.tmp` 下工作树里命中的 4 处 BLOCK 没有历史可查（它们从未入库）。
+
 ## 分布
 
 按目录：`mbdsdr_ai` 692 / `desktop` 574 / `tests` 62 / `experiments` 32 / `scripts` 26 / `tools` 8 / 根脚本 3 / `docs` 1。
