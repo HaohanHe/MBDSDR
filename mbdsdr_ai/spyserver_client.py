@@ -780,18 +780,27 @@ class SpyServerBackend(SDRBackend):
         return None
 
     def disconnect(self):
+        """先关 socket 唤醒生产者 → 再停生产者线程 → 标记断开。
+
+        顺序不能反：生产者可能正阻塞在 ``recv``（socket 超时 = idle_timeout，
+        默认 5s）。先 ``_ring_reader.stop()`` 会白等 2s 的 join 超时；超时后
+        ``_ThreadedRingReader.stop()`` 已经把 ``_thread`` 置 None，生产者线程
+        会在 ``disconnect()`` 返回后继续存活一段。先关 socket 让 recv 立即
+        出错返回，join 就能立刻收割。
+        """
+        if self._client is not None:
+            try:
+                # 只关 socket，不先置 None：避免生产者读到 None 的竞态
+                self._client.stop()
+            except Exception:
+                pass
         if self._ring_reader is not None:
             try:
                 self._ring_reader.stop()
             except Exception:
                 pass
             self._ring_reader = None
-        if self._client is not None:
-            try:
-                self._client.stop()
-            except Exception:
-                pass
-            self._client = None
+        self._client = None
         self._last_ring_data_time = None
         super().disconnect()
 
