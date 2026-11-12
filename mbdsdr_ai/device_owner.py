@@ -23,6 +23,30 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple, Union
 
 logger = logging.getLogger(__name__)
 
+__all__ = [
+    "AmbiguousOwners",
+    "OwnerState",
+    "RegistryUntrustedError",
+    "acquire_hardware_owner",
+    "backup_corrupt_registry",
+    "claim_active_owner",
+    "get_active_owner",
+    "get_owner_state",
+    "open_process_query",
+    "owner_conflict_channel",
+    "owner_conflict_hints",
+    "owner_conflict_text",
+    "owner_conflict_untrusted",
+    "owner_label",
+    "owner_registry_path",
+    "owner_state_text",
+    "process_owner",
+    "release_active_owner",
+    "release_hardware_owner",
+    "release_stale_owners",
+    "set_process_owner",
+]
+
 
 # ──────────────────────── 设备占用登记（跨进程） ────────────────────────
 # 桌面端与 AI/MCP 可能在不同进程里抢同一根 USB 棒。占用登记必须让**别的
@@ -384,12 +408,12 @@ def _registry_lock():
                     else:
                         import fcntl
                         fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
-                except Exception:
-                    pass
+                except Exception as e:  # noqa: BLE001 - 解锁失败不能盖住调用方的原始结果
+                    logger.debug("解除设备登记文件锁失败(忽略): %s", e)
             try:
                 fh.close()
-            except Exception:
-                pass
+            except Exception as e:  # noqa: BLE001 - 关闭失败不能盖住调用方的原始结果
+                logger.debug("关闭设备登记文件失败(忽略): %s", e)
 
 
 def backup_corrupt_registry(reason: str) -> Optional[str]:
@@ -840,8 +864,8 @@ def _release_owned_here_at_exit() -> None:
     for owner, dev in list(_OWNED_HERE):
         try:
             release_active_owner(owner, dev)
-        except Exception:  # noqa: BLE001 - 退出路径绝不抛
-            pass
+        except Exception as e:  # noqa: BLE001 - 退出路径绝不抛
+            logger.debug("退出时释放设备占用失败(忽略): %s", e)
 
 
 atexit.register(_release_owned_here_at_exit)
