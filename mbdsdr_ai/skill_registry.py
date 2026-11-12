@@ -21,12 +21,15 @@ SSTV 解码指引都是技能，模型按 description 自己决定何时加载�
 """
 from __future__ import annotations
 
+import logging
 import os
 import re
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
 
 from .hooks import Event, EventType
+
+logger = logging.getLogger(__name__)
 
 # user 技能根默认位置（可经构造参数 user_dir 覆盖或置 "" 禁用），
 # 与 plugin_system 的 ~/.mbdsdr/plugins 同一约定。
@@ -161,7 +164,10 @@ class SkillRegistry:
         try:
             with open(path, "r", encoding="utf-8") as f:
                 text = f.read()
-        except Exception:
+        except Exception as e:
+            # 读不到就丢，技能会从列表里静默消失；路径与原因必须留痕。
+            logger.warning("读取技能文件失败：%s: %s: %s",
+                           path, type(e).__name__, e)
             return None
         meta, body = _parse_frontmatter(text)
         desc = meta.get("description", body.split("\n")[0].lstrip("# ").strip())
