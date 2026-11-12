@@ -51,10 +51,6 @@ def _as_float(img: Array) -> Array:
     return img.astype(np.float64, copy=False)
 
 
-def _is_uint8(img: Array) -> bool:
-    return img.dtype == np.uint8
-
-
 def _prepare(img: Array) -> Tuple[Array, bool]:
     """统一把输入归一化到 [0,1] 浮点工作区间。
 
