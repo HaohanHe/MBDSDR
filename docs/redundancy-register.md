@@ -221,7 +221,7 @@ python -m pytest tests/test_theme_switch.py tests/test_theme_tokens.py \
 |---|---|
 | 占位文案「未连接，档位随设备」 | 「未知（设备未报告采样率范围，将用默认 X）」 |
 | `selected_sample_rate_hz()` 返回 `Optional[float]`/`None` | 仍返回 `float`，无效时回退 `DEFAULT_SAMPLE_RATE_HZ` |
-| 新增 `set_sample_rate_options(...)` 注入接口 + `tests/test_module_panel_sample_rate_capability.py` | 直接按 `device` dict 查能力，无独立注入接口；他线新增 `tests/test_module_panel_truthful_controls.py`（工作区未跟踪，本线未复跑） |
+| 新增 `set_sample_rate_options(...)` 注入接口 + tests/test_module_panel_sample_rate_capability.py（原规格提案，未落地） | 直接按 `device` dict 查能力，无独立注入接口；他线新增 `tests/test_module_panel_truthful_controls.py`（工作区未跟踪，本线未复跑） |
 
 三处差异都是**行为收窄**（禁用 + 显式「未知」），不改变「用户可见档位不再来自前端静态表」这一结论。
 
@@ -412,7 +412,7 @@ python -m pytest tests/test_theme_switch.py tests/test_theme_tokens.py \
 | 入口角色不动 | `mbdsdr_ai/fengyun_sat.py` | `fy4_lrit_pipeline` | FY-4 LRIT 流水线入口；零件有测试 ≠ 入口可删 | 不删 |
 | 真可删 | `mbdsdr_ai/ft8_decode.py` | `hard_tones_to_llr` | FT8 主链用 `soft_tones_to_llr`，硬判决仅离线实验 | 3 个 FT8 测试文件全绿 |
 | 需先补测试再删 | `mbdsdr_ai/gps_ca.py` | `nav_bits_from_corr` | 导航比特提取（含门限策略）无测试钉扎 | 先补已知 C/A 相关向量对拍 |
-| 真可删 | `mbdsdr_ai/meteor_sat.py` | `convolutional_interleave` | LRPT 主链不复用该交织器 | `tests/apt_meteor_roundtrip.py` 全绿 |
+| 真可删 | `mbdsdr_ai/meteor_sat.py` | `convolutional_interleave` | LRPT 主链不复用该交织器 | `tests/test_apt_meteor_roundtrip.py` 全绿 |
 | 需先补测试再删 | `mbdsdr_ai/orbit_determination.py` | `ecef_state_to_keplerian` | ECEF→开普勒根数换算属数值 API，现有 orbit 测试未钉 | 先补已知向量测试（ISS 单点） |
 
 > **执行结果（2026-11-06，HEAD `86ae9807`）**：8 条删除、2 条入口角色加注释保留。
