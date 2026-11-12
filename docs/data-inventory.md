@@ -384,8 +384,8 @@ DVB-S2 BCH/LDPC 表、月面反照率），另有 `desktop/bandplan.json` 频段
 | `astro-golden.json` | `build/gen_astro_golden.py` | `mbdsdr_ai/celestial_geometry.py`（岁差 / 章动 / GMST） |
 
 **生成器输入 → 产物 → 文档**（2026-11-06 实测，只列关键字段；
-`03`/`06`/`07`/`09`/`10` 分别指 `docs/03-architecture.md`、`docs/06-compliance.md`、
-`docs/07-roadmap.md`、`docs/09-repo-alignment.md`、`docs/10-sky-catalog.md`）：
+`03`/`06`/`07`/`09`/`10` 分别指 `web/product/docs/03-architecture.md`、`web/product/docs/06-compliance.md`、
+`web/product/docs/07-roadmap.md`、`web/product/docs/09-repo-alignment.md`、`web/product/docs/10-sky-catalog.md`）：
 
 | 字段 | 产物 | 输入复核 | 文档声明 |
 |---|---|---|---|
@@ -433,7 +433,7 @@ python web/product/tests/verify_build_json.py --check
 `--check` 路径不会触发）在第一个生成器后硬退出 → 返回 137、3 个文件已变脏、
 `READY` 在位；`--restore` 后 10 个文件 sha 全部回到原值、备份目录清空；
 再跑 `--check` 也能先自动恢复。
-`tests/verify_product.py` 另钉内容红线：`starCount>10000`、HYG 许可/SHA、
+`web/product/tests/verify_product.py` 另钉内容红线：`starCount>10000`、HYG 许可/SHA、
 `notVerified` 条数、`satCount`/`count` 下限、`caseCount≥6` 且事实源为
 `celestial_geometry.py`。`build/astro-golden.json` 与
 `build/gen_astro_golden.py` 已作为同一笔提交 `f4ef0d13` 入库（两者必须同进
