@@ -214,6 +214,10 @@ gpredict 没有频率预设或书签概念（它是跟踪器，不是接收机�
 - 对照我们的 G12（「随数据禁用」vs「始终可用」两档）：gpredict 给的是**第三档**——不是「没数据就不能改」，而是「**设备会话期间不许改，值仍保留，断开时写回**」。**已核（2026-11-12，HEAD）：我们没有第三档**——会话期间被切换的控件封闭集只有 `connect_btn` / `disconnect_btn` 两个（`HEAD:desktop/device_panel.py:499-506`：连接时 `connect_btn.setEnabled(False)` / `disconnect_btn.setEnabled(True)`，断开反之），采样率/增益不在该集合内，不存在「占用中只读、断开写回」。
 - 该不该搬：**搬概念**。给「设备会话」加一个占用态：会话内配置控件只读但不丢值，断开时一次性写回并持久化。
 - 代价：低。控件 `setEnabled` 一处开关 + 会话结束时的保存点；风险是「断开时写回」需要明确失败路径（写回失败要不要回滚到会话前的值），这一点 gpredict 没处理，我们得自己定。
+- **进展（2026-11-12）**：数据源已落——`connect_request_store` 新增会话占用态
+  （`begin_session` / `end_session` / `session_values` / `is_occupied`），
+  证据 `tests/test_connect_request_session.py`；「置灰还是仅提示」两案代价见
+  `docs/research/2026-11-12-gpredict-occupancy-decision.md`。
 
 **④ 首次启动：三条懒加载，其中一条我们已经做得更彻底**
 
@@ -423,7 +427,11 @@ for (auto const& [name, _vfo] : vfos) {
 
 ### 3.3 待办（不计入上表）
 
-- gpredict 专项③ 占用态（设备会话置灰 + 断开写回）—— 采纳与否待定。
+- gpredict 专项③ 占用态（设备会话置灰 + 断开写回）—— **数据源已落**
+  （`connect_request_store.begin_session/end_session/session_values/is_occupied`，
+  证据 `tests/test_connect_request_session.py`）；显示方案待决策、面板生产者接线
+  被 `desktop/device_panel.py` 的活跃 claim 阻塞。决策页：
+  `docs/research/2026-11-12-gpredict-occupancy-decision.md`。
 
 已办（2026-11-12，原两条待办结案）：
 
