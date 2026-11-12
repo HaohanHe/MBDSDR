@@ -190,10 +190,11 @@ Python 标签数取 **6**；C++ 仍为 12，因为它只画三角形不画文字
 | D-7 | "光谱空值"哨兵 | `-120.0` vs 无哨兵 | `spectrum_widget.py:419` vs C++ 用 `-100` 只作**安静带默认读数**（真实值） |
 | D-7b | RTL 设备基线采样率 | 三套：`2.048` / `1.024` / `2.048` 硬编码 | `sdr_backend.py` / `osmosdr_source.py` / `rtltcp_client.py`。**已统一为 2.4 MS/s 首选**（§10-3）；证据 `6ed9ee7d` — `mbdsdr_ai/sdr_backend.py:159` — `DEFAULT_SAMPLE_RATE_HZ = 2_400_000`（基准 `6ed9ee7d`）（2.048 只作基类最后兜底 `_FALLBACK_SAMPLE_RATE_HZ`） |
 | D-8 | 状态提示时长 | `3000/4000/6000/8000 ms` 散落 20+ 处 | `main_window.py:2061,2490-2624` 等 |
-| D-9 | AI 工具重试 | 2 次 / 0.4 s vs 3 次 / 1 s→8 s | `agent.py:4050-4061` vs `tokens.h:1335-1337` |
+| D-9-AI | AI 工具重试 | 2 次 / 0.4 s vs 3 次 / 1 s→8 s | `agent.py:4050-4061` vs `tokens.h:1335-1337` |
 | D-10 | AI 上下文 | Python 8192（`max_context_tokens`） vs C++ `32768×0.75` | `config.py:20` / `config_schema.py:237` vs `tokens.h:1321-1322` |
 
-D-9 **不是**同一语义：Python 是"工具调用可重试判定"，C++ 是"LLM 请求瞬时错误退避"。
+D-9-AI **不是**同一语义：Python 是"工具调用可重试判定"，C++ 是"LLM 请求瞬时错误退避"。
+此处曾与录音 D-9 重名，已改（2026-11-12，编号让位给录音格式裁决 D-9，见 `docs/research/2026-11-12-d9-recording-format-ruling.md`）。
 两者都合理，只需在文档写清（已写）。其余 8 组是真·同一语义两套数。
 
 **D-2 撤回（本线自我纠错）**：先把 `tokens.h:283 kFreqStepHz = 100e3` 当成"调谐步进"，
