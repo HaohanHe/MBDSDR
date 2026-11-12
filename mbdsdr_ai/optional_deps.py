@@ -7,6 +7,8 @@ MBDSDR AI - 可选依赖检测与降级
 缺失时提供降级方案。
 """
 
+import importlib.metadata
+import importlib.util
 from typing import Dict, Optional
 
 
@@ -35,11 +37,17 @@ def check_optional_deps() -> Dict:
     except ImportError:
         deps['pyserial'] = {'available': False, 'fallback': '无串口功能'}
 
-    # PySide6
-    try:
-        import PySide6
-        deps['PySide6'] = {'available': True, 'version': PySide6.__version__}
-    except ImportError:
+    # PySide6：只探测"是否安装"，不 import Qt。
+    # 本模块被 CLI/MCP 复用，import PySide6 会把整套 Qt 拖进无 GUI 进程；
+    # 交付物是可导入性报告，不是 Qt 对象，所以用 find_spec + 发行版元数据即可。
+    # 依赖方向由 tests/test_import_direction_contract.py 守卫。
+    if importlib.util.find_spec('PySide6') is not None:
+        try:
+            version = importlib.metadata.version('PySide6')
+        except importlib.metadata.PackageNotFoundError:
+            version = 'unknown'
+        deps['PySide6'] = {'available': True, 'version': version}
+    else:
         deps['PySide6'] = {'available': False, 'fallback': '无GUI，仅CLI/MCP'}
 
     # SoapySDR
