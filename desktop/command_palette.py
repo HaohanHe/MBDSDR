@@ -48,6 +48,19 @@ except ImportError:  # pragma: no cover - 兼容只把 desktop/ 放进 sys.path 
 
 logger = logging.getLogger(__name__)
 
+__all__ = [
+    "Command",
+    "CommandPalette",
+    "GROUPS",
+    "backup_corrupt_recent",
+    "build_index",
+    "load_recent",
+    "recent_error",
+    "remember_recent",
+    "reset_recent",
+    "search_commands",
+]
+
 #: 分组顺序（界面上按此顺序排；搜索命中后按相关度重排）
 GROUPS = ("菜单", "页签", "面板", "能力", "快捷键")
 
