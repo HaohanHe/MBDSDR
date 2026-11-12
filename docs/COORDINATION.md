@@ -4356,3 +4356,72 @@ pid 3484 已退出，属 K16 同形的「孤儿改动」。配套测试
 **本笔的行号引用自查**：本条登记不写行号，引用一律落到函数/判断。
 
 
+## 处理记录（2026-11-13 03:05）：测试隔离事故——真实用户配置被探针覆盖（录音回放核查线）
+
+**事故**：2026-11-13 01:42:46，本线一支**仓库外临时探针**（`python D:\mbdsdr\.tmp\probe_rr.py`，
+现已删除）构造真实 `MainWindow` 做录制/回放实验，没把配置目录指到临时目录，于是
+`DesktopSettings` 按默认路径整份重写了用户真实 `%APPDATA%\mbdsdr\desktop_settings.json`
+（`record_dir` → 探针临时目录、`frequency_hz` → 0.0、六组设置全展开、右栏 section =
+"status"）。原件后由他线在全盘 29 份同哈希副本中找回（1207 字节、`c8cc6266…`），
+与守卫记录的写前哈希三方对齐，**损失可归零**；还原由持有证据的线执行，本线未动真实文件。
+
+**定性**：仓库内代码没有漏——`tests/conftest.py` 的隔离对 pytest 会话生效，
+`tests/` 与 `scripts/repro/` 写盘一律走 tmp_path 或重定向 HOME/APPDATA。漏的是
+**探针的运行方式**：裸 `python xxx.py` 不经过 conftest，而探针自己没设隔离。
+同类现场另有两处：`~/.mbdsdr/gui_config.json` 的 mtime 被并发全量用例改写
+（同病、不同文件），以及「为了不等全局锁用 `MBDSDR_TEST_LOCK=0` 跑界面用例」。
+
+**判据缺陷（已撤销的旧做法）**：上一版守卫逐用例比 size/mtime 并点名当前用例。
+本机多个并发 pytest 时，谁写都会算到当时正在跑的用例头上——**会冤枉好人**；
+归因要跨进程抓 `WriteFile`，代价大且不准。已删除该判据。
+
+**本轮堵漏（写不进去优先，守卫降级为兜底）**：
+1. **写保护**：`pytest_configure` 把三份真实配置（`desktop_settings.json` /
+   `~/.mbdsdr/bookmarks.json` / `~/.mbdsdr/gui_config.json`）设成只读；任何进程
+   写入当场失败在**它自己进程里**，不需要事后猜；会话结束恢复原属性（用户自己
+   设的只读不碰）。崩溃遗留由下次会话按 `write-protection-<pid>.json` 标记恢复。
+2. **内容备份 + 自动还原**：会话开始把三份文件**内容**整份拷到
+   `.locks/real_config_snapshots/session-<时间>-<pid>/`（manifest 记路径与 sha256，
+   只留最近 20 个会话）；会话结束内容不一致就按备份**逐字节还原**，还原清单写进
+   失败信息。备份的是内容，不是哈希——哈希只能证明「变了」，证明不了「原来是什么」。
+3. **兜底守卫**：会话级比对 sha256/mtime/目录清单，只在「居然有人写成功了」时
+   喊一声，不再指认凶手。
+4. **绕锁机检**：设了 `MBDSDR_TEST_LOCK=0` 且进程内已构造 `QApplication` → 当场
+   FAIL 并点名用例；父会话持锁（本进程是它的子进程）时放行。锁的理由就是「同一
+   时刻只有一个进程碰 Qt 全局态」，绕锁还建窗口等于拆刹车踩油门。
+5. **单点清单**：`_real_config_files()` 是守卫/备份/还原/写保护共用的唯一路径
+   清单；新增第四份真实配置只加一个 `*_path` 键。
+
+**反证（均实测）**：`tests/_pollution_probe/pollutes_real_config.py` 四条探针 +
+`tests/test_ui_settings_isolation_guard.py` 四条反证：
+- 会话中故意写真实配置 → 当场 `PermissionError`（探针只认 `OSError`，写成功即红）；
+- 只写 tmp_path → 绿（阴性对照，证明不是永远红）；
+- 绕过只读整份覆盖 → 兜底守卫红，且会话结束按备份还原为原始字节；
+- 绕锁构造 `QApplication` → `FAILED` 且点名该用例（实测输出含 `[mbdsdr-lock]`）。
+
+**仓库内审计（只列清单，未改他人文件）**：
+- `tests/`：写真实路径的用例都已隔离或只读；`test_listen_state_machine.py` /
+  `test_import_probe.py` / `test_narrow_gate_selfcheck.py` 在模块/子进程里显式重定向
+  HOME/APPDATA；`test_adsb_dump1090_golden.py` / `test_ft8_wsjtx_golden.py` /
+  `test_lrpt_meteor_real_golden.py` 只**读** `~/.mbdsdr/*_golden`，不写。
+- `scripts/`：`repro/*`、`ui_narrow_breakdown.py`、`ui_interaction_audit.py`、
+  `check_action_duplication.py` 均重定向；`config_write_guard.py` 是给**仓库外**
+  探针用的包装器（`--wrap`），本线这次没走它，是事故直接原因。
+- **仍各自拼路径的写入点（报给对应线，本线未改）**：`main_window._save_gui_config`
+  与 `_load_gui_config` / `_load_ntrip_config`、`settings_panel.GUI_CONFIG_PATH`、
+  `station_sync` 的 `gui_config` 路径函数——同一份 `~/.mbdsdr/gui_config.json` 有
+  ≥4 个独立入口，收敛成 `desktop/settings.py` 的单点属各线。
+
+**纪律（对所有线生效）**：仓库外探针一律
+`python scripts/config_write_guard.py --wrap <脚本>` 运行，或在脚本顶部**无条件**
+把 HOME/USERPROFILE/APPDATA/LOCALAPPDATA 指到临时目录；不许写「设了环境变量才
+隔离」的可选开关。`MBDSDR_TEST_LOCK=0` 只给不碰 Qt 全局态的纯子进程/纯计算用例用。
+
+**提交与复核**：`8ea2d6c7`（首版逐用例点名，已被 `891437c8` 取代）、`891437c8`
+（写保护 + 内容备份还原 + 绕锁机检 + 四条反证）。本笔未改真实用户文件（还原由
+他线执行）；真机 SDR/GNSS 不在位，与本次改动无关。
+
+**本笔的行号引用自查**：本条登记、`tests/conftest.py` 与两个测试文件均不写行号，
+引用一律落到函数/判断。
+
+
