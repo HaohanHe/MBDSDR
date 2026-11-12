@@ -57,7 +57,7 @@
     "manifest.json": {
       "provenance": "self-generated",
       "source_name": "scripts/make_sensitivity_fixtures.py",
-      "sha256": "55e758185935896ff70bd2e379812d35eda33aa3ae6b28e628afcd7ae86c8bf3",
+      "sha256": "b9a590fa98fd0624936cb12fbfd965aa6a6e9bda1b3430be918719c8846468ac",
       "derivation": "脚本写出的 fixture 清单（合成真值与 SHA-256）",
       "date": "2026-11-06"
     }

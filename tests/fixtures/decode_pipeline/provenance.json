@@ -64,7 +64,7 @@
     "manifest.json": {
       "provenance": "self-generated",
       "source_name": "scripts/make_decode_fixtures.py",
-      "sha256": "7ee585dcfdf4771a2c91cf80886d0360e90f0ab5729dbde935aee23b33950e17",
+      "sha256": "f1384ed72d3e8184e8417bcfc7a75661454ab5fa62c7a0dc03598ad876a27377",
       "derivation": "生成器写出的期望值清单（帧 hex / 采样率 / 失败原因），provenance 字段自述 self-generated",
       "date": "2026-11-05"
     }

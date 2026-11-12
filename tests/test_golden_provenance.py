@@ -25,6 +25,7 @@ import hashlib
 import json
 import os
 import re
+import subprocess
 import sys
 
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -101,8 +102,22 @@ def _load(rel_dir: str) -> dict:
 
 
 def _sha256(rel_file: str) -> str:
-    with open(os.path.join(_ROOT, rel_file), "rb") as f:
-        return hashlib.sha256(f.read()).hexdigest()
+    """对 git blob 的原始字节取 SHA-256，不做换行归一。
+
+    `git hash-object` 会按仓库的 clean 过滤器（如 core.autocrlf）把工作区
+    内容归一成「将要入库的 blob」，再对 blob 原始字节取哈希。这样同一份
+    资产在任何平台、任何检出方式下指纹一致；如果有人真的提交了不同的
+    行尾字节，blob 会变，指纹也跟着变，仍然能抓住。
+    """
+    oid = subprocess.run(
+        ["git", "hash-object", "--", rel_file],
+        cwd=_ROOT, capture_output=True, text=True, check=True,
+    ).stdout.strip()
+    blob = subprocess.run(
+        ["git", "cat-file", "blob", oid],
+        cwd=_ROOT, capture_output=True, check=True,
+    ).stdout
+    return hashlib.sha256(blob).hexdigest()
 
 
 def _all_declarations() -> dict:

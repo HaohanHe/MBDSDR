@@ -15,7 +15,7 @@
     "capture.sigmf-meta": {
       "provenance": "external-truth",
       "source_name": "RTL-SDR 空口采集的 SigMF 元数据",
-      "sha256": "6814ae668a723d17efe21d28e35870a1437a42fc1c9cea4e3658074b62acaf08",
+      "sha256": "c2fee8d9a8a03f1ef474c43aeb53aee33302cdf46639a7b13c369b76b9f89c01",
       "derivation": "采集时同步写出的 SigMF 元数据（datatype/采样率/频点/增益/时间戳），非事后补写",
       "date": "2026-10-28"
     }
