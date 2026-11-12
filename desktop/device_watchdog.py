@@ -41,6 +41,17 @@ except ImportError:  # PySide6 属 desktop 可选依赖组；缺它模块仍可�
         """占位信号工厂：返回 None，仅保证类体可求值。"""
         return None
 
+
+def qt_available() -> bool:
+    """Qt 绑定是否可用的**唯一判定入口**。
+
+    生产代码一律经本函数读取；测试要模拟「PySide6 缺失」时替换本函数
+    （``monkeypatch.setattr(device_watchdog, "qt_available", lambda: False)``），
+    不再改写模块私有名 ``_HAS_QT``。
+    """
+    return _HAS_QT
+
+
 logger = logging.getLogger(__name__)
 
 # 状态机取值
@@ -86,7 +97,7 @@ class DeviceWatchdog(QThread):
             ping_fn: 可选的自定义探测函数 ``ping_fn(backend) -> bool``；
                 不传则使用默认的 ``backend.get_status().connected`` 探测。
         """
-        if not _HAS_QT:
+        if not qt_available():
             raise ImportError(
                 "PySide6 未安装：DeviceWatchdog 是 Qt 看门狗线程，需要它"
                 "（pip install 'mbdsdr_ai[desktop]' 或 pip install PySide6）")
