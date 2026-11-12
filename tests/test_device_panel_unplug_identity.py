@@ -32,6 +32,21 @@ def _app():
     return QApplication.instance() or QApplication(sys.argv)
 
 
+class _AbsentProbe:
+    """假物理探针：枚举里没有的序列号就当作物理不在（不碰真机）。"""
+
+    def probe(self):
+        import mbdsdr_ai.usb_hotplug as uh
+        return uh.Presence(uh.PROBE_OK, authoritative=True)
+
+
+class _UnsupportedProbe:
+    def probe(self):
+        import mbdsdr_ai.usb_hotplug as uh
+        return uh.Presence(uh.PROBE_UNSUPPORTED, authoritative=False,
+                           detail="测试平台无探针")
+
+
 def _dev(index: int, serial: str = "", driver: str = "rtlsdr", label: str = "") -> dict:
     return {
         "driver": driver,
@@ -50,6 +65,9 @@ def panel(monkeypatch):
     monkeypatch.setattr(dp.DevicePanel, "refresh_devices_async",
                         lambda self: None)
     widget = dp.DevicePanel()
+    # 热插拔判定的物理探针换成假的：本文件不依赖真机，也不让测试受
+    # 运行机器的 USB 拓扑影响。
+    widget._hotplug_probe = _AbsentProbe()
     yield widget
     widget.close()
 
@@ -86,6 +104,43 @@ def test_unplug_detected_when_connected_before_enumeration(panel):
     assert seen, "连上后才枚举/发现设备消失，必须触发 device_unplugged"
 
 
+def test_unplugging_other_device_does_not_touch_connected_one(panel):
+    """两台同类设备：拔掉没在用的那台，正在用的状态与数据流不许中断。"""
+    a = _dev(0, serial="A-0001", label="RTL-A")
+    b = _dev(1, serial="B-0002", label="RTL-B")
+    panel._apply_devices([a, b])
+    panel.set_connected(True, device=b)
+    panel._on_hotplug_devices([a, b], "")       # 基准
+    seen = _unplug_counter(panel)
+    key_before = panel._current_dev_key
+
+    panel._on_hotplug_devices([b], "")          # A 拔掉（B 的序号前移到 0）
+    assert not seen, "拔掉 A 不许断开正在用的 B"
+    assert panel._connected, "B 的连接状态不许被别的设备拔出改动"
+    assert panel._current_dev_key == key_before
+    assert "已连接" in panel.status_label.text()
+
+
+def test_enum_failure_is_visible_and_never_means_unplug(panel):
+    """监听失败本身要可见；枚举失败不能当成设备已拔出。"""
+    a = _dev(0, serial="A-0001", label="RTL-A")
+    panel.set_connected(True, device=a)
+    seen = _unplug_counter(panel)
+
+    panel._on_hotplug_devices(None, "OSError: USB open timeout")
+    assert not seen, "枚举失败不等于拔出"
+    assert "轮询失败" in panel.status_label.text()
+    assert "USB open timeout" in panel.status_label.toolTip()
+
+
+def test_probe_unsupported_is_written_out_not_silent(panel):
+    """平台没有物理探针时必须明确写出来，不许静默降级成什么都没发生。"""
+    panel._hotplug_probe = _UnsupportedProbe()
+    panel._on_hotplug_devices([_dev(0, serial="A-0001", label="RTL-A")], "")
+    text = panel.status_label.text()
+    assert "探针" in text and "枚举" in text, f"平台不支持要显式说明，实际：{text!r}"
+
+
 def test_unknown_identity_refuses_detection_loudly(panel, caplog):
     """拿不到身份：显式拒绝检测（warning + tooltip），不许静默。"""
     panel._apply_devices([_dev(0, serial="A-0001", label="RTL-A")])
@@ -103,8 +158,8 @@ def test_unknown_identity_refuses_detection_loudly(panel, caplog):
 
 def test_panel_connect_identity_comes_from_request_not_combo(panel):
     """面板发起的连接：身份取请求里的设备，之后改下拉选中项也不影响。"""
-    a = _dev(0, driver="fake", label="Fake-A")
-    b = _dev(1, driver="fake", label="Fake-B")
+    a = _dev(0, serial="A-0001", driver="fake", label="Fake-A")
+    b = _dev(1, serial="B-0002", driver="fake", label="Fake-B")
     panel._apply_devices([a, b])
     panel.dev_combo.setCurrentIndex(0)
     panel.sr_edit.setText("2048000")

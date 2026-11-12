@@ -29,9 +29,11 @@ from PySide6.QtWidgets import (
 
 try:  # pragma: no cover
     from mbdsdr_ai.sdr_backend import enumerate_all_sdr_devices
+    from mbdsdr_ai import usb_hotplug
     _ENUM_OK = True
 except Exception:  # noqa: BLE001
     enumerate_all_sdr_devices = None  # type: ignore
+    usb_hotplug = None  # type: ignore
     _ENUM_OK = False
 
 # 跨进程设备占用**不在这里登记**：判据只有一个地方——后端 connect()（真正
@@ -138,6 +140,9 @@ class DevicePanel(QWidget):
     audio_output_changed = Signal(int)
     device_unplugged = Signal()
     device_plugged = Signal(str)
+    #: USB 物理在位探针；None = 按平台默认（Windows SetupAPI / Linux sysfs）。
+    #: 测试可换成假探针，热插拔判定因此不依赖真机。
+    _hotplug_probe = None
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -432,44 +437,97 @@ class DevicePanel(QWidget):
         QThreadPool.globalInstance().start(
             _DeviceEnumTask(self._enum_signals, self._enum_token))
 
+    def _hotplug_monitor(self):
+        """懒建热插拔监听（``mbdsdr_ai/usb_hotplug``）。
+
+        不放进 ``__init__``：面板可能在没有 mbdsdr_ai 的打包形态里单独导入，
+        而且监听第一拍才需要探针（Windows SetupAPI 枚举一次约几毫秒）。
+        """
+        if usb_hotplug is None:
+            return None
+        monitor = getattr(self, "_hotplug_mon", None)
+        if monitor is None:
+            monitor = usb_hotplug.HotplugMonitor(probe=self._hotplug_probe)
+            self._hotplug_mon = monitor
+        return monitor
+
     def _on_hotplug_devices(self, now, err: str, token: int = 0):
-        """后台枚举回来了：在 GUI 线程里做插入/拔出判定（结果语义与原来一致）。"""
+        """后台枚举回来了：按稳定身份判定插拔，再把结论落到界面。
+
+        拔出判定**不再用 (driver, index)**：枚举序号会随同类设备插拔前移，
+        「拔掉 A」会被记成「序号 1 消失」= 误判成 B 被拔。身份分级、物理
+        在位探针与失败归因都在 ``mbdsdr_ai/usb_hotplug`` 里，这里只做接线：
+
+        * 只处理与「当前连接那台」匹配的事件，别的设备拔掉不打断数据流；
+        * 拔出后不产生任何连接动作，重连仍由主窗口/用户决定；
+        * 枚举失败、探针不可用都如实显示，不当成「设备全都没了」。
+        """
         if token != self._enum_token:
             # 超时那拍已经复位并重派了新任务：迟到的旧结果既不能当现状，
             # 也不能把新任务的 inflight 清掉（那会让下一拍重复派发）。
             return
         self._enum_inflight = False
         self._enum_watchdog.stop()
-        if err or now is None:
+        monitor = self._hotplug_monitor()
+        if monitor is None:
             return
-        # 身份键与 set_connected 用同一套规则（connect_request_store.resolve），
-        # 否则「连接时记的 key」和「每拍枚举算的 key」不是同一种字符串，
-        # 拔出判定会退化成只看 locator 甚至永远不成立。
-        now_keys = {ident.key for ident in _req_store.resolve(now)}
-        now_locs = {self._locator_of(d) for d in now}
-        old_locs = self._last_poll_locs
-        self._last_poll_locs = set(now_locs)
+        if now is None and not err:
+            err = "枚举任务没有返回设备列表"
+        events = monitor.observe(now, err or "")
+        if not events:
+            return
 
-        # 拔出：设备打开（占用）后再次枚举读不到 USB 字符串，serial 会变空、
-        # tuner 变 Unknown，key 随之改变，但这并不代表拔出。因此连接中的设备
-        # 同时用稳定的 (driver, index) 判在位：key 与 locator 都消失才算真拔出。
-        if self._connected and self._current_dev_key and \
-                self._current_dev_key not in now_keys and \
-                self._current_dev_locator not in now_locs:
-            self.status_label.setText("设备已拔出")
-            self.device_unplugged.emit()
-            self.set_connected(False)
+        now_locs = {self._locator_of(d) for d in (now or [])}
+        plugged_label = ""
+        for event in events:
+            if event.kind == usb_hotplug.EVENT_PLUGGED:
+                if not self._connected and not plugged_label:
+                    plugged_label = event.label or "新设备"
+                continue
+            if event.kind in (usb_hotplug.EVENT_POLL_PROBLEM,
+                              usb_hotplug.EVENT_PROBE_PROBLEM):
+                # 监听本身出了问题也要可见：三种失败各有自己的文案，
+                # 不静默降级成「什么都没有发生」。
+                self.status_label.setText(event.user_text)
+                self.status_label.setToolTip(event.detail)
+                continue
+            if event.kind == usb_hotplug.EVENT_RECOVERED:
+                if self._connected:
+                    dev = self._connected_device or {}
+                    self.status_label.setText(
+                        f"已连接: {dev.get('label') or '设备'}")
+                elif self._devices:
+                    self.status_label.setText(
+                        f"检测到 {len(self._devices)} 台设备")
+                self.status_label.setToolTip("")
+                continue
+            # 以下事件只对「当前连接的那一台」有意义。别的设备拔出不许
+            # 触发断开，否则就是被删 watchdog 的老毛病（拔一台停一排）。
+            if not (self._connected and event.key == self._current_dev_key):
+                continue
+            if event.kind == usb_hotplug.EVENT_UNPLUGGED:
+                self.status_label.setText(event.user_text or "设备已拔出")
+                self.status_label.setToolTip(event.detail)
+                self.device_unplugged.emit()
+                self.set_connected(False)
+                # set_connected(False) 会改写提示并清掉 key；拔出的结论要
+                # 留在界面上，所以这里最后再写一次（含「按枚举判定」等限定）。
+                self.status_label.setText(event.user_text or "设备已拔出")
+                self.status_label.setToolTip(event.detail)
+            elif event.kind == usb_hotplug.EVENT_PRESENT_UNOPENABLE:
+                # 物理探针确认还在，只是这一拍枚举读不到。locator 仍在
+                # 通常只是「本程序正占用，读不到 serial」，属正常现象，
+                # 不打扰用户；locator 也没了才提示。
+                if self._current_dev_locator not in now_locs:
+                    self.status_label.setText(event.user_text)
+                    self.status_label.setToolTip(event.detail)
+            else:
+                # ambiguous / disappeared_unverified：只提示，不断开。
+                self.status_label.setText(event.user_text)
+                self.status_label.setToolTip(event.detail)
 
-        # 插入：以稳定的 (driver, index) 定位符为准。key 里含 serial/tuner，
-        # 设备被占用再释放时这两项会在 Unknown ↔ 实值之间跳变（不是插拔），
-        # 用 key 判定会误报“检测到新设备”并覆盖掉掉线提示。
-        new_locs = now_locs - old_locs
-        if new_locs and not self._connected:
-            for d in now:
-                if self._locator_of(d) in new_locs:
-                    label = d.get("label", "新设备")
-                    self.device_plugged.emit(label)
-                    break
+        if plugged_label and not self._connected:
+            self.device_plugged.emit(plugged_label)
             # 本轮枚举刚拿到的列表直接落控件，不再触发第二次枚举。
             self._apply_devices(now)
 
@@ -650,6 +708,17 @@ class DevicePanel(QWidget):
                 self._current_dev_locator = self._locator_of(dev)
                 self._unplug_identity_warned = False
                 self.status_label.setToolTip("")
+                # 预登记到热插拔监听：连接发生在首拍枚举之前时，这台设备
+                # 从未进过基准，拔掉也判不出来。
+                monitor = self._hotplug_monitor()
+                if monitor is not None:
+                    monitor.expect(ident.key, dev)
+                if usb_hotplug is not None:
+                    identity_note = usb_hotplug.hotplug_grade(dev)[1]
+                    if identity_note:
+                        # 「按口路径/按序号识别」的限制要在连接时就说清；
+                        # 换口会被当成另一台设备。
+                        self.status_label.setToolTip(identity_note)
                 # 登记 store 侧会话占用（第三档）：数据层靠它冻结本次生效值，
                 # 重复调用不覆盖首次快照，所以两次 set_connected(True) 无副作用。
                 _req_store.begin_session(self._current_dev_key)
