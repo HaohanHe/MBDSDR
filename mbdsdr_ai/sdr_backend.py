@@ -100,6 +100,16 @@ AI_OWNER = "mbdsdr-ai"
 
 def owner_conflict_text(holder: Dict[str, Any]) -> str:
     """占用冲突的可执行提示：谁占着、它还活着、下一步能做什么。"""
+    if holder.get("reason") == "ambiguous_alias":
+        dev = holder.get("device_id") or ""
+        cands = holder.get("candidates") or []
+        shown = ", ".join(str(c) for c in cands[:3])
+        if len(cands) > 3:
+            shown += f" 等 {len(cands)} 条"
+        return (f"无法唯一确定设备：键 {dev} 同时匹配多条占用记录（{shown}）。"
+                f"可能是两台同型号设备共用同一组备用标识（序号/总线位置）。"
+                f"请先在占用侧断开其中一台，或改用其他设备"
+                f"（先用 sdr_list_devices 查看）——不会替你猜是哪一台。")
     dev = holder.get("device_id") or ""
     who = owner_label(holder.get("owner", ""))
     return (f"设备 {dev} 当前由{who}占用（pid {holder.get('pid')}，进程仍在运行）。"
@@ -397,7 +407,37 @@ def release_stale_owners() -> List[Dict[str, Any]]:
     return removed
 
 
-def get_active_owner(device_id: str = "") -> Optional[Dict[str, Any]]:
+def _match_owner_record(owners: Dict[str, Dict[str, Any]], device_id: str,
+                        allow_alias_match: bool = True):
+    """在登记里找出与 ``device_id`` 对应的记录。
+
+    返回 ``(kind, key, record, candidates)``，kind ∈
+    ``exact`` / ``alias`` / ``ambiguous`` / ``none``。
+
+    两条硬规矩：
+
+    * **别名只在序列号读不到时才参与匹配**（``allow_alias_match`` 由调用方
+      按身份质量决定）。serial 可得时它就是身份本身——换 USB 口不该变成
+      另一台设备；
+    * **别名命中必须唯一**。两条记录同时匹配时返回 ``ambiguous``，由调用方
+      拒绝——**猜错比拒绝坏得多**：拒绝只要用户换一台设备，猜错会让两个
+      进程分同一条流。
+    """
+    if device_id in owners:
+        return "exact", device_id, owners[device_id], []
+    if not allow_alias_match:
+        return "none", "", None, []
+    candidates = [(key, rec) for key, rec in owners.items()
+                  if device_id in (rec.get("aliases") or [])]
+    if len(candidates) > 1:
+        return "ambiguous", "", None, [key for key, _ in candidates]
+    if candidates:
+        return "alias", candidates[0][0], candidates[0][1], []
+    return "none", "", None, []
+
+
+def get_active_owner(device_id: str = "",
+                     allow_alias_match: bool = True) -> Optional[Dict[str, Any]]:
     """当前占用者（先清失效记录再判）。device_id 为空时返回唯一的记录。"""
     release_stale_owners()
     # 与写路径同锁：读到的如果是损坏文件，这里会改名留证，不能在无锁时与
@@ -407,21 +447,21 @@ def get_active_owner(device_id: str = "") -> Optional[Dict[str, Any]]:
         _ACTIVE_OWNER.clear()
         _ACTIVE_OWNER.update(owners)
         if device_id:
-            if device_id in owners:
-                return dict(owners[device_id])
-            # 别名命中：持有者按序列号登记、竞争者只能算出枚举序号（设备被
-            # 占用时读不到 serial）——不认别名就等于没有互斥。
-            for rec in owners.values():
-                if device_id in (rec.get("aliases") or []):
-                    return dict(rec)
-            return None
+            kind, _key, rec, candidates = _match_owner_record(
+                owners, device_id, allow_alias_match)
+            if kind == "ambiguous":
+                # 返回一个真值标记：调用方一律按「被占用」处理并拒绝连接。
+                return {"reason": "ambiguous_alias", "device_id": str(device_id),
+                        "candidates": candidates, "owner": "", "pid": 0}
+            return dict(rec) if rec is not None else None
         if len(owners) == 1:
             return dict(next(iter(owners.values())))
         return None
 
 
 def claim_active_owner(owner: str, device_id: str,
-                       aliases: Optional[List[str]] = None
+                       aliases: Optional[List[str]] = None,
+                       allow_alias_match: bool = True
                        ) -> Tuple[bool, Dict[str, Any]]:
     """为 ``owner`` 声明占用 ``device_id``。
 
@@ -431,6 +471,8 @@ def claim_active_owner(owner: str, device_id: str,
     ``aliases`` 是同一台设备的其它可选身份键（见
     :func:`device_identity_aliases`）：设备被占用时枚举读不到序列号，
     竞争者只能算出枚举序号键，只按主键比对会漏掉活着的持有者。
+    别名命中**必须唯一**，撞上多条记录时返回 ``reason=ambiguous_alias``，
+    由调用方拒绝并说明——绝不取第一条。
 
     同进程内的重复声明允许覆盖（桌面端与 AI 适配器同在一个进程时不能互相
     死锁）；跨进程只有持有者进程真的不在了才会被清掉。
@@ -441,12 +483,12 @@ def claim_active_owner(owner: str, device_id: str,
     release_stale_owners()
     with _OWNER_LOCK, _registry_lock():
         owners = _read_registry()
-        matched_key, cur = device_id, owners.get(device_id)
-        if cur is None:
-            for key, rec in owners.items():
-                if device_id in (rec.get("aliases") or []):
-                    matched_key, cur = key, rec
-                    break
+        kind, matched_key, cur, candidates = _match_owner_record(
+            owners, device_id, allow_alias_match)
+        if kind == "ambiguous":
+            return False, {"reason": "ambiguous_alias",
+                           "device_id": str(device_id),
+                           "candidates": candidates, "owner": "", "pid": 0}
         if cur is not None and str(cur.get("owner")) != str(owner):
             try:
                 cur_pid = int(cur.get("pid") or 0)
@@ -485,8 +527,10 @@ def release_active_owner(owner: str, device_id: str = "") -> bool:
                          if str(r.get("owner")) == str(owner)])
         if device_id and device_id not in owners:
             # 别名释放：持有者按序列号登记、调用方只拿到枚举序号键。
-            targets = [d for d, r in owners.items()
-                       if device_id in (r.get("aliases") or [])]
+            # 撞上多条时一条都不放（同 _match_owner_record 的唯一性要求）。
+            kind, matched_key, _rec, _cands = _match_owner_record(
+                owners, device_id)
+            targets = [matched_key] if kind == "alias" else []
         for dev in targets:
             rec = owners.get(dev)
             if rec is None or str(rec.get("owner")) != str(owner):
@@ -614,6 +658,15 @@ def device_identity_aliases(device: Dict[str, Any]) -> List[str]:
     index_text = _identity_text(args.get("index", device.get("index")))
     if index_text:
         out.append(f"{driver}|index:{index_text}")
+    # USB 总线位置：设备被占用时**不需要 open 也读得到**（libusb 枚举即可），
+    # 是 serial 读不到时最接近「物理那一台」的替代依据。注意只在枚举方
+    # 提供了 bus/port 时才存在（原生 RTL 的 librtlsdr 不导出该信息）。
+    bus = _identity_text(device.get("bus") or device.get("usb_bus")
+                         or args.get("bus") or args.get("usb_bus"))
+    port = _identity_text(device.get("port") or device.get("usb_port")
+                          or args.get("usb_port"))
+    if bus and port:
+        out.append(f"{driver}|bus:{bus}|port:{port}")
     label = _identity_text(device.get("label"))
     if label:
         out.append(f"{driver}|label:{label}")
@@ -5961,12 +6014,14 @@ class SDRBackendManager:
                 continue
             # device_id 就是桌面端存连接参数用的那个键：两边同名才能互斥。
             backend.device.device_id = key
-            # 别名（序列号 / 枚举序号 / 显示名）：设备被占用时读不到序列号，
-            # 竞争者只能算出序号键，登记时一并带上才能互相认出来。
+            # 别名（序列号 / 枚举序号 / 总线位置 / 显示名）：设备被占用时
+            # 读不到序列号，竞争者只能算出这些键，登记时一并带上才能互相认出。
             try:
                 backend._identity_aliases = device_identity_aliases(dev)
+                backend._identity_quality = _quality
             except Exception:  # noqa: BLE001 - 别名缺了不影响连接
                 backend._identity_aliases = None
+                backend._identity_quality = None
             self._keep(backend)
 
         # SpyServer 不参与 enumerate（枚举不覆盖该源），仍走 env 显式登记。
@@ -6186,7 +6241,11 @@ class SDRBackendManager:
                 new_did = backend.device.device_id
                 claimed, holder = claim_active_owner(
                     AI_OWNER, new_did,
-                    aliases=getattr(backend, "_identity_aliases", None))
+                    aliases=getattr(backend, "_identity_aliases", None),
+                    # serial/uri 可得时它就是身份：换 USB 口不该变成另一台设备，
+                    # 所以这种身份只按主键匹配，别名不参与。
+                    allow_alias_match=(getattr(backend, "_identity_quality", None)
+                                       != IDENTITY_STABLE))
                 if not claimed:
                     self.last_conflict = owner_conflict_text(holder)
                     self.last_connect_notice = self.last_conflict

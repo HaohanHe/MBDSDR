@@ -140,7 +140,7 @@ def _record_owner_calls(monkeypatch, dp, claim_result=(True, {}), ):
     calls = []
     monkeypatch.setattr(
         dp, "_claim_owner",
-        lambda owner, dev, aliases=None: (
+        lambda owner, dev, aliases=None, allow_alias_match=True: (
             calls.append(("claim", owner, dev)) or claim_result))
     monkeypatch.setattr(
         dp, "_release_owner",

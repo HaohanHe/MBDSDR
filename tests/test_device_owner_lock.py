@@ -355,3 +355,113 @@ def test_aliases_include_serial_index_and_label():
     assert keys[0] == "rtlsdr|serial:777"
     assert "rtlsdr|index:0" in keys
     assert "rtlsdr|label:RTL-SDR #0" in keys
+
+
+def test_aliases_include_usb_bus_port_when_available():
+    """bus/port 被占用时也读得到（不需要 open），是 serial 读不到时的替代依据。"""
+    dev = {"driver": "rtlsdr", "serial": "777", "label": "RTL-SDR #0",
+           "bus": 1, "port": 3, "device_args": {"index": 0}}
+    keys = sb.device_identity_aliases(dev)
+    assert "rtlsdr|bus:1|port:3" in keys
+
+
+def _seed_many(path, records) -> None:
+    """一次写多条占用记录（模拟两台设备同时被别的进程占着）。"""
+    path.write_text(json.dumps({
+        "version": 1,
+        "owners": {dev: rec for dev, rec in records},
+    }), encoding="utf-8")
+
+
+def _live_record(child, device_id, aliases):
+    return {"owner": "desktop", "pid": child.pid,
+            "proc_start": sb._proc_start_time(child.pid),
+            "device_id": device_id, "aliases": list(aliases),
+            "claimed_at": time.time()}
+
+
+def test_ambiguous_alias_refuses_instead_of_guessing(_registry):
+    """两条登记共用同一组备用标识 → 必须拒绝，不许取第一条。
+
+    猜错比拒绝坏得多：拒绝只要用户换一台设备，猜错会让两个进程分同一条流。
+    """
+    child = _spawn_child()
+    try:
+        aliases = ["rtlsdr|index:0", "rtlsdr|bus:1|port:2"]
+        _seed_many(_registry, [
+            ("rtlsdr|serial:AAA", _live_record(child, "rtlsdr|serial:AAA", aliases)),
+            ("rtlsdr|serial:BBB", _live_record(child, "rtlsdr|serial:BBB", aliases)),
+        ])
+        ok, holder = sb.claim_active_owner(sb.AI_OWNER, "rtlsdr|index:0")
+        assert ok is False
+        assert holder.get("reason") == "ambiguous_alias"
+        assert len(holder.get("candidates") or []) == 2
+
+        text = sb.owner_conflict_text(holder)
+        assert "无法唯一确定设备" in text
+        assert "AAA" in text and "BBB" in text
+
+        # 读侧同样不猜：返回歧义标记（真值），调用方一律按被占用处理。
+        seen = sb.get_active_owner("rtlsdr|index:0")
+        assert seen and seen.get("reason") == "ambiguous_alias"
+
+        # 别名有歧义时也不许释放任何一条（避免放错人）。
+        assert sb.release_active_owner("desktop", "rtlsdr|index:0") is False
+    finally:
+        _kill(child)
+
+
+def test_serial_identity_survives_usb_port_change(_registry):
+    """同一根棒子换 USB 口、serial 仍可读 → 仍是同一台设备（serial 优先）。"""
+    child = _spawn_child()
+    try:
+        old = {"driver": "rtlsdr", "serial": "777", "label": "RTL-SDR #0",
+               "bus": 1, "port": 2, "device_args": {"index": 0}}
+        moved = dict(old, port=6)
+        # 换口不改变身份键本身（bus/port 不进主键）。
+        assert sb.device_identity_key(old)[0] == sb.device_identity_key(moved)[0]
+        assert "rtlsdr|bus:1|port:6" in sb.device_identity_aliases(moved)
+
+        _seed(_registry, "rtlsdr|serial:777", child.pid,
+              sb._proc_start_time(child.pid),
+              aliases=sb.device_identity_aliases(old)[1:])
+
+        # serial 可得：只按主键认，换口后仍命中原记录。
+        holder = sb.get_active_owner("rtlsdr|serial:777",
+                                     allow_alias_match=False)
+        assert holder and holder["owner"] == "desktop"
+
+        ok, holder = sb.claim_active_owner(
+            sb.AI_OWNER, "rtlsdr|serial:777",
+            aliases=sb.device_identity_aliases(moved),
+            allow_alias_match=False)
+        assert ok is False, "换 USB 口不能把同一台设备变成第二台（否则会双开）"
+        assert holder.get("device_id") == "rtlsdr|serial:777"
+    finally:
+        _kill(child)
+
+
+def test_stable_identity_does_not_fall_back_to_aliases(_registry):
+    """serial 可得时序列号就是身份，别名（序号/标签/端口）一律不参与匹配。
+
+    与上一条互补：上一条证明「换口不换身份」，这一条证明「身份稳定时不去
+    翻别名」。别名是给读不到 serial 的竞争者用的替代依据，不是让 stable
+    身份绕开序列号去撞别人记录的后门——真被绕过去，两个进程就会分同一条流。
+    """
+    child = _spawn_child()
+    try:
+        # 故意让旧记录的别名里出现另一个 stable 键（登记内容异常/旧版本遗留
+        # 都可能是这种形状）：stable 查询若回落去翻别名，就会误拦这台设备。
+        _seed(_registry, "rtlsdr|serial:777", child.pid,
+              sb._proc_start_time(child.pid),
+              aliases=["rtlsdr|serial:999", "rtlsdr|index:0"])
+
+        # 对照：默认（允许别名回落）确实会撞上——说明下面那条不是空过。
+        assert sb.get_active_owner("rtlsdr|serial:999")["owner"] == "desktop"
+
+        ok, holder = sb.claim_active_owner(
+            sb.AI_OWNER, "rtlsdr|serial:999", allow_alias_match=False)
+        assert ok is True, "serial 可得时不该靠别名去撞别人的记录"
+        assert holder.get("device_id") == "rtlsdr|serial:999"
+    finally:
+        _kill(child)
