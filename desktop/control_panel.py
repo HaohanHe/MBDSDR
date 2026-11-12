@@ -467,7 +467,7 @@ class ControlPanel(QWidget):
         header.setChecked(expanded)
         header.blockSignals(False)
         header.setText(("▾ " if expanded else "▸ ") + title)
-        header.setToolTip(("收起" if expanded else "展开") + f"「{title}」分组")
+        header.setToolTip("收起这一组" if expanded else "展开这一组")
 
     def _on_fold_toggled(self, header: QToolButton, checked: bool) -> None:
         for h, g, t in self._fold_sections:
