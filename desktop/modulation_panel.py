@@ -19,6 +19,7 @@ from typing import Optional
 import numpy as np
 
 from constants import DEFAULT_SAMPLE_RATE_HZ
+from readouts import format_bandwidth_hz
 
 from PySide6.QtCore import Qt, QThread, Signal
 from PySide6.QtWidgets import (
@@ -257,7 +258,7 @@ class ModulationPanel(QWidget):
         self.conf_bar.setFormat("%p%")
         self.conf_bar.setValue(int(conf * 100))
         self.conf_val.setText(f"{conf*100:.0f}%")
-        self.bw_label.setText(f"{bw/1e3:.1f} kHz" if bw > 0 else "--")
+        self.bw_label.setText(format_bandwidth_hz(bw, zero_text="--"))
         self.sr_hint_label.setText(
             f"{sym/1e3:.1f} kBd" if sym else "--")
         self.suggest_list.clear()

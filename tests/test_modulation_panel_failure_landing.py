@@ -63,3 +63,28 @@ def test_new_attempt_clears_previous_failure(qapp, monkeypatch):
         assert "识别中" in panel.status_label.text()
     finally:
         panel.close()
+
+
+def test_bandwidth_readout_comes_from_readouts(qapp, monkeypatch):
+    """A01：带宽读数只有 readouts.format_bandwidth_hz 一个产生点。
+
+    就地 f-string 的旧写法对 500 Hz 显示「0.5 kHz」、对 2.5 MHz 显示
+    「2500.0 kHz」、对 0 显示「0.0 kHz」；唯一口径分别是 500 Hz /
+    2.500 MHz / --。断言直接与 readouts 的输出比对，改回就地拼装即变红。
+    """
+    from types import SimpleNamespace
+
+    import readouts
+    from desktop import modulation_panel as mp
+
+    monkeypatch.setattr(mp, "_KERNEL_AVAILABLE", True)
+    panel = mp.ModulationPanel()
+    try:
+        for bw in (0.0, 500.0, 2_400.0, 12_500.0, 2_500_000.0):
+            panel._on_done(SimpleNamespace(
+                modulation="FM", confidence=0.9, bandwidth=bw,
+                symbol_rate_hint=0.0, suggestions=[]))
+            assert panel.bw_label.text() == readouts.format_bandwidth_hz(
+                bw, zero_text="--"), f"bw={bw} 的读数必须来自 readouts"
+    finally:
+        panel.close()
