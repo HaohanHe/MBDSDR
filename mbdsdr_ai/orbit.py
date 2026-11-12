@@ -106,6 +106,23 @@ PASS_ALGORITHM = "sgp4-coarse60-fine2-bisect0.25"
 
 _TLE_CACHE: Dict[str, Tuple[float, Tuple[str, str]]] = {}
 _CACHE_DIR = os.path.join(os.path.expanduser("~"), ".mbdsdr", "tle_cache")
+
+#: 测试/嵌入方隔离磁盘缓存的官方环境变量（优先于默认目录）。
+TLE_CACHE_DIR_ENV = "MBDSDR_TLE_CACHE_DIR"
+
+
+def tle_cache_dir() -> str:
+    """TLE 磁盘缓存目录的唯一读取入口。
+
+    默认 ``~/.mbdsdr/tle_cache``；``MBDSDR_TLE_CACHE_DIR`` 可覆盖。测试用
+    ``monkeypatch.setenv`` 指向 tmp，不再改写本模块私有名。
+    """
+    override = os.environ.get(TLE_CACHE_DIR_ENV)
+    if override:
+        return os.path.abspath(os.path.expanduser(override))
+    return _CACHE_DIR
+
+
 _CTX = ssl.create_default_context()
 
 # 网络门（杜绝无限阻塞 / 假造 TLE）：
@@ -211,18 +228,25 @@ def _tle_opener(url: str, timeout_s: float, deadline_s: float) -> bytes:
 _TLE_FETCHER: Optional[Any] = None
 
 
+def reset_tle_cache() -> None:
+    """清空进程内 TLE 缓存并丢弃已构造的 fetcher（测试/嵌入方官方入口）。"""
+    global _TLE_FETCHER
+    _TLE_CACHE.clear()
+    _TLE_FETCHER = None
+
+
 def _get_fetcher():
     """单例 TLE 获取器；缓存目录/内存字典用 provider 动态读取。
 
-    provider 形式让测试仍可 monkeypatch ``orbit._CACHE_DIR`` /
-    ``orbit._TLE_CACHE`` 生效（与重构前行为一致）。
+    provider 形式让测试用 ``MBDSDR_TLE_CACHE_DIR`` + :func:`reset_tle_cache`
+    切换隔离环境，不再改写本模块私有名。
     """
     global _TLE_FETCHER
     if _TLE_FETCHER is None:
         from .tle_fetch import FetchPolicy, TleFetcher
         _TLE_FETCHER = TleFetcher(
             opener=_tle_opener,
-            cache_dir_provider=lambda: _CACHE_DIR,
+            cache_dir_provider=lambda: tle_cache_dir(),
             memory_provider=lambda: _TLE_CACHE,
             offline_provider=network_disabled,
             clock=time.time,
