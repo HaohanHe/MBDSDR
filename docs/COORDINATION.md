@@ -2378,32 +2378,48 @@ unreachable commit 逐棵读也没有——它从未落地。而后续判断（�
 
 ```
 python scripts/file_claim.py claim   desktop/main_window.py --owner 操作逻辑线 [--ttl-min 10]
-python scripts/file_claim.py claim   desktop/main_window.py --owner 操作逻辑线 --token <凭据>   # 续租
+python scripts/file_claim.py claim   desktop/main_window.py --owner 操作逻辑线 --token <凭据>   # 续租（不带则读 sidecar）
 python scripts/file_claim.py claim   desktop/main_window.py --owner 操作逻辑线 --adopt-legacy  # 旧格式迁移
+python scripts/file_claim.py release desktop/main_window.py --owner 操作逻辑线                  # 自动读 sidecar
 python scripts/file_claim.py release desktop/main_window.py --owner 操作逻辑线 --token <凭据>
 python scripts/file_claim.py status  [desktop/main_window.py]
 ```
 
 - **claim 在第一次 Edit 之前**（不是"看完代码准备改"，是动手那一刻）。
-- **claim 成功时签发一次性凭据**：`--token <32 位十六进制>`。它只在 claim 成功时
-  打印这一次，占位文件里只存它的 sha256（`token_sha256`）。凭据丢了没有找回入口，
-  只能等 TTL 过期后重新 claim（会签发新凭据）或走 takeover。
-- **续租必须带凭据**：再次 `claim` 同一路径并带 `--token` 才刷新心跳。不带凭据时
-  即使 owner 名相同也会被拒绝——**同名不等于同一持有者**。
-- **release 必须带凭据**：`release --owner X --token <凭据>`，凭据的 sha256 与占位
-  文件里登记的一致才放行（`hmac.compare_digest`）。**同名不再能互相释放**：两条都
-  叫 `W81线` 的线各自持有不同凭据，A 用 B 的名字释放 B 的 claim 会失败。只有凭据
-  持有者能释放；互相解锁等于没有锁。
+- **claim 成功时签发凭据并自动落盘**：`--token <32 位十六进制>` 打印一次，同时写到
+  占位文件同目录的 `<claim_id>.token`（best-effort 0600）；占位文件里只存它的 sha256
+  （`token_sha256`）。续租、`release` 不带 `--token` 时自动读这份 sidecar，进程退出
+  后仍可用——**不再要求人手保存凭据**。只有 sidecar 写入失败时才会显式告警，此时才
+  需要手工保存 `--token`。
+- **续租必须带凭据**：再次 `claim` 同一路径并带 `--token`（或由 sidecar 自动补上）
+  才刷新心跳；显式带 `--token` 时还会顺手修复 sidecar。同名但凭据不同会被拒绝——
+  **同名不等于同一持有者**。
+- **release 必须带凭据**：`release --owner X --token <凭据>`；不显式带时，仅当 owner
+  名与当前持有者一致才自动读 sidecar。凭据 sha256 与占位文件登记值一致才放行
+  （`hmac.compare_digest`）。**同名不再能互相释放**：两条都叫 `W81线` 的线各自持有
+  不同凭据，A 用 B 的名字释放 B 的 claim 会失败。release 成功后删除 sidecar。
+- **旧凭据的失效时机**：takeover 和过期夺取会用新 token 覆盖旧 sidecar，并改写占位
+  文件里的 `token_sha256`，旧凭据与旧 sidecar 一并作废；`release` 成功则删除 sidecar。
+- **fail-closed**：sidecar 不存在、被删、或与占位文件哈希不匹配时，release 和续租
+  一律拒绝，不会退化成「按 owner 名放行」。报错给三条出路：① 显式带 `--token`；
+  ② 等 TTL 过期后重新 claim；③ 走 takeover（需 pid 已死 + 过期/无在途之一）。
+- **边界（能力文件 ≠ 身份证明）**：sidecar 谁拿到谁就能出示，是能力文件而非身份
+  证明。同一账户、且 owner 名完全相同的另一条线仍能读到它并释放；这层隔离靠的是
+  owner 名 + 凭据一致，不是文件权限。不同名会话没有 token 一律拒绝；把 sidecar 删掉
+  也同样拒绝。
 - **release 在 `git commit` 成功之后**（commit 失败就还持有着，别提前放）。
 - **旧格式 claim 迁移**：落地前写入的 claim 只有 owner 名、没有凭据，`status` 会显示
   `id=legacy(名不可作身份)`。这种 claim 的 `claim`/`release` 都不按名字放行。原持有者
   需显式执行 `claim <path> --owner <原 owner> --adopt-legacy` 迁移一次：打印
-  `CLAIM UPGRADED` 并签发新凭据，**这是唯一一次按 owner 名匹配**；之后续租/释放都要
-  带新凭据。不迁移就只能等 TTL 过期后重新 claim 或 takeover。
+  `CLAIM UPGRADED`、签发新凭据并落 sidecar，**这是唯一一次按 owner 名匹配**；之后
+  续租/释放走 sidecar 自动凭据（或显式 `--token`）。不迁移就只能等 TTL 过期后重新
+  claim 或 takeover。
 - 超过 TTL 没续租视为过期，别人可夺取；夺取会打印
-  「原持有者 X 已超时 N，请确认它真的停了」，并给新持有者签发新凭据（旧凭据作废）。
+  「原持有者 X 已超时 N，请确认它真的停了」，并给新持有者签发新凭据（覆盖 sidecar，
+  旧凭据作废）。
 - 状态文件 `D:\mbdsdr\.locks\claims.json`，占位文件 `D:\mbdsdr\.locks\claims\*.claim`，
-  与既有 `qt_test.lock` 同目录；不写 C 盘。
+  凭据 sidecar `D:\mbdsdr\.locks\claims\<claim_id>.token`，与既有 `qt_test.lock` 同目录；
+  不写 C 盘。
 - 互斥由操作系统裁决：占位文件 `O_CREAT|O_EXCL` 原子创建，续租/夺取/释放都在
   文件字节锁（Windows `msvcrt.locking`）里完成，不是"读 JSON 再写 JSON"。
 
