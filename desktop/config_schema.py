@@ -359,8 +359,8 @@ ALL_ITEMS: Tuple[SettingItem, ...] = (
               "-20 ≈ 16 dB（只放行强信号）。滑块数字沿用旧键名，但含义已是相对余量；"
               "噪声基线由解调后的谱峰/谱中位自动标定，切换模式或改变增益会重标。"
               "余量越高越容易切断弱信号，越低越容易放过底噪。"),
-        source="mbdsdr_ai/squelch.py:54-62 SQUELCH_MIN/MAX/默认值与余量映射；"
-               "margin_threshold_db() 为唯一换算入口",
+        source="mbdsdr_ai/squelch.py SQUELCH_MIN_DBFS/SQUELCH_MAX_DBFS/"
+               "DEFAULT_SQUELCH_DBFS 与余量映射；margin_threshold_db() 为唯一换算入口",
     ),
     SettingItem(
         key="tuning_step_hz", group="频谱与解码", kind="enum",
