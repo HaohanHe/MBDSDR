@@ -275,7 +275,7 @@ pre-commit**：pre-commit 现在只跑 claim 范围 + claim 台账 + 暂存区�
 
 | 脚本 | 入口 | 什么时候跑 | 谁跑 | 复核 |
 | --- | --- | --- | --- | --- |
-| `scripts/verify_claims.py` | 自动：`release_check.py --steps docs` | 每次发版第一步；`--check-lines --strict-lines` 不通过即 FAIL（实测 33.7s；2026-11-13 已把 38 条坐标漂移逐条真修，现绿、豁免 0） | 发版人 | 2027-01 |
+| `scripts/verify_claims.py` | 自动：`release_check.py --steps docs` | 每次发版第一步；`--check-lines --strict-lines` 不通过即 FAIL（实测 33.7–40.6s；2026-11-13 已把 38 条坐标漂移逐条真修，现绿、豁免 0） | 发版人 | 2027-01 |
 | `scripts/check_rollback_table.py` | 自动：`release_check.py --steps docs` | 发版前；§6.10.2 表格改动后本地跑（2.3s） | 发版人 / 表格改动者 | 2027-01 |
 | `scripts/check_generated_artifacts.py` | 自动：`release_check.py --steps gen_reconcile` | 发版前（3.7s），同时覆盖 `gen_mcp_tools_doc` 的产物 | 发版人 | 2027-01 |
 | `scripts/check_action_duplication.py` | 自动：`release_check.py --steps action_dup` | 发版前；菜单/QAction 增改后本地跑 `--gate`（5.9s，需 Qt/offscreen） | 发版人 / UI 改动者 | 2027-01 |
