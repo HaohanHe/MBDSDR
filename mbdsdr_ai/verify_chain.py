@@ -93,14 +93,43 @@ def _decode_field(raw: bytes, spec: Dict[str, Any]) -> Any:
     return v
 
 
+def _decode_bits(payload: bytes, bit_offset: int, bit_len: int) -> int:
+    """按 MSB-first 从载荷中取一段无符号位域（bit_offset 以帧首为 0）。"""
+    total = len(payload) * 8
+    if bit_offset < 0 or bit_len <= 0 or bit_offset + bit_len > total:
+        raise ValueError(
+            f"位字段越界：bit_offset={bit_offset} bit_len={bit_len}，"
+            f"载荷仅 {len(payload)} 字节（{total} bit）——布局与帧长不匹配")
+    v = 0
+    for i in range(bit_offset, bit_offset + bit_len):
+        v = (v << 1) | ((payload[i >> 3] >> (7 - (i & 7))) & 1)
+    return v
+
+
 def extract_fields(payload: bytes, *,
                    layout_name: str,
                    ) -> Dict[str, Any]:
-    """帧载荷 → 按布局字段表逐字段抽取（offset/len/type/scale/unit）。"""
+    """帧载荷 → 按布局字段表逐字段抽取（offset/len/type/scale/unit）。
+
+    字段若声明 ``bit_len``，则走位级路径：``bit_offset``（以帧首为 0 的
+    绝对位偏移，MSB-first）+ ``bit_len`` 取无符号整数，``type`` 须为
+    ``uint``；未声明 ``bit_len`` 的旧字段仍走原字节路径，行为不变。
+    """
     layout = load_frame_layout(layout_name)
     fields: Dict[str, Any] = {}
     for spec in layout.get("fields", []):
         name = str(spec.get("name"))
+        if spec.get("bit_len") is not None:
+            ftype = str(spec.get("type", "uint"))
+            if ftype != "uint":
+                raise ValueError(
+                    f"位字段 {name!r} 类型 {ftype!r} 未支持（位级只支持 uint）")
+            v: Any = _decode_bits(payload, int(spec.get("bit_offset", 0)),
+                                  int(spec["bit_len"]))
+            if "scale" in spec:
+                v = v * float(spec["scale"])
+            fields[name] = {"value": v, "unit": spec.get("unit", "")}
+            continue
         offset = int(spec.get("offset", 0))
         length = int(spec.get("len", 0))
         if name == "data" and length < 0:  # 其余全部
