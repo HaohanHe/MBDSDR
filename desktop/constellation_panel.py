@@ -36,6 +36,7 @@ from PySide6.QtWidgets import (
     QCheckBox, QGroupBox, QFormLayout, QSpinBox, QSizePolicy, QButtonGroup,
 )
 
+from constants import cons_of_talker as _cons_of_talker
 from tokens import tokens
 
 
@@ -59,27 +60,6 @@ _CONS_COLORS = {
     "未知": "#8892A6",
 }
 _CONS_SHORT = {"BeiDou": "北斗"}
-
-
-def _cons_of_talker(talker: str, prn) -> str:
-    """NMEA talker → 星座名（口径同 rf_sky_view._talker_to_constellation）。"""
-    t = (talker or "").upper()
-    if t == "GP":
-        return "GPS"
-    if t == "GL":
-        return "GLONASS"
-    if t == "GA":
-        return "Galileo"
-    if t in ("GB", "BD"):
-        return "BeiDou"
-    if t == "GN":
-        try:
-            p = int(prn)
-        except (TypeError, ValueError):
-            return "未知"
-        if 65 <= p <= 96:
-            return "GLONASS"
-    return "未知"
 
 
 def _sat_used(sat: dict, used) -> bool:
