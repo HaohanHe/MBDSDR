@@ -3,14 +3,19 @@
 
 覆盖：
   1. 主窗口 `fill_sample_rate_combo`：每一项文案 == `format_sample_rate(itemData)`；
-  2. 「未知」项 `data is None`，其文案承诺的默认值与应用处
-     `currentData() or DEFAULT_SAMPLE_RATE_HZ` 同源；
+  2. 「未知」项 `data is None` 且**不夹带任何 MS/s 数字**（43ffe3f1 起：写
+     2.4 MS/s 会被读成设备能力），应用侧兜底由 `connect_sample_rate_hz`
+     唯一决定；
   3. 模块面板未连接态：只一项显式未知说明、置灰，不静默列全表（旧静态 5 档）；
   4. 模块面板已连接且能力受限态：档位 = 后端离散表 ∩ 设备量程。
 
+设备样例必须显式标 `capability_status`（16042e4b 起：量程没标来源一律按
+未知处理，展示层不替生产者补来源）。缺这一步，产品会诚实地只给「档位
+未知」——那不是缺陷，是本用例的样例不完整。
+
 反证（本地手工复现）：
   * 把任一文案改回 "2.048 MHz" → 用例 1 红；
-  * 把未知项 data 换成 2_400_000 → 用例 2 红；
+  * 把未知项文案改回 "未知 · 2.400 MS/s"（夹带数字）→ 用例 2 红；
   * 把 module_panel 的静态档位表加回来 → 用例 3 红（未连接也列出 5 档）。
 """
 import os
@@ -27,15 +32,18 @@ from PySide6.QtWidgets import QApplication, QComboBox  # noqa: E402
 
 app = QApplication.instance() or QApplication(sys.argv)
 
-from constants import DEFAULT_SAMPLE_RATE_HZ, format_sample_rate  # noqa: E402
+from constants import (  # noqa: E402
+    DEFAULT_SAMPLE_RATE_HZ, connect_sample_rate_hz, format_sample_rate)
 from main_window import fill_sample_rate_combo  # noqa: E402
 from module_panel import ModulePanel  # noqa: E402
 
 #: RTL-SDR 类设备：离散档位表 ∩ [1.0, 2.56] MHz → 8 档
+#: 量程必须带来源（declared/probed），否则产品按「来源未标注=未知」处理。
 _RTL_DEVICE = {
     "label": "RTL-SDR",
     "driver": "rtlsdr",
     "sample_rate_range": (1_000_000, 2_560_000),
+    "capability_status": {"sample_rate_range": "declared"},
 }
 
 
@@ -53,15 +61,17 @@ def test_every_combo_text_is_formatted_from_item_data():
 
 
 def test_unknown_item_is_none_and_promise_matches_the_fallback():
-    """未知项 data=None；文案里的默认值必须与 `currentData() or DEFAULT...` 同源。"""
+    """未知项 data=None、文案不夹带 MS/s；应用侧兜底由唯一入口决定。"""
     combo = QComboBox()
     fill_sample_rate_combo(combo, None)
     assert combo.count() == 1, "量程未知时不得列出任何档位"
     assert combo.itemData(0) is None, "未知项必须是 data=None（应用侧才走兜底）"
-    assert "未知" in combo.itemText(0)
-    assert format_sample_rate(DEFAULT_SAMPLE_RATE_HZ) in combo.itemText(0), \
-        "未知项文案没承诺应用侧真正会用的默认档"
-    assert float(combo.currentData() or DEFAULT_SAMPLE_RATE_HZ) \
+    text = combo.itemText(0)
+    assert "未知" in text
+    # 43ffe3f1：未知态不许出现 MS/s 数字——那会被读成「设备能跑这个速率」。
+    assert "MS/s" not in text and "Hz" not in text, \
+        f"未知项文案夹带了采样率数字，会被读成设备能力: {text!r}"
+    assert float(connect_sample_rate_hz(combo.currentData())) \
         == float(DEFAULT_SAMPLE_RATE_HZ)
 
 
