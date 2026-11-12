@@ -41,10 +41,14 @@ from freq_display import FreqDisplay  # noqa: E402
 
 
 @pytest.fixture
-def clean_window_settings(tmp_path, request):
+def clean_window_settings(isolated_profile):
     """隔离窗口几何与顶层形态持久化（QSettings + gui_config.json +
-    DesktopSettings 三通道）：备份→清空→跑→还原，并把 ``%APPDATA%``
-    重定向到临时目录——测试绝不碰用户真实的 ``desktop_settings.json``。
+    DesktopSettings 三通道）：备份→清空→跑→还原。
+
+    ``isolated_profile``（module 级）已把 HOME/USERPROFILE/APPDATA/
+    LOCALAPPDATA、QSettings 与 layout_store 全部重定向到本模块专属临时目录，
+    下面这些路径都在临时 profile 内——真实用户配置一个字节都不碰；真去写
+    真实路径会被 conftest 的写保护（防线 4c）当场拦下。
 
     为什么必须隔离 ``app_mode``（2026-11-05 实测，P0）：星象仪形态会把
     ``app_mode=planetarium`` 持久化到 ``%APPDATA%/mbdsdr/desktop_settings.json``；
@@ -57,20 +61,6 @@ def clean_window_settings(tmp_path, request):
     注意：**不要用 PowerShell 直接改这个 JSON**（``Set-Content -Encoding
     UTF8`` 在 PS 5.1 会写 BOM，应用会把它当损坏文件改名备份）。
     """
-    appdata_backup = os.environ.get("APPDATA")
-
-    def _restore_appdata():
-        if appdata_backup is None:
-            os.environ.pop("APPDATA", None)
-        else:
-            os.environ["APPDATA"] = appdata_backup
-
-    # 先登记再改：yield 之前的 setup 一旦抛异常，写在 yield 之后的还原本
-    # 来永远不执行，APPDATA 会漏给同一进程里的后续文件。finalizer 在
-    # setup 失败时也会跑。
-    request.addfinalizer(_restore_appdata)
-    os.environ["APPDATA"] = str(tmp_path / "appdata")
-    os.makedirs(os.environ["APPDATA"], exist_ok=True)
     s = QSettings("MBDSDR", "Desktop")
     keys = ("window_geometry", "three_column_sizes",
             "three_column_layout_version")
@@ -80,12 +70,10 @@ def clean_window_settings(tmp_path, request):
     s.sync()
     import json as _json
     gui_cfg = os.path.expanduser("~/.mbdsdr/gui_config.json")
-    cfg_backup = None
     if os.path.exists(gui_cfg):
-        with open(gui_cfg, "r", encoding="utf-8") as f:
-            cfg_backup = f.read()
         try:  # 摘掉 window 键：_load_gui_config 的 100ms 定时器不再改几何
-            data = _json.loads(cfg_backup)
+            with open(gui_cfg, "r", encoding="utf-8") as f:
+                data = _json.load(f)
             if "window" in data:
                 data.pop("window")
                 with open(gui_cfg, "w", encoding="utf-8") as f:
@@ -99,10 +87,6 @@ def clean_window_settings(tmp_path, request):
         else:
             s.setValue(k, v)
     s.sync()
-    if cfg_backup is not None:
-        with open(gui_cfg, "w", encoding="utf-8") as f:
-            f.write(cfg_backup)
-    # APPDATA 已由上面的 finalizer 还原（setup 失败时也生效）。
 
 
 def _stop_startup_timers(win):
