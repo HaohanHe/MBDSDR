@@ -188,7 +188,7 @@ class MBDSDRAgent:
             pass
         return (None, None)
 
-    def __init__(self, config: AgentConfig = None):
+    def __init__(self, config: AgentConfig = None, sdr_session=None):
         self.config = config or AgentConfig()
 
         # 初始化各子系统
@@ -316,6 +316,13 @@ class MBDSDRAgent:
         # 注册自进化工具（如果启用）
         if self.evolution:
             self._register_evolution_tools()
+
+        # SDR 会话注入：桌面传入 sdr_session 时，agent.sdr_manager 就是它，
+        # 而不是另起一个后端管理器——否则 AI 断开的和桌面正在收的不是同一个
+        # 实例（AI 回成功、电台还在收）。必须发生在 register_sdr_tools 之前：
+        # 工具 handler 是注册时闭包捕获 mgr 的，事后再换对象不会生效。
+        if sdr_session is not None:
+            self.sdr_manager = sdr_session
 
         # 注册 SDR 专用工具（38个）
         register_sdr_tools(self)

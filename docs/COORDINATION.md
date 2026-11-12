@@ -2230,6 +2230,33 @@ No supported devices found），GNSS+SDR 同开复验没做成；离线那次
 - 回退：`git checkout -- mbdsdr_ai/sdr_backend.py` 并恢复 xfail 标记，
   或 `git revert <接管提交>`
 
+### 等待项：AI SDR 会话显式注入（2026-11-12）
+
+> 背景：桌面 `MainWindow._active_sdr_backend` 与 `agent.sdr_manager` 原本是
+> 两个互不通信的实例——用户对 AI 说「断开」，AI 断开的是自己那个，桌面里
+> 正在收的那台仍开着（状态说成功、物理世界没变）。
+
+- 已落：
+  - `mbdsdr_ai/desktop_sdr_session.py`：`agent.sdr_manager` 的桌面委托。
+    `get_active()` 直通桌面；`connect`/`disconnect`/`switch_device` 回 GUI
+    线程走桌面的 `_connect_backend`/`_teardown_connection`，**桌面确认生效
+    后才返回 True**；VFO/扫描/IQ 等仍委托内部真 `SDRBackendManager`。
+  - `MBDSDRAgent.__init__(config, sdr_session=None)`：在 `register_sdr_tools`
+    之前注入（handler 是注册时闭包捕获 `mgr`，事后替换无效）。
+    `mbdsdr_ai/sdr_tools.py` 未改。
+  - `AIPanel._create_agent` 传 `DesktopSdrSession(window=lambda: self.window())`。
+- **未落（等待项）**：`desktop/main_window.py` 的显式注入那一行
+  （`AIPanel(self)` 或 `set_sdr_session(...)`）。等该文件占用方放开后补。
+  **这一行不落，适配器就只能惰性解析窗口**：第一次工具调用才去
+  `AIPanel.window()` 取宿主，构造期是 None（面板无 parent 构造、后入布局）。
+- 惰性解析失败的后果（已实测，不是推测）：`connect`/`disconnect` 返回
+  False，`last_connect_notice` 写明「AI 侧尚未接上桌面窗口……这次不碰硬件，
+  也不假装成功」；`get_active()` 返回 None。**不会静默成功**。
+- 已知能力分歧（第 2 步范围外）：`connect_sdr` / `open_iq_file` 仍作用在
+  内部 manager 上，不随桌面会话走。
+- 守门：`tests/test_ai_sdr_single_authority.py`（10 条，含「桌面返回 True
+  但未生效 → 委托必须报失败」「解析不到窗口 → 显式拒绝」）。
+
 ### 6.2 共享文件清单（今天实际撞过的）
 
 - `desktop/main_window.py`

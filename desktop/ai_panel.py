@@ -271,6 +271,9 @@ class AIPanel(QWidget):
         self._conversation: List[Dict] = []
         self._tool_log: List[ai_steps.StepRecord] = []
         self.agent: Optional["MBDSDRAgent"] = None
+        #: AI 侧 SDR 会话（桌面委托）。惰性解析宿主窗口，首次工具调用才取，
+        #: 见 mbdsdr_ai/desktop_sdr_session.py 与 docs/COORDINATION.md 等待项。
+        self._sdr_session_obj = None
         self._worker_thread: Optional[QThread] = None
         self._worker: Optional[AIWorker] = None
         self._is_processing = False
@@ -697,11 +700,24 @@ class AIPanel(QWidget):
     def _create_agent(self, config):
         """创建 agent，并沿用旧会话的天空硬件能力账本（不重新追问）。"""
         old_ledger = getattr(self.agent, "sky_ledger", None) if self.agent else None
-        agent = MBDSDRAgent(config)
+        agent = MBDSDRAgent(config, sdr_session=self._sdr_session())
         if old_ledger is not None:
             agent.sky_ledger = old_ledger
             agent.context_manager.capability_ledger = old_ledger
         return agent
+
+    def _sdr_session(self):
+        """AI 的 SDR 管理器：桌面会话委托（不是另开一套后端）。
+
+        窗口惰性解析：``lambda: self.window()`` 在首次工具调用时才求值——
+        本面板是无 parent 构造、后入布局的，构造期 window() 还是 None。
+        """
+        session = self._sdr_session_obj
+        if session is None:
+            from mbdsdr_ai.desktop_sdr_session import DesktopSdrSession
+            session = DesktopSdrSession(window=lambda: self.window())
+            self._sdr_session_obj = session
+        return session
 
     def init_agent(self, api_key: str = "", base_url: str = "", model: str = ""):
         """初始化 AI Agent（由外部调用）。

@@ -264,7 +264,7 @@ class TestAgentInitAndMcpRegistration:
         monkeypatch.setattr(ap, "AI_CORE_AVAILABLE", True)
         sentinel = {}
 
-        def _fake_agent(config):
+        def _fake_agent(config, **_kwargs):
             sentinel["config"] = config
             return _StubAgent()
 
@@ -280,7 +280,7 @@ class TestAgentInitAndMcpRegistration:
         monkeypatch.setenv("MBDSDR_API_KEY", "env-key")
         seen = {}
 
-        def _fake_agent(config):
+        def _fake_agent(config, **_kwargs):
             seen["config"] = config
             return _StubAgent()
 
@@ -295,7 +295,7 @@ class TestAgentInitAndMcpRegistration:
         panel.register_mcp_tools(tools, lambda n, p: None)
         assert panel.agent is None
         assert "已缓存 1 个硬件工具 schema" in _view_text(panel)
-        monkeypatch.setattr(ap, "MBDSDRAgent", lambda config: _StubAgent())
+        monkeypatch.setattr(ap, "MBDSDRAgent", lambda config, **_kwargs: _StubAgent())
         panel.init_agent(api_key="k")
         assert panel.agent.registered_mcp is not None
         assert panel.agent.registered_mcp[0] == tools
