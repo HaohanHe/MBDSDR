@@ -123,14 +123,15 @@
 **机制 A：转发器成对模型（`core/domain/model/SatRadio.kt:24-36`）**
 一个条目同时持有 `downlinkLow / downlinkHigh / downlinkMode / uplinkLow / uplinkHigh / uplinkMode / invert / isAlive`，UI 用 `selectedTransponderUuid` 做**单一选择态**（`feature/radar/RadarState.kt:34-42`），选中后 TX/RX 两个频率由同一对象派生。
 - 我们的落点：`mbdsdr_ai/sat_links.py` + `mbdsdr_ai/data/sat_links.json`（现 8 颗星、每条只有一个 `freq_hz`；容差默认值见 `` `HEAD:mbdsdr_ai/sat_links.py:61` ``：`def identify_by_freq(freq_hz: float, tolerance_hz: float = 3000.0) -> List[Dict[str, Any]]:`）。
-- 该不该搬：**搬字段形状，不搬上行**。带宽区间 `low/high` 能让「点星即听」自动给出合适的 FFT 带宽，也让 `identify_by_freq` 的容差从全局常量变成「按条目带宽」；`invert`（线性转发器倒置）**待查**——本条「本地无此概念」缺封闭集定义行，按 §0.4 不得算已核。上行仍只走 `tc_uplink` 的确认 token，不进表。
+- 该不该搬：**搬字段形状，不搬上行**。带宽区间 `low/high` 能让「点星即听」自动给出合适的 FFT 带宽，也让 `identify_by_freq` 的容差从全局常量变成「按条目带宽」；`invert`（线性转发器倒置）**本地不存在**——封闭集证据 `` `HEAD:mbdsdr_ai/data/sat_links.json:14-15` ``：link 字面量字段只有 `direction/freq_hz/mode/baud/note`，无 `low/high/invert`；溯源只到卫星级（`:18` 的 `source`），未到每条带宽。上行仍只走 `tc_uplink` 的确认 token，不进表。
 - 搬的代价：8 条数据要补 low/high（需公开文档逐条溯源，属数据工作量）；`identify_by_freq` 签名要接受每条的带宽；星空页链路卡片加一行带宽/极性标签。
 
 **机制 B：极坐标雷达多星同盘（`feature/radar/RadarView.kt` + `RadarState.kt:57` `satTrack: List<OrbitalPos>`）**
 一屏画出所有在跟踪卫星的当前方位/仰角点，并保留一串历史点作拖尾；顺带 `shouldUseCompass` / `shouldShowSweep` 两个开关把「罗盘刻度」和「扫描线」解耦。
 - 我们的落点：`desktop/rf_sky_view.py:487`（方位盘标签生成）、`:8673`（`SatelliteTracker`）；`desktop/sat_track_panel.py` 只画当前一颗。
-- 该不该搬：**搬「多星同盘」**。现在换星就是换面板，看不到「哪几颗同时在天上」，这是卫星页的实质信息缺口。**待查**：本结论「我们未实现多星同盘」尚无 HEAD 行号证据（无封闭集定义行可引），按 §0.4 标待查。
-- 搬的代价：绘制循环 + 星座配色（要与现有 heatmap/星等配色共存），一个 `list[SkyObject]` 输入即可，不需要改轨道层。
+- **已核（2026-11-12，HEAD）**：天空图**已有多星同盘**——`desktop/rf_sky_view.py:8928` `for entry in self._catalog:` 逐星建 `SkyObject`，`:8959-8975` 每次 append，`:8991-8993` 每星带 10 分钟轨迹，`:8995` `set_objects(objs)` 一次画全部。原判断「换星就是换面板，看不到哪几颗同时在天上」是错的，只对专用雷达面板 `sat_track_panel` 成立（它按设计只画当前一颗）。
+- 该不该搬：**不搬**（能力已在天空图落地）；专用雷达面板补多星属可选增强，不是缺口。
+- 搬的代价：不适用（天空图已有多星）；专用雷达面板可选，成本为一个绘制循环。
 
 **机制 C：过境倒计时状态（`RadarState.kt:51-56` `currentPass` / `isTimeAos` / `isUtc`）**
 UI 只存「当前过境对象 + 现在处于 AOS 侧还是 LOS 侧 + 是否用 UTC 显示」，倒计时由 `aos/los - now` 派生，不另存秒数。
@@ -209,7 +210,7 @@ gpredict 没有频率预设或书签概念（它是跟踪器，不是接收机�
 **③ 无设备：他们的第三档是「占用即置灰，退出占用才写回」**
 
 - 机制：`src/gtk-rig-ctrl.c:1013-1031`，`engaged` 开关决定 `DevSel` / `DevSel2` 的 `set_sensitive`；**未占用时可改，占用期间置灰**。配置写回发生在退出占用的那一瞬 `setconfig(ctrl)`（`:1022`），另有进程退出时统一 `sat_cfg_save()`（`src/main.c:174`）。
-- 对照我们的 G12（「随数据禁用」vs「始终可用」两档）：gpredict 给的是**第三档**——不是「没数据就不能改」，而是「**设备会话期间不许改，值仍保留，断开时写回**」。**待查**：我们「有设备在跑时改采样率/增益要么立即生效、要么被禁」这一空档判断尚无 HEAD 行号证据（缺封闭集定义行），按 §0.4 不得算已核。
+- 对照我们的 G12（「随数据禁用」vs「始终可用」两档）：gpredict 给的是**第三档**——不是「没数据就不能改」，而是「**设备会话期间不许改，值仍保留，断开时写回**」。**已核（2026-11-12，HEAD）：我们没有第三档**——会话期间被切换的控件封闭集只有 `connect_btn` / `disconnect_btn` 两个（`HEAD:desktop/device_panel.py:499-506`：连接时 `connect_btn.setEnabled(False)` / `disconnect_btn.setEnabled(True)`，断开反之），采样率/增益不在该集合内，不存在「占用中只读、断开写回」。
 - 该不该搬：**搬概念**。给「设备会话」加一个占用态：会话内配置控件只读但不丢值，断开时一次性写回并持久化。
 - 代价：低。控件 `setEnabled` 一处开关 + 会话结束时的保存点；风险是「断开时写回」需要明确失败路径（写回失败要不要回滚到会话前的值），这一点 gpredict 没处理，我们得自己定。
 
@@ -222,9 +223,9 @@ gpredict 没有频率预设或书签概念（它是跟踪器，不是接收机�
 - 我们的对应：
   - 第三条（可见性跳过）**已同构且更彻底**——`desktop/rf_sky_view.py:2194/2254` 自适应渲染定时器，`:2211-2219` `showEvent`/`hideEvent` 直接停/启（注释写明「隐藏即停表、显示即恢复，不改变任何画面内容」）。
   - 第一条（TLE 定时刷新）**已核（2026-11-12，HEAD）**：我们**没有** 10 分钟周期任务；`desktop/main_window.py:13084-13103` 仅在 `tle_date` 距今天 ≥ 2 天时挂一次性 `_tle_boot_timer`（singleShot 1500 ms → `_on_update_sat_tle`），另有菜单 `:1605` 与面板「刷新星历」按钮 `:1891` 手动触发。与 gpredict 的 `g_timeout_add(600000, ...)` **不同构**，但也没有把 TLE 刷新放进启动路径。
-  - 第二条（面板是否懒创建）**待查**：本轮未核，不写成结论。
-- 该不该搬：第三条不搬（已有）；第一条不搬（按需刷新更适合我们，周期任务只增加网络与线程管理）；第二条**待查**后再定。
-- 代价：第二条若确实是启动时全量构造，改懒创建会牵动面板注册表与主题唯一出口，风险中等，不建议本轮动。
+  - 第二条（面板是否懒创建）**已核（2026-11-12，HEAD）**：我们**启动时全量构造，无懒创建**——`desktop/main_window.py:2246` `self._build_kernel_panels()` 在 `__init__` 内直接调用，`:10387` 该函数逐页 `new` 面板（`:10419` `self.bookmark_panel = BookmarkPanel()`、`:10508` 星座图、`:10520` 设备面板），卫星跟踪面板更早在 `:1888` `self.sat_track_panel = SatTrackPanel()`。与 gpredict 的懒创建相反。
+- 该不该搬：第三条不搬（已有）；第一条不搬（按需刷新更适合我们，周期任务只增加网络与线程管理）；第二条已核（我们是全量构造）——要学懒创建属新优化，不在本轮。
+- 代价：已确认是启动全量构造；改懒创建会牵动面板注册表与主题唯一出口，风险中等，不建议本轮动。
 
 ### 2.3 gqrx（`D:\mbdsdr\reference\gqrx`，C++/Qt + GNU Radio，GPL-3.0，213 文件 / 约 3.7 万行）
 
@@ -236,9 +237,9 @@ gpredict 没有频率预设或书签概念（它是跟踪器，不是接收机�
 
 `QTableView.activated` → `DockBookmarks::activated`（`dockbookmarks.cpp:104`）→ `emit newBookmarkActivated(freq, modulation, bandwidth)`（`:107`）→ `MainWindow::onBookmarkActivated`（`mainwindow.cpp:2275`）→ `setNewFrequency(freq)` + `selectDemod(demod)`，然后**带宽不硬居中**，而是按当前滤波预设的锚点落位：`lo+hi==0` 居中、`lo>=0&&hi>=0` 抬上边、`lo<=0&&hi<=0` 压下边（`:2287-2301`）。
 - 我们的落点：`desktop/bookmark_panel.py:63` `tune_requested = Signal(float, str, float)`、`main_window.py:10917` `_on_bookmark_tune_requested(freq_hz, mode, ...)` —— **面板路径与 gqrx 同构**（三参数 + 带宽）。
-- **缺口（确凿，2026-11-12 对 HEAD 核）**：频谱上点书签旗走的是另一条信号 `spectrum_widget.py:2542` `bookmark_activated = Signal(float)`，`main_window.py:8153-8166` 只按频率反查模式，**带宽被丢弃**（`:8159` 的 `_b` 取了不用）。同一书签两条激活路径参数集不一致，走旗子就丢带宽。
+- **缺口（确凿，2026-11-12 对 HEAD 核，已按封闭集复核）**：内部书签元组是 **4 元组 `(freq_hz, name, mode, builtin)`，根本没有带宽字段**——写入 `main_window.py:8118-8119` 追加 `(float(freq_hz), str(name), str(mode), False)`，加载 `:2056-2057` 取 `(b.freq_hz, b.name, b.mode, bool(b.builtin))`，持久化走 `FrequencyManager.add(name, freq, mode=...)`（`:8123-8125`，无带宽参数）。因此 `:8159` 的 `_b` 是 `builtin`，不是带宽；旧表述「旗子路径丢带宽」不准确：**两条路径都没有带宽可丢**，缺的是数据模型字段，不是某条链路。`spectrum_widget.py:2542` 仍是单参数 `Signal(float)`。
 - 该不该搬：**搬「三参数 + 锚点带宽」**。旗子路径也携带 (freq, mode, bandwidth)，复用 `_on_bookmark_tune_requested`，不要再留降级路径。
-- 代价：低。信号签名加参数 + 合并槽函数，约 20–30 行；风险是频谱侧 `_bookmarks` 元组的带宽字段目前未校验，需先确认写入端确实持久化了 bandwidth。
+- 代价：低。信号签名加参数 + 合并槽函数，约 20–30 行；前置工作是把书签元组从 4 元组扩成 5 元组（带宽字段），并同步写入/加载/`FrequencyManager.add` 三处。
 
 **机制 C：未选源时不进主界面（`src/applications/gqrx/main.cpp:157-167` + `mainwindow.cpp:372-396`）**
 
@@ -359,13 +360,15 @@ for (auto const& [name, _vfo] : vfos) {
 
 ## 3. 已核 / 待查 清点（2026-11-12，对 HEAD）
 
-口径：本节逐条列出上文出现过的「事实判断」类条目；纯裁定（不搬/暂不搬）不单独计入已核。编号保留原序号，第 2 条已移出，故 §3.1 实际 28 条。
+口径：本节逐条列出上文出现过的「事实判断」类条目；纯裁定（不搬/暂不搬）不单独计入已核。计数以实际条目为准。
 
-### 3.1 已核（28 条）
+> **口径对账（102 vs 33）**：`102` 是 §2.4 时间源普查的**行级命中数**（10 时间基准 + 46 动画节流 + 29 日志耗时 + 17 其他 = 102，覆盖 20 个文件），与本节 33 条**结论条目**不是同一张表；§0 项目清单是 45 个项目（21 + 24）。文件历史只有两次提交：`fc5d0876` 新建 410 行、`2e35798a` +35/−14，均为文本替换，**没有机制/专项条目被删**。
 
-**Look4Sat（4）**
+### 3.1 已核（33 条）
+
+**Look4Sat（5）**
 1. 机制 C 过境倒计时 + UTC 开关 —— 已落地（`sat_track_panel.py:156-167/281-318/560-599`）。
-2. （原第 2 条「机制 B 多星同盘未落地」已移入 §3.2——属未核的否定结论。）
+2. 机制 B 多星同盘 —— **已落地在天空图**（`rf_sky_view.py:8928` 逐星建对象、`:8995` 一次画全部）；专用雷达面板仍按设计只画一颗。
 3. 机制 A 数据形状 —— 8 颗星、每条单 `freq_hz`、`identify_by_freq` 默认 3000 Hz。
 4. 机制 D 观测点 —— 每次调用经 skyfield `Topos` 重建（`sat_passes.py:481/624/777`）。
 5. 机制 E SSTV 模式表 —— 与 Look4Sat 同构，无增量。
@@ -377,13 +380,13 @@ for (auto const& [name, _vfo] : vfos) {
 9. 机制 E 控制层自查 AOS/LOS —— 停止判据在 500 ms 闭环内（`main_window.py:13415-13422`）。
 10. 专项① 时间基准 —— 单一时间引擎 + `ClockGuard`，视图层不另造。
 11. 专项② 预设/书签 —— gpredict 无此概念，不适用。
-12. 专项③ 无设备 —— 第三档「占用即置灰、退出占用写回」成立。
+12. 专项③ 无设备 —— 第三档「占用即置灰、退出占用写回」在 gpredict 成立；我方无此档（见第 33 条）。
 13. 专项④-1 TLE 刷新 —— 无 10 分钟周期任务，仅陈旧时一次性 1.5 s 延迟刷新 + 手动刷新。
 
 **gqrx（4）**
 14. 机制 A 书签数据结构 —— 频率/名字/调制/带宽/共享标签 + CSV 明文。
 15. 机制 B 面板激活路径 —— 三参数（freq/mode/bandwidth）同构。
-16. 机制 B 旗子激活路径 —— 单参数，带宽被丢弃（`main_window.py:8153-8166`）。
+16. 机制 B 旗子激活路径 —— 单参数 `Signal(float)`；且内部书签元组为 4 元组、无带宽字段（`main_window.py:8118-8119/2056-2057/8123-8125`）。
 17. 机制 C 未选源 —— 配置未完成不进主界面，无空态。
 
 **satdump（5）**
@@ -404,28 +407,29 @@ for (auto const& [name, _vfo] : vfos) {
 **时间源普查（1）**
 29. 102 处 / 20 文件；时间基准 10、动画节流 46、日志耗时 29、其他 17；真缺口 7 处。
 
-### 3.2 待查（5 条）
+**补充核验（4）**
+30. gpredict 专项④-2 —— 面板启动全量构造、无懒创建（`main_window.py:2246/10387/1888`）。
+31. gqrx 机制 B 带宽持久化 —— 元组 4 字段无带宽，`FrequencyManager.add` 无带宽参数，**带宽不持久化**（`main_window.py:8118-8119/2056-2057/8123-8125`）。
+32. Look4Sat 机制 A `low/high` 与 `invert` —— link 字面量字段封闭集无 `low/high/invert`（`sat_links.json:14-15`）；`source` 只到卫星级（`:18`），逐条带宽溯源未做。
+33. gpredict 专项③ 我方占用态 —— 会话期间被禁控件只有 `connect_btn`/`disconnect_btn`，**确无第三档**（`device_panel.py:499-506`）。
 
-1. **gpredict 专项④-2**：面板是否在启动时全量构造（懒创建与否）——未核。
-2. **gqrx 机制 B**：频谱侧 `_bookmarks` 元组的 `bandwidth` 字段是否真的由写入端持久化——未核，合并旗子路径前必须确认。
-3. **Look4Sat 机制 A**：8 条转发器 `low/high` 的逐条公开溯源是否完成，以及 `invert` 是否真的完全不存在（缺封闭集定义行）——数据侧未核。
-4. **Look4Sat 机制 B**：多星同盘「未落地」——缺 HEAD 行号证据，未核。
-5. **gpredict 专项③**：我方「有设备在跑时改采样率/增益要么立即生效、要么被禁」的空档判断——缺 HEAD 行号证据，未核。
+### 3.2 待查（0 条）
+
+原 5 条待查已于 2026-11-12 全部结案（见 §3.4），当前无待查项。
 
 ### 3.3 待办（不计入上表）
 
-- Look4Sat B 多星同盘（排 C 之后）。
-- gpredict 专项③ 占用态（设备会话置灰 + 断开写回）。
+- gpredict 专项③ 占用态（设备会话置灰 + 断开写回）—— 采纳与否待定。
 - satdump E 类型声明（排 C 之后）。
-- gqrx B 旗子路径改为携带 (freq, mode, bandwidth)。
+- gqrx B 书签模型补带宽字段并合并旗子路径。
 - sdrpp A 窄带 CW/USB 回归用例。
 
-### 3.4 未核条目按「重复劳动风险」排序
+### 3.4 5 条待查的结案记录
 
-| 风险 | 条目 | 理由 |
-|---|---|---|
-| 高 | Look4Sat 机制 B：多星同盘「未落地」 | 若其实已有绘制路径，照此条会重做整块雷达视图。 |
-| 高 | gpredict 专项③：我方占用态空档 | 若空档已由 G12 或设备面板覆盖，会重复造「占用中可改/断开写回」。 |
-| 中 | gpredict 专项④-2：面板是否启动全量构造 | 机制在，构造时机未知；若已懒加载，改懒创建属纯重复。 |
-| 中 | gqrx 机制 B：带宽字段是否持久化 | 机制在，链路参数不全；误判会让旗子路径重复改造。 |
-| 低 | Look4Sat 机制 A：`low/high` 溯源 + `invert` 确认 | 数据与字段确认，误判只影响数据补齐，不产生重复代码。 |
+| 原风险 | 条目 | 结论 | 依据 |
+|---|---|---|---|
+| 高 | Look4Sat B 多星同盘 | **已核：其实已落地**（天空图多星） | `rf_sky_view.py:8928/8995` |
+| 高 | gpredict ③ 我方占用态空档 | **已核：确无第三档** | `device_panel.py:499-506` |
+| 中 | gpredict ④-2 面板懒创建 | **已核：启动全量构造，非懒创建** | `main_window.py:2246/10387/1888` |
+| 中 | gqrx B 带宽持久化 | **已核：未持久化（模型无该字段）** | `main_window.py:8118-8119/2056-2057/8123-8125` |
+| 低 | Look4Sat A `low/high` + `invert` | **已核：字段不存在；逐条带宽溯源未做** | `sat_links.json:14-15/18` |
