@@ -190,6 +190,10 @@ def test_control_panel_passthrough_tooltips_self_describe(qapp):
         p.set_ppm_applied(p.ppm_spin.value())
         p.set_offset_tuning_applied(p.offset_check.isChecked())
         p.set_vfo_bandwidth(12_500)
+        # 能力收紧：不支持 AGC 走「基础说明 + 原因」那条，增益仍支持走
+        # 「只写基础说明」那条，两条透传分支都要渲染（control_panel.py:392/394）。
+        p.set_device_capabilities(
+            gain=True, agc=False, ppm=True, offset_tuning=True)
         # 启动恢复用的三个 setter：只有「请求值在范围内、无需钳位」时才走
         # 无 ⚠ 的那条分支，即登记表里的透传行。
         p.set_frequency_hz(145_500_000)
