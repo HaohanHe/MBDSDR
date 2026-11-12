@@ -163,6 +163,45 @@ def _run(args, env, stdin: bytes | None = None) -> subprocess.CompletedProcess:
                           capture_output=True, input=stdin)
 
 
+def _emit(proc: subprocess.CompletedProcess, label: str) -> None:
+    """失败时把子进程输出原样打出来：只剩返回码等于看不见闸门为什么拒。"""
+    out = proc.stdout.decode("utf-8", "replace").rstrip()
+    err = proc.stderr.decode("utf-8", "replace").rstrip()
+    if out:
+        print(f"[{label}] stdout:\n{out}")
+    if err:
+        print(f"[{label}] stderr:\n{err}")
+
+
+def _report_hooks(proc: subprocess.CompletedProcess, env: dict) -> None:
+    """成功路径也把钩子交代清楚：跑没跑、scope 结果、标记去哪了。
+
+    钩子的输出由 git 转发进 commit 的 stdout/stderr，而 ``_run`` 一直在捕获，
+    所以这里主动回放 pre-commit / post-commit 的关键行，再补一条结论——
+    「通过了」本身必须可见，否则不可见的门禁等于没有。
+    """
+    text = (proc.stdout + proc.stderr).decode("utf-8", "replace")
+    lines = [
+        line.rstrip()
+        for line in text.splitlines()
+        if line.lstrip().startswith(("[pre-commit]", "[post-commit]"))
+    ]
+    for line in lines:
+        print(line)
+    tree = _run(["rev-parse", "HEAD^{tree}"], env).stdout.decode().strip()
+    marker = (
+        Path(os.environ.get("MBDSDR_HOOK_MARKER_DIR") or r"D:\mbdsdr\.locks\hook_ok")
+        / f"{tree}.json"
+    )
+    pre = "已执行" if any(l.lstrip().startswith("[pre-commit]") for l in lines) else "无输出"
+    post = "已执行" if any(l.lstrip().startswith("[post-commit]") for l in lines) else "无输出"
+    state = "仍在（post-commit 未消费）" if marker.exists() else "已被 post-commit 消费"
+    print(
+        f"[hooks] pre-commit={pre} · commit RC={proc.returncode} · "
+        f"标记 {tree[:8]} {state} · post-commit={post}"
+    )
+
+
 def _index_env(path: Path) -> dict:
     env = dict(os.environ)
     env.pop("GIT_INDEX_FILE", None)          # 形态⑫：不继承会话级泄漏
@@ -196,12 +235,15 @@ def _attempt(
     base = _run(["rev-parse", "HEAD"], env).stdout.decode().strip()
 
     # 1) 用当时的 HEAD 建 index（形态⑧/⑪：绝不复用陈旧 index）
-    if _run(["read-tree", "HEAD"], env).returncode != 0:
+    read_tree = _run(["read-tree", "HEAD"], env)
+    if read_tree.returncode != 0:
+        _emit(read_tree, "read-tree")
         return 1, "read-tree 失败"
 
     # 2) 只 add 声明文件；工作区内容即 index 内容
     add = _run(["add", "--", *files], env)
     if add.returncode != 0:
+        _emit(add, "git add")
         return 1, f"git add 失败：{add.stderr.decode('utf-8', 'replace')[:200]}"
 
     # 2b) 排除他人 hunk：只从私有 index 反向撤掉，工作树不动
@@ -269,10 +311,12 @@ def _attempt(
     # 5) 提交（消息走 stdin bytes，避开编码坑）
     commit = _run(["commit", "-F", "-"], env, stdin=message)
     if commit.returncode != 0:
+        _emit(commit, "git commit")
         err = (commit.stderr + commit.stdout).decode("utf-8", "replace")
         if any(h in err for h in LOCK_HINTS):
             return 1, f"撞 ref 锁：{err.strip()[:160]}（下次重试用新 HEAD 重建）"
         return 1, f"git commit 失败：{err.strip()[:300]}"
+    _report_hooks(commit, env)
 
     # 6) 提交后复核：HEAD 里每个文件的 blob 必须等于暂存时的 blob
     #    （删除项两边都为空，相等即通过）
