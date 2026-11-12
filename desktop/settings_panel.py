@@ -35,6 +35,11 @@ try:  # 右栏「分组标题 + 展开内容」的同款折叠节（唯一实现
 except ImportError:  # pragma: no cover - 包内导入
     from .right_column import RightSection
 
+try:  # 提示标签字色走主题入口（status_warning），本文件不写死色值
+    from tokens import tokens
+except ImportError:  # pragma: no cover - 包内导入
+    from .tokens import tokens
+
 # 单一事实源：默认值/范围/文案全部来自 config_schema，UI 不写第二份。
 logger = logging.getLogger(__name__)
 
@@ -663,6 +668,9 @@ class SettingsPanel(QWidget):
         self._pending_lon: Optional[float] = None
         self._building = False
         self._host_signals_wired = False
+        #: 「重启后生效 / 需要重连」提示标签。字色随主题走（status_warning），
+        #: 切主题后必须重刷，否则深色档位留在浅底上反而更看不清。
+        self._note_labels: List[QLabel] = []
         self._ai = _load_json_dict(AI_CONFIG_PATH)
         #: 字号降档提示。主题的变更广播可能在设置页首次显示前就回调刷新它，
         #: 所以这个标签随面板一起建（一个空 QLabel，很便宜），不随外观块延迟。
@@ -700,6 +708,8 @@ class SettingsPanel(QWidget):
         # 首次显示：同步补建。showEvent 在首帧绘制之前，用户看不到空壳，
         # 也不是"切过去先白一下再长出来"（不新增空窗）。
         self._ensure_ui_built()
+        # 主题可能在面板隐藏期间被换过（菜单/其它入口）：显示前对齐字色。
+        self._sync_note_colors()
         super().showEvent(event)
 
     def _build_shell(self) -> None:
@@ -1330,7 +1340,7 @@ class SettingsPanel(QWidget):
             control.setToolTip(text)
             note = QLabel(text)
             wrap_cn_label(note)
-            note.setStyleSheet("color:#D4956A;")
+            self._style_note(note)
             v.addWidget(note)
         elif getattr(item, "apply_note", ""):
             # 不是重启级、但也不是下一帧：重连 / 重启某个服务 / 下次录音。
@@ -1338,11 +1348,34 @@ class SettingsPanel(QWidget):
             control.setToolTip(item.apply_note)
             note = QLabel(item.apply_note)
             wrap_cn_label(note)
-            note.setStyleSheet("color:#D4956A;")
+            self._style_note(note)
             v.addWidget(note)
         self._rows[item.key] = control
         self._row_boxes[item.key] = box
         return box
+
+    @staticmethod
+    def _note_color() -> str:
+        """提示标签字色：取当前主题的 status_warning。
+
+        浅色主题压暗档 4.55:1、深色主题 6.78:1，均过正文级 4.5:1；
+        不在本文件写死十六进制色值。
+        """
+        return tokens().status_color("warning")
+
+    def _style_note(self, note: QLabel) -> None:
+        """登记并着色一条提示标签（切主题后由 _sync_note_colors 统一重刷）。"""
+        self._note_labels.append(note)
+        note.setStyleSheet(f"color:{self._note_color()};")
+
+    def _sync_note_colors(self) -> None:
+        """按当前主题重刷所有提示标签的字色（不留在旧主题的档位上）。"""
+        color = self._note_color()
+        for note in self._note_labels:
+            try:
+                note.setStyleSheet(f"color:{color};")
+            except RuntimeError:  # 控件已随面板销毁
+                continue
 
     def _make_control(self, item) -> QWidget:
         value = self._current_value(item)
@@ -1552,6 +1585,8 @@ class SettingsPanel(QWidget):
                 return False   # 需重启（行内已标注）
             if key == "theme":
                 h._apply_theme(str(value))
+                # 主题已换：提示标签字色跟着换（否则旧档位落在新底色上更差）。
+                self._sync_note_colors()
                 return True
             if key == "touch_mode":
                 h._set_touch_mode(str(value))
