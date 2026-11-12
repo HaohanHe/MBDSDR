@@ -1,0 +1,37 @@
+{
+  "_comment": "死符号检测器允许不删的条目：每条必须写 reason（为什么不能删）与 review_by（到期必须复核，缺一即判不合格）。键格式 <path>::<qualname>。文档见 scripts/lint_dead_symbols.py 的模块 docstring。",
+  "waivers": {
+    "desktop/connect_request_store.py::unsubscribe": {
+      "reason": "公开 API：订阅/退订是成对契约，退订点未接线属「告警只看最新一条」的缺陷登记，删除会让缺陷变成不可修",
+      "review_by": "2026-12"
+    },
+    "desktop/connect_request_store.py::recent_warnings": {
+      "reason": "公开 API：告警回看出口，UI 尚未接线（同属缺陷登记）；删除等于把「没有回看」固化成设计",
+      "review_by": "2026-12"
+    },
+    "desktop/right_column.py::_TabBarShim.setElideMode": {
+      "reason": "QTabBar 兼容壳的成对 API（与 setUsesScrollButtons/setExpanding 同批），单删一个会破坏壳的接口完整性；文件当前有他线在途改动，本线不动",
+      "review_by": "2026-12"
+    },
+    "mbdsdr_ai/agent.py::MBDSDRAgent._register_hook_tools": {
+      "reason": "方法体为空且 docstring 记录了 A2(D2) 摘除决策，调用点注释仍指向它；删掉会丢失「为什么不再注册 hook_* 工具」的判断依据",
+      "review_by": "2026-12"
+    },
+    "mbdsdr_ai/agent.py::MBDSDRAgent._register_orchestrator_tools": {
+      "reason": "同上：空实现 + 决策记录，不是遗留逻辑",
+      "review_by": "2026-12"
+    },
+    "mbdsdr_ai/orbit_determination.py::_ecef_dynamics_aug": {
+      "reason": "文件被 A03 静默降级线持有（claim 未释放），本线不动；释放后按同一口径判定",
+      "review_by": "2026-12"
+    },
+    "tools/axioms/checks.py::_same_path": {
+      "reason": "tools/axioms 被公理棘轮线持有，用户明确要求等释放后再动",
+      "review_by": "2026-12"
+    },
+    "tools/axioms/model.py::func_name_of": {
+      "reason": "tools/axioms 被公理棘轮线持有，用户明确要求等释放后再动",
+      "review_by": "2026-12"
+    }
+  }
+}
