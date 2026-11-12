@@ -122,11 +122,13 @@ def scan_corruption_evidence(directories, now: Optional[float] = None,
     parts: List[str] = []
     if recent:
         newest = max(recent, key=lambda p: os.stat(p).st_mtime)
-        parts.append(f"最近 {stale_days} 天内有 {len(recent)} 个配置文件损坏"
+        parts.append(f"最近 {stale_days} 天内有 {len(recent)} 个配置/数据文件损坏"
                      f"并已备份，最近一次：{newest}")
     if stale:
+        # 不再写「见帮助 › 诊断」：本仓没有这个菜单（grep 无入口），
+        # 指向不存在的位置比不提示更坏。
         parts.append(f"有 {stale} 个超过 {stale_days} 天的损坏备份，"
-                     "可手动清理（见帮助 › 诊断）")
+                     "可手动清理（备份名为 *.corrupt-时间戳）")
     for item in unreadable:
         parts.append(f"未检查 {item['dir']}（{item['error']}）")
 
@@ -140,11 +142,19 @@ def scan_corruption_evidence(directories, now: Optional[float] = None,
 
 
 def default_scan_directories(settings_path: str) -> List[str]:
-    """启动时要清点的目录：书签/FM 预设默认目录 + 桌面配置所在目录。
+    """启动时要清点的目录：数据根目录 + 已知数据子目录 + 桌面配置目录。
 
     只做路径推导、不碰文件系统，便于在没有 GUI 的进程里断言。
+
+    子目录不是可有可无的：version_store（``evolution``）、guardian
+    （``guardian_snapshots``）、workflow_engine（``workflows``）的备份都落在
+    ``~/.mbdsdr/<子目录>/`` 下，而清点只做一级 ``listdir``——不加这几项，
+    它们的 ``*.corrupt-*`` 永远不会出现在启动日志里，等于「备份了但没人知道」。
     """
-    directories = [os.path.join(os.path.expanduser("~"), ".mbdsdr")]
+    home_data = os.path.join(os.path.expanduser("~"), ".mbdsdr")
+    directories = [home_data]
+    for sub in ("evolution", "guardian_snapshots", "workflows"):
+        directories.append(os.path.join(home_data, sub))
     settings_dir = os.path.dirname(str(settings_path or ""))
     if settings_dir:
         directories.append(settings_dir)
