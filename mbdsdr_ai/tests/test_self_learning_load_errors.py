@@ -68,11 +68,18 @@ def test_corrupt_experience_backed_up_with_reason(tmp_path):
     backups = [p for p in exp_dir.glob("bad.json.corrupt-*")
                if not p.name.endswith(".reason.txt")]
     assert len(backups) == 1
-    assert backups[0].read_text(encoding="utf-8") == "{ broken"
+    assert backups[0].read_bytes() == b"{ broken"
     reasons = list(exp_dir.glob("bad.json.corrupt-*.reason.txt"))
     assert len(reasons) == 1 and "JSONDecodeError" in reasons[0].read_text(encoding="utf-8")
     assert not bad.exists(), "原件必须移出扫描路径"
     assert engine.corrupt_backups == [str(backups[0])]
+
+    # 之后加载继续可用：坏文件移走后新经验能写入，并被下一次加载读回。
+    fresh = engine.record_experience(
+        ExperienceType.TOOL_CALL, "恢复", "ok", score=1)
+    reloaded = SelfLearningEngine(storage_dir=str(tmp_path))
+    assert fresh.experience_id in reloaded.experiences
+    assert reloaded.load_errors == []
 
 
 def test_backup_failure_blocks_save_to_same_path(tmp_path, monkeypatch):
@@ -83,7 +90,7 @@ def test_backup_failure_blocks_save_to_same_path(tmp_path, monkeypatch):
     exp_dir.mkdir(parents=True)
     bad = exp_dir / "bad.json"
     bad.write_text("{ broken", encoding="utf-8")
-    monkeypatch.setattr(sl_mod, "_backup_corrupt", lambda _p: None)
+    monkeypatch.setattr(sl_mod, "backup_corrupt", lambda _p: None)
 
     engine = SelfLearningEngine(storage_dir=str(tmp_path))
     exp = Experience(experience_id="bad",
@@ -118,7 +125,7 @@ def test_save_target_backup_failure_blocks_write(tmp_path, monkeypatch):
     engine = SelfLearningEngine(storage_dir=str(tmp_path))
     target = tmp_path / "late.json"
     target.write_text("{ broken", encoding="utf-8")
-    monkeypatch.setattr(sl_mod, "_backup_corrupt", lambda _p: None)
+    monkeypatch.setattr(sl_mod, "backup_corrupt", lambda _p: None)
 
     assert engine._write_json(str(target), {"ok": 1}) is False
     assert target.read_text(encoding="utf-8") == "{ broken"
