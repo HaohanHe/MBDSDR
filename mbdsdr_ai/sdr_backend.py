@@ -644,16 +644,20 @@ class SDRBackend:
         self.status.demod_mode = mode.upper()
         # 切模式时自动按 SDR++ 默认设置解调带宽，不写死。
         # 来源: repos/sdrpp/decoder_modules/radio/src/demodulators/*/getDefaultBandwidth()
-        #   WFM=150000, NFM=12500, AM=10000, USB/LSB=2800, CW=200, DSB=4600
-        # 我们的 modes_defaults.py 已对齐这些值（WFM ±75k=150k 等），
-        # 从表中取 high-low 作为总带宽，避免每个调用方各写一份常量。
+        # 我们的 modes_defaults.py 已对齐这些值（AM ±3k=6k、NFM ±4k=8k、
+        # WFM ±75k=150k 等），从表中取 high-low 作为总带宽。
+        #
+        # 红线（2026-11-12）：**先下发、再写 status**。status.bandwidth_hz 的
+        # 语义是「硬件/解调链真在用的值」，只记录实际下发成功的数；下发失败
+        # 就保留原值（真值），绝不把一个没发生过的模式默认值写成读数。
         try:
             from .modes_defaults import get_mode_bandwidth
             bw_info = get_mode_bandwidth(mode.upper())
-            self.status.bandwidth_hz = float(
-                bw_info["high_hz"] - bw_info["low_hz"])
+            bw = float(bw_info["high_hz"] - bw_info["low_hz"])
+            if bw > 0 and self._apply_bandwidth(bw):
+                self.status.bandwidth_hz = bw
         except Exception:
-            pass  # 表缺失时保留原有 bandwidth，不阻断模式切换
+            pass  # 表缺失/硬件拒绝时保留原有 bandwidth，不阻断模式切换
         # 模式改变 → 重建整条接收链（if_sr/解调器/重采样器都可能变）
         self._invalidate_rx_chain(rebuild=True)
         return True
