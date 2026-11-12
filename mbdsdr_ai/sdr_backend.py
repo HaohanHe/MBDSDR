@@ -1371,6 +1371,20 @@ class _FanOutSub:
             return out
 
 
+#: 读失败退避阶梯（秒）：连续失败次数 → 生产者线程的等待。
+#: 5ms 只适合「偶尔抖一下」；拔出后 USB bulk 会一直抛错，5ms 一轮等于空转
+#: （实测 183.6 次失败读/s、单核 0.3%）。≥200 次且链路已明确 disconnected
+#: 说明设备真的不在了，拉到 500ms 等热插拔/重连把状态改回来。
+#: 任一次成功读立刻回到 5ms（在 _produce_loop 里复位失败计数）。
+def reader_backoff_s(failures: int, link_state: str = "") -> float:
+    """连续读失败 ``failures`` 次后的等待秒数（纯函数，便于单测与反证）。"""
+    if failures >= 200 and link_state == "disconnected":
+        return 0.5
+    if failures >= 20:
+        return 0.05
+    return 0.005
+
+
 class _ThreadedRingReader:
     """单生产者 + 多订阅者环形缓冲。
 
@@ -1380,10 +1394,13 @@ class _ThreadedRingReader:
     """
 
     def __init__(self, read_fn, block_size: int = 8192,
-                 ring_size: int = 1_000_000):
+                 ring_size: int = 1_000_000, link_state_fn=None):
         self._read_fn = read_fn
         self._block_size = int(block_size)
         self._ring_size = int(ring_size)
+        #: 读失败退避阶梯要问「链路现在是什么状态」（见 reader_backoff_s）。
+        #: None = 没人给状态，按「未断开」处理（不会升到 500ms）。
+        self._link_state_fn = link_state_fn
         self._buf = np.zeros(self._ring_size, dtype=np.complex64)
         self._lock = threading.Lock()
         self._cond = threading.Condition(self._lock)
@@ -1423,21 +1440,40 @@ class _ThreadedRingReader:
         self._thread.start()
 
     def _produce_loop(self):
+        failures = 0
         while not self._stop:
             try:
                 chunk = self._read_fn(self._block_size)
             except Exception as e:
                 if self._stop:
                     break
+                failures += 1
                 logger.warning(f"环形缓冲生产者读设备失败: {e}")
-                time.sleep(0.01)
+                self._sleep(reader_backoff_s(failures, self._link_state()))
                 continue
             if chunk is None or len(chunk) == 0:
                 if self._stop:
                     break
-                time.sleep(0.005)
+                failures += 1
+                self._sleep(reader_backoff_s(failures, self._link_state()))
                 continue
+            # 任一次成功读立刻复位阶梯：设备回来了就不该继续按旧失败计数等待。
+            failures = 0
             self._write(chunk)
+
+    def _sleep(self, seconds: float) -> None:
+        """退避等待（单测替换点：驱动测试时记录请求值而不真等）。"""
+        time.sleep(seconds)
+
+    def _link_state(self) -> str:
+        """当前链路状态；拿不到时按「未断开」处理（不升级到 500ms 档）。"""
+        fn = self._link_state_fn
+        if fn is None:
+            return ""
+        try:
+            return str(fn() or "")
+        except Exception:
+            return ""
 
     def _write(self, chunk: np.ndarray):
         n = len(chunk)
@@ -2074,6 +2110,8 @@ class RTLSDRBackend(SDRBackend):
                     read_fn=self._ring_read,
                     block_size=8192,
                     ring_size=1_000_000,
+                    # 退避阶梯的最后一档要看链路是否已明确断开（见 reader_backoff_s）。
+                    link_state_fn=lambda: self.status.link_state,
                 )
                 self._ring_reader.start()
             except Exception as e:
@@ -2177,7 +2215,15 @@ class RTLSDRBackend(SDRBackend):
         return out
 
     def _mark_link_lost(self, category: str, message: str) -> None:
-        """设备/链路真实丢失：标记断开并保留可区分类别，绝不继续假装在线。"""
+        """设备/链路真实丢失：标记断开并保留可区分类别，绝不继续假装在线。
+
+        只在**状态转移**时写一次 error/category：设备拔出后每轮读都会失败，
+        每次都重写等于把状态栏/日志刷屏，且后续失败文本会覆盖首因。已经
+        disconnected 时只维持 connected=False，等成功读或重连把它转回去。
+        """
+        if self.status.link_state == "disconnected":
+            self.status.connected = False
+            return
         self.status.connected = False
         self.status.link_state = "disconnected"
         self.status.error_category = category
