@@ -199,6 +199,12 @@ def _fake_window(backend):
     bar = _Bar()
     win.statusBar = lambda: bar
     win._status_bar = bar
+    # 调谐成功后主窗口必经 P0-09 补记（_apply_hw_action 收口 / 本入口直调两处）。
+    # 它是真实实例方法，未录音时首行早退，因此这里绑**真实实现**而不是空 lambda：
+    # 替身只补实例状态，不替生产逻辑兜底（补记若将来抛错，用例应当看见）。
+    from desktop import main_window as _mw
+    win._note_record_center_change = types.MethodType(
+        _mw.MainWindow._note_record_center_change, win)
     return win
 
 
