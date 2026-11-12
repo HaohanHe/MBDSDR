@@ -41,7 +41,7 @@ app = QApplication.instance() or QApplication(sys.argv)
 
 
 @pytest.fixture(scope="module")
-def isolated_home(tmp_path_factory):
+def isolated_home(request, tmp_path_factory):
     """HOME 隔离到临时目录：不读用户真实书签/配置，也不写用户目录。
 
     Windows 上 ``DesktopSettings.default_config_path()`` 走 ``%APPDATA%``：
@@ -53,6 +53,17 @@ def isolated_home(tmp_path_factory):
     home = str(tmp_path_factory.mktemp("home"))
     saved = {k: os.environ.get(k)
              for k in ("HOME", "USERPROFILE", "APPDATA", "LOCALAPPDATA")}
+
+    def _restore_env():
+        for key, value in saved.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+
+    # 先登记再改：下面 QSettings 的 setup 若抛异常，写在 yield 之后的
+    # 还原不会执行，HOME/APPDATA 会漏给同一进程里的后续文件。
+    request.addfinalizer(_restore_env)
     os.environ["HOME"] = home
     os.environ["USERPROFILE"] = home
     for var in ("APPDATA", "LOCALAPPDATA"):
@@ -69,11 +80,6 @@ def isolated_home(tmp_path_factory):
         for key, value in backup.items():
             qset.setValue(key, value)
         qset.sync()
-        for key, value in saved.items():
-            if value is None:
-                os.environ.pop(key, None)
-            else:
-                os.environ[key] = value
 
 
 @pytest.fixture(scope="module")
