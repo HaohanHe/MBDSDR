@@ -78,12 +78,12 @@
 | --- | --- |
 | 判据 | 7 条形状规则（GitHub classic/fine-grained PAT、GitLab PAT、Slack、AWS、JWT、PEM 私钥），**不跑熵**，也不跑 argv/日志 AST 规则 |
 | 豁免 | 行内 `# pragma: allowlist secret` 同样生效（逐行） |
-| 扫描对象 | `git cat-file --batch-all-objects` 的 13 622 个 blob / 757.2 MiB（含 `--all`/reflog 之外的对象） |
+| 扫描对象 | `git cat-file --batch-all-objects` 的 13 648 个 blob / 759.5 MiB（含 `--all`/reflog 之外的对象；数字随提交增长，判据不变） |
 | 二进制跳过 | 679 个（首 8 KB 含 NUL，未做文本扫描） |
 | 归属索引 | `rev-list --objects --all --reflog <各 worktree HEAD>` + `git log --raw` 反向索引；detached 的 worktree HEAD 不在 refs 下，必须单独补 |
 | HEAD 可达性 | 逐个命中提交 `git merge-base --is-ancestor <commit> HEAD` |
 
-结果（2026-11-13，HEAD `b8c89d57`）：
+结果（2026-11-13，HEAD `81bef3bd`，26 个 worktree HEAD）：
 
 - **命中提交 0 个、命中路径 0 个**——可达历史干净；
 - 另有 **1 个不可达 blob**（`c20bd082d638…`，69 字节）命中 `github-pat-classic`，
