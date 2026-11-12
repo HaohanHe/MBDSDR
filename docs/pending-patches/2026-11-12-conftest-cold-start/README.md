@@ -135,11 +135,24 @@
   裸 pytest 与 CI 从此是同一集合。
 - 另有 `tools/hw_selfcheck/test_selfcheck.py:257`、`tools/test_paste_block.py:318`、
   `tools/test_acceptance_run.py:680`、`tools/onboarding/test_parse_hw_report.py:364`
-  用 `pytest.main([__file__])`；`mbdsdr_ai/tests/` 有 10 处同样写法。
-  这些不在 CI 分组收件范围内，仍是「自己跑自己」。
+  用 `pytest.main([__file__])`；`mbdsdr_ai/tests/` 有 10 处同样写法（共 14 处）。
+  其中 12 处已在 CI matrix 的根内（`mbdsdr_ai/tests`、`tools/onboarding`、
+  `tools/hw_selfcheck`），本来就被收集；剩下 2 处
+  （`tools/test_paste_block.py`、`tools/test_acceptance_run.py`）所在的
+  `tools/` 顶层不在 matrix 内，**已按「纳入 CI 收件范围」处置**：matrix 新增
+  两条文件级 root 显式收件（`python -m pytest -q <文件>` 支持文件路径），
+  两个文件顶部同时写明收件状态。它们是离线确定性测试（无硬件、无网络），
+  本地合跑 **65 passed in 11.56s**，没有「留作手工」的理由。
+  判据：**「不在收件范围」和「不知道在不在」是两件事**，14 处现在全部有明确答案。
+- 收集一致性由 `tests/test_collection_consistency.py` 钉住：期望集合来自
+  源码扫描（`^\s*def test_`，含类内），实际集合来自
+  `pytest --collect-only -q tests/` 的真实输出；反证=把任一文件改成不带
+  `test_` 前缀后它必红并点名。
 
 一条线在真 runner 里没验证过时，用临时脚本调测试函数能拿到「通过」，
-但那批断言从此不在任何自动回归里——改坏了没人知道。
+但那只证明函数能跑，不证明它被收集：本仓库的实际形态是 CI（显式路径 +
+五种命名）与裸 `pytest tests/`（默认命名）**收的不是同一集合**。只在本地
+`--noconftest` 或临时脚本里跑过，不能替代对收集路径的验证。
 
 ## 六、复现命令
 
