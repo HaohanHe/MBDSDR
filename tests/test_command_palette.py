@@ -424,3 +424,107 @@ def test_main_window_exposes_locator_and_registered_shortcut(main_window, qapp):
     assert getattr(dlg, "_commands", []), "命令面板打开但索引为空（空壳入口）"
     dlg.close()
     qapp.processEvents()
+
+
+# ---------------------------------------------------------------------------
+# 焦点返还（第 8 条：执行成功后不能把焦点丢给系统）
+# ---------------------------------------------------------------------------
+def _toy_window(qapp, names):
+    """一个不依赖主窗口的玩具窗：只验证焦点返还契约，不搬整套 MainWindow。
+
+    用 --noconftest 单跑时不能依赖 conftest 的 isolated_profile，所以这里
+    自建 QMainWindow；契约本身与主窗无关（谁打开面板、命令挪没挪焦点）。
+    """
+    from PySide6.QtWidgets import QMainWindow, QPushButton, QVBoxLayout, QWidget
+    win = QMainWindow()
+    central = QWidget(win)
+    lay = QVBoxLayout(central)
+    buttons = []
+    for name in names:
+        btn = QPushButton(name, central)
+        lay.addWidget(btn)
+        buttons.append(btn)
+    win.setCentralWidget(central)
+    win.show()
+    win.activateWindow()
+    qapp.processEvents()
+    return win, buttons
+
+
+def test_success_returns_focus_to_widget_that_opened_palette(qapp):
+    """执行成功关闭面板后，焦点回到打开前那颗控件。
+
+    命令自己会把焦点挪走（真实「设置」命令就调 tab.setFocus()），所以
+    「关掉面板后焦点还在原处」只能靠显式返还。
+    反证：删掉 run_command 里的 ``_restore_return_focus()``，焦点会停在
+    命令挪去的那颗控件上，最后一条断言必红。
+    """
+    from PySide6.QtCore import Qt
+    from PySide6.QtWidgets import QApplication
+    from command_palette import Command, CommandPalette
+
+    win, (opener, moved) = _toy_window(qapp, ["打开前焦点", "命令把焦点挪到这里"])
+    opener.setFocus(Qt.OtherFocusReason)
+    qapp.processEvents()
+    assert QApplication.focusWidget() is opener, "前置条件：焦点没放到打开前的控件"
+
+    dlg = CommandPalette(window=win, parent=win)
+    assert dlg._return_focus is opener, "打开面板时没记住原焦点控件"
+
+    def _run():
+        moved.setFocus(Qt.OtherFocusReason)   # 模拟「设置」命令的 tab.setFocus()
+        return {"ok": True, "status": "DONE", "reason": "已执行"}
+
+    dlg._commands.insert(0, Command(
+        title="__成功样例__", group="菜单", description="执行必成功的样例",
+        source="test:ok", run=_run))
+    dlg.show()
+    dlg.activateWindow()
+    qapp.processEvents()
+    result = dlg.run_first("__成功样例__")
+    qapp.processEvents()
+
+    assert result["ok"] is True
+    assert not dlg.isVisible()
+    assert QApplication.focusWidget() is opener, (
+        f"执行后焦点落在 {type(QApplication.focusWidget()).__name__}，"
+        "没回到打开面板前的控件")
+    win.close()
+    dlg.deleteLater()
+    qapp.processEvents()
+
+
+def test_destroyed_opener_falls_back_into_main_window(qapp):
+    """原焦点控件已销毁时，回主窗一个确定落点，而不是把焦点丢给系统。"""
+    import shiboken6
+    from PySide6.QtCore import Qt
+    from PySide6.QtWidgets import QApplication
+    from command_palette import Command, CommandPalette
+
+    win, (keep, gone) = _toy_window(qapp, ["常驻控件", "__临时焦点控件__"])
+    gone.setFocus(Qt.OtherFocusReason)
+    qapp.processEvents()
+    assert QApplication.focusWidget() is gone
+
+    dlg = CommandPalette(window=win, parent=win)
+    assert dlg._return_focus is gone
+    shiboken6.delete(gone)          # 面板开着时控件被销毁（设置页重建同构）
+
+    dlg._commands.insert(0, Command(
+        title="__成功样例__", group="菜单", description="执行必成功的样例",
+        source="test:ok", run=lambda: {"ok": True, "status": "DONE", "reason": "已执行"}))
+    dlg.show()
+    dlg.activateWindow()
+    qapp.processEvents()
+    assert dlg.run_first("__成功样例__")["ok"] is True
+    qapp.processEvents()
+
+    fw = QApplication.focusWidget()
+    assert fw is not None, "焦点被丢给系统（focusWidget 为 None）"
+    assert not dlg.isAncestorOf(fw), "焦点还在已关闭的面板里"
+    assert win.isAncestorOf(fw), (
+        f"兜底落点不在主窗内：{type(fw).__name__}")
+    assert fw is keep, f"兜底没落到焦点链第一颗可用控件，而是 {type(fw).__name__}"
+    win.close()
+    dlg.deleteLater()
+    qapp.processEvents()
