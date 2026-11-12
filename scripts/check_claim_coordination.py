@@ -26,6 +26,16 @@
 * 「线名」单元格 ``（…）`` 之前的部分参与 owner 匹配，括号内的备注忽略；
 * 模板行 ``_（空）_``、真机独占行 ``真机（USB SDR）`` 不是文件 claim，跳过。
 
+分层登记（防止把 100+ 条只读资料逐条抄成一张没人维护的表）：
+
+* **必须逐条**：``desktop/``、``mbdsdr_ai/``、``scripts/``、``tools/``、
+  ``tests/`` 等代码根，以及 ``docs/`` **顶层**共享文档（``docs/*.md``）。
+  目录级行覆盖到这些路径 → 报「仅目录级登记」。
+* **允许目录级**：``docs/<子目录>/**``（如 ``docs/learn/**``）。一行写清
+  「模式 + owner + 起始时间」，覆盖该模式下该 owner 的全部 claim。
+* 同一模式下的活跃 claim 若出现**第二个 owner**，目录级行只写第一个 → 报，
+  必须再补一行（或多行）直到每个 owner 都有覆盖。
+
 退出码：0 = 两个方向都无发现；1 = 用法/解析错误；3 = 有发现（同 audit-stale）。
 """
 from __future__ import annotations
@@ -51,6 +61,9 @@ EXIT_FINDINGS = 3
 TICK_RE = re.compile(r"`([^`]+)`")
 #: 显式历史/已释放标记：只有写明的旧行才允许「文档有、台账无」。
 RELEASED_MARKERS = ("已释放", "（历史）", "(历史)")
+#: 代码根 + docs 顶层共享文档必须逐条；其余 docs/<子目录> 允许目录级。
+STRICT_PREFIXES = ("desktop/", "mbdsdr_ai/", "scripts/", "tools/", "tests/",
+                   "web/", "cpp/", "mobile/", "deploy/", "service/")
 
 Row = Tuple[List[str], str, bool]  # (paths, 线名原文, 是否显式历史/已释放)
 
@@ -161,6 +174,23 @@ def active_claims(now: Optional[float] = None, marker_dir: Optional[Path] = None
     return out
 
 
+def _is_pattern(path: str) -> bool:
+    return path.endswith("/**")
+
+
+def _matches(path: str, pattern: str) -> bool:
+    return path.startswith(pattern[:-2])  # 去掉 `**`，保留末尾 `/`
+
+
+def is_strict_path(path: str) -> bool:
+    """代码文件、脚本、测试与 docs 顶层共享文档：必须逐条登记。"""
+    if path.startswith(STRICT_PREFIXES):
+        return True
+    if path.startswith("docs/"):
+        return "/" not in path[len("docs/"):]
+    return True  # 根目录文件等一律按严格处理（fail closed）
+
+
 def cross_check(
     active: Iterable[Tuple[str, str]],
     registry: Dict[str, Any],
@@ -169,12 +199,37 @@ def cross_check(
     """两个方向的差集。返回 ledger_only / doc_only，均已格式化成可打印的行。"""
     active = list(active)
     rows = parse_coordination_rows(doc_text)
+    file_rows = [(ps, oc, rel) for ps, oc, rel in rows
+                 if any(not _is_pattern(p) for p in ps)]
+    pattern_rows = [(ps, oc, rel) for ps, oc, rel in rows
+                    if any(_is_pattern(p) for p in ps)]
+
     ledger_only: List[str] = []
     for path, owner in active:
-        hit = any(path in paths and _owner_matches(_owner_label(owner_cell), owner)
-                  for paths, owner_cell, _released in rows)
-        if not hit:
+        exact = any(path in ps and _owner_matches(_owner_label(oc), owner)
+                    for ps, oc, _rel in file_rows)
+        if exact:
+            continue
+        pat_hit = any(_matches(path, p) and _owner_matches(_owner_label(oc), owner)
+                      for ps, oc, _rel in pattern_rows for p in ps if _is_pattern(p))
+        if is_strict_path(path):
+            ledger_only.append(
+                f"{path} owner={owner}（仅目录级登记；代码/共享文档必须逐条）"
+                if pat_hit else f"{path} owner={owner}")
+        elif not pat_hit:
             ledger_only.append(f"{path} owner={owner}")
+
+    # 目录级行必须覆盖该模式下的**全部** owner：出现第二个 owner 就报。
+    for ps, oc, rel in pattern_rows:
+        if rel:
+            continue
+        label = _owner_label(oc)
+        for pattern in (p for p in ps if _is_pattern(p)):
+            owners = {o for p, o in active if p and _matches(p, pattern)}
+            extra = {o for o in owners if not _owner_matches(label, o)}
+            if extra:
+                ledger_only.append(
+                    f"{pattern} 目录级行 owner={label}，但同一模式下还有 owner={sorted(extra)}")
 
     recorded = ledger_index(registry)
     doc_only: List[str] = []
@@ -183,6 +238,14 @@ def cross_check(
             continue
         label = _owner_label(owner_cell)
         for path in paths:
+            if _is_pattern(path):
+                owners = {o for p, os_ in recorded.items() if _matches(p, path) for o in os_}
+                if not owners:
+                    doc_only.append(f"{path}（目录级行，台账无匹配记录）")
+                elif not any(_owner_matches(label, o) for o in owners):
+                    doc_only.append(
+                        f"{path}（文档线名={label}，台账 owner={sorted(owners)}）")
+                continue
             owners = recorded.get(path)
             if not owners:
                 doc_only.append(f"{path}（文档线名={label}，台账无此文件记录）")

@@ -1861,6 +1861,10 @@ No supported devices found），GNSS+SDR 同开复验没做成；离线那次
 
 改共享文件前先写一行，**提交后删行**。表里没有行不代表可以改——先跑
 `python scripts/file_claim.py status` 查操作系统锁（表靠人记得写，锁不会忘）。
+只读批量目录（`docs/<子目录>/**`）允许**目录级一行**常驻登记，不随提交删除；
+代码（`desktop/`、`mbdsdr_ai/`、`scripts/`、`tools/`、`tests/`）与 `docs/` 顶层
+共享文档**必须逐条**，目录级行覆盖到它们会被 `scripts/check_claim_coordination.py`
+判红。
 
 | 文件 | 线名 | 开始时间 | 预计提交 hash |
 |---|---|---|---|
@@ -1870,6 +1874,10 @@ No supported devices found），GNSS+SDR 同开复验没做成；离线那次
 | `docs/settings-inventory.md` | K18收口线（孤儿 claim 接管；脚本重生成数字块，提交后即释放） | 2026-11-13 01:48 | 随本笔 |
 | `desktop/control_panel.py` | 参数治理线/59ca04d1（preset_combo 宽策略 + 静噪行拆行；pid 见 claim 记录） | 2026-11-06 06:23 | 待定 |
 | `docs/COORDINATION.md` | 参数治理线/59ca04d1（本文件 §6.1 备忘 + 尺寸登记） | 2026-11-06 06:23 | 同笔 |
+| `docs/learn/**` | 守卫账本线（只读学习资料，批量 claim；目录级常驻登记） | 2026-11-13 05:43 | 目录级 |
+| `docs/audit_r2/**` | 守卫账本线（只读审计产物，批量 claim；目录级常驻登记） | 2026-11-13 05:46 | 目录级 |
+| `docs/research/**` | 守卫账本线（只读调研产物，批量 claim；目录级常驻登记） | 2026-11-13 05:46 | 目录级 |
+| `docs/pending-patches/**` | 守卫账本线（待建单只读稿，批量 claim；目录级常驻登记） | 2026-11-13 05:47 | 目录级 |
 | **真机（USB SDR）** | 跑 `hw_acceptance/`、七环、`capture_throughput.py` 的线（资源独占） | 占用时段 | — |
 
 > **真机独占（硬规则，优先于文件归属）**：谁在跑 `docs/hw-acceptance.md` 的七环、

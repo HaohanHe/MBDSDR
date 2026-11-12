@@ -75,6 +75,32 @@ def test_active_claim_matching_row_passes():
     assert result["ledger_only"] == [] and result["doc_only"] == [], result
 
 
+def test_code_file_only_dir_level_is_reported():
+    """(a) 代码文件只登记了目录级 → 报「仅目录级登记」。"""
+    doc = _doc("| `desktop/**` | 操作逻辑线 | 2026-11-13 01:00 | 目录级登记 |")
+    reg = _registry(("desktop/main_window.py", ["操作逻辑线"]))
+    result = cc.cross_check([("desktop/main_window.py", "操作逻辑线")], reg, doc)
+    assert len(result["ledger_only"]) == 1, result
+    assert "仅目录级登记" in result["ledger_only"][0], result
+
+
+def test_readonly_bulk_dir_level_row_is_ok():
+    """(b) docs/learn/** 的目录级行可以覆盖其下批量 claim → 不报。"""
+    doc = _doc("| `docs/learn/**` | 守卫账本线 | 2026-11-13 05:30 | 目录级登记 |")
+    reg = _registry(("docs/learn/a.md", ["守卫账本线"]))
+    result = cc.cross_check([("docs/learn/a.md", "守卫账本线")], reg, doc)
+    assert result["ledger_only"] == [] and result["doc_only"] == [], result
+
+
+def test_second_owner_under_pattern_is_reported():
+    """(c) 同一模式下出现第二个 owner，目录级行只写第一个 → 报。"""
+    doc = _doc("| `docs/learn/**` | 守卫账本线 | 2026-11-13 05:30 | 目录级登记 |")
+    reg = _registry(("docs/learn/a.md", ["守卫账本线"]), ("docs/learn/b.md", ["他线"]))
+    result = cc.cross_check(
+        [("docs/learn/a.md", "守卫账本线"), ("docs/learn/b.md", "他线")], reg, doc)
+    assert any("同一模式下还有 owner" in x for x in result["ledger_only"]), result
+
+
 def test_brace_group_row_expands_to_each_file():
     """``desktop/{a,b}.py`` 花括号组按每个文件参与匹配。"""
     doc = _doc("| `desktop/{a,b}.py` | 组线 | 2026-11-13 01:00 | 随本笔 |")
