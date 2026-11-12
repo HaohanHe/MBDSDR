@@ -25,6 +25,8 @@ import math
 from dataclasses import dataclass, field
 from typing import List, Dict, Any, Optional, Tuple
 
+from .tool_results import ToolResult
+
 # ──────────────────────────────────────────────────────────────────────────
 # 全局常量
 # ──────────────────────────────────────────────────────────────────────────
@@ -778,7 +780,6 @@ def register_rtl433_tools(registry) -> None:
       - rtl433_decode_pulses : 对给定脉冲/比特载荷解码
       - rtl433_decode_iq      : 对一段基带 IQ 做完整 OOK→解码
     """
-    from .tool_registry import ToolResult  # 延迟导入避免循环依赖
 
     def _list_devices(args):
         devs = list_devices()
