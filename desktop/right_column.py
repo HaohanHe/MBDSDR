@@ -529,9 +529,48 @@ class RightColumn(QScrollArea):
         changed = index != self._current
         self._current = index
         # 展开会改变几何，等一帧再算落点（否则算出来的是折叠前的高度）。
+        # 焦点先移交、落点后滚动：焦点若把子控件滚进视野，随后的
+        # _reveal_section 仍会把标题顶回视口顶部（W46 的落点契约不变）。
+        QTimer.singleShot(0, lambda s=section: self._focus_section(s))
         QTimer.singleShot(0, lambda s=section: self._reveal_section(s))
         if changed:
             self.currentChanged.emit(index)
+
+    def _first_focusable_in(self, root: QWidget) -> Optional[QWidget]:
+        """``root`` 子树里按焦点链顺序的第一颗可聚焦控件。"""
+        members = set(root.findChildren(QWidget))
+        w = root.nextInFocusChain()
+        for _ in range(len(members) + 1):
+            if w is None or w not in members:
+                return None
+            if (w.isVisible() and w.isEnabled()
+                    and (w.focusPolicy() & Qt.TabFocus)):
+                return w
+            w = w.nextInFocusChain()
+        return None
+
+    def _focus_section(self, section: "RightSection") -> None:
+        """程序化跳节后把键盘焦点移交到目标节（普查「中 10」）。
+
+        只做纯逻辑移交，不碰绘制：目标控件是节内第一个可聚焦子控件
+        （标准控件自己会画焦点框）；节里没有可聚焦控件时退回节标题。
+        不因此修改 ``_SectionHeader.paintEvent`` —— 焦点可见性属于视觉，
+        仍归 FZ-04。
+
+        例外：焦点已经在目标节内时**不抢**。AI 提问路径会先把文本灌进
+        ``ai_panel.input_field`` 并 setFocus，再调 ``_show_right_tab_of``；
+        这里若无条件 setFocus，会把光标从输入框拽到节里第一个控件。
+        """
+        if not self.isVisible():
+            return
+        current = QApplication.focusWidget()
+        if current is not None and (current is section
+                                    or section.isAncestorOf(current)):
+            return
+        target = None
+        if section.is_expanded():
+            target = self._first_focusable_in(section.body())
+        (target or section.header).setFocus(Qt.OtherFocusReason)
 
     def _reveal_section(self, section: "RightSection", _attempt: int = 0) -> None:
         """程序化跳转的落点：把该节标题顶到视口顶部（W46 / P1-01）。
