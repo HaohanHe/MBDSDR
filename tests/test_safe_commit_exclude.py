@@ -109,8 +109,9 @@ def test_exclude_pure_deletion_hunk(tmp_path):
     assert "line2 mine" in committed
     assert "line5\n" in committed, "别人的删除不能被带走"
     tree = (repo / "doc.md").read_text(encoding="utf-8")
-    assert "line5\n" not in tree, "工作树不能被动"
-    assert "line6" in tree
+    # 这是临时仓库里的运行期文件，不是源码：按行成员断言，不做整份文本子串匹配。
+    assert "line5" not in set(tree.splitlines()), "工作树不能被动"
+    assert "line6" in set(tree.splitlines())
 
 
 def test_exclude_range_must_cover_whole_hunk(tmp_path):

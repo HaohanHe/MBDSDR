@@ -11,6 +11,7 @@
 """
 from __future__ import annotations
 
+import ast
 import sys
 from pathlib import Path
 
@@ -286,6 +287,27 @@ def test_windows_setupapi_probe_smoke():
 
 # ------------------------------------------------------------------ 与重连解耦
 def test_module_has_no_reconnection_dependency():
-    source = Path(uh.__file__).read_text(encoding="utf-8").lower()
-    assert "reconnection" not in source
-    assert "reconnect" not in source
+    """结构断言：模块里不存在以 reconnect 命名的函数/方法/属性/导入。
+
+    行为侧另有 ``test_replug_same_identity_is_a_plug_event_not_another_device``
+    兜底：拔了再插只产出 ``plugged`` 事件，不产生任何连接动作。这里只把
+    「把重连逻辑搬回本模块」这条实现路径钉死；注释/文档里出现 reconnect
+    不算违规（旧写法扫整份源码文本，改个文案型注释就误红）。
+    """
+    tree = ast.parse(Path(uh.__file__).read_text(encoding="utf-8"))
+    names = set()
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            names.add(node.name)
+        elif isinstance(node, ast.Attribute):
+            names.add(node.attr)
+        elif isinstance(node, ast.Name):
+            names.add(node.id)
+        elif isinstance(node, ast.alias):
+            names.add(node.name)
+            if node.asname:
+                names.add(node.asname)
+    offenders = sorted(name for name in names if "reconnect" in name.lower())
+    assert not offenders, (
+        f"热插拔模块里出现了重连实现：{offenders}；本模块只产事件，"
+        "重连由主窗口/用户决定")

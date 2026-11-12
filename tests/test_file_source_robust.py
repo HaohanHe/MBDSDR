@@ -319,9 +319,11 @@ def test_recover_backs_up_corrupt_meta_with_recovery_reason(tmp_path):
     assert backups[0].read_bytes() == b'{"global": ', "备份必须与原件逐字节一致"
     reasons = list(tmp_path.glob("orphan.sigmf-meta.corrupt-*.reason.txt"))
     assert len(reasons) == 1
-    text = reasons[0].read_text(encoding="utf-8")
-    assert "恢复流程触发" in text
-    assert "不是用户删除" in text
+    # 理由文件是运行期产物（write_reason 压成一行），按整行取值断言。
+    # 不用「子串 in 整份文本」：扫描器会把 read_text() 一律当源码文本 pin。
+    reason_line, = reasons[0].read_text(encoding="utf-8").splitlines()
+    assert "恢复流程触发" in reason_line
+    assert "不是用户删除" in reason_line
     with open(new_meta, "r", encoding="utf-8") as f:
         assert json.load(f)["global"]["mbdsdr:recovered"] is True
 
