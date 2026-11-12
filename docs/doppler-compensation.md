@@ -116,7 +116,7 @@ SDRBackend._ensure_receive_chain()
 1. `desktop/main_window.py:3188-3192 _connect_real()` 只启动
    `self._worker = _worker_manager.start(...)`，不创建本地 `SDRBackend`；
    断开时 `:3410 _worker=None`，本地后端仍为空。
-2. 调谐/偏移全部通过 `:3512-3514 _worker.request_tool.emit("tune_sdr", ...)`
+2. 调谐/偏移统一经由 `:3512-3514 _worker.request_tool.emit("tune_sdr", ...)`
    发给远端；IQ 与 DSP 都在远端进程。
 3. Python 侧没有 `ReceiveChain`、没有 `SDRBackend` → **不施加**。
    即使误调 `sdr_doppler_compensation`，`_ensure_receive_chain` 因无本地

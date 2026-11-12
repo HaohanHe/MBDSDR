@@ -403,7 +403,7 @@ python tests/network_hotplug_regression.py
 
 反证：删除 `_on_health_tick` 里的 `if link == "stale"` 分支后，
 `test_stale_is_visible_not_disconnected` 立刻红，实际标签是 `FakeSDR |`（仍在冒充
-已连接）；恢复分支后 6 条全绿。
+已连接）；恢复分支后 6 条全绿（2026-11-13 于 `97fc5fc8` 复跑 `tests/test_link_state_visibility.py` → 7 passed；「6 条」是当时指向的子集，现整文件 7 条）。
 
 ### 重连策略实测（桌面 vs 库层）
 

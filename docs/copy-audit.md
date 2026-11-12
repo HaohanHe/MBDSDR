@@ -222,7 +222,7 @@
 - 峰值门**实现**：`cpp/src/core/tokens.h:357-371` 与 `desktop/config_schema.py:207-216` 都注明基准为中位数/噪声底，实现没有错，问题只在 UI 文案（U-04）。
 - 扫描命中门限：C++ `dBFS(频谱)` 与移动端 `dBFS` 都是绝对谱/音频电平，单位本身正确。
 - S 表：`desktop/status_panel.py:756-757` 以 dBFS 映射 S 值，未混用 dBm。
-- 快捷键真实性：Python `shortcuts.py` 的 42 条登记项由单一事实源生成，帮助页动态取键，快捷键 guard/焦点优先级测试 15 项全部通过；C++ `shortcuts_catalog.h` 9 条在 `main_window.cpp:3785-3851` 逐条有真实 `QShortcut` 绑定，未发现“写了不生效”或同键双绑。
+- 快捷键真实性：Python `shortcuts.py` 的 42 条登记项由单一事实源生成，帮助页动态取键，快捷键 guard/焦点优先级测试 15 项全部通过（2026-11-13 于 `97fc5fc8` 复跑：`python -m pytest tests/test_shortcuts_guard.py tests/test_shortcut_focus_priority.py -q` → 15 passed）；C++ `shortcuts_catalog.h` 9 条在 `main_window.cpp:3785-3851` 逐条有真实 `QShortcut` 绑定，未发现“写了不生效”或同键双绑。
 - 静噪语义守卫：`desktop/status_panel.py:86-107` 的 `_fmt_squelch` 已显式区分「C++ 手动门 = 绝对 dBFS」与「桌面余量 = -100≈0 dB」，没有把余量误标成 dBFS；问题只在两侧滑杆本体的读数（U-01）。
 - 运行状态诚实性：`desktop/status_panel.py:892-894` 对 fake/simulated/demo 状态直接不刷新，避免假读数。
 

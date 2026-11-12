@@ -87,7 +87,7 @@ python scripts/lint_swallow_all.py                        # 棘轮判定（越�
 python scripts/lint_swallow_all.py --list                 # 打印每一处 catch-all
 python scripts/lint_swallow_all.py --json out.json        # 完整明细
 python scripts/lint_swallow_all.py --write-baseline docs/code-guards-baseline.json
-python -m pytest tests/test_swallow_guard.py -q            # 全绿（棘轮不越线）
+python -m pytest tests/test_swallow_guard.py -q            # 24 passed + 1 xfailed（K06 已知红，xfail 不计为通过）
 ```
 
 ## 门禁脚本入口登记（D4）

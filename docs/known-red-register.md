@@ -72,8 +72,7 @@ MBDSDR_TEST_LOCK=0 QT_QPA_PLATFORM=offscreen \
 ## K05 — desktop 全量确定性红（2026-11-09 16:09–17:10 权威复跑）
 
 **本节取代上午那版 K05，上午的结论作废。** 上午用「日志点号序号 →
-collect 清单」映射 nodeid 得到 15 条，并判成「单跑全绿 = 顺序依赖假红」
-（历史判断，已在本段更正）。
+collect 清单」映射 nodeid 得到 15 条，并判成「单跑全绿 = 顺序依赖假红」（历史判断，已在本段更正）。
 那套映射是错的：collect 顺序随代码变动整体偏移，跑的根本不是真失败的
 用例，所以 `15 passed` 证明不了任何事。**以后一律从 pytest `-rf` 汇总的
 `FAILED ...` 行取 nodeid，不许用点号序号猜。**
@@ -108,8 +107,8 @@ python3 tools/evidence/test_suites.py --suite desktop --desktop-timeout 5400
 |---|---|---|
 | A 契约基线 | `test_settings_ui_coverage::test_inventory_table_matches_script` | 数字表与脚本漂移 → 官方 `settings_inventory.py --write`（本轮处理） |
 | A | `test_typing_annotation_guard` | `scripts/ui_interaction_audit.py` 漏导 `Optional`（CI 3.12 会 NameError）→ 补 import（本轮处理） |
-| A | `test_time_input_guard` | `test_first_open_welcome.py:137/162` 裸时钟 → 白名单补该文件 + `# timeguard: allow`（本轮处理） |
-| A | `test_ui_interaction_guard` | 按钮 ⧉ 触发 `MainWindow._return_all_panels` AttributeError；真方法名 `_return_all_panes`（多一个 l）→ 改名（本轮处理，AST 静态核验） |
+| A | `test_time_input_guard` | `tests/test_first_open_welcome.py:137/162` 裸时钟 → 白名单补该文件 + `# timeguard: allow`（本轮处理） |
+| A | `test_ui_interaction_guard` | 按钮 ⧉ 触发 `desktop/main_window.py:3679` 的 `MainWindow._return_all_panels` AttributeError；真方法名 `_return_all_panes`（多一个 l）→ 改名（本轮处理，AST 静态核验） |
 | A | `test_source_pin_ratchet::test_no_new_source_text_pins` | 5 条存量新增 pin（`test_config_persistence_safety` / `test_iq_modulation_consistency` / `test_pipeline_iq_bus_wiring`×2 / `test_rtltcp_honest_write`）。基线只减不增，须改成行为断言 |
 | A | `test_swallow_guard::test_repo_ratchet_within_baseline` | `desktop/adsb_map_panel.py` WARN 4 > 基线 1，空 `pass` 来自 `692fb3ce`（11-08）。补实现或登记理由 |
 | A | `test_settings_ui_coverage::test_forward_every_field_has_ui_entry_or_reason` | `record_dir_inside_program_ack` 无 UI 入口/理由；该键由运行时对话框写入，需定夺补设置控件还是写 `INTERNAL_REASONS` |
@@ -129,7 +128,7 @@ python3 tools/evidence/test_suites.py --suite desktop --desktop-timeout 5400
   （6 分钟无输出，主动停止），用 AST 核验方法名与定义，未单独复跑。
 - **37 分钟全量没有重跑**，不宣称修复后的新数字。
 - 对外口径：`tests/` 全量 = `20 failed / 5553 passed`（修复前快照，带完整
-  汇总行）；kernel 单组 = `2827 passed / 0 failed`。**不得说全绿。**
+  汇总行）；kernel 单组 = `2827 passed / 0 failed`。**不得对外宣称整体已经绿。**
 
 ---
 
@@ -420,7 +419,7 @@ listGains 失败（设备可能不支持分档）: 'SDRDevice' object has no att
 - **为什么没改阈值**：把 0.3 调成 0.2 就是拿标准换绿字，本轮不做。
 - **修法（下轮）**：改成同一段 IQ 的「文件回放 vs 内存直解」对拍，
   消掉时间窗变量；或判据改为「回放 RMS 有能量且与实时同量级」并写明依据。
-- **诚实边界**：R4 在其他子项全绿（流式增长、完整性、改速跟随）。本轮
+- **诚实边界**：R4 在其他子项均通过（流式增长、完整性、改速跟随）。本轮
   单跑 `PASS`、全跑曾 `FAIL`，属判据抖动。
 - **为什么没有 nodeid**：实现在 `scripts/hw_acceptance/ring4_recording_playback.py`；
   需要真机 SDR 录制 + 声卡回放，不是 pytest 节点。
@@ -823,9 +822,14 @@ baseline 56 → 58（`BUILT_AT` 同步 58），每条带 owner + reason：
 - 中途另一会话（PID 24992）持锁时，单跑 ratchet 曾用 `MBDSDR_TEST_LOCK=0`
   得到 3 passed；最终结论以持锁的 117 passed 为准。
 - **转绿条件**：33 条逐条处置（删 16 / 改 15 / 留 2）后，
-  `test_no_new_source_text_pins` 与 11 个相关测试文件全绿；留下的 2 条必须继续
+  `test_no_new_source_text_pins` 与 11 个相关测试文件全绿（当前树复核见下条 `97fc5fc8`）；留下的 2 条必须继续
   带 owner + reason，且基线只降不升（当前 56 → 58 是这 2 条的登记，不许再涨）。
   反证：把任一「改」过的断言退回文本 pin，该节点必须红。
+- **2026-11-13 复核**（`97fc5fc8` 独立 worktree）：
+  `python -m pytest tests/test_source_pin_ratchet.py -q` → **1 failed, 2 passed**，
+  `tests/test_usb_hotplug.py::test_module_has_no_reconnection_dependency` 仍有
+  `"reconnect"` / `"reconnection"` 两处文本 pin。上面那句判断尚未成立于当前树，
+  本条按未清处理，不销账。
 - **判断**：33 条里只有 2 条真的在钉「产品必须给操作员看到的文档判据」，
   其余 31 条钉的是实现写法——4 条与既有行为用例/AST 硬闸重复、10 条改写为
   行为或运行时取值、2 条是注释文本、9 条是扫描器把运行期文件误判成源码、
@@ -840,8 +844,8 @@ baseline 56 → 58（`BUILT_AT` 同步 58），每条带 owner + reason：
 
 | nodeid | 失败消息首行 | 首次变红 |
 |---|---|---|
-| `test_dynamic_tooltips_are_honest` | `AssertionError: 动态 tooltip 有量纲却没写来源/置信标注：`（`device_panel.py:365` / `:494`） | `ff7e3288`（2026-11-12 22:36，设备枚举看门狗文案） |
-| `test_every_passthrough_tooltip_is_registered` | `AssertionError: 以下透传 tooltip 没有进登记表（也就不可能有运行时兜底）：`（`control_panel.py:506` / `:1045` `_step_tooltip_text()`） | `b97b0cd1`（2026-11-11 23:34，步进 tooltip 随当前档位生成） |
+| `test_dynamic_tooltips_are_honest` | `AssertionError: 动态 tooltip 有量纲却没写来源/置信标注：`（`desktop/device_panel.py:365` / `:494`） | `ff7e3288`（2026-11-12 22:36，设备枚举看门狗文案） |
+| `test_every_passthrough_tooltip_is_registered` | `AssertionError: 以下透传 tooltip 没有进登记表（也就不可能有运行时兜底）：`（`desktop/control_panel.py:506` / `:1045` `_step_tooltip_text()`） | `b97b0cd1`（2026-11-11 23:34，步进 tooltip 随当前档位生成） |
 | `test_tooltip_baseline_only_shrinks` | `AssertionError: 新增了不合规 tooltip（长度 <12 或与控件可见文字逐字相同）：`（`main_window.py::收起右栏浮层（Esc）::too_short`） | `c204e945`（2026-11-12 11:20，右栏浮层临时展开按钮） |
 | `test_baseline_file_stays_in_sync_with_counter` | `AssertionError: assert 3 == 4`（基线 3 条 vs 当前 4 条） | `c204e945`（同上，出现第 4 条违规） |
 
@@ -876,7 +880,7 @@ baseline 56 → 58（`BUILT_AT` 同步 58），每条带 owner + reason：
     点名 `desktop/control_panel.py:1045 :: self._step_tooltip_text()`。
   - `main_window` tooltip 改回空字符串 → `test_upgraded_tooltips_meet_the_rules`
     红（文案未落地）。
-  - 去掉 `device_panel.py:529` 的来源标注 → `test_dynamic_tooltips_are_honest`
+  - 去掉 `desktop/device_panel.py:529` 的来源标注 → `test_dynamic_tooltips_are_honest`
     红，点名 `desktop/device_panel.py:528`。
 - **验证**：`tests/test_tooltip_guard.py` 7 passed；
   `tests/test_tooltip_dynamic_runtime.py` 除 `settings_panel` 外 16 passed /

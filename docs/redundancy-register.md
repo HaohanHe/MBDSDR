@@ -405,14 +405,14 @@ python -m pytest tests/test_theme_switch.py tests/test_theme_tokens.py \
 | 分级 | 位置 | 符号 | 删了谁可能受影响 | 删除判据（摘要） |
 |---|---|---|---|---|
 | 需先补测试再删 | `desktop/rf_sky_view.py` | `load_ground_station_config` | 环境变量+配置回退的地面站策略；当前"有写入、无人读"，直接删会抹掉该集成缺口 | 先补"未配置/非法坐标→`None`"行为测试，并核对写入侧口径 |
-| 真可删 | `mbdsdr_ai/adsb_lite.py` | `build_short_frame` | 无调用方；短帧不在 `decode_baseband` 主链 | adsb 3 个测试文件全绿 |
-| 真可删 | `mbdsdr_ai/astronomy/moon_albedo.py` | `grid_resolution_pix_per_deg` | 一行委托 `albedo_meta`，月面几何走 `screen_to_disc`/`albedo_at_disc` | `tests/test_moon_albedo.py` 全绿 |
-| 真可删 | `mbdsdr_ai/dab_plus_lite.py` | `audio_info_from_service` | 未接线的音频信息构造入口，FIC 解析链不受影响 | `tests/dab_plus_test.py` 全绿 |
+| 真可删 | `mbdsdr_ai/adsb_lite.py` | `build_short_frame` | 无调用方；短帧不在 `decode_baseband` 主链 | adsb 3 个测试文件全绿（2026-11-06 删除判据快照，未在现树复核） |
+| 真可删 | `mbdsdr_ai/astronomy/moon_albedo.py` | `grid_resolution_pix_per_deg` | 一行委托 `albedo_meta`，月面几何走 `screen_to_disc`/`albedo_at_disc` | `tests/test_moon_albedo.py` 全绿（2026-11-06 删除判据快照，未在现树复核） |
+| 真可删 | `mbdsdr_ai/dab_plus_lite.py` | `audio_info_from_service` | 未接线的音频信息构造入口，FIC 解析链不受影响 | `tests/dab_plus_test.py` 全绿（2026-11-06 删除判据快照，未在现树复核） |
 | 入口角色不动 | `mbdsdr_ai/decoder_registry.py` | `select_decoder` | 注册表"按模式选择"公开入口；可能被外部/CLI 按名调用 | 不删（零命中不构成删除许可） |
 | 入口角色不动 | `mbdsdr_ai/fengyun_sat.py` | `fy4_lrit_pipeline` | FY-4 LRIT 流水线入口；零件有测试 ≠ 入口可删 | 不删 |
-| 真可删 | `mbdsdr_ai/ft8_decode.py` | `hard_tones_to_llr` | FT8 主链用 `soft_tones_to_llr`，硬判决仅离线实验 | 3 个 FT8 测试文件全绿 |
+| 真可删 | `mbdsdr_ai/ft8_decode.py` | `hard_tones_to_llr` | FT8 主链用 `soft_tones_to_llr`，硬判决仅离线实验 | 3 个 FT8 测试文件全绿（2026-11-06 删除判据快照，未在现树复核） |
 | 需先补测试再删 | `mbdsdr_ai/gps_ca.py` | `nav_bits_from_corr` | 导航比特提取（含门限策略）无测试钉扎 | 先补已知 C/A 相关向量对拍 |
-| 真可删 | `mbdsdr_ai/meteor_sat.py` | `convolutional_interleave` | LRPT 主链不复用该交织器 | `tests/test_apt_meteor_roundtrip.py` 全绿 |
+| 真可删 | `mbdsdr_ai/meteor_sat.py` | `convolutional_interleave` | LRPT 主链不复用该交织器 | `tests/test_apt_meteor_roundtrip.py` 全绿（2026-11-06 删除判据快照，未在现树复核） |
 | 需先补测试再删 | `mbdsdr_ai/orbit_determination.py` | `ecef_state_to_keplerian` | ECEF→开普勒根数换算属数值 API，现有 orbit 测试未钉 | 先补已知向量测试（ISS 单点） |
 
 > **执行结果（2026-11-06，HEAD `86ae9807`）**：8 条删除、2 条入口角色加注释保留。
