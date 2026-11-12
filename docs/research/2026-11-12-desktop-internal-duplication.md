@@ -118,6 +118,10 @@ Select-String -Path desktop\*.py -Pattern '1e6:\.\d[fg]' | Where-Object { $_.Lin
 后端夹值（意图 30、实际 29.7）时，控制面板标「未生效」，模块面板静默显示 `30 dB`。
 **同一个硬件增益，两块面板既不同值也不同告警。**
 
+**告警部分已修（`26d8d1c2`）**：`module_panel` 在读数与滑杆意图不一致时写
+tooltip + `logger.warning`，不再静默；格式（`int(round())` vs `:g`）与
+`readback_source` 参数按计划留到下一步统一。
+
 ---
 
 ## 4. 连接错误翻译：两套关键词分类器，同一字符串两种结论
@@ -149,8 +153,15 @@ Select-String -Path desktop\*.py -Pattern '1e6:\.\d[fg]' | Where-Object { $_.Lin
   `device_busy`，状态栏「查看怎么办」链接打开的是**「设备被占用，请关闭 SDR#/GQRX」**。
 
 用户按链接去关别的软件，权限问题照旧。这是「文案一套、补救入口另一套」的典型。
-另外 `classify_connect_error` 的权限分支返回 `None`（目录里没有该码），
-即使顺序改对，权限错误也不会出链接——这是第二个独立问题。
+
+**已修（`dd0a47f8`）**：两处合并为 `error_remedy.CONNECT_ERROR_RULES`
+一张有序表（permission 先于 busy，理由见上：用户动作不同），裸 `errno`
+从占用关键词移除；`classify_connect_error` 新增 `usb_permission` 码，
+目录与「怎么办」条目同步补齐，链接指向 udev/WinUSB 步骤；
+`main_window._humanize_error` 不再自带分支，委托同源函数。
+反证：`tests/test_connect_error_ordering.py` 断言
+`"Permission denied [Errno 13]"` 的文案与码同分类，旧顺序下必红
+（实测返回 `device_busy`）。
 
 ---
 
@@ -330,16 +341,16 @@ RSSI 也有一对：`main_window._fmt_rssi_mcp`
 1. **§5 信号电平**：先统一「S-meter 到底显示 dBFS 还是 S 单位」这一个决定，
    再决定控制面板那块是否改成 S 单位；顺手对齐平滑值（一块 EMA、一块原始值
    本身就是两块表跳得不一样的原因）。
-2. **§4 连接错误翻译**：把两套关键词表合成一张有序规则表，文案与错误码从
-   同一次匹配产出；权限分支在 `classify_connect_error` 里现在返回 `None`，
-   要么补目录条目，要么在界面上明说「该错误暂无对应条目」。
+2. **§4 连接错误翻译**：已修（`dd0a47f8`）——两套表已合并为一张有序规则表，
+   文案与错误码同源；`usb_permission` 已有独立条目与补救链接。
 3. **§7 设备枚举**：把 `module_panel` 已修好的「枚举失败 ≠ 没插设备」与
    看门狗搬进 `device_panel`（或反向抽成一个共用控件），别让两个面板继续各自演化。
 4. **§2 Hz 格式化**：先定「一个频率在 UI 里保留几位」的唯一口径，
    再按这个口径改那 4 个具名出口；51 处内联可以分批替换，
    不需要一次性改完，但要禁止新增 `1e6:.Nf` 字面量。
-5. **§3 增益回读**：让 `module_panel.set_gain_applied` 与
-   `control_panel` 同签名（补 `readback_source`）、同格式（`:g`）、同告警。
+5. **§3 增益回读**：告警已修（`26d8d1c2`）——`module_panel` 夹值时写
+   tooltip + 日志；剩余待办是签名（补 `readback_source`）与格式（`:g`）统一，
+   所以 12.34 vs 12 的显示差异仍在。
 6. **§6 带宽**：把 `status_panel._fmt_bw` 的「整数 kHz」改成 1 位小数，
    其余三处已经是对的。
 7. 一致重复（§10）与同名不同职（§11）暂不处理，只在新增代码时引用现有实现。
