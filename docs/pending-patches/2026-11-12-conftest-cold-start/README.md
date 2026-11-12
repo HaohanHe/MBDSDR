@@ -131,7 +131,7 @@
   `test_*()`（如 `tests/ax25_aprs_roundtrip.py:135-143`、
   `tests/fldigi_roundtrip.py:186-195` 的 `__main__`），那条线就只剩手调。
 - 处置：18 个全部改名 `test_*.py` 纳管（本轮已完成 18/18，逐个实跑：
-  151 条断言 148 passed / 1 skipped（`syn_robot36.wav` 缺失守卫）），
+  151 条断言 **150 passed / 1 skipped**（`syn_robot36.wav` 缺失守卫）），
   裸 pytest 与 CI 从此是同一集合。
 - 另有 `tools/hw_selfcheck/test_selfcheck.py:257`、`tools/test_paste_block.py:318`、
   `tools/test_acceptance_run.py:680`、`tools/onboarding/test_parse_hw_report.py:364`
