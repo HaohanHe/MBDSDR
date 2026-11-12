@@ -316,6 +316,7 @@ def _numbers(line: str) -> Iterable[str]:
 def run(paths: Optional[List[str]] = None, classify: bool = False) -> Dict:
     files = _files(paths)
     rows: List[Dict] = []
+    skipped_examples = 0
     for f in files:
         try:
             text = f.read_text(encoding="utf-8", errors="replace")
@@ -334,6 +335,12 @@ def run(paths: Optional[List[str]] = None, classify: bool = False) -> Dict:
         for block in _blocks(prose):
             block_text = "\n".join(ln for _, ln in block)
             is_table = block[0][1].strip().startswith("|")
+            # 规范文件 §3 的「反例表」引用的是别人写错的原文，不是本仓断言（§4.0）：
+            # 只认「docs/evidence-standard.md + 表头首格 == 反例」这一种形态，不做模糊匹配
+            if is_table and rel.replace("\\", "/") == "docs/evidence-standard.md" and \
+                    block[0][1].strip().strip("|").split("|")[0].strip() == "反例":
+                skipped_examples += sum(1 for _, ln in block if not _is_table_sep(ln)) - 1
+                continue
             if is_table:
                 # 表格按整块判定：表头写“谐振/实测”，整张表都是测量断言
                 if not CLAIM_VERB_RE.search(block_text):
@@ -373,7 +380,8 @@ def run(paths: Optional[List[str]] = None, classify: bool = False) -> Dict:
     buckets = Counter(r["bucket"] for r in rows if r.get("bucket"))
     files_with_none = sorted({r["file"] for r in rows if r["column"] == "无证据"})
     return {"files": len(files), "claims": len(rows), "counts": dict(counts),
-            "buckets": dict(buckets), "rows": rows, "files_with_none": files_with_none}
+            "buckets": dict(buckets), "rows": rows, "files_with_none": files_with_none,
+            "skipped_examples": skipped_examples}
 
 
 def main(argv: Optional[List[str]] = None) -> int:
@@ -399,7 +407,10 @@ def main(argv: Optional[List[str]] = None) -> int:
     else:
         c = rep["counts"]
         print(f"扫描 {rep['files']} 个文件，{rep['claims']} 条数字断言"
-              f"（{time.time() - t0:.1f}s）\n")
+              f"（{time.time() - t0:.1f}s）")
+        if rep.get("skipped_examples"):
+            print(f"（规范 §3 反例表引用行 {rep['skipped_examples']} 条不计，见 §4.0）")
+        print()
         print("| 有证据 | 无证据 | 已显式标未验证 |")
         print("| --- | --- | --- |")
         print(f"| {c.get('有证据', 0)} | {c.get('无证据', 0)} "
