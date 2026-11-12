@@ -27,7 +27,10 @@ from .model import (
 
 #: 本检查器自己的产物。它们「是否存在于工作区」取决于有没有跑过，
 #: 不能当作「文档指向不存在的路径」来计数，否则同一棵树在跑基线前后各出一个数。
-TOOL_ARTIFACTS = set(GENERATED_ARTIFACTS) | {"docs/axioms-baseline.json"}
+TOOL_ARTIFACTS = set(GENERATED_ARTIFACTS) | {
+    "docs/axioms-baseline.json",
+    "docs/axioms-accepted.json",
+}
 
 # ────────────────────────────── 维度 ──────────────────────────────
 
