@@ -396,8 +396,9 @@ class SatTrackPanel(QFrame):
         self.update_tle_btn.setText("更新中…" if busy else "更新 TLE")
 
     def _show_tle_status(self, text: str) -> None:
+        # 标签本身 setWordWrap(True)，全文直接可见；不再复写一份 tooltip：
+        # 逐字重复可见文字没有新增信息，还会多出一条未登记的透传文案。
         self.tle_status_label.setText(text)
-        self.tle_status_label.setToolTip(text)
         self.tle_status_label.setVisible(bool(text))
 
     # ------------------------------------------------------- 窄屏可折叠
