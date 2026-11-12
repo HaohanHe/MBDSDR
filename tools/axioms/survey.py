@@ -702,6 +702,29 @@ def _file_index(repo: Repo) -> Set[str]:
     return out
 
 
+_MOVED_HINT = re.compile(r"迁|搬|移至|移到|改名|重构到|落到|拆到")
+
+
+def _migration_target(unit: Unit, raw: str, index: Set[str]) -> Tuple[str, int]:
+    """同一个文档里有没有「这个模块已迁移」的记录，返回 (新路径, 行号)。
+
+    只认同时满足三件事的行：点名了同一个模块名、出现了迁移词、给出了一个
+    仓内存在的 .py 路径。三条缺一不算迁移记录，避免把「只是又提了一次」
+    当成已经改过名。
+    """
+    stem = os.path.basename(raw).rsplit(".", 1)[0]
+    if len(stem) < 6:
+        return "", 0
+    for lineno, line in enumerate(unit.text.splitlines(), 1):
+        if stem not in line or not _MOVED_HINT.search(line):
+            continue
+        for m in DOC_PATH.finditer(line):
+            cand = m.group(1).replace("\\", "/")
+            if cand != raw and cand.endswith(".py") and cand in index:
+                return cand, lineno
+    return "", 0
+
+
 def collect_d6(repo: Repo) -> Dimension:
     dim = Dimension("D6", "目录与文档结构", DIMENSIONS[5][2])
     docs = repo.doc_units()
@@ -734,6 +757,20 @@ def collect_d6(repo: Repo) -> Dimension:
                     missing += 1
                     artifact = raw.endswith((".json", ".log", ".csv", ".bin", ".npz", ".wav", ".db"))
                     archive = bool(_ARCHIVE_DOC.search(unit.path))
+                    moved_to, moved_at = _migration_target(unit, raw, index)
+                    if moved_to:
+                        # 路径过期 ≠ 声明是假的：同一文档记着它迁到了哪。
+                        # 仍然报，但降级成 review 并直接给出建议路径，避免
+                        # 把「改一行文档」估成「重写一个模块」。
+                        dim.findings.append(Finding(
+                            "D6-path-moved", unit.path, lineno,
+                            f"引用的 {raw} 已迁移",
+                            f"路径过期：同文档第 {moved_at} 行记着该模块已迁到 {moved_to}；"
+                            "文件确实存在，只是这份文档的路径没跟上。",
+                            f"把引用改为 {moved_to}；不需要重建模块。",
+                            "review",
+                        ))
+                        continue
                     dim.findings.append(Finding(
                         "D6-missing-path", unit.path, lineno, f"引用的 {raw} 不存在",
                         "文档事实指向了仓库里不存在的路径，按文档操作会直接失败。"

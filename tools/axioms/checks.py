@@ -743,20 +743,159 @@ ACTION_METHODS = {
 }
 
 
-def _guards_call_arg(fn: ast.AST, call: ast.Call) -> bool:
-    """守卫必须作用在这条调用传进去的那个值上，才算「这条路径加了约束」。"""
-    arg_names = {a.id for a in call.args if isinstance(a, ast.Name)}
+def _literal_number(node: Optional[ast.AST]) -> Optional[float]:
+    """能从语法树直接读出的数值：字面量或带正负号的字面量。"""
+    if isinstance(node, ast.Constant) and isinstance(node.value, (int, float)) \
+            and not isinstance(node.value, bool):
+        return float(node.value)
+    if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.USub, ast.UAdd)):
+        inner = _literal_number(node.operand)
+        if inner is not None:
+            return -inner if isinstance(node.op, ast.USub) else inner
+    return None
+
+
+def _module_constants(tree: ast.Module) -> Dict[str, Optional[float]]:
+    """模块级赋值：名字 → 字面量值；运行时算出来的记 None（不可静态确认）。
+
+    只认模块顶层的直接赋值。`FREQ_MAX = 6e9` 可确认；`FREQ_MAX = 6e9 * 1.0`
+    在语法树里是 BinOp，无法确认——宁可报红并在理由里说明，也不默认放行。
+    """
+    out: Dict[str, Optional[float]] = {}
+    for node in tree.body:
+        if isinstance(node, ast.Assign):
+            value = _literal_number(node.value)
+            for target in node.targets:
+                if isinstance(target, ast.Name):
+                    out[target.id] = value
+        elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+            out[node.target.id] = _literal_number(node.value)
+    return out
+
+
+def _module_path_of(src: str, node: ast.ImportFrom) -> str:
+    """把 `from ... import` 解析成仓内相对路径（解析不出就是空串）。"""
+    if node.level:
+        base = src.split("/")[:-1]
+        parts = base[: max(len(base) - (node.level - 1), 0)]
+        if node.module:
+            parts = parts + node.module.split(".")
+    else:
+        parts = (node.module or "").split(".") if node.module else []
+    return "/".join(p for p in parts if p) + ".py"
+
+
+def _imported_constants(
+    unit: Unit, tree: ast.Module, consts: Dict[str, Dict[str, Optional[float]]],
+) -> Tuple[Dict[str, Optional[float]], Dict[str, str]]:
+    """两个映射：`from x import FREQ_MAX` 的常量值；`import x as c` 的模块别名。
+
+    模块别名用于解析 `constants.FREQ_MAX_HZ` 这种属性引用——那在 AST 里是
+    Attribute 而不是 Name，只认 Name 会让「用常量」的写法反而判红。
+    """
+    values: Dict[str, Optional[float]] = {}
+    modules: Dict[str, str] = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom):
+            path = _module_path_of(unit.path, node)
+            src = consts.get(path)
+            for alias in node.names:
+                if alias.name == "*":
+                    continue
+                name = alias.asname or alias.name
+                sub = path[:-3] + "/" + alias.name + ".py" if path.endswith(".py") else ""
+                if sub in consts:
+                    modules[name] = sub
+                elif src is not None and alias.name in src:
+                    values[name] = src[alias.name]
+        elif isinstance(node, ast.Import):
+            for alias in node.names:
+                path = alias.name.replace(".", "/") + ".py"
+                if path in consts:
+                    modules[alias.asname or alias.name] = path
+    return values, modules
+
+
+def _constant_state(
+    node: ast.AST, arg_names: Set[str], values: Dict[str, Optional[float]],
+    modules: Dict[str, str], consts: Dict[str, Dict[str, Optional[float]]],
+) -> str:
+    """判断条件里的引用能不能静态确认是数值常量：ok / unknown / ''（与常量无关）。"""
+    if isinstance(node, ast.Name):
+        if node.id in arg_names or node.id in {"True", "False", "None"}:
+            return ""
+        if node.id in values:
+            return "ok" if values[node.id] is not None else "unknown"
+        # 只对「看起来是常量」的名字报不可确认，避免把 self / 局部变量也写进理由。
+        return "unknown" if re.match(r"^[A-Z][A-Z0-9_]{2,}$", node.id) else ""
+    if isinstance(node, ast.Attribute):
+        text = _attr_text(node)
+        mod, _, attr = text.rpartition(".")
+        path = modules.get(mod)
+        if path:
+            table = consts.get(path, {})
+            if attr in table:
+                return "ok" if table[attr] is not None else "unknown"
+            return "unknown"
+        return "unknown" if re.match(r"^[A-Z][A-Z0-9_]{2,}$", attr) else ""
+    return ""
+
+
+def _arg_names(call: ast.Call) -> Set[str]:
+    """调用实参里被传进去的变量名。
+
+    `set_frequency(float(center_hz))` 与 `set_frequency(center_hz)` 是同一个值，
+    只认顶层 Name 会让前者永远找不到对应的守卫（scanner_panel.py:119 就是这种形态）。
+    """
+    out: Set[str] = set()
+    for arg in call.args:
+        node: ast.AST = arg
+        while isinstance(node, ast.Call) and _call_name(node) in {"float", "int", "round", "abs"} \
+                and node.args:
+            node = node.args[0]
+        if isinstance(node, ast.Name):
+            out.add(node.id)
+    return out
+
+
+def _guards_call_arg(
+    unit: Unit, fn: ast.AST, call: ast.Call,
+    consts: Dict[str, Dict[str, Optional[float]]],
+) -> Tuple[bool, str]:
+    """守卫必须作用在这条调用传进去的那个值上，才算「这条路径加了约束」。
+
+    返回 (是否加了约束, 无法静态确认的表达式)。上界写成数字字面量、
+    同模块模块级常量、或 `from 模块 import 常量` / `模块.常量` 都算加了；
+    解析不出来的（运行时计算、参数传进来的阈值）仍按未加约束处理，
+    并把那个表达式写进理由，避免「写魔数才能变绿」把正解堵死。
+    """
+    tree = parse(unit)
+    if tree is None:
+        return False, ""
+    values, modules = _imported_constants(unit, tree, consts)
+    # 同模块的模块级常量与导入来的常量同等对待：`LIMIT_HZ = 6e9` 就在
+    # 本文件顶部，解析不出它会让「用常量」这条正解永远红着。
+    values.update(consts.get(unit.path, {}))
+    arg_names = _arg_names(call)
     if not arg_names:
-        return False
+        return False, ""
+    unknown = ""
     for node in ast.walk(fn):
         if not isinstance(node, ast.If):
             continue
         tested = {n.id for n in ast.walk(node.test) if isinstance(n, ast.Name)}
         if not (tested & arg_names):
             continue
-        if any(isinstance(n, ast.Constant) and isinstance(n.value, (int, float)) for n in ast.walk(node.test)):
-            return True
-    return False
+        if any(isinstance(n, ast.Constant) and isinstance(n.value, (int, float))
+               and not isinstance(n.value, bool) for n in ast.walk(node.test)):
+            return True, ""
+        for n in ast.walk(node.test):
+            state = _constant_state(n, arg_names, values, modules, consts)
+            if state == "ok":
+                return True, ""
+            if state == "unknown" and not unknown:
+                unknown = ast.get_source_segment(unit.text, n) or _attr_text(n) or "?"
+    return False, unknown
 
 
 #: 同名但不同职：控件也有 set_frequency()，那不是「真正执行调谐的路径」。
@@ -843,6 +982,16 @@ def scan_a07(units: List[Unit]) -> List[Finding]:
     guarded: Dict[str, Set[str]] = {m: set() for m in ACTION_METHODS}
     unguarded: Dict[str, List[Tuple[Unit, ast.Call]]] = {m: [] for m in ACTION_METHODS}
     widgets: Dict[str, Set[str]] = {}
+    # 上界写成常量（constants.FREQ_MAX_HZ）是正解，不能因为「不是数字字面量」
+    # 反而判红；这里先扫出所有模块的模块级数值常量，供守卫解析。
+    consts: Dict[str, Dict[str, Optional[float]]] = {}
+    unconfirmed: Dict[int, str] = {}
+    for unit in units:
+        if not (unit.path.startswith("desktop/") or unit.path.startswith("mbdsdr_ai/")):
+            continue
+        tree = parse(unit)
+        if tree is not None:
+            consts[unit.path] = _module_constants(tree)
     for unit in units:
         if not (unit.path.startswith("desktop/") or unit.path.startswith("mbdsdr_ai/")):
             continue
@@ -863,10 +1012,13 @@ def scan_a07(units: List[Unit]) -> List[Finding]:
             fn = fn_nodes.get(node.lineno)
             if fn is None or getattr(fn, "name", "") == name:
                 continue
-            if _guards_call_arg(fn, node):
+            guarded_ok, unresolved = _guards_call_arg(unit, fn, node, consts)
+            if guarded_ok:
                 guarded[name].add(unit.path)
             elif not _result_used(node, parents):
                 unguarded[name].append((unit, node))
+                if unresolved:
+                    unconfirmed[id(node)] = unresolved
     for method, sites in unguarded.items():
         if not guarded[method]:
             continue
@@ -895,6 +1047,10 @@ def scan_a07(units: List[Unit]) -> List[Finding]:
                 tail = (f"同一文件同一方法另有 {len(siblings)} 处同形态未展开："
                         f"L{', L'.join(str(n) for n in siblings)}；"
                         "修掉本处只会让它换一处冒出来，请一并看。")
+            unresolved = unconfirmed.get(id(node), "")
+            if unresolved:
+                tail += (f"（守卫里的 {unresolved} 无法静态确认是数值常量，"
+                         "按未加约束处理）")
             _add(
                 findings, "A07", unit, node.lineno,
                 f"{method} 的数值前置条件只出现在 {example} 等入口，{unit.path} 这条调用路径没有同一约束；"

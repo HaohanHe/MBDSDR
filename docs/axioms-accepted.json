@@ -656,6 +656,41 @@
         }
       ],
       "session": ""
+    },
+    {
+      "accepted": [
+        {
+          "fingerprint": "b8c8e2cf9cf250bd",
+          "line": 1385,
+          "path": "mbdsdr_ai/core/controller.py",
+          "rule": "A07",
+          "severity": "must-fix",
+          "snippet": "self.set_frequency(tuned)"
+        },
+        {
+          "fingerprint": "068abbe318c6c983",
+          "line": 3368,
+          "path": "mbdsdr_ai/sdr_tools.py",
+          "rule": "A07",
+          "severity": "must-fix",
+          "snippet": "backend.set_sample_rate(sr)"
+        },
+        {
+          "fingerprint": "69e6462f64596c34",
+          "line": 7042,
+          "path": "mbdsdr_ai/sdr_tools.py",
+          "rule": "A07",
+          "severity": "must-fix",
+          "snippet": "radio.set_frequency(freq)"
+        }
+      ],
+      "at": "2026-11-13 05:08:04",
+      "by": "xxhzb",
+      "escalated": [],
+      "head": "519da1ad2b58310412046efc481e2e1827d03f2e",
+      "reason": "A07 范围检查补认模块级数值常量时顺带修正：`if <call> is False:` 这类对返回值的布尔判断不算入参范围守卫（bool 是 int 的子类，旧判据把它当成数值上界）。修正后暴露 3 处本就没有入参约束的调用路径：mbdsdr_ai/core/controller.py（调谐频率由多普勒修正算出、未夹范围）、mbdsdr_ai/core/sdr_tools.py 两处。属判据变准暴露的存量，不是新债；未接受并行线 device_owner/known-red 等新增。",
+      "removed": [],
+      "session": "Console"
     }
   ],
   "version": 1

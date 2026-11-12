@@ -126,6 +126,45 @@ CASES: List[Case] = [
           "desktop/b.py": "def apply(self, r):\n    self._vfo_panel.set_sample_rate(r)\n"},
          {"desktop/a.py": "def apply(backend, r):\n    if 10 <= r <= 100:\n        backend.set_sample_rate(r)\n",
           "desktop/b.py": "def apply(self, r):\n    self._x = QLabel()\n    self._x.set_sample_rate(r)\n"}),
+    Case("A07", "上界写成模块常量也算加了约束",
+         "desktop/scanner_panel.py:119 正解是用 desktop/constants.py 的 FREQ_MIN_HZ/FREQ_MAX_HZ；"
+         "旧判据只认数字字面量，逼人把 10_000.0/6.0e9 再抄一遍",
+         {"desktop/constants.py": "FREQ_MIN_HZ = 10_000.0\nFREQ_MAX_HZ = 6.0e9\n",
+          "desktop/a.py": "from desktop import constants\n\ndef apply(backend, r):\n"
+                          "    if constants.FREQ_MIN_HZ <= r <= constants.FREQ_MAX_HZ:\n"
+                          "        backend.set_frequency(r)\n",
+          "desktop/b.py": "def apply(backend, center_hz):\n"
+                          "    backend.set_frequency(float(center_hz))\n"},
+         {"desktop/constants.py": "FREQ_MIN_HZ = 10_000.0\nFREQ_MAX_HZ = 6.0e9\n",
+          "desktop/a.py": "from desktop import constants\n\ndef apply(backend, r):\n"
+                          "    if constants.FREQ_MIN_HZ <= r <= constants.FREQ_MAX_HZ:\n"
+                          "        backend.set_frequency(r)\n",
+          "desktop/b.py": "from desktop.constants import FREQ_MIN_HZ, FREQ_MAX_HZ\n\n"
+                          "def apply(backend, center_hz):\n"
+                          "    if not (FREQ_MIN_HZ <= center_hz <= FREQ_MAX_HZ):\n"
+                          "        return\n"
+                          "    backend.set_frequency(float(center_hz))\n"}),
+    Case("A07", "上界是运行时值仍报红并注明无法静态确认",
+         "`if x < some_runtime_value:` 静态解析不出常量，不能默认放行",
+         {"desktop/a.py": "def apply(backend, r):\n    if 10 <= r <= 100:\n        backend.set_frequency(r)\n",
+          "desktop/b.py": "LIMIT_HZ = load_limit()\n\ndef apply(backend, r):\n"
+                          "    if r <= LIMIT_HZ:\n        backend.set_frequency(r)\n"},
+         {"desktop/a.py": "def apply(backend, r):\n    if 10 <= r <= 100:\n        backend.set_frequency(r)\n",
+          "desktop/b.py": "LIMIT_HZ = 6e9\n\ndef apply(backend, r):\n"
+                          "    if r <= LIMIT_HZ:\n        backend.set_frequency(r)\n"}),
+    Case("A07", "常量改成运行时计算后回到红",
+         "`FREQ_MAX_HZ = int(os.environ[...])` 不是字面量：登记成常量不等于可静态确认",
+         {"desktop/constants.py": "import os\nFREQ_MAX_HZ = int(os.environ.get('FREQ_MAX', '6000000000'))\n",
+          "desktop/a.py": "from desktop.constants import FREQ_MAX_HZ\n\ndef apply(backend, r):\n"
+                          "    if r <= FREQ_MAX_HZ:\n        backend.set_frequency(r)\n",
+          "desktop/b.py": "def apply(backend, r):\n    backend.set_frequency(r)\n",
+          "desktop/c.py": "def apply(backend, r):\n    if 10 <= r <= 100:\n        backend.set_frequency(r)\n"},
+         {"desktop/constants.py": "FREQ_MAX_HZ = 6.0e9\n",
+          "desktop/a.py": "from desktop.constants import FREQ_MAX_HZ\n\ndef apply(backend, r):\n"
+                          "    if r <= FREQ_MAX_HZ:\n        backend.set_frequency(r)\n",
+          "desktop/b.py": "from desktop.constants import FREQ_MAX_HZ\n\ndef apply(backend, r):\n"
+                          "    if r <= FREQ_MAX_HZ:\n        backend.set_frequency(r)\n",
+          "desktop/c.py": "def apply(backend, r):\n    if 10 <= r <= 100:\n        backend.set_frequency(r)\n"}),
     Case("A05", "改为无界循环后仍要报",
          "线程体卡在没有 break 的 while True 里（不看阻塞函数叫什么）",
          {"tests/test_t.py": "import threading\n\nclass T:\n    def _pump(self):\n        return 1\n\n    def _run(self):\n        while True:\n            self._pump()\n\n    def test_x(self):\n        t = threading.Thread(target=self._run)\n        t.start()\n        t.join(timeout=1)\n        assert not t.is_alive()\n"},
@@ -219,6 +258,22 @@ CASES: List[Case] = [
          "本轮文档与代码不一致（例如「不改颜色」但代码仍有硬编码颜色）",
          {"docs/x.md": "见 `desktop/nope.py`。\n"},
          {"docs/x.md": "见 `desktop/ok.py`。\n", "desktop/ok.py": "x = 1\n"},
+         match="D6-missing-path"),
+    Case("D6", "路径过期降级为「已迁移」而不是「声明不实」",
+         "docs/COORDINATION.md:2354 写 desktop_sdr_session.py 已落，4254 行记着整模块迁到 ai_sdr_session",
+         {"docs/x.md": "已落：`mbdsdr_ai/desktop_sdr_session.py`。\n\n"
+                       "| 模块 | 结论 |\n| --- | --- |\n"
+                       "| `desktop_sdr_session.py:38` | 整模块迁 `desktop/ai_sdr_session.py` |\n",
+          "desktop/ai_sdr_session.py": "x = 1\n"},
+         {"docs/x.md": "已落：`desktop/ai_sdr_session.py`。\n",
+          "desktop/ai_sdr_session.py": "x = 1\n"},
+         match="D6-path-moved"),
+    Case("D6", "从未存在过的模块仍报声明不实",
+         "文档点名一个仓里从来没有的模块，又没有迁移记录：不能降级成「路径过期」",
+         {"docs/x.md": "见 `mbdsdr_ai/ghost_module.py`。\n\n"
+                       "| `ghost_module.py:38` | 待查 |\n"},
+         {"docs/x.md": "见 `mbdsdr_ai/ghost_module.py`。\n",
+          "mbdsdr_ai/ghost_module.py": "x = 1\n"},
          match="D6-missing-path"),
     Case("A14", "台账只用行号定位",
          "desktop/main_window.py 改十几行后，豁免 :8327/:12761/:14455 全部失效",
