@@ -65,10 +65,14 @@ def rms_dbm(block: np.ndarray, ref_dbfs_per_dbm: float = -10.0) -> float:
 def dbm_to_s_unit(dbm: float) -> Tuple[float, str]:
     """把 dBm 映射成 (数值 S, 显示字符串)。
 
+    - 非有限值（NaN/±Inf，断流或驱动异常）→ ``(nan, "—")``：显式「没有读数」，
+      既不落进 ``int(round(nan))`` 抛 ValueError，也不伪装成 S0；
     - < S0 → (0.0, "S0")
     - S0..S9 → (0..9, "S0".."S9")
     - > S9 → (9 + (dbm-S9)/10, "S9+X") 其中 X 是超过 S9 的 dB 数
     """
+    if not math.isfinite(dbm):
+        return float("nan"), "—"
     if dbm <= _S0_DBM:
         return 0.0, "S0"
     if dbm < _S9_DBM:
@@ -130,6 +134,10 @@ class SMeter:
         同时更新平滑值、峰值保持、异常检测。
         """
         dbm = rms_dbm(block, self.ref)
+        if not math.isfinite(dbm):
+            # 断流/驱动返回 NaN/Inf：本拍显式无效。不写平滑值、峰值与历史——
+            # 否则 NaN 会永久污染 EMA（NaN 比较恒 False）并使峰值保持失效。
+            return float("nan")
 
         # 一阶平滑（跟随快）
         alpha = 0.3

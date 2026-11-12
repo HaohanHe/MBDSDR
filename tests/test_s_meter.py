@@ -5,6 +5,7 @@ S 表单元测试
 
 覆盖：已知功率→dBm、S-unit 映射、峰值保持、AI 异常检测。
 """
+import math
 import os
 import sys
 
@@ -53,6 +54,37 @@ def test_s_unit_below_s0_clamps():
     s, label = dbm_to_s_unit(-200.0)
     assert label == "S0"
     assert s == 0.0
+
+
+def test_s_unit_non_finite_is_no_reading():
+    """NaN/±Inf：必须返回「没有读数」，不抛 ValueError，也不伪装成 S0。
+
+    反证：旧实现走 ``int(round(nan))`` → ValueError；``inf`` 会得到
+    ``S9+inf`` 这种无法显示的字符串。
+    """
+    for bad in (float("nan"), float("inf"), float("-inf")):
+        s, label = dbm_to_s_unit(bad)
+        assert math.isnan(s), f"{bad!r} 应返回 NaN 数值，得到 {s!r}"
+        assert label == "—", f"{bad!r} 应显示「—」，得到 {label!r}"
+
+
+def test_push_non_finite_does_not_poison_state():
+    """非有限块不污染平滑值/峰值，且 s_unit 仍可安全取用。"""
+    m = SMeter(peak_decay_db=0.0)
+    good = 0.1 * np.ones(1024, dtype=np.complex64)
+    m.push(good)
+    dbm_good, peak_good = m.dbm, m.peak
+
+    for bad in (np.full(1024, np.nan, dtype=np.complex64),
+                np.full(1024, np.inf, dtype=np.complex64)):
+        assert math.isnan(m.push(bad)), "非有限读数必须显式返回 NaN"
+        assert m.dbm == dbm_good, "平滑值被非有限读数污染"
+        assert m.peak == peak_good, "峰值被非有限读数污染"
+
+    # 仍能安全读 S 单位（不抛，且保留最后一次有效读数）
+    s, label = m.s_unit
+    assert math.isfinite(s)
+    assert label.startswith("S") and label != "—"
 
 
 # ── 3. 峰值保持 ────────────────────────────────────────────────
