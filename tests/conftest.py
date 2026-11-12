@@ -1079,6 +1079,42 @@ def _recycle_top_level_widgets():
     app.processEvents()
 
 
+@pytest.fixture(autouse=True, scope="module")
+def _restore_os_environ_at_module_boundary(request):
+    """模块结束时把 ``os.environ`` 还回本模块建立时的样子（跨文件不串味）。
+
+    2026-11-12 实测（两文件复现）：A 文件的 module fixture 在 ``yield`` 之前
+    写入环境变量后抛异常，setup 失败 → 写在 ``yield`` 之后的还原代码永远
+    不执行，同一 pytest 进程里后跑的 B 文件读到被改写的值，走进另一条分支。
+    逐个 fixture 补 try/finally 只能覆盖已知点；这里做机械兜底：autouse
+    模块级 fixture 最先建立、最后拆除，正好在模块边界把整个环境还原。
+
+    只还原模块期间的增删改，不碰模块 import 时 ``setdefault`` 的基线
+    （那些在快照之前就已写入，属于本模块声明的测试环境）。
+    ``MBDSDR_ENV_GUARD=0`` 显式关闭（反证用）。
+    """
+    if os.environ.get("MBDSDR_ENV_GUARD", "1") == "0":
+        yield
+        return
+    before = dict(os.environ)
+    yield
+    after = dict(os.environ)
+    changed = sorted(
+        (set(after) - set(before))
+        | (set(before) - set(after))
+        | {k for k in set(before) & set(after) if before[k] != after[k]})
+    for key in set(after) - set(before):
+        os.environ.pop(key, None)
+    for key, value in before.items():
+        if os.environ.get(key) != value:
+            os.environ[key] = value
+    if changed:
+        module = getattr(request, "module", None)
+        name = getattr(module, "__name__", "?")
+        print("[mbdsdr-env-guard] %s 结束时还原环境变量：%s"
+              % (name, ", ".join(changed)), flush=True)
+
+
 @pytest.hookimpl(trylast=True)
 def pytest_sessionfinish(session, exitstatus):
     _RESULT["exitstatus"] = int(exitstatus)
