@@ -178,7 +178,9 @@ def _chat_colors() -> dict:
         "user_bg": c.get("card_2", "#2b2c2f"),
         "user_edge": c.get("accent", "#919cac"),
         "sys_bg": "#241f16",
-        "sys_text": c.get("status_warning", "#C8A040"),
+        # 对话区是固定深底（不随主题变），状态色按真实底色取：浅色主题的
+        # 压暗琥珀放到 #241f16 上只有 3.25:1。
+        "sys_text": _tok().status_color("warning", bg="#241f16"),
     }
 
 
@@ -571,7 +573,8 @@ class AIPanel(QWidget):
             if not getattr(self.agent.config, "api_key", ""):
                 self.ai_status_label.setText(self.tr("未配置 API"))
                 self.ai_status_label.setStyleSheet(
-                    f"font-size: 8pt; color: {_tok().COLORS['status_warning']};")
+                    f"font-size: 8pt; color: "
+                    f"{_tok().status_color('warning', bg=_chat_colors()['panel_bg'])};")
                 return
             model = self.agent.model_manager.model
             # 获取上下文状态
@@ -593,11 +596,13 @@ class AIPanel(QWidget):
         elif AI_CORE_AVAILABLE:
             self.ai_status_label.setText(self.tr("未配置 API"))
             self.ai_status_label.setStyleSheet(
-                f"font-size: 8pt; color: {_tok().COLORS['status_warning']};")
+                f"font-size: 8pt; color: "
+                f"{_tok().status_color('warning', bg=_chat_colors()['panel_bg'])};")
         else:
             self.ai_status_label.setText(self.tr("AI 内核不可用"))
             self.ai_status_label.setStyleSheet(
-                f"font-size: 8pt; color: {_tok().COLORS['status_danger']};")
+                f"font-size: 8pt; color: "
+                f"{_tok().status_color('danger', bg=_chat_colors()['panel_bg'])};")
 
     def _show_config(self):
         """显示 API 配置对话框。"""
@@ -819,8 +824,8 @@ class AIPanel(QWidget):
         _c = _chat_colors()
         status_color = {
             ai_steps.STATUS_SUCCESS: _t["status_success"],
-            ai_steps.STATUS_FAILED: _t["status_danger"],
-            ai_steps.STATUS_RUNNING: _t["status_warning"],
+            ai_steps.STATUS_FAILED: _tok().status_color("danger", bg=_t["card_1"]),
+            ai_steps.STATUS_RUNNING: _tok().status_color("warning", bg=_t["card_1"]),
             ai_steps.STATUS_SKIPPED: _t["disabled_gray"],
         }.get(step.status, _t["text_muted"])
         status_label = {
@@ -848,7 +853,8 @@ class AIPanel(QWidget):
             html += (f'<br><span style="color:{status_color};">'
                      f'{_esc(step.summary)}</span>')
         if step.error and step.error not in step.summary:
-            html += (f'<br><span style="color:{_t["status_danger"]};">'
+            html += (f'<br><span style="color:'
+                     f'{_tok().status_color("danger", bg=_t["card_1"])};">'
                      f'错误 {_esc(step.error)}</span>')
         html += '</div>'
 
@@ -1071,12 +1077,16 @@ class AIPanel(QWidget):
             self._add_ai_message("本地能力协商返回了无法识别的结果。")
             return
         _t = _tok().COLORS
+        # 工具卡底是 rgba(20,26,36,.65) 叠在 panel 上，比 card_1 更暗；按更亮的
+        # card_1 取色是保守算法（真实底色只会让对比度更高）。
+        _warn = _tok().status_color("warning", bg=_t["card_1"])
+        _danger = _tok().status_color("danger", bg=_t["card_1"])
         status_label = {
             "ok": ("已执行", _t["status_success"]),
-            "gated": ("等待确认", _t["status_warning"]),
+            "gated": ("等待确认", _warn),
             "not_connected": ("设备未连接", _t["text_muted"]),
-            "denied": ("被 Hooks 否决", _t["status_danger"]),
-            "failed": ("执行失败", _t["status_danger"]),
+            "denied": ("被 Hooks 否决", _danger),
+            "failed": ("执行失败", _danger),
             "no_match": ("没有匹配能力", _t["text_muted"]),
         }
         for card in out.get("cards", []):
