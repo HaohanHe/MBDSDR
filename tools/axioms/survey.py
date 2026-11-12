@@ -1067,6 +1067,61 @@ def collect_d8(repo: Repo) -> Dimension:
 # ────────────────────────────── 汇总 ──────────────────────────────
 
 
+def _location_problem(raw_path: str, line: int, root: str) -> str:
+    """finding 指向的位置是否属于**被分析的这棵树**。
+
+    返回 ``""`` / ``unknown-path`` / ``line-out-of-range``。
+    这类错误比漏报更伤：报了一个不存在的文件，读报告的人会以为看见了证据。
+    """
+    if not raw_path or raw_path.startswith("<inline:") or raw_path.startswith(".git/"):
+        # 内联片段与 git 目录（钩子）不在工作树里，不算「被分析树」的路径。
+        return ""
+    full = os.path.join(root, raw_path)
+    if not os.path.exists(full):
+        return "unknown-path"
+    if line <= 0 or os.path.isdir(full):
+        return ""
+    text = _read(full)
+    if line > len(text.splitlines()):
+        return "line-out-of-range"
+    return ""
+
+
+def validate_finding_locations(repo: Repo, dims: Sequence[Dimension]) -> Dict[str, int]:
+    """在报告出闸前核对每条 finding 的 path/line 确实落在被分析树里。
+
+    历史事故：报告里出现过本仓、全部 worktree、`git log --all` 都不存在的
+    路径（`mbdsdr_ai/skyfield_compat.py`、`docs/learn/phase9/_PHASE9_FINAL_SUMMARY.md`）。
+    判据自己不知道自己看的是哪棵树，是这类错误的根；所以这里不删条目，
+    而是把规则名改写成 `-unknown-path` / `-line-out-of-range` 并升级为应修，
+    让「报了个不存在的东西」本身成为可见的违规。
+    """
+    counts = {"unknown-path": 0, "line-out-of-range": 0, "checked": 0}
+    for dim in dims:
+        for f in dim.findings:
+            counts["checked"] += 1
+            bad = _location_problem(f.path, f.line, repo.root)
+            if not bad:
+                continue
+            counts[bad] += 1
+            f.rule = f"{f.rule}-{bad}"
+            f.severity = "must-fix"
+            what = "不存在" if bad == "unknown-path" else "行号越界"
+            f.why = (
+                f"判据指向的位置在被分析树里{what}（{f.path}:{f.line}）；"
+                "先修判据取到的路径/行号，这条结论不可信。" + f.why
+            )
+            f.fix = "路径必须来自被分析的那棵树；" + f.fix
+    for dim in dims:
+        if dim.id == "D6":
+            dim.facts.append(
+                f"位置校验：核对 {counts['checked']} 条 finding 的 path/line；"
+                f"unknown-path {counts['unknown-path']} 条；"
+                f"line-out-of-range {counts['line-out-of-range']} 条"
+            )
+    return counts
+
+
 def collect_all(repo: Repo) -> Tuple[List[Axiom], List[Dimension]]:
     axioms = build_axioms(repo)
     reset_skips()
@@ -1094,4 +1149,5 @@ def collect_all(repo: Repo) -> Tuple[List[Axiom], List[Dimension]]:
         collect_d7(axioms, base),
         collect_d8(repo),
     ]
+    validate_finding_locations(repo, dims)
     return axioms, dims

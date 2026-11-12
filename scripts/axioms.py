@@ -74,6 +74,13 @@ def main(argv=None) -> int:
         return 2
 
     repo = Repo(args.root)
+    if not args.self_test_only:
+        # 判据自己必须交代看的是哪棵树：报告里的每个 path 都相对这棵树。
+        dirt = [ln for ln in repo.git("status", "--porcelain").splitlines() if ln.strip()]
+        print(
+            f"[tree] 分析树：{repo.root} · HEAD={repo.head() or '<无 git>'} · "
+            f"未提交改动 {len(dirt)} 项"
+        )
 
     if args.self_test_only:
         results = run_selftest(repo)

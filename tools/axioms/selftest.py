@@ -26,7 +26,7 @@ from .model import (
     priority_score,
 )
 from .ratchet import build_baseline, compare, load_baseline, snippet_key, write_baseline
-from .survey import audit_waiver_items, collect_all
+from .survey import Dimension, audit_waiver_items, collect_all, validate_finding_locations
 
 
 @dataclass
@@ -432,7 +432,44 @@ def _extra_checks() -> List[dict]:
     results.append(_locator_drift_check())
     results.append(_cycle_representative_check())
     results.append(_finding_type_check())
+    results.append(_location_check())
     return results
+
+
+def _location_check() -> dict:
+    """finding 指向的路径/行号必须属于被分析的树，否则必须改写并升级。
+
+    历史事故：报告里出现过本仓、全部 worktree、`git log --all` 都不存在的
+    路径。判据必须能自己证明「我报的东西在这棵树里」。
+    """
+    root = tempfile.mkdtemp(prefix="mbdsdr-axiom-loc-")
+    try:
+        os.makedirs(os.path.join(root, "desktop"), exist_ok=True)
+        with open(os.path.join(root, "desktop", "a.py"), "w", encoding="utf-8", newline="\n") as f:
+            f.write("x = 1\ny = 2\n")
+        dim = Dimension("D6", "目录与文档结构", "")
+        dim.findings = [
+            Finding("D6-ok", "desktop/a.py", 2, "", "", ""),
+            Finding("D6-ghost", "desktop/nope.py", 0, "", "", ""),
+            Finding("D6-far", "desktop/a.py", 99, "", "", ""),
+        ]
+        counts = validate_finding_locations(Repo(root), [dim])
+        rules = [f.rule for f in dim.findings]
+        ok = (
+            counts["unknown-path"] == 1
+            and counts["line-out-of-range"] == 1
+            and rules == ["D6-ok", "D6-ghost-unknown-path", "D6-far-line-out-of-range"]
+            and dim.findings[1].severity == "must-fix"
+        )
+        return {
+            "rule": "R1", "name": "finding 位置必须存在于被分析树",
+            "provenance": "报告出现两个全历史都不存在的路径（skyfield_compat / _PHASE9_FINAL_SUMMARY）",
+            "positive_hits": 2, "negative_hits": 0,
+            "ok": ok,
+            "detail": "" if ok else f"位置校验失效：counts={counts} rules={rules}",
+        }
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
 
 
 def _finding_type_check() -> dict:

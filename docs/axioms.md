@@ -16,7 +16,7 @@ python scripts/axioms.py --prioritize \
 
 | 用法 | 作用 |
 |---|---|
-| `python scripts/axioms.py` | 八维合规报告（含 47 条反证自检 + 棘轮） |
+| `python scripts/axioms.py` | 八维合规报告（含 48 条反证自检 + 棘轮） |
 | `--prioritize` | 追加按派活规则排序的清单 |
 | `--self-test-only` | 只验"反证是否空过" |
 | `--rule A03` | 只看某条规则 / 某个维度 |
@@ -167,6 +167,26 @@ A03/A04（关键字当行为）、A14（行号当位置）。
 `severity` 传 `True`（把第 7 个位置参数写成布尔）→ `ValueError`。这条与棘轮同属 R1 级自证：
 判据对象的构造必须先于判据本身被验证。
 
+### 判据必须报出它分析的树（2026-11-13 第三轮）
+
+**规矩：分析入口先打印「分析树 = 根目录 + HEAD + 未提交改动数」；每条 finding 的 `path`
+必须存在于这棵树里，`file:line` 的行号不得超过该文件行数。不满足就地把规则名改写成
+`-unknown-path` / `-line-out-of-range` 并升级为应修，而不是删掉条目。**
+
+事故形态：报告里出现过 `mbdsdr_ai/skyfield_compat.py` 与
+`docs/learn/phase9/_PHASE9_FINAL_SUMMARY.md` 两个路径。按 records 核对：本仓、
+29 个 worktree、`git log --all` 都没有它们，也没有任何一次检查器输出产生过它们——
+它们是汇报时手写的，不是分析结果。**「报了一个不存在的东西」比漏报更伤**：
+读报告的人会以为看见了证据。
+
+落地方式（`survey.validate_finding_locations`，在 `collect_all` 出闸前统一执行）：
+路径不存在 → `unknown-path`；行号超过文件行数 → `line-out-of-range`；
+`.git/` 前缀（钩子台账）与 `<inline:...>`（反证片段）不属于工作树，豁免。
+D6 的事实行会给出「核对 N 条 / unknown-path 0 / line-out-of-range 0」，让这条不变式
+自己的执行也可复核。反证：真路径正常、不存在路径必须被改写、行号越界必须被改写。
+
+这一条与「判据对象先验类型」是同一类：判据不仅要证明结论，还要证明**它看的是哪棵树**。
+
 ### 登记表必须由检查器执行
 
 `docs/truth-sources.json` 是「每个量的合法产生点」的登记表。D2 曾经完全无视它——
@@ -218,7 +238,7 @@ A03/A04（关键字当行为）、A14（行号当位置）。
 | D3 接口与命名 | 公开函数 ≥8 的模块必须有 `__all__`；同名不得不同职；同一概念不得两名 | `D3-no-contract` `D3-name-role` `D3-concept-alias` |
 | D4 门禁与验收 | 守卫必须接入某个入口；门禁的文档登记必须指名**可解析**的入口；共享库必须被真的有入口的脚本引用；skip 只能表环境缺失；断言必须可成立；xfail 必须 strict | `D4-silent-gate` `D4-gate-unresolvable` `D4-unreferenced-lib` + A05–A09 |
 | D5 流程与协作 | 已知红必须带转绿条件/复跑命令；文档提交号必须 `cat-file` 可见；绿必须绑定当前树；位置引用必须落到符号 | `D5-known-red-incomplete` + A10/A11/A14 |
-| D6 目录与文档 | 文档引用的仓内路径必须存在；行号必须落在文件内；主题冻结声明必须与代码一致 | `D6-missing-path` `D6-path-moved` `D6-stale-line` `D6-color-claim` |
+| D6 目录与文档 | 文档引用的仓内路径必须存在；行号必须落在文件内；主题冻结声明必须与代码一致；每条 finding 的 path/line 必须落在被分析树内 | `D6-missing-path` `D6-path-moved` `D6-stale-line` `D6-color-claim` `unknown-path` `line-out-of-range` |
 | D7 任务分派 | 按固定公式算优先级，不由"谁最后汇报"决定 | `priority_score` |
 | D8 豁免与债务 | 任何"暂时不做"必须有理由、到期、批准人 | `D8-debt-no-expiry` |
 
@@ -381,7 +401,7 @@ D1 5 / D2 69 / D3 33 / D4 42 / D5 40 / D6 39 / D7 0 / D8 1
 这些**没有**做批量豁免：豁免需要理由、到期、批准人三要素，批量豁免会把真实漂移藏起来。
 它们保留在报告里，按季度复核。
 
-## 反证自检（47 条，必须全部 PASS）
+## 反证自检（48 条，必须全部 PASS）
 
 `python scripts/axioms.py --self-test-only` 会为每条规则在临时目录重建：
 
