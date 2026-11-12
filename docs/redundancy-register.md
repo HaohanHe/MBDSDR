@@ -686,6 +686,32 @@ new_spacetime      | same object: False
 **红线**：不许把显示层副本改成真值对象（显示层本来就该有副本）；只砍「可写副本」与「第二写入口」。
 每条收敛必须带反向测试（两侧对调必须红），否则就是另一种假绿。
 
+## 5.12 发现：`frequency_manager_v2` 生产零实例化（2026-11-12，交冗余线裁定，未动代码）
+
+> 来源：设置三环线在修 `frequency_manager.py` 损坏恢复时旁证发现。**本线只登记，不删代码。**
+
+**一句话现状**：`mbdsdr_ai/frequency_manager_v2.py` 的 `FrequencyManagerV2` 在生产代码里零实例化，只有 `tests/test_frequency_manager_v2.py` 在 new 它——属于「死代码 / 未接线功能」的典型样本，不是「已经合并掉的旧实现」。
+
+**证据（全仓 grep）**：
+
+```powershell
+git grep -n "FrequencyManagerV2("     # 仅 tests/test_frequency_manager_v2.py 5 处
+git grep -n "frequency_manager_v2"    # 生产侧 0 命中；仅 docs 与测试
+```
+
+- `mbdsdr_ai/agent.py` 只实例化 `MemoryStore` / `Guardian` / `WorkflowEngine` / `Scheduler`，没有 v2 频率管理器；
+- `desktop/` 全目录 0 命中；
+- v2 落盘的 `bookmarks_v2.json` 与生产在用的 `bookmarks.json` 不是同一个文件（后者由 `frequency_manager.py` 与书签面板共用，已是单真值源）。
+
+**与 §5.3 的关系**：§5.3② 已把它归为「实验 / 原型，保留 + 标 `@experimental`」。本节补的是更强的结论：**连原型接线都不存在**，生产用户永远碰不到它。因此它不参与「用户可见的数据丢失概率」排序——设置三环线已据此把它从第一档 7 条排到最后（生产零实例化 = 用户感知为零）。
+
+**移交事项**（冗余线裁定，二选一）：
+
+1. 认定为死代码 → 随下一次删除批次删模块 + 测试，并同步 §5.3② 计数（46 → 45）；
+2. 认定为未接线功能 → 保留，补一条接线计划与验收（谁实例化、写哪个文件、与 `frequency_manager.py` 的单真值源关系）；在此之前不得声称它是书签 v2 的落点。
+
+**本线已做**：只登记，不改 `frequency_manager_v2.py`，不动其测试。
+
 ## 6. 账本线登记行并入（R1–R20）
 
 > 来源：`D:\mbdsdr\.tmp\account_redundancy_rows.md`（账本线导出 20 行，不是 16 行）。
@@ -753,3 +779,4 @@ new_spacetime      | same object: False
 | 2026-11-06 | （本次提交） | §5.8.1 十条无用符号分三级（真可删 5 / 需先补测试再删 3 / 入口角色不动 2），patch 计划落 `docs/pending-patches/2026-11-06-deadcode-unused-symbols.md`；§5.8.2 七条存疑跑完四种确认手段后落"确认无用 4 / 保留 3"；§1.1 加数字引用规矩（必须带口径 + HEAD 短哈希）；§5.9 棘轮提案评估结论为"本轮不实施"并写明过渡期豁免设计 |
 | 2026-11-06 | （本次提交） | A10 改判：**两实现并存、入口不止一个、退休条件未满足**（`decoder_registry.py:78` 只是一个入口；CLI 生产路径 `decode_router.py:517` 仍走 `acars_decoder` 状态机）；新增 §5.6 差异表（模式/链路/质量/测试/调用方）+ 5 条退休判据，不出 patch、不删生产路径；清单 2 的 A3/C5/C12 摘要行补「见 §X」指针；A3 的 `53 passed` 标注为 2026-11-06 02:21 实跑记录（本轮未复跑） |
 | 2026-11-06 | （本次提交） | 新增 §5.7 落库依赖表：A 表 6 项等「操作逻辑线」提交 `main_window.py`/`module_panel.py` 后按 HEAD 校正（B5、C2、C3、A11、§5.4、§4.3）；B 表 6 项无他线依赖（C7 其余 4 方法、A9、A7/A8、B7、§5.3、A3 历史位置）；C 表 `device_panel.py:296`→HEAD `366` 可即改；明确「claim 到期但没提交不算落库」 |
+| 2026-11-12 | （本表更新提交） | 新增 §5.12：`frequency_manager_v2` 生产零实例化（`FrequencyManagerV2(` 仅命中 `tests/test_frequency_manager_v2.py` 5 处，`agent.py` 只实例化 MemoryStore/Guardian/WorkflowEngine/Scheduler）。设置三环线只登记、不删代码，裁定权交冗余线（死代码 vs 未接线功能） |
