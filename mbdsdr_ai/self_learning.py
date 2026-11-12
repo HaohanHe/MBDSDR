@@ -28,11 +28,14 @@ SelfLearning：从经验中学习，优化工具调用策略和系统提示词�
 """
 
 import json
+import logging
 import time
 import os
 from dataclasses import dataclass, field
 from typing import Dict, List, Any, Optional
 from enum import Enum
+
+logger = logging.getLogger(__name__)
 
 
 class ExperienceType(str, Enum):
@@ -129,10 +132,20 @@ class SelfLearningEngine:
         self.experiences: Dict[str, Experience] = {}
         self.patterns: Dict[str, LearnedPattern] = {}
         self._counter = 0
+        # 降级可见：加载失败的经验/模式文件记在这里（kind + path + 原因）。
+        # 「经验本来就是空的」与「经验文件读不出来」不再等价。
+        self.load_errors: List[Dict[str, str]] = []
 
         # 加载历史经验和模式
         self._load_experiences()
         self._load_patterns()
+
+    def _record_load_error(self, kind: str, path: str, exc: Exception) -> None:
+        """记录一次加载降级；单个坏文件不阻断其余文件的加载。"""
+        reason = f"{type(exc).__name__}: {exc}"
+        self.load_errors.append({"kind": kind, "path": path, "error": reason})
+        logger.warning("学习数据读取失败（%s），已记入 load_errors：%s | %s",
+                       kind, path, reason)
 
     def record_experience(
         self,
@@ -308,6 +321,8 @@ class SelfLearningEngine:
             "patterns_by_type": pattern_types,
             "min_score_for_learning": self.min_score_for_learning,
             "storage_dir": self.storage_dir,
+            # 加载降级条数：非 0 表示「统计里少了东西」，不是「本来就没有」。
+            "load_error_count": len(self.load_errors),
         }
 
     def get_experiences(self, limit: int = 20, min_score: float = 0) -> List[Dict[str, Any]]:
@@ -366,10 +381,17 @@ class SelfLearningEngine:
                         timestamp=data.get("timestamp", 0),
                         learned=data.get("learned", False),
                     )
-                    self.experiences[exp.experience_id] = exp
+                except FileNotFoundError:
+                    continue  # 竞态：列目录后刚被删，与「本来就没有」同义
+                except (OSError, ValueError, KeyError, TypeError) as exc:
+                    self._record_load_error("experience", path, exc)
+                    continue
+                self.experiences[exp.experience_id] = exp
+                try:
                     self._counter = max(self._counter, int(exp.experience_id.split('_')[-1]))
-                except Exception:
-                    pass
+                except (ValueError, IndexError, AttributeError) as exc:
+                    # 数据本身已加载，只是编号解析不了：不影响经验可用性，但留痕。
+                    self._record_load_error("experience-counter", path, exc)
 
     def _load_patterns(self):
         """加载历史模式。"""
@@ -395,6 +417,9 @@ class SelfLearningEngine:
                     created_at=data.get("created_at", 0),
                     applied=data.get("applied", False),
                 )
-                self.patterns[pattern.pattern_id] = pattern
-            except Exception:
-                pass
+            except FileNotFoundError:
+                continue  # 竞态：列目录后刚被删，与「本来就没有」同义
+            except (OSError, ValueError, KeyError, TypeError) as exc:
+                self._record_load_error("pattern", path, exc)
+                continue
+            self.patterns[pattern.pattern_id] = pattern
