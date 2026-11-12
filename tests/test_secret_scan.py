@@ -83,6 +83,28 @@ def test_inline_allowlist_silences_only_that_line(tmp_path: Path) -> None:
     assert FAKE not in text
 
 
+def test_large_file_still_gets_shape_rules(tmp_path: Path) -> None:
+    """超过 2MB 只是不做熵检查：形状规则必须照跑，且流式读不整块进内存。"""
+    big = tmp_path / "big.csv"
+    filler = "a,b,c\n" * ((3 * 1024 * 1024) // 6)
+    big.write_text(filler + f'"{FAKE}",x\n', encoding="utf-8")
+
+    result = run_scan(tmp_path, "--root", str(tmp_path))
+    text = result.stdout + result.stderr
+    assert result.returncode == 1, text
+    assert "big.csv" in text, text
+    assert "github-pat-classic" in text, text
+    assert "大文件仅形状检查 1 个" in text, text
+    assert FAKE not in text
+
+    # 删掉那一行：同一体积下必须干净，证明拦的是形状而不是「文件大」。
+    big.write_text(filler, encoding="utf-8")
+    clean = run_scan(tmp_path, "--root", str(tmp_path))
+    text2 = clean.stdout + clean.stderr
+    assert clean.returncode == 0, text2
+    assert "github-pat-classic" not in text2, text2
+
+
 def test_staged_mode_checks_index_not_worktree(tmp_path: Path) -> None:
     repo = tmp_path / "repo"
     repo.mkdir()
