@@ -35,6 +35,7 @@ except ImportError:  # pragma: no cover - Windows
     grp = None
 import importlib.util
 import json
+import logging
 import os
 import platform
 try:  # POSIX-only; absent on Windows (user-name lookup degrades to unknown)
@@ -51,6 +52,8 @@ import time
 from dataclasses import dataclass, field, asdict
 from pathlib import Path
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # 常量
@@ -141,10 +144,12 @@ def run_cmd(
 
 
 def read_text_file(path: str, max_bytes: int = 4096) -> str | None:
+    """读文本的一小段；失败返回 None，但原因（路径 + 异常类型）必须留痕。"""
     try:
         with open(path, "rb") as f:
             return f.read(max_bytes).decode("utf-8", errors="replace").strip()
-    except Exception:  # noqa: BLE001
+    except Exception as e:  # noqa: BLE001
+        logger.debug("读取 %s 失败：%s: %s", path, type(e).__name__, e)
         return None
 
 
@@ -200,7 +205,8 @@ def scan_usb_via_sys(root: str = "/sys/bus/usb/devices") -> list[dict[str, str]]
                     "product": prod,
                 }
             )
-        except Exception:  # noqa: BLE001
+        except Exception as e:  # noqa: BLE001
+            logger.warning("跳过 USB 设备 %s：%s: %s", child.name, type(e).__name__, e)
             continue
     return found
 
@@ -295,10 +301,8 @@ def check_usb_udev() -> CheckResult:
         if not os.path.isdir(d):
             continue
         for rp in glob.glob(os.path.join(d, "*.rules")):
-            try:
-                txt = read_text_file(rp, max_bytes=200_000) or ""
-            except Exception:  # noqa: BLE001
-                continue
+            # read_text_file 自己吞掉读失败并留下原因，这里不需要再包一层 except。
+            txt = read_text_file(rp, max_bytes=200_000) or ""
             if "0bda" in txt and ("2838" in txt or "2832" in txt):
                 found_rules.append(rp)
     r.detail["udev_rules_hit"] = found_rules
