@@ -1,5 +1,6 @@
 #!/usr/bin/env python
-"""pre-commit 机械闸：①跨线范围检查 ②逐个文件查 claim 台账 ③明文凭据扫描。
+"""pre-commit 机械闸：①跨线范围检查 ②逐个文件查 claim 台账 ③明文凭据扫描
+④协调台账 §6.1 登记检查。
 
 ① `scripts/check_commit_scope.py --staged`：暂存区涉及 ≥2 个仍在 TTL 内的
    claim owner 时拒绝。
@@ -12,6 +13,11 @@
 ③ `scripts/secret_scan.py --staged`：扫**暂存区内容**（不是工作树）的明文凭据
    形状；命中只打印「文件:行 + 规则名」，不打印值。测试夹具/文档占位需在命中行
    加 `# pragma: allowlist secret` 逐行豁免，不支持目录级豁免。
+④ `scripts/check_claim_coordination.py --staged`：暂存文件里仍有活跃 claim 的，
+   必须在 `docs/COORDINATION.md` §6.1 已有行（逐条，或对只读批量目录的目录级行）。
+   这条以前只能事后扫全量，等发现时已经提交了。预算 `COORD_BUDGET_S`：超过只告警
+   不阻塞（说明原因），因为它是登记一致性检查，不是安全闸；读不到台账也降级为告警
+   ——「文件是否被他人占用」由 ② 的 claim_gate fail-closed 保底。
 
 安装：python scripts/install_git_hooks.py
 绕过：git commit --no-verify（会由 post-commit 写入 bypass 日志）
@@ -24,6 +30,8 @@ import time
 from pathlib import Path
 
 MANAGED = "MBDSDR-MANAGED-HOOK pre-commit"
+#: ④ 的耗时预算（秒）：实测 0.22–0.30s；超预算只告警，不阻塞提交。
+COORD_BUDGET_S = 0.30
 
 
 def _git(*args):
@@ -126,6 +134,38 @@ def main():
         print("[pre-commit] 确认是测试夹具/文档占位时，在**那一行**加 `# pragma: allowlist secret`；")
         print("[pre-commit] 不支持目录级/文件级豁免。真凭据请先轮换，不要只删字面量。")
         return proc.returncode
+
+    # ④ 协调台账登记：暂存文件里的活跃 claim 必须已有 §6.1 行。
+    #    顺序放在最后：前面三道是安全闸（fail-closed），这道是登记一致性（超预算/读不到降级告警）。
+    coord = Path(
+        os.environ.get("MBDSDR_CLAIM_COORD") or root / "scripts" / "check_claim_coordination.py"
+    )
+    if coord.exists():
+        sys.stdout.flush()
+        started = time.perf_counter()
+        proc = subprocess.run([sys.executable, str(coord), "--staged"], cwd=str(root))
+        elapsed = time.perf_counter() - started
+        if proc.returncode == 3:
+            if elapsed <= COORD_BUDGET_S:
+                print(
+                    f"[pre-commit] 拒绝提交：活跃 claim 在 docs/COORDINATION.md §6.1 缺行"
+                    f"（见上，本步 {elapsed:.2f}s）。"
+                )
+                print("[pre-commit] 补「文件 | 线名 | 开始时间 | 预计提交 hash」后重试；")
+                print("[pre-commit] 目录级行只对 docs/<子目录>/** 只读批量成立，")
+                print("[pre-commit] 代码根与 docs 顶层共享文档必须逐条。")
+                return 3
+            print(
+                f"[pre-commit] 警告：§6.1 缺行，但本步 {elapsed:.2f}s 超 "
+                f"{COORD_BUDGET_S:.2f}s 预算，本次不阻塞（补上台账，下笔会再拦）。"
+            )
+        elif proc.returncode != 0:
+            print(
+                f"[pre-commit] 警告：协调台账检查退出 {proc.returncode}"
+                "（读不到台账/文档），本步不阻塞；文件占用由 claim_gate fail-closed 保底。"
+            )
+    else:
+        print("[pre-commit] 警告：找不到 check_claim_coordination.py，跳过 §6.1 登记检查。")
 
     tree = _git("write-tree")
     if tree.returncode != 0:

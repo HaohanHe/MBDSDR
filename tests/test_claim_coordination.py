@@ -101,6 +101,18 @@ def test_second_owner_under_pattern_is_reported():
     assert any("同一模式下还有 owner" in x for x in result["ledger_only"]), result
 
 
+def test_second_owner_with_own_file_row_is_not_reported():
+    """第二个 owner 已用自己的逐条行登记 → 不再报（否则补行也永远红）。"""
+    doc = _doc(
+        "| `docs/learn/**` | 守卫账本线 | 2026-11-13 05:30 | 目录级登记 |",
+        "| `docs/learn/b.md` | 他线 | 2026-11-13 06:17 | 随本笔 |",
+    )
+    reg = _registry(("docs/learn/a.md", ["守卫账本线"]), ("docs/learn/b.md", ["他线"]))
+    result = cc.cross_check(
+        [("docs/learn/a.md", "守卫账本线"), ("docs/learn/b.md", "他线")], reg, doc)
+    assert result["ledger_only"] == [], result
+
+
 def test_brace_group_row_expands_to_each_file():
     """``desktop/{a,b}.py`` 花括号组按每个文件参与匹配。"""
     doc = _doc("| `desktop/{a,b}.py` | 组线 | 2026-11-13 01:00 | 随本笔 |")
@@ -108,3 +120,47 @@ def test_brace_group_row_expands_to_each_file():
     result = cc.cross_check(
         [("desktop/a.py", "组线"), ("desktop/b.py", "组线")], reg, doc)
     assert result["ledger_only"] == [] and result["doc_only"] == [], result
+
+
+def _staged_fixture(tmp_path: Path, doc_text: str):
+    """造一份临时文档/台账/占位文件目录，供 --staged 模式跑 main()。"""
+    import json
+    import time
+
+    doc = tmp_path / "COORD.md"
+    doc.write_text(doc_text, encoding="utf-8")
+    reg = tmp_path / "claims.json"
+    reg.write_text(json.dumps({"version": 1, "claims": {}}), encoding="utf-8")
+    markers = tmp_path / "markers"
+    markers.mkdir()
+    now = time.time()
+    (markers / "a.claim").write_text(json.dumps({
+        "path": "desktop/main_window.py", "owner": "操作逻辑线",
+        "acquired_at": now, "heartbeat_at": now, "ttl_min": 60,
+    }), encoding="utf-8")
+    return ["--doc", str(doc), "--registry", str(reg), "--markers", str(markers), "--staged"]
+
+
+def test_staged_mode_blocks_claimed_file_without_row(tmp_path, monkeypatch, capsys):
+    """提交前置：暂存文件有活跃 claim 但 §6.1 缺行 → 退出码 3（不是等到事后扫）。"""
+    argv = _staged_fixture(tmp_path, _doc())
+    monkeypatch.setattr(cc, "staged_paths", lambda root=None: ["desktop/main_window.py"])
+    assert cc.main(argv) == 3
+    out = capsys.readouterr().out
+    assert "缺 §6.1 行 1 条" in out, out
+    assert "desktop/main_window.py" in out
+    assert "[规矩]" in out, "输出必须带上「提交前就该有行」这条规矩"
+
+
+def test_staged_mode_passes_with_row_and_ignores_unstaged_claims(tmp_path, monkeypatch, capsys):
+    """正向：有行 → 0；且只查暂存文件，未暂存的活跃 claim 不该在这里报。"""
+    doc_text = _doc("| `desktop/main_window.py` | 操作逻辑线 | 2026-11-13 06:30 | 随本笔 |")
+    argv = _staged_fixture(tmp_path, doc_text)
+    monkeypatch.setattr(cc, "staged_paths", lambda root=None: ["desktop/main_window.py"])
+    assert cc.main(argv) == 0
+    out = capsys.readouterr().out
+    assert "缺 §6.1 行 0 条" in out, out
+
+    # 同一份 claim 未进暂存区 → 本模式不报（cheap：只为这次要提交的文件算）
+    monkeypatch.setattr(cc, "staged_paths", lambda root=None: ["docs/other.md"])
+    assert cc.main(argv) == 0

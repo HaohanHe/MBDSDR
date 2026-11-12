@@ -43,6 +43,7 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -191,6 +192,35 @@ def is_strict_path(path: str) -> bool:
     return True  # 根目录文件等一律按严格处理（fail closed）
 
 
+def _uncovered(
+    pairs: Iterable[Tuple[str, str]],
+    rows: List[Row],
+) -> Tuple[List[str], List[Row]]:
+    """逐条判覆盖。返回（缺行明细, 目录级行清单）。
+
+    strict 路径必须命中**逐条**行；非 strict 可被 owner 匹配的目录级行覆盖。
+    """
+    file_rows = [(ps, oc, rel) for ps, oc, rel in rows
+                 if any(not _is_pattern(p) for p in ps)]
+    pattern_rows = [(ps, oc, rel) for ps, oc, rel in rows
+                    if any(_is_pattern(p) for p in ps)]
+    out: List[str] = []
+    for path, owner in pairs:
+        exact = any(path in ps and _owner_matches(_owner_label(oc), owner)
+                    for ps, oc, _rel in file_rows)
+        if exact:
+            continue
+        pat_hit = any(_matches(path, p) and _owner_matches(_owner_label(oc), owner)
+                      for ps, oc, _rel in pattern_rows for p in ps if _is_pattern(p))
+        if is_strict_path(path):
+            out.append(
+                f"{path} owner={owner}（仅目录级登记；代码/共享文档必须逐条）"
+                if pat_hit else f"{path} owner={owner}")
+        elif not pat_hit:
+            out.append(f"{path} owner={owner}")
+    return out, pattern_rows
+
+
 def cross_check(
     active: Iterable[Tuple[str, str]],
     registry: Dict[str, Any],
@@ -199,34 +229,27 @@ def cross_check(
     """两个方向的差集。返回 ledger_only / doc_only，均已格式化成可打印的行。"""
     active = list(active)
     rows = parse_coordination_rows(doc_text)
-    file_rows = [(ps, oc, rel) for ps, oc, rel in rows
-                 if any(not _is_pattern(p) for p in ps)]
-    pattern_rows = [(ps, oc, rel) for ps, oc, rel in rows
-                    if any(_is_pattern(p) for p in ps)]
+    ledger_only, pattern_rows = _uncovered(active, rows)
+    file_rows = [(ps, oc) for ps, oc, _rel in rows if any(not _is_pattern(p) for p in ps)]
 
-    ledger_only: List[str] = []
-    for path, owner in active:
-        exact = any(path in ps and _owner_matches(_owner_label(oc), owner)
-                    for ps, oc, _rel in file_rows)
-        if exact:
-            continue
-        pat_hit = any(_matches(path, p) and _owner_matches(_owner_label(oc), owner)
-                      for ps, oc, _rel in pattern_rows for p in ps if _is_pattern(p))
-        if is_strict_path(path):
-            ledger_only.append(
-                f"{path} owner={owner}（仅目录级登记；代码/共享文档必须逐条）"
-                if pat_hit else f"{path} owner={owner}")
-        elif not pat_hit:
-            ledger_only.append(f"{path} owner={owner}")
-
-    # 目录级行必须覆盖该模式下的**全部** owner：出现第二个 owner 就报。
+    # 目录级行必须覆盖该模式下的**全部** owner：出现第二个 owner 就报——
+    # 除非那个 owner 已经用自己的逐条行登记过（否则「补了逐条行」也永远报红）。
     for ps, oc, rel in pattern_rows:
         if rel:
             continue
         label = _owner_label(oc)
         for pattern in (p for p in ps if _is_pattern(p)):
-            owners = {o for p, o in active if p and _matches(p, pattern)}
-            extra = {o for o in owners if not _owner_matches(label, o)}
+            extra = set()
+            for path, owner in active:
+                if not (path and _matches(path, pattern)):
+                    continue
+                if _owner_matches(label, owner):
+                    continue
+                covered = any(
+                    path in ps0 and _owner_matches(_owner_label(oc0), owner)
+                    for ps0, oc0 in file_rows)
+                if not covered:
+                    extra.add(owner)
             if extra:
                 ledger_only.append(
                     f"{pattern} 目录级行 owner={label}，但同一模式下还有 owner={sorted(extra)}")
@@ -269,25 +292,56 @@ def _load_registry(path: Path) -> Dict[str, Any]:
     return data
 
 
+def staged_paths(root: Path = ROOT) -> List[str]:
+    """暂存区文件名（规范化）。pre-commit 用，只为「这次要提交的文件」算覆盖。"""
+    proc = subprocess.run(
+        ["git", "diff", "--cached", "--name-only", "--no-renames"],
+        cwd=str(root), capture_output=True, text=True,
+        encoding="utf-8", errors="replace")
+    if proc.returncode != 0:
+        raise ValueError(f"git diff --cached 失败：{proc.stderr.strip()[:200]}")
+    return [_norm(x) for x in proc.stdout.splitlines() if x.strip()]
+
+
 def main(argv: Optional[Sequence[str]] = None) -> int:
     parser = argparse.ArgumentParser(description="claim 台账 ↔ COORDINATION.md §6.1 交叉校验")
     parser.add_argument("--doc", default=str(DOC), help="协调文档路径")
     parser.add_argument("--registry", default=str(fc.REGISTRY_PATH), help="claims.json 路径")
     parser.add_argument("--markers", default=str(fc.MARKER_DIR), help="占位文件目录（活跃 claim）")
     parser.add_argument("--json", action="store_true", help="输出机器可读 JSON")
+    parser.add_argument("--staged", action="store_true",
+                        help="只查暂存文件里的活跃 claim 有没有 §6.1 行（pre-commit 用）")
     args = parser.parse_args(argv)
 
     try:
         text = Path(args.doc).read_text(encoding="utf-8")
-        registry = _load_registry(Path(args.registry))
         active = active_claims(marker_dir=Path(args.markers))
-        result = cross_check(active, registry, text)
+        if args.staged:
+            # 只读文档 + 占位文件：台账（claims.json）在提交前置这条路上用不到，
+            # 少解析一份大 JSON 是 0.3s 预算的一部分。
+            rows = parse_coordination_rows(text)
+            staged = set(staged_paths(Path(args.doc).resolve().parents[1]))
+            pairs = [(p, o) for p, o in active if p in staged]
+            missing, _pats = _uncovered(pairs, rows)
+            result: Dict[str, Any] = {
+                "ledger_only": missing, "doc_only": [],
+                "rows": len(rows), "active": len(active),
+                "staged": len(staged), "staged_claims": len(pairs),
+            }
+        else:
+            registry = _load_registry(Path(args.registry))
+            result = cross_check(active, registry, text)
     except (OSError, ValueError, json.JSONDecodeError) as exc:
         print(f"CHECK FAIL：{exc}", file=sys.stderr)
         return EXIT_USAGE
 
     if args.json:
         print(json.dumps(result, ensure_ascii=False, indent=2))
+    elif args.staged:
+        print(f"暂存文件 {result['staged']} 个，其中仍有活跃 claim "
+              f"{result['staged_claims']} 条；缺 §6.1 行 {len(result['ledger_only'])} 条")
+        for line in result["ledger_only"]:
+            print(f"  - {line}")
     else:
         print(f"§6.1 表行：{result['rows']}；未过期 claim：{result['active']}")
         for name, label in (("ledger_only", "台账有、文档无"),
@@ -296,6 +350,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             print(f"[{label}] {len(items)} 条")
             for line in items:
                 print(f"  - {line}")
+
+    if not args.json:
+        print("[规矩] 活跃 claim 在提交时就必须已有 §6.1 行：pre-commit ④ 用 --staged "
+              "逐文件拦（0.3s 预算），不靠事后扫全量。")
 
     findings = len(result["ledger_only"]) + len(result["doc_only"])
     return EXIT_FINDINGS if findings else EXIT_OK

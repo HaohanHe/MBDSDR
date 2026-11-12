@@ -1864,7 +1864,9 @@ No supported devices found），GNSS+SDR 同开复验没做成；离线那次
 只读批量目录（`docs/<子目录>/**`）允许**目录级一行**常驻登记，不随提交删除；
 代码（`desktop/`、`mbdsdr_ai/`、`scripts/`、`tools/`、`tests/`）与 `docs/` 顶层
 共享文档**必须逐条**，目录级行覆盖到它们会被 `scripts/check_claim_coordination.py`
-判红。
+判红。**这条规矩由提交前拦，不靠事后扫**：pre-commit ④ 跑
+`check_claim_coordination.py --staged`，暂存文件里有活跃 claim 却缺本表行即拒绝
+（实测 0.22–0.30s，超 0.30s 预算只告警不阻塞并说明原因）。
 
 | 文件 | 线名 | 开始时间 | 预计提交 hash |
 |---|---|---|---|
@@ -1878,7 +1880,42 @@ No supported devices found），GNSS+SDR 同开复验没做成；离线那次
 | `docs/audit_r2/**` | 守卫账本线（只读审计产物，批量 claim；目录级常驻登记） | 2026-11-13 05:46 | 目录级 |
 | `docs/research/**` | 守卫账本线（只读调研产物，批量 claim；目录级常驻登记） | 2026-11-13 05:46 | 目录级 |
 | `docs/pending-patches/**` | 守卫账本线（待建单只读稿，批量 claim；目录级常驻登记） | 2026-11-13 05:47 | 目录级 |
+| `docs/axioms-accepted.json` | 公理棘轮线（目的未声明） | 2026-11-13 03:40 | 未声明 |
+| `docs/axioms-baseline.json` | 公理棘轮线（目的未声明） | 2026-11-13 02:45 | 未声明 |
+| `docs/axioms.md` | 公理棘轮线（目的未声明） | 2026-11-13 05:13 | 未声明 |
+| `tools/axioms/checks.py` | 公理棘轮线（目的未声明） | 2026-11-13 02:15 | 未声明 |
+| `tools/axioms/selftest.py` | 公理棘轮线（目的未声明） | 2026-11-13 02:15 | 未声明 |
+| `tools/axioms/survey.py` | 公理棘轮线（目的未声明） | 2026-11-13 02:15 | 未声明 |
+| `docs/code-guards.md` | 合规入口线/6ae85f56（目的未声明） | 2026-11-13 05:02 | 未声明 |
+| `scripts/release_check.py` | 合规入口线/6ae85f56（目的未声明） | 2026-11-13 05:54 | 未声明 |
+| `tests/test_narrow_gate_selfcheck.py` | 合规入口线/6ae85f56（目的未声明） | 2026-11-13 05:54 | 未声明 |
+| `docs/claim-waivers.md` | 守卫账本线（目的未声明） | 2026-11-13 05:52 | 未声明 |
+| `docs/constellations.md` | 守卫账本线（目的未声明） | 2026-11-13 05:52 | 未声明 |
+| `docs/hardcoded-parameters.md` | 守卫账本线（目的未声明） | 2026-11-13 05:52 | 未声明 |
+| `docs/hw-acceptance.md` | 守卫账本线（目的未声明） | 2026-11-13 05:52 | 未声明 |
+| `docs/interaction-audit.md` | 守卫账本线（目的未声明） | 2026-11-13 05:52 | 未声明 |
+| `docs/parameter-unification.md` | 守卫账本线（目的未声明） | 2026-11-13 05:52 | 未声明 |
+| `docs/performance-baseline.md` | 守卫账本线（目的未声明） | 2026-11-13 05:52 | 未声明 |
+| `docs/settings-inventory.md` | 守卫账本线（目的未声明） | 2026-11-13 05:52 | 未声明 |
+| `docs/star-catalog.md` | 守卫账本线（目的未声明） | 2026-11-13 05:52 | 未声明 |
+| `docs/tool-availability.md` | 守卫账本线（目的未声明） | 2026-11-13 05:52 | 未声明 |
+| `docs/COORDINATION.md` | 残留收口线/6ae85f56（目的未声明） | 2026-11-13 06:03 | 未声明 |
+| `docs/known-red-register.md` | 残留收口线/6ae85f56（目的未声明） | 2026-11-13 06:03 | 未声明 |
+| `docs/redundancy-register.md` | 残留收口线/6ae85f56（目的未声明） | 2026-11-13 06:03 | 未声明 |
+| `scripts/check_claim_coordination.py` | 残留收口线/6ae85f56（目的未声明） | 2026-11-13 06:03 | 未声明 |
+| `scripts/hooks/pre-commit` | 残留收口线/6ae85f56（目的未声明） | 2026-11-13 06:03 | 未声明 |
+| `scripts/file_claim.py` | 残留收口线/6ae85f56（续租留痕与累计上限） | 2026-11-13 06:17 | 未声明 |
+| `tests/test_file_claim.py` | 残留收口线/6ae85f56（续租反证三条） | 2026-11-13 06:17 | 未声明 |
+| `tests/test_claim_coordination.py` | 残留收口线/6ae85f56（staged 模式反证） | 2026-11-13 06:17 | 未声明 |
+| `docs/axioms-waivers.json` | 公理棘轮线（目的未声明） | 2026-11-13 06:18 | 未声明 |
+| `desktop/device_panel.py` | 设备会话锁线（目的未声明） | 2026-11-13 06:12 | 未声明 |
+| `tests/test_device_panel_session_lock.py` | 设备会话锁线（目的未声明） | 2026-11-13 06:12 | 未声明 |
+| `docs/pending-patches/2026-11-13-device-session-lock-not-implemented.md` | 设备会话锁线（目的未声明） | 2026-11-13 06:17 | 未声明 |
 | **真机（USB SDR）** | 跑 `hw_acceptance/`、七环、`capture_throughput.py` 的线（资源独占） | 占用时段 | — |
+
+> 上表 31 条由 `claim` 台账推导的行：owner 原文与 `acquired_at` 直接取自台账，
+> 目的优先用台账里的 `claim_reason`，没有就如实写「未声明」，不补编。时间列只是
+> 快照，重新 claim 会刷新，以台账为准；owner 对不上才报警。
 
 > **真机独占（硬规则，优先于文件归属）**：谁在跑 `docs/hw-acceptance.md` 的七环、
 > `scripts/hw_acceptance/**`、`scripts/hw_acceptance/capture_throughput.py`（含 `--mode product`），
