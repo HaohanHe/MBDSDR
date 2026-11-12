@@ -155,6 +155,9 @@ python -m pytest tests/test_swallow_guard.py -q -rf
   修好后 strict 会变 `XPASS` → 红，强制销账删标记。
 - **诚实边界**：对外说「desktop 全量」时必须同时说明 K06 的 113 处存量
   静默吞噬**未修**，只是按已知红登记；`xfailed` 不等于绿。
+- **2026-11-13 复核**（HEAD `99a61044`，独立 worktree，`--runxfail` 单跑）：
+  `total=1626 > 基线 1284（新增 342）`，仍红、仍未改基线；上面 `1397` 是
+  2026-11-09 的读数，结论（未修、不抬基线）不变。
 
 ---
 
@@ -423,7 +426,10 @@ assert abs(elev - st["elevation"]) <= 0.2
   两条路都会动时刻语义，本轮不顺手改。
 - **转绿条件**：该用例 `1 passed`，且另加一条反证证明「跳时刻后不等刷新
   就会红」，否则改完等于把真实延迟掩盖掉。
-- **诚实边界**：提交 `bd0e7ec0` 不含这条修复，该用例当前红。
+- **诚实边界**：提交 `bd0e7ec0` 不含这条修复；2026-11-09 记录时该用例为红。
+  **2026-11-13 复核**：HEAD `99a61044` 独立 worktree 单跑 `1 passed`；但该失败
+  依赖墙钟时刻，且未按转绿条件补「跳时刻不等刷新会红」的反证，**不据此销账**，
+  状态记为「实跑绿·待反证」。
 
 ---
 
@@ -477,8 +483,8 @@ QT_QPA_PLATFORM=offscreen python -m pytest "<nodeid>" -q
     - 改后同一 HEAD worktree 跑 K14 节点 +
       `tests/test_copy_entry_points.py::test_onboarding_entries_resolve_to_live_widgets`
       → `2 passed`（后者证明「FM」仍是真窗口控件树里点得到的原文）。
-  - 提交：本条目所在提交（`git log -1 --format=%H -- docs/known-red-register.md`
-    可取）。`git cat-file -t` 可验证的引用：`a287ef63`=commit、
+  - 提交：K14 收口提交 `a58dc94d`（2026-11-13，`git cat-file -t a58dc94d`
+    已验证为 commit）。`git cat-file -t` 可验证的引用：`a287ef63`=commit、
     `4aa0514`=commit、`d7715275`=commit。
 
 ### K15 — 设置页惰性构建后，可发现性断言扫不到控件
@@ -514,8 +520,8 @@ QT_QPA_PLATFORM=offscreen python -m pytest "<nodeid>" -q
     - 改后同一 HEAD worktree：该节点 `1 passed`；另跑
       `tests/test_settings_panel_lazy.py` → `3 passed`（构造后不 `show()` 时控件
       仍为零，惰性构建契约没被改回去）。
-  - 提交：本条目所在提交（`git log -1 --format=%H -- docs/known-red-register.md`
-    可取）。`git cat-file -t` 可验证的引用：`3c23faa2`=commit、
+  - 提交：K15 收口提交 `6789bc85`（2026-11-13，`git cat-file -t 6789bc85`
+    已验证为 commit）。`git cat-file -t` 可验证的引用：`3c23faa2`=commit、
     `4d156159`=commit、`a58dc94d`=commit。
 
 ### K16 — 右栏收窄加了一层 host，splitter 断言仍按旧父件
@@ -531,5 +537,9 @@ QT_QPA_PLATFORM=offscreen python -m pytest "<nodeid>" -q
 - **现状**：工作区 `tests/test_main_window.py` 已有未提交的新断言（点名
   `rightColumnHost`，docstring 引用 `c204e945`），即**修复在途未落库**；
   登记后由布局线提交即可销账。
+- **2026-11-13 复核**：HEAD `99a61044` 独立 worktree 单跑仍 `1 failed`；主工作区
+  那份未提交断言仍在，但 claim 持有进程 pid 26460 已不存在（`Get-Process` 查无），
+  claim（2026-11-12 20:39 取得，TTL 10min）已过期。即「在途」应改判为
+  **无人接手的孤儿改动**：需布局锁线确认后提交，或按接管规则另行处理。
 - **转绿条件**：提交工作区那份 `test_main_window.py`；验收单跑 `1 passed`，
   且断言仍点名 host 层（拆掉这层要能红）。不许为了让测试绿去改产品结构。
