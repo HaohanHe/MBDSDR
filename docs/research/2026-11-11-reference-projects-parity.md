@@ -72,6 +72,15 @@
 
 若用户指的是某个「示例/demo 仓库」，本地没有同名克隆；需要用户给一个更准的词（例如 `DVBS2`、`SigMF` 或某个产品名）才能定位。
 
+### 0.4 结论格式硬约束（2026-11-12）
+
+凡写「我们没有 / 未实现 / 缺口 / 不校验 / 空档」这类**关于本项目的否定结论**，必须同时给出**当前 HEAD 的行号证据**：
+
+- 证据格式固定为 `` `HEAD:<path>:<line>` `` ＋ 该行原文（可直接用 `git show HEAD:<path>` 复核），**行号与原文必须能对上**。
+- 否定结论（「没有 X」）不能靠单行原文直接证明，必须给出**封闭集定义行**（schema / 类型定义 / dict 字面量 / 函数签名等枚举了允许字段的那一行）＋ 一句「X 不在该集合内」；给不出封闭集定义行的，一律标 **待查**。
+- **给不出行号证据的条目不得留在「已核」**，必须改标「待查」。
+- 本约束适用于 `docs/research/` 下所有参考项目对照文档；其它文件由各自负责人按同一口径补齐。
+
 ## 1. 学习次序（按与 MBDSDR 的相关度）
 
 1. Look4Sat — 卫星过境预测与 UI 状态机（同域，代码量小）
@@ -113,14 +122,14 @@
 
 **机制 A：转发器成对模型（`core/domain/model/SatRadio.kt:24-36`）**
 一个条目同时持有 `downlinkLow / downlinkHigh / downlinkMode / uplinkLow / uplinkHigh / uplinkMode / invert / isAlive`，UI 用 `selectedTransponderUuid` 做**单一选择态**（`feature/radar/RadarState.kt:34-42`），选中后 TX/RX 两个频率由同一对象派生。
-- 我们的落点：`mbdsdr_ai/sat_links.py` + `mbdsdr_ai/data/sat_links.json`（现 8 颗星、每条只有一个 `freq_hz`、`identify_by_freq` 用固定 3000 Hz 容差）。
-- 该不该搬：**搬字段形状，不搬上行**。带宽区间 `low/high` 能让「点星即听」自动给出合适的 FFT 带宽，也让 `identify_by_freq` 的容差从全局常量变成「按条目带宽」；`invert` 是线性转发器倒置，我们目前完全没有这个概念。上行仍只走 `tc_uplink` 的确认 token，不进表。
+- 我们的落点：`mbdsdr_ai/sat_links.py` + `mbdsdr_ai/data/sat_links.json`（现 8 颗星、每条只有一个 `freq_hz`；容差默认值见 `` `HEAD:mbdsdr_ai/sat_links.py:61` ``：`def identify_by_freq(freq_hz: float, tolerance_hz: float = 3000.0) -> List[Dict[str, Any]]:`）。
+- 该不该搬：**搬字段形状，不搬上行**。带宽区间 `low/high` 能让「点星即听」自动给出合适的 FFT 带宽，也让 `identify_by_freq` 的容差从全局常量变成「按条目带宽」；`invert`（线性转发器倒置）**待查**——本条「本地无此概念」缺封闭集定义行，按 §0.4 不得算已核。上行仍只走 `tc_uplink` 的确认 token，不进表。
 - 搬的代价：8 条数据要补 low/high（需公开文档逐条溯源，属数据工作量）；`identify_by_freq` 签名要接受每条的带宽；星空页链路卡片加一行带宽/极性标签。
 
 **机制 B：极坐标雷达多星同盘（`feature/radar/RadarView.kt` + `RadarState.kt:57` `satTrack: List<OrbitalPos>`）**
 一屏画出所有在跟踪卫星的当前方位/仰角点，并保留一串历史点作拖尾；顺带 `shouldUseCompass` / `shouldShowSweep` 两个开关把「罗盘刻度」和「扫描线」解耦。
 - 我们的落点：`desktop/rf_sky_view.py:487`（方位盘标签生成）、`:8673`（`SatelliteTracker`）；`desktop/sat_track_panel.py` 只画当前一颗。
-- 该不该搬：**搬「多星同盘」**。现在换星就是换面板，看不到「哪几颗同时在天上」，这是卫星页的实质信息缺口。
+- 该不该搬：**搬「多星同盘」**。现在换星就是换面板，看不到「哪几颗同时在天上」，这是卫星页的实质信息缺口。**待查**：本结论「我们未实现多星同盘」尚无 HEAD 行号证据（无封闭集定义行可引），按 §0.4 标待查。
 - 搬的代价：绘制循环 + 星座配色（要与现有 heatmap/星等配色共存），一个 `list[SkyObject]` 输入即可，不需要改轨道层。
 
 **机制 C：过境倒计时状态（`RadarState.kt:51-56` `currentPass` / `isTimeAos` / `isUtc`）**
@@ -200,7 +209,7 @@ gpredict 没有频率预设或书签概念（它是跟踪器，不是接收机�
 **③ 无设备：他们的第三档是「占用即置灰，退出占用才写回」**
 
 - 机制：`src/gtk-rig-ctrl.c:1013-1031`，`engaged` 开关决定 `DevSel` / `DevSel2` 的 `set_sensitive`；**未占用时可改，占用期间置灰**。配置写回发生在退出占用的那一瞬 `setconfig(ctrl)`（`:1022`），另有进程退出时统一 `sat_cfg_save()`（`src/main.c:174`）。
-- 对照我们的 G12（「随数据禁用」vs「始终可用」两档）：gpredict 给的是**第三档**——不是「没数据就不能改」，而是「**设备会话期间不许改，值仍保留，断开时写回**」。这一档恰好覆盖我们现在的空档：有设备且在跑时，改采样率/增益要么立即生效（危险）、要么被禁（用户想改却改不了）。
+- 对照我们的 G12（「随数据禁用」vs「始终可用」两档）：gpredict 给的是**第三档**——不是「没数据就不能改」，而是「**设备会话期间不许改，值仍保留，断开时写回**」。**待查**：我们「有设备在跑时改采样率/增益要么立即生效、要么被禁」这一空档判断尚无 HEAD 行号证据（缺封闭集定义行），按 §0.4 不得算已核。
 - 该不该搬：**搬概念**。给「设备会话」加一个占用态：会话内配置控件只读但不丢值，断开时一次性写回并持久化。
 - 代价：低。控件 `setEnabled` 一处开关 + 会话结束时的保存点；风险是「断开时写回」需要明确失败路径（写回失败要不要回滚到会话前的值），这一点 gpredict 没处理，我们得自己定。
 
@@ -323,7 +332,7 @@ for (auto const& [name, _vfo] : vfos) {
 
 **机制 B：带宽参考系 `reference`（`:313-327`，`REF_LOWER` / `REF_UPPER` / `REF_CENTER`）**
 哪个手柄可拖由参考系决定，调带宽时固定另一侧，避免连续拖拽导致中心漂移。
-- 我们的落点（2026-11-12 对 HEAD 核）：`:4198-4214` 只区分 `resize_l` / `resize_r`，中心按「拖哪侧就固定另一侧」即时重算；VFO 模型无 `reference` 字段，**没有持久化的参考系**。
+- 我们的落点（2026-11-12 对 HEAD 核）：`:4198-4214` 只区分 `resize_l` / `resize_r`，中心按「拖哪侧就固定另一侧」即时重算；**没有持久化的参考系**——封闭集证据 `` `HEAD:mbdsdr_ai/vfo_manager.py:50-60` ``（`VfoState` 字段：`vfo_id/center_hz/bw_hz/mode/label/muted/squelch_level_db/squelch_enabled/gain_db/delta_lock/active`，无 `reference`）。
 - 该不该搬：**搬概念，不必搬三态**。单次拖拽内我们的行为与 `REF_CENTER` 之外的两态一致；差异在「松手后再次拖同一条边」时，参考系是否延续。低优先——先记为「已知差异」。
 - 搬的代价：低，但需要 VFO 模型加字段并落进配置序列化，属于模型改动，不建议与机制 A 同批。
 
@@ -350,13 +359,13 @@ for (auto const& [name, _vfo] : vfos) {
 
 ## 3. 已核 / 待查 清点（2026-11-12，对 HEAD）
 
-口径：本节逐条列出上文出现过的「事实判断」类条目；纯裁定（不搬/暂不搬）不单独计入已核。计数以本节编号为准。
+口径：本节逐条列出上文出现过的「事实判断」类条目；纯裁定（不搬/暂不搬）不单独计入已核。编号保留原序号，第 2 条已移出，故 §3.1 实际 28 条。
 
-### 3.1 已核（29 条）
+### 3.1 已核（28 条）
 
-**Look4Sat（5）**
+**Look4Sat（4）**
 1. 机制 C 过境倒计时 + UTC 开关 —— 已落地（`sat_track_panel.py:156-167/281-318/560-599`）。
-2. 机制 B 多星同盘 —— 未落地（盘中无多星绘制）。
+2. （原第 2 条「机制 B 多星同盘未落地」已移入 §3.2——属未核的否定结论。）
 3. 机制 A 数据形状 —— 8 颗星、每条单 `freq_hz`、`identify_by_freq` 默认 3000 Hz。
 4. 机制 D 观测点 —— 每次调用经 skyfield `Topos` 重建（`sat_passes.py:481/624/777`）。
 5. 机制 E SSTV 模式表 —— 与 Look4Sat 同构，无增量。
@@ -379,14 +388,14 @@ for (auto const& [name, _vfo] : vfos) {
 
 **satdump（5）**
 18. 机制 A 管线 —— 层断裂跳过/推荐采样率/按星配置已同构。
-19. 机制 B 插件注册 —— 未拆；条目 8 < 15，触发条件未到。
+19. 机制 B 插件注册 —— 未拆；条目 8 < 15，触发条件未到（封闭集 `` `HEAD:mbdsdr_ai/sat_pipeline_params.py:82` ``：`SATELLITE_PIPELINES: Dict[str, SatellitePipeline] = {`）。
 20. 机制 C 产品清单 —— 已落地（`dataset.json` 优先，glob 兜底）。
 21. 机制 D 模块自带 UI —— 与 Qt 面板模型不同构。
-22. 机制 E 类型声明 —— 未落地，`register_stage_handler` 仍只绑定不校验。
+22. 机制 E 类型声明 —— 未落地，`register_stage_handler` 仍只绑定不校验（`` `HEAD:mbdsdr_ai/sat_pipeline_runner.py:105` ``：`def register_stage_handler(module: str,`，签名无 `inputs/outputs`）。
 
 **sdrpp（6）**
 23. 机制 A 窄条保护 —— 已落地（`spectrum_widget.py:3553-3560`）。
-24. 机制 B 带宽参考系 —— 未实现（模型无 `reference` 字段），记为已知差异。
+24. 机制 B 带宽参考系 —— 未实现（封闭集 `` `HEAD:mbdsdr_ai/vfo_manager.py:50-60` ``，`VfoState` 无 `reference` 字段），记为已知差异。
 25. 机制 C 视图平移 —— 已同构（`_rf_shift`，`:3381/3912/4216-4222`）。
 26. 机制 D 方向键 —— 语义分歧保留；键位已收进 `shortcuts.py`（scope=spectrum），焦点为显式约定。
 27. 机制 E 单一出口清态 —— 已落地（`_end_all_gestures()`，`:4152-4166/4168`）。
@@ -395,11 +404,13 @@ for (auto const& [name, _vfo] : vfos) {
 **时间源普查（1）**
 29. 102 处 / 20 文件；时间基准 10、动画节流 46、日志耗时 29、其他 17；真缺口 7 处。
 
-### 3.2 待查（3 条）
+### 3.2 待查（5 条）
 
 1. **gpredict 专项④-2**：面板是否在启动时全量构造（懒创建与否）——未核。
 2. **gqrx 机制 B**：频谱侧 `_bookmarks` 元组的 `bandwidth` 字段是否真的由写入端持久化——未核，合并旗子路径前必须确认。
-3. **Look4Sat 机制 A**：8 条转发器 `low/high` 的逐条公开溯源是否完成——数据侧未核。
+3. **Look4Sat 机制 A**：8 条转发器 `low/high` 的逐条公开溯源是否完成，以及 `invert` 是否真的完全不存在（缺封闭集定义行）——数据侧未核。
+4. **Look4Sat 机制 B**：多星同盘「未落地」——缺 HEAD 行号证据，未核。
+5. **gpredict 专项③**：我方「有设备在跑时改采样率/增益要么立即生效、要么被禁」的空档判断——缺 HEAD 行号证据，未核。
 
 ### 3.3 待办（不计入上表）
 
@@ -408,3 +419,13 @@ for (auto const& [name, _vfo] : vfos) {
 - satdump E 类型声明（排 C 之后）。
 - gqrx B 旗子路径改为携带 (freq, mode, bandwidth)。
 - sdrpp A 窄带 CW/USB 回归用例。
+
+### 3.4 未核条目按「重复劳动风险」排序
+
+| 风险 | 条目 | 理由 |
+|---|---|---|
+| 高 | Look4Sat 机制 B：多星同盘「未落地」 | 若其实已有绘制路径，照此条会重做整块雷达视图。 |
+| 高 | gpredict 专项③：我方占用态空档 | 若空档已由 G12 或设备面板覆盖，会重复造「占用中可改/断开写回」。 |
+| 中 | gpredict 专项④-2：面板是否启动全量构造 | 机制在，构造时机未知；若已懒加载，改懒创建属纯重复。 |
+| 中 | gqrx 机制 B：带宽字段是否持久化 | 机制在，链路参数不全；误判会让旗子路径重复改造。 |
+| 低 | Look4Sat 机制 A：`low/high` 溯源 + `invert` 确认 | 数据与字段确认，误判只影响数据补齐，不产生重复代码。 |
