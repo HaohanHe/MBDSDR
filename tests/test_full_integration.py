@@ -227,22 +227,13 @@ def test_fake_tool_face_removed(result: TestResult, agent: MBDSDRAgent):
 
 
 def _sdr_connect_or_skip(tr) -> None:
-    """SDR 工具链只在真的连上设备时才有意义；连不上按 NO_HW 跳过，不记失败。
+    """连接枚举到的第一台真实设备（实现见 tests/sdr_toolchain.py）。
 
-    ``sdr_connect`` 空参依赖「上次使用的设备」记录，隔离 profile 下没有；
-    第二个参数用本机枚举号。两者都失败即判定为环境依赖（缺设备/未连接）。
+    旧实现把 device_id 写死 ``rtl_0``、连不上就 skip：设备身份键一换，用例
+    永远绿着空转。现在只有「枚举为空」才 skip；枚举到设备却连不上必须红。
     """
-    errs = []
-    for args in ({}, {"device_id": "rtl_0"}):
-        try:
-            r = tr.call("sdr_connect", args)
-        except Exception as e:  # noqa: BLE001 - 连接异常同样按环境依赖处理
-            errs.append(f"{args}: {type(e).__name__}: {e}")
-            continue
-        if r.success:
-            return
-        errs.append(f"{args}: {(r.content or '')[:160]}")
-    pytest.skip("NO_HW: SDR 未连接，跳过 SDR 工具链（" + " | ".join(errs) + "）")
+    from sdr_toolchain import connect_first_device_or_skip
+    connect_first_device_or_skip(tr)
 
 
 def test_sdr_tools(result: TestResult, agent: MBDSDRAgent):

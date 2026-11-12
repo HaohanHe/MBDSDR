@@ -240,3 +240,30 @@ def test_panels_do_not_write_connect_payload_keys_directly():
     assert 'payload["_gain"]' in store_source
     assert 'payload["_ppm"]' in store_source
     assert 'payload["_bandwidth"]' in store_source
+
+
+# ------------------------------------------------ 桌面端与 AI 必须算出同一个键
+def test_desktop_and_ai_compute_the_same_identity_key():
+    """同一份枚举，桌面端 store 与 AI sdr_backend 的键/质量/告警逐字相同。
+
+    「桌面端占着、AI 被拒」完全建立在两侧键同名上：各写一套口径迟早漂移
+    （AI 旧口径 ``rtl_0`` 连序列号都丢了）。桌面端现在直接委托 AI 侧实现，
+    这条用例钉死两边输出一致，改任何一侧的口径都会红。
+    """
+    from mbdsdr_ai import sdr_backend as sb
+
+    devices = [_rtl(0, serial="REAL-0001"), _rtl(1, serial=""), _rtl(2, serial="")]
+    desktop = [(i.key, i.quality, i.warning) for i in store.resolve(devices)]
+    ai = sb.resolve_device_identities(devices)
+    assert desktop == ai
+
+
+def test_collision_suffix_is_identical_on_both_sides():
+    """撞键加的 ``#n`` 后缀也是同一套：两侧对同批设备的排序一致。"""
+    from mbdsdr_ai import sdr_backend as sb
+
+    devices = [_rtl(0, serial="SAME"), _rtl(1, serial="SAME")]
+    desktop = [i.key for i in store.resolve(devices)]
+    ai = [k for k, _q, _w in sb.resolve_device_identities(devices)]
+    assert desktop == ai
+    assert desktop == ["rtlsdr|serial:SAME#1", "rtlsdr|serial:SAME#2"]

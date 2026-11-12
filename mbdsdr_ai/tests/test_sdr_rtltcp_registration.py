@@ -11,8 +11,22 @@ import pytest
 from mbdsdr_ai.sdr_backend import (
     RTL_TCP_ENV,
     SDRBackendManager,
+    enumerate_all_sdr_devices,
     parse_rtl_tcp_env,
+    resolve_device_identities,
 )
+
+
+def _rtl_tcp_ids():
+    """按生产口径算 rtl_tcp 源的 device_id（同一枚举 + 同一身份键）。
+
+    device_id 已统一为身份键（``rtlsdr|serial:rtl_tcp_host_port``），
+    不能再按 ``rtl_tcp_`` 前缀过滤——那正是「换了 id 就静默空转」的写法。
+    """
+    devices = enumerate_all_sdr_devices()
+    return [key for dev, (key, _q, _w)
+            in zip(devices, resolve_device_identities(devices))
+            if dev.get("source") == "rtl_tcp"]
 
 
 # ---------------------------------------------------------------------------
@@ -56,9 +70,11 @@ def test_parse_garbage_entries_skipped_not_faked():
 
 def test_discover_registers_rtl_tcp_source(monkeypatch):
     monkeypatch.setenv(RTL_TCP_ENV, "127.0.0.1:1234")
+    expected = _rtl_tcp_ids()
+    assert len(expected) == 1
     mgr = SDRBackendManager()
     dev = mgr.list_devices()
-    rtl_tcp = [d for d in dev if d["device_id"] == "rtl_tcp_127.0.0.1_1234"]
+    rtl_tcp = [d for d in dev if d["device_id"] == expected[0]]
     assert len(rtl_tcp) == 1
     d = rtl_tcp[0]
     assert d["type"] == "rtl_sdr"
@@ -69,9 +85,10 @@ def test_discover_registers_rtl_tcp_source(monkeypatch):
 
 def test_discover_without_env_has_no_rtl_tcp_source(monkeypatch):
     monkeypatch.delenv(RTL_TCP_ENV, raising=False)
+    assert _rtl_tcp_ids() == []
     mgr = SDRBackendManager()
     assert not [d for d in mgr.list_devices()
-                if d["device_id"].startswith("rtl_tcp_")]
+                if d["name"].startswith("rtl_tcp ")]
 
 
 def test_registered_backend_connects_to_live_rtl_tcp():
@@ -83,9 +100,11 @@ def test_registered_backend_connects_to_live_rtl_tcp():
     if not entries:
         pytest.skip("MBDSDR_RTL_TCP 未配置")
     mgr = SDRBackendManager()
-    dev = [d for d in mgr.list_devices() if d["device_id"].startswith("rtl_tcp_")]
-    if not dev:
-        pytest.skip("rtl_tcp 源未登记")
+    rtl_ids = _rtl_tcp_ids()
+    # env 已配置 → 登记是确定性的，算不出 id 就是契约坏了，必须红（不许 skip）
+    assert rtl_ids, "MBDSDR_RTL_TCP 已配置却算不出 rtl_tcp 身份键——登记契约被改坏"
+    dev = [d for d in mgr.list_devices() if d["device_id"] in rtl_ids]
+    assert dev, f"env 已配置 {entries} 但设备表里没有对应条目（契约问题，不许 skip）"
     # 契约即 docstring：无服务时 honest skip（开发机 env 全局挂着但服务器不在跑）
     import socket
     _host, _port = entries[0]
@@ -138,8 +157,8 @@ def test_device_manager_open_rtl_tcp_live():
     from mbdsdr_ai.device_manager import DeviceManager
     dm = DeviceManager()
     target = [d for d in dm.list_devices() if d.driver == "rtltcp"]
-    if not target:
-        pytest.skip("rtl_tcp 源未登记")
+    # env 已配置 → 登记确定性；拿不到条目是契约问题，必须红（不许 skip）
+    assert target, "MBDSDR_RTL_TCP 已配置但 DeviceManager 未登记 rtl_tcp 源（契约问题）"
     try:
         dev = dm.open(target[0])
     except Exception as e:

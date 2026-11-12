@@ -98,7 +98,7 @@ _OWNER_LABELS = {"desktop": "桌面端", "mbdsdr-ai": "AI/MCP 进程"}
 AI_OWNER = "mbdsdr-ai"
 
 
-def _owner_conflict_text(holder: Dict[str, Any]) -> str:
+def owner_conflict_text(holder: Dict[str, Any]) -> str:
     """占用冲突的可执行提示：谁占着、它还活着、下一步能做什么。"""
     dev = holder.get("device_id") or ""
     who = owner_label(holder.get("owner", ""))
@@ -407,17 +407,31 @@ def get_active_owner(device_id: str = "") -> Optional[Dict[str, Any]]:
         _ACTIVE_OWNER.clear()
         _ACTIVE_OWNER.update(owners)
         if device_id:
-            return dict(owners[device_id]) if device_id in owners else None
+            if device_id in owners:
+                return dict(owners[device_id])
+            # 别名命中：持有者按序列号登记、竞争者只能算出枚举序号（设备被
+            # 占用时读不到 serial）——不认别名就等于没有互斥。
+            for rec in owners.values():
+                if device_id in (rec.get("aliases") or []):
+                    return dict(rec)
+            return None
         if len(owners) == 1:
             return dict(next(iter(owners.values())))
         return None
 
 
-def claim_active_owner(owner: str, device_id: str) -> Tuple[bool, Dict[str, Any]]:
+def claim_active_owner(owner: str, device_id: str,
+                       aliases: Optional[List[str]] = None
+                       ) -> Tuple[bool, Dict[str, Any]]:
     """为 ``owner`` 声明占用 ``device_id``。
 
     返回 ``(ok, record)``：成功时 record 是本次写入的记录；失败时 record
     是**仍在运行**的现有持有者（调用方据此给出可执行提示）。
+
+    ``aliases`` 是同一台设备的其它可选身份键（见
+    :func:`device_identity_aliases`）：设备被占用时枚举读不到序列号，
+    竞争者只能算出枚举序号键，只按主键比对会漏掉活着的持有者。
+
     同进程内的重复声明允许覆盖（桌面端与 AI 适配器同在一个进程时不能互相
     死锁）；跨进程只有持有者进程真的不在了才会被清掉。
     """
@@ -427,7 +441,12 @@ def claim_active_owner(owner: str, device_id: str) -> Tuple[bool, Dict[str, Any]
     release_stale_owners()
     with _OWNER_LOCK, _registry_lock():
         owners = _read_registry()
-        cur = owners.get(device_id)
+        matched_key, cur = device_id, owners.get(device_id)
+        if cur is None:
+            for key, rec in owners.items():
+                if device_id in (rec.get("aliases") or []):
+                    matched_key, cur = key, rec
+                    break
         if cur is not None and str(cur.get("owner")) != str(owner):
             try:
                 cur_pid = int(cur.get("pid") or 0)
@@ -435,11 +454,19 @@ def claim_active_owner(owner: str, device_id: str) -> Tuple[bool, Dict[str, Any]
                 cur_pid = 0
             if cur_pid != _SELF_PID and _pid_alive(cur_pid, cur.get("proc_start")):
                 return False, dict(cur)
+        if cur is not None and matched_key != device_id:
+            # 同一台设备的旧别名记录：改用本次主键，避免同机两条记录。
+            owners.pop(matched_key, None)
+        alias_list = []
+        for key in [device_id] + list(aliases or []):
+            if key and key not in alias_list:
+                alias_list.append(str(key))
         rec = {
             "owner": str(owner),
             "pid": _SELF_PID,
             "proc_start": _self_start(),
             "device_id": str(device_id),
+            "aliases": alias_list[1:],
             "claimed_at": time.time(),
         }
         owners[device_id] = rec
@@ -456,6 +483,10 @@ def release_active_owner(owner: str, device_id: str = "") -> bool:
         targets = ([device_id] if device_id
                    else [d for d, r in owners.items()
                          if str(r.get("owner")) == str(owner)])
+        if device_id and device_id not in owners:
+            # 别名释放：持有者按序列号登记、调用方只拿到枚举序号键。
+            targets = [d for d, r in owners.items()
+                       if device_id in (r.get("aliases") or [])]
         for dev in targets:
             rec = owners.get(dev)
             if rec is None or str(rec.get("owner")) != str(owner):
@@ -484,6 +515,114 @@ def _release_owned_here_at_exit() -> None:
 
 
 atexit.register(_release_owned_here_at_exit)
+
+
+# ─────────────────── 设备身份键（桌面端与 AI 共用同一口径） ───────────────────
+# 桌面端按身份键存连接参数与会话占用（desktop/connect_request_store.py），
+# AI 按 device_id 持有后端。两边必须**对同一台物理设备算出同一个字符串**，
+# 否则「两个进程抢同一根 USB 棒」的互斥只是各说各话：桌面端说占着 A，
+# AI 说连的是 B，谁也没拦住谁。
+#
+# 原始材料是同一个 enumerate_all_sdr_devices()，所以键只能从它的 dict 算。
+# 旧口径下 AI 用 f"rtl_{index}" 把序列号丢了，而桌面端恰恰把「无序列号的
+# 序号键」标成 provisional 并告警拔插后会变——同一台设备，一边当稳定身份、
+# 一边当不稳定身份。这是本次要消灭的矛盾。
+#
+# 语法逐字沿用桌面端既有实现，改动会让已存的连接请求失配：
+#   driver|serial:<serial> > uri:<uri> > driver|index:<index> > driver|label:<label>
+IDENTITY_STABLE = "stable"
+IDENTITY_PROVISIONAL = "provisional"
+
+
+def _identity_text(value: Any) -> str:
+    return "" if value is None else str(value).strip()
+
+
+def device_identity_key(device: Dict[str, Any]) -> Tuple[str, str, str]:
+    """``(键, 质量, 告警文案)``；质量见 ``IDENTITY_*``。
+
+    只有序列号/URI 这类**跟着设备走**的标识算稳定；枚举序号拔插会变、
+    显示名可能重名，都如实标 provisional 并给出可读告警。
+    """
+    driver = _identity_text(device.get("driver")) or "?"
+    serial = _identity_text(device.get("serial"))
+    args = device.get("device_args") or {}
+    uri = _identity_text(device.get("uri")) or _identity_text(args.get("uri"))
+    label = _identity_text(device.get("label")) or driver
+    if serial:
+        return f"{driver}|serial:{serial}", IDENTITY_STABLE, ""
+    if uri:
+        return f"uri:{uri}", IDENTITY_STABLE, ""
+    index_text = _identity_text(args.get("index", device.get("index")))
+    if index_text:
+        return (f"{driver}|index:{index_text}", IDENTITY_PROVISIONAL,
+                f"设备「{label}」没有序列号，按枚举序号 {index_text} 暂记连接参数；"
+                "拔插或重新枚举后序号可能变化，参数不会跟随设备。")
+    return (f"{driver}|label:{label}", IDENTITY_PROVISIONAL,
+            f"设备「{label}」既无序列号也无枚举序号，按显示名暂记连接参数；"
+            "同名设备的参数可能互相覆盖。")
+
+
+def _identity_fingerprint(device: Dict[str, Any]) -> Tuple[str, ...]:
+    # 与桌面端历史实现逐字一致（不 strip）：只影响撞键时 #n 的分配顺序。
+    args = device.get("device_args") or {}
+    return (str(device.get("driver") or ""), str(device.get("serial") or ""),
+            str(device.get("uri") or ""), str(args.get("index", "")),
+            str(device.get("label") or ""))
+
+
+def resolve_device_identities(devices: List[Dict[str, Any]]
+                              ) -> List[Tuple[str, str, str]]:
+    """对**整份枚举**逐台算键；撞键按指纹排序加 ``#n``（与桌面端逐字一致）。
+
+    键必须整份算：``#n`` 的去重结果依赖同一批设备的相对顺序，逐台算永远
+    对不上（AI 旧的逐台 _keep 就拿不到这份上下文）。
+    """
+    items = list(devices or [])
+    base = [device_identity_key(d) for d in items]
+    groups: Dict[str, List[int]] = {}
+    for i, (key, _quality, _warning) in enumerate(base):
+        groups.setdefault(key, []).append(i)
+    out: List[Tuple[str, str, str]] = [base[i] for i in range(len(items))]
+    for key, idxs in groups.items():
+        if len(idxs) < 2:
+            continue
+        warning = (f"设备身份键冲突：{len(idxs)} 台设备都映射到「{key}」；"
+                   "已按枚举顺序加 #n 临时区分，拔插后参数可能错位。")
+        order = sorted(idxs, key=lambda j: _identity_fingerprint(items[j]))
+        for n, i in enumerate(order, 1):
+            out[i] = (f"{key}#{n}", base[i][1], warning)
+    return out
+
+
+def device_identity_aliases(device: Dict[str, Any]) -> List[str]:
+    """同一台设备可被认出的全部键（主键在前），用于跨进程占用匹配。
+
+    为什么需要别名（2026-11-12 端到端实测发现）：**占着设备的那一方能读到
+    序列号，来抢的那一方读不到**——RTL-SDR 被别的进程打开时，枚举拿不到
+    serial（libusb 打不开），只能退到 ``driver|index:n``。于是持有者登记在
+    ``rtlsdr|serial:...``，竞争者算出 ``rtlsdr|index:0``，两边对不上，互斥
+    形同虚设（实测 AI 直接去 open，拿到的是 LIBUSB_ERROR_ACCESS）。
+
+    所以登记时把「不依赖打开设备就能算出的其它身份」一并记下，判定占用时
+    任一命中即视为同一台设备。
+    """
+    primary = device_identity_key(device)
+    out = [primary[0]]
+    driver = _identity_text(device.get("driver")) or "?"
+    args = device.get("device_args") or {}
+    index_text = _identity_text(args.get("index", device.get("index")))
+    if index_text:
+        out.append(f"{driver}|index:{index_text}")
+    label = _identity_text(device.get("label"))
+    if label:
+        out.append(f"{driver}|label:{label}")
+    seen, deduped = set(), []
+    for key in out:
+        if key not in seen:
+            seen.add(key)
+            deduped.append(key)
+    return deduped
 
 
 # rtl_tcp 网络源的环境变量登记口（comma-separated host[:port]，默认端口 1234）。
@@ -5800,69 +5939,37 @@ class SDRBackendManager:
 
         刷新语义（审计 B 节 P1 设备表 TTL）：只增不减——新设备并入，
         已注册条目永不替换/摘除（探测失败 ≠ 不存在：占用中的棒子探测
-        必失败，正在用的实例更不许换掉）。已登记的源连探测都不做，
-        不为刷新反复开棒子。要摘除条目请重启进程。
+        必失败，正在用的实例更不许换掉）。TTL 过期必然重枚举：身份键只能
+        对整份枚举算（撞键 ``#n`` 依赖同批设备），频率由 ``_DISCOVER_TTL_S``
+        控制，不当轮询用。要摘除条目请重启进程。
         """
-        # 尝试发现 RTL-SDR（已登记则跳过探测——不为刷新反复开棒子；
-        # device_id 约定 f"rtl_{index}"，这里只探 index 0）
-        if "rtl_0" not in self.backends:
-            try:
-                from rtlsdr import RtlSdr
-                sdr = RtlSdr(0)
-                sdr.close()
-                rtl = RTLSDRBackend(0)
-                self._keep(rtl)
-            except Exception as e:
-                # 无硬件/缺 pyrtlsdr 环境下启动是正常的；用 debug 记录原因，不静默也不弹错
-                logger.debug(f"RTL-SDR 发现失败(忽略，无硬件环境正常): {e}")
-
-        # 尝试发现 HackRF（驱动是 libhackrf 的 ctypes 直连：libhackrf 可加载
-        # 才登记；真正缺设备/被占用由 connect() 如实报错。device_id 约定
-        # f"hackrf_{index}"，已登记则跳过探测）
-        if "hackrf_0" not in self.backends:
-            try:
-                from .hackrf_params import HackRFBackend as _CtlsBackend
-                if _CtlsBackend(0)._load_lib() is None:
-                    raise RuntimeError("libhackrf 不可用")
-                hf = HackRFBackend(0)
-                # 不实际连接，只注册（用户手动连接）
-                self._keep(hf)
-            except Exception:
-                pass  # 没有 libhackrf
-
-        # 尝试发现 USRP（device_id 约定 usrp_{device_args or 'default'}，
-        # 已登记则跳过探测）
-        if "usrp_default" not in self.backends:
-            try:
-                import uhd
-                usrp = USRPBackend()
-                self._keep(usrp)
-            except Exception:
-                pass  # 没有 UHD 库
-
-        # PlutoSDR：仅当真实 enumerate() 探测到设备时才注册（libiio USB/网络）。
+        # 设备表由 enumerate_all_sdr_devices() 统一驱动：桌面端与 AI 必须对
+        # 同一台物理设备算出同一个身份键（device_id），否则「互斥」只是各说
+        # 各话。顺带消掉旧逻辑两处「装了库就登记一台」的假设备——HackRF/USRP
+        # 没有真机时也会出现在列表里，与「无硬件就显式未连接」相悖。
         try:
-            for _pd in PlutoSDRBackend.enumerate():
-                _uri = _pd.get("uri")
-                _pl = PlutoSDRBackend(uri=_uri, device_info=_pd) if _uri \
-                    else PlutoSDRBackend(device_info=_pd)
-                self._keep(_pl)
-        except Exception as e:
-            logger.debug(f"PlutoSDR 枚举失败(忽略): {e}")
-
-        # rtl_tcp 网络源：env 驱动的显式登记（上面 USB 发现都失败时的最常见
-        # 情形——本机装不上 librtlsdr / 棒在远端 / 多客户端共享）。登记的是
-        # 真实网络前端（RTLSDRBackend(host=...) 走自研 MIT rtl_tcp 客户端），
-        # connect() 克制不立即联网，保持在 list_devices / MCP connect 语义内。
-        for _host, _port in parse_rtl_tcp_env(os.environ.get(RTL_TCP_ENV, "")):
+            devices = enumerate_all_sdr_devices()
+        except Exception as e:  # noqa: BLE001 - 枚举失败按「没发现设备」处理
+            logger.debug(f"SDR 枚举失败(忽略): {e}")
+            devices = []
+        for dev, (key, _quality, _warning) in zip(
+                devices, resolve_device_identities(devices)):
+            if key in self.backends:
+                continue          # 已登记则跳过探测（不为刷新反复开棒子）
+            backend = build_backend_for_device(dev)
+            if backend is None:
+                continue
+            # device_id 就是桌面端存连接参数用的那个键：两边同名才能互斥。
+            backend.device.device_id = key
+            # 别名（序列号 / 枚举序号 / 显示名）：设备被占用时读不到序列号，
+            # 竞争者只能算出序号键，登记时一并带上才能互相认出来。
             try:
-                _rt = RTLSDRBackend(host=_host, port=_port)
-                self._keep(_rt)
-                logger.debug(f"rtl_tcp 源已登记: {_host}:{_port}")
-            except Exception as e:
-                logger.debug(f"rtl_tcp 后端登记失败(忽略): {_host}:{_port}: {e}")
+                backend._identity_aliases = device_identity_aliases(dev)
+            except Exception:  # noqa: BLE001 - 别名缺了不影响连接
+                backend._identity_aliases = None
+            self._keep(backend)
 
-        # SpyServer 网络源：与 rtl_tcp 同样走 env 显式登记（默认端口 7355）。
+        # SpyServer 不参与 enumerate（枚举不覆盖该源），仍走 env 显式登记。
         # 懒导入避免 sdr_backend <-> spyserver_client 的循环导入。
         for _host, _port in parse_rtl_tcp_env(
                 os.environ.get(SPYSERVER_ENV, ""), default_port=7355):
@@ -5873,17 +5980,6 @@ class SDRBackendManager:
                 logger.debug(f"SpyServer 源已登记: {_host}:{_port}")
             except Exception as e:
                 logger.debug(f"SpyServer 后端登记失败(忽略): {_host}:{_port}: {e}")
-
-        # 通用网络 IQ 源（sdrpp network_source 同机制）：env 显式登记。
-        # 裸流无元数据，rate/freq 由配置给定；登记不等于连接，成败交给 connect()。
-        for _cfg in parse_network_iq_env(os.environ.get(NETWORK_IQ_ENV, "")):
-            try:
-                _nq = NetworkIQBackend(**_cfg)
-                self._keep(_nq)
-                logger.debug(
-                    f"网络 IQ 源已登记: {_cfg['protocol']}://{_cfg['host']}:{_cfg['port']}")
-            except Exception as e:
-                logger.debug(f"网络 IQ 源登记失败(忽略): {_cfg}: {e}")
 
         # 无默认后端：active_backend 保持 None，等用户显式 connect 真实设备。
         self._last_discover_ts = time.monotonic()
@@ -6088,9 +6184,11 @@ class SDRBackendManager:
                 # 先声明占用、再碰硬件：别的进程（桌面端/另一个 AI）占着这台
                 # 设备时必须在这里拒绝，不能等 USB open 失败再猜原因。
                 new_did = backend.device.device_id
-                claimed, holder = claim_active_owner(AI_OWNER, new_did)
+                claimed, holder = claim_active_owner(
+                    AI_OWNER, new_did,
+                    aliases=getattr(backend, "_identity_aliases", None))
                 if not claimed:
-                    self.last_conflict = _owner_conflict_text(holder)
+                    self.last_conflict = owner_conflict_text(holder)
                     self.last_connect_notice = self.last_conflict
                     logger.warning("激活被拒：%s", self.last_conflict)
                     return False

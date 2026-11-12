@@ -35,14 +35,18 @@ def _registry(tmp_path, monkeypatch):
     sb._OWNED_HERE.clear()
 
 
-def _seed(path, device_id: str, pid: int, proc_start, owner: str = "desktop") -> None:
+def _seed(path, device_id: str, pid: int, proc_start, owner: str = "desktop",
+          aliases=None) -> None:
     """直接写登记文件，模拟「另一个进程」留下的占用记录。"""
+    rec = {
+        "owner": owner, "pid": pid, "proc_start": proc_start,
+        "device_id": device_id, "claimed_at": time.time(),
+    }
+    if aliases:
+        rec["aliases"] = list(aliases)
     path.write_text(json.dumps({
         "version": 1,
-        "owners": {device_id: {
-            "owner": owner, "pid": pid, "proc_start": proc_start,
-            "device_id": device_id, "claimed_at": time.time(),
-        }},
+        "owners": {device_id: rec},
     }), encoding="utf-8")
 
 
@@ -114,7 +118,7 @@ def test_live_holder_is_refused_then_released_after_death(_registry):
 
         ok, holder = sb.claim_active_owner(sb.AI_OWNER, "rtl_0")
         assert ok is False
-        text = sb._owner_conflict_text(holder)
+        text = sb.owner_conflict_text(holder)
         assert "桌面端" in text and "断开" in text, text
         assert "pid" in text
     finally:
@@ -311,3 +315,43 @@ def test_switch_moves_claim_to_new_device():
     assert owner and owner["owner"] == sb.AI_OWNER
     mgr.disconnect()
     assert sb.get_active_owner("rtl_tcp") is None
+
+
+# ------------------------------------------------ 别名键：设备被占用时读不到序列号
+# 实测依据（2026-11-12 真机端到端）：桌面端占着 RTL-SDR 时，AI 进程枚举拿不到
+# serial（libusb 打不开设备），只能算出 ``rtlsdr|index:0``；持有者却登记在
+# ``rtlsdr|serial:...``。只比对主键 → 漏掉活着的持有者 → AI 直接去 open，
+# 拿到 LIBUSB_ERROR_ACCESS。登记必须带上别名，任一命中即同一台设备。
+def test_alias_key_finds_live_holder(_registry):
+    child = _spawn_child()
+    try:
+        start = sb._proc_start_time(child.pid)
+        _seed(_registry, "rtlsdr|serial:777", child.pid, start,
+              aliases=["rtlsdr|index:0"])
+
+        holder = sb.get_active_owner("rtlsdr|index:0")
+        assert holder and holder["owner"] == "desktop", "别名键必须能查到持有者"
+
+        ok, holder = sb.claim_active_owner(sb.AI_OWNER, "rtlsdr|index:0")
+        assert ok is False, "只算出序号键的竞争者仍必须被拒"
+        assert "桌面端" in sb.owner_conflict_text(holder)
+    finally:
+        _kill(child)
+
+
+def test_release_by_alias_key(_registry):
+    """持有者按序列号登记、释放时只拿到序号键（换进程后重算不出 serial）。"""
+    start = sb._self_start()
+    _seed(_registry, "rtlsdr|serial:777", os.getpid(), start,
+          aliases=["rtlsdr|index:0"])
+    assert sb.release_active_owner("desktop", "rtlsdr|index:0") is True
+    assert sb.get_active_owner("rtlsdr|serial:777") is None
+
+
+def test_aliases_include_serial_index_and_label():
+    dev = {"driver": "rtlsdr", "serial": "777", "label": "RTL-SDR #0",
+           "device_args": {"index": 0}}
+    keys = sb.device_identity_aliases(dev)
+    assert keys[0] == "rtlsdr|serial:777"
+    assert "rtlsdr|index:0" in keys
+    assert "rtlsdr|label:RTL-SDR #0" in keys

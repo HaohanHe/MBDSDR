@@ -42,13 +42,21 @@ except Exception:  # pragma: no cover - 单独打包/工具脚本下的安全回
     constants = None  # type: ignore[assignment]
     CONNECT_SAMPLE_RATE_KEY = "_sample_rate"
 
+# 身份键实现只有一份，在 AI 内核里（桌面端与 AI 必须算出同一个字符串）。
+from mbdsdr_ai.sdr_backend import (  # noqa: E402
+    IDENTITY_PROVISIONAL as _SB_PROVISIONAL,
+    IDENTITY_STABLE as _SB_STABLE,
+    device_identity_key,
+    resolve_device_identities,
+)
+
 
 logger = logging.getLogger(__name__)
 
 #: 身份键质量：来自设备自报的持久标识（serial / uri / rtl_tcp host:port）。
-STABLE = "stable"
+STABLE = _SB_STABLE
 #: 身份键质量：只能按枚举序号或显示名暂记，重枚举后可能变。
-PROVISIONAL = "provisional"
+PROVISIONAL = _SB_PROVISIONAL
 
 _UNSET = object()
 
@@ -88,38 +96,14 @@ def _text(value: Any) -> str:
 
 
 def _identity_of(device: Dict[str, Any]) -> DeviceIdentity:
-    """从设备字典派生身份键；拿不到持久标识时如实降级为 PROVISIONAL。"""
-    driver = _text(device.get("driver")) or "?"
-    serial = _text(device.get("serial"))
-    args = device.get("device_args") or {}
-    uri = _text(device.get("uri")) or _text(args.get("uri"))
-    label = _text(device.get("label")) or driver
+    """从设备字典派生身份键（实现只有一份，在 AI 内核里）。
 
-    if serial:
-        # rtl_tcp / network IQ 的 serial 是枚举阶段合成的稳定定位串，
-        # 与真实序列号一样在重枚举后不变。
-        return DeviceIdentity(f"{driver}|serial:{serial}", STABLE)
-    if uri:
-        return DeviceIdentity(f"uri:{uri}", STABLE)
-
-    idx = args.get("index", device.get("index"))
-    if idx is not None and _text(idx) != "":
-        return DeviceIdentity(
-            f"{driver}|index:{_text(idx)}", PROVISIONAL,
-            f"设备「{label}」没有序列号，按枚举序号 {_text(idx)} 暂记连接参数；"
-            "拔插或重枚举后序号可能变化，参数不会跟随设备。")
-
-    return DeviceIdentity(
-        f"{driver}|label:{label}", PROVISIONAL,
-        f"设备「{label}」既无序列号也无枚举序号，按显示名暂记连接参数；"
-        "同名设备的参数可能互相覆盖。")
-
-
-def _fingerprint(device: Dict[str, Any]) -> tuple:
-    args = device.get("device_args") or {}
-    return (str(device.get("driver") or ""), str(device.get("serial") or ""),
-            str(device.get("uri") or ""), str(args.get("index", "")),
-            str(device.get("label") or ""))
+    AI 侧 ``device_id`` 与这里的键必须逐字相同，否则「桌面端占着、AI 被拒」
+    这条互斥永远不成立。规范实现放 ``mbdsdr_ai.sdr_backend``（纯 Python、
+    无 Qt，本模块本来就与它同仓）；这里只做类型转换，不另写一套口径。
+    """
+    key, quality, warning = device_identity_key(device)
+    return DeviceIdentity(key, quality, warning)
 
 
 def _warn_once(text: str) -> None:
@@ -133,33 +117,16 @@ def _warn_once(text: str) -> None:
 def resolve(devices) -> List[DeviceIdentity]:
     """给本次枚举的每台设备派生身份键（顺序与入参一一对应）。
 
-    撞键时：不稳定地共用一份请求是必须禁止的——这里按指纹排序后加
+    撞键时：不稳定地共用一份请求是必须禁止的——规范实现按指纹排序后加
     ``#n`` 区分，并显式告警「身份键冲突」。
     """
     items = list(devices or [])
-    base = [_identity_of(d) for d in items]
-    groups: Dict[str, List[int]] = {}
-    for i, ident in enumerate(base):
-        groups.setdefault(ident.key, []).append(i)
-
-    out: List[Optional[DeviceIdentity]] = [None] * len(items)
-    for key, idxs in groups.items():
-        if len(idxs) == 1:
-            i = idxs[0]
-            ident = base[i]
-            out[i] = ident
-            if ident.warning:
-                _warn_once(ident.warning)
-            continue
-
-        warning = (f"设备身份键冲突：{len(idxs)} 台设备都映射到「{key}」；"
-                   "已按枚举顺序加 #n 临时区分，拔插后参数可能错位。")
-        _warn_once(warning)
-        for n, i in enumerate(sorted(idxs, key=lambda j: _fingerprint(items[j])), 1):
-            quality = base[i].quality
-            out[i] = DeviceIdentity(f"{key}#{n}", quality, warning)
-
-    return [ident for ident in out if ident is not None]
+    out: List[DeviceIdentity] = []
+    for key, quality, warning in resolve_device_identities(items):
+        if warning:
+            _warn_once(warning)
+        out.append(DeviceIdentity(key, quality, warning))
+    return out
 
 
 def intent_for(key: str) -> ConnectRequest:

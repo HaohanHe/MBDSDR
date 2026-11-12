@@ -131,8 +131,11 @@ Python 侧见 `mbdsdr_ai/hackrf_params.py`：
   `False`，所有 setter 返回 `False`、`read_samples` 返回 `None`，**不造假**。
 
 `sdr_backend.HackRFBackend`（PyPI `hackrf` 绑定版）的量程与增益档也全部改为引用
-`HackRFParams`，不再硬编码魔数；`enumerate_all_sdr_devices()` 固定列出一台
-`hackrf_0`，真实打开成败由 `connect()` 决定。
+`HackRFParams`，不再硬编码魔数。`enumerate_all_sdr_devices()` **不再**固定列出一台
+`hackrf_0`：HackRF 只有在 SoapySDR 总线或 gr-osmosdr 真枚举到时才出现（此前
+「装了库就登记一台」会让无硬件机器也看到假设备）。设备 id 由同一套身份键生成
+（`driver|serial:` > `uri:` > `driver|index:` > `driver|label:`），桌面端与 AI
+逐字相同；真实打开成败仍由 `connect()` 决定。
 
 ## 9. 已注册工具（ToolRegistry）
 
@@ -147,5 +150,5 @@ Python 侧见 `mbdsdr_ai/hackrf_params.py`：
 ```
 python3 -m pytest tests/hackrf_params_test.py -v
 # 15 passed：LNA 6 档 / VGA 32 档 / TXVGA 48 档 / 频率 1M-6G / 采样率 2M-20M /
-#           无设备 connect 返回 False 不崩溃 / enumerate 含 hackrf 条目
+#           无设备 connect 返回 False 不崩溃 / 无硬件时 enumerate 不含 hackrf 条目
 ```
