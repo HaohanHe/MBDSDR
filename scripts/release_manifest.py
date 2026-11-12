@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
-"""发布清单机检：版本号一致性 / 依赖 pin 存在性 / 许可证与合规文件 / 安装器。
+"""发布清单机检：版本号一致性 / 依赖 pin / 许可证与合规文件 / 安装器 / 产物凭据。
 
-四项都只读仓库与已构建产物，不改产品代码、不调阈值。任一项 FAIL → 退出码 1。
+五项都只读仓库与已构建产物，不改产品代码、不调阈值。任一项 FAIL → 退出码 1。
 
 口径：
 * **版本号**：``mbdsdr_ai/VERSION`` 是唯一手抄点，CMake / pyproject / ``version.py`` /
@@ -27,6 +27,10 @@
 * **安装器**：当前裁定为 **BY-DESIGN 绿色包分发**（不提供安装器，删除目录即卸载）；
   glob 未命中安装器描述文件是有理由的 BY-DESIGN，不是 SKIP。若以后真新增安装器
   描述文件，则要求配套安装/启动/卸载冒烟，否则 FAIL（防止删位置置换绿）。
+* **产物凭据**：发布产物里不得出现任何「形状规则」命中的文件。判据直接复用
+  ``scripts/secret_scan.py`` 的 7 条形状规则（单一真值源，不另抄一份正则），
+  对产物**按字节**扫（exe/dll/pyc 里内嵌的字符串同样算），不跑熵、不认 pragma。
+  命中即 FAIL 并逐个点名文件；删掉/移出打包目录后复跑才变绿。
 
 用法::
 
@@ -935,6 +939,50 @@ def check_installer() -> list[dict]:
 
 
 # ----------------------------------------------------------------------
+# 5. 发布产物凭据扫描
+# ----------------------------------------------------------------------
+def _secret_scan_module():
+    """按路径加载 ``scripts/secret_scan.py``（不复制规则，保持单一真值源）。"""
+    scripts = str(ROOT / "scripts")
+    if scripts not in sys.path:
+        sys.path.insert(0, scripts)
+    import secret_scan  # noqa: E402  (路径补好后再导入)
+
+    return secret_scan
+
+
+def check_secrets(dist: Path) -> list[dict]:
+    """发布产物不得包含任何 BLOCK 命中的文件。
+
+    对产物**按字节**跑形状规则（exe/dll/pyc 里内嵌的字符串同样算），不跑熵、
+    不认 pragma；命中即 FAIL 并逐个点名相对路径。删掉或移出打包目录后复跑
+    才变绿——「打包时忘了删临时文件」不能靠人工记性。
+    """
+    items: list[dict] = []
+    if not dist.exists():
+        _record(FAIL, f"产物目录不存在：{dist}", items)
+        return items
+    try:
+        scanner = _secret_scan_module()
+    except Exception as exc:  # 扫描器加载失败也要明确红，不静默
+        _record(FAIL, f"无法加载 scripts/secret_scan.py：{type(exc).__name__}: {exc}", items)
+        return items
+
+    hits, stats = scanner.scan_artifact(dist)
+    label = (f"产物 {stats['artifact_files']} 个文件 / "
+             f"{stats['artifact_bytes'] / 1048576:.1f} MiB（按字节，含二进制）")
+    if hits:
+        files = sorted({rel for rel, _rule in hits})
+        _record(FAIL, f"{label} 命中凭据形状：{', '.join(files)}"
+                      "（发布产物不得包含这些文件；输出不含命中的值）", items)
+    else:
+        _record(PASS, f"{label} 无凭据形状命中", items)
+    if stats["artifact_skip_unreadable"]:
+        _record(WARN, f"产物中有 {stats['artifact_skip_unreadable']} 个文件不可读，未扫描", items)
+    return items
+
+
+# ----------------------------------------------------------------------
 # main
 # ----------------------------------------------------------------------
 CHECKS = {
@@ -942,6 +990,7 @@ CHECKS = {
     "deps": lambda dist: check_deps(dist),
     "license": lambda dist: check_license(dist),
     "installer": lambda dist: check_installer(),
+    "secrets": lambda dist: check_secrets(dist),
 }
 
 
@@ -950,7 +999,7 @@ def main(argv: list[str] | None = None) -> int:
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--dist", type=Path, default=None,
                     help="PyInstaller onedir 产物目录（默认取 .tmp 下编号最大的 pyi-distN）")
-    ap.add_argument("--only", default="version,deps,license,installer",
+    ap.add_argument("--only", default="version,deps,license,installer,secrets",
                     help="逗号分隔：" + ",".join(CHECKS))
     ap.add_argument("--json", action="store_true", help="输出机器可读 JSON")
     args = ap.parse_args(argv)
@@ -970,10 +1019,11 @@ def main(argv: list[str] | None = None) -> int:
     all_items: list[dict] = []
     human: list[str] = []
     labels = {
-        "version": "1/4 版本号一致性",
-        "deps": "2/4 依赖 pin 存在性",
-        "license": "3/4 许可证与合规文件",
-        "installer": "4/4 安装器冒烟",
+        "version": "1/5 版本号一致性",
+        "deps": "2/5 依赖 pin 存在性",
+        "license": "3/5 许可证与合规文件",
+        "installer": "4/5 安装器冒烟",
+        "secrets": "5/5 发布产物凭据扫描",
     }
     for name in selected:
         human.append(f"\n== {labels[name]} ==")
