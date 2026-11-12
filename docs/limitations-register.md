@@ -19,7 +19,7 @@
 | --- | --- |
 | 真验过 | RTL-SDR（FC0012）七环验收 R1–R5/R7；NanoVNA 真机 SOLT；FT8 外采 WSJT-X 官方样本；ADS-B 外采 dump1090 全量清单；LRPT 外采 TU Berlin 实录；GPS C/A IS-GPS-200E 矢量；DVB-S2 BCH/LDPC KAT |
 | 仅自测 | 全量工具面与 schema 一致性；AI 上下文预算/工具裁剪/并发取消/错误恢复；录音库 P9 全系列；TLE 编号三方校验；发射门/状态机/半双工互斥（假后端）；天空/云台编排；端到端场景 A/B/C（假模型 + 合成 IQ/音频 + 时间拨盘，跨模块数值自洽） |
-| 未验证 | 真实发射（PlutoSDR）；1090 MHz ADS-B；云台/rotator 闭环；真过境 APRS/NOAA-APT/Meteor OTA；真实 LLM 联调（工具选择/流式取消/token 计数）；celestrak/NTP/open API 实时网络；arm64 Chromebook 真机；听感验收 |
+| 未验证 | 真实发射（PlutoSDR）；云台/rotator 闭环；真过境 APRS/NOAA-APT/Meteor OTA；真实 LLM 联调（工具选择/流式取消/token 计数）；celestrak/NTP/open API 实时网络；arm64 Chromebook 真机；听感验收 |
 
 ## 1. 待真机（有代码、无硬件）
 
@@ -27,11 +27,16 @@
 | --- | --- | --- | --- | --- |
 | L1 | 发射链路真发（CW/IQ/回放发射/TC 上行） | 发射线 `2aa912c`/`6094b87`/`322aba4`/`899882c`；`tests/test_tx_no_hardware.py` 用假后端 | 仅自测 | PlutoSDR + 衰减器/假负载 + 一台接收机；设 `MBDSDR_TX_BANDS` 与 `MBDSDR_TX_TOKEN`，先失败路径（未 arm/错 token/超频段）再真发 |
 | L2 | 云台/rotator 闭环（`gimbal_track_satellite`、`sky_gimbal_follow`、`gimbal_rssi_sweep`） | 天空/云台线；`sdr_tools._gimbal_rssi_sweep`（`agent.sdr_manager.get_active()` 先例） | 仅自测（误差口径边界见 L43） | 真 rotator（串口 RPRT）+ 真实过境；先验 `gimbal_read_pose` 回读一致，再验跟踪 |
-| L3 | ADS-B 1090 MHz 接收 | `docs/real_hw_acceptance_20261103.md` 环 6 = UNVERIFIABLE（FC0012 上限约 948.6 MHz） | 未验证 | 换 R820T/R820T2 棒，`python scripts/real_hw_acceptance.py --ring 6` |
 | L4 | 听感验收（链内 AGC、长时音高漂移） | 同上文档「不可验声明」；本轮全程 `MBDSDR_NULL_AUDIO=1` | 未验证 | 用户放行声卡后人工听；数据面（导频/RMS/频谱含量）已另行验证 |
 | L5 | NanoVNA 命令细节（`vbat`/`freqoffset`/`edelay`/`averages`） | `docs/learn/nanovna/protocol-study.md` 逐行标「待真机验证」；SOLT 已于 2026-10-23 真机验过 | 部分真验 | 真机逐条发命令并记录回显；单位/上限语义以实测为准 |
 | L6 | 物理 arm64 Chromebook 启动/USB 直收/rtl_tcp | `docs/CHROMEOS_CROSTINI_SDR.md`（qemu 交叉编译已过，物理机未验） | 未验证 | 真机启动 + `QT_QPA_PLATFORM=offscreen` ctest + USB 直收 |
 | L43 | 云台追踪误差口径：指令侧 vs 机械侧 | 天空/云台线 `25740f82`/`cac5d1a7`；`PointingErrorRecorder` + `MainWindow.gimbal_tracking_report()` / `gimbal_accuracy_text()`；模拟服务器 `scripts/hw_acceptance/rotctld_sim.py` + `ring5_gimbal_sim.py` | 仅自测 | 真 rotator/IMU；`pose_error_by_source.readback.samples > 0` 后 `pose_*` 才可作机械精度；模拟过境的 0.2° 不得对外称云台精度；UI 与文档在不可报时都写原因（tooltip/停机文案），绝不显示 0°。**模拟 rotctld 服务器只给「理想电机 + 传输延迟 + 量化 + 抖动」，不含齿隙/风力/电机曲线；其结论状态恒为 `SIMULATED`，不计 PASS，且 `mechanical_accuracy_claimable` 在模拟下永远 False**（`rotctld_sim` 的姿势样本进 `pose_error_by_source.simulated`，`readback` 桶必须 0 样本） |
+
+## 1.1 已结案：ADS-B 1090 MHz（本机物理不可达，不是待办）
+
+| 编号 | 条目 | 结论 | 证据 | 后续 |
+| --- | --- | --- | --- | --- |
+| ~~L3~~ | ADS-B 1090 MHz 接收 | **结案**：本机物理不可达——当前棒子（FC0012）频率上限不足，需 R820T 系 | 2026-11-06 本机实测：948.5 MHz 写频回读一致；948.6/950/1000/1090 MHz 均报 `LIBUSB_ERROR_IO "Could not set center_freq"` + `[FC0012] no valid PLL combination found`（`docs/pending-patches/2026-11-06-limitation-adsb-1090-fc0012.md`；探针原件未入库，E3 不可复跑） | **不是待办**，不等设备；换 R820T/R820T2 后另起验收 `python scripts/real_hw_acceptance.py --ring 6` |
 
 ## 2. 待真样本（有链路、无真实信号）
 
