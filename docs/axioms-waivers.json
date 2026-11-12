@@ -22,6 +22,13 @@
       "reason": "同上：main_window 内的 _fmt_* 与 readouts.py 重复，冻结期内只能登记不能合并。",
       "review_by": "2027-06-30",
       "approver": "user（冻结决定）"
+    },
+    {
+      "rule": "A03",
+      "path": "desktop/main_window.py",
+      "reason": "冻结文件；3 处（:8327 自动初始化 AI、:12761/:14455 读 gui_config 的 ntrip 段）均为「读配置失败 → 降级为空/默认」，是真问题但语义本身正确。改法是各在 except 内补一行 logger.warning（文件第 21 行已有 logger），约 3 行，解冻后随 A01/A02/A12 一并处理。",
+      "review_by": "2027-06-30",
+      "approver": "待用户批准"
     }
   ]
 }
