@@ -111,7 +111,21 @@ python scripts/soak_receive_chain.py --minutes 3 --speed 10 --sr 192000
 | FFT 后 512 bin 抽取改为 reshape+max | `desktop/spectrum_widget.py` `_resample_max` | 单块 0.747 ms | 0.065 ms | 0.96 MS/s 档，约 −91%；不可整除时保留原循环 |
 | 窗函数按 (名称, 长度) 缓存 | 同上 `_window` | 每块重算 | 命中即复用 | 换窗/换长度自动失效 |
 | VFO 旋转子按 (块长, 频偏) 缓存 | `mbdsdr_ai/dsp.py` `VFO.process` | 0.751 ms | 0.467 ms | 约 −38% |
-| 端到端可持续速率（2.4 MS/s 档） | 链路整体 | 3.75 MS/s（1.56x） | 6.83 MS/s（2.85x，该轮） | 另两轮实测 4.28 MS/s；受本机后台负载影响，看余量不看绝对值 |
+
+**端到端可持续速率为啥不在这张表里**：文档旧记「3.75 → 6.83 MS/s（1.8x 提速）」，
+本轮在独立 worktree 里把旧码 `06e42a69`（2026-11-06 01:41，正是那批数字被测出来时的
+代码）用**同一条命令、同一台机器**复跑，低负载下得到 **9.54 MS/s**；HEAD 三轮
+9.27 / 9.61 / 9.68，11-11 perf 批的父提交 `2ff06b3a` 为 8.98。两边的
+`scripts/bench_dsp_throughput.py` 字节一致（`git diff 06e42a69 HEAD -- scripts/bench_dsp_throughput.py`
+为空，20,602 B），口径没有漂移。**所以 3.75 / 4.28 / 6.83 的差别来自机器上并行跑着
+别的活，不是代码变快**——「优化前后」这个因果关系不成立，故从表中撤下，改按条件记区间：
+低负载 **9.0–9.9 MS/s**（3.74–4.03x），高负载可低至 3.9。
+
+本轮条件：12 逻辑核，系统 CPU 19–33%（测量前后各采一次），bench 进程 1.43–1.60 核。
+证据（已入库）：`docs/perf-evidence/2026-11-12/dsp-throughput-2p4ms-head-run1.json`（同 `-run2`、`-run3`）、
+`docs/perf-evidence/2026-11-12/dsp-throughput-2p4ms-oldcode-06e42a69.json`、
+`docs/perf-evidence/2026-11-12/dsp-throughput-2p4ms-oldcode-2ff06b3a.json`。
+负载口径见 `docs/evidence-standard.md` §2 第 10 条。
 
 **边界（不能优化，如实标注）**：`upfirdn.apply_filter`、`correlate`、
 `angle`、`lfilter`、`resample_poly` 都是外部 C 实现，Python 侧只能减少
@@ -121,15 +135,21 @@ python scripts/soak_receive_chain.py --minutes 3 --speed 10 --sr 192000
 ## 6. 线程切换与 UI 刷新开销
 
 - **跨线程信号**：`bench_signal_overhead` 用 QObject Emitter 从工作线程发
-  queued `Signal` 到主线程槽，2000 次实测 2.7 µs/信号（约 37 万信号/秒
-  上限）；按生产最坏帧率（2.4 MS/s × 16384 样本块 ≈ 146.5 帧/秒）折算
+  queued `Signal` 到主线程槽，2000 次实测 **2.76 µs/信号**（旧文写的 2.7 是四舍五入；
+  字段 `signal_dispatch.per_signal_us` 见
+  `docs/perf-evidence/2026-11-12/dsp-throughput-2p4ms-head-run3.json`，三轮 2.76–3.14 µs，
+  上限约 36 万信号/秒）；
+  按生产最坏帧率（2.4 MS/s × 16384 样本块 ≈ 146.5 帧/秒）折算
   事件循环占用 **0.04%**，不构成瓶颈。
 - **UI 重绘节流**：瀑布/频谱不由每帧信号直接触发绘制，而由主窗口统一的
   33 ms（约 30 fps）重绘定时器合并（`desktop/main_window.py`
   `_ensure_repaint_timer`，属另一条线，本段未改动）。因此帧率升高只增加
   轻量状态更新，不线性增加绘制成本。
-- **GIL**：端到端 CPU 占用 130–145%（相对单核），说明 FFT/解调/I/O 三线程
-  确有并行，未退化成单线程串行。
+- **GIL**：端到端 CPU 占用 **166–190%**（相对单核；JSON `rates[].e2e.cpu_utilization_pct`，
+  HEAD 三轮 × 三档 165.6–190.2%，旧码 `06e42a69` 同条件 170.8–186.6%），说明
+  FFT/解调/I/O 三线程确有并行，未退化成单线程串行。另有一套全程进程采样口径
+  （1.52 核 ≈ 152%，含微基准的单线程段），窗口不同，别与本行混用。旧记的
+  130–145% 没有同时段负载记录，按 `docs/evidence-standard.md` §2 第 10 条不作基线。
 
 ## 7. 未验证 / 已知边界
 
@@ -141,5 +161,8 @@ python scripts/soak_receive_chain.py --minutes 3 --speed 10 --sr 192000
   驱动重连瞬态不在本基线内。
 - `cProfile` 会给被测进程加约 2–3 倍开销，只用于**相对排序**，报告里的
   绝对耗时取自无 profile 的微基准。
-- 本机实测值随后台负载波动（端到端可持续速率跨轮 3.9–6.8 MS/s），阈值
+- 本机实测值随后台负载波动：**低负载**（12 逻辑核、系统 CPU 19–33%、bench 1.43–1.60 核）
+  端到端可持续速率 **9.0–9.9 MS/s**；**高负载**下同一代码同一命令可低到 3.9 MS/s
+  （区间与条件见 §5，原始件 `docs/perf-evidence/2026-11-12/dsp-throughput-2p4ms-head-run3.json`；
+  负载口径见 `docs/evidence-standard.md` §2 第 10 条）。阈值
   与结论都按「余量 ≥ 1.15x」判断，不以单次绝对值为准。
