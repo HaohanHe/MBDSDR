@@ -2,7 +2,7 @@
 
 > 本地参考克隆：`repos/dump1090/`（FlightAware/mutability 版）
 > 配套实现：`mbdsdr_ai/adsb.py`（完整解码器）、`mbdsdr_ai/adsb_lite.py`（轻量在线版）
-> 往返验证：`tests/adsb_real_roundtrip.py`（35 项全过）
+> 往返验证：`tests/test_adsb_real_roundtrip.py`（35 项全过）
 >
 > 本文件只记录**这次真读 .c/.h 源码后逐行对齐到 Python 的常量与位域**，
 > 每条都给 `file:line`，便于日后对照。泛泛的协议介绍见同目录 `dump1090.md`。
@@ -118,7 +118,7 @@ CRC / preamble / PPM 位判决全部与 dump1090 对齐。
 
 ```
 python3 -c "from mbdsdr_ai.adsb import ADSBDecoder; print('ok')"   # ok
-python3 tests/adsb_real_roundtrip.py
+python3 -m pytest tests/test_adsb_real_roundtrip.py -q
   == 结果: 35 passed, 0 failed ==
 ```
 

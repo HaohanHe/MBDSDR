@@ -97,7 +97,7 @@ Type-1 标准消息位布局（packjt77.f90:1304）：
 加扰向量 rvec(77)（genfst4.f90:29-31）：编码时 `msgbits ^= rvec`，解码后再 `^= rvec` 还原。
 CRC24 多项式 0x100065b（get_crc24.f90:12）。
 
-## 8. 往返验证结果（tests/ft8_real_roundtrip.py）
+## 8. 往返验证结果（tests/test_ft8_real_roundtrip.py）
 
 ```
 [1] 参考向量 CQ BI1AAA OM74 → 79 音调，3 个 Costas7 块正确，无噪解码文本一致  PASS

@@ -345,7 +345,9 @@ satdump/rtklib/bladerf/limesuite 等 15 个）与 `*roundtrip*.py`（协议编�
 命名（`test_` 前缀 / `_test.py` 后缀 / 文件名含 roundtrip），`--check`
 自检保证分组并集=全集，分组数 167 → 200（两组各 100）。另将两个
 `main()` 脚本风格文件 pytest 化（`tests/ft8_roundtrip.py`、
-`tests/adsb_real_roundtrip.py` 各加一个 wrapper 测试，手动运行方式不变）：
+`tests/adsb_real_roundtrip.py` 各加一个 wrapper 测试，手动运行方式不变；
+2026-11-12 两文件已改名 `test_ft8_roundtrip.py` / `test_adsb_real_roundtrip.py`，
+裸 pytest 也能收集）：
 后者是 `cpp/tests/test_adsb_decode.cpp` golden 数字的 Python 参照
 （35 项 dump1090 常量校验），必须随 CI 跑。四个 `main()` 体检脚本
 （tool_selftest/tool_health_check/tool_param_smoke/smoke_live_tools）

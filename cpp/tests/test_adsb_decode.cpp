@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 // Comprehensive 1090 Mode-S / ADS-B decoder tests (C++ port of the validated
-// Python suite tests/adsb_real_roundtrip.py). Numbers must match that reference.
+// Python suite tests/test_adsb_real_roundtrip.py). Numbers must match that reference.
 #include <cmath>
 #include <cstdio>
 #include <cstdint>
