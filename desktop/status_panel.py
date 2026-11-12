@@ -888,7 +888,10 @@ class StatusPanel(QWidget):
         self.rx_srate.setText("—")
         self.rx_bw.setText("—")
         self.rx_demod.setText("—")
-        self.rx_gain.setText("—")
+        # 走同一个读数出口：它同时清掉上一次「未生效」告警 tooltip。
+        # 只 setText("—") 会把「当前增益 30 dB 超出能力，已按 20 dB 显示」
+        # 留在控件上——断开后界面上已经没有这两个数字了。
+        self._apply_gain_readout(None)
         self.rx_agc.setText("—")
         self.rx_squelch.setText("—")
         self.rx_volume.setText("—")

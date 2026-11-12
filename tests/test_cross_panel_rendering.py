@@ -225,6 +225,26 @@ def test_gain_backend_clamped_is_flagged_in_both_panels():
     )
 
 
+def test_disconnect_clears_stale_gain_warning_and_its_numbers():
+    """断开后 rx_gain 显「—」，tooltip 不许再引用任何具体 dB 数字。
+
+    反证：把 ``status_panel.set_sdr_connected`` 里的 ``_apply_gain_readout(None)``
+    换回 ``setText("—")``，本用例立刻变红——tooltip 仍停在
+    「当前增益 30 dB 超出…已按 20 dB 显示」，而界面上这两个数字已经没了。
+    """
+    _ensure_app()
+    st = _status_panel(gain_db=GAIN_DB)
+    st.set_gain_intent(30)          # 回读 20 / 意图 30 → 进「未生效」
+    assert "未生效" in st.rx_gain.toolTip(), (
+        f"前置条件不成立：没有进入夹值告警：{st.rx_gain.toolTip()!r}")
+
+    st.set_sdr_connected(False)
+
+    assert st.rx_gain.text() == "—"
+    assert not re.search(r"\d", st.rx_gain.toolTip()), (
+        f"断开后 tooltip 仍引用具体数字：{st.rx_gain.toolTip()!r}")
+
+
 # ===========================================================================
 # 3. S 值：同一电平，两处 dBFS 文本必须一致；口径必须自证
 # ===========================================================================

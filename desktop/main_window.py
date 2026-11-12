@@ -3534,7 +3534,7 @@ class MainWindow(QMainWindow):
         if backend is None or pipeline is None:
             text = "SDR 未连接"
             color = self._tok('gray_100', '#D9D9D9')
-            tip = ("SDR 未连接：按 Esc 回主界面，点工具栏「连接」选设备。"
+            tip = ("按 Esc 回主界面，点工具栏「连接」选设备。"
                    "星空来自离线星历，此时没有真实射频数据。")
         elif getattr(self, "_link_degraded", False):
             text = "数据流中断"
@@ -14043,6 +14043,12 @@ class MainWindow(QMainWindow):
             self.doppler_chip.setText("多普勒 --")
             if st.reason:
                 self.doppler_chip.setToolTip(f"补偿已关闭：{st.reason}")
+            else:
+                # 无有效目标且无原因（过境结束、目标被清，最常见）：tooltip 必须
+                # 跟着变成「无补偿」，不能留着上一颗星的「点击关闭补偿」。
+                self.doppler_chip.setToolTip(
+                    "无有效目标：当前不施加多普勒补偿；"
+                    "跟踪卫星并开启补偿后这里显示 Δ")
 
     def _on_doppler_chip_toggled(self, checked: bool):
         """芯片开关：关补偿 → 调谐回标称下行（不沿用过期偏移）。"""

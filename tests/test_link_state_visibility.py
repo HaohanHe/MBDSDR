@@ -231,3 +231,30 @@ def test_no_auto_reconnect_policy(window):
     assert w._active_sdr_backend is None, "桌面端不应偷偷自动重连（当前策略=手动）"
     msg = w.statusBar().currentMessage()
     assert "正在重连" not in msg, f"没有自动重连却显示正在重连=假状态：{msg}"
+
+
+def test_doppler_chip_tooltip_follows_target_loss(window):
+    """多普勒芯片：目标失效且无 reason 时，tooltip 必须变成「无补偿」。
+
+    旧实现只在 ``st.reason`` 非空时重设 tooltip，过境结束/目标被清（最常见的
+    失效路径，reason 为空）时，芯片已显示「多普勒 --」，悬停却还是上一颗星的
+    「…点击关闭补偿（调谐回标称）」——指向一个不存在的补偿。
+    """
+    st_valid = SimpleNamespace(
+        target_name="ISS", valid=True, doppler_hz=1200.0,
+        downlink_hz=145_800_000.0, corrected_freq_hz=145_801_200.0,
+        enabled=True, reason="")
+    window._update_doppler_chip(SimpleNamespace(state=st_valid))
+    assert "ISS" in window.doppler_chip.toolTip(), (
+        f"前置条件不成立：有效目标时 tooltip 未带目标名：{window.doppler_chip.toolTip()!r}")
+
+    st_lost = SimpleNamespace(
+        target_name="", valid=False, doppler_hz=None,
+        downlink_hz=145_800_000.0, corrected_freq_hz=None,
+        enabled=False, reason="")
+    window._update_doppler_chip(SimpleNamespace(state=st_lost))
+
+    assert window.doppler_chip.text() == "多普勒 --"
+    tip = window.doppler_chip.toolTip()
+    assert "无有效目标" in tip and "点击关闭补偿" not in tip, (
+        f"目标失效后 tooltip 仍是旧的补偿说明：{tip!r}")

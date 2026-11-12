@@ -1871,6 +1871,11 @@ No supported devices found），GNSS+SDR 同开复验没做成；离线那次
 | 文件 | 线名 | 开始时间 | 预计提交 hash |
 |---|---|---|---|
 | _（空）_ | | | |
+| `desktop/status_panel.py` | K20同类收口线/6ae85f56（断开时清掉残留增益告警 tooltip） | 2026-11-13 07:05 | 本笔 |
+| `desktop/main_window.py` | K20同类收口线/6ae85f56（多普勒芯片目标失效 tooltip + SDR 未连接分支去重复） | 2026-11-13 06:51 | 本笔 |
+| `tests/test_cross_panel_rendering.py` | K20同类收口线/6ae85f56（断开后 tooltip 无残留数字断言） | 2026-11-13 07:05 | 本笔 |
+| `tests/test_link_state_visibility.py` | K20同类收口线/6ae85f56（多普勒芯片目标失效 tooltip 断言） | 2026-11-13 07:05 | 本笔 |
+| `docs/COORDINATION.md` | K20同类收口线/6ae85f56（本笔四个文件的 §6.1 登记行） | 2026-11-13 07:05 | 本笔 |
 | `desktop/spectrum_widget.py` | A02读数失真线（孤儿 claim 接管；原持有者 右栏收窄A pid 已死、心跳过期 681 min、工作区干净） | 2026-11-13 01:48 | 随本笔 |
 | `desktop/{readouts,adsb_map_panel,bookmark_panel,control_panel,scanner_panel}.py` | A02读数失真线（MHz 读数精度收口到 readouts；逐文件提交后释放） | 2026-11-13 01:48 | 随本笔 |
 | `docs/settings-inventory.md` | K18收口线（孤儿 claim 接管；脚本重生成数字块，提交后即释放） | 2026-11-13 01:48 | 随本笔 |
