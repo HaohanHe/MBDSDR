@@ -40,6 +40,12 @@ git apply docs/pending-patches/2026-11-12-a1/00-all.patch
 $env:MBDSDR_TEST_LOCK="0"; python -m pytest tests/test_ui_contrast.py tests/test_theme_contrast_gate.py -q
 ```
 
+**`00-all.patch` 的应用前提**：它要改的 **5 个文件**（`desktop/status_panel.py`、
+`desktop/sat_track_panel.py`、`desktop/vfo_panel.py`、`desktop/ntrip_panel.py`、
+`tests/test_ui_contrast.py`；10 指片数，不是文件数）必须仍是当前 HEAD 的样子。
+批下来时若期间有人动过其中任何一个：**先 `git apply --check`，失败就停下来报告，
+不要手工合并**——手工合会绕过逐片计数，棘轮与上限容易对不上。
+
 **单片只含产品代码，故意不带测试改动**：两片合用时，棘轮基线行与上限会被各改一次，
 diff 必冲突；产品代码本身不冲突（不同文件 / 同一文件里互不重叠的行）。所以：
 要么用 `00-all`，要么单片 + 手工同步。
