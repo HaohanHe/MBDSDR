@@ -424,7 +424,7 @@ pre-commit**：pre-commit 现在只跑 claim 范围 + claim 台账 + 暂存区�
 2026-11-13 转绿（links=16 全 PASS），`make_decode_fixtures.py --check` 同日修绿并
 接入 `guards`；`check_destructive_ops.py` / `audit_evidence.py` / `lint_swallow_all.py` 当前仍是红的，
 已分别入 K22 / K23 / K06，属于待修项，不是死代码；`check_red_lifecycle.py`
-2026-11-13 05:54 实测 rc=1（FAIL 9：R8 待复核 3 条＋「已修缺 hash」6 条），
+2026-11-13 05:54 实测 rc=1（FAIL 9：R8 待复核 3 条＋「修完没留 hash」6 条），
 触发条件见上表，红项交各 owner，尚未转绿。
 
 ### 零引用核查（2026-11-13）：两条「写不出责任人」的处置
