@@ -755,3 +755,77 @@ for (auto const& [name, _vfo] : vfos) {
 | Hamlib 提交 feed（最新 2026-11-11）；COPYING = GPL-2.0 文本 | https://github.com/Hamlib/Hamlib/commits/master.atom；https://raw.githubusercontent.com/Hamlib/Hamlib/master/COPYING | 2026-11-12 |
 | satnogs-network 归档（2018-12-17，license=null） | https://api.github.com/repos/satnogs/satnogs-network | 2026-11-12 |
 | satnogs-client GitHub 归档页（"moved to GitLab"） | https://github.com/satnogs/satnogs-client | 2026-11-12 |
+
+---
+
+## 8. 三类扩查（第三轮，2026-11-12）
+
+> **范围**：按**能力**挑三类我们覆盖不足的——(a) SDR 客户端的录音回放 + 多设备 + 热插拔、(b) 卫星追踪 + 多普勒 + 云台一体化、(c) 完整键盘全操作 / a11y。§5/§6/§7 已收的机制不重复；§8.1 按指令**排除** SDR++ / SDRangel / GQRX / CubicSDR，§8.3 的键盘维度不排除。
+> **口径**：沿用 §4–§7——URL ＋ 抓取时间 **2026-11-12（Asia/Shanghai）**；许可证以 GitHub API 的 `license.spdx_id` 为准，取不到写「未取到」；**README 宣传语不算机制**，要落到可复核的文档段落或源码行为；**查不到写「未查到」，不补**。
+> **自我约束**：本轮**仍未做全量封闭集**，因此**不对任何项目下「他们没有」结论**；「未查到」只表示本次检索范围内没看到。
+> **不产出工单**：本节不改 roadmap、不占 W 编号；§8.4 只列「建议新开」，批准后才落条。
+
+### 8.1 (a) 录音回放 + 多设备 + 热插拔
+
+| 项目 | 它怎么做的（出处） | 我们能搬什么机制 | 对应哪条工单 |
+|---|---|---|---|
+| **SigDigger**（LGPL-3.0；`pushed_at` 2026-02-11） | 官方特性页列 `Baseband recording (full spectrum and per-channel)`、`realtime and replay analysis modes`；用户手册 0.3.0 第 23 页（ManualsLib 转录）：capture 存 **Complex 32-bit float**（原文 "exactly as in Gqrx"），命名 `sigdigger_YYYYMMDD_hhmmssZ_SampleRate_Frequency_float32_iq.raw`，保存目录由 `Browse...` 选 | ① **文件名内嵌「UTC 时刻 + 采样率 + 中心频率」**——回放端不依赖外部 sidecar 也能自校验；② **全谱 / 单通道两级录制** | ① → **W96**（文件名模板 + 时区）；② → **无既有工单**（建议 **A2**）；回放模式 → W97（已关闭）/ W37 |
+| **URH**（GPL-3.0；commits atom 最新 2025-12-19） | README：对多种 SDR 原生支持（`native support for many common Software Defined Radios`）、`automatic detection of modulation parameters`、截图段 `Record and send signals` | **载入录音即自动估调制参数**，不要求用户先填波特率/调制方式——把「猜参数」从用户手里拿走 | **无既有工单**（建议 **A3**）；**硬前置是 P0-04 三态**——先能区分「没信号 / 前导不对 / 算法失败」，再谈自动估参，否则「估错」会被显示成「已识别」 |
+| **ka9q-radio**（GPL-3.0；`pushed_at` 2026-11-02；README 署名更新 27 June 2026） | README 原文要点：mid-2023 起把各前端驱动**内建进 `radiod`**（RTL-SDR / Airspy R2 / Airspy HF+ / Funcube Pro+ / RX-888 Mk II，另可选 Rigexpert Fobos、SDRplay、BladeRF、HackRF、HydraSDR）；**全部 I/O（信号与控制/状态）走 IP 多播**，因此「单个模块可重启而不重启全部」；`pcmrecord` **自动判定采样率、格式与字节序** | ① **记录端自适应头部参数**（用户不填速率/格式/字节序）；② **模块级解耦 + 单独重启**——这是「运行中某一路挂了只重建那一路」的可参照形态 | ① → **W96 / W37**（回放读头自适应）；② → **无既有工单**；②**不改变** §5.2「运行期热插拔无参照、属自研」的结论：它给的是解耦方式，不是热插拔实现 |
+
+**结论（a）**：三个项目**都没有**给出可搬的热插拔实现——SigDigger 只写「经 SoapySDR 支持多种设备」，URH 只写「原生支持多种 SDR」，ka9q-radio 写的是模块重启，**三者运行期拔插监听均未查到**。能给的是三条：文件名字段化、记录端自适应、模块解耦。**§5.2 的封闭集结论（6 项目 28,051 blob、运行期设备监听 0 处）与「热插拔属自研」不变。**
+
+### 8.2 (b) 卫星追踪 + 多普勒 + 云台一体化
+
+| 项目 | 它怎么做的（出处） | 我们能搬什么机制 | 对应哪条工单 |
+|---|---|---|---|
+| **SatNOGS Client** | 用户指南（stable，2.1.1）：`SATNOGS_ROT_MODEL` 取 **Hamlib rotator 模型串**，配套 `SATNOGS_ROT_BAUD` / `ROT_PORT` / `ROT_THRESHOLD` / `ROT_FLIP` / `ROT_FLIP_ANGLE`；`SATNOGS_STATION_LAT` 条目明写「精度越高，多普勒校正越准」 | **把「过境阈值 + 翻转角 + 站址精度」当一等配置**，而不是埋在代码常量里；`ROT_THRESHOLD` 正对应「仰角低于多少不动云台」 | **W101**（rotctld 残项）；仰角闸门我们已有（W101「已有什么」记的星历闸门），本条只借配置形态 |
+| **Gpredict** | Ubuntu jammy manpage `gpredict.1`：「Gpredict can perform Doppler tuning and antenna rotator tracking via hamlib.」 | **多普勒调谐与云台跟踪共用同一个后端抽象（hamlib）**——频率与角度由同一份轨道解驱动，不出现「频率按 A 算、角度按 B 算」 | **W101**；频率/TLE 同源侧 → **P0-18 / P0-01**（已在做） |
+| **SatDump** | 官方文档 PDF 专节 `Interfacing SatDump with an antenna rotator`：选 rotctld → 填 IP 与端口（默认 **4533**）→ `Connect` → `Engage` 才开始下发；rtl-sdr.com 1.1.0 发布文：「rotor tracking control which works together with its satellite pass predictor and scheduler … no more need to use programs like Orbitron or Gpredict」 | **Engage 两段式**：连接 ≠ 开始下发，必须再点一次才动天线；以及「过境预测—调度—云台」同进程闭环 | **W101**；调度闭环与 **W99** 邻近，但 **W99 只做录制、不含云台**，不作前置 |
+
+**结论（b）**：三家共同点是**不造「云台专属子系统」**——rotator 只是 hamlib 的一个后端，与频率/轨道共用同一目标解。W101 的定位（补 rotctld 残项、不新造框架）与此一致。
+**本轮新发现（未改动 W101，仅登记）**：SatDump 的 `Engage` 揭示了「连接成功即开始下发」的风险，而 W101 只写了 `K` park 与停止、**没写「连接后是否允许立即下发」**。这是一句话可补的口径，是否并进 W101 等指示，本节不擅自改工单文本。
+
+### 8.3 (c) 完整键盘全操作 / a11y
+
+| 项目 | 它怎么做的（出处） | 我们能搬什么机制 | 对应哪条工单 |
+|---|---|---|---|
+| **WSJT-X** | 用户指南 2.7.0-rc8：「**Shift+F11 / Shift+F12** 以 **90 Hz** 步进移动 FT4 发射频率」；`Settings|General` 的 **Alternate F1–F6 bindings**：F1 发 CQ、F2–F5 发送 Tx2–Tx5 | **主操作绑功能键 + 一份「键位↔动作」单一表**；频率微调用**固定步长**，不靠鼠标拖 | **P1-40**（菜单入口且快捷键可见）、**P1-34 / W55 / W61**（焦点可见、键盘可达）；「键位表」→ **无既有工单**（建议 **C1**） |
+| **SDR# Accessibility 插件** | rtl-sdr.com 2019-11-05：插件提供 `keyboard shortcuts`、`on-screen display`、新工具栏，「可直接从键盘输入频率」；作者自述「currently working on incorporating a screen reader」 | **a11y 做成可插拔的一层（快捷键 + OSD + 朗读）**，不散落在业务控件里 | **P1-34 / P1-37**；建议 **C2**（a11y 模式）。屏幕阅读器**是否最终落地未查到**，不得当「已实现」引用 |
+| **HDSDR** | 官方快捷键表（HTML）：模式切换 `ctrl+A/C/D/E/F`、LO 步进 `ctrl+←` 等成表列出 | **全量快捷键表对外发布 + 冲突检测**——补我们「有入口无键位表」的那一半 | **P1-40**；与 C1 合并 |
+| **SDR++** | v1.1.0 手册目录含独立 **`Keyboard controls`** 章节（第 33 页） | 只作「键盘操作独立成章」的对照；**具体键位正文未取到，不写** | **P1-40** |
+| **fldigi** | Debian manpage：`-k / -kbd`「Enable or disable **visible keyboard focus** in non-text widgets」，默认**不启用** | **「焦点可见」是需要显式开启的开关，且允许关闭**——说明焦点样式不是装饰；同时提醒：焦点可见 ≠ 可操作，仍需 Tab 链 | **P1-34 / W55 / W61**、**P1-37** |
+
+**未查到**：**屏幕阅读器级**（读屏能念出频谱、读数、状态栏变化）的成体系实现——本次检索范围内**没有可复核的成品**；SDR# 插件 2019 年只是「在做」。按口径记为「未查到」，不补、不外推。
+
+### 8.4 建议新开（待批准；本节不占编号、不进 roadmap 统计）
+
+| 建议 | 内容 | 对标 | 前置 / 约束 |
+|---|---|---|---|
+| **A2** | 单通道基带录制（全谱之外再录解调后那一路） | SigDigger per-channel | 无硬前置；落 `main_window.py` 录音段则受现有串行链约束 |
+| **A3** | 回放自动参数估计（载入即估调制/速率） | URH | **硬前置 P0-04 三态**，否则「估错」冒充「已识别」 |
+| **C1** | 键位表 + 冲突检测（一份单一表，可对外发布） | WSJT-X / HDSDR | 与 P1-40 同域，可合并验收 |
+| **C2** | a11y 模式（快捷键 + OSD + 朗读接口） | SDR# 插件 | 屏幕阅读器部分无成品参照，验收只能按「接口可用」写，不写「读屏已兼容」 |
+
+若批准落条，编号接 **W102**（当前最大为 **W101**）。**在批准前，本节四条只存在于这里。**
+
+### 8.5 抓取记录
+
+| 证据 | URL | 抓取时间 |
+|---|---|---|
+| SigDigger 仓库元数据（`license=LGPL-3.0`、`pushed_at=2026-02-11`） | https://api.github.com/repos/BatchDrake/SigDigger | 2026-11-12 |
+| SigDigger 官方特性页（`Baseband recording (full spectrum and per-channel)`、`realtime and replay analysis modes`） | https://batchdrake.github.io/SigDigger/ | 2026-11-12 |
+| SigDigger 用户手册 0.3.0 p.23（cf32 存储、文件命名、Browse 选目录；经 ManualsLib 转录） | https://www.manualslib.com/manual/2636359/Matlab-Sigdigger.html?page=23 | 2026-11-12 |
+| URH README（多 SDR 原生支持、`automatic detection of modulation parameters`、`Record and send signals`） | https://raw.githubusercontent.com/jopohl/urh/master/README.md | 2026-11-12 |
+| URH 提交 feed（最新 2025-12-19）；**注意** API `pushed_at=2023-11-15` 与此不一致，两值并记 | https://github.com/jopohl/urh/commits/master.atom；https://api.github.com/repos/jopohl/urh | 2026-11-12 |
+| ka9q-radio README（驱动内建 `radiod`、IP 多播解耦、`pcmrecord` 自动判定采样率/格式/字节序、署名 27 June 2026） | https://github.com/ka9q/ka9q-radio | 2026-11-12 |
+| ka9q-radio 仓库元数据（`license=GPL-3.0`、`pushed_at=2026-11-02`） | https://api.github.com/repos/ka9q/ka9q-radio | 2026-11-12 |
+| SatNOGS Client 用户指南（`SATNOGS_ROT_MODEL` 等 rotator 变量、站址精度与多普勒校正） | https://docs.satnogs.org/projects/satnogs-client/en/stable/userguide.html | 2026-11-12 |
+| Gpredict manpage（Doppler tuning + antenna rotator tracking via hamlib） | https://manpages.ubuntu.com/manpages/jammy/man1/gpredict.1.html | 2026-11-12 |
+| SatDump 文档 PDF 专节（rotctld / 端口 4533 / Connect / Engage） | https://www.mikrocontroller.net/attachment/659068/SatDumpdoc.pdf | 2026-11-12 |
+| SatDump 1.1.0 发布文（rotor tracking 与过境预测/调度一体） | https://www.rtl-sdr.com/satdump-version-1-1-0-released-feature-overview/ | 2026-11-12 |
+| WSJT-X 2.7.0-rc8 用户指南（Shift+F11/F12 90 Hz、Alternate F1–F6 bindings） | https://wsjt.sourceforge.io/wsjtx-doc/wsjtx-main-2.7.0-rc8.html | 2026-11-12 |
+| SDR# Accessibility 插件报道（快捷键、OSD、可键盘输入频率、屏幕阅读器「在做」） | https://www.rtl-sdr.com/new-accessibility-plugin-for-sdr/ | 2026-11-12 |
+| HDSDR 快捷键表 | https://www.qsl.net/k/kb1uif/downloads/Software_for_Radios/Software_Programs_for_SDR_Radios_with_Docs_&_Links/1_SDR%20Programs/HDSDR/HDSDRv1.0/hdsdr_keyboard_shortcuts.htm | 2026-11-12 |
+| SDR++ v1.1.0 手册（目录含 `Keyboard controls` 第 33 页；第三方托管 PDF） | https://wtfda.org/wp-content/uploads/SDRs/SDRpp_manual.pdf | 2026-11-12 |
+| fldigi manpage（`-k/-kbd` visible keyboard focus in non-text widgets） | https://manpages.debian.org/experimental/fldigi/fldigi.1 | 2026-11-12 |
