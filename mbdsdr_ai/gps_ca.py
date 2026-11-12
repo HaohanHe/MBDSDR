@@ -322,7 +322,7 @@ def correlate_codes(iq: np.ndarray, sample_rate: float,
 def register_tool_registry(registry) -> None:
     """注册 GPS 扩频伪随机序列与码相关捕获工具。"""
     import json as _json
-    from .tool_registry import ToolResult, clean_exc
+    from .tool_results import ToolResult, clean_exc
 
     def _prn(args):
         """生成 LFSR/m 序列/Gold 族/标准 C/A 码并给自校验结果。"""

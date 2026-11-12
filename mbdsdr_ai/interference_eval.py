@@ -249,7 +249,7 @@ def interference_assess(iq_before: Union[Sequence[complex], np.ndarray],
 # ─────────────────────────────────────────────────────────────
 def register_tool_registry(registry) -> None:
     """注册 P1-8 干扰生成/评估积木（合成口径，不驱动发射硬件）。"""
-    from .tool_registry import ToolResult, clean_exc
+    from .tool_results import ToolResult, clean_exc
     import json as _json
 
     def _gen(args):

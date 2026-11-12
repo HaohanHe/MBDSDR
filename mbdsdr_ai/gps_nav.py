@@ -617,7 +617,7 @@ def ephemeris_to_nav_bits(eph: Dict[str, Any], tow_count: int = 1,
 # ═══════════════════════════════════════════════════════════
 def register_tool_registry(registry) -> None:
     """注册 GPS 电文/PVT 积木（nav 解码 / 星历解算 / PVT）。"""
-    from .tool_registry import ToolResult, clean_exc
+    from .tool_results import ToolResult, clean_exc
     import json as _json
 
     def _nav_decode(args):

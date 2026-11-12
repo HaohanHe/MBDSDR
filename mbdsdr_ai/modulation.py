@@ -27,7 +27,7 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 import numpy as np
 
 from .fir_taps import root_raised_cosine_taps
-from .tool_registry import ToolResult, clean_exc
+from .tool_results import ToolResult, clean_exc
 
 __all__ = [
     "SCHEMES", "symbol_points", "modulate_bits", "demodulate_iq",

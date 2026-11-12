@@ -213,7 +213,7 @@ def tdoa_bearing(sig_a: Sequence[float], sig_b: Sequence[float],
 # ============================================================================
 def register_tool_registry(registry) -> None:
     """注册射电干涉测量积木（互相关测向 + 角分辨率/可见度）。"""
-    from .tool_registry import ToolResult, clean_exc
+    from .tool_results import ToolResult, clean_exc
     import json as _json
 
     def _tdoa(args):

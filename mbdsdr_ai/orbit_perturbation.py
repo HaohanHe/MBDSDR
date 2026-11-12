@@ -354,7 +354,7 @@ def initial_orbit_laplace(
 # ─────────────────────────────────────────────────────────────
 def register_tool_registry(registry) -> None:
     """注册 P1-4 摄动 STM 传播 / Laplace 初轨确定积木。"""
-    from .tool_registry import ToolResult, clean_exc
+    from .tool_results import ToolResult, clean_exc
     import json as _json
 
     def _prop(args):

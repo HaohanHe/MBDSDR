@@ -573,7 +573,7 @@ def register_minimodem_tools(registry) -> None:
     baudot_* 工具；本函数是模块级独立注册入口，只追加 bell103_* 工具，
     不改动现有 Bell202 / ASCII / Baudot 接口。
     """
-    from mbdsdr_ai.tool_registry import ToolResult
+    from mbdsdr_ai.tool_results import ToolResult
 
     def _bell103_modulate(args: Dict[str, Any]) -> "ToolResult":
         text = args.get("text", "")
@@ -589,7 +589,7 @@ def register_minimodem_tools(registry) -> None:
         )
 
     def _bell103_demodulate(args: Dict[str, Any]) -> "ToolResult":
-        from mbdsdr_ai.tool_registry import ToolResult, numeric_array
+        from mbdsdr_ai.tool_results import ToolResult, numeric_array
         samples, err = numeric_array(args, "samples")
         if err:
             # adapter 侧对非数组 samples raise ValueError；按「错误:即失败」

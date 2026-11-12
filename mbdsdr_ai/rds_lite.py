@@ -531,7 +531,7 @@ def register_rds_tools(registry) -> None:
       - rds_decode_groups    : 给定 4 个 16bit 组块字 → 逐组语义字段
       - rds_extract_ps_rt    : 已解析组列表 → 拼出 PS/RT/AF/时钟摘要
     """
-    from .tool_registry import ToolResult
+    from .tool_results import ToolResult
 
     def _decode_mpx(args):
         # 离线路径：接受 hex 编码的 MPX 样例或说明用合成信号；真机由 sdr_tools 喂入。

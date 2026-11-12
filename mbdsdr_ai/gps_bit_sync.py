@@ -230,7 +230,7 @@ def how_validate(subframe: Sequence[int],
 
 def register_tool_registry(registry) -> None:
     """注册 P1-1 位同步/子帧装配积木。"""
-    from .tool_registry import ToolResult, clean_exc
+    from .tool_results import ToolResult, clean_exc
     import json as _json
 
     def _sync(args):
