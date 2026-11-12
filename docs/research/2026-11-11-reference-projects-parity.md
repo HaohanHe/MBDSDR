@@ -612,3 +612,39 @@ for (auto const& [name, _vfo] : vfos) {
 - **证伪「我们有、他们缺」（2026-11-12）**：原 4 条 → **保留 1、降级 2、删除 1**。方法：6 个已查仓库全树（blob 合计 28,051 个）按名检索 + 抽读；结论见 §4.2.2。
 - 不查：SatNOGS server（定位不同）；SDR-Console/Orbitron 已按 §4.4 单列。
 - 下一批：待裁定。
+
+---
+
+## 5. 能力维度补查：录音回放 / 多设备与热插拔（2026-11-12）
+
+> **为什么单开一节**：§0–§3 按项目组织、§4 按线上项目组织，两套表都放不下「这个领域我们到底对照过没有」的判断；本节按**能力维度**切，正好补 §4 开头记下的跨区块盲区（遥测覆盖/数据源/过境自动化/地固轨迹之外，又发现两个从未对照的维度）。混进 §4 会让「按项目」与「按能力」两种分类打架，故独立成节。
+> **口径**：沿用 §4——`仓库@提交:路径:行` ＋ 抓取时间 **2026-11-12（Asia/Shanghai）**＋ 可复核 URL；线上证据等级低于 §2，不得反向给 §2 背书；否定结论给封闭集；README 宣传语不算机制。
+> **注记（可反复引用）**：**注释掉的功能不计入机制**。例：SDRangel 的 SHA512 校验在 `f4exb/sdrangel@1ec7cea:sdrbase/dsp/sigmffilerecord.cpp:264-265` 被注释（原文 `// skip takes too long`），按未实现处理，不写进下表。
+> **前置事实**：这两个维度**此前从未做过跨项目对照**。内部只有 `2026-11-11-gap-recording.md`（8 项）与 `2026-11-11-gap-device.md`（12 项）的自身行为审计；§0–§3 已核项目名单中没有这两个维度的条目。
+
+### 5.1 录音与回放链路
+
+**判断：此前未对照**（内部审计 8 项，跨项目对照 0 次）。按价值排序：
+
+| # | 机制 | 线上出处 | roadmap 覆盖状态 | 说明 |
+|---|---|---|---|---|
+| 1 | **SigMF sidecar 双层元数据**：global 存 `author/description/sample_rate/hw/recorder`，capture 存 `frequency/sample_start/length/datetime/tsms`，录制中反复回写 meta | `f4exb/sdrangel@1ec7cea:sdrbase/dsp/sigmffilerecord.cpp:240-244`、`:267-279` | **roadmap 未覆盖：新条目**（§6 D-9 只定了目标态 C，未派工） | 标准格式 + 每段 capture 带起止样本与时刻，回放端可精确切片；我们的 sidecar 可逐字段对照 |
+| 2 | **静噪触发录制 + 预录/后录**：`preRecordTime`、`squelchPostRecordTime`、`squelchRecordingEnable` 三个独立参数 | `f4exb/sdrangel@1ec7cea:plugins/channelrx/sigmffilesink/sigmffilesink.cpp:533-545` | **roadmap 未覆盖：新条目** | 只在有信号时落盘，预录缓冲保住前导；和「录整段再挑」是两种形态 |
+| 3 | **录制参数装配**：WAV 容器、样本类型（Uint8/Int16/Int32/Float32）、文件名模板、时区选择、baseband/audio 双模式 | `AlexandreRouma/SDRPlusPlus@ea6f755:misc_modules/recorder/src/main.cpp:57-67`、`:249-256`、`:276-284` | **roadmap 未覆盖：新条目**（D-9 的「位深选择」仍停在产品决定） | 成本最低的一组 UX；文件名模板 + 时区直接解重名与时间对不上 |
+| 4 | **回放即数据源**：file source 从 WAV 头读采样率，再喂同一条 DSP 链 | `AlexandreRouma/SDRPlusPlus@ea6f755:source_modules/file_source/src/main.cpp:133-134` | **roadmap 未覆盖：新条目** | 不需要单独回放管线；打开外部文件时速率自动对齐 |
+| 5 | **多 capture 回放按段切率 + 实时节流**：逐 track 切采样率，按 `QElapsedTimer` 控制喂样节奏 | `f4exb/sdrangel@1ec7cea:plugins/samplesource/sigmffileinput/sigmffileinputworker.cpp:116-120`、`:227-231`、`:194` | **roadmap 部分覆盖：W37**（回放上限/传输控制，且被 D-9 阻塞）；**按段切率与节流未覆盖：新条目** | 回放不抢 CPU、不「一秒放完一小时」 |
+
+**否定结论（限定范围）**：SDR++ recorder 模块的 include 只有 `recorder_interface.h` ＋ `utils/wav.h`（`:20-23`），写盘只经 wav writer，**未见** sidecar 元数据写入；判断范围仅该模块，标「未见」不标「没有」。
+
+### 5.2 多设备并发与热插拔
+
+**判断：此前未对照**（内部 `gap-device` 12 项只审自身行为，跨项目对照 0 次）。
+
+| # | 机制 | 线上出处 | roadmap 覆盖状态 | 说明 |
+|---|---|---|---|---|
+| 1 | **多 DeviceSet 并发**：每个 set 有独立采样源、通道链与频率，统一进 `m_deviceUIs` 向量；删除走 `removeDeviceSet(index)`，不影响其他 set | `f4exb/sdrangel@1ec7cea:sdrgui/mainwindow.cpp:398`、`:516`、`:635`、`:1793-1818` | **roadmap 未覆盖：新条目** | 「同时接两支棒」最完整的形态；成本在架构层（我们是单设备模型），只宜借鉴「每设备独立状态对象」 |
+| 2 | **设备列表轮询刷新 + 手动加删远端**：对话框每 250 ms 刷新设备树；Soapy 远端设备走明确 Add/Remove 状态 | `cjcliffe/CubicSDR@fd82cd9:src/forms/SDRDevices/SDRDevicesForm.cpp:23`、`:256-260`、`:289-304` | **roadmap 未覆盖：新条目**（P1-30 只覆盖读数回执，不覆盖设备列表刷新） | 成本低，但只覆盖「对话框打开时」，不覆盖运行中拔插 |
+| 3 | **单设备切换模型（反例）**：全应用只有一个 `deviceChanged` 标志与一个 `devInfo`，换设备即重建 | `cjcliffe/CubicSDR@fd82cd9:src/AppFrame.cpp:82`、`:968-977`、`:1236` | 不适用（非缺口，作基线校准） | 说明「多设备并发」不是这类桌面 SDR 的默认形态，别当行业基线 |
+
+**独立结论（热插拔）**：6 个项目、**28,051** 个 blob，按 `hotplug|udev|devicemonitor|device_monitor|devicewatch` 检索路径，命中 **1 处**且为 Direwolf 的构建期 `cmake/modules/Findudev.cmake`；**运行期设备监听 0 处**。因此「运行中拔插的诚实状态机」在已查范围内**没有可搬参照，属自研**——这是「没有参照」，不是「我们没有」。
+**roadmap 覆盖状态**：**roadmap 未覆盖：新条目**。
