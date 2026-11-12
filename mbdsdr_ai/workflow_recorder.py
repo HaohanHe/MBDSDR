@@ -51,7 +51,7 @@ def _same_content_backup(path: str) -> Optional[str]:
         return None
 
 
-def backup_corrupt(path: str) -> Optional[str]:
+def backup_corrupt_recordings(path: str) -> Optional[str]:
     """把损坏的录制/模板改名为 ``*.corrupt-<时间戳>``，返回备份路径（失败 None）。
 
     同一份内容只留一份副本；改名后原路径不再被扫描，也不会被下一次保存覆盖。
@@ -482,7 +482,7 @@ class WorkflowRecorder:
 
     def _quarantine_corrupt(self, path: str, exc: Exception, kind: str) -> bool:
         """备份损坏文件并写理由；备份失败则登记该路径禁止后续写回。"""
-        backup = backup_corrupt(path)
+        backup = backup_corrupt_recordings(path)
         reason = f"{type(exc).__name__}: {exc}"
         if kind == "save-target":
             self.save_warnings.append(
