@@ -1446,9 +1446,19 @@ def scan_a13(units: List[Unit]) -> List[Finding]:
                     field = names[0] if same else ""
                 if not field or field in UNIQUE_FIELDS:
                     continue
-                if schema and field not in schema:
-                    continue
-                if not schema and not re.search(r"owner|holder|identity", field, re.I):
+                # 有记录 schema 时：只有「schema 里的名字类字段」才算违规——
+                # entry_id / fingerprint / size_bytes / source 本身就是唯一或
+                # 内容标识，比较它们不是违规。
+                # 没有 schema 时退回原来那窄口径（owner/holder/identity），
+                # 这一段仍可改名绕过，已在文档里写明是两个数里的残留。
+                name_like = re.search(r"owner|holder|claimant|identity", field, re.I)
+                if schema:
+                    if field not in schema:
+                        continue
+                    if not re.search(r"owner|holder|claimant|identity|label|^name$|user|author",
+                                     field, re.I):
+                        continue
+                elif not name_like:
                     continue
                 # 只有比较式本身带了 pid/serial 才算「用了唯一事实」；
                 # 同函数别处出现 `'pid'` 字面量（比如记录定义）不能当作豁免。
