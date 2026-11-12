@@ -58,11 +58,25 @@ class TestSatLinkInfoCard:
         # 星性注记非空（文化层座位坐上了人）
         assert info.get("culture")
 
+    def test_machine_library_status_row_present(self):
+        view = _make_view_with("NOAA 19")
+        info = view._selected_info or {}
+        # 机器库状态永远给一句人话（无缓存/离线也是如实「未取到」）
+        assert info.get("downlink_machine")
+
+    def test_machine_library_status_comes_from_data_layer(self, monkeypatch):
+        from mbdsdr_ai import sat_links as SL
+        monkeypatch.setattr(SL, "machine_entry_text",
+                            lambda entry: "SatNOGS（0.1 小时前）")
+        view = _make_view_with("NOAA 19")
+        assert view._selected_info["downlink_machine"] == "SatNOGS（0.1 小时前）"
+
     def test_unknown_sat_honest_gap(self):
         view = _make_view_with("SOME UNKNOWN SAT")
         info = view._selected_info or {}
         assert info.get("downlink_mhz") is None
         assert info.get("culture") == ""
+        assert info.get("downlink_machine") == ""
 
 
 class TestSatLinkTune:
