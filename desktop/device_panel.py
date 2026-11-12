@@ -38,6 +38,8 @@ from constants import DEFAULT_SAMPLE_RATE_HZ, format_sample_rate
 # 连接请求的唯一持有者：本面板只渲染/写回，不再自持 _sample_rate/_gain 副本。
 import connect_request_store as _req_store
 
+logger = logging.getLogger(__name__)
+
 #: 无设备空态：下拉框说事实，状态行说下一步——两处都写「未检测到 SDR 设备」
 #: 等于同一句话念两遍，用户看不出该干什么。
 _NO_DEVICE_COMBO = "未检测到 SDR 设备"
@@ -133,6 +135,15 @@ class DevicePanel(QWidget):
         self._current_dev_locator: Optional[tuple] = None
         self._last_capability_report: Dict = {}
         self._last_verdict: tuple = (None, "尚未连接")
+        #: 面板最后一次发起的连接（用户点「连接」时的设备字典）。它是
+        #: 「实际连上的那台设备」的第一手证据——不能用下拉框当前选中项推断：
+        #: 下拉选 B、实际连 A 时，按选中项会把身份记成 B，A 拔掉永远检测不到。
+        self._pending_connect_device: Optional[Dict] = None
+        #: 已确认身份的那台连接设备（主窗口可能连调两次 set_connected(True)，
+        #: 第二次不能再丢掉第一次确认好的身份）。
+        self._connected_device: Optional[Dict] = None
+        #: 本次连接确认不了身份时的告警标记（只对本次连接告警一次）。
+        self._unplug_identity_warned = False
         # 热插拔判定基准：上一拍枚举的稳定定位符集合。
         # 用轮询历史而不是下拉框快照，避免 serial/tuner 抖动被误判成插拔。
         self._last_poll_locs: set = set()
@@ -356,8 +367,10 @@ class DevicePanel(QWidget):
         self._enum_inflight = False
         if err or now is None:
             return
-        now_keys = {self._key_of(d) for d in now}
-        old_keys = {self._key_of(d) for d in self._devices}
+        # 身份键与 set_connected 用同一套规则（connect_request_store.resolve），
+        # 否则「连接时记的 key」和「每拍枚举算的 key」不是同一种字符串，
+        # 拔出判定会退化成只看 locator 甚至永远不成立。
+        now_keys = {ident.key for ident in _req_store.resolve(now)}
         now_locs = {self._locator_of(d) for d in now}
         old_locs = self._last_poll_locs
         self._last_poll_locs = set(now_locs)
@@ -384,10 +397,6 @@ class DevicePanel(QWidget):
                     break
             # 本轮枚举刚拿到的列表直接落控件，不再触发第二次枚举。
             self._apply_devices(now)
-
-    @staticmethod
-    def _key_of(d: Dict) -> str:
-        return d.get("serial") or d.get("label") or d.get("driver", "?")
 
     @staticmethod
     def _locator_of(d: Dict) -> tuple:
@@ -422,6 +431,42 @@ class DevicePanel(QWidget):
             self._render_request(idx)
 
     # ------------------------------------------------------ 连接请求（唯一存储）
+    def _resolve_connected_device(self, dev_label: str, device: Optional[Dict]):
+        """确认「实际连上的那台设备」及其身份键；拿不到就返回 ``(None, None)``。
+
+        身份一律走 ``connect_request_store.resolve`` 的同一套规则，
+        面板不再自己造 key。优先级里的前三项都是**实际连接证据**，
+        没有一项是「下拉框现在选着什么」。
+        """
+        if device is not None:
+            return device, self._identity_of_device(device)
+        pending, self._pending_connect_device = self._pending_connect_device, None
+        if pending is not None:
+            return pending, self._identity_of_device(pending)
+        if self._connected_device is not None:
+            return (self._connected_device,
+                    self._identity_of_device(self._connected_device))
+        if dev_label:
+            hits = [i for i, d in enumerate(self._devices)
+                    if (d.get("label") or d.get("driver") or "") == dev_label]
+            if len(hits) == 1:
+                idx = hits[0]
+                if len(self._identities) != len(self._devices):
+                    self._identities = _req_store.resolve(self._devices)
+                if idx < len(self._identities):
+                    return self._devices[idx], self._identities[idx]
+        return None, None
+
+    @staticmethod
+    def _identity_of_device(device: Dict):
+        """用连接请求存储的身份规则给单台设备定身份（拿不到时返回 None）。"""
+        try:
+            idents = _req_store.resolve([device])
+        except Exception:  # noqa: BLE001 - 身份解析失败不该拖垮连接状态
+            logger.exception("设备身份解析失败")
+            return None
+        return idents[0] if idents else None
+
     def _current_identity(self):
         """当前选中设备的身份结论；无设备时返回 None。"""
         # 设备列表被直接替换（测试/异步枚举竞态）时补一次身份解析，
@@ -486,24 +531,55 @@ class DevicePanel(QWidget):
             return
         self._render_request(self.dev_combo.currentIndex())
 
-    def set_connected(self, connected: bool, dev_label: str = "") -> None:
-        """主窗口连接成功/断开后调用。"""
+    def set_connected(self, connected: bool, dev_label: str = "",
+                      device: Optional[Dict] = None) -> None:
+        """主窗口连接成功/断开后调用。
+
+        ``device`` 是**实际连上的那台设备**（主窗口已知时应传入）。缺省时按
+        「面板最后一次发起的连接 → 本次已确认的设备 → 枚举里唯一同名设备」
+        依次确认身份；都确认不了就显式拒绝检测拔出（日志 + tooltip 说明），
+        绝不按下拉框当前选中项猜——选中项可以和实际连接设备不是同一台，
+        据此推断会让拔出永远检测不到。
+        """
         self._connected = bool(connected)
         if connected:
-            self._current_dev_key = None
-            self._current_dev_locator = None
-            idx = self.dev_combo.currentIndex()
-            if 0 <= idx < len(self._devices):
-                self._current_dev_key = self._key_of(self._devices[idx])
-                self._current_dev_locator = self._locator_of(self._devices[idx])
+            dev, ident = self._resolve_connected_device(dev_label, device)
+            if dev is not None and ident is not None:
+                self._connected_device = dev
+                self._current_dev_key = ident.key
+                self._current_dev_locator = self._locator_of(dev)
+                self._unplug_identity_warned = False
+                self.status_label.setToolTip("")
+                # 登记 store 侧会话占用（第三档）：数据层靠它冻结本次生效值，
+                # 重复调用不覆盖首次快照，所以两次 set_connected(True) 无副作用。
+                _req_store.begin_session(self._current_dev_key)
+            else:
+                self._connected_device = None
+                self._current_dev_key = None
+                self._current_dev_locator = None
+                self.status_label.setToolTip(
+                    "本次连接无法确认设备身份，拔出不会被自动检测。"
+                    "从本面板选择设备重新连接可恢复检测。")
+                if not self._unplug_identity_warned:
+                    self._unplug_identity_warned = True
+                    logger.warning(
+                        "设备面板无法确认已连接设备的身份（label=%r）："
+                        "本次不检测拔出，也不按下拉框选中项猜设备。", dev_label)
             self.connect_btn.setEnabled(False)
             self.disconnect_btn.setEnabled(True)
             self.status_label.setText(f"已连接: {dev_label or '设备'}")
         else:
+            # 先注销会话占用，再清 key——清完就拿不到是哪个请求要解锁了。
+            if self._current_dev_key:
+                _req_store.end_session(self._current_dev_key)
+            self._connected_device = None
+            self._pending_connect_device = None
+            self._unplug_identity_warned = False
             self._current_dev_key = None
             self._current_dev_locator = None
             self.connect_btn.setEnabled(bool(self._devices))
             self.disconnect_btn.setEnabled(False)
+            self.status_label.setToolTip("")
             if self.status_label.text() != "设备已拔出":
                 self.status_label.setText("已断开")
         # 「默认 · 未确认」标记随连接态切换：断开后重新标，连上后去掉。
@@ -591,7 +667,14 @@ class DevicePanel(QWidget):
         _req_store.update(ident.key, sample_rate_hz=sr,
                           gain_db=gain, ppm=ppm)
         _req_store.fill_payload(dev, ident.key)
+        # 记下「这次真要连的是哪台」：连接成功后 set_connected 用它确认身份，
+        # 而不是等回调时再看下拉框（那时选中项可能已经不是这台了）。
+        self._pending_connect_device = dev
         self.connect_requested.emit(dev)
+        # 信号是同一线程的直连：emit 返回时连接流程已经走完。若 pending 还在，
+        # 说明这次连接失败、没人调 set_connected(True)——必须立刻作废，
+        # 否则下一次无关的连接会误用这台设备的身份，把别人的拔出算到它头上。
+        self._pending_connect_device = None
 
     def _on_audio_changed(self, _idx: int):
         dev_index = self.audio_combo.currentData()
