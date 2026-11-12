@@ -650,5 +650,168 @@
   "tick_ms": 409.3,
   "widgets": 1454,
   "wrapped_methods": 23
+ },
+ {
+  "run": "5",
+  "ruler": {
+   "qt_platform": "windows",
+   "font_families": 394,
+   "device_pixel_ratio": 1.0,
+   "logical_dpi": 144.0,
+   "font_family": "MiSans",
+   "font_point_size": 10.0,
+   "font_line_height": 27,
+   "scale_factor": "1"
+  },
+  "shown": true,
+  "load_before": {
+   "sys_cpu_pct": 79.4,
+   "cpu_count": 12,
+   "python_proc_count": 8,
+   "python_total_cpu_pct": 121.9,
+   "python_top": [
+    {
+     "pid": 31428,
+     "cpu_pct": 101.6,
+     "cmd": "C:\\Users\\xxhzb\\AppData\\Local\\Programs\\Python\\Python314\\python.exe -m pytest"
+    },
+    {
+     "pid": 37052,
+     "cpu_pct": 14.1,
+     "cmd": "C:\\Users\\xxhzb\\AppData\\Local\\Programs\\Python\\Python314\\python.exe D:\\mbdsdr\\_rep"
+    },
+    {
+     "pid": 36388,
+     "cpu_pct": 6.2,
+     "cmd": "C:\\Users\\xxhzb\\AppData\\Local\\Programs\\Python\\Python314\\python.exe D:\\mbdsdr\\MBDS"
+    },
+    {
+     "pid": 32508,
+     "cpu_pct": 0.0,
+     "cmd": "C:\\Users\\xxhzb\\AppData\\Local\\Programs\\Python\\Python314\\python.exe D:\\mbdsdr\\outp"
+    },
+    {
+     "pid": 37640,
+     "cpu_pct": 0.0,
+     "cmd": "C:\\Users\\xxhzb\\AppData\\Local\\Programs\\Python\\Python314\\python.exe scripts/releas"
+    }
+   ]
+  },
+  "load_after": {
+   "sys_cpu_pct": 80.8,
+   "cpu_count": 12,
+   "python_proc_count": 9,
+   "python_total_cpu_pct": 57.8,
+   "python_top": [
+    {
+     "pid": 37052,
+     "cpu_pct": 31.2,
+     "cmd": "C:\\Users\\xxhzb\\AppData\\Local\\Programs\\Python\\Python314\\python.exe D:\\mbdsdr\\_rep"
+    },
+    {
+     "pid": 38512,
+     "cpu_pct": 21.9,
+     "cmd": "C:\\Users\\xxhzb\\AppData\\Local\\Programs\\Python\\Python314\\python.exe scripts/repro/"
+    },
+    {
+     "pid": 36388,
+     "cpu_pct": 4.7,
+     "cmd": "C:\\Users\\xxhzb\\AppData\\Local\\Programs\\Python\\Python314\\python.exe D:\\mbdsdr\\MBDS"
+    },
+    {
+     "pid": 11568,
+     "cpu_pct": 0.0,
+     "cmd": ""
+    },
+    {
+     "pid": 28384,
+     "cpu_pct": 0.0,
+     "cmd": "C:\\Users\\xxhzb\\AppData\\Local\\Programs\\Python\\Python314\\python.exe D:\\mbdsdr\\MBDS"
+    }
+   ]
+  },
+  "import_ms": {
+   "ai_panel": 1310.5,
+   "main_window": 663.6,
+   "total": 1974.1
+  },
+  "ctor_ms": 2546.6,
+  "ctor_build_ms": 2483.6,
+  "ctor_theme_ms": 12.4,
+  "ctor_other_ms": 50.6,
+  "build_top": [
+   {
+    "name": "_build_central_widget",
+    "ms": 2426.7
+   },
+   {
+    "name": "_build_tool_bar",
+    "ms": 50.9
+   },
+   {
+    "name": "_build_menu_bar",
+    "ms": 3.9
+   },
+   {
+    "name": "_build_status_bar",
+    "ms": 2.1
+   }
+  ],
+  "build_nested_top": [
+   {
+    "name": "_build_mode_shell",
+    "ms": 909.1
+   },
+   {
+    "name": "_build_kernel_panels",
+    "ms": 726.0
+   },
+   {
+    "name": "_build_digital_decode_panels",
+    "ms": 131.6
+   },
+   {
+    "name": "_build_extended_panels",
+    "ms": 130.1
+   },
+   {
+    "name": "_build_top_bar",
+    "ms": 45.8
+   },
+   {
+    "name": "_build_planetarium_page",
+    "ms": 32.9
+   },
+   {
+    "name": "_build_capability_drawer",
+    "ms": 31.2
+   },
+   {
+    "name": "_init_loop_sat_catalog",
+    "ms": 20.2
+   },
+   {
+    "name": "_create_sky_widget",
+    "ms": 8.3
+   },
+   {
+    "name": "_init_sky_action_bus",
+    "ms": 5.7
+   }
+  ],
+  "theme_top": [
+   {
+    "name": "_apply_theme",
+    "ms": 6.3
+   },
+   {
+    "name": "_apply_theme",
+    "ms": 6.1
+   }
+  ],
+  "show_ms": 206.9,
+  "tick_ms": 269.0,
+  "widgets": 1454,
+  "wrapped_methods": 23
  }
 ]
