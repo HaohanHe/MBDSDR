@@ -370,20 +370,27 @@ class TestSpyServerFailureModes:
             assert c.error_category == link_state.CATEGORY_EOF
 
     def test_slow_drip_handshake_cannot_hold_connect_forever(self):
-        """慢滴握手：1024 字节 × 0.3s = 307s，必须被总时限截断。"""
+        """慢滴握手：对端每 0.3s 一字节且永不主动停，握手仍须在总时限内失败。
+
+        对端由本测试通过 ``stop`` 控制，没有「发完 1024 字节就结束」这种自然
+        终点，所以 connect 在预算内返回只可能来自握手总时限（逐字节 recv 各自
+        0.4s 超时，慢滴每 0.3s 一字节恰好绕过它）。实现若退化成只靠逐字节
+        超时，这里会在预算处失败并报出已收字节数，不会挂死。
+        """
         result = {}
+        budget = 2.0
 
         def handler(conn, idx, stop):
-            for b in _SPY_HANDSHAKE:
-                if stop.is_set():
-                    return
+            sent = 0
+            while not stop.is_set():          # 与测试等待赛跑，自己不会结束
                 try:
-                    _send(conn, bytes([b]))
+                    _send(conn, bytes([_SPY_HANDSHAKE[sent % len(_SPY_HANDSHAKE)]]))
                 except OSError:
                     return
-                time.sleep(0.3)
+                sent += 1
+                time.sleep(0.3)               # < 0.4s 单次 recv 超时
 
-        with _server(handler) as (port, _stop, _conns):
+        with _server(handler) as (port, stop, _conns):
             c = SpyServerClient("127.0.0.1", port, timeout=0.4)
 
             def run():
@@ -396,17 +403,19 @@ class TestSpyServerFailureModes:
             th = threading.Thread(target=run, daemon=True)
             t0 = time.perf_counter()
             th.start()
-            th.join(2.5)
+            th.join(budget)
             elapsed = time.perf_counter() - t0
             finished = not th.is_alive()
-            if finished:
-                assert "error" in result, "慢滴握手不该连成功"
-                assert c.error_category in (
-                    link_state.CATEGORY_TIMEOUT,
-                    link_state.CATEGORY_HANDSHAKE)
+            reached = c._last_recv_bytes
+            stop.set()
             assert finished, (
-                f"慢滴握手 2.5s 仍未返回（{elapsed:.1f}s）；按当前实现"
-                f"需要 1024×0.3=307s 才可能结束")
+                f"connect 在预算 {budget:.1f}s 内没有返回（已收 {reached}/1024 "
+                f"字节，耗时 {elapsed:.1f}s）：握手缺少总时限，被慢滴对端拖住")
+            assert "error" in result, "慢滴握手不该连成功"
+            assert c.error_category in (
+                link_state.CATEGORY_TIMEOUT, link_state.CATEGORY_HANDSHAKE)
+            assert 0 < reached < 1024, (
+                f"握手应在读满 1024 字节前被总时限截断，实际收到 {reached} 字节")
 
 
 # ---------------------------------------------------------------------------
