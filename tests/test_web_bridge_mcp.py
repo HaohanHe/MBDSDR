@@ -23,6 +23,12 @@ from mbdsdr_ai.web_bridge_mcp import (DEFAULT_CONFIRM_TTL_S, PendingConfirms,
 
 CONFIRM_ENV = "MBDSDR_BRIDGE_CONFIRM"
 
+#: 本仓代码：MCPToolSet 构造失败或工具面为空 = 回归，不是「环境不具备」（A09）。
+#: 这里必须红——改成 skip 会把「内核工具面被改坏」长期伪装成环境不凑巧。
+_REGISTRY_ABSENT = (
+    "build_default_backend 没有构造出 MCPToolSet registry：MCPToolSet 是本仓代码，"
+    "导入/构造失败或工具面为空属于回归，必须红；不得按环境缺失跳过")
+
 
 # ---------------------------------------------------------------------------
 # 假 toolset：复刻 ToolCallGate 的**判定形状**（真门仍走 tx_guard）
@@ -201,8 +207,7 @@ def test_deny_env_makes_it_read_only(monkeypatch):
 # ---------------------------------------------------------------------------
 def test_real_toolset_face_is_wired():
     bridge, reg, pending = build_default_backend()
-    if reg is None:
-        pytest.skip("MCPToolSet 在此环境不可构造")
+    assert reg is not None, _REGISTRY_ABSENT
     names = reg.get_tool_names()
     assert len(names) >= 80, f"工具面异常小: {len(names)}"
     writes = [n for n in names if reg.is_write_tool(n)]
@@ -216,8 +221,7 @@ def test_real_toolset_face_is_wired():
 
 def test_real_write_tool_is_gated_without_confirmation():
     bridge, reg, pending = build_default_backend()
-    if reg is None:
-        pytest.skip("MCPToolSet 在此环境不可构造")
+    assert reg is not None, _REGISTRY_ABSENT
     out = bridge.invoke_tool("set_frequency", {"hz": 100e6})
     assert out["gated"] is True
     assert out["error"] == "manual_gate_required"
@@ -227,8 +231,7 @@ def test_real_write_tool_is_gated_without_confirmation():
 def test_real_write_tool_passes_gate_after_confirmation():
     """确认后门必须放行：无设备时应是「已调用但未下发硬件」，**不能**还是 gated。"""
     bridge, reg, pending = build_default_backend()
-    if reg is None:
-        pytest.skip("MCPToolSet 在此环境不可构造")
+    assert reg is not None, _REGISTRY_ABSENT
     assert pending.request("set_frequency", {"hz": 100e6})[0] is True
     out = bridge.invoke_tool("set_frequency", {"hz": 100e6})
     assert not out.get("gated"), f"门没放行: {json.dumps(out, ensure_ascii=False)[:300]}"
@@ -241,8 +244,7 @@ def test_real_write_tool_passes_gate_after_confirmation():
 
 def test_manifest_not_verified_is_conditional():
     bridge, reg, _ = build_default_backend()
-    if reg is None:
-        pytest.skip("MCPToolSet 在此环境不可构造")
+    assert reg is not None, _REGISTRY_ABSENT
     nv = bridge.manifest()["notVerified"]
     assert any("WebChannel" in s for s in nv)
     assert any("physically isolated" in s or "same-origin" in s for s in nv)
@@ -270,8 +272,7 @@ def _host_calls(host, method, payload):
 def test_host_confirm_flow_end_to_end():
     from mbdsdr_ai.web_bridge_host import BridgeHost
     host = BridgeHost(port=0, mcp=True)
-    if host.registry is None:
-        pytest.skip("MCPToolSet 在此环境不可构造")
+    assert host.registry is not None, _REGISTRY_ABSENT
 
     shim = host.dispatch("GET", "/bridge.js", b"", {"Host": "127.0.0.1"})[1].decode("utf-8")
     assert "confirm: function" in shim and "canConfirm: true" in shim
@@ -300,8 +301,7 @@ def test_host_confirm_flow_end_to_end():
 def test_host_confirm_rejects_unknown_tool_and_deny_mode(monkeypatch):
     from mbdsdr_ai.web_bridge_host import BridgeHost
     host = BridgeHost(port=0, mcp=True)
-    if host.registry is None:
-        pytest.skip("MCPToolSet 在此环境不可构造")
+    assert host.registry is not None, _REGISTRY_ABSENT
     code, out = _host_calls(host, "confirm", {"tool": "os.system", "args": {}})
     assert out["ok"] is False and out["error"] == "unknown_tool"
 
