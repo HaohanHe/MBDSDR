@@ -17,6 +17,8 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field, asdict
 from typing import Callable, Iterator, Optional, Dict, Any
 
+from .corrupt_evidence import REASON_SUFFIX, write_reason
+
 logger = logging.getLogger(__name__)
 
 
@@ -244,20 +246,52 @@ def _atomic_write_json(path: str, data: Dict[str, Any]) -> bool:
                 pass
 
 
-def _backup_corrupt(path: str) -> Optional[str]:
-    """把损坏配置复制成 ``*.corrupt-<时间戳>`` 留证，原文件保持不动（读操作
-    不擅自删除用户文件）。返回备份路径；备份也失败时返回 None。"""
-    stamp = time.strftime("%Y%m%d-%H%M%S")
-    dst = f"{path}.corrupt-{stamp}"
-    n = 0
-    while os.path.exists(dst):
-        n += 1
-        dst = f"{path}.corrupt-{stamp}-{n}"
+def _same_content_backup(path: str) -> Optional[str]:
+    """同目录下是否已有一份与当前文件字节相同的 ``*.corrupt-*`` 备份。
+
+    ``load_config`` 是高频读路径（``tx_guard`` 每次取审计路径都会调一次）。
+    配置文件持续损坏时，每次读都复制一份会堆出 ``-1/-2/...`` 无数副本：
+    既吃磁盘，又让启动清点把「1 个坏文件」报成 N 个。同一份内容只留一份证据。
+    """
+    directory = os.path.dirname(os.path.abspath(path))
+    prefix = os.path.basename(path) + ".corrupt-"
     try:
-        shutil.copy2(path, dst)
-        return dst
+        names = sorted(
+            (n for n in os.listdir(directory)
+             if n.startswith(prefix) and not n.endswith(REASON_SUFFIX)),
+            reverse=True)
+        if not names:
+            return None
+        candidate = os.path.join(directory, names[0])
+        if os.path.getsize(candidate) != os.path.getsize(path):
+            return None
+        with open(candidate, "rb") as a, open(path, "rb") as b:
+            return candidate if a.read() == b.read() else None
     except OSError:
         return None
+
+
+def _backup_corrupt(path: str, reason: str) -> Optional[str]:
+    """把损坏配置复制成 ``*.corrupt-<时间戳>`` 并在旁边写一行理由。
+
+    原文件保持不动（读操作不擅自删除用户文件）。理由文件
+    （``*.reason.txt``）不是装饰：启动清点只认这种成对的证据，不写它备份
+    就只是目录里一个没人知道的文件。返回备份路径；备份也失败时返回 None。
+    """
+    dst = _same_content_backup(path)
+    if dst is None:
+        stamp = time.strftime("%Y%m%d-%H%M%S")
+        dst = f"{path}.corrupt-{stamp}"
+        n = 0
+        while os.path.exists(dst):
+            n += 1
+            dst = f"{path}.corrupt-{stamp}-{n}"
+        try:
+            shutil.copy2(path, dst)
+        except OSError:
+            return None
+    write_reason(dst, reason, logger)
+    return dst
 
 
 #: config.json 的默认路径（桌面面板与内核共用同一份文件）。
@@ -340,7 +374,8 @@ def _read_disk(path: str) -> Dict[str, Any]:
             data = json.load(f)
         return data if isinstance(data, dict) else {}
     except (OSError, json.JSONDecodeError, UnicodeDecodeError) as exc:
-        backup = _backup_corrupt(path)
+        backup = _backup_corrupt(
+            path, f"config.json 读取失败（{type(exc).__name__}: {exc}）：{path}")
         logger.warning("config.json 读取失败（%s），已备份到 %s；按空配置处理",
                        exc, backup or "（备份失败）")
         return {}
@@ -442,7 +477,9 @@ def load_config(path: str = "~/.mbdsdr/config.json") -> AgentConfig:
         _set_error(None)
         return config
     except (json.JSONDecodeError, UnicodeDecodeError, OSError, ValueError) as exc:
-        backup = _backup_corrupt(path)
+        backup = _backup_corrupt(
+            path,
+            f"配置文件损坏或不可读（{type(exc).__name__}: {exc}）：{path}")
         where = f"，已备份到 {os.path.basename(backup)}" if backup else \
                 "（备份失败，请手动复制该文件）"
         _set_error(f"配置文件损坏或不可读（{type(exc).__name__}: {exc}）"

@@ -39,6 +39,12 @@ def _seed(path, **extra):
     return data
 
 
+def _corrupt_backups(directory, name):
+    """只数备份本体：``*.reason.txt`` 是成对的理由文件，不是第二份备份。"""
+    return [p for p in directory.glob(f"{name}.corrupt-*")
+            if not p.name.endswith(".reason.txt")]
+
+
 # ------------------------------------------------------------------ 原子写
 class TestAtomicWrite:
     def test_replace_failure_keeps_original_bytes(self, tmp_path, monkeypatch):
@@ -113,20 +119,65 @@ class TestMergeAndCorrupt:
         assert cfg.api_key == ""
         assert cfg._config_path == str(path), "后续 save 必须知道往哪写"
         assert path.read_bytes() == bad, "读操作不许删用户文件"
-        backups = list(tmp_path.glob("config.json.corrupt-*"))
+        backups = _corrupt_backups(tmp_path, "config.json")
         assert len(backups) == 1 and backups[0].read_bytes() == bad
         msg = last_error() or ""
         assert "损坏" in msg and "备份" in msg and "默认配置启动" in msg
 
-    def test_save_after_corrupt_keeps_a_second_backup(self, tmp_path):
+    def test_save_after_corrupt_keeps_backup_evidence(self, tmp_path):
         path = tmp_path / "config.json"
         bad = b'{not json'
         path.write_bytes(bad)
         load_config(str(path))
         assert save_config(AgentConfig(api_key="fresh"), str(path)) is True
-        assert len(list(tmp_path.glob("config.json.corrupt-*"))) >= 2
+        backups = _corrupt_backups(tmp_path, "config.json")
+        assert len(backups) == 1, "同一份损坏内容只需一份证据，保存不额外复制"
+        assert backups[0].read_bytes() == bad
         assert json.loads(path.read_text(encoding="utf-8"))["api_key"] == "fresh"
         assert last_error() is None
+
+    def test_corrupt_load_writes_reason_for_startup_report(self, tmp_path):
+        """备份必须带理由文件：启动清点只认 ``*.reason.txt``，否则用户看不到。"""
+        path = tmp_path / "config.json"
+        bad = b'{"api_key": "sk-live", "base_url": '
+        path.write_bytes(bad)
+
+        load_config(str(path))
+
+        reason_files = list(tmp_path.glob("config.json.corrupt-*.reason.txt"))
+        assert len(reason_files) == 1, "备份成功却没写理由，等于备份没人知道"
+        text = reason_files[0].read_text(encoding="utf-8")
+        assert "损坏" in text and str(path) in text
+        assert text.count("\n") == 1, "理由文件必须是单行"
+
+        import mbdsdr_ai.corrupt_evidence as ce
+        report = ce.scan_corruption_evidence([str(tmp_path)])
+        assert report["total"] == 1, "启动清点没看到 config.json 的损坏备份"
+        assert str(reason_files[0]) in report["recent"]
+
+    def test_repeated_corrupt_load_does_not_pile_up_copies(self, tmp_path):
+        """tx_guard 每次取审计路径都会 load_config；持续损坏不许堆副本。"""
+        path = tmp_path / "config.json"
+        path.write_bytes(b'{not json')
+
+        for _ in range(5):
+            load_config(str(path))
+
+        backups = _corrupt_backups(tmp_path, "config.json")
+        assert len(backups) == 1, f"同一份损坏内容留了 {len(backups)} 份副本"
+        assert "损坏" in (last_error() or "")
+
+    def test_clean_config_clears_error_but_keeps_evidence(self, tmp_path):
+        """损坏恢复后 last_error 必须归零；备份与理由仍留在原处供查证。"""
+        path = tmp_path / "config.json"
+        path.write_bytes(b'{not json')
+        load_config(str(path))
+        assert last_error()
+
+        assert save_config(AgentConfig(api_key="fresh"), str(path)) is True
+        assert last_error() is None
+        assert _corrupt_backups(tmp_path, "config.json"), "证据不许被清理"
+        assert list(tmp_path.glob("config.json.corrupt-*.reason.txt"))
 
     def test_non_object_json_is_corrupt_not_silent(self, tmp_path):
         path = tmp_path / "config.json"
