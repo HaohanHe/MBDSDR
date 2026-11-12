@@ -344,11 +344,11 @@ python -c "import sys; sys.path.insert(0,'.'); sys.path.insert(0,'desktop'); imp
 
 ### 7.1 `desktop/troubleshooting.py:92` 的「2.048 MS/s」
 
-- 更正（`ff964183` — `desktop/troubleshooting.py:92` — `2.048 MS/s`，基准 `ff964183`）：该行单位由 `2.048 MHz`
+- 更正（`ff964183` — `desktop/troubleshooting.py:98` — `2.048 MS/s`，基准 `9a5deff4`）：该行单位由 `2.048 MHz`
   改为 `2.048 MS/s` 的是 **`ff964183`**
   （`fix(copy): 缺值不再渲染 0（APT 统计/卫星表单）与采样率建议改 MS/s`，属**文案审计线**批次），
   **不是** `70429a02`（参数治理线，清单 4 个文件，不含 `troubleshooting.py`）。
-- 2026-11-11 单位统一后更新：四元组的字面量按 HEAD 现文改为 `2.048 MS/s`，基准取该行 blame 提交 `ff964183`。
+- 2026-11-11 单位统一后更新：四元组的字面量按 HEAD 现文改为 `2.048 MS/s`，基准取该行 blame 提交 `9a5deff4`（2026-11-13 复核：`:92`→`:98`，该行在 `9a5deff4` 被重写）。
 - 证据命令：
 
   ```text
