@@ -60,13 +60,19 @@ print(f"✓ Test 4: _streamed_any set to True on stream delta")
 # 状态条如实写未配置」——状态条不许挂绿 LLM 标签冒充模型就绪。
 panel2 = AIPanel()
 panel2._saved_config = {}
-os.environ.pop("MBDSDR_API_KEY", None)
-panel2.init_agent()  # no key, no config, no env var
-assert panel2.agent is not None, \
-    "无 Key 也应常驻 Agent 内核（c47cdce9 口径），不是整体消失"
-assert not panel2.agent.config.api_key, "常驻内核不得携带任何 API Key"
-assert "未配置" in panel2.ai_status_label.text(), \
-    f"无 Key 常驻时状态条应如实写未配置, got: {panel2.ai_status_label.text()}"
+_api_key_backup = os.environ.pop("MBDSDR_API_KEY", None)
+try:
+    panel2.init_agent()  # no key, no config, no env var
+    assert panel2.agent is not None, \
+        "无 Key 也应常驻 Agent 内核（c47cdce9 口径），不是整体消失"
+    assert not panel2.agent.config.api_key, "常驻内核不得携带任何 API Key"
+    assert "未配置" in panel2.ai_status_label.text(), \
+        f"无 Key 常驻时状态条应如实写未配置, got: {panel2.ai_status_label.text()}"
+finally:
+    # 别把模块级 `pop` 留成整个 pytest 进程的永久删除：后续文件可能要靠
+    # 真实环境里的 Key 走另一条分支。异常路径也要还。
+    if _api_key_backup is not None:
+        os.environ["MBDSDR_API_KEY"] = _api_key_backup
 print(f"✓ Test 5: init_agent with no key keeps resident kernel, status honest")
 
 print("\n=== All AI panel offscreen tests passed ===")
