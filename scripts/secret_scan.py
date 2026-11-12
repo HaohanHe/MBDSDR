@@ -25,6 +25,7 @@
     python scripts/secret_scan.py                  # 扫 D:\\mbdsdr（跳过目录逐条打印）
     python scripts/secret_scan.py --staged         # 只扫暂存区内容（pre-commit 用）
     python scripts/secret_scan.py --history        # 扫 git 历史里的 blob（只跑形状规则）
+    python scripts/secret_scan.py --artifact DIR   # 扫待发布目录（含二进制），BLOCK>0 退出 1
     python scripts/secret_scan.py --root D:\\some   # 指定扫描根
     python scripts/secret_scan.py path1 path2      # 只扫指定文件
 
@@ -64,6 +65,20 @@ SHAPE_RULES: Tuple[Tuple[str, "re.Pattern[str]"], ...] = (
     ("jwt", re.compile(r"eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.")),
     ("pem-private-key", re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----")),
 )
+
+#: 字节流版本：发布产物里有 exe/dll/pyc，凭据字符串可能被嵌在二进制里，
+#: 产物门禁因此不按文本扫，直接对字节跑同一组形状规则（同一真值源）。
+SHAPE_BYTES: Tuple[Tuple[str, "re.Pattern[bytes]"], ...] = tuple(
+    (name, re.compile(pattern.pattern.encode())) for name, pattern in SHAPE_RULES
+)
+
+#: 历史扫描的「已知良性」登记：**完整 blob sha → 规则名**。
+#: 命中条件严格：sha 完全一致、规则名一致、且该 blob 没有任何提交引用它
+#: （不可达）。可达 blob 命中同一规则、或命中另一个 sha，一律照旧报 HISTORY。
+#: 登记、打码指纹与解除条件在 docs/code-guards.md（真值源），这里只放判据。
+KNOWN_BENIGN_HISTORY: Dict[str, str] = {
+    "c20bd082d6382e0d498f029151e10e305a39ef12": "github-pat-classic",
+}
 
 #: 熵候选：不跨空格/引号，避免把整行代码当随机串。
 _CANDIDATE = re.compile(r"[A-Za-z0-9+/=_-]{32,}")
@@ -588,6 +603,26 @@ def _ancestor_of_head(commit: str) -> bool:
     return proc.returncode == 0
 
 
+def _split_known_benign(
+    sha: str, rules: Iterable[str], commits: List[str]
+) -> Tuple[List[str], List[str]]:
+    """返回 (登记为良性的规则, 仍要报的规则)。
+
+    只有三个条件同时成立才放行：sha 完全一致、规则名一致、**没有任何提交
+    引用它**（`commits` 为空 = 不可达）。可达 blob 一律照旧报——这是登记的
+    解除条件在代码里的落点。
+    """
+    registered = KNOWN_BENIGN_HISTORY.get(sha)
+    benign: List[str] = []
+    still: List[str] = []
+    for rule in rules:
+        if registered == rule and not commits:
+            benign.append(rule)
+        else:
+            still.append(rule)
+    return benign, still
+
+
 def _history_report(
     stats: "Counter[str]",
     hits: Dict[str, List[Tuple[int, str]]],
@@ -599,9 +634,16 @@ def _history_report(
     hit_paths: set = set()
     still_at_head = 0
     unattributed = 0
+    benign_blobs: List[str] = []
     for sha in sorted(hits):
         paths = sorted(set(blob_paths.get(sha, [])))
         commits = sorted(set(blob_commits.get(sha, [])))
+        rules = [rule for _lineno, rule in hits[sha]]
+        benign, still = _split_known_benign(sha, rules, commits)
+        if benign:
+            benign_blobs.append(f"{sha[:12]}:{','.join(sorted(set(benign)))}")
+        if not still:
+            continue
         if not commits:
             unattributed += 1
         if not paths:
@@ -613,6 +655,8 @@ def _history_report(
             shown += f"+{len(commits) - 5}"
         more = f" paths={len(paths)}" if len(paths) > 1 else ""
         for lineno, rule in hits[sha]:
+            if rule not in still:
+                continue
             print(
                 f"HISTORY {paths[0]}:{lineno} {rule} blob={sha[:12]} "
                 f"commits={shown}{more}"
@@ -633,8 +677,14 @@ def _history_report(
     )
     print(
         "[secret-scan] 历史命中："
-        f"blob={len(hits)} 个，路径={len(hit_paths)} 个，提交={len(hit_commits)} 个"
+        f"blob={len(hits) - len(benign_blobs)} 个，路径={len(hit_paths)} 个，"
+        f"提交={len(hit_commits)} 个"
     )
+    if benign_blobs:
+        print(
+            f"[secret-scan] 已知良性（不拦，登记见 docs/code-guards.md）："
+            f"{'；'.join(benign_blobs)}"
+        )
     print(
         "[secret-scan] 历史命中提交："
         f"仍可从 HEAD 到达 {len(from_head)} 个；仅存在于其它 ref 或不可达 {only_other_refs} 个"
@@ -664,6 +714,78 @@ def _scan_history(stats: "Counter[str]") -> int:
     blob_commits = _history_blob_commits(tips)
     hits = _scan_history_blobs(_all_blob_shas(), stats)
     return _history_report(stats, hits, blob_paths, blob_commits)
+
+
+def scan_artifact(root: Path) -> Tuple[List[Tuple[str, str]], "Counter[str]"]:
+    """扫一个待发布目录的全部文件（含二进制），返回 [(相对路径, 规则)]。
+
+    与工作树扫描的区别：产物里的 exe/dll/pyc 不能跳过——凭据可能被嵌进去，
+    所以直接对字节跑 ``SHAPE_BYTES``；也不认 pragma（产物不是源码）。
+    只按 (路径, 规则) 去重，不打印值。
+    """
+    hits: List[Tuple[str, str]] = []
+    seen: set = set()
+    stats: "Counter[str]" = Counter()
+    root = Path(root)
+    if not root.exists():
+        stats["artifact_missing"] += 1
+        return hits, stats
+    for path in sorted(root.rglob("*")):
+        if not path.is_file():
+            continue
+        stats["artifact_files"] += 1
+        if path.is_symlink():
+            stats["artifact_skip_symlink"] += 1
+            continue
+        try:
+            with path.open("rb") as fh:
+                carry = b""
+                offset = 0
+                while True:
+                    chunk = fh.read(1 << 20)
+                    if not chunk:
+                        break
+                    buf = carry + chunk
+                    base = offset - len(carry)
+                    for rule, rx in SHAPE_BYTES:
+                        for match in rx.finditer(buf):
+                            key = (rule, base + match.start())
+                            if key in seen:
+                                continue
+                            seen.add(key)
+                            pair = (path.relative_to(root).as_posix(), rule)
+                            if pair not in hits:
+                                hits.append(pair)
+                    stats["artifact_bytes"] += len(chunk)
+                    carry = buf[-128:]
+                    offset += len(chunk)
+        except OSError:
+            stats["artifact_skip_unreadable"] += 1
+    return hits, stats
+
+
+def _report_artifact(
+    root: Path, hits: List[Tuple[str, str]], stats: "Counter[str]"
+) -> int:
+    for rel, rule in hits:
+        print(f"BLOCK {rel} {rule}")
+    print(f"[secret-scan] 产物扫描：{root}")
+    line = (
+        "[secret-scan] 覆盖："
+        f"文件 {stats['artifact_files']} 个 / {stats['artifact_bytes'] / 1048576:.1f} MiB"
+        "（含二进制，按字节跑形状规则）"
+    )
+    if stats["artifact_skip_symlink"]:
+        line += f"；符号链接跳过 {stats['artifact_skip_symlink']} 个"
+    if stats["artifact_skip_unreadable"]:
+        line += f"；不可读跳过 {stats['artifact_skip_unreadable']} 个"
+    print(line)
+    print(
+        f"[secret-scan] 产物门禁：BLOCK={len(hits)}"
+        + ("（发布产物不得包含这些文件：删掉或移出打包目录后复跑）" if hits else "（无凭据形状）")
+    )
+    print("[secret-scan] 输出只含相对路径 + 规则名，不含命中的值。")
+    return 1 if hits else 0
 
 
 def _report(findings: Iterable[Finding], stats: Optional["Counter[str]"] = None) -> int:
@@ -702,9 +824,18 @@ def main(argv: Optional[List[str]] = None) -> int:
         action="store_true",
         help="扫 git 历史里的 blob（只跑形状规则，不跑熵；不拦提交，退出码 0）",
     )
+    parser.add_argument(
+        "--artifact",
+        type=Path,
+        default=None,
+        help="扫一个待发布目录的全部文件（含二进制），BLOCK>0 退出 1",
+    )
     args = parser.parse_args(argv)
 
     stats: "Counter[str]" = Counter()
+    if args.artifact is not None:
+        hits, artifact_stats = scan_artifact(args.artifact)
+        return _report_artifact(args.artifact, hits, artifact_stats)
     if args.history:
         return _scan_history(stats)
     if args.staged:
