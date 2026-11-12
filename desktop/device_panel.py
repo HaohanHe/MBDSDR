@@ -719,6 +719,11 @@ class DevicePanel(QWidget):
             return
         text = self._owner_state_text_value(state)
         self.owner_state_label.setText(text)
+        # 切到「被占用 / 无法唯一确定」时必须换掉上一条 tooltip：那一条是
+        # unknown 态的「点重试 / 点查看诊断」，而诊断按钮此时已隐藏——留着
+        # 就是一个指向不存在按钮的残留提示（tooltip 普查 2026-11-13）。
+        self.owner_state_label.setToolTip(
+            f"{text}\n等对方断开后点「重试」重新读取登记。")
         self.owner_state_label.setVisible(True)
         # 被占用也可能随时被对方释放：同样给「重试」，但不引到诊断。
         self.owner_retry_btn.setVisible(True)
@@ -838,9 +843,23 @@ class DevicePanel(QWidget):
         if ident.warning:
             # 身份不可靠时必须在状态行说出来，不许静默共用/错位。
             self.status_label.setText(f"⚠ {ident.warning}")
+            # tooltip 必须跟着换成本状态专属的内容：上一条可能是热插拔
+            # event.detail、「用 Zadig 装 WinUSB 驱动」或上一台的告警。
+            # 告警回看出口（本进程内出现过）仍要留着：_warn_once 只写一次
+            # 日志，面板是用户唯一能看到的地方。
+            warnings = _req_store.recent_warnings()
+            history = ("\n\n身份告警（本进程内出现过）：\n"
+                       + "\n".join(warnings[-3:])) if warnings else ""
+            self.status_label.setToolTip(
+                f"{ident.warning}\n这台设备的参数按身份键记忆，"
+                f"重插/重枚举后身份若变化，参数可能跟丢。{history}")
         elif self.status_label.text().startswith("⚠"):
             # 只有上一台设备的身份告警才需要回退成计数；不覆盖连接校验等提示。
             self.status_label.setText(f"检测到 {len(self._devices)} 台设备")
+            warnings = _req_store.recent_warnings()
+            self.status_label.setToolTip(
+                ("身份告警（本进程内出现过）：\n" + "\n".join(warnings[-3:]))
+                if warnings else "")
 
     def _push_request_from_editors(self) -> None:
         """把输入框里的合法值写回唯一请求存储（非法值不写，保持原值）。"""
@@ -902,6 +921,10 @@ class DevicePanel(QWidget):
         只在断开路径调用一次；返回空串表示已写回，否则返回可读提示（不写回）。
         采样率走 ``parse_sample_rate`` 这唯一解析入口：解析失败或非正数一律
         不写回，避免把 0 Hz / 非法值塞进 store。
+
+        写回前必须先 ``end_session``：store 的 ``update`` 在占用期间是写门
+        （拒绝 + 可读原因），这里不是绕过它，而是「会话已结束 → 再走同一个
+        写入入口」。调用方随后的 ``end_session`` 是幂等空操作。
         """
         snap = _req_store.session_values(key)
         if snap is None:
@@ -926,6 +949,7 @@ class DevicePanel(QWidget):
             values["bandwidth_hz"] = snap.bandwidth_hz
         if not values:
             return ""
+        _req_store.end_session(key)
         _req_store.update(key, **values)
         if dev is not None:
             _req_store.fill_payload(dev, key)
@@ -1064,6 +1088,7 @@ class DevicePanel(QWidget):
         if verdict is None:
             # 未知范围：不能假装校验通过，也不能凭空填默认范围；如实说明后放行。
             self.status_label.setText(f"采样率范围未知，无法校验；将以 {sr:.0f} Hz 下发")
+            self.status_label.setToolTip("")
             self._unverified_capabilities.append(f"采样率 {sr:.0f} Hz")
         # 采样率留在局部变量里，连接前与增益/PPM 一起写入唯一请求存储；
         # 连接载荷由 fill_payload 统一落键，本面板不再直接写载荷副本。
@@ -1086,6 +1111,7 @@ class DevicePanel(QWidget):
         if gverdict is None:
             self.status_label.setText(
                 f"增益范围未知，无法校验；将以 {gain:g} dB 下发")
+            self.status_label.setToolTip("")
             self._unverified_capabilities.append(f"增益 {gain:g} dB")
 
         text = self.ppm_edit.text().strip()
@@ -1103,6 +1129,7 @@ class DevicePanel(QWidget):
             # 身份键拿不到就无法保证参数归属：拒绝连接并说明原因，
             # 绝不退回“各写一份副本”的老路（那正是本次要消灭的静默错值）。
             self.status_label.setText("无法确定设备身份，未发起连接")
+            self.status_label.setToolTip("")
             logger.warning("设备身份键不可用，拒绝连接：%r",
                            dev.get("label") or dev.get("driver"))
             return

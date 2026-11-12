@@ -29,7 +29,7 @@ def _clean_store():
 
 
 def test_begin_session_freezes_values_used_for_connect():
-    """会话开始冻结当前请求；会话期间写入照常记录，但渲染读侧不跟着变。"""
+    """会话开始冻结当前请求；会话期间的写入被写门**拒绝**（不是照常记录）。"""
     store.update("dev-a", sample_rate_hz=2_048_000.0, gain_db=30.0, ppm=0)
     snap = store.begin_session("dev-a")
 
@@ -38,10 +38,14 @@ def test_begin_session_freezes_values_used_for_connect():
     assert snap.gain_db == 30.0
     assert snap.ppm == 0
 
-    # 反证①：会话中喂一条不同的请求 → 渲染读侧必须仍是生效值。
-    # 若摘掉 request_for 的占用门（直接返回 intent），这里会变成 1.024M。
-    store.update("dev-a", sample_rate_hz=1_024_000.0)
-    assert store.intent_for("dev-a").sample_rate_hz == 1_024_000.0
+    # 反证①：会话中喂一条不同的请求 → 拒绝 + 可读原因，意图与读侧都不变。
+    # 若摘掉写门（照常记录意图），intent_for 会变成 1.024M。
+    result = store.update("dev-a", sample_rate_hz=1_024_000.0)
+    assert result.rejected is True, "会话占用期间写入必须被拒"
+    assert result.reason, "拒绝必须带可读原因，不能静默忽略"
+    assert result.request.sample_rate_hz == 2_048_000.0, \
+        "被拒时返回的应仍是当前权威值（会话快照）"
+    assert store.intent_for("dev-a").sample_rate_hz == 2_048_000.0
     assert store.request_for("dev-a").sample_rate_hz == 2_048_000.0
 
 
@@ -49,10 +53,12 @@ def test_render_view_resumes_after_session():
     """反证②：会话结束后同一请求正常生效，证明门不是「永远拒写」。"""
     store.update("dev-a", sample_rate_hz=2_048_000.0)
     store.begin_session("dev-a")
-    store.update("dev-a", sample_rate_hz=1_024_000.0)
+    assert store.update("dev-a", sample_rate_hz=1_024_000.0).rejected
     assert store.request_for("dev-a").sample_rate_hz == 2_048_000.0
 
     store.end_session("dev-a")
+    result = store.update("dev-a", sample_rate_hz=1_024_000.0)
+    assert not result.rejected, "会话结束后写入必须放行"
     assert store.request_for("dev-a").sample_rate_hz == 1_024_000.0
 
 
@@ -60,7 +66,7 @@ def test_begin_session_keeps_first_snapshot():
     """重复 begin 不覆盖首次快照：正在生效的值不能被后来的请求换掉。"""
     store.update("dev-a", gain_db=30.0)
     first = store.begin_session("dev-a")
-    store.update("dev-a", gain_db=40.0)
+    assert store.update("dev-a", gain_db=40.0).rejected
     second = store.begin_session("dev-a")
 
     assert second == first

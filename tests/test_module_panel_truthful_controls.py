@@ -81,6 +81,42 @@ def test_disconnect_hides_previous_gain(panel):
 # 离开「正在枚举」并把原因和可做的下一步写出来，而不是永久转。
 
 
+def test_rejected_write_shows_reason_without_duplicate_tooltip(panel):
+    """会话占用期间被拒：原因只显示一次，tooltip 不再逐字复写。
+
+    tooltip 与标签文字相同 = 没有补充信息；下一次写入成功后还会变成一条
+    指向旧拒绝的残留提示（tooltip 普查 2026-11-13）。
+    """
+    import connect_request_store as store
+
+    key = "rtlsdr|serial:A-0001"
+    store.reset()
+    try:
+        store.update(key, gain_db=30.0)
+        store.begin_session(key, initial=store.ConnectRequest(gain_db=33.0))
+        ident = type("_Ident", (), {"key": key, "warning": ""})()
+
+        panel._push(ident, gain_db=40.0)
+
+        assert "会话" in panel.params_hint.text(), "被拒原因必须在标签上显示"
+        assert panel.params_hint.toolTip() == "", \
+            "tooltip 复写了标签里的拒绝原因（无补充信息/会残留）"
+    finally:
+        store.reset()
+
+
+def test_reconnect_clears_stale_session_tooltip(panel):
+    """重新连上后不许把「会话占用中」的旧 tooltip 留着。"""
+    panel.params_hint.setText("设备会话进行中：连接期间不能改参数")
+    panel.params_hint.setToolTip("设备会话进行中：连接期间不能改参数")
+
+    panel.set_sdr_connected(True, tune_wired=True)
+
+    assert panel.params_hint.toolTip() == "", \
+        "已解除的会话限制还挂在 tooltip 上（tooltip 普查 2026-11-13）"
+    assert "会话占用中" not in panel.params_hint.toolTip()
+
+
 def test_enum_timeout_leaves_in_progress_and_allows_retry(qapp, monkeypatch):
     import desktop.module_panel as mp
 

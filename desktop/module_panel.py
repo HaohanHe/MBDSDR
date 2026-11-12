@@ -463,6 +463,9 @@ class ModulePanel(QWidget):
         """
         self._sdr_connected = bool(connected)
         self._tune_wired = bool(connected and tune_wired)
+        # 提示行换文案时 tooltip 一并复位：上一条可能是上一轮会话的拒绝原因，
+        # 留着会把已经解除的限制说成仍然生效。
+        self.params_hint.setToolTip("")
         self.freq_spin.setEnabled(self._tune_wired)
         self.gain_slider.setEnabled(self._sdr_connected)
         if not self._sdr_connected:
@@ -714,23 +717,36 @@ class ModulePanel(QWidget):
             self.device_info.setText(
                 f"{self.device_info.text()}\n⚠ {ident.warning}")
 
+    def _push(self, ident, **values) -> None:
+        """写参数到唯一请求存储；会话占用期间被写门拒绝时**必须显示原因**。
+
+        store 拒绝时不改意图、也不下发硬件，读侧随后会被刷新回冻结值。
+        这里不静默吞掉结果——否则用户以为改动生效了。
+        """
+        result = _req_store.update(ident.key, **values)
+        if result.rejected:
+            # 原因逐字显示在标签上；tooltip 再抄一遍等于没有补充信息，
+            # 而且下一次写入成功后还会留下一条指向旧拒绝的残留提示。
+            self.params_hint.setToolTip("")
+            self.params_hint.setText(result.reason)
+
     def _push_sample_rate(self, _idx: int = -1) -> None:
         ident = self._current_identity()
         if ident is None:
             return
         data = self.sr_combo.currentData()
         if data is not None:
-            _req_store.update(ident.key, sample_rate_hz=float(data))
+            self._push(ident, sample_rate_hz=float(data))
 
     def _push_gain(self, value: int) -> None:
         ident = self._current_identity()
         if ident is not None:
-            _req_store.update(ident.key, gain_db=float(value))
+            self._push(ident, gain_db=float(value))
 
     def _push_bandwidth(self, value: float) -> None:
         ident = self._current_identity()
         if ident is not None:
-            _req_store.update(ident.key, bandwidth_hz=float(value))
+            self._push(ident, bandwidth_hz=float(value))
 
     def _on_request_changed(self, key: str) -> None:
         """另一面板改了同一台设备的请求 → 这边同步渲染。"""

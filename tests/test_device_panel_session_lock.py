@@ -110,15 +110,17 @@ def test_render_stays_on_session_snapshot_while_other_panel_writes(panel):
         "连接后没有回显实际连上设备的本次生效值"
     before = _texts(panel)
 
-    # 另一面板在会话中改 A 的请求（update 会同步通知订阅者）。
-    store.update(key_a, sample_rate_hz=1_500_000.0, gain_db=40.0, ppm=5)
+    # 另一入口在会话中尝试改 A 的请求：写门拒绝（不是静默忽略）。
+    result = store.update(key_a, sample_rate_hz=1_500_000.0, gain_db=40.0, ppm=5)
 
-    assert store.intent_for(key_a).sample_rate_hz == 1_500_000.0, \
-        "模拟的另一面板写入没有落到意图值"
+    assert result.rejected is True, "会话占用期间的写入必须被写门拒绝"
+    assert result.reason, "拒绝必须带可读原因"
+    assert store.intent_for(key_a).sample_rate_hz == 2_048_000.0, \
+        "被拒的写入不得改动意图值"
     assert store.request_for(key_a).sample_rate_hz == 2_048_000.0, \
         "占用期间的读侧冻结快照失效"
     assert _texts(panel) == before, (
-        "会话期间回显被另一面板的新意图拉走了：request_for 的冻结快照"
+        "会话期间回显被拒绝的写入拉走了：request_for 的冻结快照"
         "没有真正被面板用上")
 
 
@@ -153,8 +155,8 @@ def test_disconnect_writes_back_once_and_clears_occupancy(panel, monkeypatch):
     key = _key(panel)
     store.update(key, sample_rate_hz=2_048_000.0, gain_db=30.0, ppm=12)
     panel.set_connected(True, device=a)
-    # 会话中另一面板改了意图：断开时必须以本次会话生效值写回。
-    store.update(key, sample_rate_hz=1_024_000.0, gain_db=40.0, ppm=3)
+    # 会话中另一入口试图改意图：写门拒绝，断开时仍以本次会话生效值写回。
+    assert store.update(key, sample_rate_hz=1_024_000.0, gain_db=40.0, ppm=3).rejected
 
     calls = []
     real_fill = store.fill_payload
@@ -177,6 +179,29 @@ def test_disconnect_writes_back_once_and_clears_occupancy(panel, monkeypatch):
     assert calls == [key], "重复 set_connected(False) 又写回了一次"
     assert store.request_for(key).sample_rate_hz == 1_500_000.0, \
         "重复断开把断开后的新意图覆盖掉了"
+
+
+def test_write_back_goes_through_gate_and_updates_intent(panel):
+    """断开写回必须真的落到 store：用「实机生效值 ≠ 旧意图」证明没被门拒。
+
+    快照来自 ``begin_session(initial=...)``：主窗口下发的是调用方参数，可能
+    与旧意图不同。写回若在占用态直接调 ``update``（被写门拒绝），意图会停在
+    30.0；正确实现先 ``end_session`` 再用同一个 ``update`` 写入，意图变 33.0。
+    """
+    a = _dev()
+    panel._apply_devices([a])
+    key = _key(panel)
+    store.update(key, sample_rate_hz=2_048_000.0, gain_db=30.0, ppm=0)
+    store.begin_session(key, initial=store.ConnectRequest(
+        sample_rate_hz=2_048_000.0, gain_db=33.0, ppm=0))
+    panel.sr_edit.setText("2.048e+06")
+
+    panel.set_connected(True, device=a)    # 已占用：不覆盖首次快照
+    panel.set_connected(False)
+
+    assert not store.is_occupied(key)
+    assert store.intent_for(key).gain_db == 33.0, \
+        "断开写回没落到 store（很可能在占用态调 update，被自己的写门拒了）"
 
 
 def test_identity_failure_keeps_editable_and_creates_no_session(panel, monkeypatch):
@@ -206,13 +231,14 @@ def test_write_back_skips_fields_missing_from_snapshot(panel):
     key = _key(panel)
     store.update(key, gain_db=30.0, ppm=0)      # 会话快照没有采样率
     panel.set_connected(True, device=a)
-    # 故意选一个与界面预填默认值不同的采样率：若写回误用预填值，这里会红。
-    store.update(key, sample_rate_hz=1_536_000.0)  # 会话中别的面板补的意图
+    # 故意选一个与界面预填默认值（1.024M）不同的采样率：若写回误用预填值，
+    # 会以 1_024_000.0 出现在 store 里；写门拒绝后这里必须仍是 None。
+    assert store.update(key, sample_rate_hz=1_536_000.0).rejected
 
     panel.set_connected(False)
 
     req = store.request_for(key)
-    assert req.sample_rate_hz == 1_536_000.0, \
+    assert req.sample_rate_hz is None, \
         "快照里没有采样率，却用界面预填值把它写回了 store"
     # 快照里有的字段仍应按本次生效值写回（只跳过缺失字段，不是整笔不写）。
     assert req.gain_db == 30.0, "快照里有的增益没有写回"
@@ -226,16 +252,16 @@ def test_write_back_parse_failure_does_not_touch_store(panel):
     key = _key(panel)
     store.update(key, sample_rate_hz=2_048_000.0, gain_db=30.0, ppm=0)
     panel.set_connected(True, device=a)
-    # 会话中另一面板的意图；写回失败时它必须原样保留。
-    store.update(key, sample_rate_hz=1_024_000.0, gain_db=40.0)
+    # 会话中另一入口的意图会被写门拒绝；写回失败时 store 必须原样保留会话值。
+    assert store.update(key, sample_rate_hz=1_024_000.0, gain_db=40.0).rejected
     panel.sr_edit.setText("abc")
 
     panel.set_connected(False)
 
     assert not store.is_occupied(key), "无论写回成功与否，占用态都必须清掉"
     req = store.request_for(key)
-    assert req.sample_rate_hz == 1_024_000.0, \
+    assert req.sample_rate_hz == 2_048_000.0, \
         "解析失败时不得写回（更不得写入 0 Hz / 非法值）"
-    assert req.gain_db == 40.0, "采样率解析失败时整笔写回应中止，增益不应被改写"
+    assert req.gain_db == 30.0, "采样率解析失败时整笔写回应中止，增益不应被改写"
     assert "无法解析" in panel.status_label.text(), \
         "写回失败必须给用户可读提示，不能静默"

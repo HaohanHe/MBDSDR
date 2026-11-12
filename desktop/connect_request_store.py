@@ -16,6 +16,12 @@
   * 连接载荷由 :func:`fill_payload` 统一写入，面板不直接写
     ``_sample_rate / _gain / _ppm / _bandwidth``。
 
+写门（2026-11-13 追加）：会话占用期间 :func:`update` **拒绝**写入并返回
+可读原因——不静默忽略（用户会以为改成功了），也不排队延后（会话结束时
+凭空多出一次写入更难解释）。拒绝时返回的 ``request`` 仍是冻结快照，
+调用方据此渲染就不会停在被拒的值上。设备面板的断开写回是唯一在
+``end_session`` 之前发生的写入，因此它先结束占用、再走同一个 ``update``。
+
 身份键的硬约束（用户 2026-11-12 要求）：
 
   * 键必须**证明稳定且唯一**。序列号 / URI 视为稳定身份；
@@ -79,6 +85,23 @@ class ConnectRequest:
     gain_db: Optional[float] = None
     ppm: Optional[int] = None
     bandwidth_hz: Optional[float] = None
+
+
+@dataclass(frozen=True)
+class WriteResult:
+    """写门结果：**拒绝 + 可读原因**，调用方不必再猜该显示哪份值。
+
+    ``request`` 永远是当前权威值：会话占用期间就是冻结快照，未占用就是
+    最新意图。``rejected=True`` 时 store 一个字段都没改。
+    """
+
+    request: ConnectRequest
+    rejected: bool = False
+    reason: str = ""
+
+    def __bool__(self) -> bool:
+        """``if store.update(...)`` 只在没被拒时为真。"""
+        return not self.rejected
 
 
 _requests: Dict[str, ConnectRequest] = {}
@@ -155,15 +178,56 @@ def request_for(key: str) -> ConnectRequest:
 # 这里只回答「这台设备是否在会话中 / 会话生效值是什么」，不决定 UI 怎么
 # 显示、也不决定退出时是否回滚。显示方案见
 # docs/research/2026-11-12-gpredict-occupancy-decision.md。
-def begin_session(key: str) -> ConnectRequest:
-    """登记设备会话开始，冻结当前请求值作为「本次会话生效值」。
+def _notify(key: str) -> None:
+    """通知订阅者重渲染（写成功后、拒绝后都发：拒绝也必须把读数拉回冻结值）。"""
+    for listener in _live_listeners():
+        try:
+            listener(key)
+        except Exception:  # noqa: BLE001 - 一个面板渲染失败不该拖垮另一侧
+            logger.exception("连接请求变更通知失败")
 
-    重复调用**不覆盖**首次快照：会话期间 store 被另一面板改过，也不能把
+
+def _session_reject_reason(key: str) -> str:
+    """会话占用期间拒绝写入的可读原因（面板状态行与 AI 工具共用同一句）。"""
+    return (f"设备会话进行中（{key}）：本次改动未写入，"
+            "采样率/增益/PPM/带宽保持本次会话的生效值。"
+            "请先断开设备（结束会话）再修改。")
+
+
+def begin_session(key: str,
+                  initial: Optional[ConnectRequest] = None) -> ConnectRequest:
+    """登记设备会话开始，冻结本次会话的**生效值**（不等于意图值）。
+
+    ``initial``：连接时实际要下发的载荷。给了就与当前意图叠加、经同一套
+    校验后作为快照；**不写意图**——意图是「用户想设什么」，快照是「这次
+    实际生效什么」，两者只在断开写回时合一（gpredict 第三档）。
+
+    为什么选「建会话时收下初始载荷」而不是「先下发后建会话」：
+    ``_apply_connect_params`` 在 ``_panels_set_sdr_connected(True)`` 之后才
+    执行（main_window 2026-11-13 的 L6720 vs L6647），把建会话挪到它后面
+    要改主窗口两段时序、中间还夹着 UI 通知；让本函数收下初始载荷，则
+    「起点值」成为会话的一部分，此后门关闭，**连接流程自身零拒绝**。
+
+    重复调用**不覆盖**首次快照：会话期间 store 被另一入口改过，也不能把
     正在生效的值换掉。返回不可变快照。
     """
-    if key not in _sessions:
-        _sessions[key] = intent_for(key)
-    return _sessions[key]
+    if key in _sessions:
+        return _sessions[key]
+    snap = intent_for(key)
+    if initial is not None:
+        changes = _normalize_values(
+            sample_rate_hz=(initial.sample_rate_hz
+                            if initial.sample_rate_hz is not None else _UNSET),
+            gain_db=(initial.gain_db
+                     if initial.gain_db is not None else _UNSET),
+            ppm=(initial.ppm if initial.ppm is not None else _UNSET),
+            bandwidth_hz=(initial.bandwidth_hz
+                          if initial.bandwidth_hz is not None else _UNSET),
+        )
+        if changes:
+            snap = replace(snap, **changes)
+    _sessions[key] = snap
+    return snap
 
 
 def end_session(key: str) -> Optional[ConnectRequest]:
@@ -184,17 +248,13 @@ def is_occupied(key: str) -> bool:
     return key in _sessions
 
 
-def update(key: str, *, sample_rate_hz=_UNSET, gain_db=_UNSET,
-           ppm=_UNSET, bandwidth_hz=_UNSET) -> ConnectRequest:
-    """写回某台设备的连接请求——全仓唯一写入口。
+def _normalize_values(*, sample_rate_hz=_UNSET, gain_db=_UNSET,
+                      ppm=_UNSET, bandwidth_hz=_UNSET) -> Dict[str, Any]:
+    """把原始请求值校验/归一化成可落库字段——校验规则只有这一份。
 
-    非法值（非数/NaN/<=0 的采样率）保持原值不变并记日志，不把 0 Hz 这类
-    会让后端崩掉的假值存进来。
-
-    写侧以**意图值**为底，不以渲染读侧为底：会话占用期间写入照常记录，
-    但 ``request_for`` 继续返回冻结快照，直到 ``end_session`` 才可见。
+    非法值不落库（保持原值）并记日志：0 Hz 这类假值能让后端直接崩。
+    ``update``（意图）与 ``begin_session``（会话初始载荷）都走这里。
     """
-    current = intent_for(key)
     changes: Dict[str, Any] = {}
 
     if sample_rate_hz is not _UNSET:
@@ -233,19 +293,44 @@ def update(key: str, *, sample_rate_hz=_UNSET, gain_db=_UNSET,
         else:
             logger.warning("拒绝带宽请求 %r（必须为非负有限数）", bandwidth_hz)
 
+    return changes
+
+
+def update(key: str, *, sample_rate_hz=_UNSET, gain_db=_UNSET,
+           ppm=_UNSET, bandwidth_hz=_UNSET) -> WriteResult:
+    """写回某台设备的连接请求——全仓唯一写入口（会话占用期间是**写门**）。
+
+    非法值（非数/NaN/<=0 的采样率）保持原值不变并记日志，不把 0 Hz 这类
+    会让后端崩掉的假值存进来。
+
+    **会话占用期间直接拒绝**：不改 ``_requests``、不给硬件下发任何东西，
+    返回 ``rejected=True`` 与可读原因（见 :func:`_session_reject_reason`）。
+    这是有意的取舍——静默忽略会让用户以为改成功了；排队延后则会在会话
+    结束时凭空多出一次写入，事后无从解释。断开写回由调用方先
+    ``end_session`` 再调本函数，因此不需要任何绕过标志。
+    """
+    locked = _sessions.get(key)
+    if locked is not None:
+        reason = _session_reject_reason(key)
+        logger.info("会话占用期间拒绝写入请求 %s", key)
+        # 拒绝也通知读侧：控件必须回到冻结值，不能停在被拒的新值上。
+        _notify(key)
+        return WriteResult(locked, True, reason)
+
+    current = intent_for(key)
+    changes = _normalize_values(
+        sample_rate_hz=sample_rate_hz, gain_db=gain_db,
+        ppm=ppm, bandwidth_hz=bandwidth_hz)
+
     if not changes:
-        return current
+        return WriteResult(current)
 
     updated = replace(current, **changes)
     if updated == current:
-        return current
+        return WriteResult(current)
     _requests[key] = updated
-    for listener in _live_listeners():
-        try:
-            listener(key)
-        except Exception:  # noqa: BLE001 - 一个面板渲染失败不该拖垮另一侧
-            logger.exception("连接请求变更通知失败")
-    return updated
+    _notify(key)
+    return WriteResult(updated)
 
 
 def fill_payload(payload: Dict[str, Any], key: str) -> Dict[str, Any]:

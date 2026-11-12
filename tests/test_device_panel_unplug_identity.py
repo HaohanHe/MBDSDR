@@ -293,6 +293,100 @@ def test_owner_occupied_state_shows_pid(panel, monkeypatch, tmp_path):
     own.release_active_owner("desktop", key)
 
 
+def test_owner_unknown_to_occupied_drops_diag_tooltip(
+        panel, monkeypatch, tmp_path):
+    """unknown → 被占用：上一条 tooltip 里的「查看诊断」必须一并换掉。
+
+    诊断按钮在被占用态已隐藏；tooltip 若照旧，就是一个指向不存在按钮的
+    残留提示（tooltip 普查 2026-11-13 抓到）。
+    """
+    import mbdsdr_ai.device_owner as own
+
+    reg = tmp_path / "device_owner.json"
+    monkeypatch.setenv(own.OWNER_REGISTRY_ENV, str(reg))
+    monkeypatch.setattr(own, "backup_corrupt_registry", lambda reason: None)
+    reg.write_bytes(b'{"owners": ')
+    panel._apply_devices([_dev(0, serial="A-0001", label="RTL-A")])
+
+    assert "查看诊断" in panel.owner_state_label.toolTip(), \
+        "前置条件不成立：unknown 态的 tooltip 本应摆出诊断入口"
+
+    # 登记被修好并被另一持有者占用（对方进程仍在运行）。
+    key = panel._identities[0].key
+    reg.unlink()
+    own._OWNED_HERE.clear()
+    assert own.claim_active_owner("desktop", key)[0] is True
+    panel._refresh_owner_state()
+
+    tip = panel.owner_state_label.toolTip()
+    assert "查看诊断" not in tip, \
+        "被占用态的 tooltip 还指向已隐藏的「查看诊断」按钮"
+    assert "重试" in tip, "被占用态的 tooltip 应给出可做的下一步（重试）"
+    own.release_active_owner("desktop", key)
+
+
+def test_render_identity_warning_replaces_stale_tooltip(panel):
+    """身份告警出现时，状态行 tooltip 必须换成本状态的内容。
+
+    上一条可能是热插拔 event.detail、「用 Zadig 装 WinUSB 驱动」或上一台
+    设备的告警——与「选中项身份不可靠」毫不相干（tooltip 普查 2026-11-13）。
+    """
+    from connect_request_store import DeviceIdentity
+
+    panel._identities = [DeviceIdentity(
+        "rtlsdr|label:RTL-A", "provisional",
+        "设备没有稳定序列号，重枚举后参数可能跟丢")]
+    panel.status_label.setToolTip("用 Zadig 装 WinUSB 驱动后点刷新重试")
+
+    panel._render_request(0)
+
+    tip = panel.status_label.toolTip()
+    assert "Zadig" not in tip, "tooltip 还留着无关的驱动安装指引"
+    assert "查看诊断" not in tip
+    assert "序列号" in tip, "tooltip 没有换成当前身份告警的说明"
+
+
+def test_connect_precheck_hints_drop_stale_tooltip(panel, monkeypatch):
+    """连接前三类提示（采样率/增益范围未知、身份拿不到）都清掉旧 tooltip。"""
+    import mbdsdr_ai.device_capabilities as caps
+
+    a = _dev(0, serial="A-0001", label="RTL-A")
+    panel._apply_devices([a])
+    panel.sr_edit.setText("2.048e+06")
+    panel.gain_edit.setText("30")
+    panel.ppm_edit.setText("0")
+
+    stale = "用 Zadig 装 WinUSB 驱动后点刷新重试"
+    monkeypatch.setattr(caps, "build_capability_report", lambda dev: {})
+
+    # ① 采样率范围未知（增益放行，避免后一句覆盖状态行）
+    monkeypatch.setattr(
+        caps, "check_range",
+        lambda report, key, value: (
+            (None, "范围未知") if key == "sample_rate_range" else (True, "")))
+    panel.status_label.setToolTip(stale)
+    panel._on_connect_clicked()
+    assert "采样率范围未知" in panel.status_label.text()
+    assert "Zadig" not in panel.status_label.toolTip()
+
+    # ② 增益范围未知
+    monkeypatch.setattr(
+        caps, "check_range",
+        lambda report, key, value: (
+            (True, "") if key == "sample_rate_range" else (None, "范围未知")))
+    panel.status_label.setToolTip(stale)
+    panel._on_connect_clicked()
+    assert "增益范围未知" in panel.status_label.text()
+    assert "Zadig" not in panel.status_label.toolTip()
+
+    # ③ 身份拿不到：拒绝连接
+    panel.status_label.setToolTip(stale)
+    monkeypatch.setattr(panel, "_current_identity", lambda: None)
+    panel._on_connect_clicked()
+    assert "无法确定设备身份" in panel.status_label.text()
+    assert "Zadig" not in panel.status_label.toolTip()
+
+
 # ------------------------------------------------ 枚举失败 != 没插设备（W92 patch）
 # 同一次枚举失败，module_panel 说「这不等于没插设备」，device_panel 却说
 # 「未检测到 SDR 设备」——用户会去拔插 USB，而真实原因可能是依赖缺失或驱动报错。

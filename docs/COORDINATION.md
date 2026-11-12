@@ -1909,9 +1909,17 @@ No supported devices found），GNSS+SDR 同开复验没做成；离线那次
 | `docs/star-catalog.md` | 守卫账本线（目的未声明） | 2026-11-13 05:52 | 未声明 |
 | `docs/tool-availability.md` | 守卫账本线（目的未声明） | 2026-11-13 05:52 | 未声明 |
 | `docs/axioms-waivers.json` | 公理棘轮线（目的未声明） | 2026-11-13 06:18 | 未声明 |
-| `desktop/device_panel.py` | 设备会话锁线（目的未声明） | 2026-11-13 06:12 | 未声明 |
-| `tests/test_device_panel_session_lock.py` | 设备会话锁线（目的未声明） | 2026-11-13 06:12 | 未声明 |
-| `docs/pending-patches/2026-11-13-device-session-lock-not-implemented.md` | 设备会话锁线（目的未声明） | 2026-11-13 06:17 | 未声明 |
+| `desktop/connect_request_store.py` | 设备会话锁线（写门：拒绝+可读原因；`begin_session(initial)` 收初始载荷） | 2026-11-13 07:11 | 本笔 |
+| `desktop/device_panel.py` | 设备会话锁线（断开写回先 `end_session`；4 处状态切换 tooltip 残留） | 2026-11-13 07:11 | 本笔 |
+| `desktop/module_panel.py` | 设备会话锁线（`_push` 去透传 tooltip；连接态复位 tooltip） | 2026-11-13 07:11 | 本笔 |
+| `mbdsdr_ai/sdr_tools.py` | 设备会话锁线（AI 4 个写工具 + PPM 加会话门，`device_session_locked`） | 2026-11-13 07:11 | 本笔 |
+| `tests/test_session_write_gate.py` | 设备会话锁线（写门 7 条：连接永不被拒/被拒三条断言） | 2026-11-13 07:11 | 本笔 |
+| `tests/test_connect_request_session.py` | 设备会话锁线（契约：会话中写入必须被拒并保持意图） | 2026-11-13 07:11 | 本笔 |
+| `tests/test_device_panel_session_lock.py` | 设备会话锁线（写回经门可观测 + 拒绝不改回显） | 2026-11-13 07:11 | 本笔 |
+| `tests/test_device_panel_unplug_identity.py` | 设备会话锁线（unknown→占用/身份告警/连接前校验的 tooltip 断言） | 2026-11-13 07:11 | 本笔 |
+| `tests/test_module_panel_truthful_controls.py` | 设备会话锁线（拒绝原因不复写 tooltip + 重连清旧 tooltip） | 2026-11-13 07:11 | 本笔 |
+| `docs/pending-patches/2026-11-13-device-session-lock-not-implemented.md` | 设备会话锁线（§五写门/§5.6 tooltip 规矩/§六 main_window 符号清单/§七接管审计） | 2026-11-13 07:11 | 本笔 |
+| `docs/COORDINATION.md` | 设备会话锁线（本笔文件的 §6.1 登记行） | 2026-11-13 07:11 | 本笔 |
 | `scripts/audit_evidence.py` | 守卫账本线（目的未声明） | 2026-11-13 05:31 | 未声明 |
 | `docs/evidence-standard.md` | 守卫账本线（目的未声明） | 2026-11-13 06:23 | 未声明 |
 | `desktop/mbdsdr.spec` | 守卫账本线（目的未声明） | 2026-11-13 06:23 | 未声明 |

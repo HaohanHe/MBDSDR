@@ -27,6 +27,7 @@ AI 可以通过 tool calling 直接调用，也可以通过工作流组合调用
 import logging
 import math
 import os
+import sys
 import time
 import json
 import threading
@@ -253,6 +254,71 @@ def _setter_refusal_reason(backend, what: str) -> str:
     status = getattr(backend, "status", None)
     err = getattr(status, "error", "") if status is not None else ""
     return err or f"{what}未生效（设备拒绝该设置）"
+
+
+#: ``_guard_backend_set`` 的 method → 给用户看的参数名
+_SESSION_WRITE_LABELS = {
+    "set_bandwidth": "带宽",
+    "set_gain": "增益",
+    "set_agc": "AGC",
+}
+
+
+def _desktop_request_store():
+    """同进程桌面会话锁的数据源；不在桌面进程里时返回 ``None``。
+
+    只从 ``sys.modules`` 取**已经导入**的那一个对象，绝不 ``import``：
+    桌面端按裸名 ``import connect_request_store`` 持有单例，包名导入会造出
+    第二份空存储（该模块文档明令禁止），门就永远开着。独立 AI/MCP 进程里
+    这个模块不存在 → 那里没有「桌面会话」概念，门不参与；同一根设备在
+    跨进程时由 ``device_owner`` 互斥，不靠这里。
+    """
+    for name in ("connect_request_store", "desktop.connect_request_store"):
+        mod = sys.modules.get(name)
+        if mod is not None:
+            return mod
+    return None
+
+
+def _session_identity_key(backend) -> str:
+    """后端 → 桌面端同一身份键；算不出（网络源/缺身份）返回空串，不猜。"""
+    dev = getattr(backend, "device", None)
+    if dev is None:
+        return ""
+    if str(getattr(dev, "driver", "") or "").lower() == "rtltcp":
+        return ""      # 网络源不占本机硬件，桌面端也不为它建会话
+    ident = getattr(dev, "identity", None)
+    if not ident:
+        return ""
+    try:
+        from .device_identity import describe
+        return describe(dict(ident)).key
+    except (TypeError, ValueError, KeyError) as e:
+        logger.warning("会话锁：身份键计算失败，按未占用处理（%s）", e)
+        return ""
+
+
+def _session_lock_reason(backend, what: str) -> str:
+    """会话占用期间拒绝改设备参数的**可读原因**；空串表示未占用。
+
+    与桌面端 ``connect_request_store`` 同一句话、同一份占用态：AI 工具
+    不再有「绕过面板直接写后端」的第二条路。
+    """
+    store = _desktop_request_store()
+    if store is None:
+        return ""
+    key = _session_identity_key(backend)
+    if not key:
+        return ""
+    try:
+        if not store.is_occupied(key):
+            return ""
+    except Exception as e:  # noqa: BLE001 - 门自身故障不能让工具崩，但必须留证据
+        logger.warning("会话锁查询失败，按未占用处理（%s）", e)
+        return ""
+    return (f"{what}未下发：设备会话进行中（{key}），"
+            "采样率/增益/PPM/带宽已冻结，硬件保持会话生效值。"
+            "请先在设备面板断开（结束会话）再改。")
 
 
 def register_sdr_tools(agent):
@@ -593,6 +659,10 @@ def register_sdr_tools(agent):
         if b is None:
             return ToolResult(success=False,
                               content="采样率设置失败：当前无连接设备，请先 sdr_connect 或 sdr_open_iq_file")
+        reason = _session_lock_reason(b, "采样率")
+        if reason:
+            return ToolResult(success=False, content=reason,
+                              error="device_session_locked")
         ok = b.set_sample_rate(args["sample_rate_hz"])
         return ToolResult(success=bool(ok),
                           content=(f"采样率已设置: {_fmt_sample_rate(args['sample_rate_hz'])}"
@@ -613,11 +683,19 @@ def register_sdr_tools(agent):
     )
 
     def _guard_backend_set(method_name, value, ok_msg):
-        """无设备时诚实失败；有设备时调一次后端 setter（统一 None 保护）。"""
+        """无设备时诚实失败；有设备时调一次后端 setter（统一 None 保护）。
+
+        会话占用期间先过写门：被拒就一个 setter 都不调，硬件保持原值。
+        """
         b = _get_backend(mgr)
         if b is None:
             return ToolResult(success=False,
                               content="操作失败：当前无连接设备，请先 sdr_connect 或 sdr_open_iq_file")
+        reason = _session_lock_reason(
+            b, _SESSION_WRITE_LABELS.get(method_name, "设备参数"))
+        if reason:
+            return ToolResult(success=False, content=reason,
+                              error="device_session_locked")
         ok = getattr(b, method_name)(value)
         return ToolResult(
             success=bool(ok),
@@ -7729,6 +7807,13 @@ def _set_ppm_correction(mgr, args):
         return ToolResult(
             success=False,
             content="ppm 校正失败：当前无连接设备，请先 sdr_connect 或 sdr_open_iq_file")
+
+    # 会话占用期间与面板/其它工具同一道门：确认 token 只说明「允许写」，
+    # 不说明「现在能写」——会话中的参数是冻结的。
+    reason = _session_lock_reason(b, "PPM 校正")
+    if reason:
+        return ToolResult(success=False, content=reason,
+                          error="device_session_locked")
 
     applied, clamped = clamp_ppm(raw)
     ppm_int = int(round(applied))
