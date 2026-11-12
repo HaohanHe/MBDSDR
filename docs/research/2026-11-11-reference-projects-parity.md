@@ -281,12 +281,12 @@ gpredict 没有频率预设或书签概念（它是跟踪器，不是接收机�
 
 > **裁定（2026-11-11，用户口径）**
 > - C：**该搬**，已派人修 `satdump_integration.py`（先读 `dataset.json`、失败退回 glob），验收标准是「同一输入必得同一张图」。
-> - E：只借鉴类型声明，给 handler 补 `inputs/outputs`、拼 steps 时校验前后层；**排 C 之后**。
+> - E：只借鉴类型声明，给 handler 补 `inputs/outputs`、拼 steps 时校验前后层；**排 C 之后**（2026-11-12 已落地）。
 > - A：不搬（层断裂跳过、推荐采样率、按星配置已同构）。
 > - B：暂不搬，触发条件写死——**条目超 15 条或有第三方扩展需求时**，拆「一星一模块 + 聚合 import」，纯重构无行为变化。
 > - D：不搬（ImGui 即时模式与 Qt 信号槽不同构）。
 >
-> **现状（2026-11-12 对 HEAD 核）**：C 已落地（见机制 C）；E 尚未落地；A/B/D 无变化。
+> **现状（2026-11-12 对 HEAD 核）**：C、E 均已落地（E 见 `tests/test_sat_pipeline_contracts.py`）；A/B/D 无变化。
 
 **机制 A：管线即数据（`src-core/pipeline/pipeline.h:28-58`）**
 `Pipeline.steps` 是 `{level, module, parameters, input_override}` 列表；模块用 `getInputTypes()` / `getOutputTypes()` 声明自己能吃什么、吐什么，`PipelinePreset` 给推荐采样率与频点，`LivePipelineCfg` 把实时拓扑分成 normal / server / client 三种。
@@ -398,7 +398,7 @@ for (auto const& [name, _vfo] : vfos) {
 19. 机制 B 插件注册 —— 未拆；条目 8 < 15，触发条件未到（封闭集 `` `HEAD:mbdsdr_ai/sat_pipeline_params.py:82` ``：`SATELLITE_PIPELINES: Dict[str, SatellitePipeline] = {`）。
 20. 机制 C 产品清单 —— 已落地（`dataset.json` 优先，glob 兜底）。
 21. 机制 D 模块自带 UI —— 与 Qt 面板模型不同构。
-22. 机制 E 类型声明 —— 未落地，`register_stage_handler` 仍只绑定不校验（`` `HEAD:mbdsdr_ai/sat_pipeline_runner.py:105` ``：`def register_stage_handler(module: str,`，签名无 `inputs/outputs`）。
+22. 机制 E 类型声明 —— 已落地：`register_stage_handler(module, fn, inputs=, outputs=)` 登记数据契约，`run_pipeline` 在跑任何 handler 前用 `_check_stage_contracts` 校验相邻 stage 的 outputs/inputs 是否有交集，接不上即返回「stage 类型不兼容」；未声明类型的旧 handler 不参与校验，行为与以前逐字一致（`mbdsdr_ai/sat_pipeline_runner.py:104-153`）。
 
 **sdrpp（6）**
 23. 机制 A 窄条保护 —— 已落地（`spectrum_widget.py:3553-3560`）。
@@ -424,8 +424,11 @@ for (auto const& [name, _vfo] : vfos) {
 ### 3.3 待办（不计入上表）
 
 - gpredict 专项③ 占用态（设备会话置灰 + 断开写回）—— 采纳与否待定。
-- satdump E 类型声明（排 C 之后）。
-- sdrpp A 窄带 CW/USB 回归用例。
+
+已办（2026-11-12，原两条待办结案）：
+
+- satdump E 类型声明 —— 已落地：`register_stage_handler(inputs=, outputs=)` + `run_pipeline` 执行前校验；证据 `tests/test_sat_pipeline_contracts.py`（4 用例 + 摘掉校验后错配链路静默跑通的反证）。
+- sdrpp A 窄带 CW/USB 回归用例 —— 已在 `fb9d9656` 补 `tests/test_spectrum_gesture_edges.py`（窄带整条命中、拖动改中心不改带宽、宽信号仍可改边）；本次复核遇 Qt 测试锁被另一会话占用，未复跑。
 
 ### 3.4 5 条待查的结案记录
 
