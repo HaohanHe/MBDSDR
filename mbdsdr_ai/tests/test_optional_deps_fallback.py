@@ -75,10 +75,6 @@ from mbdsdr_ai import lrpt_render
 check("lrpt_render.save_png",
       lambda: lrpt_render.save_png(np.zeros((2, 2), np.uint8), "x.png"))
 
-from mbdsdr_ai import device_watchdog
-check("device_watchdog.DeviceWatchdog",
-      lambda: device_watchdog.DeviceWatchdog(None))
-
 from mbdsdr_ai import sat_passes
 check("sat_passes.make_timescale", sat_passes.make_timescale)
 

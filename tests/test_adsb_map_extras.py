@@ -6,8 +6,8 @@ ADSB 地图/基带附加能力测试
 
 覆盖两个新增模块：
   1. mbdsdr_ai.recording_meta —— SigMF 标准 .sigmf-meta 元数据读写往返。
-  2. mbdsdr_ai.device_watchdog —— 独立线程看门狗在后端抖动/异常时不崩溃、
-     能自动重连并对外上报状态信号。
+  2. desktop.device_watchdog —— 独立线程看门狗在后端抖动/异常时不崩溃、
+     能自动重连并对外上报状态信号（Qt QThread，故属 desktop 层）。
 """
 
 import os
@@ -34,7 +34,8 @@ from mbdsdr_ai.recording_meta import (  # noqa: E402
     metadata_for_display,
     SigMFRecordingSession,
 )
-from mbdsdr_ai.device_watchdog import DeviceWatchdog  # noqa: E402
+import desktop.device_watchdog as watchdog_mod  # noqa: E402
+from desktop.device_watchdog import DeviceWatchdog  # noqa: E402
 
 
 @pytest.fixture(scope="session")
@@ -194,3 +195,15 @@ def test_watchdog_backend_none(qapp):
         wd.stop()
     assert wd.wait(2000), "backend=None 看门狗应正常 stop"
     assert wd.current_state() == "disconnected"
+
+
+def test_watchdog_without_qt_raises_actionable_importerror(monkeypatch):
+    """PySide6 缺失时必须抛含安装提示的 ImportError，不得裸 AttributeError。
+
+    该守卫点随模块从 mbdsdr_ai 迁到 desktop（QThread 属界面层）后仍需保留，
+    这里直接翻 _HAS_QT 模拟缺失，避免再拉一个子进程。
+    """
+    monkeypatch.setattr(watchdog_mod, "_HAS_QT", False)
+    with pytest.raises(ImportError) as ei:
+        DeviceWatchdog(None)
+    assert "pip install" in str(ei.value)

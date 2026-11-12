@@ -3,6 +3,10 @@
 设备看门狗（DeviceWatchdog）
 =============================
 
+所属层：desktop。本类本身就是 QThread、对外用 Qt Signal 通知，属「Qt 类型
+贯穿」而非可用回调替代的事件通知，因此从 mbdsdr_ai 迁到界面层，
+mbdsdr_ai 不再反向依赖 Qt（守卫见 tests/test_import_direction_contract.py）。
+
 在独立 QThread 中周期性地 ping 后端连接状态：
 - 连接正常 -> 对外上报 connected；
 - 连接断开 -> 对外上报 disconnected，并按间隔自动尝试重连（reconnecting）；
