@@ -427,6 +427,53 @@ class MBSDRAIMCPServer:
 # ============================================================================
 
 
+def _read_api_key_file(path: str) -> str:
+    try:
+        with open(path, encoding="utf-8") as handle:
+            text = handle.read().strip()
+    except OSError as exc:
+        raise SystemExit(f"--api-key-file 读不到：{path}（{exc}）")
+    if not text:
+        raise SystemExit(f"--api-key-file 是空的：{path}")
+    return text
+
+
+def _resolve_api_key(argv_key: Optional[str], key_file: Optional[str]) -> Optional[str]:
+    """密钥通道优先级：文件 > 环境变量 > argv。
+
+    argv 通道保留兼容（老脚本还在用），但命令行对同机任何进程可读，
+    所以走 argv 必须打警告；文件通道连「同机可读的路径」都不带密钥值。
+    任何一条路径都不把密钥写日志。
+    """
+    if key_file:
+        key = _read_api_key_file(key_file)
+        if argv_key:
+            print(
+                "WARN 同时给了 --api-key 与 --api-key-file：按优先级使用文件内容；"
+                "argv 里那份已进进程列表，建议尽快轮换。",
+                file=sys.stderr,
+            )
+        return key
+
+    env_key = os.environ.get("MBDSDR_API_KEY")
+    if env_key:
+        if argv_key:
+            print(
+                "WARN 同时给了 --api-key 与 MBDSDR_API_KEY：按优先级使用环境变量；"
+                "argv 里那份已进进程列表，建议尽快轮换。",
+                file=sys.stderr,
+            )
+        return env_key
+
+    if argv_key:
+        print(
+            "WARN --api-key 会把密钥写进进程命令行，同机其它进程可直接读到；"
+            "建议改用 MBDSDR_API_KEY 环境变量或 --api-key-file。",
+            file=sys.stderr,
+        )
+    return argv_key
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="MBDSDR AI 内核 MCP stdio 服务器 - 暴露全部 SDR 工具给任意通用 agent",
@@ -443,20 +490,32 @@ def main():
   python3 mbdsdr_ai_mcp_server.py --cli call_tool sdr_set_frequency '{"frequency_hz": 98500000, "confirm_token": "<token>"}'
   python3 mbdsdr_ai_mcp_server.py --cli call_tool sdr_spectrum_analyze '{"fft_size": 512}'
 
-  # 带 API Key (启用 LLM 对话能力)
+  # 带 API Key (启用 LLM 对话能力) —— 推荐文件或环境变量通道
+  python3 mbdsdr_ai_mcp_server.py --api-key-file /path/to/key.txt
   MBDSDR_API_KEY=sk-xxx python3 mbdsdr_ai_mcp_server.py
+  # --api-key 仍可用但会进进程列表（同机其它进程可读），只在临时调试时用
         """,
     )
     parser.add_argument("--cli", nargs="+", help="命令行模式: list_tools | call_tool <name> [args_json]")
-    parser.add_argument("--api-key", default=None, help="硅基流动 API Key (或环境变量 MBDSDR_API_KEY)")
+    parser.add_argument(
+        "--api-key",
+        default=None,
+        help="硅基流动 API Key（不推荐：会进进程列表，同机其它进程可读；"
+        "优先用 MBDSDR_API_KEY 或 --api-key-file）",
+    )
+    parser.add_argument(
+        "--api-key-file",
+        default=None,
+        help="从文件读 API Key（优先级最高；推荐）",
+    )
     parser.add_argument("--model", default="Qwen/Qwen3.6-35B-A3B", help="默认模型")
     parser.add_argument("--api-base", default="https://api.siliconflow.cn/v1", help="API 基础 URL")
     parser.add_argument("--verbose", "-v", action="store_true", help="输出调试信息")
 
     args = parser.parse_args()
 
-    # 从环境变量获取 API Key
-    api_key = args.api_key or os.environ.get("MBDSDR_API_KEY")
+    # 密钥通道：文件 > 环境变量 > argv（argv 会进进程列表，用到了就打警告）
+    api_key = _resolve_api_key(args.api_key, args.api_key_file)
 
     # 创建服务器
     server = MBSDRAIMCPServer(
