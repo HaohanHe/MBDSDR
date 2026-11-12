@@ -1,0 +1,338 @@
+{
+ "kind": "find_spec 对 .pyc-only 子树的可见性（冻结包门槛依据）",
+ "date": "2026-11-12",
+ "head": "699dcb92",
+ "python": "3.14.0 (tags/v3.14.0:ebf955d, Oct  7 2025, 10:15:03) [MSC v.1944 64 bit (AMD64)]",
+ "method": {
+  "compile": "compileall.compile_dir(..., legacy=True/False) 后删掉全部 .py",
+  "probe": "两条都记：①产品门槛 desktop/main.py:_probe_module_spec 的实际返回值（目录遍历 + 标准 find_spec 兜底）；②标准 importlib.util.find_spec 的 spec/loader/真 import 结果，用来看清是哪条路径起的作用",
+  "cases": {
+   "legacy_pyc": "pkg/__init__.pyc + pkg/sub/__init__.pyc + pkg/sub/mod.pyc",
+   "pycache_pyc": "只剩 pkg/__pycache__/*.pyc，没有 legacy .pyc",
+   "corrupt_pyc": "legacy 布局，叶子 .pyc 截断到 1/3",
+   "missing": "目录里没有这个包（对照）"
+  }
+ },
+ "results": [
+  {
+   "case": "legacy_pyc",
+   "site": "C:\\Users\\xxhzb\\AppData\\Local\\Temp\\mbdsdr_pyc_fq7jvpv1\\legacy_pyc",
+   "tree": [
+    "mbdsdr_pyc_legacy_pyc/__init__.pyc",
+    "mbdsdr_pyc_legacy_pyc/sub/__init__.pyc",
+    "mbdsdr_pyc_legacy_pyc/sub/mod.pyc"
+   ],
+   "top_level_probe": {
+    "module": "mbdsdr_pyc_legacy_pyc.sub",
+    "product_gate": true,
+    "spec_found": true,
+    "spec_origin": "C:\\Users\\xxhzb\\AppData\\Local\\Temp\\mbdsdr_pyc_fq7jvpv1\\legacy_pyc\\mbdsdr_pyc_legacy_pyc\\sub\\__init__.pyc",
+    "spec_loader": "SourcelessFileLoader",
+    "import_ok": true,
+    "import_value": null
+   },
+   "leaf_probe": {
+    "module": "mbdsdr_pyc_legacy_pyc.sub.mod",
+    "product_gate": true,
+    "spec_found": true,
+    "spec_origin": "C:\\Users\\xxhzb\\AppData\\Local\\Temp\\mbdsdr_pyc_fq7jvpv1\\legacy_pyc\\mbdsdr_pyc_legacy_pyc\\sub\\mod.pyc",
+    "spec_loader": "SourcelessFileLoader",
+    "import_ok": true,
+    "import_value": 42
+   }
+  },
+  {
+   "case": "pycache_pyc",
+   "site": "C:\\Users\\xxhzb\\AppData\\Local\\Temp\\mbdsdr_pyc_fq7jvpv1\\pycache_pyc",
+   "tree": [
+    "mbdsdr_pyc_pycache_pyc/__pycache__/__init__.cpython-314.pyc",
+    "mbdsdr_pyc_pycache_pyc/sub/__pycache__/__init__.cpython-314.pyc",
+    "mbdsdr_pyc_pycache_pyc/sub/__pycache__/mod.cpython-314.pyc"
+   ],
+   "top_level_probe": {
+    "module": "mbdsdr_pyc_pycache_pyc.sub",
+    "product_gate": true,
+    "spec_found": true,
+    "spec_origin": null,
+    "spec_loader": "NamespaceLoader",
+    "import_ok": true,
+    "import_value": null
+   },
+   "leaf_probe": {
+    "module": "mbdsdr_pyc_pycache_pyc.sub.mod",
+    "product_gate": false,
+    "spec_found": false,
+    "spec_origin": null,
+    "spec_loader": null,
+    "import_ok": false,
+    "import_error": "ModuleNotFoundError: No module named 'mbdsdr_pyc_pycache_pyc.sub.mod'"
+   }
+  },
+  {
+   "case": "corrupt_pyc",
+   "site": "C:\\Users\\xxhzb\\AppData\\Local\\Temp\\mbdsdr_pyc_fq7jvpv1\\corrupt_pyc",
+   "tree": [
+    "mbdsdr_pyc_corrupt_pyc/__init__.pyc",
+    "mbdsdr_pyc_corrupt_pyc/sub/__init__.pyc",
+    "mbdsdr_pyc_corrupt_pyc/sub/mod.pyc"
+   ],
+   "top_level_probe": {
+    "module": "mbdsdr_pyc_corrupt_pyc.sub",
+    "product_gate": true,
+    "spec_found": true,
+    "spec_origin": "C:\\Users\\xxhzb\\AppData\\Local\\Temp\\mbdsdr_pyc_fq7jvpv1\\corrupt_pyc\\mbdsdr_pyc_corrupt_pyc\\sub\\__init__.pyc",
+    "spec_loader": "SourcelessFileLoader",
+    "import_ok": true,
+    "import_value": null
+   },
+   "leaf_probe": {
+    "module": "mbdsdr_pyc_corrupt_pyc.sub.mod",
+    "product_gate": true,
+    "spec_found": true,
+    "spec_origin": "C:\\Users\\xxhzb\\AppData\\Local\\Temp\\mbdsdr_pyc_fq7jvpv1\\corrupt_pyc\\mbdsdr_pyc_corrupt_pyc\\sub\\mod.pyc",
+    "spec_loader": "SourcelessFileLoader",
+    "import_ok": false,
+    "import_error": "EOFError: marshal data too short"
+   }
+  },
+  {
+   "case": "missing",
+   "site": "C:\\Users\\xxhzb\\AppData\\Local\\Temp\\mbdsdr_pyc_fq7jvpv1\\missing",
+   "tree": [],
+   "top_level_probe": {
+    "module": "mbdsdr_pyc_missing.sub",
+    "product_gate": false,
+    "spec_found": false,
+    "spec_error": "ModuleNotFoundError: No module named 'mbdsdr_pyc_missing'",
+    "import_ok": false,
+    "import_error": "ModuleNotFoundError: No module named 'mbdsdr_pyc_missing'"
+   },
+   "leaf_probe": {
+    "module": "mbdsdr_pyc_missing.sub.mod",
+    "product_gate": false,
+    "spec_found": false,
+    "spec_error": "ModuleNotFoundError: No module named 'mbdsdr_pyc_missing'",
+    "import_ok": false,
+    "import_error": "ModuleNotFoundError: No module named 'mbdsdr_pyc_missing'"
+   }
+  }
+ ],
+ "verdict": {
+  "can_see_legacy_pyc": true,
+  "product_gate_sees_legacy_pyc": true,
+  "sees_pycache_only": false,
+  "product_gate_sees_pycache_only": false,
+  "corrupt_pyc": {
+   "gate_sees_it": true,
+   "product_gate_sees_it": true,
+   "real_import_ok": false,
+   "real_import_error": "EOFError: marshal data too short"
+  },
+  "missing_blocks": true,
+  "product_gate_blocks_missing": true,
+  "pass": true
+ },
+ "probe_cost": {
+  "repeat": 3,
+  "arms": [
+   "scipy",
+   "scipy.signal",
+   "scipy._external.array_api_compat.common",
+   "scipy._external.array_api_compat.numpy.fft"
+  ],
+  "runs": [
+   {
+    "mode": "gate",
+    "rows": [
+     [
+      "scipy",
+      true,
+      0.94
+     ],
+     [
+      "scipy.signal",
+      true,
+      1.0
+     ],
+     [
+      "scipy._external.array_api_compat.common",
+      true,
+      1.91
+     ],
+     [
+      "scipy._external.array_api_compat.numpy.fft",
+      true,
+      1.04
+     ]
+    ],
+    "scipy_imported": false,
+    "total_ms": 4.89
+   },
+   {
+    "mode": "gate",
+    "rows": [
+     [
+      "scipy",
+      true,
+      0.6
+     ],
+     [
+      "scipy.signal",
+      true,
+      0.63
+     ],
+     [
+      "scipy._external.array_api_compat.common",
+      true,
+      0.9
+     ],
+     [
+      "scipy._external.array_api_compat.numpy.fft",
+      true,
+      0.89
+     ]
+    ],
+    "scipy_imported": false,
+    "total_ms": 3.02
+   },
+   {
+    "mode": "gate",
+    "rows": [
+     [
+      "scipy",
+      true,
+      0.71
+     ],
+     [
+      "scipy.signal",
+      true,
+      0.73
+     ],
+     [
+      "scipy._external.array_api_compat.common",
+      true,
+      1.38
+     ],
+     [
+      "scipy._external.array_api_compat.numpy.fft",
+      true,
+      1.14
+     ]
+    ],
+    "scipy_imported": false,
+    "total_ms": 3.96
+   },
+   {
+    "mode": "stdlib",
+    "rows": [
+     [
+      "scipy",
+      true,
+      0.44
+     ],
+     [
+      "scipy.signal",
+      true,
+      133.55
+     ],
+     [
+      "scipy._external.array_api_compat.common",
+      true,
+      4.92
+     ],
+     [
+      "scipy._external.array_api_compat.numpy.fft",
+      true,
+      196.4
+     ]
+    ],
+    "scipy_imported": true,
+    "total_ms": 335.31
+   },
+   {
+    "mode": "stdlib",
+    "rows": [
+     [
+      "scipy",
+      true,
+      0.53
+     ],
+     [
+      "scipy.signal",
+      true,
+      120.39
+     ],
+     [
+      "scipy._external.array_api_compat.common",
+      true,
+      4.01
+     ],
+     [
+      "scipy._external.array_api_compat.numpy.fft",
+      true,
+      162.69
+     ]
+    ],
+    "scipy_imported": true,
+    "total_ms": 287.62
+   },
+   {
+    "mode": "stdlib",
+    "rows": [
+     [
+      "scipy",
+      true,
+      0.35
+     ],
+     [
+      "scipy.signal",
+      true,
+      118.82
+     ],
+     [
+      "scipy._external.array_api_compat.common",
+      true,
+      4.33
+     ],
+     [
+      "scipy._external.array_api_compat.numpy.fft",
+      true,
+      167.75
+     ]
+    ],
+    "scipy_imported": true,
+    "total_ms": 291.25
+   }
+  ],
+  "gate_total_ms": {
+   "runs": [
+    4.89,
+    3.02,
+    3.96
+   ],
+   "median": 3.96,
+   "min": 3.02,
+   "max": 4.89
+  },
+  "gate_scipy_imported": [
+   false,
+   false,
+   false
+  ],
+  "stdlib_total_ms": {
+   "runs": [
+    335.31,
+    287.62,
+    291.25
+   ],
+   "median": 291.25,
+   "min": 287.62,
+   "max": 335.31
+  },
+  "stdlib_scipy_imported": [
+   true,
+   true,
+   true
+  ]
+ }
+}
