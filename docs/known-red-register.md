@@ -482,7 +482,9 @@ skyfield 参考：首场峰值 5.025°（贴 5° 门限的掠射场）
 
 ---
 
-## K13 — 场景 B 天空视图仰角与 sgp4 直算差 0.23°（2026-11-09 23:05，已修·改为确定性用例）
+## K13 — 场景 B 天空视图仰角与 sgp4 直算差 0.23°（2026-11-09 23:05，已转绿 `dad6324f`）
+
+- **再检绑定**：验证提交 `dad6324f`；文件集合 `mbdsdr_ai/decoders.py`、`tests/test_e2e_operation_scenarios.py`
 
 ```
 tests/test_e2e_operation_scenarios.py::test_scenario_b_sky_to_spectrum
@@ -535,9 +537,13 @@ assert abs(elev - st["elevation"]) <= 0.2
 - **诚实边界**：用例仍依赖「24h 内有一场 NOAA 19 过境 + 本地有可用 TLE」，
   无 TLE 时 skip（环境前置条件，与本红无关）；但判据本身不再随当天过境几何
   在绿/红之间摇摆——1 秒级时间差已消除（改前/改后同刻差 0.2459° → 0.0001°）。
-- **状态**：已修（2026-11-13，基于 `99a61044` 的单笔提交含 `mbdsdr_ai/decoders.py`
-  + `tests/test_e2e_operation_scenarios.py` + 本条目）。历史原文保留不改，
-  仅追加本次结论。
+- **状态**：已转绿（首次修复提交 `34a1fd11`「K13 收口——去掉卫星位置的整秒截断
+  并加确定性反证」；2026-11-13 在干净 worktree `D:\mbdsdr\_wt\kcheck-dad6324f`
+  （`dad6324f`）复跑 `2 passed`，见下）。历史原文保留不改，仅追加本次结论。
+- **本次复跑（2026-11-13，`dad6324f` 干净 worktree）**：
+  `MBDSDR_OFFLINE=1 QT_QPA_PLATFORM=offscreen python -m pytest tests/test_e2e_operation_scenarios.py::test_scenario_b_sky_to_spectrum tests/test_e2e_operation_scenarios.py::test_scenario_b_sky_guard_is_live -q`
+  → `2 passed, 1 warning in 6.54s`。绑定验证提交取本次跑绿的 `dad6324f`；
+  `34a1fd11` 是首次修复提交，供追溯。
 
 ---
 
@@ -661,13 +667,18 @@ QT_QPA_PLATFORM=offscreen python -m pytest "<nodeid>" -q
 
 ---
 
-## K17 — 设置向前覆盖：3 个字段无 UI 入口也无理由（2026-11-13 实跑，待复核：原验证提交 `ffeeb7c5`）
+## K17 — 设置向前覆盖：3 个字段无 UI 入口也无理由（2026-11-13 实跑，已转绿 `dad6324f`）
 
-- **再检绑定**：验证提交 `ffeeb7c5`；文件集合 `scripts/settings_inventory.py`、`tests/test_settings_ui_coverage.py`、`desktop/config_schema.py`、`desktop/control_panel.py`、`desktop/settings_panel.py`
-- **再检（2026-11-13，R8）**：`desktop/control_panel.py`（3 笔）、
-  `desktop/settings_panel.py`（1 笔）在 `ffeeb7c5` 之后又被改动 → 本条自动退回
-  待复核；下面 `1 passed` 是当时那次验证，不代表当前树。按记录命令重跑后再改回
-  `已转绿` 并更新验证提交。
+- **再检绑定**：验证提交 `dad6324f`；文件集合 `scripts/settings_inventory.py`、`tests/test_settings_ui_coverage.py`、`desktop/config_schema.py`、`desktop/control_panel.py`、`desktop/settings_panel.py`
+- **再检（2026-11-13，R8 清账）**：旧验证提交 `ffeeb7c5` 之后
+  `desktop/control_panel.py` / `desktop/settings_panel.py` 又有改动，曾被 R8 退回
+  待复核。本次在干净 worktree `D:\mbdsdr\_wt\kcheck-dad6324f`（`dad6324f`，不含
+  其他线未提交改动）实跑：
+  - `MBDSDR_OFFLINE=1 QT_QPA_PLATFORM=offscreen python -m pytest tests/test_settings_ui_coverage.py::test_forward_every_field_has_ui_entry_or_reason -q`
+    → `1 passed in 0.71s`；
+  - `python scripts/settings_inventory.py` →
+    `字段 55 / 有 UI 入口 51 / 有理由 4 / 缺失 0 / 幽灵键 0 / source_commit ce1ed9ef`。
+  绑定验证提交已从 `ffeeb7c5` 更新为本次跑绿的 `dad6324f`。
 
 - **nodeid**：`tests/test_settings_ui_coverage.py::test_forward_every_field_has_ui_entry_or_reason`
 - **复跑命令**：
@@ -689,8 +700,9 @@ QT_QPA_PLATFORM=offscreen python -m pytest "<nodeid>" -q
   定位方式：`git log -S`（未逐提交 checkout 复跑）。
 - **根因**：盘点锚点跟着产品文案走，文案改了锚点没跟；内部持久化键入库时没有
   同步登记「为什么没有 UI」。
-- **当前 owner**：设置线（K17 已由 R8 退回待复核）；`scripts/settings_inventory.py`
-  无活跃 claim；`desktop/settings_panel.py` 仍属设置三环线，本笔未触碰。
+- **当前 owner**：无（K17 已于 2026-11-13 在 `dad6324f` 干净 worktree 复跑转绿）；
+  `scripts/settings_inventory.py` 无活跃 claim；`desktop/settings_panel.py` 仍属
+  设置三环线，本笔未触碰。
 - **收口判定（逐字段）**：
   - `agc_enabled`：不是缺控件，是锚点过时。控件文案早在 `2a07f344` 改为
     `QCheckBox("硬件 AGC")`，产品形态正确，**不补新控件/不改 UI**，按实际控件
@@ -715,12 +727,16 @@ QT_QPA_PLATFORM=offscreen python -m pytest "<nodeid>" -q
 
 ---
 
-## K18 — 设置盘点表与脚本读数不一致（2026-11-13 实跑，待复核：原验证提交 `a92d74c4`）
+## K18 — 设置盘点表与脚本读数不一致（2026-11-13 实跑，已转绿 `dad6324f`）
 
-- **再检绑定**：验证提交 `a92d74c4`；文件集合 `docs/settings-inventory.md`、`scripts/settings_inventory.py`、`tests/test_settings_ui_coverage.py`、`desktop/config_schema.py`
-- **再检（2026-11-13，R8）**：`docs/settings-inventory.md` 在 `a92d74c4` 之后又被
-  重生成 3 笔（`57ddb41d` / `97f213d5` / `515fe918`）→ 本条自动退回待复核；按记录
-  命令重跑并核对读数后再改回 `已转绿`。
+- **再检绑定**：验证提交 `dad6324f`；文件集合 `docs/settings-inventory.md`、`scripts/settings_inventory.py`、`tests/test_settings_ui_coverage.py`、`desktop/config_schema.py`
+- **再检（2026-11-13，R8 清账）**：`docs/settings-inventory.md` 在旧验证提交
+  `a92d74c4` 之后被重生成 3 笔，曾被 R8 退回待复核。本次在
+  `D:\mbdsdr\_wt\kcheck-dad6324f`（`dad6324f`）实跑：
+  - `MBDSDR_OFFLINE=1 QT_QPA_PLATFORM=offscreen python -m pytest tests/test_settings_ui_coverage.py::test_inventory_table_matches_script -q`
+    → `1 passed`；
+  - `python scripts/settings_inventory.py --check` → `文档块一致`。
+  绑定验证提交已从 `a92d74c4` 更新为本次跑绿的 `dad6324f`。
 
 - **nodeid**：`tests/test_settings_ui_coverage.py::test_inventory_table_matches_script`
 - **复跑命令**：
@@ -735,9 +751,10 @@ QT_QPA_PLATFORM=offscreen python -m pytest "<nodeid>" -q
 - **首次变红**：`2a07f344`（2026-11-11 22:14，UI 入口 51→50、缺失 0→1），随后
   `20652e90`（22:26，字段 53→55、缺失 1→3）；表最后一次生成在 `a2be554a`
   （2026-11-11）。定位方式 `git log -S`。
-- **当前 owner**：设置线（K18 已由 R8 退回待复核）。`docs/settings-inventory.md`
-  原为机制线孤儿 claim（pid 34636 已退出、心跳过期 +1611.8min、工作区无在途改动），
-  按 COORDINATION §6.1.4 2026-11-13 记录型接管，提交后已释放。
+- **当前 owner**：无（K18 已于 2026-11-13 在 `dad6324f` 干净 worktree 复跑转绿）。
+  `docs/settings-inventory.md` 原为机制线孤儿 claim（pid 34636 已退出、心跳过期
+  +1611.8min、工作区无在途改动），按 COORDINATION §6.1.4 2026-11-13 记录型接管，
+  提交后已释放。
 - **根因复核（修正原判断）**：表**不是手写**的——块由
   `scripts/settings_inventory.py --write` 生成，`test_inventory_table_matches_script`
   整块比对脚本产出，手改即红。真实根因是 `config_schema` 两次变更
@@ -766,7 +783,9 @@ QT_QPA_PLATFORM=offscreen python -m pytest "<nodeid>" -q
   - `64b0b397`（接入运行期热插拔监听）→
     `tests/test_usb_hotplug.py::test_module_has_no_reconnection_dependency`
     新增 `"reconnect"`、`"reconnection"` 两条。
-  当前树单跑 `tests/test_source_pin_ratchet.py` → **1 failed, 2 passed**，失败首行
+  2026-11-13 在干净 worktree `D:\mbdsdr\_wt\kcheck-dad6324f`（`dad6324f`）单跑
+  `python -m pytest tests/test_source_pin_ratchet.py -q` → **1 failed, 2 passed**，
+  失败首行
   `AssertionError: 新增源码文本 pin（必须改成行为断言，或由 owner 在基线写明理由）：`。
   不是当时写错，而是「已转绿」只核了一次：没有「验证提交之后同文件再变就退回
   待复核」的机制。本条现由 R8 自动退回待复核；重跑并把验证提交更新到最新一次之前，
@@ -873,19 +892,22 @@ baseline 56 → 58（`BUILT_AT` 同步 58），每条带 owner + reason：
 ## K20 — tooltip 守卫 4 条（2026-11-13 实跑，待复核：原验证提交 `294beef4`）
 
 - **再检绑定**：验证提交 `294beef4`；文件集合 `desktop/device_panel.py`、`desktop/control_panel.py`、`desktop/main_window.py`、`desktop/sat_track_panel.py`、`docs/tooltip-dynamic-baseline.json`、`docs/tooltip-baseline.json`、`tests/test_tooltip_guard.py`、`tests/test_tooltip_dynamic_runtime.py`
-- **为什么失守（2026-11-13 在 HEAD 实跑）**：`294beef4` 当时 7 passed，但后继提交
-  继续往同文件加透传 tooltip，登记表没跟：
+- **为什么失守（2026-11-13 在干净 worktree 实跑）**：`294beef4` 当时 7 passed，但
+  后继提交继续往同文件加透传 tooltip，登记表没跟：
   - `64b0b397` → `desktop/device_panel.py` 的 5 处 `event.detail`
-    （`:570` / `:588` / `:594` / `:601` / `:605`）、`:710 :: text`、
-    `:896 :: identity_note` 未登记；
-  - `03fe46c0` → `desktop/device_panel.py`「重新读取设备占用登记」tooltip 长度 <12；
-  - 另有 `desktop/sat_track_panel.py:400 :: text` 未登记。
-  当前树单跑 `tests/test_tooltip_guard.py` → **3 failed, 4 passed**：
-  `test_every_passthrough_tooltip_is_registered` 点名 8 处未登记；
+    （`dad6324f` 树内为 `:537` / `:555` / `:561` / `:568` / `:572`）、
+    `:677 :: text`、`:860 :: identity_note` 未登记；
+  - `03fe46c0` → `desktop/device_panel.py`「重新读取设备占用登记」tooltip 长度 <12。
+  2026-11-13 在 `D:\mbdsdr\_wt\kcheck-dad6324f`（`dad6324f`）单跑
+  `python -m pytest tests/test_tooltip_guard.py -q` → **3 failed, 4 passed**：
+  `test_every_passthrough_tooltip_is_registered` 点名 **7 处**未登记；
   `test_tooltip_baseline_only_shrinks` 点名
   `desktop/device_panel.py::重新读取设备占用登记::too_short`；
   `test_baseline_file_stays_in_sync_with_counter` → `assert 3 == 4`。
-  与 K19 同因：当时真绿、后继提交打破、缺再检机制。本条现由 R8 自动退回待复核。
+  与 K19 同因：当时真绿、后继提交打破、缺再检机制。本条保持待复核。
+  注：主工作树里另一线未提交的 `device_panel` / `sat_track_panel` 改动会让未登记
+  列表临时变长（含 `sat_track_panel.py:400 :: text`），本条以干净提交 `dad6324f`
+  的读数为准，不把那部分算进 K20。
 
 **合并为一条而非四条**：同一文件、同一契约（`docs/discoverability.md` 三条规矩）、
 同一批转绿动作（补登记 / 改文案 / 删数值），拆开只会把一个修复批次记成 4 笔账。
@@ -950,10 +972,13 @@ baseline 56 → 58（`BUILT_AT` 同步 58），每条带 owner + reason：
   MBDSDR_OFFLINE=1 QT_QPA_PLATFORM=offscreen \
     python -m pytest tests/test_tooltip_dynamic_runtime.py::test_settings_panel_passthrough_tooltips_self_describe -q -rf
   ```
-- **失败消息首行**（2026-11-13 在 HEAD `66a43516` 实跑）：
+- **失败消息首行**（2026-11-13 在干净 worktree `D:\mbdsdr\_wt\kcheck-dad6324f`
+  （`dad6324f`）实跑）：
   `AssertionError: 以下透传条目在构造/触发后没有渲染出 tooltip（运行时兜底失效，请补触发步骤或从登记表移除）：`
-  实测缺 3 处：`desktop/settings_panel.py:1072`、`:1424`、`:1432`；结果 `1 failed`。
-- **首次记录**：2026-11-13（HEAD `66a43516` 工作树，持 Qt 锁单跑）。
+  实测缺 3 处：`desktop/settings_panel.py:1072`、`:1424`、`:1432`；
+  pytest 汇总 `1 failed in 2.22s`。
+- **首次记录**：2026-11-13（先在工作树 HEAD `66a43516` 复现，随后在干净提交
+  `dad6324f` 的独立 worktree 复跑，结论一致；持 Qt 锁单跑）。
 - **首次变红**：未逐提交 bisect；按 K15 的懒构建改动推定早于 K20 的 `294beef4`，
   属存量。定位方式：读 `tests/test_tooltip_dynamic_runtime.py` 的 `_record`
   （只构造面板、不 `show()`）与 K15 记录。
