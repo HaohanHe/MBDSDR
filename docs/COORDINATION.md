@@ -1871,6 +1871,8 @@ No supported devices found），GNSS+SDR 同开复验没做成；离线那次
 | 文件 | 线名 | 开始时间 | 预计提交 hash |
 |---|---|---|---|
 | _（空）_ | | | |
+| `tests/test_status_panel_squelch_units.py` | K20同类收口线/6ae85f56（静态守卫改按类名定位 SDRStatus 定义文件并补反证） | 2026-11-13 07:13 | 本笔 |
+| `docs/COORDINATION.md` | K20同类收口线/6ae85f56（本笔两行的 §6.1 登记） | 2026-11-13 07:13 | 本笔 |
 | `desktop/status_panel.py` | K20同类收口线/6ae85f56（断开时清掉残留增益告警 tooltip） | 2026-11-13 07:05 | 本笔 |
 | `desktop/main_window.py` | K20同类收口线/6ae85f56（多普勒芯片目标失效 tooltip + SDR 未连接分支去重复） | 2026-11-13 06:51 | 本笔 |
 | `tests/test_cross_panel_rendering.py` | K20同类收口线/6ae85f56（断开后 tooltip 无残留数字断言） | 2026-11-13 07:05 | 本笔 |
