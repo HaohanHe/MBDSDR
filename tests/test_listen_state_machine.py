@@ -115,8 +115,12 @@ def test_start_iq_streams_does_not_auto_open_soundcard(win, monkeypatch):
     """连接成功只接频谱/录制，不得自动 start 声卡。"""
     calls = []
     player = getattr(win, "_audio_player", None)
-    if player is None:
-        pytest.skip("无音频设备，AudioPlayer 降级为 None")
+    assert player is not None, (
+        "_audio_player is None 不是「没声卡」：没声卡时 AudioPlayer 仍然存在，"
+        "只是 available=False；None 只出现在 AudioPlayer 导入失败或构造抛异常，"
+        "那是本仓组件坏了（docs/evidence-standard.md §2 附则：本仓该有的依赖"
+        "导不进来必须红），不在这里 skip。"
+    )
     monkeypatch.setattr(player, "start", lambda: calls.append("start") or True)
     monkeypatch.setattr(win, "_build_pipeline", lambda: None)
     win._listening = False
@@ -139,8 +143,12 @@ def test_listen_without_device_is_honest(win, monkeypatch):
 def test_listen_toggle_starts_and_stops_player(win, monkeypatch):
     """收听开声卡并推 worker；停止解调关声卡并把解调也停掉。"""
     player = getattr(win, "_audio_player", None)
-    if player is None:
-        pytest.skip("无音频设备，AudioPlayer 降级为 None")
+    assert player is not None, (
+        "_audio_player is None 不是「没声卡」：没声卡时 AudioPlayer 仍然存在，"
+        "只是 available=False；None 只出现在 AudioPlayer 导入失败或构造抛异常，"
+        "那是本仓组件坏了（docs/evidence-standard.md §2 附则：本仓该有的依赖"
+        "导不进来必须红），不在这里 skip。"
+    )
     events = []
     monkeypatch.setattr(player, "start", lambda: events.append("start") or True)
     monkeypatch.setattr(player, "stop", lambda: events.append("stop"))
@@ -164,8 +172,12 @@ def test_listen_toggle_starts_and_stops_player(win, monkeypatch):
 def test_muted_state_keeps_demod_running(win, monkeypatch):
     """「不收听」= 静音解调：worker 继续解调，只是不写声卡。"""
     player = getattr(win, "_audio_player", None)
-    if player is None:
-        pytest.skip("无音频设备，AudioPlayer 降级为 None")
+    assert player is not None, (
+        "_audio_player is None 不是「没声卡」：没声卡时 AudioPlayer 仍然存在，"
+        "只是 available=False；None 只出现在 AudioPlayer 导入失败或构造抛异常，"
+        "那是本仓组件坏了（docs/evidence-standard.md §2 附则：本仓该有的依赖"
+        "导不进来必须红），不在这里 skip。"
+    )
     pushed = []
     monkeypatch.setattr(player, "start", lambda: True)
     monkeypatch.setattr(player, "set_muted", lambda m: None)
@@ -180,8 +192,12 @@ def test_muted_state_keeps_demod_running(win, monkeypatch):
 def test_disconnect_resets_listening(win, monkeypatch):
     """断连必须复位收听态与按钮，否则重连会偷偷出声。"""
     player = getattr(win, "_audio_player", None)
-    if player is None:
-        pytest.skip("无音频设备，AudioPlayer 降级为 None")
+    assert player is not None, (
+        "_audio_player is None 不是「没声卡」：没声卡时 AudioPlayer 仍然存在，"
+        "只是 available=False；None 只出现在 AudioPlayer 导入失败或构造抛异常，"
+        "那是本仓组件坏了（docs/evidence-standard.md §2 附则：本仓该有的依赖"
+        "导不进来必须红），不在这里 skip。"
+    )
     monkeypatch.setattr(player, "stop", lambda: None)
     monkeypatch.setattr(win, "_stop_tx", lambda *a, **k: None)
     monkeypatch.setattr(win, "_stop_replay", lambda: None)
