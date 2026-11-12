@@ -85,7 +85,7 @@ def patch_sd(monkeypatch):
     def _apply(output_names, start_raises=False):
         fake = make_fake_sd(output_names, start_raises=start_raises)
         monkeypatch.setattr(audio_out_mod, "sd", fake, raising=True)
-        monkeypatch.setattr(audio_out_mod, "_SD_AVAILABLE", True, raising=True)
+        monkeypatch.setattr(audio_out_mod, "sd_available", lambda: True, raising=True)
         FakeOutputStream.instances.clear()
         return fake
     return _apply
@@ -185,7 +185,7 @@ def test_test_tone_write_queued(patch_sd):
 # ----------------------------------------------------------------------
 def test_sounddevice_absent_degrades(monkeypatch):
     monkeypatch.setattr(audio_out_mod, "sd", None, raising=True)
-    monkeypatch.setattr(audio_out_mod, "_SD_AVAILABLE", False, raising=True)
+    monkeypatch.setattr(audio_out_mod, "sd_available", lambda: False, raising=True)
     player = audio_out_mod.AudioPlayer(sample_rate=48000)
     assert player.available is False
     assert player.start() is False
@@ -214,7 +214,7 @@ def test_sounddevice_import_fail_degrades(monkeypatch):
     monkeypatch.setattr(builtins, "__import__", deny_sounddevice)
     try:
         reloaded = importlib.reload(audio_out_mod)
-        assert reloaded._SD_AVAILABLE is False
+        assert reloaded.sd_available() is False
         player = reloaded.AudioPlayer(sample_rate=48000)
         assert player.available is False
         assert player.start() is False
