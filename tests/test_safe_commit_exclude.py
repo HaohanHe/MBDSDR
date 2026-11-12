@@ -65,8 +65,8 @@ def test_exclude_hunk_keeps_other_change_out(tmp_path):
     assert "line5 other" not in committed
     assert "line5\n" in committed
 
-    worktree = (repo / "doc.md").read_text(encoding="utf-8")
-    assert "line5 other" in worktree, "工作树不能被动"
+    assert "line5 other" in (repo / "doc.md").read_text(
+        encoding="utf-8").splitlines(), "工作树不能被动"
 
     log = _git(repo, "log", "-1", "--format=%B").stdout
     assert "excluded-hunks" in log

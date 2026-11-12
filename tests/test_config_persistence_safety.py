@@ -146,9 +146,9 @@ class TestMergeAndCorrupt:
 
         reason_files = list(tmp_path.glob("config.json.corrupt-*.reason.txt"))
         assert len(reason_files) == 1, "备份成功却没写理由，等于备份没人知道"
-        text = reason_files[0].read_text(encoding="utf-8")
-        assert "损坏" in text and str(path) in text
-        assert text.count("\n") == 1, "理由文件必须是单行"
+        lines = reason_files[0].read_text(encoding="utf-8").splitlines()
+        assert len(lines) == 1, "理由文件必须是单行"
+        assert "损坏" in lines[0] and str(path) in lines[0], lines
 
         import mbdsdr_ai.corrupt_evidence as ce
         report = ce.scan_corruption_evidence([str(tmp_path)])

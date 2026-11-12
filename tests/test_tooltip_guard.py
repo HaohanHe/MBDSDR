@@ -126,6 +126,14 @@ def _load_baseline():
         return json.load(fh)["entries"]
 
 
+def _defines_function(source: str, name: str) -> bool:
+    """按 AST 判断用例是否真的定义着（`def name(` 子串会误命中注释/调用）。"""
+    return any(
+        isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+        and node.name == name
+        for node in ast.walk(ast.parse(source)))
+
+
 def _sample_rate_tooltip(monkeypatch) -> str:
     """构造一次设备面板，读采样率控件渲染后的 tooltip（桩掉硬件枚举）。"""
     pytest.importorskip("PySide6")
@@ -234,7 +242,7 @@ def test_dynamic_baseline_schema_is_complete():
         assert os.path.exists(full), f"runtime_test 指向的文件不存在：{e['runtime_test']}"
         with open(full, encoding="utf-8") as fh:
             src = fh.read()
-        assert f"def {name}(" in src, (
+        assert _defines_function(src, name), (
             f"runtime_test 指向的用例不存在：{e['runtime_test']}（没有这个字段/用例"
             "的条目不许进 baseline）")
 

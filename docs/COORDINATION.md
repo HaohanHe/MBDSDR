@@ -2259,6 +2259,33 @@ No supported devices found），GNSS+SDR 同开复验没做成；离线那次
 - 回退：`git checkout 84da999b131af6a669d6656e266cb7a2e5268267 -- docs/settings-inventory.md`
   或 `git revert <接管提交>`
 
+### 接管记录：tests/test_config_persistence_safety.py
+
+- 接管人 / 会话：K19收口线 / 6ae85f56a16a76df1598024e
+- 接管时间 / HEAD：2026-11-13 01:26 / `748a2992`
+- 原持有者：设置三环线
+- 原 claim 证据：acquired_at=2026-11-12 22:23:49 ttl=45min 心跳=2026-11-12 22:23:49，
+  接管时已过期 **+182.5 分钟**（held=182.5/45.0min），满足 ≥30 分钟
+- 原 owner 最后活跃证据（原始输出）：
+  - `file_claim.py status`：
+    `owner=设置三环线 held=182.5/45.0min EXPIRED(+137.5min) pid=5348 since=2026-11-12 22:23:49`
+  - `git log -1 -- tests/test_config_persistence_safety.py`：`81ecc4ba`
+    （2026-11-12 22:23:57，即 claim 建立 8 秒后随改动提交，此后无新内容）
+  - `git status --porcelain -- tests/test_config_persistence_safety.py`：空（无在途改动）
+  - `Get-Process -Id 5348`：无输出（进程已退出）；接管前 `git rev-parse
+    HEAD:...` = `4df52a6f6c37f1ff12ba07a8c068b6645675ee38`
+- 凭什么判定「已放弃」而不是「在忙」：
+  过期 ≥ 30min（+182.5）✅；`git status` 为空 ✅；claim 之后无新内容提交 ✅；
+  pid 5348 已不存在 ✅ —— 四条同时成立。
+- 本次改动范围：仅该文件 3 条 runtime-artifact pin 的断言写法（理由文件按行断言），
+  另含本记录。
+- 保留原改动的证明：接管前该路径 `git status` 为空、blob 为
+  `4df52a6f6c37f1ff12ba07a8c068b6645675ee38`；接管提交 diff 只含该用例断言写法，
+  不含原 owner 任何未提交内容。
+- 引用：接管提交即包含本记录的那次提交（`test(pins): K19 把 15 条脆弱 pin …`）
+- 回退：`git checkout 4df52a6f6c37f1ff12ba07a8c068b6645675ee38 -- tests/test_config_persistence_safety.py`
+  或 `git revert <接管提交>`
+
 ### 等待项：AI SDR 会话显式注入（2026-11-12）
 
 > 背景：桌面 `MainWindow._active_sdr_backend` 与 `agent.sdr_manager` 原本是

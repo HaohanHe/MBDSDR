@@ -202,12 +202,13 @@ def test_corrupt_registry_is_backed_up_with_reason(_registry):
     assert len(backups) == 1, backups
     reason = backups[0].with_name(backups[0].name + ".reason.txt")
     assert reason.exists(), "损坏备份必须与理由文件成对"
-    text = reason.read_text(encoding="utf-8").strip()
-    assert text, "理由不能为空"
+    lines = reason.read_text(encoding="utf-8").splitlines()
+    assert any(line.strip() for line in lines), "理由不能为空"
     # 理由文本必须自带登记文件路径：其余四类（配置/书签/布局/AI 记忆）
     # 都有，单独看理由或以后加导出时才能定位到是哪一份文件坏了。
-    assert str(_registry) in text, f"理由缺少登记文件路径：{text!r}"
-    assert "JSON 读取/解析失败" in text, text
+    assert any(str(_registry) in line for line in lines), (
+        f"理由缺少登记文件路径：{lines!r}")
+    assert any("JSON 读取/解析失败" in line for line in lines), lines
 
 
 def test_non_object_registry_is_also_treated_as_corrupt(_registry):

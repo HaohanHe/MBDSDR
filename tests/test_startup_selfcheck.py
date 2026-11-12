@@ -164,6 +164,7 @@ def test_deferred_failure_reports_to_status_bar_and_log(monkeypatch, tmp_path):
     assert "scipy._external.packaging_version" in text
     assert isinstance(timeout, int) and timeout > 0, "必须带超时：不阻塞、也不永久占位"
 
-    written = log.read_text(encoding="utf-8")
-    assert "延后导入失败" in written
-    assert "缺了会怎样" in written and "怎么修" in written
+    lines = log.read_text(encoding="utf-8").splitlines()
+    for needle in ("延后导入失败", "缺了会怎样", "怎么修"):
+        assert any(needle in line for line in lines), (
+            f"启动日志缺少「{needle}」：{lines!r}")

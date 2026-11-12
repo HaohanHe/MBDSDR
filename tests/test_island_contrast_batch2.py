@@ -87,16 +87,27 @@ def test_rf_sky_search_and_popup_borders_meet_non_text_contrast():
 
 def test_time_machine_control_borders_meet_non_text_contrast():
     """时间机器的输入框/按钮描边是唯一可见边界，必须达到非文本 3:1。"""
-    import inspect
+    from PySide6.QtWidgets import QApplication
 
+    _app = QApplication.instance() or QApplication([])
     import time_machine as tm
 
-    src = inspect.getsource(tm.TimeMachineDialog._build_ui)
-    assert src.count("border: 1px solid #6A7284") == 2, (
-        "输入框与按钮应各有一条 #6A7284 描边，实际 %d 条"
-        % src.count("border: 1px solid #6A7284"))
-    assert "QPushButton:hover { border-color: #8f95a3; }" in src, (
-        "hover 描边应复用 tmHint 的 #8f95a3")
+    dlg = tm.TimeMachineDialog()
+    try:
+        qss = dlg.styleSheet()
+    finally:
+        dlg.close()
+
+    borders = dict(re.findall(
+        r"(QDateTimeEdit|QPushButton)\s*\{[^}]*?border:\s*1px solid\s+"
+        r"(#[0-9A-Fa-f]{6})", qss))
+    assert borders == {"QDateTimeEdit": "#6A7284", "QPushButton": "#6A7284"}, (
+        "输入框与按钮应各有一条 #6A7284 描边，实际 %r" % borders)
+    hover = re.search(
+        r"QPushButton:hover\s*\{\s*border-color:\s*(#[0-9A-Fa-f]{6})", qss)
+    assert hover and hover.group(1).lower() == "#8f95a3", (
+        "hover 描边应复用 tmHint 的 #8f95a3，实际 %r"
+        % (hover and hover.group(1)))
 
     for host in ("#1b1e26", "#14161c"):     # 控件底 / 对话框底
         assert contrast_ratio("#6A7284", host) >= MIN_NON_TEXT, (

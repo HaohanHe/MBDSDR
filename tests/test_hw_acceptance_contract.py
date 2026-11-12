@@ -14,6 +14,7 @@
 「这个数还是当时认定的那个数」——两者都不可或缺。
 """
 
+import ast
 import sys
 from pathlib import Path
 
@@ -26,6 +27,33 @@ import common  # noqa: E402
 import run_all  # noqa: E402
 
 CODE_SET = {"NO_HW", "NO_DATA", "NEEDS_OPERATOR", "NEEDS_TIME_WINDOW"}
+
+
+def _functions_referencing(path: Path, name: str) -> set:
+    """返回源码里真正引用该名字的函数名（AST 语义，不是子串计数）。"""
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    return {
+        fn.name
+        for fn in ast.walk(tree)
+        if isinstance(fn, ast.FunctionDef)
+        and any(isinstance(n, ast.Name) and n.id == name for n in ast.walk(fn))
+    }
+
+
+def _naked_pilot_tolerance_literals(path: Path) -> list:
+    """找出 ``abs(f_p - 19000) < 100/300`` 这类绕开常量的裸字面量比较。"""
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    hits = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Compare):
+            continue
+        if "f_p" not in ast.unparse(node.left):
+            continue
+        for comparator in node.comparators:
+            if (isinstance(comparator, ast.Constant)
+                    and comparator.value in (100, 100.0, 300, 300.0)):
+                hits.append(ast.unparse(node))
+    return hits
 
 
 def test_skip_codes_are_exactly_four():
@@ -247,11 +275,11 @@ def test_pilot_acceptance_thresholds_match_doc_card():
     assert f"19000±{tol:.0f} Hz 且峰/邻域 >{snr:.0f} dB" in text, (
         "人工卡与 ring3 导频阈值已分叉：文档里找不到由常量拼出的判据串")
 
-    ring3_src = RING3.read_text(encoding="utf-8")
-    assert ring3_src.count("PILOT_FREQ_TOL_HZ") >= 2, (
-        "ring3 的夹具路径与真机路径没有共用同一个容差常量")
-    assert "abs(f_p - 19000) < 100" not in ring3_src
-    assert "abs(f_p - 19000) < 300" not in ring3_src
+    ring3_sites = _functions_referencing(RING3, "PILOT_FREQ_TOL_HZ")
+    assert len(ring3_sites) >= 2, (
+        f"ring3 的夹具路径与真机路径没有共用同一个容差常量：{ring3_sites}")
+    naked = _naked_pilot_tolerance_literals(RING3)
+    assert naked == [], f"ring3 又写回了裸容差字面量（绕开常量）：{naked}"
 
 
 def test_playback_ratio_thresholds_match_doc_card():
