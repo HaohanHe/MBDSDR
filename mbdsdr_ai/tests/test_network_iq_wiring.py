@@ -111,7 +111,7 @@ class TestRegistration:
         monkeypatch.setenv(sb.NETWORK_IQ_ENV, ENV_VALUE)
         mgr = sb.SDRBackendManager()
         dev = [d for d in mgr.list_devices()
-               if d["device_id"] == "net_tcp_127.0.0.1_1234"]
+               if d["device_id"] == "network_iq|serial:net_tcp_127.0.0.1_1234"]
         assert len(dev) == 1
         assert dev[0]["type"] == "network_iq"
         assert dev[0]["connected"] is False   # 登记 != 连接
