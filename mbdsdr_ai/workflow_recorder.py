@@ -18,12 +18,15 @@ WorkflowRecorder：录制 Agent 的工具调用序列，保存为可复用的工
 """
 
 import json
+import logging
 import time
 import os
 
 from dataclasses import dataclass, field
 from typing import Dict, List, Any, Optional, Callable, Tuple
 from enum import Enum
+
+logger = logging.getLogger(__name__)
 
 
 class RecordingStatus(str, Enum):
@@ -137,6 +140,9 @@ class WorkflowRecorder:
         self.recordings: Dict[str, Recording] = {}
         self.templates: Dict[str, WorkflowTemplate] = {}
         self._step_counter = 0
+        # 降级可见：读不出来的模板文件记在这里（path + 原因），
+        # 避免「模板列表为空」同时代表「没存过」和「读坏了」。
+        self.load_errors: List[Dict[str, str]] = []
 
         # 加载已保存的模板
         self._load_templates()
@@ -416,6 +422,8 @@ class WorkflowRecorder:
             "total_recordings": len(self.recordings),
             "total_templates": len(self.templates),
             "storage_dir": self.storage_dir,
+            # 加载降级条数：非 0 表示模板列表少了东西，不是「本来就没有模板」。
+            "load_error_count": len(self.load_errors),
         }
 
     def _save_recording(self, recording: Recording):
@@ -454,6 +462,12 @@ class WorkflowRecorder:
                         version=data.get("version", "1.0"),
                         tags=data.get("tags", []),
                     )
-                    self.templates[template.template_id] = template
-                except Exception:
-                    pass
+                except FileNotFoundError:
+                    continue  # 竞态：列目录后刚被删，与「本来就没有」同义
+                except (OSError, ValueError, KeyError, TypeError) as exc:
+                    reason = f"{type(exc).__name__}: {exc}"
+                    self.load_errors.append({"path": path, "error": reason})
+                    logger.warning("工作流模板读取失败，已记入 load_errors：%s | %s",
+                                   path, reason)
+                    continue
+                self.templates[template.template_id] = template
