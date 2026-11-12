@@ -300,7 +300,7 @@ def three_stage_sync(samples: List[float], sample_rate: float,
 
 
 # ---------------------------------------------------------------------------
-# 闭环自测：用 ft8_encode 真实编码生成信号（加频偏+噪声），验证三段跟踪
+# 合成信号：用 ft8_encode 真实编码生成信号（加频偏+噪声），供同步件测试使用
 # ---------------------------------------------------------------------------
 def _synthesize_ft8_audio(text: str, center_hz: float = 1500.0,
                           f_offset_hz: float = 3.7, t_offset_s: float = 0.5,
@@ -328,62 +328,7 @@ def _synthesize_ft8_audio(text: str, center_hz: float = 1500.0,
     return x.tolist(), center_hz + f_offset_hz
 
 
-def _self_test() -> int:
-    from mbdsdr_ai.ft8_decode import data_symbol_positions
-    from mbdsdr_ai import ft8_decode
-    from mbdsdr_ai.ft8_unpack import unpack77
+# 端到端自测（合成 → decode_ft8_audio）已迁到 tests/test_ft8_e2e.py：
+# 它必须 import ft8_lite，而 ft8_lite 依赖本模块——留在库内就是一条
+# 「用函数体内 import 把环藏起来」的边（D1）。
 
-    sr = 12000
-    # 用标准格式呼号（letter+digit+3letter，iarea=2），走 pack28 标准分支
-    text = "CQ K1ABC OM74"
-    f_true = 1500.0 + 3.7
-    samples, true_center = _synthesize_ft8_audio(
-        text, center_hz=1500.0, f_offset_hz=3.7, t_offset_s=0.5,
-        sigma_noise=0.15, sr=sr, seed=0)
-    print(f"[合成] 真中心={true_center:.2f}Hz, t0=0.5s, 噪声σ=0.15")
-
-    cands = costas_sync(samples, sr, search_lo_hz=300.0, search_hi_hz=3000.0)
-    if not cands:
-        print("[FAIL] costas_sync 未检出候选")
-        return 1
-    best = cands[0]
-    ferr_coarse = abs(best["center_hz"] - true_center)
-    print(f"[粗同步] best center={best['center_hz']:.2f}Hz "
-          f"(误差 {ferr_coarse:.2f}Hz), t={best['time_offset_s']:.3f}s, "
-          f"sync_ratio={best['sync_ratio']:.2f}")
-    ok1 = ferr_coarse < 2.0
-    print(f"  -> 粗频差 < 2Hz: {'PASS' if ok1 else 'FAIL'}")
-
-    ref = three_stage_sync(samples, sr, best)
-    ferr_ref = abs(ref["center_hz"] - true_center)
-    print(f"[精同步] center={ref['center_hz']:.3f}Hz "
-          f"(误差 {ferr_ref:.3f}Hz), 残余校正={ref['residual_freq_hz']:+.3f}Hz, "
-          f"SNR={ref['snr_est_db']:.1f}dB")
-    ok2 = ferr_ref < 0.5
-    print(f"  -> 精频差 < 0.5Hz: {'PASS' if ok2 else 'FAIL'}")
-
-    # 直接走解码
-    data_pos = data_symbol_positions()
-    e58 = ref["energies_79"][data_pos, :].tolist()
-    r = ft8_decode.decode_ft8_payload(e58, snr_db=ref["snr_est_db"])
-    msg = unpack77(r["data_bits"])
-    print(f"[解码] crc_ok={r['crc_ok']}, iters={r['iters']}, "
-          f"text={msg.get('text')!r}")
-    ok3 = (r["crc_ok"] and msg.get("text") == text)
-    print(f"  -> 解出原始消息: {'PASS' if ok3 else 'FAIL'}")
-
-    # 端到端 decode_ft8_audio
-    from mbdsdr_ai.ft8_lite import decode_ft8_audio
-    out = decode_ft8_audio(samples, sr)
-    print(f"[端到端] decoded={out.get('decoded')}, message={out.get('message')!r}, "
-          f"center={out.get('center_hz')}")
-    ok4 = out.get("decoded") and out.get("message") == text
-    print(f"  -> decode_ft8_audio 解出原文: {'PASS' if ok4 else 'FAIL'}")
-
-    allok = ok1 and ok2 and ok3 and ok4
-    print(f"\n闭环自测: {'ALL PASS' if allok else 'FAIL'}")
-    return 0 if allok else 1
-
-
-if __name__ == "__main__":
-    raise SystemExit(_self_test())
