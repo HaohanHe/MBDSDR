@@ -3,6 +3,7 @@
 > 只做清单与判断，不改代码。
 > 已修好的三处（`settings.py`、`bookmark_manager.py`、`fm_scan.py`）不在表内，仅作为第 1 条的修法参照。
 > 范围：生产代码里读用户配置 / 用户状态 JSON 的点；打包数据、协议报文、录音元数据读取单列在末尾，不入 27 条。
+> 修复状态：A1 → `d48fc550`，A2 → `afa77023`，B4 → 本笔；表内其余各条仍为清单判断。
 
 ## 结论摘要
 
@@ -36,7 +37,7 @@
 | B1 | `mbdsdr_ai/config.py:334` / `:391` `config.json` | 解析失败/顶层非对象 → 备份后回默认 + `last_error` | 是，合并写（只提交变化的键） | 有，`*.corrupt-*` | 有 `last_error()`，AI 面板/预连接会展示 | 最多重填一次设置，证据还在 |
 | B2 | `desktop/settings_panel.py:610` 通用 JSON 读取 | 解析失败/顶层非对象 → 备份 + `on_error` 提示 | 是（设置面板保存） | 有，`*.corrupt-*` | 有，面板错误行 | 设置回默认，但用户能看到「已备份」并找回 |
 | B3 | `desktop/main_window.py:14502` `gui_config.json` | 解析失败/顶层非对象 → `_backup_corrupt_gui_config()` + 状态栏 + 置损坏标记 | 是；备份失败时 `_save_gui_config` 直接跳过本次保存 | 有，`*.corrupt-*` | 有，状态栏与 `last_error` | 备份失败时本次设置不落盘（会提示），原文件不删 |
-| B4 | `desktop/station_sync.py:62` `config.json` 镜像 | 任何异常 → `None`（**读侧仍静默**） | 是，走 `ConfigStore.update` 合并写；值冲突时先建 `.bak` | 有（ConfigStore 的 `*.corrupt-*` + `.bak`） | **已核实**：`.bak` 由 `shutil.copy2(target, target + ".bak")` 静默生成（`desktop/station_sync.py:148`），失败还 `except OSError: pass`（L149-152），既不提示也不记日志；读侧 `last_error` 未接到任何界面 | 数据不会丢，但用户不知道自己多了一份 `.bak`、也不知道哪份新 |
+| B4 | `desktop/station_sync.py:62` `config.json` 镜像 | 任何异常 → `None`（**读侧仍静默**） | 是，走 `ConfigStore.update` 合并写；值冲突时先建 `.bak` | 有（ConfigStore 的 `*.corrupt-*` + `.bak`） | **已修（`desktop/station_sync.py`）**：备份失败不再 `except OSError: pass`，而是 `last_error()` 留人话（含源路径、备份目标、原因）+ 一行 warning，并中止本次 `ConfigStore.update`，不覆盖旧站址这唯一证据；写入成功清空 `last_error()`。`.bak` 成功时仍静默生成，读侧 `last_error` 尚未接界面 | 备份失败时这次站址改不动（会留痕），但用户仍不知道成功生成的 `.bak` 在哪 |
 
 ## 第三档：只读不写（不丢数据，但静默失真）
 
@@ -72,3 +73,26 @@
 3. **没有现成 UI 出口**。布局侧没有状态行，最近的出口是 `DockLayoutManager.last_save_error`（现在只装写失败）或主窗口状态栏。建议复用这条通道，不新建界面；文案要写清「自定义布局已备份为 X，本次只显示内置布局」，因为 QSettings 里还留着 active 布局名，用户会以为「布局没坏、只是预设少了」——这两件事不一样。
 
 工作量与测试口径可按书签那笔同构：初次损坏备份且字节一致、二次保存不吞备份也不重复造、备份失败拒绝写并保留可用状态。
+
+## 附：A2 `load_error` 接线说明（只写方案，不动代码）
+
+**现状**：`BookmarkManager` 已经把损坏处理成「备份 + 人话 `last_error`」，`FrequencyManager._reload_from_store()` 也把它转存到 `self.load_error`（`mbdsdr_ai/frequency_manager.py:210` 初始化、`:229` 赋值），但全仓只有两个单测读它，**用户永远看不到**。A2 的代码修复（单真值源）已在 `afa77023` 落地，缺的只是这条出口。
+
+**落点**：`desktop/main_window.py:2098` 之后（`_build_control_panel` 里书签灌入 `try/except` 结束、`self._add_right_tab("控制", ...)` 之前），新增三行：
+
+```python
+        err = getattr(self._freq_mgr, "load_error", "")
+        if err:
+            logger.warning("书签文件读取失败：%s", err)
+            self.statusBar().showMessage(f"书签文件读取失败：{err}", 15000)
+```
+
+**送什么**：直接送 `FrequencyManager.load_error` 原文。它已经包含路径、原因与备份去向（损坏时形如「书签文件损坏：原文件已备份为 `bookmarks.json.corrupt-…`」；只是跳过非法条目时形如「跳过 N 条缺少有效频率/字段非法的书签」），不需要在主窗口再拼一次，避免两处文案分叉。
+
+**为什么选状态栏，而不是另外两条**：
+
+- **状态栏**：`MainWindow` 已经在用（B3 的 `gui_config` 损坏就走这里），`statusBar()` 由 Qt 懒创建，不新建控件；这条路径正好在「书签已灌进面板之后」，用户看到空书签列表的同一时刻能拿到解释。
+- **已有的错误提示组件**：书签面板没有错误行；设置面板里那套错误行属于 `settings_panel` 自己的 JSON，跨面板调用会把两个组件的生命周期绑在一起，不划算。
+- **启动日志**：`main.py` 的 `corruption_startup_report` 在 `MainWindow` 构造之前跑，只能扫磁盘上的 `*.reason.txt`，看不到这个实例内存里的 `load_error`；GUI 没有控制台，单写日志等于没提示。
+
+**归属**：这三行在 `main_window.py`，属于卫星线独占的那一笔（和 `10266` / `14385` 一起排），**等 Qt 锁放开再落**，本线不碰该文件。落的时候补一条断言：构造 `MainWindow` 前把临时 `bookmarks.json` 写坏，构造后 `load_error` 非空且 `statusBar().currentMessage()` 含「已备份为」。
