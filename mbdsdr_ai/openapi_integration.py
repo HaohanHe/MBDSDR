@@ -23,10 +23,10 @@ from typing import Dict, List, Optional
 def _offline() -> bool:
     """与 TLE 链路同一离线门（MBDSDR_OFFLINE=1/true/yes/on）。"""
     try:
-        from .orbit import _network_disabled
+        from .net_policy import network_disabled
     except ImportError:  # 独立脚本运行
-        from orbit import _network_disabled
-    return _network_disabled()
+        from net_policy import network_disabled
+    return network_disabled()
 
 
 def _offline_refusal(feature: str) -> Dict:
