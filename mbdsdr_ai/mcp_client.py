@@ -91,6 +91,7 @@ SSE（streamable HTTP 的 text/event-stream）实现边界
 from __future__ import annotations
 
 import json
+import logging
 import os
 import queue
 import socket
@@ -105,6 +106,8 @@ from enum import Enum
 from typing import Any, Deque, Dict, List, Optional, Tuple
 
 from .version import __version__
+
+logger = logging.getLogger(__name__)
 
 #: 覆盖配置路径的环境变量（对齐 tool_policy.POLICY_ENV 约定）。
 MCP_SERVERS_ENV = "MBDSDR_MCP_SERVERS"
@@ -502,8 +505,9 @@ class StreamableHttpTransport(MCPTransport):
             detail = ""
             try:
                 detail = e.read(512).decode("utf-8", "replace")
-            except Exception:  # pragma: no cover - 读体失败的极端情况
-                pass
+            except Exception as body_err:  # pragma: no cover - 读体失败的极端情况
+                logger.debug("读 HTTP 错误体失败（保留状态码判定）：%s: %s",
+                             type(body_err).__name__, body_err)
             if e.code == 401:
                 # needs_auth 是错误码 + FAILED 状态，不是第五个伪造状态
                 raise MCPTransportError(
