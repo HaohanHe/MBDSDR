@@ -36,6 +36,12 @@ DEFAULT_BUDGET_RATIO = 0.25    # 工具 schema 最多占上下文窗口的 25%
 MIN_BUDGET_TOKENS = 1000       # 窗口再小也至少给工具留这么多
 MIN_TOOLS = 8                  # 相关命中不足时，至少保留这么多工具
 NAME_WEIGHT = 4
+# 类目加成刻意高于 MIN_SCORE：类目命中通常意味着整个工具族都值得给模型看，
+# 所以「描述 + 类目」就足以让工具进候选。**代价是这类工具的总分可以和名称
+# 真命中的工具同档（甚至更高）**，因此「类目凑分不得挤掉名称命中」不能靠分数
+# 保证，只能靠 select_tools 的两轮分层（见该函数里的排序注释与 _name_hits）。
+# 调大/调小 CATEGORY_WEIGHT 只影响同层内的相对顺序；若要改分层规则，
+# 必须重跑 tests/test_ai_tool_budget.py 的意图基准集（dev-03 就是被类目凑分挤掉的）。
 CATEGORY_WEIGHT = 5            # 类目命中比描述命中更可靠
 DESC_WEIGHT = 1
 DESC_CAP = 3                   # 描述命中封顶，防长描述互相引用造成噪声
@@ -204,10 +210,15 @@ def select_tools(definitions: Sequence[Dict[str, Any]], request: str,
                  if ((d.get("function") or {}).get("name") or "") in core]
     others = [(s, i, d, _name_hits(d, keywords)) for s, i, d in scored
               if ((d.get("function") or {}).get("name") or "") not in core]
-    # 名称命中是强证据，先装；名称 0 命中（描述 + 类目凑出来的分）后装。
-    # 只按总分排会让「类目 +5」把整类无关工具抬到与真相关工具同档，预算被它们
-    # 先占满，而名称真正命中本请求的工具反被裁掉（dev-03 事故原型）。
-    # 组内仍按分数降序、注册序号升序，保证确定性。
+    # 两轮分层（跨层不变式，改动前请先读模块顶部的 CATEGORY_WEIGHT 注释）：
+    #   第一轮 = 工具名命中请求关键词（强证据）；第二轮 = 名称 0 命中、只靠
+    #   描述/类目凑分（弱证据）。第一轮装完才轮到第二轮，所以 CATEGORY_WEIGHT
+    #   再大也只改变**同层内**顺序，永远挤不掉名称命中的工具（dev-03 就是被
+    #   类目凑分的发射工具挤出预算的）。层内仍按分数降序 + 注册序号升序；
+    #   名称命中个数已经通过 NAME_WEIGHT 计入分数，故层内无需再按个数分层。
+    #   反向约束：第二轮自身不能被第一轮饿死——基准集里 rec-04/baseband_save、
+    #   dev-05/sdr_status 这两条「名称 0 命中、靠描述命中」的期望工具，修复前后
+    #   都仍在候选内（见 tests/test_ai_tool_budget.py 的意图基准集）。
     others.sort(key=lambda t: (t[3] == 0, -t[0], t[1]))
 
     kept_defs: List[Dict[str, Any]] = []
