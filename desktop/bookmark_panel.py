@@ -48,7 +48,7 @@ except Exception:  # noqa: BLE001
 
 
 # 分组树：只建空壳，不带任何频点（红线）
-GROUPS = [
+BOOKMARK_GROUPS = [
     ("aviation", "航空"),
     ("marine", "海事"),
     ("ham", "业余"),
@@ -56,8 +56,8 @@ GROUPS = [
     ("satellite", "卫星"),
     ("custom", "自定义"),
 ]
-_GROUP_LABEL = dict(GROUPS)
-_GROUP_KEY = {v: k for k, v in GROUPS}
+_GROUP_LABEL = dict(BOOKMARK_GROUPS)
+_GROUP_KEY = {v: k for k, v in BOOKMARK_GROUPS}
 
 
 class BookmarkPanel(QWidget):
@@ -92,7 +92,7 @@ class BookmarkPanel(QWidget):
         self.group_list = QListWidget()
         all_item = QListWidgetItem("全部")
         self.group_list.addItem(all_item)
-        for key, label in GROUPS:
+        for key, label in BOOKMARK_GROUPS:
             self.group_list.addItem(QListWidgetItem(f"{label}"))
         self.group_list.setCurrentRow(0)
         self.group_list.currentRowChanged.connect(self._on_group_changed)
@@ -258,8 +258,8 @@ class BookmarkPanel(QWidget):
         group_label = _GROUP_LABEL.get(self._current_group, "自定义")
         group_label, ok = QInputDialog.getItem(
             self, "添加书签", "分组：",
-            [l for _, l in GROUPS], [l for _, l in GROUPS].index(group_label)
-            if group_label in dict(GROUPS).values() else 5, False)
+            [l for _, l in BOOKMARK_GROUPS], [l for _, l in BOOKMARK_GROUPS].index(group_label)
+            if group_label in dict(BOOKMARK_GROUPS).values() else 5, False)
         if not ok:
             return
         mode, ok = QInputDialog.getItem(
