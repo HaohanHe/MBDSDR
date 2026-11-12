@@ -1,0 +1,6 @@
+{
+  "_comment": "死符号棘轮基线：真死条数只许降不许升。2026-11-13 定版：删除 10 个真死符号（10 文件 10 笔）后剩 8 条，全部逐条登记在 docs/dead-symbols-waivers.json（公共 API / 决策记录 / 他线持有），因此棘轮口径下的真死为 0。改口径必须改 scripts/lint_dead_symbols.py 的 docstring，不许在别处另抄。",
+  "dead_total": 0,
+  "measured_at": "2026-11-13",
+  "defs_scanned": 11518
+}
