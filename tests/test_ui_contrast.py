@@ -209,7 +209,9 @@ _DIRECT_READ = re.compile(
 #:   FROZEN main_window 已登记冻结项（须与同处底纹一起改）；
 #:   ISLAND 固定深/浅色岛屿，读全局 COLORS 是设计（docs/a11y 清单 B 类）；
 #:   TEST   测试自己断言 token 原值。
-#: 修完一条：删掉对应行，A1 单元数随 `_BASELINE_CEILING` 一起下调。
+#: 修完一条必须**同一笔**做两件事：删掉对应基线行 + `_BASELINE_CEILING -= 1`。
+#: 门禁按 `==` 判定（不是 `<=`）：漏降上限 → 红，漏删基线行 → 也红（见
+#: 「基线里已不存在的直读」那条断言）。否则棘轮会退化成「11 就对了」。
 _BASELINE = (
     # ---- A1 待迁（11 个单元 / 12 行）----
     ("desktop/status_panel.py", 360, "danger", "A1", "status:360"),
@@ -299,11 +301,16 @@ def _scan_semantic_reads():
 
 
 def test_no_new_direct_semantic_color_reads():
-    """棘轮：新增任何直读全局语义色 → 红；从基线删一条（代码未修）也会红。
+    """棘轮：新增直读 → 红；基线已过期（修完没删行）或上限没跟着降 → 也红。
 
     允许集合是「基线（文件 × token 计数）」而不是行号集合：行号会随上方编辑漂移，
-    但计数不会——漂移只更新注释里的行号，不改变判定。修完一处必须同步删基线行，
-    否则计数不变、A1 单元数也不会下降（下一步门禁会拦）。
+    但计数不会——漂移只更新注释里的行号，不改变判定。
+
+    两个方向都拦：
+      * 代码里多出直读、基线没登记            → extra 红；
+      * 代码里已经改掉、基线行还留着（过期）  → stale 红；
+      * A1 单元数与 `_BASELINE_CEILING` 不等   → 红（`==`，不是 `<=`）。
+    第三条是「每修一处必须同笔降 1」的执行点：漏降上限、漏删基线行都过不去。
     """
     assert {e[2] for e in _BASELINE} <= set(_SEMANTIC_TOKENS), "基线里有未知 token"
     hits = _scan_semantic_reads()
@@ -314,9 +321,15 @@ def test_no_new_direct_semantic_color_reads():
         "新增了直接读全局语义色的点位（必须走 tokens().status_color(...) "
         "或主题 token）："
         + ", ".join("%s %s +%d" % (f, t, n) for (f, t), n in sorted(extra.items())))
+    stale = {k: base[k] - got[k] for k in base if got[k] < base[k]}
+    assert not stale, (
+        "基线里登记了已不存在的直读（代码已改、基线行没删）："
+        + ", ".join("%s %s -%d" % (f, t, n) for (f, t), n in sorted(stale.items()))
+        + "；删掉对应基线行并把 _BASELINE_CEILING 减 1")
     a1_units = {e[4] for e in _BASELINE if e[3] == "A1"}
-    assert len(a1_units) <= _BASELINE_CEILING, (
-        f"A1 待迁单元 {len(a1_units)} > 上限 {_BASELINE_CEILING}：棘轮只许降不许涨")
+    assert len(a1_units) == _BASELINE_CEILING, (
+        f"A1 待迁单元 {len(a1_units)} != 上限 {_BASELINE_CEILING}："
+        "每修完一处必须同笔删基线行并把 _BASELINE_CEILING 减 1（只许降）")
 
 
 def test_gain_range_hint_exempt_only_when_stage_unsupported():

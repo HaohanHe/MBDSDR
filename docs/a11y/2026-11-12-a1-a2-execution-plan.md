@@ -123,6 +123,8 @@
   正则拦 `danger|success|accent|status_busy|status_warning|status_danger` 的直读；
   58 条现状命中逐条登记（文件:行 + token + kind），新增一处即红，
   从基线删一条（代码未修）也红；`_BASELINE_CEILING = 11` 只许降。
+  追加：`len(a1_units) == _BASELINE_CEILING`（`==` 不是 `<=`），且基线里出现
+  「代码已改、行还留着」的过期项也红——即「每修一处必须同笔删行 + 降 1」。
 - `tests/test_ui_contrast.py::test_gain_range_hint_exempt_only_when_stage_unsupported`
   （`9b3b055b`）：禁用档才允许用豁免灰；可用档必须回到 `palette(placeholder-text)` 且五套主题 ≥4.5。
 - `tests/test_theme_contrast_gate.py::test_scrollbar_handle_meets_non_text_contrast`：
@@ -160,7 +162,14 @@
 | `9b3b055b` | `gain_panel` 提示字：仅禁用档用豁免灰，可用档回 `palette(placeholder-text)` | 把 `exempt=not supported` 改成 `exempt=True` → 红 |
 
 棘轮的基线按「文件 × token 计数」判定、行号只作注释：行号会随上方编辑漂移，
-计数不会；修完一处必须同步删基线行，否则 A1 单元数不降、上限不放宽。
+计数不会。
+
+**降天花板的规则（2026-11-12 追加，已写进门禁）**：`_BASELINE_CEILING` 的判定是
+`len(a1_units) == _BASELINE_CEILING`（不是 `<=`）。**每修完一处必须同一笔做三件事**：
+① 把该点位改成 `tokens().status_color(...)`；② 删掉对应基线行；③ `_BASELINE_CEILING -= 1`。
+三种漏法都会红：只删行不降数（11→10 却仍写 11）、只降数不删行（10 行却写 10 但实际 11 个单元）、
+代码改了基线行留着（新增的「基线里已不存在的直读」断言）。**上限只许降**；万一发现新的
+待迁单元，必须单列说明并同步 +1，不许用涨上限吸收新代码。
 
 ### 7.2 `control_panel` 红底前景：停在门口（未改）
 
