@@ -683,7 +683,7 @@ class ModelManager:
             "current_model": self.model,
             "base_url": self.base_url,
             "api_key_set": bool(self.api_key),
-            "api_key_masked": self.api_key[:8] + "..." + self.api_key[-4:] if self.api_key else "(未设置)",
+            "credential_state": "(已设置)" if self.api_key else "(未设置)",
             "temperature": self.temperature,
             "top_p": self.top_p,
             "max_output_tokens": self.max_output_tokens,
@@ -700,7 +700,7 @@ class ModelManager:
             "=== MBDSDR 模型管理器 ===",
             f"当前模型: {s['current_model']}",
             f"API: {s['base_url']}",
-            f"API Key: {s['api_key_masked']}",
+            f"API Key: {s['credential_state']}",
             f"参数: temperature={s['temperature']}, top_p={s['top_p']}, max_tokens={s['max_output_tokens']}",
             f"可用模型: {s['available_models_count']} 个",
             f"调用统计: 成功 {s['stats']['successful_calls']}/{s['stats']['total_calls']}, "
