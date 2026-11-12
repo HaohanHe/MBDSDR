@@ -11,7 +11,9 @@
   1. 核心工具永远保留（list_tools / context_status / model_status / tool_log），
      保证模型始终能自行发现被裁掉的工具名；
   2. 其余工具按请求关键词打分（工具名权重 4、描述权重 1、命中类目权重 3）；
-  3. 按分数从高到低装入，直到 token 预算用完；命中不足时用注册顺序补足最小数量；
+  3. 先装「名称命中请求关键词」的工具（强证据），再按分数从高到低装描述/类目
+     命中（弱证据），直到 token 预算用完；命中不足时用注册顺序补足最小数量；
+     弱证据不能把强证据挤出预算——否则整类类目加成会把无关工具抬进候选；
   4. 返回裁剪报告（保留/裁掉数量、估算 token、命中类目、可解释 note）。
 
 裁剪不是「删除能力」：工具执行仍按注册表全量解析，模型只要知道名字就能调用；
@@ -133,6 +135,17 @@ def _score(definition: Dict[str, Any], keywords: set, categories: set) -> int:
     return score
 
 
+def _name_hits(definition: Dict[str, Any], keywords: set) -> int:
+    """工具名里命中的请求关键词个数（唯一的「强证据」判据）。
+
+    为什么单列而不是从 score 反推：类目加成 5 分已经高于 MIN_SCORE，
+    「名称 0 命中、仅描述 + 类目」的工具也会拿到 8 分，与真相关工具同档；
+    只看总分会把这类弱证据工具和强证据混在一起排，预算先被弱证据占满。
+    """
+    name = ((definition.get("function", {}) or {}).get("name") or "").lower()
+    return sum(1 for kw in keywords if kw in name)
+
+
 @dataclass
 class ToolSelection:
     """一次工具集选择的结果（可序列化，供诊断与 UI 展示）。"""
@@ -189,9 +202,13 @@ def select_tools(definitions: Sequence[Dict[str, Any]], request: str,
 
     core_defs = [d for s, _, d in scored
                  if ((d.get("function") or {}).get("name") or "") in core]
-    others = [(s, i, d) for s, i, d in scored
+    others = [(s, i, d, _name_hits(d, keywords)) for s, i, d in scored
               if ((d.get("function") or {}).get("name") or "") not in core]
-    others.sort(key=lambda t: (-t[0], t[1]))
+    # 名称命中是强证据，先装；名称 0 命中（描述 + 类目凑出来的分）后装。
+    # 只按总分排会让「类目 +5」把整类无关工具抬到与真相关工具同档，预算被它们
+    # 先占满，而名称真正命中本请求的工具反被裁掉（dev-03 事故原型）。
+    # 组内仍按分数降序、注册序号升序，保证确定性。
+    others.sort(key=lambda t: (t[3] == 0, -t[0], t[1]))
 
     kept_defs: List[Dict[str, Any]] = []
     kept_tokens = 0
@@ -204,9 +221,9 @@ def select_tools(definitions: Sequence[Dict[str, Any]], request: str,
         kept_defs.append(d)
         kept_tokens += _tok(d)
 
-    has_scored = any(s >= MIN_SCORE for s, _, _ in others)
+    has_scored = any(s >= MIN_SCORE for s, _, _, _ in others)
     kept_others = 0
-    for s, _, d in others:
+    for s, _, d, _nh in others:
         t = _tok(d)
         # 只保留被本请求明显命中的工具。描述弱命中（< MIN_SCORE）也不进候选：
         # 否则「查频谱」时候选里会混进录音/开设备工具，等于给模型制造误调机会。
@@ -223,7 +240,7 @@ def select_tools(definitions: Sequence[Dict[str, Any]], request: str,
     # 请求完全没命中任何工具（寒暄/空串）：用注册顺序兜底 min_tools 个，
     # 保证模型仍有一组基础工具可看，而不是只拿到 4 个核心工具。
     if not has_scored:
-        for s, _, d in others[kept_others:]:
+        for s, _, d, _nh in others[kept_others:]:
             t = _tok(d)
             if kept_others >= min_tools or kept_tokens + t > budget_tokens:
                 evicted.append((d.get("function") or {}).get("name", ""))
