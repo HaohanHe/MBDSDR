@@ -630,13 +630,14 @@ def cmd_claim(
             print(f"WARN 台账写入失败（claim 仍有效）：{exc}", file=sys.stderr)
         sidecar_err = _write_token_file(key, fresh_token)
         if sidecar_err:
-            print(
+            print(  # pragma: allowlist secret — 打印的是 sidecar 路径，非凭据值
                 f"WARN 凭据文件写入失败（{_token_path(key)}）：{sidecar_err}\n"
                 f"     本次 release/续租必须显式带 --token；丢了只能等 TTL 过期或 takeover。",
                 file=sys.stderr,
             )
         print(f"CLAIM OK {display} owner={owner} ttl={ttl_min:g}min 到期={_iso(now + _ttl(ttl_min, now))}")
-        print(_TOKEN_HINT.format(path=_token_path(key)))
+        print(  # pragma: allowlist secret — 打印的是 sidecar 路径，非凭据值
+            _TOKEN_HINT.format(path=_token_path(key)))
         return EXIT_OK
 
     with _locked_fd(marker, create=False) as fd:
@@ -669,7 +670,7 @@ def cmd_claim(
                 # 显式 --token 时顺手补齐/修复 sidecar，避免下次又只能靠记忆。
                 sidecar_err = _write_token_file(key, presented)
                 if sidecar_err:
-                    print(
+                    print(  # pragma: allowlist secret — 打印的是 sidecar 路径，非凭据值
                         f"WARN 凭据文件写入失败（{_token_path(key)}）：{sidecar_err}",
                         file=sys.stderr,
                     )
@@ -695,7 +696,7 @@ def cmd_claim(
                 _write_fd(fd, json.dumps(renewed, ensure_ascii=False))
                 sidecar_err = _write_token_file(key, upgraded_token)
                 if sidecar_err:
-                    print(
+                    print(  # pragma: allowlist secret — 打印的是 sidecar 路径，非凭据值
                         f"WARN 凭据文件写入失败（{_token_path(key)}）：{sidecar_err}",
                         file=sys.stderr,
                     )
@@ -708,7 +709,8 @@ def cmd_claim(
                     f"  旧格式 claim（只记名字）已迁移为凭据绑定；"
                     f"这次按 owner 名匹配是唯一一次，之后同名也不再放行。"
                 )
-                print(_TOKEN_HINT.format(path=_token_path(key)))
+                print(  # pragma: allowlist secret — 打印的是 sidecar 路径，非凭据值
+                    _TOKEN_HINT.format(path=_token_path(key)))
                 return EXIT_OK
             raise ClaimDenied(
                 f"CLAIM DENIED {display}\n"
@@ -741,7 +743,7 @@ def cmd_claim(
         sidecar_err = _write_token_file(key, fresh_token)
 
     if sidecar_err:
-        print(
+        print(  # pragma: allowlist secret — 打印的是 sidecar 路径，非凭据值
             f"WARN 凭据文件写入失败（{_token_path(key)}）：{sidecar_err}",
             file=sys.stderr,
         )
@@ -754,7 +756,8 @@ def cmd_claim(
         f"CLAIM OK (steal) {display} owner={owner} ttl={ttl_min:g}min "
         f"（原持有者开始于 {_iso(float(old.get('acquired_at') or 0))}，上次心跳 {_iso(heartbeat)}）"
     )
-    print(_TOKEN_HINT.format(path=_token_path(key)))
+    print(  # pragma: allowlist secret — 打印的是 sidecar 路径，非凭据值
+        _TOKEN_HINT.format(path=_token_path(key)))
     return EXIT_OK
 
 
@@ -1010,7 +1013,7 @@ def cmd_takeover(path: str, owner: str, ttl_min: float, reason: str = "") -> int
         sidecar_err = _write_token_file(key, new_token)
 
     if sidecar_err:
-        print(
+        print(  # pragma: allowlist secret — 打印的是 sidecar 路径，非凭据值
             f"WARN 凭据文件写入失败（{_token_path(key)}）：{sidecar_err}",
             file=sys.stderr,
         )
@@ -1030,7 +1033,8 @@ def cmd_takeover(path: str, owner: str, ttl_min: float, reason: str = "") -> int
         + f"\n  理由：{reason}"
         + f"\n  日志：{TAKEOVER_LOG}"
     )
-    print(_TOKEN_HINT.format(path=_token_path(key)))
+    print(  # pragma: allowlist secret — 打印的是 sidecar 路径，非凭据值
+        _TOKEN_HINT.format(path=_token_path(key)))
     return EXIT_OK
 
 
