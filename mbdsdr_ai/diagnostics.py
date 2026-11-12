@@ -68,6 +68,10 @@ def redact_secrets(text: str) -> str:
     顺序：先切 ``Bearer`` 头（token 可能不是 ``sk-`` 形状），再切带标签的
     赋值，最后切裸 ``sk-`` 串。宁可多遮一点，也不让一段能直接拿去调用
     接口的串留在截图里。
+
+    但这不等于整段打码：**只替换命中片段本身**，前后路径、异常类型、步骤
+    文案原样保留。诊断页的价值是「哪个文件坏了、为什么」，把
+    ``/home/sk-workbench/config.json`` 整条遮掉等于为了安全把诊断弄瞎。
     """
     if not text:
         return text

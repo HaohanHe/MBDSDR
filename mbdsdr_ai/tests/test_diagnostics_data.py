@@ -105,6 +105,9 @@ def test_redact_secrets_keeps_labels_and_hides_values():
     assert diag.redact_secrets(f"Authorization: Bearer {_FAKE_KEY}") == \
         "Authorization: Bearer ***"
     assert diag.redact_secrets(f"解析失败：{_FAKE_KEY}") == "解析失败：sk-***"
+    # 只替换命中片段，路径/文件名等定位信息必须留下
+    assert diag.redact_secrets("/home/sk-workbench/config.json") == \
+        "/home/sk-***/config.json"
     # 正常文案不能被吞掉
     assert diag.redact_secrets("书签文件读取失败：测试") == "书签文件读取失败：测试"
 
@@ -144,5 +147,35 @@ def test_api_key_never_leaks_from_collected_structure(tmp_path, monkeypatch):
     assert "api_key=***" in blob
     assert "token=***" in blob
     assert "Bearer ***" in blob
+    assert data["backups"]["total"] == 1, "脱敏把证据本身弄丢了"
+    mbdsdr_config._set_error(None)
+
+
+def test_redaction_keeps_location_type_and_step(tmp_path, monkeypatch):
+    """路径里有 ``sk-`` 形状（但不是密钥）时，打码不能把定位信息一起打掉。
+
+    两个断言必须同时成立：
+    * 定位信息在——哪个源文件、什么异常、哪一步失败；
+    * 命中片段被替换——``sk-workbench`` 不再原样出现。
+    只保前一个就是泄露，只保后一个就是「为了安全把诊断弄瞎」。
+    """
+    workdir = tmp_path / "sk-workbench"
+    workdir.mkdir()
+    cfg_path = workdir / "config.json"
+    cfg_path.write_text('{"api_key": "sk-abcdef1234567890", "model": ',
+                        encoding="utf-8")
+
+    mbdsdr_config.load_config(str(cfg_path))
+    monkeypatch.setattr(diag, "_scan_directories", lambda: [str(workdir)])
+
+    data = diag.collect_diagnostics()
+    blob = json.dumps(data, ensure_ascii=False)
+    reason = data["backups"]["items"][0]["reason"]
+
+    assert "config.json" in reason, "打码后看不出哪个源文件坏了"
+    assert "JSONDecodeError" in reason, "打码后看不出异常类型"
+    assert "配置文件损坏或不可读" in reason, "打码后看不出是哪一步失败的"
+    assert "sk-workbench" not in blob, "命中片段没有被替换"
+    assert "sk-***" in blob, "替换标记丢了，看不出这里被脱敏"
     assert data["backups"]["total"] == 1, "脱敏把证据本身弄丢了"
     mbdsdr_config._set_error(None)
