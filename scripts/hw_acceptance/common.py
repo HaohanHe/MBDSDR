@@ -121,10 +121,10 @@ def real_devices() -> list:
     """非 debug 的真实设备列表（debug 调试源永远不算硬件）。
 
     上一进程刚释放 USB 句柄时，pyrtlsdr 可能读不到字符串描述符，DeviceManager
-    会退化成占位序列号 ``rtl-0``；拿这个 id 去 connect 必报 DeviceNotFound
-    （本轮实测两次：一次在探针第 22 轮，一次在 ring3 首开）。遇到占位号时
-    短暂重试枚举（0.3/0.6/0.9/1.2 s），拿不到真序列号就原样返回——
-    由 open_controller 重试或环判 FAIL，绝不伪造设备。
+    给出的序列号是空串、``has_stable_identity=False``（身份不可分辨，枚举位置
+    只是当次的位置，拔插/换口会变）。拿这种条目去 connect 无法确认是哪一台。
+    遇到不可分辨条目时短暂重试枚举（0.3/0.6/0.9/1.2 s），拿不到真序列号就
+    原样返回——由 open_controller 重试或环判 FAIL，绝不伪造设备/身份。
     """
     from mbdsdr_ai.device_manager import DeviceManager
 
@@ -135,13 +135,16 @@ def real_devices() -> list:
                     if str(getattr(d, "driver", "")).lower() != "debug"]
         except Exception:
             return last
-        placeholder = [
+        unidentified = [
             d for d in last
             if str(getattr(d, "driver", "")) == "rtlsdr"
-            and str(getattr(d, "serial", "")).startswith("rtl-")
-            and str(getattr(d, "serial", ""))[4:].isdigit()
+            and not getattr(
+                d,
+                "has_stable_identity",
+                bool(str(getattr(d, "serial", "")).strip()),
+            )
         ]
-        if not placeholder:
+        if not unidentified:
             return last
         if i < 4:
             time.sleep(0.3 * (i + 1))
