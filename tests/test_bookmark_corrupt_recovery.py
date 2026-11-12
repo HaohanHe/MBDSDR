@@ -23,7 +23,9 @@ CORRUPT = b'{"bookmarks": [{"frequency_hz": 145000000, "name": "half'
 
 
 def _backups(path):
-    return sorted(path.parent.glob(path.name + ".corrupt-*"))
+    # 理由文件 ``*.reason.txt`` 与备份同名同前缀，清点备份时要排除。
+    return sorted(p for p in path.parent.glob(path.name + ".corrupt-*")
+                  if not p.name.endswith(".reason.txt"))
 
 
 def _corrupt_bookmarks(root):

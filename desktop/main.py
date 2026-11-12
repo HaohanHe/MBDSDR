@@ -650,6 +650,22 @@ def _report_runtime_dlls() -> None:
         print(line, file=sys.stderr)
 
 
+def _report_corruption_evidence() -> None:
+    """启动自检：只读清点历史损坏备份，结论只写启动日志（不碰界面）。
+
+    覆盖书签 / FM 预设（默认 ``~/.mbdsdr``）与桌面配置所在目录。只报告
+    数量，不删除任何文件；超过 30 天的备份提示用户手动清理。
+    """
+    from mbdsdr_ai.corrupt_evidence import (
+        corruption_startup_report,
+        default_scan_directories,
+    )
+    from settings import default_config_path
+
+    corruption_startup_report(default_scan_directories(default_config_path()),
+                              append_line=_append_startup_log)
+
+
 class _UiNotifier(QObject):
     """把工作线程的探测结果切回 GUI 线程（statusBar 只能在主线程动）。"""
 
@@ -1003,6 +1019,7 @@ def main():
     # 启动自检：运行期 DLL（缺件给「缺运行库：x」而不是 0xC0000135），
     # 以及录音目录的后台可写探测（不阻塞主线程，失败进状态栏）。
     _report_runtime_dlls()
+    _report_corruption_evidence()
     _check_record_dir_async(window)
 
     print("=" * 60)

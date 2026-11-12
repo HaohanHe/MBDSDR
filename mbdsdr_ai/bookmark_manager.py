@@ -30,6 +30,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional
 
+from .corrupt_evidence import write_reason
+
 logger = logging.getLogger(__name__)
 
 
@@ -230,11 +232,15 @@ class BookmarkManager:
         self._tag_colors = {UNTAGGED: DEFAULT_COLOR}
         self.corrupt_backup = _backup_corrupt_bookmarks(self.bookmarks_path)
         self._save_blocked = self.corrupt_backup is None
-        self.last_error = (
+        message = (
             f"书签文件读取失败（{reason}）：{self.bookmarks_path}；"
             f"原文件已备份为 {self.corrupt_backup or '（备份失败）'}，"
             "本次按空书签列表启动"
         )
+        # 备份已成功 → 才写理由；理由写失败只记日志，备份与启动都不受影响。
+        if self.corrupt_backup:
+            write_reason(self.corrupt_backup, message, logger)
+        self.last_error = message
         logger.warning("书签文件不可用（%s）：%s；备份=%s", self.bookmarks_path,
                        reason, self.corrupt_backup or "（备份失败）")
 

@@ -27,6 +27,8 @@ from typing import Callable, List, Optional, Dict, Any
 
 import numpy as np
 
+from .corrupt_evidence import write_reason
+
 logger = logging.getLogger(__name__)
 
 
@@ -402,6 +404,9 @@ def _fallback_corrupt(reason: str) -> Dict[str, Any]:
         f"原文件已备份为 {_CORRUPT_BACKUP or '（备份失败）'}，"
         "本次按空预设启动"
     )
+    # 备份已成功 → 才写理由；理由写失败只记日志，备份与启动都不受影响。
+    if _CORRUPT_BACKUP:
+        write_reason(_CORRUPT_BACKUP, _LAST_ERROR, logger)
     logger.warning("FM 预设文件不可用（%s）；备份=%s", reason,
                    _CORRUPT_BACKUP or "（备份失败）")
     return {"stations": [], "last_scan": None, "updated_at": None}
