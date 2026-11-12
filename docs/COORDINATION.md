@@ -1895,13 +1895,14 @@ No supported devices found），GNSS+SDR 同开复验没做成；离线那次
 > `.locks/residue_commits.log`（JSONL：时间/commit/文件/行号/被删原文）；**只记录、不返回非 0**
 > ——提交已落地，卡下一笔只会把账算到别人头上。
 
-> **批次末手动跑的两道慢检查（2026-11-12；>3 s，不进钩子）**
+> **批次末手动跑的三道检查（2026-11-12，全部不进钩子）**
 >
-> 命令与耗时：`python scripts/audit_evidence.py`（约 20.9 s）、`python scripts/check_red_lifecycle.py`（约 12.5 s）。
-> 不进钩子的理由：单次远超 3 s；塞进 pre-commit 只会让人开始用 `--no-verify`，门禁反而先失效。
+> 命令与耗时：`python scripts/audit_evidence.py`（约 20.9 s）、`python scripts/check_red_lifecycle.py`（约 12.5 s）、`python scripts/check_roadmap_blocking.py`（实测 0.10 s）。
+> 不进钩子的理由：前两道单次远超 3 s；第三道虽只有约 0.1 s，但它是**提醒器不是闸门**，按「永不进 pre-commit」登记——塞进钩子只会让人开始用 `--no-verify`，门禁反而先失效。
+> 第三道口径：抓的是「失效的理由分句」，**不代表整条工单可开工**（W19 仍被 W11 挡、W60 仍被 FZ-04 挡、W44 仍被 FZ-04 挡）。
 > 谁在什么时机跑：一次任务批次收尾时由当班 owner 跑一次，结果（红/绿 + 条数）记进本台账或对应 evidence 文档。
-> 第一个实例（2026-11-12）：两道都实跑——`audit_evidence.py` RC=1、2456 条数字断言无证据；
-> `check_red_lifecycle.py` RC=1、FAIL（样例 `docs/star-catalog.md:334`）。
+> 第一个实例（2026-11-12）：三道都实跑——`audit_evidence.py` RC=1、2456 条数字断言无证据；
+> `check_red_lifecycle.py` RC=1、FAIL（样例 `docs/star-catalog.md:334`）；`check_roadmap_blocking.py` RC=0、扫描 21 条阻塞、命中 3 条（W19/D-2、W44 claim 过期、W60/D-8）、UNKNOWN 0。
 
 > **有活跃 claim ≠ 文件可运行（2026-11-11 立规；「空表 ≠ 无人占」的姊妹条）**
 >
