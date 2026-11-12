@@ -34,6 +34,7 @@ import json
 import os
 import shlex
 import shutil
+import stat
 import sys
 import tempfile
 import threading
@@ -884,6 +885,9 @@ def _restore_real_config_from_backup():
         if _file_state(target)["sha256"] == info.get("sha256"):
             continue
         try:
+            if os.path.exists(target):
+                # 会话期间真实配置是被写保护的，还原前先临时放开。
+                os.chmod(target, stat.S_IWRITE | stat.S_IREAD)
             shutil.copy2(src, target)
         except OSError as exc:
             restored.append(f"  {key}: {target} 还原失败：{exc}")
@@ -898,7 +902,9 @@ def pytest_configure(config):
         "allow_modal: 允许该用例弹真模态（默认全局拦下；offscreen 下真 exec "
         "可能永不返回，只有确需验证模态行为的用例才可 opt-in）")
     _snapshot_real_config()
+    _recover_stale_write_protection()
     _backup_real_config_contents()
+    _protect_real_config()
     # 配置快照会 import desktop/settings（其顶部 import PySide6.QtCore）：把这批
     # 守卫自己拉进来的模块记成基线，锁门控只认「收集阶段新增」的 Qt 模块。
     _QT_BASELINE["mods"] = {n for n in sys.modules
@@ -908,6 +914,13 @@ def pytest_configure(config):
 @pytest.fixture(scope="session", autouse=True)
 def _real_config_guard_fixture():
     yield
+    try:
+        _assert_real_config_untouched()
+    finally:
+        _unprotect_real_config()
+
+
+def _assert_real_config_untouched():
     path = _REAL_CONFIG_GUARD["path"]
     if not path:
         return
@@ -956,78 +969,157 @@ def _real_config_guard_fixture():
 
 
 # ---------------------------------------------------------------------------
-# 防线 4b：逐用例点名（2026-11-13）
+# 防线 4b：测试期间真实配置**写保护** + 会话内容备份（2026-11-13）
 #
-# 会话级守卫只在会话结束时报「哪个文件变了」，查不出是**哪条用例**写的；
-# 2026-11-13 凌晨一支仓库外的临时探针把用户真实 desktop_settings.json 整份
-# 覆盖（record_dir 指向探针临时目录、frequency_hz 写成 0.0），会话级守卫能
-# 给出文件与字节差，却点不出写入者。这里每个用例前后各取一次
-# size/mtime_ns + 目录清单（只有变化时才谈 sha256），变了就当场 pytest.fail
-# 并点名 nodeid。
+# 当晚的教训：靠「事后比 mtime 找是谁写的」会冤枉好人——本机 6 个以上并发
+# pytest 时，谁写都会算到当时正在跑的用例头上；逐用例比对只能说明「这个窗口
+# 内变了」，不能说明「这条用例写的」。正确方向是让写**进不去**：
 #
-# 该守卫是 autouse、没有跳过标记、没有环境变量开关：只有「测试真的没写真实
-# 配置」才能绿。守的是 pytest_configure 快照下来的真实路径，所以别人把
-# APPDATA 改到沙箱也不会让它看不见真实文件。
+#   1. pytest_configure 把真实配置文件设成只读：任何进程想写就当场失败在
+#      它自己进程里（归因不需要猜），会话结束恢复原属性；
+#   2. 内容备份到 .locks/real_config_snapshots/：万一有写绕过只读（改属性、
+#      管理员权限），会话结束按备份逐字节还原——备份的是内容，不是哈希。
+#
+# 守卫因此降级为兜底：不再指认凶手，只在「居然有人写成功了」时喊一声。
 # ---------------------------------------------------------------------------
-def _guard_quick_state():
-    """真实配置的廉价指纹：只 stat，避免每条用例都读整份文件。"""
-    state = {}
-    for key in ("path", "bm_path", "gui_path"):
-        path = _REAL_CONFIG_GUARD.get(key)
-        if not path:
+_REAL_CONFIG_PROTECT_PREFIX = "write-protection-"
+
+
+def _protect_marker_path():
+    return os.path.join(_REAL_CONFIG_BACKUP_ROOT,
+                        f"{_REAL_CONFIG_PROTECT_PREFIX}{os.getpid()}.json")
+
+
+def _recover_stale_write_protection():
+    """恢复上次崩溃会话留下的只读属性（只动它自己记录过的文件）。"""
+    try:
+        names = os.listdir(_REAL_CONFIG_BACKUP_ROOT)
+    except OSError:
+        return
+    for name in names:
+        if not name.startswith(_REAL_CONFIG_PROTECT_PREFIX):
+            continue
+        marker = os.path.join(_REAL_CONFIG_BACKUP_ROOT, name)
+        try:
+            with open(marker, "r", encoding="utf-8") as f:
+                info = json.load(f)
+        except (OSError, ValueError):
+            continue
+        pid = info.get("pid")
+        if pid and _process_start_time(pid) is not None:
+            continue          # 那个会话还活着，别动它的保护
+        for entry in (info.get("entries") or {}).values():
+            if entry.get("readonly"):
+                continue      # 用户本来就设了只读：保持原样
+            try:
+                os.chmod(entry.get("path"), stat.S_IWRITE | stat.S_IREAD)
+            except (OSError, TypeError):
+                pass
+        try:
+            os.remove(marker)
+        except OSError:
+            pass
+
+
+def _protect_real_config():
+    """真实配置设只读：写入失败会发生在真正的写入者进程里。"""
+    entries = {}
+    for key, path in _real_config_files().items():
+        try:
+            readonly = not (os.stat(path).st_mode & stat.S_IWRITE)
+        except OSError:
+            continue
+        entries[key] = {"path": path, "readonly": readonly}
+        if not readonly:
+            try:
+                os.chmod(path, stat.S_IREAD)
+            except OSError as exc:
+                sys.stderr.write(
+                    f"[mbdsdr-guard] 真实配置写保护失败（{path}）：{exc}\n")
+    _REAL_CONFIG_GUARD["write_protected"] = entries
+    if not entries:
+        return
+    try:
+        os.makedirs(_REAL_CONFIG_BACKUP_ROOT, exist_ok=True)
+        with open(_protect_marker_path(), "w", encoding="utf-8") as f:
+            json.dump({"pid": os.getpid(), "entries": entries}, f,
+                      ensure_ascii=False, indent=2)
+    except OSError:
+        pass
+
+
+def _unprotect_real_config():
+    """会话结束恢复原属性；用户自己设的只读一律不碰。"""
+    entries = _REAL_CONFIG_GUARD.get("write_protected") or {}
+    for entry in entries.values():
+        if entry.get("readonly"):
             continue
         try:
-            st = os.stat(path)
+            os.chmod(entry["path"], stat.S_IWRITE | stat.S_IREAD)
         except OSError:
-            state[key] = None
+            pass
+    _REAL_CONFIG_GUARD["write_protected"] = {}
+    try:
+        os.remove(_protect_marker_path())
+    except OSError:
+        pass
+
+
+def _qt_lock_held_elsewhere():
+    """不等人地试抢一次全局 Qt 锁：抢到=没人持有（立刻释放），抢不到=有人在跑。"""
+    path = _qt_lock_path()
+    if not os.path.exists(path):
+        return False
+    fh = None
+    try:
+        fh = open(path, "a+b")
+        if os.fstat(fh.fileno()).st_size == 0:
+            fh.write(b"\0")
+            fh.flush()
+        fh.seek(0)
+        if sys.platform == "win32":
+            import msvcrt
+            msvcrt.locking(fh.fileno(), msvcrt.LK_NBLCK, 1)
+            msvcrt.locking(fh.fileno(), msvcrt.LK_UNLCK, 1)
         else:
-            state[key] = (st.st_size, st.st_mtime_ns)
-    d = _REAL_CONFIG_GUARD.get("dir")
-    state["dir_listing"] = tuple(_dir_names(d)) if d else ()
-    return state
+            import fcntl
+            fcntl.flock(fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
+        return False
+    except OSError:
+        return True
+    finally:
+        if fh is not None:
+            fh.close()
 
 
-def _guard_fail_if_changed(nodeid, before):
-    after = _guard_quick_state()
-    if after == before:
-        return
-    changed = [k for k in before if before[k] != after.get(k)]
-    pytest.fail(
-        f"[mbdsdr-guard] 用例 {nodeid} 写改了用户真实配置"
-        f"（变化项：{', '.join(changed)}）。\n"
-        f"真实配置路径：{_REAL_CONFIG_GUARD.get('path')}\n"
-        "测试必须把 HOME/USERPROFILE/APPDATA/LOCALAPPDATA 重定向到 tmp_path"
-        "（请求 isolated_profile），或把配置目录指到临时目录"
-        "（MBDSDR_SETTINGS_DIR）。探针/脚本请用 "
-        "`python scripts/config_write_guard.py --wrap <脚本>` 跑。\n"
-        "纪律见 docs/COORDINATION.md「测试纪律」。",
-        pytrace=False)
+def _lock_bypass_qt_problem():
+    """绕锁进程碰了 Qt 全局态就返回原因；不该判红时返回 None。"""
+    if os.environ.get("MBDSDR_TEST_LOCK", "1") != "0":
+        return None
+    widgets = sys.modules.get("PySide6.QtWidgets")
+    if widgets is None or widgets.QApplication.instance() is None:
+        return None
+    if _qt_lock_held_elsewhere():
+        return None           # 父会话持锁：本进程是它的子进程，机器仍被保护
+    return ("[mbdsdr-lock] MBDSDR_TEST_LOCK=0 绕锁状态下构造了 QApplication。\n"
+            "绕锁的前提是**不碰 Qt 全局态**（只跑纯子进程/纯计算用例）；"
+            "构造窗口就必须拿锁。\n"
+            "要么去掉 MBDSDR_TEST_LOCK=0，要么把这批用例挪到不构造 Qt 的路径。")
 
 
 @pytest.hookimpl(wrapper=True)
 def pytest_runtest_call(item):
-    """用例主体前后各比一次：当场点名写真实配置的那条用例（判 FAIL 而非 ERROR）。"""
-    before = _guard_quick_state()
+    """用例主体前/后各查一次：绕锁碰 Qt 当场判 FAIL 并点名（不是 ERROR）。"""
+    problem = _lock_bypass_qt_problem()
+    if problem:
+        pytest.fail(f"用例 {item.nodeid}：{problem}", pytrace=False)
     try:
         return (yield)
     finally:
-        after = _guard_quick_state()
-        if after != before:
-            item._mbdsdr_guard_fired = True
-            _guard_fail_if_changed(item.nodeid, before)
-
-
-@pytest.fixture(autouse=True)
-def _real_config_per_case_guard(request):
-    """兜住 setup/teardown 阶段的写入（call 阶段已由上面的钩子点名）。"""
-    if _REAL_CONFIG_GUARD.get("before") is None:
-        yield
-        return
-    before = _guard_quick_state()
-    yield
-    if getattr(request.node, "_mbdsdr_guard_fired", False):
-        return
-    _guard_fail_if_changed(request.node.nodeid, before)
+        problem = _lock_bypass_qt_problem()
+        if problem:
+            pytest.fail(f"用例 {item.nodeid}：{problem}", pytrace=False)
 
 
 @pytest.fixture(scope="session")

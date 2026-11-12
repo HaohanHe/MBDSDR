@@ -188,46 +188,41 @@ _PROBE = os.path.join(_ROOT, "tests", "_pollution_probe",
                       "pollutes_real_config.py")
 
 
-def test_per_case_guard_turns_red_and_names_the_case(tmp_path):
-    """反证：故意写一次「真实配置」，逐用例守卫必须红并点名该用例。
+def test_real_config_is_write_protected_in_session(tmp_path):
+    """反证写保护：会话期间真实配置只读，故意写一次必须当场失败。
 
-    用 ``MBDSDR_SETTINGS_DIR`` 把「真实配置」指到 tmp_path 里的一个目录：
-    守卫在 ``pytest_configure`` 取快照，探针随后写同一路径。写真实用户目录
-    的事一次也不做。
+    归因不靠事后猜：写入失败发生在写入者进程里，谁写谁红。
     """
     real = tmp_path / "realdir"
     real.mkdir()
+    target = real / "desktop_settings.json"
+    original = b'{"record_dir": ""}\n'
+    target.write_bytes(original)
     proc = _run_pytest_subprocess(
-        [f"{_PROBE}::test_writes_declared_real_config"],
+        [f"{_PROBE}::test_write_to_real_config_is_refused"],
         extra_env={"MBDSDR_SETTINGS_DIR": str(real)})
     text = proc.stdout + proc.stderr
-    assert proc.returncode != 0, (
-        f"故意写真实配置却没被判红——守卫是假的：\n{text[-3000:]}")
-    assert "test_writes_declared_real_config" in text, (
-        f"守卫红了但没点名写入的用例：\n{text[-3000:]}")
-    assert "[mbdsdr-guard]" in text, (
-        f"不是配置守卫判的红（可能是别的原因）：\n{text[-3000:]}")
-    assert (real / "desktop_settings.json").exists(), (
-        "探针没有真的写下去，反证不成立")
+    assert proc.returncode == 0, (
+        f"真实配置没被写保护（写入成功了）：\n{text[-3000:]}")
+    assert target.read_bytes() == original, "写保护没生效，内容被改了"
+    assert os.access(target, os.W_OK), (
+        "会话结束没有恢复原属性（用户文件被永久设成只读）")
 
 
-def test_per_case_guard_stays_green_for_tmp_writes(tmp_path):
+def test_tmp_only_write_passes(tmp_path):
     """阴性对照：只写 tmp_path 的用例必须绿，证明守卫不是「永远红」。"""
     real = tmp_path / "realdir"
     real.mkdir()
     proc = _run_pytest_subprocess(
         [f"{_PROBE}::test_writes_tmp_only"],
         extra_env={"MBDSDR_SETTINGS_DIR": str(real)})
-    text = proc.stdout + proc.stderr
     assert proc.returncode == 0, (
-        f"只写临时目录的用例被守卫误伤（永远红的守卫等于没有）：\n"
-        f"{text[-3000:]}")
-    assert not (real / "desktop_settings.json").exists(), (
-        "阴性对照竟然写了守卫路径，反证不成立")
+        f"只写临时目录的用例被误伤（永远红的守卫等于没有）：\n"
+        f"{(proc.stdout + proc.stderr)[-3000:]}")
 
 
 def test_session_backup_restores_overwritten_content(tmp_path):
-    """反证还原：整份覆盖已有内容后，会话结束必须按**内容备份**逐字节还原。
+    """反证还原：绕过写保护整份覆盖后，会话结束必须按**内容备份**逐字节还原。
 
     守卫只存 sha256 时只能证明「变了」；用户真实配置 2026-11-13 被探针覆盖
     后能逐字节找回，靠的是别人留下的副本。这里钉住「会话自己就留副本、自己
@@ -243,9 +238,30 @@ def test_session_backup_restores_overwritten_content(tmp_path):
         extra_env={"MBDSDR_SETTINGS_DIR": str(real)})
     text = proc.stdout + proc.stderr
     assert proc.returncode != 0, (
-        f"整份覆盖真实配置却没被判红：\n{text[-3000:]}")
-    assert "test_overwrites_existing_real_config" in text, (
-        f"守卫没点名覆盖配置的用例：\n{text[-3000:]}")
+        f"绕过写保护覆盖配置后兜底守卫没红：\n{text[-3000:]}")
+    assert "[mbdsdr-guard]" in text, (
+        f"不是配置守卫判的红（可能是别的原因）：\n{text[-3000:]}")
     assert target.read_bytes() == original, (
         "会话结束没有按备份还原被覆盖的真实配置："
         f"now={target.read_bytes()!r}")
+
+
+def test_lock_bypass_constructing_qapp_is_red(tmp_path):
+    """反证绕锁机检：``MBDSDR_TEST_LOCK=0`` + 构造 QApplication 必须当场判红。
+
+    锁存在的理由就是「同一时刻只有一个进程碰 Qt 全局态」；绕锁还去建窗口
+    等于拆了刹车踩油门。这里把锁路径指到 tmp_path，确保本机没有别的会话
+    持锁，判定条件与真实并发时一致。
+    """
+    lock_path = tmp_path / "qt_test.lock"
+    proc = _run_pytest_subprocess(
+        [f"{_PROBE}::test_creates_qapplication_without_lock"],
+        extra_env={"MBDSDR_TEST_LOCK": "0",
+                   "MBDSDR_TEST_LOCK_PATH": str(lock_path)})
+    text = proc.stdout + proc.stderr
+    assert proc.returncode != 0, (
+        f"绕锁下构造 QApplication 却没被判红：\n{text[-3000:]}")
+    assert "[mbdsdr-lock]" in text, (
+        f"不是绕锁机检判的红：\n{text[-3000:]}")
+    assert "test_creates_qapplication_without_lock" in text, (
+        f"机检红了但没点名用例：\n{text[-3000:]}")
