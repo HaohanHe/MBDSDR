@@ -250,18 +250,6 @@
       "runtime_test": "tests/test_tooltip_dynamic_runtime.py::test_settings_panel_passthrough_tooltips_self_describe"
     },
     {
-      "file": "desktop/settings_panel.py",
-      "expr": "text",
-      "reason": "passthrough",
-      "runtime_test": "tests/test_tooltip_dynamic_runtime.py::test_settings_panel_passthrough_tooltips_self_describe"
-    },
-    {
-      "file": "desktop/settings_panel.py",
-      "expr": "item.apply_note",
-      "reason": "passthrough",
-      "runtime_test": "tests/test_tooltip_dynamic_runtime.py::test_settings_panel_passthrough_tooltips_self_describe"
-    },
-    {
       "file": "desktop/shortcuts_panel.py",
       "expr": "1",
       "reason": "passthrough",

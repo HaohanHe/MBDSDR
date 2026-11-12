@@ -1421,7 +1421,6 @@ class SettingsPanel(QWidget):
         if item.requires_restart:
             # 就在切换控件下方写明——改完不能让人以为已经生效。
             text = "重启后生效：" + (item.restart_note or "该项在启动阶段装载。")
-            control.setToolTip(text)
             note = QLabel(text)
             wrap_cn_label(note)
             self._style_note(note)
@@ -1429,7 +1428,6 @@ class SettingsPanel(QWidget):
         elif getattr(item, "apply_note", ""):
             # 不是重启级、但也不是下一帧：重连 / 重启某个服务 / 下次录音。
             # 不标清楚，用户会以为「保存 = 立刻生效」（设置项名字看不出来）。
-            control.setToolTip(item.apply_note)
             note = QLabel(item.apply_note)
             wrap_cn_label(note)
             self._style_note(note)
