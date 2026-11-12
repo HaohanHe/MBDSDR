@@ -253,10 +253,16 @@ def test_s_readouts_declare_their_scale():
 # ===========================================================================
 # 4. 带宽：同一份状态，三处也必须一致
 # ===========================================================================
-@pytest.mark.xfail(
-    strict=True,
-    reason="状态面板 _fmt_bw 整数 kHz 截断：2400 Hz 显示成 2 kHz（读数失真）；"
-           "待 _fmt_bw 精度修复后删本标记")
+def _bandwidth_token(text):
+    """取带宽文本的「数字+单位」部分。
+
+    控制面板的 ``vfo_bw_combo`` 是输入控件的**档位标签**，带模式注释
+    （``"2.4kHz (SSB)"``）；状态面板与 VFO 面板是纯读数。注释不是带宽，
+    剥离后再逐字比较——但两个纯读数之间必须逐字相同，不做任何归一化。
+    """
+    return text.split("(")[0].replace(" ", "")
+
+
 def test_bandwidth_is_the_same_string_where_rendered():
     _ensure_app()
     st = _status_panel()
@@ -268,8 +274,14 @@ def test_bandwidth_is_the_same_string_where_rendered():
         "控制面板 vfo_bw_combo": cp.vfo_bw_combo.currentText(),
         "VFO 面板 列3": vp.table.item(0, 3).text(),
     }
-    unique = set(shown.values())
-    assert len(unique) == 1, (
-        "同一带宽 2400 Hz 在不同面板显示成了不同字符串：\n"
+    # 两个纯读数：必须逐字相同（2400 Hz 显示成 "2 kHz" 就是读数失真）。
+    assert shown["状态面板 rx_bw"] == shown["VFO 面板 列3"], (
+        "同一带宽 2400 Hz 在两处读数不同：\n"
         + "\n".join(f"  {k}: {v!r}" for k, v in shown.items())
+    )
+    # 档位标签只允许差在模式注释上，带宽 token 必须一致。
+    tokens = {k: _bandwidth_token(v) for k, v in shown.items()}
+    assert len(set(tokens.values())) == 1, (
+        "同一带宽 2400 Hz 在不同面板显示成了不同字符串：\n"
+        + "\n".join(f"  {k}: {v!r} → {tokens[k]!r}" for k, v in shown.items())
     )

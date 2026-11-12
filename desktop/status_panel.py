@@ -102,7 +102,13 @@ def _fmt_rate(hz):
 
 
 def _fmt_bw(hz):
-    """解调带宽格式化。0/None 视为自动。"""
+    """解调带宽格式化。0/None 视为自动。
+
+    ≥1 kHz 必须是 1 位小数 kHz，不足 1 kHz 用整 Hz——与 VFO 面板
+    ``vfo_panel._fmt_bw_hz`` 同一口径。旧实现把 kHz 舍到整数，2400 Hz
+    显示成 "2 kHz"：既不是 2.4 也不是 2400，是个谁也不认识的数（读数
+    失真，不是精度取舍）。500 Hz 更会被舍成 "0 kHz"。
+    """
     if hz is None:
         return _EMPTY
     try:
@@ -115,7 +121,9 @@ def _fmt_bw(hz):
         return "自动"
     if hz >= 1e6:
         return f"{hz / 1e6:.3f} MHz"
-    return f"{hz / 1e3:.0f} kHz"
+    if hz >= 1e3:
+        return f"{hz / 1e3:.1f} kHz"
+    return f"{hz:.0f} Hz"
 
 
 def _fmt_squelch(squelch_db, applied_by="none", threshold_dbfs=None):
