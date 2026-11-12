@@ -73,6 +73,11 @@ IMPOSSIBLE_MESSAGE = re.compile(
 
 def _add(findings: List[Finding], rule: str, unit: Unit, line: int, why: str, fix: str,
          severity: str = "must-fix") -> None:
+    # 同一个 AST 位置可能被多条路径命中（嵌套比较、同语句多个子表达式）：
+    # 完全相同的结论只报一次，否则棘轮会把它当成两条独立违规。
+    if any(f.rule == rule and f.path == unit.path and f.line == line and f.why == why
+           for f in findings):
+        return
     findings.append(Finding(rule, unit.path, line, line_of(unit, line), why, fix, severity))
 
 
@@ -510,18 +515,69 @@ def scan_a04(units: List[Unit]) -> List[Finding]:
 
 # ────────────────────────────── A05 ──────────────────────────────
 
-_BLOCKING_CALLS = {"recv", "read", "get", "poll"}
+#: socket/serial 这类**外部** API 的调用名。本仓改不动它们，所以按名字认是稳定的；
+#: 以前这里还收了 `get`/`poll`（本仓自己的方法），换个名字就绕过去了。
+_BLOCKING_CALLS = {"recv", "recv_into", "recvfrom", "accept", "read", "readinto", "readline"}
+_EXTERNAL_IO_CTOR = re.compile(r"^(?:socket\.socket|socket\.create_connection|serial\.Serial|Serial|socket)$")
+
+
+def _external_io_names(tree: ast.Module) -> Set[str]:
+    """被绑定成 socket/serial 实例的名字；只有这些对象上的阻塞读才算无界等待。"""
+    names: Set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Assign, ast.AnnAssign)):
+            value = node.value
+            if not isinstance(value, ast.Call):
+                continue
+            if not _EXTERNAL_IO_CTOR.match(_attr_text(value.func)):
+                continue
+            targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+            for t in targets:
+                if isinstance(t, ast.Name):
+                    names.add(t.id)
+                elif isinstance(t, ast.Attribute):
+                    names.add(t.attr)
+    return names
+
+
+def _sets_timeout(node: ast.AST) -> bool:
+    for n in ast.walk(node):
+        if isinstance(n, ast.Call) and _call_name(n) == "settimeout":
+            return True
+        if isinstance(n, (ast.Assign, ast.AnnAssign)):
+            targets = n.targets if isinstance(n, ast.Assign) else [n.target]
+            if any(isinstance(t, ast.Attribute) and t.attr in {"timeout", "read_timeout", "write_timeout"}
+                   for t in targets):
+                return True
+    return False
 
 
 def _thread_target_blocks(tree: ast.Module, target: str) -> bool:
+    io_names = _external_io_names(tree)
     for node in ast.walk(tree):
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == target:
-            has_loop = any(isinstance(n, ast.While) for n in ast.walk(node))
-            if not has_loop:
+            # 结构判据一：`while True` 里没有任何 break/return —— 没名字也能判。
+            for loop in (n for n in ast.walk(node) if isinstance(n, ast.While)):
+                ok, value = const_eval(loop.test, {})
+                if not (ok and value):
+                    continue
+                has_exit = any(isinstance(n, (ast.Break, ast.Return, ast.Raise)) for n in ast.walk(loop)
+                               if n is not loop)
+                if not has_exit:
+                    return True
+            if _sets_timeout(node):
                 return False
+            # 结构判据二：socket/serial 实例上的阻塞读，且既没传 timeout 也没设过超时。
             for n in ast.walk(node):
-                if isinstance(n, ast.Call) and _call_name(n) in _BLOCKING_CALLS:
-                    if _kw(n, "timeout") is None and len(n.args) == 0:
+                if not isinstance(n, ast.Call) or _call_name(n) not in _BLOCKING_CALLS:
+                    continue
+                if _kw(n, "timeout") is not None:
+                    continue
+                if len(n.args) > 0:
+                    continue
+                if isinstance(n.func, ast.Attribute):
+                    recv = _attr_text(n.func.value)
+                    if recv.split(".")[-1] in io_names or recv in io_names:
                         return True
             return False
     return False
@@ -603,6 +659,9 @@ def scan_a05(units: List[Unit]) -> List[Finding]:
                     t = _kw(n, "target")
                     if isinstance(t, ast.Name):
                         target = t.id
+                    elif isinstance(t, ast.Attribute):
+                        # target=self._run：方法常以属性形式传入，不能只看裸名字。
+                        target = t.attr
             if target and _thread_target_blocks(tree, target):
                 _add(
                     findings, "A05", unit, node.lineno,
@@ -700,11 +759,33 @@ def _guards_call_arg(fn: ast.AST, call: ast.Call) -> bool:
     return False
 
 
-#: 同名但不同职：显示器/控件也有 set_frequency()，那不是「真正执行调谐的路径」。
-WIDGET_RECEIVER = re.compile(
-    r"display|label|widget|spin|slider|combo|button|panel|indicator|readout|_ui\b|\bview\b",
-    re.I,
-)
+#: 同名但不同职：控件也有 set_frequency()，那不是「真正执行调谐的路径」。
+#: 判据不看接收者叫什么，而看它是不是在模块里被绑定成 Qt 控件构造出来的对象：
+#: `self._x = QLabel(...)` 之后，`self._x` 叫什么名字都是展示；反过来，把
+#: `self._vfo` 改名叫 `self._vfo_panel` 也不会变成展示。Qt 类名是外部 API，
+#: 本仓改不动，因此可以作为稳定依据。
+QT_CTOR = re.compile(r"^(?:QtWidgets\.)?Q[A-Z]\w*$")
+
+
+def _widget_attrs(tree: ast.Module) -> Set[str]:
+    """模块内被绑定成 Qt 控件构造结果的名字（属性名/局部名）。"""
+    names: Set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Assign, ast.AnnAssign)):
+            value = node.value
+            if not isinstance(value, ast.Call):
+                continue
+            func = value.func
+            fname = _attr_text(func)
+            if not QT_CTOR.match(fname):
+                continue
+            targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+            for t in targets:
+                if isinstance(t, ast.Attribute):
+                    names.add(t.attr)
+                elif isinstance(t, ast.Name):
+                    names.add(t.id)
+    return names
 
 
 def _receiver_text(unit: Unit, call: ast.Call) -> str:
@@ -742,10 +823,26 @@ def _result_used(call: ast.Call, parents: Dict[int, ast.AST]) -> bool:
     return False
 
 
+def _receiver_is_display(unit: Unit, call: ast.Call, widgets: Set[str]) -> bool:
+    """接收者是不是控件实例：看它是否被绑定成 Qt 控件构造结果，不看它叫什么。"""
+    if not isinstance(call.func, ast.Attribute):
+        return False
+    recv = call.func.value
+    while isinstance(recv, ast.Subscript):
+        recv = recv.value
+    if isinstance(recv, ast.Attribute):
+        return recv.attr in widgets
+    if isinstance(recv, ast.Name):
+        # `self` / 参数 / 局部名：只有被绑定成控件构造结果的才算展示。
+        return recv.id in widgets
+    return False
+
+
 def scan_a07(units: List[Unit]) -> List[Finding]:
     findings: List[Finding] = []
     guarded: Dict[str, Set[str]] = {m: set() for m in ACTION_METHODS}
     unguarded: Dict[str, List[Tuple[Unit, ast.Call]]] = {m: [] for m in ACTION_METHODS}
+    widgets: Dict[str, Set[str]] = {}
     for unit in units:
         if not (unit.path.startswith("desktop/") or unit.path.startswith("mbdsdr_ai/")):
             continue
@@ -754,6 +851,7 @@ def scan_a07(units: List[Unit]) -> List[Finding]:
         tree = parse(unit)
         if tree is None:
             continue
+        widgets[unit.path] = _widget_attrs(tree)
         fn_nodes = enclosing_functions(tree)
         parents = _parent_map(tree)
         for node in ast.walk(tree):
@@ -780,14 +878,27 @@ def scan_a07(units: List[Unit]) -> List[Finding]:
             # 约束的实现就在这个文件里：它自己调用自己不算「绕开约束」。
             if unit.path in guarded[method]:
                 continue
-            if WIDGET_RECEIVER.search(_receiver_text(unit, node)):
-                note_skip("A07", "接收者名字像控件（display/label/panel…），视为展示而非执行")
+            if _receiver_is_display(unit, node, widgets.get(unit.path, set())):
+                note_skip("A07", "接收者是模块内 Qt 控件构造出来的对象，视为展示而非执行")
                 continue
             seen_files.add(unit.path)
+            # 同一文件同一方法的多处：只报第一条会让「修一处、浮一处」永远看不到
+            # 全貌。计数口径仍是一文件一方法一条（棘轮基线不动），但把其余同形态
+            # 的行号全部写进理由——读者不用再跑一遍才挤出下一个。
+            siblings = sorted(
+                n.lineno for u, n in sites
+                if u.path == unit.path and n is not node
+                and not _receiver_is_display(u, n, widgets.get(u.path, set()))
+            )
+            tail = ""
+            if siblings:
+                tail = (f"同一文件同一方法另有 {len(siblings)} 处同形态未展开："
+                        f"L{', L'.join(str(n) for n in siblings)}；"
+                        "修掉本处只会让它换一处冒出来，请一并看。")
             _add(
                 findings, "A07", unit, node.lineno,
                 f"{method} 的数值前置条件只出现在 {example} 等入口，{unit.path} 这条调用路径没有同一约束；"
-                "真正执行动作的地方也没有，所以这条路径能绕过去。",
+                "真正执行动作的地方也没有，所以这条路径能绕过去。" + tail,
                 "把约束下沉到动作的必经实现（后端方法）或唯一网关，调用方只负责展示。",
             )
     return findings
@@ -868,14 +979,71 @@ def _skip_reason(unit: Unit, node: ast.Call) -> str:
     return ""
 
 
+def _repo_symbols(units: List[Unit]) -> Set[str]:
+    """仓内**生产代码**里的函数/类名（不含测试与 conftest）。
+
+    只收生产代码：测试文件里叫 `f`、`helper` 的局部替身不是「环境缺失」的
+    判据来源；拿它们去匹配理由文本只会制造噪声。
+    """
+    names: Set[str] = set()
+    for unit in units:
+        if not unit.path.endswith(".py"):
+            continue
+        if _is_test_path(unit.path) or unit.path.endswith("conftest.py"):
+            continue
+        tree = parse(unit)
+        if tree is None:
+            continue
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                names.add(node.name)
+    return names
+
+
+def _covered_elsewhere(fn: ast.AST, tree: ast.Module, prod: Set[str]) -> bool:
+    """跳过之后，同一模块里还有没有别的用例在断言同一个行为。
+
+    判据看调用图：别的测试函数至少有一条 assert，且它调用的本仓函数/类
+    与这个被跳过用例重叠。重叠则为「行为仍有覆盖」，不按删用例处理。
+    """
+    mine = {_call_name(n) for n in ast.walk(fn)
+            if isinstance(n, ast.Call) and _call_name(n) in prod}
+    if not mine:
+        return False
+    for node in ast.walk(tree):
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) or node is fn:
+            continue
+        if not (node.name.startswith("test") or "_test" in node.name):
+            continue
+        if not any(isinstance(n, ast.Assert) for n in ast.walk(node)):
+            continue
+        theirs = {_call_name(n) for n in ast.walk(node)
+                  if isinstance(n, ast.Call) and _call_name(n) in prod}
+        if mine & theirs:
+            return True
+    return False
+
+
 def scan_a09(units: List[Unit]) -> List[Finding]:
+    """判据看 skip 的**形态**，不看理由里有没有某个词。
+
+    三条形态判据：
+    1. skip 在宽泛 except 里 —— 任何实现错误都能伪装成「环境不凑巧」；
+    2. 无条件 skip 且跳过之前没有断言 —— 这个用例等于被删掉；
+    3. 第 2 条只在同模块找不到覆盖同一行为的其他用例时才报。
+    """
     findings: List[Finding] = []
+    prod = _repo_symbols(units)
     for unit in units:
         if not _is_test_path(unit.path):
             continue
         tree = parse(unit)
         if tree is None:
             continue
+        fn_nodes = enclosing_functions(tree)
+        parents: Dict[int, ast.AST] = {
+            id(n): parent for n, parent in walk_with_parents(tree) if parent is not None
+        }
         for node in ast.walk(tree):
             if not isinstance(node, ast.Call):
                 continue
@@ -883,16 +1051,39 @@ def scan_a09(units: List[Unit]) -> List[Finding]:
             if name not in {"skip", "skipif", "SkipTest"}:
                 continue
             reason = _skip_reason(unit, node)
-            if not reason:
-                _add(findings, "A09", unit, node.lineno, "skip 没有说明原因。", "写出具体的环境缺失条件。", "review")
-                continue
-            if VAGUE_SKIP.search(reason) and not CONCRETE_ANCHOR.search(reason):
+            fn = fn_nodes.get(node.lineno)
+            chain = []
+            cur = parents.get(id(node))
+            while cur is not None:
+                chain.append(cur)
+                cur = parents.get(id(cur))
+            in_broad_except = any(
+                isinstance(n, ast.ExceptHandler) and _broad_except(n) for n in chain
+            )
+            unconditional = not any(isinstance(n, (ast.If, ast.While, ast.Try, ast.For,
+                                                   ast.AsyncFor, ast.With, ast.AsyncWith)) for n in chain)
+            # 只看 skip 之前的断言：跳过之后的断言永远不会执行。
+            has_assert = fn is not None and any(
+                isinstance(n, ast.Assert) and n.lineno < node.lineno for n in ast.walk(fn))
+            if in_broad_except:
                 _add(
                     findings, "A09", unit, node.lineno,
-                    f"skip 理由只写了「{reason[:50]}」，没有可核对的缺失条件；"
-                    "本仓依赖缺失/构造失败会被长期伪装成环境不凑巧。",
-                    "写清缺的是哪个依赖/文件/硬件，并先断言探测结果；本仓自身缺陷一律改红。",
+                    "在宽泛 except 里 skip：任何实现错误都会被伪装成「环境不凑巧」。",
+                    "先断言探测结果，只有明确的外部缺失才允许 skip；本仓缺陷一律改红。",
                 )
+                continue
+            if unconditional and not has_assert:
+                if fn is not None and _covered_elsewhere(fn, tree, prod):
+                    note_skip("A09", "无条件 skip 但同模块另有带断言的用例覆盖同一行为")
+                    continue
+                _add(
+                    findings, "A09", unit, node.lineno,
+                    f"无条件 skip（理由「{reason[:40] or '空'}」）：函数体里没有任何断言，"
+                    "这个用例等于被删掉，却仍显示为「跳过」。",
+                    "改为按探测结果条件 skip，或在 skip 前保留至少一条断言。",
+                )
+                continue
+            note_skip("A09", "skip 有理由且形态合法（条件/断言在前/只提仓外依赖），需人工复核")
     return findings
 
 
@@ -906,11 +1097,23 @@ A10_AS_COMMIT = re.compile(r"(?:提交|commit|HEAD)[\s:：]*$", re.I)
 #: 「不是提交」的说明必须紧贴这个 hash（前后各一句内），不能靠整行任意位置的一个词来关掉检查。
 #: 窗口从「整行」收到 ±24 字符后，这些词就不再是开关，而是就近的语境证据。
 A10_NON_COMMIT_NEAR = re.compile(
-    r"会话|session|线名|交接方|收件方|来源|提出|维护者|owner|blob|字节|byte|打包|"
-    r"多项式|系数|二进制|0b[01]{6,}|第三方|不存在|幻影|幽灵|phantom|未落地|已作废|"
-    r"报出|误报|抓到|示例|例如|示意|占位|placeholder",
+    r"会话|session|blob|tree|字节|byte|打包|多项式|系数|二进制|0b[01]{6,}",
     re.I,
 )
+
+
+def _fenced_lines(text: str) -> Set[int]:
+    """fenced code block 内的行号。示例只认「在代码块里」，不认正文里写「例如」。"""
+    inside: Set[int] = set()
+    fence = False
+    for i, line in enumerate(text.splitlines(), 1):
+        if line.lstrip().startswith("```"):
+            fence = not fence
+            inside.add(i)
+            continue
+        if fence:
+            inside.add(i)
+    return inside
 
 
 def _looks_like_commit(text: str) -> bool:
@@ -938,10 +1141,14 @@ def scan_a10(repo: Repo, units: List[Unit]) -> List[Finding]:
         if unit.path.startswith("docs/learn/"):
             # learn/ 引用的是外部项目的历史提交，不属于本仓证据。
             continue
+        fenced = _fenced_lines(unit.text)
         for lineno, line in enumerate(unit.text.splitlines(), 1):
             for m in HASH_IN_BACKTICKS.finditer(line):
                 token = m.group(1)
                 if not _looks_like_commit(token):
+                    continue
+                if lineno in fenced:
+                    note_skip("A10", "hash 在代码块里，按示例处理")
                     continue
                 near = line[max(0, m.start() - 24): m.end() + 24]
                 if A10_NON_COMMIT_NEAR.search(near):
@@ -995,11 +1202,27 @@ def scan_a11(repo: Repo, units: List[Unit]) -> List[Finding]:
             if EXIT_CRITERION.search(line):
                 note_skip("A11", "写的是转绿/验收判据，不是已绿的声明")
                 continue
+            # 判据看「有没有可复核的东西」：命令、提交号、日期至少要有一样。
+            # 「历史 / 已修 / 快照」这类词本身不是证据，必须同时给出日期，
+            # 否则读者不知道该重跑哪一版。
+            has_date = re.search(r"\b20\d{2}-\d{2}-\d{2}\b", line) is not None
+            has_command = bool(re.search(r"`(?:python|pytest|git|pwsh|powershell|scripts/)[^`]*`", line, re.I))
             if HISTORY_MARKER.search(line):
-                note_skip("A11", "同一句已标注历史/快照")
+                if has_date:
+                    note_skip("A11", "标注为历史快照且带日期，可定位到某一版")
+                    continue
+                _add(
+                    findings, "A11", unit, i + 1,
+                    "标注为历史/已修，但没有日期，读者无法判断它说的是哪一版。",
+                    "补上日期（YYYY-MM-DD）或提交号；否则按当前树的声明处理。",
+                    "review",
+                )
                 continue
             match = HASH_IN_BACKTICKS.search(window)
             if not match:
+                if has_command or has_date:
+                    note_skip("A11", "绿声明带命令/日期，可复核（未绑定提交号）")
+                    continue
                 if unit.path.startswith("docs/learn/") or ARCHIVE_DOC.search(unit.path):
                     note_skip("A11", "历史快照目录里的声明不承担当前树结论")
                     continue
@@ -1007,8 +1230,8 @@ def scan_a11(repo: Repo, units: List[Unit]) -> List[Finding]:
                     no_hash_reported = True
                     _add(
                         findings, "A11", unit, i + 1,
-                        "「全绿/全部通过」的声明没有绑定任何提交，读者无法知道它说的是哪棵树。",
-                        "补上实跑所在的提交号，或标注为历史快照。",
+                        "「全绿/全部通过」的声明没有命令、提交号、日期中的任何一项，读者无法复核。",
+                        "补上实跑命令与所在提交号（或日期），或标注为历史快照。",
                         "review",
                     )
                 continue
@@ -1036,22 +1259,48 @@ def scan_a11(repo: Repo, units: List[Unit]) -> List[Finding]:
 
 # ────────────────────────────── A12 ──────────────────────────────
 
-#: 只比较「同一语义、用户可见口径」的同名实现（fmt_xxx / format_xxx / render_xxx）。
-#: `parse()` 在各协议解码器里是不同对象的不同方法，属于 D3「同名不同职」，不该算 A12。
-DUP_NAME = re.compile(
-    r"^_?(?:fmt|format|render)(?:_?(?:freq|frequency|hz|mhz|khz|bw|bandwidth|gain|rate|"
-    r"dbfs|dbm|db|power|unit|level|snr|ppm|offset))",
-    re.I,
-)
-
-
 def _normalized(node: ast.AST) -> str:
     return ast.dump(node, include_attributes=False)
 
 
+def _shape_key(fn: ast.AST) -> str:
+    """函数体的结构形状：抹掉标识符与常量值的差异，只留语句/表达式骨架。
+
+    判据不再要求「函数名以 fmt/format/render 开头」——那只是给重命名留后门。
+    两份实现只要骨架相同、产出单位/精度不同，就是同一个值有两种口径。
+    """
+    parts: List[str] = []
+    for n in ast.walk(fn):
+        if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and n is not fn:
+            continue
+        kind = type(n).__name__
+        if isinstance(n, ast.Attribute):
+            kind += ":" + n.attr
+        elif isinstance(n, ast.Call):
+            kind += ":" + (_call_name(n) or "-")
+        elif isinstance(n, ast.Constant):
+            kind += ":" + type(n.value).__name__
+        parts.append(kind)
+    return "|".join(parts)
+
+
+def _unit_literals(fn: ast.AST) -> List[str]:
+    """函数体里出现的单位/精度口径（`MHz`、`.6f` 这类）。"""
+    out: List[str] = []
+    for n in ast.walk(fn):
+        if isinstance(n, ast.Constant) and isinstance(n.value, str) and UNIT_RE.search(n.value):
+            out.append(" ".join(n.value.split()))
+        elif isinstance(n, ast.FormattedValue) and isinstance(n.format_spec, ast.JoinedStr):
+            spec = "".join(v.value for v in n.format_spec.values
+                           if isinstance(v, ast.Constant) and isinstance(v.value, str))
+            if spec:
+                out.append("{" + spec + "}")
+    return out
+
+
 def scan_a12(units: List[Unit]) -> List[Finding]:
     findings: List[Finding] = []
-    groups: Dict[str, List[Tuple[Unit, ast.AST, str]]] = {}
+    groups: Dict[str, List[Tuple[Unit, ast.AST, List[str], str]]] = {}
     for unit in units:
         if not (unit.path.startswith("desktop/") or unit.path.startswith("mbdsdr_ai/")):
             continue
@@ -1061,24 +1310,34 @@ def scan_a12(units: List[Unit]) -> List[Finding]:
         if tree is None:
             continue
         for node in ast.walk(tree):
-            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and DUP_NAME.search(node.name):
-                if len(node.body) < 4:
-                    continue
-                groups.setdefault(node.name, []).append((unit, node, _normalized(node)))
-    for name, items in groups.items():
-        modules = {u.path for u, _, _ in items}
+            if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            if len(node.body) < 4:
+                continue
+            units_seen = _unit_literals(node)
+            if not units_seen:
+                continue
+            groups.setdefault(_shape_key(node), []).append(
+                (unit, node, units_seen, _normalized(node)))
+    for items in groups.values():
+        if len(items) < 2:
+            continue
+        modules = {u.path for u, _, _, _ in items}
         if len(modules) < 2:
             continue
-        bodies = {b for _, _, b in items}
-        if len(bodies) < 2:
+        literal_sets = {tuple(sorted(lits)) for _, _, lits, _ in items}
+        if len(literal_sets) < 2:
+            # 骨架相同、口径也相同：是重复实现，但不是「给出不同结论」，不归 A12。
             continue
+        items.sort(key=lambda it: (it[0].path, it[1].lineno))
         first = items[0]
-        for unit, node, body in items[1:]:
-            if body == first[2]:
+        for unit, node, lits, body in items[1:]:
+            if tuple(sorted(lits)) == tuple(sorted(first[2])):
                 continue
             _add(
                 findings, "A12", unit, node.lineno,
-                f"与 {first[0].path}:{first[1].lineno} 同名（{name}）但实现不同；"
+                f"与 {first[0].path}:{first[1].lineno} 的 `{first[1].name}` 结构相同但口径不同"
+                f"（{'/'.join(lits[:2])} vs {'/'.join(first[2][:2])}）；"
                 "同一语义在两处各写一遍，迟早会对同一个值给出不同结论。",
                 "合并到唯一实现（读数类统一收进 desktop/readouts.py），删除另一份。",
             )
@@ -1089,6 +1348,39 @@ def scan_a12(units: List[Unit]) -> List[Finding]:
 
 IDENTITY_NAME = re.compile(r"(^|_)(owner|holder|serial|device_key|device_id|identity)($|_)", re.I)
 INDEX_NAMES = {"idx", "index", "i", "n"}
+#: 唯一性字段：一个记录里有这些字段，说明它知道自己「是谁的、哪个进程的」，
+#: 那么用它旁边那个同名字符串字段判同一就是可复用的身份。
+UNIQUE_FIELDS = {"pid", "start_time", "starttime", "serial", "serial_number", "udid", "epoch"}
+
+
+def _record_schemas(tree: ast.Module) -> Set[str]:
+    """模块里出现过的「带唯一性字段的记录」的字段集合（dict 字面量 / 类成员）。
+
+    判据不要求字段叫 owner/holder：只要这个记录同时带 pid/serial 这类唯一字段，
+    却拿另一个字段按名字比较，就是可复用的身份。
+    """
+    keys: Set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Dict):
+            names = {k.value for k in node.keys
+                     if isinstance(k, ast.Constant) and isinstance(k.value, str)}
+            if names & UNIQUE_FIELDS:
+                keys |= names
+        elif isinstance(node, ast.ClassDef):
+            members: Set[str] = set()
+            for child in node.body:
+                if isinstance(child, (ast.Assign, ast.AnnAssign)):
+                    targets = child.targets if isinstance(child, ast.Assign) else [child.target]
+                    for t in targets:
+                        if isinstance(t, ast.Name):
+                            members.add(t.id)
+                elif isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    for a in list(child.args.args) + list(child.args.kwonlyargs):
+                        if isinstance(a.arg, str):
+                            members.add(a.arg)
+            if members & UNIQUE_FIELDS:
+                keys |= members
+    return keys
 
 
 def _has_index_name(node: ast.AST) -> bool:
@@ -1128,7 +1420,7 @@ def scan_a13(units: List[Unit]) -> List[Finding]:
         tree = parse(unit)
         if tree is None:
             continue
-        fn_nodes = enclosing_functions(tree)
+        schema = _record_schemas(tree)
         for node in ast.walk(tree):
             # 身份比较只看名字，不看 pid
             if isinstance(node, ast.Compare) and any(isinstance(op, (ast.Eq, ast.NotEq)) for op in node.ops):
@@ -1139,21 +1431,33 @@ def scan_a13(units: List[Unit]) -> List[Finding]:
                         names.append(op.id)
                     elif isinstance(op, ast.Attribute):
                         names.append(op.attr)
+                    elif isinstance(op, ast.Subscript) and isinstance(op.slice, ast.Constant) \
+                            and isinstance(op.slice.value, str):
+                        names.append(op.slice.value)
                     elif isinstance(op, ast.Call) and isinstance(op.func, ast.Attribute):
                         names.append(op.func.attr)
-                # 必须两边都是 owner/holder —— 一边是 owner、另一边是 epoch/常量时，
-                # 判的不是「是不是同一个持有者」。
-                owner_like = [n for n in names if re.search(r"owner|holder", n, re.I)]
-                if len(owner_like) < 2:
+                # 两边比较的是同一个字段名，且这个字段属于「带 pid/serial 的记录」，
+                # 而它本身不是唯一字段 —— 这就是拿可复用的名字当身份。
+                field = ""
+                if len(names) >= 2 and names[0] == names[1]:
+                    field = names[0]
+                if not field and len(names) >= 2:
+                    same = {n for n in names[1:] if n == names[0]}
+                    field = names[0] if same else ""
+                if not field or field in UNIQUE_FIELDS:
                     continue
-                fn = fn_nodes.get(node.lineno)
-                fn_src = ""
-                if fn is not None:
-                    try:
-                        fn_src = ast.get_source_segment(unit.text, fn) or ""
-                    except Exception:
-                        pass
-                if re.search(r"\bpid\b", fn_src):
+                if schema and field not in schema:
+                    continue
+                if not schema and not re.search(r"owner|holder|identity", field, re.I):
+                    continue
+                # 只有比较式本身带了 pid/serial 才算「用了唯一事实」；
+                # 同函数别处出现 `'pid'` 字面量（比如记录定义）不能当作豁免。
+                cmp_src = ""
+                try:
+                    cmp_src = ast.get_source_segment(unit.text, node) or ""
+                except Exception:
+                    pass
+                if any(re.search(rf"\b{u}\b", cmp_src) for u in UNIQUE_FIELDS):
                     continue
                 _add(
                     findings, "A13", unit, node.lineno,
@@ -1164,7 +1468,8 @@ def scan_a13(units: List[Unit]) -> List[Finding]:
                 for target in node.targets:
                     if not isinstance(target, ast.Name):
                         continue
-                    if not IDENTITY_NAME.search(target.id):
+                    # 名字不再是唯一判据：属于「带 pid/serial 的记录」的字段同样算身份。
+                    if not (IDENTITY_NAME.search(target.id) or target.id in schema):
                         continue
                     if _index_derived(node.value):
                         _add(

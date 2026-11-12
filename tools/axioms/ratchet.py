@@ -18,11 +18,14 @@ import os
 import re
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Dict, List, Optional, Sequence, Tuple
+from typing import Dict, List, Optional, Sequence, Set, Tuple
 
 from .model import Finding, Repo
 
 DEFAULT_BASELINE = "docs/axioms-baseline.json"
+#: 接受记录单独入库：谁、在哪个提交上、因为什么、接受了哪些指纹。
+#: 基线文件本身只能看出「现在有什么」，「为什么它在这里」只能靠这份账。
+DEFAULT_ACCEPTED = "docs/axioms-accepted.json"
 SCHEMA = 2
 
 # 有些规则的片段里会写「另一个文件:行号」（例如 D3-name-role 指认同名实现）。
@@ -120,6 +123,60 @@ def write_baseline(repo: Repo, path: str, data: Dict[str, object]) -> str:
     return full
 
 
+def load_accepted(repo: Repo, path: str = DEFAULT_ACCEPTED) -> Dict[str, object]:
+    full = path if os.path.isabs(path) else os.path.join(repo.root, path)
+    if not os.path.isfile(full):
+        return {"version": 1, "records": []}
+    with open(full, encoding="utf-8") as fh:
+        data = json.load(fh)
+    data.setdefault("records", [])
+    return data
+
+
+def accepted_fingerprints(data: Dict[str, object]) -> Dict[str, Dict[str, object]]:
+    out: Dict[str, Dict[str, object]] = {}
+    for rec in data.get("records") or []:
+        for item in rec.get("accepted") or []:
+            fp = str(item.get("fingerprint", ""))
+            if fp:
+                out[fp] = {"record": rec, "item": item}
+    return out
+
+
+def accept_record(repo: Repo, result: "RatchetResult", head: str, reason: str,
+                  user: str, session: str) -> Dict[str, object]:
+    return {
+        "at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "by": user,
+        "session": session,
+        "head": head,
+        "reason": reason,
+        "accepted": [
+            {"fingerprint": fp, "rule": f.rule, "path": f.path, "line": f.line,
+             "severity": f.severity, "snippet": _norm(f.snippet)}
+            for fp, f in result.new
+        ],
+        "escalated": [
+            {"fingerprint": fp, "rule": f.rule, "path": f.path, "line": f.line,
+             "severity": f.severity, "snippet": _norm(f.snippet)}
+            for fp, f in result.escalated
+        ],
+        "removed": [
+            {"fingerprint": fp, "rule": e.get("rule"), "path": e.get("path"),
+             "line": e.get("line"), "snippet": e.get("snippet")}
+            for fp, e in result.gone
+        ],
+    }
+
+
+def append_accepted(repo: Repo, record: Dict[str, object],
+                    path: str = DEFAULT_ACCEPTED) -> str:
+    data = load_accepted(repo, path)
+    data["records"].append(record)
+    data["version"] = data.get("version", 1)
+    return write_baseline(repo, path, data)
+
+
 @dataclass
 class RatchetResult:
     baseline_total: int = 0
@@ -128,6 +185,7 @@ class RatchetResult:
     gone: List[Tuple[str, Dict[str, object]]] = field(default_factory=list)
     escalated: List[Tuple[str, Finding]] = field(default_factory=list)
     downgraded: List[Tuple[str, Finding]] = field(default_factory=list)
+    current_fps: Set[str] = field(default_factory=set)
 
     @property
     def ok(self) -> bool:
@@ -142,7 +200,8 @@ def compare(current: Sequence[Finding], baseline: Dict[str, object]) -> RatchetR
     entries = entry_map(baseline)
     active = [f for f in current if not f.waived]
     current_map = fingerprint_map(active)
-    result = RatchetResult(baseline_total=len(entries), current_total=len(current_map))
+    result = RatchetResult(baseline_total=len(entries), current_total=len(current_map),
+                           current_fps=set(current_map))
     for fp, f in current_map.items():
         if fp not in entries:
             result.new.append((fp, f))
@@ -162,13 +221,23 @@ def describe(entry: Dict[str, object]) -> str:
     return f"{entry.get('rule')} {entry.get('path')}:{entry.get('line')}  {entry.get('snippet')}"
 
 
-def render(result: RatchetResult, baseline_path: str) -> str:
+def render(result: RatchetResult, baseline_path: str,
+           accepted: Optional[Dict[str, Dict[str, object]]] = None,
+           accepted_path: str = "", current_fps: Optional[Set[str]] = None) -> str:
     lines = ["", "── 棘轮（存量只减不增）──"]
     lines.append(
         f"基线 {result.baseline_total} 条（豁免项不占额度，由 D8 到期机制管理）；"
         f"当前 {result.current_total} 条；新增 {len(result.new)} / 消失 {len(result.gone)} / "
         f"升级 {len(result.escalated)} / 降级 {len(result.downgraded)}"
     )
+    if accepted is not None:
+        fps = current_fps or set()
+        live = sum(1 for fp in accepted if fp in fps)
+        latest = max((str(v["record"].get("at", "")) for v in accepted.values()), default="")
+        lines.append(
+            f"已接受（在基线内、按接受记录入账）：{len(accepted)} 条 / 当前仍存在 {live} 条 / "
+            f"已修掉 {len(accepted) - live} 条；最近一次 {latest or '无'}（{accepted_path}）"
+        )
     if result.new:
         lines.append("新增违规（棘轮红）：")
         for fp, f in result.new:
@@ -199,11 +268,17 @@ def render(result: RatchetResult, baseline_path: str) -> str:
 
 
 def render_accept(result: RatchetResult, before: int, after: int,
-                  accepted_path: str, reason: str) -> str:
+                  accepted_path: str, reason: str,
+                  record: Optional[Dict[str, object]] = None,
+                  ledger_path: str = "") -> str:
     lines = ["", "── 棘轮基线更新 ──"]
     lines.append(f"基线 {before} → {after}")
-    if reason:
-        lines.append(f"接受理由：{reason}")
+    lines.append(f"接受理由：{reason}")
+    if record:
+        lines.append(f"接受人：{record.get('by')}（会话 {record.get('session') or '未声明'}）"
+                     f"@ {record.get('head')}，{record.get('at')}")
+    if ledger_path:
+        lines.append(f"接受记录：{ledger_path}（入库，可 diff）")
     if result.new:
         lines.append(f"本次接受的新增违规 {len(result.new)} 条：")
         for fp, f in result.new:

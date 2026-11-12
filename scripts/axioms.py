@@ -24,10 +24,14 @@ if ROOT not in sys.path:
 from tools.axioms.checks import skip_report  # noqa: E402
 from tools.axioms.model import DEFAULT_WAIVER_FILE, Repo, apply_waivers, load_waivers  # noqa: E402
 from tools.axioms.ratchet import (  # noqa: E402
+    DEFAULT_ACCEPTED,
     DEFAULT_BASELINE,
-    RatchetResult,
+    accept_record,
+    accepted_fingerprints,
+    append_accepted,
     build_baseline,
     compare,
+    load_accepted,
     load_baseline,
     render,
     render_accept,
@@ -56,12 +60,17 @@ def main(argv=None) -> int:
                         help="本次不做棘轮比对")
     parser.add_argument("--baseline", default="", help=f"基线路径（默认 {DEFAULT_BASELINE}）")
     parser.add_argument("--accept-current", action="store_true",
-                        help="把当前违规写为新基线；会打印本次接受/移除的条目")
-    parser.add_argument("--accept-reason", default="", help="写基线时记录的理由")
+                        help="把当前违规写为新基线；必须带 --reason，并会打印接受清单")
+    parser.add_argument("--accept-reason", "--reason", dest="accept_reason", default="",
+                        help="写基线时记录的理由（必填，落盘到 docs/axioms-accepted.json）")
     args = parser.parse_args(argv)
 
     if args.accept_current and args.rule:
         print("拒绝：--accept-current 不能与 --rule 一起用（会只保留被过滤的条目）。", file=sys.stderr)
+        return 2
+    if args.accept_current and not args.accept_reason.strip():
+        print("拒绝写基线：--accept-current 必须带 --reason，说明这次为什么接受这些新增违规。\n"
+              "静默刷新基线等于把闸门关掉。", file=sys.stderr)
         return 2
 
     repo = Repo(args.root)
@@ -118,10 +127,19 @@ def main(argv=None) -> int:
             return 1
         old = load_baseline(repo, baseline_path)
         old_total = len((old or {}).get("entries", {}))
-        result = compare(all_findings, old) if old else RatchetResult()
-        new_data = build_baseline(repo, all_findings, repo.head(), args.accept_reason)
+        # 首次建基线时「当前全部」都是这次被接受的条目，必须一并记账，
+        # 否则接受清单会是空的——等于审计第一次就是瞎的。
+        result = compare(all_findings, old if old else {"entries": {}})
+        head = repo.head()
+        new_data = build_baseline(repo, all_findings, head, args.accept_reason)
         full = write_baseline(repo, baseline_path, new_data)
-        print(render_accept(result, old_total, int(new_data["total_active"]), full, args.accept_reason))
+        who = os.environ.get("MBDSDR_CLAIM_OWNER") or os.environ.get("USERNAME") or os.environ.get("USER") or "unknown"
+        session = (os.environ.get("MBDSDR_SESSION_ID") or os.environ.get("TRAE_SESSION_ID")
+                   or os.environ.get("CLAUDE_SESSION_ID") or "")
+        record = accept_record(repo, result, head, args.accept_reason, who, session)
+        ledger = append_accepted(repo, record)
+        print(render_accept(result, old_total, int(new_data["total_active"]), full,
+                            args.accept_reason, record, ledger))
         return 0
 
     ratchet_on = args.ratchet if args.ratchet is not None else True
@@ -133,7 +151,8 @@ def main(argv=None) -> int:
               f"（路径 {baseline_path}）")
         return 0
     result = compare(all_findings, baseline)
-    print(render(result, baseline_path))
+    accepted = accepted_fingerprints(load_accepted(repo, DEFAULT_ACCEPTED))
+    print(render(result, baseline_path, accepted, DEFAULT_ACCEPTED, result.current_fps))
     return 1 if result.failed else 0
 
 
