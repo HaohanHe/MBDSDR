@@ -821,7 +821,7 @@ MBDSDR 是**单机桌面观测台**，不是在线服务、不是专业仪器软
 
 | 机制 | 实现位置 | 实际行为 |
 |---|---|---|
-| 私有模块冒烟 | `desktop/main.py:_RISKY_IMPORTS`（13 项）、`_run_import_smoke` | 在创建 `QApplication` 之前逐项 `importlib.import_module`；结果写成 `[smoke] 私有模块导入自检 n/13 通过`，失败项列名，**不阻断启动** |
+| 私有模块导入自检（拆两段） | `desktop/main.py:_SPEC_FIRST_DEPENDENCIES`（scipy 系 4 项，`find_spec`）、`_RISKY_IMPORTS`（13 项，首帧后真 import）、`_start_deferred_imports` | **在创建 `QApplication` 与 splash 之后**只做 `find_spec` 存在性检查（缺件 → 中止并弹缺件窗）；私有子树的真 import 推迟到主窗首个 `Paint` 派发完毕之后，由工作线程逐个做；失败只写启动日志 + 状态栏提示（60 s），不阻断启动。改前把 13 项真 import 压在 splash 前，实测 0.93–0.97 s（`docs/perf-evidence/2026-11-12/deferred-import-verify.json`） |
 | 缺件归因三分类 | `desktop/main.py:_packaging_verdict`、`_import_error_text` | `defect`（整棵子树缺失）/ `incomplete`（只缺单文件、同子树其余仍可导入）/ `unknown`（判不了），三类文案与行动建议不同 |
 | Qt 平台插件判定 | `desktop/main.py:_qt_platform_plugin_problem` | 仅 Windows 生效；区分"平台插件缺失"与一般启动失败 |
 | 日志落点策略 | `desktop/startup_paths.py:log_candidates` / `startup_log_path` / `append_startup_log` | 候选顺序：`MBDSDR_STARTUP_LOG` 覆盖 → 各固定/可移动盘 `X:\mbdsdr\logs\` → 程序目录 `logs\` → `%PROGRAMDATA%\MBDSDR\logs\`；**不写用户目录**；全不可写时回退内存环形缓冲（200 行），`startup_log_path()` 返回空串 |
@@ -832,7 +832,7 @@ MBDSDR 是**单机桌面观测台**，不是在线服务、不是专业仪器软
 
 **验收**
 - AC-R1（已有自动化）：`QT_QPA_PLATFORM=offscreen python -m pytest tests/test_startup_log_policy.py -q` 全绿。`test_runtime_dll_report_finds_and_misses` 用临时目录构造"缺/不缺"两种布局，精确断言两个列表；`test_candidates_never_under_user_profile` 钉住日志不落用户目录。
-- AC-R2（可复跑脚本）：源码启动一次，启动日志出现 `[smoke] 私有模块导入自检 13/13 通过`；人为改名任一私有模块后重启，日志列出该模块名，主窗口仍能打开。
+- AC-R2（可复跑脚本）：`scripts/repro/2026-11-12-deferred-import-verify.py` 三条反证全绿——`gate_missing` 模拟缺件 → 3/3 退出码 3、弹窗文案含「缺了会怎样 / 怎么修」、不导入主窗口；`defer_broken` 模拟「文件在但加载失败」→ 3/3 首帧已出后报 1 条、状态栏有提示、进程不崩；`frame_gap` 量延后期间最坏帧间隔 87.0–90.1 ms（无延后对照 88.7–93.0 ms），无切片超过 100 ms。
 - AC-R3（已有自动化）：`tests/test_startup_log_policy.py::test_all_unwritable_uses_memory_buffer` 断言三处都不可写时回退内存缓冲且不抛异常。
 - 提交：`c295423`（ProgramData 日志兜底、异步可写探测、运行库 DLL 自检）。
 
