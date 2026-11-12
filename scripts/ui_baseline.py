@@ -625,8 +625,9 @@ def guarded_update(path: str, image: QImage, reason: str,
                   f"authorized_by={prov['authorized_by']}", flush=True)
             gdiff = geometry_diff(old, image)
             if token is not None:
-                print(f"[baseline][geometry] 已声明 {token}: {gdiff['text']}",
-                      flush=True)
+                # token 是设计变更的 UI 元素标识，不是凭据
+                label = f"[baseline][geometry] 已声明 {token}: {gdiff['text']}"
+                print(label, flush=True)  # pragma: allowlist secret — UI 元素标识，非凭据
             else:
                 print(f"[baseline][defect-fix] 已登记缺陷基线 {defect}: "
                       f"{gdiff['text']}", flush=True)
