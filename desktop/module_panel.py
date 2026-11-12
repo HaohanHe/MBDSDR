@@ -52,7 +52,9 @@ from constants import (
     DEFAULT_SAMPLE_RATE_HZ, DEFAULT_SR_UNCONFIRMED,
     FREQ_MIN_HZ, FREQ_MAX_HZ, format_sample_rate,
     default_sample_rate_combo_index, sample_rate_combo_items,
-    connect_sample_rate_hz, set_connect_sample_rate)
+    connect_sample_rate_hz)
+# 连接请求的唯一持有者：本面板只渲染/写回，不再自持 _sample_rate/_gain 副本。
+import connect_request_store as _req_store
 
 try:  # pragma: no cover - 失败消息整形（clean_exc 战役先例），缺失时退化原文
     from mbdsdr_ai.tool_registry import clean_exc as _clean_exc
@@ -247,6 +249,8 @@ class ModulePanel(QWidget):
     def __init__(self, parent: Optional[QWidget] = None):
         super().__init__(parent)
         self._devices: List[Dict] = []
+        #: 与 _devices 同序的身份结论（key/quality/warning）。
+        self._identities: List = []
         # 连接/调谐的真实状态：只有后端回执过的值才允许出现在控件里。
         self._sdr_connected = False
         # 模块面板调谐是否已接入后端（_apply_hw_action）。未接入时频率控件禁用，
@@ -258,6 +262,7 @@ class ModulePanel(QWidget):
         self._enum_signals.finished.connect(self._on_devices_enumerated)
         self._enum_inflight = False
         self._build_ui()
+        _req_store.subscribe(self._on_request_changed)
         # 设备枚举放到后台：实测本机 enumerate_all_sdr_devices 1.03 s
         # （含 rtlsdr_open + 0.5 s 网络探测），压在 GUI 线程里首帧得等它。
         self.refresh_devices_async()
@@ -344,6 +349,7 @@ class ModulePanel(QWidget):
         self.gain_val = QLabel("—")
         self.gain_slider.valueChanged.connect(
             lambda v: self.gain_val.setText(f"{v} dB"))
+        self.gain_slider.valueChanged.connect(self._push_gain)
         grow = QHBoxLayout()
         grow.addWidget(self.gain_slider)
         grow.addWidget(self.gain_val)
@@ -364,6 +370,7 @@ class ModulePanel(QWidget):
             "说明项并置灰；连接时按默认采样率兜底，连上后以控制面板的设备"
             "回执档位为准。")
         self._fill_sample_rate_options(None)
+        self.sr_combo.currentIndexChanged.connect(self._push_sample_rate)
         form.addRow("采样率", self.sr_combo)
 
         self.bw_spin = QDoubleSpinBox()
@@ -375,6 +382,7 @@ class ModulePanel(QWidget):
             "设备射频带宽（硬件滤波），0 = 自动（跟随后端默认）。"
             "注意与 VFO 信道带宽（控制面板「VFO 带宽」）不同")
         form.addRow("硬件带宽", self.bw_spin)
+        self.bw_spin.valueChanged.connect(self._push_bandwidth)
 
         # 参数区的诚实说明：为什么禁用、哪个值不是真实读数。
         self.params_hint = QLabel()
@@ -524,6 +532,8 @@ class ModulePanel(QWidget):
     def _apply_devices(self, devices, enum_err=None):
         """把一份设备列表落到界面（同步/异步/测试共用同一套显示规则）。"""
         self._devices = list(devices) if devices else []
+        # 身份键与设备列表同序：撞键/无序列号时 resolve 会显式告警。
+        self._identities = _req_store.resolve(self._devices)
 
         self.device_combo.clear()
         if not self._devices:
@@ -547,6 +557,7 @@ class ModulePanel(QWidget):
             d0 = self._devices[0]
             self._show_device_info(d0)
             self._fill_sample_rate_options(d0)
+            self._render_request(0)
 
         # 设备列表没变化时界面只会"纹丝不动"；给刷新按钮一个明确的动作反馈，
         # 避免用户以为按钮坏了（本次交互审计发现的死按钮）。
@@ -568,6 +579,81 @@ class ModulePanel(QWidget):
         if 0 <= idx < len(self._devices):
             self._show_device_info(self._devices[idx])
             self._fill_sample_rate_options(self._devices[idx])
+            self._render_request(idx)
+
+    # ------------------------------------------------------ 连接请求（唯一存储）
+    def _current_identity(self):
+        """当前选中设备的身份结论；无设备时返回 None。"""
+        # 设备列表被直接替换（测试/异步枚举竞态）时补一次身份解析，
+        # 避免把“还没跑 resolve”误判成“没有身份”。
+        if len(self._identities) != len(self._devices):
+            self._identities = _req_store.resolve(self._devices)
+        idx = self.device_combo.currentIndex()
+        if 0 <= idx < len(self._identities):
+            return self._identities[idx]
+        return None
+
+    def _render_request(self, idx: int) -> None:
+        """按唯一请求存储渲染采样率/增益/带宽，不再使用面板自持副本。"""
+        if not (0 <= idx < len(self._identities)):
+            return
+        ident = self._identities[idx]
+        req = _req_store.request_for(ident.key)
+
+        if req.sample_rate_hz is not None and not self.sr_combo.hasFocus():
+            target = float(req.sample_rate_hz)
+            for i in range(self.sr_combo.count()):
+                data = self.sr_combo.itemData(i)
+                if data is not None and float(data) == target:
+                    self.sr_combo.blockSignals(True)
+                    self.sr_combo.setCurrentIndex(i)
+                    self.sr_combo.blockSignals(False)
+                    break
+
+        if req.gain_db is not None and not self.gain_slider.isSliderDown():
+            value = max(self.gain_slider.minimum(),
+                        min(self.gain_slider.maximum(), int(round(req.gain_db))))
+            self.gain_slider.blockSignals(True)
+            self.gain_slider.setValue(value)
+            self.gain_slider.blockSignals(False)
+            self.gain_val.setText(f"{value} dB")
+
+        if req.bandwidth_hz is not None and not self.bw_spin.hasFocus():
+            self.bw_spin.blockSignals(True)
+            self.bw_spin.setValue(float(req.bandwidth_hz))
+            self.bw_spin.blockSignals(False)
+
+        if ident.warning:
+            # 身份不可靠必须在界面上说出来，不许静默共用/错位；
+            # 能力摘要仍保留在前，告警另起一行。
+            self._show_device_info(self._devices[idx])
+            self.device_info.setText(
+                f"{self.device_info.text()}\n⚠ {ident.warning}")
+
+    def _push_sample_rate(self, _idx: int = -1) -> None:
+        ident = self._current_identity()
+        if ident is None:
+            return
+        data = self.sr_combo.currentData()
+        if data is not None:
+            _req_store.update(ident.key, sample_rate_hz=float(data))
+
+    def _push_gain(self, value: int) -> None:
+        ident = self._current_identity()
+        if ident is not None:
+            _req_store.update(ident.key, gain_db=float(value))
+
+    def _push_bandwidth(self, value: float) -> None:
+        ident = self._current_identity()
+        if ident is not None:
+            _req_store.update(ident.key, bandwidth_hz=float(value))
+
+    def _on_request_changed(self, key: str) -> None:
+        """另一面板改了同一台设备的请求 → 这边同步渲染。"""
+        ident = self._current_identity()
+        if ident is None or ident.key != key:
+            return
+        self._render_request(self.device_combo.currentIndex())
 
     def _fill_sample_rate_options(self, device) -> None:
         """按设备能力重填采样率下拉（单一真值源见 constants 同名函数）。
@@ -626,19 +712,26 @@ class ModulePanel(QWidget):
         idx = self.device_combo.currentIndex()
         if not self._devices or idx >= len(self._devices):
             return
-        # 面板参数随设备一起下发：沿用 device_panel 的 dev["_gain"] 协议
-        # （main_window._on_panel_device_connect 读取）；采样率只经 constants
-        # 唯一写入口落进载荷，不再与设备面板各写一份。
-        # 此前这两个控件改了不下发，连接永远走默认
-        # DEFAULT_SAMPLE_RATE_HZ = 2.400 MS/s / 20 dB。
+        # 面板参数随设备一起下发；参数先写回唯一请求存储，载荷由
+        # fill_payload 统一生成（设备面板读到的是同一份，不再各写一份）。
         dev = dict(self._devices[idx])
-        set_connect_sample_rate(dev, self.sr_combo.currentData())
-        dev["_gain"] = self.selected_gain_db()
-        # 带宽也进载荷（此前只有采样率/增益下发，用户设的带宽被静默丢弃）
         try:
-            dev["_bandwidth"] = float(self.bw_spin.value())
-        except Exception:  # noqa: BLE001
-            dev["_bandwidth"] = 0.0  # 0=自动（与后端 bandwidth_hz 语义一致）
+            bandwidth = float(self.bw_spin.value())
+        except (TypeError, ValueError):
+            bandwidth = 0.0  # 0=自动（与后端 bandwidth_hz 语义一致）
+        ident = self._current_identity()
+        if ident is None:
+            # 身份键拿不到就无法保证参数归属：拒绝连接并说明原因，
+            # 绝不退回“各写一份副本”的老路（那正是本次要消灭的静默错值）。
+            self.device_info.setText("无法确定设备身份，未发起连接")
+            logger.warning("设备身份键不可用，拒绝连接：%r",
+                           dev.get("label") or dev.get("driver"))
+            return
+        _req_store.update(ident.key,
+                          sample_rate_hz=self.selected_sample_rate_hz(),
+                          gain_db=self.selected_gain_db(),
+                          bandwidth_hz=bandwidth)
+        _req_store.fill_payload(dev, ident.key)
         self.device_selected.emit(dev)
         QMessageBox.information(self, "已选择设备",
                                 f"{dev.get('label')}\n（真实连接由后端完成）")

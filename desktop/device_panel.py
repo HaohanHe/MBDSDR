@@ -34,8 +34,9 @@ except Exception:  # noqa: BLE001
     enumerate_all_sdr_devices = None  # type: ignore
     _ENUM_OK = False
 
-from constants import (DEFAULT_SAMPLE_RATE_HZ, format_sample_rate,
-                       set_connect_sample_rate)
+from constants import DEFAULT_SAMPLE_RATE_HZ, format_sample_rate
+# 连接请求的唯一持有者：本面板只渲染/写回，不再自持 _sample_rate/_gain 副本。
+import connect_request_store as _req_store
 
 #: 无设备空态：下拉框说事实，状态行说下一步——两处都写「未检测到 SDR 设备」
 #: 等于同一句话念两遍，用户看不出该干什么。
@@ -125,6 +126,8 @@ class DevicePanel(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._devices: List[Dict] = []
+        #: 与 _devices 同序的身份结论（key/quality/warning）。
+        self._identities: List = []
         self._connected = False
         self._current_dev_key: Optional[str] = None
         self._current_dev_locator: Optional[tuple] = None
@@ -134,6 +137,7 @@ class DevicePanel(QWidget):
         # 用轮询历史而不是下拉框快照，避免 serial/tuner 抖动被误判成插拔。
         self._last_poll_locs: set = set()
         self._build_ui()
+        _req_store.subscribe(self._on_request_changed)
         # 首次枚举延后到首帧之后：enumerate_all_sdr_devices 本机实测 1.0–1.8 s
         # （rtlsdr_open + Pluto 网络探测 0.5 s），压在构造函数里等于让首帧等它。
         # 期间界面如实显示「正在枚举」，不假装「未检测到设备」。
@@ -208,6 +212,11 @@ class DevicePanel(QWidget):
         self.ppm_edit.setToolTip(
             "频率校正（PPM = 百万分率）：晶振频偏校正，典型 20~50，可为负")
         form.addRow("PPM", self.ppm_edit)
+
+        # 用户改完任一参数就写回唯一请求存储：另一面板选中同一台设备时
+        # 看到的是同一份请求，而不是各自的旧副本。
+        for _w in (self.sr_edit, self.gain_edit, self.ppm_edit):
+            _w.editingFinished.connect(self._push_request_from_editors)
 
         # 连接按钮
         btn_row = QHBoxLayout()
@@ -300,6 +309,8 @@ class DevicePanel(QWidget):
     def _apply_devices(self, devices) -> None:
         """把一份已枚举到的设备列表落到控件上（不触发重新枚举）。"""
         self._devices = list(devices or [])
+        # 身份键与设备列表同序：撞键/无序列号时 resolve 会显式告警。
+        self._identities = _req_store.resolve(self._devices)
         self.dev_combo.clear()
         if not self._devices:
             self.dev_combo.addItem(_NO_DEVICE_COMBO)
@@ -316,6 +327,7 @@ class DevicePanel(QWidget):
         self.connect_btn.setEnabled(not self._connected)
         # 手动刷新/初始刷新后，轮询基准同步到最新列表：刷新本身不算“新插入”。
         self._last_poll_locs = {self._locator_of(d) for d in self._devices}
+        self._render_request(self.dev_combo.currentIndex())
 
     def _refresh_audio_devices(self) -> None:
         self.audio_combo.blockSignals(True)
@@ -407,6 +419,72 @@ class DevicePanel(QWidget):
                 tip = f"能力摘要不可用：{e}"
                 logger.warning("设备能力摘要生成失败：%s", e)
             self.status_label.setToolTip(tip)
+            self._render_request(idx)
+
+    # ------------------------------------------------------ 连接请求（唯一存储）
+    def _current_identity(self):
+        """当前选中设备的身份结论；无设备时返回 None。"""
+        # 设备列表被直接替换（测试/异步枚举竞态）时补一次身份解析，
+        # 避免把“还没跑 resolve”误判成“没有身份”。
+        if len(self._identities) != len(self._devices):
+            self._identities = _req_store.resolve(self._devices)
+        idx = self.dev_combo.currentIndex()
+        if 0 <= idx < len(self._identities):
+            return self._identities[idx]
+        return None
+
+    def _render_request(self, idx: int) -> None:
+        """按唯一请求存储渲染当前设备的参数（不再使用面板自持副本）。"""
+        if not (0 <= idx < len(self._identities)):
+            return
+        ident = self._identities[idx]
+        req = _req_store.request_for(ident.key)
+        # 正在输入的控件不抢：用户还在改的时候被另一侧的旧值覆盖是更坏的行为。
+        if req.sample_rate_hz is not None and not self.sr_edit.hasFocus():
+            self.sr_edit.setText(f"{req.sample_rate_hz:g}")
+        if req.gain_db is not None and not self.gain_edit.hasFocus():
+            self.gain_edit.setText(f"{req.gain_db:g}")
+        if req.ppm is not None and not self.ppm_edit.hasFocus():
+            self.ppm_edit.setText(f"{int(req.ppm)}")
+
+        if ident.warning:
+            # 身份不可靠时必须在状态行说出来，不许静默共用/错位。
+            self.status_label.setText(f"⚠ {ident.warning}")
+        elif self.status_label.text().startswith("⚠"):
+            # 只有上一台设备的身份告警才需要回退成计数；不覆盖连接校验等提示。
+            self.status_label.setText(f"检测到 {len(self._devices)} 台设备")
+
+    def _push_request_from_editors(self) -> None:
+        """把输入框里的合法值写回唯一请求存储（非法值不写，保持原值）。"""
+        ident = self._current_identity()
+        if ident is None:
+            return
+        values = {}
+        try:
+            # 这里只认纯 Hz；带 M/k 后缀的写法由连接时的统一解析负责，
+            # 本方法不复制一份解析器（避免第三条解析口径）。
+            hz = float(self.sr_edit.text().strip())
+        except (TypeError, ValueError):
+            hz = None
+        if hz is not None and hz > 0:
+            values["sample_rate_hz"] = hz
+        try:
+            values["gain_db"] = float(self.gain_edit.text())
+        except (TypeError, ValueError):
+            pass
+        try:
+            values["ppm"] = int(self.ppm_edit.text())
+        except (TypeError, ValueError):
+            pass
+        if values:
+            _req_store.update(ident.key, **values)
+
+    def _on_request_changed(self, key: str) -> None:
+        """另一面板改了同一台设备的请求 → 这边同步渲染。"""
+        ident = self._current_identity()
+        if ident is None or ident.key != key:
+            return
+        self._render_request(self.dev_combo.currentIndex())
 
     def set_connected(self, connected: bool, dev_label: str = "") -> None:
         """主窗口连接成功/断开后调用。"""
@@ -468,9 +546,8 @@ class DevicePanel(QWidget):
         if verdict is None:
             # 未知范围：不能假装校验通过，也不能凭空填默认范围；如实说明后放行。
             self.status_label.setText(f"采样率范围未知，无法校验；将以 {sr:.0f} Hz 下发")
-        # 采样率写进载荷只走 constants 的唯一写入口（不与模块面板各写一份）。
-        set_connect_sample_rate(dev, sr)
-
+        # 采样率留在局部变量里，连接前与增益/PPM 一起写入唯一请求存储；
+        # 连接载荷由 fill_payload 统一落键，本面板不再直接写载荷副本。
         text = self.gain_edit.text().strip()
         try:
             gain = float(text)
@@ -490,17 +567,30 @@ class DevicePanel(QWidget):
         if gverdict is None:
             self.status_label.setText(
                 f"增益范围未知，无法校验；将以 {gain:g} dB 下发")
-        dev["_gain"] = gain
 
         text = self.ppm_edit.text().strip()
         try:
-            dev["_ppm"] = int(text)
+            ppm = int(text)
         except (TypeError, ValueError):
             QMessageBox.warning(
                 self, "PPM 无效",
                 f"“{text}”不是整数。PPM 是晶振频偏校正（百万分率），"
                 "典型值 20~50，可为负。")
             return
+
+        ident = self._current_identity()
+        if ident is None:
+            # 身份键拿不到就无法保证参数归属：拒绝连接并说明原因，
+            # 绝不退回“各写一份副本”的老路（那正是本次要消灭的静默错值）。
+            self.status_label.setText("无法确定设备身份，未发起连接")
+            logger.warning("设备身份键不可用，拒绝连接：%r",
+                           dev.get("label") or dev.get("driver"))
+            return
+        # 三个参数一次性写回唯一请求存储，载荷由 fill_payload 统一生成：
+        # 另一面板选同一台设备时读到的就是这份，不再各持旧副本。
+        _req_store.update(ident.key, sample_rate_hz=sr,
+                          gain_db=gain, ppm=ppm)
+        _req_store.fill_payload(dev, ident.key)
         self.connect_requested.emit(dev)
 
     def _on_audio_changed(self, _idx: int):

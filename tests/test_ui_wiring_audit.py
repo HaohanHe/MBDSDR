@@ -160,14 +160,16 @@ class TestModulePanelParamsReachBackend:
         from PySide6.QtWidgets import QMessageBox
 
         calls = []
+        real = constants.set_connect_sample_rate
 
         def spy(payload, requested_hz=None):
-            real = constants.set_connect_sample_rate
             calls.append(requested_hz)
             return real(payload, requested_hz)
 
-        monkeypatch.setattr(device_panel_mod, "set_connect_sample_rate", spy)
-        monkeypatch.setattr(module_panel_mod, "set_connect_sample_rate", spy)
+        # 两个面板现在都经 connect_request_store 写请求，由 store 调
+        # constants.set_connect_sample_rate 落进载荷——spy 打在唯一写入口上，
+        # 任一面板绕过 store 直写该键都会让 calls 少一次。
+        monkeypatch.setattr(constants, "set_connect_sample_rate", spy)
         monkeypatch.setattr(QMessageBox, "information",
                             lambda *a, **k: QMessageBox.Ok)
 
@@ -344,10 +346,8 @@ ALLOWED_UNCONNECTED = {
     "main_window.py:port_edit": "GNSS 对话框：Accepted 后统一读 text()",
     "main_window.py:baud_combo": "GNSS 对话框：Accepted 后统一读 currentData()",
     "spectrum_widget.py:menu": "右键菜单：exec() 返回值直接判定，无需 connect",
-    # 2026-10-30 已修（C 类"改了不下发"）：带宽进 dev["_bandwidth"] 载荷，
-    # main_window._connect_backend 增加 bandwidth 参数并下发 backend.set_bandwidth。
-    # 旋钮本身仍走"Accepted 后统一读 value()"（与 sr_combo/gain_spin 同款），故留本条。
-    "module_panel.py:self.bw_spin": "连接对话框：Accepted 后统一读 value() → dev[\"_bandwidth\"]（已下发）",
+    # module_panel.py:self.bw_spin 已直接从 valueChanged 写回唯一请求存储
+    # （connect_request_store），不再走“连接时统一读 value()”，白名单条目已删。
 }
 
 
