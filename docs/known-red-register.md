@@ -460,6 +460,26 @@ QT_QPA_PLATFORM=offscreen python -m pytest "<nodeid>" -q
   - 断言改为从 `mode_registry` 取真实模式 label 拼串再比对 `_HELP`，
     避免再被文案改写打断。
   验收：该节点单跑 `1 passed`，且断言仍能抓到「列表少一个模式」的回归。
+- **收口（2026-11-13）**：判定为**产品文案漏字**，修文案，断言不动。
+  - 依据：`desktop/mode_registry.py:96` 注册了 `FM`（`_BUILTIN_MODES["FM"]`，
+    频偏 75 kHz，解调函数 `mbdsdr_ai.dsp:fm_demod`）；
+    `desktop/control_panel.py:159` 的 `_PANEL_MODE_ORDER` 首项就是 `FM`，
+    `:462` 按「已注册」过滤后填进模式下拉；`desktop/main_window.py:1733-1734`
+    的顶栏 `toolbar_mode_combo` 同一列表也含 `FM`。即 FM 是真可选的解调模式，
+    `a287ef63` 只是把它从列举里漏掉，不是产品删了 FM，故修文案不改断言。
+  - 改动：`desktop/help_panel.py:44` 的「（可切 …）」列表补回 `FM`。
+  - 验证（均在独立 worktree 单跑该节点，不跑全量）：
+    - HEAD `d7715275`（worktree `d:\mbdsdr\_wt\k14-head`）：
+      `QT_QPA_PLATFORM=offscreen python -m pytest tests/test_copy_units_audit.py::test_t02_help_uses_real_topbar_demod_labels -q`
+      → `1 failed`（断言消息与上面登记的首行一致）；
+    - `a287ef63^` = `4aa0514`（worktree `d:\mbdsdr\_wt\k14-parent`）同一命令
+      → `1 passed`；
+    - 改后同一 HEAD worktree 跑 K14 节点 +
+      `tests/test_copy_entry_points.py::test_onboarding_entries_resolve_to_live_widgets`
+      → `2 passed`（后者证明「FM」仍是真窗口控件树里点得到的原文）。
+  - 提交：本条目所在提交（`git log -1 --format=%H -- docs/known-red-register.md`
+    可取）。`git cat-file -t` 可验证的引用：`a287ef63`=commit、
+    `4aa0514`=commit、`d7715275`=commit。
 
 ### K15 — 设置页惰性构建后，可发现性断言扫不到控件
 
