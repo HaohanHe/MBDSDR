@@ -84,7 +84,7 @@ A03/A04（关键字当行为）、A14（行号当位置）。
 | A07 | 接收者名字像控件（`display/label/panel…`）就跳过 | 只看调用形态：接收者在模块内被绑定成 Qt 控件构造结果才算展示；并把同文件同方法其余站点除行号写进同一条 | 「改名成 panel 也不能当展示」：`self._vfo_panel.set_sample_rate()` 红；先 `= QLabel()` 再调用绿 |
 | A09 | skip 理由命中「文件/环境/缺失」等锚点词就放过 | 只看 skip 形态：①在宽泛 `except` 里；②无条件 skip 且**跳过之前**没有断言（同模块另有带断言的用例覆盖同一行为则降为复核）；③理由文本不再参与判定 | 条件 skip + 前置断言绿；无条件无断言红 |
 | A10 | 同一行含「例如/示例」就整条放过 | 只有落在**围栏代码块**里的 hash 才算示例；正文里的不算 | 正文含 hash 仍红；代码块内跳过并记账 |
-| A11 | 同一句含「历史/已修」就当真 | 必须同时给出可复核物证：命令、提交号、或日期；只有「历史」没有日期仍是红；绿色声明只有命令/日期时记账为「可复核但未绑定提交号」 | 只有「已修」无日期 → 红；带日期 → 复核记账 |
+| A11 | 同一句含「历史/修完」就当真 | 必须同时给出可复核物证：命令、提交号、或日期；只有「历史」没有日期仍是红；绿色声明只有命令/日期时记账为「可复核但未绑定提交号」 | 只有「修完」不给日期 → 红；带日期 → 复核记账 |
 | A05 | 阻塞调用名表（`recv/read/get/poll`） | 主判据换成控制流：线程体里 `while True` 无 `break/return/raise` 即红；次判据只对 socket/serial 这类**仓外 API** 实例上的阻塞读、且未设超时，才成立 | 「改为无界循环后仍要报」：`while True: self._pump()` 红；加 `break` 绿 |
 | A12 | 按函数名前缀 `fmt/format/render` 配对比较 | 按函数体**骨架**（抹掉标识符与常量值）分组，跨 ≥2 模块、正文含单位字面量、且口径（精度/单位）不同才报 | 名字完全不同（`_fmt_level` vs `render_gain`）仍红；口径一致绿 |
 | A13 | 只把 `owner/holder/serial` 命名的变量当身份 | 只看记录 schema：模块里出现带 `pid/serial/start_time` 等唯一字段的记录，却拿另一个同名字段比较才算；豁免判断也只看**比较式本身**是否含唯一字段（同函数别处写 `'pid'` 不算） | dict 记录 + `item['claimant'] == payload['claimant']` 红；比 `pid` 绿 |
@@ -155,7 +155,7 @@ A03/A04（关键字当行为）、A14（行号当位置）。
 | A08 | 守卫必须判对对象且可被触发 | `if`/`while` 条件完全由字面量构成即违规（不做变量传播避免误报） | `decoders.py:435 if False:`；无设备降级判错对象从未触发 | `guard_cannot_fire` | `decoders.py:435` |
 | A09 | skip 只能表示环境缺失 | 看 skip 形态：在宽泛 `except` 里、或无条件且跳过前无断言（同模块无覆盖）即违规；理由文本不参与判定 | `test_web_bridge_mcp.py` 6 处「MCPToolSet 在此环境不可构造」 | `skip_means_env_only` | 同左 |
 | A10 | 证据必须可复核 | 文档反引号中的 7–40 位十六进制串必须 `git cat-file -t` 为 commit | `推进报告:141` 的 `5d09bb2`（示例，非真实提交）、`COORDINATION:3430` 的 `0d7e433e`（示例，非真实提交） | `evidence_commit_exists` | `推进报告:141` |
-| A11 | 绿必须绑定到被断言的那棵树 | 绿色声明无提交号且无可复核物证（命令/提交号/日期缺一）；或提交距 HEAD >50 且未标历史/已修 | `learn/phase40/ci-notes.md` 的 752 提交前绿 | `green_binds_tree` | `known-red-register.md` |
+| A11 | 绿必须绑定到被断言的那棵树 | 绿色声明无提交号且无可复核物证（命令/提交号/日期缺一）；或提交距 HEAD >50 且未标历史/修完 | `learn/phase40/ci-notes.md` 的 752 提交前绿 | `green_binds_tree` | `known-red-register.md` |
 | A12 | 同名实现必须行为一致 | 函数体骨架相同、跨 ≥2 模块、含单位字面量、但口径（单位/精度）不同即违规（不看函数名） | `main_window._fmt_dbfs` vs `readouts.fmt_dbfs` | `duplicate_impl_divergence` | main_window 的 `_fmt_dbfs` |
 | A13 | 身份必须唯一且不可复用 | 模块里有带 `pid/serial/start_time` 的记录，却用其中另一个同名字段判同一；比较式里没出现唯一字段即违规 | `file_claim.py:540` 只比名字；`device_manager.py:422/451` 用序号兜底 | `identity_not_reusable` | 同左 |
 | A14 | 位置引用必须是符号，不是行号 | 台账/豁免里的 `path.py:N` 若没有可校验的符号名 → 定位不稳定；`name()` 必须在目标模块 AST 符号表里存在 | `axioms-waivers.json` 的 `main_window.py:8327/12761/14455` 在文件被改十几行后全部失效 | `locator_is_symbolic` | 目标文件顶部插 20 行空行 |
