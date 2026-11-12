@@ -64,16 +64,23 @@ $env:MBDSDR_TEST_LOCK="0"; python -m pytest tests/test_ui_contrast.py tests/test
 diff 必冲突；产品代码本身不冲突（不同文件 / 同一文件里互不重叠的行）。所以：
 要么用 `00-all`，要么单片 + 手工同步。
 
-**2026-11-12 复核（本目录移动后实测，正好撞上前提条款）**：
+**2026-11-12 复核（本目录移动后两次实测）**：
 
-- `01`–`10`：对当前工作树 `git apply --check` **全部 OK**；4 个产品文件未被他人改动。
-- `00-all`：对工作树 **FAIL** —— `tests/test_ui_contrast.py` 有他线未提交改动
-  （+126 行，棘轮扩面到全部 token），补丁上下文对不上；
-  对索引 `git apply --check --cached` **OK**（即对 HEAD 仍然有效）。
-- 处理方式按本节前提执行：**不手工合并、不改补丁**，等该文件落定后重跑
-  `git apply --check`；届时仍失败就把冲突报给 W92 派发方。
-- 这是「5 个文件必须都是 HEAD 原样」条款的真实样例：产品文件干净、测试文件被改，
-  合并版就会先坏。
+- 第一次（`tests/test_ui_contrast.py` 尚未提交时）：`01`–`10` 对工作树全 OK；
+  `00-all` 对工作树 FAIL（他线 +126 行未提交），对当时 HEAD `--cached` OK。
+- 第二次（a11y 线提交 `b089f8c6`，棘轮扩面落地后，工作树干净）：
+
+  - `01`–`10`：对当前工作树 **仍全部 OK**；4 个产品文件未被改动。
+  - `00-all`：对当前 HEAD **仍 FAIL**，只剩一处：
+    `tests/test_ui_contrast.py` 的第二个 hunk（旧行 278，删 10 条 A1 基线 +
+    `_BASELINE_CEILING` 11→1）。原因不是未提交改动，而是 `b089f8c6` 把
+    `_scan_semantic_reads` 改名为 `_scan_direct_reads`，并在
+    `_BASELINE_CEILING` 与函数之间插入了 `_LEGACY_READS` / `_baseline_counts()`
+    ——正是该 hunk 的尾上下文；第一个 hunk（删 A1 行）仍能对上。
+  - 反证：用 `b089f8c6^` 建临时索引跑 `git apply --cached --check` **exit 0**，
+    说明补丁对「扩面之前」的文件仍完整有效，只是过期于当前 HEAD。
+- 处理方式按本节前提执行：**不手工合并、不改补丁**。等 A2 拍板后重生成
+  （只需重做测试文件那一个 hunk 的上下文，产品代码 5 片不受影响）。
 
 ## 3. 逐片期望（应用后必须成立）
 
