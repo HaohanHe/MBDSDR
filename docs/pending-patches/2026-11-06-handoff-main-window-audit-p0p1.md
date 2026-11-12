@@ -83,6 +83,7 @@
   `spectrum_widget.py:2671` `_redraw()`（两次 `update()`）。同时还有三个驱动源：
   `_ensure_repaint_timer` 33 ms（~6276）、FFT 控件自建 50 ms 定时器
   （`spectrum_widget.py:3599`）、瀑布 100 ms（3654）。
+> 证据等级 E4：本段数字未验证，引用前须复核（判据见 docs/evidence-standard.md）。
 - 后果：单帧绘制实测 25 ms（`spectrum_widget.py:1372` 自注 900×400 45.8→25.0 ms），
   40 帧/s × 25 ms ≈ 一个核跑满，事件循环被饿死。
 - 建议：`_refresh_status_labels` 从逐帧改为 5–10 Hz 节流（SNR 不需要 146 Hz）；
