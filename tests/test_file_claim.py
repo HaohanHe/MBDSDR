@@ -533,3 +533,154 @@ def test_case_variant_is_same_file_not_two_markers(tmp_path: Path) -> None:
     assert len(markers) == 1, [m.name for m in markers]
     registry = _registry(locks)
     assert list(registry["claims"]) == ["desktop/mbdsdr.spec"]
+
+
+# ---------------------------------------------------------------------------
+# A13：台账历史必须绑定凭据身份，不能只按 owner 名字匹配
+# ---------------------------------------------------------------------------
+
+def _load_module(locks: Path, monkeypatch):
+    """以独立模块实例加载 scripts/file_claim.py，绑定到本用例的临时 locks 目录。
+
+    模块级常量（LOCKS_DIR/REGISTRY_PATH）在 import 时读取 MBDSDR_LOCKS_DIR；
+    importlib 起独立实例，不受同进程里其他测试已加载实例的影响。
+    """
+    import importlib.util
+
+    monkeypatch.setenv("MBDSDR_LOCKS_DIR", str(locks))
+    monkeypatch.setenv("MBDSDR_CLAIM_ROOT", str(REPO))
+    name = f"file_claim_a13_{abs(hash(str(locks)))}"
+    spec = importlib.util.spec_from_file_location(name, SCRIPT)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def test_steal_records_credential_in_ledger_history(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """夺取后，台账活跃历史条目必须携带新持有者的凭据哈希。
+
+    反证：`_registry_record_claim` 若不把 token_sha256 写进 history，
+    本用例红——历史条目只剩 owner 名字，同名续租就无法区分是哪一个
+    持有者在续（A13 的病灶）。
+    """
+    locks = tmp_path / "locks"
+    first = run(locks, "claim", SHARED, "--owner", "线A", "--ttl-min", "0.01")
+    assert first.returncode == 0, first.stderr
+    time.sleep(1.0)  # TTL = 0.6s，确保过期
+    stolen = run(locks, "claim", SHARED, "--owner", "线B", "--ttl-min", "10")
+    assert stolen.returncode == 0, stolen.stderr
+    assert "CLAIM OK (steal)" in stolen.stdout
+    token_b = _token(stolen, locks)
+
+    mod = _load_module(locks, monkeypatch)
+    entry = next(iter(_registry(locks)["claims"].values()))
+    hist = entry["history"]
+    assert len(hist) == 2
+    assert hist[0]["released_at"] is not None  # 线A 的条目已关闭
+    assert hist[1]["released_at"] is None      # 线B 的条目活跃
+    assert hist[1].get("token_sha256") == mod._token_hash(token_b), (
+        "台账活跃条目必须携带当前持有者的凭据哈希，"
+        "否则同名续租无法区分是哪一个持有者在续"
+    )
+
+
+def test_renew_matches_history_by_credential_not_name(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """A13 行为：同名不同凭据的 renew 不得把心跳续到别人的活跃历史条目上。
+
+    台账层直调（同名两条线各持不同凭据的场景在 CLI 层造不出——同名续租/
+    同名 takeover 都被 marker 层拦下；台账层仍须自己守住，因为台账可能与
+    marker 不一致：台账写入失败只 WARN，marker 才是权威）：
+
+      * history = [同名线/凭据A 已关闭, 同名线/凭据B 活跃]；
+      * 迟到的 renew 自称「同名线」但带着旧凭据 A：
+        - 旧实现：按 owner 名匹配 → 把心跳写进凭据 B 的活跃条目（续错身份）；
+        - 新实现：凭据不匹配 → 跳过，B 的条目心跳保持不变；
+      * 凭据 B 的合法 renew 必须照常更新（防修复变成「一律不续」）。
+
+    注：`_registry_renew` 对 `current` 的覆写不在本修复范围——current 是
+    marker 的如实转写，marker 层已做凭据校验。
+    """
+    locks = tmp_path / "locks"
+    mod = _load_module(locks, monkeypatch)
+    key, _display = mod.canonical_path(SHARED)
+
+    claim_a = mod._marker_payload(
+        _display, key, "同名线", 10.0, 1000.0, mod._token_hash("token-A")
+    )
+    mod._registry_record_claim(claim_a, None)
+    claim_b = mod._marker_payload(
+        _display, key, "同名线", 10.0, 2000.0, mod._token_hash("token-B")
+    )
+    mod._registry_record_claim(claim_b, claim_a, close_reason="expired_steal")
+
+    hist = _registry(locks)["claims"][key]["history"]
+    assert len(hist) == 2
+    assert hist[0]["released_at"] is not None
+    assert hist[1]["released_at"] is None
+
+    # 同名 + 旧凭据 A 的迟到 renew：不许碰凭据 B 的活跃条目
+    stale = dict(claim_b)
+    stale["token_sha256"] = mod._token_hash("token-A")
+    stale["heartbeat_at"] = 3000.0
+    mod._registry_renew(stale)
+    hist_after = _registry(locks)["claims"][key]["history"]
+    assert float(hist_after[1]["last_heartbeat_at"]) == 2000.0, (
+        "同名不同凭据的 renew 改动了活跃条目的历史心跳——续错了身份"
+    )
+
+    # 凭据 B 的合法 renew：照常更新
+    legit = dict(claim_b)
+    legit["heartbeat_at"] = 4000.0
+    mod._registry_renew(legit)
+    hist_legit = _registry(locks)["claims"][key]["history"]
+    assert float(hist_legit[1]["last_heartbeat_at"]) == 4000.0
+
+
+def test_adopt_legacy_binds_credential_into_history(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """adopt-legacy 迁移后，旧格式历史条目（台账也无凭据）必须绑上新凭据。
+
+    反证：`_registry_renew` 若因「条目无凭据 ≠ payload 有凭据」而跳过，
+    迁移后的历史条目永远没有凭据，本用例红。
+    """
+    locks = tmp_path / "locks"
+    claimed = run(locks, "claim", SHARED, "--owner", "老格式线")
+    assert claimed.returncode == 0, claimed.stderr
+    # 模拟真正的旧版台账：marker 与 history 都没有凭据字段
+    marker = _markers(locks)[0]
+    payload = json.loads(marker.read_text(encoding="utf-8"))
+    payload.pop("token_sha256")
+    marker.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+    reg_path = locks / "claims.json"
+    reg = json.loads(reg_path.read_text(encoding="utf-8"))
+    entry = next(iter(reg["claims"].values()))
+    for item in entry["history"]:
+        item.pop("token_sha256", None)
+    reg_path.write_text(json.dumps(reg, ensure_ascii=False), encoding="utf-8")
+
+    upgraded = run(
+        locks, "claim", SHARED, "--owner", "老格式线", "--ttl-min", "10",
+        "--adopt-legacy",
+    )
+    assert upgraded.returncode == 0, upgraded.stderr
+    token = _token(upgraded, locks)
+
+    mod = _load_module(locks, monkeypatch)
+    hist = next(iter(_registry(locks)["claims"].values()))["history"]
+    active = [h for h in hist if h["released_at"] is None]
+    assert len(active) == 1
+    assert active[0].get("token_sha256") == mod._token_hash(token), (
+        "adopt-legacy 必须把新凭据绑进活跃历史条目，否则后续同名续租"
+        "又会退化成按名字放行"
+    )
+
+    # 迁移完成后，同名无凭据仍然不能续租（既有契约不回退）
+    for sidecar in _sidecars(locks):
+        sidecar.unlink()
+    denied = run(locks, "claim", SHARED, "--owner", "老格式线", "--ttl-min", "10")
+    assert denied.returncode == 2, denied.stdout + denied.stderr

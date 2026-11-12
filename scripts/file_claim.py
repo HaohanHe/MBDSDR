@@ -555,6 +555,9 @@ def _registry_record_claim(
         entry["history"].append(
             {
                 "owner": payload["owner"],
+                # 历史条目同样只记凭据哈希（不落明文），让 renew 能按身份
+                # 而不是按名字找回自己的条目（A13）。
+                "token_sha256": payload.get("token_sha256", ""),
                 "acquired_at": payload["acquired_at"],
                 "released_at": None,
                 "last_heartbeat_at": payload["heartbeat_at"],
@@ -567,15 +570,45 @@ def _registry_record_claim(
     _update_registry(mutate)
 
 
+def _same_holder(item: Dict[str, Any], owner: str, token_hash: str) -> bool:
+    """历史条目是否属于本次续租的持有者：owner 名与凭据哈希**同时**相等。
+
+    凭据哈希是唯一且不可复用的事实；owner 名只是展示标签——同名可以是
+    另一条线（A13）。无凭据的旧格式条目返回 False：它们只能经
+    adopt-legacy 窗口显式绑定凭据（见 `_registry_renew`）。
+    """
+    return (item["owner"], item.get("token_sha256") or "") == (owner, token_hash)
+
+
 def _registry_renew(payload: Dict[str, Any]) -> None:
     def mutate(data: Dict[str, Any]) -> None:
         entry = _entry(data, payload["key"])
         entry["path"] = payload["path"]
         entry["current"] = payload
+        # 续租找回历史条目必须按「身份」（owner 名 + 凭据哈希联合）匹配，
+        # 不能只按 owner 名字：同名可以是另一条线，续错会把别人的历史心跳
+        # 改掉（A13）。marker 层已校验凭据，但台账可能与 marker 不一致
+        # （台账写入失败只 WARN），台账层必须自己守住。
+        payload_token = payload.get("token_sha256") or ""
         for item in reversed(entry["history"]):
-            if item.get("released_at") is None and item["owner"] == payload["owner"]:
+            if item.get("released_at") is not None:
+                continue
+            if not payload_token:
+                continue  # 无凭据的续租不按名字放行
+            if _same_holder(item, payload["owner"], payload_token):
                 item["last_heartbeat_at"] = payload["heartbeat_at"]
                 break
+            if item.get("token_sha256"):
+                continue  # 同名不同凭据：绝不续到别人的历史身份上
+            # 旧格式历史条目（无凭据）的唯一合法来源是 adopt-legacy
+            # （cmd_claim 里 holder == owner 才走到）：名字相同才允许
+            # 把凭据绑进台账；绑定后该条目也只认凭据。
+            same_name = (item["owner"],) == (payload["owner"],)
+            if not same_name:
+                continue
+            item["token_sha256"] = payload_token
+            item["last_heartbeat_at"] = payload["heartbeat_at"]
+            break
 
     _update_registry(mutate)
 
