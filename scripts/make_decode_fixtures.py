@@ -421,6 +421,7 @@ def build_all():
     aprs_failures = _build_aprs_failures()
     manifest = {
         "generated_by": "scripts/make_decode_fixtures.py",
+        "provenance": "self-generated",
         "license": "MIT",
         "honesty": ("synthetic remodulation of known-truth frames with in-repo "
                     "encoders; NOT OTA recordings. Proves stage-by-stage "
