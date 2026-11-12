@@ -295,3 +295,144 @@ def test_sky_satellite_tune_false_keeps_label_and_reports(window):
     msg = w.statusBar().currentMessage()
     assert "未调谐频率" in msg, "失败后没有任何未调谐提示"
     assert "设备拒绝频率设置" in msg, "失败原因没有显示"
+
+
+# ------------------------------------------------- 能力探测：支持 ≠ 有 set_* 方法
+class _NoCapabilityBackend(_Backend):
+    """有 set_* 方法、但明确报告「没有该能力」的后端桩。
+
+    真实后端里对应的就是继承基类空操作（FileIQ/NetworkIQ 的增益/AGC）：
+    方法存在且返回 True，但其实什么也没有写进硬件。
+    """
+
+    def supports_gain(self):
+        return False
+
+    def supports_agc(self):
+        return False
+
+    def supports_ppm(self):
+        return False
+
+    def supports_offset_tuning(self):
+        return False
+
+
+def _bare_device():
+    from mbdsdr_ai.sdr_backend import SDRDevice
+    return SDRDevice(
+        device_type="file", device_id="test", name="测试设备",
+        frequency_range=(0.0, 0.0), sample_rate_range=(0.0, 48e6),
+        max_gain=49.0)
+
+
+def test_base_backend_does_not_fake_gain_or_agc_success():
+    """继承基类空操作的后端：set_gain/set_agc 必须 False，且不留假读数。
+
+    反证：把基类 ``_apply_gain``/``_apply_agc`` 的默认「返回 True 的空操作」
+    当成功（旧实现）→ 两个 set_* 都返回 True、status 被写成从未下发的值，
+    本用例红。
+    """
+    from mbdsdr_ai.sdr_backend import SDRBackend
+
+    class _NoApply(SDRBackend):
+        pass
+
+    be = _NoApply(_bare_device())
+    be.status.connected = True
+    be.status.gain_db = 12.0
+    be.status.agc_enabled = False
+
+    assert be.supports_gain() is False, "继承空操作却被判成支持增益"
+    assert be.supports_agc() is False, "继承空操作却被判成支持 AGC"
+
+    assert be.set_gain(30.0) is False, "不支持增益却报成功（假成功）"
+    assert be.status.gain_db == 12.0, "增益读数被写成从未下发的请求值"
+    assert "不支持" in be.status.error
+
+    assert be.set_agc(True) is False, "不支持 AGC 却报成功（假成功）"
+    assert be.status.agc_enabled is False
+    assert "不支持" in be.status.error
+
+
+def test_connect_skips_unsupported_capabilities_and_disables_controls(window):
+    """设备明说没有 AGC/增益/PPM/Offset → 不计失败、界面说明、控件置灰。
+
+    反证：把 ``_apply_connect_params`` 的 ``_supports`` 改回「有 set_* 就
+    为真」（恒真）→ 四项都会被下发、状态栏不再出现「本设备不支持」、控件
+    保持可点，本用例红。
+    """
+    w = window
+    be = _NoCapabilityBackend()
+    w.control_panel.set_sdr_connected(True)
+    w.statusBar().clearMessage()
+
+    failures = w._apply_connect_params(
+        be, sample_rate=2_400_000.0, bandwidth=0.0, freq=98e6,
+        ppm=0, offset=False, agc=False, gain=20.0)
+
+    assert failures == [], f"「不支持」被记成了「未生效」: {failures}"
+    msg = w.statusBar().currentMessage()
+    assert "本设备不支持" in msg, f"界面没有说明能力缺失: {msg!r}"
+    for label in ("AGC", "增益", "PPM", "Offset Tuning"):
+        assert label in msg, f"{label} 未在说明里点名: {msg!r}"
+
+    wrote = {label for (label, _v) in be.calls}
+    assert wrote.isdisjoint(
+        {"set_gain", "set_agc", "set_ppm", "set_offset_tuning"}), \
+        f"不支持的能力仍被下发: {be.calls}"
+
+    cp = w.control_panel
+    assert not cp.agc_check.isEnabled(), "AGC 控件仍可点，没有反映能力"
+    assert not cp.gain_slider.isEnabled(), "增益滑杆仍可点，没有反映能力"
+    assert not cp.ppm_spin.isEnabled(), "PPM 输入仍可编辑，没有反映能力"
+    assert not cp.offset_check.isEnabled(), "Offset 开关仍可点，没有反映能力"
+    assert "本设备不支持" in cp.agc_check.toolTip()
+    assert cp.agc_check.isChecked() is False, "不支持的 AGC 停在勾选态"
+
+
+def test_unsupported_agc_is_explained_not_blamed_on_device(window):
+    """点 AGC 但设备没有该能力 → 说「不支持」，不报「可能设备坏了」。
+
+    反证：删掉 ``_on_agc_changed`` 里的能力探测（回到无条件
+    ``_apply_hw_action``）→ 文案变成「设置 AGC 未生效：…可能原因：SDR 已
+    断开…」，本用例红。
+    """
+    w = window
+    be = _NoCapabilityBackend()
+    w._active_sdr_backend = be
+    w.control_panel.set_sdr_connected(True)
+    w.control_panel.set_agc(True)
+    w.statusBar().clearMessage()
+
+    w._on_agc_changed(False)
+
+    msg = w.statusBar().currentMessage()
+    assert "不支持 AGC" in msg, f"没有说清是能力缺失: {msg!r}"
+    assert "未生效" not in msg, "把「没这个能力」说成了「这次没做成」"
+    assert w.control_panel.agc_check.isChecked() is False, "开关没退回真实态"
+    assert ("set_agc", False) not in be.calls, "不支持的能力仍然被下发"
+
+
+def test_unsupported_gain_is_skipped_and_not_persisted(window):
+    """拖增益但设备没有该能力 → 说明跳过、不落盘、读数回设备值。
+
+    反证：删掉 ``_on_gain_changed`` 里的能力探测 → 会下发并落盘 49 dB，
+    本用例红。
+    """
+    w = window
+    be = _NoCapabilityBackend(actual_gain=20.0)
+    w._active_sdr_backend = be
+    w.control_panel.set_sdr_connected(True)
+    w.settings.set("gain_db", 20.0)
+    w.statusBar().clearMessage()
+
+    w._on_gain_changed(49)
+
+    msg = w.statusBar().currentMessage()
+    assert "不支持增益" in msg, f"没有说清是能力缺失: {msg!r}"
+    assert "未生效" not in msg, "把「没这个能力」说成了「这次没做成」"
+    assert ("set_gain", 49.0) not in be.calls, "不支持的能力仍然被下发"
+    assert float(w.settings.get("gain_db")) == 20.0, "不支持的请求值被落盘"
+    assert w.control_panel.gain_val.text() == "20.0 dB", \
+        "读数没有回到设备真实值"

@@ -56,9 +56,23 @@ def test_backend_state_set_get():
     assert abs(be.get_frequency() - 145.8e6) < 1.0
     assert be.set_sample_rate(2.048e6)
     assert abs(be.get_sample_rate() - 2.048e6) < 1.0
-    assert be.set_gain(30.0)
-    assert abs(be.get_gain() - 30.0) < 0.1
-    assert be.set_agc(True)
+    assert be.set_gain(30.0) is False, "基类没有增益实现，不许把空操作当成功"
+    assert be.set_agc(True) is False, "基类没有 AGC 实现，不许把空操作当成功"
+
+    class _Applying(SDRBackend):
+        """真正实现了写入的后端：状态机照旧可测（能力探测按覆写判定）。"""
+
+        def _apply_gain(self, gain_db):
+            return True
+
+        def _apply_agc(self, enabled):
+            return True
+
+    be2 = _Applying(dev)
+    be2.status.connected = True
+    assert be2.set_gain(30.0)
+    assert abs(be2.get_gain() - 30.0) < 0.1
+    assert be2.set_agc(True)
     st = be.get_status()
     assert abs(st.frequency_hz - 145.8e6) < 1.0
     return True
