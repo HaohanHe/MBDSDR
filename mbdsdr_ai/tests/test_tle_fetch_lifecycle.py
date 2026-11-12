@@ -442,9 +442,8 @@ def test_orbit_status_and_offline_label(tmp_path, monkeypatch):
     from mbdsdr_ai import orbit
 
     write_cache(tmp_path, age_hours=1.0)
-    monkeypatch.setattr(orbit, "_CACHE_DIR", str(tmp_path))
-    monkeypatch.setattr(orbit, "_TLE_CACHE", {})
-    monkeypatch.setattr(orbit, "_TLE_FETCHER", None)
+    monkeypatch.setenv("MBDSDR_TLE_CACHE_DIR", str(tmp_path))
+    orbit.reset_tle_cache()
     monkeypatch.setenv("MBDSDR_OFFLINE", "1")
 
     rec = orbit.fetch_tle_record(CAT)
