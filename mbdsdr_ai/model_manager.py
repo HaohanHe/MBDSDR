@@ -148,8 +148,8 @@ class ModelManager:
             return self.available_models
 
         # 离线门：不联网，直接给内置列表并如实标注来源（内置列表是本地的、静态的）
-        from .orbit import _network_disabled
-        if _network_disabled():
+        from .net_policy import network_disabled
+        if network_disabled():
             self._last_error = (
                 "离线模式（MBDSDR_OFFLINE）：未查询模型列表，"
                 "使用内置模型列表（本地静态，无时效问题）")
@@ -263,8 +263,8 @@ class ModelManager:
         self.stats.total_calls += 1
 
         # 离线门：模型 API 纯在线，无本地替代；明确拒绝而不是重试到超时
-        from .orbit import _network_disabled
-        if _network_disabled():
+        from .net_policy import network_disabled
+        if network_disabled():
             err = user_message("llm_offline")
             self.stats.failed_calls += 1
             self._last_error = err
@@ -393,8 +393,8 @@ class ModelManager:
         self.stats.total_calls += 1
 
         # 离线门：与 chat 同一口径，不发起任何请求
-        from .orbit import _network_disabled
-        if _network_disabled():
+        from .net_policy import network_disabled
+        if network_disabled():
             err = user_message("llm_offline")
             self.stats.failed_calls += 1
             self._last_error = err
