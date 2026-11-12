@@ -33,6 +33,7 @@ import os
 import stat
 import subprocess
 import sys
+import tempfile
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -75,14 +76,33 @@ def _dir_listing(path: str):
 def _run_pytest_subprocess(targets, extra_env=None):
     env = dict(os.environ)
     env["QT_QPA_PLATFORM"] = "offscreen"
-    env.setdefault("MBDSDR_TEST_LOCK", "0")   # 子进程单跑一个用例，不抢全局锁
+    # 子会话不能靠 `MBDSDR_TEST_LOCK=0` 放行：那会把「绕锁碰 Qt」的机检本身
+    # 一起关掉（检查判定的是「有没有拿着锁碰 Qt」，不是「跟父会话抢同一把
+    # 锁」）。给它一把**自己的**锁：父会话持不持锁都不影响子会话，检查照跑。
+    env.pop("MBDSDR_TEST_LOCK", None)
+    lock_path = _child_lock_path()
+    env.setdefault("MBDSDR_TEST_LOCK_PATH", lock_path)
     if extra_env:
         env.update(extra_env)
-    proc = subprocess.run(
-        [sys.executable, "-m", "pytest", *targets, "-q", "-p", "no:cacheprovider"],
-        cwd=_ROOT, env=env, capture_output=True, text=True, timeout=600,
-    )
+    try:
+        proc = subprocess.run(
+            [sys.executable, "-m", "pytest", *targets, "-q",
+             "-p", "no:cacheprovider"],
+            cwd=_ROOT, env=env, capture_output=True, text=True, timeout=600,
+        )
+    finally:
+        try:
+            os.remove(lock_path)
+        except OSError:
+            pass
     return proc
+
+
+def _child_lock_path():
+    """子会话专属的 Qt 测试锁文件（与父会话、其他会话都不共用）。"""
+    fd, path = tempfile.mkstemp(prefix="mbdsdr-child-qt-", suffix=".lock")
+    os.close(fd)
+    return path
 
 
 # 代表性 UI 用例：星象仪形态切换 + 三栏比例（前者是污染源，后者是受害者）。
