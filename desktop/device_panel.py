@@ -44,7 +44,8 @@ try:  # pragma: no cover
         release_active_owner as _release_owner,
     )
 except Exception:  # noqa: BLE001
-    def _claim_owner(owner, device_id, aliases=None):
+    def _claim_owner(owner, device_id, aliases=None,
+                     allow_alias_match=True):
         return True, {}
 
     def _release_owner(owner, device_id):
@@ -798,8 +799,11 @@ class DevicePanel(QWidget):
         _req_store.fill_payload(dev, ident.key)
         # 跨进程互斥：连之前先登记占用。AI/MCP 进程按同一个身份键判占用，
         # 拿不到就把「谁占着、该怎么办」原样告诉用户，不装作连接失败是硬件问题。
-        claimed, holder = _claim_owner(_DESKTOP_OWNER, ident.key,
-                                       _device_identity_aliases(dev))
+        claimed, holder = _claim_owner(
+            _DESKTOP_OWNER, ident.key, _device_identity_aliases(dev),
+            # serial/uri 可得时它就是身份：换 USB 口不该变成另一台设备，
+            # 这种身份只按主键匹配，别名不参与（只在读不到 serial 时才用别名）。
+            allow_alias_match=(ident.quality != _req_store.STABLE))
         if not claimed:
             conflict = _owner_conflict_text(holder)
             self.status_label.setText("设备被占用，未发起连接")
