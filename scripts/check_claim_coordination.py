@@ -175,6 +175,42 @@ def active_claims(now: Optional[float] = None, marker_dir: Optional[Path] = None
     return out
 
 
+def _marker_in(path: str, marker_dir: Optional[Path]) -> Path:
+    """占位文件路径：默认与 file_claim 同一套命名，测试可改到临时目录。"""
+    if marker_dir is None:
+        return fc._marker_for(path)
+    import hashlib
+
+    digest = hashlib.sha1(path.encode("utf-8")).hexdigest()[:16]
+    return Path(marker_dir) / f"{digest}.claim"
+
+
+def active_claims_for_paths(
+    paths: Iterable[str],
+    now: Optional[float] = None,
+    marker_dir: Optional[Path] = None,
+) -> List[Tuple[str, str]]:
+    """只查这些路径的活跃 claim（pre-commit 用）。
+
+    占位文件名是 ``sha1(比较键)[:16]``，所以能按路径直接定位，不必 glob 整个
+    claims 目录再逐个解析——那是 0.3s 预算里最大的一块（实测 100+ 个占位文件
+    逐个加锁读，冷启动 0.4s 起步）。
+    """
+    now = time.time() if now is None else now
+    out: List[Tuple[str, str]] = []
+    for raw in paths:
+        path = _norm(raw)
+        payload = fc._peek_marker(_marker_in(path, marker_dir))
+        if payload is None:
+            continue
+        heartbeat = float(payload.get("heartbeat_at") or payload.get("acquired_at") or 0)
+        ttl_s = float(payload.get("ttl_min") or 0.0) * 60.0
+        if heartbeat + ttl_s <= now:
+            continue
+        out.append((_norm(str(payload.get("path") or "")), str(payload.get("owner") or "")))
+    return out
+
+
 def _is_pattern(path: str) -> bool:
     return path.endswith("/**")
 
@@ -315,12 +351,13 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
     try:
         text = Path(args.doc).read_text(encoding="utf-8")
-        active = active_claims(marker_dir=Path(args.markers))
         if args.staged:
-            # 只读文档 + 占位文件：台账（claims.json）在提交前置这条路上用不到，
-            # 少解析一份大 JSON 是 0.3s 预算的一部分。
+            # 只为「这次要提交的文件」算：按路径直接定位占位文件，不 glob 全量，
+            # 也不读 claims.json —— 每一块都在 0.3s 预算里。
             rows = parse_coordination_rows(text)
             staged = set(staged_paths(Path(args.doc).resolve().parents[1]))
+            active = active_claims_for_paths(
+                staged, marker_dir=Path(args.markers) if args.markers != str(fc.MARKER_DIR) else None)
             pairs = [(p, o) for p, o in active if p in staged]
             missing, _pats = _uncovered(pairs, rows)
             result: Dict[str, Any] = {
@@ -329,6 +366,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 "staged": len(staged), "staged_claims": len(pairs),
             }
         else:
+            active = active_claims(marker_dir=Path(args.markers))
             registry = _load_registry(Path(args.registry))
             result = cross_check(active, registry, text)
     except (OSError, ValueError, json.JSONDecodeError) as exc:

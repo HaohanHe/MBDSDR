@@ -134,7 +134,8 @@ def _staged_fixture(tmp_path: Path, doc_text: str):
     markers = tmp_path / "markers"
     markers.mkdir()
     now = time.time()
-    (markers / "a.claim").write_text(json.dumps({
+    # 占位文件名 = sha1(路径)[:16].claim：--staged 按路径直接定位，不再 glob。
+    (markers / cc._marker_in("desktop/main_window.py", markers).name).write_text(json.dumps({
         "path": "desktop/main_window.py", "owner": "操作逻辑线",
         "acquired_at": now, "heartbeat_at": now, "ttl_min": 60,
     }), encoding="utf-8")
