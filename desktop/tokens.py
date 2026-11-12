@@ -90,7 +90,10 @@ class DesignTokens:
             "light_accent_hover": "#D4946C",   # 主操作按钮 hover（连接按钮高亮）
             "light_hint_bg":   "#F0E8DC",      # 无设备引导横幅底色
             "light_hint_text": "#8A6D4A",      # 无设备引导横幅文字
-            "disabled_gray":   "#999999",      # 次要置灰文字/指示
+            # 禁用态专用：WCAG 对禁用控件不要求 4.5:1，这是**豁免、不是达标**。
+            # 控件一旦变为可用，同样的字必须换回主题角色（如 palette(placeholder-text)），
+            # 门禁见 tests/test_ui_contrast.py::test_gain_range_hint_exempt_only_when_stage_unsupported。
+            "disabled_gray":   "#999999",      # 次要置灰文字/指示（仅禁用态）
             # ---- 新增语义 token（控制面板/各面板收口用）----
             "light_grid":       "#D8D2C8",      # 浅色主题网格线/分隔线
             "light_hover":      "#F0EDE8",      # 浅色主题按钮 hover 底色

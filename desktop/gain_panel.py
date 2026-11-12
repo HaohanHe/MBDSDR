@@ -63,19 +63,29 @@ class _StageSlider(QWidget):
         lay.addWidget(self.slider)
 
         self.range_label = QLabel("范围: --")
-        self.range_label.setStyleSheet(
-            "color:" + tokens().COLORS["disabled_gray"] + "; font-size:8pt;")
         lay.addWidget(self.range_label)
+        self._set_range_color(exempt=True)
 
         self._min = 0.0
         self._max = 0.0
         self._supported = False
+
+    def _set_range_color(self, exempt: bool) -> None:
+        """禁用档豁免 ≠ 达标：档位可用时，同一行字必须回到 ≥4.5 的主题角色。
+
+        ``disabled_gray`` 只给「设备无此增益档 / 未连接」这类禁用态用；
+        WCAG 对这种状态豁免对比度，但豁免不是「这个面板随便什么色都行」。
+        """
+        color = ("palette(placeholder-text)" if not exempt
+                 else tokens().COLORS["disabled_gray"])
+        self.range_label.setStyleSheet(f"color:{color}; font-size:8pt;")
 
     def setup_stage(self, elem_name: str, min_db: float, max_db: float,
                     supported: bool) -> None:
         self._supported = bool(supported)
         self._min = float(min_db)
         self._max = float(max_db)
+        self._set_range_color(exempt=not supported)
         if supported:
             self.name_label.setText(f"{self.logical} ({elem_name}):")
             self.range_label.setText(f"范围: {min_db:.0f}..{max_db:.0f} dB")

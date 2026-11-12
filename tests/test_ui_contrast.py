@@ -319,6 +319,37 @@ def test_no_new_direct_semantic_color_reads():
         f"A1 待迁单元 {len(a1_units)} > 上限 {_BASELINE_CEILING}：棘轮只许降不许涨")
 
 
+def test_gain_range_hint_exempt_only_when_stage_unsupported():
+    """禁用档 exempt ≠ 达标：可用档位的同一行字必须回到 ≥4.5 的主题角色。
+
+    `disabled_gray` 只给「设备无此增益档」这类禁用态；豁免一旦被当成
+    「这个面板随便什么色都行」，可用档位的提示字就会永远停在 2.85。
+    """
+    from PySide6.QtWidgets import QApplication
+    from gain_panel import _StageSlider
+
+    _app = QApplication.instance() or QApplication([])  # noqa: F841
+    sl = _StageSlider("LNA")
+    exempt = tokens().COLORS["disabled_gray"]
+
+    assert exempt in sl.range_label.styleSheet(), "初始态（禁用）应走豁免色"
+
+    sl.setup_stage("elem", 0.0, 40.0, True)
+    css = sl.range_label.styleSheet()
+    assert "palette(placeholder-text)" in css, "可用档位必须回到主题角色"
+    assert exempt not in css, "可用档位的提示字不许继续用豁免色"
+    for theme in _ALL:
+        colors = tokens().theme_colors(theme)
+        for surface in ("card", "bg"):
+            ratio = contrast_ratio(colors["text_secondary"], colors[surface])
+            assert ratio >= 4.5, (
+                f"{theme}: 可用档位提示字 text_secondary/{surface} "
+                f"{ratio:.2f} < 4.5")
+
+    sl.setup_stage("elem", 0.0, 0.0, False)
+    assert exempt in sl.range_label.styleSheet(), "不支持档位（禁用）回到豁免色"
+
+
 def _sdr_hint_css() -> str:
     """取 constellation_panel 里 ``sdr_hint.setStyleSheet(...)`` 的实参。
 
