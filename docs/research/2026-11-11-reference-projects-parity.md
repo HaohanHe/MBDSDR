@@ -528,10 +528,11 @@ for (auto const& [name, _vfo] : vfos) {
 - 机制：布局在程序启动时从 CSV 加载，帧型固定为 `RT / MAX / MIN / WOD / EXP / CAN_*`，并支持 `parentLayout / secondaryLayout` 派生——`src/telemetry/BitArrayLayout.java:34-36`、`:42-52`、`:58-70`；主 CSV 生成器 `genSpacecraft/genSpacecraft.py:80-104`。<https://github.com/ac2cz/FoxTelem/blob/537b7cc/src/telemetry/BitArrayLayout.java#L34-L70>
 - 我方（2026-11-12 复核，**下面两句必须同时读**）：
   1. **机制已支持**：帧布局 schema 已升 v2，有帧型标签 `frame_type` 与派生关系 `derived_from`；派生规则写死在 `mbdsdr_ai/sat_profile.py:75-152`，缺 `source` 的派生布局拒载（`:96-107`、`:142`）。位级字段路径也已支持（`bit_offset` 以帧首为 0、MSB-first、越界报错不截断），见 `mbdsdr_ai/verify_chain.py:109-146`。
-  2. **数据已上 1 颗**：`ccsds_tc_segmented`（`data/frame_layouts.json:31-33`）属**通用协议帧**、不是任何一颗星的遥测，不计入星覆盖；星上遥测新增 FUNcube-1（AO-73）`funcube1_ao73_frame` 与其 Fitter 派生 `funcube1_ao73_fitter`（同文件，出处为 AMSAT-UK 公开 PDF + SHA-256 + 抓取时间），**星覆盖 1 颗**，距「认得 2 颗星」仍差 1 颗。
+  2. **数据已上 1 颗**：`ccsds_tc_segmented`（`data/frame_layouts.json:31-33`）属**通用协议帧**、不是任何一颗星的遥测，不计入星覆盖；星上遥测新增 FUNcube-1（AO-73）`funcube1_ao73_frame` 与其 Fitter 派生 `funcube1_ao73_fitter`（同文件，出处为 AMSAT-UK 公开 PDF + SHA-256 + 抓取时间），**星覆盖 1 颗 = 达下限，其余待公开规范**。
+  3. **FUNcube 布局的验证边界**：AMSAT-UK 规范全文只有位宽表，**没有示例帧字节或字段取值示例**（§6 为「To be added」），因此该布局**无法做端到端验证，仅通过 schema 校验**；测试字节属机制用例，不作规范样例。
   **机制通 ≠ 覆盖扩**：W91 的判据是「扩遥测覆盖」，`ccsds_tc_segmented` 不得据此计入，W91 是否完成只看星上遥测布局数与出处。
 - 差距判断：**缺**，缺的是**数据**。差距本质不是「布局格式不同」，而是我们遥测能覆盖的星太少——库内为 1 条示例布局 + 2 条 CCSDS 通用协议布局 + 2 条 FUNcube-1 星上遥测（1 基座 + 1 派生）；对方有帧型变体 + 派生，覆盖几十颗。按「**只是缺数据、不是缺代码**」定性。
-- roadmap：**W91 进行中：机制已落、星上遥测已上 1 颗、第二颗待补**（2026-11-12 复核；NOAA KLM 手册在本环境不可取得）。
+- roadmap：**W91 数据侧 1 颗、达下限，其余待公开规范**（2026-11-12 复核）。已尝试并停止：NOAA KLM 手册本环境不可取得；ESEO 文档标注 `Distribution: Confidential`，不满足公开可引用红线；Fox-1A 字段位表仅存于 GPL 项目；FUNcube-2/Nayif-1 的同类规范「正在准备」但从未发布。**停止扩星**，不为凑数造字段。
 - 可搬性：**能搬数据**（机制与派生骨架已具备，位级解释器已支持；只差逐星布局与出处）。**优先级高于 SatNOGS 那条**：成本更低，且直接扩遥测覆盖。
 
 **条目 12｜PreviSat `mconsidine/previsat-git@6bf04c7`（master，2026-11-02）— 可见过境筛选**
@@ -546,7 +547,7 @@ for (auto const& [name, _vfo] : vfos) {
 
 | # | 机制 | 我方位置 | roadmap 覆盖 | 可搬性 |
 |---|---|---|---|---|
-| 1 | FoxTelem 每星多帧型布局（数据覆盖） | `frame_layouts.json` 含 1 条示例 + 2 条 CCSDS 通用 + 2 条 FUNcube-1 星上遥测（1 基座 + 1 派生）；schema v2 派生与位级字段已支持（`sat_profile.py:75-152`、`verify_chain.py:109-145`） | **W91 进行中：机制已落、覆盖 1 颗** | 能搬数据；**优先级最高**（成本低、直接扩覆盖） |
+| 1 | FoxTelem 每星多帧型布局（数据覆盖） | `frame_layouts.json` 含 1 条示例 + 2 条 CCSDS 通用 + 2 条 FUNcube-1 星上遥测（1 基座 + 1 派生）；schema v2 派生与位级字段已支持（`sat_profile.py:75-152`、`verify_chain.py:109-145`） | **W91 数据侧：1 颗，达下限，其余待公开规范** | 能搬数据；**优先级最高**（成本低、直接扩覆盖） |
 | 2 | SatNOGS 发射机库（带宽区间/状态/service） | `sat_links.json:14-15/18` | **已覆盖：W92** | 能搬（拉库缓存） |
 | 3 | AOS/LOS 外部命令钩子 | `config_schema.py:602` 封闭集无此键 | **已覆盖：W94** | 能搬（事件订阅 + 受控子进程） |
 | 4 | 地面轨迹（可视化缺口） | `paintEvent` `rf_sky_view.py:4203-4263` 无地固线入口 | **已覆盖：W93** | 能搬（SGP4 与方位投影已有） |
@@ -608,7 +609,7 @@ for (auto const& [name, _vfo] : vfos) {
 
 - **第一批（2026-11-12）**：SDRangel / SDR++ / gr-satellites / Direwolf / OpenWebRX+ / CubicSDR，共 10 条（条目 1–10）。
 - **第二批（2026-11-12）**：FoxTelem（条目 11）、PreviSat（条目 12），已完成。
-- **接入 roadmap（2026-11-12）**：§4.2.1 四条缺口按派单方优先级接入——W91（FoxTelem 多帧型布局，最高；**进行中：机制已落、覆盖 1 颗**）、W92（SatNOGS 发射机库，次高）、W93（地面轨迹，中）、W94（AOS/LOS 外部命令钩子，低），其中 W92–W94 状态均「未开工」。§4.2.4 候选「是否受照标签」**不进 roadmap**。
+- **接入 roadmap（2026-11-12）**：§4.2.1 四条缺口按派单方优先级接入——W91（FoxTelem 多帧型布局，最高；**数据侧 1 颗、达下限，其余待公开规范**）、W92（SatNOGS 发射机库，次高）、W93（地面轨迹，中）、W94（AOS/LOS 外部命令钩子，低），其中 W92–W94 状态均「未开工」。§4.2.4 候选「是否受照标签」**不进 roadmap**。
 - **证伪「我们有、他们缺」（2026-11-12）**：原 4 条 → **保留 1、降级 2、删除 1**。方法：6 个已查仓库全树（blob 合计 28,051 个）按名检索 + 抽读；结论见 §4.2.2。
 - 不查：SatNOGS server（定位不同）；SDR-Console/Orbitron 已按 §4.4 单列。
 - 下一批：待裁定。
