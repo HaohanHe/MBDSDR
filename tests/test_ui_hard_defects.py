@@ -41,7 +41,7 @@ from freq_display import FreqDisplay  # noqa: E402
 
 
 @pytest.fixture
-def clean_window_settings(tmp_path):
+def clean_window_settings(tmp_path, request):
     """隔离窗口几何与顶层形态持久化（QSettings + gui_config.json +
     DesktopSettings 三通道）：备份→清空→跑→还原，并把 ``%APPDATA%``
     重定向到临时目录——测试绝不碰用户真实的 ``desktop_settings.json``。
@@ -58,6 +58,17 @@ def clean_window_settings(tmp_path):
     UTF8`` 在 PS 5.1 会写 BOM，应用会把它当损坏文件改名备份）。
     """
     appdata_backup = os.environ.get("APPDATA")
+
+    def _restore_appdata():
+        if appdata_backup is None:
+            os.environ.pop("APPDATA", None)
+        else:
+            os.environ["APPDATA"] = appdata_backup
+
+    # 先登记再改：yield 之前的 setup 一旦抛异常，写在 yield 之后的还原本
+    # 来永远不执行，APPDATA 会漏给同一进程里的后续文件。finalizer 在
+    # setup 失败时也会跑。
+    request.addfinalizer(_restore_appdata)
     os.environ["APPDATA"] = str(tmp_path / "appdata")
     os.makedirs(os.environ["APPDATA"], exist_ok=True)
     s = QSettings("MBDSDR", "Desktop")
@@ -91,10 +102,7 @@ def clean_window_settings(tmp_path):
     if cfg_backup is not None:
         with open(gui_cfg, "w", encoding="utf-8") as f:
             f.write(cfg_backup)
-    if appdata_backup is None:
-        os.environ.pop("APPDATA", None)
-    else:
-        os.environ["APPDATA"] = appdata_backup
+    # APPDATA 已由上面的 finalizer 还原（setup 失败时也生效）。
 
 
 def _stop_startup_timers(win):
