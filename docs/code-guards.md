@@ -262,19 +262,20 @@ pre-commit**：pre-commit 现在只跑 claim 范围 + claim 台账 + 暂存区�
 `verify_*`/`lint_*`/`*_scan`/带 `--check` 的生成器，排除 bench/硬件/一次性工具）：
 逐条实跑 1 次、`QT_QPA_PLATFORM=offscreen`、取墙钟秒；**没有一个脚本自己取
 `qt_test.lock`**，所以下表的「Qt」一栏只有「是否 import/启动 Qt」的区别，不是锁。
-按覆盖分为三档：**A 自动入口（24 条）**、**B 只有测试入口、仓库现状无人跑（11 条）**、
-**C 无任何入口（8 条，漏网）**。
+按覆盖分为三档：**A 自动入口（27 条）**、**B 只有测试入口、仓库现状无人跑（11 条）**、
+**C 无任何入口（5 条，漏网）**。
 
 ### A. 已接入自动入口（覆盖当前仓库）
 
-`release_check.py` 新增 `guards` 步（本次接入 13 条 + 1 条只提示），加上原有
-`docs`/`gen_reconcile`/`action_dup` 步与 3 个 git 钩子。`guards` 连跑 3 次墙钟
-**77.8s / 43.2s / 44.9s，中位 44.9s**（首跑含冷缓存）；单项超时 120s，任一非 0
-即整步 FAIL，明细点名到脚本。
+`release_check.py` 的 `guards` 步（14 条 + 1 条只提示），加上原有
+`docs`/`gen_reconcile`/`action_dup` 步与 3 个 git 钩子。`guards` 连跑 5 次墙钟
+**35.2s / 39.2s / 40.1s / 46.9s / 82.2s，中位 40.1s**（最后两次他线在改
+`scripts/secret_scan.py`，`install_git_hooks --check` 因工作树与钩子副本不一致
+瞬时红）；单项超时 120s，任一非 0 即整步 FAIL，明细点名到脚本。
 
 | 脚本 | 入口 | 什么时候跑 | 谁跑 | 复核 |
 | --- | --- | --- | --- | --- |
-| `scripts/verify_claims.py` | 自动：`release_check.py --steps docs` | 每次发版第一步；`--check-lines --strict-lines` 不通过即 FAIL（实测 59.4s；2026-11-13 当前红：38 条未豁免） | 发版人 | 2027-01 |
+| `scripts/verify_claims.py` | 自动：`release_check.py --steps docs` | 每次发版第一步；`--check-lines --strict-lines` 不通过即 FAIL（实测 33.7s；2026-11-13 已把 38 条坐标漂移逐条真修，现绿、豁免 0） | 发版人 | 2027-01 |
 | `scripts/check_rollback_table.py` | 自动：`release_check.py --steps docs` | 发版前；§6.10.2 表格改动后本地跑（2.3s） | 发版人 / 表格改动者 | 2027-01 |
 | `scripts/check_generated_artifacts.py` | 自动：`release_check.py --steps gen_reconcile` | 发版前（3.7s），同时覆盖 `gen_mcp_tools_doc` 的产物 | 发版人 | 2027-01 |
 | `scripts/check_action_duplication.py` | 自动：`release_check.py --steps action_dup` | 发版前；菜单/QAction 增改后本地跑 `--gate`（5.9s，需 Qt/offscreen） | 发版人 / UI 改动者 | 2027-01 |
@@ -298,6 +299,9 @@ pre-commit**：pre-commit 现在只跑 claim 范围 + claim 台账 + 暂存区�
 | `scripts/secret_scan.py` | 自动：`scripts/hooks/pre-commit`（**仅 `--staged`**） | 每次提交前扫暂存区；全量 `--history`/全树扫描**无自动入口**（实测 >300s，见 C 档） | 全体提交者（钩子自动） | 2027-01 |
 | `scripts/release_manifest.py` | 自动：`tests/test_import_probe.py` 等 + `docs/packaging.md` 流程 | 出安装包后手动 `--dist`；测试内覆盖版本/依赖/许可证断言（需 Qt） | 发版人 | 2027-01 |
 | `scripts/git_sync_index.py` | 自动：`post-commit` 钩子 + `tests/test_git_sync_index.py` | 每次提交后同步共享 index（钩子自动） | 全体提交者（钩子自动） | 2027-01 |
+| `scripts/make_decode_fixtures.py --check` | 自动：`release_check.py --steps guards` | 发版前（4.2s）：生成器与 8 个 cf32/wav + `manifest.json` 逐字对账；2026-11-13 生成器补 `provenance: self-generated` 后转绿 | 发版人 / 解码 fixture 改动者 | 2027-01 |
+| `scripts/check_commit_residue.py` | 自动：`scripts/hooks/post-commit`（`--repo <root> --json HEAD`） | **每次提交后**（实测 0.68–0.85s）：本次提交新增的连续行块若以「删除」形态回到工作区未提交 diff → 打印 RESIDUE 并追加 `D:\mbdsdr\.locks\residue_commits.log`；只记录不阻断（提交已落地） | 全体提交者（钩子自动） | 2027-01 |
+| `scripts/ci_pytest_groups.py` | 自动：`.github/workflows/ci.yml`（`--check` + `--group/--total`）+ `scripts/run_all_tests.sh` + `tests/test_collection_consistency.py` | 每次 CI 的 `tests` 矩阵 job（先 `--check` 断言并集=全集，再取本组文件跑 pytest）；本地全量测试走同一分组 | CI runner / 跑全量测试的人 | 2027-01 |
 
 ### B. 只有测试入口：扫描器被测，但「当前仓库」没人跑
 
@@ -321,16 +325,12 @@ pre-commit**：pre-commit 现在只跑 claim 范围 + claim 台账 + 暂存区�
 
 ### C. 无任何入口（漏网）
 
-**这 8 条脚本（外加 1 个无入口的 `--history` 全量模式）谁也跑不到**。要么缺
-必填参数（dist/commit 范围），要么要真机/GUI，要么根本没定责任人——「写不出
-谁跑」的，直接写原因，不编。
+**这 5 条脚本（外加 1 个无入口的 `--history` 全量模式）谁也跑不到**。要么缺
+必填参数（dist/commit 范围），要么要真机/GUI——「写不出谁跑」的，直接写原因，不编。
 
 | 脚本 | 为什么没有入口 | 建议触发条件 | 谁跑 | 复核 |
 | --- | --- | --- | --- | --- |
 | `scripts/audit_evidence.py` | 51.5s 且**当前红**（2,702 条数字断言无证据）；接入会立刻把发版闸门变成常红 | 证据标准改版 / 批次末；先清库存再谈接入 | 证据标准 owner | 2026-12 |
-| `scripts/make_decode_fixtures.py --check` | 4.2s，但**当前红**（fixture 与 `manifest.json` 不一致），谁改的未定 | 解码 fixture 变更后；先修红再接入 | 解码线 | 2026-12 |
-| `scripts/check_commit_residue.py` | 需要「某提交」范围参数，属提交后检查；**没有任何调用方，也没定责任人（写不出谁跑）** | 建议接 `post-commit`：对 HEAD 跑一次（待提交后钩子 owner 评估耗时） | 提交工具链 owner（待认领） | 2027-01 |
-| `scripts/ci_pytest_groups.py --check` | 只服务 CI 并行分组，本仓无 CI 配置引用它；**写不出谁跑**（没有 CI 维护者这一角色） | 接入 CI 或删除；二选一 | 未定（需产品/工程负责人指定） | 2027-01 |
 | `scripts/config_write_guard.py` | 哨兵脚本，需挂在真实配置写点；目前只被 `scripts/repro/` 引用 | 配置写入路径改动时 + 发版前 | 桌面线 | 2027-01 |
 | `scripts/check_dist_head_parity.py` | `--dist` 必填，无产物无法执行；实测未跑 | 每次出安装包后（与 release_manifest 同批） | 发版人 | 2027-01 |
 | `scripts/ui_layout_audit.py` | 需要起 GUI 并对比几何基线（Qt），耗时与稳定性都不适合闸门 | UI 布局/尺寸改动后手动，基线更新必须给 `--reason` | UI 线 | 2027-01 |
@@ -339,9 +339,22 @@ pre-commit**：pre-commit 现在只跑 claim 范围 + claim 台账 + 暂存区�
 
 删除判定：**0 个**。43 个都有活调用方、活文档流程或明确待接条件；C 档没有一个是
 「结论已无人使用」的死代码，只是**入口缺失**。`check_card_links.py` 已于
-2026-11-13 转绿（links=16 全 PASS），`check_destructive_ops.py` /
-`make_decode_fixtures.py` / `audit_evidence.py` / `lint_swallow_all.py` /
-`check_red_lifecycle.py` 当前仍是红的，属于待修项，不是死代码。
+2026-11-13 转绿（links=16 全 PASS），`make_decode_fixtures.py --check` 同日修绿并
+接入 `guards`；`check_destructive_ops.py` / `audit_evidence.py` /
+`lint_swallow_all.py` / `check_red_lifecycle.py` 当前仍是红的，属于待修项，不是死代码。
+
+### 零引用核查（2026-11-13）：两条「写不出责任人」的处置
+
+上一版登记里 `check_commit_residue.py`、`ci_pytest_groups.py` 被标成「无人引用 /
+无 CI、待认领」。按「先证零引用、证完再删」的口径逐条取证，**两条都不成立，不删**：
+
+| 脚本 | 零引用证据（反证） | 结论 |
+| --- | --- | --- |
+| `scripts/check_commit_residue.py` | ① `scripts/hooks/post-commit:280-306` 就是调用方：`--repo <root> --json HEAD`，每次提交后跑，实测 0.68–0.85s；② 已安装副本 `.git/hooks/post-commit` 含 `_residue_records`；③ `docs/COORDINATION.md:1914` 记录了 `--range A..B` 的事后复核用法 | 入口存在（post-commit），改登记到 A 档；不接 pre-commit（虽只要 0.7s，但它是提交后检查，挂 pre-commit 等于用未提交内容判已提交事实） |
+| `scripts/ci_pytest_groups.py` | ① `.github/workflows/ci.yml:150-166` 每 job 先 `--check` 再 `--group/--total`；② `scripts/run_all_tests.sh:160-163` 本地全量同分组；③ `tests/test_collection_consistency.py:7` 显式覆盖分组口径 | **本仓有 CI**（`.github/workflows/ci.yml`），「无 CI」是上版测绘错误；改登记到 A 档 |
+
+可回滚点：本表改动前的版本为提交 `3de656f4`（`docs: guards 步接入与 43 条登记`），
+如需还原两条「待认领」的旧表述，`git show 3de656f4:docs/code-guards.md` 即原文。
 
 ### 复核记录（2026-11-05，HEAD `d41591b`，工作区含他线在途改动）
 
