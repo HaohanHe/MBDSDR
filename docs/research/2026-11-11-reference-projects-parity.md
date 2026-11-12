@@ -366,7 +366,7 @@ for (auto const& [name, _vfo] : vfos) {
 
 > **口径对账（102 vs 33）**：`102` 是 §2.4 时间源普查的**行级命中数**（10 时间基准 + 46 动画节流 + 29 日志耗时 + 17 其他 = 102，覆盖 20 个文件），与本节 33 条**结论条目**不是同一张表；§0 项目清单是 45 个项目（21 + 24）。文件历史只有两次提交：`fc5d0876` 新建 410 行、`2e35798a` +35/−14，均为文本替换，**没有机制/专项条目被删**。
 
-> **线上对照（2026-11-12）**：本地 33 条 + 线上 10 条（见 §4）。线上条目不计入本地 33，理由见 §4 开头。
+> **线上对照（2026-11-12）**：本地 33 条 + 线上 12 条（见 §4）。线上条目不计入本地 33，理由见 §4 开头。
 
 ### 3.1 已核（33 条）
 
@@ -444,6 +444,7 @@ for (auto const& [name, _vfo] : vfos) {
 > - **线上条目证据等级低于 §2**：§2 用的是本仓 `HEAD:` 行号，可直接支撑「已核」；§4 只能证明「对方实现了什么」，**不得反向给 §2 的否定结论背书**。
 > - 因此 §4 单开一节、不并入 §2；§3 的本地 33 条计数不含本节。
 > - README/官网宣传语不算机制证据；只看得到宣传的一律写「宣称 X，未见实现」。
+> - **roadmap 联动（2026-11-12 起长期有效）**：§4 每新增一条缺口，同一行必须标出 roadmap 覆盖状态——`roadmap 已覆盖：W##` 或 `roadmap 未覆盖：新条目`。缺口表不接 roadmap，就会持续生产重复劳动（书签带宽是前例）。
 > - 只学机制、不抄代码（`AGENTS.md` §3）。参考项目均 GPL 系，未逐仓库核 LICENSE 版本。
 > - 抓取时间统一为 **2026-11-12（Asia/Shanghai）**。
 
@@ -456,13 +457,14 @@ for (auto const& [name, _vfo] : vfos) {
 - `curl` → `raw.githubusercontent.com`：**实测 200**，可下载全文后本地 grep 取行号——本节所有 `:行` 均由此获得。
 - 闭源项目（SDR#、SDRuno、SDR-Console、Orbitron、SatPC32）：无源码/配置可查，只在 §4.4 单列，不进机制表。
 
-### 4.1 逐项目条目（10 条）
+### 4.1 逐项目条目（12 条）
 
 **条目 1｜SDRangel `f4exb/sdrangel@1ec7cea`（master，2026-11-10）— AOS/LOS 生命周期动作**
 - 机制：过境边界触发一整套动作——开始/停止采集、开始/停止录制、执行外部命令、语音播报、加载预设。出处 `plugins/feature/satellitetracker/satellitetrackersettings.h:48-53`（`m_startOnAOS` / `m_stopOnLOS` / `m_startStopFileSink` / `m_aosCommand` / `m_losCommand`）、`:82-83`（`m_aosSpeech` / `m_losSpeech`）。<https://github.com/f4exb/sdrangel/blob/1ec7cea/plugins/feature/satellitetracker/satellitetrackersettings.h#L48-L53>
 - 我方：闭环自动跟踪已有（`main_window.py:13105` 注释、`:13306` 过境结束自动停、`:13353` 仰角 <5° 停止），**无**外部命令/录制自动启停/语音/过境加载预设。
 - 差距判断：**部分缺**。否定证据（封闭集）：设置唯一事实源 `SCHEMA`（`config_schema.py:602`），卫星组只有 `observer_lat/lon`、`pass_min_elevation_deg`、`pass_window_hours`、`show_low_elevation_passes`；AOS 命令与录制钩子不在该集合内。
 - 可搬性：命令钩子 **能搬**（过境事件订阅 + 受控子进程，沿用 `tc_uplink` 确认门思路）；语音 **不该搬**（TTS 依赖 + 占音频链路）；预设加载 **需重写**（无 SDRangel preset 概念，等价物是书签/设备参数）。
+- roadmap：**未覆盖：新条目**（roadmap 全表检索 `AOS|过境命令` 0 命中）。
 
 **条目 2｜SDRangel — 每星每设备参数表**
 - 机制：`QHash<QString, QList<SatelliteDeviceSettings*>*> m_deviceSettings`（`satellitetrackersettings.h:87`），按卫星 × device set 保存设备参数；控制入口 `satelliteradiocontroldialog.h:50`。
@@ -475,6 +477,7 @@ for (auto const& [name, _vfo] : vfos) {
 - 我方：`sat_links.json` 8 颗星，link 字段只有 `direction/freq_hz/mode/baud/note`（`sat_links.json:14-15`），`source` 只到卫星级（`:18`）。
 - 差距判断：**缺**（数据源 + 带宽区间 + 状态）。
 - 可搬性：**能搬**（HTTP 拉库 + 落盘缓存，schema 增可选 `low/high/status`）；这条同时把 §2.1 Look4Sat A 的搬运代价从「人工溯源」降为「拉库」。
+- roadmap：**未覆盖：新条目**（roadmap 全表检索 `SatNOGS|sat_links` 0 命中）。
 
 **条目 4｜SDRangel — 预测窗口 / 地面轨迹 / 过境回放**
 - 机制：`m_predictionPeriod`（按天）、`m_groundTrackPoints`（地面轨迹点数）、`m_replayEnabled`（把时间拨回过去过境回放）——`satellitetrackersettings.h:71`、`:76`、`:88`。
@@ -482,6 +485,7 @@ for (auto const& [name, _vfo] : vfos) {
 - 差距判断：窗口单位是设计差异不记缺口；地面轨迹缺；过境回放缺。
 - 可搬性：地面轨迹 **能搬**（SGP4 与方位投影已有，只差地固线）；过境回放 **需重写且建议不搬**（要改写时间源，冲突于单一时间基准）。
 - 附：位置轮询与多普勒计时分离（`satellitetrackerworker.cpp:92` 轮询、`:99-100` 每星 `m_dopplerTimer`）——我方 500 ms 多普勒调谐（`rf_sky_view.py:2031`）+ 1 s 倒计时，**已同构**，不记缺口。
+- roadmap：地面轨迹 **未覆盖：新条目**；过境回放不搬。
 
 **条目 5｜SDR++ `AlexandreRouma/SDRPlusPlus@ea6f755`（master，2026-11-07）— 书签带带宽**
 - 机制：`FrequencyBookmark{frequency, bandwidth, mode, name}`（`misc_modules/frequency_manager/src/main.cpp:25-28`）；`applyBookmark` 依次设模式、带宽、调谐（`:107-122`）。
@@ -519,16 +523,31 @@ for (auto const& [name, _vfo] : vfos) {
 - 差距判断：带宽已覆盖；**整链快照是粒度差异**，不记缺口。
 - 可搬性：整链快照 **需重写且不建议**（与参数单一事实源冲突）；加载失败回退思路可借鉴。
 
+**条目 11｜FoxTelem `ac2cz/FoxTelem@537b7cc`（master，2026-06）— 每星多帧型遥测布局**
+- 机制：布局在程序启动时从 CSV 加载，帧型固定为 `RT / MAX / MIN / WOD / EXP / CAN_*`，并支持 `parentLayout / secondaryLayout` 派生——`src/telemetry/BitArrayLayout.java:34-36`、`:42-52`、`:58-70`；主 CSV 生成器 `genSpacecraft/genSpacecraft.py:80-104`。<https://github.com/ac2cz/FoxTelem/blob/537b7cc/src/telemetry/BitArrayLayout.java#L34-L70>
+- 我方：`data/frame_layouts.json` 每星单布局、无帧型变体维度，仅 2 个 profile（`sat_profile.py:58-70`）。
+- 差距判断：**缺**。差距本质**不是「布局格式不同」，而是我们遥测能覆盖的星太少**——每星单布局、只有 2 个 profile；对方有帧型变体 + 派生，覆盖几十颗。按「**只是缺数据、不是缺代码**」定性。
+- roadmap：**未覆盖：新条目**（`docs/research/2026-11-11-roadmap.md` 全表检索 `遥测|telemetry|帧布局|frame_layout` 0 命中）。
+- 可搬性：**能搬**（schema 加 `variant` + `parent/secondary`，解释器骨架不动）。**优先级高于 SatNOGS 那条**：成本更低，且直接扩遥测覆盖。
+
+**条目 12｜PreviSat `mconsidine/previsat-git@6bf04c7`（master，2026-11-02）— 可见过境筛选**
+- 机制：候选过境先过高度门，再算地影与星等，最后按 `magnitudeLimite` 过滤——`src/previsions/prevision.cpp:196-232`；频率表为 6 字段 `FrequenceRadio{nom, frequenceMontante, frequenceDescendante, balise, mode, signalAppel}`（`src/configuration/frequencesradio.h:57-64`）。<https://github.com/mconsidine/previsat-git/blob/6bf04c7/src/previsions/prevision.cpp#L196-L232>
+- 我方：只有仰角门（`config_schema.py:456-468`），无星等/地影筛选。
+- 差距判断：**不搬，不进缺口表**。星等门属目视天文域，与无线电工作台定位不同。
+- 可搬性：星等门 **不该搬**；「是否受照」标签单列为候选（见 §4.2.4），不排期。
+
 ### 4.2 三张表
 
-**4.2.1 他们有、我们缺（2 条真缺口）**
+**4.2.1 他们有、我们缺（4 条，含 1 条可视化）**
 
-| # | 机制 | 我方位置 | 可搬性 |
-|---|---|---|---|
-| 1 | SatNOGS 发射机库（带宽区间/状态/service） | `sat_links.json:14-15/18` | 能搬（拉库缓存） |
-| 2 | AOS/LOS 外部命令钩子 | `config_schema.py:602` 封闭集无此键 | 能搬（事件订阅 + 受控子进程） |
+| # | 机制 | 我方位置 | roadmap 覆盖 | 可搬性 |
+|---|---|---|---|---|
+| 1 | FoxTelem 每星多帧型布局（数据覆盖） | `frame_layouts.json` 每星单布局、2 个 profile（`sat_profile.py:58-70`） | **未覆盖：新条目** | 能搬；**优先级最高**（成本低、直接扩覆盖） |
+| 2 | SatNOGS 发射机库（带宽区间/状态/service） | `sat_links.json:14-15/18` | **未覆盖：新条目** | 能搬（拉库缓存） |
+| 3 | AOS/LOS 外部命令钩子 | `config_schema.py:602` 封闭集无此键 | **未覆盖：新条目** | 能搬（事件订阅 + 受控子进程） |
+| 4 | 地面轨迹（可视化缺口） | `paintEvent` `rf_sky_view.py:4203-4263` 无地固线入口 | **未覆盖：新条目** | 能搬（SGP4 与方位投影已有） |
 
-另：地面轨迹为**可视化缺口**（已核，见 §4.5），是否补由裁定；预测窗口单位、书签带宽、bandplan 均不是缺口。
+预测窗口单位、书签带宽、bandplan 均不是缺口。
 
 **4.2.2 我们有、他们缺（4 条）**
 
@@ -549,6 +568,18 @@ for (auto const& [name, _vfo] : vfos) {
 | 4 | 外部解码器子进程（OpenWebRX+） | 进程契约、格式协商、崩溃隔离成本高于自研收益 |
 | 5 | 过境「时间旅行」回放（SDRangel） | 要改写时间源，冲突于单一时间基准 |
 
+**4.2.4 候选（单列，不排期）**
+
+| # | 候选 | 理由 | roadmap |
+|---|---|---|---|
+| 1 | 天空图卫星「是否受照」标签 | 成本低：已有晨昏/受照基础；**候选、不排期** | 未覆盖：新条目（候选，不排期） |
+
+**4.2.5 其余不搬（各一句）**
+
+- **遥测字段图表**（FoxTelem）：需新增面板 + 库表存储，超出频谱工作台定位。
+- **轨道事件表**（PreviSat）：近/远地点、升交点、地影与无线电主流程无关。
+- **Iridium 闪光 / Starlink 列车 / 凌日 / 望远镜模式**（PreviSat）：目视天文域。
+
 ### 4.3 原 33 条的改判（2 条）
 
 1. **gqrx 机制 B 书签带宽** → **已实现（2026-11-12 复核）**：5 元组含 `bandwidth_hz`，旗子路径同为 3 参数。已写回 §2.3 并保留原判原文；§3.1 第 16/31 条同步改判。
@@ -565,8 +596,9 @@ for (auto const& [name, _vfo] : vfos) {
 2. **地面轨迹** → **已核：缺**。封闭集 = 天空图唯一绘制入口 `paintEvent`（`rf_sky_view.py:4203`）的调用序列 `:4209-4263`（背景/恒星/星座/DSO/辉光/地平线/地景/方位网格/赤道网格/轨迹/天线波束/天体/行星/卫星对象/天线指针/GNSS/HUD/信息卡/过境/GNSS 叠加/数据源/空态/夜视）；`_draw_trajectories`（`:7176`）画的是 az/el 天空轨迹，不是地固轨迹。该序列内无地图或地固线绘制入口。
 3. **`bandplan.json` 是否含卫星转发器级分段** → **已核：不含**。文件含三条卫星子带（`desktop/bandplan.json:29` 低轨下行 137–138 MHz、`:31` 业余卫星上行 145.8–146 MHz、`:35` 业余卫星下行 435–438 MHz），无 QO-100、无 per-transponder 起止字段（全部条目只有 `label/start_hz/stop_hz/category/priority/modulation/desc`）。
 
-### 4.6 下一批（只查两个）
+### 4.6 批次记录
 
-- **FoxTelem**（遥测 UI）：先定位可以访问的仓库/发行物，再按实现层取证。
-- **PreviSat**（过境预测 UI）：SourceForge 主体，先确认能否拉到源码或发行说明。
+- **第一批（2026-11-12）**：SDRangel / SDR++ / gr-satellites / Direwolf / OpenWebRX+ / CubicSDR，共 10 条（条目 1–10）。
+- **第二批（2026-11-12）**：FoxTelem（条目 11）、PreviSat（条目 12），已完成。
 - 不查：SatNOGS server（定位不同）；SDR-Console/Orbitron 已按 §4.4 单列。
+- 下一批：待裁定。
