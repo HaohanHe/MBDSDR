@@ -1,0 +1,1099 @@
+{
+ "kind": "延后导入（scipy 私有子树）三条反证 + 最坏帧间隔 + T2 前后对比",
+ "date": "2026-11-12",
+ "head": "afd449fa",
+ "snapshot": "C:\\Users\\xxhzb\\AppData\\Local\\Temp\\kilo\\defer_head_afd449fa",
+ "snapshot_old_main": "C:\\Users\\xxhzb\\AppData\\Local\\Temp\\kilo\\defer_head_afd449fa_oldmain",
+ "cases": [
+  "frame_gap",
+  "frame_gap_nodefer"
+ ],
+ "runs_per_case": 1,
+ "load_rule": "规则 10：每 run 前 2 s 低负载门（python 总占比 <200%）",
+ "definition": {
+  "t1_splash_paint_ms": "子进程 T0（脚本第一行）→ splash 首个 paintEvent 返回",
+  "t2_ms": "splash 首个 paintEvent 返回 → 主窗顶层首个 Paint 派发完毕",
+  "first_frame_ms": "子进程 T0 → 主窗首个 Paint 派发完毕",
+  "worst_frame_gap_ms": "首帧后 16 ms 心跳定时器相邻两次回调的最大间隔；间隔里主线程没机会回到事件循环，就是一次掉帧",
+  "deferred_total_ms": "首帧 → 延后导入全部完成（_deferred_import_timer 停止）",
+  "t2_baseline": "HEAD 的 desktop/main.py（老代码：smoke + scipy 真 import 都在 splash 后、主窗前）；frame_gap 是改后代码，两者同一量法"
+ },
+ "delta_t2_vs_baseline_ms": null,
+ "summary": {
+  "frame_gap": {
+   "t1_splash_paint_ms": {
+    "runs": [
+     1596.8
+    ],
+    "median": 1596.8,
+    "min": 1596.8,
+    "max": 1596.8,
+    "range": 0.0
+   },
+   "t2_ms": {
+    "runs": [
+     2445.6
+    ],
+    "median": 2445.6,
+    "min": 2445.6,
+    "max": 2445.6,
+    "range": 0.0
+   },
+   "first_frame_ms": {
+    "runs": [
+     4042.4
+    ],
+    "median": 4042.4,
+    "min": 4042.4,
+    "max": 4042.4,
+    "range": 0.0
+   },
+   "deferred_total_ms": {
+    "runs": [
+     980.3
+    ],
+    "median": 980.3,
+    "min": 980.3,
+    "max": 980.3,
+    "range": 0.0
+   },
+   "worst_frame_gap_ms": {
+    "runs": [
+     88.6
+    ],
+    "median": 88.6,
+    "min": 88.6,
+    "max": 88.6,
+    "range": 0.0
+   },
+   "worst_gap_attribution": [
+    {
+     "gap_ms": 88.6,
+     "gap_at_ms": 88.6,
+     "imports_in_gap": [
+      "scipy._external.array_api_compat.numpy.fft",
+      "scipy._external.array_api_compat.numpy.linalg",
+      "scipy._external.array_api_compat.common",
+      "scipy._external.array_api_extra"
+     ]
+    },
+    {
+     "gap_ms": 46.8,
+     "gap_at_ms": 847.2,
+     "imports_in_gap": [
+      "scipy.stats",
+      "scipy.stats",
+      "scipy.signal"
+     ]
+    },
+    {
+     "gap_ms": 34.6,
+     "gap_at_ms": 706.4,
+     "imports_in_gap": [
+      "scipy.stats",
+      "scipy.stats",
+      "scipy.signal"
+     ]
+    }
+   ],
+   "reports": [],
+   "status_bar": [
+    ""
+   ],
+   "exit_codes": [
+    0
+   ],
+   "errors": [],
+   "failure_dialog": [
+    null
+   ],
+   "window_imported_despite_missing": false,
+   "per_slice_ms": {
+    "scipy._external.array_api_compat.numpy.fft": {
+     "runs": [
+      0.0
+     ],
+     "median": 0.0,
+     "min": 0.0,
+     "max": 0.0,
+     "range": 0.0
+    },
+    "scipy._external.array_api_compat.numpy.linalg": {
+     "runs": [
+      0.0
+     ],
+     "median": 0.0,
+     "min": 0.0,
+     "max": 0.0,
+     "range": 0.0
+    },
+    "scipy._external.array_api_compat.common": {
+     "runs": [
+      0.0
+     ],
+     "median": 0.0,
+     "min": 0.0,
+     "max": 0.0,
+     "range": 0.0
+    },
+    "scipy._external.array_api_extra": {
+     "runs": [
+      22.7
+     ],
+     "median": 22.7,
+     "min": 22.7,
+     "max": 22.7,
+     "range": 0.0
+    },
+    "scipy._external.packaging_version": {
+     "runs": [
+      0.0
+     ],
+     "median": 0.0,
+     "min": 0.0,
+     "max": 0.0,
+     "range": 0.0
+    },
+    "scipy._lib._array_api": {
+     "runs": [
+      13.8
+     ],
+     "median": 13.8,
+     "min": 13.8,
+     "max": 13.8,
+     "range": 0.0
+    },
+    "scipy._lib._util": {
+     "runs": [
+      3.0
+     ],
+     "median": 3.0,
+     "min": 3.0,
+     "max": 3.0,
+     "range": 0.0
+    },
+    "scipy.linalg": {
+     "runs": [
+      52.8
+     ],
+     "median": 52.8,
+     "min": 52.8,
+     "max": 52.8,
+     "range": 0.0
+    },
+    "scipy.special": {
+     "runs": [
+      0.0,
+      54.1,
+      0.0
+     ],
+     "median": 0.0,
+     "min": 0.0,
+     "max": 54.1,
+     "range": 54.1
+    },
+    "scipy.fft": {
+     "runs": [
+      24.8,
+      0.0
+     ],
+     "median": 12.4,
+     "min": 0.0,
+     "max": 24.8,
+     "range": 24.8
+    },
+    "scipy.sparse": {
+     "runs": [
+      0.0
+     ],
+     "median": 0.0,
+     "min": 0.0,
+     "max": 0.0,
+     "range": 0.0
+    },
+    "scipy.spatial": {
+     "runs": [
+      0.0,
+      0.0,
+      0.0,
+      0.0
+     ],
+     "median": 0.0,
+     "min": 0.0,
+     "max": 0.0,
+     "range": 0.0
+    },
+    "scipy.optimize": {
+     "runs": [
+      0.0,
+      0.0
+     ],
+     "median": 0.0,
+     "min": 0.0,
+     "max": 0.0,
+     "range": 0.0
+    },
+    "scipy.ndimage": {
+     "runs": [
+      31.2
+     ],
+     "median": 31.2,
+     "min": 31.2,
+     "max": 31.2,
+     "range": 0.0
+    },
+    "scipy.integrate": {
+     "runs": [
+      34.0
+     ],
+     "median": 34.0,
+     "min": 34.0,
+     "max": 34.0,
+     "range": 0.0
+    },
+    "scipy.stats": {
+     "runs": [
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0
+     ],
+     "median": 0.0,
+     "min": 0.0,
+     "max": 0.0,
+     "range": 0.0
+    },
+    "scipy.signal": {
+     "runs": [
+      720.7
+     ],
+     "median": 720.7,
+     "min": 720.7,
+     "max": 720.7,
+     "range": 0.0
+    },
+    "scipy.interpolate": {
+     "runs": [
+      0.0
+     ],
+     "median": 0.0,
+     "min": 0.0,
+     "max": 0.0,
+     "range": 0.0
+    },
+    "numpy._core._multiarray_umath": {
+     "runs": [
+      0.0
+     ],
+     "median": 0.0,
+     "min": 0.0,
+     "max": 0.0,
+     "range": 0.0
+    }
+   },
+   "phase_ms": {
+    "_startup_dependency_problems": {
+     "runs": [
+      549.2
+     ],
+     "median": 549.2,
+     "min": 549.2,
+     "max": 549.2,
+     "range": 0.0
+    }
+   }
+  },
+  "frame_gap_nodefer": {
+   "t1_splash_paint_ms": {
+    "runs": [
+     1617.3
+    ],
+    "median": 1617.3,
+    "min": 1617.3,
+    "max": 1617.3,
+    "range": 0.0
+   },
+   "t2_ms": {
+    "runs": [
+     2386.1
+    ],
+    "median": 2386.1,
+    "min": 2386.1,
+    "max": 2386.1,
+    "range": 0.0
+   },
+   "first_frame_ms": {
+    "runs": [
+     4003.3
+    ],
+    "median": 4003.3,
+    "min": 4003.3,
+    "max": 4003.3,
+    "range": 0.0
+   },
+   "deferred_total_ms": null,
+   "worst_frame_gap_ms": {
+    "runs": [
+     88.2
+    ],
+    "median": 88.2,
+    "min": 88.2,
+    "max": 88.2,
+    "range": 0.0
+   },
+   "worst_gap_attribution": [
+    {
+     "gap_ms": 88.2,
+     "gap_at_ms": 88.2,
+     "imports_in_gap": []
+    },
+    {
+     "gap_ms": 18.4,
+     "gap_at_ms": 322.7,
+     "imports_in_gap": []
+    },
+    {
+     "gap_ms": 17.1,
+     "gap_at_ms": 105.3,
+     "imports_in_gap": []
+    }
+   ],
+   "reports": [],
+   "status_bar": [
+    ""
+   ],
+   "exit_codes": [
+    0
+   ],
+   "errors": [],
+   "failure_dialog": [
+    null
+   ],
+   "window_imported_despite_missing": false,
+   "per_slice_ms": {},
+   "phase_ms": {
+    "_startup_dependency_problems": {
+     "runs": [
+      545.2
+     ],
+     "median": 545.2,
+     "min": 545.2,
+     "max": 545.2,
+     "range": 0.0
+    }
+   }
+  }
+ },
+ "samples": [
+  {
+   "case": "frame_gap",
+   "head": "afd449fa",
+   "exit_code": 0,
+   "error": null,
+   "failure_dialog": null,
+   "window_imported_despite_missing": false,
+   "t_first_frame_ms": 4042.4,
+   "t_splash_paint_ms": 1596.8,
+   "t2_ms": 2445.6,
+   "t_first_frame_abs": 3277.556276,
+   "phase_ms": {
+    "_startup_dependency_problems": 549.2
+   },
+   "repaint_before_first_frame_ms": null,
+   "deferred_done_after_first_frame_ms": 980.3,
+   "deferred_timeout": false,
+   "reports": [],
+   "status_bar": "",
+   "frame_gaps": [
+    {
+     "t": 3277.6449144,
+     "gap": 88.6
+    },
+    {
+     "t": 3277.667995,
+     "gap": 23.1
+    },
+    {
+     "t": 3277.6783414,
+     "gap": 10.3
+    },
+    {
+     "t": 3277.6850434,
+     "gap": 6.7
+    },
+    {
+     "t": 3277.7006571,
+     "gap": 15.6
+    },
+    {
+     "t": 3277.7196924,
+     "gap": 19.0
+    },
+    {
+     "t": 3277.7333925,
+     "gap": 13.7
+    },
+    {
+     "t": 3277.7508749,
+     "gap": 17.5
+    },
+    {
+     "t": 3277.7766468,
+     "gap": 25.8
+    },
+    {
+     "t": 3277.7878212,
+     "gap": 11.2
+    },
+    {
+     "t": 3277.7969906,
+     "gap": 9.2
+    },
+    {
+     "t": 3277.8123082,
+     "gap": 15.3
+    },
+    {
+     "t": 3277.8302887,
+     "gap": 18.0
+    },
+    {
+     "t": 3277.8442029,
+     "gap": 13.9
+    },
+    {
+     "t": 3277.8607813,
+     "gap": 16.6
+    },
+    {
+     "t": 3277.8791728,
+     "gap": 18.4
+    },
+    {
+     "t": 3277.8928241,
+     "gap": 13.7
+    },
+    {
+     "t": 3277.9090398,
+     "gap": 16.2
+    },
+    {
+     "t": 3277.924697,
+     "gap": 15.7
+    },
+    {
+     "t": 3277.9414696,
+     "gap": 16.8
+    },
+    {
+     "t": 3277.9568833,
+     "gap": 15.4
+    },
+    {
+     "t": 3277.9726406,
+     "gap": 15.8
+    },
+    {
+     "t": 3277.9891116,
+     "gap": 16.5
+    },
+    {
+     "t": 3278.0051196,
+     "gap": 16.0
+    },
+    {
+     "t": 3278.0205476,
+     "gap": 15.4
+    },
+    {
+     "t": 3278.0369893,
+     "gap": 16.4
+    },
+    {
+     "t": 3278.0536226,
+     "gap": 16.6
+    },
+    {
+     "t": 3278.0690148,
+     "gap": 15.4
+    },
+    {
+     "t": 3278.087111,
+     "gap": 18.1
+    },
+    {
+     "t": 3278.101409,
+     "gap": 14.3
+    },
+    {
+     "t": 3278.1163733,
+     "gap": 15.0
+    },
+    {
+     "t": 3278.1324529,
+     "gap": 16.1
+    },
+    {
+     "t": 3278.1555679,
+     "gap": 23.1
+    },
+    {
+     "t": 3278.1755189,
+     "gap": 20.0
+    },
+    {
+     "t": 3278.1969093,
+     "gap": 21.4
+    },
+    {
+     "t": 3278.1971549,
+     "gap": 0.2
+    },
+    {
+     "t": 3278.2130811,
+     "gap": 15.9
+    },
+    {
+     "t": 3278.2280661,
+     "gap": 15.0
+    },
+    {
+     "t": 3278.2626476,
+     "gap": 34.6
+    },
+    {
+     "t": 3278.2771046,
+     "gap": 14.5
+    },
+    {
+     "t": 3278.2973797,
+     "gap": 20.3
+    },
+    {
+     "t": 3278.3089248,
+     "gap": 11.5
+    },
+    {
+     "t": 3278.3249821,
+     "gap": 16.1
+    },
+    {
+     "t": 3278.3424343,
+     "gap": 17.5
+    },
+    {
+     "t": 3278.3566811,
+     "gap": 14.2
+    },
+    {
+     "t": 3278.4034485,
+     "gap": 46.8
+    },
+    {
+     "t": 3278.4044648,
+     "gap": 1.0
+    },
+    {
+     "t": 3278.420221,
+     "gap": 15.8
+    },
+    {
+     "t": 3278.4367567,
+     "gap": 16.5
+    },
+    {
+     "t": 3278.4529874,
+     "gap": 16.2
+    },
+    {
+     "t": 3278.4691047,
+     "gap": 16.1
+    },
+    {
+     "t": 3278.4841394,
+     "gap": 15.0
+    },
+    {
+     "t": 3278.5008319,
+     "gap": 16.7
+    },
+    {
+     "t": 3278.5170092,
+     "gap": 16.2
+    },
+    {
+     "t": 3278.5329369,
+     "gap": 15.9
+    }
+   ],
+   "import_spans": [
+    {
+     "name": "scipy._external.array_api_compat.numpy.fft",
+     "thread": "mbdsdr-deferred-import",
+     "ms": 0.0,
+     "t": 3277.6447967
+    },
+    {
+     "name": "scipy._external.array_api_compat.numpy.linalg",
+     "thread": "mbdsdr-deferred-import",
+     "ms": 0.0,
+     "t": 3277.6448144
+    },
+    {
+     "name": "scipy._external.array_api_compat.common",
+     "thread": "mbdsdr-deferred-import",
+     "ms": 0.0,
+     "t": 3277.6448201
+    },
+    {
+     "name": "scipy._external.array_api_extra",
+     "thread": "mbdsdr-deferred-import",
+     "ms": 22.7,
+     "t": 3277.6448233
+    },
+    {
+     "name": "scipy._external.packaging_version",
+     "thread": "mbdsdr-deferred-import",
+     "ms": 0.0,
+     "t": 3277.6675558
+    },
+    {
+     "name": "scipy._lib._array_api",
+     "thread": "mbdsdr-deferred-import",
+     "ms": 13.8,
+     "t": 3277.6675635
+    },
+    {
+     "name": "scipy._lib._util",
+     "thread": "mbdsdr-deferred-import",
+     "ms": 3.0,
+     "t": 3277.6814089
+    },
+    {
+     "name": "scipy.linalg",
+     "thread": "mbdsdr-deferred-import",
+     "ms": 52.8,
+     "t": 3277.6886294
+    },
+    {
+     "name": "scipy.special",
+     "thread": "mbdsdr-deferred-import",
+     "ms": 0.0,
+     "t": 3277.7560208
+    },
+    {
+     "name": "scipy.special",
+     "thread": "mbdsdr-deferred-import",
+     "ms": 54.1,
+     "t": 3277.7414746
+    },
+    {
+     "name": "scipy.fft",
+     "thread": "mbdsdr-deferred-import",
+     "ms": 24.8,
+     "t": 3277.7956253
+    },
+    {
+     "name": "scipy.sparse",
+     "thread": "mbdsdr-deferred-import",
+     "ms": 0.0,
+     "t": 3277.8405388
+    },
+    {
+     "name": "scipy.spatial",
+     "thread": "mbdsdr-deferred-import",
+     "ms": 0.0,
+     "t": 3277.8744877
+    },
+    {
+     "name": "scipy.spatial",
+     "thread": "mbdsdr-deferred-import",
+     "ms": 0.0,
+     "t": 3277.8750904
+    },
+    {
+     "name": "scipy.spatial",
+     "thread": "mbdsdr-deferred-import",
+     "ms": 0.0,
+     "t": 3277.8881321
+    },
+    {
+     "name": "scipy.spatial",
+     "thread": "mbdsdr-deferred-import",
+     "ms": 0.0,
+     "t": 3277.8891963
+    },
+    {
+     "name": "scipy.optimize",
+     "thread": "mbdsdr-deferred-import",
+     "ms": 0.0,
+     "t": 3277.9877956
+    },
+    {
+     "name": "scipy.ndimage",
+     "thread": "mbdsdr-deferred-import",
+     "ms": 31.2,
+     "t": 3278.0579228
+    },
+    {
+     "name": "scipy.integrate",
+     "thread": "mbdsdr-deferred-import",
+     "ms": 34.0,
+     "t": 3278.111228
+    },
+    {
+     "name": "scipy.stats",
+     "thread": "mbdsdr-deferred-import",
+     "ms": 0.0,
+     "t": 3278.1456707
+    },
+    {
+     "name": "scipy.stats",
+     "thread": "mbdsdr-deferred-import",
+     "ms": 0.0,
+     "t": 3278.1456933
+    },
+    {
+     "name": "scipy.stats",
+     "thread": "mbdsdr-deferred-import",
+     "ms": 0.0,
+     "t": 3278.1590769
+    },
+    {
+     "name": "scipy.stats",
+     "thread": "mbdsdr-deferred-import",
+     "ms": 0.0,
+     "t": 3278.2181695
+    },
+    {
+     "name": "scipy.stats",
+     "thread": "mbdsdr-deferred-import",
+     "ms": 0.0,
+     "t": 3278.2211381
+    },
+    {
+     "name": "scipy.stats",
+     "thread": "mbdsdr-deferred-import",
+     "ms": 0.0,
+     "t": 3278.2211649
+    },
+    {
+     "name": "scipy.stats",
+     "thread": "mbdsdr-deferred-import",
+     "ms": 0.0,
+     "t": 3278.229031
+    },
+    {
+     "name": "scipy.stats",
+     "thread": "mbdsdr-deferred-import",
+     "ms": 0.0,
+     "t": 3278.2290549
+    },
+    {
+     "name": "scipy.stats",
+     "thread": "mbdsdr-deferred-import",
+     "ms": 0.0,
+     "t": 3278.2703499
+    },
+    {
+     "name": "scipy.stats",
+     "thread": "mbdsdr-deferred-import",
+     "ms": 0.0,
+     "t": 3278.2703787
+    },
+    {
+     "name": "scipy.stats",
+     "thread": "mbdsdr-deferred-import",
+     "ms": 0.0,
+     "t": 3278.271429
+    },
+    {
+     "name": "scipy.stats",
+     "thread": "mbdsdr-deferred-import",
+     "ms": 0.0,
+     "t": 3278.2714522
+    },
+    {
+     "name": "scipy.stats",
+     "thread": "mbdsdr-deferred-import",
+     "ms": 0.0,
+     "t": 3278.2782313
+    },
+    {
+     "name": "scipy.stats",
+     "thread": "mbdsdr-deferred-import",
+     "ms": 0.0,
+     "t": 3278.2782582
+    },
+    {
+     "name": "scipy.stats",
+     "thread": "mbdsdr-deferred-import",
+     "ms": 0.0,
+     "t": 3278.2844165
+    },
+    {
+     "name": "scipy.stats",
+     "thread": "mbdsdr-deferred-import",
+     "ms": 0.0,
+     "t": 3278.2844735
+    },
+    {
+     "name": "scipy.stats",
+     "thread": "mbdsdr-deferred-import",
+     "ms": 0.0,
+     "t": 3278.3006747
+    },
+    {
+     "name": "scipy.stats",
+     "thread": "mbdsdr-deferred-import",
+     "ms": 0.0,
+     "t": 3278.300721
+    },
+    {
+     "name": "scipy.stats",
+     "thread": "mbdsdr-deferred-import",
+     "ms": 0.0,
+     "t": 3278.3015183
+    },
+    {
+     "name": "scipy.stats",
+     "thread": "mbdsdr-deferred-import",
+     "ms": 0.0,
+     "t": 3278.3281104
+    },
+    {
+     "name": "scipy.stats",
+     "thread": "mbdsdr-deferred-import",
+     "ms": 0.0,
+     "t": 3278.3281375
+    },
+    {
+     "name": "scipy.stats",
+     "thread": "mbdsdr-deferred-import",
+     "ms": 0.0,
+     "t": 3278.3305959
+    },
+    {
+     "name": "scipy.stats",
+     "thread": "mbdsdr-deferred-import",
+     "ms": 0.0,
+     "t": 3278.3306531
+    },
+    {
+     "name": "scipy.stats",
+     "thread": "mbdsdr-deferred-import",
+     "ms": 0.0,
+     "t": 3278.3355936
+    },
+    {
+     "name": "scipy.stats",
+     "thread": "mbdsdr-deferred-import",
+     "ms": 0.0,
+     "t": 3278.3356242
+    },
+    {
+     "name": "scipy.stats",
+     "thread": "mbdsdr-deferred-import",
+     "ms": 0.0,
+     "t": 3278.3394776
+    },
+    {
+     "name": "scipy.stats",
+     "thread": "mbdsdr-deferred-import",
+     "ms": 0.0,
+     "t": 3278.3395087
+    },
+    {
+     "name": "scipy.stats",
+     "thread": "mbdsdr-deferred-import",
+     "ms": 0.0,
+     "t": 3278.3572794
+    },
+    {
+     "name": "scipy.stats",
+     "thread": "mbdsdr-deferred-import",
+     "ms": 0.0,
+     "t": 3278.357305
+    },
+    {
+     "name": "scipy.signal",
+     "thread": "mbdsdr-deferred-import",
+     "ms": 720.7,
+     "t": 3277.6844364
+    },
+    {
+     "name": "scipy.special",
+     "thread": "mbdsdr-deferred-import",
+     "ms": 0.0,
+     "t": 3278.4051429
+    },
+    {
+     "name": "scipy.fft",
+     "thread": "mbdsdr-deferred-import",
+     "ms": 0.0,
+     "t": 3278.4051485
+    },
+    {
+     "name": "scipy.interpolate",
+     "thread": "mbdsdr-deferred-import",
+     "ms": 0.0,
+     "t": 3278.4051517
+    },
+    {
+     "name": "scipy.optimize",
+     "thread": "mbdsdr-deferred-import",
+     "ms": 0.0,
+     "t": 3278.4051548
+    },
+    {
+     "name": "numpy._core._multiarray_umath",
+     "thread": "mbdsdr-deferred-import",
+     "ms": 0.0,
+     "t": 3278.4051572
+    }
+   ],
+   "numpy_imported_before_first_frame": true,
+   "load_before_python_pct": 0.0,
+   "run": 0
+  },
+  {
+   "case": "frame_gap_nodefer",
+   "head": "afd449fa",
+   "exit_code": 0,
+   "error": null,
+   "failure_dialog": null,
+   "window_imported_despite_missing": false,
+   "t_first_frame_ms": 4003.3,
+   "t_splash_paint_ms": 1617.3,
+   "t2_ms": 2386.1,
+   "t_first_frame_abs": 3285.1183084,
+   "phase_ms": {
+    "_startup_dependency_problems": 545.2
+   },
+   "repaint_before_first_frame_ms": null,
+   "deferred_done_after_first_frame_ms": null,
+   "deferred_timeout": false,
+   "reports": [],
+   "status_bar": "",
+   "frame_gaps": [
+    {
+     "t": 3285.2064869,
+     "gap": 88.2
+    },
+    {
+     "t": 3285.2235691,
+     "gap": 17.1
+    },
+    {
+     "t": 3285.2329912,
+     "gap": 9.4
+    },
+    {
+     "t": 3285.2466072,
+     "gap": 13.6
+    },
+    {
+     "t": 3285.2630028,
+     "gap": 16.4
+    },
+    {
+     "t": 3285.2787569,
+     "gap": 15.8
+    },
+    {
+     "t": 3285.2940846,
+     "gap": 15.3
+    },
+    {
+     "t": 3285.3102152,
+     "gap": 16.1
+    },
+    {
+     "t": 3285.3262098,
+     "gap": 16.0
+    },
+    {
+     "t": 3285.3422004,
+     "gap": 16.0
+    },
+    {
+     "t": 3285.3590805,
+     "gap": 16.9
+    },
+    {
+     "t": 3285.3741401,
+     "gap": 15.1
+    },
+    {
+     "t": 3285.3902632,
+     "gap": 16.1
+    },
+    {
+     "t": 3285.4071793,
+     "gap": 16.9
+    },
+    {
+     "t": 3285.422591,
+     "gap": 15.4
+    },
+    {
+     "t": 3285.4410067,
+     "gap": 18.4
+    },
+    {
+     "t": 3285.4547083,
+     "gap": 13.7
+    },
+    {
+     "t": 3285.4706087,
+     "gap": 15.9
+    },
+    {
+     "t": 3285.4861949,
+     "gap": 15.6
+    },
+    {
+     "t": 3285.5022709,
+     "gap": 16.1
+    },
+    {
+     "t": 3285.5181068,
+     "gap": 15.8
+    },
+    {
+     "t": 3285.5341742,
+     "gap": 16.1
+    }
+   ],
+   "import_spans": [],
+   "numpy_imported_before_first_frame": true,
+   "load_before_python_pct": 0.0,
+   "run": 0
+  }
+ ]
+}
