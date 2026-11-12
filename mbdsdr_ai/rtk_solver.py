@@ -21,7 +21,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 
-from .rtklib_adapter import (
+from .geodesy import (
     CLIGHT, CoordinateConverter, R2D, PI,
 )
 

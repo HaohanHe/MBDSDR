@@ -31,27 +31,22 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import numpy as np
 
+# 物理/几何常数与 CoordinateConverter 定义在叶子模块 geodesy（本处再导出）：
+# rtk_solver 需要它们，若留在这里，就会被 rtk_solver 反向依赖成
+# rtklib_adapter <-> rtk_solver 两模块环。
+from .geodesy import (
+    CLIGHT, D2R, FE_WGS84, OMGE, PI, R2D, RE_WGS84, CoordinateConverter,
+)
+# 环已断（本模块 -> rtk_solver -> geodesy，无回路），原先函数体内的延迟
+# import 提到模块级：不再把一条真实依赖藏在检测器看不见的地方。
+from .rtk_solver import RTKFloatSolver, RTKInput, RTKObs
+
 # ============================================================
 # 物理与几何常数 —— 逐字抄自 RTKLIB 源码，禁止改动数值
+#   数值定义在 geodesy.py（保持同一对象），此处仅说明出处：
+#   rtklib.h:56 PI / :57 D2R / :58 R2D / :59 CLIGHT / :64 OMGE
+#   rtklib.h:66 RE_WGS84 / :67 FE_WGS84
 # ============================================================
-
-# rtklib.h:56 #define PI 3.1415926535897932  /* pi */
-PI = 3.1415926535897932
-# rtklib.h:57 #define D2R (PI/180.0)
-D2R = PI / 180.0
-# rtklib.h:58 #define R2D (180.0/PI)
-R2D = 180.0 / PI
-
-# rtklib.h:59 #define CLIGHT 299792458.0  /* speed of light (m/s) */
-CLIGHT = 299792458.0
-
-# rtklib.h:64 #define OMGE 7.2921151467E-5  /* earth angular velocity (IS-GPS) (rad/s) */
-OMGE = 7.2921151467e-5
-
-# rtklib.h:66 #define RE_WGS84 6378137.0  /* earth semimajor axis (WGS84) (m) */
-RE_WGS84 = 6378137.0
-# rtklib.h:67 #define FE_WGS84 (1.0/298.257223563)  /* earth flattening (WGS84) */
-FE_WGS84 = 1.0 / 298.257223563
 
 #define MU_GPS 3.9860050E14  /* gravitational constant ref[1] */
 MU_GPS = 3.9860050e14
@@ -223,106 +218,10 @@ class TimeSystem:
 
 
 # ============================================================
-# CoordinateConverter —— 
+# CoordinateConverter —— 定义在叶子模块 geodesy（本处再导出）。
+# 原类在本文件内时，rtk_solver 反向 import 它 + 本模块延迟 import
+# rtk_solver，构成两模块环；类与常数一起下沉后环断开。
 # ============================================================
-class CoordinateConverter:
-    """ECEF(地心地固直角) <-> LLH(经纬高) <-> ENU(站心东北天)。WGS84 椭球。"""
-
- # ----  ecef2pos() ----
-    @staticmethod
-    def ecef_to_llh(x: float, y: float, z: float) -> Tuple[float, float, float]:
-        """ECEF(m) -> (lat[rad], lon[rad], h[m])。 ecef2pos()。
-
-        WGS84 逆解用 Bowring 迭代（），1e-4 m 内收敛。
-        """
-        a = RE_WGS84 # rtklib.h:66
-        f = FE_WGS84 # rtklib.h:67
-        e2 = f * (2.0 - f) #   e2=FE_WGS84*(2-FE_WGS84)
-        r2 = x * x + y * y
-        rz = z # 原始 z（ 循环内恒用 r[2]）
-        z = rz
-        zk = 0.0
-        v = a
- #   Bowring 迭代（注意 z 每轮重置为 r[2]+...，非累加）
-        while abs(z - zk) >= 1e-4:
-            zk = z
-            sinp = z / math.sqrt(r2 + z * z)
-            v = a / math.sqrt(1.0 - e2 * sinp * sinp)
-            z = rz + v * e2 * sinp
- # 
-        lat = math.atan(z / math.sqrt(r2)) if r2 > 1e-12 else (PI / 2.0 if z > 0 else -PI / 2.0)
-        lon = math.atan2(y, x) if r2 > 1e-12 else 0.0
-        h = math.sqrt(r2 + z * z) - v
-        return lat, lon, h
-
- # ----  pos2ecef() ----
-    @staticmethod
-    def llh_to_ecef(lat: float, lon: float, h: float) -> Tuple[float, float, float]:
-        """(lat[rad], lon[rad], h[m]) -> ECEF(m)。 pos2ecef()。"""
-        a = RE_WGS84
-        f = FE_WGS84
-        e2 = f * (2.0 - f)
-        sinp = math.sin(lat); cosp = math.cos(lat)
-        sinl = math.sin(lon); cosl = math.cos(lon)
-        v = a / math.sqrt(1.0 - e2 * sinp * sinp) # 
-        x = (v + h) * cosp * cosl # 
-        y = (v + h) * cosp * sinl # 
-        z = (v * (1.0 - e2) + h) * sinp # 
-        return x, y, z
-
- # ----  xyz2enu() + 1686 ecef2enu() ----
-    @staticmethod
-    def ecef_to_enu(lat: float, lon: float, dx: float, dy: float, dz: float
-                    ) -> Tuple[float, float, float]:
-        """ECEF 向量 -> ENU 向量。 ecef2enu()（经 xyz2enu 旋转阵）。"""
-        sinp = math.sin(lat); cosp = math.cos(lat)
-        sinl = math.sin(lon); cosl = math.cos(lon)
- #   E 矩阵（行主序 3x3）
-        e = -sinl * dx + cosl * dy
-        n = -sinp * cosl * dx - sinp * sinl * dy + cosp * dz
-        u = cosp * cosl * dx + cosp * sinl * dy + sinp * dz
-        return e, n, u
-
- # ----  enu2ecef() ----
-    @staticmethod
-    def enu_to_ecef(lat: float, lon: float, e: float, n: float, u: float
-                    ) -> Tuple[float, float, float]:
-        """ENU 向量 -> ECEF 向量（旋转阵转置）。 enu2ecef()。"""
-        sinp = math.sin(lat); cosp = math.cos(lat)
-        sinl = math.sin(lon); cosl = math.cos(lon)
-        dx = -sinl * e - sinp * cosl * n + cosp * cosl * u
-        dy = cosl * e - sinp * sinl * n + cosp * sinl * u
-        dz = cosp * n + sinp * u
-        return dx, dy, dz
-
- # ----  geodist() ----
-    @staticmethod
-    def geodist(rs: np.ndarray, rr: np.ndarray) -> Tuple[float, np.ndarray]:
-        """几何距离（含 Sagnac 改正）+ 接收机到卫星单位向量。
-
-         geodist(): r + OMGE*(rs[0]*rr[1]-rs[1]*rr[0])/CLIGHT。
-        """
-        d = rs - rr
-        r = float(np.linalg.norm(d))
-        e = d / r
- #   Sagnac
-        r_sagnac = r + OMGE * (rs[0] * rr[1] - rs[1] * rr[0]) / CLIGHT
-        return r_sagnac, e
-
- # ----  satazel() ----
-    @classmethod
-    def satazel(cls, lat: float, lon: float, e: np.ndarray) -> Tuple[float, float]:
-        """接收机到卫星单位向量 e(ECEF) -> (方位角 az[rad], 仰角 el[rad])。
-
-         satazel(): az=atan2(enu_e, enu_n), el=asin(enu_u)。
-        """
-        enu = np.array(cls.ecef_to_enu(lat, lon, float(e[0]), float(e[1]), float(e[2])))
-        horiz = float(np.dot(enu[:2], enu[:2]))
-        az = 0.0 if horiz < 1e-12 else math.atan2(enu[0], enu[1])
-        if az < 0.0:
-            az += 2.0 * PI
-        el = math.asin(max(-1.0, min(1.0, enu[2])))
-        return az, el
 
 
 # ============================================================
@@ -1147,7 +1046,6 @@ class GNSSPipeline:
 
         if has_base:
             try:
-                from .rtk_solver import RTKFloatSolver, RTKInput, RTKObs
  # 对齐基站/流动站观测（按 prn）
                 base_flat: List[RTKObs] = []
                 for sysname, olist in self.base_obs_by_sys.items():
