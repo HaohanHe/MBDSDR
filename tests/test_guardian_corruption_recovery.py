@@ -63,6 +63,9 @@ def _assert_corrupt_evidence_kept(factory, tmp_path) -> None:
     assert (backups[0].with_name(backups[0].name + ".reason.txt")).exists()
     saved = json.loads(path.read_text(encoding="utf-8"))
     assert [s["label"] for s in saved] == ["损坏之后"]
+    # 之后加载继续可用：重新打开同一目录能读回刚写入的快照索引。
+    reloaded = store.__class__(str(store_dir))
+    assert [s.label for s in reloaded.snapshots.values()] == ["损坏之后"]
 
 
 # ---------------------------------------------------------------------------
@@ -121,7 +124,7 @@ def test_backup_failure_blocks_snapshot_index_writes(tmp_path, monkeypatch):
     store_dir.mkdir()
     path = store_dir / "snapshots.json"
     path.write_bytes(_CORRUPT_BYTES)
-    monkeypatch.setattr(guardian_module, "_backup_corrupt_snapshots",
+    monkeypatch.setattr(guardian_module, "backup_corrupt_snapshots",
                         lambda _p: None)
 
     store = Guardian(store_path=str(store_dir))
@@ -160,7 +163,7 @@ def test_status_text_surfaces_last_error(tmp_path, monkeypatch):
     store_dir = tmp_path / "guardian"
     store_dir.mkdir()
     (store_dir / "snapshots.json").write_bytes(_CORRUPT_BYTES)
-    monkeypatch.setattr(guardian_module, "_backup_corrupt_snapshots",
+    monkeypatch.setattr(guardian_module, "backup_corrupt_snapshots",
                         lambda _p: None)
     store = Guardian(store_path=str(store_dir))
 

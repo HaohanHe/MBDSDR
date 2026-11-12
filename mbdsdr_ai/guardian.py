@@ -29,8 +29,12 @@ from .corrupt_evidence import write_reason
 logger = logging.getLogger(__name__)
 
 
-def _backup_corrupt_snapshots(path: str) -> Optional[str]:
-    """把损坏的快照索引改名成 ``*.corrupt-时间戳``，返回备份路径（失败 None）。"""
+def backup_corrupt_snapshots(path: str) -> Optional[str]:
+    """把损坏的快照索引改名成 ``*.corrupt-时间戳``，返回备份路径（失败 None）。
+
+    这是损坏留证的**公共接缝**：测试模拟「备份失败」时替换本函数返回
+    ``None``，不再改模块私有名。
+    """
     backup = f"{path}.corrupt-{time.strftime('%Y%m%d-%H%M%S')}"
     try:
         os.replace(path, backup)
@@ -164,7 +168,7 @@ class Guardian:
 
     def _mark_corrupt(self, reason: str) -> None:
         """损坏：先备份原件再留人话错误；备份失败则禁止后续写盘。"""
-        self.corrupt_backup = _backup_corrupt_snapshots(self.snapshots_file)
+        self.corrupt_backup = backup_corrupt_snapshots(self.snapshots_file)
         self._save_blocked = self.corrupt_backup is None
         message = (
             f"守护者快照索引损坏（{reason}）：{self.snapshots_file}；"
