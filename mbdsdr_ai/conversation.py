@@ -12,9 +12,56 @@ import time
 from dataclasses import dataclass, asdict, field
 from typing import List, Dict, Any, Optional
 
+from .corrupt_evidence import REASON_SUFFIX, write_reason
+
 log = logging.getLogger(__name__)
 
 CONVERSATION_DIR = os.path.expanduser("~/.mbdsdr/conversations")
+
+
+def _same_content_backup(path: str) -> Optional[str]:
+    """同目录下是否已有一份与当前文件字节相同的 ``*.corrupt-*`` 备份。
+
+    会话列表是高频读路径；同一个坏文件反复被读到时，每次都复制一份会堆出
+    ``-1/-2/...`` 无数副本。同一份内容只留一份证据。
+    """
+    directory = os.path.dirname(os.path.abspath(path))
+    prefix = os.path.basename(path) + ".corrupt-"
+    try:
+        names = sorted(
+            (n for n in os.listdir(directory)
+             if n.startswith(prefix) and not n.endswith(REASON_SUFFIX)),
+            reverse=True)
+        if not names:
+            return None
+        candidate = os.path.join(directory, names[0])
+        if os.path.getsize(candidate) != os.path.getsize(path):
+            return None
+        with open(candidate, "rb") as a, open(path, "rb") as b:
+            return candidate if a.read() == b.read() else None
+    except OSError:
+        return None
+
+
+def _backup_corrupt(path: str) -> Optional[str]:
+    """把损坏会话改名为 ``*.corrupt-<时间戳>``，返回备份路径（失败 None）。
+
+    改名而不是复制：原件字节完整留在备份里，原路径不再被列表扫到，也不会被
+    后续保存覆盖。已有同内容备份时直接复用它，不堆第二份。
+    """
+    dst = _same_content_backup(path)
+    if dst is None:
+        stamp = time.strftime("%Y%m%d-%H%M%S")
+        dst = f"{path}.corrupt-{stamp}"
+        n = 0
+        while os.path.exists(dst):
+            n += 1
+            dst = f"{path}.corrupt-{stamp}-{n}"
+    try:
+        os.replace(path, dst)
+    except OSError:
+        return None
+    return dst
 
 
 @dataclass
@@ -58,25 +105,26 @@ class ConversationStore:
         self.load_errors.append({"path": path, "error": reason})
         log.warning("会话读取失败（已记入 load_errors）：%s | %s", path, reason)
 
-    def _quarantine_corrupt(self, path: str, exc: Exception) -> None:
-        """把读不出来的原件改名保留，避免随后的整文件覆写抹掉用户数据。"""
-        backup = f"{path}.corrupt-{time.strftime('%Y%m%d-%H%M%S')}"
+    def _quarantine_corrupt(self, path: str, exc: Exception) -> bool:
+        """把读不出来的原件改名保留，并写一行理由；返回是否备份成功。
+
+        备份失败返回 False：调用方必须据此拒绝写回，宁可这次保存失败，
+        也不能拿默认结构盖掉唯一证据。
+        """
+        backup = _backup_corrupt(path)
         reason = f"{type(exc).__name__}: {exc}"
-        try:
-            os.replace(path, backup)
-        except OSError as backup_exc:
-            backup_error = f"{type(backup_exc).__name__}: {backup_exc}"
+        if backup is None:
             self.save_warnings.append({
                 "path": path, "error": reason, "backup": "",
-                "backup_error": backup_error,
             })
-            log.warning("会话文件损坏且备份失败：%s | %s | 备份失败：%s",
-                        path, reason, backup_error)
-            return
+            log.error("会话文件损坏且备份失败，本次拒绝写回：%s | %s", path, reason)
+            return False
+        write_reason(backup, f"会话文件读取失败（{reason}）：{path}", log)
         self.save_warnings.append({
             "path": path, "error": reason, "backup": backup,
         })
         log.warning("会话文件损坏/不可读，已备份为 %s | %s", backup, reason)
+        return True
 
     def get_path(self, conversation_id: str) -> str:
         """返回某会话对应的文件路径。"""
@@ -112,9 +160,18 @@ class ConversationStore:
                     created_at = old.get("created_at", now)
             except FileNotFoundError:
                 pass  # 竞态：判存在后刚被删，等价于首次保存
-            except (OSError, ValueError) as exc:
-                # 真坏：不吞。原件先备份，创建时间重置这件事有据可查。
-                self._quarantine_corrupt(path, exc)
+            except OSError as exc:
+                # 读不了 ≠ 损坏：不备份，但也绝不写回。否则一次临时读失败
+                # （占用/权限/是目录）就会把可能仍可恢复的文件整份覆盖。
+                raise OSError(
+                    f"会话文件读取失败（{type(exc).__name__}: {exc}）：{path}；"
+                    "本次不写入，避免覆盖可能仍可恢复的文件") from exc
+            except ValueError as exc:
+                # 真坏：先备份原件并留理由，备份失败则拒绝写回。
+                if not self._quarantine_corrupt(path, exc):
+                    raise OSError(
+                        f"会话文件损坏且无法备份（{type(exc).__name__}: {exc}）："
+                        f"{path}；本次不写入，避免覆盖唯一证据") from exc
 
         if not title:
             title = self._title_from_messages(messages)
@@ -154,10 +211,18 @@ class ConversationStore:
                 data = json.load(f)
         except FileNotFoundError:
             return None  # 竞态：判存在后刚被删，与「本来就没有」同义
-        except (OSError, ValueError) as exc:
+        except OSError as exc:
+            # 读不了 ≠ 损坏：只记可见错误，不改名、不备份。
+            self._record_load_error(path, exc)
+            return None
+        except ValueError as exc:
+            # 真损坏：首次读到就落备份 + 理由，原件从列表路径移走。
+            self._quarantine_corrupt(path, exc)
             self._record_load_error(path, exc)
             return None
         if not isinstance(data, dict):
+            self._quarantine_corrupt(
+                path, TypeError(f"顶层不是 JSON 对象，而是 {type(data).__name__}"))
             self._record_load_error(
                 path, TypeError(f"顶层不是 JSON 对象，而是 {type(data).__name__}"))
             return None
