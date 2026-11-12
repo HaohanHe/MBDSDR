@@ -15,9 +15,10 @@
 """
 from __future__ import annotations
 
+import copy
 import json
 import os
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Sequence
 
 _DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
 
@@ -56,21 +57,109 @@ def load_sat_profile(name: str) -> Dict[str, Any]:
 
 
 def list_frame_layouts() -> List[str]:
-    """帧布局库里的全部布局名。"""
+    """帧布局库里的全部布局名（含派生变体，按表内顶层键计）。"""
     return _strip_meta(_load_json("frame_layouts.json"))
 
 
-def load_frame_layout(name: str) -> Dict[str, Any]:
-    """按名取帧布局；未知布局名如实报错并列出可用名单。"""
-    table = _load_json("frame_layouts.json")
+def _check_duplicate_fields(fields: Sequence[Dict[str, Any]],
+                            layout_name: str) -> None:
+    """同一份 fields 列表内字段重名 → 直接报错（不静默后者覆盖前者）。"""
+    names = [str(spec.get("name")) for spec in fields]
+    dup = sorted({n for n in names if names.count(n) > 1})
+    if dup:
+        raise ValueError(
+            f"帧布局 {layout_name} 的 fields 内字段重名: {', '.join(dup)}"
+            "（同一列表内不允许重名，避免静默覆盖）")
+
+
+def _merge_fields(parent_fields: Sequence[Dict[str, Any]],
+                  child_fields: Sequence[Dict[str, Any]],
+                  layout_name: str) -> List[Dict[str, Any]]:
+    """父字段为基底合并子字段：同名整体覆盖（子胜、位置不变），新名追加。
+
+    这条优先级是派生机制的唯一定义，改动必须同步改
+    ``mbdsdr_ai/tests/test_frame_layout_variants.py`` 的钉扎用例。
+    """
+    _check_duplicate_fields(child_fields, layout_name)
+    merged = [copy.deepcopy(spec) for spec in parent_fields]
+    index = {str(spec.get("name")): i for i, spec in enumerate(merged)}
+    for spec in child_fields:
+        name = str(spec.get("name"))
+        if name in index:  # 冲突：子胜，保留父布局里的位置
+            merged[index[name]] = copy.deepcopy(spec)
+        else:              # 子布局独有：追加到末尾
+            index[name] = len(merged)
+            merged.append(copy.deepcopy(spec))
+    return merged
+
+
+def _require_own_source(entry: Dict[str, Any], layout_name: str) -> None:
+    """派生布局必须自带公开出处（URL + 抓取时间），无出处不入库。"""
+    src = entry.get("source")
+    if not isinstance(src, dict):
+        raise ValueError(
+            f"派生帧布局 {layout_name} 缺 source（须给公开文档/规范 URL + "
+            "retrieved_at 抓取时间；无出处不入库）")
+    missing = [k for k in ("url", "retrieved_at")
+               if not str(src.get(k, "")).strip()]
+    if missing:
+        raise ValueError(
+            f"派生帧布局 {layout_name} 的 source 缺 {'/'.join(missing)}"
+            "（须给公开文档/规范 URL + 抓取时间；无出处不入库）")
+
+
+def _resolve_layout(table: Dict[str, Any], name: str,
+                    _stack: Sequence[str] = ()) -> Dict[str, Any]:
+    """按名解析布局；``derived_from`` 声明的派生布局在此展开为完整字段表。
+
+    派生优先级（写死）：
+      1. 递归解析父布局；``derived_from`` 成环 → ValueError；
+      2. fields：父字段按原序为基底，子字段同名整体覆盖（子胜、位置不变），
+         子字段新名追加到末尾；同一 fields 列表内重名 → ValueError；
+      3. 子条目的 sync/crc/honesty/source 覆盖父条目；fields 只按名合并；
+      4. 派生布局必须自带 source.url + source.retrieved_at，缺失拒载。
+    无 ``derived_from`` 的条目原样返回（与 v1 行为逐字一致，只多
+    ``_layout_name``），旧 JSON 不受影响。
+    """
+    table_names = _strip_meta(table)
     key = str(name).strip()
     if key not in table or key.startswith("_"):
         raise ValueError(
-            f"未知帧布局: {name}（可用: {', '.join(_strip_meta(table))}；"
+            f"未知帧布局: {name}（可用: {', '.join(table_names)}；"
             "新布局请往 mbdsdr_ai/data/frame_layouts.json 增条目）")
-    layout = dict(table[key])
+    if key in _stack:
+        raise ValueError(
+            "帧布局派生成环: " + " -> ".join(list(_stack) + [key]))
+    entry = table[key]
+    if not isinstance(entry, dict):
+        raise ValueError(f"帧布局 {key} 条目必须是对象")
+    _check_duplicate_fields(entry.get("fields", []) or [], key)
+    parent_name = str(entry.get("derived_from") or "").strip()
+    if not parent_name:
+        layout = copy.deepcopy(entry)
+        layout["_layout_name"] = key
+        return layout
+    _require_own_source(entry, key)
+    parent = _resolve_layout(table, parent_name, tuple(_stack) + (key,))
+    layout = copy.deepcopy(parent)
+    layout["fields"] = _merge_fields(parent.get("fields", []),
+                                     entry.get("fields", []) or [], key)
+    for k, v in entry.items():
+        if k in ("fields", "derived_from"):
+            continue
+        layout[k] = copy.deepcopy(v)
     layout["_layout_name"] = key
+    layout["_derived_from"] = parent_name
     return layout
+
+
+def load_frame_layout(name: str) -> Dict[str, Any]:
+    """按名取帧布局；未知布局名如实报错并列出可用名单。
+
+    布局名可以是派生变体（表内带 ``derived_from`` 的顶层条目），
+    解析在 :func:`_resolve_layout` 内完成，调用方无需传额外参数。
+    """
+    return _resolve_layout(_load_json("frame_layouts.json"), name)
 
 
 def profile_to_rx_chain_args(profile: Dict[str, Any]) -> Dict[str, Any]:
