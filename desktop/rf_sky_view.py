@@ -1557,7 +1557,9 @@ def _load_user_tle_catalog() -> List[Dict[str, object]]:
                 "tle_source": f"用户 TLE 文件（~/.mbdsdr/tle/{fn}）",
                 "tle_epoch": _tle_epoch_iso(line1),
             })
-        except Exception:
+        except Exception as e:
+            # 单条解析失败就跳过会让「加载了 3 条」与「加载了 30 条但坏了 27 条」不可区分。
+            _log.warning("跳过无法解析的 TLE：%s: %s", type(e).__name__, e)
             continue
     return catalog
 
