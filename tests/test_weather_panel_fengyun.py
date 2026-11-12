@@ -56,3 +56,33 @@ def test_fy4_raw_iq_goes_through_real_ccsds_chain(tmp_path):
     assert result["meta"]["raw_iq_supported"] is True
     assert result["meta"].get("attempts"), "两轮尝试的诊断要留下，便于排查"
     assert not png.exists(), "失败时不得留下半截图"
+
+
+def test_status_line_frequency_uses_readouts():
+    """A01：状态行频率读数走 readouts.format_frequency_hz，不就地拼「MHz」。
+
+    输入框是用户可改的 MHz 字符串：是数值就按 1 Hz 口径（6 位小数 MHz）
+    格式化，不降精度（145.5125 → 145.512500 MHz）；不是数值原样保留，
+    不被静默吞掉，整行结构（频率 | 符号率 | 调制 | 频段 | 帧数）不变。
+    """
+    import readouts
+    from desktop.weather_panel import WeatherPanel
+
+    panel = WeatherPanel()
+    try:
+        panel.sat_combo.setCurrentText("GOES-16 HRIT (75.2°W)")
+        panel.freq_edit.setText("145.5125")
+        panel._update_status()
+
+        expected = readouts.format_frequency_hz(145.5125e6)
+        assert expected == "145.512500 MHz"
+        text = panel.status_label.text()
+        assert text.startswith(expected + " | "), text
+        assert text.count("MHz") == 1, "频率单位只由 readouts 产生一次"
+        assert "ksps" in text and "帧/段" in text, "整行信息结构不变"
+
+        panel.freq_edit.setText("不是数字")
+        panel._update_status()
+        assert panel.status_label.text().startswith("不是数字 MHz | ")
+    finally:
+        panel.close()

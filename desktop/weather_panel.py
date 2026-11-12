@@ -64,6 +64,7 @@ from PySide6.QtWidgets import (  # noqa: E402
 )
 
 from themes import get_theme, DEFAULT_THEME  # noqa: E402
+from readouts import format_frequency_hz  # noqa: E402
 
 
 # ----------------------------------------------------------------------
@@ -921,7 +922,14 @@ class WeatherPanel(QWidget):
         sat = self._current_sat()
         if not sat:
             self.status_label.setText(extra or "就绪"); return
-        line = (f"{self.freq_edit.text()} MHz | "
+        # 频率读数不再就地拼「{输入框} MHz」：输入是 MHz 字符串，是数值才按
+        # 1 Hz 口径格式化（6 位小数 MHz）；不是数值就原样保留，不吞掉用户输入。
+        raw_freq = self.freq_edit.text()
+        try:
+            freq_text = format_frequency_hz(float(raw_freq) * 1e6)
+        except ValueError:
+            freq_text = f"{raw_freq} MHz"
+        line = (f"{freq_text} | "
                 f"{self.sym_edit.text()} ksps | {sat.get('mod','?')} | "
                 f"{sat.get('band','')} | 帧/段: {self._frame_count}")
         if extra:
