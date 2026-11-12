@@ -39,7 +39,17 @@ _CLOCK_ATTRS = {
     ("datetime", "now"),
     ("datetime", "utcnow"),
     ("datetime", "today"),
+    # PySide6 的静态取时刻。按 (类名, 方法名) 精确匹配：``QDate.fromString`` /
+    # ``QTime.fromString`` / ``QDateTime.fromSecsSinceEpoch`` 这类解析、换算
+    # 调用不取当前时刻，不在表内，不会误伤。
+    ("QDateTime", "currentDateTime"),
+    ("QDateTime", "currentDateTimeUtc"),
+    ("QDate", "currentDate"),
+    ("QTime", "currentTime"),
 }
+
+#: Qt 取时刻的类名：from-import 后是普通 Name（``QDateTime.currentDateTime()``）。
+_QT_CLOCK_CLASSES = ("QDateTime", "QDate", "QTime")
 
 
 def _module_files() -> list[str]:
@@ -73,7 +83,7 @@ def _is_clock_call(node: ast.Call, mods: set[str], names: set[str]) -> bool:
     f = node.func
     if isinstance(f, ast.Attribute) and isinstance(f.value, ast.Name):
         base = f.value.id
-        if base in mods or base in ("time", "datetime", "date"):
+        if base in mods or base in ("time", "datetime", "date") + _QT_CLOCK_CLASSES:
             return (base, f.attr) in _CLOCK_ATTRS or (
                 base == "date" and f.attr == "today")
         # datetime.datetime.now() / datetime.date.today()
@@ -178,6 +188,37 @@ def test_guard_detects_bare_clock_and_respects_marker():
         "h(time.time())  # timeguard: allow\n"
     )
     assert violations_in_source("ok.py", allowed_src) == []
+
+
+def test_qt_clock_attrs_are_covered():
+    """Qt 的静态取时刻不能被漏掉（2026-11-12 补：此前三条全漏报）。
+
+    按 (类名, 方法名) 精确匹配——``QDate.fromString`` / ``QTime.fromString``
+    这类解析调用不取当前时刻，必须保持不报，否则守卫就成了「带 Qt 就报」的噪声。
+    """
+    pinned = {
+        ("QDateTime", "currentDateTime"),
+        ("QDateTime", "currentDateTimeUtc"),
+        ("QDate", "currentDate"),
+        ("QTime", "currentTime"),
+    }
+    assert pinned <= _CLOCK_ATTRS
+
+    src = (
+        "from PySide6.QtCore import QDate, QDateTime, QTime\n"
+        "f(QDateTime.currentDateTime())\n"
+        "f(QDateTime.currentDateTimeUtc())\n"
+        "f(QDate.currentDate())\n"
+        "f(QTime.currentTime())\n"
+    )
+    assert [n for n, _ in violations_in_source("qt.py", src)] == [2, 3, 4, 5]
+
+    parse_src = (
+        "from PySide6.QtCore import QDate, QTime\n"
+        "f(QDate.fromString('2026-11-12', 'yyyy-MM-dd'))\n"
+        "f(QTime.fromString('12:00', 'HH:mm'))\n"
+    )
+    assert violations_in_source("qt_parse.py", parse_src) == []
 
 
 def test_no_guard_marker_abuse():
