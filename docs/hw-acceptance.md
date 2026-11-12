@@ -394,7 +394,7 @@ Welch（65536 点/Hann，不重叠）→ 18.5–19.5 kHz 取峰 + 抛物线插�
    正好落在 18.5–19.5 kHz 搜索带里且幅度压过真导频。再叠加单段 131072 点 FFT、
    无平均、无插值 → 幅度也被折叠底压低（旧法 7.3–8.9 dB vs 新法同台 12.0–38.2 dB）。
 
-已修：`ring3._pilot` 改为 `resample_poly` 抗混叠 + Welch 平均 + 抛物线插值 —— `a19f506e` — `scripts/hw_acceptance/ring3_demod_audio.py:48` — `resample_poly`。
+已修：`ring3._pilot` 改为 `resample_poly` 抗混叠 + Welch 平均 + 抛物线插值 —— `a19f506e` — `scripts/hw_acceptance/ring3_demod_audio.py:57` — `resample_poly`。
 同时把采集改成连读约 6 s IQ（读线程修复后实得 5.7–5.9 s，约 17–18 段）而不是单段 131072 点。真机 98.0 MHz 复跑 →
 `PASS`，导频 **19003.0 Hz / 37.7 dB**；91.24375 MHz 复测 12.05–13.46 dB
 仍过 10 dB 门限。
@@ -450,7 +450,7 @@ Welch（65536 点/Hann，不重叠）→ 18.5–19.5 kHz 取峰 + 抛物线插�
 3. **同步块读另有 1.3–3% 传输间死区**：262144 时读耗时 112.9 ms ≈ 109.2 ms
    信号 + 3.7 ms 固定开销；异步读（多缓冲在途）能补掉这部分。
 
-**修复（已落地）**：`_pilot_from_ctrl` 改为**独立读线程 + 有界队列**（6 块 ≈ 12 MB，满则读线程阻塞，内存有界；`26fc39fc` — `scripts/hw_acceptance/ring3_demod_audio.py:110` — `queue.Queue`）。
+**修复（已落地）**：`_pilot_from_ctrl` 改为**独立读线程 + 有界队列**（6 块 ≈ 12 MB，满则读线程阻塞，内存有界；`26fc39fc` — `scripts/hw_acceptance/ring3_demod_audio.py:119` — `queue.Queue`）。
 主线程只做鉴频/抗混叠；窗口前预热 0.7 s（scipy 首次滤波设计），不把一次性成本算成丢样。同台同参数 4 次有效：
 
 | # | captured_s | wall_s | 吞吐 MS/s | 丢样 | Welch 段数 | 导频 Hz / dB |
