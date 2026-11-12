@@ -33,9 +33,10 @@ _BUILTIN_NOAA15_L1 = next(
 
 @pytest.fixture(autouse=True)
 def _isolated_cache(tmp_path, monkeypatch):
-    """隔离磁盘缓存目录（与 tle_fetch 共用 orbit._CACHE_DIR 的唯一来源）。"""
+    """隔离磁盘缓存目录（与 tle_fetch 共用 orbit.tle_cache_dir() 的唯一来源）。"""
     cache = tmp_path / "tle_cache"
-    monkeypatch.setattr(orbit, "_CACHE_DIR", str(cache))
+    monkeypatch.setenv("MBDSDR_TLE_CACHE_DIR", str(cache))
+    orbit.reset_tle_cache()
     return cache
 
 
