@@ -424,3 +424,70 @@ assert abs(elev - st["elevation"]) <= 0.2
 - **转绿条件**：该用例 `1 passed`，且另加一条反证证明「跳时刻后不等刷新
   就会红」，否则改完等于把真实延迟掩盖掉。
 - **诚实边界**：提交 `bd0e7ec0` 不含这条修复，该用例当前红。
+
+---
+
+## K14–K16 — 读数一致线交叉撞到的三条存量红（2026-11-12，均非本线引入）
+
+**验证方式**：独立 worktree 检出 HEAD `859b7003`（不读工作区，避免「HEAD 红」与
+「本地半截改动」混成一个现象），三条各单节点跑一次，均**确定性红**（非抖动）。
+首次变红均用 `git log -S` 限定到具体文件定位，并用父提交内容核对「红之前是绿的」。
+
+**统一复跑命令**
+
+```bash
+QT_QPA_PLATFORM=offscreen python -m pytest "<nodeid>" -q
+```
+
+| ID | nodeid | 首次变红 | 当前文件 owner |
+|---|---|---|---|
+| K14 | `tests/test_copy_units_audit.py::test_t02_help_uses_real_topbar_demod_labels` | `a287ef63`（2026-11-11 23:20） | `desktop/help_panel.py` 无活跃 claim；提交时持有者 NONE（无台账） |
+| K15 | `tests/test_copy_units_audit.py::test_discoverability_ports_are_findable_from_settings_tab` | `3c23faa2`（2026-11-12 00:09） | `desktop/settings_panel.py` = 设置三环线（pid 3484，TTL 30min）；提交时持有者 性能线/6ae85f56 |
+| K16 | `tests/test_main_window.py::TestThreeColumnSplitter::test_three_panes_present` | `c204e945`（2026-11-12 11:20） | `tests/test_main_window.py` = 布局锁线/59ca04d1（claim 已过期，pid 26460）；提交时持有者 右栏收窄A |
+
+### K14 — 帮助页解调模式列表被改写，断言仍按旧全字匹配
+
+- **失败消息首行**：`assert 'FM / WFM / NFM / AM / USB / LSB / CW' in _HELP`
+- **分类**：存量（他线文案改动引入）。
+- **根因**：`a287ef63` 在 `desktop/help_panel.py` 把
+  `"（FM / WFM / NFM / AM / USB / LSB / CW）"` 改成
+  `"（可切 WFM / NFM / AM / USB / LSB / CW）"`；该提交只改了
+  `help_panel.py` / `troubleshooting.py` / `test_copy_entry_points.py`，
+  没有改 `tests/test_copy_units_audit.py`。父提交 `a287ef63^` 的
+  `help_panel.py` 仍含旧串，所以红是这一笔引入的，不是从最初就红。
+- **转绿条件**（任一条，并说明为何不是放宽）：
+  - 把 `FM` 重新写进该句（例如「模式」后补全 `FM / WFM / …` 的实际顶栏列表）；或
+  - 断言改为从 `mode_registry` 取真实模式 label 拼串再比对 `_HELP`，
+    避免再被文案改写打断。
+  验收：该节点单跑 `1 passed`，且断言仍能抓到「列表少一个模式」的回归。
+
+### K15 — 设置页惰性构建后，可发现性断言扫不到控件
+
+- **失败消息首行**：`AssertionError: 服务开关与端口见右栏「服务设置」一节。`
+- **分类**：存量（他线启动性能改动引入）。
+- **根因**：`3c23faa2` 把 `SettingsPanel._build_ui()` 从 `__init__` 移到
+  首次显示时构建（`_ui_built` / `showEvent`）；用例直接 `SettingsPanel()`
+  不 `show()`，实测 `findChildren(QLabel)` 为 **0**（`QGroupBox` 也为 0），
+  扫不到任何文案。父提交 `3c23faa2^` 的 `__init__` 里直接调 `_build_ui()`
+  （两处命中），所以红是这一笔引入的。
+- **转绿条件**：用例先触发一次构建（`panel.show()` 或显式调用面板的惰性构建
+  入口）再扫文案；**不许删掉该断言**。验收：单跑 `1 passed`，且构造后不
+  `show()` 时控件仍为零（惰性构建这个行为不能被改回去）。
+- **注意**：工作区 `desktop/settings_panel.py` 有他线未提交修改，修复需与其
+  合并后复核，别用旧 blob 覆盖。
+
+### K16 — 右栏收窄加了一层 host，splitter 断言仍按旧父件
+
+- **失败消息首行**：
+  `assert <QWidget name="rightColumnHost"> is <QWidget name="rightColumn">`
+- **分类**：存量（他线布局改动引入）。
+- **根因**：`c204e945` 给右栏加 `rightColumnHost`（QStackedLayout：0=展开态
+  长列 / 1=48px 图标条），`_main_splitter` 第 2 栏从 `RightColumn` 变成
+  `_right_stack_host`；该提交只改 `desktop/main_window.py`，未更新
+  `tests/test_main_window.py`。父提交 `c204e945^` 里是
+  `_main_splitter.addWidget(right_col)`，HEAD 里是 `addWidget(self._right_stack_host)`。
+- **现状**：工作区 `tests/test_main_window.py` 已有未提交的新断言（点名
+  `rightColumnHost`，docstring 引用 `c204e945`），即**修复在途未落库**；
+  登记后由布局线提交即可销账。
+- **转绿条件**：提交工作区那份 `test_main_window.py`；验收单跑 `1 passed`，
+  且断言仍点名 host 层（拆掉这层要能红）。不许为了让测试绿去改产品结构。
