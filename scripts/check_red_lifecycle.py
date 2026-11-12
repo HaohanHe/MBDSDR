@@ -19,6 +19,16 @@
           存在的 hash」不能混过 R1。
   R7 FAIL  出现快照标记，但头部不完整（缺「本文为当时状态快照」/「未逐条复核」/
           「不作现状依据」/「共 N 条未复核」），或声明的 N 与实际条数不符。
+  R8 FAIL  已转绿条目的**再检义务**：条目必须声明「验证提交 `<sha>` + 文件集合」，
+          且集合里的每个文件/目录在 `<sha>` 之后不得再被改动（判据是 git 历史，
+          不是行号/mtime）。一旦有后继提交碰过，该条目的有效状态即为「待复核」，
+          并点名「哪个文件在哪笔提交之后又变了」。绑定文件被删、绑定写不全、
+          「已转绿」却没有绑定，同样判 R8。
+          另：状态词含「已转绿」但没有 commit hash → R1，文案固定为
+          「已修必须带一次可复跑的验证记录（命令 + 实际输出）」。
+  R9 FAIL  已修条目有 hash、有复跑命令，但本节/相邻行内没有「实际输出」
+          （passed/failed/AssertionError/→ 等结果行）→ 表头规矩的
+          「命令 + 实际输出」后半段也由机检执行。
 
 快照（T 路线，单独成类计数，不许改文档销红）：
   * 头部四要素齐全且 N 与实际条数一致 → 该文件内所有红项状态行降为
@@ -76,6 +86,11 @@ SNAPSHOT_COUNT_RE = re.compile(r"共\s*(\d+)\s*条未复核")
 SNAPSHOT_MARKERS = (SNAPSHOT_TITLE, "未逐条复核", "不作现状依据")
 
 FIXED_RE = re.compile(r"已修复|已修|已落地|已解决")
+RECHECK_MARK = "再检绑定"
+RECHECK_SHA_RE = re.compile(r"验证提交\s*`([0-9a-f]{7,40})`")
+RECHECK_FILES_RE = re.compile(r"文件集合\s*(.+?)\s*$")
+LEDGER_DISPLAY = "docs/known-red-register.md"
+HEADING_RE = re.compile(r"^(#{1,6})\s")
 # 「未复核」只有落在红项语境里才算状态；「未复核 claim」是协作时序，不是红项未验。
 RED_CONTEXT_RE = re.compile(r"槽|红项|测试|用例|状态|ctest|pytest|test_")
 OPEN_RE = re.compile(r"待修|未修|在途修")
@@ -83,6 +98,10 @@ OPEN_RE = re.compile(r"待修|未修|在途修")
 HASH_RE = re.compile(r"\b(?=[0-9a-f]*[a-f])[0-9a-f]{7,40}\b")
 CMD_RE = re.compile(
     r"`?(?:python\s+-m\s+)?pytest\b|`?ctest\s+-R|`?python\s+scripts/|`?\./scripts/"
+)
+OUTPUT_RE = re.compile(
+    r"\b\d+\s+(?:passed|failed)\b|\b(?:passed|failed)\b|AssertionError|"
+    r"Traceback|exit code|返回码|→"
 )
 REASON_RE = re.compile(
     r"缺|阻塞|原因|因为|无法|尚未|待|才能|未具备|不可复现|无环境|没有|不满足"
@@ -195,9 +214,17 @@ def _commit_exists(sha: str, cache: Dict[str, bool]) -> bool:
     return cache[sha]
 
 
-def _detect_statuses(text: str, context: str = "") -> List[str]:
+def _detect_statuses(text: str, context: str = "", raw: str = "") -> List[str]:
     found: List[str] = []
-    if FIXED_RE.search(text):
+    fixed = bool(FIXED_RE.search(text))
+    # 「已转绿」只在状态位（标题 / 状态行）算销账声明；正文叙述里的
+    # 「该节点已转绿」「不得再写已转绿」不是状态，不能要求它带 hash。
+    if not fixed and "已转绿" in text:
+        stripped = raw.strip()
+        fixed = bool(HEADING_RE.match(stripped)) or bool(
+            re.match(r"^[-*]\s*(?:\*\*)?(?:状态|转绿)[:：]", stripped)
+        )
+    if fixed:
         found.append("fixed")
     if "`not_verified`" in text or (
         "未复核" in text and RED_CONTEXT_RE.search(context or text)
@@ -213,6 +240,171 @@ def _banner_line(lines: List[Tuple[int, str]]) -> Optional[int]:
         if BANNER_TEXT in raw:
             return number
     return None
+
+
+def _section_bodies(lines: List[Tuple[int, str]]) -> Dict[int, str]:
+    """标题行号 → 该标题到下一个同级/更高级标题之间的正文。
+
+    状态词常写在 `## Kxx — … 已转绿 <sha>` 的标题上，而验证命令、文件集合
+    在正文里；只看标题 ±2 行会把「有举证」误判成「没举证」。
+    """
+    heads = [
+        (number, len(match.group(1)))
+        for number, raw in lines
+        for match in [HEADING_RE.match(raw.strip())]
+        if match
+    ]
+    bodies: Dict[int, str] = {}
+    for index, (number, level) in enumerate(heads):
+        end = len(lines) + 1
+        for later, later_level in heads[index + 1:]:
+            if later_level <= level:
+                end = later
+                break
+        bodies[number] = "\n".join(
+            raw for candidate, raw in lines if number < candidate < end
+        )
+    return bodies
+
+
+def _parse_recheck_binding(raw: str) -> Tuple[Optional[str], List[str]]:
+    """解析 `- **再检绑定**：验证提交 `<sha>`；文件集合 `a`、`b/``。"""
+    sha_match = RECHECK_SHA_RE.search(raw)
+    files_match = RECHECK_FILES_RE.search(raw)
+    if not sha_match or not files_match:
+        return None, []
+    targets: List[str] = []
+    for token in re.split(r"[、,，]", files_match.group(1)):
+        cleaned = token.strip().strip("`").strip().strip("。；;")
+        if cleaned:
+            targets.append(cleaned)
+    return sha_match.group(1), targets
+
+
+def _later_changes(
+    sha: str, target: str, cache: Dict[Tuple[str, str], Optional[List[Tuple[str, str, List[str]]]]]
+) -> Optional[List[Tuple[str, str, List[str]]]]:
+    """`sha..HEAD` 之间碰过 target 的提交：[(短 hash, 标题, 该提交碰到的 target 内文件)]。
+
+    返回 None 表示 git 查询失败（sha 不可解析等），与「没有后继改动」区分开。
+    """
+    key = (sha, target)
+    if key in cache:
+        return cache[key]
+    proc = subprocess.run(
+        ["git", "log", "--name-only", "--format=COMMIT%x09%h%x09%s", f"{sha}..HEAD", "--", target],
+        cwd=str(SCAN_ROOT),
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+    if proc.returncode != 0:
+        cache[key] = None
+        return None
+    commits: List[Tuple[str, str, List[str]]] = []
+    current: Optional[Tuple[str, str, List[str]]] = None
+    for line in proc.stdout.splitlines():
+        if line.startswith("COMMIT\t"):
+            parts = line.split("\t", 2)
+            while len(parts) < 3:
+                parts.append("")
+            current = (parts[1], parts[2], [])
+            commits.append(current)
+        elif line.strip() and current is not None:
+            current[2].append(line.strip())
+    cache[key] = commits
+    return commits
+
+
+def _recheck_findings(
+    display: str,
+    number: int,
+    raw: str,
+    cache: Dict[Tuple[str, str], Optional[List[Tuple[str, str, List[str]]]]],
+) -> List[Finding]:
+    """R8：把「已转绿」的再检义务变成机检。"""
+    sha, targets = _parse_recheck_binding(raw)
+    if sha is None or not targets:
+        return [
+            Finding(
+                "R8", "FAIL", display, number,
+                "再检绑定无法解析：需要「验证提交 `<sha>`；文件集合 `文件或目录/`、`…`」",
+                raw.strip(),
+            )
+        ]
+    findings: List[Finding] = []
+    for target in targets:
+        relative = target.replace("\\", "/").lstrip("./")
+        path = SCAN_ROOT / relative.rstrip("/")
+        exists = path.is_dir() if target.endswith("/") else path.is_file()
+        if not exists:
+            findings.append(
+                Finding(
+                    "R8", "FAIL", display, number,
+                    f"待复核：声称已绿的文件/目录 `{target}` 已不存在，"
+                    "删掉的文件不能继续算绿（请重跑验证或更正绑定）",
+                    raw.strip(),
+                )
+            )
+            continue
+        commits = _later_changes(sha, relative.rstrip("/") or relative, cache)
+        if commits is None:
+            findings.append(
+                Finding(
+                    "R8", "FAIL", display, number,
+                    f"再检失败：无法读取验证提交 `{sha}` 之后的 git 历史（sha 不可解析？）",
+                    raw.strip(),
+                )
+            )
+            continue
+        if not commits:
+            continue
+        details: List[str] = []
+        for commit_sha, subject, files in commits[:3]:
+            hit_files = [item for item in files if item and item != target] or files
+            named = "、".join(f"`{item}`" for item in hit_files[:3]) or f"`{target}`"
+            details.append(f"{commit_sha}（{subject}）改了 {named}")
+        more = f"；另有 {len(commits) - 3} 笔" if len(commits) > 3 else ""
+        findings.append(
+            Finding(
+                "R8", "FAIL", display, number,
+                f"待复核：`{target}` 在验证提交 `{sha}` 之后又被改动"
+                f"（共 {len(commits)} 笔：{'；'.join(details)}{more}）；"
+                "本条不能继续算绿，需重跑并把验证提交更新到最新一次",
+                raw.strip(),
+            )
+        )
+    return findings
+
+
+def _entry_requires_recheck(
+    display: str, lines: List[Tuple[int, str]], bodies: Dict[int, str]
+) -> List[Finding]:
+    """R8 配套：账本里写「已转绿」的 K 条目必须带再检绑定。"""
+    if display != LEDGER_DISPLAY:
+        return []
+    findings: List[Finding] = []
+    for number, raw in lines:
+        stripped = raw.strip()
+        if not re.match(r"^##\s+K\d+", stripped):
+            continue
+        claims_fixed = "已转绿" in stripped or "已修" in stripped
+        if not claims_fixed:
+            continue
+        if RECHECK_MARK in bodies.get(number, ""):
+            continue
+        kid = re.match(r"^##\s+(K\d+)", stripped).group(1)  # type: ignore[union-attr]
+        findings.append(
+            Finding(
+                "R8", "FAIL", display, number,
+                f"{kid} 声称已修/已转绿，但没有「再检绑定」（验证提交 + 文件集合），"
+                "后继提交再碰同一文件时无法自动退回待复核",
+                stripped,
+            )
+        )
+    return findings
+
 
 
 class CommandResolver:
@@ -477,10 +669,19 @@ def scan_file(
     resolver: Optional[CommandResolver] = None,
     inspector: Optional[CommitInspector] = None,
     stats: Optional[Dict[str, int]] = None,
+    recheck_cache: Optional[
+        Dict[Tuple[str, str], Optional[List[Tuple[str, str, List[str]]]]]
+    ] = None,
 ) -> Tuple[List[Finding], List[Hit]]:
     findings: List[Finding] = []
     hits: List[Hit] = []
     lines = list(_iter_lines(path))
+    bodies = _section_bodies(lines)
+    recheck_cache = recheck_cache if recheck_cache is not None else {}
+    for number, raw in lines:
+        if RECHECK_MARK in raw and raw.lstrip().startswith("- **再检绑定**"):
+            findings.extend(_recheck_findings(display, number, raw, recheck_cache))
+    findings.extend(_entry_requires_recheck(display, lines, bodies))
     historical = bool(HISTORICAL_PATH_RE.match(display))
     banner = _banner_line(lines)
     if banner is not None and not historical:
@@ -503,7 +704,7 @@ def scan_file(
         window_text = _strip_quoted(
             "\n".join(item for _n, item in lines[max(0, index - 2): index + 3])
         )
-        for status in _detect_statuses(text, window_text):
+        for status in _detect_statuses(text, window_text, raw):
             status_entries.append((number, raw, status))
 
     if present:
@@ -549,7 +750,9 @@ def scan_file(
         # 原因/复跑命令允许落在相邻两行内（表格单元格会折行）。
         window = "\n".join(item for _n, item in lines[max(0, index - 2): index + 3])
         window_text = _strip_quoted(window)
-        statuses = _detect_statuses(text, window_text)
+        # 状态写在标题上时，举证材料在整节正文里，不能只看标题 ±2 行。
+        context_text = _strip_quoted(bodies.get(number, window))
+        statuses = _detect_statuses(text, window_text, raw)
         if not statuses:
             continue
 
@@ -576,7 +779,8 @@ def scan_file(
                         Finding(
                             "R1", "WARN" if (banner is not None and historical) else "FAIL",
                             display, number,
-                            "出现「已修/已修复/已落地/已解决」但同一行没有 commit hash",
+                            "已修必须带一次可复跑的验证记录（命令 + 实际输出）："
+                            "出现「已转绿/已修/已修复/已落地/已解决」但同一行没有 commit hash",
                             raw.strip(), historical,
                         )
                     )
@@ -593,7 +797,7 @@ def scan_file(
                     )
                 verified = not bad
                 if verified and inspector is not None:
-                    refs = _change_refs(raw + "\n" + window)
+                    refs = _change_refs(raw + "\n" + context_text)
                     hit = None
                     for sha in hashes:
                         hit = inspector.match(sha, refs)
@@ -618,10 +822,10 @@ def scan_file(
                         verified = False
                 if verified and not (banner is not None and historical) and stats is not None:
                     stats["fixed_verified"] = stats.get("fixed_verified", 0) + 1
-                if not bad and not CMD_RE.search(window_text):
-                    command = None
+                command = None
+                if not bad and not CMD_RE.search(context_text):
                     if resolver is not None:
-                        command = resolver.resolve(text) or resolver.resolve(window_text)
+                        command = resolver.resolve(text) or resolver.resolve(context_text)
                     if command:
                         # 自动映射到可执行命令：视为已举证，不记 WARN。
                         pass
@@ -629,12 +833,12 @@ def scan_file(
                         findings.append(
                             Finding(
                                 "R3", "WARN", display, number,
-                                "已修 + hash 有效，但相邻行内没有可复跑命令（ctest -R / pytest）",
+                                "已修 + hash 有效，但本节/相邻行内没有可复跑命令（ctest -R / pytest）",
                                 raw.strip(), historical,
                             )
                         )
                     else:
-                        reason = resolver.reason(text + "\n" + window_text)
+                        reason = resolver.reason(text + "\n" + context_text)
                         key = keys[0] if keys else ""
                         findings.append(
                             Finding(
@@ -644,12 +848,27 @@ def scan_file(
                                 raw.strip(), historical,
                             )
                         )
+                if (
+                    display == LEDGER_DISPLAY
+                    and not bad
+                    and (CMD_RE.search(context_text) or command)
+                    and not OUTPUT_RE.search(context_text)
+                ):
+                    findings.append(
+                        Finding(
+                            "R9", "WARN" if (banner is not None and historical) else "FAIL",
+                            display, number,
+                            "已修记录缺「实际输出」：命令已有，但本节/相邻行内没有 "
+                            "passed/failed/AssertionError/→ 等结果行",
+                            raw.strip(), historical,
+                        )
+                    )
             elif status == "not_verified":
-                if not REASON_RE.search(window_text):
+                if not REASON_RE.search(context_text):
                     findings.append(
                         Finding(
                             "R4", "FAIL", display, number,
-                            "标了 `not_verified`/未复核，但相邻行内没写为什么没验或缺什么才能验",
+                            "标了 `not_verified`/未复核，但本节/相邻行内没写为什么没验或缺什么才能验",
                             raw.strip(), historical,
                         )
                     )
@@ -747,6 +966,9 @@ def main(argv: Optional[List[str]] = None) -> int:
     exemptions = _load_exemptions()
     excluded = {os_norm(p) for p in args.exclude}
     hash_cache: Dict[str, bool] = {}
+    recheck_cache: Dict[
+        Tuple[str, str], Optional[List[Tuple[str, str, List[str]]]]
+    ] = {}
     all_findings: List[Finding] = []
     all_hits: List[Hit] = []
     skip_entries: List[Dict[str, object]] = []
@@ -757,7 +979,9 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     for path, display in docs:
         try:
-            findings, hits = scan_file(path, display, hash_cache, resolver, inspector, stats)
+            findings, hits = scan_file(
+                path, display, hash_cache, resolver, inspector, stats, recheck_cache
+            )
         except OSError as exc:
             errors.append(f"{display}: {exc}")
             continue
@@ -789,6 +1013,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     snapshot_files = sorted({f.path for f in snapshots})
     skip_total = sum(int(entry["count"]) for entry in skip_entries) + len(r3_skips)
     fixed_verified = stats["fixed_verified"]
+    recheck_findings = [f for f in all_findings if f.rule == "R8"]
+    recheck_pending = len({(f.path, f.line) for f in recheck_findings})
     ledger = (
         f"R1 实修 {fixed_verified} 条 / SNAPSHOT {len(snapshots)} 条 / "
         f"历史横幅 {len(hist_warns)} 条"
@@ -805,6 +1031,8 @@ def main(argv: Optional[List[str]] = None) -> int:
                     "snapshot_count": len(snapshots),
                     "fixed_verified_count": fixed_verified,
                     "hist_banner_count": len(hist_warns),
+                    "recheck_pending_count": recheck_pending,
+                    "recheck_findings": [f.as_dict() for f in recheck_findings],
                     "ledger": ledger,
                     "skip_count": skip_total,
                     "skipped": skip_entries,
@@ -827,6 +1055,10 @@ def main(argv: Optional[List[str]] = None) -> int:
         f"SKIP {skip_total}"
     )
     print(f"总账：{ledger}")
+    print(
+        f"再检：待复核/缺绑定 {recheck_pending} 条"
+        "（绑定文件在验证提交后被后继提交碰过，或已修条目没有可自动再检的绑定）"
+    )
     if snapshots:
         for path in snapshot_files:
             count = sum(1 for f in snapshots if f.path == path)
