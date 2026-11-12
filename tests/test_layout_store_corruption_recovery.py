@@ -61,6 +61,9 @@ def _assert_corrupt_evidence_kept(store, tmp_path) -> None:
     assert "已备份为" in store.last_error, store.last_error
     assert (backups[0].with_name(backups[0].name + ".reason.txt")).exists(), \
         "备份旁没有成对的损坏理由"
+    saved = json.loads(path.read_text(encoding="utf-8"))
+    assert saved["presets"]["我的布局"]["data"] == {"x": 1}, \
+        "备份之后新布局没有正常落盘"
 
 
 # ---------------------------------------------------------------------------
@@ -114,7 +117,7 @@ def test_second_save_does_not_create_an_extra_backup(tmp_path):
 def test_backup_failure_blocks_writes_and_keeps_corrupt_file(tmp_path, monkeypatch):
     path = tmp_path / "layouts.json"
     path.write_bytes(_CORRUPT_BYTES)
-    monkeypatch.setattr(layout_store_module, "_backup_corrupt_layout",
+    monkeypatch.setattr(layout_store_module, "backup_corrupt_layout",
                         lambda _path: None)
 
     store = LayoutStore(path=str(path))

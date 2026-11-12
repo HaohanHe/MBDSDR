@@ -58,11 +58,14 @@ BUILTIN_LAYOUTS: List[str] = ["专注", "分析", "网格"]
 _VERSION = 1
 
 
-def _backup_corrupt_layout(path: str) -> Optional[str]:
+def backup_corrupt_layout(path: str) -> Optional[str]:
     """把损坏的布局文件改名成 ``*.corrupt-时间戳``，返回备份路径（失败 None）。
 
     与书签 / 桌面配置同一套口径：只改名不删除，原件字节原样留在备份里；
     改名失败返回 None，调用方据此拒绝写盘，避免空骨架覆盖唯一证据。
+
+    这是损坏留证的**公共接缝**：测试模拟「备份失败」时替换本函数返回
+    ``None``，不再改模块私有名。
     """
     stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     backup = f"{path}.corrupt-{stamp}"
@@ -183,7 +186,7 @@ class LayoutStore:
 
     def _mark_corrupt(self, reason: str) -> None:
         """损坏文件：先备份原件再留人话错误；备份失败则禁止后续写盘。"""
-        self.corrupt_backup = _backup_corrupt_layout(self._path)
+        self.corrupt_backup = backup_corrupt_layout(self._path)
         self._save_blocked = self.corrupt_backup is None
         message = (
             f"布局文件读取失败（{reason}）：{self._path}；"
