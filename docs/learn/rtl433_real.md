@@ -2,7 +2,7 @@
 
 > 本地参考克隆：`repos/rtl_433/`（merbanan/rtl_433）
 > 配套实现：`mbdsdr_ai/rtl433_decoder.py`
-> 往返验证：`tests/rtl433_roundtrip.py`（15 项全过）
+> 往返验证：`tests/test_rtl433_roundtrip.py`（15 项全过）
 >
 > 本文件只记录**这次真读 `.c/.h` 源码后逐行对齐到 Python 的常量与位域**，
 > 每条都给 `file:line`。不抄 README，只对齐真实解码链。
@@ -165,7 +165,7 @@ while (ipos < len) {
 
 ## 8. 验证
 
-`tests/rtl433_roundtrip.py` 15 项：
+`tests/test_rtl433_roundtrip.py` 15 项：
 - 曼彻斯特编/解码往返一致
 - 合成 OOK 包络 → pulse/gap 时长在容差内
 - 每个设备一条**能通过真实校验和**的已知帧 → 物理量正确

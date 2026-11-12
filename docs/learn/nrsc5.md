@@ -126,7 +126,7 @@ nrsc5 **本身不含 HDC 解码器**——它把解出的音频 RSPDU 通过
 | `hdc`/`output.c` | `HDCDecoder`（骨架）|
 | `input.c` | 顶层 `hdradio_ofdm_demod` 等入口 |
 
-往返验证见 `tests/nrsc5_roundtrip.py`：15dB 加噪下 QPSK-OFDM 往返 BER < 1%，
+往返验证见 `tests/test_nrsc5_roundtrip.py`：15dB 加噪下 QPSK-OFDM 往返 BER < 1%，
 HDLC/PSD 帧可正确解出节目名。
 
 ## 9. 红线对照

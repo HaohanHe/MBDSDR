@@ -2,7 +2,7 @@
 
 > 本地参考克隆：`repos/redsea/`（windytan/redsea，FM RDS 解码器）
 > 配套实现：`mbdsdr_ai/rds_lite.py`
-> 往返验证：`tests/rds_real_roundtrip.py`（15 项全过）
+> 往返验证：`tests/test_rds_real_roundtrip.py`（15 项全过）
 >
 > 本文件只记录**这次真读 .cc/.hh 源码后逐行对齐到 Python 的常量与位域**，
 > 每条都给 `file:line`。注意 redsea 源码树是扁平的（`src/*.cc`），**没有**

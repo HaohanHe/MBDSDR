@@ -113,7 +113,7 @@ NFM tau=75µs（nbrx.cpp:52）；WFM tau=0（wfmrx.cpp:48）。
 
 ## 6. 往返验证
 
-`tests/gqrx_roundtrip.py`（10 用例全绿）：
+`tests/test_gqrx_roundtrip.py`（10 用例全绿）：
 - AGC 弱/强阶跃稳态都收敛到目标 ≈0.7；
 - 攻击 ~ms 级收敛，hang 期压住、50ms 级慢释放；
 - 带 DC 偏移的信号经 tau=1s IIR 后均值≈0；

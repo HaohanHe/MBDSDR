@@ -117,19 +117,26 @@
 
 **「测试能跑通」和「测试被 runner 收集」是两件事，后者才是回归防线。**
 
-现存绕开 pytest 的形态（本轮实测）：
+现有形态（本轮实测 + 一次纠正）：
 
-- `tests/` 下 **13 个文件名不匹配 `test_*.py`**、却含 **74 个 `test_` 函数**
-  的脚本（`fldigi_roundtrip.py` 9 个、`ax25_aprs_roundtrip.py` 8 个、
-  `sdrangel_roundtrip.py` 7 个、`digital_voice_roundtrip.py` 7 个、
-  `apt_meteor_roundtrip.py` 7 个……）。pytest 默认只收 `test_*.py` /
-  `*_test.py`，这些**永远不会被收集**，只能靠 `__main__` 里手写
-  `test_xxx()` 逐个调（`tests/ax25_aprs_roundtrip.py:135-143`、
-  `tests/fldigi_roundtrip.py:186-195`）。**首批三个（ax25_aprs / fldigi /
-  codec2_freedv）已改名纳管**，其余分批处理。
-- `tools/hw_selfcheck/test_selfcheck.py:257`、`tools/test_paste_block.py:318`、
+- `tests/` 下文件里含 `test_` 函数、但**文件名不匹配 pytest 默认
+  `python_files`（`test_*.py` / `*_test.py`）**的共 **18 个文件 / 151 条
+  断言**：13 个模块级 `def test_`（74 条）+ 5 个类内 `test_` 方法（77 条）。
+- 这 18 个文件**在 CI 里并非完全没人跑**：`scripts/ci_pytest_groups.py`
+  的收件口径自 phase71 起包含 `*roundtrip*.py`，并且是以**显式路径**传给
+  pytest（显式路径不受 python_files 限制）。所以「CI 从没跑过」是错的。
+- 真正的缺口有两个：① 裸 `pytest tests/`、IDE、以及各线自己拼的
+  `pytest tests/test_xxx.py` 看不见这些文件，本地和 CI 跑的不是同一集合；
+  ② 一旦某条线按「conftest 导入要两分钟」的假结论改用临时脚本直接调
+  `test_*()`（如 `tests/ax25_aprs_roundtrip.py:135-143`、
+  `tests/fldigi_roundtrip.py:186-195` 的 `__main__`），那条线就只剩手调。
+- 处置：18 个全部改名 `test_*.py` 纳管（本轮已完成 18/18，逐个实跑：
+  151 条断言 148 passed / 1 skipped（`syn_robot36.wav` 缺失守卫）），
+  裸 pytest 与 CI 从此是同一集合。
+- 另有 `tools/hw_selfcheck/test_selfcheck.py:257`、`tools/test_paste_block.py:318`、
   `tools/test_acceptance_run.py:680`、`tools/onboarding/test_parse_hw_report.py:364`
   用 `pytest.main([__file__])`；`mbdsdr_ai/tests/` 有 10 处同样写法。
+  这些不在 CI 分组收件范围内，仍是「自己跑自己」。
 
 一条线在真 runner 里没验证过时，用临时脚本调测试函数能拿到「通过」，
 但那批断言从此不在任何自动回归里——改坏了没人知道。

@@ -2,7 +2,7 @@
 
 > 学习目标：clone → 真读源码 → 当场把核心能力移植到 Python(numpy)。
 > 所有移植见 `mbdsdr_ai/{sdrsharp,openwebrx,cubicsdr,hdsdr}_adapter.py`，
-> 往返验证见 `tests/sdr_ui_roundtrip.py`（20 用例全绿）。
+> 往返验证见 `tests/test_sdr_ui_roundtrip.py`（20 用例全绿）。
 
 ---
 
@@ -211,4 +211,4 @@ HDSDR 通过 ExtIO DLL 控制前端三级增益（UI 上 "RF" / "IF" 滑块）�
 - cubicsdr：`cubicsdr_waterfall_colormap` / `cubicsdr_vfo_state_machine` / `cubicsdr_drag_tune`
 - hdsdr：`hdsdr_rf_gain` / `hdsdr_bandwidth_preset` / `hdsdr_gain_table`
 
-测试：`python3 tests/sdr_ui_roundtrip.py` → 20 passed。
+测试：`python3 -m pytest tests/test_sdr_ui_roundtrip.py -q` → 20 passed。
