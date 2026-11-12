@@ -669,16 +669,17 @@ QT_QPA_PLATFORM=offscreen python -m pytest "<nodeid>" -q
 
 ## K17 — 设置向前覆盖：3 个字段无 UI 入口也无理由（2026-11-13 实跑，已转绿 `dad6324f`）
 
-- **再检绑定**：验证提交 `dad6324f`；文件集合 `scripts/settings_inventory.py`、`tests/test_settings_ui_coverage.py`、`desktop/config_schema.py`、`desktop/control_panel.py`、`desktop/settings_panel.py`
+- **再检绑定**：验证提交 `d7448d2d`；文件集合 `scripts/settings_inventory.py`、`tests/test_settings_ui_coverage.py`、`desktop/config_schema.py`、`desktop/control_panel.py`、`desktop/settings_panel.py`
 - **再检（2026-11-13，R8 清账）**：旧验证提交 `ffeeb7c5` 之后
   `desktop/control_panel.py` / `desktop/settings_panel.py` 又有改动，曾被 R8 退回
-  待复核。本次在干净 worktree `D:\mbdsdr\_wt\kcheck-dad6324f`（`dad6324f`，不含
-  其他线未提交改动）实跑：
+  待复核；改用 `dad6324f` 复跑后，`desktop/control_panel.py` 又被 `08e61bd5`
+  （AGC/增益能力探测改「真是否实现」）碰过，R8 再次退回。本次在干净 worktree
+  `D:\mbdsdr\_wt\kcheck-k17`（`d7448d2d`，不含其他线未提交改动）重跑：
   - `MBDSDR_OFFLINE=1 QT_QPA_PLATFORM=offscreen python -m pytest tests/test_settings_ui_coverage.py::test_forward_every_field_has_ui_entry_or_reason -q`
-    → `1 passed in 0.71s`；
+    → `1 passed in 1.55s`；
   - `python scripts/settings_inventory.py` →
     `字段 55 / 有 UI 入口 51 / 有理由 4 / 缺失 0 / 幽灵键 0 / source_commit ce1ed9ef`。
-  绑定验证提交已从 `ffeeb7c5` 更新为本次跑绿的 `dad6324f`。
+  绑定验证提交已从 `dad6324f` 更新为本次跑绿的 `d7448d2d`。
 
 - **nodeid**：`tests/test_settings_ui_coverage.py::test_forward_every_field_has_ui_entry_or_reason`
 - **复跑命令**：
@@ -772,9 +773,28 @@ QT_QPA_PLATFORM=offscreen python -m pytest "<nodeid>" -q
 
 ---
 
-## K19 — 源码文本 pin 棘轮新增 33 条（2026-11-13 实跑，待复核：原验证提交 `ce31ff20`）
+## K19 — 源码文本 pin 棘轮（2026-11-13 收口，已转绿 `d3b91c19`）
 
-- **再检绑定**：验证提交 `ce31ff20`；文件集合 `tests/`、`docs/source-pin-ratchet-baseline.json`
+- **再检绑定**：验证提交 `d3b91c19`；文件集合 `tests/test_usb_hotplug.py`、`tests/test_file_source_robust.py`、`tests/test_safe_commit_exclude.py`、`tests/test_source_pin_ratchet.py`
+- **收口（2026-11-13，验证提交 `d3b91c19`）**：4 条回加的 pin 逐条判定后全部改写，
+  不再靠再删一遍（`cc2f8109` 已证明删了会被加回来）：
+  - `test_usb_hotplug.py::test_module_has_no_reconnection_dependency` 的
+    `"reconnect"` / `"reconnection"` → AST 结构断言：模块里不存在以 reconnect
+    命名的函数/方法/属性/导入；行为侧由
+    `test_replug_same_identity_is_a_plug_event_not_another_device` 兜底（拔插只产
+    事件、不产连接动作）。注释里提到 reconnect 不再误红。
+  - `test_file_source_robust.py::test_recover_backs_up_corrupt_meta_with_recovery_reason`
+    的 `"恢复流程触发"` / `"不是用户删除"` → 断言对象其实是运行期生成的
+    `.reason.txt`（`write_reason` 压成一行），不是源码；改为取整行后按行断言。
+  - 收口时又发现 `f418d8d5` 新增的
+    `test_safe_commit_exclude.py::test_exclude_pure_deletion_hunk` 两条同型 pin
+    （临时 git 仓库里的 `doc.md`），一并改为按行成员断言。
+  - 实跑 `python -m pytest tests/test_source_pin_ratchet.py
+    tests/test_file_source_robust.py tests/test_usb_hotplug.py
+    tests/test_safe_commit_exclude.py -q` → **48 passed in 19.94s**；干净 worktree
+    `D:\mbdsdr\_wt\kcheck-k19`（`d3b91c19`）连同 tooltip 两组共 **65 passed**。
+  - 仍然保留的 2 条文本 pin（`docs/source-pin-ratchet-baseline.json` 里带 owner +
+    reason 的人工验收卡串）不动，理由见本节「该留 2 条」。
 - **为什么失守（2026-11-13 在 HEAD 实跑）**：当时 `748a2992` / `b00a73d3` / `ce31ff20`
   确实把 33 条清到 0，但后继提交又往同一批测试文件加回 4 条源码文本 pin：
   - `cc2f8109`（恢复流程覆盖损坏 meta 前必须备份留证）→
@@ -788,8 +808,8 @@ QT_QPA_PLATFORM=offscreen python -m pytest "<nodeid>" -q
   失败首行
   `AssertionError: 新增源码文本 pin（必须改成行为断言，或由 owner 在基线写明理由）：`。
   不是当时写错，而是「已转绿」只核了一次：没有「验证提交之后同文件再变就退回
-  待复核」的机制。本条现由 R8 自动退回待复核；重跑并把验证提交更新到最新一次之前，
-  不得再写已转绿。
+  待复核」的机制。本条现由 R8 自动退回待复核；2026-11-13 已按上面的判定逐条
+  改写并重跑，绑定更新为 `d3b91c19`。
 
 - **nodeid**：`tests/test_source_pin_ratchet.py::test_no_new_source_text_pins`
 - **复跑命令**：
@@ -889,9 +909,31 @@ baseline 56 → 58（`BUILT_AT` 同步 58），每条带 owner + reason：
 
 ---
 
-## K20 — tooltip 守卫 4 条（2026-11-13 实跑，待复核：原验证提交 `294beef4`）
+## K20 — tooltip 守卫 4 条（2026-11-13 收口，已转绿 `5e0bb563`）
 
-- **再检绑定**：验证提交 `294beef4`；文件集合 `desktop/device_panel.py`、`desktop/control_panel.py`、`desktop/main_window.py`、`desktop/sat_track_panel.py`、`docs/tooltip-dynamic-baseline.json`、`docs/tooltip-baseline.json`、`tests/test_tooltip_guard.py`、`tests/test_tooltip_dynamic_runtime.py`
+- **再检绑定**：验证提交 `5e0bb563`；文件集合 `desktop/device_panel.py`、`desktop/control_panel.py`、`docs/tooltip-dynamic-baseline.json`、`tests/test_tooltip_dynamic_runtime.py`
+- **收口（2026-11-13，验证提交 `5e0bb563`）**：逐处判定（不是整批豁免），并把
+  `08e61bd5` 新引入的 2 处同型透传一并清掉：
+
+  | 位置 | 判定 | 依据 |
+  |---|---|---|
+  | `event.detail` ×5（监听失败 / 拔出 / 拔出后复写 / 在位打不开 / 歧义） | 登记 | detail 是 `usb_hotplug` 生成的完整原因与判定依据；标签只放短句 `user_text`，悬停看完整因果；不是裸值。解除条件：detail 退化成裸数值或常量短语时，在调用点补「监听原始信息：」前缀并删登记。 |
+  | `identity_note` | 登记 | `hotplug_grade` 生成完整句子（识别方式 + 换口/重启后被当成另一台设备的后果），是用户要看的限制说明。 |
+  | `owner_state_label.setToolTip(text)` | 该修（已删） | 标签 `setWordWrap(True)` 会完整显示 `text`，tooltip 逐字重复、不增加信息。 |
+  | `重新读取设备占用登记` too_short | 该修（文案太短，不是判据过严） | 原文只说了做什么，没说为什么/何时用；补成「重新读取设备占用登记：确认这台设备是否被其它程序占用」，不往基线塞第 4 条豁免。 |
+  | `control_panel.py` 的 `base_tip` / `f'{base_tip}\n{reason}' if …`（`08e61bd5` 引入） | 登记 | 与既有 `base` / `f'{base}\n{_why}'` 同型：基础说明由 `set_*_applied` 生成，`reason` 是常量原因句。 |
+
+  - 每条登记的 `note` 字段都写了「为什么不是裸值」与解除条件；`reason` 仍用
+    schema 允许的 `passthrough`（机检把 `reason` 当闭集，说明放 `note`）。
+  - 运行时兜底同步扩触发：device_panel 用假 monitor 回放四类热插拔事件 + 连接一台
+    无序列号设备；control_panel 调 `set_device_capabilities(gain=True, agc=False, …)`，
+    让「支持 → 只写基础说明」「不支持 → 基础说明 + 原因」两支都渲染。登记了就必须
+    有非空渲染文本，否则运行时用例红（不是登记即豁免）。
+  - 实跑：干净 worktree `D:\mbdsdr\_wt\kcheck-k20b`（`5e0bb563`）
+    `python -m pytest tests/test_tooltip_guard.py tests/test_tooltip_dynamic_runtime.py -q`
+    → **17 passed**。
+  - 未处理并点名：`desktop/sat_track_panel.py:400 :: text` 是卫星过境线**未提交**
+    改动引入的同型透传，不属本线；它一旦提交，守卫会再次红，需由该线登记或改文案。
 - **为什么失守（2026-11-13 在干净 worktree 实跑）**：`294beef4` 当时 7 passed，但
   后继提交继续往同文件加透传 tooltip，登记表没跟：
   - `64b0b397` → `desktop/device_panel.py` 的 5 处 `event.detail`
@@ -904,10 +946,11 @@ baseline 56 → 58（`BUILT_AT` 同步 58），每条带 owner + reason：
   `test_tooltip_baseline_only_shrinks` 点名
   `desktop/device_panel.py::重新读取设备占用登记::too_short`；
   `test_baseline_file_stays_in_sync_with_counter` → `assert 3 == 4`。
-  与 K19 同因：当时真绿、后继提交打破、缺再检机制。本条保持待复核。
+  与 K19 同因：当时真绿、后继提交打破、缺再检机制。本条当时保持待复核
+  （2026-11-13 已在 `5e0bb563` 收口，见上）。
   注：主工作树里另一线未提交的 `device_panel` / `sat_track_panel` 改动会让未登记
   列表临时变长（含 `sat_track_panel.py:400 :: text`），本条以干净提交 `dad6324f`
-  的读数为准，不把那部分算进 K20。
+  的读数为准，不把那部分算进 K20。该状态已于 2026-11-13 在 `5e0bb563` 收口。
 
 **合并为一条而非四条**：同一文件、同一契约（`docs/discoverability.md` 三条规矩）、
 同一批转绿动作（补登记 / 改文案 / 删数值），拆开只会把一个修复批次记成 4 笔账。
@@ -961,10 +1004,28 @@ baseline 56 → 58（`BUILT_AT` 同步 58），每条带 owner + reason：
 
 ---
 
-## K21 — 设置页透传 tooltip 运行时用例在懒构建下拿不到 UI（2026-11-13 实跑，存量·待复核）
+## K21 — 设置页透传 tooltip 运行时用例在懒构建下拿不到 UI（2026-11-13 收口，已转绿 `879b4793`）
+
+> 标题里的 `879b4793` 是修复提交（补 `show()` 触发）；下方再检绑定里的
+> `d3b91c19` 是把它连同 K19 一起复跑跑绿的那一笔。两者分开写，是因为 R6 要求
+> 标题 hash 碰到本条描述的文件，而 R8 要求绑定的是最近一次复跑。
 
 > 本条原为 K20 段末一句「属存量问题」，没有 K 编号：机检抓不到、下一班翻 K 表
 > 也看不到。2026-11-13 按正式条目补编号，结论（存量、非 K20 引入）不变。
+
+- **再检绑定**：验证提交 `d3b91c19`；文件集合 `tests/test_tooltip_dynamic_runtime.py`、`desktop/settings_panel.py`
+- **判定（2026-11-13，不是产品缺陷）**：设置页在 `showEvent → _ensure_ui_built()`
+  时才建控件；用户打开设置页后 tooltip 正常渲染——补 `show()` 触发后，登记的 3 条
+  `:1072` / `:1424` / `:1432` 全部拿到非空文本并通过自描述校验。用户不会「看不到
+  tooltip」，因此按转绿条件第 1 条**修测试，不改产品**。
+- **收口与反证**：
+  - `_record` 的 triggers 增加 `p.show()` + `processEvents()`；实跑
+    `python -m pytest tests/test_tooltip_dynamic_runtime.py::test_settings_panel_passthrough_tooltips_self_describe -q`
+    → **1 passed in 2.42s**；干净 worktree `D:\mbdsdr\_wt\kcheck-k19`（`d3b91c19`）
+    连同 tooltip 两组共 **65 passed**。
+  - 反证：去掉 `show()` 触发（恢复只构造）→ 该 nodeid 重新报 3 处
+    `settings_panel.py:1072/1424/1432` 没有渲染出 tooltip，即旧写法红的原因；
+    说明触发是必要而非空转。
 
 - **nodeid**：`tests/test_tooltip_dynamic_runtime.py::test_settings_panel_passthrough_tooltips_self_describe`
 - **复跑命令**：
@@ -993,6 +1054,6 @@ baseline 56 → 58（`BUILT_AT` 同步 58），每条带 owner + reason：
   验收：该 nodeid `1 passed`；反证：去掉 `_record` 里的构建触发，必须重新变红。
 - **当前 owner**：`tests/test_tooltip_dynamic_runtime.py` 与
   `desktop/settings_panel.py` 均无活跃 claim；按引入线归设置页线（K15）。
-- **再检**：本条从未写过「已转绿」，暂不需要再检绑定；修完若要写「已转绿」，
-  必须同时补 `再检绑定`，否则 R8 直接判红。
+- **再检**：已按上面的绑定登记；`settings_panel.py` 或该运行时用例任一变动，R8 都会
+  把本条退回待复核（判据只用 git 历史）。
 
