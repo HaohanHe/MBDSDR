@@ -523,7 +523,7 @@ class LimeSDRBackend:
         """先登记，冲突时**连库都不加载**。"""
         key = self._owner_identity()
         try:
-            from .sdr_backend import acquire_hardware_owner
+            from .device_owner import acquire_hardware_owner
         except ImportError:
             # 直接以脚本方式运行本文件时没有包上下文，登记接口不可用。
             # 那不是应用路径，放行并告警一次。
@@ -548,7 +548,7 @@ class LimeSDRBackend:
         if not key:
             return
         try:
-            from .sdr_backend import release_hardware_owner
+            from .device_owner import release_hardware_owner
         except ImportError:
             return
         release_hardware_owner(key)
