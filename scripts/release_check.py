@@ -978,8 +978,14 @@ def main() -> int:
             return False, "对账输出不是 JSON（生成器崩了）：" + \
                 out.strip().replace("\n", " ")[:300]
         if proc.returncode == 0:
-            return True, (f"{data.get('checked', 0)} 个生成物与生成器一致；"
-                          f"豁免 {data.get('exempt', 0)}（理由见 --list）")
+            # 单报一条关切的单次耗时：后端能力表要现场调用 supports_*，
+            # 若哪天它慢到不可接受，这里能直接看见，不用翻 JSON。
+            secs = next((r.get("seconds") for r in data.get("results", [])
+                         if r.get("id") == "backend_capability"), None)
+            extra = (f"；后端能力表单次 {secs:.2f}s"
+                     if isinstance(secs, (int, float)) else "")
+            return True, (f"{data.get('checked', 0)} 个生成物与生成器一致"
+                          f"{extra}；豁免 {data.get('exempt', 0)}（理由见 --list）")
         bad = [r.get("path", "?") for r in data.get("results", [])
                if r.get("status") != "ok"]
         return False, "生成物不同步/生成器失败：" + (", ".join(bad) or "见脚本输出")

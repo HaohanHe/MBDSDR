@@ -47,6 +47,7 @@ import os
 import re
 import subprocess
 import sys
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, List, Optional, Sequence
@@ -152,6 +153,21 @@ ARTIFACTS: tuple[Artifact, ...] = (
         trigger="解码器能力/证据/重跑命令变化",
     ),
     Artifact(
+        id="backend_capability",
+        path="docs/backend-capability-matrix.md",
+        generator=[PY, "scripts/gen_backend_capability_matrix.py", "--write"],
+        check=[PY, "scripts/gen_backend_capability_matrix.py", "--check"],
+        inputs=(
+            "mbdsdr_ai/sdr_backend.py",
+            "mbdsdr_ai/rtltcp_client.py",
+            "mbdsdr_ai/spyserver_client.py",
+            "scripts/gen_backend_capability_matrix.py",
+        ),
+        owner="SDR 后端线；发版闸门",
+        trigger="任一后端类的 supports_gain/agc/ppm/offset_tuning 判据、"
+                "device.sample_rate_range/max_gain 或后端类清单变化",
+    ),
+    Artifact(
         id="error_catalog",
         path="docs/error-catalog.md",
         generator=[PY, "scripts/check_generated_artifacts.py", "--write-mirror",
@@ -219,6 +235,8 @@ class Result:
     status: str  # ok / drift / error
     detail: str = ""
     output: str = ""
+    #: 单次检查实际耗时（秒）。release_check 的生成物对账段按它单报耗时。
+    seconds: float = 0.0
 
 
 def _env() -> dict:
@@ -459,7 +477,12 @@ def main(argv: Optional[List[str]] = None) -> int:
                 print(f"自 {args.changed} 以来没有生成物或输入发生改动，跳过。")
                 return 0
 
-    results = [_check(a) for a in wanted]
+    results = []
+    for a in wanted:
+        t0 = time.perf_counter()
+        r = _check(a)
+        r.seconds = time.perf_counter() - t0
+        results.append(r)
     red = [r for r in results if r.status != "ok"]
 
     if args.json:
@@ -469,7 +492,8 @@ def main(argv: Optional[List[str]] = None) -> int:
             "broken": sum(1 for r in results if r.status == "error"),
             "exempt": len(EXEMPT),
             "results": [{"id": r.artifact.id, "path": r.artifact.path,
-                         "status": r.status, "detail": r.detail}
+                         "status": r.status, "detail": r.detail,
+                         "seconds": round(r.seconds, 3)}
                         for r in results],
         }, ensure_ascii=False, indent=2))
         return 1 if red else 0

@@ -13,6 +13,8 @@ MBDSDR 桌面端「能力目录」数据层
   * AI 工具域   ← mbdsdr_ai/core/mcp_server.py 的域摘要 + 工具→域映射
   * 快捷操作    ← desktop/shortcuts.py（键位与菜单标签，标题直接用 label）
   * 静态能力    ← 直接用 code 符号校验（PTT 按钮、天空搜索框）
+  * 设备硬件能力 ← docs/backend-capability-matrix.md（生成物；逐后端类调用
+    `supports_*` 得出，这里只给指针，不抄一份判据）
 
 新增/删除任何一侧的能力时，目录自动跟着变；``tests/test_discoverability_help.py``
 还会逐条断言 source 在注册表里真实存在、不可用项必须写原因，防止目录漂移。
@@ -103,6 +105,16 @@ STATIC_CAPABILITIES: Tuple[Tuple[str, str, str, str, str, str, str], ...] = (
      "每次执行都要外部确认通道签发的一次性 confirm_token（tx_guard 硬门），"
      "模型无法自备授权",
      "module:desktop/main_window.py:_tx_block_reason"),
+    ("接收", "本设备支持哪些硬件能力",
+     "按后端类逐项列出 AGC / 增益 / PPM / Offset / 采样率区间 / 增益区间："
+     "哪些设备真支持、哪些不支持，以及区间多大、是否要连接后才确定",
+     "查看 docs/backend-capability-matrix.md"
+     "（数值由脚本直接调用各后端的 supports_* 生成，文档不另抄判据；"
+     "发版前由生成物对账自动校验）",
+     "available",
+     "表是逐类静态对照；实例级差异（例如 RTL-SDR 的 Offset 需连接后按驱动"
+     "判定）已在表内逐项标注",
+     "doc:docs/backend-capability-matrix.md"),
 )
 
 #: 证据等级 → 人话标注（数字解码状态说明）

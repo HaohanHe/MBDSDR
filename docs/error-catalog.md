@@ -122,11 +122,11 @@ AI 层各自拼中文。守卫测试 `tests/test_error_catalog_guard.py` 校验�
 | `sample_rate_not_supported` | access | 采样率不支持 | 设备不支持采样率 {rate} Hz：{detail} | 改用设备支持的采样率。 | 否 |
 | `sdr_error` | access | SDR 通用错误 | SDR 错误：{detail} | 按错误详情处理；必要时重启程序。 | 否 |
 | `sdr_frequency_out_of_range` | access | 请求频率超出当前设备实际可调范围 | 当前{front_end}可调范围 {range_mhz} MHz，无法调谐到 {requested_mhz} MHz；未向硬件下发该请求。 | 改选范围内的频率；若必须收该频段，需换用覆盖它的前端（本机 FC0012 类 tuner 的上限实测约 948.5 MHz）。 | 否 |
-| `sdr_set_agc_failed` | access | 设置 AGC 失败 | 设置 AGC 失败（{detail}），已回滚到原 AGC 状态。 | 确认设备支持 AGC 开关后重试。 | 是 |
+| `sdr_set_agc_failed` | access | 设置 AGC 失败 | 设置 AGC 失败（{detail}），已回滚到原 AGC 状态。 | 确认设备支持 AGC 开关后重试；各后端是否支持 AGC 见 docs/backend-capability-matrix.md。 | 是 |
 | `sdr_set_bandwidth_failed` | access | 设置带宽失败 | 设置带宽失败（{detail}），已回滚到原带宽。 | 确认带宽被设备支持后重试。 | 是 |
 | `sdr_set_frequency_failed` | access | 设置频率失败 | 设置频率失败（{detail}），已回滚到原频率。 | 确认频率在设备可调范围内后重试。 | 是 |
-| `sdr_set_gain_failed` | access | 设置增益失败 | 设置增益失败（{detail}），已回滚到原增益。 | 确认增益在设备范围内后重试。 | 是 |
-| `sdr_set_sample_rate_failed` | access | 设置采样率失败 | 设置采样率失败（{detail}），已回滚到原采样率。 | 确认采样率被设备支持后重试。 | 是 |
+| `sdr_set_gain_failed` | access | 设置增益失败 | 设置增益失败（{detail}），已回滚到原增益。 | 确认增益在设备范围内后重试；各后端的增益区间见 docs/backend-capability-matrix.md。 | 是 |
+| `sdr_set_sample_rate_failed` | access | 设置采样率失败 | 设置采样率失败（{detail}），已回滚到原采样率。 | 确认采样率被设备支持后重试；各后端的采样率区间见 docs/backend-capability-matrix.md。 | 是 |
 | `spill_write_failed` | access | 溢出数据落盘失败 | 大字段落盘失败：{detail} | 检查磁盘/临时目录后重试。 | 是 |
 | `station_untrusted` | access | 站点不在可信列表 | 站点不在可信列表（{detail}）。 | 先把该站点加入可信列表，或换用可信站点。 | 否 |
 | `unknown_command` | access | 未知指令 | 未知指令 '{detail}'。 | 从支持的指令列表中选择。 | 否 |

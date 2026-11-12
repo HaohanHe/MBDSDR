@@ -499,15 +499,18 @@ _SPECS = (
     _spec("sdr_set_sample_rate_failed", LAYER_ACCESS, True,
           "设置采样率失败",
           "设置采样率失败（{detail}），已回滚到原采样率。",
-          "确认采样率被设备支持后重试。"),
+          "确认采样率被设备支持后重试；各后端的采样率区间见 "
+          "docs/backend-capability-matrix.md。"),
     _spec("sdr_set_gain_failed", LAYER_ACCESS, True,
           "设置增益失败",
           "设置增益失败（{detail}），已回滚到原增益。",
-          "确认增益在设备范围内后重试。"),
+          "确认增益在设备范围内后重试；各后端的增益区间见 "
+          "docs/backend-capability-matrix.md。"),
     _spec("sdr_set_agc_failed", LAYER_ACCESS, True,
           "设置 AGC 失败",
           "设置 AGC 失败（{detail}），已回滚到原 AGC 状态。",
-          "确认设备支持 AGC 开关后重试。"),
+          "确认设备支持 AGC 开关后重试；各后端是否支持 AGC 见 "
+          "docs/backend-capability-matrix.md。"),
     _spec("sdr_set_bandwidth_failed", LAYER_ACCESS, True,
           "设置带宽失败",
           "设置带宽失败（{detail}），已回滚到原带宽。",
