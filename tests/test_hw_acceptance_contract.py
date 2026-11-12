@@ -288,10 +288,11 @@ def test_hardware_thresholds_are_frozen_with_recorded_provenance():
 
 
 def test_runtime_pilot_detection_is_a_distinct_named_threshold():
-    """产品扫描 vs 硬件验收是两个场景：名字、值域、用途声明都必须分开。
+    """产品扫描 vs 硬件验收是两个场景：名字与值域必须分开。
 
-    反证：把 fm_scan.PILOT_DETECT_BAND_HZ 改成 300 / 把阈值改成 10 → 本用例红；
-    删掉任一侧的「此值不适用于…」声明 → 本用例红。
+    用途声明是注释/文档，无法用行为断言证明；这里只守住可执行部分。
+
+    反证：把 fm_scan.PILOT_DETECT_BAND_HZ 改成 300 / 把阈值改成 10 → 本用例红。
     """
     from mbdsdr_ai import fm_scan
 
@@ -299,12 +300,6 @@ def test_runtime_pilot_detection_is_a_distinct_named_threshold():
     assert fm_scan.PILOT_DETECT_SNR_DB != ring3.PILOT_SNR_MIN_DB
     assert fm_scan.PILOT_DETECT_BAND_HZ > ring3.PILOT_FREQ_TOL_HZ
     assert fm_scan.PILOT_DETECT_SNR_DB < ring3.PILOT_SNR_MIN_DB
-
-    fm_src = Path(fm_scan.__file__).read_text(encoding="utf-8")
-    ring3_src = (ROOT / "scripts" / "hw_acceptance" / "ring3_demod_audio.py").read_text(
-        encoding="utf-8")
-    assert "此值不适用于硬件验收" in fm_src
-    assert "此值不适用于产品立体声探测" in ring3_src
 
 
 def test_floor_drift_threshold_matches_recorded_derivation():

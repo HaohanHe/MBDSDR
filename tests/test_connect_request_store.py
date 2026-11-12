@@ -235,11 +235,18 @@ def test_panels_do_not_write_connect_payload_keys_directly():
             f"{os.path.basename(path)} 又直接写连接载荷键 {hits}："
             "必须走 connect_request_store.update/fill_payload")
 
-    store_source = open(os.path.join(_DESKTOP, "connect_request_store.py"),
-                        encoding="utf-8").read()
-    assert 'payload["_gain"]' in store_source
-    assert 'payload["_ppm"]' in store_source
-    assert 'payload["_bandwidth"]' in store_source
+
+def test_store_fills_every_connect_payload_key():
+    """行为验收：写入意图后 ``fill_payload`` 必须把四个键全部带出。"""
+    key = store.resolve([_rtl(0, serial="REAL-0001")])[0].key
+    store.update(key, sample_rate_hz=2_048_000, gain_db=31, ppm=12,
+                 bandwidth_hz=150_000)
+
+    payload = store.fill_payload({}, key)
+    assert payload[store.CONNECT_SAMPLE_RATE_KEY] == pytest.approx(2_048_000)
+    assert payload["_gain"] == pytest.approx(31)
+    assert payload["_ppm"] == 12
+    assert payload["_bandwidth"] == pytest.approx(150_000), payload
 
 
 # ------------------------------------------------ 桌面端与 AI 必须算出同一个键

@@ -137,10 +137,34 @@ def test_reason_text_is_preserved_in_full():
     assert hit[0]["text"] == long_reason
     assert len(hit[0]["text"]) == len(long_reason), "理由被截断了"
 
-    with open(_PANEL_PATH, "r", encoding="utf-8") as f:
-        source = f.read()
-    assert "QScrollArea" in source, "页面没有滚动区"
-    assert "QTextEdit" in source and "setPlainText" in source, "长文本没有滚动控件"
+
+def test_reason_text_renders_full_inside_scroll_area(monkeypatch):
+    """行为验收：长理由整段进只读文本框，且文本框落在可滚动区域里。"""
+    pytest.importorskip("PySide6")
+    from PySide6.QtWidgets import QApplication, QScrollArea, QTextEdit
+
+    _app = QApplication.instance() or QApplication([])
+    long_reason = "Exception: " + ("abcdefghij" * 500)
+    data = _empty_data()
+    data["backups"]["items"] = [{
+        "backup": "bookmarks.json.corrupt-20261112-220000",
+        "reason_file": "bookmarks.json.corrupt-20261112-220000.reason.txt",
+        "reason": long_reason,
+    }]
+    monkeypatch.setattr(panel, "collect_diagnostics", lambda: data)
+
+    dlg = panel._build_dialog_class()()
+    try:
+        boxes = [b for b in dlg.findChildren(QTextEdit)
+                 if b.toPlainText() == long_reason]
+        assert len(boxes) == 1, "长理由没有整段渲染到文本框（被截断或没渲染）"
+        assert boxes[0].isReadOnly(), "理由必须只读展示"
+        node = boxes[0].parent()
+        while node is not None and not isinstance(node, QScrollArea):
+            node = node.parent()
+        assert isinstance(node, QScrollArea), "长文本没有落在可滚动区域"
+    finally:
+        dlg.close()
 
 
 def test_open_help_hook_is_optional():
@@ -168,13 +192,6 @@ def test_backup_rows_carry_path_and_manual_delete_note():
         "没有告诉用户备份可以自己清理"
     assert any("不启动外部程序" in r["text"] for r in rows), \
         "没有写清本页不打开文件管理器"
-
-    with open(_PANEL_PATH, "r", encoding="utf-8") as f:
-        source = f.read()
-    assert "QApplication.clipboard" in source and ".setText(" in source, \
-        "没有复制路径实现"
-    assert "QDesktopServices" not in source and "startfile" not in source, \
-        "页面出现了打开目录的实现"
 
 
 def test_copy_path_button_copies_without_opening_directory(monkeypatch):

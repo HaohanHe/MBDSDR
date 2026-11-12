@@ -22,6 +22,9 @@ import ast
 import json
 import os
 import re
+import sys
+
+import pytest
 
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _DESKTOP = os.path.join(_ROOT, "desktop")
@@ -121,6 +124,24 @@ def _fingerprint(item):
 def _load_baseline():
     with open(_BASELINE, encoding="utf-8") as fh:
         return json.load(fh)["entries"]
+
+
+def _sample_rate_tooltip(monkeypatch) -> str:
+    """构造一次设备面板，读采样率控件渲染后的 tooltip（桩掉硬件枚举）。"""
+    pytest.importorskip("PySide6")
+    if _ROOT not in sys.path:
+        sys.path.insert(0, _ROOT)
+    from PySide6.QtWidgets import QApplication
+
+    _app = QApplication.instance() or QApplication([])
+    from desktop.device_panel import DevicePanel
+
+    monkeypatch.setattr(DevicePanel, "refresh_devices_async", lambda self: None)
+    panel = DevicePanel()
+    try:
+        return panel.sr_edit.toolTip()
+    finally:
+        panel.close()
 
 
 # ======================================================================
@@ -284,7 +305,7 @@ def test_baseline_file_stays_in_sync_with_counter():
     assert len(_load_baseline()) == len(violations)
 
 
-def test_upgraded_tooltips_meet_the_rules():
+def test_upgraded_tooltips_meet_the_rules(monkeypatch):
     """本次改写的 tooltip 必须真的落地：任一处退回旧文案即红。"""
     texts = {item["text"] for item in scan_tooltips()[0]}
     upgraded = [
@@ -326,11 +347,8 @@ def test_upgraded_tooltips_meet_the_rules():
     assert "失败时状态栏会显示真实错误原因" in src
     dock = open(os.path.join(_DESKTOP, "dock_layout_manager.py"), encoding="utf-8").read()
     assert "面板：点击显示或隐藏" in dock
-    # 采样率 tooltip（device_panel.py）同样是三段式 f 字符串拼接，静态扫描
-    # 取不到字面量；且它插的是性能档 1.024 MS/s（PERF_DEFAULT_SR），与
-    # constants.DEFAULT_SR_UNCONFIRMED（内核基准 2.400 MS/s）不是同一个值，
-    # 无法按「必须包含该常量」断言。这里只钉 d77d9b78 引入的语义内核：
-    # 说清是配置意图、并打「默认 · 未确认」标；数字与前后措辞可随产品演进。
-    dev = open(os.path.join(_DESKTOP, "device_panel.py"), encoding="utf-8").read()
-    assert "配置意图，不是设备读数" in dev
-    assert "（默认 · 未确认）" in dev
+    # 采样率 tooltip（device_panel.py）是动态拼接的 f 字符串，读它渲染后的
+    # 实际文案，而不是源码里的字面量：语义内核是「配置意图 + 默认未确认」。
+    dev_tip = _sample_rate_tooltip(monkeypatch)
+    assert "配置意图，不是设备读数" in dev_tip, dev_tip
+    assert "（默认 · 未确认）" in dev_tip, dev_tip

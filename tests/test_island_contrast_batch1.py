@@ -109,14 +109,59 @@ def test_new_spacetime_empty_axis_labels_are_not_watermarked():
 # ---------------------------------------------------------------- T1-6 / T1-8
 
 
+class _PainterFactory:
+    """替身 QPainter：构造时返回记录画笔的转发器，类属性照旧透传。"""
+
+    def __init__(self, spy: _PenSpy, original):
+        self._spy = spy
+        self._original = original
+
+    def __call__(self, *_args, **_kwargs):
+        return self._spy
+
+    def __getattr__(self, name):
+        return getattr(self._original, name)
+
+
+def _pens_from_paint(module, widget):
+    """把 paintEvent 内部 ``QPainter(widget)`` 换成记录画笔的转发器。"""
+    img = QImage(max(widget.width(), 1), max(widget.height(), 1),
+                 QImage.Format_ARGB32)
+    img.fill(0)
+    spy = _PenSpy(QPainter(img))
+    original = module.QPainter
+    module.QPainter = _PainterFactory(spy, original)
+    try:
+        widget.paintEvent(None)
+    finally:
+        module.QPainter = original
+    return spy.pens
+
+
 def test_adsb_range_rings_and_label_no_longer_use_grid_ink():
     """距圈与量程文字不再拿 light_grid 当墨色（对纸面 1.36:1）。"""
-    import inspect
-
     import adsb_panel as ap
 
-    src = inspect.getsource(ap._AdsbMapCanvas.paintEvent)
-    assert "QPen(_GRID" not in src, (
+    class _Ac:
+        icao_hex = "ABC123"
+        callsign = "TEST"
+        lat = 30.0
+        lon = 120.0
+        track_deg = 0.0
+
+    class _Tracker:
+        _ac = {"ABC123": _Ac()}
+
+        def all(self):
+            return list(self._ac.values())
+
+    canvas = ap._AdsbMapCanvas(_Tracker())
+    canvas.set_station(30.0, 120.0)
+    canvas.resize(420, 300)
+
+    colors = {_hex(c) for c in _pens_from_paint(ap, canvas)}
+    assert _hex(ap._STATION) in colors, "距圈/本站没有用站色"
+    assert _hex(ap._GRID) not in colors, (
         "距圈/量程又用回了网格色：light_grid 对 light_bg 只有 1.36:1")
     assert contrast_ratio(ap._STATION.name(), ap._BG.name()) >= MIN_NON_TEXT
     assert contrast_ratio(ap._TEXT.name(), ap._BG.name()) >= MIN_TEXT
@@ -212,11 +257,13 @@ def test_rf_sky_overlay_text_adapts_to_day_and_night():
 
 def test_module_canvas_empty_state_uses_canvas_ink():
     """画布空态文字不能用主题表面的 MUTED（gray_300 对 card_1 仅 2.62:1）。"""
-    import inspect
-
     import module_panel as mp
 
     assert contrast_ratio(mp.CANVAS_MUTED.name(), mp.PAPER.name()) >= MIN_TEXT
-    src = inspect.getsource(mp.FlowCanvas.paintEvent)
-    assert "p.setPen(MUTED)" not in src, (
+    canvas = mp.FlowCanvas()
+    canvas.resize(420, 260)
+
+    colors = {_hex(c) for c in _pens_from_paint(mp, canvas)}
+    assert _hex(mp.CANVAS_MUTED) in colors, "空态文字没有用画布墨色"
+    assert _hex(mp.MUTED) not in colors, (
         "画布空态又用回主题表面的 MUTED：对 card_1 只有 2.62:1")
