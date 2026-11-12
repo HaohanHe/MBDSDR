@@ -70,13 +70,17 @@
   实际横幅同样把它们转成「已标未验证」（+241）；② 按文件性质排除 162 条不横幅
   （hw-acceptance 79／nanovna README 56／evidence-standard 6／reference-mechanisms 21）（−162）；
   ③ 两个 pending-patch 的横幅被并行进程回写覆盖 16 条（−16）。+241−162−16 = +63。
-- **块级标记**：18 个文件、26 处标记、3 笔提交（第 4 批 experiments 的 nanovna
-  README 有真实 data/ 工件，属桶③，不标）。**实测 1349 → 983（−366）**，
-  其中桶② −175、桶① −180、桶④ −11；桶①被表级标记顺带覆盖，已如实计入。
-- **终值 983**，桶分布：①181 / ②691 / ③70 / ④35 / ⑤6。
-  桶②残量前几名：`docs/dsp-performance-baseline.md` 123、
-  `docs/audit_r2/*` 与 `docs/measurements-*.md` 等零散段落（逐条补测清单见
-  `d:\mbdsdr\output\audit_final.json` 的 `rows[].bucket=="②"`）。
+- **块级标记**：18 个文件、26 处标记、3 笔提交 + 1 笔修正（`b6b2bb34`：表格
+  标记后补空行，恢复「表头照旧跳过」，避免表头里的 `文件:符号` 被误记 E1、
+  表头数字被算成断言）。第 4 批 experiments 的 nanovna README 有真实 data/
+  工件，属桶③，不标。**实测 1349 → 905（−444）**：桶② −226、桶① −197、桶④ −21。
+- **终值 905**，桶分布：①164 / ②640 / ③70 / ④25 / ⑤6。
+  桶②残量前几名：`docs/performance-baseline.md` 116、
+  `docs/COORDINATION.md` 40、`docs/parameter-unification.md` 33、
+  `docs/pending-patches/2026-11-11-p0-roadmap-backfill-handoff.md` 29、
+  `docs/hardcoded-parameters.md` 25、`docs/PRD.md` 22、
+  `docs/settings-inventory.md` 21；其余 73 个文件各 ≤20 条
+  （逐条清单见 `d:\mbdsdr\output\audit_fixed.json` 的 `rows[].bucket=="②"`）。
 
 ## 5. 落库时的协调规矩（2026-11-13 派单方明确）
 
