@@ -69,10 +69,19 @@ def _list_audio_output_devices() -> List[Dict]:
         return []
 
 
+#: 单次后台枚举的最长等待（毫秒）。USB open 没有超时，设备/驱动卡死时
+#: ``enumerate_all_sdr_devices()`` 会永不返回；没有这个上限，inflight 会
+#: 永久卡 True，热插拔轮询从此全部跳过，而且日志里一个字都没有。
+#: 5 s 覆盖本机实测最慢 2.4 s，只在真的卡住时触发。
+ENUM_TIMEOUT_MS = 5000
+
+
 class _DeviceEnumSignals(QObject):
     """跨线程枚举结果信号（不挂父对象，生命周期由运行中的任务持有）。"""
 
-    finished = Signal(object, str)  # (devices | None, error_text)
+    #: (devices | None, error_text, token)。token 用于丢弃超时后迟到的结果，
+    #: 避免它把新一轮枚举的 inflight 清掉（见 DevicePanel._on_enum_timeout）。
+    finished = Signal(object, str, int)
 
 
 class _DeviceEnumTask(QRunnable):
@@ -84,9 +93,10 @@ class _DeviceEnumTask(QRunnable):
     QThreadPool：存在性判断结果不变，只是不再阻塞事件循环。
     """
 
-    def __init__(self, signals: _DeviceEnumSignals):
+    def __init__(self, signals: _DeviceEnumSignals, token: int = 0):
         super().__init__()
         self._signals = signals
+        self._token = int(token)
 
     def run(self):  # noqa: D102 - Qt 接口
         try:
@@ -96,7 +106,7 @@ class _DeviceEnumTask(QRunnable):
         except Exception as exc:  # noqa: BLE001
             devices, err = None, f"{type(exc).__name__}: {exc}"
         try:
-            self._signals.finished.emit(devices, err)
+            self._signals.finished.emit(devices, err, self._token)
         except RuntimeError:
             # 面板已销毁、接收端已自动断开：结果无人接收，安静丢弃。
             pass
@@ -157,6 +167,12 @@ class DevicePanel(QWidget):
         self._refresh_signals = _DeviceEnumSignals()
         self._refresh_signals.finished.connect(self._on_devices_refreshed)
         self._refresh_inflight = False
+        #: 刷新枚举的 token 与看门狗：枚举卡死时也要能复位 inflight，
+        #: 否则 _refresh_inflight 会永久挡住热插拔轮询（见 _on_hotplug_poll）。
+        self._refresh_token = 0
+        self._refresh_watchdog = QTimer(self)
+        self._refresh_watchdog.setSingleShot(True)
+        self._refresh_watchdog.timeout.connect(self._on_refresh_timeout)
         # 枚举完成前 dropdown 如实写「正在枚举」、连接按钮置灰：
         # 不假装「未检测到设备」，也不允许对着占位项点连接。
         self.dev_combo.addItem("正在枚举设备…")
@@ -167,6 +183,12 @@ class DevicePanel(QWidget):
         self._enum_signals = _DeviceEnumSignals()
         self._enum_signals.finished.connect(self._on_hotplug_devices)
         self._enum_inflight = False
+        #: 本轮枚举的 token；超时/完成后自增，迟到结果按 token 丢弃。
+        self._enum_token = 0
+        self._enum_timeout_count = 0
+        self._enum_watchdog = QTimer(self)
+        self._enum_watchdog.setSingleShot(True)
+        self._enum_watchdog.timeout.connect(self._on_enum_timeout)
         self._hotplug_timer = QTimer(self)
         self._hotplug_timer.setInterval(2000)
         self._hotplug_timer.timeout.connect(self._on_hotplug_poll)
@@ -302,20 +324,43 @@ class DevicePanel(QWidget):
         if self._refresh_inflight or self._enum_inflight:
             return  # 上一拍还没回来，不堆积任务
         self._refresh_inflight = True
+        self._refresh_token += 1
+        # 枚举卡死时不能永远等：看门狗到点复位 inflight（见 _on_refresh_timeout）。
+        self._refresh_watchdog.start(ENUM_TIMEOUT_MS)
         # 每次手动刷新都给「正在枚举」这一拍：设备集合没变时，否则界面
         # 从点击到结果零变化，用户无法判断按钮到底有没有被响应（审计
         # 白名单里这条「幂等刷新」即由此而来）。结果回来照旧写实际台数。
         self.status_label.setText("正在枚举设备…")
         self.status_label.setToolTip("")
-        QThreadPool.globalInstance().start(_DeviceEnumTask(self._refresh_signals))
+        QThreadPool.globalInstance().start(
+            _DeviceEnumTask(self._refresh_signals, self._refresh_token))
 
-    def _on_devices_refreshed(self, devices, err: str) -> None:
+    def _on_devices_refreshed(self, devices, err: str, token: int = 0) -> None:
         """后台刷新回来了：GUI 线程里更新下拉框（失败按空列表处理，不造假）。"""
+        if token != self._refresh_token:
+            return  # 超时后迟到的旧结果：不得清掉新一轮的 inflight
         self._refresh_inflight = False
+        self._refresh_watchdog.stop()
         if err or devices is None:
             self._apply_devices([])
             return
         self._apply_devices(devices)
+
+    def _on_refresh_timeout(self) -> None:
+        """刷新枚举超过上限仍未返回：复位 inflight，让后续刷新/轮询能重试。"""
+        if not self._refresh_inflight:
+            return
+        self._refresh_inflight = False
+        self._refresh_token += 1  # 迟到结果作废
+        logger.warning(
+            "设备枚举超时（刷新，>%.1fs）：enumerate_all_sdr_devices 未返回，"
+            "已复位 inflight，下一次刷新会重新发起枚举",
+            ENUM_TIMEOUT_MS / 1000.0)
+        self.status_label.setText("设备枚举超时 · 稍后自动重试")
+        self.status_label.setToolTip(
+            "枚举设备超过 %.0f 秒没有返回，通常是设备/驱动无响应（USB open 无超时）。"
+            "面板会自动重试；也可拔插设备后点「刷新」。"
+            % (ENUM_TIMEOUT_MS / 1000.0))
 
     def _apply_devices(self, devices) -> None:
         """把一份已枚举到的设备列表落到控件上（不触发重新枚举）。"""
@@ -360,11 +405,21 @@ class DevicePanel(QWidget):
         if self._enum_inflight or self._refresh_inflight:
             return
         self._enum_inflight = True
-        QThreadPool.globalInstance().start(_DeviceEnumTask(self._enum_signals))
+        self._enum_token += 1
+        # 枚举卡死（USB open 无超时）时 finished 永不发射：看门狗到点复位
+        # inflight，否则热插拔检测整体死亡且日志里看不出来。
+        self._enum_watchdog.start(ENUM_TIMEOUT_MS)
+        QThreadPool.globalInstance().start(
+            _DeviceEnumTask(self._enum_signals, self._enum_token))
 
-    def _on_hotplug_devices(self, now, err: str):
+    def _on_hotplug_devices(self, now, err: str, token: int = 0):
         """后台枚举回来了：在 GUI 线程里做插入/拔出判定（结果语义与原来一致）。"""
+        if token != self._enum_token:
+            # 超时那拍已经复位并重派了新任务：迟到的旧结果既不能当现状，
+            # 也不能把新任务的 inflight 清掉（那会让下一拍重复派发）。
+            return
         self._enum_inflight = False
+        self._enum_watchdog.stop()
         if err or now is None:
             return
         # 身份键与 set_connected 用同一套规则（connect_request_store.resolve），
@@ -397,6 +452,30 @@ class DevicePanel(QWidget):
                     break
             # 本轮枚举刚拿到的列表直接落控件，不再触发第二次枚举。
             self._apply_devices(now)
+
+    def _on_enum_timeout(self) -> None:
+        """热插拔枚举超过上限仍未返回：复位 inflight 并留下可见证据。
+
+        这一步是整个看门狗的关键：不复位 ``_enum_inflight``，之后每一拍轮询
+        都会在 ``_on_hotplug_poll`` 开头被跳过，热插拔检测从此静默死亡。
+        复位后下一拍会重新派发枚举（本次失败可重试）；旧任务即使随后返回，
+        也因 token 不匹配被丢弃。
+        """
+        if not self._enum_inflight:
+            return
+        self._enum_inflight = False
+        self._enum_token += 1  # 迟到结果作废
+        self._enum_timeout_count += 1
+        logger.warning(
+            "设备枚举超时（第 %d 次，>%.1fs）：enumerate_all_sdr_devices 未返回，"
+            "已复位 inflight；下一拍轮询会重新发起枚举",
+            self._enum_timeout_count, ENUM_TIMEOUT_MS / 1000.0)
+        self.status_label.setText(
+            f"设备枚举超时 · 已自动重试 {self._enum_timeout_count} 次")
+        self.status_label.setToolTip(
+            "枚举设备超过 %.0f 秒没有返回，通常是设备/驱动无响应（USB open 无超时）。"
+            "热插拔检测会在下一拍自动重试；也可拔插设备后点「刷新」。"
+            % (ENUM_TIMEOUT_MS / 1000.0))
 
     @staticmethod
     def _locator_of(d: Dict) -> tuple:
