@@ -118,7 +118,7 @@ def _load(psutil, sec: float = 2.0) -> dict:
             before[p.pid] = p.cpu_times()
         except Exception:
             continue
-    time.sleep(sec)
+    sys_pct = psutil.cpu_percent(interval=sec)
     rows = []
     for p in procs:
         try:
@@ -130,7 +130,8 @@ def _load(psutil, sec: float = 2.0) -> dict:
         except Exception:
             continue
     rows.sort(key=lambda r: -r["cpu_pct"])
-    return {"python_proc_count": len(rows),
+    return {"sys_cpu_pct": round(sys_pct, 1),
+            "python_proc_count": len(rows),
             "python_total_cpu_pct": round(sum(r["cpu_pct"] for r in rows), 1),
             "python_top": rows[:5], "cpu_count": psutil.cpu_count()}
 
