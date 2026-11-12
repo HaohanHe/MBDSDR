@@ -38,8 +38,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 HOOKS_SRC = ROOT / "scripts" / "hooks"
 HOOK_NAMES = ("pre-commit", "post-commit")
-#: claim 闸的运行时依赖：装到 hooks 目录，保证旧工作树也能跑（见模块 docstring）。
-SUPPORT_FILES = ("claim_gate.py", "file_claim.py")
+#: 闸门的运行时依赖：装到 hooks 目录，保证旧工作树也能跑（见模块 docstring）。
+SUPPORT_FILES = ("claim_gate.py", "file_claim.py", "secret_scan.py")
 SIGNATURE = "MBDSDR-MANAGED-HOOK"
 
 
