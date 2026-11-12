@@ -10,6 +10,27 @@
 操作，任何一步不满足就退出且**不提交**；撞上 ref 锁就用新 HEAD 整盘重建 index
 再试（默认 3 次）。
 
+会话私有 index（2026-11-13，形态⑬）
+------------------------------------
+
+本脚本从不读写共享的 ``.git/index``；index 固定落在
+``<locks>/index/<session>.<pid>.index``（``MBDSDR_LOCKS_DIR`` 可覆盖，
+默认仓库上一级的 ``.locks``，与 file_claim 同一处）。选它而不是
+``git commit --only -- <paths>``：``--exclude-hunk`` 需要先把声明 hunk
+从 index 反向撤掉，``--only`` 会按工作树重新取内容，排除声明会失效。
+仍会串的场景写在 ``_warn_shared_index``：**别的会话**用 ``git add -A`` /
+``git commit -a`` 往共享 index 暂存，再由它自己的普通 ``git commit`` 带走；
+本脚本只能做到「自己这一笔绝对不含未声明路径」，管不了别人的笔。
+因此提交后追加作用域机检：HEAD 的父必须是本次基线，且 HEAD 的改动路径
+必须与 ``--files`` 清单逐项相等，否则按退出码 3（已提交、事故卡）报出。
+
+私有 index 只隔离了「读谁的暂存区」，隔离不了「写进哪个父提交」：建完 index
+到真提交之间 HEAD 若被推进，本笔 tree 按旧 HEAD 建，diff 出来会删掉对方刚加的
+文件。所以「重读 HEAD → commit → 作用域机检」整段由 ``<locks>/commit.lock``
+互斥（``_CommitLock``，崩溃残留 600s 后可摘）；锁内发现基线变了就返回可重试
+错误，用新 HEAD 整盘重建 index。绕开本脚本手敲 ``git commit`` 仍能破坏它，
+那种情况由作用域机检以退出码 3 抓出来。
+
 排除他人 hunk（2026-11-12 裁定）
 --------------------------------
 
@@ -45,13 +66,14 @@ import os
 import re
 import subprocess
 import sys
-import tempfile
 import time
 from pathlib import Path
 
 ROOT = Path(
     os.environ.get("MBDSDR_REPO_ROOT") or Path(__file__).resolve().parents[1]
 )
+#: 与 file_claim 同一处；index 不落在仓库里，避免被 .gitignore/备份扫到
+LOCKS_DIR = Path(os.environ.get("MBDSDR_LOCKS_DIR") or (ROOT.parent / ".locks"))
 
 EXCLUDE_ENV = "MBDSDR_EXCLUDE_HUNKS"
 INTENT_ENV = "MBDSDR_INTENT_DELETIONS"
@@ -219,6 +241,92 @@ def _index_env(path: Path) -> dict:
     return env
 
 
+def _session_key() -> str:
+    """会话名（环境变量优先），只保留文件名安全字符。"""
+    raw = (os.environ.get("MBDSDR_SESSION_ID")
+           or os.environ.get("MBDSDR_CLAIM_OWNER")
+           or f"pid{os.getpid()}")
+    safe = re.sub(r"[^A-Za-z0-9_.-]+", "_", raw).strip("._")
+    return (safe or "session")[:64]
+
+
+def _index_path() -> Path:
+    """每个会话（进程）自己的 index；不碰共享 ``.git/index``。"""
+    directory = LOCKS_DIR / "index"
+    directory.mkdir(parents=True, exist_ok=True)
+    return directory / f"{_session_key()}.{os.getpid()}.index"
+
+
+def _warn_shared_index() -> None:
+    """共享 index 里有暂存项时告警：本脚本不读它，但别人会。
+
+    这正是 ``ddcecf76`` 的成因——A 会话 ``git add -A`` 后只提交了声明路径，
+    B 会话的普通 ``git commit`` 把剩下的暂存项按 B 的消息带走了。隔离只能
+    保证本脚本自己的提交干净，挡不住别人用共享 index 提交。
+    """
+    env = {k: v for k, v in os.environ.items() if k != "GIT_INDEX_FILE"}
+    proc = _run(["diff", "--cached", "--name-only", "--no-renames"], env)
+    staged = [p for p in proc.stdout.decode("utf-8", "replace").splitlines() if p]
+    if staged:
+        print(
+            f"[warn] 共享 index 有 {len(staged)} 个暂存项：{', '.join(staged[:8])}"
+            + ("…" if len(staged) > 8 else "")
+            + "；本脚本不读它，但任何普通 git commit 都会把它们带走。"
+        )
+
+
+class _CommitLock:
+    """跨进程串行化「读 HEAD → commit → 作用域机检」这一段。
+
+    私有 index 只解决「读的是谁的暂存区」，解决不了「写进哪个父提交」：从
+    ``read-tree`` 到 ``git commit`` 之间 HEAD 若被别的会话推进，本笔的 tree
+    是按旧 HEAD 建的，diff 出来会**删掉**对方刚加的文件。所以提交这一段必须
+    互斥：锁内重读 HEAD，和基线不一致就退回去整盘重建 index。
+    """
+
+    def __init__(self, timeout: float = 120.0, stale_after: float = 600.0) -> None:
+        self.path = LOCKS_DIR / "commit.lock"
+        self.timeout = timeout
+        self.stale_after = stale_after
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+
+    def __enter__(self) -> "_CommitLock":
+        deadline = time.monotonic() + self.timeout
+        while True:
+            try:
+                fd = os.open(self.path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            except FileExistsError:
+                # 持有者崩溃留下的旧锁：超过 stale_after 直接摘掉，否则等
+                try:
+                    if time.time() - self.path.stat().st_mtime > self.stale_after:
+                        self.path.unlink()
+                        continue
+                except OSError:
+                    pass
+                if time.monotonic() > deadline:
+                    raise TimeoutError(
+                        f"等提交锁超时（{self.timeout:.0f}s）：{self.path}"
+                        "（若确认无提交在跑，删掉该文件即可）"
+                    )
+                time.sleep(0.05)
+                continue
+            with os.fdopen(fd, "w", encoding="utf-8") as handle:
+                handle.write(f"{os.getpid()}\n")
+            return self
+
+    def __exit__(self, *_exc) -> None:
+        try:
+            self.path.unlink()
+        except OSError:
+            pass
+
+
+def _blob(env: dict, rev: str) -> str:
+    """取 rev 的 blob 号；删除项/不存在返回空串。"""
+    proc = _run(["rev-parse", "--verify", "--quiet", rev], env)
+    return proc.stdout.decode().strip() if proc.returncode == 0 else ""
+
+
 def _staged_set(env) -> list[str]:
     proc = _run(["diff", "--cached", "--name-status", "--no-renames"], env)
     out = []
@@ -314,12 +422,28 @@ def _attempt(
     # 3) 记录待提交 blob，供提交后复核（形态⑩）
     #    用 --verify --quiet 取：删除项（index/HEAD 都没有该路径）返回空，
     #    否则 `rev-parse :path` 会把参数原样回显，删除项必被误判成 blob 不一致。
-    def _blob(rev: str) -> str:
-        proc = _run(["rev-parse", "--verify", "--quiet", rev], env)
-        return proc.stdout.decode().strip() if proc.returncode == 0 else ""
+    wanted = {f: _blob(env, f":{f}") for f in files}
 
-    wanted = {f: _blob(f":{f}") for f in files}
+    # 4) 提交窗口加锁：读 HEAD → commit → 作用域机检 必须串行，
+    #    否则「建 index 时的父」和「真提交时的父」可以是两个（形态⑬）。
+    try:
+        lock = _CommitLock().__enter__()
+    except TimeoutError as exc:
+        return 1, str(exc)
+    try:
+        return _commit_locked(files, message, env, base, wanted)
+    finally:
+        lock.__exit__(None, None, None)
 
+
+def _commit_locked(
+    files: list[str],
+    message: bytes,
+    env: dict,
+    base: str,
+    wanted: dict[str, str],
+) -> tuple[int, str]:
+    """锁内：重校验基线 → commit → 作用域机检 → blob 复核。"""
     # 4) 提交前重校验基线：HEAD 变了就整盘重建
     now = _run(["rev-parse", "HEAD"], env).stdout.decode().strip()
     if now != base:
@@ -335,11 +459,37 @@ def _attempt(
         return 1, f"git commit 失败：{err.strip()[:300]}"
     _report_hooks(commit, env)
 
+    # 5b) 作用域机检：本笔只能包含 --files 声明的路径，且父提交就是本次基线。
+    #     共享 index 被别线暂存污染时，这里会在「已提交」之后红着脸报出来
+    #     （退出码 3），而不是等下一个人对着 blame 猜「这行是谁的」。
+    parent = _run(["rev-parse", "HEAD^"], env).stdout.decode().strip()
+    changed = _run(
+        ["diff-tree", "--no-commit-id", "--name-only", "-r", "--no-renames", "HEAD"],
+        env,
+    )
+    actual = sorted(
+        p for p in changed.stdout.decode("utf-8", "replace").splitlines() if p
+    )
+    declared = sorted(files)
+    if parent != base:
+        # 锁内仍被绕过（有人手敲 git commit）：这笔已落到别人的父上，按事故报
+        return 3, (
+            f"提交父不是本次基线：{parent[:8]} / {base[:8]}"
+            f"（有进程绕过提交锁）；本笔改动 {len(actual)} 项 {actual[:8]}"
+        )
+    if actual != declared:
+        extra = sorted(set(actual) - set(declared))
+        missing = sorted(set(declared) - set(actual))
+        return 3, (
+            f"提交作用域不符：声明 {len(declared)} 项 / 实际 {len(actual)} 项"
+            f" 多 {extra} 缺 {missing}"
+        )
+
     # 6) 提交后复核：HEAD 里每个文件的 blob 必须等于暂存时的 blob
     #    （删除项两边都为空，相等即通过）
     bad = []
     for f, blob in wanted.items():
-        head_blob = _blob(f"HEAD:{f}")
+        head_blob = _blob(env, f"HEAD:{f}")
         if head_blob != blob:
             bad.append(f"{f}（暂存 {blob[:8] or '<删除>'} / "
                        f"HEAD {head_blob[:8] or '<删除>'}）")
@@ -375,7 +525,9 @@ def main(argv: list[str] | None = None) -> int:
     except ValueError as exc:
         print(f"拒绝：{exc}")
         return 1
-    index = Path(tempfile.gettempdir()) / f"safe_commit_{os.getpid()}_{int(time.time())}.idx"
+    index = _index_path()
+    print(f"[index] 会话私有 index：{index}")
+    _warn_shared_index()
 
     try:
         for n in range(1, args.retries + 1):
