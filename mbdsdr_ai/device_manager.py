@@ -53,6 +53,22 @@ class DeviceDisconnectedError(DeviceError):
     """读样本期间设备被拔出（或连接断开）。下次应重新 list_devices()。"""
 
 
+def _release_owner_claim(key: str) -> None:
+    """归还跨进程占用登记。空键（网络源）直接返回；失败只告警。
+
+    ``kill -9`` 时这里不会执行——那种情况靠登记里的 pid + 进程启动时间在
+    下一次 claim 时被 :func:`sdr_backend.release_stale_owners` 清掉，
+    所以设备不会永久锁死，也不依赖 atexit 一定跑到。
+    """
+    if not key:
+        return
+    try:
+        from .sdr_backend import release_hardware_owner
+        release_hardware_owner(key)
+    except Exception as e:
+        logger.warning("释放设备占用登记失败（%s）：%s", key, e)
+
+
 # ---------------------------------------------------------------------------
 # DeviceInfo：一次枚举快照
 # ---------------------------------------------------------------------------
@@ -80,6 +96,10 @@ class DeviceInfo:
     endpoint: Tuple[str, int] = ("", 0)
     # 本次枚举位置：序列号缺失时用于定位，不能当身份（换口会变）。
     enum_index: int = -1
+    # 统一枚举（sdr_backend.enumerate_all_sdr_devices）里的 canonical 条目。
+    # open() 用它算身份键并 claim 占用——必须与桌面端/AI 侧同源，否则同一根
+    # 棒在两边算出不同键，跨进程互斥形同虚设。网络源（rtltcp）为空：不占本地硬件。
+    identity: Dict[str, Any] = field(default_factory=dict)
 
     @property
     def has_stable_identity(self) -> bool:
@@ -111,8 +131,9 @@ class DeviceInfo:
         并在 has_stable_identity 上明确标为不可分辨。
 
         拼写与 canonical 键（``driver|serial:<sn>``）不同：这是面向用户/CLI
-        的标识（``--device rtlsdr:SN`` 已被脚本使用），且 ``DeviceManager``
-        **不参与跨进程占用比较**，拼写不同不会让同一台被当成两台去抢设备。
+        的标识（``--device rtlsdr:SN`` 已被脚本使用）。跨进程占用比较**不用**
+        它，而用 ``identity`` 算出的 canonical 键（见 ``open()``），保证与
+        桌面端 / AI 侧同一根棒得到同一个键。
         唯一定义在 ``device_identity.manager_key``，此处不再写第二份 f-string。
         """
         from .device_identity import manager_key
@@ -134,6 +155,8 @@ class OpenDevice:
         self._backend = backend  # 具体驱动对象（rtlsdr.RtlSdr / SoapySDR.Device / ...）
         self._closed = False
         self._lock = threading.Lock()
+        #: open() 成功时登记的设备占用键；close() 时归还（空串=网络源不登记）。
+        self._claim_key: str = ""
         # ── ReceiveChain 实时音频（信道滤波/立体声/去加重 → 声卡）──
         self._sample_rate_hz: Optional[float] = None
         self._chain: Any = None
@@ -397,6 +420,9 @@ class OpenDevice:
             self._backend.close()
         except Exception:
             pass
+        # 谁开谁 release：正常 close、disconnect、异常清理都走这里。
+        key, self._claim_key = self._claim_key, ""
+        _release_owner_claim(key)
 
 
 # ---------------------------------------------------------------------------
@@ -460,7 +486,7 @@ class DeviceManager:
     def _probe_rtlsdr(self) -> List[DeviceInfo]:
         """通过 pyrtlsdr 枚举本机 USB RTL-SDR；导入失败/无设备返回 []。"""
         try:
-            from .sdr_backend import RTLSDRBackend
+            from .sdr_backend import RTLSDRBackend, rtlsdr_native_entry
             items = RTLSDRBackend.list_devices()
         except Exception as e:
             logger.debug("RTLSDRBackend 枚举不可用，跳过 RTL-SDR: %s", e)
@@ -479,6 +505,8 @@ class DeviceManager:
                 sample_rates=self._RTL_SRATES,
                 gains=self._RTL_GAINS,
                 enum_index=idx,
+                # 与 enumerate_all_sdr_devices 同一条目：身份键不会各算一套。
+                identity=rtlsdr_native_entry(it),
             )
             self._warn_identity_once(info)
             out.append(info)
@@ -537,6 +565,14 @@ class DeviceManager:
                     sample_rates=sample_rates,
                     gains=gains,
                     enum_index=i,
+                    # canonical 身份用**原始** driver（不带 soapysdr: 前缀），
+                    # 与 SoapySDRBackend.list_devices() 的条目逐字一致。
+                    identity={
+                        "driver": driver,
+                        "serial": serial,
+                        "label": str(sarg.get("label") or driver),
+                        "device_args": dict(sarg),
+                    },
                 )
                 self._warn_identity_once(info)
                 out.append(info)
@@ -583,12 +619,73 @@ class DeviceManager:
 
     # -- 打开 / 关闭 --------------------------------------------------------
     def open(self, info: DeviceInfo) -> OpenDevice:
-        """打开一台设备，返回 OpenDevice 句柄。找不到/驱动失败抛 DeviceNotFoundError。"""
+        """打开一台设备，返回 OpenDevice 句柄。找不到/驱动失败抛 DeviceNotFoundError。
+
+        占用判据在**任何重新枚举/打开之前**：与桌面端、AI 侧走同一个 claim
+        （``sdr_backend.acquire_hardware_owner``）。CLI 若绕过它，同一根 USB
+        棒就能被 CLI 和桌面端同时打开，三态展示与 fail-closed 全成摆设。
+        登记命中时连枚举都不做——枚举本身会 probe 打开设备。
+        """
         if not info.has_stable_identity and info.enum_index < 0:
             raise DeviceNotFoundError(
                 f"设备「{info.name}」身份不可分辨：既没有序列号，也没有本次枚举位置；"
                 "请重新 list_devices() 取一份新快照，不要复用旧对象。"
             )
+        claim_key = self._claim_owner(info)
+        try:
+            opened = self._open_checked(info)
+        except Exception:
+            self._release_owner(claim_key)
+            raise
+        opened._claim_key = claim_key
+        return opened
+
+    def _claim_owner(self, info: DeviceInfo) -> str:
+        """登记占用；成功返回登记键，网络源返回空串（不占本地硬件）。
+
+        拒绝时按两种结论抛不同异常：登记不可读 → 「读不出来」
+        （``OwnerRegistryUnavailableError``）；有真实持有者 → 「谁占着、pid 多少」
+        （``DeviceBusyError``）。文案全部来自 ``sdr_backend``，CLI 不另写一份。
+        """
+        if info.driver == "rtltcp":
+            # 与 RTLTCPBackend.hardware_owner_identity() 返回 None 保持一致：
+            # 远端 / 共享的网络源不是本机 USB，不参与本机互斥。
+            return ""
+        from .sdr_backend import (
+            IDENTITY_STABLE, acquire_hardware_owner, device_identity_aliases,
+            device_identity_key, rtlsdr_native_entry,
+        )
+        identity = dict(info.identity)
+        if not identity and info.driver == "rtlsdr":
+            # 手工构造的 DeviceInfo（测试/脚本）没有枚举条目：用与统一枚举
+            # 完全相同的构造函数补一条，别在这里再拼一套键。
+            identity = rtlsdr_native_entry(
+                {"index": info.enum_index, "serial": info.serial})
+        if not identity.get("driver"):
+            raise DeviceNotFoundError(
+                f"设备「{info.name}」缺少统一身份信息，无法参与占用判据；"
+                "请重新 list_devices() 取一份新快照。"
+            )
+        key, quality, _warning = device_identity_key(identity)
+        ok, conflict, untrusted = acquire_hardware_owner(
+            key,
+            aliases=device_identity_aliases(identity),
+            allow_alias_match=quality != IDENTITY_STABLE,
+        )
+        if ok:
+            return key
+        # 延迟导入：mbdsdr_ai.core 会 import 本模块，模块级导入会成环。
+        from .core.errors import DeviceBusyError, OwnerRegistryUnavailableError
+        if untrusted:
+            raise OwnerRegistryUnavailableError(conflict)
+        raise DeviceBusyError(conflict)
+
+    @staticmethod
+    def _release_owner(key: str) -> None:
+        _release_owner_claim(key)
+
+    def _open_checked(self, info: DeviceInfo) -> OpenDevice:
+        """校验设备仍在枚举中，再交给对应驱动打开。调用方负责 claim/release。"""
         # 先校验还在
         present = {d.device_key for d in self.list_devices()}
         if info.device_key not in present:
