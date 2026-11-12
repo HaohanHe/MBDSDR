@@ -54,10 +54,10 @@ def ntp_offset(server: str = "ntp.aliyun.com", port: int = 123, timeout: float =
     时间源保持系统时钟，不做假校时）。
     """
     try:
-        from .orbit import _network_disabled
+        from .net_policy import network_disabled
     except ImportError:  # 独立脚本运行
-        from orbit import _network_disabled
-    if _network_disabled():
+        from net_policy import network_disabled
+    if network_disabled():
         return {
             "ntp_server": server, "reachable": False, "offline": True,
             "error": ("离线模式（MBDSDR_OFFLINE）：NTP 授时需要联网，已拒绝；"
