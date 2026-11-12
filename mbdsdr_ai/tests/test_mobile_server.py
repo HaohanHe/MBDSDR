@@ -125,13 +125,18 @@ def test_broadcast_unicode_not_escaped():
 # ---------------------------------------------------------------- handle
 
 def test_handle_bad_json_skipped():
-    """坏 JSON 行跳过（continue），后续正常消息仍被处理。"""
+    """坏 JSON 行不让主循环中断，且必须回执（A03：不再静默丢弃）。
+
+    新契约：坏消息 → 回一条 error 帧（code=bad_json）→ 后续正常消息照常处理。
+    """
     hub = MobileHub()
     ws = FakeWS(["{not json", json.dumps({"type": "handshake",
                                           "payload": {"device": "p"}})])
     asyncio.run(hub.handle(ws))
-    assert len(ws.sent) == 1
-    assert json.loads(ws.sent[0]) == {"type": "hello", "ok": True}
+    frames = [json.loads(s) for s in ws.sent]
+    assert frames[0]["type"] == "error"
+    assert frames[0]["payload"]["code"] == "bad_json"
+    assert frames[-1] == {"type": "hello", "ok": True}
 
 
 def test_handle_registers_on_enter():

@@ -49,11 +49,29 @@ class MobileHub:
             async for raw in ws:
                 try:
                     msg = json.loads(raw)
-                except Exception:
+                except (ValueError, TypeError) as exc:
+                    # 非法消息不能静默丢：回执 + 日志，手机端才知道没被处理
+                    log.warning("手机端消息不是合法 JSON，已拒绝并回执：%s", exc)
+                    await self._send_error(ws, "bad_json", "消息不是合法 JSON，已丢弃")
+                    continue
+                if not isinstance(msg, dict):
+                    log.warning("手机端消息不是 JSON 对象（%s），已拒绝并回执",
+                                type(msg).__name__)
+                    await self._send_error(ws, "bad_message", "消息必须是 JSON 对象")
                     continue
                 await self.on_message(ws, msg)
         finally:
             await self.unregister(ws)
+
+    async def _send_error(self, ws, code: str, text: str) -> None:
+        """回执发送失败只记日志：连接已断不应影响主循环收尾。"""
+        try:
+            await ws.send(json.dumps({
+                "type": "error",
+                "payload": {"code": code, "text": text},
+            }, ensure_ascii=False))
+        except Exception as exc:
+            log.warning("错误回执发送失败（%s）：%s", code, exc)
 
     async def on_message(self, ws, msg: dict):
         mtype = msg.get("type")
