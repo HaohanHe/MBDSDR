@@ -17,6 +17,7 @@
 import os
 import re
 import sys
+from collections import Counter
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -193,38 +194,129 @@ def test_status_color_readable_on_dark_panel(theme, kind, bg):
         f"{theme}: {kind} {color} on 深色面板 {bg} 对比度 {ratio:.2f} < 4.5")
 
 
-#: 直接读全局状态色 = 绕过主题 remap。已迁点必须走 tokens().status_color()。
-#: 例外只收已登记待迁移的点位；迁移时连同这里一起删。
-_ALLOWED_DIRECT_READS = {
-    "desktop/main_window.py":
-        "PTT 提示条已登记下一批；必须与同处 rgba(200,160,64,0.18) 的琥珀底一起改",
-}
-_DIRECT_READ = re.compile(r"""COLORS\s*\[\s*['"]status_(?:warning|danger)['"]\s*\]""")
+#: 直接读全局语义色 = 绕过主题 remap。浅色主题下 danger 4.45、success 2.73、
+#: accent 2.78、status_busy 2.03，全部掉出正文 4.5 阈值。
+_SEMANTIC_TOKENS = ("danger", "success", "accent", "status_busy",
+                    "status_warning", "status_danger")
+_DIRECT_READ = re.compile(
+    r"""COLORS\s*\[\s*['"](danger|success|accent|status_busy"""
+    r"""|status_warning|status_danger)['"]\s*\]""")
+
+#: 棘轮基线（只许降不许涨）：当前全部命中，逐条「文件:行 + 取的 token」。
+#: kind 语义：
+#:   A1     待迁 status_color 的 11 个单元（control 两行同属 1 个单元，共 12 行）；
+#:   A2     success/accent 当正文或填充，等用户拍板，禁止新增；
+#:   FROZEN main_window 已登记冻结项（须与同处底纹一起改）；
+#:   ISLAND 固定深/浅色岛屿，读全局 COLORS 是设计（docs/a11y 清单 B 类）；
+#:   TEST   测试自己断言 token 原值。
+#: 修完一条：删掉对应行，A1 单元数随 `_BASELINE_CEILING` 一起下调。
+_BASELINE = (
+    # ---- A1 待迁（11 个单元 / 12 行）----
+    ("desktop/status_panel.py", 360, "danger", "A1", "status:360"),
+    ("desktop/status_panel.py", 867, "danger", "A1", "status:867"),
+    ("desktop/status_panel.py", 965, "danger", "A1", "status:965"),
+    ("desktop/status_panel.py", 1019, "danger", "A1", "status:1019"),
+    ("desktop/sat_track_panel.py", 453, "danger", "A1", "sat:453"),
+    ("desktop/sat_track_panel.py", 518, "danger", "A1", "sat:518"),
+    ("desktop/sat_track_panel.py", 522, "danger", "A1", "sat:522"),
+    ("desktop/vfo_panel.py", 232, "danger", "A1", "vfo:232"),
+    ("desktop/ntrip_panel.py", 48, "danger", "A1", "ntrip:48"),
+    ("desktop/ntrip_panel.py", 49, "status_busy", "A1", "ntrip:49"),
+    ("desktop/control_panel.py", 999, "danger", "A1", "control:invalid"),
+    ("desktop/control_panel.py", 1007, "danger", "A1", "control:invalid"),
+    # ---- A2 等拍板（success/accent 当正文/填充）----
+    ("desktop/status_panel.py", 855, "success", "A2", ""),
+    ("desktop/status_panel.py", 857, "accent", "A2", ""),
+    ("desktop/status_panel.py", 863, "success", "A2", ""),
+    ("desktop/status_panel.py", 865, "accent", "A2", ""),
+    ("desktop/status_panel.py", 959, "success", "A2", ""),
+    ("desktop/status_panel.py", 1013, "success", "A2", ""),
+    ("desktop/status_panel.py", 1016, "accent", "A2", ""),
+    ("desktop/status_panel.py", 1049, "success", "A2", ""),
+    ("desktop/status_panel.py", 1093, "success", "A2", ""),
+    ("desktop/sat_track_panel.py", 526, "success", "A2", ""),
+    ("desktop/sat_track_panel.py", 528, "success", "A2", ""),
+    ("desktop/vfo_panel.py", 191, "accent", "A2", ""),
+    ("desktop/ntrip_panel.py", 50, "success", "A2", ""),
+    # ---- FROZEN 冻结期登记 ----
+    ("desktop/main_window.py", 5273, "status_warning", "FROZEN", ""),
+    ("desktop/main_window.py", 11523, "accent", "FROZEN", ""),
+    # ---- ISLAND 固定色岛屿（不随主题，属设计）----
+    ("desktop/adsb_map_panel.py", 76, "accent", "ISLAND", ""),
+    ("desktop/ai_panel.py", 504, "accent", "ISLAND", ""),
+    ("desktop/constellation_panel.py", 439, "success", "ISLAND", ""),
+    ("desktop/freq_display.py", 216, "accent", "ISLAND", ""),
+    ("desktop/module_panel.py", 71, "accent", "ISLAND", ""),
+    ("desktop/module_panel.py", 79, "success", "ISLAND", ""),
+    ("desktop/new_spacetime_panel.py", 115, "accent", "ISLAND", ""),
+    ("desktop/new_spacetime_panel.py", 116, "success", "ISLAND", ""),
+    ("desktop/new_spacetime_panel.py", 117, "danger", "ISLAND", ""),
+    ("desktop/rf_sky_view.py", 2017, "accent", "ISLAND", ""),
+    ("desktop/rf_sky_view.py", 2037, "success", "ISLAND", ""),
+    ("desktop/rf_sky_view.py", 2077, "accent", "ISLAND", ""),
+    ("desktop/rf_sky_view.py", 2117, "accent", "ISLAND", ""),
+    ("desktop/rf_sky_view.py", 2119, "success", "ISLAND", ""),
+    ("desktop/rf_sky_view.py", 2139, "accent", "ISLAND", ""),
+    ("desktop/rf_sky_view.py", 2140, "success", "ISLAND", ""),
+    ("desktop/rf_sky_view.py", 2141, "danger", "ISLAND", ""),
+    ("desktop/rf_sky_view.py", 2146, "accent", "ISLAND", ""),
+    ("desktop/rf_sky_view.py", 2151, "accent", "ISLAND", ""),
+    ("desktop/rf_sky_view.py", 2152, "danger", "ISLAND", ""),
+    ("desktop/rf_sky_view.py", 2153, "success", "ISLAND", ""),
+    ("desktop/rf_sky_view.py", 2156, "accent", "ISLAND", ""),
+    ("desktop/rf_sky_view.py", 4682, "danger", "ISLAND", ""),
+    ("desktop/rf_sky_view.py", 5581, "accent", "ISLAND", ""),
+    ("desktop/rf_sky_view.py", 5585, "danger", "ISLAND", ""),
+    ("desktop/rf_sky_view.py", 5589, "danger", "ISLAND", ""),
+    ("desktop/rf_sky_view.py", 5686, "danger", "ISLAND", ""),
+    ("desktop/rf_sky_view.py", 6202, "accent", "ISLAND", ""),
+    ("desktop/rf_sky_view.py", 7032, "accent", "ISLAND", ""),
+    ("desktop/rf_sky_view.py", 8967, "accent", "ISLAND", ""),
+    # ---- TEST 测试断言 token 原值 ----
+    ("tests/test_theme_tokens.py", 65, "accent", "TEST", ""),
+)
+
+#: A1 单元数上限（只许降）：当前 11 = status 4 + sat 3 + vfo 1 + ntrip 2 + control 1。
+_BASELINE_CEILING = 11
 
 
-def test_no_direct_status_token_reads():
-    """全仓不允许再直接读 COLORS["status_warning"/"status_danger"]。"""
-    hits = {}
+def _scan_semantic_reads():
+    """返回 [(相对路径, 行号, token)]；跳过隐藏目录与缓存目录。"""
+    hits = []
     for dirpath, dirnames, filenames in os.walk(_ROOT):
-        # 跳过隐藏目录（.git/.audit_tmp/.trae 等临时副本）与缓存目录：
-        # 只对入库源码负责。
         dirnames[:] = [d for d in dirnames
                        if not d.startswith(".") and d not in {"__pycache__", "tmp"}]
         for name in filenames:
             if not name.endswith(".py"):
                 continue
             path = os.path.join(dirpath, name)
+            rel = os.path.relpath(path, _ROOT).replace(os.sep, "/")
             with open(path, encoding="utf-8") as fh:
-                count = len(_DIRECT_READ.findall(fh.read()))
-            if count:
-                hits[os.path.relpath(path, _ROOT).replace(os.sep, "/")] = count
+                for lineno, line in enumerate(fh, 1):
+                    for m in _DIRECT_READ.finditer(line):
+                        hits.append((rel, lineno, m.group(1)))
+    return hits
 
-    unexpected = {k: v for k, v in hits.items() if k not in _ALLOWED_DIRECT_READS}
-    assert not unexpected, (
-        f"仍有直接读全局状态色的点位：{unexpected}；"
-        f"请改走 tokens().status_color(kind[, bg=真实底色])")
-    assert hits.get("desktop/main_window.py") == 1, (
-        "main_window 的登记例外变了（已迁移就把 _ALLOWED_DIRECT_READS 里这条删掉）")
+
+def test_no_new_direct_semantic_color_reads():
+    """棘轮：新增任何直读全局语义色 → 红；从基线删一条（代码未修）也会红。
+
+    允许集合是「基线（文件 × token 计数）」而不是行号集合：行号会随上方编辑漂移，
+    但计数不会——漂移只更新注释里的行号，不改变判定。修完一处必须同步删基线行，
+    否则计数不变、A1 单元数也不会下降（下一步门禁会拦）。
+    """
+    assert {e[2] for e in _BASELINE} <= set(_SEMANTIC_TOKENS), "基线里有未知 token"
+    hits = _scan_semantic_reads()
+    got = Counter((f, t) for f, _l, t in hits)
+    base = Counter((f, t) for f, _l, t, *_ in _BASELINE)
+    extra = {k: got[k] - base[k] for k in got if got[k] > base[k]}
+    assert not extra, (
+        "新增了直接读全局语义色的点位（必须走 tokens().status_color(...) "
+        "或主题 token）："
+        + ", ".join("%s %s +%d" % (f, t, n) for (f, t), n in sorted(extra.items())))
+    a1_units = {e[4] for e in _BASELINE if e[3] == "A1"}
+    assert len(a1_units) <= _BASELINE_CEILING, (
+        f"A1 待迁单元 {len(a1_units)} > 上限 {_BASELINE_CEILING}：棘轮只许降不许涨")
 
 
 def _sdr_hint_css() -> str:
