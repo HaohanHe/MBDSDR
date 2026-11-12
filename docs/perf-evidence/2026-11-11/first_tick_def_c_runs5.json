@@ -1,0 +1,363 @@
+{
+ "definition": "C",
+ "definition_text": "进程入口 → 真屏 show() 后首个 paint 事件派发完毕",
+ "script": "scripts/repro/2026-11-11-first-tick-definitions.py --def d3",
+ "snapshot": "1e90b7f6",
+ "runs": 5,
+ "entry_to_tick_ms_sorted": [
+  1235.2,
+  1262.2,
+  1336.3,
+  1526.9,
+  1852.0
+ ],
+ "entry_to_tick_ms_range": [
+  1235.2,
+  1852.0
+ ],
+ "entry_to_tick_ms_median": 1336.3,
+ "samples": [
+  {
+   "def": "d3",
+   "ruler": {
+    "qt_platform": "windows",
+    "font_families": 394,
+    "dpr": 1.0,
+    "logical_dpi": 144.0,
+    "font": "MiSans",
+    "pt": 10.0,
+    "line_h": 27
+   },
+   "ctor_ms": 1133.7,
+   "tick_ms": 101.5,
+   "entry_to_tick_ms": 1235.2,
+   "entry_to_end_ms": 4347.1,
+   "paints": 1,
+   "kernel_calls": 0,
+   "init_agent_calls": 0,
+   "load_before": {
+    "sys_cpu_pct": 25.5,
+    "python_proc_count": 5,
+    "python_total_cpu_pct": 109.4,
+    "python_top": [
+     {
+      "pid": 33804,
+      "cpu_pct": 107.8
+     },
+     {
+      "pid": 32508,
+      "cpu_pct": 1.6
+     },
+     {
+      "pid": 12176,
+      "cpu_pct": 0.0
+     },
+     {
+      "pid": 32944,
+      "cpu_pct": 0.0
+     },
+     {
+      "pid": 37752,
+      "cpu_pct": 0.0
+     }
+    ]
+   },
+   "load_after": {
+    "sys_cpu_pct": 25.6,
+    "python_proc_count": 4,
+    "python_total_cpu_pct": 18.8,
+    "python_top": [
+     {
+      "pid": 32944,
+      "cpu_pct": 14.1
+     },
+     {
+      "pid": 32508,
+      "cpu_pct": 3.1
+     },
+     {
+      "pid": 12176,
+      "cpu_pct": 1.6
+     },
+     {
+      "pid": 37752,
+      "cpu_pct": 0.0
+     }
+    ]
+   }
+  },
+  {
+   "def": "d3",
+   "ruler": {
+    "qt_platform": "windows",
+    "font_families": 394,
+    "dpr": 1.0,
+    "logical_dpi": 144.0,
+    "font": "MiSans",
+    "pt": 10.0,
+    "line_h": 27
+   },
+   "ctor_ms": 1158.2,
+   "tick_ms": 104.0,
+   "entry_to_tick_ms": 1262.2,
+   "entry_to_end_ms": 4337.5,
+   "paints": 1,
+   "kernel_calls": 0,
+   "init_agent_calls": 0,
+   "load_before": {
+    "sys_cpu_pct": 51.8,
+    "python_proc_count": 5,
+    "python_total_cpu_pct": 95.4,
+    "python_top": [
+     {
+      "pid": 35440,
+      "cpu_pct": 93.8
+     },
+     {
+      "pid": 32508,
+      "cpu_pct": 1.6
+     },
+     {
+      "pid": 12176,
+      "cpu_pct": 0.0
+     },
+     {
+      "pid": 14396,
+      "cpu_pct": 0.0
+     },
+     {
+      "pid": 37752,
+      "cpu_pct": 0.0
+     }
+    ]
+   },
+   "load_after": {
+    "sys_cpu_pct": 21.8,
+    "python_proc_count": 6,
+    "python_total_cpu_pct": 20.4,
+    "python_top": [
+     {
+      "pid": 14396,
+      "cpu_pct": 18.8
+     },
+     {
+      "pid": 32508,
+      "cpu_pct": 1.6
+     },
+     {
+      "pid": 12176,
+      "cpu_pct": 0.0
+     },
+     {
+      "pid": 13808,
+      "cpu_pct": 0.0
+     },
+     {
+      "pid": 35440,
+      "cpu_pct": 0.0
+     }
+    ]
+   }
+  },
+  {
+   "def": "d3",
+   "ruler": {
+    "qt_platform": "windows",
+    "font_families": 394,
+    "dpr": 1.0,
+    "logical_dpi": 144.0,
+    "font": "MiSans",
+    "pt": 10.0,
+    "line_h": 27
+   },
+   "ctor_ms": 1219.3,
+   "tick_ms": 117.0,
+   "entry_to_tick_ms": 1336.3,
+   "entry_to_end_ms": 4395.5,
+   "paints": 1,
+   "kernel_calls": 0,
+   "init_agent_calls": 0,
+   "load_before": {
+    "sys_cpu_pct": 44.7,
+    "python_proc_count": 4,
+    "python_total_cpu_pct": 9.4,
+    "python_top": [
+     {
+      "pid": 32508,
+      "cpu_pct": 7.8
+     },
+     {
+      "pid": 33168,
+      "cpu_pct": 1.6
+     },
+     {
+      "pid": 12176,
+      "cpu_pct": 0.0
+     },
+     {
+      "pid": 37752,
+      "cpu_pct": 0.0
+     }
+    ]
+   },
+   "load_after": {
+    "sys_cpu_pct": 45.7,
+    "python_proc_count": 4,
+    "python_total_cpu_pct": 31.3,
+    "python_top": [
+     {
+      "pid": 33168,
+      "cpu_pct": 18.8
+     },
+     {
+      "pid": 32508,
+      "cpu_pct": 10.9
+     },
+     {
+      "pid": 12176,
+      "cpu_pct": 1.6
+     },
+     {
+      "pid": 37752,
+      "cpu_pct": 0.0
+     }
+    ]
+   }
+  },
+  {
+   "def": "d3",
+   "ruler": {
+    "qt_platform": "windows",
+    "font_families": 394,
+    "dpr": 1.0,
+    "logical_dpi": 144.0,
+    "font": "MiSans",
+    "pt": 10.0,
+    "line_h": 27
+   },
+   "ctor_ms": 1394.8,
+   "tick_ms": 132.1,
+   "entry_to_tick_ms": 1526.9,
+   "entry_to_end_ms": 4515.5,
+   "paints": 1,
+   "kernel_calls": 0,
+   "init_agent_calls": 0,
+   "load_before": {
+    "sys_cpu_pct": 50.2,
+    "python_proc_count": 6,
+    "python_total_cpu_pct": 0.0,
+    "python_top": [
+     {
+      "pid": 12176,
+      "cpu_pct": 0.0
+     },
+     {
+      "pid": 13808,
+      "cpu_pct": 0.0
+     },
+     {
+      "pid": 32508,
+      "cpu_pct": 0.0
+     },
+     {
+      "pid": 35440,
+      "cpu_pct": 0.0
+     },
+     {
+      "pid": 37752,
+      "cpu_pct": 0.0
+     }
+    ]
+   },
+   "load_after": {
+    "sys_cpu_pct": 44.2,
+    "python_proc_count": 4,
+    "python_total_cpu_pct": 23.4,
+    "python_top": [
+     {
+      "pid": 38472,
+      "cpu_pct": 23.4
+     },
+     {
+      "pid": 12176,
+      "cpu_pct": 0.0
+     },
+     {
+      "pid": 32508,
+      "cpu_pct": 0.0
+     },
+     {
+      "pid": 37752,
+      "cpu_pct": 0.0
+     }
+    ]
+   }
+  },
+  {
+   "def": "d3",
+   "ruler": {
+    "qt_platform": "windows",
+    "font_families": 394,
+    "dpr": 1.0,
+    "logical_dpi": 144.0,
+    "font": "MiSans",
+    "pt": 10.0,
+    "line_h": 27
+   },
+   "ctor_ms": 1682.4,
+   "tick_ms": 169.6,
+   "entry_to_tick_ms": 1852.0,
+   "entry_to_end_ms": 5005.1,
+   "paints": 1,
+   "kernel_calls": 0,
+   "init_agent_calls": 0,
+   "load_before": {
+    "sys_cpu_pct": 32.9,
+    "python_proc_count": 4,
+    "python_total_cpu_pct": 3.1,
+    "python_top": [
+     {
+      "pid": 32508,
+      "cpu_pct": 3.1
+     },
+     {
+      "pid": 5584,
+      "cpu_pct": 0.0
+     },
+     {
+      "pid": 12176,
+      "cpu_pct": 0.0
+     },
+     {
+      "pid": 37752,
+      "cpu_pct": 0.0
+     }
+    ]
+   },
+   "load_after": {
+    "sys_cpu_pct": 27.0,
+    "python_proc_count": 4,
+    "python_total_cpu_pct": 23.5,
+    "python_top": [
+     {
+      "pid": 32508,
+      "cpu_pct": 12.5
+     },
+     {
+      "pid": 5584,
+      "cpu_pct": 9.4
+     },
+     {
+      "pid": 12176,
+      "cpu_pct": 1.6
+     },
+     {
+      "pid": 37752,
+      "cpu_pct": 0.0
+     }
+    ]
+   }
+  }
+ ],
+ "verdict": "定义 C 在低负载窗口（python 总占比 0–109.4% / 测后 18.8–31.3%，均 <200%；sys CPU 21.8–51.8%）5 次：中位 1336.3 ms，区间 1235.2–1852.0 ms，全部 > 800 ms 验收线 → 不达标，基线钉住。"
+}
