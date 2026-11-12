@@ -72,9 +72,6 @@ class ARDOPFEC(str, Enum):
 # =====================================================================
 #  起：16QAM 每字节 2 符号 (l=2)；QPSK/4PSK 每字节 4 符号。
 # 这里用标准 Gray 映射的复星座点（单位能量归一）。
-def _gray(bits: int, n: int) -> int:
-    """n bit 二进制 -> Gray 码。"""
-    return bits ^ (bits >> 1)
 
 
 def qam_constellation(order: int) -> np.ndarray:
