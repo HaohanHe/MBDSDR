@@ -56,10 +56,10 @@
 用法：
   python scripts/file_claim.py claim desktop/main_window.py --owner 操作逻辑线
   python scripts/file_claim.py claim desktop/main_window.py --owner 操作逻辑线 --ttl-min 10
-  python scripts/file_claim.py claim desktop/main_window.py --owner 操作逻辑线 --token <凭据>
+  python scripts/file_claim.py claim desktop/main_window.py --owner 操作逻辑线 --token-file <凭据文件>
   python scripts/file_claim.py claim desktop/main_window.py --owner 操作逻辑线 --adopt-legacy
   python scripts/file_claim.py release desktop/main_window.py --owner 操作逻辑线          # 自动读 sidecar
-  python scripts/file_claim.py release desktop/main_window.py --owner 操作逻辑线 --token <凭据>
+  python scripts/file_claim.py release desktop/main_window.py --owner 操作逻辑线 --token-file <凭据文件>
   python scripts/file_claim.py status
   python scripts/file_claim.py status desktop/main_window.py
   python scripts/file_claim.py audit-stale            # 定期跑：过期 claim 却仍在改文件
@@ -321,9 +321,28 @@ def _marker_for(key: str) -> Path:
 
 _TOKEN_DOMAIN = b"mbdsdr/file_claim/token/v1:"
 _TOKEN_HINT = (
-    "  凭据：--token {token}\n"
-    "  已存到 {path}（release/续租不带 --token 时会自动读取；该文件是持有者凭据，勿外传）"
+    "  凭据已写入 {path}（用 --token-file 读取；release/续租不带 --token 时自动读取；"
+    "该文件是持有者凭据，勿外传）"
 )
+
+
+def _load_token_arg(token: Optional[str], token_file: Optional[str]) -> Optional[str]:
+    """凭据通道二选一：--token 走 argv，--token-file 读文件。
+
+    提示语改成「凭据已写入 <path>」之后，出示凭据应该走文件通道：argv 会进
+    进程列表，同机任何进程都能读（今晚已确认过这个泄露面）。
+    """
+    if token and token_file:
+        raise ValueError("--token 与 --token-file 只能给一个")
+    if not token_file:
+        return token
+    try:
+        text = Path(token_file).read_text(encoding="utf-8").strip()
+    except OSError as exc:
+        raise ValueError(f"--token-file 读不到：{token_file}（{exc}）")
+    if not text:
+        raise ValueError(f"--token-file 是空的：{token_file}")
+    return text
 
 
 def _token_hash(token: str) -> str:
@@ -617,7 +636,7 @@ def cmd_claim(
                 file=sys.stderr,
             )
         print(f"CLAIM OK {display} owner={owner} ttl={ttl_min:g}min 到期={_iso(now + _ttl(ttl_min, now))}")
-        print(_TOKEN_HINT.format(token=fresh_token, path=_token_path(key)))
+        print(_TOKEN_HINT.format(path=_token_path(key)))
         return EXIT_OK
 
     with _locked_fd(marker, create=False) as fd:
@@ -689,7 +708,7 @@ def cmd_claim(
                     f"  旧格式 claim（只记名字）已迁移为凭据绑定；"
                     f"这次按 owner 名匹配是唯一一次，之后同名也不再放行。"
                 )
-                print(_TOKEN_HINT.format(token=upgraded_token, path=_token_path(key)))
+                print(_TOKEN_HINT.format(path=_token_path(key)))
                 return EXIT_OK
             raise ClaimDenied(
                 f"CLAIM DENIED {display}\n"
@@ -735,7 +754,7 @@ def cmd_claim(
         f"CLAIM OK (steal) {display} owner={owner} ttl={ttl_min:g}min "
         f"（原持有者开始于 {_iso(float(old.get('acquired_at') or 0))}，上次心跳 {_iso(heartbeat)}）"
     )
-    print(_TOKEN_HINT.format(token=fresh_token, path=_token_path(key)))
+    print(_TOKEN_HINT.format(path=_token_path(key)))
     return EXIT_OK
 
 
@@ -1011,7 +1030,7 @@ def cmd_takeover(path: str, owner: str, ttl_min: float, reason: str = "") -> int
         + f"\n  理由：{reason}"
         + f"\n  日志：{TAKEOVER_LOG}"
     )
-    print(_TOKEN_HINT.format(token=new_token, path=_token_path(key)))
+    print(_TOKEN_HINT.format(path=_token_path(key)))
     return EXIT_OK
 
 
@@ -1320,7 +1339,13 @@ def build_parser() -> argparse.ArgumentParser:
     claim.add_argument(
         "--token",
         default=None,
-        help="续租已绑定凭据的 claim；必须等于 claim 时输出的一次性凭据",
+        help="续租已绑定凭据的 claim；必须等于 claim 时输出的一次性凭据"
+        "（会进进程列表，优先用 --token-file）",
+    )
+    claim.add_argument(
+        "--token-file",
+        default=None,
+        help="从文件读凭据（sidecar 或 claim 时写出的文件），避免凭据进 argv",
     )
     claim.add_argument(
         "--adopt-legacy",
@@ -1334,7 +1359,13 @@ def build_parser() -> argparse.ArgumentParser:
     release.add_argument(
         "--token",
         default=None,
-        help="claim 时输出的一次性凭据；同名不等于同一持有者，没有凭据不能释放",
+        help="claim 时签发的一次性凭据；同名不等于同一持有者，没有凭据不能释放"
+        "（会进进程列表，优先用 --token-file）",
+    )
+    release.add_argument(
+        "--token-file",
+        default=None,
+        help="从文件读凭据，避免凭据进 argv",
     )
 
     status = sub.add_parser("status", help="查看占用状态")
@@ -1397,16 +1428,19 @@ def _repairer(args) -> str:
 def main(argv: Optional[list[str]] = None) -> int:
     args = build_parser().parse_args(argv)
     try:
+        token = _load_token_arg(
+            getattr(args, "token", None), getattr(args, "token_file", None)
+        )
         if args.command == "claim":
             return cmd_claim(
                 args.path,
                 args.owner,
                 args.ttl_min,
-                token=args.token,
+                token=token,
                 adopt_legacy=args.adopt_legacy,
             )
         if args.command == "release":
-            return cmd_release(args.path, args.owner, token=args.token)
+            return cmd_release(args.path, args.owner, token=token)
         if args.command == "audit-stale":
             return cmd_audit_stale(args.json)
         if args.command == "takeover":
