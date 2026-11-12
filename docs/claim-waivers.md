@@ -9,7 +9,7 @@
 > 指纹 = sha256(`文档\0断言原文`)[:12]；断言原文改动即指纹变化 = 按新增判红。
 > 在途未提交的 docs 改动不享本白名单——那正是门禁要拦的「修改后无证据」。
 
-<!-- waived-total: 56 -->
+<!-- waived-total: 53 -->
 
 建表口径：HEAD 断言 144 条 = 可证实 2 + 文档过期 46 + 无 hash 96；白名单只覆盖后两类。
 
@@ -33,7 +33,6 @@
 | 46 | docs/constellations.md | ac337af5dc66 | > 结论先行：IAU 88 座已补齐（拉丁名/缩写/中文名/示意连线，88/88）； | 未写 commit hash，无法用 git 复核；本轮只锁增量，存量由该文档 owner 逐条补 hash 或删断言 |
 | 47 | docs/design-basis-sky-figma-note.md | 3eea4e7e7446 | **对「334×334 大圆」这一描述的更正**：`284_177/index.module.scss` 写的是 | 未写 commit hash，无法用 git 复核；本轮只锁增量，存量由该文档 owner 逐条补 hash 或删断言 |
 | 48 | docs/design-basis.md | d1db6fb52bad | 取证附带发现（`af7208b` 已修）：`test_ui_layout_locks.py` 原来的 `800x600` 参数**实际跑在 1000×600**。 | 有 hash 但缺 <path>:<line>，无法定位改动；本轮只锁增量，存量由该文档 owner 逐条补 hash 或删断言 |
-| 49 | docs/design-basis.md | 23b9f2f6b319 | / 4 / 无设备引导是「基准外」的我们多做项 / 横幅 + 状态栏双份引导；横幅已改单行不换行（`e6f0e7d`） / 仍是双份占位：横幅独占一行高度 / wordWrap 已撤（§3）；下… | 有 hash 但缺 <path>:<line>，无法定位改动；本轮只锁增量，存量由该文档 owner 逐条补 hash 或删断言 |
 | 50 | docs/design_tokens_mapping.md | ac1079782e56 | （4.15→5.22:1）均已修到达标。品牌橙新增 `primary_text` `#9A5F33` | 未写 commit hash，无法用 git 复核；本轮只锁增量，存量由该文档 owner 逐条补 hash 或删断言 |
 | 52 | docs/hardcoded-parameters.md | 707ff33e1312 | - **A11 调谐步进**：**更正**——C++ 调谐步进本就是 10 kHz（§D-2 撤回）， | 未写 commit hash，无法用 git 复核；本轮只锁增量，存量由该文档 owner 逐条补 hash 或删断言 |
 | 53 | docs/hardcoded-parameters.md | 96044a799385 | / P-1 / `cpp/src/core/tokens.h`（频谱线已改） / Python `6.0` 与 C++ 原 `15.0` 两套显示峰阈值；原"统一到 15 dB"已被实测驳回 /… | 未写 commit hash，无法用 git 复核；本轮只锁增量，存量由该文档 owner 逐条补 hash 或删断言 |
@@ -52,7 +51,6 @@
 | 70 | docs/limitations-register.md | fddb5d89bbbc | / L52 / **`station_warning` 的真实可见面（不是「进了日志就算」）** / (0,0) 控制器实测返回 **2 条**并带 `station_warning="null… | 有 hash 但缺 <path>:<line>，无法定位改动；本轮只锁增量，存量由该文档 owner 逐条补 hash 或删断言 |
 | 71 | docs/narrow-screen-plan.md | 15fb3ab8e89a | > DPR 1.0 口径，验收线 **1344×700**（1366×768 扣边框/任务栏）。已落地： | 未写 commit hash，无法用 git 复核；本轮只锁增量，存量由该文档 owner 逐条补 hash 或删断言 |
 | 72 | docs/narrow-screen-plan.md | f2c2f94e32f7 | 2. **已落地（2026-11-05）**：顶栏 1625→**1265**（§2.3.1）、频谱 1941→**688**（§2.1.1）、 | 未写 commit hash，无法用 git 复核；本轮只锁增量，存量由该文档 owner 逐条补 hash 或删断言 |
-| 73 | docs/narrow-screen-plan.md | 8db68d25d0bd | > **已更正**：`minimumSizeHint()` ≠ 窗口地板；声明最小宽（1000） | 未写 commit hash，无法用 git 复核；本轮只锁增量，存量由该文档 owner 逐条补 hash 或删断言 |
 | 74 | docs/narrow-screen-plan.md | 9c3f596afb44 | 6. 上述省量是估算，**已落地实测为 85 / 140**（见 §3.1）；若后续再改分组框内容， | 未写 commit hash，无法用 git 复核；本轮只锁增量，存量由该文档 owner 逐条补 hash 或删断言 |
 | 75 | docs/narrow-screen-plan.md | 87bcc22756c3 | **宽度已收口**：offscreen 窗口宽 **1625→1265**（顶栏，§2.3.1）；真屏 **1237→960**。 | 未写 commit hash，无法用 git 复核；本轮只锁增量，存量由该文档 owner 逐条补 hash 或删断言 |
 | 76 | docs/network-layer.md | c5867aec39fc | 该复现的 faulthandler 实抓栈（本机，Python 3.14，2s 超时；线程名已改）： | 未写 commit hash，无法用 git 复核；本轮只锁增量，存量由该文档 owner 逐条补 hash 或删断言 |
@@ -62,7 +60,6 @@
 | 88 | docs/prototype-gap.md | acefb2e8145b | - **已落地优化**：视图旋转 `lru_cache(32)`；方位网格/地景/地平线批量投影； | 未写 commit hash，无法用 git 复核；本轮只锁增量，存量由该文档 owner 逐条补 hash 或删断言 |
 | 89 | docs/python-crash-20261105.md | 5b18bcb1ebb6 | **结论一句话**：不是单条用例的确定性崩溃，也不是显卡/平台插件问题；直接崩溃点是 PySide6 绑定层空指针解引用（`pyside6.abi3.dll+0x1c91e`，落在导出符号 `P… | 未写 commit hash，无法用 git 复核；本轮只锁增量，存量由该文档 owner 逐条补 hash 或删断言 |
 | 90 | docs/python-crash-20261105.md | 96732be0ef35 | / ② / `desktop/main.py::_install_sigint_graceful_quit()`：`signal.SIGINT` 只置标志 + 0.2 s `QTimer` 调 … | 未写 commit hash，无法用 git 复核；本轮只锁增量，存量由该文档 owner 逐条补 hash 或删断言 |
-| 91 | docs/real_hw_acceptance_20261103.md | e85843173c3b | / R5 / 录音落盘 / **PASS** / 录制中流式增长 2,883,584 → 5,898,240 B；stop 后 745,472 样本；两次采样率 sidecar `core:sa… | 未写 commit hash，无法用 git 复核；本轮只锁增量，存量由该文档 owner 逐条补 hash 或删断言 |
 | 92 | docs/real_hw_acceptance_20261103.md | c391462d01be | 独立基准工具的环境行为，非本仓库代码问题；验收脚本已改为不依赖 rtl_power | 未写 commit hash，无法用 git 复核；本轮只锁增量，存量由该文档 owner 逐条补 hash 或删断言 |
 | 93 | docs/reference-mechanisms.md | 815c7035b8d7 | > **2026-11-05 更正**：`reference/` 下不存在 `decoders`、`blackmagic` 目录；`satdump` 已在本轮补读。见 §8。 | 未写 commit hash，无法用 git 复核；本轮只锁增量，存量由该文档 owner 逐条补 hash 或删断言 |
 | 95 | docs/reference-mechanisms.md | f292eb428cdb | **S12 更正细节**：上一轮记为「无」，本轮核实已实现。`sat_illumination.py:78-80` 定义 `sunlit/umbra/penumbra` 三态，`:204` 起为… | 未写 commit hash，无法用 git 复核；本轮只锁增量，存量由该文档 owner 逐条补 hash 或删断言 |
