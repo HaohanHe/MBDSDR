@@ -122,12 +122,25 @@ def test_repo_variants_all_carry_public_source():
 
 
 def test_only_grandfathered_layouts_may_lack_source():
-    """除既有 2 条外，任何顶层布局都必须带 source（防无出处新 profile）。"""
+    """除既有 2 条外，任何顶层布局都必须带可核对的 source。
+
+    语义：新增带 source（含 url + retrieved_at）的布局不会触发本断言；
+    新增无 source、或 source 缺 URL/抓取时间的顶层布局都会红——即本测试
+    只钉「无出处不许入库」，不限制有出处的新布局数量。
+    """
     without = {name for name, entry in TABLE.items()
                if not name.startswith("_") and not entry.get("source")}
     assert without == {"astu_1_tm_example", "ccsds_tc_classic"}, (
         f"出现无出处的布局条目: {sorted(without)}——新布局必须带 source，"
         "无出处不入库")
+    for name, entry in TABLE.items():
+        if name.startswith("_") or not entry.get("source"):
+            continue
+        src = entry["source"]
+        assert str(src.get("url", "")).startswith("http"), (
+            f"{name} 的 source.url 不是公开 URL")
+        assert str(src.get("retrieved_at", "")).strip(), (
+            f"{name} 的 source 缺抓取时间")
 
 
 # ── 兼容性：旧条目解析逐字不变 ─────────────────────────────────
@@ -179,3 +192,93 @@ def test_real_segmented_layout_extract_on_official_frame_bytes():
     assert fields["frame_header_hex"]["value"] == "001B000E06"
     assert fields["segment_header_hex"]["value"] == "01"
     assert fields["data"]["value"] == "02030405060708"
+
+
+# ── 真实星上遥测：FUNcube-1（AO-73）──────────────────────────
+def _set_bits(buf, bit_offset, bit_len, value):
+    for i in range(bit_len):
+        bit = (value >> (bit_len - 1 - i)) & 1
+        pos = bit_offset + i
+        mask = 1 << (7 - (pos % 8))
+        if bit:
+            buf[pos // 8] |= mask
+        else:
+            buf[pos // 8] &= ~mask
+
+
+def test_funcube1_frame_structure_is_documented_bit_table():
+    layout = SP.load_frame_layout("funcube1_ao73_frame")
+    assert len(layout["fields"]) == 61  # 2 头 + 16 EPS + 10 BOB + 6 RF + 4 PA + 6 ANTS + 16 SW + 1 载荷
+    by_name = {f["name"]: f for f in layout["fields"]}
+    # 位偏移逐段累加：头 8bit、RT 440bit（§1），载荷 200 字节从第 56 字节起
+    assert (by_name["sat_id"]["bit_offset"], by_name["sat_id"]["bit_len"]) == (0, 2)
+    assert (by_name["frame_type_id"]["bit_offset"],
+            by_name["frame_type_id"]["bit_len"]) == (2, 6)
+    assert by_name["battery_voltage"]["bit_offset"] == 72
+    assert by_name["sun_sensor_xp"]["bit_offset"] == 200
+    assert by_name["bus_5v_voltage"]["bit_offset"] == 290
+    assert by_name["sequence_number"]["bit_offset"] == 400
+    assert (by_name["deployment_wait_next_boot"]["bit_offset"],
+            by_name["deployment_wait_next_boot"]["bit_len"]) == (447, 1)
+    assert (by_name["payload"]["offset"], by_name["payload"]["len"]) == (56, 200)
+    assert layout["source"]["sha256"] == (
+        "86e12bc7b882726d47e69b4834379e042c309a95e58c0b1920ce9281a87d90cd")
+    assert "FUNcube-1" in layout["source"]["document"]
+
+
+def test_funcube1_frame_bit_extraction_end_to_end():
+    """构造 256 字节帧（非 OTA 样本），按文档位偏移逐段取值。"""
+    frame = bytearray(256)
+    _set_bits(frame, 0, 2, 2)          # Sat Id = [1][0] 飞行件
+    _set_bits(frame, 2, 6, 1)          # Frame Type = 01
+    _set_bits(frame, 72, 16, 0x1234)   # Battery voltage
+    _set_bits(frame, 200, 10, 1023)    # Sun Sensor X+
+    _set_bits(frame, 290, 10, 512)     # 5.0 bus voltage（跨字节）
+    _set_bits(frame, 399, 1, 1)        # Antenna deployment 3
+    _set_bits(frame, 400, 24, 0xABCDEF)  # Sequence number
+    _set_bits(frame, 424, 6, 42)       # DTMF command count
+    _set_bits(frame, 430, 5, 17)       # DTMF last command
+    _set_bits(frame, 437, 1, 1)        # Data valid EPS
+    _set_bits(frame, 443, 1, 1)        # In eclipse mode
+    f = extract_fields(bytes(frame), layout_name="funcube1_ao73_frame")
+    assert f["sat_id"]["value"] == 2
+    assert f["frame_type_id"]["value"] == 1
+    assert f["battery_voltage"]["value"] == 0x1234
+    assert f["sun_sensor_xp"]["value"] == 1023
+    assert f["bus_5v_voltage"]["value"] == 512
+    assert f["antenna_deployment_3"]["value"] == 1
+    assert f["sequence_number"]["value"] == 0xABCDEF
+    assert f["dtmf_command_count"]["value"] == 42
+    assert f["dtmf_last_command"]["value"] == 17
+    assert f["data_valid_eps"]["value"] == 1
+    assert f["in_eclipse_mode"]["value"] == 1
+    assert f["payload"]["value"] == "00" * 200
+    assert f["battery_voltage"]["unit"] == ""
+
+
+def test_funcube1_fitter_variant_overrides_payload_only():
+    frame = bytearray(256)
+    _set_bits(frame, 0, 2, 2)
+    _set_bits(frame, 2, 6, 14)         # FM1
+    _set_bits(frame, 72, 16, 0x0BAD)
+    frame[56:56 + 13] = b"HELLO FUNCUBE"
+    base = extract_fields(bytes(frame), layout_name="funcube1_ao73_frame")
+    fm = extract_fields(bytes(frame), layout_name="funcube1_ao73_fitter")
+    assert base["payload"]["value"].startswith("48454C4C4F")
+    assert fm["payload"]["value"].startswith("HELLO FUNCUBE")
+    assert fm["battery_voltage"]["value"] == 0x0BAD  # 其余字段继承
+    assert fm["frame_type_id"]["value"] == 14
+    layout = SP.load_frame_layout("funcube1_ao73_fitter")
+    assert layout["_derived_from"] == "funcube1_ao73_frame"
+    assert layout["frame_type"] == "FM"
+
+
+def test_bit_field_out_of_range_rejected():
+    from mbdsdr_ai.verify_chain import _decode_bits
+    assert _decode_bits(b"\x0f\xf0", 4, 8) == 0xFF
+    assert _decode_bits(b"\x80", 0, 1) == 1
+    with pytest.raises(ValueError, match="位字段越界"):
+        _decode_bits(b"\x00", 1, 8)
+    with pytest.raises(ValueError, match="位字段越界"):
+        _decode_bits(b"\x00", 0, 0)
+
