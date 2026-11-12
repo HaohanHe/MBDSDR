@@ -16,6 +16,10 @@
 豁免：命中行内必须出现 ``pragma: allowlist secret``（任何注释风格都行），
 **逐行**标注；不支持目录级 / 文件级豁免——豁免范围一大，检查器就成摆设。
 
+体积口径：形状规则（BLOCK）对**任何体积**的文件都跑（大文件流式逐行读），
+熵规则才有 2MB 上限。跳过分两类、分别计数，不合并成一个数：
+「大文件仅形状检查（不做熵）」与「二进制/媒体不扫（不做文本扫描）」。
+
 用法::
 
     python scripts/secret_scan.py                  # 扫 D:\\mbdsdr（跳过目录逐条打印）
@@ -154,7 +158,9 @@ _BINARY_SUFFIXES = {
     ".woff",
     ".woff2",
 }
-_MAX_BYTES = 2 * 1024 * 1024
+#: 熵规则的体积上限。只限制熵——大文件里熵告警没有意义；形状规则是廉价
+#: 正则，**任何体积都跑**（3MB 的 CSV 里写一枚 token 也必须被拦）。
+_MAX_ENTROPY_BYTES = 2 * 1024 * 1024
 _MAX_WARN_PRINT = 200
 
 Finding = Tuple[str, int, str, str]  # (path, line, rule, tier)
@@ -178,7 +184,7 @@ def _skip_reason(name: str, full: Path) -> Optional[str]:
     return None
 
 
-def _iter_files(root: Path) -> Iterator[Path]:
+def _iter_files(root: Path, stats: "Counter[str]") -> Iterator[Path]:
     for dirpath, dirnames, filenames in os.walk(root):
         dirnames.sort()
         kept: List[str] = []
@@ -193,12 +199,9 @@ def _iter_files(root: Path) -> Iterator[Path]:
         for name in sorted(filenames):
             path = Path(dirpath) / name
             if path.suffix.lower() in _BINARY_SUFFIXES:
-                continue
-            try:
-                if path.stat().st_size > _MAX_BYTES:
-                    print(f"SKIP {path} — 文件超过 {_MAX_BYTES // (1024 * 1024)}MB")
-                    continue
-            except OSError:
+                # 二进制/媒体：不做文本扫描。与「大文件只跑形状」分开计数，
+                # 两类跳过不能合成一个数。
+                stats["skip_binary"] += 1
                 continue
             yield path
 
@@ -322,15 +325,56 @@ def _decode(blob: bytes) -> Optional[str]:
     return blob.decode("utf-8", errors="replace")
 
 
-def _scan_path(path: Path, display: Optional[str] = None) -> List[Finding]:
+def _shape_hits(path: str, lines: Iterable[str]) -> List[Finding]:
+    """只跑形状规则（BLOCK 档）。大文件走这里：熵不做，形状照跑。"""
+    hits: List[Finding] = []
+    for lineno, line in enumerate(lines, 1):
+        if SPDX in line:
+            continue
+        for rule, rx in SHAPE_RULES:
+            if rx.search(line):
+                hits.append((path, lineno, rule, "block"))
+    return hits
+
+
+def _scan_large(path: Path, display: str, stats: "Counter[str]") -> List[Finding]:
+    """超过熵上限的文件：流式逐行只跑形状规则，不整块读进内存。"""
+    try:
+        with path.open("rb") as handle:
+            head = handle.read(8192)
+            if b"\0" in head:
+                # 二进制没有「行」的概念，放到与媒体文件同一类里计数。
+                stats["skip_binary"] += 1
+                return []
+            handle.seek(0)
+            lines = (raw.decode("utf-8", errors="ignore") for raw in handle)
+            hits = _shape_hits(display, lines)
+    except OSError:
+        return []
+    stats["shape_only_large"] += 1
+    return hits
+
+
+def _scan_path(
+    path: Path, display: Optional[str] = None, stats: Optional["Counter[str]"] = None
+) -> List[Finding]:
+    stats = stats if stats is not None else Counter()
+    try:
+        size = path.stat().st_size
+    except OSError:
+        return []
+    name = display or str(path)
+    if size > _MAX_ENTROPY_BYTES:
+        return _scan_large(path, name, stats)
     try:
         blob = path.read_bytes()
     except OSError:
         return []
     text = _decode(blob)
     if text is None:
+        stats["skip_binary"] += 1
         return []
-    return scan_text(display or str(path), text)
+    return scan_text(name, text)
 
 
 def _git(*args: str) -> subprocess.CompletedProcess:
@@ -339,7 +383,7 @@ def _git(*args: str) -> subprocess.CompletedProcess:
     )
 
 
-def _scan_staged() -> List[Finding]:
+def _scan_staged(stats: "Counter[str]") -> List[Finding]:
     proc = _git("diff", "--cached", "--name-only", "--no-renames", "--diff-filter=ACMR")
     if proc.returncode != 0:
         print(f"[secret-scan] 读取暂存区失败：{proc.stderr.strip()}")
@@ -351,12 +395,18 @@ def _scan_staged() -> List[Finding]:
         ).stdout
         text = _decode(blob)
         if text is None:
+            stats["skip_binary"] += 1
+            continue
+        if len(blob) > _MAX_ENTROPY_BYTES:
+            # 暂存区里的大文件同样只做形状检查（熵规则有体积上限）。
+            stats["shape_only_large"] += 1
+            findings.extend(_shape_hits(name, text.splitlines()))
             continue
         findings.extend(scan_text(name, text))
     return findings
 
 
-def _report(findings: Iterable[Finding]) -> int:
+def _report(findings: Iterable[Finding], stats: Optional["Counter[str]"] = None) -> int:
     unique = sorted(set(findings), key=lambda item: (item[0], item[1], item[2]))
     blocks = [f for f in unique if f[3] == "block"]
     warns = [f for f in unique if f[3] == "warn"]
@@ -371,6 +421,13 @@ def _report(findings: Iterable[Finding]) -> int:
     by_rule = Counter(rule for _p, _l, rule, _t in unique)
     print(f"[secret-scan] BLOCK={len(blocks)} WARN={len(warns)}")
     print("[secret-scan] 按规则：" + ("，".join(f"{k}={v}" for k, v in sorted(by_rule.items())) or "无"))
+    if stats is not None:
+        print(
+            "[secret-scan] 覆盖："
+            f"大文件仅形状检查 {stats['shape_only_large']} 个"
+            f"（>{_MAX_ENTROPY_BYTES // (1024 * 1024)}MB，不做熵检查）"
+            f"；二进制/媒体跳过 {stats['skip_binary']} 个（不做文本扫描）"
+        )
     print("[secret-scan] 输出只含文件:行 + 规则名，不含命中的值。")
     return 1 if blocks else 0
 
@@ -382,20 +439,21 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument("--staged", action="store_true", help="只扫 git 暂存区内容")
     args = parser.parse_args(argv)
 
+    stats: "Counter[str]" = Counter()
     if args.staged:
-        return _report(_scan_staged())
+        return _report(_scan_staged(stats), stats)
 
     targets = [Path(item) for item in args.paths] if args.paths else [Path(args.root)]
     findings: List[Finding] = []
     for target in targets:
         if target.is_dir():
-            for path in _iter_files(target):
-                findings.extend(_scan_path(path))
+            for path in _iter_files(target, stats):
+                findings.extend(_scan_path(path, stats=stats))
         elif target.exists():
-            findings.extend(_scan_path(target))
+            findings.extend(_scan_path(target, stats=stats))
         else:
             print(f"SKIP {target} — 路径不存在")
-    return _report(findings)
+    return _report(findings, stats)
 
 
 if __name__ == "__main__":
