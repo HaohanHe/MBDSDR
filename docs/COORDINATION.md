@@ -2126,6 +2126,8 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `scripts/audit_unclaimed_changes.py` | 收尸线/6ae85f56（审计单列可疑占位：owner_mismatch / reason_missing 只报不拦） | 2026-11-13 21:20 | 本笔 |
 | `tests/test_audit_flagged_claims.py` | 收尸线/6ae85f56（反证：冒名/空理由入列、干净与过期不入列、旧键未记录不误判） | 2026-11-13 21:20 | 本笔 |
 | `docs/incidents/2026-11-13-safe-commit-swept-inflight-work.md` | 收尸线/6ae85f56（3 条无凭据收口：theme json 直接引用、qgis 旁证链、axioms init 无内容差异） | 2026-11-13 21:21 | 本笔 |
+| `scripts/verify_claims.py` | 文档引用复核线/6ae85f56（口径缺口（非新功能）：新增 --head，文档正文取自 HEAD 树（git ls-tree/git show），工作区在途改动不参与评审） | 2026-11-13 21:27 | 本笔 |
+| `tests/test_verify_claims.py` | 文档引用复核线/6ae85f56（口径缺口反证两条：工作区独有的四元组在 --head 下判无 hash；未跟踪文档不进断言集） | 2026-11-13 21:27 | 本笔 |
 
 > 上表各行均由 `claim` 台账推导：owner 原文与 `acquired_at` 直接取自台账，
 > 目的优先用台账里的 `claim_reason`，没有就如实写「未声明」，不补编。时间列只是
@@ -3531,6 +3533,12 @@ token 没了、谁也 release 不了」的中间态。
 提交了某文件、该文件有活跃 claim、而当时表里没有对应行 → 记 1 条。重跑这条
 口径得到下面的清单：**89 笔提交 / 313 条缺行**（按提交时间倒序）。
 
+**分时点报口径（2026-11-13 21:28 重算，HEAD `f4559ac0`）**：上面的 89 / 313 是
+**claim 口径**（该文件当时有活跃 claim 才记账）。另有 **4 笔 / 7 项**是**无 claim
+口径**：规则落库前漏登，且全程没有 claim（清单见本节末尾）。两者合计
+**93 笔 / 320 条**。数字随提交增长，引用时必须连重算时的 HEAD sha 一起给；
+立账时点（2026-11-13 20:2x）只有 89 / 313。
+
 **为什么不追溯（三条，缺一不可）**：
 
 1. **当时的闸不阻塞。** `147212f5` 之前缺行只告警，人按「不阻塞」的规则干活，
@@ -3634,6 +3642,15 @@ token 没了、谁也 release 不了」的中间态。
 - 2026-11-13 05:38 `a3c8fbb4` 守卫账本线 缺 1 项：`docs/pending-patches/2026-11-13-k23-k24-layering-and-verdicts.md`
 - 2026-11-13 05:37 `daaaa4a7` 守卫账本线 缺 1 项：`docs/known-red-register.md`
 - 2026-11-13 05:34 `68760638` trae-a13-576 缺 2 项：`scripts/file_claim.py`、`tests/test_file_claim.py`
+- 2026-11-13 21:15 `8aa7c72e` 归属证据线/6ae85f56 缺 1 项（无 claim 口径）：`scripts/safe_commit.py`
+- 2026-11-13 21:14 `ec938a09` 归属证据线/6ae85f56 缺 3 项（无 claim 口径）：`scripts/safe_commit.py`、`tests/test_safe_commit_exclude.py`、`tests/test_safe_commit_coordination.py`
+- 2026-11-13 21:14 `583d8f62` 归属证据线/6ae85f56 缺 1 项（无 claim 口径）：`docs/pending-patches/2026-11-13-shared-index-residue.md`
+- 2026-11-13 21:14 `e376e16b` 归属证据线/6ae85f56 缺 2 项（无 claim 口径）：`scripts/safe_commit.py`、`tests/test_safe_commit_declaration.py`
+
+**补记 4 笔的成因（不要写成「工具未要求」）**：这四笔是**规则落库前漏登、
+且全程无 claim**——既没有 claim 记录，也没有 §6.1 行。它们不满足上面的 claim
+对照口径（该口径要求「该文件有活跃 claim」），所以单列、不并入 313 条。当时
+确实没有任何人占位；如实记成「无 claim 口径」，不是把漏登推给工具。
 
 > 这份清单是**缺陷产物**，不是违规名单：一部分缺行是旧闸「只告警」造成的；
 > 另一部分是「为了让闸绿而制造失真」造成的——见下条。
