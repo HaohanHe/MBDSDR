@@ -53,6 +53,12 @@ logger = logging.getLogger(__name__)
 #: 区分"磁盘上没有这个键"与"键的值是 None"（JSON 里 None 是合法值）。
 _MISSING = object()
 
+#: JSON 里的元数据键：记录哪些设置项是**用户显式设置过**的。
+#: 它不是设置项（不在 SCHEMA/DEFAULTS 里），写盘时保留、读回时剥离。
+#: 有了它，才能区分「用户没碰过 → 跟随当前版本默认值」与
+#: 「用户明确设过 → 升级也不许用新默认值覆盖」。
+EXPLICIT_KEYS_FIELD = "_explicit_keys"
+
 #: 类型分组由 schema.kind 派生，避免手写清单漏登记（漏登记会被 _coerce 落成
 #: 字符串，下游 int() 再炸一次）。
 _FLOAT_KEYS = tuple(k for k, it in SCHEMA.items()
@@ -344,6 +350,13 @@ class DesktopSettings:
         self._change_listeners: list = []
         #: 上次文件里**真实出现**的键（用于一次性迁移提示：缺键 ≠ 用户选择了默认值）
         self._file_keys: set = set()
+        #: 用户**显式设置过**的键。读取时：在里面 → 用磁盘用户值；不在 →
+        #: 跟随当前 DEFAULTS（版本升级改了默认值就生效）。写盘时随文件持久化。
+        self._explicit_keys: set = set()
+        #: 本次会话里「显式标记」被改过的键（新增或 reset 清除）。写盘合并时
+        #: 只对这些键以内存为准，其余沿用磁盘标记——否则两个实例交错写会把
+        #: 对方刚设的标记抹掉，下次读回又退回默认值。
+        self._marker_dirty: set = set()
         #: 启动读回时因越界/非法档位而回落的字段及原因（不静默丢改动）
         self.migration_notes: Optional[list] = None
         # 防抖写盘定时器：singleShot 语义，每次 set() 都重启，连续改动只写最后一次。
@@ -369,18 +382,39 @@ class DesktopSettings:
                     raise ValueError("顶层不是 JSON 对象")
                 inst._file_keys = set(raw)
                 inst.migration_notes = []
+                # 「用户显式设置过」的判读：
+                #   * 文件带标记 → 以标记为准；
+                #   * 旧文件没有标记（本功能引入前写的）→ 无法回溯哪些只是
+                #     当年的默认值，保守按「文件里出现的键都算用户值」迁移。
+                #     宁可少生效一次新默认值，也不能把用户值当默认值丢掉。
+                legacy_no_marker = EXPLICIT_KEYS_FIELD not in raw
+                if legacy_no_marker:
+                    inst._explicit_keys = {k for k in raw if k in DEFAULTS}
+                else:
+                    marked = raw.get(EXPLICIT_KEYS_FIELD)
+                    if isinstance(marked, list):
+                        inst._explicit_keys = {
+                            str(k) for k in marked if str(k) in DEFAULTS}
+                    else:
+                        inst.migration_notes.append(
+                            f"{EXPLICIT_KEYS_FIELD}: 不是数组，已忽略；"
+                            "本次按「未显式设置」处理（跟随默认值）")
                 for k, v in raw.items():
-                    if k in DEFAULTS:
+                    if k not in DEFAULTS:
+                        continue
+                    if legacy_no_marker or k in inst._explicit_keys:
                         inst._data[k] = _coerce(k, v, inst.migration_notes)
+                    # 未显式设置：磁盘上的值可能只是上一版默认值，不采纳；
+                    # 保留 __init__ 里的当前 DEFAULTS——默认值变更才生效。
                 # 并发覆盖告警的基线：load 时磁盘上真实存在的、归一后的值。
                 # 必须取在音量迁移**之前**——迁移改的是内存值，磁盘还是旧值，
                 # 落盘时不该被误判成"别的实例覆盖了我们"。
-                inst._disk_snapshot = {k: inst._data[k] for k in raw
+                inst._disk_snapshot = {k: _coerce(k, raw[k]) for k in raw
                                        if k in DEFAULTS}
                 # 未知键（可能是更新版本写的，或是笔误）：不静默丢。这里只
                 # 记录说明，文件里的原始未知键在写盘时会被保留（见
                 # _merged_payload），避免旧版本把新版本的设置吃掉。
-                unknown = sorted(set(raw) - set(DEFAULTS))
+                unknown = sorted(set(raw) - set(DEFAULTS) - {EXPLICIT_KEYS_FIELD})
                 if unknown:
                     shown = "、".join(repr(k) for k in unknown[:8])
                     more = f" 等 {len(unknown)} 个" if len(unknown) > 8 else ""
@@ -438,11 +472,15 @@ class DesktopSettings:
             return default
         return DEFAULTS.get(key)
 
-    def set(self, key: str, value: Any) -> None:
+    def set(self, key: str, value: Any, *, explicit: bool = True) -> None:
         """写一个字段并标记 dirty，防抖 500ms 后落盘。未知 key 忽略。
 
         值真的变了才通知订阅者：既避免滑杆每像素刷一次主界面，也让
         「listener 里再 set 同一个值」天然收敛、不会递归。
+
+        ``explicit=True``（默认，UI/导入等用户意图）时把该键记为「用户显式
+        设置过」；值没有实际变化则不记（启动时按读回值回推一遍不该把默认值
+        洗成用户值）。``explicit=False`` 仅供程序性写入（如迁移写入默认值）。
         """
         if key not in DEFAULTS:
             return
@@ -451,6 +489,9 @@ class DesktopSettings:
         self._data[key] = new_value
         self._dirty_keys.add(key)
         self._dirty = True
+        if explicit and old_value != new_value and key not in self._explicit_keys:
+            self._explicit_keys.add(key)
+            self._marker_dirty.add(key)
         try:
             self._timer.start()  # 重启 500ms 防抖窗口
         except RuntimeError:
@@ -460,11 +501,43 @@ class DesktopSettings:
             self._emit_change(key, new_value)
 
     def reset(self, key: str) -> Any:
-        """把单项恢复到 schema 默认值；返回恢复后的值（未知 key 返回 None）。"""
+        """把单项恢复到 schema 默认值；返回恢复后的值（未知 key 返回 None）。
+
+        恢复默认同时**清除「用户显式设置过」标记**：此后该项重新跟随默认值，
+        版本升级改默认值时不会被旧值钉住。
+        """
         if key not in DEFAULTS:
             return None
-        self.set(key, DEFAULTS[key])
+        had_marker = key in self._explicit_keys
+        self._explicit_keys.discard(key)
+        self._marker_dirty.add(key)
+        self.set(key, DEFAULTS[key], explicit=False)
+        if had_marker:
+            # 值可能本来就等于默认值（set 不会置脏路径），但标记变化必须落盘。
+            self._dirty = True
+            try:
+                self._timer.start()
+            except RuntimeError:
+                self._write_to_disk()
         return self._data[key]
+
+    def is_explicit(self, key: str) -> bool:
+        """该设置项是否**由用户显式设置过**（False = 跟随当前默认值）。
+
+        供设置界面标注「已自定义 / 默认值」，也供迁移逻辑判断能否用新默认值
+        覆盖。未知键返回 False。
+        """
+        return key in self._explicit_keys
+
+    def value_source(self, key: str) -> str:
+        """``"explicit"``（用户值）/``"default"``（跟随默认）/``"unknown"``。"""
+        if key not in DEFAULTS:
+            return "unknown"
+        return "explicit" if key in self._explicit_keys else "default"
+
+    def explicit_keys(self) -> "set[str]":  # noqa: F821
+        """当前被用户显式设置过的键（副本；调用方修改不影响内部状态）。"""
+        return set(self._explicit_keys)
 
     # ---------------------------------------------------------------- 变更订阅
     def add_change_listener(self, fn: Any) -> None:
@@ -597,7 +670,14 @@ class DesktopSettings:
                     self.on_error(self.last_error)
                 logger.warning("配置文件损坏（%s），已备份到 %s", reason, backup)
         if not disk_ok:
-            return dict(self._data)
+            data = dict(self._data)
+            data[EXPLICIT_KEYS_FIELD] = sorted(self._explicit_keys)
+            return data
+
+        # 磁盘上已有的「用户显式设置」标记；写回时只以本次改过标记的键为准。
+        raw_markers = payload.get(EXPLICIT_KEYS_FIELD)
+        disk_explicit = ({str(k) for k in raw_markers if str(k) in DEFAULTS}
+                         if isinstance(raw_markers, list) else set())
 
         for key in DEFAULTS:
             if key in self._dirty_keys:
@@ -623,6 +703,15 @@ class DesktopSettings:
                 payload[key] = self._data[key]
                 continue
             if key in payload:
+                if key not in self._explicit_keys:
+                    if key in disk_explicit and key not in self._marker_dirty:
+                        # 别的实例刚把它设成用户值：尊重磁盘（非本次改动，
+                        # 不能拿本地默认值把它顶掉）。
+                        continue
+                    # 用户没显式设过：磁盘上那份只是上一版默认值，用当前
+                    # 版本默认值刷新快照（不存在丢用户值的问题）。
+                    payload[key] = self._data.get(key, DEFAULTS.get(key))
+                    continue
                 item = SCHEMA.get(key)
                 disk_value = payload[key]
                 if item is not None:
@@ -632,6 +721,17 @@ class DesktopSettings:
                 continue
             # 旧版本文件缺这个键：按当前默认/内存值补齐，保证文件完整。
             payload[key] = self._data.get(key, DEFAULTS.get(key))
+        # 「显式设置过」标记随文件持久化；它是元数据，不属于设置项。
+        # 合并规则：本次改过标记的键以内存为准，其余沿用磁盘——两个实例
+        # 交错写时不会互相抹掉对方刚设的标记。
+        markers = set(disk_explicit)
+        for key in self._marker_dirty:
+            if key in self._explicit_keys:
+                markers.add(key)
+            else:
+                markers.discard(key)
+        markers |= self._explicit_keys
+        payload[EXPLICIT_KEYS_FIELD] = sorted(markers)
         return payload
 
     def _write_to_disk(self) -> None:
@@ -680,6 +780,7 @@ class DesktopSettings:
             self._dirty = False
             self._dirty_keys.clear()
             self._overwrite_warned.clear()
+            self._marker_dirty.clear()
             # 落盘成功后磁盘现值就是刚写的 payload：刷新并发检测基线。
             self._disk_snapshot = {
                 k: _coerce(k, payload[k]) for k in DEFAULTS if k in payload}
