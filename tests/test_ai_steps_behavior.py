@@ -52,14 +52,15 @@ class TestFailureCriteriaConsistency:
         assert step.status == ai_steps.STATUS_SUCCESS
 
     def test_non_empty_error_is_failed_and_carried(self):
-        step = ai_steps.steps_from_tool_result("sdr_tune",
-                                               {"error": "未连接"})
+        step = ai_steps.steps_from_tool_result(
+            "sdr_tune", {"error": "未连接", "success": False})
         assert step.status == ai_steps.STATUS_FAILED
         assert step.error == "未连接"
 
-    def test_ok_false_payload_is_failed_even_without_error_key(self):
-        step = ai_steps.steps_from_tool_result("radio_ptt",
-                                               {"ok": False, "detail": "只收"})
+    def test_worker_envelope_with_ok_false_is_failed(self):
+        """worker 把设备信封的 ok:false 折算成 success:false 后的真实形状。"""
+        step = ai_steps.steps_from_tool_result(
+            "radio_ptt", {"ok": False, "detail": "只收", "success": False})
         assert step.status == ai_steps.STATUS_FAILED
 
     def test_hardware_worker_error_envelope_shape(self):

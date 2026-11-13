@@ -623,6 +623,7 @@ if _REPO_ROOT not in sys.path:
 
 from themes import get_theme, THEMES, DEFAULT_THEME
 from mbdsdr_ai.net_utils import parse_host_port
+from mbdsdr_ai.tool_results import tool_success
 # 强调色底上的墨色由 themes 按实际对比度算（浅色主题白字只有 3.09:1）
 from themes import _on_primary as _primary_ink
 from shortcuts import bind as _key
@@ -8695,7 +8696,10 @@ class MainWindow(QMainWindow):
             return {"success": False, "error": "not_connected",
                     "content": "硬件未连接：MCP 硬件工具需先连接 ai-sdr Mini"}
         raw = worker.call_tool_sync(tool_name, args)
-        ok = "error" not in raw and not raw.get("skipped")
+        ok = tool_success(raw)
+        if ok is None:
+            ok = "error" not in raw      # 旧载荷兜底（worker 现在恒带 success）
+        ok = bool(ok) and not raw.get("skipped")
         if ok:
             # 只有硬件真执行成功才同步 UI：失败时先跳频的假状态必须避免（S11）
             self._ai_tool_done.emit(tool_name, dict(args or {}))
@@ -8772,8 +8776,13 @@ class MainWindow(QMainWindow):
         params = self._pending_ui_sync.pop(tool_name, None)
         if params is None:
             return
-        if isinstance(result, dict) and ("error" in result or result.get("skipped")):
-            return
+        if isinstance(result, dict):
+            ok = tool_success(result)
+            if ok is None:
+                # 旧载荷没有 success：退回错误键判读（不看正文文本）。
+                ok = not bool(result.get("error"))
+            if not ok or result.get("skipped"):
+                return
         self._sync_ui_for_tool(tool_name, params)
 
     @Slot(float)

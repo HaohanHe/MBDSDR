@@ -29,6 +29,7 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
 from tokens import tokens as _tok  # noqa: E402  # 截断长度收口在 tokens 层
+from mbdsdr_ai.tool_results import tool_success  # noqa: E402  # 成败唯一判据
 
 logger = logging.getLogger(__name__)
 
@@ -219,18 +220,19 @@ def steps_from_tool_result(tool_name: str, result: Dict[str, Any]) -> StepRecord
     """把一次异步工具调用结果（UI→worker 转发链）投影成单张步骤卡。"""
     result = result if isinstance(result, dict) else {"result": str(result)}
     text = json.dumps(result, ensure_ascii=False)
-    # 只有"真有错误内容"才算失败：`{"error": None}` / `{"error": ""}` 的空错误键
-    # 不应判失败——那会给明明成功的结果画一张 FAIL 卡（steps_from_chat 同口径：
-    # 只按 error 取真值）。
-    failed = bool(result.get("error")) or is_failure_result(text)
     if result.get("skipped"):
         # 软件工具不二次转发：不是一次硬件执行，不进步骤卡
         return StepRecord(tool=str(tool_name), status=STATUS_SKIPPED,
                           summary=str(result.get("reason", "")), error="")
+    # 成败只看 success：worker 三条返回（未连接/失败/成功）现在都带这个字段。
+    # 只有旧载荷读不到 success 时才退回 error 键判读（不再看正文文本）。
+    ok = tool_success(result)
+    if ok is None:
+        ok = not bool(result.get("error"))
     return StepRecord(
         tool=str(tool_name),
         args_preview="",
-        status=STATUS_FAILED if failed else STATUS_SUCCESS,
+        status=STATUS_FAILED if not ok else STATUS_SUCCESS,
         summary=summarize_result(text),
         elapsed_ms=latency_ms(result),
         error=str(result.get("error", "") or ""),

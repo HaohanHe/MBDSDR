@@ -865,8 +865,17 @@ class ToolRegistry:
                         if isinstance(_parsed, (dict, list)):
                             result.data = _parsed
             elif isinstance(raw_result, dict):
+                # 产出端收口：dict 只带 ok（MCP / UI 动作口径）时按 ok 定成败，
+                # 不能默认 True——否则 success=True + {"ok": false} 会流到下游，
+                # 逼着展示层再用正文文本猜一遍。
+                if "success" in raw_result:
+                    _ok_flag = bool(raw_result["success"])
+                elif "ok" in raw_result:
+                    _ok_flag = bool(raw_result["ok"])
+                else:
+                    _ok_flag = True
                 result = ToolResult(
-                    success=raw_result.get("success", True),
+                    success=_ok_flag,
                     content=raw_result.get("content", json.dumps(raw_result, ensure_ascii=False)),
                     tool_name=tool_name,
                     args=args,

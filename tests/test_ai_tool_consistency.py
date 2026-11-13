@@ -64,6 +64,21 @@ def test_real_registry_has_no_structural_errors(real_registry):
     assert report["drift_count"] == 0, report["drift"]
 
 
+def test_dict_result_with_ok_false_is_failed_at_source():
+    """handler 回裸 dict 且只带 ok:false 时，产出端必须落 success:false。
+
+    这是旧 is_failure_result 的 ①（success 缺席 + 正文 {"ok": false} → 失败）
+    在「消费端拿不到 success」的真实形态上的兜底：源头把 ok 折算进 success，
+    下游只认 success，不再扫正文。
+    """
+    reg = ToolRegistry()
+    _register(reg, "gated_ptt", "手动模式受限的电台发话", {},
+              lambda a: {"ok": False, "detail": "只收"})
+    res = reg.call("gated_ptt", {})
+    assert res.success is False
+    assert res.to_dict()["success"] is False
+
+
 def test_scanner_catches_structural_problems():
     reg = ToolRegistry()
     _register(reg, "empty_desc", "", {"x": {"type": "number"}}, lambda a: "ok")
