@@ -15,12 +15,15 @@
   * ``mapping_gaps()``：error_catalog 新增了码却没登记时返回缺口，
     测试据此判红。
 
-界面接入只有两条路（本笔范围）：
+界面接入只有三条路（本笔范围）：
 
   * 状态栏：``RemedyLinkLabel`` 追加在 ``QStatusBar`` 右侧，文案
     「查看怎么办 →」，点击按 code 定位到帮助面板第三页对应条目；
   * 有正文的弹窗：``attach_remedy_link(box, code)`` 在底部加同一行链接，
-    不新增按钮、不改变默认焦点。
+    不新增按钮、不改变默认焦点；
+  * 非模态通知条：``notification_bar.NotificationBar`` 对有 remedy 的错误
+    显示目录 message + ``suggestion()`` + 「查看怎么办」按钮；无 remedy
+    的错误只进日志，绝不出现死链接。
 """
 
 from __future__ import annotations

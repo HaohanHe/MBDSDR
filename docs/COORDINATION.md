@@ -2192,6 +2192,11 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `desktop/main_window.py` | 参考移植线/20261114（第3条：过境 provider 附 track） | 2026-11-14 05:22 | 本笔 |
 | `docs/COORDINATION.md` | 参考移植线/20261114（第3条 §6.1 登记行） | 2026-11-14 05:22 | 本笔 |
 | `tests/test_sat_polar_plot.py` | 参考移植线/20261114（第3条：投影/连续性/轨迹采样/面板注入用例） | 2026-11-14 05:22 | 本笔 |
+| `desktop/notification_bar.py` | 参考移植线/20261114（第1条：非模态通知条（有 remedy 显示 message+suggestion+动作；无 remedy 只进日志；同码聚合；批量汇总一条）） | 2026-11-14 05:27 | 本笔 |
+| `desktop/main_window.py` | 参考移植线/20261114（第1条：顶部挂通知条 + _notify_error 入口；_show_error_dialog 有码有 remedy 改走通知条，无码/无条目仍模态） | 2026-11-14 05:27 | 本笔 |
+| `desktop/error_remedy.py` | 参考移植线/20261114（第1条：接入路径文档补第三条（通知条）） | 2026-11-14 05:27 | 本笔 |
+| `tests/test_notification_bar.py` | 参考移植线/20261114（第1条：10 条判据（含 MainWindow 不弹模态的反证）） | 2026-11-14 05:27 | 本笔 |
+| `docs/COORDINATION.md` | 参考移植线/20261114（本笔 §6.1 登记行，提交后释放） | 2026-11-14 05:27 | 本笔 |
 
 > 上表各行均由 `claim` 台账推导：owner 原文与 `acquired_at` 直接取自台账，
 > 目的优先用台账里的 `claim_reason`，没有就如实写「未声明」，不补编。时间列只是

@@ -640,6 +640,8 @@ from error_remedy import (
     RemedyLinkLabel, attach_remedy_link, build_diagnostics_link,
     classify_connect_error, classify_record_dir_error, humanize_connect_error,
 )
+# 非模态通知条：有 remedy 的错误不再弹模态框，改为顶部常驻条 + 可执行建议
+from notification_bar import NotificationBar
 from mode_registry import (
     default_bandwidth,
     audio_cutoff,
@@ -2427,6 +2429,10 @@ class MainWindow(QMainWindow):
         root_lay.setContentsMargins(0, 0, 0, 0)
         root_lay.setSpacing(0)
         self._build_top_bar(root_lay)
+        # 非模态通知条：顶栏之下、三栏之上。默认隐藏，不占布局高度；
+        # 有 remedy 的错误在这里常驻到用户关闭（见 notification_bar）。
+        self.notification_bar = NotificationBar(root)
+        root_lay.addWidget(self.notification_bar, 0)
         root_lay.addWidget(self._main_splitter, stretch=1)
         self._build_bottom_dock(root_lay)
         self.setCentralWidget(root)
@@ -5164,8 +5170,35 @@ class MainWindow(QMainWindow):
         if code:
             self._remedy_link.set_code(code)
 
+    def _notify_error(self, code, *, fields=None, text=None, suggestion=None,
+                      retry=None, timeout_ms=None) -> bool:
+        """非模态通知条入口：有 remedy 才显示，无 remedy 只进日志。
+
+        与 ``_show_error_status``（瞬态状态栏，几秒后消失）互补：这条常驻到
+        用户关闭，且带 ``error_catalog.suggestion()`` 的下一步动作与
+        「查看怎么办」按钮。返回是否真的显示。
+        """
+        bar = getattr(self, "notification_bar", None)
+        if bar is None:
+            return False
+        return bar.notify(code, fields=fields, message=text,
+                          suggestion=suggestion, retry=retry,
+                          timeout_ms=timeout_ms)
+
     def _show_error_dialog(self, icon, title: str, text: str, code=None):
-        """有正文的错误弹窗：底部追加「查看怎么办」，不新增按钮/不动默认焦点。"""
+        """有正文的错误：能非模态就不打断。
+
+        有码且有 remedy 的错误走通知条（顶部常驻 + 建议 + 查看怎么办）；
+        没有码、或码没有帮助条目时退回原来的模态框（并保留链接），
+        保证「认不出的错误」不会被静默吞掉。
+        """
+        bar = getattr(self, "notification_bar", None)
+        if bar is not None and code:
+            level = {QMessageBox.Critical: "error",
+                     QMessageBox.Warning: "warning",
+                     QMessageBox.Information: "info"}.get(icon, "error")
+            if bar.notify(code, message=f"{title}：{text}", level=level):
+                return
         box = QMessageBox(icon, title, text, QMessageBox.Ok, self)
         box.setDefaultButton(QMessageBox.Ok)
         if code:
