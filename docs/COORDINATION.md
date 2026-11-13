@@ -1881,6 +1881,7 @@ No supported devices found），GNSS+SDR 同开复验没做成；离线那次
 
 | 文件 | 线名 | 开始时间 | 预计提交 hash |
 |---|---|---|---|
+| `docs/COMMIT-INCIDENT-CARD.md`、`scripts/check_card_links.py`、`scripts/check_generated_artifacts.py`、`tests/test_card_links.py` | 锚点机制线（卡片锚点改按章节号解析，ae98d46e 已落库；pre-commit 超预算只告警，本行是释放后补登） | 2026-11-13 19:49 | ae98d46e |
 | `desktop/search_providers.py` | Qt翻译与设置显式线/6ae85f56（统一搜索 provider 声明式注册表：菜单/页签/面板/能力/快捷键/设置项/卫星） | 2026-11-13 20:15 | 本笔 |
 | `desktop/command_palette.py` | Qt翻译与设置显式线/6ae85f56（build_index 改走 PROVIDERS；分组渲染、不可用与空结果分开、Esc 全流程） | 2026-11-13 20:15 | 本笔 |
 | `tests/test_search_providers.py` | Qt翻译与设置显式线/6ae85f56（各 provider 用例 + 不可用/空结果 + 去掉注册的反证） | 2026-11-13 20:15 | 本笔 |
@@ -2030,6 +2031,8 @@ No supported devices found），GNSS+SDR 同开复验没做成；离线那次
 | `docs/pending-patches/2026-11-12-fz04-unfreeze-request.md` | 收尸线/6ae85f56（补 W106 诊断入口待拍项与首次使用记录） | 2026-11-13 20:06 | 本笔 |
 | `desktop/main_window.py` | 窄屏高度链4px线/6ae85f56（narrow 4px 收口：topBarDetail 56→52；否掉会压 Home 按钮 5px 的底坞 48→40） | 2026-11-13 20:07 | 本笔 |
 | `docs/COORDINATION.md` | 窄屏高度链4px线/6ae85f56（本笔 §6.1 登记行，提交后释放） | 2026-11-13 20:07 | 本笔 |
+| `docs/parameter-unification.md` | 文档引用复核线/6ae85f56（引用按符号重定位 main_window.py:8191（行号二次漂移）） | 2026-11-13 20:10 | 本笔 |
+| `docs/PRD.md` | 文档引用复核线/6ae85f56（引用按符号重定位 main_window.py:7069（行号二次漂移）） | 2026-11-13 20:10 | 本笔 |
 
 > 上表各行均由 `claim` 台账推导：owner 原文与 `acquired_at` 直接取自台账，
 > 目的优先用台账里的 `claim_reason`，没有就如实写「未声明」，不补编。时间列只是
