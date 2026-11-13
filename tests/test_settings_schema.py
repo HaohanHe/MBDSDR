@@ -28,7 +28,7 @@ sys.path.insert(0, os.path.join(_ROOT, "desktop"))
 
 import pytest  # noqa: E402
 
-from PySide6.QtWidgets import QApplication, QSpinBox  # noqa: E402
+from PySide6.QtWidgets import QApplication, QLabel, QSpinBox  # noqa: E402
 
 import config_schema  # noqa: E402
 import settings as settings_mod  # noqa: E402
@@ -1944,8 +1944,19 @@ def test_delayed_items_carry_apply_note_and_not_restart_flag():
         assert ("生效" in item.apply_note) or ("影响" in item.apply_note)
 
 
-def test_apply_note_reaches_the_widget_tooltip(env):
-    """提示必须真的挂到控件上（只在 schema 里写一句等于没写）。"""
+def test_apply_note_reaches_the_user(env):
+    """提示必须真的出现在该项所在的行里（只在 schema 里写一句等于没写）。
+
+    2026-11-13 判定：原断言查 ``control.toolTip()``，但 ec2e20f5 已按
+    「tooltip 与紧邻可见注释逐字重复」删掉那两处 tooltip，提示改由行内可见
+    QLabel 承载。故这是**断言过期**，不是实现坏了：提示仍然到达用户，只是
+    通道从「悬停」换成「直接可见」。
+
+    被删掉的那条期望（``apply_note in control.toolTip()``）由下面的新断言
+    兜住，且更严：按 key 定位到 ``_row_boxes[key]`` 这一行，要求行内确有
+    文本逐字等于 apply_note 的 QLabel，且它在该行上可见（没被藏起来）。
+    仅靠「整页有 8 个提示标签」的计数兜不住「哪一项的提示丢了」。
+    """
     ds, host, panel, _ = env
     # 2026-11-11 W51 后服务开关并入「设备与接口」，6 项 apply_note 全在本页。
     in_panel = [k for k in DELAYED_APPLY_KEYS if k in panel._rows]
@@ -1953,10 +1964,18 @@ def test_apply_note_reaches_the_widget_tooltip(env):
                              "perf_profile", "record_dir",
                              "rc_port", "web_port"}
     for key in in_panel:
-        assert SCHEMA[key].apply_note in panel._rows[key].toolTip()
+        box = panel._row_boxes[key]
+        notes = [lbl for lbl in box.findChildren(QLabel)
+                 if lbl.text() == SCHEMA[key].apply_note]
+        assert notes, (f"{key} 所在行里没有 apply_note 提示标签："
+                       f"该行文本 = {[lbl.text() for lbl in box.findChildren(QLabel)]}")
+        assert notes[0].isVisibleTo(box), f"{key} 的 apply_note 提示标签被藏起来了"
 
-    # 端口项在独立「服务设置」面板里也有一份：它自己的 tooltip 明说需重启服务
-    svc = getattr(host, "service_settings_panel", None)
-    if svc is not None:
+    # 端口项在独立「服务设置」面板里也有一份控件，tooltip 必须写明需重启服务。
+    # 直接构造该面板（原写法依赖 host.service_settings_panel，恒为 None = 空转）。
+    svc = settings_panel.ServiceSettingsPanel(settings=ds)
+    try:
         for widget in (svc.rc_port, svc.web_port):
             assert "重启" in widget.toolTip()
+    finally:
+        svc.deleteLater()
