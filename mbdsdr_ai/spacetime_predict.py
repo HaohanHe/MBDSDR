@@ -79,7 +79,9 @@ def predict_passes_report(
           "prediction_start_utc": "ISO...",
           "tle": {"status": "fresh"|"stale"|"none",   # 与 tier 同源（≤24h=fresh）
                   "tier": "fresh"|"usable"|"expired"|"dead"|"unknown",
-                  "epoch_utc": ..., "age_days": ..., "threshold_days": ...},
+                  "epoch_utc": ..., "age_days": ..., "threshold_days": ...,
+                  "epoch_in_future": bool,  # 历元在将来：按新鲜处理但必须显式可见
+                  },
           "n_passes": int,
           "passes": [ {"rise_utc":..., "set_utc":..., "max_alt":...,
                        "rise_az":..., "set_az":..., "duration_s":...}, ... ],
