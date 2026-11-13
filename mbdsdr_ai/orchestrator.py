@@ -32,6 +32,8 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Any, Optional, Callable, Set
 from enum import Enum
 
+from .tool_results import ToolResult, tool_success
+
 
 class TaskStatus(str, Enum):
     """任务状态。"""
@@ -92,6 +94,17 @@ class Task:
             "completed_at": self.completed_at,
             "duration_ms": self.duration_ms,
         }
+
+
+def _tool_result_reason(outcome: Any) -> str:
+    """从一份失败的工具结果里取可读原因（error 可能为空 → 退回 content）。"""
+    if isinstance(outcome, ToolResult):
+        err, content = outcome.error, outcome.content
+    elif isinstance(outcome, dict):
+        err, content = outcome.get("error"), outcome.get("content")
+    else:
+        err, content = "", outcome
+    return str(err or content or "工具返回失败（未说明原因）")
 
 
 @dataclass
@@ -330,12 +343,25 @@ class Orchestrator:
 
                 # 执行 handler 或调用工具
                 if task.handler:
-                    task.result = task.handler(effective_params)
+                    outcome = task.handler(effective_params)
+                    ok = tool_success(outcome)
+                    if ok is False:
+                        # handler 返回的是一份工具结果且自称失败：不能因为
+                        # 「没抛异常」就记 COMPLETED。成败只读 success 字段
+                        # （tool_success），与对话栏 / 步骤卡同一个来源。
+                        reason = _tool_result_reason(outcome)
+                        task.result = reason
+                        raise RuntimeError(reason)
+                    task.result = (outcome.content
+                                   if isinstance(outcome, ToolResult) else outcome)
                 elif task.tool_name and self.tool_registry:
                     tool_result = self.tool_registry.call(task.tool_name, effective_params)
-                    task.result = tool_result.content if tool_result.success else tool_result.error
-                    if not tool_result.success:
-                        raise Exception(tool_result.error)
+                    ok = tool_success(tool_result)
+                    if ok is False:
+                        reason = _tool_result_reason(tool_result)
+                        task.result = reason
+                        raise RuntimeError(reason)
+                    task.result = tool_result.content
                 else:
                     # 无 handler 无 registry：不能空跑报成功
                     raise RuntimeError(

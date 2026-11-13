@@ -1389,10 +1389,12 @@ class AIPanel(QWidget):
                 else:
                     args = {}
                 res = tool_results[i] if i < len(tool_results) else None
-                ok = bool(res) and not (
-                    isinstance(res, dict) and res.get("error"))
-                bridge.record_external_call(
-                    name, args, ok, "" if res is None else str(res)[:400])
+                if res is None:
+                    # 工具环没回结果（未执行 / 流被截断）：步骤卡已如实落
+                    # running，这里不登记任务、不写 tool_result 事件——
+                    # 记成功是伪造，记失败同样是伪造。
+                    continue
+                bridge.record_external_call(name, args, res)
             self._refresh_live_bar()
 
         if compacted:

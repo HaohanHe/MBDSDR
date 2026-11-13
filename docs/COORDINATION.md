@@ -2035,8 +2035,17 @@ No supported devices found），GNSS+SDR 同开复验没做成；离线那次
 | `docs/pending-patches/2026-11-12-fz04-unfreeze-request.md` | 收尸线/6ae85f56（补 W106 诊断入口待拍项与首次使用记录） | 2026-11-13 20:06 | 本笔 |
 | `desktop/main_window.py` | 窄屏高度链4px线/6ae85f56（narrow 4px 收口：topBarDetail 56→52；否掉会压 Home 按钮 5px 的底坞 48→40） | 2026-11-13 20:07 | 本笔 |
 | `docs/COORDINATION.md` | 窄屏高度链4px线/6ae85f56（本笔 §6.1 登记行，提交后释放） | 2026-11-13 20:07 | 本笔 |
-| `docs/parameter-unification.md` | 文档引用复核线/6ae85f56（引用按符号重定位 main_window.py:8191（行号二次漂移）） | 2026-11-13 20:10 | 本笔 |
-| `docs/PRD.md` | 文档引用复核线/6ae85f56（引用按符号重定位 main_window.py:7069（行号二次漂移）） | 2026-11-13 20:10 | 本笔 |
+| `mbdsdr_ai/tool_results.py` | S1-S4结果伪造线/6ae85f56（S3 工具成败唯一判据 tool_success：成功只读 success 字段） | 2026-11-13 20:13 | 本笔 |
+| `desktop/ai_panel.py` | S1-S4结果伪造线/6ae85f56（S3 不再现算 ok，把工具原始结果交给 Hooks 与编排任务） | 2026-11-13 20:13 | 本笔 |
+| `desktop/local_agent_bridge.py` | S1-S4结果伪造线/6ae85f56（S3 record_external_call 同源派生，未回结果不伪造结论） | 2026-11-13 20:13 | 本笔 |
+| `mbdsdr_ai/orchestrator.py` | S1-S4结果伪造线/6ae85f56（S3 handler 返回失败工具结果时任务落 FAILED 而非 COMPLETED） | 2026-11-13 20:13 | 本笔 |
+| `tests/test_tool_failure_consistency.py` | S1-S4结果伪造线/6ae85f56（S3 步骤卡/Hooks/编排任务三处一致 + 反证） | 2026-11-13 20:13 | 本笔 |
+| `tests/test_ai_panel_model_orchestration.py` | S1-S4结果伪造线/6ae85f56（S3 用例数据补齐 ToolResult.to_dict 的 success 字段，断言不变） | 2026-11-13 20:13 | 本笔 |
+| `desktop/scanner_panel.py` | S1-S4结果伪造线/6ae85f56（S1 读失败计数上报（全失败报设备未返回数据） / S2 取消与完成分离） | 2026-11-13 20:13 | 本笔 |
+| `tests/test_scanner_failure_and_cancel.py` | S1-S4结果伪造线/6ae85f56（S1/S2 真实抛异常读失败与取消三态 + 反证） | 2026-11-13 20:13 | 本笔 |
+| `tests/test_destructive_confirm_guards.py` | S1-S4结果伪造线/6ae85f56（扫频 worker stub 跟随新信号签名，判定逻辑未动） | 2026-11-13 20:13 | 本笔 |
+| `mbdsdr_ai/agent.py` | S1-S4结果伪造线/6ae85f56（S4 已存在克隆目标校验 rev-parse HEAD 与 origin） | 2026-11-13 20:13 | 本笔 |
+| `tests/test_git_clone_existing_target.py` | S1-S4结果伪造线/6ae85f56（S4 空目录/无提交残目录/错远端判失败 + 完整仓库判可用） | 2026-11-13 20:13 | 本笔 |
 
 > 上表各行均由 `claim` 台账推导：owner 原文与 `acquired_at` 直接取自台账，
 > 目的优先用台账里的 `claim_reason`，没有就如实写「未声明」，不补编。时间列只是

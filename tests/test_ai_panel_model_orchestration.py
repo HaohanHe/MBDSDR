@@ -37,7 +37,9 @@ def test_model_round_records_real_tasks_and_events(isolated_profile, qapp):
     panel._on_ai_finished({
         "content": "已查询设备状态",
         "tool_calls": [{"name": "sdr_status", "arguments": {}}],
-        "tool_results": [{"content": "未连接"}],
+        # 真实链路里 tool_results 是 ToolResult.to_dict()，一定带 success；
+        # S3 起成败只认这个字段（没有它就不猜，见 tool_success）。
+        "tool_results": [{"success": True, "content": "未连接", "error": ""}],
         "compacted": False,
     })
     after = bridge.live_state()
@@ -70,7 +72,7 @@ def test_model_round_with_string_arguments_is_not_guessed(
             "name": "sdr_status",
             "arguments": '{"freq_hz": 98000000}',
         }],
-        "tool_results": [{"content": "ok"}],
+        "tool_results": [{"success": True, "content": "ok", "error": ""}],
         "compacted": False,
     })
     assert bridge.live_state()["tasks"] > before["tasks"]

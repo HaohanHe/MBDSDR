@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 
 def numeric_array(args: Dict[str, Any], key: str, *, allow_empty: bool = False):
@@ -153,7 +153,13 @@ def clean_exc(e: BaseException) -> str:
 
 @dataclass
 class ToolResult:
-    """工具调用结果。"""
+    """工具调用结果。
+
+    成败**只由 ``success`` 一个字段说了算**：``error`` 只是失败原因文本，
+    默认空串（``ToolResult(False, "设备未响应")`` 是完全合法的失败结果）。
+    因此任何 ``not result.get("error")`` 式的推断都会把失败读成成功——
+    需要判成败请一律走 :func:`tool_success`。
+    """
     success: bool
     content: str
     tool_name: str = ""
@@ -181,8 +187,27 @@ class ToolResult:
         }
 
 
+def tool_success(result: Any) -> Optional[bool]:
+    """工具成败的**唯一**判据：只读 ``success`` 字段，绝不按 ``error`` 猜。
+
+    事故（2026-11-13）：调用点写 ``ok = bool(res) and not res.get("error")``，
+    而失败的 ``ToolResult`` 的 ``error`` 默认是空串，于是同一次失败在步骤卡
+    显示「失败」、在 Hooks / 编排任务里却记成功——两处说的不是一回事。
+
+    接受两种形态：``ToolResult`` 与 ``ToolResult.to_dict()``（模型链路）。
+    返回 ``None`` 表示「这根本不是一份工具结果 / 没收到结果」，调用方必须
+    自己决定（例如如实记「未执行」），**不得当成成功**。
+    """
+    if isinstance(result, ToolResult):
+        return bool(result.success)
+    if isinstance(result, dict) and "success" in result:
+        return bool(result["success"])
+    return None
+
+
 __all__ = [
     "ToolResult",
     "clean_exc",
     "numeric_array",
+    "tool_success",
 ]

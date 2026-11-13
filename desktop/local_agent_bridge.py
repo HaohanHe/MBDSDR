@@ -28,6 +28,8 @@ import re
 import time
 from typing import Any, Dict, List, Optional, Tuple
 
+from mbdsdr_ai.tool_results import ToolResult, tool_success
+
 # ---------------------------------------------------------------- 状态口径
 STATUS_OK = "ok"                 # 真跑完了，回执是工具真实结果
 STATUS_GATED = "gated"           # 人工门未确认（不是失败）
@@ -303,14 +305,21 @@ class LocalAgentBridge:
 
     def _record_task(self, name: str, tool: str, params: Dict[str, Any],
                      result: Any) -> Optional[str]:
-        """把这次调用登记成真实编排任务（handler 复用已算出的结果，不二次执行）。"""
+        """把这次调用登记成真实编排任务（handler 复用已算出的结果，不二次执行）。
+
+        ``result`` 是工具真实结果（``ToolResult`` 或 ``to_dict()``），不是
+        摘要字符串：编排器据此按 ``success`` 判定 COMPLETED / FAILED，
+        与步骤卡、Hooks 读同一个字段。``max_retries=0`` —— 结果已经拿到，
+        重试只会拿同一份失败结果再跑一遍。
+        """
         orch = getattr(self.agent, "orchestrator", None)
         if orch is None:
             return None
         try:
             tid = orch.add_task(name=name, description="对话栏本地能力协商",
                                 tool_name=tool, tool_params=dict(params),
-                                handler=lambda _p, r=result: r)
+                                handler=lambda _p, r=result: r,
+                                max_retries=0)
             orch.execute(order=[tid])
             return tid
         except Exception:
@@ -406,18 +415,20 @@ class LocalAgentBridge:
             t0 = time.perf_counter()
             try:
                 result = reg.call(name, args)
-                ok = bool(result.success)
+                ok = bool(tool_success(result))
                 content = result.content if ok else (result.error or result.content)
                 latency = (time.perf_counter() - t0) * 1000.0
             except Exception as e:
                 ok, content, latency = False, "%s: %s" % (type(e).__name__, e), 0.0
+                # 补一份显式失败结果：登记任务时同样按 success 判失败，
+                # 不因「没有 result 对象」就落到 COMPLETED。
+                result = ToolResult(success=False, content=content)
             status = STATUS_OK if ok else STATUS_FAILED
             out["cards"].append({
                 "tool": name, "args": args, "status": status,
                 "content": str(content)[:1200], "latency_ms": latency})
             out["status"] = status
-            tid = self._record_task(name, name, args,
-                                    str(content)[:400])
+            tid = self._record_task(name, name, args, result)
             if tid:
                 out["tasks"].append({"id": tid, "name": name,
                                      "status": "completed" if ok else "failed"})
@@ -438,19 +449,28 @@ class LocalAgentBridge:
         return out
 
     def record_external_call(self, tool_name: str, args: Dict[str, Any] = None,
-                             ok: bool = True, content: str = "") -> Optional[str]:
+                             result: Any = None) -> Optional[str]:
         """模型链路（配了 API Key）的工具调用也登记到同一套编排/Hooks。
 
         本地协商和模型对话是两条入口，但「编排 / 常驻化」必须是同一份
         事实源：模型跑过的工具同样产生真实 Orchestrator 任务与 Hooks
         事件，状态条与能力矩阵读到的数字才不分裂。
+
+        成败**不在这里另行判断**：传入工具原始结果（``ToolResult`` 或
+        ``to_dict()``），统一走 :func:`tool_success` 读 ``success`` 字段。
+        旧签名收 ``ok`` 布尔值，调用方用 ``not res.get("error")`` 现算——
+        失败结果的 error 默认空串，于是同一次失败在步骤卡是「失败」、
+        在这里是「成功」。没有结果（未执行）时不登记任务、不写
+        tool_result 事件，避免伪造任何一种结论。
         """
         args = dict(args or {})
         self._emit_hook("agent.tool_call",
                         {"tool": tool_name, "args": args,
                          "source": "model_chat", "gated": False})
-        tid = self._record_task(tool_name, tool_name, args,
-                                str(content or ("ok" if ok else "failed"))[:400])
+        ok = tool_success(result)
+        if ok is None:
+            return None
+        tid = self._record_task(tool_name, tool_name, args, result)
         self._emit_hook("agent.tool_result",
                         {"tool": tool_name, "success": bool(ok),
                          "source": "model_chat"})
