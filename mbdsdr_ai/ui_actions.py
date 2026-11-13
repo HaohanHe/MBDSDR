@@ -34,6 +34,22 @@ UI_ACTION_VERBS = (
 )
 
 
+def parse_layout_ratio(value: Any) -> Optional[List[int]]:
+    """把 ``'左:中:右'`` 解析成三个非负整数；非法返回 None。
+
+    校验器（``UiActionBus.validate``）与桌面执行器（``_execute_ui_action``）
+    共用这一份：执行器被直连（绕过 validate）时也不能拿到两档/四档比例，
+    更不能拿 ``'0:0:0'`` 去整除（ZeroDivisionError）。
+    """
+    parts = str(value or "").split(":")
+    if len(parts) != 3 or not all(p.isdigit() for p in parts):
+        return None
+    nums = [int(p) for p in parts]
+    if sum(nums) == 0:
+        return None
+    return nums
+
+
 @dataclass
 class UiActionBus:
     """进程级 UI 动作总线（校验→排队→UI 线程排水→逆栈可撤销）。"""
@@ -51,13 +67,10 @@ class UiActionBus:
             return (f"未知动词 {verb!r}：白名单 "
                     f"{'/'.join(UI_ACTION_VERBS)}")
         if verb == "set_layout_ratio":
-            parts = str(action.get("value", "")).split(":")
-            if len(parts) != 3 or not all(p.isdigit() and int(p) >= 0
-                                          for p in parts):
+            if parse_layout_ratio(action.get("value")) is None:
                 return ("set_layout_ratio 需要 value='左:中:右' 三个非负整数"
-                        f"（如 '2:2:1'），实际 {action.get('value')!r}")
-            if sum(int(p) for p in parts) == 0:
-                return "set_layout_ratio 三档比例不能全为 0"
+                        "且不全为 0（如 '2:2:1'），"
+                        f"实际 {action.get('value')!r}")
         else:
             if not str(action.get("target", "")).strip():
                 return f"动词 {verb} 需要非空 target（面板 id）"

@@ -2486,7 +2486,15 @@ class MainWindow(QMainWindow):
             if sp is None:
                 return {"ok": False, "status": "ERROR",
                         "reason": "三栏 splitter 未就绪"}
-            parts = [int(p) for p in str(action.get("value", "")).split(":")]
+            # 与 UiActionBus.validate 共用一份解析（A3）：执行器是公开入口，
+            # 未来新增调用方可能直连；旧实现自己 int() 拆分，'0:0:0' 会在
+            # sum(parts) 处除零。
+            from mbdsdr_ai.ui_actions import parse_layout_ratio
+            parts = parse_layout_ratio(action.get("value"))
+            if parts is None:
+                return {"ok": False, "status": "PARAM_ERROR",
+                        "reason": ("set_layout_ratio 需要 value='左:中:右' "
+                                   "三个非负整数且不全为 0（如 '2:2:1'）")}
             total_parts = sum(parts)
             old_sizes = list(sp.sizes())
             total = max(1, sum(old_sizes))

@@ -1980,6 +1980,8 @@ No supported devices found），GNSS+SDR 同开复验没做成；离线那次
 | `scripts/safe_commit.py` | 用户输入静默线/6ae85f56（排除 hunk 改为 index blob 逐字替换，修 main_window 多 hunk 放错位置） | 2026-11-13 19:24 | 本笔 |
 | `tests/test_safe_commit_exclude.py` | 用户输入静默线/6ae85f56（多 hunk 排除回归用例） | 2026-11-13 19:24 | 本笔 |
 | `docs/COORDINATION.md` | 用户输入静默线/6ae85f56（本批 §6.1 行） | 2026-11-13 19:24 | 本笔 |
+| `mbdsdr_ai/ui_actions.py` | 用户输入静默线/6ae85f56（A3：新增 `parse_layout_ratio`，校验器与执行器同源） | 2026-11-13 19:52 | 本笔 |
+| `tests/test_ui_layout_actions.py` | 用户输入静默线/6ae85f56（A3：执行器直连坏比例/`0:0:0` 必须 PARAM_ERROR；反证=旧 int() 拆分 ZeroDivisionError 红） | 2026-11-13 19:52 | 本笔 |
 | **真机（USB SDR）** | 跑 `hw_acceptance/`、七环、`capture_throughput.py` 的线（资源独占） | 占用时段 | — |
 
 > 上表各行均由 `claim` 台账推导：owner 原文与 `acquired_at` 直接取自台账，

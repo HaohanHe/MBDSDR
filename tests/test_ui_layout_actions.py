@@ -221,6 +221,20 @@ class TestExecutorWiring:
         assert abs(sizes[1] - total * 0.4) <= 2, sizes
         assert abs(sizes[2] - total * 0.2) <= 2, sizes
 
+    def test_executor_rejects_bad_ratio_like_validator(self, mw):
+        """A3：执行器复用校验器的解析，直连也不许坏比例/除零。
+
+        总线入口有 validate 挡着，但 _execute_ui_action 是公开执行器（未来
+        新增调用方可能直连）。旧实现自己 int() 拆分：档数不对或 '0:0:0'
+        会在 sum(parts) 处 ZeroDivisionError。
+        反证：把执行器换回 [int(p) for p in ...split(':')] → 本用例红。
+        """
+        for bad in ("0:0:0", "1:2", "a:b:c", "", None):
+            r = mw._execute_ui_action(
+                {"verb": "set_layout_ratio", "value": bad})
+            assert r["ok"] is False, (bad, r)
+            assert r["status"] == "PARAM_ERROR", (bad, r)
+
     def test_undo_restores(self, mw):
         bus = get_ui_bus()
         act = mw._panel_actions["weather"]
