@@ -1188,7 +1188,7 @@ No supported devices found），GNSS+SDR 同开复验没做成；离线那次
   静态守卫改为「禁圆形视场盘 / 禁屏幕中心径向渐变 / 必须有 projectSegment」。
   **未入库**：仓库工作树仍是别的会话在途 M/??。
 
-- **[11-05 22:00] 产品工程阶段 A 入库（5a977026，本线已提交）**：详见队列 #11。
+- **[11-05 22:00] 产品工程阶段 A 入库（5a977026，本线已提交）**：详见队列 #11。〔证：`5a977026` — `web/product/build/build.py:95` — `def build_dist():`〕
   开工前撞到 C 盘 195G 满、余 455MB，`Grep` 工具写临时缓存 ENOSPC；
   定位为长期累积（WinSxS 13G / Program Files 31G / AppData 下各类 SDK 与
   AI 工具缓存 ~90G / hiberfil 6.3G），**未擅自删任何系统盘文件**，只做只读诊断，
@@ -1290,7 +1290,7 @@ No supported devices found），GNSS+SDR 同开复验没做成；离线那次
   1. ~~cpp/ctest `engine_integration`（slow）~~ **已销账（fbbe5c8）**——
      本地单跑 3 次全过、全量 ctest 162/162 绿，判定 CI runner 环境特有
      flaky，非代码真错；
-  2. ~~tests/(B) `test_identity_redline` 误伤~~ **已修（fe43c74，WorkBuddy）**——
+  2. ~~tests/(B) `test_identity_redline` 误伤~~ **已修（fe43c74，WorkBuddy）**——〔证：`fe43c74` — `tests/test_identity_redline.py:175` — `def test_phone_rule_ignores_hashes_but_flags_prose():`〕
      49dc00d 入库的金样 `tests/golden/dvbs2_ldpc_vectors.json` 里 SHA-256
      摘要十六进制串内嵌 11 位号码形态（摘要巧合，非 PII）；扫描器学会忽略
      长 hex/base64 token 内的数字巧合（散文里的真号照咬，双向钉扎）
@@ -1687,7 +1687,7 @@ No supported devices found），GNSS+SDR 同开复验没做成；离线那次
    - `tests/test_ui_stability_resources.py`：`mw` 没请求 `isolated_profile`，
      直接 `MainWindow()` 且 `close()` 触发 `settings.flush()`。守卫实测
      1074→1074 bytes、sha256 不变、仅 mtime 变（**+0 bytes 的同内容写入
-     同样判红**）。**已修 `f0f68cc6`**（`mw(qapp, isolated_profile)`），
+     同样判红**）。**已修 `f0f68cc6`**（`mw(qapp, isolated_profile)`），〔证：`f0f68cc6` — `tests/test_ui_stability_resources.py:58` — `def mw(qapp, isolated_profile):`〕
      连跑两次守卫绿、真实配置 sha/长度/mtime 全不变；**没有把守卫改成
      忽略 mtime**。
    - `tests/test_device_switch_flow.py`：**不是写配置的文件**。单文件复跑
@@ -1737,7 +1737,8 @@ No supported devices found），GNSS+SDR 同开复验没做成；离线那次
   全绿（行尾根治生效）。队列 #8 销账，收尾件拆出 #10。
 
 - 2026-11-05（接续线）：`mbdsdr_ai/agent.py` 自编程四工具从 arm_manual 自报改为外部确认一次性 `confirm_token`（`tx_guard` 单一事实源），schema 移除 arm_manual；`desktop/mcp_protocol.py` 仅改 schema 注入（执行层真人确认不变）。**报备审计线**：本次动到 `agent.py`，但只动 `_register_code_editor_tools` 段（约 3078-3244），未碰 catch-all；若审计棘轮同段在途，按 hunk 归属拆分，别整文件覆盖。
-- 2026-11-05（接续线，**给操作逻辑线**）：PTT 置灰问题已修 `9b803d07`，按钮状态可复位；复跑 `pytest tests/test_backend_tx_capability.py`。`sdr_backend.SDRBackend` 新增
+- 2026-11-05（接续线，**给操作逻辑线**）：PTT 置灰问题已修 `9b803d07`，按钮状态可复位；复跑 `pytest tests/test_backend_tx_capability.py`。〔证：`9b803d07` — `mbdsdr_ai/sdr_backend.py:827` — `def supports_tx(self) -> bool:`〕
+  `sdr_backend.SDRBackend` 新增
   `supports_tx()`（单一事实源：设备声明 ∧ 本类确有 `write_tx` ∧ 运行时就绪）
   与 `tx_capability()`（declared/implemented/ready/verified 四态）。HackRF / USRP /
   Pluto 三个后端已实现真实写流（libhackrf `hackrf_start_tx` 回调队列 / UHD
@@ -1772,8 +1773,7 @@ No supported devices found），GNSS+SDR 同开复验没做成；离线那次
   未改 `rf_sky_view.py` / `spectrum_widget.py` / 设置面板。盘点见
   `docs/discoverability.md`。未推送。
 
-- 2026-11-05（硬编码与参数治理线，裁定落地 `12a43a0`）：三轮裁定已落地两条、
-  受阻一条。
+- 2026-11-05（硬编码与参数治理线，裁定落地 `12a43a0`）：三轮裁定已落地两条、受阻一条。〔证：`12a43a0` — `mbdsdr_ai/squelch.py:56` — `DEFAULT_SQUELCH_DBFS = -50.0`〕
   ① **静噪**统一到「解调后音频 RMS」：新增 `mbdsdr_ai/squelch.py` 唯一常量
   （`-100..-20`，默认 `-50`）；`receive_pipeline` 的 WFM（原全带宽 IQ 功率）
   与窄带（原 VFO 信道 IQ 功率）**都改为先解调、再按音频 RMS 门控**；
@@ -1797,8 +1797,8 @@ No supported devices found），GNSS+SDR 同开复验没做成；离线那次
   / `core/controller` / 注册表测试 / 本文档；未碰 main_window / rf_sky_view /
   spectrum_widget。未推送。
 
-- 2026-11-05（硬编码线，补交 `6ed9ee7`，接上条 `12a43a0`）：③ 采样率已落地，
-  不再是受阻项。`sdr_backend.DEFAULT_SAMPLE_RATE_HZ` 2.048M → **2.4 MS/s**
+- 2026-11-05（硬编码线，补交 `6ed9ee7`，接上条 `12a43a0`）：③ 采样率已落地，不再是受阻项。〔证：`6ed9ee7` — `mbdsdr_ai/sdr_backend.py:1735` — `# 默认采样率：项目统一首选 2.4 MS/s（模块级 DEFAULT_SAMPLE_RATE_HZ）。`〕
+  `sdr_backend.DEFAULT_SAMPLE_RATE_HZ` 2.048M → **2.4 MS/s**
   （"首选，不是保证"）；设备不支持时 `nearest_sample_rate()` 回落，
   `status.sample_rate_hz` 回报实际值。三套 RTL 基线收口：`osmosdr_source`
   1.024M → 2.4M、`RtlTcpBackend` 硬编码 2.048M → 引用同一常量、
@@ -1810,6 +1810,8 @@ No supported devices found），GNSS+SDR 同开复验没做成；离线那次
   `rtltcp_client` / 5 个测试期望 / 文档；未碰 main_window / rf_sky_view /
   spectrum_widget。未推送。
   另：`control_panel.py` 的 UX 线阻塞已在 `12a43a0` 解除，该文件工作区干净。
+  常量定义后由 `bb7dda23` 下沉到 `mbdsdr_ai/sdr_status.py:21`，`sdr_backend` 仍 re-export：
+  〔证：`bb7dda23` — `mbdsdr_ai/sdr_status.py:21` — `DEFAULT_SAMPLE_RATE_HZ = 2_400_000`〕
 
 - 2026-11-05（可发现性/快捷键线，本笔修复 HEAD ImportError）：**同文件并发事故**。
   `desktop/main_window.py` 被另一条线整文件提交时，带走了本线尚未提交的
@@ -2095,6 +2097,10 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `desktop/modulation_panel.py` | S1-S4结果伪造线/6ae85f56（A2：_terminal_status 保留识别完成/失败，成功侧不再被刷新改写成就绪） | 2026-11-13 20:53 | 本笔 |
 | `tests/test_weather_panel_fengyun.py` | S1-S4结果伪造线/6ae85f56（A1 用例：失败后触发 _on_idle/_refresh_state，状态行不变） | 2026-11-13 20:53 | 本笔 |
 | `tests/test_modulation_panel_failure_landing.py` | S1-S4结果伪造线/6ae85f56（A2 用例：识别完成后刷新仍为「识别完成」） | 2026-11-13 20:53 | 本笔 |
+| `scripts/claim_window.py` | 收尸线/6ae85f56（判据同源：新增 claim_active（心跳+TTL 唯一口径），闸与审计共用） | 2026-11-13 20:54 | 本笔 |
+| `scripts/check_claim_coordination.py` | 收尸线/6ae85f56（判据同源：两处活跃判定改调 claim_window.claim_active） | 2026-11-13 20:54 | 本笔 |
+| `scripts/audit_unclaimed_changes.py` | 收尸线/6ae85f56（判据同源：删除自写 TTL 比较，改 import claim_active） | 2026-11-13 20:54 | 本笔 |
+| `tests/test_claim_liveness_one_source.py` | 收尸线/6ae85f56（判据同源反证：55/61/边界 三档，闸与审计同答案） | 2026-11-13 20:54 | 本笔 |
 | `desktop/time_machine.py` | S1-S4结果伪造线/6ae85f56（A3：_terminal_status 保留回到现在/天文暮光终/极昼极夜/跳转失败，刷新只回显，重新选时刻才清空） | 2026-11-13 20:56 | 本笔 |
 | `tests/test_ui_gap_fill.py` | S1-S4结果伪造线/6ae85f56（A3 三条用例：极昼极夜/回到现在/跳转失败终态在刷新后不变） | 2026-11-13 20:56 | 本笔 |
 | `docs/design-basis.md` | 文档引用复核线/6ae85f56（11 条过期定性：:145 af7208b 缺坐标；minSize 旧字面量按 a2be554a 重定位） | 2026-11-13 21:02 | 本笔 |

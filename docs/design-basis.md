@@ -142,8 +142,8 @@ Select-String -Path D:\mbdsdr\.figma\* -Pattern "星空|天空|望远镜|频谱|
 - `5ba61b7`：`strip.setFixedWidth(152)` → `tokens().SIZE["planetarium_strip_w"]`（上表第 1 行的令牌回收）。
   像素等价证据：同尺寸 1280×800 星象仪截图，`strip` 9120 px、整窗 640000 px **逐像素 diff = 0**。
 
-取证附带发现（`af7208b` 已修）：`test_ui_layout_locks.py` 原来的 `800x600` 参数**实际跑在 1000×600**。
-根因是 `desktop/main_window.py:L548` 的 `self.setMinimumSize(1000, 600)`——显式硬下限，`resize(800, 600)` 被夹回 1000 宽。
+取证附带发现（`af7208b` 已修）：`test_ui_layout_locks.py` 原来的 `800x600` 参数**实际跑在 1000×600**。〔证：`af7208b` — `tests/test_ui_layout_locks.py:286` — `def test_request_800_is_clamped_to_declared_1000():`〕
+根因是 `desktop/main_window.py` 的 `self.setMinimumSize(1000, 600)`（当时的显式硬下限，`resize(800, 600)` 被夹回 1000 宽）；该字面量现已不存在，同一处眼下是 `desktop/main_window.py:1021` 的 `self.setMinimumSize(max(860, _min_w), max(560, _min_h))`——下限改按内容夹取。〔证：`a2be554a` — `desktop/main_window.py:1021` — `self.setMinimumSize(max(860, _min_w), max(560, _min_h))`〕
 `af7208b` 已删掉伪 800 档，改为两条真正的夹取断言：`test_request_800_is_clamped_to_declared_1000`
 （断言请求 800 实得 1000×600）与 `test_window_never_shrinks_below_declared_minimum`。
 最小宽口径同步更新为实测 `HEAD 5ba61b7`：**offscreen 指纹 `minimumSizeHint()` = 1625×729**

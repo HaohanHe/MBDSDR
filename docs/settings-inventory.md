@@ -256,9 +256,7 @@
 
 ## 8. 与其它线的边界 / 在途冲突
 
-- `desktop/main_window.py` 仅做了**最小停靠接线**（已提交 `49eddcf`，9 insertions /
-  1 deletion）：新增 `SettingsPanel` 导入 + 在服务页签之后创建"设置"页签，未改任何
-  既有逻辑。
+- `desktop/main_window.py` 仅做了**最小停靠接线**（已提交 `49eddcf`，9 insertions / 1 deletion）：新增 `SettingsPanel` 导入 + 在服务页签之后创建"设置"页签，未改任何既有逻辑。〔证：`49eddcf` — `desktop/main_window.py:697` — `from settings_panel import ServiceSettingsPanel, SettingsPanel`〕
 - `desktop/spectrum_widget.py`：既有配置仍走它的公开方法/控件；本轮按 A7 只**新增**
   `set_waterfall_depth()` / `wf_rows_at()` / `SpectrumPanel.set_waterfall_depth_rows()`
   与瀑布滚轮回看，不改既有绘制语义（实时增量绘制路径不变）。
