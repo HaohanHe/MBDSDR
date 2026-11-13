@@ -2187,6 +2187,11 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `mbdsdr_ai/tests/test_lrpt_modem.py` | 参考移植线/20261114（第5条：锁状态/标定/复位用例） | 2026-11-14 05:18 | 本笔 |
 | `mbdsdr_ai/tests/test_lrpt_pipeline.py` | 参考移植线/20261114（第5条：结果呈现与失败原因用例） | 2026-11-14 05:18 | 本笔 |
 | `docs/COORDINATION.md` | 参考移植线/20261114（第5条 §6.1 登记行） | 2026-11-14 05:18 | 本笔 |
+| `mbdsdr_ai/sat_passes.py` | 参考移植线/20261114（第3条：sample_pass_track 过境方位/仰角采样） | 2026-11-14 05:22 | 本笔 |
+| `desktop/sat_track_panel.py` | 参考移植线/20261114（第3条：PolarPassPlot 极坐标图与跨北展开） | 2026-11-14 05:22 | 本笔 |
+| `desktop/main_window.py` | 参考移植线/20261114（第3条：过境 provider 附 track） | 2026-11-14 05:22 | 本笔 |
+| `docs/COORDINATION.md` | 参考移植线/20261114（第3条 §6.1 登记行） | 2026-11-14 05:22 | 本笔 |
+| `tests/test_sat_polar_plot.py` | 参考移植线/20261114（第3条：投影/连续性/轨迹采样/面板注入用例） | 2026-11-14 05:22 | 本笔 |
 
 > 上表各行均由 `claim` 台账推导：owner 原文与 `acquired_at` 直接取自台账，
 > 目的优先用台账里的 `claim_reason`，没有就如实写「未声明」，不补编。时间列只是

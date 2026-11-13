@@ -13889,7 +13889,8 @@ class MainWindow(QMainWindow):
             from mbdsdr_ai.sat_passes import GroundStation
             gs = GroundStation(lat_deg=self._observer_lat,
                                lon_deg=self._observer_lon)
-        from mbdsdr_ai.sat_passes import predict_upcoming_passes
+        from mbdsdr_ai.sat_passes import (predict_upcoming_passes,
+                                          sample_pass_track)
         from settings import (effective_pass_min_elevation_deg,
                               effective_pass_window_hours)
         entries = predict_upcoming_passes(
@@ -13909,6 +13910,8 @@ class MainWindow(QMainWindow):
                 "max_alt": float(p.max_alt),
                 "aos_utc": aos,
                 "los_utc": los,
+                # 方位/仰角轨迹与过境时刻同一传播源；面板只画不重算。
+                "track": sample_pass_track(row["tle"], gs, p, num_points=48),
             })
         return rows
 

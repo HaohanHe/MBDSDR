@@ -21,7 +21,8 @@ import math
 from datetime import datetime, timezone
 from typing import Optional, Dict
 
-from PySide6.QtCore import Qt, Signal, QTimer
+from PySide6.QtCore import Qt, Signal, QTimer, QPointF, QRectF
+from PySide6.QtGui import QColor, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import (
     QFrame, QVBoxLayout, QHBoxLayout, QFormLayout, QLabel, QComboBox,
     QDoubleSpinBox, QPushButton, QProgressBar, QGroupBox, QMessageBox,
@@ -69,6 +70,147 @@ _TIER_ALIAS = {"stale": "dead"}
 #: 过境列表取数的冷却（秒）。列表只由宿主注入的 provider 产生；
 #: 窗口内确实没有过境 / provider 失败时，冷却期内不再触发第二次 skyfield 计算。
 _PASSES_COOLDOWN_S = 60.0
+
+
+def unwrap_azimuths(points):
+    """把 ``[(az°, el°), ...]`` 的方位角展开成连续序列。
+
+    过境从 359° 跨到 1° 时朴素折线会在图上横穿整个圆盘；展开成
+    359→361 后，``polar_xy`` 的三角函数天然把 361° 画回 1° 的位置，
+    轨迹连续且不经过圆心。地平线以下（el < 0）的点丢弃。
+    """
+    out = []
+    prev = None
+    for az, el in points:
+        if el < 0:
+            continue
+        az = az % 360.0
+        if prev is not None:
+            d = az - prev
+            while d > 180.0:
+                az -= 360.0
+                d = az - prev
+            while d < -180.0:
+                az += 360.0
+                d = az - prev
+        out.append((az, el))
+        prev = az
+    return out
+
+
+def polar_xy(az_deg, el_deg, cx, cy, radius):
+    """天顶等距投影：仰角 90° 在圆心、0° 在外圈；北=上、东=右。
+
+    对齐 gpredict ``gtk_polar_plot`` 的常见画法（天顶居中、方位顺时针）。
+    """
+    el = max(0.0, min(90.0, float(el_deg)))
+    r = radius * (1.0 - el / 90.0)
+    ang = math.radians(float(az_deg))
+    return cx + r * math.sin(ang), cy - r * math.cos(ang)
+
+
+class PolarPassPlot(QWidget):
+    """过境方位/仰角极坐标图（只画宿主给的轨迹，不自己算命盘）。"""
+
+    MARGIN_PX = 18
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setObjectName("polarPassPlot")
+        self.setMinimumHeight(200)
+        self.setFixedHeight(220)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self._track = []
+        self._current = None
+        self._note = "暂无过境轨迹"
+
+    # -- 数据入口 ---------------------------------------------------------
+    def set_track(self, points, note: str = ""):
+        cleaned = []
+        for p in points or []:
+            try:
+                az = float(p["az"])
+                el = float(p["el"])
+            except (KeyError, TypeError, ValueError):
+                continue
+            if math.isfinite(az) and math.isfinite(el):
+                cleaned.append((az % 360.0, el))
+        self._track = cleaned
+        self._note = note or ("暂无过境轨迹" if not cleaned else "")
+        self.update()
+
+    def set_current(self, az, el=None):
+        if az is None or el is None:
+            self._current = None
+        else:
+            try:
+                az = float(az)
+                el = float(el)
+            except (TypeError, ValueError):
+                self._current = None
+            else:
+                self._current = (az % 360.0, el) if (
+                    math.isfinite(az) and math.isfinite(el)) else None
+        self.update()
+
+    def track_points(self):
+        return list(self._track)
+
+    def current_point(self):
+        return self._current
+
+    # -- 绘制 -------------------------------------------------------------
+    def paintEvent(self, event):  # noqa: N802 (Qt 命名)
+        t = tokens()
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing, True)
+        w, h = float(self.width()), float(self.height())
+        cx, cy = w / 2.0, h / 2.0
+        radius = max(10.0, min(w, h) / 2.0 - self.MARGIN_PX)
+
+        p.setBrush(Qt.NoBrush)
+        p.setPen(QPen(QColor(t.COLORS["gray_400"]), 1))
+        for el in (0, 30, 60):
+            r = radius * (1.0 - el / 90.0)
+            p.drawEllipse(QPointF(cx, cy), r, r)
+        p.drawLine(QPointF(cx, cy - radius), QPointF(cx, cy + radius))
+        p.drawLine(QPointF(cx - radius, cy), QPointF(cx + radius, cy))
+
+        p.setPen(QPen(QColor(t.text("tertiary")), 1))
+        font = p.font()
+        font.setPointSizeF(8.0)
+        p.setFont(font)
+        for label, az in (("N", 0), ("E", 90), ("S", 180), ("W", 270)):
+            x, y = polar_xy(az, 0.0, cx, cy, radius + 11.0)
+            p.drawText(QRectF(x - 8, y - 8, 16, 16), Qt.AlignCenter, label)
+
+        pts = unwrap_azimuths(self._track)
+        if len(pts) >= 2:
+            path = QPainterPath()
+            x0, y0 = polar_xy(pts[0][0], pts[0][1], cx, cy, radius)
+            path.moveTo(x0, y0)
+            for az, el in pts[1:]:
+                x, y = polar_xy(az, el, cx, cy, radius)
+                path.lineTo(x, y)
+            p.setPen(QPen(QColor(t.COLORS["accent"]), 2))
+            p.drawPath(path)
+            for (az, el), color in ((pts[0], t.COLORS["success"]),
+                                    (pts[-1], t.COLORS["danger"])):
+                x, y = polar_xy(az, el, cx, cy, radius)
+                p.setBrush(QColor(color))
+                p.setPen(Qt.NoPen)
+                p.drawEllipse(QPointF(x, y), 3.5, 3.5)
+        elif self._note:
+            p.setPen(QPen(QColor(t.text("tertiary")), 1))
+            p.drawText(QRectF(0, cy - 10, w, 20), Qt.AlignCenter, self._note)
+
+        if self._current is not None:
+            x, y = polar_xy(self._current[0], self._current[1], cx, cy, radius)
+            p.setBrush(Qt.NoBrush)
+            p.setPen(QPen(QColor(t.COLORS.get("accent_warm",
+                                               t.COLORS["accent"])), 2))
+            p.drawEllipse(QPointF(x, y), 5.0, 5.0)
+        p.end()
 
 
 def _tle_policy(age_days: Optional[float], tier: Optional[str] = None) -> Dict:
@@ -334,6 +476,24 @@ class SatTrackPanel(QFrame):
         # 收起分组 = 倒计时不可见：1s 重绘必须跟着停，不做常驻心跳。
         cd_box.toggled.connect(self._sync_countdown_timer)
         root.addWidget(cd_box)
+
+        # ---- 过境极坐标（方位/仰角轨迹）----
+        # 轨迹点由宿主 provider 的 ``track`` 提供（与过境列表同一条轨道源），
+        # 面板只画，不自己点 TLE 重算，避免出现第二份星历真值。
+        polar_box = _CollapsibleGroupBox("过境极坐标")
+        self._polar_box = polar_box
+        self._make_collapsible(polar_box, "过境极坐标", 3, "satPolarBox")
+        polar_layout = QVBoxLayout(polar_box)
+        self.polar_plot = PolarPassPlot()
+        polar_layout.addWidget(self.polar_plot)
+        self.polar_hint = QLabel("天顶居中、外圈地平线；绿色=AOS，红色=LOS")
+        self.polar_hint.setWordWrap(True)
+        self.polar_hint.setMinimumWidth(0)
+        self.polar_hint.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
+        self.polar_hint.setStyleSheet(
+            "color: " + tokens().text("tertiary") + "; font-size: 8.5pt;")
+        polar_layout.addWidget(self.polar_hint)
+        root.addWidget(polar_box)
 
         # ---- 星下点 / 地面轨迹 / 覆盖圈 ----
         # 复用公用 OSM 地图（osm_map.OsmMapView.add_layer），本面板不画底图。
@@ -615,6 +775,7 @@ class SatTrackPanel(QFrame):
             self.range_label.setText("--")
             self.el_bar.setValue(0)
             self._set_el_color(tokens().COLORS["gray_300"])
+            self.polar_plot.set_current(None)
             return
 
         az = float(pos["azimuth"])
@@ -622,6 +783,7 @@ class SatTrackPanel(QFrame):
         dop = float(pos["doppler_hz"])
         corr = float(pos["corrected_freq_hz"])
         rng = float(pos["range_km"])
+        self.polar_plot.set_current(az, el)
 
         self.az_label.setText(f"{az:6.1f}°")
         self.el_label.setText(f"{el:6.1f}°")
@@ -697,6 +859,7 @@ class SatTrackPanel(QFrame):
         self._passes_for = ""
         self._passes_fetched_unix = None
         self._pass_warning = ""
+        self.polar_plot.set_track([])
         # 注意：不清 ``_last_now_unix``——它只是「上次显示用的时基」，
         # 与过境数据无关；清掉会让 UTC 开关退回一次时钟读取（数字会跳）。
 
@@ -742,7 +905,8 @@ class SatTrackPanel(QFrame):
                 self._pass_warning = chk["warning"]
                 continue
             peak = row.get("max_alt")
-            parsed.append({"aos": aos, "los": los, "peak_alt": peak})
+            parsed.append({"aos": aos, "los": los, "peak_alt": peak,
+                           "track": row.get("track") or []})
         parsed.sort(key=lambda r: r["aos"])
         self._passes = parsed
 
@@ -793,6 +957,7 @@ class SatTrackPanel(QFrame):
         if now_unix is None:
             self.countdown_label.setText("--")
             self.pass_abs_label.setText("时间引擎不可用，倒计时暂停")
+            self.polar_plot.set_track([])
             return
         self._last_now_unix = float(now_unix)
 
@@ -800,11 +965,13 @@ class SatTrackPanel(QFrame):
         if not name:
             self.countdown_label.setText("--")
             self.pass_abs_label.setText("先选择一颗卫星")
+            self.polar_plot.set_track([])
             return
         self._ensure_passes(name, now_unix)
         if self._pass_provider is None:
             self.countdown_label.setText("--")
             self.pass_abs_label.setText("过境数据未接入（由主窗口注入预测结果）")
+            self.polar_plot.set_track([])
             return
 
         active = next((r for r in self._passes if r["los"] > now_unix), None)
@@ -812,7 +979,11 @@ class SatTrackPanel(QFrame):
             self.countdown_label.setText("窗口内无过境")
             self.pass_abs_label.setText(
                 self._pass_warning or "预测窗口内这颗星不再升起")
+            self.polar_plot.set_track([])
             return
+        track = active.get("track") or []
+        self.polar_plot.set_track(
+            track, note="" if track else "该过境无轨迹数据")
 
         utc = self.utc_check.isChecked()
         aos_txt = self._fmt_when(active["aos"], utc)

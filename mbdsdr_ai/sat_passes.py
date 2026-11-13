@@ -60,6 +60,7 @@ __all__ = [
     "make_timescale",
     "DopplerPoint",
     "compute_doppler_curve",
+    "sample_pass_track",
     "predict_upcoming_passes",
     "PASS_COARSE_STEP_S",
     "PASS_FINE_STEP_S",
@@ -814,6 +815,59 @@ def compute_doppler_curve(
             doppler_hz=dop_vals[i],
             doppler_rate_hz_s=dop_rate[i],
         ))
+    return out
+
+
+def sample_pass_track(
+    tle_lines: Sequence[str],
+    ground_station: GroundStation,
+    pass_: SatellitePass,
+    num_points: int = 48,
+) -> List[Dict[str, float]]:
+    """采样一次过境的 (时刻, 方位角, 仰角) 轨迹，供极坐标图绘制。
+
+    与 :func:`compute_doppler_curve` 共用同一条传播/站心变换（``_alt_az``），
+    只是不计算距离与多普勒；方位角统一归一到 ``[0, 360)``。
+    无 TLE/传播失败/过境时长非正 → 返回空列表（调用方显示空轨迹，
+    不补点、不外推）。
+
+    返回
+    ----
+    ``[{"unix": float, "az": float, "el": float}, ...]``，按时间升序。
+    """
+    parsed = _parse_tle(tle_lines)
+    if parsed is None:
+        return []
+    name, line1, line2 = parsed
+    ts = make_timescale()
+    try:
+        sat = EarthSatellite(line1, line2, name, ts)
+    except Exception:
+        return []
+    topo = Topos(latitude_degrees=ground_station.lat_deg,
+                 longitude_degrees=ground_station.lon_deg,
+                 elevation_m=ground_station.alt_m)
+    diff = sat - topo
+
+    t0 = pass_.rise_time
+    t1 = pass_.set_time
+    dt_days = t1.tt - t0.tt
+    if dt_days <= 0 or num_points < 2:
+        return []
+
+    out: List[Dict[str, float]] = []
+    for k in range(num_points):
+        frac = k / (num_points - 1)
+        t = ts.tt_jd(t0.tt + frac * dt_days)
+        r = _alt_az(diff, t)
+        if r is None:
+            continue
+        el, az = r          # _alt_az 返回 (仰角°, 方位角°)
+        out.append({
+            "unix": float(t.utc_datetime().timestamp()),
+            "az": float(az) % 360.0,
+            "el": float(el),
+        })
     return out
 
 
