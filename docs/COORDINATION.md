@@ -1952,6 +1952,8 @@ No supported devices found），GNSS+SDR 同开复验没做成；离线那次
 | `desktop/device_panel.py` | 用户输入静默线/6ae85f56（store 预览复用 `parse_sample_rate`，不再自造只认纯 Hz 的第二份解析；原持有者在途 hunk 按 §6.1.4 排除，见下方接管记录） | 2026-11-13 18:58 | 本笔 |
 | `tests/test_device_panel_preview_parse.py` | 用户输入静默线/6ae85f56（2.048M / 纯 Hz / 不可解析 3 条；反证=改回裸 `float` 时 1 红） | 2026-11-13 18:58 | 本笔 |
 | `docs/COORDINATION.md` | 用户输入静默线/6ae85f56（本批 §6.1 行 + §6.1.4 接管记录） | 2026-11-13 18:58 | 本笔 |
+| `docs/pending-patches/2026-11-13-orphan-initial-hunks.md` | 用户输入静默线/6ae85f56（登记 device_panel 原 owner 3 处在途 hunk 的归属、接取人与验收判据） | 2026-11-13 19:05 | 本笔 |
+| `docs/COORDINATION.md` | 用户输入静默线/6ae85f56（本笔 §6.1 行） | 2026-11-13 19:05 | 本笔 |
 | **真机（USB SDR）** | 跑 `hw_acceptance/`、七环、`capture_throughput.py` 的线（资源独占） | 占用时段 | — |
 
 > 上表各行均由 `claim` 台账推导：owner 原文与 `acquired_at` 直接取自台账，
