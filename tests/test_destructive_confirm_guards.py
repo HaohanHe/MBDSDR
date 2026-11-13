@@ -120,8 +120,9 @@ def test_rescan_without_results_starts_without_prompt(monkeypatch):
 
     class _WorkerStub(QObject):
         progress = Signal(float, float)
-        done = Signal(list)
-        failed = Signal(str)
+        done = Signal(list, int)
+        cancelled = Signal(list, int)
+        failed = Signal(str, int)
         finished = Signal()
 
         def __init__(self, *args, **kwargs):
