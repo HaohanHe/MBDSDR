@@ -6065,6 +6065,10 @@ class MainWindow(QMainWindow):
         for spec in registry().list():
             if not spec.closable:
                 continue
+            # 星象仪模式的显示/隐藏由「视图 → 星象仪模式」承担；面板菜单
+            # 再放一份同名项会被 action-duplication 判成「同名不同命令」。
+            if spec.id == "rf_sky":
+                continue
             act = QAction(spec.name, self)
             act.setCheckable(True)
             loc = self._find_panel_tab(spec)
