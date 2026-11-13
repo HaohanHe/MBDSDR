@@ -1881,6 +1881,10 @@ No supported devices found），GNSS+SDR 同开复验没做成；离线那次
 
 | 文件 | 线名 | 开始时间 | 预计提交 hash |
 |---|---|---|---|
+| `desktop/search_providers.py` | Qt翻译与设置显式线/6ae85f56（补书签 provider：名称/频率检索 + 定位列表行；83afbf77 已落库，本行补登） | 2026-11-13 20:17 | 83afbf77 |
+| `desktop/command_palette.py` | Qt翻译与设置显式线/6ae85f56（GROUPS 增补「书签」；0ecbeaf2 已落库） | 2026-11-13 20:17 | 0ecbeaf2 |
+| `tests/test_search_providers.py` | Qt翻译与设置显式线/6ae85f56（书签三条用例 + 去注册反证；f73549ec 已落库） | 2026-11-13 20:17 | f73549ec |
+| `docs/COORDINATION.md` | Qt翻译与设置显式线/6ae85f56（本笔 §6.1 登记行，提交后释放） | 2026-11-13 20:17 | 本笔 |
 | `docs/COMMIT-INCIDENT-CARD.md`、`scripts/check_card_links.py`、`scripts/check_generated_artifacts.py`、`tests/test_card_links.py` | 锚点机制线（卡片锚点改按章节号解析，ae98d46e 已落库；pre-commit 超预算只告警，本行是释放后补登） | 2026-11-13 19:49 | ae98d46e |
 | `desktop/search_providers.py` | Qt翻译与设置显式线/6ae85f56（统一搜索 provider 声明式注册表：菜单/页签/面板/能力/快捷键/设置项/卫星） | 2026-11-13 20:15 | 本笔 |
 | `desktop/command_palette.py` | Qt翻译与设置显式线/6ae85f56（build_index 改走 PROVIDERS；分组渲染、不可用与空结果分开、Esc 全流程） | 2026-11-13 20:15 | 本笔 |
