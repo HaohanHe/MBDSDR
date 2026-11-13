@@ -472,16 +472,33 @@ def _index_path() -> Path:
 
 
 def _shared_index_owners(paths: list[str]) -> dict[str, str]:
-    """查每条暂存路径在台账里的当前 owner；查不到如实写「无 claim 记录」。"""
+    """查每条暂存路径的**当前** owner；没有就写「无 claim 记录」。
+
+    只认 ``current``：历史主人不是「现在找谁」，混在一起会指错人。
+    有历史但无 current 时把历史放括号里，供人判断该问谁。
+    """
     try:
         cc = _coord_module()
-        known = cc.ledger_index(cc._load_registry(cc.fc.REGISTRY_PATH))
+        registry = cc._load_registry(cc.fc.REGISTRY_PATH)
     except (ImportError, OSError, ValueError):
         return {path: "无 claim 记录（台账不可用）" for path in paths}
+    by_path = {}
+    for entry in (registry.get("claims") or {}).values():
+        if isinstance(entry, dict) and entry.get("path"):
+            by_path[cc._norm(str(entry["path"]))] = entry
     labels = {}
     for path in paths:
-        owners = sorted(known.get(cc._norm(path)) or [])
-        labels[path] = "、".join(owners) if owners else "无 claim 记录"
+        entry = by_path.get(cc._norm(path)) or {}
+        current = entry.get("current")
+        if isinstance(current, dict) and current.get("owner"):
+            labels[path] = str(current["owner"])
+            continue
+        seen = list(dict.fromkeys(
+            str(item["owner"]) for item in (entry.get("history") or [])
+            if isinstance(item, dict) and item.get("owner")
+        ))
+        labels[path] = ("无 claim 记录（历史：" + "、".join(seen) + "）"
+                        if seen else "无 claim 记录")
     return labels
 
 
