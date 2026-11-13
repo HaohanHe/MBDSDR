@@ -192,9 +192,6 @@ class Repo:
             return None
         return proc.stdout
 
-    def head(self) -> str:
-        return self.git("rev-parse", "HEAD").strip()
-
     def describe_commit(self, abbr: str) -> Tuple[str, str]:
         """返回 (类型, 完整名)；类型为 commit/tree/blob/missing。"""
         proc = subprocess.run(

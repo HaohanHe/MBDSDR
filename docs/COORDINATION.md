@@ -2170,6 +2170,7 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `tests/test_ground_track.py` | 公理体检线/6ae85f56（地面足迹默认仰角与可见门单值守卫（清单 Q1-5/Q4）） | 2026-11-13 22:13 | 本笔 |
 | `mbdsdr_ai/tests/test_tle_freshness_predict.py` | 公理体检线/6ae85f56（未来历元可见性用例（清单 Q4 TLE 老化）） | 2026-11-13 22:14 | 本笔 |
 | `mbdsdr_ai/spacetime_predict.py` | 公理体检线/6ae85f56（报告 tle 字段补 epoch_in_future 说明（清单 Q4）） | 2026-11-13 22:14 | 本笔 |
+| `tools/axioms/model.py` | 公理体检线/6ae85f56（删除同名两义的死 head 定义（清单 Q1-4）） | 2026-11-13 22:16 | 本笔 |
 
 > 上表各行均由 `claim` 台账推导：owner 原文与 `acquired_at` 直接取自台账，
 > 目的优先用台账里的 `claim_reason`，没有就如实写「未声明」，不补编。时间列只是
