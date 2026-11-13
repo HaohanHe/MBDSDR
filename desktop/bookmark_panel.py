@@ -249,12 +249,22 @@ class BookmarkPanel(QWidget):
                                         text="")
         if not ok:
             return
-        freq_mhz, ok = QInputDialog.getDouble(
-            self, "添加书签", "频率 (MHz):",
-            value=freq/1e6 if freq > 0 else 100.0,
-            min=0.001, max=6000.0, decimals=6)
-        if not ok:
-            return
+        # 频率对话框自身不做范围夹值：QInputDialog.getDouble 会在关闭前把
+        # 7000 改写成 6000，用户只看到结果、看不到过程（B2）。这里放宽控件
+        # 边界，由下面的显式校验提示重输，绝不静默落库一个被改过的频率。
+        freq_mhz = freq/1e6 if freq > 0 else 100.0
+        while True:
+            freq_mhz, ok = QInputDialog.getDouble(
+                self, "添加书签", "频率 (MHz, 0.001–6000)：",
+                value=freq_mhz, min=-1e9, max=1e9, decimals=6)
+            if not ok:
+                return
+            if 0.001 <= freq_mhz <= 6000.0:
+                break
+            QMessageBox.warning(
+                self, "频率超出范围",
+                f"{freq_mhz:g} MHz 超出书签可用范围 0.001–6000 MHz。\n"
+                "请重新输入（这次的值未保存）。")
         group_label = _GROUP_LABEL.get(self._current_group, "自定义")
         group_label, ok = QInputDialog.getItem(
             self, "添加书签", "分组：",
@@ -290,6 +300,13 @@ class BookmarkPanel(QWidget):
         name, ok = QInputDialog.getText(self, "编辑书签", "名称：",
                                         text=sel["name"])
         if not ok:
+            return
+        if not name.strip():
+            # 清空名称 ≠ 取消改名：旧实现把空串落库，列表里那行变成空白，
+            # 用户会以为自己只是没改。空名不接受，原名原样保留。
+            QMessageBox.warning(
+                self, "名称不能为空",
+                "名称不能为空，书签未修改。\n如需改名请填写新名称。")
             return
         try:
             self._mgr.update(sel["frequency_hz"], name=name)

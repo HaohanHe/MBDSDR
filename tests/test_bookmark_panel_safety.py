@@ -84,3 +84,80 @@ def test_delete_custom_bookmark_on_confirm(panel, monkeypatch):
 
     assert len(panel._bookmarks) == 1, "确认后只删当前选中项"
     assert store.removed == ["我的本地台"], "确认后必须落盘删除"
+
+
+# ---------------------------------------------------------------------------
+# A4 / B2：书签面板自己的改名与频率输入
+# ---------------------------------------------------------------------------
+@pytest.fixture
+def bm_panel(qtapp, tmp_path):
+    from bookmark_panel import BookmarkPanel
+
+    p = BookmarkPanel(config_dir=str(tmp_path))
+    yield p
+    p.close()
+
+
+def _seed(bm_panel, name="原名"):
+    from mbdsdr_ai.bookmark_manager import Bookmark
+
+    bm_panel._mgr.add(Bookmark(frequency_hz=98_500_000, name=name,
+                               modulation="FM", bandwidth_hz=200_000))
+    bm_panel.refresh_list()
+    bm_panel.tree.setCurrentItem(bm_panel.tree.topLevelItem(0))
+
+
+def test_edit_empty_name_rejected_and_original_kept(bm_panel, monkeypatch):
+    """清空名称 ≠ 取消改名：空名必须拒绝，不得把原名落库成空白。"""
+    from PySide6.QtWidgets import QInputDialog, QMessageBox
+
+    _seed(bm_panel)
+    warnings = []
+    monkeypatch.setattr(QInputDialog, "getText",
+                        staticmethod(lambda *a, **k: ("   ", True)))
+    monkeypatch.setattr(
+        QMessageBox, "warning",
+        staticmethod(lambda *a, **k: warnings.append(a)))
+
+    bm_panel._on_edit()
+
+    assert warnings, "空名称必须给出可见提示"
+    assert "不能为空" in str(warnings[0][2])
+    assert bm_panel._mgr.all()[0].name == "原名", "原名必须原样保留"
+
+
+def test_add_out_of_range_frequency_reprompts_instead_of_clamping(
+        bm_panel, monkeypatch):
+    """7000 MHz 不许被对话框夹成 6000 后静默落库，必须提示重输。"""
+    from PySide6.QtWidgets import QInputDialog, QMessageBox
+
+    calls = []
+    answers = [(7000.0, True), (145.5, True)]
+
+    def fake_double(*a, **k):
+        calls.append(k)
+        return answers[len(calls) - 1]
+
+    groups = [("自定义", True), ("NFM", True)]
+    warnings = []
+    monkeypatch.setattr(QInputDialog, "getText",
+                        staticmethod(lambda *a, **k: ("测试台", True)))
+    monkeypatch.setattr(QInputDialog, "getDouble", staticmethod(fake_double))
+    monkeypatch.setattr(QInputDialog, "getItem",
+                        staticmethod(lambda *a, **k: groups.pop(0)))
+    monkeypatch.setattr(QMessageBox, "information",
+                        staticmethod(lambda *a, **k: QMessageBox.Ok))
+    monkeypatch.setattr(
+        QMessageBox, "warning",
+        staticmethod(lambda *a, **k: warnings.append(a)))
+
+    bm_panel._on_add_current()
+
+    assert len(calls) == 2, "超范围后必须重新询问，而不是直接落库"
+    assert calls[0]["max"] > 6000, "对话框自身不得把超范围值夹到 6000"
+    assert warnings and "超出" in str(warnings[0][2])
+    assert "6000" in str(warnings[0][2])
+    stored = bm_panel._mgr.all()
+    assert len(stored) == 1
+    assert stored[0].frequency_hz == 145_500_000, "落库的应是用户重输的值"
+
