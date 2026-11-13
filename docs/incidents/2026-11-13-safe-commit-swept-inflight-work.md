@@ -97,3 +97,29 @@
   `d:\mbdsdr\.locks\claims.json` 中 `scripts/safe_commit.py` 的 `history`；
   两测试文件在台账中无键（`'tests/test_safe_commit_declaration.py' in claims`
   = `False`，`'tests/test_safe_commit_line_range.py' in claims` = `False`）。
+
+## 八、裁定（2026-11-13，用户）：不回退
+
+理由：那条线 20:39 之后的编辑叠在 `052828d1` 之上，单方面 revert 会把它的
+在途编辑一起卷回去。**后续由那条线只提增量，并自行核对 `052828d1` 里的版本
+是否就是它想要的版本**；若不一致，由它在自己的增量里改回来，不由本线动它。
+
+裁定后的事实更新：20:41 那条线已自行提交
+`e326d9d2 fix(safe_commit): 豁免路径的报告不再自称「拒绝提交」`（+25/−9），
+增量正是它 20:39 在写的那一段。三件现在落在 `052828d1` + `e326d9d2` 两笔上，
+工作区已干净；本线没有再碰这三个文件。
+
+## 九、自查补充：提交说明到底有没有点名
+
+`git show -s --format=%B 052828d1` 原文：
+
+- **提到了**：`safe_commit.py` 文件名、「此前未提交的三件」及形态⑰/⑱/⑳，
+  以及 `test_safe_commit_declaration.py` / `test_safe_commit_line_range.py`
+  两个测试文件名。
+- **漏了**：① 没写实现文件的完整路径 `scripts/safe_commit.py`；② 没写「这是
+  另一条在途线正在写的活」，反而写成「此前一直未提交」，把别人的在途工作
+  定性成无主遗留。
+
+结论：**点名了文件，却给错了性质**——仍属「悄悄多带」的变体，不因写了文件名
+而减等。记录在此。
+
