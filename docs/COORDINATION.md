@@ -2132,6 +2132,9 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `scripts/hooks/pre-commit` | 归属证据线/6ae85f56（裁定三：index 归属提示（只提示不改退出码）） | 2026-11-13 21:28 | 本笔 |
 | `tests/test_precommit_index_hint.py` | 归属证据线/6ae85f56（裁定三：提示的 2 条反证用例） | 2026-11-13 21:28 | 本笔 |
 | `scripts/safe_commit.py` | 归属证据线/6ae85f56（e376e16b 规则边界注释） | 2026-11-13 21:28 | 本笔 |
+| `scripts/safe_commit.py` | 归属证据线/6ae85f56（⑲ 选行顺序服从文件行号 + §10 判据指针） | 2026-11-13 21:34 | 本笔 |
+| `tests/test_safe_commit_coordination.py` | 归属证据线/6ae85f56（行序反证用例） | 2026-11-13 21:34 | 本笔 |
+| `docs/evidence-standard.md` | 归属证据线/6ae85f56（§10 整份与选行判据） | 2026-11-13 21:34 | 本笔 |
 
 > 上表各行均由 `claim` 台账推导：owner 原文与 `acquired_at` 直接取自台账，
 > 目的优先用台账里的 `claim_reason`，没有就如实写「未声明」，不补编。时间列只是

@@ -45,7 +45,7 @@ def _git(repo, *args, check=False):
     )
 
 
-def _repo(tmp_path):
+def _repo(tmp_path, extra=()):
     repo = tmp_path / "repo"
     (repo / "scripts").mkdir(parents=True)
     (repo / "docs").mkdir(parents=True)
@@ -54,6 +54,8 @@ def _repo(tmp_path):
     _git(repo, "config", "user.name", "safe-commit", check=True)
     _git(repo, "config", "commit.gpgsign", "false", check=True)
     (repo / CODE).write_text("def foo():\n    return 1\n", encoding="utf-8")
+    for name in extra:
+        (repo / name).write_text("def z():\n    return 1\n", encoding="utf-8")
     (repo / DOC).write_text(DOC_TEXT, encoding="utf-8", newline="")
     # 「补登记」命令打印的是 `python scripts/append_coordination_row.py ...`：
     # 把这几个脚本放进临时树，命令才能原样粘贴执行（不靠测试改写命令）。
@@ -61,7 +63,7 @@ def _repo(tmp_path):
         shutil.copy2(ROOT / "scripts" / name, repo / "scripts" / name)
     (repo / ".gitignore").write_text("__pycache__/\n", encoding="utf-8")
     _git(repo, "add", CODE, DOC, ".gitignore", "scripts/append_coordination_row.py",
-         "scripts/file_claim.py", "scripts/claim_window.py", check=True)
+         "scripts/file_claim.py", "scripts/claim_window.py", *extra, check=True)
     _git(repo, "commit", "-q", "-m", "base", check=True)
     return repo
 
@@ -79,19 +81,19 @@ def _env(repo, locks, owner=""):
     return env
 
 
-def _claim(repo, locks, owner):
+def _claim(repo, locks, owner, path=CODE):
     return subprocess.run(
-        [sys.executable, str(CLAIM), "claim", CODE, "--owner", owner],
+        [sys.executable, str(CLAIM), "claim", path, "--owner", owner],
         cwd=str(repo), env=_env(repo, locks), capture_output=True,
         text=True, encoding="utf-8", errors="replace",
     )
 
 
-def _safe(repo, locks, tmp_path, message="test: 改动\n"):
+def _safe(repo, locks, tmp_path, message="test: 改动\n", files=(CODE,)):
     msg = tmp_path / "msg.txt"
     msg.write_text(message, encoding="utf-8")
     return subprocess.run(
-        [sys.executable, str(SAFE), "--files", CODE, "--message-file", str(msg)],
+        [sys.executable, str(SAFE), "--files", *files, "--message-file", str(msg)],
         cwd=str(repo), env=_env(repo, locks, OWNER),
         capture_output=True, text=True, encoding="utf-8", errors="replace",
     )
@@ -282,4 +284,40 @@ def test_insert_rows_tolerates_prose_before_table():
     assert row in lines
     assert lines.index(row) == lines.index(
         "| `desktop/main_window.py` | 老线/000000（历史） | 2026-11-13 01:48 | 已提交 |") + 1
+
+
+def test_row_order_follows_worktree_not_files_order(tmp_path):
+    """两行同时待提交时，按文件里的行序进本笔，不按 --files / 路径排序重排。
+
+    反证：把 ``_coordination_step`` 的选行改回「按 missing_in_index 顺序」，
+    提交内容与工作树就不再逐字相等，本用例在 ``committed == worktree`` 转红。
+    """
+    extra = "scripts/zzz.py"
+    locks = tmp_path / "locks"
+    repo = _repo(tmp_path, extra=(extra,))
+    assert _claim(repo, locks, OWNER).returncode == 0
+    assert _claim(repo, locks, OWNER, extra).returncode == 0
+    (repo / CODE).write_text("def foo():\n    return 2\n", encoding="utf-8")
+    (repo / extra).write_text("def z():\n    return 2\n", encoding="utf-8")
+
+    out = _safe(repo, locks, tmp_path, files=(CODE, extra)).stdout
+    commands = list(dict.fromkeys(
+        line.strip() for line in out.splitlines()
+        if line.strip().startswith("python scripts/append_coordination_row.py")
+    ))
+    assert len(commands) == 2, out
+    # 故意按「与路径排序相反」的次序追加：zzz 的行在前，foo 的行在后。
+    for command in reversed(commands):
+        proc = _run_command(repo, locks, command)
+        assert proc.returncode == 0, proc.stdout + proc.stderr
+
+    worktree = (repo / DOC).read_text(encoding="utf-8")
+    assert worktree.index(f"`{extra}`") < worktree.index(f"`{CODE}`")
+
+    # --files 顺序与路径排序相反：提交结果仍须与工作树逐字一致（行序不变）。
+    proc = _safe(repo, locks, tmp_path, files=(extra, CODE))
+    out = proc.stdout + proc.stderr
+    assert proc.returncode == 0, out
+    committed = _git(repo, "show", f"HEAD:{DOC}").stdout
+    assert committed == worktree, "提交内容必须服从文件行序，不按 --files 重排"
 

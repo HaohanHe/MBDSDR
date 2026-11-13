@@ -184,6 +184,11 @@ hunk，于是有人把自己的行挪到别处让 diff 断开——提交干净�
 规则只约束 ``ec938a09`` 之后的调用；不要把 ``e376e16b`` 当成「没有声明也能
 排 hunk」的反例。
 
+什么时候可以把整份文件带进本笔、什么时候必须选行：判据见
+``docs/evidence-standard.md`` §10（append-only 且无他线在途 hunk 才可整份；
+**整份带走不是选不中行时的兜底**）。选行时按文件里的行号升序进本笔，
+不按 ``--files`` 顺序重排——否则私有 index 与工作树的字节不等，会被判 DIRTY。
+
 用法::
 
     python scripts/safe_commit.py --files a.py b.md --message-file msg.txt
@@ -1208,15 +1213,18 @@ def _coordination_step(env: dict, files: list[str], doc_rel: str) -> tuple[int, 
         return 0, "", []
 
     # 只挑「覆盖本笔」的那几行；同一行可能同时覆盖多条 claim，不重复带。
+    # 顺序服从文件：按行在文档里的先后输出，不按 --files / 路径排序重排。
+    # 2026-11-13 现场：四行按 --files 顺序重排后与工作树字节不等，被判 DIRTY。
     candidates = _coord_row_lines(doc_text)
-    picked: list[str] = []
-    unresolved = []
-    for path, owner, pattern in missing_in_index:
-        line = next((row for row in candidates if _covers(cc, row, (path, owner))), None)
-        if line is None:
-            unresolved.append((path, owner, pattern))
-        elif line not in picked:
-            picked.append(line)
+    wanted = list(missing_in_index)
+    picked = list(dict.fromkeys(
+        line for line in candidates
+        if any(_covers(cc, line, (path, owner)) for path, owner, _p in wanted)
+    ))
+    unresolved = [
+        item for item in wanted
+        if not any(_covers(cc, line, (item[0], item[1])) for line in picked)
+    ]
     if unresolved:
         return 5, _coord_missing_report(cc, unresolved, doc_abs), []
 
