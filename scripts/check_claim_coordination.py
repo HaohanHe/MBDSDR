@@ -53,6 +53,11 @@
 一条分支时，提交登记表的人会被要求先给自己写一行临时行、提交后再删掉；这是
 「工具逼人制造失真」，比闸松更糟。
 
+但「登记面豁免」只免「给自己登记」，不免「整档编辑」：``--staged`` 时若本笔
+对文档的改动**不是纯追加**（删行 / 改写 / 重排 / 插入非表格内容），仍要求提交者
+持有该文件的 claim（或 60 分钟内由本人释放过）。判据 ``is_pure_append`` 与 ⑤
+只增检查同一个函数——窄锁追加免 claim，整档编辑照旧要 claim。
+
 退出码：0 = 两个方向都无发现；1 = 用法/解析错误；3 = 有发现（同 audit-stale）。
 """
 from __future__ import annotations
@@ -71,6 +76,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 import file_claim as fc  # noqa: E402  （复用占位文件路径与只读窥视）
 from claim_window import RELEASE_WINDOW_S, claim_active, window_release  # noqa: E402
+from check_coordination_append_only import is_pure_append  # noqa: E402  （同一条「纯追加」判据）
 
 DOC = ROOT / "docs" / "COORDINATION.md"
 SECTION_HEAD = "### 6.1 当前占用"
@@ -459,6 +465,53 @@ def staged_paths(root: Path = ROOT) -> List[str]:
     return [_norm(x) for x in proc.stdout.splitlines() if x.strip()]
 
 
+def _git_text(root: Path, spec: str) -> Optional[str]:
+    """取某个版本的文件原文（``HEAD:<path>`` / ``:<path>``）；取不到返回 None。
+
+    ``<path>`` 必须用**原文大小写**：git 的路径匹配在 Windows 上也区分大小写，
+    传规范化后的小写键会得到 ``exists on disk, but not in HEAD``。
+    """
+    proc = subprocess.run(
+        ["git", "show", spec], cwd=str(root), capture_output=True,
+        text=True, encoding="utf-8", errors="replace")
+    return proc.stdout if proc.returncode == 0 else None
+
+
+def doc_edit_findings(
+    root: Path,
+    rel: str,
+    owner: str,
+    registry: Path,
+    markers: Optional[Path],
+    now: Optional[float] = None,
+) -> List[str]:
+    """文档面窄锁：**纯追加**免整档 claim；非追加改动退回「先 claim 整档」。
+
+    追加登记行走 ``append_coordination_row.py``（自己的毫秒级锁即互斥），既不需要
+    占住整本协调文档，也不该被别人的整档 claim 挡住。但「免 claim」只对纯追加
+    成立：出现删除、改写、重排，或插入非表格内容时，仍要求提交者持有该文件的
+    claim（或刚由本人释放过）。否则窄锁会变成「任何人可以整篇重写登记面」。
+    """
+    staged_doc = _git_text(root, f":{rel}")
+    if staged_doc is None:
+        return []  # 暂存区没有该文档：不是本笔要管的事
+    base = _git_text(root, f"HEAD:{rel}") or ""
+    ok, why = is_pure_append(base, staged_doc)
+    if ok:
+        return []
+    held = active_claims_for_paths([rel], now=now, marker_dir=markers)
+    if owner and any(o.strip() == owner.strip() for _p, o in held):
+        return []
+    if owner and recently_released_claims(registry, [rel], owner, now=now):
+        return []
+    return [
+        f"{rel}：本次改动不是「纯追加」（{why}），但没有活跃 claim。"
+        f"整篇重写 / 删行 / 改行仍要 claim："
+        f'python scripts/file_claim.py claim {rel} --owner "<你的 owner>" '
+        f'--reason "<为什么改整档>"'
+    ]
+
+
 def append_command(path: str, owner: str, doc: Path, root: Path) -> str:
     """一条可直接粘贴执行的补登记命令（窄锁，不需要整文件 claim）。
 
@@ -506,6 +559,16 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             # ——活跃 claim 分支原先漏了它，于是提交登记表要先给自己写一行临时行、
             # 提交后再删掉；这是「工具逼人制造失真」，比闸松更糟。
             self_key = _norm(os.path.relpath(args.doc, root))
+            # git 路径匹配区分大小写：给 git 的必须是原文路径，给比较键的可以是小写。
+            doc_git_path = os.path.relpath(args.doc, root).replace("\\", "/")
+            owner = resolve_owner(root)
+            # 文档面窄锁（任务二裁定）：纯追加免整档 claim；非追加（删除/改写/
+            # 重排/插散文）退回「先 claim 整档」。判据与 ⑤ 只增检查同一个函数。
+            doc_blocked: List[str] = []
+            if self_key in staged:
+                doc_blocked = doc_edit_findings(
+                    root, doc_git_path, owner, Path(args.registry),
+                    Path(args.markers) if args.markers != str(fc.MARKER_DIR) else None)
             active = active_claims_for_paths(
                 staged, marker_dir=Path(args.markers) if args.markers != str(fc.MARKER_DIR) else None)
             pairs = [(p, o) for p, o in active
@@ -522,7 +585,6 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             # 这一步永远要先给自己写一行、删行时又欠一行。
             rest = staged - {p for p, _o in pairs} - {self_key}
             recent: List[Tuple[str, str, float]] = []
-            owner = resolve_owner(root) if rest else ""
             if rest:
                 recent = recently_released_claims(
                     Path(args.registry), rest, owner)
@@ -539,6 +601,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             cmd_pairs = missing_pairs + recent_missing_pairs
             result: Dict[str, Any] = {
                 "ledger_only": missing, "doc_only": [],
+                "doc_edit_blocked": doc_blocked,
                 "rows": len(rows), "active": len(active),
                 "staged": len(staged), "staged_claims": len(pairs),
                 "staged_released": len(recent),
@@ -563,6 +626,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                   f"{result['staged_released_missing']} 个")
         for line in result["ledger_only"]:
             print(f"  - {line}")
+        for line in result.get("doc_edit_blocked") or []:
+            print(f"  [非纯追加] {line}")
         if cmd_pairs:
             print("[补登记] 窄锁追加一行即可（毫秒级，不需要整文件 claim）；逐条执行：")
             seen_cmds: Set[str] = set()
@@ -586,7 +651,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
               "逐文件拦（补行用窄锁工具，毫秒级），不靠事后扫全量；最近 60 分钟内被同一 owner "
               "释放过的暂存文件同样要行——先 release 再提交不算消行。")
 
-    findings = len(result["ledger_only"]) + len(result["doc_only"])
+    findings = (len(result["ledger_only"]) + len(result["doc_only"])
+                + len(result.get("doc_edit_blocked") or []))
     return EXIT_FINDINGS if findings else EXIT_OK
 
 

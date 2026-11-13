@@ -15,6 +15,11 @@
   * 提交者身份（`MBDSDR_CLAIM_OWNER`，其次 `git config mbdsdr.owner`）与台账
     `owner` **原文完全一致** → 放行（同 owner 提交自己持有的文件）。身份未声明
     时，任何仍在持有的 claim 都会拒——不声明就能过，等于没闸。
+  * **登记面纯追加豁免**（2026-11-13 任务二裁定）：`docs/COORDINATION.md` 本次
+    若只是插入表格行（判据 ``is_pure_append`` 与 pre-commit ⑤ 同一个函数），
+    不由「被他人持有」拦——追加行有 `append_coordination_row.py` 的毫秒级锁，
+    整档 claim 不该成为提交登记行的前提。非纯追加（删/改/重排/插散文）照旧
+    按普通文件处理。
   * 当前 claim 由 takeover 产生时，takeover 记录的 `reason` 必须非空；没理由的
     takeover 不认（旧持有者仍视为持有者）。
 
@@ -31,6 +36,7 @@ from typing import Any, Dict, List, Optional
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import file_claim as fc  # noqa: E402  （复用台账路径、占位文件锁、pid 存活判定）
+from check_coordination_append_only import is_pure_append  # noqa: E402  （同一条「纯追加」判据）
 
 IDENTITY_ENV = "MBDSDR_CLAIM_OWNER"
 #: takeover 记录与当前 claim 的 acquired_at 允许的时间差（同一台机器，正常 < 1s）。
@@ -44,6 +50,8 @@ TAKEOVER_ACTIONS = frozenset({"orphan_takeover"})
 #: 已知但**不是** takeover 的记录类型（审计回放、legacy 凭据修复）。它们不参与
 #: 「这笔 claim 是否被有效接管」的判定，但仍然是被承认的日志行。
 NON_TAKEOVER_ACTIONS = frozenset({"audit_replay", "legacy_token_repair"})
+#: 登记面（规范化键）：**纯追加表格行**时不参与「被他人持有」的拦截。
+COORD_DOC_KEY = "docs/coordination.md"
 
 
 class LedgerError(RuntimeError):
@@ -94,6 +102,23 @@ def _identity(root: Path) -> str:
 
 def _iso(ts: float) -> str:
     return time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(ts))
+
+
+def _staged_is_pure_append_doc(root: Path, rel: str) -> bool:
+    """登记面这一笔是否**只是插入了若干表格行**（纯追加）。
+
+    判据与 pre-commit ⑤（``check_coordination_append_only``）同一个函数：
+    原文每行按序都能在暂存版里找到，且所有插入行都是表格行。只有这种改动
+    才免整档 claim；删行、改写、重排、插入散文都退回普通文件语义。
+    """
+    if _key(rel) != COORD_DOC_KEY:
+        return False
+    base = _git(root, "show", f"HEAD:{rel}")
+    staged = _git(root, "show", f":{rel}")
+    if staged.returncode != 0:
+        return False
+    ok, _why = is_pure_append(base.stdout if base.returncode == 0 else "", staged.stdout)
+    return ok
 
 
 def _num(claim: Dict[str, Any], field: str, default: Any = None) -> float:
@@ -406,6 +431,18 @@ def main(argv: Optional[List[str]] = None) -> int:
         print(f"[claim-gate] 注意：{message}")
 
     blocked = [(rel, row) for rel, row in inspected if row and row["state"] == "blocked"]
+    if blocked:
+        # 文档面窄锁（任务二裁定）：登记面**纯追加表格行**由
+        # `append_coordination_row.py` 的毫秒级锁保证互斥，不需要整档 claim，
+        # 因此别人的整档 claim 也不挡这一笔。非纯追加（删/改/重排）照旧拦。
+        kept = []
+        for rel, row in blocked:
+            if _staged_is_pure_append_doc(root, rel):
+                print(f"[claim-gate] 放行（登记面纯追加）：{rel} 本次只插入表格行，"
+                      f"窄锁已是互斥；{row['owner']} 的整档 claim 不挡这一笔")
+                continue
+            kept.append((rel, row))
+        blocked = kept
     counts = {"self": 0, "expired": 0, "blocked": len(blocked)}
     for _rel, row in inspected:
         if row:

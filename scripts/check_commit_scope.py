@@ -83,12 +83,45 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from check_coordination_append_only import is_pure_append  # noqa: E402  （同一条「纯追加」判据）
+
 ROOT = Path(os.environ.get("MBDSDR_REPO_ROOT") or Path(__file__).resolve().parents[1])
 DEFAULT_LOCKS_DIR = Path(r"D:\mbdsdr\.locks")
 LOCKS_DIR = Path(os.environ.get("MBDSDR_LOCKS_DIR") or DEFAULT_LOCKS_DIR)
 REGISTRY_PATH = LOCKS_DIR / "claims.json"
 EXCLUDE_ENV = "MBDSDR_EXCLUDE_HUNKS"
 INTENT_ENV = "MBDSDR_INTENT_DELETIONS"
+#: 登记面（规范化键）：**纯追加表格行**时不参与 MULTI 判定（任务二裁定）。
+COORD_DOC = "docs/coordination.md"
+
+
+def _show_text(spec: str) -> Optional[str]:
+    """取某个版本的文件原文；取不到返回 None（不像 ``_git`` 那样直接退出）。"""
+    proc = subprocess.run(
+        ["git", "show", spec],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+    return proc.stdout if proc.returncode == 0 else None
+
+
+def _is_pure_append_doc(path: str) -> bool:
+    """登记面这一笔是否**只是插入了若干表格行**（纯追加）。
+
+    判据与 ⑤ ``check_coordination_append_only``、② ``claim_gate`` 是同一个函数。
+    纯追加有 ``append_coordination_row.py`` 的毫秒级锁保证互斥，所以别人的整档
+    claim 不该让「补一行登记」变成跨线提交；非纯追加照旧按普通文件处理。
+    """
+    if _canonical(path) != COORD_DOC:
+        return False
+    staged = _show_text(f":{path}")
+    if staged is None:
+        return False
+    return is_pure_append(_show_text(f"HEAD:{path}") or "", staged)[0]
 
 
 def _git(*args: str) -> str:
@@ -573,6 +606,7 @@ def check_staged(
 
     rows: List[Dict[str, Any]] = []
     owners: List[str] = []
+    append_only_doc = {p for p in paths if _is_pure_append_doc(p)}
     for path in paths:
         entry = registry.get(_canonical(path), {})
         cur = _active_claim(entry, now) if entry else None
@@ -588,7 +622,7 @@ def check_staged(
         except (TypeError, ValueError):
             heartbeat, ttl_s = now, 0.0
         remaining = max(0.0, (heartbeat + ttl_s - now) / 60.0)
-        if owner not in owners:
+        if owner not in owners and path not in append_only_doc:
             owners.append(owner)
         rows.append(
             {
@@ -749,6 +783,9 @@ def check_staged(
         print("  要么把它们补进声明清单（确认确实归你）。")
         failed = True
     if multi:
+        if append_only_doc:
+            print(f"登记面纯追加：{', '.join(sorted(append_only_doc))} 本次只插入表格行，"
+                  "其整档 claim 不参与 MULTI（窄锁互斥）。")
         print(f"发现 MULTI：暂存区涉及 {len(owners)} 个仍在 TTL 内的 owner：{', '.join(owners)}")
         print("  拒绝提交。只提交你自己的路径：git commit --only -- <你的文件...>")
         failed = True

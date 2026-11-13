@@ -2139,6 +2139,13 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `scripts/safe_commit.py` | 归属证据线/6ae85f56（退出码表：--help 一句话版 + 指向 docs/safe-commit.md） | 2026-11-13 21:43 | 本笔 |
 | `docs/safe-commit.md` | 归属证据线/6ae85f56（退出码表（含义/谁的问题/处置/不该怎么做）） | 2026-11-13 21:43 | 本笔 |
 | `tests/test_safe_commit_exit_codes.py` | 归属证据线/6ae85f56（自证不漂：码集合双向比对 + help 一句话版） | 2026-11-13 21:43 | 本笔 |
+| `scripts/verify_claims.py` | 文档引用复核线/6ae85f56（口径收噪：引号内文案/跨词巧合/名词化/否定四类不入扫描集（45→38 无 hash，可证实不变）） | 2026-11-13 21:45 | 本笔 |
+| `tests/test_verify_claims.py` | 文档引用复核线/6ae85f56（收噪反证 5 条：否定/引号/跨词/名词化不入集 + 真断言仍入集 + 〔证〕行不被整行丢弃） | 2026-11-13 21:45 | 本笔 |
+| `docs/2026-11-12-user-decisions.md` | 文档引用复核线/6ae85f56（认领孤儿：两处行号 1750→1751（HEAD 坐标）+ 核 7 个引用（3 行状态有据，无需降级）） | 2026-11-13 21:45 | 本笔 |
+| `docs/COORDINATION.md` | 文档引用复核线/6ae85f56（§6.1 本笔登记：--head 口径补齐 2 行 + 收噪与孤儿认领 3 行） | 2026-11-13 21:45 | 本笔 |
+| `scripts/claim_gate.py` | 收尸线/6ae85f56（任务二：登记面纯追加不参与被他人持有拦截） | 2026-11-13 21:43 | 本笔 |
+| `scripts/check_commit_scope.py` | 收尸线/6ae85f56（任务二：纯追加的登记面不计入 MULTI） | 2026-11-13 21:43 | 本笔 |
+| `tests/test_coordination_doc_narrow_lock.py` | 收尸线/6ae85f56（任务二：窄锁化 5 条反证） | 2026-11-13 21:43 | 本笔 |
 
 > 上表各行均由 `claim` 台账推导：owner 原文与 `acquired_at` 直接取自台账，
 > 目的优先用台账里的 `claim_reason`，没有就如实写「未声明」，不补编。时间列只是

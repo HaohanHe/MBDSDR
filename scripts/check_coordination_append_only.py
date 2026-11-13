@@ -79,6 +79,36 @@ def removed_rows(base_text: str, target_text: str) -> List[str]:
     return list((base - target).elements())
 
 
+def is_pure_append(base_text: str, target_text: str) -> tuple[bool, str]:
+    """整篇文档层面：目标是否**只是往原文里插入了若干表格行**。
+
+    判据（全部满足才算纯追加）：
+      * 原文每一行都能在目标里按原顺序对上——删行、改写、重排都会让对不上；
+      * 所有插入行都是表格行（``| … |``）——插一段散文不是「追加登记行」。
+
+    返回 ``(是否纯追加, 不满足时的原因)``。用途只有一个：区分「窄锁追加登记行」
+    与「整档编辑」。前者不需要整文件 claim，后者仍然需要——判据必须能分开，
+    否则「纯追加免 claim」会顺手把整篇重写也放行。
+    """
+    base = base_text.splitlines()
+    target = target_text.splitlines()
+    inserted: List[str] = []
+    i = 0
+    for line in target:
+        if i < len(base) and line == base[i]:
+            i += 1
+        else:
+            inserted.append(line)
+    if i != len(base):
+        missing = sum((Counter(base) - Counter(target)).values())
+        return False, (f"原文有 {missing} 行被删除或改写" if missing else "原文行顺序变了")
+    odd = [ln for ln in inserted
+           if not (ln.strip().startswith("|") and ln.strip().endswith("|"))]
+    if odd:
+        return False, f"插入了 {len(odd)} 行非表格内容"
+    return True, ""
+
+
 def _git(*args: str) -> str:
     proc = subprocess.run(["git", *args], cwd=str(ROOT), capture_output=True)
     if proc.returncode != 0:
