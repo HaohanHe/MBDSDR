@@ -239,7 +239,7 @@ def _lt_rtl433_decode(device_type: str, message_hex: str) -> Any:
                 "message": user_message("unknown_device_type",
                                         device=device_type),
                 "suggestion": suggestion("unknown_device_type")}
-    msg = dec.decode_message(data)
+    msg = dec.decode(data)
     if msg is None:
         return {"decoded": None, "reason": "message_not_matched",
                 "real_hardware_verified": False}

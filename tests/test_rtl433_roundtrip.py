@@ -198,5 +198,145 @@ class TestRegistryAndTools(unittest.TestCase):
         self.assertTrue(r2.success, r2.content)
 
 
+class TestProtocolMetadataAndStats(unittest.TestCase):
+    """每协议 fields / disabled 元数据与成功失败计数（对应 r_device）。"""
+
+    @staticmethod
+    def _acurite_temp_frame():
+        v = bytes([0xC1, 0x23, 0x78, 0x00, 0x09, 0x00, 0xB7, 0x1C])
+        return bytes([~x & 0xFF for x in v])
+
+    @staticmethod
+    def _acurite_rain_frame():
+        # msgtype=0x31、字节 2..6 偶校验、sum(b0..b6)&0xFF=b7
+        v = [0x01, 0x02, 0xB1, 0x00, 0x00, 0x00, 0x00, 0xB4]
+        return bytes([~x & 0xFF for x in v])
+
+    @staticmethod
+    def _lacrosse_humidity_frame():
+        # 11 nibble：0A | type=0E | id=21 | value=45.0 | checksum
+        return bytes([0x0A, 0xE2, 0xA4, 0x50, 0x00, 0xD0])
+
+    @staticmethod
+    def _oregon_frame():
+        msg = bytearray([0x1D, 0x20, 0x05, 0x30, 0x52, 0x20, 0x54, 0x00, 0x00])
+        total = sum((msg[i] >> 4) + (msg[i] & 0x0F) for i in range(7))
+        total += msg[7] >> 4
+        msg[7] = total % 16
+        msg[8] = (total // 16) << 4
+        return bytes(R.reflect_nibbles(msg))
+
+    @staticmethod
+    def _citroen_frame():
+        b = bytearray([0x00, 0xDE, 0xAD, 0xBE, 0xEF, 0x00, 0xA1, 0x4B, 0x01])
+        crc = 0
+        for x in b[1:]:
+            crc ^= x
+        return bytes(b) + bytes([crc])
+
+    @staticmethod
+    def _elantra_frame():
+        b = bytearray([180, 77, 1, 2, 3, 4, 0x40, 0])
+        b[7] = R.crc8(bytes(b[:7]), 0x07, 0x00)
+        return bytes(b)
+
+    def _known_frames(self):
+        body = bytes([0x05, 0x37, 0x04, 0x38, 0x30])
+        ambient = body + bytes([R.lfsr_digest8(body, 0x98, 0x3e) ^ 0x64])
+        return {
+            "acurite_5n1": [self._acurite_temp_frame(), self._acurite_rain_frame()],
+            "ambient_weather_f007th": [ambient],
+            "lacrosse_tx": [
+                bytes.fromhex("0A02A72572D0"), self._lacrosse_humidity_frame(),
+            ],
+            "oregon_thgr122n": [self._oregon_frame()],
+            "nexus": [bytes.fromhex("4580E1F2D0")],
+            "tpms_citroen": [self._citroen_frame()],
+            "tpms_elantra2012": [self._elantra_frame()],
+        }
+
+    def test_fields_declaration_equals_union_of_actual_outputs(self):
+        """声明字段必须与合法帧实际产出的键完全一致（不多不少）。"""
+        frames = self._known_frames()
+        for device_type, payloads in frames.items():
+            dec = R.get_device(device_type)
+            self.assertIsNotNone(dec, device_type)
+            actual = set()
+            for payload in payloads:
+                out = dec.decode_message(payload)
+                self.assertIsNotNone(out, (device_type, payload.hex()))
+                actual.update(out)
+            self.assertEqual(
+                set(dec.fields), actual,
+                f"{device_type}: 声明 {sorted(dec.fields)} != 实际 {sorted(actual)}",
+            )
+
+    def test_disabled_metadata_is_declared_and_within_upstream_range(self):
+        """disabled 取 rtl_433 定义域 0..3；本模块 7 个协议上游均为 0。"""
+        devs = {d["device_type"]: d for d in R.list_devices()}
+        self.assertEqual(set(devs), set(self._known_frames()))
+        for name, entry in devs.items():
+            self.assertIsInstance(entry["disabled"], int, name)
+            self.assertIn(entry["disabled"], (0, 1, 2, 3), name)
+            self.assertEqual(entry["disabled"], 0, name)
+            self.assertGreater(len(entry["fields"]), 0, name)
+
+    def test_decode_counts_success_and_failure_per_protocol(self):
+        dec = R.NexusDecoder()
+        self.assertEqual(
+            dec.stats(),
+            {"decode_events": 0, "decode_ok": 0, "decode_fail": 0},
+        )
+        self.assertIsNotNone(dec.decode(bytes.fromhex("4580E1F2D0")))
+        self.assertIsNone(dec.decode(b"\x00\x00\x00\x00\x00"))
+        self.assertIsNone(dec.decode(b"\x01"))
+        self.assertEqual(
+            dec.stats(),
+            {"decode_events": 3, "decode_ok": 1, "decode_fail": 2},
+        )
+        # 直接回调是无状态单帧入口，不污染统计
+        self.assertIsNotNone(dec.decode_message(bytes.fromhex("4580E1F2D0")))
+        self.assertEqual(dec.stats()["decode_events"], 3)
+
+    def test_decode_pulses_increments_registry_counters(self):
+        payload = bytes.fromhex("4580E1F2D0")
+        pulses = [
+            R.Pulse(500.0, 1000.0 if bit == 0 else 2000.0)
+            for bit in R.bytes_to_bits(payload)
+        ]
+        dec = R.get_device("nexus")
+        before = dec.stats()
+        self.assertIsNotNone(R.decode_pulses(pulses, "nexus"))
+        after = dec.stats()
+        self.assertEqual(after["decode_events"] - before["decode_events"], 1)
+        self.assertEqual(after["decode_ok"] - before["decode_ok"], 1)
+        self.assertEqual(after["decode_fail"], before["decode_fail"])
+
+    def test_device_stats_covers_every_registered_protocol(self):
+        stats = R.device_stats()
+        devs = {d["device_type"] for d in R.list_devices()}
+        self.assertEqual(set(stats), devs)
+        for counters in stats.values():
+            self.assertEqual(
+                set(counters), {"decode_events", "decode_ok", "decode_fail"},
+            )
+            self.assertEqual(
+                counters["decode_events"],
+                counters["decode_ok"] + counters["decode_fail"],
+            )
+
+    def test_tool_list_devices_exposes_metadata_and_stats(self):
+        from mbdsdr_ai.tool_registry import ToolRegistry
+        reg = ToolRegistry()
+        R.register_rtl433_tools(reg)
+        res = reg.call("rtl433_list_devices", {})
+        self.assertTrue(res.success)
+        devs = {d["device_type"]: d for d in res.data["devices"]}
+        self.assertEqual(set(res.data["stats"]), set(devs))
+        for name, entry in devs.items():
+            self.assertEqual(set(entry["fields"]), set(R.get_device(name).fields))
+            self.assertEqual(entry["disabled"], 0)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

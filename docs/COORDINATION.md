@@ -2174,6 +2174,10 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `tests/test_axioms_model_head.py` | 公理体检线/6ae85f56（Repo.head 单一定义与短 SHA 守卫（清单 Q1-4）） | 2026-11-13 22:16 | 本笔 |
 | `desktop/main_window.py` | 公理体检线/6ae85f56（删除面板菜单星象仪重复项（豁免单触发条件）） | 2026-11-14 05:09 | 本笔 |
 | `docs/action-duplication-waivers.md` | 公理体检线/6ae85f56（删除已满足触发条件的星象仪豁免（白名单清零）） | 2026-11-14 05:09 | 本笔 |
+| `mbdsdr_ai/rtl433_decoder.py` | 参考移植线/20261114（第4条：每协议 fields/disabled 元数据 + 成功失败计数（decode 计数入口、device_stats）） | 2026-11-14 05:12 | 本笔 |
+| `mbdsdr_ai/core/mcp_server.py` | 参考移植线/20261114（第4条：MCP rtl433 解码统一走带计数 decode()） | 2026-11-14 05:12 | 本笔 |
+| `tests/test_rtl433_roundtrip.py` | 参考移植线/20261114（第4条：fields 声明与实产一致、disabled 定义域、计数/反证用例） | 2026-11-14 05:12 | 本笔 |
+| `docs/COORDINATION.md` | 参考移植线/20261114（第4条 §6.1 登记行，提交后释放） | 2026-11-14 05:12 | 本笔 |
 | `mbdsdr_ai/time_format.py` | 公理体检线/6ae85f56（DST：resolve_tz(None) 携带夏令时规则，不再返回冻结偏移） | 2026-11-14 05:12 | 本笔 |
 | `mbdsdr_ai/time_basis.py` | 公理体检线/6ae85f56（DST：local_to_utc 歧义/不存在时刻显式报错，fold 参数生效） | 2026-11-14 05:12 | 本笔 |
 | `mbdsdr_ai/tests/test_time_basis.py` | 公理体检线/6ae85f56（DST：补歧义/不存在时刻与系统时区非固定偏移用例） | 2026-11-14 05:12 | 本笔 |

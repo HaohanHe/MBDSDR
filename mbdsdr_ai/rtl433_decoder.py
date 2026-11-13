@@ -352,14 +352,50 @@ class DeviceDecoder:
     """设备解码器基类（统一的设备协议描述与解码回调接口）。
 
     子类需设置 cfg 并实现 decode_message(b: bytes) -> dict|None。
-。
+
+    ``fields`` / ``disabled`` / 成功失败计数对应 rtl_433 ``r_device`` 的
+    同名元数据与统计（``include/r_device.h``）；它们只描述协议，不参与
+    解包判定。
     """
     device_type: str = "generic"
     cfg: DeviceConfig
+    #: 该协议成功解包时可能产出的字段名（超集：不同消息类型只产出一部分）。
+    #: 对应 rtl_433 ``r_device.fields``，供调用方在解码前预知输出形状。
+    fields: Tuple[str, ...] = ()
+    #: 协议默认启用状态，取值语义同 rtl_433 ``r_device.disabled``：
+    #: 0=默认启用，1=默认不启用，2=禁用，3=禁用且隐藏。
+    #: 本模块没有「自动扫描全部协议」的入口，按名显式解码等价于 rtl_433 的
+    #: ``-R <n>``，因此该字段只作元数据对外暴露，不阻断显式调用。
+    disabled: int = 0
+
+    def __init__(self) -> None:
+        self.decode_events = 0
+        self.decode_ok = 0
+        self.decode_fail = 0
 
     def decode_message(self, b: bytes) -> Optional[Dict[str, Any]]:
         """对一帧已切片字节做协议解包。失败返回 None。"""
         raise NotImplementedError
+
+    def decode(self, b: bytes) -> Optional[Dict[str, Any]]:
+        """带成功/失败计数的解包入口。
+
+        分发路径统一走这里；``decode_message`` 保持无状态，便于单帧回放。
+        """
+        self.decode_events += 1
+        result = self.decode_message(b)
+        if result is None:
+            self.decode_fail += 1
+        else:
+            self.decode_ok += 1
+        return result
+
+    def stats(self) -> Dict[str, int]:
+        return {
+            "decode_events": self.decode_events,
+            "decode_ok": self.decode_ok,
+            "decode_fail": self.decode_fail,
+        }
 
     def describe(self) -> Dict[str, Any]:
         return {
@@ -369,6 +405,8 @@ class DeviceDecoder:
             "short_width_us": self.cfg.short_width,
             "long_width_us": self.cfg.long_width,
             "reset_limit_us": self.cfg.reset_limit,
+            "fields": list(self.fields),
+            "disabled": self.disabled,
         }
 
 
@@ -381,6 +419,11 @@ def register_device(dec: DeviceDecoder) -> None:
 
 def list_devices() -> List[Dict[str, Any]]:
     return [d.describe() for d in _REGISTRY.values()]
+
+
+def device_stats() -> Dict[str, Dict[str, int]]:
+    """各协议自进程启动以来的成功/失败计数（不持久化）。"""
+    return {name: dec.stats() for name, dec in _REGISTRY.items()}
 
 
 def get_device(device_type: str) -> Optional[DeviceDecoder]:
@@ -398,6 +441,10 @@ _ACURITE_5N1_BYTELEN = 8
 
 class Acurite5n1Decoder(DeviceDecoder):
     device_type = "acurite_5n1"
+    fields = (
+        "device_type", "id", "battery_ok", "message_type", "wind_speed_kmh",
+        "rain_in", "rain_mm", "wind_dir_deg", "temperature_c", "humidity",
+    )
 
     cfg = DeviceConfig(
         name="Acurite 5n1 (592TXR/Iris)",
@@ -452,6 +499,10 @@ class Acurite5n1Decoder(DeviceDecoder):
 
 class AmbientWeatherTHDecoder(DeviceDecoder):
     device_type = "ambient_weather_f007th"
+    fields = (
+        "device_type", "id", "channel", "battery_ok", "temperature_c",
+        "temperature_f", "humidity", "mic",
+    )
 
     cfg = DeviceConfig(
         name="Ambient Weather F007TH / TFA 30.3208.02",
@@ -497,6 +548,7 @@ class AmbientWeatherTHDecoder(DeviceDecoder):
 
 class LaCrosseTXDecoder(DeviceDecoder):
     device_type = "lacrosse_tx"
+    fields = ("device_type", "id", "mic", "temperature_c", "humidity")
 
     cfg = DeviceConfig(
         name="LaCrosse TX Temperature/Humidity Sensor",
@@ -546,6 +598,10 @@ _OS_ID_THGR122N = 0x1D20
 
 class OregonTHGRDecoder(DeviceDecoder):
     device_type = "oregon_thgr122n"
+    fields = (
+        "device_type", "id", "channel", "battery_ok", "temperature_c",
+        "humidity", "mic",
+    )
 
     cfg = DeviceConfig(
         name="Oregon Scientific THGR122N/THGR968",
@@ -606,6 +662,10 @@ class OregonTHGRDecoder(DeviceDecoder):
 
 class NexusDecoder(DeviceDecoder):
     device_type = "nexus"
+    fields = (
+        "device_type", "id", "channel", "battery_ok", "temperature_c",
+        "humidity",
+    )
 
     cfg = DeviceConfig(
         name="Nexus / FreeTec NC-7345 / TFA 30.3209",
@@ -652,6 +712,10 @@ class NexusDecoder(DeviceDecoder):
 
 class TpmsCitroenDecoder(DeviceDecoder):
     device_type = "tpms_citroen"
+    fields = (
+        "device_type", "id", "state", "flags", "repeat", "pressure_kpa",
+        "temperature_c", "mic",
+    )
 
     cfg = DeviceConfig(
         name="Citroen/Peugeot TPMS",
@@ -693,6 +757,10 @@ class TpmsCitroenDecoder(DeviceDecoder):
 
 class TpmsElantraDecoder(DeviceDecoder):
     device_type = "tpms_elantra2012"
+    fields = (
+        "device_type", "id", "pressure_kpa", "temperature_c", "battery_ok",
+        "triggered", "storage", "mic",
+    )
 
     cfg = DeviceConfig(
         name="Hyundai Elantra / Honda Civic TPMS (TRW)",
@@ -748,7 +816,7 @@ def decode_pulses(pulses: List[Pulse], device_type: str) -> Optional[Dict[str, A
     else:  # FSK_PULSE_PCM：脉冲即原始比特，由设备自己做曼彻斯特
         bits = [1] * len(pulses)
     data_bytes = bits_to_bytes(bits)
-    return dec.decode_message(data_bytes)
+    return dec.decode(data_bytes)
 
 
 def decode_iq(iq: List[complex], device_type: str,
@@ -786,7 +854,7 @@ def register_rtl433_tools(registry) -> None:
         return ToolResult(
             success=True,
             content=f"已注册 {len(devs)} 个 ISM 设备解码器：",
-            data={"devices": devs},
+            data={"devices": devs, "stats": device_stats()},
         )
 
     def _decode_pulses(args):
@@ -798,7 +866,7 @@ def register_rtl433_tools(registry) -> None:
             return ToolResult(success=False, content=f"未知设备: {device_type}",
                               error="unknown_device")
         data_bytes = bytes.fromhex(payload_hex) if payload_hex else b""
-        out = dec.decode_message(data_bytes)
+        out = dec.decode(data_bytes)
         if out is None:
             return ToolResult(success=False, content="校验失败或字段不合法",
                               error="decode_failed")
