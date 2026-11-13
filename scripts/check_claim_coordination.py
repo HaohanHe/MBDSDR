@@ -70,7 +70,7 @@ from typing import Any, Dict, Iterable, List, Optional, Sequence, Set, Tuple
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 import file_claim as fc  # noqa: E402  （复用占位文件路径与只读窥视）
-from claim_window import RELEASE_WINDOW_S, window_release  # noqa: E402
+from claim_window import RELEASE_WINDOW_S, claim_active, window_release  # noqa: E402
 
 DOC = ROOT / "docs" / "COORDINATION.md"
 SECTION_HEAD = "### 6.1 当前占用"
@@ -184,17 +184,19 @@ def ledger_index(registry: Dict[str, Any]) -> Dict[str, Set[str]]:
 
 
 def active_claims(now: Optional[float] = None, marker_dir: Optional[Path] = None) -> List[Tuple[str, str]]:
-    """未过期、未释放的 claim：(规范化路径, owner)。判活只看心跳 + TTL。"""
+    """未过期、未释放的 claim：(规范化路径, owner)。判活只看心跳 + TTL。
+
+    判活调用 ``claim_window.claim_active``（唯一口径）；本函数不再自己比较
+    心跳与 TTL——按需审计 ``audit_unclaimed_changes`` 调的是同一个函数，
+    两侧必须给同一个答案（55 分钟 / 61 分钟反证见
+    ``tests/test_claim_liveness_one_source.py``）。
+    """
     now = time.time() if now is None else now
     out: List[Tuple[str, str]] = []
     for marker in sorted((marker_dir or fc.MARKER_DIR).glob("*.claim")):
         payload = fc._peek_marker(marker)
-        if payload is None:
-            continue
-        heartbeat = float(payload.get("heartbeat_at") or payload.get("acquired_at") or 0)
-        ttl_s = float(payload.get("ttl_min") or 0.0) * 60.0
-        if heartbeat + ttl_s <= now:
-            continue  # 已过期 = 不再活跃（他人可夺取）
+        if not claim_active(payload, now):
+            continue  # 空/已过期 = 不再活跃（他人可夺取）
         out.append((_norm(str(payload.get("path") or "")), str(payload.get("owner") or "")))
     return out
 
@@ -225,11 +227,7 @@ def active_claims_for_paths(
     for raw in paths:
         path = _norm(raw)
         payload = fc._peek_marker(_marker_in(path, marker_dir))
-        if payload is None:
-            continue
-        heartbeat = float(payload.get("heartbeat_at") or payload.get("acquired_at") or 0)
-        ttl_s = float(payload.get("ttl_min") or 0.0) * 60.0
-        if heartbeat + ttl_s <= now:
+        if not claim_active(payload, now):
             continue
         out.append((_norm(str(payload.get("path") or "")), str(payload.get("owner") or "")))
     return out

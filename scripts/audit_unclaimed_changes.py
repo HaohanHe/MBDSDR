@@ -32,6 +32,7 @@ ROOT = Path(
 )
 sys.path.insert(0, str(ROOT / "scripts"))
 import file_claim as fc  # noqa: E402  （与 claim 工具同一套占位解析）
+from claim_window import claim_active  # noqa: E402  （判活唯一口径，与闸共用）
 
 
 def _changed_paths() -> list[tuple[str, str]]:
@@ -59,18 +60,22 @@ def _changed_paths() -> list[tuple[str, str]]:
     return out
 
 
-def _active_owner(path: str, now: float) -> str:
-    """按占位文件判活（与闸/工具同一规则：heartbeat + ttl）；无活跃 claim 返回空。"""
+def _active_owner(path: str, now: float, marker_dir=None) -> str:
+    """按占位文件判活；无活跃 claim 返回空。
+
+    判活调 ``claim_window.claim_active``——与 pre-commit ④ 的闸、以及
+    ``append_coordination_row`` 用的是同一个函数。这里**不许**再写一遍
+    TTL 比较：两边各写一份时，「正好到期」那一刻会给出相反答案。
+    """
     try:
         key, _display = fc.canonical_path(path)
     except Exception:
         return ""
-    payload = fc._peek_marker(fc._marker_for(key))
-    if not payload:
-        return ""
-    ttl_s = float(payload.get("ttl_min") or 0.0) * 60.0
-    heartbeat = float(payload.get("heartbeat_at") or payload.get("acquired_at") or now)
-    if now - heartbeat > ttl_s:
+    marker = fc._marker_for(key)
+    if marker_dir is not None:
+        marker = Path(marker_dir) / marker.name
+    payload = fc._peek_marker(marker)
+    if not claim_active(payload, now):
         return ""
     return str(payload.get("owner") or "")
 
