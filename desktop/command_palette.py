@@ -79,6 +79,15 @@ RECENT_FILENAME = "command_palette_recent.json"
 #: 最近使用最多保留条数（再多也排不进首屏）
 RECENT_LIMIT = 12
 
+#: 结果列表一次最多渲染的命令行数（不含组标题）。
+#: 逐键成本的大头是渲染命中行数，不是 provider 查询/过滤：同机同输入实测
+#: 10500 条命中时过滤 2.6–4.1 ms、整键 495–1259 ms；截到 200 行后整键
+#: 9.9–13.2 ms（样本与逐次负载见 docs/perf-evidence/2026-11-13/
+#: palette-result-cap.json）。超出部分不静默丢弃，``_hidden_note`` 会明说
+#: 还有多少条没显示。复跑入口：
+#: ``scripts/repro/2026-11-13-palette-result-cap.py``。
+MAX_RENDERED_RESULTS = 200
+
 #: 模糊（子序列）匹配的起始分档：10 起，越紧凑越小
 _FUZZY_BASE = 10
 
@@ -589,6 +598,7 @@ def build_index(window=None) -> List[Command]:
     调用点只有 ``CommandPalette.__init__``：索引在**打开面板时建一次**，
     按键路径不重建（见 ``_refresh`` 的性能注记）。实测 2026-11-13：
     真实规模 196 条约 1.6 ms；500 书签 + 10000 卫星（10690 条）约 38 ms。
+    这条路径不在逐键链上；逐键慢的是渲染，见 ``MAX_RENDERED_RESULTS``。
     """
     from search_providers import PROVIDERS
 
@@ -728,6 +738,8 @@ def _build_dialog_class():
             self._return_focus = self._capture_return_focus()
             self._commands = build_index(window)
             self._results: List[Command] = []
+            #: 命中但没进渲染队列的条数（0 = 全部显示）；随每次 _refresh 更新。
+            self._hidden_count = 0
             #: 当前不可用的搜索源（打开面板时取一次）；与「空结果」分开展示。
             #: 与索引是同一时刻的快照：索引不随按键重建，单独刷新 gaps 会
             #: 出现「这类可用但一条都搜不到」的自相矛盾；要更新只能整体重开。
@@ -817,29 +829,52 @@ def _build_dialog_class():
             # 结论：现有规模每键 <5 ms，不引入防抖（防抖会拖住最后一键）。
             # 若将来目录真涨到上千条、首屏开始卡，先给结果行数设上限再谈别的：
             # 渲染开销跟随「命中行数」，不跟随索引总量。
+            # 2026-11-13 已落地上限（MAX_RENDERED_RESULTS=200）：同机同输入
+            # 10500 条命中时整键 631–2113 ms，截断后见同目录 perf-evidence。
             self._results = search_commands(self._commands, text,
                                             recent=load_recent())
+            self._hidden_count = max(0, len(self._results) - MAX_RENDERED_RESULTS)
             self.reason_label.clear()
             self._render_results()
             if self._results:
+                hidden = self._hidden_note()
                 if not (text or "").strip():
-                    self.reason_label.setText(
-                        "可执行动作（按来源分组，最近使用优先）：回车执行选中项，"
-                        "↑↓ 选择，输入关键词可搜菜单命令、设置项、卫星、"
-                        "能力与快捷键，Esc 关闭。")
+                    hint = ("可执行动作（按来源分组，最近使用优先）：回车执行选中项，"
+                            "↑↓ 选择，输入关键词可搜菜单命令、设置项、卫星、"
+                            "能力与快捷键，Esc 关闭。")
+                    self.reason_label.setText(f"{hint} {hidden}" if hidden else hint)
+                elif hidden:
+                    self.reason_label.setText(hidden)
                 return
             self.reason_label.setText(self._no_match_hint(text))
+
+        def hidden_count(self) -> int:
+            """命中但没进渲染队列的条数（0 = 全部显示）。"""
+            return self._hidden_count
+
+        def rendered_count(self) -> int:
+            """实际进列表的命令行数（不含组标题）。"""
+            return min(len(self._results), MAX_RENDERED_RESULTS)
+
+        def _hidden_note(self) -> str:
+            """超过上限时明确说明还有多少条未显示，不静默截断。"""
+            if self._hidden_count <= 0:
+                return ""
+            return (f"已显示前 {MAX_RENDERED_RESULTS} 条，另有 "
+                    f"{self._hidden_count} 条未显示：输入更具体的关键词可缩小范围。")
 
         def _render_results(self) -> None:
             """按来源分组渲染（组标题不可选中），组序 = 首条命中出现的顺序。
 
             组序跟着相关度走：最相关的那条仍在第一行，回车直接执行它；
-            「分组」只影响展示，不改变 ``_results`` 的排序。
+            「分组」只影响展示，不改变 ``_results`` 的排序。只渲染
+            ``MAX_RENDERED_RESULTS`` 行——尾部低相关条目本来也翻不到，
+            却要为每一条付 QListWidgetItem 的构造成本。
             """
             self.list_widget.clear()
             order: List[str] = []
             grouped: dict = {}
-            for cmd in self._results:
+            for cmd in self._results[:MAX_RENDERED_RESULTS]:
                 if cmd.group not in grouped:
                     grouped[cmd.group] = []
                     order.append(cmd.group)
