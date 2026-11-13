@@ -1871,6 +1871,8 @@ No supported devices found），GNSS+SDR 同开复验没做成；离线那次
 | 文件 | 线名 | 开始时间 | 预计提交 hash |
 |---|---|---|---|
 | _（空）_ | | | |
+| `tests/test_safe_commit_exclude.py` | 用户输入静默线/6ae85f56（排除 hunk 三条固化：多 hunk、内容对不上必拒、同内容按位置） | 2026-11-13 19:45 | 本笔 |
+| `docs/COORDINATION.md` | 用户输入静默线/6ae85f56（本笔两条 §6.1 登记行） | 2026-11-13 19:45 | 本笔 |
 | `docs/COORDINATION.md` | 星下点轨迹线/6ae85f56（本笔 §6.1 登记行，提交后释放） | 2026-11-13 19:24 | 本笔 |
 | `mbdsdr_ai/orbit.py` | 星下点轨迹线/6ae85f56（P0：WGS-72 入口改名 + 反解 + teme_to_ecef_km） | 2026-11-13 19:13 | 本笔 |
 | `mbdsdr_ai/geodesy.py` | 星下点轨迹线/6ae85f56（P0：WGS-84 入口改名 llh_to_ecef_m） | 2026-11-13 19:13 | 本笔 |

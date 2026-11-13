@@ -4,6 +4,7 @@
 自己那部分，但必须逐文件声明排除了哪些 hunk。这条测试验证声明真的生效：
 提交里只有自己的改动，别人的 hunk 留在工作树，提交说明带 excluded-hunks 段。
 """
+import importlib.util
 import os
 import subprocess
 import sys
@@ -36,6 +37,34 @@ def _make_repo(tmp_path):
     lines[4] = "line5 other"
     (repo / "doc.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
     return repo
+
+
+def _init_repo(tmp_path, lines):
+    """按给定基线提交一个 12 行以内的小文件，供多 hunk 形状构造。"""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-q", check=True)
+    _git(repo, "config", "user.email", "safe-commit@example.invalid", check=True)
+    _git(repo, "config", "user.name", "safe-commit", check=True)
+    _git(repo, "config", "commit.gpgsign", "false", check=True)
+    (repo / "doc.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    _git(repo, "add", "doc.md", check=True)
+    _git(repo, "commit", "-q", "-m", "base", check=True)
+    return repo
+
+
+def _run_safe(repo, tmp_path, *extra, message="test: safe commit\n"):
+    msg = tmp_path / "msg.txt"
+    msg.write_text(message, encoding="utf-8")
+    env = os.environ.copy()
+    env.pop("GIT_INDEX_FILE", None)
+    env["MBDSDR_REPO_ROOT"] = str(repo)
+    return subprocess.run(
+        [sys.executable, str(SAFE), "--files", "doc.md",
+         "--message-file", str(msg), *extra],
+        cwd=str(repo), env=env, capture_output=True, text=True,
+        encoding="utf-8", errors="replace",
+    )
 
 
 def test_exclude_hunk_keeps_other_change_out(tmp_path):
@@ -246,4 +275,142 @@ def test_repeated_files_flag_commits_every_declared_file(tmp_path):
     assert "本次声明 2 个文件" in out, out
     names = _git(repo, "show", "--pretty=", "--name-only", "HEAD").stdout.split()
     assert sorted(names) == ["a.txt", "b.txt"], out
+
+
+def test_exclude_three_hunks_in_one_call(tmp_path):
+    """一条命令排除 3 个 hunk：提交内容必须与声明逐行一致。
+
+    真故障形态之一：旧实现把所有排除 hunk 拼成一个 patch 交给
+    ``git apply -R``，多个 hunk 直接报 ``patch does not apply``。
+    本用例的 3 个 hunk 行数变化方向还不同（+2,1 / +9,2 / +14,1），
+    排除后提交必须等于「基线 + 仅我的第 2 行」，一个字节都不能多。
+    """
+    base = [f"line{i}" for i in range(1, 13)]
+    repo = _init_repo(tmp_path, base)
+    new = list(base)
+    new[1] = "line2 mine"                        # 我的：@@ +2,1
+    new[4] = "line5 other"                       # 别线 A：@@ +5,1
+    new[8:8] = ["other8a", "other8b"]            # 别线 B：@@ +9,2（行数 +2）
+    new[13] = "line12 other"                     # 别线 C：@@ +14,1（被 +2 顶到 14）
+    (repo / "doc.md").write_text("\n".join(new) + "\n", encoding="utf-8")
+
+    proc = _run_safe(
+        repo, tmp_path,
+        "--exclude-hunk", "doc.md:5-5",
+        "--exclude-hunk", "doc.md:9-10",
+        "--exclude-hunk", "doc.md:14-14",
+        "--exclude-owner", "别线",
+    )
+    out = proc.stdout + proc.stderr
+    assert proc.returncode == 0, out
+
+    committed = _git(repo, "show", "HEAD:doc.md").stdout.splitlines()
+    expected = list(base)
+    expected[1] = "line2 mine"
+    assert committed == expected, (committed, expected)
+    assert sorted(x for x in committed if x.endswith("other")) == []
+
+    tree = (repo / "doc.md").read_text(encoding="utf-8").splitlines()
+    assert "line5 other" in tree
+    assert "other8a" in tree and "other8b" in tree
+    assert "line12 other" in tree
+
+    log = _git(repo, "log", "-1", "--format=%B").stdout
+    for rng in ("doc.md:5-5", "doc.md:9-10", "doc.md:14-14"):
+        assert rng in log
+
+
+def test_mismatched_hunk_body_aborts_without_commit(tmp_path):
+    """声明 hunk 的新侧内容与私有 index 对不上 → 报错退出，绝不静默改写。
+
+    这是「静默放错位置」的直接防线：写 blob 前必须逐字核对 ``+`` 行，
+    对不上就拒绝。反证：删掉 ``if lines[pos:end] != added: raise`` 后，
+    本用例会「成功」提交一份被写歪的内容。
+    """
+    repo = _init_repo(tmp_path, [f"line{i}" for i in range(1, 7)])
+    lines = [f"line{i}" for i in range(1, 7)]
+    lines[1] = "line2 mine"
+    lines[4] = "line5 other"
+    (repo / "doc.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    before = _git(repo, "rev-parse", "HEAD").stdout.strip()
+
+    spec = importlib.util.spec_from_file_location("safe_commit_under_test", SAFE)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    mod.ROOT = repo
+    mod.LOCKS_DIR = tmp_path / "locks"
+
+    # 只篡改「读暂存 diff」这一步，让 hunk 新侧内容与 index blob 不一致；
+    # 其余 git 调用照常打到临时仓库。
+    real_run = mod._run
+    doctored = (
+        b"diff --git a/doc.md b/doc.md\n"
+        b"--- a/doc.md\n"
+        b"+++ b/doc.md\n"
+        b"@@ -2 +2 @@\n"
+        b"-line2\n"
+        b"+line2 WRONG\n"
+    )
+
+    def fake_run(args, env, stdin=None):
+        # 只拦「取暂存 patch」这一步（-U0）；name-status 等其余调用照常放行，
+        # 否则文件集校验会拿到补丁文本而不是状态行。
+        if args[:2] == ["diff", "--cached"] and "-U0" in args:
+            return subprocess.CompletedProcess(args, 0, doctored, b"")
+        return real_run(args, env, stdin)
+
+    mod._run = fake_run
+    try:
+        code, reason = mod._attempt(
+            ["doc.md"], b"test: mismatch\n", mod._index_path(),
+            [{"path": "doc.md", "start": 2, "end": 2}])
+    finally:
+        mod._run = real_run
+
+    assert code == 1, reason
+    assert "对不上" in reason and "拒绝静默改写" in reason, reason
+    assert _git(repo, "rev-parse", "HEAD").stdout.strip() == before, "不许提交"
+    tree = (repo / "doc.md").read_text(encoding="utf-8").splitlines()
+    assert "line2 mine" in tree and "line5 other" in tree, "工作树不能被动"
+
+
+def test_identical_hunks_excluded_by_position_not_content(tmp_path):
+    """两个 hunk 的 +/- 内容完全相同：只能按位置定位，不能按内容搜。
+
+    这是 9c58d767 那类事故的根：``desktop/main_window.py`` 里相邻 hunk
+    内容长得一样时，按内容找第一处就会撤错位置。构造两个逐字相同的
+    ``-dup/+DUP`` hunk（+2,1 与 +9,1），声明排除后者：提交里必须
+    第 2 行是 DUP、第 9 行仍是 dup。
+    反证：把位置切片换成 ``lines.index(added)``（按内容找）后，本用例红。
+    """
+    base = ["a1", "dup", "a3", "a4", "a5", "a6", "a7", "a8",
+            "dup", "a10", "a11", "a12"]
+    repo = _init_repo(tmp_path, base)
+    new = list(base)
+    new[1] = "DUP"
+    new[8] = "DUP"
+    (repo / "doc.md").write_text("\n".join(new) + "\n", encoding="utf-8")
+    _git(repo, "add", "doc.md", check=True)
+
+    # 先证明这两个 hunk 的内容真的逐字相同，否则本用例证明不了「靠位置」
+    bodies, cur = [], None
+    for line in _git(repo, "diff", "--cached", "-U0", "HEAD", "--",
+                     "doc.md").stdout.splitlines():
+        if line.startswith("@@"):
+            cur = []
+            bodies.append(cur)
+        elif cur is not None and line[:1] in "+-":
+            cur.append(line)
+    assert bodies == [["-dup", "+DUP"], ["-dup", "+DUP"]], bodies
+
+    proc = _run_safe(repo, tmp_path, "--exclude-hunk", "doc.md:9-9",
+                     "--exclude-owner", "别线")
+    out = proc.stdout + proc.stderr
+    assert proc.returncode == 0, out
+
+    committed = _git(repo, "show", "HEAD:doc.md").stdout.splitlines()
+    assert committed == ["a1", "DUP", "a3", "a4", "a5", "a6", "a7", "a8",
+                         "dup", "a10", "a11", "a12"], committed
+    tree = (repo / "doc.md").read_text(encoding="utf-8").splitlines()
+    assert tree[1] == "DUP" and tree[8] == "DUP", "工作树不能被动"
 
