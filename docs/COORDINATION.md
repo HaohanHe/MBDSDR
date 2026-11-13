@@ -2110,6 +2110,7 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `docs/parameter-unification.md` | 文档引用复核线/6ae85f56（行号漂移：6 处 :8191 重定位到 :8192（showMessage 拆行，字面量未变）） | 2026-11-13 21:07 | 本笔 |
 | `docs/PRD.md` | 文档引用复核线/6ae85f56（行号漂移：:7069 重定位到 :7070（注释拆行，字面量未变）） | 2026-11-13 21:07 | 本笔 |
 | `docs/COORDINATION.md` | 文档引用复核线/6ae85f56（本笔 §6.1 登记行，提交后释放） | 2026-11-13 21:07 | 本笔 |
+| `docs/incidents/2026-11-13-exclude-hunk-swept-appended-rows.md` | S1-S4结果伪造线/6ae85f56（事故记录：ed3c09e5 多带 4 行登记（--exclude-hunk 坐标过期、无 --declare）） | 2026-11-13 21:09 | 本笔 |
 
 > 上表各行均由 `claim` 台账推导：owner 原文与 `acquired_at` 直接取自台账，
 > 目的优先用台账里的 `claim_reason`，没有就如实写「未声明」，不补编。时间列只是
