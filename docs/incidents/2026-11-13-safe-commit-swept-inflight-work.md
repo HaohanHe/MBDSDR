@@ -123,3 +123,37 @@
 结论：**点名了文件，却给错了性质**——仍属「悄悄多带」的变体，不因写了文件名
 而减等。记录在此。
 
+## 十、补充：说明少算一件，且同一笔混入本线自己的修复
+
+### 10.1 ⑲ 也在同一笔，说明只列了 ⑰⑱⑳
+
+`git show --numstat --format= 052828d1` 原文（6 文件）：
+
+```text
+15      2       scripts/check_claim_coordination.py
+752     31      scripts/safe_commit.py
+13      0       tests/test_coordination_gate_blocking.py
+247     0       tests/test_safe_commit_coordination.py
+407     0       tests/test_safe_commit_declaration.py
+207     0       tests/test_safe_commit_line_range.py
+```
+
+说明里只列了 ⑰（声明快照）、⑱（提交信息逐字校验）、⑳（`--exclude-hunk`
+按行范围），**漏了 ⑲**：`_coordination_step`（`scripts/safe_commit.py:998`，
+提交时把该笔的 §6.1 行一起带进去）与 `tests/test_safe_commit_coordination.py`
+（+247 行）是同一形态的第四件。
+
+结论：实际是**四件**，不是三件。**清点以 `--numstat` 为准，说明里的枚举不可
+当作件数依据**——这次少算的一件没有被任何人发现，直到逐文件对账。
+
+### 10.2 `check_claim_coordination.py` 的 +15/−2 是别线的活
+
+同一笔里的 `scripts/check_claim_coordination.py`（+15/−2）不是那三/四件之一，
+而是**本线（收尸线）**在 20:36 前完成并实测过的「登记面自身豁免两条分支」修复
+（递归补行的根因）。它被卷进这一笔，后果不是内容错，而是**两件事共用一条
+message**：按 message 追「登记面自身豁免」会指到 `052828d1`，按 message 追
+「safe_commit 三件」也会指到 `052828d1`，两个方向的检索在同一处交叉。
+
+这与 §九 的自查是同一病灶的两个面：说明既漏了件数（⑲），又把本线修复与
+别线在途混在一句里。**一笔只该说一件事；说不清就不该合笔。**
+

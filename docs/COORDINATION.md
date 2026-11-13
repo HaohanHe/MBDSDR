@@ -2089,6 +2089,7 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `tests/test_ai_steps_behavior.py` | S1-S4结果伪造线/6ae85f56（TestWorkflowCrossCheck 改经 WorkflowEngine 真跑（ToolResult.success=False → FAILED）） | 2026-11-13 20:47 | 本笔 |
 | `tests/test_ai_steps.py` | S1-S4结果伪造线/6ae85f56（启发式删除：success 正文 ok:false 不再翻案 + 删 is_failure_result 单测） | 2026-11-13 20:50 | 本笔 |
 | `docs/evidence-standard.md` | 收尸线/6ae85f56（⑰ 边界章节 §8（takeover 守卫账本线过期 claim）） | 2026-11-13 20:52 | 本笔 |
+| `docs/incidents/2026-11-13-safe-commit-swept-inflight-work.md` | 收尸线/6ae85f56（事故记录补两条：052828d1 少算的 ⑲、同笔混入的登记面豁免修复） | 2026-11-13 20:52 | 本笔 |
 
 > 上表各行均由 `claim` 台账推导：owner 原文与 `acquired_at` 直接取自台账，
 > 目的优先用台账里的 `claim_reason`，没有就如实写「未声明」，不补编。时间列只是
