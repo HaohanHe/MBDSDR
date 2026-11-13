@@ -2107,6 +2107,9 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `docs/limitations-register.md` | 文档引用复核线/6ae85f56（11 条过期定性：L49/L50/L52 补四元组 10efa40c/05f3a6b5/cff501fc） | 2026-11-13 21:02 | 本笔 |
 | `docs/settings-inventory.md` | 文档引用复核线/6ae85f56（11 条过期定性：:259 补 49eddcf 的 path:line 与字面量） | 2026-11-13 21:02 | 本笔 |
 | `docs/COORDINATION.md` | 文档引用复核线/6ae85f56（本笔 §6.1 登记行，提交后释放） | 2026-11-13 21:02 | 本笔 |
+| `docs/parameter-unification.md` | 文档引用复核线/6ae85f56（行号漂移：6 处 :8191 重定位到 :8192（showMessage 拆行，字面量未变）） | 2026-11-13 21:07 | 本笔 |
+| `docs/PRD.md` | 文档引用复核线/6ae85f56（行号漂移：:7069 重定位到 :7070（注释拆行，字面量未变）） | 2026-11-13 21:07 | 本笔 |
+| `docs/COORDINATION.md` | 文档引用复核线/6ae85f56（本笔 §6.1 登记行，提交后释放） | 2026-11-13 21:07 | 本笔 |
 
 > 上表各行均由 `claim` 台账推导：owner 原文与 `acquired_at` 直接取自台账，
 > 目的优先用台账里的 `claim_reason`，没有就如实写「未声明」，不补编。时间列只是
