@@ -1870,6 +1870,10 @@ No supported devices found），GNSS+SDR 同开复验没做成；离线那次
 
 | 文件 | 线名 | 开始时间 | 预计提交 hash |
 |---|---|---|---|
+| `desktop/search_providers.py` | Qt翻译与设置显式线/6ae85f56（统一搜索 provider 声明式注册表：菜单/页签/面板/能力/快捷键/设置项/卫星） | 2026-11-13 20:15 | 本笔 |
+| `desktop/command_palette.py` | Qt翻译与设置显式线/6ae85f56（build_index 改走 PROVIDERS；分组渲染、不可用与空结果分开、Esc 全流程） | 2026-11-13 20:15 | 本笔 |
+| `tests/test_search_providers.py` | Qt翻译与设置显式线/6ae85f56（各 provider 用例 + 不可用/空结果 + 去掉注册的反证） | 2026-11-13 20:15 | 本笔 |
+| `docs/COORDINATION.md` | Qt翻译与设置显式线/6ae85f56（本笔 §6.1 登记行，提交后释放） | 2026-11-13 20:15 | 本笔 |
 | `tests/test_settings_schema.py` | Qt翻译与设置显式线/6ae85f56（既有红收口：apply_note 断言随 ec2e20f5 改判为「行内可见标签」并加严） | 2026-11-13 19:45 | 本笔 |
 | `docs/COORDINATION.md` | Qt翻译与设置显式线/6ae85f56（本笔 §6.1 登记行，提交后释放） | 2026-11-13 19:45 | 本笔 |
 | _（空）_ | | | |
