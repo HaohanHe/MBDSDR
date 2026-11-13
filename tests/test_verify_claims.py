@@ -328,6 +328,62 @@ def test_expired_waiver_fails(tmp_path):
     assert vc.main(["--root", str(repo), "--check-lines", "--strict-lines"]) == 1
 
 
+# ——— 反证：证据目标不靠「行内第一个 path:line」猜 ———
+
+def test_two_quads_on_different_files_is_format_error(tmp_path):
+    """反证 1：一行两个四元组指向不同文件 → 格式错误，不许静默取首个。"""
+    repo, h = _repo(tmp_path, {"src/foo.py": "MAGIC_TOKEN = 42\n",
+                               "src/bar.py": "OTHER_TOKEN = 7\n"})
+    _write_doc(repo, (f"- 已修复 — `{h}` — `src/foo.py:1` — `MAGIC_TOKEN`；"
+                      f"另 — `{h}` — `src/bar.py:1` — `OTHER_TOKEN`\n"))
+    claims = vc.verify_docs(repo, repo / "docs")
+    assert len(claims) == 1
+    assert claims[0].status == vc.FORMAT_ERROR
+    assert claims[0].target == ""
+    assert "src/foo.py" in claims[0].reason and "src/bar.py" in claims[0].reason
+
+
+def test_two_quads_on_same_file_is_not_an_error(tmp_path):
+    """反证 2：同文件两个四元组是正常写法，两条都核过即绿。"""
+    repo, h = _repo(tmp_path, {"src/foo.py": "MAGIC_TOKEN = 42\nOTHER_TOKEN = 7\n"})
+    _write_doc(repo, (f"- 已修复 — `{h}` — `src/foo.py:1` — `MAGIC_TOKEN`；"
+                      f"另 — `{h}` — `src/foo.py:2` — `OTHER_TOKEN`\n"))
+    claims = vc.verify_docs(repo, repo / "docs")
+    assert claims[0].status == vc.OK
+    assert len(claims[0].detail) == 2
+
+
+def test_second_quad_fabricated_literal_is_not_green(tmp_path):
+    """反证 4：同文件两个四元组，第二个字面量是编的 → 不得仍判绿。"""
+    repo, h = _repo(tmp_path, {"src/foo.py": "MAGIC_TOKEN = 42\nOTHER_TOKEN = 7\n"})
+    _write_doc(repo, (f"- 已修复 — `{h}` — `src/foo.py:1` — `MAGIC_TOKEN`；"
+                      f"另 — `{h}` — `src/foo.py:2` — `NEVER_EXISTED_LITERAL`\n"))
+    claims = vc.verify_docs(repo, repo / "docs")
+    assert claims[0].status == vc.STALE
+    assert "log -S" in claims[0].reason
+    assert "NEVER_EXISTED_LITERAL" in claims[0].reason
+
+
+def test_extensionless_hook_path_is_a_valid_coordinate(tmp_path):
+    """反证 3：``scripts/hooks/post-commit:1`` 是合法坐标，且不被行内更早的引用抢位。"""
+    repo, h = _repo(tmp_path, {"scripts/hooks/post-commit": "def _residue_records(root, head):\n"})
+    _write_doc(repo, (f"- 已修复：见 `docs/COORDINATION.md:1914` 的登记；"
+                      f"〔证：`{h}` — `scripts/hooks/post-commit:1` — `_residue_records`〕\n"))
+    claims = vc.verify_docs(repo, repo / "docs")
+    assert claims[0].status == vc.OK
+    assert claims[0].target == "scripts/hooks/post-commit:1"
+    assert claims[0].detail == [f"{h} — scripts/hooks/post-commit:1 — _residue_records"]
+
+
+def test_multi_coordinate_without_quad_is_format_error(tmp_path):
+    """没有结构化四元组、行内又有多处坐标 → 同样拒绝，不拿第一个当证据。"""
+    repo, h = _repo(tmp_path, {"src/foo.py": "MAGIC_TOKEN = 42\n"})
+    _write_doc(repo, (f"- 已修复（{h}）：见 `src/foo.py:1`；另见 `src/bar.py:1`\n"))
+    claims = vc.verify_docs(repo, repo / "docs")
+    assert claims[0].status == vc.FORMAT_ERROR
+    assert "src/foo.py:1" in claims[0].reason and "src/bar.py:1" in claims[0].reason
+
+
 def test_waiver_over_cap_fails(tmp_path):
     """白名单条数超过 MAX_WAIVERS 即失败，防止靠加豁免无限期放行。"""
     repo = _waiver_repo(tmp_path, [

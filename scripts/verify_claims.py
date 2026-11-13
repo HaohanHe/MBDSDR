@@ -21,6 +21,8 @@
   * 可证实                三步全过
   * 未证实（文档过期）    有 hash，但 hash/路径/字面量对不上
   * 未证实（无 hash）     没写 hash（或没写 path:line/字面量）
+  * 格式错误（多证据目标）一行里有 ≥2 个完整四元组且跨不同文件——
+                          不猜哪个是证据，交写的人拆行或改成纯引用
 
 跳过：标题行、``` 围栏代码块、``$ git`` 证据命令行 —— 它们不是断言。
 
@@ -47,6 +49,18 @@ HASH_RE = re.compile(r"\b([0-9a-f]{7,40})\b")
 PATHLINE_RE = re.compile(
     r"([A-Za-z0-9_./\\-]+\.(?:py|md|json|yaml|yml|ts|dart|cpp|c|h|hpp))"
     r":(\d+(?:-\d+)?)")
+#: 无扩展名的脚本路径也是合法坐标（``scripts/hooks/post-commit:279``）。
+#: 只认「含 / 且最后一段无扩展名」的形态，避免把 ``05:54`` 这类时间当坐标。
+PATHLINE_NOEXT_RE = re.compile(
+    r"([A-Za-z0-9_.\-]*(?:/[A-Za-z0-9_.\-]+)+):(\d+(?:-\d+)?)")
+_PATH_TOKEN = (r"(?:[A-Za-z0-9_.\-]*(?:/[A-Za-z0-9_.\-]+)+"
+               r"|[A-Za-z0-9_.\-]+\.(?:py|md|json|yaml|yml|ts|dart|cpp|c|h|hpp))")
+#: 显式证据段 ``〔证：`hash` — `path:line` — `literal`〕``：段内四元组优先于行内其它坐标。
+EVIDENCE_SEG_RE = re.compile(r"〔证[：:]([^〕]*)〕")
+#: 完整四元组 ``<hash> — <path>:<line> — <字面量>``（破折号分隔，反引号可省）。
+QUAD_RE = re.compile(
+    r"`?([0-9a-f]{7,40})`?\s*[—–-]\s*`?(" + _PATH_TOKEN +
+    r":\d+(?:-\d+)?)`?\s*[—–-]\s*`([^`]+)`")
 TICK_RE = re.compile(r"`([^`]+)`")
 #: 行内坐标基准：``（基准 `abc1234`）`` / ``baseline abc1234``
 BASELINE_RE = re.compile(r"(?:基准|baseline)[:：]?\s*`?([0-9a-f]{7,40})`?")
@@ -56,6 +70,9 @@ DOC_BASELINE_RE = re.compile(r"<!--\s*line-baseline:\s*([0-9a-f]{7,40})\s*-->")
 OK = "可证实"
 STALE = "未证实（文档过期）"
 NO_HASH = "未证实（无 hash）"
+#: 格式错误：一行里有 ≥2 个完整四元组、且证据目标落在不同文件。
+#: 不猜「哪个才是证据」，交写的人拆行或改成纯引用（见 ``_evidence_quads``）。
+FORMAT_ERROR = "格式错误（多证据目标）"
 
 EXCLUDE_DIRS = {"audit_r2"}
 #: 白名单/账本本身不是断言；它按设计要引用「已修复…」原文，扫它等于自吞。
@@ -116,11 +133,66 @@ def _log_s_hits(root: Path, h: str, literal: str, path: str) -> bool:
     return any(ln.split()[0].startswith(h[:7]) for ln in proc.stdout.splitlines() if ln.strip())
 
 
+def _is_pathline(token: str) -> bool:
+    """``path:line`` 坐标（扩展名白名单，或「含 / 的无扩展名脚本」）。"""
+    if PATHLINE_RE.fullmatch(token):
+        return True
+    m = PATHLINE_NOEXT_RE.fullmatch(token)
+    return bool(m) and "." not in m.group(1).rsplit("/", 1)[-1]
+
+
+def _pathlines(text: str) -> List[Tuple[str, str]]:
+    """按出现顺序取坐标 ``(path, line)``，两种形态合并、不重复。
+
+    旧实现只认 ``PATHLINE_RE``，``scripts/hooks/post-commit:279`` 这种无扩展名
+    脚本永远匹配不到，于是行内更早的 ``docs/COORDINATION.md:1914`` 抢了证据位。
+    """
+    out: List[Tuple[str, str]] = []
+    for m in PATHLINE_RE.finditer(text):
+        item = (m.group(1), m.group(2))
+        if item not in out:
+            out.append(item)
+    for m in PATHLINE_NOEXT_RE.finditer(text):
+        path = m.group(1)
+        if "." in path.rsplit("/", 1)[-1]:
+            continue
+        item = (path, m.group(2))
+        if item not in out:
+            out.append(item)
+    out.sort(key=lambda it: text.find(f"{it[0]}:{it[1]}"))
+    return out
+
+
+def _evidence_quads(text: str) -> List[Tuple[str, str, str]]:
+    """取一行里的完整四元组 ``(hash, target, literal)``。
+
+    两处来源，口径不猜：
+
+    1. 行内有 ``〔证：…〕`` 段时，**只认段内的四元组**——这是写的人显式指定的
+       证据；行内其它 ``path:line`` 只是引用。
+    2. 没有显式段时，认所有 ``<hash> — <path>:<line> — <字面量>`` 形态
+       （必须有破折号分隔，光靠反引号相邻会把「基准 + 实现位置」误判成四元组）。
+
+    返回空表表示这行没有结构化四元组，调用方退回旧的「首个坐标」口径。
+    """
+    segments = EVIDENCE_SEG_RE.findall(text) or [text]
+    out: List[Tuple[str, str, str]] = []
+    for segment in segments:
+        for m in QUAD_RE.finditer(segment):
+            h, target, literal = m.group(1), m.group(2), m.group(3).strip()
+            if not _is_pathline(target):
+                continue
+            quad = (h, target, literal)
+            if quad not in out:
+                out.append(quad)
+    return out
+
+
 def _is_literal_token(t: str, hashes: List[str], target: str) -> bool:
     """能否作为「改动后唯一字面量」候选。"""
     if not t or t in hashes or t in target:
         return False
-    if PATHLINE_RE.fullmatch(t) or HASH_RE.fullmatch(t):
+    if _is_pathline(t) or HASH_RE.fullmatch(t):
         return False
     return len(t) >= 3 and not t.isdigit()
 
@@ -141,7 +213,7 @@ def _literal_candidates(text: str, hashes: List[str], target: str) -> List[str]:
     preferred: List[str] = []
     for index, token in enumerate(tokens[:-1]):
         follow = tokens[index + 1]
-        if PATHLINE_RE.fullmatch(token) and _is_literal_token(follow, hashes, target):
+        if _is_pathline(token) and _is_literal_token(follow, hashes, target):
             if follow not in preferred:
                 preferred.append(follow)
     if preferred:
@@ -184,7 +256,8 @@ def classify(text: str, root: Path, heading: str = "", baseline: str = "") -> Cl
     """
     c = Claim(doc="", line=0, text=text.strip(), baseline=baseline)
     hashes = _hashes(text, root)
-    targets = PATHLINE_RE.findall(text) or PATHLINE_RE.findall(heading)
+    targets = _pathlines(text) or _pathlines(heading)
+    quads = _evidence_quads(text)
     if not hashes:
         c.status = NO_HASH
         c.reason = "未写 commit hash，无法用 git 复核"
@@ -196,9 +269,58 @@ def classify(text: str, root: Path, heading: str = "", baseline: str = "") -> Cl
         c.action = "补 path:line，或删掉无法定位的断言"
         return c
 
-    target = f"{targets[0][0]}:{targets[0][1]}"
+    quad_paths = list(dict.fromkeys(t.rpartition(":")[0] for _, t, _ in quads))
+    if len(quad_paths) >= 2:
+        # 拒绝，不猜：多个完整四元组指向不同文件时必须由写的人指定证据目标。
+        c.status = FORMAT_ERROR
+        c.reason = (f"一行里有 {len(quads)} 个完整四元组、跨 {len(quad_paths)} 个文件："
+                    + "、".join(f"{t}（{h}）" for h, t, _ in quads))
+        c.action = ("把证据拆到多行；或只保留一个四元组，其余改成不带"
+                    "「hash — path:line — 字面量」结构的纯引用；"
+                    "也可用 〔证：…〕 显式圈定唯一证据")
+        return c
+
+    if quads:
+        target, path = quads[0][1], quad_paths[0]
+    else:
+        if len(targets) >= 2:
+            # 没有结构化四元组、行内却有多个坐标：同样拒绝，不拿「第一个」当证据。
+            c.status = FORMAT_ERROR
+            c.reason = (f"有 hash 但无完整四元组，行内有 {len(targets)} 个坐标："
+                        + "、".join(f"{p}:{n}" for p, n in targets))
+            c.action = ("用 〔证：`hash` — `path:line` — `字面量`〕 圈定唯一证据目标，"
+                        "或把其余坐标拆到别的行")
+            return c
+        target, path = f"{targets[0][0]}:{targets[0][1]}", targets[0][0]
     c.target = target
-    path = targets[0][0]
+
+    if quads:
+        # 同文件多个四元组是正常写法，但每一条都要核过：第二条字面量造假不得蒙混。
+        for h, t, literal in quads:
+            p = t.rpartition(":")[0]
+            if not _commit_exists(root, h):
+                c.commit = h
+                c.status = STALE
+                c.reason = f"hash {h} 不存在或不是 commit（四元组 {t} — `{literal}`）"
+                c.action = "换成真实 commit hash；换不出就删断言"
+                return c
+            if not _commit_touches(root, h, p):
+                c.commit = h
+                c.status = STALE
+                c.reason = f"{h} 未改动 {p}（四元组 {t} — `{literal}`）"
+                c.action = "换成真正改到该文件的 hash（多半是另一条线的提交）"
+                return c
+            if not _log_s_hits(root, h, literal, p):
+                c.commit = h
+                c.status = STALE
+                c.reason = f"git log -S `{literal}` 未命中 {h} — {p}（四元组 {t}）"
+                c.action = "改字面量为该提交真实引入/删除的文本；对不上就判未证实并删断言"
+                return c
+        c.commit, c.target, c.literal = quads[0]
+        c.status = OK
+        c.reason = "逐条四元组：cat-file + show --name-only + log -S 全过"
+        c.detail = [f"{h} — {t} — {lit}" for h, t, lit in quads]
+        return c
 
     known = [h for h in dict.fromkeys(hashes) if _commit_exists(root, h)]
     if not known:
@@ -306,7 +428,7 @@ def verify_docs(root: Path = ROOT, docs_root: Optional[Path] = None,
 
 
 def summarize(claims: List[Claim]) -> Dict[str, int]:
-    counts = {OK: 0, STALE: 0, NO_HASH: 0}
+    counts = {OK: 0, STALE: 0, NO_HASH: 0, FORMAT_ERROR: 0}
     for c in claims:
         counts[c.status] = counts.get(c.status, 0) + 1
     return counts
@@ -689,8 +811,9 @@ def print_waivers(waivers: List[Waiver], errors: List[str]) -> None:
 def print_report(claims: List[Claim]) -> None:
     counts = summarize(claims)
     print(f"断言总数：{len(claims)}  |  可证实 {counts[OK]}  |  "
-          f"文档过期 {counts[STALE]}  |  无 hash {counts[NO_HASH]}")
-    for status in (STALE, NO_HASH, OK):
+          f"文档过期 {counts[STALE]}  |  无 hash {counts[NO_HASH]}  |  "
+          f"格式错误 {counts[FORMAT_ERROR]}")
+    for status in (FORMAT_ERROR, STALE, NO_HASH, OK):
         rows = [c for c in claims if c.status == status]
         if not rows:
             continue
@@ -770,7 +893,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         return 1
     if args.fail_on_line_misref and any(r.result == LINE_MISLOCATED for r in rows):
         return 1
-    if strict and (open_problems or waiver_errors):
+    if strict and (open_problems or waiver_errors
+                   or any(c.status == FORMAT_ERROR for c in claims)):
         return 1
     return 0
 
