@@ -73,21 +73,27 @@ _SR_SUFFIX_SCALE = (
 )
 
 
-def parse_sample_rate(text: str) -> float:
-    """把采样率输入解析成 Hz。
+def parse_sample_rate(text: str, default_scale: float = 1.0) -> float:
+    """把采样率输入解析成 Hz——全应用唯一一份采样率语法。
 
     标签写「Hz 或 MS/s」就必须真收这两种写法：``2048000`` 与 ``2.048M``
-    等价。纯数字按 Hz（后端按 Hz 下发）；带 M/MS/s/MHz 或 k/kHz 时按倍数
-    换算。无法解析时抛 ValueError，由调用方给出可执行提示。
+    等价。带 M/MS/s/MHz 或 k/kHz 后缀时按后缀倍数换算；**不带后缀**时按
+    ``default_scale`` 换算（设备面板标签是 Hz，用默认 1.0；天气面板标签是
+    MS/s，传 1e6）。无法解析时抛 ValueError，由调用方给出可执行提示。
+
+    天气面板必须调这里而不是自己 float()：同一个应用里同一个字段名，
+    「2.048M」在设备面板能用、在天气面板被拒，用户会把习惯带过去。
     """
     s = (text or "").strip().replace(" ", "")
     low = s.lower()
-    scale = 1.0
+    scale: Optional[float] = None
     for suffix, factor in _SR_SUFFIX_SCALE:
         if low.endswith(suffix):
             scale = factor
             s = s[: -len(suffix)]
             break
+    if scale is None:
+        scale = float(default_scale)
     if not s:
         raise ValueError(text)
     return float(s) * scale

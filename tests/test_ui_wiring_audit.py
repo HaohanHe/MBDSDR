@@ -334,7 +334,8 @@ ALLOWED_UNCONNECTED = {
     # 2026-11-09 删：`new_spacetime_panel.py:self.alt_spin` 已随经纬度三个
     # SpinBox 一起移除 —— 面板不再持有可编辑站址（第二个写入口），
     # 站址唯一写入口在主窗 set_observer_site()，面板只读显示 + 「更改地点…」。
-    "weather_panel.py:self.freq_edit": "开始解码读 text()",
+    # C3 后：只读展示（值来自 SATELLITES 制式表），解码走录制基带不读它。
+    "weather_panel.py:self.freq_edit": "只读展示：制式预设填入，仅状态行标注",
     "weather_panel.py:self.sym_edit": "开始解码读 text()",
     "weather_panel.py:self.sr_edit": "开始解码读 text()",
     "main_window.py:right_tab": "QTabWidget 页签容器，不做业务接线",

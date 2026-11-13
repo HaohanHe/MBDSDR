@@ -65,6 +65,8 @@ from PySide6.QtWidgets import (  # noqa: E402
 
 from themes import get_theme, DEFAULT_THEME  # noqa: E402
 from readouts import format_frequency_hz  # noqa: E402
+# 采样率语法与设备面板同源：同一个字段名不允许两种写法（见 B1）。
+from device_panel import parse_sample_rate  # noqa: E402
 
 
 # ----------------------------------------------------------------------
@@ -527,11 +529,16 @@ class WeatherPanel(QWidget):
         file_w = QWidget(); file_w.setLayout(file_row)
         form.addRow("录制文件", file_w)
 
-        # 频率/符号率/采样率（可编辑）
+        # 中心频率：只读展示。解码走录制文件里的基带，不读这个值——留成可编辑
+        # 就是一个「能敲、敲了没用、还不说话」的框（C3）。值来源：SATELLITES
+        # 制式表，由 _on_satellite_changed 填入。
         self.freq_edit = QLineEdit()
+        self.freq_edit.setReadOnly(True)
         self.freq_edit.setToolTip(
-            "卫星下行信号的中心频率（MHz）；选好制式会自动填入，手动改动前先确认")
-        form.addRow("中心频率", self.freq_edit)
+            "中心频率由所选卫星制式预设，只读；它只用于状态行标注与核对录音时"
+            "的调谐，解码走录制文件的基带，不读这个值。要换频点请回主窗口调谐"
+            "后重新录音")
+        form.addRow("中心频率 (制式预设)", self.freq_edit)
         self.sym_edit = QLineEdit()
         self.sym_edit.setToolTip(
             "卫星信号的符号率（ksps）；要与所选制式匹配，不确定就用制式默认值")
@@ -766,17 +773,32 @@ class WeatherPanel(QWidget):
         if not sr_text or not sym_text:
             QMessageBox.warning(
                 self, "参数不完整", "采样率与符号率都不能为空，未开始解码。\n"
-                "请填纯数字：采样率按 MS/s（如 2.048），符号率按 ksps（如 72.0）。")
+                "采样率按 MS/s（如 2.048，也可写 2.048M），"
+                "符号率按 ksps（如 72.0）。")
             self._update_status(extra="采样率/符号率为空，未开始解码")
             return
         try:
-            sr_msps = float(sr_text)
-        except ValueError:
+            # 与设备面板同一份语法（parse_sample_rate）：本栏标签是 MS/s，
+            # 所以纯数字按 MS/s 换算，2.048M / 2048000Hz 这类带单位写法也认。
+            sr_hz = parse_sample_rate(sr_text, default_scale=1e6)
+        except (ValueError, TypeError):
             QMessageBox.warning(
                 self, "采样率无效",
-                f"采样率“{sr_text}”不是数字，未开始解码。\n"
-                "请填纯数字（单位 MS/s），如 2.048；不要带 M/MS/s/Hz 后缀。")
+                f"采样率“{sr_text}”无法识别，未开始解码。\n"
+                "请写 2.048（按 MS/s）、2.048M 或 2048000Hz 中的一种。")
             self._update_status(extra="采样率无效，未开始解码")
+            return
+        sr_msps = sr_hz / 1e6
+        # 本栏按 MS/s 计：2048000 会被读成 2.048 THz——这是「照设备面板按 Hz
+        # 填」的典型写法。直接拒绝并写清两种写法，不静默算成一个巨值。
+        if sr_msps > 200:
+            QMessageBox.warning(
+                self, "采样率超出范围",
+                f"采样率“{sr_text}”按 MS/s 算是 {sr_msps:g} MS/s，超出常见范围，"
+                "未开始解码。\n"
+                "本栏按 MS/s 计：2.048 表示 2.048 MS/s；要写 Hz 请带单位，"
+                "如 2048000Hz。")
+            self._update_status(extra="采样率超出范围，未开始解码")
             return
         try:
             sym_ksps = float(sym_text)
@@ -801,8 +823,8 @@ class WeatherPanel(QWidget):
             "satellite": self.sat_combo.currentText(),
             "iq_file": self._iq_file,
             "out_png": out_png,
-            "sps": max(1, round(sr_msps * 1e6 / (sym_ksps * 1e3))),
-            "sample_rate": sr_msps * 1e6,
+            "sps": max(1, round(sr_hz / (sym_ksps * 1e3))),
+            "sample_rate": sr_hz,
         }
         self._start_worker(params)
 
