@@ -397,12 +397,12 @@ P1–P15 覆盖刻度、dB 量程、峰值、hold、调色板、缩放锚定、�
 
 | 机制 | 参考做法 | 我们现状 | 决定与动作 |
 |---|---|---|---|
-| C1 坏配置恢复 | `sdrpp/core/src/config.cpp`（34-43）（直接覆盖写默认） | `a96c010f` — `desktop/settings.py:298` — `os.replace(path, backup)`（基准 `a96c010f`）；实现位置：`desktop/settings.py:298` 先备份 `*.corrupt-时间戳` | **改良后做**（已落地）：先留证据再回默认 |
-| C2 原子写 | `config.cpp`（47-52）（`ofstream` 直接覆盖） | `357076eb` — `desktop/settings.py:637` — `_write_to_disk`（基准 `357076eb`，该行 blame）；实现位置：`desktop/settings.py:637-697`（`tmp_path = ...pid...tmp` + `os.replace(tmp_path, self._path)`） | **改良后做**（已落地；上游是反例） |
+| C1 坏配置恢复 | `sdrpp/core/src/config.cpp`（34-43）（直接覆盖写默认） | `a96c010f` — `desktop/settings.py:304` — `os.replace(path, backup)`（基准 `a96c010f`）；实现位置：`desktop/settings.py:304` 先备份 `*.corrupt-时间戳` | **改良后做**（已落地）：先留证据再回默认 |
+| C2 原子写 | `config.cpp`（47-52）（`ofstream` 直接覆盖） | `357076eb` — `desktop/settings.py:737` — `_write_to_disk`（基准 `357076eb`，该行 blame）；实现位置：`desktop/settings.py:737-800`（`tmp_path = ...pid...tmp` + `os.replace(tmp_path, self._path)`） | **改良后做**（已落地；上游是反例） |
 | C3 定时自动保存线程 | `config.cpp:82-100`（1s `try_lock` + 写） | 按需 `flush` | **明确不做**：无收益且与原子写重复 |
 | C4 崩溃自检/配置重载提示 | `gqrx/.../mainwindow.cpp:500-521`（`crashed` 标志） | 未做 | **明确不做**：原子写+备份已降低丢配置概率；崩溃标记无法区分断电/强杀，误报成本高于收益 |
 | C5 默认值不落盘 | `gqrx/.../dockfft.cpp:238-324`（等于默认就 `remove(key)`） | 全量落盘 | **明确不做**：全量写是单一事实源，利于审计与逐键迁移 |
-| C6 版本化迁移 | `gpredict/src/sat-cfg.c`（302-330）（1.1→1.4 重写键） | `605e89da` — `desktop/settings.py:348` — `migration_notes`（基准 `605e89da`）；实现位置：`desktop/settings.py:247`（`_coerce`）、`:348`（`migration_notes`） | **改良后做**（已落地）：逐键迁移，粒度比文件级版本块更细 |
+| C6 版本化迁移 | `gpredict/src/sat-cfg.c`（302-330）（1.1→1.4 重写键） | `605e89da` — `desktop/settings.py:361` — `migration_notes`（基准 `605e89da`）；实现位置：`desktop/settings.py:253`（`_coerce`）、`:361`（`migration_notes`） | **改良后做**（已落地）：逐键迁移，粒度比文件级版本块更细 |
 | C7 分段 JSON 配置 | `satdump/.../sat_finder_ui.cpp:107`（按模块 `get_user_json`） | 单一 `settings.json` | **明确不做**：集中式更易原子写/迁移/审计 |
 
 #### TX 安全闸（X1–X5）
