@@ -2091,6 +2091,10 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `docs/evidence-standard.md` | 收尸线/6ae85f56（⑰ 边界章节 §8（takeover 守卫账本线过期 claim）） | 2026-11-13 20:52 | 本笔 |
 | `docs/incidents/2026-11-13-safe-commit-swept-inflight-work.md` | 收尸线/6ae85f56（事故记录补两条：052828d1 少算的 ⑲、同笔混入的登记面豁免修复） | 2026-11-13 20:52 | 本笔 |
 | `docs/incidents/2026-11-13-safe-commit-swept-inflight-work.md` | 收尸线/6ae85f56（事故记录补第三条：7 条无凭据复盘、4 条搬 A 组、反向盲区） | 2026-11-13 20:52 | 本笔 |
+| `desktop/weather_panel.py` | S1-S4结果伪造线/6ae85f56（A1：_terminal_status 保留出图成功/未出图/错误，排队 _on_idle→_refresh_state 不再冲成就绪） | 2026-11-13 20:53 | 本笔 |
+| `desktop/modulation_panel.py` | S1-S4结果伪造线/6ae85f56（A2：_terminal_status 保留识别完成/失败，成功侧不再被刷新改写成就绪） | 2026-11-13 20:53 | 本笔 |
+| `tests/test_weather_panel_fengyun.py` | S1-S4结果伪造线/6ae85f56（A1 用例：失败后触发 _on_idle/_refresh_state，状态行不变） | 2026-11-13 20:53 | 本笔 |
+| `tests/test_modulation_panel_failure_landing.py` | S1-S4结果伪造线/6ae85f56（A2 用例：识别完成后刷新仍为「识别完成」） | 2026-11-13 20:53 | 本笔 |
 
 > 上表各行均由 `claim` 台账推导：owner 原文与 `acquired_at` 直接取自台账，
 > 目的优先用台账里的 `claim_reason`，没有就如实写「未声明」，不补编。时间列只是

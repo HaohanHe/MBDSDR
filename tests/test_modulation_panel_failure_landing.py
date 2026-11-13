@@ -46,6 +46,33 @@ def test_failure_text_survives_thread_finished(qapp, monkeypatch):
         panel.close()
 
 
+def test_success_text_survives_thread_finished(qapp, monkeypatch):
+    """A2：成功侧的「识别完成」同样必须有保留字段。
+
+    失败侧早有 ``_last_failure`` 兜底；成功侧此前没有对应字段，
+    ``QThread.finished`` → ``_refresh_state`` 会把它改写成「就绪」。
+    """
+    from types import SimpleNamespace
+
+    from desktop import modulation_panel as mp
+
+    monkeypatch.setattr(mp, "_KERNEL_AVAILABLE", True)
+    panel = mp.ModulationPanel()
+    try:
+        panel.set_backend(object())
+        panel.set_sdr_connected(True)
+
+        panel._on_done(SimpleNamespace(
+            modulation="FM", confidence=0.9, bandwidth=12_500.0,
+            symbol_rate_hint=0.0, suggestions=[]))
+        # 真实路径里 QThread.finished 随后会走到这里
+        panel._refresh_state()
+
+        assert panel.status_label.text() == "识别完成", "成功结论不能被复位成「就绪」"
+    finally:
+        panel.close()
+
+
 def test_new_attempt_clears_previous_failure(qapp, monkeypatch):
     from desktop import modulation_panel as mp
 

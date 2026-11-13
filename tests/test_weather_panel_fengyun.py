@@ -86,3 +86,30 @@ def test_status_line_frequency_uses_readouts():
         assert panel.status_label.text().startswith("不是数字 MHz | ")
     finally:
         panel.close()
+
+
+def test_decode_failure_survives_queued_idle_refresh(monkeypatch):
+    """A1：解码失败结论不能被排队的 _on_idle → _refresh_state 冲成「就绪」。
+
+    失败弹窗 ``QMessageBox.critical`` 会自转事件循环，worker 的 ``finished``
+    恰在这段时间派发到 ``_on_idle``；旧实现 ``_update_status()`` 无 extra 时
+    回写纯频率行，「错误: …」就此消失。终态必须有保留字段，刷新只回显。
+    """
+    from desktop import weather_panel as wp
+
+    monkeypatch.setattr(wp.QMessageBox, "critical", lambda *a, **k: None)
+    panel = wp.WeatherPanel()
+    try:
+        panel._on_failed("读取失败: 文件不存在\n第二行详情")
+        before = panel.status_label.text()
+        assert "错误: 读取失败" in before
+        # 排队回调：worker.finished → _on_idle，以及主动刷新
+        panel._on_idle()
+        panel._refresh_state()
+        after = panel.status_label.text()
+        assert "错误: 读取失败" in after, "失败结论必须留在状态行"
+        assert "就绪" not in after, "失败不能被复位成「就绪」"
+        assert after == before, "刷新不得改动终态状态行"
+    finally:
+        panel.close()
+

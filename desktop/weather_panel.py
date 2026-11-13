@@ -477,6 +477,10 @@ class WeatherPanel(QWidget):
         self._worker: Optional[QThread] = None
         self._worker_obj: Optional[DecodeWorker] = None
         self._frame_count = 0
+        #: 最近一次解码的终态（出图成功 / 未出图 / 错误）。worker 的
+        #: ``QThread.finished`` → ``_on_idle`` → ``_refresh_state`` 会在失败
+        #: 弹窗自转事件循环期间排队执行，旧实现用「就绪」把它冲掉。
+        self._terminal_status = ""
         self._build_ui()
         self._on_satellite_changed(0)
         self._load_history()
@@ -839,6 +843,7 @@ class WeatherPanel(QWidget):
 
     # ------------------------------------------------------------------
     def _start_worker(self, params: Dict):
+        self._terminal_status = ""  # 新一轮解码开始，上一轮终态作废
         self._worker = QThread()
         self._worker_obj = DecodeWorker(params)
         self._worker_obj.moveToThread(self._worker)
@@ -864,7 +869,8 @@ class WeatherPanel(QWidget):
 
     def _on_failed(self, text: str):
         self._set_placeholder("解码失败")
-        self._update_status(extra=f"错误: {text.splitlines()[0]}")
+        self._terminal_status = f"错误: {text.splitlines()[0]}"
+        self._update_status()
         QMessageBox.critical(self, "解码错误", text)
 
     def _on_result(self, res: dict):
@@ -880,16 +886,18 @@ class WeatherPanel(QWidget):
                 f"时间: {ts} | "
                 f"分辨率: {res.get('width','?')}×{res.get('height','?')} | "
                 f"注释: {res.get('annotation','') or '—'}")
-            self._update_status(extra=(
+            self._terminal_status = (
                 f"出图成功: {os.path.basename(res['png'])}"
-                + (f" | 链路: {res['link']}" if res.get("link") else "")))
+                + (f" | 链路: {res['link']}" if res.get("link") else ""))
+            self._update_status()
             self.save_btn.setEnabled(True)
             self._load_history()
         else:
             # 不出图：保持空白占位，如实说明，绝不补假图
             self._set_placeholder("无数据")
             self.meta_label.setText("卫星: — | 通道: — | 时间: — | 分辨率: —")
-            self._update_status(extra=f"未出图: {res.get('error','未知原因')}")
+            self._terminal_status = f"未出图: {res.get('error','未知原因')}"
+            self._update_status()
 
     def _show_image(self, path: str):
         pix = QPixmap(path)
@@ -978,7 +986,8 @@ class WeatherPanel(QWidget):
     def _update_status(self, extra: str = ""):
         sat = self._current_sat()
         if not sat:
-            self.status_label.setText(extra or "就绪"); return
+            self.status_label.setText(
+                extra or self._terminal_status or "就绪"); return
         # 频率读数不再就地拼「{输入框} MHz」：输入是 MHz 字符串，是数值才按
         # 1 Hz 口径格式化（6 位小数 MHz）；不是数值就原样保留，不吞掉用户输入。
         raw_freq = self.freq_edit.text()
@@ -991,6 +1000,10 @@ class WeatherPanel(QWidget):
                 f"{sat.get('band','')} | 帧/段: {self._frame_count}")
         if extra:
             line += f" | {extra}"
+        elif self._terminal_status:
+            # 终态只在这里回显：_refresh_state 的排队回调不得用「就绪」
+            # 把「出图成功 / 未出图 / 错误」冲掉。
+            line += f" | {self._terminal_status}"
         self.status_label.setText(line)
 
 

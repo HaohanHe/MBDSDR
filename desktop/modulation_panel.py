@@ -116,6 +116,11 @@ class ModulationPanel(QWidget):
         #: 调 _refresh_state，若不留这一份，失败文案会立刻被改写成「就绪」，
         #: 用户看到的是「点了没反应」而不是「这次没识别成」。
         self._last_failure: Optional[str] = None
+        #: 最近一次识别的终态文案（成功/失败共用）。失败侧有 _last_failure
+        #: 兜底，成功侧的「识别完成」此前没有保留字段，
+        #: ``QThread.finished`` 触发的 _refresh_state 会把它改写成「就绪」。
+        #: 两者都留，刷新只负责回显，不再产生结论。
+        self._terminal_status: str = ""
         self._build_ui()
         self._refresh_state()
 
@@ -211,7 +216,10 @@ class ModulationPanel(QWidget):
             # 失败文案必须留在明面上：先说没做成什么，再说现在能做什么。
             self.status_label.setText(self._failure_text())
         else:
-            self.status_label.setText("就绪：对准信号后点「识别信号」")
+            # 终态（识别完成 / 识别没有完成）只在这里回显：
+            # 线程结束后的刷新不得把它改写成「就绪」。
+            self.status_label.setText(
+                self._terminal_status or "就绪：对准信号后点「识别信号」")
 
     def _failure_text(self) -> str:
         """失败落地文案（唯一一份，_on_failed 与 _refresh_state 共用）。"""
@@ -227,6 +235,7 @@ class ModulationPanel(QWidget):
             return
         self.status_label.setText("识别中…，请稍候")
         self._last_failure = None  # 新一轮识别开始，上一次的失败结论作废
+        self._terminal_status = ""  # 上一轮的终态（含「识别完成」）也作废
         self.identify_btn.setEnabled(False)
         # 新一轮识别先把上一轮的数字清成 "—"：识别中点着上一条的
         # 「95% NFM」会被读成当前信号的结果，属于拿旧读数冒充实时。
@@ -269,14 +278,16 @@ class ModulationPanel(QWidget):
         self.suggest_hint.setVisible(not has_suggest)
         self.apply_btn.setEnabled(True)
         self._last_failure = None
-        self.status_label.setText("识别完成")
+        self._terminal_status = "识别完成"
+        self.status_label.setText(self._terminal_status)
         self.done.emit(result)
 
     def _on_failed(self, msg: str):
         # 失败必须落地成「看得见的结论 + 可做的下一步」，不能只写进一行
         # 随后又被 QThread.finished → _refresh_state 覆盖回「就绪」。
         self._last_failure = str(msg)
-        self.status_label.setText(self._failure_text())
+        self._terminal_status = self._failure_text()
+        self.status_label.setText(self._terminal_status)
         self.apply_btn.setEnabled(False)
         self.failed.emit(msg)
 
