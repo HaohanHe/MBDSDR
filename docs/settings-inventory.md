@@ -773,7 +773,7 @@ combo_tip= 同上
 | 5 | 设置页（`settings_panel.py`） | 否 | `sample_rate_hz` 是内部项（`exposed=False`），设置页没有该行；只能手改 JSON，手改值启动后由 #1 入口提示 |
 | 6 | SDR 工具栏 / 顶栏工具栏 | 否 | 工具栏只有频率/模式/带宽，没有采样率字段 |
 
-结论：能"凭空显示一个设备做不到的采样率"的只有 #1（配置恢复路径），已修（取证 `bf2db0d2` — `desktop/control_panel.py:1869` — `超出当前设备能力`（基准 `b4c2d1f9`，该行 blame））；
+结论：能"凭空显示一个设备做不到的采样率"的只有 #1（配置恢复路径），已修（取证 `bf2db0d2` — `desktop/control_panel.py:1900` — `超出当前设备能力`（基准 `b4c2d1f9`，该行 blame））；
 其余入口要么读设备真值、要么只提供能力档、要么显式拒绝并报错。
 
 ### 18.7 schema 为什么不加 1 GHz 上限：按后端能力逐条判定
@@ -855,10 +855,10 @@ last-write-wins。故本轮只登记、不实现。
 
 | 项名（settings 键） | 恢复路径 | 现在会不会塞进后端做不到的值 | 有没有可见提示 | 缺口在哪 |
 |---|---|---|---|---|
-| `frequency_hz`（取证 `abc52bd8` — `desktop/control_panel.py:1559` — `全局调谐范围`（基准 `abc52bd8`，该行 blame）） | `_apply_restored_settings` → `control_panel.set_frequency_hz`（全局钳位 10 kHz–6 GHz）；连接时 `_connect_backend` 把 `control_panel.get_frequency_hz()` 交给 `backend.set_frequency` | 恢复本身不下发；连接时会把钳位后的值下发。若超出 `backend.device.frequency_range`，基类 `set_frequency` 直接 `return False`（不设 `status.error`），调用处只 catch 异常、不检查返回值 → **后端未生效、界面仍显示配置值** | 本轮补：恢复被全局钳位时 `freq_input` tooltip 追加「⚠ 配置请求 X 低于/高于全局调谐范围 […]，已按边界 Y 显示（配置文件未改）」+ `logger.warning`；合法值还原静态说明。**设备能力层越界下发仍无提示** | 设备能力校验缺在 `main_window._connect_backend`（该文件被操作逻辑线持有，补丁口径见 §18.10 末尾）。本行其余部分已修 |
-| `sample_rate_hz`（取证 `bf2db0d2` — `desktop/control_panel.py:1869` — `超出当前设备能力`（基准 `b4c2d1f9`，该行 blame）） | `control_panel.set_sample_rate`（最近档 + ⚠/tooltip/warning） | 恢复值不下发；连接时下发的是对话框档位（`device_panel.sr_edit` 已有 `check_range`）或自动连接常量 2.048 MS/s | 有（§18.6 已修） | 无（"恢复值不参与连接"见 §18.10 的 `status_sr` 口径） |
+| `frequency_hz`（取证 `abc52bd8` — `desktop/control_panel.py:1590` — `全局调谐范围`（基准 `abc52bd8`，该行 blame）） | `_apply_restored_settings` → `control_panel.set_frequency_hz`（全局钳位 10 kHz–6 GHz）；连接时 `_connect_backend` 把 `control_panel.get_frequency_hz()` 交给 `backend.set_frequency` | 恢复本身不下发；连接时会把钳位后的值下发。若超出 `backend.device.frequency_range`，基类 `set_frequency` 直接 `return False`（不设 `status.error`），调用处只 catch 异常、不检查返回值 → **后端未生效、界面仍显示配置值** | 本轮补：恢复被全局钳位时 `freq_input` tooltip 追加「⚠ 配置请求 X 低于/高于全局调谐范围 […]，已按边界 Y 显示（配置文件未改）」+ `logger.warning`；合法值还原静态说明。**设备能力层越界下发仍无提示** | 设备能力校验缺在 `main_window._connect_backend`（该文件被操作逻辑线持有，补丁口径见 §18.10 末尾）。本行其余部分已修 |
+| `sample_rate_hz`（取证 `bf2db0d2` — `desktop/control_panel.py:1900` — `超出当前设备能力`（基准 `b4c2d1f9`，该行 blame）） | `control_panel.set_sample_rate`（最近档 + ⚠/tooltip/warning） | 恢复值不下发；连接时下发的是对话框档位（`device_panel.sr_edit` 已有 `check_range`）或自动连接常量 2.048 MS/s | 有（§18.6 已修） | 无（"恢复值不参与连接"见 §18.10 的 `status_sr` 口径） |
 | `gain_db` | `control_panel.set_gain`（未连接按 [0, 49] dB 钳位）；连接后 `main_window` 调 `control_panel.set_gain_range(0, device.max_gain)` 收放滑杆 | 恢复值不下发（连接用 `gain` 参数=对话框值/常量 20；AGC 开时更不下发）。连接后收放滑杆时，QSlider.setRange 会把超界值夹到设备上限并触发 `valueChanged`——此前会经 `_on_gain_changed` 写回 `settings` | 本轮补：`set_gain` 被钳位时 `gain_slider` tooltip 追加「⚠ 配置请求 X dB 超出未连接时的显示范围 [0, 49] dB，已按 Y dB 显示（配置文件未改）」；`set_gain_range` 夹值时追加「⚠ 当前增益 X dB 超出所连设备能力 […] dB，已按 Y dB 显示（配置文件未改）」，并 **blockSignals 防回写** | 无能力越界缺口；"恢复值不参与连接下发"属 main_window 面（行为与 `agc_enabled` 同：恢复的是界面意图，不是连接参数） |
-| `bandwidth_hz`（取证 `abc52bd8` — `desktop/control_panel.py:1914` — `解调带宽不在当前可见档位`（基准 `abc52bd8`，该行 blame）） | `control_panel.set_vfo_bandwidth`（无精确档位时选最近可见档） | 恢复本身不下发；连接时 `_connect_backend(bandwidth=…)` 默认 0.0（自动），恢复值不下发。用户之后再选档才走 `_on_vfo_bandwidth_changed` → `backend.set_bandwidth` | 本轮补：替换时 `vfo_bw_combo` tooltip 追加「⚠ 配置请求 X Hz 解调带宽不在当前可见档位，已按最近档 Y Hz 显示（配置文件未改）」+ `logger.warning`；精确命中/用户选档/切模式时还原静态说明 | 静默替换已修；"恢复值不下发"在 main_window 面（与之相对，用户手动选档的值是下发的） |
+| `bandwidth_hz`（取证 `abc52bd8` — `desktop/control_panel.py:1945` — `解调带宽不在当前可见档位`（基准 `abc52bd8`，该行 blame）） | `control_panel.set_vfo_bandwidth`（无精确档位时选最近可见档） | 恢复本身不下发；连接时 `_connect_backend(bandwidth=…)` 默认 0.0（自动），恢复值不下发。用户之后再选档才走 `_on_vfo_bandwidth_changed` → `backend.set_bandwidth` | 本轮补：替换时 `vfo_bw_combo` tooltip 追加「⚠ 配置请求 X Hz 解调带宽不在当前可见档位，已按最近档 Y Hz 显示（配置文件未改）」+ `logger.warning`；精确命中/用户选档/切模式时还原静态说明 | 静默替换已修；"恢复值不下发"在 main_window 面（与之相对，用户手动选档的值是下发的） |
 | `ppm` | **无 settings 键**（`config_schema.py` 无此键），无恢复路径 | 否：只有连接对话框 `ppm_spin`（控件范围 -1000–1000）与 rtl_tcp 构造参数 | 不适用 | 无 |
 | `offset_tuning` / `dc_removal` / `iq_balance` | **无 settings 键**，无恢复路径（`set_offset_tuning` 等只在用户操作时下发） | 否（每次启动回到默认） | 不适用 | 无（如需持久化，属功能缺口而非能力缺口） |
 | `agc_enabled` | `control_panel.set_agc`（bool） | 否（无越界概念）；恢复值不参与连接下发 | 静态 tooltip 说明勾选语义 | 无能力缺口；"恢复值不下发"同上 |
