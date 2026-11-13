@@ -70,6 +70,24 @@ pre-commit 闸门对**任何未声明的删除条目**一律拒绝（幻影删�
   理由与逐文件增删行数会写进提交说明的 ``foreign-changes:`` 段——豁免必须留痕，
   不能默默通过。
 
+⑰ 的边界（`052828d1` 形态）：判据是**时间窗**，不是**归属**
+------------------------------------------------------------
+
+``052828d1`` 现场：声明把两个**未被任何 claim 占着**的新测试文件列进了
+``--files``，同时工作区里另有他线写在同文件里的内容。这两类都**不在** ⑰ 的
+判定范围内：
+
+* 声明**之前**就已经躺在工作区里的他线内容会原样进快照，⑰ 不会提示——
+  本脚本**没有**任何机制判断「这几行是谁写的」；
+* 未被 ``--files`` 列到的未跟踪文件，本脚本**碰不到**：index 只从 HEAD 建，
+  只 add 声明清单，提交后再逐路径比对作用域。``052828d1`` 能把它们带走，
+  只可能是它们**被写进了 ``--files``**——那是声明内容错了，不是工具漏了。
+
+能提供的只有弱提示：进入 ``--files`` 的路径若台账里没有当前 owner 的 claim
+记录，打印 ``[claim] 该路径无 claim 记录，请确认归属：<path>``。**只提示，
+不拦**——没签字不等于偷东西，归属由人确认，工具不替人签字，也不把「没签字」
+当成拦下的理由。声明时已有他人 hunk 与「声明后漂移」的分界，见 ⑰ 的判定本身。
+
 提交说明逐字校验（2026-11-13，形态⑱）
 --------------------------------------
 
@@ -676,6 +694,33 @@ def _claim_owners(path: str, since: float) -> list[str]:
     return owners
 
 
+def _claim_hint(files: list[str]) -> None:
+    """台账里没有当前 owner 的 claim 记录时，逐路径提示一行（**只提示，不拦**）。
+
+    声明快照（形态⑰）的判据是**时间窗**，不是**归属**：声明之前就已经躺在工作区
+    里的他线内容会原样进快照，本脚本不会、也无法判断那几行是谁写的。``052828d1``
+    就是这一类——``--files`` 把未 claim 的新测试文件一起列进了声明，工具照单全收，
+    内容没错，错的是声明范围。
+
+    归属是人的判断：没签字不等于偷东西，工具不替人签字，也不把「没签字」当成
+    拦下的理由。所以这里只打印，不返回状态、不参与退出码。
+    """
+    cc = _coord_module()
+    owner = cc.resolve_owner(ROOT)
+    if not owner:
+        return                       # 没有提交者身份可比，提示只会变成噪声
+    try:
+        registry = cc._load_registry(cc.fc.REGISTRY_PATH)
+    except (OSError, ValueError):
+        return
+    known = cc.ledger_index(registry)
+    for rel in files:
+        owners = known.get(cc._norm(rel)) or set()
+        if any(cc._owner_matches(item, owner) for item in owners):
+            continue
+        print(f"[claim] 该路径无 claim 记录，请确认归属：{rel}")
+
+
 def _verify_declaration(env: dict, declared: dict, declared_at: float,
                         waived: bool = False) -> tuple[list[dict], str]:
     """比对声明快照与当前工作区：返回 (变化清单, 报告文本)。
@@ -1272,6 +1317,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"[files] 重复路径已合并：{len(files)} → {len(uniq)} 个")
     print(f"[files] 本次声明 {len(uniq)} 个文件：{', '.join(uniq)}")
     files = uniq
+    _claim_hint(files)
 
     # 只声明不提交：把当前工作区内容钉成快照，供之后（可能跨进程）的提交比对。
     if args.declare:

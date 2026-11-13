@@ -406,3 +406,81 @@ def test_message_is_stored_verbatim(tmp_path):
     stored = raw.split("\n\n", 1)[1]
     # subprocess 用 text=True 会把 \r\n 折成 \n，这里按 git 的原样比较
     assert stored.replace("\r\n", "\n") == text, repr(stored)
+
+
+def _safe_files(repo, locks, tmp_path, files, *extra, owner="进程A线"):
+    """声明任意文件清单跑一次 safe_commit（``_safe`` 只声明 doc.md）。"""
+    msg = tmp_path / "msg.txt"
+    msg.write_text("test: 多文件声明\n", encoding="utf-8")
+    return subprocess.run(
+        [sys.executable, str(SAFE), "--files", *files,
+         "--message-file", str(msg), *extra],
+        cwd=str(repo), env=_safe_env(repo, locks, owner),
+        capture_output=True, text=True, encoding="utf-8", errors="replace",
+    )
+
+
+def test_052828d1_shape_only_declared_paths_enter_the_commit(tmp_path):
+    """``052828d1`` 形态：未跟踪的新文件只能**因为被写进 --files** 才进提交。
+
+    现场是「声明里列了不该列的文件」，不是「工具偷偷多带」——这两句话的处置
+    完全不同，所以这里把两侧都钉住：
+
+    * 清单里只有 ``doc.md`` 时，两个未跟踪的新测试文件必须留在工作区（工具
+      碰不到它们：index 从 HEAD 建、只 add 声明清单）；
+    * 把其中一个写进 ``--files`` 后它才会进提交——证明入口在声明，不在工具；
+    * 声明**之前**就在工作区里的他线内容会照原样落库（⑰ 判的是时间窗，不是
+      归属），这是已知边界，不是本用例要修的行为。
+    """
+    locks = tmp_path / "locks"
+    repo = _repo(tmp_path, [f"line{i}" for i in range(1, 7)])
+    lines = [f"line{i}" for i in range(1, 7)]
+    lines[1] = "line2 mine"
+    lines[4:4] = ["foreign-before-declare"]      # 声明前就躺在工作区的他线内容
+    _write(repo, lines)
+    tests_dir = repo / "tests"
+    tests_dir.mkdir()
+    (tests_dir / "test_new_a.py").write_text("# new a\n", encoding="utf-8")
+    (tests_dir / "test_new_b.py").write_text("# new b\n", encoding="utf-8")
+
+    proc = _safe_files(repo, locks, tmp_path, [DOC])
+    out = proc.stdout + proc.stderr
+    assert proc.returncode == 0, out
+    assert "[claim] 该路径无 claim 记录，请确认归属：doc.md" in out, out
+    assert _git(repo, "show", "--pretty=", "--name-only", "HEAD").stdout.split() == [DOC]
+    untracked = _git(repo, "ls-files", "--others", "--exclude-standard").stdout.split()
+    assert sorted(untracked) == ["tests/test_new_a.py", "tests/test_new_b.py"], untracked
+
+    # 诚实结论：声明前就在的他线内容进了这笔（⑰ 不判归属，没有别的机制提示）
+    assert "foreign-before-declare" in _git(repo, "show", "HEAD:doc.md").stdout
+
+    # 只有显式写进 --files，未跟踪文件才会被带走
+    proc = _safe_files(repo, locks, tmp_path, ["tests/test_new_a.py"])
+    out = proc.stdout + proc.stderr
+    assert proc.returncode == 0, out
+    assert _git(repo, "show", "--pretty=", "--name-only", "HEAD").stdout.split() == [
+        "tests/test_new_a.py"]
+    # 共享 index 提交后是陈旧的（形态⑤），不能拿 ls-files --others 判断跟踪状态，
+    # 直接看 HEAD 的树：b 不在里面，就说明它没被这笔带走。
+    tree = _git(repo, "ls-tree", "-r", "--name-only", "HEAD").stdout.split()
+    assert "tests/test_new_a.py" in tree and "tests/test_new_b.py" not in tree, tree
+
+
+def test_claim_hint_appears_only_without_claim_record(tmp_path):
+    """归属提示只提示不拦：无 claim 记录时打印，有记录时不打印，两者都 rc=0。"""
+    locks = tmp_path / "locks"
+    repo = _repo(tmp_path, [f"line{i}" for i in range(1, 7)])
+    lines = [f"line{i}" for i in range(1, 7)]
+    lines[1] = "line2 mine"
+    _write(repo, lines)
+
+    proc = _safe(repo, locks, tmp_path, "--declare", message=None, owner="进程A线")
+    out = proc.stdout + proc.stderr
+    assert proc.returncode == 0, out
+    assert "[claim] 该路径无 claim 记录，请确认归属：doc.md" in out, out
+
+    assert _claim(repo, locks, "进程A线").returncode == 0
+    proc = _safe(repo, locks, tmp_path, "--declare", message=None, owner="进程A线")
+    out = proc.stdout + proc.stderr
+    assert proc.returncode == 0, out
+    assert "[claim]" not in out, out
