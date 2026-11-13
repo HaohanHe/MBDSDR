@@ -62,6 +62,7 @@ from typing import Any, Dict, Iterable, List, Optional, Sequence, Set, Tuple
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 import file_claim as fc  # noqa: E402  （复用占位文件路径与只读窥视）
+from claim_window import RELEASE_WINDOW_S, window_release  # noqa: E402
 
 DOC = ROOT / "docs" / "COORDINATION.md"
 SECTION_HEAD = "### 6.1 当前占用"
@@ -72,8 +73,7 @@ EXIT_FINDINGS = 3
 TICK_RE = re.compile(r"`([^`]+)`")
 #: 显式历史/已释放标记：只有写明的旧行才允许「文档有、台账无」。
 RELEASED_MARKERS = ("已释放", "（历史）", "(历史)")
-#: 「先 release 再提交」窗口（秒）：同一 owner 在窗口内释放过的暂存文件，仍要行。
-RELEASE_WINDOW_S = 3600.0
+#: 「先 release 再提交」窗口（秒）由 claim_window 唯一定义，见模块文档。
 #: 提交者身份环境变量（与 claim_gate 同口径）。
 IDENTITY_ENV = "MBDSDR_CLAIM_OWNER"
 #: 只解析台账里单条记录用的解码器（见 `_entry_for`）。
@@ -209,7 +209,7 @@ def active_claims_for_paths(
     """只查这些路径的活跃 claim（pre-commit 用）。
 
     占位文件名是 ``sha1(比较键)[:16]``，所以能按路径直接定位，不必 glob 整个
-    claims 目录再逐个解析——那是 0.3s 预算里最大的一块（实测 100+ 个占位文件
+    claims 目录再逐个解析——那是检查耗时里最大的一块（实测 100+ 个占位文件
     逐个加锁读，冷启动 0.4s 起步）。
     """
     now = time.time() if now is None else now
@@ -301,23 +301,11 @@ def recently_released_claims(
         return []  # 没有台账 = 没有持有过
     out: List[Tuple[str, str, float]] = []
     for path in {_norm(p) for p in paths}:
-        entry = _entry_for(raw, path)
-        if entry is None:
-            continue
-        latest: Optional[Tuple[str, float]] = None
-        for item in entry.get("history") or []:
-            if not isinstance(item, dict):
-                continue
-            released = item.get("released_at")
-            if not isinstance(released, (int, float)):
-                continue  # 仍在持有：由活跃 claim 分支负责
-            held = str(item.get("owner") or "")
-            if owner and held != owner:
-                continue
-            if latest is None or float(released) > latest[1]:
-                latest = (held, float(released))
-        if latest is not None and now - latest[1] <= window_s:
-            out.append((path, latest[0], latest[1]))
+        # 窗口判定只在 claim_window.window_release 一处实现：窄工具
+        # （append_coordination_row.py）调的是同一个函数，两侧不会各改各的。
+        hit = window_release(_entry_for(raw, path), owner, now, window_s)
+        if hit is not None:
+            out.append((path, hit[0], hit[1]))
     out.sort()
     return out
 
@@ -339,19 +327,21 @@ def is_strict_path(path: str) -> bool:
     return True  # 根目录文件等一律按严格处理（fail closed）
 
 
-def _uncovered(
+def uncovered_pairs(
     pairs: Iterable[Tuple[str, str]],
     rows: List[Row],
-) -> Tuple[List[str], List[Row]]:
-    """逐条判覆盖。返回（缺行明细, 目录级行清单）。
+) -> Tuple[List[Tuple[str, str, bool]], List[Row]]:
+    """逐条判覆盖。返回（[(路径, owner, 是否仅目录级行)], 目录级行清单）。
 
     strict 路径必须命中**逐条**行；非 strict 可被 owner 匹配的目录级行覆盖。
+    返回值保留 ``path``/``owner`` 两列，供 ``--staged`` 打印可直接执行的补登命令
+    ——只返回格式化字符串的话，命令里的路径就得靠正则从提示里反解。
     """
     file_rows = [(ps, oc, rel) for ps, oc, rel in rows
                  if any(not _is_pattern(p) for p in ps)]
     pattern_rows = [(ps, oc, rel) for ps, oc, rel in rows
                     if any(_is_pattern(p) for p in ps)]
-    out: List[str] = []
+    out: List[Tuple[str, str, bool]] = []
     for path, owner in pairs:
         exact = any(path in ps and _owner_matches(_owner_label(oc), owner)
                     for ps, oc, _rel in file_rows)
@@ -360,10 +350,23 @@ def _uncovered(
         pat_hit = any(_matches(path, p) and _owner_matches(_owner_label(oc), owner)
                       for ps, oc, _rel in pattern_rows for p in ps if _is_pattern(p))
         if is_strict_path(path):
-            out.append(
-                f"{path} owner={owner}（仅目录级登记；代码/共享文档必须逐条）"
-                if pat_hit else f"{path} owner={owner}")
+            out.append((path, owner, pat_hit))
         elif not pat_hit:
+            out.append((path, owner, False))
+    return out, pattern_rows
+
+
+def _uncovered(
+    pairs: Iterable[Tuple[str, str]],
+    rows: List[Row],
+) -> Tuple[List[str], List[Row]]:
+    """``uncovered_pairs`` 的可打印形式（保持既有输出格式不变）。"""
+    found, pattern_rows = uncovered_pairs(pairs, rows)
+    out: List[str] = []
+    for path, owner, pat_hit in found:
+        if pat_hit:
+            out.append(f"{path} owner={owner}（仅目录级登记；代码/共享文档必须逐条）")
+        else:
             out.append(f"{path} owner={owner}")
     return out, pattern_rows
 
@@ -450,6 +453,31 @@ def staged_paths(root: Path = ROOT) -> List[str]:
     return [_norm(x) for x in proc.stdout.splitlines() if x.strip()]
 
 
+def append_command(path: str, owner: str, doc: Path, root: Path) -> str:
+    """一条可直接粘贴执行的补登记命令（窄锁，不需要整文件 claim）。
+
+    拒绝信息里必须给出能跑通的命令：只写「补一行」让人自己拼路径/owner/说明，
+    实际就是逼人 ``--no-verify``。这里把三样都填好；``--doc``/``--root`` 只在
+    文档不在默认位置时追加，保证默认树里命令最短、别的根目录下也照样能跑。
+    """
+    parts = [
+        "python scripts/append_coordination_row.py",
+        f'--path "{path}"',
+        f'--owner "{owner}"',
+        '--note "§6.1 补登记（pre-commit ④ 拦截）"',
+    ]
+    doc_resolved = Path(doc).resolve()
+    root_resolved = Path(root).resolve()
+    if doc_resolved != (root_resolved / "docs" / "COORDINATION.md").resolve():
+        parts.append(f'--root "{root_resolved}"')
+        try:
+            rel = doc_resolved.relative_to(root_resolved).as_posix()
+        except ValueError:
+            rel = doc_resolved.as_posix()
+        parts.append(f'--doc "{rel}"')
+    return " ".join(parts)
+
+
 def main(argv: Optional[Sequence[str]] = None) -> int:
     parser = argparse.ArgumentParser(description="claim 台账 ↔ COORDINATION.md §6.1 交叉校验")
     parser.add_argument("--doc", default=str(DOC), help="协调文档路径")
@@ -460,6 +488,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                         help="只查暂存文件里的活跃 claim 有没有 §6.1 行（pre-commit 用）")
     args = parser.parse_args(argv)
 
+    cmd_pairs: List[Tuple[str, str, bool]] = []
     try:
         text = Path(args.doc).read_text(encoding="utf-8")
         if args.staged:
@@ -470,7 +499,12 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             active = active_claims_for_paths(
                 staged, marker_dir=Path(args.markers) if args.markers != str(fc.MARKER_DIR) else None)
             pairs = [(p, o) for p, o in active if p in staged]
-            missing, _pats = _uncovered(pairs, rows)
+            missing_pairs, _pats = uncovered_pairs(pairs, rows)
+            missing = [
+                (f"{p} owner={o}（仅目录级登记；代码/共享文档必须逐条）" if pat else
+                 f"{p} owner={o}")
+                for p, o, pat in missing_pairs
+            ]
             # 「先 release 再提交」窗口：释放不等于没发生过，窗口内仍要 §6.1 行。
             # 只对「没有活跃 claim」的暂存路径查，活跃的那批已由上面判过。
             # 协调文档本身豁免：它是登记面而不是被登记对象，否则「提交后删行」
@@ -482,12 +516,16 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 recent = recently_released_claims(
                     Path(args.registry), rest, owner)
             recent_missing, _ = _uncovered([(p, o) for p, o, _t in recent], rows)
+            recent_missing_pairs, _ = uncovered_pairs(
+                [(p, o) for p, o, _t in recent], rows)
             if recent_missing:
                 note = "" if owner else "；提交身份未声明，按任一 owner 匹配"
                 missing = missing + [
                     f"{line}（最近 {RELEASE_WINDOW_S / 60:.0f} 分钟内释放过，release 不消行{note}）"
                     for line in recent_missing
                 ]
+            # 补登命令按 (路径, owner) 生成：与缺失提示同源，不靠正则反解。
+            cmd_pairs = missing_pairs + recent_missing_pairs
             result: Dict[str, Any] = {
                 "ledger_only": missing, "doc_only": [],
                 "rows": len(rows), "active": len(active),
@@ -514,6 +552,15 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                   f"{result['staged_released_missing']} 个")
         for line in result["ledger_only"]:
             print(f"  - {line}")
+        if cmd_pairs:
+            print("[补登记] 窄锁追加一行即可（毫秒级，不需要整文件 claim）；逐条执行：")
+            seen_cmds: Set[str] = set()
+            for path, owner, _pat in cmd_pairs:
+                cmd = append_command(path, owner, Path(args.doc), root)
+                if cmd in seen_cmds:
+                    continue
+                seen_cmds.add(cmd)
+                print(f"  {cmd}")
     else:
         print(f"§6.1 表行：{result['rows']}；未过期 claim：{result['active']}")
         for name, label in (("ledger_only", "台账有、文档无"),
@@ -525,7 +572,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
     if not args.json:
         print("[规矩] 活跃 claim 在提交时就必须已有 §6.1 行：pre-commit ④ 用 --staged "
-              "逐文件拦（0.3s 预算），不靠事后扫全量；最近 60 分钟内被同一 owner "
+              "逐文件拦（补行用窄锁工具，毫秒级），不靠事后扫全量；最近 60 分钟内被同一 owner "
               "释放过的暂存文件同样要行——先 release 再提交不算消行。")
 
     findings = len(result["ledger_only"]) + len(result["doc_only"])

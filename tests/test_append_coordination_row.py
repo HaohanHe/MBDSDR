@@ -15,6 +15,7 @@
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -71,9 +72,15 @@ def _make_files(root: Path, *rel: str) -> None:
 
 
 def _write_claims(locks: Path, pairs: dict[str, tuple[str, float]]) -> None:
-    """直接写台账（与 file_claim.py 的落盘结构一致）：path -> (owner, 心跳年龄秒)。"""
+    """直接写台账 + 占位文件（与 file_claim.py 的落盘结构一致）。
+
+    活跃判据在闸与工具两侧都读**占位文件**（心跳 + TTL），台账 ``current``
+    只是旁证；只写台账会得到「台账有 claim、工具说过期」的假红。
+    """
     now = time.time()
     claims = {}
+    marker_dir = locks / "claims"
+    marker_dir.mkdir(parents=True, exist_ok=True)
     for path, (owner, age) in pairs.items():
         key = path.replace("\\", "/").lower()
         claims[key] = {
@@ -89,6 +96,9 @@ def _write_claims(locks: Path, pairs: dict[str, tuple[str, float]]) -> None:
             },
             "history": [],
         }
+        (marker_dir / f"{hashlib.sha1(key.encode('utf-8')).hexdigest()[:16]}.claim"
+         ).write_text(json.dumps(claims[key]["current"], ensure_ascii=False),
+                      encoding="utf-8")
     locks.mkdir(parents=True, exist_ok=True)
     (locks / "claims.json").write_text(
         json.dumps({"version": 1, "claims": claims}, ensure_ascii=False), encoding="utf-8"

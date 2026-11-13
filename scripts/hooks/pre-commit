@@ -17,9 +17,16 @@
    必须在 `docs/COORDINATION.md` §6.1 已有行（逐条，或对只读批量目录的目录级行）。
    这条以前只能事后扫全量，等发现时已经提交了。**最近 60 分钟内被同一 owner
    持有过又释放的暂存文件同样要行**——否则「先 release 再提交」能在提交前一刻
-   把行要求一起释放掉。预算 `COORD_BUDGET_S`：超过只告警不阻塞（说明原因），
-   因为它是登记一致性检查，不是安全闸；读不到台账也降级为告警——「文件是否被
-   他人占用」由 ② 的 claim_gate fail-closed 保底。
+   把行要求一起释放掉。**缺行即阻塞**（2026-11-13 起）；只有「本步超出
+   `COORD_BUDGET_S` 预算」或「检查脚本/文档/台账不可用」才降级为告警并说明原因，
+   否则工具一坏就完全没法提交。
+
+   2026-11-13 升为**阻塞**：窄锁工具（`scripts/append_coordination_row.py`）
+   把「补一行」的成本从整文件 claim（分钟级）压到 40ms 量级，催行成本的借口
+   没了；缺行就 `return 3`，并把可直接执行的补登命令打在拒绝信息里。
+   **不自动补行**：机器替你写「这行是我占的」，等于代替持有人签名——这行必须
+   由真正占着这个文件的人写。预算从 0.30s 抬到 1.0s，是因为实测检查本身
+   306–346ms，0.30s 几乎永远落进降级支，闸形同告警。
 
 安装：python scripts/install_git_hooks.py
 绕过：git commit --no-verify（会由 post-commit 写入 bypass 日志）
@@ -32,8 +39,83 @@ import time
 from pathlib import Path
 
 MANAGED = "MBDSDR-MANAGED-HOOK pre-commit"
-#: ④ 的耗时预算（秒）：实测 0.22–0.30s；超预算只告警，不阻塞提交。
-COORD_BUDGET_S = 0.30
+#: ④ 的耗时预算（秒）：实测 0.30–0.35s，抬到 1.0s 留出冷启动与文档增长余量。
+#: 超预算仍只告警（降级），但每次运行都记一条趋势（见 `_log_coord_timing`）：
+#: 预算只是把门槛挪远，真正要盯的是「检查自身耗时」有没有随文档增长而上涨。
+COORD_BUDGET_S = 1.0
+#: 趋势记录的探针大小（字节）：每次读固定一段，用来区分「机器忙」与「检查变慢」。
+COORD_PROBE_BYTES = 262144
+
+
+def _locks_dir():
+    env = os.environ.get("MBDSDR_LOCKS_DIR")
+    return Path(env) if env else Path(r"D:\mbdsdr\.locks")
+
+
+def _probe_ms(root):
+    """固定工作量探针：读 256 KiB（优先台账，缺失则读协调文档）。
+
+    返回毫秒。它和 ④ 走同样的磁盘/调度路径，但不随文档结构变化；
+    `elapsed/probe` 比值上升才说明「检查本身变慢」，两者同涨是机器忙。
+    """
+    candidate = _locks_dir() / "claims.json"
+    if not candidate.exists():
+        candidate = root / "docs" / "COORDINATION.md"
+    started = time.perf_counter()
+    try:
+        with candidate.open("rb") as fh:
+            fh.read(COORD_PROBE_BYTES)
+    except OSError:
+        return 0.0
+    return (time.perf_counter() - started) * 1000.0
+
+
+def _recent_ratios(path, limit=20):
+    """趋势文件里最近若干条的 elapsed/probe 比值。"""
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()[-limit:]
+    except OSError:
+        return []
+    out = []
+    for line in lines:
+        try:
+            item = json.loads(line)
+            ratio = float(item.get("ratio") or 0)
+        except (ValueError, TypeError):
+            continue
+        if ratio > 0:
+            out.append(ratio)
+    return out
+
+
+def _log_coord_timing(elapsed_ms, probe_ms, rc):
+    """每次运行都记一条；只在超预算时才说话 = 没有趋势，只有事故。"""
+    path = _locks_dir() / "coord_check_trend.jsonl"
+    ratio = elapsed_ms / probe_ms if probe_ms > 0 else 0.0
+    history = _recent_ratios(path)
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("a", encoding="utf-8") as fh:
+            fh.write(json.dumps({
+                "at": time.time(), "elapsed_ms": round(elapsed_ms, 1),
+                "probe_ms": round(probe_ms, 1), "ratio": round(ratio, 2),
+                "rc": rc,
+            }, ensure_ascii=False) + "\n")
+        # 只留最近 200 条：趋势不需要全史，无限增长的文件本身会拖慢钩子。
+        if path.stat().st_size > 200 * 200:
+            tail = path.read_text(encoding="utf-8").splitlines()[-200:]
+            path.write_text("\n".join(tail) + "\n", encoding="utf-8")
+    except OSError:
+        pass  # 记不下来不影响提交判断
+    print(
+        f"[pre-commit] ④ §6.1 检查 {elapsed_ms:.0f}ms / 预算 "
+        f"{COORD_BUDGET_S * 1000:.0f}ms（探针 {probe_ms:.1f}ms，比值 {ratio:.1f}"
+        + (f"，近 {len(history)} 次中位 {sorted(history)[len(history) // 2]:.1f}"
+           if history else "")
+        + f"；趋势 {path}）"
+    )
+    return history, ratio
+
 
 
 def _git(*args):
@@ -144,30 +226,62 @@ def main():
     )
     if coord.exists():
         sys.stdout.flush()
+        coord_args = [sys.executable, str(coord), "--staged"]
+        # 只为可测性：临时树里跑钩子时，把文档/台账/占位目录指到别处。
+        for env_name, flag in (
+            ("MBDSDR_COORD_DOC", "--doc"),
+            ("MBDSDR_COORD_REGISTRY", "--registry"),
+            ("MBDSDR_COORD_MARKERS", "--markers"),
+        ):
+            value = os.environ.get(env_name)
+            if value:
+                coord_args += [flag, value]
         started = time.perf_counter()
-        proc = subprocess.run([sys.executable, str(coord), "--staged"], cwd=str(root))
+        proc = subprocess.run(coord_args, cwd=str(root))
         elapsed = time.perf_counter() - started
+        probe = _probe_ms(root)
+        history, ratio = _log_coord_timing(elapsed * 1000.0, probe, proc.returncode)
+        # 预算内的耗时不等于「没问题」：贴近预算时要能分清是检查自身变慢，
+        # 还是整台机器忙。比值（检查耗时/固定探针）只随检查本身变化。
+        if history and elapsed >= 0.75 * COORD_BUDGET_S:
+            median = sorted(history)[len(history) // 2]
+            if ratio > median * 1.6:
+                print(f"[pre-commit] ④ 接近预算：比值 {ratio:.1f} 是近 {len(history)} 次"
+                      f"中位 {median:.1f} 的 {ratio / median:.1f} 倍 → 检查自身变慢"
+                      "（文档增长/台账变大），不是机器忙。")
+            else:
+                print(f"[pre-commit] ④ 接近预算：比值 {ratio:.1f} 与中位 {median:.1f} 同处"
+                      "高位 → 机器整体变慢（探针同比上升），检查本身没退化。")
         if proc.returncode == 3:
             if elapsed <= COORD_BUDGET_S:
                 print(
                     f"[pre-commit] 拒绝提交：活跃 claim 在 docs/COORDINATION.md §6.1 缺行"
                     f"（见上，本步 {elapsed:.2f}s）。"
                 )
-                print("[pre-commit] 补「文件 | 线名 | 开始时间 | 预计提交 hash」后重试；")
-                print("[pre-commit] 目录级行只对 docs/<子目录>/** 只读批量成立，")
-                print("[pre-commit] 代码根与 docs 顶层共享文档必须逐条。")
+                print("[pre-commit] 上面 [补登记] 列的每条命令就是补法：窄锁追加一行，"
+                      "毫秒级，不需要整文件 claim。")
+                print("[pre-commit] 目录级行只对 docs/<子目录>/** 只读批量成立，"
+                      "代码根与 docs 顶层共享文档必须逐条。")
+                print("[pre-commit] 本钩子**不会**替你自动写这行：机器写「这行是我占的」"
+                      "等于代签，登记行必须由真正占着该文件的人写。")
+                print("[pre-commit] 若补登记工具本身不可用（锁文件不可写/文档路径不存在/"
+                      "台账读不了），那是工具坏了不是提交不合格：可用 git commit --no-verify")
+                print("[pre-commit]   绕过（post-commit 会留 bypass 记录），并在事故卡登记工具故障。")
                 return 3
             print(
                 f"[pre-commit] 警告：§6.1 缺行，但本步 {elapsed:.2f}s 超 "
-                f"{COORD_BUDGET_S:.2f}s 预算，本次不阻塞（补上台账，下笔会再拦）。"
+                f"{COORD_BUDGET_S:.2f}s 预算，本次降级为告警（补上台账，下笔会再拦）。"
             )
         elif proc.returncode != 0:
             print(
                 f"[pre-commit] 警告：协调台账检查退出 {proc.returncode}"
-                "（读不到台账/文档），本步不阻塞；文件占用由 claim_gate fail-closed 保底。"
+                "（文档/台账读不到或路径不对），本步降级为告警，**不拦提交**；"
+                "文件占用由 claim_gate fail-closed 保底。"
             )
+            print("[pre-commit] 若这是路径/权限问题，修好后再提交；期间闸门对 §6.1 不设防。")
     else:
-        print("[pre-commit] 警告：找不到 check_claim_coordination.py，跳过 §6.1 登记检查。")
+        print("[pre-commit] 警告：找不到 check_claim_coordination.py，"
+              "§6.1 登记检查本步降级为不执行（不拦提交）。")
 
     tree = _git("write-tree")
     if tree.returncode != 0:

@@ -22,7 +22,10 @@
 写入前仍要过 §6.1 的字段检查，任一不过直接拒绝且**不改动文件**：
 * ``--path`` 可解析（相对仓库根、不允许绝对路径与 ``..``），且文件存在；
   支持 ``docs/{a,b}.md`` 花括号组，组内每个文件都要能被台账对上；
-* ``--owner`` 与台账**活跃 claim** 的 owner 一致（不区分大小写）；
+* ``--owner`` 与台账**活跃 claim** 的 owner 一致（不区分大小写）；没有活跃
+  claim 时，接受「同一 owner 在 ``claim_window.RELEASE_WINDOW_S``（60 分钟）内
+  释放过」——这一条与 pre-commit ④ 的判据是**同一个函数**，否则闸要求补行、
+  工具却拒收，人只能 ``--no-verify`` 绕过；
 * ``--note`` 非空、不含 ``|`` 与换行（否则会把表格写坏）。
 
 用法::
@@ -37,12 +40,17 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import sys
 import time
 from pathlib import Path
 from typing import Iterable, List, Tuple
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import file_claim as fc  # noqa: E402  （占位文件名/只读窥视，与闸同一来源）
+from claim_window import RELEASE_WINDOW_S, window_release  # noqa: E402
 
 DEFAULT_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_DOC = "docs/COORDINATION.md"
@@ -111,17 +119,24 @@ def _load_registry(registry: Path) -> dict:
     return data
 
 
-def _active_owner(data: dict, path: str, now: float) -> str:
-    """返回该路径活跃 claim 的 owner；没有活跃 claim 返回空串。"""
-    entry = (data.get("claims") or {}).get(_norm(path)) or {}
-    cur = entry.get("current") or {}
-    if not cur:
+def _active_owner(locks: Path, path: str, now: float) -> str:
+    """该路径活跃 claim 的 owner；没有活跃 claim 返回空串。
+
+    判活读**占位文件**（心跳 + TTL），与 pre-commit ④ 完全同一来源。台账
+    ``current`` 只是旁证：用它判活会出现「闸说有活跃 claim、工具说没有」，
+    照着拒绝信息补行反而补不上。
+    """
+    # 命名必须是 file_claim._marker_for 那一个（sha1(规范化路径)[:16].claim）；
+    # 这里按 --root 推导锁目录，避免 MBDSDR_LOCKS_DIR 未设时读到另一棵树。
+    digest = hashlib.sha1(_norm(path).encode("utf-8")).hexdigest()[:16]
+    payload = fc._peek_marker(locks / "claims" / f"{digest}.claim")
+    if not payload:
         return ""
-    heartbeat = float(cur.get("heartbeat_at") or cur.get("acquired_at") or 0)
-    ttl_s = float(cur.get("ttl_min") or 0) * 60
+    heartbeat = float(payload.get("heartbeat_at") or payload.get("acquired_at") or 0)
+    ttl_s = float(payload.get("ttl_min") or 0) * 60
     if not ttl_s or now - heartbeat > ttl_s:
         return ""
-    return str(cur.get("owner") or "")
+    return str(payload.get("owner") or "")
 
 
 def validate(root: Path, registry: Path, raw_paths: str, owner: str, note: str) -> List[str]:
@@ -151,11 +166,26 @@ def validate(root: Path, registry: Path, raw_paths: str, owner: str, note: str) 
         if not (root / path).exists():
             errors.append(f"路径不存在：{path}")
             continue
-        claimed = _active_owner(data, path, time.time())
-        if not claimed:
-            errors.append(f"台账里没有活跃 claim：{path}（先 file_claim.py claim，或等接管）")
-        elif _norm(claimed) != _norm(owner):
-            errors.append(f"owner 不一致：{path} 的活跃 claim 属于 {claimed!r}，不是 {owner!r}")
+        now = time.time()
+        claimed = _active_owner(registry.parent, path, now)
+        if claimed:
+            if _norm(claimed) != _norm(owner):
+                errors.append(
+                    f"owner 不一致：{path} 的活跃 claim 属于 {claimed!r}，不是 {owner!r}")
+            continue
+        # 与 pre-commit ④ 同一个窗口判定（claim_window.window_release）。
+        entry = (data.get("claims") or {}).get(_norm(path)) or {}
+        if window_release(entry, owner, now) is not None:
+            continue
+        other = window_release(entry, "", now)
+        if other is not None:
+            errors.append(
+                f"{path} 最近 {RELEASE_WINDOW_S / 60:.0f} 分钟内被 {other[0]!r} 释放，"
+                f"不是 {owner!r}（release 不消行；换对 owner，或等窗口过期）")
+        else:
+            errors.append(
+                f"台账里既没有活跃 claim、也没有最近 {RELEASE_WINDOW_S / 60:.0f} 分钟内的"
+                f"释放记录：{path}（先 file_claim.py claim，或等接管）")
     return errors
 
 
