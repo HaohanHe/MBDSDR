@@ -366,8 +366,60 @@ def classify(text: str, root: Path, heading: str = "", baseline: str = "") -> Cl
     return c
 
 
-def iter_claim_lines(docs_root: Path, recursive: bool = False) -> List[tuple]:
+def _doc_sources(docs_root: Path, recursive: bool, root: Optional[Path],
+                 source: str) -> List[tuple]:
+    """(相对路径, 行列表) 列表；决定「被评审的文档正文从哪取」。
+
+    ``source="worktree"``（默认）读磁盘文件；``source="head"`` 只读
+    ``git ls-tree HEAD`` 列出的文档 + ``git show HEAD:<path>``，工作区里
+    别人的在途改动不参与评审——「以工作区计算的 PASS 不算通过」。
+    """
+    if source == "head":
+        base = Path(root) if root else docs_root.parent
+        rel_docs = docs_root.relative_to(base).as_posix()
+        proc = _git(base, ["ls-tree", "-r", "--name-only", "HEAD", "--", rel_docs])
+        if proc is None or proc.returncode != 0:
+            return []
+        picked: List[tuple] = []
+        for rel in sorted(proc.stdout.splitlines()):
+            rel = rel.strip()
+            if not rel or not rel.endswith(".md"):
+                continue
+            parts = rel.split("/")
+            if parts[-1] in EXCLUDE_FILES:
+                continue
+            if any(part in EXCLUDE_DIRS for part in parts[:-1]):
+                continue
+            if not recursive and "/" in "/".join(parts[1:]):
+                continue
+            blob = _git(base, ["show", f"HEAD:{rel}"])
+            if blob is None or blob.returncode != 0:
+                continue
+            picked.append((rel, blob.stdout.splitlines()))
+        return picked
+
+    pattern = "**/*.md" if recursive else "*.md"
+    picked = []
+    for p in sorted(docs_root.glob(pattern)):
+        if p.name in EXCLUDE_FILES:
+            continue
+        if any(part in EXCLUDE_DIRS for part in p.parts):
+            continue
+        try:
+            lines = p.read_text(encoding="utf-8", errors="ignore").splitlines()
+        except OSError:
+            continue
+        picked.append((p.relative_to(docs_root.parent).as_posix(), lines))
+    return picked
+
+
+def iter_claim_lines(docs_root: Path, recursive: bool = False,
+                     root: Optional[Path] = None,
+                     source: str = "worktree") -> List[tuple]:
     """返回 (相对路径, 行号, 文本, 最近标题, 坐标基准)；跳过围栏与 $ 证据命令。
+
+    ``source="head"`` 时正文取自 HEAD 树（见 :func:`_doc_sources`），
+    条目集合与字面量都不受工作区在途改动影响。
 
     坐标基准的优先级：本行 ``（基准 `abc1234`）`` > 最近标题里的同写法 >
     文件首部 ``<!-- line-baseline: abc1234 -->``；都没有则为空串（第 4 步按
@@ -377,20 +429,11 @@ def iter_claim_lines(docs_root: Path, recursive: bool = False) -> List[tuple]:
     ``--recursive`` 才下沉到 docs/learn 等历史子目录。
     """
     out: List[tuple] = []
-    pattern = "**/*.md" if recursive else "*.md"
-    for p in sorted(docs_root.glob(pattern)):
-        if p.name in EXCLUDE_FILES:
-            continue
-        if any(part in EXCLUDE_DIRS for part in p.parts):
-            continue
+    for rel, lines in _doc_sources(docs_root, recursive, root, source):
         in_fence = False
         heading = ""
         heading_baseline = ""
         doc_baseline = ""
-        try:
-            lines = p.read_text(encoding="utf-8", errors="ignore").splitlines()
-        except OSError:
-            continue
         for raw in lines[:20]:
             m = DOC_BASELINE_RE.search(raw)
             if m:
@@ -411,16 +454,17 @@ def iter_claim_lines(docs_root: Path, recursive: bool = False) -> List[tuple]:
             if CLAIM_RE.search(s):
                 m = BASELINE_RE.search(s)
                 baseline = m.group(1) if m else (heading_baseline or doc_baseline)
-                out.append((p.relative_to(docs_root.parent).as_posix(), i, s, heading, baseline))
+                out.append((rel, i, s, heading, baseline))
     return out
 
 
 def verify_docs(root: Path = ROOT, docs_root: Optional[Path] = None,
-                recursive: bool = False) -> List[Claim]:
+                recursive: bool = False, source: str = "worktree") -> List[Claim]:
     root = Path(root)
     docs_root = Path(docs_root) if docs_root else root / "docs"
     claims: List[Claim] = []
-    for rel, line, text, heading, baseline in iter_claim_lines(docs_root, recursive):
+    for rel, line, text, heading, baseline in iter_claim_lines(
+            docs_root, recursive, root, source):
         c = classify(text, root, heading, baseline)
         c.doc, c.line = rel, line
         claims.append(c)
@@ -830,6 +874,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     ap.add_argument("--docs", default=None, help="文档目录，默认 <root>/docs")
     ap.add_argument("--recursive", action="store_true",
                     help="下沉到 docs 子目录（含 docs/learn 历史档）")
+    ap.add_argument("--head", action="store_true",
+                    help="文档正文取自 HEAD 树（git show HEAD:<path>），工作区在途改动不参与评审")
     ap.add_argument("--json", default=None)
     ap.add_argument("--fail-on-unverified", action="store_true")
     ap.add_argument("--check-lines", action="store_true",
@@ -856,7 +902,9 @@ def main(argv: Optional[List[str]] = None) -> int:
     waivers, waiver_errors = load_waivers(waivers_path)
     # 白名单清零 → 自动转严格：临时放宽必须有账，账清了闸门自己合上。
     strict = args.strict_lines or (args.check_lines and not waivers)
-    claims = verify_docs(root, Path(args.docs) if args.docs else None, args.recursive)
+    claims = verify_docs(root, Path(args.docs) if args.docs else None, args.recursive,
+                         "head" if args.head else "worktree")
+    print(f"评审对象：{'HEAD 树（--head，工作区不计）' if args.head else '工作区文件'}")
     print_report(claims)
     rows: List[LineCheck] = []
     open_problems: List[LineCheck] = []

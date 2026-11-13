@@ -62,6 +62,31 @@ def test_missing_hash_is_unverified(tmp_path):
     assert claims[0].status == vc.NO_HASH
 
 
+def test_head_mode_does_not_count_worktree_only_claim(tmp_path):
+    """反证：只有工作区才成立的四元组，--head 下不得算绿。
+
+    HEAD 里的文档只有一句无 hash 的断言；工作区把同一句改成带真 hash 的完整
+    四元组。默认（工作区）判 OK，--head（HEAD 正文）必须仍判「无 hash」——
+    两者结果必须不同，否则「以工作区计算的 PASS」就会被当成通过。
+    """
+    repo, h = _repo(tmp_path, {"src/foo.py": "MAGIC_TOKEN = 42\n",
+                               "docs/claim.md": "- 已修复：采样率口径统一\n"})
+    _write_doc(repo, f"- 已修复 — `{h}` — src/foo.py:1 — `MAGIC_TOKEN`\n")
+    worktree = [c.status for c in vc.verify_docs(repo, repo / "docs")]
+    head = [c.status for c in vc.verify_docs(repo, repo / "docs", source="head")]
+    assert worktree == [vc.OK]
+    assert head == [vc.NO_HASH]
+    assert worktree != head
+
+
+def test_head_mode_skips_untracked_doc(tmp_path):
+    """未跟踪的文档在 --head 下不存在，不得进入断言集合。"""
+    repo, _ = _repo(tmp_path, {"src/foo.py": "MAGIC_TOKEN = 42\n"})
+    _write_doc(repo, "- 已修复：采样率口径统一\n")
+    assert len(vc.verify_docs(repo, repo / "docs")) == 1
+    assert vc.verify_docs(repo, repo / "docs", source="head") == []
+
+
 def test_hash_not_touching_path_is_stale(tmp_path):
     repo, h = _repo(tmp_path, {"src/foo.py": "MAGIC_TOKEN = 42\n"})
     _write_doc(repo, f"- 已修复 — `{h}` — src/bar.py:1 — `MAGIC_TOKEN`\n")
