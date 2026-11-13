@@ -133,6 +133,48 @@ def _root():
     return Path(proc.stdout.strip()) if proc.returncode == 0 else Path.cwd()
 
 
+def _declared_identity():
+    """本进程的提交者身份：与 claim 闸同源（环境变量优先，其次 git config）。"""
+    owner = (os.environ.get("MBDSDR_CLAIM_OWNER") or "").strip()
+    if owner:
+        return owner
+    proc = _git("config", "mbdsdr.owner")
+    return proc.stdout.strip() if proc.returncode == 0 else ""
+
+
+def _index_claim_hints(names):
+    """逐条打印暂存路径在台账里的**当前** owner；只提示，不改退出码。
+
+    只认 ``current``：``history`` 里的 owner 是「曾经有人占过」，不等于现在
+    占着——``safe_commit`` 的 ``[warn]`` 用的是同一判据。台账读不到时只打一行
+    提示，后面的闸门与退出码完全不受影响。
+    """
+    registry = _locks_dir() / "claims.json"
+    try:
+        data = json.loads(registry.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        print("[index] 台账不可读，跳过归属提示。")
+        return
+    by_path = {}
+    for entry in (data.get("claims") or {}).values():
+        if isinstance(entry, dict) and entry.get("path"):
+            by_path[str(entry["path"]).replace("\\", "/").casefold()] = entry
+    me = _declared_identity()
+    for name in names:
+        entry = by_path.get(name.replace("\\", "/").casefold()) or {}
+        current = entry.get("current")
+        owner = ""
+        if isinstance(current, dict) and current.get("owner"):
+            owner = str(current["owner"])
+        if not owner:
+            print(f"[index] 无 claim 记录：{name}")
+        elif me and owner == me:
+            continue
+        else:
+            print(f"[index] 他人占用中：{name}（owner: {owner}）")
+
+
+
 def main():
     root = _root()
     scope = Path(os.environ.get("MBDSDR_SCOPE_SCRIPT") or root / "scripts" / "check_commit_scope.py")
@@ -147,6 +189,9 @@ def main():
         # 让一笔真提交被消费方误判为「已审计」（2026-11-12，98d95982 实例）。
         print("[pre-commit] 暂存内容为空，不写闸门标记。")
         return 0
+
+    # 归属提示：只打印，不参与退出码。此时还没跑 ①~⑤，被闸门拒的提交也能看到。
+    _index_claim_hints(names)
 
     if not scope.exists():
         print(f"[pre-commit] 拒绝：找不到 {scope}，无法执行 claim 闸门。")

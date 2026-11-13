@@ -2128,6 +2128,10 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `docs/incidents/2026-11-13-safe-commit-swept-inflight-work.md` | 收尸线/6ae85f56（3 条无凭据收口：theme json 直接引用、qgis 旁证链、axioms init 无内容差异） | 2026-11-13 21:21 | 本笔 |
 | `scripts/verify_claims.py` | 文档引用复核线/6ae85f56（口径缺口（非新功能）：新增 --head，文档正文取自 HEAD 树（git ls-tree/git show），工作区在途改动不参与评审） | 2026-11-13 21:27 | 本笔 |
 | `tests/test_verify_claims.py` | 文档引用复核线/6ae85f56（口径缺口反证两条：工作区独有的四元组在 --head 下判无 hash；未跟踪文档不进断言集） | 2026-11-13 21:27 | 本笔 |
+| `docs/evidence-standard.md` | 归属证据线/6ae85f56（裁定二：§9 归属证据等级（§6.1 owner 是台账投影）） | 2026-11-13 21:28 | 本笔 |
+| `scripts/hooks/pre-commit` | 归属证据线/6ae85f56（裁定三：index 归属提示（只提示不改退出码）） | 2026-11-13 21:28 | 本笔 |
+| `tests/test_precommit_index_hint.py` | 归属证据线/6ae85f56（裁定三：提示的 2 条反证用例） | 2026-11-13 21:28 | 本笔 |
+| `scripts/safe_commit.py` | 归属证据线/6ae85f56（e376e16b 规则边界注释） | 2026-11-13 21:28 | 本笔 |
 
 > 上表各行均由 `claim` 台账推导：owner 原文与 `acquired_at` 直接取自台账，
 > 目的优先用台账里的 `claim_reason`，没有就如实写「未声明」，不补编。时间列只是
