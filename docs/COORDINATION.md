@@ -1871,6 +1871,18 @@ No supported devices found），GNSS+SDR 同开复验没做成；离线那次
 | 文件 | 线名 | 开始时间 | 预计提交 hash |
 |---|---|---|---|
 | _（空）_ | | | |
+| `docs/COORDINATION.md` | 星下点轨迹线/6ae85f56（本笔 §6.1 登记行，提交后释放） | 2026-11-13 19:24 | 本笔 |
+| `mbdsdr_ai/orbit.py` | 星下点轨迹线/6ae85f56（P0：WGS-72 入口改名 + 反解 + teme_to_ecef_km） | 2026-11-13 19:13 | 本笔 |
+| `mbdsdr_ai/geodesy.py` | 星下点轨迹线/6ae85f56（P0：WGS-84 入口改名 llh_to_ecef_m） | 2026-11-13 19:13 | 本笔 |
+| `mbdsdr_ai/ground_track.py` | 星下点轨迹线/6ae85f56（星下点/地面轨迹/覆盖圈） | 2026-11-13 19:24 | 本笔 |
+| `desktop/sat_track_panel.py` | 星下点轨迹线/6ae85f56（地面轨迹折叠分组） | 2026-11-13 19:13 | 本笔 |
+| `desktop/sat_ground_map.py` | 星下点轨迹线/6ae85f56（复用 OsmMapView 图层） | 2026-11-13 19:24 | 本笔 |
+| `tests/gpredict_test.py` | 星下点轨迹线/6ae85f56（改名调用点） | 2026-11-13 19:13 | 本笔 |
+| `tests/rtklib_test.py` | 星下点轨迹线/6ae85f56（改名调用点） | 2026-11-13 19:13 | 本笔 |
+| `tests/test_rtcm3.py` | 星下点轨迹线/6ae85f56（改名调用点） | 2026-11-13 19:13 | 本笔 |
+| `tests/test_ground_track.py` | 星下点轨迹线/6ae85f56（对拍/几何/反证） | 2026-11-13 19:24 | 本笔 |
+| `tests/test_ellipsoid_boundary.py` | 星下点轨迹线/6ae85f56（椭球对照） | 2026-11-13 19:24 | 本笔 |
+| `tests/test_sat_ground_map.py` | 星下点轨迹线/6ae85f56（图层绘制） | 2026-11-13 19:24 | 本笔 |
 | `tests/test_status_panel_squelch_units.py` | K20同类收口线/6ae85f56（静态守卫改按类名定位 SDRStatus 定义文件并补反证） | 2026-11-13 07:13 | 本笔 |
 | `docs/COORDINATION.md` | K20同类收口线/6ae85f56（本笔两行的 §6.1 登记） | 2026-11-13 07:13 | 本笔 |
 | `desktop/status_panel.py` | K20同类收口线/6ae85f56（断开时清掉残留增益告警 tooltip） | 2026-11-13 07:05 | 本笔 |

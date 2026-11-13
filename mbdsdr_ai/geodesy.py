@@ -43,12 +43,16 @@ FE_WGS84 = 1.0 / 298.257223563
 # CoordinateConverter —— 
 # ============================================================
 class CoordinateConverter:
-    """ECEF(地心地固直角) <-> LLH(经纬高) <-> ENU(站心东北天)。WGS84 椭球。"""
+    """ECEF(地心地固直角) <-> LLH(经纬高) <-> ENU(站心东北天)。
+
+    全类固定 **WGS-84 椭球、长度单位米**；卫星轨道链
+    （``orbit.wgs72_*``）是 WGS-72 + km，禁止混用。
+    """
 
  # ----  ecef2pos() ----
     @staticmethod
     def ecef_to_llh(x: float, y: float, z: float) -> Tuple[float, float, float]:
-        """ECEF(m) -> (lat[rad], lon[rad], h[m])。 ecef2pos()。
+        """WGS-84 / 米：ECEF(m) -> (lat[rad], lon[rad], h[m])。 ecef2pos()。
 
         WGS84 逆解用 Bowring 迭代（），1e-4 m 内收敛。
         """
@@ -74,8 +78,12 @@ class CoordinateConverter:
 
  # ----  pos2ecef() ----
     @staticmethod
-    def llh_to_ecef(lat: float, lon: float, h: float) -> Tuple[float, float, float]:
-        """(lat[rad], lon[rad], h[m]) -> ECEF(m)。 pos2ecef()。"""
+    def llh_to_ecef_m(lat: float, lon: float, h: float) -> Tuple[float, float, float]:
+        """WGS-84 / 米：(lat[rad], lon[rad], h[m]) -> ECEF(m)。 pos2ecef()。
+
+        名字里的 ``_m`` 是硬边界；卫星链请用
+        ``orbit.wgs72_geodetic_to_ecef_km``（WGS-72、km）。
+        """
         a = RE_WGS84
         f = FE_WGS84
         e2 = f * (2.0 - f)

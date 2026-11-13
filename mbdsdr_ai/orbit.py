@@ -188,8 +188,13 @@ def _gmst_days(jd_ut1: float) -> float:
     return gmst_rad % (2.0 * math.pi)
 
 
-def geodetic_to_ecef(lat_deg: float, lon_deg: float, alt_km: float) -> Tuple[float, float, float]:
-    """WGS-72 大地坐标 -> ECEF (km)。椭球与 SGP4 输出一致。"""
+def wgs72_geodetic_to_ecef_km(lat_deg: float, lon_deg: float,
+                              alt_km: float) -> Tuple[float, float, float]:
+    """WGS-72 椭球：大地坐标(°,°,km) -> ECEF (km)。与 SGP4/TEME 同族。
+
+    禁止与 ``geodesy.CoordinateConverter.llh_to_ecef_m``（WGS-84、米）
+    互相转发；两者差约米级且不会报错。反解见 :func:`wgs72_ecef_km_to_llh`。
+    """
     lat = math.radians(lat_deg)
     lon = math.radians(lon_deg)
     sin_lat = math.sin(lat)
@@ -199,6 +204,50 @@ def geodetic_to_ecef(lat_deg: float, lon_deg: float, alt_km: float) -> Tuple[flo
     y = (n + alt_km) * cos_lat * math.sin(lon)
     z = (n * (1.0 - WGS72_E2) + alt_km) * sin_lat
     return x, y, z
+
+
+def wgs72_ecef_km_to_llh(x: float, y: float, z: float
+                         ) -> Tuple[float, float, float]:
+    """WGS-72 椭球坐标反解：ECEF (km) -> (lat_deg, lon_deg, alt_km)。
+
+    与 ``wgs72_geodetic_to_ecef_km`` 严格互逆；与 WGS-84 的
+    ``CoordinateConverter.ecef_to_llh``（米）不是同一条链。
+    """
+    a = WGS72_A
+    e2 = WGS72_E2
+    r2 = x * x + y * y
+    lon = math.atan2(y, x)
+    if r2 < 1e-12:
+        lat = math.pi / 2.0 if z >= 0 else -math.pi / 2.0
+        return math.degrees(lat), 0.0, abs(z) - WGS72_B
+    # Bowring 迭代：与 geodesy.ecef_to_llh 同一算法，仅椭球/单位不同。
+    zk = 0.0
+    v = a
+    zz = z
+    while abs(zz - zk) >= 1e-9:       # 1e-9 km = 1 µm
+        zk = zz
+        sinp = zz / math.sqrt(r2 + zz * zz)
+        v = a / math.sqrt(1.0 - e2 * sinp * sinp)
+        zz = z + v * e2 * sinp
+    lat = math.atan2(zz, math.sqrt(r2))
+    h = math.sqrt(r2 + zz * zz) - v
+    return math.degrees(lat), math.degrees(lon), h
+
+
+def _rotate_teme_to_ecef(v: Tuple[float, float, float], gmst: float
+                         ) -> Tuple[float, float, float]:
+    """TEME -> ECEF：绕 z 轴转 -GMST（供位置与速度共用同一旋转）。"""
+    cg, sg = math.cos(-gmst), math.sin(-gmst)
+    return (cg * v[0] - sg * v[1], sg * v[0] + cg * v[1], v[2])
+
+
+def teme_to_ecef_km(r_teme: Tuple[float, float, float], jd_utc: float
+                    ) -> Tuple[float, float, float]:
+    """WGS-72/TEME 卫星位置 (km) -> ECEF (km)，只做 GMST 旋转。
+
+    星下点/地面轨迹必须走这条（与 SGP4 同族），不要接 WGS-84 的米制链。
+    """
+    return _rotate_teme_to_ecef(r_teme, _gmst_days(jd_utc))
 
 
 def tle_epoch_iso(line1: str) -> str:
@@ -334,7 +383,7 @@ def _state_from_satrec(
     vy += -OMEGA_E * r_ecef[0]   # - (Ω×r)_y = -ω·x
     v_ecef = (vx, vy, v_teme[2])
     # 站 ECEF（WGS-72 椭球，与 SGP4 一致）
-    s_ecef = geodetic_to_ecef(observer_lat, observer_lon, observer_alt)
+    s_ecef = wgs72_geodetic_to_ecef_km(observer_lat, observer_lon, observer_alt)
     # 站心矢量
     rx_s = r_ecef[0] - s_ecef[0]
     ry_s = r_ecef[1] - s_ecef[1]
@@ -406,7 +455,7 @@ def compute_satellite_state(
     Parameters
     ----------
     observer_alt :
-        观测站海拔，**公里**——内部 ``geodetic_to_ecef`` 走 WGS-72、与
+        观测站海拔，**公里**——内部 ``wgs72_geodetic_to_ecef_km`` 走 WGS-72、与
         sgp4/TEME 同为 km 量纲。站址配置（``GroundStation`` / ``StationFix``）
         存的是**米**，调用方必须先 ``/1000.0``。传米会把站址抬高 1000 倍：
         仰角错到几十度、升起时刻错到小时级，而高度恰好为 0 时完全看不出来
@@ -739,7 +788,7 @@ def predict_passes(
     """预测未来 hours 小时内的卫星过境事件（列表兼容接口）。
 
     ``observer_alt`` 单位是**公里**（与 ``compute_satellite_state`` /
-    ``geodetic_to_ecef`` 同一 WGS-72 km 口径）。站址配置存米，调用方先
+    ``wgs72_geodetic_to_ecef_km`` 同一 WGS-72 km 口径）。站址配置存米，调用方先
     ``/1000.0``——传米会把站址抬到几百公里，仰角与升起时刻全错。
 
     ``start_unix`` 显式 UTC 秒；缺省取 TimeEngine。引擎不可用时抛

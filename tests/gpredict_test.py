@@ -117,7 +117,7 @@ def test_coordinate_az_el():
         gmst = O._gmst_days(jd)
         cg, sg = math.cos(-gmst), math.sin(-gmst)
         re = (cg * rl[0] - sg * rl[1], sg * rl[0] + cg * rl[1], rl[2])
-        se = O.geodetic_to_ecef(39.9, 116.4, 0.0)
+        se = O.wgs72_geodetic_to_ecef_km(39.9, 116.4, 0.0)
         dx, dy, dz = re[0] - se[0], re[1] - se[1], re[2] - se[2]
         dist = math.sqrt(dx * dx + dy * dy + dz * dz)
         lat, lon = math.radians(39.9), math.radians(116.4)

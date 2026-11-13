@@ -335,6 +335,52 @@ class SatTrackPanel(QFrame):
         cd_box.toggled.connect(self._sync_countdown_timer)
         root.addWidget(cd_box)
 
+        # ---- 星下点 / 地面轨迹 / 覆盖圈 ----
+        # 复用公用 OSM 地图（osm_map.OsmMapView.add_layer），本面板不画底图。
+        # 地图控件懒创建：不展开就不建、更不去拉瓦片。
+        ground_box = _CollapsibleGroupBox("地面轨迹 / 覆盖圈")
+        self._ground_box = ground_box
+        self._make_collapsible(ground_box, "地面轨迹 / 覆盖圈", 3, "satGroundBox")
+        gform = QFormLayout(ground_box)
+        self.ground_minutes_spin = QDoubleSpinBox()
+        self.ground_minutes_spin.setRange(10.0, 180.0)
+        self.ground_minutes_spin.setDecimals(0)
+        self.ground_minutes_spin.setSingleStep(10.0)
+        self.ground_minutes_spin.setSuffix(" min")
+        self.ground_minutes_spin.setValue(90.0)
+        self.ground_minutes_spin.setToolTip(
+            "向后推算多长时间的地面轨迹；默认 90 min 覆盖近地轨道一整圈")
+        gform.addRow("轨迹窗口:", self.ground_minutes_spin)
+        self.ground_elev_spin = QDoubleSpinBox()
+        self.ground_elev_spin.setRange(0.0, 60.0)
+        self.ground_elev_spin.setDecimals(0)
+        self.ground_elev_spin.setSingleStep(1.0)
+        self.ground_elev_spin.setSuffix(" °")
+        self.ground_elev_spin.setValue(5.0)
+        self.ground_elev_spin.setToolTip(
+            "覆盖圈按此最小仰角绘制；门限越高，覆盖半径越小")
+        gform.addRow("最小仰角:", self.ground_elev_spin)
+        self.ground_hint = QLabel("展开后按当前星历计算星下点与覆盖圈")
+        self.ground_hint.setWordWrap(True)
+        self.ground_hint.setMinimumWidth(0)
+        self.ground_hint.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
+        self.ground_hint.setStyleSheet(
+            "color: " + tokens().text("tertiary") + "; font-size: 8.5pt;")
+        gform.addRow(self.ground_hint)
+        self.ground_refresh_btn = QPushButton("计算轨迹")
+        self.ground_refresh_btn.setToolTip(
+            "按当前星历重算星下点、地面轨迹与覆盖圈；不自动联网刷新")
+        self.ground_refresh_btn.clicked.connect(self._on_ground_refresh_clicked)
+        gform.addRow(self.ground_refresh_btn)
+        self._ground_map = None
+        self._ground_form = gform
+        ground_box.toggled.connect(self._on_ground_toggled)
+        self.ground_minutes_spin.valueChanged.connect(
+            self._on_ground_params_changed)
+        self.ground_elev_spin.valueChanged.connect(
+            self._on_ground_params_changed)
+        root.addWidget(ground_box)
+
         root.addStretch(1)
 
     # ------------------------------------------------- TLE 更新（宿主驱动）
@@ -827,3 +873,45 @@ class SatTrackPanel(QFrame):
 
     def _on_stop_clicked(self):
         self.stop_requested.emit()
+
+    # ------------------------------------------- 星下点 / 地面轨迹 / 覆盖圈
+    def _on_ground_toggled(self, checked: bool) -> None:
+        if checked:
+            self._refresh_ground_view()
+
+    def _on_ground_refresh_clicked(self, _checked: bool = False) -> None:
+        self._refresh_ground_view()
+
+    def _on_ground_params_changed(self, _value: float = 0.0) -> None:
+        if self._ground_box.isChecked():
+            self._refresh_ground_view()
+
+    def _ensure_ground_map(self):
+        """懒创建地图控件：展开时才 import/建图，失败给一句人话。"""
+        if self._ground_map is not None:
+            return self._ground_map
+        try:
+            from sat_ground_map import SatelliteGroundMap
+        except ImportError as exc:      # 缺 QtNetwork 等可选依赖
+            self.ground_hint.setText(f"地图不可用：{type(exc).__name__}")
+            return None
+        self._ground_map = SatelliteGroundMap(self)
+        self._ground_form.addRow(self._ground_map)
+        return self._ground_map
+
+    def _refresh_ground_view(self) -> None:
+        """按当前选中卫星重算并重绘；失败如实写原因，不画假轨迹。"""
+        name = self.current_satellite_name()
+        if not name:
+            self.ground_hint.setText("先选择一颗卫星，再展开地面轨迹")
+            return
+        view = self._ensure_ground_map()
+        if view is None:
+            return
+        self.ground_hint.setText("正在按当前星历计算…")
+        ok = view.update_satellite(
+            name,
+            minutes=float(self.ground_minutes_spin.value()),
+            min_elevation_deg=float(self.ground_elev_spin.value()))
+        self.ground_hint.setText(
+            view.summary_text if ok else f"无法计算：{view.error_text}")

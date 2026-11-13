@@ -271,7 +271,7 @@ class TestMSM7:
 def _place_satellites(lat0_deg, lon0_deg, h0_m, rsat=26500000.0):
     """在真实接收机周围布置 6 颗 GPS 卫星（合成）。"""
     lat, lon = math.radians(lat0_deg), math.radians(lon0_deg)
-    rr_true = np.array(CoordinateConverter.llh_to_ecef(lat, lon, h0_m))
+    rr_true = np.array(CoordinateConverter.llh_to_ecef_m(lat, lon, h0_m))
     sats = [(45, 0), (45, 90), (45, 180), (45, -90), (10, 45), (10, 225)]
     return rr_true, sats
 
@@ -282,7 +282,7 @@ class TestSPPMulti:
         obs = []
         b_true = 2000.0
         for slat, slon in sats:
-            rs = np.array(CoordinateConverter.llh_to_ecef(
+            rs = np.array(CoordinateConverter.llh_to_ecef_m(
                 math.radians(slat), math.radians(slon), 26500000.0))
             r = float(np.linalg.norm(rs - rr_true))
             obs.append({"rs": rs, "dts": 0.0, "pr": r + b_true, "system": "GPS"})
@@ -301,12 +301,12 @@ class TestSPPMulti:
         obs = []
         b_gps, b_glo = 2000.0, 500.0
         for slat, slon in gps_sats:
-            rs = np.array(CoordinateConverter.llh_to_ecef(
+            rs = np.array(CoordinateConverter.llh_to_ecef_m(
                 math.radians(slat), math.radians(slon), 26500000.0))
             r = float(np.linalg.norm(rs - rr_true))
             obs.append({"rs": rs, "dts": 0.0, "pr": r + b_gps, "system": "GPS"})
         for slat, slon in glo_sats:
-            rs = np.array(CoordinateConverter.llh_to_ecef(
+            rs = np.array(CoordinateConverter.llh_to_ecef_m(
                 math.radians(slat), math.radians(slon), 26500000.0))
             r = float(np.linalg.norm(rs - rr_true))
             obs.append({"rs": rs, "dts": 0.0, "pr": r + b_gps + b_glo,
@@ -325,7 +325,7 @@ class TestSPPMulti:
         rr_true, sats = _place_satellites(39.9, 116.4, 50.0)
         obs = []
         for slat, slon in sats[:3]:
-            rs = np.array(CoordinateConverter.llh_to_ecef(
+            rs = np.array(CoordinateConverter.llh_to_ecef_m(
                 math.radians(slat), math.radians(slon), 26500000.0))
             r = float(np.linalg.norm(rs - rr_true))
             obs.append({"rs": rs, "dts": 0.0, "pr": r, "system": "GPS"})
@@ -339,13 +339,13 @@ class TestSPPMulti:
 class TestRTKFloat:
     def _make_input(self):
         lat, lon, h = math.radians(39.9), math.radians(116.4), 50.0
-        base_ecef = np.array(CoordinateConverter.llh_to_ecef(lat, lon, h))
-        rover_ecef = np.array(CoordinateConverter.llh_to_ecef(
+        base_ecef = np.array(CoordinateConverter.llh_to_ecef_m(lat, lon, h))
+        rover_ecef = np.array(CoordinateConverter.llh_to_ecef_m(
             lat + 0.001, lon, h))
         sats = [(45, 0), (45, 90), (45, 180), (45, -90), (10, 45), (10, 225)]
         base_obs, rover_obs = [], []
         for k, (slat, slon) in enumerate(sats, start=1):
-            rs = np.array(CoordinateConverter.llh_to_ecef(
+            rs = np.array(CoordinateConverter.llh_to_ecef_m(
                 math.radians(slat), math.radians(slon), 26500000.0))
             r_b = float(np.linalg.norm(rs - base_ecef))
             r_r = float(np.linalg.norm(rs - rover_ecef))
@@ -395,7 +395,7 @@ class TestGNSSPipeline:
 
         rover_obs = []
         for slat, slon in sats:
-            rs = np.array(CoordinateConverter.llh_to_ecef(
+            rs = np.array(CoordinateConverter.llh_to_ecef_m(
                 math.radians(slat), math.radians(slon), 26500000.0))
             r = float(np.linalg.norm(rs - rr_true))
             rover_obs.append({"prn": 1, "system": "GPS", "rs": rs,

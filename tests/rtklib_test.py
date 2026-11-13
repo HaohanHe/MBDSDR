@@ -109,7 +109,7 @@ class TestCoordinateConverter(unittest.TestCase):
                                   (-33.8688, 151.2093, 100.0),
                                   (0.0, 0.0, 0.0)]:
             lat = lat_d * ra.D2R; lon = lon_d * ra.D2R
-            x, y, z = ra.CoordinateConverter.llh_to_ecef(lat, lon, h)
+            x, y, z = ra.CoordinateConverter.llh_to_ecef_m(lat, lon, h)
             lat2, lon2, h2 = ra.CoordinateConverter.ecef_to_llh(x, y, z)
             self.assertLess(abs(lat2 - lat) * ra.RE_WGS84, 0.01, f"lat err {lat_d}")
             self.assertLess(abs(lon2 - lon) * ra.RE_WGS84, 0.01, f"lon err {lon_d}")
