@@ -1954,6 +1954,20 @@ No supported devices found），GNSS+SDR 同开复验没做成；离线那次
 | `docs/COORDINATION.md` | 用户输入静默线/6ae85f56（本批 §6.1 行 + §6.1.4 接管记录） | 2026-11-13 18:58 | 本笔 |
 | `docs/pending-patches/2026-11-13-orphan-initial-hunks.md` | 用户输入静默线/6ae85f56（登记 device_panel 原 owner 3 处在途 hunk 的归属、接取人与验收判据） | 2026-11-13 19:05 | 本笔 |
 | `docs/COORDINATION.md` | 用户输入静默线/6ae85f56（本笔 §6.1 行） | 2026-11-13 19:05 | 本笔 |
+| `desktop/control_panel.py` | 用户输入静默线/6ae85f56（C1：逗号/空格歧义频率一律拒绝，提示两种解释 + 145.5/145.5M/145500k） | 2026-11-13 19:24 | 本笔 |
+| `tests/test_control_panel_freq_ambiguity.py` | 用户输入静默线/6ae85f56（C1 12 条；反证=去掉歧义守卫 6 红，含 145,5→1.455 GHz 实证） | 2026-11-13 19:24 | 本笔 |
+| `mbdsdr_ai/net_utils.py` | 用户输入静默线/6ae85f56（A2：host:port 唯一实现；`[::1]:1234` 去方括号、裸 `fe80::1` 拒绝） | 2026-11-13 19:24 | 本笔 |
+| `mbdsdr_ai/sdr_backend.py` | 用户输入静默线/6ae85f56（A2：`parse_rtl_tcp_env` 改用 net_utils，跳过项 warning 写明 `[地址]:端口`） | 2026-11-13 19:24 | 本笔 |
+| `desktop/main_window.py` | 用户输入静默线/6ae85f56（A2：`_parse_host_port` 委托 net_utils；他线在途 hunk 按完整范围排除） | 2026-11-13 19:24 | 本笔 |
+| `tests/test_host_port_parse.py` | 用户输入静默线/6ae85f56（A2 20 条；反证=去掉裸 IPv6 守卫 + 旧 rpartition 5 红） | 2026-11-13 19:24 | 本笔 |
+| `desktop/weather_panel.py` | 用户输入静默线/6ae85f56（B1：采样率复用 `parse_sample_rate(default_scale=1e6)`；C3：中心频率改只读并写明来源/去向） | 2026-11-13 19:24 | 本笔 |
+| `tests/test_weather_decode_params.py` | 用户输入静默线/6ae85f56（B1/C3 新增 5 条；反证=回退裸 float + 去掉只读 3 红） | 2026-11-13 19:24 | 本笔 |
+| `tests/test_tooltip_guard.py` | 用户输入静默线/6ae85f56（C3 tooltip 文案跟守卫，只追平产品文案不放宽判据） | 2026-11-13 19:24 | 本笔 |
+| `tests/test_ui_wiring_audit.py` | 用户输入静默线/6ae85f56（C3 白名单理由追平只读语义） | 2026-11-13 19:24 | 本笔 |
+| `desktop/device_panel.py` | 用户输入静默线/6ae85f56（B1：`parse_sample_rate` 增 `default_scale` 参数，默认 1.0 行为不变） | 2026-11-13 19:24 | 本笔 |
+| `scripts/safe_commit.py` | 用户输入静默线/6ae85f56（排除 hunk 改为 index blob 逐字替换，修 main_window 多 hunk 放错位置） | 2026-11-13 19:24 | 本笔 |
+| `tests/test_safe_commit_exclude.py` | 用户输入静默线/6ae85f56（多 hunk 排除回归用例） | 2026-11-13 19:24 | 本笔 |
+| `docs/COORDINATION.md` | 用户输入静默线/6ae85f56（本批 §6.1 行） | 2026-11-13 19:24 | 本笔 |
 | **真机（USB SDR）** | 跑 `hw_acceptance/`、七环、`capture_throughput.py` 的线（资源独占） | 占用时段 | — |
 
 > 上表各行均由 `claim` 台账推导：owner 原文与 `acquired_at` 直接取自台账，
