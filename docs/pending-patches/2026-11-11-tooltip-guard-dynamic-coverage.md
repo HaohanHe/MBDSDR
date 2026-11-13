@@ -1,6 +1,5 @@
 # 交接单：tooltip 守卫的「动态文案」覆盖盲区（2026-11-11 实测）
 
-> 证据状态：E4——本文件数字未逐条绑定原始件/复跑命令，引用前须复核（判据见 docs/evidence-standard.md）。
 > 来源：W71–W77 策论线。起因：`tests/test_tooltip_guard.py` 的 `scan_tooltips()`
 > 只收 AST 字面量，f-string / `+` / `.format()` / 变量一律 `continue` 跳过。
 > 本文只做定量与判别设计，**未改任何代码**。
