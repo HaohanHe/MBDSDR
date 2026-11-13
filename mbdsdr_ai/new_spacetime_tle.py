@@ -374,8 +374,9 @@ class TLEManager:
 #
 # 统一新鲜度阈值（天）。LEO 轨道受大气阻力摄动显著，TLE 历元越旧，SGP4 外推
 # 误差越大：经验上 <~3 天预报可靠，>~7 天过境方位/多普勒开始明显漂移，>2 周
-# 不建议用于对准。这里取 7 天作为"新鲜/陈旧"分界（保守，便于 SDR 对准）。
-# 该常量是全仓唯一阈值，predict_passes_report 与日志/测试共用。
+# 不建议用于对准。这里取 7 天作为"新鲜/陈旧"分界（保守，便于 SDR 对准），
+# 与 tle_integrity 的 USABLE_MAX_DAYS 同值；「年龄」本身不再在此计算，
+# 统一委托 tle_integrity.freshness。
 TLE_FRESHNESS_MAX_DAYS = 7.0
 
 
@@ -384,12 +385,16 @@ def tle_age_days(line1: str,
     """TLE 历元到 ``now`` 的天数。历元解析失败返回 None。
 
     ``now`` 默认本机 UTC；测试时注入固定时刻以做确定性断言。
+
+    年龄口径委托 :func:`mbdsdr_ai.tle_integrity.freshness`：全仓只有那一个
+    年龄实现（钳到 ≥0、未来历元单列 ``epoch_in_future``）。旧实现在这里
+    自算 ``(ref - epoch)``，未来历元会返回负年龄（实测 -32.75 天），与
+    面板读到的 0.0 天是同一个词的两个量。
     """
-    epoch = parse_tle_epoch(line1)
-    if epoch is None:
-        return None
-    ref = now or datetime.now(timezone.utc)
-    return (ref - epoch).total_seconds() / 86400.0
+    from .tle_integrity import freshness
+
+    age = freshness(line1, now=now).get("age_days")
+    return None if age is None else float(age)
 
 
 def tle_freshness(line1: str,
@@ -401,21 +406,29 @@ def tle_freshness(line1: str,
         {"status": "fresh"|"stale"|"none",
          "epoch_utc": "ISO..."|None,
          "age_days": float|None,
-         "threshold_days": float}
+         "threshold_days": float,
+         "epoch_in_future": bool}
 
     - 历元可解析且 age <= max_days → "fresh"；
     - 历元可解析但 age > max_days → "stale"（仍可用，但预报精度下降，需告警）；
     - 历元解析失败（无/坏 TLE）→ "none"。
+
+    年龄来自 ``tle_integrity.freshness``（唯一实现），因此未来历元的
+    ``age_days`` 为 0.0 且 ``epoch_in_future=True``，不再出现负年龄。
     """
-    epoch = parse_tle_epoch(line1)
-    if epoch is None:
+    from .tle_integrity import freshness
+
+    report = freshness(line1, now=now)
+    epoch_utc = report.get("epoch_utc")
+    age = report.get("age_days")
+    if age is None or epoch_utc is None:
         return {"status": "none", "epoch_utc": None, "age_days": None,
-                "threshold_days": float(max_days)}
-    age = tle_age_days(line1, now=now)
-    status = "fresh" if (age is not None and age <= max_days) else "stale"
-    return {"status": status, "epoch_utc": epoch.strftime("%Y-%m-%dT%H:%M:%SZ"),
-            "age_days": round(age, 3) if age is not None else None,
-            "threshold_days": float(max_days)}
+                "threshold_days": float(max_days), "epoch_in_future": False}
+    age = float(age)
+    status = "fresh" if age <= max_days else "stale"
+    return {"status": status, "epoch_utc": epoch_utc,
+            "age_days": age, "threshold_days": float(max_days),
+            "epoch_in_future": bool(report.get("epoch_in_future"))}
 
 
 def __getattr__(name: str):

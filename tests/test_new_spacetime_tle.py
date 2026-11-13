@@ -225,3 +225,32 @@ def test_fetch_keeps_true_object_name_and_flags_mismatch(tmp_path, monkeypatch):
     with open(os.path.join(str(tmp_path), "44016.tle"), encoding="utf-8") as f:
         assert f.readline().strip() == "ATLAS 5 CENTAUR DEB"
 
+
+def test_future_epoch_age_is_single_sourced_and_non_negative():
+    """同一颗未来历元 TLE 的年龄只有一个值，且不出现负年龄。
+
+    反证：把 tle_age_days 改回自算 ``(ref - epoch)``，未来历元得 -69.25，
+    与 tle_integrity.freshness 的 0.0 分叉，本用例必红。
+    """
+    from datetime import datetime, timezone
+
+    from mbdsdr_ai.new_spacetime_tle import tle_age_days, tle_freshness
+    from mbdsdr_ai.tle_integrity import freshness
+
+    # 历元 27001.5 = 2027-01-01 12:00 UTC，相对 now 在将来 69 天。
+    future_l1 = ("1 25544U 98067A   27001.50000000  .00011731  00000+0"
+                 "  21853-3 0  9991")
+    now = datetime(2026, 10, 24, 6, 0, 0, tzinfo=timezone.utc)
+
+    age = tle_age_days(future_l1, now=now)
+    view = tle_freshness(future_l1, now=now)
+    integrity = freshness(future_l1, now=now)
+
+    assert integrity["epoch_in_future"] is True
+    assert age is not None and age >= 0.0, f"未来历元年龄为负：{age}"
+    assert age == integrity["age_days"] == 0.0
+    assert view["age_days"] == age
+    assert view["epoch_in_future"] is True
+    assert view["status"] == "fresh"
+    assert view["threshold_days"] == 7.0
+
