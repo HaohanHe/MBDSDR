@@ -107,6 +107,45 @@ def _git_clone_failure_zh(returncode: int, stderr: Optional[str]) -> str:
     return f"克隆失败: git 退出码 {returncode}{hint}——未识别的失败模式，请把该输出人工排查"
 
 
+def _clone_target_problem(path: str, url: str) -> str:
+    """检查已存在的克隆目标是否**可用**；返回空串表示可用，否则返回原因。
+
+    「目录存在」不等于「仓库可用」：``--depth 1`` 克隆中途失败会留下一个
+    有 ``.git`` 但 HEAD 无效 / remote 缺失的残目录。之前只看 ``os.path.exists``
+    就报「已存在」，用户以为能读源码，实际拿到的是残缺内容。判据两条：
+    ``rev-parse HEAD`` 能过（有完整提交），``remote.origin.url`` 与请求一致。
+    """
+    if not os.path.isdir(path):
+        return "路径存在但不是目录"
+    import subprocess  # 与文件内其他子进程调用保持同样的局部导入风格
+
+    try:
+        r = subprocess.run(["git", "-C", path, "rev-parse", "HEAD"],
+                           capture_output=True, text=True, timeout=15)
+    except FileNotFoundError:
+        return "本机找不到 git 命令，无法校验"
+    except Exception as e:  # noqa: BLE001
+        return f"运行 git 失败: {clean_exc(e)}"
+    if r.returncode != 0:
+        return "rev-parse HEAD 失败（不是 Git 仓库，或克隆中断没有完整提交）"
+    try:
+        r = subprocess.run(["git", "-C", path, "remote", "get-url", "origin"],
+                           capture_output=True, text=True, timeout=15)
+    except Exception as e:  # noqa: BLE001
+        return f"读取 origin 失败: {clean_exc(e)}"
+    if r.returncode != 0 or not (r.stdout or "").strip():
+        return "没有 origin 远端（克隆未完成或被改过）"
+
+    def _norm(u: str) -> str:
+        u = (u or "").strip().rstrip("/").lower()
+        return u[:-4] if u.endswith(".git") else u
+
+    got = (r.stdout or "").strip()
+    if _norm(got) != _norm(url):
+        return f"origin 指向 {got}，与请求的 {url} 不一致"
+    return ""
+
+
 def _tool_result_to_model_content(result) -> str:
     """工具结果转模型可见文本。
 
@@ -663,7 +702,14 @@ class MBDSDRAgent:
             name = (args.get("dest") or "").strip() or url.rstrip("/").split("/")[-1].replace(".git", "")
             dest = os.path.join(self.workspace_root if hasattr(self, "workspace_root") else ".", "repos", name)
             if os.path.exists(dest):
-                return ToolResult(True, f"已存在: {dest}")
+                problem = _clone_target_problem(dest, url)
+                if problem:
+                    return ToolResult(
+                        False,
+                        f"目录存在但不是可用仓库: {dest}\n原因: {problem}\n"
+                        "如果确认这个目录没用（例如上次克隆中断留下的残目录），"
+                        "删除后重新克隆；需要读源码时不要拿它继续用。")
+                return ToolResult(True, f"仓库已存在且可用: {dest}")
             os.makedirs(os.path.dirname(dest), exist_ok=True)
             try:
                 subprocess.run(["git", "clone", "--depth", "1", url, dest],
