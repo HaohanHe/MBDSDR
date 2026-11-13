@@ -2084,6 +2084,9 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `docs/known-red-register.md` | 文档引用复核线/6ae85f56（口径 3 整改：跨文件第二四元组改纯引用） | 2026-11-13 20:47 | 本笔 |
 | `docs/parameter-unification.md` | 文档引用复核线/6ae85f56（口径 3 整改：跨文件第二/三四元组改纯引用） | 2026-11-13 20:47 | 本笔 |
 | `docs/redundancy-register.md` | 文档引用复核线/6ae85f56（口径 3 整改：:85 改显式〔证〕指向 tokens.h:338） | 2026-11-13 20:47 | 本笔 |
+| `mbdsdr_ai/workflow_engine.py` | S1-S4结果伪造线/6ae85f56（源头：step_results 随条目落 tool_success（ToolResult.success），执行层 success 与工具成败分开） | 2026-11-13 20:47 | 本笔 |
+| `desktop/ai_steps.py` | S1-S4结果伪造线/6ae85f56（投影：steps_from_workflow 只读 tool_success，不再拿结果文本猜） | 2026-11-13 20:47 | 本笔 |
+| `tests/test_ai_steps_behavior.py` | S1-S4结果伪造线/6ae85f56（TestWorkflowCrossCheck 改经 WorkflowEngine 真跑（ToolResult.success=False → FAILED）） | 2026-11-13 20:47 | 本笔 |
 
 > 上表各行均由 `claim` 台账推导：owner 原文与 `acquired_at` 直接取自台账，
 > 目的优先用台账里的 `claim_reason`，没有就如实写「未声明」，不补编。时间列只是

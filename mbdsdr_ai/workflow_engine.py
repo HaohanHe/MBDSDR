@@ -27,6 +27,7 @@ from typing import List, Dict, Any, Optional, Callable
 
 from .corrupt_evidence import write_reason
 from .error_catalog import user_message
+from .tool_results import tool_success
 
 logger = logging.getLogger(__name__)
 
@@ -479,7 +480,10 @@ class WorkflowEngine:
             step_results.append({
                 "step_id": step.step_id,
                 "tool": step.tool_name,
-                "success": True,
+                "success": True,   # 执行层：tool_executor 没抛异常
+                # 工具自己的成败（ToolResult.success）随条目落账，投影层不再
+                # 靠结果文本猜；读不到 success 时为 None（未知，按执行成功渲染）。
+                "tool_success": tool_success(result),
                 "result": (result.content if hasattr(result, "content") else str(result))[:500] if result else "",
             })
 

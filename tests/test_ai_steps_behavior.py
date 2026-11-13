@@ -120,22 +120,36 @@ class TestMalformedResultRobustness:
 
 
 class TestWorkflowCrossCheck:
-    def test_step_flagged_success_but_text_says_failure(self):
-        """success:true 但子结果自己写 {"ok": false} -> 不得画 OK 卡。"""
-        payload = {"workflow_name": "wf", "success": False, "step_results": [
-            {"step_id": 1, "tool": "sdr_tune", "success": True,
-             "result": '{"ok": false, "error": "设备忙"}'},
-        ]}
-        children = ai_steps.steps_from_workflow(payload)
+    """step_results 的工具成败来自 workflow_engine 落账的 tool_success。"""
+
+    @staticmethod
+    def _run_step(tmp_path, tool_result):
+        from mbdsdr_ai.workflow_engine import WorkflowEngine
+        p = tmp_path / "wf_fail.json"
+        p.write_text(json.dumps({
+            "name": "wf_fail",
+            "steps": [{"step_id": 1, "tool_name": "sdr_tune", "params": {}}],
+        }, ensure_ascii=False), encoding="utf-8")
+        we = WorkflowEngine(workflows_dir=str(tmp_path))
+        we.set_tool_executor(lambda name, params: tool_result)
+        return ai_steps.steps_from_workflow(we.execute("wf_fail").to_dict())
+
+    def test_tool_result_failure_is_failed_despite_executor_success(self, tmp_path):
+        """执行器没抛异常（success:true），但 ToolResult.success=False -> FAILED。"""
+        from mbdsdr_ai.tool_results import ToolResult
+        children = self._run_step(
+            tmp_path,
+            ToolResult(success=False, content='{"ok": false, "error": "设备忙"}',
+                       tool_name="sdr_tune"))
         assert children[0].status == ai_steps.STATUS_FAILED
         assert "设备忙" in children[0].summary
 
-    def test_step_flagged_success_with_error_prefixed_text(self):
-        payload = {"step_results": [
-            {"step_id": 1, "tool": "sdr_record_start", "success": True,
-             "result": "Error: 参数非法"},
-        ]}
-        children = ai_steps.steps_from_workflow(payload)
+    def test_error_prefixed_content_with_failed_result(self, tmp_path):
+        from mbdsdr_ai.tool_results import ToolResult
+        children = self._run_step(
+            tmp_path,
+            ToolResult(success=False, content="Error: 参数非法",
+                       tool_name="sdr_record_start"))
         assert children[0].status == ai_steps.STATUS_FAILED
 
     def test_real_success_step_stays_success(self):

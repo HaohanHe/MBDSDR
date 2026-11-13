@@ -244,15 +244,14 @@ def steps_from_tool_result(tool_name: str, result: Dict[str, Any]) -> StepRecord
 def steps_from_workflow(payload: Dict[str, Any]) -> List[StepRecord]:
     """WorkflowResult.to_dict() → 子步骤卡（parent=workflow_execute）。
 
-    `success: true` 但 bool(step.result) 文本自己说失败（{"ok": false} / "Error..."）
-    时按失败渲染——与 steps_from_chat 同一口径：执行器不抛异常不等于工具成功
-    （workflow_engine 只看 tool_executor 有没有抛异常，ToolResult.success=False
-    的失败结果会带着 success:true 落到 step_results）。
-
     step_results 条目（见 mbdsdr_ai/workflow_engine.py）：
-      * {"step_id", "tool", "success": true, "result"}          → success
-      * {"step_id", "tool", "success": false, "error", ...}     → failed
-      * {"step_id", "tool", "skipped": true, "reason"}          → skipped
+      * {"step_id", "tool", "success": true, "tool_success": bool, "result"} → success
+      * {"step_id", "tool", "success": false, "error", ...}                 → failed
+      * {"step_id", "tool", "skipped": true, "reason"}                      → skipped
+
+    `success` 只表示「执行器没抛异常」；工具自己的成败看 `tool_success`
+    （由 workflow_engine 从 ToolResult.success 落账）。这里不再拿结果文本猜：
+    旧载荷没有 tool_success 字段时按执行层成功渲染，不引入第二个判据。
     """
     out: List[StepRecord] = []
     wf_name = str(payload.get("workflow_name", "") or "")
@@ -265,14 +264,13 @@ def steps_from_workflow(payload: Dict[str, Any]) -> List[StepRecord]:
                                     str(entry.get("reason", "") or "条件不满足，未执行"), "")
         elif entry.get("success"):
             step_text = str(entry.get("result", "") or "")
-            if is_failure_result(step_text):
+            if entry.get("tool_success") is False:
                 status = STATUS_FAILED
-                summary = summarize_result(step_text)
                 err = ""
             else:
                 status = STATUS_SUCCESS
-                summary = summarize_result(step_text)
                 err = ""
+            summary = summarize_result(step_text)
         else:
             status = STATUS_FAILED
             err = str(entry.get("error", "") or "")
