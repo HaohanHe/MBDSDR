@@ -10,16 +10,22 @@
 用法::
 
     python scripts/audit_unclaimed_changes.py        # 只列无活跃 claim 的
-    python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列（带 owner）
+    python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列（带台账记名）
     python scripts/audit_unclaimed_changes.py --json
 
 输出只是候选集：每一条的最终归属仍须人工给出证据（claim 记录 / 台账声明 /
 `docs/pending-patches/` 补丁单）；都拿不出来就写「无凭据」，不许猜。
 本脚本恒以 0 退出，不阻断任何流程。
 
-另有一节「可疑占位（只报不拦）」：活跃 claim 里带 `owner_mismatch`（写着别人
-名字）或 `reason_missing`（没写为什么占）的单独列出。它们是**比没有占位更糟**
-的占位——别人会以为这里安全。只报，不拦，也不替人判断归属。
+**「台账记名」不等于「谁在写」。** 台账在 2026-11-13 21:19 之前不记签发人，
+而 `append_coordination_row.py` 又强制 `--owner` 与活跃 claim 逐字一致，所以
+§6.1 行上的名字是照台账抄的。拿表证明归属、再拿归属解释表，是循环论证。
+因此本脚本凡显示 claim 的 owner 一律写作「台账记名」，只陈述「当时记的是谁」；
+要知道「谁签发的」只能看 `issued_by`（新记录才有）。
+
+另有一节「可疑占位（只报不拦）」：活跃 claim 里带 `owner_mismatch`（记名与
+签发身份不一致）或 `reason_missing`（没写为什么占）的单独列出。它们是**比没有
+占位更糟**的占位——别人会以为这里安全。只报，不拦，也不替人判断归属。
 `--json` 输出 `{"unclaimed": [...], "flagged_claims": [...]}`。
 """
 from __future__ import annotations
@@ -66,7 +72,11 @@ def _changed_paths() -> list[tuple[str, str]]:
 
 
 def _active_owner(path: str, now: float, marker_dir=None) -> str:
-    """按占位文件判活；无活跃 claim 返回空。
+    """返回**台账当时记的名字**；无活跃 claim 返回空。
+
+    名字不是证据。台账在 2026-11-13 21:19 前不记签发人，而 `--owner` 是可以
+    照抄的字符串——所以这里只答「名字记的是谁」，不答「谁在写」；后者要看
+    `issued_by`（新记录才有）。调用方打印时必须写成「台账记名」。
 
     判活调 ``claim_window.claim_active``——与 pre-commit ④ 的闸、以及
     ``append_coordination_row`` 用的是同一个函数。这里**不许**再写一遍
@@ -116,7 +126,7 @@ def _flagged_claims(now: float, marker_dir=None) -> list[dict]:
         heartbeat = float(payload.get("heartbeat_at") or payload.get("acquired_at") or now)
         out.append({
             "path": str(payload.get("path") or marker.stem),
-            "owner": str(payload.get("owner") or ""),
+            "ledger_name": str(payload.get("owner") or ""),
             "issued_by": str(payload.get("issued_by") or ""),
             "owner_mismatch": mismatch,
             "reason_missing": reason_missing,
@@ -129,7 +139,7 @@ def _flagged_claims(now: float, marker_dir=None) -> list[dict]:
 def _flags(row: dict) -> str:
     tags = []
     if row["owner_mismatch"]:
-        tags.append("冒名")
+        tags.append("记名≠签发")
     if row["reason_missing"]:
         tags.append("空理由")
     return "+".join(tags)
@@ -139,7 +149,7 @@ def _print_flagged(rows: list[dict]) -> None:
     print()
     print(f"可疑占位（只报不拦）：{len(rows)} 条")
     if not rows:
-        print("  （无：活跃 claim 里没有冒名或空理由的占位）")
+        print("  （无：活跃 claim 里没有「记名≠签发」或「空理由」的占位）")
         return
     for row in rows:
         issuer = row["issued_by"] or "未记录"
@@ -147,12 +157,14 @@ def _print_flagged(rows: list[dict]) -> None:
             row["owner_mismatch"]
         ]
         print(f"  [{_flags(row)}] {row['path']}")
-        print(f"    owner={row['owner']}  issued_by={issuer}  "
+        print(f"    台账记名={row['ledger_name']}  issued_by={issuer}  "
               f"owner_mismatch={mismatch}  reason_missing={row['reason_missing']}  "
               f"已持有={row['held_min']}min")
         print(f"    理由={row['claim_reason'] or '（空）'}")
-    print("  说明：这两类占位只知道「名字」，不知道「谁签的 / 为什么占」；"
-          "按需核对后再决定是否 takeover，脚本不替你判断。")
+    print("  说明：「台账记名」只是当时记下的字符串，不是「谁在写」——台账在 "
+          "21:19 前不记签发人，且 --owner 可以照抄。要定位到人就只能看 "
+          "issued_by（旧占位没有这一项）。")
+    print("  按需核对后再决定是否 takeover，脚本不替你判断归属。")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -167,10 +179,10 @@ def main(argv: list[str] | None = None) -> int:
     now = time.time()
     rows = []
     for xy, path in _changed_paths():
-        owner = _active_owner(path, now)
-        if owner and not args.all:
+        name = _active_owner(path, now)
+        if name and not args.all:
             continue
-        rows.append({"status": xy, "path": path, "owner": owner})
+        rows.append({"status": xy, "path": path, "ledger_name": name})
     flagged = _flagged_claims(now, args.markers.strip() or None)
 
     if args.json:
@@ -182,12 +194,14 @@ def main(argv: list[str] | None = None) -> int:
 
     print("候选集：工作区有改动 / 未提交进 HEAD / 当前无活跃 claim")
     for row in rows:
-        if row["owner"]:
-            print(f"  {row['status']} {row['path']}  [有 claim: {row['owner']}]")
+        if row["ledger_name"]:
+            print(f"  {row['status']} {row['path']}  "
+                  f"[台账记名: {row['ledger_name']}]")
         else:
             print(f"  {row['status']} {row['path']}")
     print(f"共 {len(rows)} 个路径。清单只说明没人占位，不说明无主；"
-          "逐条归属须给凭据（claim / 台账 / 补丁单），给不出写「无凭据」。")
+          "「台账记名」只是当时记下的字符串，不是「谁在写」——"
+          "逐条归属须给凭据（签发记录 / 台账时间窗 / 补丁单），给不出写「无凭据」。")
     _print_flagged(flagged)
     return 0
 

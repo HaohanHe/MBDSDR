@@ -1,13 +1,14 @@
 # SPDX-License-Identifier: MIT
 """审计里的「可疑占位」一节（只报不拦）。
 
-一条写着别人名字、又没有理由的占位，等于**不知道谁占的、也不知道为什么占**，
-它比没有占位更糟——别人会以为这里是安全的。本文件钉四件事：
+一条记名与签发身份不一致、又没有理由的占位，等于**不知道谁签的、也不知道
+为什么占**，它比没有占位更糟——别人会以为这里是安全的。本文件钉四件事：
 
-  ① 冒名 / 空理由的活跃 claim 必须入列；
+  ① 记名≠签发 / 空理由的活跃 claim 必须入列（字段名 ledger_name：只陈述
+     「台账当时记的是谁」，不陈述「谁在写」）；
   ② 两个标记都干净的活跃 claim 不入列；
   ③ 过期 claim 不入列（判活与闸共用 ``claim_active``）；
-  ④ 旧占位没有 ``owner_mismatch`` 键时显示「未记录」，**不**当成冒名；
+  ④ 旧占位没有 ``owner_mismatch`` 键时显示「未记录」，**不**当成不一致；
      没有 ``reason_missing`` 键时退回读 ``claim_reason``（空串才算空理由）。
 
 并且：审计恒以 0 退出——这一节只报，不拦。
@@ -53,7 +54,8 @@ def test_mismatched_and_reasonless_claim_is_listed(tmp_path):
     assert len(rows) == 1
     row = rows[0]
     assert row["path"] == "scripts/safe_commit.py"
-    assert row["owner"] == "甲线"
+    # 字段名是 ledger_name：台账记下的字符串不是「谁在写」的证据。
+    assert row["ledger_name"] == "甲线"
     assert row["issued_by"] == "乙线"
     assert row["owner_mismatch"] is True
     assert row["reason_missing"] is True
@@ -97,7 +99,9 @@ def test_cli_prints_section_and_exits_zero(tmp_path):
     assert proc.returncode == 0, proc.stderr
     assert "可疑占位（只报不拦）：1 条" in proc.stdout
     assert "scripts/safe_commit.py" in proc.stdout
+    assert "台账记名=甲线" in proc.stdout
     assert "issued_by=乙线" in proc.stdout
+    assert "不是「谁在写」" in proc.stdout
 
 
 def test_cli_json_shape_has_both_sections(tmp_path):

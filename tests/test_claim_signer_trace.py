@@ -1,9 +1,9 @@
 # SPDX-License-Identifier: MIT
-"""冒名占位 / 空理由的留痕（2026-11-13 裁定）。
+"""记名与签发身份的留痕 / 空理由的留痕（2026-11-13 裁定）。
 
 背景：`scripts/safe_commit.py` 上出现过一条 owner 写「收尸线」、理由为空、
-时间 20:41:49–20:42:24 的 claim，不是该线签发的。追到根：`cmd_claim` 既不记
-「谁签发的」，也不校验理由非空——**名字可以是别人的，理由可以是空的，而台账
+时间 20:41:49–20:42:24 的 claim，不是该线手工签的。追到根：`cmd_claim` 既不记
+「谁签发的」，也不校验理由非空——**名字可以是照抄的，理由可以是空的，而台账
 看不出来**。
 
 裁定（用户原话）：空理由**不升级为必填**——会一次打红大量既有调用，而且
@@ -15,7 +15,7 @@
   ④ 正常带理由且一致：两个标记都为 false。
 
 签发身份 = `MBDSDR_CLAIM_OWNER`，缺省读 `git config mbdsdr.owner`；都没有时
-为空串——空串**不算冒名**（未声明 ≠ 别人签的）。
+为空串——空串**不算不一致**（未声明 ≠ 别人签的）。
 """
 from __future__ import annotations
 
@@ -83,7 +83,7 @@ def test_mismatched_owner_warns_and_flags_both_surfaces():
         locks = Path(raw)
         proc = _run(locks, "乙线", "--owner", "甲线", "--ttl-min", "1")
         assert proc.returncode == 0, proc.stderr
-        assert "WARN 冒名痕迹" in proc.stderr
+        assert "WARN 记名与签发身份不一致" in proc.stderr
         assert "issued_by=乙线" in proc.stderr
         payload = _payload(locks)
         assert payload["owner_mismatch"] is True
@@ -121,7 +121,7 @@ def test_named_reason_and_matching_owner_are_clean():
 
 
 def test_undeclared_signer_is_not_a_mismatch():
-    """未声明签发身份 ≠ 别人签的：不许把「读不到」记成「冒名」。"""
+    """未声明签发身份 ≠ 别人签的：不许把「读不到」记成「不一致」。"""
     with tempfile.TemporaryDirectory() as raw:
         locks = Path(raw)
         bare_root = Path(raw) / "bare"  # 非 git 仓库 → git config 取不到
@@ -131,4 +131,4 @@ def test_undeclared_signer_is_not_a_mismatch():
         payload = _payload(locks)
         assert payload["issued_by"] == ""
         assert payload["owner_mismatch"] is False
-        assert "WARN 冒名痕迹" not in proc.stderr
+        assert "WARN 记名与签发身份不一致" not in proc.stderr

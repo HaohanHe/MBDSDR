@@ -744,14 +744,18 @@ def _declared_owner() -> str:
 
 
 def _stamp_signer(payload: Dict[str, Any], owner: str, reason: str) -> bool:
-    """落「签发身份 / 是否冒名 / 是否空理由」，返回是否冒名。
+    """落「签发身份 / 记名是否与签发一致 / 是否空理由」，返回是否不一致。
 
-    **只留痕，不改退出码**：空理由与冒名都真实发生过，但升级为必填会一次打红
-    大量既有调用（`tests/` 里有大量不带 `--reason` 的 claim），而且「理由是否
-    可信」没有机器判据。所以这里只保证事后看得见，不保证当场拦得住——
+    为什么要这三项：§6.1 的 owner 列**不能当归属证据**——`--owner` 是一个可以
+    照抄的字符串，而 `append_coordination_row.py` 又强制它与活跃 claim 逐字一致，
+    于是「拿表证明归属、再拿归属解释表」成了循环论证。2026-11-13 20:41 那两条
+    挂在 `scripts/safe_commit.py` 上的 claim 就是例证：事后只能靠人工比对提交
+    时间窗才发现不是本线手工签的。**只留痕，不改退出码**：把空理由升级为必填
+    会一次打红大量既有调用（`tests/` 里有大量不带 `--reason` 的 claim），而且
+    「理由是否可信」没有机器判据。
 
-      * `issued_by`       谁签发的（未声明时为空串，空串不等于冒名）；
-      * `owner_mismatch`  `--owner` 与签发身份不一致；
+      * `issued_by`       谁签发的（未声明时为空串，空串不等于不一致）；
+      * `owner_mismatch`  `--owner` 与签发身份不一致（代签 / 照抄都会命中）；
       * `reason_missing`  `--reason` 为空。
     """
     issuer = _declared_owner()
@@ -814,9 +818,9 @@ def cmd_claim(
     payload["max_hold_source"] = cap_source
     if _stamp_signer(payload, owner, reason) and not quiet:
         print(
-            f"WARN 冒名痕迹：--owner={owner} 与签发身份 issued_by="
-            f"{payload['issued_by']} 不一致，已落 owner_mismatch=true"
-            f"（只留痕，不拦提交）。",
+            f"WARN 记名与签发身份不一致：--owner={owner} 但 issued_by="
+            f"{payload['issued_by']}（可能是代签或照抄）。已落 "
+            f"owner_mismatch=true，只留痕、不拦提交。",
             file=sys.stderr,
         )
     # 空续租记录也显式写出来：否则「还没续过」与「老格式没留痕」在机检里
