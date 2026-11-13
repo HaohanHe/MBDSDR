@@ -134,17 +134,27 @@ class _RefusingOffsetBackend:
 
 
 def test_ppm_rejection_restores_last_applied(mw):
-    """PPM 被拒后，数值框回到最后生效值，不停在请求值。"""
+    """PPM 被拒后，数值框回到最后生效值，不停在请求值。
+
+    生效值的唯一来源是请求存储（会话外 = 写前意图），不再有
+    ``_last_ppm_applied`` 这类第二状态；用真实身份键种一条 25。
+    """
+    import connect_request_store
     cp = mw.control_panel
     cp.set_sdr_connected(True)
+    key = "rtlsdr|serial:ppm-history"
+    mw.device_panel._current_dev_key = key
+    connect_request_store.update(key, ppm=25)
     mw._active_sdr_backend = None          # 先把「用户改值」与下发隔开
-    mw._last_ppm_applied = 25
     cp.ppm_spin.setValue(25)
     cp.ppm_spin.setValue(50)
     assert cp.ppm_spin.value() == 50       # 此刻控件就是「从未生效的请求值」
 
     mw._active_sdr_backend = _RefusingPpmBackend()
-    mw._on_ppm_changed(50)
+    try:
+        mw._on_ppm_changed(50)
+    finally:
+        mw.device_panel._current_dev_key = None
 
     assert cp.ppm_spin.value() == 25, "拒绝后必须回到最后生效的 PPM"
     assert "未生效" in mw.statusBar().currentMessage()
@@ -154,13 +164,17 @@ def test_ppm_without_confirmed_history_falls_back_to_zero(mw):
     """从未确认过任何 PPM 时，拒绝后退回连接默认 0（不是请求值）。"""
     cp = mw.control_panel
     cp.set_sdr_connected(True)
+    key = "rtlsdr|serial:ppm-no-history"
+    mw.device_panel._current_dev_key = key
     mw._active_sdr_backend = None
-    mw._last_ppm_applied = None
     cp.ppm_spin.setValue(0)
     cp.ppm_spin.setValue(40)
 
     mw._active_sdr_backend = _RefusingPpmBackend()
-    mw._on_ppm_changed(40)
+    try:
+        mw._on_ppm_changed(40)
+    finally:
+        mw.device_panel._current_dev_key = None
 
     assert cp.ppm_spin.value() == 0, "无生效历史时必须退回连接默认 0"
 

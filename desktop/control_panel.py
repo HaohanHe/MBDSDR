@@ -235,6 +235,9 @@ class ControlPanel(QWidget):
         #: 6 组折叠头：(header, body, title)。W51 / D-10 A：手风琴单展开，
         #: 默认只展开「频率」，保证默认高度 < 1 屏（旧版全展开 1,148 px ≈1.95 屏）。
         self._fold_sections: list[tuple[QToolButton, QWidget, str]] = []
+        #: 会话占用态（gpredict 第三档）：占用期间连接参数置灰且 tooltip 写「怎么解除」。
+        self._session_occupied = False
+        self._session_reason = ""
 
         self._build_ui()
         self._relax_combo_widths()
@@ -305,6 +308,10 @@ class ControlPanel(QWidget):
         断开时再置灰（freq_display 同置灰——按位编辑无设备不可发调谐）。
         收藏查看/删除始终可用，仅“收藏当前频率”按钮随连接状态禁用。
         """
+        # 连接态重算先清会话占用标记：新会话由 set_session_occupied 重新登记，
+        # 否则上一次会话的冻结会跨连接残留（断开/重连必须回到可编辑）。
+        self._session_occupied = False
+        self._session_reason = ""
         self._sdr_connected = bool(connected)
         widgets = [
             getattr(self, "mode_combo", None),
@@ -372,6 +379,55 @@ class ControlPanel(QWidget):
         # 不能把预填档位当成设备正在跑的速率。
         self._apply_sample_rate_unconfirmed_marker()
 
+    #: 会话占用期间冻结的连接参数控件（gpredict 第三档）。
+    _SESSION_FROZEN_WIDGETS = (
+        "sample_rate_combo", "vfo_bw_combo", "agc_check",
+        "agc_speed_combo", "ppm_spin", "gain_slider",
+    )
+
+    def _session_why(self) -> str:
+        """会话占用态的统一说明（与 store 的拒绝原因同义，写清怎么解除）。"""
+        return self._session_reason or (
+            "设备会话进行中：本次会话的采样率/增益/PPM/带宽已冻结，"
+            "请先断开设备（结束会话）再修改。")
+
+    def _session_tip(self, base: str) -> str:
+        """给某个 tooltip 追加/还原会话占用说明。
+
+        统一口径：占用的控件只显示「当前状态专属内容」——静态说明 + 冻结原因；
+        解除后原样还原静态说明，绝不留上一条状态的提示。
+        """
+        base = str(base or "")
+        if not self._session_occupied:
+            return base
+        why = self._session_why()
+        return f"{base}\n{why}" if base else why
+
+    def _enabled_without_session(self, enabled: bool) -> bool:
+        """启用判据的唯一入口：会话占用期间一律不可用（哪怕设备支持）。"""
+        return bool(enabled) and not self._session_occupied
+
+    def set_session_occupied(self, occupied: bool, reason: str = "") -> None:
+        """会话占用期间冻结连接参数：置灰并说明「怎么解除」。
+
+        与 ``set_sdr_connected`` 分工：后者管「有没有设备」，本方法只管
+        「设备正在本次会话中，参数已冻结」。断开时 ``set_sdr_connected(False)``
+        会全量置灰，因此这里只处理连接态下的占用/解除；重复调用幂等。
+        """
+        self._session_occupied = bool(occupied)
+        self._session_reason = "" if not occupied else (reason or "")
+        if not self._sdr_connected:
+            return
+        for name in self._SESSION_FROZEN_WIDGETS:
+            w = getattr(self, name, None)
+            if w is None:
+                continue
+            w.setEnabled(not self._session_occupied)
+            try:
+                w.setToolTip(self._session_tip(getattr(w, "_base_tip", "")))
+            except (AttributeError, RuntimeError):
+                pass
+
     def set_device_capabilities(self, *, gain: bool, agc: bool, ppm: bool,
                                 offset_tuning: bool) -> None:
         """按所连设备的真实能力收紧控件：不支持就置灰并写明原因。
@@ -396,12 +452,14 @@ class ControlPanel(QWidget):
         def _apply(widget, supported: bool, base_tip: str) -> None:
             if widget is None:
                 return
-            widget.setEnabled(self._sdr_connected and supported)
+            # 会话占用期间不允许被能力探测重新点亮：两条判据都真才可用。
+            widget.setEnabled(
+                self._enabled_without_session(self._sdr_connected and supported))
             if supported:
-                widget.setToolTip(base_tip)
+                tip = base_tip
             else:
-                widget.setToolTip(f"{base_tip}\n{reason}" if base_tip
-                                  else reason)
+                tip = f"{base_tip}\n{reason}" if base_tip else reason
+            widget.setToolTip(self._session_tip(tip))
 
         # tooltip 最后写，避免被上面 set_*_applied 里的"还原基础说明"覆盖。
         _apply(getattr(self, "gain_slider", None), gain,
@@ -1186,7 +1244,7 @@ class ControlPanel(QWidget):
         self.gain_val.setText(format_gain_db(db))
         self.gain_val.setToolTip("已连接：增益请求已下发，等待设备回执")
         # 用户手动调增益即采纳当前值，清掉恢复/收放期"配置请求被替换"提示
-        self.gain_slider.setToolTip(self._gain_base_tip)
+        self.gain_slider.setToolTip(self._session_tip(self._gain_base_tip))
         self.gain_changed.emit(db)
 
     @Slot(int)
@@ -1549,12 +1607,12 @@ class ControlPanel(QWidget):
                 "实际档位以设备为准，后端钳位）")
         # 静态说明随设备能力更新；用户后续手动调增益时还原的就是这一版
         self._gain_base_tip = base
-        self.gain_slider.setToolTip(base)
+        self.gain_slider.setToolTip(self._session_tip(base))
         if applied != requested:
             hint = (f"当前增益 {requested} dB 超出所连设备能力 [{lo}, {hi}] dB，"
                     f"已按 {applied} dB 显示（配置文件未改）")
             logger.warning("%s", hint)
-            self.gain_slider.setToolTip(f"{base}\n⚠ {hint}")
+            self.gain_slider.setToolTip(self._session_tip(f"{base}\n⚠ {hint}"))
             # 标签是读数：已连接才写设备真实值；未连接保持「—」，不编造。
             if self._sdr_connected:
                 self.gain_val.setText(format_gain_db(applied))
@@ -1622,7 +1680,8 @@ class ControlPanel(QWidget):
             self.vfo_bw_combo.setCurrentIndex(idx)
         self.vfo_bw_combo.blockSignals(False)
         # 模式切换会改写带宽档位：旧的"配置请求被替换"提示已不成立
-        self.vfo_bw_combo.setToolTip(self._vfo_bw_base_tip)
+        self.vfo_bw_combo.setToolTip(
+            self._session_tip(self._vfo_bw_base_tip))
 
     def set_gain(self, db: float):
         """从外部恢复 LNA 增益 (dB)，不发射 gain_changed。
@@ -1649,9 +1708,10 @@ class ControlPanel(QWidget):
             hint = (f"配置请求 {requested:g} dB 超出未连接时的显示范围 [0, 49] dB，"
                     f"已按 {db} dB 显示（配置文件未改）")
             logger.warning("%s", hint)
-            self.gain_slider.setToolTip(f"{self._gain_base_tip}\n⚠ {hint}")
+            self.gain_slider.setToolTip(
+                self._session_tip(f"{self._gain_base_tip}\n⚠ {hint}"))
         else:
-            self.gain_slider.setToolTip(self._gain_base_tip)
+            self.gain_slider.setToolTip(self._session_tip(self._gain_base_tip))
 
     def set_gain_applied(self, db: float, readback_source: str = "") -> bool:
         """回填设备真实增益读数；只改标签，不动滑杆。
@@ -1713,9 +1773,10 @@ class ControlPanel(QWidget):
         if ppm != requested:
             hint = f"设备最后生效的 PPM 是 {ppm}（请求 {requested} 未生效）"
             logger.warning("%s", hint)
-            self.ppm_spin.setToolTip(f"{self._ppm_base_tip}\n⚠ {hint}")
+            self.ppm_spin.setToolTip(
+                self._session_tip(f"{self._ppm_base_tip}\n⚠ {hint}"))
         else:
-            self.ppm_spin.setToolTip(self._ppm_base_tip)
+            self.ppm_spin.setToolTip(self._session_tip(self._ppm_base_tip))
         return True
 
     def set_offset_tuning_applied(self, enabled: bool) -> bool:
@@ -1908,7 +1969,7 @@ class ControlPanel(QWidget):
             logger.warning("%s", hint)
             self.sr_label.setText("采样率 ⚠")
             self.sr_label.setToolTip(hint)
-            combo.setToolTip(hint)
+            combo.setToolTip(self._session_tip(hint))
         else:
             self.sr_label.setText("采样率")
             self.sr_label.setToolTip("")
@@ -1945,9 +2006,10 @@ class ControlPanel(QWidget):
             hint = (f"配置请求 {bw:g} Hz 解调带宽不在当前可见档位，"
                     f"已按最近档 {applied:g} Hz 显示（配置文件未改）")
             logger.warning("%s", hint)
-            combo.setToolTip(f"{self._vfo_bw_base_tip}\n⚠ {hint}")
+            combo.setToolTip(
+                self._session_tip(f"{self._vfo_bw_base_tip}\n⚠ {hint}"))
         else:
-            combo.setToolTip(self._vfo_bw_base_tip)
+            combo.setToolTip(self._session_tip(self._vfo_bw_base_tip))
 
     def set_agc(self, enabled: bool):
         """从外部恢复 AGC 开关，不发射 agc_changed。"""

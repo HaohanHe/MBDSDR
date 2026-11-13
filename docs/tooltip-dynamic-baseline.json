@@ -9,13 +9,6 @@
     },
     {
       "file": "desktop/control_panel.py",
-      "expr": "base_tip",
-      "reason": "passthrough",
-      "note": "能力收紧（set_device_capabilities，08e61bd5 引入）里，支持的能力只把原有的基础说明写回控件；基础说明由 set_*_applied 生成，本身是完整句子。解除条件：若基础说明退化为裸值或短标签，改为在 _apply 里补固定前缀并删本条。",
-      "runtime_test": "tests/test_tooltip_dynamic_runtime.py::test_control_panel_passthrough_tooltips_self_describe"
-    },
-    {
-      "file": "desktop/control_panel.py",
       "expr": "base",
       "reason": "passthrough",
       "runtime_test": "tests/test_tooltip_dynamic_runtime.py::test_control_panel_passthrough_tooltips_self_describe"
@@ -24,13 +17,6 @@
       "file": "desktop/control_panel.py",
       "expr": "f'{base}\\n{_why}' if base else _why",
       "reason": "passthrough",
-      "runtime_test": "tests/test_tooltip_dynamic_runtime.py::test_control_panel_passthrough_tooltips_self_describe"
-    },
-    {
-      "file": "desktop/control_panel.py",
-      "expr": "f'{base_tip}\\n{reason}' if base_tip else reason",
-      "reason": "passthrough",
-      "note": "能力不支持时把「基础说明 + 不能用的原因」拼成 tooltip；reason 是常量原因句，base_tip 为空时只留原因，两条来源都完整。解除条件：同上。",
       "runtime_test": "tests/test_tooltip_dynamic_runtime.py::test_control_panel_passthrough_tooltips_self_describe"
     },
     {
@@ -59,43 +45,13 @@
     },
     {
       "file": "desktop/control_panel.py",
-      "expr": "self._gain_base_tip",
-      "reason": "passthrough",
-      "runtime_test": "tests/test_tooltip_dynamic_runtime.py::test_control_panel_passthrough_tooltips_self_describe"
-    },
-    {
-      "file": "desktop/control_panel.py",
       "expr": "self._vfo_bw_base_tip",
-      "reason": "passthrough",
-      "runtime_test": "tests/test_tooltip_dynamic_runtime.py::test_control_panel_passthrough_tooltips_self_describe"
-    },
-    {
-      "file": "desktop/control_panel.py",
-      "expr": "base",
       "reason": "passthrough",
       "runtime_test": "tests/test_tooltip_dynamic_runtime.py::test_control_panel_passthrough_tooltips_self_describe"
     },
     {
       "file": "desktop/control_panel.py",
       "expr": "self._freq_input_base_tip",
-      "reason": "passthrough",
-      "runtime_test": "tests/test_tooltip_dynamic_runtime.py::test_control_panel_passthrough_tooltips_self_describe"
-    },
-    {
-      "file": "desktop/control_panel.py",
-      "expr": "self._vfo_bw_base_tip",
-      "reason": "passthrough",
-      "runtime_test": "tests/test_tooltip_dynamic_runtime.py::test_control_panel_passthrough_tooltips_self_describe"
-    },
-    {
-      "file": "desktop/control_panel.py",
-      "expr": "self._gain_base_tip",
-      "reason": "passthrough",
-      "runtime_test": "tests/test_tooltip_dynamic_runtime.py::test_control_panel_passthrough_tooltips_self_describe"
-    },
-    {
-      "file": "desktop/control_panel.py",
-      "expr": "self._ppm_base_tip",
       "reason": "passthrough",
       "runtime_test": "tests/test_tooltip_dynamic_runtime.py::test_control_panel_passthrough_tooltips_self_describe"
     },
@@ -108,18 +64,6 @@
     {
       "file": "desktop/control_panel.py",
       "expr": "hint",
-      "reason": "passthrough",
-      "runtime_test": "tests/test_tooltip_dynamic_runtime.py::test_control_panel_passthrough_tooltips_self_describe"
-    },
-    {
-      "file": "desktop/control_panel.py",
-      "expr": "hint",
-      "reason": "passthrough",
-      "runtime_test": "tests/test_tooltip_dynamic_runtime.py::test_control_panel_passthrough_tooltips_self_describe"
-    },
-    {
-      "file": "desktop/control_panel.py",
-      "expr": "self._vfo_bw_base_tip",
       "reason": "passthrough",
       "runtime_test": "tests/test_tooltip_dynamic_runtime.py::test_control_panel_passthrough_tooltips_self_describe"
     },
@@ -284,6 +228,54 @@
       "expr": "path",
       "reason": "passthrough",
       "runtime_test": "tests/test_tooltip_dynamic_runtime.py::test_weather_panel_passthrough_tooltips_self_describe"
+    },
+    {
+      "file": "desktop/control_panel.py",
+      "expr": "self._session_tip(tip)",
+      "reason": "passthrough",
+      "runtime_test": "tests/test_tooltip_dynamic_runtime.py::test_control_panel_passthrough_tooltips_self_describe"
+    },
+    {
+      "file": "desktop/control_panel.py",
+      "expr": "self._session_tip(self._gain_base_tip)",
+      "reason": "passthrough",
+      "runtime_test": "tests/test_tooltip_dynamic_runtime.py::test_control_panel_passthrough_tooltips_self_describe"
+    },
+    {
+      "file": "desktop/control_panel.py",
+      "expr": "self._session_tip(base)",
+      "reason": "passthrough",
+      "runtime_test": "tests/test_tooltip_dynamic_runtime.py::test_control_panel_passthrough_tooltips_self_describe"
+    },
+    {
+      "file": "desktop/control_panel.py",
+      "expr": "self._session_tip(self._vfo_bw_base_tip)",
+      "reason": "passthrough",
+      "runtime_test": "tests/test_tooltip_dynamic_runtime.py::test_control_panel_passthrough_tooltips_self_describe"
+    },
+    {
+      "file": "desktop/control_panel.py",
+      "expr": "self._session_tip(self._gain_base_tip)",
+      "reason": "passthrough",
+      "runtime_test": "tests/test_tooltip_dynamic_runtime.py::test_control_panel_passthrough_tooltips_self_describe"
+    },
+    {
+      "file": "desktop/control_panel.py",
+      "expr": "self._session_tip(self._ppm_base_tip)",
+      "reason": "passthrough",
+      "runtime_test": "tests/test_tooltip_dynamic_runtime.py::test_control_panel_passthrough_tooltips_self_describe"
+    },
+    {
+      "file": "desktop/control_panel.py",
+      "expr": "self._session_tip(hint)",
+      "reason": "passthrough",
+      "runtime_test": "tests/test_tooltip_dynamic_runtime.py::test_control_panel_passthrough_tooltips_self_describe"
+    },
+    {
+      "file": "desktop/control_panel.py",
+      "expr": "self._session_tip(self._vfo_bw_base_tip)",
+      "reason": "passthrough",
+      "runtime_test": "tests/test_tooltip_dynamic_runtime.py::test_control_panel_passthrough_tooltips_self_describe"
     }
   ]
 }

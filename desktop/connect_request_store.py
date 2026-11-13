@@ -194,6 +194,11 @@ def _session_reject_reason(key: str) -> str:
             "请先断开设备（结束会话）再修改。")
 
 
+def session_reject_reason(key: str) -> str:
+    """公开别名：UI 显示会话占用原因时用它，保证与 ``update`` 拒绝同一句。"""
+    return _session_reject_reason(key)
+
+
 def begin_session(key: str,
                   initial: Optional[ConnectRequest] = None) -> ConnectRequest:
     """登记设备会话开始，冻结本次会话的**生效值**（不等于意图值）。

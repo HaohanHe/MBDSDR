@@ -2149,6 +2149,13 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `scripts/install_git_hooks.py` | 归属证据线/6ae85f56（安装器补拷 check_coordination_append_only.py（claim_gate 新依赖）） | 2026-11-13 21:45 | 本笔 |
 | `scripts/claim_gate.py` | 收尸线/6ae85f56（任务三：拒绝落 rejected.log（时间/路径/原因码/记名）） | 2026-11-13 21:46 | 本笔 |
 | `tests/test_claim_gate_rejected_log.py` | 收尸线/6ae85f56（任务三：拒绝留痕 2 条反证） | 2026-11-13 21:46 | 本笔 |
+| `desktop/main_window.py` | S1-S4结果伪造线/6ae85f56（写门 14 组本轮落库（_UNSET/_req_store/_session_store_key/PPM 唯一真值/四处写门），排除 3 组焦点链 hunk 另行提交） | 2026-11-13 21:53 | 本笔 |
+| `desktop/control_panel.py` | S1-S4结果伪造线/6ae85f56（写门配套：_session_tip/set_session_occupied/_enabled_without_session，会话占用期置灰并说明解除方式） | 2026-11-13 21:53 | 本笔 |
+| `desktop/device_panel.py` | S1-S4结果伪造线/6ae85f56（写门配套：set_connected(initial=) 把本次连接载荷作为会话快照起点） | 2026-11-13 21:53 | 本笔 |
+| `desktop/connect_request_store.py` | S1-S4结果伪造线/6ae85f56（写门配套：session_reject_reason 公开别名（从过期 845min 的遗留 claim 夺取，内容未改）） | 2026-11-13 21:53 | 本笔 |
+| `tests/test_main_window_session_gate.py` | S1-S4结果伪造线/6ae85f56（写门 5 条用例（四槽拒绝/会话后放行/连接载荷先开会话/能力探测后仍冻结/AI 增益回显）） | 2026-11-13 21:53 | 本笔 |
+| `tests/test_hw_rollback_shows_device_truth.py` | S1-S4结果伪造线/6ae85f56（写门配套：PPM 回填改种 store 值，删除 _last_ppm_applied 依赖） | 2026-11-13 21:53 | 本笔 |
+| `docs/tooltip-dynamic-baseline.json` | S1-S4结果伪造线/6ae85f56（写门配套：passthrough 基线换成 _session_tip 表达式（13 删 8 增）） | 2026-11-13 21:53 | 本笔 |
 
 > 上表各行均由 `claim` 台账推导：owner 原文与 `acquired_at` 直接取自台账，
 > 目的优先用台账里的 `claim_reason`，没有就如实写「未声明」，不补编。时间列只是

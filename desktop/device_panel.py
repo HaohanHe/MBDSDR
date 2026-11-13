@@ -964,7 +964,8 @@ class DevicePanel(QWidget):
         return ""
 
     def set_connected(self, connected: bool, dev_label: str = "",
-                      device: Optional[Dict] = None) -> None:
+                      device: Optional[Dict] = None,
+                      initial=None) -> None:
         """主窗口连接成功/断开后调用。
 
         ``device`` 是**实际连上的那台设备**（主窗口已知时应传入）。缺省时按
@@ -972,6 +973,10 @@ class DevicePanel(QWidget):
         依次确认身份；都确认不了就显式拒绝检测拔出（日志 + tooltip 说明），
         绝不按下拉框当前选中项猜——选中项可以和实际连接设备不是同一台，
         据此推断会让拔出永远检测不到。
+
+        ``initial`` 是主窗口马上要下发的连接载荷（``ConnectRequest``）：
+        作为会话快照的起点一次性交给 store，避免「先建会话、后下发」被
+        自己的写门拒掉（见 docs §5.2）。
         """
         self._connected = bool(connected)
         if connected:
@@ -997,7 +1002,7 @@ class DevicePanel(QWidget):
                         self.status_label.setToolTip(identity_note)
                 # 登记 store 侧会话占用（第三档）：数据层靠它冻结本次生效值，
                 # 重复调用不覆盖首次快照，所以两次 set_connected(True) 无副作用。
-                _req_store.begin_session(self._current_dev_key)
+                _req_store.begin_session(self._current_dev_key, initial=initial)
                 # 身份确认成功才置灰；置灰期间回显冻结的本次生效值。
                 self._set_params_editable(False)
                 self._render_session_values()

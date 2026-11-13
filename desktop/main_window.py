@@ -46,6 +46,9 @@ MSG_QUICK = 2000
 MSG_NORMAL = 4000
 MSG_IMPORTANT = 8000
 
+#: 「未传参」哨兵：与显式传 None（没有上次生效值）区分开。
+_UNSET = object()
+
 # S8 断源感知：读线程卡死时 read_failed 可能永远发不出来（read_samples 阻塞在
 # 驱动/套接字里），所以 UI 侧还要独立按数据新鲜度轮询后端 health。
 # 轮询间隔 1s；超过 DATA_STALE_S 无真实数据即判掉线（AC-06.7「断源 2s 内可见」）；
@@ -593,6 +596,8 @@ def _is_text_entry_widget(w) -> bool:
     return False
 
 import l10n   # i18n 加载层（Qt Linguist）；同级裸导入，双上下文由 desktop/__init__ 垫片保证
+
+import connect_request_store as _req_store  # 设备参数唯一真值/会话写门
 
 import numpy as np
 
@@ -1226,9 +1231,10 @@ class MainWindow(QMainWindow):
         self._vfo_out_sr: float = 48000.0
         # 默认 VFO 带宽 12.5 kHz（NBFM 语音档，与 control_panel.MODE_VFO_BANDWIDTH["FM"] 对齐）
         self._vfo_bw: float = 12_500.0
-        # 最后确认生效的 PPM / Offset Tuning（无回读接口，只能记「被设备接受
-        # 过的请求值」）。写失败时回填这里，绝不回填刚被拒的请求值。
-        self._last_ppm_applied: Optional[int] = None
+        # 最后确认生效的 Offset Tuning（无回读接口，只能记「被设备接受过
+        # 的请求值」）。写失败时回填这里，绝不回填刚被拒的请求值。
+        # PPM 的同类状态不再另存：唯一来源是 connect_request_store
+        # （会话中 request_for 的冻结生效值，会话外 intent_for）。
         self._last_offset_applied: Optional[bool] = None
         # 调试/测试断言用：记录 _demod_and_play 本次实际使用的解调模式
         self._last_demod_mode: str = "FM"
@@ -6738,7 +6744,13 @@ class MainWindow(QMainWindow):
         self._worker_manager.stop()
         self._worker = None
         self._active_sdr_backend = backend
-        self._panels_set_sdr_connected(True)
+        self._panels_set_sdr_connected(
+            True,
+            session_initial=_req_store.ConnectRequest(
+                sample_rate_hz=float(sample_rate),
+                gain_db=(None if agc else float(gain)),
+                ppm=int(ppm),
+                bandwidth_hz=float(bandwidth)))
         # 面板入口连上 ≠ 设备收得到 1090；上限提示必须在连接成功路径同步。
         self._sync_adsb_tuner_limit()
         # 设备名必须受保护取值：BladeRF/Lime 后端没有 `.device`，直取会抛
@@ -7176,7 +7188,12 @@ class MainWindow(QMainWindow):
         self._worker.error_occurred.connect(self._on_error)
         self._worker.log_message.connect(self._on_log)
 
-    def _panels_set_sdr_connected(self, connected: bool):
+    def _session_store_key(self):
+        """当前占用设备的身份键；未连接/身份确认失败时返回 None（门不参与）。"""
+        key = getattr(getattr(self, "device_panel", None), "_current_dev_key", None)
+        return key or None
+
+    def _panels_set_sdr_connected(self, connected: bool, session_initial=None):
         """把真实 SDR 连接状态同步到各操作控件。
         未连接时：气象云图面板的实时 SDR 按钮置灰；
         控制面板的调谐/音量/模式/预设控件与录音按钮一并禁用，绝不暴露假可控状态；
@@ -7277,7 +7294,17 @@ class MainWindow(QMainWindow):
                 cp.set_sdr_connected(bool(connected))
             dp = getattr(self, "device_panel", None)
             if dp is not None and hasattr(dp, "set_connected"):
-                dp.set_connected(bool(connected))
+                # 会话起点随连接一次性交给 store：快照=本次实际下发值，
+                # 这样连接流程不会在门关闭后自己撞门（docs §5.2）。
+                dp.set_connected(bool(connected), initial=session_initial)
+                # 设备面板已建好会话 → 现在才有关闭参数的键；控制面板据此
+                # 置灰并说明怎么解除（gpredict 第三档）。
+                cp2 = getattr(self, "control_panel", None)
+                frozen = getattr(cp2, "set_session_occupied", None)
+                if callable(frozen):
+                    key = self._session_store_key() if connected else None
+                    frozen(bool(key),
+                           _req_store.session_reject_reason(key) if key else "")
             gp = getattr(self, "gain_panel", None)
             if gp is not None and hasattr(gp, "set_backend"):
                 gp.set_backend(self._active_sdr_backend if connected else None)
@@ -7619,15 +7646,13 @@ class MainWindow(QMainWindow):
                 except Exception as e:  # noqa: BLE001 - 回退失败才保留原失败
                     logger.warning("回退 98.5 MHz 也失败: %s: %s",
                                    type(e).__name__, e)
-        # 只有设备接受的连接值才算「最后生效值」；被拒时记 None，失败回填
-        # 会退到连接默认（PPM 0 / Offset 关），而不是一个设备没接受过的数。
+        # 只有设备接受的连接值才算「最后生效值」；被拒时不写任何第二状态：
+        # 会话中 ``request_for`` 的冻结快照就是本次实际生效值，PPM 回填时
+        # 直接读它（见 _restore_ppm_display），不再另存 _last_ppm_applied。
         if not caps["ppm"]:
             _skip("PPM")
-            self._last_ppm_applied = None
         else:
-            self._last_ppm_applied = (int(ppm) if
-                                      _run("PPM", lambda: backend.set_ppm(ppm))
-                                      else None)
+            _run("PPM", lambda: backend.set_ppm(ppm))
         # 「不支持」≠「未生效」：能力探测为假就直接跳过，既不下发也不记失败，
         # 并把控件置灰写明原因——不许留一个能点、点了没反应的开关。
         if not caps["offset_tuning"]:
@@ -7927,7 +7952,9 @@ class MainWindow(QMainWindow):
             value = None if db is None else float(db)
         except (TypeError, ValueError):
             value = None
-        self._gain_intent_db = value
+        # 不在本类另存副本：唯一真值是 connect_request_store（会话中
+        # request_for 返回冻结生效值，会话外 intent_for 是最新意图），
+        # 状态面板只作为消费方接收这次推送。
         sp = getattr(self, "status_panel", None)
         if sp is not None and hasattr(sp, "set_gain_intent"):
             sp.set_gain_intent(value)
@@ -7979,6 +8006,18 @@ class MainWindow(QMainWindow):
 
     @Slot(int)
     def _on_gain_changed(self, db: int):
+        # 会话占用期间是写门：拒绝 + 可读原因。硬件一个字节都不碰、不落盘，
+        # 滑杆回到本次会话的生效值（gate.request），不停在被拒的新值上。
+        key = self._session_store_key()
+        if key is not None:
+            gate = _req_store.update(key, gain_db=float(db))
+            if gate.rejected:
+                self._set_gain_intent(gate.request.gain_db)
+                cp = getattr(self, "control_panel", None)
+                if cp is not None and gate.request.gain_db is not None:
+                    cp.set_gain(gate.request.gain_db)
+                self.statusBar().showMessage(gate.reason, MSG_NORMAL)
+                return
         # 用户拖动滑杆 = 意图产生点：先记下来，再碰硬件。失败时读数会回到
         # 设备真实值，而意图仍是 db，三块面板据此一起标「未生效」。
         self._set_gain_intent(float(db))
@@ -8000,11 +8039,9 @@ class MainWindow(QMainWindow):
             # 成功也必须读回：后端会静默夹值（请求 49 dB 实际 33 dB），
             # 标签要显示硬件真实值，配置仍保留用户意图（下面的落盘是 db）。
             self._show_real_gain(backend)
-        if self._worker:
-            try:
-                self._worker.request_tool.emit("sdr_set_gain", {"gain_db": float(db)})
-            except Exception:
-                pass
+        # 只有一条下发路径：上面的 backend.set_gain 就是唯一落点。
+        # 再 emit 一次 request_tool 会让同一个意图下发两遍（工具层调的是
+        # 同一个 backend 对象），失败时也会把一次失败记成两次。
         # 持久化：LNA 增益（仅真实成功后落盘）
         try:
             self.settings.set("gain_db", float(db))
@@ -8192,6 +8229,16 @@ class MainWindow(QMainWindow):
         rate = float(rate_hz)
         if rate <= 0.0:
             return
+        # 会话占用期间是写门（gpredict 第三档）：拒绝 + 可读原因。硬件、
+        # _record_sr、流水线与 settings 一律不动，下拉回到本次会话生效值。
+        key = self._session_store_key()
+        if key is not None:
+            gate = _req_store.update(key, sample_rate_hz=rate)
+            if gate.rejected:
+                self._sync_sample_rate_display_from_backend(
+                    gate.request.sample_rate_hz)
+                self.statusBar().showMessage(gate.reason, MSG_NORMAL)
+                return
         # 幂等 + 即时反馈：下拉的程序化回填、恢复配置、用户连拨都会重复发
         # 同一个速率。旧实现每次都同步 stop+重建整条流水线（含线程 join），
         # 在主线程上就是用户说的「调采样率有时原地不动」。同值直接返回；
@@ -8424,33 +8471,51 @@ class MainWindow(QMainWindow):
         backend = self._active_sdr_backend
         if backend is None:
             return
+        key = self._session_store_key()
+        if key is not None:
+            before = _req_store.intent_for(key).ppm
+            gate = _req_store.update(key, ppm=int(ppm))
+            if gate.rejected:
+                # 会话占用：回填冻结生效值，硬件一个字节都不碰、不落盘。
+                self._restore_ppm_display()
+                self.statusBar().showMessage(gate.reason, MSG_NORMAL)
+                return
+        else:
+            before = None
         if not self._backend_capability("ppm"):
             self.statusBar().showMessage(
                 "本设备不支持 PPM 校正（已跳过，未下发）", MSG_NORMAL)
-            self._restore_ppm_display()
+            self._restore_ppm_display(before)
             return
         set_ppm = getattr(backend, "set_ppm", None)
         if not callable(set_ppm):
             self.statusBar().showMessage(
                 "PPM 未下发：当前后端不支持 PPM 校正", MSG_IMPORTANT)
-            self._restore_ppm_display()
+            self._restore_ppm_display(before)
             return
-        if self._apply_hw_action("设置 PPM", lambda: set_ppm(int(ppm))):
-            self._last_ppm_applied = int(ppm)
-        else:
+        if not self._apply_hw_action("设置 PPM", lambda: set_ppm(int(ppm))):
             # 失败后控件必须回到最后生效值（没有回读接口）；停在请求值就是
             # 显示一个设备从未接受的数。
-            self._restore_ppm_display()
+            self._restore_ppm_display(before)
 
-    def _restore_ppm_display(self) -> None:
-        """把 PPM 控件回填到最后确认生效值；从未确认过则退连接默认 0。"""
+    def _restore_ppm_display(self, revert=_UNSET) -> None:
+        """把 PPM 控件回填到最后确认生效值；从未确认过则退连接默认 0。
+
+        唯一来源是请求存储：会话中 ``request_for`` 返回冻结的本次生效值，
+        会话外返回最新意图——不再在 main_window 另存 ``_last_ppm_applied``。
+        ``revert`` 显式给出时优先：本次请求已被设备拒收，写前意图
+        （``intent_for``）才代表「上一次被接受的值」；传 None 表示从未生效。
+        """
         cp = getattr(self, "control_panel", None)
         if cp is None:
             return
-        revert = self._last_ppm_applied
+        if revert is _UNSET:
+            key = self._session_store_key()
+            revert = (_req_store.request_for(key).ppm
+                      if key is not None else None)
         if revert is None:
             revert = 0
-        cp.set_ppm_applied(revert)
+        cp.set_ppm_applied(int(revert))
 
     @Slot(bool)
     def _on_offset_tuning_changed(self, enabled: bool):
@@ -8521,6 +8586,16 @@ class MainWindow(QMainWindow):
             bw = float(bw_hz)
         except Exception:
             return False
+        # 会话占用期间写门：拒绝 + 可读原因；硬件/本地 _vfo_bw/settings 全不动。
+        key = self._session_store_key()
+        if key is not None:
+            gate = _req_store.update(key, bandwidth_hz=bw)
+            if gate.rejected:
+                if gate.request.bandwidth_hz is not None:
+                    self.control_panel.set_vfo_bandwidth(
+                        gate.request.bandwidth_hz)
+                self.statusBar().showMessage(gate.reason, MSG_NORMAL)
+                return False
         backend = self._active_sdr_backend
         if backend is not None:
             if not self._apply_hw_action(
@@ -8877,6 +8952,20 @@ class MainWindow(QMainWindow):
                 requested = float(params.get("gain_db"))
             except (TypeError, ValueError):
                 return
+            # 会话占用期间写门：被拒就用冻结生效值回显，不把 AI 的请求值
+            # 写进意图/滑杆（否则三块面板会一起显示一个没生效的数）。
+            key = self._session_store_key()
+            if key is not None:
+                gate = _req_store.update(key, gain_db=requested)
+                if gate.rejected:
+                    self.statusBar().showMessage(gate.reason, MSG_NORMAL)
+                    if gate.request.gain_db is None:
+                        self._set_gain_intent(None)
+                        backend = getattr(self, "_active_sdr_backend", None)
+                        if backend is not None:
+                            self._show_real_gain(backend)
+                        return
+                    requested = float(gate.request.gain_db)
             slider = getattr(self.control_panel, "gain_slider", None)
             if slider is not None:
                 slider.blockSignals(True)
