@@ -41,25 +41,16 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 
-try:
-    from skyfield.api import EarthSatellite, Topos, Time, load as _sky_load
-    _HAS_SKYFIELD = True
-except ImportError:  # skyfield 属 satellite 可选依赖组；缺它模块仍可导入
-    EarthSatellite = None  # type: ignore[assignment,misc]
-    Topos = None  # type: ignore[assignment,misc]
-    Time = None  # type: ignore[assignment,misc]
-    _sky_load = None  # type: ignore[assignment]
-    _HAS_SKYFIELD = False
-
 from datetime import datetime, timezone
 
-
-def _require_skyfield() -> None:
-    """skyfield 缺失时给出可操作的诚实报错（而非 AttributeError: NoneType）。"""
-    if not _HAS_SKYFIELD:
-        raise ImportError(
-            "skyfield 未安装：过境预报/多普勒曲线需要它"
-            "（pip install 'mbdsdr_ai[satellite]' 或 pip install skyfield）")
+# skyfield 兼容层是零内部依赖叶子；原位再导出，既有
+# `sat_passes.make_timescale` / `sat_passes._require_skyfield` 调用方不变。
+try:
+    from .skyfield_compat import (EarthSatellite, Topos, Time, _HAS_SKYFIELD,
+                                  _sky_load, _require_skyfield, make_timescale)
+except ImportError:  # 旧脚本以扁平模块方式 import sat_passes
+    from skyfield_compat import (EarthSatellite, Topos, Time, _HAS_SKYFIELD,
+                                 _sky_load, _require_skyfield, make_timescale)
 
 __all__ = [
     "GroundStation",
@@ -294,14 +285,6 @@ def clamp_pass_window_hours(hours: Any) -> float:
 # predict_passes()，导致"下一次过境"这条链与直接预测拿到两个门。
 VISIBLE_MIN_ALT_DEG = 5.0
 PASS_MIN_ALT_DEG = 10.0
-
-
-def make_timescale():
-    """返回 skyfield 时间系统（缓存，避免重复加载 ephemeris/UT1 表）。"""
-    if not hasattr(make_timescale, "_ts"):
-        _require_skyfield()
-        make_timescale._ts = _sky_load.timescale()
-    return make_timescale._ts
 
 
 @dataclass

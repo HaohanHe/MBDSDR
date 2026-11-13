@@ -21,6 +21,8 @@ import urllib.request
 import ssl
 from datetime import datetime, timezone, timedelta
 
+from .tle_epoch import parse_tle_epoch  # noqa: F401  (原位再导出，identity 不变)
+
 CELESTRAK_BASE = "https://celestrak.org/NORAD/elements/gp.php"
 
 # 默认关注卫星列表 (名称, NORAD CATNR)
@@ -375,44 +377,6 @@ class TLEManager:
 # 不建议用于对准。这里取 7 天作为"新鲜/陈旧"分界（保守，便于 SDR 对准）。
 # 该常量是全仓唯一阈值，predict_passes_report 与日志/测试共用。
 TLE_FRESHNESS_MAX_DAYS = 7.0
-
-
-def _is_leap_year(year: int) -> bool:
-    """公历闰年（4 年一闰，百年不闰，四百年再闰）。"""
-    return (year % 4 == 0 and year % 100 != 0) or (year % 400 == 0)
-
-
-def parse_tle_epoch(line1: str) -> Optional[datetime]:
-    """从 TLE 第 1 行解析历元（epoch）为 UTC datetime。
-
-    TLE 第 1 行历元占**固定列**第 19–32 列（1 基），格式 ``YYDOO.DDDDDDDD``：
-    两位年份 + 一年中的第几天（含小数）。按 Spacetrack Report #3 的列布局取子串，
-    不依赖空格分词（intl designator 等字段间空格数不固定）。
-    yy>=57 归 1900s，否则 2000s。解析失败返回 None —— 调用方据此标 "none"，绝不猜历元。
-    """
-    if not line1 or not line1.startswith("1 "):
-        return None
-    # 固定列：第 19~32 列（0 基 [18:32]）
-    if len(line1) < 32:
-        return None
-    ep = line1[18:32].strip()
-    try:
-        if len(ep) < 5 or "." not in ep:
-            return None
-        yy = int(ep[0:2])
-        doy = float(ep[2:])
-    except (ValueError, IndexError):
-        return None
-    year = (1900 + yy) if yy >= 57 else (2000 + yy)
-    if doy <= 0:
-        return None
-    # 年积日越界（如 DDD=367）必须判解析失败，不能顺延到下一年冒充历元。
-    max_doy = 366.0 if _is_leap_year(year) else 365.0
-    if doy >= max_doy + 1.0:
-        return None
-    # doy=1.0 = 1 月 1 日 00:00；(doy-1) 天后的小数时刻
-    base = datetime(year, 1, 1, tzinfo=timezone.utc)
-    return base + timedelta(days=(doy - 1.0))
 
 
 def tle_age_days(line1: str,

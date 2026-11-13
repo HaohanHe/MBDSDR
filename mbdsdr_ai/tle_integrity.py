@@ -26,7 +26,7 @@ from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
-from .new_spacetime_tle import parse_tle_epoch
+from .tle_epoch import parse_tle_epoch
 
 __all__ = [
     "CatalogEntry",

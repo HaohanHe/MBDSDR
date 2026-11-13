@@ -185,11 +185,16 @@ def propagate_state_and_stm(
 def pseudorange_rate_and_jacobian(
     sat_state_ecef: np.ndarray,
     receiver_ecef: np.ndarray,
+    receiver_velocity: Optional[np.ndarray] = None,
 ) -> Tuple[float, np.ndarray]:
-    """伪距率观测模型：rate = los·v + c·clock_drift。
+    """伪距率观测模型：rate = los·(v_sat − v_rx) + clock_drift。
 
     sat_state_ecef: 7 维 ECEF 卫星状态（含 clock_drift）。
     receiver_ecef: 3 维 ECEF 接收机位置。
+    receiver_velocity: 3 维 ECEF 接收机速度；``None`` 表示静止接收机。
+        两种形态共用同一实现：此前 orbit_determination 另有一份 3 参版本，
+        orbit_dynamics 用函数体内 import 反向取它；两份公式一旦只改一处，
+        先验传播与观测模型就会不自洽（多普勒定轨发散的常见根因）。
     返回 (伪距率 m/s, 对 7 维状态的 1x7 雅可比)。
     """
     state = np.asarray(sat_state_ecef, dtype=float)
@@ -200,11 +205,14 @@ def pseudorange_rate_and_jacobian(
         raise ValueError("卫星与接收机距离异常")
 
     los = rel / dist
+    v_rel = state[3:6]
+    if receiver_velocity is not None:
+        v_rel = v_rel - np.asarray(receiver_velocity, dtype=float)
     # 单位统一：状态为 km / km/s；第 7 维 = 速率偏置 b（km/s），
     # 直接相加（不乘光速），与 orbit_determination 的第 7 维语义一致。
-    estimate = float(los @ state[3:6] + state[6])
+    estimate = float(los @ v_rel + state[6])
     jac = np.zeros(7)
-    jac[:3] = ((np.eye(3) - np.outer(los, los)) @ state[3:6]) / dist
+    jac[:3] = ((np.eye(3) - np.outer(los, los)) @ v_rel) / dist
     jac[3:6] = los
     jac[6] = 1.0
     return estimate, jac
@@ -403,12 +411,8 @@ def reference_epoch_rls_recursive(state, P, reference_timestamp, observations,
 
     def _predict(state):
         """按当前模型口径预测伪距率与雅可比（2 参/3 参统一入口）。"""
-        if use_receiver_velocity:
-            from .orbit_determination import (pseudorange_rate_and_jacobian
-                                              as _jac_rx)
-            est, Hj = _jac_rx(state, rec, rx_vel)
-        else:
-            est, Hj = pseudorange_rate_and_jacobian(state, rec)
+        est, Hj = pseudorange_rate_and_jacobian(
+            state, rec, rx_vel if use_receiver_velocity else None)
         if clock_fixed:
             # 钟差不参与估计（初值即校时偏置）：雅可比的第 7 列清零
             Hj = np.asarray(Hj, dtype=float).copy()

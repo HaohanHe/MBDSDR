@@ -829,7 +829,7 @@ def save_png(image: np.ndarray, path: str) -> str:
 def register_tool_registry(registry) -> None:
     """把风云卫星接收工具注册到 MBDSDR ToolRegistry。"""
     import json as _json
-    from .tool_registry import ToolResult
+    from .tool_results import ToolResult
 
     def _fy4_handler(args):
         try:
@@ -853,7 +853,7 @@ def register_tool_registry(registry) -> None:
         """
         import base64
         import json as _json
-        from .tool_registry import ToolResult
+        from .tool_results import ToolResult
 
         iq_path = args.get("iq_path")
         iq_b64 = args.get("iq_base64")

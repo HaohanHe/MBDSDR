@@ -1034,7 +1034,7 @@ def doppler_orbit_determine(observations: List[Tuple[float, float]],
 
 def register_tool_registry(registry) -> None:
     """把多普勒定轨 / LRO 跟踪工具注册到 MBDSDR ToolRegistry。"""
-    from .tool_registry import ToolResult, clean_exc
+    from .tool_results import ToolResult, clean_exc
 
     def _latlon(args: Dict[str, Any]):
         """地面站坐标：优先用 args 显式传入；否则从 ~/.mbdsdr/config.json 读；

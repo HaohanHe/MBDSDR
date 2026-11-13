@@ -394,7 +394,7 @@ def evaluate_from_tle(
     TimeEngine。TLE 解析/传播失败抛异常，绝不返回假状态。
     """
     ts, _source = _resolve_unix(at_unix, time_engine)
-    from .sat_passes import _require_skyfield, make_timescale
+    from .skyfield_compat import _require_skyfield, make_timescale
     _require_skyfield()
     from skyfield.api import EarthSatellite  # local import：可选依赖
 

@@ -198,3 +198,102 @@
    （已清 4：`goes_lrit`×2、`rtklib_adapter`、`rtl433_decoder`）。
 3. **`from .. import x`** 与 **import 别名** 这两条解析规则，已写进本文件；
    实现新检查时不要重写第三遍。
+
+## 六、2026-11-13 D1 环收口实测（D1环收口线）
+
+> **口径现状（以 HEAD `238da1c7` 为准）**：`D1-cycle` 只把**模块顶层执行**的
+> import 算成环边；函数体内的延迟 import 不进环，单列 facts
+> 「延迟 import 强连通组」。**但顶层/延迟互指仍报**：A→B 是顶层 import、B→A
+> 只出现在函数体内时照样报 `D1-cycle`（severity 复核）——延迟 import 不能成为
+> 真环的藏身处。实测：
+> - 模块级 import 环 **0**；顶层/延迟互指对 **3**（均在 SDR 子系统，见 6.4，
+>   非本批改动引入）；延迟组 **1 块 / 15 成员 / 37 条内部边**；
+> - 本节 6.1/6.2 的 SCC 与割数是**含延迟边的历史测量**，用于说明「再往下是
+>   业务耦合」，不代表模块级违规；
+> - 6.3 的 `D1-cycle` 豁免登记不再需要，但 6.4 那 3 条互指对是现行违规。
+
+### 6.1 5 块已清零（3 刀，均行为不变）
+
+| 刀 | 落点 | 做法 | 站点 |
+|---|---|---|---|
+| 1 | `fengyun_sat → tool_registry` | `ToolResult` 改引零依赖叶子 `mbdsdr_ai/tool_results.py`；`tool_registry` 原位再导出，identity 不变 | 2 |
+| 2 | `orbit_determination → tool_registry` | `ToolResult`/`clean_exc` 同上 | 1 |
+| 3 | `orbit_dynamics → orbit_determination` | 删掉函数体内 `pseudorange_rate_and_jacobian` 反向 import；`orbit_dynamics` 本地的同名观测模型加可选 `receiver_velocity`（`None` = 原 2 参路径），两参/三参共用一份公式 | 1 |
+
+实测：`pytest tests/test_orbit_dynamics.py tests/test_orbit_determination.py`
+15 passed；`test_fy4_iq_chain/test_fengyun/test_fengyun_dvbs2/test_tool_result_contract/test_tool_result_honesty`
+82 passed。观测模型与 `orbit_determination` 三参版本 200 组随机样本
+`max abs diff = 6.5e-19`（双精度舍入，源于把两项等价公式统一实现）。
+旧口径下 D1-cycle 由 2 条 → 1 条，5 块整体消失（现行模块级口径下本来就是 0）。
+
+> 落库前复验（2026-11-13 19:04，收尸线）：上述两条命令按原文复跑，
+> `15 passed`、`82 passed` 与记录一致（记录里 81 passed / 1 failed 的那条
+> `test_sdr_list_devices_never_fabricates` 转绿靠的是**工作区在途、不属本批**
+> 的 `mbdsdr_ai/sdr_backend.py` 里 `MBDSDR_NO_HW` 短路；该文件归另一条线，
+> 需在其落库后复跑这条用例确认。等价性另取 200 组随机
+> 样本（`numpy.random.default_rng(7)`）复得 `max abs diff = 8.7e-19`，
+> 与记录值同一量级；两参路径与三参 `None` 路径逐组差为 0。
+
+### 6.2 16 块：本批安全抽叶子 3 刀，残量 15 成员 / 37 边 / 拆环最少删 6 条边
+
+安全刀（均「原语下沉到零内部依赖叶子 + 原模块原位再导出」，identity 不变）：
+
+| 刀 | 落点 | 新叶子 | 站点 |
+|---|---|---|---|
+| 1 | `time_basis → new_spacetime_tle` | `mbdsdr_ai/tle_epoch.py`（`parse_tle_epoch` + `_is_leap_year`，仅 datetime） | 1 |
+| 2 | `tle_integrity → new_spacetime_tle` | 同上 | 1 |
+| 3 | `sat_illumination → sat_passes` | `mbdsdr_ai/skyfield_compat.py`（`_require_skyfield`/`make_timescale`/skyfield 可选依赖块） | 1 |
+
+`time_basis` 因此退出该块。**切前实测：16 成员 / 45 条内部边**
+（45 条为去重后的 (src,dst) 对；k≤6 全枚举无解，即拆环最少要删 7 条边）。
+**切后实测：15 成员 / 37 条内部边，拆环最少删 6 条边**
+（子集 DP 全枚举：|E| − 可保留无环边 = 37 − 31 = 6）。
+注意 `survey` facts 里打印的「最小割」是 **min over s≠t maxflow**（单点对最小
+割），SCC 内只要有一个成员出度 1 就是 1，不能当「拆掉整个环要删几条边」用。
+成员：`builtin_tle_meta`、`decode_router`、`decoders`、`doppler_link`、
+`new_spacetime`、`new_spacetime_tle`、`orbit`、`rtltcp_client`、
+`sat_illumination`、`sat_passes`、`sat_tracker`、`sdr_backend`、`sdr_tools`、
+`spyserver_client`、`tle_integrity`。
+
+**其余 37 条边逐条初筛：没有第二组「零行为变化抽叶子」的刀。**
+剩余边全是真业务耦合：SDR 后端基类（`rtltcp_client`/`spyserver_client`/
+`sdr_tools → sdr_backend`）、解码器注册表（`decoders ↔ decode_router`）、
+时间引擎访问器（`new_spacetime` 19 站点同一入口）、TLE 管理器
+（`builtin_tle_meta → decoders/sat_tracker/new_spacetime_tle`）、
+观测几何（`orbit → sat_illumination` 的 `evaluate_illumination` 依赖
+skyfield/时间引擎，不是纯原语）、`new_spacetime_tle.__getattr__` 兼容转发。
+**结论：再往下要改 API（注册表/基类注入），不属于本批。**
+
+- owner：公理棘轮线（D1 收口）
+- 到期：2026-11-27
+- 转绿条件：延迟组只是 facts，当前不设转绿；若口径改回「延迟边也算环」，
+  15 成员 / 37 边 / 拆环最少 6 条边按 API 改造清零。
+
+### 6.3 登记结论：不需要已知红/豁免
+
+口径改为「只认模块顶层 import」后，15 模块残量只是
+**facts「延迟 import 强连通组」**，不是违规，因此：
+
+1. ~~`docs/axioms-waivers.json` 追加 D1-cycle 豁免~~ —— **撤销，不再需要**。
+   若日后口径改回「延迟边也算环」，再按 6.2 的 15 成员 / 37 边 / 拆环最少 6 条边
+   补登记（owner：公理棘轮线，到期 2026-11-27）。
+2. `path` 存在性不变式（`unknown-path` / `line-out-of-range`）已由
+   `42df5fe3` 落地（`tools/axioms/survey.py` + `scripts/axioms.py` +
+   `selftest.py` + `docs/axioms.md`），本批无需重复实现。
+3. `docs/axioms.md` D1 小节的现行口径应为「D1-cycle 只认模块顶层 import；
+   函数体内延迟 import 单列 facts，不算环；但顶层/延迟互指仍报」——与旧口径
+   「函数体内 import 也算边」相反，落笔前须以当时 `survey.py` 为准。
+
+### 6.4 现行 3 条顶层/延迟互指（`D1-cycle`，severity 复核）
+
+实测（HEAD `238da1c7` 判据，`python scripts/axioms.py --rule D1`）：
+
+| 对 | 顶层方向 | 延迟方向 |
+|---|---|---|
+| `rtltcp_client ↔ sdr_backend` | `rtltcp_client → sdr_backend` | `sdr_backend → rtltcp_client`（函数体内） |
+| `sdr_tools ↔ sdr_backend` | `sdr_tools → sdr_backend` | `sdr_backend → sdr_tools`（函数体内） |
+| `spyserver_client ↔ sdr_backend` | `spyserver_client → sdr_backend` | `sdr_backend → spyserver_client`（函数体内） |
+
+这三条**不是本批引入**（本批未改 SDR 子系统任何文件），是判据新增「互指」
+检测后暴露的存量。修法同 6.2：把其中一个方向下沉到共同下层，或改回调/
+依赖注入——属于「再往下要改 API」，不在本批范围。

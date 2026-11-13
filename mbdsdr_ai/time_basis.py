@@ -21,9 +21,9 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
 try:
-    from .new_spacetime_tle import parse_tle_epoch
+    from .tle_epoch import parse_tle_epoch
 except ImportError:  # 旧脚本以扁平模块方式 import time_basis
-    from new_spacetime_tle import parse_tle_epoch
+    from tle_epoch import parse_tle_epoch
 
 # 显示格式化是叶子能力（time_format 不依赖任何 mbdsdr_ai 模块），放在本模块
 # 会让「只要一个 ISO 字符串」的调用方拖上整块时间系统。原处再导出，保持
