@@ -25,6 +25,9 @@
                           不猜哪个是证据，交写的人拆行或改成纯引用
 
 跳过：标题行、``` 围栏代码块、``$ git`` 证据命令行 —— 它们不是断言。
+另跳过四类「形似断言」的噪声（见 ``_is_claim_statement``）：引号内被引用的
+文案/原文、``变更正确跟随`` 这类跨词巧合、``…的更正``/``更正细节`` 这类
+名词化、``不冒充已收口``/``尚未修复`` 这类否定句。
 
 默认只报告、退出码 0（存量 92 条待各线认领）；``--fail-on-unverified``
 供存量清零后接 CI。``--check-lines`` 默认也只报，``--strict-lines`` 才参与退出码
@@ -45,6 +48,12 @@ from typing import Dict, List, Optional, Tuple
 ROOT = Path(__file__).resolve().parents[1]
 
 CLAIM_RE = re.compile(r"(已修复|已提交|已落地|已收口|已补齐|已解决|已修|已改|更正)")
+#: 引号内是「被引用的文案/原文」（产品提示、文档状态词），不是本文件的断言。
+_QUOTED_RE = re.compile(r"「[^」]*」|『[^』]*』|“[^”]*”|‘[^’]*’|\"[^\"]*\"")
+#: 「更正」作名词时的后缀（`更正细节`、`更正的说明`）——不是纠正动作。
+_NOUN_SUFFIXES = ("细节", "内容", "记录", "说明", "通知", "事项", "请求", "单")
+#: 否定/存疑标记：`不冒充已收口`、`尚未修复`、`没有已解决`。
+_NEG_MARKERS = ("不", "未", "没", "勿")
 HASH_RE = re.compile(r"\b([0-9a-f]{7,40})\b")
 PATHLINE_RE = re.compile(
     r"([A-Za-z0-9_./\\-]+\.(?:py|md|json|yaml|yml|ts|dart|cpp|c|h|hpp))"
@@ -413,6 +422,38 @@ def _doc_sources(docs_root: Path, recursive: bool, root: Optional[Path],
     return picked
 
 
+def _is_claim_statement(text: str) -> bool:
+    """这一行是不是「本文件声称某处已被改过」的断言。
+
+    四类形似断言但不是（2026-11-13 收紧；误报会把真断言淹掉）：
+
+    1. **引号内文案**——被引用的产品提示、文档原文（``「…已改为…」``）；
+    2. **跨词巧合**——``变更正确跟随`` 里的「更正」不是纠正动作；
+    3. **名词化**——``…的更正`` / ``更正细节`` / ``已提交内容``；
+    4. **否定句**——``不冒充已收口`` / ``尚未修复``。
+
+    只决定「进不进扫描集」；进来之后仍要过三步核验，不会因此变绿。
+    """
+    # 显式证据段（``〔证：…〕``）+ 触发词：这一行已被写的人指认为证据，
+    # 即使触发词落在引号里，也不能因为噪声规则被整行丢掉。
+    # 反之，光有 〔证〕 没有触发词的行（如证据索引表）本来就从不入集，不在此列。
+    if CLAIM_RE.search(text) and _evidence_quads(text):
+        return True
+    scan = _QUOTED_RE.sub(" ", text)
+    for m in CLAIM_RE.finditer(scan):
+        token, start, end = m.group(0), m.start(), m.end()
+        nxt = scan[end:]
+        if token == "更正" and (scan[start - 1:start] in "变纠修校更"
+                                or nxt[:1] in "确式文"):
+            continue
+        if nxt[:1] == "的" or nxt[:2] in _NOUN_SUFFIXES:
+            continue
+        if any(mark in scan[max(0, start - 3):start] for mark in _NEG_MARKERS):
+            continue
+        return True
+    return False
+
+
 def iter_claim_lines(docs_root: Path, recursive: bool = False,
                      root: Optional[Path] = None,
                      source: str = "worktree") -> List[tuple]:
@@ -451,7 +492,7 @@ def iter_claim_lines(docs_root: Path, recursive: bool = False,
                 m = BASELINE_RE.search(s)
                 heading_baseline = m.group(1) if m else ""
                 continue
-            if CLAIM_RE.search(s):
+            if _is_claim_statement(s):
                 m = BASELINE_RE.search(s)
                 baseline = m.group(1) if m else (heading_baseline or doc_baseline)
                 out.append((rel, i, s, heading, baseline))

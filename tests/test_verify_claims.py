@@ -149,8 +149,8 @@ def test_all_digit_date_is_not_a_hash():
     assert c.status == vc.NO_HASH
 
 
-def test_real_claim_still_caught_after_negation_decision(tmp_path):
-    """裁定「不加否定跳过规则」的反证①：真断言 `已收口` 仍必须被抓并可证实。"""
+def test_real_claim_still_caught_after_noise_rules(tmp_path):
+    """噪声规则的反证①：真断言 `已收口` 仍必须被抓并可证实。"""
     repo, h = _repo(tmp_path, {"src/foo.py": "MAGIC_TOKEN = 42\n"})
     _write_doc(repo, f"- 已收口 — `{h}` — src/foo.py:1 — `MAGIC_TOKEN`\n")
     claims = vc.verify_docs(repo, repo / "docs")
@@ -158,13 +158,57 @@ def test_real_claim_still_caught_after_negation_decision(tmp_path):
     assert claims[0].status == vc.OK
 
 
-def test_negated_claim_is_not_silently_green(tmp_path):
-    """裁定「靠人工复核兜底」的反证②：否定句仍进扫描集判红，不静默转绿。"""
+def test_negated_claim_is_not_scanned_but_positive_is(tmp_path):
+    """否定句不是断言（2026-11-13 收紧）；去掉否定词后必须重新入集。
+
+    只验一半（否定句不入集）等于把规则收窄到失效；另一半是这个用例的意义：
+    同一句话变成肯定断言时仍要判「无 hash」。
+    """
     repo, _ = _repo(tmp_path, {"src/foo.py": "MAGIC_TOKEN = 42\n"})
-    _write_doc(repo, "- 表中各项是**明确登记的另一些测量点/死参数**，处置如上，不冒充已收口。\n")
+    doc = _write_doc(repo, "- 表中各项是**明确登记的另一些测量点/死参数**，处置如上，不冒充已收口。\n")
+    assert vc.verify_docs(repo, repo / "docs") == []
+    doc.write_text("- 表中各项已收口，处置如上。\n", encoding="utf-8")
+    assert [c.status for c in vc.verify_docs(repo, repo / "docs")] == [vc.NO_HASH]
+
+
+def test_quoted_product_copy_is_not_a_claim(tmp_path):
+    """引号内是被引用的产品文案，不是本文件的断言。"""
+    repo, _ = _repo(tmp_path, {"src/foo.py": "MAGIC_TOKEN = 42\n"})
+    _write_doc(repo, (
+        "- 提示文案：「平滑跟随跟不上，已改为逐帧直贴」。\n"
+        "-（“启动时已修正配置：…”），不静默写日志。\n"
+    ))
+    assert vc.verify_docs(repo, repo / "docs") == []
+
+
+def test_cross_word_correction_is_not_a_claim(tmp_path):
+    """`变更正确跟随` 里的「更正」是跨词巧合，不是纠正动作。"""
+    repo, _ = _repo(tmp_path, {"src/foo.py": "MAGIC_TOKEN = 42\n"})
+    _write_doc(repo, "- 两次采样率分别为 2,400,000 / 1,200,000（变更正确跟随）。\n")
+    assert vc.verify_docs(repo, repo / "docs") == []
+
+
+def test_nominalized_correction_is_not_a_claim(tmp_path):
+    """`更正细节` / `已提交内容` 是名词，不是「我改过」的断言。"""
+    repo, _ = _repo(tmp_path, {"src/foo.py": "MAGIC_TOKEN = 42\n"})
+    _write_doc(repo, (
+        "**S12 更正细节**：上一轮记为「无」。\n"
+        "撤销已提交内容只有两个合法动作：\n"
+    ))
+    assert vc.verify_docs(repo, repo / "docs") == []
+
+
+def test_evidence_segment_keeps_line_with_quoted_trigger(tmp_path):
+    """反证②：触发词在引号里但有 〔证：…〕 的行，不得被噪声规则整行丢掉。"""
+    repo, h = _repo(tmp_path, {"src/foo.py": "MAGIC_TOKEN = 42\n"})
+    _write_doc(repo, (
+        "| 检查器 | 结果 | 备注 |\n"
+        "|---|---|---|\n"
+        f"| 红项 | 待复核 | 含「已修缺 hash」一类"
+        f"〔证：`{h}` — `src/foo.py:1` — `MAGIC_TOKEN`〕 |\n"
+    ))
     claims = vc.verify_docs(repo, repo / "docs")
-    assert len(claims) == 1
-    assert claims[0].status == vc.NO_HASH
+    assert [c.status for c in claims] == [vc.OK]
 
 
 def test_line_check_contains_literal(tmp_path):
