@@ -21,12 +21,11 @@ ISS_L1 = "1 25544U 98067A   08264.51780074  .00016553  00000-0  10270-3 0  2897"
 ISS_L2 = "2 25544  51.6400 247.4627 0006703 130.5360 325.0288 15.72125391563530"
 
 
-def _fixed_datetime_class(fixed):
-    class _FixedDateTime(datetime):
-        @classmethod
-        def now(cls, tz=None):
-            return fixed
-    return _FixedDateTime
+def _pin_engine(fixed):
+    """把全局 TimeEngine 钉在固定时刻（F1 之后预测起点只认 TimeEngine）。"""
+    from mbdsdr_ai.new_spacetime import get_time_engine
+
+    get_time_engine().set_unix(fixed.timestamp())
 
 
 def _tle_entry():
@@ -50,10 +49,9 @@ def panel(qapp, isolated_profile):
 
 def test_panel_shows_expired_tle_warning(panel, monkeypatch):
     from desktop import new_spacetime_panel as nsp
-    import mbdsdr_ai.new_spacetime_timeline as nst
 
     fixed = datetime(2009, 9, 20, 6, 0, 0, tzinfo=timezone.utc)
-    monkeypatch.setattr(nst, "datetime", _fixed_datetime_class(fixed))
+    _pin_engine(fixed)
     panel._settings = {"pass_window_hours": 24,
                        "pass_min_elevation_deg": 10.0,
                        "show_low_elevation_passes": False}
@@ -82,10 +80,8 @@ def test_panel_shows_expired_tle_warning(panel, monkeypatch):
 def test_panel_shows_null_island_warning(panel, monkeypatch):
     """显式 (0,0) 照常算过境，但用户必须看见「位置可疑」的原话。"""
     from desktop import new_spacetime_panel as nsp
-    import mbdsdr_ai.new_spacetime_timeline as nst
 
-    monkeypatch.setattr(nst, "datetime", _fixed_datetime_class(
-        datetime(2008, 9, 20, 6, 0, 0, tzinfo=timezone.utc)))
+    _pin_engine(datetime(2008, 9, 20, 6, 0, 0, tzinfo=timezone.utc))
     panel._settings = {"pass_window_hours": 24,
                        "pass_min_elevation_deg": 10.0,
                        "show_low_elevation_passes": False}

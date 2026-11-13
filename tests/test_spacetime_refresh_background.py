@@ -111,17 +111,13 @@ def test_failure_in_worker_is_visible_and_button_recovers(panel, monkeypatch, qa
 def test_sync_api_still_refreshes_for_direct_callers(panel, monkeypatch):
     """设置面板应用后直接调用 refresh_passes 仍需同步生效。"""
     from desktop import new_spacetime_panel as nsp
-    import mbdsdr_ai.new_spacetime_timeline as nst
-
-    class _FixedDateTime(datetime):
-        @classmethod
-        def now(cls, tz=None):
-            return datetime(2008, 9, 20, 6, 0, 0, tzinfo=timezone.utc)
+    from mbdsdr_ai.new_spacetime import get_time_engine
 
     panel.set_observer(0.0, 0.0, 0.0)
     monkeypatch.setattr(nsp, "DEFAULT_SATELLITES", [(ISS_NAME, 25544)])
     monkeypatch.setattr(panel._tle_mgr, "fetch", lambda *_a, **_k: _tle_entry())
-    monkeypatch.setattr(nst, "datetime", _FixedDateTime)
+    get_time_engine().set_unix(
+        datetime(2008, 9, 20, 6, 0, 0, tzinfo=timezone.utc).timestamp())
 
     panel.refresh_passes()
 

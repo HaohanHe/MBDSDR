@@ -44,13 +44,11 @@ def panel(qapp):
     p.close()
 
 
-def _fixed_datetime_class():
-    class _FixedDateTime(datetime):
-        @classmethod
-        def now(cls, tz=None):
-            return FIXED_UTC
+def _pin_engine(fixed=FIXED_UTC):
+    """把全局 TimeEngine 钉在固定时刻（F1 之后预测起点只认 TimeEngine）。"""
+    from mbdsdr_ai.new_spacetime import get_time_engine
 
-    return _FixedDateTime
+    get_time_engine().set_unix(fixed.timestamp())
 
 
 def _tle_entry():
@@ -99,7 +97,6 @@ def test_no_station_hint(panel, monkeypatch):
 def test_null_island_is_a_legal_station(panel, monkeypatch):
     """显式设置 (0,0) 必须照常算过境：实测 24h/10° 门内 2 条。"""
     from desktop import new_spacetime_panel as nsp
-    import mbdsdr_ai.new_spacetime_timeline as nst
 
     panel._settings = {"pass_window_hours": 24,
                        "pass_min_elevation_deg": 10.0,
@@ -108,7 +105,7 @@ def test_null_island_is_a_legal_station(panel, monkeypatch):
     assert panel._observer_configured is True
     monkeypatch.setattr(nsp, "DEFAULT_SATELLITES", [(ISS_NAME, 25544)])
     monkeypatch.setattr(panel._tle_mgr, "fetch", lambda *_a, **_k: _tle_entry())
-    monkeypatch.setattr(nst, "datetime", _fixed_datetime_class())
+    _pin_engine()
 
     panel.refresh_passes()
 
@@ -120,7 +117,6 @@ def test_null_island_is_a_legal_station(panel, monkeypatch):
 
 def test_empty_window_hint_uses_effective_values(panel, monkeypatch):
     from desktop import new_spacetime_panel as nsp
-    import mbdsdr_ai.new_spacetime_timeline as nst
 
     panel._settings = {"pass_window_hours": 1,
                        "pass_min_elevation_deg": 10.0,
@@ -128,7 +124,7 @@ def test_empty_window_hint_uses_effective_values(panel, monkeypatch):
     panel.set_observer(39.9, 116.4, 0.0)
     monkeypatch.setattr(nsp, "DEFAULT_SATELLITES", [(ISS_NAME, 25544)])
     monkeypatch.setattr(panel._tle_mgr, "fetch", lambda *_a, **_k: _tle_entry())
-    monkeypatch.setattr(nst, "datetime", _fixed_datetime_class())
+    _pin_engine()
 
     panel.refresh_passes()
 

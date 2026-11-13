@@ -41,13 +41,15 @@ def qapp():
     yield app
 
 
-def _fixed_datetime_class():
-    class _FixedDateTime(datetime):
-        @classmethod
-        def now(cls, tz=None):
-            return FIXED_UTC
+def _pin_engine(fixed=FIXED_UTC):
+    """把全局 TimeEngine 钉在固定时刻（计算链唯一时间源）。
 
-    return _FixedDateTime
+    F1 之前这里 monkeypatch 的是 ``nst.datetime``；现在过境预测起点只认
+    TimeEngine，钉住引擎才是真正钉住面板看到的时间。
+    """
+    from mbdsdr_ai.new_spacetime import get_time_engine
+
+    get_time_engine().set_unix(fixed.timestamp())
 
 
 def _refresh(panel, monkeypatch, settings: dict):
@@ -62,7 +64,6 @@ def _refresh(panel, monkeypatch, settings: dict):
     `_settings` 直接注入：修前代码不读它（于是红），修后读它。
     """
     from desktop import new_spacetime_panel as nsp
-    import mbdsdr_ai.new_spacetime_timeline as nst
     from mbdsdr_ai.new_spacetime_tle import TLEEntry
 
     panel._settings = dict(settings)
@@ -72,7 +73,7 @@ def _refresh(panel, monkeypatch, settings: dict):
         panel._tle_mgr, "fetch",
         lambda catnr, name="": TLEEntry(name=ISS_NAME, line1=ISS_L1,
                                         line2=ISS_L2, catnr=25544))
-    monkeypatch.setattr(nst, "datetime", _fixed_datetime_class())
+    _pin_engine()
     panel.refresh_passes()
     out = {}
     for row in range(panel.passes_table.rowCount()):

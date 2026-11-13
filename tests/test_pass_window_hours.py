@@ -38,19 +38,16 @@ def qapp():
     yield app
 
 
-def _fixed_datetime_class():
-    class _FixedDateTime(datetime):
-        @classmethod
-        def now(cls, tz=None):
-            return FIXED_UTC
+def _pin_engine(fixed=FIXED_UTC):
+    """把全局 TimeEngine 钉在固定时刻（F1 之后预测起点只认 TimeEngine）。"""
+    from mbdsdr_ai.new_spacetime import get_time_engine
 
-    return _FixedDateTime
+    get_time_engine().set_unix(fixed.timestamp())
 
 
 def _refresh_panel(panel, monkeypatch, settings: dict) -> int:
     """在固定时刻跑一次 refresh_passes，返回列表条数。"""
     from desktop import new_spacetime_panel as nsp
-    import mbdsdr_ai.new_spacetime_timeline as nst
     from mbdsdr_ai.new_spacetime_tle import TLEEntry
 
     panel._settings = dict(settings)
@@ -60,7 +57,7 @@ def _refresh_panel(panel, monkeypatch, settings: dict) -> int:
         panel._tle_mgr, "fetch",
         lambda catnr, name="": TLEEntry(name=ISS_NAME, line1=ISS_L1,
                                         line2=ISS_L2, catnr=25544))
-    monkeypatch.setattr(nst, "datetime", _fixed_datetime_class())
+    _pin_engine()
     panel.refresh_passes()
     return panel.passes_table.rowCount()
 

@@ -28,21 +28,18 @@ ISS_L1 = "1 25544U 98067A   08264.51780074  .00016553  00000-0  10270-3 0  2897"
 ISS_L2 = "2 25544  51.6400 247.4627 0006703 130.5360 325.0288 15.72125391563530"
 
 
-def _fixed_datetime_class(fixed):
-    class _FixedDateTime(datetime):
-        @classmethod
-        def now(cls, tz=None):
-            return fixed
-    return _FixedDateTime
+def _pin_engine(fixed):
+    """把全局 TimeEngine 钉在固定时刻（F1 之后预测起点只认 TimeEngine）。"""
+    from mbdsdr_ai.new_spacetime import get_time_engine
+    get_time_engine().set_unix(fixed.timestamp())
 
 
 def test_timeline_marks_expired_tle(monkeypatch):
     """1 年旧的 TLE 必须在结果里带 tle_age_days / tier / 人话。"""
-    import mbdsdr_ai.new_spacetime_timeline as nst
     from mbdsdr_ai.new_spacetime_timeline import TimelineEngine
 
     fixed = datetime(2009, 9, 20, 6, 0, 0, tzinfo=timezone.utc)
-    monkeypatch.setattr(nst, "datetime", _fixed_datetime_class(fixed))
+    _pin_engine(fixed)
 
     passes = TimelineEngine().compute_passes(
         39.9, 116.4, 0.0, [(ISS_NAME, ISS_L1, ISS_L2)],
@@ -60,11 +57,10 @@ def test_timeline_marks_expired_tle(monkeypatch):
 
 def test_timeline_does_not_flag_fresh_tle(monkeypatch):
     """新鲜 TLE 不得被误标为过期（否则文案会天天报警）。"""
-    import mbdsdr_ai.new_spacetime_timeline as nst
     from mbdsdr_ai.new_spacetime_timeline import TimelineEngine
 
     fixed = datetime(2008, 9, 20, 18, 0, 0, tzinfo=timezone.utc)
-    monkeypatch.setattr(nst, "datetime", _fixed_datetime_class(fixed))
+    _pin_engine(fixed)
 
     passes = TimelineEngine().compute_passes(
         39.9, 116.4, 0.0, [(ISS_NAME, ISS_L1, ISS_L2)],
