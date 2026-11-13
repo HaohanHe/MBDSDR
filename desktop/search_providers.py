@@ -39,6 +39,7 @@ from command_palette import (
 
 __all__ = [
     "PROVIDERS",
+    "BookmarkProvider",
     "ProviderStatus",
     "SearchProvider",
     "SettingsProvider",
@@ -252,6 +253,109 @@ def _reveal_satellite(window, name: str, norad=None) -> dict:
                           resolve=lambda _w: combo, prepare=prepare)
 
 
+class BookmarkProvider(SearchProvider):
+    """书签：按名称/频率搜，命中后定位到书签列表里的那一行。"""
+
+    group = "书签"
+
+    @staticmethod
+    def _manager(window):
+        panel = getattr(window, "bookmark_panel", None)
+        if panel is None:
+            return None, None
+        return panel, getattr(panel, "_mgr", None)
+
+    def status(self, window) -> ProviderStatus:
+        if window is None:
+            return ProviderStatus()
+        panel, manager = self._manager(window)
+        if panel is None:
+            return ProviderStatus(False, "书签面板未创建：无法定位书签")
+        if manager is None:
+            # 面板自己知道原因（内核不可用 / 目录读写失败），照抄它的人话说明。
+            detail = getattr(panel, "status_label", None)
+            text = detail.text().strip() if detail is not None else ""
+            return ProviderStatus(False, text or "书签库未加载：书签内核不可用")
+        return ProviderStatus()
+
+    def commands(self, window, prior):
+        if not self.status(window).available:
+            return []
+        _panel, manager = self._manager(window)
+        try:
+            bookmarks = list(manager.all())
+        except Exception:       # 目录读取异常按「当前没有书签」处理，不产出半截索引
+            return []
+        out: List[Command] = []
+        for bm in bookmarks:
+            name = str(getattr(bm, "name", "") or "")
+            freq = int(getattr(bm, "frequency_hz", 0) or 0)
+            mode = str(getattr(bm, "modulation", "") or "")
+            group = str(getattr(bm, "group", "") or "")
+            tags = " ".join(getattr(bm, "tags", []) or [])
+            title = name or "（未命名书签）"
+            # 名称、多种频率写法、模式、分组、标签都进检索文本：
+            # 用户可能敲 145.8 / 145.8 MHz / 145800000 任一种。
+            trigger = (f"{freq / 1e6:g} MHz · {freq} Hz"
+                       + (f" · {mode}" if mode else ""))
+            out.append(Command(
+                title=title,
+                group=self.group,
+                description=(f"书签：{title}（{mode or '未设模式'}，"
+                             f"分组 {group or '未分组'}）{tags}".strip()),
+                trigger=trigger,
+                source=f"bookmark:{freq}:{name}",
+                run=lambda w=window, f=freq, n=name:
+                    _reveal_bookmark(w, f, n),
+            ))
+        return out
+
+
+def _reveal_bookmark(window, frequency_hz: int, name: str) -> dict:
+    """清过滤态、回到「全部」分组，再把列表选中到这一条书签。"""
+    from PySide6.QtCore import Qt
+
+    panel = getattr(window, "bookmark_panel", None)
+    if panel is None:
+        return {"ok": False, "status": "UNAVAILABLE",
+                "reason": "书签面板未创建：无法定位书签"}
+    manager = getattr(panel, "_mgr", None)
+    if manager is None:
+        return {"ok": False, "status": "UNAVAILABLE",
+                "reason": "书签库未加载：书签内核不可用"}
+    try:
+        entries = list(manager.all())
+    except Exception:
+        entries = []
+    if not any(int(getattr(b, "frequency_hz", -1)) == int(frequency_hz)
+               and str(getattr(b, "name", "") or "") == name
+               for b in entries):
+        return {"ok": False, "status": "UNAVAILABLE",
+                "reason": "这条书签已不存在：可能刚被删除，重新输入关键词可刷新"}
+
+    def prepare(_window) -> None:
+        panel.group_list.setCurrentRow(0)          # 「全部」分组
+        if panel.search_box.text():
+            panel.search_box.clear()               # 触发 refresh_list
+        else:
+            panel.refresh_list()
+        target = None
+        for i in range(panel.tree.topLevelItemCount()):
+            item = panel.tree.topLevelItem(i)
+            data = item.data(0, Qt.UserRole) or {}
+            if (int(data.get("frequency_hz", -1)) == int(frequency_hz)
+                    and str(data.get("name") or "") == name):
+                target = item
+                break
+        if target is not None:
+            panel.tree.setCurrentItem(target)
+            panel.tree.scrollToItem(target)
+
+    # 右栏页签身份由 _add_right_tab 从 "bookmark_dock" 推导成 "bookmark"。
+    return _jump_to_right(window, "bookmark", name or "（未命名书签）",
+                          resolve=lambda _w: panel.tree, prepare=prepare)
+
+
 #: 声明式注册表：新增一类搜索源 = 在这里加一个 provider，搜索框不用改。
 PROVIDERS: Tuple[SearchProvider, ...] = (
     _MenuProvider(),
@@ -261,4 +365,5 @@ PROVIDERS: Tuple[SearchProvider, ...] = (
     _ShortcutProvider(),
     SettingsProvider(),
     SatelliteProvider(),
+    BookmarkProvider(),
 )
