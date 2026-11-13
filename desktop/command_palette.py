@@ -3,12 +3,19 @@
 全局命令面板（统一索引 + 搜索 + 执行）
 ======================================
 
-一个搜索框找到四类入口，不做第二份手抄清单：
+一个搜索框找到所有入口，不做第二份手抄清单。搜索源由
+``desktop/search_providers.py`` 的声明式注册表提供，本文件只负责：
 
   * **菜单命令** ← 主窗口 ``menuBar()`` 里真实存在的 QAction（含键位）
   * **页签定位** ← 左/右栏 ``QTabWidget`` 的 tabData（如 settings_dock）
   * **能力**     ← ``desktop/capability_catalog.py``（53 项 / 8 类，注册表实时生成）
   * **快捷键**   ← ``desktop/shortcuts.py``（与菜单已重复的条目自动去重）
+  * **设置项**   ← 设置面板的每一行（定位到那一行，不只打开面板）
+  * **卫星**     ← 主窗口卫星目录（名字/编号 → 选中该星）
+
+新增一类搜索源 = 在 ``search_providers.PROVIDERS`` 加一行注册项；搜索框、
+分组渲染与键盘路径都不用改。某类当前不可用时（如卫星 TLE 未就绪）会
+单独说明原因，不混进「没有匹配」。
 
 红线：
   * 不可用项必须灰显并写原因（菜单项置灰取 tooltip，能力项取 note），
@@ -55,6 +62,7 @@ __all__ = [
     "backup_corrupt_recent",
     "build_index",
     "load_recent",
+    "provider_gaps",
     "recent_error",
     "remember_recent",
     "reset_recent",
@@ -62,7 +70,8 @@ __all__ = [
 ]
 
 #: 分组顺序（界面上按此顺序排；搜索命中后按相关度重排）
-GROUPS = ("菜单", "页签", "面板", "能力", "快捷键")
+#: 「设置项」「卫星」由 ``search_providers`` 的注册表提供，不是本文件手抄的清单。
+GROUPS = ("菜单", "页签", "面板", "能力", "快捷键", "设置项", "卫星")
 
 #: 「最近使用」落盘文件名（与 desktop_settings.json 同目录，独立小文件不碰用户设置）
 RECENT_FILENAME = "command_palette_recent.json"
@@ -572,15 +581,29 @@ def _panel_commands(window) -> List[Command]:
 
 
 def build_index(window=None) -> List[Command]:
-    """构建统一索引：菜单动作 + 页签 + 右栏定位 + 能力目录 + 快捷键。
+    """构建统一索引：遍历 ``search_providers.PROVIDERS``（声明式注册表）。
 
-    无窗口时只有能力与快捷键两类（菜单/页签/右栏定位都需要真实窗口）。
+    新增一类搜索源只需在注册表里加一个 provider；这里不写死分组清单。
+    无窗口时菜单/页签/右栏定位天然为空，能力与快捷键照旧可离线构建。
     """
-    menu = _menu_commands(window)
-    commands = (menu + _tab_commands(window) + _panel_commands(window)
-                + _capability_commands(window))
-    commands += _shortcut_commands(window, commands)
+    from search_providers import PROVIDERS
+
+    commands: List[Command] = []
+    for provider in PROVIDERS:
+        commands.extend(provider.commands(window, commands))
     return commands
+
+
+def provider_gaps(window=None) -> List[tuple]:
+    """当前不可用的搜索源 ``[(分组, 原因)]``；与「空结果」分开表达用。"""
+    from search_providers import PROVIDERS
+
+    gaps: List[tuple] = []
+    for provider in PROVIDERS:
+        status = provider.status(window)
+        if not status.available:
+            gaps.append((provider.group, status.reason or "当前不可用"))
+    return gaps
 
 
 def _fuzzy_score(text: str, q: str) -> Optional[int]:
@@ -701,12 +724,15 @@ def _build_dialog_class():
             self._return_focus = self._capture_return_focus()
             self._commands = build_index(window)
             self._results: List[Command] = []
+            #: 当前不可用的搜索源（打开面板时取一次）；与「空结果」分开展示。
+            self._gaps = provider_gaps(window)
             self.last_result: dict = {}
 
             root = QVBoxLayout(self)
             self.search_edit = QLineEdit(self)
             self.search_edit.setPlaceholderText(
-                "搜索菜单命令 / 面板页签 / 能力 / 快捷键（例如：设置、全天、FT8、Ctrl+K）")
+                "搜索菜单命令 / 设置项 / 面板页签 / 卫星 / 能力 / 快捷键"
+                "（例如：录音目录、ISS、设置、全天、Ctrl+K）")
             self.search_edit.textChanged.connect(self._refresh)
             self.search_edit.returnPressed.connect(self._on_return_pressed)
             self.search_edit.installEventFilter(self)
@@ -715,6 +741,7 @@ def _build_dialog_class():
             self.list_widget = QListWidget(self)
             self.list_widget.itemActivated.connect(self._on_item_activated)
             self.list_widget.itemClicked.connect(self._on_item_clicked)
+            self.list_widget.installEventFilter(self)
             root.addWidget(self.list_widget, stretch=1)
 
             self.reason_label = QLabel(self)
@@ -776,24 +803,75 @@ def _build_dialog_class():
         def _refresh(self, text: str) -> None:
             self._results = search_commands(self._commands, text,
                                             recent=load_recent())
-            self.list_widget.clear()
             self.reason_label.clear()
-            for cmd in self._results:
-                item = QListWidgetItem(self._item_text(cmd))
-                item.setData(Qt.UserRole, cmd)
-                if cmd.status == "unavailable":
-                    item.setForeground(Qt.gray)
-                elif cmd.status == "conditional":
-                    item.setForeground(Qt.darkYellow)
-                self.list_widget.addItem(item)
+            self._render_results()
             if self._results:
-                self.list_widget.setCurrentRow(0)
                 if not (text or "").strip():
                     self.reason_label.setText(
-                        "可执行动作（最近使用优先）：回车执行首条，"
-                        "↑↓ 选择，输入关键词过滤，Esc 关闭。")
+                        "可执行动作（按来源分组，最近使用优先）：回车执行选中项，"
+                        "↑↓ 选择，输入关键词可搜菜单命令、设置项、卫星、"
+                        "能力与快捷键，Esc 关闭。")
                 return
             self.reason_label.setText(self._no_match_hint(text))
+
+        def _render_results(self) -> None:
+            """按来源分组渲染（组标题不可选中），组序 = 首条命中出现的顺序。
+
+            组序跟着相关度走：最相关的那条仍在第一行，回车直接执行它；
+            「分组」只影响展示，不改变 ``_results`` 的排序。
+            """
+            self.list_widget.clear()
+            order: List[str] = []
+            grouped: dict = {}
+            for cmd in self._results:
+                if cmd.group not in grouped:
+                    grouped[cmd.group] = []
+                    order.append(cmd.group)
+                grouped[cmd.group].append(cmd)
+            for group in order:
+                header = QListWidgetItem(f"{group}（{len(grouped[group])}）")
+                font = header.font()
+                font.setBold(True)
+                header.setFont(font)
+                header.setForeground(Qt.gray)
+                # 组标题只是分隔符：不可选、不可点，键盘会自然跳过。
+                header.setFlags(Qt.NoItemFlags)
+                self.list_widget.addItem(header)
+                for cmd in grouped[group]:
+                    self.list_widget.addItem(self._make_item(cmd))
+            self.list_widget.setCurrentRow(self._first_selectable_row())
+
+        def _make_item(self, cmd: Command) -> QListWidgetItem:
+            item = QListWidgetItem(self._item_text(cmd))
+            item.setData(Qt.UserRole, cmd)
+            if cmd.status == "unavailable":
+                item.setForeground(Qt.gray)
+            elif cmd.status == "conditional":
+                item.setForeground(Qt.darkYellow)
+            return item
+
+        def _first_selectable_row(self) -> int:
+            """第一行真正的命令（跳过组标题）；没有结果时返回 -1。"""
+            for row in range(self.list_widget.count()):
+                if self.list_widget.item(row).data(Qt.UserRole) is not None:
+                    return row
+            return -1
+
+        def _selected_command(self):
+            """当前选中行对应的命令；落在组标题上时退回第一条结果。"""
+            item = self.list_widget.currentItem()
+            cmd = item.data(Qt.UserRole) if item is not None else None
+            if cmd is None and self._results:
+                return self._results[0]
+            return cmd
+
+        def _gaps_text(self) -> str:
+            """「该类当前不可用」的独立句子（与「没有匹配」分开表达）。"""
+            gaps = getattr(self, "_gaps", ())
+            if not gaps:
+                return ""
+            detail = "；".join(f"{group}：{reason}" for group, reason in gaps)
+            return f"另有 {len(gaps)} 类入口当前不可用（{detail}）。"
 
         def _no_match_hint(self, text: str) -> str:
             """没匹配也给下一步：拿索引里真实存在的条目举例，不写死样例。"""
@@ -809,7 +887,9 @@ def _build_dialog_class():
             tried = " ".join(f"「{t}」" for t in samples)
             head = (f"没有匹配「{(text or '').strip()}」。"
                     if (text or "").strip() else "当前没有可执行的入口。")
-            return (f"{head}试试：{tried}；按 ↑↓ 选择，Enter 执行，Esc 关闭。")
+            base = f"{head}试试：{tried}；按 ↑↓ 选择，Enter 执行，Esc 关闭。"
+            gaps = self._gaps_text()
+            return f"{base} {gaps}" if gaps else base
 
         @staticmethod
         def _item_text(cmd: Command) -> str:
@@ -844,22 +924,29 @@ def _build_dialog_class():
             return result
 
         def eventFilter(self, obj, event):
-            """↓ 从搜索框进入结果列表（回车仍由 returnPressed 负责）。"""
+            """键盘路径：Esc 退出（焦点在搜索框或列表里都生效）；↓ 进入列表。"""
+            if event.type() == QEvent.KeyPress and event.key() == Qt.Key_Escape:
+                # 不依赖「QLineEdit 会把 Esc 递给父对话框」：不同平台/控件组合
+                # 下它可能被控件吞掉，键盘用户就退出不了。
+                self.reject()
+                return True
             if obj is self.search_edit and event.type() == QEvent.KeyPress:
-                if event.key() == Qt.Key_Down and self.list_widget.count():
-                    self.list_widget.setCurrentRow(0)
+                if event.key() == Qt.Key_Down and self._results:
+                    row = self._first_selectable_row()
+                    if row >= 0:
+                        self.list_widget.setCurrentRow(row)
                     self.list_widget.setFocus()
                     return True
             return super().eventFilter(obj, event)
 
         def _on_return_pressed(self) -> None:
             """回车直接执行当前（默认第一条）结果，不必再 Tab 进列表。"""
-            item = self.list_widget.currentItem()
-            if item is None:
+            cmd = self._selected_command()
+            if cmd is None:
                 self.reason_label.setText(
                     "没有可执行的条目：先输入关键词，或在列表里选中一行。")
                 return
-            self.run_command(item.data(Qt.UserRole))
+            self.run_command(cmd)
 
         def run_first(self, query: str) -> dict:
             """测试/自动化接缝：按关键词取第一条并执行。"""
@@ -872,15 +959,19 @@ def _build_dialog_class():
             return self.run_command(self._results[0])
 
         def _on_item_activated(self, item: QListWidgetItem) -> None:
-            self.run_command(item.data(Qt.UserRole))
+            cmd = item.data(Qt.UserRole)
+            if cmd is not None:      # 组标题行不是命令
+                self.run_command(cmd)
 
         def _on_item_clicked(self, item: QListWidgetItem) -> None:
             cmd = item.data(Qt.UserRole)
-            if cmd.status in ("unavailable", "conditional") and cmd.reason:
+            if cmd is not None and cmd.status in ("unavailable", "conditional") \
+                    and cmd.reason:
                 self.reason_label.setText(cmd.reason)
 
         def visible_count(self) -> int:
-            return self.list_widget.count()
+            """命中的命令条数（不含组标题行）。"""
+            return len(self._results)
 
         def visible_commands(self) -> List[Command]:
             return list(self._results)
