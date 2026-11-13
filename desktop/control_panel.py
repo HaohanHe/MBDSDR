@@ -30,6 +30,7 @@ BOOKMARK_NAME_MAX_CHARS = 64
 import logging
 import math
 import os as _os
+import re
 import sys as _sys
 _HERE = _os.path.dirname(_os.path.abspath(__file__))
 if _HERE not in _sys.path:
@@ -179,6 +180,14 @@ def _format_frequency_hz(hz: float) -> str:
     if abs(v) >= 1e3:
         return f"{v / 1e3:g} kHz"
     return f"{v:g} Hz"
+
+
+class AmbiguousFrequencyInput(ValueError):
+    """输入含逗号/空格，无法判定是小数点还是千分位——拒绝，不猜。"""
+
+
+# 严格千分位：首组 1–3 位，其后每组恰好 3 位；可带小数部分。
+_GROUPED_NUMBER_RE = re.compile(r"^\d{1,3}(?:,\d{3})+(?:\.\d+)?$")
 
 
 class ControlPanel(QWidget):
@@ -525,7 +534,8 @@ class ControlPanel(QWidget):
             "（FM/WFM/未选模式 = MHz，AM/其它 = kHz，绝对值 >10000 = Hz）。"
             f"可调范围 {FREQ_MIN_HZ/1e3:.0f} kHz – {FREQ_MAX_HZ/1e9:.0f} GHz；"
             "键入超出范围会拒绝调谐并提示（内部自动值仍限制到边界，"
-            "实际范围以设备为准）")
+            "实际范围以设备为准）。千分位只认 145,500,000 这种严格分组；"
+            "145,5 / 145 5 这类有歧义的写法会拒绝并提示改用 145.5 / 145.5M / 145500k")
         self.freq_input.setMinimumHeight(28)
         self.freq_input.returnPressed.connect(self._on_freq_input)
         # 恢复 setter 在这里追加/还原"配置请求被替换"的运行期提示，保留原静态说明
@@ -902,23 +912,36 @@ class ControlPanel(QWidget):
         支持：
         - 带 M/MHz/k/kHz/G 后缀，如 "98.5M"=98.5MHz, "144500k"=144.5MHz
         - 纯数字：FM/WFM 按 MHz，AM 按 kHz；绝对值 >10000 视为 Hz（如 144500000）
-        解析失败抛 ValueError。
+        - 千分位只收严格分组："145,500,000"（首组 1–3 位、其后每组恰好 3 位）
+
+        含逗号或内部空格的写法若不能判定，抛 ``AmbiguousFrequencyInput``：
+        "145,5" / "145 5" 既可能是小数分隔符（145.5 MHz），也可能是千分位
+        （145,500 kHz）。猜错是 10 倍的错，所以拒绝并要求用户写明确形式。
+        其它解析失败抛 ValueError。
         """
-        t = text.strip().replace(",", "").replace(" ", "")
-        if not t:
+        raw = text.strip()
+        if not raw:
             raise ValueError("empty")
-        low = t.lower()
+        low = raw.lower()
         suffix = None
+        num_text = raw
         for suf in ("mhz", "khz", "hz", "ghz", "g", "m", "k"):
             if low.endswith(suf):
                 suffix = suf
-                num = t[: -len(suf)]
+                num_text = raw[: -len(suf)]
                 break
-        else:
-            num = t
-        if num in ("", "-", "+", "."):
+        num_text = num_text.strip()
+        if num_text in ("", "-", "+", "."):
             raise ValueError("no number")
-        val = float(num)
+        if "," in num_text or " " in num_text or "\t" in num_text:
+            if not _GROUPED_NUMBER_RE.match(num_text):
+                raise AmbiguousFrequencyInput(
+                    f"无法确定「{raw}」指的是 145.5 MHz 还是 145,500 kHz："
+                    "逗号/空格在这里既可能是小数点，也可能是千分位。\n"
+                    "请用 145.5 / 145.5M / 145500k 中的一种；"
+                    "确实要千分位请写成 145,500,000。")
+            num_text = num_text.replace(",", "")
+        val = float(num_text)
         if suffix is None:
             if abs(val) > 10000:
                 suffix = "hz"
@@ -1048,6 +1071,14 @@ class ControlPanel(QWidget):
         text = self.freq_input.text()
         try:
             freq_hz = self._parse_freq_text(text)
+        except AmbiguousFrequencyInput as e:
+            # 该拒绝而不是猜：逗号当小数点会差 1000 倍。弹框写明两种可能，
+            # 而不是只闪一下红框（用户不知道刚才那一下意味着什么）。
+            self.freq_input.setStyleSheet(
+                "background-color:" + tokens().COLORS["danger"] + ";")
+            QTimer.singleShot(700, self._restore_freq_input)
+            QMessageBox.warning(self, "频率写法不明确", str(e))
+            return
         except (ValueError, OSError):
             # 解析失败：输入框变红，稍后恢复原值，绝不崩溃
             self.freq_input.setStyleSheet(
