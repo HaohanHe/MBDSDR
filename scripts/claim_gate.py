@@ -52,6 +52,8 @@ TAKEOVER_ACTIONS = frozenset({"orphan_takeover"})
 NON_TAKEOVER_ACTIONS = frozenset({"audit_replay", "legacy_token_repair"})
 #: 登记面（规范化键）：**纯追加表格行**时不参与「被他人持有」的拦截。
 COORD_DOC_KEY = "docs/coordination.md"
+#: 拒绝留痕（只追加、不汇总）。没有这张表时，「因 claim 被拒的提交数」永远算不出来。
+REJECT_LOG = fc.LOCKS_DIR / "rejected.log"
 
 
 class LedgerError(RuntimeError):
@@ -102,6 +104,32 @@ def _identity(root: Path) -> str:
 
 def _iso(ts: float) -> str:
     return time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(ts))
+
+
+def _log_rejection(code: str, reason: str, path: str = "", holder: str = "", me: str = "") -> None:
+    """把一次拒绝写进 ``rejected.log``：时间 / 路径 / 原因码 / 记名。
+
+    只追加，不汇总，不改退出码——留痕失败也不影响「拒绝」这个结论本身。
+    ``pid`` 也记下来：同一次提交被拒多行（多文件）时，靠它区分「一次提交」
+    与「多次提交」。
+    """
+    now = time.time()
+    record = {
+        "at": now,
+        "at_iso": _iso(now),
+        "code": code,
+        "reason": reason,
+        "path": path,
+        "holder": holder,
+        "identity": me,
+        "pid": os.getpid(),
+    }
+    try:
+        REJECT_LOG.parent.mkdir(parents=True, exist_ok=True)
+        with REJECT_LOG.open("a", encoding="utf-8") as fh:
+            fh.write(json.dumps(record, ensure_ascii=False) + "\n")
+    except OSError:
+        pass
 
 
 def _staged_is_pure_append_doc(root: Path, rel: str) -> bool:
@@ -410,6 +438,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         names = _staged(root)
     except LedgerError as exc:
         print(f"[claim-gate] 拒绝：{exc}")
+        _log_rejection("LEDGER", "staged_unreadable")
         return 2
     if not names:
         print("[claim-gate] 暂存区为空，放行。")
@@ -424,6 +453,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         inspected = [(rel, _inspect(rel, me, takeovers, now)) for rel in names]
     except LedgerError as exc:
         print(f"[claim-gate] 拒绝：台账不可用/不可信，按失败关闭 —— {exc}")
+        _log_rejection("LEDGER", "ledger_unavailable", me=me)
         return 2
 
     # 行级降级必须可见：被忽略的行逐条打印原因，但不影响其余台账与本次提交。
@@ -451,6 +481,11 @@ def main(argv: Optional[List[str]] = None) -> int:
     if blocked:
         for _rel, row in blocked:
             _print_blocked(row, me)
+            reason = ("takeover_no_reason"
+                      if str(row.get("why", "")).startswith("当前 claim 来自没写理由的 takeover")
+                      else "claim_held")
+            _log_rejection("BLOCKED", reason, str(row.get("path") or _rel),
+                           str(row.get("owner") or ""), me)
         print(
             f"[claim-gate] 结论：拒绝（{len(blocked)}/{len(names)} 个暂存文件被他人持有）；"
             f"本次提交身份：{me or '<未声明>'}"

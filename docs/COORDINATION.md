@@ -2147,6 +2147,8 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `scripts/check_commit_scope.py` | 收尸线/6ae85f56（任务二：纯追加的登记面不计入 MULTI） | 2026-11-13 21:43 | 本笔 |
 | `tests/test_coordination_doc_narrow_lock.py` | 收尸线/6ae85f56（任务二：窄锁化 5 条反证） | 2026-11-13 21:43 | 本笔 |
 | `scripts/install_git_hooks.py` | 归属证据线/6ae85f56（安装器补拷 check_coordination_append_only.py（claim_gate 新依赖）） | 2026-11-13 21:45 | 本笔 |
+| `scripts/claim_gate.py` | 收尸线/6ae85f56（任务三：拒绝落 rejected.log（时间/路径/原因码/记名）） | 2026-11-13 21:46 | 本笔 |
+| `tests/test_claim_gate_rejected_log.py` | 收尸线/6ae85f56（任务三：拒绝留痕 2 条反证） | 2026-11-13 21:46 | 本笔 |
 
 > 上表各行均由 `claim` 台账推导：owner 原文与 `acquired_at` 直接取自台账，
 > 目的优先用台账里的 `claim_reason`，没有就如实写「未声明」，不补编。时间列只是
