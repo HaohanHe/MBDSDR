@@ -372,7 +372,7 @@ def test_stored_message_must_match_passed_message(tmp_path):
     )
 
     def fake_run(args, env, stdin=None):
-        if args == ["cat-file", "commit", "HEAD"]:
+        if args[:2] == ["cat-file", "commit"]:
             return subprocess.CompletedProcess(args, 0, hijacked, b"")
         return real_run(args, env, stdin)
 
@@ -406,6 +406,116 @@ def test_message_is_stored_verbatim(tmp_path):
     stored = raw.split("\n\n", 1)[1]
     # subprocess 用 text=True 会把 \r\n 折成 \n，这里按 git 的原样比较
     assert stored.replace("\r\n", "\n") == text, repr(stored)
+
+
+def test_message_file_inside_git_dir_is_rejected(tmp_path):
+    """``b898f4a3`` 的入口：消息文件不许落在 ``.git/`` 这种全仓共享路径。
+
+    ``.git/COMMIT_EDITMSG`` 会被任何 ``git commit`` 覆写；共用它的进程会把
+    别人刚写进去的消息当成本笔的说明读走（⑱ 随后还会打印「一致」）。
+    """
+    locks = tmp_path / "locks"
+    repo = _repo(tmp_path, [f"line{i}" for i in range(1, 7)])
+    lines = [f"line{i}" for i in range(1, 7)]
+    lines[1] = "line2 mine"
+    _write(repo, lines)
+    msg = repo / ".git" / "COMMIT_EDITMSG"
+    msg.write_text("test: 共享消息路径\n", encoding="utf-8")
+
+    before = _head(repo)
+    proc = subprocess.run(
+        [sys.executable, str(SAFE), "--files", DOC, "--message-file", str(msg)],
+        cwd=str(repo), env=_safe_env(repo, locks, "进程A线"),
+        capture_output=True, text=True, encoding="utf-8", errors="replace",
+    )
+    out = proc.stdout + proc.stderr
+    assert proc.returncode == 1, out
+    assert "拒绝" in out and ".git 目录" in out, out
+    assert "逐字校验一致" not in out, out
+    assert _head(repo) == before, "拒绝时不许提交"
+
+
+def test_message_source_rewritten_before_commit_is_refused(tmp_path):
+    """来源文件在「读入 → 提交」之间被改写：必须拒绝，且不许打印「一致」。
+
+    复用 ``b898f4a3`` 的形态：两个进程共用一个消息路径，后写的那个会把
+    先写的消息换掉。这里在锁内重读基线时改写源文件，等价于第三方插进这段窗口。
+    """
+    locks = tmp_path / "locks"
+    repo = _repo(tmp_path, [f"line{i}" for i in range(1, 7)])
+    lines = [f"line{i}" for i in range(1, 7)]
+    lines[1] = "line2 mine"
+    _write(repo, lines)
+    msg = tmp_path / "msg.txt"
+    msg.write_text("本笔的消息\n", encoding="utf-8")
+
+    spec = importlib.util.spec_from_file_location("safe_commit_srcchk", SAFE)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    mod.ROOT = repo
+    mod.LOCKS_DIR = locks
+
+    real_run = mod._run
+    seen = {"head": 0}
+
+    def fake_run(args, env, stdin=None):
+        if args == ["rev-parse", "HEAD"]:
+            seen["head"] += 1
+            if seen["head"] == 2:            # 锁内重读基线的那一次
+                msg.write_text("别线的消息\n", encoding="utf-8")
+        return real_run(args, env, stdin)
+
+    before = _head(repo)
+    mod._run = fake_run
+    try:
+        code = mod.main(["--files", DOC, "--message-file", str(msg)])
+    finally:
+        mod._run = real_run
+
+    assert code == 6, "消息源被改写必须以退出码 6 拒绝"
+    assert _head(repo) == before, "拒绝时不许提交"
+
+
+def test_verification_uses_private_copy_not_the_shared_file(tmp_path):
+    """比对端必须是本进程留存的副本：提交后源文件被写坏也不影响判定。
+
+    反证：把 ``_verify_message`` 换回读 ``--message-file``，本用例会以退出码 3
+    转红——那正是 ``b898f4a3`` 之前「两头都指向共享文件」的形态。
+    """
+    locks = tmp_path / "locks"
+    repo = _repo(tmp_path, [f"line{i}" for i in range(1, 7)])
+    lines = [f"line{i}" for i in range(1, 7)]
+    lines[1] = "line2 mine"
+    _write(repo, lines)
+    msg = tmp_path / "msg.txt"
+    msg.write_text("本笔的消息\n", encoding="utf-8")
+
+    spec = importlib.util.spec_from_file_location("safe_commit_copychk", SAFE)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    mod.ROOT = repo
+    mod.LOCKS_DIR = locks
+
+    real_run = mod._run
+
+    def fake_run(args, env, stdin=None):
+        proc = real_run(args, env, stdin)
+        if args[:2] == ["commit", "--cleanup=verbatim"]:
+            msg.write_text("别线在提交后写进来的消息\n", encoding="utf-8")
+        return proc
+
+    mod._run = fake_run
+    try:
+        code = mod.main(["--files", DOC, "--message-file", str(msg)])
+    finally:
+        mod._run = real_run
+
+    assert code == 0, "落库消息等于本进程副本，源文件事后被改不应误报"
+    stored = subprocess.run(
+        ["git", "-C", str(repo), "cat-file", "commit", "HEAD"],
+        capture_output=True,
+    ).stdout.split(b"\n\n", 1)[1]
+    assert stored.decode("utf-8").strip() == "本笔的消息"
 
 
 def _safe_files(repo, locks, tmp_path, files, *extra, owner="进程A线",

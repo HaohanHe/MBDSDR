@@ -100,11 +100,29 @@ pre-commit 闸门对**任何未声明的删除条目**一律拒绝（幻影删�
 任何外部临时文件），提交锁内串行化，提交后从 commit 对象里把消息取回来逐字
 比对——对不上就是退出码 3 的事故报告，不会因为「已经提交了」而沉默。
 
+``b898f4a3`` 证明这还不够（2026-11-13，形态⑱补）。那笔的 tree 是工具成败线的
+5 个文件，message 却是本会话另一笔 ``5c6f10f8`` 的原文（逐字相同，1266 字节）
+＋它自己的 ``excluded-hunks:`` 尾段；尾段只可能由 ``_exclusion_trailer`` 生成，
+所以它确实走了本脚本。串的是**读入之前**：``--message-file`` 指向了一个全仓
+共享的可变路径，别的进程写进去的消息被它原样读走，随后「读到的字节 vs 落库
+字节」当然一致——这条比对管的是 git 有没有原样保存，管不了读进来的是谁的消息。
+
+因此现在：
+
+* ``--message-file`` 落在 ``.git/`` 里一律拒绝（退出码 1）——那是 git 自己会
+  覆写的全仓共享路径，不是本进程的载体；
+* 启动时打出消息来源、sha256 与字节数；**提交前重读来源文件**，与启动时读到
+  的字节不同就拒绝（退出码 6，不重试）：两个进程共用一个消息路径本身就是
+  事故前兆；
+* 提交前把最终消息（含各类尾段）落成本进程私有副本
+  ``<locks>/messages/<session>.<pid>.msg``，``git commit -F -`` 用副本字节，
+  提交后也只跟这份副本比对——比对端不再回头读任何可能被覆盖的共享文件。
+
 这条路径上的共享可变状态清单：
 
 * ``.git/index`` / ``.git/index.lock``：不进，本脚本全程用会话私有 index；
-* ``.git/COMMIT_EDITMSG``：git 自己会写，本脚本无法改路径，只能靠提交锁串行化
-  ＋提交后逐字复核；
+* ``.git/COMMIT_EDITMSG``：git 自己会写，本脚本无法改路径；它不再是本脚本的
+  输入或比对端（消息走 stdin、复查用私有副本），只剩 git 内部这一跳；
 * ``.git/ORIG_HEAD``：本脚本不产生，也不读；
 * 钩子产物：pre/post-commit 的标记按 tree 号命名，不与并发提交撞名；
 * ``refs/heads/*.lock``：git 自己的锁，撞上按可重试处理。
@@ -161,7 +179,7 @@ hunk，于是有人把自己的行挪到别处让 diff 断开——提交干净�
 
 退出码：0 成功；1 前置校验失败（未提交）；2 重试耗尽（未提交）；3 提交后复核失败
 （已提交，需按事故卡处理）；4 声明后内容变化被拒（未提交，不重试）；
-5 §6.1 缺行被拒（未提交，不重试）。
+5 §6.1 缺行被拒（未提交，不重试）；6 消息源在提交前被改写（未提交，不重试）。
 """
 from __future__ import annotations
 
@@ -821,26 +839,110 @@ def _foreign_trailer(message: bytes, changed: list[dict], reason: str) -> bytes:
     return message.rstrip(b"\n") + ("\n" + "\n".join(lines) + "\n").encode("utf-8")
 
 
-def _stored_message(env: dict) -> bytes | None:
-    """从 commit 对象里取回落库的消息原文（不经过任何文件）。"""
-    proc = _run(["cat-file", "commit", "HEAD"], env)
+def _git_dir() -> Path | None:
+    """仓库的 git 目录（worktree 下 ``.git`` 可能是个文件，交给 git 解析）。"""
+    proc = _run(["rev-parse", "--absolute-git-dir"], _plain_env())
     if proc.returncode != 0:
         return None
-    raw = proc.stdout
-    head, sep, body = raw.partition(b"\n\n")
-    return body if sep else None
+    raw = proc.stdout.decode("utf-8", "replace").strip()
+    return Path(raw) if raw else None
 
 
-def _verify_message(env: dict, message: bytes) -> str:
-    """提交后逐字复核：``7a76b097`` 那种「主题与内容不符」必须可见。"""
-    stored = _stored_message(env)
+def _shared_message_error(source: Path) -> str:
+    """``--message-file`` 落在 ``.git/`` 里就拒绝：那是全仓共享的可变路径。
+
+    ``b898f4a3`` 的入口就是共享消息路径：别的进程写进去的消息被这一笔原样
+    读走。``.git/COMMIT_EDITMSG`` 尤其危险——任何 ``git commit`` 都会覆写它。
+    """
+    git_dir = _git_dir()
+    if git_dir is None:
+        return ""
+    try:
+        resolved = source.resolve()
+    except OSError:
+        resolved = source.absolute()
+    try:
+        rel = resolved.relative_to(git_dir.resolve())
+    except ValueError:
+        return ""
+    return (
+        f"消息文件位于 .git 目录内（{rel.as_posix()}）：这是全仓共享的可变路径，"
+        "任何 git commit 都可能覆写它；请把消息写到仓库外、本进程独有的文件。"
+    )
+
+
+def _recheck_message_source(source: Path, expected: bytes) -> str:
+    """提交前重读来源：与启动时读到的字节不同就拒绝（不重试）。
+
+    比对端是**本进程启动时留存的那份字节**，不是磁盘现状；所以这里比的是
+    「来源文件有没有在两个步骤之间被改写」，而不是「现在的文件长什么样」。
+    """
+    try:
+        now = source.read_bytes()
+    except OSError as exc:
+        return f"消息源在提交前读不出来：{source}（{exc}）；本笔不提交"
+    if now == expected:
+        return ""
+    return (
+        f"消息源在提交前被改写：{source}（启动时 {len(expected)} 字节 / "
+        f"现在 {len(now)} 字节）；两个进程共用同一个消息路径时，读到的可能"
+        "不是本笔要提交的说明。本笔不提交，请改用本进程独有的消息文件后重跑。"
+    )
+
+
+def _message_copy_path() -> Path:
+    """本进程私有消息副本的路径（落在 locks 下，不进仓库）。"""
+    return LOCKS_DIR / "messages" / f"{_session_key()}.{os.getpid()}.msg"
+
+
+def _write_message_copy(message: bytes) -> Path:
+    """把最终消息（含各类尾段）落成本进程私有副本，作为提交与复核的唯一载体。"""
+    path = _message_copy_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    # Windows 下 os.open 默认是文本模式，会把消息里的 \n 再翻成 \r\n；
+    # 副本必须与传入字节逐字一致，所以显式带 O_BINARY。
+    flags = os.O_CREAT | os.O_TRUNC | os.O_WRONLY | getattr(os, "O_BINARY", 0)
+    fd = os.open(path, flags, 0o600)
+    try:
+        os.write(fd, message)
+    finally:
+        os.close(fd)
+    return path
+
+
+def _stored_message(env: dict) -> tuple[bytes | None, str]:
+    """从 commit 对象里取回落库的消息原文（按显式 sha 取，不依赖 HEAD 时序）。"""
+    sha = _run(["rev-parse", "HEAD"], env).stdout.decode("utf-8", "replace").strip()
+    if not sha:
+        return None, ""
+    proc = _run(["cat-file", "commit", sha], env)
+    if proc.returncode != 0:
+        return None, sha
+    _, sep, body = proc.stdout.partition(b"\n\n")
+    return (body if sep else None), sha
+
+
+def _verify_message(env: dict, copy: Path) -> str:
+    """提交后逐字复核：``7a76b097`` 那种「主题与内容不符」必须可见。
+
+    比对端是本进程私有副本（最终消息的落盘拷贝），不是 ``--message-file``
+    指向的共享文件——后者在提交窗口里可能已被别人覆写（``b898f4a3``）。
+    """
+    try:
+        message = copy.read_bytes()
+    except OSError as exc:
+        return (f"本进程消息副本读不出来：{copy}（{exc}）；这笔已落库，"
+                "必须按事故卡处理")
+    stored, sha = _stored_message(env)
     if stored == message:
-        print(f"[message] 提交信息逐字校验一致（{len(message)} 字节）")
+        print(f"[message] 提交信息逐字校验一致（{sha[:12]}，{len(message)} 字节，"
+              "比对端为本进程私有副本）")
         return ""
     got = (stored or b"").decode("utf-8", "replace")
     want = message.decode("utf-8", "replace")
     detail = [f"提交信息与传入内容不一致：传入 {len(message)} 字节 / 落库 "
               f"{len(stored) if stored is not None else '<读不出来>'} 字节"]
+    detail.append(f"  落库提交：{sha[:12] or '<读不出 HEAD>'}")
     detail.append(f"  传入主题：{want.splitlines()[0] if want.splitlines() else '<空>'}")
     detail.append(f"  落库主题：{got.splitlines()[0] if got.splitlines() else '<空>'}")
     for i, (a, b) in enumerate(zip(want, got)):
@@ -1096,6 +1198,8 @@ def _attempt(
     declared: dict | None = None,
     declared_at: float = 0.0,
     allow_reason: str = "",
+    message_source: Path | None = None,
+    source_bytes: bytes = b"",
 ) -> tuple[int, str]:
     """一次完整尝试。返回 (退出码, 说明)。"""
     exclusions = exclusions or []
@@ -1200,6 +1304,7 @@ def _attempt(
         return _commit_locked(
             expect_files, message, env, base, wanted,
             declared or {}, declared_at, allow_reason,
+            message_source or Path(), source_bytes,
         )
     finally:
         lock.__exit__(None, None, None)
@@ -1214,6 +1319,8 @@ def _commit_locked(
     declared: dict,
     declared_at: float,
     allow_reason: str,
+    message_source: Path,
+    source_bytes: bytes,
 ) -> tuple[int, str]:
     """锁内：复核声明快照 → 重校验基线 → commit → 作用域/message 机检 → blob 复核。"""
     # 4a) 声明快照：提交时刻的内容必须等于声明时刻的那份。不一致就拒绝（不重试），
@@ -1235,6 +1342,17 @@ def _commit_locked(
     if now != base:
         return 1, f"基线在提交前变化：{base[:8]} → {now[:8]}（下次重试用新 HEAD 重建）"
 
+    # 4b) 消息源复核：来源可能是共享路径，提交前确认它自本进程读入后没被改写；
+    #     比对端是启动时留存的字节，不是磁盘现状（``b898f4a3``）。
+    bad_source = _recheck_message_source(message_source, source_bytes)
+    if bad_source:
+        return 6, bad_source
+
+    # 4c) 落成本进程私有副本（含各类尾段）：提交与复核都只认这份拷贝，
+    #     不再回头读 ``--message-file``——它可能已经被第三方覆写。
+    copy = _write_message_copy(message)
+    message = copy.read_bytes()
+
     # 5) 提交（消息走 stdin bytes，避开编码坑；--cleanup=verbatim 保证落库逐字等于传入）
     commit = _run(["commit", "--cleanup=verbatim", "-F", "-"], env, stdin=message)
     if commit.returncode != 0:
@@ -1245,9 +1363,9 @@ def _commit_locked(
         return 1, f"git commit 失败：{err.strip()[:300]}"
     _report_hooks(commit, env)
 
-    # 5a) 提交信息逐字复核：多进程共用 COMMIT_EDITMSG 时消息可能被别人的覆盖，
-    #     这笔已经落库也必须报出来（退出码 3），不能烂在历史里。
-    bad_message = _verify_message(env, message)
+    # 5a) 提交信息逐字复核：落库消息必须等于本进程留存的副本；不一致按事故
+    #     报出（退出码 3），不能烂在历史里。
+    bad_message = _verify_message(env, copy)
     if bad_message:
         return 3, bad_message
 
@@ -1359,7 +1477,19 @@ def main(argv: list[str] | None = None) -> int:
 
     if not args.message_file:
         ap.error("--message-file 必填（只有 --declare 可以不传）")
-    message = Path(args.message_file).read_bytes()
+    message_source = Path(args.message_file)
+    shared = _shared_message_error(message_source)
+    if shared:
+        print(f"拒绝：{shared}")
+        return 1
+    try:
+        message = message_source.read_bytes()
+    except OSError as exc:
+        print(f"拒绝：读不到消息文件 {message_source}（{exc}）")
+        return 1
+    digest = hashlib.sha256(message).hexdigest()
+    print(f"[message] 来源：{message_source}（sha256 {digest[:12]}…，"
+          f"{len(message)} 字节；提交前会重读，变了就拒）")
     _message_coverage_hint(message, files)
 
     try:
@@ -1381,6 +1511,7 @@ def main(argv: list[str] | None = None) -> int:
               "（只覆盖本次运行；写入后先跑 --declare 才能拦住「释放 claim → 提交」这段漂移）")
 
     index = _index_path()
+    keep_copy = False
     print(f"[index] 会话私有 index：{index}")
     _warn_shared_index()
 
@@ -1391,18 +1522,26 @@ def main(argv: list[str] | None = None) -> int:
                 exclude_owner=args.exclude_owner,
                 declared=declared, declared_at=declared_at,
                 allow_reason=args.allow_foreign_changes.strip(),
+                message_source=message_source, source_bytes=message,
             )
             print(f"[try {n}] {note}")
             if code == 0:
                 _drop_declaration(declaration_file)
                 return 0
-            if code in (3, 4, 5):
+            if code in (3, 4, 5, 6):
+                keep_copy = code in (3, 6)
                 return code
         print(f"重试 {args.retries} 次仍未提交，已放弃（工作区与 index 未改动）")
         return 2
     finally:
         if index.exists():
             index.unlink()
+        copy = _message_copy_path()
+        if copy.exists():
+            if keep_copy:
+                print(f"[message] 本进程私有副本保留：{copy}")
+            else:
+                copy.unlink()
 
 
 if __name__ == "__main__":
