@@ -1870,6 +1870,8 @@ No supported devices found），GNSS+SDR 同开复验没做成；离线那次
 
 | 文件 | 线名 | 开始时间 | 预计提交 hash |
 |---|---|---|---|
+| `tests/test_settings_schema.py` | Qt翻译与设置显式线/6ae85f56（既有红收口：apply_note 断言随 ec2e20f5 改判为「行内可见标签」并加严） | 2026-11-13 19:45 | 本笔 |
+| `docs/COORDINATION.md` | Qt翻译与设置显式线/6ae85f56（本笔 §6.1 登记行，提交后释放） | 2026-11-13 19:45 | 本笔 |
 | _（空）_ | | | |
 | `desktop/l10n.py` | Qt翻译与设置显式线/6ae85f56（加载 qtbase_<locale>.qm + 状态如实上报） | 2026-11-13 19:37 | 本笔 |
 | `desktop/main.py` | Qt翻译与设置显式线/6ae85f56（启动入口接 Qt 自带翻译安装） | 2026-11-13 19:37 | 本笔 |
