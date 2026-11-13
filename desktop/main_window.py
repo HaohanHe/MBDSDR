@@ -598,7 +598,7 @@ import numpy as np
 
 from PySide6.QtCore import (
     QEvent, Qt, QTimer, Slot, QDateTime, QTimeZone, QThread, Signal, QSettings,
-    QRect, QPoint, QRectF, QEventLoop,
+    QRect, QPoint, QRectF, QEventLoop, QObject,
 )
 from PySide6.QtGui import (
     QAction, QActionGroup, QKeySequence, QFont, QShortcut, QGuiApplication,
@@ -969,6 +969,16 @@ def _touch_stylesheet_extra(scrollbar_width: int) -> str:
     )
 
 
+class _ConnectRelay(QObject):
+    """后台 ``connect()`` 结果回投 GUI 线程的继电器。
+
+    跨线程 ``emit`` 自动排队到主线程事件循环，槽函数里改 UI 才安全。
+    只投递尝试号；结果本体在每次尝试的上下文里（``_connect_contexts``）。
+    """
+
+    finished = Signal(int)
+
+
 class MainWindow(QMainWindow):
     """MBDSDR 主窗口。"""
 
@@ -1156,6 +1166,15 @@ class MainWindow(QMainWindow):
         # 上一次 connect 的后台线程。超时返回后它可能仍卡在 connect() 里，
         # 保留引用才能把「仍在收尾」读出来，而不是把闸门复位成空闲。
         self._connect_worker: Optional[threading.Thread] = None
+        # 每次连接尝试的序号：迟到结果据此判断是否已被用户的新意图作废。
+        self._connect_attempt: int = 0
+        # 已被等待循环消费的尝试号：回投迟到重复到达时不再改一次 UI。
+        self._connect_settled_attempt: int = 0
+        # 一次尝试的上下文（backend / box / 参数 / 是否仍在等待）。
+        self._connect_contexts: Dict[int, dict] = {}
+        # 后台 connect 结果回投（跨线程 signal 自动排队到 GUI 线程）。
+        self._connect_relay = _ConnectRelay()
+        self._connect_relay.finished.connect(self._on_connect_finished)
         # NTRIP 配置对话框（非模态）。首次从菜单打开时才创建；保持引用防 GC。
         self._ntrip_dialog: Optional[object] = None
 
@@ -6438,7 +6457,8 @@ class MainWindow(QMainWindow):
                     f"{self._CONNECT_WAIT_TIMEOUT_MS // 1000} 秒）")
         return "正在连接设备，请等本次连接结束"
 
-    def _connect_backend_in_background(self, backend) -> bool:
+    def _connect_backend_in_background(self, backend,
+                                       meta: Optional[dict] = None) -> Optional[bool]:
         """把原生 ``connect()`` 丢到后台线程，GUI 线程用嵌套事件循环等结果。
 
         原生 connect 实测 2.0 s（USB 打开 + 调谐器探测），原先直接在 GUI 线程
@@ -6446,6 +6466,10 @@ class MainWindow(QMainWindow):
         「连接中」标签停在旧值，用户看到的就是「点了没反应」。
         这里保持同步返回语义（调用方仍在连接结束后接着切状态/下发参数），
         但等待期间持续处理事件：窗口能重绘、能拖动，状态栏提示真的在刷。
+
+        返回 **三态**：``True/False`` = 有结论；``None`` = 等待超时（结果未知）。
+        超时不是失败：后台仍卡在同一句柄上，终态由 ``_on_connect_finished``
+        按硬件真实结果补上。
         """
         busy = self._connect_busy_reason()
         if busy:
@@ -6455,13 +6479,25 @@ class MainWindow(QMainWindow):
                                "不新增线程（避免两根线程抢同一根棒子）")
             return False
         self._connect_in_flight = True
+        attempt = self._connect_attempt + 1
+        self._connect_attempt = attempt
         box: dict = {}
+        context = {"attempt": attempt, "backend": backend, "box": box,
+                   "waiting": True}
+        context.update(meta or {})
+        self._connect_contexts[attempt] = context
 
         def _worker() -> None:
             try:
                 box["ok"] = bool(backend.connect())
             except Exception as exc:  # noqa: BLE001 - 交回 GUI 线程按原口径处理
                 box["exc"] = exc
+            finally:
+                # 结果回投 GUI 线程：超时之后才返回的成功/失败仍要修正终态。
+                try:
+                    self._connect_relay.finished.emit(attempt)
+                except RuntimeError:
+                    pass
 
         worker = threading.Thread(target=_worker, name="sdr-connect", daemon=True)
         loop = QEventLoop()
@@ -6488,14 +6524,23 @@ class MainWindow(QMainWindow):
             # 否则闸门重新打开，用户再点一下就是第二根线程抢同一根棒子。
             self._connect_worker = worker
             self._connect_in_flight = worker.is_alive()
+            context["waiting"] = False
         if worker.is_alive():
-            self.statusBar().showMessage(
-                f"设备连接超过 {self._CONNECT_WAIT_TIMEOUT_MS // 1000} 秒未返回，"
-                "已停止等待；后台仍在收尾，请稍后再试", MSG_IMPORTANT)
-            logger.warning("设备 connect 超过 %d ms 未返回，按失败处理"
-                           "（后台线程留在 connect() 里收尾，保持忙碌态、不新增线程）",
-                           self._CONNECT_WAIT_TIMEOUT_MS)
-            return False
+            # 超时 ≠ 失败：不写「连接失败」、不 disconnect（那会和仍在跑的
+            # connect() 抢设备），只把「结果未知、仍在收尾」如实告诉用户。
+            logger.warning("设备 connect 超过 %d ms 未返回：结果未知，"
+                           "后台留在 connect() 里收尾（尝试 %d）",
+                           self._CONNECT_WAIT_TIMEOUT_MS, attempt)
+            try:
+                name = getattr(getattr(backend, "device", None), "name", "") or "设备"
+                self.conn_label.setText(f"  状态: 连接中 {name}（收尾）  ")
+                self.status_conn.setText(f"连接中 {name}（收尾）")
+            except Exception:
+                pass
+            return None
+        # 正常返回路径消费本次结果：迟到的重复回投不再改 UI。
+        self._connect_settled_attempt = attempt
+        self._connect_contexts.pop(attempt, None)
         if "exc" in box:
             raise box["exc"]
         return bool(box.get("ok"))
@@ -6554,7 +6599,15 @@ class MainWindow(QMainWindow):
             except Exception:
                 pass
             try:
-                ok = self._connect_backend_in_background(backend)
+                ok = self._connect_backend_in_background(
+                    backend,
+                    meta={"previous": previous, "carried_freq": carried_freq,
+                          "params": dict(
+                              sample_rate=float(sample_rate),
+                              gain=float(gain), ppm=int(ppm),
+                              agc=bool(agc),
+                              offset_tuning=bool(offset_tuning),
+                              bandwidth=float(bandwidth))})
             except Exception as e:
                 ok = False
                 try:
@@ -6562,33 +6615,120 @@ class MainWindow(QMainWindow):
                 except Exception:
                     pass
 
+        if ok is None:
+            # 超时 = 结果未知，不是失败：后台仍卡在同一句柄上，这里既不写
+            # 「连接失败」也不 disconnect（会和仍在跑的 connect() 抢设备）。
+            # 终态由后台回投补上；同时给用户明确的下一步（等自动补上 / 重试）。
+            self.statusBar().showMessage(
+                f"连接结果未知：后台仍在收尾（最多再等 "
+                f"{self._CONNECT_WAIT_TIMEOUT_MS // 1000} 秒），完成后会自动补上；"
+                "也可等收尾结束后点「连接」重试", MSG_IMPORTANT)
+            return False
         if not ok:
-            raw_err = ""
-            try:
-                raw_err = backend.get_status().error or ""
-            except Exception:
-                pass
-            friendly = self._humanize_error(raw_err) if raw_err else \
-                "设备无响应：请检查 USB 棒、librtlsdr 驱动、以及设备是否被 SDR#/GQRX 占用。"
-            # 原始错误 → error_catalog code：认不出就不出「查看怎么办」，
-            # 绝不硬套一个码把用户带到不相关的条目。
-            self._last_connect_code = classify_connect_error(raw_err)
-            self._show_error_status(f"连接失败：{friendly}",
-                                    self._last_connect_code, 6000)
-            try:
-                backend.disconnect()
-            except Exception:
-                pass
-            # 切换失败：回滚到拆掉的旧后端，绝不留"未连接"却以为还连着
-            if previous is not None:
-                self._restore_backend_after_failed_switch(previous, friendly)
-            else:
-                # 没有可回滚的旧设备：必须把「连接中」收回「未连接」，
-                # 不许让一次失败的连接把标签永久停在连接中。
-                self.conn_label.setText("  状态: 未连接  ")
-                self.status_conn.setText("未连接")
+            self._report_connect_failure(backend, previous)
             return False
 
+        # 连接成功（含超时后由后台回投的成功，见 _on_connect_finished）：
+        self._finalize_connect_success(
+            backend, sample_rate=float(sample_rate), gain=float(gain),
+            ppm=int(ppm), agc=bool(agc), offset_tuning=bool(offset_tuning),
+            bandwidth=float(bandwidth), carried_freq=carried_freq)
+        return True
+
+    def _report_connect_failure(self, backend, previous, *,
+                                late: bool = False) -> None:
+        """连接失败的唯一落点：状态栏 + 错误码 + 释放后端 + 回滚旧设备。"""
+        raw_err = ""
+        try:
+            raw_err = backend.get_status().error or ""
+        except Exception:
+            pass
+        friendly = self._humanize_error(raw_err) if raw_err else \
+            "设备无响应：请检查 USB 棒、librtlsdr 驱动、以及设备是否被 SDR#/GQRX 占用。"
+        # 原始错误 → error_catalog code：认不出就不出「查看怎么办」，
+        # 绝不硬套一个码把用户带到不相关的条目。
+        self._last_connect_code = classify_connect_error(raw_err)
+        prefix = "连接失败（后台收尾后返回）：" if late else "连接失败："
+        self._show_error_status(f"{prefix}{friendly}",
+                                self._last_connect_code, 6000)
+        try:
+            backend.disconnect()
+        except Exception:
+            pass
+        # 切换失败：回滚到拆掉的旧后端，绝不留"未连接"却以为还连着
+        if previous is not None:
+            self._restore_backend_after_failed_switch(previous, friendly)
+        else:
+            # 没有可回滚的旧设备：必须把「连接中」收回「未连接」，
+            # 不许让一次失败的连接把标签永久停在连接中。
+            self.conn_label.setText("  状态: 未连接  ")
+            self.status_conn.setText("未连接")
+
+    @Slot(int)
+    def _on_connect_finished(self, attempt: int) -> None:
+        """后台 connect 的结果回投：超时之后才返回的那一半由这里修正终态。
+
+        超时只说明「界面等不及了」，不说明硬件没连上。真实结果回来时，
+        状态条与设备面板必须**一起**改——只改一处就等于又造了一个真值源。
+        已被用户新意图（断开 / 新一次连接）作废的结果，由本回调关闭后端，
+        UI 一律不动。
+        """
+        context = self._connect_contexts.get(attempt)
+        if not context:
+            return
+        if context.get("waiting"):
+            return  # 等待循环还在转：结果由正常返回路径消费
+        if attempt <= self._connect_settled_attempt:
+            return
+        self._connect_settled_attempt = attempt
+        self._connect_contexts.pop(attempt, None)
+        self._connect_in_flight = False
+        box = context.get("box") or {}
+        backend = context.get("backend")
+        stale = attempt != self._connect_attempt
+        if "exc" in box:
+            try:
+                backend.status.error = f"connect 异常: {box['exc']}"
+            except Exception:
+                pass
+        if "exc" in box or not box.get("ok"):
+            if stale:
+                self._close_late_backend(backend, "迟到失败（已被新意图作废）")
+                return
+            self._report_connect_failure(backend, context.get("previous"),
+                                         late=True)
+            return
+        if stale:
+            self._close_late_backend(backend, "迟到成功，但已被用户新意图作废")
+            return
+        params = context.get("params") or {}
+        self._finalize_connect_success(
+            backend, late=True, carried_freq=context.get("carried_freq"),
+            sample_rate=float(params.get("sample_rate", DEFAULT_SAMPLE_RATE_HZ)),
+            gain=float(params.get("gain", 20.0)),
+            ppm=int(params.get("ppm", 0)),
+            agc=bool(params.get("agc", True)),
+            offset_tuning=bool(params.get("offset_tuning", False)),
+            bandwidth=float(params.get("bandwidth", 0.0)))
+
+    def _close_late_backend(self, backend, why: str) -> None:
+        """迟到的结果已作废：由回投方负责释放后端，界面保持用户当前状态。"""
+        try:
+            backend.disconnect()
+        except Exception:
+            pass
+        logger.warning("后台 connect %s：已关闭该后端，界面不动", why)
+
+    def _finalize_connect_success(self, backend, *, sample_rate: float,
+                                  gain: float, ppm: int, agc: bool,
+                                  offset_tuning: bool, bandwidth: float,
+                                  carried_freq: Optional[float],
+                                  late: bool = False) -> None:
+        """连接成功后的唯一挂接路径：正常返回与「迟到成功」都走这里。
+
+        状态条与设备面板必须一起改——只改一处就等于又造了第二个真值源。
+        ``late=True`` 表示等待循环已按「结果未知」返回过，这里把终态补回来。
+        """
         # 连接成功：停掉旧 worker，切换到真实后端
         self._last_connect_code = None
         # 新连接从「正常」开始，清掉上一条链路留下的降级态标记
@@ -6624,12 +6764,15 @@ class MainWindow(QMainWindow):
                 self._no_device_hint.setVisible(False)
         except Exception:
             pass
+        # 迟到的成功：等待循环已按「结果未知」返回过，终态文案要说明它是补上的。
+        late_note = "（后台完成后补上）" if late else ""
         if name_readable:
-            self.statusBar().showMessage(f"已连接 {device_name}", MSG_NORMAL)
+            self.statusBar().showMessage(
+                f"已连接 {device_name}{late_note}", MSG_NORMAL)
         else:
             self.statusBar().showMessage(
-                f"已连接 {device_name}，但设备名称不可读（后端未提供 device.name）",
-                MSG_IMPORTANT)
+                f"已连接 {device_name}，但设备名称不可读（后端未提供 device.name）"
+                f"{late_note}", MSG_IMPORTANT)
 
         # 增益动态范围：按所连设备能力收放面板滑杆（此前 0-49/0-50 硬编码
         # 是"RTL-SDR 典型"占位，接到别的设备也不动）。失败仅忽略——滑杆
@@ -6686,7 +6829,6 @@ class MainWindow(QMainWindow):
         self._refresh_tx_button_state()
         # 启动真实 IQ 流：频谱/录制/声卡全部接通
         self._start_iq_streams()
-        return True
 
     def _restore_backend_after_failed_switch(self, previous, reason: str) -> bool:
         """设备切换失败后的回滚：重新连回旧后端，连不上就如实停在未连接。
@@ -7204,6 +7346,9 @@ class MainWindow(QMainWindow):
         `_disconnect()` 与 `_connect_backend()` 共用这一条拆除路径，
         重复调用安全（全程 try/except）。
         """
+        # 拆除 = 主动作废在途连接尝试：迟到的后台结果不许再改 UI，由回投方
+        # 自己关闭后端（见 _on_connect_finished 的 stale 分支）。
+        self._connect_attempt += 1
         # 发射中先停波（先停硬件动作，再拆其余资源）
         self._stop_tx("断开连接", wait=True)
         # 回放：先清 resume 标志，避免 _stop_replay 在拆连接过程中又拉起流水线

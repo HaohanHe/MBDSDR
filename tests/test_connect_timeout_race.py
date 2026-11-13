@@ -94,7 +94,9 @@ def test_timed_out_connect_does_not_start_second_real_connect(window):
         }
         # 打出来是为了让红证自证：xfail 只报「有一条 xfailed」，看不出数字。
         print("W25-connect-race observed:", observed)
-        assert first is False, f"超时应当按失败返回（不静默当成功）：{observed}"
+        # B2（2026-11-13）：超时不再是「失败」，而是三态里的 None = 结果未知；
+        # 「不静默当成功」这条不变——None 不是 True。同步调用方仍按 False 收场。
+        assert first is None, f"超时应返回 None（结果未知，≠失败≠成功）：{observed}"
         assert be.connect_calls == 1, (
             "超时后又发起了第二次真实 connect()（两根线程抢同一根棒子）："
             f"{observed}")
