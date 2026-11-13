@@ -2055,6 +2055,8 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `docs/pending-patches/2026-11-12-fz04-unfreeze-request.md` | 收尸线/6ae85f56（补 W106 诊断入口待拍项与首次使用记录） | 2026-11-13 20:06 | 本笔 |
 | `desktop/main_window.py` | 窄屏高度链4px线/6ae85f56（narrow 4px 收口：topBarDetail 56→52；否掉会压 Home 按钮 5px 的底坞 48→40） | 2026-11-13 20:07 | 本笔 |
 | `docs/COORDINATION.md` | 窄屏高度链4px线/6ae85f56（本笔 §6.1 登记行，提交后释放） | 2026-11-13 20:07 | 本笔 |
+| `docs/parameter-unification.md` | 文档引用复核线/6ae85f56（引用按符号重定位 main_window.py:8191（行号二次漂移）） | 2026-11-13 20:10 | 本笔（2026-11-13 20:16 被 09712c6f 删除，本次按原文复原） |
+| `docs/PRD.md` | 文档引用复核线/6ae85f56（引用按符号重定位 main_window.py:7069（行号二次漂移）） | 2026-11-13 20:10 | 本笔（2026-11-13 20:16 被 09712c6f 删除，本次按原文复原） |
 | `mbdsdr_ai/tool_results.py` | S1-S4结果伪造线/6ae85f56（S3 工具成败唯一判据 tool_success：成功只读 success 字段） | 2026-11-13 20:13 | 本笔 |
 | `desktop/ai_panel.py` | S1-S4结果伪造线/6ae85f56（S3 不再现算 ok，把工具原始结果交给 Hooks 与编排任务） | 2026-11-13 20:13 | 本笔 |
 | `desktop/local_agent_bridge.py` | S1-S4结果伪造线/6ae85f56（S3 record_external_call 同源派生，未回结果不伪造结论） | 2026-11-13 20:13 | 本笔 |
@@ -2111,6 +2113,9 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `docs/PRD.md` | 文档引用复核线/6ae85f56（行号漂移：:7069 重定位到 :7070（注释拆行，字面量未变）） | 2026-11-13 21:07 | 本笔 |
 | `docs/COORDINATION.md` | 文档引用复核线/6ae85f56（本笔 §6.1 登记行，提交后释放） | 2026-11-13 21:07 | 本笔 |
 | `docs/incidents/2026-11-13-exclude-hunk-swept-appended-rows.md` | S1-S4结果伪造线/6ae85f56（事故记录：ed3c09e5 多带 4 行登记（--exclude-hunk 坐标过期、无 --declare）） | 2026-11-13 21:09 | 本笔 |
+| `scripts/check_coordination_append_only.py` | 收尸线/6ae85f56（§6.1 只增检查：剥离释放标记后按多重集比对，删行/改写即红） | 2026-11-13 21:11 | 本笔 |
+| `tests/test_coordination_append_only.py` | 收尸线/6ae85f56（只增检查反证：追加标记绿、新增行绿、删行红、改写红） | 2026-11-13 21:11 | 本笔 |
+| `scripts/hooks/pre-commit` | 收尸线/6ae85f56（接入 ⑤：本笔暂存协调文档时跑只增检查，违规拒绝） | 2026-11-13 21:11 | 本笔 |
 
 > 上表各行均由 `claim` 台账推导：owner 原文与 `acquired_at` 直接取自台账，
 > 目的优先用台账里的 `claim_reason`，没有就如实写「未声明」，不补编。时间列只是
@@ -3640,6 +3645,27 @@ token 没了、谁也 release 不了」的中间态。
 
 判据：**任何要求人先制造一个不真实状态才能通过的闸，都比松的闸更糟**——它教人
 绕过，而绕过的人还觉得自己在守规矩。遇到这类拒绝，先改闸，不要改数据。
+
+### 6.1.8 §6.1 表格只许追加，不许删行或改写（2026-11-13 立规）
+
+表是登记面，不是便签。行被删掉，事后只能靠 git 考古，按当前行号去找什么都
+找不到。2026-11-13 `09712c6f` 删掉了 20:10 登记的两行
+（`docs/parameter-unification.md` / `docs/PRD.md`），到 20:16 之后才被发现。
+
+- **只追加**：新登记 = 在表里加一行；不改已有行、不删、不重排。
+- **释放不删行**：在行末追加 `〔释放 <YYYY-MM-DD HH:MM> <released|expired|takeover>〕`，
+  例如 `〔释放 2026-11-13 21:05 released〕`。标记只追加，不替换原行。
+- **改写已有行**（哪怕只改时间 / owner / 备注）同样按「删除」处理：比较时先
+  剥离行末释放标记、再按多重集比对，所以「追加标记」是绿的，「删行 / 改写」
+  是红的。
+- **可复跑入口**：
+  `python scripts/check_coordination_append_only.py`（HEAD vs 暂存区）/
+  `--worktree`（HEAD vs 工作区）。pre-commit ⑤ 在**本笔暂存了本文件**时自动跑，
+  违规即拒绝；工具读取失败降级为告警（与 ④ 同口径）。
+- **确需改历史行**：先人工裁定并写进 `docs/incidents/`，不许直接改表完事。
+- **本次复原**：`09712c6f` 删掉的 20:10 两行已按原文插回 20:07 之后、20:13 之前，
+  行末注明「2026-11-13 20:16 被 09712c6f 删除，本次按原文复原」。痕迹比原来
+  更全：既有原文，也有被谁删过。
 
 ### 6.10 历史改写事件（主分支被 reset 改写；按批次登记，跨日后继续累计）
 

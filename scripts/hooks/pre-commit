@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 """pre-commit 机械闸：①跨线范围检查 ②逐个文件查 claim 台账 ③明文凭据扫描
-④协调台账 §6.1 登记检查。
+④协调台账 §6.1 登记检查 ⑤§6.1 表格只增检查。
 
 ① `scripts/check_commit_scope.py --staged`：暂存区涉及 ≥2 个仍在 TTL 内的
    claim owner 时拒绝。
@@ -27,6 +27,10 @@
    **不自动补行**：机器替你写「这行是我占的」，等于代替持有人签名——这行必须
    由真正占着这个文件的人写。预算从 0.30s 抬到 1.0s，是因为实测检查本身
    306–346ms，0.30s 几乎永远落进降级支，闸形同告警。
+⑤ `scripts/check_coordination_append_only.py`：§6.1 表格**只允许增长**——
+   比较基线与暂存区（剥离行末释放标记后按多重集比对），删行或改写已有行即拒绝。
+   释放不删行，在行末追加 `〔释放 <时间> <方式>〕`，所以「追加标记」必须绿。
+   只在本笔暂存了该文档时执行；工具读取失败降级为告警（与 ④ 同口径）。
 
 安装：python scripts/install_git_hooks.py
 绕过：git commit --no-verify（会由 post-commit 写入 bypass 日志）
@@ -282,6 +286,37 @@ def main():
     else:
         print("[pre-commit] 警告：找不到 check_claim_coordination.py，"
               "§6.1 登记检查本步降级为不执行（不拦提交）。")
+
+    # ⑤ §6.1 表格只允许增长：行不许删、不许改写；释放请在行末追加标记。
+    #    只在本笔确实动了该文档时检查（没动就没有可删的行）；工具故障降级为
+    #    告警，与 ④ 同口径——机械判据坏了是工具坏了，不该逼人 --no-verify。
+    doc_rel = (os.environ.get("MBDSDR_COORD_DOC") or "docs/COORDINATION.md").replace("\\", "/")
+    if any(n.replace("\\", "/").lower() == doc_rel.lower() for n in names):
+        append_only = Path(
+            os.environ.get("MBDSDR_COORD_APPEND_ONLY")
+            or root / "scripts" / "check_coordination_append_only.py"
+        )
+        if append_only.exists():
+            started = time.perf_counter()
+            proc = subprocess.run(
+                [sys.executable, str(append_only), "--doc", doc_rel], cwd=str(root))
+            elapsed = time.perf_counter() - started
+            print(f"[pre-commit] ⑤ §6.1 只增检查 {elapsed * 1000.0:.0f}ms")
+            if proc.returncode == 1:
+                print("[pre-commit] 拒绝提交：§6.1 表格有行被删除或改写。")
+                print("[pre-commit] 规则（§6.1.8）：表格行只许追加；释放时在行末追加"
+                      "「〔释放 <时间> <方式>〕」再提交，不要删行。")
+                print("[pre-commit] 确实需要改历史行时，先人工裁定并在事故记录里写明，"
+                      "不要靠改写表格绕过。")
+                return 1
+            if proc.returncode != 0:
+                print(f"[pre-commit] 警告：只增检查退出 {proc.returncode}"
+                      "（读取失败），本步降级为告警，**不拦提交**。")
+        else:
+            print("[pre-commit] 警告：找不到 check_coordination_append_only.py，"
+                  "⑤ 只增检查本步不执行（不拦提交）。")
+    else:
+        print("[pre-commit] ⑤ §6.1 未改动，只增检查跳过。")
 
     tree = _git("write-tree")
     if tree.returncode != 0:
