@@ -773,7 +773,7 @@ class SettingsPanel(QWidget):
     #: 首次显示前不存在的 UI 属性。外部（主窗口、测试、复现脚本）按既有名字
     #: 直接取时自动补建，不要求调用方知道这里有惰性构建。
     _LAZY_UI_ATTRS = frozenset((
-        "_rows", "_row_boxes", "_search_index", "_group_keys",
+        "_rows", "_row_boxes", "_origin_labels", "_search_index", "_group_keys",
         "_group_sections", "_key_section", "_section_purpose",
         "_search_extras", "_other_index", "_other_hint",
         "group_sections", "search_edit", "search_status", "status_label",
@@ -809,6 +809,8 @@ class SettingsPanel(QWidget):
         self._rows: Dict[str, QWidget] = {}
         #: 行容器（QGroupBox）。过滤时按行 setVisible，控件本身在 _rows。
         self._row_boxes: Dict[str, QWidget] = {}
+        #: 每项「默认值 / 已自定义」来源标签（仅 settings 存储有这个概念）。
+        self._origin_labels: Dict[str, QLabel] = {}
         #: 每项的检索文本（名称 + 键名 + 分组 + 说明 + 生效提示 + 枚举文案）。
         self._search_index: Dict[str, str] = {}
         #: 分组 → 该组在 schema 里的键；用于「不留空组」判定。
@@ -1398,6 +1400,15 @@ class SettingsPanel(QWidget):
         h = QHBoxLayout()
         control = self._make_control(item)
         h.addWidget(control, 1)
+        origin_lbl = QLabel()
+        origin_lbl.setObjectName("hintLabel")
+        origin_lbl.setToolTip(
+            "「已自定义」= 你明确设过这个值，升级不会用新默认值覆盖；"
+            "「默认值」= 从未显式设置，跟随当前版本的默认值")
+        h.addWidget(origin_lbl)
+        if item.storage == "settings":
+            self._origin_labels[item.key] = origin_lbl
+            self._update_origin_label(item.key)
         btn = QToolButton()
         btn.setText("默认")
         btn.setToolTip(f"恢复「{item.label}」为默认值")
@@ -1562,6 +1573,7 @@ class SettingsPanel(QWidget):
                 self._set_control_value(item, self._current_value(item))
         finally:
             self._building = False
+        self._refresh_origin_labels()
 
     def _set_control_value(self, item, value):
         w = self._rows.get(item.key)
@@ -1589,6 +1601,35 @@ class SettingsPanel(QWidget):
         finally:
             w.blockSignals(False)
 
+    def _origin_text(self, key: str) -> str:
+        """该设置项的来源文案：用户值还是跟随默认值。
+
+        只有 settings 存储有「显式设置」概念；其它后端（gui_config/ai_config）
+        没有可靠判据，界面留空——不假装知道。
+        """
+        if self._settings is None:
+            return ""
+        checker = getattr(self._settings, "is_explicit", None)
+        if not callable(checker):
+            return ""
+        try:
+            return "已自定义" if checker(key) else "默认值"
+        except (RuntimeError, TypeError):
+            return ""
+
+    def _update_origin_label(self, key: str) -> None:
+        label = self._origin_labels.get(key)
+        if label is None:
+            return
+        try:
+            label.setText(self._origin_text(key))
+        except RuntimeError:      # 控件已随面板销毁
+            pass
+
+    def _refresh_origin_labels(self) -> None:
+        for key in list(self._origin_labels):
+            self._update_origin_label(key)
+
     # ------------------------------------------------------------ 改值
     def _on_changed(self, key: str, raw):
         if self._building:
@@ -1598,6 +1639,7 @@ class SettingsPanel(QWidget):
         store_error = self._store_value(item, value)
         applied = self._apply(item, value)
         self._set_control_value(item, self._current_value(item))
+        self._update_origin_label(key)
         if store_error:
             # 写盘失败必须停在失败态：不能先报一句失败、再被「已保存」冲掉。
             msg = f"未保存：{item.label}（{store_error}）"
