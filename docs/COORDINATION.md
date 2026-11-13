@@ -2046,6 +2046,7 @@ No supported devices found），GNSS+SDR 同开复验没做成；离线那次
 | `tests/test_destructive_confirm_guards.py` | S1-S4结果伪造线/6ae85f56（扫频 worker stub 跟随新信号签名，判定逻辑未动） | 2026-11-13 20:13 | 本笔 |
 | `mbdsdr_ai/agent.py` | S1-S4结果伪造线/6ae85f56（S4 已存在克隆目标校验 rev-parse HEAD 与 origin） | 2026-11-13 20:13 | 本笔 |
 | `tests/test_git_clone_existing_target.py` | S1-S4结果伪造线/6ae85f56（S4 空目录/无提交残目录/错远端判失败 + 完整仓库判可用） | 2026-11-13 20:13 | 本笔 |
+| `docs/incidents/2026-11-13-safe-commit-swept-foreign-rows.md` | 锚点机制线/6ae85f56（事故记录：safe_commit 卷走他线 §6.1 两行（8982b4f9）） | 2026-11-13 20:20 | 本笔 |
 | `desktop/command_palette.py` | 统一搜索性能线/1e994b03（补逐键耗时实测注记（2026-11-13）） | 2026-11-13 20:17 | 本笔 |
 
 > 上表各行均由 `claim` 台账推导：owner 原文与 `acquired_at` 直接取自台账，
