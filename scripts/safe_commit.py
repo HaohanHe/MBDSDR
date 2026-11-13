@@ -49,18 +49,101 @@ pre-commit 闸门对**任何未声明的删除条目**一律拒绝（幻影删�
 自动导出为 ``MBDSDR_INTENT_DELETIONS``，正常删文件不用手写声明；``--files``
 清单之外的路径根本不会进索引，因此不会被误声明。
 
+声明快照：只交「声明时的那份内容」（2026-11-13，形态⑰）
+-------------------------------------------------------
+
+``8982b4f9`` 实证：``--files`` 声明之后、``git add`` 之前，别的线往同一个文件
+写了两行，于是这笔「只该加 1 行」的提交带了 3 行，内容没丢但归属记错。根因是
+本脚本一直按**提交时刻的工作区**取文件，而不是按声明时的那份快照。
+
+现在：
+
+* ``--declare`` 只记录声明快照（每文件的存在性 + blob 号 + 行数），落在
+  ``<locks>/declarations/<session>.<文件集摘要>.json``，不提交；
+* 提交时若找到同一文件集的声明，就以它为准；没有声明则退化为「本次进程启动
+  时刻的工作区」，并明确打出「无预先声明，窗口只覆盖本次运行」；
+* ``git commit`` 之前重算一次，**一个字节不同就拒绝**（退出码 4，不重试）：
+  逐行列出声明之后新增的行、消失的行，并从 claim 台账推断这些行可能属于谁；
+* 声明时**已经存在**的他人改动不算变化（那正是 ``--exclude-hunk`` 处理的对象），
+  这条边界不能混：混了以后共享文件就没人敢提交；
+* 确认要连别人的行一起带走时，用 ``--allow-foreign-changes "<理由>"`` 放行，
+  理由与逐文件增删行数会写进提交说明的 ``foreign-changes:`` 段——豁免必须留痕，
+  不能默默通过。
+
+提交说明逐字校验（2026-11-13，形态⑱）
+--------------------------------------
+
+``7a76b097`` 实证：主题写「hardcoded-parameters 的文案」，内容却是
+``desktop/command_palette.py``。多进程并发提交时 ``.git/COMMIT_EDITMSG`` 是
+共享可变状态（``git commit -F`` 也会把消息写进去，commit-msg 钩子跑完再读回），
+别人的消息可能在读回之前覆盖它。
+
+本脚本的处理：消息只走 stdin（``git commit --cleanup=verbatim -F -``，不经过
+任何外部临时文件），提交锁内串行化，提交后从 commit 对象里把消息取回来逐字
+比对——对不上就是退出码 3 的事故报告，不会因为「已经提交了」而沉默。
+
+这条路径上的共享可变状态清单：
+
+* ``.git/index`` / ``.git/index.lock``：不进，本脚本全程用会话私有 index；
+* ``.git/COMMIT_EDITMSG``：git 自己会写，本脚本无法改路径，只能靠提交锁串行化
+  ＋提交后逐字复核；
+* ``.git/ORIG_HEAD``：本脚本不产生，也不读；
+* 钩子产物：pre/post-commit 的标记按 tree 号命名，不与并发提交撞名；
+* ``refs/heads/*.lock``：git 自己的锁，撞上按可重试处理。
+
+§6.1 登记行：闸看暂存区，这里连工作区一起看（2026-11-13，形态⑲）
+------------------------------------------------------------------
+
+``ac232bf5`` 实证：pre-commit 要求 §6.1 有登记行，人用
+``append_coordination_row.py`` 把行追加到**工作区**，但这行没进暂存区——
+闸看见的暂存区是干净的，行就这么挂在工作区等「下次顺手带走」。这正是
+``8982b4f9`` 会重演的入口：闸的视野比本笔该带的内容窄。
+
+现在，提交前按**同一个判定**（直接 import ``check_claim_coordination``，
+不另写一份语义）算出本笔哪些暂存文件需要 §6.1 行：
+
+* 工作区里没有该行 → 拒绝（退出码 5），并打印可直接粘贴执行的
+  ``append_coordination_row.py`` 命令；
+* 工作区里有、暂存区没有 → 只把覆盖本笔的**那几行**写进私有 index，
+  工作区里别人写的行原样留在外面；拒绝信息与放行信息都会说清带了哪几行；
+* 工具**不生成**登记行内容：行是谁占着文件谁写的（签名权在人手上），
+  工具只负责别让这行掉队。
+
+排除粒度：整 hunk 之外，允许按行（2026-11-13，形态⑳）
+-------------------------------------------------------
+
+现场：三行相邻的 §6.1 登记里只有一行是自己的，``--exclude-hunk`` 只认完整
+hunk，于是有人把自己的行挪到别处让 diff 断开——提交干净了，台账时间序却被
+「为了让工具能用」这个排版副作用打乱。**为了让工具能用而改数据，代价不能接受。**
+
+现在 ``--exclude-hunk path:2051-2053`` 可以只排 hunk 里的那几行：
+
+* 范围完整覆盖 hunk → 与原来的整块排除完全一样（老入口保留）；
+* 范围收在单个纯新增 hunk 内部 → 只丢掉范围内的 ``+`` 行，其余行留在原位，
+  不因为排除而挪动；
+* 含删除行的 hunk 只能整块声明（新侧行号选不中 ``-`` 行）；跨 hunk 边界、
+  行号落空、blob 逐字对不上，一律拒绝。
+
 用法::
 
     python scripts/safe_commit.py --files a.py b.md --message-file msg.txt
+    python scripts/safe_commit.py --files a.md --declare
     python scripts/safe_commit.py --files a.md --message-file msg.txt \\
         --exclude-hunk a.md:120-138 --exclude-owner 接入层线
+    python scripts/safe_commit.py --files a.md --message-file msg.txt \\
+        --exclude-hunk a.md:2051-2052 --exclude-owner 文档引用复核线
+    python scripts/safe_commit.py --files a.md --message-file msg.txt \\
+        --allow-foreign-changes "B 线两行已当面核对，随本笔一起落库"
 
 退出码：0 成功；1 前置校验失败（未提交）；2 重试耗尽（未提交）；3 提交后复核失败
-（已提交，需按事故卡处理）。
+（已提交，需按事故卡处理）；4 声明后内容变化被拒（未提交，不重试）；
+5 §6.1 缺行被拒（未提交，不重试）。
 """
 from __future__ import annotations
 
 import argparse
+import difflib
+import hashlib
 import json
 import os
 import re
@@ -101,10 +184,16 @@ def _parse_exclusions(specs: list[str], files: list[str]) -> list[dict]:
 
 
 def _revert_index_hunks(env: dict, path: str, ranges: list[dict]) -> None:
-    """把声明的 hunk 从私有 index 里反向撤掉（工作树不动）。
+    """把声明的行从私有 index 里反向撤掉（工作树不动）。
 
-    只接受「完整覆盖某个 hunk」的声明：跨 hunk 边界会多撤或少撤，宁可拒绝
-    也不静默扩大排除范围。新增文件与二进制文件不支持排除。
+    声明范围可以是**完整 hunk**（``a.md:120-138``），也可以是 hunk 内部的
+    **行范围**（``a.md:2051-2053``）。后者是为 2026-11-13 的现场加的：三行
+    相邻新增里只有一行是自己的，按整 hunk 排就只能把自己的行挪走让 diff 断开，
+    结果「为了让工具能用而改数据」——台账时间序被排版副作用打乱。
+
+    行级排除只在 hunk 不含删除行时才允许：新侧行号选不中 ``-`` 行，选中了
+    也是猜。跨 hunk 边界、行号落空、blob 内容对不上，一律拒绝，绝不静默
+    扩大或缩小排除范围。新增文件与二进制文件不支持排除。
     """
     if _run(["cat-file", "-e", f"HEAD:{path}"], env).returncode != 0:
         raise ValueError(f"{path} 是新增文件，不支持 --exclude-hunk")
@@ -143,8 +232,16 @@ def _revert_index_hunks(env: dict, path: str, ranges: list[dict]) -> None:
         # 参与覆盖检查（与「声明范围按 new 行号」同一条规则）。反向撤销已验证：
         # --unidiff-zero 下能把删掉的行精确加回私有 index。
         hunk["end"] = hunk["start"] + count - 1 if count else hunk["start"]
+        # 每个 + 行对应的新侧行号：行级排除要靠它定位，不能靠 body 下标。
+        hunk["plus"] = []
+        lineno = hunk["start"]
+        for body_line in hunk["body"]:
+            if body_line.startswith("+"):
+                hunk["plus"].append((lineno, body_line))
+                lineno += 1
 
-    selected: list[dict] = []
+    # plan: hunk → 要丢掉的新侧行号集合（None = 整块排除，保持老入口）
+    plan: dict[int, dict] = {}
     for item in ranges:
         matched = [
             h for h in hunks if h["start"] <= item["end"] and h["end"] >= item["start"]
@@ -154,14 +251,38 @@ def _revert_index_hunks(env: dict, path: str, ranges: list[dict]) -> None:
                 f"{path}:{item['start']}-{item['end']} 没对上任何暂存 hunk"
             )
         for hunk in matched:
-            if not (item["start"] <= hunk["start"] and hunk["end"] <= item["end"]):
+            entry = plan.get(id(hunk))
+            if item["start"] <= hunk["start"] and hunk["end"] <= item["end"]:
+                plan[id(hunk)] = {"hunk": hunk, "drop": None}
+                continue
+            if item["start"] < hunk["start"] or item["end"] > hunk["end"]:
+                raise ValueError(
+                    f"{path}:{item['start']}-{item['end']} 与 hunk "
+                    f"{hunk['start']}-{hunk['end']} 只相交一部分：要么整块声明，"
+                    "要么把范围收进这一个 hunk 里"
+                )
+            if any(line.startswith("-") for line in hunk["body"]):
                 raise ValueError(
                     f"{path}:{item['start']}-{item['end']} 未完整覆盖 hunk "
-                    f"{hunk['start']}-{hunk['end']}，请按完整 hunk 范围声明"
+                    f"{hunk['start']}-{hunk['end']}：该 hunk 含删除行，行级排除"
+                    "定位不了删除行，这种 hunk 请按完整 hunk 范围声明"
                 )
-            if all(hunk is not s for s in selected):
-                selected.append(hunk)
-    if not selected:
+            drop = {ln for ln, _line in hunk["plus"]
+                    if item["start"] <= ln <= item["end"]}
+            if not drop:
+                raise ValueError(
+                    f"{path}:{item['start']}-{item['end']} 在 hunk "
+                    f"{hunk['start']}-{hunk['end']} 里没有可排除的新增行"
+                )
+            if entry is None:
+                plan[id(hunk)] = {"hunk": hunk, "drop": drop}
+                item["partial"] = True
+            elif entry["drop"] is None:
+                continue                      # 已经被另一条声明整块排除
+            else:
+                entry["drop"] |= drop
+                item["partial"] = True
+    if not plan:
         raise ValueError(f"{path} 的排除声明没有选中任何 hunk")
 
     # 直接在私有 index 的 blob 上做行替换，不再让 git apply 去猜位置。
@@ -178,26 +299,30 @@ def _revert_index_hunks(env: dict, path: str, ranges: list[dict]) -> None:
             f"{blob.stderr.decode('utf-8', 'replace')[:200]}"
         )
     lines = blob.stdout.splitlines(keepends=True)
-    for hunk in sorted(selected, key=lambda h: h["start"], reverse=True):
-        added, removed = [], []
+    for entry in sorted(plan.values(), key=lambda e: e["hunk"]["start"], reverse=True):
+        hunk = entry["hunk"]
+        removed: list[bytes] = []
         for body_line in hunk["body"]:
             if body_line.startswith("\\"):
                 raise ValueError(
                     f"{path} 的 hunk {hunk['start']}-{hunk['end']} 含"
                     "「No newline at end of file」标记，暂不支持排除")
-            raw = body_line[1:].encode("utf-8")
-            if body_line.startswith("+"):
-                added.append(raw)
-            elif body_line.startswith("-"):
-                removed.append(raw)
+            if body_line.startswith("-"):
+                removed.append(body_line[1:].encode("utf-8"))
+        added = [(ln, line[1:].encode("utf-8")) for ln, line in hunk["plus"]]
         pos = hunk["start"] - 1 if added else hunk["start"]
         end = pos + len(added)
-        if lines[pos:end] != added:
+        # 整块逐字比对（包含被行级排除掉的那几行）：排除的每一行都必须在
+        # blob 里原地、原样存在，找不到就拒绝——这条不能因为粒度变细而松。
+        if lines[pos:end] != [raw for _ln, raw in added]:
             raise ValueError(
                 f"{path} 的 hunk {hunk['start']}-{hunk['end']} 在私有 index 里"
                 "对不上（行号/内容漂移），拒绝静默改写"
             )
-        lines[pos:end] = removed
+        drop = entry["drop"]
+        # drop is None 是整块排除的老入口：整个 hunk 的 + 行一行都不带。
+        kept = [] if drop is None else [raw for ln, raw in added if ln not in drop]
+        lines[pos:end] = kept + removed
     new_blob = b"".join(lines)
     sha = _run(["hash-object", "-w", "--stdin"], env, new_blob)
     if sha.returncode != 0:
@@ -216,7 +341,8 @@ def _exclusion_trailer(message: bytes, exclusions: list[dict], owner: str) -> by
         return message
     lines = ["", "", "excluded-hunks:" + (f" owner={owner}" if owner else "")]
     for item in exclusions:
-        lines.append(f"- {item['path']}:{item['start']}-{item['end']}")
+        tail = "（行级）" if item.get("partial") else ""
+        lines.append(f"- {item['path']}:{item['start']}-{item['end']}{tail}")
     return message.rstrip(b"\n") + ("\n" + "\n".join(lines) + "\n").encode("utf-8")
 
 LOCK_HINTS = ("cannot lock ref", "expected ", "Unable to create", "index.lock")
@@ -369,12 +495,523 @@ def _staged_set(env) -> list[str]:
     return out
 
 
+# ---------------------------------------------------------------------------
+# 声明快照：声明之后冒出来/消失的内容一律拒绝（形态⑰）
+# ---------------------------------------------------------------------------
+
+def _plain_env() -> dict:
+    """不含 ``GIT_INDEX_FILE`` 的环境：只读工作区内容，不碰任何暂存区。"""
+    return {k: v for k, v in os.environ.items() if k != "GIT_INDEX_FILE"}
+
+
+def _iso(ts: float) -> str:
+    return time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(ts))
+
+
+def _fingerprint(env: dict, path: str) -> dict:
+    """工作区内容的声明指纹：存在性 + blob 号 + 行数。
+
+    blob 用 ``hash-object -w --stdin`` 落进对象库（与 ``git add`` 同一种东西，
+    未被引用，gc 会回收）：比对时能 ``cat-file`` 取回声明时的原文，用来逐行
+    说出「哪几行是声明之后才冒出来的」，而不是只给一个不相等。
+    """
+    target = ROOT / path
+    if not target.is_file():
+        return {"path": path, "exists": False, "blob": "", "lines": 0}
+    data = target.read_bytes()
+    proc = _run(["hash-object", "-w", "--stdin"], env, data)
+    if proc.returncode != 0:
+        raise ValueError(
+            f"计算 {path} 的 blob 号失败：{proc.stderr.decode('utf-8', 'replace')[:200]}")
+    return {
+        "path": path,
+        "exists": True,
+        "blob": proc.stdout.decode().strip(),
+        "lines": len(data.decode("utf-8", "replace").splitlines()),
+    }
+
+
+def _declaration_dir() -> Path:
+    directory = LOCKS_DIR / "declarations"
+    directory.mkdir(parents=True, exist_ok=True)
+    return directory
+
+
+def _declaration_digest(files: list[str]) -> str:
+    """按文件集（不是按会话）索引：同一份声明清单在哪条线手里都指同一批内容。"""
+    joined = "\n".join(sorted(files))
+    return hashlib.sha1(joined.encode("utf-8")).hexdigest()[:16]
+
+
+def _write_declaration(files: list[str], env: dict) -> tuple[dict, float]:
+    """把声明时刻的工作区内容记成快照；同一文件集只留最新一份。"""
+    snapshot = {path: _fingerprint(env, path) for path in files}
+    stamp = time.time()
+    record = {
+        "session": _session_key(),
+        "owner": os.environ.get("MBDSDR_CLAIM_OWNER", ""),
+        "root": str(ROOT),
+        "declared_at": stamp,
+        "declared_iso": _iso(stamp),
+        "files": snapshot,
+    }
+    for old in _declaration_dir().glob(f"*.{_declaration_digest(files)}.json"):
+        try:
+            old.unlink()
+        except OSError:
+            pass
+    target = _declaration_dir() / f"{_session_key()}.{_declaration_digest(files)}.json"
+    tmp = target.with_name(f"{target.name}.tmp{os.getpid()}")
+    tmp.write_text(json.dumps(record, ensure_ascii=False, indent=1), encoding="utf-8")
+    os.replace(tmp, target)
+    return snapshot, stamp
+
+
+def _load_declaration(files: list[str]) -> tuple[Path, dict, float] | None:
+    """找同一文件集的声明快照；找不到返回 None（调用方退化为本次启动时刻）。"""
+    candidates = sorted(
+        _declaration_dir().glob(f"*.{_declaration_digest(files)}.json"),
+        key=lambda p: p.stat().st_mtime,
+        reverse=True,
+    )
+    for path in candidates:
+        try:
+            record = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            print(f"[declare] 忽略读不出来的声明文件：{path}")
+            continue
+        if set(record.get("files") or {}) != set(files):
+            print(f"[declare] 忽略文件集不符的声明文件：{path}")
+            continue
+        if str(record.get("root")) != str(ROOT):
+            print(f"[declare] 忽略其它仓库的声明文件：{path}")
+            continue
+        print(
+            f"[declare] 使用声明快照 {path}（session={record.get('session')}，"
+            f"{record.get('declared_iso')}）"
+        )
+        return path, record["files"], float(record["declared_at"])
+    return None
+
+
+def _drop_declaration(path: Path | None) -> None:
+    """提交成功才清声明：失败/被拒时快照必须留着，否则下次就查不出东西。"""
+    if path is None:
+        return
+    try:
+        path.unlink()
+    except OSError:
+        pass
+
+
+def _declared_lines(env: dict, blob: str) -> list[str] | None:
+    """取回声明时的原文；blob 已被 gc 清走时返回 None（仍然判不一致）。"""
+    if not blob:
+        return []
+    proc = _run(["cat-file", "blob", blob], env)
+    if proc.returncode != 0:
+        return None
+    return proc.stdout.decode("utf-8", "replace").splitlines()
+
+
+def _line_diff(env: dict, declared: dict, limit: int = 40) -> tuple[list[str], int, int]:
+    """逐行说出「声明之后多了什么 / 消失了什么」，返回 (明细, 新增数, 消失数)。"""
+    old = _declared_lines(env, declared.get("blob") or "")
+    if old is None:
+        return ([f"    （声明 blob {(declared.get('blob') or '')[:8]} 已不在对象库，"
+                 "无法逐行对比；指纹仍不一致）"], 0, 0)
+    target = ROOT / declared["path"]
+    new = (target.read_bytes().decode("utf-8", "replace").splitlines()
+           if target.is_file() else [])
+    items: list[tuple[str, int, str]] = []
+    added = removed = 0
+    matcher = difflib.SequenceMatcher(None, old, new, autojunk=False)
+    for tag, i1, i2, j1, j2 in matcher.get_opcodes():
+        if tag == "equal":
+            continue
+        for k in range(i1, i2):          # 声明时在、现在没了：丢内容
+            removed += 1
+            items.append(("-", k + 1, old[k]))
+        for k in range(j1, j2):          # 声明时没有、现在冒出来：归属会被记错
+            added += 1
+            items.append(("+", k + 1, new[k]))
+    detail = [
+        f"    {mark} {'声明时第' if mark == '-' else '现在第'} {lineno} 行：{text}"
+        for mark, lineno, text in items[:limit]
+    ]
+    if len(items) > limit:
+        detail.append(f"    …另有 {len(items) - limit} 行变化未显示")
+    return detail, added, removed
+
+
+def _claim_owners(path: str, since: float) -> list[str]:
+    """从 claim 台账推断：声明之后仍持有过这个文件的线。"""
+    try:
+        data = json.loads(
+            (LOCKS_DIR / "claims.json").read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return []
+    record = (data.get("claims") or {}).get(path.casefold()) or {}
+    entries = list(record.get("history") or [])
+    if record.get("current"):
+        entries.append(record["current"])
+    now = time.time()
+    me = os.environ.get("MBDSDR_CLAIM_OWNER", "")
+    owners: list[str] = []
+    for entry in entries:
+        owner = str(entry.get("owner") or "")
+        if me and owner == me:
+            continue                     # 「可能属于」要指向别人，不指向自己
+        start = float(entry.get("acquired_at") or 0)
+        end_raw = entry.get("released_at")
+        end = float(end_raw) if end_raw else None
+        if start > now:
+            continue
+        if end is not None and end <= since:
+            continue                     # 声明前就释放了，跟这次变化无关
+        state = "持有中" if end is None else f"至 {_iso(end)}"
+        line = f"{owner or '<未知>'}（{_iso(start)} 起，{state}）"
+        if line not in owners:
+            owners.append(line)
+    return owners
+
+
+def _verify_declaration(env: dict, declared: dict, declared_at: float) -> tuple[list[dict], str]:
+    """比对声明快照与当前工作区：返回 (变化清单, 报告文本)。
+
+    只比内容，不比 mtime：``--exclude-hunk`` 声明时就已经在的他人改动已进快照，
+    天然不会命中——这条边界混掉，共享文件就再没人敢提交。
+    """
+    changed: list[dict] = []
+    for path, item in declared.items():
+        current = _fingerprint(env, path)
+        if (current["exists"] == bool(item.get("exists"))
+                and current["blob"] == (item.get("blob") or "")):
+            continue
+        detail, added, removed = _line_diff(env, item)
+        changed.append({
+            "path": path,
+            "detail": detail,
+            "added": added,
+            "removed": removed,
+            "before": item.get("blob") or "",
+            "after": current["blob"],
+        })
+    if not changed:
+        return [], ""
+    lines = [
+        f"拒绝提交：声明之后有内容变化（{len(changed)} 个文件）。",
+        f"声明时刻 {_iso(declared_at)}。只拒绝「声明之后新冒出来或消失」的内容；"
+        "声明时就已经在的他人改动不算（那属于 --exclude-hunk）。",
+    ]
+    for item in changed:
+        before = item["before"][:8] or "<无>"
+        after = item["after"][:8] or "<无>"
+        lines.append(
+            f"  {item['path']}：声明 {before} → 现在 {after}"
+            f"（+{item['added']} / -{item['removed']} 行）"
+        )
+        lines.extend(item["detail"])
+        owners = _claim_owners(item["path"], declared_at)
+        if owners:
+            lines.append("    可能属于：" + "、".join(owners[:5]))
+        else:
+            lines.append("    可能属于：claim 台账里该路径在声明之后没有归属记录（无法推断）")
+    lines.append(
+        "处置：等对方落库或撤回后重新 --declare 再提交；确认要一起带走时用 "
+        "--allow-foreign-changes \"<理由>\"（理由会写进提交说明）。"
+    )
+    return changed, "\n".join(lines)
+
+
+def _foreign_trailer(message: bytes, changed: list[dict], reason: str) -> bytes:
+    """豁免必须留痕：理由 + 逐文件增删行数写进提交说明。"""
+    lines = ["", "", f"foreign-changes: {reason}"]
+    for item in changed:
+        before = item["before"][:8] or "<无>"
+        after = item["after"][:8] or "<无>"
+        lines.append(
+            f"- {item['path']} 声明后 +{item['added']} / -{item['removed']} 行"
+            f"（{before} → {after}）"
+        )
+    return message.rstrip(b"\n") + ("\n" + "\n".join(lines) + "\n").encode("utf-8")
+
+
+def _stored_message(env: dict) -> bytes | None:
+    """从 commit 对象里取回落库的消息原文（不经过任何文件）。"""
+    proc = _run(["cat-file", "commit", "HEAD"], env)
+    if proc.returncode != 0:
+        return None
+    raw = proc.stdout
+    head, sep, body = raw.partition(b"\n\n")
+    return body if sep else None
+
+
+def _verify_message(env: dict, message: bytes) -> str:
+    """提交后逐字复核：``7a76b097`` 那种「主题与内容不符」必须可见。"""
+    stored = _stored_message(env)
+    if stored == message:
+        print(f"[message] 提交信息逐字校验一致（{len(message)} 字节）")
+        return ""
+    got = (stored or b"").decode("utf-8", "replace")
+    want = message.decode("utf-8", "replace")
+    detail = [f"提交信息与传入内容不一致：传入 {len(message)} 字节 / 落库 "
+              f"{len(stored) if stored is not None else '<读不出来>'} 字节"]
+    detail.append(f"  传入主题：{want.splitlines()[0] if want.splitlines() else '<空>'}")
+    detail.append(f"  落库主题：{got.splitlines()[0] if got.splitlines() else '<空>'}")
+    for i, (a, b) in enumerate(zip(want, got)):
+        if a != b:
+            detail.append(f"  首个差异在第 {i} 个字符：传入 {a!r} / 落库 {b!r}")
+            break
+    else:
+        if len(want) != len(got):
+            detail.append(f"  公共前缀一致，长度差 {abs(len(want) - len(got))} 个字符"
+                          "（某一段被追加或截断）")
+    detail.append(
+        "  这笔已落库，必须按事故卡处理：`git log -1` 核对，必要时 "
+        "`git commit --amend -F <原消息>` 改回来；别让错消息烂在历史里。"
+    )
+    return "\n".join(detail)
+
+
+# ---------------------------------------------------------------------------
+# §6.1 登记行：闸只看暂存区，这里连工作区一起看（形态⑲）
+# ---------------------------------------------------------------------------
+
+COORD_SECTION = "### 6.1 当前占用"
+COORD_TABLE_HEAD = "| 文件 | 线名"
+
+
+def _coord_doc_rel() -> str:
+    """登记文档的仓库相对路径（与 pre-commit 同用 ``MBDSDR_COORD_DOC``）。"""
+    raw = os.environ.get("MBDSDR_COORD_DOC")
+    if not raw:
+        return "docs/COORDINATION.md"
+    try:
+        return Path(raw).resolve().relative_to(ROOT.resolve()).as_posix()
+    except ValueError:
+        return Path(raw).as_posix()
+
+
+def _coord_module():
+    """按需导入闸门的判定实现：两边共用一套语义，不各写一份。
+
+    放在函数里是因为 ``check_claim_coordination.py`` 是可选的登记一致性设施
+    （不是凭据/删除那种安全闸）：缺了它本脚本仍要能提交，只在缺它时说明降级。
+    """
+    try:
+        import check_claim_coordination as cc
+        return cc
+    except ImportError:
+        scripts = str(Path(__file__).resolve().parent)
+        if scripts not in sys.path:
+            sys.path.insert(0, scripts)
+        import check_claim_coordination as cc
+        return cc
+
+
+def _index_text(env: dict, rel: str) -> str | None:
+    """私有 index 里该文件的内容；index/HEAD 都没有时返回 None。"""
+    for spec in (f":{rel}", f"HEAD:{rel}"):
+        proc = _run(["show", spec], env)
+        if proc.returncode == 0:
+            return proc.stdout.decode("utf-8", "replace")
+    return None
+
+
+def _coord_row_lines(text: str) -> list[str]:
+    """§6.1 表格里的数据行原文（表头/分隔行除外），保持文档里的顺序。"""
+    lines = text.splitlines()
+    start = next((i for i, ln in enumerate(lines)
+                  if ln.strip().startswith(COORD_SECTION)), None)
+    if start is None:
+        return []
+    out: list[str] = []
+    started = False
+    for ln in lines[start + 1:]:
+        stripped = ln.strip()
+        if stripped.startswith("|"):
+            started = True
+            cells = [c.strip() for c in stripped.strip("|").split("|")]
+            if all(re.fullmatch(r":?-{2,}:?", c) for c in cells):
+                continue
+            if not cells or cells[0] in ("文件", ""):
+                continue
+            out.append(stripped)
+            continue
+        if started and stripped:
+            break
+    return out
+
+
+def _insert_table_rows(text: str, rows: list[str]) -> str:
+    """把行插到 §6.1 表格末尾；文档其余部分一个字节都不动。"""
+    lines = text.splitlines(keepends=True)
+    start = next((i for i, ln in enumerate(lines)
+                  if ln.strip().startswith(COORD_SECTION)), None)
+    if start is None:
+        raise ValueError(f"找不到 {COORD_SECTION}")
+    pos = start + 1
+    # §6.1 标题与表格之间允许多段说明文字（「追加登记行不必占整文件」等），
+    # 只要还没遇到下一个标题就继续往后找。原来只容忍空行，文档一加说明就报
+    #「下面没有表格」，逼人手工插行——工具不该把正常文档结构当成错误。
+    while pos < len(lines):
+        stripped = lines[pos].lstrip()
+        if stripped.startswith("|"):
+            break
+        if stripped.startswith("#"):
+            raise ValueError(f"{COORD_SECTION} 下面没有表格")
+        pos += 1
+    if pos >= len(lines):
+        raise ValueError(f"{COORD_SECTION} 下面没有表格")
+    end = pos
+    while end < len(lines) and lines[end].lstrip().startswith("|"):
+        end += 1
+    eol = "\r\n" if lines[end - 1].endswith("\r\n") else "\n"
+    payload = "".join(row.rstrip("\r\n") + eol for row in rows)
+    return "".join(lines[:end]) + payload + "".join(lines[end:])
+
+
+def _covers(cc, line: str, pair: tuple[str, str]) -> bool:
+    """这一行是否覆盖这个 (路径, owner) 对：解析与覆盖判定都走闸门那一套。"""
+    synthetic = "\n".join([
+        COORD_SECTION,
+        COORD_TABLE_HEAD + " | 开始时间 | 预计提交 hash |",
+        "| --- | --- | --- | --- |",
+        line,
+    ])
+    try:
+        rows = cc.parse_coordination_rows(synthetic)
+    except ValueError:
+        return False
+    return bool(rows) and not cc.uncovered_pairs([pair], rows)[0]
+
+
+def _coord_missing_report(cc, missing, doc_abs: Path) -> str:
+    lines = [
+        "拒绝提交：本笔的活跃 claim 在 §6.1 还没有登记行。",
+        "pre-commit ④ 只看暂存区，看不到躺在工作区里的行；这里连工作区一起看，"
+        "免得登记行掉队、下次被别人顺手带走。",
+    ]
+    for path, owner, pattern in missing:
+        lines.append(f"  - {path} owner={owner}"
+                     + ("（仅目录级登记；代码/共享文档必须逐条）" if pattern else ""))
+    lines.append("补法（工具不代写登记行，签名权在占着文件的人手上）：")
+    seen: set[str] = set()
+    for path, owner, _pattern in missing:
+        cmd = cc.append_command(path, owner, doc_abs, ROOT)
+        if "--root" not in cmd:
+            # 临时树/从别处调用时，默认 root 会指错仓库；补上才是可粘贴执行的。
+            cmd += f' --root "{ROOT}"'
+        if cmd in seen:
+            continue
+        seen.add(cmd)
+        lines.append(f"  {cmd}")
+    lines.append("补完重跑同一条 safe_commit 命令即可：这行会被「只带这一行」放进本笔。")
+    return "\n".join(lines)
+
+
+def _coordination_step(env: dict, files: list[str], doc_rel: str) -> tuple[int, str, list[str]]:
+    """闸需要 §6.1 行时：工作区有就只带这一行，没有就拒绝并给命令。
+
+    返回 (退出码, 说明, 额外进本笔的路径)。判定完全复用闸门实现，不另写一份：
+    两条路各写一半，就会出现「闸说缺行、工具说不用」的死循环。
+    """
+    doc_abs = ROOT / doc_rel
+    if not doc_abs.is_file():
+        return 0, "", []
+    try:
+        cc = _coord_module()
+    except ImportError:
+        return 0, "[coord] 找不到 check_claim_coordination.py，跳过 §6.1 检查" \
+                  "（pre-commit 侧仍会按暂存区拦）", []
+    try:
+        doc_text = doc_abs.read_text(encoding="utf-8")
+        rows = cc.parse_coordination_rows(doc_text)
+    except (OSError, ValueError) as exc:
+        return 0, f"[coord] {doc_rel} 读/解析失败（{exc}），跳过 §6.1 检查" \
+                  "（pre-commit 侧仍会按暂存区拦）", []
+
+    staged = {cc._norm(f) for f in files}
+    active = cc.active_claims_for_paths(sorted(staged), marker_dir=LOCKS_DIR / "claims")
+    pairs = [(path, owner) for path, owner in active if path in staged]
+    rest = staged - {path for path, _owner in pairs} - {cc._norm(doc_rel)}
+    owner = cc.resolve_owner(ROOT) if rest else ""
+    recent = (cc.recently_released_claims(
+        LOCKS_DIR / "claims.json", sorted(rest), owner) if rest else [])
+    required = pairs + [(path, o) for path, o, _at in recent]
+    if not required:
+        return 0, "", []
+
+    missing, _patterns = cc.uncovered_pairs(required, rows)
+    if missing:
+        return 5, _coord_missing_report(cc, missing, doc_abs), []
+
+    # 工作区已有行：再看暂存区那份有没有。有就什么都不用做（本笔本来就带了）。
+    index_text = _index_text(env, doc_rel)
+    if index_text is None:
+        return 5, (f"拒绝提交：{doc_rel} 既不在私有 index 也不在 HEAD 里，"
+                   "没法只带登记行；请把整份文档声明进 --files。"), []
+    index_rows: list = []
+    try:
+        index_rows = cc.parse_coordination_rows(index_text)
+    except ValueError:
+        index_rows = []
+    missing_in_index, _ = cc.uncovered_pairs(required, index_rows)
+    if not missing_in_index:
+        return 0, "", []
+
+    # 只挑「覆盖本笔」的那几行；同一行可能同时覆盖多条 claim，不重复带。
+    candidates = _coord_row_lines(doc_text)
+    picked: list[str] = []
+    unresolved = []
+    for path, owner, pattern in missing_in_index:
+        line = next((row for row in candidates if _covers(cc, row, (path, owner))), None)
+        if line is None:
+            unresolved.append((path, owner, pattern))
+        elif line not in picked:
+            picked.append(line)
+    if unresolved:
+        return 5, _coord_missing_report(cc, unresolved, doc_abs), []
+
+    try:
+        new_text = _insert_table_rows(index_text, picked)
+    except ValueError as exc:
+        return 5, f"拒绝提交：无法把 §6.1 行放进暂存区（{exc}）。请整文件带上 {doc_rel}。", []
+
+    blob = _run(["hash-object", "-w", "--stdin"], env, new_text.encode("utf-8"))
+    if blob.returncode != 0:
+        return 5, "拒绝提交：§6.1 行写入对象库失败（git hash-object 出错）", []
+    mode = "100644"
+    mode_proc = _run(["ls-files", "-s", "--", doc_rel], env)
+    if mode_proc.returncode == 0 and mode_proc.stdout.strip():
+        mode = mode_proc.stdout.decode().split()[0]
+    upd = _run(
+        ["update-index", "--add", "--cacheinfo",
+         f"{mode},{blob.stdout.decode().strip()},{doc_rel}"],
+        env,
+    )
+    if upd.returncode != 0:
+        return 5, f"拒绝提交：§6.1 行 update-index 失败：{upd.stderr.decode('utf-8', 'replace')[:200]}", []
+
+    report = (
+        f"[coord] §6.1 行只在工作区、没进暂存区：只带这 {len(picked)} 行进本笔"
+        f"（{doc_rel}），工作区其它改动原样留在外面"
+    )
+    for row in picked:
+        report += f"\n    + {row}"
+    return 0, report, [doc_rel]
+
+
 def _attempt(
     files: list[str],
     message: bytes,
     index: Path,
     exclusions: list[dict] | None = None,
     exclude_owner: str = "",
+    declared: dict | None = None,
+    declared_at: float = 0.0,
+    allow_reason: str = "",
 ) -> tuple[int, str]:
     """一次完整尝试。返回 (退出码, 说明)。"""
     exclusions = exclusions or []
@@ -424,9 +1061,22 @@ def _attempt(
         env["MBDSDR_DECLARED_INDEX"] = str(index)
         message = _exclusion_trailer(message, exclusions, exclude_owner)
 
+    # 2c) §6.1 登记行：闸只看暂存区，行躺在工作区就等于「该带的一条没带」。
+    #     工作区有 → 只把那几行写进私有 index；没有 → 拒绝并给补登记命令。
+    coord_code, coord_note, coord_extras = _coordination_step(
+        env, files, _coord_doc_rel())
+    if coord_note:
+        print(coord_note)
+    if coord_code != 0:
+        return coord_code, coord_note
+    expect_files = files + [
+        p for p in coord_extras
+        if p not in files and p not in {f.replace("\\", "/") for f in files}
+    ]
+
     staged = _staged_set(env)
     expect = []
-    for f in files:
+    for f in expect_files:
         in_head = _run(["cat-file", "-e", f"HEAD:{f}"], env).returncode == 0
         # 删除文件同样要能提交：HEAD 有、工作区没有 → D（旧实现一律按 M 期望，
         # 于是任何「删掉某文件」的提交都被判成文件集不符，退不回去）。
@@ -444,7 +1094,7 @@ def _attempt(
             )
         return 1, f"文件集不符：多 {extra} 缺 {missing}"
 
-    # 2c) 意图删除集：私有 index 里「HEAD 有、新索引没有」的路径就是本次真删
+    # 2d) 意图删除集：私有 index 里「HEAD 有、新索引没有」的路径就是本次真删
     #     的文件，自动导出给 pre-commit 闸门（闸门对未声明的删除一律拒绝）。
     deletions = [line.split("\t", 1)[1] for line in staged if line.startswith("D\t")]
     if deletions:
@@ -454,7 +1104,7 @@ def _attempt(
     # 3) 记录待提交 blob，供提交后复核（形态⑩）
     #    用 --verify --quiet 取：删除项（index/HEAD 都没有该路径）返回空，
     #    否则 `rev-parse :path` 会把参数原样回显，删除项必被误判成 blob 不一致。
-    wanted = {f: _blob(env, f":{f}") for f in files}
+    wanted = {f: _blob(env, f":{f}") for f in expect_files}
 
     # 4) 提交窗口加锁：读 HEAD → commit → 作用域机检 必须串行，
     #    否则「建 index 时的父」和「真提交时的父」可以是两个（形态⑬）。
@@ -463,7 +1113,10 @@ def _attempt(
     except TimeoutError as exc:
         return 1, str(exc)
     try:
-        return _commit_locked(files, message, env, base, wanted)
+        return _commit_locked(
+            expect_files, message, env, base, wanted,
+            declared or {}, declared_at, allow_reason,
+        )
     finally:
         lock.__exit__(None, None, None)
 
@@ -474,15 +1127,32 @@ def _commit_locked(
     env: dict,
     base: str,
     wanted: dict[str, str],
+    declared: dict,
+    declared_at: float,
+    allow_reason: str,
 ) -> tuple[int, str]:
-    """锁内：重校验基线 → commit → 作用域机检 → blob 复核。"""
+    """锁内：复核声明快照 → 重校验基线 → commit → 作用域/message 机检 → blob 复核。"""
+    # 4a) 声明快照：提交时刻的内容必须等于声明时刻的那份。不一致就拒绝（不重试），
+    #     因为漂移的内容不会因为多试几次自己回去；豁免必须带理由并落进提交说明。
+    if declared:
+        changed, report = _verify_declaration(env, declared, declared_at)
+        if changed:
+            if not allow_reason:
+                return 4, report
+            print("[foreign] 声明后有变化，按 --allow-foreign-changes 放行，理由写进提交说明：")
+            print(report)
+            message = _foreign_trailer(message, changed, allow_reason)
+        else:
+            print(f"[declare] 声明快照无漂移（{len(declared)} 个文件，"
+                  f"声明于 {_iso(declared_at)}）")
+
     # 4) 提交前重校验基线：HEAD 变了就整盘重建
     now = _run(["rev-parse", "HEAD"], env).stdout.decode().strip()
     if now != base:
         return 1, f"基线在提交前变化：{base[:8]} → {now[:8]}（下次重试用新 HEAD 重建）"
 
-    # 5) 提交（消息走 stdin bytes，避开编码坑）
-    commit = _run(["commit", "-F", "-"], env, stdin=message)
+    # 5) 提交（消息走 stdin bytes，避开编码坑；--cleanup=verbatim 保证落库逐字等于传入）
+    commit = _run(["commit", "--cleanup=verbatim", "-F", "-"], env, stdin=message)
     if commit.returncode != 0:
         _emit(commit, "git commit")
         err = (commit.stderr + commit.stdout).decode("utf-8", "replace")
@@ -490,6 +1160,12 @@ def _commit_locked(
             return 1, f"撞 ref 锁：{err.strip()[:160]}（下次重试用新 HEAD 重建）"
         return 1, f"git commit 失败：{err.strip()[:300]}"
     _report_hooks(commit, env)
+
+    # 5a) 提交信息逐字复核：多进程共用 COMMIT_EDITMSG 时消息可能被别人的覆盖，
+    #     这笔已经落库也必须报出来（退出码 3），不能烂在历史里。
+    bad_message = _verify_message(env, message)
+    if bad_message:
+        return 3, bad_message
 
     # 5b) 作用域机检：本笔只能包含 --files 声明的路径，且父提交就是本次基线。
     #     共享 index 被别线暂存污染时，这里会在「已提交」之后红着脸报出来
@@ -542,14 +1218,25 @@ def _build_parser() -> argparse.ArgumentParser:
         required=True,
         help="本笔要提交的文件（精确清单）；可重复传，按出现顺序合并",
     )
-    ap.add_argument("--message-file", required=True, help="提交信息文件（UTF-8）")
+    ap.add_argument("--message-file", help="提交信息文件（UTF-8）；--declare 时不需要")
+    ap.add_argument(
+        "--declare",
+        action="store_true",
+        help="只记录声明快照（不提交）：写入后立刻执行，把「声明时的内容」钉住",
+    )
+    ap.add_argument(
+        "--allow-foreign-changes",
+        default="",
+        metavar="REASON",
+        help="声明后内容有变化仍要提交时的豁免理由（会写进提交说明，不能留空）",
+    )
     ap.add_argument("--retries", type=int, default=3, help="撞锁/基线变化时的重建次数")
     ap.add_argument(
         "--exclude-hunk",
         action="append",
         default=[],
         metavar="PATH:START-END",
-        help="从私有 index 排除的 hunk（可重复）；工作树保持原样",
+        help="从私有 index 排除的 hunk 或 hunk 内的行范围（可重复）；工作树保持原样",
     )
     ap.add_argument("--exclude-owner", default="", help="排除 hunk 的归属线（可留空）")
     return ap
@@ -570,12 +1257,43 @@ def main(argv: list[str] | None = None) -> int:
         print(f"[files] 重复路径已合并：{len(files)} → {len(uniq)} 个")
     print(f"[files] 本次声明 {len(uniq)} 个文件：{', '.join(uniq)}")
     files = uniq
+
+    # 只声明不提交：把当前工作区内容钉成快照，供之后（可能跨进程）的提交比对。
+    if args.declare:
+        try:
+            snapshot, stamp = _write_declaration(files, _plain_env())
+        except ValueError as exc:
+            print(f"拒绝：{exc}")
+            return 1
+        for path, item in snapshot.items():
+            print(f"[declare] {path}：blob {item['blob'][:8] or '<缺失>'}，"
+                  f"{item['lines']} 行")
+        print(f"[declare] 已记录声明快照（{_iso(stamp)}，session={_session_key()}）；"
+              f"提交时用同一文件集即可比对，提交成功后才清除")
+        return 0
+
+    if not args.message_file:
+        ap.error("--message-file 必填（只有 --declare 可以不传）")
     message = Path(args.message_file).read_bytes()
+
     try:
         exclusions = _parse_exclusions(args.exclude_hunk, files)
     except ValueError as exc:
         print(f"拒绝：{exc}")
         return 1
+
+    # 声明快照：优先用 --declare 钉住的那份；没有就退化为本次启动时刻，
+    # 并明确说出窗口边界（只覆盖本次运行），避免让人误以为跨进程也受保护。
+    found = _load_declaration(files)
+    if found:
+        declaration_file, declared, declared_at = found
+    else:
+        declaration_file = None
+        declared = {path: _fingerprint(_plain_env(), path) for path in files}
+        declared_at = time.time()
+        print(f"[declare] 无预先声明快照：以本次启动 {_iso(declared_at)} 的工作区为基线"
+              "（只覆盖本次运行；写入后先跑 --declare 才能拦住「释放 claim → 提交」这段漂移）")
+
     index = _index_path()
     print(f"[index] 会话私有 index：{index}")
     _warn_shared_index()
@@ -585,12 +1303,15 @@ def main(argv: list[str] | None = None) -> int:
             code, note = _attempt(
                 files, message, index, exclusions=exclusions,
                 exclude_owner=args.exclude_owner,
+                declared=declared, declared_at=declared_at,
+                allow_reason=args.allow_foreign_changes.strip(),
             )
             print(f"[try {n}] {note}")
             if code == 0:
+                _drop_declaration(declaration_file)
                 return 0
-            if code == 3:
-                return 3
+            if code in (3, 4, 5):
+                return code
         print(f"重试 {args.retries} 次仍未提交，已放弃（工作区与 index 未改动）")
         return 2
     finally:

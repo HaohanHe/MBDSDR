@@ -45,6 +45,14 @@
 并释放，仍要求行存在。判据只读台账 ``claims[key].history[].released_at`` 与
 ``owner``，不新增人工手续；超过窗口的旧释放不影响正常提交。
 
+登记面自身豁免
+--------------
+
+``docs/COORDINATION.md`` 自身不参与「必须已有 §6.1 行」的判定——它是登记面，
+不是被登记对象。**活跃 claim 分支与 60 分钟释放窗口分支都必须豁免**：只豁免
+一条分支时，提交登记表的人会被要求先给自己写一行临时行、提交后再删掉；这是
+「工具逼人制造失真」，比闸松更糟。
+
 退出码：0 = 两个方向都无发现；1 = 用法/解析错误；3 = 有发现（同 audit-stale）。
 """
 from __future__ import annotations
@@ -496,9 +504,14 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             root = Path(args.doc).resolve().parents[1]
             rows = parse_coordination_rows(text)
             staged = set(staged_paths(root))
+            # 登记面自身豁免：COORDINATION.md 不登记自己。必须在**两条**分支都生效
+            # ——活跃 claim 分支原先漏了它，于是提交登记表要先给自己写一行临时行、
+            # 提交后再删掉；这是「工具逼人制造失真」，比闸松更糟。
+            self_key = _norm(os.path.relpath(args.doc, root))
             active = active_claims_for_paths(
                 staged, marker_dir=Path(args.markers) if args.markers != str(fc.MARKER_DIR) else None)
-            pairs = [(p, o) for p, o in active if p in staged]
+            pairs = [(p, o) for p, o in active
+                     if p in staged and p != self_key]
             missing_pairs, _pats = uncovered_pairs(pairs, rows)
             missing = [
                 (f"{p} owner={o}（仅目录级登记；代码/共享文档必须逐条）" if pat else
@@ -509,7 +522,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             # 只对「没有活跃 claim」的暂存路径查，活跃的那批已由上面判过。
             # 协调文档本身豁免：它是登记面而不是被登记对象，否则「提交后删行」
             # 这一步永远要先给自己写一行、删行时又欠一行。
-            rest = staged - {p for p, _o in pairs} - {_norm(os.path.relpath(args.doc, root))}
+            rest = staged - {p for p, _o in pairs} - {self_key}
             recent: List[Tuple[str, str, float]] = []
             owner = resolve_owner(root) if rest else ""
             if rest:

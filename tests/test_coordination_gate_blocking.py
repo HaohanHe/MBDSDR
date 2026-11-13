@@ -167,6 +167,19 @@ def test_missing_row_blocks_and_printed_command_runs(tmp_path):
     assert passed.returncode == 0, passed.stdout + passed.stderr
 
 
+def test_coordination_doc_itself_needs_no_row(tmp_path):
+    """登记面不登记自己：COORDINATION.md 被活跃 claim 持有时仍可直接提交。
+
+    回归靶子：豁免原来只写在「60 分钟释放窗口」那条分支，活跃 claim 分支漏了，
+    于是提交登记表要先给自己写一行临时行、提交后再删掉——工具逼人制造失真。
+    """
+    repo = _tree(tmp_path, active=False)
+    subprocess.run(["git", "add", "docs/COORDINATION.md"], cwd=str(repo), check=True)
+    _marker(repo, "docs/COORDINATION.md")
+    result = _run_check(repo)
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
 def test_release_window_is_one_shared_judgement(tmp_path):
     """55 分钟前释放：闸要行 + 工具接受；61 分钟前：闸不要 + 工具也不收。"""
     inside = _tree(tmp_path / "inside", active=False, released_ago_s=55 * 60)
