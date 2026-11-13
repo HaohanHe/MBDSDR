@@ -2118,6 +2118,11 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `scripts/hooks/pre-commit` | 收尸线/6ae85f56（接入 ⑤：本笔暂存协调文档时跑只增检查，违规拒绝） | 2026-11-13 21:11 | 本笔 |
 | `desktop/weather_panel.py` | S1-S4结果伪造线/6ae85f56（B1：两次失败保留最近一条，终态带身份，被覆盖的失败附「另有 N 次失败」并写日志） | 2026-11-13 21:16 | 本笔 |
 | `tests/test_weather_panel_fengyun.py` | S1-S4结果伪造线/6ae85f56（B1 用例：先失败 A 再失败 B，最近一条+身份+另有 N 次失败） | 2026-11-13 21:16 | 本笔 |
+| `desktop/main_window.py` | S1-S4结果伪造线/6ae85f56（B2：connect 三态（None=结果未知），迟到结果回投；状态条与设备面板同一路径修正） | 2026-11-13 21:17 | 本笔 |
+| `tests/test_connect_late_success.py` | S1-S4结果伪造线/6ae85f56（B2 两条用例：超时未知+迟到成功两处一起修正；用户断开后迟到成功被关闭） | 2026-11-13 21:17 | 本笔 |
+| `tests/test_connect_timeout_race.py` | S1-S4结果伪造线/6ae85f56（B2：超时返回 None（未知）同步断言） | 2026-11-13 21:17 | 本笔 |
+| `scripts/file_claim.py` | 收尸线/6ae85f56（冒名与空理由留痕：issued_by / owner_mismatch / reason_missing（只留痕不改退出码）） | 2026-11-13 21:19 | 本笔 |
+| `tests/test_claim_signer_trace.py` | 收尸线/6ae85f56（反证：一致不标记、不一致警告+标记、空理由标记、正常两清、未声明不算冒名） | 2026-11-13 21:19 | 本笔 |
 
 > 上表各行均由 `claim` 台账推导：owner 原文与 `acquired_at` 直接取自台账，
 > 目的优先用台账里的 `claim_reason`，没有就如实写「未声明」，不补编。时间列只是

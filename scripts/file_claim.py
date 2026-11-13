@@ -620,6 +620,11 @@ def _registry_record_claim(
                 "last_heartbeat_at": payload["heartbeat_at"],
                 "pid": payload.get("pid"),
                 "claim_reason": payload.get("claim_reason", ""),
+                # 留痕三件套（2026-11-13）：谁签发的、是否冒名、是否空理由。
+                # 旧记录没有这三个键，读方按「未记录」处理，不当成 false。
+                "issued_by": payload.get("issued_by", ""),
+                "owner_mismatch": bool(payload.get("owner_mismatch")),
+                "reason_missing": bool(payload.get("reason_missing")),
                 "renewals": [],
             }
         )
@@ -709,6 +714,53 @@ def _resolve_max_hold(cli_value: Optional[float]) -> Tuple[float, str]:
     return value, source
 
 
+SIGNER_ENV = "MBDSDR_CLAIM_OWNER"
+
+
+def _declared_owner() -> str:
+    """签发身份：`MBDSDR_CLAIM_OWNER`，缺省读 `git config mbdsdr.owner`。
+
+    与 `--owner` 是两件事：`--owner` 回答「这条 claim 记谁的名字」，签发身份
+    回答「谁在按回车」。两者可以不同，但**不同必须留痕**——2026-11-13 20:41
+    那条挂在 `scripts/safe_commit.py` 上、owner 写本线、理由为空的 claim，
+    事后只能靠人工比对提交才发现不是本线签的。
+    """
+    name = (os.environ.get(SIGNER_ENV) or "").strip()
+    if name:
+        return name
+    try:
+        proc = subprocess.run(
+            ["git", "config", "--get", "mbdsdr.owner"],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=20,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    return proc.stdout.strip() if proc.returncode == 0 else ""
+
+
+def _stamp_signer(payload: Dict[str, Any], owner: str, reason: str) -> bool:
+    """落「签发身份 / 是否冒名 / 是否空理由」，返回是否冒名。
+
+    **只留痕，不改退出码**：空理由与冒名都真实发生过，但升级为必填会一次打红
+    大量既有调用（`tests/` 里有大量不带 `--reason` 的 claim），而且「理由是否
+    可信」没有机器判据。所以这里只保证事后看得见，不保证当场拦得住——
+
+      * `issued_by`       谁签发的（未声明时为空串，空串不等于冒名）；
+      * `owner_mismatch`  `--owner` 与签发身份不一致；
+      * `reason_missing`  `--reason` 为空。
+    """
+    issuer = _declared_owner()
+    payload["issued_by"] = issuer
+    payload["owner_mismatch"] = bool(issuer) and issuer != owner
+    payload["reason_missing"] = not reason.strip()
+    return bool(payload["owner_mismatch"])
+
+
 def cmd_claim(
     path: str,
     owner: str,
@@ -760,6 +812,13 @@ def cmd_claim(
     payload["claim_reason"] = reason.strip()
     payload["max_hold_min"] = cap_min
     payload["max_hold_source"] = cap_source
+    if _stamp_signer(payload, owner, reason) and not quiet:
+        print(
+            f"WARN 冒名痕迹：--owner={owner} 与签发身份 issued_by="
+            f"{payload['issued_by']} 不一致，已落 owner_mismatch=true"
+            f"（只留痕，不拦提交）。",
+            file=sys.stderr,
+        )
     # 空续租记录也显式写出来：否则「还没续过」与「老格式没留痕」在机检里
     # 无法区分，后者会被误当成 0 次（本次事故正是这种沉默）。
     payload["renewals"] = []
@@ -810,6 +869,7 @@ def cmd_claim(
                 )
                 acquired = float(data.get("acquired_at") or now)
                 renewed["acquired_at"] = acquired
+                _stamp_signer(renewed, owner, reason)
                 old_ttl = float(data.get("ttl_min") or 0.0)
                 held_total_s = max(0.0, now - acquired)
                 prior = data.get("renewals")
@@ -886,6 +946,7 @@ def cmd_claim(
                 )
                 renewed["acquired_at"] = float(data.get("acquired_at") or now)
                 renewed["legacy_upgraded_at"] = now
+                _stamp_signer(renewed, owner, reason)
                 _write_fd(fd, json.dumps(renewed, ensure_ascii=False))
                 sidecar_err = _write_token_file(key, upgraded_token)
                 if sidecar_err:
@@ -1809,22 +1870,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def _repairer(args) -> str:
-    by = (args.by or "").strip() or (os.environ.get("MBDSDR_CLAIM_OWNER") or "").strip()
-    if by:
-        return by
-    try:
-        proc = subprocess.run(
-            ["git", "config", "--get", "mbdsdr.owner"],
-            cwd=ROOT,
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            timeout=20,
-        )
-    except (OSError, subprocess.SubprocessError):
-        return ""
-    return proc.stdout.strip() if proc.returncode == 0 else ""
+    return (args.by or "").strip() or _declared_owner()
 
 
 def main(argv: Optional[list[str]] = None) -> int:
