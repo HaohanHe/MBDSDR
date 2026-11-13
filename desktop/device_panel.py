@@ -868,9 +868,11 @@ class DevicePanel(QWidget):
             return
         values = {}
         try:
-            # 这里只认纯 Hz；带 M/k 后缀的写法由连接时的统一解析负责，
-            # 本方法不复制一份解析器（避免第三条解析口径）。
-            hz = float(self.sr_edit.text().strip())
+            # 与等价值标签（``_update_sr_equiv``）、连接下发共用同一份解析：
+            # 旧实现在这里只认纯 Hz，用户填 "2.048M" 时等价值已显示 2.048 MS/s、
+            # 连接也按 2.048 MHz 下发，但 store 的预览仍是旧采样率——别的面板
+            # 读摘要就会看到与输入框不一致的数。
+            hz = parse_sample_rate(self.sr_edit.text())
         except (TypeError, ValueError):
             hz = None
         if hz is not None and hz > 0:
