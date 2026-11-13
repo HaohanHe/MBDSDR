@@ -164,24 +164,50 @@ def _revert_index_hunks(env: dict, path: str, ranges: list[dict]) -> None:
     if not selected:
         raise ValueError(f"{path} 的排除声明没有选中任何 hunk")
 
-    # 逐个 hunk 反向应用，且从文件底部往上走。-U0 没有上下文，git apply 只按
-    # 行号定位；一次塞进多个 hunk 时，靠前的 hunk 反向撤掉的行数会把它下面
-    # （行号更大）的 hunk 挤偏，实测 main_window.py:8401 报「patch does not
-    # apply」。自下而上逐个应用时，先动的都在下面，尚未应用的 hunk 行号不受
-    # 影响——这条路径才真的能把「多人共写一个文件」的排除声明落地。
-    patch_header = "".join(header)
-    for hunk in sorted(selected, key=lambda h: h["start"], reverse=True):
-        apply = _run(
-            ["apply", "--cached", "-R", "--unidiff-zero",
-             "--whitespace=nowarn", "-"],
-            env,
-            (patch_header + hunk["head"] + "".join(hunk["body"])).encode("utf-8"),
+    # 直接在私有 index 的 blob 上做行替换，不再让 git apply 去猜位置。
+    # 原因（2026-11-13 实测）：排除 diff 是 -U0，没有上下文，git 只能按行号
+    # 定位。一次塞多个 hunk 会报「patch does not apply」；即使自下而上逐个
+    # apply，main_window.py 这种相邻 hunk 紧挨着（+8396 / +8398 / +8401）
+    # 的文件仍会被放错位置——apply 返回 0，提交里却混进了他线的 3 行 tab 顺序
+    # 搬移（9c58d767 实证）。这里按 hunk 自带的 +/- 行做「内容必须逐字相同」
+    # 的精确撤销：对不上就报错，绝不静默写歪。
+    blob = _run(["show", f":{path}"], env)
+    if blob.returncode != 0:
+        raise ValueError(
+            f"读取私有 index 里 {path} 的内容失败："
+            f"{blob.stderr.decode('utf-8', 'replace')[:200]}"
         )
-        if apply.returncode != 0:
+    lines = blob.stdout.splitlines(keepends=True)
+    for hunk in sorted(selected, key=lambda h: h["start"], reverse=True):
+        added, removed = [], []
+        for body_line in hunk["body"]:
+            if body_line.startswith("\\"):
+                raise ValueError(
+                    f"{path} 的 hunk {hunk['start']}-{hunk['end']} 含"
+                    "「No newline at end of file」标记，暂不支持排除")
+            raw = body_line[1:].encode("utf-8")
+            if body_line.startswith("+"):
+                added.append(raw)
+            elif body_line.startswith("-"):
+                removed.append(raw)
+        pos = hunk["start"] - 1 if added else hunk["start"]
+        end = pos + len(added)
+        if lines[pos:end] != added:
             raise ValueError(
-                f"{path} 排除 hunk {hunk['start']}-{hunk['end']} 失败："
-                f"{apply.stderr.decode('utf-8', 'replace')[:300]}"
+                f"{path} 的 hunk {hunk['start']}-{hunk['end']} 在私有 index 里"
+                "对不上（行号/内容漂移），拒绝静默改写"
             )
+        lines[pos:end] = removed
+    new_blob = b"".join(lines)
+    sha = _run(["hash-object", "-w", "--stdin"], env, new_blob)
+    if sha.returncode != 0:
+        raise ValueError(f"写入 {path} 新 blob 失败：{sha.stderr.decode()[:200]}")
+    mode = _run(["ls-files", "-s", "--", path], env).stdout.split(b" ")[0]
+    info = f"{mode.decode()},{sha.stdout.strip().decode()},{path}"
+    upd = _run(["update-index", "--cacheinfo", info], env)
+    if upd.returncode != 0:
+        raise ValueError(
+            f"更新私有 index 里 {path} 失败：{upd.stderr.decode()[:200]}")
 
 
 def _exclusion_trailer(message: bytes, exclusions: list[dict], owner: str) -> bytes:

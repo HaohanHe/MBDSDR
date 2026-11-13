@@ -152,9 +152,11 @@ def test_multiple_exclusion_hunks_survive_line_count_shift(tmp_path):
 
     真实故障记录：2026-11-13 在 ``desktop/main_window.py`` 上排除 31 个 hunk
     时，旧实现「所有 hunk 拼成一个 patch 一次 apply -R」报
-    ``patch failed: main_window.py:8401``（-U0 无上下文，靠前 hunk 的行数
-    变化把后面的 hunk 挤偏）。现改为自下而上逐个应用。本用例锁住多 hunk
-    语义本身（含行数 +2 的形状），真实文件上的验收记在提交说明里。
+    ``patch failed: main_window.py:8401``；改成自下而上逐个 apply 后虽然
+    返回 0，却在 9c58d767 里混进了他线 3 行 tab 顺序搬移（-U0 无上下文，
+    相邻 hunk 会被放错位置）。现改为在 index blob 上按 hunk 的 +/- 行做
+    逐字替换，内容对不上就报错。本用例锁住多 hunk 语义（含行数 +2 的形状），
+    真实文件上的验收记在提交说明里。
     """
     repo = tmp_path / "repo"
     repo.mkdir()
