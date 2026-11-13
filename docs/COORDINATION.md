@@ -2028,6 +2028,8 @@ No supported devices found），GNSS+SDR 同开复验没做成；离线那次
 | `docs/pending-patches/2026-11-06-limitation-adsb-1090-fc0012.md` | 收尸线/6ae85f56（删过期证据状态头，数字与复跑命令已在正文） | 2026-11-13 20:06 | 本笔 |
 | `docs/pending-patches/2026-11-11-tooltip-guard-dynamic-coverage.md` | 收尸线/6ae85f56（删过期证据状态头，逐行已绑提交） | 2026-11-13 20:06 | 本笔 |
 | `docs/pending-patches/2026-11-12-fz04-unfreeze-request.md` | 收尸线/6ae85f56（补 W106 诊断入口待拍项与首次使用记录） | 2026-11-13 20:06 | 本笔 |
+| `desktop/main_window.py` | 窄屏高度链4px线/6ae85f56（narrow 4px 收口：topBarDetail 56→52；否掉会压 Home 按钮 5px 的底坞 48→40） | 2026-11-13 20:07 | 本笔 |
+| `docs/COORDINATION.md` | 窄屏高度链4px线/6ae85f56（本笔 §6.1 登记行，提交后释放） | 2026-11-13 20:07 | 本笔 |
 
 > 上表各行均由 `claim` 台账推导：owner 原文与 `acquired_at` 直接取自台账，
 > 目的优先用台账里的 `claim_reason`，没有就如实写「未声明」，不补编。时间列只是

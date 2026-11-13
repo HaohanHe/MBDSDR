@@ -4261,7 +4261,12 @@ class MainWindow(QMainWindow):
         # ---- 第二行：工程读数抽屉（默认收起，功能一个不删）----
         self._top_detail = QWidget()
         self._top_detail.setObjectName("topBarDetail")
-        self._top_detail.setFixedHeight(max(30, tokens().SIZE["topbar_h"]))
+        # 窄屏高度链收口（2026-11-13 实测，DPR1）：默认态窗口内容最小高
+        # 704 = 菜单 37 + 顶栏 56 + 本抽屉 56 + 分栏 422 + 工具栏 53 + 底坞 48
+        # + 状态栏 32。本抽屉内容 sizeHint 只有 36（最高控件「发射」36），
+        # 是链路里余量最大的一段：减 4px 后仍比 sizeHint 高 16px，不压内容。
+        # 不动常驻顶栏 / 底坞（底坞 sizeHint 45，只剩 3px）与天空地板 376。
+        self._top_detail.setFixedHeight(max(30, tokens().SIZE["topbar_h"] - 4))
         self._top_detail.setStyleSheet(_detail_bar_css())
         dl = QHBoxLayout(self._top_detail)
         dl.setContentsMargins(16, 0, 16, 0)
