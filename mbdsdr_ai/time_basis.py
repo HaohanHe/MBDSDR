@@ -166,11 +166,63 @@ def tle_epoch_report(line1: str, now: Optional[datetime] = None,
     }
 
 
-def local_to_utc(dt_local: datetime, tz: Optional[Any] = None) -> datetime:
-    """本地时区 datetime → UTC。无时区的输入按 ``tz``（缺省系统本地）解释。"""
-    if dt_local.tzinfo is None:
-        dt_local = dt_local.replace(tzinfo=_resolve_tz(tz))
-    return dt_local.astimezone(UTC)
+def local_to_utc(dt_local: datetime, tz: Optional[Any] = None,
+                 *, fold: Optional[int] = None) -> datetime:
+    """本地时区 datetime → UTC。无时区的输入按 ``tz``（缺省系统本地）解释。
+
+    夏令时切换处的本地时刻有两种**不可静默处理**的情况：
+
+    * **歧义时刻**（回拨，同一墙上时间出现两次）：必须由调用方用 ``fold=0``
+      （第一次）或 ``fold=1``（第二次）明确选一次，否则抛 ``ValueError``；
+      也可在输入上 ``dt_local.replace(fold=1)`` 表达同样意图。
+    * **不存在时刻**（前拨，墙上时间被跳过）：任何映射都会悄悄挪动时刻，
+      一律抛 ``ValueError``，由调用方改用切换前/后的真实时刻。
+
+    带时区的输入偏移已确定，按其自带 ``fold`` 直接换算；``fold`` 参数若给出
+    则覆盖输入的 ``fold``。
+    """
+    if dt_local.tzinfo is not None:
+        if fold is not None:
+            dt_local = dt_local.replace(fold=fold)
+        return dt_local.astimezone(UTC)
+
+    if fold not in (None, 0, 1):
+        raise ValueError(f"fold 只能是 None/0/1，收到 {fold!r}")
+    zone = _resolve_tz(tz)
+    first = dt_local.replace(tzinfo=zone, fold=0)
+    second = dt_local.replace(tzinfo=zone, fold=1)
+    off0, off1 = first.utcoffset(), second.utcoffset()
+
+    if off0 != off1:
+        # PEP 495：回拨重叠时 fold=0 是较早（较大）偏移，fold=1 是较晚（较小）偏移；
+        # 前拨缺口相反（fold=0 是切换前偏移，fold=1 是切换后偏移）。
+        if off0 < off1:
+            raise ValueError(
+                f"本地时刻 {dt_local.isoformat()} 在时区 {zone} 不存在"
+                f"（夏令时前拨跳过该时段，可用偏移 "
+                f"{first.astimezone(UTC).isoformat()} 与 "
+                f"{second.astimezone(UTC).isoformat()} 之间没有对应时刻）："
+                f"请改用切换前或切换后的真实时刻"
+            )
+        chosen = fold if fold is not None else (1 if dt_local.fold == 1 else None)
+        if chosen is None:
+            raise ValueError(
+                f"本地时刻 {dt_local.isoformat()} 在时区 {zone} 有歧义（夏令时回拨，"
+                f"出现两次）：请显式传 fold=0（第一次，UTC "
+                f"{first.astimezone(UTC).isoformat()}）或 fold=1（第二次，UTC "
+                f"{second.astimezone(UTC).isoformat()}）"
+            )
+        return dt_local.replace(tzinfo=zone, fold=chosen).astimezone(UTC)
+
+    # 偏移唯一，但仍可能是「前拨被跳过」的不存在时刻：UTC 往返后墙上时间会变。
+    roundtrip = first.astimezone(UTC).astimezone(zone).replace(tzinfo=None)
+    if roundtrip != dt_local:
+        raise ValueError(
+            f"本地时刻 {dt_local.isoformat()} 在时区 {zone} 不存在"
+            f"（夏令时前拨跳过该时段，换算后墙上时间是 {roundtrip.isoformat()}）："
+            f"请改用切换前或切换后的真实时刻"
+        )
+    return first.astimezone(UTC)
 
 
 def validate_pass_window(rise_unix: float, set_unix: float,
