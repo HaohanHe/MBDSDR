@@ -1013,6 +1013,10 @@ def main():
         # 改设置后重启生效。必须先于主窗口构造，避免丢掉启动期调试信息。
         configure_from_settings(_boot_settings)
         _l10n.install_translator(app, _boot_settings.get("ui_language"))
+        # Qt 自带文案（QMessageBox 的 Yes/No、QFileDialog 按钮、输入框右键菜单）
+        # 跟随界面语言：加载 qtbase_<locale>.qm。找不到时如实降级为英文内置
+        # 文案，状态写进启动日志（已加载/未找到/已跳过），不假装成功。
+        _l10n.install_qt_translator(app, _boot_settings.get("ui_language"))
     except Exception as _l10n_ex:  # noqa: BLE001
         print(f"[mbdsdr] i18n: 加载失败，保持源语言 zh: {_l10n_ex}",
               file=sys.stderr)
