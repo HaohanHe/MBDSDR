@@ -223,6 +223,24 @@ def test_pass_and_visible_elevation_are_named_apart():
     assert default == pytest.approx(PASS_MIN_ALT_DEG)
 
 
+def test_consistency_tool_uses_pass_gate_not_visible_gate():
+    """P-2c：诊断工具的「下一次过境」默认门必须与 next_pass() 同源。
+
+    反证：把 ``check_next_pass_consistency(min_alt=...)`` 默认值改回 5.0，
+    本用例必红（诊断工具会把一次 5° 过境当「下一次过境」去对拍）。
+    """
+    import inspect
+
+    from mbdsdr_ai.sat_consistency import check_next_pass_consistency
+    from mbdsdr_ai.sat_passes import PASS_MIN_ALT_DEG, VISIBLE_MIN_ALT_DEG
+
+    default = inspect.signature(
+        check_next_pass_consistency).parameters["min_alt"].default
+    assert default == pytest.approx(PASS_MIN_ALT_DEG)
+    assert default == pytest.approx(10.0)
+    assert default != pytest.approx(VISIBLE_MIN_ALT_DEG)
+
+
 # ---------------------------------------------------------------------------
 # 3. 跨语言对拍：C++ 侧阈值（tokens.h）与文档记录一致
 # ---------------------------------------------------------------------------

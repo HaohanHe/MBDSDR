@@ -511,7 +511,7 @@ star_catalog.naked_eye_limit_mag is stars.naked_eye_limit_mag: True
 | P-6 | `cpp/src/dsp/spectrum_engine.cpp` | `kChunk = 8192` 在两处函数里各写一次 | 提到文件级 `constexpr std::size_t kReadChunk`。 |
 | P-7 | `mbdsdr_ai/skyengine/star_catalog.py` | `0.5 * log2(...)` 的斜率字面量 | 提成 `DETAIL_GAIN_SLOPE = 0.5`（与 `MAX_DETAIL_GAIN_MAG` 同段）。 |
 | P-2b | `desktop/rf_sky_view.py` | 私有 `PASS_MIN_ALT_DEG = 10.0` 字面量 | 改为 `from mbdsdr_ai.sat_passes import PASS_MIN_ALT_DEG`；与 `sat_track_panel` / `new_spacetime_panel` 共用同一常量。星象仪的 `PASS_COARSE_STEP_S/FINE_STEP_S` 属 D-6，**不要**顺手合并。 |
-| P-2c | `mbdsdr_ai/sat_consistency.py:141` | `check_next_pass_consistency(min_alt=5.0)` 仍把 5 传进默认 10 的 `predict_passes` | 这正是裁定 2 禁止的形态（"下一次过境"却用可见门）。改默认 `PASS_MIN_ALT_DEG`，或明确改名为"从 5° 起算的下一次过境"并加注释。**诊断工具口径需与 `next_pass()` 一致，否则对拍结论不可信。** |
+| P-2c | `mbdsdr_ai/sat_consistency.py:143` | `check_next_pass_consistency(min_alt=5.0)` 仍把 5 传进默认 10 的 `predict_passes` | **已完成**：默认值改为 `sat_passes.PASS_MIN_ALT_DEG`（10°），诊断工具与 `next_pass()` 对同一次过境对拍；`tests/test_hardcoded_parameter_registry.py::test_consistency_tool_uses_pass_gate_not_visible_gate` 钉住（改回 5.0 必红）。 |
 | P-8a | `desktop/main_window.py` | `_squelch_db = -80.0`（约 507 行）是权威初值，滑杆已显示 -50 | 改为 `DEFAULT_SQUELCH_DBFS`（一行）。**必须与 P-8d 迁移提示同批**：否则旧配置读入后仍按 -80 门控，UI 显示与行为继续分裂。 |
 | P-8b | `mbdsdr_ai/sdr_backend.py` + `osmosdr_source.py` + `rtltcp_client.py` | RTL 基线三套（2.048 / 1.024 / 2.048 硬编码） | **已完成**（§10-3）：统一为 2.4 MS/s 首选 + `nearest_sample_rate()` 回落 + 状态回报实际值；三处不再各写字面量。相关测试期望已成对更新（100 passed）。 |
 | P-8c | `desktop/spectrum_widget.py:419` | 无数据哨兵 `-120.0` 落在可显示量程内 | 改为 `float("nan")`（绘制/重采样对 NaN 显式判空）。C++ `rssiDbfs_{-100.0f}` 是**真实安静读数**，不得当哨兵；若要哨兵请用量程外的 `-999` 并注释。 |
@@ -695,9 +695,9 @@ star_catalog.naked_eye_limit_mag is stars.naked_eye_limit_mag: True
 - 显式传 `min_alt=5` 的调用方行为不变（只是默认值变了）；
 - 星象仪 `PASS_MIN_ALT_DEG=10.0` 数值不变（仍是私有字面量 → P-2b）。
 
-**残留（已登记，未改）**：`mbdsdr_ai/sat_consistency.py:141`
-`check_next_pass_consistency(min_alt=5.0)` 仍是"5 传进默认 10"的形态。
-→ P-2c。诊断工具不先对齐，它对"下一次过境"的对拍结论就不可信。
+**残留（已修）**：`mbdsdr_ai/sat_consistency.py` 的
+`check_next_pass_consistency` 默认门已改为 `PASS_MIN_ALT_DEG`
+（→ P-2c），诊断工具与 `next_pass()` 对的是同一次过境。
 
 ### 10-3 默认采样率：统一为 2.4 MS/s + 能力回落
 

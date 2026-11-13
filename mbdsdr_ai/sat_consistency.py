@@ -18,6 +18,8 @@ from __future__ import annotations
 import math
 from typing import Any, Dict, List, Optional, Sequence
 
+from .sat_passes import PASS_MIN_ALT_DEG
+
 __all__ = [
     "DEFAULT_TOL_DEG",
     "check_pass_object",
@@ -138,12 +140,15 @@ def check_next_pass_consistency(
     tle_lines: Sequence[str],
     ground_station: Any,
     hours: float = 24.0,
-    min_alt: float = 5.0,
+    min_alt: float = PASS_MIN_ALT_DEG,
     tol_deg: float = DEFAULT_TOL_DEG,
     start_unix: Optional[float] = None,
 ) -> Dict[str, Any]:
     """预测下一次过境并立即做三路径对拍。无过境时 checked=False。
 
+    默认门与 ``sat_passes.PASS_MIN_ALT_DEG``（10°）同源：诊断工具若自带
+    5° 的「可见门」，它对「下一次过境」的对拍结论与 ``next_pass()``
+    不是同一次过境，对拍本身失真。
     ``start_unix`` 显式钉死预测起点（Unix UTC 秒）；缺省走 TimeEngine。
     """
     from .sat_passes import predict_passes
