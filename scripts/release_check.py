@@ -27,8 +27,10 @@
 * 结果三态 PASS/FAIL/SKIP 逐条落 ``.tmp/release_check/result.json``，
   SKIP 带原因码（``no_gui`` 真屏指纹拿不到、``not_run`` 失败即停后未执行、
   ``no_device`` 留给需要真硬件的步骤）；
-* 日志落点：启动日志本身不得落在任何 ``C:\\Users\\<user>`` 路径；再快照
-  已知用户目录 + 全盘扫描本次运行窗口内新增的日志类文件，任一命中即 FAIL；
+* 日志落点：启动日志本身不得落在任何 ``C:\\Users\\<user>`` 路径；快照已知
+  用户目录，并只扫**产品日志的声明落点**（本地/漫游 AppData 的
+  ``MBDSDR\\logs``、仓库与安装目录的 ``logs/``）中本次运行窗口内新增的
+  ``*.log``，任一命中即 FAIL，detail 逐个列出扫描根；
 * 任一步 FAIL 立即停止后续步骤，并打印该步「下一步该查什么」；
 * build 步自动与「上一次 dist」比对（``TMP_ROOT`` 下编号最大的 pyi-distN），
   无需人肉指定基准。
@@ -819,22 +821,55 @@ def _is_log_file_name(name: str) -> bool:
     return bool(sep) and bool(_head) and tail.isdigit()
 
 
-def _looks_like_product_log(path: str) -> bool:
-    """产品日志 = ``.log`` 后缀 **且**（文件名或任一目录段带 ``mbdsdr``）。
+def _is_product_attributed(path: str) -> bool:
+    """全盘扫时的**产品归属**判据：路径（目录或文件名）里含 ``mbdsdr``。
 
-    2026-11-13 收紧：旧判据是「路径含 mbdsdr 且文件名含 startup / mbdsdr_desktop」，
-    会把别的会话从 ``%TEMP%`` 复制的 ``mbdsdr_ai/startup_sequence.py`` 误判成
-    产品日志。日志就是日志：先要求 ``.log`` 后缀，再要求产品归属，两条同时成立
-    才算。``gui_config.json`` 等用户数据与 ``.py`` 源码都不在池子里。
+    收窄口径靠「声明根」隐含归属；全盘口径没有根可依，必须显式判归属，
+    否则会把 Trae / QQMusic / aTrust / clash 这些**别人家的** ``*.log``
+    一起算成产品写入（实测 21 条），闸门永远不可能绿。
     """
-    name = os.path.basename(path).lower()
-    if not _is_log_file_name(name):
-        return False
-    if "mbdsdr" in name:
-        return True
-    parts = [p.lower() for p in
-             os.path.dirname(path).replace("/", "\\").split("\\") if p]
-    return any(p == "mbdsdr" or p.startswith("mbdsdr.") for p in parts)
+    return "mbdsdr" in path.lower()
+
+
+def _product_log_roots(home: str | None = None,
+                       dist_dir: str | None = None) -> list[str]:
+    """产品日志的**声明落点**（明确位置，不再全盘扫 ``C:\\Users``）。
+
+    只扫这些根，且只认 ``*.log`` / ``*.log.N``：
+      * ``%LOCALAPPDATA%\\MBDSDR\\logs``、``%APPDATA%\\MBDSDR\\logs``；
+      * 仓库 ``logs/`` 与仓库父目录 ``logs/``（当前启动日志 ``D:\\mbdsdr\\logs``）；
+      * 安装目录 ``logs/`` 与 ``安装目录\\MBDSDR\\logs/``。
+
+    收窄不等于少扫：``do_log`` 必须把声明根与其中存在的根逐个打进 detail，
+    让人一眼能看出扫的是哪几个位置。
+    """
+    if home is None:
+        home = os.path.expanduser("~")
+        local = os.environ.get("LOCALAPPDATA") or os.path.join(
+            home, "AppData", "Local")
+        roaming = os.environ.get("APPDATA") or os.path.join(
+            home, "AppData", "Roaming")
+    else:
+        local = os.path.join(home, "AppData", "Local")
+        roaming = os.path.join(home, "AppData", "Roaming")
+    roots = [
+        os.path.join(local, "MBDSDR", "logs"),
+        os.path.join(roaming, "MBDSDR", "logs"),
+        os.path.join(TMP_ROOT, "logs"),
+        os.path.join(ROOT, "logs"),
+    ]
+    if dist_dir:
+        roots.insert(0, os.path.join(dist_dir, "MBDSDR", "logs"))
+        roots.insert(1, os.path.join(dist_dir, "logs"))
+    out: list[str] = []
+    seen: set[str] = set()
+    for root in roots:
+        key = os.path.normcase(os.path.abspath(root))
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(os.path.abspath(root))
+    return out
 
 
 def _step_warmup(exe: str, timeout: float = 90) -> tuple[bool, str]:
@@ -871,40 +906,39 @@ def _step_warmup(exe: str, timeout: float = 90) -> tuple[bool, str]:
 
 
 def _scan_userprofile_log_writes(since: float,
-                                 home: str | None = None) -> tuple[list[str], int]:
-    """全盘扫用户目录，只认**产品日志**（``*.log`` 后缀 + 产品归属，见上）。
+                                 home: str | None = None,
+                                 roots: list[str] | None = None,
+                                 full: bool = False
+                                 ) -> tuple[list[str], int]:
+    """扫产品日志写入，两种口径，都只认 ``*.log`` / ``*.log.N``。
 
-    不把整个用户目录的 mtime 都算成 FAIL：运行期间浏览器/系统也会写缓存，
-    别的 MBDSDR 会话还会写 gui_config.json（用户数据，不是日志），
-    那些噪声不能算到本次运行头上。本项要证明的是「产品日志不落 C 盘用户目录」。
-
-    另外排除 IDE / Agent 会话日志目录（``.workbuddy`` / ``.trae*`` /
-    ``.vscode`` / ``.cursor``）：它们的文件名会带工作区名 ``mbdsdr``
-    （如 ``mbdsdr__<session>.log``），但那是编辑器写的会话记录，不是产品日志。
+    * ``full=False``（日常闸）：只扫**声明落点**（见 ``_product_log_roots``）。
+      2026-11-13 第二次收紧：判据没错，扫描根错了。全盘扫 ``C:\\Users`` 一次
+      1,029,800 个文件 / 76–100s，只为证明 0 命中；改为只走产品日志的明确位置，
+      报表里照样打「扫了多少文件 / 命中几个 / 声明哪几个根」，避免收窄变成静默少扫。
+    * ``full=True``（发版前闸）：回到整个用户目录全盘扫。收窄版的盲区正是
+      ``%TEMP%`` 里那种**不在任何声明落点**的写入（例：别的会话把
+      ``mbdsdr_ai/startup_sequence.py`` 复制到 ``%TEMP%\\axfinal``），
+      只有全盘扫看得见。两条命令互补，不是拿收窄换绿。
     """
-    home = home or os.path.expanduser("~")
+    if full:
+        top = home if home is not None else os.path.expanduser("~")
+        roots = [top]
+    else:
+        roots = list(roots) if roots is not None else _product_log_roots(home)
     hits: list[str] = []
     lock = threading.Lock()
     counter = [0]
-    tool_dirs = (".workbuddy", ".trae", ".trae-cn", ".vscode", ".cursor",
-                 ".codeium", ".continue")
-
-    def _is_tool_dir(dirpath: str) -> bool:
-        parts = [p.lower() for p in dirpath.replace("/", "\\").split("\\")]
-        return any(t in parts for t in tool_dirs)
 
     def _scan(top: str) -> None:
         local: list[str] = []
         scanned = 0
-        for dirpath, dirnames, filenames in os.walk(top):
-            if _is_tool_dir(dirpath):
-                dirnames[:] = []
-                continue
+        for dirpath, _dirnames, filenames in os.walk(top):
             for name in filenames:
                 scanned += 1
-                full = os.path.join(dirpath, name)
-                if not _looks_like_product_log(full):
+                if not _is_log_file_name(name):
                     continue
+                full = os.path.join(dirpath, name)
                 try:
                     if os.stat(full).st_mtime >= since:
                         local.append(full)
@@ -914,15 +948,10 @@ def _scan_userprofile_log_writes(since: float,
             hits.extend(local)
             counter[0] += scanned
 
-    tops: list[str] = []
-    try:
-        with os.scandir(home) as it:
-            for entry in it:
-                tops.append(entry.path)
-    except OSError:
-        pass
-    with ThreadPoolExecutor(max_workers=8) as pool:
-        list(pool.map(_scan, tops))
+    existing = [r for r in roots if os.path.isdir(r)]
+    if existing:
+        with ThreadPoolExecutor(max_workers=min(8, len(existing))) as pool:
+            list(pool.map(_scan, existing))
     return hits, counter[0]
 
 
@@ -945,12 +974,19 @@ def main() -> int:
     ap.add_argument("--diff-against", default=None,
                     help="体积/文件数比对基准；默认自动取 .tmp 下上一次 pyi-distN")
     ap.add_argument("--skip-user-scan", action="store_true",
-                    help="跳过全盘用户目录扫描（只保留已知落点快照）")
+                    help="跳过产品日志落点扫描（只保留已知落点快照）")
+    ap.add_argument("--full-scan", action="store_true",
+                    help="产品日志改为全盘扫整个用户目录（发版前跑一次）；"
+                         "日常闸只扫声明落点。两者互补，不可互相替代")
     ap.add_argument("--reuse-diag", action="store_true",
                     help="复用已有 noarchive 诊断构建（调试用）")
     ap.add_argument("--keep-going", action="store_true",
                     help="FAIL 后继续跑剩余步骤（只用于出完整报告；默认失败即停）")
     args = ap.parse_args()
+    if args.full_scan and args.skip_user_scan:
+        print("--full-scan 与 --skip-user-scan 互斥：全盘扫不能同时被跳过",
+              file=sys.stderr)
+        return 2
 
     profile = "release" if args.release else "daily"
     defaults = ALL_STEPS if args.release else DAILY_STEPS
@@ -1339,14 +1375,36 @@ def main() -> int:
         changed = _diff_snapshot(before_user, after)
         if changed:
             return False, "历史泄漏点被写：\n" + "\n".join(changed[:20])
+        roots = _product_log_roots(dist_dir=args.dist_dir)
         if args.skip_user_scan:
-            return True, f"~/.config/MBDSDR 无新增/变化（全盘扫描已跳过）；日志={log_path}"
-        hits, scanned = _scan_userprofile_log_writes(run_start)
+            return True, (f"产品日志落点扫描已跳过；声明根 {len(roots)} 个："
+                          f"{'；'.join(roots)}；日志={log_path}")
+        started = time.time()
+        hits, scanned = _scan_userprofile_log_writes(
+            run_start, roots=roots, full=bool(args.full_scan))
+        elapsed = time.time() - started
+        if args.full_scan:
+            product = [h for h in hits if _is_product_attributed(h)]
+            foreign = len(hits) - len(product)
+            mode = (f"本次是**全盘**扫（用户目录 {os.path.expanduser('~')}，"
+                    f"{elapsed:.1f}s，产品归属命中 {len(product)} 条/"
+                    f"非产品 {foreign} 条已忽略）")
+            root_text = f"全盘：{os.path.expanduser('~')}"
+            existing = 1 if os.path.isdir(os.path.expanduser("~")) else 0
+            roots = [os.path.expanduser("~")]
+            hits = product
+        else:
+            mode = f"本次是声明落点扫（{elapsed:.1f}s）"
+            root_text = "；".join(roots)
+            existing = sum(1 for r in roots if os.path.isdir(r))
         if hits:
-            return False, f"C 盘用户目录出现本次写入的产品日志：\n" + \
-                "\n".join(hits[:20])
-        return True, (f"C:\\Users 全盘 {scanned} 个文件里无本次写入的产品日志"
-                      f"（*.log/.log.N 且文件名或目录含 mbdsdr，mtime 过滤）；"
+            return False, (f"产品日志落点出现本次写入（{mode}，扫 {scanned} 个文件，"
+                           f"命中 {len(hits)}）：\n"
+                           + "\n".join(hits[:20])
+                           + f"\n扫描根（存在 {existing}/{len(roots)}）：{root_text}")
+        return True, (f"产品日志落点：{mode}，声明 {len(roots)} 个根/存在 {existing} 个，"
+                      f"共 {scanned} 个文件，命中 0"
+                      f"（*.log/.log.N，mtime 过滤）；根：{root_text}；"
                       f"日志={log_path}")
 
     steps = (

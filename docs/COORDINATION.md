@@ -1871,6 +1871,11 @@ No supported devices found），GNSS+SDR 同开复验没做成；离线那次
 | 文件 | 线名 | 开始时间 | 预计提交 hash |
 |---|---|---|---|
 | _（空）_ | | | |
+| `scripts/release_check.py` | 收尸线/6ae85f56（裁定②：日常只扫声明落点，新增 --full-scan 全盘入口 + 产品归属判据） | 2026-11-13 19:58 | 本笔 |
+| `tests/test_release_check_log_scan.py` | 收尸线/6ae85f56（全盘扫 5 条用例：落点外命中 / 后缀过滤 / 时间窗 / 免声明根 / 归属判据） | 2026-11-13 19:58 | 本笔 |
+| `mbdsdr_ai/{tle_epoch,skyfield_compat,fengyun_sat,orbit_determination,orbit_dynamics,new_spacetime_tle,time_basis,tle_integrity,sat_passes,sat_illumination}.py` | 收尸线/6ae85f56（接管 D1环收口线夜班遗留：零依赖叶子下沉打断延迟 import 环；原持有心跳过期、pid 已死、期间无他方落库） | 2026-11-13 19:58 | 本笔 |
+| `docs/pending-patches/2026-11-13-d1-21-scc-closeout.md` | 收尸线/6ae85f56（落库前复验记录：15 passed / 82 passed、等价性 200 组） | 2026-11-13 19:58 | 本笔 |
+| `docs/COORDINATION.md` | 收尸线/6ae85f56（②/A 两笔 §6.1 登记行，提交后释放） | 2026-11-13 19:58 | 本笔 |
 | `scripts/file_claim.py` | 收尸线/6ae85f56（pid 只作诊断 + 长租期必须给理由 + 「疑似死会话」提示；接管判据未放宽） | 2026-11-13 19:55 | 本笔 |
 | `tests/test_file_claim.py` | 收尸线/6ae85f56（长租期 reason 三条 + 夹具补 --reason） | 2026-11-13 19:55 | 本笔 |
 | `tests/test_file_claim_takeover.py` | 收尸线/6ae85f56（疑似死会话/pid 复用/短 TTL 仍须宽限，四条） | 2026-11-13 19:55 | 本笔 |
