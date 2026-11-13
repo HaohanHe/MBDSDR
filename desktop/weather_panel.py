@@ -741,7 +741,6 @@ class WeatherPanel(QWidget):
             return
         realtime = self._is_realtime()
         sat = self._current_sat()
-        out_png = self._out_png_path("decode")
 
         if realtime:
             # 本面板不做边收边解：另起 read_samples 定时器会与主窗口统一 IQ 轮询
@@ -759,15 +758,51 @@ class WeatherPanel(QWidget):
         if not self._iq_file:
             QMessageBox.information(self, "选择文件", "请先选择真实录制的 IQ/WAV 文件。")
             return
+        # 先解析参数再进「解码中」：旧实现先亮进度条，裸 float() 抛出的
+        # ValueError 直接逃出槽函数（只进 stderr）——用户看到进度 0 卡住、
+        # 按钮照旧可点，会以为任务在后台排队。解析失败必须当场说清「没有开始」。
+        sr_text = self.sr_edit.text().strip()
+        sym_text = self.sym_edit.text().strip()
+        if not sr_text or not sym_text:
+            QMessageBox.warning(
+                self, "参数不完整", "采样率与符号率都不能为空，未开始解码。\n"
+                "请填纯数字：采样率按 MS/s（如 2.048），符号率按 ksps（如 72.0）。")
+            self._update_status(extra="采样率/符号率为空，未开始解码")
+            return
+        try:
+            sr_msps = float(sr_text)
+        except ValueError:
+            QMessageBox.warning(
+                self, "采样率无效",
+                f"采样率“{sr_text}”不是数字，未开始解码。\n"
+                "请填纯数字（单位 MS/s），如 2.048；不要带 M/MS/s/Hz 后缀。")
+            self._update_status(extra="采样率无效，未开始解码")
+            return
+        try:
+            sym_ksps = float(sym_text)
+        except ValueError:
+            QMessageBox.warning(
+                self, "符号率无效",
+                f"符号率“{sym_text}”不是数字，未开始解码。\n"
+                "请填纯数字（单位 ksps），如 72.0；不要带 k/ksps 后缀。")
+            self._update_status(extra="符号率无效，未开始解码")
+            return
+        if sr_msps <= 0 or sym_ksps <= 0:
+            QMessageBox.warning(
+                self, "参数无效",
+                f"采样率 {sr_msps:g} MS/s、符号率 {sym_ksps:g} ksps 都必须为正数，"
+                "未开始解码。")
+            self._update_status(extra="采样率/符号率必须为正数，未开始解码")
+            return
         self.progress.setVisible(True); self.progress.setValue(0)
+        out_png = self._out_png_path("decode")
         params = {
             "family": sat.get("family", "gk2a"),
             "satellite": self.sat_combo.currentText(),
             "iq_file": self._iq_file,
             "out_png": out_png,
-            "sps": max(1, round(float(self.sr_edit.text()) * 1e6 /
-                               (float(self.sym_edit.text()) * 1e3 or 1))),
-            "sample_rate": float(self.sr_edit.text()) * 1e6,
+            "sps": max(1, round(sr_msps * 1e6 / (sym_ksps * 1e3))),
+            "sample_rate": sr_msps * 1e6,
         }
         self._start_worker(params)
 
