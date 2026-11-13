@@ -70,6 +70,33 @@ class _FakeTracker:
         return 437_800_000.0
 
 
+class _FakeBookmarks:
+    """最小书签库：面板 refresh_list 只会调 all()/search()。"""
+
+    def __init__(self, items):
+        self.items = list(items)
+
+    def all(self):
+        return list(self.items)
+
+    def search(self, q):
+        q = (q or "").strip().lower()
+        if not q:
+            return self.all()
+        return [b for b in self.items
+                if q in f"{b.name} {b.modulation} {b.group}".lower()]
+
+
+def _bookmarks():
+    from mbdsdr_ai.bookmark_manager import Bookmark
+    return [
+        Bookmark(frequency_hz=121_500_000, name="航空应急",
+                 modulation="AM", bandwidth_hz=12_500, group="航空"),
+        Bookmark(frequency_hz=145_800_000, name="ISS 下行",
+                 modulation="FM", bandwidth_hz=12_500, group="卫星"),
+    ]
+
+
 # ---------------------------------------------------------------------------
 # 注册表本身
 # ---------------------------------------------------------------------------
@@ -78,7 +105,8 @@ def test_registry_is_declarative_and_declares_groups():
     import search_providers as sp
 
     groups = [p.group for p in sp.PROVIDERS]
-    assert groups == ["菜单", "页签", "面板", "能力", "快捷键", "设置项", "卫星"]
+    assert groups == ["菜单", "页签", "面板", "能力", "快捷键",
+                      "设置项", "卫星", "书签"]
     assert set(groups) <= set(cp.GROUPS)
     # 每个 provider 都能独立回答「现在能不能用」。
     assert all(hasattr(p, "status") and hasattr(p, "commands")
@@ -176,6 +204,99 @@ def test_satellite_provider_jumps_to_satellite(monkeypatch, main_window, qapp):
         if getattr(main_window, "_right_overlay", None) is not None:
             main_window._close_right_overlay()
         qapp.processEvents()
+
+
+# ---------------------------------------------------------------------------
+# 书签：按名称 / 频率搜，命中定位到列表那一行
+# ---------------------------------------------------------------------------
+def _bookmark_hits(index, query):
+    from command_palette import search_commands
+    return [c for c in search_commands(index, query) if c.group == "书签"]
+
+
+def test_bookmark_provider_searches_by_name_and_frequency(
+        monkeypatch, main_window, qapp):
+    from command_palette import build_index
+
+    panel = main_window.bookmark_panel
+    assert panel is not None, "前置条件：书签面板没建出来"
+    monkeypatch.setattr(panel, "_mgr", _FakeBookmarks(_bookmarks()))
+    panel.search_box.clear()
+    panel.refresh_list()
+
+    index = build_index(main_window)
+    assert {c.title for c in index if c.group == "书签"} == {
+        "航空应急", "ISS 下行"}
+
+    by_name = _bookmark_hits(index, "航空应急")
+    assert by_name and by_name[0].title == "航空应急", "按名称搜不到书签"
+
+    for query in ("145.8", "145.8 MHz", "145800000"):
+        hits = _bookmark_hits(index, query)
+        assert hits, f"按频率 {query!r} 搜不到书签"
+        assert hits[0].title == "ISS 下行", (query, [c.title for c in hits])
+
+
+def test_bookmark_provider_reveals_the_specific_row(
+        monkeypatch, main_window, qapp):
+    from PySide6.QtCore import Qt
+    from command_palette import build_index
+
+    panel = main_window.bookmark_panel
+    monkeypatch.setattr(panel, "_mgr", _FakeBookmarks(_bookmarks()))
+    panel.search_box.clear()
+    panel.refresh_list()
+    cmd = next(c for c in build_index(main_window)
+               if c.source == "bookmark:145800000:ISS 下行")
+
+    # 先制造「列表被过滤空」的状态：定位必须自己清场，不能只打开面板。
+    panel.search_box.setText("zzz_过滤态")
+    qapp.processEvents()
+    assert panel.tree.topLevelItemCount() == 0, "前置条件：过滤态没清空列表"
+
+    main_window.activateWindow()
+    main_window.raise_()
+    qapp.processEvents()
+    try:
+        res = cmd.run()
+        assert res["ok"] is True, res
+        qapp.processEvents()
+        qapp.processEvents()
+
+        assert panel.search_box.text() == "", "定位书签后过滤词没清空"
+        assert panel.group_list.currentRow() == 0, "没有回到「全部」分组"
+        item = panel.tree.currentItem()
+        assert item is not None, "书签列表没有选中目标行（只打开了面板）"
+        data = item.data(0, Qt.UserRole)
+        assert data["frequency_hz"] == 145_800_000
+        assert data["name"] == "ISS 下行"
+        assert main_window.focusWidget() is panel.tree, (
+            "焦点没落在书签列表，而是 %s"
+            % type(main_window.focusWidget()).__name__)
+        rt = main_window.right_tab
+        assert rt.tabBar().tabData(rt.currentIndex()) == "bookmark"
+    finally:
+        if getattr(main_window, "_right_overlay", None) is not None:
+            main_window._close_right_overlay()
+        qapp.processEvents()
+
+
+def test_bookmark_unavailable_and_empty_are_distinguishable(
+        monkeypatch, main_window):
+    import command_palette as cp
+
+    panel = main_window.bookmark_panel
+    monkeypatch.setattr(panel, "_mgr", None)
+    panel.status_label.setText("书签内核不可用: 测试")
+    gaps = dict(cp.provider_gaps(main_window))
+    assert "书签" in gaps and "书签内核不可用" in gaps["书签"], gaps
+    assert not [c for c in cp.build_index(main_window) if c.group == "书签"]
+
+    # 空书签库是「可用但没有条目」，不能报成「不可用」。
+    monkeypatch.setattr(panel, "_mgr", _FakeBookmarks([]))
+    gaps = dict(cp.provider_gaps(main_window))
+    assert "书签" not in gaps, "空书签库被误报成「不可用」"
+    assert not [c for c in cp.build_index(main_window) if c.group == "书签"]
 
 
 # ---------------------------------------------------------------------------
