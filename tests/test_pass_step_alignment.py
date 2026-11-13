@@ -93,25 +93,19 @@ def test_rf_sky_peak_matches_single_source():
         f"超过 步长×速率={bound:.2f}°")
 
 
-def test_timeline_aos_los_peak_within_step(monkeypatch):
+def test_timeline_aos_los_peak_within_step():
     """新时空面板（TimelineEngine）vs 参考：AOS/LOS ≤ 1 粗步长，峰值仰角 ≤ 步长×速率。"""
-    import mbdsdr_ai.new_spacetime_timeline as nst
     from mbdsdr_ai.new_spacetime_timeline import TimelineEngine
 
-    class _FixedDateTime(datetime):
-        @classmethod
-        def now(cls, tz=None):
-            return FIXED_UTC
-
-    monkeypatch.setattr(nst, "datetime", _FixedDateTime)
     ref = _ref_passes(hours=6.0)
     assert ref
 
+    # 时间基准走 TimeEngine；这里显式钉死预测起点，只比较网格差异。
     got = TimelineEngine().compute_passes(
         39.9, 116.4, 0.0,
         [(ISS_NAME, ISS_L1, ISS_L2)],
         hours_ahead=6.0, min_elevation=5.0,
-        step_sec=sat_passes.PASS_COARSE_STEP_S)
+        step_sec=sat_passes.PASS_COARSE_STEP_S, now_unix=FIXED_UNIX)
 
     used = set()
     for p in got:

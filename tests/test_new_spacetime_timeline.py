@@ -111,6 +111,34 @@ def test_no_observer_default():
         eng.compute_passes()  # type: ignore[call-arg]
 
 
+def test_compute_passes_defaults_to_time_engine():
+    """时间基准单源：预测起点跟随 TimeEngine，不跟随墙钟。
+
+    反证：把 ``now_unix`` 缺省分支改回 ``datetime.now(timezone.utc)``，
+    墙钟（2026-11-13）与引擎时刻（2026-09-26）差 48 天，首条 rise
+    必然落在窗外，本用例变红。
+    """
+    from mbdsdr_ai.new_spacetime import get_time_engine
+
+    start_dt = datetime(2026, 9, 26, 0, 0, 0, tzinfo=timezone.utc)
+    start = start_dt.timestamp()
+    end = start + 24.0 * 3600.0
+    get_time_engine().set_unix(start)
+
+    passes = TimelineEngine().compute_passes(
+        OBS_LAT, OBS_LON, OBS_ALT,
+        [(ISS_NAME, ISS_L1, ISS_L2)],
+        hours_ahead=24.0, min_elevation=5.0, step_sec=60.0,
+    )
+    assert passes, "赤道上 24h 内应至少看到 1 次 ISS 过境"
+    for p in passes:
+        assert p.rise_time is not None
+        unix = p.rise_time.timestamp()
+        assert start - 60.0 <= unix <= end + 60.0, (
+            f"rise={p.rise_time.isoformat()} 不在引擎窗 "
+            f"[{start_dt.isoformat()}, +24h] 内")
+
+
 def test_time_sync_none():
     """不传 GNSS、不试 NTP → 未同步。"""
     eng = TimelineEngine()

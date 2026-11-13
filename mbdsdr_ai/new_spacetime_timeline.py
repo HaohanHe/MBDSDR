@@ -289,7 +289,8 @@ class TimelineEngine:
                        hours_ahead: float = 24.0,
                        min_elevation: float = 5.0,
                        step_sec: float = 30.0,
-                       frequencies: Optional[Dict[str, float]] = None
+                       frequencies: Optional[Dict[str, float]] = None,
+                       now_unix: Optional[float] = None
                        ) -> List[SatellitePass]:
         """计算未来 hours_ahead 内所有卫星的过境时间线。
 
@@ -307,11 +308,23 @@ class TimelineEngine:
             时间采样步长（秒）。
         frequencies : dict, optional
             ``{name: 下行频率 Hz}``，用于多普勒计算。
+        now_unix : float, optional
+            预测起点（Unix UTC 秒）。缺省取全局 ``TimeEngine.now_unix()``，
+            与时间机器/快转同源；显式传入只用于复算或测试钉死时刻。
         """
         _require_sgp4()
         frequencies = frequencies or {}
         obs_ecef = _observer_ecef(observer_lat, observer_lon, observer_alt)
-        now = datetime.now(timezone.utc)
+        # 时间基准只有一个来源（docs/time-source.md）：默认取 TimeEngine。
+        # 旧实现用 datetime.now()，时间机器把引擎拨到另一天后面板仍从墙钟
+        # 起算，过境列表整段落在错误的日期上。
+        if now_unix is None:
+            try:
+                from .new_spacetime import get_time_engine
+            except ImportError:  # 脚本 / 直接运行时
+                from new_spacetime import get_time_engine  # type: ignore
+            now_unix = float(get_time_engine().now_unix())
+        now = datetime.fromtimestamp(float(now_unix), tz=timezone.utc)
         start = now
         end = now + timedelta(hours=hours_ahead)
         n_steps = max(1, int(round(hours_ahead * 3600.0 / step_sec)))
