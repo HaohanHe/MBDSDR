@@ -1866,7 +1866,10 @@ No supported devices found），GNSS+SDR 同开复验没做成；离线那次
 共享文档**必须逐条**，目录级行覆盖到它们会被 `scripts/check_claim_coordination.py`
 判红。**这条规矩由提交前拦，不靠事后扫**：pre-commit ④ 跑
 `check_claim_coordination.py --staged`，暂存文件里有活跃 claim 却缺本表行即拒绝
-（实测 0.22–0.30s，超 0.30s 预算只告警不阻塞并说明原因）。
+（`147212f5` 起预算 1.0s：`147212f5` 之后实测最慢一次 260.2ms、中位 190.2ms，
+5 次运行 0 次落降级支。每次运行都把 `elapsed_ms / probe_ms` 比值追加到
+`<locks>/coord_check_trend.jsonl`——**不只在超预算时才说话**；耗时接近预算
+（≥0.75）时按同一份探针比值判「检查自身变慢」还是「机器整体变慢」）。
 
 **追加登记行不必占整文件（2026-11-13 落地）**：`scripts/append_coordination_row.py`
 只做「在 §6.1 表格末尾追加一行」——独立窄锁（`.locks/coordination-append.lock`，
@@ -2048,6 +2051,10 @@ No supported devices found），GNSS+SDR 同开复验没做成；离线那次
 | `tests/test_git_clone_existing_target.py` | S1-S4结果伪造线/6ae85f56（S4 空目录/无提交残目录/错远端判失败 + 完整仓库判可用） | 2026-11-13 20:13 | 本笔 |
 | `docs/incidents/2026-11-13-safe-commit-swept-foreign-rows.md` | 锚点机制线/6ae85f56（事故记录：safe_commit 卷走他线 §6.1 两行（8982b4f9）） | 2026-11-13 20:20 | 本笔 |
 | `desktop/command_palette.py` | 统一搜索性能线/1e994b03（补逐键耗时实测注记（2026-11-13）） | 2026-11-13 20:17 | 本笔 |
+| `scripts/{append_coordination_row.py,check_claim_coordination.py,claim_window.py,hooks/pre-commit}` | 收尸线/6ae85f56（§6.1 登记闸升阻塞：窗口判据共用、预算 1.0s + 耗时趋势、拒绝时打印补登命令） | 2026-11-13 20:21 | 本笔 |
+| `tests/{test_coordination_gate_blocking.py,test_append_coordination_row.py}` | 收尸线/6ae85f56（§6.1 登记闸升阻塞：钩子层拒绝/补登/放行 + 55/61 分钟窗口两侧对称反证） | 2026-11-13 20:21 | 本笔 |
+| `scripts/safe_commit.py` | 收尸线/6ae85f56（插入 §6.1 行时容忍标题与表格之间的说明文字（工具不再逼人手工插行）） | 2026-11-13 20:28 | 本笔 |
+| `tests/test_safe_commit_coordination.py` | 收尸线/6ae85f56（回归：说明文字在表头之前时仍能插入行且原文不动） | 2026-11-13 20:28 | 本笔 |
 
 > 上表各行均由 `claim` 台账推导：owner 原文与 `acquired_at` 直接取自台账，
 > 目的优先用台账里的 `claim_reason`，没有就如实写「未声明」，不补编。时间列只是
@@ -3438,6 +3445,145 @@ token 没了、谁也 release 不了」的中间态。
 **⑤ 过期 claim 清单（2026-11-13 02:2x 快照）**：占位文件 110 个，未过期 40、
 已过期 70；其中 **68 个文件当前无在途改动**（批量释放候选）、**2 个仍有在途
 改动**（不许释放，可能是忘了续租的活跃线）。批量释放尚未执行，等用户确认。
+
+### 6.1.7 历史欠账：`147212f5` 之后的提交缺 §6.1 行（2026-11-13 立账，不追溯）
+
+**分界点写成 sha，不写成「当前 HEAD」。** 本节的界是 **`147212f5` 之后的提交**
+（`147212f5` 自身是「§6.1 登记闸由告警升为阻塞」那一笔，不计入本账）。不用
+`ce5fe327` 当界：那之后已经落了 `73b75378`（4px）、`8982b4f9`（补登）、
+`83afbf77` 等，拿旧界会漏账或重复记账；而「以当前 HEAD 为界」每提交一次就漂
+一次，清单永远对不上。核对一律以 sha 为准。
+
+**口径（可复现）**：对 `git log 147212f5^..HEAD` 的每一笔，用
+`git show --name-only <sha>` 取改动文件，用 `git show <sha>:docs/COORDINATION.md`
+取**该笔提交时**的 §6.1 表，再与 `claims.json` 里同一文件的 owner 对照：该笔
+提交了某文件、该文件有活跃 claim、而当时表里没有对应行 → 记 1 条。重跑这条
+口径得到下面的清单：**89 笔提交 / 313 条缺行**（按提交时间倒序）。
+
+**为什么不追溯（三条，缺一不可）**：
+
+1. **当时的闸不阻塞。** `147212f5` 之前缺行只告警，人按「不阻塞」的规则干活，
+   不算违规；用新规矩追旧笔等于以事后法判事前行为。
+2. **owner 是短命字段。** 台账里的 `owner` 早已被释放/刷新，硬追只能追到
+   「当时大概是哪条线」；把它写成欠账人，就是制造一份查不实的责任表。
+3. **追溯会逼人重写历史。** 补 313 条历史行只能改旧提交，或往今天的表里塞
+   313 行假时间：前者改写历史（§6.10 明令禁止），后者让台账时间序失真——
+   **为了台账好看而让台账失真，正是本节要防的东西。**
+
+**处置**：本节只立清单与口径，**不挂到 pre-commit 上追**。pre-commit ④ 只判
+「这次暂存的文件」（`--staged`），历史笔不进候选集，也不会因为本节存在而在
+任何时候变红。已落库的欠账保持原样；新提交从 `147212f5` 之后逐笔记。
+
+- 2026-11-13 20:20 `ac232bf5` 锚点机制线/6ae85f56 缺 1 项：`docs/incidents/2026-11-13-safe-commit-swept-foreign-rows.md`
+- 2026-11-13 20:10 `5eb0804e` 文档引用复核线/6ae85f56 缺 1 项：`docs/PRD.md`
+- 2026-11-13 20:05 `67f4d192` 文档引用复核线/6ae85f56 缺 1 项：`docs/reference-mechanisms.md`
+- 2026-11-13 20:05 `f0bb248f` 文档引用复核线/6ae85f56 缺 1 项：`docs/packaging.md`
+- 2026-11-13 20:05 `add33992` 文档引用复核线/6ae85f56 缺 1 项：`docs/hardcoded-parameters.md`
+- 2026-11-13 20:05 `4c30287b` Qt翻译与设置显式线/6ae85f56 缺 1 项：`tests/test_search_providers.py`
+- 2026-11-13 20:04 `7a76b097` Qt翻译与设置显式线/6ae85f56 缺 1 项：`desktop/command_palette.py`
+- 2026-11-13 20:04 `d011c078` Qt翻译与设置显式线/6ae85f56 缺 1 项：`desktop/search_providers.py`
+- 2026-11-13 20:04 `425d9df3` 文档引用复核线/6ae85f56 缺 1 项：`docs/PRD.md`
+- 2026-11-13 20:04 `0595886c` 文档引用复核线/6ae85f56 缺 1 项：`docs/redundancy-register.md`
+- 2026-11-13 20:04 `44ce3221` 文档引用复核线/6ae85f56 缺 1 项：`docs/known-red-register.md`
+- 2026-11-13 20:04 `6f9bfd37` 文档引用复核线/6ae85f56 缺 1 项：`docs/settings-inventory.md`
+- 2026-11-13 20:04 `221e89f7` 文档引用复核线/6ae85f56 缺 1 项：`docs/parameter-unification.md`
+- 2026-11-13 19:53 `ae98d46e` 锚点机制线 缺 4 项：`docs/COMMIT-INCIDENT-CARD.md`、`scripts/check_card_links.py`、`scripts/check_generated_artifacts.py` 等 4 项
+- 2026-11-13 19:42 `c868657c` Qt翻译与设置显式线/6ae85f56 缺 1 项：`tests/test_settings_schema.py`
+- 2026-11-13 19:38 `74fa734d` Qt翻译与设置显式线/6ae85f56 缺 1 项：`desktop/settings_panel.py`
+- 2026-11-13 19:38 `47640254` Qt翻译与设置显式线/6ae85f56 缺 1 项：`desktop/settings.py`
+- 2026-11-13 19:38 `cae1a6fe` Qt翻译与设置显式线/6ae85f56 缺 1 项：`tests/test_desktop_i18n.py`
+- 2026-11-13 19:37 `212dd880` Qt翻译与设置显式线/6ae85f56 缺 1 项：`desktop/main.py`
+- 2026-11-13 19:37 `c4a2f345` Qt翻译与设置显式线/6ae85f56 缺 1 项：`desktop/l10n.py`
+- 2026-11-13 19:24 `ede850c7` 用户输入静默线/6ae85f56 缺 2 项：`scripts/safe_commit.py`、`tests/test_safe_commit_exclude.py`
+- 2026-11-13 19:22 `608f61c7` 用户输入静默线/6ae85f56 缺 2 项：`scripts/safe_commit.py`、`tests/test_safe_commit_exclude.py`
+- 2026-11-13 19:17 `51218982` 用户输入静默线/6ae85f56 缺 2 项：`desktop/control_panel.py`、`tests/test_control_panel_freq_ambiguity.py`
+- 2026-11-13 19:01 `c3a46d8f` 用户输入静默线/6ae85f56 缺 2 项：`desktop/device_panel.py`、`tests/test_device_panel_preview_parse.py`
+- 2026-11-13 19:01 `d754dcad` 用户输入静默线/6ae85f56 缺 2 项：`desktop/bookmark_panel.py`、`tests/test_bookmark_panel_safety.py`
+- 2026-11-13 19:00 `7c30eac5` 用户输入静默线/6ae85f56 缺 2 项：`desktop/weather_panel.py`、`tests/test_weather_decode_params.py`
+- 2026-11-13 07:30 `9a2c744c` A11文档证据线/6ae85f56、守卫账本线 缺 2 项：`docs/PRD.md`、`docs/pending-patches/2026-11-13-known-red-register-repair.md`
+- 2026-11-13 07:01 `d52b8db1` 残留收口线/6ae85f56 缺 1 项：`docs/known-red-register.md`
+- 2026-11-13 07:00 `d0881d80` 残留收口线/6ae85f56 缺 4 项：`scripts/check_claim_coordination.py`、`scripts/hooks/pre-commit`、`tests/test_claim_coordination.py` 等 4 项
+- 2026-11-13 06:58 `42df5fe3` 公理棘轮线 缺 1 项：`scripts/axioms.py`
+- 2026-11-13 06:55 `f549f78a` A11文档证据线/6ae85f56 缺 1 项：`docs/learn/rewrite-sha-map.md`
+- 2026-11-13 06:51 `5f458ce6` 判据存量收口/6ae85f56 缺 1 项：`tests/test_frequency_manager_v2.py`
+- 2026-11-13 06:51 `bce4eed5` 判据存量收口/6ae85f56 缺 1 项：`desktop/bookmark_panel.py`
+- 2026-11-13 06:51 `b8479fc5` 判据存量收口/6ae85f56 缺 1 项：`desktop/command_palette.py`
+- 2026-11-13 06:50 `c57d055e` 判据存量收口/6ae85f56 缺 1 项：`mbdsdr_ai/workflow_recorder.py`
+- 2026-11-13 06:50 `0974f8f2` 判据存量收口/6ae85f56 缺 1 项：`mbdsdr_ai/self_learning.py`
+- 2026-11-13 06:50 `df64d80c` 判据存量收口/6ae85f56 缺 1 项：`mbdsdr_ai/frequency_manager_v2.py`
+- 2026-11-13 06:50 `dd6bbcf5` 判据存量收口/6ae85f56 缺 1 项：`mbdsdr_ai/conversation.py`
+- 2026-11-13 06:50 `aaed7fa4` 判据存量收口/6ae85f56 缺 1 项：`mbdsdr_ai/device_manager.py`
+- 2026-11-13 06:50 `12da8251` 判据存量收口/6ae85f56 缺 1 项：`mbdsdr_ai/device_owner.py`
+- 2026-11-13 06:50 `53bcb34d` 判据存量收口/6ae85f56 缺 1 项：`docs/redundancy-register.md`
+- 2026-11-13 06:45 `0f490801` 守卫账本线 缺 1 项：`docs/pending-patches/2026-11-13-known-red-register-repair.md`
+- 2026-11-13 06:44 `b4e06787` 守卫账本线 缺 1 项：`docs/known-red-register.md`
+- 2026-11-13 06:43 `ac18ebe7` 公理棘轮线 缺 1 项：`tools/axioms/model.py`
+- 2026-11-13 06:40 `eb95198d` 守卫账本线 缺 3 项：`desktop/requirements.txt`、`pyproject.toml`、`scripts/release_manifest.py`
+- 2026-11-13 06:38 `835c2e12` 守卫账本线 缺 1 项：`desktop/MBDSDR.spec`
+- 2026-11-13 06:24 `696cb4c5` 守卫账本线 缺 1 项：`docs/pending-patches/2026-11-13-known-red-register-repair.md`
+- 2026-11-13 06:24 `50ff13c3` 守卫账本线 缺 1 项：`scripts/check_banner_coverage.py`
+- 2026-11-13 06:24 `fdf609fe` 守卫账本线 缺 2 项：`docs/evidence-standard.md`、`scripts/audit_evidence.py`
+- 2026-11-13 06:23 `39e800bf` 守卫账本线 缺 1 项：`desktop/main.py`
+- 2026-11-13 06:23 `6fcb421b` 守卫账本线 缺 2 项：`desktop/MBDSDR.spec`、`scripts/check_dist_head_parity.py`
+- 2026-11-13 06:20 `436ea42a` 残留收口线/6ae85f56 缺 1 项：`docs/redundancy-register.md`
+- 2026-11-13 06:20 `7c159f1a` 残留收口线/6ae85f56 缺 2 项：`scripts/file_claim.py`、`tests/test_file_claim.py`
+- 2026-11-13 06:18 `3bfca3bf` 公理棘轮线 缺 5 项：`docs/axioms-waivers.json`、`docs/axioms.md`、`tools/axioms/checks.py` 等 5 项
+- 2026-11-13 06:05 `cfcc9878` A13身份线/6ae85f56 缺 3 项：`scripts/diagnostics_scan.py`、`scripts/secret_scan.py`、`tests/test_diagnostics_scan.py`
+- 2026-11-13 06:04 `50f125d8` 合规入口线/6ae85f56 缺 1 项：`scripts/release_check.py`
+- 2026-11-13 06:02 `7d2c6a65` 合规入口线/6ae85f56 缺 1 项：`docs/code-guards.md`
+- 2026-11-13 06:01 `98b8e5f1` 守卫账本线 缺 1 项：`docs/pending-patches/2026-11-13-code-guards-red-accounting.md`
+- 2026-11-13 06:01 `b6b2bb34` 守卫账本线 缺 14 项：`docs/claim-waivers.md`、`docs/constellations.md`、`docs/hardcoded-parameters.md` 等 14 项
+- 2026-11-13 06:00 `306760e9` 残留收口线/6ae85f56 缺 1 项：`docs/known-red-register.md`
+- 2026-11-13 06:00 `9da4930e` 残留收口线/6ae85f56 缺 2 项：`scripts/check_claim_coordination.py`、`tests/test_claim_coordination.py`
+- 2026-11-13 05:58 `7d10a1fb` 守卫账本线 缺 1 项：`docs/pending-patches/2026-11-13-code-guards-red-accounting.md`
+- 2026-11-13 05:52 `cc2f366d` 守卫账本线 缺 1 项：`docs/pending-patches/2026-11-06-handoff-main-window-audit-p0p1.md`
+- 2026-11-13 05:52 `cda691ae` 守卫账本线 缺 10 项：`docs/claim-waivers.md`、`docs/constellations.md`、`docs/hardcoded-parameters.md` 等 10 项
+- 2026-11-13 05:52 `cf686a06` 守卫账本线 缺 5 项：`docs/learn/capability-map.md`、`docs/learn/decoder-capability-matrix.md`、`docs/learn/gqrx_real.md` 等 5 项
+- 2026-11-13 05:51 `8d7447c8` 残留收口线/6ae85f56 缺 1 项：`tests/test_claims_guard.py`
+- 2026-11-13 05:50 `13077cb5` 合规入口线/6ae85f56 缺 1 项：`docs/code-guards.md`
+- 2026-11-13 05:49 `4ad6f6e5` 残留收口线/6ae85f56 缺 1 项：`tests/test_claims_guard.py`
+- 2026-11-13 05:49 `f17f582c` 残留收口线/6ae85f56 缺 1 项：`docs/known-red-register.md`
+- 2026-11-13 05:49 `f3164b72` A13身份线/6ae85f56 缺 2 项：`scripts/secret_scan.py`、`tests/test_secret_scan.py`
+- 2026-11-13 05:48 `0e03d375` 守卫账本线 缺 2 项：`docs/pending-patches/2026-11-06-limitation-adsb-1090-fc0012.md`、`docs/pending-patches/2026-11-11-tooltip-guard-dynamic-coverage.md`
+- 2026-11-13 05:47 `fc4bae83` 守卫账本线 缺 3 项：`docs/limitations-register.md`、`docs/python-crash-20261105.md`、`docs/real_hw_acceptance_20261103.md`
+- 2026-11-13 05:47 `0b8bb9c1` 守卫账本线 缺 2 项：`docs/research/2026-11-12-duplicate-implementation-audit.md`、`docs/research/2026-11-12-feature-module-disposition.md`
+- 2026-11-13 05:47 `8a7ee181` 守卫账本线 缺 20 项：`docs/research/2026-11-11-copy-claims.md`、`docs/research/2026-11-11-gap-copy.md`、`docs/research/2026-11-11-gap-decoders.md` 等 20 项
+- 2026-11-13 05:47 `58f4948c` 残留收口线/6ae85f56 缺 2 项：`scripts/check_claim_coordination.py`、`tests/test_claim_coordination.py`
+- 2026-11-13 05:46 `8fdab8dd` 守卫账本线 缺 19 项：`docs/audit_r2/26_new_spacetime.md`、`docs/audit_r2/28_astronomy_gnss.md`、`docs/audit_r2/29_time_sync_skyview.md` 等 19 项
+- 2026-11-13 05:46 `61b5e019` 守卫账本线 缺 20 项：`docs/audit_r2/01_dsp_core.md`、`docs/audit_r2/02_analog_demod.md`、`docs/audit_r2/03_digital_modes.md` 等 20 项
+- 2026-11-13 05:45 `50489af6` 守卫账本线 缺 16 项：`docs/learn/phase7/Q2-spacetime.md`、`docs/learn/phase7/paper/CHANGES.md`、`docs/learn/phase7/paper/P2-submission-check.md` 等 16 项
+- 2026-11-13 05:45 `8548c8cc` 守卫账本线 缺 20 项：`docs/learn/phase63/instrument-onramping.md`、`docs/learn/phase63/lrpt-step1.md`、`docs/learn/phase63/lrpt-step2.md` 等 20 项
+- 2026-11-13 05:44 `68f22bd8` 守卫账本线 缺 20 项：`docs/learn/phase60/notes.md`、`docs/learn/phase63/a2ui-v1-delta.md`、`docs/learn/phase63/agent-architecture-benchmark.md` 等 20 项
+- 2026-11-13 05:44 `a58f83dd` 守卫账本线 缺 20 项：`docs/learn/phase39/capability-matrix.md`、`docs/learn/phase4/audits/B2-experiment-pipeline.md`、`docs/learn/phase4/audits/B4-gap-learning.md` 等 20 项
+- 2026-11-13 05:44 `9b17ddd3` 守卫账本线 缺 20 项：`docs/learn/phase14/SSDV_SSTV_SPEC.md`、`docs/learn/phase14/_PHASE14_SPEC.md`、`docs/learn/phase16/sdrpp-source.md` 等 20 项
+- 2026-11-13 05:43 `de402595` 守卫账本线 缺 20 项：`docs/learn/agent-onboarding-runbook.md`、`docs/learn/cpp-tool-ui-reverse-audit.md`、`docs/learn/gpredict.md` 等 20 项
+- 2026-11-13 05:39 `7e3ebf7f` 残留收口线/6ae85f56 缺 1 项：`docs/reference-mechanisms.md`
+- 2026-11-13 05:38 `f7c2da6c` 残留收口线/6ae85f56 缺 1 项：`docs/packaging.md`
+- 2026-11-13 05:38 `8862b803` 残留收口线/6ae85f56 缺 1 项：`docs/design-basis.md`
+- 2026-11-13 05:38 `a3c8fbb4` 守卫账本线 缺 1 项：`docs/pending-patches/2026-11-13-k23-k24-layering-and-verdicts.md`
+- 2026-11-13 05:37 `daaaa4a7` 守卫账本线 缺 1 项：`docs/known-red-register.md`
+- 2026-11-13 05:34 `68760638` trae-a13-576 缺 2 项：`scripts/file_claim.py`、`tests/test_file_claim.py`
+
+> 这份清单是**缺陷产物**，不是违规名单：一部分缺行是旧闸「只告警」造成的；
+> 另一部分是「为了让闸绿而制造失真」造成的——见下条。
+
+**「工具逼人作弊」的两种形态（比任何一条具体红都值得防）**：
+
+1. **挪行位置改时间序**：三行相邻登记里只有一行是自己的，`--exclude-hunk` 原只认
+   整 hunk，于是有人把自己的行挪到别处让 diff 断开——提交干净了，台账时间序
+   却被打乱。治法：`--exclude-hunk` 支持按行（`2026-11-13` 落地），并且**不许**
+   用挪行解决。
+2. **临时自登记行**：提交 `docs/COORDINATION.md` 自身时被要求先给自己写一行、
+   把它落进 `--exclude-hunk` 的排除范围、提交后再从工作区删掉，才通过。
+   这条在 `147212f5` 之后实际发生过。根因是「登记面自身豁免」只写进了
+   「60 分钟释放窗口」分支，活跃 claim 分支漏了（可能性②，非回归、非单分支
+   特例）。治法：两条分支共用同一个 `self_key` 排除，见
+   `scripts/check_claim_coordination.py` 的「登记面自身豁免」小节与
+   `tests/test_coordination_gate_blocking.py::test_coordination_doc_itself_needs_no_row`。
+   反证：拿掉 `p != self_key`，同一场景闸从退出码 0 变 3。
+
+判据：**任何要求人先制造一个不真实状态才能通过的闸，都比松的闸更糟**——它教人
+绕过，而绕过的人还觉得自己在守规矩。遇到这类拒绝，先改闸，不要改数据。
 
 ### 6.10 历史改写事件（主分支被 reset 改写；按批次登记，跨日后继续累计）
 
