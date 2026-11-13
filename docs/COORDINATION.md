@@ -1945,6 +1945,13 @@ No supported devices found），GNSS+SDR 同开复验没做成；离线那次
 | `scripts/check_banner_coverage.py` | 守卫账本线（目的未声明） | 2026-11-13 06:23 | 未声明 |
 | `desktop/sat_track_panel.py` | K20sat收口线/6ae85f56（修 sat_track_panel.py:400 动态 tooltip 未登记导致 test_every_passthrough_tooltip_is_registered 红） | 2026-11-13 06:23 | 未声明 |
 | `docs/COORDINATION.md` | 判据存量收口/6ae85f56（本表 §6.1 占用行） | 2026-11-13 06:41 | 同笔 |
+| `desktop/weather_panel.py` | 用户输入静默线/6ae85f56（`start_decode` 裸 `float` 解析失败静默逃出槽函数：解析失败弹框 + 状态行写明「未开始解码」，不再亮进度条） | 2026-11-13 18:58 | 本笔 |
+| `tests/test_weather_decode_params.py` | 用户输入静默线/6ae85f56（空/带单位/非正/合法 4 条；反证=回退到 HEAD 时 3 红） | 2026-11-13 18:58 | 本笔 |
+| `desktop/bookmark_panel.py` | 用户输入静默线/6ae85f56（空名称不落库并保留原名；频率超范围提示重输，不靠对话框静默夹到 6000） | 2026-11-13 18:58 | 本笔 |
+| `tests/test_bookmark_panel_safety.py` | 用户输入静默线/6ae85f56（空名称/超范围 2 条；反证=回退到 HEAD 时 2 红） | 2026-11-13 18:58 | 本笔 |
+| `desktop/device_panel.py` | 用户输入静默线/6ae85f56（store 预览复用 `parse_sample_rate`，不再自造只认纯 Hz 的第二份解析；原持有者在途 hunk 按 §6.1.4 排除，见下方接管记录） | 2026-11-13 18:58 | 本笔 |
+| `tests/test_device_panel_preview_parse.py` | 用户输入静默线/6ae85f56（2.048M / 纯 Hz / 不可解析 3 条；反证=改回裸 `float` 时 1 红） | 2026-11-13 18:58 | 本笔 |
+| `docs/COORDINATION.md` | 用户输入静默线/6ae85f56（本批 §6.1 行 + §6.1.4 接管记录） | 2026-11-13 18:58 | 本笔 |
 | **真机（USB SDR）** | 跑 `hw_acceptance/`、七环、`capture_throughput.py` 的线（资源独占） | 占用时段 | — |
 
 > 上表各行均由 `claim` 台账推导：owner 原文与 `acquired_at` 直接取自台账，
@@ -2424,6 +2431,38 @@ No supported devices found），GNSS+SDR 同开复验没做成；离线那次
 - 引用：接管提交即包含本记录的那次提交（`refactor(d1): mbdsdr_ai 去掉对 desktop/Qt 的反向依赖`）
 - 回退：`git checkout 09a9199a3cd485bb367c2f66bf280fdd97e757d9 -- mbdsdr_ai/tests/test_corruption_evidence.py`
   或 `git revert <接管提交>`
+
+### 接管记录：desktop/device_panel.py
+
+- 接管人 / 会话：用户输入静默线 / 6ae85f56a16a76df1598024e
+- 接管时间 / HEAD：2026-11-13 18:58 / `b0776406`
+- 原持有者：设备会话锁线
+- 原 claim 证据：acquired_at=2026-11-13 06:46:40 ttl=60min 心跳=2026-11-13 06:46:40，
+  接管时已过期 **+671.9 分钟**（取 claim 时实测），满足 ≥30 分钟
+- 原 owner 最后活跃证据（原始输出）：
+  - `file_claim.py status desktop/device_panel.py`：
+    `owner=设备会话锁线 held=730.7/60.0min EXPIRED(+670.7min) pid=39716
+    id=token renew=0 since=2026-11-13 06:46:40`
+  - `git log -1 -- desktop/device_panel.py`：`e6d5e269 2026-11-13 07:12:12
+    fix(sdr): 会话占用期间的参数写入改为拒绝并给出解除办法`；此后约 11 小时无新提交
+  - `git status --porcelain -- desktop/device_panel.py`：`MM`（staged+worktree，
+    3 处 in-flight hunk：`set_connected(initial=)` 签名/说明/`begin_session` 调用）
+  - `Get-Process -Id 39716`：无输出（进程已退出）；文件 mtime 2026-11-13 07:17:11，
+    claim 心跳后 30 分钟再无一笔写入
+- 凭什么判定「已放弃」而不是「在忙」：
+  过期 ≥ 30min（+671.9）✅；进程 39716 已不存在 ✅；07:12 提交后无新提交 ✅；
+  **不满足**「无在途改动」一条（有上述 3 处 staged hunk），因此按 §6.1.4 第 3 条
+  处理：原改动原样保留、逐 hunk 排除，不并入本笔接管提交——接管范围仅
+  `_push_request_from_editors` 一处。
+- 本次改动范围：`desktop/device_panel.py` `_push_request_from_editors()` 内
+  采样率解析改为复用模块级 `parse_sample_rate`（3 行注释 + 1 行代码），
+  另加 `tests/test_device_panel_preview_parse.py`；不含原 owner 任何 hunk。
+- 保留原改动的证明：接管前该路径 worktree blob `3551b5b4`
+  （= 原 owner 改动后的内容，未含本次修复）；本笔提交用
+  `--exclude-hunk desktop/device_panel.py:961-962 / 970-973 / 999-999` 把
+  原 owner 三处 hunk 从私有 index 反向撤掉，工作树保持原样。
+- 引用：本文件本次 §6.1 行所属提交；测试 `tests/test_device_panel_preview_parse.py`
+- 回退：`git revert <接管提交>`（原 owner 的 hunk 从未进入该提交，无需恢复）
 
 ### 等待项：AI SDR 会话显式注入（2026-11-12）
 
