@@ -166,6 +166,19 @@ hunk，于是有人把自己的行挪到别处让 diff 断开——提交干净�
 * 含删除行的 hunk 只能整块声明（新侧行号选不中 ``-`` 行）；跨 hunk 边界、
   行号落空、blob 逐字对不上，一律拒绝。
 
+行号是坐标，坐标只在它被计算的那一刻有效（2026-11-13，``ed3c09e5``）
+-------------------------------------------------------------------
+
+``ed3c09e5`` 的 ``--exclude-hunk`` 行号是 20:58 按当时工作区算的（hunk
+``+2100,6``）；21:02 另一条线在同一位置追加 4 行，hunk 变成 ``+2100,10``；
+排掉 2100-2103 后，2104-2105 与新出现的 2106-2109 被一起带走——其中
+2106-2109 是别人的。根因不是排除算法，是**没有 ``--declare``**：⑰ 的基线
+退化成「本次启动时刻的工作区」，那 4 行被算进基线，程序一个字都没报。
+
+现在：**``--exclude-hunk`` / 行范围必须与 ``--declare`` 一起用**。找不到
+同一文件集的声明快照就直接拒绝（退出码 7，不重试），不再拿「本次启动时刻」
+冒充声明——行号可以算得很准，但算完到提交之间世界会变。
+
 用法::
 
     python scripts/safe_commit.py --files a.py b.md --message-file msg.txt
@@ -179,7 +192,8 @@ hunk，于是有人把自己的行挪到别处让 diff 断开——提交干净�
 
 退出码：0 成功；1 前置校验失败（未提交）；2 重试耗尽（未提交）；3 提交后复核失败
 （已提交，需按事故卡处理）；4 声明后内容变化被拒（未提交，不重试）；
-5 §6.1 缺行被拒（未提交，不重试）；6 消息源在提交前被改写（未提交，不重试）。
+5 §6.1 缺行被拒（未提交，不重试）；6 消息源在提交前被改写（未提交，不重试）；
+7 使用了 ``--exclude-hunk`` 却没有声明快照（未提交，不重试）。
 """
 from __future__ import annotations
 
@@ -1138,9 +1152,14 @@ def _coordination_step(env: dict, files: list[str], doc_rel: str) -> tuple[int, 
                   "（pre-commit 侧仍会按暂存区拦）", []
 
     staged = {cc._norm(f) for f in files}
+    # 登记面自身的规范化键：与闸 main() 里 ``self_key`` 同一判据（同一个 _norm）。
+    # 闸把它从 pairs 和 rest 里都排除；只排 rest 会让「文档被别人持有时，
+    # 本笔连文档一起提交」变成给登记面自己要登记行——死循环。
+    self_key = cc._norm(doc_rel)
     active = cc.active_claims_for_paths(sorted(staged), marker_dir=LOCKS_DIR / "claims")
-    pairs = [(path, owner) for path, owner in active if path in staged]
-    rest = staged - {path for path, _owner in pairs} - {cc._norm(doc_rel)}
+    pairs = [(path, owner) for path, owner in active
+             if path in staged and path != self_key]
+    rest = staged - {path for path, _owner in pairs} - {self_key}
     owner = cc.resolve_owner(ROOT) if rest else ""
     recent = (cc.recently_released_claims(
         LOCKS_DIR / "claims.json", sorted(rest), owner) if rest else [])
@@ -1529,6 +1548,21 @@ def main(argv: list[str] | None = None) -> int:
         print(f"[declare] 无预先声明快照：以本次启动 {_iso(declared_at)} 的工作区为基线"
               "（只覆盖本次运行；写入后先跑 --declare 才能拦住「释放 claim → 提交」这段漂移）")
 
+    # 行号是坐标，坐标只在它被计算的那一刻有效：``--exclude-hunk`` 的行号是
+    # 按某个时刻的 hunk 算的，没有声明快照就只能拿「本次启动」当基线，
+    # 别人后来追加的行会被静默算进基线（``ed3c09e5``）。所以必须成对使用。
+    if exclusions and declaration_file is None:
+        print(
+            "拒绝提交：--exclude-hunk 必须配 --declare。\n"
+            "  行号是坐标，坐标只在它被计算的那一刻有效：20:58 算出的 hunk\n"
+            "  +2100,6 到 21:02 已被别线追加的 4 行顶成 +2100,10（ed3c09e5），\n"
+            "  排掉 2100-2103 后把 2106-2109 一起带走了。没有声明快照时，\n"
+            "  ⑰ 的基线退化成「本次启动时刻的工作区」，新行被算进基线，程序一个字都不报。\n"
+            "  先跑声明（在写入/排除之前）：\n"
+            f"    python scripts/safe_commit.py --files {' '.join(files)} --declare"
+        )
+        return 7
+
     index = _index_path()
     keep_copy = False
     print(f"[index] 会话私有 index：{index}")
@@ -1547,7 +1581,7 @@ def main(argv: list[str] | None = None) -> int:
             if code == 0:
                 _drop_declaration(declaration_file)
                 return 0
-            if code in (3, 4, 5, 6):
+            if code in (3, 4, 5, 6, 7):
                 keep_copy = code in (3, 6)
                 return code
         print(f"重试 {args.retries} 次仍未提交，已放弃（工作区与 index 未改动）")

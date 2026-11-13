@@ -215,6 +215,44 @@ def test_row_already_staged_is_left_alone(tmp_path):
     assert committed.count(f"`{CODE}`") == rows_before, "不许重复插行"
 
 
+def test_coordination_doc_claim_never_demands_its_own_row(tmp_path):
+    """登记面被别人持有时，本笔连文档一起提交不该给「登记面自己」要行。
+
+    真实现场：清账线正持有 ``docs/COORDINATION.md`` 改结构；业务线补完自己
+    那行后想把文档一起带上，不能因为「文档自身有他人 claim」被 §6.1 反复拒。
+    反证：把 ``_coordination_step`` 里 pairs 的 ``path != self_key`` 去掉，
+    本用例会以退出码 5 转红。
+    """
+    locks = tmp_path / "locks"
+    repo = _repo(tmp_path)
+    assert _claim(repo, locks, OWNER).returncode == 0
+    (repo / CODE).write_text("def foo():\n    return 2\n", encoding="utf-8")
+
+    command = _printable_command(_safe(repo, locks, tmp_path).stdout)
+    assert command
+    assert _run_command(repo, locks, command).returncode == 0
+
+    claimed = subprocess.run(
+        [sys.executable, str(CLAIM), "claim", DOC, "--owner", FOREIGN],
+        cwd=str(repo), env=_env(repo, locks), capture_output=True,
+        text=True, encoding="utf-8", errors="replace",
+    )
+    assert claimed.returncode == 0, claimed.stdout + claimed.stderr
+
+    msg = tmp_path / "msg.txt"
+    msg.write_text("test: 文档一起带\n", encoding="utf-8")
+    proc = subprocess.run(
+        [sys.executable, str(SAFE), "--files", CODE, DOC,
+         "--message-file", str(msg)],
+        cwd=str(repo), env=_env(repo, locks, OWNER),
+        capture_output=True, text=True, encoding="utf-8", errors="replace",
+    )
+    out = proc.stdout + proc.stderr
+    assert proc.returncode == 0, out
+    committed = _git(repo, "show", f"HEAD:{DOC}").stdout
+    assert f"`{CODE}`" in committed and OWNER in committed, committed
+
+
 def test_insert_rows_tolerates_prose_before_table():
     """§6.1 标题与表格之间允许说明文字（真实文档就是这样）。
 

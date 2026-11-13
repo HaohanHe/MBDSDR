@@ -53,27 +53,42 @@ def _init_repo(tmp_path, lines):
     return repo
 
 
-def _run_safe(repo, tmp_path, *extra, message="test: safe commit\n"):
-    msg = tmp_path / "msg.txt"
-    msg.write_text(message, encoding="utf-8")
+def _env(repo, tmp_path):
     env = os.environ.copy()
     env.pop("GIT_INDEX_FILE", None)
     env["MBDSDR_REPO_ROOT"] = str(repo)
+    # 声明快照与私有 index 都落在临时目录：测试不往真实 .locks 里写
+    env["MBDSDR_LOCKS_DIR"] = str(tmp_path / "locks")
+    env["MBDSDR_SESSION_ID"] = "exclude-test"
+    return env
+
+
+def _declare(repo, tmp_path):
+    """先钉声明快照：--exclude-hunk 的行号只在声明那一刻有效（⑳ ed3c09e5）。"""
+    return subprocess.run(
+        [sys.executable, str(SAFE), "--files", "doc.md", "--declare"],
+        cwd=str(repo), env=_env(repo, tmp_path), capture_output=True, text=True,
+        encoding="utf-8", errors="replace",
+    )
+
+
+def _run_safe(repo, tmp_path, *extra, message="test: safe commit\n"):
+    msg = tmp_path / "msg.txt"
+    msg.write_text(message, encoding="utf-8")
     return subprocess.run(
         [sys.executable, str(SAFE), "--files", "doc.md",
          "--message-file", str(msg), *extra],
-        cwd=str(repo), env=env, capture_output=True, text=True,
+        cwd=str(repo), env=_env(repo, tmp_path), capture_output=True, text=True,
         encoding="utf-8", errors="replace",
     )
 
 
 def test_exclude_hunk_keeps_other_change_out(tmp_path):
     repo = _make_repo(tmp_path)
+    assert _declare(repo, tmp_path).returncode == 0
     msg = tmp_path / "msg.txt"
     msg.write_text("test: exclude other hunk\n", encoding="utf-8")
-    env = os.environ.copy()
-    env.pop("GIT_INDEX_FILE", None)
-    env["MBDSDR_REPO_ROOT"] = str(repo)
+    env = _env(repo, tmp_path)
 
     proc = subprocess.run(
         [
@@ -114,11 +129,10 @@ def test_exclude_pure_deletion_hunk(tmp_path):
     lines[1] = "line2 mine"
     del lines[4]                       # 别线：删掉第 5 行 → @@ … +4,0 @@
     (repo / "doc.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    assert _declare(repo, tmp_path).returncode == 0
     msg = tmp_path / "msg.txt"
     msg.write_text("test: exclude pure deletion\n", encoding="utf-8")
-    env = os.environ.copy()
-    env.pop("GIT_INDEX_FILE", None)
-    env["MBDSDR_REPO_ROOT"] = str(repo)
+    env = _env(repo, tmp_path)
 
     proc = subprocess.run(
         [
@@ -150,11 +164,10 @@ def test_exclude_range_must_cover_whole_hunk(tmp_path):
     lines = (repo / "doc.md").read_text(encoding="utf-8").splitlines()
     lines[5] = "line6 other2"
     (repo / "doc.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    assert _declare(repo, tmp_path).returncode == 0
     msg = tmp_path / "msg.txt"
     msg.write_text("test: bad exclusion\n", encoding="utf-8")
-    env = os.environ.copy()
-    env.pop("GIT_INDEX_FILE", None)
-    env["MBDSDR_REPO_ROOT"] = str(repo)
+    env = _env(repo, tmp_path)
     before = _git(repo, "rev-parse", "HEAD").stdout.strip()
 
     proc = subprocess.run(
@@ -202,12 +215,11 @@ def test_multiple_exclusion_hunks_survive_line_count_shift(tmp_path):
     lines[4:5] = ["line5", "other5a", "other5b"]      # 别线：+5,2（行数变多）
     lines[10] = "line9 other"                          # 别线：+11,1
     (repo / "doc.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    assert _declare(repo, tmp_path).returncode == 0
 
     msg = tmp_path / "msg.txt"
     msg.write_text("test: multi-hunk exclusion\n", encoding="utf-8")
-    env = os.environ.copy()
-    env.pop("GIT_INDEX_FILE", None)
-    env["MBDSDR_REPO_ROOT"] = str(repo)
+    env = _env(repo, tmp_path)
 
     proc = subprocess.run(
         [
@@ -256,9 +268,7 @@ def test_repeated_files_flag_commits_every_declared_file(tmp_path):
 
     msg = tmp_path / "msg.txt"
     msg.write_text("test: repeated --files\n", encoding="utf-8")
-    env = os.environ.copy()
-    env.pop("GIT_INDEX_FILE", None)
-    env["MBDSDR_REPO_ROOT"] = str(repo)
+    env = _env(repo, tmp_path)
 
     proc = subprocess.run(
         [
@@ -293,6 +303,7 @@ def test_exclude_three_hunks_in_one_call(tmp_path):
     new[8:8] = ["other8a", "other8b"]            # 别线 B：@@ +9,2（行数 +2）
     new[13] = "line12 other"                     # 别线 C：@@ +14,1（被 +2 顶到 14）
     (repo / "doc.md").write_text("\n".join(new) + "\n", encoding="utf-8")
+    assert _declare(repo, tmp_path).returncode == 0
 
     proc = _run_safe(
         repo, tmp_path,
@@ -391,6 +402,7 @@ def test_identical_hunks_excluded_by_position_not_content(tmp_path):
     new[8] = "DUP"
     (repo / "doc.md").write_text("\n".join(new) + "\n", encoding="utf-8")
     _git(repo, "add", "doc.md", check=True)
+    assert _declare(repo, tmp_path).returncode == 0
 
     # 先证明这两个 hunk 的内容真的逐字相同，否则本用例证明不了「靠位置」
     bodies, cur = [], None
@@ -413,4 +425,45 @@ def test_identical_hunks_excluded_by_position_not_content(tmp_path):
                          "dup", "a10", "a11", "a12"], committed
     tree = (repo / "doc.md").read_text(encoding="utf-8").splitlines()
     assert tree[1] == "DUP" and tree[8] == "DUP", "工作树不能被动"
+
+
+def test_exclude_hunk_without_declaration_is_refused(tmp_path):
+    """反证：没有 ``--declare`` 就使用 ``--exclude-hunk`` → 退出码 7，不提交。
+
+    ``ed3c09e5``：行号按 20:58 的 hunk（``+2100,6``）算，21:02 别线在同一位置
+    追加 4 行后 hunk 变成 ``+2100,10``；没有声明快照时基线退化成「本次启动
+    时刻的工作区」，新出现的行被算进基线，程序一个字都没报。
+    """
+    repo = _make_repo(tmp_path)
+    before = _git(repo, "rev-parse", "HEAD").stdout.strip()
+
+    proc = _run_safe(repo, tmp_path, "--exclude-hunk", "doc.md:5-5")
+    out = proc.stdout + proc.stderr
+    assert proc.returncode == 7, out
+    assert "必须配 --declare" in out, out
+    assert "行号是坐标" in out, out
+    assert _git(repo, "rev-parse", "HEAD").stdout.strip() == before, "拒绝时不许提交"
+
+
+def test_foreign_append_after_declaration_with_exclusion_is_drift(tmp_path):
+    """声明后别线在同一 hunk 追加行：排除必须判漂移（退出码 4），不能带走。
+
+    这是 ``ed3c09e5`` 的正向复现：声明时 hunk 是 ``+5,1``，之后同一位置多了
+    4 行（``+5,5``）。范围按新 hunk 完整覆盖 5-9，所以问题只剩「声明之后变了」。
+    """
+    repo = _make_repo(tmp_path)
+    assert _declare(repo, tmp_path).returncode == 0
+
+    lines = (repo / "doc.md").read_text(encoding="utf-8").splitlines()
+    lines[5:5] = ["foreign-1", "foreign-2", "foreign-3", "foreign-4"]
+    (repo / "doc.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+    before = _git(repo, "rev-parse", "HEAD").stdout.strip()
+    proc = _run_safe(repo, tmp_path, "--exclude-hunk", "doc.md:5-9")
+    out = proc.stdout + proc.stderr
+    assert proc.returncode == 4, out
+    assert "声明之后有内容变化" in out, out
+    for line in ("foreign-1", "foreign-2", "foreign-3", "foreign-4"):
+        assert f"+ 现在第 {lines.index(line) + 1} 行：{line}" in out, out
+    assert _git(repo, "rev-parse", "HEAD").stdout.strip() == before, "拒绝时不许提交"
 
