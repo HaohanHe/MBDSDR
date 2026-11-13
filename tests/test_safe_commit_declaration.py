@@ -408,10 +408,11 @@ def test_message_is_stored_verbatim(tmp_path):
     assert stored.replace("\r\n", "\n") == text, repr(stored)
 
 
-def _safe_files(repo, locks, tmp_path, files, *extra, owner="进程A线"):
+def _safe_files(repo, locks, tmp_path, files, *extra, owner="进程A线",
+                message="test: 多文件声明\n"):
     """声明任意文件清单跑一次 safe_commit（``_safe`` 只声明 doc.md）。"""
     msg = tmp_path / "msg.txt"
-    msg.write_text("test: 多文件声明\n", encoding="utf-8")
+    msg.write_text(message, encoding="utf-8")
     return subprocess.run(
         [sys.executable, str(SAFE), "--files", *files,
          "--message-file", str(msg), *extra],
@@ -484,3 +485,30 @@ def test_claim_hint_appears_only_without_claim_record(tmp_path):
     out = proc.stdout + proc.stderr
     assert proc.returncode == 0, out
     assert "[claim]" not in out, out
+
+
+def test_message_coverage_hint_is_visible_but_never_blocking(tmp_path):
+    """说明里没提的文件要被看见：提及不打印，未提及打印，两边都 rc=0。
+
+    提示只按 basename 做子串匹配，不要求逐文件罗列——它不是清单作业，只是让
+    「内容都对、说明漏了」这件事有出口（`052828d1` / `1004608f` 两次同形）。
+    """
+    locks = tmp_path / "locks"
+    repo = _repo(tmp_path, [f"line{i}" for i in range(1, 7)])
+    lines = [f"line{i}" for i in range(1, 7)]
+    lines[1] = "line2 mine"
+    _write(repo, lines)
+
+    proc = _safe_files(repo, locks, tmp_path, [DOC],
+                       message="test: 只改 doc.md 第二行\n")
+    out = proc.stdout + proc.stderr
+    assert proc.returncode == 0, out
+    # [message] 前缀另有「提交信息逐字校验一致」一行，这里只判「未提及」那一条
+    assert "说明未提及" not in out, out
+
+    lines[2] = "line3 mine"
+    _write(repo, lines)
+    proc = _safe_files(repo, locks, tmp_path, [DOC], message="test: 再改一行\n")
+    out = proc.stdout + proc.stderr
+    assert proc.returncode == 0, out
+    assert "[message] 说明未提及：doc.md" in out, out

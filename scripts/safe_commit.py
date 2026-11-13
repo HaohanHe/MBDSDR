@@ -109,6 +109,12 @@ pre-commit 闸门对**任何未声明的删除条目**一律拒绝（幻影删�
 * 钩子产物：pre/post-commit 的标记按 tree 号命名，不与并发提交撞名；
 * ``refs/heads/*.lock``：git 自己的锁，撞上按可重试处理。
 
+``052828d1`` 只把 ⑰⑱⑳ 写进说明、实际还带着 ⑲；``1004608f`` 说明只写「补
+``--full-scan`` 全盘入口」、实际并进 log 扫描根收窄与 12 条测试。内容都对、
+说明漏了——人按 message 检索会被指偏。因此另有一条弱提示：``--files`` 里某路径的
+basename 在说明里一次都没出现，就打印 ``[message] 说明未提及：<path>``。只提示
+不拦、不参与退出码，也不要求逐文件罗列：让漏写被看见，不是清单作业。
+
 §6.1 登记行：闸看暂存区，这里连工作区一起看（2026-11-13，形态⑲）
 ------------------------------------------------------------------
 
@@ -719,6 +725,24 @@ def _claim_hint(files: list[str]) -> None:
         if any(cc._owner_matches(item, owner) for item in owners):
             continue
         print(f"[claim] 该路径无 claim 记录，请确认归属：{rel}")
+
+
+def _message_coverage_hint(message: bytes, files: list[str]) -> None:
+    """说明里一个文件名都没提的路径，逐条提示（**只提示，不参与退出码**）。
+
+    ``052828d1`` 的说明只列了 ⑰⑱⑳ 而实际还有 ⑲；``1004608f`` 只写「补
+    ``--full-scan`` 全盘入口」，实际并进了 log 扫描根收窄与 12 条测试。两次的
+    共同点是内容都对、说明漏了——而人对「说明」的信任没有上限，事后按 message
+    检索会被指偏。
+
+    判据是 basename 的子串出现，不做目录匹配、不要求逐文件罗列：提示只是让
+    「漏写」被看见，不是把提交说明变成清单作业。不拦，也不参与退出码。
+    """
+    text = message.decode("utf-8", "replace")
+    for rel in files:
+        name = rel.rsplit("/", 1)[-1]
+        if name and name not in text:
+            print(f"[message] 说明未提及：{rel}")
 
 
 def _verify_declaration(env: dict, declared: dict, declared_at: float,
@@ -1336,6 +1360,7 @@ def main(argv: list[str] | None = None) -> int:
     if not args.message_file:
         ap.error("--message-file 必填（只有 --declare 可以不传）")
     message = Path(args.message_file).read_bytes()
+    _message_coverage_hint(message, files)
 
     try:
         exclusions = _parse_exclusions(args.exclude_hunk, files)
