@@ -237,6 +237,34 @@ def test_time_machine_timezone_conversion_uses_qt(qapp):
         assert unix_from_qdatetime(qdatetime_from_unix(unix)) == unix
 
 
+def test_time_machine_go_now_uses_current_wall_clock(qapp):
+    """「回到现在」取点按那一刻，不是构造时冻结的时刻（F8）。
+
+    反证：改回 ``self._now_unix = self._real_unix``，selected_unix 停在 t0，
+    与 t0+300 差 300 s，本用例必红。
+    """
+    from time_machine import TimeMachineDialog
+
+    t0 = 1_800_000_000.0
+    clock = {"t": t0}
+    dlg = TimeMachineDialog(None, now_unix=t0 - 7200, real_unix=t0,
+                            real_now_provider=lambda: clock["t"])
+    try:
+        _pump(3)
+        clock["t"] = t0 + 300.0
+        dlg._go_now()
+        assert dlg.selected_unix() == t0 + 300.0
+        assert "已回到现在" in dlg.status.text()
+        # 只改输入框、没改引擎：不得声称「实时」，必须写明还要点跳过去。
+        assert "实时" not in dlg.status.text()
+        assert "点「跳过去」生效" in dlg.status.text()
+
+        dlg._go_now()   # 已在现在：幂等回执
+        assert "已在现在" in dlg.status.text()
+    finally:
+        dlg.close()
+
+
 # ---------------------------------------------------------------------- #
 # 星象仪里的搜索与图层面板
 # ---------------------------------------------------------------------- #

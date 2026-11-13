@@ -74,12 +74,16 @@ class TimeMachineDialog(QDialog):
     def __init__(self, parent=None, *, now_unix: Optional[float] = None,
                  real_unix: Optional[float] = None,
                  night_resolver: Optional[Callable[[], Optional[Tuple[datetime, float]]]] = None,
-                 on_apply: Optional[Callable[[float], None]] = None):
+                 on_apply: Optional[Callable[[float], None]] = None,
+                 real_now_provider: Optional[Callable[[], float]] = None):
         super().__init__(parent)
         self.setWindowTitle("时间机器")
         self.setModal(True)
         self.setMinimumWidth(420)
-        self._real_unix = float(real_unix if real_unix is not None else time.time())
+        #: 「现在」的取值口。默认墙钟；测试注入固定值。「回到现在」必须
+        #: 每次现取，不能复用对话框构造时的快照（开久了会跳到旧时刻）。
+        self._real_now = real_now_provider or time.time
+        self._real_unix = float(real_unix if real_unix is not None else self._real_now())
         self._now_unix = float(now_unix if now_unix is not None else self._real_unix)
         self._night_resolver = night_resolver
         self._on_apply = on_apply
@@ -125,7 +129,8 @@ class TimeMachineDialog(QDialog):
         jump = QHBoxLayout()
         jump.setSpacing(6)
         self.now_btn = QPushButton("回到现在", self)
-        self.now_btn.setToolTip("把时刻归零到今天此刻，并恢复 1× 流速")
+        self.now_btn.setToolTip(
+            "把时刻归零到今天此刻（点「跳过去」才改引擎）")
         self.now_btn.clicked.connect(self._go_now)
         jump.addWidget(self.now_btn)
         self.night_btn = QPushButton("今夜", self)
@@ -188,14 +193,19 @@ class TimeMachineDialog(QDialog):
         self.edit.setDateTime(self.edit.dateTime().addSecs(int(seconds)))
 
     def _go_now(self) -> None:
-        was_real = abs(float(self._now_unix) - float(self._real_unix)) < 0.5
-        self._now_unix = self._real_unix
+        # 「现在」要现取：对话框开 10 分钟后点它，必须跳到此刻，而不是
+        # 构造对话框那一刻（旧实现复用 _real_unix 快照）。
+        fresh = float(self._real_now())
+        was_real = abs(float(self._now_unix) - fresh) < 0.5
+        self._real_unix = fresh
+        self._now_unix = fresh
         self._load_current()
         # 幂等动作也要有回执：本来就在「现在」时界面一个字都不变，
         # 用户会以为按钮坏了（UI 交互守卫专门抓这类「点了没反应」）。
-        # 说清「本来就在」与「刚跳回来」的区别，不假装刚发生了什么。
-        self.status.setText("已在现在 · 实时" if was_real
-                            else "已回到现在 · 实时")
+        # 只改输入框、不改引擎，所以文案不能说「实时 / 已恢复流速」，
+        # 要写明还得点「跳过去」才生效。
+        self.status.setText("已在现在 · 点「跳过去」生效" if was_real
+                            else "已回到现在 · 点「跳过去」生效")
         self._terminal_status = self.status.text()
 
     def _go_night(self) -> None:
@@ -229,7 +239,7 @@ class TimeMachineDialog(QDialog):
             return
         delta = self.selected_unix() - self._real_unix
         if abs(delta) < 60.0:
-            self.status.setText("当前就是现在（实时）")
+            self.status.setText("当前就是现在（点「跳过去」生效）")
         else:
             self.status.setText(f"模拟中 · 比现在 {format_offset(delta)}")
 
