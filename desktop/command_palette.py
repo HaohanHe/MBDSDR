@@ -585,6 +585,10 @@ def build_index(window=None) -> List[Command]:
 
     新增一类搜索源只需在注册表里加一个 provider；这里不写死分组清单。
     无窗口时菜单/页签/右栏定位天然为空，能力与快捷键照旧可离线构建。
+
+    调用点只有 ``CommandPalette.__init__``：索引在**打开面板时建一次**，
+    按键路径不重建（见 ``_refresh`` 的性能注记）。实测 2026-11-13：
+    真实规模 196 条约 1.6 ms；500 书签 + 10000 卫星（10690 条）约 38 ms。
     """
     from search_providers import PROVIDERS
 
@@ -725,6 +729,8 @@ def _build_dialog_class():
             self._commands = build_index(window)
             self._results: List[Command] = []
             #: 当前不可用的搜索源（打开面板时取一次）；与「空结果」分开展示。
+            #: 与索引是同一时刻的快照：索引不随按键重建，单独刷新 gaps 会
+            #: 出现「这类可用但一条都搜不到」的自相矛盾；要更新只能整体重开。
             self._gaps = provider_gaps(window)
             self.last_result: dict = {}
 
@@ -801,6 +807,16 @@ def _build_dialog_class():
 
         # ---------------- 列表 ----------------
         def _refresh(self, text: str) -> None:
+            # 逐键成本（2026-11-13 实测：offscreen + MainWindow，Python 3.14，
+            # 逐字输入「卫星跟踪面板设置」8 次按键，各取 20 次中位/最坏）：
+            #   provider 不在按键路径上——索引只在 __init__ 建一次（见
+            #   build_index），每键只跑 search_commands + 渲染。
+            #   真实规模 196 条：过滤 0.17–0.44 ms，渲染 ≤4.3 ms；
+            #   500 书签 + 2000 卫星（2690 条）：过滤 2–3.5 ms，渲染 54–85 ms；
+            #   500 书签 + 10000 卫星（10690 条）：过滤 9–16 ms，渲染 335–453 ms。
+            # 结论：现有规模每键 <5 ms，不引入防抖（防抖会拖住最后一键）。
+            # 若将来目录真涨到上千条、首屏开始卡，先给结果行数设上限再谈别的：
+            # 渲染开销跟随「命中行数」，不跟随索引总量。
             self._results = search_commands(self._commands, text,
                                             recent=load_recent())
             self.reason_label.clear()
