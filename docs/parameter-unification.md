@@ -418,7 +418,7 @@ constexpr double kCandidateRatesHz[] = {
 | 2,880,000 | True | 2,880,000 | 2,880,000 | 一致 |
 | 3,200,000 | True | 3,200,000 | 3,200,000 | 一致（内核档） |
 
-结论：12 档里 **11 档请求=回读=硬件实收**，1 档（2.800M，非任何一端可见档）被吸附到 2.880M，改后回读如实报 2.880M 并由界面提示「请求 2.800 MS/s → 实际 2.880 MS/s」。改前该档回读是 2.800M，属"静默接受后 DSP 按别的率跑"的 Python 侧实例——本轮已修（取证 `70429a02` — `desktop/main_window.py:8191` — `该采样率未被设备接受（保持`（基准 `70429a02`）；测试 `70429a02` — `tests/test_sample_rate_options.py:222` — `未被设备接受`）。
+结论：12 档里 **11 档请求=回读=硬件实收**，1 档（2.800M，非任何一端可见档）被吸附到 2.880M，改后回读如实报 2.880M 并由界面提示「请求 2.800 MS/s → 实际 2.880 MS/s」。改前该档回读是 2.800M，属"静默接受后 DSP 按别的率跑"的 Python 侧实例——本轮已修（取证 `70429a02` — `desktop/main_window.py:8191` — `该采样率未被设备接受（保持`（基准 `70429a02`）；测试同断言 `70429a02`（`tests/test_sample_rate_options.py:222`，`未被设备接受`））。
 
 **新增测试**（`tests/test_sample_rate_options.py`，共 12 条）：11 档逐档回读一致 + 硬件侧一致；档外 2.800M 回读=2.880M；未连接返回 `False`；主窗口槽逐档下发后 `_record_sr`/持久化均为生效值；后端拒绝时 `_record_sr` 不变、下拉回填、状态栏含「未被设备接受」、**不写配置**。实测 `12 passed`（8.77s）。
 
@@ -450,7 +450,7 @@ constexpr double kCandidateRatesHz[] = {
 
 - 2026-11-11 命名统一后更新：第 1 项四元组按现名 `fill_sample_rate_combo` 重写，证据取改名提交 `7bea149a`（同时删 `_fill_sr_combo`、加 `fill_sample_rate_combo`）。该行后来被改过签名（现 blame `a2be554a`），按 §7.7 基准取该行 blame；行号随并行提交漂移时同步重定位（本次 `:53 → :55`）。
 
-**结论维持「部分统一」**：第 2 项内核侧已补（取证 `f0a19376` — `cpp/src/control/control_hub.cpp:1083` — `sample_rate_options_hz`；回读面取证 `dd72ba1c` — `cpp/src/control/control_hub.cpp:1024` — `sample_rate_readback_available`）：`cmdGetCapabilities` 现已调用 `dsp::buildSampleRateOptions(caps)`（`cpp/src/control/control_hub.cpp:1080`），输出 `sample_rate_options_hz`（`:1083`）与 `sample_rate_options_status`（`:1084-1085`，取值 `no_device` / `range_unknown` / `no_tier_in_range` / `ok`，即空数组绝不冒充「零档位」）；`cmdGetStatus` 的 `readback_sample_rate_hz` / `sample_rate_readback_available` / `sample_rate_status` / `sample_rate_error` 不变。第 1、3 项已落地（`70429a02` — `desktop/main_window.py:8191` — `该采样率未被设备接受（保持`（基准 `70429a02`）；`754f64e6` — `scripts/sample_rate_readback_check.py:156` — `真机不可复跑，以下为注入验证`；第 3 项真机复跑 12 档 11 一致 + 1 吸附被抓到）。**移动端仍未接线**（Dart 消费侧按「字段缺失 → 未知并禁用」写着，未真正读新字段），故不写「统一（收敛态）」。本机无 Flutter 工具链，Dart 改动未跑 `flutter analyze` / `flutter test`，未经验证。另 C++ 侧四项（AI 4 档接线、2160/2880 拒绝路径、2800 vs 2880、硬件读回）已由 `dd72ba1c` 落地；上面「回读可观测」即来自该笔。
+**结论维持「部分统一」**：第 2 项内核侧已补（取证 `f0a19376` — `cpp/src/control/control_hub.cpp:1083` — `sample_rate_options_hz`；回读面取证 `dd72ba1c`（`cpp/src/control/control_hub.cpp:1024`，`sample_rate_readback_available`））：`cmdGetCapabilities` 现已调用 `dsp::buildSampleRateOptions(caps)`（`cpp/src/control/control_hub.cpp:1080`），输出 `sample_rate_options_hz`（`:1083`）与 `sample_rate_options_status`（`:1084-1085`，取值 `no_device` / `range_unknown` / `no_tier_in_range` / `ok`，即空数组绝不冒充「零档位」）；`cmdGetStatus` 的 `readback_sample_rate_hz` / `sample_rate_readback_available` / `sample_rate_status` / `sample_rate_error` 不变。第 1、3 项已落地（`70429a02`，`desktop/main_window.py:8191`，`该采样率未被设备接受（保持`，基准 `70429a02`）；另见 `754f64e6`（`scripts/sample_rate_readback_check.py:156`，`真机不可复跑，以下为注入验证`）；第 3 项真机复跑 12 档 11 一致 + 1 吸附被抓到）。**移动端仍未接线**（Dart 消费侧按「字段缺失 → 未知并禁用」写着，未真正读新字段），故不写「统一（收敛态）」。本机无 Flutter 工具链，Dart 改动未跑 `flutter analyze` / `flutter test`，未经验证。另 C++ 侧四项（AI 4 档接线、2160/2880 拒绝路径、2800 vs 2880、硬件读回）已由 `dd72ba1c` 落地；上面「回读可观测」即来自该笔。
 
 **三份档位表的用途分工（不是矛盾，供重复治理线登记时分开写）**
 

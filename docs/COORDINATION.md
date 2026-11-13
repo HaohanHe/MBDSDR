@@ -2076,6 +2076,14 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `tests/test_mcp_worker_behavior.py` | S1-S4结果伪造线/6ae85f56（协议缺口用例：6 处信封补 success + 设备 ok:false 折算成 success:false） | 2026-11-13 20:46 | 本笔 |
 | `scripts/verify_claims.py` | 文档引用复核线/6ae85f56（检查器口径 3：四元组取值/无扩展名坐标/多证据目标拒绝） | 2026-11-13 20:46 | 本笔 |
 | `tests/test_verify_claims.py` | 文档引用复核线/6ae85f56（检查器 5 条反证测试） | 2026-11-13 20:46 | 本笔 |
+| `desktop/ai_steps.py` | S1-S4结果伪造线/6ae85f56（接线：steps_from_tool_result 成败只看 tool_success（旧载荷才退回 error 键）） | 2026-11-13 20:47 | 本笔 |
+| `desktop/main_window.py` | S1-S4结果伪造线/6ae85f56（接线：_on_worker_tool_result/_mcp_call_handler 成败接 tool_success（他线 hunk 按行范围排除）） | 2026-11-13 20:47 | 本笔 |
+| `mbdsdr_ai/tool_registry.py` | S1-S4结果伪造线/6ae85f56（接线：dict 分支把 ok 折算成 success，不再默认 True） | 2026-11-13 20:47 | 本笔 |
+| `tests/test_ai_tool_consistency.py` | S1-S4结果伪造线/6ae85f56（补账①：裸 dict ok:false → 产出端 success:false） | 2026-11-13 20:47 | 本笔 |
+| `tests/test_ai_steps_behavior.py` | S1-S4结果伪造线/6ae85f56（信封两条用例改判 success:false 真实形状） | 2026-11-13 20:47 | 本笔 |
+| `docs/known-red-register.md` | 文档引用复核线/6ae85f56（口径 3 整改：跨文件第二四元组改纯引用） | 2026-11-13 20:47 | 本笔 |
+| `docs/parameter-unification.md` | 文档引用复核线/6ae85f56（口径 3 整改：跨文件第二/三四元组改纯引用） | 2026-11-13 20:47 | 本笔 |
+| `docs/redundancy-register.md` | 文档引用复核线/6ae85f56（口径 3 整改：:85 改显式〔证〕指向 tokens.h:338） | 2026-11-13 20:47 | 本笔 |
 
 > 上表各行均由 `claim` 台账推导：owner 原文与 `acquired_at` 直接取自台账，
 > 目的优先用台账里的 `claim_reason`，没有就如实写「未声明」，不补编。时间列只是
