@@ -2157,6 +2157,7 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `tests/test_hw_rollback_shows_device_truth.py` | S1-S4结果伪造线/6ae85f56（写门配套：PPM 回填改种 store 值，删除 _last_ppm_applied 依赖） | 2026-11-13 21:53 | 本笔 |
 | `docs/tooltip-dynamic-baseline.json` | S1-S4结果伪造线/6ae85f56（写门配套：passthrough 基线换成 _session_tip 表达式（13 删 8 增）） | 2026-11-13 21:53 | 本笔 |
 | `desktop/command_palette.py` | 统一搜索性能线/6ae85f56（结果行数上限 200 + 未显示条数提示（命令面板逐键渲染实测）） | 2026-11-13 21:55 | 本笔 |
+| `tests/test_command_palette_result_cap.py` | 统一搜索性能线/6ae85f56（结果上限行数判据 + 去掉上限重新变慢的反证（5 用例）） | 2026-11-13 21:57 | 本笔 |
 
 > 上表各行均由 `claim` 台账推导：owner 原文与 `acquired_at` 直接取自台账，
 > 目的优先用台账里的 `claim_reason`，没有就如实写「未声明」，不补编。时间列只是
