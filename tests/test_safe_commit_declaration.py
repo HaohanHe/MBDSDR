@@ -167,6 +167,7 @@ def test_waiver_commits_and_records_reason(tmp_path):
     )
     out = proc.stdout + proc.stderr
     assert proc.returncode == 0, out
+    assert "豁免通过" in out and "拒绝提交" not in out, out
     assert "foreign-a" in _git(repo, "show", "HEAD:doc.md").stdout
     log = _git(repo, "log", "-1", "--format=%B").stdout
     assert "foreign-changes: 两行已与 B 线当面核对，随本笔一起落库" in log, log

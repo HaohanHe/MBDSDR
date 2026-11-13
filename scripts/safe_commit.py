@@ -676,8 +676,12 @@ def _claim_owners(path: str, since: float) -> list[str]:
     return owners
 
 
-def _verify_declaration(env: dict, declared: dict, declared_at: float) -> tuple[list[dict], str]:
+def _verify_declaration(env: dict, declared: dict, declared_at: float,
+                        waived: bool = False) -> tuple[list[dict], str]:
     """比对声明快照与当前工作区：返回 (变化清单, 报告文本)。
+
+    ``waived`` 只改报告措辞（放行而不是拒绝），不改判定：豁免路径同样要把
+    逐行明细打出来，否则「悄悄过去」和原来的 bug 没区别。
 
     只比内容，不比 mtime：``--exclude-hunk`` 声明时就已经在的他人改动已进快照，
     天然不会命中——这条边界混掉，共享文件就再没人敢提交。
@@ -700,8 +704,13 @@ def _verify_declaration(env: dict, declared: dict, declared_at: float) -> tuple[
     if not changed:
         return [], ""
     lines = [
-        f"拒绝提交：声明之后有内容变化（{len(changed)} 个文件）。",
-        f"声明时刻 {_iso(declared_at)}。只拒绝「声明之后新冒出来或消失」的内容；"
+        (
+            f"豁免通过（--allow-foreign-changes）：声明之后有 {len(changed)} 个文件的内容"
+            "变化，按给定理由一起落库。"
+            if waived else
+            f"拒绝提交：声明之后有内容变化（{len(changed)} 个文件）。"
+        ),
+        f"声明时刻 {_iso(declared_at)}。只比「声明之后新冒出来或消失」的内容；"
         "声明时就已经在的他人改动不算（那属于 --exclude-hunk）。",
     ]
     for item in changed:
@@ -717,10 +726,16 @@ def _verify_declaration(env: dict, declared: dict, declared_at: float) -> tuple[
             lines.append("    可能属于：" + "、".join(owners[:5]))
         else:
             lines.append("    可能属于：claim 台账里该路径在声明之后没有归属记录（无法推断）")
-    lines.append(
-        "处置：等对方落库或撤回后重新 --declare 再提交；确认要一起带走时用 "
-        "--allow-foreign-changes \"<理由>\"（理由会写进提交说明）。"
-    )
+    if waived:
+        lines.append(
+            "豁免已留痕：理由与上面逐文件的增删行数会写进提交说明的 "
+            "foreign-changes 段（事后可查是哪几行、按什么理由带走的）。"
+        )
+    else:
+        lines.append(
+            "处置：等对方落库或撤回后重新 --declare 再提交；确认要一起带走时用 "
+            "--allow-foreign-changes \"<理由>\"（理由会写进提交说明）。"
+        )
     return changed, "\n".join(lines)
 
 
@@ -1135,11 +1150,11 @@ def _commit_locked(
     # 4a) 声明快照：提交时刻的内容必须等于声明时刻的那份。不一致就拒绝（不重试），
     #     因为漂移的内容不会因为多试几次自己回去；豁免必须带理由并落进提交说明。
     if declared:
-        changed, report = _verify_declaration(env, declared, declared_at)
+        changed, report = _verify_declaration(
+            env, declared, declared_at, waived=bool(allow_reason))
         if changed:
             if not allow_reason:
                 return 4, report
-            print("[foreign] 声明后有变化，按 --allow-foreign-changes 放行，理由写进提交说明：")
             print(report)
             message = _foreign_trailer(message, changed, allow_reason)
         else:

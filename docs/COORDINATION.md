@@ -2055,6 +2055,7 @@ No supported devices found），GNSS+SDR 同开复验没做成；离线那次
 | `tests/{test_coordination_gate_blocking.py,test_append_coordination_row.py}` | 收尸线/6ae85f56（§6.1 登记闸升阻塞：钩子层拒绝/补登/放行 + 55/61 分钟窗口两侧对称反证） | 2026-11-13 20:21 | 本笔 |
 | `scripts/safe_commit.py` | 收尸线/6ae85f56（插入 §6.1 行时容忍标题与表格之间的说明文字（工具不再逼人手工插行）） | 2026-11-13 20:28 | 本笔 |
 | `tests/test_safe_commit_coordination.py` | 收尸线/6ae85f56（回归：说明文字在表头之前时仍能插入行且原文不动） | 2026-11-13 20:28 | 本笔 |
+| `tests/test_safe_commit_declaration.py` | 收尸线/6ae85f56（豁免路径报告措辞修正（§6.1 补登记）） | 2026-11-13 20:42 | 本笔 |
 
 > 上表各行均由 `claim` 台账推导：owner 原文与 `acquired_at` 直接取自台账，
 > 目的优先用台账里的 `claim_reason`，没有就如实写「未声明」，不补编。时间列只是
