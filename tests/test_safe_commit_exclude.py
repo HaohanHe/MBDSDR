@@ -144,6 +144,65 @@ def test_exclude_range_must_cover_whole_hunk(tmp_path):
     assert _git(repo, "rev-parse", "HEAD").stdout.strip() == before
 
 
+def test_multiple_exclusion_hunks_survive_line_count_shift(tmp_path):
+    """一个文件里排除多个 hunk：提交里只能有自己那一份，别线一个都不能带。
+
+    形状：自己的改动在第 2 行；别线在第 5 行后插两行（行数 +2），又在原第
+    9 行（新文件第 11 行）改了一行——两个排除 hunk 的行数变化方向不同。
+
+    真实故障记录：2026-11-13 在 ``desktop/main_window.py`` 上排除 31 个 hunk
+    时，旧实现「所有 hunk 拼成一个 patch 一次 apply -R」报
+    ``patch failed: main_window.py:8401``（-U0 无上下文，靠前 hunk 的行数
+    变化把后面的 hunk 挤偏）。现改为自下而上逐个应用。本用例锁住多 hunk
+    语义本身（含行数 +2 的形状），真实文件上的验收记在提交说明里。
+    """
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-q", check=True)
+    _git(repo, "config", "user.email", "safe-commit@example.invalid", check=True)
+    _git(repo, "config", "user.name", "safe-commit", check=True)
+    _git(repo, "config", "commit.gpgsign", "false", check=True)
+    lines = [f"line{i}" for i in range(1, 10)]
+    (repo / "doc.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    _git(repo, "add", "doc.md", check=True)
+    _git(repo, "commit", "-q", "-m", "base", check=True)
+
+    lines[1] = "line2 mine"
+    lines[4:5] = ["line5", "other5a", "other5b"]      # 别线：+5,2（行数变多）
+    lines[10] = "line9 other"                          # 别线：+11,1
+    (repo / "doc.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+    msg = tmp_path / "msg.txt"
+    msg.write_text("test: multi-hunk exclusion\n", encoding="utf-8")
+    env = os.environ.copy()
+    env.pop("GIT_INDEX_FILE", None)
+    env["MBDSDR_REPO_ROOT"] = str(repo)
+
+    proc = subprocess.run(
+        [
+            sys.executable, str(SAFE),
+            "--files", "doc.md",
+            "--message-file", str(msg),
+            "--exclude-hunk", "doc.md:6-7",
+            "--exclude-hunk", "doc.md:11-11",
+            "--exclude-owner", "别线",
+        ],
+        cwd=str(repo), env=env, capture_output=True, text=True,
+        encoding="utf-8", errors="replace",
+    )
+    out = proc.stdout + proc.stderr
+    assert proc.returncode == 0, out
+
+    committed = _git(repo, "show", "HEAD:doc.md").stdout.splitlines()
+    assert "line2 mine" in committed
+    assert "other5a" not in committed and "other5b" not in committed
+    assert "line9 other" not in committed
+    assert "line5" in committed and "line9" in committed
+
+    tree = (repo / "doc.md").read_text(encoding="utf-8").splitlines()
+    assert "other5a" in tree and "line9 other" in tree, "工作树不能被动"
+
+
 def test_repeated_files_flag_commits_every_declared_file(tmp_path):
     """反证：``--files A --files B`` 不许只提交最后一个。
 

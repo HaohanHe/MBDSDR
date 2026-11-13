@@ -164,18 +164,24 @@ def _revert_index_hunks(env: dict, path: str, ranges: list[dict]) -> None:
     if not selected:
         raise ValueError(f"{path} 的排除声明没有选中任何 hunk")
 
-    patch = "".join(header) + "".join(
-        h["head"] + "".join(h["body"]) for h in selected
-    )
-    apply = _run(
-        ["apply", "--cached", "-R", "--unidiff-zero", "--whitespace=nowarn", "-"],
-        env,
-        patch.encode("utf-8"),
-    )
-    if apply.returncode != 0:
-        raise ValueError(
-            f"{path} 排除 hunk 失败：{apply.stderr.decode('utf-8', 'replace')[:300]}"
+    # 逐个 hunk 反向应用，且从文件底部往上走。-U0 没有上下文，git apply 只按
+    # 行号定位；一次塞进多个 hunk 时，靠前的 hunk 反向撤掉的行数会把它下面
+    # （行号更大）的 hunk 挤偏，实测 main_window.py:8401 报「patch does not
+    # apply」。自下而上逐个应用时，先动的都在下面，尚未应用的 hunk 行号不受
+    # 影响——这条路径才真的能把「多人共写一个文件」的排除声明落地。
+    patch_header = "".join(header)
+    for hunk in sorted(selected, key=lambda h: h["start"], reverse=True):
+        apply = _run(
+            ["apply", "--cached", "-R", "--unidiff-zero",
+             "--whitespace=nowarn", "-"],
+            env,
+            (patch_header + hunk["head"] + "".join(hunk["body"])).encode("utf-8"),
         )
+        if apply.returncode != 0:
+            raise ValueError(
+                f"{path} 排除 hunk {hunk['start']}-{hunk['end']} 失败："
+                f"{apply.stderr.decode('utf-8', 'replace')[:300]}"
+            )
 
 
 def _exclusion_trailer(message: bytes, exclusions: list[dict], owner: str) -> bytes:
