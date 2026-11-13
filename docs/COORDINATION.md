@@ -1871,6 +1871,21 @@ No supported devices found），GNSS+SDR 同开复验没做成；离线那次
 `<locks>/coord_check_trend.jsonl`——**不只在超预算时才说话**；耗时接近预算
 （≥0.75）时按同一份探针比值判「检查自身变慢」还是「机器整体变慢」）。
 
+**「没有活跃 claim」只回答「此刻没人占位」，不回答「没有主人」（2026-11-13
+裁定）。** claim 是占位声明，不是著作权。`052828d1` 事故
+（`docs/incidents/2026-11-13-safe-commit-swept-inflight-work.md`）就是把它当反证：
+那条线的三个文件里两个从未入账、一个只有我自己的 claim，我据此判「无主」，
+把约 1400 行在途活一起带走了。判断归属一律按证据走：claim 记录 / 本表行 /
+`docs/pending-patches/` 补丁单；**都拿不出来就写「无凭据」，不许猜**。
+按需审计入口（**不是闸，不进 pre-commit**——归属是人的判断，脚本不签字）：
+
+```text
+python scripts/audit_unclaimed_changes.py        # 有改动 / 未提交进 HEAD / 无活跃 claim
+python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（带 owner）
+```
+
+清单只说明没人占位，不说明无主。**宁可停一笔，不可猜一次。**
+
 **追加登记行不必占整文件（2026-11-13 落地）**：`scripts/append_coordination_row.py`
 只做「在 §6.1 表格末尾追加一行」——独立窄锁（`.locks/coordination-append.lock`，
 `O_EXCL` + 1ms 退避 + 60s 陈旧锁清理），读-插-`os.replace` 原子写回-立刻放锁，
@@ -2056,6 +2071,7 @@ No supported devices found），GNSS+SDR 同开复验没做成；离线那次
 | `scripts/safe_commit.py` | 收尸线/6ae85f56（插入 §6.1 行时容忍标题与表格之间的说明文字（工具不再逼人手工插行）） | 2026-11-13 20:28 | 本笔 |
 | `tests/test_safe_commit_coordination.py` | 收尸线/6ae85f56（回归：说明文字在表头之前时仍能插入行且原文不动） | 2026-11-13 20:28 | 本笔 |
 | `tests/test_safe_commit_declaration.py` | 收尸线/6ae85f56（豁免路径报告措辞修正（§6.1 补登记）） | 2026-11-13 20:42 | 本笔 |
+| `scripts/audit_unclaimed_changes.py` | 收尸线/6ae85f56（按需审计入口：无活跃 claim 的在途改动） | 2026-11-13 20:44 | 本笔 |
 
 > 上表各行均由 `claim` 台账推导：owner 原文与 `acquired_at` 直接取自台账，
 > 目的优先用台账里的 `claim_reason`，没有就如实写「未声明」，不补编。时间列只是
