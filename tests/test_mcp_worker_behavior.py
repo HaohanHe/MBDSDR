@@ -233,7 +233,8 @@ class TestEndpointAndSignalSurface:
         w = mcp_worker.MCPWorker()
         rec = _recorders(w, "tool_result", "log_message")
         w.request_tool.emit("tune_fm", {"freq_mhz": 98.5})
-        assert rec["tool_result"].items == [("tune_fm", {"error": "未连接"})]
+        assert rec["tool_result"].items == \
+            [("tune_fm", {"error": "未连接", "success": False})]
         assert any("调用工具: tune_fm" in m for m in rec["log_message"].items)
 
 
@@ -256,7 +257,8 @@ class TestHonestEmptyState:
         w = mcp_worker.MCPWorker()
         rec = _recorders(w, "tool_result", "error_occurred")
         w.call_tool("tune_fm", {"freq_mhz": 98.5})
-        assert rec["tool_result"].items == [("tune_fm", {"error": "未连接"})]
+        assert rec["tool_result"].items == \
+            [("tune_fm", {"error": "未连接", "success": False})]
         assert rec["error_occurred"].items == []
 
     def test_call_tool_sync_without_connection_reports_error(self, env_clean):
@@ -418,14 +420,15 @@ class TestToolForwarding:
         w = _connected(monkeypatch, stub)
         stub.responses["tune_fm"] = {"result": {"ok": True, "freq_mhz": 98.5}}
         out = w.call_tool_sync("tune_fm", {"freq_mhz": 98.5, "arm_manual": True})
-        assert out == {"ok": True, "freq_mhz": 98.5}
+        assert out == {"ok": True, "freq_mhz": 98.5, "success": True}
         assert stub.calls[-1] == ("tune_fm", {"freq_mhz": 98.5})  # 门控 token 不下发
 
     def test_device_registered_name_forwards(self, monkeypatch, stub):
         w = _connected(monkeypatch, stub)
         w._mcp_tool_names = {"sdr_set_gain"}
         stub.responses["sdr_set_gain"] = {"result": {"gain_db": 20}}
-        assert w.call_tool_sync("sdr_set_gain", {"gain_db": 20}) == {"gain_db": 20}
+        assert w.call_tool_sync("sdr_set_gain", {"gain_db": 20}) == \
+            {"gain_db": 20, "success": True}
         assert ("sdr_set_gain", {"gain_db": 20}) in stub.calls
 
     def test_software_tool_is_skipped_not_forwarded(self, monkeypatch, stub):
@@ -435,6 +438,19 @@ class TestToolForwarding:
         assert out["skipped"] is True and out["success"] is True
         assert "workflow_list" in out["reason"]
         assert [c for c in stub.calls if c[0] == "workflow_list"] == []
+
+    def test_device_ok_false_folds_to_success_false(self, monkeypatch, stub):
+        """设备只回 ok 的信封 → 产出端落 success:false，步骤卡判失败。
+
+        对应旧 is_failure_result 的 ①：success 缺席 + 正文 {"ok": false} → 失败。
+        折算点前移到 _real_tool，消费端只认 success（不再扫正文）。
+        """
+        from ai_steps import STATUS_FAILED, steps_from_tool_result
+        w = _connected(monkeypatch, stub)
+        stub.responses["tune_fm"] = {"result": {"ok": False, "detail": "只收"}}
+        out = w.call_tool_sync("tune_fm", {"freq_mhz": 98.5, "arm_manual": True})
+        assert out["success"] is False
+        assert steps_from_tool_result("tune_fm", out).status == STATUS_FAILED
 
     def test_error_envelope_marks_failure(self, monkeypatch, stub):
         """设备回错误信封 → 失败，绝不吞成空结果冒充成功。"""
@@ -457,7 +473,8 @@ class TestToolForwarding:
         rec = _recorders(w, "tool_result", "error_occurred")
         w.call_tool("tune_fm", {})
         assert rec["error_occurred"].items == ["工具调用失败: 炸了"]
-        assert rec["tool_result"].items == [("tune_fm", {"error": "炸了"})]
+        assert rec["tool_result"].items == \
+            [("tune_fm", {"error": "炸了", "success": False})]
 
     def test_is_hardware_tool_covers_registry_alias_and_software(self, monkeypatch, stub):
         w = _connected(monkeypatch, stub)
@@ -551,7 +568,7 @@ class TestCallSerialization:
         assert done.wait(5), "同步调用未返回"
         t1.join(5)
         t2.join(5)
-        assert box["result"] == {"ok": True}
+        assert box["result"] == {"ok": True, "success": True}
         assert state["max_in_flight"] == 1, (
             "异步与同步调用并发进了同一个客户端，响应 id 会错位")
 
@@ -654,7 +671,8 @@ class TestDegradedWithoutClientLib:
         w = mod.MCPWorker()
         rec = _recorders(w, "tool_result")
         w.request_tool.emit("set_volume", {"volume": 30})
-        assert rec["tool_result"].items == [("set_volume", {"error": "未连接"})]
+        assert rec["tool_result"].items == \
+            [("set_volume", {"error": "未连接", "success": False})]
         assert w.call_tool_sync("set_volume", {}) == \
             {"error": "未连接", "success": False}
         assert w.fetch_mcp_tools() == []

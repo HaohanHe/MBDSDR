@@ -2072,6 +2072,8 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `tests/test_safe_commit_coordination.py` | 收尸线/6ae85f56（回归：说明文字在表头之前时仍能插入行且原文不动） | 2026-11-13 20:28 | 本笔 |
 | `tests/test_safe_commit_declaration.py` | 收尸线/6ae85f56（豁免路径报告措辞修正（§6.1 补登记）） | 2026-11-13 20:42 | 本笔 |
 | `scripts/audit_unclaimed_changes.py` | 收尸线/6ae85f56（按需审计入口：无活跃 claim 的在途改动） | 2026-11-13 20:44 | 本笔 |
+| `desktop/mcp_worker.py` | S1-S4结果伪造线/6ae85f56（协议缺口：未连接/失败/成功三条返回都带 success（设备只回 ok 的信封在产出端折算）） | 2026-11-13 20:46 | 本笔 |
+| `tests/test_mcp_worker_behavior.py` | S1-S4结果伪造线/6ae85f56（协议缺口用例：6 处信封补 success + 设备 ok:false 折算成 success:false） | 2026-11-13 20:46 | 本笔 |
 
 > 上表各行均由 `claim` 台账推导：owner 原文与 `acquired_at` 直接取自台账，
 > 目的优先用台账里的 `claim_reason`，没有就如实写「未声明」，不补编。时间列只是

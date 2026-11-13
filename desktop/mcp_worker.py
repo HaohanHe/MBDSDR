@@ -237,12 +237,13 @@ class MCPWorker(QObject):
                 with self._call_lock:
                     result = self._real_tool(tool_name, params)
             else:
-                result = {"error": "未连接"}
+                result = {"error": "未连接", "success": False}
 
             self.tool_result.emit(tool_name, result)
         except Exception as e:
             self.error_occurred.emit(f"工具调用失败: {_clean_exc(e)}")
-            self.tool_result.emit(tool_name, {"error": _clean_exc(e)})
+            self.tool_result.emit(tool_name,
+                                  {"error": _clean_exc(e), "success": False})
 
     def call_tool_sync(self, tool_name: str, params: Dict) -> Dict:
         """同步调用硬件工具（供 AI 工具环内的 MCP handler 用，任意线程可调）。
@@ -292,7 +293,7 @@ class MCPWorker(QObject):
         - 非硬件面的调用如实返回 skipped（不是失败，不制造「未知工具」噪声）。
         """
         if not self.client:
-            return {"error": "客户端未初始化"}
+            return {"error": "客户端未初始化", "success": False}
 
         plan = normalize_tool_call(tool_name, params, self._mcp_tool_names)
         if plan is None:
@@ -302,7 +303,14 @@ class MCPWorker(QObject):
         resp = self.client.call(plan["method"], plan["params"])
         if "error" in resp:
             return {"error": resp["error"], "success": False}
-        return resp.get("result", {})
+        result = resp.get("result", {})
+        # 三条返回（未连接/失败/成功）都必须带 success：下游只认这一个字段。
+        # 设备只回 ok 的（MCP 信封口径）在产出端折算成 success，不让展示层再猜。
+        if isinstance(result, dict):
+            if "success" not in result:
+                result["success"] = bool(result["ok"]) if "ok" in result else True
+            return result
+        return {"success": True, "result": result}
 
 
 # ============================================================================
