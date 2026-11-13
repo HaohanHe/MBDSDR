@@ -63,6 +63,7 @@ __all__ = [
     "predict_upcoming_passes",
     "PASS_COARSE_STEP_S",
     "PASS_FINE_STEP_S",
+    "PASS_BISECT_TOL_S",
     "PASS_SCAN_BATCH",
     "PASS_CHUNK_HOURS",
     "refine_culmination",
@@ -109,7 +110,11 @@ PASS_EDGE_PROBE_MARGIN_DEG = 15.0
 # 兼容旧调用点的私有别名（值只在这里定义一次，别名不构成第二事实源）
 _COARSE_STEP_S = PASS_COARSE_STEP_S
 _FINE_STEP_S = PASS_FINE_STEP_S
-_BISECT_TOL_S = 0.5       # 二分收敛容差（秒），LEO 仰角变化 ~0.5°/s ⇒ ~0.25° 精度
+# 二分收敛容差（秒），LEO 仰角变化 ~0.5°/s ⇒ ~0.25° 精度。公开名给 orbit 等
+# 外部实现 import —— 旧 orbit 自写 0.25 s，导致同一次过境两张图的收敛容差
+# 不同而 PASS_ALGORITHM 字符串只宣称其中一个值。
+PASS_BISECT_TOL_S = 0.5
+_BISECT_TOL_S = PASS_BISECT_TOL_S
 
 # 粗扫向量化批大小（点数）。skyfield 的 ``diff.at(t_array).altaz()`` 一次算
 # 一批，比逐点调用快约 7 倍；2048 点的内存占用可忽略。这是 P1-13「72 h 分批」

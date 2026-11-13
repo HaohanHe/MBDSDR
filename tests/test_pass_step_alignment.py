@@ -69,6 +69,24 @@ def test_step_constants_single_source():
     assert sat_passes.PASS_FINE_STEP_S == 2.0
 
 
+def test_orbit_step_constants_come_from_single_source():
+    """orbit 的粗扫/细扫/二分容差与主链逐值相等（反证：任改一个必红）。
+
+    旧实现 orbit 自写 bisect=0.25 s 而 sat_passes=0.5 s，同一个
+    ``PASS_ALGORITHM`` 口径在两个面板里各说一个值。
+    """
+    from mbdsdr_ai import orbit
+
+    assert orbit.PASS_COARSE_STEP_S == sat_passes.PASS_COARSE_STEP_S
+    assert orbit.PASS_FINE_STEP_S == sat_passes.PASS_FINE_STEP_S
+    assert orbit.PASS_BISECT_TOL_S == sat_passes.PASS_BISECT_TOL_S
+    assert orbit.PASS_ALGORITHM == (
+        f"sgp4-coarse{sat_passes.PASS_COARSE_STEP_S:g}"
+        f"-fine{sat_passes.PASS_FINE_STEP_S:g}"
+        f"-bisect{sat_passes.PASS_BISECT_TOL_S:g}")
+    assert "bisect0.5" in orbit.PASS_ALGORITHM
+
+
 def test_rf_sky_peak_matches_single_source():
     """rf 天空图峰值 vs sat_passes 参考：差 ≤ 粗步长×实测仰角速率。"""
     from desktop.rf_sky_view import compute_pass_peaks

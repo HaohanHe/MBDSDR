@@ -98,11 +98,18 @@ def builtin_satellite_names(satellite_type: str = "all") -> List[str]:
     return [n for n in BUILTIN_SATS if any(k in n for k in keys)]
 
 
-# 过境预测网格与精度档（单一常量源；面板/AI 的「精度标注」都读这里）
-PASS_COARSE_STEP_S = 60.0      # 粗扫步长
-PASS_FINE_STEP_S = 2.0         # 过境段内采样步长
-PASS_BISECT_TOL_S = 0.25       # 二分收敛容差（秒）
-PASS_ALGORITHM = "sgp4-coarse60-fine2-bisect0.25"
+# 过境预测网格与精度档：全部来自 sat_passes 的唯一事实源，orbit 不再自写一套。
+# 旧值 bisect=0.25 s 与主链 0.5 s 不一致，而 PASS_ALGORITHM 字符串对外只宣称
+# 其中一个值——同一次过境的二分口径在两个面板里成了两个答案。
+from .sat_passes import (
+    PASS_BISECT_TOL_S,
+    PASS_COARSE_STEP_S,
+    PASS_FINE_STEP_S,
+)
+
+PASS_ALGORITHM = (f"sgp4-coarse{PASS_COARSE_STEP_S:g}"
+                  f"-fine{PASS_FINE_STEP_S:g}"
+                  f"-bisect{PASS_BISECT_TOL_S:g}")
 
 _TLE_CACHE: Dict[str, Tuple[float, Tuple[str, str]]] = {}
 _CACHE_DIR = os.path.join(os.path.expanduser("~"), ".mbdsdr", "tle_cache")
