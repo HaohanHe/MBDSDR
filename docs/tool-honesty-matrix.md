@@ -8,15 +8,15 @@
 
 | 环境 | 诚实 | 假成功 | 静默 | 未覆盖（不适用） | 总计 |
 | --- | --- | --- | --- | --- | --- |
-| no_device | 82 | 0 | 0 | 0 | 82 |
-| offline | 2 | 0 | 0 | 80 | 82 |
-| no_api_key | 0 | 0 | 0 | 82 | 82 |
+| no_device | 83 | 0 | 0 | 0 | 83 |
+| offline | 2 | 0 | 0 | 81 | 83 |
+| no_api_key | 0 | 0 | 0 | 83 | 83 |
 
 ### 未覆盖（J）及原因
 
 - `no_device`：**J=0**，全部工具都在无设备环境下有区分力。
-- `offline`：**J=80**，这些工具不访问外网（纯本地 DSP/文件/配置/解码），断网不会改变它们的正确行为。
-- `no_api_key`：**J=82**，本 MCP 工具表**没有任何模型类工具**；模型调用在 agent/provider 层，不在此表，因此清空 API key 对 82 个工具均无区分力（这是覆盖边界，不是诚实性结论）。
+- `offline`：**J=81**，这些工具不访问外网（纯本地 DSP/文件/配置/解码），断网不会改变它们的正确行为。
+- `no_api_key`：**J=83**，本 MCP 工具表**没有任何模型类工具**；模型调用在 agent/provider 层，不在此表，因此清空 API key 对 82 个工具均无区分力（这是覆盖边界，不是诚实性结论）。
 
 ### 修复前后对照（反例）
 
@@ -66,6 +66,7 @@
 | `start_scan` | 书签扫描卫星 | no_device | `not_connected` | false | 否 | 诚实 |  |
 | `stop_scan` | 书签扫描卫星 | no_device | `scan_not_found` | false | 否 | 诚实 |  |
 | `get_scan_results` | 书签扫描卫星 | no_device | `scan_not_found` | false | 否 | 诚实 |  |
+| `list_decoders` | 亚音数字解码 | no_device | `ok` | true | 否 | 诚实 | ok=true 且说明了不可测/未应用 |
 | `start_decoder` | 亚音数字解码 | no_device | `not_connected` | false | 否 | 诚实 |  |
 | `stop_decoder` | 亚音数字解码 | no_device | `decoder_not_found` | false | 否 | 诚实 |  |
 | `get_decoder_messages` | 亚音数字解码 | no_device | `decoder_not_found` | false | 否 | 诚实 |  |
@@ -77,9 +78,9 @@
 | `sat_link_get` | 卫星链路 | no_device | `SDRUserError` | false | 否 | 诚实 | 抛出用户可见错误 |
 | `sat_link_identify` | 卫星链路 | no_device | `ok` | true | 否 | 诚实 |  |
 | `sat_link_tuning` | 卫星链路 | no_device | `ok` | true | 否 | 诚实 | ok=true 且说明了不可测/未应用 |
-| `add_bookmark` | 书签扫描卫星 | no_device | `ok` | true | 否 | 诚实 |  |
+| `add_bookmark` | 书签扫描卫星 | no_device | `PermissionError` | false | 否 | 诚实 | 抛出用户可见错误 |
 | `list_bookmarks` | 书签扫描卫星 | no_device | `ok` | true | 否 | 诚实 |  |
-| `delete_bookmark` | 书签扫描卫星 | no_device | `ok` | true | 否 | 诚实 |  |
+| `delete_bookmark` | 书签扫描卫星 | no_device | `PermissionError` | false | 否 | 诚实 | 抛出用户可见错误 |
 | `find_nearest_bookmark` | 书签扫描卫星 | no_device | `ok` | true | 否 | 诚实 |  |
 | `start_recording` | 导出演制 | no_device | `not_connected` | false | 否 | 诚实 |  |
 | `stop_recording` | 导出演制 | no_device | `ok` | true | 否 | 诚实 | ok=true 且说明了不可测/未应用 |
@@ -148,6 +149,7 @@
 | `start_scan` | 书签扫描卫星 | offline | `not_connected` | false | 否 | 不适用 | 工具不访问外网，离线环境对它无区分力 |
 | `stop_scan` | 书签扫描卫星 | offline | `scan_not_found` | false | 否 | 不适用 | 工具不访问外网，离线环境对它无区分力 |
 | `get_scan_results` | 书签扫描卫星 | offline | `scan_not_found` | false | 否 | 不适用 | 工具不访问外网，离线环境对它无区分力 |
+| `list_decoders` | 亚音数字解码 | offline | `ok` | true | 否 | 不适用 | 工具不访问外网，离线环境对它无区分力 |
 | `start_decoder` | 亚音数字解码 | offline | `not_connected` | false | 否 | 不适用 | 工具不访问外网，离线环境对它无区分力 |
 | `stop_decoder` | 亚音数字解码 | offline | `decoder_not_found` | false | 否 | 不适用 | 工具不访问外网，离线环境对它无区分力 |
 | `get_decoder_messages` | 亚音数字解码 | offline | `decoder_not_found` | false | 否 | 不适用 | 工具不访问外网，离线环境对它无区分力 |
@@ -159,9 +161,9 @@
 | `sat_link_get` | 卫星链路 | offline | `SDRUserError` | false | 否 | 不适用 | 工具不访问外网，离线环境对它无区分力 |
 | `sat_link_identify` | 卫星链路 | offline | `ok` | true | 否 | 不适用 | 工具不访问外网，离线环境对它无区分力 |
 | `sat_link_tuning` | 卫星链路 | offline | `ok` | true | 否 | 不适用 | 工具不访问外网，离线环境对它无区分力 |
-| `add_bookmark` | 书签扫描卫星 | offline | `ok` | true | 否 | 不适用 | 工具不访问外网，离线环境对它无区分力 |
+| `add_bookmark` | 书签扫描卫星 | offline | `PermissionError` | false | 否 | 不适用 | 工具不访问外网，离线环境对它无区分力 |
 | `list_bookmarks` | 书签扫描卫星 | offline | `ok` | true | 否 | 不适用 | 工具不访问外网，离线环境对它无区分力 |
-| `delete_bookmark` | 书签扫描卫星 | offline | `ok` | true | 否 | 不适用 | 工具不访问外网，离线环境对它无区分力 |
+| `delete_bookmark` | 书签扫描卫星 | offline | `PermissionError` | false | 否 | 不适用 | 工具不访问外网，离线环境对它无区分力 |
 | `find_nearest_bookmark` | 书签扫描卫星 | offline | `ok` | true | 否 | 不适用 | 工具不访问外网，离线环境对它无区分力 |
 | `start_recording` | 导出演制 | offline | `not_connected` | false | 否 | 不适用 | 工具不访问外网，离线环境对它无区分力 |
 | `stop_recording` | 导出演制 | offline | `ok` | true | 否 | 不适用 | 工具不访问外网，离线环境对它无区分力 |
@@ -230,6 +232,7 @@
 | `start_scan` | 书签扫描卫星 | no_api_key | `not_connected` | false | 否 | 不适用 | 本表无模型类工具（模型调用在 agent/provider 层） |
 | `stop_scan` | 书签扫描卫星 | no_api_key | `scan_not_found` | false | 否 | 不适用 | 本表无模型类工具（模型调用在 agent/provider 层） |
 | `get_scan_results` | 书签扫描卫星 | no_api_key | `scan_not_found` | false | 否 | 不适用 | 本表无模型类工具（模型调用在 agent/provider 层） |
+| `list_decoders` | 亚音数字解码 | no_api_key | `ok` | true | 否 | 不适用 | 本表无模型类工具（模型调用在 agent/provider 层） |
 | `start_decoder` | 亚音数字解码 | no_api_key | `not_connected` | false | 否 | 不适用 | 本表无模型类工具（模型调用在 agent/provider 层） |
 | `stop_decoder` | 亚音数字解码 | no_api_key | `decoder_not_found` | false | 否 | 不适用 | 本表无模型类工具（模型调用在 agent/provider 层） |
 | `get_decoder_messages` | 亚音数字解码 | no_api_key | `decoder_not_found` | false | 否 | 不适用 | 本表无模型类工具（模型调用在 agent/provider 层） |
@@ -241,9 +244,9 @@
 | `sat_link_get` | 卫星链路 | no_api_key | `SDRUserError` | false | 否 | 不适用 | 本表无模型类工具（模型调用在 agent/provider 层） |
 | `sat_link_identify` | 卫星链路 | no_api_key | `ok` | true | 否 | 不适用 | 本表无模型类工具（模型调用在 agent/provider 层） |
 | `sat_link_tuning` | 卫星链路 | no_api_key | `ok` | true | 否 | 不适用 | 本表无模型类工具（模型调用在 agent/provider 层） |
-| `add_bookmark` | 书签扫描卫星 | no_api_key | `ok` | true | 否 | 不适用 | 本表无模型类工具（模型调用在 agent/provider 层） |
+| `add_bookmark` | 书签扫描卫星 | no_api_key | `PermissionError` | false | 否 | 不适用 | 本表无模型类工具（模型调用在 agent/provider 层） |
 | `list_bookmarks` | 书签扫描卫星 | no_api_key | `ok` | true | 否 | 不适用 | 本表无模型类工具（模型调用在 agent/provider 层） |
-| `delete_bookmark` | 书签扫描卫星 | no_api_key | `ok` | true | 否 | 不适用 | 本表无模型类工具（模型调用在 agent/provider 层） |
+| `delete_bookmark` | 书签扫描卫星 | no_api_key | `PermissionError` | false | 否 | 不适用 | 本表无模型类工具（模型调用在 agent/provider 层） |
 | `find_nearest_bookmark` | 书签扫描卫星 | no_api_key | `ok` | true | 否 | 不适用 | 本表无模型类工具（模型调用在 agent/provider 层） |
 | `start_recording` | 导出演制 | no_api_key | `not_connected` | false | 否 | 不适用 | 本表无模型类工具（模型调用在 agent/provider 层） |
 | `stop_recording` | 导出演制 | no_api_key | `ok` | true | 否 | 不适用 | 本表无模型类工具（模型调用在 agent/provider 层） |

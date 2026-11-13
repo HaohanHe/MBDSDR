@@ -357,7 +357,7 @@ pre-commit**：pre-commit 现在只跑 claim 范围 + claim 台账 + 暂存区�
 | `scripts/check_rollback_table.py` | 自动：`release_check.py --steps docs` | 发版前；§6.10.2 表格改动后本地跑（2.3s） | 发版人 / 表格改动者 | 2027-01 |
 | `scripts/check_generated_artifacts.py` | 自动：`release_check.py --steps gen_reconcile` | 发版前（3.7s），同时覆盖 `gen_mcp_tools_doc` 的产物 | 发版人 | 2027-01 |
 | `scripts/check_action_duplication.py` | 自动：`release_check.py --steps action_dup` | 发版前；菜单/QAction 增改后本地跑 `--gate`（5.9s，需 Qt/offscreen） | 发版人 / UI 改动者 | 2027-01 |
-| `scripts/check_help_paths.py` | 自动：`release_check.py --steps docs`（**仅渲染点**；全量 CLI 无自动入口） | 发版前自动跑渲染点；帮助文案增删后手动跑全量（**112.4s**，原登记写 13s 已更正） | 发版人 / 帮助文案改动者 | 2027-01 |
+| `scripts/check_help_paths.py` | 自动：`release_check.py --steps docs`（**仅渲染点**；全量 CLI 无自动入口） | 发版前自动跑渲染点；帮助文案增删后手动跑全量（**112.4s**，原登记写 13s 已更正） | 发版人 / 帮助文案改动者 | 2027-01〔证：`b18a39e1` — `docs/code-guards.md:360` — `112.4s`〕 |
 | `scripts/check_card_links.py` | 自动：`guards` + `tests/test_card_links.py` | 发版前（0.2s）；§ 章节增删/改号后由文档 owner 跑 `--fix-anchors` | 发版人 / 文档 owner | 2027-01 |
 | `scripts/check_data_licenses.py` | 自动：`guards` + `tests/test_data_licenses.py` | 发版前（12.6s）；新增/替换数据文件后本地先跑 | 发版人 / 数据改动者 | 2027-01 |
 | `scripts/audit_source_text_pins.py` | 自动：`guards` + `tests/test_source_pin_ratchet.py` | 发版前（9.1s）；基线更新或批次末跑 `--report` | 测试线 / 发版人 | 2027-01 |
@@ -376,7 +376,7 @@ pre-commit**：pre-commit 现在只跑 claim 范围 + claim 台账 + 暂存区�
 | `scripts/claim_gate.py` | 自动：`scripts/hooks/pre-commit` | 每次 `git commit` 前逐文件查 claim 台账（约 0.2s） | 全体提交者（钩子自动） | 2027-01 |
 | `scripts/secret_scan.py` | 自动：`scripts/hooks/pre-commit`（**仅 `--staged`**） | 每次提交前扫暂存区；全量 `--history`/全树扫描**无自动入口**（实测 >300s，见 C 档） | 全体提交者（钩子自动） | 2027-01 |
 | `scripts/git_sync_index.py` | 自动：`post-commit` 钩子 + `tests/test_git_sync_index.py` | 每次提交后同步共享 index（钩子自动） | 全体提交者（钩子自动） | 2027-01 |
-| `scripts/make_decode_fixtures.py --check` | 自动：`release_check.py --steps guards` | 发版前（4.2s）：生成器与 8 个 cf32/wav + `manifest.json` 逐字对账；2026-11-13 生成器补 `provenance: self-generated` 后转绿 | 发版人 / 解码 fixture 改动者 | 2027-01 |
+| `scripts/make_decode_fixtures.py --check` | 自动：`release_check.py --steps guards` | 发版前（4.2s）：生成器与 8 个 cf32/wav + `manifest.json` 逐字对账；2026-11-13 生成器补 `provenance: self-generated` 后转绿 | 发版人 / 解码 fixture 改动者 | 2027-01〔证：`f6034fcd` — `docs/code-guards.md:379` — `self-generated`〕 |
 | `scripts/check_commit_residue.py` | 自动：`scripts/hooks/post-commit`（`--repo <root> --json HEAD`） | **每次提交后**（实测 0.68–0.85s）：本次提交新增的连续行块若以「删除」形态回到工作区未提交 diff → 打印 RESIDUE 并追加 `D:\mbdsdr\.locks\residue_commits.log`；只记录不阻断（提交已落地） | 全体提交者（钩子自动） | 2027-01 |
 | `scripts/ci_pytest_groups.py` | 自动：`.github/workflows/ci.yml`（`--check` + `--group/--total`）+ `scripts/run_all_tests.sh` + `tests/test_collection_consistency.py` | 每次 CI 的 `tests` 矩阵 job（先 `--check` 断言并集=全集，再取本组文件跑 pytest）；本地全量测试走同一分组 | CI runner / 跑全量测试的人 | 2027-01 |
 
@@ -393,7 +393,7 @@ pre-commit**：pre-commit 现在只跑 claim 范围 + claim 台账 + 暂存区�
 | --- | --- | --- | --- | --- | --- |
 | `scripts/release_manifest.py` | `tests/test_release_secrets.py`、`tests/test_version_literal_guard.py` 只 `import` 函数并对**临时 dist** 断言 | 没有命令对**本仓/真 dist** 跑 CLI；`scripts/package_windows.ps1:149` 只是在注释里提到同判据，`docs/known-red-register.md:1136` 是人工复跑命令 | **每次 `python scripts/release_check.py --release` 构建成功后、压 zip 之前**：发版人对真 dist 跑 `python scripts/release_manifest.py --dist D:\mbdsdr\.tmp\pyi-dist12\MBDSDR`（`--only` 默认含 `secrets`）；`package_windows.ps1` 的 owner 应在落盘后调用同一命令，不能只留注释。当前对本仓是红的（`known-red-register.md:1136`），所以暂不接进日常闸 | 发版人（出包脚本 owner 共同承担） | 2027-01 |
 | `scripts/lint_swallow_all.py` | `tests/test_swallow_guard.py`（棘轮） | 仓库现状（37.0s，实测 rc=1：越线中） | 批次末与发版前手动；越线必须当天归因 | 吞噬治理线 | 2026-12 |
-| `scripts/check_red_lifecycle.py` | `tests/test_red_lifecycle.py` | 仓库现状（27.3s，**不进 pre-commit**；2026-11-13 05:54 实测 **rc=1：FAIL 9 / WARN 0 / SKIP 0**＝R8 待复核 3 条＋「已修缺 hash」6 条；红项清单交各 owner，不在扫描时顺带改别人的段落） | **触发条件**：① 每个批次收口前至少 1 次；② 任何 K 条目新增/改绑定/改状态后立即；③ 发版前必跑。**谁跑**：红项 owner（当前 `守卫账本线`）；谁改 K 账谁负责跑。 | 2026-12 |
+| `scripts/check_red_lifecycle.py` | `tests/test_red_lifecycle.py` | 仓库现状（27.3s，**不进 pre-commit**；2026-11-13 05:54 实测 **rc=1：FAIL 9 / WARN 0 / SKIP 0**＝R8 待复核 3 条＋「已修缺 hash」6 条；红项清单交各 owner，不在扫描时顺带改别人的段落） | **触发条件**：① 每个批次收口前至少 1 次；② 任何 K 条目新增/改绑定/改状态后立即；③ 发版前必跑。**谁跑**：红项 owner（当前 `守卫账本线`）；谁改 K 账谁负责跑。 | 2026-12〔证：`7d2c6a65` — `docs/code-guards.md:396` — `FAIL 9 / WARN 0 / SKIP 0`〕 |
 | `scripts/check_red_accounting.py` | `tests/test_red_accounting.py`（8 条反证，含「rc=1 且无条目必须报无账红」） | 守卫账本 `docs/guard-accounting.json`；`--fast` 约 60s，全量约 5min（含 audit_evidence / release_manifest） | 批次末与发版前；任一守卫改退出码语义或新增守卫后 | 红项 owner（守卫账本线） | 2026-12 |
 | `scripts/check_destructive_ops.py` | `tests/test_destructive_audit.py` | 仓库 reflog（0.5s，实测 rc=1：27 笔未审计） | 发生 reset/clean/branch -D 当天 | 操作执行人 | 2026-12 |
 | `scripts/check_test_version.py` | `tests/test_check_test_version.py` | 只在事件调查时对具体路径跑（内部两次 pytest） | 怀疑「改测试销红」时 | 复核人 | 2027-01 |
@@ -434,7 +434,7 @@ pre-commit**：pre-commit 现在只跑 claim 范围 + claim 台账 + 暂存区�
 
 | 脚本 | 零引用证据（反证） | 结论 |
 | --- | --- | --- |
-| `scripts/check_commit_residue.py` | ① `scripts/hooks/post-commit:280-306` 就是调用方：`--repo <root> --json HEAD`，每次提交后跑，实测 0.68–0.85s；② 已安装副本 `.git/hooks/post-commit` 含 `_residue_records`；③ `docs/COORDINATION.md:1914` 记录了 `--range A..B` 的事后复核用法 | 入口存在（post-commit），改登记到 A 档；不接 pre-commit（虽只要 0.7s，但它是提交后检查，挂 pre-commit 等于用未提交内容判已提交事实） |
+| `scripts/check_commit_residue.py` | ① `scripts/hooks/post-commit:280-306` 就是调用方：`--repo <root> --json HEAD`，每次提交后跑，实测 0.68–0.85s；② 已安装副本 `.git/hooks/post-commit` 含 `_residue_records`；③ `docs/COORDINATION.md:1914` 记录了 `--range A..B` 的事后复核用法 | 入口存在（post-commit），改登记到 A 档；不接 pre-commit（虽只要 0.7s，但它是提交后检查，挂 pre-commit 等于用未提交内容判已提交事实）〔证：`4c29e07b` — `scripts/hooks/post-commit:279` — `_residue_records`〕 |
 | `scripts/ci_pytest_groups.py` | ① `.github/workflows/ci.yml:150-166` 每 job 先 `--check` 再 `--group/--total`；② `scripts/run_all_tests.sh:160-163` 本地全量同分组；③ `tests/test_collection_consistency.py:7` 显式覆盖分组口径 | **本仓有 CI**（`.github/workflows/ci.yml`），「无 CI」是上版测绘错误；改登记到 A 档 |
 
 可回滚点：本表改动前的版本为提交 `3de656f4`（`docs: guards 步接入与 43 条登记`），
