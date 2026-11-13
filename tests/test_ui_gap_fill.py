@@ -217,6 +217,26 @@ def test_time_machine_apply_failure_receipt_survives_refresh(qapp):
         dlg.close()
 
 
+def test_time_machine_timezone_conversion_uses_qt(qapp):
+    """带时区的 QDateTime 只能按 Qt 口径换算成 Unix 秒（F6）。
+
+    反证：把 ``unix_from_qdatetime`` 改回 ``toPython().timestamp()``，本机
+    (+08:00) 会把 2026-11-01 01:30 America/New_York 算成 1793467800，
+    与 Qt 的 1793511000 差 43200 s，本用例必红。
+    """
+    from PySide6.QtCore import QDate, QDateTime, QTime, QTimeZone
+
+    from time_machine import qdatetime_from_unix, unix_from_qdatetime
+
+    ny = QDateTime(QDate(2026, 11, 1), QTime(1, 30, 0),
+                   QTimeZone(b"America/New_York"))
+    assert unix_from_qdatetime(ny) == 1793511000
+
+    # 本地时区往返：进出一致，跨日边界同样成立。
+    for unix in (1793511000, 1767225600, 1798761600):
+        assert unix_from_qdatetime(qdatetime_from_unix(unix)) == unix
+
+
 # ---------------------------------------------------------------------- #
 # 星象仪里的搜索与图层面板
 # ---------------------------------------------------------------------- #

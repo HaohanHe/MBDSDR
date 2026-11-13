@@ -16,7 +16,6 @@
 from __future__ import annotations
 
 import time
-from datetime import datetime
 from typing import Callable, Optional, Tuple
 
 from PySide6.QtCore import QDateTime, Qt
@@ -24,7 +23,25 @@ from PySide6.QtWidgets import (
     QDateTimeEdit, QDialog, QHBoxLayout, QLabel, QPushButton, QVBoxLayout,
 )
 
-__all__ = ["TimeMachineDialog", "format_offset"]
+__all__ = ["TimeMachineDialog", "format_offset",
+           "unix_from_qdatetime", "qdatetime_from_unix"]
+
+
+def unix_from_qdatetime(qdt: QDateTime) -> int:
+    """QDateTime → Unix 秒（绝对时刻）。
+
+    时区换算只走 Qt：``toPython()`` 会丢掉 QDateTime 自带的时区，返回 naive
+    datetime，随后 ``.timestamp()`` 按**本机**时区重解释。实测带
+    America/New_York 的秋季回拨歧义时刻 2026-11-01 01:30：
+    ``toSecsSinceEpoch()``=1793511000（Qt 取标准时 −05:00），
+    ``toPython().timestamp()``=1793467800（按本机 +08:00 解释），差 43200 s。
+    """
+    return int(qdt.toSecsSinceEpoch())
+
+
+def qdatetime_from_unix(unix_s: float) -> QDateTime:
+    """Unix 秒 → 本地时区的 QDateTime（输入框显示的是本地时刻）。"""
+    return QDateTime.fromSecsSinceEpoch(int(round(float(unix_s))))
 
 
 def format_offset(delta_s: float) -> str:
@@ -160,14 +177,12 @@ class TimeMachineDialog(QDialog):
 
     # ------------------------------------------------------------------ #
     def _load_current(self) -> None:
-        dt = datetime.fromtimestamp(self._now_unix)
-        self.edit.setDateTime(QDateTime(dt.year, dt.month, dt.day,
-                                        dt.hour, dt.minute, dt.second))
+        self.edit.setDateTime(qdatetime_from_unix(self._now_unix))
         self._refresh_status()
 
     def selected_unix(self) -> float:
-        """输入框里的本地时刻 → Unix 秒（naive 按系统本地时区解释）。"""
-        return float(self.edit.dateTime().toPython().timestamp())
+        """输入框里的本地时刻 → Unix 秒；时区换算交给 Qt（见 unix_from_qdatetime）。"""
+        return float(unix_from_qdatetime(self.edit.dateTime()))
 
     def _shift(self, seconds: int) -> None:
         self.edit.setDateTime(self.edit.dateTime().addSecs(int(seconds)))
@@ -196,10 +211,10 @@ class TimeMachineDialog(QDialog):
             self.status.setText(self._terminal_status)
             return
         t, alt_deg = got
-        dt = t.astimezone().replace(tzinfo=None)
-        self.edit.setDateTime(QDateTime(dt.year, dt.month, dt.day,
-                                        dt.hour, dt.minute, dt.second))
-        self.status.setText(f"天文暮光终：太阳 {alt_deg:g}° · {dt:%m-%d %H:%M}")
+        qdt = qdatetime_from_unix(t.timestamp())
+        self.edit.setDateTime(qdt)
+        self.status.setText(
+            f"天文暮光终：太阳 {alt_deg:g}° · {qdt.toString('MM-dd HH:mm')}")
         self._terminal_status = self.status.text()
 
     def _on_time_edited(self) -> None:
