@@ -137,7 +137,7 @@ ARTIFACTS: tuple[Artifact, ...] = (
         check=[PY, "scripts/check_card_links.py"],
         inputs=("docs/COORDINATION.md", "docs/COMMIT-INCIDENT-CARD.md"),
         owner="协调/账本线；发版闸门",
-        trigger="docs/COORDINATION.md 的 §x 标题行号移动",
+        trigger="docs/COORDINATION.md 的 §x 标题被改名/改号，或卡片锚点写错章节号",
     ),
     Artifact(
         id="decoder_matrix",
