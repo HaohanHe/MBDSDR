@@ -162,8 +162,12 @@ message**：按 message 追「登记面自身豁免」会指到 `052828d1`，按
 ### 11.1 口径
 
 `python scripts/audit_unclaimed_changes.py` 在 2026-11-13 20:45:05 的快照
-共 37 条；其中「无活跃 claim」且「给不出凭据」的 7 条已逐条复核。凭据层级：
-claim 记录 / §6.1 行 / `docs/pending-patches/` 补丁单 / 用户派单。
+共 37 条；其中「无活跃 claim」且「给不出凭据」的 7 条已逐条复核。
+
+凭据层级（2026-11-13 21:25 修订）：**签发记录 `issued_by`**（当时台账还没有
+这一项）/ 台账记名 + 时间窗 / `docs/pending-patches/` 补丁单 / 用户派单。
+**§6.1 行不再算凭据**——`append_coordination_row.py` 强制 `--owner` 与活跃
+claim 逐字一致，行上的名字是照台账抄的，用它证归属是循环论证（见 §十二）。
 
 ### 11.2 对三份补丁单的结果：0 命中
 
@@ -172,14 +176,18 @@ claim 记录 / §6.1 行 / `docs/pending-patches/` 补丁单 / 用户派单。
 `2026-11-13-main-window-tool-success-wiring.md` 三份单子对下列 7 条路径
 **一条都没有提到**，所以「补丁单」这一层给不出任何依据。
 
-### 11.3 4 条搬进 A 组（有 claim 记录 + 提交可指认）
+### 11.3 4 条搬进 A 组（台账记名 + 时间窗与提交吻合；当时无签发记录）
+
+下表 `owner` 一律是**台账当时记的名字**，不是「谁在写」。它们之所以够格进
+A 组，靠的是「记名 + 时间窗包住提交 + 文件与提交内容对得上」三件事叠起来，
+单靠名字不成立；证据等级低于「签发记录」。
 
 | 路径 | 凭据 |
 | --- | --- |
-| `desktop/mcp_worker.py` | claim 20:45:56–20:46:39（S1-S4结果伪造线/6ae85f56，理由「协议缺口：三条返回都带 success」）；提交 `9196439a` 20:46:29 |
-| `tests/test_mcp_worker_behavior.py` | claim 20:45:57–20:46:39（同上）；提交 `9196439a` |
-| `tests/test_ai_steps_behavior.py` | claim 20:47:04–20:47:45（理由「信封用例改判」）；提交 `b898f4a3` 20:47:32 |
-| `tests/test_ai_tool_consistency.py` | claim 20:47:04–20:47:44（理由「补账①用例」）；提交 `b898f4a3` |
+| `desktop/mcp_worker.py` | 台账记名 20:45:56–20:46:39（S1-S4结果伪造线/6ae85f56，理由「协议缺口：三条返回都带 success」）；提交 `9196439a` 20:46:29 |
+| `tests/test_mcp_worker_behavior.py` | 台账记名 20:45:57–20:46:39（同上）；提交 `9196439a` |
+| `tests/test_ai_steps_behavior.py` | 台账记名 20:47:04–20:47:45（理由「信封用例改判」）；提交 `b898f4a3` 20:47:32 |
+| `tests/test_ai_tool_consistency.py` | 台账记名 20:47:04–20:47:44（理由「补账①用例」）；提交 `b898f4a3` |
 
 ### 11.4 剩余 3 条的收口（2026-11-13 21:21 复核）
 
@@ -188,8 +196,8 @@ claim 记录 / §6.1 行 / `docs/pending-patches/` 补丁单 / 用户派单。
 
 | 路径 | 20:45 状态 | 收口结论 | 依据 |
 | --- | --- | --- | --- |
-| `docs/perf-evidence/2026-11-11/theme_switch_lowload_retest.json` | ?? | **A 组（直接引用）**：`守卫账本线` 的研究文档逐字点名此文件为证据 | `docs/research/2026-11-11-p0-static-inference-check-rest.md:123`「证据 `docs/perf-evidence/2026-11-11/theme_switch_lowload_retest.json`」；同段 L121 的 `103.1% / 108.6%`、`243–397 ms` 与该 JSON 的 `load_before/load_after`、`wall_ms` 逐数对上；该 research 文件在台账里的 owner 是 `守卫账本线` |
-| `docs/learn/2026-11-13-qgis-3.44.15-source-study.md` | ?? | **A 组（间接凭据）**：台账里唯一一条 QGIS 相关 claim 来自 `Qt翻译与设置显式线/6ae85f56`，其理由与当天该线的提交同题，且文档落点正是该线改过的文件 | ① `.locks/claims.json` 中 `desktop/l10n.py` 的 history 有 `owner=Qt翻译与设置显式线/6ae85f56`、`claim_reason="QGIS学习项：加载 qtbase 翻译 + 设置显式标记，需改本文件"`（全仓唯一含 `QGIS` 的 claim 记录）；② 该线当天提交 `c4a2f345`（19:37:38）`feat(i18n): 加载 Qt 自带 qtbase 翻译`；③ 文档 §8.1（L313–328）逐条对照 `desktop/l10n.py`、`desktop/i18n/build_qm.py`。**该文件本身从未被 claim**，所以这是「旁证链」不是「占位凭据」——按 A 组记，但标注凭据类型 |
+| `docs/perf-evidence/2026-11-11/theme_switch_lowload_retest.json` | ?? | **A 组（直接引用）**：`守卫账本线` 的研究文档逐字点名此文件为证据 | `docs/research/2026-11-11-p0-static-inference-check-rest.md:123`「证据 `docs/perf-evidence/2026-11-11/theme_switch_lowload_retest.json`」；同段 L121 的 `103.1% / 108.6%`、`243–397 ms` 与该 JSON 的 `load_before/load_after`、`wall_ms` 逐数对上。台账记名 `守卫账本线` 只作旁证——本条主证据是**文档逐字引用**，不依赖名字 |
+| `docs/learn/2026-11-13-qgis-3.44.15-source-study.md` | ?? | **A 组（旁证链，等级低于直接引用）**：台账里唯一一条 QGIS 相关记录记的是 `Qt翻译与设置显式线/6ae85f56`，理由与当天该线的提交同题，文档落点正是该线改过的文件 | ① `.locks/claims.json` 中 `desktop/l10n.py` 的 history 有 `owner=Qt翻译与设置显式线/6ae85f56`、`claim_reason="QGIS学习项：加载 qtbase 翻译 + 设置显式标记，需改本文件"`（全仓唯一含 `QGIS` 的 claim 记录；**这是台账记名，不是签发人**）；② 该线当天提交 `c4a2f345`（19:37:38）`feat(i18n): 加载 Qt 自带 qtbase 翻译`；③ 文档 §8.1（L313–328）逐条对照 `desktop/l10n.py`、`desktop/i18n/build_qm.py`。**该文件本身从未被 claim**，所以这是「旁证链」不是「占位凭据」，也不能只靠名字成立 |
 | `tools/axioms/__init__.py` | M | **不属于任何线：它不是一条改动**——工作区内容与 HEAD 同一 blob，`git diff` 为空 | `git hash-object tools/axioms/__init__.py` = `8072776681…` = `git rev-parse HEAD:tools/axioms/__init__.py`；`git diff --quiet -- tools/axioms/__init__.py` 退出码 0；`git status` 仍报 `M` 是行尾假象（`core.autocrlf=true`、工作区存 LF），文件 mtime 为 2026-11-13 00:40:12。既然内容没变，就既不搬 A 组也不记「无凭据」，按「假改动」销账 |
 
 销账口径：前两条**搬进 A 组**（一条直接、一条间接且注明凭据类型），第三条按
@@ -214,4 +222,57 @@ claim 记录 / §6.1 行 / `docs/pending-patches/` 补丁单 / 用户派单。
 **现在已不是未提交状态**。
 
 本线对这条线只做记录：**没有替它加 claim，也没有替它写 §6.1 行**。
+
+---
+
+## 十二、更正：20:41 两条 claim 的真实来源，以及「§6.1 owner 列不能当归属证据」
+
+### 12.1 更正的事实
+
+20:41:49 那两条挂在 `scripts/safe_commit.py` 上的 claim（理由为空，
+20:41:49–20:42:24）**是 safe_commit 线自己的进程发的**：`--owner` 写的是它
+当时的线名原串，不是「它判断文件归谁」；`--reason` 是漏传——HEAD 版
+`cmd_claim` 只在超过长租期阈值或续租时强制理由，默认 10 分钟的新建 claim
+不校验非空，所以空理由能落库。
+
+它能给的证据只到「时间 + 文件集」：两条 `acquired` 相隔 0.188 秒、窗口包住
+`e326d9d2`、35 秒后一起释放。**到不了命令行**。因此本线此前口头报告里
+「另一条线借用了本线 owner 名」的判断**作废**：不是冒名，也不是机器替人签名；
+根因是**台账当时不记签发人**。
+
+### 12.2 吸收的结论：§6.1 的 owner 列不能当归属证据
+
+`append_coordination_row.py` 强制 `--owner` 与活跃 claim 的 owner 逐字一致，
+所以那行是**照台账抄的**；而台账在 20:41 不记签发人。拿表证明归属、再拿归属
+解释表，是**循环论证**。
+
+本文件逐句复核的结果（凡是靠 §6.1 行或纯 claim owner 推断归属的句子）：
+
+| 位置 | 原来怎么写的 | 处置 |
+| --- | --- | --- |
+| 11.1 凭据层级 | 把「§6.1 行」列为凭据之一 | 已删。改为「签发记录 `issued_by`（当时还没有）/ 台账记名 + 时间窗 / 补丁单 / 用户派单」 |
+| 11.3 表头与正文 | 「有 claim 记录 + 提交可指认」 | 改为「台账记名 + 时间窗包住提交 + 文件与提交内容对得上」，并写明证据等级**低于签发记录**、单靠名字不成立 |
+| 11.4 theme json 行 | 把「台账 owner=守卫账本线」并列为依据 | 主证据改为**文档逐字引用 + 数字逐项对上**；台账记名降为旁证 |
+| 11.4 qgis 行 | 「A 组（间接凭据）」 | 改为「A 组（旁证链，等级低于直接引用）」，并注明「台账记名不是签发人」 |
+| §一（`052828d1` 归属） | —— | **保留**：那条靠的是本线自己的 claim 时间窗（20:28:15–20:37:15）+ 提交内容比对，不是 §6.1 行 |
+
+补这个洞的唯一手段是 21:19 起落地的三项留痕：`issued_by`（谁签发的）、
+`owner_mismatch`（记名与签发不一致）、`reason_missing`（没写理由）。截至本节
+写作时，台账里带 `issued_by` 的记录只有 6 条——**旧记录不可追认**，只能靠
+「记名 + 时间窗」这种低一档的证据。
+
+### 12.3 一处措辞欠账，按 §6.1.8 不回头改行
+
+21:19 落的两条 §6.1 行（`scripts/file_claim.py`、`tests/test_claim_signer_trace.py`）
+写的是「冒名与空理由留痕」。按 §6.1.8「行不许改写」不回头改行，**语义以本节
+为准**：`owner_mismatch` 只表示「记名与签发身份不一致」（代签、照抄都会命中），
+不含「冒名」这个动机定性。代码与其 WARN 文案已同步改为「记名与签发身份不一致」。
+
+### 12.4 safe_commit 四笔：不补登，进 §6.1.7 由该线自己写
+
+`safe_commit` 线自报四笔 `e376e16b`、`8aa7c72e`、`583d8f62`、`ec938a09`
+**既没有 claim 也没有 §6.1 行**。裁定：不补登——补登要重新 claim，会把时间
+写成现在，等于把「当时没人占位」改写成「当时占位了」，那正是本文件反复警告的
+「让台账失真换取台账好看」。这四笔归 §6.1.7 历史欠账清单，**由该线自己写**；
+本线不代写、不代 claim、不代为解释。
 
