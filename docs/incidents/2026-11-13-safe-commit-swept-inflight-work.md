@@ -157,3 +157,57 @@ message**：按 message 追「登记面自身豁免」会指到 `052828d1`，按
 这与 §九 的自查是同一病灶的两个面：说明既漏了件数（⑲），又把本线修复与
 别线在途混在一句里。**一笔只该说一件事；说不清就不该合笔。**
 
+## 十一、反向盲区：同一处「不占位」，一天内第二次（方向相反）
+
+### 11.1 口径
+
+`python scripts/audit_unclaimed_changes.py` 在 2026-11-13 20:45:05 的快照
+共 37 条；其中「无活跃 claim」且「给不出凭据」的 7 条已逐条复核。凭据层级：
+claim 记录 / §6.1 行 / `docs/pending-patches/` 补丁单 / 用户派单。
+
+### 11.2 对三份补丁单的结果：0 命中
+
+`2026-11-13-main-window-session-write-gate.md`、
+`2026-11-13-keyboard-focus-chain-unlanded.md`、
+`2026-11-13-main-window-tool-success-wiring.md` 三份单子对下列 7 条路径
+**一条都没有提到**，所以「补丁单」这一层给不出任何依据。
+
+### 11.3 4 条搬进 A 组（有 claim 记录 + 提交可指认）
+
+| 路径 | 凭据 |
+| --- | --- |
+| `desktop/mcp_worker.py` | claim 20:45:56–20:46:39（S1-S4结果伪造线/6ae85f56，理由「协议缺口：三条返回都带 success」）；提交 `9196439a` 20:46:29 |
+| `tests/test_mcp_worker_behavior.py` | claim 20:45:57–20:46:39（同上）；提交 `9196439a` |
+| `tests/test_ai_steps_behavior.py` | claim 20:47:04–20:47:45（理由「信封用例改判」）；提交 `b898f4a3` 20:47:32 |
+| `tests/test_ai_tool_consistency.py` | claim 20:47:04–20:47:44（理由「补账①用例」）；提交 `b898f4a3` |
+
+### 11.4 仍为「无凭据」的 3 条
+
+| 路径 | 状态 | 核查结果 |
+| --- | --- | --- |
+| `tools/axioms/__init__.py` | M | `claims.json` 无该键；§6.1 无行；三份补丁单 0 命中 |
+| `docs/learn/2026-11-13-qgis-3.44.15-source-study.md` | ?? | 同上 |
+| `docs/perf-evidence/2026-11-11/theme_switch_lowload_retest.json` | ?? | 同上 |
+
+三条均**不猜、不合并、不代签**。
+
+### 11.5 反向盲区（同一处缺陷，方向相反）
+
+20:45:05 做审计快照时，上表 4 条路径**没有任何 claim**；51 秒后
+（20:45:56/57）那四处才被 claim。也就是说：
+
+- 上一次（`052828d1`）是「**占了位就当成内容归我**」；
+- 这一次是「**干活不占位，别人就看不见**」。
+
+两者是同一个盲区的两面：都拿「claim 表里有没有」当「有没有主」。区别只在
+谁吃亏——上次是别人被我卷走，这次是那条线的在途改动在审计里显示为「无主」。
+
+**明确回答「此刻是否正被工具成败线改」**：是。20:45 那一刻，`desktop/mcp_worker.py`
+与 `tests/test_ai_steps_behavior.py`、`tests/test_ai_tool_consistency.py`、
+`tests/test_mcp_worker_behavior.py` 正被「S1-S4结果伪造线/6ae85f56」修改且
+未提交；它们分别在 `9196439a`（20:46:29，mcp_worker + 其行为测试）与
+`b898f4a3`（20:47:32，ai_steps + main_window + tool_registry + 两个测试）落库，
+**现在已不是未提交状态**。
+
+本线对这条线只做记录：**没有替它加 claim，也没有替它写 §6.1 行**。
+
