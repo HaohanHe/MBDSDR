@@ -115,6 +115,26 @@ def test_status_fresh_within_24h_same_source():
     assert t["threshold_days"] == 1.0
 
 
+def test_future_epoch_is_visible_in_report():
+    """历元在将来时年龄按 0 处理，但必须显式标出 epoch_in_future。
+
+    反证：从 predict_passes_report 的 tle 字典删掉 epoch_in_future，
+    本用例直接 KeyError 变红；把 flag 恒置 False，本用例第一段变红。
+    """
+    before_epoch = datetime(2024, 9, 30, 0, 0, 0, tzinfo=timezone.utc)
+    rep = predict_passes_report(
+        TLE, SAMPLE_SITE, hours=1, min_alt=5, clock=lambda: before_epoch)
+    t = rep["tle"]
+    assert t["epoch_in_future"] is True
+    assert t["age_days"] == 0.0
+    assert t["status"] == "fresh"
+
+    after_epoch = datetime(2024, 10, 2, 0, 0, 0, tzinfo=timezone.utc)
+    rep2 = predict_passes_report(
+        TLE, SAMPLE_SITE, hours=1, min_alt=5, clock=lambda: after_epoch)
+    assert rep2["tle"]["epoch_in_future"] is False
+
+
 def test_predict_exception_preserves_reason(monkeypatch):
     """预测抛异常时必须留下原因，不许压成无来源的 n_passes=0。"""
     import mbdsdr_ai.spacetime_predict as sp
