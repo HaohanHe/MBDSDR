@@ -76,12 +76,16 @@ class TestStepsFromChat:
         assert steps[0].status == ai_steps.STATUS_FAILED
         assert steps[0].error == "not_connected"
 
-    def test_failure_from_ok_false_text(self):
-        """success 标志为真但结果体显式 {"ok": false} 时仍判失败（对齐 mobile）。"""
+    def test_ok_false_text_does_not_override_success_flag(self):
+        """判据只有 success：正文里的 ok:false 不再翻案。
+
+        设备只回 ok 的信封已在产出端折算成 success（mcp_worker._real_tool /
+        tool_registry 的 dict 分支），投影层不再用正文文本猜成败。
+        """
         calls = [{"name": "radio_ptt", "arguments": "{}"}]
         results = [_chat_result('{"ok": false, "error": "只收电台"}')]
         steps = ai_steps.steps_from_chat(calls, results)
-        assert steps[0].status == ai_steps.STATUS_FAILED
+        assert steps[0].status == ai_steps.STATUS_SUCCESS
 
     def test_missing_result_is_running_not_invented(self):
         """结果缺失（流被打断）→ running，绝不臆造成功/失败。"""
@@ -120,13 +124,6 @@ class TestSummarySemantics:
 
     def test_summary_empty_text_is_empty(self):
         assert ai_steps.summarize_result("") == ""
-
-    def test_is_failure_error_prefix_and_ok_false(self):
-        assert ai_steps.is_failure_result("Error: 参数非法")
-        assert ai_steps.is_failure_result('{"ok":false}')
-        assert ai_steps.is_failure_result('{"ok" : false}')
-        assert not ai_steps.is_failure_result('{"ok": true}')
-        assert not ai_steps.is_failure_result("")
 
 
 class TestWorkflowProjection:

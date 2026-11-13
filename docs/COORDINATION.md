@@ -2087,6 +2087,7 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `mbdsdr_ai/workflow_engine.py` | S1-S4结果伪造线/6ae85f56（源头：step_results 随条目落 tool_success（ToolResult.success），执行层 success 与工具成败分开） | 2026-11-13 20:47 | 本笔 |
 | `desktop/ai_steps.py` | S1-S4结果伪造线/6ae85f56（投影：steps_from_workflow 只读 tool_success，不再拿结果文本猜） | 2026-11-13 20:47 | 本笔 |
 | `tests/test_ai_steps_behavior.py` | S1-S4结果伪造线/6ae85f56（TestWorkflowCrossCheck 改经 WorkflowEngine 真跑（ToolResult.success=False → FAILED）） | 2026-11-13 20:47 | 本笔 |
+| `tests/test_ai_steps.py` | S1-S4结果伪造线/6ae85f56（启发式删除：success 正文 ok:false 不再翻案 + 删 is_failure_result 单测） | 2026-11-13 20:50 | 本笔 |
 
 > 上表各行均由 `claim` 台账推导：owner 原文与 `acquired_at` 直接取自台账，
 > 目的优先用台账里的 `claim_reason`，没有就如实写「未声明」，不补编。时间列只是

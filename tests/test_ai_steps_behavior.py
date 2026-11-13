@@ -4,12 +4,11 @@
 与既有 tests/test_ai_steps.py 的分工：那份覆盖 happy path（成功/失败/缺结果/
 多步展开）；本文件专盯**投影层的失败/成功判据是否说谎**：
 
-1. steps_from_tool_result 的失败判据（"error" 键取真值 vs 键存在即可）与
-   steps_from_chat 必须同口径——否则同一份结果两条路径画出两种卡；
+1. steps_from_tool_result / steps_from_chat 的成败只认 success（tool_success），
+   不再拿结果正文二次判读，两条路径必须同口径——否则同一份结果画出两种卡；
 2. 错误信封、None、标量、缺 tool 名的 handling 不抛穿、不制造"假成功步骤"；
-3. workflow_execute 子步骤：success:true 但子结果自己说失败时不得画 OK 卡
-   （workflow_engine 只看 tool_executor 有没有抛异常，ToolResult.success=False
-   的失败会带着 success:true 落到 step_results）；
+3. workflow_execute 子步骤：成败来自 workflow_engine 落账的 tool_success，
+   执行器没抛异常（success:true）不等于工具成功；
 4. subagent_execute：无单步结果时不补写单步成败理由。
 
 跑法：python -m pytest tests/test_ai_steps_behavior.py
@@ -71,12 +70,11 @@ class TestFailureCriteriaConsistency:
         assert "未连接" in step.summary
 
     def test_error_prefixed_value_is_classified_by_envelope_keys_only(self):
-        """已知边界：Error: 前缀判据只作用于裸文本顶层内容，不扫字段值。
+        """已知边界：文本判据已移除，只认 success / error 键。
 
-        steps_from_tool_result 的输入先 json.dumps 成串后以 "{" 开头，
-        is_failure_result 的 startswith("Error") 分支恒不命中——这里如实钉住
-        当前口径（显式 error 键 / ok:false 才算失败），不引入"扫字段值"的
-        启发式误判。
+        steps_from_tool_result 的输入先 json.dumps 成串，任何以 "Error" 开头的
+        字段值都是数据而非判据——没带 success 也没 error 键时按成功渲染，
+        不引入"扫字段值"的启发式误判。
         """
         step = ai_steps.steps_from_tool_result("sdr_record_start",
                                                {"message": "Error: 硬件忙"})
@@ -317,9 +315,3 @@ class TestTextToolEdges:
         preview = ai_steps.args_preview({"x": Weird()})
         assert preview, "不可序列化的参数不得退化成空预览"
         assert "x" in preview and "Weird" in preview
-
-    def test_is_failure_result_ignores_whitespace_only_and_ok_true(self):
-        assert not ai_steps.is_failure_result("   ")
-        assert not ai_steps.is_failure_result('{"ok" : true}')
-        assert ai_steps.is_failure_result("Error: timeout")
-        assert ai_steps.is_failure_result('{"ok"  :  false}')

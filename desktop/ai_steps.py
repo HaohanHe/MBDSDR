@@ -100,19 +100,6 @@ def args_preview(args: Any) -> str:
     return truncate_text(text, int(_tok().AI["args_preview_chars"]))
 
 
-def is_failure_result(text: str) -> bool:
-    """真实结果文本是否表明失败（对齐 mobile isFailureResult，不臆造成功）。
-
-    覆盖：显式 {"ok": false}（含手动模式 gated，容忍空格）、执行层 "Error..." 文本。
-    """
-    s = (text or "").strip()
-    if not s:
-        return False
-    if s.startswith("Error"):
-        return True
-    return re.search(r'"ok"\s*:\s*false', s) is not None
-
-
 def summarize_result(text: str) -> str:
     """从真实结果提取一行短摘要（对齐 mobile summarizeResult）。
 
@@ -192,10 +179,12 @@ def steps_from_chat(tool_calls: List[Dict[str, Any]],
             continue
 
         content = tr.get("content", "")
-        success = bool(tr.get("success", False))
-        err = str(tr.get("error", "") or "")
         text = content if isinstance(content, str) else json.dumps(content, ensure_ascii=False)
-        status = STATUS_SUCCESS if (success and not is_failure_result(text)) else STATUS_FAILED
+        # 成败只看 success（tool_success），不再拿正文文本二次判读：
+        # 文本启发式会把 success=True 翻成 FAILED，等于第二个判定点。
+        ok = tool_success(tr)
+        status = STATUS_SUCCESS if ok else STATUS_FAILED
+        err = str(tr.get("error", "") or "")
         steps.append(StepRecord(
             tool=name,
             args_preview=args_preview(tr.get("args", args) or args),
