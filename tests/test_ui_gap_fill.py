@@ -159,6 +159,64 @@ def test_time_machine_apply_hands_unix_to_callback(qapp):
         dlg.close()
 
 
+def test_time_machine_night_receipt_survives_refresh(qapp):
+    """A3：极昼/极夜的「不猜时刻」是终态，刷新不得改写成模拟差。"""
+    from time_machine import TimeMachineDialog
+    t0 = 1_800_000_000.0
+    dlg = TimeMachineDialog(None, now_unix=t0, real_unix=t0,
+                            night_resolver=lambda: None)
+    try:
+        _pump(3)
+        dlg._go_night()
+        assert "不猜" in dlg.status.text()
+        dlg._refresh_status()  # 排队/主动刷新
+        _pump(3)
+        assert "不猜" in dlg.status.text()
+        assert "模拟中" not in dlg.status.text()
+    finally:
+        dlg.close()
+
+
+def test_time_machine_now_receipt_survives_refresh(qapp):
+    """A3（成功侧）：回到现在的回执同样要留住。"""
+    from time_machine import TimeMachineDialog
+    t0 = 1_800_000_000.0
+    dlg = TimeMachineDialog(None, now_unix=t0 - 7200, real_unix=t0)
+    try:
+        _pump(3)
+        dlg._go_now()
+        receipt = dlg.status.text()
+        assert "回到现在" in receipt
+        dlg._refresh_status()
+        assert dlg.status.text() == receipt
+    finally:
+        dlg.close()
+
+
+def test_time_machine_apply_failure_receipt_survives_refresh(qapp):
+    """A3：跳转失败是终态；用户重新选时刻才算新一轮，回执让位。"""
+    from time_machine import TimeMachineDialog
+    t0 = 1_800_000_000.0
+
+    def boom(_ts):
+        raise RuntimeError("引擎不可用")
+
+    dlg = TimeMachineDialog(None, now_unix=t0, real_unix=t0, on_apply=boom)
+    try:
+        _pump(3)
+        dlg._shift(3600)
+        dlg._apply()
+        assert "跳转失败" in dlg.status.text()
+        dlg._refresh_status()
+        assert "跳转失败" in dlg.status.text()
+        # 用户重新选时刻 = 新一轮，回执让位给实时差
+        dlg._shift(3600)
+        _pump(3)
+        assert "跳转失败" not in dlg.status.text()
+    finally:
+        dlg.close()
+
+
 # ---------------------------------------------------------------------- #
 # 星象仪里的搜索与图层面板
 # ---------------------------------------------------------------------- #

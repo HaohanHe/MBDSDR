@@ -66,6 +66,10 @@ class TimeMachineDialog(QDialog):
         self._now_unix = float(now_unix if now_unix is not None else self._real_unix)
         self._night_resolver = night_resolver
         self._on_apply = on_apply
+        #: 最近一次动作的终态回执（已在现在/已回到现在、天文暮光终、
+        #: 极昼极夜没有事件、跳转失败）。刷新路径只回显它，不能把回执
+        #: 改写成「模拟中 · 比现在 …」；用户重新选时刻才清空。
+        self._terminal_status: str = ""
         self._build_ui()
         self._load_current()
 
@@ -129,7 +133,7 @@ class TimeMachineDialog(QDialog):
 
         # 任何时刻变化都立刻重算「与现在的差」：快捷按钮、日历、手打都要
         # 有反馈，否则点「+1 天」界面像没反应。
-        self.edit.dateTimeChanged.connect(lambda _dt: self._refresh_status())
+        self.edit.dateTimeChanged.connect(lambda _dt: self._on_time_edited())
 
         self.setStyleSheet(
             "QDialog { background-color: #14161c; }"
@@ -177,6 +181,7 @@ class TimeMachineDialog(QDialog):
         # 说清「本来就在」与「刚跳回来」的区别，不假装刚发生了什么。
         self.status.setText("已在现在 · 实时" if was_real
                             else "已回到现在 · 实时")
+        self._terminal_status = self.status.text()
 
     def _go_night(self) -> None:
         if self._night_resolver is None:
@@ -187,15 +192,26 @@ class TimeMachineDialog(QDialog):
             got = None
         if not got:
             # 极昼/极夜没有这个事件：明说，不硬凑一个时刻。
-            self.status.setText("这个纬度当天没有天文暮光终（极昼/极夜），不猜时刻")
+            self._terminal_status = "这个纬度当天没有天文暮光终（极昼/极夜），不猜时刻"
+            self.status.setText(self._terminal_status)
             return
         t, alt_deg = got
         dt = t.astimezone().replace(tzinfo=None)
         self.edit.setDateTime(QDateTime(dt.year, dt.month, dt.day,
                                         dt.hour, dt.minute, dt.second))
         self.status.setText(f"天文暮光终：太阳 {alt_deg:g}° · {dt:%m-%d %H:%M}")
+        self._terminal_status = self.status.text()
+
+    def _on_time_edited(self) -> None:
+        """用户重新选时刻 = 新一轮：上一轮的回执作废，回到实时差。"""
+        self._terminal_status = ""
+        self._refresh_status()
 
     def _refresh_status(self) -> None:
+        if self._terminal_status:
+            # 终态回执只在这里回显：dateTimeChanged / 主动刷新不得改写。
+            self.status.setText(self._terminal_status)
+            return
         delta = self.selected_unix() - self._real_unix
         if abs(delta) < 60.0:
             self.status.setText("当前就是现在（实时）")
@@ -209,6 +225,7 @@ class TimeMachineDialog(QDialog):
             try:
                 self._on_apply(ts)
             except Exception:
-                self.status.setText("跳转失败：时间引擎不可用，时刻未改变")
+                self._terminal_status = "跳转失败：时间引擎不可用，时刻未改变"
+                self.status.setText(self._terminal_status)
                 return
         self.accept()

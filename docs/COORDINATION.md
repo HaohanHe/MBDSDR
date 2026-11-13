@@ -2095,6 +2095,12 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `desktop/modulation_panel.py` | S1-S4结果伪造线/6ae85f56（A2：_terminal_status 保留识别完成/失败，成功侧不再被刷新改写成就绪） | 2026-11-13 20:53 | 本笔 |
 | `tests/test_weather_panel_fengyun.py` | S1-S4结果伪造线/6ae85f56（A1 用例：失败后触发 _on_idle/_refresh_state，状态行不变） | 2026-11-13 20:53 | 本笔 |
 | `tests/test_modulation_panel_failure_landing.py` | S1-S4结果伪造线/6ae85f56（A2 用例：识别完成后刷新仍为「识别完成」） | 2026-11-13 20:53 | 本笔 |
+| `desktop/time_machine.py` | S1-S4结果伪造线/6ae85f56（A3：_terminal_status 保留回到现在/天文暮光终/极昼极夜/跳转失败，刷新只回显，重新选时刻才清空） | 2026-11-13 20:56 | 本笔 |
+| `tests/test_ui_gap_fill.py` | S1-S4结果伪造线/6ae85f56（A3 三条用例：极昼极夜/回到现在/跳转失败终态在刷新后不变） | 2026-11-13 20:56 | 本笔 |
+| `docs/design-basis.md` | 文档引用复核线/6ae85f56（11 条过期定性：:145 af7208b 缺坐标；minSize 旧字面量按 a2be554a 重定位） | 2026-11-13 21:02 | 本笔 |
+| `docs/limitations-register.md` | 文档引用复核线/6ae85f56（11 条过期定性：L49/L50/L52 补四元组 10efa40c/05f3a6b5/cff501fc） | 2026-11-13 21:02 | 本笔 |
+| `docs/settings-inventory.md` | 文档引用复核线/6ae85f56（11 条过期定性：:259 补 49eddcf 的 path:line 与字面量） | 2026-11-13 21:02 | 本笔 |
+| `docs/COORDINATION.md` | 文档引用复核线/6ae85f56（本笔 §6.1 登记行，提交后释放） | 2026-11-13 21:02 | 本笔 |
 
 > 上表各行均由 `claim` 台账推导：owner 原文与 `acquired_at` 直接取自台账，
 > 目的优先用台账里的 `claim_reason`，没有就如实写「未声明」，不补编。时间列只是
