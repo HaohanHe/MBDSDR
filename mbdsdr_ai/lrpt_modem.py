@@ -26,7 +26,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass, field
-from typing import List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 
@@ -56,6 +56,18 @@ SPS: int = FS_HZ // SYM_RATE    # = 8
 LRPT_SYNC_WORD: int = 0xFCA2B63DB00D9794
 SYNC_BITS: int = 64
 SYNC_SYMBOLS: int = SYNC_BITS // 2    # QPSK 每符号 2 bit → 32 符号
+
+#: 载波锁判据（对齐 meteor_demod ``pll.c`` 的 ``_locked``/``_locked_once``
+#: 双阈值迟滞结构，但误差量改用与本仓 AGC 单位无关的判决导向相位残差）：
+#: QPSK 四象限折叠后的相位残差在无锁时近似均匀分布，期望为 π/8 rad；
+#: 锁定要求 EMA 低于该期望的 0.65 倍，失锁要求高于 0.85 倍。
+#: 阈值由 ``test_lrpt_modem`` 的合成标定钉住（10 dB 稳态 ≈0.19 rad，
+#: 纯噪声 ≈0.38 rad）；上游 tanh(I)Q−tanh(Q)I 的 85/105 阈值依赖其
+#: AGC 目标幅度 190，本仓 AGC 为 RMS=1，照搬会失去区分度（实测噪声
+#: 0.029 与 10 dB 信号 0.025 无法分档）。
+_LOCK_ACQUIRE_RAD: float = 0.65 * (math.pi / 8.0)
+_LOCK_RELEASE_RAD: float = 0.85 * (math.pi / 8.0)
+_LOCK_EMA_POLE: float = 0.01
 
 
 def _root_raised_cosine(alpha: float, sps: int, span: int = 10) -> np.ndarray:
@@ -302,6 +314,30 @@ class LrptDemodulator:
         # 预计算 4 相位 + swap 的同步字假设（correlator.cpp:54-63 机制）
         self._sync_hypotheses = self._build_sync_hypotheses()
 
+        # 最近一次 demodulate_soft 的载波锁状态（未跑过时为诚实空态）
+        self._lock_state: Dict[str, Any] = self._empty_lock_state()
+
+    @staticmethod
+    def _empty_lock_state() -> Dict[str, Any]:
+        return {
+            "locked": False,
+            "locked_once": False,
+            "unlock_events": 0,
+            "lock_ratio": 0.0,
+            "phase_error_avg_rad": None,
+            "symbols": 0,
+        }
+
+    def lock_state(self) -> Dict[str, Any]:
+        """最近一次 :meth:`demodulate_soft` 的载波锁状态。
+
+        与 ``signal_quality``（宽谱 IQ 信噪比估计）不同，这是**解调器内部**
+        状态：``locked`` 是收尾时刻是否仍锁、``locked_once`` 是本段是否曾
+        锁定过、``lock_ratio`` 是锁定符号占比。无信号/未跑过时返回空态，
+        不编造锁定。
+        """
+        return dict(self._lock_state)
+
     # -- 同步字假设（4 相位 × I/Q swap） ------------------------------------ #
     @staticmethod
     def _rotate_bits_qpsk(bits: np.ndarray, phase_deg: int, swap: bool) -> np.ndarray:
@@ -372,14 +408,21 @@ class LrptDemodulator:
 
     # -- Costas 环（QPSK，符号速率） ------------------------------------------ #
     def _costas_track_symbols(self, sym: np.ndarray) -> np.ndarray:
-        """二阶 Costas 环（符号速率，QPSK tanh 误差检测）。
+        """二阶 Costas 环（符号速率，QPSK tanh 误差检测）+ 载波锁判定。
 
         机制（meteor_demod pll.c:117-118 自述重写）：
           e = tanh(I)*Q - tanh(Q)*I；二阶环 alpha/beta 由阻尼+带宽决定。
+        锁判定对齐 pll.c:116-123 的双阈值迟滞（``_locked``/``_locked_once``），
+        但误差量用判决导向相位残差（见模块级 ``_LOCK_*`` 说明）。
         """
         out = np.empty_like(sym)
         phase = 0.0
         freq = 0.0
+        err_avg = 1.0          # 无锁初值：远高于失锁门限
+        locked = False
+        locked_once = False
+        unlock_events = 0
+        locked_symbols = 0
         for n in range(sym.size):
             mixed = sym[n] * np.exp(-1j * phase)
             I = float(np.real(mixed))
@@ -391,7 +434,28 @@ class LrptDemodulator:
                 phase -= 2 * math.pi
             while phase < -math.pi:
                 phase += 2 * math.pi
+            # 判决导向相位残差：QPSK 四象限折叠到 [-π/4, π/4]
+            phi = (math.atan2(float(Q), float(I)) - math.pi / 4.0) % (math.pi / 2.0)
+            if phi > math.pi / 4.0:
+                phi -= math.pi / 2.0
+            err_avg += _LOCK_EMA_POLE * (abs(phi) - err_avg)
+            if not locked and err_avg < _LOCK_ACQUIRE_RAD:
+                locked = True
+                locked_once = True
+            elif locked and err_avg > _LOCK_RELEASE_RAD:
+                locked = False
+                unlock_events += 1
+            if locked:
+                locked_symbols += 1
             out[n] = mixed
+        self._lock_state = {
+            "locked": locked,
+            "locked_once": locked_once,
+            "unlock_events": unlock_events,
+            "lock_ratio": locked_symbols / float(sym.size),
+            "phase_error_avg_rad": err_avg,
+            "symbols": int(sym.size),
+        }
         return out
 
     # -- Gardner 定时恢复 + 符号抽取 ----------------------------------------- #
@@ -591,6 +655,7 @@ class LrptDemodulator:
             顺序 I,Q,I,Q…，正负即硬判决、幅度即置信度；无信号时 ([], [])。
         """
         iq = np.asarray(iq, dtype=np.complex128)
+        self._lock_state = self._empty_lock_state()
         if iq.size < self.sps * SYNC_SYMBOLS:
             return np.empty(0, dtype=np.float64), []
 

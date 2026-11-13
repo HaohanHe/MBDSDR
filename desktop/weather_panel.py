@@ -344,11 +344,15 @@ class DecodeWorker(QObject):
                 os.path.dirname(self._p["iq_file"]), "meteor_recording.png")
             Image.fromarray(real.rgb).save(out_png)
             st = real.stats
+            lock = st.get("demod_lock") or {}
+            lock_txt = ("已锁" if lock.get("locked") else
+                        "曾锁后失锁" if lock.get("locked_once") else "未锁")
             self._emit(
                 ok=True, png=out_png, width=w, height=h,
                 annotation=(f"链路：真录链 | LRPT {w}x{h}"
                             f"（VCDU {st.get('n_valid_vcdu', 0)} / "
-                            f"图像包 {st.get('n_image_packets', 0)}）"),
+                            f"图像包 {st.get('n_image_packets', 0)}）"
+                            f"| 载波锁：{lock_txt}"),
                 channel="Meteor-M2 LRPT",
                 frames=int(st.get("n_valid_vcdu", 0)),
                 link="真录链",

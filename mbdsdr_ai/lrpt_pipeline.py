@@ -217,6 +217,11 @@ def _pair_swap(soft: np.ndarray) -> np.ndarray:
     return sw
 
 
+def _fmt_rad(value) -> str:
+    """锁状态相位残差的人类可读形式（空态用破折号，不把 None 说成 0）。"""
+    return "—" if value is None else f"{value:.2f} rad"
+
+
 def _suppress_ghosts(cands, radius: int = 32):
     """NMS：±radius 符号内只留汉明最优（滑窗鬼影保险，真帧间隔 8198 符号）。"""
     kept = []
@@ -301,11 +306,17 @@ def decode_recording_to_image(
     # 2. 软判决解调 + 帧同步（松阈值，ASM 负责证伪）
     dem = LrptDemodulator(fs=target_hz, sym_rate=sym_rate, costas_bw=0.01)
     soft, cands = dem.demodulate_soft(arr, max_hamming=max_hamming)
+    lock = dem.lock_state()
+    stats["demod_lock"] = lock
     kept = _suppress_ghosts(cands)
     stats["n_candidates"] = len(kept)
     if soft.size == 0 or not kept:
         res.stage = "sync"
-        res.error = (f"帧同步未锁（软位 {soft.size}，候选 {len(kept)}）："
+        lock_txt = ("已锁定" if lock["locked"] else
+                    "曾锁定后失锁" if lock["locked_once"] else "未锁定")
+        res.error = (f"帧同步未锁（软位 {soft.size}，候选 {len(kept)}；"
+                     f"载波环{lock_txt}，相位残差 "
+                     f"{_fmt_rad(lock['phase_error_avg_rad'])}）："
                      "录制不是 LRPT / 信号过弱 / 采样率标注不符")
         return res
 

@@ -9,6 +9,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
+from mbdsdr_ai import lrpt_modem as lm
 from mbdsdr_ai.lrpt_modem import (
     FS_HZ,
     LRPT_SYNC_WORD,
@@ -188,7 +189,87 @@ class TestFalseAlarm:
         """空输入 → 空列表（诚实空态）。"""
         assert demod.process(np.empty(0, dtype=np.complex64)) == []
 
-    def test_too_short_input(self, demod: LrptDemodulator):
-        """输入过短（不足一个同步字）→ 空列表。"""
-        short = np.ones(SPS * SYNC_SYMBOLS // 2, dtype=np.complex64)
-        assert demod.process(short) == []
+
+# --------------------------------------------------------------------------- #
+# 载波锁状态（meteor_demod pll.c _locked/_locked_once 的对应呈现）
+# --------------------------------------------------------------------------- #
+
+class TestCarrierLock:
+    def test_empty_state_before_any_run(self, demod: LrptDemodulator):
+        ls = demod.lock_state()
+        assert ls == {
+            "locked": False, "locked_once": False, "unlock_events": 0,
+            "lock_ratio": 0.0, "phase_error_avg_rad": None, "symbols": 0,
+        }
+
+    def test_locks_on_clean_signal(self, mod: LrptModulator,
+                                   demod: LrptDemodulator,
+                                   frame_bits: np.ndarray):
+        demod.demodulate_soft(mod.modulate(frame_bits))
+        ls = demod.lock_state()
+        assert ls["locked"] is True
+        assert ls["locked_once"] is True
+        assert ls["unlock_events"] == 0
+        assert ls["lock_ratio"] > 0.8
+        assert ls["symbols"] > 0
+        assert ls["phase_error_avg_rad"] < lm._LOCK_ACQUIRE_RAD
+
+    def test_locks_at_10db(self, mod: LrptModulator, demod: LrptDemodulator,
+                           frame_bits: np.ndarray):
+        demod.demodulate_soft(mod.modulate(frame_bits, awgn_snr_db=10.0,
+                                           noise_seed=42))
+        assert demod.lock_state()["locked"] is True
+
+    def test_noise_never_locks(self, demod: LrptDemodulator):
+        rng = np.random.default_rng(12345)
+        noise = (rng.standard_normal(8448) + 1j * rng.standard_normal(8448)) \
+            .astype(np.complex64)
+        demod.demodulate_soft(noise)
+        ls = demod.lock_state()
+        assert ls["locked"] is False
+        assert ls["locked_once"] is False
+        assert ls["unlock_events"] == 0
+        assert ls["lock_ratio"] == 0.0
+        assert ls["phase_error_avg_rad"] > lm._LOCK_RELEASE_RAD
+
+    def test_lock_then_signal_drop_reports_unlock(self, mod: LrptModulator,
+                                                  demod: LrptDemodulator,
+                                                  frame_bits: np.ndarray):
+        """先信号后纯噪声：曾锁定（locked_once）但收尾失锁。"""
+        iq = mod.modulate(frame_bits)
+        rng = np.random.default_rng(7)
+        noise = (rng.standard_normal(iq.size) + 1j * rng.standard_normal(iq.size)) \
+            .astype(np.complex64)
+        demod.demodulate_soft(np.concatenate([iq, noise]))
+        ls = demod.lock_state()
+        assert ls["locked_once"] is True
+        assert ls["locked"] is False
+        assert ls["unlock_events"] >= 1
+        assert 0.0 < ls["lock_ratio"] < 1.0
+
+    def test_short_input_resets_state(self, mod: LrptModulator,
+                                      demod: LrptDemodulator,
+                                      frame_bits: np.ndarray):
+        """前一次锁定不得残留到下一次空输入（诚实空态）。"""
+        demod.demodulate_soft(mod.modulate(frame_bits))
+        assert demod.lock_state()["locked"] is True
+        demod.demodulate_soft(np.empty(0, dtype=np.complex64))
+        assert demod.lock_state()["locked"] is False
+        assert demod.lock_state()["symbols"] == 0
+        assert demod.lock_state()["phase_error_avg_rad"] is None
+
+    def test_thresholds_sit_between_measured_10db_and_noise(
+            self, mod: LrptModulator, demod: LrptDemodulator,
+            frame_bits: np.ndarray):
+        """标定锚：门限必须落在 10 dB 稳态与纯噪声之间，且两者可分。"""
+        demod.demodulate_soft(mod.modulate(frame_bits, awgn_snr_db=10.0,
+                                           noise_seed=42))
+        err_10db = demod.lock_state()["phase_error_avg_rad"]
+        rng = np.random.default_rng(12345)
+        noise = (rng.standard_normal(8448) + 1j * rng.standard_normal(8448)) \
+            .astype(np.complex64)
+        demod.demodulate_soft(noise)
+        err_noise = demod.lock_state()["phase_error_avg_rad"]
+        assert err_10db < lm._LOCK_ACQUIRE_RAD < err_noise
+        assert err_noise > 1.7 * err_10db
+

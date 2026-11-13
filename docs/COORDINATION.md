@@ -2181,6 +2181,12 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `mbdsdr_ai/time_format.py` | 公理体检线/6ae85f56（DST：resolve_tz(None) 携带夏令时规则，不再返回冻结偏移） | 2026-11-14 05:12 | 本笔 |
 | `mbdsdr_ai/time_basis.py` | 公理体检线/6ae85f56（DST：local_to_utc 歧义/不存在时刻显式报错，fold 参数生效） | 2026-11-14 05:12 | 本笔 |
 | `mbdsdr_ai/tests/test_time_basis.py` | 公理体检线/6ae85f56（DST：补歧义/不存在时刻与系统时区非固定偏移用例） | 2026-11-14 05:12 | 本笔 |
+| `mbdsdr_ai/lrpt_modem.py` | 参考移植线/20261114（第5条：Costas 载波锁 locked/locked_once/lock_ratio，相位残差判据） | 2026-11-14 05:18 | 本笔 |
+| `mbdsdr_ai/lrpt_pipeline.py` | 参考移植线/20261114（第5条：stats.demod_lock + 同步失败原因带锁状态） | 2026-11-14 05:18 | 本笔 |
+| `desktop/weather_panel.py` | 参考移植线/20261114（第5条：成功标注追加载波锁） | 2026-11-14 05:18 | 本笔 |
+| `mbdsdr_ai/tests/test_lrpt_modem.py` | 参考移植线/20261114（第5条：锁状态/标定/复位用例） | 2026-11-14 05:18 | 本笔 |
+| `mbdsdr_ai/tests/test_lrpt_pipeline.py` | 参考移植线/20261114（第5条：结果呈现与失败原因用例） | 2026-11-14 05:18 | 本笔 |
+| `docs/COORDINATION.md` | 参考移植线/20261114（第5条 §6.1 登记行） | 2026-11-14 05:18 | 本笔 |
 
 > 上表各行均由 `claim` 台账推导：owner 原文与 `acquired_at` 直接取自台账，
 > 目的优先用台账里的 `claim_reason`，没有就如实写「未声明」，不补编。时间列只是

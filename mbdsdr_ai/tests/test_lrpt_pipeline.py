@@ -8,7 +8,11 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from mbdsdr_ai.lrpt_pipeline import E2EResult, LrptE2EPipeline
+from mbdsdr_ai.lrpt_pipeline import (
+    E2EResult,
+    LrptE2EPipeline,
+    decode_recording_to_image,
+)
 
 # --------------------------------------------------------------------------- #
 # Fixtures
@@ -130,3 +134,27 @@ class TestFalseAlarm:
         res = pipe.rx(np.empty(0, dtype=np.complex64))
         assert not res.success
         assert res.payload == b""
+
+
+# --------------------------------------------------------------------------- #
+# 载波锁状态呈现（signal_quality 之外：解调结果 stats + 失败原因）
+# --------------------------------------------------------------------------- #
+
+class TestDemodLockPresentation:
+    def test_synthetic_recording_stats_carry_lock(self, pipe: LrptE2EPipeline,
+                                                  sample_payload: bytes):
+        iq = pipe.build_tx_iq(sample_payload)
+        res = decode_recording_to_image(iq, float(pipe.mod.fs))
+        lock = res.stats["demod_lock"]
+        assert lock["locked_once"] is True
+        assert lock["symbols"] > 0
+
+    def test_noise_failure_reason_reports_unlocked(self, pipe: LrptE2EPipeline):
+        rng = np.random.default_rng(12345)
+        noise = (rng.standard_normal(8448) + 1j * rng.standard_normal(8448)) \
+            .astype(np.complex64)
+        res = decode_recording_to_image(noise, 576_000.0)
+        assert res.success is False
+        assert res.stage == "sync"
+        assert res.stats["demod_lock"]["locked"] is False
+        assert "载波环未锁定" in res.error
