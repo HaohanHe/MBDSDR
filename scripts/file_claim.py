@@ -127,6 +127,10 @@ REGISTRY_PATH = LOCKS_DIR / "claims.json"
 MARKER_DIR = LOCKS_DIR / "claims"
 REGISTRY_MUTEX = LOCKS_DIR / "claims.mutex"
 TAKEOVER_LOG = LOCKS_DIR / "claim_takeovers.log"
+#: 「想拿但被别人占着」的等待记录。只在冲突时写；持有者下次续租/append 成功时
+#: 读出并清零（打印一次即删）。持有方成本为 0，被挡方成本全付，等待不可见——
+#: 所以占位对持有者本来是隐形的；这张表只补「看得见」，不参与任何判定。
+WAIT_LOG = LOCKS_DIR / "waiting.log"
 
 LOCK_TIMEOUT_S = 15.0
 #: 单条 claim 的累计持有上限（分钟）。改它必须留痕：值 + 来源写进占位文件。
@@ -498,6 +502,83 @@ def _peek_marker(path: Path) -> Optional[Dict[str, Any]]:
         return None
 
 
+def _read_all_fd(fd: int, chunk: int = 1 << 20) -> str:
+    """读整个 fd（``_read_fd`` 只读 64KB，等待日志会随冲突累积，不能截断）。"""
+    os.lseek(fd, 0, os.SEEK_SET)
+    parts: List[bytes] = []
+    while True:
+        buf = os.read(fd, chunk)
+        if not buf:
+            break
+        parts.append(buf)
+    return b"".join(parts).decode("utf-8", errors="replace")
+
+
+def record_wait(key: str, display: str, waiter: str, holder: str, kind: str) -> bool:
+    """记一条「想拿这个文件、但被别人挡着」。只留痕，不改判定/退出码。
+
+    写失败返回 False 且不抛：留痕失败不能反过来把 claim 变成失败。
+    """
+    now = _now()
+    record = {
+        "at": now,
+        "at_iso": _iso(now),
+        "path": display,
+        "key": key,
+        "waiter": waiter,
+        "holder": holder,
+        "kind": kind,
+    }
+    try:
+        LOCKS_DIR.mkdir(parents=True, exist_ok=True)
+        with _locked_fd(WAIT_LOG, create=True) as fd:
+            text = _read_all_fd(fd)
+            _write_fd(fd, text + json.dumps(record, ensure_ascii=False) + "\n")
+        return True
+    except (ClaimDenied, OSError):
+        return False
+
+
+def take_waits(key: str) -> List[Dict[str, Any]]:
+    """取出并清除该文件的等待记录（「打印完即标记已读」）；无记录返回 []。"""
+    try:
+        with _locked_fd(WAIT_LOG, create=False) as fd:
+            text = _read_all_fd(fd)
+            rows: List[Dict[str, Any]] = []
+            keep: List[str] = []
+            for line in text.splitlines():
+                if not line.strip():
+                    continue
+                try:
+                    rec = json.loads(line)
+                except json.JSONDecodeError:
+                    continue  # 坏行丢弃：等待记录是提示，不是凭据
+                if isinstance(rec, dict) and rec.get("key") == key:
+                    rows.append(rec)
+                else:
+                    keep.append(line)
+            if rows:
+                _write_fd(fd, "".join(item + "\n" for item in keep))
+            return rows
+    except (ClaimDenied, OSError, FileNotFoundError):
+        return []
+
+
+def report_waits(key: str, display: str, quiet: bool = False) -> int:
+    """打印「另有 N 个进程等过」，打印后清零；返回条数。只提示，不影响返回码。"""
+    waits = take_waits(key)
+    if not waits or quiet:
+        return len(waits)
+    stamps = [float(w.get("at") or 0) for w in waits]
+    earliest = min(stamps) if stamps else 0.0
+    waiters = sorted({str(w.get("waiter") or "?") for w in waits})
+    print(
+        f"WAIT {display}：另有 {len(waits)} 个进程在此文件上等待过"
+        f"（最早 {_iso(earliest)}；记名 {', '.join(waiters)}）"
+    )
+    return len(waits)
+
+
 def _marker_payload(
     display: str,
     key: str,
@@ -860,6 +941,7 @@ def cmd_claim(
             if holder_token_hash:
                 presented = token or _read_token_file(key)
                 if not _token_matches(presented, holder_token_hash):
+                    record_wait(key, display, owner, holder, "token_mismatch")
                     raise ClaimDenied(
                         f"CLAIM DENIED {display}\n"
                         f"  持有者名同为 {owner}，但无法证明是同一持有者：该 claim 已绑定凭据，\n"
@@ -934,6 +1016,8 @@ def cmd_claim(
                         f"第 {len(renewed['renewals'])} 次续租 上限={cap_min:g}min"
                     )
                     print(f"  续租理由：{reason.strip()}")
+                # 等待可见：续租是持有者唯一会回来看一眼的时刻（append 成功是另一个）。
+                report_waits(key, display, quiet)
                 if cap_source != "default":
                     print(
                         f"WARN 持有上限被改为 {cap_min:g}min（来源 {cap_source}）——"
@@ -982,6 +1066,7 @@ def cmd_claim(
         expired_s = held_s - ttl_holder
         if expired_s <= 0:
             remain = ttl_holder - held_s
+            record_wait(key, display, owner, holder, "held")
             raise ClaimDenied(
                 f"CLAIM DENIED {display}\n"
                 f"  当前持有者={holder}\n"

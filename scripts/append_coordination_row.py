@@ -94,6 +94,19 @@ def _norm(path: str) -> str:
     return path.replace("\\", "/").strip().lower()
 
 
+def _wait_key(root: Path, doc: Path) -> str:
+    """等待记录的比较键：与 ``file_claim.canonical_path`` 同一口径（相对根、小写）。
+
+    这里按 ``--root`` 推导而不是借 ``fc.ROOT``：测试树里两者不是同一目录，
+    借错根就会读不到别人写的等待记录（而生产环境两者恒等）。
+    """
+    try:
+        rel = doc.resolve().relative_to(root.resolve()).as_posix()
+    except ValueError:
+        rel = doc.resolve().as_posix()
+    return rel.lower()
+
+
 def expand_paths(raw: str) -> List[str]:
     """把 ``a/{b,c}.py`` 展开成多条；也接受单条路径。"""
     raw = raw.strip().strip("`")
@@ -257,6 +270,8 @@ def main(argv: Iterable[str] | None = None) -> int:
         _release_lock(lock_path)
 
     print(f"APPEND OK 第 {line_no} 行（表格 {rows} 行）耗时 {(time.monotonic() - started) * 1000:.1f}ms")
+    # 等待可见：只在别人被挡过时多打一行；打印即清零。只提示，不改退出码。
+    fc.report_waits(_wait_key(root, doc), args.doc.replace("\\", "/"))
     return 0
 
 
