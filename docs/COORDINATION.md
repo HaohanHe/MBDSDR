@@ -2167,6 +2167,7 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `tests/test_discoverability_help.py` | S1-S4结果伪造线/6ae85f56（入口可发现性用例（从测试隔离线过期 2843min 的遗留 claim 夺取，内容未改）） | 2026-11-13 21:59 | 本笔 |
 | `docs/axioms.md` | 公理体检线/6ae85f56（公理条数 13→14 与自检例外口径（清单 Q1-1/Q1-2）） | 2026-11-13 22:13 | 本笔 |
 | `tests/test_axioms_doc_contract.py` | 公理体检线/6ae85f56（公理文档/自检入口一致性守卫（清单 Q2）） | 2026-11-13 22:13 | 本笔 |
+| `tests/test_ground_track.py` | 公理体检线/6ae85f56（地面足迹默认仰角与可见门单值守卫（清单 Q1-5/Q4）） | 2026-11-13 22:13 | 本笔 |
 
 > 上表各行均由 `claim` 台账推导：owner 原文与 `acquired_at` 直接取自台账，
 > 目的优先用台账里的 `claim_reason`，没有就如实写「未声明」，不补编。时间列只是

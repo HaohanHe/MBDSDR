@@ -216,5 +216,18 @@ class DestinationPointTest(unittest.TestCase):
         self.assertGreater(lat, 0.0)
 
 
+class MinimumElevationSingleSourceTest(unittest.TestCase):
+    """地面足迹默认仰角必须与「当前可见门」同值，不许各写一份 5.0。
+
+    反证：把 ``ground_track.DEFAULT_MIN_ELEVATION_DEG`` 改成 6.0（或把
+    ``sat_passes.VISIBLE_MIN_ALT_DEG`` 改成 4.0），本用例必红。
+    """
+
+    def test_footprint_default_matches_visible_gate(self):
+        from mbdsdr_ai.sat_passes import VISIBLE_MIN_ALT_DEG
+
+        self.assertEqual(DEFAULT_MIN_ELEVATION_DEG, VISIBLE_MIN_ALT_DEG)
+
+
 if __name__ == "__main__":
     unittest.main()
