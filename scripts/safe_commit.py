@@ -1480,7 +1480,17 @@ def _commit_locked(
 
 def _build_parser() -> argparse.ArgumentParser:
     """命令行。``--files`` 用 extend：重复传参合并，绝不「只取最后一个」。"""
-    ap = argparse.ArgumentParser(description="私有 index 安全提交（形态⑪）")
+    ap = argparse.ArgumentParser(
+        description="私有 index 安全提交（形态⑪）",
+        epilog=(
+            "退出码：0 成功（--declare 时为快照已记录）；1 前置条件不满足（未提交，可重试）；"
+            "2 重试耗尽或参数用法错误（未提交）；3 已提交但提交后复核失败（事故）；"
+            "4 声明后内容漂移（未提交）；5 缺 §6.1 登记行（未提交）；"
+            "6 消息源被改写（未提交）；7 --exclude-hunk 未配 --declare（未提交）。"
+            "各码的处置与常见误用见 docs/safe-commit.md。"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
     ap.add_argument(
         "--files",
         nargs="+",
