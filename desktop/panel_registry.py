@@ -4,21 +4,25 @@ MBDSDR 桌面端面板注册表
 ========================
 
 集中声明所有可用面板的元数据（id / 名称 / 图标 / 默认停靠区 / 弹性尺寸约束 /
-是否可折叠）。注册表本身**不实例化任何 Qt 控件**——面板由 MainWindow 在构建
-中央区与 Dock 时创建，再通过 ``attach_widget(id, widget)`` 挂进来。
+是否可折叠 / **构造工厂**）。注册表本身不缓存控件实例：面板由 MainWindow 在
+构建中央区与 Dock 时调 ``create(id)`` 取得，再通过 ``attach_widget(id, widget)``
+挂回来（注册表不拥有生命周期）。
 
 这样做的好处：
-  * 新增面板只改这一处声明，DockLayoutManager 按 id 布局，MainWindow 不散落。
+  * 新增面板只改这一处声明（元数据 + 工厂），DockLayoutManager 按 id 布局，
+    MainWindow 不再逐个 ``ControlPanel()`` 硬编码构造。
   * 尺寸用"比例 + 最小/最大弹性约束"，不写死像素（与 tokens.RATIO 对齐）。
-  * 可被测试离线查询（不需要 QApplication 就能 list()/get()）。
+  * 可被测试离线查询（不需要 QApplication 就能 list()/get()；只有 create()
+    才真正 import Qt 模块）。
 
-红线：注册表只描述"有哪些面板、默认放哪、多大多小弹性"，不造任何业务数据。
+红线：注册表只描述"有哪些面板、默认放哪、多大多小弹性、怎么构造"，不造任何
+业务数据。
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional
+from typing import Callable, Dict, List, Optional
 
 from tokens import tokens
 
@@ -45,6 +49,63 @@ class PanelSpec:
     closable: bool = True
     # 一句话能力说明（帮助面板「能力目录」直接取此字段，避免另抄一份清单）
     summary: str = ""
+    # 零参构造工厂：返回该面板的 Qt 控件；可选面板不可用时返回 None。
+    # 放在最后一个字段，既有按位置传参的调用方（含测试）不受影响。
+    factory: Optional[Callable[[], object]] = None
+
+
+# ---------------------------------------------------------------------------
+# 面板工厂（声明式构造）
+#
+# 用惰性 import 而不是模块顶部 import：``panel_registry`` 要被纯逻辑测试在
+# 没有 QApplication 的环境里 import（list()/get() 不碰 Qt），只有真正
+# ``create()`` 时才把控件模块拉进来。工厂只负责「造对象」，信号接线仍在
+# MainWindow（接线是宿主职责，不是面板元数据）。
+# ---------------------------------------------------------------------------
+def _cls_factory(module_name: str, class_name: str) -> Callable[[], object]:
+    """``module.class()`` 形式的零参工厂（惰性 import）。"""
+    def _factory():
+        mod = __import__(module_name)
+        cls = getattr(mod, class_name)
+        return cls()
+    return _factory
+
+
+def _optional_factory(module_name: str,
+                      class_name: str) -> Callable[[], object]:
+    """可选面板：模块/类缺失时返回 None（宿主按「无此面板」降级）。"""
+    def _factory():
+        try:
+            mod = __import__(module_name)
+        except Exception:  # noqa: BLE001 - 缺依赖不得拖垮启动
+            return None
+        cls = getattr(mod, class_name, None)
+        if cls is None:
+            return None
+        try:
+            return cls()
+        except Exception:  # noqa: BLE001 - 控件构造失败等同「无此面板」
+            return None
+    return _factory
+
+
+def _spectrum_factory():
+    """频谱控件：与 MainWindow 原调用完全一致的参数（prefer_opengl=False）。"""
+    from spectrum_widget import create_spectrum_widget
+    return create_spectrum_widget(prefer_opengl=False)
+
+
+def _sky_factory():
+    """星象仪控件：路B工厂 ``create_sky_widget()`` 优先，回退 RFSkyView。"""
+    try:
+        from rf_sky_view import create_sky_widget as _factory
+        widget = _factory()
+        if widget is not None:
+            return widget
+    except Exception:  # noqa: BLE001 - 工厂缺失/异常时回退，与旧行为一致
+        pass
+    from rf_sky_view import RFSkyView
+    return RFSkyView()
 
 
 class PanelRegistry:
@@ -72,48 +133,62 @@ class PanelRegistry:
             PanelSpec("spectrum",   "频谱",       "≡", AREA_CENTER,
                       collapsible=False, min_w=center_min,
                       ratio_hint=t.RATIO["splitter_center"],
-                      summary="实时频谱与瀑布；拖动谱面改频，滚轮缩放，单键切解调模式"),
+                      summary="实时频谱与瀑布；拖动谱面改频，滚轮缩放，单键切解调模式",
+                      factory=_spectrum_factory),
             PanelSpec("rf_sky",     "星象仪模式", "◎", AREA_CENTER,
                       collapsible=False, min_w=center_min,
                       ratio_hint=t.RATIO["splitter_center"],
-                      summary="全天球视图：恒星/行星/深空/卫星；点天体看信息，点卫星调谐收听"),
+                      summary="全天球视图：恒星/行星/深空/卫星；点天体看信息，点卫星调谐收听",
+                      factory=_sky_factory),
             PanelSpec("weather",    "气象云图",   "☁", AREA_CENTER,
                       collapsible=False, min_w=center_min,
                       summary="气象卫星云图：GOES/GK-2A/Meteor/NOAA/FY 用录制文件离线解码出图"
-                              "（不实时边收边解）"),
+                              "（不实时边收边解）",
+                      factory=_cls_factory("weather_panel", "WeatherPanel")),
             PanelSpec("module",      "模块/信号流","▤", AREA_CENTER,
                       collapsible=False, min_w=center_min,
-                      summary="SDR++ 式信号流：源设备 → 解调 → 解码 → 输出，逐段调参数"),
+                      summary="SDR++ 式信号流：源设备 → 解调 → 解码 → 输出，逐段调参数",
+                      factory=_cls_factory("module_panel", "ModulePanel")),
             PanelSpec("sat_track",   "卫星跟踪",   "◍", AREA_CENTER,
                       collapsible=False, min_w=center_min,
-                      summary="选卫星后闭环跟踪：500ms 更新方位/仰角/多普勒并自动调谐"),
+                      summary="选卫星后闭环跟踪：500ms 更新方位/仰角/多普勒并自动调谐",
+                      factory=_cls_factory("sat_track_panel", "SatTrackPanel")),
             PanelSpec("new_spacetime","新时空",    "◷", AREA_CENTER,
                       collapsible=False, min_w=center_min,
-                      summary="调制自动识别 + 卫星过境时间线与授时 + 频率-轨道关系图"),
+                      summary="调制自动识别 + 卫星过境时间线与授时 + 频率-轨道关系图",
+                      factory=_cls_factory("new_spacetime_panel",
+                                           "NewSpacetimePanel")),
             PanelSpec("adsb",       "ADS-B 航路", "✈", AREA_CENTER,
                       collapsible=False, min_w=center_min,
-                      summary="ADS-B 飞机位置图与航班列表；只画真实解算出的经纬度"),
+                      summary="ADS-B 飞机位置图与航班列表；只画真实解算出的经纬度",
+                      factory=_cls_factory("adsb_map_panel", "AdsbMapPanel")),
             # 右侧停靠面板（可折叠成窄条 / 可悬浮）
             PanelSpec("control",    "控制",       "⚙", AREA_RIGHT,
                       collapsible=True, min_w=side_min,
                       ratio_hint=t.RATIO["focus_side"],
-                      summary="接收参数：频率/解调/带宽/增益/静噪/采样率与音量"),
+                      summary="接收参数：频率/解调/带宽/增益/静噪/采样率与音量",
+                      factory=_cls_factory("control_panel", "ControlPanel")),
             PanelSpec("status",      "状态",       "▦", AREA_RIGHT,
                       collapsible=True, min_w=side_min,
-                      summary="设备/信号/GNSS/接收参数实时读数；无数据显「—」"),
+                      summary="设备/信号/GNSS/接收参数实时读数；无数据显「—」",
+                      factory=_cls_factory("status_panel", "StatusPanel")),
             PanelSpec("ai",          "AI 助手",    "✦", AREA_RIGHT,
                       collapsible=True, min_w=side_min,
-                      summary="用自然语言描述需求，AI 调用工具完成调谐/解码/录制等操作"),
+                      summary="用自然语言描述需求，AI 调用工具完成调谐/解码/录制等操作",
+                      factory=_cls_factory("ai_panel", "AIPanel")),
             # 以下两个是右栏页签（MainWindow._attach_digital_panels 创建），
             # 此前只在代码里存在、不在注册表，能力目录与「面板」菜单都看不到。
             PanelSpec("aprs",        "APRS 数据包", "✉", AREA_RIGHT,
                       collapsible=True, min_w=side_min,
                       summary="解出的 AX.25/APRS 报文列表；需 NFM 解调且中心频率对准 "
-                              "144.390/144.800 MHz 等 APRS 频点"),
+                              "144.390/144.800 MHz 等 APRS 频点",
+                      factory=_optional_factory("aprs_panel", "AprsPanel")),
             PanelSpec("sat_image",   "卫星云图",   "▨", AREA_RIGHT,
                       collapsible=True, min_w=side_min,
                       summary="NOAA APT / Meteor LRPT 云图与最近产物；离线 IQ 出图，"
-                              "不是实时边收边解"),
+                              "不是实时边收边解",
+                      factory=_optional_factory("satellite_image_panel",
+                                                "SatelliteImagePanel")),
 
         ]
         for s in specs:
@@ -129,6 +204,21 @@ class PanelRegistry:
     def get(self, panel_id: str) -> Optional[PanelSpec]:
         """按 id 取元数据，不存在返回 None。"""
         return self._specs.get(panel_id)
+
+    def create(self, panel_id: str) -> Optional[object]:
+        """按声明的工厂构造一个**新**控件（不缓存、不挂载）。
+
+        返回 None 的两种情况：id 未注册；或该面板声明为可选且依赖缺失。
+        工厂自身抛异常一律向上冒——那是接线/依赖错误，不该被静默吞掉。
+        """
+        spec = self._specs.get(panel_id)
+        if spec is None or spec.factory is None:
+            return None
+        return spec.factory()
+
+    def factoryless(self) -> List[str]:
+        """没有声明工厂的面板 id（用于测试守住「构造已声明式」）。"""
+        return [s.id for s in self._specs.values() if s.factory is None]
 
     def list(self, area: Optional[str] = None) -> List[PanelSpec]:
         """列出全部面板；可选按停靠区过滤。"""

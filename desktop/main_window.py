@@ -632,9 +632,9 @@ from mbdsdr_ai.tool_results import tool_success
 # 强调色底上的墨色由 themes 按实际对比度算（浅色主题白字只有 3.09:1）
 from themes import _on_primary as _primary_ink
 from shortcuts import bind as _key
-from spectrum_widget import (
-    create_spectrum_widget, HAS_OPENGL, owns_local_shortcuts)
-from control_panel import ControlPanel
+from spectrum_widget import HAS_OPENGL, owns_local_shortcuts
+# 面板控件一律经 panel_registry 的声明式工厂构造（见 PanelSpec.factory）；
+# 主窗口只负责接线与布局，不再逐个 import + new。
 # 错误码 → 帮助「怎么办」入口（无对应条目的 code 不出链接，见 error_remedy）
 from error_remedy import (
     RemedyLinkLabel, attach_remedy_link, build_diagnostics_link,
@@ -648,12 +648,9 @@ from mode_registry import (
     demodulate,
     get as get_mode,
 )
-from status_panel import StatusPanel
-from ai_panel import AIPanel
 from mcp_worker import MCPWorkerManager
 from mcp_protocol import GATE_PARAM, is_write_tool
-from rf_sky_view import RFSkyView, SkyObject, AntennaPointing, HeatmapCell, SatelliteTracker
-from module_panel import ModulePanel
+from rf_sky_view import SkyObject, AntennaPointing, HeatmapCell, SatelliteTracker
 # CarWith 设计体系：token 单例 / 面板注册表 / Dock 布局管理器
 from tokens import tokens
 from right_column import RightColumn
@@ -680,12 +677,10 @@ try:
 except ImportError:  # pragma: no cover - 单独打包时兜底
     _perf_profile = None
     _perf_sample_rate = None
-# 气象云图面板（懒加载：构造时只建 Qt 控件，后端 ToolRegistry
-# 在用户首次点解码时才创建，避免拖慢启动）。
-from weather_panel import WeatherPanel
-from sat_track_panel import SatTrackPanel, tle_band_badge
-from new_spacetime_panel import NewSpacetimePanel
-from adsb_map_panel import AdsbMapPanel
+# 气象云图 / 卫星跟踪 / 新时空 / ADS-B 航路面板的控件类由 panel_registry
+# 的工厂持有；这里只保留主窗口自己要用的符号（tle_band_badge）。
+from sat_track_panel import tle_band_badge
+
 # 内核能力面板（扫频 / 自动调制识别 / 书签管理 / 远程服务设置）。
 # 用 try/except 守卫：内核模块缺失时面板降级为不可用，绝不拖垮启动。
 try:
@@ -733,14 +728,6 @@ try:
     from adsb_panel import AdsbPanel
 except Exception:  # pragma: no cover
     AdsbPanel = None  # type: ignore
-try:
-    from aprs_panel import AprsPanel
-except Exception:  # pragma: no cover
-    AprsPanel = None  # type: ignore
-try:
-    from satellite_image_panel import SatelliteImagePanel
-except Exception:  # pragma: no cover
-    SatelliteImagePanel = None  # type: ignore
 # 卫星闭环跟踪器（mbdsdr_ai.sat_tracker）：选中卫星->实时 az/el/多普勒->自动调谐。
 # 用别名避免与 rf_sky_view 里的展示型 SatelliteTracker 冲突。缺 skyfield 时降级。
 try:
@@ -2098,7 +2085,7 @@ class MainWindow(QMainWindow):
 
         # Tab: 卫星闭环自动跟踪（2026-11-10 用户要求：跟天空/AI 一样挂右栏，
         # 不再占左栏工作面的页签位置）
-        self.sat_track_panel = SatTrackPanel()
+        self.sat_track_panel = self._create_panel("sat_track")
         self.sat_track_panel.track_requested.connect(self._start_satellite_tracking)
         self.sat_track_panel.stop_requested.connect(self._stop_satellite_tracking)
         self.sat_track_panel.update_tle_requested.connect(self._on_update_sat_tle)
@@ -2169,7 +2156,7 @@ class MainWindow(QMainWindow):
         # 预算选形态解决：窄形态 216px ≤ 860 下的预算地板 244px。
         spectrum_layout.addWidget(self._no_device_hint)
 
-        self.spectrum = create_spectrum_widget(prefer_opengl=False)
+        self.spectrum = self._create_panel("spectrum")
         self.spectrum.freq_changed.connect(self._on_spectrum_freq_changed)
         if self._vfo_mgr is not None:
             self.spectrum.vfo_manager = self._vfo_mgr
@@ -2205,7 +2192,7 @@ class MainWindow(QMainWindow):
         center_widget.setObjectName("centerPane")
         center_lay = QVBoxLayout(center_widget)
         center_lay.setContentsMargins(0, 0, 0, 0)
-        self.adsb_map_panel = AdsbMapPanel()
+        self.adsb_map_panel = self._create_panel("adsb")
         center_lay.addWidget(self.adsb_map_panel, stretch=1)
         # 中栏**不再显示** AI 输入栏（2026-11-10 用户明确要求）：IDE 形态的
         # AI 对话唯一入口是右栏「AI 智能体」面板里的输入框。这条命令栏只在
@@ -2230,7 +2217,7 @@ class MainWindow(QMainWindow):
         # 实测值再抬一次，不用猜的数字。
 
         # 控制面板
-        self.control_panel = ControlPanel()
+        self.control_panel = self._create_panel("control")
         self.control_panel.tune_fm_requested.connect(self._on_tune_fm)
         self.control_panel.tune_am_requested.connect(self._on_tune_am)
         self.control_panel.volume_changed.connect(self._on_volume_changed)
@@ -2281,11 +2268,11 @@ class MainWindow(QMainWindow):
         self._add_right_tab("控制", self.control_panel, "control_dock")
 
         # 状态面板
-        self.status_panel = StatusPanel()
+        self.status_panel = self._create_panel("status")
         self._add_right_tab("状态", self.status_panel, "status_dock")
 
         # AI 助手面板
-        self.ai_panel = AIPanel()
+        self.ai_panel = self._create_panel("ai")
         self.ai_panel.tool_call_requested.connect(self._on_ai_tool_call)
         # 面板自身的提交已在 _on_submit 里直接调 _call_ai；这里再接
         # command_submitted 会造成一次提交起两个 AIWorker（S10 的重复派发）。
@@ -2313,7 +2300,7 @@ class MainWindow(QMainWindow):
             self._add_right_tab("卫星跟踪", self.sat_track_panel, "sat_track")
 
         # 模块 / 信号流（原中央页签 → 右栏 App）
-        self.module_panel = ModulePanel()
+        self.module_panel = self._create_panel("module")
         self.module_panel.tune_requested.connect(self._on_module_tune)
         # —— 孤儿接通：选设备 / 解调模式 / sink / 节点 ——
         self.module_panel.device_selected.connect(self._on_module_device_selected)
@@ -2324,11 +2311,11 @@ class MainWindow(QMainWindow):
         self._add_right_tab("模块", self.module_panel, "module_dock")
 
         # 气象云图（原中央页签 → 右栏 App）
-        self.weather_panel = WeatherPanel()
+        self.weather_panel = self._create_panel("weather")
         self._add_right_tab("气象云图", self.weather_panel, "weather_dock")
 
         # 新时空（原中央页签 → 右栏 App）
-        self.new_spacetime_panel = NewSpacetimePanel()
+        self.new_spacetime_panel = self._create_panel("new_spacetime")
         self._add_right_tab("新时空", self.new_spacetime_panel, "new_spacetime_dock")
         # 面板里的「更改地点…」：站址唯一写入口在主窗，面板只发意图
         try:
@@ -5280,24 +5267,27 @@ class MainWindow(QMainWindow):
             return f"color: {self._tok('light_accent', '#C4845C')}; font-weight: 600;"
         return "font-weight: 600;"
 
-    def _create_sky_widget(self):
-        """创建星象仪模式 widget：路B工厂 create_sky_widget() 优先，回退 RFSkyView。
+    def _create_panel(self, panel_id: str):
+        """按 ``PanelRegistry`` 里声明的工厂构造面板控件。
 
-        路B（星空组，负责 rf_sky_view.py）会产出自包含天空 widget 并在模块里
-        暴露 ``create_sky_widget()`` 工厂。这里用 hasattr/try 守卫：
-          * 工厂存在 → 调用它拿到路B产物；
-          * 工厂缺失（路B尚未交付）→ 回退本模块已 import 的 RFSkyView。
-        无论哪条路，返回的 widget 都要支持 addTab / set_callsign / get_observer /
-        object_clicked 等既有接口（缺哪个由调用方 hasattr 守卫，绝不崩）。
+        工厂缺失/返回 None 视为接线错误立即报出——静默返回 None 会在后面
+        某行 ``None.connect(...)`` 处炸掉，报错点离真正原因很远。
         """
-        try:
-            from rf_sky_view import create_sky_widget as _factory  # type: ignore
-            w = _factory()
-            if w is not None:
-                return w
-        except Exception:
-            pass
-        return RFSkyView()
+        widget = registry().create(panel_id)
+        if widget is None:
+            raise RuntimeError(
+                f"面板 {panel_id!r} 未在 panel_registry 声明可用的构造工厂")
+        return widget
+
+    def _create_sky_widget(self):
+        """创建星象仪模式 widget：工厂声明在 panel_registry（rf_sky）。
+
+        路B（星空组）在 rf_sky_view.py 暴露 ``create_sky_widget()`` 时优先用
+        它，缺失则回退 RFSkyView——两条路的判断都在
+        ``panel_registry._sky_factory``，本方法只做转发，保留这个名字供
+        性能探针/历史调用点定位。
+        """
+        return self._create_panel("rf_sky")
 
     def _set_processing_status(self, text: str):
         """更新底 Dock 的"正在处理"指示（录制/回放/流水线）。无设备由调用方置灰。"""
@@ -11343,18 +11333,21 @@ class MainWindow(QMainWindow):
             self._sync_adsb_tuner_limit()
 
         # ---- APRS 数据包（右栏页签）----
-        if AprsPanel is not None:
+        # 控件由 panel_registry 的可选工厂构造：依赖缺失时工厂返回 None。
+        aprs_panel = registry().create("aprs")
+        if aprs_panel is not None:
             try:
-                self.digital_aprs_panel = AprsPanel()
+                self.digital_aprs_panel = aprs_panel
                 self.aprs_dock = self._add_right_tab(
                     "APRS", self.digital_aprs_panel, "aprs_dock")
             except Exception:  # noqa: BLE001
                 self.digital_aprs_panel = None
 
         # ---- 卫星云图（右栏页签）----
-        if SatelliteImagePanel is not None:
+        sat_image_panel = registry().create("sat_image")
+        if sat_image_panel is not None:
             try:
-                self.digital_sat_image_panel = SatelliteImagePanel()
+                self.digital_sat_image_panel = sat_image_panel
                 self.sat_image_dock = self._add_right_tab(
                     "卫星云图", self.digital_sat_image_panel, "sat_image_dock")
             except Exception:  # noqa: BLE001

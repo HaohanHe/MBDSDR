@@ -2197,6 +2197,10 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `desktop/error_remedy.py` | 参考移植线/20261114（第1条：接入路径文档补第三条（通知条）） | 2026-11-14 05:27 | 本笔 |
 | `tests/test_notification_bar.py` | 参考移植线/20261114（第1条：10 条判据（含 MainWindow 不弹模态的反证）） | 2026-11-14 05:27 | 本笔 |
 | `docs/COORDINATION.md` | 参考移植线/20261114（本笔 §6.1 登记行，提交后释放） | 2026-11-14 05:27 | 本笔 |
+| `desktop/panel_registry.py` | 参考移植线/20261114（第2条：PanelSpec.factory（末位字段，位置参数兼容）+ create()/factoryless()；12 个默认面板声明惰性工厂） | 2026-11-14 05:31 | 本笔 |
+| `desktop/main_window.py` | 参考移植线/20261114（第2条：面板构造改走 registry().create；_create_panel 工厂缺失即报错；删除面板类直接 import/构造） | 2026-11-14 05:31 | 本笔 |
+| `tests/test_panel_registry_factory.py` | 参考移植线/20261114（第2条：19 条判据（工厂可用性 + 主窗口经注册表 + 源码无硬编码 + 缺工厂报错）） | 2026-11-14 05:31 | 本笔 |
+| `docs/COORDINATION.md` | 参考移植线/20261114（本笔 §6.1 登记行，提交后释放） | 2026-11-14 05:31 | 本笔 |
 
 > 上表各行均由 `claim` 台账推导：owner 原文与 `acquired_at` 直接取自台账，
 > 目的优先用台账里的 `claim_reason`，没有就如实写「未声明」，不补编。时间列只是
