@@ -1871,6 +1871,13 @@ No supported devices found），GNSS+SDR 同开复验没做成；离线那次
 | 文件 | 线名 | 开始时间 | 预计提交 hash |
 |---|---|---|---|
 | _（空）_ | | | |
+| `desktop/l10n.py` | Qt翻译与设置显式线/6ae85f56（加载 qtbase_<locale>.qm + 状态如实上报） | 2026-11-13 19:37 | 本笔 |
+| `desktop/main.py` | Qt翻译与设置显式线/6ae85f56（启动入口接 Qt 自带翻译安装） | 2026-11-13 19:37 | 本笔 |
+| `tests/test_desktop_i18n.py` | Qt翻译与设置显式线/6ae85f56（内置文案真变 + 缺文件降级 + 反证） | 2026-11-13 19:37 | 本笔 |
+| `desktop/settings.py` | Qt翻译与设置显式线/6ae85f56（显式设置标记 + 读取/迁移区分） | 2026-11-13 19:37 | 本笔 |
+| `desktop/settings_panel.py` | Qt翻译与设置显式线/6ae85f56（行内显示「默认值/已自定义」） | 2026-11-13 19:37 | 本笔 |
+| `tests/test_settings_explicit_defaults.py` | Qt翻译与设置显式线/6ae85f56（显式标记/默认值跟随/界面来源 + 反证） | 2026-11-13 19:37 | 本笔 |
+| `docs/COORDINATION.md` | Qt翻译与设置显式线/6ae85f56（本批 6 个文件的 §6.1 登记行，提交后释放） | 2026-11-13 19:37 | 本笔 |
 | `scripts/release_check.py` | 收尸线/6ae85f56（裁定②：日常只扫声明落点，新增 --full-scan 全盘入口 + 产品归属判据） | 2026-11-13 19:58 | 本笔 |
 | `tests/test_release_check_log_scan.py` | 收尸线/6ae85f56（全盘扫 5 条用例：落点外命中 / 后缀过滤 / 时间窗 / 免声明根 / 归属判据） | 2026-11-13 19:58 | 本笔 |
 | `mbdsdr_ai/{tle_epoch,skyfield_compat,fengyun_sat,orbit_determination,orbit_dynamics,new_spacetime_tle,time_basis,tle_integrity,sat_passes,sat_illumination}.py` | 收尸线/6ae85f56（接管 D1环收口线夜班遗留：零依赖叶子下沉打断延迟 import 环；原持有心跳过期、pid 已死、期间无他方落库） | 2026-11-13 19:58 | 本笔 |
