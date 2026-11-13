@@ -332,6 +332,25 @@ def test_help_menu_is_wired_in_main_window(main_window, qtapp):
     qtapp.processEvents()
 
 
+def test_deep_right_column_jumps_are_discoverable(main_window):
+    """右栏埋得最深的几处必须在命令面板里看得见、点得动（不靠新快捷键）。
+
+    可发现性口径：入口要么在菜单里，要么在命令面板（Ctrl+K 模糊搜索）里；
+    「跳到设备」「跳到增益」「打开设置」「导出」走后者，且必须是 available + 有 run。
+    """
+    from command_palette import build_index
+
+    rows = {c.title: c for c in build_index(main_window)}
+    for title in ("跳到设备", "跳到增益", "打开设置", "导出"):
+        row = rows.get(title)
+        assert row is not None, f"命令面板缺「{title}」入口（可发现性断了）"
+        assert row.group == "面板"
+        assert row.status == "available", (
+            f"「{title}」应为可用入口，实际 {row.status}：{row.reason}")
+        assert row.run is not None, f"「{title}」标了可用却没有执行入口"
+        assert row.description.strip(), f"「{title}」没写「跳到哪、省掉什么」"
+
+
 # ---------------------------------------------------------------------------
 # 能力断言 ↔ AI 工具注册表实况（2026-11-11，A1「不暴露发射工具」事故）
 # ---------------------------------------------------------------------------

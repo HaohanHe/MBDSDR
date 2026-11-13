@@ -528,3 +528,114 @@ def test_destroyed_opener_falls_back_into_main_window(qapp):
     win.close()
     dlg.deleteLater()
     qapp.processEvents()
+
+
+# ---------------------------------------------------------------------------
+# 右栏深处的两条直接入口（2026-11-13：不新增快捷键，走命令面板）
+# ---------------------------------------------------------------------------
+def test_panel_jump_commands_land_on_target_widgets(index, main_window, qapp):
+    """「跳到设备」「跳到增益」必须真的把焦点落到设备下拉 / 增益滑杆。
+
+    反证：删掉 ``_jump_to_right`` 里的 ``QTimer.singleShot(0, _focus)``，
+    焦点会被 run_command 的「返还打开前位置」覆盖，两条断言都会红。
+    """
+    from PySide6.QtWidgets import QApplication
+
+    by_title = {c.title: c for c in index}
+    for title in ("跳到设备", "跳到增益"):
+        cmd = by_title.get(title)
+        assert cmd is not None, f"命令面板缺「{title}」"
+        assert cmd.group == "面板" and cmd.run is not None, (
+            f"「{title}」不是可执行的右栏定位入口")
+
+    dp = main_window.device_panel
+    assert dp is not None, "设备面板没建出来，本用例前提不成立"
+    # 无硬件时热插拔轮询会把注入的假设备清空，定位期间停掉
+    dp._hotplug_timer.stop()
+    dp._apply_devices([
+        {"driver": "rtlsdr", "label": "Fake A", "index": 0,
+         "serial": "AAA", "tuner": "R820T"},
+    ])
+    # 增益滑杆未连接时是禁用的，setFocus 会被 Qt 忽略；先进入「已连接」态
+    main_window.control_panel.set_sdr_connected(True)
+    main_window.activateWindow()
+    main_window.raise_()
+    qapp.processEvents()
+    try:
+        res = by_title["跳到设备"].run()
+        assert res["ok"] is True, res
+        qapp.processEvents()
+        qapp.processEvents()
+        assert main_window.focusWidget() is dp.dev_combo, (
+            "跳到设备后焦点没落在设备下拉，而是 %s"
+            % type(main_window.focusWidget()).__name__)
+
+        res = by_title["跳到增益"].run()
+        assert res["ok"] is True, res
+        qapp.processEvents()
+        qapp.processEvents()
+        gain = main_window.control_panel.gain_slider
+        assert gain.isVisible(), "跳到增益后滑杆仍隐藏（「接收」组没展开）"
+        assert main_window.focusWidget() is gain, (
+            "跳到增益后焦点没落在增益滑杆，而是 %s"
+            % type(main_window.focusWidget()).__name__)
+    finally:
+        if getattr(main_window, "_right_overlay", None) is not None:
+            main_window._close_right_overlay()
+        qapp.processEvents()
+
+
+# ---------------------------------------------------------------------------
+# P1-40 的两条入口（2026-11-13：设置/导出没有菜单入口，先由命令面板兜住）
+# ---------------------------------------------------------------------------
+def test_settings_and_export_commands_land_on_operable_controls(
+        index, main_window, qapp):
+    """「打开设置」落在搜索框、「导出」落在导出按钮——都不是节标题。
+
+    反证：把 ``_jump_to_right`` 的 ``prepare`` 去掉（不展开「数据与操作」组），
+    导出按钮处于隐藏态、``setFocus`` 被忽略，第二条断言会红。
+    """
+    from PySide6.QtWidgets import QPushButton
+
+    by_title = {c.title: c for c in index}
+    for title in ("打开设置", "导出"):
+        cmd = by_title.get(title)
+        assert cmd is not None, f"命令面板缺「{title}」"
+        assert cmd.group == "面板" and cmd.run is not None, (
+            f"「{title}」不是可执行的入口")
+
+    panel = getattr(main_window, "settings_dock", None)
+    assert panel is not None, "设置面板没建出来，本用例前提不成立"
+    main_window.activateWindow()
+    main_window.raise_()
+    qapp.processEvents()
+    try:
+        res = by_title["打开设置"].run()
+        assert res["ok"] is True, res
+        qapp.processEvents()
+        qapp.processEvents()
+        section = next(
+            s for s in main_window.right_tab._sections
+            if s.header.text().strip() == "设置")
+        assert section.is_expanded(), "打开设置后「设置」节仍是收起态"
+        assert panel.search_edit.isVisible(), "打开设置后搜索框不可见"
+        assert main_window.focusWidget() is panel.search_edit, (
+            "打开设置后焦点没落在设置搜索框，而是 %s"
+            % type(main_window.focusWidget()).__name__)
+
+        res = by_title["导出"].run()
+        assert res["ok"] is True, res
+        qapp.processEvents()
+        qapp.processEvents()
+        group = panel._group_sections["数据与操作"]
+        assert group.is_expanded(), "导出前「数据与操作」组没展开"
+        export_btn = panel.export_btn
+        assert isinstance(export_btn, QPushButton)
+        assert export_btn.isVisible(), "导出按钮仍隐藏，焦点落不上"
+        assert main_window.focusWidget() is export_btn, (
+            "导出后焦点没落在「导出配置」按钮，而是 %s"
+            % type(main_window.focusWidget()).__name__)
+    finally:
+        if getattr(main_window, "_right_overlay", None) is not None:
+            main_window._close_right_overlay()
+        qapp.processEvents()

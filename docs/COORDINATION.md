@@ -2161,6 +2161,10 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `scripts/repro/2026-11-13-palette-result-cap.py` | 统一搜索性能线/6ae85f56（命令面板结果上限前后对比复跑脚本（固定 10500 条样本，预热 2 + 采样 7）） | 2026-11-13 21:57 | 本笔 |
 | `docs/perf-evidence/2026-11-13/palette-result-cap.json` | 统一搜索性能线/6ae85f56（结果上限改前/改后与 cap 100/500 扫描的逐次实测与负载） | 2026-11-13 21:57 | 本笔 |
 | `docs/performance-baseline.md` | 统一搜索性能线/6ae85f56（§2 增加命令面板结果行数上限一行（494.98/1259.27 → 13.20/9.87 ms）） | 2026-11-13 21:57 | 本笔 |
+| `desktop/main_window.py` | S1-S4结果伪造线/6ae85f56（焦点链 3 组：重写 _setup_tab_order（栏级+右栏内部按节重串）、新增 _window_focus_chain/_right_column_focus_widgets、调用点移到 __init__ 末、_open_right_overlay 补 _right_col.show()） | 2026-11-13 21:59 | 本笔 |
+| `tests/test_keyboard_main_flow.py` | S1-S4结果伪造线/6ae85f56（键盘全操作 7 条用例（Tab 环覆盖右栏/显式链=视觉序/链外控件仍可达/不跳底坞/窄窗浮层右栏可见/8 步键盘流程/连接断连快捷键）） | 2026-11-13 21:59 | 本笔 |
+| `tests/test_command_palette.py` | S1-S4结果伪造线/6ae85f56（「跳到设备」「跳到增益」「打开设置」「导出」四条入口的焦点落点用例） | 2026-11-13 21:59 | 本笔 |
+| `tests/test_discoverability_help.py` | S1-S4结果伪造线/6ae85f56（入口可发现性用例（从测试隔离线过期 2843min 的遗留 claim 夺取，内容未改）） | 2026-11-13 21:59 | 本笔 |
 
 > 上表各行均由 `claim` 台账推导：owner 原文与 `acquired_at` 直接取自台账，
 > 目的优先用台账里的 `claim_reason`，没有就如实写「未声明」，不补编。时间列只是

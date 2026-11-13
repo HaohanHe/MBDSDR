@@ -1975,24 +1975,80 @@ class MainWindow(QMainWindow):
         self.replay_btn.clicked.connect(self._replay_recording)
         toolbar.addWidget(self.replay_btn)
 
-        self._setup_tab_order()
-
     def _setup_tab_order(self) -> None:
-        """顶栏 Tab 顺序按视觉从左到右显式串联。
+        """把主界面焦点链串成视觉顺序：工具栏 → 顶栏 → 左栏 → 右栏 → 底坞。
 
-        Qt 的默认焦点链按控件创建次序，中间夹了 QLabel/分隔符后会跳序；
-        显式 setTabOrder 保证键盘用户按屏幕顺序走。链尾进入中央三栏。
+        Qt 默认焦点链按控件创建/重挂接次序，而右栏是 QScrollArea（内容体
+        setWidget 时才重新入链），底坞又晚于右栏创建——结果 Tab 走到右栏
+        「新时空」就跳去左下「⌂」，再回右栏「扫频」（P1-37）。
+
+        做法分两层：
+
+          * **栏级锚点**：工具栏 → 顶栏 → 左栏 → 右栏顶部的「跳到分组」→
+            右栏滚动区（``_tab_order`` 里登记的就是这串，供清单/测试引用）；
+          * **右栏内部**：按 ``_sections`` 的视觉顺序重串节标题与节内可聚焦
+            控件，再把底坞接在最后一节之后。不重串内部，右栏子树在环里是
+            断成两截的（晚加入的节落在底坞之后），只在栏级 setTabOrder
+            补不回来。
+
+        只排顺序，不改任何控件的可见性、尺寸或样式。
         """
         chain = [
-            self.toolbar_mode_combo, self.theme_combo, self.lang_combo,
-            self.layout_combo, self.layout_save_btn, self.layout_delete_btn,
-            self.new_vfo_btn, self.cycle_vfo_btn, self.toolbar_volume,
-            self.toolbar_mute_btn, self.listen_combo, self.record_btn,
-            self.replay_btn,
+            # 工具栏（聚焦模式下隐藏 → 由 Qt 跳过）
+            self.toggle_docks_btn, self.toolbar_mode_combo, self.new_vfo_btn,
+            self.cycle_vfo_btn, self.toolbar_volume, self.toolbar_mute_btn,
+            self.record_btn, self.replay_btn,
+            # 顶栏常驻
+            self.connect_btn, self.disconnect_btn, self.listen_combo,
+            self._focus_btn, self._float_btn,
+            # 左栏 → 右栏顶部的「跳到分组」
+            self.left_tab, self.right_nav,
         ]
-        self._tab_order = tuple(chain)
         for first, second in zip(chain, chain[1:]):
             QWidget.setTabOrder(first, second)
+
+        # 右栏内部按视觉顺序重串：内容扫完后再落回滚动区自身，最后接底坞。
+        # 只串「真的在焦点链里」的控件：setTabOrder 遇到不在链上的控件会
+        # 静默无效，一次无效会把后面整串都串断（实测）。
+        members = self._window_focus_chain()
+        order = [w for w in self._right_column_focus_widgets() if w in members]
+        if order:
+            # right_nav 与首个节标题都是叶子控件，可以相邻；滚动区容器
+            # 不能当 first（setTabOrder 对「祖先→后代」是静默无效的）。
+            QWidget.setTabOrder(self.right_nav, order[0])
+            for first, second in zip(order, order[1:]):
+                QWidget.setTabOrder(first, second)
+            QWidget.setTabOrder(order[-1], self.right_tab)
+        else:
+            QWidget.setTabOrder(self.right_nav, self.right_tab)
+        QWidget.setTabOrder(self.right_tab, self.home_btn)
+        chain.append(self.right_tab)
+        chain.append(self.home_btn)
+        self._tab_order = tuple(chain)
+
+    def _window_focus_chain(self):
+        """当前窗口焦点环里的全部控件（集合；用于过滤 setTabOrder 参数）。"""
+        out = set()
+        cur = self.nextInFocusChain()
+        for _ in range(20000):
+            if cur is None or cur is self:
+                break
+            out.add(cur)
+            cur = cur.nextInFocusChain()
+        return out
+
+    def _right_column_focus_widgets(self):
+        """右栏按「节顺序 + 节内创建顺序」列出可聚焦控件（视觉顺序）。
+
+        只负责给出顺序；隐藏节里的控件照收，运行时 Qt 会自动跳过。
+        """
+        out = []
+        for section in getattr(self.right_tab, "_sections", ()):
+            out.append(section.header)
+            for w in section.body().findChildren(QWidget):
+                if w.focusPolicy() != Qt.NoFocus:
+                    out.append(w)
+        return out
 
     def _build_central_widget(self):
         """构建「平行视界」三栏固定 QSplitter 布局。
@@ -2455,6 +2511,11 @@ class MainWindow(QMainWindow):
         self._init_ui_action_bus()
         # 天空动作执行总线（模型协商后 → 主窗口 UI 线程落地，150ms 排水）
         self._init_sky_action_bus()
+
+        # ---- Tab 焦点链放到构造最末：右栏「设备/扫频/调制识别」等节与
+        # 底坞都在 _build_central_widget 里创建，布局恢复还可能重排右栏节；
+        # 早于这些步骤串链，锚点会指向错误位置（P1-37）。----
+        self._setup_tab_order()
 
     # ------------------------------------------------------------------
     # 动态 UI（模型 → 界面动作执行器 + 排水）
@@ -12632,6 +12693,10 @@ class MainWindow(QMainWindow):
         self._right_stack.removeWidget(self._right_col)
         self._right_col.setParent(ov)
         lay.addWidget(self._right_col, 1)
+        # right_col 作为 QStackedLayout 的非当前页被显式 hide()，removeWidget +
+        # reparent 不会把 hidden 状态复位；只 show() 浮层也递归不到它，结果浮层
+        # 里只剩「收起」，整根右栏（含增益）键盘和鼠标都进不去。这里补一次 show()。
+        self._right_col.show()
         self._right_overlay = ov
         self._position_right_overlay()
         ov.show()
