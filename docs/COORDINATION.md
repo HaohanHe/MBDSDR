@@ -2125,6 +2125,7 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `tests/test_claim_signer_trace.py` | 收尸线/6ae85f56（反证：一致不标记、不一致警告+标记、空理由标记、正常两清、未声明不算冒名） | 2026-11-13 21:19 | 本笔 |
 | `scripts/audit_unclaimed_changes.py` | 收尸线/6ae85f56（审计单列可疑占位：owner_mismatch / reason_missing 只报不拦） | 2026-11-13 21:20 | 本笔 |
 | `tests/test_audit_flagged_claims.py` | 收尸线/6ae85f56（反证：冒名/空理由入列、干净与过期不入列、旧键未记录不误判） | 2026-11-13 21:20 | 本笔 |
+| `docs/incidents/2026-11-13-safe-commit-swept-inflight-work.md` | 收尸线/6ae85f56（3 条无凭据收口：theme json 直接引用、qgis 旁证链、axioms init 无内容差异） | 2026-11-13 21:21 | 本笔 |
 
 > 上表各行均由 `claim` 台账推导：owner 原文与 `acquired_at` 直接取自台账，
 > 目的优先用台账里的 `claim_reason`，没有就如实写「未声明」，不补编。时间列只是

@@ -181,15 +181,19 @@ claim 记录 / §6.1 行 / `docs/pending-patches/` 补丁单 / 用户派单。
 | `tests/test_ai_steps_behavior.py` | claim 20:47:04–20:47:45（理由「信封用例改判」）；提交 `b898f4a3` 20:47:32 |
 | `tests/test_ai_tool_consistency.py` | claim 20:47:04–20:47:44（理由「补账①用例」）；提交 `b898f4a3` |
 
-### 11.4 仍为「无凭据」的 3 条
+### 11.4 剩余 3 条的收口（2026-11-13 21:21 复核）
 
-| 路径 | 状态 | 核查结果 |
-| --- | --- | --- |
-| `tools/axioms/__init__.py` | M | `claims.json` 无该键；§6.1 无行；三份补丁单 0 命中 |
-| `docs/learn/2026-11-13-qgis-3.44.15-source-study.md` | ?? | 同上 |
-| `docs/perf-evidence/2026-11-11/theme_switch_lowload_retest.json` | ?? | 同上 |
+三条线索是**查找方向**，不是证据；下列每条都附了可复核的文件 / 行 / 命令。
+结论按「有没有可指认的凭据」分档，不按「像谁干的」分档。
 
-三条均**不猜、不合并、不代签**。
+| 路径 | 20:45 状态 | 收口结论 | 依据 |
+| --- | --- | --- | --- |
+| `docs/perf-evidence/2026-11-11/theme_switch_lowload_retest.json` | ?? | **A 组（直接引用）**：`守卫账本线` 的研究文档逐字点名此文件为证据 | `docs/research/2026-11-11-p0-static-inference-check-rest.md:123`「证据 `docs/perf-evidence/2026-11-11/theme_switch_lowload_retest.json`」；同段 L121 的 `103.1% / 108.6%`、`243–397 ms` 与该 JSON 的 `load_before/load_after`、`wall_ms` 逐数对上；该 research 文件在台账里的 owner 是 `守卫账本线` |
+| `docs/learn/2026-11-13-qgis-3.44.15-source-study.md` | ?? | **A 组（间接凭据）**：台账里唯一一条 QGIS 相关 claim 来自 `Qt翻译与设置显式线/6ae85f56`，其理由与当天该线的提交同题，且文档落点正是该线改过的文件 | ① `.locks/claims.json` 中 `desktop/l10n.py` 的 history 有 `owner=Qt翻译与设置显式线/6ae85f56`、`claim_reason="QGIS学习项：加载 qtbase 翻译 + 设置显式标记，需改本文件"`（全仓唯一含 `QGIS` 的 claim 记录）；② 该线当天提交 `c4a2f345`（19:37:38）`feat(i18n): 加载 Qt 自带 qtbase 翻译`；③ 文档 §8.1（L313–328）逐条对照 `desktop/l10n.py`、`desktop/i18n/build_qm.py`。**该文件本身从未被 claim**，所以这是「旁证链」不是「占位凭据」——按 A 组记，但标注凭据类型 |
+| `tools/axioms/__init__.py` | M | **不属于任何线：它不是一条改动**——工作区内容与 HEAD 同一 blob，`git diff` 为空 | `git hash-object tools/axioms/__init__.py` = `8072776681…` = `git rev-parse HEAD:tools/axioms/__init__.py`；`git diff --quiet -- tools/axioms/__init__.py` 退出码 0；`git status` 仍报 `M` 是行尾假象（`core.autocrlf=true`、工作区存 LF），文件 mtime 为 2026-11-13 00:40:12。既然内容没变，就既不搬 A 组也不记「无凭据」，按「假改动」销账 |
+
+销账口径：前两条**搬进 A 组**（一条直接、一条间接且注明凭据类型），第三条按
+「无内容差异」销账。三条都**没有替任何线补 claim、也没有替任何线写 §6.1 行**。
 
 ### 11.5 反向盲区（同一处缺陷，方向相反）
 
