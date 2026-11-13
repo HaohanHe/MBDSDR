@@ -518,7 +518,8 @@ def test_audit_stale_ignores_fresh_claim_even_if_file_touched(tmp_path: Path) ->
     locks = tmp_path / "locks"
     target = tmp_path / "fresh.md"
     target.write_text("x", encoding="utf-8")
-    claimed = run(locks, "claim", str(target), "--owner", "审计线", "--ttl-min", "60")
+    claimed = run(locks, "claim", str(target), "--owner", "审计线", "--ttl-min", "60",
+                  "--reason", "audit-stale 用例：需要覆盖 60min 租期")
     assert claimed.returncode == 0, claimed.stderr
     os.utime(target, None)
     audit = run(locks, "audit-stale")
@@ -726,7 +727,7 @@ def test_renew_rejected_after_cumulative_cap_and_audit_shows_totals(tmp_path: Pa
     """反证(b)：累计持有超上限即拒绝续租；台账/占位文件能查到次数、总时长、上限来源。"""
     locks = tmp_path / "locks"
     first = run(locks, "claim", SHARED, "--owner", "线A", "--ttl-min", "60",
-                "--max-hold-min", "0.02")  # 0.02min = 1.2s
+                "--reason", "累计上限反证：初始租期", "--max-hold-min", "0.02")  # 0.02min = 1.2s
     assert first.returncode == 0, first.stderr
     token = _token(first, locks)
     assert _marker_data(locks)["max_hold_min"] == 0.02
@@ -833,3 +834,38 @@ def test_audit_renew_reports_renew_count_and_reason(tmp_path: Path) -> None:
     active = [h for h in hist if h["released_at"] is None]
     assert active and active[0]["renewals"][0]["reason"] == "半途被别的事插队"
     assert active[0]["renew_count"] == 1
+
+def test_long_ttl_without_reason_is_denied(tmp_path: Path) -> None:
+    """长租期是续租审计的旁路：--ttl-min > 30 必须带 --reason。"""
+    locks = tmp_path / "locks"
+    denied = run(locks, "claim", SHARED, "--owner", "线A", "--ttl-min", "120")
+    text = denied.stdout + denied.stderr
+    assert denied.returncode == 1, text
+    assert "必须带 --reason" in text
+    assert "默认 10 分钟" in text
+    assert not _markers(locks), "被拒的 claim 不得留下占位文件"
+
+
+def test_long_ttl_with_reason_is_recorded(tmp_path: Path) -> None:
+    """带理由的长租期照常取得，理由写进 claim 记录，可事后复核。"""
+    locks = tmp_path / "locks"
+    ok = run(locks, "claim", SHARED, "--owner", "线A", "--ttl-min", "120",
+             "--reason", "跨模块重构期间独占该文件")
+    assert ok.returncode == 0, ok.stdout + ok.stderr
+    data = _marker_data(locks)
+    assert data["ttl_min"] == 120
+    assert data["claim_reason"] == "跨模块重构期间独占该文件"
+
+
+def test_long_ttl_takeover_requires_reason(tmp_path: Path) -> None:
+    """接管同样口径：长租期不给理由 → 用法错误，且不写接管审计。"""
+    locks = tmp_path / "locks"
+    first = run(locks, "claim", SHARED, "--owner", "线A", "--ttl-min", "0.01")
+    assert first.returncode == 0, first.stderr
+    time.sleep(1.0)
+    denied = run(locks, "takeover", SHARED, "--owner", "线B", "--ttl-min", "120")
+    text = denied.stdout + denied.stderr
+    # takeover 的 --reason 是 argparse 必填（比 claim 更严），与长租期门槛同向。
+    assert denied.returncode == 2, text
+    assert "--reason" in text
+    assert not (locks / "claim_takeovers.log").exists()

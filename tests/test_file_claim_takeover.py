@@ -13,6 +13,13 @@
   (c) 心跳过期 + 有在途改动 → 拒绝（理由：在途改动）；
   (d) 不允许无理由接管；
   (e) pid 活着但心跳过期 → 允许（pid 不是判据，避免把「pid 存活」当忙碌信号）。
+
+另外钉住「疑似死会话」提示（2026-11-13 裁定 A）：
+  (f) 未过期 + 心跳过半 + pid 已不在 → status 标提示，但 takeover 仍拒绝；
+  (g) 心跳未过半 → 不标；
+  (h) pid 号还在但创建时刻对不上（被复用）→ 标；
+  (i) 反证：把 TTL 压到已过期，接管仍必须过 30min 宽限——短 TTL 只改数字，
+      不放宽机制。
 """
 from __future__ import annotations
 
@@ -87,7 +94,10 @@ def _dead_pid() -> int:
 
 
 def _claim(locks: Path, root: Path, owner: str = "线A") -> None:
-    claimed = run(locks, root, "claim", TARGET, "--owner", owner, "--ttl-min", "60")
+    claimed = run(
+        locks, root, "claim", TARGET, "--owner", owner, "--ttl-min", "60",
+        "--reason", "接管用例：覆盖跨过一次心跳的 60min 租期",
+    )
     assert claimed.returncode == 0, claimed.stdout + claimed.stderr
 
 
@@ -230,3 +240,88 @@ def test_takeover_without_claim_is_denied(tmp_path: Path) -> None:
     denied = run(locks, root, "takeover", TARGET, "--owner", "线B", "--reason", "x")
     assert denied.returncode == 2
     assert "没有 claim" in (denied.stdout + denied.stderr)
+
+
+def test_suspect_hint_marks_dead_pid_past_half_ttl(tmp_path: Path) -> None:
+    """(f) 未过期 + 心跳过半 + pid 已不在 → status 标提示，但 takeover 仍拒绝。"""
+    root = _repo(tmp_path)
+    locks = tmp_path / "locks"
+    _claim(locks, root)
+
+    now = time.time()
+    # TTL 60，心跳在 40 分钟前（>50%），仍未过期。
+    _rewrite(locks, pid=_dead_pid(), acquired_at=now - 40 * 60, heartbeat_at=now - 40 * 60, ttl_min=60)
+
+    status = run(locks, root, "status", TARGET)
+    assert status.returncode == 0, status.stdout + status.stderr
+    assert "疑似死会话" in status.stdout
+    assert "仅提示" in status.stdout
+    assert "EXPIRED" not in status.stdout
+
+    # 提示不等于判据：心跳未过期时接管仍必须拒绝（同事故形态 a）。
+    denied = run(locks, root, "takeover", TARGET, "--owner", "线B", "--reason", "看着像死了")
+    text = denied.stdout + denied.stderr
+    assert denied.returncode == 2, text
+    assert "[FAIL] 心跳过期" in text
+    assert not (locks / "claim_takeovers.log").exists()
+
+
+def test_suspect_hint_absent_before_half_ttl(tmp_path: Path) -> None:
+    """(g) 心跳未过半 → 不标提示（即使 pid 已死）。"""
+    root = _repo(tmp_path)
+    locks = tmp_path / "locks"
+    _claim(locks, root)
+
+    now = time.time()
+    _rewrite(locks, pid=_dead_pid(), acquired_at=now - 10 * 60, heartbeat_at=now - 10 * 60, ttl_min=60)
+
+    status = run(locks, root, "status", TARGET)
+    assert status.returncode == 0, status.stdout + status.stderr
+    assert "疑似死会话" not in status.stdout
+
+
+def test_suspect_hint_marks_reused_pid(tmp_path: Path) -> None:
+    """(h) pid 号还在、但创建时刻对不上（被复用）→ 标提示。"""
+    import psutil
+
+    root = _repo(tmp_path)
+    locks = tmp_path / "locks"
+    _claim(locks, root)
+
+    actual = psutil.Process(os.getpid()).create_time()
+    now = time.time()
+    # 复用：号是本进程的，但记录的创建时刻在 1 小时前 → 不是同一个进程。
+    _rewrite(
+        locks,
+        pid=os.getpid(),
+        pid_create_time=actual - 3600,
+        acquired_at=now - 40 * 60,
+        heartbeat_at=now - 40 * 60,
+        ttl_min=60,
+    )
+
+    status = run(locks, root, "status", TARGET)
+    assert status.returncode == 0, status.stdout + status.stderr
+    assert "疑似死会话" in status.stdout
+    assert "复用" in status.stdout
+
+
+def test_short_ttl_expiry_still_requires_grace(tmp_path: Path) -> None:
+    """(i) 反证：TTL 压到已过期，接管仍必须过 30min 宽限，不因「短」放宽。"""
+    root = _repo(tmp_path)
+    locks = tmp_path / "locks"
+    _claim(locks, root)
+
+    now = time.time()
+    # TTL 1 分钟、心跳停在 5 分钟前 → 过期 4 分钟，落在 §6.1.4 的 30min 宽限内。
+    _rewrite(locks, pid=_dead_pid(), acquired_at=now - 6 * 60, heartbeat_at=now - 5 * 60, ttl_min=1)
+
+    status = run(locks, root, "status", TARGET)
+    assert "EXPIRED" in status.stdout
+
+    denied = run(locks, root, "takeover", TARGET, "--owner", "线B", "--reason", "TTL 已经短到过期了")
+    text = denied.stdout + denied.stderr
+    assert denied.returncode == 2, text
+    assert "[FAIL] 心跳过期" in text
+    assert "宽限" in text
+    assert not (locks / "claim_takeovers.log").exists()

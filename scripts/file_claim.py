@@ -136,6 +136,19 @@ MAX_HOLD_ENV = "MBDSDR_CLAIM_MAX_HOLD_MIN"
 #: 到期后升级为「到期未清」（退出码 4）——不允许一条不可审计的老 claim 变成永久状态。
 DEFAULT_LEGACY_AUDIT_DUE = "2026-11-20"
 LEGACY_AUDIT_DUE_ENV = "MBDSDR_LEGACY_AUDIT_DUE"
+#: 「疑似死会话」提示阈值：心跳年龄超过 TTL 的这个比例时，若 pid 也已不在，
+#: `status` 会多标一个提示。**这是提示阈值，不是判据**——取 50% 只是因为
+#: 「已过半」是个能一眼解释的分界（离过期只剩一半租期），不是算出来的最优点；
+#: 它不参与任何夺取/接管判定（见 `_orphan_criteria` 的 pid 说明）。
+SUSPECT_HEARTBEAT_RATIO = 0.5
+#: 判定「同一个进程」的创建时刻容差（秒）。见 `_same_process_create_time`。
+PID_CREATE_TIME_TOLERANCE_S = 2.0
+#: 长租期门槛（分钟）：`--ttl-min` 超过它必须带 `--reason`，拒绝无理由长租。
+#: 取 30 的依据：台账 2212 条已释放 claim 的持有中位数 5.4min、p90 42.5min，
+#: 仅 14.3% 超过 30min；但当前活跃 claim 里 17/20 是 120min——「整批动手」时
+#: 长租期是常态。所以不能只打告警：一次性传个大 TTL 会绕过续租审计
+#:（reason + 累计上限），必须同样留下「为什么占这么久」的凭据。
+LONG_TTL_HINT_MIN = 30.0
 EXIT_OK = 0
 EXIT_USAGE = 1
 EXIT_DENIED = 2
@@ -234,6 +247,18 @@ def _proc_snapshot(pid: int) -> Tuple[str, Optional[float], Optional[str]]:
         return "alive", None, None
     except OSError:
         return "unknown", None, None
+
+
+def _same_process_create_time(recorded: float, actual: float) -> bool:
+    """两个创建时刻是否指向同一个进程（容差 2 秒）。
+
+    为什么要容差：Windows 的 FILETIME 精度是 100ns，但「进程启动时刻」在
+    不同取数路径上的取整方向不一致——`GetProcessTimes` 给原值，有的封装按
+    整秒向下取整、有的保留亚秒；同一进程在跨秒边界上两次读数会落在相邻整秒
+    两侧，差接近 1s。取 2s 覆盖「一边整秒取整 + 一次读数抖动」，再放大就会把
+    相邻启动的两个进程误判成同一个。
+    """
+    return abs(float(recorded) - float(actual)) <= PID_CREATE_TIME_TOLERANCE_S
 
 
 # ---------------------------------------------------------------------------
@@ -701,6 +726,21 @@ def cmd_claim(
     if ttl_min <= 0:
         print("--ttl-min 必须大于 0", file=sys.stderr)
         return EXIT_USAGE
+    if ttl_min > LONG_TTL_HINT_MIN:
+        # 长租期是续租审计的旁路：renew 必须带理由，而一次性传个大 TTL 过去
+        # 什么都不用写。同一条事实（为什么这个文件要占这么久）走同一种凭据。
+        if not reason.strip():
+            print(
+                f"CLAIM DENIED：--ttl-min {ttl_min:g} 超过 {LONG_TTL_HINT_MIN:g}min，"
+                f"必须带 --reason。\n"
+                f"  要么用默认 10 分钟（到期后 renew 续租，同样要理由）；\n"
+                f"  要么说明为什么这个文件要占这么久（理由会写进 claim 记录，"
+                f"事后可复核）。\n"
+                f"  依据：历史已释放 claim 持有 p90 42.5min；一次性传大 TTL 等于"
+                f"绕过续租审计（reason + 累计上限）。",
+                file=sys.stderr,
+            )
+            return EXIT_USAGE
     try:
         cap_min, cap_source = _resolve_max_hold(max_hold_min)
     except ValueError:
@@ -987,11 +1027,15 @@ def _orphan_criteria(payload: Dict[str, Any], display: str, now: float) -> Dict[
     """判定 claim 是否可被接管：只看「心跳过期」+「无在途改动」。
 
     **pid 不是判据**：`claim` 是一次性 CLI，写完就退出，`pid` 记的是那个短命
-    进程——「pid 已死」是默认状态，不是异常状态（旧实现把它当接管硬前提，等于
-    任何 claim 都能被接管：2026-11-13 01:39 的 `desktop/ai_panel.py` /
-    `desktop/ai_sdr_session.py` 就是这样在 TTL 还剩 160+ 分钟时被抢走的）。
-    pid 现在只作诊断展示，不参与 `allowed` 判定；持有者是否还在工作，唯一
-    新鲜且唯一的信号是心跳（`heartbeat_at` + `ttl_min`）。
+    进程——「pid 已死」是默认状态，不是异常状态。实测（2026-11-13）：claim
+    子进程返回后 0.08s 去查它自己刚写下的 pid 就已经 NoSuchProcess；活跃
+    claim 里「pid 已死」占比 100%，是构造性恒真，不携带任何会话存活信息。
+    旧实现把它当接管硬前提，等于任何 claim 都能被接管：2026-11-13 01:39 的
+    `desktop/ai_panel.py` / `desktop/ai_sdr_session.py` 就是这样在 TTL 还剩
+    160+ 分钟时被抢走的。
+    pid 现在只作诊断展示（`status` 里的「疑似死会话」提示也只提示，不参与
+    `allowed`），不参与判定；持有者是否还在工作，唯一新鲜且唯一的信号是心跳
+    （`heartbeat_at` + `ttl_min`）。
     """
     heartbeat = float(payload.get("heartbeat_at") or payload.get("acquired_at") or now)
     ttl_s = float(payload.get("ttl_min") or 0.0) * 60.0
@@ -1358,6 +1402,46 @@ def cmd_legacy_token_repair(path: str, owner: str, reason: str, by: str = "") ->
     return EXIT_OK
 
 
+def _suspect_dead_session(payload: Dict[str, Any], now: float) -> str:
+    """提示用：判断「持有者可能已经不在了」，返回提示文本或空串。
+
+    只在 ``status`` 里显示，**不参与** takeover/夺取判定——判定仍是
+    「心跳过期 + 宽限 + 无在途改动」（见 ``_orphan_criteria``）。三个条件同时
+    满足才提示：
+
+    1. claim 还没过期（过期了 ``status`` 已经显示 EXPIRED，不需要重复提示）；
+    2. 心跳年龄已超过 TTL 的 ``SUSPECT_HEARTBEAT_RATIO``（提示阈值，非判据）；
+    3. pid 记录的进程已不存在，或 pid 被复用（号还在但创建时刻对不上）。
+
+    关于「pid 被复用」的方向（这条判据唯一的保守性代价）：若只看 pid 号存不
+    存在，死进程的号被系统复用会让这条 claim「看起来还活着」——不会误抢，
+    但会让文件一直解不开，直到 TTL 到期。所以用 ``pid_create_time`` 二次
+    校验：号还在、创建时刻对不上，判为原进程已死。即便判死，这里也只是提示，
+    不会因此提前夺权。
+    """
+    pid = payload.get("pid")
+    if pid is None:
+        return ""
+    ttl_s = float(payload.get("ttl_min") or 0.0) * 60.0
+    heartbeat = float(payload.get("heartbeat_at") or payload.get("acquired_at") or now)
+    age_s = max(0.0, now - heartbeat)
+    if ttl_s <= 0 or age_s >= ttl_s:  # 已过期：交给 EXPIRED 展示
+        return ""
+    if age_s < ttl_s * SUSPECT_HEARTBEAT_RATIO:
+        return ""
+    try:
+        state, create_time, _cmd = _proc_snapshot(int(pid))
+    except (TypeError, ValueError, OSError):
+        return ""
+    if state == "gone":
+        return "疑似死会话(pid 已不在且心跳过半；仅提示，非判据)"
+    recorded = payload.get("pid_create_time")
+    if state == "alive" and create_time is not None and recorded is not None:
+        if not _same_process_create_time(float(recorded), float(create_time)):
+            return "疑似死会话(pid 已被复用且心跳过半；仅提示，非判据)"
+    return ""
+
+
 def _describe(payload: Dict[str, Any], now: float) -> str:
     owner = payload.get("owner", "<unknown>")
     ttl_s = float(payload.get("ttl_min") or 0.0) * 60.0
@@ -1372,10 +1456,12 @@ def _describe(payload: Dict[str, Any], now: float) -> str:
     ident = "token" if payload.get("token_sha256") else "legacy(名不可作身份)"
     renewals = payload.get("renewals")
     renew_txt = f"renew={len(renewals)}" if isinstance(renewals, list) else "renew=NA"
+    suspect = _suspect_dead_session(payload, now)
     return (
         f"{payload.get('path', '?'):<44} owner={owner:<18} held={_minutes(held_s)}/{_minutes(ttl_s)}min "
         f"{state} pid={payload.get('pid')} id={ident} {renew_txt} "
         f"since={_iso(float(payload.get('acquired_at') or heartbeat))}"
+        + (f" {suspect}" if suspect else "")
     )
 
 
@@ -1527,13 +1613,20 @@ def cmd_status(path: Optional[str]) -> int:
         print("STATUS: 无任何 claim")
         return EXIT_OK
     expired = 0
+    suspects = 0
     for payload in items:
         ttl_s = float(payload.get("ttl_min") or 0.0) * 60.0
         heartbeat = float(payload.get("heartbeat_at") or payload.get("acquired_at") or now)
         if now - heartbeat > ttl_s:
             expired += 1
+        if _suspect_dead_session(payload, now):
+            suspects += 1
         print(_describe(payload, now))
-    print(f"STATUS: {len(items)} 条 claim，其中 {expired} 条已过期（过期后他人可夺取）")
+    print(
+        f"STATUS: {len(items)} 条 claim，其中 {expired} 条已过期（过期后他人可夺取）；"
+        f"{suspects} 条疑似死会话（pid 已不在/被复用且心跳过半，**仅提示**，"
+        f"接管仍按心跳过期 + 宽限 + 无在途改动判）"
+    )
     return EXIT_OK
 
 

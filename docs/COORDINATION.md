@@ -1871,6 +1871,11 @@ No supported devices found），GNSS+SDR 同开复验没做成；离线那次
 | 文件 | 线名 | 开始时间 | 预计提交 hash |
 |---|---|---|---|
 | _（空）_ | | | |
+| `scripts/file_claim.py` | 收尸线/6ae85f56（pid 只作诊断 + 长租期必须给理由 + 「疑似死会话」提示；接管判据未放宽） | 2026-11-13 19:55 | 本笔 |
+| `tests/test_file_claim.py` | 收尸线/6ae85f56（长租期 reason 三条 + 夹具补 --reason） | 2026-11-13 19:55 | 本笔 |
+| `tests/test_file_claim_takeover.py` | 收尸线/6ae85f56（疑似死会话/pid 复用/短 TTL 仍须宽限，四条） | 2026-11-13 19:55 | 本笔 |
+| `tests/test_claim_gate.py` | 收尸线/6ae85f56（180min 夹具补 --reason） | 2026-11-13 19:55 | 本笔 |
+| `docs/COORDINATION.md` | 收尸线/6ae85f56（本笔 §6.1 登记行，提交后释放） | 2026-11-13 19:55 | 本笔 |
 | `tests/test_safe_commit_exclude.py` | 用户输入静默线/6ae85f56（排除 hunk 三条固化：多 hunk、内容对不上必拒、同内容按位置） | 2026-11-13 19:45 | 本笔 |
 | `docs/COORDINATION.md` | 用户输入静默线/6ae85f56（本笔两条 §6.1 登记行） | 2026-11-13 19:45 | 本笔 |
 | `docs/COORDINATION.md` | 星下点轨迹线/6ae85f56（本笔 §6.1 登记行，提交后释放） | 2026-11-13 19:24 | 本笔 |

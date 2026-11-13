@@ -372,7 +372,8 @@ def test_real_file_claim_cli_is_seen(repo_env):
     _stage(repo, env)
     proc = subprocess.run(
         [sys.executable, str(ROOT / "scripts" / "file_claim.py"),
-         "claim", "a.txt", "--owner", "A03静默降级线/realline", "--ttl-min", "180"],
+         "claim", "a.txt", "--owner", "A03静默降级线/realline", "--ttl-min", "180",
+         "--reason", "gate 用例：180min 长租期需理由"],
         cwd=str(repo), env=env, capture_output=True, text=True,
         encoding="utf-8", errors="replace",
     )
