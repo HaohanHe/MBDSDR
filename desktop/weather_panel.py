@@ -38,6 +38,7 @@ MBDSDR 桌面端 - 气象卫星云图面板 (WeatherPanel)
 """
 from __future__ import annotations
 
+import logging
 import os
 import sys
 import time
@@ -114,6 +115,8 @@ ENHANCE_OPS = {
 #: 源码树里的东西）。输出与用户数据一律落 ``~/.mbdsdr/``（与 adsb_panel 的
 #: ``~/.mbdsdr/adsb`` 同口径）。
 _OUT_DIR = os.path.expanduser(os.path.join("~", ".mbdsdr", "weather"))
+
+logger = logging.getLogger(__name__)
 
 
 def _theme_colors() -> Dict[str, str]:
@@ -481,6 +484,14 @@ class WeatherPanel(QWidget):
         #: ``QThread.finished`` → ``_on_idle`` → ``_refresh_state`` 会在失败
         #: 弹窗自转事件循环期间排队执行，旧实现用「就绪」把它冲掉。
         self._terminal_status = ""
+        #: 本轮的「卫星制式 / 文件」身份：终态文案必须自证是哪一次，否则先失败
+        #: A 再失败 B 后，用户分不清状态行这条属于哪个文件。
+        self._run_identity: str = ""
+        #: 仍是状态行主体的那次失败；被下一条终态覆盖时移入保留位。
+        self._pending_failure: Optional[dict] = None
+        #: 已被最近一条终态覆盖掉的失败（时间/身份）。保留最近 = 丢信息，
+        #: 丢掉的必须可见，所以状态行附「另有 N 次失败」。
+        self._discarded_failures: List[dict] = []
         self._build_ui()
         self._on_satellite_changed(0)
         self._load_history()
@@ -843,7 +854,13 @@ class WeatherPanel(QWidget):
 
     # ------------------------------------------------------------------
     def _start_worker(self, params: Dict):
-        self._terminal_status = ""  # 新一轮解码开始，上一轮终态作废
+        # 新一轮解码开始：上一轮终态退出状态行主体，但失败不许静默消失，
+        # 转入「另有 N 次失败」的保留位（时间/身份仍在）。
+        if self._pending_failure is not None:
+            self._discarded_failures.append(self._pending_failure)
+            self._pending_failure = None
+        self._terminal_status = ""
+        self._run_identity = self._identity_of(params)
         self._worker = QThread()
         self._worker_obj = DecodeWorker(params)
         self._worker_obj.moveToThread(self._worker)
@@ -867,9 +884,44 @@ class WeatherPanel(QWidget):
     def _on_progress(self, text: str):
         self._update_status(extra=text)
 
+    def _identity_of(self, params: Optional[Dict] = None) -> str:
+        """「卫星制式 / 录制文件」：终态文案的身份，缺项写「?」。"""
+        if params:
+            sat = str(params.get("satellite") or "?")
+            iq = str(params.get("iq_file") or "")
+        else:
+            sat = self.sat_combo.currentText() or "?"
+            iq = self._iq_file or ""
+        return f"{sat} / {os.path.basename(iq) if iq else '?'}"
+
+    def _record_failure(self, prefix: str, reason: str, detail: str) -> None:
+        """记一次失败：状态行挂最近一条，更早的进保留位，完整正文进日志。
+
+        「保留最近」本质是丢信息，丢掉的必须可见：被本条覆盖的那次失败带
+        时间与身份留在 ``_discarded_failures``，由状态行附「另有 N 次失败」。
+        """
+        if self._pending_failure is not None:
+            self._discarded_failures.append(self._pending_failure)
+        identity = self._run_identity or self._identity_of()
+        self._pending_failure = {
+            "time": time.strftime("%H:%M:%S"),
+            "identity": identity,
+            "reason": reason,
+        }
+        self._terminal_status = f"{prefix}: {reason} · {identity}"
+        logger.warning("气象解码失败（%s）%s", identity, detail)
+
+    def _discarded_note(self) -> str:
+        """被最近一条终态覆盖掉的失败：时间与身份必须仍可见。"""
+        if not self._discarded_failures:
+            return ""
+        last = self._discarded_failures[-1]
+        return (f"另有 {len(self._discarded_failures)} 次失败"
+                f"（{last['time']} {last['identity']}）")
+
     def _on_failed(self, text: str):
         self._set_placeholder("解码失败")
-        self._terminal_status = f"错误: {text.splitlines()[0]}"
+        self._record_failure("错误", text.splitlines()[0], text)
         self._update_status()
         QMessageBox.critical(self, "解码错误", text)
 
@@ -889,6 +941,10 @@ class WeatherPanel(QWidget):
             self._terminal_status = (
                 f"出图成功: {os.path.basename(res['png'])}"
                 + (f" | 链路: {res['link']}" if res.get("link") else ""))
+            if self._pending_failure is not None:
+                # 成功覆盖了上一次失败：转保留位，状态行仍会提它一句。
+                self._discarded_failures.append(self._pending_failure)
+                self._pending_failure = None
             self._update_status()
             self.save_btn.setEnabled(True)
             self._load_history()
@@ -896,7 +952,8 @@ class WeatherPanel(QWidget):
             # 不出图：保持空白占位，如实说明，绝不补假图
             self._set_placeholder("无数据")
             self.meta_label.setText("卫星: — | 通道: — | 时间: — | 分辨率: —")
-            self._terminal_status = f"未出图: {res.get('error','未知原因')}"
+            reason = str(res.get("error", "未知原因"))
+            self._record_failure("未出图", reason, reason)
             self._update_status()
 
     def _show_image(self, path: str):
@@ -986,8 +1043,10 @@ class WeatherPanel(QWidget):
     def _update_status(self, extra: str = ""):
         sat = self._current_sat()
         if not sat:
-            self.status_label.setText(
-                extra or self._terminal_status or "就绪"); return
+            text = extra or self._terminal_status or "就绪"
+            note = "" if extra else self._discarded_note()
+            self.status_label.setText(f"{text} | {note}" if note else text)
+            return
         # 频率读数不再就地拼「{输入框} MHz」：输入是 MHz 字符串，是数值才按
         # 1 Hz 口径格式化（6 位小数 MHz）；不是数值就原样保留，不吞掉用户输入。
         raw_freq = self.freq_edit.text()
@@ -1004,6 +1063,10 @@ class WeatherPanel(QWidget):
             # 终态只在这里回显：_refresh_state 的排队回调不得用「就绪」
             # 把「出图成功 / 未出图 / 错误」冲掉。
             line += f" | {self._terminal_status}"
+            note = self._discarded_note()
+            if note:
+                # 保留最近 = 丢掉更早那条；丢掉的必须可见。
+                line += f" | {note}"
         self.status_label.setText(line)
 
 

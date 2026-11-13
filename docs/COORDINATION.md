@@ -2116,6 +2116,8 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `scripts/check_coordination_append_only.py` | 收尸线/6ae85f56（§6.1 只增检查：剥离释放标记后按多重集比对，删行/改写即红） | 2026-11-13 21:11 | 本笔 |
 | `tests/test_coordination_append_only.py` | 收尸线/6ae85f56（只增检查反证：追加标记绿、新增行绿、删行红、改写红） | 2026-11-13 21:11 | 本笔 |
 | `scripts/hooks/pre-commit` | 收尸线/6ae85f56（接入 ⑤：本笔暂存协调文档时跑只增检查，违规拒绝） | 2026-11-13 21:11 | 本笔 |
+| `desktop/weather_panel.py` | S1-S4结果伪造线/6ae85f56（B1：两次失败保留最近一条，终态带身份，被覆盖的失败附「另有 N 次失败」并写日志） | 2026-11-13 21:16 | 本笔 |
+| `tests/test_weather_panel_fengyun.py` | S1-S4结果伪造线/6ae85f56（B1 用例：先失败 A 再失败 B，最近一条+身份+另有 N 次失败） | 2026-11-13 21:16 | 本笔 |
 
 > 上表各行均由 `claim` 台账推导：owner 原文与 `acquired_at` 直接取自台账，
 > 目的优先用台账里的 `claim_reason`，没有就如实写「未声明」，不补编。时间列只是

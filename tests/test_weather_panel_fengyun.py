@@ -113,3 +113,37 @@ def test_decode_failure_survives_queued_idle_refresh(monkeypatch):
     finally:
         panel.close()
 
+
+def test_second_failure_keeps_latest_and_flags_discarded(monkeypatch, caplog):
+    """B1：两次失败，状态行保留最近那条并自证身份；被覆盖的那条不许静默消失。
+
+    复现：先解码 A 抛异常（``错误: …``），再解码 B 正常失败（``未出图: …``）。
+    用户最终看到 B（描述当前输入），A 退出状态行主体，但它的时间与身份必须
+    仍可见（``另有 N 次失败``），完整正文进日志。
+    """
+    import logging
+
+    from desktop import weather_panel as wp
+
+    caplog.set_level(logging.WARNING, logger=wp.__name__)
+    monkeypatch.setattr(wp.QMessageBox, "critical", lambda *a, **k: None)
+    panel = wp.WeatherPanel()
+    try:
+        panel.sat_combo.setCurrentText("GOES-16 HRIT (75.2°W)")
+        panel._run_identity = "GOES-16 HRIT (75.2°W) / a.iq"
+        panel._on_failed("读取失败: 文件不存在\n第二行详情")
+        panel._run_identity = "GOES-16 HRIT (75.2°W) / b.iq"
+        panel._on_result({"ok": False, "error": "未锁相（符号率不匹配）"})
+
+        text = panel.status_label.text()
+        assert "未出图: 未锁相（符号率不匹配） · GOES-16 HRIT (75.2°W) / b.iq" in text, text
+        assert "另有 1 次失败" in text, "被覆盖的失败必须可见，不许静默消失"
+        assert "a.iq" in text, "时间/身份里必须认得出被丢掉的是哪一次"
+        assert text.index("b.iq") < text.index("a.iq"), "最近一条在前，被丢弃的在后"
+        # 完整正文（含第二行）进日志，不只留状态行的一行摘要
+        assert "读取失败: 文件不存在" in caplog.text
+        assert "第二行详情" in caplog.text
+        assert "未锁相（符号率不匹配）" in caplog.text
+    finally:
+        panel.close()
+
