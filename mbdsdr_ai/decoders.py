@@ -260,11 +260,15 @@ def compute_satellite_position(
         doppler = 0.0
         freq_hz = 0
 
-    # 卫星经纬度（从 ECEF 反算，简化为球坐标）
-    sat_lon = math.degrees(math.atan2(sat_y, sat_x))
-    sat_r = math.sqrt(sat_x**2 + sat_y**2 + sat_z**2)
-    sat_lat = math.degrees(math.asin(sat_z / sat_r)) if sat_r > 0 else 0.0
-    sat_alt = sat_r - earth_radius
+    # 卫星星下点：与地面轨迹同一底层（ECEF → WGS-72 大地坐标）。
+    # 旧实现按球坐标反解（半径用 WGS-84 赤道半径），同刻同 TLE 与
+    # ground_track.satellite_subpoint 差 lat 0.17° 量级（探针 0.176°、
+    # 回归用例 0.1708°）、高度差约 13 km。
+    try:
+        from .orbit import wgs72_ecef_km_to_llh
+    except ImportError:  # 脚本 / 直接运行时（mbdsdr_ai 目录已在 sys.path）
+        from orbit import wgs72_ecef_km_to_llh  # type: ignore
+    sat_lat, sat_lon, sat_alt = wgs72_ecef_km_to_llh(sat_x, sat_y, sat_z)
 
     return SatellitePass(
         name=satellite_name,

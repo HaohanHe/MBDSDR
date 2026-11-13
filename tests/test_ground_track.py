@@ -183,6 +183,32 @@ class TimeSourceTest(unittest.TestCase):
         self.assertAlmostEqual(sub.unix_s, WHEN, delta=1.0)
 
 
+class DecoderSubpointConsistencyTest(unittest.TestCase):
+    """解码器与地面轨迹的「星下点」必须是同一个量（WGS-72 大地坐标）。
+
+    反证：把 decoders 改回球坐标反解，纬度差 0.1708°（≈18.9 km），
+    本用例必红。
+    """
+
+    def test_decoder_subpoint_matches_ground_track(self):
+        from mbdsdr_ai import decoders
+        from mbdsdr_ai.ground_track import satellite_subpoint
+
+        orig = decoders._resolve_tle
+        decoders._resolve_tle = lambda name: (ISS_TLE[0], ISS_TLE[1], "test")
+        try:
+            pos = decoders.compute_satellite_position(
+                "ISS (ZARYA)", 0.0, 0.0, 0.0, timestamp=WHEN)
+        finally:
+            decoders._resolve_tle = orig
+
+        self.assertIsNotNone(pos)
+        sub = satellite_subpoint("ISS (ZARYA)", when_unix=WHEN, tle=ISS_TLE)
+        self.assertAlmostEqual(pos.latitude, sub.lat_deg, delta=0.01)
+        self.assertAlmostEqual(pos.longitude, sub.lon_deg, delta=0.01)
+        self.assertAlmostEqual(pos.altitude_km, sub.sat_alt_km, delta=0.05)
+
+
 class DestinationPointTest(unittest.TestCase):
     def test_pole_seam_lon_wrap(self):
         lat, lon = destination_point(0.0, 179.5, 90.0, 2.0)
