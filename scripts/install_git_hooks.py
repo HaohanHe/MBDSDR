@@ -45,7 +45,16 @@ ROOT = Path(__file__).resolve().parents[1]
 HOOKS_SRC = ROOT / "scripts" / "hooks"
 HOOK_NAMES = ("pre-commit", "post-commit", "commit-msg")
 #: 闸门的运行时依赖：装到 hooks 目录，保证旧工作树也能跑（见模块 docstring）。
-SUPPORT_FILES = ("claim_gate.py", "file_claim.py", "secret_scan.py")
+#: ``check_coordination_append_only.py`` 是 ``claim_gate.py`` 的兄弟模块
+#: （``is_pure_append``，登记面纯追加判据）：闸优先执行 hooks 目录里的
+#: claim_gate 副本，少拷一个依赖就整条 pre-commit 在 ② 处以
+#: ``ModuleNotFoundError`` fail-closed。2026-11-13 安装后实测撞到过。
+SUPPORT_FILES = (
+    "claim_gate.py",
+    "file_claim.py",
+    "check_coordination_append_only.py",
+    "secret_scan.py",
+)
 SIGNATURE = "MBDSDR-MANAGED-HOOK"
 
 
