@@ -52,6 +52,9 @@ from typing import List, Dict, Any, Optional, Tuple, Union
 
 logger = logging.getLogger(__name__)
 
+# host:port 的唯一实现（桌面连接对话框与环境变量共用）
+from mbdsdr_ai.net_utils import parse_host_port  # noqa: E402
+
 from .error_catalog import user_message
 
 from .device_identity import (
@@ -113,22 +116,23 @@ def parse_rtl_tcp_env(value: str, default_port: int = 1234
                       ) -> List[Tuple[str, int]]:
     """解析 ``host[:port][,host[:port]...]`` 为 [(host, port), ...]。
 
-    无法解析的条目记 debug 日志后跳过（诚实忽略，不为坏配置造后端）；
+    无法解析的条目记 warning 日志后跳过（诚实忽略，不为坏配置造后端）；
     空值返回 []（显式未登记）。裸主机名/IP 用 ``default_port``。
+    解析统一走 ``parse_host_port``：``[::1]:1234`` 得到主机 ``::1``，
+    裸 IPv6 ``fe80::1`` 会被拒绝（它和 host:port 无法区分）。
     """
     out: List[Tuple[str, int]] = []
     for raw in (value or "").split(","):
         item = raw.strip()
         if not item:
             continue
-        if ":" in item:
-            host, _, port_s = item.rpartition(":")
-            if not host or not port_s.isdigit() or not (0 < int(port_s) < 65536):
-                logger.debug(f"rtl_tcp 配置无法解析（已跳过）: {item!r}")
-                continue
-            out.append((host, int(port_s)))
-        else:
-            out.append((item, int(default_port)))
+        parsed = parse_host_port(item, default_port=default_port)
+        if parsed is None:
+            logger.warning(
+                "rtl_tcp/spyserver 配置无法解析（已跳过）: %r —— "
+                "IPv6 必须写成 [地址]:端口，例如 [fe80::1]:1234", item)
+            continue
+        out.append(parsed)
     return out
 
 

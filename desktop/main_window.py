@@ -622,6 +622,7 @@ if _REPO_ROOT not in sys.path:
     sys.path.insert(0, _REPO_ROOT)
 
 from themes import get_theme, THEMES, DEFAULT_THEME
+from mbdsdr_ai.net_utils import parse_host_port
 # 强调色底上的墨色由 themes 按实际对比度算（浅色主题白字只有 3.09:1）
 from themes import _on_primary as _primary_ink
 from shortcuts import bind as _key
@@ -6906,7 +6907,7 @@ class MainWindow(QMainWindow):
                 QMessageBox.critical(
                     self, "连接失败",
                     f"无法解析地址「{host_port.strip()}」，格式应为 host:port"
-                    "（如 192.168.1.100:1234）")
+                    "（如 192.168.1.100:1234；IPv6 请写成 [fe80::1]:1234）")
                 return
             try:
                 from mbdsdr_ai.rtltcp_client import RtlTcpBackend
@@ -6961,40 +6962,15 @@ class MainWindow(QMainWindow):
 
     @staticmethod
     def _parse_host_port(s: str, default_port: int = 1234):
-        """解析 'host:port' 字符串，返回 (host, port)；解析失败返回 (None, None)。
-        支持 IPv6 [::1]:1234 格式。"""
-        s = s.strip()
-        if not s:
-            return None, None
-        # IPv6 带方括号
-        if s.startswith("["):
-            end = s.find("]")
-            if end < 0:
-                return None, None
-            host = s[1:end]
-            rest = s[end + 1:]
-            if rest.startswith(":"):
-                try:
-                    port = int(rest[1:])
-                except ValueError:
-                    return None, None
-            else:
-                port = default_port
-            return host, port
-        # 普通 host:port（rsplit 一次，兼容 host 不含端口时默认端口）
-        if ":" in s:
-            parts = s.rsplit(":", 1)
-            host = parts[0]
-            try:
-                port = int(parts[1])
-            except ValueError:
-                return None, None
-        else:
-            host = s
-            port = default_port
-        if not host or port < 1 or port > 65535:
-            return None, None
-        return host, port
+        """解析 'host:port'，返回 (host, port)；失败返回 (None, None)。
+
+        实际解析在 ``mbdsdr_ai.net_utils.parse_host_port``：桌面连接对话框与
+        ``MBDSDR_RTL_TCP`` / ``MBDSDR_SPYSERVER`` 环境变量必须共用同一份实现，
+        否则 ``[::1]:1234`` 在界面能连、走环境变量却把方括号当主机名。
+        裸 IPv6（``fe80::1``）也会被拒绝——它和 ``host:port`` 无法区分。
+        """
+        parsed = parse_host_port(s, default_port=default_port)
+        return parsed if parsed is not None else (None, None)
 
     @staticmethod
     def _humanize_error(raw_err: str) -> str:
