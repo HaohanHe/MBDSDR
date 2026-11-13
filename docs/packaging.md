@@ -912,7 +912,7 @@ python scripts/release_manifest.py --only installer
 | 状态 | 语义 | 能否发布 |
 |---|---|---|
 | `PASS` | 验证通过（每条附命令/证据） | 可以 |
-| WARN（取证：`a0969112` — `scripts/release_manifest.py:751` — `未归因（不在 Requires-Dist 闭包`，基准 `a0969112`） | 缺口存在但不构成取值冲突（依赖差集②已改为 PASS/FAIL 两态，不再产生 WARN） | 可以，需登记 |
+| WARN（取证：`a0969112` — `scripts/release_manifest.py:806` — `未归因（不在 Requires-Dist 闭包`，基准 `a0969112`） | 缺口存在但不构成取值冲突（依赖差集②已改为 PASS/FAIL 两态，不再产生 WARN） | 可以，需登记 |
 | `FAIL` | 红（含「正则失配」这种删位置置换绿的情况） | 不可以 |
 | `BY-DESIGN` | 该项按产品决策不做，理由与边界已登记（如无安装器） | 可以，但必须带理由 |
 | `SKIP` | 对象不存在、未验 | 不算绿 |
