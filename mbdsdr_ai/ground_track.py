@@ -18,13 +18,13 @@
 from __future__ import annotations
 
 import math
-import time
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 
 from .orbit import (
     BUILTIN_SATS,
     WGS72_A,
+    _engine_now_unix,
     _require_sgp4,
     fetch_tle,
     teme_to_ecef_km,
@@ -89,8 +89,12 @@ def _point_from_satrec(sat, unix_s: float) -> Subpoint:
 def satellite_subpoint(name_or_catnr: Union[str, int],
                        when_unix: Optional[float] = None,
                        tle: Optional[Tuple[str, str]] = None) -> Subpoint:
-    """当前（或指定时刻）星下点，WGS-72 + km。"""
-    when = time.time() if when_unix is None else float(when_unix)
+    """当前（或指定时刻）星下点，WGS-72 + km。
+
+    缺省时刻取 :func:`mbdsdr_ai.orbit._engine_now_unix`（全链路唯一时间源）；
+    时间机器把引擎拨走之后，地图必须画那一刻的星下点，而不是墙钟时刻。
+    """
+    when = _engine_now_unix() if when_unix is None else float(when_unix)
     return _point_from_satrec(_satrec(name_or_catnr, tle=tle), when)
 
 
@@ -120,7 +124,7 @@ def ground_track(name_or_catnr: Union[str, int],
     """
     if minutes <= 0 or step_s <= 0:
         raise ValueError("minutes 与 step_s 必须为正")
-    start = time.time() if when_unix is None else float(when_unix)
+    start = _engine_now_unix() if when_unix is None else float(when_unix)
     sat = _satrec(name_or_catnr, tle=tle)
     count = int(round(minutes * 60.0 / step_s))
     points = [_point_from_satrec(sat, start + i * step_s)

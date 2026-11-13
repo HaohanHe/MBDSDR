@@ -166,6 +166,23 @@ class FootprintTest(unittest.TestCase):
         self.assertAlmostEqual(fp["central_angle_deg"], want, places=9)
 
 
+class TimeSourceTest(unittest.TestCase):
+    """缺省时刻必须跟 TimeEngine（与时间机器同源），不跟墙钟。
+
+    反证：把 ``when_unix is None`` 分支改回 ``time.time()``，start_unix
+    会是跑用例当天的墙钟（与 WHEN 差约 20 天），本用例必红。
+    """
+
+    def test_default_time_follows_time_engine(self):
+        from mbdsdr_ai.new_spacetime import get_time_engine
+
+        get_time_engine().set_unix(WHEN)
+        track = ground_track("ISS (ZARYA)", minutes=1, step_s=30, tle=ISS_TLE)
+        self.assertAlmostEqual(track["start_unix"], WHEN, delta=1.0)
+        sub = satellite_subpoint("ISS (ZARYA)", tle=ISS_TLE)
+        self.assertAlmostEqual(sub.unix_s, WHEN, delta=1.0)
+
+
 class DestinationPointTest(unittest.TestCase):
     def test_pole_seam_lon_wrap(self):
         lat, lon = destination_point(0.0, 179.5, 90.0, 2.0)
