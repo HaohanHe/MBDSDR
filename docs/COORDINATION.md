@@ -1868,6 +1868,17 @@ No supported devices found），GNSS+SDR 同开复验没做成；离线那次
 `check_claim_coordination.py --staged`，暂存文件里有活跃 claim 却缺本表行即拒绝
 （实测 0.22–0.30s，超 0.30s 预算只告警不阻塞并说明原因）。
 
+**追加登记行不必占整文件（2026-11-13 落地）**：`scripts/append_coordination_row.py`
+只做「在 §6.1 表格末尾追加一行」——独立窄锁（`.locks/coordination-append.lock`，
+`O_EXCL` + 1ms 退避 + 60s 陈旧锁清理），读-插-`os.replace` 原子写回-立刻放锁，
+**不需要 claim**。写入前仍过同样的字段检查：路径在仓库内且存在（支持
+`docs/{a,b}.md` 花括号组）、该文件有活跃 claim 且 owner 与 `--owner` 一致、
+说明非空且不含 `|`；任一不过直接拒绝且不改动文件。**大段编辑（改章节、改规则、
+删行、重排表格）仍要整文件 claim**；两条路并存，判据不重复。实测（376KB /
+4771 行副本）：单行追加中位 39.8ms；同文档整文件持有今天 36 次、中位 2.1 分钟，
+最长一次 688 分钟（掉线那笔正是挡住 A 批的原因）。并发正确性有用例钉住：
+两线各追加 10 行 → 20 行不丢；拆掉窄锁同用例必红。
+
 | 文件 | 线名 | 开始时间 | 预计提交 hash |
 |---|---|---|---|
 | `desktop/search_providers.py` | Qt翻译与设置显式线/6ae85f56（统一搜索 provider 声明式注册表：菜单/页签/面板/能力/快捷键/设置项/卫星） | 2026-11-13 20:15 | 本笔 |
@@ -2008,6 +2019,15 @@ No supported devices found），GNSS+SDR 同开复验没做成；离线那次
 | `mbdsdr_ai/ui_actions.py` | 用户输入静默线/6ae85f56（A3：新增 `parse_layout_ratio`，校验器与执行器同源） | 2026-11-13 19:52 | 本笔 |
 | `tests/test_ui_layout_actions.py` | 用户输入静默线/6ae85f56（A3：执行器直连坏比例/`0:0:0` 必须 PARAM_ERROR；反证=旧 int() 拆分 ZeroDivisionError 红） | 2026-11-13 19:52 | 本笔 |
 | **真机（USB SDR）** | 跑 `hw_acceptance/`、七环、`capture_throughput.py` 的线（资源独占） | 占用时段 | — |
+| `scripts/append_coordination_row.py` | 收尸线/6ae85f56（§6.1 追加行走毫秒级窄锁 + 四条用例） | 2026-11-13 20:06 | 本笔 |
+| `tests/test_append_coordination_row.py` | 收尸线/6ae85f56（并发 20 行不丢、无锁必红、非法拒写不改文件） | 2026-11-13 20:06 | 本笔 |
+| `docs/COORDINATION.md` | 收尸线/6ae85f56（两条路并存规则 + 本笔登记行） | 2026-11-13 20:06 | 本笔 |
+| `docs/code-guards.md` | 收尸线/6ae85f56（三处〔证〕绑定；f6034fcd 绑定从 380 修正到 379） | 2026-11-13 20:06 | 本笔 |
+| `docs/tool-honesty-matrix.md` | 收尸线/6ae85f56（list_decoders 入矩阵，82→83 条） | 2026-11-13 20:06 | 本笔 |
+| `docs/a11y/2026-11-12-remaining-decisions.md` | 收尸线/6ae85f56（8pt 信息字 40 处，A4/B36 分堆） | 2026-11-13 20:06 | 本笔 |
+| `docs/pending-patches/2026-11-06-limitation-adsb-1090-fc0012.md` | 收尸线/6ae85f56（删过期证据状态头，数字与复跑命令已在正文） | 2026-11-13 20:06 | 本笔 |
+| `docs/pending-patches/2026-11-11-tooltip-guard-dynamic-coverage.md` | 收尸线/6ae85f56（删过期证据状态头，逐行已绑提交） | 2026-11-13 20:06 | 本笔 |
+| `docs/pending-patches/2026-11-12-fz04-unfreeze-request.md` | 收尸线/6ae85f56（补 W106 诊断入口待拍项与首次使用记录） | 2026-11-13 20:06 | 本笔 |
 
 > 上表各行均由 `claim` 台账推导：owner 原文与 `acquired_at` 直接取自台账，
 > 目的优先用台账里的 `claim_reason`，没有就如实写「未声明」，不补编。时间列只是
