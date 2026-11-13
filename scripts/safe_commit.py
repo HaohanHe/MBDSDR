@@ -457,22 +457,41 @@ def _index_path() -> Path:
     return directory / f"{_session_key()}.{os.getpid()}.index"
 
 
+def _shared_index_owners(paths: list[str]) -> dict[str, str]:
+    """查每条暂存路径在台账里的当前 owner；查不到如实写「无 claim 记录」。"""
+    try:
+        cc = _coord_module()
+        known = cc.ledger_index(cc._load_registry(cc.fc.REGISTRY_PATH))
+    except (ImportError, OSError, ValueError):
+        return {path: "无 claim 记录（台账不可用）" for path in paths}
+    labels = {}
+    for path in paths:
+        owners = sorted(known.get(cc._norm(path)) or [])
+        labels[path] = "、".join(owners) if owners else "无 claim 记录"
+    return labels
+
+
 def _warn_shared_index() -> None:
     """共享 index 里有暂存项时告警：本脚本不读它，但别人会。
 
     这正是 ``ddcecf76`` 的成因——A 会话 ``git add -A`` 后只提交了声明路径，
     B 会话的普通 ``git commit`` 把剩下的暂存项按 B 的消息带走了。隔离只能
     保证本脚本自己的提交干净，挡不住别人用共享 index 提交。
+
+    逐条带上 owner：知道找谁，才有处置的可能；查不到就写「无 claim 记录」，
+    不拿空白冒充「没人认领」。
     """
     env = {k: v for k, v in os.environ.items() if k != "GIT_INDEX_FILE"}
     proc = _run(["diff", "--cached", "--name-only", "--no-renames"], env)
     staged = [p for p in proc.stdout.decode("utf-8", "replace").splitlines() if p]
     if staged:
+        labels = _shared_index_owners(staged)
         print(
-            f"[warn] 共享 index 有 {len(staged)} 个暂存项：{', '.join(staged[:8])}"
-            + ("…" if len(staged) > 8 else "")
-            + "；本脚本不读它，但任何普通 git commit 都会把它们带走。"
+            f"[warn] 共享 index 有 {len(staged)} 个暂存项"
+            "（本脚本不读它，但任何普通 git commit 都会把它们带走）："
         )
+        for path in staged:
+            print(f"[warn]   {path}（owner: {labels.get(path, '无 claim 记录')}）")
 
 
 class _CommitLock:

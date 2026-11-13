@@ -518,6 +518,37 @@ def test_verification_uses_private_copy_not_the_shared_file(tmp_path):
     assert stored.decode("utf-8").strip() == "本笔的消息"
 
 
+def test_shared_index_warning_names_each_owner(tmp_path):
+    """共享 index 的告警逐条带 owner：有 claim 写 owner，没有写「无 claim 记录」。
+
+    知道找谁才有处置可能；空白会被误读成「没人认领」。
+    """
+    locks = tmp_path / "locks"
+    repo = _repo(tmp_path, [f"line{i}" for i in range(1, 7)])
+    (repo / "other.md").write_text("other\n", encoding="utf-8")
+    _git(repo, "add", "other.md", check=True)
+    _git(repo, "commit", "-q", "-m", "other", check=True)
+    claimed = subprocess.run(
+        [sys.executable, str(CLAIM), "claim", "other.md", "--owner", "别线/abc"],
+        cwd=str(repo), env=_claim_env(repo, locks), capture_output=True,
+        text=True, encoding="utf-8", errors="replace",
+    )
+    assert claimed.returncode == 0, claimed.stdout + claimed.stderr
+
+    lines = [f"line{i}" for i in range(1, 7)]
+    lines[1] = "line2 mine"
+    _write(repo, lines)
+    (repo / "other.md").write_text("other2\n", encoding="utf-8")
+    _git(repo, "add", "doc.md", "other.md", check=True)
+
+    proc = _safe(repo, locks, tmp_path, owner="进程A线")
+    out = proc.stdout + proc.stderr
+    assert proc.returncode == 0, out
+    assert "[warn] 共享 index 有 2 个暂存项" in out, out
+    assert "other.md（owner: 别线/abc）" in out, out
+    assert "doc.md（owner: 无 claim 记录）" in out, out
+
+
 def _safe_files(repo, locks, tmp_path, files, *extra, owner="进程A线",
                 message="test: 多文件声明\n"):
     """声明任意文件清单跑一次 safe_commit（``_safe`` 只声明 doc.md）。"""
