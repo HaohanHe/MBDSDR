@@ -111,6 +111,89 @@ def _install_translator_paths():
         l10n.qm_search_dirs = orig
 
 
+def _qt_builtin_button_texts():
+    """取 Qt 内置标准按钮的实际文本（QMessageBox 的 OK/Cancel）。"""
+    from PySide6.QtWidgets import QMessageBox
+    box = QMessageBox()
+    box.setStandardButtons(QMessageBox.Ok | QMessageBox.Cancel)
+    try:
+        return (box.button(QMessageBox.Ok).text(),
+                box.button(QMessageBox.Cancel).text())
+    finally:
+        box.deleteLater()
+
+
+def _available_qtbase_qm(locale):
+    for d in l10n.qt_translations_dirs():
+        path = os.path.join(d, f"qtbase_{locale}.qm")
+        if os.path.isfile(path):
+            return path
+    return None
+
+
+def _qt_builtin_translation_changes_text():
+    """真管线：加载 qtbase_zh_CN.qm 后，Qt 内置按钮文本必须真的变中文。
+
+    不是「调了 load() 就算」——取同一个内置字符串在加载前后的实际文本，
+    断言不同；before 必须是 Qt 源语言英文（没有别的翻译器混进来）。
+    """
+    import pytest
+    if _available_qtbase_qm("zh_CN") is None:
+        pytest.skip("本机 PySide6 未带 qtbase_zh_CN.qm，无法验证真实文案变化"
+                    "（诚实跳过，不用假翻译冒充）")
+    before = _qt_builtin_button_texts()
+    assert before == ("OK", "Cancel"), (
+        f"加载前 Qt 内置按钮应为源语言英文，实际 {before!r}"
+        "（若有其他翻译器残留，先查测试隔离）")
+    try:
+        status = l10n.install_qt_translator(app, "zh")
+        assert status["status"] == "loaded", status
+        assert status["path"] and os.path.isfile(status["path"]), status
+        assert l10n.qt_translator_status() == status
+        after = _qt_builtin_button_texts()
+    finally:
+        translator = getattr(l10n, "_qt_translator", None)
+        if translator is not None:
+            app.removeTranslator(translator)
+            l10n._qt_translator = None
+        l10n._qt_status = None
+    assert after != before, f"加载 qtbase_zh_CN.qm 后按钮文本未变化：{before!r}"
+    assert after[0] != "OK" and after[1] != "Cancel", (
+        f"Qt 内置按钮仍是英文，说明翻译没生效：{after!r}")
+
+
+def _qt_missing_qm_degrades_honestly():
+    """找不到 qtbase_*.qm：如实报「未找到」且不装翻译器（不静默通过）。"""
+    import tempfile
+    orig = l10n.qt_translations_dirs
+    try:
+        with tempfile.TemporaryDirectory() as td:
+            l10n.qt_translations_dirs = lambda: [td]
+            before = _qt_builtin_button_texts()
+            status = l10n.install_qt_translator(app, "ja")
+            after = _qt_builtin_button_texts()
+            assert status["status"] == "not_found", status
+            assert "未找到" in status["summary"], status
+            assert status["path"] is None, status
+            # 搜索目录必须写进摘要：说清「找过哪里」，不是只说一句失败。
+            assert td in status["summary"], status["summary"]
+            assert l10n.qt_translator_status() == status
+            assert after == before, "找不到 .qm 时不得装任何翻译（文案不许变）"
+    finally:
+        l10n.qt_translations_dirs = orig
+        l10n._qt_status = None
+
+
+def _qt_english_is_skipped():
+    """en 是 Qt 源语言：明确标「已跳过」，不去装一个同义空翻译。"""
+    before = _qt_builtin_button_texts()
+    status = l10n.install_qt_translator(app, "en")
+    after = _qt_builtin_button_texts()
+    assert status["status"] == "skipped", status
+    assert "已跳过" in status["summary"], status
+    assert after == before, "en 跳过时不得改动内置文案"
+
+
 def test_normalize_ui_language():
     _normalize_cases()
 
@@ -125,3 +208,15 @@ def test_translator_pipeline():
 
 def test_install_translator_paths():
     _install_translator_paths()
+
+
+def test_qt_builtin_translation_changes_text():
+    _qt_builtin_translation_changes_text()
+
+
+def test_qt_missing_qm_degrades_honestly():
+    _qt_missing_qm_degrades_honestly()
+
+
+def test_qt_english_is_skipped():
+    _qt_english_is_skipped()
