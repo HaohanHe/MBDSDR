@@ -2158,6 +2158,9 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `docs/tooltip-dynamic-baseline.json` | S1-S4结果伪造线/6ae85f56（写门配套：passthrough 基线换成 _session_tip 表达式（13 删 8 增）） | 2026-11-13 21:53 | 本笔 |
 | `desktop/command_palette.py` | 统一搜索性能线/6ae85f56（结果行数上限 200 + 未显示条数提示（命令面板逐键渲染实测）） | 2026-11-13 21:55 | 本笔 |
 | `tests/test_command_palette_result_cap.py` | 统一搜索性能线/6ae85f56（结果上限行数判据 + 去掉上限重新变慢的反证（5 用例）） | 2026-11-13 21:57 | 本笔 |
+| `scripts/repro/2026-11-13-palette-result-cap.py` | 统一搜索性能线/6ae85f56（命令面板结果上限前后对比复跑脚本（固定 10500 条样本，预热 2 + 采样 7）） | 2026-11-13 21:57 | 本笔 |
+| `docs/perf-evidence/2026-11-13/palette-result-cap.json` | 统一搜索性能线/6ae85f56（结果上限改前/改后与 cap 100/500 扫描的逐次实测与负载） | 2026-11-13 21:57 | 本笔 |
+| `docs/performance-baseline.md` | 统一搜索性能线/6ae85f56（§2 增加命令面板结果行数上限一行（494.98/1259.27 → 13.20/9.87 ms）） | 2026-11-13 21:57 | 本笔 |
 
 > 上表各行均由 `claim` 台账推导：owner 原文与 `acquired_at` 直接取自台账，
 > 目的优先用台账里的 `claim_reason`，没有就如实写「未声明」，不补编。时间列只是

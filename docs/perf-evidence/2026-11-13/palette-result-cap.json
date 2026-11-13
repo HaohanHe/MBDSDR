@@ -1,0 +1,699 @@
+[
+ {
+  "run": "before-oldcode",
+  "mode": "auto",
+  "product_cap": null,
+  "effective_cap": null,
+  "python": "3.14.0",
+  "qt": "6.12.0",
+  "platform": "offscreen",
+  "sample": {
+   "bookmarks": 500,
+   "satellites": [
+    2000,
+    10000
+   ],
+   "warmup": 2,
+   "rounds": 7,
+   "queries": [
+    "",
+    "sat"
+   ]
+  },
+  "load_before": {
+   "sys_cpu_pct": 94.2,
+   "cpu_count": 12,
+   "python_proc_count": 2,
+   "python_total_cpu_pct": 12.5,
+   "python_top": [
+    {
+     "pid": 9352,
+     "cpu_pct": 12.5,
+     "cmd": "C:\\Users\\xxhzb\\AppData\\Local\\Programs\\Python\\Python314\\python.exe C:\\Users\\xxhzb"
+    },
+    {
+     "pid": 19688,
+     "cpu_pct": 0.0,
+     "cmd": "C:\\Users\\xxhzb\\AppData\\Local\\Programs\\Python\\Python314\\python.exe D:\\mbdsdr\\MBDS"
+    }
+   ]
+  },
+  "load_after": {
+   "sys_cpu_pct": 74.3,
+   "cpu_count": 12,
+   "python_proc_count": 3,
+   "python_total_cpu_pct": 101.6,
+   "python_top": [
+    {
+     "pid": 228,
+     "cpu_pct": 92.2,
+     "cmd": "C:\\Users\\xxhzb\\AppData\\Local\\Programs\\Python\\Python314\\python.exe scripts/axioms"
+    },
+    {
+     "pid": 9352,
+     "cpu_pct": 9.4,
+     "cmd": "C:\\Users\\xxhzb\\AppData\\Local\\Programs\\Python\\Python314\\python.exe C:\\Users\\xxhzb"
+    },
+    {
+     "pid": 19688,
+     "cpu_pct": 0.0,
+     "cmd": "C:\\Users\\xxhzb\\AppData\\Local\\Programs\\Python\\Python314\\python.exe D:\\mbdsdr\\MBDS"
+    }
+   ]
+  },
+  "samples": [
+   {
+    "query": "",
+    "hits": 2500,
+    "list_rows": 2502,
+    "hidden": null,
+    "filter_median_ms": 1.32,
+    "filter_worst_ms": 2.58,
+    "refresh_median_ms": 125.65,
+    "refresh_worst_ms": 165.52,
+    "reason_tail": "可执行动作（按来源分组，最近使用优先）：回车执行选中项，↑↓ 选择，输入关键词可搜菜单命令、设置项、卫星、能力与快捷键，Esc 关闭。",
+    "index_size": 2500,
+    "sat_count": 2000
+   },
+   {
+    "query": "sat",
+    "hits": 2000,
+    "list_rows": 2001,
+    "hidden": null,
+    "filter_median_ms": 1.18,
+    "filter_worst_ms": 2.06,
+    "refresh_median_ms": 83.75,
+    "refresh_worst_ms": 103.52,
+    "reason_tail": "",
+    "index_size": 2500,
+    "sat_count": 2000
+   },
+   {
+    "query": "",
+    "hits": 10500,
+    "list_rows": 10502,
+    "hidden": null,
+    "filter_median_ms": 3.29,
+    "filter_worst_ms": 4.89,
+    "refresh_median_ms": 630.71,
+    "refresh_worst_ms": 903.52,
+    "reason_tail": "可执行动作（按来源分组，最近使用优先）：回车执行选中项，↑↓ 选择，输入关键词可搜菜单命令、设置项、卫星、能力与快捷键，Esc 关闭。",
+    "index_size": 10500,
+    "sat_count": 10000
+   },
+   {
+    "query": "sat",
+    "hits": 10000,
+    "list_rows": 10001,
+    "hidden": null,
+    "filter_median_ms": 7.43,
+    "filter_worst_ms": 20.21,
+    "refresh_median_ms": 2112.77,
+    "refresh_worst_ms": 2625.68,
+    "reason_tail": "",
+    "index_size": 10500,
+    "sat_count": 10000
+   }
+  ]
+ },
+ {
+  "run": "after",
+  "mode": "auto",
+  "product_cap": 200,
+  "effective_cap": 200,
+  "python": "3.14.0",
+  "qt": "6.12.0",
+  "platform": "offscreen",
+  "sample": {
+   "bookmarks": 500,
+   "satellites": [
+    2000,
+    10000
+   ],
+   "warmup": 2,
+   "rounds": 7,
+   "queries": [
+    "",
+    "sat"
+   ]
+  },
+  "load_before": {
+   "sys_cpu_pct": 29.6,
+   "cpu_count": 12,
+   "python_proc_count": 4,
+   "python_total_cpu_pct": 193.8,
+   "python_top": [
+    {
+     "pid": 228,
+     "cpu_pct": 96.9,
+     "cmd": "C:\\Users\\xxhzb\\AppData\\Local\\Programs\\Python\\Python314\\python.exe scripts/axioms"
+    },
+    {
+     "pid": 30872,
+     "cpu_pct": 96.9,
+     "cmd": "C:\\Users\\xxhzb\\AppData\\Local\\Programs\\Python\\Python314\\python.exe -m pytest"
+    },
+    {
+     "pid": 584,
+     "cpu_pct": 0.0,
+     "cmd": "C:\\Users\\xxhzb\\AppData\\Local\\Programs\\Python\\Python314\\python.exe _tmp_probe_spa"
+    },
+    {
+     "pid": 4292,
+     "cpu_pct": 0.0,
+     "cmd": "C:\\Users\\xxhzb\\AppData\\Local\\Programs\\Python\\Python314\\python.exe D:\\mbdsdr\\MBDS"
+    }
+   ]
+  },
+  "load_after": {
+   "sys_cpu_pct": 37.6,
+   "cpu_count": 12,
+   "python_proc_count": 4,
+   "python_total_cpu_pct": 200.0,
+   "python_top": [
+    {
+     "pid": 228,
+     "cpu_pct": 100.0,
+     "cmd": "C:\\Users\\xxhzb\\AppData\\Local\\Programs\\Python\\Python314\\python.exe scripts/axioms"
+    },
+    {
+     "pid": 30872,
+     "cpu_pct": 100.0,
+     "cmd": "C:\\Users\\xxhzb\\AppData\\Local\\Programs\\Python\\Python314\\python.exe -m pytest"
+    },
+    {
+     "pid": 584,
+     "cpu_pct": 0.0,
+     "cmd": "C:\\Users\\xxhzb\\AppData\\Local\\Programs\\Python\\Python314\\python.exe _tmp_probe_spa"
+    },
+    {
+     "pid": 4292,
+     "cpu_pct": 0.0,
+     "cmd": "C:\\Users\\xxhzb\\AppData\\Local\\Programs\\Python\\Python314\\python.exe D:\\mbdsdr\\MBDS"
+    }
+   ]
+  },
+  "samples": [
+   {
+    "query": "",
+    "hits": 2500,
+    "list_rows": 201,
+    "hidden": 2300,
+    "filter_median_ms": 0.59,
+    "filter_worst_ms": 1.07,
+    "refresh_median_ms": 2.51,
+    "refresh_worst_ms": 4.15,
+    "reason_tail": "，↑↓ 选择，输入关键词可搜菜单命令、设置项、卫星、能力与快捷键，Esc 关闭。 已显示前 200 条，另有 2300 条未显示：输入更具体的关键词可缩小范围。",
+    "index_size": 2500,
+    "sat_count": 2000
+   },
+   {
+    "query": "sat",
+    "hits": 2000,
+    "list_rows": 201,
+    "hidden": 1800,
+    "filter_median_ms": 0.88,
+    "filter_worst_ms": 1.0,
+    "refresh_median_ms": 3.35,
+    "refresh_worst_ms": 3.72,
+    "reason_tail": "已显示前 200 条，另有 1800 条未显示：输入更具体的关键词可缩小范围。",
+    "index_size": 2500,
+    "sat_count": 2000
+   },
+   {
+    "query": "",
+    "hits": 10500,
+    "list_rows": 201,
+    "hidden": 10300,
+    "filter_median_ms": 2.71,
+    "filter_worst_ms": 9.51,
+    "refresh_median_ms": 8.64,
+    "refresh_worst_ms": 21.11,
+    "reason_tail": "↑↓ 选择，输入关键词可搜菜单命令、设置项、卫星、能力与快捷键，Esc 关闭。 已显示前 200 条，另有 10300 条未显示：输入更具体的关键词可缩小范围。",
+    "index_size": 10500,
+    "sat_count": 10000
+   },
+   {
+    "query": "sat",
+    "hits": 10000,
+    "list_rows": 201,
+    "hidden": 9800,
+    "filter_median_ms": 3.91,
+    "filter_worst_ms": 13.29,
+    "refresh_median_ms": 10.91,
+    "refresh_worst_ms": 21.11,
+    "reason_tail": "已显示前 200 条，另有 9800 条未显示：输入更具体的关键词可缩小范围。",
+    "index_size": 10500,
+    "sat_count": 10000
+   }
+  ]
+ },
+ {
+  "run": "before-newcode",
+  "mode": "before",
+  "product_cap": 200,
+  "effective_cap": 1000000000,
+  "python": "3.14.0",
+  "qt": "6.12.0",
+  "platform": "offscreen",
+  "sample": {
+   "bookmarks": 500,
+   "satellites": [
+    2000,
+    10000
+   ],
+   "warmup": 2,
+   "rounds": 7,
+   "queries": [
+    "",
+    "sat"
+   ]
+  },
+  "load_before": {
+   "sys_cpu_pct": 29.4,
+   "cpu_count": 12,
+   "python_proc_count": 2,
+   "python_total_cpu_pct": 96.9,
+   "python_top": [
+    {
+     "pid": 228,
+     "cpu_pct": 96.9,
+     "cmd": "C:\\Users\\xxhzb\\AppData\\Local\\Programs\\Python\\Python314\\python.exe scripts/axioms"
+    },
+    {
+     "pid": 30432,
+     "cpu_pct": 0.0,
+     "cmd": "C:\\Users\\xxhzb\\AppData\\Local\\Programs\\Python\\Python314\\python.exe D:\\mbdsdr\\MBDS"
+    }
+   ]
+  },
+  "load_after": {
+   "sys_cpu_pct": 25.4,
+   "cpu_count": 12,
+   "python_proc_count": 3,
+   "python_total_cpu_pct": 93.8,
+   "python_top": [
+    {
+     "pid": 228,
+     "cpu_pct": 93.8,
+     "cmd": "C:\\Users\\xxhzb\\AppData\\Local\\Programs\\Python\\Python314\\python.exe scripts/axioms"
+    },
+    {
+     "pid": 5600,
+     "cpu_pct": 0.0,
+     "cmd": "C:\\Users\\xxhzb\\AppData\\Local\\Programs\\Python\\Python314\\python.exe _tmp_probe_spa"
+    },
+    {
+     "pid": 30432,
+     "cpu_pct": 0.0,
+     "cmd": "C:\\Users\\xxhzb\\AppData\\Local\\Programs\\Python\\Python314\\python.exe D:\\mbdsdr\\MBDS"
+    }
+   ]
+  },
+  "samples": [
+   {
+    "query": "",
+    "hits": 2500,
+    "list_rows": 2502,
+    "hidden": 0,
+    "filter_median_ms": 0.68,
+    "filter_worst_ms": 2.63,
+    "refresh_median_ms": 45.43,
+    "refresh_worst_ms": 59.52,
+    "reason_tail": "可执行动作（按来源分组，最近使用优先）：回车执行选中项，↑↓ 选择，输入关键词可搜菜单命令、设置项、卫星、能力与快捷键，Esc 关闭。",
+    "index_size": 2500,
+    "sat_count": 2000
+   },
+   {
+    "query": "sat",
+    "hits": 2000,
+    "list_rows": 2001,
+    "hidden": 0,
+    "filter_median_ms": 1.0,
+    "filter_worst_ms": 1.64,
+    "refresh_median_ms": 56.73,
+    "refresh_worst_ms": 82.02,
+    "reason_tail": "",
+    "index_size": 2500,
+    "sat_count": 2000
+   },
+   {
+    "query": "",
+    "hits": 10500,
+    "list_rows": 10502,
+    "hidden": 0,
+    "filter_median_ms": 2.63,
+    "filter_worst_ms": 4.52,
+    "refresh_median_ms": 494.98,
+    "refresh_worst_ms": 857.11,
+    "reason_tail": "可执行动作（按来源分组，最近使用优先）：回车执行选中项，↑↓ 选择，输入关键词可搜菜单命令、设置项、卫星、能力与快捷键，Esc 关闭。",
+    "index_size": 10500,
+    "sat_count": 10000
+   },
+   {
+    "query": "sat",
+    "hits": 10000,
+    "list_rows": 10001,
+    "hidden": 0,
+    "filter_median_ms": 4.05,
+    "filter_worst_ms": 17.68,
+    "refresh_median_ms": 1259.27,
+    "refresh_worst_ms": 1500.78,
+    "reason_tail": "",
+    "index_size": 10500,
+    "sat_count": 10000
+   }
+  ]
+ },
+ {
+  "run": "after-paired",
+  "mode": "after",
+  "product_cap": 200,
+  "effective_cap": 200,
+  "python": "3.14.0",
+  "qt": "6.12.0",
+  "platform": "offscreen",
+  "sample": {
+   "bookmarks": 500,
+   "satellites": [
+    2000,
+    10000
+   ],
+   "warmup": 2,
+   "rounds": 7,
+   "queries": [
+    "",
+    "sat"
+   ]
+  },
+  "load_before": {
+   "sys_cpu_pct": 62.5,
+   "cpu_count": 12,
+   "python_proc_count": 3,
+   "python_total_cpu_pct": 100.0,
+   "python_top": [
+    {
+     "pid": 228,
+     "cpu_pct": 95.3,
+     "cmd": "C:\\Users\\xxhzb\\AppData\\Local\\Programs\\Python\\Python314\\python.exe scripts/axioms"
+    },
+    {
+     "pid": 2180,
+     "cpu_pct": 4.7,
+     "cmd": "C:\\Users\\xxhzb\\AppData\\Local\\Programs\\Python\\Python314\\python.exe C:\\Users\\xxhzb"
+    },
+    {
+     "pid": 28236,
+     "cpu_pct": 0.0,
+     "cmd": "C:\\Users\\xxhzb\\AppData\\Local\\Programs\\Python\\Python314\\python.exe D:\\mbdsdr\\MBDS"
+    }
+   ]
+  },
+  "load_after": {
+   "sys_cpu_pct": 37.2,
+   "cpu_count": 12,
+   "python_proc_count": 3,
+   "python_total_cpu_pct": 112.5,
+   "python_top": [
+    {
+     "pid": 228,
+     "cpu_pct": 100.0,
+     "cmd": "C:\\Users\\xxhzb\\AppData\\Local\\Programs\\Python\\Python314\\python.exe scripts/axioms"
+    },
+    {
+     "pid": 2180,
+     "cpu_pct": 12.5,
+     "cmd": "C:\\Users\\xxhzb\\AppData\\Local\\Programs\\Python\\Python314\\python.exe C:\\Users\\xxhzb"
+    },
+    {
+     "pid": 28236,
+     "cpu_pct": 0.0,
+     "cmd": "C:\\Users\\xxhzb\\AppData\\Local\\Programs\\Python\\Python314\\python.exe D:\\mbdsdr\\MBDS"
+    }
+   ]
+  },
+  "samples": [
+   {
+    "query": "",
+    "hits": 2500,
+    "list_rows": 201,
+    "hidden": 2300,
+    "filter_median_ms": 0.69,
+    "filter_worst_ms": 1.04,
+    "refresh_median_ms": 3.14,
+    "refresh_worst_ms": 5.52,
+    "reason_tail": "，↑↓ 选择，输入关键词可搜菜单命令、设置项、卫星、能力与快捷键，Esc 关闭。 已显示前 200 条，另有 2300 条未显示：输入更具体的关键词可缩小范围。",
+    "index_size": 2500,
+    "sat_count": 2000
+   },
+   {
+    "query": "sat",
+    "hits": 2000,
+    "list_rows": 201,
+    "hidden": 1800,
+    "filter_median_ms": 2.15,
+    "filter_worst_ms": 2.67,
+    "refresh_median_ms": 7.05,
+    "refresh_worst_ms": 9.65,
+    "reason_tail": "已显示前 200 条，另有 1800 条未显示：输入更具体的关键词可缩小范围。",
+    "index_size": 2500,
+    "sat_count": 2000
+   },
+   {
+    "query": "",
+    "hits": 10500,
+    "list_rows": 201,
+    "hidden": 10300,
+    "filter_median_ms": 3.94,
+    "filter_worst_ms": 16.49,
+    "refresh_median_ms": 13.2,
+    "refresh_worst_ms": 22.9,
+    "reason_tail": "↑↓ 选择，输入关键词可搜菜单命令、设置项、卫星、能力与快捷键，Esc 关闭。 已显示前 200 条，另有 10300 条未显示：输入更具体的关键词可缩小范围。",
+    "index_size": 10500,
+    "sat_count": 10000
+   },
+   {
+    "query": "sat",
+    "hits": 10000,
+    "list_rows": 201,
+    "hidden": 9800,
+    "filter_median_ms": 3.91,
+    "filter_worst_ms": 13.01,
+    "refresh_median_ms": 9.87,
+    "refresh_worst_ms": 20.44,
+    "reason_tail": "已显示前 200 条，另有 9800 条未显示：输入更具体的关键词可缩小范围。",
+    "index_size": 10500,
+    "sat_count": 10000
+   }
+  ]
+ },
+ {
+  "run": "cap-100",
+  "mode": "auto",
+  "product_cap": 200,
+  "effective_cap": 100,
+  "python": "3.14.0",
+  "qt": "6.12.0",
+  "platform": "offscreen",
+  "sample": {
+   "bookmarks": 500,
+   "satellites": [
+    2000,
+    10000
+   ],
+   "warmup": 2,
+   "rounds": 7,
+   "queries": [
+    "",
+    "sat"
+   ]
+  },
+  "load_before": {
+   "sys_cpu_pct": 46.9,
+   "cpu_count": 12,
+   "python_proc_count": 1,
+   "python_total_cpu_pct": 0.0,
+   "python_top": [
+    {
+     "pid": 29868,
+     "cpu_pct": 0.0,
+     "cmd": "C:\\Users\\xxhzb\\AppData\\Local\\Programs\\Python\\Python314\\python.exe D:\\mbdsdr\\MBDS"
+    }
+   ]
+  },
+  "load_after": {
+   "sys_cpu_pct": 27.1,
+   "cpu_count": 12,
+   "python_proc_count": 1,
+   "python_total_cpu_pct": 0.0,
+   "python_top": [
+    {
+     "pid": 29868,
+     "cpu_pct": 0.0,
+     "cmd": "C:\\Users\\xxhzb\\AppData\\Local\\Programs\\Python\\Python314\\python.exe D:\\mbdsdr\\MBDS"
+    }
+   ]
+  },
+  "samples": [
+   {
+    "query": "",
+    "hits": 2500,
+    "list_rows": 101,
+    "hidden": 2400,
+    "filter_median_ms": 0.52,
+    "filter_worst_ms": 1.08,
+    "refresh_median_ms": 1.75,
+    "refresh_worst_ms": 3.43,
+    "reason_tail": "，↑↓ 选择，输入关键词可搜菜单命令、设置项、卫星、能力与快捷键，Esc 关闭。 已显示前 100 条，另有 2400 条未显示：输入更具体的关键词可缩小范围。",
+    "index_size": 2500,
+    "sat_count": 2000
+   },
+   {
+    "query": "sat",
+    "hits": 2000,
+    "list_rows": 101,
+    "hidden": 1900,
+    "filter_median_ms": 0.85,
+    "filter_worst_ms": 1.27,
+    "refresh_median_ms": 2.48,
+    "refresh_worst_ms": 4.3,
+    "reason_tail": "已显示前 100 条，另有 1900 条未显示：输入更具体的关键词可缩小范围。",
+    "index_size": 2500,
+    "sat_count": 2000
+   },
+   {
+    "query": "",
+    "hits": 10500,
+    "list_rows": 101,
+    "hidden": 10400,
+    "filter_median_ms": 4.15,
+    "filter_worst_ms": 9.99,
+    "refresh_median_ms": 8.23,
+    "refresh_worst_ms": 15.04,
+    "reason_tail": "↑↓ 选择，输入关键词可搜菜单命令、设置项、卫星、能力与快捷键，Esc 关闭。 已显示前 100 条，另有 10400 条未显示：输入更具体的关键词可缩小范围。",
+    "index_size": 10500,
+    "sat_count": 10000
+   },
+   {
+    "query": "sat",
+    "hits": 10000,
+    "list_rows": 101,
+    "hidden": 9900,
+    "filter_median_ms": 3.52,
+    "filter_worst_ms": 15.74,
+    "refresh_median_ms": 8.1,
+    "refresh_worst_ms": 19.65,
+    "reason_tail": "已显示前 100 条，另有 9900 条未显示：输入更具体的关键词可缩小范围。",
+    "index_size": 10500,
+    "sat_count": 10000
+   }
+  ]
+ },
+ {
+  "run": "cap-500",
+  "mode": "auto",
+  "product_cap": 200,
+  "effective_cap": 500,
+  "python": "3.14.0",
+  "qt": "6.12.0",
+  "platform": "offscreen",
+  "sample": {
+   "bookmarks": 500,
+   "satellites": [
+    2000,
+    10000
+   ],
+   "warmup": 2,
+   "rounds": 7,
+   "queries": [
+    "",
+    "sat"
+   ]
+  },
+  "load_before": {
+   "sys_cpu_pct": 38.1,
+   "cpu_count": 12,
+   "python_proc_count": 1,
+   "python_total_cpu_pct": 0.0,
+   "python_top": [
+    {
+     "pid": 13376,
+     "cpu_pct": 0.0,
+     "cmd": "C:\\Users\\xxhzb\\AppData\\Local\\Programs\\Python\\Python314\\python.exe D:\\mbdsdr\\MBDS"
+    }
+   ]
+  },
+  "load_after": {
+   "sys_cpu_pct": 43.1,
+   "cpu_count": 12,
+   "python_proc_count": 2,
+   "python_total_cpu_pct": 21.9,
+   "python_top": [
+    {
+     "pid": 3880,
+     "cpu_pct": 21.9,
+     "cmd": "C:\\Users\\xxhzb\\AppData\\Local\\Programs\\Python\\Python314\\python.exe scripts/axioms"
+    },
+    {
+     "pid": 13376,
+     "cpu_pct": 0.0,
+     "cmd": "C:\\Users\\xxhzb\\AppData\\Local\\Programs\\Python\\Python314\\python.exe D:\\mbdsdr\\MBDS"
+    }
+   ]
+  },
+  "samples": [
+   {
+    "query": "",
+    "hits": 2500,
+    "list_rows": 501,
+    "hidden": 2000,
+    "filter_median_ms": 0.63,
+    "filter_worst_ms": 1.09,
+    "refresh_median_ms": 5.03,
+    "refresh_worst_ms": 7.82,
+    "reason_tail": "，↑↓ 选择，输入关键词可搜菜单命令、设置项、卫星、能力与快捷键，Esc 关闭。 已显示前 500 条，另有 2000 条未显示：输入更具体的关键词可缩小范围。",
+    "index_size": 2500,
+    "sat_count": 2000
+   },
+   {
+    "query": "sat",
+    "hits": 2000,
+    "list_rows": 501,
+    "hidden": 1500,
+    "filter_median_ms": 0.96,
+    "filter_worst_ms": 2.08,
+    "refresh_median_ms": 7.9,
+    "refresh_worst_ms": 11.69,
+    "reason_tail": "已显示前 500 条，另有 1500 条未显示：输入更具体的关键词可缩小范围。",
+    "index_size": 2500,
+    "sat_count": 2000
+   },
+   {
+    "query": "",
+    "hits": 10500,
+    "list_rows": 501,
+    "hidden": 10000,
+    "filter_median_ms": 2.49,
+    "filter_worst_ms": 10.57,
+    "refresh_median_ms": 9.8,
+    "refresh_worst_ms": 17.48,
+    "reason_tail": "↑↓ 选择，输入关键词可搜菜单命令、设置项、卫星、能力与快捷键，Esc 关闭。 已显示前 500 条，另有 10000 条未显示：输入更具体的关键词可缩小范围。",
+    "index_size": 10500,
+    "sat_count": 10000
+   },
+   {
+    "query": "sat",
+    "hits": 10000,
+    "list_rows": 501,
+    "hidden": 9500,
+    "filter_median_ms": 3.81,
+    "filter_worst_ms": 13.17,
+    "refresh_median_ms": 11.74,
+    "refresh_worst_ms": 20.59,
+    "reason_tail": "已显示前 500 条，另有 9500 条未显示：输入更具体的关键词可缩小范围。",
+    "index_size": 10500,
+    "sat_count": 10000
+   }
+  ]
+ }
+]
