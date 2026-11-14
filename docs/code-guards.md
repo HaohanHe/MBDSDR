@@ -427,6 +427,25 @@ pre-commit**：pre-commit 现在只跑 claim 范围 + claim 台账 + 暂存区�
 2026-11-13 05:54 实测 rc=1（FAIL 9：R8 待复核 3 条＋「修完没留 hash」6 条），
 触发条件见上表，红项交各 owner，尚未转绿。
 
+### 复合入口（不计入 A/B/C 计数）
+
+有的入口把多道检查串成一次执行。它们**不新增任何一道子检查对仓库的覆盖**：
+子检查原来没人跑，挂在复合入口下也不会自动跑（复合入口本身也要人触发）。
+把它们计进 A/B/C 会虚增「已覆盖脚本数」，所以单列。
+
+| 复合入口 | 聚合的子检查 | 何时跑 / 谁跑 | 退出码 | 为什么不计入 A/B/C |
+| --- | --- | --- | --- | --- |
+| `scripts/batch_close.py` | `audit_evidence.py` + `check_red_lifecycle.py` + `check_roadmap_blocking.py`（与 `docs/COORDINATION.md` 的批次收尾三道同源） | 每个批次收口前，当班 owner 手动跑一次；**不进 pre-commit**（单次耗时远超钩子预算，挂上去只会让人开始用 `--no-verify`） | 0 全绿 / 1 至少一道判红 / 2 用法 / 3 至少一道没跑成（3 > 1 > 0）；rc=1 且 stderr 有 Python 回溯时按「疑似检查器崩溃」归 3，**这是启发式，不是判断** | 三道子检查各自的入口现状不变（`audit_evidence` 仍在 C 档、`check_red_lifecycle` 仍在 B 档）；计进来等于把 3 条算成 1+3 条 |
+
+**遗留待办（`batch_close` 的 rc=1 启发式）**：三道子检查目前没有顶层异常
+捕获，检查器自己抛异常也以 1 退出，与「真判红」共用同一个码，所以
+`batch_close` 只能看 stderr 的 `Traceback (most recent call last):` 猜。
+长期方案是三道脚本各自在 `main()` 顶层捕获未处理异常，崩溃时用专用退出码
+（不和 0/1/2 混），`batch_close` 直接按码归类、删掉启发式。触发时机：下一次
+改这三道脚本任意一道时；责任人：守卫账本线 / 批次收尾人。在那之前，启发式
+的误判边界写在 `scripts/batch_close.py` 模块文档里：脚本自己打印 traceback
+再判红会被误归，崩溃但没打 traceback 仍会被当真红。
+
 ### 零引用核查（2026-11-13）：两条「写不出责任人」的处置
 
 上一版登记里 `check_commit_residue.py`、`ci_pytest_groups.py` 被标成「无人引用 /
