@@ -167,6 +167,11 @@ def test_live_claim_is_not_a_cleanup_candidate(tmp_path: Path) -> None:
     assert "租约未过期 1" in result.stdout
     assert _only_marker(locks).exists()
 
+    trend = locks / "claim_cleanup_trend.jsonl"
+    last = json.loads(trend.read_text(encoding="utf-8").splitlines()[-1])
+    assert last["claims_with_content_hash"] == 1, "新 claim 必须记内容基线"
+    assert last["undecidable_ratio"] == 0.0
+
 
 def test_default_is_dry_run(tmp_path: Path) -> None:
     repo, locks = tmp_path / "repo", tmp_path / "locks"
@@ -242,6 +247,21 @@ def test_changed_content_blocks_release(tmp_path: Path) -> None:
     assert "补法：" in result.stdout
     assert _only_marker(locks).exists()
     assert not _log(locks)
+
+
+def test_suspect_json_carries_hint_for_batch_report(tmp_path: Path) -> None:
+    """batch_close 只读 JSON，所以 SUSPECT 的补法必须落在 rows[].hint 里。"""
+    repo, locks = tmp_path / "repo", tmp_path / "locks"
+    _init_repo(repo)
+    _claim(repo, locks)
+    _expire(locks)
+    (repo / TARGET).write_text("changed after claim\n", encoding="utf-8")
+
+    result = run(repo, locks, "cleanup-stale", "--json")
+    assert result.returncode == 0, result.stderr + result.stdout
+    row = json.loads(result.stdout)["rows"][0]
+    assert row["category"] == "suspect"
+    assert "内容与基线不符" in row["hint"]
 
 
 def test_missing_baseline_on_untracked_file_is_a_gap(tmp_path: Path) -> None:
@@ -321,6 +341,8 @@ def test_post_claim_commit_is_undecidable_not_todo(tmp_path: Path) -> None:
     last = json.loads(trend.read_text(encoding="utf-8").splitlines()[-1])
     assert last["summary"]["undecidable"] == 1
     assert last["undecidable_reasons"] == {"post_claim_commit": 1}
+    assert last["undecidable_ratio"] == 1.0
+    assert last["claims_with_content_hash"] == 0  # 这条是旧 claim，没有内容基线
 
 
 def test_undecidable_json_is_machine_readable(tmp_path: Path) -> None:
