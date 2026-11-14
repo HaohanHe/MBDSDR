@@ -2256,6 +2256,9 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `docs/known-red-register.md` | 时空核对线/timeline-now（K12 原场素材不可得 + NOAA-19 替代场判据（pre-commit ④ 补登记）） | 2026-11-14 10:18 | 本笔 |
 | `tests/test_grazing_pass_detection.py` | 时空核对线/timeline-now（K12 NOAA-19 替代场 4 条判据（pre-commit ④ 补登记）） | 2026-11-14 10:18 | 本笔 |
 | `mbdsdr_ai/orbit.py` | 时空核对线/timeline-now（R5 证据快照：TLE 记录注入（可回放）） | 2026-11-14 10:22 | 本笔 |
+| `scripts/hw_acceptance/ring5_satellite_passes.py` | 时空核对线/timeline-now（R5 验收加证据快照（TLE/站址/窗口/门限/结果落盘）） | 2026-11-14 10:29 | 本笔 |
+| `scripts/hw_acceptance/recompute_r5_evidence.py` | 时空核对线/timeline-now（R5 证据快照独立复算（不联网）） | 2026-11-14 10:29 | 本笔 |
+| `tests/test_hw_acceptance_r5_evidence.py` | 时空核对线/timeline-now（R5 快照齐全 + 复算一致两层判据与反证） | 2026-11-14 10:29 | 本笔 |
 
 > 上表各行均由 `claim` 台账推导：owner 原文与 `acquired_at` 直接取自台账，
 > 目的优先用台账里的 `claim_reason`，没有就如实写「未声明」，不补编。时间列只是
