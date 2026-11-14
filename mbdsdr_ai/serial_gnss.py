@@ -458,6 +458,7 @@ class SerialGNSSReader:
             "satellites": None, "hdop": None,
             "speed_kmh": None, "course_deg": None,
             "utc_time": None, "fix_quality": 0,
+            "gst": None,
             "timestamp": None,
         }
 
@@ -780,6 +781,7 @@ class SerialGNSSReader:
                     f["latitude"] = None
                     f["longitude"] = None
                     f["altitude_m"] = None
+                    f["gst"] = None
             elif s == "RMC":
                 if (rec.get("valid") and rec.get("latitude") is not None
                         and rec.get("longitude") is not None):
@@ -791,6 +793,7 @@ class SerialGNSSReader:
                     f["latitude"] = None
                     f["longitude"] = None
                     f["altitude_m"] = None
+                    f["gst"] = None
                 f["speed_kmh"] = rec.get("speed_kmh")
                 f["course_deg"] = rec.get("course_deg")
                 f["utc_time"] = rec.get("utc_time")
@@ -799,6 +802,15 @@ class SerialGNSSReader:
                     f["speed_kmh"] = rec["speed_kmh"]
                 if rec.get("course_deg") is not None:
                     f["course_deg"] = rec["course_deg"]
+            elif s == "GST":
+                # GST 是「本历元接收机自报的伪距噪声统计」（1σ，米）。只在
+                # 当前确实有坐标时接收：没有定位的历元，误差数字没有含义，
+                # 留着旧值会被读成"当前精度"。
+                if f.get("latitude") is not None and \
+                        f.get("longitude") is not None:
+                    f["gst"] = dict(rec)
+                else:
+                    f["gst"] = None
             elif s == "GSV":
                 # 只缓存聚合完成（或单帧）的完整 GSV；中间帧 parser 已返回 None
                 talker = rec.get("talker")

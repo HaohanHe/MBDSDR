@@ -2400,6 +2400,9 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `docs/axioms.md` | 公理体检线/6ae85f56（计数块改为按基准钉住并写明何时重生成） | 2026-11-14 11:34 | 本笔 |
 | `mbdsdr_ai/rtk_solver.py` | 时空环境层/A3（删除 DD 不可观测的钟差/湿延迟假状态） | 2026-11-14 11:35 | 本笔 |
 | `tests/test_rtk_no_dead_states.py` | 时空环境层/A3（A3 判据：每个状态列可观测） | 2026-11-14 11:35 | 本笔 |
+| `mbdsdr_ai/serial_gnss.py` | 时空环境层/A5（GST 真实误差并入 fix 快照） | 2026-11-14 11:37 | 本笔 |
+| `desktop/status_panel.py` | 时空环境层/A5（定位误差与 HDOP 并列） | 2026-11-14 11:37 | 本笔 |
+| `tests/test_gps_gst_error_display.py` | 时空环境层/A5（A5 判据与反证） | 2026-11-14 11:37 | 本笔 |
 
 > 上表各行均由 `claim` 台账推导：owner 原文与 `acquired_at` 直接取自台账，
 > 目的优先用台账里的 `claim_reason`，没有就如实写「未声明」，不补编。时间列只是

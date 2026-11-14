@@ -349,6 +349,27 @@ def format_reassembly_quality(stats) -> str:
             f"长度异常 {bad_len} / CRC 失败 {bad_crc}")
 
 
+def format_gst_error(gst) -> str:
+    """GST 各轴 1σ 误差 → 「纬 ±0.8 m · 经 ±0.6 m · 高 ±5.0 m」。
+
+    只读接收机 GST 真实报告的标准差；HDOP 是几何因子，不能乘系数冒充精度。
+    缺字段/非 dict/值不可解析 → 「—」，绝不补 0。
+    """
+    if not isinstance(gst, dict):
+        return "—"
+    parts = []
+    for key, name in (("lat_sigma", "纬"), ("lon_sigma", "经"),
+                      ("alt_sigma", "高")):
+        value = gst.get(key)
+        if value is None:
+            continue
+        try:
+            parts.append(f"{name} ±{float(value):.1f} m")
+        except (TypeError, ValueError):
+            continue
+    return " · ".join(parts) if parts else "—"
+
+
 class StatusPanel(QWidget):
     """设备状态面板。"""
 
@@ -546,20 +567,32 @@ class StatusPanel(QWidget):
         gps_layout.addWidget(QLabel("HDOP:"), 3, 2)
         self.gps_hdop = QLabel("—")
         self.gps_hdop.setObjectName("statusValue")
+        self.gps_hdop.setToolTip(
+            "几何精度因子：只反映卫星几何，不是定位误差；真实误差见下方"
+            "「定位误差」（接收机 GST）。")
         gps_layout.addWidget(self.gps_hdop, 3, 3)
 
+        # 真实定位误差（GST 各轴 1σ）与 HDOP 并列：几何因子不能冒充精度
+        gps_layout.addWidget(QLabel("定位误差:"), 4, 0)
+        self.gps_error = QLabel("—")
+        self.gps_error.setObjectName("statusValue")
+        self.gps_error.setToolTip(
+            "接收机 GST 报告的各轴 1σ 误差（米）；无 GST 时显示「—」，"
+            "不拿 HDOP 推算。")
+        gps_layout.addWidget(self.gps_error, 4, 1, 1, 3)
+
         # 数据时间戳（来源/更新时间）
-        gps_layout.addWidget(QLabel("更新:"), 4, 0)
+        gps_layout.addWidget(QLabel("更新:"), 5, 0)
         self.gps_timestamp = QLabel("—")
         self.gps_timestamp.setObjectName("statusValue")
-        gps_layout.addWidget(self.gps_timestamp, 4, 1, 1, 3)
+        gps_layout.addWidget(self.gps_timestamp, 5, 1, 1, 3)
 
         # 卫星信号强度（可选）：fix_dict 带 satellite_signals 时显示最强 5 颗 SNR；
         # 无该字段时保持 "—"，不报错。
-        gps_layout.addWidget(QLabel("信号:"), 5, 0)
+        gps_layout.addWidget(QLabel("信号:"), 6, 0)
         self.gps_signals = QLabel("—")
         self.gps_signals.setObjectName("statusValue")
-        gps_layout.addWidget(self.gps_signals, 5, 1, 1, 3)
+        gps_layout.addWidget(self.gps_signals, 6, 1, 1, 3)
 
         layout.addWidget(self.gps_group)
 
@@ -1117,6 +1150,7 @@ class StatusPanel(QWidget):
             self.gps_lon.setText("—")
             self.gps_alt.setText("—")
             self.gps_hdop.setText("—")
+            self.gps_error.setText("—")
             self.gps_group.setTitle("GPS / 北斗")
         else:
             # source=="real" 且 fix==True：绿色"已定位"，真实坐标
@@ -1133,13 +1167,16 @@ class StatusPanel(QWidget):
             self.gps_lon.setText(f"{lon:.6f}" if lon is not None else "—")
             self.gps_alt.setText(f"{alt:.1f} m" if alt is not None else "—")
             self.gps_hdop.setText(f"{hdop:.1f}" if hdop is not None else "—")
+            self.gps_error.setText(format_gst_error(gps.get("gst")))
 
     def update_gnss(self, fix_dict: dict):
         """由真实串口 GNSS（mbdsdr_ai.serial_gnss.get_fix）驱动 GPS 组。
 
         fix_dict 口径：{source, latitude, longitude, altitude_m, satellites,
-                       hdop, speed_kmh, course_deg, utc_time, fix_quality, timestamp}
-        source=="real"  → 绿色(#6BA89A)显示真实坐标/卫星数/HDOP/高度；
+                       hdop, gst, speed_kmh, course_deg, utc_time,
+                       fix_quality, timestamp}
+        source=="real"  → 绿色(#6BA89A)显示真实坐标/卫星数/HDOP/高度/定位误差；
+        ``gst`` 是接收机自报的各轴 1σ 误差，缺省时显示「—」，不拿 HDOP 推算；
         source=="none"  → 灰色“未连接/无数据”，坐标一律空，绝不造假。
         fix_dict 为 None / 空字典 / 非 dict 时一律按"无数据"处理，绝不抛异常、
         绝不保留旧坐标。
@@ -1159,6 +1196,7 @@ class StatusPanel(QWidget):
             self.gps_lon.setText("—")
             self.gps_alt.setText("—")
             self.gps_hdop.setText("—")
+            self.gps_error.setText("—")
             self.gps_signals.setText("—")
             self.gps_group.setTitle("GPS / 北斗")
             return
@@ -1177,6 +1215,7 @@ class StatusPanel(QWidget):
         self.gps_lon.setText(f"{lon:.6f}" if lon is not None else "—")
         self.gps_alt.setText(f"{alt:.1f} m" if alt is not None else "—")
         self.gps_hdop.setText(f"{hdop:.1f}" if hdop is not None else "—")
+        self.gps_error.setText(format_gst_error(fix_dict.get("gst")))
         # 可选：最强 5 颗卫星 SNR（无 satellite_signals 字段时显示 '--'，不报错）
         self._update_signal_strength(fix_dict.get("satellite_signals"))
 
