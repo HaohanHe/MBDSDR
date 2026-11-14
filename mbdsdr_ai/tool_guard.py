@@ -24,10 +24,11 @@ from __future__ import annotations
 import json
 import os
 import sys
-import threading
-from typing import Any, Dict, Optional
+from datetime import datetime
+from typing import Any, Dict, List, Optional, Tuple
 
 from .hooks import Event, EventType
+from .rotating_jsonl import RotatingJsonlLog
 
 # ======================================================================
 # 持久审计账本（AI 操作员可追溯性）
@@ -38,6 +39,18 @@ AUDIT_LOG_ENV = "MBDSDR_AUDIT_LOG"
 
 #: 操作员手动开启时的默认账本位置（~/.mbdsdr/ 已是 hooks.json 的家）。
 AUDIT_LOG_DEFAULT = os.path.join(os.path.expanduser("~"), ".mbdsdr", "audit.jsonl")
+
+#: 单文件轮转阈值：8 MiB（写死，不开放配置——审计账本不该有"调大就能不
+#: 轮转"的开关）。按单条事件约 300 B 估算 ≈ 2.8 万条；每天 20 次工具调用的
+#: 机器约三年才轮到一次。
+AUDIT_LOG_MAX_BYTES = 8 * 1024 * 1024
+#: 保留份数（含当前文件）：5 份，即 ``.1`` 到 ``.4`` 加当前文件。
+AUDIT_LOG_KEEP_FILES = 5
+#: 备份保留天数：180 天前轮转出去的备份在下次轮转时清掉；0 表示只按份数。
+AUDIT_LOG_RETENTION_DAYS = 180
+
+#: 磁盘占用硬上限：8 MiB × 5 = 40 MiB（单账本；跨进程共用同一个账本）。
+AUDIT_LOG_DISK_CAP_BYTES = AUDIT_LOG_MAX_BYTES * AUDIT_LOG_KEEP_FILES
 
 #: 模型/代理发起的工具调用：过模型侧守卫，可被否决。
 TRIGGER_MODEL = "model"
@@ -141,12 +154,29 @@ class AuditLog:
     口径与事件总线一致：只落事件信封（tool / arguments / ok / outcome
     摘要），长结果不重复落盘（spill 路径已有全文）。任何 IO 失败只记
     stderr 并放行——审计面绝不当工具链的单点故障源。
+
+    容量：按大小轮转（:data:`AUDIT_LOG_MAX_BYTES`），保留
+    :data:`AUDIT_LOG_KEEP_FILES` 份且不超过
+    :data:`AUDIT_LOG_RETENTION_DAYS` 天，磁盘硬上限
+    :data:`AUDIT_LOG_DISK_CAP_BYTES`（40 MiB）。轮转与并发写的互斥由
+    :mod:`mbdsdr_ai.rotating_jsonl` 的文件锁提供；查询统一走
+    :meth:`query` / :func:`query_audit_events`，跨轮转文件按时间范围取，
+    调用方不需要知道 ``.1`` / ``.2`` 的存在。
     """
 
-    def __init__(self, path: Optional[str] = None) -> None:
+    def __init__(self, path: Optional[str] = None, *,
+                 max_bytes: int = AUDIT_LOG_MAX_BYTES,
+                 keep_files: int = AUDIT_LOG_KEEP_FILES,
+                 retention_days: int = AUDIT_LOG_RETENTION_DAYS,
+                 lock_timeout: Optional[float] = 10.0) -> None:
         self.path = path if path is not None else AUDIT_LOG_DEFAULT
-        self._lock = threading.Lock()
-        self._dir_ready = False
+        self._log = RotatingJsonlLog(
+            self.path,
+            max_bytes=max_bytes,
+            backups=max(1, int(keep_files) - 1),
+            retention_days=retention_days,
+            lock_timeout=lock_timeout,
+        )
 
     @classmethod
     def from_env(cls, env: Optional[Dict[str, str]] = None,
@@ -168,19 +198,53 @@ class AuditLog:
         return cls() if default_on else None
 
     def record(self, event: Event) -> None:
-        """钩子回调：追加一行 JSONL。绝不抛异常（Hook.trigger 已兜底）。"""
+        """钩子回调：追加一行 JSONL（超限先轮转）。绝不抛异常。"""
         try:
-            line = json.dumps(event.to_dict(), ensure_ascii=False)
-            with self._lock:
-                if not self._dir_ready:
-                    parent = os.path.dirname(os.path.abspath(self.path))
-                    if parent:
-                        os.makedirs(parent, exist_ok=True)
-                    self._dir_ready = True
-                with open(self.path, "a", encoding="utf-8") as f:
-                    f.write(line + "\n")
+            self._log.append_line(json.dumps(event.to_dict(),
+                                             ensure_ascii=False))
         except Exception as e:  # pragma: no cover - 审计失败不阻断工具流
             print(f"[tool_guard] 审计账本写入失败（忽略）: {e}", file=sys.stderr)
+
+    def query(self, start: Any = None, end: Any = None) -> Tuple[List[Dict[str, Any]], int]:
+        """跨轮转文件按时间范围查；返回 ``(事件, 坏行数)``。
+
+        ``start`` / ``end`` 接受 epoch 秒、``datetime`` 或 ISO-8601 字符串，
+        闭区间，``None`` 表示不限。
+        """
+        return self._log.read_events(_to_epoch(start), _to_epoch(end))
+
+    def files(self) -> List[str]:
+        """账本现存文件（最旧 → 最新），仅供排查用；查询请用 :meth:`query`。"""
+        return self._log.files()
+
+
+def _to_epoch(value: Any) -> Optional[float]:
+    """把 ``None`` / epoch 秒 / datetime / ISO-8601 统一成 epoch 秒。"""
+    if value is None:
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, datetime):
+        return value.timestamp()
+    return datetime.fromisoformat(str(value)).timestamp()
+
+
+def query_audit_events(start: Any = None, end: Any = None, *,
+                       path: Optional[str] = None,
+                       ) -> Tuple[List[Dict[str, Any]], int]:
+    """审计账本的统一查询入口：给时间范围，跨轮转文件取。
+
+    不要求调用方拼 ``audit.jsonl.1`` / ``.2``：轮转出去的备份按最旧到最新
+    一起读，再按 ``timestamp`` 排序过滤。返回 ``(事件, 坏行数)``；坏行只在
+    「读的同时有进程正在写最后一行」时出现，如实计数、不猜不补。
+
+    账本不存在（从未开启）时返回 ``([], 0)``，不抛错。
+    """
+    log = RotatingJsonlLog(path if path is not None else AUDIT_LOG_DEFAULT,
+                           max_bytes=AUDIT_LOG_MAX_BYTES,
+                           backups=AUDIT_LOG_KEEP_FILES - 1,
+                           retention_days=AUDIT_LOG_RETENTION_DAYS)
+    return log.read_events(_to_epoch(start), _to_epoch(end))
 
 
 def attach_audit_log(hooks: Any, audit: Optional[AuditLog] = None, *,

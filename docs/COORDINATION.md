@@ -2392,6 +2392,7 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `mbdsdr_ai/environment_evidence.py` | 时空环境层/D4（环境证据快照落盘与只读复算） | 2026-11-14 11:33 | 本笔 |
 | `tests/test_environment_evidence.py` | 时空环境层/D4（D4 判据与反证） | 2026-11-14 11:33 | 本笔 |
 | `scripts/replay_environment_evidence.py` | 时空环境层/D4（只读复算 CLI） | 2026-11-14 11:33 | 本笔 |
+| `{mbdsdr_ai/rotating_jsonl.py,mbdsdr_ai/tool_guard.py,mbdsdr_ai/tx_guard.py,tests/test_audit_log_rotation.py,docs/limitations-register.md}` | 审计账本轮转线/6ae85f56（审计账本 8MiB×5 轮转 + 唯一查询入口 + 跨进程写锁；TxAuditLog 改用共享实现） | 2026-11-14 11:34 | 本笔 |
 
 > 上表各行均由 `claim` 台账推导：owner 原文与 `acquired_at` 直接取自台账，
 > 目的优先用台账里的 `claim_reason`，没有就如实写「未声明」，不补编。时间列只是

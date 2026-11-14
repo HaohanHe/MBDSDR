@@ -978,6 +978,24 @@ python -c "from mbdsdr_ai.sdr_backend import HackRFBackend as K;be=K(device_inde
 | --- | --- | --- | --- | --- |
 | L65 | **历史遗留无凭据 claim（`current` 缺 `token_sha256`）：等 TTL，不开名字释放后门** | ①写方：`scripts/file_claim.py::_marker_payload` 只在拿到 token 时写 `token_sha256`，早期 claim 没有该字段。②读方均**单条降级、原因可读**，不判死整本台账：`release` 对无凭据 claim 一律拒（不能凭 owner 名放行）；`takeover` 对「持有者无 token」跳过「同 owner 带 token 拒绝」那一条检查；`legacy-token-repair` 要求 token，否则可读拒绝。③P2 之外的旁证：`pid_dead_or_reused` 恒真导致正常持有被抢，说明「凭名字/凭猜测判身份」会造出真实事故 | **2026-11-13 03:52 快照：`claims.json` 的 `current` 缺 `token_sha256` 的记录 67 条；按 `max(acquired_at, heartbeat_at) + ttl_min*60` 计算，67 条全部已过 TTL，最晚一条到期 2026-11-12 23:14:44**——即「最坏要等到几点」的答案是「已经过去，无需再等」。规则：过期前该文件归持有方，任何线不得接管；过期后按正常 takeover 走（三条判据 + 理由），仍**不得**以「我知道 owner 是谁」为由释放 | 复跑计数（只读，不改台账）：`python -c "import json,datetime,pathlib;d=json.loads(pathlib.Path(r'D:\mbdsdr\.locks\claims.json').read_text(encoding='utf-8'));now=datetime.datetime.now().timestamp();rows=[];[rows.append((max(float(v['current'].get('acquired_at') or 0),float(v['current'].get('heartbeat_at') or v['current'].get('acquired_at') or 0))+float(v['current'].get('ttl_min') or 0)*60,k)) for k,v in d['claims'].items() if isinstance(v.get('current'),dict) and not v['current'].get('token_sha256')];rows.sort();print('N=',len(rows),'未过期=',sum(1 for e,_ in rows if e>now),'最晚=',datetime.datetime.fromtimestamp(rows[-1][0]).strftime('%Y-%m-%d %H:%M:%S') if rows else None)"`。通过判据：未过期数只减不增，且没有任何代码路径能凭 owner 名释放无凭据 claim |
 
+## 附 X：工具审计账本容量上限与查询入口（2026-11-14，审计账本轮转线追加）
+
+**一句话结论：工具审计账本按 8 MiB 切文件、保留 5 份（当前 + 4 个备份）且不超过 180 天，单账本磁盘占用硬上限 40 MiB；查询只走 `query_audit_events()` / `AuditLog.query()` 一个入口，给时间范围就跨轮转文件取，调用方不需要知道 `.1`/`.2` 的存在。轮转与并发写由 `<ledger>.lock` 上的操作系统文件锁串行化，两个进程同写不丢行、不出半行。**
+
+| 项 | 值 / 行为 | 依据 |
+| --- | --- | --- |
+| 轮转条件 | **写前**当前文件 `>= 8 MiB` 才轮转（`AUDIT_LOG_MAX_BYTES`）；单文件最坏为 8 MiB + 一行 | `mbdsdr_ai/tool_guard.py` 常量 + `rotating_jsonl.RotatingJsonlLog.append_line` |
+| 切法（不丢记录） | 删最旧备份 → 依次改名后移 → 当前文件改名 `.1`；**不截断、不覆盖未到期备份** | 同上 `_rotate`；反证见下行 |
+| 反证 | 把 `_rotate` 改成「直接截断当前文件」：`tests/test_audit_log_rotation.py` **3 条红**（轮转前后的记录查不到），并发写场景 300 条只剩 16 条 | 本轮实跑，恢复后 5 passed |
+| 保留策略 | 份数：当前 + 4 份备份（`AUDIT_LOG_KEEP_FILES=5`）；天数：备份 mtime 早于 180 天在下次轮转时删除（`AUDIT_LOG_RETENTION_DAYS=180`）；两者**先到者**生效 | 同上 |
+| 磁盘占用上限 | **40 MiB / 账本**（`AUDIT_LOG_DISK_CAP_BYTES = 8 MiB × 5`）。TX 审计账本另算（50 MB × 10 ≈ 500 MB，见附 G），两份账本各守各的上限 | 同上 + `tx_guard.TX_AUDIT_*` |
+| 查询入口 | `tool_guard.query_audit_events(start, end, path=None)`；实例侧 `AuditLog.query(start, end)`。`start`/`end` 接受 epoch 秒、`datetime`、ISO-8601 字符串，闭区间，`None` 不限；返回 `(事件, 坏行数)`；按 `timestamp` 排序 | `mbdsdr_ai/tool_guard.py`、`mbdsdr_ai/rotating_jsonl.py:read_events` |
+| 并发写（两个进程同写） | 「判大小 → 轮转 → 追加」整段在 `<ledger>.lock` 的 OS 文件锁内完成（Windows `msvcrt.locking` / POSIX `fcntl.flock`）；等不到锁按超时处理——工具审计账本 fail-open（打 stderr 跳过本次写入），TX 账本 fail-closed（拒绝发射） | `rotating_jsonl.file_lock`；`tests/test_audit_log_rotation.py::test_concurrent_writers_no_partial_or_lost_lines`（2 进程 × 150 条，300 条全在、无坏行） |
+| 读侧并发 | 查询**不加写锁**：轮转是改名，读到正在写的最后一行可能是半行；这类行计入返回值的「坏行数」，不猜不补 | `read_events` 的 `skipped` |
+| 与 TX 审计的关系 | 轮转/保留/文件锁只有一份实现（`mbdsdr_ai/rotating_jsonl.py`），`TxAuditLog` 与 `AuditLog` 都在用；TX 的 fail-closed 语义、token 打码、计数器仍在 `tx_guard`，未搬动 | 本线重构，`tests/test_tx_audit.py` 全绿 |
+| 已知边界 | ① 跨进程 rename 与同文件追加在 Windows 本地盘上实测无丢行；网络盘 / 同步盘（OneDrive、SMB）未验，那里的 rename 原子性不保证。② 查询以事件自带 `timestamp` 为准，系统时钟回拨会让排序与范围过滤失真（账本本身不改正时钟）。③ 180 天清理依赖备份文件的 mtime，被外部工具 touch 过会延寿。④ 账本未开启（`MBDSDR_AUDIT_LOG` 未设）时不存在任何账本，本附录的容量约束只在开启后成立 | 本轮实测范围 |
+| 复跑判据 | `python -m pytest tests/test_audit_log_rotation.py tests/test_tx_audit.py -q`（5 + 79 passed）；并发那条用 `multiprocessing` spawn 起两个真实进程 | 本轮实跑 |
+
 
 
 

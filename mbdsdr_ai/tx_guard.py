@@ -43,6 +43,8 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import Any, Dict, Iterator, List, Optional, Sequence, Tuple
 
+from .rotating_jsonl import RotatingJsonlLog
+
 logger = logging.getLogger(__name__)
 
 # ── 门拒绝码（可区分，供 UI/日志/测试判定）────────────────────────────────
@@ -199,6 +201,8 @@ class TxAuditLog:
 
     容量策略：写前若当前文件已达 ``max_bytes``，删掉最旧的 ``.backups``，
     依次后移并把当前文件改名 ``.1``——**永远不停写**（停写会让 TX 不可发射）。
+    轮转/保留/跨进程互斥的实现在 :mod:`mbdsdr_ai.rotating_jsonl`，与工具审计
+    账本共用一份，本类只负责 fail-closed 语义与计数器。
     """
 
     def __init__(self, path: Optional[str] = None, *,
@@ -215,12 +219,21 @@ class TxAuditLog:
         self._retention_days = max(0, int(
             settings["retention_days"] if retention_days is None
             else retention_days))
+        self._sink = self._make_sink()
         self.last_error = ""
         self.write_failures = 0
         self.records_written = 0
         # 失败告警限流：同一条错误在 _LOG_INTERVAL_S 内只打一次（错误变化立即打）。
         self._last_log_ts = 0.0
         self._last_log_msg = ""
+
+    def _make_sink(self) -> RotatingJsonlLog:
+        return RotatingJsonlLog(
+            self._path,
+            max_bytes=self._max_bytes,
+            backups=self._backups,
+            retention_days=self._retention_days,
+        )
 
     @property
     def path(self) -> str:
@@ -245,6 +258,7 @@ class TxAuditLog:
     def set_path(self, path: str) -> None:
         with self._lock:
             self._path = str(path)
+            self._sink = self._make_sink()
             self.last_error = ""
             self.write_failures = 0
             self.records_written = 0
@@ -268,14 +282,9 @@ class TxAuditLog:
                           separators=(",", ":"), default=str)
         with self._lock:
             try:
-                parent = os.path.dirname(os.path.abspath(self._path))
-                if parent:
-                    os.makedirs(parent, exist_ok=True)
-                if (os.path.exists(self._path)
-                        and os.path.getsize(self._path) >= self._max_bytes):
-                    self._rotate()
-                with open(self._path, "a", encoding="utf-8", newline="\n") as f:
-                    f.write(line + "\n")
+                # 判大小 → 轮转 → 追加整段在 <path>.lock 的跨进程写锁内完成
+                # （rotating_jsonl），两个进程同写也不会互相踩掉行。
+                self._sink.append_line(line)
                 self.records_written += 1
                 self.last_error = ""
             except OSError as e:
@@ -283,38 +292,6 @@ class TxAuditLog:
                 self.last_error = f"{type(e).__name__}: {e}"
                 self._log_failure()
                 raise TxAuditError(self.last_error) from e
-
-    def _rotate(self) -> None:
-        """删最旧 → 依次后移 → 当前 → ``.1``（绝不因容量停写）。"""
-        oldest = f"{self._path}.{self._backups}"
-        try:
-            if os.path.exists(oldest):
-                os.remove(oldest)          # 超限删最旧，而不是停止写入
-            for i in range(self._backups - 1, 0, -1):
-                src = f"{self._path}.{i}"
-                if os.path.exists(src):
-                    os.replace(src, f"{self._path}.{i + 1}")
-            os.replace(self._path, f"{self._path}.1")
-            self._purge_expired()
-        except OSError as e:
-            self.write_failures += 1
-            self.last_error = f"轮转失败 {type(e).__name__}: {e}"
-            logger.error("发射审计轮转失败（fail-closed，拒绝发射）: %s",
-                         self.last_error)
-            raise TxAuditError(self.last_error) from e
-
-    def _purge_expired(self) -> None:
-        """按天数清理备份；当前活动文件永不删除，清理失败不阻断写入。"""
-        if self._retention_days <= 0:
-            return
-        cutoff = time.time() - self._retention_days * 86400
-        for i in range(1, self._backups + 1):
-            p = f"{self._path}.{i}"
-            try:
-                if os.path.exists(p) and os.path.getmtime(p) < cutoff:
-                    os.remove(p)
-            except OSError as e:  # 删旧失败不影响本次写入
-                logger.warning("发射审计过期清理失败（不影响写入）: %s", e)
 
 
 _AUDIT = TxAuditLog()
