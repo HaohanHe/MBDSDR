@@ -2431,6 +2431,8 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `desktop/audit_alarm.py` | 审计漏记可见线/6ae85f56（第四轮补：端到端可见判据 + 未知状态文案） | 2026-11-14 11:47 | 本笔 |
 | `tests/test_audit_alarm.py` | 审计漏记可见线/6ae85f56（第四轮补：三条端到端界面判据与摘挂载反证） | 2026-11-14 11:47 | 本笔 |
 | `docs/limitations-register.md` | 审计漏记可见线/6ae85f56（第四轮补：附 X.1 端到端判据与 unknown） | 2026-11-14 11:47 | 本笔 |
+| `experiments/exp_doppler_orbit.py` | 无线电课清单线/6ae85f56（IQ 定轨最小 CLI：扩 --iq 模式（IQ/TLE/站址/f0 缺项非零 + 合成样本 2.2km + 证据快照）） | 2026-11-14 11:49 | 本笔 |
+| `tests/test_orbit_determination_cli.py` | 无线电课清单线/6ae85f56（IQ 定轨 CLI 用例：2.2km 对拍 + 缺 TLE/站址/空 IQ/观测不足非零且不写快照） | 2026-11-14 11:49 | 本笔 |
 
 > 上表各行均由 `claim` 台账推导：owner 原文与 `acquired_at` 直接取自台账，
 > 目的优先用台账里的 `claim_reason`，没有就如实写「未声明」，不补编。时间列只是
