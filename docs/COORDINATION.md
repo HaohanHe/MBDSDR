@@ -2433,6 +2433,7 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `docs/limitations-register.md` | 审计漏记可见线/6ae85f56（第四轮补：附 X.1 端到端判据与 unknown） | 2026-11-14 11:47 | 本笔 |
 | `experiments/exp_doppler_orbit.py` | 无线电课清单线/6ae85f56（IQ 定轨最小 CLI：扩 --iq 模式（IQ/TLE/站址/f0 缺项非零 + 合成样本 2.2km + 证据快照）） | 2026-11-14 11:49 | 本笔 |
 | `tests/test_orbit_determination_cli.py` | 无线电课清单线/6ae85f56（IQ 定轨 CLI 用例：2.2km 对拍 + 缺 TLE/站址/空 IQ/观测不足非零且不写快照） | 2026-11-14 11:49 | 本笔 |
+| `tests/test_safe_commit_foreign_at_declare.py` | 归属证据线/6ae85f56（声明前他线改动可见化：退出码 8 + 三条判据用例） | 2026-11-14 11:51 | 本笔 |
 | `scripts/head_symbol_check.py` | HEAD可构建线/6ae85f56（新增：静态核查调用目标在 HEAD 树里是否存在） | 2026-11-14 11:51 | 本笔 |
 | `scripts/symbol_check_allowlist.json` | HEAD可构建线/6ae85f56（白名单：逐条理由与条数上限） | 2026-11-14 11:51 | 本笔 |
 | `tests/test_head_symbol_check.py` | HEAD可构建线/6ae85f56（真样本两红一绿 + 只跑用例的反证 + 合成未定义方法） | 2026-11-14 11:51 | 本笔 |

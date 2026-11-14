@@ -76,7 +76,7 @@ pre-commit 闸门对**任何未声明的删除条目**一律拒绝（幻影删�
   时刻的工作区」，并明确打出「无预先声明，窗口只覆盖本次运行」；
 * ``git commit`` 之前重算一次，**一个字节不同就拒绝**（退出码 4，不重试）：
   逐行列出声明之后新增的行、消失的行，并从 claim 台账推断这些行可能属于谁；
-* 声明时**已经存在**的他人改动不算变化（那正是 ``--exclude-hunk`` 处理的对象），
+* 声明时**已经存在**的他人改动不算变化（它改由退出码 8 的清单管，见形态㉑），
   这条边界不能混：混了以后共享文件就没人敢提交；
 * 确认要连别人的行一起带走时，用 ``--allow-foreign-changes "<理由>"`` 放行，
   理由与逐文件增删行数会写进提交说明的 ``foreign-changes:`` 段——豁免必须留痕，
@@ -99,6 +99,23 @@ pre-commit 闸门对**任何未声明的删除条目**一律拒绝（幻影删�
 记录，打印 ``[claim] 该路径无 claim 记录，请确认归属：<path>``。**只提示，
 不拦**——没签字不等于偷东西，归属由人确认，工具不替人签字，也不把「没签字」
 当成拦下的理由。声明时已有他人 hunk 与「声明后漂移」的分界，见 ⑰ 的判定本身。
+
+声明之前就已在工作区的他线改动（2026-11-14，形态㉑）
+----------------------------------------------------
+
+上面说「本脚本没有任何机制判断这几行是谁写的」——现在有了，但判据仍是**台账**，
+不是读心：``--declare`` 会枚举 ``--files`` 里不属于本笔的改动块（登记面逐行读
+§6.1 线名，普通文件按活跃 claim 的线名；没人占的文件没有「他线」证据，不算别人
+的；解析不出线名的行标「无归属」），按「N 个文件 / M 个块 / 共 K 行」打印，
+并写进声明快照。提交时这些块若仍会被带入，
+必须用 ``--exclude-hunk`` / ``--exclude-owner`` 排掉，或用
+``--allow-foreign-changes "<理由>"`` 留痕（写进说明的 ``foreign-before-declare:``
+段）；两者都没有就拒绝（退出码 8，不重试）。清单只比 ``--files``，不扫全仓。
+
+两把锁各管一半，**不重叠也不互相替代**：声明**之前**已在工作区的内容归 8
+（本节的块清单），声明**之后**冒出来/消失的内容归 4（⑰ 的时间窗）。只做
+其中一个，另一半照样漏——这正是 ``8982b4f9`` / ``052828d1`` / ``ed3c09e5``
+反复出现的形态。
 
 提交说明逐字校验（2026-11-13，形态⑱）
 --------------------------------------
@@ -233,7 +250,9 @@ hunk，于是有人把自己的行挪到别处让 diff 断开——提交干净�
 退出码：0 成功；1 前置校验失败（未提交）；2 重试耗尽（未提交）；3 提交后复核失败
 （已提交，需按事故卡处理）；4 声明后内容变化被拒（未提交，不重试）；
 5 §6.1 缺行被拒（未提交，不重试）；6 消息源在提交前被改写（未提交，不重试）；
-7 使用了 ``--exclude-hunk`` 却没有声明快照（未提交，不重试）。
+7 使用了 ``--exclude-hunk`` 却没有声明快照（未提交，不重试）；
+8 声明前已在工作区的他线改动会被带入，且既未排除也未 ``--allow-foreign-changes``
+（未提交，不重试）。
 """
 from __future__ import annotations
 
@@ -246,6 +265,7 @@ import re
 import subprocess
 import sys
 import time
+from collections import Counter
 from pathlib import Path
 
 ROOT = Path(
@@ -770,8 +790,14 @@ def _declaration_digest(files: list[str]) -> str:
 
 
 def _write_declaration(files: list[str], env: dict) -> tuple[dict, float]:
-    """把声明时刻的工作区内容记成快照；同一文件集只留最新一份。"""
+    """把声明时刻的工作区内容记成快照；同一文件集只留最新一份。
+
+    同时记下**声明前就已经在工作区的他线改动块**（形态㉑）：这份清单是提交时
+    「要么排除、要么留痕」的判据。它只覆盖声明那一刻，声明之后的变化仍归 ⑰，
+    两把锁各管一半，不互相替代。
+    """
     snapshot = {path: _fingerprint(env, path) for path in files}
+    foreign = _foreign_blocks(files, _coord_doc_rel())
     stamp = time.time()
     record = {
         "session": _session_key(),
@@ -780,6 +806,7 @@ def _write_declaration(files: list[str], env: dict) -> tuple[dict, float]:
         "declared_at": stamp,
         "declared_iso": _iso(stamp),
         "files": snapshot,
+        "foreign": foreign,
     }
     for old in _declaration_dir().glob(f"*.{_declaration_digest(files)}.json"):
         try:
@@ -790,7 +817,7 @@ def _write_declaration(files: list[str], env: dict) -> tuple[dict, float]:
     tmp = target.with_name(f"{target.name}.tmp{os.getpid()}")
     tmp.write_text(json.dumps(record, ensure_ascii=False, indent=1), encoding="utf-8")
     os.replace(tmp, target)
-    return snapshot, stamp
+    return record, stamp
 
 
 def _load_declaration(files: list[str]) -> tuple[Path, dict, float] | None:
@@ -816,7 +843,7 @@ def _load_declaration(files: list[str]) -> tuple[Path, dict, float] | None:
             f"[declare] 使用声明快照 {path}（session={record.get('session')}，"
             f"{record.get('declared_iso')}）"
         )
-        return path, record["files"], float(record["declared_at"])
+        return path, record, float(record["declared_at"])
     return None
 
 
@@ -868,6 +895,231 @@ def _line_diff(env: dict, declared: dict, limit: int = 40) -> tuple[list[str], i
     if len(items) > limit:
         detail.append(f"    …另有 {len(items) - limit} 行变化未显示")
     return detail, added, removed
+
+
+# ---------------------------------------------------------------------------
+# 声明之前的他线改动：声明快照挡不住的那一半（形态㉑，2026-11-14）
+# ---------------------------------------------------------------------------
+
+def _my_identity() -> str:
+    """本笔的归属身份：与 claim_gate 同口径（环境变量优先，其次 git config）。"""
+    try:
+        name = _coord_module().resolve_owner(ROOT)
+    except ImportError:
+        name = ""
+    return (name or os.environ.get("MBDSDR_CLAIM_OWNER", "")).strip()
+
+
+def _owner_same(label: str, owner: str) -> bool:
+    """线名是否同一家：与 §6.1 闸门共用 ``_owner_matches``，不另写一份。"""
+    try:
+        return bool(_coord_module()._owner_matches(label, owner))
+    except ImportError:
+        return bool(label) and label == owner
+
+
+def _active_claim_map(paths: list[str]) -> dict[str, list[str]]:
+    """路径 → 活跃 claim 的线名（只读占位文件，不碰台账正文）。"""
+    try:
+        pairs = _coord_module().active_claims_for_paths(
+            sorted(paths), marker_dir=LOCKS_DIR / "claims")
+    except ImportError:
+        return {}
+    out: dict[str, list[str]] = {}
+    for path, owner in pairs:
+        if not owner:
+            continue
+        key = str(path).replace("\\", "/").lower()
+        bucket = out.setdefault(key, [])
+        if owner not in bucket:
+            bucket.append(owner)
+    return out
+
+
+def _diff_blocks(path: str) -> list[dict]:
+    """工作区相对 HEAD 的改动块（``-U0`` hunk）：新侧范围 + 逐行原文。
+
+    行号只用于打印给人看；提交时判断「这块还在不在」用的是**行原文**，
+    所以别线在我算完之后插行不会让判定失效（坐标只在计算那一刻有效）。
+    """
+    proc = _run(["diff", "--no-renames", "-U0", "HEAD", "--", path], _plain_env())
+    if proc.returncode != 0:
+        raise ValueError(
+            f"读取 {path} 的工作区 diff 失败："
+            f"{proc.stderr.decode('utf-8', 'replace')[:200]}")
+    blocks: list[dict] = []
+    cur: dict | None = None
+    new_no = old_no = 0
+    for line in proc.stdout.decode("utf-8", "replace").splitlines():
+        if line.startswith("@@"):
+            match = re.match(
+                r"^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@", line)
+            if not match:
+                cur = None
+                continue
+            old_no = int(match.group(1))
+            new_no = int(match.group(3))
+            count = int(match.group(4)) if match.group(4) is not None else 1
+            cur = {"start": new_no, "end": new_no + max(count, 1) - 1,
+                   "added": [], "removed": []}
+            blocks.append(cur)
+            continue
+        if cur is None:
+            continue
+        if line.startswith("+"):
+            cur["added"].append((new_no, line[1:]))
+            new_no += 1
+        elif line.startswith("-"):
+            cur["removed"].append((old_no, line[1:]))
+            old_no += 1
+    return blocks
+
+
+def _foreign_blocks(files: list[str], doc_rel: str) -> dict[str, list[dict]]:
+    """枚举 ``--files`` 里**不属于本笔**的改动块（只比清单内文件，不扫全仓）。
+
+    归属按台账：登记面逐行读 §6.1 的线名，普通文件按活跃 claim 的线名；
+    没人占的文件没有「他线」证据，不算别人的；解析不出线名的行标「无归属」。
+    """
+    me = _my_identity()
+    claims = _active_claim_map(files)
+    out: dict[str, list[dict]] = {}
+    for path in files:
+        items: list[dict] = []
+        for block in _diff_blocks(path):
+            if path == doc_rel:
+                for lineno, text in block["added"]:
+                    label = _coord_row_label(text)
+                    if label and _owner_same(label, me):
+                        continue
+                    items.append({"start": lineno, "end": lineno, "owner": label,
+                                  "lines": [text], "removed": []})
+                for lineno, text in block["removed"]:
+                    label = _coord_row_label(text)
+                    if label and _owner_same(label, me):
+                        continue
+                    items.append({"start": lineno, "end": lineno, "owner": label,
+                                  "lines": [], "removed": [text]})
+                continue
+            if not block["added"] and not block["removed"]:
+                continue
+            owners = claims.get(path.replace("\\", "/").lower()) or []
+            if not owners:
+                continue            # 没人占：没有「他线」的证据，不按别人的算
+            if me and any(_owner_same(owner, me) for owner in owners):
+                continue            # 本笔持有这个文件：整份改动算自己的
+            items.append({
+                "start": block["start"], "end": block["end"],
+                "owner": "、".join(owners),
+                "lines": [text for _no, text in block["added"]],
+                "removed": [text for _no, text in block["removed"]],
+            })
+        if items:
+            out[path] = items
+    return out
+
+
+def _foreign_stats(foreign: dict[str, list[dict]]) -> tuple[int, int, int]:
+    paths = sum(1 for items in foreign.values() if items)
+    blocks = sum(len(items) for items in foreign.values())
+    lines = sum(len(item["lines"]) + len(item["removed"])
+                for items in foreign.values() for item in items)
+    return paths, blocks, lines
+
+
+def _foreign_lines(foreign: dict[str, list[dict]], limit: int = 20) -> list[str]:
+    """一份能一眼看出规模的清单：块数有上限，每块只带一行样例。"""
+    out: list[str] = []
+    shown = 0
+    for path, items in foreign.items():
+        for item in items:
+            if shown >= limit:
+                break
+            rng = (f"{item['start']}-{item['end']}"
+                   if item["end"] >= item["start"] else f">{item['start']}")
+            delta = f"+{len(item['lines'])}"
+            if item["removed"]:
+                delta += f"/-{len(item['removed'])}"
+            out.append(f"  {path}:{rng}（{item['owner'] or '无归属'}）{delta} 行")
+            sample = (item["lines"] or item["removed"] or [""])[0].strip()
+            if sample:
+                out.append(f"      {sample[:110]}")
+            shown += 1
+        if shown >= limit:
+            break
+    total = sum(len(items) for items in foreign.values())
+    if total > shown:
+        out.append(f"  …另有 {total - shown} 个块未显示（清单已写入声明快照）")
+    return out
+
+
+def _print_foreign(foreign: dict[str, list[dict]]) -> None:
+    nfiles, nblocks, nlines = _foreign_stats(foreign)
+    if not nblocks:
+        print("[foreign] 声明前没有他线改动块（只比 --files 的归属，不扫全仓）")
+        return
+    print(f"[foreign] 声明前已在工作区的他线改动："
+          f"{nfiles} 个文件 / {nblocks} 个块 / 共 {nlines} 行")
+    for line in _foreign_lines(foreign):
+        print(line)
+    print("[foreign] 提交时若这些块会被带入，必须用 --exclude-hunk / --exclude-owner 排掉，"
+          "或 --allow-foreign-changes \"<理由>\" 留痕；两者都没有就拒绝（退出码 8）")
+
+
+def _carried_foreign(env: dict, foreign: dict[str, list[dict]]) -> list[dict]:
+    """私有 index 里仍带着的「声明前他线块」（按行原文比对，抗行号漂移）。"""
+    carried: list[dict] = []
+    for path, items in foreign.items():
+        present = Counter((_index_text(env, path) or "").splitlines())
+        for item in items:
+            hits = Counter(item.get("lines") or [])
+            remain = sum((present & hits).values())
+            gone = sum(1 for text in item.get("removed") or [] if present[text] <= 0)
+            if remain or gone:
+                entry = dict(item)
+                entry["path"] = path
+                entry["carried"] = remain or gone
+                carried.append(entry)
+    return carried
+
+
+def _foreign_gate(env: dict, foreign: dict[str, list[dict]],
+                  allow_reason: str) -> tuple[list[dict], str]:
+    """提交前的判据：声明前的他线块还在 index 里 → 必须排除或显式留痕。"""
+    carried = _carried_foreign(env, foreign or {})
+    if not carried:
+        return [], ""
+    grouped: dict[str, list[dict]] = {}
+    for item in carried:
+        grouped.setdefault(item["path"], []).append(item)
+    nfiles, nblocks, nlines = _foreign_stats(grouped)
+    lines = [
+        f"拒绝提交：声明前已经在工作区的他线改动会被带入本笔"
+        f"（{nfiles} 个文件 / {nblocks} 个块 / 共 {nlines} 行）。",
+        "  这些块在 --declare 时就已经躺在工作区，声明快照把它们当成了基线；"
+        "⑰ 的时间窗只看声明之后，管不到这一半。",
+        *_foreign_lines(grouped),
+        "  处置：普通文件用 --exclude-hunk <path>:<start-end> 排掉；"
+        "§6.1 登记面用 --exclude-owner \"<线名>\"；",
+        "        确认要一起带走时用 --allow-foreign-changes \"<理由>\""
+        "（理由与块清单会写进提交说明的 foreign-before-declare 段）。",
+    ]
+    return carried, "\n".join(lines)
+
+
+def _foreign_before_trailer(message: bytes, carried: list[dict],
+                            reason: str) -> bytes:
+    """留痕：声明前带走的不属于本笔的块，逐块写进提交说明。"""
+    lines = ["", "", f"foreign-before-declare: {reason}"]
+    for item in carried:
+        rng = (f"{item['start']}-{item['end']}"
+               if item["end"] >= item["start"] else f">{item['start']}")
+        delta = f"+{len(item['lines'])}"
+        if item["removed"]:
+            delta += f"/-{len(item['removed'])}"
+        lines.append(
+            f"- {item['path']}:{rng}（{item['owner'] or '无归属'}）{delta} 行")
+    return message.rstrip(b"\n") + ("\n" + "\n".join(lines) + "\n").encode("utf-8")
 
 
 def _claim_owners(path: str, since: float) -> list[str]:
@@ -1491,6 +1743,7 @@ def _attempt(
     exclude_owner: list[str] | None = None,
     declared: dict | None = None,
     declared_at: float = 0.0,
+    foreign: dict | None = None,
     allow_reason: str = "",
     message_source: Path | None = None,
     source_bytes: bytes = b"",
@@ -1574,6 +1827,16 @@ def _attempt(
         )
         env["MBDSDR_DECLARED_INDEX"] = str(index)
         message = _exclusion_trailer(message, exclusions, owner_label)
+
+    # 2b2) 声明前他线改动：声明快照把它们算成了基线，⑰ 看不见。
+    #      排除后已不在 index 就放行；仍会被带入就必须排除或显式留痕。
+    if foreign:
+        carried, report = _foreign_gate(env, foreign, allow_reason)
+        if carried:
+            if not allow_reason:
+                return 8, report
+            print(report)
+            message = _foreign_before_trailer(message, carried, allow_reason)
 
     # 2c) §6.1 登记行：闸只看暂存区，行躺在工作区就等于「该带的一条没带」。
     #     工作区有 → 只把那几行写进私有 index；没有 → 拒绝并给补登记命令。
@@ -1750,7 +2013,8 @@ def _build_parser() -> argparse.ArgumentParser:
             "含路径不存在/权限这类不可重试的清单错误）；"
             "2 重试耗尽或参数用法错误（未提交）；3 已提交但提交后复核失败（事故）；"
             "4 声明后内容漂移（未提交）；5 缺 §6.1 登记行（未提交）；"
-            "6 消息源被改写（未提交）；7 --exclude-hunk 未配 --declare（未提交）。"
+            "6 消息源被改写（未提交）；7 --exclude-hunk 未配 --declare（未提交）；"
+            "8 声明前已在工作区的他线改动将被带入，且未排除也未留痕（未提交）。"
             "各码的处置与常见误用见 docs/safe-commit.md。"
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -1811,13 +2075,14 @@ def main(argv: list[str] | None = None) -> int:
     # 只声明不提交：把当前工作区内容钉成快照，供之后（可能跨进程）的提交比对。
     if args.declare:
         try:
-            snapshot, stamp = _write_declaration(files, _plain_env())
+            record, stamp = _write_declaration(files, _plain_env())
         except ValueError as exc:
             print(f"拒绝：{exc}")
             return 1
-        for path, item in snapshot.items():
+        for path, item in record["files"].items():
             print(f"[declare] {path}：blob {item['blob'][:8] or '<缺失>'}，"
                   f"{item['lines']} 行")
+        _print_foreign(record.get("foreign") or {})
         print(f"[declare] 已记录声明快照（{_iso(stamp)}，session={_session_key()}）；"
               f"提交时用同一文件集即可比对，提交成功后才清除")
         return 0
@@ -1849,11 +2114,14 @@ def main(argv: list[str] | None = None) -> int:
     # 并明确说出窗口边界（只覆盖本次运行），避免让人误以为跨进程也受保护。
     found = _load_declaration(files)
     if found:
-        declaration_file, declared, declared_at = found
+        declaration_file, record, declared_at = found
+        declared = record["files"]
+        foreign = record.get("foreign") or {}
     else:
         declaration_file = None
         declared = {path: _fingerprint(_plain_env(), path) for path in files}
         declared_at = time.time()
+        foreign = {}
         print(f"[declare] 无预先声明快照：以本次启动 {_iso(declared_at)} 的工作区为基线"
               "（只覆盖本次运行；写入后先跑 --declare 才能拦住「释放 claim → 提交」这段漂移）")
 
@@ -1884,6 +2152,7 @@ def main(argv: list[str] | None = None) -> int:
                     files, message, index, exclusions=exclusions,
                     exclude_owner=args.exclude_owner,
                     declared=declared, declared_at=declared_at,
+                    foreign=foreign,
                     allow_reason=args.allow_foreign_changes.strip(),
                     message_source=message_source, source_bytes=message,
                 )
@@ -1896,7 +2165,7 @@ def main(argv: list[str] | None = None) -> int:
             if code == 0:
                 _drop_declaration(declaration_file)
                 return 0
-            if code in (3, 4, 5, 6, 7):
+            if code in (3, 4, 5, 6, 7, 8):
                 keep_copy = code in (3, 6)
                 return code
         print(f"重试 {args.retries} 次仍未提交，已放弃（工作区与 index 未改动）")
