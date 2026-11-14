@@ -2492,6 +2492,8 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `tests/test_batch_close.py` | 批次收尾线/6ae85f56（cleanup NOTE/崩溃/坏 JSON/缺脚本 + JSON metrics，共 6 条） | 2026-11-14 12:43 | 本笔 |
 | `tests/test_file_claim_cleanup.py` | 批次收尾线/6ae85f56（趋势两列 + JSON 行 hint 的断言） | 2026-11-14 12:43 | 本笔 |
 | `docs/COORDINATION.md` | 批次收尾线/6ae85f56（本笔 §6.1 登记行，提交后释放） | 2026-11-14 12:43 | 本笔 |
+| `docs/code-guards.md` | 批次收尾线/6ae85f56（复合入口补 cleanup NOTE 口径，并写趋势两列的用途与「三个月后仍 87%」判据） | 2026-11-14 12:44 | 本笔 |
+| `docs/COORDINATION.md` | 批次收尾线/6ae85f56（本笔 §6.1 登记行，提交后释放） | 2026-11-14 12:44 | 本笔 |
 
 > 上表各行均由 `claim` 台账推导：owner 原文与 `acquired_at` 直接取自台账，
 > 目的优先用台账里的 `claim_reason`，没有就如实写「未声明」，不补编。时间列只是

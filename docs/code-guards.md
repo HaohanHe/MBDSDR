@@ -435,7 +435,9 @@ pre-commit**：pre-commit 现在只跑 claim 范围 + claim 台账 + 暂存区�
 
 | 复合入口 | 聚合的子检查 | 何时跑 / 谁跑 | 退出码 | 为什么不计入 A/B/C |
 | --- | --- | --- | --- | --- |
-| `scripts/batch_close.py` | `audit_evidence.py` + `check_red_lifecycle.py` + `check_roadmap_blocking.py`（与 `docs/COORDINATION.md` 的批次收尾三道同源） | 每个批次收口前，当班 owner 手动跑一次；**不进 pre-commit**（单次耗时远超钩子预算，挂上去只会让人开始用 `--no-verify`） | 0 全绿 / 1 至少一道判红 / 2 用法 / 3 至少一道没跑成（3 > 1 > 0）；rc=1 且 stderr 有 Python 回溯时按「疑似检查器崩溃」归 3，**这是启发式，不是判断** | 三道子检查各自的入口现状不变（`audit_evidence` 仍在 C 档、`check_red_lifecycle` 仍在 B 档）；计进来等于把 3 条算成 1+3 条 |
+| `scripts/batch_close.py` | `audit_evidence.py` + `check_red_lifecycle.py` + `check_roadmap_blocking.py`（与 `docs/COORDINATION.md` 的批次收尾三道同源）+ `file_claim.py cleanup-stale`（NOTE 级） | 每个批次收口前，当班 owner 手动跑一次；**不进 pre-commit**（单次耗时远超钩子预算，挂上去只会让人开始用 `--no-verify`） | 0 全绿 / 1 至少一道判红 / 2 用法 / 3 至少一道没跑成（3 > 1 > 0）；rc=1 且 stderr 有 Python 回溯时按「疑似检查器崩溃」归 3，**这是启发式，不是判断**；`cleanup` 固定 NOTE（rc=0 主数为空、rc=3 有可释放未释放，都不判红），只有它没跑成（缺文件 / 超时 / 崩溃 / 输出不是可解析 JSON）才 ERROR→3 | 三道子检查各自的入口现状不变（`audit_evidence` 仍在 C 档、`check_red_lifecycle` 仍在 B 档）；`cleanup` 是「有活没干」的提示而非缺陷，计进来会让「今天没人清理」把批次判红 |
+
+**`cleanup` 为什么只做 NOTE**：它报告的是 claim 清理的存量（可释放未释放 / UNDECIDABLE / SUSPECT），不是这批改动有没有问题；算成红会让红失去信息量。它的 SUSPECT 也不进任何自动判定，只在报告里逐条给缺口和补法。每次运行都往 `D:\mbdsdr\.locks\claim_cleanup_trend.jsonl` 写一行计数，其中 `undecidable_ratio` 与 `claims_with_content_hash` 必须成对看：前者降、后者升，才说明新 claim 记 `content_sha256` 真的在生效。三个月后如果比例仍是 87%，就说明记 hash 那条没生效——这个判断只能靠趋势快照，不能靠记忆。
 
 **遗留待办（`batch_close` 的 rc=1 启发式）**：三道子检查目前没有顶层异常
 捕获，检查器自己抛异常也以 1 退出，与「真判红」共用同一个码，所以
