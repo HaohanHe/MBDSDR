@@ -938,8 +938,13 @@ python scripts/audit_bare_commits.py --json --quiet     # 机器可读 / 只给�
 
 判据与反证：`tests/test_bare_commit_audit.py` 构造全满足 / 文件集不全 / 缺行 /
 有删除四笔，必须分别落到 ①/④/③；把「缺行」改成合规，该测试必须红（已实测
-两处断言变红）。本仓规则生效以来跑一次的结果：① 1 笔（`87b3a36d` 的
-`tests/test_goes_lrit_reassembly_stats.py`、`tests/test_status_panel_reassembly_quality.py`
-当时无 claim）、④ 2 笔（即 11.5 的两笔缺口）、③ 0 笔。① 的那笔是本次新发现的，
-不追溯改写，只记在这里。
+两处断言变红）。本仓规则生效以来第一次跑（2026-11-14 11:37，HEAD=`ecbae6df`）：
+① 1 笔（`87b3a36d` 的 `tests/test_goes_lrit_reassembly_stats.py`、
+`tests/test_status_panel_reassembly_quality.py` 当时无 claim）、④ 2 笔（即 11.5
+的两笔缺口）、③ 0 笔。① 的那笔是本次新发现的，不追溯改写，只记在这里。
+
+这些数是**区间快照**，不是基线：同一入口在 `2790b483`（他线提交）之后又抓到
+① 一笔（`docs/axioms.md`、`tools/axioms/current_stats.py`、
+`tests/test_axioms_doc_current_stats.py` 当时无 claim）。数字随区间变，
+复跑取当次输出。
 
