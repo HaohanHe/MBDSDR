@@ -1,0 +1,315 @@
+[
+ {
+  "run": "after",
+  "mode": "auto",
+  "caps": {
+   "bookmark": 500,
+   "adsb": 300
+  },
+  "python": "3.14.0",
+  "qt": "6.12.0",
+  "platform": "offscreen",
+  "sampling": "每档 1 次预热 + 5 次采样取中位（20000 书签/过境 3 次）",
+  "load_before": {
+   "sys_cpu_pct": 66.1,
+   "cpu_count": 12,
+   "python_proc_count": 5,
+   "python_total_cpu_pct": 231.3,
+   "python_top_pct": [
+    115.6,
+    109.4,
+    4.7,
+    1.6,
+    0.0
+   ]
+  },
+  "load_after": {
+   "sys_cpu_pct": 64.5,
+   "cpu_count": 12,
+   "python_proc_count": 6,
+   "python_total_cpu_pct": 240.5,
+   "python_top_pct": [
+    98.4,
+    95.3,
+    40.6,
+    6.2,
+    0.0
+   ]
+  },
+  "sections": {
+   "scanner": {
+    "sizes": [
+     {
+      "rows": 100,
+      "widget_rows": 100,
+      "median_ms": 1.74,
+      "worst_ms": 2.51
+     },
+     {
+      "rows": 500,
+      "widget_rows": 500,
+      "median_ms": 13.51,
+      "worst_ms": 15.28
+     },
+     {
+      "rows": 2000,
+      "widget_rows": 2000,
+      "median_ms": 66.38,
+      "worst_ms": 77.26
+     },
+     {
+      "rows": 5000,
+      "widget_rows": 5000,
+      "median_ms": 396.95,
+      "worst_ms": 463.01
+     }
+    ],
+    "callsite": "ScannerPanel._render_segments",
+    "cadence": "扫描完成后一次",
+    "real_bound": "默认 21 MHz/0.1 MHz=210 段；扫 2000 段本身要数十秒"
+   },
+   "bookmark": {
+    "sizes": [
+     {
+      "rows": 250,
+      "tree_rows": 250,
+      "median_ms": 4.71,
+      "worst_ms": 12.55
+     },
+     {
+      "rows": 500,
+      "tree_rows": 500,
+      "median_ms": 12.7,
+      "worst_ms": 13.45
+     },
+     {
+      "rows": 1000,
+      "tree_rows": 500,
+      "median_ms": 14.64,
+      "worst_ms": 16.53
+     },
+     {
+      "rows": 5000,
+      "tree_rows": 500,
+      "median_ms": 18.9,
+      "worst_ms": 20.39
+     },
+     {
+      "rows": 20000,
+      "tree_rows": 500,
+      "median_ms": 23.2,
+      "worst_ms": 27.9
+     }
+    ],
+    "callsite": "BookmarkPanel.refresh_list",
+    "cadence": "搜索框每键 + 增删改后",
+    "cap": 500
+   },
+   "passes": {
+    "sizes": [
+     {
+      "rows": 200,
+      "table_rows": 200,
+      "median_ms": 51.31,
+      "worst_ms": 62.71,
+      "filter_median_ms": 0.59,
+      "filter_worst_ms": 1.1
+     },
+     {
+      "rows": 1000,
+      "table_rows": 1000,
+      "median_ms": 240.96,
+      "worst_ms": 259.03,
+      "filter_median_ms": 3.7,
+      "filter_worst_ms": 7.82
+     },
+     {
+      "rows": 3000,
+      "table_rows": 3000,
+      "median_ms": 764.5,
+      "worst_ms": 920.97,
+      "filter_median_ms": 23.6,
+      "filter_worst_ms": 28.94
+     }
+    ],
+    "callsite": "NewSpacetimePanel._populate_passes",
+    "cadence": "后台过境计算结束后一次；过滤框每键",
+    "real_bound": "只对 DEFAULT_SATELLITES(6) 计算，窗口上限 72h"
+   },
+   "adsb": {
+    "sizes": [
+     {
+      "rows": 100,
+      "table_rows": 100,
+      "median_ms": 5.06,
+      "worst_ms": 21.43
+     },
+     {
+      "rows": 500,
+      "table_rows": 300,
+      "median_ms": 9.98,
+      "worst_ms": 13.65
+     },
+     {
+      "rows": 1200,
+      "table_rows": 300,
+      "median_ms": 11.41,
+      "worst_ms": 13.32
+     },
+     {
+      "rows": 2000,
+      "table_rows": 300,
+      "median_ms": 12.27,
+      "worst_ms": 17.55
+     }
+    ],
+    "callsite": "AdsbPanel._refresh_table",
+    "cadence": "每批解码帧（_after_update）",
+    "cap": 300
+   },
+   "aprs": {
+    "sizes": [
+     {
+      "rows": 100,
+      "table_rows": 100,
+      "median_ms": 2.92,
+      "worst_ms": 3.67
+     },
+     {
+      "rows": 500,
+      "table_rows": 500,
+      "median_ms": 13.84,
+      "worst_ms": 15.09
+     }
+    ],
+    "callsite": "AprsPanel._refresh_table",
+    "cadence": "每收到一个包 + 过滤框每键",
+    "real_bound": "_packets 硬上限 MAX_PACKETS=500"
+   },
+   "device": {
+    "sizes": [
+     {
+      "rows": 8,
+      "median_ms": 0.03,
+      "worst_ms": 0.05
+     },
+     {
+      "rows": 64,
+      "median_ms": 0.2,
+      "worst_ms": 0.22
+     }
+    ],
+    "callsite": "DevicePanel 的 dev_combo 填充",
+    "cadence": "设备枚举后（拔插/刷新）",
+    "real_bound": "物理 SDR 数量，通常 1–4 台"
+   }
+  }
+ },
+ {
+  "run": "before",
+  "mode": "before",
+  "caps": {
+   "bookmark": 500,
+   "adsb": 300
+  },
+  "python": "3.14.0",
+  "qt": "6.12.0",
+  "platform": "offscreen",
+  "sampling": "每档 1 次预热 + 5 次采样取中位（20000 书签/过境 3 次）",
+  "load_before": {
+   "sys_cpu_pct": 73.0,
+   "cpu_count": 12,
+   "python_proc_count": 5,
+   "python_total_cpu_pct": 206.2,
+   "python_top_pct": [
+    104.7,
+    95.3,
+    6.2,
+    0.0,
+    0.0
+   ]
+  },
+  "load_after": {
+   "sys_cpu_pct": 67.6,
+   "cpu_count": 12,
+   "python_proc_count": 4,
+   "python_total_cpu_pct": 235.9,
+   "python_top_pct": [
+    140.6,
+    92.2,
+    3.1,
+    0.0
+   ]
+  },
+  "sections": {
+   "bookmark": {
+    "sizes": [
+     {
+      "rows": 250,
+      "tree_rows": 250,
+      "median_ms": 5.12,
+      "worst_ms": 6.45
+     },
+     {
+      "rows": 500,
+      "tree_rows": 500,
+      "median_ms": 11.86,
+      "worst_ms": 14.47
+     },
+     {
+      "rows": 1000,
+      "tree_rows": 1000,
+      "median_ms": 26.13,
+      "worst_ms": 27.88
+     },
+     {
+      "rows": 5000,
+      "tree_rows": 5000,
+      "median_ms": 288.16,
+      "worst_ms": 335.64
+     },
+     {
+      "rows": 20000,
+      "tree_rows": 20000,
+      "median_ms": 2737.54,
+      "worst_ms": 2986.14
+     }
+    ],
+    "callsite": "BookmarkPanel.refresh_list",
+    "cadence": "搜索框每键 + 增删改后",
+    "cap": 1000000000
+   },
+   "adsb": {
+    "sizes": [
+     {
+      "rows": 100,
+      "table_rows": 100,
+      "median_ms": 2.57,
+      "worst_ms": 8.05
+     },
+     {
+      "rows": 500,
+      "table_rows": 500,
+      "median_ms": 16.72,
+      "worst_ms": 27.81
+     },
+     {
+      "rows": 1200,
+      "table_rows": 1200,
+      "median_ms": 45.05,
+      "worst_ms": 48.44
+     },
+     {
+      "rows": 2000,
+      "table_rows": 2000,
+      "median_ms": 56.75,
+      "worst_ms": 73.28
+     }
+    ],
+    "callsite": "AdsbPanel._refresh_table",
+    "cadence": "每批解码帧（_after_update）",
+    "cap": 1000000000
+   }
+  }
+ }
+]

@@ -2229,6 +2229,9 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `scripts/install_git_hooks.py` | HEAD可构建线/6ae85f56（head_build_smoke.py 随钩子安装副本，旧工作树兜住） | 2026-11-14 09:38 | 本笔 |
 | `desktop/adsb_panel.py` | 统一搜索性能线/6ae85f56（ADS-B 表格渲染上限 300 + 表头未显示架数（实测 1200 架 45ms/批）） | 2026-11-14 09:40 | 本笔 |
 | `tests/test_adsb_panel_result_cap.py` | 统一搜索性能线/6ae85f56（ADS-B 上限行数判据与去上限反证） | 2026-11-14 09:40 | 本笔 |
+| `scripts/repro/2026-11-14-list-render-baseline.py` | 统一搜索性能线/6ae85f56（六类长列表渲染基线复跑脚本（扫频/书签/过境/ADS-B/APRS/设备，每档预热1+采样5取中位，--mode before 放大上限做反证）） | 2026-11-14 09:42 | 本笔 |
+| `docs/perf-evidence/2026-11-14/list-render-baseline.json` | 统一搜索性能线/6ae85f56（长列表渲染上限改前/改后逐次实测与负载（六节 after + 两节 before）） | 2026-11-14 09:42 | 本笔 |
+| `docs/performance-baseline.md` | 统一搜索性能线/6ae85f56（§2 增加书签 500 / ADS-B 300 两行，新增 §2.1 评估后不设上限的六类列表实测与依据） | 2026-11-14 09:42 | 本笔 |
 
 > 上表各行均由 `claim` 台账推导：owner 原文与 `acquired_at` 直接取自台账，
 > 目的优先用台账里的 `claim_reason`，没有就如实写「未声明」，不补编。时间列只是

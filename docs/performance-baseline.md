@@ -141,8 +141,24 @@ python scripts/perf_probe.py --section dsp       # 复用 scripts/bench_dsp_thro
 | **设备枚举全部移出 GUI 线程**：`module_panel` 启动枚举 + `device_panel` 首次/手动刷新都改为 `QThreadPool` 后台枚举；同步入口保留给测试 | `desktop/module_panel.py`、`desktop/device_panel.py` | `MainWindow` 构造内主线程同步枚举 **884 ms/3 次**（1970–2201 ms 构造）；启动后主线程累计阻塞 884 ms | 构造 **1418 ms**（-677 ms / -32%）；主线程枚举只剩 `main_window._auto_enumerate_and_connect` 约 **100–500 ms** | §1 行 2 的同窗口 A/B；`tests/test_device_capability_probe.py` 等 65 passed |
 | **频谱谱线关几何 AA**：`_render_spectrum` 里只对 `_draw_spectrum` 临时关 `QPainter.Antialiasing`，峰点/刻度/文字仍开 | `desktop/spectrum_widget.py` | `_draw_spectrum` **40.10 ms**（900×400） | **19.79 ms（-51%）**；像素差 2.498%，仅填充边缘 1 px（§3.3） | 同帧 AA 开/关 A/B + 4× 裁剪图 |
 | **命令面板结果行数上限**：命中超过 `MAX_RENDERED_RESULTS=200` 时只把前 200 行收进渲染队列（尾部低相关条目不构造 `QListWidgetItem`），说明区明确写「另有 N 条未显示」 | `desktop/command_palette.py` | 500 书签 + 10000 卫星（10500 命中）空查询整键 **494.98 ms**（过滤 2.63）、`sat` 查询 **1259.27 ms**（过滤 4.05）；列表行 10502 / 10001 | 同机同输入 **13.20 ms** / **9.87 ms**（过滤 3.94 / 3.91）；列表行 **201**；2500 条样本 45.43 → 3.14、56.73 → 7.05 ms | `pytest tests/test_command_palette_result_cap.py -q` 5 passed（含「去掉上限必须重新变慢」反证）；`scripts/repro/2026-11-13-palette-result-cap.py`（每 query 预热 2 + 采样 7，逐次负载见 `docs/perf-evidence/2026-11-13/palette-result-cap.json`） |
+| **书签列表结果行数上限**：搜索框每键触发的 `refresh_list` 只建前 500 行，状态栏写「另有 N 条未显示」；分组过滤先于截断 | `desktop/bookmark_panel.py` | 1000 行 **26.13 ms**、5000 行 **288.16 ms**、20000 行 **2737.54 ms**（每键） | 同上输入分别为 **14.64 / 18.90 / 23.20 ms**，列表恒为 500 行 | `pytest tests/test_bookmark_panel_result_cap.py` 4 passed（去掉切片 3 红）；`scripts/repro/2026-11-14-list-render-baseline.py --only bookmark`；`docs/perf-evidence/2026-11-14/list-render-baseline.json` |
+| **ADS-B 飞机表行数上限**：每批解码帧后的整表重建只渲染最近 300 架，表头写「另 N 架未显示」；tracker 数据不动 | `desktop/adsb_panel.py` | 500 架 **16.72 ms**、1200 架 **45.05 ms**、2000 架 **56.75 ms**（每批帧） | 同上输入 **9.98 / 11.41 / 12.27 ms**，表格恒为 300 行 | `pytest tests/test_adsb_panel_result_cap.py` 3 passed（去掉切片 2 红）；`scripts/repro/2026-11-14-list-render-baseline.py --only adsb`；同一 JSON |
 
 > 占用状态（2026-11-06 复测时）：`desktop/rf_sky_view.py`、`mbdsdr_ai/sdr_backend.py`、`desktop/module_panel.py` 在 `.locks/claims.json` 中均为 `current: null`（持有方已 release），本线才动它们；`mbdsdr_ai/sdr_backend.py` 的改动已由持有方自行入库，本线工作区对其无 diff，**不重复提交**。
+
+### 2.1 评估后不设渲染上限的长列表（2026-11-14）
+
+同口径实测见 `scripts/repro/2026-11-14-list-render-baseline.py`；判断标准是「这次刷新在真实数据量下是否会超过一帧（16.7 ms）/ 是否在逐键或每包热路径上」。
+
+| 列表 | 刷新入口与节奏 | 实测（预热 1 + 采样 5 取中位） | 真实数据量上限 | 结论 |
+|---|---|---|---|---|
+| 扫频结果 | `ScannerPanel._render_segments`，扫描完成后一次 | 100 段 1.74 ms、500 段 13.51 ms、2000 段 66.38 ms、5000 段 396.95 ms | 默认 21 MHz / 0.1 MHz = 210 段；扫 2000 段本身要数十秒 | 不收：一次性的 210 段约 3 ms；能产生上千段的扫描本身就以分钟计，不是逐键/每秒路径 |
+| 卫星过境表 | `NewSpacetimePanel._populate_passes`，后台计算结束后一次；过滤框每键 `_apply_passes_filter` | 200 行 51.31 ms（过滤 0.59）、1000 行 240.96 ms（过滤 3.70）、3000 行 764.50 ms（过滤 23.60） | 只对 `DEFAULT_SATELLITES`(6 颗) 计算，窗口上限 72 h，实际 ≈ 几十至 200 行 | 不收：真实量级约 50 ms 一次性，过滤 <1 ms；3000 行是不可达的合成压力值 |
+| APRS 包表 | `AprsPanel._refresh_table`，每收到一个包 + 过滤框每键 | 100 包 2.92 ms、500 包 13.84 ms | `_packets` 硬上限 `MAX_PACKETS=500` | 不收：已有 500 条硬上限，满缓冲刷新 13.8 ms，仍在一帧内 |
+| 设备下拉 | `DevicePanel` 的 `dev_combo` 填充，设备枚举后 | 8 台 0.03 ms、64 台 0.20 ms | 物理 SDR 数量，通常 1–4 台 | 不收：量级只有个位数，渲染成本可忽略 |
+| 日志/事件 | — | — | — | 无条目列表控件：日志/事件走 `QTextEdit`/`QTextBrowser` 文本流（`ai_panel.conversation_view`、`diagnostics_panel` 等），不创建列表项，不在本口径内 |
+| 天气/卫星图像历史 | `_load_history` | 代码已截断 `files[:50]` | 50 条硬上限 | 不收：已有硬上限 |
+| 地点搜索结果 | `LocationPanel` | — | provider 请求上限 8 条 | 不收：硬上限 8 条 |
 
 ---
 
