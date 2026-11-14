@@ -35,12 +35,15 @@ except Exception:  # noqa: BLE001 - scipy 为可选，缺失时走纯 numpy RK4
 
 # 物理常量（单位由名字后缀钉死：_MPS=m/s，_KMPS=km/s，_KM3_S2=km^3/s^2）
 MU_EARTH_KM3_S2 = 398600.4418        # km^3/s^2, 地球引力常数（全链口径统一为 km）
-OMEGA_E = 7.2921151467e-5     # rad/s, 地球自转角速度
+OMEGA_E = 7.2921151467e-5     # rad/s, IS-GPS/RTKLIB 口径；非 SGP4 的 7.292115e-5
 C_LIGHT_MPS = 299792458.0         # m/s, 真空光速（仅供频率换算用）
 C_LIGHT_KMPS = 299792.458       # km/s, 真空光速（内部量线统一用这个）
 
-# WGS-72 椭球：唯一定义在 geodesy.WGS72（与 orbit.py / SGP4 内核一致）。
-# 三个旧名保留是因为 ground_track.py 与测试直接引用 ``WGS72_A``。
+# WGS-72 椭球：唯一定义在 geodesy.WGS72（米制 a_m）。
+# 口径边界：这里的 WGS72_A 是**米**（a_m），而 orbit.WGS72_A 是**公里**
+# （a_m/1000）——同名不同单位，差 1000 倍，两链禁止直接互传。
+# 旧名保留是因 tests/test_orbit_dynamics.py、
+# tests/test_geodesy_ecef_lla.py 直接引用；ground_track.py 引的是 orbit 的 km 版。
 WGS72_A = WGS72.a_m           # m, 赤道半径
 WGS72_F = WGS72.f             # 扁率
 WGS72_E2 = WGS72.e2

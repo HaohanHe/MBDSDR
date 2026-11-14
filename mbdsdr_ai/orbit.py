@@ -31,10 +31,12 @@ try:  # 包内正常路径
     from .sat_illumination import evaluate_illumination, sun_direction_eci
     from .time_format import iso_utc_z
     from .gmst import gmst_rad_iau1982
+    from .geodesy import WGS72 as _WGS72_ELLIPSOID
 except ImportError:  # 脚本 / 直接运行时（mbdsdr_ai 目录已在 sys.path）
     from sat_illumination import evaluate_illumination, sun_direction_eci
     from time_format import iso_utc_z
     from gmst import gmst_rad_iau1982
+    from geodesy import WGS72 as _WGS72_ELLIPSOID
 
 try:
     from sgp4.api import Satrec, jday
@@ -55,11 +57,17 @@ def _require_sgp4() -> None:
 # WGS-72 椭球参数（SGP4/SDP4 标准，Spacetrack Report #3）。
 # SGP4 内核全程 WGS-72，站心椭球必须一致，否则 ECEF 站位置与卫星
 # TEME→ECEF 旋转后的坐标存在 ~米级系统差。
-WGS72_A = 6378.135          # km, WGS-72 赤道半径
-WGS72_F = 1.0 / 298.26      # WGS-72 扁率
-WGS72_B = WGS72_A * (1.0 - WGS72_F)
-WGS72_E2 = WGS72_F * (2.0 - WGS72_F)
-OMEGA_E = 7.292115e-5       # rad/s, 地球自转角速度 (WGS-72)
+#
+# 椭球唯一真值在 geodesy.WGS72（**米制**定义，a_m / f）；本模块走 km 链，
+# 只在这里做一次显式 /1000 换算，禁止再写 6378.135 / 298.26 字面量。
+# 口径边界：orbit_dynamics.WGS72_A 是同名但**米制**（a_m），差 1000 倍，
+# 两链禁止直接互传（详见 tests/test_physical_constant_registry.py）。
+_M_PER_KM = 1000.0
+WGS72_A = _WGS72_ELLIPSOID.a_m / _M_PER_KM   # km, WGS-72 赤道半径
+WGS72_F = _WGS72_ELLIPSOID.f                 # 无量纲, WGS-72 扁率
+WGS72_B = WGS72_A * (1.0 - WGS72_F)          # km, 保持原派生式（逐位不变）
+WGS72_E2 = WGS72_F * (2.0 - WGS72_F)         # 无量纲
+OMEGA_E = 7.292115e-5       # rad/s, 地球自转角速度 (WGS-72/SGP4 口径)
 C_LIGHT_KMPS = 299792.458          # km/s
 
 

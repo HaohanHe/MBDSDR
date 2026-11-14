@@ -22,8 +22,10 @@ from dataclasses import dataclass
 from typing import Dict, List, Any, Optional, Tuple
 try:
     from .gmst import gmst_rad_iau1982
+    from .geodesy import WGS72 as _WGS72_ELLIPSOID
 except ImportError:  # 扁平导入（部分脚本直挂 mbdsdr_ai 目录）
     from gmst import gmst_rad_iau1982
+    from geodesy import WGS72 as _WGS72_ELLIPSOID
 from enum import Enum
 
 from .environment_facts import (
@@ -403,22 +405,18 @@ def equatorial_to_altaz(
     alt_deg = alt_rad * RAD2DEG
     az_deg = az_rad * RAD2DEG
 
-    # 大气折射修正（仅对地平线以上的天体）。缺当天实测气象时
-    # compute_refraction 返回 None：保留几何仰角并把状态标 unknown，
-    # 不用标准大气顶替。
+    # 大气折射修正。唯一入口是 compute_refraction：地平线以下由它返回 0.0
+    # （无折射路径），缺当天实测气象时返回 None（保留几何仰角、状态 unknown）。
+    # 不在本处另写一条「地平线下 = known」的分支——那会把「折射不适用」
+    # 冒充「气象已知」，违反 unknown 必须诚实。
     now_unix = jd_to_unix(jd)
-    if alt_deg > -2.0:
-        refraction = compute_refraction(alt_deg, observer, now=now_unix)
-        if refraction is None:
-            alt_deg_refracted = alt_deg
-            refraction_status = observer.refraction_weather_status(now_unix)
-        else:
-            alt_deg_refracted = alt_deg + refraction
-            refraction_status = STATUS_KNOWN
-    else:
+    refraction = compute_refraction(alt_deg, observer, now=now_unix)
+    if refraction is None:
         alt_deg_refracted = alt_deg
-        refraction = 0.0
-        refraction_status = STATUS_KNOWN  # 地平线下无大气折射路径
+        refraction_status = observer.refraction_weather_status(now_unix)
+    else:
+        alt_deg_refracted = alt_deg + refraction
+        refraction_status = STATUS_KNOWN
 
     # 大气质量
     airmass = compute_airmass(alt_deg)
@@ -508,12 +506,14 @@ def compute_refraction(
         折射修正量（度，正值表示视仰角高于真实仰角）；
         **气象未知/过期时返回 ``None``**——不拿标准大气代算。
     """
-    if alt_deg < -2.0:
-        return 0.0
-
     # 折射只用气压与气温；两者任一未知/过期即未校正。
+    # 必须先判气象：低仰角「无折射路径」会返回 0.0，若把它放在气象检查
+    # 前面，「气象未知」就会被冒充成「已校正」（实测 alt=-23° 返回 0.0）。
     if observer.refraction_weather_status(now) != STATUS_KNOWN:
         return None
+
+    if alt_deg < -2.0:
+        return 0.0
 
     # 折射公式（弧分）
     # R = 1.02 / tan(h + 10.3/(h + 5.11))
@@ -617,11 +617,11 @@ def _sat_elaz_at_unix(sat: "Satrec", t_unix: float,
     椭球用 WGS-72（与 SGP4 内核赤道半径 6378.135 km 一致），
     避免轨道 WGS-72 / 站心 WGS-84 混用的米级系统差。
     """
-    # WGS-72 椭球（与 orbit.py 一致；赤道半径 6378.135 km，扁率 1/298.26）
-    a = 6378.135
-    f = 1.0 / 298.26
-    e2 = f * (2.0 - f)
-    omega_e = 7.292115e-5  # rad/s, 地球自转角速度 (WGS-72)
+    # WGS-72 椭球（km 链）：椭圆唯一真值在 geodesy.WGS72（米制定义），
+    # 这里只做一次显式 /1000 换算；orbit.py 的 WGS72_A / WGS72_E2 同源。
+    # 不需单独的自转角速度常量：TEME→ECEF 的旋转已由 GMST 承担。
+    a = _WGS72_ELLIPSOID.a_m / 1000.0
+    e2 = _WGS72_ELLIPSOID.e2
 
     jd_utc = t_unix / 86400.0 + 2440587.5
     jd = int(jd_utc)

@@ -2532,6 +2532,7 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `experiments/{exp_doppler_orbit,exp_doppler_duration}.py` | 冗余线/6ae85f56（第5件：跟随常量改名 C_LIGHT_KMS -> C_LIGHT_KMPS） | 2026-11-14 12:53 | 本笔 |
 | `tests/test_constant_units.py` | 冗余线/6ae85f56（第5件：新增守护（值不变/后缀成对/旧名消失/三套 GM 未统一/零引用半径已删）） | 2026-11-14 12:53 | 本笔 |
 | `docs/audit_r2/25_orbit.md` | 冗余线/6ae85f56（第5件：更正已证伪的 decoders 无 GMST 旋转 结论；:98 同步 orbit.C_LIGHT_KMPS） | 2026-11-14 12:53 | 本笔 |
+| `docs/COORDINATION.md` | QGIS复核线/常量口径（QGIS 第三轮：椭球唯一真值/单位口径登记收工段（非纯追加，整档 claim）） | 2026-11-14 21:26 | 本笔 |
 
 > 上表各行均由 `claim` 台账推导：owner 原文与 `acquired_at` 直接取自台账，
 > 目的优先用台账里的 `claim_reason`，没有就如实写「未声明」，不补编。时间列只是
@@ -5581,3 +5582,49 @@ scripts/bench_agent_startup.py            cold 4462->2902ms / warm 2314->234ms
 **下一坐标**：换干净宿主环境（无沙箱 sitecustomize 注入）重跑
 `pytest tests -q`；或先定位接收流水线工作线程在长序列里的生命周期，
 再跑全量。在此之前不对外报全量绿，也不提前开香槟。
+
+## 2026-11-14 夜收工登记：QGIS 第三轮（椭球唯一真值 / 单位口径）
+
+**在途已收，主工作区干净。** 本笔 `refactor(constants)` 一笔落库：
+
+- 全仓实测发现 `orbit.WGS72_A`（km, 6378.135）与
+  `orbit_dynamics.WGS72_A`（m, 6378135.0）**同名差 1000 倍**；
+  `OMEGA_E` 另有 SGP4 `7.292115e-5` 与 IS-GPS `7.2921151467e-5` 两套规范值。
+  按 QGIS「椭球注册表 + `Qgis::DistanceUnit` 显式单位 + `lengthUnits()`」的
+  治理次序：**只登记不合并**（笔记 §11，仓库外 `D:/mbdsdr/output/learn/`）。
+- `orbit.py` / `astronomy.py` 删 WGS-72 字面量，改从 `geodesy.WGS72` 派生
+  （km 链一处显式 `/1000`）；四个椭球常量与三个黄金向量**逐位不变**。
+  `orbit_dynamics.py` 修「`ground_track.py` 引用 `WGS72_A`」的假注释，
+  写明 m/km 边界与 `OMEGA_E` 的 IS-GPS 口径；数值一个没动。
+- 新增 `tests/test_physical_constant_registry.py`：19 条口径登记（独立 oracle，
+  硬编码规范值）+ 14 条守卫（运行时对拍、AST 查椭球字面量回潮、全仓模块级
+  `WGS72_A` 只允许两条链、黄金向量、动态跟随、单位字段完整性）。
+  **真反证**：三处改坏产品均红、还原 14 绿。第一版动态跟随守卫**自身假绿**
+  （只换整个椭球时 `e2` 仍跟随，`a` 硬编码漏检），拆成只改 `a_m` / 只改 `f`
+  两个变体后修好；改 `a` 或 `e2` 硬编码都精确触发 2 红。
+- 附带修一条既有红：扩展回归暴露
+  `test_observer_weather::test_altaz_marks_uncorrected_when_weather_missing`
+  （`refraction_deg=0.0`，期望 `None`）。用 `git show HEAD:<file>` 覆写三个改动
+  文件跑干净基线，**HEAD 同样红** → 既有欠账，非本笔引入。根因是
+  `equatorial_to_altaz` 另写「地平线下 = known」分支 +
+  `compute_refraction` 低仰角早退排在气象检查之前；判定收回唯一入口，
+  新增 4 条钉扎，两处改坏反证分别触发 3 红 / 1 红。
+
+**可复跑的硬结果**（不依赖中断的全量）：
+
+```
+tests/test_physical_constant_registry.py       14 passed
+13 个相关文件合跑                              169 passed, 2 skipped
+HEAD 基线反证（既有红归属）                    1 failed, 9 passed（与本笔改动无关）
+```
+
+踩坑登记：`mbdsdr_ai/astronomy/` 包会 shadow 同名 `astronomy.py`，
+`__init__.py` 用 importlib 把后者加载成 `mbdsdr_ai._astronomy_legacy` 并
+只 re-export 公共名（值拷贝）。私有符号要从 `sys.modules` 取，别误判死文件。
+
+**not_verified**：权威全量 `pytest tests -q` 仍按上方「最终权威全量补记」标
+`not_verified`（四轮中断在收集序第 3961 条），本轮**未重跑**、未放宽任何断言。
+
+**下一坐标**：仍为干净宿主环境重跑全量 / 查 `receive_pipeline` 工作线程生命周期；
+本轮无新增在途。
+
