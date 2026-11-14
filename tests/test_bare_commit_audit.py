@@ -252,7 +252,7 @@ def test_same_range_twice_keeps_one_row(tmp_path: Path) -> None:
     rows = _rows(trend)
     assert len(rows) == 1, rows
     row = rows[0]
-    assert row["criteria"].startswith("v2:"), row
+    assert row["criteria"].startswith("v3:"), row
     assert row["commits"] == 5, row
     assert row["range"]["from"]["sha"] == sha["base"], row
     assert row["range"]["to"]["sha"] == sha["deleted"], row
@@ -301,12 +301,12 @@ def test_trend_report_groups_by_version_with_denominator(tmp_path: Path) -> None
 
 
 def _foreign_samples(tmp_path: Path) -> tuple[Path, Path, dict[str, str]]:
-    """他线持有同文件 / 他线持有但不同文件 / 无人持有，各一笔。"""
+    """四笔：他线持同文件（主数）/ 持不同文件 / 无人持有 / 他线持登记面（窄锁）。"""
     repo = _repo(tmp_path)
     locks = tmp_path / "locks"
     now = time.time()
     start, end = now - 1000.0, now + 1000.0
-    base = _commit(repo, {"seed.py": "s = 0\n"},
+    base = _commit(repo, {"seed.py": "s = 0\n", DOC: DOC_TWO_ROWS},
                    "chore: base\n\nclaim-line: 甲线", now - 500.0)
     same = _commit(repo, {"a.py": "x = 1\n"},
                    "feat: on someone's file\n\nclaim-line: 甲线", now - 300.0)
@@ -314,28 +314,35 @@ def _foreign_samples(tmp_path: Path) -> tuple[Path, Path, dict[str, str]]:
                     "feat: other file\n\nclaim-line: 甲线", now - 200.0)
     free = _commit(repo, {"d.py": "d = 1\n"},
                    "feat: nobody holds it\n\nclaim-line: 甲线", now - 100.0)
+    reg = _commit(repo, {DOC: DOC_TWO_ROWS + "| `e.py` | 乙线 | 新行 |\n"},
+                  "docs: add row\n\nclaim-line: 甲线", now - 50.0)
 
+    # 登记面从 base 之后才被乙线持有，免得基线提交本身也算一次窄锁命中。
     _ledger_multi(locks, {"seed.py": OWNER, "c.py": OWNER, "d.py": OWNER,
-                          "a.py": "乙线/bbbb2222"}, start, end)
-    return repo, locks, {"base": base, "same": same, "other": other, "free": free}
+                          "a.py": "乙线/bbbb2222",
+                          DOC: ("乙线/bbbb2222", now - 400.0, end)},
+                  start, end)
+    return repo, locks, {"base": base, "same": same, "other": other,
+                         "free": free, "reg": reg}
 
 
-def _ledger_multi(locks: Path, owner_of: dict[str, str],
-                  start: float, end: float) -> None:
-    locks.mkdir(parents=True, exist_ok=True)
-    claims = {
-        rel: {"path": rel, "current": None,
-              "history": [{"owner": owner, "acquired_at": start,
-                           "released_at": end, "last_heartbeat_at": start}]}
-        for rel, owner in owner_of.items()
-    }
-    (locks / "claims.json").write_text(
-        json.dumps({"version": 1, "claims": claims}, ensure_ascii=False),
-        encoding="utf-8")
+def _registry_only(tmp_path: Path) -> tuple[Path, Path, str]:
+    """只有登记面窄锁命中：主数必须报 0，而不是把窄锁算成信号。"""
+    repo = _repo(tmp_path)
+    locks = tmp_path / "locks"
+    now = time.time()
+    _commit(repo, {"seed.py": "s = 0\n", DOC: DOC_TWO_ROWS},
+            "chore: base\n\nclaim-line: 甲线", now - 500.0)
+    reg = _commit(repo, {DOC: DOC_TWO_ROWS + "| `e.py` | 乙线 | 新行 |\n"},
+                  "docs: add row\n\nclaim-line: 甲线", now - 300.0)
+    _ledger_multi(locks, {"seed.py": OWNER,
+                          DOC: ("乙线/bbbb2222", now - 400.0, now + 1000.0)},
+                  now - 1000.0, now + 1000.0)
+    return repo, locks, reg
 
 
 def test_foreign_hold_three_samples(tmp_path: Path) -> None:
-    """判据：同文件 → 疑似；不同文件 / 无人持有 → 不报；且不许并进 ①。"""
+    """判据：同文件 → 疑似；不同文件 / 无人持有 → 不报；登记面另立一类。"""
     repo, locks, sha = _foreign_samples(tmp_path)
     proc = _run(repo, locks, "--range", "HEAD", "--rule-since", "0", "--json")
     assert proc.returncode == 0, proc.stdout + proc.stderr
@@ -343,31 +350,58 @@ def test_foreign_hold_three_samples(tmp_path: Path) -> None:
 
     fh = checks["foreign_hold"]
     assert fh["status"] == "checked", fh
-    assert fh["checked"] == 4 and fh["skipped_no_trailer"] == 0, fh
+    assert fh["checked"] == 5 and fh["skipped_no_trailer"] == 0, fh
+    # 主数只含非登记面：a.py 那笔；登记面那笔进 registry，不进 count。
     assert fh["count"] == 1, fh
     assert [v["sha"] for v in fh["suspected"]] == [sha["same"]], fh
     hit = fh["suspected"][0]["hits"][0]
     assert hit["path"] == "a.py" and hit["line"] == "乙线", hit
     assert hit["held_min"] > 0 and hit["left_min"] > 0, hit
+    assert fh["registry_count"] == 1, fh
+    assert [v["sha"] for v in fh["registry"]] == [sha["reg"]], fh
+    assert fh["registry"][0]["hits"][0]["path"] == DOC, fh
 
     # ① 仍只按自己的判据：同一笔因「没有被自己的 claim 覆盖」进 ①，
-    # 另两笔不进——把他线持有并进 ① 会让这里多出条目，测试因此变红。
+    # 另三笔不进——把他线持有并进 ① 会让这里多出条目，测试因此变红。
     cov = checks["claim_coverage"]
     assert cov["violating"] == 1, cov
     assert [v["sha"] for v in cov["violations"]] == [sha["same"]], cov
     assert [p["path"] for p in cov["violations"][0]["paths"]] == ["a.py"], cov
 
     flagged = {v["sha"] for v in fh["suspected"]}
-    assert sha["other"] not in flagged and sha["free"] not in flagged, flagged
+    assert not (flagged & {sha["other"], sha["free"], sha["reg"]}), flagged
 
     text = _run(repo, locks, "--range", "HEAD", "--rule-since", "0")
     assert "提示，非违规" in text.stdout, text.stdout
     assert "命中不等于被带入" in text.stdout, text.stdout
     assert "本项机检不覆盖，需人工复核" in text.stdout, text.stdout
+    assert "主数（非登记面文件）：疑似 1 笔" in text.stdout, text.stdout
+    assert "登记面窄锁（已知形态，只做趋势）：1 笔" in text.stdout, text.stdout
+
+
+def test_registry_hold_is_not_the_main_number(tmp_path: Path) -> None:
+    """反证：把登记面窄锁算进主数，本测试必红（主数是 0 就该报 0）。
+
+    真实区间的 8 笔疑似 100% 是登记面窄锁；若它们仍计入主数，这项提示的主数
+    就永远是「文档活动量」，不是信号。
+    """
+    repo, locks, reg = _registry_only(tmp_path)
+    proc = _run(repo, locks, "--range", "HEAD", "--rule-since", "0", "--json")
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    fh = json.loads(proc.stdout)["checks"]["foreign_hold"]
+    assert fh["count"] == 0, fh
+    assert fh["suspected"] == [], fh
+    assert fh["registry_count"] == 1, fh
+    assert [v["sha"] for v in fh["registry"]] == [reg], fh
+    assert fh["checked"] == 2, fh
+
+    text = _run(repo, locks, "--range", "HEAD", "--rule-since", "0")
+    assert "主数（非登记面文件）：疑似 0 笔" in text.stdout, text.stdout
+    assert "这项在当前实践下从未命中" in text.stdout, text.stdout
 
 
 def test_foreign_hold_has_its_own_trend_denominator(tmp_path: Path) -> None:
-    """趋势里单列分母，不混进 ① 的比率；判据版本升到 v2。"""
+    """趋势里单列分母 + 拆分登记面，不混进 ① 的比率；判据版本升到 v3。"""
     repo, locks, _ = _foreign_samples(tmp_path)
     trend = tmp_path / "trend.jsonl"
     proc = _run(repo, locks, "--range", "HEAD", "--rule-since", "0",
@@ -375,14 +409,52 @@ def test_foreign_hold_has_its_own_trend_denominator(tmp_path: Path) -> None:
     assert proc.returncode == 0, proc.stdout + proc.stderr
 
     row = _rows(trend)[0]
-    assert row["criteria"].startswith("v2:"), row
+    assert row["criteria"].startswith("v3:"), row
     assert row["suspected_foreign_hold"] == {
-        "count": 1, "checked": 4, "skipped_no_trailer": 0, "rate": 0.25}, row
+        "count": 1, "checked": 5, "skipped_no_trailer": 0, "rate": 0.2,
+        "registry_count": 1, "registry_rate": 0.2, "registry_doc": DOC}, row
     # ① 的分母/分子不受提示项影响。
     assert row["violations"]["claim_coverage"] == 1, row
-    assert row["denominators"]["claim_coverage"] == 4, row
-    assert row["rates"]["claim_coverage"] == 0.25, row
+    assert row["denominators"]["claim_coverage"] == 5, row
+    assert row["rates"]["claim_coverage"] == 0.2, row
 
     report = _run(repo, locks, "--trend-report", "--trend", str(trend))
-    assert "他线在途（提示）1/4" in report.stdout, report.stdout
+    assert "他线在途主数 1/5" in report.stdout, report.stdout
+    assert "登记面窄锁，已知形态、只做趋势：1/5" in report.stdout, report.stdout
     assert "命中不等于被带入" in report.stdout, report.stdout
+    # 本段主数不为 0 → 不该出现「从未命中」的结论。
+    assert "从未命中" not in report.stdout, report.stdout
+
+
+def test_trend_says_never_hit_when_main_is_zero(tmp_path: Path) -> None:
+    """主数长期是 0 时必须明说，别让它读起来像一直在发现问题。"""
+    repo, locks, _ = _registry_only(tmp_path)
+    trend = tmp_path / "trend.jsonl"
+    proc = _run(repo, locks, "--range", "HEAD", "--rule-since", "0",
+                "--trend", str(trend))
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    row = _rows(trend)[0]
+    assert row["suspected_foreign_hold"]["count"] == 0, row
+
+    report = _run(repo, locks, "--trend-report", "--trend", str(trend))
+    assert "他线在途主数（非登记面，提示）0/2" in report.stdout, report.stdout
+    assert "登记面窄锁（已知形态）1/2" in report.stdout, report.stdout
+    assert "这项在当前实践下从未命中" in report.stdout, report.stdout
+
+
+def _ledger_multi(locks: Path, owner_of: dict[str, object],
+                  start: float, end: float) -> None:
+    """每路径一个 owner，或 (owner, 起, 止) 三元组（用来让持有晚于基线提交）。"""
+    locks.mkdir(parents=True, exist_ok=True)
+    claims = {}
+    for rel, spec in owner_of.items():
+        owner, win_start, win_end = (
+            (spec, start, end) if isinstance(spec, str) else spec)
+        claims[rel] = {"path": rel, "current": None,
+                       "history": [{"owner": owner, "acquired_at": win_start,
+                                    "released_at": win_end,
+                                    "last_heartbeat_at": win_start}]}
+    (locks / "claims.json").write_text(
+        json.dumps({"version": 1, "claims": claims}, ensure_ascii=False),
+        encoding="utf-8")
+

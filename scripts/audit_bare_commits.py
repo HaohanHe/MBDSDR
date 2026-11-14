@@ -33,10 +33,16 @@
 另有一项**提示**（不是判据）：**提交时刻他线是否正持有同一文件**。按台账时间
 窗查每笔路径，命中就点名 sha/路径/持有者/时间差，措辞是「疑似带入他线在途
 内容」。它与 ① 分开列、分开算分母：① 查「本笔有没有被自己的 claim 覆盖」，
-它查「本笔有没有踩在别人脚上」，两者互不替代。命中**不等于**被带入——也可能
+它查「本笔有没有踩在别人脚上」。两者互不替代。命中**不等于**被带入——也可能
 双方都在改同一文件、各自只提交自己那段，所以只用来触发人工复核，不计违规、
 不进 ① 的比率。判「本线」只认 ``claim-line``；没有这一行的提交不猜，计入
 「无法判断」并交给 ④ 报缺行。
+
+提示项再拆两类，**主数只算非登记面**：登记面（协调文档）走 §6.1 窄锁，双方
+都在往登记表写行、各自只提交自己那行，命中它是已知无害形态。实测真实区间的
+疑似命中 100% 都是这一类——提示如果命中全是同一个已知良性形态，就等于没有
+信号（告警洪水等于没有告警）。所以报告先给「非登记面：疑似 n / 有 claim-line
+的提交 d」，是 0 就明写 0；登记面窄锁单列计数与样本、排在后面，只做趋势。
 
 明确不覆盖（人工复核）
 ----------------------
@@ -98,8 +104,11 @@ APPEND_ONLY_DOC = cao.DEFAULT_DOC
 #: 不升版本的话，趋势文件里「同一版本下违规变少」会被误读成实践变好——实际可能
 #: 只是判据变松。``CRITERIA_ITEMS`` 进了版本串，新增/删除判据会自动改串。
 #: v2：新增「提交时刻他线持有同一文件」提示项（不影响 ① 的判定）。
-CRITERIA_BASE_VERSION = "v2"
-CRITERIA_ITEMS = ("claim-coverage", "append-only", "claim-line", "foreign-hold")
+#: v3：把提示项拆成「非登记面（主数）」与「登记面窄锁（已知形态）」两类，
+#:     ``count`` 只算前者——v2 的 ``count`` 混着登记面命中，两段不可比。
+CRITERIA_BASE_VERSION = "v3"
+CRITERIA_ITEMS = ("claim-coverage", "append-only", "claim-line",
+                  "foreign-hold", "foreign-hold-split")
 
 #: 趋势文件（与 ``coord_check_trend.jsonl`` 同一位置、同一逐行 JSON 格式）。
 TREND_FILE = "bare_commit_trend.jsonl"
@@ -200,7 +209,8 @@ def check_claim_coverage(commits: List[Dict[str, Any]],
 
 def check_foreign_hold(commits: List[Dict[str, Any]],
                        intervals: Dict[str, List[Dict[str, Any]]],
-                       display: Dict[str, str]) -> Dict[str, Any]:
+                       display: Dict[str, str],
+                       doc: str) -> Dict[str, Any]:
     """本笔路径在提交时刻是否正被他线持有。
 
     与 ① 的分工：① 问「本笔有没有被自己的 claim 覆盖」，本项问「本笔有没有踩在
@@ -212,8 +222,23 @@ def check_foreign_hold(commits: List[Dict[str, Any]],
 
     命中**不是**违规：台账只能证明「那个文件当时有人在改」，不能证明「带进来的是
     他那部分」。这是提示，用来触发人工复核。
+
+    **拆两类，主数只算非登记面。** 登记面（协调文档）走 §6.1 窄锁：双方都在往
+    登记表写行、各自只提交自己那行，命中它是已知无害形态。实测真实区间的 8 笔
+    疑似 100% 都是这一类——一项提示如果命中全是同一个已知良性形态，就等于没有
+    信号（告警洪水等于没有告警）。所以：
+
+    * ``suspected`` / ``count``：**主数**，只含非登记面文件（其余路径）的命中；
+    * ``registry`` / ``registry_count``：登记面窄锁命中，保留计数与样本，排在主数
+      之后，只做趋势，不参与主数。
+
+    分母都是 ``checked``（有 ``claim-line`` 的提交数）。一笔同时踩到两类时两边
+    各计一次，所以两类之和可以大于 ``checked``；主数的分母仍是 ``checked``，
+    不把登记面那些「可能命中」剔掉——那样会让分母随文档活动量漂移。
     """
+    doc_key = acl.norm_path(doc)
     suspected: List[Dict[str, Any]] = []
+    registry: List[Dict[str, Any]] = []
     checked = 0
     skipped = 0
     for c in commits:
@@ -224,7 +249,8 @@ def check_foreign_hold(commits: List[Dict[str, Any]],
             skipped += 1
             continue
         checked += 1
-        hits: List[Dict[str, Any]] = []
+        file_hits: List[Dict[str, Any]] = []
+        doc_hits: List[Dict[str, Any]] = []
         seen: set[Tuple[str, str]] = set()
         for path in c["paths"]:
             for item in intervals.get(path, ()):
@@ -234,19 +260,24 @@ def check_foreign_hold(commits: List[Dict[str, Any]],
                 if not name or name in own or (path, item["owner"]) in seen:
                     continue
                 seen.add((path, item["owner"]))
-                hits.append({
+                hit = {
                     "path": display.get(path, path),
                     "line": name,
                     "owner": item["owner"],
                     "held_min": round((c["ct"] - item["start"]) / 60.0, 1),
                     "left_min": round((item["end"] - c["ct"]) / 60.0, 1),
-                })
-        if hits:
-            suspected.append({"sha": c["sha"], "at": _iso(c["ct"]),
-                              "own": own, "hits": hits})
+                }
+                (doc_hits if path == doc_key else file_hits).append(hit)
+        entry = {"sha": c["sha"], "at": _iso(c["ct"]), "own": own}
+        if file_hits:
+            suspected.append({**entry, "hits": file_hits})
+        if doc_hits:
+            registry.append({**entry, "hits": doc_hits})
     return {"status": STATUS_CHECKED, "checked": checked,
             "skipped_no_trailer": skipped,
-            "suspected": suspected, "count": len(suspected)}
+            "suspected": suspected, "count": len(suspected),
+            "registry": registry, "registry_count": len(registry),
+            "registry_doc": doc}
 
 
 # ---------------------------------------------------------------------------
@@ -426,6 +457,8 @@ def trend_row(commits: List[Dict[str, Any]], range_label: str,
         "denominators": denominators,
         "rates": rates,
         # 提示项单列：分母是自己的「有 claim-line 的提交数」，不混进 ① 的比率。
+        # ``count`` 是**主数**（非登记面）；登记面窄锁单列 ``registry_count``，
+        # 只做趋势，不并进主数（v2 的 count 混着它，两段不可比）。
         "suspected_foreign_hold": {
             "count": foreign.get("count", 0),
             "checked": foreign.get("checked", 0),
@@ -433,6 +466,11 @@ def trend_row(commits: List[Dict[str, Any]], range_label: str,
             "rate": (round(int(foreign.get("count") or 0)
                            / int(foreign.get("checked") or 0), 4)
                      if foreign.get("checked") else None),
+            "registry_count": foreign.get("registry_count", 0),
+            "registry_rate": (round(int(foreign.get("registry_count") or 0)
+                                    / int(foreign.get("checked") or 0), 4)
+                              if foreign.get("checked") else None),
+            "registry_doc": foreign.get("registry_doc"),
         },
         "lines": {"distinct": len(names), "names": sorted(names)},
     }
@@ -476,6 +514,7 @@ def print_trend_report(path: Path) -> None:
         unchecked: set[str] = set()
         fh_count = 0
         fh_checked = 0
+        fh_reg = 0
         all_lines: set[str] = set()
         for row in items:
             den = row.get("denominators") or {}
@@ -489,10 +528,13 @@ def print_trend_report(path: Path) -> None:
                   f" | ① {_fmt_rate(vio.get('claim_coverage'), den.get('claim_coverage', 0))}"
                   f" | ③ {_fmt_rate(vio.get('append_only'), den.get('append_only', 0))}"
                   f" | ④ {_fmt_rate(vio.get('claim_line'), den.get('claim_line', 0))}"
-                  f" | 他线在途（提示）{fh.get('count', 0)}/{fh.get('checked', 0)}"
+                  f" | 他线在途主数 {fh.get('count', 0)}/{fh.get('checked', 0)}"
                   f" | 涉及线 {(row.get('lines') or {}).get('distinct', 0)} 条")
+            print(f"      （登记面窄锁，已知形态、只做趋势："
+                  f"{fh.get('registry_count', 0)}/{fh.get('checked', 0)}）")
             total_commits += int(row.get("commits") or 0)
             fh_count += int(fh.get("count") or 0)
+            fh_reg += int(fh.get("registry_count") or 0)
             fh_checked += int(fh.get("checked") or 0)
             for key in total_den:
                 total_den[key] += int(den.get(key) or 0)
@@ -508,8 +550,17 @@ def print_trend_report(path: Path) -> None:
 
         print(f"  合计：提交 {total_commits} 笔；① {total('claim_coverage')}；"
               f"③ {total('append_only')}；④ {total('claim_line')}；"
-              f"他线在途（提示，非违规）{fh_count}/{fh_checked}；"
+              f"他线在途主数（非登记面，提示）{fh_count}/{fh_checked}；"
+              f"登记面窄锁（已知形态）{fh_reg}/{fh_checked}；"
               f"涉及线 {len(all_lines)} 条")
+        if fh_count == 0:
+            print("  他线在途主数在本段所有区间里是 0：这项在当前实践下从未命中——"
+                  "不是「一直在发现问题」，")
+            print("  也不是「没有问题」的证明，只是非登记面从未触发过。")
+        if any("registry_count" not in (r.get("suspected_foreign_hold") or {})
+               for r in items):
+            print("  注意：本段含旧判据行（count 里混着登记面命中），"
+                  "其「主数」不可与拆分后的行直接比较。")
         print("  汇总分母是各行分母之和；区间重叠时同一提交会重复计入，"
               "只看方向，别当总体比例。")
     print()
@@ -542,6 +593,14 @@ def _print_item_cover(result: Dict[str, Any], doc: str, quiet: bool) -> None:
             print(f"      - {item['path']}：{item['reason']}")
 
 
+def _print_foreign_samples(items: List[Dict[str, Any]]) -> None:
+    for v in items:
+        print(f"    {v['sha'][:12]}  {v['at']}  本线={'、'.join(v['own'])}")
+        for hit in v["hits"]:
+            print(f"      - {hit['path']}：{hit['owner']} 已持有 {hit['held_min']} 分钟"
+                  f"（其窗口还剩 {hit['left_min']} 分钟）")
+
+
 def _print_item_hunks(result: Dict[str, Any], doc: str, quiet: bool) -> None:
     print()
     print("【§11.3-①后半 提交时刻他线正持有同一文件（提示，非违规）】")
@@ -553,21 +612,22 @@ def _print_item_hunks(result: Dict[str, Any], doc: str, quiet: bool) -> None:
         print(f"  未审计：{result.get('reason', '台账不可读')}")
         print("  仍不覆盖：他线在途 hunk 是否真被带入本笔——本项机检不覆盖，需人工复核。")
         return
-    print(f"  疑似 {result['count']} 笔 / 已审计 {result['checked']} 笔"
+    print(f"  主数（非登记面文件）：疑似 {result['count']} 笔 / "
+          f"有 claim-line 的提交 {result['checked']} 笔"
           f"（另有 {result['skipped_no_trailer']} 笔无 claim-line，无法判断本线，"
           "未计入，见 §11.3-④）")
-    doc_key = acl.norm_path(doc)
-    if any(acl.norm_path(h["path"]) == doc_key
-           for v in result["suspected"] for h in v["hits"]):
-        print(f"  说明：命中 {doc} 的多半是 §6.1 窄锁形态（双方都在往登记表写行、"
-              "各自只提交自己那行），")
-        print("        正属于「命中不等于被带入」；别据此认定串了内容。")
-    if not quiet:
-        for v in result["suspected"]:
-            print(f"    {v['sha'][:12]}  {v['at']}  本线={'、'.join(v['own'])}")
-            for hit in v["hits"]:
-                print(f"      - {hit['path']}：{hit['owner']} 已持有 {hit['held_min']} 分钟"
-                      f"（其窗口还剩 {hit['left_min']} 分钟）")
+    if result["count"] == 0:
+        print("  主数是 0：本区间非登记面从未命中——这项在当前实践下从未命中，"
+              "别当成「一直在发现问题」，\n  也别当成清白的证明。")
+    elif not quiet:
+        _print_foreign_samples(result["suspected"])
+    print(f"  登记面窄锁（已知形态，只做趋势）：{result['registry_count']} 笔 / "
+          f"{result['checked']} 笔——双方都在往 {doc} 写行、各自只提交自己那行，")
+    print("  这正属于「命中不等于被带入」；它不是主数，也不据此认定串了内容。"
+          "实测它在真实区间里占满提示命中，")
+    print("  所以拆出去：一个提示如果命中全是同一个已知良性形态，就等于没有信号。")
+    if not quiet and result["registry_count"]:
+        _print_foreign_samples(result["registry"])
     print("  仍不覆盖：他线在途 hunk 是否真被带入本笔（要 --declare 快照）——"
           "本项机检不覆盖，需人工复核。")
 
@@ -691,7 +751,7 @@ def main(argv: List[str] | None = None) -> int:
     line = (check_claim_line(commits, intervals, rule_at) if ledger_ok
             else {"status": STATUS_NOT_CHECKED, "reason": ledger_gap})
     append = check_append_only(commits, args.doc)
-    foreign = (check_foreign_hold(commits, intervals, display) if ledger_ok
+    foreign = (check_foreign_hold(commits, intervals, display, args.doc) if ledger_ok
                else {"status": STATUS_NOT_CHECKED, "reason": ledger_gap})
     criteria = criteria_version(args.criteria_version)
     trend = trend_row(commits, range_label, cover, line, append, foreign, criteria)
