@@ -22,6 +22,8 @@ except ImportError:  # pragma: no cover
 
 from mbdsdr_ai.ground_track import ground_track, satellite_footprint
 from mbdsdr_ai.orbit import TLEUnavailableError
+# 可见门只有一个来源（sat_passes）；不在地图控件里再写一份 5.0。
+from mbdsdr_ai.sat_passes import VISIBLE_MIN_ALT_DEG
 
 _t = _tok()
 
@@ -53,7 +55,7 @@ class SatelliteGroundMap(QWidget):
     def update_satellite(self, name: str,
                          when_unix: Optional[float] = None,
                          minutes: float = 90.0,
-                         min_elevation_deg: float = 5.0,
+                         min_elevation_deg: float = VISIBLE_MIN_ALT_DEG,
                          recenter: bool = True) -> bool:
         """重算并重绘；返回是否成功（失败文本见 :attr:`error_text`）。"""
         try:

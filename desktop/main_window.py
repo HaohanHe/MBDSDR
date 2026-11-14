@@ -682,52 +682,19 @@ except ImportError:  # pragma: no cover - 单独打包时兜底
 from sat_track_panel import tle_band_badge
 
 # 内核能力面板（扫频 / 自动调制识别 / 书签管理 / 远程服务设置）。
-# 用 try/except 守卫：内核模块缺失时面板降级为不可用，绝不拖垮启动。
-try:
-    from scanner_panel import ScannerPanel
-except Exception:  # pragma: no cover
-    ScannerPanel = None  # type: ignore
-try:
-    from modulation_panel import ModulationPanel
-except Exception:  # pragma: no cover
-    ModulationPanel = None  # type: ignore
-try:
-    from bookmark_panel import BookmarkPanel
-except Exception:  # pragma: no cover
-    BookmarkPanel = None  # type: ignore
+# 扫频/调制/书签的控件类由 panel_registry 工厂持有；远程服务设置需要注入
+# settings，无法零参构造，仍在下方直接 import（见 §6.1 登记说明）。
 try:
     from settings_panel import ServiceSettingsPanel, SettingsPanel
 except Exception:  # pragma: no cover
     ServiceSettingsPanel = None  # type: ignore
     SettingsPanel = None  # type: ignore
-# 新增内核能力面板（多 VFO / ANR / 星座图 / 设备选择 / 分段增益）。
-# try/except 守卫：面板文件缺失时主窗口不崩，对应 dock 不建。
+# 多 VFO 面板需要注入主窗口共享的 vfo_manager（零参会另起一套 VFO 列表，
+# 与主窗口分叉），故不走注册表工厂，仍直接构造。
 try:
     from vfo_panel import VfoPanel
 except Exception:  # pragma: no cover
     VfoPanel = None  # type: ignore
-try:
-    from anr_panel import AnrPanel
-except Exception:  # pragma: no cover
-    AnrPanel = None  # type: ignore
-try:
-    from constellation_panel import ConstellationPanel
-except Exception:  # pragma: no cover
-    ConstellationPanel = None  # type: ignore
-try:
-    from device_panel import DevicePanel
-except Exception:  # pragma: no cover
-    DevicePanel = None  # type: ignore
-try:
-    from gain_panel import GainPanel
-except Exception:  # pragma: no cover
-    GainPanel = None  # type: ignore
-# 数字信号解码面板：ADS-B 航路图 / APRS 包 / 卫星云图。
-# try/except 守卫：面板文件缺失时主窗口不崩，对应 dock 不建。
-try:
-    from adsb_panel import AdsbPanel
-except Exception:  # pragma: no cover
-    AdsbPanel = None  # type: ignore
 # 卫星闭环跟踪器（mbdsdr_ai.sat_tracker）：选中卫星->实时 az/el/多普勒->自动调谐。
 # 用别名避免与 rf_sky_view 里的展示型 SatelliteTracker 冲突。缺 skyfield 时降级。
 try:
@@ -2477,6 +2444,15 @@ class MainWindow(QMainWindow):
             ("new_spacetime", self.new_spacetime_panel),
             ("adsb", self.adsb_map_panel), ("control", self.control_panel),
             ("status", self.status_panel), ("ai", self.ai_panel),
+            # 右栏固定页签（同样由注册表工厂构造，这里对称记账）
+            ("scanner", self.scanner_panel),
+            ("modulation", self.modulation_panel),
+            ("bookmark", self.bookmark_panel),
+            ("anr", self.anr_panel),
+            ("constellation", self.constellation_panel),
+            ("device", self.device_panel),
+            ("gain", self.gain_panel),
+            ("adsb_list", self.digital_adsb_panel),
         ]
         for pid, wgt in self._panel_attachments:
             reg.attach_widget(pid, wgt)
@@ -11150,10 +11126,11 @@ class MainWindow(QMainWindow):
     # 内核能力面板：扫频 / 自动调制识别 / 书签 / 远程服务设置
     # ------------------------------------------------------------------ #
     def _build_kernel_panels(self):
-        """把内核能力面板接入右栏页签（缺面板类时 hasattr 守卫，不崩）。"""
-        if ScannerPanel is not None:
+        """把内核能力面板接入右栏页签（控件由 panel_registry 工厂构造）。"""
+        scanner_panel = self._create_optional_panel("scanner")
+        if scanner_panel is not None:
             try:
-                self.scanner_panel = ScannerPanel()
+                self.scanner_panel = scanner_panel
                 self.scanner_panel.segment_chosen.connect(
                     self._on_scanner_segment_chosen)
                 self.scanner_panel.scan_began.connect(self._on_panel_scan_began)
@@ -11166,9 +11143,10 @@ class MainWindow(QMainWindow):
                     "扫频", self.scanner_panel, "scanner_dock")
             except Exception:  # noqa: BLE001
                 self.scanner_panel = None
-        if ModulationPanel is not None:
+        modulation_panel = self._create_optional_panel("modulation")
+        if modulation_panel is not None:
             try:
-                self.modulation_panel = ModulationPanel()
+                self.modulation_panel = modulation_panel
                 self.modulation_panel.apply_demod_requested.connect(
                     self._on_apply_demod_requested)
                 # —— 孤儿接通：识别完成/失败回显，完成后可选自动切模式 ——
@@ -11179,9 +11157,10 @@ class MainWindow(QMainWindow):
             except Exception:  # noqa: BLE001
                 self.modulation_panel = None
 
-        if BookmarkPanel is not None:
+        bookmark_panel = self._create_optional_panel("bookmark")
+        if bookmark_panel is not None:
             try:
-                self.bookmark_panel = BookmarkPanel()
+                self.bookmark_panel = bookmark_panel
                 self.bookmark_panel.tune_requested.connect(
                     self._on_bookmark_tune_requested)
                 self.bookmark_panel.set_current_freq_provider(
@@ -11253,9 +11232,10 @@ class MainWindow(QMainWindow):
                 self.vfo_panel = None
 
         # ---- ANR 降噪面板 ----
-        if AnrPanel is not None:
+        anr_panel = self._create_optional_panel("anr")
+        if anr_panel is not None:
             try:
-                self.anr_panel = AnrPanel()
+                self.anr_panel = anr_panel
                 self.anr_panel.enabled_changed.connect(self._on_anr_enabled)
                 self.anr_panel.strength_changed.connect(self._on_anr_strength)
                 self.anr_panel.learn_noise_requested.connect(
@@ -11268,9 +11248,10 @@ class MainWindow(QMainWindow):
                 self.anr_panel = None
 
         # ---- 星座图面板 ----
-        if ConstellationPanel is not None:
+        constellation_panel = self._create_optional_panel("constellation")
+        if constellation_panel is not None:
             try:
-                self.constellation_panel = ConstellationPanel()
+                self.constellation_panel = constellation_panel
                 # —— 孤儿接通：清空星座图时重置主窗口统计 ——
                 self.constellation_panel.cleared.connect(
                     self._on_constellation_cleared)
@@ -11280,9 +11261,10 @@ class MainWindow(QMainWindow):
                 self.constellation_panel = None
 
         # ---- 设备选择 / 热插拔面板 ----
-        if DevicePanel is not None:
+        device_panel = self._create_optional_panel("device")
+        if device_panel is not None:
             try:
-                self.device_panel = DevicePanel()
+                self.device_panel = device_panel
                 self.device_panel.connect_requested.connect(
                     self._on_panel_device_connect)
                 self.device_panel.disconnect_requested.connect(self._disconnect)
@@ -11298,9 +11280,10 @@ class MainWindow(QMainWindow):
                 self.device_panel = None
 
         # ---- 分段增益面板 ----
-        if GainPanel is not None:
+        gain_panel = self._create_optional_panel("gain")
+        if gain_panel is not None:
             try:
-                self.gain_panel = GainPanel()
+                self.gain_panel = gain_panel
                 # 分档增益失败必须可见：滑杆动了不等于硬件已生效
                 self.gain_panel.stage_gain_failed.connect(
                     self._on_stage_gain_failed)
@@ -11323,9 +11306,10 @@ class MainWindow(QMainWindow):
         无后端时各面板自带“等待数据/未连接”空态。
         """
         # ---- ADS-B 文本列表（右栏页签）----
-        if AdsbPanel is not None:
+        adsb_list_panel = self._create_optional_panel("adsb_list")
+        if adsb_list_panel is not None:
             try:
-                self.digital_adsb_panel = AdsbPanel()
+                self.digital_adsb_panel = adsb_list_panel
                 self.adsb_dock = self._add_right_tab(
                     "ADS-B", self.digital_adsb_panel, "adsb_dock")
             except Exception:  # noqa: BLE001
@@ -14196,6 +14180,7 @@ class MainWindow(QMainWindow):
         t_pos = time.monotonic()
         # 链路补偿状态（唯一真相源；失效自动关闭 + 原因上芯片）
         from mbdsdr_ai.doppler_link import get_compensator
+        from mbdsdr_ai.sat_passes import VISIBLE_MIN_ALT_DEG
         comp = get_compensator()
         comp.refresh(pos)
         self._update_doppler_chip(comp)
@@ -14207,12 +14192,13 @@ class MainWindow(QMainWindow):
                 self._stop_gimbal_follow(
                     "目标位置失效，云台跟随已停止并解锁（保持最后指向）")
             trackable = False
-        elif float(pos["elevation"]) < 5.0:
-            # 仰角 < 5°：卫星不可见 → 跟踪与云台一起明确停止，不向地平线下发角
+        elif float(pos["elevation"]) < VISIBLE_MIN_ALT_DEG:
+            # 仰角低于可见门：卫星不可见 → 跟踪与云台一起明确停止，不向地平线下发角
             el = float(pos["elevation"])
             self._stop_satellite_tracking()
             self.statusBar().showMessage(
-                f"卫星不可见（仰角 {el:.1f}° < 5°），跟踪与云台跟随已停止",
+                f"卫星不可见（仰角 {el:.1f}° < {VISIBLE_MIN_ALT_DEG:g}°），"
+                "跟踪与云台跟随已停止",
                 MSG_IMPORTANT)
             trackable = False
         if trackable:

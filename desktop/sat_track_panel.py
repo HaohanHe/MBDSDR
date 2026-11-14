@@ -516,7 +516,7 @@ class SatTrackPanel(QFrame):
         self.ground_elev_spin.setDecimals(0)
         self.ground_elev_spin.setSingleStep(1.0)
         self.ground_elev_spin.setSuffix(" °")
-        self.ground_elev_spin.setValue(5.0)
+        self.ground_elev_spin.setValue(VISIBLE_MIN_ALT_DEG)
         self.ground_elev_spin.setToolTip(
             "覆盖圈按此最小仰角绘制；门限越高，覆盖半径越小")
         gform.addRow("最小仰角:", self.ground_elev_spin)

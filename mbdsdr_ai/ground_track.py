@@ -30,10 +30,13 @@ from .orbit import (
     teme_to_ecef_km,
     wgs72_ecef_km_to_llh,
 )
+# 覆盖圈「最小仰角」就是全仓唯一可见门，不在本地再写一份 5.0。
+# 改 sat_passes.VISIBLE_MIN_ALT_DEG 后，覆盖圈/地图/面板一起变。
+from .sat_passes import VISIBLE_MIN_ALT_DEG
 
 DEFAULT_TRACK_MINUTES = 90.0
 DEFAULT_TRACK_STEP_S = 30.0
-DEFAULT_MIN_ELEVATION_DEG = 5.0
+DEFAULT_MIN_ELEVATION_DEG = VISIBLE_MIN_ALT_DEG
 DEFAULT_FOOTPRINT_POINTS = 72
 
 
