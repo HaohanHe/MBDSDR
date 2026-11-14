@@ -186,6 +186,10 @@ class TLEData:
     revnum: int = 0
     elset: int = 0
     deep_space: bool = False
+    # 原始两行（不含标题）。下游（如 skyfield 传播）需要原文时直接用，
+    # 不按解析字段重新编码——重新编码会丢 bstar/n-dot 的原始写法。
+    line1: str = ""
+    line2: str = ""
 
 
 class TLEParser:
@@ -234,6 +238,8 @@ class TLEParser:
             raise ValueError(f"TLE 校验和失败: {line1!r} / {line2!r}")
         if not line1.startswith("1") or not line2.startswith("2"):
             raise ValueError("TLE 行号列应为 '1'/'2'")
+        t.line1 = line1.strip()
+        t.line2 = line2.strip()
 
         # --- line 1 (行内列号 0..68) ---
         # catnr: [2:7]   

@@ -31,9 +31,9 @@ from enum import Enum
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from .gpredict_adapter import (
-    TLEParser, TLEData, GeoStation, SGP4Propagator,
-    CoordinateConverter, Observation, doppler_shift, unix_to_jd, C_LIGHT,
+    TLEParser, TLEData, GeoStation, Observation,
 )
+from .sat_passes import DopplerSampler, GroundStation
 
 
 # =====================================================================
@@ -102,23 +102,31 @@ class DopplerCorrector:
         self.station = station
         self.tx_freq_hz = tx_freq_hz
         self.sample_dt_s = sample_dt_s
-        self.prop = SGP4Propagator(tle)
         self._curve: List[DopplerPoint] = []
 
     def build_curve(self, t_start_s: float, t_end_s: float) -> List[DopplerPoint]:
-        """在过境期间采样多普勒曲线。"""
+        """在过境期间采样多普勒曲线。
+
+        传播、站心几何与多普勒公式统一走 ``sat_passes.DopplerSampler``，
+        本类只负责把它映射成 satnogs 的 ``DopplerPoint`` 形状。原实现自带
+        一份 SGP4 + doppler_shift 曲线，与 ``compute_doppler_curve`` 并存会
+        让同一次过境出现两条口径不同的曲线，已删除。
+        """
         self._curve = []
+        gs = GroundStation(lat_deg=self.station.lat_deg,
+                           lon_deg=self.station.lon_deg,
+                           alt_m=self.station.alt_km * 1000.0)
+        sampler = DopplerSampler([self.tle.line1, self.tle.line2], gs)
+        if not sampler.ok:
+            return self._curve
         t = t_start_s
         while t <= t_end_s + 1e-6:
-            jd = unix_to_jd(t)
-            tsince_min = (jd - self.tle.epoch_jd) * 1440.0
-            r, v = self.prop.propagate(tsince_min)
-            ob = CoordinateConverter.calculate_obs(jd, r, v, self.station)
-            f_rx = doppler_shift(ob, self.tx_freq_hz)
-            self._curve.append(DopplerPoint(
-                time_unix_s=t, rx_freq_hz=f_rx,
-                doppler_hz=f_rx - self.tx_freq_hz,
-                range_rate_kms=ob.range_rate_kms))
+            r = sampler.sample(sampler.time_at_unix(t), self.tx_freq_hz)
+            if r is not None:
+                _az, _el, _rng, rr, dop = r
+                self._curve.append(DopplerPoint(
+                    time_unix_s=t, rx_freq_hz=self.tx_freq_hz + dop,
+                    doppler_hz=dop, range_rate_kms=rr))
             t += self.sample_dt_s
         return self._curve
 

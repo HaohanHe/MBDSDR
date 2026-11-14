@@ -59,6 +59,8 @@ __all__ = [
     "sample_trail",
     "make_timescale",
     "DopplerPoint",
+    "DopplerSampler",
+    "doppler_hz_from_range_rate",
     "compute_doppler_curve",
     "sample_pass_track",
     "predict_upcoming_passes",
@@ -748,6 +750,68 @@ def _range_and_rate(diff, t: Time) -> Optional[Tuple[float, float, float, float,
         return None
 
 
+def doppler_hz_from_range_rate(freq_hz: float, range_rate_km_s: float) -> float:
+    """多普勒频移的唯一公式：``f_d = -v_r / c * f0``（远离为负）。
+
+    :func:`compute_doppler_curve` 与
+    ``satnogs_adapter.DopplerCorrector`` 都调这里；不要在别处再写一遍
+    符号约定，否则两条曲线的正负会悄悄分叉。
+    """
+    return -float(range_rate_km_s) * 1000.0 / C_LIGHT_MPS * float(freq_hz)
+
+
+class DopplerSampler:
+    """多普勒/站心几何采样的唯一实现。
+
+    一次构建「TLE + 地面站」的站心几何，之后按任意时刻采样
+    ``(az, el, range, range_rate, f_d)``。:func:`compute_doppler_curve`
+    与 ``satnogs_adapter.DopplerCorrector`` 共用本类：同一 TLE、同一站、
+    同一频率，两条路径必须给出同一条曲线。
+    """
+
+    def __init__(self, tle_lines: Sequence[str], ground_station: "GroundStation"):
+        self._diff = None
+        self.ts = None
+        parsed = _parse_tle(tle_lines)
+        if parsed is None:
+            return
+        name, line1, line2 = parsed
+        try:
+            self.ts = make_timescale()
+            sat = EarthSatellite(line1, line2, name, self.ts)
+        except Exception:
+            return
+        topo = Topos(latitude_degrees=ground_station.lat_deg,
+                     longitude_degrees=ground_station.lon_deg,
+                     elevation_m=ground_station.alt_m)
+        self._diff = sat - topo
+
+    @property
+    def ok(self) -> bool:
+        """TLE/传播器可用时为 True；否则 :meth:`sample` 恒返回 ``None``。"""
+        return self._diff is not None
+
+    def time_at_unix(self, unix_s: float) -> Time:
+        """unix 秒 → skyfield Time（UTC）。"""
+        return self.ts.from_datetime(
+            datetime.fromtimestamp(float(unix_s), tz=timezone.utc))
+
+    def time_at_tt_jd(self, tt_jd: float) -> Time:
+        """TT 儒略日 → skyfield Time。"""
+        return self.ts.tt_jd(float(tt_jd))
+
+    def sample(self, t: Time, freq_hz: float
+               ) -> Optional[Tuple[float, float, float, float, float]]:
+        """返回 ``(az_deg, el_deg, range_km, range_rate_km_s, doppler_hz)``。"""
+        if self._diff is None:
+            return None
+        r = _range_and_rate(self._diff, t)
+        if r is None:
+            return None
+        az, el, rng, rr, _ = r
+        return az, el, rng, rr, doppler_hz_from_range_rate(freq_hz, rr)
+
+
 def compute_doppler_curve(
     tle_lines: Sequence[str],
     ground_station: GroundStation,
@@ -783,19 +847,9 @@ def compute_doppler_curve(
         df_d/dt ≈ (f_d[i+1] - f_d[i-1]) / (t[i+1] - t[i-1])
     端点用前向/后向差分。
     """
-    parsed = _parse_tle(tle_lines)
-    if parsed is None:
+    sampler = DopplerSampler(tle_lines, ground_station)
+    if not sampler.ok:
         return []
-    name, line1, line2 = parsed
-    ts = make_timescale()
-    try:
-        sat = EarthSatellite(line1, line2, name, ts)
-    except Exception:
-        return []
-    topo = Topos(latitude_degrees=ground_station.lat_deg,
-                 longitude_degrees=ground_station.lon_deg,
-                 elevation_m=ground_station.alt_m)
-    diff = sat - topo
 
     t0 = pass_.rise_time
     t1 = pass_.set_time
@@ -803,24 +857,22 @@ def compute_doppler_curve(
     if dt_days <= 0 or num_points < 2:
         return []
 
-    raw: List[Tuple[Time, float, float, float, float]] = []
+    raw: List[Tuple[Time, float, float, float, float, float]] = []
     for k in range(num_points):
         frac = k / (num_points - 1)
-        t = ts.tt_jd(t0.tt + frac * dt_days)
-        r = _range_and_rate(diff, t)
+        t = sampler.time_at_tt_jd(t0.tt + frac * dt_days)
+        r = sampler.sample(t, freq_hz)
         if r is None:
             continue
-        az, el, rng, rr, _ = r
-        # f_d = -freq * (rangeRate_mps / c)；range_rate_km_s → m/s 乘 1000
-        dop = -rr * 1000.0 / C_LIGHT_MPS * freq_hz
-        raw.append((t, az, el, rng, rr))
+        az, el, rng, rr, dop = r
+        raw.append((t, az, el, rng, rr, dop))
 
     if len(raw) < 2:
         return []
 
     # 计算多普勒变化率（Hz/s）：中心差分
-    dop_vals = [-rr * 1000.0 / C_LIGHT_MPS * freq_hz for (_, _, _, _, rr) in raw]
-    t_days = [t.tt for (t, _, _, _, _) in raw]
+    dop_vals = [dop for (_, _, _, _, _, dop) in raw]
+    t_days = [t.tt for (t, _, _, _, _, _) in raw]
     dop_rate = [0.0] * len(raw)
     for i in range(len(raw)):
         if i == 0:
@@ -834,7 +886,7 @@ def compute_doppler_curve(
             dop_rate[i] = (dop_vals[i + 1] - dop_vals[i - 1]) / dt_s if dt_s > 0 else 0.0
 
     out: List[DopplerPoint] = []
-    for i, (t, az, el, rng, rr) in enumerate(raw):
+    for i, (t, az, el, rng, rr, _dop) in enumerate(raw):
         out.append(DopplerPoint(
             time=t,
             azimuth=az,
