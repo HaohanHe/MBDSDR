@@ -67,6 +67,8 @@ STALE_CHECK_WINDOW_S = 5.0
 
 #: 提交后可构建烟雾检查的超时（含 Qt 全局锁等待）；超时按「无法判定」记账。
 HEAD_BUILD_SMOKE_TIMEOUT_S = 240
+#: 符号存在性检查是纯静态 AST 解析（实测 0.3–2.0 s），给 90 s 只为防卡死。
+SYMBOL_CHECK_TIMEOUT_S = 90
 
 
 def _git(*args):
@@ -377,20 +379,35 @@ def _smoke_ledger_path():
     )
 
 
-def _smoke_script(root):
-    """优先用本工作树的 scripts/head_build_smoke.py，其次 hooks 目录里的安装副本。
+def _symbol_ledger_path():
+    return Path(
+        os.environ.get("MBDSDR_SYMBOL_LOG")
+        or r"D:\mbdsdr\.locks\head_symbol_check.log"
+    )
 
-    旧工作树（HEAD 还没更新到本提交）没有 scripts/head_build_smoke.py，靠安装
-    副本兜住；两处都没有才是「检查没跑成」。
+
+def _support_script(root, name):
+    """优先用本工作树的 ``scripts/<name>``，其次 hooks 目录里的安装副本。
+
+    旧工作树（HEAD 还没更新到本提交）没有该脚本，靠安装副本兜住；
+    两处都没有才是「检查没跑成」。
     """
-    candidates = [root / "scripts" / "head_build_smoke.py"]
+    candidates = [root / "scripts" / name]
     hooks_raw = _git("rev-parse", "--git-path", "hooks").stdout.strip()
     if hooks_raw:
         hooks = Path(hooks_raw)
         if not hooks.is_absolute():
             hooks = root / hooks
-        candidates.append(hooks / "head_build_smoke.py")
+        candidates.append(hooks / name)
     return next((path for path in candidates if path.exists()), None)
+
+
+def _smoke_script(root):
+    return _support_script(root, "head_build_smoke.py")
+
+
+def _symbol_script(root):
+    return _support_script(root, "head_symbol_check.py")
 
 
 def _record_smoke_failure(head, reason, detail=""):
@@ -465,6 +482,79 @@ def _head_build_smoke(root, head):
         )
 
 
+def _record_symbol_failure(head, reason, detail=""):
+    """符号检查自身跑不起来：醒目打印 + 记 error，**不静默跳过**。"""
+    log_path = _symbol_ledger_path()
+    bar = "=" * 70
+    print(f"[post-commit] {bar}", file=sys.stderr)
+    print(f"[post-commit] ⚠ 符号存在性检查没跑成：{head[:8]}", file=sys.stderr)
+    print(f"[post-commit]   原因：{reason}", file=sys.stderr)
+    for line in (detail or "").strip().splitlines()[-6:]:
+        print(f"[post-commit]     {line}", file=sys.stderr)
+    print(f"[post-commit]   台账：{log_path}", file=sys.stderr)
+    print(f"[post-commit] {bar}", file=sys.stderr)
+    try:
+        _append_records(
+            log_path,
+            [
+                {
+                    "ts": datetime.now().isoformat(timespec="seconds"),
+                    "type": "HEAD_SYMBOL",
+                    "status": "error",
+                    "sha": head,
+                    "reason": f"post-commit 侧：{reason}",
+                    "missing": [],
+                    "unresolved": [],
+                }
+            ],
+        )
+    except OSError as exc:
+        print(f"[post-commit] 符号台账写入失败：{exc}", file=sys.stderr)
+
+
+def _head_symbol_check(root, head):
+    """调用侧先落地、被调侧后落地：静态核查调用目标在 HEAD 的树里存不存在。
+
+    与烟雾检查是**两条独立结论**，分开打印、分开记账：跑不过用例 ≠ 符号不存在。
+    """
+    script = _symbol_script(root)
+    if script is None:
+        _record_symbol_failure(
+            head, "找不到 scripts/head_symbol_check.py（工作树与 hooks 目录都没有）"
+        )
+        return
+    env = os.environ.copy()
+    for key in ("GIT_INDEX_FILE", "GIT_DIR", "GIT_WORK_TREE", "GIT_PREFIX"):
+        env.pop(key, None)
+    env.setdefault("MBDSDR_SYMBOL_LOG", str(_symbol_ledger_path()))
+    try:
+        proc = subprocess.run(
+            [sys.executable, str(script), "--repo", str(root), "--commit", head],
+            cwd=str(root),
+            env=env,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=SYMBOL_CHECK_TIMEOUT_S,
+        )
+    except subprocess.TimeoutExpired:
+        _record_symbol_failure(head, f"超出 {SYMBOL_CHECK_TIMEOUT_S}s 未返回")
+        return
+    except OSError as exc:
+        _record_symbol_failure(
+            head, f"无法启动符号检查：{exc.__class__.__name__}: {exc}"
+        )
+        return
+    output = ((proc.stdout or "") + (proc.stderr or "")).strip()
+    if output:
+        print(output, file=sys.stderr)
+    if proc.returncode not in (0, 3):
+        _record_symbol_failure(
+            head, f"符号脚本自身异常退出 rc={proc.returncode}", output[-600:]
+        )
+
+
 def main():
     started_at = time.time()
     root = Path(_git("rev-parse", "--show-toplevel").stdout.strip() or ".")
@@ -532,6 +622,15 @@ def main():
         _head_build_smoke(root, head)
     except Exception as exc:  # noqa: BLE001 —— 自检异常不许影响提交结果，但要可见
         _record_smoke_failure(head, f"烟雾检查异常：{exc.__class__.__name__}: {exc}")
+
+    # 提交后符号存在性检查：用例抓不到「调用侧先落地、被调侧后落地」。
+    # 与烟雾检查并列、各记各的账——「跑不过用例」和「符号不存在」不能混成一条。
+    try:
+        _head_symbol_check(root, head)
+    except Exception as exc:  # noqa: BLE001
+        _record_symbol_failure(
+            head, f"符号检查异常：{exc.__class__.__name__}: {exc}"
+        )
 
     marker_dir = Path(
         os.environ.get("MBDSDR_HOOK_MARKER_DIR") or r"D:\mbdsdr\.locks\hook_ok"

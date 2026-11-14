@@ -57,6 +57,8 @@ SUPPORT_FILES = (
     # 提交后可构建烟雾检查：旧工作树里 `root/scripts/head_build_smoke.py` 还不存在，
     # post-commit 靠 hooks 目录里的副本兜住（两处都没有才算「检查没跑成」）。
     "head_build_smoke.py",
+    "head_symbol_check.py",
+    "symbol_check_allowlist.json",
 )
 SIGNATURE = "MBDSDR-MANAGED-HOOK"
 
