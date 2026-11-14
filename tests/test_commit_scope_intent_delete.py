@@ -195,6 +195,12 @@ def _install_hooks(repo):
     scripts = repo / "scripts"
     scripts.mkdir(exist_ok=True)
     shutil.copy2(SCOPE, scripts / "check_commit_scope.py")
+    # pre-commit 把闸门当子进程跑在 <repo>/scripts/ 下，闸门按**自身目录**
+    # import 兄弟模块（check_coordination_append_only 等）。支持文件必须同时
+    # 落在它旁边；只放 .git/hooks/ 会让临时仓缺依赖（真实仓的 scripts/ 本来
+    # 就有这些文件，所以生产环境照不出来）。
+    for name in installer.SUPPORT_FILES:
+        shutil.copy2(installer.ROOT / "scripts" / name, scripts / name)
     hooks = repo / ".git" / "hooks"
     for name in installer.HOOK_NAMES:
         dst = hooks / name

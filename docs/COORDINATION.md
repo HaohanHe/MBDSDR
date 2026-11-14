@@ -2458,6 +2458,7 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `mbdsdr_ai/amr.py` | 共享件边界线/6ae85f56（共享件收口：builtin_cache_path 委托 user_paths.user_cache_dir（行为不变，提交后释放）） | 2026-11-14 12:12 | 本笔 |
 | `mbdsdr_ai/sat_links_fetch.py` | 共享件边界线/6ae85f56（共享件收口：cache_path 委托 user_paths.user_cache_dir；后续 _iso_utc 委托 time_format（提交后释放）） | 2026-11-14 12:12 | 本笔 |
 | `tests/test_batch_close.py` | 工具化线/6ae85f56（新增 batch_close 退出码语义测试） | 2026-11-14 12:13 | 本笔 |
+| `tests/test_commit_scope_intent_delete.py` | 用例随闸线/6ae85f56（钩子夹具补拷 SUPPORT_FILES 到 scripts/（2 条既有红）） | 2026-11-14 12:13 | 本笔 |
 
 > 上表各行均由 `claim` 台账推导：owner 原文与 `acquired_at` 直接取自台账，
 > 目的优先用台账里的 `claim_reason`，没有就如实写「未声明」，不补编。时间列只是
