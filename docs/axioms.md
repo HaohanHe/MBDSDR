@@ -37,8 +37,8 @@ python scripts/axioms.py --prioritize \
 ### 当前计数（工具生成，勿手改）
 
 <!-- axioms-current-stats:begin（由 python -m tools.axioms.current_stats 生成） -->
-违规 643 条：应修 68，复核 416，豁免 159。
-D1 5 / D2 168 / D3 247 / D4 28 / D5 135 / D6 59 / D7 0 / D8 1。
+违规 641 条：应修 67，复核 415，豁免 159。
+D1 5 / D2 168 / D3 247 / D4 28 / D5 134 / D6 59 / D7 0 / D8 0。
 <!-- axioms-current-stats:end -->
 
 `tests/test_axioms_doc_current_stats.py` 会用工具当次输出与本块逐字比对，
@@ -306,6 +306,29 @@ D6 的事实行会给出「核对 N 条 / unknown-path 0 / line-out-of-range 0�
 
 判同与判活是两件事：同 pid + 进程启动时间才叫"同一个进程"；同序列号才叫"同一台设备"。
 名字、枚举序号、可改路径字符串都只是标签。
+
+## 时空域量：现有公理下的不变量
+
+时空量（过境、TLE、时区、星下点、可见性、步长）不是新的治理维度：它们要的
+性质——同一事实一个产生点、值不得被换算成另一个值、降级必须可见、同名实现
+行为一致——已经由 A01/A02/A03/A12 覆盖。因此这里**不新增公理**，只把六个量
+逐项登记成这些公理下的具名不变量，并给出可复跑的判据；缺判据的两项本轮补上，
+其余引用既有用例。
+
+| 时空量 | 载体（符号） | 挂靠公理 | 可复跑判据 | 状态 |
+|---|---|---|---|---|
+| 过境起始基准 | `sat_passes.predict_passes`（排班门限 `PASS_MIN_ALT_DEG`）、`skyengine.satellites.next_rise_set(horizon_alt=)`、`PASS_COARSE_STEP_S`/`PASS_FINE_STEP_S` | A02 | `tests/test_pass_step_alignment.py`、`tests/test_grazing_pass_detection.py`、`tests/test_satellite_rise_set_precision.py` | 已兜：门限未放宽、擦边不放过、事件顺序有标记 |
+| TLE 老化与未来历元 | `tle_integrity.freshness`、`time_basis.tle_epoch_report`、`tle_epoch.TLE_FUTURE_TOL_DAYS` | A01 + A12 | `tests/test_tle_epoch_single_source.py`、`tests/test_tle_age_visibility.py`、`mbdsdr_ai/tests/test_tle_freshness_predict.py` | 本轮补齐：年龄/未来判定单一产生点、容差单一常量，`freshness` 暴露 `age_days_signed` 与 `epoch_implausible` |
+| 时区与夏令时 | `time_format.resolve_tz`、`time_basis.local_to_utc(fold=)` | A02 + A03 | `mbdsdr_ai/tests/test_time_basis.py`、`mbdsdr_ai/tests/test_time_scale_physics.py` | 已兜：歧义必须显式 `fold`、不存在时刻抛错、墙钟回跳告警；兜底固定偏移只在取不到时区规则时发生（见未闭合项） |
+| 星下点与地面轨迹 | `ground_track.satellite_subpoint`/`ground_track`/`satellite_footprint`、`orbit.wgs72_ecef_km_to_llh` | A01 | `tests/test_ground_track.py`、`tests/test_ellipsoid_boundary.py` | 已兜：星下点只走 WGS-72 椭球反解；覆盖圈用同一 `WGS72_A` 做球面近似（已在函数 docstring 声明，不与椭球反解混用） |
+| 可见性门限 | `sat_passes.VISIBLE_MIN_ALT_DEG`、`ground_track.DEFAULT_MIN_ELEVATION_DEG` | A01 | `tests/test_visible_gate_single_source.py` | 已兜：卫星"可见"只有一个仰角常量；恒星可见性（星等/消光）是另一概念，不得共用该常量 |
+| 步长误差界 | `PASS_COARSE_STEP_S`/`PASS_FINE_STEP_S`/`PASS_BISECT_TOL_S`、`skyengine.satellites.RISE_SET_BISECT_TOL_S`、`TRAIL_STEP_S`/`TRAIL_STEP_MAX_ERR_DEG`、`DEFAULT_TRACK_STEP_S`/`DEFAULT_TRACK_STEP_MAX_CHORD_KM` | A02 | `tests/test_ground_track_step_bound.py`、`tests/test_pass_step_alignment.py`、`tests/test_satellite_rise_set_precision.py` | 已兜：地面轨迹有弦高界；过境 AOS/LOS 由内联 `1.0s` 提为 `RISE_SET_BISECT_TOL_S` 并被断言（误差 ≤ 声明容差） |
+
+**未闭合项（复核 2026-12-14）**：`time_format` 在系统时区不可发现时退到
+"此刻固定偏移"，该降级目前没有可检测标记；DST 地区的用户会得到静默的固定
+偏移换算。转绿条件：`resolve_tz(None)` 的兜底返回值带可检测标记（或调用方
+能查询 `tz` 是否携带 DST 规则），并有用例断言该标记在兜底时出现、正常时区
+时不出现。在此之前，本条只作为已登记缺口，不得写成"时空域已全部兜住"。
 
 ## 棘轮（存量只减不增）
 
