@@ -6668,6 +6668,10 @@ class MainWindow(QMainWindow):
                     and not self._confirm_stop_tx("切换设备")):
                 self.statusBar().showMessage("已取消切换（发射继续）", MSG_NORMAL)
                 return False
+            # 防呆：录音中切换设备同样会停录落盘，先确认；取消则整条切换不做。
+            if self._recording and not self._confirm_stop_recording("切换设备"):
+                self.statusBar().showMessage("已取消切换（录音继续）", MSG_NORMAL)
+                return False
             self._teardown_connection()
         # 连接是同步阻塞调用（本机 RTL-SDR 原生 connect 实测 2.0 s）：先把
         # 「连接中」写上并冲一次事件循环，否则用户在阻塞期内看到的仍是旧标签。
@@ -7273,15 +7277,19 @@ class MainWindow(QMainWindow):
         return key or None
 
     def _on_weather_decode_result(self, res: dict):
-        """气象面板解码终态 → 状态面板 FEC 质量行（12.1）。
+        """气象面板解码终态 → 状态面板质量行（12.1 FEC / 12.2 文件重组）。
 
-        只搬真录链自带 ``rs_*`` 聚合的 meta；别的链路（GK-2A / APT 等）没有
-        这些键就不动质量行——绝不拿别处的数字顶上去。
+        只搬各链路自带统计：真录 LRPT 用 ``rs_*``，GOES HRIT 用 ``reassembly``；
+        别的链路没有这些键就不动对应行——绝不拿别处的数字顶上去。
         """
         meta = res.get("meta") if isinstance(res, dict) else None
-        if not isinstance(meta, dict) or "rs_frames" not in meta:
+        if not isinstance(meta, dict):
             return
-        self.status_panel.set_fec_quality(meta)
+        if "rs_frames" in meta:
+            self.status_panel.set_fec_quality(meta)
+        reassembly = meta.get("reassembly")
+        if isinstance(reassembly, dict):
+            self.status_panel.set_reassembly_quality(reassembly)
 
     def _panels_set_sdr_connected(self, connected: bool, session_initial=None):
         """把真实 SDR 连接状态同步到各操作控件。
@@ -7559,13 +7567,51 @@ class MainWindow(QMainWindow):
             QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
         return ans == QMessageBox.Yes
 
+    def _confirm_stop_recording(self, action: str) -> bool:
+        """录音中执行会停录的动作时先确认；返回 True 表示继续（保存后{action}）。
+
+        录制中断开/切换设备会立即停录落盘。不告知保存路径就停录，用户
+        会以为录音丢了；默认按钮是「取消（继续录音）」，误触不会停录。
+        """
+        path = getattr(self, "_record_file_path", "") or "（文件名尚未生成）"
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Warning)
+        box.setWindowTitle("正在录音")
+        box.setText(
+            f"正在录音。{action}会停止录音并保存到：\n"
+            f"{path}\n\n"
+            f"要停止并保存，然后{action}吗？")
+        box.setStandardButtons(QMessageBox.Save | QMessageBox.Cancel)
+        box.button(QMessageBox.Save).setText(f"停止录音并{action}")
+        box.button(QMessageBox.Cancel).setText("取消（继续录音）")
+        box.setDefaultButton(QMessageBox.Cancel)
+        return (QMessageBox.StandardButton(box.exec())
+                == QMessageBox.StandardButton.Save)
+
     def _on_disconnect_clicked(self):
-        """工具栏「断开」按钮：发射中先确认，误点不直接断波。"""
+        """工具栏/设备面板「断开」：发射或录音中先确认，误点不丢波也不停录。"""
         if self._tx_session is not None \
                 and not self._confirm_stop_tx("断开连接"):
             self.statusBar().showMessage("已取消断开（发射继续）", MSG_NORMAL)
             return
+        if self._recording \
+                and not self._confirm_stop_recording("断开连接"):
+            self.statusBar().showMessage("已取消断开（录音继续）", MSG_NORMAL)
+            return
         self._disconnect()
+
+    def _on_device_unplugged(self):
+        """设备被拔出：不弹确认（录音已录不下去），停录落盘并在状态栏写明路径。"""
+        path = getattr(self, "_record_file_path", "") or ""
+        was_recording = bool(self._recording)
+        self._disconnect()
+        if was_recording:
+            # 覆盖 _disconnect 里那句「已断开连接」：拔设备不是用户点断开的，
+            # 必须让他知道录音停在哪，而不是自己去找。
+            self.statusBar().showMessage(
+                (f"设备被拔出，录音已停止并保存到：{path}" if path
+                 else "设备被拔出，录音已停止（本次没有可保存的样本）"),
+                MSG_IMPORTANT)
 
     def _disconnect(self):
         """断开连接（用户点"断开"）：幂等拆除 + 未连接时如实说明。"""
@@ -11293,10 +11339,13 @@ class MainWindow(QMainWindow):
                 self.device_panel = device_panel
                 self.device_panel.connect_requested.connect(
                     self._on_panel_device_connect)
-                self.device_panel.disconnect_requested.connect(self._disconnect)
+                self.device_panel.disconnect_requested.connect(
+                    self._on_disconnect_clicked)
                 self.device_panel.audio_output_changed.connect(
                     self._on_audio_output_changed)
-                self.device_panel.device_unplugged.connect(self._disconnect)
+                # 拔设备不弹确认（设备已不在，录音无法继续），但要写明落盘路径
+                self.device_panel.device_unplugged.connect(
+                    self._on_device_unplugged)
                 # —— 孤儿接通：设备热插入 → 状态栏提示 + 刷新列表 ——
                 self.device_panel.device_plugged.connect(
                     self._on_device_plugged)
