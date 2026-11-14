@@ -252,7 +252,7 @@ def test_same_range_twice_keeps_one_row(tmp_path: Path) -> None:
     rows = _rows(trend)
     assert len(rows) == 1, rows
     row = rows[0]
-    assert row["criteria"].startswith("v1:"), row
+    assert row["criteria"].startswith("v2:"), row
     assert row["commits"] == 5, row
     assert row["range"]["from"]["sha"] == sha["base"], row
     assert row["range"]["to"]["sha"] == sha["deleted"], row
@@ -293,3 +293,96 @@ def test_trend_report_groups_by_version_with_denominator(tmp_path: Path) -> None
     assert "① 1/5" in out and "③ 1/2" in out and "④ 1/5" in out, out
     assert "比率必须带分母" in out, out
     assert "不等于实践变好" in out, out
+
+
+# ---------------------------------------------------------------------------
+# ①后半：提交时刻他线正持有同一文件（提示，不是违规）
+# ---------------------------------------------------------------------------
+
+
+def _foreign_samples(tmp_path: Path) -> tuple[Path, Path, dict[str, str]]:
+    """他线持有同文件 / 他线持有但不同文件 / 无人持有，各一笔。"""
+    repo = _repo(tmp_path)
+    locks = tmp_path / "locks"
+    now = time.time()
+    start, end = now - 1000.0, now + 1000.0
+    base = _commit(repo, {"seed.py": "s = 0\n"},
+                   "chore: base\n\nclaim-line: 甲线", now - 500.0)
+    same = _commit(repo, {"a.py": "x = 1\n"},
+                   "feat: on someone's file\n\nclaim-line: 甲线", now - 300.0)
+    other = _commit(repo, {"c.py": "c = 1\n"},
+                    "feat: other file\n\nclaim-line: 甲线", now - 200.0)
+    free = _commit(repo, {"d.py": "d = 1\n"},
+                   "feat: nobody holds it\n\nclaim-line: 甲线", now - 100.0)
+
+    _ledger_multi(locks, {"seed.py": OWNER, "c.py": OWNER, "d.py": OWNER,
+                          "a.py": "乙线/bbbb2222"}, start, end)
+    return repo, locks, {"base": base, "same": same, "other": other, "free": free}
+
+
+def _ledger_multi(locks: Path, owner_of: dict[str, str],
+                  start: float, end: float) -> None:
+    locks.mkdir(parents=True, exist_ok=True)
+    claims = {
+        rel: {"path": rel, "current": None,
+              "history": [{"owner": owner, "acquired_at": start,
+                           "released_at": end, "last_heartbeat_at": start}]}
+        for rel, owner in owner_of.items()
+    }
+    (locks / "claims.json").write_text(
+        json.dumps({"version": 1, "claims": claims}, ensure_ascii=False),
+        encoding="utf-8")
+
+
+def test_foreign_hold_three_samples(tmp_path: Path) -> None:
+    """判据：同文件 → 疑似；不同文件 / 无人持有 → 不报；且不许并进 ①。"""
+    repo, locks, sha = _foreign_samples(tmp_path)
+    proc = _run(repo, locks, "--range", "HEAD", "--rule-since", "0", "--json")
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    checks = json.loads(proc.stdout)["checks"]
+
+    fh = checks["foreign_hold"]
+    assert fh["status"] == "checked", fh
+    assert fh["checked"] == 4 and fh["skipped_no_trailer"] == 0, fh
+    assert fh["count"] == 1, fh
+    assert [v["sha"] for v in fh["suspected"]] == [sha["same"]], fh
+    hit = fh["suspected"][0]["hits"][0]
+    assert hit["path"] == "a.py" and hit["line"] == "乙线", hit
+    assert hit["held_min"] > 0 and hit["left_min"] > 0, hit
+
+    # ① 仍只按自己的判据：同一笔因「没有被自己的 claim 覆盖」进 ①，
+    # 另两笔不进——把他线持有并进 ① 会让这里多出条目，测试因此变红。
+    cov = checks["claim_coverage"]
+    assert cov["violating"] == 1, cov
+    assert [v["sha"] for v in cov["violations"]] == [sha["same"]], cov
+    assert [p["path"] for p in cov["violations"][0]["paths"]] == ["a.py"], cov
+
+    flagged = {v["sha"] for v in fh["suspected"]}
+    assert sha["other"] not in flagged and sha["free"] not in flagged, flagged
+
+    text = _run(repo, locks, "--range", "HEAD", "--rule-since", "0")
+    assert "提示，非违规" in text.stdout, text.stdout
+    assert "命中不等于被带入" in text.stdout, text.stdout
+    assert "本项机检不覆盖，需人工复核" in text.stdout, text.stdout
+
+
+def test_foreign_hold_has_its_own_trend_denominator(tmp_path: Path) -> None:
+    """趋势里单列分母，不混进 ① 的比率；判据版本升到 v2。"""
+    repo, locks, _ = _foreign_samples(tmp_path)
+    trend = tmp_path / "trend.jsonl"
+    proc = _run(repo, locks, "--range", "HEAD", "--rule-since", "0",
+                "--trend", str(trend))
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+
+    row = _rows(trend)[0]
+    assert row["criteria"].startswith("v2:"), row
+    assert row["suspected_foreign_hold"] == {
+        "count": 1, "checked": 4, "skipped_no_trailer": 0, "rate": 0.25}, row
+    # ① 的分母/分子不受提示项影响。
+    assert row["violations"]["claim_coverage"] == 1, row
+    assert row["denominators"]["claim_coverage"] == 4, row
+    assert row["rates"]["claim_coverage"] == 0.25, row
+
+    report = _run(repo, locks, "--trend-report", "--trend", str(trend))
+    assert "他线在途（提示）1/4" in report.stdout, report.stdout
+    assert "命中不等于被带入" in report.stdout, report.stdout
