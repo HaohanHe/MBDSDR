@@ -2410,6 +2410,9 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `tools/axioms/current_stats.py` | 公理体检线/6ae85f56（基准过期上限：24 小时/200 笔，超限红、未超只提示） | 2026-11-14 11:38 | 本笔 |
 | `tests/test_axioms_doc_current_stats.py` | 公理体检线/6ae85f56（判据：超龄/超笔数必红，未超只提示；上限改极大值反证） | 2026-11-14 11:38 | 本笔 |
 | `docs/axioms.md` | 公理体检线/6ae85f56（过期上限与何时重生成写在同一处） | 2026-11-14 11:38 | 本笔 |
+| `desktop/main_window.py` | 无线电课清单线/6ae85f56（讲座清单 P2：_provide_sat_passes 增补 doppler/tca_unix/freq_hz） | 2026-11-14 11:40 | 本笔 |
+| `desktop/sat_track_panel.py` | 无线电课清单线/6ae85f56（讲座清单 P2：过境多普勒 f_d(t) 曲线控件） | 2026-11-14 11:40 | 本笔 |
+| `tests/test_sat_doppler_curve_panel.py` | 无线电课清单线/6ae85f56（讲座清单 P2：曲线行契约与缺数据反证） | 2026-11-14 11:40 | 本笔 |
 
 > 上表各行均由 `claim` 台账推导：owner 原文与 `acquired_at` 直接取自台账，
 > 目的优先用台账里的 `claim_reason`，没有就如实写「未声明」，不补编。时间列只是

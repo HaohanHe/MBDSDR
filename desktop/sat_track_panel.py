@@ -213,6 +213,154 @@ class PolarPassPlot(QWidget):
         p.end()
 
 
+class DopplerCurvePlot(QWidget):
+    """过境多普勒-时间曲线 ``f_d(t)``：只画宿主采样结果，不自己算星历。
+
+    输入 ``points=[{"t": unix_s, "fd": hz}, ...]`` 与 AOS/TCA/LOS 三个时刻。
+    点数不足 2 时画说明文字，**不画一条「零偏移」假曲线**——没有采样就是没有。
+    """
+
+    MARGIN_LEFT_PX = 46
+    MARGIN_RIGHT_PX = 8
+    MARGIN_TOP_PX = 10
+    MARGIN_BOTTOM_PX = 22
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setObjectName("dopplerCurvePlot")
+        self.setMinimumHeight(150)
+        self.setFixedHeight(170)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self._points = []
+        self._aos = None
+        self._tca = None
+        self._los = None
+        self._freq_hz = None
+        self._note = "暂无多普勒曲线"
+
+    # -- 数据入口 ---------------------------------------------------------
+    @staticmethod
+    def _as_float(value):
+        try:
+            value = float(value)
+        except (TypeError, ValueError):
+            return None
+        return value if math.isfinite(value) else None
+
+    def set_curve(self, points, aos=None, tca=None, los=None,
+                  note: str = "", freq_hz=None):
+        cleaned = []
+        for item in points or []:
+            try:
+                tv = float(item["t"])
+                fd = float(item["fd"])
+            except (KeyError, TypeError, ValueError):
+                continue
+            if math.isfinite(tv) and math.isfinite(fd):
+                cleaned.append((tv, fd))
+        cleaned.sort(key=lambda pair: pair[0])
+        self._points = cleaned
+        self._aos = self._as_float(aos)
+        self._tca = self._as_float(tca)
+        self._los = self._as_float(los)
+        self._freq_hz = self._as_float(freq_hz)
+        self._note = note or ("暂无多普勒曲线" if len(cleaned) < 2 else "")
+        self.update()
+
+    def curve_points(self):
+        return list(self._points)
+
+    def markers(self):
+        return {"aos": self._aos, "tca": self._tca, "los": self._los}
+
+    def note(self):
+        return self._note
+
+    def freq_hz(self):
+        return self._freq_hz
+
+    # -- 绘制 -------------------------------------------------------------
+    def paintEvent(self, event):  # noqa: N802 (Qt 命名)
+        t = tokens()
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing, True)
+        w, h = float(self.width()), float(self.height())
+        left = self.MARGIN_LEFT_PX
+        right = max(left + 10.0, w - self.MARGIN_RIGHT_PX)
+        top = self.MARGIN_TOP_PX
+        bottom = max(top + 10.0, h - self.MARGIN_BOTTOM_PX)
+
+        p.setPen(QPen(QColor(t.COLORS["gray_400"]), 1))
+        p.drawLine(QPointF(left, top), QPointF(left, bottom))
+        p.drawLine(QPointF(left, bottom), QPointF(right, bottom))
+        font = p.font()
+        font.setPointSizeF(8.0)
+        p.setFont(font)
+
+        if len(self._points) < 2:
+            p.setPen(QPen(QColor(t.text("tertiary")), 1))
+            p.drawText(QRectF(left, top, right - left, bottom - top),
+                       Qt.AlignCenter, self._note or "暂无多普勒曲线")
+            p.end()
+            return
+
+        ts = [tv for tv, _ in self._points]
+        fds = [fd for _, fd in self._points]
+        t_lo, t_hi = ts[0], ts[-1]
+        if t_hi <= t_lo:
+            t_hi = t_lo + 1.0
+        span_t = t_hi - t_lo
+        f_abs = max(abs(min(fds)), abs(max(fds)), 1.0)
+
+        def x_of(tv):
+            return left + (tv - t_lo) / span_t * (right - left)
+
+        def y_of(fv):
+            # 对称 y 轴：零点居中，正负偏移的视觉权重一致
+            return bottom - (fv + f_abs) / (2.0 * f_abs) * (bottom - top)
+
+        zero_y = y_of(0.0)
+        p.setPen(QPen(QColor(t.text("tertiary")), 1, Qt.DashLine))
+        p.drawLine(QPointF(left, zero_y), QPointF(right, zero_y))
+        p.setPen(QPen(QColor(t.text("tertiary")), 1))
+        p.drawText(QRectF(0, zero_y - 8, left - 4, 16),
+                   Qt.AlignRight | Qt.AlignVCenter, "0")
+        p.drawText(QRectF(0, top - 2, left - 4, 14),
+                   Qt.AlignRight | Qt.AlignVCenter, f"+{f_abs:.0f}")
+        p.drawText(QRectF(0, bottom - 12, left - 4, 14),
+                   Qt.AlignRight | Qt.AlignVCenter, f"-{f_abs:.0f}")
+
+        # AOS/TCA/LOS 竖线：时刻不在采样区间内就不画，不把线钉在边上冒充真实时刻
+        for mark, color_key, label in ((self._aos, "success", "AOS"),
+                                       (self._tca, "gray_400", "TCA"),
+                                       (self._los, "danger", "LOS")):
+            if mark is None or not (t_lo <= mark <= t_hi):
+                continue
+            x = x_of(mark)
+            p.setPen(QPen(QColor(t.COLORS.get(color_key,
+                                              t.text("tertiary"))), 1, Qt.DashLine))
+            p.drawLine(QPointF(x, top), QPointF(x, bottom))
+            p.setPen(QPen(QColor(t.text("tertiary")), 1))
+            p.drawText(QRectF(x - 18, bottom + 2, 36, 14), Qt.AlignCenter, label)
+
+        path = QPainterPath()
+        path.moveTo(QPointF(x_of(ts[0]), y_of(fds[0])))
+        for tv, fv in self._points[1:]:
+            path.lineTo(QPointF(x_of(tv), y_of(fv)))
+        p.setPen(QPen(QColor(t.COLORS["accent"]), 2))
+        p.drawPath(path)
+
+        p.setPen(QPen(QColor(t.text("tertiary")), 1))
+        p.drawText(QRectF(left - 22, bottom + 2, 44, 14), Qt.AlignCenter,
+                   datetime.fromtimestamp(ts[0], timezone.utc).strftime("%H:%M:%S"))
+        p.drawText(QRectF(right - 22, bottom + 2, 44, 14), Qt.AlignCenter,
+                   datetime.fromtimestamp(ts[-1], timezone.utc).strftime("%H:%M:%S"))
+        if self._note:
+            p.drawText(QRectF(left, top + 2, right - left, 14),
+                       Qt.AlignCenter, self._note)
+        p.end()
+
+
 def _tle_policy(age_days: Optional[float], tier: Optional[str] = None) -> Dict:
     """按年龄/档位取显示与闸门字段（桌面层只读，不写判据）。"""
     level = str(tier or "")
@@ -494,6 +642,25 @@ class SatTrackPanel(QFrame):
             "color: " + tokens().text("tertiary") + "; font-size: 8.5pt;")
         polar_layout.addWidget(self.polar_hint)
         root.addWidget(polar_box)
+
+        # ---- 过境多普勒-时间曲线 f_d(t) ----
+        # 采样点由宿主 provider 的 ``doppler`` 提供（唯一实现是
+        # ``sat_passes.compute_doppler_curve``）；面板只画折线与 AOS/TCA/LOS
+        # 标线，不重算多普勒，也不缺省补一条零线。
+        doppler_box = _CollapsibleGroupBox("过境多普勒")
+        self._doppler_box = doppler_box
+        self._make_collapsible(doppler_box, "过境多普勒", 3, "satDopplerBox")
+        doppler_layout = QVBoxLayout(doppler_box)
+        self.doppler_plot = DopplerCurvePlot()
+        doppler_layout.addWidget(self.doppler_plot)
+        self.doppler_hint = QLabel("f_d(t) = -v_r/c*f0；绿=AOS，灰=TCA，红=LOS")
+        self.doppler_hint.setWordWrap(True)
+        self.doppler_hint.setMinimumWidth(0)
+        self.doppler_hint.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
+        self.doppler_hint.setStyleSheet(
+            "color: " + tokens().text("tertiary") + "; font-size: 8.5pt;")
+        doppler_layout.addWidget(self.doppler_hint)
+        root.addWidget(doppler_box)
 
         # ---- 星下点 / 地面轨迹 / 覆盖圈 ----
         # 复用公用 OSM 地图（osm_map.OsmMapView.add_layer），本面板不画底图。
@@ -860,6 +1027,7 @@ class SatTrackPanel(QFrame):
         self._passes_fetched_unix = None
         self._pass_warning = ""
         self.polar_plot.set_track([])
+        self.doppler_plot.set_curve([])
         # 注意：不清 ``_last_now_unix``——它只是「上次显示用的时基」，
         # 与过境数据无关；清掉会让 UTC 开关退回一次时钟读取（数字会跳）。
 
@@ -906,7 +1074,12 @@ class SatTrackPanel(QFrame):
                 continue
             peak = row.get("max_alt")
             parsed.append({"aos": aos, "los": los, "peak_alt": peak,
-                           "track": row.get("track") or []})
+                           "track": row.get("track") or [],
+                           # 多普勒曲线与 AOS/LOS 同源（宿主一次算好）；
+                           # freq_hz 是采样时用的标称频率，缺它只能报未知。
+                           "doppler": row.get("doppler") or [],
+                           "tca": row.get("tca_unix"),
+                           "freq_hz": row.get("freq_hz")})
         parsed.sort(key=lambda r: r["aos"])
         self._passes = parsed
 
@@ -958,6 +1131,7 @@ class SatTrackPanel(QFrame):
             self.countdown_label.setText("--")
             self.pass_abs_label.setText("时间引擎不可用，倒计时暂停")
             self.polar_plot.set_track([])
+            self.doppler_plot.set_curve([])
             return
         self._last_now_unix = float(now_unix)
 
@@ -966,12 +1140,14 @@ class SatTrackPanel(QFrame):
             self.countdown_label.setText("--")
             self.pass_abs_label.setText("先选择一颗卫星")
             self.polar_plot.set_track([])
+            self.doppler_plot.set_curve([])
             return
         self._ensure_passes(name, now_unix)
         if self._pass_provider is None:
             self.countdown_label.setText("--")
             self.pass_abs_label.setText("过境数据未接入（由主窗口注入预测结果）")
             self.polar_plot.set_track([])
+            self.doppler_plot.set_curve([])
             return
 
         active = next((r for r in self._passes if r["los"] > now_unix), None)
@@ -980,10 +1156,12 @@ class SatTrackPanel(QFrame):
             self.pass_abs_label.setText(
                 self._pass_warning or "预测窗口内这颗星不再升起")
             self.polar_plot.set_track([])
+            self.doppler_plot.set_curve([])
             return
         track = active.get("track") or []
         self.polar_plot.set_track(
             track, note="" if track else "该过境无轨迹数据")
+        self._update_doppler_curve(active)
 
         utc = self.utc_check.isChecked()
         aos_txt = self._fmt_when(active["aos"], utc)
@@ -1006,6 +1184,31 @@ class SatTrackPanel(QFrame):
         if self._pass_warning:
             sub += f" · {self._pass_warning}"
         self.pass_abs_label.setText(sub)
+
+    def _update_doppler_curve(self, active: Dict) -> None:
+        """把宿主的 f_d(t) 采样交给绘图控件；缺数据时写明原因，不画假曲线。
+
+        面板不做频率换算：``freq_hz`` 是宿主采样时用的标称频率，只用于标注
+        「这条曲线是在什么频率下算的」。当前输入与之不同时明说尚未刷新，
+        避免把旧频率的曲线当成新输入的结论。
+        """
+        points = active.get("doppler") or []
+        used_hz = DopplerCurvePlot._as_float(active.get("freq_hz"))
+        cur_hz = float(self.current_downlink_hz())
+        if not points:
+            note = ("未提供下行频率，无法画 f_d(t)"
+                    if not used_hz or used_hz <= 0
+                    else "该过境没有多普勒采样点（宿主未提供）")
+        elif not used_hz or used_hz <= 0:
+            note = "宿主未给采样频率，曲线频率口径未知"
+        elif abs(cur_hz - used_hz) > 1.0:
+            note = (f"f_d(t) @ {used_hz / 1e6:.4f} MHz"
+                    f"（当前输入 {cur_hz / 1e6:.4f} MHz，下次取数后更新）")
+        else:
+            note = f"f_d(t) @ {used_hz / 1e6:.4f} MHz"
+        self.doppler_plot.set_curve(points, active.get("aos"), active.get("tca"),
+                                    active.get("los"), note=note,
+                                    freq_hz=used_hz)
 
     # ------------------------------------------------------------ 内部槽
     def _on_sat_selected(self, name: str):

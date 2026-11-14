@@ -14056,7 +14056,8 @@ class MainWindow(QMainWindow):
             from mbdsdr_ai.sat_passes import GroundStation
             gs = GroundStation(lat_deg=self._observer_lat,
                                lon_deg=self._observer_lon)
-        from mbdsdr_ai.sat_passes import (predict_upcoming_passes,
+        from mbdsdr_ai.sat_passes import (compute_doppler_curve,
+                                          predict_upcoming_passes,
                                           sample_pass_track)
         from settings import (effective_pass_min_elevation_deg,
                               effective_pass_window_hours)
@@ -14064,6 +14065,9 @@ class MainWindow(QMainWindow):
             [row["tle"]], gs,
             hours=float(effective_pass_window_hours(self.settings)),
             min_alt=float(effective_pass_min_elevation_deg(self.settings)))
+        # 多普勒曲线与 AOS/LOS 同源同频：频率取面板当前输入（用户看到的
+        # 那个值），采样只走 compute_doppler_curve 一处，面板不重算。
+        freq_hz = float(self.sat_track_panel.current_downlink_hz())
         rows = []
         for entry in entries:
             p = entry["pass"]
@@ -14071,14 +14075,21 @@ class MainWindow(QMainWindow):
             # 显示层（面板 UTC 开关）只做格式化，不改这里的时基。
             aos = p.rise_time.utc_datetime()
             los = p.set_time.utc_datetime()
+            tca = p.max_alt_time.utc_datetime()
+            curve = compute_doppler_curve(row["tle"], gs, p, freq_hz,
+                                          num_points=61)
             rows.append({
                 "aos_unix": aos.timestamp(),
                 "los_unix": los.timestamp(),
+                "tca_unix": tca.timestamp(),
                 "max_alt": float(p.max_alt),
                 "aos_utc": aos,
                 "los_utc": los,
                 # 方位/仰角轨迹与过境时刻同一传播源；面板只画不重算。
                 "track": sample_pass_track(row["tle"], gs, p, num_points=48),
+                "freq_hz": freq_hz,
+                "doppler": [{"t": pt.time.utc_datetime().timestamp(),
+                             "fd": float(pt.doppler_hz)} for pt in curve],
             })
         return rows
 
