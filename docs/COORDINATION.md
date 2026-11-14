@@ -1084,7 +1084,7 @@ No supported devices found），GNSS+SDR 同开复验没做成；离线那次
 - **LRPT 队列#9 实验结果（4sps 矩阵，已测未入库）**：2/4sps × RRC ×
   Costas 带宽 6 配置均**不敌基线**（2sps 前馈 269/91/16 仍最优；4sps
   bw.005 ASM=108 但 VCDU=10）——"细定时网格"假设证伪，天花板是信道。
-  Gardner 环修复版已改进 lrpt_modem.py（中点插值+归一+钳制+热启动，
+  Gardner 环修复版已改进 lrpt_modem.py（中点插值+归一+钳制+热启动〔证：`4d5feff1` — `mbdsdr_ai/lrpt_modem.py:476` — `热启动`〕，
   默认关未验）；擦除辅助 RS（2e+f≤32，救 75 条部分帧）设计已论证但
   未实现。矩阵脚本在 output/tmp/lrpt_4sps_matrix.py。
 - 前批落定：LRPT 图像链破层批 **已推（7d04a3d）**；COORDINATION.md
@@ -1120,7 +1120,7 @@ No supported devices found），GNSS+SDR 同开复验没做成；离线那次
   「你参考一下原项目呀」——查实上一版 6 处自说自话：能力位凭空编、桥接
   通道虚构、MockSource/预填充瀑布违反「绝不伪造数据」、站点用真实地名
   （身份红线）、时间倍率与桌面端不一致、把 6DOF/VR 规划项画成已上线。
-  已改为**让产品从原仓库代码长出来**：`build/sync_from_repo.py` 只读
+  已改为**让产品从原仓库代码长出来**：`build/sync_from_repo.py`〔证：`5a977026` — `web/product/build/sync_from_repo.py:71` — `def literal_assign`〕只读
   AST/正则解析 mcp_server.py（14 工具域 / 82 工具→域 / 79 写工具模式）、
   desktop/tokens.py（figma 主题令牌）、rf_sky_view.py（5 档时间倍率）、
   tokens.h（ControlHub :50732）、sat_tracker.py（内置 TLE/下行频率/禁用
@@ -1174,7 +1174,7 @@ No supported devices found），GNSS+SDR 同开复验没做成；离线那次
   `proj_perspective.c`（原样进 4×4 透视，max_ui_fov=120°）与
   `proj_stereographic.c`（`x'=2x/(1−z)`，max_ui_fov=185°）可插拔；
   地景是 FRAME_OBSERVED 下的球面纹理（w=0，只随视线转）。
-  已改：`31-celestial.js` 换「相机在球心 → 视图空间(X/Y/Z) → 全屏平面投影」，
+  已改：`31-celestial.js`〔证：`5a977026` — `web/product/run_all.py:97` — `投影切换阈值`〕换「相机在球心 → 视图空间(X/Y/Z) → 全屏平面投影」，
   ≤88° 针孔透视 / 更大立体投影；**删圆形 clip、圆边框、屏幕径向渐变**；
   地平线透视下成直线（大圆在相机里的正确像）、鱼眼下成弧。`30-sky.js` 地景
   改**逐屏幕列**求 `alt(y)=h(az)` 首个穿越点再整体填充（上一版按方位×高度分块，
@@ -1211,7 +1211,7 @@ No supported devices found），GNSS+SDR 同开复验没做成；离线那次
   **GPS 侧本窗口收口（3f225db）**：IS-GPS-200E Table 3-I 内置
   `gps_ca.ca_code`，官方 PDF 脚本提取 + gps-sdr-sim 比特级对拍 + octal 37/37
   + Gold 指纹，金样 `tests/golden/gps_ca_prn_vectors.json`；材料
-  GPScacodes.py 裁决更正（标准码的反极性版本，原"非标准"判词有误）；
+  GPScacodes.py 裁决更正（标准码的反极性版本，原"非标准"判词有误）〔证：`3f225dbe` — `tests/test_gps_prn.py:50` — `gps_ca_prn_vectors.json`〕；
   ④健壮性与长跑＝**督办登记（2026-11-06 06:10）**：
   `scripts/soak_truth_battery.py --rounds 20`（真值电池 15 文件 174 测试/轮）
   于 11-06 02:09:33–03:50:07 跑满 **20/20 轮全绿**（逐轮 rc=0、
@@ -2246,6 +2246,8 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `scripts/repro/2026-11-14-list-render-baseline.py` | 统一搜索性能线/6ae85f56（六类长列表渲染基线复跑脚本（扫频/书签/过境/ADS-B/APRS/设备，每档预热1+采样5取中位，--mode before 放大上限做反证）） | 2026-11-14 09:42 | 本笔 |
 | `docs/perf-evidence/2026-11-14/list-render-baseline.json` | 统一搜索性能线/6ae85f56（长列表渲染上限改前/改后逐次实测与负载（六节 after + 两节 before）） | 2026-11-14 09:42 | 本笔 |
 | `docs/performance-baseline.md` | 统一搜索性能线/6ae85f56（§2 增加书签 500 / ADS-B 300 两行，新增 §2.1 评估后不设上限的六类列表实测与依据） | 2026-11-14 09:42 | 本笔 |
+| `tests/conftest.py` | A03静默降级线/6ae85f56（会话级关掉 Qt 自动退出（quitNow latch），修 guards→device 跨文件 5 红） | 2026-11-14 09:50 | 本笔 |
+| `docs/COORDINATION.md` | 文档引用复核线/6ae85f56（A类补证据：最后 4 条 COORD 断言补四元组） | 2026-11-14 09:52 | 本笔 |
 
 > 上表各行均由 `claim` 台账推导：owner 原文与 `acquired_at` 直接取自台账，
 > 目的优先用台账里的 `claim_reason`，没有就如实写「未声明」，不补编。时间列只是
