@@ -1827,6 +1827,10 @@ def _restore_qsettings_isolation():
     for scope in (real.UserScope, real.SystemScope):
         real.setPath(real.IniFormat, scope, _QS_ISOLATION["session_path"])
     _QS_ISOLATION.update(cls=None, patched={})
+    session_path = _QS_ISOLATION.get("session_path")
+    if session_path:
+        # session 级唯一一次清理（见 _isolate_qsettings 的说明）。
+        shutil.rmtree(session_path, ignore_errors=True)
 
 
 @pytest.fixture(autouse=True)
@@ -1850,7 +1854,13 @@ def _isolate_qsettings():
         real.setDefaultFormat(old_format)
         for scope in (real.UserScope, real.SystemScope):
             real.setPath(real.IniFormat, scope, _QS_ISOLATION["session_path"])
-        shutil.rmtree(path, ignore_errors=True)
+        # 不在这里逐个删 case 目录。隔离靠的是每个用例独立的 case%05d
+        # 路径，删与不删都不影响下一用例的隔离；但全量近 8000 个用例就是
+        # 近 8000 次 shutil.rmtree，宿主沙箱对 rmtree 的安全包装会在
+        # ntpath.realpath 上触发 C 层崩溃（2026-11-14 两轮权威全量都精确
+        # 崩在第 3961 个用例的 teardown：一次 access violation、一次
+        # Fatal Python error: Aborted）。统一挪到 session 结束时清一次，
+        # 既避开累积调用，也顺手把原本会残留的 session_path 收干净。
 
 
 @pytest.fixture(scope="module")
