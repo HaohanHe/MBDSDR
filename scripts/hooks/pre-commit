@@ -344,9 +344,21 @@ def main():
         if append_only.exists():
             started = time.perf_counter()
             proc = subprocess.run(
-                [sys.executable, str(append_only), "--doc", doc_rel], cwd=str(root))
+                [sys.executable, str(append_only), "--doc", doc_rel], cwd=str(root),
+                capture_output=True, text=True, encoding="utf-8", errors="replace")
             elapsed = time.perf_counter() - started
+            if proc.stdout:
+                print(proc.stdout.rstrip())
+            if proc.stderr:
+                print(proc.stderr.rstrip(), file=sys.stderr)
             print(f"[pre-commit] ⑤ §6.1 只增检查 {elapsed * 1000.0:.0f}ms")
+            # 纯追加提示：只告诉人「这笔不用整档 claim」，**不改变退出码**。
+            # 判据来自 ⑤ 自己打印的 PURE_APPEND 机器行（同一个 is_pure_append），
+            # 这里不再另写一份「是不是纯追加」。
+            if proc.returncode == 0 and "PURE_APPEND=yes" in (proc.stdout or ""):
+                print("[pre-commit] 本次为纯追加，可免 claim"
+                      "（§6.1 追加行由 append_coordination_row.py 的窄锁互斥；"
+                      "本提示不改变退出码）。")
             if proc.returncode == 1:
                 print("[pre-commit] 拒绝提交：§6.1 表格有行被删除或改写。")
                 print("[pre-commit] 规则（§6.1.8）：表格行只许追加；释放时在行末追加"

@@ -2292,6 +2292,9 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `scripts/safe_commit.py` | 收尸线/6ae85f56（提交前追加 claim-line，只复述本人当前 claim） | 2026-11-14 11:10 | 本笔 |
 | `scripts/audit_claim_lines.py` | 收尸线/6ae85f56（按 claim-line 归线并核对台账（任务一）） | 2026-11-14 11:10 | 本笔 |
 | `tests/test_claim_line_trailer.py` | 收尸线/6ae85f56（claim-line 生成/审计分桶/错线名反证） | 2026-11-14 11:10 | 本笔 |
+| `scripts/hooks/pre-commit` | 收尸线/6ae85f56（纯追加提示，不改退出码（任务二）） | 2026-11-14 11:10 | 本笔 |
+| `scripts/check_coordination_append_only.py` | 收尸线/6ae85f56（输出 PURE_APPEND 机器行供提示复用） | 2026-11-14 11:10 | 本笔 |
+| `tests/test_precommit_pure_append_hint.py` | 收尸线/6ae85f56（纯追加提示与退出码对照用例） | 2026-11-14 11:10 | 本笔 |
 | `mbdsdr_ai/tool_registry.py` | 进程内工具守卫线/6ae85f56（call 统一入口发 PRE/RESULT，trigger 区分 model/user，否决返回结构化拒绝） | 2026-11-14 11:11 | 本笔 |
 | `mbdsdr_ai/agent.py` | 进程内工具守卫线/6ae85f56（工作流执行器调用标注 model 触发） | 2026-11-14 11:11 | 本笔 |
 | `mbdsdr_ai/orchestrator.py` | 进程内工具守卫线/6ae85f56（编排执行器调用标注 model 触发） | 2026-11-14 11:11 | 本笔 |

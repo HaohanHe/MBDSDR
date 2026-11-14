@@ -19,6 +19,10 @@
 
 退出码：0 只增/未变；1 有删除或改写；2 用法/读取失败。
 本脚本只做机械比对，不判断归属、不代为补行。
+
+输出里固定带一行机器可读判定 ``PURE_APPEND=yes`` / ``PURE_APPEND=no（原因）``：
+pre-commit 用它决定要不要打印「本次为纯追加，可免 claim」。**这一行只服务提示，
+不参与退出码**——退出码仍只由「有没有删/改表格行」决定。
 """
 from __future__ import annotations
 
@@ -150,6 +154,15 @@ def main(argv: List[str] | None = None) -> int:
             # 暂存区里没有这份文档：本笔没动它，不算违规。
             print(f"暂存区无 {doc}：本笔未改动该文件，跳过（0 行缺失）")
             return EXIT_OK
+
+    # 机器可读：整篇是否只是插入了表格行（窄锁追加 vs 整档编辑）。
+    # 放在 removed_rows 之前打印，保证即便表格解析失败也不影响这行提示；
+    # 它不改变下面的退出码。
+    try:
+        pure, why = is_pure_append(base_text, target_text)
+        print(f"PURE_APPEND={'yes' if pure else 'no'}" + ("" if pure else f"（{why}）"))
+    except ValueError:
+        pass
 
     try:
         missing = removed_rows(base_text, target_text)
