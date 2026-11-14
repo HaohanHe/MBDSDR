@@ -2272,13 +2272,12 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `desktop/bookmark_panel.py` | UI防呆线/6ae85f56（A2: 删书签确认默认 No，正文写明不可撤销与落盘位置） | 2026-11-14 11:03 | 本笔 |
 | `tests/test_bookmark_panel_safety.py` | UI防呆线/6ae85f56（A2: 判据（默认按钮实参=No、文案含后果）+ 反证） | 2026-11-14 11:03 | 本笔 |
 | `docs/ux-audit.md` | UI防呆线/6ae85f56（D6: 写死确认框默认按钮口径与五处对照） | 2026-11-14 11:03 | 本笔 |
+| `mbdsdr_ai/time_basis.py` | 公理体检线/6ae85f56（时空域缺口：tle_epoch_report 改用共享容差常量） | 2026-11-14 11:03 | 本笔 |
 | `tests/test_tle_epoch_single_source.py` | 公理体检线/6ae85f56（判据：TLE 年龄/未来判定两出口逐值一致） | 2026-11-14 11:03 | 本笔 |
 | `mbdsdr_ai/lrpt_pipeline.py` | 参考移植线/20261114（12.1 每帧 RS 纠错量聚合进 stats（summarize_rs_errors）） | 2026-11-14 11:05 | 本笔 |
 | `desktop/status_panel.py` | 参考移植线/20261114（12.1 信号质量区 FEC 纠错一行） | 2026-11-14 11:05 | 本笔 |
 | `desktop/weather_panel.py` | 参考移植线/20261114（12.1 解码终态转发信号 decode_result） | 2026-11-14 11:05 | 本笔 |
 | `desktop/main_window.py` | 参考移植线/20261114（12.1 把真录链 rs_* 统计接到状态面板） | 2026-11-14 11:05 | 本笔 |
-| `mbdsdr_ai/tle_epoch.py` | 公理体检线/6ae85f56（时空域缺口：未来历元容差常量化（TLE_FUTURE_TOL_DAYS）） | 2026-11-14 11:03 | 本笔 |
-| `mbdsdr_ai/tle_integrity.py` | 公理体检线/6ae85f56（时空域缺口：freshness 暴露 age_days_signed/epoch_implausible） | 2026-11-14 11:03 | 本笔 |
 | `mbdsdr_ai/skyengine/satellites.py` | 公理体检线/6ae85f56（时空域缺口：过境二分容差提为 RISE_SET_BISECT_TOL_S） | 2026-11-14 11:06 | 本笔 |
 | `tests/test_satellite_rise_set_precision.py` | 公理体检线/6ae85f56（判据：AOS/LOS 误差 ≤ 声明容差（去掉二分必红）） | 2026-11-14 11:06 | 本笔 |
 | `desktop/control_panel.py` | S1-S4结果伪造线/6ae85f56（静默丢弃：切模式不再调 _update_freq_display，保留用户未回车的频率输入） | 2026-11-14 11:06 | 本笔 |
@@ -2286,6 +2285,8 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `docs/COORDINATION.md` | S1-S4结果伪造线/6ae85f56（本笔 §6.1 登记行，提交后释放） | 2026-11-14 11:06 | 本笔 |
 | `desktop/shortcuts_panel.py` | UI防呆线/6ae85f56（A3：全部恢复默认批量清键位前确认，默认「否」并写明条数/不可撤销） | 2026-11-14 11:07 | 本笔 |
 | `tests/test_shortcuts_reset_all_guard.py` | UI防呆线/6ae85f56（A3 判据：question 默认按钮为 No、选否则保留、选是则清空（反证已跑：去掉确认即红）） | 2026-11-14 11:07 | 本笔 |
+| `docs/learn/nanovna/vna-workflow.md` | 无线电课清单线/6ae85f56（讲座清单 P1-B5：补接地/地网测量前提（900→400MHz 示例，读数不可比）） | 2026-11-14 11:07 | 本笔 |
+| `mbdsdr_ai/acquisition.py` | 无线电课清单线/6ae85f56（讲座清单 P1-B4 更正：fe_diagnose 传播提示改为实时驱动（Kp/F10.7/黑子/X 射线/本地天气，带观测时刻与来源；缺值即未知，无默认平静）） | 2026-11-14 11:07 | 本笔 |
 | `mbdsdr_ai/tool_guard.py` | 进程内工具守卫线/6ae85f56（共享 PRE/RESULT 守卫叶子（MCP 面与进程内面唯一实现）） | 2026-11-14 11:09 | 本笔 |
 | `mbdsdr_ai/core/mcp_server.py` | 进程内工具守卫线/6ae85f56（ToolCallGate 的 PRE/RESULT 改为调用共享实现） | 2026-11-14 11:09 | 本笔 |
 | `scripts/claim_window.py` | 收尸线/6ae85f56（claim-line 尾行解析/线名归一（任务一）） | 2026-11-14 11:10 | 本笔 |
@@ -2300,6 +2301,9 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `mbdsdr_ai/orchestrator.py` | 进程内工具守卫线/6ae85f56（编排执行器调用标注 model 触发） | 2026-11-14 11:11 | 本笔 |
 | `mbdsdr_ai_mcp_server.py` | 进程内工具守卫线/6ae85f56（旧壳执行入口标注 model 触发，避免误记为用户触发） | 2026-11-14 11:12 | 本笔 |
 | `tests/test_inproc_tool_guard.py` | 进程内工具守卫线/6ae85f56（进程内 PRE/RESULT/否决/触发者/字段一致判据与反证） | 2026-11-14 11:12 | 本笔 |
+| `docs/axioms.md` | 公理体检线/6ae85f56（时空域六项不变量登记（挂 A01/A02/A03/A12）+ 未闭合项 + 计数重生） | 2026-11-14 11:12 | 本笔 |
+| `mbdsdr_ai/space_weather.py` | 无线电课清单线/6ae85f56（新增：传播条件实时采集/快照回放/缺值未知（无默认平静）） | 2026-11-14 11:12 | 本笔 |
+| `tests/test_space_weather_propagation.py` | 无线电课清单线/6ae85f56（判据：Kp 高低建议不同/缺值未知/回放一致；反证默认平静已跑红） | 2026-11-14 11:12 | 本笔 |
 | `desktop/main_window.py` | UI防呆线/6ae85f56（A1：录音中断开/切换设备先确认（默认取消），拔设备不弹窗但状态栏写明落盘路径） | 2026-11-14 11:12 | 本笔 |
 | `tests/test_recording_stop_guard.py` | UI防呆线/6ae85f56（A1 判据：断开/切设备必弹确认且取消保留录音；拔设备不弹窗并写明路径（反证已跑：去确认后 3 条红）） | 2026-11-14 11:12 | 本笔 |
 | `desktop/scanner_panel.py` | S1-S4结果伪造线/6ae85f56（静默丢弃：扫频在途时重复触发开始，状态行写「扫频进行中（忽略重复开始）」） | 2026-11-14 11:13 | 本笔 |
@@ -2321,8 +2325,22 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `tests/test_claim_line_trailer.py` | 收尸线/6ae85f56（分段正反例 + owner 后缀归一） | 2026-11-14 11:20 | 本笔 |
 | `mbdsdr_ai/rtklib_adapter.py` | 时空核对线/timeline-now（A1 删除 Klobuchar 固定典型系数兜底：缺广播参数返回 None（uncorrected）） | 2026-11-14 11:20 | 本笔 |
 | `tests/test_klobuchar_no_default.py` | 时空核对线/timeline-now（A1 反证：退回典型系数必须红） | 2026-11-14 11:20 | 本笔 |
+| `mbdsdr_ai/goes_lrit.py` | 参考移植线/20261114（12.2 文件级重组五类失败计数 + 端到端 CRC 门） | 2026-11-14 11:20 | 本笔 |
 | `desktop/bookmark_panel.py` | UI防呆线/6ae85f56（C1-C5：添加/编辑/删除/导入/导出失败改三段式（发生了什么/原因/下一步）） | 2026-11-14 11:20 | 本笔 |
 | `tests/test_bookmark_failure_next_steps.py` | UI防呆线/6ae85f56（C1-C5 判据：五处失败正文含原因与下一步（反证已跑：换回裸异常 5 条全红）） | 2026-11-14 11:20 | 本笔 |
+| `mbdsdr_ai/orbit_determination.py` | 无线电课清单线/6ae85f56（默认 init_P 量纲修正（30e3 km/30 km·s⁻¹ → 30 km/0.03 km·s⁻¹）；反证：修前 20s 内半径 6737→5539 km） | 2026-11-14 11:21 | 本笔 |
+| `tests/test_orbit_determination_chain.py` | 无线电课清单线/6ae85f56（定轨链可复跑：两次逐位一致；空/单点观测必抛错；空 IQ 无观测） | 2026-11-14 11:21 | 本笔 |
+| `mbdsdr_ai/sat_passes.py` | 无线电课清单线/6ae85f56（多普勒单一来源：新增 DopplerSampler + doppler_hz_from_range_rate，compute_doppler_curve 改用它） | 2026-11-14 11:21 | 本笔 |
+| `mbdsdr_ai/satnogs_adapter.py` | 无线电课清单线/6ae85f56（删除自带的 SGP4+doppler_shift 曲线，build_curve 委托 DopplerSampler） | 2026-11-14 11:21 | 本笔 |
+| `mbdsdr_ai/gpredict_adapter.py` | 无线电课清单线/6ae85f56（TLEData 保留原始 line1/line2，供 skyfield 复用不重编码） | 2026-11-14 11:21 | 本笔 |
+| `tests/test_doppler_single_source.py` | 无线电课清单线/6ae85f56（反证：旧实现与新实现差 ~0.7Hz，1e-9 断言必红） | 2026-11-14 11:21 | 本笔 |
+| `mbdsdr_ai/{time_format.py,time_basis.py,new_spacetime.py}` | 公理体检线/6ae85f56（时区兜底降级可检测：三态(system-rules/fixed-offset/unavailable)+对象自带标记+查询接口；呈现点接固定偏移说明） | 2026-11-14 11:21 | 本笔 |
+| `desktop/{time_machine.py,rf_sky_view.py}` | 公理体检线/6ae85f56（本地时间呈现点：本地输入框/天空状态卡时钟接降级说明） | 2026-11-14 11:21 | 本笔 |
+| `mbdsdr_ai/tests/test_timezone_fallback_detection.py` | 公理体检线/6ae85f56（判据：构造系统时区不可发现必判降级，正常未降级；去掉标记必红） | 2026-11-14 11:21 | 本笔 |
+| `docs/axioms.md` | 公理体检线/6ae85f56（时区未闭合项闭合：接口/判据/反证写入不变量表） | 2026-11-14 11:21 | 本笔 |
+| `{mbdsdr_ai/tool_guard.py,mbdsdr_ai/core/mcp_server.py,mbdsdr_ai/tool_registry.py,desktop/main.py,tests/test_user_call_audit.py}` | 进程内工具守卫线/6ae85f56（留痕落盘：ToolRegistry 自动挂 AuditLog（与 MCP 同落点）+ 桌面入口默认开启审计） | 2026-11-14 11:21 | 本笔 |
+| `mbdsdr_ai/tle_epoch.py` | 公理体检线/6ae85f56（时空域缺口：未来历元容差常量化（TLE_FUTURE_TOL_DAYS）） | 2026-11-14 11:03 | 本笔 |
+| `mbdsdr_ai/tle_integrity.py` | 公理体检线/6ae85f56（时空域缺口：freshness 暴露 age_days_signed/epoch_implausible） | 2026-11-14 11:03 | 本笔 |
 
 > 上表各行均由 `claim` 台账推导：owner 原文与 `acquired_at` 直接取自台账，
 > 目的优先用台账里的 `claim_reason`，没有就如实写「未声明」，不补编。时间列只是

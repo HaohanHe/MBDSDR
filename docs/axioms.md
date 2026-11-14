@@ -319,16 +319,31 @@ D6 的事实行会给出「核对 N 条 / unknown-path 0 / line-out-of-range 0�
 |---|---|---|---|---|
 | 过境起始基准 | `sat_passes.predict_passes`（排班门限 `PASS_MIN_ALT_DEG`）、`skyengine.satellites.next_rise_set(horizon_alt=)`、`PASS_COARSE_STEP_S`/`PASS_FINE_STEP_S` | A02 | `tests/test_pass_step_alignment.py`、`tests/test_grazing_pass_detection.py`、`tests/test_satellite_rise_set_precision.py` | 已兜：门限未放宽、擦边不放过、事件顺序有标记 |
 | TLE 老化与未来历元 | `tle_integrity.freshness`、`time_basis.tle_epoch_report`、`tle_epoch.TLE_FUTURE_TOL_DAYS` | A01 + A12 | `tests/test_tle_epoch_single_source.py`、`tests/test_tle_age_visibility.py`、`mbdsdr_ai/tests/test_tle_freshness_predict.py` | 本轮补齐：年龄/未来判定单一产生点、容差单一常量，`freshness` 暴露 `age_days_signed` 与 `epoch_implausible` |
-| 时区与夏令时 | `time_format.resolve_tz`、`time_basis.local_to_utc(fold=)` | A02 + A03 | `mbdsdr_ai/tests/test_time_basis.py`、`mbdsdr_ai/tests/test_time_scale_physics.py` | 已兜：歧义必须显式 `fold`、不存在时刻抛错、墙钟回跳告警；兜底固定偏移只在取不到时区规则时发生（见未闭合项） |
+| 时区与夏令时 | `time_format.resolve_tz`/`resolve_tz_info`/`tz_degradation`/`local_time_note`、`time_basis.local_to_utc(fold=)` | A02 + A03 | `mbdsdr_ai/tests/test_timezone_fallback_detection.py`、`mbdsdr_ai/tests/test_time_basis.py`、`mbdsdr_ai/tests/test_time_scale_physics.py` | 已兜：歧义必须显式 `fold`、不存在时刻抛错、墙钟回跳告警；兜底固定偏移带可检测降级标记（三态 `system-rules`/`fixed-offset`/`unavailable`） |
 | 星下点与地面轨迹 | `ground_track.satellite_subpoint`/`ground_track`/`satellite_footprint`、`orbit.wgs72_ecef_km_to_llh` | A01 | `tests/test_ground_track.py`、`tests/test_ellipsoid_boundary.py` | 已兜：星下点只走 WGS-72 椭球反解；覆盖圈用同一 `WGS72_A` 做球面近似（已在函数 docstring 声明，不与椭球反解混用） |
 | 可见性门限 | `sat_passes.VISIBLE_MIN_ALT_DEG`、`ground_track.DEFAULT_MIN_ELEVATION_DEG` | A01 | `tests/test_visible_gate_single_source.py` | 已兜：卫星"可见"只有一个仰角常量；恒星可见性（星等/消光）是另一概念，不得共用该常量 |
 | 步长误差界 | `PASS_COARSE_STEP_S`/`PASS_FINE_STEP_S`/`PASS_BISECT_TOL_S`、`skyengine.satellites.RISE_SET_BISECT_TOL_S`、`TRAIL_STEP_S`/`TRAIL_STEP_MAX_ERR_DEG`、`DEFAULT_TRACK_STEP_S`/`DEFAULT_TRACK_STEP_MAX_CHORD_KM` | A02 | `tests/test_ground_track_step_bound.py`、`tests/test_pass_step_alignment.py`、`tests/test_satellite_rise_set_precision.py` | 已兜：地面轨迹有弦高界；过境 AOS/LOS 由内联 `1.0s` 提为 `RISE_SET_BISECT_TOL_S` 并被断言（误差 ≤ 声明容差） |
 
-**未闭合项（复核 2026-12-14）**：`time_format` 在系统时区不可发现时退到
-"此刻固定偏移"，该降级目前没有可检测标记；DST 地区的用户会得到静默的固定
-偏移换算。转绿条件：`resolve_tz(None)` 的兜底返回值带可检测标记（或调用方
-能查询 `tz` 是否携带 DST 规则），并有用例断言该标记在兜底时出现、正常时区
-时不出现。在此之前，本条只作为已登记缺口，不得写成"时空域已全部兜住"。
+**已闭合（2026-11-14）**：时区兜底的降级此前不可检测，DST 地区的用户会得到
+静默的固定偏移换算。现在三种情形可区分且调用方能判定：
+
+- `time_format.resolve_tz_info()` 返回 `TZResolution(tz, state, source, degraded, reason, note)`，
+  `state ∈ {system-rules, fixed-offset, unavailable}`；
+- `resolve_tz(None)` 保持返回 `tzinfo` 契约（不破坏 `astimezone` 调用点），兜底时返回
+  `_FixedOffsetTZ`（`mbdsdr_degraded=True`、`mbdsdr_state="fixed-offset"`、`mbdsdr_reason`）；
+- `tz_degradation(tz)` 可对任意时区对象回查同一结论，`local_time_note()` 给出
+  「当前为固定偏移，不随夏令时调整（系统时区规则不可发现）」；
+- `local_to_utc` 的 docstring 明示：固定偏移下 `fold=0/1` 偏移相同，夏令时歧义
+  **无法检测**，调用方应先查降级状态再呈现；
+- 呈现点已接同一句说明：`desktop/time_machine.py`（本地时间输入）、
+  `desktop/rf_sky_view.py::format_local_time`（天空状态卡本地时钟）、
+  `new_spacetime.local_display()`/`TimeInfo.local_note`（时间信息）。
+
+判据：`mbdsdr_ai/tests/test_timezone_fallback_detection.py`（10 passed）——注入
+`_probe_system_tz → (None, …)` 构造「系统时区不可发现」，断言调用方能判定降级；
+正常探测时断言未降级、说明为空；并覆盖 `unavailable` 与「冻结偏移不随冬夏变化」。
+反证：删掉 `_FixedOffsetTZ.mbdsdr_degraded` 后该文件 2 failed（`test_fixed_offset_is_detected`、
+`test_time_basis_reexports_query_api`），恢复即绿。
 
 ## 棘轮（存量只减不增）
 

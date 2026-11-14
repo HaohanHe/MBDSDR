@@ -28,18 +28,38 @@ except ImportError:  # 旧脚本以扁平模块方式 import time_basis
 # 显示格式化是叶子能力（time_format 不依赖任何 mbdsdr_ai 模块），放在本模块
 # 会让「只要一个 ISO 字符串」的调用方拖上整块时间系统。原处再导出，保持
 # `from .time_basis import format_local` 的既有调用方不变。
-from .time_format import as_utc as _as_utc, format_local, resolve_tz as _resolve_tz
+# 时区降级查询也从这里透出：调用方以 time_basis 为时间系统单一入口时，
+# 不必再单独 import time_format 才能知道「本地时间是不是固定偏移」。
+from .time_format import (
+    DEGRADED_TZ_NOTE,
+    TZ_STATE_FIXED_OFFSET,
+    TZ_STATE_SYSTEM_RULES,
+    TZ_STATE_UNAVAILABLE,
+    as_utc as _as_utc,
+    format_local,
+    local_time_note,
+    resolve_tz as _resolve_tz,
+    resolve_tz_info,
+    tz_degradation,
+)
 
 __all__ = [
     "UTC",
     "LEAP_SECOND_TABLE",
     "TLE_EPOCH_YEAR_PIVOT",
+    "TZ_STATE_SYSTEM_RULES",
+    "TZ_STATE_FIXED_OFFSET",
+    "TZ_STATE_UNAVAILABLE",
+    "DEGRADED_TZ_NOTE",
     "leap_seconds_at",
     "utc_to_gps_seconds",
     "gps_seconds_to_utc",
     "tle_epoch_utc",
     "tle_epoch_report",
     "format_local",
+    "local_time_note",
+    "resolve_tz_info",
+    "tz_degradation",
     "local_to_utc",
     "validate_pass_window",
     "ClockGuard",
@@ -180,6 +200,13 @@ def local_to_utc(dt_local: datetime, tz: Optional[Any] = None,
 
     带时区的输入偏移已确定，按其自带 ``fold`` 直接换算；``fold`` 参数若给出
     则覆盖输入的 ``fold``。
+
+    **降级前提**：``tz`` 缺省时用 :func:`time_format.resolve_tz_info` 解析系统
+    时区。若系统时区规则不可发现，会退到冻结偏移（``state='fixed-offset'``，
+    ``degraded=True``）——此时 ``fold=0/1`` 的偏移必然相同，上面两种夏令时
+    异常**无法被检测**，本函数会把该墙上时间当作唯一对应时刻返回。调用方
+    若在意这一点，先用 :func:`tz_degradation` / :func:`local_time_note` 查询，
+    并在呈现时说明「当前为固定偏移，不随夏令时调整」。
     """
     if dt_local.tzinfo is not None:
         if fold is not None:

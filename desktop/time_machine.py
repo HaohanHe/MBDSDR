@@ -23,6 +23,10 @@ from PySide6.QtWidgets import (
     QDateTimeEdit, QDialog, QHBoxLayout, QLabel, QPushButton, QVBoxLayout,
 )
 
+# 输入框是本地时间：系统时区退到冻结偏移时，必须在同一处说明
+# 「当前为固定偏移，不随夏令时调整」，否则用户会以为跨夏令时的换算仍然对。
+from mbdsdr_ai.time_basis import local_time_note
+
 __all__ = ["TimeMachineDialog", "format_offset",
            "unix_from_qdatetime", "qdatetime_from_unix"]
 
@@ -104,7 +108,12 @@ class TimeMachineDialog(QDialog):
         title.setObjectName("tmTitle")
         lay.addWidget(title)
 
-        hint = QLabel("跳到任意时刻看那时的天空 · 观测条件设定，不是观测数据", self)
+        hint_text = "跳到任意时刻看那时的天空 · 观测条件设定，不是观测数据"
+        note = local_time_note()
+        if note:
+            # 本地时间不可信时先说实话，再让用户继续输入。
+            hint_text = f"{hint_text}\n{note}"
+        hint = QLabel(hint_text, self)
         hint.setObjectName("tmHint")
         hint.setWordWrap(True)
         lay.addWidget(hint)

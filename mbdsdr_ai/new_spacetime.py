@@ -222,15 +222,24 @@ class TimeEngine:
         return self._clock_guard.status()
 
     def local_display(self) -> Dict[str, Any]:
-        """当前仿真时刻的本地时区显示（带偏移，仅显示；计算仍用 UTC）。"""
+        """当前仿真时刻的本地时区显示（带偏移，仅显示；计算仍用 UTC）。
+
+        同时给出 ``local_note`` / ``tz_degraded``：系统时区规则不可发现而
+        退到冻结偏移时，``local_note`` 非空——显示层必须把它贴出来，不能
+        让用户以为本地时间跨夏令时仍然正确。
+        """
         try:
-            from .time_format import format_local
+            from .time_format import format_local, resolve_tz_info
         except ImportError:
-            from time_format import format_local
+            from time_format import format_local, resolve_tz_info
         utc = self.now_utc()
+        res = resolve_tz_info()
         return {
             "utc_iso": utc.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
             "local_iso": format_local(utc),
+            "local_note": res.note,
+            "tz_degraded": res.degraded,
+            "tz_state": res.state,
         }
 
     # ---- 当前模拟时间读取 ----------------------------------------------
@@ -300,6 +309,7 @@ class TimeInfo:
     leap_seconds: int = 18  # GPS-UTC 闰秒（按 UTC 时刻查表，不写死）
     utc_iso: str = ""       # UTC ISO（带 Z 语义，用于计算口径）
     local_iso: str = ""     # 本地时区 ISO（带偏移，仅显示；可逆验证）
+    local_note: str = ""    # 本地时区降级说明（固定偏移时非空；正常为空）
 
 
 class NTPError(Exception):
@@ -406,10 +416,11 @@ def get_time_info(prefer_ntp: bool = True) -> TimeInfo:
     info.utc_iso = info.utc_time.astimezone(timezone.utc).strftime(
         "%Y-%m-%dT%H:%M:%SZ")
     try:
-        from .time_format import format_local
+        from .time_format import format_local, local_time_note
     except ImportError:
-        from time_format import format_local
+        from time_format import format_local, local_time_note
     info.local_iso = format_local(info.utc_time)
+    info.local_note = local_time_note()
     return info
 
 

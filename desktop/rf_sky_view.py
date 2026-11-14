@@ -80,6 +80,8 @@ import numpy as np
 from datetime import datetime, timedelta, timezone
 from typing import Optional, List, Dict, Tuple, Set
 
+from mbdsdr_ai.time_format import resolve_tz_info
+
 from PySide6.QtCore import Qt, QTimer, QPointF, QRectF, Signal
 from PySide6.QtGui import (
     QPainter, QColor, QPen, QBrush, QFont, QFontMetrics,
@@ -1341,16 +1343,25 @@ def format_local_time(when, tz=None, fmt: str = "%H:%M:%S") -> str:
 
     tz 缺省用系统本地时区；偏移由 tzinfo 在该时刻给出，夏令时切换自动正确
     （调用 `astimezone`，不手算固定偏移）。
+
+    系统时区规则不可发现时，时区退到冻结偏移（``resolve_tz_info`` 的
+    ``fixed-offset``），此时在读数后追加降级说明——这行时钟不代表跨夏令时
+    仍正确，不能让用户误读。
     """
     dt = _utc_datetime(when)
     if dt is None:
         return "—"
-    local = dt.astimezone(tz) if tz is not None else dt.astimezone()
+    if tz is not None:
+        local, note = dt.astimezone(tz), ""
+    else:
+        res = resolve_tz_info()
+        local, note = dt.astimezone(res.tz), res.note
     off = local.utcoffset()
     secs = int((off or timedelta(0)).total_seconds())
     sign = "+" if secs >= 0 else "-"
     mins = abs(secs) // 60
-    return f"{local.strftime(fmt)} (UTC{sign}{mins // 60:02d}:{mins % 60:02d})"
+    text = f"{local.strftime(fmt)} (UTC{sign}{mins // 60:02d}:{mins % 60:02d})"
+    return f"{text} · {note}" if note else text
 
 
 def format_satellite_description(alt_deg: float, range_km: float,
