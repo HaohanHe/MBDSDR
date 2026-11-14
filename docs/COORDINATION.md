@@ -2478,6 +2478,11 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `tests/test_safe_commit_foreign_at_declare.py` | 用例随闸线/6ae85f56（反证用例：空行块单独提交不触发、HEAD 推进后已落库块不被误报） | 2026-11-14 12:28 | 本笔 |
 | `scripts/file_claim.py` | 清理线/6ae85f56（cleanup-stale 分三堆：待办只算可释放未释放；UNDECIDABLE 只计数/趋势不改退出码） | 2026-11-14 12:33 | 本笔 |
 | `tests/test_file_claim_cleanup.py` | 清理线/6ae85f56（补三堆分类：UNDECIDABLE 不改退出码/趋势快照/JSON 机读字段/释放账 line+证据） | 2026-11-14 12:33 | 本笔 |
+| `docs/guard-accounting.json` | 判据存量收口/6ae85f56（check_claim_coordination 豁免理由改为类别口径（net_utils 真漏登保留）） | 2026-11-14 12:34 | 本笔 |
+| `docs/safe-commit.md` | 用例随闸线/6ae85f56（拆 allow-foreign 两参数：drift(⑰)/before-declare(㉑)，理由不共用） | 2026-11-14 12:34 | 本笔 |
+| `docs/evidence-standard.md` | 用例随闸线/6ae85f56（§8.3 豁免入口改为两个参数） | 2026-11-14 12:34 | 本笔 |
+| `scripts/audit_bare_commits.py` | 用例随闸线/6ae85f56（审计文案里的豁免入口改名） | 2026-11-14 12:34 | 本笔 |
+| `tests/test_safe_commit_declaration.py` | 用例随闸线/6ae85f56（漂移豁免用例改 --allow-foreign-drift，补用错开关反证） | 2026-11-14 12:34 | 本笔 |
 
 > 上表各行均由 `claim` 台账推导：owner 原文与 `acquired_at` 直接取自台账，
 > 目的优先用台账里的 `claim_reason`，没有就如实写「未声明」，不补编。时间列只是
