@@ -12,6 +12,11 @@
 from datetime import datetime, timezone, timedelta
 from typing import Optional
 
+#: 未来历元容差（天）。历元领先本机时钟超过该值即判「时钟或 TLE 可疑」。
+#: **唯一事实源**：``time_basis.tle_epoch_report`` 与 ``tle_integrity.freshness``
+#: 都从这里取，避免两套阈值把同一份 TLE 判成一真一假。
+TLE_FUTURE_TOL_DAYS = 2.0
+
 
 def _is_leap_year(year: int) -> bool:
     """公历闰年（4 年一闰，百年不闰，四百年再闰）。"""

@@ -21,9 +21,9 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
 try:
-    from .tle_epoch import parse_tle_epoch
+    from .tle_epoch import TLE_FUTURE_TOL_DAYS, parse_tle_epoch
 except ImportError:  # 旧脚本以扁平模块方式 import time_basis
-    from tle_epoch import parse_tle_epoch
+    from tle_epoch import TLE_FUTURE_TOL_DAYS, parse_tle_epoch
 
 # 显示格式化是叶子能力（time_format 不依赖任何 mbdsdr_ai 模块），放在本模块
 # 会让「只要一个 ISO 字符串」的调用方拖上整块时间系统。原处再导出，保持
@@ -111,7 +111,7 @@ def tle_epoch_utc(line1: str) -> Optional[datetime]:
 
 
 def tle_epoch_report(line1: str, now: Optional[datetime] = None,
-                     future_tol_days: float = 2.0) -> Dict[str, Any]:
+                     future_tol_days: float = TLE_FUTURE_TOL_DAYS) -> Dict[str, Any]:
     """TLE 历元解析报告：年份规则、年龄、是否在将来、是否可信。
 
     ``now`` 默认系统 UTC。返回::

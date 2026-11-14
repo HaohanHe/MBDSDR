@@ -26,7 +26,7 @@ from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
-from .tle_epoch import parse_tle_epoch
+from .tle_epoch import TLE_FUTURE_TOL_DAYS, parse_tle_epoch
 
 __all__ = [
     "CatalogEntry",
@@ -262,13 +262,18 @@ def freshness(line1: str, fetched_at: Optional[float] = None,
               now: Optional[Any] = None) -> Dict[str, Any]:
     """TLE 新鲜度分级（按历元年龄）+ 缓存时间。
 
-    返回 ``{"tier", "label", "age_days", "epoch_utc", "cache_age_hours",
-    "pass_eligible", "tracking_eligible", "epoch_in_future",
-    "thresholds"}``。
+    返回 ``{"tier", "label", "age_days", "age_days_signed", "epoch_utc",
+    "cache_age_hours", "pass_eligible", "tracking_eligible",
+    "epoch_in_future", "epoch_implausible", "thresholds"}``。
 
     分级口径：fresh ≤24h / usable ≤7d / expired ≤30d / dead >30d /
     unknown（历元无法解析）。过期与失效条目仍可显示与查询，但
     ``pass_eligible=False``——默认不用于过境与跟踪，显式放行才降精度使用。
+
+    ``age_days`` 是展示口径（未来历元钳到 0，避免界面出现「-3 天前」）；
+    ``age_days_signed`` 是有符号的真实年龄，供判定与交叉核对使用——它与
+    ``time_basis.tle_epoch_report()["age_days"]`` 必须逐值相等，否则同一份
+    TLE 在两个出口会给出不同年龄。
     """
     if now is None:
         ref = datetime.now(timezone.utc)
@@ -288,14 +293,18 @@ def freshness(line1: str, fetched_at: Optional[float] = None,
     if epoch is None:
         return {
             "tier": "unknown", "label": TIER_LABELS["unknown"],
-            "age_days": None, "epoch_utc": None,
+            "age_days": None, "age_days_signed": None, "epoch_utc": None,
             "cache_age_hours": cache_age_hours,
             "pass_eligible": False, "tracking_eligible": False,
-            "epoch_in_future": False, "thresholds": thresholds,
+            "epoch_in_future": False, "epoch_implausible": False,
+            "thresholds": thresholds,
             "reason": "TLE 历元无法解析（缺/坏数据），年龄未知",
         }
     age_days = (ref - epoch).total_seconds() / 86400.0
     in_future = age_days < 0.0
+    # 未来历元的可信度判定必须与 time_basis.tle_epoch_report 同源同阈值：
+    # 同一份 TLE 不能在一个出口「新鲜可用」、在另一个出口「时钟可疑」。
+    implausible = bool(in_future and abs(age_days) > TLE_FUTURE_TOL_DAYS)
     age = max(0.0, age_days)
     if age <= FRESH_MAX_HOURS / 24.0:
         tier = "fresh"
@@ -310,11 +319,13 @@ def freshness(line1: str, fetched_at: Optional[float] = None,
         "tier": tier,
         "label": TIER_LABELS[tier],
         "age_days": round(age, 3),
+        "age_days_signed": round(age_days, 3),
         "epoch_utc": epoch.strftime("%Y-%m-%dT%H:%M:%SZ"),
         "cache_age_hours": cache_age_hours,
         "pass_eligible": usable,
         "tracking_eligible": usable,
         "epoch_in_future": in_future,
+        "epoch_implausible": implausible,
         "thresholds": thresholds,
         "reason": (
             "历元在将来（本机时钟可能不准），按新鲜处理但需核对时钟"

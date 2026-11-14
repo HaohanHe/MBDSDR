@@ -2273,6 +2273,12 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `tests/test_bookmark_panel_safety.py` | UI防呆线/6ae85f56（A2: 判据（默认按钮实参=No、文案含后果）+ 反证） | 2026-11-14 11:03 | 本笔 |
 | `docs/ux-audit.md` | UI防呆线/6ae85f56（D6: 写死确认框默认按钮口径与五处对照） | 2026-11-14 11:03 | 本笔 |
 | `tests/test_tle_epoch_single_source.py` | 公理体检线/6ae85f56（判据：TLE 年龄/未来判定两出口逐值一致） | 2026-11-14 11:03 | 本笔 |
+| `mbdsdr_ai/lrpt_pipeline.py` | 参考移植线/20261114（12.1 每帧 RS 纠错量聚合进 stats（summarize_rs_errors）） | 2026-11-14 11:05 | 本笔 |
+| `desktop/status_panel.py` | 参考移植线/20261114（12.1 信号质量区 FEC 纠错一行） | 2026-11-14 11:05 | 本笔 |
+| `desktop/weather_panel.py` | 参考移植线/20261114（12.1 解码终态转发信号 decode_result） | 2026-11-14 11:05 | 本笔 |
+| `desktop/main_window.py` | 参考移植线/20261114（12.1 把真录链 rs_* 统计接到状态面板） | 2026-11-14 11:05 | 本笔 |
+| `mbdsdr_ai/tle_epoch.py` | 公理体检线/6ae85f56（时空域缺口：未来历元容差常量化（TLE_FUTURE_TOL_DAYS）） | 2026-11-14 11:03 | 本笔 |
+| `mbdsdr_ai/tle_integrity.py` | 公理体检线/6ae85f56（时空域缺口：freshness 暴露 age_days_signed/epoch_implausible） | 2026-11-14 11:03 | 本笔 |
 
 > 上表各行均由 `claim` 台账推导：owner 原文与 `acquired_at` 直接取自台账，
 > 目的优先用台账里的 `claim_reason`，没有就如实写「未声明」，不补编。时间列只是
