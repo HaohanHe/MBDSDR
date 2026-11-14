@@ -56,6 +56,25 @@ def test_doc_only_claim_is_reported():
     assert result["ledger_only"] == [], result
 
 
+def test_registry_doc_row_is_exempt_from_owner_match():
+    """登记面（COORDINATION.md）按行归属：多人共写的文件不要求对上单一 owner。"""
+    doc = _doc("| `docs/COORDINATION.md` | 某线 | 2026-11-13 01:00 | 随本笔 |")
+    reg = _registry(("docs/coordination.md", ["甲线", "乙线", "丙线"]))
+    result = cc.cross_check([], reg, doc)
+    assert result["doc_only"] == [], result
+    assert result["registry_doc_rows"] == 1, result
+
+
+def test_non_registry_doc_row_still_requires_owner_match():
+    """豁免只给登记面本身：别的多人文档照旧要求线名对上台账 owner。"""
+    doc = _doc("| `docs/shared.md` | 某线 | 2026-11-13 01:00 | 随本笔 |")
+    reg = _registry(("docs/shared.md", ["甲线", "乙线"]))
+    result = cc.cross_check([], reg, doc)
+    assert len(result["doc_only"]) == 1, result
+    assert "docs/shared.md" in result["doc_only"][0], result
+    assert result["registry_doc_rows"] == 0, result
+
+
 def test_released_or_historical_row_is_not_reported():
     """(c) 显式标成已释放/历史的旧行 → 两个方向都不报。"""
     doc = _doc(

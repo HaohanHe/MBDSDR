@@ -48,6 +48,12 @@
 登记面自身豁免
 --------------
 
+**文档 → 台账方向**：``docs/COORDINATION.md`` 自身的 §6.1 行不做「线名 = 台账
+owner」匹配。它是十几条线各写各行的多人登记面，用文件级 claim 归属去要求它
+只对应一个 owner，是把「文件归谁」错当成「这行归谁」；实测同一路径对上 19
+个 owner，任何单值判据都永远红。归属按**行**算：谁写的行，行里写谁。豁免条数
+照常打印（``registry_doc_rows``），不静默放行。
+
 ``docs/COORDINATION.md`` 自身不参与「必须已有 §6.1 行」的判定——它是登记面，
 不是被登记对象。**活跃 claim 分支与 60 分钟释放窗口分支都必须豁免**：只豁免
 一条分支时，提交登记表的人会被要求先给自己写一行临时行、提交后再删掉；这是
@@ -97,6 +103,9 @@ STRICT_PREFIXES = ("desktop/", "mbdsdr_ai/", "scripts/", "tools/", "tests/",
                    "web/", "cpp/", "mobile/", "deploy/", "service/")
 
 Row = Tuple[List[str], str, bool]  # (paths, 线名原文, 是否显式历史/已释放)
+
+#: 多人共写的 §6.1 登记面：doc→台账 方向按行归属，不做「线名 = 文件 claim owner」匹配。
+REGISTRY_DOC = "docs/coordination.md"
 
 
 def _norm(path: str) -> str:
@@ -418,11 +427,16 @@ def cross_check(
 
     recorded = ledger_index(registry)
     doc_only: List[str] = []
+    registry_doc_rows = 0
     for paths, owner_cell, released in rows:
         if released:
             continue
         label = _owner_label(owner_cell)
         for path in paths:
+            if path == REGISTRY_DOC:
+                # 多人共写的登记面：按行归属，不按文件 claim 归属（见模块 docstring）。
+                registry_doc_rows += 1
+                continue
             if _is_pattern(path):
                 owners = {o for p, os_ in recorded.items() if _matches(p, path) for o in os_}
                 if not owners:
@@ -442,6 +456,7 @@ def cross_check(
         "doc_only": doc_only,
         "rows": len(rows),
         "active": len(active),
+        "registry_doc_rows": registry_doc_rows,
     }
 
 
@@ -638,7 +653,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 seen_cmds.add(cmd)
                 print(f"  {cmd}")
     else:
-        print(f"§6.1 表行：{result['rows']}；未过期 claim：{result['active']}")
+        print(f"§6.1 表行：{result['rows']}；未过期 claim：{result['active']}；"
+              f"登记面按行归属豁免：{result.get('registry_doc_rows', 0)} 行")
         for name, label in (("ledger_only", "台账有、文档无"),
                             ("doc_only", "文档有、台账无")):
             items = result[name]

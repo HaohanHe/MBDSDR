@@ -172,6 +172,18 @@
       "review_by": "2026-12"
     },
     {
+      "id": "check_claim_coordination",
+      "script": "scripts/check_claim_coordination.py",
+      "mode": "run",
+      "trigger": "批次收口前至少 1 次；发版前必跑；不进 pre-commit——提交时由 ④ --staged 逐文件拦，全量口径只在这里跑",
+      "owner": "协调登记线",
+      "exemption": {
+        "reason": "2026-11-14 体检读数：doc_only 5 条（tests/test_settings_explicit_defaults.py、tests/test_release_check_log_scan.py、tests/test_file_claim.py、tests/test_claim_gate.py、mbdsdr_ai/net_utils.py）。net_utils.py 已核为真漏登——§6.1 行写着 19:24「本笔」，claims.json 里 1183 个 key 无此路径的任何 current/history，按纪律记缺口、不补登。其余 4 条均为行已写而台账无记录/owner 不同，属他线登记面待收口。ledger_only 2 条是活跃 claim 未写 §6.1 行（无线电课清单线、公理体检线）。登记面 docs/COORDINATION.md 的 owner 不匹配已改为按行归属，不再计入。",
+        "owner": "判据存量收口/6ae85f56",
+        "review_by": "2026-12"
+      }
+    },
+    {
       "id": "check_destructive_ops",
       "script": "scripts/check_destructive_ops.py",
       "mode": "run",

@@ -2441,6 +2441,9 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `scripts/install_git_hooks.py` | HEAD可构建线/6ae85f56（符号脚本与白名单随钩子安装副本） | 2026-11-14 11:51 | 本笔 |
 | `tools/axioms/current_stats.py` | 公理体检线/6ae85f56（任务E收尾：commits_since 排除计数块文档（doc-only 提交不计落后）） | 2026-11-14 11:54 | 本笔 |
 | `tests/test_axioms_doc_current_stats.py` | 公理体检线/6ae85f56（任务E收尾：commits_since doc-only 提交回归用例（去掉 exclude 必红）） | 2026-11-14 11:54 | 本笔 |
+| `scripts/check_claim_coordination.py` | 判据存量收口/6ae85f56（登记面按行归属豁免 + 接入守卫账本） | 2026-11-14 11:59 | 本笔 |
+| `docs/guard-accounting.json` | 判据存量收口/6ae85f56（协调判据接入守卫账本） | 2026-11-14 11:59 | 本笔 |
+| `tests/test_claim_coordination.py` | 判据存量收口/6ae85f56（补登记面豁免反证） | 2026-11-14 11:59 | 本笔 |
 
 > 上表各行均由 `claim` 台账推导：owner 原文与 `acquired_at` 直接取自台账，
 > 目的优先用台账里的 `claim_reason`，没有就如实写「未声明」，不补编。时间列只是
