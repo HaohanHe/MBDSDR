@@ -8,7 +8,7 @@
   2. 关键控件存在（卫星/目标下拉、来源下拉、开始/停止按钮、图像/画布）；
   3. 不存在任何“模拟演示”按钮（demo_btn 已随模拟模式一并移除）；
   4. 默认无真实硬件时，「实时 SDR」模式开始按钮置灰、显示未连接；
-  5. main_window 可 import 新面板。
+  5. main_window 的面板一律经 panel_registry 构造（不直连 import 面板类）。
 
 运行:
     QT_QPA_PLATFORM=offscreen python3 -m pytest tests/test_desktop_panels.py -v
@@ -108,12 +108,111 @@ class TestWeatherPanel:
 
 
 # ----------------------------------------------------------------------
+def _registry_panel_classes(reg):
+    """注册表工厂闭包里声明的面板类名（只读，不 import 任何 Qt 模块）。"""
+    names = set()
+    for spec in reg.list():
+        factory = spec.factory
+        code = getattr(factory, "__code__", None)
+        freevars = getattr(code, "co_freevars", ())
+        if "class_name" not in freevars:
+            continue
+        cell = factory.__closure__[freevars.index("class_name")]
+        name = cell.cell_contents
+        if isinstance(name, str):
+            names.add(name)
+    return names
+
+
 class TestMainWindowIntegration:
-    def test_main_window_imports_panels(self):
-        """main_window 模块可导入，且确实 import 了气象云图面板。"""
-        import desktop.main_window as mw  # noqa: F402,F401
-        import main_window as mw2  # noqa: E402
-        assert hasattr(mw2, "WeatherPanel")
+    def test_main_window_constructs_panels_via_registry(self):
+        """面板一律经 panel_registry 构造，main_window 不直连 import 面板类。
+
+        PanelSpec 收编后 ``main_window.WeatherPanel`` 这类直连导入不该存在；
+        旧断言却把「import 过面板」钉成了契约，是重构留下的过期断言。
+        这里改守真正的契约（AST 静态判据）：
+
+          1) 注册表里声明的面板类名不得出现在 main_window 的 import 里；
+          2) 也不得被直接实例化；
+          3) 构造点走 ``self._create_panel("<id>")``，id 必须在注册表里，且
+             ``_create_panel`` 的实现确实调用 ``registry().create(id)``。
+        """
+        import ast
+        import inspect
+
+        import main_window as mw
+        from panel_registry import registry
+
+        reg = registry()
+        panel_classes = _registry_panel_classes(reg)
+        assert "WeatherPanel" in panel_classes, "注册表未声明气象面板，判据失去意义"
+
+        tree = ast.parse(inspect.getsource(mw))
+
+        # 1) 不得 import 面板类（模块级与函数内都算）
+        imported = set()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom):
+                imported.update(a.name for a in node.names)
+                imported.update(a.asname for a in node.names if a.asname)
+            elif isinstance(node, ast.Import):
+                imported.update((a.asname or a.name).split(".")[0]
+                                for a in node.names)
+        leaked = sorted(imported & panel_classes)
+        assert not leaked, (
+            "main_window 直连 import 了面板类，应改为经 panel_registry 构造："
+            f"{leaked}")
+
+        # 2) 不得直接实例化面板类
+        direct = set()
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            func = node.func
+            if isinstance(func, ast.Name) and func.id in panel_classes:
+                direct.add(func.id)
+            elif (isinstance(func, ast.Attribute)
+                  and func.attr in panel_classes):
+                direct.add(func.attr)
+        assert not direct, f"main_window 直接实例化面板类：{sorted(direct)}"
+
+        # 3) 构造走 _create_panel(id) → registry().create(id)
+        built = {}
+        for node in ast.walk(tree):
+            if not (isinstance(node, ast.Call)
+                    and isinstance(node.func, ast.Attribute)
+                    and node.func.attr == "_create_panel"
+                    and node.args
+                    and isinstance(node.args[0], ast.Constant)
+                    and isinstance(node.args[0].value, str)):
+                continue
+            pid = node.args[0].value
+            targets = set()
+            for parent in ast.walk(tree):
+                if (isinstance(parent, ast.Assign) and parent.value is node):
+                    targets.update(t.attr for t in parent.targets
+                                   if isinstance(t, ast.Attribute))
+            built.setdefault(pid, set()).update(targets)
+        assert "weather" in built, "气象面板未走 _create_panel('weather')"
+        assert "weather_panel" in built["weather"], (
+            "气象面板未经 _create_panel('weather') 赋给 self.weather_panel")
+        unknown = sorted(pid for pid in built if reg.get(pid) is None)
+        assert not unknown, f"_create_panel 用了注册表里没有的 id：{unknown}"
+
+        used_registry = False
+        for node in ast.walk(tree):
+            if (isinstance(node, ast.FunctionDef)
+                    and node.name == "_create_panel"):
+                used_registry = any(
+                    isinstance(c, ast.Call)
+                    and isinstance(c.func, ast.Attribute)
+                    and c.func.attr == "create"
+                    and isinstance(c.func.value, ast.Call)
+                    and isinstance(c.func.value.func, ast.Name)
+                    and c.func.value.func.id == "registry"
+                    for c in ast.walk(node))
+        assert used_registry, (
+            "_create_panel 没有调用 registry().create(id)，面板构造绕开了注册表")
 
     def test_main_window_class_has_panels(self):
         from main_window import MainWindow

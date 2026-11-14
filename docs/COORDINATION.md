@@ -2358,6 +2358,7 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `docs/evidence-standard.md` | 收尸线/6ae85f56（定裸 git 提交的允许条件与留痕方式（423ac262/31afa759 两笔缺口调查结论：个别线绕过，非工具漏）） | 2026-11-14 11:29 | 本笔 |
 | `mbdsdr_ai/tle_integrity.py` | 时空环境层/D3（TLE 可信时长环境收紧层（只收紧，不改四档阈值）） | 2026-11-14 11:30 | 本笔 |
 | `tests/test_tle_environment_tightening.py` | 时空环境层/D3（D3 判据与反证测试） | 2026-11-14 11:30 | 本笔 |
+| `tests/test_desktop_panels.py` | 参考移植线/20261114（修过期断言：面板经 panel_registry 构造，AST 守直连 import（反证：改回 WeatherPanel() 即红）） | 2026-11-14 11:31 | 本笔 |
 
 > 上表各行均由 `claim` 台账推导：owner 原文与 `acquired_at` 直接取自台账，
 > 目的优先用台账里的 `claim_reason`，没有就如实写「未声明」，不补编。时间列只是
