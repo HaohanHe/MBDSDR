@@ -617,8 +617,8 @@ TRACKING_SEVERITY: Dict[str, str] = {
 }
 
 
-def _age_text(age: Optional[float]) -> str:
-    """年龄人话：<1 天留一位小数，否则取整（显示与标签共用一份）。"""
+def _age_value(age: Optional[float]) -> str:
+    """年龄数值：<1 天留一位小数，否则取整（不带单位，供自带单位的标签拼接）。"""
     if age is None:
         return ""
     return f"{age:.1f}" if float(age) < 1.0 else f"{float(age):.0f}"
@@ -628,7 +628,7 @@ def _display_tag(level: str, age: Optional[float], forced: bool) -> str:
     """过境行/卫星名后的陈旧标签（空串 = 不标注）。"""
     if forced:
         return "（TLE 身份不符）"
-    age_text = _age_text(age)
+    age_text = _age_value(age)
     if level == "expired":
         return f"（TLE 过期 {age_text} 天）" if age_text else "（TLE 过期）"
     if level == "dead":
@@ -640,7 +640,7 @@ def _display_tag(level: str, age: Optional[float], forced: bool) -> str:
 
 def _short_tag(level: str, age: Optional[float]) -> str:
     """下拉项后缀（不带括号）：空串 = 不标注。"""
-    age_text = _age_text(age)
+    age_text = _age_value(age)
     if level == "usable":
         return f"{age_text} 天前" if age_text else ""
     if level == "expired":
@@ -732,7 +732,7 @@ def tracking_policy(fresh: Optional[Dict[str, Any]],
         "short_tag": _short_tag(level, age),
         "severity": TRACKING_SEVERITY[level],
         "stale": level in ("expired", "dead", "unknown"),
-        "age_text": _age_text(age),
+        "age_text": _age_value(age),
         "reason": reason,
         "next_action": next_action,
     }

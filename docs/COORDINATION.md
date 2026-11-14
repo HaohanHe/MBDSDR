@@ -2463,6 +2463,8 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `mbdsdr_ai/tle_fetch.py` | 共享件边界线/6ae85f56（共享件收口：内嵌 _iso 委托 time_format.iso_utc_z（保留 None 透传）） | 2026-11-14 12:14 | 本笔 |
 | `docs/evidence-standard.md` | 用例随闸线/6ae85f56（记『自己的 §6.1 行被别的提交扫走』（反向实例；152449c2 的行落进 b10fe3f6，hash 永久失准、不得猜补）） | 2026-11-14 12:16 | 本笔 |
 | `mbdsdr_ai/bookmark_manager.py` | 判据存量收口/6ae85f56（修 legacy 条目缺带宽被猜成 12500（记缺口 #2 真 bug）） | 2026-11-14 12:18 | 本笔 |
+| `mbdsdr_ai/tle_integrity.py` | 共享件边界线/6ae85f56（收口同名 _age_text 遮蔽：纯数字版改名 _age_value，band_note 恢复「天」单位） | 2026-11-14 12:20 | 本笔 |
+| `tests/test_tle_age_visibility.py` | 共享件边界线/6ae85f56（为 band_note 年龄单位补正向用例与反证口径） | 2026-11-14 12:20 | 本笔 |
 | `tests/test_desktop_constants.py` | 判据存量收口/6ae85f56（判据追平：白名单补 cons_of_talker（9762f419 收口，断言不变）） | 2026-11-14 12:21 | 本笔 |
 | `scripts/file_claim.py` | 清理线/6ae85f56（新增 cleanup-stale：四项证据全 PASS 才释放过期 claim，默认只审计） | 2026-11-14 12:22 | 本笔 |
 | `tests/test_file_claim_cleanup.py` | 清理线/6ae85f56（cleanup-stale 行为契约：证据缺一不释放/默认只审计/留痕） | 2026-11-14 12:23 | 本笔 |

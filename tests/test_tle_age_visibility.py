@@ -109,3 +109,15 @@ def test_365_days_hits_strongest_warning():
     assert "预测时刻精度" in dead and "不是卫星位置精度" in dead
     assert "预测时刻精度" in stale
 
+
+def test_band_note_age_has_day_unit():
+    """band_note 的年龄必须带「天」单位。
+
+    反证：把 band_note 用的带单位实现换成纯数字实现（曾因同模块同名
+    ``_age_text`` 后定义遮蔽前定义而丢掉「天」），本用例立刻变红。
+    """
+    assert "4 天" in band_note("usable", 4.0)
+    assert "4.0，" not in band_note("usable", 4.0)
+    assert "0.5 天" in band_note("fresh", 0.5)
+    assert "12 天" in band_note("expired", 12.0)
+
