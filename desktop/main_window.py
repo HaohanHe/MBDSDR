@@ -5046,6 +5046,9 @@ class MainWindow(QMainWindow):
         self._float_windows[key] = dict(
             panel=panel, tabs=tabs, index=index, placeholder=placeholder,
             text=text, data=data)
+        # 页签被摘出主窗，焦点链少了一整棵子树——重排一次，别让 Tab 从
+        # 缺口旁边直接跳走。放到下一拍：insertTab/removeTab 的入链已完成。
+        QTimer.singleShot(0, self._setup_tab_order)
         if not restore:
             self._persist_float_keys()
 
@@ -5072,6 +5075,8 @@ class MainWindow(QMainWindow):
         ph.hide()
         panel.hide()
         panel.setParent(None)
+        # 页签已回到主窗焦点链：重跑一次，把「弹出期间被绕过的」那一段接回去。
+        QTimer.singleShot(0, self._setup_tab_order)
         # 不用 deleteLater()：on_return 闭包还持有 panel 的 Python 引用，
         # 强删会让 C++ QVBoxLayout 比 Python 包装先走，退出时抛
         # "Internal C++ object already deleted"。交给 GC 按引用计数收。
