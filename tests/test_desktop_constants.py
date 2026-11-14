@@ -126,6 +126,11 @@ class TestNoSecondSourceOfTruth:
         只剩这一份；``DEFAULT_SR_UNCONFIRMED`` 同属空态唯一写法。这几项
         是入册的**收口结果**，不是新事实源；白名单仍封闭，多一个符号照样红。
 
+        2026-11-13 星座名收口（9762f419）：NMEA talker 前缀 → 星座名原先在
+        星座面板与天图各有一份，收敛为本模块 ``cons_of_talker`` 唯一实现。
+        这是冗余治理的**收口结果**，不是新事实源；白名单仍封闭，多一个
+        符号照样红。
+
         导入痕迹不算"第二个事实源"：``logging``（模块对象）与 ``logger``
         （日志设施）显式排除在统计外；若本模块再长出一个**真正的常量**，
         本条仍然会红。
@@ -140,7 +145,8 @@ class TestNoSecondSourceOfTruth:
                           "connect_sample_rate_hz",
                           "set_connect_sample_rate",
                           "sample_rate_combo_items",
-                          "default_sample_rate_combo_index"}, sorted(public)
+                          "default_sample_rate_combo_index",
+                          "cons_of_talker"}, sorted(public)
 
     def test_no_module_redefines_the_constant(self):
         """desktop 侧只 import，不重新赋值（第二事实源会静默漂移）。"""
