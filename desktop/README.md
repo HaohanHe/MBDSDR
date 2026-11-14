@@ -13,9 +13,10 @@ pip install -r requirements.txt
 ### 普通启动（带控制台日志）
 
 ```bash
-python main.py              # 默认模式
-python main.py --sim        # 模拟模式（无硬件）
+python main.py              # 默认模式；未接硬件时显示诚实「未连接」空状态
+python main.py --theme dark # 可选主题：default / dark / high_contrast
 python main.py --host 192.168.4.1 --port 81   # 连接真实硬件
+python main.py --import-probe desktop.main_window  # 只做导入自检，不建窗口
 ```
 
 ### 无控制台启动
@@ -24,6 +25,9 @@ python main.py --host 192.168.4.1 --port 81   # 连接真实硬件
 |------|------|
 | Windows | 双击 `run_gui.bat`，或双击 `run_gui.pyw`（由 pythonw 运行，不弹黑框） |
 | Linux / macOS | `./run_gui.sh`（后台运行，日志丢弃） |
+
+`main.py` 只接受 `--host` / `--port` / `--theme` / `--import-probe` 四个参数，
+**没有 `--sim` 开关**：无硬件时不会默认生成合成 IQ，界面直接呈现未连接空状态。
 
 ## 应用图标
 
