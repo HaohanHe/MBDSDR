@@ -1,0 +1,178 @@
+{
+  "schema": 1,
+  "ring": "R5",
+  "run_utc": "2026-11-14T02:28:35Z",
+  "run_unix": 1794623315.8872955,
+  "station": {
+    "lat": 45.0,
+    "lon": 120.0,
+    "alt_m": 200.0,
+    "alt_km": 0.2
+  },
+  "window_hours": 24.0,
+  "min_elevation_deg": 5.0,
+  "params": {
+    "coarse_step_s": 60.0,
+    "fine_step_s": 2.0,
+    "bisect_tol_s": 0.5,
+    "skyfield_ref_step_s": 5.0,
+    "pair_max_gap_s": 1800.0
+  },
+  "targets": [
+    25338,
+    28654,
+    33591,
+    25544
+  ],
+  "tle": {
+    "25338": {
+      "name": "NOAA 15",
+      "epoch_utc": "2026-11-11T04:54:12Z",
+      "source": "cache",
+      "fetched_at_unix": 1794406220.0943527,
+      "fetched_at_utc": "2026-11-11T14:10:20Z",
+      "refresh_status": "not_updated",
+      "refresh_error": "网络不可达/DNS 失败（URLError: <urlopen error [SSL: UNEXPECTED_EOF_WHILE_READING] EOF occurred in violation of protocol (_ssl.c:1077)>）；退避 60s",
+      "line1": "1 25338U 98030A   26315.20430892  .00000137  00000+0  73421-4 0  9997",
+      "line2": "2 25338  98.5001 331.8254 0009116 277.2153  82.7992 14.27182802482260"
+    },
+    "28654": {
+      "name": "NOAA 18",
+      "epoch_utc": "2026-11-11T02:51:51Z",
+      "source": "cache",
+      "fetched_at_unix": 1794406222.164963,
+      "fetched_at_utc": "2026-11-11T14:10:22Z",
+      "refresh_status": "not_updated",
+      "refresh_error": "退避中（source_backoff，还剩 50s），不重试",
+      "line1": "1 28654U 05018A   26315.11934901  .00000089  00000+0  70296-4 0  9998",
+      "line2": "2 28654  98.8012  32.5827 0015279  93.6373 266.6547 14.13753342107071"
+    },
+    "33591": {
+      "name": "NOAA 19",
+      "epoch_utc": "2026-11-11T10:15:53Z",
+      "source": "cache",
+      "fetched_at_unix": 1794414231.0188913,
+      "fetched_at_utc": "2026-11-11T16:23:51Z",
+      "refresh_status": "not_updated",
+      "refresh_error": "退避中（source_backoff，还剩 50s），不重试",
+      "line1": "1 33591U 09005A   26315.42770748  .00000055  00000+0  53109-4 0  9992",
+      "line2": "2 33591  98.9378  26.2937 0013257 337.6350  22.4243 14.13493352915288"
+    },
+    "25544": {
+      "name": "ISS (ZARYA)",
+      "epoch_utc": "2026-11-11T08:03:57Z",
+      "source": "cache",
+      "fetched_at_unix": 1794414242.5428185,
+      "fetched_at_utc": "2026-11-11T16:24:02Z",
+      "refresh_status": "not_updated",
+      "refresh_error": "退避中（source_backoff，还剩 50s），不重试",
+      "line1": "1 25544U 98067A   26315.33607970  .00009043  00000+0  17017-3 0  9996",
+      "line2": "2 25544  51.6323 291.9174 0007326  13.1877 346.9302 15.49313022594566"
+    },
+    "40069": {
+      "name": "METEOR-M 2",
+      "epoch_utc": "2026-11-11T11:16:55Z",
+      "source": "cache",
+      "fetched_at_unix": 1794414244.4457185,
+      "fetched_at_utc": "2026-11-11T16:24:04Z",
+      "refresh_status": "not_updated",
+      "refresh_error": "退避中（source_backoff，还剩 50s），不重试",
+      "line1": "1 40069U 14037A   26315.47008795  .00000369  00000+0  18811-3 0  9990",
+      "line2": "2 40069  98.5331 286.1431 0005488 340.7635  19.3334 14.21498898640241"
+    },
+    "43010": {
+      "name": "FENGYUN 3D",
+      "epoch_utc": "2026-11-11T12:12:37Z",
+      "source": "cache",
+      "fetched_at_unix": 1794414245.5753467,
+      "fetched_at_utc": "2026-11-11T16:24:05Z",
+      "refresh_status": "not_updated",
+      "refresh_error": "退避中（source_backoff，还剩 50s），不重试",
+      "line1": "1 43010U 17072A   26315.50877050  .00000053  00000+0  46856-4 0  9994",
+      "line2": "2 43010  99.0331 292.7376 0001830  23.2311 336.8947 14.19766796465893"
+    }
+  },
+  "tle_errors": {},
+  "status": "PASS",
+  "pass_count": 33,
+  "checks": [
+    {
+      "name": "tle_available",
+      "ok": true,
+      "detail": "6/6 颗 TLE 可用",
+      "skipped": false
+    },
+    {
+      "name": "tle_checksums_valid",
+      "ok": true,
+      "detail": "全部 TLE 行校验和符合 NORAD 标准",
+      "skipped": false
+    },
+    {
+      "name": "passes_sorted",
+      "ok": true,
+      "detail": "33 条过境按补全日期后的升起时刻升序",
+      "skipped": false
+    },
+    {
+      "name": "elevation_ge_gate",
+      "ok": true,
+      "detail": "全部 >= 5.0°",
+      "skipped": false
+    },
+    {
+      "name": "el_err_25338",
+      "ok": true,
+      "detail": "0.04° <= 1.0°",
+      "skipped": false
+    },
+    {
+      "name": "rise_err_25338",
+      "ok": true,
+      "detail": "2.1s <= 60s",
+      "skipped": false
+    },
+    {
+      "name": "el_err_28654",
+      "ok": true,
+      "detail": "0.05° <= 1.0°",
+      "skipped": false
+    },
+    {
+      "name": "rise_err_28654",
+      "ok": true,
+      "detail": "2.4s <= 60s",
+      "skipped": false
+    },
+    {
+      "name": "el_err_33591",
+      "ok": true,
+      "detail": "0.01° <= 1.0°",
+      "skipped": false
+    },
+    {
+      "name": "rise_err_33591",
+      "ok": true,
+      "detail": "1.5s <= 60s",
+      "skipped": false
+    },
+    {
+      "name": "el_err_25544",
+      "ok": true,
+      "detail": "0.05° <= 1.0°",
+      "skipped": false
+    },
+    {
+      "name": "rise_err_25544",
+      "ok": true,
+      "detail": "0.5s <= 60s",
+      "skipped": false
+    },
+    {
+      "name": "measured_sats",
+      "ok": true,
+      "detail": "4 颗完成误差量化",
+      "skipped": false
+    }
+  ]
+}

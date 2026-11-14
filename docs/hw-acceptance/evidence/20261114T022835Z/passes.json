@@ -1,0 +1,474 @@
+{
+  "passes": [
+    {
+      "satellite": "NOAA 18",
+      "rise_utc": "2026-11-14T02:44:08Z",
+      "rise_epoch_unix": 1794624248.465,
+      "culmination_utc": "2026-11-14T02:50:30Z",
+      "culmination_epoch_unix": 1794624630.465,
+      "set_utc": "2026-11-14T02:56:52Z",
+      "set_epoch_unix": 1794625012.528,
+      "max_elevation": 47.0,
+      "elevation_error_deg": 0.05,
+      "rise_error_s": 2.4
+    },
+    {
+      "satellite": "NOAA 19",
+      "rise_utc": "2026-11-14T03:20:24Z",
+      "rise_epoch_unix": 1794626424.403,
+      "culmination_utc": "2026-11-14T03:26:54Z",
+      "culmination_epoch_unix": 1794626814.403,
+      "set_utc": "2026-11-14T03:33:22Z",
+      "set_epoch_unix": 1794627202.059,
+      "max_elevation": 54.3,
+      "elevation_error_deg": 0.01,
+      "rise_error_s": 1.5
+    },
+    {
+      "satellite": "NOAA 18",
+      "rise_utc": "2026-11-14T04:25:08Z",
+      "rise_epoch_unix": 1794630308.465,
+      "culmination_utc": "2026-11-14T04:30:52Z",
+      "culmination_epoch_unix": 1794630652.465,
+      "set_utc": "2026-11-14T04:36:36Z",
+      "set_epoch_unix": 1794630996.59,
+      "max_elevation": 27.1,
+      "elevation_error_deg": null,
+      "rise_error_s": null
+    },
+    {
+      "satellite": "NOAA 19",
+      "rise_utc": "2026-11-14T05:02:55Z",
+      "rise_epoch_unix": 1794632575.34,
+      "culmination_utc": "2026-11-14T05:06:19Z",
+      "culmination_epoch_unix": 1794632779.34,
+      "set_utc": "2026-11-14T05:09:43Z",
+      "set_epoch_unix": 1794632983.153,
+      "max_elevation": 9.3,
+      "elevation_error_deg": null,
+      "rise_error_s": null
+    },
+    {
+      "satellite": "METEOR M2",
+      "rise_utc": "2026-11-14T05:20:25Z",
+      "rise_epoch_unix": 1794633625.34,
+      "culmination_utc": "2026-11-14T05:24:49Z",
+      "culmination_epoch_unix": 1794633889.34,
+      "set_utc": "2026-11-14T05:29:14Z",
+      "set_epoch_unix": 1794634154.559,
+      "max_elevation": 13.9,
+      "elevation_error_deg": null,
+      "rise_error_s": null
+    },
+    {
+      "satellite": "FENGYUN 3D",
+      "rise_utc": "2026-11-14T06:18:52Z",
+      "rise_epoch_unix": 1794637132.997,
+      "culmination_utc": "2026-11-14T06:24:28Z",
+      "culmination_epoch_unix": 1794637468.997,
+      "set_utc": "2026-11-14T06:30:07Z",
+      "set_epoch_unix": 1794637807.528,
+      "max_elevation": 26.0,
+      "elevation_error_deg": null,
+      "rise_error_s": null
+    },
+    {
+      "satellite": "METEOR M2",
+      "rise_utc": "2026-11-14T06:57:43Z",
+      "rise_epoch_unix": 1794639463.153,
+      "culmination_utc": "2026-11-14T07:04:07Z",
+      "culmination_epoch_unix": 1794639847.153,
+      "set_utc": "2026-11-14T07:10:34Z",
+      "set_epoch_unix": 1794640234.247,
+      "max_elevation": 84.8,
+      "elevation_error_deg": null,
+      "rise_error_s": null
+    },
+    {
+      "satellite": "FENGYUN 3D",
+      "rise_utc": "2026-11-14T07:58:05Z",
+      "rise_epoch_unix": 1794643085.653,
+      "culmination_utc": "2026-11-14T08:04:21Z",
+      "culmination_epoch_unix": 1794643461.653,
+      "set_utc": "2026-11-14T08:10:42Z",
+      "set_epoch_unix": 1794643842.215,
+      "max_elevation": 48.6,
+      "elevation_error_deg": null,
+      "rise_error_s": null
+    },
+    {
+      "satellite": "METEOR M2",
+      "rise_utc": "2026-11-14T08:40:28Z",
+      "rise_epoch_unix": 1794645628.622,
+      "culmination_utc": "2026-11-14T08:44:54Z",
+      "culmination_epoch_unix": 1794645894.622,
+      "set_utc": "2026-11-14T08:49:21Z",
+      "set_epoch_unix": 1794646161.59,
+      "max_elevation": 13.4,
+      "elevation_error_deg": null,
+      "rise_error_s": null
+    },
+    {
+      "satellite": "NOAA 15",
+      "rise_utc": "2026-11-14T08:46:18Z",
+      "rise_epoch_unix": 1794645978.778,
+      "culmination_utc": "2026-11-14T08:51:26Z",
+      "culmination_epoch_unix": 1794646286.778,
+      "set_utc": "2026-11-14T08:56:37Z",
+      "set_epoch_unix": 1794646597.997,
+      "max_elevation": 20.5,
+      "elevation_error_deg": 0.04,
+      "rise_error_s": 2.1
+    },
+    {
+      "satellite": "ISS (ZARYA)",
+      "rise_utc": "2026-11-14T08:59:25Z",
+      "rise_epoch_unix": 1794646765.34,
+      "culmination_utc": "2026-11-14T09:03:01Z",
+      "culmination_epoch_unix": 1794646981.34,
+      "set_utc": "2026-11-14T09:06:40Z",
+      "set_epoch_unix": 1794647200.809,
+      "max_elevation": 20.2,
+      "elevation_error_deg": 0.05,
+      "rise_error_s": 0.5
+    },
+    {
+      "satellite": "NOAA 15",
+      "rise_utc": "2026-11-14T10:24:25Z",
+      "rise_epoch_unix": 1794651865.34,
+      "culmination_utc": "2026-11-14T10:30:41Z",
+      "culmination_epoch_unix": 1794652241.34,
+      "set_utc": "2026-11-14T10:37:02Z",
+      "set_epoch_unix": 1794652622.84,
+      "max_elevation": 62.3,
+      "elevation_error_deg": null,
+      "rise_error_s": null
+    },
+    {
+      "satellite": "ISS (ZARYA)",
+      "rise_utc": "2026-11-14T10:35:20Z",
+      "rise_epoch_unix": 1794652520.184,
+      "culmination_utc": "2026-11-14T10:39:32Z",
+      "culmination_epoch_unix": 1794652772.184,
+      "set_utc": "2026-11-14T10:43:47Z",
+      "set_epoch_unix": 1794653027.84,
+      "max_elevation": 65.4,
+      "elevation_error_deg": null,
+      "rise_error_s": null
+    },
+    {
+      "satellite": "NOAA 19",
+      "rise_utc": "2026-11-14T11:31:58Z",
+      "rise_epoch_unix": 1794655918.622,
+      "culmination_utc": "2026-11-14T11:34:56Z",
+      "culmination_epoch_unix": 1794656096.622,
+      "set_utc": "2026-11-14T11:37:55Z",
+      "set_epoch_unix": 1794656275.34,
+      "max_elevation": 8.2,
+      "elevation_error_deg": null,
+      "rise_error_s": null
+    },
+    {
+      "satellite": "NOAA 15",
+      "rise_utc": "2026-11-14T12:08:52Z",
+      "rise_epoch_unix": 1794658132.997,
+      "culmination_utc": "2026-11-14T12:11:26Z",
+      "culmination_epoch_unix": 1794658286.997,
+      "set_utc": "2026-11-14T12:14:01Z",
+      "set_epoch_unix": 1794658441.434,
+      "max_elevation": 7.2,
+      "elevation_error_deg": null,
+      "rise_error_s": null
+    },
+    {
+      "satellite": "ISS (ZARYA)",
+      "rise_utc": "2026-11-14T12:12:50Z",
+      "rise_epoch_unix": 1794658370.184,
+      "culmination_utc": "2026-11-14T12:16:46Z",
+      "culmination_epoch_unix": 1794658606.184,
+      "set_utc": "2026-11-14T12:20:41Z",
+      "set_epoch_unix": 1794658841.747,
+      "max_elevation": 26.4,
+      "elevation_error_deg": null,
+      "rise_error_s": null
+    },
+    {
+      "satellite": "NOAA 18",
+      "rise_utc": "2026-11-14T12:33:39Z",
+      "rise_epoch_unix": 1794659619.403,
+      "culmination_utc": "2026-11-14T12:38:29Z",
+      "culmination_epoch_unix": 1794659909.403,
+      "set_utc": "2026-11-14T12:43:20Z",
+      "set_epoch_unix": 1794660200.184,
+      "max_elevation": 16.5,
+      "elevation_error_deg": null,
+      "rise_error_s": null
+    },
+    {
+      "satellite": "NOAA 19",
+      "rise_utc": "2026-11-14T13:07:57Z",
+      "rise_epoch_unix": 1794661677.215,
+      "culmination_utc": "2026-11-14T13:14:17Z",
+      "culmination_epoch_unix": 1794662057.215,
+      "set_utc": "2026-11-14T13:20:40Z",
+      "set_epoch_unix": 1794662440.809,
+      "max_elevation": 49.3,
+      "elevation_error_deg": null,
+      "rise_error_s": null
+    },
+    {
+      "satellite": "ISS (ZARYA)",
+      "rise_utc": "2026-11-14T13:50:08Z",
+      "rise_epoch_unix": 1794664208.934,
+      "culmination_utc": "2026-11-14T13:54:10Z",
+      "culmination_epoch_unix": 1794664450.934,
+      "set_utc": "2026-11-14T13:58:13Z",
+      "set_epoch_unix": 1794664693.153,
+      "max_elevation": 31.1,
+      "elevation_error_deg": null,
+      "rise_error_s": null
+    },
+    {
+      "satellite": "NOAA 18",
+      "rise_utc": "2026-11-14T14:11:53Z",
+      "rise_epoch_unix": 1794665513.934,
+      "culmination_utc": "2026-11-14T14:18:23Z",
+      "culmination_epoch_unix": 1794665903.934,
+      "set_utc": "2026-11-14T14:24:57Z",
+      "set_epoch_unix": 1794666297.684,
+      "max_elevation": 83.1,
+      "elevation_error_deg": null,
+      "rise_error_s": null
+    },
+    {
+      "satellite": "NOAA 19",
+      "rise_utc": "2026-11-14T14:49:25Z",
+      "rise_epoch_unix": 1794667765.34,
+      "culmination_utc": "2026-11-14T14:55:07Z",
+      "culmination_epoch_unix": 1794668107.34,
+      "set_utc": "2026-11-14T15:00:55Z",
+      "set_epoch_unix": 1794668455.34,
+      "max_elevation": 24.9,
+      "elevation_error_deg": null,
+      "rise_error_s": null
+    },
+    {
+      "satellite": "ISS (ZARYA)",
+      "rise_utc": "2026-11-14T15:26:56Z",
+      "rise_epoch_unix": 1794670016.278,
+      "culmination_utc": "2026-11-14T15:31:12Z",
+      "culmination_epoch_unix": 1794670272.278,
+      "set_utc": "2026-11-14T15:35:27Z",
+      "set_epoch_unix": 1794670527.684,
+      "max_elevation": 73.6,
+      "elevation_error_deg": null,
+      "rise_error_s": null
+    },
+    {
+      "satellite": "NOAA 18",
+      "rise_utc": "2026-11-14T15:55:46Z",
+      "rise_epoch_unix": 1794671746.434,
+      "culmination_utc": "2026-11-14T15:59:50Z",
+      "culmination_epoch_unix": 1794671990.434,
+      "set_utc": "2026-11-14T16:03:54Z",
+      "set_epoch_unix": 1794672234.872,
+      "max_elevation": 11.3,
+      "elevation_error_deg": null,
+      "rise_error_s": null
+    },
+    {
+      "satellite": "ISS (ZARYA)",
+      "rise_utc": "2026-11-14T17:04:38Z",
+      "rise_epoch_unix": 1794675878.934,
+      "culmination_utc": "2026-11-14T17:07:26Z",
+      "culmination_epoch_unix": 1794676046.934,
+      "set_utc": "2026-11-14T17:10:15Z",
+      "set_epoch_unix": 1794676215.965,
+      "max_elevation": 11.1,
+      "elevation_error_deg": null,
+      "rise_error_s": null
+    },
+    {
+      "satellite": "FENGYUN 3D",
+      "rise_utc": "2026-11-14T18:37:05Z",
+      "rise_epoch_unix": 1794681425.653,
+      "culmination_utc": "2026-11-14T18:39:05Z",
+      "culmination_epoch_unix": 1794681545.653,
+      "set_utc": "2026-11-14T18:41:06Z",
+      "set_epoch_unix": 1794681666.59,
+      "max_elevation": 6.3,
+      "elevation_error_deg": null,
+      "rise_error_s": null
+    },
+    {
+      "satellite": "METEOR M2",
+      "rise_utc": "2026-11-14T19:13:10Z",
+      "rise_epoch_unix": 1794683590.809,
+      "culmination_utc": "2026-11-14T19:19:06Z",
+      "culmination_epoch_unix": 1794683946.809,
+      "set_utc": "2026-11-14T19:24:59Z",
+      "set_epoch_unix": 1794684299.09,
+      "max_elevation": 29.9,
+      "elevation_error_deg": null,
+      "rise_error_s": null
+    },
+    {
+      "satellite": "FENGYUN 3D",
+      "rise_utc": "2026-11-14T20:13:59Z",
+      "rise_epoch_unix": 1794687239.09,
+      "culmination_utc": "2026-11-14T20:20:23Z",
+      "culmination_epoch_unix": 1794687623.09,
+      "set_utc": "2026-11-14T20:26:45Z",
+      "set_epoch_unix": 1794688005.028,
+      "max_elevation": 56.3,
+      "elevation_error_deg": null,
+      "rise_error_s": null
+    },
+    {
+      "satellite": "METEOR M2",
+      "rise_utc": "2026-11-14T20:53:09Z",
+      "rise_epoch_unix": 1794689589.872,
+      "culmination_utc": "2026-11-14T20:59:17Z",
+      "culmination_epoch_unix": 1794689957.872,
+      "set_utc": "2026-11-14T21:05:22Z",
+      "set_epoch_unix": 1794690322.528,
+      "max_elevation": 40.0,
+      "elevation_error_deg": null,
+      "rise_error_s": null
+    },
+    {
+      "satellite": "FENGYUN 3D",
+      "rise_utc": "2026-11-14T21:54:42Z",
+      "rise_epoch_unix": 1794693282.684,
+      "culmination_utc": "2026-11-14T22:00:10Z",
+      "culmination_epoch_unix": 1794693610.684,
+      "set_utc": "2026-11-14T22:05:35Z",
+      "set_epoch_unix": 1794693935.653,
+      "max_elevation": 23.1,
+      "elevation_error_deg": null,
+      "rise_error_s": null
+    },
+    {
+      "satellite": "METEOR M2",
+      "rise_utc": "2026-11-14T22:36:20Z",
+      "rise_epoch_unix": 1794695780.184,
+      "culmination_utc": "2026-11-14T22:37:58Z",
+      "culmination_epoch_unix": 1794695878.184,
+      "set_utc": "2026-11-14T22:39:36Z",
+      "set_epoch_unix": 1794695976.122,
+      "max_elevation": 5.9,
+      "elevation_error_deg": null,
+      "rise_error_s": null
+    },
+    {
+      "satellite": "NOAA 15",
+      "rise_utc": "2026-11-14T22:36:45Z",
+      "rise_epoch_unix": 1794695805.965,
+      "culmination_utc": "2026-11-14T22:42:55Z",
+      "culmination_epoch_unix": 1794696175.965,
+      "set_utc": "2026-11-14T22:49:02Z",
+      "set_epoch_unix": 1794696542.84,
+      "max_elevation": 43.4,
+      "elevation_error_deg": null,
+      "rise_error_s": null
+    },
+    {
+      "satellite": "NOAA 15",
+      "rise_utc": "2026-11-15T00:16:47Z",
+      "rise_epoch_unix": 1794701807.84,
+      "culmination_utc": "2026-11-15T00:22:25Z",
+      "culmination_epoch_unix": 1794702145.84,
+      "set_utc": "2026-11-15T00:28:03Z",
+      "set_epoch_unix": 1794702483.309,
+      "max_elevation": 27.7,
+      "elevation_error_deg": null,
+      "rise_error_s": null
+    },
+    {
+      "satellite": "NOAA 19",
+      "rise_utc": "2026-11-15T01:27:48Z",
+      "rise_epoch_unix": 1794706068.309,
+      "culmination_utc": "2026-11-15T01:33:02Z",
+      "culmination_epoch_unix": 1794706382.309,
+      "set_utc": "2026-11-15T01:38:15Z",
+      "set_epoch_unix": 1794706695.028,
+      "max_elevation": 17.9,
+      "elevation_error_deg": null,
+      "rise_error_s": null
+    }
+  ],
+  "reference": {
+    "NOAA15": {
+      "rise_unix": 1794645980.8872955,
+      "max_el_deg": 20.464544915488556,
+      "peak_unix": 1794646285.8872955
+    },
+    "NOAA18": {
+      "rise_unix": 1794624250.8872955,
+      "max_el_deg": 47.05175462841288,
+      "peak_unix": 1794624630.8872955
+    },
+    "NOAA19": {
+      "rise_unix": 1794626425.8872955,
+      "max_el_deg": 54.308448937146785,
+      "peak_unix": 1794626815.8872955
+    },
+    "ISSZARYA": {
+      "rise_unix": 1794646765.8872955,
+      "max_el_deg": 20.2451948993692,
+      "peak_unix": 1794646980.8872955
+    },
+    "METEORM2": {
+      "rise_unix": 1794633625.8872955,
+      "max_el_deg": 13.930431368338072,
+      "peak_unix": 1794633890.8872955
+    },
+    "FENGYUN3D": {
+      "rise_unix": 1794637135.8872955,
+      "max_el_deg": 25.99235903028984,
+      "peak_unix": 1794637470.8872955
+    }
+  },
+  "findings": [
+    {
+      "norad": 25338,
+      "name": "NOAA 15",
+      "tle_source": "cache",
+      "matched_rise_epoch_unix": 1794645978.778,
+      "mbdsdr_pass_max_el_deg": 20.5,
+      "skyfield_pass_max_el_deg": 20.5,
+      "elevation_error_deg": 0.04,
+      "rise_error_s": 2.1
+    },
+    {
+      "norad": 28654,
+      "name": "NOAA 18",
+      "tle_source": "cache",
+      "matched_rise_epoch_unix": 1794624248.465,
+      "mbdsdr_pass_max_el_deg": 47.0,
+      "skyfield_pass_max_el_deg": 47.1,
+      "elevation_error_deg": 0.05,
+      "rise_error_s": 2.4
+    },
+    {
+      "norad": 33591,
+      "name": "NOAA 19",
+      "tle_source": "cache",
+      "matched_rise_epoch_unix": 1794626424.403,
+      "mbdsdr_pass_max_el_deg": 54.3,
+      "skyfield_pass_max_el_deg": 54.3,
+      "elevation_error_deg": 0.01,
+      "rise_error_s": 1.5
+    },
+    {
+      "norad": 25544,
+      "name": "ISS (ZARYA)",
+      "tle_source": "cache",
+      "matched_rise_epoch_unix": 1794646765.34,
+      "mbdsdr_pass_max_el_deg": 20.2,
+      "skyfield_pass_max_el_deg": 20.2,
+      "elevation_error_deg": 0.05,
+      "rise_error_s": 0.5
+    }
+  ]
+}
