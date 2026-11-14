@@ -2485,6 +2485,7 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `docs/evidence-standard.md` | 用例随闸线/6ae85f56（§8.3 豁免入口改为两个参数） | 2026-11-14 12:34 | 本笔 |
 | `scripts/audit_bare_commits.py` | 用例随闸线/6ae85f56（审计文案里的豁免入口改名） | 2026-11-14 12:34 | 本笔 |
 | `tests/test_safe_commit_declaration.py` | 用例随闸线/6ae85f56（漂移豁免用例改 --allow-foreign-drift，补用错开关反证） | 2026-11-14 12:34 | 本笔 |
+| `mbdsdr_ai/orbit.py` | 共享件边界线/6ae85f56（共享件收口：_iso_utc 与 tle_cache_time_utc 委托 time_format.iso_utc_z（第 3 份同形实现，行为不变）） | 2026-11-14 12:38 | 本笔 |
 
 > 上表各行均由 `claim` 台账推导：owner 原文与 `acquired_at` 直接取自台账，
 > 目的优先用台账里的 `claim_reason`，没有就如实写「未声明」，不补编。时间列只是

@@ -28,6 +28,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Any, Optional, Tuple
 
 from .sat_illumination import evaluate_illumination, sun_direction_eci
+from .time_format import iso_utc_z
 
 try:
     from sgp4.api import Satrec, jday
@@ -180,9 +181,10 @@ def _iso_utc(unix_ts: float) -> str:
     """Unix UTC 秒 → ISO-8601 UTC（带 ``Z``、带日期）。
 
     过境时刻的权威表示：跨日不会丢掉日期，也不依赖本机时区（P1-14）。
+    格式本身是 ``time_format.iso_utc_z`` 的事：同一时间戳在
+    ``sat_links_fetch`` / ``tle_fetch`` / 本模块三个出口必须逐字节相同。
     """
-    return datetime.fromtimestamp(float(unix_ts), tz=timezone.utc) \
-        .strftime("%Y-%m-%dT%H:%M:%SZ")
+    return iso_utc_z(unix_ts)
 
 
 def _gmst_days(jd_ut1: float) -> float:
@@ -836,9 +838,7 @@ def _predict_passes_impl(
                 "tle_tier_label": fresh["label"],
                 "tle_age_days": fresh["age_days"],
                 "tle_cache_time_utc": (
-                    datetime.fromtimestamp(float(rec["fetched_at"]),
-                                           tz=timezone.utc)
-                    .strftime("%Y-%m-%dT%H:%M:%SZ")
+                    iso_utc_z(rec["fetched_at"])
                     if rec.get("fetched_at") is not None else None),
                 "refresh_status": rec.get("refresh_status", "unknown"),
                 "refresh_error": rec.get("refresh_error", ""),
