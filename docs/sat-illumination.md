@@ -19,7 +19,7 @@
   由 `sat-vis.c:55-105` 调用）同构。gpredict 本身把半影当受晒（二值），
   本仓保留半影三态供渲染晨昏线。
 - 圆柱影**没有半影带**：这是模型近似，不是漏算；边界靠不确定度字段诚实标注。
-- 既有 `sat_passes._is_sunlit_geometric()` 已改为委托本模块，避免第二份地影数学源。
+- 既有 `sat_passes._is_sunlit_geometric()` 已改为委托本模块，避免第二份地影数学源。〔证：`3fc46b98` — `mbdsdr_ai/sat_passes.py:681` — `from .sat_illumination import STATUS_UMBRA, evaluate_illumination`〕
 
 ## 2. 输入纪律（时间不读墙钟）
 

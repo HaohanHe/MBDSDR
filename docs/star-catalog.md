@@ -333,6 +333,6 @@ python -m mbdsdr_ai.skyengine.build_full_sky_catalog `
    成本未计入。
 9. **许可合规**：随仓 npz 是 HYG 的衍生数据（CC BY-SA 4.0），再分发需保留
    署名与同许可；代码（MIT）与数据的许可边界已在本文件 §1 写明。
-10. **打包**：已修。`pyproject.toml` 的 `package-data` 现含 `data/*.npz`；
+10. **打包**：已修。`pyproject.toml` 的 `package-data` 现含 `data/*.npz`〔证：`a330f766` — `mbdsdr_ai/tests/test_star_catalog_packaging.py:6` — `data/*.npz`〕；
     测试会真构建 wheel 与 sdist，并在压缩包内断言星表存在
     （`test_star_catalog_packaging.py`）。

@@ -311,7 +311,7 @@ python -m pytest -q -s tests/test_network_layer_matrix.py::TestWeakNetworkMatrix
                cond.wait(timeout=max(0.001, deadline - now))
    ```
 
-   该复现的 faulthandler 实抓栈（本机，Python 3.14，2s 超时；线程名已改）：
+   该复现的 faulthandler 实抓栈（本机，Python 3.14，2s 超时；线程名已改）：〔证：`ff13e4ba` — `tests/test_network_layer_matrix.py:1112` — `fanout-deadlock-probe`〕
 
    ```
    Thread 0x000072b4 (most recent call first):

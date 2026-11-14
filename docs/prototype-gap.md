@@ -147,11 +147,11 @@
 | 批次 | 条目 | 证据 |
 | --- | --- | --- |
 | 批 1（已完成） | B8 视轴读数、B9 恒星时/JD、G3 星表署名 | `pytest tests/test_sky_readouts.py -q` → 26 passed；固定时刻截图 `D:/mbdsdr/output/sky-batch1-readouts.png`（UTC 1790532300 = 2026-09-27 12:05:00，站址 43.9N/125.3E，FOV 90°，视轴 AZ 210°/ALT 35°）。状态卡高度 276→330；银河行下移 36px，受晒行下移 36px，相关行裁剪测试已同步并写明原因。 |
-| 批 2（已完成） | A10 DSO 四步（两型 glyph、中文标签、真实轴比、轴比未知）；状态卡超高滚动 | `pytest tests/test_sky_dso_layer.py tests/test_sky_readouts.py tests/test_dso.py -q` → 82 passed（**OpenNGC v2 已落地**，`mbdsdr_ai/data/dso_catalog.json` 真实数据）。A10：`cluster_nebula` 虚线椭圆+内点环、`double_star` 双点中心留空；标签走 `display_name/zh_name`，缺失退回编号，最差「深空天体」；星系椭圆按 `size_minor_arcmin/size_arcmin`；缺小轴/空星等/空尺寸写「轴比未知/星等未知/角大小 未知」，不拿 0 或 0.55 冒充真值。状态卡：卡高 `min(INFO_CARD_H, 视口高-24)`，内容裁剪+平移+右侧滚动条，光标在卡内滚轮只滚卡（卡外仍缩放）。 |
+| 批 2（已完成） | A10 DSO 四步（两型 glyph、中文标签、真实轴比、轴比未知）；状态卡超高滚动 | `pytest tests/test_sky_dso_layer.py tests/test_sky_readouts.py tests/test_dso.py -q` → 82 passed（**OpenNGC v2 已落地**，`mbdsdr_ai/data/dso_catalog.json` 真实数据）。A10：`cluster_nebula` 虚线椭圆+内点环、`double_star` 双点中心留空；标签走 `display_name/zh_name`，缺失退回编号，最差「深空天体」；星系椭圆按 `size_minor_arcmin/size_arcmin`；缺小轴/空星等/空尺寸写「轴比未知/星等未知/角大小 未知」，不拿 0 或 0.55 冒充真值。状态卡：卡高 `min(INFO_CARD_H, 视口高-24)`，内容裁剪+平移+右侧滚动条，光标在卡内滚轮只滚卡（卡外仍缩放）。 〔证：`f0c8fa25` — `mbdsdr_ai/data/dso_catalog.json:3` — `dso_catalog.v2`〕 |
 | 批 3 | D4 卡内锁定语义、D3/F3 跨线入口（需报备 `main_window.py`）；方案③ 2/4（全天入口、160° 性能实测） | 单测 + 截图；跨线项先报备 |
 | 不动 | A4 地景遮挡（仅登记） | 文档登记，无代码 |
 
-**OpenNGC v2 换源口径（已落地）**：`dso_catalog.json` 已是
+**OpenNGC v2 换源口径（已落地）**：`dso_catalog.json` 已是〔证：`f0c8fa25` — `mbdsdr_ai/data/dso_catalog.json:3` — `dso_catalog.v2`〕
 `schema=mbdsdr.dso_catalog.v2`，加载器同步接受；缺星等/长轴/常用名的条目
 在 API 层是 `None`/空串，视图层显示「未知」，**任何情况下不把 0 当真实值**。
 DSO 基线就是 `tests/test_sky_dso_layer.py` 套件（仓内无 DSO 截图基线），
@@ -196,7 +196,7 @@ DSO 基线就是 `tests/test_sky_dso_layer.py` 套件（仓内无 DSO 截图基�
 - **标签**：160° B3 队列 55（planet 3 / sat 1 / constel 33 / dso 6 / star 12），
   按档限流后 46（3/1/24/6/12），避让后保留 31；B9 42→29；120° B3 34→24。
   上面这组「46（3/1/24/6/12）」是 **P1≤4 时代的实测快照**，仅作历史对照。
-  P0–P4 顺序未失效。**每档上限已落地（当前实现 `LABEL_TIER_CAPS`）**：
+  P0–P4 顺序未失效。**每档上限已落地（当前实现 `LABEL_TIER_CAPS`）**：〔证：`2b29c20a` — `desktop/rf_sky_view.py:768` — `LABEL_TIER_CAPS`〕
   P0≤5、P1≤20、P2≤24、P3≤12、P4≤20；P1 从 4 提到 20 的原因：南半球实测
   13 条亮星名同时出现，4 条会把亮星名挤掉（`c1107b8`）；同档内按「离视场
   中心距离」升序保留，**先限流后避让**——丢的是远处座名，不是队列/目录序
@@ -249,7 +249,7 @@ DSO 基线就是 `tests/test_sky_dso_layer.py` 套件（仓内无 DSO 截图基�
 - **性能方案**：A（拾取批量 numpy 预筛）已做；B（裁星）按用户否决，未做，
   全天暗星完整保留；C（分层缓存）未做——收益 <2ms 且需跨视角失效逻辑，
   复杂度不合算；D 不做。
-- **已落地优化**：视图旋转 `lru_cache(32)`；方位网格/地景/地平线批量投影；
+- **已落地优化**：视图旋转 `lru_cache(32)`；方位网格/地景/地平线批量投影；〔证：`5318c1bc` — `mbdsdr_ai/sky_interaction.py:331` — `@lru_cache(maxsize=32)`〕
   DSO 整表一次 P·N·R + 批量落屏；星座链路委托 `j2000_to_altaz_many`；
   拾取整表批量视高度/落屏 + ±tolerance box 预筛；新增
   `azalt_from_vec_many` / `j2000_to_altaz_many` 及「批量=单点」逐点

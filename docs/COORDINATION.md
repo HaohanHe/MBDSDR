@@ -2201,6 +2201,8 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `desktop/main_window.py` | 参考移植线/20261114（第2条：面板构造改走 registry().create；_create_panel 工厂缺失即报错；删除面板类直接 import/构造） | 2026-11-14 05:31 | 本笔 |
 | `tests/test_panel_registry_factory.py` | 参考移植线/20261114（第2条：19 条判据（工厂可用性 + 主窗口经注册表 + 源码无硬编码 + 缺工厂报错）） | 2026-11-14 05:31 | 本笔 |
 | `docs/COORDINATION.md` | 参考移植线/20261114（本笔 §6.1 登记行，提交后释放） | 2026-11-14 05:31 | 本笔 |
+| `scripts/verify_claims.py` | 文档引用复核线/6ae85f56（业务状态词不算断言（退出码/表格里的状态词），看位置不看词表；可证实不变 99） | 2026-11-14 09:14 | 本笔 |
+| `tests/test_verify_claims.py` | 文档引用复核线/6ae85f56（状态词成对反证：同句改到状态位不命中、原四元组仍可证实（44 passed）） | 2026-11-14 09:14 | 本笔 |
 | `tests/test_append_coordination_row.py` | S1-S4结果伪造线/6ae85f56（CRLF 守卫：追加只插入一行字节，插入点前后逐字节相等；反证=读侧按平台默认换行（CRLF 被整份改写成 LF）即红） | 2026-11-14 09:14 | 本笔 |
 | `desktop/panel_registry.py` | 参考移植线/20261114（第2条扩展：新增 8 个右栏固定页签的零参惰性工厂（scanner/modulation/bookmark/anr/constellation/device/gain/adsb_list）） | 2026-11-14 09:14 | 本笔 |
 | `desktop/main_window.py` | 参考移植线/20261114（第2条扩展：8 个面板构造改走 _create_optional_panel（工厂缺失即报错、依赖缺失才降级）；VFO/远程设置如实保留直接构造） | 2026-11-14 09:14 | 本笔 |
@@ -2227,6 +2229,18 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `tests/test_head_build_smoke.py` | HEAD可构建线/6ae85f56（判据：红/无法判定都记账，非静默跳过） | 2026-11-14 09:38 | 本笔 |
 | `scripts/hooks/post-commit` | HEAD可构建线/6ae85f56（接入烟雾检查，置于审计/绕过分支之前） | 2026-11-14 09:38 | 本笔 |
 | `scripts/install_git_hooks.py` | HEAD可构建线/6ae85f56（head_build_smoke.py 随钩子安装副本，旧工作树兜住） | 2026-11-14 09:38 | 本笔 |
+| `docs/constellations.md` | 文档引用复核线/6ae85f56（A类补证据：IAU 88 座结论补四元组，四步复核全过） | 2026-11-14 09:39 | 本笔 |
+| `docs/design_tokens_mapping.md` | 文档引用复核线/6ae85f56（A类补证据：品牌橙 #9A5F33 补四元组） | 2026-11-14 09:39 | 本笔 |
+| `docs/hardcoded-parameters.md` | 文档引用复核线/6ae85f56（A类补证据：6 条硬编码断言补四元组） | 2026-11-14 09:39 | 本笔 |
+| `docs/limitations-register.md` | 文档引用复核线/6ae85f56（A类补证据：L32/L46/L47 三条补四元组） | 2026-11-14 09:39 | 本笔 |
+| `docs/narrow-screen-plan.md` | 文档引用复核线/6ae85f56（A类补证据：4 条自指证据改为代码目标） | 2026-11-14 09:39 | 本笔 |
+| `docs/network-layer.md` | 文档引用复核线/6ae85f56（A类补证据：faulthandler 复现补四元组） | 2026-11-14 09:39 | 本笔 |
+| `docs/prototype-gap.md` | 文档引用复核线/6ae85f56（A类补证据：4 条原型落地断言补四元组） | 2026-11-14 09:39 | 本笔 |
+| `docs/python-crash-20261105.md` | 文档引用复核线/6ae85f56（A类补证据：防线落地补四元组） | 2026-11-14 09:39 | 本笔 |
+| `docs/real_hw_acceptance_20261103.md` | 文档引用复核线/6ae85f56（A类补证据：验收脚本不依赖 rtl_power 补四元组） | 2026-11-14 09:39 | 本笔 |
+| `docs/sat-illumination.md` | 文档引用复核线/6ae85f56（A类补证据：sat_passes 委托补四元组） | 2026-11-14 09:39 | 本笔 |
+| `docs/star-catalog.md` | 文档引用复核线/6ae85f56（A类补证据：打包 data/*.npz 改为测试目标） | 2026-11-14 09:39 | 本笔 |
+| `docs/claim-waivers.md` | 文档引用复核线/6ae85f56（A类补证据后销掉已失效行，waived-total 53→12） | 2026-11-14 09:44 | 本笔 |
 | `desktop/adsb_panel.py` | 统一搜索性能线/6ae85f56（ADS-B 表格渲染上限 300 + 表头未显示架数（实测 1200 架 45ms/批）） | 2026-11-14 09:40 | 本笔 |
 | `tests/test_adsb_panel_result_cap.py` | 统一搜索性能线/6ae85f56（ADS-B 上限行数判据与去上限反证） | 2026-11-14 09:40 | 本笔 |
 | `scripts/repro/2026-11-14-list-render-baseline.py` | 统一搜索性能线/6ae85f56（六类长列表渲染基线复跑脚本（扫频/书签/过境/ADS-B/APRS/设备，每档预热1+采样5取中位，--mode before 放大上限做反证）） | 2026-11-14 09:42 | 本笔 |

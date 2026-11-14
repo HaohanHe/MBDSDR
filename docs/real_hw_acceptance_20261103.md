@@ -72,7 +72,7 @@ python scripts/real_hw_acceptance.py --aprs-seconds 120   # 延长 APRS 监听�
 1. **offscreen 快照 CJK 字符呈方框**：Qt offscreen 平台无系统字体回退，仅影响无头截图，
    真实显示环境不受影响。不需要修；如需无头截图留档美观，可在 CI 镜像装 Noto Sans CJK。
 2. **rtl_power 在本机增益行为反直觉**（`-g 192` 读数低于 `-g 0`，且 bin 有空洞 NaN）——
-   独立基准工具的环境行为，非本仓库代码问题；验收脚本已改为不依赖 rtl_power
+   独立基准工具的环境行为，非本仓库代码问题；验收脚本已改为不依赖 rtl_power〔证：`e9ca3d05` — `scripts/real_hw_acceptance.py:181` — `rtl_fm 独立互证`〕
    （频轴平移自洽 + rtl_fm 互证，更硬）。
 
 ## 不可验声明（不拿推断当结论）
