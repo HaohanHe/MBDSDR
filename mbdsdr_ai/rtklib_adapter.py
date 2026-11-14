@@ -331,17 +331,30 @@ class SatelliteOrbit:
 # ============================================================
 # Klobuchar 电离层模型 ——  ionmodel()
 # ============================================================
-def klobuchar_ion_delay(t_gpst: float, ion_par: List[float],
-                        lat: float, lon: float, az: float, el: float) -> float:
+def klobuchar_ion_delay(t_gpst: float, ion_par: Optional[List[float]],
+                        lat: float, lon: float, az: float, el: float
+                        ) -> Optional[float]:
     """Klobuchar 单频电离层延迟(m)。 ionmodel()。
 
     ion_par: 8 个电离层参数 [alpha0..3, beta0..3]（广播导航文件 1/2 行）。
+
+    缺参数纪律（A1）：``ion_par`` 缺失/长度不足/非有限/全零时返回 ``None``，
+    表示**未校正**。这里不保留任何固定典型系数——典型值不是当天值。
+    调用方必须把 ``None`` 如实标成 uncorrected，不得当成 0 或代填。
     """
-    ion_default = [0.1118e-7, -0.7451e-8, -0.5961e-7, 0.1192e-6,
-                   0.1167e6, -0.2294e6, -0.1311e6, 0.1049e7] # 
     if el <= 0.0:
         return 0.0
-    ion = ion_par if ion_par and np.linalg.norm(ion_par) > 0 else ion_default
+    if ion_par is None:
+        return None
+    try:
+        ion = [float(v) for v in ion_par]
+    except (TypeError, ValueError):
+        return None
+    if len(ion) < 8 or not all(math.isfinite(v) for v in ion[:8]):
+        return None
+    # 全零 = 广播未给出有效模型（非「零延迟」），按未校正处理
+    if not any(v != 0.0 for v in ion[:8]):
+        return None
 
     psi = 0.0137 / (el / PI + 0.11) - 0.022 # 
     phi = lat / PI + psi * math.cos(az) # 
