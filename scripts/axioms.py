@@ -21,6 +21,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
+from tools.axioms.axiom_rules import select_findings, select_selftest  # noqa: E402
 from tools.axioms.checks import skip_report  # noqa: E402
 from tools.axioms.model import DEFAULT_WAIVER_FILE, Repo, apply_waivers, load_waivers  # noqa: E402
 from tools.axioms.ratchet import (  # noqa: E402
@@ -51,7 +52,9 @@ def main(argv=None) -> int:
     parser.add_argument("--prioritize", action="store_true", help="额外输出派活优先顺序")
     parser.add_argument("--no-self-test", action="store_true", help="跳过反证自检")
     parser.add_argument("--self-test-only", action="store_true", help="只跑反证自检")
-    parser.add_argument("--rule", default="", help="只显示某条规则（如 A03 / D1）")
+    parser.add_argument("--rule", default="",
+                        help="只显示某条规则：公理 ID（A01）/维度（D1）/规则名；"
+                             "反证自检同样按此过滤")
     parser.add_argument("--fail-on", choices=["none", "must-fix"], default="none",
                         help="默认不因违规失败；接入 CI 时用 must-fix")
     parser.add_argument("--ratchet", dest="ratchet", action="store_true", default=None,
@@ -84,12 +87,15 @@ def main(argv=None) -> int:
 
     if args.self_test_only:
         results = run_selftest(repo)
+        if args.rule:
+            results = select_selftest(results, args.rule)
         failed = [r for r in results if not r["ok"]]
         for r in results:
             print(f"{'PASS' if r['ok'] else 'FAIL'} {r['rule']:<3} {r['name']}："
                   f"正例 {r['positive_hits']} / 负例 {r['negative_hits']}"
                   + ("" if r["ok"] else f"\n     {r['detail']}  来源：{r['provenance']}"))
-        print(f"\n反证自检 {len(results)} 条，失败 {len(failed)} 条")
+        scope = f"（过滤 {args.rule}）" if args.rule else ""
+        print(f"\n反证自检 {len(results)} 条{scope}，失败 {len(failed)} 条")
         return 0 if not failed else 1
 
     axioms, dims = collect_all(repo)
@@ -102,9 +108,7 @@ def main(argv=None) -> int:
     skips_snapshot = skip_report()
 
     if args.rule:
-        rule = args.rule.upper()
-        for dim in dims:
-            dim.findings = [f for f in dim.findings if f.rule.upper() == rule or dim.id == rule]
+        select_findings(dims, args.rule)
 
     self_test = [] if args.no_self_test else run_selftest(repo)
     report = Report8(axioms, dims, self_test, skips_snapshot)
