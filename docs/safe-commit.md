@@ -102,3 +102,21 @@ python scripts/safe_commit.py --files <清单> \
 `git add` 失败的分流另有判据用例 `tests/test_safe_commit_add_errors.py`：
 永久错误 → 退出码 1 且只出现 `[try 1]`；瞬时错误 → 每轮重试、耗尽归 2。
 反证：把 `_attempt` 里的分流去掉（一律按瞬时重试），前一条用例转红（退出码变 2）。
+
+## 已知边界：`check_claim_coordination.py` 按 `<repo>/scripts` 找兄弟模块
+
+`scripts/check_claim_coordination.py:82` 写的是
+`sys.path.insert(0, str(ROOT / "scripts"))`，不是「脚本自身所在目录」。
+**当前无实害**，因为两条前提都成立：
+
+- 它不在 `tests/test_commit_scope_intent_delete.py` 的 `SUPPORT_FILES` 里，钩子
+  夹具不会把它拷进临时仓库的 `<repo>/scripts/`；
+- 它不从 `.git/hooks/` 运行：pre-commit ④ 调的是
+  `<repo>/scripts/check_claim_coordination.py`（或 `MBDSDR_CLAIM_COORD` 覆盖），
+  `__file__` 本来就在 `<repo>/scripts/`，`ROOT/"scripts"` 与自身目录重合。
+
+哪天要把它装进 `.git/hooks/`，或让它进夹具的 `SUPPORT_FILES`，**必须先改成按
+自身目录解析**（`Path(__file__).resolve().parent`）。否则兄弟模块
+`file_claim` / `claim_window` / `check_coordination_append_only` 会导入失败，
+或导到别处的旧副本——这正是 pre-commit 整条 `ModuleNotFoundError` 那类事故的入口。
+在那之前，不要把这段 `sys.path` 写法当模板照抄。
