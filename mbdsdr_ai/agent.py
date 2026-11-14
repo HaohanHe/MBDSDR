@@ -61,6 +61,7 @@ from .code_editor import CodeEditor, EditRecord, EditStatus
 from .astronomy import Observer, EquatorialCoord, AltAzCoord, AntennaParams, unix_to_jd, jd_to_mjd, jd_to_gmst, jd_to_lst, lst_to_hms, compute_refraction, compute_airmass, compute_pointing_guidance
 from .amr import AMRClassifier, AMRResult, ModulationType
 from .error_catalog import retryable, suggestion, user_message
+from .tool_guard import TRIGGER_MODEL
 
 
 logger = logging.getLogger(__name__)
@@ -2163,7 +2164,8 @@ class MBDSDRAgent:
         回填。失败抛异常，由 workflow_engine 走重试/失败分支。
         """
         t0 = time.time()
-        result = self.tool_registry.call(tool_name, params)
+        result = self.tool_registry.call(tool_name, params,
+                                         trigger=TRIGGER_MODEL)
         # 录制工作流：记录本次工具调用（D1 接真实）。
         # 仅当 workflow_record_start 已开始录制时落步骤；未在录制时 record_tool_call 内部直接返回，
         # 因此这是真实记录而非假数据。参数对照 workflow_recorder.py: record_tool_call(tool_name,

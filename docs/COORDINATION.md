@@ -2288,6 +2288,13 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `tests/test_shortcuts_reset_all_guard.py` | UI防呆线/6ae85f56（A3 判据：question 默认按钮为 No、选否则保留、选是则清空（反证已跑：去掉确认即红）） | 2026-11-14 11:07 | 本笔 |
 | `mbdsdr_ai/tool_guard.py` | 进程内工具守卫线/6ae85f56（共享 PRE/RESULT 守卫叶子（MCP 面与进程内面唯一实现）） | 2026-11-14 11:09 | 本笔 |
 | `mbdsdr_ai/core/mcp_server.py` | 进程内工具守卫线/6ae85f56（ToolCallGate 的 PRE/RESULT 改为调用共享实现） | 2026-11-14 11:09 | 本笔 |
+| `mbdsdr_ai/tool_registry.py` | 进程内工具守卫线/6ae85f56（call 统一入口发 PRE/RESULT，trigger 区分 model/user，否决返回结构化拒绝） | 2026-11-14 11:11 | 本笔 |
+| `mbdsdr_ai/agent.py` | 进程内工具守卫线/6ae85f56（工作流执行器调用标注 model 触发） | 2026-11-14 11:11 | 本笔 |
+| `mbdsdr_ai/orchestrator.py` | 进程内工具守卫线/6ae85f56（编排执行器调用标注 model 触发） | 2026-11-14 11:11 | 本笔 |
+| `mbdsdr_ai_mcp_server.py` | 进程内工具守卫线/6ae85f56（旧壳执行入口标注 model 触发，避免误记为用户触发） | 2026-11-14 11:12 | 本笔 |
+| `tests/test_inproc_tool_guard.py` | 进程内工具守卫线/6ae85f56（进程内 PRE/RESULT/否决/触发者/字段一致判据与反证） | 2026-11-14 11:12 | 本笔 |
+| `desktop/main_window.py` | UI防呆线/6ae85f56（A1：录音中断开/切换设备先确认（默认取消），拔设备不弹窗但状态栏写明落盘路径） | 2026-11-14 11:12 | 本笔 |
+| `tests/test_recording_stop_guard.py` | UI防呆线/6ae85f56（A1 判据：断开/切设备必弹确认且取消保留录音；拔设备不弹窗并写明路径（反证已跑：去确认后 3 条红）） | 2026-11-14 11:12 | 本笔 |
 
 > 上表各行均由 `claim` 台账推导：owner 原文与 `acquired_at` 直接取自台账，
 > 目的优先用台账里的 `claim_reason`，没有就如实写「未声明」，不补编。时间列只是

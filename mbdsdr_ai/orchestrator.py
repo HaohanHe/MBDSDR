@@ -33,6 +33,7 @@ from typing import Dict, List, Any, Optional, Callable, Set
 from enum import Enum
 
 from .tool_results import ToolResult, tool_success
+from .tool_guard import TRIGGER_MODEL
 
 
 class TaskStatus(str, Enum):
@@ -355,7 +356,8 @@ class Orchestrator:
                     task.result = (outcome.content
                                    if isinstance(outcome, ToolResult) else outcome)
                 elif task.tool_name and self.tool_registry:
-                    tool_result = self.tool_registry.call(task.tool_name, effective_params)
+                    tool_result = self.tool_registry.call(
+                        task.tool_name, effective_params, trigger=TRIGGER_MODEL)
                     ok = tool_success(tool_result)
                     if ok is False:
                         reason = _tool_result_reason(tool_result)

@@ -69,6 +69,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from mbdsdr_ai import MBDSDRAgent, AgentConfig
 from mbdsdr_ai.core.mcp_server import ToolCallGate
 from mbdsdr_ai.tx_guard import tx_authorization
+from mbdsdr_ai.tool_guard import TRIGGER_MODEL
 from mbdsdr_ai.version import __version__
 
 
@@ -236,9 +237,11 @@ class MBSDRAIMCPServer:
             decision = self.gate.last_token_decision
             if decision is not None and decision.allowed:
                 with tx_authorization(decision):
-                    result = self.tool_registry.call(name, args)
+                    result = self.tool_registry.call(
+                        name, args, trigger=TRIGGER_MODEL)
             else:
-                result = self.tool_registry.call(name, args)
+                result = self.tool_registry.call(
+                    name, args, trigger=TRIGGER_MODEL)
 
             if result.success:
                 # 成功: 返回文本内容

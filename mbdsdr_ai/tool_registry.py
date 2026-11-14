@@ -36,6 +36,13 @@ from .error_catalog import (
 # 一旦出现第二份定义，跨模块 isinstance / except 会静默失效。
 from .tool_results import ToolResult, clean_exc, numeric_array
 
+# 进程内面的工具调用守卫：与 MCP 面（core.mcp_server.ToolCallGate）共用
+# 同一份 PRE 判据、RESULT 字段与触发者标注，禁止在这里再写第二套。
+from .hook_commands import HookCommandRunner
+from .hooks import HookManager
+from .tool_guard import (TRIGGER_MODEL, TRIGGER_USER, emit_pre_tool_use,
+                         emit_tool_result, normalize_trigger)
+
 
 def hex_bytes(args: Dict[str, Any], key: str):
     """按「十六进制字符串」取参校验，返回 ``(blob, err)``。
@@ -398,7 +405,10 @@ class ToolRegistry:
     """
 
     def __init__(self, tool_output_max_chars: int = 4000,
-                 default_timeout_s: Optional[float] = None):
+                 default_timeout_s: Optional[float] = None,
+                 hooks: Optional[HookManager] = None,
+                 hook_commands: Optional[HookCommandRunner] = None,
+                 guard_source: str = "agent_inproc"):
         self.tools: Dict[str, Dict[str, Any]] = {}  # name -> {definition, handler, available, category}
         self.tool_output_max_chars = tool_output_max_chars
         # 工具执行超时（秒）。None/<=0 = 不设超时，handler 在调用线程内联执行
@@ -409,6 +419,13 @@ class ToolRegistry:
         self.call_log: List[ToolCallLog] = []
         self.max_log_entries = 200
         self._mcp_client = None  # MCP 客户端引用（运行时设置）
+        # 工具调用守卫：PRE（可否决）/ RESULT（观测）事件，与 MCP 面同一份
+        # 判据。默认自建 HookManager + HookCommandRunner（后者懒读
+        # ~/.mbdsdr/hooks.json），可按需注入以便共用观测面。
+        self.hooks = hooks if hooks is not None else HookManager()
+        self.hook_commands = (hook_commands if hook_commands is not None
+                              else HookCommandRunner())
+        self.guard_source = guard_source
         # Sprint 5：并发执行（parallel_safe 工具走 ThreadPoolExecutor）时，多
         # worker 会同时 _log_call 写 call_log——append 虽 GIL 原子，但「超长即
         # 重切片赋值」是读改写复合操作，裸跑会丢条目/瞬态不一致。用锁串行化这一
@@ -679,9 +696,15 @@ class ToolRegistry:
 
     # ── 工具调用 ────────────────────────────────────────
 
-    def call(self, tool_name: str, args: Dict[str, Any] = None) -> ToolResult:
+    def call(self, tool_name: str, args: Dict[str, Any] = None,
+             *, trigger: str = TRIGGER_USER) -> ToolResult:
         """
-        调用工具。
+        调用工具（进程内唯一执行入口）。
+
+        trigger 标注触发者：``model``（模型/子代理/由模型发起的工作流）或
+        ``user``（用户直接点按 / 命令行）。两者都会发 PRE 与 RESULT 事件；
+        只有 ``model`` 会取 PRE 否决并跑外部命令 hooks——用户自己的操作
+        不该被模型侧守卫拦掉。
 
         处理：
         - 工具不存在
@@ -819,6 +842,31 @@ class ToolRegistry:
             self._log_call(result)
             return result
 
+        # ── 工具调用守卫（与 MCP 面共用判据）：PRE 可否决 ─────────────
+        # 放在参数校验之后、handler 之前：缺工具/不可用/坏参数的既有错误
+        # 语义保持不变，否决只拦真正要执行的调用；否决后 handler 不被调用。
+        veto = emit_pre_tool_use(
+            self.hooks, self.hook_commands, tool_name, args,
+            is_write=bool(tool.get("write")),
+            trigger=trigger, source=self.guard_source)
+        if veto is not None:
+            reason = str(veto.get("reason") or "hook_denied")
+            result = ToolResult(
+                success=False,
+                content=(f"工具「{tool_name}」的调用被 Hooks 否决（{reason}），"
+                         "未执行。如需继续，请调整或关闭对应 hook 后重试。"),
+                tool_name=tool_name,
+                args=args,
+                error="hook_vetoed",
+                next_step=("检查 agent.pre_tool_use 的进程内钩子与 "
+                           "~/.mbdsdr/hooks.json 规则。"),
+                data={"ok": False, "gated": True, "outcome": "vetoed",
+                      "veto_reason": reason,
+                      "trigger": normalize_trigger(trigger)},
+            )
+            self._log_call(result)
+            return result
+
         # 调用 handler（可选超时：默认内联执行，设了 timeout 才甩到 daemon 线程）
         try:
             handler = tool["handler"]
@@ -839,6 +887,8 @@ class ToolRegistry:
                         next_step=error_suggestion("tool_timeout"),
                     )
                     result.latency_ms = round((time.time() - start_time) * 1000, 1)
+                    emit_tool_result(self.hooks, tool_name, result,
+                                     trigger=trigger, source=self.guard_source)
                     self._log_call(result)
                     return result
                 if not _ok:
@@ -958,6 +1008,8 @@ class ToolRegistry:
             )
             result.truncated = True
 
+        emit_tool_result(self.hooks, tool_name, result,
+                         trigger=trigger, source=self.guard_source)
         self._log_call(result)
         return result
 
@@ -1043,9 +1095,9 @@ class ToolRegistry:
                 self._log_call(result)
                 return result
             with tx_authorization(decision):
-                return self.call(name, args)
+                return self.call(name, args, trigger=TRIGGER_MODEL)
 
-        return self.call(name, args)
+        return self.call(name, args, trigger=TRIGGER_MODEL)
 
     # ── 调用日志 ────────────────────────────────────────
 
