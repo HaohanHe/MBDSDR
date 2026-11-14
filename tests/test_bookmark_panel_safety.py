@@ -107,6 +107,37 @@ def _seed(bm_panel, name="原名"):
     bm_panel.tree.setCurrentItem(bm_panel.tree.topLevelItem(0))
 
 
+def test_delete_confirm_defaults_to_no_and_states_consequence(
+        bm_panel, monkeypatch):
+    """删书签的确认框必须默认「否」，正文写清不可撤销。
+
+    反证：旧实现不传 defaultButton，Qt 默认选中第一个按钮（Yes），
+    回车即删；且正文只有「删除 X @ freq？」没有后果说明。
+    """
+    from PySide6.QtWidgets import QMessageBox
+
+    _seed(bm_panel)
+    asked = []
+    monkeypatch.setattr(
+        QMessageBox, "question",
+        staticmethod(lambda *a, **k: asked.append(a) or QMessageBox.No))
+
+    bm_panel._on_delete()
+
+    assert asked, "删除书签必须弹确认框"
+    args = asked[0]
+    assert args[3] == (QMessageBox.Yes | QMessageBox.No), \
+        f"确认框应给「是/否」两个选项，实际: {args[3]}"
+    assert len(args) >= 5, \
+        "确认框必须显式传 defaultButton=No；不传时 Qt 默认选中 Yes（回车即删）"
+    assert args[4] == QMessageBox.No, \
+        f"默认按钮必须是 No（回车不能删除），实际: {args[4]}"
+    text = str(args[2])
+    assert "不能撤销" in text, f"必须写明不可撤销: {text}"
+    assert "bookmarks.json" in text, "必须写明会落盘到哪里"
+    assert bm_panel._mgr.all()[0].name == "原名", "取消后书签必须原样保留"
+
+
 def test_edit_empty_name_rejected_and_original_kept(bm_panel, monkeypatch):
     """清空名称 ≠ 取消改名：空名必须拒绝，不得把原名落库成空白。"""
     from PySide6.QtWidgets import QInputDialog, QMessageBox

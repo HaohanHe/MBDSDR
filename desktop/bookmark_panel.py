@@ -332,10 +332,15 @@ class BookmarkPanel(QWidget):
         sel = self._selected()
         if sel is None:
             return
+        # 破坏性操作口径（docs/ux-audit.md「确认框默认按钮口径」）：
+        # 默认按钮必须是「否」，回车不能等于删除；正文写明后果与不可撤销。
         if QMessageBox.question(
                 self, "删除书签",
-                f"删除 {sel['name']} @ {format_frequency_hz(sel['frequency_hz'])}？",
-                QMessageBox.Yes | QMessageBox.No) != QMessageBox.Yes:
+                f"删除书签「{sel['name']}」"
+                f"（{format_frequency_hz(sel['frequency_hz'])}）？\n"
+                "此操作不能撤销，确认后立即写入 bookmarks.json。",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No) != QMessageBox.Yes:
             return
         try:
             self._mgr.remove(sel["frequency_hz"], sel["name"])

@@ -2266,6 +2266,12 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `docs/COORDINATION.md` | S1-S4结果伪造线/6ae85f56（本笔 §6.1 登记行，提交后释放） | 2026-11-14 10:58 | 本笔 |
 | `desktop/ntrip_panel.py` | UI防呆线/6ae85f56（E1: NTRIP 拉取结果改信号回主线程，修按钮永久停在拉取中） | 2026-11-14 10:58 | 本笔 |
 | `tests/test_ntrip_panel.py` | UI防呆线/6ae85f56（E1: 补拉取收尾两条守卫用例（成功/失败按钮恢复）） | 2026-11-14 10:58 | 本笔 |
+| `desktop/vfo_panel.py` | S1-S4结果伪造线/6ae85f56（静默丢弃：中心频率未知时不再按 100 MHz 凭空新建 VFO，改为明确拒绝并给下一步） | 2026-11-14 11:02 | 本笔 |
+| `tests/test_ui_vfo_constellation.py` | S1-S4结果伪造线/6ae85f56（判据：中心频率未知不发射 vfo_added + 状态写明原因与下一步 + 兜底反证） | 2026-11-14 11:02 | 本笔 |
+| `docs/COORDINATION.md` | S1-S4结果伪造线/6ae85f56（本笔 §6.1 登记行，提交后释放） | 2026-11-14 11:02 | 本笔 |
+| `desktop/bookmark_panel.py` | UI防呆线/6ae85f56（A2: 删书签确认默认 No，正文写明不可撤销与落盘位置） | 2026-11-14 11:03 | 本笔 |
+| `tests/test_bookmark_panel_safety.py` | UI防呆线/6ae85f56（A2: 判据（默认按钮实参=No、文案含后果）+ 反证） | 2026-11-14 11:03 | 本笔 |
+| `docs/ux-audit.md` | UI防呆线/6ae85f56（D6: 写死确认框默认按钮口径与五处对照） | 2026-11-14 11:03 | 本笔 |
 
 > 上表各行均由 `claim` 台账推导：owner 原文与 `acquired_at` 直接取自台账，
 > 目的优先用台账里的 `claim_reason`，没有就如实写「未声明」，不补编。时间列只是

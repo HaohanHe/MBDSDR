@@ -148,6 +148,27 @@
 - 天空跟踪可以再次点按钮停止；AI 工具结果有 `inverse` 总线但未暴露给用户。
 - 设置面板有“恢复出厂布局”类兜底（设置线维护）。
 
+### 确认框默认按钮口径（2026-11-14 定，落地时逐处对齐）
+
+规则（写死在文档，改 UI 时按这条走，不再各写各的）：
+
+1. **破坏性 / 不可逆操作**（删除、清空、覆盖、断开正在进行的采集）必须二次确认，且 `QMessageBox.question(..., Yes|No, QMessageBox.No)` **默认按钮必须是 No**——回车不能等于执行破坏。
+2. 正文必须写清三件事：做什么、后果、能不能撤销/是否落盘到哪。
+3. **可逆操作**（调谐、切换显示、打开面板）可以默认 Yes，也可以不弹；不要把可逆动作做成拦路确认。
+4. 判据：打桩 `QMessageBox.question` 后断言第 4 个实参就是 `QMessageBox.No`；反证是把默认按钮去掉后该用例必须红（Qt 默认选中第一个按钮 = Yes）。
+
+现有五处破坏性确认（均为默认 No，作为对照基线）：
+
+| 位置 | 符号 | 动作 |
+|---|---|---|
+| `desktop/control_panel.py` | `_on_bookmark_del` | 删除自定义书签 |
+| `desktop/bookmark_panel.py` | `_on_delete` | 删除书签（2026-11-14 补齐默认 No 与后果说明） |
+| `desktop/main_window.py` | `_on_delete_layout` | 删除自定义布局 |
+| `desktop/main_window.py` | `_on_reset_layout` | 清除所有自定义布局 |
+| `desktop/main_window.py` | `_confirm_stop_tx` | 停止发射 |
+
+可逆对照（默认 Yes / 不拦）：扫频段点击调谐 `main_window._on_scan_segment_clicked`、地点下载 `location_panel._on_download_tiles`。
+
 ---
 
 ## 修复分组与归属
