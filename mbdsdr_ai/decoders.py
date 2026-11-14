@@ -19,6 +19,10 @@ import math
 import numpy as np
 from typing import Dict, Any, List, Optional, Sequence, Tuple
 from dataclasses import dataclass
+try:
+    from .gmst import gmst_rad_iau1982
+except ImportError:  # 扁平导入
+    from gmst import gmst_rad_iau1982
 
 # sgp4 卫星轨道计算
 try:
@@ -196,10 +200,8 @@ def compute_satellite_position(
 
     # TEME -> ECEF：绕 z 轴转 -GMST
     jd_utc = timestamp / 86400.0 + 2440587.5
-    t_ut1 = (jd_utc - 2451545.0) / 36525.0
-    gmst_sec = (67310.54841 + (876600.0 * 3600.0 + 8640184.812866) * t_ut1
-                + 0.093104 * t_ut1 * t_ut1 - 6.2e-6 * t_ut1 ** 3)
-    gmst = math.radians((gmst_sec % 86400.0) / 240.0) % (2.0 * math.pi)
+    # 口径 A，委托单一内核（原处内联的折叠式已删除）。
+    gmst = gmst_rad_iau1982(jd_utc)
     cg, sg = math.cos(-gmst), math.sin(-gmst)
     sat_x = cg * r_teme[0] - sg * r_teme[1]
     sat_y = sg * r_teme[0] + cg * r_teme[1]

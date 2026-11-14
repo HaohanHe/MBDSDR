@@ -202,6 +202,10 @@ def gmst(jd_ut1: float) -> float:
     """格林尼治平恒星时 GMST (度)。输入 JD 为 UT1 (即民用世界时的 Julian Date)。
 
     注意: 高精度应使用 TT; 此处简化用 UT 直接计算（忽略 ΔT，约 1 分钟，对演示足够）。
+
+    **口径 C：Capitaine 2003，与 IAU 1982 是不同物理模型。** 实测与
+    gmst.gmst_rad_iau1982 差 0.0145"–0.1261"（随历元漂移），属星象仪
+    IAU 2006 岁差 / 章动链的一环，**绝不合并到 gmst.py**。
     """
     jd_tt = jd_ut1  # 简化: 忽略 ΔT (约 1 分钟, 对演示足够)
     t = (jd_tt - J2000) / 36525.0          # T (Julian centuries, TT)

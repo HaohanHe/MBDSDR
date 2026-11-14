@@ -33,6 +33,10 @@ import os
 from typing import List, Tuple, Dict, Any, Optional
 
 import numpy as np
+try:
+    from .gmst import gmst_rad_iau1982
+except ImportError:  # 扁平导入（部分脚本直挂 mbdsdr_ai 目录）
+    from gmst import gmst_rad_iau1982
 
 # 课件/物理常数（统一 km-s 单位制）
 C_LIGHT_MS = 299792458.0          # m/s
@@ -58,14 +62,8 @@ ARTIFACT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "artifac
 # ═══════════════════════════════════════════════════════
 
 def gmst_rad(jd_ut1: float) -> float:
-    """Greenwich 平恒星时（弧度），IAU1982 折叠式。jd_ut1 为儒略日。"""
-    t = (jd_ut1 - 2451545.0) / 36525.0
-    gmst_sec = (67310.54841
-                + (876600.0 * 3600.0 + 8640184.812866) * t
-                + 0.093104 * t * t
-                - 6.2e-6 * t * t * t)
-    gmst = math.radians((gmst_sec % 86400.0) / 240.0)
-    return gmst % (2.0 * math.pi)
+    """Greenwich 平恒星时（弧度）。口径 A，委托 gmst.gmst_rad_iau1982。"""
+    return gmst_rad_iau1982(jd_ut1)
 
 
 def jd_from_unix(unix_s: float) -> float:

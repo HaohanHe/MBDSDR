@@ -27,6 +27,10 @@ from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Any, Optional, Tuple
 
 from .sat_illumination import evaluate_illumination, sun_direction_eci
+try:
+    from .gmst import gmst_rad_iau1982
+except ImportError:  # 扁平导入（部分脚本直挂 mbdsdr_ai 目录）
+    from gmst import gmst_rad_iau1982
 
 try:
     from sgp4.api import Satrec, jday
@@ -127,14 +131,12 @@ def _bounded_urlopen(req, timeout_s: float, hard_deadline_s: float):
 
 
 def _gmst_days(jd_ut1: float) -> float:
-    """Greenwich 平恒星时（弧度），基于儒略日。"""
-    t = (jd_ut1 - 2451545.0) / 36525.0
-    gmst_sec = (67310.54841
-                + (876600.0 * 3600.0 + 8640184.812866) * t
-                + 0.093104 * t * t
-                - 6.2e-6 * t * t * t)
-    gmst_rad = math.radians((gmst_sec % 86400.0) / 240.0)
-    return gmst_rad % (2.0 * math.pi)
+    """Greenwich 平恒星时（弧度）。口径 A，委托 gmst.gmst_rad_iau1982。
+
+    与 SGP4/TEME 同族。口径 B（简化式）/ C（Capitaine 2003）不在此收敛，
+    见 mbdsdr_ai/gmst.py 的口径登记表。
+    """
+    return gmst_rad_iau1982(jd_ut1)
 
 
 def geodetic_to_ecef(lat_deg: float, lon_deg: float, alt_km: float) -> Tuple[float, float, float]:
