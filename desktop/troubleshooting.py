@@ -180,6 +180,9 @@ VISIBLE_BY_FAMILY: Dict[str, Tuple[str, ...]] = {
         # fy3_pass_curve / lro_track 在配置存在但读不出来时返该码，AI 步骤卡
         # 渲染 ``错误 {code}``，因此必须给「怎么办」。
         "station_config_unreadable",
+        # sdr_* 写工具在设备会话进行中返该码；tool_registry 的 hook 否决
+        # 返 hook_vetoed——两者同样在 AI 步骤卡渲染 code 字面量。
+        "device_session_locked", "hook_vetoed",
     ),
     "AI 会话": ("agent_busy", "cancelled"),
     "设备能力": (
@@ -224,6 +227,11 @@ VISIBLE_BY_FAMILY: Dict[str, Tuple[str, ...]] = {
         "link_timeout", "link_refused", "link_half_open", "link_reset",
         "buffer_overflow",
     ),
+    # 设备接入/热插拔：owner_registry_unavailable 由 DeviceManager 在打开设备
+    # 时抛出（目录 message 会随连接失败原文进入状态栏）；usb_probe_failed 的
+    # message 由「设备」面板状态行与悬停详情原样渲染。两者的补救动作不同，
+    # 逐码写在 CODE_NEXT_STEPS，避免把「登记表不可读」误当成「设备被占用」。
+    "设备接入": ("owner_registry_unavailable", "usb_probe_failed"),
     # TLE 抓取族：状态栏 ``_on_tle_update_result`` 走
     # ``tle_fetch.tle_refresh_status_text`` 渲染
     # ``TLE 在线更新失败（{code}：{label}）：{reason}；建议：{action}``，
@@ -261,6 +269,9 @@ VISIBLE_NEXT_STEPS: Dict[str, str] = {
     "设备调谐": (
         "先在顶栏点「连接」确认设备在线；频率/采样率/增益超出"
         "设备能力就改回设备支持的值，仍失败则断开重连后再试一次。"),
+    "设备接入": (
+        "在「设备」面板点「重新枚举」核对在位状态并看状态行原文；"
+        "仍失败就打开「诊断」把日志反馈开发者，不要按「设备被占用」去关闭其它程序。"),
     "AI 模型": (
         "在「AI 助手」页签点「配置」核对 API Key 与模型名；限流或 5xx 等几分钟"
         "再发同一条指令，4xx 先改模型名或重新填 Key 后重试。"),
@@ -279,6 +290,18 @@ VISIBLE_NEXT_STEPS: Dict[str, str] = {
 #: 解码结果族里原因码各异，「下一步」逐码写具体动作（族级一条盖不住：
 #: 采样率档位、样本长度、CRC 是三种完全不同的修法）。
 CODE_NEXT_STEPS: Dict[str, str] = {
+    "device_session_locked": (
+        "先在「设备」面板断开（结束会话）再重新下发这次写操作；会话进行中别并发"
+        "改采样率/增益/PPM/带宽，也不要绕过面板直接写后端。"),
+    "hook_vetoed": (
+        "在「AI 助手」页签看步骤卡里的否决原因，按提示调整 `pre_tool_use` 钩子或 "
+        "~/.mbdsdr/hooks.json 规则后再调用；改规则前别原样重发同一被否决调用。"),
+    "owner_registry_unavailable": (
+        "到「设备」面板点「查看诊断」按提示修复或移除占用登记文件（下次启动会重建）；"
+        "不要按「设备被占用」去关闭其它程序——两件事的补救动作不同。"),
+    "usb_probe_failed": (
+        "拔插一次设备看「设备」面板状态行是否恢复；持续失败时拔插只能按枚举判断"
+        "（可能把「被占用」误报成「已拔出」），把「诊断」日志反馈开发者。"),
     "crc_failed": (
         "「控制」页签降低解调带宽并提高增益，改善天线后重录；"
         "APRS 类录满一整帧（实战建议 ≥5s），ADS-B 保持 1090MHz 与 fs=2 MS/s 或 4 MS/s。"),

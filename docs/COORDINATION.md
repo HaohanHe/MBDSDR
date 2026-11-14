@@ -2466,6 +2466,9 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `tests/test_desktop_constants.py` | 判据存量收口/6ae85f56（判据追平：白名单补 cons_of_talker（9762f419 收口，断言不变）） | 2026-11-14 12:21 | 本笔 |
 | `scripts/file_claim.py` | 清理线/6ae85f56（新增 cleanup-stale：四项证据全 PASS 才释放过期 claim，默认只审计） | 2026-11-14 12:22 | 本笔 |
 | `tests/test_file_claim_cleanup.py` | 清理线/6ae85f56（cleanup-stale 行为契约：证据缺一不释放/默认只审计/留痕） | 2026-11-14 12:23 | 本笔 |
+| `mbdsdr_ai/error_catalog.py` | 判据存量收口/6ae85f56（野码/可见码补登记（#14 #9 #15 #16）） | 2026-11-14 12:23 | 本笔 |
+| `docs/error-catalog.md` | 判据存量收口/6ae85f56（野码/可见码补登记（#14 #9 #15 #16）） | 2026-11-14 12:23 | 本笔 |
+| `desktop/troubleshooting.py` | 判据存量收口/6ae85f56（野码/可见码补登记（#14 #9 #15 #16）） | 2026-11-14 12:23 | 本笔 |
 
 > 上表各行均由 `claim` 台账推导：owner 原文与 `acquired_at` 直接取自台账，
 > 目的优先用台账里的 `claim_reason`，没有就如实写「未声明」，不补编。时间列只是

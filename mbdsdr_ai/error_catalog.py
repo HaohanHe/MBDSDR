@@ -435,6 +435,17 @@ _SPECS = (
           "拔插一次设备或重启程序后看状态行是否恢复；持续失败时拔插只能按"
           "枚举判断（可能把「被占用」误报成「已拔出」），请把诊断页日志反馈"
           "开发者。"),
+    _spec("device_session_locked", LAYER_TOOL, True,
+          "设备会话进行中，写参数被冻结",
+          "设备会话进行中（{detail}），本次写操作未下发；"
+          "采样率/增益/PPM/带宽保持会话生效值。",
+          "先在「设备」面板断开（结束会话）再改参数；会话期间不要并发下发"
+          "写操作，也不要绕过面板直接写后端。"),
+    _spec("hook_vetoed", LAYER_TOOL, False,
+          "工具调用被 Hooks 否决",
+          "工具「{tool}」的调用被 Hooks 否决（{reason}），未执行。",
+          "检查 agent.pre_tool_use 的进程内钩子与 ~/.mbdsdr/hooks.json 规则，"
+          "调整或关闭对应 hook 后再调用；改规则前不要原样重复同一被否决调用。"),
     # ── 网络链路（rtl_tcp / SpyServer 接入层）──────────────────────────
     _spec("link_timeout", LAYER_ACCESS, True,
           "链路超时（连接/握手）",

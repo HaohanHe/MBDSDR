@@ -103,12 +103,14 @@ AI 层各自拼中文。守卫测试 `tests/test_error_catalog_guard.py` 校验�
 | `denied_by_policy` | access | 策略拒绝执行 | denied_by_policy：策略拒绝执行 {tool}（规则集不可被 armed 覆盖）。 | 换用允许的工具或修改策略；不要重复尝试同一个被拒调用。 | 否 |
 | `device_busy` | access | 设备被占用 | 设备被其它进程占用：{detail} | 关闭占用进程后重试；不要并发打开同一设备。 | 是 |
 | `device_not_found` | access | 找不到设备 | 找不到 SDR 设备：{detail} | 检查 USB/驱动后重新枚举。 | 否 |
+| `device_session_locked` | tool | 设备会话进行中，写参数被冻结 | 设备会话进行中（{detail}），本次写操作未下发；采样率/增益/PPM/带宽保持会话生效值。 | 先在「设备」面板断开（结束会话）再改参数；会话期间不要并发下发写操作，也不要绕过面板直接写后端。 | 是 |
 | `dist_missing` | access | 前端构建产物缺失 | 前端构建产物缺失：{detail} | 运行 cd web/product && python run_all.py 生成 dist 后刷新页面。 | 是 |
 | `doppler_compensation_failed` | access | 接收链多普勒补偿失败（预测不可用） | 多普勒补偿失败：{detail}。本块音频已跳过，未按 0 补偿。 | 检查卫星目标/TLE 是否有效、本站位置是否已设置；修复后重开补偿。 | 是 |
 | `driver_not_found` | access | 找不到 SDR 驱动 | 找不到 SDR 驱动：{detail} | 安装驱动/DLL 后重启程序。 | 否 |
 | `export_path_out_of_root` | access | 导出路径越界 | 导出路径越界，拒绝写入：{detail} | 把路径改到允许根目录内，或先设置 MBDSDR_EXPORT_ROOT。 | 否 |
 | `forbidden` | access | 跨源/同源校验拒绝 | 请求被拒绝（同源校验未通过）：{detail} | 从宿主注入的本地页面发起请求，不要跨源调用桥接接口。 | 否 |
 | `frequency_out_of_range` | access | 频率超出范围 | 频率 {freq} Hz 超出设备范围：{detail} | 改用设备可调范围内的频率。 | 否 |
+| `hook_vetoed` | tool | 工具调用被 Hooks 否决 | 工具「{tool}」的调用被 Hooks 否决（{reason}），未执行。 | 检查 agent.pre_tool_use 的进程内钩子与 ~/.mbdsdr/hooks.json 规则，调整或关闭对应 hook 后再调用；改规则前不要原样重复同一被否决调用。 | 否 |
 | `identity_mismatch` | access | 站点身份不匹配 | 站点身份不匹配：{detail} | 确认站点 ID 与数据库一致后重试。 | 否 |
 | `internal_error` | access | 内部异常 | 内部错误（{exc_type}）：{detail} | 重试一次；仍失败请收集日志（含异常类型与上下文）反馈开发者。 | 是 |
 | `invalid_argument` | access | 参数校验失败 | 参数校验失败：{detail} | 按参数说明修正后重试（本库不做静默钳位）。 | 否 |
