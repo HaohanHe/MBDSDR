@@ -2421,6 +2421,12 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `tests/test_audit_health.py` | 审计漏记可见线/6ae85f56（第四轮：漏记计数判据与反证） | 2026-11-14 11:42 | 本笔 |
 | `tests/test_audit_alarm.py` | 审计漏记可见线/6ae85f56（第四轮：界面可见判据） | 2026-11-14 11:42 | 本笔 |
 | `docs/limitations-register.md` | 审计漏记可见线/6ae85f56（第四轮：附 X.1 漏记策略与 fail-open/fail-closed 差异） | 2026-11-14 11:42 | 本笔 |
+| `mbdsdr_ai/astronomy.py` | 时空环境层/A6（Observer 气象改为带 at_utc/source 的实测事实；缺项折射返回 None（不回落 1013.25/10）） | 2026-11-14 11:44 | 本笔 |
+| `mbdsdr_ai/space_weather.py` | 时空环境层/A6（同一 Open-Meteo 请求补 surface_pressure，weather 样本输出结构化 measurements） | 2026-11-14 11:44 | 本笔 |
+| `mbdsdr_ai/environment_facts.py` | 时空环境层/A6（空间天气快照桥接气压/温度/湿度事实（3h 过期即 unknown）） | 2026-11-14 11:44 | 本笔 |
+| `mbdsdr_ai/agent.py` | 时空环境层/A6（astro_set_observer 去掉典型值兜底，优先复用 space_weather 快照；折射工具报 uncorrected） | 2026-11-14 11:44 | 本笔 |
+| `tests/test_observer_weather.py` | 时空环境层/A6（A6 判据：静日vs高湿方向/缺项unknown/反证典型值必红） | 2026-11-14 11:44 | 本笔 |
+| `{tests/test_full_integration.py,tests/test_full_integration_v2.py}` | 时空环境层/A6（A6 适配：集成脚本观测者补实测气象） | 2026-11-14 11:44 | 本笔 |
 
 > 上表各行均由 `claim` 台账推导：owner 原文与 `acquired_at` 直接取自台账，
 > 目的优先用台账里的 `claim_reason`，没有就如实写「未声明」，不补编。时间列只是

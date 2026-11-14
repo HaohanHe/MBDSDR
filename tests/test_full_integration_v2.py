@@ -694,7 +694,10 @@ def test_astronomy_module(result, agent):
         compute_refraction, compute_airmass, compute_pointing_guidance,
     )
 
-    obs = Observer(latitude_deg=45.0, longitude_deg=120.0, height_m=250)
+    obs = Observer(latitude_deg=45.0, longitude_deg=120.0, height_m=250,
+                   pressure_hpa=1008.0, temperature_c=6.0, humidity=45.0,
+                   weather_at_utc="2026-11-14T05:30:00Z",
+                   weather_source="测试气象站", weather_max_age_s=None)
     result.record("创建观测者", obs.latitude_deg == 45.0,
                   f"读回 {obs.latitude_deg}（应等于构造值 45.0，不是旧站点 43.88）")
 

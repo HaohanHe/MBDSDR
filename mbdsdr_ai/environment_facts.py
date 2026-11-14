@@ -300,15 +300,20 @@ class EnvironmentSnapshot:
                            ) -> "EnvironmentSnapshot":
         """桥接 :mod:`mbdsdr_ai.space_weather` 的采集快照。
 
-        只取 ``kp`` / ``f107`` 两项；采集失败（``value=None``）也保留成
-        unknown 事实并带原 ``error``，让下游能说明「取不到」而不是静默
-        变成「没这条」。
+        取 ``kp`` / ``f107`` 两项，以及 weather 样本里同一请求取到的
+        ``measurements``（气温/湿度/气压）。采集失败（``value=None``）也
+        保留成 unknown 事实并带原 ``error``，让下游能说明「取不到」而不是
+        静默变成「没这条」；不做任何典型值回填。
         """
         samples = payload.get("samples") or {}
         if not isinstance(samples, Mapping):
             raise ValueError("空间天气快照 samples 必须是对象")
-        limits = {FACT_KP_INDEX: 6 * 3600.0, FACT_F107: 48 * 3600.0}
-        units = {FACT_KP_INDEX: "Kp", FACT_F107: "sfu"}
+        limits = {FACT_KP_INDEX: 6 * 3600.0, FACT_F107: 48 * 3600.0,
+                  FACT_PRESSURE: 3 * 3600.0, FACT_TEMPERATURE: 3 * 3600.0,
+                  FACT_HUMIDITY: 3 * 3600.0}
+        units = {FACT_KP_INDEX: "Kp", FACT_F107: "sfu",
+                 FACT_PRESSURE: "hPa", FACT_TEMPERATURE: "degC",
+                 FACT_HUMIDITY: "%"}
         key_map = (("kp", FACT_KP_INDEX), ("f107", FACT_F107))
         facts: list[EnvironmentFact] = []
         for raw_key, name in key_map:
@@ -324,6 +329,33 @@ class EnvironmentSnapshot:
                 max_age_s=limits[name],
                 note=str(item.get("error") or ""),
             ))
+
+        # weather：同一 Open-Meteo 请求的结构化测量，字段名与 FACT_* 一一对应。
+        weather = samples.get("weather")
+        if isinstance(weather, Mapping):
+            raw_measurements = weather.get("measurements") or {}
+            measurements = (raw_measurements
+                            if isinstance(raw_measurements, Mapping) else {})
+            weather_map = (
+                ("surface_pressure_hpa", FACT_PRESSURE),
+                ("temperature_c", FACT_TEMPERATURE),
+                ("relative_humidity_pct", FACT_HUMIDITY),
+            )
+            observed_at = weather.get("observed_at") or None
+            source = str(weather.get("source") or weather.get("url") or "")
+            note = str(weather.get("error") or "")
+            for raw_name, fact_name in weather_map:
+                value = measurements.get(raw_name)
+                facts.append(EnvironmentFact(
+                    name=fact_name,
+                    value=value,
+                    unit=units[fact_name],
+                    at_utc=observed_at,
+                    source=source,
+                    max_age_s=limits[fact_name],
+                    note=(note or ("weather 样本缺该测量字段"
+                                   if value is None else "")),
+                ))
         return cls.capture(facts, captured_at=payload.get("taken_at"))
 
     def save(self, path: Any) -> Path:

@@ -101,7 +101,8 @@ def _iso(dt: datetime) -> str:
 
 
 def _sample(key: str, value: Optional[float], display: str, observed_at: str,
-            fetched_at: str, unit: str = "", error: str = "") -> Dict[str, Any]:
+            fetched_at: str, unit: str = "", error: str = "",
+            measurements: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     meta = SOURCES[key]
     return {
         "key": key,
@@ -114,6 +115,9 @@ def _sample(key: str, value: Optional[float], display: str, observed_at: str,
         "source": meta["source"],
         "url": meta["url"],
         "error": error,
+        # 结构化的同期测量（目前只有 weather 用）：单项缺失即不写该键，
+        # 下游据此判 unknown，而不是拿默认值补。
+        "measurements": dict(measurements or {}),
     }
 
 
@@ -172,22 +176,38 @@ def _fetch_weather(fetcher: Callable[..., Any], fetched_at: str,
                    lat: Optional[float], lon: Optional[float]) -> Dict[str, Any]:
     if lat is None or lon is None:
         raise ValueError("未配置地面站坐标（~/.mbdsdr/config.json 的 ground_station_lat/lon）")
+    # 同一个请求同时取降水与折射/对流层需要的三件套（不另开采集点）。
     url = (f"{SOURCES['weather']['url']}?latitude={lat:.4f}&longitude={lon:.4f}"
-           "&current=temperature_2m,relative_humidity_2m,precipitation,weather_code")
+           "&current=temperature_2m,relative_humidity_2m,precipitation,"
+           "surface_pressure,weather_code")
     data = fetcher(url)
     cur = (data or {}).get("current") or {}
     if "precipitation" not in cur:
         raise ValueError("响应里没有 current.precipitation")
     prec = float(cur["precipitation"])
     temp = cur.get("temperature_2m")
+    humidity = cur.get("relative_humidity_2m")
+    pressure = cur.get("surface_pressure")
     code = cur.get("weather_code")
     bits = [f"降水 {prec:g} mm"]
     if temp is not None:
         bits.append(f"气温 {float(temp):g} ℃")
+    if humidity is not None:
+        bits.append(f"湿度 {float(humidity):g}%")
+    if pressure is not None:
+        bits.append(f"气压 {float(pressure):g} hPa")
     if code is not None:
         bits.append(f"天气代码 {int(code)}")
+    # 只收录真实取到的字段；缺项不补默认值，交给下游判 unknown。
+    measurements: Dict[str, Any] = {}
+    if temp is not None:
+        measurements["temperature_c"] = float(temp)
+    if humidity is not None:
+        measurements["relative_humidity_pct"] = float(humidity)
+    if pressure is not None:
+        measurements["surface_pressure_hpa"] = float(pressure)
     return _sample("weather", prec, "，".join(bits), str(cur.get("time", "")),
-                   fetched_at, unit="mm")
+                   fetched_at, unit="mm", measurements=measurements)
 
 
 def _xray_class(flux: float) -> str:

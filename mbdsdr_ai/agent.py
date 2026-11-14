@@ -3405,16 +3405,21 @@ class MBDSDRAgent:
 
         self.tool_registry.register(
             name="astro_set_observer",
-            description="设置观测者位置（经纬度/高度）和气象参数（气压/温度/湿度）。用于卫星指向、坐标转换、大气折射计算。获取 GPS 后应调用此工具更新位置。",
+            description=("设置观测者位置（经纬度/高度）和**当天实测**气象参数（气压/温度/湿度）。"
+                         "用于卫星指向、坐标转换、大气折射计算。获取 GPS 后应调用此工具更新位置。"
+                         "气象必须带采集时刻与来源；未提供时优先复用 space_weather 已有本地天气采集，"
+                         "仍取不到则标 unknown（折射不校正），不会用 1013.25hPa/10℃ 等典型值代填。"),
             parameters={
                 "type": "object",
                 "properties": {
                     "latitude_deg": {"type": "number", "description": "纬度（度，北纬为正）"},
                     "longitude_deg": {"type": "number", "description": "经度（度，东经为正）"},
                     "height_m": {"type": "number", "description": "海拔高度（米）", "default": 0},
-                    "pressure_hpa": {"type": "number", "description": "气压（百帕）", "default": 1013.25},
-                    "temperature_c": {"type": "number", "description": "温度（摄氏度）", "default": 10},
-                    "humidity": {"type": "number", "description": "相对湿度（0-1）", "default": 0.2},
+                    "pressure_hpa": {"type": "number", "description": "当天实测气压（百帕）"},
+                    "temperature_c": {"type": "number", "description": "当天实测气温（摄氏度）"},
+                    "humidity": {"type": "number", "description": "当天实测相对湿度（%，0-100）"},
+                    "weather_at_utc": {"type": "string", "description": "气象采集时刻（UTC ISO8601，如 2026-11-14T05:30:00Z）"},
+                    "weather_source": {"type": "string", "description": "气象数据来源（站名或 URL）"},
                 },
                 "required": ["latitude_deg", "longitude_deg"],
             },
@@ -3470,7 +3475,7 @@ class MBDSDRAgent:
                 },
                 "required": ["alt_deg"],
             },
-            handler=lambda args: ToolResult(success=True, content=f"仰角 {args['alt_deg']}° 的大气折射修正: {compute_refraction(args['alt_deg'], obs)*60:.2f} 弧分 ({compute_refraction(args['alt_deg'], obs):.4f}°)"),
+            handler=lambda args: ToolResult(success=True, content=self._refraction_handler(args)),
             category="astronomy",
         )
 
@@ -3634,16 +3639,69 @@ class MBDSDRAgent:
             category="amr",
         )
 
+    def _reuse_weather_from_space_weather(self) -> str:
+        """把已有的空间天气快照（含本地天气测量）桥接进观测者气象。
+
+        只读快照，不新开采集点；没有新鲜快照/快照缺测量时返回说明，
+        观测者气象保持 None（unknown）。
+        """
+        from .environment_facts import EnvironmentSnapshot
+        from .space_weather import latest_snapshot
+
+        cached = latest_snapshot(max_age_h=3.0)
+        if not cached:
+            return "没有 3 小时内的空间天气快照可复用"
+        payload, path = cached
+        snapshot = EnvironmentSnapshot.from_space_weather(payload)
+        status = self.observer.apply_weather_snapshot(snapshot)
+        if status == "known":
+            return f"已复用空间天气快照 {path}"
+        return f"空间天气快照缺可用气象测量（状态 {status}），不做推测"
+
+    def _weather_summary(self) -> str:
+        """观测者气象的一行诚实描述（供工具结果直接回给模型）。"""
+        obs = self.observer
+        status = obs.refraction_weather_status()
+        if status != "known":
+            why = {"unknown": "缺当天实测气压/气温或采集时刻/来源",
+                   "stale": "实测气象已过期"}.get(status, status)
+            return (f"气象未知（{why}）：大气折射不校正（uncorrected）；"
+                    "不用典型值代填")
+        humidity = (f"{obs.humidity:g}%" if obs.humidity is not None
+                    else "未知")
+        return (f"气象 {status}：气压 {obs.pressure_hpa:g} hPa，"
+                f"气温 {obs.temperature_c:g} ℃，湿度 {humidity}，"
+                f"采集 {obs.weather_at_utc}，来源 {obs.weather_source}")
+
     def _set_observer_handler(self, args: Dict[str, Any]) -> str:
         """设置观测者的 handler（避免复杂 lambda）。"""
         obs = self.observer
         obs.latitude_deg = args["latitude_deg"]
         obs.longitude_deg = args["longitude_deg"]
         obs.height_m = args.get("height_m", 0)
-        obs.pressure_hpa = args.get("pressure_hpa", 1013.25)
-        obs.temperature_c = args.get("temperature_c", 10)
-        obs.humidity = args.get("humidity", 0.2)
-        return f"观测者已设置: 纬度 {obs.latitude_deg}°, 经度 {obs.longitude_deg}°, 高度 {obs.height_m}m, 气压 {obs.pressure_hpa}hPa, 温度 {obs.temperature_c}°C"
+
+        weather_keys = ("pressure_hpa", "temperature_c", "humidity")
+        if any(k in args for k in weather_keys):
+            obs.pressure_hpa = args.get("pressure_hpa")
+            obs.temperature_c = args.get("temperature_c")
+            obs.humidity = args.get("humidity")
+            obs.weather_at_utc = args.get("weather_at_utc")
+            obs.weather_source = str(args.get("weather_source") or "")
+            weather_note = "使用调用方提供的实测气象"
+        else:
+            weather_note = self._reuse_weather_from_space_weather()
+        return (f"观测者已设置: 纬度 {obs.latitude_deg}°, 经度 {obs.longitude_deg}°, "
+                f"高度 {obs.height_m}m；{self._weather_summary()}（{weather_note}）")
+
+    def _refraction_handler(self, args: Dict[str, Any]) -> str:
+        """折射工具：气象未知时如实报 uncorrected，不返回标准大气结果。"""
+        alt = args["alt_deg"]
+        refraction = compute_refraction(alt, self.observer)
+        if refraction is None:
+            return (f"仰角 {alt}°：大气折射未校正（uncorrected）——"
+                    f"{self._weather_summary()}；不按标准大气代算")
+        return (f"仰角 {alt}° 的大气折射修正: {refraction * 60:.2f} 弧分 "
+                f"({refraction:.4f}°)；{self._weather_summary()}")
 
     # ── 核心对话循环 ────────────────────────────────────
 

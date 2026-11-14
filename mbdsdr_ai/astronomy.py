@@ -22,6 +22,17 @@ from dataclasses import dataclass
 from typing import Dict, List, Any, Optional, Tuple
 from enum import Enum
 
+from .environment_facts import (
+    FACT_HUMIDITY,
+    FACT_PRESSURE,
+    FACT_TEMPERATURE,
+    STATUS_KNOWN,
+    STATUS_STALE,
+    STATUS_UNKNOWN,
+    EnvironmentFact,
+    EnvironmentSnapshot,
+)
+
 
 # ── 常量 ──────────────────────────────────────────────
 
@@ -38,10 +49,22 @@ J2000_MJD = 51544.5
 EARTH_RADIUS_KM = 6378.137  # WGS84 赤道半径
 EARTH_FLATTENING = 1.0 / 298.257223563  # WGS84 扁率
 
-# 大气折射常数（标准大气）
-STD_PRESSURE_HPA = 1013.25  # 标准气压（百帕）
-STD_TEMPERATURE_C = 10.0  # 标准温度（摄氏度）
-STD_HUMIDITY = 0.2  # 标准相对湿度
+# Saemundsson 公式的气象归一化基准（只是公式里的参考量，不是观测缺省值）。
+# 观测气象缺项时绝不用这两条基准代入，而是返回 None / 标 unknown。
+REFRACTION_REF_PRESSURE_HPA = 1013.25
+REFRACTION_REF_TEMPERATURE_K = 283.15
+
+
+def _weather_status_of(facts: List["EnvironmentFact"], now=None) -> str:
+    """两条（或多条）气象事实的合并状态：任一 unknown 即 unknown，任一 stale 即 stale。"""
+    if not facts or any(f is None for f in facts):
+        return STATUS_UNKNOWN
+    statuses = [f.status(now) for f in facts]
+    if STATUS_UNKNOWN in statuses:
+        return STATUS_UNKNOWN
+    if STATUS_STALE in statuses:
+        return STATUS_STALE
+    return STATUS_KNOWN
 
 
 class FrameType(str, Enum):
@@ -58,14 +81,93 @@ class Observer:
     观测者模型（位置/气象参数）。
 
     包含位置信息和气象参数，用于坐标转换和大气折射计算。
+
+    气象参数**没有默认值**：缺采集值/采集时刻/来源时三者保持 ``None``，
+    折射计算返回 ``None`` 并标 ``unknown``，绝不拿标准大气（1013.25 hPa /
+    10 ℃）冒充当天实测。气象可来自 :meth:`apply_weather_snapshot`，
+    直接复用 ``space_weather`` 的本地天气采集。
     """
     longitude_deg: float = 0.0  # 经度（度，东经为正）
     latitude_deg: float = 0.0  # 纬度（度，北纬为正）
     height_m: float = 0.0  # 海拔高度（米）
-    pressure_hpa: float = STD_PRESSURE_HPA  # 气压（百帕）
-    temperature_c: float = STD_TEMPERATURE_C  # 温度（摄氏度）
-    humidity: float = STD_HUMIDITY  # 相对湿度（0-1）
+    pressure_hpa: Optional[float] = None  # 气压（百帕，实测；None=未知）
+    temperature_c: Optional[float] = None  # 温度（摄氏度，实测；None=未知）
+    humidity: Optional[float] = None  # 相对湿度（%，0-100，实测；None=未知）
+    weather_at_utc: Optional[str] = None  # 气象采集时刻（UTC ISO8601）
+    weather_source: str = ""  # 气象数据来源
+    weather_max_age_s: Optional[float] = 3 * 3600.0  # 气象最大可接受年龄
     horizon_alt_deg: float = 0.0  # 地平线高度（度，用于升起/落下计算）
+
+    # ---- 气象事实 -------------------------------------------------------
+    def weather_facts(self) -> Dict[str, EnvironmentFact]:
+        """把扁平字段包装成带 at_utc/source 的环境事实。"""
+        spec = {
+            FACT_PRESSURE: (self.pressure_hpa, "hPa"),
+            FACT_TEMPERATURE: (self.temperature_c, "degC"),
+            FACT_HUMIDITY: (self.humidity, "%"),
+        }
+        return {
+            name: EnvironmentFact(
+                name=name, value=value, unit=unit,
+                at_utc=self.weather_at_utc, source=self.weather_source,
+                max_age_s=self.weather_max_age_s,
+            )
+            for name, (value, unit) in spec.items()
+        }
+
+    def weather_snapshot(self) -> EnvironmentSnapshot:
+        """当前气象 → 可落盘环境快照（供证据回放/误差预算复用）。"""
+        facts = self.weather_facts()
+        return EnvironmentSnapshot(
+            facts=dict(facts), captured_at_utc=self.weather_at_utc)
+
+    def refraction_weather_status(self, now: Any = None) -> str:
+        """折射所需气象（气压+气温）的状态；湿度不参与折射，缺它不拦。
+
+        返回 ``known`` / ``unknown`` / ``stale``——``unknown`` 时不得调用
+        典型值补算。
+        """
+        facts = self.weather_facts()
+        return _weather_status_of(
+            [facts[FACT_PRESSURE], facts[FACT_TEMPERATURE]], now)
+
+    def apply_weather_snapshot(self, snapshot: EnvironmentSnapshot,
+                               now: Any = None) -> str:
+        """从环境快照吸收气象事实；缺项/过期一律置 None（不回落典型值）。
+
+        参考时刻缺省取快照的 ``captured_at_utc``，保证同一快照回放结果一致。
+        """
+        ref = now if now is not None else snapshot.captured_at_utc
+        usable: Dict[str, EnvironmentFact] = {}
+        statuses: List[str] = []
+        for name in (FACT_PRESSURE, FACT_TEMPERATURE, FACT_HUMIDITY):
+            fact = snapshot.get(name)
+            if fact is not None:
+                statuses.append(fact.status(ref))
+                if fact.usable(ref):
+                    usable[name] = fact
+            else:
+                statuses.append(STATUS_UNKNOWN)
+        self.pressure_hpa = (usable[FACT_PRESSURE].value
+                             if FACT_PRESSURE in usable else None)
+        self.temperature_c = (usable[FACT_TEMPERATURE].value
+                              if FACT_TEMPERATURE in usable else None)
+        self.humidity = (usable[FACT_HUMIDITY].value
+                         if FACT_HUMIDITY in usable else None)
+        if usable:
+            self.weather_at_utc = min(f.at_utc for f in usable.values()
+                                      if f.at_utc)
+            sources = sorted({f.source for f in usable.values() if f.source})
+            self.weather_source = "；".join(sources)
+        else:
+            self.weather_at_utc = None
+            self.weather_source = ""
+        # 返回输入快照的状态（清空字段后无法再区分 unknown/stale）。
+        if STATUS_UNKNOWN in statuses:
+            return STATUS_UNKNOWN
+        if STATUS_STALE in statuses:
+            return STATUS_STALE
+        return STATUS_KNOWN
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -75,6 +177,10 @@ class Observer:
             "pressure_hpa": self.pressure_hpa,
             "temperature_c": self.temperature_c,
             "humidity": self.humidity,
+            "weather_at_utc": self.weather_at_utc,
+            "weather_source": self.weather_source,
+            "weather_max_age_s": self.weather_max_age_s,
+            "weather_status": self.refraction_weather_status(),
             "horizon_alt_deg": self.horizon_alt_deg,
         }
 
@@ -107,6 +213,10 @@ class AltAzCoord:
     az_deg: float  # 方位角（度，0=北，顺时针）
     distance_km: Optional[float] = None  # 距离（公里，可选）
     airmass: Optional[float] = None  # 大气质量（可选）
+    # 折射是否真的应用：缺当天实测气象时 refraction_deg=None、status=unknown，
+    # alt_deg 为几何仰角（未把标准大气当实测）。
+    refraction_deg: Optional[float] = None
+    refraction_status: str = "unknown"
 
     def to_equatorial(self, observer: Observer, jd: float = None) -> EquatorialCoord:
         """转换为赤道坐标。"""
@@ -120,6 +230,9 @@ class AltAzCoord:
             "az_compass": az_to_compass(self.az_deg),
             "distance_km": self.distance_km,
             "airmass": round(self.airmass, 3) if self.airmass else None,
+            "refraction_deg": (round(self.refraction_deg, 6)
+                               if self.refraction_deg is not None else None),
+            "refraction_status": self.refraction_status,
         }
 
 
@@ -300,13 +413,22 @@ def equatorial_to_altaz(
     alt_deg = alt_rad * RAD2DEG
     az_deg = az_rad * RAD2DEG
 
-    # 大气折射修正（仅对地平线以上的天体）
+    # 大气折射修正（仅对地平线以上的天体）。缺当天实测气象时
+    # compute_refraction 返回 None：保留几何仰角并把状态标 unknown，
+    # 不用标准大气顶替。
+    now_unix = jd_to_unix(jd)
     if alt_deg > -2.0:
-        refraction = compute_refraction(alt_deg, observer)
-        alt_deg_refracted = alt_deg + refraction
+        refraction = compute_refraction(alt_deg, observer, now=now_unix)
+        if refraction is None:
+            alt_deg_refracted = alt_deg
+            refraction_status = observer.refraction_weather_status(now_unix)
+        else:
+            alt_deg_refracted = alt_deg + refraction
+            refraction_status = STATUS_KNOWN
     else:
         alt_deg_refracted = alt_deg
         refraction = 0.0
+        refraction_status = STATUS_KNOWN  # 地平线下无大气折射路径
 
     # 大气质量
     airmass = compute_airmass(alt_deg)
@@ -316,6 +438,8 @@ def equatorial_to_altaz(
         az_deg=az_deg,
         distance_km=coord.distance_km,
         airmass=airmass,
+        refraction_deg=refraction,
+        refraction_status=refraction_status,
     )
 
 
@@ -334,11 +458,13 @@ def altaz_to_equatorial(
     az_rad = coord.az_deg * DEG2RAD
     lat_rad = observer.latitude_deg * DEG2RAD
 
-    # 去除大气折射
+    # 去除大气折射；缺实测气象（None）时不扣，按输入即几何仰角处理。
     if coord.alt_deg > -2.0:
-        refraction = compute_refraction(coord.alt_deg, observer)
-        alt_true = coord.alt_deg - refraction
-        alt_rad = alt_true * DEG2RAD
+        refraction = compute_refraction(
+            coord.alt_deg, observer, now=jd_to_unix(jd))
+        if refraction is not None:
+            alt_true = coord.alt_deg - refraction
+            alt_rad = alt_true * DEG2RAD
 
     # 球面三角转换
     # sin(dec) = sin(lat)*sin(alt) + cos(lat)*cos(alt)*cos(az)
@@ -376,24 +502,30 @@ def altaz_to_equatorial(
 def compute_refraction(
     alt_deg: float,
     observer: Observer,
-) -> float:
+    now: Any = None,
+) -> Optional[float]:
     """
     计算大气折射修正量（度）。
 
     基于 Saemundsson/Bennett 公式，适用于仰角 > -2 度。
-    大气折射修正（Saemundsson 公式）。
 
     参数：
         alt_deg: 真实仰角（度，未修正折射）
-        observer: 观测者（含气压/温度/湿度）
+        observer: 观测者（气象必须是带 at_utc/source 的实测值）
+        now: 判定气象是否过期的参考时刻（缺省当前 UTC）
 
     返回：
-        折射修正量（度，正值表示视仰角高于真实仰角）
+        折射修正量（度，正值表示视仰角高于真实仰角）；
+        **气象未知/过期时返回 ``None``**——不拿标准大气代算。
     """
     if alt_deg < -2.0:
         return 0.0
 
-    # 标准大气折射（弧分）
+    # 折射只用气压与气温；两者任一未知/过期即未校正。
+    if observer.refraction_weather_status(now) != STATUS_KNOWN:
+        return None
+
+    # 折射公式（弧分）
     # R = 1.02 / tan(h + 10.3/(h + 5.11))
     h = alt_deg
     if h > -0.5:
@@ -402,10 +534,10 @@ def compute_refraction(
         # 低仰角使用更复杂的公式
         refraction_arcmin = 1.0 / math.tan(math.radians(h + 7.31 / (h + 4.4)))
 
-    # 气象修正
-    pressure_factor = observer.pressure_hpa / STD_PRESSURE_HPA
-    temp_kelvin = observer.temperature_c + 273.15
-    temp_factor = 283.15 / temp_kelvin
+    # 气象修正（实测值对公式参考态的归一化）
+    pressure_factor = float(observer.pressure_hpa) / REFRACTION_REF_PRESSURE_HPA
+    temp_kelvin = float(observer.temperature_c) + 273.15
+    temp_factor = REFRACTION_REF_TEMPERATURE_K / temp_kelvin
     refraction_arcmin *= pressure_factor * temp_factor
 
     # 转为度

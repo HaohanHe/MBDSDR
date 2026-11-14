@@ -834,8 +834,11 @@ def test_astronomy_module(result: TestResult, agent: MBDSDRAgent):
         compute_refraction, compute_airmass, compute_pointing_guidance,
     )
 
-    # 观测者
-    obs = Observer(latitude_deg=45.0, longitude_deg=120.0, height_m=250)
+    # 观测者（气象必须带采集时刻与来源，否则折射按 uncorrected 处理）
+    obs = Observer(latitude_deg=45.0, longitude_deg=120.0, height_m=250,
+                   pressure_hpa=1008.0, temperature_c=6.0, humidity=45.0,
+                   weather_at_utc="2026-11-14T05:30:00Z",
+                   weather_source="测试气象站", weather_max_age_s=None)
     result.record("创建观测者", obs.latitude_deg == 45.0)
 
     # 时间系统
