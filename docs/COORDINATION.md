@@ -2283,6 +2283,8 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `tests/test_satellite_rise_set_precision.py` | 公理体检线/6ae85f56（判据：AOS/LOS 误差 ≤ 声明容差（去掉二分必红）） | 2026-11-14 11:06 | 本笔 |
 | `desktop/shortcuts_panel.py` | UI防呆线/6ae85f56（A3：全部恢复默认批量清键位前确认，默认「否」并写明条数/不可撤销） | 2026-11-14 11:07 | 本笔 |
 | `tests/test_shortcuts_reset_all_guard.py` | UI防呆线/6ae85f56（A3 判据：question 默认按钮为 No、选否则保留、选是则清空（反证已跑：去掉确认即红）） | 2026-11-14 11:07 | 本笔 |
+| `mbdsdr_ai/tool_guard.py` | 进程内工具守卫线/6ae85f56（共享 PRE/RESULT 守卫叶子（MCP 面与进程内面唯一实现）） | 2026-11-14 11:09 | 本笔 |
+| `mbdsdr_ai/core/mcp_server.py` | 进程内工具守卫线/6ae85f56（ToolCallGate 的 PRE/RESULT 改为调用共享实现） | 2026-11-14 11:09 | 本笔 |
 
 > 上表各行均由 `claim` 台账推导：owner 原文与 `acquired_at` 直接取自台账，
 > 目的优先用台账里的 `claim_reason`，没有就如实写「未声明」，不补编。时间列只是

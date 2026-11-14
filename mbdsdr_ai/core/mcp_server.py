@@ -38,9 +38,11 @@ from .controller import SDRController
 from .errors import (ExportPathOutOfRootError, InvalidArgumentError,
                      SDRUserError)
 from ..questions import QuestionError, QuestionStore
-from ..hooks import Event, EventType, HookManager
+from ..hooks import Event, HookManager
 from ..version import __version__
 from ..hook_commands import HookCommandRunner
+from ..tool_guard import (TRIGGER_MODEL, emit_pre_tool_use, emit_tool_result,
+                          result_summary)
 from ..error_catalog import suggestion, user_message
 from ..tool_policy import ToolPolicy, normalize_key
 from ..mcp_client import MCPClientManager
@@ -1655,37 +1657,24 @@ def _finalize_tool_result(name: str, result: Any,
 
 
 def _emit_tool_result(hooks: "HookManager", name: str, result: Any,
-                      source: str = "mcp_toolset") -> None:
+                      source: str = "mcp_toolset",
+                      trigger: str = TRIGGER_MODEL) -> None:
     """冒泡 AGENT_TOOL_RESULT（PostToolUse）观测事件；钩子异常不冒泡。
 
-    事件只携带结果信封的摘要（ok/outcome/spilled），不携带完整负载
+    事件只携带结果信封的摘要（ok/outcome/spilled/trigger），不携带完整负载
     （长结果已在 spill 路径上，摘要够观测用）；钩子只读不改写。
     source 标注事件来源（旧壳走 "legacy_mcp_shell"），审计账本可区分面。
+    实现与进程内面共用 :mod:`mbdsdr_ai.tool_guard`，字段结构只有一份。
     """
-    try:
-        ev = Event(event_type=EventType.AGENT_TOOL_RESULT,
-                   data=_result_summary(name, result), source=source)
-        hooks.trigger(ev)
-    except Exception as e:  # pragma: no cover - 观测面不得影响主流程
-        print("[mcp] tool_result 钩子故障（忽略）: %s" % e, file=sys.stderr)
+    emit_tool_result(hooks, name, result, trigger=trigger, source=source)
 
 
 def _result_summary(name: str, result: Any) -> Dict[str, Any]:
     """结果信封的观测摘要（不含完整负载）。
 
-    outcome 缺省为 None 时按信封形态归类：dict 带 ok=True 视为 executed
-    （executed 是本仓新约定，未及全量回填；gate/error 信封均自带该键）。
+    转发到共享实现，保持 MCP 面既有调用点与字段口径不变。
     """
-    if not isinstance(result, dict):
-        return {"tool": name, "kind": type(result).__name__,
-                "ok": None, "outcome": None, "spilled": False}
-    outcome = result.get("outcome")
-    if outcome is None and result.get("ok") is True:
-        outcome = "executed"
-    return {"tool": name, "kind": "dict",
-            "ok": result.get("ok"),
-            "outcome": outcome,
-            "spilled": bool(result.get("truncated"))}
+    return result_summary(name, result)
 
 
 # ======================================================================
@@ -1949,33 +1938,22 @@ class ToolCallGate:
         _emit_tool_result(self.hooks, name, result, source=self.source)
 
     def _pre_tool_veto(self, name: str, args: Dict[str, Any],
-                       is_write: bool) -> Optional[Dict[str, Any]]:
+                       is_write: bool,
+                       trigger: str = TRIGGER_MODEL) -> Optional[Dict[str, Any]]:
         """触发 AGENT_PRE_TOOL_USE 钩子并提取否决（进程内 + 外部命令双闸）。
 
+        实现与进程内面共用 :func:`mbdsdr_ai.tool_guard.emit_pre_tool_use`：
         进程内钩子（HookManager）判完后，再跑配置驱动的外部命令 hooks
         （HookCommandRunner，~/.mbdsdr/hooks.json）：任一闸否决即拦。
+        trigger=user 时只发事件留痕、不取否决（用户点按不受模型侧守卫约束）。
 
-        钩子异常绝不影响主流程（Hook.trigger 已兜底为 None；这里再兜一层
+        钩子异常绝不影响主流程（Hook.trigger 已兜底为 None；共享实现再兜一层
         防御——钩子整体故障时记 stderr 并放行，绝不让观测面变成单点；
         HookCommandRunner.decide 自身同样 fail-open + stderr 留痕）。
         """
-        try:
-            ev = Event(event_type=EventType.AGENT_PRE_TOOL_USE,
-                       data={"tool": name, "arguments": dict(args),
-                             "write": is_write},
-                       source=self.source)
-            inner = self.hooks.veto_for(ev)
-            if inner is not None:
-                return inner
-            # 外部命令 hooks（kimi-code externalHooks 子集）：exit 2 或
-            # stdout JSON deny 即否决；超时/启动失败/其他退出码一律放行。
-            cmd_veto = self.hook_commands.decide(ev)
-            if cmd_veto is not None:
-                return cmd_veto
-            return None
-        except Exception as e:  # pragma: no cover - 防御
-            print(f"[mcp] pre_tool_use 钩子故障（放行）: {e}", file=sys.stderr)
-            return None
+        return emit_pre_tool_use(self.hooks, self.hook_commands, name, args,
+                                 is_write=is_write, trigger=trigger,
+                                 source=self.source)
 
 
 # ======================================================================
