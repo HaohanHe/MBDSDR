@@ -16,6 +16,16 @@ USAGE_ERROR = 'import sys\nprint("git error", file=sys.stderr)\nsys.exit(2)\n'
 SLOW = "import time\ntime.sleep(5)\n"
 RED_LIFECYCLE_MARKER = 'import sys\nprint("RED_LIFECYCLE-RAN")\nsys.exit(0)\n'
 ROADMAP_MARKER = 'import sys\nprint("ROADMAP-RAN")\nsys.exit(0)\n'
+#: 检查器自己抛异常：rc=1 + stderr 回溯，与「真判红」共用退出码。
+CRASH = 'raise RuntimeError("boom")\n'
+#: rc=1 但没有回溯：这是真的判红，不能被启发式吞掉。
+RED_WITH_STDERR = 'import sys\nprint("real red", file=sys.stderr)\nsys.exit(1)\n'
+#: 把回溯当**数据**打到 stdout：不在 stderr，不能触发启发式。
+TRACEBACK_IN_STDOUT = (
+    'print("Traceback (most recent call last):")\n'
+    'print("RuntimeError: just data")\n'
+    "raise SystemExit(1)\n"
+)
 
 
 def _write_step(root: Path, script: str, body: str) -> None:
@@ -129,3 +139,47 @@ def test_json_mode_and_snapshot(tmp_path: Path) -> None:
     assert len(records) == 1
     saved = json.loads(records[0].read_text(encoding="utf-8"))
     assert saved["exit_code"] == 0
+
+
+def test_rc1_with_traceback_is_heuristic_not_red(tmp_path: Path) -> None:
+    """检查器崩溃（stderr 回溯）归到 3，并在输出里写明是启发式。"""
+    _green_root(tmp_path)
+    _write_step(tmp_path, "audit_evidence.py", CRASH)
+    proc = _run(tmp_path)
+    assert proc.returncode == 3, proc.stdout + proc.stderr
+    assert "[ERROR] evidence" in proc.stdout
+    assert "RuntimeError" in proc.stdout
+    assert "启发式" in proc.stdout
+    assert "结论不成立" in proc.stdout
+
+
+def test_rc1_without_traceback_stays_red(tmp_path: Path) -> None:
+    """只有 rc=1 + 普通 stderr 时仍按真红处理，启发式不许扩大。"""
+    _green_root(tmp_path)
+    _write_step(tmp_path, "audit_evidence.py", RED_WITH_STDERR)
+    proc = _run(tmp_path)
+    assert proc.returncode == 1, proc.stdout + proc.stderr
+    assert "[FAIL] evidence" in proc.stdout
+    assert "启发式" not in proc.stdout
+
+
+def test_traceback_in_stdout_does_not_trigger_heuristic(tmp_path: Path) -> None:
+    """回溯只认 stderr：stdout 里的 Traceback 可能只是被检查的数据。"""
+    _green_root(tmp_path)
+    _write_step(tmp_path, "audit_evidence.py", TRACEBACK_IN_STDOUT)
+    proc = _run(tmp_path)
+    assert proc.returncode == 1, proc.stdout + proc.stderr
+    assert "[FAIL] evidence" in proc.stdout
+
+
+def test_json_records_crash_heuristic(tmp_path: Path) -> None:
+    root = tmp_path / "repo"
+    _green_root(root)
+    _write_step(root, "audit_evidence.py", CRASH)
+    proc = _run(root, "--json")
+    assert proc.returncode == 3, proc.stdout + proc.stderr
+    payload = json.loads(proc.stdout)
+    step = payload["steps"][0]
+    assert step["status"] == "ERROR"
+    assert step["rc"] == 1
+    assert "RuntimeError" in step["heuristic"]
