@@ -2389,6 +2389,9 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `tests/test_tle_environment_tightening.py` | 时空环境层/D3（D3 判据与反证测试） | 2026-11-14 11:30 | 本笔 |
 | `tests/test_desktop_panels.py` | 参考移植线/20261114（修过期断言：面板经 panel_registry 构造，AST 守直连 import（反证：改回 WeatherPanel() 即红）） | 2026-11-14 11:31 | 本笔 |
 | `docs/COORDINATION.md` | 参考移植线/20261114（本笔 §6.1 登记行 + 12.2 呈现侧「声明前不覆盖」归属实例（ec3a964b/2b69e3df）） | 2026-11-14 11:31 | 本笔 |
+| `mbdsdr_ai/environment_evidence.py` | 时空环境层/D4（环境证据快照落盘与只读复算） | 2026-11-14 11:33 | 本笔 |
+| `tests/test_environment_evidence.py` | 时空环境层/D4（D4 判据与反证） | 2026-11-14 11:33 | 本笔 |
+| `scripts/replay_environment_evidence.py` | 时空环境层/D4（只读复算 CLI） | 2026-11-14 11:33 | 本笔 |
 
 > 上表各行均由 `claim` 台账推导：owner 原文与 `acquired_at` 直接取自台账，
 > 目的优先用台账里的 `claim_reason`，没有就如实写「未声明」，不补编。时间列只是
