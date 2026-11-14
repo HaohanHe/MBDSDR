@@ -50,6 +50,12 @@ ONBOARDING_STEPS = (
 )
 
 
+#: Esc 语义的唯一口径：帮助页渲染与测试都读这一份，不再各写各的。
+ESCAPE_LAYER_NOTE = (
+    "Esc 取消进行中的操作（扫频 / 识别 / 回放）；若当前有覆盖层"
+    "（右栏浮层、星象仪全天等），先按 Esc 退出覆盖层，再按一次才取消操作。")
+
+
 def onboarding_steps() -> List[dict]:
     """返回三步上手文案（键位从 shortcuts.py 取，取不到就抛 KeyError）。"""
     steps = []
@@ -117,6 +123,7 @@ def _build_dialog_class():
             html.append(
                 "<p><b>没有硬件也能先看</b>：星象仪模式、能力目录、快捷键一览"
                 "不依赖设备；频谱/音频没有数据时会如实显示空态。</p>")
+            html.append(f"<p><b>Esc 键</b>：{ESCAPE_LAYER_NOTE}</p>")
             browser = QTextBrowser(page)
             browser.setOpenExternalLinks(False)
             browser.setHtml("".join(html))

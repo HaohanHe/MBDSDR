@@ -2350,6 +2350,11 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `mbdsdr_ai/gps_nav.py` | 时空核对线/timeline-now（D2 pvt_solve 接入环境改正与 error_budget） | 2026-11-14 11:26 | 本笔 |
 | `mbdsdr_ai/rtk_solver.py` | 时空核对线/timeline-now（D2 RTK 结果带环境溯源字段（双差不另加改正）） | 2026-11-14 11:26 | 本笔 |
 | `tests/test_gnss_environment.py` | 时空核对线/timeline-now（D2 判据：环境注入方向正确、缺项uncorrected、SPP/PVT/RTK结果字段） | 2026-11-14 11:26 | 本笔 |
+| `desktop/main_window.py` | UI防呆线/6ae85f56（D5：Esc 分层取消长操作（扫频/识别/回放），覆盖层仍优先） | 2026-11-14 11:29 | 本笔 |
+| `desktop/modulation_panel.py` | UI防呆线/6ae85f56（D5：cancel_identify 作废迟到结果并恢复按钮） | 2026-11-14 11:29 | 本笔 |
+| `desktop/help_panel.py` | UI防呆线/6ae85f56（D5：ESCAPE_LAYER_NOTE 唯一口径并渲染到三步上手） | 2026-11-14 11:29 | 本笔 |
+| `tests/test_escape_cancels_long_ops.py` | UI防呆线/6ae85f56（D5 判据：三类长操作 Esc 取消、无操作不吞 Esc、帮助页原样渲染（反证已跑：4 红）） | 2026-11-14 11:29 | 本笔 |
+| `docs/evidence-standard.md` | 收尸线/6ae85f56（定裸 git 提交的允许条件与留痕方式（423ac262/31afa759 两笔缺口调查结论：个别线绕过，非工具漏）） | 2026-11-14 11:29 | 本笔 |
 
 > 上表各行均由 `claim` 台账推导：owner 原文与 `acquired_at` 直接取自台账，
 > 目的优先用台账里的 `claim_reason`，没有就如实写「未声明」，不补编。时间列只是

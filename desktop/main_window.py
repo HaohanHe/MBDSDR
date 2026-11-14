@@ -12372,8 +12372,46 @@ class MainWindow(QMainWindow):
                 pass
         sv.set_all_sky_mode(bool(checked))
 
+    def _long_operation_in_flight(self) -> str:
+        """正在进行的可取消长操作：``scan`` / ``identify`` / ``replay`` / 空串。"""
+        sp = getattr(self, "scanner_panel", None)
+        worker = getattr(sp, "_worker", None)
+        if worker is not None and worker.isRunning():
+            return "scan"
+        mp = getattr(self, "modulation_panel", None)
+        worker = getattr(mp, "_worker", None)
+        if worker is not None and worker.isRunning():
+            return "identify"
+        load = getattr(self, "_replay_load_thread", None)
+        if (getattr(self, "_replay_iq", None) is not None
+                or getattr(self, "_replay_timer", None) is not None
+                or (load is not None and load.is_alive())):
+            return "replay"
+        return ""
+
+    def _cancel_long_operation(self) -> bool:
+        """Esc 取消进行中的长操作：扫频 → 识别 → 回放，一次只取消一件。"""
+        kind = self._long_operation_in_flight()
+        if not kind:
+            return False
+        if kind == "scan":
+            self.scanner_panel._on_cancel_clicked()
+            self.statusBar().showMessage("正在取消扫频…", MSG_NORMAL)
+        elif kind == "identify":
+            self.modulation_panel.cancel_identify()
+            self.statusBar().showMessage(
+                "已取消识别（本次结果作废）", MSG_NORMAL)
+        else:  # replay
+            self._stop_replay()
+            self.statusBar().showMessage("已取消回放", MSG_NORMAL)
+        return True
+
     def _handle_escape_layer(self) -> bool:
-        """Esc 分层：先退全天（仍在星象仪模式），再退星象仪模式。"""
+        """Esc 分层：先退全天（仍在星象仪模式），再退星象仪模式，最后取消长操作。
+
+        覆盖层（右栏浮层）在事件过滤器里先拦，轮不到这里；口径见帮助页
+        ``help_panel.ESCAPE_LAYER_NOTE``（唯一一份文案）。
+        """
         sv = getattr(self, "sky_view", None)
         if sv is not None and bool(getattr(sv, "all_sky_active", False)):
             sv.set_all_sky_mode(False)
@@ -12383,6 +12421,8 @@ class MainWindow(QMainWindow):
         if getattr(self, "_app_mode", "ide") == "planetarium":
             self._exit_planetarium()
             self.statusBar().showMessage("已退出星象仪模式", MSG_NORMAL)
+            return True
+        if self._cancel_long_operation():
             return True
         return False
 

@@ -121,6 +121,9 @@ class ModulationPanel(QWidget):
         #: ``QThread.finished`` 触发的 _refresh_state 会把它改写成「就绪」。
         #: 两者都留，刷新只负责回显，不再产生结论。
         self._terminal_status: str = ""
+        #: Esc 取消识别：读 IQ/分类那一步不可中断，但结果必须作废，
+        #: 不能让用户按了 Esc 之后又跳出一份"识别完成"。
+        self._cancel_requested = False
         self._build_ui()
         self._refresh_state()
 
@@ -228,6 +231,22 @@ class ModulationPanel(QWidget):
                 "现在可以：确认设备已连接、调好频率后点「识别信号」重试。")
 
     # ------------------------------------------------------------------ slots
+    def cancel_identify(self) -> bool:
+        """取消进行中的识别；返回 True 表示确有一轮识别被取消。
+
+        QThread 里是同步读 IQ + 分类，无法从外部中断；这里只保证
+        结果作废、按钮立刻恢复，迟到结果不会覆盖「已取消」的结论。
+        """
+        w = self._worker
+        if w is None or not w.isRunning():
+            return False
+        self._cancel_requested = True
+        self._last_failure = None
+        self._terminal_status = "已取消识别（本次结果作废）"
+        self.status_label.setText(self._terminal_status)
+        self.identify_btn.setEnabled(True)
+        return True
+
     def _on_identify_clicked(self):
         if self._worker is not None and self._worker.isRunning():
             # 已在识别：幂等忽略重复点击，但必须留下可见反馈——
@@ -235,6 +254,7 @@ class ModulationPanel(QWidget):
             self.status_label.setText("识别中…，请稍候")
             return
         self.status_label.setText("识别中…，请稍候")
+        self._cancel_requested = False  # 新一轮识别，上一轮的取消标记作废
         self._last_failure = None  # 新一轮识别开始，上一次的失败结论作废
         self._terminal_status = ""  # 上一轮的终态（含「识别完成」）也作废
         self.identify_btn.setEnabled(False)
@@ -257,6 +277,11 @@ class ModulationPanel(QWidget):
         self._worker.start()
 
     def _on_done(self, result):
+        if self._cancel_requested:
+            # Esc 已取消：迟到结果作废，不能把卡片重新填成"识别完成"
+            self._cancel_requested = False
+            self.status_label.setText(self._terminal_status)
+            return
         self._last = result
         mod = getattr(result, "modulation", "?")
         conf = float(getattr(result, "confidence", 0.0))
@@ -284,6 +309,10 @@ class ModulationPanel(QWidget):
         self.done.emit(result)
 
     def _on_failed(self, msg: str):
+        if self._cancel_requested:
+            self._cancel_requested = False
+            self.status_label.setText(self._terminal_status)
+            return
         # 失败必须落地成「看得见的结论 + 可做的下一步」，不能只写进一行
         # 随后又被 QThread.finished → _refresh_state 覆盖回「就绪」。
         self._last_failure = str(msg)
