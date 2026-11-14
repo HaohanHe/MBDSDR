@@ -27,9 +27,12 @@
 from __future__ import annotations
 
 import math
-from typing import Any, Dict, List, Sequence, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
+
+from .geodesy import CoordinateConverter
+from .gnss_environment import uncorrected_error_budget
 
 __all__ = [
     "nav_bits_to_subframes", "subframes_to_ephemeris",
@@ -407,6 +410,8 @@ def pvt_solve(observations: Sequence[Dict[str, Any]],
               max_iter: int = 12,
               conv_m: float = 1e-6,
               resid_floor_m: float = 1e-6,
+              atmosphere: Any = None,
+              t_gpst: Optional[float] = None,
               ) -> Dict[str, Any]:
     """多星伪距 → PVT 迭代最小二乘（收敛判据显式，残差如实输出）。
 
@@ -439,7 +444,18 @@ def pvt_solve(observations: Sequence[Dict[str, Any]],
             raise ValueError("接收机初值与卫星重合，几何矩阵奇异——换初值")
         h_mat = np.concatenate([-los / rng[:, None],
                                 np.ones((len(pr), 1))], axis=1)
-        pred = rng + b
+        dion = np.zeros(len(pr))
+        dtrop = np.zeros(len(pr))
+        if atmosphere is not None:
+            lat_i, lon_i, h_i = CoordinateConverter.ecef_to_llh(*x)
+            for i in range(len(pr)):
+                az, el = CoordinateConverter.satazel(
+                    lat_i, lon_i, los[i] / rng[i])
+                di = atmosphere.iono_delay(lat_i, lon_i, az, el, t_gpst)
+                dt = atmosphere.tropo_delay(lat_i, h_i, el)
+                dion[i] = di if di is not None else 0.0
+                dtrop[i] = dt if dt is not None else 0.0
+        pred = rng + b + dion + dtrop
         resid = pr - pred
         try:
             dx = np.linalg.lstsq(h_mat, resid, rcond=None)[0]
@@ -460,7 +476,22 @@ def pvt_solve(observations: Sequence[Dict[str, Any]],
             continue
         los = sats - x[None, :]
         rng = np.linalg.norm(los, axis=1)
-        final_resid = pr - (rng + b)
+        iono_delays: List[Optional[float]] = []
+        tropo_delays: List[Optional[float]] = []
+        final_dion = np.zeros(len(pr))
+        final_dtrop = np.zeros(len(pr))
+        if atmosphere is not None:
+            lat_f, lon_f, h_f = CoordinateConverter.ecef_to_llh(*x)
+            for i in range(len(pr)):
+                az, el = CoordinateConverter.satazel(
+                    lat_f, lon_f, los[i] / rng[i])
+                di = atmosphere.iono_delay(lat_f, lon_f, az, el, t_gpst)
+                dt = atmosphere.tropo_delay(lat_f, h_f, el)
+                iono_delays.append(di)
+                tropo_delays.append(dt)
+                final_dion[i] = di if di is not None else 0.0
+                final_dtrop[i] = dt if dt is not None else 0.0
+        final_resid = pr - (rng + b + final_dion + final_dtrop)
         return {
             "pos_ecef_m": [float(v) for v in x],
             "clock_bias_m": float(b),
@@ -473,6 +504,11 @@ def pvt_solve(observations: Sequence[Dict[str, Any]],
                 np.linalg.inv(h_mat.T @ h_mat)))),
             "history": history,
             "conv_criteria": criteria,
+            "t_gpst": t_gpst,
+            "error_budget": (atmosphere.summary(iono_delays, tropo_delays)
+                             if atmosphere is not None
+                             else uncorrected_error_budget(
+                                 "未注入电离层/对流层环境输入")),
         }
     raise ValueError(
         f"{max_iter} 次迭代未收敛（末步长 {history[-1]['step_m']:.3e} m ≥ "

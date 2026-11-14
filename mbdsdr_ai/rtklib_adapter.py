@@ -43,6 +43,8 @@ from .rtk_solver import RTKFloatSolver, RTKInput, RTKObs
 # rtcm3_decoder 只依赖 numpy，与 rtklib_adapter 之间没有反向边；原先函数体内的
 # 延迟 import 不隐藏任何环，提到模块级。
 from .rtcm3_decoder import RTCM3Decoder
+# 环境层：电离层广播参数 + 实测气象 -> 误差预算（缺项 uncorrected）
+from .gnss_environment import GnssAtmosphere, uncorrected_error_budget
 
 # ============================================================
 # 物理与几何常数 —— 逐字抄自 RTKLIB 源码，禁止改动数值
@@ -527,6 +529,7 @@ class SPPInput:
     dts: np.ndarray # (n,)  卫星钟差(s)
     pr: np.ndarray # (n,)  伪距 P(m)
     name: List[str] = field(default_factory=list)
+    t_gpst: Optional[float] = None # 观测时刻（GPST 连续秒），Klobuchar 需要
 
 
 class SPPLocator:
@@ -543,21 +546,36 @@ class SPPLocator:
         self.conv_tol = conv_tol
 
     def locate(self, data: SPPInput,
-               x0: Tuple[float, float, float] = (0.0, 0.0, 0.0)) -> Dict[str, Any]:
-        """解算。返回 {x,y,z, b, pos_llh, rms, n_sat, iters}。"""
+               x0: Tuple[float, float, float] = (0.0, 0.0, 0.0),
+               atmosphere: Optional[GnssAtmosphere] = None,
+               t_gpst: Optional[float] = None) -> Dict[str, Any]:
+        """解算。返回 {x,y,z, b, pos_llh, rms, n_sat, iters, error_budget}。
+
+        ``atmosphere`` 为已注入的当天环境；缺省/缺项时结果里的
+        ``error_budget.status`` 如实写 uncorrected，不退回典型值。
+        """
         n = len(data.pr)
+        t_use = data.t_gpst if t_gpst is None else t_gpst
  # 状态 x = [X, Y, Z, 接收机钟差 dtr(m)]
         x = np.array([x0[0], x0[1], x0[2], 0.0])
 
         for it in range(self.max_iter):
             H = np.zeros((n, 4))
             v = np.zeros(n)
+            lat_i, lon_i, h_i = CoordinateConverter.ecef_to_llh(*x[:3])
             for i in range(n):
                 rs = data.rs[i]
                 rr = x[:3]
                 r, e = CoordinateConverter.geodist(rs, rr) #  geodist
- #   v = P - (r + dtr - c*dts)
-                v[i] = data.pr[i] - (r + x[3] - CLIGHT * data.dts[i])
+ #   v = P - (r + dtr - c*dts + dion + dtrp)
+                dion = dtrop = 0.0
+                if atmosphere is not None:
+                    az, el = CoordinateConverter.satazel(lat_i, lon_i, e)
+                    di = atmosphere.iono_delay(lat_i, lon_i, az, el, t_use)
+                    dt = atmosphere.tropo_delay(lat_i, h_i, el)
+                    dion = di if di is not None else 0.0
+                    dtrop = dt if dt is not None else 0.0
+                v[i] = data.pr[i] - (r + x[3] - CLIGHT * data.dts[i] + dion + dtrop)
  #   H 行 = [-e_x,-e_y,-e_z, 1]
                 H[i, 0] = -e[0]
                 H[i, 1] = -e[1]
@@ -569,15 +587,28 @@ class SPPLocator:
             if float(np.linalg.norm(dx[:3])) < self.conv_tol:
                 break
 
- # 残差 RMS
+ # 残差 RMS + 逐星环境延迟（最终位置处）
         rr = x[:3]
-        res = []
+        lat, lon, h = CoordinateConverter.ecef_to_llh(*rr)
+        res: List[float] = []
+        iono_delays: List[Optional[float]] = []
+        tropo_delays: List[Optional[float]] = []
         for i in range(n):
-            r, _ = CoordinateConverter.geodist(data.rs[i], rr)
-            res.append(data.pr[i] - (r + x[3] - CLIGHT * data.dts[i]))
+            r, e = CoordinateConverter.geodist(data.rs[i], rr)
+            dion = dtrop = 0.0
+            di = dt = None
+            if atmosphere is not None:
+                az, el = CoordinateConverter.satazel(lat, lon, e)
+                di = atmosphere.iono_delay(lat, lon, az, el, t_use)
+                dt = atmosphere.tropo_delay(lat, h, el)
+                dion = di if di is not None else 0.0
+                dtrop = dt if dt is not None else 0.0
+            iono_delays.append(di)
+            tropo_delays.append(dt)
+            res.append(data.pr[i] - (r + x[3] - CLIGHT * data.dts[i]
+                                     + dion + dtrop))
         rms = float(np.sqrt(np.mean(np.square(res))))
 
-        lat, lon, h = CoordinateConverter.ecef_to_llh(x[0], x[1], x[2])
         return {
             "x": float(x[0]), "y": float(x[1]), "z": float(x[2]),
             "b_m": float(x[3]), # 接收机钟差等价距离(m)
@@ -585,6 +616,11 @@ class SPPLocator:
             "lat_rad": lat, "lon_rad": lon, "h": h,
             "lat_deg": lat * R2D, "lon_deg": lon * R2D,
             "rms_m": rms, "n_sat": n, "iters": it + 1,
+            "t_gpst": t_use,
+            "error_budget": (atmosphere.summary(iono_delays, tropo_delays)
+                             if atmosphere is not None
+                             else uncorrected_error_budget(
+                                 "未注入电离层/对流层环境输入")),
         }
 
  # ----------------------------------------------------------
@@ -593,7 +629,9 @@ class SPPLocator:
  # ----------------------------------------------------------
     def locate_multi(self, obs: List[Dict[str, Any]],
                      x0: Tuple[float, float, float] = (0.0, 0.0, 0.0),
-                     use_wls: bool = True) -> Dict[str, Any]:
+                     use_wls: bool = True,
+                     atmosphere: Optional[GnssAtmosphere] = None,
+                     t_gpst: Optional[float] = None) -> Dict[str, Any]:
         """多星座伪距单点定位。
 
         每条观测 dict 字段：
@@ -642,12 +680,19 @@ class SPPLocator:
 
         for it in range(self.max_iter):
             rows: List[Tuple[np.ndarray, float, float]] = [] # (H_row, v, weight)
-            lat0, lon0 = 0.0, 0.0
+            lat0, lon0, h0 = CoordinateConverter.ecef_to_llh(*x[:3])
             for o in valid:
                 rs = o["rs"]; rr = x[:3]
                 r, e = CoordinateConverter.geodist(rs, rr) #   v = P - (r + dtr - c*dts)
                 dtr = x[3]
-                v = o["pr"] - (r + dtr - CLIGHT * o["dts"])
+                az, el = CoordinateConverter.satazel(lat0, lon0, e)
+                dion = dtrop = 0.0
+                if atmosphere is not None:
+                    di = atmosphere.iono_delay(lat0, lon0, az, el, t_gpst)
+                    dt = atmosphere.tropo_delay(lat0, h0, el)
+                    dion = di if di is not None else 0.0
+                    dtrop = dt if dt is not None else 0.0
+                v = o["pr"] - (r + dtr - CLIGHT * o["dts"] + dion + dtrop)
                 Hrow = np.zeros(NX)
                 Hrow[0] = -e[0]; Hrow[1] = -e[1]; Hrow[2] = -e[2]
                 Hrow[3] = 1.0
@@ -656,9 +701,6 @@ class SPPLocator:
                 if col != 3:
                     v -= x[col]
                     Hrow[col] = 1.0
- # 仰角加权（ varerr 简化版：仰角越低方差越大）
-                lat0, lon0, _ = CoordinateConverter.ecef_to_llh(*rr)
-                _, el = CoordinateConverter.satazel(lat0, lon0, e)
  # var = 1/sin(el)^2 近似（ EFACT_GPS/GLO）
                 w = 1.0 / max(0.1, math.sin(el) ** 2) if use_wls else 1.0
                 rows.append((Hrow, v, w))
@@ -682,13 +724,25 @@ class SPPLocator:
             if float(np.linalg.norm(dx[:3])) < self.conv_tol:
                 break
 
- # 残差 RMS 与 HDOP
+ # 残差 RMS、HDOP 与逐星环境延迟
         res = []
+        iono_delays: List[Optional[float]] = []
+        tropo_delays: List[Optional[float]] = []
         lat, lon, h = CoordinateConverter.ecef_to_llh(x[0], x[1], x[2])
         Hpos = np.zeros((n, 3))
         for i, o in enumerate(valid):
             r, e = CoordinateConverter.geodist(o["rs"], x[:3])
-            res.append(o["pr"] - (r + x[3] - CLIGHT * o["dts"]))
+            az, el = CoordinateConverter.satazel(lat, lon, e)
+            dion = dtrop = 0.0
+            di = dt = None
+            if atmosphere is not None:
+                di = atmosphere.iono_delay(lat, lon, az, el, t_gpst)
+                dt = atmosphere.tropo_delay(lat, h, el)
+                dion = di if di is not None else 0.0
+                dtrop = dt if dt is not None else 0.0
+            iono_delays.append(di)
+            tropo_delays.append(dt)
+            res.append(o["pr"] - (r + x[3] - CLIGHT * o["dts"] + dion + dtrop))
             Hpos[i] = -e
         rms = float(np.sqrt(np.mean(np.square(res)))) if res else 0.0
         try:
@@ -707,6 +761,11 @@ class SPPLocator:
             "rms_m": rms, "n_sat": n, "iters": it + 1,
             "hdop": hdop,
             "systems_present": [s for s, p in present.items() if p],
+            "t_gpst": t_gpst,
+            "error_budget": (atmosphere.summary(iono_delays, tropo_delays)
+                             if atmosphere is not None
+                             else uncorrected_error_budget(
+                                 "未注入电离层/对流层环境输入")),
         }
 
 
@@ -1019,6 +1078,9 @@ class GNSSPipeline:
         self.base_ecef: Optional[np.ndarray] = None
         self.base_obs_by_sys: Dict[str, List[Dict[str, Any]]] = {}
         self.last_solution: Dict[str, Any] = {}
+        # 注入点：由调用方按当天环境设置（None = 未注入，结果标 uncorrected）
+        self.atmosphere: Optional[GnssAtmosphere] = None
+        self.t_gpst: Optional[float] = None
 
  # ----------------------------------------------------------
     def feed_rtcm(self, data: bytes) -> List[Dict[str, Any]]:
@@ -1080,12 +1142,13 @@ class GNSSPipeline:
                     base_ecef=np.asarray(self.base_ecef, dtype=float),
                     base_obs=base_flat, rover_obs=rover_flat,
                 )
-                sol = RTKFloatSolver().solve(inp)
+                sol = RTKFloatSolver().solve(inp, atmosphere=self.atmosphere)
                 if sol.get("fix_type") == "RTK_FLOAT":
                     self.last_solution = {
                         "lat_deg": sol["lat_deg"], "lon_deg": sol["lon_deg"],
                         "alt": sol["alt"], "fix_type": "RTK_FLOAT",
                         "num_sats": sol["num_sats"], "hdop": sol["hdop"],
+                        "error_budget": sol.get("error_budget"),
                     }
                     return self.last_solution
             except Exception:
@@ -1093,13 +1156,17 @@ class GNSSPipeline:
 
  # SPP 兜底
         if len(spp_obs) >= 4:
-            sol = SPPLocator().locate_multi(spp_obs)
+            sol = SPPLocator().locate_multi(
+                spp_obs, atmosphere=self.atmosphere, t_gpst=self.t_gpst)
             self.last_solution = {
                 "lat_deg": sol["lat_deg"], "lon_deg": sol["lon_deg"],
                 "alt": sol["h"], "fix_type": "SPP",
                 "num_sats": sol["n_sat"], "hdop": sol["hdop"],
+                "error_budget": sol.get("error_budget"),
             }
             return self.last_solution
 
         return {"lat_deg": 0.0, "lon_deg": 0.0, "alt": 0.0,
-                "fix_type": "NONE", "num_sats": len(spp_obs), "hdop": 99.0}
+                "fix_type": "NONE", "num_sats": len(spp_obs), "hdop": 99.0,
+                "error_budget": (self.atmosphere.summary() if self.atmosphere
+                                 else uncorrected_error_budget("未获得可用观测"))}

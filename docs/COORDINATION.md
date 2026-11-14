@@ -2344,6 +2344,11 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `desktop/main_window.py` | UI防呆线/6ae85f56（B1/B2：未连接时收听下拉置灰并说明原因；连接等待窗口按钮置灰显示「连接中…」） | 2026-11-14 11:25 | 本笔 |
 | `tests/test_connection_controls_guard.py` | UI防呆线/6ae85f56（B1/B2 判据：收听下拉随连接态启停、等待窗口内按钮置灰/文案/恢复（反证已跑：3 红）） | 2026-11-14 11:25 | 本笔 |
 | `tests/test_keyboard_main_flow.py` | UI防呆线/6ae85f56（B1 适配：键盘主流程模拟已连接改走 _panels_set_sdr_connected(True)） | 2026-11-14 11:25 | 本笔 |
+| `mbdsdr_ai/gnss_environment.py` | 时空核对线/timeline-now（D2 电离层广播Klobuchar+实测气象Saastamoinen误差预算，缺项uncorrected） | 2026-11-14 11:26 | 本笔 |
+| `mbdsdr_ai/rtklib_adapter.py` | 时空核对线/timeline-now（D2 SPP/locate_multi 接入环境改正与 error_budget） | 2026-11-14 11:26 | 本笔 |
+| `mbdsdr_ai/gps_nav.py` | 时空核对线/timeline-now（D2 pvt_solve 接入环境改正与 error_budget） | 2026-11-14 11:26 | 本笔 |
+| `mbdsdr_ai/rtk_solver.py` | 时空核对线/timeline-now（D2 RTK 结果带环境溯源字段（双差不另加改正）） | 2026-11-14 11:26 | 本笔 |
+| `tests/test_gnss_environment.py` | 时空核对线/timeline-now（D2 判据：环境注入方向正确、缺项uncorrected、SPP/PVT/RTK结果字段） | 2026-11-14 11:26 | 本笔 |
 
 > 上表各行均由 `claim` 台账推导：owner 原文与 `acquired_at` 直接取自台账，
 > 目的优先用台账里的 `claim_reason`，没有就如实写「未声明」，不补编。时间列只是

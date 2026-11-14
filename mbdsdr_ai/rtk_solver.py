@@ -24,6 +24,7 @@ import numpy as np
 from .geodesy import (
     CLIGHT, CoordinateConverter, R2D, PI,
 )
+from .gnss_environment import uncorrected_error_budget
 
 
 # ============================================================
@@ -223,13 +224,19 @@ class RTKFloatSolver:
     # ----------------------------------------------------------
     # 主入口
     # ----------------------------------------------------------
-    def solve(self, inp: RTKInput) -> Dict[str, Any]:
+    def solve(self, inp: RTKInput, atmosphere: Any = None) -> Dict[str, Any]:
         """执行一次 RTK float 解算。
 
         返回 dict: {lat, lon, alt, fix_type, num_sats, hdop, residuals}
         fix_type: "RTK_FLOAT"（成功）/ "NONE"（失败）
         LAMBDA 固定解 TODO: 留接口 fix_ambiguities()。
+
+        ``atmosphere`` 仅用于在结果里标注当天环境状态与来源：双差已消去
+        共模电离层/对流层，不另加单差改正；未注入时标 uncorrected。
         """
+        error_budget = (atmosphere.provenance() if atmosphere is not None
+                        else uncorrected_error_budget(
+                            "未注入电离层/对流层环境输入"))
         if self.x is None:
             self._initialize_state(inp)
 
@@ -239,7 +246,8 @@ class RTKFloatSolver:
         common = base_prns & rover_prns
         if len(common) < 4:
             return {"fix_type": "NONE", "num_sats": len(common),
-                    "error": "insufficient common satellites"}
+                    "error": "insufficient common satellites",
+                    "error_budget": error_budget}
 
         # 迭代最小二乘 + KF 更新
         for it in range(self.max_iter):
@@ -271,6 +279,7 @@ class RTKFloatSolver:
             "hdop": hdop,
             "num_ambiguities": max(0, len(self.x) - 5),
             "note": "float only, fixed pending (LAMBDA TODO)",
+            "error_budget": error_budget,
         }
 
     # ----------------------------------------------------------
