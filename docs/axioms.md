@@ -34,15 +34,33 @@ python scripts/axioms.py --prioritize \
 一个会截断的检查器和一个会漏检的检查器一样不可信：「应修 0」如果只代表
 「窗口内前 N 条是 0」，它就不能当合规判据。
 
-### 当前计数（工具生成，勿手改）
+### 当前计数（工具生成，按基准 sha 钉住，勿手改）
 
-<!-- axioms-current-stats:begin（由 python -m tools.axioms.current_stats 生成） -->
-违规 641 条：应修 67，复核 415，豁免 159。
-D1 5 / D2 168 / D3 247 / D4 28 / D5 134 / D6 59 / D7 0 / D8 0。
+<!-- axioms-current-stats:begin（由 python -m tools.axioms.current_stats 生成；基准 fb00be6e3b9401050dca62e0b877bd49c0d80fb4 生成于 2026-11-14T11:34:18+08:00） -->
+违规 646 条：应修 70，复核 417，豁免 159。
+D1 7 / D2 171 / D3 247 / D4 28 / D5 134 / D6 59 / D7 0 / D8 0。
+校验指纹 sha256:9a3d9ca5d2027331b331d2dd9808720cef4a76dac45a805b33e6f5632395bbf1
 <!-- axioms-current-stats:end -->
 
-`tests/test_axioms_doc_current_stats.py` 会用工具当次输出与本块逐字比对，
-不一致即红。改数字请重跑 `python -m tools.axioms.current_stats`，不要手改。
+`tests/test_axioms_doc_current_stats.py` 只做三种检查，且**不跟 HEAD 比**：
+
+1. 块内数字与块内「校验指纹」一致——手改一个数字即红；
+2. 基准 sha == HEAD 且工作树干净时，再与工具当次输出逐字比对——那才是真错；
+3. 基准 sha != HEAD（别人又提交了）时**不判红**，只提示重跑生成器，让这条
+   判据不会因为「当下变了」而长期红。
+
+「当前」永远指**某一棵基准树**（块内记下的 sha + 生成时刻），不是浮动的 HEAD。
+
+**什么时候该重生成**（改完、提交前）：
+
+- 改动任何被 `tools/axioms/survey.py::collect_all` 扫描的源码；
+- 新增/销账「已知红」，或改 `docs/axioms-waivers.json`（豁免集合）；
+- 公理/检查器本身变更导致 D1–D8 计数变化。
+
+以上任一发生，跑 `python -m tools.axioms.current_stats`：它会把基准 sha、
+生成时刻、指纹与计数正文一起写回本块，和你的代码改动放在同一笔提交。
+仅改文档措辞、或改与本域无关的文件，不需要重生成。
+
 **本块之外的所有计数都是历史快照（非当前）**，只用于对账，不作为当前存量。
 
 历史教训（2026-11-13 对账）：`survey.py` 曾对 D6/D3/D2/D1 的明细做 10–40 条截断，

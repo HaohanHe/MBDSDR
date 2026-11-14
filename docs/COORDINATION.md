@@ -2392,7 +2392,12 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `mbdsdr_ai/environment_evidence.py` | 时空环境层/D4（环境证据快照落盘与只读复算） | 2026-11-14 11:33 | 本笔 |
 | `tests/test_environment_evidence.py` | 时空环境层/D4（D4 判据与反证） | 2026-11-14 11:33 | 本笔 |
 | `scripts/replay_environment_evidence.py` | 时空环境层/D4（只读复算 CLI） | 2026-11-14 11:33 | 本笔 |
+| `desktop/main_window.py` | UI防呆线/6ae85f56（D7：面板弹出/收回后各重跑一次 _setup_tab_order（QTimer.singleShot(0)）） | 2026-11-14 11:33 | 本笔 |
+| `tests/test_tab_order_after_panel_roundtrip.py` | UI防呆线/6ae85f56（D7 判据：弹出/收回各触发一次重排 + 焦点链稳定指纹与基线一致（反证已跑：去重跑必红）） | 2026-11-14 11:33 | 本笔 |
 | `{mbdsdr_ai/rotating_jsonl.py,mbdsdr_ai/tool_guard.py,mbdsdr_ai/tx_guard.py,tests/test_audit_log_rotation.py,docs/limitations-register.md}` | 审计账本轮转线/6ae85f56（审计账本 8MiB×5 轮转 + 唯一查询入口 + 跨进程写锁；TxAuditLog 改用共享实现） | 2026-11-14 11:34 | 本笔 |
+| `tools/axioms/current_stats.py` | 公理体检线/6ae85f56（计数块钉基准 sha：记录基准/生成时刻/指纹，判据不再跟 HEAD 比） | 2026-11-14 11:34 | 本笔 |
+| `tests/test_axioms_doc_current_stats.py` | 公理体检线/6ae85f56（判据：基准未变改数字必红；基准未变 HEAD 前进必过并提示；反证改回跟 HEAD 比必红） | 2026-11-14 11:34 | 本笔 |
+| `docs/axioms.md` | 公理体检线/6ae85f56（计数块改为按基准钉住并写明何时重生成） | 2026-11-14 11:34 | 本笔 |
 
 > 上表各行均由 `claim` 台账推导：owner 原文与 `acquired_at` 直接取自台账，
 > 目的优先用台账里的 `claim_reason`，没有就如实写「未声明」，不补编。时间列只是
