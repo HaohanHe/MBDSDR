@@ -42,6 +42,15 @@ GIT_INDEX_FILE 提交后，共享 index 仍停在旧 HEAD，本次提交的每�
 `INDEX_RESIDUE` 记录并逐条打印路径。**不改退出码、不阻断、不自动修复**——
 这些条目可能是别线正在准备的提交，也可能是旧 blob 未重新 add（事故
 `bc0c75e1`）；清理动作由 owner 或人工决定。
+
+再做一道**提交后可构建烟雾检查**（`scripts/head_build_smoke.py`）：在该提交
+自己的检出上跑一组既有的「能构造主窗口/面板」用例（实测约 5 s，文档类提交
+跳过）。红 = 醒目打印 sha + 失败用例 + 首条错误 + 台账并追加
+`head_build_smoke.log`；检查自身跑不起来（脚本缺失 / 超时 / 锁占满）同样记账
+并打印，**不允许静默跳过**。这道闸补的是前面所有闸门都不判的一件事：
+「提交出去的东西自身能不能构建」（事故 `12bcdb7a` 带走了调用侧、定义没跟上，
+HEAD 有 272 s 构造主窗口直接 AttributeError）。本调用放在审计/绕过分支**之前**，
+`MBDSDR_BYPASS_REASON` 的提交也照样跑；只记录，不改提交结果。
 """
 import json
 import os
@@ -55,6 +64,9 @@ MANAGED = "MBDSDR-MANAGED-HOOK post-commit"
 
 #: 提交后自检窗口：超过这个窗口的改动可能只是别人随后又改，不能算漏带。
 STALE_CHECK_WINDOW_S = 5.0
+
+#: 提交后可构建烟雾检查的超时（含 Qt 全局锁等待）；超时按「无法判定」记账。
+HEAD_BUILD_SMOKE_TIMEOUT_S = 240
 
 
 def _git(*args):
@@ -358,6 +370,101 @@ def _report_residue(records):
         print(f"[post-commit] 残留台账写入失败：{exc}", file=sys.stderr)
 
 
+def _smoke_ledger_path():
+    return Path(
+        os.environ.get("MBDSDR_HEAD_BUILD_LOG")
+        or r"D:\mbdsdr\.locks\head_build_smoke.log"
+    )
+
+
+def _smoke_script(root):
+    """优先用本工作树的 scripts/head_build_smoke.py，其次 hooks 目录里的安装副本。
+
+    旧工作树（HEAD 还没更新到本提交）没有 scripts/head_build_smoke.py，靠安装
+    副本兜住；两处都没有才是「检查没跑成」。
+    """
+    candidates = [root / "scripts" / "head_build_smoke.py"]
+    hooks_raw = _git("rev-parse", "--git-path", "hooks").stdout.strip()
+    if hooks_raw:
+        hooks = Path(hooks_raw)
+        if not hooks.is_absolute():
+            hooks = root / hooks
+        candidates.append(hooks / "head_build_smoke.py")
+    return next((path for path in candidates if path.exists()), None)
+
+
+def _record_smoke_failure(head, reason, detail=""):
+    """烟雾检查自身跑不起来：醒目打印 + 记 error，**不静默跳过**。"""
+    log_path = _smoke_ledger_path()
+    bar = "=" * 70
+    print(f"[post-commit] {bar}", file=sys.stderr)
+    print(f"[post-commit] ⚠ HEAD 可构建烟雾检查没跑成：{head[:8]}", file=sys.stderr)
+    print(f"[post-commit]   原因：{reason}", file=sys.stderr)
+    for line in (detail or "").strip().splitlines()[-6:]:
+        print(f"[post-commit]     {line}", file=sys.stderr)
+    print(f"[post-commit]   台账：{log_path}", file=sys.stderr)
+    print(f"[post-commit] {bar}", file=sys.stderr)
+    try:
+        _append_records(
+            log_path,
+            [
+                {
+                    "ts": datetime.now().isoformat(timespec="seconds"),
+                    "type": "HEAD_BUILD_SMOKE",
+                    "status": "error",
+                    "commit": head,
+                    "reason": f"post-commit 侧：{reason}",
+                    "failures": [],
+                    "ledger": str(log_path),
+                }
+            ],
+        )
+    except OSError as exc:
+        print(f"[post-commit] 烟雾台账写入失败：{exc}", file=sys.stderr)
+
+
+def _head_build_smoke(root, head):
+    """提交后可构建烟雾检查：红/跑不成都要可见，但**只记录、不改提交结果**。
+
+    判的是「提交出去的东西自身能不能构建」，前面几道闸门都不判这件事。
+    """
+    script = _smoke_script(root)
+    if script is None:
+        _record_smoke_failure(
+            head, "找不到 scripts/head_build_smoke.py（工作树与 hooks 目录都没有）"
+        )
+        return
+    env = os.environ.copy()
+    for key in ("GIT_INDEX_FILE", "GIT_DIR", "GIT_WORK_TREE", "GIT_PREFIX"):
+        env.pop(key, None)
+    try:
+        proc = subprocess.run(
+            [sys.executable, str(script), "--repo", str(root), "--commit", head],
+            cwd=str(root),
+            env=env,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=HEAD_BUILD_SMOKE_TIMEOUT_S,
+        )
+    except subprocess.TimeoutExpired:
+        _record_smoke_failure(head, f"超出 {HEAD_BUILD_SMOKE_TIMEOUT_S}s 未返回")
+        return
+    except OSError as exc:
+        _record_smoke_failure(
+            head, f"无法启动烟雾检查：{exc.__class__.__name__}: {exc}"
+        )
+        return
+    output = ((proc.stdout or "") + (proc.stderr or "")).strip()
+    if output:
+        print(output, file=sys.stderr)
+    if proc.returncode not in (0, 3, 4):
+        _record_smoke_failure(
+            head, f"烟雾脚本自身异常退出 rc={proc.returncode}", output[-600:]
+        )
+
+
 def main():
     started_at = time.time()
     root = Path(_git("rev-parse", "--show-toplevel").stdout.strip() or ".")
@@ -418,6 +525,13 @@ def main():
         residue = None
     if residue:
         _report_residue(residue)
+
+    # 提交后可构建烟雾检查：判「提交出去的东西自身能不能构建」。
+    # 放在审计/绕过分支之前——带 MBDSDR_BYPASS_REASON 的提交也照样跑。
+    try:
+        _head_build_smoke(root, head)
+    except Exception as exc:  # noqa: BLE001 —— 自检异常不许影响提交结果，但要可见
+        _record_smoke_failure(head, f"烟雾检查异常：{exc.__class__.__name__}: {exc}")
 
     marker_dir = Path(
         os.environ.get("MBDSDR_HOOK_MARKER_DIR") or r"D:\mbdsdr\.locks\hook_ok"

@@ -2221,6 +2221,10 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `tools/axioms/current_stats.py` | 公理体检线/6ae85f56（Task2: 当前计数唯一生成器） | 2026-11-14 09:26 | 本笔 |
 | `tests/test_axioms_doc_current_stats.py` | 公理体检线/6ae85f56（Task2: 文档计数与工具比对） | 2026-11-14 09:26 | 本笔 |
 | `docs/incidents/2026-11-14-head-unbuildable-swept-call-site.md` | HEAD可构建线/6ae85f56（事故记录：带走的调用侧缺定义，HEAD 272s 不可构建） | 2026-11-14 09:36 | 本笔 |
+| `scripts/head_build_smoke.py` | HEAD可构建线/6ae85f56（新增：在指定提交自己的检出上跑构造烟雾检查） | 2026-11-14 09:38 | 本笔 |
+| `tests/test_head_build_smoke.py` | HEAD可构建线/6ae85f56（判据：红/无法判定都记账，非静默跳过） | 2026-11-14 09:38 | 本笔 |
+| `scripts/hooks/post-commit` | HEAD可构建线/6ae85f56（接入烟雾检查，置于审计/绕过分支之前） | 2026-11-14 09:38 | 本笔 |
+| `scripts/install_git_hooks.py` | HEAD可构建线/6ae85f56（head_build_smoke.py 随钩子安装副本，旧工作树兜住） | 2026-11-14 09:38 | 本笔 |
 
 > 上表各行均由 `claim` 台账推导：owner 原文与 `acquired_at` 直接取自台账，
 > 目的优先用台账里的 `claim_reason`，没有就如实写「未声明」，不补编。时间列只是
