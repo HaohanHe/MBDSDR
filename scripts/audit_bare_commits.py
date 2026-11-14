@@ -49,7 +49,8 @@
 
 * §11.3-① 后半：他线在途 hunk 是否被带入（要 ``--declare`` 快照，历史提交没留）；
 * §11.3-②：本笔要用的 §6.1 行是否已在 HEAD（哪几行「属于本笔」无法机读）；
-* §11.3-③ 后半：``--allow-foreign-changes`` / 有意删除非只增文件这类留痕例外。
+* §11.3-③ 后半：``--allow-foreign-drift`` / ``--allow-foreign-before-declare`` /
+  有意删除非只增文件这类留痕例外。
 
 用法::
 
@@ -642,8 +643,8 @@ def _print_item_append(result: Dict[str, Any], doc: str, quiet: bool) -> None:
     print()
     print("【§11.3-③ 只许追加的文件是否被删行（机检，不管有没有 claim）】")
     print(f"  检查范围：{doc}（§6.1 表格行；剥离线末释放标记后比较）")
-    print("  留痕例外（--allow-foreign-changes / 有意删除非只增文件）："
-          "本项机检不覆盖，需人工复核。")
+    print("  留痕例外（--allow-foreign-drift / --allow-foreign-before-declare / "
+          "有意删除非只增文件）：本项机检不覆盖，需人工复核。")
     if result["status"] != STATUS_CHECKED:
         print(f"  未审计：{result.get('reason', '台账不可读')}")
         return
@@ -772,7 +773,8 @@ def main(argv: List[str] | None = None) -> int:
             "not_covered": [
                 "§11.3-①后半 他线在途 hunk 是否被带入",
                 "§11.3-② 本笔要用的 §6.1 行是否已在 HEAD",
-                "§11.3-③ 留痕例外（--allow-foreign-changes / 有意删除）",
+                "§11.3-③ 留痕例外（--allow-foreign-drift / "
+                "--allow-foreign-before-declare / 有意删除）",
             ],
         }, ensure_ascii=False, indent=2))
         return 0

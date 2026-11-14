@@ -3,7 +3,7 @@
 一、声明快照（``8982b4f9``）：``--declare`` 之后、提交之前，别的线往同一个
     文件插进来的行必须被拒，且拒信要逐行点名；声明时就已经在的他人改动
     （``--exclude-hunk`` 的对象）不许被误拒；删行比增行更危险，同样要拒；
-    确需一起带走时走 ``--allow-foreign-changes``，理由必须进提交说明。
+    确需一起带走时走 ``--allow-foreign-drift``，理由必须进提交说明。
 
 二、提交信息逐字校验（``7a76b097``）：消息只走 stdin，不经过任何外部临时
     文件；提交后从 commit 对象里取回来比对，不一致按退出码 3 事故报出。
@@ -165,7 +165,7 @@ def test_foreign_lines_after_declaration_are_rejected_line_by_line(tmp_path):
 
 
 def test_waiver_commits_and_records_reason(tmp_path):
-    """同上的现场，走 ``--allow-foreign-changes``：能过，理由必须进提交说明。"""
+    """同上的现场，走 ``--allow-foreign-drift``：能过，理由必须进提交说明。"""
     locks = tmp_path / "locks"
     repo = _repo(tmp_path, [f"line{i}" for i in range(1, 7)])
     lines = [f"line{i}" for i in range(1, 7)]
@@ -189,7 +189,7 @@ def test_waiver_commits_and_records_reason(tmp_path):
         [
             sys.executable, str(SAFE), "--files", DOC,
             "--message-file", str(msg),
-            "--allow-foreign-changes", "两行已与 B 线当面核对，随本笔一起落库",
+            "--allow-foreign-drift", "两行已与 B 线当面核对，随本笔一起落库",
         ],
         cwd=str(repo), env=_safe_env(repo, locks, "进程A线"),
         capture_output=True, text=True, encoding="utf-8", errors="replace",
@@ -221,7 +221,7 @@ def test_declaration_mismatch_requires_waiver(tmp_path):
         [
             sys.executable, str(SAFE), "--files", DOC,
             "--message-file", str(msg),
-            "--allow-foreign-changes", "别线第 6 行已核对",
+            "--allow-foreign-drift", "别线第 6 行已核对",
         ],
         cwd=str(repo), env=_safe_env(repo, locks, "进程A线"),
         capture_output=True, text=True, encoding="utf-8", errors="replace",
@@ -231,6 +231,41 @@ def test_declaration_mismatch_requires_waiver(tmp_path):
     log = _git(repo, "log", "-1", "--format=%B").stdout
     assert "foreign-changes: 别线第 6 行已核对" in log, log
     assert "+1 / -1" in log, log
+
+
+def test_before_declare_waiver_does_not_open_drift(tmp_path):
+    """㉑ 的理由不能开 ⑰ 的闸：声明后漂移给 ``--allow-foreign-before-declare`` 仍然退出码 4。
+
+    两个豁免各管一道闸（2026-11-14 拆分）；用错开关就拒绝，理由是给哪道闸写的
+    必须对得上。
+    """
+    locks = tmp_path / "locks"
+    repo = _repo(tmp_path, [f"line{i}" for i in range(1, 7)])
+    lines = [f"line{i}" for i in range(1, 7)]
+    lines[1] = "line2 mine"
+    _write(repo, lines)
+    assert _safe(repo, locks, tmp_path, "--declare", message=None,
+                 owner="进程A线").returncode == 0
+
+    lines[4:4] = ["foreign-a", "foreign-b"]
+    _write(repo, lines)
+    before = _head(repo)
+
+    msg = tmp_path / "msg.txt"
+    msg.write_text("test: 用错豁免\n", encoding="utf-8")
+    proc = subprocess.run(
+        [
+            sys.executable, str(SAFE), "--files", DOC,
+            "--message-file", str(msg),
+            "--allow-foreign-before-declare", "写的是声明前他线块（用错了开关）",
+        ],
+        cwd=str(repo), env=_safe_env(repo, locks, "进程A线"),
+        capture_output=True, text=True, encoding="utf-8", errors="replace",
+    )
+    out = proc.stdout + proc.stderr
+    assert proc.returncode == 4, out
+    assert "声明之后有内容变化" in out, out
+    assert _head(repo) == before, "拒绝时不许提交"
 
 
 def test_deleted_line_after_declaration_is_rejected(tmp_path):

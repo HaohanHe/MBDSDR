@@ -78,7 +78,7 @@ pre-commit 闸门对**任何未声明的删除条目**一律拒绝（幻影删�
   逐行列出声明之后新增的行、消失的行，并从 claim 台账推断这些行可能属于谁；
 * 声明时**已经存在**的他人改动不算变化（它改由退出码 8 的清单管，见形态㉑），
   这条边界不能混：混了以后共享文件就没人敢提交；
-* 确认要连别人的行一起带走时，用 ``--allow-foreign-changes "<理由>"`` 放行，
+* 确认要连别人的行一起带走时，用 ``--allow-foreign-drift "<理由>"`` 放行，
   理由与逐文件增删行数会写进提交说明的 ``foreign-changes:`` 段——豁免必须留痕，
   不能默默通过。
 
@@ -109,13 +109,24 @@ pre-commit 闸门对**任何未声明的删除条目**一律拒绝（幻影删�
 的；解析不出线名的行标「无归属」），按「N 个文件 / M 个块 / 共 K 行」打印，
 并写进声明快照。提交时这些块若仍会被带入，
 必须用 ``--exclude-hunk`` / ``--exclude-owner`` 排掉，或用
-``--allow-foreign-changes "<理由>"`` 留痕（写进说明的 ``foreign-before-declare:``
-段）；两者都没有就拒绝（退出码 8，不重试）。清单只比 ``--files``，不扫全仓。
+``--allow-foreign-before-declare "<理由>"`` 留痕（写进说明的
+``foreign-before-declare:`` 段）；两者都没有就拒绝（退出码 8，不重试）。
+清单只比 ``--files``，不扫全仓。
 
 「仍会被带入」的判据是**本笔 diff（私有 index vs HEAD）的新增/删除行**，不是
 index 全文：全文比对会让空行原文 ``""`` 到处命中（``1a092cf8`` 的 7 个空行块），
 也会把 HEAD 推进后已经落库的块误报成他线块。纯空行不参与判定——空行不带归属，
 任何提交里的空行都能和它同文。
+
+两个豁免**各管一道闸，理由不许共用**（2026-11-14）
+--------------------------------------------------
+
+``--allow-foreign-drift`` 只放行 ⑰（声明之后漂移），
+``--allow-foreign-before-declare`` 只放行 ㉑（声明之前已在工作区的他线块）。
+``1a092cf8`` 的教训是同一个开关同时开两道闸：说明里写的是「空行块原文误报」，
+实际却把 ``mbdsdr_ai/bookmark_manager.py`` 的登记行带走了，理由与带入的内容
+对不上。现在用错开关，另一半照样拒绝；两个理由分别落在 ``foreign-changes:``
+与 ``foreign-before-declare:`` 两段，事后能对着看是哪道闸、按什么理由开的。
 
 两把锁各管一半，**不重叠也不互相替代**：声明**之前**已在工作区的内容归 8
 （本节的块清单），声明**之后**冒出来/消失的内容归 4（⑰ 的时间窗）。只做
@@ -250,14 +261,16 @@ hunk，于是有人把自己的行挪到别处让 diff 断开——提交干净�
     python scripts/safe_commit.py --files docs/COORDINATION.md a.md \\
         --message-file msg.txt --exclude-owner "UI防呆线" --exclude-owner "收尸线"
     python scripts/safe_commit.py --files a.md --message-file msg.txt \\
-        --allow-foreign-changes "B 线两行已当面核对，随本笔一起落库"
+        --allow-foreign-drift "声明后 B 线改的那两行已当面核对"
+    python scripts/safe_commit.py --files a.md --message-file msg.txt \\
+        --allow-foreign-before-declare "声明前 B 线的块已当面核对，随本笔落库"
 
 退出码：0 成功；1 前置校验失败（未提交）；2 重试耗尽（未提交）；3 提交后复核失败
 （已提交，需按事故卡处理）；4 声明后内容变化被拒（未提交，不重试）；
 5 §6.1 缺行被拒（未提交，不重试）；6 消息源在提交前被改写（未提交，不重试）；
 7 使用了 ``--exclude-hunk`` 却没有声明快照（未提交，不重试）；
-8 声明前已在工作区的他线改动会被带入，且既未排除也未 ``--allow-foreign-changes``
-（未提交，不重试）。
+8 声明前已在工作区的他线改动会被带入，且既未排除也未
+``--allow-foreign-before-declare``（未提交，不重试）。
 """
 from __future__ import annotations
 
@@ -1068,7 +1081,7 @@ def _print_foreign(foreign: dict[str, list[dict]]) -> None:
     for line in _foreign_lines(foreign):
         print(line)
     print("[foreign] 提交时若这些块会被带入，必须用 --exclude-hunk / --exclude-owner 排掉，"
-          "或 --allow-foreign-changes \"<理由>\" 留痕；两者都没有就拒绝（退出码 8）")
+          "或 --allow-foreign-before-declare \"<理由>\" 留痕；两者都没有就拒绝（退出码 8）")
 
 
 def _staged_diff_lines(env: dict, path: str) -> tuple[Counter, Counter]:
@@ -1125,7 +1138,7 @@ def _carried_foreign(env: dict, foreign: dict[str, list[dict]]) -> list[dict]:
 
 
 def _foreign_gate(env: dict, foreign: dict[str, list[dict]],
-                  allow_reason: str) -> tuple[list[dict], str]:
+                  allow_before: str) -> tuple[list[dict], str]:
     """提交前的判据：声明前的他线块还在 index 里 → 必须排除或显式留痕。"""
     carried = _carried_foreign(env, foreign or {})
     if not carried:
@@ -1142,8 +1155,9 @@ def _foreign_gate(env: dict, foreign: dict[str, list[dict]],
         *_foreign_lines(grouped),
         "  处置：普通文件用 --exclude-hunk <path>:<start-end> 排掉；"
         "§6.1 登记面用 --exclude-owner \"<线名>\"；",
-        "        确认要一起带走时用 --allow-foreign-changes \"<理由>\""
-        "（理由与块清单会写进提交说明的 foreign-before-declare 段）。",
+        "        确认要一起带走时用 --allow-foreign-before-declare \"<理由>\""
+        "（理由与块清单会写进提交说明的 foreign-before-declare 段；"
+        "这个理由不放行 ⑰ 的声明后漂移）。",
     ]
     return carried, "\n".join(lines)
 
@@ -1339,7 +1353,7 @@ def _verify_declaration(env: dict, declared: dict, declared_at: float,
         return [], ""
     lines = [
         (
-            f"豁免通过（--allow-foreign-changes）：声明之后有 {len(changed)} 个文件的内容"
+            f"豁免通过（--allow-foreign-drift）：声明之后有 {len(changed)} 个文件的内容"
             "变化，按给定理由一起落库。"
             if waived else
             f"拒绝提交：声明之后有内容变化（{len(changed)} 个文件）。"
@@ -1368,7 +1382,8 @@ def _verify_declaration(env: dict, declared: dict, declared_at: float,
     else:
         lines.append(
             "处置：等对方落库或撤回后重新 --declare 再提交；确认要一起带走时用 "
-            "--allow-foreign-changes \"<理由>\"（理由会写进提交说明）。"
+            "--allow-foreign-drift \"<理由>\"（理由会写进提交说明）。"
+            "声明前就已在工作区的块不归这道闸管，用 --allow-foreign-before-declare。"
         )
     return changed, "\n".join(lines)
 
@@ -1785,7 +1800,8 @@ def _attempt(
     declared: dict | None = None,
     declared_at: float = 0.0,
     foreign: dict | None = None,
-    allow_reason: str = "",
+    allow_drift: str = "",
+    allow_before: str = "",
     message_source: Path | None = None,
     source_bytes: bytes = b"",
 ) -> tuple[int, str]:
@@ -1873,14 +1889,14 @@ def _attempt(
     #      排除后已不在 index 就放行；仍会被带入就必须排除或显式留痕。
     if foreign:
         try:
-            carried, report = _foreign_gate(env, foreign, allow_reason)
+            carried, report = _foreign_gate(env, foreign, allow_before)
         except ValueError as exc:
             raise PermanentFailure(f"拒绝提交：{exc}") from exc
         if carried:
-            if not allow_reason:
+            if not allow_before:
                 return 8, report
             print(report)
-            message = _foreign_before_trailer(message, carried, allow_reason)
+            message = _foreign_before_trailer(message, carried, allow_before)
 
     # 2c) §6.1 登记行：闸只看暂存区，行躺在工作区就等于「该带的一条没带」。
     #     工作区有 → 只把那几行写进私有 index；没有 → 拒绝并给补登记命令。
@@ -1936,7 +1952,7 @@ def _attempt(
     try:
         return _commit_locked(
             expect_files, message, env, base, wanted,
-            declared or {}, declared_at, allow_reason,
+            declared or {}, declared_at, allow_drift,
             message_source or Path(), source_bytes,
         )
     finally:
@@ -1951,7 +1967,7 @@ def _commit_locked(
     wanted: dict[str, str],
     declared: dict,
     declared_at: float,
-    allow_reason: str,
+    allow_drift: str,
     message_source: Path,
     source_bytes: bytes,
 ) -> tuple[int, str]:
@@ -1960,12 +1976,12 @@ def _commit_locked(
     #     因为漂移的内容不会因为多试几次自己回去；豁免必须带理由并落进提交说明。
     if declared:
         changed, report = _verify_declaration(
-            env, declared, declared_at, waived=bool(allow_reason))
+            env, declared, declared_at, waived=bool(allow_drift))
         if changed:
-            if not allow_reason:
+            if not allow_drift:
                 return 4, report
             print(report)
-            message = _foreign_trailer(message, changed, allow_reason)
+            message = _foreign_trailer(message, changed, allow_drift)
         else:
             print(f"[declare] 声明快照无漂移（{len(declared)} 个文件，"
                   f"声明于 {_iso(declared_at)}）")
@@ -2077,10 +2093,18 @@ def _build_parser() -> argparse.ArgumentParser:
         help="只记录声明快照（不提交）：写入后立刻执行，把「声明时的内容」钉住",
     )
     ap.add_argument(
-        "--allow-foreign-changes",
+        "--allow-foreign-drift",
         default="",
         metavar="REASON",
-        help="声明后内容有变化仍要提交时的豁免理由（会写进提交说明，不能留空）",
+        help="⑰：声明之后内容漂移仍要提交时的豁免理由（进 foreign-changes 段；"
+             "不放行声明前的他线块，那种用 --allow-foreign-before-declare）",
+    )
+    ap.add_argument(
+        "--allow-foreign-before-declare",
+        default="",
+        metavar="REASON",
+        help="㉑：声明前就已由他线留在工作区的改动会被带入时的豁免理由"
+             "（进 foreign-before-declare 段；不放行声明后漂移）",
     )
     ap.add_argument("--retries", type=int, default=3, help="撞锁/基线变化时的重建次数")
     ap.add_argument(
@@ -2197,7 +2221,8 @@ def main(argv: list[str] | None = None) -> int:
                     exclude_owner=args.exclude_owner,
                     declared=declared, declared_at=declared_at,
                     foreign=foreign,
-                    allow_reason=args.allow_foreign_changes.strip(),
+                    allow_drift=args.allow_foreign_drift.strip(),
+                    allow_before=args.allow_foreign_before_declare.strip(),
                     message_source=message_source, source_bytes=message,
                 )
             except PermanentFailure as exc:

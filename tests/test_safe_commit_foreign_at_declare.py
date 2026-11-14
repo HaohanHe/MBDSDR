@@ -5,7 +5,7 @@
 
 * ``--declare`` 按台账枚举 ``--files`` 里不属于本笔的块，打印规模与清单；
 * 提交时这些块仍会被带入 → 必须 ``--exclude-hunk`` / ``--exclude-owner`` 排掉，
-  或 ``--allow-foreign-changes "<理由>"`` 留痕（进 ``foreign-before-declare`` 段）；
+  或 ``--allow-foreign-before-declare "<理由>"`` 留痕（进 ``foreign-before-declare`` 段）；
 * 两者都没有 → 退出码 8，未提交。
 
 反证：把 ``_attempt`` 里的 ``return 8`` 分支改成放行，
@@ -116,7 +116,7 @@ def test_foreign_block_blocks_commit(tmp_path):
     assert _git(repo, "rev-list", "--count", "HEAD").stdout.strip() == "1"
 
 
-def test_allow_foreign_changes_passes_and_is_traceable(tmp_path):
+def test_allow_foreign_before_declare_passes_and_is_traceable(tmp_path):
     """显式 allow → 通过，理由与块清单写进 foreign-before-declare 段。"""
     repo = _repo(tmp_path)
     locks = tmp_path / "locks"
@@ -125,7 +125,7 @@ def test_allow_foreign_changes_passes_and_is_traceable(tmp_path):
     assert _safe(repo, locks, "--files", DOC, "--declare").returncode == 0
     proc = _safe(
         repo, locks, "--files", DOC, "--message-file", str(_msg(tmp_path)),
-        "--allow-foreign-changes", "B 线一行已当面核对，随本笔一起落库",
+        "--allow-foreign-before-declare", "B 线一行已当面核对，随本笔一起落库",
     )
     out = proc.stdout + proc.stderr
     assert proc.returncode == 0, out
@@ -134,6 +134,28 @@ def test_allow_foreign_changes_passes_and_is_traceable(tmp_path):
     assert "foreign-before-declare: B 线一行已当面核对，随本笔一起落库" in body
     assert f"{DOC}:" in body and OTHER in body
     assert OTHER in _git(repo, "show", f"HEAD:{DOC}").stdout
+
+
+def test_drift_waiver_does_not_open_exit_8(tmp_path):
+    """⑰ 的理由不能开 ㉑ 的闸：声明前的他线块给 ``--allow-foreign-drift``，照样退出码 8。
+
+    ``1a092cf8`` 的形态：一个开关两道闸全开，说明写「空行原文误报」、实际带走
+    ``mbdsdr_ai/bookmark_manager.py`` 的登记行——理由与带入内容对不上。拆开后
+    各管各的，用错开关那一半照样拒绝。
+    """
+    repo = _repo(tmp_path)
+    locks = tmp_path / "locks"
+    _foreign_in_worktree(repo)
+
+    assert _safe(repo, locks, "--files", DOC, "--declare").returncode == 0
+    proc = _safe(
+        repo, locks, "--files", DOC, "--message-file", str(_msg(tmp_path)),
+        "--allow-foreign-drift", "写的是声明后漂移（用错了开关）",
+    )
+    out = proc.stdout + proc.stderr
+    assert proc.returncode == 8, out
+    assert "声明前已经在工作区的他线改动会被带入本笔" in out, out
+    assert _git(repo, "rev-list", "--count", "HEAD").stdout.strip() == "1"
 
 
 def test_exclude_hunk_keeps_block_out(tmp_path):

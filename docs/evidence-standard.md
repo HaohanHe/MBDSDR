@@ -742,8 +742,10 @@ python <tmp>/vc.py --root <repo> --docs <tmp>/docs
    `--exclude-hunk docs/COORDINATION.md:2051-2053`（`-U0` **新侧**行号，可只排 hunk
    内的几行；含删除行的 hunk 只能整块声明）。被排除的每个 `+/-` 行都在 blob 里
    逐字比对，对不上就拒绝——不要为了能用工具去挪行、改时间序。
-3. **确实要一起带走，用 `--allow-foreign-changes "<理由>"`**：理由与逐文件增删
-   行数会写进提交说明的 `foreign-changes:` 段，事后可查。
+3. **确实要一起带走，用 `--allow-foreign-drift "<理由>"`（⑰ 声明后漂移）或
+   `--allow-foreign-before-declare "<理由>"`（㉑ 声明前他线块）**：两个豁免各管
+   一道闸，理由不许共用。理由与逐文件增删行数会写进提交说明的 `foreign-changes:`
+   / `foreign-before-declare:` 段，事后可查。
 4. **查不到凭据就写「无凭据」**：说明或记录里明写「这几行归属无凭据（原因：
    当时未记录 claim / 时间点不可复跑）」，按 E3 处理；**不许**写成「已验证归属」。
    宁可留一个诚实的空缺，不要造一份看起来完整的归属。
@@ -872,7 +874,8 @@ owner / pid / token，没有 `issued_by`、没有命令行、没有 session。�
 2. 本笔要用的 **§6.1 行已在 HEAD**。行还躺在工作区时，只有 `safe_commit` 的 2c
    会把它带进本笔；裸提交会让它继续挂着（`423ac262`/`31afa759` 的 6 行就是这样被
    别的线顺手带走的）。
-3. 本笔没有意图删除、没有 `--allow-foreign-changes` 这类需要留痕的例外。
+3. 本笔没有意图删除、没有 `--allow-foreign-drift` / `--allow-foreign-before-declare`
+   这类需要留痕的例外。
 4. 消息末尾**手写** `claim-line: <线名>`；owner 形如 `线名/会话短号` 时只写斜杠前
    的线名，与审计的归一口径一致（`scripts/claim_window.py` 的 `line_name`）。
 
@@ -966,7 +969,7 @@ python scripts/audit_bare_commits.py --trend-report     # 按判据版本看比�
 
 - 11.3-① 后半：他线在途 hunk 是否被带入（要 `--declare` 快照，历史提交没留）；
 - 11.3-②：本笔要用的 §6.1 行是否已在 HEAD（哪几行「属于本笔」无法机读）；
-- 11.3-③ 后半：`--allow-foreign-changes` / 有意删除这类留痕例外。
+- 11.3-③ 后半：`--allow-foreign-drift` / `--allow-foreign-before-declare` / 有意删除这类留痕例外。
 
 两处例外要一并记住：协调文档自身在 ① 里**豁免**（它是登记面，走 §6.1 窄锁
 写行，与 pre-commit 的 `self_key` 同一例外）；台账不存在时 ①/④ 报「未审计」，
