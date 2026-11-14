@@ -281,3 +281,65 @@ def test_panel_fits_small_screen_and_apply_stays_reachable(qapp):
         assert panel.search_edit.isVisible() and panel.result_list.isVisible()
     finally:
         panel.close()
+
+
+class _GatedWorker:
+    """只提供 isRunning()：模拟「上一轮搜索还在跑」。"""
+
+    def __init__(self, running=True):
+        self.running = running
+
+    def isRunning(self):
+        return self.running
+
+
+def test_new_query_while_searching_is_queued_not_dropped(qapp):
+    """异步搜索在途时再提交：新关键词排队，提示写明这次还没搜，结束后真的搜。
+
+    实测缺陷（2026-11-14）：`_do_search` 在 worker 未结束时直接 return，
+    用户新输入的关键词静默消失，回来的结果还是旧词的，输入框却已是新词。
+    """
+    from location_panel import LocationPanel
+    prov = _FakeProvider([])
+    panel = LocationPanel(None, provider=prov, async_search=True,
+                          map_online=False)
+    started = []
+    panel._run_search = lambda p, q: started.append((p, q))
+    try:
+        panel._worker = _GatedWorker(running=True)
+        panel.search_edit.setText("上海")
+        panel._do_search()
+
+        # ① 不并发起第二次搜索（一根棒子一个请求）
+        assert prov.calls == []
+        # ② 新关键词被保留，不是静默丢
+        assert panel._queued_query == "上海"
+        # ③ 用户看得见「这次还没搜」，而不是把旧结果当新词答案
+        hint = panel.hint.text()
+        assert "还在进行" in hint and "上海" in hint, hint
+
+        # ④ 上一轮结束后，排队的关键词必须真的去搜（不是只记一笔）
+        panel._worker.running = False
+        panel._on_search_done([])
+        assert started and started[0][1] == "上海", (
+            f"上一轮结束后没有开始排队的那次搜索：{started}")
+        assert panel._queued_query is None
+    finally:
+        panel._worker = None
+        panel.close()
+
+
+def test_normal_search_clears_stale_queue(qapp):
+    """没有在途搜索时，新搜索直接执行并把残留队列清掉（不重复搜旧词）。"""
+    from location_panel import LocationPanel
+    prov = _FakeProvider([])
+    panel = LocationPanel(None, provider=prov, async_search=False,
+                          map_online=False)
+    try:
+        panel._queued_query = "旧词"
+        panel.search_edit.setText("北京")
+        panel._do_search()
+        assert prov.calls == ["北京"]
+        assert panel._queued_query is None
+    finally:
+        panel.close()

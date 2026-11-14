@@ -2261,6 +2261,9 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `tests/test_hw_acceptance_r5_evidence.py` | 时空核对线/timeline-now（R5 快照齐全 + 复算一致两层判据与反证） | 2026-11-14 10:29 | 本笔 |
 | `docs/known-red-register.md` | 公理体检线/6ae85f56（K24 补转绿条件，让 D5 归零） | 2026-11-14 10:53 | 本笔 |
 | `docs/learn/2026-11-13-reference-porting-shortlist.md` | 参考移植线/20261114（第11/12节：4项核实结论（U1不采纳/U2差额/U3缺呈现/U4有绕行）+ 第二批候选2条） | 2026-11-14 10:56 | 本笔 |
+| `desktop/location_panel.py` | S1-S4结果伪造线/6ae85f56（静默丢弃：异步搜索在途时新关键词改为排队（提示写明「这次还没搜」），上一轮结束后接着真搜） | 2026-11-14 10:58 | 本笔 |
+| `tests/test_location_panel.py` | S1-S4结果伪造线/6ae85f56（判据：在途搜索时新词排队/提示可见/结束后真搜/无在途时清残留队列 + 反证） | 2026-11-14 10:58 | 本笔 |
+| `docs/COORDINATION.md` | S1-S4结果伪造线/6ae85f56（本笔 §6.1 登记行，提交后释放） | 2026-11-14 10:58 | 本笔 |
 | `desktop/ntrip_panel.py` | UI防呆线/6ae85f56（E1: NTRIP 拉取结果改信号回主线程，修按钮永久停在拉取中） | 2026-11-14 10:58 | 本笔 |
 | `tests/test_ntrip_panel.py` | UI防呆线/6ae85f56（E1: 补拉取收尾两条守卫用例（成功/失败按钮恢复）） | 2026-11-14 10:58 | 本笔 |
 

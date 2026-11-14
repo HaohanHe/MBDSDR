@@ -129,6 +129,8 @@ class LocationPanel(QFrame):
         self._map_online = bool(map_online)
         self._map_cache = map_cache
         self._worker: Optional[_SearchWorker] = None
+        # 上一轮还在跑时用户又提交的关键词：排队等它结束后接着搜，绝不静默丢
+        self._queued_query: Optional[str] = None
         self._results: List[object] = []
         self._pending = None          # 待确认的 Place
         self._current: Optional[tuple] = None   # 已生效站址（只读回显）
@@ -594,9 +596,18 @@ class LocationPanel(QFrame):
 
         self.search_btn.setEnabled(False)
         self._set_hint("搜索中…")
+        if self._async_search and self._worker is not None \
+                and self._worker.isRunning():
+            # 上一轮还没回来：新关键词不能静默丢。记下来等它结束再搜，
+            # 并在提示里写明「这次还没搜」，避免把旧结果当新词的答案。
+            self._queued_query = q
+            self._set_hint(f"上一次搜索还在进行；结束后自动搜索「{q}」")
+            return
+        self._queued_query = None
+        self._run_search(prov, q)
+
+    def _run_search(self, prov, q: str) -> None:
         if self._async_search:
-            if self._worker is not None and self._worker.isRunning():
-                return
             self._worker = _SearchWorker(prov, q, self)
             self._worker.done.connect(self._on_search_done)
             self._worker.start()
@@ -606,6 +617,21 @@ class LocationPanel(QFrame):
             except Exception:  # noqa: BLE001
                 hits = None
             self._on_search_done(hits)
+
+    def _start_queued_search(self) -> None:
+        """上一轮结束后，把期间排队的关键词真正搜出来（不是只记一笔）。"""
+        q = self._queued_query
+        if not q:
+            return
+        self._queued_query = None
+        prov = self._provider_or_none()
+        if prov is None:
+            self._set_hint("地点检索不可用：直接在地图上点，或在设置里手填经纬度",
+                           error=True)
+            return
+        self.search_btn.setEnabled(False)
+        self._set_hint(f"搜索中…（「{q}」）")
+        self._run_search(prov, q)
 
     def _show_list_hint(self, text: str) -> None:
         """列表空态：一条不可选的灰字提示（不是假结果）。"""
@@ -625,12 +651,14 @@ class LocationPanel(QFrame):
             self._set_hint(
                 "搜索失败：可能没网或被限流。可直接在地图上点，或手填经纬度",
                 error=True)
+            self._start_queued_search()
             return
         if not hits:
             item = QListWidgetItem("没有匹配的地名（换个写法试试，或直接点地图）")
             item.setFlags(Qt.NoItemFlags)
             self.result_list.addItem(item)
             self._set_hint("没有匹配。可直接在地图上点。", error=True)
+            self._start_queued_search()
             return
         for p in hits:
             extra = f"  ·  {p.detail}" if getattr(p, "detail", "") else ""
@@ -638,6 +666,7 @@ class LocationPanel(QFrame):
             it.setData(Qt.UserRole, p)
             self.result_list.addItem(it)
         self._set_hint(f"找到 {len(hits)} 个结果，点一条选中")
+        self._start_queued_search()
 
     # ------------------------------------------------------------- 选择
     def _on_item(self, item: QListWidgetItem) -> None:
