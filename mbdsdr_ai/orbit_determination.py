@@ -952,9 +952,13 @@ def doppler_orbit_determine(observations: List[Tuple[float, float]],
     if init_P is None:
         # 默认先验与"初值来自 TLE 传播"相称（TLE 位置误差为公里级）：
         # 位置 σ=30 km、速度 σ=30 m/s、钟差项 σ=30/C · s。
+        # 量纲是 km / km/s（ECEF 内部单位）：位置 30（km）不是 30e3，
+        # 速度 0.03（km/s）不是 30。写成 30e3/30 会让先验比观测宽 3 个量级，
+        # 一次观测就能把状态拉出轨道（实测 20s 内半径 6737→5539 km）。
         # 之前取 10 m 位置先验，比观测还"自信"，会把 RLS 拉离 TLE 先验并锁到
         # 多普勒不可观测的方向上（材料数据集上表现为位置偏 2.5e6 km）。
-        init_P = np.diag([30e3 ** 2] * 3 + [30.0 ** 2] * 3 + [(30.0 / C_LIGHT_KMS) ** 2])
+        init_P = np.diag([30.0 ** 2] * 3 + [0.03 ** 2] * 3
+                         + [(0.03 / C_LIGHT_KMS) ** 2])
     # 测量噪声（**m/s**，与观测模型输出量纲一致）：
     # 可显式给定；否则按"频移 σ=10Hz"折算。
     if observation_sigma_mps is None:
