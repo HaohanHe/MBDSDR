@@ -902,3 +902,44 @@ owner / pid / token，没有 `issued_by`、没有命令行、没有 session。�
 - 裸提交却要带共享文件、或把工作区的 §6.1 行留在外面——这时应走 `safe_commit`
   （2c 带行，⑰ 拦漂移）。
 
+### 11.7 机检边界：`scripts/audit_bare_commits.py`（2026-11-14）
+
+11.3 的四条前提写在文档里不等于被检查。裸提交没有工具位置（跑的就是
+pre-commit，钩子里没有「这笔是裸提交」的标记），所以做成**事后区间审计**：
+
+```
+python scripts/audit_bare_commits.py                    # 规则生效以来
+python scripts/audit_bare_commits.py --range A..B       # 指定区间
+python scripts/audit_bare_commits.py --json --quiet     # 机器可读 / 只给计数
+```
+
+**只报告，不拦截，退出码恒 0。** 拦提交是 pre-commit 的事，这条入口的用途是
+让缺口被看见，不是把提交挡在门外。
+
+**覆盖范围先说清楚：本工具不判断某笔是不是裸提交。** 没有可机读的标记区分
+裸提交与 `safe_commit`（私有 index、声明快照都不落库），所以「裸提交」这件事
+本身在本工具覆盖范围之外；能机检的只有下面三项。
+
+| 项 | 判据 | 实现 |
+| --- | --- | --- |
+| ① 文件集被本线活跃 claim 覆盖 | 按台账时间窗逐路径判断，**不看 §6.1 行**；消息里的 `claim-line` 用来认「本线」，写了他线的 claim 也算违规 | `audit_claim_lines.load_intervals` + `classify` |
+| ③ 只许追加的文件被删行 | 协调文档按 §6.1 表格行比较（剥离线末释放标记），删行/改写/整档删除都违规，**不管有没有 claim** | `check_coordination_append_only.removed_rows` |
+| ④ 消息末尾手写 `claim-line` 且与台账一致 | 分桶复用审计脚本；规则生效前的「有 claim 无行」不计缺口 | `audit_claim_lines.classify` |
+
+以下明确**不覆盖**，输出里逐条打印「本项机检不覆盖，需人工复核」：
+
+- 11.3-① 后半：他线在途 hunk 是否被带入（要 `--declare` 快照，历史提交没留）；
+- 11.3-②：本笔要用的 §6.1 行是否已在 HEAD（哪几行「属于本笔」无法机读）；
+- 11.3-③ 后半：`--allow-foreign-changes` / 有意删除这类留痕例外。
+
+两处例外要一并记住：协调文档自身在 ① 里**豁免**（它是登记面，走 §6.1 窄锁
+写行，与 pre-commit 的 `self_key` 同一例外）；台账不存在时 ①/④ 报「未审计」，
+不报「0 违规」——空白不是清白。
+
+判据与反证：`tests/test_bare_commit_audit.py` 构造全满足 / 文件集不全 / 缺行 /
+有删除四笔，必须分别落到 ①/④/③；把「缺行」改成合规，该测试必须红（已实测
+两处断言变红）。本仓规则生效以来跑一次的结果：① 1 笔（`87b3a36d` 的
+`tests/test_goes_lrit_reassembly_stats.py`、`tests/test_status_panel_reassembly_quality.py`
+当时无 claim）、④ 2 笔（即 11.5 的两笔缺口）、③ 0 笔。① 的那笔是本次新发现的，
+不追溯改写，只记在这里。
+

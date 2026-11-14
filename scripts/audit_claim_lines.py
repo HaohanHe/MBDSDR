@@ -105,23 +105,29 @@ def _git(*args: str) -> str:
     return proc.stdout
 
 
-def _norm(path: str) -> str:
+def norm_path(path: str) -> str:
+    """路径比较键。审计脚本共用这一处，别各写一份大小写/斜杠口径。"""
     text = str(path).strip().replace("\\", "/").lower()
     while text.startswith("./"):
         text = text[2:]
     return text
 
 
-def load_commits(rev: str) -> List[Dict[str, Any]]:
-    """sha / 提交时刻 / 说明 / 本笔改动路径（新→旧）。"""
-    raw = _git("-c", "core.quotepath=false", "log", rev, "--no-merges", "--no-renames",
-               "--format=%x1e%H%x1f%ct%x1f%B%x1d", "--name-only")
+def load_commits(rev: "str | List[str]") -> List[Dict[str, Any]]:
+    """sha / 提交时刻 / 说明 / 本笔改动路径（新→旧）。
+
+    ``rev`` 接受单个范围（``HEAD``、``A..B``）或参数列表（如追加
+    ``--since=``/``--until=``），两种情况共用同一个 ``git log`` 解析。
+    """
+    extra = [rev] if isinstance(rev, str) else list(rev)
+    raw = _git("-c", "core.quotepath=false", "log", *extra, "--no-merges",
+               "--no-renames", "--format=%x1e%H%x1f%ct%x1f%B%x1d", "--name-only")
     commits: List[Dict[str, Any]] = []
     for chunk in raw.split("\x1e")[1:]:
         head, _, tail = chunk.partition("\x1d")
         sha, _, rest = head.partition("\x1f")
         stamp, _, message = rest.partition("\x1f")
-        paths = [_norm(p) for p in tail.strip().splitlines() if p.strip()]
+        paths = [norm_path(p) for p in tail.strip().splitlines() if p.strip()]
         try:
             ct = float(stamp)
         except ValueError:
@@ -147,7 +153,7 @@ def load_intervals(registry: Path) -> Dict[str, List[Dict[str, Any]]]:
     for key, entry in (data.get("claims") or {}).items():
         if not isinstance(entry, dict):
             continue
-        path = _norm(entry.get("path") or key)
+        path = norm_path(entry.get("path") or key)
         current = entry.get("current") if isinstance(entry.get("current"), dict) else {}
         try:
             ttl_s = float(current.get("ttl_min") or DEFAULT_TTL_MIN) * 60.0
