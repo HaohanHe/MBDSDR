@@ -816,3 +816,89 @@ owner / pid / token，没有 `issued_by`、没有命令行、没有 session。�
 哪些字节」。三者的共同结论只有一句：**把不属于本笔的字节带进来，任何一层都
 补不回来。** 判据写在这里，`scripts/safe_commit.py` 的模块文档只指路、不复述。
 
+## 11. 裸 `git commit`：什么时候允许、归属怎么留（2026-11-14）
+
+> 起因：`claim-line` 生效后头 10 笔里有 2 笔缺口——`31afa759`（11:21:45，4 路径）
+> 与 `423ac262`（11:22:04，2 路径），owner 同为 `无线电课清单线/6ae85f56`。
+> 本节是这 2 笔的调查结论与由此定下的裸提交边界；**结论是个别线绕过，不是工具
+> 漏了**，因此不逼所有线改道，只把「什么条件下可以不走 `safe_commit`」写死。
+
+### 11.1 四种可能，逐条给证据
+
+| # | 可能 | 结论 | 证据 |
+| --- | --- | --- | --- |
+| 1 | 没走 `safe_commit`（裸 `git commit`） | **成立** | 见 11.2 的三条 |
+| 2 | 走了但身份与 owner 不逐字相等 | 不成立 | `scripts/claim_gate.py:387` 只在 `me == owner` 时放行；身份为空或不等一律 `blocked` 并写 `.locks/rejected.log`。同一线 11:08:38 对 `docs/learn/nanovna/vna-workflow.md` 的尝试就是 `identity=""` 被拒（自己持有也照拒）。这两个时点 `rejected.log` 无记录，说明身份就是台账原文 `无线电课清单线/6ae85f56` |
+| 3 | 读占位文件时 claim 已释放 / 还没生效 | 不成立 | 六段 claim 时间窗都包住各自提交时刻，且都在提交后 26–27 秒才释放（见 11.5）；TTL 20 分钟，最长一段只用掉 15 分钟 |
+| 4 | 人已手写 `claim-line` | 不成立 | 两笔消息里 `claim-line` 出现 0 次（`git log -1 --format=%B`） |
+
+### 11.2 为什么排除「工具漏了」
+
+1. **走 `safe_commit` 就必然带 §6.1 行。** 2c 会在工作区里找到覆盖本笔的登记行写进
+   私有 index（`scripts/safe_commit.py:1578`）；而这两笔的 `--name-status` 只有代码
+   与测试文件，**没有 `docs/COORDINATION.md`**。对应的 6 条登记行是 11:25:09 的
+   `11588844` 才落库（`git blame -L 2331,2336`）。走工具就不可能不带行，带了就不可能
+   在 `--name-status` 里消失。
+2. **同一窗口工具是好的。** 规则生效后 14 笔里 12 笔有 `claim-line`，其中
+   `5b0755b2`、`3e6ce34a` 写的是带会话后缀的完整 owner（`时空核对线/timeline-now`），
+   `87b3a36d` 写 `参考移植线`——线名归一与逐字读取都正常，不存在「只对这条线失灵」
+   的代码路径。
+3. **两笔不是 `--no-verify`。** pre-commit 的 ④ 在 11:21:47、11:22:06 各记了一条
+   `rc=0`（`.locks/coord_check_trend.jsonl`），闸门标记也被 post-commit 正常消费
+   （`scripts/hooks/post-commit:540`）；`git_hook_bypass.log` 与
+   `unaudited_commits.log` 都没有这两笔。
+
+三条合起来：**钩子全程在跑、身份逐字正确、claim 全部活跃，唯独没有 `claim-line`**
+——唯一解释是提交命令没经过 `safe_commit`，而该行只由它追加
+（`scripts/safe_commit.py:969`）。
+
+### 11.3 允许裸 `git commit` 的条件（四条全满足）
+
+1. 本笔路径全部由本线**当前活跃 claim** 持有，且**没有他线在途 hunk**。有在途
+   hunk 就要 `--exclude-hunk`，而它必须先 `--declare`（⑳，退出码 7）——这条路
+   只能走 `safe_commit`。
+2. 本笔要用的 **§6.1 行已在 HEAD**。行还躺在工作区时，只有 `safe_commit` 的 2c
+   会把它带进本笔；裸提交会让它继续挂着（`423ac262`/`31afa759` 的 6 行就是这样被
+   别的线顺手带走的）。
+3. 本笔没有意图删除、没有 `--allow-foreign-changes` 这类需要留痕的例外。
+4. 消息末尾**手写** `claim-line: <线名>`；owner 形如 `线名/会话短号` 时只写斜杠前
+   的线名，与审计的归一口径一致（`scripts/claim_window.py` 的 `line_name`）。
+
+裸提交仍然要过 pre-commit 五道闸，身份仍须 `MBDSDR_CLAIM_OWNER` 与台账 owner
+**逐字相等**——「裸」只是不借助私有 index / 声明快照，不是绕过闸门。
+
+### 11.4 裸提交怎么留下归属
+
+- **行由人写，工具不代签。** `_claim_line_trailer` 只复述提交者此刻真实持有的
+  claim（`scripts/safe_commit.py:942-997`）；没有 claim 就不写，「不写」本身是信号。
+- **审计按行归线、按规则时点分段。** `scripts/audit_claim_lines.py`：生效前的
+  「有 claim 无行」是正常空白，不计数；生效后的同样是**缺口**，单独计数，两段
+  各用各的分母，不相加。
+- **不能事后回填。** 历史提交不可变，缺口只计数、不改写；`--amend`/`rebase` 补行会
+  换掉 SHA，让已有的审计引用全部失效——缺口的正确处置是记下来，不是美化。
+- **裸提交没有内容级证据。** 没有声明快照、也没有私有消息副本，事后可复核的只有
+  三样：claim 时间窗、提交文件集、消息里的 `claim-line`。按 §8 的口径，不得因此
+  声称「归属已确认」。
+
+### 11.5 本次两笔的 claim 时间窗（判据 3 的数据）
+
+| 提交 | 路径 | claim 窗口 | 提交时刻在窗内 |
+| --- | --- | --- | --- |
+| `31afa759` | `mbdsdr_ai/sat_passes.py` | 11:06:23.372 → 11:22:30.741 | 是 |
+| `31afa759` | `mbdsdr_ai/satnogs_adapter.py` | 11:06:23.836 → 11:22:30.977 | 是 |
+| `31afa759` | `tests/test_doppler_single_source.py` | 11:06:24.852 → 11:22:31.453 | 是 |
+| `31afa759` | `mbdsdr_ai/gpredict_adapter.py` | 11:13:32.520 → 11:22:31.239 | 是 |
+| `423ac262` | `mbdsdr_ai/orbit_determination.py` | 11:21:22.533 → 11:22:31.651 | 是 |
+| `423ac262` | `tests/test_orbit_determination_chain.py` | 11:06:25.231 → 11:22:31.879 | 是 |
+
+两笔记为**缺口**（有 claim、无行、不是工具漏），不追溯改写；该线后续提交要么
+按 11.3 手写 `claim-line`，要么改走 `safe_commit`。
+
+### 11.6 反例（出现即不合规）
+
+- 「反正有 claim，行可以不写」——生效后就是缺口，审计会数。
+- 用 §6.1 行代替 `claim-line`——行是台账投影（§9），不能当第二份凭据。
+- 为了让审计变绿去改历史提交——SHA 变了，引用全失效。
+- 裸提交却要带共享文件、或把工作区的 §6.1 行留在外面——这时应走 `safe_commit`
+  （2c 带行，⑰ 拦漂移）。
+
