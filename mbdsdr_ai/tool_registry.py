@@ -40,8 +40,9 @@ from .tool_results import ToolResult, clean_exc, numeric_array
 # 同一份 PRE 判据、RESULT 字段与触发者标注，禁止在这里再写第二套。
 from .hook_commands import HookCommandRunner
 from .hooks import HookManager
-from .tool_guard import (TRIGGER_MODEL, TRIGGER_USER, emit_pre_tool_use,
-                         emit_tool_result, normalize_trigger)
+from .tool_guard import (TRIGGER_MODEL, TRIGGER_USER, attach_audit_log,
+                         emit_pre_tool_use, emit_tool_result,
+                         normalize_trigger)
 
 
 def hex_bytes(args: Dict[str, Any], key: str):
@@ -426,6 +427,12 @@ class ToolRegistry:
         self.hook_commands = (hook_commands if hook_commands is not None
                               else HookCommandRunner())
         self.guard_source = guard_source
+        # 留痕必须落盘：只发进程内事件等于没留痕（没有观测者，磁盘上什么都
+        # 没有）。这里按 MBDSDR_AUDIT_LOG 自动挂审计观测者，落点与 MCP 面
+        # 相同（~/.mbdsdr/audit.jsonl）；未设环境变量则不挂（测试/CI 无副作用）。
+        # 挂在注册表而不是某个 UI 入口：任何 ``ToolRegistry()`` 调用方（含天气
+        # 面板）自动获得留痕，不会因为漏接而静默丢记录。
+        self.audit_log = attach_audit_log(self.hooks)
         # Sprint 5：并发执行（parallel_safe 工具走 ThreadPoolExecutor）时，多
         # worker 会同时 _log_call 写 call_log——append 虽 GIL 原子，但「超长即
         # 重切片赋值」是读改写复合操作，裸跑会丢条目/瞬态不一致。用锁串行化这一

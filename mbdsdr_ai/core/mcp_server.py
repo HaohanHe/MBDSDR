@@ -20,7 +20,7 @@ MBDSDR Core - MCP / JSON-RPC 2.0 接口
 server。连接动作起子进程/发网络请求，写工具走外部确认 token 门
 （模型自报 ``arm_manual`` 不构成确认）。
 
-本文件纯标准库（json / sys / os / threading / datetime）+ 同包纯标准库
+本文件纯标准库（json / sys / os / datetime）+ 同包纯标准库
 客户端模块（mcp_client），绝不 import PySide6/Qt。
 """
 
@@ -29,7 +29,6 @@ from __future__ import annotations
 import json
 import os
 import sys
-import threading
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional
 
@@ -38,11 +37,14 @@ from .controller import SDRController
 from .errors import (ExportPathOutOfRootError, InvalidArgumentError,
                      SDRUserError)
 from ..questions import QuestionError, QuestionStore
-from ..hooks import Event, HookManager
+from ..hooks import HookManager
 from ..version import __version__
 from ..hook_commands import HookCommandRunner
-from ..tool_guard import (TRIGGER_MODEL, emit_pre_tool_use, emit_tool_result,
-                          result_summary)
+from ..tool_guard import (TRIGGER_MODEL, attach_audit_log, emit_pre_tool_use,
+                          emit_tool_result, result_summary)
+from ..tool_guard import AUDIT_LOG_DEFAULT as _AUDIT_LOG_DEFAULT
+from ..tool_guard import AUDIT_LOG_ENV as _AUDIT_LOG_ENV
+from ..tool_guard import AuditLog as _AuditLog
 from ..error_catalog import suggestion, user_message
 from ..tool_policy import ToolPolicy, normalize_key
 from ..mcp_client import MCPClientManager
@@ -1680,65 +1682,16 @@ def _result_summary(name: str, result: Any) -> Dict[str, Any]:
 # ======================================================================
 # 持久审计账本（AI 操作员可追溯性）
 # ======================================================================
+# 实现在 :mod:`mbdsdr_ai.tool_guard`（进程内面与 MCP 面共用一份，落点不做
+# 第二处）；此处重导出，既有 `from ...mcp_server import AuditLog` 调用点不变。
 #: 审计账本开关：设为 JSONL 文件路径即开启；空串/未设则关闭（库内构造与
 #: 测试默认无副作用，与 MBDSDR_HOOKS_CONFIG 同 pattern）。
-AUDIT_LOG_ENV = "MBDSDR_AUDIT_LOG"
+AUDIT_LOG_ENV = _AUDIT_LOG_ENV
 
 #: 操作员手动开启时的默认账本位置（~/.mbdsdr/ 已是 hooks.json 的家）。
-AUDIT_LOG_DEFAULT = os.path.join(os.path.expanduser("~"), ".mbdsdr", "audit.jsonl")
+AUDIT_LOG_DEFAULT = _AUDIT_LOG_DEFAULT
 
-
-class AuditLog:
-    """工具调用事件的持久 JSONL 审计账本。
-
-    进程内 ``HookManager._history`` 重启即丢；"AI 操作员"叙事要求
-    "谁/何时/对哪个工具/结果如何"可回溯。本类以通配符钩子挂在
-    ``MCPToolSet.hooks`` 上，把 AGENT_PRE_TOOL_USE / AGENT_TOOL_RESULT
-    事件按行追加到 JSONL（两事件都经 ``HookManager.trigger``，通配符
-    钩子必然收到）。
-
-    口径与事件总线一致：只落事件信封（tool / arguments / ok / outcome
-    摘要），长结果不重复落盘（spill 路径已有全文）。任何 IO 失败只记
-    stderr 并放行——审计面绝不当工具链的单点故障源。
-    """
-
-    def __init__(self, path: Optional[str] = None) -> None:
-        self.path = path if path is not None else AUDIT_LOG_DEFAULT
-        self._lock = threading.Lock()
-        self._dir_ready = False
-
-    @classmethod
-    def from_env(cls, env: Optional[Dict[str, str]] = None,
-                 default_on: bool = False) -> Optional["AuditLog"]:
-        """按 MBDSDR_AUDIT_LOG 构造账本。
-
-        ``default_on=False``（库内构造默认）：未设/空串 -> None（关闭），
-        测试与 CI 无副作用。``default_on=True``（产品入口
-        :func:`run_mcp_server`）：未设 -> 默认路径 ``~/.mbdsdr/audit.jsonl``
-        （与 ``tool_results`` spill 落盘同惯例）；显式 ``off``/``0`` 可关。
-        """
-        env = os.environ if env is None else env
-        raw = (env.get(AUDIT_LOG_ENV) or "").strip()
-        if raw:
-            if raw.lower() in ("off", "0", "none", "false"):
-                return None
-            return cls(raw)
-        return cls() if default_on else None
-
-    def record(self, event: Event) -> None:
-        """钩子回调：追加一行 JSONL。绝不抛异常（Hook.trigger 已兜底）。"""
-        try:
-            line = json.dumps(event.to_dict(), ensure_ascii=False)
-            with self._lock:
-                if not self._dir_ready:
-                    parent = os.path.dirname(os.path.abspath(self.path))
-                    if parent:
-                        os.makedirs(parent, exist_ok=True)
-                    self._dir_ready = True
-                with open(self.path, "a", encoding="utf-8") as f:
-                    f.write(line + "\n")
-        except Exception as e:  # pragma: no cover - 审计失败不阻断工具流
-            print(f"[mcp] 审计账本写入失败（忽略）: {e}", file=sys.stderr)
+AuditLog = _AuditLog
 
 
 # ======================================================================
@@ -1782,11 +1735,9 @@ class ToolCallGate:
         # 事件钩子（AGENT_PRE_TOOL_USE 可否决；本进程独立实例）
         self.hooks = HookManager()
         # 持久审计账本：显式注入 > MBDSDR_AUDIT_LOG 环境变量 > 关闭。
-        # 通配符钩子只读观测，钩子异常已被 Hook.trigger 兜底。
-        self.audit_log = audit_log if audit_log is not None else AuditLog.from_env()
-        if self.audit_log is not None:
-            self.hooks.register("*", self.audit_log.record,
-                                description="JSONL 持久审计账本（只读观测）")
+        # 挂载函数与进程内面共用（tool_guard.attach_audit_log），只读观测，
+        # 钩子异常已被 Hook.trigger 兜底。
+        self.audit_log = attach_audit_log(self.hooks, audit_log)
         # 外部命令 hooks（配置驱动；无注入时默认构造，配置缺失则空转）
         self.hook_commands = (hook_commands if hook_commands is not None
                               else HookCommandRunner())

@@ -38,6 +38,10 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from mbdsdr_ai.version import __version__ as _app_version  # noqa: E402
+from mbdsdr_ai.tool_guard import (  # noqa: E402
+    AUDIT_LOG_DEFAULT as _AUDIT_LOG_DEFAULT,
+    AUDIT_LOG_ENV as _AUDIT_LOG_ENV,
+)
 
 _STARTUP_LOG_NAME = "mbdsdr_startup.log"
 
@@ -932,6 +936,13 @@ def _import_main_window(splash=None):
 def main():
     # pythonw.exe 无控制台：必须在任何 print / argparse --help 之前兜底 stdio
     _ensure_stdio_for_pythonw()
+
+    # 审计账本：桌面端与 MCP 服务端同为产品入口，默认开启，落点相同
+    # （~/.mbdsdr/audit.jsonl）。天气面板等处是 UI 直点工具（trigger=user），
+    # 只发进程内事件、不落盘就等于没留痕；ToolRegistry 构造时按这个环境
+    # 变量挂观测者，所以必须在建窗口之前设好。显式 off/0/false 可关。
+    if not (os.environ.get(_AUDIT_LOG_ENV) or "").strip():
+        os.environ[_AUDIT_LOG_ENV] = _AUDIT_LOG_DEFAULT
 
     parser = argparse.ArgumentParser(description="MBDSDR - AI 定义无线电桌面端")
     parser.add_argument("--host", type=str, default=None, help="设备 IP 地址")
