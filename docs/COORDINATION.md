@@ -5472,3 +5472,112 @@ index 带走。
 
 
 
+---
+
+## 收工登记（2026-11-14，本线单线）
+
+**当前在途**：无。并行会话收工，工作区 4.5 小时无写入后开始本轮整合。
+本线不代推对方提交、不改对方在途文件；对方在途的 15 个改动与 4 份研究资料
+经逐字核对后由本线收编入库。
+
+**主线指针**（git 只读事实，写本段时的取值）：
+
+```
+origin/main   eb2df990   docs(claims): 登记 K26 已知红 + code-guards 补真实四元组
+main          eb2df990   （本地 main 已同步）
+工作区        0 项改动，分支 main
+```
+
+推送为 fast-forward：起点是 11-11 的远端旧快照，共 1567 个提交、
+1374 个文件（+236922 / -8968 行）一次同步。远端此前长期落后，本轮消除。
+
+**三条成果线的合入方式**：基于 wip 线末端提交（hash 见上方只读事实段的起点说明）建独立 worktree
+逐笔 cherry-pick，不在主工作区抢文件。冲突裁决按「审计护栏 > 性能」：
+
+- `self_learning.py`：整份保留 wip 版（损坏文件隔离 / 禁写路径 / 竞态处理共
+  15 处护栏），历史快照缓存的收益只由 `file_tracker` 承担。整合后
+  Agent 热构造中位 2314ms → 234ms，比独立分支的 140ms 少一截，代价如实记。
+- `decoders.py`：wip 线已自行删掉内联 TEME→ECEF 段，取 HEAD；
+  `orbit.py` 的 import 区合并两边。
+- `gmst.py` 口径表按整合后实际文件重列（`decoders` 内联已不存在，
+  工具数 496 → 497 是 wip 线自己新增）。
+
+**claims 闸门的三条红**：在 wip 线末端提交的干净 worktree 上单跑同一用例复现，
+归类为 11-14 台账批次的存量。`code-guards.md` 补真实四元组；
+`COORDINATION.md` §6.1 两行受「只增」规则保护，不能行内改写，
+改走 `docs/known-red-register.md` 的 K26 登记出口，真实证据写在 K26 正文。
+没有新增白名单、没有放宽判据、没有绕过 pre-commit。
+
+**验证记录**（命令与实际输出）：
+
+```
+python scripts/verify_readme.py --json          -> ok=true, total=0
+python scripts/repro_readme_offline.py         -> 6/6 按预期（真机自检 rc=1 为设计行为）
+python -m pytest tests/test_claims_guard.py -q -> 7 passed
+三条分支钉扎合跑                               -> 26 passed
+python scripts/bench_agent_startup.py --repeat 6
+    cold 4462 -> 2902 ms；warm median 2314 -> 234 ms
+python -m pytest tests -q --tb=line            -> [见下方最终全量段]
+```
+
+**队列（沿用用户 11-10 口述顺序，不颠倒）**
+
+1. UI / 稳定性 / 性能继续过：窄栏频谱工具栏、右栏输入框溢出、
+   星象仪 150° 中心标签偏密 —— 待用户在真机或截图上复核。
+2. 权威桌面全量：本段下方补记。
+3. 待验：OSM 离线下载完整跑一次、高 DPI 真机触屏。
+4. 用户真实书签 `~/.mbdsdr/bookmarks.json` 曾被历史 dry-call 探针写脏到
+   1095 字节（4 条探针书签）。隔离缺陷在本线修掉，按个人文件安全规矩
+   未擅自清理，需用户确认才动。
+
+## 最终权威全量补记（not_verified）
+
+**结论：本轮拿不到可对外使用的权威全量数字，标 `not_verified`。** 四轮
+`pytest tests -q --tb=line -p no:cacheprovider` 全部中途终止，日志在
+`D:/mbdsdr/output/`（仓库外）：
+
+```
+_final_authoritative.log   9%   rc=127   无汇总
+_final_v3.log             49%  rc=139   Windows fatal exception: access violation
+_final_v4.log             49%  rc=3     Fatal Python error: Aborted
+_final_v5.log             49%  rc=3     Fatal Python error: Aborted
+```
+
+后三轮**精确崩在同一个用例**：收集序第 3961 条
+`tests/test_new_spacetime_panel.py::test_next_pass_countdown_matches_earliest_rise`。
+单跑 `test_new_spacetime_panel.py` + `_feedback.py` 共 20 条全绿，说明不是
+该用例自身的断言，而是长序列累积态触发的 C 层崩溃。
+
+根因分层（两阶段，别混为一谈）：
+
+- 前两轮的栈落在本仓库 `tests/conftest.py` 的 `_isolate_qsettings`
+  teardown 调 `shutil.rmtree`，经宿主 `sitecustomize.py:_safe_shutil_rmtree`
+  在 `ntpath.realpath` 上 access violation / Aborted。
+- 本线把逐例删除改为 session 结束时统一清理（提交见下方），隔离语义不变、
+  没有放宽任何断言；第三轮栈里这条路径消失，但崩溃点没变，当前线程转为
+  `_pytest/capture.py:suspend`，另有活线程停在
+  `desktop/receive_pipeline.py:167` 的 `run`。据此判断余下崩溃与接收流水线
+  工作线程在长序列里的累积态有关，**属环境 / 资源生命周期问题，未定位到
+  本轮合入的三条成果线**（它们都不碰 `receive_pipeline.py`）。
+
+三轮中断前已跑出的进度里累计 8–9 个 F、1 个 E；按前一轮探测清单定位，
+其中 `test_claims_guard` 一条已由 K26 登记与 `code-guards` 四元组转绿，
+另有四条纯静态守卫（`test_full_integration_v2::test_module_imports`、
+`test_git_safe`、`test_help_path_truthfulness`、`test_import_direction_contract`）
+单独跑全绿，属全量顺序下的全局态污染型。其余条目未按「改断言」处理。
+
+**可复验的硬结果**（对应交付指针，不依赖中断的全量）：
+
+```
+scripts/verify_readme.py --json           ok=true / total=0
+scripts/repro_readme_offline.py           6/6 按预期
+tests/test_claims_guard.py                7 passed
+三条分支钉扎合跑                          26 passed
+test_new_spacetime_panel*.py              20 passed
+test_settings_semantics.py 等             40 passed
+scripts/bench_agent_startup.py            cold 4462->2902ms / warm 2314->234ms
+```
+
+**下一坐标**：换干净宿主环境（无沙箱 sitecustomize 注入）重跑
+`pytest tests -q`；或先定位接收流水线工作线程在长序列里的生命周期，
+再跑全量。在此之前不对外报全量绿，也不提前开香槟。
