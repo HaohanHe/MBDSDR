@@ -1004,7 +1004,8 @@ python -c "from mbdsdr_ai.sdr_backend import HackRFBackend as K;be=K(device_inde
 | --- | --- | --- |
 | 计数落点 | `~/.mbdsdr/audit_health.json`（`MBDSDR_AUDIT_HEALTH` 可覆盖）。**独立文件 + 独立 `<路径>.lock`**，不写进那个写不进去的账本——账本的锁/权限故障不会连带健康文件 | `mbdsdr_ai/audit_health.py::candidate_paths` |
 | 一起失效时的退路 | 用户目录写不进 → 系统临时目录（`%TEMP%/mbdsdr/audit_health.json`）；两处都写不进 → 留在本次会话内存，界面仍显示；下次任一落点可写时**补记**这些增量 | `note_audit_drop` 的候选路径循环 + `_MEM.pending` |
-| 记什么 | `dropped`（累计，只增不减）、`last_at`/`last_iso`（最近时刻）、`last_reason`/`last_reason_text`（`lock_timeout` / `disk_full` / `permission` / `other`）、`last_detail`、`last_ledger`、`by_reason`（按原因分组） | `audit_drop_snapshot()` 返回值 |
+| 记什么 | `dropped`（累计，只增不减）、`last_at`/`last_iso`（最近时刻）、`last_reason`/`last_reason_text`（`lock_timeout` / `disk_full` / `permission` / `other`）、`last_detail`、`last_ledger`、`by_reason`（按原因分组）、`state`（`ok` / `unknown`） | `audit_drop_snapshot()` 返回值 |
+| 计数文件读不到时 | 文件存在但损坏/无权限读 → `state="unknown"` 且强制可见，界面显示「历史漏记状态未知」（若本次会话另有漏记，附「本次会话已漏记 N 条」）。**绝不显示 0 条**：0 会被读成「审计一直正常」 | `audit_health._read_file` 三态（`ok`/`missing`/`unreadable`）、`audit_alarm.alarm_text` |
 | 查询入口（一个） | `python -m mbdsdr_ai.audit_health` 输出 JSON；代码内 `audit_drop_count()` / `audit_drop_snapshot()`；实例侧 `AuditLog.health()` | `mbdsdr_ai/audit_health.py::_main` |
 | 界面可见 | 阈值 `AUDIT_DROP_VISIBLE_THRESHOLD = 1`（漏一条就显示，审计是「调用过就该有记录」的承诺）。`desktop/main.py` 启动时把 `audit_alarm` 的常驻标签挂到状态栏右侧，每 15 s 读一次健康文件；计数为 0 隐藏，命中显示「审计漏记 N 条 · 最近原因 · 时刻」，tooltip 给按原因分组、计数文件路径与查询命令 | `desktop/audit_alarm.py`、`desktop/main.py`（`install_audit_alarm`） |
 | 为什么 audit 是 fail-open | 工具审计记录的是**已经发生**的调用。为留痕而阻断工具，是用「现在不能用」换「以后能查」，代价与收益倒挂；审计面自身故障应降级，不该成为工具链的单点。失效由计数 + 状态栏可见兜住 | `tool_guard.AuditLog` 类文档字符串 |
@@ -1013,9 +1014,13 @@ python -c "from mbdsdr_ai.sdr_backend import HackRFBackend as K;be=K(device_inde
 | 判据（磁盘满 / 权限） | 账本追加抛 `OSError(ENOSPC)` → 原因 `disk_full`；抛 `EACCES` → 原因 `permission`；恢复后计数不变 | `test_disk_full_counts_and_reason_is_queryable`、`test_permission_denied_counts_and_reason_is_queryable` |
 | 判据（健康文件也写不进） | 父路径是普通文件 → 建目录失败：本次会话 `dropped == 1`、`visible == True`；换到可写路径后下一次写入把积压的 2 条一并补记 | `test_unwritable_health_file_still_visible_in_session`、`test_pending_drops_are_flushed_on_next_success` |
 | 判据（跨进程查询） | 子进程执行 `python -m mbdsdr_ai.audit_health`，读到同一计数与原因 | `test_query_entry_reports_cumulative_count_in_new_process` |
+| 界面端到端判据（真漏记） | 走生产路径造一次锁超时 → 状态栏子树里能找到告警标签且 `isVisible()`，文案同时含「审计漏记 1 条」、原因「等不到账本写锁（超时）」、ISO 时刻；账本恢复写入后，标签仍在、文案仍是 1 条 | `tests/test_audit_alarm.py::test_e2e_real_lock_timeout_appears_and_survives_recovery`（定时器 40ms 真实跑一拍） |
+| 界面端到端判据（启动即有历史） | 启动前计数文件里已有 3 条 → `install` 返回时（不等轮询）状态栏就显示「审计漏记 3 条 · 磁盘空间不足 · 2026-11-14T09:05:06+08:00」 | `test_e2e_startup_with_history_shows_immediately` |
+| 界面端到端判据（计数文件读不到） | 计数文件是坏 JSON → 标签可见、文案含「历史漏记状态未知」，且**不含**「审计漏记 0 条」 | `test_e2e_unreadable_count_file_shows_unknown_not_zero` |
+| 反证（摘掉挂载） | 把 `install_audit_alarm` 里的 `bar.addPermanentWidget(label)` 摘掉 → 上面三条全红（`statusBar().findChild(QLabel, "audit_drop_alarm")` 为 None） | 本轮实跑：3 failed；恢复后 18 passed |
 | 反证 | 把 `AuditLog.record` 的异常分支改回「只打 stderr」：`tests/test_audit_health.py` 10 条里 **5 条红**（读的是健康文件原文，不读内存：计数为 0 或文件不存在）；恢复后全绿 | 本轮实跑（5 failed, 5 passed → 恢复后 45 passed） |
 | 已知边界 | ① 健康文件记录的是**本机累计**，不按账本路径分组（`last_ledger` 只保留最近一个）；多账本场景下 `by_reason` 是合计。② 健康文件损坏时先改名 `<path>.corrupt` 再按 0 起算，旧计数需人工从副本恢复。③ 计数文件本身也在用户磁盘上：整块盘写满且临时目录同样不可写时，只有本次会话内存可见（界面仍显示，重启归零）——这是「至少别完全消失」的下限，不冒充持久化。④ 界面轮询 15 s，别的进程刚发生的漏记最迟一个轮询周期后出现 | 本轮实测范围 |
-| 复跑判据 | `python -m pytest tests/test_audit_health.py tests/test_audit_alarm.py tests/test_tx_audit.py -q`（36 passed） | 本轮实跑 |
+| 复跑判据 | `python -m pytest tests/test_audit_health.py tests/test_audit_alarm.py tests/test_tx_audit.py -q`（39 passed） | 本轮实跑 |
 
 
 

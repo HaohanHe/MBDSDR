@@ -43,13 +43,24 @@ AUDIT_ALARM_POLL_MS = 15_000
 
 
 def alarm_text(snapshot: dict) -> str:
-    """状态栏文案：累计条数 + 最近一次原因 + 时刻（缺项如实省略）。"""
-    total = int((snapshot or {}).get("dropped") or 0)
+    """状态栏文案：累计条数 + 最近一次原因 + 时刻（缺项如实省略）。
+
+    计数文件读不出来时显示「历史漏记状态未知」——**绝不显示 0 条**：
+    0 会被读成「审计一直正常」，而真相是「不知道漏了多少」。
+    """
+    snap = dict(snapshot or {})
+    if snap.get("state") == "unknown":
+        text = "历史漏记状态未知"
+        pending = int(snap.get("dropped") or 0)
+        if pending > 0:
+            text += f"（本次会话已漏记 {pending} 条）"
+        return text
+    total = int(snap.get("dropped") or 0)
     text = f"审计漏记 {total} 条"
-    reason = str((snapshot or {}).get("last_reason_text") or "").strip()
+    reason = str(snap.get("last_reason_text") or "").strip()
     if reason:
         text += f" · {reason}"
-    when = str((snapshot or {}).get("last_iso") or "").strip()
+    when = str(snap.get("last_iso") or "").strip()
     if when:
         text += f" · {when}"
     return text
@@ -59,23 +70,30 @@ def alarm_tooltip(snapshot: dict) -> str:
     """详细的「为什么/在哪查」：按原因分组、计数文件、查询命令。"""
     snap = dict(snapshot or {})
     total = int(snap.get("dropped") or 0)
-    lines = [
-        f"工具审计账本写不进时不会阻断工具调用（fail-open），"
-        f"但每次漏记都会计数。累计漏记 {total} 条。",
-    ]
-    when = str(snap.get("last_iso") or "").strip() or "时刻未知"
-    reason = str(snap.get("last_reason_text") or "").strip() or "原因未知"
-    detail = str(snap.get("last_detail") or "").strip()
-    lines.append(f"最近一次：{when}，{reason}"
-                 + (f"（{detail[:200]}）" if detail else ""))
-    grouped = dict(snap.get("by_reason") or {})
-    if grouped:
-        parts = [f"{reason_text(str(r))} {int(n)} 条"
-                 for r, n in sorted(grouped.items())]
-        lines.append("按原因：" + "；".join(parts))
-    ledger = str(snap.get("last_ledger") or "").strip()
-    if ledger:
-        lines.append(f"最近失败的账本：{ledger}")
+    if snap.get("state") == "unknown":
+        lines = [
+            "审计漏记计数文件存在但读不出来（损坏或没有读权限），"
+            "无法确认历史累计漏记条数；本次会话内发生的漏记仍会在此显示。",
+            f"累计（仅本次会话可确认）：{total} 条",
+        ]
+    else:
+        lines = [
+            f"工具审计账本写不进时不会阻断工具调用（fail-open），"
+            f"但每次漏记都会计数。累计漏记 {total} 条。",
+        ]
+        when = str(snap.get("last_iso") or "").strip() or "时刻未知"
+        reason = str(snap.get("last_reason_text") or "").strip() or "原因未知"
+        detail = str(snap.get("last_detail") or "").strip()
+        lines.append(f"最近一次：{when}，{reason}"
+                     + (f"（{detail[:200]}）" if detail else ""))
+        grouped = dict(snap.get("by_reason") or {})
+        if grouped:
+            parts = [f"{reason_text(str(r))} {int(n)} 条"
+                     for r, n in sorted(grouped.items())]
+            lines.append("按原因：" + "；".join(parts))
+        ledger = str(snap.get("last_ledger") or "").strip()
+        if ledger:
+            lines.append(f"最近失败的账本：{ledger}")
     path = str(snap.get("path") or "").strip()
     if path:
         lines.append(f"计数文件：{path}")

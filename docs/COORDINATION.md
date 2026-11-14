@@ -2427,6 +2427,10 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `mbdsdr_ai/agent.py` | 时空环境层/A6（astro_set_observer 去掉典型值兜底，优先复用 space_weather 快照；折射工具报 uncorrected） | 2026-11-14 11:44 | 本笔 |
 | `tests/test_observer_weather.py` | 时空环境层/A6（A6 判据：静日vs高湿方向/缺项unknown/反证典型值必红） | 2026-11-14 11:44 | 本笔 |
 | `{tests/test_full_integration.py,tests/test_full_integration_v2.py}` | 时空环境层/A6（A6 适配：集成脚本观测者补实测气象） | 2026-11-14 11:44 | 本笔 |
+| `mbdsdr_ai/audit_health.py` | 审计漏记可见线/6ae85f56（第四轮补：未知状态（读不到 ≠ 0）） | 2026-11-14 11:47 | 本笔 |
+| `desktop/audit_alarm.py` | 审计漏记可见线/6ae85f56（第四轮补：端到端可见判据 + 未知状态文案） | 2026-11-14 11:47 | 本笔 |
+| `tests/test_audit_alarm.py` | 审计漏记可见线/6ae85f56（第四轮补：三条端到端界面判据与摘挂载反证） | 2026-11-14 11:47 | 本笔 |
+| `docs/limitations-register.md` | 审计漏记可见线/6ae85f56（第四轮补：附 X.1 端到端判据与 unknown） | 2026-11-14 11:47 | 本笔 |
 
 > 上表各行均由 `claim` 台账推导：owner 原文与 `acquired_at` 直接取自台账，
 > 目的优先用台账里的 `claim_reason`，没有就如实写「未声明」，不补编。时间列只是

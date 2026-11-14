@@ -144,18 +144,23 @@ def _iso(ts: float) -> str:
         return ""
 
 
-def _read_file(path: str) -> Tuple[Dict[str, Any], bool]:
-    """读健康文件；返回 ``(内容, 是否损坏)``。不存在按空内容处理。"""
+def _read_file(path: str) -> Tuple[Dict[str, Any], str]:
+    """读健康文件；返回 ``(内容, 状态)``。
+
+    状态三值：``ok``（读到了）、``missing``（文件不存在，等于从没漏记过）、
+    ``unreadable``（存在但损坏/无权限读）。后两者必须分开：把「读不到」
+    当成 0 就是假读数，界面会显示「一切正常」。
+    """
     try:
         with open(path, "r", encoding="utf-8") as f:
             data = json.load(f)
     except FileNotFoundError:
-        return {}, False
+        return {}, "missing"
     except (OSError, ValueError):
-        return {}, True
+        return {}, "unreadable"
     if not isinstance(data, dict):
-        return {}, True
-    return data, False
+        return {}, "unreadable"
+    return data, "ok"
 
 
 def _write_atomic(path: str, data: Dict[str, Any]) -> None:
@@ -186,8 +191,8 @@ def _persist_drop(path: str, pending: int, pending_reasons: Dict[str, int],
     成功写入时**一并补记**，不会因为一次故障把中间几条抹掉。
     """
     with file_lock(path, HEALTH_LOCK_TIMEOUT_S):
-        data, corrupt = _read_file(path)
-        if corrupt:
+        data, status = _read_file(path)
+        if status == "unreadable":
             # 坏文件不静默丢弃：先留副本，再按 0 起算（原样可查）。
             try:
                 os.replace(path, path + ".corrupt")
@@ -258,6 +263,7 @@ def _merge(file_data: Dict[str, Any], pending: int,
             last_ledger = str(ledger or last_ledger)
     return {
         "dropped": dropped,
+        "state": "ok",
         "threshold": AUDIT_DROP_VISIBLE_THRESHOLD,
         "visible": dropped >= AUDIT_DROP_VISIBLE_THRESHOLD,
         "last_at": last_at or None,
@@ -327,7 +333,9 @@ def audit_drop_snapshot(path: Optional[str] = None) -> Dict[str, Any]:
     """累计漏记快照（查询入口，给界面与 ``python -m`` 共用）。
 
     ``dropped`` 只增不减；``visible`` 表示已达界面可见阈值。读不到文件时
-    用进程内最近一次成功内容 + 未落盘增量，绝不因读失败而报 0。
+    用进程内最近一次成功内容 + 未落盘增量，绝不因读失败而报 0；文件存在
+    却读不出（损坏/无权限）时 ``state == "unknown"`` 并强制可见——宁可说
+    「历史漏记状态未知」，也不能显示「0 条」冒充正常。
     """
     with _OP_LOCK:
         targets = candidate_paths(path)
@@ -335,16 +343,23 @@ def audit_drop_snapshot(path: Optional[str] = None) -> Dict[str, Any]:
         if active and active not in targets:
             targets = [active] + targets
         file_data: Dict[str, Any] = {}
+        state = "ok"
         for target in targets:
-            data, corrupt = _read_file(target)
-            if not corrupt and data:
+            data, status = _read_file(target)
+            if status == "ok":
                 file_data = data
+                state = "ok"
                 break
-        if not file_data:
+            if status == "unreadable":
+                state = "unknown"
+        if not file_data and state == "ok":
             file_data = dict(_MEM.get("last_data") or {})
         merged = _merge(file_data, int(_MEM.get("pending") or 0),
                         dict(_MEM.get("pending_reasons") or {}),
                         _MEM.get("pending_last"))
+        merged["state"] = state
+        if state == "unknown":
+            merged["visible"] = True
         merged["path"] = active or (targets[0] if targets else "")
         return merged
 
