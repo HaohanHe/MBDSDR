@@ -36,6 +36,14 @@ from .sat_passes import VISIBLE_MIN_ALT_DEG
 
 DEFAULT_TRACK_MINUTES = 90.0
 DEFAULT_TRACK_STEP_S = 30.0
+# 轨迹折线误差界（默认 30 s 步长）。取数口径：以 1 s 星下点为参照，把相邻
+# 30 s 采样点按大圆短弧连线，算每个 1 s 真位置到所在弦的最大大圆距离
+# （= 折线相对真轨迹的偏差）。实测 ISS（2026-10-24T06:00Z 起 24 h，每 2 h
+# 取一段 90 min 轨迹的最大值）：20 s 0.0407 km / 30 s 0.0916 km /
+# 60 s 0.3666 km，随步长平方增长。0.10 km 是 30 s 实测值的向上取整，
+# 不是另设的物理阈值；判据见 tests/test_ground_track_step_bound.py。
+DEFAULT_TRACK_STEP_MAX_CHORD_KM = 0.10
+DEFAULT_TRACK_REF_STEP_S = 1.0
 DEFAULT_MIN_ELEVATION_DEG = VISIBLE_MIN_ALT_DEG
 DEFAULT_FOOTPRINT_POINTS = 72
 

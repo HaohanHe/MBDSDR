@@ -67,6 +67,8 @@ __all__ = [
     "PASS_BISECT_TOL_S",
     "PASS_SCAN_BATCH",
     "PASS_CHUNK_HOURS",
+    "TRAIL_STEP_S",
+    "TRAIL_STEP_MAX_ERR_DEG",
     "refine_culmination",
     "split_pass_window",
     "grid_manifest",
@@ -116,6 +118,14 @@ _FINE_STEP_S = PASS_FINE_STEP_S
 # 不同而 PASS_ALGORITHM 字符串只宣称其中一个值。
 PASS_BISECT_TOL_S = 0.5
 _BISECT_TOL_S = PASS_BISECT_TOL_S
+
+# 天空轨迹（trail）默认采样步长与偏差界。
+# 取数口径：以 1 s 采样为参照，按 az/alt 线性插值，真实方向与插值方向的最大
+# 角偏差。实测 ISS 24 h 内 6 次过境（峰值居中 ±600 s）：20 s 最大 1.085°，
+# 60 s 7.521°（随步长平方增长）。1.2° 是 20 s 实测值的向上取整；判据见
+# tests/test_ground_track_step_bound.py。
+TRAIL_STEP_S = 20.0
+TRAIL_STEP_MAX_ERR_DEG = 1.2
 
 # 粗扫向量化批大小（点数）。skyfield 的 ``diff.at(t_array).altaz()`` 一次算
 # 一批，比逐点调用快约 7 倍；2048 点的内存占用可忽略。这是 P1-13「72 h 分批」
@@ -594,7 +604,7 @@ def sample_trail(
     t_center: Time,
     before_s: float = 600.0,
     after_s: float = 600.0,
-    step_s: float = 20.0,
+    step_s: float = TRAIL_STEP_S,
 ) -> List[Tuple[Time, float, float]]:
     """采样过去/未来轨迹点（trail），返回 [(Time, az_deg, alt_deg), ...]。
 
