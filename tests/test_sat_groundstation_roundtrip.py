@@ -37,7 +37,7 @@ from mbdsdr_ai.sdrangel_plugins import (  # noqa: E402
 )
 from mbdsdr_ai.gpredict_adapter import (  # noqa: E402
     TLEParser, GeoStation, SGP4Propagator, CoordinateConverter,
-    unix_to_jd, C_LIGHT,
+    unix_to_jd, C_LIGHT_KMPS,
 )
 
 PASS = 0
@@ -114,7 +114,7 @@ def test_satnogs_doppler():
     tsince_min = (jd - tle.epoch_jd) * 1440.0
     r, v = prop.propagate(tsince_min)
     ob = CoordinateConverter.calculate_obs(jd, r, v, st)
-    analytic_rx = tx_freq * (1.0 - ob.range_rate_kms / C_LIGHT)
+    analytic_rx = tx_freq * (1.0 - ob.range_rate_kms / C_LIGHT_KMPS)
     err_hz = abs(pt.rx_freq_hz - analytic_rx)
     check("NCO 频率与解析多普勒公式误差 < 1 Hz", err_hz < 1.0,
           f"(err={err_hz:.4f} Hz, range_rate={ob.range_rate_kms:.3f} km/s)")

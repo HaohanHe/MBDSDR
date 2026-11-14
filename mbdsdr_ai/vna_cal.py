@@ -34,7 +34,7 @@ from typing import Optional
 import numpy as np
 
 __all__ = [
-    "C_LIGHT",
+    "C_LIGHT_MPS",
     "OpenStandard",
     "ShortStandard",
     "LoadStandard",
@@ -44,7 +44,7 @@ __all__ = [
     "s21_enhanced_response",
 ]
 
-C_LIGHT = 299792458.0
+C_LIGHT_MPS = 299792458.0
 _GHZ = 1e9
 
 
@@ -133,7 +133,7 @@ def _apply_offset(gamma, f_hz, length_m: float, vf: float) -> np.ndarray:
         return np.asarray(gamma)
     if vf <= 0.0:
         raise ValueError(f"偏移段 VF 须为正，收到 {vf}")
-    v = C_LIGHT * vf
+    v = C_LIGHT_MPS * vf
     ph = np.exp(-1j * 4.0 * np.pi * np.asarray(f_hz, dtype=np.float64)
                 * length_m / v)
     return np.asarray(gamma) * ph

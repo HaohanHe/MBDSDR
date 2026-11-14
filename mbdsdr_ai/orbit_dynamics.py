@@ -33,11 +33,11 @@ try:
 except Exception:  # noqa: BLE001 - scipy 为可选，缺失时走纯 numpy RK4
     _HAS_SCIPY = False
 
-# 物理常量（SI：m、m/s、rad/s）
-MU_EARTH = 398600.4418        # km^3/s^2, 地球引力常数（全链口径统一为 km）
+# 物理常量（单位由名字后缀钉死：_MPS=m/s，_KMPS=km/s，_KM3_S2=km^3/s^2）
+MU_EARTH_KM3_S2 = 398600.4418        # km^3/s^2, 地球引力常数（全链口径统一为 km）
 OMEGA_E = 7.2921151467e-5     # rad/s, 地球自转角速度
-C_LIGHT = 299792458.0         # m/s, 真空光速（仅供频率换算用）
-C_LIGHT_KMS = 299792.458       # km/s, 真空光速（内部量线统一用这个）
+C_LIGHT_MPS = 299792458.0         # m/s, 真空光速（仅供频率换算用）
+C_LIGHT_KMPS = 299792.458       # km/s, 真空光速（内部量线统一用这个）
 
 # WGS-72 椭球：唯一定义在 geodesy.WGS72（与 orbit.py / SGP4 内核一致）。
 # 三个旧名保留是因为 ground_track.py 与测试直接引用 ``WGS72_A``。
@@ -65,9 +65,9 @@ def two_body_dynamics_stm(_t: float, augmented: np.ndarray) -> np.ndarray:
     if radius < 6.0e3:
         raise ValueError(f"轨道半径异常: {radius:.3f} km")
 
-    accel = -MU_EARTH * r / radius**3
+    accel = -MU_EARTH_KM3_S2 * r / radius**3
     # 引力梯度 d(-mu*r/|r|^3)/dr = mu*(3 r r^T/|r|^5 - I/|r|^3)
-    grav_grad = MU_EARTH * (
+    grav_grad = MU_EARTH_KM3_S2 * (
         3.0 * np.outer(r, r) / radius**5 - np.eye(3) / radius**3
     )
     a_mat = np.zeros((6, 6))
@@ -226,13 +226,13 @@ def observed_pseudorange_rate(frequency: float, center_frequency: float) -> floa
 
     range_rate = -c * (f_obs - f_center) / f_center（远离为正）。
     """
-    return (-C_LIGHT_KMS * (float(frequency) - float(center_frequency))
+    return (-C_LIGHT_KMPS * (float(frequency) - float(center_frequency))
             / float(center_frequency))
 
 
 def range_rate_to_doppler_hz(range_rate: float, center_frequency: float) -> float:
     """伪距率(m/s) -> 多普勒频移(Hz)（observed_pseudorange_rate 的逆）。"""
-    return -float(range_rate) * float(center_frequency) / C_LIGHT_KMS
+    return -float(range_rate) * float(center_frequency) / C_LIGHT_KMPS
 
 
 def _tle_mean_motion_token(line2: str) -> float:

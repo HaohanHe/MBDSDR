@@ -23,7 +23,7 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 import numpy as np
 
 from .orbit_dynamics import (
-    MU_EARTH,
+    MU_EARTH_KM3_S2,
     OMEGA_E,
     _rk4_step,
     _HAS_SCIPY,
@@ -64,7 +64,7 @@ def j2_accel_eci(r: np.ndarray) -> np.ndarray:
         raise ValueError(f"轨道半径异常: {rmag:.3f} km")
     z = r[2]
     u = z * z / (rmag * rmag)
-    k = -1.5 * J2 * MU_EARTH * WGS84_RE ** 2 / rmag ** 5
+    k = -1.5 * J2 * MU_EARTH_KM3_S2 * WGS84_RE ** 2 / rmag ** 5
     return np.array([
         k * r[0] * (1.0 - 5.0 * u),
         k * r[1] * (1.0 - 5.0 * u),
@@ -80,7 +80,7 @@ def _ecij2_eom6(s6: np.ndarray) -> np.ndarray:
     if rmag < 6.0e3:
         raise ValueError(f"轨道半径异常: {rmag:.3f} km")
     out[0:3] = s6[3:6]
-    out[3:6] = -MU_EARTH / rmag ** 3 * r + j2_accel_eci(r)
+    out[3:6] = -MU_EARTH_KM3_S2 / rmag ** 3 * r + j2_accel_eci(r)
     return out
 
 
@@ -197,10 +197,10 @@ def _anglediff_rate(L: np.ndarray, Ld: np.ndarray, Ldd: np.ndarray,
         raise ValueError("Laplace 系数 D3=(L̈,L,L̇) 退化——三次观测近乎共线，"
                          "几何不足以定轨（请拉大观测时间间隔）")
     # ρ = -(μ D1/r³ + D2)/D3
-    coef_r3 = -MU_EARTH * D1 / D3
+    coef_r3 = -MU_EARTH_KM3_S2 * D1 / D3
     const_rho = -D2 / D3
     # ρ̇ = -(μ D4/r³ + D5)/(2 D6)
-    coef_rhod = -MU_EARTH * D4 / (2.0 * D6) if abs(D6) > 1e-30 else 0.0
+    coef_rhod = -MU_EARTH_KM3_S2 * D4 / (2.0 * D6) if abs(D6) > 1e-30 else 0.0
     const_rhod = -D5 / (2.0 * D6) if abs(D6) > 1e-30 else 0.0
     return coef_r3, const_rho, coef_rhod, const_rhod
 

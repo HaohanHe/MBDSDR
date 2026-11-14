@@ -373,7 +373,7 @@ class _OrbitTracker:
             "elevation": float(st["elevation"]),
             "range_rate_km_s": rr,
             # 与 doppler_correction / DopplerLinkCompensator 同符号：远离为负
-            "doppler_hz": -_DOWNLINK_HZ * rr / orbit.C_LIGHT,
+            "doppler_hz": -_DOWNLINK_HZ * rr / orbit.C_LIGHT_KMPS,
         }
 
 

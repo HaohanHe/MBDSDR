@@ -48,14 +48,14 @@ AE = 1.0                   # 距离归一化单位 (ER)
 CK2 = 5.413079e-4          # = J2/2
 CK4 = 6.209887e-7          # = -3*J4/8
 F_FLAT = 3.352779e-3       # WGS-72 扁率 f ≈ 1/298.26
-GE = 3.986008e5            # GM = 398600.8 km^3/s^2
+GE_KM3_S2 = 3.986008e5    # WGS-72 规范值 GM = 398600.8 km^3/s^2（值不动，只改名）
 S_PHYS = 1.012229          # 大气模型 s 系数
 QOMS2T = 1.880279e-9       # 大气模型 q0-s0 项
 SEC_DAY = 8.6400e4          # 每天秒数
 OMEGA_E_DAY = 1.0027379    # 地球自转(圈/天,恒星)
 THDT = 4.3752691e-3        # 地球自转角速度 rad/min (=omega_ER)
 MFACTOR = 7.292115e-5      # 地球自转角速度 rad/s
-C_LIGHT = 299792.458       # km/s（真空光速，多普勒用）
+C_LIGHT_KMPS = 299792.458       # km/s（真空光速，多普勒用）
 
 
 # =====================================================================
@@ -781,7 +781,7 @@ def doppler_shift(obs: Observation, source_freq_hz: float) -> float:
     视线速度多普勒关系；
     远离(range_rate>0)时接收频率降低。
     """
-    return source_freq_hz * (1.0 - obs.range_rate_kms / C_LIGHT)
+    return source_freq_hz * (1.0 - obs.range_rate_kms / C_LIGHT_KMPS)
 
 
 # =====================================================================

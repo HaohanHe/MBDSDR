@@ -163,7 +163,7 @@ def test_doppler_shift():
                        range_rate_kms=7.5)  # 远离
     f_src = 145.9e6
     f_rx = G.doppler_shift(ob, f_src)
-    expected_shift = -f_src * 7.5 / G.C_LIGHT
+    expected_shift = -f_src * 7.5 / G.C_LIGHT_KMPS
     assert f_rx - f_src == pytest.approx(expected_shift, rel=1e-6)
     # 远离 -> 接收频率降低
     assert f_rx < f_src

@@ -219,9 +219,9 @@ def compute_satellite_position(
         return None
 
     try:
-        from .orbit import C_LIGHT, wgs72_ecef_km_to_llh
+        from .orbit import C_LIGHT_KMPS, wgs72_ecef_km_to_llh
     except ImportError:  # 脚本 / 直接运行时（mbdsdr_ai 目录已在 sys.path）
-        from orbit import C_LIGHT, wgs72_ecef_km_to_llh  # type: ignore
+        from orbit import C_LIGHT_KMPS, wgs72_ecef_km_to_llh  # type: ignore
 
     raw = _raw_state(satellite_name, observer_lat, observer_lon,
                      observer_alt, timestamp)
@@ -232,7 +232,7 @@ def compute_satellite_position(
     # orbit.doppler_correction 的 doppler_shift_hz（频率偏移，靠近为正）相反。
     if satellite_name in SATELLITE_FREQUENCIES:
         freq_hz = SATELLITE_FREQUENCIES[satellite_name] * 1e6
-        doppler = freq_hz * raw.range_rate_kms / C_LIGHT
+        doppler = freq_hz * raw.range_rate_kms / C_LIGHT_KMPS
     else:
         doppler = 0.0
 
@@ -311,9 +311,9 @@ def compute_doppler_correction(
         return {"error": f"无法计算卫星 {satellite_name} 的位置"}
 
     try:
-        from .orbit import C_LIGHT
+        from .orbit import C_LIGHT_KMPS
     except ImportError:  # 脚本 / 直接运行时（mbdsdr_ai 目录已在 sys.path）
-        from orbit import C_LIGHT  # type: ignore
+        from orbit import C_LIGHT_KMPS  # type: ignore
 
     raw = _raw_state(satellite_name, observer_lat, observer_lon,
                      observer_alt, timestamp)
@@ -321,12 +321,12 @@ def compute_doppler_correction(
         return {"error": f"无法计算卫星 {satellite_name} 的位置"}
 
     # 频率偏移 = -f·v_los/c（远离时 v_los>0 -> 频率降低）
-    shift = -nominal_freq_hz * raw.range_rate_kms / C_LIGHT
+    shift = -nominal_freq_hz * raw.range_rate_kms / C_LIGHT_KMPS
     corrected_freq = nominal_freq_hz + shift
     # 上界：轨道速度对应的最大可能频移（不是本次过境实测峰值）。
     # 视线速度 |v_los| ≤ |v_inertial|，故这是解析上界。
     speed_kms = math.sqrt(sum(v * v for v in raw.v_teme_kmps))
-    max_doppler = nominal_freq_hz * speed_kms / C_LIGHT
+    max_doppler = nominal_freq_hz * speed_kms / C_LIGHT_KMPS
 
     return {
         "satellite": satellite_name,

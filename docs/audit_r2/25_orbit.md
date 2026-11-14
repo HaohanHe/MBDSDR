@@ -95,7 +95,8 @@ TLE 第一行历元字段（1 起始列）是第 19–32 列 = 年份 2 位 + �
 
 `orbit.py` 算出的 `range_rate_kms` **在 orbit.py 自己的链路里是真用了**：
 - `orbit.py:162` 计算 → `:186` 多普勒 → `:274` 过境多普勒；
-- `sdr_tools.py:3394` 也真用 `st["range_rate_kms"] / orbit.C_LIGHT`。
+- `sdr_tools.py:3394` 也真用 `st["range_rate_kms"] / orbit.C_LIGHT_KMPS`
+  （原名 `orbit.C_LIGHT`，第 5 件只改名加 `_KMPS` 单位后缀，数值 299792.458 不变）。
 
 **但是**存在一条完全独立、且残废的并行路径 `decoders.py`：
 
@@ -112,11 +113,21 @@ radial_velocity = 0  # km/s，简化为 0，实际需要速度向量
 doppler = freq_hz * radial_velocity / c   # ← 恒等于 0
 ```
 
-这条路径有两处硬伤：
+这条路径有两处硬伤（**已于 8be5af66 修复，见下方「更正」**）：
 1. **拿到 TEME 位置后完全不做 GMST 旋转**（orbit.py:130-134 那一套在 decoders.py 里整个缺失），注释自己都写了"完整实现需要考虑地球自转，这里用简化的球面几何"。卫星位置相对真实 ECEF 绕 z 轴转了一个 GMST 角，LOS 方向全错 → 仰角/方位/过境时刻全错。
 2. **丢弃速度向量 `v`**，`radial_velocity` 硬编码 0 → 多普勒恒为 0。
 
-**调用关系**：`new_spacetime.py:711-715` 用的是 `from .decoders import list_visible_satellites`（残废路径），而 `sdr_tools.py:3264/3296/3323` 用的是 `orbit.*`（真路径）。**两条路径并存且行为不一致**——这正好解释了"实验室绿、真机红"：单测/合成 TLE 在某条路径上通过，真机过境预报走的是 decoders.py 这条没旋转地球的路径。
+> **更正（2026-11，8be5af66 后复核）**：本节第 1 条「decoders 没有 GMST 旋转」
+> 只对修复前的旧实现成立，已证伪，勿据此重复排查。当前 `decoders._raw_state`
+> 直接把 SGP4 的 TEME 状态交给 `orbit.satellite_raw_state`，GMST 绕 z 轴旋转、
+> 站心 ENU 转换、视线速度都在内核里完成，`decoders` 只剩「TLE 来源」和
+> 「返回 `SatellitePass`」两条薄壳；`radial_velocity = 0` 的硬编码也已不存在，
+> 多普勒改用内核的 `range_rate_kms`。核对方式：
+> `decoders.compute_satellite_position` 与 `orbit.doppler_correction` 同星/站/
+> 频率/时刻的差值应只剩返回类型与符号约定之差（见 `tests/test_constant_units.py`
+> 与第 1 件的方向校核记录）。
+
+**调用关系**：`new_spacetime.py:711-715` 用的是 `from .decoders import list_visible_satellites`，而 `sdr_tools.py:3264/3296/3323` 用的是 `orbit.*`。两条路径的几何内核现已合一（同一个 `orbit.satellite_raw_state`），剩余差异只在「TLE 来源（decoders 允许内置近似 TLE 回退，orbit 无 TLE 时返回 None）」与「返回类型（`SatellitePass` vs `RawSatelliteState`）」，不再存在「一条没旋转地球」的行为分叉。
 
 ---
 

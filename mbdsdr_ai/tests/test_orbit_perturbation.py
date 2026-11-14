@@ -25,7 +25,7 @@ from mbdsdr_ai.orbit_perturbation import (
     propagate_state_and_stm_j2,
     register_tool_registry,
 )
-from mbdsdr_ai.orbit_dynamics import MU_EARTH
+from mbdsdr_ai.orbit_dynamics import MU_EARTH_KM3_S2
 from mbdsdr_ai.orbit_determination import J2, WGS84_RE
 
 # 中性示例坐标（红线）：赤道、零经度、零海拔
@@ -47,10 +47,10 @@ def _elements(state6: np.ndarray):
     hm = np.linalg.norm(h)
     n_vec = np.cross([0.0, 0.0, 1.0], h)
     nm = np.linalg.norm(n_vec)
-    e_vec = np.cross(v, h) / MU_EARTH - r / rm
+    e_vec = np.cross(v, h) / MU_EARTH_KM3_S2 - r / rm
     e = float(np.linalg.norm(e_vec))
-    energy = vm * vm / 2.0 - MU_EARTH / rm
-    a = -MU_EARTH / (2.0 * energy)
+    energy = vm * vm / 2.0 - MU_EARTH_KM3_S2 / rm
+    a = -MU_EARTH_KM3_S2 / (2.0 * energy)
     i = math.acos(min(1.0, max(-1.0, h[2] / hm)))
     raan = math.atan2(n_vec[1], n_vec[0]) if nm > 1e-12 else 0.0
     argp = math.acos(min(1.0, max(-1.0,
@@ -126,7 +126,7 @@ def test_j2_raan_secular_rate_matches_theory():
     _, _, _, raan1, _, _ = _elements(end)
     draan = (raan1 - raan0 + math.pi) % (2.0 * math.pi) - math.pi
     a, e, _, _, _, _ = _elements(_STATE0)
-    n = math.sqrt(MU_EARTH / a ** 3)
+    n = math.sqrt(MU_EARTH_KM3_S2 / a ** 3)
     p = a * (1.0 - e * e)
     theory = -1.5 * J2 * n * (WGS84_RE / p) ** 2 * math.cos(i0) * dt_day
     assert abs(draan - theory) < 0.01 * abs(theory)

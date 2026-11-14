@@ -132,7 +132,7 @@ class SatelliteTracker:
         if st is None:
             return None
         v_los = st["range_rate_kms"]            # km/s, 远离为正
-        shift_hz = -f_carrier_hz * v_los / orbit.C_LIGHT
+        shift_hz = -f_carrier_hz * v_los / orbit.C_LIGHT_KMPS
         return {
             "t_unix": t_unix,
             "range_rate_kms": v_los,

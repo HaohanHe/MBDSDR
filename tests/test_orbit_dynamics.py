@@ -21,7 +21,7 @@ from mbdsdr_ai import orbit_dynamics as od  # noqa: E402
 def _leo_state(t: float) -> np.ndarray:
     """解析圆轨道参考状态（ECI，再转 ECEF）——测试真值发生器。"""
     r = 7.0e3          # km（全链口径统一为 km）
-    n = np.sqrt(od.MU_EARTH / r**3)
+    n = np.sqrt(od.MU_EARTH_KM3_S2 / r**3)
     pos_eci = np.array([r * np.cos(n * t), r * np.sin(n * t), 0.0])
     vel_eci = np.array([-r * n * np.sin(n * t), r * n * np.cos(n * t), 0.0])
     p, v = od.eci_to_ecef(pos_eci, vel_eci, t)
@@ -86,7 +86,7 @@ class TestObservationModel:
     def test_doppler_roundtrip(self):
         fc = 1626.270833e6
         rr = 0.25                      # km/s（= 250 m/s）
-        f = fc - rr * fc / od.C_LIGHT_KMS  # range_rate = -c*(f-fc)/fc
+        f = fc - rr * fc / od.C_LIGHT_KMPS  # range_rate = -c*(f-fc)/fc
         assert abs(od.observed_pseudorange_rate(f, fc) - rr) < 1e-9
 
 

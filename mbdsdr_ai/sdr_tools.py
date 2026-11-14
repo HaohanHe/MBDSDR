@@ -4989,7 +4989,7 @@ def _satellite_doppler_track(mgr, args):
                 st = state_at(t0 + elapsed)
                 if st is None:
                     break
-                shift = -nominal * st["range_rate_kms"] / orbit.C_LIGHT
+                shift = -nominal * st["range_rate_kms"] / orbit.C_LIGHT_KMPS
                 if backend.set_frequency(int(nominal + shift)) is False:
                     # 调谐没落到硬件：后续样本仍属于旧频率，继续录会把
                     # "未补偿的 IQ"记成"已按多普勒跟踪"的轨迹。

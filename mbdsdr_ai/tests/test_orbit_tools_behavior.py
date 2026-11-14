@@ -6,7 +6,7 @@ orbit_tools.py（轨道原子工具适配层）行为测试
 零硬件、零网络：sgp4 在解释器内（缺失则诚实 skip）；TLE 用内置合成/公开
 标准 TLE 常量。oracle 全部来自 orbit_dynamics 真实语义（读代码定）：
 
-  - 全链口径是 **km / km/s**（MU_EARTH 用 km^3/s^2；tle_state_ecef 保留
+  - 全链口径是 **km / km/s**（MU_EARTH_KM3_S2 用 km^3/s^2；tle_state_ecef 保留
     SGP4 原始 km；calibrate_time_offset 边界处 ×1000 才转 m/s）。
     故 state_ecef 半径应是 ~6.7e3 量级（km），伪距率是 ~1e0 量级（km/s）。
   - 多普勒换算是精确互逆：doppler_hz == f - fc。
@@ -52,7 +52,7 @@ TLE2 = ("2 25544  51.6416 247.4627 0006703 130.5360 325.0288 "
         "15.72125391563537")
 T0 = 1221916800.0  # 2008-09-20 12:00:00 UTC，TLE 历元附近
 
-C_LIGHT_KMS = 299792.458  # orbit_dynamics 内部光速口径
+C_LIGHT_KMPS = 299792.458  # orbit_dynamics 内部光速口径
 
 
 # ── 1. 多普勒换算：数值 oracle + 精确互逆 ─────────────────────
@@ -65,7 +65,7 @@ def test_doppler_from_frequency_value_and_units():
     # oracle：range_rate = -c*(f-fc)/fc，内部口径 km/s
     assert r.data["doppler_hz"] == pytest.approx(1000.0, rel=1e-12)
     assert r.data["range_rate_mps"] == pytest.approx(
-        -C_LIGHT_KMS * 1000.0 / fc, rel=1e-12)
+        -C_LIGHT_KMPS * 1000.0 / fc, rel=1e-12)
     # 单位口径必须是 km/s（1 kHz@150MHz 物理量 ~2 km/s，不是 ~2 m/s）
     assert abs(r.data["range_rate_mps"]) == pytest.approx(1.9986, abs=1e-3)
     assert "km/s" in r.content, f"文案单位必须如实标注 km/s: {r.content}"

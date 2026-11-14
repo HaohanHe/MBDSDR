@@ -23,7 +23,7 @@ MBDSDR AI 内核 - 深空追迹多普勒定轨系统
 物理常数：
   c            = 299792458 m/s
   f0 (LRO S 波段下行) = 2271e6 Hz
-  GM_EARTH     = 398600.4418 km^3/s^2
+  GM_EARTH_KM3_S2     = 398600.4418 km^3/s^2
   omega_earth  = 7.292115e-5 rad/s
 """
 from __future__ import annotations
@@ -38,10 +38,10 @@ from .station import station_from_config
 from .geodesy import WGS84, geodetic_to_ecef_km
 
 # 课件/物理常数（统一 km-s 单位制）
-C_LIGHT_MS = 299792458.0          # m/s
-C_LIGHT_KMS = 299792.458          # km/s
+C_LIGHT_MPS = 299792458.0          # m/s
+C_LIGHT_KMPS = 299792.458          # km/s
 F0_DEFAULT_HZ = 2271.0e6          # LRO S 波段下行标称频率
-GM_EARTH = 398600.4418            # km^3/s^2
+GM_EARTH_KM3_S2 = 398600.4418            # km^3/s^2
 OMEGA_E = 7.292115e-5             # rad/s 地球自转角速度
 # WGS-84 椭球：唯一定义在 geodesy.WGS84（米制），这里换算成 km 保留旧名。
 WGS84_A = WGS84.a_m / 1000.0      # km 赤道半径
@@ -49,7 +49,7 @@ WGS84_F = WGS84.f
 WGS84_E2 = WGS84.e2
 
 # 月球常数（LRO 参考轨道用）
-GM_MOON = 4902.8005                # km^3/s^2
+GM_MOON_KM3_S2 = 4902.8005                # km^3/s^2
 MOON_RADIUS = 1737.4               # km
 LRO_ORBIT_ALT = 50.0               # km（LRO 标称绕月高度 ~50km）
 LRO_PERIOD_S = 113.0 * 60.0        # ~113 min
@@ -289,14 +289,14 @@ def extract_doppler_observations(iq: np.ndarray, fs: float,
 def fd_to_rangerate(fd_hz: float, f0: float = F0_DEFAULT_HZ) -> float:
     """频偏 -> 伪距率 αdot（**m/s**，与观测模型的 SI 口径一致）。
 
-    αdot = -c·fd/f0，c = 299792458 m/s。注：易写成 C_LIGHT_KMS（km/s）会把观测放小
+    αdot = -c·fd/f0，c = 299792458 m/s。注：易写成 C_LIGHT_KMPS（km/s）会把观测放小
     1000 倍，与模型的 m/s 量纲错位 -> 定轨发散（材料数据集实测）。
     """
-    return -C_LIGHT_KMS * fd_hz / f0
+    return -C_LIGHT_KMPS * fd_hz / f0
 
 def rangerate_to_fd(rho_dot_kms: float, f0: float = F0_DEFAULT_HZ) -> float:
     """伪距率(km/s) -> 频偏 fd (Hz)。fd = -f0·αdot/c。"""
-    return -f0 * rho_dot_kms / C_LIGHT_KMS
+    return -f0 * rho_dot_kms / C_LIGHT_KMPS
 
 def pseudorange_rate_and_jacobian(state: np.ndarray,
                                   rx_pos: np.ndarray,
@@ -352,11 +352,11 @@ def _ecef_accel(r: np.ndarray, v: np.ndarray) -> np.ndarray:
     r = np.asarray(r, dtype=float)
     v = np.asarray(v, dtype=float)
     rmag = float(np.linalg.norm(r))
-    acc = -GM_EARTH / rmag ** 3 * r
+    acc = -GM_EARTH_KM3_S2 / rmag ** 3 * r
     # J2 摄动（标准矢量形式）
     z = r[2]
     z2r2 = z * z / rmag ** 2
-    k = -1.5 * J2 * GM_EARTH * WGS84_RE ** 2 / rmag ** 5
+    k = -1.5 * J2 * GM_EARTH_KM3_S2 * WGS84_RE ** 2 / rmag ** 5
     acc[0] += k * r[0] * (1.0 - 5.0 * z2r2)
     acc[1] += k * r[1] * (1.0 - 5.0 * z2r2)
     acc[2] += k * z * (3.0 - 5.0 * z2r2)
@@ -835,7 +835,7 @@ def plot_convergence_curve(t: np.ndarray, pos_err_rls: np.ndarray,
     axes[0].set_title("多普勒定轨收敛曲线 (Iridium 风格 LEO)")
     axes[0].legend()
     axes[0].grid(True, which="both", alpha=0.3)
-    fd_res = -f0 * np.asarray(residuals_ekf) / C_LIGHT_KMS   # 残差换算回 Hz
+    fd_res = -f0 * np.asarray(residuals_ekf) / C_LIGHT_KMPS   # 残差换算回 Hz
     axes[1].plot(t / 60.0, fd_res, lw=0.9, color="teal")
     axes[1].axhline(0, color="k", lw=0.6)
     axes[1].set_xlabel("时间 (min)")
@@ -953,11 +953,11 @@ def doppler_orbit_determine(observations: List[Tuple[float, float]],
         # 之前取 10 m 位置先验，比观测还"自信"，会把 RLS 拉离 TLE 先验并锁到
         # 多普勒不可观测的方向上（材料数据集上表现为位置偏 2.5e6 km）。
         init_P = np.diag([30.0 ** 2] * 3 + [0.03 ** 2] * 3
-                         + [(0.03 / C_LIGHT_KMS) ** 2])
+                         + [(0.03 / C_LIGHT_KMPS) ** 2])
     # 测量噪声（**m/s**，与观测模型输出量纲一致）：
     # 可显式给定；否则按"频移 σ=10Hz"折算。
     if observation_sigma_mps is None:
-        observation_sigma_mps = C_LIGHT_MS / f0 * 10.0
+        observation_sigma_mps = C_LIGHT_MPS / f0 * 10.0
     r_sigma = float(observation_sigma_mps) / 1000.0  # km/s（内部量纲，对外报 m/s）
     q_sigma = np.array([1e-5, 1e-5, 1e-5, 1e-6, 1e-6, 1e-6, 1e-6])
 

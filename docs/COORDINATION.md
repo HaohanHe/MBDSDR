@@ -2521,6 +2521,16 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `tests/test_tx_no_hardware.py` | 共享件边界线/6ae85f56（同名定义扫描：删 _arm_token 首个定义（:23 被 :129 遮蔽，调用点全在其后）） | 2026-11-14 12:45 | 本笔 |
 | `scripts/lint_dead_symbols.py` | 共享件边界线/6ae85f56（文档化同名遮蔽盲区（按名字引用 vs 按定义解析）与闸门接入点，不改判定逻辑） | 2026-11-14 12:45 | 本笔 |
 | `docs/code-guards.md` | 共享件边界线/6ae85f56（新增「同名遮蔽」节：盲区成因、判定四步、全仓 2 处真遮蔽结果） | 2026-11-14 12:45 | 本笔 |
+| `mbdsdr_ai/{orbit,decoders,fengyun_sat,sdr_tools}.py` | 冗余线/6ae85f56（第5件：C_LIGHT -> C_LIGHT_KMPS（km/s 口径，值 299792.458 不变）） | 2026-11-14 12:53 | 本笔 |
+| `mbdsdr_ai/satellite/tracker.py` | 冗余线/6ae85f56（第5件：C_LIGHT -> C_LIGHT_KMPS（km/s 口径，值不变）） | 2026-11-14 12:53 | 本笔 |
+| `mbdsdr_ai/{acquisition,gps_nav,vna_cal}.py` | 冗余线/6ae85f56（第5件：C_LIGHT -> C_LIGHT_MPS（m/s 口径）；gps_nav MU_EARTH -> MU_EARTH_M3_S2（GPS ICD 3.986005e14 值不动）） | 2026-11-14 12:53 | 本笔 |
+| `mbdsdr_ai/{orbit_dynamics,orbit_determination,orbit_perturbation,gpredict_adapter}.py` | 冗余线/6ae85f56（第5件：光速/GM 加 _MPS/_KMPS/_KM3_S2 后缀；GPS ICD 3.986005e14 与 WGS-72 3.986008e5 值不动、不统一） | 2026-11-14 12:53 | 本笔 |
+| `mbdsdr_ai/astronomy.py` | 冗余线/6ae85f56（第5件：删零引用的 EARTH_RADIUS_KM=6378.137（与 new_spacetime 平均半径同名不同义），保留 EARTH_FLATTENING） | 2026-11-14 12:53 | 本笔 |
+| `tests/{gpredict_test,test_orbit_dynamics,test_orbit_determination,test_sat_groundstation_roundtrip}.py` | 冗余线/6ae85f56（第5件：跟随常量改名（C_LIGHT_KMS/C_LIGHT/MU_EARTH -> 带单位后缀）） | 2026-11-14 12:53 | 本笔 |
+| `mbdsdr_ai/tests/{test_orbit_perturbation,test_orbit_tools_behavior,test_receive_doppler}.py` | 冗余线/6ae85f56（第5件：跟随常量改名（含本地常量与 docstring）） | 2026-11-14 12:53 | 本笔 |
+| `experiments/{exp_doppler_orbit,exp_doppler_duration}.py` | 冗余线/6ae85f56（第5件：跟随常量改名 C_LIGHT_KMS -> C_LIGHT_KMPS） | 2026-11-14 12:53 | 本笔 |
+| `tests/test_constant_units.py` | 冗余线/6ae85f56（第5件：新增守护（值不变/后缀成对/旧名消失/三套 GM 未统一/零引用半径已删）） | 2026-11-14 12:53 | 本笔 |
+| `docs/audit_r2/25_orbit.md` | 冗余线/6ae85f56（第5件：更正已证伪的 decoders 无 GMST 旋转 结论；:98 同步 orbit.C_LIGHT_KMPS） | 2026-11-14 12:53 | 本笔 |
 
 > 上表各行均由 `claim` 台账推导：owner 原文与 `acquired_at` 直接取自台账，
 > 目的优先用台账里的 `claim_reason`，没有就如实写「未声明」，不补编。时间列只是

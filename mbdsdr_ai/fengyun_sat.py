@@ -773,7 +773,7 @@ def fy3_track(tle: Tuple[str, str], observer_lat: float, observer_lon: float,
     返回 dict：azimuth/elevation/range/range_rate/doppler_shift_hz/altitude。
     """
     from sgp4.api import Satrec
-    from .orbit import _state_from_satrec, C_LIGHT
+    from .orbit import _state_from_satrec, C_LIGHT_KMPS
     sat = Satrec.twoline2rv(tle[0], tle[1])
     jd_utc = t_unix / 86400.0 + 2440587.5
     st = _state_from_satrec(sat, "FENGYUN-3", jd_utc,
@@ -781,7 +781,7 @@ def fy3_track(tle: Tuple[str, str], observer_lat: float, observer_lon: float,
                             epoch=tle[0][18:32].strip())
     if st is None:
         return {"error": "SGP4 传播失败"}
-    shift = -nominal_freq_hz * st["range_rate_kms"] / C_LIGHT
+    shift = -nominal_freq_hz * st["range_rate_kms"] / C_LIGHT_KMPS
     return {
         "elevation_deg": st["elevation"],
         "azimuth_deg": st["azimuth"],

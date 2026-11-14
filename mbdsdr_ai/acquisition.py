@@ -35,7 +35,7 @@ from . import space_weather
 from .tool_registry import ToolResult, clean_exc
 
 # 物理常数
-C_LIGHT = 299_792_458.0
+C_LIGHT_MPS = 299_792_458.0
 # 圆波导 TE11 模第一根零位（贝塞尔函数 J1 的第一个非零根）
 TE11_ROOT = 1.8412
 # 地球平均半径（m）
@@ -397,7 +397,7 @@ def _geo_pointing(args):
 
         el = math.degrees(math.asin(max(-1.0, min(1.0, d_u / rng))))
         az = math.degrees(math.atan2(d_e, d_n)) % 360.0
-        one_way_ms = rng / C_LIGHT * 1000.0
+        one_way_ms = rng / C_LIGHT_MPS * 1000.0
         return ToolResult(
             success=True,
             content=(
@@ -427,13 +427,13 @@ def _geo_pointing(args):
 # ═══════════════════════════════════════════════════════════
 def dish_gain_db(diameter_m: float, freq_mhz: float, efficiency: float = 0.6) -> float:
     """抛物面天线增益（dBi）：G = η (π D f / c)^2。"""
-    lam = C_LIGHT / (freq_mhz * 1e6)
+    lam = C_LIGHT_MPS / (freq_mhz * 1e6)
     return 10.0 * math.log10(efficiency * (math.pi * diameter_m / lam) ** 2)
 
 
 def beamwidth_deg(diameter_m: float, freq_mhz: float) -> float:
     """半功率波束宽度（度）：θ3dB ≈ 70 λ / D（工程经验式）。"""
-    lam = C_LIGHT / (freq_mhz * 1e6)
+    lam = C_LIGHT_MPS / (freq_mhz * 1e6)
     return 70.0 * lam / diameter_m
 
 
@@ -460,7 +460,7 @@ def _dish_gain(args):
                 "f_over_d": fd,
                 "focal_length_m": fd * d,
                 "efficiency": eta,
-                "wavelength_m": C_LIGHT / (f * 1e6),
+                "wavelength_m": C_LIGHT_MPS / (f * 1e6),
             },
         )
     except Exception as e:
@@ -734,7 +734,7 @@ def _fe_diagnose(args):
 # ═══════════════════════════════════════════════════════════
 def te11_cutoff_hz(diameter_m: float) -> float:
     """圆波导 TE11 模截止频率：fc = 1.8412 c / (π D)。"""
-    return TE11_ROOT * C_LIGHT / (math.pi * diameter_m)
+    return TE11_ROOT * C_LIGHT_MPS / (math.pi * diameter_m)
 
 
 def guide_wavelength_m(freq_hz: float, cutoff_hz: float) -> float:
@@ -742,7 +742,7 @@ def guide_wavelength_m(freq_hz: float, cutoff_hz: float) -> float:
     if freq_hz <= cutoff_hz:
         raise ValueError(
             f"工作频率 {freq_hz/1e6:.1f} MHz 必须高于 TE11 截止 {cutoff_hz/1e6:.1f} MHz")
-    lam0 = C_LIGHT / freq_hz
+    lam0 = C_LIGHT_MPS / freq_hz
     return lam0 / math.sqrt(1.0 - (cutoff_hz / freq_hz) ** 2)
 
 
@@ -759,7 +759,7 @@ def _cantenna_design(args):
             raise ValueError(
                 f"{freq/1e6:.1f} MHz 低于 TE11 截止 {fc/1e6:.1f} MHz，无 TE11 模")
         lam_g = guide_wavelength_m(freq, fc)
-        lam0 = C_LIGHT / freq
+        lam0 = C_LIGHT_MPS / freq
         findings = []
         rec_len = round(0.75 * lam_g * 1000.0 / 5.0) * 5.0
         rec_probe = round(0.25 * lam_g * 1000.0 / 5.0) * 5.0

@@ -66,10 +66,10 @@ _TX_PARITY_PREV: Tuple[Tuple[int, int], ...] = (
 #: TLM 前导码 10001011b = 139（十进制），ICD 固定值
 TLM_PREAMBLE = 0b10001011
 
-#: WGS-84 重力常数与地球自转（SI/公开常数值，零容差）
-MU_EARTH = 3.986005e14            # m^3/s^2
+#: GPS ICD 规范值（IS-GPS-200 表 20-IV；值不动，只改名加单位后缀）
+MU_EARTH_M3_S2 = 3.986005e14            # m^3/s^2
 OMEGA_EARTH = 7.2921151467e-5     # rad/s
-C_LIGHT = 299792458.0             # m/s
+C_LIGHT_MPS = 299792458.0             # m/s
 
 #: 子帧结构：10 字 × 30 bit
 WORD_BITS = 30
@@ -324,7 +324,7 @@ def _sat_pos_core(eph: Dict[str, Any], t_s: float) -> np.ndarray:
     a = float(eph["sqrt_a"]) ** 2
     if a <= 0:
         raise ValueError("sqrtA ≤ 0，星历无效")
-    n0 = math.sqrt(MU_EARTH / a ** 3)
+    n0 = math.sqrt(MU_EARTH_M3_S2 / a ** 3)
     n = n0 + float(eph["delta_n_rad_s"])
     tk = float(t_s) - float(eph["toe_s"])
     if tk < -302400.0:
@@ -371,7 +371,7 @@ def ephemeris_sat_pos(eph: Dict[str, Any], t_s: float,
     if a <= 0:
         raise ValueError("sqrtA ≤ 0，星历无效")
     e = float(eph["eccentricity"])
-    n0 = math.sqrt(MU_EARTH / a ** 3)
+    n0 = math.sqrt(MU_EARTH_M3_S2 / a ** 3)
     tk = float(t_s) - float(eph["toe_s"])
     if tk < -302400.0:
         tk += 604800.0
@@ -495,7 +495,7 @@ def pvt_solve(observations: Sequence[Dict[str, Any]],
         return {
             "pos_ecef_m": [float(v) for v in x],
             "clock_bias_m": float(b),
-            "clock_bias_s": float(b) / C_LIGHT,
+            "clock_bias_s": float(b) / C_LIGHT_MPS,
             "converged": True,
             "iterations": it,
             "residual_m": [float(v) for v in final_resid],

@@ -91,7 +91,7 @@ def test_iridium_synthetic_convergence():
     # 第 7 维（钟差偏置，km/s）写入合成数据里已知的 30Hz 常数钟漂
     # （单站多普勒无法分离"钟差"与"轨道误差"，产品推荐：先校时得偏置写入初值，
     # 再固定钟差估计轨道）。
-    clk_bias_kms = 30.0 * od.C_LIGHT_KMS / f0
+    clk_bias_kms = 30.0 * od.C_LIGHT_KMPS / f0
     x0 = np.concatenate([
         truth_r[0] + np.array([10.0, -5.0, 3.0]),
         truth_v0 + np.array([0.001, -0.002, 0.001]),
@@ -100,7 +100,7 @@ def test_iridium_synthetic_convergence():
     # 单站多普勒的创新量是"钟差+轨道误差"的和，单次观测无法分离。
     # 产品的推荐工作流：先校时取得钟差偏置并写入初值第 7 维，再固定钟差估计轨道。
     P0 = np.diag([10.0 ** 2] * 3 + [0.01 ** 2] * 3 + [0.01 ** 2])
-    r_sigma = od.C_LIGHT_KMS / f0 * 10.0
+    r_sigma = od.C_LIGHT_KMPS / f0 * 10.0
 
     # ---- EKF ----
     res_ekf = od.doppler_orbit_determine(obs, 39.9, 116.4, 0.0, x0,

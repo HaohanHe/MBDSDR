@@ -58,7 +58,7 @@ WGS72_F = 1.0 / 298.26      # WGS-72 扁率
 WGS72_B = WGS72_A * (1.0 - WGS72_F)
 WGS72_E2 = WGS72_F * (2.0 - WGS72_F)
 OMEGA_E = 7.292115e-5       # rad/s, 地球自转角速度 (WGS-72)
-C_LIGHT = 299792.458          # km/s
+C_LIGHT_KMPS = 299792.458          # km/s
 
 
 class TLEUnavailableError(RuntimeError):
@@ -585,7 +585,7 @@ def doppler_correction(
     if st is None:
         return {"error": f"无法计算卫星 {satellite_name} 位置（TLE 不可用或不在内置列表）"}
     v_los = st["range_rate_kms"]
-    shift = -nominal_freq_hz * v_los / C_LIGHT  # 远离时频率降低
+    shift = -nominal_freq_hz * v_los / C_LIGHT_KMPS  # 远离时频率降低
     # 数值不做展示性取整：旧实现按 round(..., 4) 输出 MHz（=100 Hz 量化），
     # 工具链拿 corrected_freq_mhz 直接调谐时会偏到 ±50 Hz，且与控制器
     # （decoders.compute_doppler_correction，未取整）对不上。展示层各自
@@ -817,7 +817,7 @@ def _predict_passes_impl(
             s_set = _state_at(t_set) or seg_states[-1][1]
             dop = None
             if nominal_freq_hz and seg_states:
-                shifts = [-nominal_freq_hz * s["range_rate_kms"] / C_LIGHT
+                shifts = [-nominal_freq_hz * s["range_rate_kms"] / C_LIGHT_KMPS
                           for _, s in seg_states]
                 dop = {"min_hz": round(min(shifts), 1),
                        "max_hz": round(max(shifts), 1)}

@@ -389,7 +389,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         init_state = truth_states[0].copy()
         init_state[0:3] += perturb_r
         init_state[3:6] += perturb_v
-        r_sigma = od.C_LIGHT_KMS / od.F0_DEFAULT_HZ * sigma
+        r_sigma = od.C_LIGHT_KMPS / od.F0_DEFAULT_HZ * sigma
 
         ekf_errs, resids = run_ekf(
             times, obs_fd, truth_states, rx_pos, rx_vel, init_state, r_sigma)

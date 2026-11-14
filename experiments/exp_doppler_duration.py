@@ -58,7 +58,7 @@ def main():
 
     windows = [float(t) for t in args.window_grid.split(",")]
     runner_obj = runner.ExperimentRunner(args.seed)
-    r_sigma = od.C_LIGHT_KMS / od.F0_DEFAULT_HZ * args.sigma_hz
+    r_sigma = od.C_LIGHT_KMPS / od.F0_DEFAULT_HZ * args.sigma_hz
 
     # 整条过境（600s）真值：仰角 0.8->71->2.6 deg，中过境(t=300s)仰角最高。
     # 参考历元取在中过境（几何最好），扫围绕它的观测窗长 -> 观测性随窗长改善。
