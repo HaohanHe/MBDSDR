@@ -1040,6 +1040,17 @@ def main():
     # 以后调整时机也只改这一个方法，不再各写一遍 theme.apply(app)。
     window.apply_theme_once()
 
+    # 审计漏记必须可见：账本写不进时 fail-open（工具照常执行），但「审计已
+    # 失效」不能只留在 GUI 看不到的 stderr 里。健康计数落在独立文件
+    # （~/.mbdsdr/audit_health.json），这里把它挂成状态栏常驻标签并轮询；
+    # 计数为 0 时标签隐藏。挂载失败只写日志，不拦启动。
+    try:
+        from audit_alarm import install_audit_alarm
+        window.audit_alarm = install_audit_alarm(window)
+    except Exception as _audit_alarm_ex:  # noqa: BLE001 - 告警面板不得拦启动
+        print(f"[mbdsdr] 审计漏记告警未能挂上（不拦启动）: {_audit_alarm_ex}",
+              file=sys.stderr)
+
     # 设置写盘失败（例如安装目录/配置目录只读）时把真相送到状态栏，
     # 而不是只写进 settings.last_error 里无人看见。
     settings_obj = getattr(window, "settings", None)

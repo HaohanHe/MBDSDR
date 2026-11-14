@@ -990,11 +990,32 @@ python -c "from mbdsdr_ai.sdr_backend import HackRFBackend as K;be=K(device_inde
 | 保留策略 | 份数：当前 + 4 份备份（`AUDIT_LOG_KEEP_FILES=5`）；天数：备份 mtime 早于 180 天在下次轮转时删除（`AUDIT_LOG_RETENTION_DAYS=180`）；两者**先到者**生效 | 同上 |
 | 磁盘占用上限 | **40 MiB / 账本**（`AUDIT_LOG_DISK_CAP_BYTES = 8 MiB × 5`）。TX 审计账本另算（50 MB × 10 ≈ 500 MB，见附 G），两份账本各守各的上限 | 同上 + `tx_guard.TX_AUDIT_*` |
 | 查询入口 | `tool_guard.query_audit_events(start, end, path=None)`；实例侧 `AuditLog.query(start, end)`。`start`/`end` 接受 epoch 秒、`datetime`、ISO-8601 字符串，闭区间，`None` 不限；返回 `(事件, 坏行数)`；按 `timestamp` 排序 | `mbdsdr_ai/tool_guard.py`、`mbdsdr_ai/rotating_jsonl.py:read_events` |
-| 并发写（两个进程同写） | 「判大小 → 轮转 → 追加」整段在 `<ledger>.lock` 的 OS 文件锁内完成（Windows `msvcrt.locking` / POSIX `fcntl.flock`）；等不到锁按超时处理——工具审计账本 fail-open（打 stderr 跳过本次写入），TX 账本 fail-closed（拒绝发射） | `rotating_jsonl.file_lock`；`tests/test_audit_log_rotation.py::test_concurrent_writers_no_partial_or_lost_lines`（2 进程 × 150 条，300 条全在、无坏行） |
+| 并发写（两个进程同写） | 「判大小 → 轮转 → 追加」整段在 `<ledger>.lock` 的 OS 文件锁内完成（Windows `msvcrt.locking` / POSIX `fcntl.flock`）；等不到锁按超时处理——工具审计账本 fail-open（跳过本次写入，但**漏记要计数**，见下节），TX 账本 fail-closed（拒绝发射） | `rotating_jsonl.file_lock`；`tests/test_audit_log_rotation.py::test_concurrent_writers_no_partial_or_lost_lines`（2 进程 × 150 条，300 条全在、无坏行） |
 | 读侧并发 | 查询**不加写锁**：轮转是改名，读到正在写的最后一行可能是半行；这类行计入返回值的「坏行数」，不猜不补 | `read_events` 的 `skipped` |
 | 与 TX 审计的关系 | 轮转/保留/文件锁只有一份实现（`mbdsdr_ai/rotating_jsonl.py`），`TxAuditLog` 与 `AuditLog` 都在用；TX 的 fail-closed 语义、token 打码、计数器仍在 `tx_guard`，未搬动 | 本线重构，`tests/test_tx_audit.py` 全绿 |
 | 已知边界 | ① 跨进程 rename 与同文件追加在 Windows 本地盘上实测无丢行；网络盘 / 同步盘（OneDrive、SMB）未验，那里的 rename 原子性不保证。② 查询以事件自带 `timestamp` 为准，系统时钟回拨会让排序与范围过滤失真（账本本身不改正时钟）。③ 180 天清理依赖备份文件的 mtime，被外部工具 touch 过会延寿。④ 账本未开启（`MBDSDR_AUDIT_LOG` 未设）时不存在任何账本，本附录的容量约束只在开启后成立 | 本轮实测范围 |
 | 复跑判据 | `python -m pytest tests/test_audit_log_rotation.py tests/test_tx_audit.py -q`（5 + 79 passed）；并发那条用 `multiprocessing` spawn 起两个真实进程 | 本轮实跑 |
+
+### 附 X.1：fail-open 的漏记计数与界面可见（2026-11-14，审计漏记可见线追加）
+
+**一句话结论：工具审计账本写不进时仍然 fail-open（不阻断工具调用），但每次漏记都会在账本之外的独立健康文件里 +1，并记录最近一次的时刻与原因（锁超时 / 磁盘满 / 权限 / 其他）。累计条数有统一查询入口，达到阈值（当前是 1 条）时桌面端状态栏常驻显示，不再只留一行 GUI 看不见的 stderr。**
+
+| 项 | 值 / 行为 | 依据 |
+| --- | --- | --- |
+| 计数落点 | `~/.mbdsdr/audit_health.json`（`MBDSDR_AUDIT_HEALTH` 可覆盖）。**独立文件 + 独立 `<路径>.lock`**，不写进那个写不进去的账本——账本的锁/权限故障不会连带健康文件 | `mbdsdr_ai/audit_health.py::candidate_paths` |
+| 一起失效时的退路 | 用户目录写不进 → 系统临时目录（`%TEMP%/mbdsdr/audit_health.json`）；两处都写不进 → 留在本次会话内存，界面仍显示；下次任一落点可写时**补记**这些增量 | `note_audit_drop` 的候选路径循环 + `_MEM.pending` |
+| 记什么 | `dropped`（累计，只增不减）、`last_at`/`last_iso`（最近时刻）、`last_reason`/`last_reason_text`（`lock_timeout` / `disk_full` / `permission` / `other`）、`last_detail`、`last_ledger`、`by_reason`（按原因分组） | `audit_drop_snapshot()` 返回值 |
+| 查询入口（一个） | `python -m mbdsdr_ai.audit_health` 输出 JSON；代码内 `audit_drop_count()` / `audit_drop_snapshot()`；实例侧 `AuditLog.health()` | `mbdsdr_ai/audit_health.py::_main` |
+| 界面可见 | 阈值 `AUDIT_DROP_VISIBLE_THRESHOLD = 1`（漏一条就显示，审计是「调用过就该有记录」的承诺）。`desktop/main.py` 启动时把 `audit_alarm` 的常驻标签挂到状态栏右侧，每 15 s 读一次健康文件；计数为 0 隐藏，命中显示「审计漏记 N 条 · 最近原因 · 时刻」，tooltip 给按原因分组、计数文件路径与查询命令 | `desktop/audit_alarm.py`、`desktop/main.py`（`install_audit_alarm`） |
+| 为什么 audit 是 fail-open | 工具审计记录的是**已经发生**的调用。为留痕而阻断工具，是用「现在不能用」换「以后能查」，代价与收益倒挂；审计面自身故障应降级，不该成为工具链的单点。失效由计数 + 状态栏可见兜住 | `tool_guard.AuditLog` 类文档字符串 |
+| 为什么 TX 是 fail-closed（**不是待统一项**） | TX 账本记录的是**即将发出的射频能量**。没有账本就无法证明谁在何时发了什么，这类不可逆操作必须先有账、后发射。把 TX 改成 fail-open 等于允许「无记录发射」，把 audit 改成 fail-closed 等于让审计故障阻断所有工具——两个方向都不许 | `tx_guard.TxAuditLog.write`（失败抛 `TxAuditError`）；`tests/test_audit_health.py::test_tx_audit_remains_fail_closed` |
+| 判据（锁超时） | 同进程另持账本锁 + `lock_timeout=0.05` → `record()` 后 `dropped == 1`、`last_reason == "lock_timeout"`、时刻非空；健康文件原文里同样是 1；释放锁再写成功，`dropped` 仍为 1 | `tests/test_audit_health.py::test_lock_timeout_lands_in_health_file_not_only_stderr`、`..._count_survives_ledger_recovery` |
+| 判据（磁盘满 / 权限） | 账本追加抛 `OSError(ENOSPC)` → 原因 `disk_full`；抛 `EACCES` → 原因 `permission`；恢复后计数不变 | `test_disk_full_counts_and_reason_is_queryable`、`test_permission_denied_counts_and_reason_is_queryable` |
+| 判据（健康文件也写不进） | 父路径是普通文件 → 建目录失败：本次会话 `dropped == 1`、`visible == True`；换到可写路径后下一次写入把积压的 2 条一并补记 | `test_unwritable_health_file_still_visible_in_session`、`test_pending_drops_are_flushed_on_next_success` |
+| 判据（跨进程查询） | 子进程执行 `python -m mbdsdr_ai.audit_health`，读到同一计数与原因 | `test_query_entry_reports_cumulative_count_in_new_process` |
+| 反证 | 把 `AuditLog.record` 的异常分支改回「只打 stderr」：`tests/test_audit_health.py` 10 条里 **5 条红**（读的是健康文件原文，不读内存：计数为 0 或文件不存在）；恢复后全绿 | 本轮实跑（5 failed, 5 passed → 恢复后 45 passed） |
+| 已知边界 | ① 健康文件记录的是**本机累计**，不按账本路径分组（`last_ledger` 只保留最近一个）；多账本场景下 `by_reason` 是合计。② 健康文件损坏时先改名 `<path>.corrupt` 再按 0 起算，旧计数需人工从副本恢复。③ 计数文件本身也在用户磁盘上：整块盘写满且临时目录同样不可写时，只有本次会话内存可见（界面仍显示，重启归零）——这是「至少别完全消失」的下限，不冒充持久化。④ 界面轮询 15 s，别的进程刚发生的漏记最迟一个轮询周期后出现 | 本轮实测范围 |
+| 复跑判据 | `python -m pytest tests/test_audit_health.py tests/test_audit_alarm.py tests/test_tx_audit.py -q`（36 passed） | 本轮实跑 |
 
 
 

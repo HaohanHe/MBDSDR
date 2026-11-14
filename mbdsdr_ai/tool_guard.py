@@ -27,6 +27,11 @@ import sys
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
+from .audit_health import (
+    audit_drop_snapshot,
+    classify_failure,
+    note_audit_drop,
+)
 from .hooks import Event, EventType
 from .rotating_jsonl import RotatingJsonlLog
 
@@ -152,8 +157,10 @@ class AuditLog:
     ``HookManager.trigger``，通配符钩子必然收到）。
 
     口径与事件总线一致：只落事件信封（tool / arguments / ok / outcome
-    摘要），长结果不重复落盘（spill 路径已有全文）。任何 IO 失败只记
-    stderr 并放行——审计面绝不当工具链的单点故障源。
+    摘要），长结果不重复落盘（spill 路径已有全文）。任何 IO 失败都放行，
+    同时把这次漏记按原因记到独立健康文件（见 :mod:`mbdsdr_ai.audit_health`）
+    并保留 stderr 一行——审计面绝不当工具链的单点故障源，但失效本身必须
+    可查。
 
     容量：按大小轮转（:data:`AUDIT_LOG_MAX_BYTES`），保留
     :data:`AUDIT_LOG_KEEP_FILES` 份且不超过
@@ -162,6 +169,23 @@ class AuditLog:
     :mod:`mbdsdr_ai.rotating_jsonl` 的文件锁提供；查询统一走
     :meth:`query` / :func:`query_audit_events`，跨轮转文件按时间范围取，
     调用方不需要知道 ``.1`` / ``.2`` 的存在。
+
+    fail-open 与 TX 账本相反（2026-11-14）
+    ---------------------------------------
+
+    本账本写不进时**放行调用**，只把这次漏记记到独立健康文件
+    （:mod:`mbdsdr_ai.audit_health`）。``tx_guard.TxAuditLog`` 相反：写不进
+    就抛 :class:`~mbdsdr_ai.tx_guard.TxAuditError`，发射必须停下来。两者
+    不同不是遗漏，而是审计对象的后果不同：
+
+    * 工具审计记录的是**已经发生的调用**。为了留痕而阻断工具，是用
+      「让用户现在用不了」换「以后能查到」——代价与收益倒挂，而且审计面
+      本身故障时应当降级而不是成为单点；
+    * TX 账本记录的是**即将发出的射频能量**。没有账本就无法证明谁在什么
+      时候发了什么，这类不可逆操作必须先有账、后发射（fail-closed）。
+
+    所以**不要**为了统一把 TX 账本改成 fail-open，也不要因此把这里改成
+    fail-closed；漏记的可见性由 :meth:`health` 与状态栏告警承担。
     """
 
     def __init__(self, path: Optional[str] = None, *,
@@ -198,12 +222,29 @@ class AuditLog:
         return cls() if default_on else None
 
     def record(self, event: Event) -> None:
-        """钩子回调：追加一行 JSONL（超限先轮转）。绝不抛异常。"""
+        """钩子回调：追加一行 JSONL（超限先轮转）。绝不抛异常。
+
+        fail-open：写不进就放行，但这次漏记要记到独立健康文件——只打
+        stderr 在 GUI 里等于没有痕迹。健康文件也写不进时计数留在本次会话
+        内存里，界面仍能显示。
+        """
         try:
             self._log.append_line(json.dumps(event.to_dict(),
                                              ensure_ascii=False))
         except Exception as e:  # pragma: no cover - 审计失败不阻断工具流
-            print(f"[tool_guard] 审计账本写入失败（忽略）: {e}", file=sys.stderr)
+            reason = classify_failure(e)
+            try:
+                snapshot = note_audit_drop(reason, detail=str(e),
+                                           ledger=self.path)
+                total = int(snapshot.get("dropped") or 0)
+            except Exception:  # noqa: BLE001 - 计数失败也不能冒泡
+                reason, total = "other", -1
+            print(f"[tool_guard] 审计账本写入失败（fail-open，累计漏记 "
+                  f"{total} 条，最近原因={reason}）: {e}", file=sys.stderr)
+
+    def health(self) -> Dict[str, Any]:
+        """累计漏记快照（``dropped`` / ``last_reason`` / ``visible`` 等）。"""
+        return audit_drop_snapshot()
 
     def query(self, start: Any = None, end: Any = None) -> Tuple[List[Dict[str, Any]], int]:
         """跨轮转文件按时间范围查；返回 ``(事件, 坏行数)``。

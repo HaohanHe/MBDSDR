@@ -2414,6 +2414,13 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `desktop/sat_track_panel.py` | 无线电课清单线/6ae85f56（讲座清单 P2：过境多普勒 f_d(t) 曲线控件） | 2026-11-14 11:40 | 本笔 |
 | `tests/test_sat_doppler_curve_panel.py` | 无线电课清单线/6ae85f56（讲座清单 P2：曲线行契约与缺数据反证） | 2026-11-14 11:40 | 本笔 |
 | `docs/axioms.md` | 公理体检线/6ae85f56（重生成计数基准（c5ad569f，650 条），纯文档笔不计落后提交数） | 2026-11-14 11:41 | 本笔 |
+| `mbdsdr_ai/audit_health.py` | 审计漏记可见线/6ae85f56（第四轮：审计 fail-open 漏记计数（独立落点）） | 2026-11-14 11:42 | 本笔 |
+| `mbdsdr_ai/tool_guard.py` | 审计漏记可见线/6ae85f56（第四轮：漏记接入健康计数 + fail-open 说明） | 2026-11-14 11:42 | 本笔 |
+| `desktop/audit_alarm.py` | 审计漏记可见线/6ae85f56（第四轮：状态栏审计漏记常驻告警） | 2026-11-14 11:42 | 本笔 |
+| `desktop/main.py` | 审计漏记可见线/6ae85f56（第四轮：启动时挂审计漏记告警） | 2026-11-14 11:42 | 本笔 |
+| `tests/test_audit_health.py` | 审计漏记可见线/6ae85f56（第四轮：漏记计数判据与反证） | 2026-11-14 11:42 | 本笔 |
+| `tests/test_audit_alarm.py` | 审计漏记可见线/6ae85f56（第四轮：界面可见判据） | 2026-11-14 11:42 | 本笔 |
+| `docs/limitations-register.md` | 审计漏记可见线/6ae85f56（第四轮：附 X.1 漏记策略与 fail-open/fail-closed 差异） | 2026-11-14 11:42 | 本笔 |
 
 > 上表各行均由 `claim` 台账推导：owner 原文与 `acquired_at` 直接取自台账，
 > 目的优先用台账里的 `claim_reason`，没有就如实写「未声明」，不补编。时间列只是
