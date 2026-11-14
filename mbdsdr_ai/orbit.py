@@ -908,6 +908,35 @@ def predict_passes(
         start_unix=start_unix, tle_records=tle_records)[0]
 
 
+def _report_tle_policy(allow_stale: bool) -> Dict[str, Any]:
+    """报告层暴露的 TLE 新鲜度阈值快照；唯一真值在 ``tle_integrity``。
+
+    旧实现在 ``predict_passes_report`` 的三条返回路径各写一份
+    ``24.0 / 7.0 / 30.0`` 字面量：权威常量一改，报告会静默说谎，而且
+    三处必须同时改对。这里用**模块属性**动态读取（不是 ``from ... import``
+    绑定值），常量变更或 monkeypatch 都会实时跟随 —— 这是从 QGIS 3.44.15
+    「CRS/口径唯一真值 + 常态对拍」学到的治理次序，不是照搬它的坐标栈。
+
+    口径边界（同名 policy 但不同事实源，不许合并）：
+    * 本字典 = 新鲜度 tier 的四档阈值报告快照，键集合与数值保持原样；
+    * ``desktop/sat_track_panel._tle_policy`` 走 ``tracking_policy()``，
+      返回 short_tag / label / severity 等展示与闸门字段；
+    * ``builtin_tle_meta.synthetic_tle_policy`` 是合成 TLE 处置策略；
+    * ``tle_integrity.age_band`` 是 31-90d / >90d 的**展示五档**，
+      不进本字典，调用方要展示档位请直接用 ``age_band``。
+    """
+    try:
+        from . import tle_integrity as _ti
+    except ImportError:  # 扁平导入（脚本直接把 mbdsdr_ai 挂进 sys.path）
+        import tle_integrity as _ti
+    return {
+        "allow_stale": bool(allow_stale),
+        "fresh_max_hours": _ti.FRESH_MAX_HOURS,
+        "usable_max_days": _ti.USABLE_MAX_DAYS,
+        "expired_max_days": _ti.EXPIRED_MAX_DAYS,
+    }
+
+
 def predict_passes_report(
     observer_lat: float,
     observer_lon: float,
@@ -944,12 +973,7 @@ def predict_passes_report(
                 "detail": "；".join(station_ev["reasons"]),
             }],
             "station": station_ev,
-            "tle_policy": {
-                "allow_stale": bool(allow_stale),
-                "fresh_max_hours": 24.0,
-                "usable_max_days": 7.0,
-                "expired_max_days": 30.0,
-            },
+            "tle_policy": _report_tle_policy(allow_stale),
         }
     try:
         passes, degraded = _predict_passes_impl(
@@ -967,12 +991,7 @@ def predict_passes_report(
                 "detail": str(exc),
             }],
             "station": station_ev,
-            "tle_policy": {
-                "allow_stale": bool(allow_stale),
-                "fresh_max_hours": 24.0,
-                "usable_max_days": 7.0,
-                "expired_max_days": 30.0,
-            },
+            "tle_policy": _report_tle_policy(allow_stale),
         }
     if station_ev.get("station_warning"):
         # 放宽必须留痕：位置被启发式怀疑也要进降级清单，用户看得见。
@@ -988,10 +1007,5 @@ def predict_passes_report(
         "passes": passes,
         "degraded": degraded,
         "station": station_ev,
-        "tle_policy": {
-            "allow_stale": bool(allow_stale),
-            "fresh_max_hours": 24.0,
-            "usable_max_days": 7.0,
-            "expired_max_days": 30.0,
-        },
+        "tle_policy": _report_tle_policy(allow_stale),
     }
