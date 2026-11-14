@@ -26,6 +26,7 @@ from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
+from .environment_facts import EnvironmentCorrection
 from .tle_epoch import TLE_FUTURE_TOL_DAYS, parse_tle_epoch
 
 __all__ = [
@@ -45,6 +46,8 @@ __all__ = [
     "verify_identity",
     "freshness",
     "accuracy",
+    "freshness_with_environment",
+    "accuracy_with_environment",
     "TRACKING_LEVELS",
     "TRACKING_OPERATIONS",
     "TRACKING_MODES",
@@ -367,6 +370,188 @@ def accuracy(fresh: Dict[str, Any]) -> Dict[str, Any]:
         "epoch_utc": fresh.get("epoch_utc"),
         "pass_eligible": bool(fresh.get("pass_eligible")),
     }
+
+
+# ---------------------------------------------------------------------------
+# 环境收紧层：在 freshness / accuracy 之上按当天 Kp / F10.7 只收紧
+#
+# 既有四档阈值（FRESH_MAX_HOURS/USABLE_MAX_DAYS/EXPIRED_MAX_DAYS/
+# DEAD_STALE_MAX_DAYS）与 TRACKING_MODES 是基线事实源，一个字不改；
+# 本层只把基线阈值乘以环境收紧系数（factor ∈ (0, 1]）后再判一次档，
+# 结果取「基线档」与「收紧档」中更严格的那个——任何输入组合都不会让
+# 可信时长变长。缺环境输入 → 回落未校正基线并显式标注，不按最坏值猜。
+# ---------------------------------------------------------------------------
+#: 基线阈值（小时口径），仅由上面四个常量派生；只读。
+_BASE_THRESHOLD_HOURS: Dict[str, float] = {
+    "fresh_max_hours": FRESH_MAX_HOURS,
+    "usable_max_hours": USABLE_MAX_DAYS * 24.0,
+    "expired_max_hours": EXPIRED_MAX_DAYS * 24.0,
+    "dead_stale_max_hours": DEAD_STALE_MAX_DAYS * 24.0,
+}
+
+#: 档位严格度（越大越严格），用于「只能更严格」的比较。
+_TIER_SEVERITY: Dict[str, int] = {
+    "fresh": 0, "usable": 1, "expired": 2, "dead": 3, "unknown": 4,
+}
+
+#: 精度风险等级（越大越差），用于「风险不得降低」的兜底断言。
+_RISK_ORDER: Dict[str, int] = {
+    "low": 0, "moderate": 1, "high": 2, "unusable": 3,
+}
+
+
+def _uncorrected_environment(reason: str) -> EnvironmentCorrection:
+    """未注入/缺输入时的显式 unsolved 结论（factor=1.0，绝不猜档）。"""
+    return EnvironmentCorrection(
+        status="uncorrected", factor=1.0, kp=None, f107=None,
+        missing=(reason,),
+        note=f"{reason}；回落未校正基线（factor=1.0），不按最坏值猜。",
+    )
+
+
+def _tier_from_thresholds(age_days: float,
+                          thresholds: Dict[str, float]) -> str:
+    """用（可能已收紧的）小时阈值重判年龄档位。"""
+    age_hours = float(age_days) * 24.0
+    if age_hours <= thresholds["fresh_max_hours"]:
+        return "fresh"
+    if age_hours <= thresholds["usable_max_hours"]:
+        return "usable"
+    if age_hours <= thresholds["expired_max_hours"]:
+        return "expired"
+    return "dead"  # 31–90 天与 >90 天的 tier 都是 dead（展示层再拆档）
+
+
+def _stricter_tier(a: str, b: str) -> str:
+    """取更严格的一档（顺序 fresh < usable < expired < dead < unknown）。"""
+    return a if _TIER_SEVERITY.get(a, 4) >= _TIER_SEVERITY.get(b, 4) else b
+
+
+def _band_from_thresholds(age_days: Optional[float],
+                          thresholds: Dict[str, float]) -> str:
+    """用收紧后的阈值映射展示档位（stale 与 dead 都是 tier=dead）。"""
+    if age_days is None:
+        return "unknown"
+    age_hours = float(age_days) * 24.0
+    if age_hours <= thresholds["fresh_max_hours"]:
+        return "fresh"
+    if age_hours <= thresholds["usable_max_hours"]:
+        return "usable"
+    if age_hours <= thresholds["expired_max_hours"]:
+        return "expired"
+    if age_hours <= thresholds["dead_stale_max_hours"]:
+        return "stale"
+    return "dead"
+
+
+def freshness_with_environment(line1: str, fetched_at: Optional[float] = None,
+                               now: Optional[Any] = None,
+                               environment: Optional[EnvironmentCorrection] = None
+                               ) -> Dict[str, Any]:
+    """基线 :func:`freshness` + 当天空间天气收紧（只收紧）。
+
+    ``environment`` 是 :class:`~mbdsdr_ai.environment_facts.EnvironmentCorrection`
+    （通常由 ``space_weather_correction(snapshot)`` 求出）。返回基线结果的全部
+    字段（``thresholds`` 仍是四档基线原值，不改写），并追加：
+
+      * ``base_tier`` / ``base``：未收紧前的基线结论；
+      * ``effective_thresholds``：基线阈值 × factor（小时，只小不大）；
+      * ``environment``：修正结论（status/factor/Kp/F10.7 的 value/at_utc/
+        source/note/disclaimer）；
+      * ``tightened``：档位是否因环境输入而变严格；
+      * ``tier``/``label``/``pass_eligible``/``tracking_eligible``/``reason``：
+        收紧后的最终结论（只会比基线严格）。
+
+    缺环境输入、输入过期或超表范围时，``environment.status="uncorrected"``
+    且最终结论逐字段等于基线。
+    """
+    base = freshness(line1, fetched_at=fetched_at, now=now)
+    corr = environment if isinstance(environment, EnvironmentCorrection) \
+        else _uncorrected_environment("未注入环境修正（缺 Kp/F10.7 输入）")
+    base_thresholds = dict(_BASE_THRESHOLD_HOURS)
+    effective = corr.effective_thresholds(base_thresholds)
+
+    out: Dict[str, Any] = dict(base)
+    out["base_tier"] = base["tier"]
+    out["base"] = dict(base)
+    out["effective_thresholds"] = effective
+    out["environment"] = {
+        **corr.to_dict(),
+        "base_thresholds_hours": dict(base_thresholds),
+        "effective_thresholds_hours": dict(effective),
+    }
+    out["tightened"] = False
+    if base["tier"] == "unknown" or base.get("age_days") is None:
+        out["reason"] = (
+            f"{base.get('reason', '')}；环境层：历元未知，无法按年龄收紧"
+            f"（{corr.note}）")
+        return out
+
+    age = float(base["age_days"])
+    eff_tier = _tier_from_thresholds(age, effective)
+    tier = _stricter_tier(eff_tier, base["tier"])
+    usable = tier in _DEFAULT_USABLE_TIERS
+    tightened_note = "" if tier == base["tier"] else \
+        f"（档位由 {base['tier']} 收紧为 {tier}）"
+    out.update({
+        "tier": tier,
+        "label": TIER_LABELS[tier],
+        "pass_eligible": usable,
+        "tracking_eligible": usable,
+        "tightened": tier != base["tier"],
+        "reason": f"{base.get('reason', '')}；环境层：{corr.note}{tightened_note}",
+    })
+    # 只收紧的硬约束：最终档位不得比基线宽松，通过资格也不得放宽。
+    assert _TIER_SEVERITY[tier] >= _TIER_SEVERITY[base["tier"]]
+    assert not (out["pass_eligible"] and not base["pass_eligible"])
+    return out
+
+
+def accuracy_with_environment(fresh_env: Dict[str, Any]) -> Dict[str, Any]:
+    """:func:`accuracy` 的环境收紧版：风险不降低、时刻精度不提高。
+
+    ``fresh_env`` 是 :func:`freshness_with_environment` 的返回值。缺环境
+    输入（``environment.status="uncorrected"``）时逐字段等于基线
+    :func:`accuracy` 的结果。
+    """
+    data: Dict[str, Any] = fresh_env if isinstance(fresh_env, dict) else {}
+    base_fresh = data.get("base") if isinstance(data.get("base"), dict) else data
+    base = accuracy(base_fresh)
+    corr = data.get("environment") or {}
+    applied = bool(corr.get("applied"))
+    thresholds = dict(data.get("effective_thresholds")
+                      or _BASE_THRESHOLD_HOURS)
+    age = data.get("age_days")
+    band = _band_from_thresholds(age, thresholds) if applied else base["band"]
+    if AGE_BAND_SEVERITY.get(band, 4) < AGE_BAND_SEVERITY.get(base["band"], 4):
+        band = base["band"]  # 兜底：任何情况下不得比基线更宽松
+    if band == "fresh":
+        risk, precision = "low", 1
+    elif band == "usable":
+        risk, precision = "moderate", 1
+    elif band == "expired":
+        risk, precision = "high", 60
+    else:
+        risk, precision = "unusable", 60
+    out = dict(base)
+    out.update({
+        "risk": risk,
+        "time_precision_s": max(int(base["time_precision_s"]), int(precision)),
+        "tier": data.get("tier", base["tier"]),
+        "band": band,
+        "band_label": AGE_BAND_LABELS[band],
+        "band_severity": AGE_BAND_SEVERITY[band],
+        "pass_eligible": bool(data.get("pass_eligible",
+                                       base["pass_eligible"])),
+        "note": (band_note(band, age) if applied else base["note"]),
+        "base_risk": base["risk"],
+        "base_band": base["band"],
+        "tightened": bool(data.get("tightened")),
+        "environment": corr,
+        "effective_thresholds": thresholds,
+    })
+    assert _RISK_ORDER[risk] >= _RISK_ORDER[base["risk"]]
+    return out
 
 
 # ---------------------------------------------------------------------------

@@ -2345,6 +2345,7 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `desktop/main_window.py` | UI防呆线/6ae85f56（B1/B2：未连接时收听下拉置灰并说明原因；连接等待窗口按钮置灰显示「连接中…」） | 2026-11-14 11:25 | 本笔 |
 | `tests/test_connection_controls_guard.py` | UI防呆线/6ae85f56（B1/B2 判据：收听下拉随连接态启停、等待窗口内按钮置灰/文案/恢复（反证已跑：3 红）） | 2026-11-14 11:25 | 本笔 |
 | `tests/test_keyboard_main_flow.py` | UI防呆线/6ae85f56（B1 适配：键盘主流程模拟已连接改走 _panels_set_sdr_connected(True)） | 2026-11-14 11:25 | 本笔 |
+| `desktop/status_panel.py` | 参考移植线/20261114（12.2 文件重组质量行（与 87b3a36d 同笔）） | 2026-11-14 11:25 | 本笔 |
 | `mbdsdr_ai/gnss_environment.py` | 时空核对线/timeline-now（D2 电离层广播Klobuchar+实测气象Saastamoinen误差预算，缺项uncorrected） | 2026-11-14 11:26 | 本笔 |
 | `mbdsdr_ai/rtklib_adapter.py` | 时空核对线/timeline-now（D2 SPP/locate_multi 接入环境改正与 error_budget） | 2026-11-14 11:26 | 本笔 |
 | `mbdsdr_ai/gps_nav.py` | 时空核对线/timeline-now（D2 pvt_solve 接入环境改正与 error_budget） | 2026-11-14 11:26 | 本笔 |
@@ -2355,6 +2356,8 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `desktop/help_panel.py` | UI防呆线/6ae85f56（D5：ESCAPE_LAYER_NOTE 唯一口径并渲染到三步上手） | 2026-11-14 11:29 | 本笔 |
 | `tests/test_escape_cancels_long_ops.py` | UI防呆线/6ae85f56（D5 判据：三类长操作 Esc 取消、无操作不吞 Esc、帮助页原样渲染（反证已跑：4 红）） | 2026-11-14 11:29 | 本笔 |
 | `docs/evidence-standard.md` | 收尸线/6ae85f56（定裸 git 提交的允许条件与留痕方式（423ac262/31afa759 两笔缺口调查结论：个别线绕过，非工具漏）） | 2026-11-14 11:29 | 本笔 |
+| `mbdsdr_ai/tle_integrity.py` | 时空环境层/D3（TLE 可信时长环境收紧层（只收紧，不改四档阈值）） | 2026-11-14 11:30 | 本笔 |
+| `tests/test_tle_environment_tightening.py` | 时空环境层/D3（D3 判据与反证测试） | 2026-11-14 11:30 | 本笔 |
 
 > 上表各行均由 `claim` 台账推导：owner 原文与 `acquired_at` 直接取自台账，
 > 目的优先用台账里的 `claim_reason`，没有就如实写「未声明」，不补编。时间列只是
