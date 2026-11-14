@@ -260,6 +260,11 @@ def test_eight_step_flow_is_keyboard_only(win):
 
     # 5) 开始收听 / 7) 停止：收听下拉
     lc = win.listen_combo
+    # B1：收听下拉随真实连接态启停（未连接置灰）。本用例模拟「已连接」，
+    # 必须过同一个开关，而不是直接把下拉 setEnabled(True)。
+    win._panels_set_sdr_connected(True)
+    app.processEvents()
+    assert lc.isEnabled(), "已连接后收听下拉必须可用"
     assert {lc.itemText(i) for i in range(lc.count())} >= {"▶ 收听", "⏸ 停止解调"}
     lc.setFocus(Qt.OtherFocusReason)
     app.processEvents()

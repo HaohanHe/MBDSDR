@@ -2341,6 +2341,9 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `{mbdsdr_ai/tool_guard.py,mbdsdr_ai/core/mcp_server.py,mbdsdr_ai/tool_registry.py,desktop/main.py,tests/test_user_call_audit.py}` | 进程内工具守卫线/6ae85f56（留痕落盘：ToolRegistry 自动挂 AuditLog（与 MCP 同落点）+ 桌面入口默认开启审计） | 2026-11-14 11:21 | 本笔 |
 | `mbdsdr_ai/tle_epoch.py` | 公理体检线/6ae85f56（时空域缺口：未来历元容差常量化（TLE_FUTURE_TOL_DAYS）） | 2026-11-14 11:03 | 本笔 |
 | `mbdsdr_ai/tle_integrity.py` | 公理体检线/6ae85f56（时空域缺口：freshness 暴露 age_days_signed/epoch_implausible） | 2026-11-14 11:03 | 本笔 |
+| `desktop/main_window.py` | UI防呆线/6ae85f56（B1/B2：未连接时收听下拉置灰并说明原因；连接等待窗口按钮置灰显示「连接中…」） | 2026-11-14 11:25 | 本笔 |
+| `tests/test_connection_controls_guard.py` | UI防呆线/6ae85f56（B1/B2 判据：收听下拉随连接态启停、等待窗口内按钮置灰/文案/恢复（反证已跑：3 红）） | 2026-11-14 11:25 | 本笔 |
+| `tests/test_keyboard_main_flow.py` | UI防呆线/6ae85f56（B1 适配：键盘主流程模拟已连接改走 _panels_set_sdr_connected(True)） | 2026-11-14 11:25 | 本笔 |
 
 > 上表各行均由 `claim` 台账推导：owner 原文与 `acquired_at` 直接取自台账，
 > 目的优先用台账里的 `claim_reason`，没有就如实写「未声明」，不补编。时间列只是

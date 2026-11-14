@@ -6542,6 +6542,21 @@ class MainWindow(QMainWindow):
                     f"{self._CONNECT_WAIT_TIMEOUT_MS // 1000} 秒）")
         return "正在连接设备，请等本次连接结束"
 
+    def _set_connect_busy(self, busy: bool) -> None:
+        """连接进行中：按钮置灰并改文案「连接中…」，结束后恢复「连接」。
+
+        连接是阻塞调用（RTL-SDR 实测 2.0 s），置灰挡住重复点击；
+        只改标签不改按钮，用户仍会连点并触发「正在连接」的拒绝提示。
+        """
+        btn = getattr(self, "connect_btn", None)
+        if btn is None:
+            return
+        try:
+            btn.setEnabled(not busy)
+            btn.setText("连接中…" if busy else self.tr("连接"))
+        except Exception:
+            pass
+
     def _connect_backend_in_background(self, backend,
                                        meta: Optional[dict] = None) -> Optional[bool]:
         """把原生 ``connect()`` 丢到后台线程，GUI 线程用嵌套事件循环等结果。
@@ -6564,6 +6579,7 @@ class MainWindow(QMainWindow):
                                "不新增线程（避免两根线程抢同一根棒子）")
             return False
         self._connect_in_flight = True
+        self._set_connect_busy(True)
         attempt = self._connect_attempt + 1
         self._connect_attempt = attempt
         box: dict = {}
@@ -6610,6 +6626,9 @@ class MainWindow(QMainWindow):
             self._connect_worker = worker
             self._connect_in_flight = worker.is_alive()
             context["waiting"] = False
+            # 等待窗口结束就恢复按钮：超时后仍要能点「连接」重试（闸门会给
+            # 明确的「仍在收尾」提示），按钮不能永久停在「连接中…」。
+            self._set_connect_busy(False)
         if worker.is_alive():
             # 超时 ≠ 失败：不写「连接失败」、不 disconnect（那会和仍在跑的
             # connect() 抢设备），只把「结果未知、仍在收尾」如实告诉用户。
@@ -7245,7 +7264,7 @@ class MainWindow(QMainWindow):
         self.conn_label.setText(f"  状态: 连接中 {host}:{port}  ")
         self.conn_label.setStyleSheet(self._conn_label_qss(False, highlighted=True))
         self.status_conn.setText(f"连接中 {host}:{port}")
-        self.connect_btn.setEnabled(False)
+        self._set_connect_busy(True)
         self.connect_btn.setStyleSheet("")
         self.disconnect_btn.setEnabled(True)
         try:
@@ -7332,6 +7351,20 @@ class MainWindow(QMainWindow):
                 if fd is not None and hasattr(fd, "set_frequency"):
                     if not connected:
                         fd.set_frequency(None)
+        except Exception:
+            pass
+        # 收听三档下拉：没有设备时置灰——选了也只会被弹回「先连接」，
+        # 不如直接不可选，并在 tooltip 里写清原因。
+        try:
+            combo = getattr(self, "listen_combo", None)
+            if combo is not None:
+                combo.setEnabled(bool(connected))
+                combo.setToolTip(
+                    "收听 = 解调 + 出声；停止解调 = 保持连接但解调线程停（省 CPU）；"
+                    "不收听 = 解调继续但静音（给解码/录制/星座图用）。\n"
+                    "设备插上不会自动播放——连上设备与开始收听是两件事。"
+                    if connected else
+                    "未连接设备：先点「连接」，连上后才能选收听方式。")
         except Exception:
             pass
         # 工具栏录音按钮（无 SDR 不可录音）
@@ -7540,7 +7573,7 @@ class MainWindow(QMainWindow):
         self._link_degraded = False
         self._link_degraded_announced = False
         self._link_degraded_code = ""
-        self.connect_btn.setEnabled(True)
+        self._set_connect_busy(False)
         self.disconnect_btn.setEnabled(False)
         # 设备没了就不能还挂着"正在收听"：复位按钮 + 关声卡，避免重连时
         # 用户没点收听却突然出声（插上≠播放的边界不能从断连这里漏掉）。
@@ -7643,6 +7676,9 @@ class MainWindow(QMainWindow):
             self._link_degraded_code = ""
             # S9：硬件真正就绪才启用调谐/录音等控件（连接中一直保持置灰）
             self._panels_set_sdr_connected(True)
+            # 连接完成：把「连接中…」收回来；已连着时按钮继续置灰
+            self._set_connect_busy(False)
+            self.connect_btn.setEnabled(False)
             # 设备变了 → ADS-B 面板的上限提示跟着设备走（FC0012 收不到 1090）
             self._sync_adsb_tuner_limit()
             # 硬件就绪：把设备报告的工具 schema 注册进 AI agent
@@ -7660,9 +7696,10 @@ class MainWindow(QMainWindow):
             self._panels_set_sdr_connected(False)
             try:
                 self.disconnect_btn.setEnabled(False)
-                self.connect_btn.setEnabled(True)
             except Exception:
                 pass
+            # 失败也要把「连接中…」收回「连接」，否则按钮文案永久停在连接中
+            self._set_connect_busy(False)
             self._refresh_tx_readout()
             self._refresh_tx_button_state()
 
