@@ -2302,6 +2302,9 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `desktop/scanner_panel.py` | S1-S4结果伪造线/6ae85f56（静默丢弃：扫频在途时重复触发开始，状态行写「扫频进行中（忽略重复开始）」） | 2026-11-14 11:13 | 本笔 |
 | `tests/test_scanner_failure_and_cancel.py` | S1-S4结果伪造线/6ae85f56（判据：假 worker 在途触发开始 → 状态行含「扫频进行中」；恢复裸 return 即红） | 2026-11-14 11:13 | 本笔 |
 | `docs/COORDINATION.md` | S1-S4结果伪造线/6ae85f56（本笔 §6.1 登记行，提交后释放） | 2026-11-14 11:13 | 本笔 |
+| `desktop/weather_panel.py` | S1-S4结果伪造线/6ae85f56（静默丢弃：解码在途时重复触发开始，状态行写「解码进行中（忽略重复开始）」） | 2026-11-14 11:14 | 本笔 |
+| `tests/test_weather_panel_fengyun.py` | S1-S4结果伪造线/6ae85f56（判据：_is_busy 时触发开始 → 状态行含「解码进行中」；恢复裸 return 即红） | 2026-11-14 11:14 | 本笔 |
+| `docs/COORDINATION.md` | S1-S4结果伪造线/6ae85f56（本笔 §6.1 登记行，提交后释放） | 2026-11-14 11:14 | 本笔 |
 
 > 上表各行均由 `claim` 台账推导：owner 原文与 `acquired_at` 直接取自台账，
 > 目的优先用台账里的 `claim_reason`，没有就如实写「未声明」，不补编。时间列只是

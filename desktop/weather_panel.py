@@ -280,15 +280,23 @@ class DecodeWorker(QObject):
                 if img is not None:
                     got = img
         if got is None:
-            self._emit(ok=False, frames=len(vcdus),
-                       error="VCDU 已解出但 LRIT 图像段未凑齐（录制时长过短或信号弱）")
+            st = parser.stats()
+            self._emit(
+                ok=False, frames=len(vcdus),
+                error=("VCDU 已解出但 LRIT 图像段未凑齐（录制时长过短或信号弱）；"
+                       f"丢帧 {st['vcdus_missing']}、断链 {st['continuity_breaks']} 次、"
+                       f"丢文件 {st['files_dropped']}、长度异常 {st['session_len_mismatch']}、"
+                       f"CRC 失败 {st['tpdu_crc_fail'] + st['session_crc_fail']}"),
+                meta={"reassembly": st})
             return
         from PIL import Image
         arr = np.asarray(got.pixels, dtype=np.uint8).reshape(got.height, got.width)
         Image.fromarray(arr, mode="L").save(out_png)
         self._emit(ok=True, png=out_png, width=got.width, height=got.height,
                    annotation=got.annotation, channel="GOES ABI",
-                   frames=len(vcdus), meta={"image_identifier": got.image_identifier})
+                   frames=len(vcdus),
+                   meta={"image_identifier": got.image_identifier,
+                         "reassembly": parser.stats()})
 
     # ---- NOAA-19 APT：wav 音频 → APT 解码 → PNG -----------------------
     def _run_noaa(self):
@@ -768,6 +776,8 @@ class WeatherPanel(QWidget):
     def start_decode(self):
         """开始解码（离线录制文件 或 实时 SDR 落盘后解码）。"""
         if self._is_busy():
+            # 按钮已置灰，程序化调用仍会进来：给出回执，别让这次开始无声消失。
+            self._update_status(extra="解码进行中（忽略重复开始，可先点「停止」）")
             return
         realtime = self._is_realtime()
         sat = self._current_sat()

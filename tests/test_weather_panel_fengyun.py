@@ -58,6 +58,24 @@ def test_fy4_raw_iq_goes_through_real_ccsds_chain(tmp_path):
     assert not png.exists(), "失败时不得留下半截图"
 
 
+def test_repeat_start_while_decoding_says_so():
+    """解码进行中再触发开始：不许静默 return，要写出「忽略重复开始」。
+
+    实测缺陷（2026-11-14）：`start_decode` 在 `_is_busy()` 时直接 return。
+    按钮已置灰，但程序化调用（工具/快捷键）仍能进来，用户得不到任何
+    「这次没有开始」的回执。
+    """
+    from desktop.weather_panel import WeatherPanel
+
+    panel = WeatherPanel()
+    try:
+        panel._is_busy = lambda: True
+        panel.start_decode()
+        assert "解码进行中" in panel.status_label.text()
+    finally:
+        panel.close()
+
+
 def test_status_line_frequency_uses_readouts():
     """A01：状态行频率读数走 readouts.format_frequency_hz，不就地拼「MHz」。
 
