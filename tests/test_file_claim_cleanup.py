@@ -177,6 +177,7 @@ def test_default_is_dry_run(tmp_path: Path) -> None:
     result = run(repo, locks, "cleanup-stale")
     assert result.returncode == 3, result.stderr + result.stdout
     assert "READY" in result.stdout
+    assert "【待办·可释放未释放】1" in result.stdout
     assert "未加 --release" in result.stdout
     assert _only_marker(locks).exists(), "只审计不许改占位"
     assert not _log(locks), "只审计不许写清理账"
@@ -216,11 +217,15 @@ def test_release_proven_dead_claim_writes_audit(tmp_path: Path) -> None:
     assert len(before) == 1 and len(after) == 1
     assert before[0]["path"] == TARGET
     assert before[0]["owner"] == data["owner"]
+    assert before[0]["line"] == "线A"
     assert before[0]["by"] == "清理人"
     assert before[0]["claim_before"]["owner"] == data["owner"]
     assert set(before[0]["evidence"]) == {"lease", "holder", "content", "no_inflight"}
     assert all(item["status"] == "PASS" for item in before[0]["evidence"].values())
     assert after[0]["released"] is True
+    assert after[0]["line"] == "线A"
+    assert after[0]["evidence"]["content"]["status"] == "PASS"
+    assert after[0]["claim_after"] is None
 
 
 def test_changed_content_blocks_release(tmp_path: Path) -> None:
@@ -231,9 +236,10 @@ def test_changed_content_blocks_release(tmp_path: Path) -> None:
     (repo / TARGET).write_text("changed after claim\n", encoding="utf-8")
 
     result = run(repo, locks, "cleanup-stale", "--release", "--by", "人", "--reason", "x")
-    assert result.returncode == 3, result.stderr + result.stdout
+    assert result.returncode == 0, result.stderr + result.stdout
     assert "SUSPECT" in result.stdout
     assert "content(FAIL" in result.stdout
+    assert "补法：" in result.stdout
     assert _only_marker(locks).exists()
     assert not _log(locks)
 
@@ -246,7 +252,7 @@ def test_missing_baseline_on_untracked_file_is_a_gap(tmp_path: Path) -> None:
     _expire(locks, legacy=True)
 
     result = run(repo, locks, "cleanup-stale", "--release", "--by", "人", "--reason", "x")
-    assert result.returncode == 3, result.stderr + result.stdout
+    assert result.returncode == 0, result.stderr + result.stdout
     assert "content(GAP" in result.stdout
     assert "不在 git 跟踪下" in result.stdout
     assert _only_marker(locks).exists()
@@ -278,6 +284,70 @@ def test_alive_pid_without_create_time_is_a_gap(tmp_path: Path) -> None:
     _write_marker(locks, data)
 
     result = run(repo, locks, "cleanup-stale", "--release", "--by", "人", "--reason", "x")
-    assert result.returncode == 3, result.stderr + result.stdout
+    assert result.returncode == 0, result.stderr + result.stdout
     assert "holder(GAP" in result.stdout
     assert _only_marker(locks).exists()
+
+
+def test_post_claim_commit_is_undecidable_not_todo(tmp_path: Path) -> None:
+    """claim 之后有提交：内容再也无法回溯到取得时 → UNDECIDABLE，不进待办、不改退出码。"""
+    repo, locks = tmp_path / "repo", tmp_path / "locks"
+    _init_repo(repo)
+    _claim(repo, locks)
+    (repo / TARGET).write_text("committed after claim\n", encoding="utf-8")
+    _git(repo, "add", TARGET)
+    _git(
+        repo, "-c", "user.name=test", "-c", "user.email=test@example.invalid",
+        "commit", "-q", "-m", "after claim",
+    )
+    data = _read_marker(locks)
+    now = time.time()
+    data["acquired_at"] = now - 120  # 让“之后有提交”确定成立
+    data["heartbeat_at"] = now - 3600
+    data["ttl_min"] = 10
+    data.pop("content_sha256", None)
+    data.pop("content_baseline_from", None)
+    _write_marker(locks, data)
+
+    result = run(repo, locks, "cleanup-stale", "--release", "--by", "人", "--reason", "x")
+    assert result.returncode == 0, result.stderr + result.stdout
+    assert "UNDECIDABLE 1" in result.stdout
+    assert "不会因为时间推移" in result.stdout
+    assert "不是「文件清白」的证明" in result.stdout
+    assert "post_claim_commit=1" in result.stdout
+    assert _only_marker(locks).exists(), "UNDECIDABLE 不许被释放"
+
+    trend = locks / "claim_cleanup_trend.jsonl"
+    last = json.loads(trend.read_text(encoding="utf-8").splitlines()[-1])
+    assert last["summary"]["undecidable"] == 1
+    assert last["undecidable_reasons"] == {"post_claim_commit": 1}
+
+
+def test_undecidable_json_is_machine_readable(tmp_path: Path) -> None:
+    repo, locks = tmp_path / "repo", tmp_path / "locks"
+    _init_repo(repo)
+    _claim(repo, locks)
+    (repo / TARGET).write_text("committed after claim\n", encoding="utf-8")
+    _git(repo, "add", TARGET)
+    _git(
+        repo, "-c", "user.name=test", "-c", "user.email=test@example.invalid",
+        "commit", "-q", "-m", "after claim",
+    )
+    data = _read_marker(locks)
+    now = time.time()
+    data["acquired_at"] = now - 120
+    data["heartbeat_at"] = now - 3600
+    data["ttl_min"] = 10
+    data.pop("content_sha256", None)
+    data.pop("content_baseline_from", None)
+    _write_marker(locks, data)
+
+    result = run(repo, locks, "cleanup-stale", "--json")
+    assert result.returncode == 0, result.stderr + result.stdout
+    payload = json.loads(result.stdout)
+    assert payload["exit_code"] == 0
+    assert payload["undecidable"]["count"] == 1
+    assert payload["undecidable"]["reasons"] == {"post_claim_commit": 1}
+    assert payload["undecidable"]["ratio"] == 1.0
+    assert payload["rows"][0]["category"] == "undecidable"
+    assert payload["rows"][0]["undecidable_reason"] == "post_claim_commit"
