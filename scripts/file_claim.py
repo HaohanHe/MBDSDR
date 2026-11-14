@@ -88,6 +88,9 @@
   python scripts/file_claim.py status desktop/main_window.py
   python scripts/file_claim.py audit-stale            # 定期跑：过期 claim 却仍在改文件
   python scripts/file_claim.py audit-stale --json
+  python scripts/file_claim.py cleanup-stale          # 默认只审计：逐条列证据，够才标可释放
+  python scripts/file_claim.py cleanup-stale --release --by <释放人> --reason "<理由>"
+  python scripts/file_claim.py cleanup-stale --json
   python scripts/file_claim.py takeover desktop/main_window.py --owner 接管线 \
       --reason "原持有者进程已死，工作区干净"
   python scripts/file_claim.py legacy-token-repair desktop/main_window.py \
@@ -100,6 +103,18 @@ token_sha256 + sidecar 缺失 + 签发早于 sidecar 引入版 028f390f」的 cl
 
 退出码：0 成功；2 被拒绝（被他人占用 / 非持有者 / 本就没有 claim / 接管判据不足）；
 1 用法错误；3 = `audit-stale` 发现「claim 已过期但文件 mtime 晚于 acquired_at」的漂移。
+
+`cleanup-stale` 另有一套**按证据**的退出码（它不做任何「超过 N 分钟一律释放」
+的默认分支）：
+
+===  ==================================================================
+码   含义
+===  ==================================================================
+0    没有需要人处理的：没有可释放的，也没有「疑似失联但证据不足」的
+1    用法错误（``--release`` 缺 ``--by`` / ``--reason`` 等）
+2    释放被拒绝：复核时证据已变化、占位已换人、或清理日志写失败
+3    需要人看：有可释放但未加 ``--release``，或有疑似失联但证据不足
+===  ==================================================================
 """
 from __future__ import annotations
 
@@ -127,6 +142,10 @@ REGISTRY_PATH = LOCKS_DIR / "claims.json"
 MARKER_DIR = LOCKS_DIR / "claims"
 REGISTRY_MUTEX = LOCKS_DIR / "claims.mutex"
 TAKEOVER_LOG = LOCKS_DIR / "claim_takeovers.log"
+#: 过期 claim 的清理账（JSONL）：释放前/后各一行，含证据与前后占位状态。
+#: 与 `claim_takeovers.log` 分开：接管是「换人持有」，清理是「确认无人后注销」，
+#: 混在一起会让读方分不清「这条路径现在归谁」。
+CLEANUP_LOG = LOCKS_DIR / "claim_cleanup.log"
 #: 「想拿但被别人占着」的等待记录。只在冲突时写；持有者下次续租/append 成功时
 #: 读出并清零（打印一次即删）。持有方成本为 0，被挡方成本全付，等待不可见——
 #: 所以占位对持有者本来是隐形的；这张表只补「看得见」，不参与任何判定。
@@ -376,6 +395,23 @@ def _marker_for(key: str) -> Path:
     return MARKER_DIR / f"{digest}.claim"
 
 
+def _target_path(display: str) -> Path:
+    p = Path(display)
+    return p if p.is_absolute() else ROOT / p
+
+
+def _sha256_file(path: Path) -> Optional[str]:
+    """文件内容哈希；读不到返回 None（调用方必须当成「证据缺口」而不是「一致」）。"""
+    try:
+        digest = hashlib.sha256()
+        with open(path, "rb") as fh:
+            for chunk in iter(lambda: fh.read(1 << 20), b""):
+                digest.update(chunk)
+        return digest.hexdigest()
+    except OSError:
+        return None
+
+
 # ---------------------------------------------------------------------------
 # 持有者身份凭据（同名 ≠ 同一持有者）
 # ---------------------------------------------------------------------------
@@ -603,7 +639,25 @@ def _marker_payload(
     if token_hash:
         # 只存凭据哈希；明文只在 claim/takeover 输出里出现一次。
         payload["token_sha256"] = token_hash
+    # 取得时刻的内容基线：清理过期 claim 时，「文件没被它改过」必须能证明，
+    # 不能靠 mtime（mtime 会被 checkout/工具触碰改掉，也不说明谁改的）。
+    # 续租不刷新这个值（见 _carry_content_baseline）——否则「改过再续租」会把
+    # 改动洗白成「没改过」。
+    baseline = _sha256_file(_target_path(display))
+    if baseline:
+        payload["content_sha256"] = baseline
+        payload["content_baseline_from"] = "claim"
     return payload
+
+
+def _carry_content_baseline(new: Dict[str, Any], old: Dict[str, Any]) -> None:
+    """续租/迁移时沿用**取得时**的内容基线；没有旧基线才以本次内容起算。"""
+    previous = str(old.get("content_sha256") or "")
+    if previous:
+        new["content_sha256"] = previous
+        new["content_baseline_from"] = str(old.get("content_baseline_from") or "claim")
+    elif new.get("content_sha256"):
+        new["content_baseline_from"] = "renew"
 
 
 def _create_marker(path: Path, payload: Dict[str, Any]) -> bool:
@@ -669,13 +723,19 @@ def _entry(data: Dict[str, Any], key: str) -> Dict[str, Any]:
     return entry
 
 
-def _close_active(entry: Dict[str, Any], now: float, reason: str, extra: Optional[Dict[str, Any]] = None) -> None:
+def _close_active(
+    entry: Dict[str, Any],
+    now: float,
+    reason: str,
+    extra: Optional[Dict[str, Any]] = None,
+    extra_key: str = "takeover",
+) -> None:
     for item in reversed(entry["history"]):
         if item.get("released_at") is None:
             item["released_at"] = now
             item["closed_reason"] = reason
             if extra:
-                item["takeover"] = extra
+                item[extra_key] = extra
             return
 
 
@@ -955,6 +1015,7 @@ def cmd_claim(
                 )
                 acquired = float(data.get("acquired_at") or now)
                 renewed["acquired_at"] = acquired
+                _carry_content_baseline(renewed, data)
                 _stamp_signer(renewed, owner, reason)
                 old_ttl = float(data.get("ttl_min") or 0.0)
                 held_total_s = max(0.0, now - acquired)
@@ -1034,6 +1095,10 @@ def cmd_claim(
                 )
                 renewed["acquired_at"] = float(data.get("acquired_at") or now)
                 renewed["legacy_upgraded_at"] = now
+                _carry_content_baseline(renewed, data)
+                if not data.get("content_sha256"):
+                    # 旧 claim 没有取得时基线：从迁移这一刻起算，并在记录里写明来源。
+                    renewed["content_baseline_from"] = "adopt"
                 _stamp_signer(renewed, owner, reason)
                 _write_fd(fd, json.dumps(renewed, ensure_ascii=False))
                 sidecar_err = _write_token_file(key, upgraded_token)
@@ -1850,6 +1915,463 @@ def cmd_audit_stale(as_json: bool = False) -> int:
 
 
 # ---------------------------------------------------------------------------
+# cleanup-stale：按证据释放过期 claim（没有「超过 N 分钟一律释放」的分支）
+# ---------------------------------------------------------------------------
+# 与 audit-stale 的分工：
+#   * audit-stale 只回答「过期后文件还被改过」——报警，不改状态；
+#   * cleanup-stale 回答「这条过期 claim 现在能不能注销」，且只有四类证据
+#     **全部 PASS** 才允许 --release。任何一项是 GAP（证不出来）或 FAIL
+#     （证出来有风险），都只报「疑似失联 + 缺口」，不动占位。
+# 为什么不复用 takeover：takeover 是「换个人持有」，清理是「确认无人后注销」；
+# 判据也不同（takeover 只看过期 + 无在途改动，不清算持有者是否改过文件）。
+
+def _evidence(status: str, detail: str, weight: str = "strong") -> Dict[str, str]:
+    """一条证据：PASS / GAP（证不出来）/ FAIL（证出来有风险）。
+
+    ``weight="weak"`` 表示这条证据**不能单独支撑释放**，只作一致性核对。
+    目前只有「进程不存在」是弱证据：claim 是一次性 CLI，pid 在 claim 返回后
+    就已经不存在，对绝大多数 claim 恒真。
+    """
+    return {"status": status, "detail": detail, "weight": weight}
+
+
+def _cleanup_grace_s() -> float:
+    # 与 takeover 共用同一个宽限口径（§6.1.4），不另造一套时间阈值。
+    return float(os.environ.get("MBDSDR_TAKEOVER_GRACE_MIN") or 30.0) * 60.0
+
+
+def _lease_evidence(payload: Dict[str, Any], now: float) -> Tuple[Dict[str, str], float]:
+    heartbeat = float(payload.get("heartbeat_at") or payload.get("acquired_at") or now)
+    ttl_s = float(payload.get("ttl_min") or 0.0) * 60.0
+    held_s = max(0.0, now - heartbeat)
+    expired_s = held_s - ttl_s
+    grace_s = _cleanup_grace_s()
+    if expired_s <= 0:
+        return _evidence(
+            "FAIL", f"租约未过期（剩余 {_minutes(ttl_s - held_s)}min），不是清理对象"
+        ), expired_s
+    if expired_s < grace_s:
+        return _evidence(
+            "FAIL",
+            f"刚过期 {_minutes(expired_s)}min，未满 {_minutes(grace_s)}min 宽限"
+            f"（§6.1.4：可能只是没来得及续租）",
+        ), expired_s
+    return _evidence(
+        "PASS",
+        f"心跳 {_iso(heartbeat)}，TTL {_minutes(ttl_s)}min，已过期 {_minutes(expired_s)}min",
+    ), expired_s
+
+
+def _holder_evidence(payload: Dict[str, Any]) -> Dict[str, str]:
+    """持有进程证据。**「进程不存在」是弱证据**，不能单独当死亡证明。"""
+    pid = payload.get("pid")
+    if pid is None:
+        return _evidence("GAP", "未记录 pid，无法核对持有进程")
+    try:
+        state, create_time, _cmd = _proc_snapshot(int(pid))
+    except (TypeError, ValueError, OSError) as exc:
+        return _evidence("GAP", f"取不到 pid {pid} 的状态（{exc.__class__.__name__}）")
+    if state == "gone":
+        return _evidence(
+            "PASS",
+            f"pid {pid} 不存在（注意：claim 是一次性 CLI，此项对多数 claim 恒真，"
+            f"只作一致性证据，不单独支撑释放）",
+            "weak",
+        )
+    if state == "unknown":
+        return _evidence("GAP", f"pid {pid} 状态未知")
+    recorded = payload.get("pid_create_time")
+    if create_time is not None and recorded is not None:
+        if _same_process_create_time(float(recorded), float(create_time)):
+            return _evidence(
+                "FAIL", f"pid {pid} 仍存在且创建时刻与记录一致（持有者可能仍在工作）"
+            )
+        return _evidence("PASS", f"pid {pid} 号已被复用（原进程不存在）", "weak")
+    return _evidence("GAP", f"pid {pid} 存在但没有创建时刻，无法区分原进程与复用")
+
+
+def _git_run(args: List[str], timeout: float = 60.0) -> Optional[subprocess.CompletedProcess]:
+    try:
+        return subprocess.run(
+            ["git", *args],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=timeout,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+
+
+def _git_status_snapshot() -> Optional[Dict[str, str]]:
+    """一次 `git status` 拿到全仓改动；返回 {路径: XY}，失败返回 None。"""
+    proc = _git_run(["status", "--porcelain=v1", "-z"], timeout=120.0)
+    if proc is None or proc.returncode != 0:
+        return None
+    items = proc.stdout.split("\0")
+    out: Dict[str, str] = {}
+    i = 0
+    while i < len(items):
+        item = items[i]
+        i += 1
+        if not item or len(item) < 4:
+            continue
+        xy, path = item[:2], item[3:]
+        if xy[0] in ("R", "C") and i < len(items):  # 重命名：下一条是新路径
+            path = items[i]
+            i += 1
+        out[path.replace("\\", "/")] = xy
+    return out
+
+
+def _git_tracked_set() -> Optional[set]:
+    proc = _git_run(["ls-files", "-z"], timeout=120.0)
+    if proc is None or proc.returncode != 0:
+        return None
+    return {
+        item.replace("\\", "/")
+        for item in proc.stdout.split("\0")
+        if item
+    }
+
+
+def _inflight_evidence(display: str, status: Optional[Dict[str, str]]) -> Dict[str, str]:
+    if status is None:
+        return _evidence("GAP", "无法查询工作区（git status 失败）")
+    xy = status.get(display.replace("\\", "/"))
+    if xy is None:
+        return _evidence("PASS", "工作区无该文件的未提交改动")
+    return _evidence("FAIL", f"工作区有该文件的未提交改动（{xy}）")
+
+
+def _content_evidence(
+    payload: Dict[str, Any],
+    display: str,
+    acquired: float,
+    tracked: Optional[set],
+    status: Optional[Dict[str, str]],
+) -> Dict[str, str]:
+    """文件内容是否与取得时一致。
+
+    优先用 claim 时记录的 ``content_sha256``；旧 claim 没有基线时，用 git 推导：
+    「工作区干净 + 该文件最后一次提交早于 acquired_at」⇒ claim 之后内容没变过。
+    推导不成立（有提交 / 未跟踪 / 无历史）一律 GAP，不猜。
+    """
+    target = _target_path(display)
+    if not target.is_file():
+        return _evidence("GAP", "目标文件不存在（删除本身也可能是在途工作）")
+    current = _sha256_file(target)
+    if current is None:
+        return _evidence("GAP", "目标文件读不到，无法计算内容哈希")
+    recorded = str(payload.get("content_sha256") or "")
+    if recorded:
+        if current == recorded:
+            return _evidence("PASS", "内容哈希与 claim 时基线一致（content_sha256）")
+        return _evidence("FAIL", "内容哈希与 claim 时基线不符：文件在持有期内被改过")
+
+    if tracked is None:
+        return _evidence("GAP", "无内容基线，且 git 查询失败")
+    if display.replace("\\", "/") not in tracked:
+        return _evidence("GAP", "无内容基线，且文件不在 git 跟踪下（无法推导）")
+    if status is None:
+        return _evidence("GAP", "无内容基线，且 git status 失败")
+    if display.replace("\\", "/") in status:
+        return _evidence("GAP", "无内容基线，且工作区有未提交改动，无法推导")
+    proc = _git_run(["log", "-1", "--format=%ct", "--", display], timeout=30.0)
+    if proc is None or proc.returncode != 0:
+        return _evidence("GAP", "无内容基线，且查不到该文件的提交历史")
+    raw = proc.stdout.strip()
+    if not raw:
+        return _evidence("GAP", "无内容基线，且该文件没有提交记录")
+    last_ts = float(raw)
+    if last_ts > acquired + 1.0:
+        return _evidence(
+            "GAP",
+            f"无内容基线；该文件在 claim 之后有提交（{_iso(last_ts)} > "
+            f"{_iso(acquired)}），无法证明未被改动",
+        )
+    return _evidence(
+        "PASS",
+        f"无记录基线；git 推导：工作区干净，最后一次提交 {_iso(last_ts)} "
+        f"早于 claim {_iso(acquired)}",
+        "weak",
+    )
+
+
+def _git_facts() -> Dict[str, Any]:
+    """一次取全仓事实，避免为每条 claim 重复起 git（几百条时是主要开销）。"""
+    return {"tracked": _git_tracked_set(), "status": _git_status_snapshot()}
+
+
+def _cleanup_row(
+    payload: Dict[str, Any], now: float, facts: Optional[Dict[str, Any]] = None
+) -> Dict[str, Any]:
+    display = str(payload.get("path") or "")
+    heartbeat = float(payload.get("heartbeat_at") or payload.get("acquired_at") or now)
+    acquired = float(payload.get("acquired_at") or heartbeat)
+    lease, expired_s = _lease_evidence(payload, now)
+    evidence: Dict[str, Dict[str, str]] = {"lease": lease}
+    if lease["status"] == "PASS":
+        # 只有租约已过宽限的才继续取证：未过期/刚过期的不是清理对象。
+        facts = facts if facts is not None else _git_facts()
+        evidence["holder"] = _holder_evidence(payload)
+        evidence["content"] = _content_evidence(
+            payload, display, acquired, facts["tracked"], facts["status"]
+        )
+        evidence["no_inflight"] = _inflight_evidence(display, facts["status"])
+
+    if lease["status"] != "PASS":
+        category = "wait" if expired_s > 0 else "live"
+    elif all(item["status"] == "PASS" for item in evidence.values()):
+        category = "releasable"
+    else:
+        category = "suspect"
+    gaps = [
+        f"{name}({item['status']}: {item['detail']})"
+        for name, item in evidence.items()
+        if item["status"] != "PASS"
+    ]
+    return {
+        "path": display,
+        "key": str(payload.get("key") or ""),
+        "owner": str(payload.get("owner") or ""),
+        "category": category,
+        "evidence": evidence,
+        "gaps": gaps,
+        "expired_min": round(expired_s / 60.0, 1) if expired_s > 0 else 0.0,
+        "acquired_at": acquired,
+        "heartbeat_at": heartbeat,
+    }
+
+
+def _append_cleanup_log(record: Dict[str, Any]) -> None:
+    CLEANUP_LOG.parent.mkdir(parents=True, exist_ok=True)
+    with open(CLEANUP_LOG, "a", encoding="utf-8") as fh:
+        fh.write(json.dumps(record, ensure_ascii=False) + "\n")
+        fh.flush()
+        os.fsync(fh.fileno())
+
+
+def _registry_cleanup(key: str, display: str, now: float, detail: Dict[str, Any]) -> None:
+    def mutate(data: Dict[str, Any]) -> None:
+        entry = _entry(data, key)
+        entry["path"] = display
+        _close_active(entry, now, "stale_cleanup", detail, extra_key="cleanup")
+        entry["current"] = None
+
+    _update_registry(mutate)
+
+
+def _release_stale_row(row: Dict[str, Any], by: str, reason: str) -> Dict[str, Any]:
+    """注销一条已证明无人且未被改动的过期 claim；审计账写前一行、成功后一行。"""
+    key = row["key"]
+    display = row["path"]
+    marker = _marker_for(key)
+    now = _now()
+    with _locked_fd(marker, create=False) as fd:
+        data = _read_marker_fd(fd)
+        fresh = _cleanup_row(data, now, _git_facts())
+        if fresh["category"] != "releasable":
+            raise ClaimDenied(
+                f"CLEANUP DENIED {display}\n"
+                f"  复核时证据已不满足，未释放：{'；'.join(fresh['gaps']) or '类别已变化'}"
+            )
+        before = dict(data)
+        record = {
+            "action": "stale_cleanup",
+            "phase": "before",
+            "logged_at": _iso(now),
+            "epoch": now,
+            "path": display,
+            "owner": data.get("owner"),
+            "by": by,
+            "reason": reason,
+            "evidence": fresh["evidence"],
+            "expired_min": fresh["expired_min"],
+            "claim_before": before,
+        }
+        try:
+            _append_cleanup_log(record)
+        except OSError as exc:
+            raise ClaimDenied(
+                f"CLEANUP DENIED {display}\n  清理账写入失败，占位文件未改：{exc}"
+            ) from None
+
+    # 锁外删除：Windows 上占位文件被自己锁着时删不掉（与 cmd_release 同一做法）。
+    # 删前再核对一次指纹：期间若有续租/夺取，heartbeat_at 或凭据会变，此时放弃。
+    current = _peek_marker(marker)
+    fingerprint = ("acquired_at", "heartbeat_at", "token_sha256", "owner")
+    if current is None:
+        raise ClaimDenied(f"CLEANUP DENIED {display}\n  复核后占位已不存在（可能被他人释放）。")
+    if any(current.get(name) != before.get(name) for name in fingerprint):
+        try:
+            _append_cleanup_log({
+                "action": "stale_cleanup",
+                "phase": "aborted",
+                "logged_at": _iso(_now()),
+                "path": display,
+                "owner": before.get("owner"),
+                "by": by,
+                "reason": "释放前占位已变化（疑似续租或换人）",
+            })
+        except OSError:
+            pass
+        raise ClaimDenied(
+            f"CLEANUP DENIED {display}\n"
+            f"  复核后占位已变化（心跳/凭据/持有者不同），放弃释放。"
+        )
+    try:
+        marker.unlink()
+    except FileNotFoundError:
+        pass
+    except OSError as exc:
+        try:
+            _append_cleanup_log({
+                "action": "stale_cleanup",
+                "phase": "failed",
+                "logged_at": _iso(_now()),
+                "path": display,
+                "owner": before.get("owner"),
+                "by": by,
+                "error": str(exc),
+            })
+        except OSError:
+            pass
+        raise ClaimDenied(
+            f"CLEANUP DENIED {display}\n  删除占位文件失败，未释放：{exc}"
+        ) from None
+    _remove_token_file(key)
+    try:
+        _registry_cleanup(key, display, _now(), {
+            "by": by,
+            "reason": reason,
+            "evidence": fresh["evidence"],
+            "at": _iso(now),
+        })
+    except ClaimDenied as exc:
+        print(f"WARN 台账写入失败（释放仍有效）：{exc}", file=sys.stderr)
+    try:
+        _append_cleanup_log({
+            "action": "stale_cleanup",
+            "phase": "after",
+            "logged_at": _iso(_now()),
+            "path": display,
+            "owner": before.get("owner"),
+            "by": by,
+            "reason": reason,
+            "released": True,
+            "claim_after": None,
+        })
+    except OSError as exc:
+        print(f"WARN 清理账收尾写入失败（释放已生效）：{exc}", file=sys.stderr)
+    return record
+
+
+def cmd_cleanup_stale(
+    as_json: bool = False,
+    release: bool = False,
+    by: str = "",
+    reason: str = "",
+    only_path: str = "",
+) -> int:
+    by = (by or "").strip()
+    reason = (reason or "").strip()
+    if release and not by:
+        print("CLEANUP DENIED：--release 必须带 --by（谁执行的清理）", file=sys.stderr)
+        return EXIT_USAGE
+    if release and not reason:
+        print("CLEANUP DENIED：--release 必须带 --reason（依据/场景，写进清理账）", file=sys.stderr)
+        return EXIT_USAGE
+
+    only_key = None
+    if only_path.strip():
+        only_key, _display = canonical_path(only_path)
+    now = _now()
+    MARKER_DIR.mkdir(parents=True, exist_ok=True)
+    facts = _git_facts()
+    rows: List[Dict[str, Any]] = []
+    for marker in sorted(MARKER_DIR.glob("*.claim")):
+        payload = _peek_marker(marker)
+        if payload is None:
+            continue
+        if only_key and str(payload.get("key") or "") != only_key:
+            continue
+        rows.append(_cleanup_row(payload, now, facts))
+
+    groups = {
+        name: [row for row in rows if row["category"] == name]
+        for name in ("releasable", "suspect", "wait", "live")
+    }
+    released: List[str] = []
+    failed: List[Dict[str, str]] = []
+    if release:
+        for row in groups["releasable"]:
+            try:
+                _release_stale_row(row, by, reason)
+                released.append(row["path"])
+            except ClaimDenied as exc:
+                failed.append({"path": row["path"], "error": str(exc)})
+
+    needs_human = bool(groups["suspect"]) or bool(failed) or (
+        bool(groups["releasable"]) and not release
+    )
+
+    if as_json:
+        public_rows = [
+            {k: v for k, v in row.items() if k != "marker"} for row in rows
+        ]
+        print(json.dumps({
+            "now": now,
+            "total": len(rows),
+            "released": released,
+            "failed": failed,
+            "summary": {name: len(items) for name, items in groups.items()},
+            "rows": public_rows,
+        }, ensure_ascii=False, indent=2))
+        return EXIT_FINDINGS if needs_human else EXIT_OK
+
+    print(
+        f"CLEANUP: 扫描 {len(rows)} 条 claim；租约未过期 {len(groups['live'])}；"
+        f"过期未满宽限 {len(groups['wait'])}；可释放 {len(groups['releasable'])}；"
+        f"疑似失联但证据不足 {len(groups['suspect'])}"
+        + (f"；本次已释放 {len(released)}" if release else "（未加 --release，未改动任何占位）")
+    )
+    for path in released:
+        print(f"  RELEASED {path}")
+    for item in failed:
+        print(f"  FAILED {item['path']}：{item['error'].splitlines()[-1]}")
+    if not release:
+        for row in groups["releasable"]:
+            marks = "；".join(
+                f"{name}={item['status']}" for name, item in row["evidence"].items()
+            )
+            print(
+                f"  READY {row['path']} owner={row['owner']} "
+                f"过期={row['expired_min']}min 证据：{marks}"
+            )
+    for row in groups["suspect"]:
+        print(
+            f"  SUSPECT {row['path']} owner={row['owner']} "
+            f"过期={row['expired_min']}min 证据缺口：" + "；".join(row["gaps"])
+        )
+    if groups["wait"]:
+        print(
+            f"  WAIT {len(groups['wait'])} 条刚过期未满宽限：按 §6.1.4 等宽限自然过完，"
+            f"本工具不提前释放"
+        )
+    if needs_human:
+        print(
+            "CLEANUP: 需要人看（退出码 3）。没有「超过 N 分钟一律释放」的分支："
+            "证据缺一项就不释放。"
+        )
+    else:
+        print("CLEANUP: 没有可释放项，也没有证据不足的疑似（退出码 0）。")
+    return EXIT_FINDINGS if needs_human else EXIT_OK
+
+
+# ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
 
@@ -1917,6 +2439,24 @@ def build_parser() -> argparse.ArgumentParser:
     )
     audit.add_argument("--json", action="store_true", help="输出机器可读 JSON")
 
+    cleanup = sub.add_parser(
+        "cleanup-stale",
+        help="按证据注销过期 claim（默认只审计；四项证据全 PASS 才释放，无时间一刀切）",
+    )
+    cleanup.add_argument("--json", action="store_true", help="输出机器可读 JSON")
+    cleanup.add_argument(
+        "--release",
+        action="store_true",
+        help="真正注销可释放项（默认只列出；必须同时给 --by 与 --reason）",
+    )
+    cleanup.add_argument("--by", default="", help="执行清理的人/线（--release 必填）")
+    cleanup.add_argument(
+        "--reason", default="", help="清理理由/场景（--release 必填，写进清理账）"
+    )
+    cleanup.add_argument(
+        "--path", default="", help="只处理这一条路径（逐条复核时用）"
+    )
+
     renew = sub.add_parser(
         "audit-renew",
         help="续租审计：次数 / 累计持有 / 超上限 / 老数据「历史不可审计」（有命中退出码 3）",
@@ -1982,6 +2522,14 @@ def main(argv: Optional[list[str]] = None) -> int:
             return cmd_release(args.path, args.owner, token=token)
         if args.command == "audit-stale":
             return cmd_audit_stale(args.json)
+        if args.command == "cleanup-stale":
+            return cmd_cleanup_stale(
+                as_json=args.json,
+                release=args.release,
+                by=args.by,
+                reason=args.reason,
+                only_path=args.path,
+            )
         if args.command == "audit-renew":
             return cmd_audit_renew(args.json, legacy_due=args.legacy_due)
         if args.command == "takeover":
