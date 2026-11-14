@@ -1257,6 +1257,38 @@ def _coordination_step(env: dict, files: list[str], doc_rel: str) -> tuple[int, 
     return 0, report, [doc_rel]
 
 
+#: ``git add`` 失败里属于「瞬时」的标记：索引锁冲突、并发改名。
+#: 命中这些就重试（耗尽归 2）；其余一律按永久错误处理（直接 1，只试一次）。
+_TRANSIENT_ADD_MARKERS = (
+    "index.lock",
+    "unable to create",
+    "cannot lock ref",
+    "another git process",
+    "file exists",
+    "no such file or directory",
+    "请稍后重试",
+)
+
+
+class PermanentFailure(Exception):
+    """不可重试的前置失败（路径不存在、权限、不在仓库内……）。
+
+    带它退出 ``_attempt``，主循环不再重试：这类错误重试三次也不会变好，
+    报成「重试耗尽（2）」会把「我的清单写错了」误导成「环境脏」。
+    """
+
+
+def _transient_add_error(stderr: str) -> bool:
+    """``git add`` 的失败是瞬时（可重试）还是永久（改清单）？
+
+    判据是**错误类型**，不是次数：锁冲突/并发改名是别人一瞬间的动作，
+    等一轮就没了；路径不存在、权限不足、路径在仓库外则是清单本身的问题。
+    白名单之外一律按永久处理——把永久错误重试三次只会拖慢报错。
+    """
+    text = stderr.lower()
+    return any(marker in text for marker in _TRANSIENT_ADD_MARKERS)
+
+
 def _attempt(
     files: list[str],
     message: bytes,
@@ -1287,7 +1319,10 @@ def _attempt(
     add = _run(["add", "--", *files], env)
     if add.returncode != 0:
         _emit(add, "git add")
-        return 1, f"git add 失败：{add.stderr.decode('utf-8', 'replace')[:200]}"
+        detail = add.stderr.decode("utf-8", "replace")[:200]
+        if not _transient_add_error(detail):
+            raise PermanentFailure(f"git add 失败（永久错误，不重试）：{detail}")
+        return 1, f"git add 瞬时失败（可重试）：{detail}"
 
     # 2b) 排除他人 hunk：只从私有 index 反向撤掉，工作树不动
     if exclusions:
@@ -1483,7 +1518,8 @@ def _build_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(
         description="私有 index 安全提交（形态⑪）",
         epilog=(
-            "退出码：0 成功（--declare 时为快照已记录）；1 前置条件不满足（未提交，可重试）；"
+            "退出码：0 成功（--declare 时为快照已记录）；1 前置条件不满足（未提交；"
+            "含路径不存在/权限这类不可重试的清单错误）；"
             "2 重试耗尽或参数用法错误（未提交）；3 已提交但提交后复核失败（事故）；"
             "4 声明后内容漂移（未提交）；5 缺 §6.1 登记行（未提交）；"
             "6 消息源被改写（未提交）；7 --exclude-hunk 未配 --declare（未提交）。"
@@ -1610,13 +1646,19 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         for n in range(1, args.retries + 1):
-            code, note = _attempt(
-                files, message, index, exclusions=exclusions,
-                exclude_owner=args.exclude_owner,
-                declared=declared, declared_at=declared_at,
-                allow_reason=args.allow_foreign_changes.strip(),
-                message_source=message_source, source_bytes=message,
-            )
+            try:
+                code, note = _attempt(
+                    files, message, index, exclusions=exclusions,
+                    exclude_owner=args.exclude_owner,
+                    declared=declared, declared_at=declared_at,
+                    allow_reason=args.allow_foreign_changes.strip(),
+                    message_source=message_source, source_bytes=message,
+                )
+            except PermanentFailure as exc:
+                # 永久错误只试一次：路径不存在/权限这类问题重试三次也不会变好，
+                # 归到「重试耗尽（2）」会让人以为是环境脏。
+                print(f"[try {n}] {exc}")
+                return 1
             print(f"[try {n}] {note}")
             if code == 0:
                 _drop_declaration(declaration_file)

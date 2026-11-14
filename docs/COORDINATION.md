@@ -2213,6 +2213,9 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `tools/axioms/axiom_rules.py` | 公理体检线/6ae85f56（Task1: 公理 ID→规则名单一映射） | 2026-11-14 09:15 | 本笔 |
 | `scripts/axioms.py` | 公理体检线/6ae85f56（Task1: --rule/--self-test-only 共用 Axx 过滤） | 2026-11-14 09:15 | 本笔 |
 | `tests/test_axioms_rule_filter.py` | 公理体检线/6ae85f56（Task1: 两入口整流相同与映射反证） | 2026-11-14 09:15 | 本笔 |
+| `scripts/safe_commit.py` | 归属证据线/6ae85f56（git add 失败按错误类型分流：永久→1 只试一次，瞬时→重试归 2） | 2026-11-14 09:18 | 本笔 |
+| `docs/safe-commit.md` | 归属证据线/6ae85f56（退出码表：补 1/2 的 add 分流边界，3/6 标未实测） | 2026-11-14 09:18 | 本笔 |
+| `tests/test_safe_commit_add_errors.py` | 归属证据线/6ae85f56（判据用例：永久只试一次/瞬时重试归 2 + 分类函数） | 2026-11-14 09:18 | 本笔 |
 | `tests/test_ai_ui_sync_guards.py` | S1-S4结果伪造线/6ae85f56（补丁单三守卫：success=False 无 error 键时 _mcp_call_handler 必须判失败、_on_worker_tool_result 不得同步 UI（旧实现下这两条红）） | 2026-11-14 09:18 | 本笔 |
 | `docs/axioms.md` | 公理体检线/6ae85f56（Task2: 当前计数改为工具生成单一来源） | 2026-11-14 09:26 | 本笔 |
 | `tools/axioms/current_stats.py` | 公理体检线/6ae85f56（Task2: 当前计数唯一生成器） | 2026-11-14 09:26 | 本笔 |
