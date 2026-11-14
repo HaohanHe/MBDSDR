@@ -31,12 +31,30 @@ PANEL_CLASSES = {
     "ControlPanel", "StatusPanel", "AIPanel", "SatTrackPanel", "ModulePanel",
     "WeatherPanel", "NewSpacetimePanel", "AdsbMapPanel", "AprsPanel",
     "SatelliteImagePanel", "RFSkyView",
+    # 右栏固定页签（本笔收编）
+    "ScannerPanel", "ModulationPanel", "BookmarkPanel", "AnrPanel",
+    "ConstellationPanel", "DevicePanel", "GainPanel", "AdsbPanel",
 }
+
+#: 如实保留的例外：这些面板确实需要外部参数，零参构造会改变语义，
+#: 因此仍由 MainWindow 直接构造（不得再新增例外）。
+#:   VfoPanel(vfo_manager=...)            —— 必须共享主窗口的 VFO 列表
+#:   ServiceSettingsPanel(settings=...)   —— 必须注入真实设置对象
+#:   SettingsPanel(settings=..., host=...)—— 需要设置对象与宿主回调
+BLOCKED_PARAM_PANELS = {"VfoPanel", "ServiceSettingsPanel", "SettingsPanel"}
 
 #: 必须经 `_create_panel("id")` / `registry().create("id")` 构造的面板。
 EXPECTED_IDS = {
     "spectrum", "rf_sky", "sat_track", "adsb", "control", "status", "ai",
     "module", "weather", "new_spacetime", "aprs", "sat_image",
+    "scanner", "modulation", "bookmark", "anr", "constellation", "device",
+    "gain", "adsb_list",
+}
+
+#: 右栏固定页签：不进「面板」菜单，但必须能在能力目录里查到。
+FIXED_TAB_IDS = {
+    "scanner", "modulation", "bookmark", "anr", "constellation", "device",
+    "gain", "adsb_list",
 }
 
 
@@ -48,19 +66,19 @@ def qapp():
 
 @pytest.fixture(scope="module")
 def main_window(qapp, isolated_profile):
-    """构造一次主窗口；weather 工厂包一层探针，记录它是否被真的调用。"""
+    """构造一次主窗口；weather / scanner 工厂各包一层探针记录调用。"""
     from panel_registry import registry
 
     reg = registry()
-    spec = reg.get("weather")
-    original = replace(spec)
+    originals = {pid: replace(reg.get(pid)) for pid in ("weather", "scanner")}
     calls = []
 
-    def _spy():
-        calls.append("weather")
-        return original.factory()
+    for pid in ("weather", "scanner"):
+        def _spy(pid=pid):
+            calls.append(pid)
+            return originals[pid].factory()
 
-    reg.register(replace(spec, factory=_spy))
+        reg.register(replace(originals[pid], factory=_spy))
     try:
         from main_window import MainWindow
         window = MainWindow()
@@ -72,7 +90,8 @@ def main_window(qapp, isolated_profile):
             pass
         window.close()
     finally:
-        reg.register(original)
+        for pid, spec in originals.items():
+            reg.register(spec)
 
 
 # ---------------------------------------------------------------------------
@@ -122,13 +141,31 @@ def test_each_declared_panel_factory_produces_widget(qapp, panel_id):
     widget.deleteLater()
 
 
+def test_fixed_right_tabs_are_catalogued_without_fake_menu_entry():
+    """收编的右栏固定页签：目录里查得到，且不谎称「面板菜单」可开关。"""
+    from capability_catalog import build_catalog
+    from panel_registry import registry
+
+    caps = {c.source: c for c in build_catalog()}
+    for pid in sorted(FIXED_TAB_IDS):
+        spec = registry().get(pid)
+        assert spec is not None, f"注册表缺右栏固定页签 {pid}"
+        assert spec.name and spec.summary, f"{pid} 缺名称或说明"
+        assert spec.closable is False, \
+            f"{pid} 没有关闭按钮，不应出现在「面板」菜单（closable 必须为 False）"
+        cap = caps.get(f"panel_registry:{pid}")
+        assert cap is not None, f"能力目录漏了 {pid}"
+        assert cap.trigger.startswith("右栏固定页签"), \
+            f"{pid} 的入口文案与真实入口不符：{cap.trigger!r}"
+
+
 # ---------------------------------------------------------------------------
 # MainWindow 接线
 # ---------------------------------------------------------------------------
 def test_main_window_builds_panels_through_registry(main_window):
     """主窗口构建时确实调用了注册表工厂（不是直接 new 面板类）。"""
-    assert main_window._factory_spy_calls == ["weather"], \
-        "MainWindow 没有经注册表工厂构造气象面板"
+    assert main_window._factory_spy_calls == ["weather", "scanner"], \
+        f"MainWindow 没有经注册表工厂构造面板：{main_window._factory_spy_calls}"
 
 
 def test_main_window_panels_attached_by_id(main_window):
@@ -146,6 +183,15 @@ def test_main_window_panels_attached_by_id(main_window):
         ("weather", main_window.weather_panel),
         ("new_spacetime", main_window.new_spacetime_panel),
         ("adsb", main_window.adsb_map_panel),
+        # 右栏固定页签
+        ("scanner", main_window.scanner_panel),
+        ("modulation", main_window.modulation_panel),
+        ("bookmark", main_window.bookmark_panel),
+        ("anr", main_window.anr_panel),
+        ("constellation", main_window.constellation_panel),
+        ("device", main_window.device_panel),
+        ("gain", main_window.gain_panel),
+        ("adsb_list", main_window.digital_adsb_panel),
     ]
     for panel_id, widget in pairs:
         assert registry().widget(panel_id) is widget, \
@@ -159,6 +205,28 @@ def test_main_window_refuses_missing_factory(main_window, monkeypatch):
     monkeypatch.setattr(PanelRegistry, "create", lambda self, pid: None)
     with pytest.raises(RuntimeError, match="未在 panel_registry 声明"):
         main_window._create_panel("weather")
+
+
+def test_optional_panel_refuses_missing_factory(main_window, monkeypatch):
+    """可选页签同样：注册表没声明工厂是接线错误，必须当场炸。"""
+    from panel_registry import PanelRegistry
+
+    monkeypatch.setattr(PanelRegistry, "get", lambda self, pid: None)
+    with pytest.raises(RuntimeError, match="未在 panel_registry 声明"):
+        main_window._create_optional_panel("scanner")
+
+
+def test_optional_panel_allows_missing_dependency_only(main_window, monkeypatch):
+    """工厂存在但依赖缺失（返回 None）才允许降级，不得与「没声明」混淆。"""
+    from panel_registry import registry
+
+    reg = registry()
+    real_get = reg.get
+    monkeypatch.setattr(
+        reg, "get",
+        lambda pid: (replace(real_get("scanner"), factory=lambda: None)
+                     if pid == "scanner" else real_get(pid)))
+    assert main_window._create_optional_panel("scanner") is None
 
 
 def test_main_window_source_has_no_hardcoded_panel_constructors():
@@ -175,7 +243,7 @@ def test_main_window_source_has_no_hardcoded_panel_constructors():
         name = fn.id if isinstance(fn, ast.Name) else getattr(fn, "attr", "")
         if name in PANEL_CLASSES:
             direct.append((name, node.lineno))
-        if name == "_create_panel" and node.args:
+        if name in ("_create_panel", "_create_optional_panel") and node.args:
             arg = node.args[0]
             if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
                 created_ids.add(arg.value)
@@ -184,6 +252,9 @@ def test_main_window_source_has_no_hardcoded_panel_constructors():
             if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
                 created_ids.add(arg.value)
 
-    assert direct == [], f"仍有硬编码面板构造：{direct}"
+    # 只允许「确实需要外部参数」的三个例外继续直接构造；新增一个都算回退。
+    hardcoded = {name for name, _line in direct}
+    assert hardcoded <= BLOCKED_PARAM_PANELS, \
+        f"出现未登记的硬编码构造：{sorted(hardcoded - BLOCKED_PARAM_PANELS)}"
     assert EXPECTED_IDS <= created_ids, \
         f"以下面板没有走注册表工厂构造：{EXPECTED_IDS - created_ids}"

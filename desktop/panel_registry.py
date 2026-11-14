@@ -189,6 +189,45 @@ class PanelRegistry:
                               "不是实时边收边解",
                       factory=_optional_factory("satellite_image_panel",
                                                 "SatelliteImagePanel")),
+            # 右栏固定页签（MainWindow._add_right_tab 挂载）：此前由主窗口
+            # 逐个 new，现在统一走注册表工厂。closable=False —— 它们没有关闭
+            # 按钮，也不进「面板」菜单（右栏导航已能到达），避免同文案动作
+            # 在两处菜单里重复。
+            PanelSpec("scanner",     "扫频",       "⌕", AREA_RIGHT,
+                      collapsible=True, closable=False, min_w=side_min,
+                      summary="在指定频段内自动扫频，找出活动频点；点活动段可直接调谐过去",
+                      factory=_optional_factory("scanner_panel", "ScannerPanel")),
+            PanelSpec("modulation",  "调制识别",   "◔", AREA_RIGHT,
+                      collapsible=True, closable=False, min_w=side_min,
+                      summary="对当前信号做调制识别并给出候选解调方式，可一键切换",
+                      factory=_optional_factory("modulation_panel",
+                                                "ModulationPanel")),
+            PanelSpec("bookmark",    "书签",       "★", AREA_RIGHT,
+                      collapsible=True, closable=False, min_w=side_min,
+                      summary="频率书签增删改与快速调谐；随配置目录持久化",
+                      factory=_optional_factory("bookmark_panel", "BookmarkPanel")),
+            PanelSpec("anr",         "ANR",        "≋", AREA_RIGHT,
+                      collapsible=True, closable=False, min_w=side_min,
+                      summary="自适应降噪：谱减/门限等模式与降噪强度，可学习底噪",
+                      factory=_optional_factory("anr_panel", "AnrPanel")),
+            PanelSpec("constellation", "星座图",   "✧", AREA_RIGHT,
+                      collapsible=True, closable=False, min_w=side_min,
+                      summary="IQ 星座图与幅度/EVM 统计；用来判断解调质量",
+                      factory=_optional_factory("constellation_panel",
+                                                "ConstellationPanel")),
+            PanelSpec("device",      "设备",       "▣", AREA_RIGHT,
+                      collapsible=True, closable=False, min_w=side_min,
+                      summary="SDR 设备枚举、连接/断开与音频输出选择；感知热插拔",
+                      factory=_optional_factory("device_panel", "DevicePanel")),
+            PanelSpec("gain",        "增益",       "▥", AREA_RIGHT,
+                      collapsible=True, closable=False, min_w=side_min,
+                      summary="分段增益与 AGC 开关；滑杆值实时同步后端，失败可见",
+                      factory=_optional_factory("gain_panel", "GainPanel")),
+            PanelSpec("adsb_list",   "ADS-B 列表", "☷", AREA_RIGHT,
+                      collapsible=True, closable=False, min_w=side_min,
+                      summary="ADS-B 报文文本列表（呼号/高度/速度/位置）；"
+                              "与航路图共用同一份解码数据",
+                      factory=_optional_factory("adsb_panel", "AdsbPanel")),
 
         ]
         for s in specs:

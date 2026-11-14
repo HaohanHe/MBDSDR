@@ -59,6 +59,9 @@ PANEL_CATEGORY: Dict[str, str] = {
     "weather": "天空", "rf_sky": "天空", "adsb": "天空",
     "sat_track": "卫星", "new_spacetime": "卫星",
     "aprs": "解码", "sat_image": "卫星",
+    "scanner": "接收", "modulation": "解码", "bookmark": "设置",
+    "anr": "接收", "constellation": "接收", "device": "设置",
+    "gain": "接收", "adsb_list": "天空",
     "ai": "AI", "status": "接收",
 }
 
@@ -159,11 +162,19 @@ def _panel_capabilities() -> List[Capability]:
             status = "conditional"
             note = ("需覆盖 1090 MHz 的前端；本机 FC0012 类 tuner 实测上限约 "
                     "948.5 MHz，在该设备上收不到（面板会如实显示无法接收）")
+        # 可关闭面板在「面板」菜单里勾选；右栏固定节没有关闭按钮，
+        # 入口是右栏页签本身——两类不能共用一句会骗人的「菜单」文案。
+        if spec.closable:
+            trigger = (f"「面板」菜单 → {spec.name}"
+                       f"（勾选显示/隐藏，位置：{_panel_area_text(spec.area)}）")
+        else:
+            trigger = (f"右栏固定页签「{spec.name}」"
+                       f"（位置：{_panel_area_text(spec.area)}）")
         out.append(Capability(
             category=PANEL_CATEGORY.get(spec.id, "接收"),
             title=spec.name,
             description=spec.summary or f"{spec.name}面板",
-            trigger=f"「面板」菜单 → {spec.name}（勾选显示/隐藏，位置：{_panel_area_text(spec.area)}）",
+            trigger=trigger,
             source=f"panel_registry:{spec.id}",
             status=status,
             note=note,

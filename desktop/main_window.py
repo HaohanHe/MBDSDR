@@ -5255,6 +5255,19 @@ class MainWindow(QMainWindow):
                 f"面板 {panel_id!r} 未在 panel_registry 声明可用的构造工厂")
         return widget
 
+    def _create_optional_panel(self, panel_id: str):
+        """构造「可选依赖」面板：工厂缺失立刻报错，依赖缺失才降级为 None。
+
+        与 ``_create_panel`` 的区别只在 None 的语义：这里 None 表示
+        ``_optional_factory`` 真的造不出来（模块/类缺失），宿主跳过该页签；
+        而注册表里没有这个 id、或没声明工厂，是接线错误，必须当场炸。
+        """
+        spec = registry().get(panel_id)
+        if spec is None or spec.factory is None:
+            raise RuntimeError(
+                f"面板 {panel_id!r} 未在 panel_registry 声明可用的构造工厂")
+        return spec.factory()
+
     def _create_sky_widget(self):
         """创建星象仪模式 widget：工厂声明在 panel_registry（rf_sky）。
 
