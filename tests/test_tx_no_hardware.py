@@ -20,11 +20,6 @@ from mbdsdr_ai.tx_guard import (  # noqa: E402
 from mbdsdr_ai.hal import DeviceInfo  # noqa: E402
 
 
-def _arm_token(ttl_s=120.0):
-    """外部确认通道（测试）：签发一次性 token；S13 后不再有 arm_manual 直通。"""
-    return get_tx_gate().arm(ttl_s=ttl_s)
-
-
 class FakeHalBackend:
     """假 HAL 后端：模拟真实驱动的授权检查、掉线与停发。"""
 

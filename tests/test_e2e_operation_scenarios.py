@@ -489,16 +489,3 @@ def test_culmination_tolerance_helper_is_not_a_free_pass():
     assert not _culmination_in_report(content, "22:40:00"), "别场过境不许蒙混"
     assert _culmination_in_report("   中天: 00:00:01\n", "23:59:59"), \
         "跨午夜按环形距离比较"
-
-
-# ---------------------------------------------------------------------------
-# 反证：中天容差不是「随便一个时刻都放行」
-# ---------------------------------------------------------------------------
-def test_culmination_tolerance_helper_is_not_a_free_pass():
-    content = ("   中天: 09:34:43 最大仰角 30.3°\n"
-               "   中天: 22:43:56 最大仰角 12.1°\n")
-    assert _culmination_in_report(content, "09:34:42"), "1 秒采样差必须放行"
-    assert not _culmination_in_report(content, "09:34:30"), "13 秒差必须拒绝"
-    assert not _culmination_in_report(content, "22:40:00"), "别场过境不许蒙混"
-    assert _culmination_in_report("   中天: 00:00:01\n", "23:59:59"), \
-        "跨午夜按环形距离比较"

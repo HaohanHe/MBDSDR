@@ -2496,6 +2496,10 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `docs/COORDINATION.md` | 批次收尾线/6ae85f56（本笔 §6.1 登记行，提交后释放） | 2026-11-14 12:44 | 本笔 |
 | `mbdsdr_ai/time_basis.py` | 判据存量收口/6ae85f56（扁平 import 回落补齐（time_engine 10 条红）） | 2026-11-14 12:42 | 本笔 |
 | `mbdsdr_ai/orbit.py` | 判据存量收口/6ae85f56（扁平 import 回落补齐（time_engine 10 条红）） | 2026-11-14 12:42 | 本笔 |
+| `tests/test_e2e_operation_scenarios.py` | 共享件边界线/6ae85f56（同名定义扫描：删 test_culmination_tolerance_helper_is_not_a_free_pass 的重复定义（:484 被 :497 遮蔽，从未被收集）） | 2026-11-14 12:45 | 本笔 |
+| `tests/test_tx_no_hardware.py` | 共享件边界线/6ae85f56（同名定义扫描：删 _arm_token 首个定义（:23 被 :129 遮蔽，调用点全在其后）） | 2026-11-14 12:45 | 本笔 |
+| `scripts/lint_dead_symbols.py` | 共享件边界线/6ae85f56（文档化同名遮蔽盲区（按名字引用 vs 按定义解析）与闸门接入点，不改判定逻辑） | 2026-11-14 12:45 | 本笔 |
+| `docs/code-guards.md` | 共享件边界线/6ae85f56（新增「同名遮蔽」节：盲区成因、判定四步、全仓 2 处真遮蔽结果） | 2026-11-14 12:45 | 本笔 |
 
 > 上表各行均由 `claim` 台账推导：owner 原文与 `acquired_at` 直接取自台账，
 > 目的优先用台账里的 `claim_reason`，没有就如实写「未声明」，不补编。时间列只是
