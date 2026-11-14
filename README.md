@@ -3,18 +3,21 @@
 > **30 秒读懂**：这是一套把示波器/矢网/软件无线电（SDR）的每个动作封装成
 > LLM 可调用工具的系统——外部 AI agent 通过 MCP 协议直接遥控真实硬件：
 > 测天线、收信号、解调、解码、抓星历。**没有 mock、没有假数据**：没插硬件
-> 就报空，未校准就标口径。
+> 就报空，未校准就标口径。本页「快速开始」的离线命令在隔离环境实测过，
+> 实测口径与自动化契约见 [§4 离线复验](#4-离线复验本页命令的实测口径) 与 [`scripts/verify_readme.py`](scripts/verify_readme.py)。
 >
 > **真机实证（2026-10）**：NanoVNA-H 实测自制天线谐振与馈线时延、
 > RTL-SDR 实抄 435MHz 业余频段载波、外部 agent 经 MCP 遥控收发全链路、
 > 设备屏幕截图回传——全部见 [`docs/learn/agent-onboarding-runbook.md`](docs/learn/agent-onboarding-runbook.md)。
 
 把 SDR 的接收 / 解调 / 解码 / 卫星过境 / AR 指向，全部封装成 LLM 可调用的工具（function calling），
-由智能体编排成"一键工作流"。本仓库是同一套体系在**三个端 + 一套论文实验 + 一套真机工具**上的落地。
+由智能体编排成"一键工作流"。本仓库是同一套体系在**桌面（两套实现）、手机端、Python 智能体内核，
+外加论文实验管线与真机工具**上的落地；不写死组件数量，实时清单以本节表格为准。
 
 | 组件 | 位置 | 是什么 |
 |---|---|---|
-| 原生桌面端 | [`cpp/`](cpp/README.md) | C++/Qt 原生 SDR 接收软件（UI 与 DSP 同进程，不依赖 Python 运行时）。AI 助手工具面（read/write 双态、写动作在手动模式被门拦截；**数量随版本漂移，实时口径以 `cpp/src/ai/tool_schema.cpp` 注册表为准**），并内置 ControlHub HTTP 控制通道 |
+| Python/PySide6 桌面客户端 | [`desktop/`](desktop/README.md) | 持续维护中的完整桌面端：频谱/瀑布、星象仪全天球、AI 对话栏、真机接收链。`python desktop/main.py` 直接启动、无需编译；无硬件时默认显示诚实「未连接」空状态 |
+| 原生 C++/Qt 桌面端 | [`cpp/`](cpp/README.md) | C++/Qt 原生 SDR 接收软件（UI 与 DSP 同进程，不依赖 Python 运行时）。AI 助手工具面（read/write 双态、写动作在手动模式被门拦截；**数量随版本漂移，实时口径以 `cpp/src/ai/tool_schema.cpp` 注册表为准**），并内置 ControlHub HTTP 控制通道 |
 | 手机端 | [`mobile/`](mobile/README.md) | Flutter 一套代码（Android/iOS），手机作 AI 的"眼睛和手臂"：定位+罗盘指向+rtl_tcp 直连外置 SDR；经 ControlHub HTTP 只读对接桌面引擎 |
 | Python 智能体内核 | [`mbdsdr_ai/`](mbdsdr_ai/README.md) | **研究原型**：注册大量 LLM 可调用工具（数量随版本漂移，实时口径见该 README §1 与运行时 `tool_registry.list_tools()`）+ 工作流引擎。这是原型期工具面，**不是**随桌面交付的工具集 |
 | 论文实验管线 | [`experiments/`](experiments/README.md) | 可复现实验（Eb/N0 解码成功率 / 多普勒定轨 / AMR 基线 / LLM 基线），固定种子、逐图标口径 |
@@ -37,23 +40,24 @@ nanovna-saver、NanoVNA-App、kimi-code、kilocode 六个上游项目做过源�
 <summary><b>日本語 / For Japanese readers</b></summary>
 
 **MBDSDR は「AI が計測器を直接操作するシステム」です。** SDR（ソフトウェア無線）と
-向量网络分析仪（NanoVNA）の全操作を LLM から呼び出せるツールとして実装し、
-MCP（Model Context Protocol）を通じて外部エージェントが実機を遠隔操作できます。
-「専用機器が使いにくい」という問題を、AI に操作させることで解く——これが本作の
-出発点です。
+ベクトル・ネットワーク・アナライザ（NanoVNA）の操作を LLM から呼び出せる
+ツールとして実装し、MCP（Model Context Protocol）経由で外部エージェントが
+実機を操作できます。専用機器の操作習熟コストを AI に引き渡すことが出発点です。
 
-**実機検証済み（2026年10月、ダミーデータなし）**：
+**実機検証済み（2026 年 10 月、ダミーデータなし）**：
 NanoVNA-H による自作アンテナの共振周波数・給線路遅延の実測 / RTL-SDR による
-435MHz 帯アマチュア周波数の実キャリア受信・FM 復調 / 外部エージェントからの
-MCP 遠隔操作（list_devices→connect→set_frequency→get_status 全闭环）。
+435 MHz 帯アマチュア周波数の実キャリア受信・FM 復調 / 外部エージェントからの
+MCP 遠隔操作（list_devices → connect → set_frequency → get_status）。
 
-**工程口径**：全倉庫 MIT（クリーンルーム自願実装、GPL コード非流用）·
-LLM ツールは三チャネル（Agent / ControlHub / HTTP）で動作一致・書き込みは
-人工承認ゲート必須 · SDR++・SatDump・NanoVNA-App・kimi-code 等の主要 OSS
-6 件をクローンして源码監査済み。
+**ライセンスと門**：リポジトリ全体が MIT（独立実装、GPL コードの流用なし）·
+LLM ツールは Agent / ControlHub / HTTP の 3 チャネルで動作が一致し、書き込みには
+手動承認ゲートが必須 · SDR++・SatDump・NanoVNA-App 等の主要 OSS をクローンして
+ソース監査済み。
 
-零硬件演示：`python3 -m mbdsdr_ai.aigui_demo --out demo.html`（AI 编排 UI
-的完整闭环）、`python3 -m pytest mbdsdr_ai/tests -q`（离线确定性测试）。
+ハードウェアなしで試す：
+`python3 -m mbdsdr_ai.aigui_demo --out demo.html`（AI 編排 UI の一巡）、
+`python3 -m pytest tools/hw_selfcheck/test_selfcheck.py tools/onboarding/test_onboarding.py -q`
+（オフライン決定性テスト）。どちらも実機を必要としません。
 
 </details>
 
@@ -61,7 +65,21 @@ LLM ツールは三チャネル（Agent / ControlHub / HTTP）で動作一致・
 
 ## 快速开始
 
-### 1. 桌面端（原生 C++/Qt）
+### 1. 桌面端（两套实现，按工具链选）
+
+**Python / PySide6 桌面客户端**——无需 C++ 工具链，当前持续维护的 UI 主界面：
+
+```bash
+pip install -r requirements.txt
+python desktop/main.py                                     # 无硬件时显示诚实「未连接」空状态
+python desktop/main.py --theme dark                        # 可选：default / dark / high_contrast
+python desktop/main.py --import-probe desktop.main_window  # 只做导入自检，不建窗口
+```
+
+依赖、打包与其它启动方式见 [`desktop/README.md`](desktop/README.md)。
+不插硬件时**不默认造合成 IQ**；`--import-probe` 是在无显示环境里验证安装的最快一条命令。
+
+**原生 C++/Qt 桌面端**——需 Qt 6.8 / librtlsdr 2.x / CMake 3.16+ 与 C++ 编译工具链：
 
 ```bash
 cd cpp
@@ -71,11 +89,14 @@ cmake -S . -B build && cmake --build build -j"$(nproc)"
                       # 设计红线：never invent synthetic IQ by default, no fake hardware is ever shown
 ```
 
-依赖（Qt 6.8 / librtlsdr 2.x / CMake 3.16+）、测试与完整功能清单见 [`cpp/README.md`](cpp/README.md)。
+依赖、测试与完整功能清单见 [`cpp/README.md`](cpp/README.md)。
+两套桌面端并存、各有独立测试；没有 C++ 工具链的机器直接走上面的 Python 端，不必先编 `cpp/`。
 
-启动后桌面引擎在**回环 `127.0.0.1:50732`** 起一条 ControlHub HTTP 控制通道（具名常量 `tokens::kControlHttpDefaultPort`，QSettings/env 可配）：
+**原生 C++/Qt 桌面端**启动后在**回环 `127.0.0.1:50732`** 起一条 ControlHub HTTP 控制通道
+（具名常量 `cpp/src/core/tokens.h` 的 `kControlHttpDefaultPort`，QSettings/env 可配）：
 本机浏览器开 `http://127.0.0.1:50732/` 即可查看状态 / 下命令；端点只绑回环，跨机控制走 SSH 隧道（如 `ssh -N -L 50732:127.0.0.1:50732 user@接收机`）。
 Chromebook / Crostini 当远程控制端的完整拓扑与隧道步骤见 [`docs/CHROMEOS_CROSTINI_SDR.md`](docs/CHROMEOS_CROSTINI_SDR.md)。
+Python/PySide6 桌面端不走这条 ControlHub 通道，别按上面的地址去找它。
 
 ### 2. 真机自检 + 联调（一条命令）
 
@@ -108,6 +129,33 @@ python3 experiments/exp_ebno_decode.py --trials 50 --seed 20261001
 见 [`mbdsdr_ai/README.md`](mbdsdr_ai/README.md)（工具面 / 摘除项 / 诚实标注项）与
 [`experiments/README.md`](experiments/README.md)（口径红线与全部复现命令）。
 
+### 4. 离线复验（本页命令的实测口径）
+
+下列命令在**隔离 HOME/APPDATA、无硬件透传**的环境里真跑过（`MBDSDR_OFFLINE=1`、
+`MBDSDR_NO_HW=1`、`QT_QPA_PLATFORM=offscreen`）。结果按命令性质分两类，不写会过期的通过数：
+
+| 命令 | 无硬件时的真实行为 |
+|---|---|
+| `python3 tools/hw_selfcheck/selfcheck.py --json` | 退出码 1；JSON `summary` 给出 PASS/WARN/FAIL/SKIP 计数与结论「未检测到 RTL-SDR 真机设备」，逐项附 evidence 与 fix，不补假设备 |
+| `python3 tools/onboarding/onboard.py --json --step detect` | 退出码 1；`detect` 步报「未检测到 RTL-SDR 设备（0bda:2838/2832）」并列修复建议，不进入采集 |
+| `python3 -m pytest tools/hw_selfcheck/test_selfcheck.py tools/onboarding/test_onboarding.py -q` | 退出码 0；离线确定性用例通过，无硬件专项诚实 SKIP |
+| `python3 experiments/exp_ebno_decode.py --trials 50 --seed 20261001` | 退出码 0；输出 Eb/N0 扫描与成功率，写 `paper/experiments/` 下 CSV、PNG、manifest，口径标 `synthetic`（仿真，非实测信号） |
+| `python3 -m mbdsdr_ai.aigui_demo --out demo.html` | 退出码 0；生成静态 HTML 编排演示页，不碰硬件 |
+| `python3 desktop/main.py --import-probe desktop.main_window` | 退出码 0；打印 `[probe] OK desktop.main_window`，不建窗口 |
+
+**在 Windows 上**，`hw_selfcheck` 的 USB 段会走降级路径（`lsusb` 不可用 → 尝试扫 `/sys`，
+而 Windows 并无该目录），
+结论仍如实说明真机待办；这属于环境差异，不是脚本失败。真机接入后按 §2 重跑才有真机结论。
+
+六条命令可一键复跑：`python3 scripts/repro_readme_offline.py`
+（隔离 HOME/APPDATA、不碰真机；真机自检按预期返回 1 并如实打印，不粉饰成通过）。
+复跑脚本为缩短耗时把仿真实验的 `--trials` 从上表的 50 降到 10，其余命令逐字一致；
+固定种子不变，曲线形态可对照，别把两次样本量不同的数字直接比。
+
+本页的链接、路径、命令参数与版本号由 [`scripts/verify_readme.py`](scripts/verify_readme.py)
+自动校验（`python3 scripts/verify_readme.py --json`），测试钉在 `tests/test_readme_contract.py`。
+文档改了、代码没跟上，守卫会直接红。
+
 ---
 
 ## 真机与云测状态（诚实声明）
@@ -122,6 +170,8 @@ python3 experiments/exp_ebno_decode.py --trials 50 --seed 20261001
   （见上方命令区）与云端 CI（`.github/workflows/ci.yml`）为准，不设数字标语——数字随时间浮动，
   写入即过期（AGENTS.md §1）。无硬件环境下的用例以诚实 SKIP 结算，换机 / 真机后需重测，不代表真机已验。
 - 未解决项总账（逐项带阶段溯源）见 [`docs/learn/phase41/open-items.md`](docs/learn/phase41/open-items.md)。
+- 「快速开始」里**不依赖真机**的六条命令已在隔离环境实跑，逐条真实行为见 §4；
+  两条真机自检返回非零退出码是设计行为（诚实失败），不是脚本坏了。
 
 ## LLM 基线（诚实说明）
 
@@ -130,7 +180,7 @@ python3 experiments/exp_ebno_decode.py --trials 50 --seed 20261001
 不伪造数值、不联网、不花钱。key 只从环境变量读（`MBDSDR_LLM_API_KEY`），代码与文档中无任何 key 字面量。
 
 桌面 / 移动端的 AI 聊天（`cpp/src/ai/llm_worker`）同理：无 key 或 `401/403` 时**诚实报 PENDING、不 mock 输出**；
-transport 层已透传真实 HTTP 状态码（`llm_client.cpp` 读 `HttpStatusCodeAttribute`），按码分类
+transport 层已透传真实 HTTP 状态码（`cpp/src/ai/llm_client.cpp` 读 `HttpStatusCodeAttribute`），按码分类
 （`429/5xx` 退避重试、`4xx` 终态如实报错）。但**真实在线重试 e2e 从未在带 key / 联网环境跑过**——
 分类与退避路径由离线纯函数测试钉住，在线一次实跑仍属未决（见总账）。
 
@@ -148,7 +198,7 @@ DMR / P25 / C4FM 等涉及专利或许可受限的语音编码器**不内置**�
 ```
 cpp/        原生 C++/Qt 桌面 SDR（引擎/解调/录制/解码/卫星过境/世界地图/AI 助手）
 mobile/     Flutter 手机端（Android/iOS）：rtl_tcp 客户端 + 解调 + 录音/回放 building blocks + GNSS
-desktop/    早期 Python/Qt 桌面 GUI 原型（面板式，非当前主推原生端）
+desktop/    Python/PySide6 桌面客户端（频谱/星象仪/AI 对话栏/真机链路，持续维护；启动见 desktop/README.md）
 mbdsdr_ai/  Python 智能体内核：agent.py 装配、sdr_tools.py 工具面、workflow_engine、scheduler、pose
 experiments/论文实验管线（common/ 公共库 + exp_*.py 脚本 + tests/）
 tools/      hw_selfcheck（真机只读自检）、onboarding（联调向导）
@@ -169,123 +219,21 @@ repos/      克隆的上游源码（仅供学习，不入产品路径）
 3. 回传 sweep.json（+ 连接日志 version/info/cal）即可比对。
 无设备可先 `--selftest` 跑通流程（合成演示，非真实测量）。详见 docs/learn/nanovna/hardware-quickstart.md。
 
-## 工具能力矩阵（三通道：Agent / Hub / HTTP 透传）
+## 工具能力（不在 README 复制浮动清单）
 
-按域分组；写=手动模式 gate 拦截，读=不拦截。
+工具名、读写标记与域分组随版本变化，抄进首页当天就开始过期；本仓库**不在这里复刻表**。
+唯一事实源与查看方式：
 
-### SDR 调谐 / VFO
-| 工具 | 写/读 |
+| 想看什么 | 去哪看 |
 |---|---|
-| tune_frequency | 写 |
-| set_mode | 写 |
-| set_bandwidth | 写 |
-| get_status | 读 |
-| get_spectrum_status | 读 |
-| list_vfos / add_vfo / delete_vfo(rename_vfo/switch_vfo 同) | 读/写 |
-| set_vfo_frequency / set_vfo_mode / set_vfo_bandwidth / set_vfo_armed | 写 |
+| 运行时实时清单 | Python `ToolRegistry.list_tools()` / C++ `registeredToolSpecs()`（写动作一律过手动 gate） |
+| 自动生成的文档快照 | [`docs/learn/phase31/agent-tool-documentation.md`](docs/learn/phase31/agent-tool-documentation.md)（固定字段：name / description / JSON Schema / 读写标记 / 错误示例） |
+| Python 内核工具面与诚实标注项 | [`mbdsdr_ai/README.md`](mbdsdr_ai/README.md) §2 |
+| 任务→积木编排对照 | [`docs/learn/capability-map.md`](docs/learn/capability-map.md) |
+| 域分组口径 | `docs/learn/phase31/agent-tool-documentation.md` 与 `docs/learn/phase31/_WAVE2_AGENT_LANDING.md` |
 
-### SDR 静噪 / 亚音 / 解码
-| 工具 | 写/读 |
-|---|---|
-| set_squelch / get_squelch_status | 写/读 |
-| set_ctcss / get_ctcss_status | 写/读 |
-| set_cdcss / get_cdcss_status | 写/读 |
-| set_ft8 / get_ft8_status | 写/读 |
-| get_ft8_history | 读 |
-| set_lrpt / get_lrpt_status | 写/读 |
-| set_noise_blanker / get_noise_blanker_status | 写/读 |
-| get_acars_packets / get_navtex_messages / get_pocsag_messages / get_m17_calls / get_vor_radial / get_adsb_aircraft / get_aprs_messages / get_color_maps | 读 |
-
-### VNA 基础
-| 工具 | 写/读 |
-|---|---|
-| set_vna_sweep | 写 |
-| get_vna_data / get_vna_status | 读 |
-
-### VNA 分析
-| 工具 | 写/读 |
-|---|---|
-| vna_tdr_cable | 写 |
-| analyze_vna_resonance / analyze_vna_filter / analyze_vna_equivalent / analyze_vna_touchstone / analyze_vna_match | 读 |
-
-### VNA 校准
-| 工具 | 写/读 |
-|---|---|
-| vna_calibration | 写（step=status 为只读引导） |
-| vna_device | 写（action=status/vbat/freq_offset 读为只读，整体手动 gate） |
-
-### 导出 / 录制
-| 工具 | 写/读 |
-|---|---|
-| start_recording / stop_recording / delete_recording / export_recording / export_iq_segment / list_recordings / get_recording_state | 写/读 |
-| export_vna_snapshot / export_spectrum_snapshot / export_peaks_csv / export_ft8_results | 写 |
-
-### 书签 / 扫描 / 网络
-| 工具 | 写/读 |
-|---|---|
-| list_bookmarks / add_bookmark / tune_to_bookmark / delete_bookmark | 读/写 |
-| scan_band / start_scan_link / stop_scan_link / get_scan_link_status | 写/读 |
-| connect_network_source / set_network_audio_sink / get_network_audio_status | 写/读 |
-| list_templates / run_template | 读/写（确定性任务模板：list 列举 3 模板；run 按名构建并登记计划 executed=false，不同步调谐/录制，手动 gate） |
-| get_task_history | 读（TaskRunner 完成任务历史：列表最近 N 条 + id 详情含 steps 数组，无记录 runs=[] 诚实空态） |
-
-### 系统 / 校准 / 卫星
-| 工具 | 写/读 |
-|---|---|
-| calibrate_frequency / apply_frequency_correction / predict_passes / list_satellites | 读 |
-| set_fft_params / set_color_map / set_doppler_compensation / get_capabilities | 写/读 |
-
-### 接收链硬件参数
-| 工具 | 写/读 |
-|---|---|
-| set_gain / set_sample_rate / set_decimation / set_direct_sampling / set_offset_tuning / set_agc / set_bias_tee（馈电风险）/ set_force_mono / set_anr | 写 |
-| set_audio_output / set_tune_step | 写 |
-
-### 录制参数
-| 工具 | 写/读 |
-|---|---|
-| set_recording_target / set_recording_dir / set_recording_template / set_recording_stereo / set_recording_ignore_squelch / set_recording_max_segment / set_gated_recording / set_watch_recording | 写 |
-
-### 扫描 / 显示 / 频谱外观
-| 工具 | 写/读 |
-|---|---|
-| set_scan_params | 写 |
-| set_persistence / set_waterfall_depth / set_waterfall_speed / set_builtin_palette / set_spectrum_db_range / set_spectrum_zoom / set_db_grid_step / set_peak_threshold / set_peak_hold / set_edge_rail_visibility | 写 |
-
-### 源 / 网络 / GNSS / 图层
-| 工具 | 写/读 |
-|---|---|
-| set_source_type / set_spyserver / connect_gnss / set_map_layers / set_station_position / set_sat_pass_template | 写 |
-
-### VNA 连接与渗透分析
-| 工具 | 写/读 |
-|---|---|
-| vna_connect | 写 |
-| analyze_vna_permeability | 读 |
-
-### 外设电台（TX，写动作均需 confirm 确认）
-| 工具 | 写/读 |
-|---|---|
-| set_cat_control / send_cw / send_ax25_beacon / soapy_transmit | 写 |
-
-### 外观 / 布局
-| 工具 | 写/读 |
-|---|---|
-| set_ui_scale / set_language / set_left_groups | 写 |
-
-### 记忆编排（SQLite FTS5，~/.mbdsdr/memory.db）
-| 工具 | 写/读 |
-|---|---|
-| memory_add / memory_update / memory_flush / memory_delete | 写（手动 gate；add/update 入队异步落库，flush 同步排空；delete 按 (scope,key) 同步删，不存在返回 deleted=false 空操作） |
-| memory_search / checkpoint_status / memory_stats | 读 |
-
-### 工作台编排（AIGUI P0-b，三栏 splitter + 右侧 tab）
-| 工具 | 写/读 |
-|---|---|
-| arrange_workspace / reset_workspace / update_component_data | 写（手动 gate；按编译期白名单调整 splitter 尺寸/tab 可见性，未知 id 诚实占位；update_component_data 为 A2UI updateDataModel 最小子集 upsert/清空组件数据槽，不碰 DSP/音频/硬件） |
-| get_workspace_layout / list_ui_components | 读 |
-
-全部工具以注册表为唯一事实源（运行时 `list_tools()` 取实时口径），文档不复制浮动数字。域分组口径见 docs/learn/phase31/agent-tool-documentation.md。
+三通道（Agent / ControlHub / HTTP）行为一致且有测试钉住，写动作一律过人工门；
+「没设备就报空、没校准就标口径」对所有通道同样成立。
 
 ## MCP 服务器（C++ mbdsdr-mcp 与 Python mbdsdr_ai/core/mcp_server.py）合并视图
 
