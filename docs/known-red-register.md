@@ -1339,3 +1339,32 @@ sidecar + 采样率变更跟随的记录，然后在该行补
 <!-- claims-gate-exempt: K25 docs/real_hw_acceptance_20261103.md#37c1a8926f3a -->
 
 
+
+---
+
+## K26 — §6.1 表格两行在途快照被 claims 闸门判未证实（2026-11-14，存量）
+
+**现象**：`docs/COORDINATION.md` §6.1 表格的两行在途快照（现 2318 / 2534 行）
+被当作技术断言扫描，判「未证实（文档过期）」：行内的线名标识不是提交号，
+`git cat-file -e` 查不到，四元组无法就地补齐。
+
+**分类**：存量。在干净基线 `38d1ebd4` 上单跑
+`tests/test_claims_guard.py::test_no_new_or_modified_unverified_claims`，同样
+3 条红（2318 / 2533）复现，与三条成果分支的整合无关。
+
+**为什么不直接改行**：§6.1.8 规定登记表格行只许追加、不许改写，pre-commit ⑤
+「只增检查」会把行内补证据段判成改写并拒绝提交。两条规矩冲突时保留历史行，
+改走本表登记出口，不绕钩子、不加白名单、不放宽判据。
+
+**真实证据（已核对，未写回表格）**：两处改动都能定位到真实提交与唯一字面量，
+`git show --name-only` 与 `git log -S` 均命中同一提交：
+- `mbdsdr_ai/acquisition.py` — 提交 `bddd9265`，`:678` 引入 `_resolve_propagation`
+- `docs/audit_r2/25_orbit.md` — 提交 `38d1ebd4`，`:120` 引入 `8be5af66 后复核`
+
+**转绿条件（唯一）**：由人工裁定改写 §6.1 历史行并在事故记录写明，或按 §6.1.8
+追加一条新的证据登记行后由 claims 守卫改判；在此之前保持登记，不放行新断言。
+
+**复跑命令**：`python -m pytest tests/test_claims_guard.py -q`
+
+<!-- claims-gate-exempt: K26 docs/COORDINATION.md#92c3474fea24 -->
+<!-- claims-gate-exempt: K26 docs/COORDINATION.md#e11553c8edbb -->
