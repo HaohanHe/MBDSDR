@@ -2403,6 +2403,13 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `mbdsdr_ai/serial_gnss.py` | 时空环境层/A5（GST 真实误差并入 fix 快照） | 2026-11-14 11:37 | 本笔 |
 | `desktop/status_panel.py` | 时空环境层/A5（定位误差与 HDOP 并列） | 2026-11-14 11:37 | 本笔 |
 | `tests/test_gps_gst_error_display.py` | 时空环境层/A5（A5 判据与反证） | 2026-11-14 11:37 | 本笔 |
+| `scripts/audit_bare_commits.py` | 收尸线/6ae85f56（§11.3 四条前提的只读机检入口（只报告，退出码恒 0）） | 2026-11-14 11:37 | 本笔 |
+| `tests/test_bare_commit_audit.py` | 收尸线/6ae85f56（四类样本 + 缺行反证） | 2026-11-14 11:37 | 本笔 |
+| `scripts/audit_claim_lines.py` | 收尸线/6ae85f56（load_commits 收参数列表、_norm 公开为 norm_path 供新审计复用） | 2026-11-14 11:37 | 本笔 |
+| `docs/evidence-standard.md` | 收尸线/6ae85f56（§11.7 写机检边界与三项判据） | 2026-11-14 11:37 | 本笔 |
+| `tools/axioms/current_stats.py` | 公理体检线/6ae85f56（基准过期上限：24 小时/200 笔，超限红、未超只提示） | 2026-11-14 11:38 | 本笔 |
+| `tests/test_axioms_doc_current_stats.py` | 公理体检线/6ae85f56（判据：超龄/超笔数必红，未超只提示；上限改极大值反证） | 2026-11-14 11:38 | 本笔 |
+| `docs/axioms.md` | 公理体检线/6ae85f56（过期上限与何时重生成写在同一处） | 2026-11-14 11:38 | 本笔 |
 
 > 上表各行均由 `claim` 台账推导：owner 原文与 `acquired_at` 直接取自台账，
 > 目的优先用台账里的 `claim_reason`，没有就如实写「未声明」，不补编。时间列只是

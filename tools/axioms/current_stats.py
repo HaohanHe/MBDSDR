@@ -27,7 +27,7 @@ import re
 import subprocess
 import sys
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -48,6 +48,14 @@ BEGIN_MARK = "<!-- axioms-current-stats:begin"
 END_MARK = "<!-- axioms-current-stats:end -->"
 FINGERPRINT_KEY = "校验指纹 sha256:"
 DOC_REL_PATH = os.path.join("docs", "axioms.md")
+
+#: 基准过期上限（双条件、先到者）：超过任一，判据从「提示」升级为红。
+#: 24 小时：正常一天之内会重生成一次；再久「当前计数」就跨过了发布/排班
+#:   节奏，继续沿用旧数会直接误导对「当前存量」的判断。
+#: 200 笔提交：本仓多线并发，一天约几十到上百笔；200 笔≈两天以上的代码面
+#:   变化，此时基准那棵树与 HEAD 早已不是同一回事。
+MAX_STALE_HOURS = 24.0
+MAX_STALE_COMMITS = 200
 
 _MARKER_RE = re.compile(
     re.escape(BEGIN_MARK)
@@ -125,6 +133,36 @@ def now_stamp() -> str:
     return datetime.now().astimezone().isoformat(timespec="seconds")
 
 
+def age_hours(generated_at: str, now: Optional[datetime] = None) -> Optional[float]:
+    """基准生成时刻距今多少小时；解析不了返回 None（不据此判红）。"""
+    try:
+        stamp = datetime.fromisoformat(str(generated_at).strip())
+    except ValueError:
+        return None
+    if stamp.tzinfo is None:
+        stamp = stamp.replace(tzinfo=timezone.utc)
+    ref = now or datetime.now().astimezone()
+    if ref.tzinfo is None:
+        ref = ref.replace(tzinfo=timezone.utc)
+    return (ref - stamp).total_seconds() / 3600.0
+
+
+def commits_since(root=None, baseline_sha: str = "", head: str = "HEAD") -> Optional[int]:
+    """基准之后「改了扫描面」的提交笔数。
+
+    只重写计数块文档的提交（如重生成本块的那一笔）不算——它不改变被统计的
+    输入，基准因此仍然对得上，不必提示重跑。
+    """
+    try:
+        out = subprocess.run(
+            ["git", "rev-list", "--count", f"{baseline_sha}..{head}", "--", ".",
+             f":(exclude){DOC_REL_PATH}"],
+            cwd=root or ROOT, capture_output=True, text=True, check=True)
+        return int(out.stdout.strip())
+    except (OSError, ValueError, subprocess.CalledProcessError):
+        return None
+
+
 @dataclass(frozen=True)
 class Block:
     baseline_sha: str
@@ -157,11 +195,15 @@ class VerifyResult:
 
 
 def verify_doc(text: str, *, head_sha: str,
-               tool_body: Optional[str] = None) -> VerifyResult:
+               tool_body: Optional[str] = None,
+               stale_commits: Optional[int] = None,
+               now: Optional[datetime] = None) -> VerifyResult:
     """按基准校验文档计数块。
 
     * 块内数字与块内指纹不符 → 红（手改数字）；
-    * 基准 sha != 当前 HEAD → 不红，提示重跑（不拿 HEAD 的数字去要求旧基准）；
+    * 基准 sha != 当前 HEAD：先看是否超过过期上限（24 小时 / 200 笔提交，
+      ``MAX_STALE_HOURS`` / ``MAX_STALE_COMMITS``）——超过即红；未超过只提示。
+      基准之后只有「重写本计数块」的提交时视为未过期；
     * 基准 sha == 当前 HEAD 且给了 ``tool_body`` → 与工具当次输出逐字比对。
     """
     blk = parse_block(text)
@@ -179,6 +221,23 @@ def verify_doc(text: str, *, head_sha: str,
             error=("文档计数与基准生成时的工具输出不一致（数字被手改？）。"
                    "请重跑 `python -m tools.axioms.current_stats`，不要手改。"))
     if blk.baseline_sha != head_sha:
+        age = age_hours(blk.generated_at, now)
+        over_age = age is not None and age > MAX_STALE_HOURS
+        over_commits = (stale_commits is not None
+                        and stale_commits > MAX_STALE_COMMITS)
+        if over_age or over_commits:
+            parts = []
+            if age is not None:
+                parts.append(f"距生成 {age:.1f} 小时（上限 {MAX_STALE_HOURS:g} 小时）")
+            if stale_commits is not None:
+                parts.append(f"落后 {stale_commits} 笔提交（上限 {MAX_STALE_COMMITS} 笔）")
+            return VerifyResult(
+                False,
+                error=(f"计数基准已过期：{'，'.join(parts) or '超过上限'}。"
+                       "请重跑 `python -m tools.axioms.current_stats` 并随代码提交"
+                       "更新基准。"))
+        if stale_commits == 0:
+            return VerifyResult(True)
         return VerifyResult(
             True,
             hint=(f"HEAD 已前进（基准 {blk.baseline_sha[:12]} → 当前 "
@@ -204,6 +263,7 @@ def verify_repo(root=None) -> VerifyResult:
     head = git_head(root)
     blk = parse_block(text)
     tool_body = None
+    stale_commits = None
     if blk is not None and head and blk.baseline_sha == head:
         if worktree_dirty(root):
             res = verify_doc(text, head_sha=head)
@@ -211,7 +271,10 @@ def verify_repo(root=None) -> VerifyResult:
                 res.ok, res.error,
                 res.hint or "工作树有未提交改动，未现场重跑工具（只校验块内指纹）。")
         tool_body = counts_text(root=root)
-    return verify_doc(text, head_sha=head, tool_body=tool_body)
+    elif blk is not None and head:
+        stale_commits = commits_since(root, blk.baseline_sha)
+    return verify_doc(text, head_sha=head, tool_body=tool_body,
+                      stale_commits=stale_commits)
 
 
 def update_doc(root=None, doc_path=None) -> Block:
