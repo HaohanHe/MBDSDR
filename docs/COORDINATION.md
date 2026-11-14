@@ -2486,6 +2486,9 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `scripts/audit_bare_commits.py` | 用例随闸线/6ae85f56（审计文案里的豁免入口改名） | 2026-11-14 12:34 | 本笔 |
 | `tests/test_safe_commit_declaration.py` | 用例随闸线/6ae85f56（漂移豁免用例改 --allow-foreign-drift，补用错开关反证） | 2026-11-14 12:34 | 本笔 |
 | `mbdsdr_ai/orbit.py` | 共享件边界线/6ae85f56（共享件收口：_iso_utc 与 tle_cache_time_utc 委托 time_format.iso_utc_z（第 3 份同形实现，行为不变）） | 2026-11-14 12:38 | 本笔 |
+| `scripts/file_claim.py` | 批次收尾线/6ae85f56（趋势快照加 undecidable_ratio 与 claims_with_content_hash；JSON 行补 suspect 的 hint，供批次报告直接读） | 2026-11-14 12:41 | 本笔 |
+| `scripts/batch_close.py` | 批次收尾线/6ae85f56（cleanup-stale 以 NOTE 接入：rc=0/3 都不判红，只有没跑成才 ERROR→3；报告逐条给 SUSPECT 缺口与补法） | 2026-11-14 12:41 | 本笔 |
+| `docs/COORDINATION.md` | 批次收尾线/6ae85f56（本笔 §6.1 登记行，提交后释放） | 2026-11-14 12:41 | 本笔 |
 
 > 上表各行均由 `claim` 台账推导：owner 原文与 `acquired_at` 直接取自台账，
 > 目的优先用台账里的 `claim_reason`，没有就如实写「未声明」，不补编。时间列只是

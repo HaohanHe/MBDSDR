@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
-"""批次收尾三道检查的唯一命名入口。
+"""批次收尾检查的唯一命名入口。
 
 背景
 ----
@@ -14,21 +14,28 @@ owner 把「红/绿 + 条数」抄进台账。实际执行时有三处靠人：
 本工具只做聚合，**不改变任何一道检查自身的判据**，也不进 pre-commit（前两道
 单次耗时远超钩子预算，塞进钩子只会让人开始用 ``--no-verify``）。
 
-三道检查（与台账同源）
+检查步骤（与台账同源）
 ----------------------
-====================  =====================================  ==========================
-步骤名                脚本                                   退出码含义
-====================  =====================================  ==========================
-``evidence``          ``scripts/audit_evidence.py``          0 无红 / 1 有红
-``red_lifecycle``     ``scripts/check_red_lifecycle.py``     0 无 FAIL / 1 有 FAIL / 2 用法或 git 错误
-``roadmap``           ``scripts/check_roadmap_blocking.py``  恒 0（提醒器，只作提示）
-====================  =====================================  ==========================
+====================  ==========================================  ==========================
+步骤名                脚本                                        退出码含义
+====================  ==========================================  ==========================
+``evidence``          ``scripts/audit_evidence.py``               0 无红 / 1 有红
+``red_lifecycle``     ``scripts/check_red_lifecycle.py``          0 无 FAIL / 1 有 FAIL / 2 用法或 git 错误
+``roadmap``           ``scripts/check_roadmap_blocking.py``       恒 0（提醒器，只作提示）
+``cleanup``           ``scripts/file_claim.py cleanup-stale``     0 主数为空 / 3 有可释放未释放（都算 NOTE）
+====================  ==========================================  ==========================
 
 行为
 ----
 * 按固定顺序**全跑**：一道判红不会遮住后两道的结论；
 * 每道有独立超时（默认 300 s），超时按「没跑成」处理，不按红处理；
-* 三道都跑完后，把结果压成一行摘要，并默认留一份 JSON 快照到
+* **``cleanup`` 是 NOTE 级**：只把「可释放未释放 / UNDECIDABLE / SUSPECT」
+  抄进报告与趋势，**不参与 0/1/3 的红绿判定**——「有可释放未释放」不是缺陷，
+  只是有活没干；把它算成红，批次会因为「今天没人清理」而变红，那种红没有
+  意义。它的 SUSPECT 也不进任何自动判定，只在报告里逐条给缺口和补法。
+  只有它自己没跑成（脚本缺失、超时、崩溃、输出不是可解析 JSON）才升级成
+  ``ERROR``/退出码 3——没跑成就不能算「没有待办」。
+* 各道都跑完后，把结果压成一行摘要，并默认留一份 JSON 快照到
   ``<仓库父目录>/.tmp/batch_close/``（D 盘；不写仓库、不写 C 盘）；
 * 快照写失败只打印 WARN，不改退出码——记录失败不是判据失败，但不能静默；
 * **rc=1 的崩溃启发式**：三道检查目前没有顶层异常捕获，检查器自己抛异常也
@@ -44,7 +51,7 @@ owner 把「红/绿 + 条数」抄进台账。实际执行时有三处靠人：
 ===  ================================================================
 码   含义
 ===  ================================================================
-0    三道全部正常且无红（``roadmap`` 恒 0，只作提示）
+0    各道全部正常且无红（``roadmap`` / ``cleanup`` 为 NOTE，只作提示）
 1    至少一道判红（该道以 1 退出）；其余检查均正常跑完
 2    用法错误：未知 ``--steps``、非正 ``--timeout``、``--root`` 下没有 scripts/
 3    至少一道**没能正常执行**（脚本缺失、超时、退出码不是 0/1，或 rc=1 但
@@ -116,13 +123,27 @@ class Step:
 
     name: str
     script: str
+    args: tuple[str, ...] = ()
     advisory: bool = False
+    #: 这些退出码也按 NOTE 处理（只提示、不判红）。目前只有 ``cleanup`` 的 3：
+    #: 「有可释放未释放」是有活没干，不是缺陷。
+    note_rcs: tuple[int, ...] = ()
+    #: stdout 是 JSON，用它生成摘要 / 指标（而不是只取最后一行）。
+    json_output: bool = False
 
 
 STEPS: tuple[Step, ...] = (
     Step("evidence", "audit_evidence.py"),
     Step("red_lifecycle", "check_red_lifecycle.py"),
     Step("roadmap", "check_roadmap_blocking.py", advisory=True),
+    Step(
+        "cleanup",
+        "file_claim.py",
+        args=("cleanup-stale", "--json"),
+        advisory=True,
+        note_rcs=(0, 3),
+        json_output=True,
+    ),
 )
 STEP_BY_NAME = {step.name: step for step in STEPS}
 
@@ -138,6 +159,8 @@ class StepResult:
     detail: str = ""
     #: 非空 = 该条 ERROR 来自 rc=1 的回溯启发式，值是识别到的异常行。
     heuristic: str = ""
+    #: 机器可读计数（目前只有 cleanup）；写进 JSON 与快照。
+    metrics: Optional[dict] = None
 
 
 def _tail(text: str, lines: int = TAIL_LINES) -> str:
@@ -151,6 +174,53 @@ def _summary(text: str) -> str:
         return "(无输出)"
     last = rows[-1]
     return last if len(last) <= 200 else last[:197] + "..."
+
+
+def _cleanup_note(stdout: str) -> tuple[Optional[dict], str, str]:
+    """解析 ``file_claim.py cleanup-stale --json``：返回 (指标, 摘要, 详情)。
+
+    解析失败返回 ``(None, "", "")``，由调用方按「没跑成」处理——输出不可读
+    就等于没有结论，不能当成「没有待办」。
+    """
+    try:
+        payload = json.loads(stdout)
+    except (TypeError, ValueError):
+        return None, "", ""
+    if not isinstance(payload, dict):
+        return None, "", ""
+
+    counts = payload.get("summary") or {}
+    undecidable = payload.get("undecidable") or {}
+    ratio = float(undecidable.get("ratio") or 0.0)
+    summary = (
+        f"待办·可释放未释放 {int(counts.get('releasable', 0))}；"
+        f"UNDECIDABLE {int(undecidable.get('count', 0))}（{ratio:.1%}）；"
+        f"SUSPECT {int(counts.get('suspect', 0))}；"
+        f"租约未过期 {int(counts.get('live', 0))}；"
+        f"过期未满宽限 {int(counts.get('wait', 0))}"
+    )
+    lines: list[str] = []
+    for row in payload.get("rows") or []:
+        if row.get("category") != "suspect":
+            continue
+        gaps = "；".join(row.get("gaps") or []) or "（无缺口描述）"
+        lines.append(
+            f"SUSPECT {row.get('path', '?')} owner={row.get('owner', '?')} "
+            f"过期={row.get('expired_min', 0)}min 缺口：{gaps}"
+        )
+        if row.get("hint"):
+            lines.append(f"  补法：{row['hint']}")
+    metrics = {
+        "total": int(payload.get("total") or 0),
+        "releasable": int(counts.get("releasable", 0)),
+        "undecidable": int(undecidable.get("count", 0)),
+        "undecidable_ratio": ratio,
+        "undecidable_reasons": undecidable.get("reasons") or {},
+        "suspect": int(counts.get("suspect", 0)),
+        "live": int(counts.get("live", 0)),
+        "wait": int(counts.get("wait", 0)),
+    }
+    return metrics, summary, "\n".join(lines)
 
 
 def run_step(step: Step, root: Path, timeout_s: int) -> StepResult:
@@ -172,7 +242,7 @@ def run_step(step: Step, root: Path, timeout_s: int) -> StepResult:
     started = time.monotonic()
     try:
         proc = subprocess.run(
-            [sys.executable, str(script)],
+            [sys.executable, str(script), *step.args],
             cwd=str(root),
             capture_output=True,
             text=True,
@@ -203,6 +273,36 @@ def run_step(step: Step, root: Path, timeout_s: int) -> StepResult:
     combined = (proc.stdout or "") + ("\n" + proc.stderr if proc.stderr else "")
     summary = _summary(proc.stdout or proc.stderr)
 
+    if proc.returncode in step.note_rcs:
+        # NOTE 级：约定内退出码只提示，不参与红绿；但输出不可读时不能算「没有待办」。
+        if step.json_output:
+            metrics, note_summary, note_detail = _cleanup_note(proc.stdout or "")
+            if metrics is None:
+                return StepResult(
+                    name=step.name,
+                    status="ERROR",
+                    rc=proc.returncode,
+                    elapsed_s=elapsed,
+                    summary="输出不是可解析 JSON，无法确认待办",
+                    detail=_tail(combined),
+                )
+            return StepResult(
+                name=step.name,
+                status="NOTE",
+                rc=proc.returncode,
+                elapsed_s=elapsed,
+                summary=note_summary,
+                detail=note_detail,
+                metrics=metrics,
+            )
+        return StepResult(
+            name=step.name,
+            status="NOTE",
+            rc=proc.returncode,
+            elapsed_s=elapsed,
+            summary=summary,
+            detail=_tail(combined),
+        )
     if proc.returncode == 0:
         return StepResult(
             name=step.name,
@@ -255,7 +355,7 @@ def overall_exit(results: Sequence[StepResult]) -> int:
 
 def _verdict(code: int) -> str:
     if code == EXIT_OK:
-        return "可以收（三道均正常且无红）"
+        return "可以收（各道均正常且无红）"
     if code == EXIT_RED:
         return "不能收（有检查判红）"
     return "结论不成立（有检查没跑成，先修检查器/环境再跑）"
@@ -278,6 +378,7 @@ def _record(results: Sequence[StepResult], root: Path, code: int) -> Optional[Pa
                 "elapsed_s": round(result.elapsed_s, 3),
                 "summary": result.summary,
                 "heuristic": result.heuristic,
+                "metrics": result.metrics,
             }
             for result in results
         ],
@@ -333,7 +434,7 @@ def _selected_steps(raw: Optional[str]) -> Optional[list[Step]]:
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="批次收尾三道检查的聚合入口（判据仍在各脚本内）。",
+        description="批次收尾检查的聚合入口（判据仍在各脚本内）。",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=(
             "退出码：0 全绿；1 有检查判红；2 用法错误；3 有检查没跑成。\n"
@@ -343,7 +444,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--steps",
         default=None,
-        help="逗号分隔的步骤名；缺省全跑（evidence,red_lifecycle,roadmap）",
+        help="逗号分隔的步骤名；缺省全跑（evidence,red_lifecycle,roadmap,cleanup）",
     )
     parser.add_argument(
         "--timeout",
@@ -404,6 +505,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                             "elapsed_s": round(result.elapsed_s, 3),
                             "summary": result.summary,
                             "heuristic": result.heuristic,
+                            "metrics": result.metrics,
                         }
                         for result in results
                     ],

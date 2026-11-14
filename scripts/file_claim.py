@@ -2337,12 +2337,18 @@ def cmd_cleanup_stale(
     MARKER_DIR.mkdir(parents=True, exist_ok=True)
     facts = _git_facts()
     rows: List[Dict[str, Any]] = []
+    #: 记了内容基线的 claim 条数。新 claim 才开始记 `content_sha256`，
+    #: 所以这个数上升 + `undecidable_ratio` 下降，才说明「记 hash」真的生效；
+    #: 三个月后比例还是 87%，就是没生效——只能靠趋势看，不能靠记忆。
+    claims_with_content_hash = 0
     for marker in sorted(MARKER_DIR.glob("*.claim")):
         payload = _peek_marker(marker)
         if payload is None:
             continue
         if only_key and str(payload.get("key") or "") != only_key:
             continue
+        if str(payload.get("content_sha256") or ""):
+            claims_with_content_hash += 1
         rows.append(_cleanup_row(payload, now, facts))
 
     groups = {
@@ -2372,6 +2378,8 @@ def cmd_cleanup_stale(
     )
 
     # 趋势只存计数，不存路径：UNDECIDABLE 不做待办，但必须能看出涨跌。
+    # `undecidable_ratio` / `claims_with_content_hash` 是一对：前者降、后者升，
+    # 才说明新 claim 记内容基线真的在起作用（见 docs/code-guards.md 复合入口）。
     trend = {
         "at": _iso(now),
         "epoch": now,
@@ -2379,6 +2387,8 @@ def cmd_cleanup_stale(
         "total": len(rows),
         "summary": {name: len(items) for name, items in groups.items()},
         "undecidable_reasons": undecidable_reasons,
+        "undecidable_ratio": undecidable_ratio,
+        "claims_with_content_hash": claims_with_content_hash,
     }
     try:
         _append_cleanup_trend(trend)
@@ -2387,7 +2397,12 @@ def cmd_cleanup_stale(
 
     if as_json:
         public_rows = [
-            {k: v for k, v in row.items() if k != "marker"} for row in rows
+            {
+                **{k: v for k, v in row.items() if k != "marker"},
+                # 补法只给 SUSPECT：其余类别的缺口不构成「怎么补」的待办。
+                "hint": _suspect_hint(row) if row["category"] == "suspect" else "",
+            }
+            for row in rows
         ]
         print(json.dumps({
             "now": now,
