@@ -255,3 +255,36 @@ def test_append_keeps_lf_line_endings(tmp_path: Path) -> None:
     raw = doc.read_bytes()
     assert b"\r\n" not in raw, "追加把整本文档的行尾翻成了 CRLF"
     assert raw.count(b"\n") == DOC_TEMPLATE.count("\n") + 200 + 1
+
+
+def test_append_keeps_crlf_and_only_inserts_one_line(tmp_path: Path) -> None:
+    """CRLF 文档：只插入一行字节，其余字节与行尾原样（不得整份重写）。
+
+    ``test_append_keeps_lf_line_endings`` 只钉住 LF 方向；这里钉反方向：
+    若写回时按平台默认换行（或强制 ``\\n``）整份重写，CRLF 会被翻成 LF，
+    本用例按「插入点前后字节逐一相等」判红。
+    """
+    root = tmp_path / "repo"
+    locks = tmp_path / "locks"
+    _make_files(root, "scripts/a.py")
+    doc = _make_doc(root, pad=50)
+    doc.write_bytes(doc.read_bytes().replace(b"\n", b"\r\n"))
+    before = doc.read_bytes()
+    assert before.count(b"\r\n") == before.count(b"\n")
+    _write_claims(locks, {"scripts/a.py": ("线A/0001", 0.0)})
+
+    res = _run(root, locks, "--path", "scripts/a.py", "--owner", "线A/0001",
+               "--note", "行尾保持 CRLF")
+    assert res.returncode == 0, res.stdout + res.stderr
+    after = doc.read_bytes()
+
+    assert b"\n" not in after.replace(b"\r\n", b""), "追加写出了裸 LF（行尾被改写）"
+    assert after.count(b"\r\n") == before.count(b"\r\n") + 1, "行尾数量不是只多一行"
+
+    old_lines = before.split(b"\r\n")
+    new_lines = after.split(b"\r\n")
+    assert len(new_lines) == len(old_lines) + 1
+    k = next(i for i in range(len(new_lines)) if new_lines[i] != old_lines[i])
+    assert new_lines[:k] == old_lines[:k], "插入点之前的字节被改动"
+    assert new_lines[k + 1:] == old_lines[k:], "插入点之后的字节被改动"
+    assert b"| `scripts/a.py` |" in new_lines[k], "插入的不是登记行"

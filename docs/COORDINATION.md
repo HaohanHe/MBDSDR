@@ -2201,6 +2201,15 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `desktop/main_window.py` | 参考移植线/20261114（第2条：面板构造改走 registry().create；_create_panel 工厂缺失即报错；删除面板类直接 import/构造） | 2026-11-14 05:31 | 本笔 |
 | `tests/test_panel_registry_factory.py` | 参考移植线/20261114（第2条：19 条判据（工厂可用性 + 主窗口经注册表 + 源码无硬编码 + 缺工厂报错）） | 2026-11-14 05:31 | 本笔 |
 | `docs/COORDINATION.md` | 参考移植线/20261114（本笔 §6.1 登记行，提交后释放） | 2026-11-14 05:31 | 本笔 |
+| `tests/test_append_coordination_row.py` | S1-S4结果伪造线/6ae85f56（CRLF 守卫：追加只插入一行字节，插入点前后逐字节相等；反证=读侧按平台默认换行（CRLF 被整份改写成 LF）即红） | 2026-11-14 09:14 | 本笔 |
+| `desktop/panel_registry.py` | 参考移植线/20261114（第2条扩展：新增 8 个右栏固定页签的零参惰性工厂（scanner/modulation/bookmark/anr/constellation/device/gain/adsb_list）） | 2026-11-14 09:14 | 本笔 |
+| `desktop/main_window.py` | 参考移植线/20261114（第2条扩展：8 个面板构造改走 _create_optional_panel（工厂缺失即报错、依赖缺失才降级）；VFO/远程设置如实保留直接构造） | 2026-11-14 09:14 | 本笔 |
+| `desktop/capability_catalog.py` | 参考移植线/20261114（第2条扩展：固定页签分类 + trigger 文案改为「右栏固定页签」） | 2026-11-14 09:14 | 本笔 |
+| `tests/test_panel_registry_factory.py` | 参考移植线/20261114（第2条扩展：判据扩到 20 个 id；AST 守卫只允许 3 个参数化例外；反证 A/B 已跑） | 2026-11-14 09:14 | 本笔 |
+| `docs/COORDINATION.md` | 参考移植线/20261114（第2条扩展：本笔 §6.1 登记行） | 2026-11-14 09:14 | 本笔 |
+| `mbdsdr_ai/ground_track.py` | 时空核对线/timeline-now（第2项：轨迹步长误差界） | 2026-11-14 09:14 | 本笔 |
+| `mbdsdr_ai/sat_passes.py` | 时空核对线/timeline-now（第2项：trail 步长误差界） | 2026-11-14 09:14 | 本笔 |
+| `tests/test_ground_track_step_bound.py` | 时空核对线/timeline-now（第2项：步长误差界判据） | 2026-11-14 09:14 | 本笔 |
 
 > 上表各行均由 `claim` 台账推导：owner 原文与 `acquired_at` 直接取自台账，
 > 目的优先用台账里的 `claim_reason`，没有就如实写「未声明」，不补编。时间列只是
