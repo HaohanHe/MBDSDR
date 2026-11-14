@@ -2308,6 +2308,9 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `desktop/weather_panel.py` | S1-S4结果伪造线/6ae85f56（静默丢弃：解码在途时重复触发开始，状态行写「解码进行中（忽略重复开始）」） | 2026-11-14 11:14 | 本笔 |
 | `tests/test_weather_panel_fengyun.py` | S1-S4结果伪造线/6ae85f56（判据：_is_busy 时触发开始 → 状态行含「解码进行中」；恢复裸 return 即红） | 2026-11-14 11:14 | 本笔 |
 | `docs/COORDINATION.md` | S1-S4结果伪造线/6ae85f56（本笔 §6.1 登记行，提交后释放） | 2026-11-14 11:14 | 本笔 |
+| `mbdsdr_ai/environment_facts.py` | 时空核对线/timeline-now（D1 环境事实层：value+at+source，缺即unknown，快照可回放） | 2026-11-14 11:15 | 本笔 |
+| `mbdsdr_ai/data/space_weather_correction.json` | 时空核对线/timeline-now（D1 空间天气经验修正表（Kp/F10.7 档位系数、来源与适用条件，只收紧）） | 2026-11-14 11:16 | 本笔 |
+| `tests/test_environment_facts.py` | 时空核对线/timeline-now（D1 判据：缺数据不猜、只收紧、改表必变、快照回放一致） | 2026-11-14 11:16 | 本笔 |
 
 > 上表各行均由 `claim` 台账推导：owner 原文与 `acquired_at` 直接取自台账，
 > 目的优先用台账里的 `claim_reason`，没有就如实写「未声明」，不补编。时间列只是

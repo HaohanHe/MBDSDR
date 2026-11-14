@@ -1,0 +1,125 @@
+{
+  "schema": "mbdsdr.space_weather_correction/1",
+  "title": "空间天气对 TLE 可信时长的经验收紧表",
+  "model": "empirical",
+  "model_kind": "empirical_confidence_tightening",
+  "disclaimer": "经验模型，非实测密度：本表系数只用于按当天空间天气收紧 TLE 可信时长，不代表大气密度实测值。",
+  "not_for": "不得用于轨道力学积分、再入预报或密度反演；静日/磁暴日的真实密度以实测或物理模型（如 NRLMSISE/JB2008）为准。",
+  "combine": "multiply",
+  "min_factor": 0.05,
+  "inputs": {
+    "kp_index": {
+      "unit": "Kp",
+      "definition": "行星 K 指数（3 小时），0–9；Kp=5/6/7/8/9 分别对应 NOAA G1–G5 地磁暴等级。",
+      "max_age_hours": 6,
+      "source": "NOAA SWPC planetary K index (https://www.swpc.noaa.gov/products/planetary-k-index)"
+    },
+    "f107_sfu": {
+      "unit": "sfu",
+      "definition": "10.7 cm 太阳射电流量，1 sfu = 1e-22 W m^-2 Hz^-1；每日一个观测值。",
+      "max_age_hours": 48,
+      "source": "NOAA SWPC F10.7 cm radio flux (https://www.swpc.noaa.gov/products/solar-cycle-progression)"
+    }
+  },
+  "kp_bins": [
+    {
+      "max_value": 3.0,
+      "factor": 1.0,
+      "label": "静日",
+      "source": "NOAA G-scale：Kp<5 无地磁暴（G0）",
+      "applicability": "LEO 300–900 km 圆轨道；Kp 为 3 小时行星指数；静日不做额外收紧"
+    },
+    {
+      "max_value": 4.0,
+      "factor": 0.9,
+      "label": "轻微扰动",
+      "source": "NOAA G-scale：Kp 3.33–4，仍属 G0 但已偏离静日",
+      "applicability": "LEO 300–900 km 圆轨道；Kp 为 3 小时行星指数"
+    },
+    {
+      "max_value": 5.0,
+      "factor": 0.8,
+      "label": "G1 地磁暴",
+      "source": "NOAA G-scale：Kp=5 → G1 (Minor)",
+      "applicability": "LEO 300–900 km 圆轨道；Kp 为 3 小时行星指数"
+    },
+    {
+      "max_value": 6.0,
+      "factor": 0.65,
+      "label": "G2 地磁暴",
+      "source": "NOAA G-scale：Kp=6 → G2 (Moderate)",
+      "applicability": "LEO 300–900 km 圆轨道；Kp 为 3 小时行星指数"
+    },
+    {
+      "max_value": 7.0,
+      "factor": 0.5,
+      "label": "G3 强地磁暴",
+      "source": "NOAA G-scale：Kp=7 → G3 (Strong)",
+      "applicability": "LEO 300–900 km 圆轨道；低轨阻力显著增大，可信时长减半"
+    },
+    {
+      "max_value": 8.0,
+      "factor": 0.4,
+      "label": "G4 严重地磁暴",
+      "source": "NOAA G-scale：Kp=8 → G4 (Severe)",
+      "applicability": "LEO 300–900 km 圆轨道；轨道衰减与预报漂移同时放大"
+    },
+    {
+      "max_value": 9.0,
+      "factor": 0.3,
+      "label": "G5 极端地磁暴",
+      "source": "NOAA G-scale：Kp=9 → G5 (Extreme)",
+      "applicability": "LEO 300–900 km 圆轨道；超出本档（Kp>9）不在表内，按未校正处理"
+    }
+  ],
+  "f107_bins": [
+    {
+      "max_value": 100.0,
+      "factor": 1.0,
+      "label": "低太阳活动",
+      "source": "NOAA SWPC F10.7 日值；≈太阳活动低年水平（约 70–100 sfu）",
+      "applicability": "LEO 300–900 km 圆轨道；F10.7 为每日观测值"
+    },
+    {
+      "max_value": 150.0,
+      "factor": 0.95,
+      "label": "中等太阳活动",
+      "source": "NOAA SWPC F10.7 日值；太阳活动中等区间（约 100–150 sfu）",
+      "applicability": "LEO 300–900 km 圆轨道；F10.7 为每日观测值"
+    },
+    {
+      "max_value": 200.0,
+      "factor": 0.85,
+      "label": "高太阳活动",
+      "source": "NOAA SWPC F10.7 日值；太阳活动高年常见区间（约 150–200 sfu）",
+      "applicability": "LEO 300–900 km 圆轨道；F10.7 为每日观测值"
+    },
+    {
+      "max_value": 250.0,
+      "factor": 0.75,
+      "label": "很高太阳活动",
+      "source": "NOAA SWPC F10.7 日值；强太阳活动区间（约 200–250 sfu）",
+      "applicability": "LEO 300–900 km 圆轨道；F10.7 为每日观测值"
+    },
+    {
+      "max_value": 300.0,
+      "factor": 0.65,
+      "label": "太阳活动峰年",
+      "source": "NOAA SWPC F10.7 日值；峰年水平（约 250–300 sfu）",
+      "applicability": "LEO 300–900 km 圆轨道；F10.7 为每日观测值"
+    },
+    {
+      "max_value": 400.0,
+      "factor": 0.55,
+      "label": "极端太阳活动",
+      "source": "NOAA SWPC F10.7 日值；超出常见峰年但仍在历史观测范围内（约 300–400 sfu）",
+      "applicability": "LEO 300–900 km 圆轨道；超出本档（F10.7>400 sfu）不在表内，按未校正处理"
+    }
+  ],
+  "provenance": {
+    "bin_boundaries": "Kp 档边界取自 NOAA G1–G5 地磁暴等级（Kp=5–9）；F10.7 档边界取一个太阳活动周内的常见区间。",
+    "factors": "各档 factor 为工程经验收紧系数（按 LEO 轨道预报误差在扰动期放大的量级设定），不是实测密度比值，也不来自任何密度模型的拟合。",
+    "change_policy": "调整任一档 factor 会直接改变修正结果与 TLE 可信时长；测试锁定「改表必须变、只收紧不放宽」。",
+    "generated_at": "2026-11-14"
+  }
+}
