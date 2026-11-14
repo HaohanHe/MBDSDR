@@ -2098,6 +2098,9 @@ class SettingsPanel(QWidget):
         row = QHBoxLayout()
         btn_export = QPushButton("导出配置")
         btn_export.clicked.connect(self._on_export_clicked)
+        #: 「导出」命令面板入口的落焦点（见 command_palette._PANEL_JUMPS）。
+        #: 只加属性、不改布局与文案。
+        self.export_btn = btn_export
         btn_import = QPushButton("导入配置")
         btn_import.clicked.connect(self._on_import_clicked)
         btn_open = QPushButton("打开配置目录")

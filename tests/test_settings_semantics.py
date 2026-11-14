@@ -54,11 +54,16 @@ def _process_events(ms: int = 10):
 
 
 def _capture_warnings(monkeypatch):
-    """把 QMessageBox.warning/info 改成记录器（offscreen 模态会挂死测试）。"""
+    """把 QMessageBox.warning/info 改成记录器（offscreen 模态会挂死测试）。
+
+    记录**标题 + 正文**：用户看到的是两者，只记正文等于少验一半。
+    旧 helper 丢标题，`test_device_panel_rejects_unparseable_without_rewrite`
+    因此在产品已经把「采样率无效」放在标题时误判为「没提采样率」。
+    """
     seen = []
 
-    def _warn(_parent, _title, text, *a, **k):
-        seen.append(str(text))
+    def _warn(_parent, title, text, *a, **k):
+        seen.append(f"{title} {text}")
         return QMessageBox.Ok
 
     monkeypatch.setattr(QMessageBox, "warning", _warn)
@@ -226,7 +231,10 @@ class TestE3RangeMatchesCapability:
         p._on_connect_clicked()
         assert got == [], "坏采样率不得 emit 连接请求"
         assert p.sr_edit.text() == "abc", "不得改写用户输入框"
-        assert seen and "采样率" in seen[-1], f"必须诚实提示采样率无效: {seen}"
+        # 标题「采样率无效」+ 正文给出具体值与两种合法写法，缺一不可。
+        assert seen and "采样率无效" in seen[-1], f"必须诚实提示采样率无效: {seen}"
+        assert "不是数字" in seen[-1] and "2048000" in seen[-1], \
+            f"提示要给出原因和合法写法，不能只说无效: {seen}"
 
     def test_device_panel_rejects_out_of_device_capability(self, monkeypatch):
         """超出所选设备 sample_rate_range / gain_range 必须拒绝并说明范围。"""
@@ -241,6 +249,13 @@ class TestE3RangeMatchesCapability:
             "label": "FakeSDR", "driver": "fake",
             "sample_rate_range": (250_000.0, 3_200_000.0),
             "gain_range": (0.0, 40.0),
+            # 能力必须带来源标记：没标记 = 未知，产品如实说明后放行
+            # （SpyServer 连接前必然不知道量程，未知就拒绝会死锁）。
+            # 本用例要验的是「已申报」时的越界拒绝，所以两段范围都要标来源。
+            "capability_status": {
+                "sample_rate_range": "declared",
+                "gain_range": "declared",
+            },
         }]
         p.dev_combo.clear()
         p.dev_combo.addItem("FakeSDR")

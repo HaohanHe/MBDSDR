@@ -273,19 +273,33 @@ def collect_d1(repo: Repo) -> Dimension:
     cycles.sort(key=lambda c: c[0])
     lazy_cycles = [sorted(c) for c in _tarjan(lazy_graph) if len(c) > 1]
     lazy_cycles.sort(key=lambda c: c[0])
+    # 报告里的数必须带时点：并行线各自看自己的工作区，同一天「4 对 / 3 对」
+    # 可能都对，差别只是时点与那棵树。
+    _dirty = [ln for ln in repo.git("status", "--porcelain").splitlines() if ln.strip()]
+    stamp = f"@{repo.head() or 'unknown'}" + (f"+{len(_dirty)}dirty" if _dirty else "")
     dim.facts.append(
         f"模块级 import 环：{len(cycles) - len(mixed)} 个；"
         f"顶层/延迟互指对：{len(mixed)} 个；"
         f"含函数内延迟 import 的强连通组：{len(lazy_cycles)} 个"
-        "（不构成初始化顺序环，列出供核对）"
+        f"（不构成初始化顺序环；时点 {stamp}）"
     )
     for idx, comp in enumerate(lazy_cycles, 1):
         members = set(comp)
         inner = {(a, b) for a in comp for b in lazy_graph.get(a, ()) if b in members}
+        cut = _min_edge_cut(comp, lazy_graph)
+        feedback, feedback_edges = _min_feedback_edges(comp, lazy_graph)
+        note = (
+            f"拆环最少删边数 {feedback}"
+            if feedback >= 0
+            else "拆环最少删边数 未算（成员 > 18）"
+        )
         dim.facts.append(
             f"延迟 import 强连通组 {idx}：{len(comp)} 成员 / {len(inner)} 条内部边 / "
-            f"最小割 {_min_edge_cut(comp, lazy_graph)}；成员：" + "、".join(comp)
+            f"点对边连通度 {cut} / {note}；成员：" + "、".join(comp)
         )
+        if feedback_edges:
+            shown = "、".join(f"{a}->{b}" for a, b in feedback_edges)
+            dim.facts.append(f"延迟 import 强连通组 {idx} 的最小反馈边集：" + shown)
     for comp in cycles:
         top_src, top_dst = mixed.get((comp[0], comp[1]), ("", "")) if len(comp) == 2 else ("", "")
         if top_src:
@@ -389,11 +403,68 @@ def _maxflow(edges: Set[Tuple[str, str]], src: str, dst: str) -> int:
     return total
 
 
-def _min_edge_cut(comp: Sequence[str], graph: Dict[str, Set[str]]) -> int:
-    """把这一块打断最少需要删几条边（全局最小有向边割）。
+def _min_feedback_edges(comp: Sequence[str], graph: Dict[str, Set[str]]) -> Tuple[int, List[Tuple[str, str]]]:
+    """拆环最少删边数：最少删多少条边能让这一块变成 DAG（最小反馈边集）。
 
-    ``min over s≠t maxflow(s,t)``：割集必须切断所有 s→t 路径；取所有点对的最小值
-    就是全局最小边割。这给出「环有多难拆」的可复核数字，而不是一句「有环」。
+    与「点对边连通度」不是一个量：后者问「断开某两个点要删几条边」，只要有个
+    成员出度为 1 它就是 1；这里问「消掉这块里的所有环」要删几条边。两个数必须
+    分开叫、分开报，否则同一个「最小割」会被读成两种意思。
+    """
+    nodes = sorted(comp)
+    n = len(nodes)
+    if n > 18:
+        return -1, []
+    index = {name: i for i, name in enumerate(nodes)}
+    out_mask = [0] * n
+    in_mask = [0] * n
+    edges: List[Tuple[str, str]] = []
+    for a in nodes:
+        for b in sorted(graph.get(a, ())):
+            if b in index:
+                i, j = index[a], index[b]
+                out_mask[i] |= 1 << j
+                in_mask[j] |= 1 << i
+                edges.append((a, b))
+    full = (1 << n) - 1
+    # dp[S] = 只用 S 内节点、按某个拓扑序能保留的最多边数。
+    # 把 v 放在最后：从 S\\{v} 指向 v 的边全部保留。
+    dp = [0] * (1 << n)
+    choice = [-1] * (1 << n)
+    for S in range(1, 1 << n):
+        best = -1
+        rest = S
+        while rest:
+            bit = rest & -rest
+            v = bit.bit_length() - 1
+            prev = S ^ bit
+            score = dp[prev] + bin(prev & in_mask[v]).count("1")
+            if score > best:
+                best = score
+                choice[S] = v
+            rest ^= bit
+        dp[S] = best
+    # 反向恢复被保留的边：按拓扑序（后放的 v）逐层剥。
+    kept: Set[Tuple[str, str]] = set()
+    S = full
+    order: List[int] = []
+    while S:
+        v = choice[S]
+        order.append(v)
+        prev = S ^ (1 << v)
+        for u in range(n):
+            if prev & (1 << u) and (nodes[u], nodes[v]) in edges:
+                kept.add((nodes[u], nodes[v]))
+        S = prev
+    removed = [e for e in edges if e not in kept]
+    return len(removed), removed
+
+
+def _min_edge_cut(comp: Sequence[str], graph: Dict[str, Set[str]]) -> int:
+    """点对边连通度：``min over s≠t maxflow(s,t)``。
+
+    含义是「任意断开两个成员最少删几条边」：只要块里有一个成员出度（或入度）为 1，
+    这个数就是 1。**它不是拆环代价**——拆环要删多少条边见 ``_min_feedback_edges``。
+    两个数共用一个「最小割」会让同一天的两份报告差 7 倍还都自称正确。
     """
     nodes = list(comp)
     edges: Set[Tuple[str, str]] = {

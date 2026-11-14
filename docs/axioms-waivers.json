@@ -771,6 +771,20 @@
       "reason": "历史快照：该文档只包含「当时跑绿」的记录，不承担当前树结论；此前由「目录即豁免」自动跳过，现按文件显式登记（只覆盖无命令/提交号/日期的绿声明）。",
       "review_by": "2027-06-30",
       "approver": "user（2026-11-13 裁定：目录不再自动免检，历史快照按文件登记）"
+    },
+    {
+      "rule": "D1-test-reverse",
+      "path": "tests/",
+      "reason": "318 的基线接受于 06751d15。之后两条显式 UI 用例把总量推到 323：tests/test_sat_track_tle_landing.py 0→4（daa97a6c，卫星面板 TLE 落地用例）、tests/test_device_panel_session_lock.py 0→1（00faa1ea，设备会话锁用例）。判据按全量计数，且把 from x import y 同时记模块边与成员边，无法区分「显式 UI 用例」与越界依赖；删用例或改写 import 只能掉覆盖率，不能消除反向依赖。按显式 UI 用例重写判据属于 tools/axioms/survey.py，由公理棘轮线持有，本线不改其文件。判据改成按显式 UI 用例判定后，本条豁免即可删除。",
+      "review_by": "2026-12-31",
+      "approver": "待用户批准"
+    },
+    {
+      "rule": "D3-concept-alias",
+      "path": "desktop/control_panel.py",
+      "reason": "gain 与 gain_db 不是可无损替换的同义名：gain 在 34 个文件里表示增益能力/档位/参数，gain_db 在 71 个文件里表示 dB 读数（两者重叠 17 个），冻结文件 desktop/main_window.py 同时使用两者（5289 行把 gain_db 赋给局部 gain）。判据命中点只是排序后的样本 desktop/control_panel.py，实际是跨全仓术语问题；统一改名要动 34 个以上文件并触碰冻结文件。按术语表保留两名，解冻后统一。",
+      "review_by": "2027-06-30",
+      "approver": "待用户批准"
     }
   ]
 }

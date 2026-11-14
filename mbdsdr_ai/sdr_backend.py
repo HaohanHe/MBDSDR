@@ -6078,6 +6078,13 @@ def enumerate_all_sdr_devices() -> List[Dict[str, Any]]:
 
     返回 [] 表示"真的没发现设备"（绝不返回假设备/mock）。
     """
+    # 进程级「不碰真硬件」开关：测试/审计环境要求确定性空枚举。
+    # 以前只在构造时替身 _discover，TTL 到期重探仍会枚举到真机（本机插着
+    # RTL-SDR 时 test_sdr_list_devices_never_fabricates 就红）——判据不能
+    # 依赖跑测时有没有插设备，故在唯一枚举入口短路。
+    if os.environ.get("MBDSDR_NO_HW") == "1":
+        return []
+
     merged: Dict[str, Dict[str, Any]] = {}
 
     def _key_of(d: Dict[str, Any]) -> str:

@@ -537,13 +537,20 @@ class RightColumn(QScrollArea):
             self.currentChanged.emit(index)
 
     def _first_focusable_in(self, root: QWidget) -> Optional[QWidget]:
-        """``root`` 子树里按焦点链顺序的第一颗可聚焦控件。"""
+        """``root`` 子树里按焦点链顺序的第一颗可聚焦控件。
+
+        沿整圈找、不「遇到非子树控件就停」：主窗口重建 Tab 顺序后，
+        子树在焦点环里可能与别的控件交错（这是为了让底坞排在整条右栏
+        之后的代价），早停会把「有控件」误判成「没有」。
+        """
         members = set(root.findChildren(QWidget))
+        if not members:
+            return None
         w = root.nextInFocusChain()
-        for _ in range(len(members) + 1):
-            if w is None or w not in members:
-                return None
-            if (w.isVisible() and w.isEnabled()
+        for _ in range(20000):
+            if w is None or w is root:
+                break
+            if (w in members and w.isVisible() and w.isEnabled()
                     and (w.focusPolicy() & Qt.TabFocus)):
                 return w
             w = w.nextInFocusChain()

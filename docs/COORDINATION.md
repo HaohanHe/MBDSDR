@@ -2501,6 +2501,7 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `tests/test_orbit_dynamics.py` | 冗余线/6ae85f56（第3件：返回顺序断言同步） | 2026-11-14 12:39 | 本笔 |
 | `tests/test_orbit_material_dataset.py` | 冗余线/6ae85f56（第3件：返回顺序断言同步） | 2026-11-14 12:39 | 本笔 |
 | `tests/test_geodesy_ecef_lla.py` | 冗余线/6ae85f56（第3件：已知向量回归（双椭球/双单位/顺序）） | 2026-11-14 12:39 | 本笔 |
+| `docs/axioms.md` | 公理体检线/6ae85f56（写入并发教训：提示是常态、别边跑边追、只在静默窗口重生成（8 笔白干留史不改）） | 2026-11-14 12:39 | 本笔 |
 | `scripts/file_claim.py` | 批次收尾线/6ae85f56（趋势快照加 undecidable_ratio 与 claims_with_content_hash；JSON 行补 suspect 的 hint，供批次报告直接读） | 2026-11-14 12:41 | 本笔 |
 | `scripts/batch_close.py` | 批次收尾线/6ae85f56（cleanup-stale 以 NOTE 接入：rc=0/3 都不判红，只有没跑成才 ERROR→3；报告逐条给 SUSPECT 缺口与补法） | 2026-11-14 12:41 | 本笔 |
 | `docs/COORDINATION.md` | 批次收尾线/6ae85f56（本笔 §6.1 登记行，提交后释放） | 2026-11-14 12:41 | 本笔 |
