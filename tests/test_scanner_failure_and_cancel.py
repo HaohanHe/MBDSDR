@@ -76,6 +76,27 @@ def panel(monkeypatch):
     p.deleteLater()
 
 
+def test_repeat_start_while_scanning_says_so(panel):
+    """扫频中再触发开始：不许静默 return，要写出「忽略这一次」。
+
+    实测缺陷（2026-11-14）：`_on_start_clicked` 在 worker 未结束时直接
+    return。按钮虽然置灰，程序化调用（工具/快捷键）仍能走到这里，用户
+    得不到任何「这次没开始」的回执；同形态的 modulation_panel 会写
+    「识别中…，请稍候」。
+    """
+
+    class _Running:
+        def isRunning(self):
+            return True
+
+    panel._worker = _Running()
+    try:
+        panel._on_start_clicked()
+        assert "扫频进行中" in panel.status_label.text()
+    finally:
+        panel._worker = None
+
+
 def _wire(panel, worker):
     worker.done.connect(panel._on_done)
     worker.cancelled.connect(panel._on_cancelled)

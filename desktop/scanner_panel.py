@@ -360,6 +360,8 @@ class ScannerPanel(QWidget):
     # ------------------------------------------------------------------ slots
     def _on_start_clicked(self):
         if self._worker is not None and self._worker.isRunning():
+            # 按钮虽已置灰，程序化调用仍能进来：不许静默丢弃这次点击。
+            self.status_label.setText("扫频进行中（忽略重复开始）")
             return
         f0 = self.start_sp.value() * 1e6
         f1 = self.stop_sp.value() * 1e6

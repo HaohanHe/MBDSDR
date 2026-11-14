@@ -2295,6 +2295,9 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `tests/test_inproc_tool_guard.py` | 进程内工具守卫线/6ae85f56（进程内 PRE/RESULT/否决/触发者/字段一致判据与反证） | 2026-11-14 11:12 | 本笔 |
 | `desktop/main_window.py` | UI防呆线/6ae85f56（A1：录音中断开/切换设备先确认（默认取消），拔设备不弹窗但状态栏写明落盘路径） | 2026-11-14 11:12 | 本笔 |
 | `tests/test_recording_stop_guard.py` | UI防呆线/6ae85f56（A1 判据：断开/切设备必弹确认且取消保留录音；拔设备不弹窗并写明路径（反证已跑：去确认后 3 条红）） | 2026-11-14 11:12 | 本笔 |
+| `desktop/scanner_panel.py` | S1-S4结果伪造线/6ae85f56（静默丢弃：扫频在途时重复触发开始，状态行写「扫频进行中（忽略重复开始）」） | 2026-11-14 11:13 | 本笔 |
+| `tests/test_scanner_failure_and_cancel.py` | S1-S4结果伪造线/6ae85f56（判据：假 worker 在途触发开始 → 状态行含「扫频进行中」；恢复裸 return 即红） | 2026-11-14 11:13 | 本笔 |
+| `docs/COORDINATION.md` | S1-S4结果伪造线/6ae85f56（本笔 §6.1 登记行，提交后释放） | 2026-11-14 11:13 | 本笔 |
 
 > 上表各行均由 `claim` 台账推导：owner 原文与 `acquired_at` 直接取自台账，
 > 目的优先用台账里的 `claim_reason`，没有就如实写「未声明」，不补编。时间列只是
