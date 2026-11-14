@@ -1114,7 +1114,8 @@ class ControlPanel(QWidget):
         # 旧实现把模式名（"FM"）当频段名传进去，_populate_presets 无一支命中，
         # 结果 clear() 后列表为空，还留下一条内容相关的最小宽缓存。
         self._populate_presets(self.band_combo.currentText())
-        self._update_freq_display()
+        # 不在这里刷新频率输入：切模式不改频率，`_update_freq_display()` 只会
+        # 把用户还没回车的输入文本悄悄换成当前值（输入消失且毫无提示）。
         # 切换模式时自动套用该模式的典型 VFO 带宽，并 emit vfo_bandwidth_changed
         bw = default_bandwidth(mode)
         self.vfo_bw_combo.blockSignals(True)

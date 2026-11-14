@@ -2281,6 +2281,9 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `mbdsdr_ai/tle_integrity.py` | 公理体检线/6ae85f56（时空域缺口：freshness 暴露 age_days_signed/epoch_implausible） | 2026-11-14 11:03 | 本笔 |
 | `mbdsdr_ai/skyengine/satellites.py` | 公理体检线/6ae85f56（时空域缺口：过境二分容差提为 RISE_SET_BISECT_TOL_S） | 2026-11-14 11:06 | 本笔 |
 | `tests/test_satellite_rise_set_precision.py` | 公理体检线/6ae85f56（判据：AOS/LOS 误差 ≤ 声明容差（去掉二分必红）） | 2026-11-14 11:06 | 本笔 |
+| `desktop/control_panel.py` | S1-S4结果伪造线/6ae85f56（静默丢弃：切模式不再调 _update_freq_display，保留用户未回车的频率输入） | 2026-11-14 11:06 | 本笔 |
+| `tests/test_control_panel_freq_ambiguity.py` | S1-S4结果伪造线/6ae85f56（判据：切模式后未提交文本原样保留且不下发调谐 + 恢复刷新调用即红） | 2026-11-14 11:06 | 本笔 |
+| `docs/COORDINATION.md` | S1-S4结果伪造线/6ae85f56（本笔 §6.1 登记行，提交后释放） | 2026-11-14 11:06 | 本笔 |
 | `desktop/shortcuts_panel.py` | UI防呆线/6ae85f56（A3：全部恢复默认批量清键位前确认，默认「否」并写明条数/不可撤销） | 2026-11-14 11:07 | 本笔 |
 | `tests/test_shortcuts_reset_all_guard.py` | UI防呆线/6ae85f56（A3 判据：question 默认按钮为 No、选否则保留、选是则清空（反证已跑：去掉确认即红）） | 2026-11-14 11:07 | 本笔 |
 | `mbdsdr_ai/tool_guard.py` | 进程内工具守卫线/6ae85f56（共享 PRE/RESULT 守卫叶子（MCP 面与进程内面唯一实现）） | 2026-11-14 11:09 | 本笔 |

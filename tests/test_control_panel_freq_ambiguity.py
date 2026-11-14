@@ -43,6 +43,22 @@ def _warnings(monkeypatch):
     return got
 
 
+def test_mode_switch_keeps_uncommitted_freq_text():
+    """切模式不许把还没回车的频率输入悄悄抹掉。
+
+    实测缺陷（2026-11-14）：`_on_mode_changed` 调用 `_update_freq_display()`，
+    后者无条件 `freq_input.setText(当前频率)`。用户输到一半去切模式，键盘敲的
+    字直接消失，没有任何提示；切模式本身并不改频率，这次刷新是多余的。
+    """
+    cp, tuned = _panel()
+    cp.set_frequency_hz(145_000_000)
+    cp.freq_input.setText("433.5")
+    cp.freq_input.setModified(True)   # 用户改过、还没回车
+    cp._on_mode_changed("FM")
+    assert cp.freq_input.text() == "433.5", "切模式抹掉了未提交的频率输入"
+    assert tuned == [], "切模式本身不该下发调谐"
+
+
 def test_comma_decimal_is_rejected(monkeypatch):
     """`145,5`：拒绝、弹框写明两种可能、不下发调谐。"""
     cp, tuned = _panel()
