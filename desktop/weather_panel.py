@@ -635,6 +635,8 @@ class WeatherPanel(QWidget):
         self.history.setMaximumHeight(110)
         self.history.setToolTip("以往解码/后处理的产物，点击可在右侧预览")
         self.history.itemClicked.connect(self._on_history_clicked)
+        # itemActivated = 双击或回车：键盘用户不必用鼠标单击也能预览。
+        self.history.itemActivated.connect(self._on_history_clicked)
         ol.addWidget(self.history)
         self.history_hint = QLabel("还没有产物\n解码完成后会列在这里")
         self.history_hint.setAlignment(Qt.AlignTop | Qt.AlignHCenter)

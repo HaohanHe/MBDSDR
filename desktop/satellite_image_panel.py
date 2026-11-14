@@ -177,6 +177,8 @@ class SatelliteImagePanel(QWidget):
         self.stop_btn.clicked.connect(self.stop_decode)
         self.save_btn.clicked.connect(self._save_current)
         self.history.itemClicked.connect(self._on_history_clicked)
+        # itemActivated = 双击或回车：键盘用户不必用鼠标单击也能预览。
+        self.history.itemActivated.connect(self._on_history_clicked)
         self.sat_combo.currentTextChanged.connect(self._on_sat_changed)
         self.sr_spin.valueChanged.connect(self._on_sr_changed)
 

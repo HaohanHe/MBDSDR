@@ -168,7 +168,8 @@ class ModulationPanel(QWidget):
 
         v.addWidget(QLabel("建议解调链（点击应用）"))
         self.suggest_list = QListWidget()
-        self.suggest_list.itemDoubleClicked.connect(self._on_apply_clicked)
+        # itemActivated = 双击或回车：键盘用户按回车即可应用建议解调链。
+        self.suggest_list.itemActivated.connect(self._on_apply_clicked)
         # 空态占位：未识别时右侧是一整块 250px 的无字黑框，看着像加载失败。
         self.suggest_hint = QLabel("识别成功后在这里列出\n可双击应用的解调链")
         self.suggest_hint.setObjectName("hintLabel")

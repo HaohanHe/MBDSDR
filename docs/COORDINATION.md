@@ -2311,6 +2311,12 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `mbdsdr_ai/environment_facts.py` | 时空核对线/timeline-now（D1 环境事实层：value+at+source，缺即unknown，快照可回放） | 2026-11-14 11:15 | 本笔 |
 | `mbdsdr_ai/data/space_weather_correction.json` | 时空核对线/timeline-now（D1 空间天气经验修正表（Kp/F10.7 档位系数、来源与适用条件，只收紧）） | 2026-11-14 11:16 | 本笔 |
 | `tests/test_environment_facts.py` | 时空核对线/timeline-now（D1 判据：缺数据不猜、只收紧、改表必变、快照回放一致） | 2026-11-14 11:16 | 本笔 |
+| `desktop/bookmark_panel.py` | UI防呆线/6ae85f56（D1：书签列表 itemActivated（双击或回车都能调谐）） | 2026-11-14 11:18 | 本笔 |
+| `desktop/scanner_panel.py` | UI防呆线/6ae85f56（D2：扫频结果列表 itemActivated（回车选活动段）） | 2026-11-14 11:18 | 本笔 |
+| `desktop/modulation_panel.py` | UI防呆线/6ae85f56（D3：建议解调链列表 itemActivated（回车应用）） | 2026-11-14 11:18 | 本笔 |
+| `desktop/weather_panel.py` | UI防呆线/6ae85f56（D4：气象历史产物列表补 itemActivated（回车预览，保留单击）） | 2026-11-14 11:18 | 本笔 |
+| `desktop/satellite_image_panel.py` | UI防呆线/6ae85f56（D4：卫星图像历史列表补 itemActivated（回车预览，保留单击）） | 2026-11-14 11:18 | 本笔 |
+| `tests/test_list_keyboard_activation.py` | UI防呆线/6ae85f56（D1-D4 判据：回车激活（反证已跑：换回 itemDoubleClicked/删连接后 5 条全红）） | 2026-11-14 11:18 | 本笔 |
 
 > 上表各行均由 `claim` 台账推导：owner 原文与 `acquired_at` 直接取自台账，
 > 目的优先用台账里的 `claim_reason`，没有就如实写「未声明」，不补编。时间列只是

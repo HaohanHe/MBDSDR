@@ -294,7 +294,8 @@ class ScannerPanel(QWidget):
         root.addWidget(self.status_label)
 
         self.result_list = QListWidget()
-        self.result_list.itemDoubleClicked.connect(self._on_item_activated)
+        # itemActivated = 双击或回车：键盘用户按回车即可选中活动段。
+        self.result_list.itemActivated.connect(self._on_item_activated)
         self.result_list.itemClicked.connect(self._on_item_clicked)
         # 空列表占位：整块 300px 的灰黑空框读起来像「扫完了但没结果」或
         # 「界面坏了」，两种都是误导。没有活动段时换成一句说明，占同一块

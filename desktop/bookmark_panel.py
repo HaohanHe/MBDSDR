@@ -112,7 +112,9 @@ class BookmarkPanel(QWidget):
         self.tree.setHeaderLabels(["名称", "频率(MHz)", "模式", "带宽(kHz)"])
         self.tree.setColumnWidth(0, 150)
         self.tree.header().setSectionResizeMode(0, QHeaderView.Stretch)
-        self.tree.itemDoubleClicked.connect(self._on_item_double_clicked)
+        # itemActivated = 双击或回车：键盘用户选一行按回车就能调谐，
+        # 不必非用鼠标双击（itemDoubleClicked 只覆盖鼠标）。
+        self.tree.itemActivated.connect(self._on_item_double_clicked)
         self.tree.itemSelectionChanged.connect(self._sync_selection_actions)
         right.addWidget(self.tree, stretch=1)
 
