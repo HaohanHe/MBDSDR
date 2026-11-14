@@ -22,6 +22,14 @@ ROOT = Path(__file__).resolve().parents[1]
 SAFE = ROOT / "scripts" / "safe_commit.py"
 CLAIM = ROOT / "scripts" / "file_claim.py"
 DOC = "doc.md"
+COORD = "docs/COORDINATION.md"
+COORD_BASE = (
+    "# 协调\n\n### 6.1 当前占用\n\n"
+    "| 文件 | 线名 | 开始时间 | 预计提交 hash |\n"
+    "| --- | --- | --- | --- |\n"
+    "| `old.py` | 老线/000000（历史） | 2026-11-13 01:48 | 已提交 |\n\n"
+    "## 7 其他\n"
+)
 
 
 def _git(repo, *args, check=False):
@@ -31,7 +39,7 @@ def _git(repo, *args, check=False):
     )
 
 
-def _repo(tmp_path, lines):
+def _repo(tmp_path, lines, coord=False):
     repo = tmp_path / "repo"
     repo.mkdir()
     _git(repo, "init", "-q", check=True)
@@ -39,9 +47,29 @@ def _repo(tmp_path, lines):
     _git(repo, "config", "user.name", "safe-commit", check=True)
     _git(repo, "config", "commit.gpgsign", "false", check=True)
     (repo / DOC).write_text("\n".join(lines) + "\n", encoding="utf-8")
-    _git(repo, "add", DOC, check=True)
+    if coord:
+        # §6.1 登记面随基线落库：--exclude-owner 要求它进 --files（0a13190e）
+        (repo / "docs").mkdir()
+        (repo / COORD).write_text(COORD_BASE, encoding="utf-8")
+        _git(repo, "add", DOC, COORD, check=True)
+    else:
+        _git(repo, "add", DOC, check=True)
     _git(repo, "commit", "-q", "-m", "base", check=True)
     return repo
+
+
+def _append_coord_row(repo, owner, path=DOC):
+    """在 §6.1 表格末尾追加一行（本笔的登记行，提交时才带走）。"""
+    coord = repo / COORD
+    lines = coord.read_text(encoding="utf-8").splitlines()
+    start = lines.index("### 6.1 当前占用")
+    end = start + 1
+    while end < len(lines) and not lines[end].lstrip().startswith("|"):
+        end += 1
+    while end < len(lines) and lines[end].lstrip().startswith("|"):
+        end += 1
+    lines.insert(end, f"| `{path}` | {owner}（本笔） | 2026-11-14 11:00 | 本笔 |")
+    coord.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
 def _write(repo, lines):
@@ -84,8 +112,9 @@ def _release(repo, locks, owner):
     )
 
 
-def _safe(repo, locks, tmp_path, *extra, message="test: safe commit\n", owner=""):
-    args = [sys.executable, str(SAFE), "--files", DOC, *extra]
+def _safe(repo, locks, tmp_path, *extra, message="test: safe commit\n", owner="",
+          files=None):
+    args = [sys.executable, str(SAFE), "--files", *(files or [DOC]), *extra]
     if message is not None:
         msg = tmp_path / "msg.txt"
         msg.write_text(message, encoding="utf-8")
@@ -234,16 +263,18 @@ def test_preexisting_foreign_hunk_is_not_drift(tmp_path):
     能正常落库，且不进豁免段。
     """
     locks = tmp_path / "locks"
-    repo = _repo(tmp_path, [f"line{i}" for i in range(1, 7)])
+    repo = _repo(tmp_path, [f"line{i}" for i in range(1, 7)], coord=True)
     lines = [f"line{i}" for i in range(1, 7)]
     lines[1] = "line2 mine"
     lines[4] = "line5 other"
     _write(repo, lines)
+    _append_coord_row(repo, "进程A线")
     assert _safe(repo, locks, tmp_path, "--declare", message=None,
-                 owner="进程A线").returncode == 0
+                 owner="进程A线", files=[DOC, COORD]).returncode == 0
 
     proc = _safe(repo, locks, tmp_path, "--exclude-hunk", "doc.md:5-5",
-                 "--exclude-owner", "别线", owner="进程A线")
+                 "--exclude-owner", "别线", owner="进程A线",
+                 files=[DOC, COORD])
     out = proc.stdout + proc.stderr
     assert proc.returncode == 0, out
     assert "声明快照无漂移" in out, out

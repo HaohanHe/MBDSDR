@@ -12,6 +12,36 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 SAFE = ROOT / "scripts" / "safe_commit.py"
+DOC = "doc.md"
+COORD = "docs/COORDINATION.md"
+MY = "我的线/abc123"
+COORD_BASE = (
+    "# 协调\n\n### 6.1 当前占用\n\n"
+    "| 文件 | 线名 | 开始时间 | 预计提交 hash |\n"
+    "| --- | --- | --- | --- |\n"
+    "| `old.py` | 老线/000000（历史） | 2026-11-13 01:48 | 已提交 |\n\n"
+    "## 7 其他\n"
+)
+
+
+def _write_coord(repo):
+    """基线里放一份 §6.1 登记表：``--exclude-owner`` 要求它进 ``--files``（0a13190e）。"""
+    (repo / "docs").mkdir(exist_ok=True)
+    (repo / COORD).write_text(COORD_BASE, encoding="utf-8")
+
+
+def _append_coord_row(repo, owner=MY, path="doc.md"):
+    """在 §6.1 表格末尾追加本笔的登记行（声明前就躺在工作区，随本笔一起提交）。"""
+    coord = repo / COORD
+    lines = coord.read_text(encoding="utf-8").splitlines()
+    start = lines.index("### 6.1 当前占用")
+    end = start + 1
+    while end < len(lines) and not lines[end].lstrip().startswith("|"):
+        end += 1
+    while end < len(lines) and lines[end].lstrip().startswith("|"):
+        end += 1
+    lines.insert(end, f"| `{path}` | {owner}（本笔） | 2026-11-14 11:00 | 本笔 |")
+    coord.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
 def _git(repo, *args, check=False):
@@ -30,8 +60,10 @@ def _make_repo(tmp_path):
     _git(repo, "config", "commit.gpgsign", "false", check=True)
     lines = [f"line{i}" for i in range(1, 7)]
     (repo / "doc.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
-    _git(repo, "add", "doc.md", check=True)
+    _write_coord(repo)
+    _git(repo, "add", "doc.md", COORD, check=True)
     _git(repo, "commit", "-q", "-m", "base", check=True)
+    _append_coord_row(repo)
     # 第 2 行是我的改动，第 5 行是别线的在途改动
     lines[1] = "line2 mine"
     lines[4] = "line5 other"
@@ -48,8 +80,10 @@ def _init_repo(tmp_path, lines):
     _git(repo, "config", "user.name", "safe-commit", check=True)
     _git(repo, "config", "commit.gpgsign", "false", check=True)
     (repo / "doc.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
-    _git(repo, "add", "doc.md", check=True)
+    _write_coord(repo)
+    _git(repo, "add", "doc.md", COORD, check=True)
     _git(repo, "commit", "-q", "-m", "base", check=True)
+    _append_coord_row(repo)
     return repo
 
 
@@ -60,23 +94,25 @@ def _env(repo, tmp_path):
     # 声明快照与私有 index 都落在临时目录：测试不往真实 .locks 里写
     env["MBDSDR_LOCKS_DIR"] = str(tmp_path / "locks")
     env["MBDSDR_SESSION_ID"] = "exclude-test"
+    # §6.1 行的归属身份：登记面上「我的线」那行算本笔，不会被 --exclude-owner 排掉
+    env["MBDSDR_CLAIM_OWNER"] = MY
     return env
 
 
-def _declare(repo, tmp_path):
+def _declare(repo, tmp_path, files=(DOC,)):
     """先钉声明快照：--exclude-hunk 的行号只在声明那一刻有效（⑳ ed3c09e5）。"""
     return subprocess.run(
-        [sys.executable, str(SAFE), "--files", "doc.md", "--declare"],
+        [sys.executable, str(SAFE), "--files", *files, "--declare"],
         cwd=str(repo), env=_env(repo, tmp_path), capture_output=True, text=True,
         encoding="utf-8", errors="replace",
     )
 
 
-def _run_safe(repo, tmp_path, *extra, message="test: safe commit\n"):
+def _run_safe(repo, tmp_path, *extra, message="test: safe commit\n", files=(DOC,)):
     msg = tmp_path / "msg.txt"
     msg.write_text(message, encoding="utf-8")
     return subprocess.run(
-        [sys.executable, str(SAFE), "--files", "doc.md",
+        [sys.executable, str(SAFE), "--files", *files,
          "--message-file", str(msg), *extra],
         cwd=str(repo), env=_env(repo, tmp_path), capture_output=True, text=True,
         encoding="utf-8", errors="replace",
@@ -85,21 +121,12 @@ def _run_safe(repo, tmp_path, *extra, message="test: safe commit\n"):
 
 def test_exclude_hunk_keeps_other_change_out(tmp_path):
     repo = _make_repo(tmp_path)
-    assert _declare(repo, tmp_path).returncode == 0
-    msg = tmp_path / "msg.txt"
-    msg.write_text("test: exclude other hunk\n", encoding="utf-8")
-    env = _env(repo, tmp_path)
+    assert _declare(repo, tmp_path, files=(DOC, COORD)).returncode == 0
 
-    proc = subprocess.run(
-        [
-            sys.executable, str(SAFE),
-            "--files", "doc.md",
-            "--message-file", str(msg),
-            "--exclude-hunk", "doc.md:5-5",
-            "--exclude-owner", "别线",
-        ],
-        cwd=str(repo), env=env, capture_output=True, text=True,
-        encoding="utf-8", errors="replace",
+    proc = _run_safe(
+        repo, tmp_path,
+        "--exclude-hunk", "doc.md:5-5", "--exclude-owner", "别线",
+        message="test: exclude other hunk\n", files=(DOC, COORD),
     )
     out = proc.stdout + proc.stderr
     assert proc.returncode == 0, out
@@ -129,21 +156,12 @@ def test_exclude_pure_deletion_hunk(tmp_path):
     lines[1] = "line2 mine"
     del lines[4]                       # 别线：删掉第 5 行 → @@ … +4,0 @@
     (repo / "doc.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
-    assert _declare(repo, tmp_path).returncode == 0
-    msg = tmp_path / "msg.txt"
-    msg.write_text("test: exclude pure deletion\n", encoding="utf-8")
-    env = _env(repo, tmp_path)
+    assert _declare(repo, tmp_path, files=(DOC, COORD)).returncode == 0
 
-    proc = subprocess.run(
-        [
-            sys.executable, str(SAFE),
-            "--files", "doc.md",
-            "--message-file", str(msg),
-            "--exclude-hunk", "doc.md:4-4",
-            "--exclude-owner", "别线",
-        ],
-        cwd=str(repo), env=env, capture_output=True, text=True,
-        encoding="utf-8", errors="replace",
+    proc = _run_safe(
+        repo, tmp_path,
+        "--exclude-hunk", "doc.md:4-4", "--exclude-owner", "别线",
+        message="test: exclude pure deletion\n", files=(DOC, COORD),
     )
     out = proc.stdout + proc.stderr
     assert proc.returncode == 0, out
@@ -208,30 +226,23 @@ def test_multiple_exclusion_hunks_survive_line_count_shift(tmp_path):
     _git(repo, "config", "commit.gpgsign", "false", check=True)
     lines = [f"line{i}" for i in range(1, 10)]
     (repo / "doc.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
-    _git(repo, "add", "doc.md", check=True)
+    _write_coord(repo)
+    _git(repo, "add", "doc.md", COORD, check=True)
     _git(repo, "commit", "-q", "-m", "base", check=True)
+    _append_coord_row(repo)
 
     lines[1] = "line2 mine"
     lines[4:5] = ["line5", "other5a", "other5b"]      # 别线：+5,2（行数变多）
     lines[10] = "line9 other"                          # 别线：+11,1
     (repo / "doc.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
-    assert _declare(repo, tmp_path).returncode == 0
+    assert _declare(repo, tmp_path, files=(DOC, COORD)).returncode == 0
 
-    msg = tmp_path / "msg.txt"
-    msg.write_text("test: multi-hunk exclusion\n", encoding="utf-8")
-    env = _env(repo, tmp_path)
-
-    proc = subprocess.run(
-        [
-            sys.executable, str(SAFE),
-            "--files", "doc.md",
-            "--message-file", str(msg),
-            "--exclude-hunk", "doc.md:6-7",
-            "--exclude-hunk", "doc.md:11-11",
-            "--exclude-owner", "别线",
-        ],
-        cwd=str(repo), env=env, capture_output=True, text=True,
-        encoding="utf-8", errors="replace",
+    proc = _run_safe(
+        repo, tmp_path,
+        "--exclude-hunk", "doc.md:6-7",
+        "--exclude-hunk", "doc.md:11-11",
+        "--exclude-owner", "别线",
+        message="test: multi-hunk exclusion\n", files=(DOC, COORD),
     )
     out = proc.stdout + proc.stderr
     assert proc.returncode == 0, out
@@ -303,7 +314,7 @@ def test_exclude_three_hunks_in_one_call(tmp_path):
     new[8:8] = ["other8a", "other8b"]            # 别线 B：@@ +9,2（行数 +2）
     new[13] = "line12 other"                     # 别线 C：@@ +14,1（被 +2 顶到 14）
     (repo / "doc.md").write_text("\n".join(new) + "\n", encoding="utf-8")
-    assert _declare(repo, tmp_path).returncode == 0
+    assert _declare(repo, tmp_path, files=(DOC, COORD)).returncode == 0
 
     proc = _run_safe(
         repo, tmp_path,
@@ -311,6 +322,7 @@ def test_exclude_three_hunks_in_one_call(tmp_path):
         "--exclude-hunk", "doc.md:9-10",
         "--exclude-hunk", "doc.md:14-14",
         "--exclude-owner", "别线",
+        message="test: safe commit\n", files=(DOC, COORD),
     )
     out = proc.stdout + proc.stderr
     assert proc.returncode == 0, out
@@ -402,7 +414,7 @@ def test_identical_hunks_excluded_by_position_not_content(tmp_path):
     new[8] = "DUP"
     (repo / "doc.md").write_text("\n".join(new) + "\n", encoding="utf-8")
     _git(repo, "add", "doc.md", check=True)
-    assert _declare(repo, tmp_path).returncode == 0
+    assert _declare(repo, tmp_path, files=(DOC, COORD)).returncode == 0
 
     # 先证明这两个 hunk 的内容真的逐字相同，否则本用例证明不了「靠位置」
     bodies, cur = [], None
@@ -416,7 +428,7 @@ def test_identical_hunks_excluded_by_position_not_content(tmp_path):
     assert bodies == [["-dup", "+DUP"], ["-dup", "+DUP"]], bodies
 
     proc = _run_safe(repo, tmp_path, "--exclude-hunk", "doc.md:9-9",
-                     "--exclude-owner", "别线")
+                     "--exclude-owner", "别线", files=(DOC, COORD))
     out = proc.stdout + proc.stderr
     assert proc.returncode == 0, out
 
