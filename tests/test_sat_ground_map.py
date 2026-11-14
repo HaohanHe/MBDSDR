@@ -39,16 +39,25 @@ def test_draws_track_and_footprint_pixels(monkeypatch):
 
     widget = SatelliteGroundMap(online=False)
     assert widget.view is not None
-    assert widget.view.layer_names() == ["sat_footprint", "sat_ground_track"]
+    # 基线重定标（2026-11-14）：新增 spacetime_features 图层后，图层清单
+    # 由两层变三层。不是放宽断言，而是把新层也钉进契约。
+    assert widget.view.layer_names() == [
+        "sat_footprint", "sat_ground_track", "spacetime_features"]
     assert widget.update_satellite("ISS (ZARYA)", minutes=90,
                                    min_elevation_deg=5) is True
     assert "覆盖半径" in widget.summary_text
+    assert widget.spacetime_layer is not None
+    assert widget.spacetime_layer.result is not None
 
     pix = QPixmap(320, 220)
     pix.fill(Qt.black)
     painter = QPainter(pix)
     widget._paint_footprint(painter, _project)
     widget._paint_track(painter, _project)
+    # 时空要素层也必须在同一张画布上真画出东西（角标/空态至少占像素）。
+    feature_cb = dict(widget.view._layers).get("spacetime_features")
+    assert feature_cb is not None
+    feature_cb(painter, _project)
     painter.end()
     assert _non_black(pix) > 200, "图层回调没有画出可见像素"
     app.processEvents()

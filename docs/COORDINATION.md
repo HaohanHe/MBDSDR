@@ -2533,6 +2533,7 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `tests/test_constant_units.py` | 冗余线/6ae85f56（第5件：新增守护（值不变/后缀成对/旧名消失/三套 GM 未统一/零引用半径已删）） | 2026-11-14 12:53 | 本笔 |
 | `docs/audit_r2/25_orbit.md` | 冗余线/6ae85f56（第5件：更正已证伪的 decoders 无 GMST 旋转 结论；:98 同步 orbit.C_LIGHT_KMPS） | 2026-11-14 12:53 | 本笔 |
 | `docs/COORDINATION.md` | QGIS复核线/常量口径（QGIS 第三轮：椭球唯一真值/单位口径登记收工段（非纯追加，整档 claim）） | 2026-11-14 21:26 | 本笔 |
+| `docs/COORDINATION.md` | QGIS时空线/地图要素（QGIS 时空要素层落到地图上：收工段（非纯追加，整档 claim）） | 2026-11-14 23:06 | 本笔 |
 
 > 上表各行均由 `claim` 台账推导：owner 原文与 `acquired_at` 直接取自台账，
 > 目的优先用台账里的 `claim_reason`，没有就如实写「未声明」，不补编。时间列只是
@@ -5627,4 +5628,33 @@ HEAD 基线反证（既有红归属）                    1 failed, 9 passed（�
 
 **下一坐标**：仍为干净宿主环境重跑全量 / 查 `receive_pipeline` 工作线程生命周期；
 本轮无新增在途。
+
+## 2026-11-14 夜收工登记（二）：时空要素层落到地图上
+
+交付落点按明确要求是**地图上**：东西画在 `OsmMapView` 画布，不是抽屉里的一行字。
+
+- 新增 `mbdsdr_ai/spacetime_features.py`：轻量时空要素层（几何 + 属性 + 有效
+  时间区间）、`TimeInterval`（`None`=±∞、单点至少一端包含即合法）、球面中心角
+  圈内判定、`merge_ranges`/`gaps_between` 保留空洞、`match_closest_before`
+  不插值不造帧、`TemporalMode` 五档（含 `redraw_only` 天空档，绝不筛要素）、
+  `TemporalContext`/`TemporalBus` 单一广播。零新依赖，不内置任何站点坐标。
+- 新增 `desktop/spacetime_map_layer.py`：按 `add_layer` 协议画要素点 / 轨迹 /
+  圈内高亮 / 时间角标；没数据或没圈显示「未设定时间范围 · 不推断」；覆盖圈
+  旧于当前时刻明写「未随时重算」。不新增控件、不重复 ODbL。
+- 接线：`sat_ground_map.update_satellite` 成功后把**真实** footprint 交给要素层；
+  `sat_track_panel` 点选详情走现有 `ground_hint` + tooltip；`main_window` 在
+  `_sync_time_rate_btn`（5 个调用点覆盖跳时/倍率/回到此刻）广播
+  `TemporalContext`，`set_observer_site`（站址唯一写入口）upsert 站址要素。
+  信标/干扰源目前无真实数据源，**不编点**。
+- 基线重定标：`tests/test_sat_ground_map.py` 图层清单由 2 层改 3 层，并新增
+  「新层必须真画出像素」断言，不是放宽。
+- 新增可复跑 `scripts/render_spacetime_map_preview.py`：离线渲染**真实**
+  `OsmMapView`（暗色、Web Mercator、缓存瓦片 + ODbL 署名按口径显示），示例
+  要素全程标注「非真实观测」，输出仓库外 PNG。不自绘地图、不伪造瓦片来源。
+- 可复验：19 个文件 **195 passed**；新增 29 条守卫；四处真反证（单点区间语义、
+  天空档偷偷过滤、球面角退化成平面经差、图层不注册到地图）均精确变红并还原。
+- **not_verified**：权威全量 `pytest tests -q` 未重跑（既有 49% 中断）；未编译
+  运行 QGIS；子 Agent 盘点报告里的行号未逐条复核；预览图要素是示例数据，
+  不是真实观测。
+
 

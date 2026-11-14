@@ -3254,7 +3254,18 @@ class MainWindow(QMainWindow):
     _TIME_RATE_STEPS = (1.0, 60.0, 600.0, 0.0)
 
     def _sync_time_rate_btn(self) -> None:
-        """按钮文案与时间引擎的实际倍率对齐（0 显示「停」，从不编造）。"""
+        """按钮文案与时间引擎的实际倍率对齐（0 显示「停」，从不编造）。
+
+        跳时刻 / 改倍率 / 回到此刻都调用本方法，故在这里发布一次
+        ``TemporalContext``，地图上的时空要素层订阅后跟着重算。
+        广播必须放在按钮判空**之前**：专业模式没有星象仪按钮，但地图仍在。
+        """
+        try:
+            from mbdsdr_ai.new_spacetime import get_time_engine
+            from mbdsdr_ai.spacetime_features import get_temporal_bus
+            get_temporal_bus().publish_from_engine(get_time_engine())
+        except Exception:
+            pass
         btn = getattr(self, "_planetarium_time_btn", None)
         if btn is None:
             return
@@ -13872,6 +13883,14 @@ class MainWindow(QMainWindow):
         self._observer_source = source if has else None
         if has:
             self._observer_from_gnss = (source == "gnss")
+        # 地面对象要素：站址唯一写入口同步进时空集合，供地图画点、判圈内。
+        # 清空时移除要素；不造坐标、不硬编码城市、不猜位置。
+        try:
+            from mbdsdr_ai.spacetime_features import upsert_ground_station
+            upsert_ground_station(new_lat, new_lon,
+                                  source=source if has else "")
+        except Exception:
+            pass
         try:
             self._apply_observer_location()
         except (AttributeError, RuntimeError, TypeError, ValueError):

@@ -1271,7 +1271,24 @@ class SatTrackPanel(QFrame):
             return None
         self._ground_map = SatelliteGroundMap(self)
         self._ground_form.addRow(self._ground_map)
+        try:
+            self._ground_map.feature_detail.connect(
+                self._on_ground_feature_detail)
+        except (AttributeError, RuntimeError):
+            pass
         return self._ground_map
+
+    def _on_ground_feature_detail(self, text: str, suggestion: str,
+                                  level: str) -> None:
+        """点中地面对象：详情走现有提示行，完整原因进 tooltip。
+
+        不新增控件、不弹模态框；``unknown`` 的原因原样带出，不折叠成「无」。
+        """
+        try:
+            self.ground_hint.setText(text)
+            self.ground_hint.setToolTip(suggestion)
+        except (AttributeError, RuntimeError):
+            pass
 
     def _refresh_ground_view(self) -> None:
         """按当前选中卫星重算并重绘；失败如实写原因，不画假轨迹。"""
