@@ -109,3 +109,23 @@ class TestAlreadyAbove:
         expect_rise = 100.0 + math.asin(0.25) / (2 * math.pi) * PERIOD_S
         assert _sec(rs["rise_jd"]) > 100.0
         assert abs(_sec(rs["rise_jd"]) - expect_rise) < 2.0
+
+
+def test_event_time_error_within_declared_tolerance(monkeypatch):
+    """AOS/LOS 误差必须落在声明的二分容差内，而不是只落在「比粗扫步长小」。
+
+    上面几条用 1.5s / 2.0s 的松界（那是 30s 粗扫吸附时代留下的余量）；
+    真正的上界是 ``RISE_SET_BISECT_TOL_S``。把它改成常量后，这里直接断言
+    误差 ≤ 该值：一旦有人退回到「把采样点当时刻」，20s 级误差会立刻变红。
+    """
+    from mbdsdr_ai.skyengine.satellites import RISE_SET_BISECT_TOL_S
+
+    _inject(monkeypatch, _sin_curve(100.0))
+    rs = next_rise_set(object(), 43.9, 125.3, 0.05, JD0,
+                       step_s=30.0, horizon_hold_s=4000.0)
+    rise_err = abs(_sec(rs["rise_jd"]) - 100.0)
+    set_err = abs(_sec(rs["set_jd"]) - 1900.0)
+    assert rise_err <= RISE_SET_BISECT_TOL_S, (
+        f"rise 误差 {rise_err:.3f}s > 声明容差 {RISE_SET_BISECT_TOL_S}s")
+    assert set_err <= RISE_SET_BISECT_TOL_S, (
+        f"set 误差 {set_err:.3f}s > 声明容差 {RISE_SET_BISECT_TOL_S}s")

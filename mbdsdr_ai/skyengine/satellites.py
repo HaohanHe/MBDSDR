@@ -16,6 +16,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Optional, Dict, List
 
+#: 升落穿越点二分的时间容差（秒）。``next_rise_set`` 用它作为停止条件，
+#: 也是「AOS/LOS 时刻误差上界」的唯一声明值——调用方与断言都引用这里，
+#: 不许再内联字面量。
+RISE_SET_BISECT_TOL_S = 1.0
+
 
 @dataclass(frozen=True)
 class SatelliteMeta:
@@ -119,10 +124,10 @@ def next_rise_set(satrec, lat: float, lon: float, alt_km: float,
 
     def _crossing(jd_lo: float, el_lo: float,
                   jd_hi: float, el_hi: float) -> float:
-        """在 [jd_lo, jd_hi] 二分求仰角 = horizon_alt 的时刻（1s 容差）。"""
+        """在 [jd_lo, jd_hi] 二分求仰角 = horizon_alt 的时刻（RISE_SET_BISECT_TOL_S 容差）。"""
         lo_above = el_lo > horizon_alt
         for _ in range(32):
-            if (jd_hi - jd_lo) * 86400.0 <= 1.0:
+            if (jd_hi - jd_lo) * 86400.0 <= RISE_SET_BISECT_TOL_S:
                 break
             mid = 0.5 * (jd_lo + jd_hi)
             e = _alt_at(mid)

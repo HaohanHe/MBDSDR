@@ -2279,6 +2279,8 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `desktop/main_window.py` | 参考移植线/20261114（12.1 把真录链 rs_* 统计接到状态面板） | 2026-11-14 11:05 | 本笔 |
 | `mbdsdr_ai/tle_epoch.py` | 公理体检线/6ae85f56（时空域缺口：未来历元容差常量化（TLE_FUTURE_TOL_DAYS）） | 2026-11-14 11:03 | 本笔 |
 | `mbdsdr_ai/tle_integrity.py` | 公理体检线/6ae85f56（时空域缺口：freshness 暴露 age_days_signed/epoch_implausible） | 2026-11-14 11:03 | 本笔 |
+| `mbdsdr_ai/skyengine/satellites.py` | 公理体检线/6ae85f56（时空域缺口：过境二分容差提为 RISE_SET_BISECT_TOL_S） | 2026-11-14 11:06 | 本笔 |
+| `tests/test_satellite_rise_set_precision.py` | 公理体检线/6ae85f56（判据：AOS/LOS 误差 ≤ 声明容差（去掉二分必红）） | 2026-11-14 11:06 | 本笔 |
 
 > 上表各行均由 `claim` 台账推导：owner 原文与 `acquired_at` 直接取自台账，
 > 目的优先用台账里的 `claim_reason`，没有就如实写「未声明」，不补编。时间列只是
