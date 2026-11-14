@@ -5,13 +5,16 @@ MBDSDR AI - 统一用户友好错误处理
 
 SDR++ / GQRX 把底层异常（``LIBUSB_ERROR_BUSY``、``Device or resource busy``、
 ``No module named 'rtlsdr'``）直接冒到 UI，用户看不懂也不知道下一步做什么。
-本模块在**不改动任何既有共享文件**的前提下，提供一层统一的错误翻译：
+本模块是**全仓唯一错误树的定义处**（``core.errors`` 只做同一对象的再导出），
+提供一层统一的错误翻译：
 
 - :class:`SDRUserError`：所有"用户可操作错误"的基类，同时携带
-  ``message``（用户友好一句话）、``technical_detail``（技术细节，给日志/开发者）、
-  ``suggestion``（明确告诉用户下一步怎么修）。
-- 7 类常见真机错误（缺 DLL / 无设备 / 设备被占用 / USB 断开 / 无音频输出 /
-  采样率不支持 / 频率超范围）。
+  ``message``（用户友好一句话）、``suggestion``（明确告诉用户下一步怎么修）、
+  ``technical_detail``（技术细节，给日志/开发者），并维护两套输出契约：
+  ``to_dict()`` 给 MCP/JSON-RPC/CLI，``to_ui()`` 给桌面弹窗/状态条。
+- 13 个具体错误类（缺驱动 / 无设备 / 设备被占用 / 占用登记不可读 / USB 断开 /
+  无音频输出 / 采样率不支持 / 频率超范围 / 非法参数 / 导出路径越界 /
+  解码器不可用 / 解码器无流式入口）。
 - :func:`format_error`：把任意异常翻译成 UI 可直接显示的
   ``{title, message, suggestion}``。
 - :func:`classify_connect_failure`：把 ``connect()`` 失败时的原始异常 /
@@ -25,7 +28,7 @@ SDR++ / GQRX 把底层异常（``LIBUSB_ERROR_BUSY``、``Device or resource busy
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional, Sequence, Union
+from typing import Any, Dict, Optional, Sequence
 
 from .error_catalog import spec, suggestion, user_message
 
@@ -34,10 +37,15 @@ __all__ = [
     "DriverNotFoundError",
     "DeviceNotFoundError",
     "DeviceBusyError",
+    "OwnerRegistryUnavailableError",
     "USBDisconnectedError",
     "NoAudioOutputError",
     "SampleRateNotSupportedError",
     "FrequencyOutOfRangeError",
+    "InvalidArgumentError",
+    "ExportPathOutOfRootError",
+    "DecoderNotAvailableError",
+    "DecoderNotStreamableError",
     "format_error",
     "classify_connect_failure",
     "probe_occupant",
@@ -45,45 +53,77 @@ __all__ = [
 
 
 class SDRUserError(Exception):
-    """用户可操作的错误基类。
+    """用户可操作的错误基类——**全仓唯一一棵**错误树。
+
+    历史上有两棵树：``mbdsdr_ai.error_handler``（桌面/启动链）与
+    ``mbdsdr_ai.core.errors``（MCP/CLI 链），构造签名第 2/3 个参数顺序相反
+    （``(message, technical_detail, suggestion)`` vs
+    ``(message, suggestion, technical_detail)``），且各自 ``isinstance`` 判自己
+    那棵——``format_error(core 的 DeviceBusyError)`` 会落进 ``unexpected_error``
+    兜底。现在只在**这里**定义一次，``core.errors`` 只做同一对象的再导出，
+    全树签名统一为 ``(message, suggestion, technical_detail)``。
+
+    两套输出契约各管一个界面，字段不互相污染：
+
+    - :meth:`to_dict` → ``{error, message, suggestion, technical_detail}``，
+      给 **MCP / JSON-RPC / CLI**：错误码做机器分支，``technical_detail``
+      （任意对象，序列化时转字符串）给日志；
+    - :meth:`to_ui` → ``{title, message, suggestion}``，给**桌面端弹窗/状态条**，
+      不暴露内部技术细节。
 
     Parameters
     ----------
     message : str
-        一句话用户友好描述（弹窗标题正文级别）。
-    technical_detail : str
-        技术细节（原始异常、错误码等），给日志/开发者看。
+        一句话用户友好描述。
     suggestion : str
-        明确的下一步操作建议。
+        明确的下一步操作建议；留空时用子类的 ``_default_suggestion()``。
+    technical_detail : Any
+        技术细节（原始异常、错误码等），给日志/开发者看。
     """
 
+    code: str = "sdr_error"
     category: str = "generic"
     title: str = "SDR 错误"
 
     def __init__(
         self,
-        message: str,
-        technical_detail: str = "",
+        message: str = "",
         suggestion: str = "",
+        technical_detail: Any = None,
     ) -> None:
+        message = str(message)
         super().__init__(message)
-        self.message = str(message)
-        self.technical_detail = str(technical_detail)
-        self.suggestion = str(suggestion)
+        self.message = message
+        self.suggestion = suggestion or self._default_suggestion()
+        self.technical_detail = technical_detail
 
     # ------------------------------------------------------------------
+    def _default_suggestion(self) -> str:
+        return "请检查设备连接与参数后重试。"
+
+    def to_dict(self) -> Dict[str, Any]:
+        """序列化为 MCP/JSON-RPC 友好的 dict（绝不抛异常）。"""
+        return {
+            "error": self.code,
+            "message": self.message,
+            "suggestion": self.suggestion,
+            "technical_detail": (
+                str(self.technical_detail) if self.technical_detail is not None else None
+            ),
+        }
+
     def to_ui(self) -> Dict[str, str]:
-        """格式化为 UI 可直接渲染的 dict。"""
+        """格式化为桌面 UI 可直接渲染的 dict。"""
         return {
             "title": self.title,
             "message": self.message,
             "suggestion": self.suggestion,
         }
 
-    def __str__(self) -> str:  # pragma: no cover - 调试辅助
-        base = f"[{self.category}] {self.message}"
+    def __str__(self) -> str:
+        base = self.message
         if self.suggestion:
-            base += f" -> {self.suggestion}"
+            base += f"（建议：{self.suggestion}）"
         return base
 
 
@@ -91,142 +131,229 @@ class SDRUserError(Exception):
 # 具体错误类
 # ----------------------------------------------------------------------
 class DriverNotFoundError(SDRUserError):
-    """找不到 rtlsdr.dll / pyrtlsdr /  librtlsdr 驱动。"""
+    """找不到 rtlsdr.dll / pyrtlsdr / librtlsdr 驱动。"""
 
+    code = "driver_not_found"
     category = "driver"
     title = "找不到 SDR 驱动"
+    default_message = "找不到 rtlsdr.dll（SDR 驱动未就绪）"
 
-    def __init__(
-        self,
-        message: str = "找不到 rtlsdr.dll（SDR 驱动未就绪）",
-        technical_detail: str = "",
-        suggestion: str = (
-            "请安装 SDR# (https://airspy.com/download/) 或手动指定 DLL 路径；"
-            "Linux/macOS 请用包管理器安装 librtlsdr0（如 apt install librtlsdr0）"
-        ),
-    ) -> None:
-        super().__init__(message, technical_detail, suggestion)
+    def __init__(self, message: str = "", suggestion: str = "",
+                 technical_detail: Any = None) -> None:
+        super().__init__(message or self.default_message, suggestion,
+                         technical_detail)
+
+    def _default_suggestion(self) -> str:
+        return (
+            "请安装对应驱动：本机 RTL-SDR USB 默认走 SoapySDR"
+            "（pip install SoapySDR + SoapyRTLSDR）；Windows 也可用 SDR# "
+            "(https://airspy.com/download/) 安装 WinUSB 驱动；"
+            "Linux/macOS 用包管理器安装 librtlsdr0（如 apt install librtlsdr0）；"
+            "或用 --debug-source 以调试信号源模式运行。"
+        )
 
 
 class DeviceNotFoundError(SDRUserError):
-    """枚举不到任何 SDR 设备。"""
+    """枚举列表里找不到指定设备，或设备已拔出。"""
 
+    code = "device_not_found"
     category = "no_device"
     title = "未检测到 SDR 设备"
+    default_message = "未检测到 SDR 设备，请检查 USB 连接和驱动"
 
-    def __init__(
-        self,
-        message: str = "未检测到 SDR 设备，请检查 USB 连接和驱动",
-        technical_detail: str = "",
-        suggestion: str = (
-            "请检查 USB 连接，确认驱动已安装（Windows 用 Zadig 把 RTL2832 绑定为 "
-            "WinUSB），然后点击刷新设备列表"
-        ),
-    ) -> None:
-        super().__init__(message, technical_detail, suggestion)
+    def __init__(self, message: str = "", suggestion: str = "",
+                 technical_detail: Any = None) -> None:
+        super().__init__(message or self.default_message, suggestion,
+                         technical_detail)
+
+    def _default_suggestion(self) -> str:
+        return (
+            "请检查 USB 连接，确认驱动已安装（Windows 用 Zadig 把 RTL2832 "
+            "绑定为 WinUSB）；然后刷新设备列表（list_devices()），确认序列号/索引"
+        )
 
 
 class DeviceBusyError(SDRUserError):
-    """设备被其他程序占用。"""
+    """设备已被其它进程占用。
 
+    **只用于「登记里有真实持有者」的拒绝**：能指认是谁、pid 多少。
+    登记读不出来（没有可指认的持有者）是
+    :class:`OwnerRegistryUnavailableError`，两者的下一步动作完全不同。
+    """
+
+    code = "device_busy"
     category = "busy"
     title = "设备被占用"
+    default_message = "SDR 设备被其他程序占用，无法打开"
 
-    def __init__(
-        self,
-        message: str = "SDR 设备被其他程序占用，无法打开",
-        technical_detail: str = "",
-        suggestion: str = (
-            "请关闭其他使用该设备的程序（SDR# / GQRX / SDRangel / Virtual Radar "
-            "Server 等）后重试"
-        ),
-    ) -> None:
-        super().__init__(message, technical_detail, suggestion)
+    def __init__(self, message: str = "", suggestion: str = "",
+                 technical_detail: Any = None) -> None:
+        super().__init__(message or self.default_message, suggestion,
+                         technical_detail)
+
+    def _default_suggestion(self) -> str:
+        return (
+            "请先关闭正在使用该设备的程序，或在那个程序里释放该设备后重试"
+            "（如桌面端、GQRX、SDR#、另一个 mbdsdr 实例）；"
+            "也可以换用其它可用设备。"
+        )
+
+
+class OwnerRegistryUnavailableError(SDRUserError):
+    """设备占用登记不可读，无法判断设备是否被占用。
+
+    与 :class:`DeviceBusyError` **不是同一件事**：这里没有可指认的持有者，
+    说的是「读不出来」。补救动作是修/移除登记文件，不是去关别的软件——
+    所以单独一个错误码，别让上层按 busy 去引导用户。
+    """
+
+    code = "owner_registry_unavailable"
+    category = "busy_registry"
+    title = "设备占用登记不可读"
+
+    def _default_suggestion(self) -> str:
+        return (
+            "请检查运行日志里的设备占用登记路径：文件损坏就修复或移除它"
+            "（下次启动会重建），或到桌面端「设备」面板点「查看诊断」按提示处理。"
+        )
 
 
 class USBDisconnectedError(SDRUserError):
-    """运行中 USB 设备被拔出 / 连接断开。"""
+    """读样本过程中设备被拔出 / USB 断连。"""
 
+    code = "usb_disconnected"
     category = "usb_disconnected"
     title = "USB 设备已断开"
+    default_message = "USB 设备已断开，信号中断"
 
-    def __init__(
-        self,
-        message: str = "USB 设备已断开，信号中断",
-        technical_detail: str = "",
-        suggestion: str = (
+    def __init__(self, message: str = "", suggestion: str = "",
+                 technical_detail: Any = None) -> None:
+        super().__init__(message or self.default_message, suggestion,
+                         technical_detail)
+
+    def _default_suggestion(self) -> str:
+        return (
             "请重新插入设备，系统将自动重连并恢复之前的频率 / 模式 / 增益设置"
-        ),
-    ) -> None:
-        super().__init__(message, technical_detail, suggestion)
+        )
 
 
 class NoAudioOutputError(SDRUserError):
-    """没有可用的音频输出设备。"""
+    """没有可用的音频输出设备（sounddevice 不可用或无输出声道）。"""
 
+    code = "no_audio_output"
     category = "no_audio"
     title = "没有音频输出设备"
+    default_message = "未找到音频输出设备，无法播放解调音频"
 
-    def __init__(
-        self,
-        message: str = "未找到音频输出设备，无法播放解调音频",
-        technical_detail: str = "",
-        suggestion: str = (
-            "请检查声卡连接（扬声器 / 耳机是否插好），或在设置中选择输出设备"
-        ),
-    ) -> None:
-        super().__init__(message, technical_detail, suggestion)
+    def __init__(self, message: str = "", suggestion: str = "",
+                 technical_detail: Any = None) -> None:
+        super().__init__(message or self.default_message, suggestion,
+                         technical_detail)
+
+    def _default_suggestion(self) -> str:
+        return (
+            "请检查声卡连接（扬声器 / 耳机是否插好），或在设置中选择输出设备；"
+            "无头服务器可跳过 --start-audio，仅录制或远程查看频谱"
+        )
 
 
 class SampleRateNotSupportedError(SDRUserError):
     """请求的采样率设备不支持。"""
 
+    code = "sample_rate_not_supported"
     category = "bad_samplerate"
     title = "采样率不受支持"
+    default_message = "请求的采样率不被设备支持"
 
-    def __init__(
-        self,
-        message: str = "请求的采样率不被设备支持",
-        technical_detail: str = "",
-        suggestion: str = "",
-        supported_rates: Optional[Sequence[float]] = None,
-    ) -> None:
-        if not suggestion:
-            if supported_rates:
-                pretty = ", ".join(f"{int(round(r))} Hz" for r in supported_rates)
-                suggestion = f"该设备支持的采样率：{pretty}"
-            else:
-                # 项目默认采样率是唯一真值源（``sdr_status.DEFAULT_SAMPLE_RATE_HZ``，
-                # 当前 2.400 MS/s）；建议文案按同一格式化口径生成，不再手写第二份数值。
-                from .sdr_status import (DEFAULT_SAMPLE_RATE_HZ,
-                                         format_sample_rate)
-                suggestion = ("请改用设备默认采样率"
-                              f"（通常 {format_sample_rate(DEFAULT_SAMPLE_RATE_HZ)}）")
-        super().__init__(message, technical_detail, suggestion)
+    def __init__(self, message: str = "", suggestion: str = "",
+                 technical_detail: Any = None,
+                 supported_rates: Optional[Sequence[float]] = None) -> None:
+        # 先落 supported_rates 再 super()：_default_suggestion() 在基类构造里调用。
         self.supported_rates = list(supported_rates or [])
+        super().__init__(message or self.default_message, suggestion,
+                         technical_detail)
+
+    def _default_suggestion(self) -> str:
+        if self.supported_rates:
+            pretty = ", ".join(f"{int(round(r))} Hz" for r in self.supported_rates)
+            return f"该设备支持的采样率：{pretty}"
+        # 项目默认采样率是唯一真值源（``sdr_status.DEFAULT_SAMPLE_RATE_HZ``）。
+        from .sdr_status import (DEFAULT_SAMPLE_RATE_HZ,
+                                 format_sample_rate)
+        return ("请改用设备默认采样率"
+                f"（通常 {format_sample_rate(DEFAULT_SAMPLE_RATE_HZ)}）")
 
 
 class FrequencyOutOfRangeError(SDRUserError):
-    """频率超出设备可调范围。"""
+    """请求频率超出设备可调范围。"""
 
+    code = "frequency_out_of_range"
     category = "bad_frequency"
     title = "频率超出范围"
+    default_message = "请求的频率超出设备可调范围"
 
-    def __init__(
-        self,
-        message: str = "请求的频率超出设备可调范围",
-        technical_detail: str = "",
-        suggestion: str = "",
-        min_freq: Optional[float] = None,
-        max_freq: Optional[float] = None,
-    ) -> None:
-        if not suggestion and min_freq is not None and max_freq is not None:
-            suggestion = (
-                f"该设备支持 {min_freq / 1e6:.3f} - {max_freq / 1e6:.3f} MHz"
-            )
-        super().__init__(message, technical_detail, suggestion)
+    def __init__(self, message: str = "", suggestion: str = "",
+                 technical_detail: Any = None,
+                 min_freq: Optional[float] = None,
+                 max_freq: Optional[float] = None) -> None:
         self.min_freq = min_freq
         self.max_freq = max_freq
+        super().__init__(message or self.default_message, suggestion,
+                         technical_detail)
+
+    def _default_suggestion(self) -> str:
+        if self.min_freq is not None and self.max_freq is not None:
+            return f"该设备支持 {self.min_freq / 1e6:.3f} - {self.max_freq / 1e6:.3f} MHz"
+        return "请把频率调到设备覆盖范围内（一般 RTL-SDR 为 24 MHz–1.7 GHz）。"
+
+
+class InvalidArgumentError(SDRUserError):
+    """入参不合法（非有限数值、越界等）——用户可修正的参数错误。
+
+    与内部故障区分开：这类错误应报 ``invalid_argument``，让调用方知道
+    改参数就行，而不是让人以为系统崩了。
+    """
+
+    code = "invalid_argument"
+    category = "invalid_argument"
+    title = "参数不合法"
+
+
+class ExportPathOutOfRootError(SDRUserError):
+    """导出路径越出允许根（路径遍历防护）。"""
+
+    code = "export_path_out_of_root"
+    category = "export_path"
+    title = "导出路径越界"
+
+
+class DecoderNotAvailableError(SDRUserError):
+    """请求的解码器未注册或缺少依赖。"""
+
+    code = "decoder_not_available"
+    category = "decoder"
+    title = "解码器不可用"
+
+    def _default_suggestion(self) -> str:
+        return "可用解码器见 list_decoders()；如需新解码器请先注册或安装其依赖。"
+
+
+class DecoderNotStreamableError(DecoderNotAvailableError):
+    """解码器有文件级实现，但没有流式 IQ 入口。
+
+    与 :class:`DecoderNotAvailableError` 分开：这是「我们没做流式入口」，
+    但**有替代做法**（``--decode-file``）；``not_implemented`` 是能力根本
+    未接线，两者对用户是两句话，不许合并。
+    """
+
+    code = "decoder_not_streamable"
+    title = "解码器无流式入口"
+
+    def _default_suggestion(self) -> str:
+        return (
+            "该解码器仅支持文件级入口，请用 --decode-file <文件> --mode <类型>；"
+            "流式解码仅支持 adsb/rds。"
+        )
 
 
 # ----------------------------------------------------------------------
@@ -235,7 +362,8 @@ class FrequencyOutOfRangeError(SDRUserError):
 def format_error(error: Any) -> Dict[str, str]:
     """把任意异常格式化为 UI 可直接显示的 ``{title, message, suggestion}``。
 
-    - :class:`SDRUserError` 直接输出其文案；
+    - :class:`SDRUserError`（含 ``mbdsdr_ai.core.errors`` 再导出的同一棵树）
+      直接输出其文案；
     - 其它异常包装成一个兜底错误，suggestion 提示"查看日志 / 重试"。
     """
     if isinstance(error, SDRUserError):
