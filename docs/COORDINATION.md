@@ -2251,6 +2251,8 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `docs/axioms.md` | 文档引用复核线/6ae85f56（收红：棘轮计数改写成非断言，写明对账口径） | 2026-11-14 10:04 | 本笔 |
 | `docs/code-guards.md` | 文档引用复核线/6ae85f56（收红：residue 守卫语义改写，去掉误触发的完成态措辞） | 2026-11-14 10:04 | 本笔 |
 | `docs/claim-waivers.md` | 文档引用复核线/6ae85f56（COORD 四条补证后销账，waived-total 12→8） | 2026-11-14 10:04 | 本笔 |
+| `tools/axioms/survey.py` | 公理体检线/6ae85f56（D8：转绿条件纳入到期判据 + 区间标题展开（expired_steal，原在途 D1 改动未动）） | 2026-11-14 10:12 | 本笔 |
+| `tests/test_axioms_d8_known_red.py` | 公理体检线/6ae85f56（D8：区间展开与无到期判据反证） | 2026-11-14 10:12 | 本笔 |
 
 > 上表各行均由 `claim` 台账推导：owner 原文与 `acquired_at` 直接取自台账，
 > 目的优先用台账里的 `claim_reason`，没有就如实写「未声明」，不补编。时间列只是

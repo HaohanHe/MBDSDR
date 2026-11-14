@@ -935,19 +935,27 @@ def _known_red_entries(repo: Repo) -> List[Tuple[str, str, int]]:
     text = _read(path)
     lines = text.splitlines()
     entries: List[Tuple[str, str, int]] = []
-    current: Optional[Tuple[str, int]] = None
+    current: Optional[Tuple[List[str], int]] = None
     buf: List[str] = []
+
+    def flush() -> None:
+        if current:
+            for kid in current[0]:
+                entries.append((kid, "\n".join(buf), current[1]))
+
     for i, line in enumerate(lines, 1):
-        m = re.match(r"^##\s+(K\d+)", line)
+        # 区间标题（如 `## K01–K04`）必须展开成逐条 ID：一条区间可能包含
+        # 多条已知红，只记 K01 会把 K02–K04 从台账里漏掉。
+        m = re.match(r"^##\s+(K\d+)(?:\s*[–—-]\s*K?(\d+))?", line)
         if m:
-            if current:
-                entries.append((current[0], "\n".join(buf), current[1]))
-            current = (m.group(1), i)
+            flush()
+            start = int(m.group(1)[1:])
+            end = int(m.group(2)) if m.group(2) else start
+            current = ([f"K{n:02d}" for n in range(start, end + 1)], i)
             buf = []
         elif current:
             buf.append(line)
-    if current:
-        entries.append((current[0], "\n".join(buf), current[1]))
+    flush()
     return entries
 
 
@@ -1186,12 +1194,14 @@ def collect_d8(repo: Repo) -> Dimension:
     dim.findings.extend(audit_waiver_items(items))
 
     entries = _known_red_entries(repo)
-    no_expiry = [k for k, body, _ in entries if not re.search(r"到期|复核|销账期限", body)]
-    dim.facts.append(f"已知红 {len(entries)} 条，其中 {len(no_expiry)} 条没写到期/复核条件")
+    no_expiry = [k for k, body, _ in entries
+                 if not re.search(r"到期|复核|转绿条件|销账期限", body)]
+    dim.facts.append(
+        f"已知红 {len(entries)} 条，其中 {len(no_expiry)} 条没写到期/复核/转绿条件")
     if no_expiry:
         dim.findings.append(Finding(
             "D8-debt-no-expiry", "docs/known-red-register.md", 0,
-            f"{len(no_expiry)} 条已知红没有到期/复核条件：{', '.join(no_expiry)}",
+            f"{len(no_expiry)} 条已知红没有到期/复核/转绿条件：{', '.join(no_expiry)}",
             "债务没有到期就不会被重新审视，只增不减。",
             "为每条补「复核日期」或「转绿条件」；转绿条件已有时可视为到期判据。",
             "review",
