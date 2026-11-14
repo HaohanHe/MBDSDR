@@ -41,6 +41,18 @@
 ② 追加到提交说明的 ``excluded-hunks:`` 段，写明路径、行号范围与 owner（可空）。
 声明范围必须完整覆盖 diff 的 hunk，跨 hunk 边界或对不上任何改动一律拒绝。
 
+按线名排除登记行（2026-11-14）
+------------------------------
+
+手算行号是坐标，坐标只在被计算的那一刻有效：``4a3ef515`` 就因为在收尾前
+少算了两行，把 UI 防呆线的两条 §6.1 登记一起带走了。所以登记表行改用
+``--exclude-owner <线名>``（可重复）：提交时对 ``--files`` 里的协调文档现算
+暂存 diff，逐条新增行读第二列的线名——命中 ``--exclude-owner`` 就排除，命中
+本笔的活跃 claim / ``MBDSDR_CLAIM_OWNER`` 就保留；两者都不是则**拒绝**并点名
+（不认识的归属不能靠猜，猜错就是把别人的行记在自己名下）。这样别人在我
+算完之后追加的行照样会被排掉。它与 ``--exclude-hunk`` 一样需要先 ``--declare``
+（行号必须锚在声明快照上），可并用。
+
 意图删除（2026-11-12）
 ----------------------
 
@@ -213,8 +225,8 @@ hunk，于是有人把自己的行挪到别处让 diff 断开——提交干净�
     python scripts/safe_commit.py --files a.md --declare
     python scripts/safe_commit.py --files a.md --message-file msg.txt \\
         --exclude-hunk a.md:120-138 --exclude-owner 接入层线
-    python scripts/safe_commit.py --files a.md --message-file msg.txt \\
-        --exclude-hunk a.md:2051-2052 --exclude-owner 文档引用复核线
+    python scripts/safe_commit.py --files docs/COORDINATION.md a.md \\
+        --message-file msg.txt --exclude-owner "UI防呆线" --exclude-owner "收尸线"
     python scripts/safe_commit.py --files a.md --message-file msg.txt \\
         --allow-foreign-changes "B 线两行已当面核对，随本笔一起落库"
 
@@ -265,6 +277,100 @@ def _parse_exclusions(specs: list[str], files: list[str]) -> list[dict]:
             raise ValueError(f"--exclude-hunk 行号范围不合法：{spec!r}")
         items.append({"path": norm, "start": start, "end": end})
     return items
+
+
+def _coord_row_label(line: str) -> str:
+    """§6.1 表格行里的线名（括号备注之前）；不是数据行返回空串。
+
+    行格式与闸门 / ``append_coordination_row.py`` 同一份：
+    ``| `path` | 线名/会话（说明） | 时间 | 本笔 |``。
+    """
+    stripped = line.strip()
+    if not stripped.startswith("|"):
+        return ""
+    cells = [c.strip() for c in stripped.strip("|").split("|")]
+    if len(cells) < 2:
+        return ""
+    if all(re.fullmatch(r":?-{2,}:?", c) for c in cells):
+        return ""
+    if cells[0] in ("文件", ""):
+        return ""
+    return re.split(r"[（(]", cells[1], maxsplit=1)[0].strip()
+
+
+def _classify_owner_rows(rows: list[tuple[int, str]], exclude_owners: list[str],
+                         my_owners: list[str]) -> tuple[list[dict], list[str]]:
+    """按行归属把新增的 §6.1 行分成「他线（排除）」与「认不出（拒绝）」。
+
+    归属只看行里的线名，不看位置：所以别人在我算完之后又追加的行同样会被
+    认出来——这正是 ``--exclude-owner`` 取代手算行号的原因（手算范围是坐标，
+    坐标只在被计算的那一刻有效）。
+    """
+    cc = _coord_module()
+    excluded: list[dict] = []
+    unknown: list[str] = []
+    for lineno, text in rows:
+        label = _coord_row_label(text)
+        if not label:
+            unknown.append(f"第 {lineno} 行不是 §6.1 表格行：{text.strip()[:60]}")
+            continue
+        if any(cc._owner_matches(label, mine) for mine in my_owners if mine):
+            continue
+        if any(cc._owner_matches(label, other) for other in exclude_owners if other):
+            excluded.append({"start": lineno, "end": lineno, "owner": label})
+            continue
+        unknown.append(f"第 {lineno} 行 owner={label}")
+    return excluded, unknown
+
+
+def _owner_exclusions(env: dict, doc_rel: str, exclude_owners: list[str],
+                      files: list[str]) -> tuple[list[dict], list[str]]:
+    """从暂存 diff 里按线名算出要排除的 §6.1 行（提交时现算，不预存行号）。
+
+    返回 ``(排除范围, 认不出的行)``；后者非空调用方必须拒绝提交。本笔的
+    归属取「声明文件上的活跃 claim owner」+ ``MBDSDR_CLAIM_OWNER``，两者任一
+    命中即算自己的行，不会被排除。
+    """
+    proc = _run(["diff", "--cached", "--no-renames", "-U0", "HEAD", "--", doc_rel],
+                env)
+    if proc.returncode != 0:
+        raise ValueError(
+            f"读取 {doc_rel} 的暂存 diff 失败："
+            f"{proc.stderr.decode('utf-8', 'replace')[:200]}")
+    text = proc.stdout.decode("utf-8", "replace")
+    added: list[int] = []
+    cur: int | None = None
+    for line in text.splitlines():
+        if line.startswith("@@"):
+            match = _HUNK_RE.match(line)
+            cur = int(match.group(1)) if match else None
+            continue
+        if cur is None or not line.startswith("+"):
+            continue
+        added.append(cur)
+        cur += 1
+    if not added:
+        return [], []
+
+    index_text = _index_text(env, doc_rel) or ""
+    doc_lines = index_text.splitlines()
+    rows = [(ln, doc_lines[ln - 1]) for ln in added if 1 <= ln <= len(doc_lines)]
+
+    my_owners: list[str] = []
+    try:
+        cc = _coord_module()
+        my_owners = [owner for _path, owner in
+                     cc.active_claims_for_paths(sorted(files),
+                                                marker_dir=LOCKS_DIR / "claims")]
+        resolved = cc.resolve_owner(ROOT)
+        if resolved:
+            my_owners.append(resolved)
+    except ImportError:
+        pass
+    excluded, unknown = _classify_owner_rows(rows, exclude_owners, my_owners)
+    for item in excluded:
+        item["path"] = doc_rel
+    return excluded, unknown
 
 
 def _revert_index_hunks(env: dict, path: str, ranges: list[dict]) -> None:
@@ -1382,7 +1488,7 @@ def _attempt(
     message: bytes,
     index: Path,
     exclusions: list[dict] | None = None,
-    exclude_owner: str = "",
+    exclude_owner: list[str] | None = None,
     declared: dict | None = None,
     declared_at: float = 0.0,
     allow_reason: str = "",
@@ -1412,8 +1518,37 @@ def _attempt(
             raise PermanentFailure(f"git add 失败（永久错误，不重试）：{detail}")
         return 1, f"git add 瞬时失败（可重试）：{detail}"
 
-    # 2b) 排除他人 hunk：只从私有 index 反向撤掉，工作树不动
+    # 2b) 排除他人 hunk：只从私有 index 反向撤掉，工作树不动。
+    #     --exclude-owner 在这里按「刚 add 进去的暂存 diff + 行里的线名」现算
+    #     范围；别人在我上一次算完之后追加的行同样会被认出来（手算行号做不到）。
+    owners = [o.strip() for o in (exclude_owner or []) if o.strip()]
+    if owners:
+        doc_rel = _coord_doc_rel()
+        if doc_rel not in files:
+            return 1, (
+                f"--exclude-owner 需要把 {doc_rel} 一并列进 --files："
+                "按行归属排除的前提是这份文档进了暂存区（随后只会带本笔的行）"
+            )
+        try:
+            auto, unknown = _owner_exclusions(env, doc_rel, owners, files)
+        except ValueError as exc:
+            return 1, str(exc)
+        if unknown:
+            return 1, (
+                "拒绝提交：暂存内容里有认不出归属的 §6.1 行，"
+                "不敢猜它是不是本笔的。\n"
+                "  这些行的线名既不在本笔的活跃 claim 里，也不在 --exclude-owner 里：\n"
+                + "\n".join(f"    - {item}" for item in unknown)
+                + "\n  处置：确认归属后把它加进 --exclude-owner \"<线名>\"（排除），"
+                "或核实确实属于本笔。"
+            )
+        if auto:
+            print(f"[exclude-owner] 按线名排除 {len(auto)} 行 §6.1 登记："
+                  + ", ".join(f"{e['start']}-{e['end']}（{e['owner']}）"
+                              for e in auto))
+        exclusions = exclusions + auto
     if exclusions:
+        owner_label = "、".join(owners)
         for path in sorted({e["path"] for e in exclusions}):
             ranges = [e for e in exclusions if e["path"] == path]
             try:
@@ -1423,7 +1558,7 @@ def _attempt(
             print(
                 f"[exclude] {path}: "
                 + ", ".join(f"{e['start']}-{e['end']}" for e in ranges)
-                + (f"（owner={exclude_owner}）" if exclude_owner else "")
+                + (f"（owner={owner_label}）" if owner_label else "")
             )
         env[EXCLUDE_ENV] = json.dumps(
             [
@@ -1431,14 +1566,14 @@ def _attempt(
                     "path": e["path"],
                     "start": e["start"],
                     "end": e["end"],
-                    "owner": exclude_owner,
+                    "owner": e.get("owner") or owner_label,
                 }
                 for e in exclusions
             ],
             ensure_ascii=False,
         )
         env["MBDSDR_DECLARED_INDEX"] = str(index)
-        message = _exclusion_trailer(message, exclusions, exclude_owner)
+        message = _exclusion_trailer(message, exclusions, owner_label)
 
     # 2c) §6.1 登记行：闸只看暂存区，行躺在工作区就等于「该带的一条没带」。
     #     工作区有 → 只把那几行写进私有 index；没有 → 拒绝并给补登记命令。
@@ -1647,7 +1782,12 @@ def _build_parser() -> argparse.ArgumentParser:
         metavar="PATH:START-END",
         help="从私有 index 排除的 hunk 或 hunk 内的行范围（可重复）；工作树保持原样",
     )
-    ap.add_argument("--exclude-owner", default="", help="排除 hunk 的归属线（可留空）")
+    ap.add_argument(
+        "--exclude-owner",
+        action="append",
+        default=[],
+        help="按 §6.1 行里的线名自动排除他线登记（可重复；需先 --declare）",
+    )
     return ap
 
 
@@ -1720,9 +1860,9 @@ def main(argv: list[str] | None = None) -> int:
     # 行号是坐标，坐标只在它被计算的那一刻有效：``--exclude-hunk`` 的行号是
     # 按某个时刻的 hunk 算的，没有声明快照就只能拿「本次启动」当基线，
     # 别人后来追加的行会被静默算进基线（``ed3c09e5``）。所以必须成对使用。
-    if exclusions and declaration_file is None:
+    if (exclusions or args.exclude_owner) and declaration_file is None:
         print(
-            "拒绝提交：--exclude-hunk 必须配 --declare。\n"
+            "拒绝提交：--exclude-hunk / --exclude-owner 必须配 --declare。\n"
             "  行号是坐标，坐标只在它被计算的那一刻有效：20:58 算出的 hunk\n"
             "  +2100,6 到 21:02 已被别线追加的 4 行顶成 +2100,10（ed3c09e5），\n"
             "  排掉 2100-2103 后把 2106-2109 一起带走了。没有声明快照时，\n"
