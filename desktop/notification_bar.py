@@ -123,7 +123,7 @@ class NotificationBar(QFrame):
         self.close_btn = QToolButton()
         self.close_btn.setObjectName("notificationClose")
         self.close_btn.setText("✕")
-        self.close_btn.setToolTip("关闭通知")
+        self.close_btn.setToolTip("关闭这条通知；同一问题再次触发时会重新出现")
         self.close_btn.setCursor(Qt.PointingHandCursor)
         self.close_btn.clicked.connect(self.dismiss)
         row.addWidget(self.close_btn, 0, Qt.AlignTop)
@@ -278,7 +278,6 @@ class NotificationBar(QFrame):
         self.message_label.setText(message)
         self.suggestion_label.setText(suggestion)
         self.suggestion_label.setVisible(bool(suggestion))
-        self.suggestion_label.setToolTip(suggestion)
 
         # 动作区：有码才有「查看怎么办」（notify 已保证有 remedy）；
         # 「重试」只在该码可重试且调用方确实给了回调时出现。

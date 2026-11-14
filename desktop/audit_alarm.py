@@ -152,7 +152,7 @@ def _build_label_class():
                 self.setVisible(False)
                 return False
             self.setText(alarm_text(self._snapshot))
-            self.setToolTip(alarm_tooltip(self._snapshot))
+            self.setToolTip(f"为什么漏记、在哪查：\n{alarm_tooltip(self._snapshot)}")
             self.setVisible(True)
             return True
 
