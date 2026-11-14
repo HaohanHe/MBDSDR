@@ -57,6 +57,24 @@ class TestVfoPanel:
         p._on_add_vfo()
         assert received and abs(received[0][0] - 100e6 - 18750) < 1.0
 
+    def test_add_vfo_without_center_refuses_instead_of_fabricating(self):
+        """中心频率未知时不许凭空按 100 MHz 新建 VFO。
+
+        实测缺陷（2026-11-14）：`_on_add_vfo` 在 provider 返回 0 时静默用
+        100 MHz 兜底，用户点一下就在一个自己没选的频率上多出一条 VFO，
+        界面上没有任何说明。
+        """
+        from vfo_panel import VfoPanel
+        p = VfoPanel()
+        p.set_sdr_connected(True)          # 按钮可用，才可能被点到
+        received = []
+        p.vfo_added.connect(lambda c, b, m: received.append((c, b, m)))
+        p._center_freq_provider = lambda: 0.0
+        p._on_add_vfo()
+        assert received == [], "中心频率未知时不得编一个 100 MHz 新建 VFO"
+        text = p.status_label.text()
+        assert "中心频率" in text and "调谐" in text, text
+
     def test_vfo_removed_signal(self):
         from vfo_panel import VfoPanel
         from mbdsdr_ai.vfo_manager import VfoManager

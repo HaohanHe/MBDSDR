@@ -255,7 +255,11 @@ class VfoPanel(QWidget):
             except Exception:  # noqa: BLE001
                 center = 0.0
         if center <= 0:
-            center = 100_000_000.0
+            # 中心频率未知时不能凭空按 100 MHz 新建——那是替用户编一个他们
+            # 没选的频率，界面上还看不出是编的。明确拒绝并给出下一步。
+            self.status_label.setText(
+                "无法新建 VFO：当前中心频率未知（请先调谐到一个频率）")
+            return
         # 默认偏移 ±一个信道带宽（次听落在旁边）
         offset = self._default_bw * 1.5
         new_center = center + offset
