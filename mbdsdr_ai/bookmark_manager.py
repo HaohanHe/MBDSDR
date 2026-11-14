@@ -82,7 +82,9 @@ def _from_legacy_entry(d: dict) -> "Bookmark":
         frequency_hz=_num("frequency_hz", _num("freq_hz")),
         name=str(d.get("name", "")),
         modulation=str(d.get("modulation") or d.get("mode") or "FM"),
-        bandwidth_hz=_num("bandwidth_hz", 12500) or 12500,
+        # 旧条目从来没存过带宽：缺字段记 0.0「未记录」，不拿 12500 猜一个
+        # 值（猜出来的带宽会被当成用户选择下发到硬件）。显式 0 也保持 0。
+        bandwidth_hz=_num("bandwidth_hz", 0),
         group=str(d.get("group") or d.get("category") or ""),
         start_hz=float(_num("start_hz") or 0.0),
         end_hz=float(_num("end_hz") or 0.0),
