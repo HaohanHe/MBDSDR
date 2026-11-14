@@ -51,6 +51,13 @@ DOC_REL_PATH = os.path.join("docs", "axioms.md")
 #: git pathspec 的分隔符是正斜杠；显式归一化，不依赖 Git for Windows 的路径转换。
 DOC_POSIX_PATH = DOC_REL_PATH.replace(os.sep, "/")
 
+#: 这些文件只被「登记/记账」改动，不计入「落后的提交数」。
+#: 本计数块：重生成本块的那一笔否则会把自己算成落后，提示永远消不掉。
+#: §6.1 登记面：每笔提交都按协议追加一行，若计入，任何提交都会推高落后数。
+#: 代价：这两个文件也在 A10/A11/D6 的扫描面里，改它们理论上能改计数；但
+#:   这类改动远小于「一天一次重生成」的节奏，由 MAX_STALE_HOURS 兜底。
+NON_COUNTING_PATHS = (DOC_POSIX_PATH, "docs/COORDINATION.md")
+
 #: 基准过期上限（双条件、先到者）：超过任一，判据从「提示」升级为红。
 #: 24 小时：正常一天之内会重生成一次；再久「当前计数」就跨过了发布/排班
 #:   节奏，继续沿用旧数会直接误导对「当前存量」的判断。
@@ -152,13 +159,14 @@ def age_hours(generated_at: str, now: Optional[datetime] = None) -> Optional[flo
 def commits_since(root=None, baseline_sha: str = "", head: str = "HEAD") -> Optional[int]:
     """基准之后「改了扫描面」的提交笔数。
 
-    只重写计数块文档的提交（如重生成本块的那一笔）不算——它不改变被统计的
-    输入，基准因此仍然对得上，不必提示重跑。
+    只改 ``NON_COUNTING_PATHS``（计数块本身、§6.1 登记面）的提交不算——
+    它们由生成器/登记脚本写入，几乎每笔提交都带一行，计进去会让重生成本块
+    的那一笔把提示重新点亮。
     """
     try:
         out = subprocess.run(
             ["git", "rev-list", "--count", f"{baseline_sha}..{head}", "--", ".",
-             f":(exclude){DOC_POSIX_PATH}"],
+             *(f":(exclude){p}" for p in NON_COUNTING_PATHS)],
             cwd=root or ROOT, capture_output=True, text=True, check=True)
         return int(out.stdout.strip())
     except (OSError, ValueError, subprocess.CalledProcessError):

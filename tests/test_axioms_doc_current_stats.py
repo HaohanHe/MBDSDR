@@ -146,9 +146,9 @@ def test_same_baseline_wrong_tool_output_fails():
 
 
 def test_commits_since_ignores_doc_only_commits(tmp_path):
-    """只重写计数块的提交不算「落后」，否则重生成完提示又被点亮。
+    """只改计数块/§6.1 登记面的提交不算「落后」，否则提示永远消不掉。
 
-    反证：去掉 ``commits_since`` 里的 ``:(exclude)``，本用例第二段断言
+    反证：去掉 ``commits_since`` 里的 ``:(exclude)``，前两段断言
     （doc-only 提交后仍为 0）必红。
     """
     if not shutil.which("git"):
@@ -176,6 +176,9 @@ def test_commits_since_ignores_doc_only_commits(tmp_path):
     assert commits_since(str(repo), baseline) == 0
     # 只改计数块所在的文档：不改变扫描面，不算落后
     commit(os.path.join("docs", "axioms.md"), "计数块\n")
+    assert commits_since(str(repo), baseline) == 0
+    # §6.1 登记面同理（每笔提交都要追加一行）
+    commit(os.path.join("docs", "COORDINATION.md"), "| row |\n")
     assert commits_since(str(repo), baseline) == 0
     # 改了扫描面：算 1 笔
     commit("b.py", "y = 2\n")
