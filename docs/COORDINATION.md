@@ -2454,6 +2454,9 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `tests/test_safe_commit_exclude.py` | 用例随闸线/6ae85f56（补 §6.1 登记面前提（5 条既有红）） | 2026-11-14 12:06 | 本笔 |
 | `tests/test_safe_commit_declaration.py` | 用例随闸线/6ae85f56（补 §6.1 登记面前提（1 条既有红）） | 2026-11-14 12:06 | 本笔 |
 | `scripts/batch_close.py` | 工具化线/6ae85f56（新增批次收尾聚合入口；只聚合三道检查，不改判据） | 2026-11-14 12:11 | 本笔 |
+| `mbdsdr_ai/user_paths.py` | 共享件边界线/6ae85f56（新增叶子模块：用户数据/缓存根唯一推导（无 mbdsdr_ai 依赖）） | 2026-11-14 12:11 | 本笔 |
+| `mbdsdr_ai/amr.py` | 共享件边界线/6ae85f56（共享件收口：builtin_cache_path 委托 user_paths.user_cache_dir（行为不变，提交后释放）） | 2026-11-14 12:12 | 本笔 |
+| `mbdsdr_ai/sat_links_fetch.py` | 共享件边界线/6ae85f56（共享件收口：cache_path 委托 user_paths.user_cache_dir；后续 _iso_utc 委托 time_format（提交后释放）） | 2026-11-14 12:12 | 本笔 |
 | `tests/test_batch_close.py` | 工具化线/6ae85f56（新增 batch_close 退出码语义测试） | 2026-11-14 12:13 | 本笔 |
 
 > 上表各行均由 `claim` 台账推导：owner 原文与 `acquired_at` 直接取自台账，

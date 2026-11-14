@@ -52,6 +52,8 @@ import urllib.request
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 
+from .user_paths import user_cache_dir
+
 try:                                    # 跨进程缓存锁（Windows）
     import msvcrt
 except ImportError:                     # pragma: no cover - 非 Windows
@@ -147,13 +149,13 @@ def offline() -> bool:
 
 
 def cache_path() -> Optional[str]:
-    """机器缓存路径；``MBDSDR_CACHE_DIR`` 优先（测试隔离），否则用户目录。"""
-    base = os.environ.get("MBDSDR_CACHE_DIR")
-    if not base:
-        home = os.path.expanduser("~")
-        if not home or home == "~":
-            return None
-        base = os.path.join(home, ".mbdsdr", "cache")
+    """机器缓存路径；``MBDSDR_CACHE_DIR`` 优先（测试隔离），否则用户目录。
+
+    缓存根推导统一走 :func:`mbdsdr_ai.user_paths.user_cache_dir`。
+    """
+    base = user_cache_dir()
+    if base is None:
+        return None
     return os.path.join(base, CACHE_FILENAME)
 
 

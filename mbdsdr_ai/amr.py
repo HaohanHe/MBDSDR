@@ -38,6 +38,8 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Any, Optional, Tuple
 from enum import Enum
 
+from .user_paths import user_cache_dir
+
 logger = logging.getLogger(__name__)
 
 #: 内置模板特征的磁盘缓存版本。**只要 `_load_builtin_training_data` 的合成
@@ -52,13 +54,11 @@ def builtin_cache_path() -> Optional[str]:
 
     `MBDSDR_CACHE_DIR` 优先（测试用它把缓存隔离到临时目录，不污染真实 HOME）；
     否则 `~/.mbdsdr/cache/`。取不到用户目录时返回 None，即「不缓存」。
+    目录推导统一走 :func:`mbdsdr_ai.user_paths.user_cache_dir`。
     """
-    base = os.environ.get("MBDSDR_CACHE_DIR")
-    if not base:
-        home = os.path.expanduser("~")
-        if not home or home == "~":
-            return None
-        base = os.path.join(home, ".mbdsdr", "cache")
+    base = user_cache_dir()
+    if base is None:
+        return None
     return os.path.join(base, "amr_builtin_features.npz")
 
 
