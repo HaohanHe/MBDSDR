@@ -9,7 +9,7 @@
 > 指纹 = sha256(`文档\0断言原文`)[:12]；断言原文改动即指纹变化 = 按新增判红。
 > 在途未提交的 docs 改动不享本白名单——那正是门禁要拦的「修改后无证据」。
 
-<!-- waived-total: 12 -->
+<!-- waived-total: 8 -->
 
 建表口径：HEAD 断言 144 条 = 可证实 2 + 文档过期 46 + 无 hash 96；白名单只覆盖后两类。
 
@@ -17,10 +17,6 @@
 
 | # | 文档 | 指纹 | 断言摘要 | 暂不补证理由 |
 |---|------|------|----------|--------------|
-| 1 | docs/COORDINATION.md | c7357a8b2b36 | Gardner 环修复版已改进 lrpt_modem.py（中点插值+归一+钳制+热启动， | 未写 commit hash，无法用 git 复核；本轮只锁增量，存量由该文档 owner 逐条补 hash 或删断言 |
-| 2 | docs/COORDINATION.md | 6e4913bfc99d | 已改为**让产品从原仓库代码长出来**：`build/sync_from_repo.py` 只读 | 未写 commit hash，无法用 git 复核；本轮只锁增量，存量由该文档 owner 逐条补 hash 或删断言 |
-| 3 | docs/COORDINATION.md | c8503b24ac33 | 已改：`31-celestial.js` 换「相机在球心 → 视图空间(X/Y/Z) → 全屏平面投影」， | 未写 commit hash，无法用 git 复核；本轮只锁增量，存量由该文档 owner 逐条补 hash 或删断言 |
-| 5 | docs/COORDINATION.md | 33211081caac | GPScacodes.py 裁决更正（标准码的反极性版本，原"非标准"判词有误）； | 未写 commit hash，无法用 git 复核；本轮只锁增量，存量由该文档 owner 逐条补 hash 或删断言 |
 | 6 | docs/COORDINATION.md | ad3e2bc78eab | 扫描器自指命中（HEAD 干净，`git grep` 无命中）；本条已改写为不引字 | 未写 commit hash，无法用 git 复核；本轮只锁增量，存量由该文档 owner 逐条补 hash 或删断言 |
 | 8 | docs/COORDINATION.md | b1f0ec5d9d1f | 现予以更正）： | 未写 commit hash，无法用 git 复核；本轮只锁增量，存量由该文档 owner 逐条补 hash 或删断言 |
 | 16 | docs/COORDINATION.md | d8cb2fdab266 | 95 passed，agent 采样相关 21 passed。文档 §10-3 已改为"已落地"。 | 未写 commit hash，无法用 git 复核；本轮只锁增量，存量由该文档 owner 逐条补 hash 或删断言 |

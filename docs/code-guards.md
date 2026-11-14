@@ -377,7 +377,7 @@ pre-commit**：pre-commit 现在只跑 claim 范围 + claim 台账 + 暂存区�
 | `scripts/secret_scan.py` | 自动：`scripts/hooks/pre-commit`（**仅 `--staged`**） | 每次提交前扫暂存区；全量 `--history`/全树扫描**无自动入口**（实测 >300s，见 C 档） | 全体提交者（钩子自动） | 2027-01 |
 | `scripts/git_sync_index.py` | 自动：`post-commit` 钩子 + `tests/test_git_sync_index.py` | 每次提交后同步共享 index（钩子自动） | 全体提交者（钩子自动） | 2027-01 |
 | `scripts/make_decode_fixtures.py --check` | 自动：`release_check.py --steps guards` | 发版前（4.2s）：生成器与 8 个 cf32/wav + `manifest.json` 逐字对账；2026-11-13 生成器补 `provenance: self-generated` 后转绿 | 发版人 / 解码 fixture 改动者 | 2027-01〔证：`f6034fcd` — `docs/code-guards.md:379` — `self-generated`〕 |
-| `scripts/check_commit_residue.py` | 自动：`scripts/hooks/post-commit`（`--repo <root> --json HEAD`） | **每次提交后**（实测 0.68–0.85s）：本次提交新增的连续行块若以「删除」形态回到工作区未提交 diff → 打印 RESIDUE 并追加 `D:\mbdsdr\.locks\residue_commits.log`；只记录不阻断（提交已落地） | 全体提交者（钩子自动） | 2027-01 |
+| `scripts/check_commit_residue.py` | 自动：`scripts/hooks/post-commit`（`--repo <root> --json HEAD`） | **每次提交后**（实测 0.68–0.85s）：本次提交新增的连续行块若以「删除」形态回到工作区未提交 diff → 打印 RESIDUE 并追加 `D:\mbdsdr\.locks\residue_commits.log`；只记录不阻断（提交已写入历史，阻断没有意义） | 全体提交者（钩子自动） | 2027-01 |
 | `scripts/ci_pytest_groups.py` | 自动：`.github/workflows/ci.yml`（`--check` + `--group/--total`）+ `scripts/run_all_tests.sh` + `tests/test_collection_consistency.py` | 每次 CI 的 `tests` 矩阵 job（先 `--check` 断言并集=全集，再取本组文件跑 pytest）；本地全量测试走同一分组 | CI runner / 跑全量测试的人 | 2027-01 |
 
 ### B. 只有测试入口：扫描器被测，但「当前仓库」没人跑

@@ -335,7 +335,7 @@ python scripts/axioms.py --accept-current --accept-reason "接受并发线的真
 - 棘轮自身有反证（自检 `R1`）：新增一处静默 `except: pass` 必红、
   删掉必绿、**同数量替换必须同时报出新增与消失**（防止按总数抵消）。
 - 2026-11-13 实测点 `eb3ef686`（干净 worktree，本线最后一个提交）：基线 520 条、当前 520 条、
-  新增 25 / 消失 25；已接受 55 条（仍存在 47、已修掉 8）。
+  新增 25 / 消失 25；接受进基线 55 条（仍存在 47、消失 8）——三个数都取自棘轮输出，是对账计数，不是对某处修复下结论。
   这 25 条**全部属于并行线的改动，未接受进基线**：`mbdsdr_ai/device_owner.py` 的
   A03/A04/D3、`mbdsdr_ai/device_manager.py` 的 A13、`known-red-register.md` 的 A14/D8、
   `desktop/control_panel.py` 的 `gain/gain_db` 别名、`command_palette.py` 的 D3、
