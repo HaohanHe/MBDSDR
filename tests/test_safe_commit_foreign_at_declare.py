@@ -154,3 +154,58 @@ def test_exclude_hunk_keeps_block_out(tmp_path):
     committed = _git(repo, "show", f"HEAD:{DOC}").stdout
     assert f"{ME}（本笔）" in committed
     assert f"{OTHER}（他线在途）" not in committed
+
+
+def test_blank_line_block_alone_does_not_trigger(tmp_path):
+    """纯空行块不再触发退出码 8：空行不带归属，按原文比对只会误报。
+
+    ``1a092cf8`` 现场：叙事节的空行被记成 7 个他线块，全文比对让原文 ``""``
+    到处命中，于是「只提交自己那一行」也被判成带入他线内容。判据改成
+    「本笔 diff vs HEAD」后，没进本笔的空行不在 diff 里，不再命中。
+    """
+    repo = _repo(tmp_path)
+    locks = tmp_path / "locks"
+    text = (repo / DOC).read_text(encoding="utf-8")
+    (repo / DOC).write_text(
+        text + "\n" + f"| `{DOC}` | {ME}（本笔） | 2026-11-14 09:10 | 是 |\n",
+        encoding="utf-8",
+    )
+
+    declared = _safe(repo, locks, "--files", DOC, "--declare")
+    assert declared.returncode == 0, declared.stdout + declared.stderr
+    # 声明时仍然如实列出这个块（可见性不因判据变严而丢）
+    assert "1 个块" in declared.stdout + declared.stderr, declared.stdout
+
+    proc = _safe(repo, locks, "--files", DOC, "--message-file", str(_msg(tmp_path)))
+    out = proc.stdout + proc.stderr
+    assert proc.returncode == 0, out
+    assert "声明前已经在工作区的他线改动会被带入本笔" not in out, out
+
+
+def test_block_already_in_head_is_not_misreported(tmp_path):
+    """HEAD 推进后，已经落库的他线块不再误报：判据是本笔 diff，不是 index 全文。
+
+    旧实现拿 index 全文做原文比对，块一旦进了 HEAD，本笔的 index 里到处都能
+    命中它，于是「本笔其实只加了新行」也被判成带入他线块。
+    """
+    repo = _repo(tmp_path)
+    locks = tmp_path / "locks"
+    text = (repo / DOC).read_text(encoding="utf-8")
+    other_row = f"| `notes.txt` | {OTHER}（他线在途） | 2026-11-14 09:00 | 否 |\n"
+    my_row = f"| `{DOC}` | {ME}（本笔） | 2026-11-14 09:05 | 是 |\n"
+    (repo / DOC).write_text(text + other_row + my_row, encoding="utf-8")
+
+    assert _safe(repo, locks, "--files", DOC, "--declare").returncode == 0
+
+    # 他线先把它的行落库（HEAD 前进）；本笔工作区内容不变
+    (repo / DOC).write_text(text + other_row, encoding="utf-8")
+    _git(repo, "add", DOC, check=True)
+    _git(repo, "commit", "-q", "-m", "other line commits its row", check=True)
+    (repo / DOC).write_text(text + other_row + my_row, encoding="utf-8")
+
+    proc = _safe(repo, locks, "--files", DOC, "--message-file", str(_msg(tmp_path)))
+    out = proc.stdout + proc.stderr
+    assert proc.returncode == 0, out
+    assert "声明前已经在工作区的他线改动会被带入本笔" not in out, out
+    committed = _git(repo, "show", f"HEAD:{DOC}").stdout
+    assert other_row in committed and my_row in committed, committed

@@ -112,6 +112,11 @@ pre-commit 闸门对**任何未声明的删除条目**一律拒绝（幻影删�
 ``--allow-foreign-changes "<理由>"`` 留痕（写进说明的 ``foreign-before-declare:``
 段）；两者都没有就拒绝（退出码 8，不重试）。清单只比 ``--files``，不扫全仓。
 
+「仍会被带入」的判据是**本笔 diff（私有 index vs HEAD）的新增/删除行**，不是
+index 全文：全文比对会让空行原文 ``""`` 到处命中（``1a092cf8`` 的 7 个空行块），
+也会把 HEAD 推进后已经落库的块误报成他线块。纯空行不参与判定——空行不带归属，
+任何提交里的空行都能和它同文。
+
 两把锁各管一半，**不重叠也不互相替代**：声明**之前**已在工作区的内容归 8
 （本节的块清单），声明**之后**冒出来/消失的内容归 4（⑰ 的时间窗）。只做
 其中一个，另一半照样漏——这正是 ``8982b4f9`` / ``052828d1`` / ``ed3c09e5``
@@ -1066,15 +1071,51 @@ def _print_foreign(foreign: dict[str, list[dict]]) -> None:
           "或 --allow-foreign-changes \"<理由>\" 留痕；两者都没有就拒绝（退出码 8）")
 
 
+def _staged_diff_lines(env: dict, path: str) -> tuple[Counter, Counter]:
+    """本笔（私有 index 相对 HEAD）在该路径上的新增行 / 删除行（``-U0``）。
+
+    这是「本笔到底带了哪些字节」的判定面：没进本的行程不在 diff 里，
+    已经在 HEAD 里的行也不在 diff 里。
+    """
+    proc = _run(["diff", "--cached", "--no-renames", "-U0", "HEAD", "--", path],
+                env)
+    if proc.returncode != 0:
+        raise ValueError(
+            f"读取 {path} 的暂存 diff 失败："
+            f"{proc.stderr.decode('utf-8', 'replace')[:200]}")
+    added: Counter = Counter()
+    removed: Counter = Counter()
+    for line in proc.stdout.decode("utf-8", "replace").splitlines():
+        if line.startswith(("+++", "---", "\\")):
+            continue
+        if line.startswith("+"):
+            added[line[1:]] += 1
+        elif line.startswith("-"):
+            removed[line[1:]] += 1
+    return added, removed
+
+
 def _carried_foreign(env: dict, foreign: dict[str, list[dict]]) -> list[dict]:
-    """私有 index 里仍带着的「声明前他线块」（按行原文比对，抗行号漂移）。"""
+    """本笔 diff（私有 index vs HEAD）里仍带着的「声明前他线块」。
+
+    判据是**本笔新增/删除的行**，不是 index 全文。旧实现拿全文做 Counter，
+    ``docs/COORDINATION.md`` 里成百上千个空行让原文 ``""`` 到处命中，空行块
+    永远判「被带入」（``1a092cf8`` 的 7 个空行块就是这样被逼出豁免的）；
+    HEAD 推进后，已经落库的块也同样能在全文里命中，被判成他线块。
+    改成 diff 后两个误报源同时消失：排除掉的字节不在 diff 里，已进 HEAD 的
+    字节也不在 diff 里。
+
+    纯空行（``strip() == ""``）不参与判定：空行不带归属，任何提交里的空行
+    都能和它同文，按原文比对只会制造误报；删除方向的纯空行同理。
+    """
     carried: list[dict] = []
     for path, items in foreign.items():
-        present = Counter((_index_text(env, path) or "").splitlines())
+        added, removed = _staged_diff_lines(env, path)
         for item in items:
-            hits = Counter(item.get("lines") or [])
-            remain = sum((present & hits).values())
-            gone = sum(1 for text in item.get("removed") or [] if present[text] <= 0)
+            hits = Counter(t for t in (item.get("lines") or []) if t.strip())
+            drops = Counter(t for t in (item.get("removed") or []) if t.strip())
+            remain = sum((added & hits).values())
+            gone = sum((removed & drops).values())
             if remain or gone:
                 entry = dict(item)
                 entry["path"] = path
@@ -1831,7 +1872,10 @@ def _attempt(
     # 2b2) 声明前他线改动：声明快照把它们算成了基线，⑰ 看不见。
     #      排除后已不在 index 就放行；仍会被带入就必须排除或显式留痕。
     if foreign:
-        carried, report = _foreign_gate(env, foreign, allow_reason)
+        try:
+            carried, report = _foreign_gate(env, foreign, allow_reason)
+        except ValueError as exc:
+            raise PermanentFailure(f"拒绝提交：{exc}") from exc
         if carried:
             if not allow_reason:
                 return 8, report
