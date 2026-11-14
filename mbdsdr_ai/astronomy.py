@@ -20,6 +20,10 @@ import math
 import time
 from dataclasses import dataclass
 from typing import Dict, List, Any, Optional, Tuple
+try:
+    from .gmst import gmst_rad_iau1982
+except ImportError:  # 扁平导入（部分脚本直挂 mbdsdr_ai 目录）
+    from gmst import gmst_rad_iau1982
 from enum import Enum
 
 from .environment_facts import (
@@ -316,25 +320,12 @@ def mjd_to_jd(mjd: float) -> float:
 
 
 def jd_to_gmst(jd: float) -> float:
+    """儒略日转格林尼治恒星时（GMST，弧度）。口径 A。
+
+    旧注释写「IAU 2006 近似公式」是错的：实际用的是 IAU 1982 折叠式，
+    与 orbit._gmst_days 在四个 JD 上逐位一致。现委托到同一内核。
     """
-    儒略日转格林尼治恒星时（GMST，弧度）。
-
-    使用 IAU 2006 近似公式。
-    """
-    # 从 J2000 起算的儒略世纪数
-    t = (jd - J2000_JD) / 36525.0
-
-    # GMST（秒）
-    gmst_sec = (
-        67310.54841
-        + (876600.0 * 3600.0 + 8640184.812866) * t
-        + 0.093104 * t * t
-        - 6.2e-6 * t * t * t
-    )
-
-    # 转为弧度（0 到 2π）
-    gmst_rad = (gmst_sec % 86400.0) / 86400.0 * 2.0 * math.pi
-    return gmst_rad
+    return gmst_rad_iau1982(jd)
 
 
 def jd_to_lst(jd: float, longitude_deg: float) -> float:

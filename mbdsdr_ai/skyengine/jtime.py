@@ -18,6 +18,10 @@ from __future__ import annotations
 
 import time as _time
 from dataclasses import dataclass
+try:
+    from ..gmst import gmst_deg_iau1982
+except ImportError:  # 扁平导入
+    from mbdsdr_ai.gmst import gmst_deg_iau1982
 
 J2000: float = 2451545.0
 _UNIX_EPOCH_JD: float = 2440587.5      # 1970-01-01 00:00 UTC 历元儒略日
@@ -34,13 +38,8 @@ def jd_to_unix(jd: float) -> float:
 
 
 def gmst_deg(jd_ut1: float) -> float:
-    """格林尼治平恒星时 GMST (度)。IAU 1982 展开式，输出度。"""
-    t = (jd_ut1 - J2000) / 36525.0
-    gmst_sec = (67310.54841
-                + (876600.0 * 3600.0 + 8640184.812866) * t
-                + 0.093104 * t * t
-                - 6.2e-6 * t * t * t)
-    return (gmst_sec % 86400.0) / 240.0 % 360.0
+    """格林尼治平恒星时 GMST (度)。口径 A，委托 gmst.gmst_deg_iau1982。"""
+    return gmst_deg_iau1982(jd_ut1)
 
 
 @dataclass

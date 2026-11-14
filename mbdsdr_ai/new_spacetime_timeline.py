@@ -26,6 +26,10 @@ MBDSDR 新时空 —— 卫星过境时间线 / 授时状态 / 频率-轨道关�
 """
 
 import math
+try:
+    from .gmst import gmst_rad_iau1982
+except ImportError:  # 扁平导入（部分脚本直挂 mbdsdr_ai 目录）
+    from gmst import gmst_rad_iau1982
 from datetime import datetime, timedelta, timezone
 from dataclasses import dataclass, field
 from typing import List, Optional, Dict, Any, Tuple
@@ -170,23 +174,12 @@ class FreqOrbitPoint:
 # ============================================================
 
 def _gmst_rad(jd_ut1: float) -> float:
-    """由 UT1 儒略日计算格林尼治平恒星时（弧度）。
+    """由 UT1 儒略日计算格林尼治平恒星时（弧度）。口径 A。
 
-    使用 IAU 1982  GMST 表达式（Vallado 式 3-54）：
-        GMST(s) = 67310.54841 + (876600*3600 + 8640184.812866)*T
-                  + 0.093104*T^2 - 6.2e-6*T^3
-    其中 T = (JD - 2451545.0)/36525。再对 86400s 取模，秒换算弧度。
-    注：8640184.812866 项**不可漏**——漏掉会让 GMST 偏数小时，过境时刻整体错位
-    （与 sat_passes/skyfield 的 AOS/LOS 差到小时级），不是采样步长能解释的差。
+    IAU 1982 折叠式（Vallado 3-54），委托 gmst.gmst_rad_iau1982。
+    其中的世纪增量不可漏，漏掉会让过境 AOS/LOS 偏到小时级。
     """
-    t = (jd_ut1 - 2451545.0) / 36525.0
-    gmst_sec = (67310.54841
-                + (876600.0 * 3600.0 + 8640184.812866) * t
-                + 0.093104 * t * t
-                - 6.2e-6 * t * t * t)
-    gmst_sec = gmst_sec % 86400.0
-    # 1 小时角秒 = 15 角秒 = 1/240 度
-    return math.radians(gmst_sec / 240.0)
+    return gmst_rad_iau1982(jd_ut1)
 
 
 def _observer_ecef(lat_deg: float, lon_deg: float, alt_km: float

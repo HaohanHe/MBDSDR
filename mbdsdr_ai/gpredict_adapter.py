@@ -127,7 +127,13 @@ def julian_date_of_year(year: float) -> float:
 
 
 def thetajd(jd: float) -> float:
-    """ThetaG_JD: 格林尼治平恒星时(弧度)。 时间/GMST"""
+    """ThetaG_JD: 格林尼治平恒星时(弧度)。**口径 D**。
+
+    这是 gpredict ``ThetaG_JD`` 的独立数值路径（当日 0h 起算 + 地球自转项），
+    与 IAU 1982 折叠式（``gmst.gmst_rad_iau1982``）实测差约 0.0076"，
+    **不是逐位相同**。本模块整体镜像 gpredict 的 SGP4/SDP4 算法链，
+    为保持与上游逐式对应，保留原式，不委托、不合并。
+    """
     ut = frac(jd + 0.5)
     jd0 = jd - ut
     tu = (jd0 - 2451545.0) / 36525.0
