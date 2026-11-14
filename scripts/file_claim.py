@@ -105,15 +105,25 @@ token_sha256 + sidecar 缺失 + 签发早于 sidecar 引入版 028f390f」的 cl
 1 用法错误；3 = `audit-stale` 发现「claim 已过期但文件 mtime 晚于 acquired_at」的漂移。
 
 `cleanup-stale` 另有一套**按证据**的退出码（它不做任何「超过 N 分钟一律释放」
-的默认分支）：
+的默认分支）。结果分三堆，只有主数（可释放未释放）会驱动退出码：
+
+* ``READY``：四项证据全 PASS，可以释放——**这是唯一的待办主数**；
+* ``UNDECIDABLE``：claim 之后文件有过提交，内容已无法回溯到取得时刻。
+  这类**不会因为时间推移变得可判定**，只计数、只做趋势，不进待办、不改
+  退出码，但报告和 JSON 必须写出条数、占比与原因分布（不许静默消失）；
+* ``SUSPECT``：暂时缺在途/内容证据，但文件在 claim 之后**没有**提交过，
+  补证据仍可能有救；列出缺口与补法，同样不改退出码。
+
+``UNDECIDABLE`` 不是「文件清白」的证明，只是「证明不了」：里面可能存在
+「文件被别人改过而本方没发现」的情况，只是没有证据可以区分。
 
 ===  ==================================================================
 码   含义
 ===  ==================================================================
-0    没有需要人处理的：没有可释放的，也没有「疑似失联但证据不足」的
+0    主数为空：没有「可释放未释放」的 claim（UNDECIDABLE / SUSPECT 只报告）
 1    用法错误（``--release`` 缺 ``--by`` / ``--reason`` 等）
 2    释放被拒绝：复核时证据已变化、占位已换人、或清理日志写失败
-3    需要人看：有可释放但未加 ``--release``，或有疑似失联但证据不足
+3    主数非空：有可释放的 claim 仍未释放（唯一会退 3 的情况）
 ===  ==================================================================
 """
 from __future__ import annotations
@@ -146,6 +156,9 @@ TAKEOVER_LOG = LOCKS_DIR / "claim_takeovers.log"
 #: 与 `claim_takeovers.log` 分开：接管是「换人持有」，清理是「确认无人后注销」，
 #: 混在一起会让读方分不清「这条路径现在归谁」。
 CLEANUP_LOG = LOCKS_DIR / "claim_cleanup.log"
+#: 每次 cleanup-stale 的计数快照（JSONL，只存数字不存路径）：UNDECIDABLE
+#: 不做待办，但必须能看出「这堆是在涨还是在降」。
+CLEANUP_TREND = LOCKS_DIR / "claim_cleanup_trend.jsonl"
 #: 「想拿但被别人占着」的等待记录。只在冲突时写；持有者下次续租/append 成功时
 #: 读出并清零（打印一次即删）。持有方成本为 0，被挡方成本全付，等待不可见——
 #: 所以占位对持有者本来是隐形的；这张表只补「看得见」，不参与任何判定。
@@ -1925,14 +1938,22 @@ def cmd_audit_stale(as_json: bool = False) -> int:
 # 为什么不复用 takeover：takeover 是「换个人持有」，清理是「确认无人后注销」；
 # 判据也不同（takeover 只看过期 + 无在途改动，不清算持有者是否改过文件）。
 
-def _evidence(status: str, detail: str, weight: str = "strong") -> Dict[str, str]:
+def _evidence(
+    status: str, detail: str, weight: str = "strong", undecidable: str = ""
+) -> Dict[str, str]:
     """一条证据：PASS / GAP（证不出来）/ FAIL（证出来有风险）。
 
     ``weight="weak"`` 表示这条证据**不能单独支撑释放**，只作一致性核对。
     目前只有「进程不存在」是弱证据：claim 是一次性 CLI，pid 在 claim 返回后
     就已经不存在，对绝大多数 claim 恒真。
+
+    ``undecidable`` 非空表示「这类缺口不会随时间变成可证」——目前只有
+    「claim 之后文件有提交」，用于把该条从 SUSPECT 分到 UNDECIDABLE。
     """
-    return {"status": status, "detail": detail, "weight": weight}
+    item = {"status": status, "detail": detail, "weight": weight}
+    if undecidable:
+        item["undecidable"] = undecidable
+    return item
 
 
 def _cleanup_grace_s() -> float:
@@ -2091,6 +2112,8 @@ def _content_evidence(
             "GAP",
             f"无内容基线；该文件在 claim 之后有提交（{_iso(last_ts)} > "
             f"{_iso(acquired)}），无法证明未被改动",
+            "weak",
+            undecidable="post_claim_commit",
         )
     return _evidence(
         "PASS",
@@ -2126,6 +2149,10 @@ def _cleanup_row(
         category = "wait" if expired_s > 0 else "live"
     elif all(item["status"] == "PASS" for item in evidence.values()):
         category = "releasable"
+    elif evidence["content"].get("undecidable"):
+        # 口径按「claim 之后文件有提交」这一条硬分：只要命中，内容就永远
+        # 无法回溯到取得时——不管其余证据是 PASS 还是暂时缺，都不再是待办。
+        category = "undecidable"
     else:
         category = "suspect"
     gaps = [
@@ -2140,6 +2167,7 @@ def _cleanup_row(
         "category": category,
         "evidence": evidence,
         "gaps": gaps,
+        "undecidable_reason": str(evidence.get("content", {}).get("undecidable") or ""),
         "expired_min": round(expired_s / 60.0, 1) if expired_s > 0 else 0.0,
         "acquired_at": acquired,
         "heartbeat_at": heartbeat,
@@ -2152,6 +2180,19 @@ def _append_cleanup_log(record: Dict[str, Any]) -> None:
         fh.write(json.dumps(record, ensure_ascii=False) + "\n")
         fh.flush()
         os.fsync(fh.fileno())
+
+
+def _append_cleanup_trend(record: Dict[str, Any]) -> None:
+    """每次运行的计数快照；失败只 WARN，不改变任何结论。"""
+    CLEANUP_TREND.parent.mkdir(parents=True, exist_ok=True)
+    with open(CLEANUP_TREND, "a", encoding="utf-8") as fh:
+        fh.write(json.dumps(record, ensure_ascii=False) + "\n")
+        fh.flush()
+
+
+def _owner_line(owner: Any) -> str:
+    """``线名/会话短号`` → 线名；清理账里单独留一列，方便按线反查。"""
+    return str(owner or "").split("/", 1)[0].strip()
 
 
 def _registry_cleanup(key: str, display: str, now: float, detail: Dict[str, Any]) -> None:
@@ -2186,6 +2227,7 @@ def _release_stale_row(row: Dict[str, Any], by: str, reason: str) -> Dict[str, A
             "epoch": now,
             "path": display,
             "owner": data.get("owner"),
+            "line": _owner_line(data.get("owner")),
             "by": by,
             "reason": reason,
             "evidence": fresh["evidence"],
@@ -2259,9 +2301,12 @@ def _release_stale_row(row: Dict[str, Any], by: str, reason: str) -> Dict[str, A
             "logged_at": _iso(_now()),
             "path": display,
             "owner": before.get("owner"),
+            "line": _owner_line(before.get("owner")),
             "by": by,
             "reason": reason,
             "released": True,
+            "evidence": fresh["evidence"],
+            "expired_min": fresh["expired_min"],
             "claim_after": None,
         })
     except OSError as exc:
@@ -2302,7 +2347,7 @@ def cmd_cleanup_stale(
 
     groups = {
         name: [row for row in rows if row["category"] == name]
-        for name in ("releasable", "suspect", "wait", "live")
+        for name in ("releasable", "suspect", "undecidable", "wait", "live")
     }
     released: List[str] = []
     failed: List[Dict[str, str]] = []
@@ -2314,9 +2359,31 @@ def cmd_cleanup_stale(
             except ClaimDenied as exc:
                 failed.append({"path": row["path"], "error": str(exc)})
 
-    needs_human = bool(groups["suspect"]) or bool(failed) or (
-        bool(groups["releasable"]) and not release
+    undecidable_reasons: Dict[str, int] = {}
+    for row in groups["undecidable"]:
+        reason_key = row["undecidable_reason"] or "unknown"
+        undecidable_reasons[reason_key] = undecidable_reasons.get(reason_key, 0) + 1
+    undecidable_ratio = (
+        round(len(groups["undecidable"]) / len(rows), 4) if rows else 0.0
     )
+    undecidable_note = (
+        "claim 之后文件有提交，内容已无法回溯到取得时；这一类不会因为时间推移"
+        "变得可判定，也不是「文件清白」的证明，只是证明不了。"
+    )
+
+    # 趋势只存计数，不存路径：UNDECIDABLE 不做待办，但必须能看出涨跌。
+    trend = {
+        "at": _iso(now),
+        "epoch": now,
+        "release": bool(release),
+        "total": len(rows),
+        "summary": {name: len(items) for name, items in groups.items()},
+        "undecidable_reasons": undecidable_reasons,
+    }
+    try:
+        _append_cleanup_trend(trend)
+    except OSError as exc:
+        print(f"WARN 趋势快照写入失败（不影响结论）：{exc}", file=sys.stderr)
 
     if as_json:
         public_rows = [
@@ -2328,14 +2395,31 @@ def cmd_cleanup_stale(
             "released": released,
             "failed": failed,
             "summary": {name: len(items) for name, items in groups.items()},
+            "undecidable": {
+                "count": len(groups["undecidable"]),
+                "ratio": undecidable_ratio,
+                "reasons": undecidable_reasons,
+                "note": undecidable_note,
+            },
+            "exit_code": (
+                EXIT_DENIED if failed
+                else EXIT_FINDINGS if groups["releasable"] and not release
+                else EXIT_OK
+            ),
             "rows": public_rows,
         }, ensure_ascii=False, indent=2))
-        return EXIT_FINDINGS if needs_human else EXIT_OK
+        return (
+            EXIT_DENIED if failed
+            else EXIT_FINDINGS if groups["releasable"] and not release
+            else EXIT_OK
+        )
 
     print(
         f"CLEANUP: 扫描 {len(rows)} 条 claim；租约未过期 {len(groups['live'])}；"
-        f"过期未满宽限 {len(groups['wait'])}；可释放 {len(groups['releasable'])}；"
-        f"疑似失联但证据不足 {len(groups['suspect'])}"
+        f"过期未满宽限 {len(groups['wait'])}；"
+        f"【待办·可释放未释放】{len(groups['releasable'])}；"
+        f"UNDECIDABLE {len(groups['undecidable'])}（{undecidable_ratio:.1%}）；"
+        f"SUSPECT {len(groups['suspect'])}"
         + (f"；本次已释放 {len(released)}" if release else "（未加 --release，未改动任何占位）")
     )
     for path in released:
@@ -2356,19 +2440,69 @@ def cmd_cleanup_stale(
             f"  SUSPECT {row['path']} owner={row['owner']} "
             f"过期={row['expired_min']}min 证据缺口：" + "；".join(row["gaps"])
         )
+        hint = _suspect_hint(row)
+        if hint:
+            print(f"    补法：{hint}")
+    print(
+        f"  UNDECIDABLE {len(groups['undecidable'])} 条（{undecidable_ratio:.1%}）；"
+        f"原因分布：" + (
+            "、".join(f"{name}={count}" for name, count in sorted(undecidable_reasons.items()))
+            or "无"
+        )
+    )
+    print(f"    说明：{undecidable_note}")
+    print("    处置：只计数、只做趋势（D:\\mbdsdr\\.locks\\claim_cleanup_trend.jsonl），"
+          "不进待办、不改退出码。")
     if groups["wait"]:
         print(
             f"  WAIT {len(groups['wait'])} 条刚过期未满宽限：按 §6.1.4 等宽限自然过完，"
             f"本工具不提前释放"
         )
-    if needs_human:
+    if failed:
+        print("CLEANUP: 有释放被拒绝（退出码 2）：见上 FAILED，占位未改。")
+    elif groups["releasable"] and not release:
         print(
-            "CLEANUP: 需要人看（退出码 3）。没有「超过 N 分钟一律释放」的分支："
-            "证据缺一项就不释放。"
+            "CLEANUP: 主数非空（退出码 3）：有可释放项但未加 --release。"
+            "没有「超过 N 分钟一律释放」的分支，证据缺一项就不释放。"
         )
     else:
-        print("CLEANUP: 没有可释放项，也没有证据不足的疑似（退出码 0）。")
-    return EXIT_FINDINGS if needs_human else EXIT_OK
+        print(
+            "CLEANUP: 主数为空（退出码 0）。UNDECIDABLE / SUSPECT 只报告，"
+            "不代表需要处理。"
+        )
+    return (
+        EXIT_DENIED if failed
+        else EXIT_FINDINGS if groups["releasable"] and not release
+        else EXIT_OK
+    )
+
+
+def _suspect_hint(row: Dict[str, Any]) -> str:
+    """按缺口给出补证据的方向；不替人做判断。"""
+    bad = {name for name, item in row["evidence"].items() if item["status"] != "PASS"}
+    hints: List[str] = []
+    if "holder" in bad:
+        hints.append("核对 pid 与创建时刻；无法核对时等 TTL 到期后由持有者 release")
+    if "content" in bad:
+        item = row["evidence"]["content"]
+        detail = str(item.get("detail") or "")
+        if item["status"] == "FAIL":
+            hints.append("内容与基线不符：先人工确认改动归属，不能自动释放")
+        elif "不存在" in detail:
+            hints.append("文件已不存在：先确认删除是否属于在途工作，再决定 release")
+        elif "读不到" in detail:
+            hints.append("文件读不到：先确认路径/权限，再复核内容")
+        elif "不在 git 跟踪下" in detail:
+            hints.append("未跟踪文件无法用 git 推导：确认未被改动后 release 并重新 claim"
+                         "（新 claim 会记 content_sha256）")
+        elif "工作区有未提交改动" in detail:
+            hints.append("工作区有未提交改动：先收掉或确认归属，再复核")
+        else:
+            hints.append("确认文件未被改动后 release 并重新 claim"
+                         "（新 claim 会记 content_sha256）")
+    if "no_inflight" in bad:
+        hints.append("先收掉工作区未提交改动，或确认归属后再复核")
+    return "；".join(hints)
 
 
 # ---------------------------------------------------------------------------

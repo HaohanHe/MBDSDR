@@ -2476,6 +2476,7 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `docs/code-guards.md` | 清理线/6ae85f56（D4 新增「复合入口」小节：batch_close 单列不计 A/B/C，并记 rc=1 启发式长期待办） | 2026-11-14 12:27 | 本笔 |
 | `scripts/safe_commit.py` | 用例随闸线/6ae85f56（修 _carried_foreign 判据：本笔 diff vs HEAD 的新增/删除行，空行块与已落库块不再误报） | 2026-11-14 12:28 | 本笔 |
 | `tests/test_safe_commit_foreign_at_declare.py` | 用例随闸线/6ae85f56（反证用例：空行块单独提交不触发、HEAD 推进后已落库块不被误报） | 2026-11-14 12:28 | 本笔 |
+| `scripts/file_claim.py` | 清理线/6ae85f56（cleanup-stale 分三堆：待办只算可释放未释放；UNDECIDABLE 只计数/趋势不改退出码） | 2026-11-14 12:33 | 本笔 |
 
 > 上表各行均由 `claim` 台账推导：owner 原文与 `acquired_at` 直接取自台账，
 > 目的优先用台账里的 `claim_reason`，没有就如实写「未声明」，不补编。时间列只是
