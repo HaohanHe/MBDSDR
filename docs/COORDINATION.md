@@ -2317,6 +2317,8 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `desktop/weather_panel.py` | UI防呆线/6ae85f56（D4：气象历史产物列表补 itemActivated（回车预览，保留单击）） | 2026-11-14 11:18 | 本笔 |
 | `desktop/satellite_image_panel.py` | UI防呆线/6ae85f56（D4：卫星图像历史列表补 itemActivated（回车预览，保留单击）） | 2026-11-14 11:18 | 本笔 |
 | `tests/test_list_keyboard_activation.py` | UI防呆线/6ae85f56（D1-D4 判据：回车激活（反证已跑：换回 itemDoubleClicked/删连接后 5 条全红）） | 2026-11-14 11:18 | 本笔 |
+| `scripts/audit_claim_lines.py` | 收尸线/6ae85f56（按规则生效时点分段，两段各自分母/缺口率） | 2026-11-14 11:20 | 本笔 |
+| `tests/test_claim_line_trailer.py` | 收尸线/6ae85f56（分段正反例 + owner 后缀归一） | 2026-11-14 11:20 | 本笔 |
 | `mbdsdr_ai/rtklib_adapter.py` | 时空核对线/timeline-now（A1 删除 Klobuchar 固定典型系数兜底：缺广播参数返回 None（uncorrected）） | 2026-11-14 11:20 | 本笔 |
 | `tests/test_klobuchar_no_default.py` | 时空核对线/timeline-now（A1 反证：退回典型系数必须红） | 2026-11-14 11:20 | 本笔 |
 | `desktop/bookmark_panel.py` | UI防呆线/6ae85f56（C1-C5：添加/编辑/删除/导入/导出失败改三段式（发生了什么/原因/下一步）） | 2026-11-14 11:20 | 本笔 |

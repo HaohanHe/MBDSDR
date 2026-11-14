@@ -204,7 +204,7 @@ def test_audit_reports_three_buckets_and_counter_evidence(tmp_path: Path) -> Non
     }, ensure_ascii=False), encoding="utf-8")
 
     proc = subprocess.run(
-        [sys.executable, str(AUDIT)], cwd=repo, env=_env(repo, locks),
+        [sys.executable, str(AUDIT), "--rule-since", "0"], cwd=repo, env=_env(repo, locks),
         capture_output=True, text=True, encoding="utf-8", timeout=120)
     out = proc.stdout + proc.stderr
     assert proc.returncode == 0, out
@@ -215,3 +215,100 @@ def test_audit_reports_three_buckets_and_counter_evidence(tmp_path: Path) -> Non
     assert sha_bad[:12] in out, out
     assert "行名不在台账期望里：假线" in out, out
     assert "甲线" in out and "假线" in out, out
+
+
+def test_rule_boundary_separates_pre_and_post_gaps(tmp_path: Path) -> None:
+    """规则生效前无行不计缺口；生效后无行必须计缺口。
+
+    判据：同一份台账与两笔样本，只改 ``--rule-since``：
+      * 分段跑（时点落在两笔之间）→ 前段 0 缺口、后段 1 缺口；
+      * 合并成一类（时点设为 0，全部算生效后）→ 2 缺口。
+    合并后前段样本被误算成缺口，即「去掉分段该判据必须红」的反证。
+    """
+    repo = _repo(tmp_path)
+    locks = tmp_path / "locks"
+    now = time.time()
+    start, end = now - 400.0, now + 1000.0
+
+    sha_pre = _commit(repo, "feat: before rule, no line", now - 300.0)
+    sha_post = _commit(repo, "feat: after rule, no line", now - 100.0)
+
+    (locks).mkdir(parents=True, exist_ok=True)
+    (locks / "claims.json").write_text(json.dumps({
+        "version": 1,
+        "claims": {
+            "a.py": {
+                "path": "a.py",
+                "current": None,
+                "history": [{
+                    "owner": OWNER,
+                    "acquired_at": start,
+                    "released_at": end,
+                    "last_heartbeat_at": start,
+                }],
+            }
+        },
+    }, ensure_ascii=False), encoding="utf-8")
+
+    def run(since: float) -> str:
+        proc = subprocess.run(
+            [sys.executable, str(AUDIT), "--rule-since", str(since)],
+            cwd=repo, env=_env(repo, locks), capture_output=True, text=True,
+            encoding="utf-8", timeout=120)
+        assert proc.returncode == 0, proc.stdout + proc.stderr
+        return proc.stdout
+
+    segmented = run(now - 200.0)
+    assert "分段依据：命令行 --rule-since" in segmented, segmented
+    assert "【生效前】" in segmented and "【生效后】" in segmented, segmented
+    pre_part, post_part = segmented.split("【生效后】", 1)
+    assert "未计入缺口" in pre_part, pre_part
+    assert sha_pre[:12] not in pre_part, pre_part
+    assert "1 笔  ← 缺口" in post_part, post_part
+    assert "缺口率：1/1" in post_part, post_part
+    assert sha_post[:12] in post_part, post_part
+    assert "合并总计：" not in segmented, segmented  # 只有声明，没有合并数
+
+    merged = run(0)
+    assert "2 笔  ← 缺口" in merged, merged
+    assert "缺口率：2/2" in merged, merged
+    assert sha_pre[:12] in merged, merged   # 合并后旧样本被误算成缺口
+    assert "1 笔  ← 缺口" not in merged, merged
+
+
+def test_owner_suffix_is_normalized_to_line_name(tmp_path: Path) -> None:
+    """写成 `线名/会话短号` 仍归同一条线；不能误报成「与台账不符」。"""
+    repo = _repo(tmp_path)
+    locks = tmp_path / "locks"
+    now = time.time()
+    start, end = now - 50.0, now + 1000.0
+    _commit(repo, f"feat: owner form\n\nclaim-line: {OWNER}", now - 10.0)
+
+    locks.mkdir(parents=True, exist_ok=True)
+    (locks / "claims.json").write_text(json.dumps({
+        "version": 1,
+        "claims": {
+            "a.py": {
+                "path": "a.py",
+                "current": None,
+                "history": [{
+                    "owner": OWNER,
+                    "acquired_at": start,
+                    "released_at": end,
+                    "last_heartbeat_at": start,
+                }],
+            }
+        },
+    }, ensure_ascii=False), encoding="utf-8")
+
+    proc = subprocess.run(
+        [sys.executable, str(AUDIT), "--rule-since", "0"], cwd=repo,
+        env=_env(repo, locks), capture_output=True, text=True, encoding="utf-8",
+        timeout=120)
+    out = proc.stdout + proc.stderr
+    assert proc.returncode == 0, out
+    assert "行与台账相符" in out and " 1 笔" in out, out
+    assert "这行与台账不符" in out and " 0 笔" in out, out
+    assert "按线名归一" in out, out
+
+
