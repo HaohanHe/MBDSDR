@@ -493,6 +493,34 @@ skyfield 参考：首场峰值 5.025°（贴 5° 门限的掠射场）
   差 ≤0.01°、AOS/LOS ≤1.5 s；把门限抬到 5.0112° 时仍 0 检出（证明确实没有
   放低门限）。本条目**不因新用例转绿**：原 NOAA-19 场的 TLE/观测时刻未入库，
   `el_err_33591`/`rise_err_33591` 无法复跑，仍需硬件验收线按原 TLE 复核。
+- **2026-11-14 原场溯源结论：原始素材已不可得。** 检索范围与结果：
+  ① 全仓检索 `33591`/`NOAA-19` 只命中 TLE 数据文件与源码默认值，没有 R5 运行产物；
+  ② `git log --all -S "5.025"` / `-S "31991"` 只命中本台账文字本身，没有任何带
+  TLE+观测时刻的输出；`git log --all -S "1 33591U"` 命中的都是 TLE 数据文件；
+  ③ 已删文件历史（`--diff-filter=D`，路径/内容含 `33591`）为空，`output/` 与
+  `.tmp*`/`.locks` 各 worktree 副本里也只有同一份源码与台账；
+  ④ 根因：`scripts/hw_acceptance/ring5_satellite_passes.py` 每次
+  `fetch_tle_record(norad, max_age_hours=24.0)` 现取 TLE、窗口起点取
+  `time.time()`，运行结果不落库。原场的 TLE 与时刻**无法复原**。
+- **2026-11-14 替代场（替代场，不是原场）**：用仓库历史里真实出现过的
+  NOAA-19 TLE（epoch `26268.85039999`，`mbdsdr_ai/sat_tracker.py` 的
+  `2a4a87d9` 版本）加原站点 45°N/120°E/200 m，造一个等效掠射场：
+  2026-10-04 05:26:48Z 峰值 **5.0027°**、过 5° 门限约 11 s；60 s 网格端点
+  最大 4.9896°、30 s 单元中点最大 4.9740°——旧「只探中点」实现 0 检出。
+  **明确标注这是替代场，不宣称还原了原场。**
+- **检出判据（替代场）**：`tests/test_grazing_pass_detection.py` 新增 4 条
+  （`test_noaa19_substitute_case_is_real_and_narrower_than_one_coarse_cell`、
+  `test_noaa19_coarse_grid_and_midpoints_stay_below_gate`、
+  `test_predict_passes_detects_noaa19_substitute_grazing_pass`、
+  `test_noaa19_gate_not_relaxed`）：固定 TLE + 固定 24 h 窗口（起点
+  2026-10-04T00:00:00Z），要求该场恰好检出 1 次，峰值与 1 s 参照差 ≤0.01°、
+  AOS/LOS ≤1.5 s；门限抬到 5.0077° 时 0 检出。门限仍 5.0°、二分容差仍 0.5 s。
+- **反证实测（2026-11-14）**：把擦边补点临时改回「只探单元中点」后，本文件
+  `2 failed, 5 passed`——ISS 场与 NOAA-19 替代场两条检出用例同时红（均为
+  0 次）；恢复 2 s 细分后 `7 passed`。
+- **口径**：替代场判据绿 ≠ K12 转绿。原场 `el_err_33591`/`rise_err_33591`
+  仍不可复跑；本条继续以「原场素材不可得 + 替代场已过判据」打开，等硬件
+  验收线按真实 TLE 复核后再定。
 - **首次记录**：2026-11-09 22:46。
 
 ---
