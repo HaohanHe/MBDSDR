@@ -299,6 +299,20 @@ def _build_dialog_class():
             self._after_change()
 
         def _on_reset_all(self) -> None:
+            """全部恢复默认是批量不可撤销动作：先确认，默认「取消」。
+
+            误点一次就清掉用户所有自定义键位，且没有撤销入口；确认框
+            必须写明影响多少条、不能撤销。破坏性确认默认 No 的口径见
+            ``docs/ux-audit.md``「确认框默认按钮口径」。
+            """
+            count = sum(1 for s in SHORTCUTS if is_overridden(s.id))
+            ans = QMessageBox.question(
+                self, "全部恢复默认？",
+                f"将清掉 {count} 条自定义键位，全部回到出厂设置。\n\n"
+                "此操作不能撤销，确认后立即生效。",
+                QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+            if ans != QMessageBox.Yes:
+                return
             clear_all_overrides()
             self._after_change()
 
