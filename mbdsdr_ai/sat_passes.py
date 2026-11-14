@@ -507,8 +507,11 @@ def predict_passes(
         return []
 
     # a2) 擦边补点：60s 网格可能整段吞掉「峰值刚好越门限、时长 <60s」的
-    # 过境（两端都低于 min_alt，峰在中间）。只对地平附近、离门限不远的区间
-    # 探测中点；命中就把中点插进 coarse，后面的分段/二分/细扫原样复用。
+    # 过境（两端都低于 min_alt，峰在中间）。只对地平附近、离门限不远的区间，
+    # 按 PASS_FINE_STEP_S 细分找峰——**不能只探单元中点**：掠射峰不一定落在
+    # 中点（实测 ISS 场峰值 5.0062°、过门限 13 s，峰距单元中点 10.9 s，
+    # 中点仰角 4.998° < 5°，旧实现整场漏检）。命中就把峰点插进 coarse，
+    # 后面的分段/二分/细扫原样复用；**门限与二分容差都不动**。
     probe_floor = max(0.0, min_alt - PASS_EDGE_PROBE_MARGIN_DEG)
     extra: List[Tuple[float, float]] = []
     for k in range(len(coarse) - 1):
@@ -520,10 +523,26 @@ def predict_passes(
             continue
         if max(el0, el1) < probe_floor:           # 离得太远/还在地平下
             continue
-        mid_s = 0.5 * (sec0 + sec1)
-        el_mid = el_at_s(mid_s)
-        if el_mid is not None and el_mid >= min_alt:
-            extra.append((mid_s, el_mid))
+        n_sub = int(round((sec1 - sec0) / PASS_FINE_STEP_S))
+        sub_secs = [sec0 + m * PASS_FINE_STEP_S for m in range(1, n_sub)]
+        sub_els: Optional[List[Optional[float]]] = None
+        if batch_alt is not None:
+            try:
+                got = batch_alt(sub_secs)
+                if len(got) == len(sub_secs):
+                    sub_els = list(got)
+            except Exception:
+                sub_els = None
+        if sub_els is None:
+            sub_els = [el_at_s(s) for s in sub_secs]
+        best_s: Optional[float] = None
+        best_el: Optional[float] = None
+        for s, e in zip(sub_secs, sub_els):
+            if e is not None and e >= min_alt and (
+                    best_el is None or e > best_el):
+                best_s, best_el = s, e
+        if best_s is not None and best_el is not None:
+            extra.append((best_s, best_el))
     if extra:
         coarse.extend(extra)
         coarse.sort(key=lambda item: item[0])
