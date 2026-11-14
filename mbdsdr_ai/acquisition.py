@@ -31,6 +31,7 @@ import math
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
+from . import space_weather
 from .tool_registry import ToolResult, clean_exc
 
 # 物理常数
@@ -632,10 +633,6 @@ DIAGNOSIS: List[Dict[str, Any]] = [
             "馈线完整性：换线复测，1.69 GHz 每米 0.5–1 dB 损耗",
             "SDR 识别：设备列表为空时重装 Zadig 驱动",
             "软件配置：SDR 采样率/增益/频率中心与实际链路一致",
-            "频段-传播：先按频段判断可通性——VHF/UHF（137/145/435 MHz 等）以视距为主，"
-            "受地平线与遮挡限制，天线高度/周围建筑常比增益更关键；1.7 GHz 段雨衰、"
-            "植被与墙体衰减更明显；HF 依赖电离层反射，昼夜与季节变化大。"
-            "本条只提示先排除传播条件，判据仍是链路预算与实测 SNR",
         ],
     },
     {
@@ -646,8 +643,6 @@ DIAGNOSIS: List[Dict[str, Any]] = [
             "前端噪声：LNA 紧贴馈源（<30 cm），馈线尽量短（<5 m）",
             "电磁环境：避开基站/WiFi 干扰，或加 L 波段带通滤波器",
             "软件增益：增益不是越大越好，过高会抬底噪反降 SNR",
-            "频段-传播：低频绕射强、高频更易被多径与遮挡；同一位置换频段仍无改善时，"
-            "优先查遮挡与天线高度，而不是继续加增益",
         ],
     },
     {
@@ -680,8 +675,25 @@ DIAGNOSIS: List[Dict[str, Any]] = [
 ]
 
 
+def _resolve_propagation(args) -> tuple:
+    """取传播条件：显式快照回放 > 新鲜快照 > 现采。
+
+    返回 ``(snapshot_or_None, path, note)``。取不到时 snapshot 为 ``None``，
+    由 :func:`space_weather.assess` 统一输出「未知（原因）」，这里不补默认值。
+    """
+    supplied = args.get("propagation")
+    if isinstance(supplied, dict):
+        if supplied.get("samples"):
+            return supplied, "", "快照回放"
+        return None, "", "传入的快照为空"
+    try:
+        return space_weather.snapshot_for_diagnosis(allow_live=bool(args.get("live", True)))
+    except Exception as e:
+        return None, "", f"采集失败：{type(e).__name__}: {e}"
+
+
 def _fe_diagnose(args):
-    """前端故障诊断：症状 → 排查步骤（按环节顺序）。"""
+    """前端故障诊断：症状 → 排查步骤（按环节顺序）+ 实时传播条件。"""
     try:
         sym = str(args.get("symptom", "")).strip()
         if not sym:
@@ -698,11 +710,18 @@ def _fe_diagnose(args):
                 data={"known_symptoms": [d["symptom"] for d in DIAGNOSIS]},
             )
         d = hits[0]
+        snap, snap_path, snap_note = _resolve_propagation(args)
+        assessment = space_weather.assess(snap)
+        steps = "\n".join(f"{i+1}. {s}" for i, s in enumerate(d["steps"]))
+        prop_text = space_weather.format_propagation_section(
+            assessment, snapshot_path=snap_path, note=snap_note)
         return ToolResult(
             success=True,
-            content=f"症状「{sym}」→ 排查环节（按顺序）：\n"
-                    + "\n".join(f"{i+1}. {s}" for i, s in enumerate(d["steps"])),
+            content=f"症状「{sym}」→ 排查环节（按顺序）：\n{steps}\n\n{prop_text}",
             data={"symptom": d["symptom"], "steps": d["steps"],
+                  "propagation": assessment,
+                  "snapshot_path": snap_path,
+                  "snapshot_note": snap_note,
                   "other_symptoms": [x["symptom"] for x in DIAGNOSIS
                                      if x["symptom"] != d["symptom"]]},
         )
@@ -980,9 +999,18 @@ def register_acquisition_tools(registry) -> None:
     R(
         name="fe_diagnose",
         description="前端故障诊断：症状（无信号/SNR 极低/图像条纹/全黑全白/设备列表为空）"
-                    "→ 按环节排序的排查步骤。原子积木。",
+                    "→ 按环节排序的排查步骤，并附实时传播条件（Kp/F10.7/太阳黑子数/"
+                    "X 射线/本地天气，每项带观测时刻与来源；取不到就写未知，不按平静处理）。"
+                    "原子积木。",
         parameters={"type": "object", "properties": {
             "symptom": {"type": "string"},
+            "propagation": {
+                "type": "object",
+                "description": "回放用快照（space_weather 快照 JSON）。传入则不再联网，"
+                               "同一快照两次回放结论一致。",
+            },
+            "live": {"type": "boolean", "default": True,
+                     "description": "没有新鲜快照时是否现采；false 时只用已有快照或报未知"},
         }, "required": ["symptom"]},
         handler=_fe_diagnose, category="acquisition",
     )
