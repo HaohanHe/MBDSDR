@@ -209,13 +209,87 @@ def test_missing_ledger_reports_not_checked_not_clean(tmp_path: Path) -> None:
     """台账不存在时不许显示「0 违规」冒充清白：必须报未审计。"""
     repo = _repo(tmp_path)
     locks = tmp_path / "locks"       # 故意不写 claims.json
+    trend = tmp_path / "trend.jsonl"
     _commit(repo, {"a.py": "x = 1\n"}, "feat: no ledger\n\nclaim-line: 甲线",
             time.time() - 10.0)
 
-    proc = _run(repo, locks, "--range", "HEAD", "--rule-since", "0", "--json")
+    proc = _run(repo, locks, "--range", "HEAD", "--rule-since", "0", "--json",
+                "--trend", str(trend))
     assert proc.returncode == 0, proc.stdout + proc.stderr
     data = json.loads(proc.stdout)["checks"]
     assert data["claim_coverage"]["status"] == "not_checked", data
     assert data["claim_line"]["status"] == "not_checked", data
-    text = _run(repo, locks, "--range", "HEAD", "--rule-since", "0")
+    text = _run(repo, locks, "--range", "HEAD", "--rule-since", "0",
+                "--trend", str(trend))
     assert "未审计" in text.stdout, text.stdout
+
+    # 趋势里也不许把「未审计」记成 0。
+    row = json.loads(trend.read_text(encoding="utf-8").splitlines()[0])
+    assert row["violations"]["claim_coverage"] is None, row
+    assert row["violations"]["claim_line"] is None, row
+
+
+# ---------------------------------------------------------------------------
+# 趋势：键 = 区间 + 判据版本
+# ---------------------------------------------------------------------------
+
+
+def _rows(trend: Path) -> list[dict]:
+    return [json.loads(line) for line in
+            trend.read_text(encoding="utf-8").splitlines() if line.strip()]
+
+
+def test_same_range_twice_keeps_one_row(tmp_path: Path) -> None:
+    """判据：同一区间跑两次 → 只留一行（把去重键去掉，本测试必红）。"""
+    repo, locks, sha = _four_samples(tmp_path)
+    trend = tmp_path / "trend.jsonl"
+
+    for _ in range(2):
+        proc = _run(repo, locks, "--range", "HEAD", "--rule-since", "0",
+                    "--trend", str(trend))
+        assert proc.returncode == 0, proc.stdout + proc.stderr
+
+    rows = _rows(trend)
+    assert len(rows) == 1, rows
+    row = rows[0]
+    assert row["criteria"].startswith("v1:"), row
+    assert row["commits"] == 5, row
+    assert row["range"]["from"]["sha"] == sha["base"], row
+    assert row["range"]["to"]["sha"] == sha["deleted"], row
+    assert row["violations"] == {"claim_coverage": 1, "append_only": 1,
+                                 "claim_line": 1}, row
+    assert row["denominators"] == {"claim_coverage": 5, "append_only": 2,
+                                   "claim_line": 5}, row
+    assert row["lines"]["distinct"] == 1, row
+
+
+def test_new_criteria_version_starts_another_row(tmp_path: Path) -> None:
+    """判据：同区间换判据版本 → 另起一行，且两行可区分。"""
+    repo, locks, _ = _four_samples(tmp_path)
+    trend = tmp_path / "trend.jsonl"
+
+    for version in ("v1-probe-a", "v1-probe-b", "v1-probe-a"):
+        proc = _run(repo, locks, "--range", "HEAD", "--rule-since", "0",
+                    "--trend", str(trend), "--criteria-version", version)
+        assert proc.returncode == 0, proc.stdout + proc.stderr
+
+    rows = _rows(trend)
+    assert [r["criteria"] for r in rows] == ["v1-probe-a", "v1-probe-b"], rows
+    assert rows[0]["range_key"] == rows[1]["range_key"], rows
+
+
+def test_trend_report_groups_by_version_with_denominator(tmp_path: Path) -> None:
+    """趋势文件要能读：按判据版本分组，比率带分母，并写明下降≠变好的限制。"""
+    repo, locks, _ = _four_samples(tmp_path)
+    trend = tmp_path / "trend.jsonl"
+    for version in ("v1-probe-a", "v1-probe-b"):
+        _run(repo, locks, "--range", "HEAD", "--rule-since", "0",
+             "--trend", str(trend), "--criteria-version", version)
+
+    proc = _run(repo, locks, "--trend-report", "--trend", str(trend))
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    out = proc.stdout
+    assert "判据版本 v1-probe-a" in out and "判据版本 v1-probe-b" in out, out
+    assert "① 1/5" in out and "③ 1/2" in out and "④ 1/5" in out, out
+    assert "比率必须带分母" in out, out
+    assert "不等于实践变好" in out, out

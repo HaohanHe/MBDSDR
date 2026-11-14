@@ -911,6 +911,7 @@ pre-commit，钩子里没有「这笔是裸提交」的标记），所以做成*
 python scripts/audit_bare_commits.py                    # 规则生效以来
 python scripts/audit_bare_commits.py --range A..B       # 指定区间
 python scripts/audit_bare_commits.py --json --quiet     # 机器可读 / 只给计数
+python scripts/audit_bare_commits.py --trend-report     # 按判据版本看比率
 ```
 
 **只报告，不拦截，退出码恒 0。** 拦提交是 pre-commit 的事，这条入口的用途是
@@ -947,4 +948,16 @@ python scripts/audit_bare_commits.py --json --quiet     # 机器可读 / 只给�
 ① 一笔（`docs/axioms.md`、`tools/axioms/current_stats.py`、
 `tests/test_axioms_doc_current_stats.py` 当时无 claim）。数字随区间变，
 复跑取当次输出。
+
+**趋势**：每次跑都往 `<locks>/bare_commit_trend.jsonl` 追加一行（与
+`coord_check_trend.jsonl` 同一放置、同一逐行 JSON 格式），记区间起止、总笔数、
+①/③/④ 的违规数与**各自分母**、涉及线名去重数、判据版本。键 = 区间（首末提交
+sha）+ 判据版本：同一区间重复跑只留一行；判据版本变了另起一行。改了任一判据
+的行为必须升 `CRITERIA_BASE_VERSION`，否则两套口径会在趋势里串成一段。
+`--trend-report` 按判据版本分组，给每行的「违规数/已审计数」。
+
+**比例怎么读**：违规笔数下降**不等于**实践变好——可能只是裸提交变少、提交总量
+变少，分子自然小。所以趋势只给「该项违规数/该项已审计数」，不给总违规率；
+汇总分母是各行分母之和，区间重叠会重复计入，只看方向；不同判据版本的两段
+不可直接比较（判据放松也会让分子变小）。
 

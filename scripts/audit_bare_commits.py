@@ -43,6 +43,21 @@
     python scripts/audit_bare_commits.py --range 11588844..HEAD
     python scripts/audit_bare_commits.py --since "2026-11-14 11:13" --until "2026-11-14 12:00"
     python scripts/audit_bare_commits.py --json --quiet   # 机器可读，只给计数
+    python scripts/audit_bare_commits.py --trend-report   # 按判据版本看比率
+
+趋势（不是每次都给一个新的快照）
+--------------------------------
+
+每次审计往 ``<台账目录>/bare_commit_trend.jsonl`` 追加**一行**（逐行 JSON，与
+``coord_check_trend.jsonl`` 同一放置与格式）：区间起止、提交笔数、①/③/④ 的
+违规数与各自分母、涉及线名去重计数、判据版本。
+
+**键 = 区间（首末提交 sha）+ 判据版本**：同一区间重复跑只留一行；判据版本变了
+（新增判据或改了行为）另起一行，两段不混。
+
+**限制**：违规笔数下降不等于实践变好——可能只是裸提交变少、或提交总量变少。
+所以每行都存分母，比率只按本项自己的分母算，不给「总违规率」；跨判据版本
+不可直接比较。
 
 退出码恒 0：只报告、不拦截。发现违规也返回 0——它的用途是「让人看见」，
 不是「把提交挡在门外」；拦提交是 pre-commit 的事。
@@ -70,6 +85,15 @@ STATUS_NOT_CHECKED = "not_checked"
 
 #: 只许追加的文件。默认与 pre-commit 的 ④ 同一份文档（``MBDSDR_COORD_DOC`` 可覆盖）。
 APPEND_ONLY_DOC = cao.DEFAULT_DOC
+
+#: 判据版本：**改动任一判据的行为都要升 ``CRITERIA_BASE_VERSION``**。
+#: 不升版本的话，趋势文件里「同一版本下违规变少」会被误读成实践变好——实际可能
+#: 只是判据变松。``CRITERIA_ITEMS`` 进了版本串，新增/删除判据会自动改串。
+CRITERIA_BASE_VERSION = "v1"
+CRITERIA_ITEMS = ("claim-coverage", "append-only", "claim-line")
+
+#: 趋势文件（与 ``coord_check_trend.jsonl`` 同一位置、同一逐行 JSON 格式）。
+TREND_FILE = "bare_commit_trend.jsonl"
 
 
 def _git(*args: str) -> subprocess.CompletedProcess:
@@ -141,16 +165,17 @@ def check_claim_coverage(commits: List[Dict[str, Any]],
             covering = [it for it in intervals.get(path, ())
                         if it["start"] <= c["ct"] <= it["end"]]
             if not covering:
-                bad.append({"path": display.get(path, path),
+                bad.append({"path": display.get(path, path), "owners": [],
                             "reason": "提交时刻没有 claim 覆盖"})
                 continue
             if trailer:
                 own_lines = {line_name(it["owner"]) for it in covering}
                 if not (own_lines & set(trailer)):
-                    owners = "、".join(sorted({it["owner"] for it in covering}))
+                    owners = sorted({it["owner"] for it in covering})
                     bad.append({
                         "path": display.get(path, path),
-                        "reason": f"覆盖该路径的是他线 claim（{owners}），"
+                        "owners": owners,
+                        "reason": f"覆盖该路径的是他线 claim（{'、'.join(owners)}），"
                                   f"消息写的线名是「{'、'.join(trailer)}」",
                     })
         if bad:
@@ -172,9 +197,11 @@ def check_append_only(commits: List[Dict[str, Any]], doc: str) -> Dict[str, Any]
         if doc_key not in c["paths"]:
             continue
         checked += 1
+        lines = _trailer_names(c["msg"])
         target = _file_at(c["sha"], doc)
         if target is None:
             violations.append({"sha": c["sha"], "at": _iso(c["ct"]), "path": doc,
+                               "lines": lines,
                                "reason": "只许追加的文件被整档删除", "rows": []})
             continue
         parent = _parent_of(c["sha"])
@@ -187,11 +214,13 @@ def check_append_only(commits: List[Dict[str, Any]], doc: str) -> Dict[str, Any]
             missing = cao.removed_rows(base, target)
         except ValueError as exc:
             violations.append({"sha": c["sha"], "at": _iso(c["ct"]), "path": doc,
+                               "lines": lines,
                                "reason": f"§6.1 小节无法解析（可能连标题一起被删）：{exc}",
                                "rows": []})
             continue
         if missing:
             violations.append({"sha": c["sha"], "at": _iso(c["ct"]), "path": doc,
+                               "lines": lines,
                                "reason": "删除了只许追加的表格行", "rows": missing[:3],
                                "removed": len(missing)})
     return {"status": STATUS_CHECKED, "checked": checked,
@@ -238,6 +267,172 @@ def _line_violation(row: Dict[str, Any], kind: str) -> Dict[str, Any]:
     return {"sha": row["sha"], "at": _iso(row["ct"]), "kind": kind,
             "written": row["written"], "expected": row["expected"],
             "owners": row["owners"], "reason": row["reason"]}
+
+
+# ---------------------------------------------------------------------------
+# 趋势记录：键 = 区间 + 判据版本；同一键重复跑不重复计
+# ---------------------------------------------------------------------------
+
+
+def criteria_version(override: str = "") -> str:
+    return override or f"{CRITERIA_BASE_VERSION}:{'+'.join(CRITERIA_ITEMS)}"
+
+
+def read_trend(path: Path) -> List[Dict[str, Any]]:
+    """逐行 JSON；坏行跳过，不让一行脏数据把整份趋势读废。"""
+    if not path.exists():
+        return []
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        return []
+    rows: List[Dict[str, Any]] = []
+    for line in text.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            item = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(item, dict):
+            rows.append(item)
+    return rows
+
+
+def trend_row(commits: List[Dict[str, Any]], range_label: str,
+              cover: Dict[str, Any], line: Dict[str, Any],
+              append: Dict[str, Any], criteria: str) -> Dict[str, Any]:
+    """一次审计 → 一行趋势。比例只带本项自己的分母，不给「总违规率」。"""
+    oldest = commits[-1] if commits else None
+    newest = commits[0] if commits else None
+    range_key = (f"{oldest['sha']}..{newest['sha']}" if oldest and newest
+                 else f"empty:{range_label}")
+
+    def checked(result: Dict[str, Any], key: str = "checked") -> int:
+        if result.get("status") != STATUS_CHECKED:
+            return 0
+        return int(result.get(key) or 0)
+
+    def violated(result: Dict[str, Any]) -> Optional[int]:
+        """未审计 → None（不是 0：0 会被读成「清白」）。"""
+        if result.get("status") != STATUS_CHECKED:
+            return None
+        return int(result.get("violating") or 0)
+
+    post = line.get("post") if isinstance(line.get("post"), dict) else {}
+    denominators = {
+        "claim_coverage": checked(cover),
+        "append_only": checked(append),
+        "claim_line": int(post.get("checked") or 0),
+    }
+    violations = {
+        "claim_coverage": violated(cover),
+        "append_only": violated(append),
+        "claim_line": (int(post.get("violating") or 0)
+                       if line.get("status") == STATUS_CHECKED else None),
+    }
+    rates = {name: (round(violations[name] / denominators[name], 4)
+                    if violations[name] is not None and denominators[name] else None)
+             for name in denominators}
+
+    names: set[str] = set()
+    for item in cover.get("violations") or []:
+        for path_hit in item.get("paths") or []:
+            names.update(path_hit.get("owners") or [])
+    for item in (line.get("post") or {}).get("violations") or []:
+        names.update(item.get("written") or [])
+        names.update(item.get("expected") or [])
+    for item in append.get("violations") or []:
+        names.update(item.get("lines") or [])
+
+    def stamp(commit: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+        return ({"sha": commit["sha"], "at": _iso(commit["ct"])}
+                if commit else {"sha": None, "at": None})
+
+    return {
+        "at": time.time(),
+        "criteria": criteria,
+        "range_key": range_key,
+        "range": {"from": stamp(oldest), "to": stamp(newest), "label": range_label},
+        "commits": len(commits),
+        "violations": violations,
+        "denominators": denominators,
+        "rates": rates,
+        "lines": {"distinct": len(names), "names": sorted(names)},
+    }
+
+
+def append_trend(path: Path, row: Dict[str, Any]) -> Tuple[bool, str]:
+    for old in read_trend(path):
+        if (old.get("range_key") == row["range_key"]
+                and old.get("criteria") == row["criteria"]):
+            return False, (f"同一区间 + 同一判据版本已记过"
+                           f"（at={old.get('at')}），本笔不重复计")
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("a", encoding="utf-8") as fh:
+            fh.write(json.dumps(row, ensure_ascii=False) + "\n")
+    except OSError as exc:
+        return False, f"写入失败（{exc}），本次不留痕"
+    return True, "已追加一行"
+
+
+def _fmt_rate(value: Optional[int], denom: int) -> str:
+    return "未审计" if value is None else f"{value}/{denom}"
+
+
+def print_trend_report(path: Path) -> None:
+    rows = read_trend(path)
+    print(f"裸提交审计趋势：{path}（{len(rows)} 行）")
+    if not rows:
+        print("  还没有记录。跑一次审计即追加一行。")
+        return
+    groups: Dict[str, List[Dict[str, Any]]] = {}
+    for row in rows:
+        groups.setdefault(str(row.get("criteria") or "<未知>"), []).append(row)
+    for version, items in sorted(groups.items()):
+        items.sort(key=lambda r: float(r.get("at") or 0))
+        print()
+        print(f"判据版本 {version}：{len(items)} 个区间")
+        total_commits = 0
+        total_den = {k: 0 for k in ("claim_coverage", "append_only", "claim_line")}
+        total_vio = {k: 0 for k in total_den}
+        unchecked: set[str] = set()
+        all_lines: set[str] = set()
+        for row in items:
+            den = row.get("denominators") or {}
+            vio = row.get("violations") or {}
+            rng = row.get("range") or {}
+            frm = (rng.get("from") or {}).get("sha") or "?"
+            to = (rng.get("to") or {}).get("sha") or "?"
+            print(f"  {_iso(float(row.get('at') or 0))} | {frm[:7]}..{to[:7]}"
+                  f" | 提交 {row.get('commits', 0)} 笔"
+                  f" | ① {_fmt_rate(vio.get('claim_coverage'), den.get('claim_coverage', 0))}"
+                  f" | ③ {_fmt_rate(vio.get('append_only'), den.get('append_only', 0))}"
+                  f" | ④ {_fmt_rate(vio.get('claim_line'), den.get('claim_line', 0))}"
+                  f" | 涉及线 {(row.get('lines') or {}).get('distinct', 0)} 条")
+            total_commits += int(row.get("commits") or 0)
+            for key in total_den:
+                total_den[key] += int(den.get(key) or 0)
+                if vio.get(key) is None:
+                    unchecked.add(key)
+                else:
+                    total_vio[key] += int(vio.get(key) or 0)
+            all_lines.update((row.get("lines") or {}).get("names") or [])
+
+        def total(key: str) -> str:
+            text = f"{total_vio[key]}/{total_den[key]}"
+            return text + ("（含未审计行）" if key in unchecked else "")
+
+        print(f"  合计：提交 {total_commits} 笔；① {total('claim_coverage')}；"
+              f"③ {total('append_only')}；④ {total('claim_line')}；"
+              f"涉及线 {len(all_lines)} 条")
+        print("  汇总分母是各行分母之和；区间重叠时同一提交会重复计入，"
+              "只看方向，别当总体比例。")
+    print()
+    print("限制：违规笔数下降不等于实践变好——裸提交变少、提交总量变少都会让分子变小；")
+    print("      比率必须带分母（分母本身也会变）；判据版本不同时两段不可直接比较。")
 
 
 # ---------------------------------------------------------------------------
@@ -349,12 +544,24 @@ def main(argv: List[str] | None = None) -> int:
     ap.add_argument("--rule-since", default="",
                     help="显式指定 claim-line 规则生效时点（仅用于对照/测试）")
     ap.add_argument("--doc", default=APPEND_ONLY_DOC, help="只许追加的协调文档")
+    ap.add_argument("--trend", default="",
+                    help=f"趋势文件（默认 <台账目录>/{TREND_FILE}）")
+    ap.add_argument("--trend-report", action="store_true",
+                    help="只读趋势文件，按判据版本分组看比率，不跑审计")
+    ap.add_argument("--criteria-version", default="",
+                    help="显式指定判据版本（仅用于对照/回填；改了判据却没升版会串段）")
     ap.add_argument("--json", action="store_true", help="机器可读输出")
     ap.add_argument("--quiet", action="store_true", help="只打印逐项计数")
     args = ap.parse_args(argv)
 
     import file_claim as fc  # noqa: E402  （与 claim 工具同一处台账路径）
     registry = Path(args.registry) if args.registry else fc.REGISTRY_PATH
+    trend_path = Path(args.trend) if args.trend else registry.parent / TREND_FILE
+
+    if args.trend_report:
+        print_trend_report(trend_path)
+        return 0
+
     revs, range_label = _pick_revs(args)
     rule_at, rule_source = acl.resolve_rule(args.rule_since)
 
@@ -376,6 +583,9 @@ def main(argv: List[str] | None = None) -> int:
     line = (check_claim_line(commits, intervals, rule_at) if ledger_ok
             else {"status": STATUS_NOT_CHECKED, "reason": ledger_gap})
     append = check_append_only(commits, args.doc)
+    criteria = criteria_version(args.criteria_version)
+    trend = trend_row(commits, range_label, cover, line, append, criteria)
+    appended, trend_note = append_trend(trend_path, trend)
 
     if args.json:
         print(json.dumps({
@@ -386,6 +596,9 @@ def main(argv: List[str] | None = None) -> int:
             "rule_source": rule_source,
             "checks": {"claim_coverage": cover, "claim_line": line,
                        "append_only": append},
+            "trend": {"path": str(trend_path), "appended": appended,
+                      "note": trend_note, "criteria": criteria,
+                      "row": trend},
             "not_covered": [
                 "§11.3-①后半 他线在途 hunk 是否被带入",
                 "§11.3-② 本笔要用的 §6.1 行是否已在 HEAD",
@@ -409,6 +622,7 @@ def main(argv: List[str] | None = None) -> int:
     _print_item_line(line, rule_at, args.quiet)
 
     print()
+    print(f"趋势：{trend_path}（{trend_note}；判据版本 {criteria}）")
     print("小结：只报告，未拦截任何提交。第 ② 项与两处后半条不在机检范围，"
           "不得据此声称「四条的查过了」。")
     return 0
