@@ -36,7 +36,7 @@ python scripts/axioms.py --prioritize \
 
 ### 当前计数（工具生成，按基准 sha 钉住，勿手改）
 
-<!-- axioms-current-stats:begin（由 python -m tools.axioms.current_stats 生成；基准 e927591f64217502bf703c6f7abf48023875e005 生成于 2026-11-14T12:24:38+08:00） -->
+<!-- axioms-current-stats:begin（由 python -m tools.axioms.current_stats 生成；基准 8be5af66496d7010d1ec0715a2622b36676eb821 生成于 2026-11-14T12:27:51+08:00） -->
 违规 656 条：应修 72，复核 425，豁免 159。
 D1 7 / D2 171 / D3 248 / D4 28 / D5 138 / D6 64 / D7 0 / D8 0。
 校验指纹 sha256:410ffc3302c436065d9e1b8a414891fa6f13e502341c4e1d24719c0274f96f11
