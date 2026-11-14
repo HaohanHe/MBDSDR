@@ -201,6 +201,19 @@ from .doppler_compensation import DopplerCompensationError
 from . import doppler_link
 
 
+# PPM 校正的**物理可信域**（±ppm）。语义边界三件事说清，互不替代：
+#   - 本常量：物理上还可能是「参考晶振偏差」的量级。RTL2832U 的 28.8 MHz
+#     晶振即使老化+温漂也在 ±200 ppm 内；越过 ±1000 ppm（100 MHz 处
+#     ±100 kHz）就已是调谐错误，而不是晶振校正。
+#   - UI 范围（desktop/control_panel.py 的 ppm_spin ±1000）：人机交互
+#     舒适区，数值恰好相同但不是本常量的来源，也不反向依赖它。
+#   - 校准置信域（ppm_calibration.clamp_ppm ±200）：kalibrate 口径，
+#     「这一次估计值可信」的范围，比物理域更窄。
+#   - 驱动/外部应用限制：librtlsdr 的 rtlsdr_set_freq_correction 只收
+#     int，不做任何量级判断，所以后端必须自己挡住。
+PPM_PHYSICAL_LIMIT = 1000
+
+
 @dataclass
 class SDRDevice:
     """SDR 设备信息。"""
@@ -2704,8 +2717,18 @@ class RTLSDRBackend(SDRBackend):
         （rtlsdr.py:239-242），所以这里优先走低层 ctypes 调用、把 -2 视作
         "无需改动"的成功；低层句柄不可用（如测试 FakeRtlSdr 注入）时退回
         Python 属性赋值。
+
+        ``|ppm|`` 超过 ``PPM_PHYSICAL_LIMIT`` 时按边界钳位并记 warning：
+        物理域之外的量不是「晶振校正」而是调谐错误（见常量注释；与 UI
+        范围、校准置信域、驱动限制都不是一回事）。返回值只表示「是否已
+        成功下发（含钳位后的值）」，回读请查 ``self._ppm``。
         """
-        self._ppm = int(ppm)
+        requested = int(ppm)
+        applied = max(-PPM_PHYSICAL_LIMIT, min(PPM_PHYSICAL_LIMIT, requested))
+        if applied != requested:
+            logger.warning("PPM 请求 %+d 超出物理可信域 ±%d ppm，按 %+d 下发",
+                           requested, PPM_PHYSICAL_LIMIT, applied)
+        self._ppm = applied
         if not self._sdr:
             return True
         # 路径 A：低层 ctypes 直接下发，容忍 -2（与 _reset_rtl_buffer 同手法）。
@@ -2714,13 +2737,13 @@ class RTLSDRBackend(SDRBackend):
             dev_p = getattr(self._sdr, "dev_p", None)
             if dev_p is not None:
                 # 返回值（含 -2 "already set"）仅记录、不抛错、不 close。
-                librtlsdr.rtlsdr_set_freq_correction(dev_p, int(ppm))
+                librtlsdr.rtlsdr_set_freq_correction(dev_p, applied)
                 return True
         except Exception:
             pass
         # 路径 B：无 ctypes 句柄（FakeRtlSdr / RtlSdrAio 无 dev_p）——走属性赋值。
         try:
-            self._sdr.freq_correction = int(ppm)
+            self._sdr.freq_correction = applied
             return True
         except Exception:
             return False

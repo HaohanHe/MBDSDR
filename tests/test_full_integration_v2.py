@@ -328,7 +328,8 @@ def test_decoders_module(result, agent):
     result.record("内置 TLE 数量 >= 5", len(BUILTIN_TLE) >= 5, f"实际 {len(BUILTIN_TLE)}")
 
     try:
-        sats = list_visible_satellites(observer_lat=45.0, observer_lon=120.0, observer_alt=0.25)
+        sats = list_visible_satellites(observer_lat=45.0, observer_lon=120.0,
+                                       observer_alt=0.25, min_elevation=0.0)
         result.record("list_visible_satellites", isinstance(sats, list))
     except Exception as e:
         result.record("list_visible_satellites", False, str(e))

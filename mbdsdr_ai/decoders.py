@@ -258,7 +258,8 @@ def list_visible_satellites(
     observer_lat: float,
     observer_lon: float,
     observer_alt: float = 0.0,
-    min_elevation: float = 0.0,
+    *,
+    min_elevation: float,
     satellite_type: str = "all",
     timestamp: float = None,
 ) -> List[SatellitePass]:
@@ -266,6 +267,10 @@ def list_visible_satellites(
     列出当前天空中可见的卫星。
 
     计算所有内置卫星的位置，筛选仰角大于 min_elevation 的卫星。
+    ``min_elevation`` 是**必传关键字**：本模块不再替调用方决定仰角门
+    （历史上默认 0.0，等于留了一个没人认领的第三道门）。天空图枚举
+    报 0°，桌面过境列表报 ``settings.effective_pass_visibility_gate_deg()``，
+    移动端报自己的 effective 值——门必须由调用方声明。
     timestamp: Unix 时间戳（秒，UTC）。None 时用 time.time()（向后兼容）。
               时间穿梭时由 TimeEngine.now_unix() 注入。
     """

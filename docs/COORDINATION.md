@@ -2453,6 +2453,8 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `tests/test_safe_commit_line_range.py` | 用例随闸线/6ae85f56（补 --declare 前提（3 条既有红）） | 2026-11-14 12:04 | 本笔 |
 | `tests/test_safe_commit_exclude.py` | 用例随闸线/6ae85f56（补 §6.1 登记面前提（5 条既有红）） | 2026-11-14 12:06 | 本笔 |
 | `tests/test_safe_commit_declaration.py` | 用例随闸线/6ae85f56（补 §6.1 登记面前提（1 条既有红）） | 2026-11-14 12:06 | 本笔 |
+| `tests/test_device_panel_writeback_truth.py` | 冗余线/6ae85f56（§6.1 补登记（pre-commit ④ 拦截）） | 2026-11-14 12:11 | 本笔 |
+| `docs/pending-patches/2026-11-14-device-panel-dev-combo-lock-handoff.md` | 冗余线/6ae85f56（§6.1 补登记（pre-commit ④ 拦截）） | 2026-11-14 12:11 | 本笔 |
 | `scripts/batch_close.py` | 工具化线/6ae85f56（新增批次收尾聚合入口；只聚合三道检查，不改判据） | 2026-11-14 12:11 | 本笔 |
 | `mbdsdr_ai/user_paths.py` | 共享件边界线/6ae85f56（新增叶子模块：用户数据/缓存根唯一推导（无 mbdsdr_ai 依赖）） | 2026-11-14 12:11 | 本笔 |
 | `mbdsdr_ai/amr.py` | 共享件边界线/6ae85f56（共享件收口：builtin_cache_path 委托 user_paths.user_cache_dir（行为不变，提交后释放）） | 2026-11-14 12:12 | 本笔 |
@@ -2471,6 +2473,8 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `mbdsdr_ai/error_catalog.py` | 判据存量收口/6ae85f56（野码/可见码补登记（#14 #9 #15 #16）） | 2026-11-14 12:23 | 本笔 |
 | `docs/error-catalog.md` | 判据存量收口/6ae85f56（野码/可见码补登记（#14 #9 #15 #16）） | 2026-11-14 12:23 | 本笔 |
 | `desktop/troubleshooting.py` | 判据存量收口/6ae85f56（野码/可见码补登记（#14 #9 #15 #16）） | 2026-11-14 12:23 | 本笔 |
+| `mbdsdr_ai/orbit.py` | 冗余线/6ae85f56（第1件：抽 raw state 内核（_state_from_satrec 拆成内核+薄壳，数值不变）） | 2026-11-14 12:24 | 本笔 |
+| `mbdsdr_ai/decoders.py` | 冗余线/6ae85f56（第1件：位置/多普勒改走 orbit 内核（删内联 GMST/ECEF/ENU 与经验多普勒）） | 2026-11-14 12:24 | 本笔 |
 | `scripts/batch_close.py` | 清理线/6ae85f56（rc=1 时按 stderr 回溯启发式归 3，输出明示启发式；长期方案记待办） | 2026-11-14 12:26 | 本笔 |
 | `tests/test_batch_close.py` | 清理线/6ae85f56（补 4 条崩溃启发式用例：归 3/无回溯仍红/stdout 回溯不触发/JSON 记录） | 2026-11-14 12:26 | 本笔 |
 | `tests/test_collection_consistency.py` | 判据存量收口/6ae85f56（收集判据补 explicit-nodeid 探针声明（#5）） | 2026-11-14 12:27 | 本笔 |
@@ -2478,6 +2482,9 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `docs/code-guards.md` | 清理线/6ae85f56（D4 新增「复合入口」小节：batch_close 单列不计 A/B/C，并记 rc=1 启发式长期待办） | 2026-11-14 12:27 | 本笔 |
 | `scripts/safe_commit.py` | 用例随闸线/6ae85f56（修 _carried_foreign 判据：本笔 diff vs HEAD 的新增/删除行，空行块与已落库块不再误报） | 2026-11-14 12:28 | 本笔 |
 | `tests/test_safe_commit_foreign_at_declare.py` | 用例随闸线/6ae85f56（反证用例：空行块单独提交不触发、HEAD 推进后已落库块不被误报） | 2026-11-14 12:28 | 本笔 |
+| `mbdsdr_ai/error_handler.py` | 冗余线/6ae85f56（第2件：错误树唯一定义处（to_dict/to_ui 双契约，签名统一）） | 2026-11-14 12:30 | 本笔 |
+| `mbdsdr_ai/core/errors.py` | 冗余线/6ae85f56（第2件：改为同一对象的再导出，不复制类定义） | 2026-11-14 12:30 | 本笔 |
+| `tests/test_error_tree_single.py` | 冗余线/6ae85f56（第2件：跨树 format_error/签名/双契约用例） | 2026-11-14 12:30 | 本笔 |
 | `scripts/file_claim.py` | 清理线/6ae85f56（cleanup-stale 分三堆：待办只算可释放未释放；UNDECIDABLE 只计数/趋势不改退出码） | 2026-11-14 12:33 | 本笔 |
 | `tests/test_file_claim_cleanup.py` | 清理线/6ae85f56（补三堆分类：UNDECIDABLE 不改退出码/趋势快照/JSON 机读字段/释放账 line+证据） | 2026-11-14 12:33 | 本笔 |
 | `docs/guard-accounting.json` | 判据存量收口/6ae85f56（check_claim_coordination 豁免理由改为类别口径（net_utils 真漏登保留）） | 2026-11-14 12:34 | 本笔 |
@@ -2486,6 +2493,14 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `scripts/audit_bare_commits.py` | 用例随闸线/6ae85f56（审计文案里的豁免入口改名） | 2026-11-14 12:34 | 本笔 |
 | `tests/test_safe_commit_declaration.py` | 用例随闸线/6ae85f56（漂移豁免用例改 --allow-foreign-drift，补用错开关反证） | 2026-11-14 12:34 | 本笔 |
 | `mbdsdr_ai/orbit.py` | 共享件边界线/6ae85f56（共享件收口：_iso_utc 与 tle_cache_time_utc 委托 time_format.iso_utc_z（第 3 份同形实现，行为不变）） | 2026-11-14 12:38 | 本笔 |
+| `mbdsdr_ai/geodesy.py` | 冗余线/6ae85f56（第3件：LLA<->ECEF 内核 + 委托） | 2026-11-14 12:39 | 本笔 |
+| `mbdsdr_ai/orbit_dynamics.py` | 冗余线/6ae85f56（第3件：委托内核 + 返回顺序 (lat,lon,alt)） | 2026-11-14 12:39 | 本笔 |
+| `mbdsdr_ai/orbit_determination.py` | 冗余线/6ae85f56（第3件：委托内核（WGS84 km）） | 2026-11-14 12:39 | 本笔 |
+| `mbdsdr_ai/satdump_adapter.py` | 冗余线/6ae85f56（第3件：委托内核（WGS84 km）） | 2026-11-14 12:39 | 本笔 |
+| `mbdsdr_ai/orbit_tools.py` | 冗余线/6ae85f56（第3件：ecef_to_geodetic 返回顺序同步） | 2026-11-14 12:39 | 本笔 |
+| `tests/test_orbit_dynamics.py` | 冗余线/6ae85f56（第3件：返回顺序断言同步） | 2026-11-14 12:39 | 本笔 |
+| `tests/test_orbit_material_dataset.py` | 冗余线/6ae85f56（第3件：返回顺序断言同步） | 2026-11-14 12:39 | 本笔 |
+| `tests/test_geodesy_ecef_lla.py` | 冗余线/6ae85f56（第3件：已知向量回归（双椭球/双单位/顺序）） | 2026-11-14 12:39 | 本笔 |
 | `scripts/file_claim.py` | 批次收尾线/6ae85f56（趋势快照加 undecidable_ratio 与 claims_with_content_hash；JSON 行补 suspect 的 hint，供批次报告直接读） | 2026-11-14 12:41 | 本笔 |
 | `scripts/batch_close.py` | 批次收尾线/6ae85f56（cleanup-stale 以 NOTE 接入：rc=0/3 都不判红，只有没跑成才 ERROR→3；报告逐条给 SUSPECT 缺口与补法） | 2026-11-14 12:41 | 本笔 |
 | `docs/COORDINATION.md` | 批次收尾线/6ae85f56（本笔 §6.1 登记行，提交后释放） | 2026-11-14 12:41 | 本笔 |
@@ -2496,6 +2511,12 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `docs/COORDINATION.md` | 批次收尾线/6ae85f56（本笔 §6.1 登记行，提交后释放） | 2026-11-14 12:44 | 本笔 |
 | `mbdsdr_ai/time_basis.py` | 判据存量收口/6ae85f56（扁平 import 回落补齐（time_engine 10 条红）） | 2026-11-14 12:42 | 本笔 |
 | `mbdsdr_ai/orbit.py` | 判据存量收口/6ae85f56（扁平 import 回落补齐（time_engine 10 条红）） | 2026-11-14 12:42 | 本笔 |
+| `mbdsdr_ai/sdr_backend.py` | 冗余线/6ae85f56（第4件：set_ppm 物理可信域钳位 ±1000ppm） | 2026-11-14 12:45 | 本笔 |
+| `mbdsdr_ai/decoders.py` | 冗余线/6ae85f56（第4件：min_elevation 改必传关键字） | 2026-11-14 12:45 | 本笔 |
+| `mbdsdr_ai/new_spacetime.py` | 冗余线/6ae85f56（第4件：调用点补显式仰角门） | 2026-11-14 12:45 | 本笔 |
+| `tests/test_full_integration.py` | 冗余线/6ae85f56（第4件：调用点补显式仰角门） | 2026-11-14 12:45 | 本笔 |
+| `tests/test_full_integration_v2.py` | 冗余线/6ae85f56（第4件：调用点补显式仰角门） | 2026-11-14 12:45 | 本笔 |
+| `tests/test_gate_and_ppm_clamp.py` | 冗余线/6ae85f56（第4件：钳位与仰角门用例） | 2026-11-14 12:45 | 本笔 |
 | `tests/test_e2e_operation_scenarios.py` | 共享件边界线/6ae85f56（同名定义扫描：删 test_culmination_tolerance_helper_is_not_a_free_pass 的重复定义（:484 被 :497 遮蔽，从未被收集）） | 2026-11-14 12:45 | 本笔 |
 | `tests/test_tx_no_hardware.py` | 共享件边界线/6ae85f56（同名定义扫描：删 _arm_token 首个定义（:23 被 :129 遮蔽，调用点全在其后）） | 2026-11-14 12:45 | 本笔 |
 | `scripts/lint_dead_symbols.py` | 共享件边界线/6ae85f56（文档化同名遮蔽盲区（按名字引用 vs 按定义解析）与闸门接入点，不改判定逻辑） | 2026-11-14 12:45 | 本笔 |

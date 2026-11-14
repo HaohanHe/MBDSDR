@@ -1175,7 +1175,8 @@ def compute_visible_satellite_count(observer_lat: float, observer_lon: float,
     # 注入模拟时间：显式 timestamp 优先；否则取 sim time（不是系统墙钟）
     sim_ts = (get_time_engine().now_unix() if timestamp is None
               else float(timestamp))
-    visible = list_visible_satellites(observer_lat, observer_lon, 0, min_elevation,
+    visible = list_visible_satellites(observer_lat, observer_lon, 0,
+                                      min_elevation=min_elevation,
                                       timestamp=sim_ts)
     return {
         "total_visible": len(visible),

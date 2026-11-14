@@ -418,7 +418,8 @@ def test_decoders_module(result: TestResult, agent: MBDSDRAgent):
 
     # 可见卫星列表
     try:
-        sats = list_visible_satellites(observer_lat=45.0, observer_lon=120.0, observer_alt=0.25)
+        sats = list_visible_satellites(observer_lat=45.0, observer_lon=120.0,
+                                       observer_alt=0.25, min_elevation=0.0)
         result.record("list_visible_satellites", isinstance(sats, list))
     except Exception as e:
         result.record("list_visible_satellites", False, str(e))
