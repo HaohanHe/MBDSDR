@@ -368,6 +368,8 @@ class _SessionPDU:
         self._ph_parsed = False
         self._total_hdr = 0
         self._first = True
+        #: 端到端 CRC 门：组成该文件的任一 CP_PDU CRC 失败即置 False（12.2）
+        self._crc_ok = True
 
     def append(self, tpdu: TransportPDU) -> bool:
         """把一个 TP_PDU 的用户数据并入 S_PDU。返回是否接受。"""
@@ -416,6 +418,27 @@ class _SessionPDU:
         data_bits = struct.unpack_from(">Q", self.buf, 8)[0]
         return self._total_hdr + (data_bits + 7) // 8
 
+    def note_crc_fail(self) -> None:
+        """组成该文件的某个 CP_PDU CRC 失败：整文件不可交付（端到端 CRC）。"""
+        self._crc_ok = False
+
+    def finish(self) -> Tuple[bool, bool]:
+        """收尾校验：返回 ``(长度是否一致, 端到端 CRC 是否全通过)``。
+
+        协议没有独立的「文件尾 CRC」：端到端 CRC 由组成该文件的每个
+        CP_PDU（即本仓的 TP_PDU）各自的 CRC-16/CCITT 共同给出——任一个
+        失败，整文件都不可信，必须整份丢弃，绝不交半份。
+        """
+        lenok = self.complete and self.expected_size() == len(self.buf)
+        return lenok, self._crc_ok
+
+
+def _is_idle_fill(chunk: bytes) -> bool:
+    """VCDU 数据区尾部的空闲填充（全 0x00 或全 0xFF）？"""
+    if not chunk:
+        return True
+    return chunk[0] in (0x00, 0xFF) and chunk.count(chunk[0]) == len(chunk)
+
 
 class _VirtualChannel:
     """单个 VCID 的状态机：VCDU → TP_PDU → SessionPDU（CCSDS 标准切包/重组）。"""
@@ -428,6 +451,15 @@ class _VirtualChannel:
         # 跨 VCDU 连头都没凑够 6 字节时缓存的前导字节。
         self._hdr_tail = bytearray()
         self._apid_spdu: Dict[int, _SessionPDU] = {}
+        # 文件级重组失败计数（12.2）：失败不再静默，按原因分桶。
+        self.stats = {
+            "vcdus_missing": 0,          # 丢帧：VCDU 计数缺口总和
+            "continuity_breaks": 0,      # 连续计数断裂：断链次数
+            "tpdu_crc_fail": 0,          # 丢包：CP_PDU(TP_PDU) CRC 失败次数
+            "session_crc_fail": 0,       # 端到端 CRC 失败而被作废的文件数
+            "session_len_mismatch": 0,   # 长度异常：收齐但长度不符的文件数
+            "files_dropped": 0,          # 开始重组却未交付的文件数
+        }
 
     def process(self, vcdu: VCDU) -> List[bytes]:
         out: List[bytes] = []
@@ -437,9 +469,15 @@ class _VirtualChannel:
             nxt = vcdu.counter
             diff = (nxt - self._last_counter) & ((1 << 24) - 1)
             if diff > 1:
+                self.stats["continuity_breaks"] += 1
+                self.stats["vcdus_missing"] += diff - 1
                 # 丢帧，丢弃未完成的 TP_PDU
                 self._in_progress = None
                 self._hdr_tail.clear()
+                # 已开始重组的文件跨过了缺口：字节序已不可信，整份作废并计数
+                if self._apid_spdu:
+                    self.stats["files_dropped"] += len(self._apid_spdu)
+                    self._apid_spdu.clear()
         self._last_counter = vcdu.counter
 
         data = vcdu.data
@@ -462,6 +500,10 @@ class _VirtualChannel:
         # 从 fhp 位置开始切出新的 TP_PDU
         pos = fhp
         while pos < len(mpdu):
+            # 数据区尾部的空闲填充（全 0x00 / 全 0xFF）不是新包起点：
+            # 继续切会把填充当坏包（CRC 必败），还会留下假包头吞掉下一帧。
+            if _is_idle_fill(mpdu[pos:]):
+                break
             pos = self._consume_one_tpdu(mpdu, pos, out)
             if pos < 0:
                 break  # 包未收完，已存为 in_progress
@@ -518,32 +560,52 @@ class _VirtualChannel:
         if tpdu.apid == FILL_APID:
             return  # 填充 APID，丢弃
 
-        # CRC 校验失败则丢弃该 APID 状态
+        flag = tpdu.seq_flag
+        spdu = self._apid_spdu.get(tpdu.apid)
+
+        # CP_PDU CRC 失败：该包不可信，失败必须计数（不再静默丢）
         if not tpdu.verify_crc():
-            self._apid_spdu.pop(tpdu.apid, None)
+            self.stats["tpdu_crc_fail"] += 1
+            if spdu is not None:
+                # 已开始成文件：端到端 CRC 门判死，整文件作废
+                spdu.note_crc_fail()
+                self._apid_spdu.pop(tpdu.apid, None)
+                self.stats["session_crc_fail"] += 1
+                self.stats["files_dropped"] += 1
+            elif flag == 3:
+                # seqFlag=3 单包即整文件，坏包直接丢掉一份文件
+                self.stats["files_dropped"] += 1
             return
 
-        flag = tpdu.seq_flag
         if flag in (1, 3):
-            # 新文件开始
+            if spdu is not None:
+                # 上一份还没等到末包就重开：旧文件永远收不齐，按丢文件计
+                self.stats["files_dropped"] += 1
             spdu = _SessionPDU(self.vcid, tpdu.apid)
             spdu.append(tpdu)
             if flag == 3:
-                # 整包在一个 TP_PDU 内
-                if spdu.complete and spdu.expected_size() == len(spdu.buf):
-                    out.append(bytes(spdu.buf))
+                self._finish_session(spdu, out)
             else:
                 self._apid_spdu[tpdu.apid] = spdu
         else:
-            # 续段/末段
-            spdu = self._apid_spdu.get(tpdu.apid)
             if spdu is None:
                 return
             spdu.append(tpdu)
             if flag == 2:
-                if spdu.complete and spdu.expected_size() == len(spdu.buf):
-                    out.append(bytes(spdu.buf))
                 self._apid_spdu.pop(tpdu.apid, None)
+                self._finish_session(spdu, out)
+
+    def _finish_session(self, spdu: _SessionPDU, out: List[bytes]) -> None:
+        """收尾一个文件：长度与端到端 CRC 都过才交付，否则按原因计数。"""
+        lenok, crcok = spdu.finish()
+        if not crcok:
+            self.stats["session_crc_fail"] += 1
+        if not lenok:
+            self.stats["session_len_mismatch"] += 1
+        if lenok and crcok:
+            out.append(bytes(spdu.buf))
+        else:
+            self.stats["files_dropped"] += 1
 
 
 # ============================================================================
@@ -562,6 +624,28 @@ class _BaseParser:
 
     def __init__(self) -> None:
         self._vcs: Dict[int, _VirtualChannel] = {}
+        self._files_ok = 0
+
+    def stats(self) -> Dict[str, int]:
+        """重组健康度（12.2）：成功成文数 + 五类失败原因计数。
+
+        所有 VCID 求和，供 ``ToolResult_goes`` 与状态面板一次读全；失败
+        只按**原因**分桶，不把同一件事混进多个格子（丢帧/断链/CRC/长度/
+        丢文件各算各的，同一文件可能同时命中 CRC 与长度，属于两个事实）。
+        """
+        out = {
+            "files_ok": self._files_ok,
+            "vcdus_missing": 0,
+            "continuity_breaks": 0,
+            "tpdu_crc_fail": 0,
+            "session_crc_fail": 0,
+            "session_len_mismatch": 0,
+            "files_dropped": 0,
+        }
+        for vc in self._vcs.values():
+            for key, value in vc.stats.items():
+                out[key] += value
+        return out
 
     # ── 同步字搜索 ──────────────────────────────────────────────
     @staticmethod
@@ -596,7 +680,9 @@ class _BaseParser:
         if vc is None:
             vc = _VirtualChannel(vcdu.vcid)
             self._vcs[vcdu.vcid] = vc
-        return vc.process(vcdu)
+        files = vc.process(vcdu)
+        self._files_ok += len(files)
+        return files
 
     def parse_stream(self, vcdus: List[bytes]) -> List[bytes]:
         """批量喂入 VCDU 流，返回所有收齐的文件。"""
@@ -915,9 +1001,11 @@ def ToolResult_goes(args, is_hrit: bool):
         return ToolResult(False, f"LRIT 解析失败: {e}", error="invalid_vcdu")
     return ToolResult(
         success=True,
-        content=_json.dumps({"files": files, "symbol_rate": parser.symbol_rate},
+        content=_json.dumps({"files": files, "symbol_rate": parser.symbol_rate,
+                             "reassembly": parser.stats()},
                             ensure_ascii=False),
-        data={"files": files, "symbol_rate": parser.symbol_rate},
+        data={"files": files, "symbol_rate": parser.symbol_rate,
+              "reassembly": parser.stats()},
     )
 
 

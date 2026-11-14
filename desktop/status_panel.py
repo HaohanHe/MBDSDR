@@ -327,6 +327,28 @@ def format_fec_quality(stats) -> str:
             f"不可纠 {uncorrectable_txt} 帧")
 
 
+def format_reassembly_quality(stats) -> str:
+    """文件级重组健康度 → 一行（第二批 12.2）：丢了几次、为什么。
+
+    ``stats`` 来自 ``goes_lrit.LRITParser.stats()``。缺键一律「—」，不拿 0
+    冒充「没丢过」；丢帧、断链、丢文件、长度异常、CRC 失败分开列，用户
+    一眼能看出是没信号、丢包太多还是 CRC 不过。
+    """
+    if not isinstance(stats, dict):
+        return _EMPTY
+    try:
+        ok = int(stats["files_ok"])
+        missing = int(stats["vcdus_missing"])
+        breaks = int(stats["continuity_breaks"])
+        dropped = int(stats["files_dropped"])
+        bad_len = int(stats["session_len_mismatch"])
+        bad_crc = int(stats["tpdu_crc_fail"]) + int(stats["session_crc_fail"])
+    except (KeyError, TypeError, ValueError):
+        return _EMPTY
+    return (f"成文 {ok} / 丢帧 {missing}（断链 {breaks} 次）/ 丢文件 {dropped} / "
+            f"长度异常 {bad_len} / CRC 失败 {bad_crc}")
+
+
 class StatusPanel(QWidget):
     """设备状态面板。"""
 
@@ -339,6 +361,7 @@ class StatusPanel(QWidget):
         self._last_gain_db = None        # 最近一次后端回读值，供意图变化时重判
         self.decode_last = None          # 最近一次解码结果的显示快照（测试可查）
         self.fec_last = None             # 最近一次 FEC 纠错统计（12.1，测试可查）
+        self.reassembly_last = None      # 最近一次文件重组统计（12.2，测试可查）
         self._build_ui()
         self._start_utc_clock()
         # 初始即未连接：SDR 相关卡片整组置灰，绝不错误呈现"有数据"
@@ -423,6 +446,13 @@ class StatusPanel(QWidget):
         self.fec_value.setObjectName("statusValue")
         self.fec_value.setWordWrap(True)
         signal_layout.addWidget(self.fec_value, 3, 1, 1, 3)
+
+        # 文件级重组（12.2）：丢了几次、为什么——不再让失败静默
+        signal_layout.addWidget(QLabel("文件重组:"), 4, 0)
+        self.reassembly_value = QLabel("—")
+        self.reassembly_value.setObjectName("statusValue")
+        self.reassembly_value.setWordWrap(True)
+        signal_layout.addWidget(self.reassembly_value, 4, 1, 1, 3)
 
         layout.addWidget(self.signal_group)
 
@@ -1248,6 +1278,11 @@ class StatusPanel(QWidget):
             self.fw_version.setText(result.get("firmware", "—"))
             self.sdr_chip.setText(result.get("sdr", "—"))
             self.mcu_chip.setText(result.get("mcu", "—"))
+        # 12.2：GOES 解析结果自带文件级重组统计 → 质量行落数值
+        if str(tool_name or "").startswith("goes_"):
+            data = result.get("data") if isinstance(result, dict) else None
+            if isinstance(data, dict):
+                self.set_reassembly_quality(data.get("reassembly"))
 
     def render_decode_result(self, tool_name: str, result: dict) -> None:
         """解码类工具结果 → 「解码结果」卡片（摘要 + 详情 + 诚实错误态）。
@@ -1265,4 +1300,9 @@ class StatusPanel(QWidget):
         """真录链 FEC 纠错统计上屏（12.1）；无统计一律「—」，不伪造读数。"""
         self.fec_last = stats if isinstance(stats, dict) else None
         self.fec_value.setText(format_fec_quality(stats))
+
+    def set_reassembly_quality(self, stats) -> None:
+        """文件级重组健康度上屏（12.2）；无统计一律「—」，不伪造读数。"""
+        self.reassembly_last = stats if isinstance(stats, dict) else None
+        self.reassembly_value.setText(format_reassembly_quality(stats))
 
