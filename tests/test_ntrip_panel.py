@@ -191,5 +191,89 @@ def test_connect_unconfigured_no_start():
     dlg.close()
 
 
+# ---------------------------------------------------------------------------
+# Test 7/8: 拉取挂载点后忙碌态必须退出（按钮恢复、结果落到下拉框）
+# ---------------------------------------------------------------------------
+class _StubResponse:
+    """urlopen 的最小替身：读一次 sourcetable 文本。"""
+
+    def __init__(self, body: bytes):
+        self._body = body
+
+    def read(self):
+        return self._body
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+
+def _wait_until(pred, timeout_ms=3000):
+    """在 offscreen 下跑事件循环直到 pred() 为真；返回是否等到。"""
+    import time
+    deadline = time.monotonic() + timeout_ms / 1000.0
+    while time.monotonic() < deadline:
+        if pred():
+            return True
+        QTest.qWait(20)
+        app.processEvents()
+    return pred()
+
+
+def test_pull_mountpoints_restores_button_and_fills_combo(monkeypatch):
+    """判据：拉取结束（无论成功）后按钮必须恢复可用且文案复位。
+
+    反证：旧实现用 worker 线程里的 QTimer.singleShot(0, _apply)，
+    该线程没有事件循环，回调永不执行 -> 按钮永久停在「拉取中...」。
+    """
+    import ntrip_panel as np_mod
+
+    body = (
+        "STR,CN,39.9,116.4,BJNEO,Example,RTCM 3.2,Multi-GNSS,G,EASYPATH,"
+        "BASE0,OFF,?,?,N,None,N,0\r\n"
+    ).encode("latin-1")
+    monkeypatch.setattr(np_mod.urllib.request, "urlopen",
+                        lambda *a, **k: _StubResponse(body))
+
+    dlg = NtripConfigDialog(manager=FakeManager())
+    dlg.host_edit.setText("ntrip.example.com")
+    dlg._pull_mountpoints()
+    # 拉取期间必须是忙碌态（按钮置灰 + 文案说明正在做什么）
+    assert not dlg.pull_btn.isEnabled()
+    assert "拉取中" in dlg.pull_btn.text()
+
+    assert _wait_until(lambda: dlg.pull_btn.isEnabled()), \
+        "拉取结束后按钮应恢复可用（旧实现会永久停在「拉取中...」）"
+    assert dlg.pull_btn.text() == "拉取挂载点列表"
+    assert dlg.mount_combo.findText("BASE0") >= 0, \
+        f"挂载点未落到下拉框: {[dlg.mount_combo.itemText(i) for i in range(dlg.mount_combo.count())]}"
+    dlg.close()
+
+
+def test_pull_mountpoints_failure_restores_button(monkeypatch):
+    """失败路径同样必须退出忙碌态，且不把下拉框清空。"""
+    import urllib.error
+    import ntrip_panel as np_mod
+
+    def _boom(*a, **k):
+        raise urllib.error.URLError("name resolution failed")
+
+    monkeypatch.setattr(np_mod.urllib.request, "urlopen", _boom)
+
+    dlg = NtripConfigDialog(manager=FakeManager())
+    dlg.host_edit.setText("ntrip.example.com")
+    dlg.mount_combo.setCurrentText("KEEP0")
+    dlg._pull_mountpoints()
+    assert not dlg.pull_btn.isEnabled()
+
+    assert _wait_until(lambda: dlg.pull_btn.isEnabled()), \
+        "拉取失败后按钮也应恢复可用"
+    assert dlg.mount_combo.currentText() == "KEEP0", \
+        f"失败不应改动已填挂载点: {dlg.mount_combo.currentText()}"
+    dlg.close()
+
+
 if __name__ == "__main__":
     sys.exit(pytest.main([__file__, "-v"]))

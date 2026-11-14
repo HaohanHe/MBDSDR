@@ -98,6 +98,8 @@ class NtripConfigDialog(QDialog):
 
     #: 后台线程连接完成后回主线程更新 UI（线程安全）
     _connect_finished = Signal(bool)
+    #: 后台拉取挂载点结果回主线程：(mounts, err)。worker 线程不能直接碰控件。
+    _pull_finished = Signal(object, str)
 
     def __init__(self, parent: Optional[QWidget] = None,
                  manager: Optional[NTRIPManager] = None):
@@ -117,8 +119,9 @@ class NtripConfigDialog(QDialog):
         self._poll_timer.timeout.connect(self._refresh_status)
         self._poll_timer.start()
 
-        # 后台连接结果回主线程
+        # 后台连接/拉取结果回主线程
         self._connect_finished.connect(self._on_connect_finished)
+        self._pull_finished.connect(self._on_pull_finished)
 
         self._set_state("idle")
 
@@ -280,24 +283,33 @@ class NtripConfigDialog(QDialog):
         except Exception as e:  # 兜底：拉取失败绝不崩
             err = f"NTRIP 拉取失败：{_clean_exc(e)}。请核对地址与网络后重试。"
 
-        # 回主线程更新 UI
-        def _apply():
-            self.pull_btn.setEnabled(True)
-            self.pull_btn.setText("拉取挂载点列表")
-            if err is not None and not mounts:
-                QMessageBox.warning(self, "拉取挂载点失败", err)
-                return
-            # 保留当前已填的 mountpoint，其余清空后填入
-            current = self.mount_combo.currentText()
-            self.mount_combo.clear()
-            self.mount_combo.addItems(mounts)
-            if current:
-                idx = self.mount_combo.findText(current)
-                self.mount_combo.setCurrentIndex(idx if idx >= 0 else 0)
-            QMessageBox.information(
-                self, "拉取完成", f"共获取 {len(mounts)} 个挂载点。")
-        # QTimer.singleShot(0,...) 在 offscreen/pytest 下也安全
-        QTimer.singleShot(0, _apply)
+        # 回主线程更新 UI：必须走 Qt 信号排队（auto connection 把回调投到
+        # 接收者所在线程）。原先用 QTimer.singleShot(0, _apply)：timer 建在
+        # worker 线程上，该线程没有事件循环、随后就结束，回调永远不执行，
+        # 按钮会永久停在「拉取中...」——成功没列表、失败没提示。
+        try:
+            self._pull_finished.emit(mounts, err or "")
+        except RuntimeError:
+            # 对话框已销毁、接收端自动断开：结果无人接收，安静丢弃。
+            pass
+
+    def _on_pull_finished(self, mounts, err: str) -> None:
+        """拉取收尾（主线程）：先恢复按钮，再按结果写列表或给出原因。"""
+        self.pull_btn.setEnabled(True)
+        self.pull_btn.setText("拉取挂载点列表")
+        mounts = list(mounts or [])
+        if err and not mounts:
+            QMessageBox.warning(self, "拉取挂载点失败", err)
+            return
+        # 保留当前已填的 mountpoint，其余清空后填入
+        current = self.mount_combo.currentText()
+        self.mount_combo.clear()
+        self.mount_combo.addItems(mounts)
+        if current:
+            idx = self.mount_combo.findText(current)
+            self.mount_combo.setCurrentIndex(idx if idx >= 0 else 0)
+        QMessageBox.information(
+            self, "拉取完成", f"共获取 {len(mounts)} 个挂载点。")
 
     # ------------------------------------------------------------------
     # 连接 / 断开（复用 NTRIPManager）
