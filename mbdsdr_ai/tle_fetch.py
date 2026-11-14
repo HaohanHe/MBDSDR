@@ -52,7 +52,6 @@ import socket
 import time
 import urllib.error
 from dataclasses import dataclass
-from datetime import datetime, timezone
 from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 
 from .error_catalog import (
@@ -61,6 +60,7 @@ from .error_catalog import (
     suggestion as catalog_suggestion,
     user_message,
 )
+from .time_format import iso_utc_z
 
 __all__ = [
     "DEFAULT_SOURCE",
@@ -258,10 +258,7 @@ class SourceHealth:
             state = "healthy"
 
         def _iso(ts: Optional[float]) -> Optional[str]:
-            if ts is None:
-                return None
-            return datetime.fromtimestamp(float(ts), tz=timezone.utc) \
-                .strftime("%Y-%m-%dT%H:%M:%SZ")
+            return None if ts is None else iso_utc_z(ts)
 
         return {
             "source": self.source,

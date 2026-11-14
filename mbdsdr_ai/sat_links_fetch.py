@@ -49,9 +49,9 @@ import threading
 import time
 import urllib.error
 import urllib.request
-from datetime import datetime, timezone
 from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 
+from .time_format import iso_utc_z
 from .user_paths import user_cache_dir
 
 try:                                    # 跨进程缓存锁（Windows）
@@ -118,8 +118,8 @@ def _now(now: Optional[float] = None) -> float:
 
 
 def _iso_utc(ts: float) -> str:
-    return datetime.fromtimestamp(float(ts), tz=timezone.utc) \
-        .strftime("%Y-%m-%dT%H:%M:%SZ")
+    """UTC ISO 字符串；格式统一由 :func:`mbdsdr_ai.time_format.iso_utc_z` 决定。"""
+    return iso_utc_z(ts)
 
 
 def _age_text(seconds: Optional[float]) -> str:

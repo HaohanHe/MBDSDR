@@ -32,6 +32,17 @@ def as_utc(dt: datetime) -> datetime:
     return dt.replace(tzinfo=UTC) if dt.tzinfo is None else dt.astimezone(UTC)
 
 
+def iso_utc_z(unix_ts: float) -> str:
+    """Unix 秒 → ``YYYY-MM-DDTHH:MM:SSZ``（明确带 Z，不随本机时区变化）。
+
+    落盘/状态文本里表示「UTC 时刻」的唯一格式。``sat_links_fetch`` 与
+    ``tle_fetch`` 曾各写一遍同样的 ``fromtimestamp(..., tz=utc).strftime``；
+    两处对同一时间戳必须给出逐字节相同的字符串，故收敛到本函数。
+    """
+    return datetime.fromtimestamp(float(unix_ts), tz=UTC) \
+        .strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
 def _posix_zone_from_files() -> Optional[Any]:
     """POSIX：从 ``TZ`` / ``/etc/timezone`` / ``/etc/localtime`` 找出 IANA 时区名。"""
     try:
