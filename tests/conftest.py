@@ -1957,6 +1957,32 @@ def _capture_app_style_baseline():
     _APP_STYLE_BASELINE.update(_app_style_snapshot(app))
 
 
+@pytest.fixture(scope="session", autouse=True)
+def _disable_auto_quit_on_last_window_closed():
+    """会话内关掉「最后一个窗口关闭 → 应用自动退出」。
+
+    2026-11-14 实测的跨文件污染（guards → device 5 红）就走这条路：
+    ``QApplication::event(QEvent::Quit)`` 会先 ``closeAllWindows()``；关掉最后一个
+    窗口后 ``QGuiApplicationPrivate::maybeLastWindowClosed()`` →
+    ``QCoreApplicationPrivate::quitAutomatically()`` 会 **post** 一个
+    ``QEvent::Quit``（Qt 6.12 qcoreapplication.cpp:2093）。此时 app 级 ``exec()``
+    已被同一个 Quit 里的 ``exit(0)`` 置退、不再派发，这个 Quit 就留在事件队列里；
+    下一个模块的 ``processEvents()`` / ``QTest.qWait`` 把它派发 → ``exit(0)`` →
+    主线程 ``QThreadData::quitNow`` 置真，而只有 ``QCoreApplication::exec()`` /
+    ``QThread::exec()`` 会复位它 → 之后所有嵌套 ``QEventLoop::exec()`` 直接返回 -1，
+    ``main_window._connect_backend_in_background`` 因此拿到 None（worker 还活着）并
+    折成 False，设备切换用例成片变红。
+
+    关掉自动退出即切断这条通路：用例里显式 ``app.quit()`` 仍照常结束 ``app.exec()``
+    （走 platform 的同步 Quit 事件），只是「关窗」不再额外投递 Quit。会话内没有
+    任何用例断言「关最后一个窗口会退出应用」。
+    """
+    app = _live_qapp()
+    if app is not None and app.quitOnLastWindowClosed():
+        app.setQuitOnLastWindowClosed(False)
+    yield
+
+
 @pytest.fixture(autouse=True)
 def _restore_app_style():
     """每个用例前后保存/恢复 QApplication 的字体、样式表、调色板。"""
