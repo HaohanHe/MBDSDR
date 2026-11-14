@@ -2454,6 +2454,7 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `tests/test_safe_commit_exclude.py` | 用例随闸线/6ae85f56（补 §6.1 登记面前提（5 条既有红）） | 2026-11-14 12:06 | 本笔 |
 | `tests/test_safe_commit_declaration.py` | 用例随闸线/6ae85f56（补 §6.1 登记面前提（1 条既有红）） | 2026-11-14 12:06 | 本笔 |
 | `scripts/batch_close.py` | 工具化线/6ae85f56（新增批次收尾聚合入口；只聚合三道检查，不改判据） | 2026-11-14 12:11 | 本笔 |
+| `tests/test_batch_close.py` | 工具化线/6ae85f56（新增 batch_close 退出码语义测试） | 2026-11-14 12:13 | 本笔 |
 
 > 上表各行均由 `claim` 台账推导：owner 原文与 `acquired_at` 直接取自台账，
 > 目的优先用台账里的 `claim_reason`，没有就如实写「未声明」，不补编。时间列只是
