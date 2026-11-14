@@ -54,6 +54,8 @@ _QUOTED_RE = re.compile(r"「[^」]*」|『[^』]*』|“[^”]*”|‘[^’]*�
 _NOUN_SUFFIXES = ("细节", "内容", "记录", "说明", "通知", "事项", "请求", "单")
 #: 否定/存疑标记：`不冒充已收口`、`尚未修复`、`没有已解决`。
 _NEG_MARKERS = ("不", "未", "没", "勿")
+#: 状态位的左侧标记：`退出码 0 = 已提交` / `3 是已提交` / `| 3 | 已提交，`。
+_STATUS_PREFIXES = ("=", "是", "为", "|")
 HASH_RE = re.compile(r"\b([0-9a-f]{7,40})\b")
 PATHLINE_RE = re.compile(
     r"([A-Za-z0-9_./\\-]+\.(?:py|md|json|yaml|yml|ts|dart|cpp|c|h|hpp))"
@@ -432,6 +434,12 @@ def _is_claim_statement(text: str) -> bool:
     3. **名词化**——``…的更正`` / ``更正细节`` / ``已提交内容``；
     4. **否定句**——``不冒充已收口`` / ``尚未修复``。
 
+    第五类（2026-11-14）：**业务状态词**——``退出码 0 = 已提交`` / ``| 3 | 已提交，``
+    里的「已提交」是某个状态的名字，不是「我改过某处」。判据看位置不看词表：
+    左侧（剥掉 ``*`` 与空白）是 ``=`` / ``是`` / ``为`` / ``|``，且右侧不是证据
+    分隔符（``—``）也不是断言冒号，才按状态词跳过；``| 已修复 — `hash` — … |
+    这种表格里的真断言照样入集。
+
     只决定「进不进扫描集」；进来之后仍要过三步核验，不会因此变绿。
     """
     # 显式证据段（``〔证：…〕``）+ 触发词：这一行已被写的人指认为证据，
@@ -450,8 +458,24 @@ def _is_claim_statement(text: str) -> bool:
             continue
         if any(mark in scan[max(0, start - 3):start] for mark in _NEG_MARKERS):
             continue
+        if _is_status_label(scan, start, end):
+            continue
         return True
     return False
+
+
+def _is_status_label(scan: str, start: int, end: int) -> bool:
+    """触发词是否处在「状态位」上（``= 已提交`` / ``| 3 | 已提交，``）。
+
+    看位置不看词表：左侧剥掉 ``*`` 与空白后是 ``=`` / ``是`` / ``为`` / ``|``，
+    且右侧不是证据分隔符 ``—`` 也不是断言冒号——两者同时成立才算状态词，
+    这样表格里的真断言（``| 已修复 — `hash` — path — lit |``）不会被误杀。
+    """
+    prev = scan[:start].replace("*", "").rstrip()
+    if not prev or prev[-1] not in _STATUS_PREFIXES:
+        return False
+    after = scan[end:].lstrip("*").lstrip()
+    return after[:1] not in ("—", "–", "-", "：")
 
 
 def iter_claim_lines(docs_root: Path, recursive: bool = False,

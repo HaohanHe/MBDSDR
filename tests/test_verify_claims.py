@@ -171,6 +171,19 @@ def test_negated_claim_is_not_scanned_but_positive_is(tmp_path):
     assert [c.status for c in vc.verify_docs(repo, repo / "docs")] == [vc.NO_HASH]
 
 
+def test_business_status_word_is_not_a_claim(tmp_path):
+    """状态词不是断言：`退出码 0 = 已提交` 不入集；同一触发词写成真断言仍须命中。
+
+    反证成对：只验「状态词不命中」等于把判据收窄到失效——换个位置写成真四元组
+    必须仍然命中，并且真的可证实。
+    """
+    repo, h = _repo(tmp_path, {"src/foo.py": "MAGIC_TOKEN = 42\n"})
+    doc = _write_doc(repo, "- 退出码 0 = 已提交（`--declare` 除外）；3 是已提交但复核失败。\n")
+    assert vc.verify_docs(repo, repo / "docs") == []
+    doc.write_text(f"- 已提交 — `{h}` — src/foo.py:1 — `MAGIC_TOKEN`\n", encoding="utf-8")
+    assert [c.status for c in vc.verify_docs(repo, repo / "docs")] == [vc.OK]
+
+
 def test_quoted_product_copy_is_not_a_claim(tmp_path):
     """引号内是被引用的产品文案，不是本文件的断言。"""
     repo, _ = _repo(tmp_path, {"src/foo.py": "MAGIC_TOKEN = 42\n"})
