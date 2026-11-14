@@ -2213,6 +2213,7 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `tools/axioms/axiom_rules.py` | 公理体检线/6ae85f56（Task1: 公理 ID→规则名单一映射） | 2026-11-14 09:15 | 本笔 |
 | `scripts/axioms.py` | 公理体检线/6ae85f56（Task1: --rule/--self-test-only 共用 Axx 过滤） | 2026-11-14 09:15 | 本笔 |
 | `tests/test_axioms_rule_filter.py` | 公理体检线/6ae85f56（Task1: 两入口整流相同与映射反证） | 2026-11-14 09:15 | 本笔 |
+| `tests/test_ai_ui_sync_guards.py` | S1-S4结果伪造线/6ae85f56（补丁单三守卫：success=False 无 error 键时 _mcp_call_handler 必须判失败、_on_worker_tool_result 不得同步 UI（旧实现下这两条红）） | 2026-11-14 09:18 | 本笔 |
 
 > 上表各行均由 `claim` 台账推导：owner 原文与 `acquired_at` 直接取自台账，
 > 目的优先用台账里的 `claim_reason`，没有就如实写「未声明」，不补编。时间列只是

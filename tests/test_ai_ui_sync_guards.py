@@ -126,3 +126,28 @@ def test_s11_success_syncs_ui(window):
     window._on_worker_tool_result("tune_fm", {"ok": True, "freq_mhz": 121.0})
     assert window.control_panel._freq_hz == pytest.approx(121.0e6), \
         "硬件成功后 UI 未跟随真实频率"
+
+
+def test_s3_mcp_result_without_error_key_still_fails(window):
+    """只有 success=False、没有 error 键时也必须判失败（同源判据）。
+
+    旧式判读只看 ``"error" not in raw``，这种载荷会被当成成功——
+    反证：把 ``_mcp_call_handler`` 的 ``tool_success`` 换成恒 None
+    （即退回旧实现）本用例即红。
+    """
+    fake = _install(window)
+    fake.call_tool_sync = lambda tool, args: {"success": False, "reason": "device busy"}
+    res = window._mcp_call_handler("tune_fm", {"freq_mhz": 120.0})
+    assert res["success"] is False, \
+        "success=False 但无 error 键时被旧式判读当成了成功"
+    assert window.control_panel._freq_hz is None, \
+        "失败结果仍把 UI 同步到了目标频率"
+
+
+def test_s3_worker_result_without_error_key_blocks_ui(window):
+    """结果只有 success=False、没有 error 键时不得同步 UI（同源判据）。"""
+    fake = _install(window)
+    window._on_ai_tool_call("tune_fm", {"freq_mhz": 120.0})
+    window._on_worker_tool_result("tune_fm", {"success": False, "reason": "timeout"})
+    assert window.control_panel._freq_hz is None, \
+        "结果只有 success=False 时 UI 仍被同步（同源判据未生效）"
