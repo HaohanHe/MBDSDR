@@ -45,6 +45,35 @@
 > **全部保留并落库**（`4d5feff1`，45 文件），一行没丢。以下原有「交给在途线」
 > 的交接单视为**收件人改为本线**，按新单逐条销账。
 
+### 我这边（2026-11-14 上午：12.1/12.2 呈现侧归属复核 —— 一笔「声明前不覆盖」实例）
+
+复核 12.2 的呈现侧（`weather_panel.py` 的 GOES 失败原因/meta 上抛、
+`main_window.py` 的 `_on_weather_decode_result` 接线）归属。按
+`docs/evidence-standard.md` §8 记账，结论与「被对方的 safe_commit 带走」的传闻**方向相反**：
+
+- **这两处是我在 12.2 期间写在工作区的在途内容**，不是他线写的。它们被两笔他线提交
+  在**其声明之前**原样落库（§8.2 表第 2 行：「声明之前他线内容就已经躺在工作区 →
+  放行，原样落库（已进快照）」），只是角色对调：我是内容作者，不是声明方。
+  - `ec3a964b`（11:14:18，claim-line: `S1-S4结果伪造线`）→ `desktop/weather_panel.py`
+    `_run_goes` 失败分支的 `parser.stats()` 原因串 + 成功/失败 `meta["reassembly"]`；
+  - `2b69e3df`（11:13:34，claim-line: `UI防呆线`）→ `desktop/main_window.py`
+    `_on_weather_decode_result` 的 `set_reassembly_quality` 路由。
+  - 同机制第三例：`ecbae6df`（11:30:43，时空域 TLE 收紧笔）把我在工作区、尚未提交的
+    `desktop/status_panel.py` §6.1 登记行（12.2）一并带入（现见
+    `HEAD:docs/COORDINATION.md:2348`）；该行已随 HEAD 生效，本笔不重复提交。
+- **可复跑取证**：`git log -S "reassembly" --oneline -- desktop/weather_panel.py`
+  → `ec3a964b`；`git log -S "set_reassembly_quality" --oneline -- desktop/main_window.py`
+  → `2b69e3df`；我的 `f6f3271f`（12.1）对这两个文件的 diff 不含上述行。
+- **当时 HEAD 的代价**：被调用方 `parser.stats()` / `set_reassembly_quality` 直到
+  11:25 的 `87b3a36d` 才入库，故 11:13–11:25 之间走到这两条路径会 `AttributeError`
+  （非导入期，测试不易照到）。这是「声明前不覆盖」放行在途内容的风险实例，不是
+  可以忽略的记账细节。
+- **归属写法（§9）**：内容作者 = 参考移植线（12.2）；提交记录指向 `ec3a964b` /
+  `2b69e3df`；**不得**用这两笔的 `claim-line` 反推归属。内容已在 HEAD 生效，
+  不回退、不改历史。
+- **not_verified**：作者判断来自内容依赖与改动内容（内容证据），不是签名证据；
+  两笔提交期间的真实 claim 持有者只能由 `claim-line` 尾行与 §6.1 行回看。
+
 ### 我这边（2026-11-08 夜：LRPT 图像内容级真值对拍，afb76976）
 
 用户「继续」，按队列 #10② 收口图像链最后一件。协议层 golden（VCDU/
@@ -2359,6 +2388,7 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `mbdsdr_ai/tle_integrity.py` | 时空环境层/D3（TLE 可信时长环境收紧层（只收紧，不改四档阈值）） | 2026-11-14 11:30 | 本笔 |
 | `tests/test_tle_environment_tightening.py` | 时空环境层/D3（D3 判据与反证测试） | 2026-11-14 11:30 | 本笔 |
 | `tests/test_desktop_panels.py` | 参考移植线/20261114（修过期断言：面板经 panel_registry 构造，AST 守直连 import（反证：改回 WeatherPanel() 即红）） | 2026-11-14 11:31 | 本笔 |
+| `docs/COORDINATION.md` | 参考移植线/20261114（本笔 §6.1 登记行 + 12.2 呈现侧「声明前不覆盖」归属实例（ec3a964b/2b69e3df）） | 2026-11-14 11:31 | 本笔 |
 
 > 上表各行均由 `claim` 台账推导：owner 原文与 `acquired_at` 直接取自台账，
 > 目的优先用台账里的 `claim_reason`，没有就如实写「未声明」，不补编。时间列只是
