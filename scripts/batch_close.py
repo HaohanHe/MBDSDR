@@ -30,7 +30,14 @@ owner 把「红/绿 + 条数」抄进台账。实际执行时有三处靠人：
 * 每道有独立超时（默认 300 s），超时按「没跑成」处理，不按红处理；
 * 三道都跑完后，把结果压成一行摘要，并默认留一份 JSON 快照到
   ``<仓库父目录>/.tmp/batch_close/``（D 盘；不写仓库、不写 C 盘）；
-* 快照写失败只打印 WARN，不改退出码——记录失败不是判据失败，但不能静默。
+* 快照写失败只打印 WARN，不改退出码——记录失败不是判据失败，但不能静默；
+* **rc=1 的崩溃启发式**：三道检查目前没有顶层异常捕获，检查器自己抛异常也
+  会以 1 退出，与「真判红」共用同一个码。本工具看 stderr 是否含 Python
+  回溯（``Traceback (most recent call last):`` + 异常行），命中就把该道归成
+  ``ERROR``（退出码 3），并在输出里写明「启发式，不是判断」。这是减速带，
+  不是结论：脚本自己打印 traceback 再判红会被误归，脚本崩溃但没打 traceback
+  仍会被当真红。长期方案是三道脚本各自顶层捕获异常、用专用退出码（待办见
+  ``docs/code-guards.md`` 的「复合入口」小节），届时这段可以删掉。
 
 退出码
 ------
@@ -40,7 +47,8 @@ owner 把「红/绿 + 条数」抄进台账。实际执行时有三处靠人：
 0    三道全部正常且无红（``roadmap`` 恒 0，只作提示）
 1    至少一道判红（该道以 1 退出）；其余检查均正常跑完
 2    用法错误：未知 ``--steps``、非正 ``--timeout``、``--root`` 下没有 scripts/
-3    至少一道**没能正常执行**（脚本缺失、超时、退出码不是 0/1），红绿结论不成立
+3    至少一道**没能正常执行**（脚本缺失、超时、退出码不是 0/1，或 rc=1 但
+     stderr 有 Python 回溯的疑似崩溃——最后一项是启发式，不是判断），红绿结论不成立
 ===  ================================================================
 
 优先级 ``3 > 1 > 0``：检查器自己没跑起来时，把「红」当结论会误导人；宁可说
@@ -58,6 +66,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
 import time
@@ -76,6 +85,29 @@ EXIT_NOT_RUN = 3
 DEFAULT_TIMEOUT_S = 300
 #: 失败时打印的日志尾行数：够看出原因，又不至于把整份输出糊到屏幕上。
 TAIL_LINES = 8
+
+#: rc=1 的崩溃启发式：只认 stderr 里的 Python 回溯，**不是**红绿判断。
+#: 三道检查目前共用 0/1/2，检查器自己抛异常也是 1；不改脚本就只能先看形状。
+TRACEBACK_MARK = "Traceback (most recent call last):"
+_EXC_LINE_RE = re.compile(
+    r"^(?:[A-Za-z_]\w*\.)*[A-Za-z_]\w*(?:Error|Exception|Interrupt)\b.*$"
+)
+
+
+def _crash_signature(stderr: str) -> Optional[str]:
+    """stderr 里像 Python 崩溃的结尾行；没有回溯头就返回 None。
+
+    只看 stderr：检查脚本可能把「Traceback」当**数据**打印到 stdout（例如
+    audit_evidence 扫到的文本），拿 stdout 判断会把正常结果误归成崩溃。
+    """
+    text = stderr or ""
+    if TRACEBACK_MARK not in text:
+        return None
+    rows = [row.strip() for row in text.splitlines() if row.strip()]
+    for row in reversed(rows):
+        if _EXC_LINE_RE.match(row):
+            return row if len(row) <= 200 else row[:197] + "..."
+    return "Traceback（未找到异常行）"
 
 
 @dataclass(frozen=True)
@@ -104,6 +136,8 @@ class StepResult:
     elapsed_s: float
     summary: str
     detail: str = ""
+    #: 非空 = 该条 ERROR 来自 rc=1 的回溯启发式，值是识别到的异常行。
+    heuristic: str = ""
 
 
 def _tail(text: str, lines: int = TAIL_LINES) -> str:
@@ -178,6 +212,20 @@ def run_step(step: Step, root: Path, timeout_s: int) -> StepResult:
             summary=summary,
         )
     if proc.returncode == 1 and not step.advisory:
+        crash = _crash_signature(proc.stderr or "")
+        if crash:
+            return StepResult(
+                name=step.name,
+                status="ERROR",
+                rc=1,
+                elapsed_s=elapsed,
+                summary=(
+                    f"rc=1，但 stderr 有 Python 回溯：{crash}"
+                    f"（启发式：疑似检查器崩溃，不是判红）"
+                ),
+                detail=_tail(combined),
+                heuristic=crash,
+            )
         return StepResult(
             name=step.name,
             status="FAIL",
@@ -229,6 +277,7 @@ def _record(results: Sequence[StepResult], root: Path, code: int) -> Optional[Pa
                 "rc": result.rc,
                 "elapsed_s": round(result.elapsed_s, 3),
                 "summary": result.summary,
+                "heuristic": result.heuristic,
             }
             for result in results
         ],
@@ -255,6 +304,9 @@ def _print_report(results: Sequence[StepResult], code: int, record: Optional[Pat
         if result.detail:
             for row in result.detail.splitlines():
                 print(f"        {row}")
+        if result.heuristic:
+            print("        （启发式：stderr 出现 Python 回溯，按「没跑成」处理，"
+                  "不是红绿判断）")
     print(f"结论：{_verdict(code)}")
     if record is not None:
         print(f"快照：{record}")
@@ -351,6 +403,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                             "rc": result.rc,
                             "elapsed_s": round(result.elapsed_s, 3),
                             "summary": result.summary,
+                            "heuristic": result.heuristic,
                         }
                         for result in results
                     ],
