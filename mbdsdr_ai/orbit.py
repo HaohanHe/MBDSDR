@@ -23,6 +23,7 @@ import os
 import time
 import urllib.request
 import ssl
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Any, Optional, Tuple
 
@@ -356,19 +357,41 @@ def fetch_tle_record(catnr: int, max_age_hours: float = 24.0,
                                        now=now)
 
 
-def _state_from_satrec(
+@dataclass(frozen=True)
+class RawSatelliteState:
+    """SGP4 单次传播出的原始几何量（WGS-72，km / km/s / 度）。
+
+    这是「卫星在某时刻相对某站」的唯一一份算术：仰角/方位/距离/视线速度/
+    星下点都从它派生。``orbit`` 与 ``decoders`` 两条入口只做返回类型转换，
+    不再各算一份（旧 decoders 自己内联了 GMST + ECEF + ENU，且把 v_teme
+    整个丢掉、多普勒改用经验式——同刻同星与真视线速度可差到 kHz 量级）。
+    """
+
+    r_teme_km: Tuple[float, float, float]
+    v_teme_kmps: Tuple[float, float, float]
+    gmst_rad: float
+    r_ecef_km: Tuple[float, float, float]
+    v_ecef_kmps: Tuple[float, float, float]
+    elevation_deg: float
+    azimuth_deg: float
+    range_km: float
+    #: 视线速度，**远离为正**（与频率偏移符号相反：频率偏移 = -f·v_los/c）。
+    range_rate_kms: float
+
+
+def satellite_raw_state(
     sat: Satrec,
-    satellite_name: str,
     jd_utc: float,
     observer_lat: float,
     observer_lon: float,
-    observer_alt: float = 0.0,
-    epoch: str = "",
-) -> Optional[Dict[str, Any]]:
+    observer_alt_km: float = 0.0,
+) -> Optional[RawSatelliteState]:
     """核心坐标变换：TEME -> ECEF(绕 z 转 -GMST) -> ENU -> 仰角/方位/距离/视线速度。
 
     路线 (a)：把卫星 TEME 转到 ECEF（与把地面站转到 TEME 互为逆，数学等价）。
     GMST 折叠式见 _gmst_days。
+
+    ``observer_alt_km`` 是**公里**，站址配置存的是米，调用方先 /1000。
     """
     _require_sgp4()
     jd = int(jd_utc)
@@ -390,7 +413,7 @@ def _state_from_satrec(
     vy += -OMEGA_E * r_ecef[0]   # - (Ω×r)_y = -ω·x
     v_ecef = (vx, vy, v_teme[2])
     # 站 ECEF（WGS-72 椭球，与 SGP4 一致）
-    s_ecef = wgs72_geodetic_to_ecef_km(observer_lat, observer_lon, observer_alt)
+    s_ecef = wgs72_geodetic_to_ecef_km(observer_lat, observer_lon, observer_alt_km)
     # 站心矢量
     rx_s = r_ecef[0] - s_ecef[0]
     ry_s = r_ecef[1] - s_ecef[1]
@@ -411,18 +434,55 @@ def _state_from_satrec(
     # 视线速度：卫星速度投影到站星方向单位矢量（远离为正）
     los = (rx_s / dist, ry_s / dist, rz_s / dist)
     range_rate = (v_ecef[0] * los[0] + v_ecef[1] * los[1] + v_ecef[2] * los[2])
+    return RawSatelliteState(
+        r_teme_km=tuple(r_teme),        # type: ignore[arg-type]
+        v_teme_kmps=tuple(v_teme),      # type: ignore[arg-type]
+        gmst_rad=gmst,
+        r_ecef_km=r_ecef,
+        v_ecef_kmps=v_ecef,
+        elevation_deg=elevation,
+        azimuth_deg=azimuth,
+        range_km=dist,
+        range_rate_kms=range_rate,
+    )
+
+
+def _state_from_satrec(
+    sat: Satrec,
+    satellite_name: str,
+    jd_utc: float,
+    observer_lat: float,
+    observer_lon: float,
+    observer_alt: float = 0.0,
+    epoch: str = "",
+) -> Optional[Dict[str, Any]]:
+    """站心状态 dict（orbit 的返回类型壳）：内核几何 + 受晒判定。
+
+    返回键与历史契约一致（``elevation``/``azimuth``/``range_km``/
+    ``range_rate_kms``/``altitude_km`` 等），下游 sat_tracker、sdr_tools、
+    天空视图都吃这一份。
+    """
+    raw = satellite_raw_state(sat, jd_utc, observer_lat, observer_lon,
+                              observer_alt)
+    if raw is None:
+        return None
     # 受晒/地影：与天空视图、sat_passes 共用 sat_illumination 的唯一口径
-    # （圆锥影，边界 ±2 s）。这里用 sgp4 已算出的 TEME 位置，不再二次传播。
+    # （圆锥影，边界 ±2 s）。这里用内核已算出的 TEME 位置，不再二次传播。
     at_unix = (jd_utc - 2440587.5) * 86400.0
     illum = evaluate_illumination(
-        r_teme, sun_direction_eci(at_unix), at_unix=at_unix)
+        raw.r_teme_km, sun_direction_eci(at_unix), at_unix=at_unix)
+    r = raw.r_ecef_km
     return {
         "satellite": satellite_name,
-        "elevation": elevation,
-        "azimuth": azimuth,
-        "range_km": dist,
-        "range_rate_kms": range_rate,
-        "altitude_km": math.sqrt(r_ecef[0]**2 + r_ecef[1]**2 + r_ecef[2]**2) - WGS72_A,
+        "elevation": raw.elevation_deg,
+        "azimuth": raw.azimuth_deg,
+        "range_km": raw.range_km,
+        "range_rate_kms": raw.range_rate_kms,
+        # 历史口径：地心距 - 赤道半径（不是椭球高）。decoders.SatellitePass
+        # 的 altitude_km 是 WGS-72 大地高，两者差 ~f·a·sin²φ（ISS 量级 ~9 km）。
+        # 两个都被下游钉住（sdr_tools 显示 / ground_track 星下点用例），
+        # 不在这笔里统一，见交付说明里的「不合的理由」。
+        "altitude_km": math.sqrt(r[0]**2 + r[1]**2 + r[2]**2) - WGS72_A,
         "epoch": epoch,
         "sunlit": illum.sunlit,
         "sunlit_status": illum.status,
@@ -510,15 +570,19 @@ def doppler_correction(
         return {"error": f"无法计算卫星 {satellite_name} 位置（TLE 不可用或不在内置列表）"}
     v_los = st["range_rate_kms"]
     shift = -nominal_freq_hz * v_los / C_LIGHT  # 远离时频率降低
+    # 数值不做展示性取整：旧实现按 round(..., 4) 输出 MHz（=100 Hz 量化），
+    # 工具链拿 corrected_freq_mhz 直接调谐时会偏到 ±50 Hz，且与控制器
+    # （decoders.compute_doppler_correction，未取整）对不上。展示层各自
+    # 格式化（sdr_tools 用 :.1f / :.6f），契约只保证数值本身。
     return {
         "satellite": satellite_name,
-        "nominal_freq_mhz": round(nominal_freq_hz / 1e6, 4),
-        "corrected_freq_mhz": round((nominal_freq_hz + shift) / 1e6, 4),
-        "doppler_shift_hz": round(shift, 1),
-        "range_rate_kms": round(v_los, 3),
-        "elevation_deg": round(st["elevation"], 1),
-        "azimuth_deg": round(st["azimuth"], 1),
-        "range_km": round(st["range_km"], 1),
+        "nominal_freq_mhz": nominal_freq_hz / 1e6,
+        "corrected_freq_mhz": (nominal_freq_hz + shift) / 1e6,
+        "doppler_shift_hz": shift,
+        "range_rate_kms": v_los,
+        "elevation_deg": st["elevation"],
+        "azimuth_deg": st["azimuth"],
+        "range_km": st["range_km"],
         "epoch": st["epoch"],
         "method": "sgp4-teme-ecef-real-velocity",
     }

@@ -157,6 +157,49 @@ class SatellitePass:
     altitude_km: float
 
 
+def _raw_state(
+    satellite_name: str,
+    observer_lat: float,
+    observer_lon: float,
+    observer_alt_m: float,
+    timestamp: float = None,
+):
+    """解析 TLE（联网优先/内置回退）+ 统一时刻 -> orbit 内核原始状态。
+
+    本模块只保留「TLE 来源」这一处差异：离线允许回退内置近似 TLE，
+    而 ``orbit`` 的入口在无 TLE 时诚实返回 None。几何/多普勒一律走
+    ``orbit.satellite_raw_state``，不再在 decoders 内联一份。
+    """
+    if not HAS_SGP4:
+        return None
+
+    if timestamp is None:
+        # 与天空视图/过境链同一时间源：TimeEngine 优先（懒导入避免模块环）
+        try:
+            from .new_spacetime import get_time_engine
+            timestamp = float(get_time_engine().now_unix())
+        except Exception:  # noqa: BLE001
+            timestamp = time.time()
+
+    # 转换为 Julian Date：直接从 Unix 秒算，保留亚秒。
+    # 不能用 time.gmtime(timestamp) + jday：gmtime 把秒截成整数，而 TimeEngine
+    # 拨表后 now_unix() 常落在整秒下方几微秒（JD 往返误差），截断会整整退回
+    # 1 秒——与 orbit.compute_satellite_state 同刻直算相差 1 秒，仰角差
+    # 0.07~0.23°（K13：同一用例随当天过境几何在绿/红之间摇摆）。
+    jd_utc = timestamp / 86400.0 + 2440587.5
+
+    # 从 TLE 创建卫星对象（优先联网最新，回退内置）
+    line1, line2, _src = _resolve_tle(satellite_name)
+    satellite = Satrec.twoline2rv(line1, line2)
+
+    try:
+        from .orbit import satellite_raw_state
+    except ImportError:  # 脚本 / 直接运行时（mbdsdr_ai 目录已在 sys.path）
+        from orbit import satellite_raw_state  # type: ignore
+    return satellite_raw_state(satellite, jd_utc, observer_lat, observer_lon,
+                               observer_alt_m / 1000.0)
+
+
 def compute_satellite_position(
     satellite_name: str,
     observer_lat: float,
@@ -175,106 +218,35 @@ def compute_satellite_position(
     if satellite_name not in BUILTIN_TLE:
         return None
 
-    if timestamp is None:
-        # 与天空视图/过境链同一时间源：TimeEngine 优先（懒导入避免模块环）
-        try:
-            from .new_spacetime import get_time_engine
-            timestamp = float(get_time_engine().now_unix())
-        except Exception:  # noqa: BLE001
-            timestamp = time.time()
+    try:
+        from .orbit import C_LIGHT, wgs72_ecef_km_to_llh
+    except ImportError:  # 脚本 / 直接运行时（mbdsdr_ai 目录已在 sys.path）
+        from orbit import C_LIGHT, wgs72_ecef_km_to_llh  # type: ignore
 
-    # 转换为 Julian Date：直接从 Unix 秒算，保留亚秒。
-    # 不能用 time.gmtime(timestamp) + jday：gmtime 把秒截成整数，而 TimeEngine
-    # 拨表后 now_unix() 常落在整秒下方几微秒（JD 往返误差），截断会整整退回
-    # 1 秒——与 orbit.compute_satellite_state 同刻直算相差 1 秒，仰角差
-    # 0.07~0.23°（K13：同一用例随当天过境几何在绿/红之间摇摆）。
-    jd_utc = timestamp / 86400.0 + 2440587.5
-    jd = int(jd_utc)
-    fr = jd_utc - jd
-
-    # 从 TLE 创建卫星对象（优先联网最新，回退内置）
-    line1, line2, _src = _resolve_tle(satellite_name)
-    satellite = Satrec.twoline2rv(line1, line2)
-
-    # 计算卫星位置（TEME/ECI 坐标系，单位 km）
-    e, r_teme, v_teme = satellite.sgp4(jd, fr)
-    if e != 0:
+    raw = _raw_state(satellite_name, observer_lat, observer_lon,
+                     observer_alt, timestamp)
+    if raw is None:
         return None
 
-    # TEME -> ECEF：绕 z 轴转 -GMST（jd_utc 即上面用于 sgp4 的同一时刻）
-    t_ut1 = (jd_utc - 2451545.0) / 36525.0
-    gmst_sec = (67310.54841 + (876600.0 * 3600.0 + 8640184.812866) * t_ut1
-                + 0.093104 * t_ut1 * t_ut1 - 6.2e-6 * t_ut1 ** 3)
-    gmst = math.radians((gmst_sec % 86400.0) / 240.0) % (2.0 * math.pi)
-    cg, sg = math.cos(-gmst), math.sin(-gmst)
-    sat_x = cg * r_teme[0] - sg * r_teme[1]
-    sat_y = sg * r_teme[0] + cg * r_teme[1]
-    sat_z = r_teme[2]
-
-    # 速度 TEME -> ECEF（含 Coriolis：v_ECEF = R·v_TEME - Ω×r）
-    omega_earth = 7.2921159e-5
-    vx = cg * v_teme[0] - sg * v_teme[1] + omega_earth * sat_y
-    vy = sg * v_teme[0] + cg * v_teme[1] - omega_earth * sat_x
-    vz = v_teme[2]
-
-    # 观测点 ECEF（WGS84 椭球）
-    obs_lat_rad = math.radians(observer_lat)
-    obs_lon_rad = math.radians(observer_lon)
-    earth_radius = 6378.137  # km
-    ecc2 = 0.00669437999014
-    sin_lat = math.sin(obs_lat_rad)
-    cos_lat = math.cos(obs_lat_rad)
-    n = earth_radius / math.sqrt(1.0 - ecc2 * sin_lat * sin_lat)
-    alt_km = observer_alt / 1000.0
-    obs_x = (n + alt_km) * cos_lat * math.cos(obs_lon_rad)
-    obs_y = (n + alt_km) * cos_lat * math.sin(obs_lon_rad)
-    obs_z = (n * (1.0 - ecc2) + alt_km) * sin_lat
-
-    # 站心矢量
-    dx = sat_x - obs_x
-    dy = sat_y - obs_y
-    dz = sat_z - obs_z
-    distance = math.sqrt(dx * dx + dy * dy + dz * dz)
-
-    # ENU 变换（正确基向量）
-    sin_lon, cos_lon = math.sin(obs_lon_rad), math.cos(obs_lon_rad)
-    east_comp = -sin_lon * dx + cos_lon * dy
-    north_comp = -sin_lat * cos_lon * dx - sin_lat * sin_lon * dy + cos_lat * dz
-    up_comp = cos_lat * cos_lon * dx + cos_lat * sin_lon * dy + sin_lat * dz
-
-    elevation = math.degrees(math.asin(max(-1.0, min(1.0, up_comp / distance)))) if distance > 0 else 0.0
-    azimuth = (math.degrees(math.atan2(east_comp, north_comp)) + 360.0) % 360.0
-
-    # 视线速度 = 卫星 ECEF 速度投影到站星方向
-    if distance > 0:
-        range_rate = (vx * dx + vy * dy + vz * dz) / distance  # km/s, 远离为正
-    else:
-        range_rate = 0.0
-
-    # 多普勒频移
+    # 多普勒：真视线速度（远离为正，故这里符号为 +）——与
+    # orbit.doppler_correction 的 doppler_shift_hz（频率偏移，靠近为正）相反。
     if satellite_name in SATELLITE_FREQUENCIES:
         freq_hz = SATELLITE_FREQUENCIES[satellite_name] * 1e6
-        c = 299792.458  # km/s
-        doppler = freq_hz * range_rate / c
+        doppler = freq_hz * raw.range_rate_kms / C_LIGHT
     else:
         doppler = 0.0
-        freq_hz = 0
 
     # 卫星星下点：与地面轨迹同一底层（ECEF → WGS-72 大地坐标）。
     # 旧实现按球坐标反解（半径用 WGS-84 赤道半径），同刻同 TLE 与
     # ground_track.satellite_subpoint 差 lat 0.17° 量级（探针 0.176°、
     # 回归用例 0.1708°）、高度差约 13 km。
-    try:
-        from .orbit import wgs72_ecef_km_to_llh
-    except ImportError:  # 脚本 / 直接运行时（mbdsdr_ai 目录已在 sys.path）
-        from orbit import wgs72_ecef_km_to_llh  # type: ignore
-    sat_lat, sat_lon, sat_alt = wgs72_ecef_km_to_llh(sat_x, sat_y, sat_z)
+    sat_lat, sat_lon, sat_alt = wgs72_ecef_km_to_llh(*raw.r_ecef_km)
 
     return SatellitePass(
         name=satellite_name,
-        elevation=elevation,
-        azimuth=azimuth,
-        distance_km=distance,
+        elevation=raw.elevation_deg,
+        azimuth=raw.azimuth_deg,
+        distance_km=raw.range_km,
         doppler_hz=doppler,
         latitude=sat_lat,
         longitude=sat_lon,
@@ -320,41 +292,48 @@ def compute_doppler_correction(
     observer_lat: float,
     observer_lon: float,
     observer_alt: float = 0.0,
+    timestamp: float = None,
 ) -> Dict[str, Any]:
-    """
-    计算卫星多普勒修正频率。
+    """计算卫星多普勒修正频率（真视线速度，与 orbit 同一内核）。
 
-    返回当前修正后的接收频率（考虑多普勒频移）。
+    返回 ``doppler_shift_hz`` 是**频率偏移**：正 = 接收频率变高（卫星靠近）。
+    注意与 :class:`SatellitePass` 的 ``doppler_hz`` 符号口径相反——后者是
+    距离变化率符号（远离为正），由过境链的上限统计使用，别混用。
+
+    ``timestamp`` 为 Unix UTC 秒；缺省取 TimeEngine（与天空视图同一时刻）。
     """
-    pos = compute_satellite_position(satellite_name, observer_lat, observer_lon, observer_alt)
-    if pos is None:
+    if satellite_name not in BUILTIN_TLE:
         return {"error": f"无法计算卫星 {satellite_name} 的位置"}
 
-    # 简化的多普勒计算（基于卫星高度和距离的近似）
-    # 实际多普勒需要卫星速度向量，这里用经验公式近似
-    earth_radius = 6378.137
-    orbital_radius = earth_radius + pos.altitude_km
-    orbital_speed = math.sqrt(398600.4418 / orbital_radius)  # km/s
+    try:
+        from .orbit import C_LIGHT
+    except ImportError:  # 脚本 / 直接运行时（mbdsdr_ai 目录已在 sys.path）
+        from orbit import C_LIGHT  # type: ignore
 
-    # 最大多普勒（卫星正上方时）
-    max_doppler = nominal_freq_hz * orbital_speed / 299792.458
+    raw = _raw_state(satellite_name, observer_lat, observer_lon,
+                     observer_alt, timestamp)
+    if raw is None:
+        return {"error": f"无法计算卫星 {satellite_name} 的位置"}
 
-    # 当前多普勒（基于仰角的近似：仰角越高，多普勒变化率越大）
-    elev_rad = math.radians(pos.elevation)
-    current_doppler = max_doppler * math.cos(elev_rad) * 0.5  # 简化
-
-    corrected_freq = nominal_freq_hz + current_doppler
+    # 频率偏移 = -f·v_los/c（远离时 v_los>0 -> 频率降低）
+    shift = -nominal_freq_hz * raw.range_rate_kms / C_LIGHT
+    corrected_freq = nominal_freq_hz + shift
+    # 上界：轨道速度对应的最大可能频移（不是本次过境实测峰值）。
+    # 视线速度 |v_los| ≤ |v_inertial|，故这是解析上界。
+    speed_kms = math.sqrt(sum(v * v for v in raw.v_teme_kmps))
+    max_doppler = nominal_freq_hz * speed_kms / C_LIGHT
 
     return {
         "satellite": satellite_name,
         "nominal_freq_mhz": nominal_freq_hz / 1e6,
         "corrected_freq_mhz": corrected_freq / 1e6,
-        "doppler_shift_hz": current_doppler,
+        "doppler_shift_hz": shift,
         "max_doppler_hz": max_doppler,
-        "elevation_deg": pos.elevation,
-        "azimuth_deg": pos.azimuth,
-        "distance_km": pos.distance_km,
-        "note": "多普勒为近似值，实际需要卫星速度向量",
+        "elevation_deg": raw.elevation_deg,
+        "azimuth_deg": raw.azimuth_deg,
+        "distance_km": raw.range_km,
+        "method": "sgp4-teme-ecef-real-velocity",
+        "note": "真视线速度（sgp4 TEME→ECEF），非经验近似",
     }
 
 
