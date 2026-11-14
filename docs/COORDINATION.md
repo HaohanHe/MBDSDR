@@ -2449,6 +2449,8 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `tools/axioms/current_stats.py` | 公理体检线/6ae85f56（基准落后数排除计数块与 §6.1 登记面（NON_COUNTING_PATHS，理由在常量注释）） | 2026-11-14 12:04 | 本笔 |
 | `tests/test_axioms_doc_current_stats.py` | 公理体检线/6ae85f56（回归：只改计数块/§6.1 的提交落后数为 0（去掉 exclude 必红）） | 2026-11-14 12:04 | 本笔 |
 | `docs/axioms.md` | 公理体检线/6ae85f56（过期上限段写明哪些文件不计入落后提交数） | 2026-11-14 12:04 | 本笔 |
+| `docs/known-red-register.md` | 判据存量收口/6ae85f56（K20 重开：记回归提交与 8f0c8c43 处置） | 2026-11-14 12:04 | 本笔 |
+| `tests/test_safe_commit_line_range.py` | 用例随闸线/6ae85f56（补 --declare 前提（3 条既有红）） | 2026-11-14 12:04 | 本笔 |
 
 > 上表各行均由 `claim` 台账推导：owner 原文与 `acquired_at` 直接取自台账，
 > 目的优先用台账里的 `claim_reason`，没有就如实写「未声明」，不补编。时间列只是

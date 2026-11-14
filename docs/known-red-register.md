@@ -1040,6 +1040,29 @@ baseline 56 → 58（`BUILT_AT` 同步 58），每条带 owner + reason：
   列表临时变长（含 `sat_track_panel.py:400 :: text`），本条以干净提交 `dad6324f`
   的读数为准，不把那部分算进 K20。该状态已于 2026-11-13 在 `5e0bb563` 收口。
 
+**重开（2026-11-14 全量体检，基线 `0afd039e`）**：`5e0bb563` 收口后**再次失守**，
+本次不抬基线，按「改文案 / 删透传 / 补自述」逐处判：
+
+- **回归提交**：`c2bbcfeb`（11-14 05:27「非模态通知条：有 remedy 的错误不再只有模态框」）
+  在 `desktop/notification_bar.py` 新增 2 处——`:126` `关闭通知`（4 字 <12）、
+  `:281` `setToolTip(suggestion)`（与标签可见文字逐字相同）；
+  `7db6cc09`（11-14 11:43「审计漏记」）在 `desktop/audit_alarm.py:155` 新增纯透传
+  `alarm_tooltip(self._snapshot)` 且未登记。
+- **体检读数**：`0afd039e` 上 3 failed——
+  `test_tooltip_baseline_only_shrinks`（点名 `notification_bar.py::关闭通知::too_short`）、
+  `test_baseline_file_stays_in_sync_with_counter`（`assert 3 == 4`）、
+  `test_upgraded_tooltips_meet_the_rules`；当前 HEAD 上另加
+  `test_every_passthrough_tooltip_is_registered` 点名 2 处
+  （`audit_alarm.py:155 :: alarm_tooltip(self._snapshot)`、`notification_bar.py:281 :: suggestion`）。
+- **处置**（`8f0c8c43`）：关闭按钮文案改成说明性长句
+  「关闭这条通知；同一问题再次触发时会重新出现」，**不往基线塞第 4 条**；
+  `suggestion_label` 的逐字透传直接删除（标签自己显示全文）；
+  审计 tooltip 补「为什么漏记、在哪查：」前缀让 tooltip 自述用途，不新增登记。
+- **基线只减**：`docs/tooltip-baseline.json` 仍 **3 条**、
+  `docs/tooltip-dynamic-baseline.json` 仍 **45 条**，两表一条未增。
+- **再检**：`python -m pytest tests/test_tooltip_guard.py tests/test_tooltip_dynamic_runtime.py
+  tests/test_audit_alarm.py -q` → **25 passed（20.62s）**。绑定价改为 `8f0c8c43`。
+
 **合并为一条而非四条**：同一文件、同一契约（`docs/discoverability.md` 三条规矩）、
 同一批转绿动作（补登记 / 改文案 / 删数值），拆开只会把一个修复批次记成 4 笔账。
 
