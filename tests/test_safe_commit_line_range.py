@@ -79,6 +79,15 @@ def _safe(repo, locks, tmp_path, *extra, message="test: 登记行\n"):
     )
 
 
+def _declare(repo, locks):
+    """先钉声明快照：``--exclude-hunk`` 的行号只在声明那一刻有效（⑳ ed3c09e5）。"""
+    return subprocess.run(
+        [sys.executable, str(SAFE), "--files", DOC, "--declare"],
+        cwd=str(repo), env=_env(repo, locks),
+        capture_output=True, text=True, encoding="utf-8", errors="replace",
+    )
+
+
 def _head_lines(repo):
     return _git(repo, "show", f"HEAD:{DOC}").stdout.splitlines()
 
@@ -96,6 +105,7 @@ def test_partial_hunk_exclusion_keeps_own_line_in_place(tmp_path):
     locks = tmp_path / "locks"
     repo = _repo(tmp_path)
     _add_three_adjacent_rows(repo)
+    assert _declare(repo, locks).returncode == 0
 
     # 自己那行在 1-based 第 8 行，别人两行是 9-10
     proc = _safe(repo, locks, tmp_path, "--exclude-hunk", f"{DOC}:9-10")
@@ -128,6 +138,7 @@ def test_full_hunk_exclusion_still_works(tmp_path):
     lines[7:7] = [OTHER_A, OTHER_B]          # 别人的两行，第 8-9 行（一个 hunk）
     lines[-1] = "## 7 其他（改）"             # 我的改动，第 11 行（另一个 hunk）
     (repo / DOC).write_text("\n".join(lines) + "\n", encoding="utf-8", newline="")
+    assert _declare(repo, locks).returncode == 0
 
     proc = _safe(repo, locks, tmp_path, "--exclude-hunk", f"{DOC}:8-9")
     out = proc.stdout + proc.stderr
@@ -198,6 +209,7 @@ def test_line_range_spanning_two_hunks_is_rejected(tmp_path):
     # 让中间那行与 HEAD 不同，才会真的断开成两个 hunk
     text = (repo / DOC).read_text(encoding="utf-8").replace("## 7 其他", "## 7 其他（改）")
     (repo / DOC).write_text(text, encoding="utf-8", newline="")
+    assert _declare(repo, locks).returncode == 0
 
     proc = _safe(repo, locks, tmp_path, "--exclude-hunk", f"{DOC}:8-10")
     out = proc.stdout + proc.stderr
