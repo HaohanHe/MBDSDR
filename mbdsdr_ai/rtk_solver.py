@@ -6,7 +6,7 @@ rtk_solver.py — RTK float 解算接口
 
 本模块依据公开 RTK/GNSS 标准方法独立实现 RTK 浮点解（float solution）骨架：
   - 双差观测组合（double-difference residuals）
-  - 扩展卡尔曼滤波：状态 = [位置(3), 接收机钟差, 对流层湿延迟, 各双差模糊度]
+  - 扩展卡尔曼滤波：状态 = [位置(3), 各双差模糊度]
   - 至少能跑通 float 解（位置输出）
   - LAMBDA 固定解标注 TODO 并留接口
 
@@ -61,24 +61,27 @@ class RTKFloatSolver:
 
     状态向量：
         x[0:3]  = 流动站 ECEF 位置
-        x[3]    = 流动站接收机钟差(m)
-        x[4]    = 对流层湿延迟(ZWD, m)
-        x[5:]   = 各双差模糊度(m)
+        x[3:]   = 各双差模糊度(m)
 
     双差残差：
         v = (P_rov_i - P_base_i) - (P_rov_j - P_base_j)
     H 行（视线方向单位向量）：
         H[k] = -e_rov_i[k] + e_rov_j[k]   for k=0,1,2
+
+    为什么没有钟差与对流层湿延迟状态：双差对同一接收机、同一卫星对做差，
+    接收机钟差与卫星钟差同时消去；对流层/电离层共模项也在两条单差之间
+    相消。二者在本设计矩阵里都没有对应列，KF 永远给不出更新——留在状态里
+    只会是一个永远估不出来的「假状态」（旧版 x[3] 钟差、x[4] ZWD 即此）。
+    因此只保留真正可观测的量：位置与各双差模糊度，每个状态列都必须在
+    ``_build_dd_equations`` 的 H 中有非零元。
     """
 
     def __init__(self, max_iter: int = 10, conv_tol: float = 1e-3,
-                 sigma_pos: float = 1.0, sigma_amb: float = 30.0,
-                 sigma_tropo: float = 0.3):
+                 sigma_pos: float = 1.0, sigma_amb: float = 30.0):
         self.max_iter = max_iter
         self.conv_tol = conv_tol
         self.sigma_pos = sigma_pos
         self.sigma_amb = sigma_amb
-        self.sigma_tropo = sigma_tropo
         # 状态与协方差（首次调用时初始化）
         self.x: Optional[np.ndarray] = None
         self.P: Optional[np.ndarray] = None
@@ -110,7 +113,7 @@ class RTKFloatSolver:
 
         返回 (v, H, R_diag)。
         简化：只处理共视卫星的伪距双差 + 载波相位双差（同频）。
-        不做电离层/对流层细分估计，对流层只在状态里加一个 ZWD。
+        双差已消去接收机钟差与共模大气延迟，因此状态里不设这两项。
         """
         # 索引对齐：基站/流动站按 prn 匹配
         base_by_prn = {o.prn: o for o in inp.base_obs}
@@ -207,16 +210,12 @@ class RTKFloatSolver:
         self.P = (np.eye(len(self.x)) - K @ H) @ self.P
 
     def _initialize_state(self, inp: RTKInput) -> None:
-        """首次调用初始化状态。"""
-        # 先用 SPP 近似位置（基站坐标 + 基线先验 0）
+        """首次调用初始化状态（位置 3 维；模糊度按需追加）。"""
+        # 先用基站坐标作位置初值（基线先验 0）
         x0 = np.array([
             inp.base_ecef[0], inp.base_ecef[1], inp.base_ecef[2],
-            0.0,   # 钟差
-            0.0,   # ZWD
         ])
-        P0 = np.diag([self.sigma_pos ** 2] * 3 +
-                     [1e4,                    # 钟差
-                      self.sigma_tropo ** 2])  # ZWD
+        P0 = np.diag([self.sigma_pos ** 2] * 3)
         self.x = x0
         self.P = P0
         self._amb_index = {}
@@ -277,7 +276,7 @@ class RTKFloatSolver:
             "fix_type": "RTK_FLOAT",
             "num_sats": len(common),
             "hdop": hdop,
-            "num_ambiguities": max(0, len(self.x) - 5),
+            "num_ambiguities": max(0, len(self.x) - 3),
             "note": "float only, fixed pending (LAMBDA TODO)",
             "error_budget": error_budget,
         }
