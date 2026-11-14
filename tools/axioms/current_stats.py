@@ -48,6 +48,8 @@ BEGIN_MARK = "<!-- axioms-current-stats:begin"
 END_MARK = "<!-- axioms-current-stats:end -->"
 FINGERPRINT_KEY = "校验指纹 sha256:"
 DOC_REL_PATH = os.path.join("docs", "axioms.md")
+#: git pathspec 的分隔符是正斜杠；显式归一化，不依赖 Git for Windows 的路径转换。
+DOC_POSIX_PATH = DOC_REL_PATH.replace(os.sep, "/")
 
 #: 基准过期上限（双条件、先到者）：超过任一，判据从「提示」升级为红。
 #: 24 小时：正常一天之内会重生成一次；再久「当前计数」就跨过了发布/排班
@@ -156,7 +158,7 @@ def commits_since(root=None, baseline_sha: str = "", head: str = "HEAD") -> Opti
     try:
         out = subprocess.run(
             ["git", "rev-list", "--count", f"{baseline_sha}..{head}", "--", ".",
-             f":(exclude){DOC_REL_PATH}"],
+             f":(exclude){DOC_POSIX_PATH}"],
             cwd=root or ROOT, capture_output=True, text=True, check=True)
         return int(out.stdout.strip())
     except (OSError, ValueError, subprocess.CalledProcessError):

@@ -15,7 +15,9 @@
 4. ``test_stale_within_cap_only_hints``：落后但未超上限 → 只提示不红；
 5. ``test_same_baseline_wrong_tool_output_fails``：基准未变、工具当次输出
    与文档不符（真错）→ 必须失败；
-6. ``test_doc_block_is_verifiable``：真实文档块必须能通过三种检查。
+6. ``test_commits_since_ignores_doc_only_commits``：只重写计数块的提交不计入
+   落后笔数（否则重生成那一笔自己会把提示重新点亮）；
+7. ``test_doc_block_is_verifiable``：真实文档块必须能通过三种检查。
 
 反证 1：把 ``verify_doc`` 的「基准 != HEAD 就只提示」分支改回「一律与传入的
 工具输出比对」，``test_head_advanced_only_hints`` 必红。
@@ -28,6 +30,8 @@
 from __future__ import annotations
 
 import os
+import shutil
+import subprocess
 import sys
 from datetime import datetime, timedelta, timezone
 
@@ -42,6 +46,7 @@ from tools.axioms.current_stats import (  # noqa: E402
     FINGERPRINT_KEY,
     MAX_STALE_COMMITS,
     MAX_STALE_HOURS,
+    commits_since,
     fingerprint,
     parse_block,
     verify_doc,
@@ -138,6 +143,43 @@ def test_same_baseline_wrong_tool_output_fails():
     res = verify_doc(doc, head_sha=BASELINE, tool_body=OTHER_BODY)
     assert not res.ok
     assert "同一基准" in res.error
+
+
+def test_commits_since_ignores_doc_only_commits(tmp_path):
+    """只重写计数块的提交不算「落后」，否则重生成完提示又被点亮。
+
+    反证：去掉 ``commits_since`` 里的 ``:(exclude)``，本用例第二段断言
+    （doc-only 提交后仍为 0）必红。
+    """
+    if not shutil.which("git"):
+        import pytest
+        pytest.skip("环境没有 git")
+    repo = tmp_path / "repo"
+    repo.mkdir()
+
+    def git(*args):
+        subprocess.run(["git", *args], cwd=repo, check=True,
+                       capture_output=True, text=True)
+
+    def commit(name: str, text: str) -> None:
+        (repo / name).parent.mkdir(parents=True, exist_ok=True)
+        (repo / name).write_text(text, encoding="utf-8")
+        git("add", name)
+        git("commit", "-m", f"edit {name}")
+
+    git("init")
+    git("config", "user.email", "t@example.invalid")
+    git("config", "user.name", "t")
+    commit("a.py", "x = 1\n")
+    baseline = subprocess.run(["git", "rev-parse", "HEAD"], cwd=repo, check=True,
+                              capture_output=True, text=True).stdout.strip()
+    assert commits_since(str(repo), baseline) == 0
+    # 只改计数块所在的文档：不改变扫描面，不算落后
+    commit(os.path.join("docs", "axioms.md"), "计数块\n")
+    assert commits_since(str(repo), baseline) == 0
+    # 改了扫描面：算 1 笔
+    commit("b.py", "y = 2\n")
+    assert commits_since(str(repo), baseline) == 1
 
 
 def test_doc_block_is_verifiable():
