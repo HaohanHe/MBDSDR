@@ -72,7 +72,7 @@ def _tle_lines():
 
 
 def _receiver_geodetic():
-    lon, lat, alt_m = ecef_to_geodetic(RECEIVER_ECEF_M)
+    lat, lon, alt_m = ecef_to_geodetic(RECEIVER_ECEF_M)
     return lat, lon, alt_m
 
 

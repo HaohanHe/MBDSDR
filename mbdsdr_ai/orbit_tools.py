@@ -167,7 +167,7 @@ def _coord_geodetic_to_ecef(args):
 
 def _coord_ecef_to_geodetic(args):
     try:
-        lon, lat, alt = od.ecef_to_geodetic(np.asarray(args["ecef"], dtype=float))
+        lat, lon, alt = od.ecef_to_geodetic(np.asarray(args["ecef"], dtype=float))
         return ToolResult(success=True, content=(
             f"经纬高: ({lon:.6f}°, {lat:.6f}°, {alt:.3f} m)"
         ), data={"lon_deg": lon, "lat_deg": lat, "alt_m": alt})

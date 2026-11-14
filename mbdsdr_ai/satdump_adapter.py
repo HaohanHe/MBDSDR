@@ -25,6 +25,8 @@ from typing import List, Optional, Tuple
 
 import numpy as np
 
+from .geodesy import WGS84, ecef_to_geodetic_km, geodetic_to_ecef_km
+
 logger = logging.getLogger(__name__)
 
 # ======================================================================
@@ -34,11 +36,12 @@ logger = logging.getLogger(__name__)
 #   f  = 1/rf                // 扁率
 #   b  = a*(1-f)             // 半短轴 (km)
 # ======================================================================
-WGS84_A_KM = 6378.137
-WGS84_RF = 298.257223563
-WGS84_F = 1.0 / WGS84_RF
-WGS84_B_KM = WGS84_A_KM * (1.0 - WGS84_F)
-WGS84_E2 = (WGS84_A_KM ** 2 - WGS84_B_KM ** 2) / (WGS84_A_KM ** 2)  # 第一偏心率^2
+# 唯一定义在 geodesy.WGS84（米制）；km 旧名保留给 tests/satdump_test.py 断言。
+WGS84_A_KM = WGS84.a_m / 1000.0
+WGS84_RF = 1.0 / WGS84.f
+WGS84_F = WGS84.f
+WGS84_B_KM = WGS84.b_m / 1000.0
+WGS84_E2 = WGS84.e2  # 第一偏心率^2
 
 # ======================================================================
 # LRPT 常量（METEOR LRPT 公开下行参数 + CCSDS 信道编码标准）
@@ -85,48 +88,14 @@ HRPT_SCAN_ANGLE_DEG = 55.37 * 2.0   # AVHRR 扫描镜 ±55.37°，全幅 ~110.74
 #   xyz2lla()  Bowring 迭代公式
 # ======================================================================
 def lla_to_ecef(lat_deg: float, lon_deg: float, alt_km: float) -> np.ndarray:
-    """WGS84 大地坐标(度, km) -> ECEF (km)。
-
-    WGS84 lla->ecef 标准公式
-      N = a / sqrt(1 - es*sin^2(lat))
-      x = (N+alt)*cos(lat)*cos(lon)
-      y = (N+alt)*cos(lat)*sin(lon)
-      z = ((1-es)*N + alt)*sin(lat)
-    """
-    lat = math.radians(lat_deg)
-    lon = math.radians(lon_deg)
-    es = WGS84_E2
-    n = WGS84_A_KM / math.sqrt(1.0 - es * math.sin(lat) ** 2)
-    x = (n + alt_km) * math.cos(lat) * math.cos(lon)
-    y = (n + alt_km) * math.cos(lat) * math.sin(lon)
-    z = ((1.0 - es) * n + alt_km) * math.sin(lat)
-    return np.array([x, y, z], dtype=float)
+    """WGS84 大地坐标(度, km) -> ECEF (km)。委托 ``geodesy.geodetic_to_ecef_km``。"""
+    return np.array(geodetic_to_ecef_km(lat_deg, lon_deg, alt_km, WGS84))
 
 
 def ecef_to_lla(pos_km: np.ndarray) -> Tuple[float, float, float]:
-    """ECEF (km) -> (lat_deg, lon_deg, alt_km)。Bowring 法。
-
-    Bowring 迭代 ecef->lla 标准公式
-      p   = sqrt(x^2+y^2)
-      th  = atan2(a*z, b*p)
-      lon = atan2(y, x)
-      lat = atan2(z + ep^2*b*sin^3(th), p - es*a*cos^3(th))
-      alt = |P| - |lla2xyz(lat,lon,0)|
-    """
-    x, y, z = float(pos_km[0]), float(pos_km[1]), float(pos_km[2])
-    a = WGS84_A_KM
-    b = WGS84_B_KM
-    es = WGS84_E2
-    ep = math.sqrt((a * a - b * b) / (b * b))
-    p = math.sqrt(x * x + y * y)
-    th = math.atan2(a * z, b * p)
-    lon = math.atan2(y, x)
-    lat = math.atan2(z + ep * ep * b * math.sin(th) ** 3,
-                     p - es * a * math.cos(th) ** 3)
-    # alt via reference surface
-    n = a / math.sqrt(1.0 - es * math.sin(lat) ** 2)
-    alt = p / math.cos(lat) - n
-    return math.degrees(lat), math.degrees(lon), alt
+    """ECEF (km) -> (lat_deg, lon_deg, alt_km)。委托 ``geodesy.ecef_to_geodetic_km``。"""
+    return ecef_to_geodetic_km(float(pos_km[0]), float(pos_km[1]),
+                               float(pos_km[2]), WGS84)
 
 
 # ======================================================================

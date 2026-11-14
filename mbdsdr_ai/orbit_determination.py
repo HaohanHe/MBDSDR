@@ -35,6 +35,7 @@ from typing import List, Tuple, Dict, Any, Optional
 import numpy as np
 
 from .station import station_from_config
+from .geodesy import WGS84, geodetic_to_ecef_km
 
 # 课件/物理常数（统一 km-s 单位制）
 C_LIGHT_MS = 299792458.0          # m/s
@@ -42,9 +43,10 @@ C_LIGHT_KMS = 299792.458          # km/s
 F0_DEFAULT_HZ = 2271.0e6          # LRO S 波段下行标称频率
 GM_EARTH = 398600.4418            # km^3/s^2
 OMEGA_E = 7.292115e-5             # rad/s 地球自转角速度
-WGS84_A = 6378.137                # km 赤道半径
-WGS84_F = 1.0 / 298.257223563
-WGS84_E2 = WGS84_F * (2.0 - WGS84_F)
+# WGS-84 椭球：唯一定义在 geodesy.WGS84（米制），这里换算成 km 保留旧名。
+WGS84_A = WGS84.a_m / 1000.0      # km 赤道半径
+WGS84_F = WGS84.f
+WGS84_E2 = WGS84.e2
 
 # 月球常数（LRO 参考轨道用）
 GM_MOON = 4902.8005                # km^3/s^2
@@ -106,15 +108,8 @@ def eci_to_ecef(pos_eci: np.ndarray, vel_eci: np.ndarray,
 
 
 def geodetic_to_ecef(lat_deg: float, lon_deg: float, alt_km: float) -> np.ndarray:
-    """WGS-84 大地坐标 -> ECEF (km)。"""
-    lat = math.radians(lat_deg)
-    lon = math.radians(lon_deg)
-    sin_lat, cos_lat = math.sin(lat), math.cos(lat)
-    n = WGS84_A / math.sqrt(1.0 - WGS84_E2 * sin_lat * sin_lat)
-    x = (n + alt_km) * cos_lat * math.cos(lon)
-    y = (n + alt_km) * cos_lat * math.sin(lon)
-    z = (n * (1.0 - WGS84_E2) + alt_km) * sin_lat
-    return np.array([x, y, z])
+    """WGS-84 大地坐标(°,°,km) -> ECEF(km)。委托 ``geodesy.geodetic_to_ecef_km``。"""
+    return np.array(geodetic_to_ecef_km(lat_deg, lon_deg, alt_km, WGS84))
 
 
 def ecef_to_enu_axes(lat_deg: float, lon_deg: float) -> np.ndarray:
@@ -344,7 +339,7 @@ def pseudorange_rate_and_jacobian(state: np.ndarray,
 # ═══════════════════════════════════════════════════════
 
 J2 = 1.08262668e-3                 # 地球二阶带谐系数
-WGS84_RE = 6378.137                # km，J2 归一化赤道半径
+WGS84_RE = WGS84_A                 # km，J2 归一化赤道半径（与椭球同源）
 
 
 def _ecef_accel(r: np.ndarray, v: np.ndarray) -> np.ndarray:

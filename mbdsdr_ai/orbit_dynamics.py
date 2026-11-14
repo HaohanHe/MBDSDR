@@ -25,6 +25,8 @@ from typing import Optional, Tuple
 
 import numpy as np
 
+from .geodesy import WGS72, ecef_to_geodetic_m, geodetic_to_ecef_m
+
 try:
     from scipy.integrate import solve_ivp
     _HAS_SCIPY = True
@@ -37,10 +39,11 @@ OMEGA_E = 7.2921151467e-5     # rad/s, 地球自转角速度
 C_LIGHT = 299792458.0         # m/s, 真空光速（仅供频率换算用）
 C_LIGHT_KMS = 299792.458       # km/s, 真空光速（内部量线统一用这个）
 
-# WGS-72 椭球（与 orbit.py / SGP4 内核一致，避免米级系统差）
-WGS72_A = 6378135.0           # m, 赤道半径
-WGS72_F = 1.0 / 298.26        # 扁率
-WGS72_E2 = WGS72_F * (2.0 - WGS72_F)
+# WGS-72 椭球：唯一定义在 geodesy.WGS72（与 orbit.py / SGP4 内核一致）。
+# 三个旧名保留是因为 ground_track.py 与测试直接引用 ``WGS72_A``。
+WGS72_A = WGS72.a_m           # m, 赤道半径
+WGS72_F = WGS72.f             # 扁率
+WGS72_E2 = WGS72.e2
 
 # 状态各分量量纲缩放（RLS 收敛判据用）：[m,m,m,m/s,m/s,m/s,s]
 STATE_SCALE = np.array([1e6, 1e6, 1e6, 1e3, 1e3, 1e3, 1e-6])
@@ -585,23 +588,15 @@ def eci_to_ecef(pos_eci, vel_eci, timestamp: float):
 
 
 def geodetic_to_ecef(lat_deg: float, lon_deg: float, alt_m: float) -> np.ndarray:
-    """WGS-72 大地坐标(°,°,m) -> ECEF(m)。"""
-    lat = math.radians(lat_deg)
-    lon = math.radians(lon_deg)
-    sin_lat, cos_lat = math.sin(lat), math.cos(lat)
-    n = WGS72_A / math.sqrt(1.0 - WGS72_E2 * sin_lat * sin_lat)
-    return np.array([
-        (n + alt_m) * cos_lat * math.cos(lon),
-        (n + alt_m) * cos_lat * math.sin(lon),
-        (n * (1.0 - WGS72_E2) + alt_m) * sin_lat,
-    ])
+    """WGS-72 大地坐标(°,°,m) -> ECEF(m)。委托 ``geodesy.geodetic_to_ecef_m``。"""
+    return np.array(geodetic_to_ecef_m(lat_deg, lon_deg, alt_m, WGS72))
 
 
 def ecef_to_enu(target_ecef, receiver_ecef) -> np.ndarray:
     """ECEF 相对向量 -> 站心 ENU（东/北/天，m）。"""
     rec = np.asarray(receiver_ecef, dtype=float)
     tgt = np.asarray(target_ecef, dtype=float)
-    lon, lat, _ = ecef_to_geodetic(rec)
+    lat, lon, _ = ecef_to_geodetic(rec)
     lon_r, lat_r = math.radians(lon), math.radians(lat)
     d = tgt - rec
     rot = np.array([
@@ -613,20 +608,16 @@ def ecef_to_enu(target_ecef, receiver_ecef) -> np.ndarray:
 
 
 def ecef_to_geodetic(pos_ecef) -> Tuple[float, float, float]:
-    """ECEF(m) -> (经度°, 纬度°, 高度 m)。WGS-72，迭代法。"""
+    """ECEF(m) -> **(纬度°, 经度°, 高度 m)**。WGS-72，委托
+    ``geodesy.ecef_to_geodetic_m``（Bowring 迭代）。
+
+    返回顺序与 ``satdump_adapter.ecef_to_lla`` / ``geodesy.ecef_to_geodetic_m``
+    一致。历史上本函数返回 (经度, 纬度, 高度)，两个直接调用方
+    （``ecef_to_enu`` 与 ``orbit_tools._coord_ecef_to_geodetic``）已随之改正；
+    接错就是经纬对调且不会报错，故不留旧顺序别名。
+    """
     x, y, z = (float(v) for v in np.asarray(pos_ecef, dtype=float)[:3])
-    lon = math.atan2(y, x)
-    p = math.hypot(x, y)
-    lat = math.atan2(z, p * (1.0 - WGS72_E2))
-    for _ in range(6):
-        sin_lat = math.sin(lat)
-        n = WGS72_A / math.sqrt(1.0 - WGS72_E2 * sin_lat * sin_lat)
-        alt = p / math.cos(lat) - n
-        lat = math.atan2(z, p * (1.0 - WGS72_E2 * n / (n + alt)))
-    sin_lat = math.sin(lat)
-    n = WGS72_A / math.sqrt(1.0 - WGS72_E2 * sin_lat * sin_lat)
-    alt = p / math.cos(lat) - n
-    return math.degrees(lon), math.degrees(lat), alt
+    return ecef_to_geodetic_m(x, y, z, WGS72)
 
 
 def enu_to_az_el(enu) -> Tuple[float, float]:

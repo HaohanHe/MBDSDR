@@ -165,14 +165,14 @@ class TestCoordinates:
     def test_geodetic_ecef_roundtrip(self):
         lat, lon, alt = 39.9, 116.4, 50.0
         ecef = od.geodetic_to_ecef(lat, lon, alt)
-        lon2, lat2, alt2 = od.ecef_to_geodetic(ecef)
+        lat2, lon2, alt2 = od.ecef_to_geodetic(ecef)
         assert abs(lat - lat2) < 1e-6 and abs(lon - lon2) < 1e-6
         assert abs(alt - alt2) < 1e-3
 
     def test_enu_az_el_zenith(self):
         """正上方目标：仰角 90°。"""
         rec = od.geodetic_to_ecef(39.9, 116.4, 0.0)
-        lon, lat, _ = od.ecef_to_geodetic(rec)
+        lat, lon, _ = od.ecef_to_geodetic(rec)
         lon_r, lat_r = np.radians(lon), np.radians(lat)
         up = np.array([
             np.cos(lat_r) * np.cos(lon_r),
