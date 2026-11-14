@@ -2280,6 +2280,8 @@ class MainWindow(QMainWindow):
         # 气象云图（原中央页签 → 右栏 App）
         self.weather_panel = self._create_panel("weather")
         self._add_right_tab("气象云图", self.weather_panel, "weather_dock")
+        # 12.1：真录链自带的 FEC 纠错统计 → 状态面板「信号质量」行
+        self.weather_panel.decode_result.connect(self._on_weather_decode_result)
 
         # 新时空（原中央页签 → 右栏 App）
         self.new_spacetime_panel = self._create_panel("new_spacetime")
@@ -7269,6 +7271,17 @@ class MainWindow(QMainWindow):
         """当前占用设备的身份键；未连接/身份确认失败时返回 None（门不参与）。"""
         key = getattr(getattr(self, "device_panel", None), "_current_dev_key", None)
         return key or None
+
+    def _on_weather_decode_result(self, res: dict):
+        """气象面板解码终态 → 状态面板 FEC 质量行（12.1）。
+
+        只搬真录链自带 ``rs_*`` 聚合的 meta；别的链路（GK-2A / APT 等）没有
+        这些键就不动质量行——绝不拿别处的数字顶上去。
+        """
+        meta = res.get("meta") if isinstance(res, dict) else None
+        if not isinstance(meta, dict) or "rs_frames" not in meta:
+            return
+        self.status_panel.set_fec_quality(meta)
 
     def _panels_set_sdr_connected(self, connected: bool, session_initial=None):
         """把真实 SDR 连接状态同步到各操作控件。

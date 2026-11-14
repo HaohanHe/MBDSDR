@@ -38,6 +38,7 @@ __all__ = [
     "E2EResult",
     "RecordingImageResult",
     "decode_recording_to_image",
+    "summarize_rs_errors",
 ]
 
 #: 真录链的固定符号率与 ASM（Meteor-M2 LRPT 72 ksym/s，CCSDS TM 同步字）
@@ -253,6 +254,51 @@ def _resample_for_symbols(iq: np.ndarray, sample_rate: float,
             target, ratio.numerator, ratio.denominator)
 
 
+def summarize_rs_errors(frames) -> Dict:
+    """把逐帧 RS 纠错数聚合成质量口径（第二批 12.1）。
+
+    参数:
+        frames: 可迭代对象，元素是一帧 4 块的纠错符号数序列
+            （``decode_cadu`` / ``decode_cadu_erasure`` 的 ``rs_errors``；
+            ``-1`` 表示该块不可纠）。
+
+    口径（与 goestools ``Packetizer::Details.reedSolomonBytes`` 对齐）：
+      - 一帧只要有任一块 ``-1`` 即「不可纠」，不参与均值与最大值；
+      - ``rs_corrected_frames`` 统计「至少纠了 1 个符号」的帧；
+      - ``rs_max_errors`` / ``rs_mean_errors`` 以**帧**为单位（4 块之和），
+        单位都是 RS 符号；
+      - 没有任何帧时全部给空值，绝不拿 0 冒充「零纠错」。
+
+    返回 dict：``rs_frames`` / ``rs_corrected_frames`` / ``rs_max_errors`` /
+    ``rs_uncorrectable_frames`` / ``rs_mean_errors``。
+    """
+    total_frames = 0
+    corrected_frames = 0
+    uncorrectable_frames = 0
+    max_errors = 0
+    symbol_sum = 0
+    for frame in frames:
+        errs = [int(e) for e in frame]
+        total_frames += 1
+        if any(e < 0 for e in errs):
+            uncorrectable_frames += 1
+            continue
+        corrected = sum(errs)
+        symbol_sum += corrected
+        max_errors = max(max_errors, corrected)
+        if corrected > 0:
+            corrected_frames += 1
+    decodable = total_frames - uncorrectable_frames
+    return {
+        "rs_frames": total_frames,
+        "rs_corrected_frames": corrected_frames,
+        "rs_max_errors": max_errors if decodable > 0 else None,
+        "rs_uncorrectable_frames": uncorrectable_frames,
+        "rs_mean_errors": (round(symbol_sum / decodable, 3)
+                           if decodable > 0 else None),
+    }
+
+
 def decode_recording_to_image(
     iq: np.ndarray,
     sample_rate: float,
@@ -274,7 +320,9 @@ def decode_recording_to_image(
     写成用户能看懂的原因（绝不拿半幅图或噪声图冒充成功）。
     """
     res = RecordingImageResult()
-    stats: Dict = {"chain": "lrpt_pipeline.real"}
+    # 先把 FEC 聚合键以空态铺好：链路在 sync/decode 前失败时消费者也能拿到
+    # 确定的键（计数 0、最大/均值 None），不用猜「没有键」是不是零纠错。
+    stats: Dict = {"chain": "lrpt_pipeline.real", **summarize_rs_errors([])}
     res.stats = stats
     try:
         arr = np.asarray(iq, dtype=np.complex128)
@@ -325,6 +373,7 @@ def decode_recording_to_image(
     need_bits = SYNC_BITS + (CADU_SIZE * 8 + 6) * 2
     payloads: List[bytes] = []
     asm_hits = 0
+    frame_errors: List[List[int]] = []
     for c in kept:
         start = c.sync_symbol_index * 2
         end = min(start + need_bits, soft.size)
@@ -345,6 +394,9 @@ def decode_recording_to_image(
                     raw[:CADU_SIZE], rel[:CADU_SIZE], order="woven")
             except (ValueError, IndexError):
                 continue
+            # 12.1：ASM 已验证的帧都留下逐块纠错数（含后面因结构判据被
+            # 拒的帧）——「这帧纠了多少」是信道质量，不因结构判据而消失。
+            frame_errors.append(list(errs))
             # 全 4 块可纠 + 结构判据（合法 TM VCDU 主头 version 恒为 1）：
             # 擦除辅助放宽到 2e+f≤32 后仍可能纠到别的合法码字，只能靠
             # 协议结构剔除（真录实测 10 条里 1 条 version=2 属此类）。
@@ -354,6 +406,7 @@ def decode_recording_to_image(
             break
     stats["n_asm"] = asm_hits
     stats["n_valid_vcdu"] = len(payloads)
+    stats.update(summarize_rs_errors(frame_errors))
     res.payloads = payloads
     if asm_hits == 0:
         res.stage = "decode"

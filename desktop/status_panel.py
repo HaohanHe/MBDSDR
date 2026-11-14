@@ -302,6 +302,31 @@ def format_decode_result(tool_name: str, result) -> dict:
             "remedy": remedy}
 
 
+def format_fec_quality(stats) -> str:
+    """真录链 FEC 纠错统计 → 一行质量读数（第二批 12.1）。
+
+    ``stats`` 来自 ``lrpt_pipeline.summarize_rs_errors``。缺键/无帧一律「—」，
+    不拿 0 冒充「零纠错」；不可纠帧数单独露出，别让用户以为「纠错 0 帧」
+    等于「信号没问题」。
+    """
+    if not isinstance(stats, dict):
+        return _EMPTY
+    frames = stats.get("rs_frames")
+    if not isinstance(frames, int) or frames <= 0:
+        return _EMPTY
+    corrected = stats.get("rs_corrected_frames")
+    uncorrectable = stats.get("rs_uncorrectable_frames")
+    max_errors = stats.get("rs_max_errors")
+    try:
+        corrected_txt = str(int(corrected or 0))
+        uncorrectable_txt = str(int(uncorrectable or 0))
+    except (TypeError, ValueError):
+        return _EMPTY
+    max_txt = _EMPTY if max_errors is None else str(int(max_errors))
+    return (f"纠错 {corrected_txt}/{frames} 帧 / 最大 {max_txt} 符号 / "
+            f"不可纠 {uncorrectable_txt} 帧")
+
+
 class StatusPanel(QWidget):
     """设备状态面板。"""
 
@@ -313,6 +338,7 @@ class StatusPanel(QWidget):
         self._gain_intent_db = None
         self._last_gain_db = None        # 最近一次后端回读值，供意图变化时重判
         self.decode_last = None          # 最近一次解码结果的显示快照（测试可查）
+        self.fec_last = None             # 最近一次 FEC 纠错统计（12.1，测试可查）
         self._build_ui()
         self._start_utc_clock()
         # 初始即未连接：SDR 相关卡片整组置灰，绝不错误呈现"有数据"
@@ -390,6 +416,13 @@ class StatusPanel(QWidget):
         self.level_bar.setMaximumHeight(16)
         self._set_level_bar_color(tokens().COLORS["gray_300"])  # 灰色（无信号）
         signal_layout.addWidget(self.level_bar, 2, 3)
+
+        # FEC 纠错量（12.1）：真录链每帧 RS 纠了多少，直接决定「这信号还能不能救」
+        signal_layout.addWidget(QLabel("FEC 纠错:"), 3, 0)
+        self.fec_value = QLabel("—")
+        self.fec_value.setObjectName("statusValue")
+        self.fec_value.setWordWrap(True)
+        signal_layout.addWidget(self.fec_value, 3, 1, 1, 3)
 
         layout.addWidget(self.signal_group)
 
@@ -1227,4 +1260,9 @@ class StatusPanel(QWidget):
         self.decode_summary.setText(view["summary"])
         self.decode_detail.setPlainText(view["detail"])
         self.decode_detail.setVisible(True)
+
+    def set_fec_quality(self, stats) -> None:
+        """真录链 FEC 纠错统计上屏（12.1）；无统计一律「—」，不伪造读数。"""
+        self.fec_last = stats if isinstance(stats, dict) else None
+        self.fec_value.setText(format_fec_quality(stats))
 

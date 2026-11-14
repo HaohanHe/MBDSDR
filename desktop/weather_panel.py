@@ -475,6 +475,10 @@ class DecodeWorker(QObject):
 class WeatherPanel(QWidget):
     """气象卫星云图面板：真实录制/实时 IQ → mbdsdr_ai 解码 → QPixmap。"""
 
+    #: 解码终态（原样转发 worker 的 result dict）。主窗口据此把真录链自带的
+    #: FEC 纠错统计送进状态面板质量行（12.1）；面板本身不解释这些数字。
+    decode_result = Signal(dict)
+
     def __init__(self, parent: Optional[QWidget] = None):
         super().__init__(parent)
         self._c = _theme_colors()
@@ -930,6 +934,8 @@ class WeatherPanel(QWidget):
         QMessageBox.critical(self, "解码错误", text)
 
     def _on_result(self, res: dict):
+        # 12.1：先转发原始终态（成功/失败都发），质量行由接收方决定怎么用。
+        self.decode_result.emit(dict(res or {}))
         if res.get("ok") and res.get("png") and os.path.exists(res["png"]):
             self._current_png = res["png"]
             self._frame_count += 1
