@@ -59,6 +59,13 @@ BOOKMARK_GROUPS = [
 _GROUP_LABEL = dict(BOOKMARK_GROUPS)
 _GROUP_KEY = {v: k for k, v in BOOKMARK_GROUPS}
 
+#: 书签列表一次最多渲染的行数。「搜索」框每敲一个键都会走 ``refresh_list``，
+#: 渲染开销跟随命中行数：同机实测 250 行 3.7 ms、500 行 11 ms、1000 行
+#: 18.7 ms、5000 行 194 ms、20000 行 2608 ms。取 500（≈11 ms/键，低于
+#: 一帧），超出部分不静默丢：状态栏明说还有多少条没显示。
+#: 复跑入口：``scripts/repro/2026-11-14-list-render-baseline.py --only bookmark``。
+MAX_RENDERED_BOOKMARKS = 500
+
 
 class BookmarkPanel(QWidget):
     """书签管理器：分组 + 列表 + 搜索 + CRUD + CSV + nearest。"""
@@ -202,9 +209,10 @@ class BookmarkPanel(QWidget):
             items: List = self._mgr.search(q) if q else self._mgr.all()
         except Exception:  # noqa: BLE001
             items = []
-        for bm in items:
-            if self._current_group and (bm.group or "") != self._current_group:
-                continue
+        matched = [bm for bm in items
+                   if not self._current_group
+                   or (bm.group or "") == self._current_group]
+        for bm in matched[:MAX_RENDERED_BOOKMARKS]:
             it = QTreeWidgetItem([
                 bm.name or "(未命名)",
                 f"{bm.frequency_hz/1e6:.4f}",
@@ -213,7 +221,13 @@ class BookmarkPanel(QWidget):
             ])
             it.setData(0, Qt.UserRole, self._bookmark_to_dict(bm))
             self.tree.addTopLevelItem(it)
-        self.status_label.setText(f"{self.tree.topLevelItemCount()} 条书签")
+        hidden = max(0, len(matched) - MAX_RENDERED_BOOKMARKS)
+        if hidden:
+            self.status_label.setText(
+                f"显示前 {MAX_RENDERED_BOOKMARKS} 条，另有 {hidden} 条未显示："
+                "输入关键词缩小范围")
+        else:
+            self.status_label.setText(f"{self.tree.topLevelItemCount()} 条书签")
         self._sync_selection_actions()
 
     @staticmethod

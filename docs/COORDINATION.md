@@ -2210,6 +2210,8 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `mbdsdr_ai/ground_track.py` | 时空核对线/timeline-now（第2项：轨迹步长误差界） | 2026-11-14 09:14 | 本笔 |
 | `mbdsdr_ai/sat_passes.py` | 时空核对线/timeline-now（第2项：trail 步长误差界） | 2026-11-14 09:14 | 本笔 |
 | `tests/test_ground_track_step_bound.py` | 时空核对线/timeline-now（第2项：步长误差界判据） | 2026-11-14 09:14 | 本笔 |
+| `desktop/bookmark_panel.py` | 统一搜索性能线/6ae85f56（书签列表渲染上限 500 + 未显示条数提示（实测 5000 行 194ms）） | 2026-11-14 09:15 | 本笔 |
+| `tests/test_bookmark_panel_result_cap.py` | 统一搜索性能线/6ae85f56（书签列表上限判据与去上限反证） | 2026-11-14 09:15 | 本笔 |
 | `tools/axioms/axiom_rules.py` | 公理体检线/6ae85f56（Task1: 公理 ID→规则名单一映射） | 2026-11-14 09:15 | 本笔 |
 | `scripts/axioms.py` | 公理体检线/6ae85f56（Task1: --rule/--self-test-only 共用 Axx 过滤） | 2026-11-14 09:15 | 本笔 |
 | `tests/test_axioms_rule_filter.py` | 公理体检线/6ae85f56（Task1: 两入口整流相同与映射反证） | 2026-11-14 09:15 | 本笔 |
