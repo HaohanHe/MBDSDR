@@ -249,6 +249,16 @@ class BookmarkPanel(QWidget):
         return it.data(0, Qt.UserRole)
 
     # ------------------------------------------------------------ 操作
+    def _warn_action_failed(self, title: str, what: str, exc, next_step: str):
+        """操作失败的统一三段式：发生了什么 / 原因 / 下一步。
+
+        只报异常原文等于让用户自己猜该干什么；这里把「未落盘、原数据还在」
+        和可执行的下一步一并写死，五个写操作共用同一口径。
+        """
+        QMessageBox.warning(
+            self, title,
+            f"{what}\n原因：{_clean_exc(exc)}\n下一步：{next_step}")
+
     def _on_add_current(self):
         if self._mgr is None:
             return
@@ -306,7 +316,10 @@ class BookmarkPanel(QWidget):
         try:
             self._mgr.add(bm)
         except Exception as e:  # noqa: BLE001
-            QMessageBox.warning(self, "添加失败", _clean_exc(e))
+            self._warn_action_failed(
+                "添加失败", f"书签「{bm.name}」未写入。", e,
+                "检查 bookmarks.json 所在目录是否可读写（~/.mbdsdr），"
+                "确认后重试；已有书签不受影响。")
         self.refresh_list()
 
     def _on_edit(self):
@@ -327,7 +340,10 @@ class BookmarkPanel(QWidget):
         try:
             self._mgr.update(sel["frequency_hz"], name=name)
         except Exception as e:  # noqa: BLE001
-            QMessageBox.warning(self, "编辑失败", _clean_exc(e))
+            self._warn_action_failed(
+                "编辑失败", f"书签「{sel['name']}」未修改，原名保持不变。", e,
+                "检查 bookmarks.json 所在目录是否可读写（~/.mbdsdr），"
+                "确认后重试。")
         self.refresh_list()
 
     def _on_delete(self):
@@ -347,7 +363,10 @@ class BookmarkPanel(QWidget):
         try:
             self._mgr.remove(sel["frequency_hz"], sel["name"])
         except Exception as e:  # noqa: BLE001
-            QMessageBox.warning(self, "删除失败", _clean_exc(e))
+            self._warn_action_failed(
+                "删除失败", f"书签「{sel['name']}」仍在，未从 bookmarks.json 删除。", e,
+                "检查 bookmarks.json 是否被其他程序占用或目录不可写，"
+                "确认后重试。")
         self.refresh_list()
 
     def _on_nearest(self):
@@ -396,7 +415,10 @@ class BookmarkPanel(QWidget):
                 text = f.read()
             n = self._mgr.import_csv_text(text)
         except Exception as e:  # noqa: BLE001
-            QMessageBox.warning(self, "导入失败", _clean_exc(e))
+            self._warn_action_failed(
+                "导入失败", "未导入任何书签。", e,
+                "确认文件是 UTF-8 文本且每行含频率/名称/模式"
+                "（可先「导出」一份 CSV 作格式模板），再重新导入。")
             return
         self.refresh_list()
         QMessageBox.information(self, "导入完成", f"导入 {n} 条书签。")
@@ -413,7 +435,10 @@ class BookmarkPanel(QWidget):
             with open(path, "w", encoding="utf-8") as f:
                 f.write(text)
         except Exception as e:  # noqa: BLE001
-            QMessageBox.warning(self, "导出失败", _clean_exc(e))
+            self._warn_action_failed(
+                "导出失败", "书签文件未写出，原书签数据不受影响。", e,
+                "换一个有写权限的目录或文件名后重试；"
+                "若目标文件正被占用，请关闭后再导出。")
             return
         QMessageBox.information(self, "导出完成", f"已写出 {path}")
 
