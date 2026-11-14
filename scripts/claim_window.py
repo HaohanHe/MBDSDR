@@ -22,12 +22,43 @@
 
 from __future__ import annotations
 
+import re
 import time
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 #: 释放窗口（秒）：同一 owner 在窗口内释放过的文件，仍要求 §6.1 行。
 #: 「先 release 再提交」不应把行要求一起释放掉。
 RELEASE_WINDOW_S = 3600.0
+
+#: 提交信息末尾的归线凭据行：``claim-line: <线名>``。
+#: 值只能是提交者**此刻真实持有**的 claim 的线名；没有 claim 就不写——
+#: 「不写」本身就是信号，工具不得推测、补写或替人签字。
+CLAIM_LINE_TRAILER = "claim-line"
+_CLAIM_LINE_RE = re.compile(
+    r"^\s*claim-line\s*[:：]\s*(?P<name>.+?)\s*$", re.IGNORECASE
+)
+
+
+def line_name(owner: str) -> str:
+    """owner ``线名/会话短号`` → 线名；没有会话后缀时原样返回。"""
+    return str(owner or "").strip().split("/", 1)[0].strip()
+
+
+def parse_claim_lines(message: str) -> List[str]:
+    """解析提交信息里的 ``claim-line:`` 行，去重保序。
+
+    解析与生成共用 ``CLAIM_LINE_TRAILER`` 与同一正则：两边各写一份时，
+    一处改了另一处会把正常凭据判成「与台账不符」。
+    """
+    out: List[str] = []
+    for line in str(message or "").splitlines():
+        match = _CLAIM_LINE_RE.match(line)
+        if not match:
+            continue
+        name = match.group("name").strip().strip("`").strip()
+        if name and name not in out:
+            out.append(name)
+    return out
 
 
 def claim_active(payload: Optional[Dict[str, Any]], now: Optional[float] = None) -> bool:

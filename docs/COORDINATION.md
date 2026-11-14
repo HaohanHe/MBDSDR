@@ -2288,6 +2288,10 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `tests/test_shortcuts_reset_all_guard.py` | UI防呆线/6ae85f56（A3 判据：question 默认按钮为 No、选否则保留、选是则清空（反证已跑：去掉确认即红）） | 2026-11-14 11:07 | 本笔 |
 | `mbdsdr_ai/tool_guard.py` | 进程内工具守卫线/6ae85f56（共享 PRE/RESULT 守卫叶子（MCP 面与进程内面唯一实现）） | 2026-11-14 11:09 | 本笔 |
 | `mbdsdr_ai/core/mcp_server.py` | 进程内工具守卫线/6ae85f56（ToolCallGate 的 PRE/RESULT 改为调用共享实现） | 2026-11-14 11:09 | 本笔 |
+| `scripts/claim_window.py` | 收尸线/6ae85f56（claim-line 尾行解析/线名归一（任务一）） | 2026-11-14 11:10 | 本笔 |
+| `scripts/safe_commit.py` | 收尸线/6ae85f56（提交前追加 claim-line，只复述本人当前 claim） | 2026-11-14 11:10 | 本笔 |
+| `scripts/audit_claim_lines.py` | 收尸线/6ae85f56（按 claim-line 归线并核对台账（任务一）） | 2026-11-14 11:10 | 本笔 |
+| `tests/test_claim_line_trailer.py` | 收尸线/6ae85f56（claim-line 生成/审计分桶/错线名反证） | 2026-11-14 11:10 | 本笔 |
 | `mbdsdr_ai/tool_registry.py` | 进程内工具守卫线/6ae85f56（call 统一入口发 PRE/RESULT，trigger 区分 model/user，否决返回结构化拒绝） | 2026-11-14 11:11 | 本笔 |
 | `mbdsdr_ai/agent.py` | 进程内工具守卫线/6ae85f56（工作流执行器调用标注 model 触发） | 2026-11-14 11:11 | 本笔 |
 | `mbdsdr_ai/orchestrator.py` | 进程内工具守卫线/6ae85f56（编排执行器调用标注 model 触发） | 2026-11-14 11:11 | 本笔 |

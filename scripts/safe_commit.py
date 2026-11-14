@@ -189,6 +189,24 @@ hunk，于是有人把自己的行挪到别处让 diff 断开——提交干净�
 **整份带走不是选不中行时的兜底**）。选行时按文件里的行号升序进本笔，
 不按 ``--files`` 顺序重排——否则私有 index 与工作树的字节不等，会被判 DIRTY。
 
+归线凭据：`claim-line:`（2026-11-14）
+------------------------------------
+
+659 笔共用一个 git 身份时，提交归属只能到「无凭据」为止。现在提交前会把
+**提交者此刻真实持有的 claim** 的线名追加到说明末尾，每线一行：
+
+    claim-line: 收尸线
+
+判据与边界：
+
+* 只读占位文件（当前态），owner 必须与提交身份逐字相等；**不读台账 history**，
+  历史条目只说明「曾经占过」，拿它写进说明等于替已释放的 claim 签字；
+* 本笔文件上没有自己的活跃 claim → **不写**，并说明原因；身份未声明 → 不写。
+  「不写」本身就是信号，工具不得用推测或缺省值把它填满；
+* 人已经手写 `claim-line:` 时不重写、不纠正——审计脚本
+  （`scripts/audit_claim_lines.py`）会把「有 claim 但没这行」与
+  「这行与台账不符」分别报出来，改错字是人的责任，不是工具代签。
+
 用法::
 
     python scripts/safe_commit.py --files a.py b.md --message-file msg.txt
@@ -803,6 +821,76 @@ def _claim_hint(files: list[str]) -> None:
         if any(cc._owner_matches(item, owner) for item in owners):
             continue
         print(f"[claim] 该路径无 claim 记录，请确认归属：{rel}")
+
+
+def _claim_line_modules():
+    """按需导入 claim 台账读取与「纯追加」判据的共享实现。"""
+    scripts = str(Path(__file__).resolve().parent)
+    if scripts not in sys.path:
+        sys.path.insert(0, scripts)
+    import file_claim as fc
+    import claim_window as cw
+    return fc, cw
+
+
+def _held_line_names(files: list[str], owner: str) -> list[str]:
+    """本笔文件上、``owner`` **此刻真实持有**的活跃 claim 的线名（去重排序）。
+
+    只读占位文件（当前态），**不读台账 history**：历史条目只说明「曾经占过」，
+    拿它写进提交信息等于替一个已经释放的 claim 签字。owner 必须逐字相等，
+    不接受前缀/包含匹配——同名不是同一持有者（A13）。
+    """
+    fc, cw = _claim_line_modules()
+    now = time.time()
+    names: list[str] = []
+    for rel in files:
+        try:
+            key, _display = fc.canonical_path(rel)
+        except ValueError:
+            continue
+        payload = fc._peek_marker(fc._marker_for(key))
+        if not cw.claim_active(payload, now):
+            continue
+        held = str((payload or {}).get("owner") or "").strip()
+        if held != owner:
+            continue
+        name = cw.line_name(held)
+        if name and name not in names:
+            names.append(name)
+    return sorted(names)
+
+
+def _claim_line_trailer(message: bytes, files: list[str]) -> bytes:
+    """把提交者**自己此刻持有的 claim** 的线名追加到说明末尾（每条一行）。
+
+    * 身份未声明 / 本笔文件上没有自己的活跃 claim → **不写**，并说明原因：
+      「不写」本身就是信号，不能让工具用推测或缺省值把它填满；
+    * 只复述占位文件里逐字相等的 owner，不读 history、不认别人的 claim、
+      不替任何一方补签字；
+    * 人已经手写了 ``claim-line:`` 时不重写、不改写，只提示一句——审计脚本
+      会把「与台账不符」单独报出来，工具不替人把错字改成对的。
+    """
+    text = message.decode("utf-8", "replace")
+    existing = [ln.strip() for ln in text.splitlines()
+                if ln.strip().lower().startswith("claim-line:")]
+    if existing:
+        print("[claim-line] 说明里已有 claim-line 行（工具不重写，审计会核对）："
+              + "；".join(existing))
+        return message
+    owner = _coord_module().resolve_owner(ROOT)
+    if not owner:
+        print("[claim-line] 提交身份未声明，不写线名（没有 claim 就不写，"
+              "不写本身是信号）。")
+        return message
+    names = _held_line_names(files, owner)
+    if not names:
+        print(f"[claim-line] 本笔文件此刻没有 {owner} 持有的活跃 claim，不写 claim-line"
+              "（不写本身是信号）。")
+        return message
+    _, cw = _claim_line_modules()
+    lines = [f"{cw.CLAIM_LINE_TRAILER}: {name}" for name in names]
+    print("[claim-line] 写入本人当前持有的 claim 线名：" + "、".join(names))
+    return message.rstrip(b"\n") + ("\n\n" + "\n".join(lines) + "\n").encode("utf-8")
 
 
 def _message_coverage_hint(message: bytes, files: list[str]) -> None:
@@ -1450,6 +1538,11 @@ def _commit_locked(
     bad_source = _recheck_message_source(message_source, source_bytes)
     if bad_source:
         return 6, bad_source
+
+    # 4c0) 归线凭据：只复述提交者此刻真实持有的 claim 线名；没有就不写。
+    #      放在消息源复核之后：这一行不是 ``--message-file`` 的内容，不能
+    #      影响「来源文件有没有被别人改写」的判断。
+    message = _claim_line_trailer(message, files)
 
     # 4c) 落成本进程私有副本（含各类尾段）：提交与复核都只认这份拷贝，
     #     不再回头读 ``--message-file``——它可能已经被第三方覆写。
