@@ -588,11 +588,16 @@ def _predict_passes_impl(
     nominal_freq_hz: Optional[float] = None,
     allow_stale: bool = True,
     start_unix: Optional[float] = None,
+    tle_records: Optional[Dict[int, Dict[str, Any]]] = None,
 ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
     """过境预测内核：返回 ``(passes, degraded)``。
 
     ``degraded`` 逐条说明「这颗星为什么没算/为什么不可信」——身份错配
     （编号指向另一颗对象）直接跳过；TLE 过期/失效仍出预报但降精度并标注。
+
+    ``tle_records`` 是**权威覆盖**（按 CATNR 索引）：给了就不联网取数，
+    缺失的星如实记 ``tle_unavailable``。验收证据快照靠它把「实跑用的那份
+    TLE」原样回放，保证同一份快照复算出的过境与实跑逐场一致。
     """
     _require_sgp4()
     from .tle_integrity import accuracy, freshness, verify_identity
@@ -611,13 +616,23 @@ def _predict_passes_impl(
     degraded: List[Dict[str, Any]] = []
     for name in names:
         catnr = BUILTIN_SATS[name]
-        try:
-            rec = fetch_tle_record(catnr)
-        except Exception as e:  # noqa: BLE001 - 无数据如实留痕
-            degraded.append({
-                "satellite": name, "catnr": catnr,
-                "reason": "tle_unavailable", "detail": str(e)})
-            continue
+        if tle_records is not None:
+            rec = tle_records.get(catnr)
+            if rec is None:
+                degraded.append({
+                    "satellite": name, "catnr": catnr,
+                    "reason": "tle_unavailable",
+                    "detail": "注入的 TLE 记录里没有该星（权威覆盖，不联网补齐）",
+                })
+                continue
+        else:
+            try:
+                rec = fetch_tle_record(catnr)
+            except Exception as e:  # noqa: BLE001 - 无数据如实留痕
+                degraded.append({
+                    "satellite": name, "catnr": catnr,
+                    "reason": "tle_unavailable", "detail": str(e)})
+                continue
         line1, line2 = rec["line1"], rec["line2"]
         object_name = str(rec.get("name") or "")
         identity = verify_identity(name, object_name)
@@ -791,6 +806,7 @@ def predict_passes(
     satellite_type: str = "all",
     nominal_freq_hz: Optional[float] = None,
     start_unix: Optional[float] = None,
+    tle_records: Optional[Dict[int, Dict[str, Any]]] = None,
 ) -> List[Dict[str, Any]]:
     """预测未来 hours 小时内的卫星过境事件（列表兼容接口）。
 
@@ -802,13 +818,16 @@ def predict_passes(
     ``TimeBasisUnavailable``，绝不用墙钟顶替（否则「下一颗什么时候过境」
     会得到一个看似正常、实则对应另一时刻的答案）。
 
+    ``tle_records`` 为 CATNR → 记录 的权威覆盖（证据快照回放用）：给了就
+    不联网取数，缺的星记 ``tle_unavailable``。
+
     自适应粗/细扫描（60s 粗扫 + 二分收敛 + 2s 中天采样）。每条结果都附带
     TLE 身份/历元/新鲜度/精度风险字段；过期或失效时时刻自动降到分钟级。
     """
     return _predict_passes_impl(
         observer_lat, observer_lon, observer_alt, hours,
         min_elevation, satellite_type, nominal_freq_hz,
-        start_unix=start_unix)[0]
+        start_unix=start_unix, tle_records=tle_records)[0]
 
 
 def predict_passes_report(
