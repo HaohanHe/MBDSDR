@@ -2471,6 +2471,8 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `desktop/troubleshooting.py` | 判据存量收口/6ae85f56（野码/可见码补登记（#14 #9 #15 #16）） | 2026-11-14 12:23 | 本笔 |
 | `scripts/batch_close.py` | 清理线/6ae85f56（rc=1 时按 stderr 回溯启发式归 3，输出明示启发式；长期方案记待办） | 2026-11-14 12:26 | 本笔 |
 | `tests/test_batch_close.py` | 清理线/6ae85f56（补 4 条崩溃启发式用例：归 3/无回溯仍红/stdout 回溯不触发/JSON 记录） | 2026-11-14 12:26 | 本笔 |
+| `tests/test_collection_consistency.py` | 判据存量收口/6ae85f56（收集判据补 explicit-nodeid 探针声明（#5）） | 2026-11-14 12:27 | 本笔 |
+| `tests/_pollution_probe/pollutes_real_config.py` | 判据存量收口/6ae85f56（收集判据补 explicit-nodeid 探针声明（#5）） | 2026-11-14 12:27 | 本笔 |
 
 > 上表各行均由 `claim` 台账推导：owner 原文与 `acquired_at` 直接取自台账，
 > 目的优先用台账里的 `claim_reason`，没有就如实写「未声明」，不补编。时间列只是

@@ -32,22 +32,57 @@ ROOT = os.path.dirname(TESTS_DIR)
 _DEF_TEST = re.compile(r"^[ \t]*def test_", re.M)
 # --collect-only -q 的节点行：tests/xxx.py::test_yyy[param]
 _NODE = re.compile(r"^(tests/[^\s:]+\.py)::", re.M)
+# 文件头声明「这是被别的用例按 nodeid 显式执行的探针，不参与裸目录收集」。
+# 只认写在行首的注释；**必须**同时被其它测试文件按文件名引用才算数（见
+# ``_explicit_probes``）——光写一句声明不许把用例藏起来。
+_PROBE_REASON = re.compile(
+    r"^#\s*collection-guard:\s*explicit-nodeid\s+--\s+(.+?)\s*$", re.M)
 
 
-def _files_with_tests():
-    """源码侧期望：{相对路径: test_ 函数条数}。"""
-    expected = {}
+def _sources():
+    """{相对路径: 文件原文}：一次读盘，供期望集合与探针判定共用。"""
+    sources = {}
     for dirpath, dirnames, filenames in os.walk(TESTS_DIR):
         dirnames[:] = [d for d in dirnames if d != "__pycache__"]
         for name in filenames:
             if not name.endswith(".py") or name.startswith("conftest"):
                 continue
             path = os.path.join(dirpath, name)
+            rel = os.path.relpath(path, ROOT).replace("\\", "/")
             with open(path, encoding="utf-8", errors="replace") as fh:
-                hits = len(_DEF_TEST.findall(fh.read()))
-            if hits:
-                rel = os.path.relpath(path, ROOT).replace("\\", "/")
-                expected[rel] = hits
+                sources[rel] = fh.read()
+    return sources
+
+
+def _explicit_probes(sources=None):
+    """声明了 explicit-nodeid 且真被别的文件按名引用的探针：{相对路径: 理由}。
+
+    两个条件缺一不认：只写声明 = 想把用例藏起来的捷径；只被引用不提声明
+    = 普通模块，仍按「未被收集」报红。
+    """
+    sources = _sources() if sources is None else sources
+    probes = {}
+    for rel, text in sources.items():
+        m = _PROBE_REASON.search(text)
+        if not m:
+            continue
+        name = os.path.basename(rel)
+        if any(name in other for path, other in sources.items() if path != rel):
+            probes[rel] = m.group(1)
+    return probes
+
+
+def _files_with_tests():
+    """源码侧期望：{相对路径: test_ 函数条数}（显式 nodeid 探针除外）。"""
+    sources = _sources()
+    probes = _explicit_probes(sources)
+    expected = {}
+    for rel, text in sources.items():
+        if rel in probes:
+            continue
+        hits = len(_DEF_TEST.findall(text))
+        if hits:
+            expected[rel] = hits
     return expected
 
 
@@ -145,9 +180,43 @@ def test_every_file_with_test_functions_is_collected():
         "`pytest --collect-only -q tests/` 的收集结果里：\n\n"
         + "\n\n".join(sections)
         + "\n\n修法：收集失败 → 修 import/语法；未被收集 → 文件名改成 "
-        "test_*.py，确属手工脚本则移出 tests/ 或在文件顶部写明为什么不被收集。\n"
+        "test_*.py，确属手工脚本则移出 tests/；若是由别的用例按 nodeid "
+        "显式执行的探针，在文件头写 "
+        "`# collection-guard: explicit-nodeid -- <谁跑它 / 为什么>`"
+        "（必须真有文件按名引用，否则照样报红）。\n"
         "收集命令 RC=%s，末尾输出：\n%s" % (proc.returncode, tail)
     )
+
+
+def test_explicit_probe_marker_is_honored_only_when_referenced(tmp_path, monkeypatch):
+    """文件头声明 + 被别的用例按名引用 → 免于「未被收集」；两条缺一不认。"""
+    tdir = tmp_path / "tests"
+    pdir = tdir / "_probe"
+    pdir.mkdir(parents=True)
+    (pdir / "probe_mod.py").write_text(
+        "# collection-guard: explicit-nodeid -- 由 test_runner.py 按 nodeid 执行\n"
+        "def test_a():\n    assert True\n", encoding="utf-8")
+    (tdir / "test_runner.py").write_text(
+        'PROBE = "probe_mod.py"\n\n\ndef test_b():\n    assert True\n',
+        encoding="utf-8")
+    monkeypatch.setattr(sys.modules[__name__], "TESTS_DIR", str(tdir))
+    monkeypatch.setattr(sys.modules[__name__], "ROOT", str(tmp_path))
+    assert _explicit_probes() == {
+        "tests/_probe/probe_mod.py": "由 test_runner.py 按 nodeid 执行"}
+    assert _files_with_tests() == {"tests/test_runner.py": 1}
+
+
+def test_probe_marker_without_any_reference_is_not_exempt(tmp_path, monkeypatch):
+    """只写声明、没人按 nodeid 跑它 → 仍按「该被收集」报红（不许藏用例）。"""
+    tdir = tmp_path / "tests"
+    tdir.mkdir()
+    (tdir / "probe_mod.py").write_text(
+        "# collection-guard: explicit-nodeid -- 没人跑我\n"
+        "def test_a():\n    assert True\n", encoding="utf-8")
+    monkeypatch.setattr(sys.modules[__name__], "TESTS_DIR", str(tdir))
+    monkeypatch.setattr(sys.modules[__name__], "ROOT", str(tmp_path))
+    assert _explicit_probes() == {}
+    assert _files_with_tests() == {"tests/probe_mod.py": 1}
 
 
 if __name__ == "__main__":

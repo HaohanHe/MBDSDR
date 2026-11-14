@@ -1,4 +1,5 @@
 # SPDX-License-Identifier: MIT
+# collection-guard: explicit-nodeid -- 只由 tests/test_ui_settings_isolation_guard.py 按 nodeid 显式执行
 """反证探针：验证「真实配置写保护 / 内容备份还原 / 绕锁禁碰 Qt」三条机检。
 
 * 文件名不以 ``test_`` 开头、目录也不以 ``test`` 开头，全量收集时不会被当成
