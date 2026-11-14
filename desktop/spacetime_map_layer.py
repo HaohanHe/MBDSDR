@@ -174,12 +174,29 @@ class SpacetimeFeatureLayer:
             self.view.update()
         return self._result
 
-    def close(self) -> None:
-        """解绑（面板销毁时调用），避免信号挂着已释放的对象。"""
+    def _emit_detail(self, text: str, suggestion: str, level: str) -> None:
+        """把详情交给上层回调；回调出错不影响点选与重绘。"""
+        cb = self._detail_cb
+        if cb is None:
+            return
         try:
-            self._unsubscribe()
+            cb(text, suggestion, level)
         except Exception:
             pass
+
+    def _detach_bus(self) -> None:
+        """解绑广播订阅；未订阅过（构造中途失败）也安全。"""
+        unsub = getattr(self, "_unsubscribe", None)
+        if unsub is None:
+            return
+        try:
+            unsub()
+        except Exception:
+            pass
+
+    def close(self) -> None:
+        """解绑（面板销毁时调用），避免信号挂着已释放的对象。"""
+        self._detach_bus()
         try:
             if hasattr(self.view, "picked"):
                 self.view.picked.disconnect(self.on_picked)
@@ -214,10 +231,7 @@ class SpacetimeFeatureLayer:
             text = (f"{f.label or f.feature_id} · {f.kind} · "
                     f"{item.state} · {item.reason}")
             level = "info" if item.is_highlighted else "warning"
-            try:
-                self._detail_cb(text, self._detail_suggestion(item), level)
-            except Exception:
-                pass
+            self._emit_detail(text, self._detail_suggestion(item), level)
         if hasattr(self.view, "update"):
             self.view.update()
         return item
