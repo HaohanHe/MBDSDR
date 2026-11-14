@@ -27,8 +27,12 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Any, Optional, Tuple
 
-from .sat_illumination import evaluate_illumination, sun_direction_eci
-from .time_format import iso_utc_z
+try:  # 包内正常路径
+    from .sat_illumination import evaluate_illumination, sun_direction_eci
+    from .time_format import iso_utc_z
+except ImportError:  # 脚本 / 直接运行时（mbdsdr_ai 目录已在 sys.path）
+    from sat_illumination import evaluate_illumination, sun_direction_eci
+    from time_format import iso_utc_z
 
 try:
     from sgp4.api import Satrec, jday
@@ -103,11 +107,18 @@ def builtin_satellite_names(satellite_type: str = "all") -> List[str]:
 # 过境预测网格与精度档：全部来自 sat_passes 的唯一事实源，orbit 不再自写一套。
 # 旧值 bisect=0.25 s 与主链 0.5 s 不一致，而 PASS_ALGORITHM 字符串对外只宣称
 # 其中一个值——同一次过境的二分口径在两个面板里成了两个答案。
-from .sat_passes import (
-    PASS_BISECT_TOL_S,
-    PASS_COARSE_STEP_S,
-    PASS_FINE_STEP_S,
-)
+try:  # 包内正常路径
+    from .sat_passes import (
+        PASS_BISECT_TOL_S,
+        PASS_COARSE_STEP_S,
+        PASS_FINE_STEP_S,
+    )
+except ImportError:  # 脚本 / 直接运行时（mbdsdr_ai 目录已在 sys.path）
+    from sat_passes import (
+        PASS_BISECT_TOL_S,
+        PASS_COARSE_STEP_S,
+        PASS_FINE_STEP_S,
+    )
 
 PASS_ALGORITHM = (f"sgp4-coarse{PASS_COARSE_STEP_S:g}"
                   f"-fine{PASS_FINE_STEP_S:g}"
@@ -145,7 +156,10 @@ _FETCH_HARD_DEADLINE_S = 20.0    # 含 DNS 的墙钟硬截止
 
 
 # 禁网判定是通用策略，定义在叶子 net_policy；这里直接用公开名。
-from .net_policy import network_disabled
+try:  # 包内正常路径
+    from .net_policy import network_disabled
+except ImportError:  # 脚本 / 直接运行时（mbdsdr_ai 目录已在 sys.path）
+    from net_policy import network_disabled
 
 
 def _bounded_urlopen(req, timeout_s: float, hard_deadline_s: float):

@@ -30,18 +30,32 @@ except ImportError:  # 旧脚本以扁平模块方式 import time_basis
 # `from .time_basis import format_local` 的既有调用方不变。
 # 时区降级查询也从这里透出：调用方以 time_basis 为时间系统单一入口时，
 # 不必再单独 import time_format 才能知道「本地时间是不是固定偏移」。
-from .time_format import (
-    DEGRADED_TZ_NOTE,
-    TZ_STATE_FIXED_OFFSET,
-    TZ_STATE_SYSTEM_RULES,
-    TZ_STATE_UNAVAILABLE,
-    as_utc as _as_utc,
-    format_local,
-    local_time_note,
-    resolve_tz as _resolve_tz,
-    resolve_tz_info,
-    tz_degradation,
-)
+try:  # 包内正常路径
+    from .time_format import (
+        DEGRADED_TZ_NOTE,
+        TZ_STATE_FIXED_OFFSET,
+        TZ_STATE_SYSTEM_RULES,
+        TZ_STATE_UNAVAILABLE,
+        as_utc as _as_utc,
+        format_local,
+        local_time_note,
+        resolve_tz as _resolve_tz,
+        resolve_tz_info,
+        tz_degradation,
+    )
+except ImportError:  # 旧脚本/内核测试以扁平模块方式 import（mbdsdr_ai/ 在 sys.path 上）
+    from time_format import (
+        DEGRADED_TZ_NOTE,
+        TZ_STATE_FIXED_OFFSET,
+        TZ_STATE_SYSTEM_RULES,
+        TZ_STATE_UNAVAILABLE,
+        as_utc as _as_utc,
+        format_local,
+        local_time_note,
+        resolve_tz as _resolve_tz,
+        resolve_tz_info,
+        tz_degradation,
+    )
 
 __all__ = [
     "UTC",
