@@ -2227,6 +2227,8 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `tests/test_head_build_smoke.py` | HEAD可构建线/6ae85f56（判据：红/无法判定都记账，非静默跳过） | 2026-11-14 09:38 | 本笔 |
 | `scripts/hooks/post-commit` | HEAD可构建线/6ae85f56（接入烟雾检查，置于审计/绕过分支之前） | 2026-11-14 09:38 | 本笔 |
 | `scripts/install_git_hooks.py` | HEAD可构建线/6ae85f56（head_build_smoke.py 随钩子安装副本，旧工作树兜住） | 2026-11-14 09:38 | 本笔 |
+| `desktop/adsb_panel.py` | 统一搜索性能线/6ae85f56（ADS-B 表格渲染上限 300 + 表头未显示架数（实测 1200 架 45ms/批）） | 2026-11-14 09:40 | 本笔 |
+| `tests/test_adsb_panel_result_cap.py` | 统一搜索性能线/6ae85f56（ADS-B 上限行数判据与去上限反证） | 2026-11-14 09:40 | 本笔 |
 
 > 上表各行均由 `claim` 台账推导：owner 原文与 `acquired_at` 直接取自台账，
 > 目的优先用台账里的 `claim_reason`，没有就如实写「未声明」，不补编。时间列只是

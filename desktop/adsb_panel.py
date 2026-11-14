@@ -92,6 +92,13 @@ NO_STATION_TEXT = ("未设置观测地点\n"
 # 飞机超时 30 秒未更新即移除。
 AIRCRAFT_TTL_SEC = 30.0
 
+#: 列表一次最多渲染的飞机行数。``_refresh_table`` 在每批解码帧后整表重建，
+#: 成本跟随在视飞机数：同机实测 100 架 3.7 ms、500 架 26 ms、2000 架 66 ms
+#: （每档预热 1 + 采样 5 取中位）。取 300（约 10 ms/批，低于一帧），只显示
+#: 最近更新的前 300 架；表头明说还有多少架未显示。
+#: 复跑入口：``scripts/repro/2026-11-14-list-render-baseline.py --only adsb``。
+MAX_RENDERED_AIRCRAFT = 300
+
 
 def _load_station() -> Tuple[Optional[float], Optional[float]]:
     """从 ~/.mbdsdr/config.json 读地面站 lat/lon；缺失或非法返回 (None, None)。
@@ -401,7 +408,10 @@ class AdsbPanel(QWidget):
             suffix = "（未连接后端）" if not self._sdr_connected else ""
             if self._gate_reason:
                 suffix = "（当前不在 1090 MHz/AM，新数据不会进来）"
-            self.header.setText(f"在视飞机 {n} 架{suffix}")
+            hidden = max(0, n - MAX_RENDERED_AIRCRAFT)
+            tail = (f"；列表只显示最近 {MAX_RENDERED_AIRCRAFT} 架，"
+                    f"另 {hidden} 架未显示") if hidden else ""
+            self.header.setText(f"在视飞机 {n} 架{suffix}{tail}")
         elif not self._sdr_connected:
             self.header.setText("未连接（等待 1090MHz 数据）")
         elif (self._tuner_max_hz is not None
@@ -417,9 +427,10 @@ class AdsbPanel(QWidget):
 
     def _refresh_table(self) -> None:
         acs = self._tracker.all()
-        self.table.setRowCount(len(acs))
+        shown = acs[:MAX_RENDERED_AIRCRAFT]
+        self.table.setRowCount(len(shown))
         now = time.time()
-        for row, a in enumerate(acs):
+        for row, a in enumerate(shown):
             vals = [
                 a.icao_hex,
                 a.callsign or "--",
