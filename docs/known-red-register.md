@@ -1280,6 +1280,7 @@ baseline 56 → 58（`BUILT_AT` 同步 58），每条带 owner + reason：
   `data/dso_catalog.json`(117 条) / `data/moon_albedo_*.npz` / `assets/icon.ico`
   五项全 OK。
 - **缺什么才能全绿**：无——五类已全 PASS（安装器为 BY-DESIGN；2026-11-13 复核，绑定本节「再检绑定」`20d71e92`）。
+- **转绿条件**：上列三条复跑命令在同一构建产物上 0 FAIL，且「再检绑定」的文件集合自 `20d71e92` 之后未被改动；任一文件再被改动则本条按再检义务自动退回「待复核」。
 - **复跑命令**：
   ```bash
   python scripts/release_manifest.py --only version
