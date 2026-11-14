@@ -2461,6 +2461,8 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `tests/test_commit_scope_intent_delete.py` | 用例随闸线/6ae85f56（钩子夹具补拷 SUPPORT_FILES 到 scripts/（2 条既有红）） | 2026-11-14 12:13 | 本笔 |
 | `mbdsdr_ai/time_format.py` | 共享件边界线/6ae85f56（共享件收口：新增 iso_utc_z 单一 UTC ISO 格式入口（叶子模块，无 mbdsdr_ai 依赖）） | 2026-11-14 12:14 | 本笔 |
 | `mbdsdr_ai/tle_fetch.py` | 共享件边界线/6ae85f56（共享件收口：内嵌 _iso 委托 time_format.iso_utc_z（保留 None 透传）） | 2026-11-14 12:14 | 本笔 |
+| `docs/evidence-standard.md` | 用例随闸线/6ae85f56（记『自己的 §6.1 行被别的提交扫走』（反向实例；152449c2 的行落进 b10fe3f6，hash 永久失准、不得猜补）） | 2026-11-14 12:16 | 本笔 |
+| `mbdsdr_ai/bookmark_manager.py` | 判据存量收口/6ae85f56（修 legacy 条目缺带宽被猜成 12500（记缺口 #2 真 bug）） | 2026-11-14 12:18 | 本笔 |
 
 > 上表各行均由 `claim` 台账推导：owner 原文与 `acquired_at` 直接取自台账，
 > 目的优先用台账里的 `claim_reason`，没有就如实写「未声明」，不补编。时间列只是
