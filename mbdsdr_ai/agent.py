@@ -2308,6 +2308,67 @@ class MBDSDRAgent:
             category="ui",
         )
 
+    def probe_hardware_capabilities(self, *, force: bool = False,
+                                    min_interval_s: float = 60.0) -> Dict[str, Any]:
+        """用**真实探测结果**填 `sky_ledger`，而不是让模型自己说"我有/没有"。
+
+        为什么需要这一步：能力账本以前的唯一写入方是 `sky_capability_report`
+        工具——模型把"用户说的"或"它以为的"写成 available/missing。于是
+        "有机/无机"是**转述**，不是探测。模型据此劝用户买设备、或拒绝一个
+        本来能做的动作时，没人能纠正它。
+
+        本方法只探测**这个进程能查的**东西：
+
+        * ``sdr`` —— `enumerate_all_sdr_devices()`（现成的枚举入口，不另造）；
+        * 其余槽位（gnss / gimbal / imu / antenna）在桌面侧，由主窗口在拿到
+          真实状态时补写。**这里不越权猜**：查不到就不写，保持 unknown。
+
+        枚举硬件不便宜（要碰 USB/网络），所以按 `min_interval_s` 缓存，
+        避免模型每问一次"你有什么"就扫一遍设备。
+        """
+        ledger = getattr(self, "sky_ledger", None)
+        if ledger is None:
+            from .sky_negotiation import CapabilityLedger
+
+            ledger = CapabilityLedger()
+            self.sky_ledger = ledger
+
+        now = time.time()
+        last = float(getattr(self, "_capability_probe_at", 0.0) or 0.0)
+        cached = getattr(self, "_capability_probe_result", None)
+        if (not force) and cached is not None and (now - last) < float(min_interval_s):
+            return dict(cached)
+
+        from .sky_negotiation import probe_capabilities
+
+        probes: Dict[str, Optional[bool]] = {}
+        detail: Dict[str, Any] = {}
+
+        # SDR：枚举失败 ≠ 没有设备。失败时给 None（保持 unknown），
+        # 因为"驱动装坏了"和"没插设备"是两件事，对用户意味着完全不同的下一步。
+        try:
+            from .sdr_backend import enumerate_all_sdr_devices
+
+            devices = enumerate_all_sdr_devices() or []
+            probes["sdr"] = bool(devices)
+            detail["sdr_devices"] = len(devices)
+        except Exception as exc:  # noqa: BLE001 - 探测失败要如实留痕
+            probes["sdr"] = None
+            detail["sdr_error"] = f"{type(exc).__name__}: {exc}"
+
+        ok_count, rejected = probe_capabilities(ledger, probes,
+                                                source="auto_probe")
+        result = {
+            "probed": sorted(k for k, v in probes.items() if v is not None),
+            "skipped": sorted(k for k, v in probes.items() if v is None),
+            "written": ok_count,
+            "rejected": rejected,
+            **detail,
+        }
+        self._capability_probe_at = now
+        self._capability_probe_result = dict(result)
+        return result
+
     def _register_sky_negotiation_tools(self):
         """注册天空模式硬件能力协商工具（会话状态 + 动作执行，原子化）。
 
@@ -2349,9 +2410,16 @@ class MBDSDRAgent:
             }
 
         def _state(_args):
+            # 先做一次真实探测，再把快照交出去：账本里的结论应该来自"查过"，
+            # 而不是模型自己的记忆。探测有缓存，不会每次扫设备。
+            probe = self.probe_hardware_capabilities()
             payload = _snapshot()
-            payload["note"] = ("只反映本会话已确认的结论；未确认项为 unknown，"
-                               "需要时先用工具探测或问用户，不要假设型号")
+            payload["probe"] = probe
+            payload["note"] = (
+                "只反映本会话已确认的结论；未确认项为 unknown。"
+                "probe 段是本次自动探测的结果：probed 里的槽位来自真实枚举，"
+                "skipped 里的槽位**本进程没有探测手段**（不等于没有硬件，"
+                "需要在桌面侧补写或问用户）。不要假设型号。")
             return ToolResult(success=True,
                               content=_json.dumps(payload, ensure_ascii=False,
                                                   indent=2),

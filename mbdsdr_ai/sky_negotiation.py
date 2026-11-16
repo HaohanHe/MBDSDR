@@ -59,6 +59,40 @@ def action_label(action: str) -> str:
     return ACTION_LABELS.get(str(action), str(action))
 
 
+def probe_capabilities(ledger: "CapabilityLedger",
+                       probes: Mapping[str, Optional[bool]],
+                       *, source: str = "probe") -> Tuple[int, List[str]]:
+    """用**真实探测结果**填能力账本（而不是让模型自己说"我有/没有"）。
+
+    ``probes`` 是 ``槽位 -> True/False/None``：
+
+    * ``True``  —— 探测到有：写 ``available``
+    * ``False`` —— 探测到没有：写 ``missing``
+    * ``None``  —— **没有探测手段**：不写，保持 ``unknown``
+
+    第三种是这一层存在的全部理由。把"我没法查"写成 ``missing`` 是撒谎：
+    模型会据此劝用户去买他其实已经有的东西，或者拒绝一个本来能做的动作。
+    同理，不探测就写 ``available`` 更糟——那会让动作落空。
+
+    未知槽位 / 非法状态由 ``CapabilityLedger.update`` 自己拒，本函数不重复校验。
+
+    Returns:
+        (写入成功条数, 被拒原因列表)
+    """
+    ok_count = 0
+    rejected: List[str] = []
+    for slot, has_it in (probes or {}).items():
+        if has_it is None:
+            continue  # 无探测手段：保持 unknown，不写
+        state = "available" if has_it else "missing"
+        evidence = f"{source}:{'found' if has_it else 'not_found'}"
+        if ledger.update(str(slot), state, evidence):
+            ok_count += 1
+        else:
+            rejected.append(f"{slot}={state}")
+    return ok_count, rejected
+
+
 def jd_to_utc_iso(jd: Any) -> str:
     """儒略日 → ISO UTC 字符串；非法/缺失如实返回空串（不编造时间）。"""
     try:
