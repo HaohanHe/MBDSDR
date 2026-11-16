@@ -2534,6 +2534,7 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `docs/audit_r2/25_orbit.md` | 冗余线/6ae85f56（第5件：更正已证伪的 decoders 无 GMST 旋转 结论；:98 同步 orbit.C_LIGHT_KMPS） | 2026-11-14 12:53 | 本笔 |
 | `docs/COORDINATION.md` | QGIS复核线/常量口径（QGIS 第三轮：椭球唯一真值/单位口径登记收工段（非纯追加，整档 claim）） | 2026-11-14 21:26 | 本笔 |
 | `docs/COORDINATION.md` | QGIS时空线/地图要素（QGIS 时空要素层落到地图上：收工段（非纯追加，整档 claim）） | 2026-11-14 23:06 | 本笔 |
+| `docs/COORDINATION.md` | QGIS时空线/地图要素（11-16：对面收官归档+地面态势端到端收工段（非纯追加，整档 claim）） | 2026-11-16 16:28 | 本笔 |
 
 > 上表各行均由 `claim` 台账推导：owner 原文与 `acquired_at` 直接取自台账，
 > 目的优先用台账里的 `claim_reason`，没有就如实写「未声明」，不补编。时间列只是
@@ -5658,3 +5659,34 @@ HEAD 基线反证（既有红归属）                    1 failed, 9 passed（�
   不是真实观测。
 
 
+
+## 2026-11-16 收工登记：对面线收官归档 + 地图地面态势推到端到端
+
+用户确认「对面已经不搞了，往死里推进到尽善尽美」。本线接管主工作区。
+
+- **对面遗留归档**：Nov 13–14 后各线 108 个未提交改动（+12188/-447）原样
+  快照到 `rescue/other-lines-1116`（`89522369`，未审未跑，只保全现场），
+  main 保持干净；随后 `feat/map-live-situation` 合入 main（`d4837c2c`）。
+- **多星地面态势**：`ground_track.satellite_situation`（覆盖圈+轨迹+TLE
+  出处+新鲜度，取不到真 TLE 绝不回退合成根数）；`sat_ground_map.
+  update_constellation` 多星随 TemporalBus 广播时刻整体重算；每星
+  Okabe–Ito 配色 + 星名标签（色弱口径：文字为主）。
+- **位置中枢接真源**：ADS-B（AircraftTracker 唯一出口）与 APRS
+  （aprs_parser.parse_aprs_frame 咽喉）双链上报，同位置去重、没位置不造点。
+  **修两颗真雷**：`adsb_lite._me_gb` numpy uint8 左移回绕（CPR 17bit/高度
+  12bit/速度 10bit 静默解错）；CPR 偶/奇配对没人做（IQ 路径位置全错/全无）。
+  另修「空集合 falsy 陷阱」三处（显式传入空集合被悄悄换成私有/全局集合）。
+- **UX 半边**：消息条「更多」展开 + 分级驻留（error 常驻、info/warning 自动
+  收）；地图详情抽屉（展开/收起=返回）。晚订阅补种子回放（先上报后开图不再
+  空）。
+- **端到端证据**：`scripts/render_live_map_e2e.py`——合成 IQ（真编码器）→
+  feed_iq 生产入口 → 解码 → 配对 → 中枢 → 要素层 → 截图（仓库外），时刻
+  取 ISS 真实覆盖 epoch、目标有效期对齐（场景时间，横幅写明）。
+- 可复验：新增 `tests/test_adsb_position_pipeline.py`（全链 6 条）等；相关
+  回归 58+21+47 passed；uint8 回绕 / 咽喉上报 / 时间广播等真反证均精确红
+  并还原。
+- **not_verified**：真机不在位（SDR 0 / 无 COM4），真实信号流未上真机；
+  权威全量 `pytest tests -q` 后台重跑进行中（此前 49% 处 C 层中断）。
+
+**下一坐标**：全量结果出来后按结果收口；真机回插后跑
+`probe_sdr_real_validate.py` 一键出真实链路证据。
