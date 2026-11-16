@@ -156,6 +156,51 @@ def test_time_sync_unsynchronized_default(qapp):
 
 
 # ---------------------------------------------------------------------------
+# 5b. 真 RMC 进来后授时标签必须变绿，收回后回到"未同步"
+#
+# 这一条补的是缺陷 D5：`set_gnss_nmea()` 写好了但没人调，于是插着真 GNSS
+# 面板恒显示"未同步"——界面在否认硬件。面板自身的行为以前没被测过，
+# 所以"函数能跑"和"界面在说实话"之间没有桥。
+# ---------------------------------------------------------------------------
+def test_time_sync_accepts_real_rmc(qapp):
+    from mbdsdr_ai.serial_gnss import nmea_checksum
+
+    body = "GPRMC,123519,A,4807.038,N,01131.000,E,022.4,084.4,230394,003.1,W"
+    rmc = f"${body}*{nmea_checksum(body):02X}"
+
+    panel = NewSpacetimePanel()
+    panel.set_gnss_nmea(rmc)
+    text = panel.time_sync_label.text()
+    assert "未同步" not in text, f"收到有效 RMC 仍显示未同步：{text!r}"
+    assert "GNSS" in text.upper(), f"授时来源没写 GNSS：{text!r}"
+    panel.close()
+
+
+def test_time_sync_cleared_on_empty(qapp):
+    """收回凭据（传空串）必须回到未同步，不能让上一次的绿留着。"""
+    from mbdsdr_ai.serial_gnss import nmea_checksum
+
+    body = "GPRMC,123519,A,4807.038,N,01131.000,E,022.4,084.4,230394,003.1,W"
+    panel = NewSpacetimePanel()
+    panel.set_gnss_nmea(f"${body}*{nmea_checksum(body):02X}")
+    assert "未同步" not in panel.time_sync_label.text()
+    panel.set_gnss_nmea("")
+    assert "未同步" in panel.time_sync_label.text()
+    panel.close()
+
+
+def test_time_sync_invalid_rmc_is_not_synchronized(qapp):
+    """V 状态（无效定位）的 RMC 不许被当成已同步——那是最容易造的假绿。"""
+    from mbdsdr_ai.serial_gnss import nmea_checksum
+
+    body = "GPRMC,123519,V,4807.038,N,01131.000,E,,,230394,,,N"
+    panel = NewSpacetimePanel()
+    panel.set_gnss_nmea(f"${body}*{nmea_checksum(body):02X}")
+    assert "未同步" in panel.time_sync_label.text()
+    panel.close()
+
+
+# ---------------------------------------------------------------------------
 # 6. FreqOrbitChart 无数据：resize + grab 触发 paintEvent 不崩
 # ---------------------------------------------------------------------------
 def test_freq_orbit_chart_no_data(qapp):

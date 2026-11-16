@@ -14947,8 +14947,12 @@ class MainWindow(QMainWindow):
                             and not static_site)
             if has_fix:
                 self.sky_view.set_gnss_position(fix_dict)
-                if not static_site:
-                    self._observer_source = "gnss"
+                # 授时状态：把**真实 RMC 原文**交给新时空面板。
+                # 面板的 set_gnss_nmea() 早就写好了，但全仓没人调它，
+                # 于是定时器每次都用 gnss_nmea=None 重算，授时标签恒显示
+                # "未同步"——插着真 GNSS 却不认，等于界面在否认硬件。
+                self._push_gnss_time_source()
+                if not static_site:                    self._observer_source = "gnss"
                 # 只在"还没设过站"或"还在看示例站"时写真 GNSS；
                 # 不落盘（_apply_observer_location 只推内存面板）。
                 if ((self._observer_lat is None and self._observer_lon is None)
@@ -14960,6 +14964,9 @@ class MainWindow(QMainWindow):
             elif not static_site:
                 self.sky_view.set_gnss_position(fix_dict)
                 self._observer_source = None
+                # 丢了 fix 就收回授时凭据：不保留上一句 RMC，否则面板会
+                # 一直显示"GNSS 有效"——那是拿过期事实冒充当前状态。
+                self._clear_gnss_time_source()
         except Exception:
             pass
         # 真实 GNSS 卫星天空图：各星座可见卫星位置/信噪比 + GSA 定位卫星标记
@@ -14975,6 +14982,35 @@ class MainWindow(QMainWindow):
                 cp.update_gnss(gsv_frames, gsa_frame,
                                bool(self._gnss.is_connected()))
         except Exception:
+            pass
+
+    def _push_gnss_time_source(self) -> None:
+        """把真实串口最近一条 RMC 交给「新时空」面板，用于授时状态判断。
+
+        为什么必须是原文：RMC 的 A/V 标志位是"这句话可不可信"的唯一凭据，
+        解析成 fix 之后就丢了。拿一堆已解析字段拼一条 NMEA 交上去，等于
+        伪造观测——所以宁可传 None（面板显示未同步），也不拼假语句。
+        """
+        panel = getattr(self, "new_spacetime_panel", None)
+        if panel is None or self._gnss is None:
+            return
+        try:
+            nmea = self._gnss.get_last_rmc()
+        except Exception:
+            nmea = None
+        try:
+            panel.set_gnss_nmea(nmea or "")
+        except (AttributeError, RuntimeError, TypeError, ValueError):
+            pass
+
+    def _clear_gnss_time_source(self) -> None:
+        """收回授时凭据。丢 fix 时调用，避免拿过期 RMC 冒充当前已同步。"""
+        panel = getattr(self, "new_spacetime_panel", None)
+        if panel is None:
+            return
+        try:
+            panel.set_gnss_nmea("")
+        except (AttributeError, RuntimeError, TypeError, ValueError):
             pass
 
     def _on_sky_object_clicked(self, obj):

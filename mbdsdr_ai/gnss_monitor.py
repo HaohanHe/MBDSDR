@@ -506,6 +506,19 @@ class RealGNSSMonitor:
         except Exception:
             return []
 
+    def get_last_rmc(self):
+        """最近一条原始 RMC 语句；无串口/未收到返回 None。
+
+        用途单一：给"授时状态"判断 A/V 标志位。**不要**拿它当定位来源
+        （定位走 ``get_position()``，那里才是融合后的最新 fix）。
+        """
+        if self._reader is None:
+            return None
+        try:
+            return self._reader.get_last_rmc()
+        except Exception:
+            return None
+
     def get_gsa(self):
         """透传 reader.get_gsa()：最新 GSA（used 卫星 / 定位模式）；无数据 None。"""
         if self._reader is None:

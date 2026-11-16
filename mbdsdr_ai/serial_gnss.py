@@ -442,6 +442,15 @@ class SerialGNSSReader:
         self._reconnect_interval = 2.0   # 重连尝试间隔（秒）
         # 最新融合状态
         self._fix: Dict[str, Any] = self._empty_fix()
+        # 最近一条**原始** RMC 语句（不含 CR/LF）。
+        #
+        # 为什么保留原文：新时空面板的授时状态要判断"这条 RMC 有效吗"，
+        # 而有效性（A/V 标志位）在解析成 fix 之后就丢了——fix 里只剩
+        # "有没有经纬度"。不保留原文就只剩两条路：让面板去猜（伪造），
+        # 或者让面板永远显示"未同步"（现在的 bug）。
+        # 所以这里存原文，让面板用**真语句**判断，而不是用一堆已解析字段
+        # 拼一条假 NMEA 出来。
+        self._last_rmc: Optional[str] = None
         # 最新 GSV/GSA 缓存：供天空图绘制真实卫星天空图
         # _latest_gsv: talker -> 最近一次聚合完成的 GSV frame（sats 完整列表）
         self._latest_gsv: Dict[str, Dict[str, Any]] = {}
@@ -754,6 +763,11 @@ class SerialGNSSReader:
                     continue
                 rec = self.parser.parse(line)
                 if rec is not None:
+                    # RMC 原文留一份：面板授时判断需要 A/V 标志位，
+                    # 那是解析成 fix 之后就丢失的信息（见 _last_rmc 注释）。
+                    if rec.get("sentence") == "RMC":
+                        with self._lock:
+                            self._last_rmc = line.strip()
                     self._merge(rec)
 
     def _merge(self, rec: Dict[str, Any]):
@@ -846,6 +860,20 @@ class SerialGNSSReader:
         """
         return (self._running.is_set() and self._fix["timestamp"] is not None
                 and time.time() - self._fix["timestamp"] > 10.0)
+
+    def get_last_rmc(self) -> Optional[str]:
+        """最近一条原始 RMC 语句（已去 CR/LF）；从未收到返回 None。
+
+        给"授时状态"用：RMC 的 A/V 标志位是"这句话可不可信"的唯一凭据，
+        解析成 fix 之后就丢了。调用方拿到原文自己判，不要拿一堆已解析字段
+        拼一条假 NMEA 出来——那是伪造观测。
+
+        与 ``get_fix()`` 的过期口径不同：这里**不做 10s 过期判断**，
+        由调用方结合 ``get_fix()["timestamp"]`` 自己决定。理由是本方法只
+        回答"最后一句长什么样"，不回答"现在还有效吗"。
+        """
+        with self._lock:
+            return self._last_rmc
 
     def get_gsv_frames(self) -> List[Dict[str, Any]]:
         """返回各 talker 最新一帧（聚合后）GSV 的列表，供天空图绘制卫星位置。
