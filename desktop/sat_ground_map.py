@@ -133,8 +133,12 @@ class SatelliteGroundMap(QWidget):
             self._unsubscribe_time = None
         try:
             from mbdsdr_ai.position_service import get_position_service
-            self._unsubscribe_pos = get_position_service().subscribe(
-                self._on_position_report)
+            svc = get_position_service()
+            self._unsubscribe_pos = svc.subscribe(self._on_position_report)
+            # 晚订阅也要吃到现在的位置：中枢不回放，图自己补种子，
+            # 否则「先上报、后开图」时图上永远是空的。
+            for rep in svc.all_latest():
+                self._on_position_report(rep)
         except Exception:  # pragma: no cover
             self._unsubscribe_pos = None
 

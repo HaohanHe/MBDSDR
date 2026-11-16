@@ -291,6 +291,11 @@ class SpacetimeFeatureLayer:
                 painter.setPen(Qt.NoPen)
                 painter.setBrush(QBrush(halo))
                 painter.drawEllipse(pos, radius + 6.0, radius + 6.0)
+            # 白描边：任何底图/任何主题上都看得见（色弱口径：形状+描边
+            # 双通道，分辨不依赖颜色）。
+            painter.setPen(QPen(QColor(255, 255, 255, 220), 1.2))
+            painter.setBrush(Qt.NoBrush)
+            painter.drawEllipse(pos, radius + 1.5, radius + 1.5)
             painter.setPen(QPen(color, 1.4))
             painter.setBrush(QBrush(color) if filled else Qt.NoBrush)
             painter.drawEllipse(pos, radius, radius)

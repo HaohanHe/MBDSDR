@@ -191,9 +191,12 @@ class AdsbMapPanel(QWidget):
     ADSB_TOLERANCE_HZ = 1_500_000.0
     ADSB_MIN_SAMPLE_RATE = 1_200_000.0
 
-    def feed_iq(self, iq, sample_rate: float) -> None:
-        """手动喂一段 1090MHz 复基带 IQ（测试/外部后端用，与订阅同一实现）。"""
-        self._decode_and_update(iq, float(sample_rate))
+    def feed_iq(self, iq, sample_rate: float) -> int:
+        """手动喂一段 1090MHz 复基带 IQ（测试/外部后端用，与订阅同一实现）。
+
+        返回本段解出的有效帧数。
+        """
+        return self._decode_and_update(iq, float(sample_rate))
 
     def _set_diag(self, text: str) -> None:
         """只在文本变化时重绘画布（200ms 轮询下同文案不重复排重绘）。"""

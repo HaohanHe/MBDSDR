@@ -15,6 +15,9 @@ import pytest
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
+_DESKTOP = os.path.join(_ROOT, "desktop")
+if _DESKTOP not in sys.path:
+    sys.path.insert(0, _DESKTOP)
 
 from mbdsdr_ai.adsb import (  # noqa: E402
     bits_to_bytes, build_long_frame, encode_cpr_airborne)
@@ -128,3 +131,30 @@ def test_me_gb_numpy_uint8_does_not_overflow():
         assert _me_gb(bits_np, first, last) == _me_gb(bits_list, first, last)
     # 17bit 全宽提取必须超过 8bit（钉住「值真的宽」，防两边一起退化）
     assert _me_gb(bits_np, 23, 39) > 255
+
+
+def test_late_map_join_sees_existing_positions():
+    """先上报、后开图：图必须吃到现在的位置（中枢不回放，图自己补种子）。"""
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    from PySide6.QtWidgets import QApplication
+    from sat_ground_map import SatelliteGroundMap
+    from mbdsdr_ai.adsb_map import Aircraft
+    from mbdsdr_ai.position_service import ingest_aircraft
+
+    app = QApplication.instance() or QApplication(sys.argv)
+    svc = reset_position_service()
+    col = None
+    try:
+        ingest_aircraft(Aircraft(icao_hex="LATE01", callsign="LATE",
+                                 lat=30.0, lon=120.0, last_seen=1763000000.0))
+        assert svc.count() == 1
+        widget = SatelliteGroundMap(online=False)
+        from mbdsdr_ai.spacetime_features import get_ground_features
+        col = get_ground_features()
+        assert any(f.feature_id == "pos:LATE01" for f in col.all()), \
+            "晚订阅的图必须补种子，否则先上报后开图永远空"
+        widget.shutdown()
+    finally:
+        if col is not None:
+            col.remove("pos:LATE01")
+    app.processEvents()
