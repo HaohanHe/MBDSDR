@@ -210,3 +210,60 @@ def ingest_aircraft(ac: Any,
         return None
     svc.report(report)
     return report
+
+
+def report_from_aprs(parsed: Dict[str, Any],
+                     now: Optional[float] = None) -> Optional[PositionReport]:
+    """``aprs_parser.parse_aprs_frame`` 的输出 dict → :class:`PositionReport`。
+
+    没有解出位置（latitude/longitude 为 None）返回 ``None``——不造坐标。
+    单位口径（APRS 事实）：速度=节→m/s、高度=英尺→m、course=度。
+    源标识 = 呼号[-SSID]（如 ``KJ6ABC-7``，与 PositionReport 文档一致）。
+    """
+    lat = parsed.get("latitude")
+    lon = parsed.get("longitude")
+    if lat is None or lon is None:
+        return None
+    call = str(parsed.get("source") or "").strip()
+    if not call:
+        call = f"{lat},{lon}"
+    ssid = parsed.get("source_ssid")
+    if ssid:
+        call = f"{call}-{int(ssid)}"
+    speed = parsed.get("speed")
+    alt = parsed.get("altitude")
+    course = parsed.get("course")
+    meta: Dict[str, str] = {"protocol": "aprs"}
+    if parsed.get("symbol"):
+        meta["symbol"] = str(parsed["symbol"])
+    return PositionReport(
+        source=call,
+        source_type="aprs",
+        lat=float(lat),
+        lon=float(lon),
+        altitude_m=None if alt is None else float(alt) * _FT_TO_M,
+        speed_mps=None if speed is None else float(speed) * _KT_TO_MPS,
+        heading_deg=None if course is None else float(course),
+        timestamp=float(time.time() if now is None else now),
+        metadata=meta,
+    )
+
+
+def ingest_aprs_position(parsed: Dict[str, Any],
+                         service: Optional[PositionService] = None,
+                         now: Optional[float] = None
+                         ) -> Optional[PositionReport]:
+    """APRS 解析出口：解出位置就上报到位置中枢（同位置去重）。
+
+    与 ``ingest_aircraft`` 同一条口径：位置没动不重复刷轨迹；异常就地
+    吞掉，绝不拖累解码主链。
+    """
+    report = report_from_aprs(parsed, now=now)
+    if report is None:
+        return None
+    svc = service or get_position_service()
+    prev = svc.get(report.source)
+    if prev is not None and prev.lat == report.lat and prev.lon == report.lon:
+        return None
+    svc.report(report)
+    return report

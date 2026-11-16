@@ -395,4 +395,13 @@ def parse_aprs_frame(frame: AX25Frame) -> Dict[str, Any]:
     except Exception:
         pass
 
+    # 真位置出口（全仓唯一）：解析出位置就上报位置中枢（同位置去重，
+    # 异常就地吞掉）。面板/协议栈/工具都走本函数，地图上的 APRS 目标
+    # 从这里来；没解出位置的帧什么都不上报，绝不造坐标。
+    if result.get('latitude') is not None and result.get('longitude') is not None:
+        try:
+            from .position_service import ingest_aprs_position
+            ingest_aprs_position(result)
+        except Exception:
+            pass
     return result

@@ -107,3 +107,62 @@ def test_reset_isolates_tests(svc):
     fresh = reset_position_service()
     assert fresh.count() == 0
     assert get_position_service() is fresh
+
+
+# ======================================================================
+# APRS 真源（2026-11-16）：造帧 → 解析 → 中枢，同一条上报口径
+# ======================================================================
+def test_report_from_aprs_converts_units(svc):
+    from mbdsdr_ai.position_service import report_from_aprs
+    rep = report_from_aprs({
+        "source": "KJ6ABC", "source_ssid": 7,
+        "latitude": 43.9, "longitude": 125.3,
+        "speed": 100.0, "altitude": 10000.0, "course": 270.0,
+        "symbol": "/>",
+    }, now=1763000000.0)
+    assert rep.source == "KJ6ABC-7"
+    assert rep.source_type == "aprs"
+    assert rep.speed_mps == pytest.approx(100.0 * 0.514444)
+    assert rep.altitude_m == pytest.approx(10000.0 * 0.3048)
+    assert rep.heading_deg == 270.0
+    assert rep.metadata["protocol"] == "aprs"
+
+
+def test_report_from_aprs_without_position_is_none(svc):
+    from mbdsdr_ai.position_service import report_from_aprs
+    assert report_from_aprs({"source": "N0POS", "latitude": None,
+                            "longitude": None}) is None
+
+
+def test_aprs_real_codec_chain_feeds_the_hub(svc):
+    """真造帧（ax25）→ 真解析（aprs_parser）→ 位置中枢，全链无测试替身。"""
+    from mbdsdr_ai.ax25 import build_aprs_position_frame
+    from mbdsdr_ai.aprs_parser import parse_aprs_frame
+
+    frame = build_aprs_position_frame("BG4TEST-9", 34.25, 117.15)
+    parsed = parse_aprs_frame(frame)
+    assert parsed["latitude"] == pytest.approx(34.25, abs=1e-3)
+    assert parsed["longitude"] == pytest.approx(117.15, abs=1e-3)
+
+    got = svc.all_latest()
+    assert len(got) == 1, "APRS 位置必须经解析咽喉上报"
+    assert got[0].source_type == "aprs"
+    assert got[0].source.startswith("BG4TEST")
+    # 同一帧再解析不刷轨迹（同位置去重）
+    parse_aprs_frame(frame)
+    assert svc.track(got[0].source) == [(parsed["latitude"], parsed["longitude"])] or \
+        len(svc.track(got[0].source)) == 1
+
+
+def test_aprs_positionless_frame_reports_nothing(svc):
+    from mbdsdr_ai.aprs_parser import parse_aprs_frame
+    from mbdsdr_ai.ax25 import AX25Frame
+
+    frame = AX25Frame()
+    frame.source, frame.source_ssid = "N0POS", 0
+    frame.destination, frame.dest_ssid = "APRS", 0
+    frame.control, frame.pid = 0x03, 0xF0
+    frame.info = b":HELLO   :hello{00"
+    parsed = parse_aprs_frame(frame)
+    assert parsed["latitude"] is None
+    assert svc.count() == 0, "没位置的帧绝不造点"
