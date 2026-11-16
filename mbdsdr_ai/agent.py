@@ -377,6 +377,13 @@ class MBDSDRAgent:
         # 注册 SDR 专用工具（38个）
         register_sdr_tools(self)
 
+        # 注册星空工具（只读）：让模型能回答"我指的这一片有什么"。
+        # 此前星表 83479 颗星对 AI 完全不可见（grep skyengine 在
+        # agent/sdr_tools/tool_registry 零命中），模型能查卫星却答不了
+        # "那颗星是什么"——"AI 讲解层"这个差异点缺的正是这一块。
+        from .sky_tools import register_sky_tools
+        register_sky_tools(self)
+
         # 注册多模式数字解码（PSK31/RTTY/MFSK/FeldHell，依据公开无线电传标准实现）
         register_fldigi_modes_tools(self.tool_registry)
 
