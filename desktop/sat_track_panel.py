@@ -1291,7 +1291,11 @@ class SatTrackPanel(QFrame):
             pass
 
     def _refresh_ground_view(self) -> None:
-        """按当前选中卫星重算并重绘；失败如实写原因，不画假轨迹。"""
+        """按当前选中卫星重算并重绘；失败如实写原因，不画假轨迹。
+
+        2026-11-16 起地图是「多星态势」：内置目录整组上图（真实 TLE，
+        取不到的星如实进 error_text），当前选中星是摘要与圈内查询的主星。
+        """
         name = self.current_satellite_name()
         if not name:
             self.ground_hint.setText("先选择一颗卫星，再展开地面轨迹")
@@ -1300,8 +1304,15 @@ class SatTrackPanel(QFrame):
         if view is None:
             return
         self.ground_hint.setText("正在按当前星历计算…")
-        ok = view.update_satellite(
-            name,
+        try:
+            from mbdsdr_ai.orbit import BUILTIN_SATS
+            names = list(BUILTIN_SATS)
+        except Exception:  # pragma: no cover - 目录缺失时退回单星
+            names = [name]
+        if name not in names:
+            names.insert(0, name)
+        ok = view.update_constellation(
+            names, primary=name,
             minutes=float(self.ground_minutes_spin.value()),
             min_elevation_deg=float(self.ground_elev_spin.value()))
         self.ground_hint.setText(

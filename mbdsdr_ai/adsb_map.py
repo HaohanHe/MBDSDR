@@ -143,6 +143,15 @@ class AircraftTracker:
             ac.lon = float(lon)
 
         ac.last_seen = time.time()
+
+        # 位置上报到统一位置中枢（全仓唯一出口：跟踪器一合并出位置就上报，
+        # 同位置去重在 ingest_aircraft 里）。异常就地吞掉，绝不拖累解码合并。
+        if ac.lat is not None and ac.lon is not None:
+            try:
+                from .position_service import ingest_aircraft
+                ingest_aircraft(ac)
+            except Exception:
+                pass
         return ac
 
     # ------------------------------------------------------------------ #

@@ -89,7 +89,10 @@ class SpacetimeFeatureLayer:
                  detail_cb: Optional[Callable[[str, str, str], None]] = None,
                  layer_name: str = LAYER_NAME) -> None:
         self.view = view
-        self.collection = collection or FeatureCollection()
+        # 空集合也是合法目标：FeatureCollection 有 __len__，空集合为假值，
+        # 用 `or` 会把显式传入的空集合悄悄换成私有集合（全局上报进不来）。
+        self.collection = (FeatureCollection() if collection is None
+                           else collection)
         self.bus = bus or get_temporal_bus()
         self._detail_cb = detail_cb
         self._layer_name = layer_name
