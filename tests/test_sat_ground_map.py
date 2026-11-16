@@ -227,3 +227,23 @@ def test_constellation_colors_are_distinct_and_tagged(monkeypatch):
     assert _non_black(pix) > 100
     widget.shutdown()
     app.processEvents()
+
+
+def test_detail_drawer_opens_on_pick_and_collapses(monkeypatch):
+    """点中对象 → 详情进抽屉；「收起」= 返回。工程读数不常驻主面。"""
+    app = QApplication.instance() or QApplication(sys.argv)
+    import mbdsdr_ai.ground_track as gt
+    monkeypatch.setattr(gt, "fetch_tle", lambda catnr, max_age_hours=24.0: ISS_TLE)
+    from sat_ground_map import SatelliteGroundMap
+
+    widget = SatelliteGroundMap(online=False)
+    # 逻辑可见性看显式 hidden 态：父链没 show 时 isVisible() 恒假（已知坑）。
+    assert widget._detail_frame.isHidden(), "抽屉默认收起"
+    widget._emit_feature_detail("圈内样本A", "来源 adsb · 有效期 120s", "info")
+    assert not widget._detail_frame.isHidden()
+    assert "圈内样本A" in widget._detail_label.text()
+    assert "有效期" in widget._detail_label.text()
+    widget._detail_close.click()
+    assert widget._detail_frame.isHidden(), "收起后不再占高度"
+    widget.shutdown()
+    app.processEvents()

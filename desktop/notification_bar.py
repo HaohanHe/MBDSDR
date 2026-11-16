@@ -74,6 +74,7 @@ class NotificationBar(QFrame):
         self._batch_label: Optional[str] = None
         self._batch: Dict[str, int] = {}
         self._batch_logged: int = 0
+        self._more_text = ""
 
         self._timer = QTimer(self)
         self._timer.setSingleShot(True)
@@ -99,14 +100,27 @@ class NotificationBar(QFrame):
         self.suggestion_label.setObjectName("notificationSuggestion")
         self.suggestion_label.setWordWrap(True)
         self.suggestion_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        self.more_label = QLabel("")
+        self.more_label.setObjectName("notificationMore")
+        self.more_label.setWordWrap(True)
+        self.more_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        self.more_label.setVisible(False)
         text_col.addWidget(self.message_label)
         text_col.addWidget(self.suggestion_label)
+        text_col.addWidget(self.more_label)
         row.addLayout(text_col, 1)
 
         self.count_label = QLabel("")
         self.count_label.setObjectName("notificationCount")
         self.count_label.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Preferred)
         row.addWidget(self.count_label, 0, Qt.AlignTop)
+
+        self.more_btn = QPushButton("更多")
+        self.more_btn.setObjectName("notificationMore")
+        self.more_btn.setCursor(Qt.PointingHandCursor)
+        self.more_btn.clicked.connect(self._on_more_clicked)
+        self.more_btn.setVisible(False)
+        row.addWidget(self.more_btn, 0, Qt.AlignTop)
 
         self.remedy_btn = QPushButton("查看怎么办")
         self.remedy_btn.setObjectName("notificationAction")
@@ -137,7 +151,8 @@ class NotificationBar(QFrame):
                level: Optional[str] = None, retry: Optional[Callable] = None,
                message: Optional[str] = None,
                suggestion: Optional[str] = None,
-               timeout_ms: Optional[int] = None) -> bool:
+               timeout_ms: Optional[int] = None,
+               show_more: str = "") -> bool:
         """按错误码呈报一次。返回是否真的显示（无 remedy 的只进日志）。
 
         文案优先级：调用方给的 ``message`` / ``suggestion`` > 目录原文。
@@ -167,17 +182,18 @@ class NotificationBar(QFrame):
         self._counts[code] = self._counts.get(code, 0) + 1
         if code not in self._order:
             self._order.append(code)
-        self._show(code, msg, sug, lvl, retry, timeout_ms)
+        self._show(code, msg, sug, lvl, retry, timeout_ms, show_more)
         return True
 
     def show_message(self, text: str, *, suggestion: str = "",
                      level: str = "info",
-                     timeout_ms: Optional[int] = None) -> None:
+                     timeout_ms: Optional[int] = None,
+                     show_more: str = "") -> None:
         """非错误通知（进度/回执）：不经 remedy 判断，按调用方要求显示。"""
         self._counts.clear()
         self._order.clear()
         self._show("", str(text or ""), str(suggestion or ""),
-                   level, None, timeout_ms)
+                   level, None, timeout_ms, show_more)
 
     def begin_batch(self, label: str) -> None:
         """进入批量窗口：期间的 ``notify()`` 只累计，结束时汇总成一条。"""
@@ -203,7 +219,7 @@ class NotificationBar(QFrame):
             self._order.append(first)
         msg = f"{label}：{total} 条错误（{len(batch)} 类）"
         self._show(first, msg, error_catalog.suggestion(first), "error",
-                   None, None)
+                   None, None, "")
         return total
 
     def dismiss(self) -> None:
@@ -213,6 +229,9 @@ class NotificationBar(QFrame):
         self._code = ""
         self._retry = None
         self._order.clear()
+        self._more_text = ""
+        self.more_label.setVisible(False)
+        self.more_btn.setVisible(False)
         self._counts.clear()
         self.message_label.setText("")
         self.suggestion_label.setText("")
@@ -268,7 +287,8 @@ class NotificationBar(QFrame):
         return "warning"
 
     def _show(self, code: str, message: str, suggestion: str, level: str,
-              retry: Optional[Callable], timeout_ms: Optional[int]) -> None:
+              retry: Optional[Callable], timeout_ms: Optional[int],
+              show_more: str = "") -> None:
         self._timer.stop()
         self._code = code
         self._level = level if level in LEVEL_LABELS else "info"
@@ -278,6 +298,12 @@ class NotificationBar(QFrame):
         self.message_label.setText(message)
         self.suggestion_label.setText(suggestion)
         self.suggestion_label.setVisible(bool(suggestion))
+        # 「更多」：详情不铺主面，点开才展开（对齐 QGIS showMore 语义）。
+        self._more_text = str(show_more or "")
+        self.more_label.setText(self._more_text)
+        self.more_label.setVisible(False)
+        self.more_btn.setText("更多")
+        self.more_btn.setVisible(bool(self._more_text))
 
         # 动作区：有码才有「查看怎么办」（notify 已保证有 remedy）；
         # 「重试」只在该码可重试且调用方确实给了回调时出现。
@@ -290,8 +316,20 @@ class NotificationBar(QFrame):
         self._apply_style()
         self._active = True
         self.setVisible(True)
+        # 分级默认驻留：调用方显式给了 timeout_ms 以调用方为准；没给时
+        # info/success 4s、warning 8s 自动收，error 常驻等手动关（不猜
+        # 用户读完了没有）。
+        if timeout_ms is None:
+            timeout_ms = {"info": 4000, "success": 4000,
+                          "warning": 8000}.get(self._level, 0)
         if timeout_ms is not None and int(timeout_ms) > 0:
             self._timer.start(int(timeout_ms))
+
+    def _on_more_clicked(self) -> None:
+        """展开/收起详情（返回导航的最小形态）。"""
+        showing = self.more_label.isVisible()
+        self.more_label.setVisible(not showing)
+        self.more_btn.setText("更多" if showing else "收起")
 
     def _refresh_count(self) -> None:
         n = self._counts.get(self._code, 0)

@@ -201,3 +201,42 @@ def test_main_window_no_remedy_code_is_not_shown(main_window):
     bar.dismiss()
     assert main_window._notify_error("io_error", fields={"detail": "x"}) is False
     assert not bar.is_active()
+
+
+# ======================================================================
+# showMore 展开 + 分级默认驻留（2026-11-16）
+# ======================================================================
+def test_show_more_expands_and_collapses(qapp):
+    from desktop.notification_bar import NotificationBar
+    bar = NotificationBar()
+    bar.show_message("一句话", level="warning",
+                     show_more="这是不铺主面的完整原因链")
+    assert bar.is_active()
+    assert bar.more_btn.isVisible(), "有详情必须给「更多」入口"
+    assert not bar.more_label.isVisible(), "详情默认收起"
+    bar._on_more_clicked()
+    assert bar.more_label.isVisible()
+    assert "完整原因链" in bar.more_label.text()
+    assert bar.more_btn.text() == "收起", "展开后按钮是返回口"
+    bar._on_more_clicked()
+    assert not bar.more_label.isVisible()
+
+    bar2 = NotificationBar()
+    bar2.show_message("没详情", level="info")
+    assert not bar2.more_btn.isVisible(), "没详情不摆空按钮"
+
+
+def test_level_default_timeout_is_graduated(qapp):
+    from desktop.notification_bar import NotificationBar
+    bar = NotificationBar()
+    bar.show_message("进度", level="info")
+    assert bar._timer.isActive(), "info 应自动收（4s）"
+    bar.show_message("警告", level="warning")
+    assert bar._timer.isActive(), "warning 应自动收（8s）"
+    bar.show_message("失败", level="error")
+    assert not bar._timer.isActive(), "error 常驻等手动关"
+    # 调用方显式给值时以调用方为准
+    bar.show_message("手动", level="error", timeout_ms=1000)
+    assert bar._timer.isActive()
+    bar.show_message("常驻", level="info", timeout_ms=0)
+    assert not bar._timer.isActive()

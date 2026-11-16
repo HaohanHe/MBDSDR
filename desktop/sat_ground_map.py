@@ -22,7 +22,9 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from PySide6.QtCore import QPointF, Qt, Signal
 from PySide6.QtGui import QBrush, QColor, QPainter, QPen, QPolygonF
-from PySide6.QtWidgets import QLabel, QVBoxLayout, QWidget
+from PySide6.QtWidgets import (
+    QFrame, QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget,
+)
 
 from tokens import tokens as _tok
 
@@ -93,6 +95,21 @@ class SatelliteGroundMap(QWidget):
         self.view.add_layer("sat_footprint", self._paint_footprint)
         self.view.add_layer("sat_ground_track", self._paint_track)
         layout.addWidget(self.view)
+        # 详情抽屉：点中地面对象才展开（工程读数不占主面），「收起」= 返回。
+        self._detail_frame = QFrame(self)
+        self._detail_frame.setObjectName("mapDetailDrawer")
+        self._detail_frame.setVisible(False)
+        drawer_row = QHBoxLayout(self._detail_frame)
+        drawer_row.setContentsMargins(8, 4, 8, 4)
+        self._detail_label = QLabel("", self._detail_frame)
+        self._detail_label.setWordWrap(True)
+        self._detail_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        drawer_row.addWidget(self._detail_label, 1)
+        self._detail_close = QPushButton("收起", self._detail_frame)
+        self._detail_close.setCursor(Qt.PointingHandCursor)
+        self._detail_close.clicked.connect(self._detail_frame.hide)
+        drawer_row.addWidget(self._detail_close, 0, Qt.AlignTop)
+        layout.addWidget(self._detail_frame)
         if SpacetimeFeatureLayer is not None:
             try:
                 from mbdsdr_ai.spacetime_features import get_ground_features
@@ -168,6 +185,13 @@ class SatelliteGroundMap(QWidget):
 
     def _emit_feature_detail(self, text: str, suggestion: str,
                              level: str) -> None:
+        """详情进抽屉（展开才见），同时保留信号给上层提示行。"""
+        try:
+            body = text if not suggestion else f"{text}｜{suggestion}"
+            self._detail_label.setText(body)
+            self._detail_frame.setVisible(True)
+        except RuntimeError:  # pragma: no cover - 控件已销毁
+            pass
         self.feature_detail.emit(text, suggestion, level)
 
     # ---------------------------------------------------------------- 数据
