@@ -22,6 +22,8 @@ import os
 from typing import Any, Dict, List, Sequence
 
 _DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
+#: 仓库根（mbdsdr_ai 的上一级）——verification_evidence 的 repo 相对路径以此为锚。
+_REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 __all__ = [
     "list_sat_profiles", "load_sat_profile", "list_frame_layouts",
@@ -80,11 +82,15 @@ _EVIDENCE_REQUIRED_LEVELS = ("spec_example", "ota")
 
 
 def _require_verification(entry: Dict[str, Any], layout_name: str) -> None:
-    """每个顶层布局必须声明 verification；高等级必须配证据文件路径。
+    """每个顶层布局必须声明 verification；高等级必须配真实可复跑证据文件。
 
     schema_only  = 仅通过结构/字段表校验，未与任何真实或规范样例对上；
     spec_example = 用规范给出的示例数据逐字段对拍通过；
     ota          = 用真实接收数据验证过。
+
+    spec_example / ota 的 verification_evidence 不只是非空路径字符串：
+    必须指向真实存在、含非空白内容的文件（见 :func:`_require_evidence_file`），
+    否则「可复跑证据」沦为空头承诺。
     """
     level = entry.get("verification")
     if level is None:
@@ -102,6 +108,31 @@ def _require_verification(entry: Dict[str, Any], layout_name: str) -> None:
                 f"帧布局 {layout_name} 声明 verification={level!r}，但缺 "
                 "verification_evidence 证据文件路径——声称强于 schema 校验"
                 "就必须有可复跑证据")
+        _require_evidence_file(evidence, layout_name, level)
+
+
+def _require_evidence_file(evidence: str, layout_name: str, level: str) -> None:
+    """证据路径必须指向真实存在、非空的文件——「可复跑证据」不是空头路径。
+
+    此前只校验路径字符串非空，于是 ``verification_evidence`` 指向一个根本
+    不存在的文件也能加载，与「声称强于 schema 校验就必须有可复跑证据」的
+    承诺矛盾（§2 文档-实现冲突）。这里把承诺钉死：repo 相对路径以仓库根为
+    锚解析，文件必须可读且含非空白内容，否则拒载。
+    """
+    path = evidence if os.path.isabs(evidence) else os.path.join(
+        _REPO_ROOT, evidence)
+    try:
+        with open(path, "rb") as fh:
+            content = fh.read()
+    except OSError as exc:
+        raise ValueError(
+            f"帧布局 {layout_name} 声明 verification={level!r}，但证据文件 "
+            f"{evidence!r} 不可读（{exc}）——声称强于 schema 校验就必须有"
+            "真实存在、可复跑的证据文件，空头路径不入库") from exc
+    if not content.strip():
+        raise ValueError(
+            f"帧布局 {layout_name} 的证据文件 {evidence!r} 为空——"
+            "可复跑证据不得是空文件或纯空白")
 
 
 def _merge_fields(parent_fields: Sequence[Dict[str, Any]],

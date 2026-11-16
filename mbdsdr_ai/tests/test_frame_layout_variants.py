@@ -189,10 +189,17 @@ def test_claiming_one_level_up_requires_evidence_path(level):
     table["child"]["verification_evidence"] = "  "
     with pytest.raises(ValueError, match="verification_evidence"):
         SP._resolve_layout(table, "child")
+    # 证据必须是真实存在、非空的文件（不是空头路径）——指向首份可复跑
+    # spec_example 证据 artifact（CCSDS 230.1-G-3 Annex F Example 10）。
     table["child"]["verification_evidence"] = (
-        "mbdsdr_ai/tests/evidence/spec_example.json")
+        "mbdsdr_ai/tests/evidence/ccsds_tc_classic_annex_f_example10.json")
     layout = SP._resolve_layout(table, "child")
     assert layout["verification"] == level
+    # 反证（pairs）：不存在的路径现在必须被拒——此前只查字符串非空会放行。
+    table["child"]["verification_evidence"] = (
+        "mbdsdr_ai/tests/evidence/__does_not_exist__.json")
+    with pytest.raises(ValueError, match="证据文件"):
+        SP._resolve_layout(table, "child")
 
 
 def test_repo_layout_claiming_ota_without_evidence_is_rejected():

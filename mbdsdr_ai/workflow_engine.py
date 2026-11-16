@@ -6,9 +6,10 @@ Workflow Engine：JSON 定义的多步骤工具调用序列。
 
 核心能力（对照之前 ~/.mbdsdr/workflows/ 的设计）：
 - JSON 定义的多步骤工具调用序列
-- 每个 step 有 tool_name, params, description, timeout, retry_on_failure, max_retries, condition
+- 每个 step 有 tool_name, params, description, timeout, retry_on_failure, max_retries, condition, expected_result
 - 支持参数模板（{{variable}}），上一步的输出可以作为下一步的输入
 - 支持条件执行（condition），根据上一步结果决定是否执行
+- 支持结果校验（expected_result）：非空时要求步骤结果正文含该片段，不符按失败重试
 - 工作流由 AI 判断后显式调用（workflow_execute），或由用户定义/调度
 - 执行结果记录（usage_count, success_count）
 
@@ -22,6 +23,7 @@ import json
 import logging
 import re
 import time
+import inspect
 from dataclasses import dataclass, field
 from typing import List, Dict, Any, Optional, Callable
 
@@ -43,6 +45,35 @@ def _backup_corrupt_workflow(path: str) -> Optional[str]:
     return backup
 
 
+def accepts_kwarg(func: Callable, name: str) -> bool:
+    """一次性探测可调用对象是否接受某个关键字参数（本包共用探测缝）。
+
+    用于判断 tool_executor 是否支持 ``timeout_s=``：内部执行器
+    （agent._workflow_tool_executor）支持，外部/测试注入的两参执行器
+    （``lambda name, params: ...``）不支持。据此决定按哪种签名调用，
+    兼容旧执行器。子代理循环（subagents.Subagent._run_llm_loop）用同一
+    函数探测 ``tool_registry.call_from_model`` 是否支持 ``timeout_s=``，
+    以便把任务墙钟余额下发给工具（duck-type 假注册表不支持时自动退回）。
+
+    【绝不】用 try/except TypeError 包住真实调用来探测——工具内部抛的
+    TypeError 会被误判成「签名不支持」，进而用另一种签名重跑一遍工具，
+    造成双重副作用（重复采集/重复写盘）。签名探测必须在调用前一次性做完。
+    """
+    try:
+        sig = inspect.signature(func)
+    except (TypeError, ValueError):
+        # 内建/C 扩展等无法取签名：保守当作不支持，走两参调用
+        return False
+    for p in sig.parameters.values():
+        if p.kind == inspect.Parameter.VAR_KEYWORD:
+            return True  # **kwargs 吞一切关键字
+        if p.name == name and p.kind in (
+                inspect.Parameter.POSITIONAL_OR_KEYWORD,
+                inspect.Parameter.KEYWORD_ONLY):
+            return True
+    return False
+
+
 @dataclass
 class WorkflowStep:
     """工作流的一个步骤。"""
@@ -54,7 +85,7 @@ class WorkflowStep:
     retry_on_failure: bool = True
     max_retries: int = 2
     condition: str = ""  # 条件表达式，为空则总是执行
-    expected_result: str = ""
+    expected_result: str = ""  # 期望结果片段（字面子串，大小写不敏感）；为空则不校验
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "WorkflowStep":
@@ -182,6 +213,9 @@ class WorkflowEngine:
         self.workflows_dir = os.path.expanduser(workflows_dir)
         self.workflows: Dict[str, Workflow] = {}
         self.tool_executor: Optional[Callable[[str, Dict[str, Any]], Any]] = None
+        #: set_tool_executor 时一次性探测执行器是否接受 timeout_s 关键字。
+        #: True=按 step.timeout 下发超时；False=两参调用（兼容外部/旧执行器）。
+        self._executor_accepts_timeout: bool = False
         #: 加载失败的人话说明（None = 正常）。目前没有独立界面消费，
         #: 完整提示接线等 main_window.py 那一笔。
         self.last_error: Optional[str] = None
@@ -320,9 +354,17 @@ class WorkflowEngine:
 
     # ── 工具执行器 ──────────────────────────────────────
 
-    def set_tool_executor(self, executor: Callable[[str, Dict[str, Any]], Any]):
-        """设置工具执行器（MCP 客户端的调用函数）。"""
+    def set_tool_executor(self, executor: Callable[..., Any]):
+        """设置工具执行器（MCP 客户端的调用函数）。
+
+        一次性探测执行器是否接受 ``timeout_s`` 关键字：内部执行器
+        （agent._workflow_tool_executor）支持，据此把 step.timeout 真正下发；
+        外部/测试注入的两参执行器（``f(name, params)``）不支持，仍按两参调用。
+        探测用 inspect.signature 在接线时做一次，绝不在调用点 try/except
+        TypeError（那会把工具内部异常误判成签名不符而重跑，双重副作用）。
+        """
         self.tool_executor = executor
+        self._executor_accepts_timeout = accepts_kwarg(executor, "timeout_s")
 
     # ── 参数模板解析 ────────────────────────────────────
 
@@ -390,14 +432,40 @@ class WorkflowEngine:
         except Exception:
             return True
 
+    def _result_matches(self, result: Any, expected: str) -> bool:
+        """校验步骤结果是否含期望片段（expected_result 非空时调用）。
+
+        最小语义（与 _check_condition 的极简风格一致）：取结果的人类可读正文
+        （ToolResult.content；非 ToolResult 则 str(result)），与期望片段做
+        **大小写不敏感的字面子串**匹配。不做表达式求值、不解析 JSON 字段——
+        期望片段为空时调用方已跳过校验，这里再兜一层返回 True。
+        """
+        if not expected:
+            return True
+        content = getattr(result, "content", None)
+        if isinstance(content, str):
+            text = content
+        elif result is None:
+            text = ""
+        else:
+            text = str(result)
+        return expected.strip().lower() in text.lower()
+
     # ── 执行工作流 ──────────────────────────────────────
 
-    def execute(self, workflow_name: str, parameters: Dict[str, Any] = None) -> WorkflowResult:
+    def execute(self, workflow_name: str, parameters: Dict[str, Any] = None,
+                *, cancel_event=None) -> WorkflowResult:
         """
         执行工作流。
 
         workflow_name: 工作流名称
         parameters: 工作流参数（覆盖默认值）
+        cancel_event: 可选 threading.Event（agent 的 _cancel_event）。在步骤
+            边界与重试等待前检查；置位后停止后续步骤——已完成的步骤照常落账，
+            未执行的步骤标记 cancelled，整体 success=False、error_code="cancelled"。
+            与 agent.request_cancel 同一套「安全点取消」哲学：正在同步执行的
+            单个工具不会被强行打断（Python 无法安全终止线程），它跑完后不再
+            继续下一步。None=不可取消（旧行为不变）。
 
         返回 WorkflowResult。
         """
@@ -433,8 +501,26 @@ class WorkflowEngine:
         completed = 0
         failed_step = None
         error = ""
+        error_code = ""
+        cancelled = False
 
-        for step in workflow.steps:
+        def _cancel_remaining(from_idx: int) -> None:
+            """把从 from_idx 起尚未执行的步骤标记为 cancelled（用户取消）。"""
+            for rem in workflow.steps[from_idx:]:
+                step_results.append({
+                    "step_id": rem.step_id,
+                    "tool": rem.tool_name,
+                    "cancelled": True,
+                    "reason": "用户取消",
+                })
+
+        for idx, step in enumerate(workflow.steps):
+            # 安全点①：步骤边界。用户取消后不再启动新步骤。
+            if cancel_event is not None and cancel_event.is_set():
+                cancelled = True
+                _cancel_remaining(idx)
+                break
+
             # 检查条件
             if not self._check_condition(step.condition, context):
                 step_results.append({
@@ -456,13 +542,39 @@ class WorkflowEngine:
 
             for attempt in range(retries + 1):
                 try:
-                    result = self.tool_executor(step.tool_name, params)
-                    success = True
-                    break
+                    # step.timeout 真正下发：执行器支持 timeout_s 才传，
+                    # 兼容外部两参执行器（探测在 set_tool_executor 一次性做）。
+                    if self._executor_accepts_timeout:
+                        result = self.tool_executor(
+                            step.tool_name, params, timeout_s=step.timeout)
+                    else:
+                        result = self.tool_executor(step.tool_name, params)
                 except Exception as e:
                     last_error = f"{type(e).__name__}: {e}"
-                    if attempt < retries:
-                        time.sleep(0.5 * (attempt + 1))
+                    result = None
+                    success = False
+                else:
+                    # 执行层没抛异常；再校验 expected_result（若声明）。不符按
+                    # 失败处理，落到下面与工具异常同一条重试/退避接缝。
+                    if step.expected_result and not self._result_matches(
+                            result, step.expected_result):
+                        success = False
+                        last_error = f"结果未含期望片段「{step.expected_result}」"
+                    else:
+                        success = True
+                        break
+                # 失败（异常或期望不符）：重试前取消安全点 + 退避。
+                if attempt < retries:
+                    # 安全点②：重试等待前。取消后不再 sleep/重试。
+                    if cancel_event is not None and cancel_event.is_set():
+                        cancelled = True
+                        break
+                    time.sleep(0.5 * (attempt + 1))
+
+            # 重试循环里被取消：当前步未完成，连同后续步骤一起标记 cancelled。
+            if cancelled:
+                _cancel_remaining(idx)
+                break
 
             if not success:
                 failed_step = step.step_id
@@ -512,9 +624,14 @@ class WorkflowEngine:
                     if isinstance(v, (str, int, float, bool, list, dict)):
                         context[k] = v
 
+        # 取消：整体判失败，给出 catalog 的「请求已取消」人话 + 结构化码。
+        if cancelled:
+            error = user_message("cancelled")
+            error_code = "cancelled"
+
         # 更新统计
         workflow.usage_count += 1
-        if failed_step is None:
+        if failed_step is None and not cancelled:
             workflow.success_count += 1
 
         execution_time = (time.time() - start_time) * 1000
@@ -531,11 +648,12 @@ class WorkflowEngine:
 
         return WorkflowResult(
             workflow_name=workflow_name,
-            success=failed_step is None,
+            success=failed_step is None and not cancelled,
             total_steps=len(workflow.steps),
             completed_steps=completed,
             failed_step=failed_step,
             error=error,
+            error_code=error_code,
             step_results=step_results,
             execution_time_ms=execution_time,
             outputs=safe_outputs,

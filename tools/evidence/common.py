@@ -140,6 +140,35 @@ def save_frame(widget, path: Path, *, min_std: float = 0.8,
     }
 
 
+def frame_target(w, *, size=(1440, 900)):
+    """当前形态下真正承载画面的顶层窗口（截图必须抓它，否则是假证据）。
+
+    星象仪住**独立顶层天空窗** ``_PlanetariumWindow``（真全屏），主窗口留在
+    IDE 形态原样可用。进星象仪后仍 ``w.grab()`` 只会拿到 IDE 残影——天空一帧
+    都没有，却顶着「星象仪」的文件名，比没有证据更坏。这里返回天空窗。
+
+    同时补 ``WA_DontShowOnScreen`` 并退到窗口态定尺：证据跑在用户真桌面上时
+    不该弹一个真全屏天空窗抢焦点；窗口态定尺也让帧可读、尺寸跨组稳定。
+    非星象仪形态（或天空窗未建）原样返回 ``w``。
+    """
+    from PySide6.QtCore import Qt
+    from PySide6.QtWidgets import QApplication
+
+    if getattr(w, "_app_mode", "ide") != "planetarium":
+        return w
+    pw = getattr(w, "_planetarium_window", None)
+    if pw is None:
+        return w
+    pw.setAttribute(Qt.WA_DontShowOnScreen, True)
+    pw.showNormal()
+    pw.resize(*size)
+    app = QApplication.instance()
+    if app is not None:
+        for _ in range(20):
+            app.processEvents()
+    return pw
+
+
 def visible_texts(widget) -> List[str]:
     """可见且有文字内容的控件文本（用来衡量首屏信息负荷）。"""
     from PySide6.QtWidgets import QLabel, QPushButton, QToolButton

@@ -2495,6 +2495,30 @@ def register_sdr_tools(agent):
     )
 
     agent.tool_registry.register(
+        name="gimbal_engage",
+        description="启用 rotctld 运动下发（连接≠启用：gimbal_connect 只建立连接并查询限位，必须再 gimbal_engage 才会真正驱动旋转器）。未启用时 gimbal_point 拒绝下发，避免误动天线。前置：先 gimbal_connect mode=rotctld。",
+        parameters={"type": "object", "properties": {}, "required": []},
+        handler=_gimbal_engage,
+        category="gimbal",
+    )
+
+    agent.tool_registry.register(
+        name="gimbal_disengage",
+        description="停用 rotctld 运动下发：之后 gimbal_point 不再驱动旋转器，直到再次 gimbal_engage。用于人工接管/检修前锁定电机，防止 AI 误下发运动指令。",
+        parameters={"type": "object", "properties": {}, "required": []},
+        handler=_gimbal_disengage,
+        category="gimbal",
+    )
+
+    agent.tool_registry.register(
+        name="gimbal_park",
+        description="云台归位（rotctld 发送 K 命令回到标定停放位）。需先 gimbal_engage；若旋转器 caps 报告不支持 park 则拒绝下发并诚实说明，不发无效指令。",
+        parameters={"type": "object", "properties": {}, "required": []},
+        handler=_gimbal_park,
+        category="gimbal",
+    )
+
+    agent.tool_registry.register(
         name="gimbal_rssi_sweep",
         description="定向天线方位测向扫描：云台带动八木/定向天线按步进逐方位转动（默认0-360°每30°），每步稳定后读RSSI，返回方位-RSSI样本和最强信号方位。板载/rotctld自动执行；人工模式返回逐方位转动指引。配合gnss_direction_find做干扰源/信标质心定位。前置：先用全向天线确定干扰频率并调谐，再切定向天线扫描。",
         parameters={
@@ -8267,7 +8291,15 @@ def _gimbal_connect(args):
         port = int(args.get('port', 4533))
         st = gc.use_rotctld(host, port)
         if st.connected:
-            return f"已连接 Hamlib 旋转器 {host}:{port}"
+            if gc.rotctld and gc.rotctld.caps_state == "ok":
+                c = gc.rotctld.caps
+                caps_note = (f"\n限位：方位 {c['min_az']:.0f}–{c['max_az']:.0f}°，"
+                             f"仰角 {c['min_el']:.0f}–{c['max_el']:.0f}°")
+            else:
+                caps_note = "\n限位：未知（dump_caps 未成功，按默认 0–360/0–90 钳位）"
+            return (f"已连接 Hamlib 旋转器 {host}:{port}（连接≠启用）。{caps_note}\n"
+                    f"尚未启用运动下发：先 gimbal_engage 启用，再 gimbal_point 指向；"
+                    f"停用 gimbal_disengage，停后归位见 gimbal_park。")
         return (f"无法连接 rotctld {host}:{port}。\n"
                 f"请确认旋转器/rotctld 已启动（如 rotctld -m 1 -r /dev/ttyUSB0 -t 4533）。\n"
                 f"可先切换 manual 模式做人工引导。")
@@ -8295,6 +8327,10 @@ def _gimbal_point(args):
     lines.append(f"当前: 方位 {r.get('current_az', 0):.1f}°  仰角 {r.get('current_el', 0):.1f}°")
     lines.append(f"偏差: 方位 {r.get('az_error_deg', 0):+.1f}°  仰角 {r.get('el_error_deg', 0):+.1f}°")
     lines.append("")
+    if not r.get('dispatched', False) and r.get('error'):
+        lines.append(f"未执行: {r['error']}")
+    if r.get('note'):
+        lines.append(f"限位: {r['note']}")
     if r.get('aligned'):
         lines.append("已对准（偏差在波束宽度内），可以开始接收。")
     else:
@@ -8316,6 +8352,10 @@ def _gimbal_track_satellite(args):
     lines.append(f"当前天线: 方位 {r.get('current_az', 0):.1f}°  仰角 {r.get('current_el', 0):.1f}°")
     lines.append(f"偏差: 方位 {r.get('az_error_deg', 0):+.1f}°  仰角 {r.get('el_error_deg', 0):+.1f}°")
     lines.append("")
+    if not r.get('dispatched', False) and r.get('error'):
+        lines.append(f"未执行: {r['error']}")
+    if r.get('note'):
+        lines.append(f"限位: {r['note']}")
     if r.get('aligned'):
         lines.append("已对准卫星，开始接收过境信号。")
         lines.append("提示：过境期间卫星持续移动，应按 sky_view_visible 刷新方位角后重复调用本工具跟踪。")
@@ -8346,6 +8386,35 @@ def _gimbal_stop(args):
                  f"（后端 {r.get('backend')}）。"),
         error="" if ok else "gimbal_stop_failed",
     )
+
+
+def _gimbal_engage(args):
+    gc = _get_gimbal_controller()
+    ok = gc.engage_rotctld()
+    if ok:
+        return ToolResult(success=True,
+                          content="已启用 rotctld 运动下发（现在 gimbal_point 会真正驱动旋转器）。")
+    return ToolResult(success=False,
+                      content="启用失败：rotctld 未连接（先 gimbal_connect mode=rotctld）。",
+                      error="gimbal_not_connected")
+
+
+def _gimbal_disengage(args):
+    gc = _get_gimbal_controller()
+    gc.disengage_rotctld()
+    return ToolResult(success=True,
+                      content="已停用 rotctld 运动下发（gimbal_point 不再驱动旋转器，直到再次 gimbal_engage）。")
+
+
+def _gimbal_park(args):
+    gc = _get_gimbal_controller()
+    r = gc.park()
+    ok = bool(r.get('ok'))
+    return ToolResult(
+        success=ok,
+        content=(f"云台归位{'已执行' if ok else '未执行'}（后端 {r.get('backend')}）。"
+                 + ("" if ok else f" 原因: {r.get('error')}")),
+        error="" if ok else "gimbal_park_failed")
 
 
 def _gimbal_sweep_result(args, agent=None):

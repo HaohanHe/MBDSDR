@@ -272,9 +272,10 @@ def test_perf_profile_changes_live_refresh_and_bins_cap(win):
 def test_perf_profile_mirrors_spectrum_panel_levels():
     """perf_profile 的 fft_size/spectrum_interval_ms 必须 == 面板 _PERF_LEVELS[panel_level]。
 
-    运行时事实源是频谱面板 set_performance_mode（它真改 generator + plot 定时器）；
-    perf_profile 里这两个字段是展示镜像。两处漂移会让设置页宣称的 FFT/刷新与
-    实际生效不符（假控件复活）。本例把镜像钉死在面板档位上。
+    这两个字段是**展示镜像**，_apply_perf_profile 并不消费它们：刷新间隔经
+    panel_level→set_performance_mode 生效（它只改 plot 定时器 + generator.num_bins，
+    **不改 FFT 点数**），FFT 点数真值源是设置项 schema fft_size（_apply_fft_size）。
+    钉住镜像是防将来把它 surfaced 到界面时与面板档矛盾（假控件复活）。
     """
     import perf_profile as pp
     from spectrum_widget import SpectrumPanel

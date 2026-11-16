@@ -236,8 +236,13 @@ class FireDetector:
         result: List[FireCluster] = []
         for cl in clusters:
             n = len(cl)
-            clat = sum(c.lat_deg for c in cl) / n
-            clon = sum(c.lon_deg for c in cl) / n
+            clat = sum(c.lat_deg for c in cl) / n  # 纬度有界 [-90,90]，线性平均正确
+            # 经度是圆周量：聚类用 _haversine_km（已 wrap-aware），跨日界线簇
+            # （如 179°E/-179°E 相距 ~22km）合法成簇，但线性平均会把质心放到
+            # 地球另一侧（(179-179)/2=0°，真值 180°）。改圆均值，与 #104/#105 同口径。
+            sin_sum = sum(math.sin(math.radians(c.lon_deg)) for c in cl)
+            cos_sum = sum(math.cos(math.radians(c.lon_deg)) for c in cl)
+            clon = (math.degrees(math.atan2(sin_sum, cos_sum)) + 180.0) % 360.0 - 180.0
             tmax = max(c.temp_k for c in cl)
             result.append(FireCluster(clat, clon, tmax, n))
         return result

@@ -17,6 +17,9 @@ sys.path.insert(0, ROOT)
 from mbdsdr_ai import orbit  # noqa: E402
 from mbdsdr_ai.decoders import BUILTIN_TLE  # noqa: E402
 from mbdsdr_ai.sat_consistency import (  # noqa: E402
+    DEFAULT_TOL_RANGE_ABS_KM,
+    DEFAULT_TOL_RANGE_REL,
+    _compare,
     check_next_pass_consistency,
     check_pass_object,
     check_time_consistency,
@@ -140,3 +143,93 @@ class TestMismatchIsReported:
         assert rep["checked"] is False
         assert rep["consistent"] is None
         assert rep["reason"]
+
+
+class TestRangeCrossCheck:
+    """range 跨口径对拍：az/el 是角度，对距离整体尺度/单位误差免疫，须独立抓。
+
+    合成路径用抽象 az/el/range 数值（非地理坐标）；真传播用例复用既有
+    GS/LINES fixture，不引入任何新的真实地点。
+    """
+
+    def test_range_scale_error_flagged_while_az_el_identical(self):
+        # az/el 完全相同、唯 range 差 1.5×：角度守卫放行，range 守卫必须抓。
+        paths = {
+            "sky_view": {"az": 100.0, "el": 30.0, "range_km": 1000.0},
+            "doppler": {"az": 100.0, "el": 30.0, "range_km": 1500.0},
+        }
+        cmp_ = _compare(paths, tol_deg=0.5)
+        d = cmp_["deltas"]["sky_view_vs_doppler"]
+        assert d["daz_deg"] == 0.0 and d["del_deg"] == 0.0
+        assert d["drange_km"] == 500.0
+        assert cmp_["issues"] and any("距离差" in s for s in cmp_["issues"])
+
+    def test_range_unit_error_km_vs_m_flagged(self):
+        # m 当 km 的 1000× 单位错：az/el 不动，range 守卫必须抓。
+        paths = {
+            "sky_view": {"az": 100.0, "el": 30.0, "range_km": 1000.0},
+            "doppler": {"az": 100.0, "el": 30.0, "range_km": 1_000_000.0},
+        }
+        cmp_ = _compare(paths, tol_deg=0.5)
+        assert cmp_["issues"] and any("距离差" in s for s in cmp_["issues"])
+
+    def test_legitimate_kou_jing_spread_accepted(self):
+        # 实测合法差 ~30 m：远小于容差，不得误报。
+        paths = {
+            "sky_view": {"az": 100.0, "el": 30.0, "range_km": 2800.0},
+            "doppler": {"az": 100.0, "el": 30.0, "range_km": 2800.03},
+        }
+        cmp_ = _compare(paths, tol_deg=0.5)
+        d = cmp_["deltas"]["sky_view_vs_doppler"]
+        assert cmp_["issues"] == []
+        assert d["drange_km"] <= d["range_tol_km"]
+        # 容差 = max(绝对下限, 相对×距离)，口径独立于角度容差。
+        assert d["range_tol_km"] == round(
+            max(DEFAULT_TOL_RANGE_ABS_KM, DEFAULT_TOL_RANGE_REL * 2800.03), 4)
+
+    def test_range_skipped_when_a_path_has_no_range(self):
+        # 过境路径无独立距离：涉及 pass 的对不做 range 对拍，只 sky_view↔doppler 做。
+        paths = {
+            "pass": {"az": 100.0, "el": 5.0},
+            "sky_view": {"az": 100.0, "el": 5.0, "range_km": 2800.0},
+            "doppler": {"az": 100.0, "el": 5.0, "range_km": 2800.03},
+        }
+        cmp_ = _compare(paths, tol_deg=0.5)
+        assert "drange_km" not in cmp_["deltas"]["pass_vs_sky_view"]
+        assert "drange_km" not in cmp_["deltas"]["pass_vs_doppler"]
+        assert "drange_km" in cmp_["deltas"]["sky_view_vs_doppler"]
+
+    def test_real_propagation_range_present_and_consistent(self):
+        p = _first_pass()[0]
+        rep = check_pass_object(p, LINES, GS, tol_deg=0.5, threshold_alt_deg=5.0)
+        assert rep["checked"] is True and rep["consistent"] is True
+        d = rep["deltas"]["sky_view_vs_doppler"]
+        assert "drange_km" in d and "range_tol_km" in d
+        assert d["drange_km"] <= d["range_tol_km"]
+        # 过境两对仍只有角度 delta（pass 无 range）。
+        assert "drange_km" not in rep["deltas"]["pass_vs_sky_view"]
+
+    def test_injected_range_scale_error_flagged_end_to_end(self, monkeypatch):
+        # 端到端反证：把 sgp4 链的 range_km 放大 1.5×（az/el 不动），
+        # check_time_consistency 必须报距离不一致，而角度仍判一致。
+        from mbdsdr_ai import orbit
+
+        real = orbit._state_from_satrec
+
+        def buggy(*a, **k):
+            st = real(*a, **k)
+            if st is not None:
+                st = dict(st)
+                st["range_km"] = float(st["range_km"]) * 1.5
+            return st
+
+        # sat_consistency 在调用时从 orbit 解析 _state_from_satrec，故 patch orbit 生效。
+        monkeypatch.setattr(orbit, "_state_from_satrec", buggy)
+        at = START.utc_datetime().timestamp() + 3600.0
+        rep = check_time_consistency(LINES, GS, at, tol_deg=0.5)
+        assert rep["checked"] is True
+        assert rep["consistent"] is False
+        assert any("距离差" in s for s in rep["issues"])
+        d = rep["deltas"]["sky_view_vs_doppler"]
+        assert d["daz_deg"] <= 0.5 and d["del_deg"] <= 0.5   # 角度仍一致
+        assert d["drange_km"] > d["range_tol_km"]            # 唯 range 被抓

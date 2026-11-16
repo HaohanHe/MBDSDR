@@ -46,7 +46,9 @@ logger = logging.getLogger(__name__)
 #: 参数、`AMRFeature` 的字段集合或 `extract_features_from_iq` 的算法有任何
 #: 改动，必须 +1**——否则旧缓存会让分类结果停在上一个特征定义上，且不会
 #: 报任何错（静默错判比启动慢严重得多）。
-_BUILTIN_CACHE_VERSION = 1
+#: v2：extract_features_from_iq 的 mean_phase/std_phase 由线性平均改圆均值/
+#:     圆标准差（修跨 ±π 回绕错判），特征定义变了，旧 v1 缓存必须失效。
+_BUILTIN_CACHE_VERSION = 2
 
 
 def builtin_cache_path() -> Optional[str]:
@@ -530,8 +532,16 @@ class AMRClassifier:
 
         # 瞬时频率和相位
         phases = [math.atan2(s.imag, s.real) for s in iq_samples]
-        mean_phase = sum(phases) / n
-        std_phase = math.sqrt(sum((p - mean_phase) ** 2 for p in phases) / n) if n > 1 else 0
+        # 相位是圆周量：线性平均在 ±π 回绕处会错（+135°/-135° 两样本线性
+        # 得 0°，真值 180°）。改用圆均值 atan2(Σsin, Σcos)，与 signal_quality.py
+        # 的 mean_phase_deg 口径一致。
+        sin_sum = sum(math.sin(p) for p in phases)
+        cos_sum = sum(math.cos(p) for p in phases)
+        mean_phase = math.atan2(sin_sum, cos_sum)
+        # 圆标准差：每个样本对圆均值的偏差先 wrap 到 [-π, π) 再求 RMS，否则
+        # 跨回绕样本的偏差被高估（+135°/-135° 线性 std=135°，真值 45°）。
+        phase_devs = [(p - mean_phase + math.pi) % (2 * math.pi) - math.pi for p in phases]
+        std_phase = math.sqrt(sum(d * d for d in phase_devs) / n) if n > 1 else 0
 
         # 瞬时频率（相位差分）
         inst_freqs = []

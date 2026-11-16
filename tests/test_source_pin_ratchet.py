@@ -5,7 +5,11 @@
 口径与 `scripts/audit_source_text_pins.py` 一致（作用域感知，不做跨函数
 变量名传染）。基线 `docs/source-pin-ratchet-baseline.json` 建表于
 2026-11-06，2026-11-13 K19 收口后为 58 条 = 存量 56 + 2 条人工验收卡
-文档判据（逐条带 `reason`，见基线末尾两条）。2026-11-06 时原为 174 条
+文档判据；2026-11-14 WorkBuddy 复核 HEAD 既有 pin 后登记 41 条（40 键，
+其中 before.count(b"\r\n") 重数 2）→ 99 条：19 条产出数据 pin（append/
+safe_commit 工具在临时仓库的 git 产出与文档字节）+ 22 条结构守卫（同源/
+负向/AST 分支序/死状态/身份坐标红线/守卫目标锚），逐条带 owner=引入线/
+commit + reason，见基线末尾。2026-11-06 时原为 174 条
 （经选中卡 10、u02/u03/u07 27、C 候选+天空读数+余量 38、B 类两簇 47、
 他线 967ac726 新增 4 收缩到 56）：
 
@@ -27,7 +31,7 @@ sys.path.insert(0, str(ROOT / "scripts"))
 import audit_source_text_pins as scanner  # noqa: E402
 
 BASELINE = ROOT / "docs" / "source-pin-ratchet-baseline.json"
-BUILT_AT = 58
+BUILT_AT = 99
 KEY_FIELDS = ("path", "func", "pinned")
 
 

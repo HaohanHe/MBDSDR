@@ -1,0 +1,39 @@
+{
+  "_schema": "mbdsdr frame_layout verification_evidence v1 —— 规范示例逐字段对拍证据（可复跑，非空头路径）",
+  "_note": "本文件是 verification=spec_example 等级要求的『可复跑证据』：用公开规范给出的官方示例帧，经本仓解释器 mbdsdr_ai/verify_chain.py::extract_fields 与 _decode_bits 逐字段对拍。reproduce 命令可重跑；test_frame_layout_evidence.py 会重新计算每个 decoded/extracted 值并与本文件钉扎值对拍，任一不符即红。证据不是空文件、不是不存在的路径。",
+  "layout_name": "ccsds_tc_classic",
+  "supports_verification": "spec_example",
+  "spec": {
+    "document": "CCSDS 230.1-G-3, TC Synchronization and Channel Coding—Summary of Concept and Rationale, Issue 3, October 2021; Editorial Change 1, January 2023",
+    "url": "https://public.ccsds.org/Pubs/230x1g3e1.pdf",
+    "sha256": "2ce64320ef8cad6fb8d5a2a80c48ffdf1f2584e5773f0c48eb255bb8b2f04ae7",
+    "section": "Annex F, Example 10 (Page F-11; PDF page 144)",
+    "header_structure_spec": "CCSDS 232.0-B-4 §4.1.1 Transfer Frame Primary Header (40 bits), url https://public.ccsds.org/Pubs/232x0b4e1c1.pdf sha256 0892557c3f28373498c2e1a9f089cd8a63e46eddff2325c90ff1c39ea6c4d792"
+  },
+  "example_frame_hex": "001B000E06010203040506070814BB",
+  "documented_field_values": {
+    "spacecraft_id": 27,
+    "virtual_channel_id": 0,
+    "frame_type": "AD",
+    "frame_seq": 6,
+    "data_hex": "0102030405060708",
+    "n_bytes": 15,
+    "fecf_hex": "14BB"
+  },
+  "header_bit_fields": [
+    {"name": "transfer_frame_version", "bit_offset": 0, "bit_len": 2, "decoded": 0},
+    {"name": "bypass_flag", "bit_offset": 2, "bit_len": 1, "decoded": 0},
+    {"name": "control_command_flag", "bit_offset": 3, "bit_len": 1, "decoded": 0},
+    {"name": "spare", "bit_offset": 4, "bit_len": 2, "decoded": 0},
+    {"name": "spacecraft_id", "bit_offset": 6, "bit_len": 10, "decoded": 27, "documented": 27},
+    {"name": "virtual_channel_id", "bit_offset": 16, "bit_len": 6, "decoded": 0, "documented": 0},
+    {"name": "frame_length", "bit_offset": 22, "bit_len": 10, "decoded": 14, "note": "帧长字段=总字节数-1 → 15 字节，与 documented n_bytes 一致"},
+    {"name": "frame_sequence_number", "bit_offset": 32, "bit_len": 8, "decoded": 6, "documented": 6}
+  ],
+  "layout_field_comparison": [
+    {"field": "frame_header_hex", "extracted": "001B000E06", "expected_hex": "001B000E06", "pass": true},
+    {"field": "data", "extracted": "010203040506070814BB", "pure_data_hex": "0102030405060708", "documented_data_hex": "0102030405060708", "fecf_hex": "14BB", "documented_fecf_hex": "14BB", "note": "data 字段 len=-1 含义为『从 offset 到帧尾剩余全部字节』，含帧尾 2 字节 FECF；纯用户数据需去末 2 字节", "pass": true}
+  ],
+  "result": "pass",
+  "reproduce": "PYTHONUTF8=1 QT_QPA_PLATFORM=offscreen MBDSDR_OFFLINE=1 python -m pytest mbdsdr_ai/tests/test_frame_layout_evidence.py -q"
+}

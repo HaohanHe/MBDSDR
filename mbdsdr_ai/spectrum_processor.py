@@ -338,14 +338,24 @@ class SpectrumProcessor:
         # 归一化幅度
         amp_norm = amplitude / (np.mean(amplitude) + 1e-10)
 
+        # 相位是圆周量（np.angle 已 wrap 到 [-π,π]）：跨 ±π 回绕信号
+        # （如扫过 ±180° 的复正弦/PSK）线性 mean/std 会把质心放到反方向、
+        # 把离散度夸大。改圆均值 atan2(mean(sin),mean(cos)) + 圆标准差
+        # sqrt(mean(wrap(phase-mean)²))，与 amr.py(#107)/signal_quality.py
+        # 同口径。inst_freq 已先 np.unwrap，不受此影响。
+        phase_mean = float(np.arctan2(np.mean(np.sin(phase)),
+                                      np.mean(np.cos(phase))))
+        phase_devs = (phase - phase_mean + np.pi) % (2 * np.pi) - np.pi
+        phase_std = float(np.sqrt(np.mean(phase_devs ** 2)))
+
         features = {
             "num_samples": len(samples),
             "amplitude_mean": float(np.mean(amplitude)),
             "amplitude_std": float(np.std(amplitude)),
             "amplitude_kurtosis": float(self._kurtosis(amp_norm)),
             "amplitude_max": float(np.max(amplitude)),
-            "phase_std": float(np.std(phase)),
-            "phase_mean": float(np.mean(phase)),
+            "phase_std": phase_std,
+            "phase_mean": phase_mean,
             "frequency_mean": float(np.mean(inst_freq)),
             "frequency_std": float(np.std(inst_freq)),
             "frequency_max_abs": float(np.max(np.abs(inst_freq))),

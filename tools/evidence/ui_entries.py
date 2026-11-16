@@ -49,6 +49,7 @@ def run(args) -> dict:
     w.set_app_mode("planetarium")
     common.pump(app, 60)
     sv = w.sky_view
+    target = common.frame_target(w)
 
     # 给一片能看见的天：示例站 + 今夜（真实太阳 -18° / 民用暮光终）
     w._preview_site_no_coords = True
@@ -79,7 +80,7 @@ def run(args) -> dict:
         getattr(w, "_planetarium_search_key", None)
         and w._planetarium_search_key.isEnabled())
     res["facts"]["search_visible_before_click"] = bool(sv.search_visible())
-    frames.append(common.save_frame(w, out / "01_toolbar.png"))
+    frames.append(common.save_frame(target, out / "01_toolbar.png"))
 
     # ---------------- 2) 图层面板 ----------------
     w._planetarium_layer_btn.setChecked(True)
@@ -101,7 +102,7 @@ def run(args) -> dict:
         limit_lbl.text() if limit_lbl is not None else "MISSING")
     res["facts"]["limit_magnitude_readonly"] = not any(
         hasattr(limit_lbl, attr) for attr in ("setSliderPosition", "setValue"))
-    frames.append(common.save_frame(w, out / "02_layers.png"))
+    frames.append(common.save_frame(target, out / "02_layers.png"))
     w._planetarium_layer_btn.setChecked(False)
     common.pump(app, 10)
 
@@ -125,7 +126,7 @@ def run(args) -> dict:
         "top": [sv._search_popup.item(i).text()
                 for i in range(min(4, sv._search_popup.count()))],
     }
-    frames.append(common.save_frame(w, out / "03_search.png"))
+    frames.append(common.save_frame(target, out / "03_search.png"))
 
     # Esc 只收搜索，不退形态（分层，不是一把全关）
     sv.keyPressEvent(QKeyEvent(QEvent.KeyPress, Qt.Key_Escape, Qt.NoModifier))

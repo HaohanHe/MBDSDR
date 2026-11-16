@@ -228,6 +228,43 @@ def test_xastir_aprs_roundtrip():
     print(f"[OK] Xastir: 对象/物品帧往返, 地理围栏内外判定正确")
 
 
+def test_xastir_aprs_minutes_conformance():
+    """APRS 未压缩坐标分钟字段必须 00–59：四舍五入进位到 60 时向度进 1。
+
+    反证旧缺陷：encode_latitude(89.999999) 曾产出 '8960.00N'（MM=60，非法），
+    encode_longitude(179.999999) 曾产出 '17960.00E'。旧往返测试只验数值精度
+    （<0.001），漏掉线格式合规——本测试钉住进位后 MM 恒 < 60。
+    """
+    # 边界：分数度 *60 四舍五入到 60.00 → 必须向度进 1、分钟归 0
+    assert encode_latitude(89.999999) == "9000.00N"
+    assert encode_latitude(45.999999) == "4600.00N"
+    assert encode_longitude(179.999999) == "18000.00E"
+    assert encode_longitude(12.99999) == "01300.00E"
+    assert encode_latitude(-89.999999) == "9000.00S"
+    assert encode_longitude(-179.999999) == "18000.00W"
+
+    # 密集扫描：任何度 + 逼近 1 的分数都不得产出 MM>=60，且往返精度保持
+    for deg in range(0, 90):
+        for frac in (0.99999, 0.999999, 0.9999999):
+            s = encode_latitude(deg + frac)
+            assert len(s) == 8, s
+            assert float(s[2:7]) < 60.0, f"非法纬度分钟字段: {s}"
+            assert abs(decode_latitude(s) - (deg + frac)) < 0.001
+    for deg in range(0, 180):
+        for frac in (0.99999, 0.999999, 0.9999999):
+            s = encode_longitude(deg + frac)
+            assert len(s) == 9, s
+            assert float(s[3:8]) < 60.0, f"非法经度分钟字段: {s}"
+            assert abs(decode_longitude(s) - (deg + frac)) < 0.001
+
+    # 正常值不变（回归守卫）
+    assert encode_latitude(39.9042) == "3954.25N"
+    assert encode_longitude(116.4074) == "11624.44E"
+    # 未达进位门限的分数不进位：45.9999 -> 59.99 分（仍 < 60）
+    assert encode_latitude(45.9999) == "4559.99N"
+    print("[OK] Xastir: APRS 分钟字段进位合规（MM 恒 00–59），正常值不变")
+
+
 # ---------------------------------------------------------------------
 # 5. minimodem Bell103 300baud 往返（且现有接口不受影响）
 # ---------------------------------------------------------------------

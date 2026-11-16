@@ -21,7 +21,10 @@ from typing import Dict, Any, List, Optional, Sequence, Tuple
 from dataclasses import dataclass
 
 # WAV 读取是通用音频原语，定义在叶子 audio_io。
-from .audio_io import read_wav_audio
+try:
+    from .audio_io import read_wav_audio
+except ImportError:  # 扁平导入（部分脚本/测试直挂 mbdsdr_ai 目录）
+    from audio_io import read_wav_audio
 
 # sgp4 卫星轨道计算
 try:

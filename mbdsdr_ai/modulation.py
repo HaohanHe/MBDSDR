@@ -384,8 +384,14 @@ def constellation_metrics(symbols: Sequence[complex], scheme: str = "qpsk",
     nearest = np.argmin(d, axis=1)
     err = xn - pts[nearest]
     evm = float(np.sqrt(np.mean(np.abs(err) ** 2)))
-    # 相位误差（仅对非零幅度星座有意义：ASK 的 0 点无相位）
-    nz = np.abs(xn) > 0.3
+    # 相位误差仅对「非零理想星座点」有意义：ASK 的 0 点无相位。掩码必须按
+    # *参考理想点* 是否为零来排除，而非仅按接收幅度——否则反相/强噪 ASK 的大
+    # 符号被判到 0 点，angle(xn·conj(0))=angle(±0) 凭浮点符号零伪造出 0°/180°，
+    # 把用户可见的相位误差 σ 抬到 ~90°（实测反相 ASK σ=89.95°），与真实相位
+    # 质量无关。排除零参考点后，无有效样本时沿用既有 [0.0] 空态（误符号率 SER
+    # 会独立标记反相，不会把问题藏掉）。注：判决导向 phase_err 有界 ≤90°、不跨
+    # ±180° 回绕，线性 mean/std 本就正确，无需圆均值（非 #107/#109 圆周统计类）。
+    nz = (np.abs(xn) > 0.3) & (np.abs(pts[nearest]) > 0)
     phase_err = np.angle(xn[nz] * np.conj(pts[nearest][nz])) if np.any(nz) else np.array([0.0])
     # I/Q 失衡：I 与 Q 的功率比
     pi = float(np.mean(xn.real ** 2))

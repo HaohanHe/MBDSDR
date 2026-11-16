@@ -50,6 +50,8 @@ DEFAULT_CONFIG = {
     "tx_audit_max_mb": 50,              # 单文件上限（MB）
     "tx_audit_keep_files": 10,          # 总文件数（当前文件 + 轮转备份）
     "tx_audit_retention_days": 365,     # 备份最长保留天数（到点即删，不停止写入）
+    # 云台：rotctld 停机后是否归位（K）。默认关；严格 bool，消费点 gimbal.stop()
+    "gimbal_park_on_stop": False,
 }
 
 
@@ -118,6 +120,9 @@ class AgentConfig:
     tx_audit_max_mb: int = 50
     tx_audit_keep_files: int = 10
     tx_audit_retention_days: int = 365
+
+    # 云台：rotctld 停机后归位（严格 bool，消费点 gimbal.GimbalController.stop）
+    gimbal_park_on_stop: bool = False
 
     # 运行时状态（不持久化）
     _config_path: Optional[str] = field(default=None, repr=False)

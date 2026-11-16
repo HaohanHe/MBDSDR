@@ -58,6 +58,11 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional, Sequence, Tuple
 
+try:
+    from .geodesy import WGS84 as _WGS84_ELLIPSOID
+except ImportError:  # 扁平导入（部分脚本直挂 mbdsdr_ai 目录）
+    from geodesy import WGS84 as _WGS84_ELLIPSOID
+
 __all__ = [
     "STATUS_SUNLIT",
     "STATUS_UMBRA",
@@ -90,8 +95,8 @@ BOUNDARY_UNCERTAINTY_S: Dict[str, float] = {
     MODEL_CYLINDRICAL: 5.0,
 }
 
-#: 地球赤道半径（WGS84），km
-R_EARTH_KM = 6378.137
+#: 地球赤道半径（WGS84），km —— 唯一真值源 geodesy.WGS84（米制 a_m，此处折 km）
+R_EARTH_KM = _WGS84_ELLIPSOID.a_m / 1000.0
 #: 太阳半径，km
 R_SUN_KM = 696000.0
 #: 1 AU，km（几何判定只需量级，日地距离变化 <2% 对边界影响 <1 s）

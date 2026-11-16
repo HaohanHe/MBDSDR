@@ -168,6 +168,7 @@ def run(args) -> dict:
     w.set_app_mode("planetarium")
     common.pump(app, 50)
     sv = w.sky_view
+    target = common.frame_target(w)
     sv.repaint()
     rect = getattr(sv, "_preview_rect", None)
     if rect is not None:
@@ -194,7 +195,7 @@ def run(args) -> dict:
             "stars": 0 if getattr(sv, "_star_sel", None) is None
                      else len(sv._star_sel),
         }
-        frames.append(common.save_frame(w, out / f"04_proj_{name}.png"))
+        frames.append(common.save_frame(target, out / f"04_proj_{name}.png"))
     res["facts"]["projections"] = proj_facts
 
     # 换投影必须真的动了画面，而不是只改了名字

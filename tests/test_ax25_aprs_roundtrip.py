@@ -17,6 +17,7 @@ sys.path.insert(0, ROOT)
 from mbdsdr_ai.ax25 import (  # noqa: E402
     AX25Frame, AFSKModem, build_aprs_position_frame,
     hdlc_bit_stuff, hdlc_bit_unstuff, crc16_ccitt,
+    APRSPosition, APRSWeather,
 )
 from mbdsdr_ai.aprs_parser import parse_aprs_frame  # noqa: E402
 
@@ -130,6 +131,48 @@ def test_message() -> None:
           f"text={r['message']['message']!r} id={r['message']['message_id']!r}")
 
 
+def test_aprs_position_minutes_conformance() -> None:
+    """APRS 位置/气象坐标分钟字段必须 00–59（进位到 60 时向度进 1）。
+
+    反证旧缺陷：APRSPosition(89.999999,179.999999).encode() 曾产出
+    '!8960.00N/17960.00E-'（两处 MM=60，非法）；APRSWeather 同理。
+    位置格式 '!'+纬8+符号表1+经9+…，气象格式 '_'+纬8+'/'+经9+'_'+…，
+    纬度 MM.hh 在 payload[3:8]、经度 MM.hh 在 payload[13:18]。
+    """
+    # 边界进位
+    assert APRSPosition(latitude=89.999999,
+                        longitude=179.999999).encode() == "!9000.00N/18000.00E-"
+    assert APRSWeather(latitude=45.999999,
+                       longitude=12.99999).encode().startswith("_4600.00N/01300.00E_")
+
+    # 密集扫描：位置 + 气象，分钟字段恒 < 60
+    for deg in range(0, 90):
+        for frac in (0.99999, 0.999999):
+            coord = deg + frac
+            pp = APRSPosition(latitude=coord, longitude=coord).encode()
+            assert float(pp[3:8]) < 60.0, pp
+            assert float(pp[13:18]) < 60.0, pp
+            ww = APRSWeather(latitude=coord, longitude=coord).encode()
+            assert float(ww[3:8]) < 60.0, ww
+            assert float(ww[13:18]) < 60.0, ww
+
+    # 生产帧构建器（build_aprs_position_frame 走 APRSPosition.encode）
+    f = build_aprs_position_frame("BI1AAA", 89.999999, 179.999999)
+    assert f.info == b"!9000.00N/18000.00E-", f.info
+
+    # 正常值不变（回归守卫）
+    assert APRSPosition(latitude=39.9042,
+                        longitude=116.4074).encode() == "!3954.25N/11624.44E-"
+
+    # 往返精度保持（含边界）
+    for la, lo in [(39.9042, 116.4074), (89.999999, 179.999999), (-33.8688, 151.2093)]:
+        dec = APRSPosition.decode(APRSPosition(latitude=la, longitude=lo).encode())
+        assert dec is not None
+        assert abs(dec.latitude - la) < 0.001, (dec.latitude, la)
+        assert abs(dec.longitude - lo) < 0.001, (dec.longitude, lo)
+    print("  [ok] APRS 位置/气象分钟字段进位合规（MM 恒 00–59），正常值不变")
+
+
 def main() -> int:
     print("== AX.25 / AFSK / APRS 真实往返测试 ==")
     test_crc_vector()
@@ -141,6 +184,7 @@ def main() -> int:
     test_compressed_position()
     test_positionless_weather()
     test_message()
+    test_aprs_position_minutes_conformance()
     print("== 全部通过 ==")
     return 0
 

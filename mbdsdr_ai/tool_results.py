@@ -187,6 +187,20 @@ class ToolResult:
         }
 
 
+#: 用户主动取消时写回 ``ToolResult.error`` 的协议值（#88 起收敛到本叶子模块）。
+#:
+#: 语义是「**没执行**」，不是「执行了但失败」：agent 的工具环在安全点收到
+#: 取消后，仍为每个 tool_call_id 写回一条 success=False + error=CANCEL_ERROR
+#: 的结果，只为保住 assistant(tool_calls) ↔ tool 链完整。消费方（桌面步骤卡）
+#: 据此把它渲染成 skipped 而不是 failed——用户自己按的取消，不该被要求
+#: 「按错误原因处理后重试」。
+#:
+#: 放这里而不是 agent.py：本模块不 import 任何 mbdsdr_ai 模块，桌面投影层
+#: （desktop/ai_steps.py）已经依赖它取 tool_success，不必为了一个字符串
+#: 把整个内核拉进 UI 单测。agent.py 原处再导出，旧引用照旧可用。
+CANCEL_ERROR = "cancelled"
+
+
 def tool_success(result: Any) -> Optional[bool]:
     """工具成败的**唯一**判据：只读 ``success`` 字段，绝不按 ``error`` 猜。
 
@@ -210,4 +224,5 @@ __all__ = [
     "clean_exc",
     "numeric_array",
     "tool_success",
+    "CANCEL_ERROR",
 ]

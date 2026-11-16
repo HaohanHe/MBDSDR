@@ -353,6 +353,28 @@ def test_shortcuts_panel_passthrough_tooltips_self_describe(qapp, monkeypatch):
     _check_file(calls, "desktop/shortcuts_panel.py")
 
 
+def test_sat_track_panel_passthrough_tooltips_self_describe(qapp):
+    from sat_track_panel import SatTrackPanel
+    from spacetime_map_layer import SpacetimeFeatureLayer
+    from mbdsdr_ai.spacetime_features import SpatialFeature, FeatureState
+
+    # 中性坐标（身份红线：不写真实城市/坐标）；文案走真实 producer 链路，
+    # 不手抄字符串——_detail_suggestion 改了文案这里必须跟着渲染验证。
+    feat = SpatialFeature(feature_id="demo", kind="ground_station",
+                          lat=0.0, lon=0.0, label="示例站点")
+
+    def triggers(p):
+        for state in ("unknown", "inside", "expired"):
+            item = FeatureState(feature=feat, state=state, reason="示例")
+            suggestion = SpacetimeFeatureLayer._detail_suggestion(item)
+            p._on_ground_feature_detail(
+                "示例站点 · ground_station", suggestion,
+                "warning" if state == "unknown" else "info")
+
+    _, calls = _record(SatTrackPanel, [triggers])
+    _check_file(calls, "desktop/sat_track_panel.py")
+
+
 def test_runtime_exemptions_are_frozen():
     """豁免只减不增：出现第 7 条必须评审。
 

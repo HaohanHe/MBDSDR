@@ -99,7 +99,18 @@ _AI_NEXT_STEPS = {
     ),
     "busy": (
         "发生了什么：上一条请求还在处理，这次输入没有发出（没有排队）。\n"
-        "下一步：等上一条结束再点「发送」，或先点「取消」中止当前请求。"
+        "下一步：等上一条结束再点「发送」；或点输入框右侧的「取消」中止当前"
+        "请求（取消在安全点生效：正在执行的那一次调用不会被强杀，已产生的"
+        "部分结果照常显示）。"
+    ),
+    # #88：用户主动中止不是故障，不能套用「未知错误」那套让人去查 HTTP
+    # 状态码的文案。这里如实说清「部分结果」，且不出现「重试」——重发是
+    # 用户自己的选择，不是系统要求的补救动作。
+    "cancelled": (
+        "发生了什么：你按了「取消」，本轮请求在安全点被中止（不是故障，"
+        "也不是模型出错）。\n"
+        "下一步：上面是中止前已产生的部分结果，可能不完整、也可能有工具"
+        "没执行；要完整结论就再点「发送」，或把问题拆小再问。"
     ),
     "unknown": (
         "发生了什么：AI 调用失败，错误原文见上。\n"
@@ -130,6 +141,9 @@ def _ai_failure_kind(error_code: str = "", error_text: str = "") -> str:
         return "offline"
     if code == "agent_busy":
         return "busy"
+    if code == "cancelled":
+        # agent.chat 主动取消时 error/error_code 都是 CANCEL_ERROR="cancelled"
+        return "cancelled"
     if code == "llm_rate_limited" or status == 429 or "429" in low \
             or "rate limit" in low or "限流" in text:
         return "rate_limit"
@@ -293,6 +307,9 @@ class AIPanel(QWidget):
     # 信号：天空动作请求的一轮协商结束（action, satellite, tool_requested）。
     # 主窗口据此把「意图」与「真实状态」对齐（模型判定不执行时要把按钮回弹）。
     sky_action_resolved = Signal(str, str, bool)
+    # 信号：当前是否有一个**可取消**的请求在跑（#88）。星象仪形态下 AI 面板
+    # 不在眼前，胶囊命令栏的停止键据此显隐——只在真能停的时候出现。
+    cancel_available = Signal(bool)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -562,6 +579,43 @@ class AIPanel(QWidget):
         """)
         self.send_btn.clicked.connect(self._on_submit)
         input_bar.addWidget(self.send_btn)
+
+        # #88：真「取消」按钮。此前 busy 引导语让用户「先点取消」，可整个
+        # 面板从来没有这个控件，agent.request_cancel() 也没有任何生产调用方
+        # ——文案指向不存在的入口就是缺陷。只在模型链路真在跑时出现：
+        # 本地能力协商（LocalAgentBridge.handle）没有取消缝，给它挂一个
+        # 按了没用的按钮比不挂更糟，所以那条路径保持隐藏。
+        self.cancel_btn = QPushButton(self.tr("取消"))
+        self.cancel_btn.setMinimumHeight(28)
+        self.cancel_btn.setMaximumHeight(40)
+        self.cancel_btn.setToolTip(
+            "中止当前 AI 请求（含正在跑的子代理）。取消在安全点生效："
+            "正在执行的那一次模型/工具调用不会被强杀，等它返回后就停；"
+            "已产生的部分结果照常显示，未执行的工具会如实标注。")
+        # 配色走「正文灰 + card_3 底 + 次级描边」，与输入框同一套令牌：
+        # 不用 danger 当底色（白字压 #B85C5C 只有 4.4:1，不到正文 4.5:1）。
+        # 取色走 tokens().island_color(角色)：本面板是固定深色岛屿，不跟主题
+        # remap，但「绕过 remap」只在令牌层的 ISLAND_ROLES 里声明一次，调用点
+        # 不各自直读 COLORS（直读棘轮 tests/test_ui_contrast.py 会拦新增）。
+        # 实测：正文 8.44:1、描边 3.88:1（对自家底）/5.37:1（对面板底）。
+        self.cancel_btn.setStyleSheet(f"""
+            QPushButton {{
+                padding: 4px 14px;
+                background: {_t.island_color('surface')};
+                color: {_t.island_color('text')};
+                border: 1px solid {_t.island_color('border')};
+                border-radius: 6px;
+                font-size: 9pt;
+            }}
+            QPushButton:hover {{ background: {_t.island_color('surface_hover')}; }}
+            QPushButton:disabled {{
+                color: {_t.island_color('text_disabled')};
+                border-color: {_t.island_color('surface')};
+            }}
+        """)
+        self.cancel_btn.clicked.connect(self._on_cancel)
+        self.cancel_btn.hide()
+        input_bar.addWidget(self.cancel_btn)
 
         layout.addLayout(input_bar)
 
@@ -1039,6 +1093,78 @@ class AIPanel(QWidget):
                 "（这是匹配，不是模型理解）；写/发射类工具仍需人工确认。"
             )
 
+    def _set_cancel_available(self, on: bool) -> None:
+        """取消能力可见性的唯一出口（#88）：面板按钮 + 胶囊停止键同步。
+
+        on=True 只在模型链路真在跑时给（agent.request_cancel 有真安全点）；
+        本地能力协商（LocalAgentBridge.handle）没有取消缝，一律 False——
+        挂一个按了没用的停止键比不挂更糟。
+        """
+        btn = getattr(self, "cancel_btn", None)
+        if btn is not None:
+            btn.setVisible(bool(on))
+            if on:
+                btn.setEnabled(True)
+                btn.setText(self.tr("取消"))
+        self.cancel_available.emit(bool(on))
+
+    def _reset_send_ui(self) -> None:
+        """回到空闲态：发送按钮复位 + 取消能力收起（#88）。
+
+        三个出口（模型完成 / 模型异常 / 本地协商完成）共用这一份复位：
+        各写一遍迟早漏掉一个，留下永远「思考中...」的死按钮或常驻的取消键。
+        """
+        self.send_btn.setEnabled(True)
+        self.send_btn.setText(self.tr("发送"))
+        self._set_cancel_available(False)
+
+    def cancel_current_request(self) -> bool:
+        """外部入口（星象仪胶囊停止键）：与面板「取消」同一条路径（#88）。
+
+        返回是否真有一个在跑的请求被通知到，调用方据此如实回话。
+        """
+        return self._on_cancel()
+
+    @Slot()
+    def _on_cancel(self) -> bool:
+        """用户按下「取消」：把取消请求真送到 agent（#88）。
+
+        agent.request_cancel() 自 #87 起会一并传到正在跑的子代理，所以这
+        一个按钮同时停主循环和子代理循环。返回值如实转述：True=真有一个
+        在跑的请求被通知到；False=没命中（可能刚好已结束），绝不谎报
+        「已取消」。取消只在安全点生效，正在执行的那一次调用不强杀。
+        """
+        if not self._is_processing:
+            # 本轮已结束（finished 信号还在路上）：收起按钮，不动忙锁，
+            # 让 _on_ai_finished/_on_ai_error 去做真正的复位。
+            self._set_cancel_available(False)
+            return False
+        agent = self.agent
+        if agent is None or not hasattr(agent, "request_cancel"):
+            self._set_cancel_available(False)
+            self._add_system_message(
+                "当前 AI 内核不支持中止请求；本轮会自己跑完，请等它结束。")
+            return False
+        # 按下即置灰：取消是幂等请求，连点不会更快，只会刷屏
+        self.cancel_btn.setEnabled(False)
+        self.cancel_btn.setText(self.tr("正在中止..."))
+        try:
+            hit = bool(agent.request_cancel())
+        except Exception as e:  # noqa: BLE001 —— 送达失败必须让用户看见
+            self._add_system_message(
+                f"取消请求未能送达：{_clean_exc(e)}。本轮可能继续跑完。")
+            return False
+        if hit:
+            self._add_system_message(
+                "已请求中止：正在执行的那一次调用返回后就停（不强杀），"
+                "中止前的部分结果会照常显示。")
+        else:
+            self._set_cancel_available(False)
+            self._add_system_message(
+                "没有命中在跑的请求（可能刚好已结束）；界面会在本轮收尾时"
+                "自动恢复。")
+        return hit
+
     def _call_ai(self, text: str) -> bool:
         """调用真正的 AI Agent（后台线程）。忙时拒绝并返回 False。
 
@@ -1058,6 +1184,8 @@ class AIPanel(QWidget):
         self._is_processing = True
         self.send_btn.setEnabled(False)
         self.send_btn.setText("思考中...")
+        # 只有模型链路可取消（agent.request_cancel 有真安全点），此时才亮按钮
+        self._set_cancel_available(True)
         self._add_system_message("AI 正在思考...")
 
         # 创建后台线程
@@ -1129,6 +1257,8 @@ class AIPanel(QWidget):
         self._local_busy = True
         self.send_btn.setEnabled(False)
         self.send_btn.setText("执行中...")
+        # 本地协商没有取消缝：不亮「取消」，免得用户按了以为停了其实没停
+        self._set_cancel_available(False)
         self._add_system_message("模型未配置 · 本地能力协商（按工具描述匹配，不是语言模型理解）")
         self._local_thread = QThread()
         self._local_worker = LocalWorker(bridge, text, confirm,
@@ -1143,8 +1273,7 @@ class AIPanel(QWidget):
     @Slot(dict)
     def _on_local_result(self, out: dict):
         self._local_busy = False
-        self.send_btn.setEnabled(True)
-        self.send_btn.setText("发送")
+        self._reset_send_ui()
         # 上一轮的人工门按钮失效：避免攒一排过期确认把用户带偏
         lay = getattr(self, "_confirm_layout", None)
         if lay is not None:
@@ -1345,13 +1474,16 @@ class AIPanel(QWidget):
     def _on_ai_finished(self, result: dict):
         """AI 调用完成。"""
         self._is_processing = False
-        self.send_btn.setEnabled(True)
-        self.send_btn.setText("发送")
+        self._reset_send_ui()
 
         content = result.get("content", "")
         tool_calls = result.get("tool_calls", [])
         tool_results = result.get("tool_results", [])
         compacted = result.get("compacted", False)
+        # #88：用户主动中止。agent.chat 此时 error/error_code 都是
+        # "cancelled"，但那是用户自己的决定，不是故障——必须单独一支，
+        # 且把「部分结果」说清楚，不让半截结论冒充完整回答。
+        cancelled = bool(result.get("cancelled"))
         # 缺 latency_ms = 没测到：None，绝不当成 0ms。
         latency = ai_steps.latency_ms(result)
         error = result.get("error")
@@ -1400,7 +1532,17 @@ class AIPanel(QWidget):
         if compacted:
             self._add_system_message("上下文已自动压缩")
 
-        if error:
+        if cancelled:
+            self._add_system_message(
+                "已按你的要求中止本轮请求：以下是中止前的部分结果，"
+                "未跑完，不得视为完整结论。")
+            if content and not self._streamed_any:
+                self._add_ai_message(content)
+            elif not content:
+                self._add_ai_message(
+                    "（本轮被中止，未产出文本结论；已执行的操作见「执行步骤」，"
+                    "未执行的工具在步骤卡里标注为已取消）")
+        elif error:
             guide = _failure_guidance(str(result.get("error_code") or ""),
                                       str(error))
             self._add_ai_message(f"[错误] {error}\n\n{guide}\n\n{content}")
@@ -1432,16 +1574,29 @@ class AIPanel(QWidget):
             footer = f"耗时 {latency:.0f}ms，调用 {len(tool_calls)} 个工具"
         if failed:
             footer += f"，其中 {len(failed)} 个失败"
+        if cancelled:
+            # 只数「因取消未执行」的那些（error=CANCEL_ERROR），不把
+            # workflow 里「条件不满足未执行」的 skipped 混进来冒充取消。
+            cancel_skipped = [
+                s for s in steps
+                if s.status == ai_steps.STATUS_SKIPPED
+                and s.error == ai_steps.CANCEL_ERROR]
+            footer += "，本轮已取消（部分结果）"
+            if cancel_skipped:
+                footer += f"，{len(cancel_skipped)} 个工具因取消未执行"
         self._add_system_message(footer)
         self._resolve_pending_sky(tool_calls)
-        self.reply_received.emit(content or "")
+        # 取消且没有正文时，回给主窗口覆盖卡的不能是空串（那看起来像
+        # 「AI 说了句空话」），如实写「已取消」。
+        self.reply_received.emit(
+            content or ("[已取消] 本轮请求被中止，未产出文本结论"
+                        if cancelled else ""))
 
     @Slot(str)
     def _on_ai_error(self, error: str):
         """AI 调用出错。"""
         self._is_processing = False
-        self.send_btn.setEnabled(True)
-        self.send_btn.setText("发送")
+        self._reset_send_ui()
         self._add_ai_message(f"AI 调用出错: {error}\n\n"
                              f"{_failure_guidance('', error)}")
         # 协商轮次失败：主窗口必须把按钮回弹，不留下「假装已执行」的勾选

@@ -173,9 +173,51 @@ def test_costas_recovers_known_offset(psk_order):
                          "sample_rate_hz": 8000})
     assert res.success is True
     assert abs(res.data["carrier_offset_rad_per_sample"] - w) < 5e-3
+    # rad/sample → Hz 必须 /(2π)（真值源 coarse_sync.py:248）；旧断言漏 /(2π)
+    # 把 6.28× 虚高的错误公式钉成了"期望"，随实现一并纠正（§2 期望成对更新）。
     assert res.data["carrier_offset_hz"] == pytest.approx(
-        res.data["carrier_offset_rad_per_sample"] * 8000)
+        res.data["carrier_offset_rad_per_sample"] * 8000 / (2.0 * math.pi))
     assert len(res.data["corrected_iq"]) == 2000
+
+
+def test_costas_hz_matches_injected_offset_not_2pi_inflated():
+    """独立物理 oracle（#114）：注入已知 +1000 Hz 载波频偏，LIVE 注册工具
+    costas_track 的 carrier_offset_hz 必须 ≈ 1000 Hz —— 真值取注入频率本身，
+    不由工具自身 rad 输出反推（避免同义反复）。绝不能是 2π×≈6283 Hz（缺 /(2π)
+    的缺陷签名）。并与同仓真值源 CoarseSync.process（正确 /(2π)）跨实现对拍。
+    确定性：固定种子合成 QPSK，无墙钟/网络输入。"""
+    from mbdsdr_ai.tool_registry import ToolRegistry
+    from mbdsdr_ai.coarse_sync import CoarseSync
+
+    fs, f_off = 1_000_000.0, 1000.0
+    sps, n_sym, seed = 8, 4000, 42
+    rng = np.random.default_rng(seed)
+    phases = (rng.integers(0, 4, n_sym) * 2 + 1) * math.pi / 4.0
+    baseband = np.repeat(np.exp(1j * phases), sps)
+    t = np.arange(baseband.size) / fs
+    iq = baseband * np.exp(2j * math.pi * f_off * t)   # 已知 +1000 Hz 频偏
+    w_true = 2.0 * math.pi * f_off / fs                # 期望 rad/sample
+
+    # LIVE 注册面：agent.py 经 register_sync_brick_tools 暴露给模型编排
+    reg = ToolRegistry()
+    register_sync_brick_tools(reg)
+    pairs = [[float(z.real), float(z.imag)] for z in iq]
+    res = reg.call("costas_track", {"iq": pairs, "psk_order": 4,
+                                    "loop_bw": 0.05, "sample_rate_hz": fs})
+    assert res.success, res.content
+    hz = float(res.data["carrier_offset_hz"])
+    rad = float(res.data["carrier_offset_rad_per_sample"])
+
+    # 环须真锁定到注入频偏（rad/sample 口径本就正确，缺陷只在 Hz 换算）
+    assert abs(rad - w_true) / w_true < 0.02
+    # 绝对物理真值：Hz ≈ 注入的 1000 Hz（2% 容差，远拒 2π 的 528% 误差）
+    assert abs(hz - f_off) / f_off < 0.02, f"Hz={hz} 偏离注入真值 {f_off}"
+    # 缺陷签名必须消失：tool/truth 比值绝不能接近 2π≈6.283
+    assert abs(hz / f_off - 2.0 * math.pi) > 1.0
+    # 跨实现对拍：同仓 CoarseSync.process 用正确 /(2π)，两者须一致
+    cs = CoarseSync(modulation="QPSK", sample_rate=fs, samples_per_symbol=sps)
+    cs_hz = float(cs.process(iq).carrier_offset_hz)
+    assert hz == pytest.approx(cs_hz, rel=1e-3)
 
 
 # ─────────────────────────── 注册 ───────────────────────────

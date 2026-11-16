@@ -713,7 +713,8 @@ class ToolRegistry:
     # ── 工具调用 ────────────────────────────────────────
 
     def call(self, tool_name: str, args: Dict[str, Any] = None,
-             *, trigger: str = TRIGGER_USER) -> ToolResult:
+             *, trigger: str = TRIGGER_USER,
+             timeout_s: Optional[float] = None) -> ToolResult:
         """
         调用工具（进程内唯一执行入口）。
 
@@ -721,6 +722,11 @@ class ToolRegistry:
         ``user``（用户直接点按 / 命令行）。两者都会发 PRE 与 RESULT 事件；
         只有 ``model`` 会取 PRE 否决并跑外部命令 hooks——用户自己的操作
         不该被模型侧守卫拦掉。
+
+        timeout_s：调用方显式超时覆盖（秒）。``None``=沿用工具注册的
+        ``timeout_s`` / registry ``default_timeout_s``；显式 ``<=0``=关闭超时
+        内联执行。工作流引擎按 ``step.timeout`` 下发，让步骤声明的超时真正
+        生效（此前 step.timeout 是死参数，挂死步骤会永久阻塞）。
 
         处理：
         - 工具不存在
@@ -886,7 +892,9 @@ class ToolRegistry:
         # 调用 handler（可选超时：默认内联执行，设了 timeout 才甩到 daemon 线程）
         try:
             handler = tool["handler"]
-            _timeout_s = tool.get("timeout_s")
+            # 调用方显式 timeout_s 优先（工作流按 step.timeout 下发）；
+            # None=沿用工具注册值/registry 默认；显式 <=0=关闭超时内联执行。
+            _timeout_s = timeout_s if timeout_s is not None else tool.get("timeout_s")
             if _timeout_s is None:
                 _timeout_s = self.default_timeout_s
             if _timeout_s and _timeout_s > 0:
@@ -1029,7 +1037,8 @@ class ToolRegistry:
         self._log_call(result)
         return result
 
-    def call_from_model(self, tool_call: Dict[str, Any]) -> ToolResult:
+    def call_from_model(self, tool_call: Dict[str, Any], *,
+                        timeout_s: Optional[float] = None) -> ToolResult:
         """
         从模型的 tool_calls 格式调用工具。
 
@@ -1039,6 +1048,12 @@ class ToolRegistry:
             "type": "function",
             "function": {"name": "xxx", "arguments": "{...}"}
         }
+
+        timeout_s：调用方显式超时覆盖（秒），透传给 :meth:`call`。
+        ``None``=沿用工具注册值 / registry 默认（默认关，零回归）；
+        显式 ``<=0``=关闭超时内联执行。子代理循环按「任务墙钟余额」下发，
+        使 ``SubagentTask.timeout_s`` 能真正约束挂死工具（此前是死参数）。
+        写操作硬门与 JSON 修复口径完全不变——超时只影响执行时长上限。
         """
         fn = tool_call.get("function", {})
         name = fn.get("name", "")
@@ -1111,9 +1126,11 @@ class ToolRegistry:
                 self._log_call(result)
                 return result
             with tx_authorization(decision):
-                return self.call(name, args, trigger=TRIGGER_MODEL)
+                return self.call(name, args, trigger=TRIGGER_MODEL,
+                                 timeout_s=timeout_s)
 
-        return self.call(name, args, trigger=TRIGGER_MODEL)
+        return self.call(name, args, trigger=TRIGGER_MODEL,
+                         timeout_s=timeout_s)
 
     # ── 调用日志 ────────────────────────────────────────
 

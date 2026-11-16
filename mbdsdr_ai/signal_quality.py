@@ -3,18 +3,24 @@
 Signal quality / constellation statistics (pure NumPy).
 
 Summarises a block of complex I/Q: DC offset, I/Q imbalance, peak-to-average
-ratio, constellation spread, and RMS level.
+ratio, constellation spread, RMS level, and ADC clipping (overload) fraction.
 """
 from __future__ import annotations
 import numpy as np
 from typing import Dict
 
 
-def signal_quality(iq: np.ndarray) -> Dict:
-    """对一段复 IQ 做信号质量统计。空输入抛 ValueError（统计量无定义）。"""
+def signal_quality(iq: np.ndarray, full_scale: float = 1.0) -> Dict:
+    """对一段复 IQ 做信号质量统计。空输入抛 ValueError（统计量无定义）。
+
+    full_scale: ADC 满量程参考（归一化 IQ 为 1.0，与本模块 squelch_gate 的
+        dBFS 参考一致）。用于削波/过载检测，必须为正数。
+    """
     x = np.asarray(iq, dtype=np.complex128)
     if len(x) == 0:
         raise ValueError("IQ 为空：信号质量统计无定义")
+    if full_scale <= 0:
+        raise ValueError("full_scale 必须为正数（ADC 满量程参考）")
     I = np.real(x)
     Q = np.imag(x)
     rms_i = float(np.sqrt(np.mean(I ** 2)))
@@ -27,6 +33,15 @@ def signal_quality(iq: np.ndarray) -> Dict:
     ang = np.angle(x)
     mean_phase = float(np.degrees(np.arctan2(
         np.mean(np.sin(ang)), np.mean(np.cos(ang)))))
+    # ADC 削波（过载）检测：I/Q 任一路撞到满量程轨即削波。注意是按 I/Q
+    # 两路各自判轨，不是按幅度 |x|——|x|=1 可能是 I=1,Q=0（I 削波）也可能
+    # 是 I=Q=0.707（两路都没削），幅度 peak 抓不到削波，必须看分量。
+    # 真值锚定（不发明任意门限，轨就是满量程本身）：RTL-SDR 8-bit 归一化
+    # 后轨恰为 ±1.0——实测强 FM 环境下 96% 样本 pile-up 在 |I|/|Q|=1.0
+    # （饱和签名），清洁 433MHz 信号 0%。(1-1e-9) 容差仅吸收浮点舍入。
+    rail = full_scale * (1.0 - 1e-9)
+    clipped = (np.abs(I) >= rail) | (np.abs(Q) >= rail)
+    clip_fraction = float(np.mean(clipped))
     return {
         "dc_offset_i": round(float(np.mean(I)), 6),
         "dc_offset_q": round(float(np.mean(Q)), 6),
@@ -35,6 +50,8 @@ def signal_quality(iq: np.ndarray) -> Dict:
         "peak": round(peak, 4),
         "papr_db": round(20 * np.log10((peak + 1e-9) / (rms + 1e-9)), 2),
         "mean_phase_deg": round(mean_phase, 2),
+        "clip_fraction": round(clip_fraction, 6),
+        "clipped_samples": int(np.sum(clipped)),
         "sample_count": int(len(x)),
     }
 

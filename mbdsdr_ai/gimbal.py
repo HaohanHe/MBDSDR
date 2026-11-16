@@ -80,6 +80,8 @@ class GimbalStatus:
     az_max: float = 360.0
     el_min: float = 0.0
     el_max: float = 90.0
+    #: 连接≠启用：rotctld 运动下发是否已显式启用（engage_rotctld）
+    engaged: bool = False
 
 
 # ========================================================================
@@ -106,13 +108,19 @@ def clamp_angle(value: float, lo: float, hi: float) -> float:
 # ========================================================================
 
 class RotctldClient:
-    """
-    Hamlib rotctld 协议客户端（TCP，默认端口 4533）。
+    """Hamlib rotctld 协议客户端（TCP，默认端口 4533）。
 
-    协议（文本，每行一条）：
-      P <az> <el>   设置位置
-      p             查询位置 → 返回 az\\nel\\n
-      \\chkstop      停止
+    协议（文本，每行一条；所有应答以 ``RPRT x`` 收尾，0=成功）：
+      P <az> <el>     设置位置
+      p               查询位置 → 返回 az\\nel\\n
+      S               停止（手册 stop；旧类注释误写 ``\\chkstop``，已纠正）
+      K               归位（park）
+      1 / \\dump_caps  能力/限位查询 → key:value 多行 + RPRT 0
+
+    安全闸（连接≠启用）：新建客户端默认 ``engaged=False``。``set_position``
+    与 ``park`` 在未启用时直接拒绝（**零流量**，不发任何运动指令），须显式
+    ``engage()`` 后才下发。``get_position`` / ``stop`` / ``ping`` / ``dump_caps``
+    不受闸限——读姿态、停机、能力查询永远允许。
     """
 
     def __init__(self, host: str = "127.0.0.1", port: int = 4533, timeout: float = 2.0,
@@ -123,8 +131,17 @@ class RotctldClient:
         #: 对端是模拟服务器（scripts/hw_acceptance/rotctld_sim.py）时置 True。
         #: 协议层仍是 rotctld 读回，但语义是「模拟执行」，不能当机械精度。
         self.simulated = bool(simulated)
-        #: 最近一次命令失败原因（超时/无应答/连接失败），供上层诚实上报
+        #: 最近一次命令失败原因（超时/无应答/连接失败/未启用），供上层诚实上报
         self.last_error = ""
+        #: 连接≠启用：默认不自动下发运动指令，须显式 engage()
+        self.engaged = False
+        #: 能力/限位查询状态：'ok'（解析成功）/ 'unknown'（未查或解析失败）
+        self.caps_state = "unknown"
+        #: 解析出的限位（caps_state=='ok' 时有效）：
+        #: {min_az,max_az,min_el,max_el,can_park}；None=用默认钳位
+        self.caps: Optional[Dict] = None
+        #: 最近一次 set_position 经限位归一后实际下发的角度，供上层诚实上报
+        self.last_clamped: Optional[Dict] = None
 
     def _command(self, cmd: str, n_lines: int = 1) -> List[str]:
         self.last_error = ""
@@ -155,11 +172,38 @@ class RotctldClient:
             self.last_error = "无应答（连接被关闭或返回空）"
         return lines
 
-    def get_position(self) -> GimbalPose:
-        lines = self._command("p", n_lines=2)
-        az = float(lines[0])
-        el = float(lines[1])
-        return GimbalPose(azimuth=az % 360.0, elevation=clamp_angle(el, -90, 90))
+    def _command_until_rprt(self, cmd: str) -> List[str]:
+        """发命令并读到 ``RPRT x`` 收尾行（用于 \\dump_caps 这类不定长应答）。"""
+        self.last_error = ""
+        try:
+            with socket.create_connection((self.host, self.port),
+                                          timeout=self.timeout) as s:
+                s.sendall((cmd + "\n").encode("ascii"))
+                buf = b""
+                s.settimeout(self.timeout)
+                try:
+                    while True:
+                        chunk = s.recv(4096)
+                        if not chunk:
+                            break
+                        buf += chunk
+                        decoded = buf.decode("ascii", errors="replace")
+                        if any(ln.strip().startswith("RPRT")
+                               for ln in decoded.splitlines()):
+                            break
+                except socket.timeout:
+                    self.last_error = f"超时（{self.timeout:.1f}s 未收齐应答）"
+        except (socket.timeout, TimeoutError):
+            self.last_error = f"连接/应答超时（{self.timeout:.1f}s）"
+            return []
+        except OSError as e:
+            self.last_error = f"连接失败：{e}"
+            return []
+        lines = [ln.strip() for ln in
+                 buf.decode("ascii", errors="replace").splitlines() if ln.strip()]
+        if not lines and not self.last_error:
+            self.last_error = "无应答（连接被关闭或返回空）"
+        return lines
 
     @staticmethod
     def _reply_ok(lines: List[str]) -> bool:
@@ -176,15 +220,153 @@ class RotctldClient:
                     return False
         return False
 
+    # ---- 启用闸 ----
+    def engage(self) -> bool:
+        """显式启用运动下发（连接≠启用）。返回启用状态。"""
+        self.engaged = True
+        return self.engaged
+
+    def disengage(self) -> bool:
+        """停用运动下发；之后 set_position/park 拒绝（零流量）。"""
+        self.engaged = False
+        return self.engaged
+
+    # ---- 能力/限位查询 ----
+    def dump_caps(self) -> bool:
+        """查询旋转器能力/限位（``\\dump_caps``，手册别名 ``1``）。
+
+        成功（RPRT 0 且四限位标签齐全且合法）→ caps_state='ok'、caps 填实；
+        任何失败/缺字段/非法值 → caps_state='unknown'、caps=None、last_error
+        记原因，**保持默认钳位**（不静默成功）。返回是否成功解析。
+        """
+        lines = self._command_until_rprt("\\dump_caps")
+        if not self._reply_ok(lines):
+            self.caps_state = "unknown"
+            self.caps = None
+            if not self.last_error:
+                self.last_error = "dump_caps 未返回 RPRT 0"
+            return False
+        vals: Dict[str, str] = {}
+        for ln in lines:
+            if ":" not in ln:
+                continue
+            key, _, val = ln.partition(":")
+            vals[key.strip()] = val.strip()
+        try:
+            min_az = float(vals["Min Azimuth"])
+            max_az = float(vals["Max Azimuth"])
+            min_el = float(vals["Min Elevation"])
+            max_el = float(vals["Max Elevation"])
+        except (KeyError, ValueError):
+            self.caps_state = "unknown"
+            self.caps = None
+            self.last_error = "dump_caps 缺少限位字段或值非数字"
+            return False
+        if not all(math.isfinite(v) for v in (min_az, max_az, min_el, max_el)):
+            self.caps_state = "unknown"
+            self.caps = None
+            self.last_error = "dump_caps 限位含非有限值"
+            return False
+        if not (min_az < max_az and min_el < max_el):
+            self.caps_state = "unknown"
+            self.caps = None
+            self.last_error = "dump_caps 限位 min>=max"
+            return False
+        if (max_az - min_az) > 720.0 or not (-90.0 <= min_el <= max_el <= 90.0):
+            self.caps_state = "unknown"
+            self.caps = None
+            self.last_error = "dump_caps 限位超出物理范围"
+            return False
+        can_park: Optional[bool] = None
+        if "Can Park" in vals:
+            cp = vals["Can Park"].upper()
+            can_park = True if cp == "Y" else (False if cp == "N" else None)
+        self.caps = {"min_az": min_az, "max_az": max_az,
+                     "min_el": min_el, "max_el": max_el, "can_park": can_park}
+        self.caps_state = "ok"
+        self.last_error = ""
+        return True
+
+    @property
+    def can_park(self) -> Optional[bool]:
+        """旋转器是否支持归位（K）：caps 解析成功返回 Y/N 布尔，未知返回 None。
+
+        None ≠ False：未查/解析失败时「不知道」支不支持，既不能当成不支持
+        而拒绝归位，也不能当成支持而盲目下发——park() 只在明确 False 时拒绝。
+        """
+        if self.caps_state == "ok" and self.caps:
+            return self.caps.get("can_park")
+        return None
+
+    # ---- 限位归一 ----
+    def normalize(self, az: float, el: float) -> Tuple[float, float, Dict]:
+        """按真实限位（caps_state=='ok'）或默认范围归一化目标角。
+
+        返回 ``(az, el, clamped)``。clamped 记录被钳位的轴（请求/实际/限位）。
+        - 方位跨度≥360（多圈旋转器）：``[min_az, min_az+360)`` 内原样保留
+          （不强行 %360，否则多圈位置被抹掉）；范围外才环形归一。
+        - 方位跨度<360（如 0..180）：直接钳位到 ``[min_az,max_az]``，**不做
+          环形归一**（否则 270 被绕成 90，而真实限位只到 180）。
+        - 仰角：钳位到 ``[min_el,max_el]``（默认 [0,90]）。
+        """
+        az = float(az)
+        el = float(el)
+        req_az, req_el = az, el
+        clamped: Dict = {}
+        if self.caps_state == "ok" and self.caps:
+            min_az = self.caps["min_az"]
+            max_az = self.caps["max_az"]
+            min_el = self.caps["min_el"]
+            max_el = self.caps["max_el"]
+        else:
+            min_az, max_az, min_el, max_el = 0.0, 360.0, 0.0, 90.0
+        span = max_az - min_az
+        if span >= 360.0:
+            if az < min_az or az >= min_az + 360.0:
+                az = min_az + (az - min_az) % 360.0
+        else:
+            az = max(min_az, min(max_az, az))
+        el = max(min_el, min(max_el, el))
+        if abs(az - req_az) > 1e-6:
+            clamped["azimuth"] = {"requested": req_az, "applied": az,
+                                  "limits": [min_az, max_az]}
+        if abs(el - req_el) > 1e-6:
+            clamped["elevation"] = {"requested": req_el, "applied": el,
+                                    "limits": [min_el, max_el]}
+        return az, el, clamped
+
+    # ---- 运动 ----
+    def get_position(self) -> GimbalPose:
+        lines = self._command("p", n_lines=2)
+        az = float(lines[0])
+        el = float(lines[1])
+        return GimbalPose(azimuth=az % 360.0, elevation=clamp_angle(el, -90, 90))
+
     def set_position(self, az: float, el: float) -> bool:
-        az = az % 360.0
-        el = clamp_angle(el, 0, 90)
-        lines = self._command(f"P {az:.2f} {el:.2f}", n_lines=1)
+        if not self.engaged:
+            self.last_error = "未启用（连接≠启用：先 engage() 再下发运动指令）"
+            self.last_clamped = None
+            return False
+        naz, nel, clamped = self.normalize(az, el)
+        self.last_clamped = {"az": naz, "el": nel, "clamped": clamped or None}
+        lines = self._command(f"P {naz:.2f} {nel:.2f}", n_lines=1)
         # rotctld 成功返回 RPRT 0
         return self._reply_ok(lines)
 
     def stop(self) -> bool:
         lines = self._command("S", n_lines=1)
+        return self._reply_ok(lines)
+
+    def park(self) -> bool:
+        """归位（K）。未启用拒绝；can_park 明确为 False 时拒绝（零流量）。"""
+        if not self.engaged:
+            self.last_error = "未启用（连接≠启用：先 engage() 再归位）"
+            return False
+        if (self.caps_state == "ok" and self.caps
+                and self.caps.get("can_park") is False):
+            self.last_error = "旋转器不支持归位（Can Park: N）"
+            return False
+        lines = self._command("K", n_lines=1)
         return self._reply_ok(lines)
 
     def ping(self) -> bool:
@@ -237,6 +419,20 @@ class BoardGimbalClient:
 # 统一控制器（手自一体）
 # ========================================================================
 
+def _park_on_stop_from_config() -> bool:
+    """从 ai_config 读 gimbal_park_on_stop（严格 bool；缺失/坏值/异常→False）。
+
+    严格 ``is True``：字符串 "true"、整数 1 都不算开启（防配置脏值误归位）。
+    读盘/解析任何异常一律回落 False（停后归位是可选动作，失败不该炸停机）。
+    """
+    try:
+        from mbdsdr_ai.config import ConfigStore
+        val = ConfigStore().read().get("gimbal_park_on_stop", False)
+        return val is True
+    except Exception:
+        return False
+
+
 class GimbalController:
     """统一云台控制器，后端可插拔。"""
 
@@ -275,10 +471,40 @@ class GimbalController:
         self.rotctld = RotctldClient(host, port, simulated=simulated)
         self.status.mode = GimbalMode.ROTCTLD
         self.status.connected = self.rotctld.ping()
+        self.status.engaged = False  # 连接≠启用：连上也不自动下发
+        # 连接成功后尽力查一次限位（失败标 unknown，不静默、不阻断连接）
+        if self.status.connected:
+            self.rotctld.dump_caps()
         self.status.backend_info = (
             f"Hamlib rotctld {host}:{port}"
             + ("（模拟服务器：指令链模型，非真机）" if simulated else ""))
         return self.status
+
+    def engage_rotctld(self) -> bool:
+        """显式启用 rotctld 运动下发（须先连接）。返回是否已启用。"""
+        if self.status.mode != GimbalMode.ROTCTLD or not self.rotctld:
+            return False
+        if not self.status.connected:
+            return False
+        self.rotctld.engage()
+        self.status.engaged = True
+        return True
+
+    def disengage_rotctld(self) -> bool:
+        """停用 rotctld 运动下发；之后 point_to/park 拒绝下发。"""
+        if self.rotctld:
+            self.rotctld.disengage()
+        self.status.engaged = False
+        return True
+
+    def park(self) -> Dict:
+        """手动归位（仅 rotctld 支持；其余后端诚实报不支持）。"""
+        if self.status.mode == GimbalMode.ROTCTLD and self.rotctld:
+            ok = self.rotctld.park()
+            return {"ok": ok, "backend": "rotctld",
+                    "error": "" if ok else (self.rotctld.last_error or "归位失败")}
+        return {"ok": False, "backend": self.status.mode.value,
+                "error": "当前后端不支持归位（仅 rotctld）"}
 
     def set_pose_provider(self, provider: Callable[[], GimbalPose]):
         """注入 IMU+磁力计姿态回读函数。"""
@@ -326,27 +552,35 @@ class GimbalController:
     def point_to(self, az: float, el: float) -> Dict:
         """指向目标方位角/仰角。返回执行结果与人工引导信息。
 
-        越界处理是**显式**的（不静默）：仰角夹到 0–90°、方位环形归一到
-        0–360°，两者都会写进 ``clamped`` 与 ``note``（「已夹到 X°」），
-        调用方必须把 note 呈现给用户，否则用户会以为请求原样执行了。
+        越界处理是**显式**的（不静默）：rotctld 按真实限位（dump_caps）归一，
+        其余后端仰角夹到 0–90°、方位环形归一到 0–360°，都写进 ``clamped`` 与
+        ``note``，调用方必须把 note 呈现给用户，否则用户以为请求原样执行了。
         """
         raw_az = float(az)
         raw_el = float(el)
-        target = GimbalPose(azimuth=raw_az % 360.0,
-                            elevation=clamp_angle(raw_el, 0, 90))
         clamped: Dict[str, Dict] = {}
         notes: List[str] = []
-        if abs(raw_el - target.elevation) > 1e-6:
-            clamped["elevation"] = {"requested": raw_el,
-                                    "applied": target.elevation,
-                                    "limits": [0.0, 90.0]}
-            notes.append(f"仰角 {raw_el:.1f}° 超出机械范围 0–90°，"
-                         f"已夹到 {target.elevation:.1f}°")
-        if raw_az < 0.0 or raw_az >= 360.0:
-            clamped["azimuth"] = {"requested": raw_az,
-                                  "applied": target.azimuth,
-                                  "limits": "0–360（环形归一）"}
-            notes.append(f"方位 {raw_az:.1f}° 已归一到 {target.azimuth:.1f}°")
+        if self.status.mode == GimbalMode.ROTCTLD and self.rotctld:
+            naz, nel, clamped = self.rotctld.normalize(raw_az, raw_el)
+            target = GimbalPose(azimuth=naz, elevation=nel)
+            if "azimuth" in clamped:
+                notes.append(f"方位 {raw_az:.1f}° 超出旋转器限位，已夹到 {naz:.1f}°")
+            if "elevation" in clamped:
+                notes.append(f"仰角 {raw_el:.1f}° 超出旋转器限位，已夹到 {nel:.1f}°")
+        else:
+            target = GimbalPose(azimuth=raw_az % 360.0,
+                                elevation=clamp_angle(raw_el, 0, 90))
+            if abs(raw_el - target.elevation) > 1e-6:
+                clamped["elevation"] = {"requested": raw_el,
+                                        "applied": target.elevation,
+                                        "limits": [0.0, 90.0]}
+                notes.append(f"仰角 {raw_el:.1f}° 超出机械范围 0–90°，"
+                             f"已夹到 {target.elevation:.1f}°")
+            if raw_az < 0.0 or raw_az >= 360.0:
+                clamped["azimuth"] = {"requested": raw_az,
+                                      "applied": target.azimuth,
+                                      "limits": "0–360（环形归一）"}
+                notes.append(f"方位 {raw_az:.1f}° 已归一到 {target.azimuth:.1f}°")
         self.status.target = target
         result: Dict = {"target_az": target.azimuth, "target_el": target.elevation,
                         "requested_az": raw_az, "requested_el": raw_el,
@@ -476,10 +710,19 @@ class GimbalController:
                           "精细定位请把 samples 交给 gnss_direction_find"),
         }
 
-    def stop(self) -> Dict:
+    def stop(self, park_on_stop: Optional[bool] = None) -> Dict:
         if self.status.mode == GimbalMode.ROTCTLD and self.rotctld:
             ok = self.rotctld.stop()
-            return {"ok": ok, "backend": "rotctld"}
+            result: Dict = {"ok": ok, "backend": "rotctld"}
+            # None=读配置；True=停后归位；False=不归位
+            if park_on_stop is None:
+                park_on_stop = _park_on_stop_from_config()
+            if park_on_stop:
+                parked = self.rotctld.park()
+                result["parked"] = parked
+                if not parked:
+                    result["park_error"] = self.rotctld.last_error or "归位失败"
+            return result
         if self.status.mode == GimbalMode.BOARD_PWM:
             r = self.board.set_position(-1, -1)  # 固件约定负值=停
             return {"ok": r.get("ok", False), "backend": "board_pwm"}

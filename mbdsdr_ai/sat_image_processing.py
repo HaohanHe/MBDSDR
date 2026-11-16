@@ -30,16 +30,17 @@ import numpy as np
 from scipy import ndimage as ndi
 
 from .error_catalog import user_message
+from .geodesy import WGS84 as _WGS84_ELLIPSOID
 
 logger = logging.getLogger(__name__)
 
 Array = np.ndarray
 
-# WGS84 椭球常数（公开 WGS84 大地测量参考系，单位米）。
-_WGS84_A = 6378137.0                 # 半长轴 (m)
-_WGS84_F = 1.0 / 298.257223563      # 扁率
-_WGS84_B = _WGS84_A * (1.0 - _WGS84_F)
-_WGS84_ES = (_WGS84_A ** 2 - _WGS84_B ** 2) / (_WGS84_A ** 2)  # 第一偏心率^2
+# WGS84 椭球常数（唯一真值源 geodesy.WGS84，单位米）。
+_WGS84_A = _WGS84_ELLIPSOID.a_m       # 半长轴 (m)
+_WGS84_F = _WGS84_ELLIPSOID.f         # 扁率
+_WGS84_B = _WGS84_ELLIPSOID.b_m       # 半短轴 (m)
+_WGS84_ES = _WGS84_ELLIPSOID.e2       # 第一偏心率^2
 
 Number = Union[int, float]
 

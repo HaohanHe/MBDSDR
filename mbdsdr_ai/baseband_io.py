@@ -20,13 +20,14 @@ sidecar（<path>.json）字段：
 from __future__ import annotations
 import numpy as np
 import logging
+import math
 import os
 import json
 import struct
 import tempfile
 import wave as _wave
 from datetime import datetime, timezone
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -77,6 +78,81 @@ _SIGMF_DATATYPE_TO_FMT = {
 }
 
 
+def _parse_sigmf_captures(caps_raw: Any) -> List[Dict]:
+    """宽容拍平 captures[]：仅接受 dict + 非负 int sample_start + 严格递增。
+
+    缺 frequency→None（规范允许 frequency 可选）；非有限 frequency→None；
+    乱序/损坏→整体丢弃（返回空表），绝不猜一个频点顶上。IQ 数据本身不受
+    影响——这是读侧降级，不是写侧校验（写侧非法直接 raise）。
+    """
+    if not isinstance(caps_raw, list) or not caps_raw:
+        return []
+    out: List[Dict] = []
+    last = -1
+    for c in caps_raw:
+        if not isinstance(c, dict):
+            return []
+        start = c.get("core:sample_start")
+        if not isinstance(start, int) or isinstance(start, bool) or start < 0:
+            return []
+        if start <= last:
+            return []
+        last = start
+        freq = c.get("core:frequency")
+        freq_out: Optional[float] = None
+        if freq is not None:
+            try:
+                ff = float(freq)
+                freq_out = ff if math.isfinite(ff) else None
+            except (TypeError, ValueError):
+                freq_out = None
+        out.append({"sample_start": start, "frequency": freq_out})
+    return out
+
+
+def _parse_sigmf_annotations(anns_raw: Any) -> List[Dict]:
+    """宽容拍平 annotations[]：仅接受 dict + 非负 int sample_start。
+
+    可选 sample_count（非负 int）；透传常见可选字段（frequency/description/
+    comment），去掉 ``core:`` 前缀，不改语义。损坏→整体丢弃。
+    """
+    if not isinstance(anns_raw, list) or not anns_raw:
+        return []
+    out: List[Dict] = []
+    for a in anns_raw:
+        if not isinstance(a, dict):
+            return []
+        start = a.get("core:sample_start")
+        if not isinstance(start, int) or isinstance(start, bool) or start < 0:
+            return []
+        entry: Dict[str, Any] = {"sample_start": start}
+        count = a.get("core:sample_count")
+        if isinstance(count, int) and not isinstance(count, bool) and count >= 0:
+            entry["sample_count"] = count
+        for k in ("core:frequency", "core:description", "core:comment"):
+            if k in a:
+                entry[k.split(":", 1)[1]] = a[k]
+        out.append(entry)
+    return out
+
+
+def frequency_at_sample(captures: Optional[List[Dict]], sample_index: int) -> Optional[float]:
+    """给定拍平后的 capture 段表与样本序号，返回该处中心频率（Hz）。
+
+    取最后一个 ``sample_start <= sample_index`` 的段的 frequency；空表 /
+    序号在首段之前 / 该段缺 frequency → None（不猜、不拿 global 频率顶替）。
+    """
+    if not captures:
+        return None
+    freq: Optional[float] = None
+    for c in captures:
+        start = c.get("sample_start")
+        if start is None or start > sample_index:
+            break
+        freq = c.get("frequency")
+    return freq
+
+
 def _sigmf_meta_global(data_path: str) -> Dict[str, Any]:
     """从同名 ``.sigmf-meta`` 的 global 段取回放需要的信息。
 
@@ -116,6 +192,14 @@ def _sigmf_meta_global(data_path: str) -> Dict[str, Any]:
         rate = 0.0
     if rate > 0:
         out["sample_rate"] = rate
+    # 多段调谐 / 事件标注：宽容拍平（坏段整体丢弃，缺频点→None），
+    # 只在有有效段时才挂出，绝不拿 global 频率冒充段频点。
+    caps = _parse_sigmf_captures(meta.get("captures"))
+    if caps:
+        out["captures"] = caps
+    anns = _parse_sigmf_annotations(meta.get("annotations"))
+    if anns:
+        out["annotations"] = anns
     return out
 
 
@@ -491,6 +575,12 @@ def load_iq(path: str, sample_rate: float = None, *,
         "duration_s": round(total / (sample_rate or 1), 3),
         "file_samples": int(file_samples),
     }
+    # captures/annotations 是整文件元数据：截断/取消时仍如实返回（不像
+    # segments 那样涉及时长断言），调用方据 frequency_at_sample 取段频点。
+    if sig_global.get("captures"):
+        result["captures"] = sig_global["captures"]
+    if sig_global.get("annotations"):
+        result["annotations"] = sig_global["annotations"]
     if file_samples > total:
         result["truncated"] = True
         result["truncation_reason"] = (

@@ -19,9 +19,13 @@ xastir 仅作技术参考与致谢，本仓未包含其源代码；纯 Python �
 from __future__ import annotations
 
 import json
-import math
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
+
+try:
+    from .geo_distance import MEAN_EARTH_RADIUS_M as EARTH_RADIUS_M, haversine_m
+except ImportError:  # 扁平导入（部分脚本直挂 mbdsdr_ai 目录）
+    from geo_distance import MEAN_EARTH_RADIUS_M as EARTH_RADIUS_M, haversine_m
 
 
 # =====================================================================
@@ -30,11 +34,18 @@ from typing import Any, Dict, List, Optional, Tuple
 # 纬度 8 字节: DDMM.hhN (APRS 未压缩位置字段)
 # 经度 9 字节: DDDMM.hhW (APRS 未压缩位置字段)
 def encode_latitude(lat: float) -> str:
-    """纬度 -> 8 字节 'DDMM.hhN'。南纬 S，北纬 N。"""
+    """纬度 -> 8 字节 'DDMM.hhN'。南纬 S，北纬 N。
+
+    分钟四舍五入到 0.01'；若进位到 60.00 则向度进 1、分钟归 0，
+    杜绝 'DD60.hh' 这种非法 APRS 分钟字段（MM 必须 00–59）。
+    """
     hemi = 'N' if lat >= 0 else 'S'
     a = abs(lat)
     deg = int(a)
-    minute = (a - deg) * 60.0
+    minute = round((a - deg) * 60.0, 2)
+    if minute >= 60.0:
+        deg += 1
+        minute -= 60.0
     return f"{deg:02d}{minute:05.2f}{hemi}"
 
 
@@ -49,11 +60,18 @@ def decode_latitude(s: str) -> float:
 
 
 def encode_longitude(lon: float) -> str:
-    """经度 -> 9 字节 'DDDMM.hhW'。西经 W，东经 E。"""
+    """经度 -> 9 字节 'DDDMM.hhW'。西经 W，东经 E。
+
+    分钟四舍五入到 0.01'；若进位到 60.00 则向度进 1、分钟归 0，
+    杜绝 'DDD60.hh' 这种非法 APRS 分钟字段（MM 必须 00–59）。
+    """
     hemi = 'E' if lon >= 0 else 'W'
     a = abs(lon)
     deg = int(a)
-    minute = (a - deg) * 60.0
+    minute = round((a - deg) * 60.0, 2)
+    if minute >= 60.0:
+        deg += 1
+        minute -= 60.0
     return f"{deg:03d}{minute:05.2f}{hemi}"
 
 
@@ -162,17 +180,7 @@ def decode_object_or_item(pkt: bytes) -> Dict[str, Any]:
 # =====================================================================
 # 地理围栏
 # =====================================================================
-EARTH_RADIUS_M = 6371000.0
-
-
-def haversine_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
-    """两点间大圆距离（米）。"""
-    p1 = math.radians(lat1)
-    p2 = math.radians(lat2)
-    dphi = math.radians(lat2 - lat1)
-    dl = math.radians(lon2 - lon1)
-    a = math.sin(dphi / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(dl / 2) ** 2
-    return 2 * EARTH_RADIUS_M * math.asin(math.sqrt(a))
+# EARTH_RADIUS_M / haversine_m 由 geo_distance 唯一真值源再导出（见文件头 import）。
 
 
 @dataclass

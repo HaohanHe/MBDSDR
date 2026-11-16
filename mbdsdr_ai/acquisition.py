@@ -33,13 +33,13 @@ from typing import Any, Dict, List, Optional
 
 from . import space_weather
 from .tool_registry import ToolResult, clean_exc
+from .geo_distance import MEAN_EARTH_RADIUS_M as EARTH_RADIUS_M
 
 # 物理常数
 C_LIGHT_MPS = 299_792_458.0
 # 圆波导 TE11 模第一根零位（贝塞尔函数 J1 的第一个非零根）
 TE11_ROOT = 1.8412
-# 地球平均半径（m）
-EARTH_RADIUS_M = 6_371_000.0
+# 地球平均半径 EARTH_RADIUS_M 由 geo_distance 唯一真值源再导出（见文件头 import）。
 # 同步轨道半径近似（m）：高度 35786 km + 地球半径
 GEO_RADIUS_M = EARTH_RADIUS_M + 35_786_000.0
 

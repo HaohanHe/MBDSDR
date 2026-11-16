@@ -644,6 +644,24 @@ class AFSKModem:
 # APRS 编解码
 # ============================================================
 
+def _encode_aprs_coord(value: float, deg_width: int,
+                       pos_hemi: str, neg_hemi: str) -> str:
+    """APRS 未压缩坐标字段（纬度 DDMM.hh / 经度 DDDMM.hh）。
+
+    分钟四舍五入到 0.01'；若进位到 60.00 则向度进 1、分钟归 0，
+    杜绝 'DD60.hh' 这种非法 APRS 分钟字段（MM 必须 00–59）。
+    deg_width：纬度 2、经度 3。
+    """
+    hemi = pos_hemi if value >= 0 else neg_hemi
+    a = abs(value)
+    deg = int(a)
+    minute = round((a - deg) * 60.0, 2)
+    if minute >= 60.0:
+        deg += 1
+        minute -= 60.0
+    return f"{deg:0{deg_width}d}{minute:05.2f}{hemi}"
+
+
 @dataclass
 class APRSPosition:
     """APRS 位置报文。"""
@@ -659,17 +677,9 @@ class APRSPosition:
 
     def encode(self) -> str:
         """编码为 APRS 位置报文。"""
-        # 纬度：DDMM.hhN
-        lat_deg = int(abs(self.latitude))
-        lat_min = (abs(self.latitude) - lat_deg) * 60
-        lat_hemi = 'N' if self.latitude >= 0 else 'S'
-        lat_str = f"{lat_deg:02d}{lat_min:05.2f}{lat_hemi}"
-
-        # 经度：DDDMM.hhW
-        lon_deg = int(abs(self.longitude))
-        lon_min = (abs(self.longitude) - lon_deg) * 60
-        lon_hemi = 'E' if self.longitude >= 0 else 'W'
-        lon_str = f"{lon_deg:03d}{lon_min:05.2f}{lon_hemi}"
+        # 纬度：DDMM.hhN / 经度：DDDMM.hhW（分钟进位见 _encode_aprs_coord）
+        lat_str = _encode_aprs_coord(self.latitude, 2, 'N', 'S')
+        lon_str = _encode_aprs_coord(self.longitude, 3, 'E', 'W')
 
         result = f"{lat_str}{self.symbol_table}{lon_str}{self.symbol_code}"
 
@@ -815,16 +825,10 @@ class APRSWeather:
     pressure: int = 0       # 十分之一毫巴
 
     def encode(self) -> str:
-        lat_deg = int(abs(self.latitude))
-        lat_min = (abs(self.latitude) - lat_deg) * 60
-        lat_hemi = 'N' if self.latitude >= 0 else 'S'
+        lat_str = _encode_aprs_coord(self.latitude, 2, 'N', 'S')
+        lon_str = _encode_aprs_coord(self.longitude, 3, 'E', 'W')
 
-        lon_deg = int(abs(self.longitude))
-        lon_min = (abs(self.longitude) - lon_deg) * 60
-        lon_hemi = 'E' if self.longitude >= 0 else 'W'
-
-        return (f"_{lat_deg:02d}{lat_min:05.2f}{lat_hemi}/"
-                f"{lon_deg:03d}{lon_min:05.2f}{lon_hemi}_"
+        return (f"_{lat_str}/{lon_str}_"
                 f"{self.wind_dir:03d}/{self.wind_speed:03d}g{self.wind_gust:03d}"
                 f"t{self.temperature:03d}r{self.rain_1h:03d}p{self.rain_24h:03d}"
                 f"P{self.rain_midnight:03d}h{self.humidity:02d}b{self.pressure:05d}")

@@ -136,6 +136,7 @@ def _sim_controller(server):
     from mbdsdr_ai.gimbal import GimbalController
     gc = GimbalController()
     gc.use_rotctld("127.0.0.1", server.port, simulated=True)
+    gc.engage_rotctld()   # 连接≠启用：模拟过境需显式启用运动下发
     return gc
 
 

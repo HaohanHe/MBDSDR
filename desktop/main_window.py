@@ -2246,6 +2246,8 @@ class MainWindow(QMainWindow):
         # 星象仪命令栏仍显式走 _on_ai_command（见 _build_ai_command_bar）。
         # 星象仪覆盖卡：AI 回复跨形态镜像（只读，历史以面板为准）
         self.ai_panel.reply_received.connect(self._on_planetarium_ai_reply)
+        # 胶囊停止键跟着「真能取消」的状态显隐（#88），不自己猜忙闲
+        self.ai_panel.cancel_available.connect(self._on_ai_cancel_available)
         # 点星信息卡「问模型」：只把问题送进对话栏，发不发由用户决定
         self.sky_view.question_requested.connect(self._on_sky_question)
         # 未定位空态的「先看看示例天空」：用户主动点才给标注过的示例站址
@@ -4047,6 +4049,20 @@ class MainWindow(QMainWindow):
         self.cmd_mic_btn.setToolTip("语音输入（未连接麦克风时无操作）")
         self.cmd_mic_btn.clicked.connect(self._on_cmd_mic)
         lay.addWidget(self.cmd_mic_btn)
+        # #88：停止键。星象仪形态下 AI 面板不在眼前，用户在这儿发的指令
+        # 就得在这儿能停——否则要退出星象仪去右栏找「取消」，等于没有。
+        # 显隐由 ai_panel.cancel_available 驱动：只在真能停的时候出现
+        # （本地能力协商没有取消缝，那时不亮）。
+        self.cmd_stop_btn = QPushButton("停止")
+        self.cmd_stop_btn.setObjectName("iconButton")
+        self.cmd_stop_btn.setMinimumSize(40, 26)
+        self.cmd_stop_btn.setMaximumSize(56, 32)
+        self.cmd_stop_btn.setToolTip(
+            "中止当前 AI 请求（含正在跑的子代理）。取消在安全点生效："
+            "正在执行的那一次调用不会被强杀，已产生的部分结果照常显示。")
+        self.cmd_stop_btn.clicked.connect(self._on_cmd_stop)
+        self.cmd_stop_btn.hide()
+        lay.addWidget(self.cmd_stop_btn)
         # 用主题 token 的常规面板底色，不再做悬浮胶囊（半透明黑压在地图上
         # 既挡内容又与主题割裂，2026-11-10 截图实指）。
         bar.setStyleSheet(
@@ -4260,6 +4276,32 @@ class MainWindow(QMainWindow):
     def _on_cmd_mic(self) -> None:
         """麦克风按钮：无语音识别后端时仅提示，不造假。"""
         self.statusBar().showMessage("语音输入未配置（接麦克风后可用）", MSG_NORMAL)
+
+    def _on_ai_cancel_available(self, available: bool) -> None:
+        """AI 面板告知「现在能不能取消」→ 胶囊停止键显隐（#88）。"""
+        btn = getattr(self, "cmd_stop_btn", None)
+        if btn is None:
+            return
+        btn.setVisible(bool(available))
+        if available:
+            btn.setEnabled(True)
+            btn.setText("停止")
+
+    def _on_cmd_stop(self) -> None:
+        """胶囊停止键：与 AI 面板「取消」同一条路径，回话如实（#88）。"""
+        panel = getattr(self, "ai_panel", None)
+        if panel is None or not hasattr(panel, "cancel_current_request"):
+            self.statusBar().showMessage(
+                "AI 面板不可用，没有可中止的请求", MSG_NORMAL)
+            return
+        hit = bool(panel.cancel_current_request())
+        if hit:
+            self.statusBar().showMessage(
+                "已请求中止 AI 本轮请求：正在执行的那一次调用返回后就停"
+                "（不强杀），部分结果会照常显示", MSG_IMPORTANT)
+        else:
+            self.statusBar().showMessage(
+                "没有命中在跑的请求（可能刚好已结束）", MSG_NORMAL)
 
     # ------------------------------------------------------------------
     # 顶栏（细状态栏）/ 底坞（Home + 模式块 + Now Bar）

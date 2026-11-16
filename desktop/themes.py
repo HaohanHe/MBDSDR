@@ -495,6 +495,20 @@ def _control_coverage_qss() -> str:
             image: none;
             width: 0px;
         }}
+        /* W55 键盘焦点框：按钮与下拉框按 Tab 时必须看得见。
+           此前只有 QLineEdit / QSpinBox 有 :focus（见默认主题模板），
+           QPushButton / QToolButton / QComboBox 聚焦时与未聚焦完全同色——
+           键盘用户按 Tab 屏幕没有任何变化（default 主题未聚焦描边是
+           palette(mid)）。这里只改描边颜色，1px 宽度与内边距一字不动，
+           所以控件位置与尺寸零变化。
+           颜色取 palette(link)（= primary_text）与 QLineEdit:focus 同口径：
+           primary_text 对 card/bg/bg_alt/button 四个相邻面五套主题最低
+           4.29:1（dark_car 的 button）；palette(highlight) 在 default 对
+           页底只有 2.79:1，不够 1.4.11 的 3:1。
+           写在五套主题共用的这份覆盖表里，因此五个主题逐字同一份规则。 */
+        QPushButton:focus, QToolButton:focus, QComboBox:focus {{
+            border-color: palette(link);
+        }}
         QCheckBox, QRadioButton {{
             background-color: transparent;
             color: palette(window-text);
@@ -558,7 +572,12 @@ def _control_coverage_qss() -> str:
             color: palette(window-text);
             border: 1px solid palette(mid);
             border-radius: 8px;
-            outline: none;
+            /* W56 键盘焦点：原先写 ``outline: none``，把列表自身的聚焦框一并
+               关掉了——用 Tab 进入列表时没有任何「我现在在这里」的提示。
+               outline 不参与盒模型，改它不影响任何控件的位置与尺寸。
+               颜色同焦点环口径（palette(link) = primary_text），不用
+               highlight：default 主题下 highlight 对页底只有 2.79:1。 */
+            outline: 1px solid palette(link);
             alternate-background-color: palette(window);
         }}
         QListView::item, QListWidget::item {{
@@ -572,7 +591,14 @@ def _control_coverage_qss() -> str:
         QListView::item:selected, QListWidget::item:selected {{
             background-color: palette(dark);
             color: palette(window-text);
-            border-left: 3px solid palette(highlight);
+            /* W56 选中行边框：选中底是 palette(dark)（button_pressed），对未选中
+               底只有 1.03–2.16:1，几乎看不出哪一行被选中；这条 3px 左标是
+               唯一的**形状**线索（不靠颜色浓淡），所以它自己必须 ≥3:1。
+               原值 palette(highlight) 在 default 对页底 2.79:1 不达标；改走
+               palette(link)（primary_text：对选中底/未选中底五套主题最低
+               4.08:1）。
+               宽度与 padding 保持原值：行高与文字位置零变化。 */
+            border-left: 3px solid palette(link);
         }}
         QListView::item:disabled, QListWidget::item:disabled {{
             color: palette(placeholder-text);

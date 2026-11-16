@@ -2,7 +2,7 @@
   "schema": 1,
   "built_at": "2026-11-06",
   "scanner": "scripts/audit_source_text_pins.py",
-  "built_count": 58,
+  "built_count": 99,
   "entries": [
     {
       "path": "tests/test_ai_panel_behavior.py",
@@ -549,8 +549,377 @@
       "reason": "保留：回放比区间 0.3 – 3.0 只在人工验收卡里以文本呈现，ring4 常量没有可供行为断言调用的消费入口；区间串由 PLAYBACK_RMS_RATIO_MIN/MAX 拼出，任一侧改动都会红。若要删此条，必须先让验收卡由常量生成。",
       "legacy": false,
       "verdict": "keep"
+    },
+    {
+      "path": "tests/test_append_coordination_row.py",
+      "func": "test_append_keeps_crlf_and_only_inserts_one_line",
+      "pinned": "after.count(b\"\\r\\n\")",
+      "owner": "协调台账线 / da83bcaf",
+      "reason": "数据/文档 pin（保留，勿当 B 类改）：断言 append_coordination_row 追加后 COORDINATION.md 的字节行尾——CRLF 计数只 +1、插入点前后字节逐一相等；查的是工具产出的文档字节，不是源码实现文本。他线 pin（da83bcaf 引入）；2026-11-14 WorkBuddy 复核登记。",
+      "legacy": false,
+      "verdict": "keep"
+    },
+    {
+      "path": "tests/test_append_coordination_row.py",
+      "func": "test_append_keeps_crlf_and_only_inserts_one_line",
+      "pinned": "before.count(b\"\\n\")",
+      "owner": "协调台账线 / da83bcaf",
+      "reason": "数据/文档 pin（保留，勿当 B 类改）：断言 append_coordination_row 追加后 COORDINATION.md 的字节行尾——CRLF 计数只 +1、插入点前后字节逐一相等；查的是工具产出的文档字节，不是源码实现文本。他线 pin（da83bcaf 引入）；2026-11-14 WorkBuddy 复核登记。",
+      "legacy": false,
+      "verdict": "keep"
+    },
+    {
+      "path": "tests/test_append_coordination_row.py",
+      "func": "test_append_keeps_crlf_and_only_inserts_one_line",
+      "pinned": "before.count(b\"\\r\\n\")",
+      "owner": "协调台账线 / da83bcaf",
+      "reason": "数据/文档 pin（保留，勿当 B 类改）：断言 append_coordination_row 追加后 COORDINATION.md 的字节行尾——CRLF 计数只 +1、插入点前后字节逐一相等；查的是工具产出的文档字节，不是源码实现文本。他线 pin（da83bcaf 引入）；2026-11-14 WorkBuddy 复核登记。",
+      "legacy": false,
+      "verdict": "keep"
+    },
+    {
+      "path": "tests/test_append_coordination_row.py",
+      "func": "test_append_keeps_crlf_and_only_inserts_one_line",
+      "pinned": "before.count(b\"\\r\\n\")",
+      "owner": "协调台账线 / da83bcaf",
+      "reason": "数据/文档 pin（保留，勿当 B 类改）：断言 append_coordination_row 追加后 COORDINATION.md 的字节行尾——CRLF 计数只 +1、插入点前后字节逐一相等；查的是工具产出的文档字节，不是源码实现文本。他线 pin（da83bcaf 引入）；2026-11-14 WorkBuddy 复核登记。",
+      "legacy": false,
+      "verdict": "keep"
+    },
+    {
+      "path": "tests/test_append_coordination_row.py",
+      "func": "test_append_keeps_lf_line_endings",
+      "pinned": "b\"\\r\\n\"",
+      "owner": "协调台账线 / da83bcaf",
+      "reason": "数据/文档 pin（保留，勿当 B 类改）：断言 LF 文档追加后仍是 LF（raw 不含 b'\\r\\n'、\\n 计数只 +1）；查工具产出的文档字节行尾，不是源码实现文本。他线 pin（da83bcaf 引入）；2026-11-14 WorkBuddy 复核登记。",
+      "legacy": false,
+      "verdict": "keep"
+    },
+    {
+      "path": "tests/test_append_coordination_row.py",
+      "func": "test_append_keeps_lf_line_endings",
+      "pinned": "raw.count(b\"\\n\")",
+      "owner": "协调台账线 / da83bcaf",
+      "reason": "数据/文档 pin（保留，勿当 B 类改）：断言 LF 文档追加后仍是 LF（raw 不含 b'\\r\\n'、\\n 计数只 +1）；查工具产出的文档字节行尾，不是源码实现文本。他线 pin（da83bcaf 引入）；2026-11-14 WorkBuddy 复核登记。",
+      "legacy": false,
+      "verdict": "keep"
+    },
+    {
+      "path": "tests/test_append_coordination_row.py",
+      "func": "test_two_lines_append_ten_rows_each_without_loss",
+      "pinned": "\"### 6.1.1 下一节\"",
+      "owner": "协调台账线 / da83bcaf",
+      "reason": "数据/文档 pin（保留，勿当 B 类改）：断言两进程并发追加 20 行后下一节标题「### 6.1.1 下一节」与占位行「| _（空）_ | | | |」仍在（内容不被挤掉）；查工具产出文档内容，不是源码实现文本。他线 pin（da83bcaf 引入）；2026-11-14 WorkBuddy 复核登记。",
+      "legacy": false,
+      "verdict": "keep"
+    },
+    {
+      "path": "tests/test_append_coordination_row.py",
+      "func": "test_two_lines_append_ten_rows_each_without_loss",
+      "pinned": "\"| _（空）_ | | | |\"",
+      "owner": "协调台账线 / da83bcaf",
+      "reason": "数据/文档 pin（保留，勿当 B 类改）：断言两进程并发追加 20 行后下一节标题「### 6.1.1 下一节」与占位行「| _（空）_ | | | |」仍在（内容不被挤掉）；查工具产出文档内容，不是源码实现文本。他线 pin（da83bcaf 引入）；2026-11-14 WorkBuddy 复核登记。",
+      "legacy": false,
+      "verdict": "keep"
+    },
+    {
+      "path": "tests/test_claim_liveness_one_source.py",
+      "func": "test_liveness_function_lives_in_claim_window",
+      "pinned": "\"claim_active\"",
+      "owner": "协调台账线 / 4cca6abd",
+      "reason": "保留（勿当 B 类砍）：同源守卫——闸与审计脚本必须调用 claim_window.claim_active（正锚），且不得自算 TTL（负锚 payload.get('ttl_min') not in src）；行为测试无法证明「整文件没有第二份活跃判定」。他线 pin（4cca6abd 引入）；2026-11-14 WorkBuddy 复核登记；重新评估条件：活跃判定收敛为单一可调用入口、脚本不可能再自写时。",
+      "legacy": false,
+      "verdict": "keep"
+    },
+    {
+      "path": "tests/test_claim_liveness_one_source.py",
+      "func": "test_liveness_function_lives_in_claim_window",
+      "pinned": "'payload.get(\"ttl_min\")'",
+      "owner": "协调台账线 / 4cca6abd",
+      "reason": "保留（勿当 B 类砍）：同源守卫——闸与审计脚本必须调用 claim_window.claim_active（正锚），且不得自算 TTL（负锚 payload.get('ttl_min') not in src）；行为测试无法证明「整文件没有第二份活跃判定」。他线 pin（4cca6abd 引入）；2026-11-14 WorkBuddy 复核登记；重新评估条件：活跃判定收敛为单一可调用入口、脚本不可能再自写时。",
+      "legacy": false,
+      "verdict": "keep"
+    },
+    {
+      "path": "tests/test_gmst_single_source.py",
+      "func": "test_gpredict_thetajd_is_a_separate_numeric_path",
+      "pinned": "\"from .gmst import\"",
+      "owner": "GMST口径收敛线 / 1b19f8cc",
+      "reason": "保留（勿当 B 类砍）：跨实现刻意分立守卫——gpredict 适配器必须保留自己的数值路径（marker 24110.54841/OMEGA_E_DAY/modulus 正锚），且不得 import 共享 gmst（from .gmst / from mbdsdr_ai.gmst 负锚）；这是 A/B 口径对拍的结构前提，行为测试证不了「没有偷偷换内核」。他线 pin（1b19f8cc 引入）；2026-11-14 WorkBuddy 复核登记；重新评估条件：两口径合并为单一实现、不再需要对拍时。",
+      "legacy": false,
+      "verdict": "keep"
+    },
+    {
+      "path": "tests/test_gmst_single_source.py",
+      "func": "test_gpredict_thetajd_is_a_separate_numeric_path",
+      "pinned": "\"from mbdsdr_ai.gmst import\"",
+      "owner": "GMST口径收敛线 / 1b19f8cc",
+      "reason": "保留（勿当 B 类砍）：跨实现刻意分立守卫——gpredict 适配器必须保留自己的数值路径（marker 24110.54841/OMEGA_E_DAY/modulus 正锚），且不得 import 共享 gmst（from .gmst / from mbdsdr_ai.gmst 负锚）；这是 A/B 口径对拍的结构前提，行为测试证不了「没有偷偷换内核」。他线 pin（1b19f8cc 引入）；2026-11-14 WorkBuddy 复核登记；重新评估条件：两口径合并为单一实现、不再需要对拍时。",
+      "legacy": false,
+      "verdict": "keep"
+    },
+    {
+      "path": "tests/test_gmst_single_source.py",
+      "func": "test_gpredict_thetajd_is_a_separate_numeric_path",
+      "pinned": "marker",
+      "owner": "GMST口径收敛线 / 1b19f8cc",
+      "reason": "保留（勿当 B 类砍）：跨实现刻意分立守卫——gpredict 适配器必须保留自己的数值路径（marker 24110.54841/OMEGA_E_DAY/modulus 正锚），且不得 import 共享 gmst（from .gmst / from mbdsdr_ai.gmst 负锚）；这是 A/B 口径对拍的结构前提，行为测试证不了「没有偷偷换内核」。他线 pin（1b19f8cc 引入）；2026-11-14 WorkBuddy 复核登记；重新评估条件：两口径合并为单一实现、不再需要对拍时。",
+      "legacy": false,
+      "verdict": "keep"
+    },
+    {
+      "path": "tests/test_gmst_single_source.py",
+      "func": "test_no_duplicated_polynomial",
+      "pinned": "needle",
+      "owner": "GMST口径收敛线 / 1b19f8cc",
+      "reason": "保留（勿当 B 类砍）：单一真值源负向守卫——A 口径多项式常数 8640184.812866 不得被任何模块再抄一遍（needle not in src）；行为对拍只能证数值相等，证不了「没有第二份实现」。他线 pin（1b19f8cc 引入）；2026-11-14 WorkBuddy 复核登记；重新评估条件：多项式收敛到唯一构造器、复制不可能存在时。",
+      "legacy": false,
+      "verdict": "keep"
+    },
+    {
+      "path": "tests/test_klobuchar_no_default.py",
+      "func": "test_source_contains_no_fixed_typical_coefficients",
+      "pinned": "\"ion_default\"",
+      "owner": "GNSS线 / 3e6ce34a",
+      "reason": "保留（勿当 B 类砍）：诚实红线负向守卫——klobuchar_ion_delay 源码不得出现固定典型系数（forbidden token）或 ion_default 兜底；缺参数必须显式未校正，行为测试无法穷举「函数内没有手写典型值」。他线 pin（3e6ce34a 引入）；2026-11-14 WorkBuddy 复核登记；重新评估条件：永不——这是「不冒充已校正」的产品红线，必须保持整函数扫描。",
+      "legacy": false,
+      "verdict": "keep"
+    },
+    {
+      "path": "tests/test_klobuchar_no_default.py",
+      "func": "test_source_contains_no_fixed_typical_coefficients",
+      "pinned": "token",
+      "owner": "GNSS线 / 3e6ce34a",
+      "reason": "保留（勿当 B 类砍）：诚实红线负向守卫——klobuchar_ion_delay 源码不得出现固定典型系数（forbidden token）或 ion_default 兜底；缺参数必须显式未校正，行为测试无法穷举「函数内没有手写典型值」。他线 pin（3e6ce34a 引入）；2026-11-14 WorkBuddy 复核登记；重新评估条件：永不——这是「不冒充已校正」的产品红线，必须保持整函数扫描。",
+      "legacy": false,
+      "verdict": "keep"
+    },
+    {
+      "path": "tests/test_physical_constant_registry.py",
+      "func": "test_refraction_weather_check_is_the_first_branch",
+      "pinned": "\"refraction_weather_status\"",
+      "owner": "常量收敛线 / a2ea6cd5",
+      "reason": "保留（勿当 B 类砍）：AST 分支顺序守卫——compute_refraction 的第一个 if 必须检查 refraction_weather_status（未校正折射先按天气状态门控）；行为测试证不了「分支顺序」，只有 AST 首分支源段能钉。他线 pin（a2ea6cd5 引入）；2026-11-14 WorkBuddy 复核登记；重新评估条件：折射门控收敛为单一前置断言、顺序不可能错时。",
+      "legacy": false,
+      "verdict": "keep"
+    },
+    {
+      "path": "tests/test_rtk_no_dead_states.py",
+      "func": "test_source_has_no_tropo_state_leftover",
+      "pinned": "\"self.x = np.append(self.x, 0.0)\"",
+      "owner": "RTK线 / f0ff33e0",
+      "reason": "保留（勿当 B 类砍）：死状态负向守卫——RTK 滤波器源码不得残留 sigma_tropo/ZWD 假状态（负锚），且只有模糊度追加状态（self.x = np.append(self.x, 0.0) 正锚）；不可观测状态删没删只有静态扫描能证。他线 pin（f0ff33e0 引入）；2026-11-14 WorkBuddy 复核登记；重新评估条件：状态向量构造收敛到单一入口、死状态不可能残留时。",
+      "legacy": false,
+      "verdict": "keep"
+    },
+    {
+      "path": "tests/test_rtk_no_dead_states.py",
+      "func": "test_source_has_no_tropo_state_leftover",
+      "pinned": "\"sigma_tropo\"",
+      "owner": "RTK线 / f0ff33e0",
+      "reason": "保留（勿当 B 类砍）：死状态负向守卫——RTK 滤波器源码不得残留 sigma_tropo/ZWD 假状态（负锚），且只有模糊度追加状态（self.x = np.append(self.x, 0.0) 正锚）；不可观测状态删没删只有静态扫描能证。他线 pin（f0ff33e0 引入）；2026-11-14 WorkBuddy 复核登记；重新评估条件：状态向量构造收敛到单一入口、死状态不可能残留时。",
+      "legacy": false,
+      "verdict": "keep"
+    },
+    {
+      "path": "tests/test_safe_commit_coordination.py",
+      "func": "test_only_own_row_is_taken_and_foreign_row_stays",
+      "pinned": "FOREIGN",
+      "owner": "提交范围线 / 052828d1",
+      "reason": "数据/文档 pin（保留，勿当 B 类改）：断言 safe_commit 只取本线登记行、别线行（FOREIGN）留在工作树且不进提交；查工具在临时仓库的 git 产出（git show HEAD:doc.md）与工作树文件内容，不是源码实现文本。他线 pin（052828d1 引入）；2026-11-14 WorkBuddy 复核登记。",
+      "legacy": false,
+      "verdict": "keep"
+    },
+    {
+      "path": "tests/test_safe_commit_exclude.py",
+      "func": "test_exclude_three_hunks_in_one_call",
+      "pinned": "\"line12 other\"",
+      "owner": "提交范围线 / e2af7192",
+      "reason": "数据/文档 pin（保留，勿当 B 类改）：断言 safe_commit --exclude-hunk 一次排除三个 hunk 后提交内容（git show HEAD:doc.md）与工作树字节的行成员；line12/line5/other8a/other8b 是注入临时仓库的 fixture 数据，查的是工具产出，不是源码实现文本。他线 pin（e2af7192 引入）；2026-11-14 WorkBuddy 复核登记。",
+      "legacy": false,
+      "verdict": "keep"
+    },
+    {
+      "path": "tests/test_safe_commit_exclude.py",
+      "func": "test_exclude_three_hunks_in_one_call",
+      "pinned": "\"line5 other\"",
+      "owner": "提交范围线 / e2af7192",
+      "reason": "数据/文档 pin（保留，勿当 B 类改）：断言 safe_commit --exclude-hunk 一次排除三个 hunk 后提交内容（git show HEAD:doc.md）与工作树字节的行成员；line12/line5/other8a/other8b 是注入临时仓库的 fixture 数据，查的是工具产出，不是源码实现文本。他线 pin（e2af7192 引入）；2026-11-14 WorkBuddy 复核登记。",
+      "legacy": false,
+      "verdict": "keep"
+    },
+    {
+      "path": "tests/test_safe_commit_exclude.py",
+      "func": "test_exclude_three_hunks_in_one_call",
+      "pinned": "\"other8a\"",
+      "owner": "提交范围线 / e2af7192",
+      "reason": "数据/文档 pin（保留，勿当 B 类改）：断言 safe_commit --exclude-hunk 一次排除三个 hunk 后提交内容（git show HEAD:doc.md）与工作树字节的行成员；line12/line5/other8a/other8b 是注入临时仓库的 fixture 数据，查的是工具产出，不是源码实现文本。他线 pin（e2af7192 引入）；2026-11-14 WorkBuddy 复核登记。",
+      "legacy": false,
+      "verdict": "keep"
+    },
+    {
+      "path": "tests/test_safe_commit_exclude.py",
+      "func": "test_exclude_three_hunks_in_one_call",
+      "pinned": "\"other8b\"",
+      "owner": "提交范围线 / e2af7192",
+      "reason": "数据/文档 pin（保留，勿当 B 类改）：断言 safe_commit --exclude-hunk 一次排除三个 hunk 后提交内容（git show HEAD:doc.md）与工作树字节的行成员；line12/line5/other8a/other8b 是注入临时仓库的 fixture 数据，查的是工具产出，不是源码实现文本。他线 pin（e2af7192 引入）；2026-11-14 WorkBuddy 复核登记。",
+      "legacy": false,
+      "verdict": "keep"
+    },
+    {
+      "path": "tests/test_safe_commit_exclude.py",
+      "func": "test_mismatched_hunk_body_aborts_without_commit",
+      "pinned": "\"line2 mine\"",
+      "owner": "提交范围线 / e2af7192",
+      "reason": "数据/文档 pin（保留，勿当 B 类改）：断言 hunk 体对不上时 safe_commit 前置失败、不提交，本线行（line2 mine）与别线行（line5 other）状态符合预期；查工具在临时仓库的 git 产出与文件内容，不是源码实现文本。他线 pin（e2af7192 引入）；2026-11-14 WorkBuddy 复核登记。",
+      "legacy": false,
+      "verdict": "keep"
+    },
+    {
+      "path": "tests/test_safe_commit_exclude.py",
+      "func": "test_mismatched_hunk_body_aborts_without_commit",
+      "pinned": "\"line5 other\"",
+      "owner": "提交范围线 / e2af7192",
+      "reason": "数据/文档 pin（保留，勿当 B 类改）：断言 hunk 体对不上时 safe_commit 前置失败、不提交，本线行（line2 mine）与别线行（line5 other）状态符合预期；查工具在临时仓库的 git 产出与文件内容，不是源码实现文本。他线 pin（e2af7192 引入）；2026-11-14 WorkBuddy 复核登记。",
+      "legacy": false,
+      "verdict": "keep"
+    },
+    {
+      "path": "tests/test_safe_commit_exclude.py",
+      "func": "test_multiple_exclusion_hunks_survive_line_count_shift",
+      "pinned": "\"line9 other\"",
+      "owner": "提交范围线 / e2af7192",
+      "reason": "数据/文档 pin（保留，勿当 B 类改）：断言多个排除 hunk 在行数漂移后仍正确——别线行（line9 other/other5a）不进提交但留工作树；查工具在临时仓库的 git 产出与文件内容，不是源码实现文本。他线 pin（e2af7192 引入）；2026-11-14 WorkBuddy 复核登记。",
+      "legacy": false,
+      "verdict": "keep"
+    },
+    {
+      "path": "tests/test_safe_commit_exclude.py",
+      "func": "test_multiple_exclusion_hunks_survive_line_count_shift",
+      "pinned": "\"other5a\"",
+      "owner": "提交范围线 / e2af7192",
+      "reason": "数据/文档 pin（保留，勿当 B 类改）：断言多个排除 hunk 在行数漂移后仍正确——别线行（line9 other/other5a）不进提交但留工作树；查工具在临时仓库的 git 产出与文件内容，不是源码实现文本。他线 pin（e2af7192 引入）；2026-11-14 WorkBuddy 复核登记。",
+      "legacy": false,
+      "verdict": "keep"
+    },
+    {
+      "path": "tests/test_safe_commit_line_range.py",
+      "func": "test_partial_hunk_exclusion_keeps_own_line_in_place",
+      "pinned": "OTHER_A",
+      "owner": "提交范围线 / 052828d1",
+      "reason": "数据/文档 pin（保留，勿当 B 类改）：断言部分 hunk 排除后本线行原位保留、别线行（OTHER_A/OTHER_B）不进提交但留工作树；查 safe_commit 在临时仓库的 git 产出（_head_lines）与文件内容，不是源码实现文本。他线 pin（052828d1 引入）；2026-11-14 WorkBuddy 复核登记。",
+      "legacy": false,
+      "verdict": "keep"
+    },
+    {
+      "path": "tests/test_safe_commit_line_range.py",
+      "func": "test_partial_hunk_exclusion_keeps_own_line_in_place",
+      "pinned": "OTHER_B",
+      "owner": "提交范围线 / 052828d1",
+      "reason": "数据/文档 pin（保留，勿当 B 类改）：断言部分 hunk 排除后本线行原位保留、别线行（OTHER_A/OTHER_B）不进提交但留工作树；查 safe_commit 在临时仓库的 git 产出（_head_lines）与文件内容，不是源码实现文本。他线 pin（052828d1 引入）；2026-11-14 WorkBuddy 复核登记。",
+      "legacy": false,
+      "verdict": "keep"
+    },
+    {
+      "path": "tests/test_spacetime_features.py",
+      "func": "test_module_has_no_hardcoded_site_coordinates",
+      "pinned": "\"北京\"",
+      "owner": "时空要素线 / 334f8c26",
+      "reason": "保留（勿当 B 类砍）：身份/坐标红线负向守卫——spacetime_features.py 不得硬编码真实站址坐标（116.4/39.9）或城市名（北京/长春/青岛）；站址必须来自 set_observer_site 声明，行为测试无法穷举「整文件没有内置坐标」。他线 pin（334f8c26 引入）；2026-11-14 WorkBuddy 复核登记；重新评估条件：永不——这是身份/坐标红线，必须保持整文件扫描。",
+      "legacy": false,
+      "verdict": "keep"
+    },
+    {
+      "path": "tests/test_spacetime_features.py",
+      "func": "test_module_has_no_hardcoded_site_coordinates",
+      "pinned": "\"长春\"",
+      "owner": "时空要素线 / 334f8c26",
+      "reason": "保留（勿当 B 类砍）：身份/坐标红线负向守卫——spacetime_features.py 不得硬编码真实站址坐标（116.4/39.9）或城市名（北京/长春/青岛）；站址必须来自 set_observer_site 声明，行为测试无法穷举「整文件没有内置坐标」。他线 pin（334f8c26 引入）；2026-11-14 WorkBuddy 复核登记；重新评估条件：永不——这是身份/坐标红线，必须保持整文件扫描。",
+      "legacy": false,
+      "verdict": "keep"
+    },
+    {
+      "path": "tests/test_spacetime_features.py",
+      "func": "test_module_has_no_hardcoded_site_coordinates",
+      "pinned": "\"青岛\"",
+      "owner": "时空要素线 / 334f8c26",
+      "reason": "保留（勿当 B 类砍）：身份/坐标红线负向守卫——spacetime_features.py 不得硬编码真实站址坐标（116.4/39.9）或城市名（北京/长春/青岛）；站址必须来自 set_observer_site 声明，行为测试无法穷举「整文件没有内置坐标」。他线 pin（334f8c26 引入）；2026-11-14 WorkBuddy 复核登记；重新评估条件：永不——这是身份/坐标红线，必须保持整文件扫描。",
+      "legacy": false,
+      "verdict": "keep"
+    },
+    {
+      "path": "tests/test_spacetime_features.py",
+      "func": "test_module_has_no_hardcoded_site_coordinates",
+      "pinned": "116.4",
+      "owner": "时空要素线 / 334f8c26",
+      "reason": "保留（勿当 B 类砍）：身份/坐标红线负向守卫——spacetime_features.py 不得硬编码真实站址坐标（116.4/39.9）或城市名（北京/长春/青岛）；站址必须来自 set_observer_site 声明，行为测试无法穷举「整文件没有内置坐标」。他线 pin（334f8c26 引入）；2026-11-14 WorkBuddy 复核登记；重新评估条件：永不——这是身份/坐标红线，必须保持整文件扫描。",
+      "legacy": false,
+      "verdict": "keep"
+    },
+    {
+      "path": "tests/test_spacetime_features.py",
+      "func": "test_module_has_no_hardcoded_site_coordinates",
+      "pinned": "39.9",
+      "owner": "时空要素线 / 334f8c26",
+      "reason": "保留（勿当 B 类砍）：身份/坐标红线负向守卫——spacetime_features.py 不得硬编码真实站址坐标（116.4/39.9）或城市名（北京/长春/青岛）；站址必须来自 set_observer_site 声明，行为测试无法穷举「整文件没有内置坐标」。他线 pin（334f8c26 引入）；2026-11-14 WorkBuddy 复核登记；重新评估条件：永不——这是身份/坐标红线，必须保持整文件扫描。",
+      "legacy": false,
+      "verdict": "keep"
+    },
+    {
+      "path": "tests/test_status_panel_squelch_units.py",
+      "func": "test_guard_goes_red_on_bad_field_doc_and_rejects_old_module",
+      "pinned": "\"class SDRStatus\"",
+      "owner": "状态栏静噪线 / 250a4ec7",
+      "reason": "保留（勿当 B 类砍）：守卫目标反向锚——旧 sdr_backend.py 不得再定义 class SDRStatus（负锚），防守卫指向已迁移的旧路径而静默放行；行为测试证不了「守卫没指向旧文件」。他线 pin（250a4ec7 引入）；2026-11-14 WorkBuddy 复核登记；重新评估条件：SDRStatus 定位收敛为单一 import、守卫不再靠类名扫文件时。",
+      "legacy": false,
+      "verdict": "keep"
+    },
+    {
+      "path": "tests/test_status_panel_squelch_units.py",
+      "func": "test_static_guard_no_bare_dbfs_on_margin",
+      "pinned": "\"class SDRStatus\"",
+      "owner": "状态栏静噪线 / 250a4ec7",
+      "reason": "保留（勿当 B 类砍）：守卫目标定位正锚——按类名定位到的 owner 文件必须真含 class SDRStatus，防止卫查了个空文件；这是静噪余量守卫的目标锚，行为测试证不了「守卫目标正确」。他线 pin（250a4ec7 引入）；2026-11-14 WorkBuddy 复核登记；重新评估条件：SDRStatus 定位收敛为单一 import、守卫不再靠类名扫文件时。",
+      "legacy": false,
+      "verdict": "keep"
+    },
+    {
+      "path": "tests/test_tle_policy_single_source.py",
+      "func": "test_display_and_synthetic_policies_are_different_contracts",
+      "pinned": "\"EXPIRED_MAX_DAYS\"",
+      "owner": "TLE口径收敛线 / a425f059",
+      "reason": "保留（勿当 B 类砍）：口径分立守卫——桌面展示/闸门层必须走 tracking_policy(（正锚），不得读新鲜度阈值常量 FRESH_MAX_HOURS/EXPIRED_MAX_DAYS（负锚）；展示口径与合成口径是不同契约，行为测试证不了「展示层没偷读阈值」。他线 pin（a425f059 引入）；2026-11-14 WorkBuddy 复核登记；重新评估条件：两口径合并、不再需要分立时。",
+      "legacy": false,
+      "verdict": "keep"
+    },
+    {
+      "path": "tests/test_tle_policy_single_source.py",
+      "func": "test_display_and_synthetic_policies_are_different_contracts",
+      "pinned": "\"FRESH_MAX_HOURS\"",
+      "owner": "TLE口径收敛线 / a425f059",
+      "reason": "保留（勿当 B 类砍）：口径分立守卫——桌面展示/闸门层必须走 tracking_policy(（正锚），不得读新鲜度阈值常量 FRESH_MAX_HOURS/EXPIRED_MAX_DAYS（负锚）；展示口径与合成口径是不同契约，行为测试证不了「展示层没偷读阈值」。他线 pin（a425f059 引入）；2026-11-14 WorkBuddy 复核登记；重新评估条件：两口径合并、不再需要分立时。",
+      "legacy": false,
+      "verdict": "keep"
+    },
+    {
+      "path": "tests/test_tle_policy_single_source.py",
+      "func": "test_display_and_synthetic_policies_are_different_contracts",
+      "pinned": "\"tracking_policy(\"",
+      "owner": "TLE口径收敛线 / a425f059",
+      "reason": "保留（勿当 B 类砍）：口径分立守卫——桌面展示/闸门层必须走 tracking_policy(（正锚），不得读新鲜度阈值常量 FRESH_MAX_HOURS/EXPIRED_MAX_DAYS（负锚）；展示口径与合成口径是不同契约，行为测试证不了「展示层没偷读阈值」。他线 pin（a425f059 引入）；2026-11-14 WorkBuddy 复核登记；重新评估条件：两口径合并、不再需要分立时。",
+      "legacy": false,
+      "verdict": "keep"
+    },
+    {
+      "path": "tests/test_tle_policy_single_source.py",
+      "func": "test_no_hardcoded_threshold_literals_in_orbit",
+      "pinned": "src.count('\"tle_policy\": _report_tle_policy(allow_stale)')",
+      "owner": "TLE口径收敛线 / a425f059",
+      "reason": "保留（勿当 B 类砍）：单一真值源计数守卫——orbit 源码必须恰好 3 处走 _report_tle_policy(allow_stale)（src.count==3），不得手写阈值字面量；行为测试证不了「整文件没有第二份阈值」。他线 pin（a425f059 引入）；2026-11-14 WorkBuddy 复核登记；重新评估条件：TLE 策略上报收敛到单一构造器、手写不可能存在时。",
+      "legacy": false,
+      "verdict": "keep"
     }
   ],
-  "revised_at": "2026-11-13",
+  "revised_at": "2026-11-14",
   "classification_note": "分类器（_literal_of / 邻近 assert 归组）会把同一函数的多条 pin 重复计入不同判定：看条数前必须按 (path, func, pinned) 去重并回读 assert 原文。条数会虚高；砍条数时若只按 C/B 标签操作，可能删掉真判据。"
 }

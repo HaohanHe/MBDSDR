@@ -35,6 +35,9 @@ from .context_manager import (
 )
 from .model_manager import ModelManager
 from .tool_registry import ToolRegistry, ToolResult, hex_bytes, clean_exc
+# 取消协议值的唯一真值源在叶子模块（桌面步骤卡也要读它，#88）；此处原处
+# 再导出，``agent.CANCEL_ERROR`` 与 ``from .agent import CANCEL_ERROR`` 照旧。
+from .tool_results import CANCEL_ERROR
 from .conversation import ConversationStore
 from .session_log import SessionLog
 from .tool_budget import select_tools, tool_budget_tokens
@@ -167,7 +170,7 @@ _CONCURRENCY_INIT_LOCK = threading.Lock()
 
 # chat() 并发被拒时的返回码（调用方据此区分「模型失败」与「本机正忙」）
 BUSY_ERROR = "agent_busy"
-CANCEL_ERROR = "cancelled"
+# CANCEL_ERROR 见文件头 from .tool_results import CANCEL_ERROR（唯一真值源）
 
 # 指标环形缓冲：只保留最近 N 个请求，避免长会话把内存越攒越大
 METRICS_HISTORY_LIMIT = 50
@@ -1760,10 +1763,18 @@ class MBDSDRAgent:
                                   port=int(args.get("port", 4533)))
                 az = float(args["azimuth_deg"])
                 el = float(args["elevation_deg"])
+                # 连接≠启用：先 ping 确认可达，再查限位、启用运动下发，
+                # 否则 set_position 会被 engage 闸拒绝（零流量，不误动天线）。
+                if not c.ping():
+                    return ToolResult(False, f"云台连接失败：{c.last_error or 'rotctld 无应答'}，检查 rotctld 是否运行")
+                c.dump_caps()
+                c.engage()
                 ok = c.set_position(az, el)
                 if ok:
-                    return ToolResult(True, f"云台已指向 方位{az:.0f}° 仰角{el:.0f}°")
-                return ToolResult(False, "云台连接失败，检查 rotctld 是否运行")
+                    cl = c.last_clamped or {}
+                    note = "（已按限位钳位）" if cl.get("clamped") else ""
+                    return ToolResult(True, f"云台已指向 方位{cl.get('az', az):.0f}° 仰角{cl.get('el', el):.0f}°{note}")
+                return ToolResult(False, f"云台未执行：{c.last_error or 'rotctld 未返回 RPRT 0'}")
             except Exception as e:
                 return ToolResult(False, f"云台控制失败: {clean_exc(e)}")
 
@@ -2157,16 +2168,22 @@ class MBDSDRAgent:
             category="memory",
         )
 
-    def _workflow_tool_executor(self, tool_name: str, params: Dict[str, Any]) -> ToolResult:
+    def _workflow_tool_executor(self, tool_name: str, params: Dict[str, Any],
+                                timeout_s: Optional[float] = None) -> ToolResult:
         """工作流引擎的工具执行器（桥接到 Agent 的工具注册表）。
 
         D6 接真实：成功时返回 ToolResult 本体（而非 content 散文字符串），workflow_engine
         据此读取 .content（人类可读结果）与 .data（结构化 sidecar 字典）做跨步 {{var}}
         回填。失败抛异常，由 workflow_engine 走重试/失败分支。
+
+        timeout_s：workflow_engine 按 step.timeout 下发的显式超时（秒），透传给
+        tool_registry.call。None=沿用工具注册/registry 默认（scheduler 等两参
+        调用方走默认，行为不变）。
         """
         t0 = time.time()
         result = self.tool_registry.call(tool_name, params,
-                                         trigger=TRIGGER_MODEL)
+                                         trigger=TRIGGER_MODEL,
+                                         timeout_s=timeout_s)
         # 录制工作流：记录本次工具调用（D1 接真实）。
         # 仅当 workflow_record_start 已开始录制时落步骤；未在录制时 record_tool_call 内部直接返回，
         # 因此这是真实记录而非假数据。参数对照 workflow_recorder.py: record_tool_call(tool_name,
@@ -2232,7 +2249,7 @@ class MBDSDRAgent:
                 },
                 "required": ["workflow_name"],
             },
-            handler=lambda args: ToolResult(success=True, content=json.dumps(wf.execute(args["workflow_name"], args.get("parameters", {})).to_dict(), ensure_ascii=False, indent=2)),
+            handler=lambda args: ToolResult(success=True, content=json.dumps(wf.execute(args["workflow_name"], args.get("parameters", {}), cancel_event=getattr(self, "_cancel_event", None)).to_dict(), ensure_ascii=False, indent=2)),
             category="workflow",
         )
 
@@ -2733,14 +2750,15 @@ class MBDSDRAgent:
                 "baseband_recorder(基带录制) 共 3 类；其余类型走通用 tool_name 路径"
                 "（agent_type 传任意名称即可，不会抛 NotImplementedError），"
                 "allowed_tools=None=全部工具（视图自动排除 subagent_* 防递归）。"
-                "max_steps 控制 LLM 循环步数上限（默认 8）。"
+                "max_steps 控制该子代理的 LLM 循环步数上限（默认 8），任务未显式"
+                "指定步数时继承此值；超限诚实返回 status=truncated 的部分结果。"
             ),
             parameters={
                 "type": "object",
                 "properties": {
                     "agent_type": {"type": "string", "description": "子代理类型：spectrum_analyzer/satellite_tracker/baseband_recorder 共 3 类有内置默认工具白名单；其余类型走通用 tool_name 路径（不抛 NotImplementedError），allowed_tools=None=全部工具（排除 subagent_*）"},
                     "subagent_id": {"type": "string", "description": "自定义 ID（可选，自动生成）"},
-                    "max_steps": {"type": "integer", "description": "LLM 循环步数上限，默认 8；超限返回截断的部分结果（truncated=true）"},
+                    "max_steps": {"type": "integer", "description": "该子代理的 LLM 循环步数上限，默认 8；后续任务未显式指定步数时继承此值。超限返回截断的部分结果（truncated=true）"},
                 },
                 "required": ["agent_type"],
             },
@@ -2789,8 +2807,11 @@ class MBDSDRAgent:
                 "同步执行一个子代理任务，等待完成并返回结果。子代理在独立隔离上下文里跑"
                 "「LLM→工具→回灌→LLM」多步循环（默认最多 8 步），只能调用白名单内的工具"
                 "（越界调用本地拒绝不执行）；达到 max_steps 仍未完成时返回 status=truncated "
-                "的部分结果（success=false、truncated=true）；model_manager 缺失或模型调用"
-                "失败时 status=error 且带技术细节，绝不伪造输出。"
+                "的部分结果（success=false、truncated=true）；耗尽 timeout_s 墙钟预算时返回 "
+                "status=timeout 的部分结果（success=false、timed_out=true）；用户按下停止时"
+                "返回 status=cancelled 的部分结果（success=false、cancelled=true，取消优先于"
+                "超时/截断，三者互斥不混报）；model_manager 缺失或模型调用失败时 status=error "
+                "且带技术细节，绝不伪造输出。"
             ),
             parameters={
                 "type": "object",
@@ -2798,7 +2819,7 @@ class MBDSDRAgent:
                     "subagent_id": {"type": "string", "description": "子代理 ID"},
                     "goal": {"type": "string", "description": "任务目标描述"},
                     "input_data": {"type": "object", "description": "输入数据（可选）"},
-                    "timeout_s": {"type": "number", "description": "超时秒数，默认 120", "default": 120},
+                    "timeout_s": {"type": "number", "description": "任务墙钟预算（秒），默认 120；<=0 不限时。在步边界与每个工具执行前检查，余额下发给工具约束挂死调用；在途单次模型调用不强杀，故实际耗时上界=预算+该次调用时长。耗尽返回 status=timeout 的部分结果", "default": 120},
                     "max_steps": {"type": "integer", "description": "LLM 循环步数上限，默认 8；超限返回截断的部分结果"},
                 },
                 "required": ["subagent_id", "goal"],
@@ -2813,6 +2834,139 @@ class MBDSDRAgent:
             parameters={"type": "object", "properties": {}, "required": []},
             handler=lambda args: ToolResult(success=True, content=json.dumps(sm.get_stats(), ensure_ascii=False, indent=2)),
             category="subagent",
+        )
+
+        # ── 生命周期收尾：停机 / 回收（#91）─────────────────────────────
+        # 缺口原状：上面只有 create / list / execute / stats —— 模型能造子代理、
+        # 能派任务，却**没有任何办法停掉或回收**它。长会话里子代理只增不减
+        # （每个还带一份独立 SessionLog），跑飞的只能等用户按面板停止（#88）
+        # 一起全掐。这两个工具把「停」与「回收」交回模型手里。
+        #
+        # 刻意 write=False（不进人工确认硬门）：两者都不发射、不删文件、不回滚
+        # 代码、不建外部连接，不属硬门家族；让「停」比「跑」还难会直接违背 #88
+        # 的可达性口径（引导语指向的控件必须真能按下去）。
+        def _subagent_missing(key: str, tool: str) -> ToolResult:
+            """id 不存在 = 可预期的传参错误：结构化失败 + 按 id 限流日志。"""
+            now = time.time()
+            if now - _SUBAGENT_ERR_LOG_AT.get(key, 0.0) >= _SUBAGENT_ERR_LOG_INTERVAL_S:
+                _SUBAGENT_ERR_LOG_AT[key] = now
+                logger.warning("%s 参数错误（子代理不存在）: %s", tool, key)
+            return ToolResult(
+                False,
+                user_message("subagent_not_found", name=key or "?"),
+                error="subagent_not_found",
+                next_step=suggestion("subagent_not_found"),
+            )
+
+        def _cancel_phrase(running: int, queued: int) -> str:
+            """两个计数说成人话。0 命中就说 0，绝不写成「已取消/已杀掉」。"""
+            if not running and not queued:
+                return ("没有命中任何在跑或排队的任务，本次没有取消任何东西"
+                        "（可能已跑完、已取消过，或本来就空闲）。")
+            parts = []
+            if running:
+                parts.append(
+                    f"在跑 {running} 个已请求中止——在安全点（步边界/每个工具"
+                    "执行前）收尾为 status=cancelled 的部分结果，在途的单次模型"
+                    "调用/工具不强杀，故不是立刻静止")
+            if queued:
+                parts.append(
+                    f"排队 {queued} 个已判取消并出队——一个模型轮次都没跑"
+                    "（cancelled_while_queued），partial 结果照常走回调")
+            return "；".join(parts) + "。"
+
+        def _subagent_cancel_handler(args):
+            key = str(args.get("subagent_id") or "").strip()
+            if key and sm.get(key) is None:
+                return _subagent_missing(key, "subagent_cancel")
+            # 省略 id = 取消全部（与面板「停止」同语义）；给了 id 只取消那一个
+            report = sm.cancel_report(key or None)
+            running = report["cancelled_running"]
+            queued = report["cancelled_queued"]
+            scope = f"子代理「{key}」" if key else "全部子代理"
+            return ToolResult(
+                success=True,
+                content=f"{scope}：{_cancel_phrase(running, queued)}",
+                data={"cancelled_running": running, "cancelled_queued": queued,
+                      "subagent_id": key or None},
+                next_step=("用 subagent_list / subagent_stats 看收尾后的台账；"
+                           "要连子代理本体一起回收用 subagent_destroy。"),
+            )
+
+        self.tool_registry.register(
+            name="subagent_cancel",
+            description=(
+                "请求中止子代理任务（协作式取消，**不强杀**在途的单次模型调用/工具）。"
+                "subagent_id 省略=取消全部子代理（与面板「停止」按钮同语义）；给了 id "
+                "只取消那一个。在跑任务在安全点（步边界/每个工具执行前）收尾为 "
+                "status=cancelled 的部分结果；还在排队的任务直接判取消并出队（一个模型"
+                "轮次都没跑）。返回 data.cancelled_running / data.cancelled_queued 两个"
+                "**分开**的真实计数；0 命中会如实说没有取消任何东西，绝不谎报已杀掉任务。"
+                "只停活、不摘台账——要连子代理本体一起回收用 subagent_destroy。"
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "subagent_id": {"type": "string", "description": "要中止的子代理 ID；省略=取消全部子代理的在跑与排队任务"},
+                },
+                "required": [],
+            },
+            handler=_subagent_cancel_handler,
+            category="subagent",
+            write=False,
+        )
+
+        def _subagent_destroy_handler(args):
+            key = str(args.get("subagent_id") or "").strip()
+            if not key:
+                # 空串不算「全部」：回收是逐个点名的事，缺 id 一律不执行
+                return ToolResult(
+                    False,
+                    user_message("missing_required_params",
+                                 tool="subagent_destroy", missing="subagent_id",
+                                 hints="subagent_id(string): 要回收的子代理 ID"),
+                    error="missing_required_params",
+                    next_step=suggestion("missing_required_params"),
+                )
+            report = sm.destroy_report(key)
+            if not report["destroyed"]:
+                return _subagent_missing(key, "subagent_destroy")
+            running = report["cancelled_running"]
+            queued = report["cancelled_queued"]
+            return ToolResult(
+                success=True,
+                content=(
+                    f"子代理「{key}」已回收：台账已摘除，subagent_list 不再出现它，"
+                    f"也不能再给它派任务。{_cancel_phrase(running, queued)}"
+                    "「已回收」不等于「此刻已静止」——在途单次调用不强杀，在跑任务"
+                    "会在安全点收尾，partial 结果仍照常走回调与 task_history。"),
+                data={"destroyed": True, "cancelled_running": running,
+                      "cancelled_queued": queued, "subagent_id": key},
+                next_step=("需要继续同类工作时用 subagent_create 重建"
+                           "（新子代理是干净上下文，不继承旧会话）。"),
+            )
+
+        self.tool_registry.register(
+            name="subagent_destroy",
+            description=(
+                "回收（销毁）一个子代理：**先停活，再摘台账**。在跑任务被请求中止"
+                "（安全点收尾为 status=cancelled 的部分结果，在途单次模型调用/工具"
+                "不强杀），排队任务判取消并出队，此后 cancel 不会再漏掉它们；台账摘除后 "
+                "subagent_list 不再出现该 id，也不能再给它派任务。返回 data.destroyed / "
+                "cancelled_running / cancelled_queued（两个取消计数分开报）。partial "
+                "结果仍照常走回调与 task_history；需要继续同类工作用 subagent_create "
+                "重建（干净上下文，不继承旧会话）。id 不存在时结构化失败，不抛裸异常。"
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "subagent_id": {"type": "string", "description": "要回收的子代理 ID（必填；不支持省略=全部，回收须逐个点名）"},
+                },
+                "required": ["subagent_id"],
+            },
+            handler=_subagent_destroy_handler,
+            category="subagent",
+            write=False,
         )
 
     def _register_pose_tools(self):
@@ -3724,18 +3878,31 @@ class MBDSDRAgent:
         return bool(getattr(self, "_chat_active", False))
 
     def request_cancel(self) -> bool:
-        """请求取消当前进行中的 chat。
+        """请求取消当前进行中的 chat **及其派生的子代理任务**（#87）。
 
-        返回是否确实有请求在跑（空闲时取消是 no-op，返回 False）。
+        返回是否确实有东西在跑（主对话或子代理；全空闲时是 no-op，返回 False）。
         取消在安全点生效：轮次之间、流式读取中、工具批次之间、工具重试
-        等待前。正在同步执行的单个工具不会被强行打断（Python 无法安全
-        终止线程），它执行完后不再继续下一个工具。
+        等待前；子代理侧是 LLM 循环的步边界与每个工具执行前。正在同步
+        执行的单个工具不会被强行打断（Python 无法安全终止线程），它执行
+        完后不再继续下一个工具。
+
+        为什么必须往下传（#87）：子代理一旦起跑就是**独立的** LLM 循环，
+        只掐主对话的话，用户按下停止后子代理还在继续调工具、烧 token——
+        「停止」名不副实。还在排队的子代理任务一并判死（一个轮次都不跑）。
         """
         self._ensure_concurrency_state()
         active = bool(getattr(self, "_chat_active", False))
         if active:
             self._cancel_event.set()
-        return active
+        cancelled_subs = 0
+        mgr = getattr(self, "subagent_manager", None)
+        if mgr is not None:
+            try:
+                cancelled_subs = mgr.cancel()
+            except Exception:
+                # 取消是善后动作：子代理面出问题也不能让主对话的取消失败
+                cancelled_subs = 0
+        return bool(active or cancelled_subs)
 
     def _cancel_pending(self) -> bool:
         ev = getattr(self, "_cancel_event", None)
@@ -4756,7 +4923,7 @@ class MBDSDRAgent:
     def _subagents_status(self) -> Dict[str, Any]:
         """子代理子系统自报状态（Sprint 7）。无 manager 时降级为空。"""
         empty = {"available": False, "count": 0,
-                 "max_concurrent": None, "subagents": []}
+                 "max_concurrent": None, "queued_tasks": 0, "subagents": []}
         try:
             mgr = getattr(self, "subagent_manager", None)
             if mgr is None or not hasattr(mgr, "list_subagents"):
@@ -4766,6 +4933,7 @@ class MBDSDRAgent:
                 "available": True,
                 "count": len(subs),
                 "max_concurrent": getattr(mgr, "max_concurrent", None),
+                "queued_tasks": len(getattr(mgr, "task_queue", []) or []),
                 "subagents": subs,
             }
         except Exception:
@@ -4794,7 +4962,7 @@ class MBDSDRAgent:
             lines.append("Hook 总线: 不可用")
         if sa.get("available"):
             lines.append(f"子代理: {sa.get('count', 0)} 个存活"
-                         f"（并发上限 {sa.get('max_concurrent')}）")
+                         f"（并发上限 {sa.get('max_concurrent')} · 排队 {sa.get('queued_tasks', 0)}）")
         else:
             lines.append("子代理: 不可用")
         return "\n".join(lines)
@@ -4917,7 +5085,7 @@ class MBDSDRAgent:
             lines = [
                 "子代理子系统:",
                 f"  存活子代理: {sa.get('count', 0)} 个"
-                f"（并发上限 {sa.get('max_concurrent')}）",
+                f"（并发上限 {sa.get('max_concurrent')} · 排队 {sa.get('queued_tasks', 0)}）",
             ]
             subs = sa.get("subagents", [])
             if subs:

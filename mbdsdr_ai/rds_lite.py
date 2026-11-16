@@ -463,7 +463,7 @@ def rds_decode_mpx(mpx: np.ndarray, sample_rate: float) -> dict:
 
     返回 rds_present / pi_hex / pty / ps / rt / clock / groups。
     """
-    from scipy.signal import butter, lfilter
+    from scipy.signal import butter, sosfilt
 
     mpx = np.asarray(mpx, dtype=np.float64)
     mpx = mpx - np.mean(mpx)
@@ -471,12 +471,14 @@ def rds_decode_mpx(mpx: np.ndarray, sample_rate: float) -> dict:
         return {"rds_present": False, "reason": "too_short"}
 
     nyq = sample_rate / 2.0
-    bpf = butter(4, [54000.0 / nyq, 60000.0 / nyq], btype="band")
-    band = lfilter(bpf[0], bpf[1], mpx)
+    # AGENTS.md §3：窄带/高阶 IIR 一律 sos+sosfilt（ba 系数在高采样率/大动态下
+    # 数值爆炸，历史事故 wfm_stereo_lite pilot_snr_db=nan）。sosfilt 支持复数输入。
+    bpf = butter(4, [54000.0 / nyq, 60000.0 / nyq], btype="band", output="sos")
+    band = sosfilt(bpf, mpx)
     t = np.arange(len(band)) / sample_rate
     z = band * np.exp(-1j * 2 * np.pi * RDS_SUBCARRIER * t)
-    lp = butter(3, 2400.0 / nyq, btype="low")
-    z = lfilter(lp[0], lp[1], z)
+    lp = butter(3, 2400.0 / nyq, btype="low", output="sos")
+    z = sosfilt(lp, z)
     z2 = np.mean(z ** 2)
     phi = 0.5 * np.angle(z2)
     s = np.real(z * np.exp(-1j * phi))

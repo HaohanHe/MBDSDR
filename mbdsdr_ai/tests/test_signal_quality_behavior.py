@@ -65,6 +65,65 @@ def test_signal_quality_empty_raises():
         signal_quality(np.zeros(0, dtype=complex))
 
 
+# ─────────────────────────── ADC 削波/过载检测 ───────────────────────────
+# oracle 为闭式：满量程轨=1.0（实测 RTL-SDR 8-bit 归一化轨恰为 ±1.0）。
+# 削波按 I/Q 两路各自判轨，不是按幅度 |x|——这是与"幅度 peak"的关键区别。
+
+def test_clip_clean_signal_zero():
+    # 幅度 0.5 的恒包络信号，I/Q 都远低于轨 → 0 削波
+    ang = np.linspace(0, 2 * np.pi, 64, endpoint=False)
+    x = 0.5 * np.exp(1j * ang)
+    r = signal_quality(x)
+    assert r["clip_fraction"] == 0.0
+    assert r["clipped_samples"] == 0
+
+
+def test_clip_full_scale_i_rail_all():
+    # I 恒为满量程 1.0 → 每个样本都削波
+    r = signal_quality(np.array([1 + 0j] * 4))
+    assert r["clip_fraction"] == 1.0
+    assert r["clipped_samples"] == 4
+
+
+def test_clip_q_rail_and_negative_rail():
+    # Q 撞轨 / I 负轨 都算削波（按 |I|、|Q| 判，不是只判正方向）
+    assert signal_quality(np.array([0 + 1j] * 4))["clip_fraction"] == 1.0
+    assert signal_quality(np.array([-1 + 0j] * 4))["clip_fraction"] == 1.0
+    assert signal_quality(np.array([0 - 1j] * 4))["clipped_samples"] == 4
+
+
+def test_clip_magnitude_one_but_not_rail_is_zero():
+    # 关键判别：|x|=1 但 I=Q=√0.5≈0.707（45°），两路都没撞轨 → 0 削波。
+    # 反证：若按幅度 |x|>=1 判削波会误报 1.0；本检测按 I/Q 分量判轨才正确。
+    c = np.sqrt(0.5)
+    r = signal_quality(np.array([c + c * 1j] * 8))
+    assert r["peak"] == pytest.approx(1.0, abs=1e-6)   # 幅度确实到 1
+    assert r["clip_fraction"] == 0.0                    # 但没削波
+    assert r["clipped_samples"] == 0
+
+
+def test_clip_partial_half():
+    # 一半样本撞轨、一半在 0.5 → 削波占比恰 0.5
+    x = np.array([1 + 0j, 0.5 + 0j, 1 + 0j, 0.5 + 0j])
+    r = signal_quality(x)
+    assert r["clip_fraction"] == 0.5
+    assert r["clipped_samples"] == 2
+
+
+def test_clip_full_scale_parameter():
+    # full_scale=2.0：I=1.0 不算削波（轨在 2.0），I=2.0 才算
+    assert signal_quality(np.array([1 + 0j] * 4), full_scale=2.0)["clip_fraction"] == 0.0
+    assert signal_quality(np.array([2 + 0j] * 4), full_scale=2.0)["clip_fraction"] == 1.0
+
+
+def test_clip_invalid_full_scale_raises():
+    x = np.array([0.5 + 0j] * 4)
+    with pytest.raises(ValueError):
+        signal_quality(x, full_scale=0)
+    with pytest.raises(ValueError):
+        signal_quality(x, full_scale=-1.0)
+
+
 # ─────────────────────────── squelch_gate ───────────────────────────
 
 def test_squelch_two_block_duty_cycle():

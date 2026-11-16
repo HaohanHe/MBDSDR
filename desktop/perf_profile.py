@@ -30,13 +30,17 @@ from typing import Dict
 #: 档位 key → 采样率 / FFT / 刷新 / GNSS 轮询 / 频谱面板性能档索引。
 #: 采样率必须是 RTLSDRBackend.SAMPLE_RATES 里的真实档位。
 #:
-#: FFT 点数与频谱刷新间隔的**运行时事实源是频谱面板**
+#: 频谱刷新间隔与送绘根数上限的**运行时事实源是频谱面板**
 #: ``SpectrumPanel._PERF_LEVELS``（高/均衡/低三档，经 ``set_performance_mode``
-#: 真改 generator.reconfigure + plot._timer + 同步下拉）。这里的
-#: ``fft_size`` / ``spectrum_interval_ms`` 是**展示镜像**，必须与
-#: ``_PERF_LEVELS[panel_level]`` 逐值相等——由
-#: ``test_perf_profile_mirrors_spectrum_panel_levels`` 钉住，防两处漂移。
-#: 桌面性能档只额外拥有采样率（下次连接默认）与 GNSS 轮询两个面板不管的杠杆。
+#: 真改 plot._timer + generator.num_bins + 同步下拉）。**FFT 点数不在其内**：
+#: set_performance_mode 刻意不改 FFT（_PERF_LEVELS 的 fft 元素运行时不读），
+#: FFT 唯一真值源是设置项 schema ``fft_size``（经 ``SettingsPanel._apply_fft_size``
+#: 下发）——档位若顺手改 FFT 会把用户显式选的 4096 冲回 1024（缺口 S-01）。
+#: 这里的 ``fft_size`` / ``spectrum_interval_ms`` 是**展示镜像**，与
+#: ``_PERF_LEVELS[panel_level]`` 逐值相等，由
+#: ``test_perf_profile_mirrors_spectrum_panel_levels`` 钉住防漂移；
+#: ``_apply_perf_profile`` 不消费它们（刷新经 panel_level 生效，FFT 经设置项）。
+#: 性能档实际的运行时杠杆：采样率（下次连接默认）、GNSS 轮询、panel_level。
 PROFILES: Dict[str, dict] = {
     "eco": {
         "label": "省电（1.024 MS/s）",

@@ -276,6 +276,13 @@
       "expr": "self._session_tip(self._vfo_bw_base_tip)",
       "reason": "passthrough",
       "runtime_test": "tests/test_tooltip_dynamic_runtime.py::test_control_panel_passthrough_tooltips_self_describe"
+    },
+    {
+      "file": "desktop/sat_track_panel.py",
+      "expr": "suggestion",
+      "reason": "passthrough",
+      "note": "地面对象详情的完整原因，由 spacetime_map_layer._detail_suggestion 生成：位置（声明）+ 有效期 + unknown 时「原因未知，不做推断」。标签只放短句 text，悬停看完整因果；位置带 ° 量纲已标「声明」来源。解除条件：suggestion 退化成裸坐标或常量短语时，改为在调用点补固定说明并删本条。",
+      "runtime_test": "tests/test_tooltip_dynamic_runtime.py::test_sat_track_panel_passthrough_tooltips_self_describe"
     }
   ]
 }

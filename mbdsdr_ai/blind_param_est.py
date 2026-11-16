@@ -285,7 +285,9 @@ def alpha_estimate(iq: Sequence[complex],
     iq            : 复基带采样；
     sample_rate_hz: 采样率；
     symbol_rate_hz: 符号率（须已知或先经 symbol_rate_estimate 得出）；
-    guard         : 通带/阻带拟合窗宽（占过渡带宽比例，防边界污染）。
+    guard         : 拟合窗下沿系数（占 edge=sr/2 比例，防低频边界污染；
+                    默认 0.15 覆盖所有候选 α 通带）。注册工具可调旋钮，
+                    函数体真用（f_lo=guard·edge），非死参数（#117）。
 
     返回：alpha（0.01~0.99 截断）/ alpha_from_slope / transition_hz/
     两法差异过大时 ambiguous=True。
@@ -312,9 +314,11 @@ def alpha_estimate(iq: Sequence[complex],
     pdb = Pdb[pos]
 
     edge = sr / 2.0
-    # 全局拟合窗下沿：所有候选 α 的通带都覆盖到 0.15·edge（α≤0.7 时
-    # (1−α)·edge ≥ 0.3·edge），上沿由 Nyquist 限死。
-    f_lo = 0.15 * edge
+    # 全局拟合窗下沿：guard·edge（默认 guard=0.15 时所有候选 α 的通带都
+    # 覆盖到 0.15·edge，α≤0.7 时 (1−α)·edge ≥ 0.3·edge），上沿由 Nyquist
+    # 限死。guard 是注册工具 alpha_estimate 暴露的可调旋钮（schema/handler/
+    # 签名/docstring 五处一致），此处必须真用，不得硬编码默认值（#117）。
+    f_lo = guard * edge
     f_hi = min(2.0 * edge, 0.9 * fs / 2.0)
     m = (f >= f_lo) & (f <= f_hi)
     if m.sum() < 64:
@@ -356,13 +360,19 @@ def alpha_estimate(iq: Sequence[complex],
     resid_best, alpha_best = best[0]
     resid_2nd, alpha_2nd = best[1]
 
-    # 过渡带实测宽度：−20 dB（相对通带）两点间距，交叉验证用
-    pb_level = float(np.median(pw[fw < 0.35 * edge]))
-    thr = pb_level - 20.0
-    below = pw < thr
-    if below.any():
-        first_below = fw[below][0]
-        trans_meas = 2.0 * (first_below - edge) if first_below > edge else None
+    # 过渡带实测宽度：−20 dB（相对通带）两点间距，交叉验证用。
+    # guard 较大时拟合窗下沿 guard·edge 可能高于通带测量区 0.35·edge，
+    # 窗内无通带频点 → 诚实跳过斜率交叉验证（不 nan/不告警），主估计不受影响。
+    pb_mask = fw < 0.35 * edge
+    if pb_mask.any():
+        pb_level = float(np.median(pw[pb_mask]))
+        thr = pb_level - 20.0
+        below = pw < thr
+        if below.any():
+            first_below = fw[below][0]
+            trans_meas = 2.0 * (first_below - edge) if first_below > edge else None
+        else:
+            trans_meas = None
     else:
         trans_meas = None
     alpha_meas = (trans_meas / sr) if trans_meas else None

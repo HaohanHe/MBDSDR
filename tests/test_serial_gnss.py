@@ -356,6 +356,125 @@ def test_reader_e2e_fix():
     assert abs(fix["course_deg"] - 30.0) < 1e-6
 
 
+# ============================================================
+# 2b. 批量读快路径钉扎（#118）
+# ------------------------------------------------------------
+# 用户 2026-11-15 11:41 投诉 GNSS「原地不动 / 你为啥频率要给它干那么高」。
+# 根治对策已在 serial_gnss._read_loop 落地：用 read(in_waiting) 一次收干
+# 等待字节，替代逐字节 readline()（9600 波特 ~800 read/s → GIL 争用 →
+# 星象仪拖到 8fps）。但上面的 MockSerial 只实现 readline()，所有既有测试
+# 都走 `except AttributeError: raw = ser.readline()` 回退分支——快路径
+# （in_waiting + read(n)）在全测试套件零覆盖。若有人把它回退成逐字节/逐行读，
+# 功能仍对（坐标照样融合），但性能冻屏回归无人抓。本测试钉扎的是「一次收干」
+# 这个性能机制本身，不只是功能正确。
+# ============================================================
+
+class BatchMockSerial:
+    """实现 pyserial 批量读接口（in_waiting + read(n)）的假串口。
+
+    - in_waiting：当前缓冲里等待的字节数（pyserial 同名属性）。
+    - read(n)：一次最多取 n 字节；记录每次请求的 n（read_sizes）与调用次数。
+      缓冲空时短暂阻塞（模拟 pyserial timeout 的等待语义），避免读循环热自旋。
+    - readline()：仅用于探测「是否回退到逐行读」；快路径下不应被调用。
+    """
+
+    def __init__(self):
+        self._buf = b""
+        self._lock = threading.Lock()
+        self.closed = False
+        self.read_calls = 0
+        self.read_sizes = []
+        self.readline_calls = 0
+
+    def feed_bytes(self, data: bytes):
+        with self._lock:
+            self._buf += data
+
+    @property
+    def in_waiting(self) -> int:
+        with self._lock:
+            return len(self._buf)
+
+    def read(self, n: int) -> bytes:
+        self.read_calls += 1
+        self.read_sizes.append(int(n))
+        deadline = time.time() + 0.05
+        while True:
+            with self._lock:
+                if self._buf or self.closed:
+                    data = self._buf[:n]
+                    self._buf = self._buf[n:]
+                    return data
+            if time.time() >= deadline:
+                return b""
+            time.sleep(0.005)
+
+    def readline(self) -> bytes:
+        # 只有回退分支才会走到这里；快路径钉扎要求 readline_calls == 0
+        self.readline_calls += 1
+        deadline = time.time() + 0.05
+        while True:
+            with self._lock:
+                if b"\n" in self._buf:
+                    line, self._buf = self._buf.split(b"\n", 1)
+                    return line + b"\n"
+                if self.closed:
+                    return b""
+            if time.time() >= deadline:
+                return b""
+            time.sleep(0.005)
+
+    def close(self):
+        self.closed = True
+
+
+def test_serial_gnss_batch_read_fast_path():
+    """#118：批量读快路径必须「一次收干等待字节」，且功能正确。
+
+    判别式钉扎性能机制（用户冻屏投诉的根治点），不只是功能：
+    - read_sizes[0] == 整批字节数 ⇒ 用了 read(in_waiting) 一次收干；
+      逐字节回归会让 read_sizes[0] == 1，逐行回归会让 readline_calls > 0。
+    - 功能：整批 NMEA 经快路径切行 + 融合后 fix 坐标正确（与回退分支同坐标）。
+    确定性：先喂整批再启动读循环 ⇒ 首读 in_waiting == 整批字节数，与墙钟无关；
+    断言只落在 read_sizes / 计数 / 坐标上，线程 settle 仅用于等消费完成。
+    """
+    batch = b"".join(E2E_CYCLE)
+    total = len(batch)
+    reader = SerialGNSSReader()
+    ser = BatchMockSerial()
+    ser.feed_bytes(batch)            # 先喂整批，再启动 ⇒ 首读 in_waiting == total
+    reader._ser = ser
+    reader._running.set()
+    t = threading.Thread(target=reader._read_loop, daemon=True)
+    t.start()
+    try:
+        deadline = time.time() + 2.0
+        while time.time() < deadline:
+            if reader.get_fix()["source"] == "real":
+                break
+            time.sleep(0.01)
+    finally:
+        reader._running.clear()
+        t.join(timeout=2.0)
+        ser.close()
+
+    fix = reader.get_fix()
+    # 功能：快路径切行 + 融合正确
+    assert fix["source"] == "real"
+    assert abs(fix["latitude"] - EXPECT_LAT) < 1e-3
+    assert abs(fix["longitude"] - EXPECT_LON) < 1e-3
+    assert fix["satellites"] == 9
+    # 机制：走了批量读快路径，而非逐行回退
+    assert ser.read_calls >= 1, "批量读快路径未被调用（read 次数为 0）"
+    assert ser.readline_calls == 0, "回退到逐行 readline()：批量读快路径失效（冻屏回归）"
+    # 判别式：首读一次请求了整批等待字节 ⇒ read(in_waiting) 一次收干。
+    # 逐字节回归（read(1)）会让首读请求量 == 1，远小于整批 → 抓性能冻屏回归。
+    assert ser.read_sizes[0] == total, (
+        f"首读未一次收干等待字节：请求 {ser.read_sizes[0]}B != 整批 {total}B"
+        "（逐字节/逐行读回归 → GIL 争用 → GNSS 原地不动）"
+    )
+
+
 def test_reader_no_fix_still_real_but_no_coords():
     """无定位序列：合法 NMEA 但 fix_quality=0 / RMC=V。"""
     reader, _ = _run_reader_with_lines([mk(NOFIX_GGA_BODY), mk(NOFIX_RMC_BODY)])

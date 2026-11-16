@@ -73,7 +73,7 @@ def test_backup_failure_blocks_save_to_same_template(tmp_path, monkeypatch):
     template_dir.mkdir()
     bad = template_dir / "bad.json"
     bad.write_text("{ broken", encoding="utf-8")
-    monkeypatch.setattr(wf_mod, "backup_corrupt", lambda _p: None)
+    monkeypatch.setattr(wf_mod, "backup_corrupt_recordings", lambda _p: None)
 
     rec = WorkflowRecorder(storage_dir=str(tmp_path))
     rec._save_template(WorkflowTemplate(template_id="bad", name="新模板"))
@@ -105,7 +105,7 @@ def test_save_target_backup_failure_blocks_write(tmp_path, monkeypatch):
     rec = WorkflowRecorder(storage_dir=str(tmp_path))
     target = tmp_path / "late.json"
     target.write_text("{ broken", encoding="utf-8")
-    monkeypatch.setattr(wf_mod, "backup_corrupt", lambda _p: None)
+    monkeypatch.setattr(wf_mod, "backup_corrupt_recordings", lambda _p: None)
 
     assert rec._write_json(str(target), {"ok": 1}) is False
     assert target.read_text(encoding="utf-8") == "{ broken"

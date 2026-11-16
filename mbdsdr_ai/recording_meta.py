@@ -22,8 +22,9 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import os
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +48,63 @@ def sigmf_meta_path(iq_path: str) -> str:
     return os.path.join(directory, stem + ".sigmf-meta")
 
 
+def _validate_captures(captures: Any) -> List[Dict]:
+    """写侧校验 captures[]：非法一律 raise ValueError（不静默写坏元数据）。
+
+    规范口径：captures 非空列表；每条 dict 必带 ``core:sample_start``
+    （非负整数、非 bool）与 ``core:frequency``（有限数字）；sample_start
+    必须严格递增（乱序/重复即非法）。校验通过返回浅拷贝列表。
+    """
+    if not isinstance(captures, list) or not captures:
+        raise ValueError("captures 必须是非空列表")
+    out: List[Dict] = []
+    last_start = -1
+    for c in captures:
+        if not isinstance(c, dict):
+            raise ValueError("capture 必须是 dict")
+        if f"{_CORE}:sample_start" not in c:
+            raise ValueError("capture 缺 core:sample_start")
+        if f"{_CORE}:frequency" not in c:
+            raise ValueError("capture 缺 core:frequency")
+        start = c[f"{_CORE}:sample_start"]
+        if not isinstance(start, int) or isinstance(start, bool) or start < 0:
+            raise ValueError("core:sample_start 必须是非负整数")
+        if start <= last_start:
+            raise ValueError("captures 的 core:sample_start 必须严格递增")
+        try:
+            freq_f = float(c[f"{_CORE}:frequency"])
+        except (TypeError, ValueError):
+            raise ValueError("core:frequency 必须是数字")
+        if not math.isfinite(freq_f):
+            raise ValueError("core:frequency 必须有限")
+        last_start = start
+        out.append(dict(c))
+    return out
+
+
+def _build_captures_section(
+    *,
+    center_freq_hz: float,
+    gain_db: float,
+    start_time_iso: str,
+    captures: Optional[List[Dict]],
+) -> List[Dict]:
+    """构造 captures 段：未显式给 captures 时退回单条默认（起始频点）。
+
+    显式给 captures 时走 :func:`_validate_captures`（非法即 raise）。
+    """
+    if captures is None:
+        capture: Dict[str, Any] = {
+            f"{_CORE}:sample_start": 0,
+            f"{_CORE}:frequency": center_freq_hz,
+            f"{_EXT}:gain_db": gain_db,
+        }
+        if start_time_iso:
+            capture[f"{_CORE}:datetime"] = start_time_iso
+        return [capture]
+    return _validate_captures(captures)
+
+
 def build_sigmf_meta(
     *,
     sample_rate: float,
@@ -58,6 +116,8 @@ def build_sigmf_meta(
     num_samples: Optional[int] = None,
     author: str = "MBDSDR",
     description: str = "",
+    captures: Optional[List[Dict]] = None,
+    annotations: Optional[List[Dict]] = None,
 ) -> Dict[str, Any]:
     """构造标准 SigMF 元数据字典（尚未落盘）。
 
@@ -71,6 +131,10 @@ def build_sigmf_meta(
         num_samples: 样本总数；录制进行中传 None，结束时补全。
         author: 作者标识。
         description: 描述文本。
+        captures: 多段调谐捕获清单（每条含 core:sample_start / core:frequency）。
+            None 时退回单条默认（起始频点）；显式给出则严格校验，非法 raise
+            ValueError（不静默写坏元数据）。
+        annotations: 事件标注清单（原样透传）；None/空 → 空列表，不自造标注。
 
     返回：
         符合 SigMF 1.0.0 的字典，含 ``global`` / ``captures`` / ``annotations``
@@ -89,18 +153,12 @@ def build_sigmf_meta(
     if num_samples is not None:
         global_sec[f"{_CORE}:num_samples"] = num_samples
 
-    capture: Dict[str, Any] = {
-        f"{_CORE}:sample_start": 0,
-        f"{_CORE}:frequency": center_freq_hz,
-        f"{_EXT}:gain_db": gain_db,
-    }
-    if start_time_iso:
-        capture[f"{_CORE}:datetime"] = start_time_iso
-
     return {
         "global": global_sec,
-        "captures": [capture],
-        "annotations": [],
+        "captures": _build_captures_section(
+            center_freq_hz=center_freq_hz, gain_db=gain_db,
+            start_time_iso=start_time_iso, captures=captures),
+        "annotations": list(annotations) if annotations else [],
     }
 
 
@@ -201,15 +259,52 @@ class SigMFRecordingSession:
         self._iq_path = iq_path
         self._meta_kwargs = dict(meta_kwargs)
         self._meta_path = sigmf_meta_path(iq_path)
+        self._captures: List[Dict] = []
+        self._annotations: List[Dict] = []
 
     @property
     def meta_path(self) -> str:
         return self._meta_path
 
+    def add_capture(self, sample_start: int, frequency_hz: float, **extra: Any) -> None:
+        """录制中调谐：追加一条 capture（首条 sample_start=0 由 _dump 默认补）。
+
+        只累积，不立即落盘；下一次 _dump（update/finalize）时连同默认首段
+        一起写出。非法 sample_start/frequency 会在 _dump 走写侧校验时 raise。
+        """
+        cap: Dict[str, Any] = {
+            f"{_CORE}:sample_start": int(sample_start),
+            f"{_CORE}:frequency": float(frequency_hz),
+        }
+        cap.update(extra)
+        self._captures.append(cap)
+
+    def add_annotation(self, sample_start: int, sample_count: int, **extra: Any) -> None:
+        """事件标注：追加一条 annotation（同样累积到下次 _dump 落盘）。"""
+        ann: Dict[str, Any] = {
+            f"{_CORE}:sample_start": int(sample_start),
+            f"{_CORE}:sample_count": int(sample_count),
+        }
+        ann.update(extra)
+        self._annotations.append(ann)
+
     def _dump(self, num_samples: Optional[int]) -> None:
         """按当前参数落盘一次 meta（异常吞掉）。"""
         kwargs = dict(self._meta_kwargs)
         kwargs["num_samples"] = num_samples
+        if self._captures:
+            # 有调谐段时，补一条 sample_start=0 的起始段（沿用录制起始频点/增益），
+            # 再拼上累积的调谐段，交给 build_sigmf_meta 走写侧严格校验。
+            first: Dict[str, Any] = {
+                f"{_CORE}:sample_start": 0,
+                f"{_CORE}:frequency": kwargs.get("center_freq_hz"),
+                f"{_EXT}:gain_db": kwargs.get("gain_db", 0.0),
+            }
+            if kwargs.get("start_time_iso"):
+                first[f"{_CORE}:datetime"] = kwargs["start_time_iso"]
+            kwargs["captures"] = [first] + self._captures
+        if self._annotations:
+            kwargs["annotations"] = self._annotations
         write_sigmf_meta(self._iq_path, **kwargs)
 
     def start(self) -> None:

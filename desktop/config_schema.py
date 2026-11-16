@@ -596,6 +596,11 @@ ALL_ITEMS: Tuple[SettingItem, ...] = (
                        "desktop/right_column.py setTabData()）；空串 = 未设置，坏值/未知 id 由"
                        "消费方回落「只展开首节」，本键只负责持久化",
                 exposed=False),
+    SettingItem(key="gimbal_park_on_stop", group="", kind="bool", label="",
+                help="", default=False, storage="ai_config", exposed=False,
+                source="mbdsdr_ai/config.py DEFAULT_CONFIG gimbal_park_on_stop；消费点 "
+                       "mbdsdr_ai/gimbal.py GimbalController.stop()（rotctld 停后归位 K，"
+                       "严格 bool，默认关；内部键，不在面板暴露）"),
     # 服务开关（既有面板，保留）
     SettingItem(key="rc_enabled", group="服务与远程访问", kind="bool",
                 label="启用远程控制（TCP）", default=False,

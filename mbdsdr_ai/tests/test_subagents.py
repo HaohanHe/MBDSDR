@@ -395,9 +395,13 @@ def test_existing_api_and_callers_not_broken():
     sub.allowed_tools = None
     assert sub.can_use_tool("不存在工具") is True
 
-    # SubagentTask 旧式构造照常（max_steps 默认与循环默认一致=8）
+    # SubagentTask 旧式构造照常。#89：max_steps 默认改为 0 = **继承子代理
+    # 自身上限**（此前默认 8 永远盖掉 create(max_steps=N)，是死旋钮）。
+    # 原意图「默认子代理的有效循环上限仍是 8」不变，故同时钉住字段语义
+    # 与真实解析结果——不是放宽断言，是把它钉到更实的地方。
     t = SubagentTask("tid", "goal")
-    assert t.max_steps == 8 and t.timeout_s == 120.0
+    assert t.max_steps == 0 and t.timeout_s == 120.0
+    assert sub._resolve_max_steps(t, None) == 8, "默认子代理有效上限仍须是 8"
     assert SubagentStatus.IDLE.value == "idle"
 
 

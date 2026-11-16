@@ -218,8 +218,11 @@ def monitor_gnss_band(
         psd_db, freqs_hz, noise_floor_db
     )
 
-    # 平均功率
-    avg_power_db = float(np.mean(psd_db))
+    # 平均功率＝线性 PSD 算术均值再转 dB：10*log10(mean(psd))。
+    # 不能用 mean(psd_db)——那是几何均值的 dB（AM≥GM），谱越尖（干扰越强）
+    # 越偏低：CW 干扰下实测低报达 42dB，读数对干扰功率几乎全盲（#112）。
+    # noise_floor 用 median、peak 用 max 均单调不变，不受此影响。
+    avg_power_db = float(10.0 * np.log10(np.mean(psd) + 1e-12))
 
     # 峰值
     peak_idx = np.argmax(psd_db)
@@ -340,10 +343,18 @@ def interference_direction_finding(
     peak_angle = angles[peak_idx]
     peak_rssi = rssi[peak_idx]
 
-    # 质心法精化（加权平均）
+    # 质心法精化。方位角是圆周量（0°/360° 在正北首尾相接），必须用加权圆均值
+    # atan2(Σw·sin, Σw·cos)，否则干扰源在正北附近、八木全罗盘扫描主瓣跨 0/360
+    # 回绕时（如 345°/350°/0°/5°/10°）线性平均会偏向 ~180°——把八木指向反方向
+    # （实证：真值 0° 线性平均给 119°）。与 new_spacetime PNT 经度融合同一 atan2
+    # 圆周接缝。权重口径不变（仅高于中位数的样本计入）；共址/非回绕时圆均值与
+    # 线性平均一致，对常规输入是恒等。结果归一化到 [0,360)。
     weights = np.maximum(0, rssi - np.median(rssi))
     if np.sum(weights) > 0:
-        refined_angle = np.average(angles, weights=weights)
+        rad = np.radians(angles)
+        sin_sum = np.sum(weights * np.sin(rad))
+        cos_sum = np.sum(weights * np.cos(rad))
+        refined_angle = float(np.degrees(np.arctan2(sin_sum, cos_sum))) % 360.0
     else:
         refined_angle = peak_angle
 
@@ -352,7 +363,7 @@ def interference_direction_finding(
     symmetric_angle = (peak_angle + 180) % 360
 
     return {
-        "estimated_direction_deg": round(float(refined_angle), 1),
+        "estimated_direction_deg": round(float(refined_angle), 1) % 360.0,
         "peak_rssi_dbm": round(float(peak_rssi), 1),
         "confidence": "high" if np.max(rssi) - np.median(rssi) > 10 else "medium",
         "note": "八木天线RSSI扫描质心法定位，建议多角度验证",

@@ -151,6 +151,7 @@ def test_rotctld_set_position_false_success_on_error_code():
     """RPRT 20（错误码含 '0'）在旧实现下假成功，必须如实失败。"""
     port, t = _serve_once(b"RPRT 20\n")
     c = RotctldClient(host="127.0.0.1", port=port, timeout=2.0)
+    c.engage()   # 连接≠启用：不启用会被闸拒绝，掩盖 RPRT 20 解析断言
     ok = c.set_position(100.0, 30.0)
     t.join(timeout=2.0)
     assert ok is False, "RPRT 20 是失败码，不得报成功"
@@ -159,6 +160,7 @@ def test_rotctld_set_position_false_success_on_error_code():
 def test_rotctld_set_position_success_and_get_position():
     port, t = _serve_once(b"RPRT 0\n")
     c = RotctldClient(host="127.0.0.1", port=port, timeout=2.0)
+    c.engage()   # 连接≠启用：显式启用后才下发运动指令
     assert c.set_position(100.0, 30.0) is True
     t.join(timeout=2.0)
 

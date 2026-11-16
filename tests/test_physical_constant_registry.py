@@ -45,6 +45,10 @@ class ConstantSpec:
 _F72 = 1.0 / 298.26
 _E2_72 = _F72 * (2.0 - _F72)
 
+_F84 = 1.0 / 298.257223563
+_E2_84 = _F84 * (2.0 - _F84)
+_B84_M = 6378137.0 * (1.0 - _F84)
+
 #: 登记表。新增/改动任何一条都必须同步改这里 —— 这就是「常态对拍」的锚。
 SPECS: Tuple[ConstantSpec, ...] = (
     # --- 椭球：唯一定义在 geodesy（米制） ---
@@ -56,6 +60,20 @@ SPECS: Tuple[ConstantSpec, ...] = (
                  "WGS-72/SGP4", "orbit、astronomy"),
     ConstantSpec("mbdsdr_ai.geodesy", "WGS84.a_m", 6378137.0, "m",
                  "WGS-84/RTK", "CoordinateConverter、GNSS 链"),
+    ConstantSpec("mbdsdr_ai.geodesy", "WGS84.f", _F84, "dimensionless",
+                 "WGS-84/RTK", "astronomy、sat_image_processing、satdump_adapter"),
+    ConstantSpec("mbdsdr_ai.geodesy", "WGS84.e2", _E2_84, "dimensionless",
+                 "WGS-84/RTK", "sat_image_processing、new_spacetime_timeline、orbit_determination"),
+    ConstantSpec("mbdsdr_ai.geodesy", "WGS84.b_m", _B84_M, "m",
+                 "WGS-84/RTK", "sat_image_processing 椭球投影"),
+    ConstantSpec("mbdsdr_ai.astronomy", "EARTH_FLATTENING", _F84, "dimensionless",
+                 "WGS-84/RTK", "折射/地平几何（委托 geodesy.WGS84.f）"),
+    ConstantSpec("mbdsdr_ai.sat_image_processing", "_WGS84_A", 6378137.0, "m",
+                 "WGS-84/RTK", "LRPT 椭球投影（委托 geodesy.WGS84.a_m）"),
+    ConstantSpec("mbdsdr_ai.new_spacetime_timeline", "WGS84_A_KM", 6378137.0 / 1000.0, "km",
+                 "WGS-84/RTK", "过境时间线 ECEF（委托 geodesy.WGS84.a_m/1000）"),
+    ConstantSpec("mbdsdr_ai.sat_illumination", "R_EARTH_KM", 6378137.0 / 1000.0, "km",
+                 "WGS-84/RTK", "受晒/地影几何（委托 geodesy.WGS84.a_m/1000）"),
     # --- SGP4 / TEME 的 km 链 ---
     ConstantSpec("mbdsdr_ai.orbit", "WGS72_A", 6378.135, "km",
                  "WGS-72/SGP4", "ground_track、decoders、sat_passes"),
@@ -118,6 +136,16 @@ def _imports_wgs72_from_geodesy(path: Path) -> bool:
         isinstance(node, ast.ImportFrom)
         and node.module == "geodesy"
         and any(alias.name == "WGS72" for alias in node.names)
+        for node in ast.walk(tree)
+    )
+
+
+def _imports_wgs84_from_geodesy(path: Path) -> bool:
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    return any(
+        isinstance(node, ast.ImportFrom)
+        and node.module == "geodesy"
+        and any(alias.name == "WGS84" for alias in node.names)
         for node in ast.walk(tree)
     )
 
@@ -192,6 +220,28 @@ def test_ellipsoid_definition_has_single_source():
             f"{path.name} 没有从 geodesy 取 WGS72")
 
 
+def test_wgs84_definition_has_single_source():
+    """结构守卫：WGS-84 椭球数值只许在 geodesy.WGS84 出现，消费链必须委托。
+
+    与 WGS-72 守卫同构。反证：把 ``R_EARTH_KM = 6378.137`` /
+    ``EARTH_FLATTENING = 1/298.257223563`` / ``WGS84_E2 = 0.00669437999014``
+    等任一处改回字面量，本例必红。覆盖米制（sat_image_processing）、km 制
+    （timeline/sat_illumination/satdump）与无量纲（astronomy/orbit_determination）。
+    """
+    paths = (_REPO / "mbdsdr_ai" / "astronomy.py",
+             _REPO / "mbdsdr_ai" / "sat_image_processing.py",
+             _REPO / "mbdsdr_ai" / "new_spacetime_timeline.py",
+             _REPO / "mbdsdr_ai" / "satdump_adapter.py",
+             _REPO / "mbdsdr_ai" / "orbit_determination.py",
+             _REPO / "mbdsdr_ai" / "sat_illumination.py")
+    forbidden = {6378137.0, 6378.137, 298.257223563, 0.00669437999014}
+    for path in paths:
+        assert _numeric_literals(path).isdisjoint(forbidden), (
+            f"{path.name} 又写回了 WGS-84 椭球字面量，单一真值被破坏")
+        assert _imports_wgs84_from_geodesy(path), (
+            f"{path.name} 没有从 geodesy 取 WGS84")
+
+
 def test_only_two_module_level_wgs72_a_definitions():
     """全仓实测：模块级 WGS72_A 只允许两条链各一份，禁止出现第三个同名常量。"""
     found = []
@@ -216,6 +266,39 @@ def test_wgs72_km_constants_are_bitwise_derived_from_geodesy():
     assert orbit.WGS72_B == (a_m / 1000.0) * (1.0 - WGS72.f)
     assert orbit.WGS72_E2 == WGS72.e2
     assert orbit.WGS72_E2 == WGS72.f * (2.0 - WGS72.f)
+
+
+def test_wgs84_constants_are_bitwise_derived_from_geodesy():
+    """WGS-84 消费链与 geodesy 米制定义逐位一致（不是近似相等）。
+
+    与 WGS-72 的 km 链对拍同构。覆盖米制（sat_image_processing）、km 制
+    （timeline/sat_illumination/satdump）、无量纲扁率（astronomy）与偏心率
+    平方（orbit_determination）。任一处改回独立字面量（哪怕数值一样）都会
+    令上面的结构守卫红；数值漂移则令本例红。
+    """
+    from mbdsdr_ai import astronomy, sat_image_processing as sip
+    from mbdsdr_ai import new_spacetime_timeline as nst
+    from mbdsdr_ai import sat_illumination as si
+    from mbdsdr_ai import satdump_adapter as sa
+    from mbdsdr_ai import orbit_determination as odet
+    from mbdsdr_ai.geodesy import WGS84
+
+    a_m, f, b_m, e2 = WGS84.a_m, WGS84.f, WGS84.b_m, WGS84.e2
+    # 无量纲扁率 / 米制椭球
+    assert astronomy.EARTH_FLATTENING == f
+    assert sip._WGS84_A == a_m
+    assert sip._WGS84_F == f
+    assert sip._WGS84_B == b_m
+    assert sip._WGS84_ES == e2
+    # km 制（a_m/1000，逐位）+ 偏心率平方
+    assert nst.WGS84_A_KM == a_m / 1000.0
+    assert nst.WGS84_E2 == e2
+    assert si.R_EARTH_KM == a_m / 1000.0
+    assert sa.WGS84_A_KM == a_m / 1000.0
+    assert sa.WGS84_E2 == e2
+    assert odet.WGS84_E2 == e2
+    # 两条 e2 推导路线数学等价：f(2-f) 与 (a²-b²)/a²，浮点最多差 1 ULP。
+    assert e2 == pytest.approx((a_m ** 2 - b_m ** 2) / a_m ** 2, rel=1e-15)
 
 
 def test_golden_vectors_unchanged_after_single_source_refactor():
@@ -314,7 +397,9 @@ def test_altaz_below_horizon_does_not_fake_known_weather():
     from mbdsdr_ai.astronomy import EquatorialCoord, Observer, unix_to_jd
 
     jd = unix_to_jd()
-    eq = EquatorialCoord(ra_deg=150.0, dec_deg=20.0)
+    # δ=-70° 在 φ=31.2°N 恒不升起（上中天最高 90-|φ-δ|=-11.2°），故 alt<-2.0
+    # 与恒星时无关、不绑墙钟；任何 jd 都成立（确定性纪律：几何断言锚定本质量）。
+    eq = EquatorialCoord(ra_deg=150.0, dec_deg=-70.0)
     unknown = eq.to_altaz(Observer(latitude_deg=31.2, longitude_deg=121.5), jd)
     assert unknown.alt_deg < -2.0
     assert unknown.refraction_deg is None

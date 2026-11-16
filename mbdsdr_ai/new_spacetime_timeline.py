@@ -28,8 +28,10 @@ MBDSDR 新时空 —— 卫星过境时间线 / 授时状态 / 频率-轨道关�
 import math
 try:
     from .gmst import gmst_rad_iau1982
+    from .geodesy import WGS84 as _WGS84_ELLIPSOID
 except ImportError:  # 扁平导入（部分脚本直挂 mbdsdr_ai 目录）
     from gmst import gmst_rad_iau1982
+    from geodesy import WGS84 as _WGS84_ELLIPSOID
 from datetime import datetime, timedelta, timezone
 from dataclasses import dataclass, field
 from typing import List, Optional, Dict, Any, Tuple
@@ -83,8 +85,8 @@ except ImportError:  # 脚本 / 直接运行时
 # 物理常数（WGS-84 椭球 + 光速）
 # ============================================================
 
-WGS84_A_KM = 6378.137          # 地球长半轴（km）
-WGS84_E2 = 0.00669437999014    # 偏心率平方
+WGS84_A_KM = _WGS84_ELLIPSOID.a_m / 1000.0  # 地球长半轴（km，唯一真值源 geodesy.WGS84）
+WGS84_E2 = _WGS84_ELLIPSOID.e2              # 偏心率平方（唯一真值源 geodesy.WGS84）
 MU_EARTH_KM3_S2 = 398600.4418  # 地球引力常数 GM（km^3/s^2）
 SPEED_OF_LIGHT_KM_S = 299792.458  # 光速（km/s）
 

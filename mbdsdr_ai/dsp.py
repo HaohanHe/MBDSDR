@@ -383,7 +383,7 @@ def wfm_broadcast_demod(x: np.ndarray, sample_rate: float,
     acceptance criterion, and do not "fix" it by re-normalising across
     buffers unless the streaming contract is re-specified.
     """
-    from scipy.signal import (resample_poly, butter, lfilter, firwin)
+    from scipy.signal import (resample_poly, butter, lfilter, firwin, sosfilt)
 
     x = np.asarray(x, dtype=np.complex128)
     x = x - np.mean(x)
@@ -417,8 +417,9 @@ def wfm_broadcast_demod(x: np.ndarray, sample_rate: float,
     nyq = audio_sr / 2.0
     norm_cut = min(0.99, audio_cutoff / nyq)
     if norm_cut < 0.99:
-        b, a = butter(5, norm_cut, btype="low")
-        audio = lfilter(b, a, audio)
+        # AGENTS.md §3：高阶低通一律 sos+sosfilt
+        sos = butter(5, norm_cut, btype="low", output="sos")
+        audio = sosfilt(sos, audio)
 
     # 5) 归一化到 [-1,1]（留 5% 余量，避免削波）
     peak = float(np.max(np.abs(audio))) if len(audio) else 0.0
@@ -431,10 +432,11 @@ class WFMReceiver:
     """Stateful broadcast-FM receiver (streaming, block by block).
 
     Unlike the stateless ``wfm_broadcast_demod``, every filter keeps its
-    ``lfilter`` zi state across blocks; the channel low-pass runs before the
-    discriminator.  Output uses a fixed gain + soft limiter instead of per-block
-    peak normalisation, so pauses / weak signals do not amplify the noise to
-    full scale.
+    zi state across blocks (channel FIR / de-emphasis via ``lfilter``, audio
+    low-pass via ``sosfilt`` per AGENTS.md §3); the channel low-pass runs
+    before the discriminator.  Output uses a fixed gain + soft limiter instead
+    of per-block peak normalisation, so pauses / weak signals do not amplify
+    the noise to full scale.
 
     The pipeline creates one instance and calls ``process()`` on each native-rate
     block.
@@ -456,15 +458,16 @@ class WFMReceiver:
         a = float(np.exp(-1.0 / (deemph_us * 1e-6 * self.audio_sr)))
         self._de_b, self._de_a = np.array([1.0 - a]), np.array([1.0, -a])
         self._zi_de = np.zeros(1)
-        # 音频低通
+        # 音频低通（AGENTS.md §3：高阶低通一律 sos+sosfilt）
         nyq = self.audio_sr / 2.0
-        self._b_lp, self._a_lp = butter(5, min(0.99, audio_cutoff / nyq),
-                                        btype="low")
-        self._zi_lp = np.zeros(max(len(self._b_lp), len(self._a_lp)) - 1)
+        self._sos_lp = butter(5, min(0.99, audio_cutoff / nyq),
+                              btype="low", output="sos")
+        # sosfilt 的 zi 形状为 (n_sections, 2)，区别于 lfilter 的 (order,)
+        self._zi_lp = np.zeros((self._sos_lp.shape[0], 2))
         self._gain = float(output_gain)
 
     def process(self, iq: np.ndarray) -> np.ndarray:
-        from scipy.signal import lfilter, resample_poly
+        from scipy.signal import lfilter, resample_poly, sosfilt
         from math import gcd
         x = np.asarray(iq, dtype=np.complex128)
         if x.size < 4:
@@ -486,9 +489,8 @@ class WFMReceiver:
         # 去加重（连续）
         audio, self._zi_de = lfilter(self._de_b, self._de_a, audio,
                                      zi=self._zi_de)
-        # 音频低通（连续）
-        audio, self._zi_lp = lfilter(self._b_lp, self._a_lp, audio,
-                                     zi=self._zi_lp)
+        # 音频低通（连续 zi，sos 形式）
+        audio, self._zi_lp = sosfilt(self._sos_lp, audio, zi=self._zi_lp)
         # 固定增益 + tanh 软限幅（不做逐块峰值归一化）
         audio = np.tanh(audio * self._gain)
         return audio.astype(np.float32)
@@ -500,7 +502,7 @@ def rds_decode_from_wfm(x: np.ndarray, sample_rate: float) -> dict:
     做带通选通与载波能量检测，返回 RDS 副载波是否存在及电平；完整块同步/纠错
     （104bit 组、差分解码、CRC）后续接入成熟开源 RDS 库。此函数先让链路可观测。
     """
-    from scipy.signal import butter, lfilter
+    from scipy.signal import butter, sosfilt
     x = np.asarray(x, dtype=np.complex128)
     x = x - np.mean(x)
     if len(x) < 4:
@@ -509,9 +511,9 @@ def rds_decode_from_wfm(x: np.ndarray, sample_rate: float) -> dict:
     mp = phase * (sample_rate / (2.0 * np.pi * 75000.0))
     mp = mp - np.mean(mp)
     nyq = sample_rate / 2.0
-    # RDS 副载波 57kHz ± 2kHz
-    b, a = butter(4, [55000.0 / nyq, 59000.0 / nyq], btype="band")
-    band = lfilter(b, a, mp)
+    # RDS 副载波 57kHz ± 2kHz（AGENTS.md §3：窄带带通一律 sos+sosfilt）
+    sos = butter(4, [55000.0 / nyq, 59000.0 / nyq], btype="band", output="sos")
+    band = sosfilt(sos, mp)
     rms = float(np.sqrt(np.mean(band ** 2)))
     floor = float(np.sqrt(np.mean(mp ** 2))) + 1e-12
     carrier_db = 20.0 * np.log10(rms / floor + 1e-12)
@@ -527,7 +529,7 @@ def audio_to_playback(x: np.ndarray, in_sr: float, cutoff_hz: float = 4500.0,
     用于 AM 航空 / NFM 对讲机 / SSB / CW，使各模式都能直接存成可听 WAV。
     """
     from math import gcd
-    from scipy.signal import resample_poly, butter, lfilter
+    from scipy.signal import resample_poly, butter, sosfilt
 
     x = np.asarray(x, dtype=np.float64)
     x = x - np.mean(x)
@@ -537,8 +539,9 @@ def audio_to_playback(x: np.ndarray, in_sr: float, cutoff_hz: float = 4500.0,
     nyq = in_sr / 2.0
     cut = min(0.98, cutoff_hz / nyq)
     if cut < 0.98:
-        b, a = butter(5, cut, btype="low")
-        x = lfilter(b, a, x)
+        # AGENTS.md §3：高阶低通一律 sos+sosfilt
+        sos = butter(5, cut, btype="low", output="sos")
+        x = sosfilt(sos, x)
 
     if int(round(in_sr)) != int(out_sr):
         g = gcd(int(round(in_sr)), int(out_sr))

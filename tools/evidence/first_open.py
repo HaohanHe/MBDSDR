@@ -72,6 +72,8 @@ def run(args) -> dict:
     layer_state = sv.layer_state() if hasattr(sv, "layer_state") else {}
     res["facts"].update({
         "planetarium_fov_deg": round(float(sv.view_state.fov_deg), 1),
+        "planetarium_window_present":
+            getattr(w, "_planetarium_window", None) is not None,
         "layers_on_at_first_open": sorted(k for k, v in layer_state.items() if v),
         "star_count": 0 if getattr(sv, "_star_sel", None) is None
                       else len(sv._star_sel),
@@ -79,8 +81,9 @@ def run(args) -> dict:
         "stars_hidden_by_daylight": bool(sv._stars_hidden_by_daylight()),
         "site_note": sv.get_site_note(),
     })
+    target = common.frame_target(w)
     sv.repaint()
-    frames.append(common.save_frame(w, out / "02_planetarium_default.png"))
+    frames.append(common.save_frame(target, out / "02_planetarium_default.png"))
 
     # 走真实命中区点「先看看示例天空」，不是直接调 handler
     preview_clicked = False
@@ -99,8 +102,9 @@ def run(args) -> dict:
         "site_note_after_preview": sv.get_site_note(),
         "observer_source": getattr(w, "_observer_source", None),
     })
+    target = common.frame_target(w)
     sv.repaint()
-    frames.append(common.save_frame(w, out / "03_preview.png"))
+    frames.append(common.save_frame(target, out / "03_preview.png"))
 
     # 「今夜」：按真实太阳高度求民用暮光终，不写死钟点
     engine = None
@@ -126,8 +130,9 @@ def run(args) -> dict:
     if not tonight_applied:
         res["notes"].append(
             "没有观测位置，今夜未生效（产品行为：先给位置再算暮光，不猜时刻）")
+    target = common.frame_target(w)
     sv.repaint()
-    frames.append(common.save_frame(w, out / "04_tonight.png"))
+    frames.append(common.save_frame(target, out / "04_tonight.png"))
 
     res["not_verified"] += [
         "真机 SDR / GNSS 未接入：首开路径未覆盖「插上棒子自动就绪」这一段",

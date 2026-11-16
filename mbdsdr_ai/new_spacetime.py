@@ -15,12 +15,17 @@ from typing import List, Optional, Tuple, Dict, Any
 from enum import Enum
 from datetime import datetime, timedelta, timezone
 
+try:
+    from .geo_distance import MEAN_EARTH_RADIUS_KM, haversine_km
+except ImportError:  # 扁平导入（部分脚本/测试直挂 mbdsdr_ai 目录）
+    from geo_distance import MEAN_EARTH_RADIUS_KM, haversine_km
+
 
 # ============================================================
 # 常量
 # ============================================================
 
-EARTH_RADIUS_KM = 6371.0088  # 地球平均半径（km）
+EARTH_RADIUS_KM = MEAN_EARTH_RADIUS_KM  # 地球平均半径（km），唯一真值源 geo_distance
 SPEED_OF_LIGHT = 299792.458  # 光速（km/s）
 
 # NTP 服务器列表（公共 NTP）
@@ -702,20 +707,8 @@ class GeoPoint:
 
 
 def haversine_distance(p1: GeoPoint, p2: GeoPoint) -> float:
-    """
-    计算两点间的大圆距离（Haversine 公式）。
-    返回：距离（km）
-    """
-    lat1, lon1 = math.radians(p1.latitude), math.radians(p1.longitude)
-    lat2, lon2 = math.radians(p2.latitude), math.radians(p2.longitude)
-
-    dlat = lat2 - lat1
-    dlon = lon2 - lon1
-
-    a = math.sin(dlat / 2) ** 2 + math.cos(lat1) * math.cos(lat2) * math.sin(dlon / 2) ** 2
-    c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
-
-    return EARTH_RADIUS_KM * c
+    """计算两点间的大圆距离（km）。薄包装 geo_distance.haversine_km（唯一真值源）。"""
+    return haversine_km(p1.latitude, p1.longitude, p2.latitude, p2.longitude)
 
 
 def bearing_between(p1: GeoPoint, p2: GeoPoint) -> float:
@@ -736,6 +729,11 @@ def bearing_between(p1: GeoPoint, p2: GeoPoint) -> float:
 def destination_point(start: GeoPoint, bearing_deg: float, distance_km: float) -> GeoPoint:
     """
     给定起点、方位角和距离，计算终点坐标。
+
+    经度归一化到 [-180, 180)，与 ground_track.destination_point 同一口径
+    （(deg+180)%360-180）。跨日界线时 lon1+atan2(...) 会溢出 ±180°，若不归一化
+    GeoPoint.to_string() 会显示 "184.99°E" 这种地理非法经度（GIS 终点工具用户可见）。
+    纬度由 asin 天然落在 [-90, 90]，无需归一化。
     """
     lat1 = math.radians(start.latitude)
     lon1 = math.radians(start.longitude)
@@ -747,9 +745,10 @@ def destination_point(start: GeoPoint, bearing_deg: float, distance_km: float) -
     lon2 = lon1 + math.atan2(math.sin(bearing) * math.sin(angular_dist) * math.cos(lat1),
                               math.cos(angular_dist) - math.sin(lat1) * math.sin(lat2))
 
+    lon_deg = (math.degrees(lon2) + 180.0) % 360.0 - 180.0
     return GeoPoint(
         latitude=math.degrees(lat2),
-        longitude=math.degrees(lon2),
+        longitude=lon_deg,
         altitude_m=start.altitude_m
     )
 
@@ -767,12 +766,24 @@ def web_mercator_project(point: GeoPoint, zoom: int = 10) -> Tuple[int, int]:
 
 
 def format_dms(decimal_deg: float, is_latitude: bool = True) -> str:
-    """十进制度转度分秒格式。"""
+    """十进制度转度分秒格式。
+
+    秒四舍五入到 0.01"；若进位到 60.00 则向分进 1、秒归 0，分再进位到 60
+    则向度进 1，杜绝 DD°MM'60.00" 这种非法秒字段（秒必须 00.00–59.99）。
+    与 astronomy.dec_to_dms / ax25._encode_aprs_coord / rf_sky_view.format_dms_deg
+    同一进位口径——#98/#99/#100 秒/分进位缺陷类的最后一处。
+    """
     hemi = ('N' if decimal_deg >= 0 else 'S') if is_latitude else ('E' if decimal_deg >= 0 else 'W')
     abs_deg = abs(decimal_deg)
     degrees = int(abs_deg)
     minutes = int((abs_deg - degrees) * 60)
-    seconds = ((abs_deg - degrees) * 60 - minutes) * 60
+    seconds = round(((abs_deg - degrees) * 60 - minutes) * 60, 2)
+    if seconds >= 60.0:
+        seconds = 0.0
+        minutes += 1
+    if minutes >= 60:
+        minutes = 0
+        degrees += 1
     return f"{degrees}°{minutes:02d}'{seconds:05.2f}\"{hemi}"
 
 
@@ -1025,11 +1036,20 @@ class PNTFusionEngine:
             self.state.altitude_m = positions[0][2]
             self.state.accuracy_m = self.sources[active[0]].get('accuracy_m', 100.0)
         else:
-            # 加权平均
+            # 逆方差加权融合。纬度/海拔是线性量，直接加权平均；经度是圆周量，
+            # 必须用加权圆均值 atan2(Σw·sin, Σw·cos)，否则跨日界线两源（如
+            # +179.9999° 与 -179.9999°，相距约 22m）线性平均会得 0°——错到地球
+            # 另一侧。与 ground_track / destination_point 同一 atan2 经度接缝，
+            # 结果归一化到 [-180,180)。共址源时圆均值与线性平均一致（差 O(散布²)）。
             self.state.fusion_mode = "fused"
             total_w = sum(weights)
             self.state.latitude = sum(p[0] * w for p, w in zip(positions, weights)) / total_w
-            self.state.longitude = sum(p[1] * w for p, w in zip(positions, weights)) / total_w
+            sin_sum = sum(w * math.sin(math.radians(p[1]))
+                          for p, w in zip(positions, weights))
+            cos_sum = sum(w * math.cos(math.radians(p[1]))
+                          for p, w in zip(positions, weights))
+            lon_mean = math.degrees(math.atan2(sin_sum, cos_sum))
+            self.state.longitude = (lon_mean + 180.0) % 360.0 - 180.0
             self.state.altitude_m = sum(p[2] * w for p, w in zip(positions, weights)) / total_w
             # 融合精度 = 1/sqrt(sum(weights))
             self.state.accuracy_m = 1.0 / math.sqrt(total_w)

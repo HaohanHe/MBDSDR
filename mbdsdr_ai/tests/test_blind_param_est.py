@@ -166,6 +166,37 @@ def test_alpha_bad_rates_rejected(signals):
         alpha_estimate(signals["qpsk"].tolist(), FS, FS)  # sr 超 Nyquist
 
 
+def test_alpha_estimate_guard_is_live():
+    """#117：guard 是注册工具 alpha_estimate 暴露的可调旋钮，函数体必须真用。
+
+    死参数链曾为：schema(line 506)/handler(line 449)/签名/docstring 五处一致
+    暴露 guard，但 body 硬编码 f_lo=0.15*edge 静默丢弃。修后 f_lo=guard*edge。
+
+    反证钉扎：guard=0.15 与 0.50 的拟合窗下沿不同 → 输出必须不同；若 body
+    重新硬编码 0.15（死参数复活），两者逐字段相同 → 本测试红。默认 guard=0.15
+    行为不变（仍命中真值 0.35）。用本地固定 seed，不依赖共享 _RNG/测试顺序。
+    """
+    rng = np.random.default_rng(117)
+    q = (rng.choice([-1, 1], N_SYMS) + 1j * rng.choice([-1, 1], N_SYMS))
+    shaped = _shape(q / math.sqrt(2), 0.35)
+    e = np.mean(np.abs(shaped) ** 2)
+    nvar = e / 10 ** (20 / 10)
+    x = shaped + math.sqrt(nvar / 2) * (
+        rng.standard_normal(len(shaped)) + 1j * rng.standard_normal(len(shaped)))
+    iq = x.tolist()
+
+    r_default = alpha_estimate(iq, FS, SR)             # guard 默认 0.15
+    r_low = alpha_estimate(iq, FS, SR, guard=0.15)
+    r_high = alpha_estimate(iq, FS, SR, guard=0.50)
+
+    # 默认 == 显式 0.15（默认值即 0.15，行为完全不变，无回归）
+    assert r_default == r_low
+    # 默认仍命中真值 α=0.35
+    assert abs(r_default["alpha"] - 0.35) <= 0.06, r_default
+    # guard 真生效：0.15 vs 0.50 拟合窗不同 → 输出必须不同（死参数复活则红）
+    assert r_low != r_high, "guard 死参数复活：0.15 与 0.50 输出逐字段相同"
+
+
 # ─────────────────────────────────────────────────────────────
 # 工具注册面
 # ─────────────────────────────────────────────────────────────

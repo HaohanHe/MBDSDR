@@ -22,10 +22,10 @@ from dataclasses import dataclass
 from typing import Dict, List, Any, Optional, Tuple
 try:
     from .gmst import gmst_rad_iau1982
-    from .geodesy import WGS72 as _WGS72_ELLIPSOID
+    from .geodesy import WGS72 as _WGS72_ELLIPSOID, WGS84 as _WGS84_ELLIPSOID
 except ImportError:  # 扁平导入（部分脚本直挂 mbdsdr_ai 目录）
     from gmst import gmst_rad_iau1982
-    from geodesy import WGS72 as _WGS72_ELLIPSOID
+    from geodesy import WGS72 as _WGS72_ELLIPSOID, WGS84 as _WGS84_ELLIPSOID
 from enum import Enum
 
 from .environment_facts import (
@@ -52,7 +52,7 @@ J2000_JD = 2451545.0
 J2000_MJD = 51544.5
 
 # 地球参数
-EARTH_FLATTENING = 1.0 / 298.257223563  # WGS84 扁率
+EARTH_FLATTENING = _WGS84_ELLIPSOID.f  # WGS84 扁率（唯一真值源 geodesy.WGS84）
 
 # Saemundsson 公式的气象归一化基准（只是公式里的参考量，不是观测缺省值）。
 # 观测气象缺项时绝不用这两条基准代入，而是返回 None / 标 unknown。
@@ -342,11 +342,23 @@ def jd_to_lst(jd: float, longitude_deg: float) -> float:
 
 
 def lst_to_hms(lst_rad: float) -> str:
-    """地方恒星时（弧度）转时分秒字符串。"""
+    """地方恒星时（弧度）转时分秒字符串。
+
+    秒四舍五入到 0.1s；若进位到 60.0 则向分进 1、秒归 0，分再进位到 60
+    则向时进 1，时按 24 归绕（恒星时循环），杜绝 HH:MM:60.0 非法秒字段
+    （秒必须 00.0–59.9）。
+    """
     hours = lst_rad * RAD2HOUR
     h = int(hours)
     m = int((hours - h) * 60)
-    s = ((hours - h) * 60 - m) * 60
+    s = round(((hours - h) * 60 - m) * 60, 1)
+    if s >= 60.0:
+        s = 0.0
+        m += 1
+    if m >= 60:
+        m = 0
+        h += 1
+    h %= 24
     return f"{h:02d}:{m:02d}:{s:04.1f}"
 
 
@@ -555,21 +567,43 @@ def compute_airmass(alt_deg: float) -> float:
 # ── 格式化 ────────────────────────────────────────────
 
 def ra_to_hms(ra_deg: float) -> str:
-    """赤经（度）转时分秒字符串。"""
+    """赤经（度）转时分秒字符串。
+
+    秒四舍五入到 0.1s；若进位到 60.0 则向分进 1、秒归 0，分再进位到 60
+    则向时进 1，时按 24 归绕（RA 循环），杜绝 HHhMMm60.0s 这种非法秒字段
+    （秒必须 00.0–59.9）。
+    """
     hours = ra_deg / 15.0
     h = int(hours)
     m = int((hours - h) * 60)
-    s = ((hours - h) * 60 - m) * 60
+    s = round(((hours - h) * 60 - m) * 60, 1)
+    if s >= 60.0:
+        s = 0.0
+        m += 1
+    if m >= 60:
+        m = 0
+        h += 1
+    h %= 24
     return f"{h:02d}h{m:02d}m{s:04.1f}s"
 
 
 def dec_to_dms(dec_deg: float) -> str:
-    """赤纬/仰角（度）转度分秒字符串。"""
+    """赤纬/仰角（度）转度分秒字符串。
+
+    秒四舍五入到 0.1"；若进位到 60.0 则向分进 1、秒归 0，分再进位到 60
+    则向度进 1，杜绝 DD°MM'60.0" 这种非法秒字段（秒必须 00.0–59.9）。
+    """
     sign = "+" if dec_deg >= 0 else "-"
     dec_abs = abs(dec_deg)
     d = int(dec_abs)
     m = int((dec_abs - d) * 60)
-    s = ((dec_abs - d) * 60 - m) * 60
+    s = round(((dec_abs - d) * 60 - m) * 60, 1)
+    if s >= 60.0:
+        s = 0.0
+        m += 1
+    if m >= 60:
+        m = 0
+        d += 1
     return f"{sign}{d:02d}°{m:02d}'{s:04.1f}\""
 
 

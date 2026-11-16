@@ -239,12 +239,14 @@ class SpacetimeFeatureLayer:
     @staticmethod
     def _detail_suggestion(item: FeatureState) -> str:
         f = item.feature
-        bits = [f"位置 {f.lat:.4f}°, {f.lon:.4f}°",
+        # 位置带 ° 量纲，按 tooltip 自描述规矩必须标来源：要素坐标是声明值，
+        # 不是设备回读，故标「声明」；unknown 用内核统一词「未知」。
+        bits = [f"位置（声明） {f.lat:.4f}°, {f.lon:.4f}°",
                 f"有效期 {f.valid.describe()}"]
         if f.properties:
             bits.append("；".join(f"{k}={v}" for k, v in f.properties.items()))
         if item.state == "unknown":
-            bits.append("原因未明，不做推断")
+            bits.append("原因未知，不做推断")
         return " · ".join(bits)
 
     # ---------------------------------------------------------------- 绘制

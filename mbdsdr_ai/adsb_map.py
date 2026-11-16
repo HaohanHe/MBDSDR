@@ -20,6 +20,11 @@ import time
 from dataclasses import dataclass, field
 from typing import Dict, Iterable, List, Optional, Tuple
 
+try:
+    from .geo_distance import haversine_km
+except ImportError:  # 扁平导入（部分脚本直挂 mbdsdr_ai 目录）
+    from geo_distance import haversine_km
+
 __all__ = [
     "project_equirectangular",
     "haversine_km",
@@ -27,9 +32,6 @@ __all__ = [
     "AircraftTracker",
     "WORLD_LAND_POLYGONS",
 ]
-
-# 平均地球半径（公里），用于大圆距离。
-_EARTH_R_KM = 6371.0
 
 
 def project_equirectangular(lat: float, lon: float,
@@ -55,20 +57,6 @@ def project_equirectangular(lat: float, lon: float,
     x = max(0.0, min(float(width), x))
     y = max(0.0, min(float(height), y))
     return x, y
-
-
-def haversine_km(lat1: float, lon1: float,
-                 lat2: float, lon2: float) -> float:
-    """用 Haversine 公式计算两点间大圆距离（公里）。"""
-    p1 = math.radians(lat1)
-    p2 = math.radians(lat2)
-    dphi = math.radians(lat2 - lat1)
-    dlmb = math.radians(lon2 - lon1)
-
-    a = (math.sin(dphi / 2.0) ** 2
-         + math.cos(p1) * math.cos(p2) * math.sin(dlmb / 2.0) ** 2)
-    c = 2.0 * math.atan2(math.sqrt(a), math.sqrt(1.0 - a))
-    return _EARTH_R_KM * c
 
 
 @dataclass

@@ -208,8 +208,9 @@ _SEMANTIC_TOKENS = ("danger", "success", "accent", "status_busy",
 
 #: 棘轮基线（只许降不许涨）：当前全部命中，逐条「文件:行 + 取的 token」。
 #: kind 语义：
-#:   A1     待迁 status_color 的 11 个单元（control 两行同属 1 个单元，共 12 行）；
-#:   A2     success/accent 当正文或填充，等用户拍板，禁止新增；
+#:   A1     待迁 status_color 的 11 个单元（control 三行同属 1 个单元，共 13 行）；
+#:   A2     success/accent/danger 当正文或填充（含图形描边/标记），等用户拍板，
+#:          禁止新增；
 #:   FROZEN main_window 已登记冻结项（须与同处底纹一起改）；
 #:   ISLAND 固定深/浅色岛屿，读全局 COLORS 是设计（docs/a11y 清单 B 类）；
 #:   TEST   测试自己断言 token 原值。
@@ -222,14 +223,18 @@ _BASELINE = (
     ("desktop/status_panel.py", 867, "danger", "A1", "status:867"),
     ("desktop/status_panel.py", 965, "danger", "A1", "status:965"),
     ("desktop/status_panel.py", 1019, "danger", "A1", "status:1019"),
-    ("desktop/sat_track_panel.py", 453, "danger", "A1", "sat:453"),
-    ("desktop/sat_track_panel.py", 518, "danger", "A1", "sat:518"),
-    ("desktop/sat_track_panel.py", 522, "danger", "A1", "sat:522"),
+    ("desktop/sat_track_panel.py", 905, "danger", "A1", "sat:905"),
+    ("desktop/sat_track_panel.py", 972, "danger", "A1", "sat:972"),
+    ("desktop/sat_track_panel.py", 976, "danger", "A1", "sat:976"),
     ("desktop/vfo_panel.py", 232, "danger", "A1", "vfo:232"),
     ("desktop/ntrip_panel.py", 48, "danger", "A1", "ntrip:48"),
     ("desktop/ntrip_panel.py", 49, "status_busy", "A1", "ntrip:49"),
-    ("desktop/control_panel.py", 999, "danger", "A1", "control:invalid"),
-    ("desktop/control_panel.py", 1007, "danger", "A1", "control:invalid"),
+    # 行号追平（2026-11-15）：原 999/1007 → 1144（0b5b9387，09-27）/
+    # 1152（2749b7c3，11-06 防呆第一批）。多出来的 1137 来自 51218982
+    # （11-13 逗号/空格歧义拒绝）——同一个「非法输入闪红」单元，不新增单元。
+    ("desktop/control_panel.py", 1137, "danger", "A1", "control:invalid"),
+    ("desktop/control_panel.py", 1144, "danger", "A1", "control:invalid"),
+    ("desktop/control_panel.py", 1152, "danger", "A1", "control:invalid"),
     # ---- A2 等拍板（success/accent 当正文/填充）----
     ("desktop/status_panel.py", 855, "success", "A2", ""),
     ("desktop/status_panel.py", 857, "accent", "A2", ""),
@@ -240,8 +245,20 @@ _BASELINE = (
     ("desktop/status_panel.py", 1016, "accent", "A2", ""),
     ("desktop/status_panel.py", 1049, "success", "A2", ""),
     ("desktop/status_panel.py", 1093, "success", "A2", ""),
-    ("desktop/sat_track_panel.py", 526, "success", "A2", ""),
-    ("desktop/sat_track_panel.py", 528, "success", "A2", ""),
+    ("desktop/sat_track_panel.py", 980, "success", "A2", ""),
+    ("desktop/sat_track_panel.py", 982, "success", "A2", ""),
+    # 2026-11-15 追平 HEAD（不是新增直读，是把已提交的点位记上账）：
+    # 极坐标轨迹图 AzElPlot（195/197/198/211）来自 651eafeb（11-14，对齐
+    # gpredict gtk_polar_plot），多普勒曲线 DopplerCurvePlot（350）来自
+    # c5ad569f（11-14）；基线上一次重建是 5b1e0b10（11-12），故这批没登记。
+    # 都是 QPainter 的描边/标记填充（非正文），属 A2「等用户拍板」：
+    # 浅色主题下 accent 2.78:1、success 2.46:1 达不到图形 3:1，真要修得
+    # 换主题感知的图形色，是视觉改动，不在棘轮里偷偷替用户决定。
+    ("desktop/sat_track_panel.py", 195, "accent", "A2", ""),
+    ("desktop/sat_track_panel.py", 197, "success", "A2", ""),
+    ("desktop/sat_track_panel.py", 198, "danger", "A2", ""),
+    ("desktop/sat_track_panel.py", 211, "accent", "A2", ""),
+    ("desktop/sat_track_panel.py", 350, "accent", "A2", ""),
     ("desktop/vfo_panel.py", 191, "accent", "A2", ""),
     ("desktop/ntrip_panel.py", 50, "success", "A2", ""),
     # ---- FROZEN 冻结期登记 ----
@@ -316,7 +333,9 @@ _LEGACY_READS = {
         "light_accent": 4, "light_bg": 1, "sky_day_ink": 1,
         "sky_day_zenith": 1, "sky_night_glow": 1, "sky_night_horizon": 1,
         "sky_night_zenith": 1, "text_primary": 2},
-    "desktop/sat_track_panel.py": {"card_2": 1, "gray_300": 1, "gray_400": 1},
+    # gray_400 1→3（2026-11-15 追平 HEAD）：仰角条描边之外，还有极坐标
+    # 网格圈（172，651eafeb）与多普勒曲线坐标轴（293，c5ad569f），均 11-14。
+    "desktop/sat_track_panel.py": {"card_2": 1, "gray_300": 1, "gray_400": 3},
     "desktop/satellite_image_panel.py": {"image_placeholder_bg": 1},
     "desktop/status_panel.py": {"card_2": 1, "gray_300": 5, "gray_400": 1},
     "desktop/tokens.py": {"light_accent": 1, "light_bg": 1, "light_bg_alt": 1,
@@ -591,6 +610,82 @@ def test_ai_panel_header_follows_theme():
             ratio = contrast_ratio(fg, bg)
             assert ratio >= 4.5, (
                 f"{theme}/{label}: {fg} on {bg} = {ratio:.2f} < 4.5")
+
+
+# ---------------------------------------------------------------- 岛屿角色缝
+#
+# #88 的「取消」按钮长在 AI 面板这块固定深色岛屿上：它刻意不跟主题 remap，
+# 但取色必须走 tokens().island_color(角色)，角色 → token 的映射只在令牌层的
+# ISLAND_ROLES 声明一次。本段钉三件事：调用点不再直读、映射没被悄悄改档、
+# 岛上的字/描边在真实底上看得见。
+_ISLAND_BTN_ROLES = {
+    "surface":       "#35373c",   # card_3
+    "surface_hover": "#2b2c2f",   # card_2
+    "text":          "#d9d9d9",   # gray_100
+    "border":        "#939393",   # gray_200
+    "text_disabled": "#999999",   # disabled_gray（仅禁用态）
+}
+
+#: 按钮可能贴着的底：自家填充 + 已声明的岛屿三底 + 全局深色页底。
+_ISLAND_BTN_SURFACES = ("#35373c",) + _AI_PANEL_SURFACES + ("#000000",)
+
+
+def test_ai_panel_cancel_btn_uses_island_roles():
+    """取消按钮走岛屿角色缝，且字/描边在岛上各真实底都达标。
+
+    阈值口径（与本文件其余用例一致，不新造豁免）：
+      * 按钮正文 4.5:1（AA 正常字号）——实测 8.44:1（对自家底 #35373c）；
+      * 描边 3:1：WCAG 1.4.11 对「有文字标签的按钮」本可豁免，这里仍钉 3:1，
+        因为岛上按钮填充对页底只有 1.38:1，描边是唯一的轮廓（实测最差
+        3.88:1，对自家底）；
+      * 禁用态豁免 4.5:1，但「看得见」仍要 ≥1.5:1（实测 4.18:1）。
+
+    反证：把 cancel_btn 任一处改回 ``_t.COLORS[...]`` → 直读断言红（同时
+    直读棘轮也会红）；把 ISLAND_ROLES 的 text 改成 danger/success 之类低对比
+    档 → 对比度断言红。
+    """
+    css = _ai_panel_css("cancel_btn")
+    assert "COLORS[" not in css and "COLORS.get(" not in css, (
+        f"cancel_btn 仍直读全局 COLORS（岛屿不是免检通道）：{css!r}")
+    assert "island_color(" in css, f"cancel_btn 没走岛屿角色缝：{css!r}"
+
+    t = tokens()
+    for role, expected in _ISLAND_BTN_ROLES.items():
+        assert t.island_color(role) == expected, (
+            f"岛屿角色 {role} 改档了：{t.island_color(role)} != {expected}")
+
+    for bg in _ISLAND_BTN_SURFACES:
+        ratio = contrast_ratio(t.island_color("text"), bg)
+        assert ratio >= 4.5, (
+            f"取消按钮正文 {t.island_color('text')} on {bg} = {ratio:.2f} < 4.5")
+        edge = contrast_ratio(t.island_color("border"), bg)
+        assert edge >= 3.0, (
+            f"取消按钮描边 {t.island_color('border')} on {bg} = {edge:.2f} < 3.0")
+        off = contrast_ratio(t.island_color("text_disabled"), bg)
+        assert off >= 1.5, (
+            f"取消按钮禁用字 {t.island_color('text_disabled')} on {bg} "
+            f"= {off:.2f} < 1.5（禁用态豁免 4.5，但不能看不见）")
+
+
+def test_island_roles_do_not_follow_theme():
+    """岛屿角色不随主题变——这正是它读全局 COLORS 的理由。
+
+    若哪天有人把 island_color 改成跟主题 remap，浅色主题会把米白档的字放到
+    深底面板上（或反之），本用例立刻红。未知角色必须抛 KeyError，不许静默
+    回落成一块看不见的底色。
+    """
+    t = tokens()
+    saved = t._theme_name          # 单例：用完必须还原，别污染后续用例
+    try:
+        baseline = {r: t.island_color(r) for r in _ISLAND_BTN_ROLES}
+        for theme in _ALL:
+            t.set_theme_name(theme)
+            got = {r: t.island_color(r) for r in _ISLAND_BTN_ROLES}
+            assert got == baseline, f"{theme}: 岛屿角色跟着主题变了：{got}"
+    finally:
+        t.set_theme_name(saved)
+    with pytest.raises(KeyError):
+        t.island_color("no_such_role")
 
 
 # ---------------------------------------------------------------- 非文本 3:1

@@ -325,6 +325,20 @@ class DesignTokens:
             "danger": "#B85C5C",
         }
 
+        # ---- 固定深色岛屿的角色表（AI 对话面板一类不随主题变的表面）----
+        # 岛屿**刻意**不跟主题 remap：浅色主题下整块面板仍是深底，所以取的是
+        # 全局 COLORS（深色方向）。但「绕过 remap」必须是显式、集中、可审计的
+        # 一处声明，而不是每个调用点各写一遍 COLORS['card_3']——后者正是
+        # tests/test_ui_contrast.py 的直读棘轮要拦的东西（岛屿不是免检通道）。
+        # 形状与 status_color 一致：角色名 → token 名，取值走计算键。
+        self.ISLAND_ROLES: Dict[str, str] = {
+            "surface":       "card_3",        # 次级控件底（悬浮卡片档）
+            "surface_hover": "card_2",        # hover 压深一档（岛上底已偏亮）
+            "text":          "gray_100",      # 正文灰：on surface 8.44:1
+            "border":        "gray_200",      # 描边：on surface 3.88:1
+            "text_disabled": "disabled_gray", # 仅禁用态（WCAG 豁免，见 COLORS）
+        }
+
         # ---- 文字 alpha 层级（叠加在白字上）----
         self.TEXT_ALPHA: Dict[str, float] = {
             "primary":   1.0,
@@ -483,6 +497,25 @@ class DesignTokens:
             if key in palette:
                 candidates.add(palette[key])
         return max(candidates, key=lambda color: contrast_ratio(color, bg))
+
+    def island_color(self, role: str) -> str:
+        """固定深色岛屿的角色取色（AI 对话面板一类不随主题变的表面）。
+
+        与 :meth:`status_color` 同一形状：调用点只说角色（surface / text /
+        border / …），角色 → token 的映射集中在 ``ISLAND_ROLES`` 一处。
+        岛屿刻意不跟主题 remap（浅色主题下面板仍是深底），所以这里读全局
+        ``COLORS``；把这次「绕过」收进令牌层，业务代码就不必各自直读，
+        直读棘轮（tests/test_ui_contrast.py）也不会把岛屿当成免检通道。
+
+        未知角色直接抛 KeyError：静默回落会让拼错的角色变成一块看不见的
+        底色，比报错更难查。
+        """
+        try:
+            key = self.ISLAND_ROLES[role]
+        except KeyError:
+            raise KeyError(
+                f"未知岛屿角色: {role}（可用：{sorted(self.ISLAND_ROLES)}）") from None
+        return self.COLORS[key]
 
     def set_theme_name(self, name: str) -> None:
         """记录当前生效主题名（由 themes 在状态变化时下推）。

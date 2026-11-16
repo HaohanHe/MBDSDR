@@ -327,7 +327,13 @@ class FileChangeTracker:
             for filename in os.listdir(full_dir):
                 if filename.endswith('.json'):
                     paths.append(os.path.join(full_dir, filename))
-        for path, data in load_json_files(paths):
+        rows = load_json_files(paths)
+        # 接缝只返回解析成功的行；被静默跳过的损坏文件须由调用方补告警（审计链留痕）。
+        loaded = {p for p, _ in rows}
+        for path in paths:
+            if path not in loaded:
+                print(f"警告: 变更记录加载失败，已跳过 {path}")
+        for path, data in rows:
             try:
                 change = FileChange(
                     change_id=data["change_id"],

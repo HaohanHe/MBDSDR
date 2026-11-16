@@ -29,7 +29,7 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
 from tokens import tokens as _tok  # noqa: E402  # 截断长度收口在 tokens 层
-from mbdsdr_ai.tool_results import tool_success  # noqa: E402  # 成败唯一判据
+from mbdsdr_ai.tool_results import tool_success, CANCEL_ERROR  # noqa: E402  # 成败唯一判据 + 取消协议值
 
 logger = logging.getLogger(__name__)
 
@@ -183,8 +183,16 @@ def steps_from_chat(tool_calls: List[Dict[str, Any]],
         # 成败只看 success（tool_success），不再拿正文文本二次判读：
         # 文本启发式会把 success=True 翻成 FAILED，等于第二个判定点。
         ok = tool_success(tr)
-        status = STATUS_SUCCESS if ok else STATUS_FAILED
         err = str(tr.get("error", "") or "")
+        # #88：用户取消导致「根本没执行」的工具，agent 写回结构化字段
+        # error=CANCEL_ERROR（不是正文猜读）。它不是执行失败，落 skipped：
+        # 否则面板会把它算进「N 个操作未成功，请按错误原因处理后重试」——
+        # 用户自己按的取消，不该被要求去修一个不存在的错误。
+        # 注意这不改成败判据：success 仍是 False，只是展示类别不同。
+        if ok is False and err == CANCEL_ERROR:
+            status = STATUS_SKIPPED
+        else:
+            status = STATUS_SUCCESS if ok else STATUS_FAILED
         steps.append(StepRecord(
             tool=name,
             args_preview=args_preview(tr.get("args", args) or args),
@@ -289,8 +297,15 @@ def steps_from_subagent(payload: Dict[str, Any]) -> List[StepRecord]:
     overall_ok = bool(payload.get("success", False)) and (
         payload.get("status", "ok") == "ok")
     status = STATUS_SUCCESS if overall_ok else STATUS_FAILED
-    if payload.get("truncated"):
+    if payload.get("cancelled"):
+        # 取消放最前：与超时/截断同轮撞上时只报用户主动的那个成因
+        # （SubagentResult 三字段互斥，取消优先）
+        note = "子代理被用户取消（部分执行，单步结果未回传）"
+    elif payload.get("truncated"):
         note = "子代理达到 max_steps 截断（部分执行，单步结果未回传）"
+    elif payload.get("timed_out"):
+        # 超时与 max_steps 截断成因不同，绝不混报（SubagentResult 两字段互斥）
+        note = "子代理耗尽 timeout_s 墙钟预算（部分执行，单步结果未回传）"
     elif overall_ok:
         note = "子代理内部调用（单步结果未回传，随整体结果 ok）"
     else:

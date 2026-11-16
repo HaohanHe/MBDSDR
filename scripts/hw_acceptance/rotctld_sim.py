@@ -58,7 +58,7 @@ def _wrap180(delta: float) -> float:
 
 
 class SimRotctldServer:
-    """rotctld 协议子集服务器：``P az el`` / ``p`` / ``S``。
+    """rotctld 协议子集服务器：``P az el`` / ``p`` / ``S`` / ``K`` / ``\\dump_caps``。
 
     每条指令一个 TCP 连接（与 ``RotctldClient`` 的实现一致），
     后台单线程顺序处理，避免并发改写姿态造成不可复现。
@@ -70,6 +70,11 @@ class SimRotctldServer:
                  drop_every: int = 0, drop_mode: str = "rprt",
                  lie_deg: float = 0.0, seed: int = 1,
                  initial_az: float = 0.0, initial_el: float = 0.0,
+                 min_az: float = 0.0, max_az: float = 360.0,
+                 min_el: float = 0.0, max_el: float = 90.0,
+                 park_az: float = 0.0, park_el: float = 0.0,
+                 can_park: bool = True, caps_mode: str = "ok",
+                 park_rprt: int = 0,
                  clock=None):
         self.latency_s = max(0.0, float(latency_s))
         self.quantize_deg = max(0.0, float(quantize_deg))
@@ -80,6 +85,16 @@ class SimRotctldServer:
         self.lie_deg = float(lie_deg)
         self._clock = clock or time.monotonic
         self._rng = random.Random(seed)
+        #: 能力/限位（\dump_caps 应答）与归位（K）模型参数
+        self.min_az = float(min_az)
+        self.max_az = float(max_az)
+        self.min_el = float(min_el)
+        self.max_el = float(max_el)
+        self.park_az = float(park_az)
+        self.park_el = float(park_el)
+        self.can_park = bool(can_park)
+        self.caps_mode = str(caps_mode)
+        self.park_rprt = int(park_rprt)
 
         self._lock = threading.Lock()
         self._az = float(initial_az) % 360.0
@@ -91,7 +106,7 @@ class SimRotctldServer:
 
         #: 可观测的执行台账：每条运动指令一条记录（含丢弃）
         self.commands: List[Dict[str, Any]] = []
-        self.counters = {"P": 0, "p": 0, "S": 0, "dropped": 0}
+        self.counters = {"P": 0, "p": 0, "S": 0, "K": 0, "caps": 0, "dropped": 0}
 
         self._sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self._sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -188,6 +203,35 @@ class SimRotctldServer:
                 self._target_az = self._az
                 self._target_el = self._el
             return "RPRT 0"
+        # —— 能力/限位查询（\dump_caps，手册别名 1）——
+        if line in ("1", "\\dump_caps"):
+            with self._lock:
+                self.counters["caps"] += 1
+            if self.caps_mode == "error":
+                return "RPRT -1"
+            if self.caps_mode == "garbage":
+                return "garbage line without limit fields\nRPRT 0"
+            can = "Y" if self.can_park else "N"
+            return (
+                "Caps dump for model:\t1\n"
+                f"Min Azimuth:\t\t{self.min_az:.2f}\n"
+                f"Max Azimuth:\t\t{self.max_az:.2f}\n"
+                f"Min Elevation:\t\t{self.min_el:.2f}\n"
+                f"Max Elevation:\t\t{self.max_el:.2f}\n"
+                f"Can Park:\t\t{can}\n"
+                "RPRT 0"
+            )
+        # —— 归位（K）——
+        if line == "K":
+            with self._lock:
+                self.counters["K"] += 1
+                self._advance()
+                if self.park_rprt != 0:
+                    return f"RPRT {self.park_rprt}"
+                self._target_az = self.park_az % 360.0
+                self._target_el = max(-90.0, min(90.0, self.park_el))
+                self._effective_at = self._clock() + self.latency_s
+            return "RPRT 0"
         return "RPRT -1"  # 未实现的指令：明确报错码，不假装成功
 
     # ---- 电机模型 ----
@@ -259,6 +303,7 @@ def run_simulated_pass(*, latency_s: float = 0.0, steps: int = 24,
         st = gc.use_rotctld("127.0.0.1", srv.port, simulated=True)
         if not st.connected:
             raise RuntimeError("模拟服务器不可达（ping 失败）")
+        gc.engage_rotctld()  # 连接≠启用：模拟过境也须显式启用才下发
         limiter = GimbalFollowLimiter()
         rec = PointingErrorRecorder()
         lags: List[float] = []

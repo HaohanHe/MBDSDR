@@ -1399,6 +1399,14 @@ class SettingsPanel(QWidget):
         v = QVBoxLayout(box)
         h = QHBoxLayout()
         control = self._make_control(item)
+        # 右栏视口只有 ~310px，而控件的固有 minimumSizeHint 可能很大
+        # （主题下拉最长项 147、静噪 spinbox 带「（≈6 dB 余量）」后缀 222、
+        #  端口 spinbox 142），会把整行→面板最小宽顶到 392 > 视口，右侧
+        #  永久横滚。控件在本行有 stretch=1，运行时自然撑到 ~168px 显示完整
+        #  值；这里给一个「正的」小布局下限把固有 hint 解耦掉（Qt qSmartMinSize
+        #  仅在 min>0 时才覆盖 minimumSizeHint，设 0 无效），只让行 chrome
+        #  决定最小宽，任何一节展开都不再横滚，也不牺牲天空列宽。
+        control.setMinimumWidth(80)
         h.addWidget(control, 1)
         origin_lbl = QLabel()
         origin_lbl.setObjectName("hintLabel")
@@ -2107,8 +2115,14 @@ class SettingsPanel(QWidget):
         btn_open.clicked.connect(self._on_open_dir_clicked)
         row.addWidget(btn_export)
         row.addWidget(btn_import)
-        row.addWidget(btn_open)
+        # 三个按钮横排最小宽 ~300（86+86+112+间距）> 右栏视口 ~310 减去
+        # 边距后的可用宽，会把「数据与操作」节顶出 14px 横滚。拆成两行：
+        # 导出/导入一行、打开目录一行，最小宽降到 ~178，任何窗宽都不横滚。
+        row2 = QHBoxLayout()
+        row2.addWidget(btn_open)
+        row2.addStretch(1)
         lay.addLayout(row)
+        lay.addLayout(row2)
         # 路径/说明/按钮都不是 schema 行，过滤时一并收起。
         self._search_extras.setdefault(group, []).extend(
             extra_widgets + [note, btn_export, btn_import, btn_open])

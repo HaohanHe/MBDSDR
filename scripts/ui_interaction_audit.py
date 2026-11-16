@@ -87,8 +87,9 @@ DISABLED_REASONS: dict[str, str] = {
     "按钮|思考中...|*": "AI 推理进行中，按钮文案即状态；完成后恢复为「发送」",
     "按钮|取消|*": "当前没有正在运行的扫描任务",
     "按钮|停止跟踪|*": "当前没有正在运行的卫星跟踪任务",
-    "按钮|开始扫描|*": "无扫频后端（未连接 SDR）：scanner_panel 的 "
-                       "`scan_btn.setEnabled(ready and not scanning)` 里 ready=False",
+    "按钮|开始扫频|*": "未就绪：scanner_panel `_refresh_state` 里 "
+                       "`ready = _connected and _backend is not None and _KERNEL_AVAILABLE`，"
+                       "`scan_btn.setEnabled(ready and not scanning)`；未连接/无后端/内核不可用即置灰",
     "按钮|开始录音|*": "未连接 SDR：control_panel 随 `_sdr_connected` "
                        "整组置灰（control_panel.py 的 `w.setEnabled(self._sdr_connected)`）",
     # 「以当前频率为输入」的三个动作：连接成功 ≠ 拿到频率真值。
@@ -126,7 +127,7 @@ SKIP_LIVE: dict[str, str] = {
     "按钮|调谐到 98.5 MHz 并录 30 秒|*": "同「发送」：填充问题并进入 AI 思考态",
     "按钮|开始跟踪|*": "按秒轮询硬件指向（sat_track_panel.start_tracking）；"
                        "真跑会起定时器并写后端",
-    "按钮|开始扫描|*": "启动扫频线程（scanner_panel）；真跑会独占设备",
+    "按钮|开始扫频|*": "启动扫频线程（scanner_panel）；真跑会独占设备",
     "按钮|开始录音|*": "启动录音线程并落盘（control_panel），审计不写真实录音",
     "按钮|拉取挂载点列表|*": "发起 NTRIP 网络请求（ntrip_panel）",
     "按钮|启用 Web 服务|*": "绑定端口起 HTTP 服务（settings_panel）",

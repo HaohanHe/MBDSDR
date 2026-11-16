@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MIT
-"""同一时刻/同一卫星的三条 az/el 路径一致性守卫（P11-4）。
+"""同一时刻/同一卫星的三条 az/el + range 路径一致性守卫（P11-4）。
 
 三条独立实现路径：
 
@@ -11,23 +11,39 @@
 同一 UTC 时刻、同一 TLE，三者 az/el 应在容差内一致（默认 0.5°）。不一致时
 返回逐项 delta 与 ``issues``，调用方必须对外报出，而不是各算各的。
 
+**range 跨口径对拍**：az/el 是角度（比值），对距离的整体尺度/单位误差天然免疫——
+两条链可能 az/el 完全一致却把 range 算错 1000×（m/km）或一个因子。天空视图与
+多普勒两条链都独立给出 slant range（km），故对这两条额外对拍 range。
+过境路径只有 AOS 方位 + 门限仰角、无独立距离，不参与 range 对拍。range 容差是
+**独立口径**（相对 + 绝对下限，见 ``DEFAULT_TOL_RANGE_*``）：skyfield ICRS/WGS-84
+与 sgp4 TEME/WGS-72 的合法差实测 ~0.001%（30 m 量级），容差取 0.1% 留 ~100× 裕度，
+专抓尺度/单位错误而非合法模型差。
+
 本模块只读、不修轨道；无 TLE/无过境时返回 ``checked=False`` 并说明原因。
 """
 from __future__ import annotations
 
-import math
 from typing import Any, Dict, List, Optional, Sequence
 
 from .sat_passes import PASS_MIN_ALT_DEG
 
 __all__ = [
     "DEFAULT_TOL_DEG",
+    "DEFAULT_TOL_RANGE_REL",
+    "DEFAULT_TOL_RANGE_ABS_KM",
     "check_pass_object",
     "check_next_pass_consistency",
     "check_time_consistency",
 ]
 
 DEFAULT_TOL_DEG = 0.5
+
+#: range 跨口径相对容差：skyfield ICRS/WGS-84 与 sgp4 TEME/WGS-72 的合法差
+#: 实测 ~0.001%（30 m 量级）；取 0.1% 留 ~100× 裕度，专抓 az/el 抓不到的
+#: 距离尺度/单位误差（如 m/km 1000×、因子错），而非合法模型差。
+DEFAULT_TOL_RANGE_REL = 1e-3
+#: range 绝对容差下限（km）：近距时兜底数值噪声，与相对容差取大者。
+DEFAULT_TOL_RANGE_ABS_KM = 0.5
 
 
 def _az_delta(a: float, b: float) -> float:
@@ -40,21 +56,44 @@ def _unix_of_skyfield_time(t: Any) -> float:
     return float(t.utc_datetime().timestamp())
 
 
-def _compare(paths: Dict[str, Dict[str, float]], tol_deg: float) -> Dict[str, Any]:
-    """三路径两两比较 az/el，返回 deltas 与 issues。"""
+def _compare(
+    paths: Dict[str, Dict[str, float]],
+    tol_deg: float,
+    tol_range_rel: float = DEFAULT_TOL_RANGE_REL,
+    tol_range_abs_km: float = DEFAULT_TOL_RANGE_ABS_KM,
+) -> Dict[str, Any]:
+    """两两比较 az/el（所有路径）与 range（两路径都给出 range_km 时）。
+
+    只比较 ``paths`` 中实际存在的路径对：``check_time_consistency`` 只喂
+    sky_view/doppler 两条，过境对自动跳过。range 用独立口径容差（相对 +
+    绝对下限取大者），因为 az/el 是角度、对距离整体尺度/单位误差免疫。
+    """
     pairs = (("pass", "sky_view"), ("pass", "doppler"), ("sky_view", "doppler"))
     deltas: Dict[str, Dict[str, float]] = {}
     issues: List[str] = []
     for a, b in pairs:
+        if a not in paths or b not in paths:
+            continue
         pa, pb = paths[a], paths[b]
         daz = _az_delta(pa["az"], pb["az"])
         del_ = abs(float(pa["el"]) - float(pb["el"]))
         key = f"{a}_vs_{b}"
-        deltas[key] = {"daz_deg": round(daz, 4), "del_deg": round(del_, 4)}
+        d: Dict[str, float] = {"daz_deg": round(daz, 4), "del_deg": round(del_, 4)}
         if daz > tol_deg:
             issues.append(f"{a} 与 {b} 方位差 {daz:.3f}° > {tol_deg}°")
         if del_ > tol_deg:
             issues.append(f"{a} 与 {b} 仰角差 {del_:.3f}° > {tol_deg}°")
+        # range：仅当两路径都独立给出距离时对拍（pass 路径无 range，跳过）。
+        if "range_km" in pa and "range_km" in pb:
+            ra, rb = float(pa["range_km"]), float(pb["range_km"])
+            drange = abs(ra - rb)
+            tol_km = max(tol_range_abs_km, tol_range_rel * max(abs(ra), abs(rb)))
+            d["drange_km"] = round(drange, 4)
+            d["range_tol_km"] = round(tol_km, 4)
+            if drange > tol_km:
+                issues.append(
+                    f"{a} 与 {b} 距离差 {drange:.3f} km > {tol_km:.3f} km")
+        deltas[key] = d
     return {"deltas": deltas, "issues": issues}
 
 
@@ -103,7 +142,7 @@ def check_pass_object(
     if rr is None:
         return {"checked": False, "consistent": None,
                 "reason": "天空视图路径传播失败"}
-    sky_path = {"az": float(rr[0]), "el": float(rr[1])}
+    sky_path = {"az": float(rr[0]), "el": float(rr[1]), "range_km": float(rr[2])}
 
     # 路径 3：多普勒/跟踪链（sgp4 TEME→ECEF→ENU）
     try:
@@ -118,7 +157,8 @@ def check_pass_object(
     if st is None:
         return {"checked": False, "consistent": None,
                 "reason": "sgp4 路径传播失败"}
-    dop_path = {"az": float(st["azimuth"]), "el": float(st["elevation"])}
+    dop_path = {"az": float(st["azimuth"]), "el": float(st["elevation"]),
+                "range_km": float(st["range_km"])}
 
     paths = {"pass": pass_path, "sky_view": sky_path, "doppler": dop_path}
     cmp_ = _compare(paths, tol_deg)
@@ -172,9 +212,10 @@ def check_time_consistency(
     at_unix: float,
     tol_deg: float = DEFAULT_TOL_DEG,
 ) -> Dict[str, Any]:
-    """任意时刻只用两条独立链（天空视图 vs sgp4）对拍 az/el。
+    """任意时刻只用两条独立链（天空视图 vs sgp4）对拍 az/el + range。
 
     过境路径需要 AOS，这里不伪造过境；返回 ``checked`` 与两路径 delta。
+    比较逻辑与 ``check_pass_object`` 共用 ``_compare``（单一比较口径）。
     """
     from .sat_passes import _parse_tle, _range_and_rate, make_timescale
     from .orbit import _state_from_satrec
@@ -211,23 +252,17 @@ def check_time_consistency(
         return {"checked": False, "consistent": None,
                 "reason": "sgp4 路径传播失败"}
     paths = {
-        "sky_view": {"az": float(rr[0]), "el": float(rr[1])},
-        "doppler": {"az": float(st["azimuth"]), "el": float(st["elevation"])},
+        "sky_view": {"az": float(rr[0]), "el": float(rr[1]), "range_km": float(rr[2])},
+        "doppler": {"az": float(st["azimuth"]), "el": float(st["elevation"]),
+                    "range_km": float(st["range_km"])},
     }
-    daz = _az_delta(paths["sky_view"]["az"], paths["doppler"]["az"])
-    del_ = abs(paths["sky_view"]["el"] - paths["doppler"]["el"])
-    issues = []
-    if daz > tol_deg:
-        issues.append(f"sky_view 与 doppler 方位差 {daz:.3f}° > {tol_deg}°")
-    if del_ > tol_deg:
-        issues.append(f"sky_view 与 doppler 仰角差 {del_:.3f}° > {tol_deg}°")
+    cmp_ = _compare(paths, tol_deg)
     return {
-        "checked": True, "consistent": not issues,
+        "checked": True, "consistent": not cmp_["issues"],
         "satellite": name, "at_unix": float(at_unix),
         "tolerance_deg": float(tol_deg), "paths": paths,
-        "deltas": {"sky_view_vs_doppler": {
-            "daz_deg": round(daz, 4), "del_deg": round(del_, 4)}},
-        "issues": issues, "warning": "；".join(issues),
+        "deltas": cmp_["deltas"],
+        "issues": cmp_["issues"], "warning": "；".join(cmp_["issues"]),
     }
 
 

@@ -155,7 +155,9 @@ def _costas_track(args):
         out = loop.feed(iq)
         off = float(loop.carrier_offset)
         sr = args.get("sample_rate_hz")
-        off_hz = off * float(sr) if sr else None
+        # carrier_offset 是 NCO 归一化频率 rad/sample；换 Hz 必须 /(2π)：
+        # f[Hz] = ω[rad/sample] · fs / (2π)。与真值源 coarse_sync.py:248 同口径。
+        off_hz = off * float(sr) / (2.0 * np.pi) if sr else None
         content = (
             f"Costas 载波恢复（PSK 阶数 {loop.psk_order}）："
             f"频偏估计 {off:.6f} rad/sample"

@@ -27,7 +27,6 @@ OSM 数据 © OpenStreetMap contributors，ODbL 1.0。本模块只发查询、�
 from __future__ import annotations
 
 import json
-import math
 import os
 import time
 import urllib.error
@@ -35,6 +34,8 @@ import urllib.parse
 import urllib.request
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Protocol, Tuple
+
+from ..geo_distance import haversine_km
 
 __all__ = [
     "Place", "PlaceProvider", "OsmNominatimProvider", "OfflineJsonProvider",
@@ -289,17 +290,6 @@ class OfflineJsonProvider:
             if d < best_d:
                 best_d, best = d, p
         return best
-
-
-def haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
-    """两点大圆距离（公里）。用途：最近地点、UI 距离显示。"""
-    r = 6371.0088
-    p1, p2 = math.radians(lat1), math.radians(lat2)
-    dp = p2 - p1
-    dl = math.radians(lon2 - lon1)
-    a = (math.sin(dp / 2.0) ** 2
-         + math.cos(p1) * math.cos(p2) * math.sin(dl / 2.0) ** 2)
-    return 2.0 * r * math.asin(min(1.0, math.sqrt(a)))
 
 
 def make_provider(kind: str = "auto") -> PlaceProvider:
