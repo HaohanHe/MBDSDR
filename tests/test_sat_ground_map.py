@@ -200,3 +200,30 @@ def test_position_report_lands_on_map_collection(monkeypatch):
     assert all(f.feature_id != "pos:QTMAP2" for f in col.all())
     widget.shutdown()
     app.processEvents()
+
+
+def test_constellation_colors_are_distinct_and_tagged(monkeypatch):
+    """多星可分辨：色弱口径=颜色只做辅助，主识别是文字标签。"""
+    app = QApplication.instance() or QApplication(sys.argv)
+    import mbdsdr_ai.ground_track as gt
+    monkeypatch.setattr(gt, "fetch_tle", lambda catnr, max_age_hours=24.0: ISS_TLE)
+    from sat_ground_map import SatelliteGroundMap
+
+    widget = SatelliteGroundMap(online=False)
+    tle_map = {"ISS (ZARYA)": ISS_TLE, "NOAA 19": ISS_TLE}
+    assert widget.update_constellation(
+        ["ISS (ZARYA)", "NOAA 19"], when_unix=1763000000.0,
+        tle_map=tle_map, recenter=False)
+    colors = [s["color"] for s in widget.constellation]
+    assert colors[0] != colors[1], "两颗星必须不同色"
+    assert all(c.startswith("#") and len(c) == 7 for c in colors)
+
+    # 星名标签必须真的画到画布上（不是只在摘要里）
+    pix = QPixmap(320, 220)
+    pix.fill(Qt.black)
+    painter = QPainter(pix)
+    widget._paint_track(painter, _project)
+    painter.end()
+    assert _non_black(pix) > 100
+    widget.shutdown()
+    app.processEvents()

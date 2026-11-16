@@ -50,6 +50,11 @@ from mbdsdr_ai.sat_passes import VISIBLE_MIN_ALT_DEG
 
 _t = _tok()
 
+#: 多星配色：色弱友好（Okabe–Ito 系），且每颗星必配文字标签，
+#: 分辨不依赖红绿差异（用户色弱，颜色只是辅助通道）。
+_SAT_COLORS = ("#E69F00", "#56B4E9", "#009E73", "#CC79A7",
+               "#F0E442", "#0072B2", "#D55E00")
+
 #: 单星摘要的既有格式（tests/test_sat_ground_map.py 钉住「覆盖半径」）。
 _SINGLE_SUMMARY = ("星下点 {lat:.3f}°, {lon:.3f}° · "
                    "覆盖半径 {radius:.0f} km（仰角 ≥ {elev:.0f}°）")
@@ -251,6 +256,8 @@ class SatelliteGroundMap(QWidget):
                     break
         if chosen is None:
             chosen = sats[0]
+        for i, sit in enumerate(sats):
+            sit["color"] = _SAT_COLORS[i % len(_SAT_COLORS)]
         self._track = chosen["track"]
         self._footprint = chosen["footprint"]
         self._error = "; ".join(errors)
@@ -315,13 +322,13 @@ class SatelliteGroundMap(QWidget):
 
     # ---------------------------------------------------------------- 绘制
     def _paint_footprint(self, painter: QPainter, project) -> None:
-        base = QColor(_t.status_color("warning"))
-        outline = QPen(base, 1.4, Qt.DashLine)
-        fill = QColor(base)
-        fill.setAlpha(38)
-        painter.setPen(outline)
-        painter.setBrush(QBrush(fill))
         for sit in self._sats:
+            base = QColor(sit.get("color") or _t.status_color("warning"))
+            outline = QPen(base, 1.4, Qt.DashLine)
+            fill = QColor(base)
+            fill.setAlpha(38)
+            painter.setPen(outline)
+            painter.setBrush(QBrush(fill))
             ring = sit["footprint"].get("ring") or []
             for chunk in _split_lonlat(ring, closed=True):
                 if len(chunk) < 3:
@@ -331,11 +338,11 @@ class SatelliteGroundMap(QWidget):
         painter.setBrush(Qt.NoBrush)
 
     def _paint_track(self, painter: QPainter, project) -> None:
-        pen = QPen(QColor(_t.status_color("success")), 1.8)
         for sit in self._sats:
+            color = QColor(sit.get("color") or _t.status_color("success"))
             segments: List[List[Any]] = sit["track"].get("segments") or []
             if segments:
-                painter.setPen(pen)
+                painter.setPen(QPen(color, 1.8))
                 for seg in segments:
                     if len(seg) < 2:
                         continue
@@ -348,7 +355,7 @@ class SatelliteGroundMap(QWidget):
             if sub is None:
                 continue
             pos = project(sub.lat_deg, sub.lon_deg)
-            color = QColor(_t.status_color("danger"))
+            color = QColor(sit.get("color") or _t.status_color("danger"))
             painter.setPen(QPen(color, 1.5))
             painter.setBrush(QBrush(color))
             painter.drawEllipse(pos, 4.0, 4.0)
@@ -357,9 +364,27 @@ class SatelliteGroundMap(QWidget):
                              QPointF(pos.x() + 8.0, pos.y()))
             painter.drawLine(QPointF(pos.x(), pos.y() - 8.0),
                              QPointF(pos.x(), pos.y() + 8.0))
-            painter.setPen(QPen(color))
-            painter.drawText(QPointF(pos.x() + 8.0, pos.y() - 8.0),
-                             f"{sub.lat_deg:.2f}, {sub.lon_deg:.2f}")
+            # 标星名（不是坐标读数）：读数在摘要/详情里，图上只留识别名。
+            _draw_tag(painter, QPointF(pos.x() + 10.0, pos.y() - 10.0),
+                      str(sit.get("name") or ""), color)
+
+
+def _draw_tag(painter: QPainter, pos: QPointF, text: str,
+              color: QColor) -> None:
+    """小标签：深色垫底 + 主题色文字，压在瓦片上也读得出。"""
+    if not text:
+        return
+    fm = painter.fontMetrics()
+    w = fm.horizontalAdvance(text) + 8
+    h = fm.height() + 4
+    rect_x, rect_y = pos.x() - 3.0, pos.y() - fm.ascent() - 2.0
+    painter.save()
+    painter.setPen(Qt.NoPen)
+    painter.setBrush(QBrush(QColor(12, 16, 24, 170)))
+    painter.drawRect(int(rect_x), int(rect_y), int(w), int(h))
+    painter.setPen(QPen(color))
+    painter.drawText(QPointF(pos.x() + 1.0, pos.y()), text)
+    painter.restore()
 
 
 def _format_tle_state(sats: List[Dict[str, Any]]) -> str:
