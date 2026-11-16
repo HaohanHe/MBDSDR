@@ -33,7 +33,7 @@ __all__ = [
     "FeatureState", "QueryResult", "FeatureCollection", "TemporalContext",
     "TemporalBus", "get_temporal_bus", "great_circle_angle_deg",
     "merge_ranges", "gaps_between", "match_closest_before",
-    "get_ground_features", "upsert_ground_station",
+    "get_ground_features", "upsert_ground_station", "upsert_position_report",
 ]
 
 
@@ -480,7 +480,7 @@ def upsert_ground_station(lat: Optional[float], lon: Optional[float], *,
     站址唯一写入口是 ``main_window.set_observer_site``；这里不读配置、
     不硬编码城市、不猜测位置。
     """
-    col = collection or get_ground_features()
+    col = get_ground_features() if collection is None else collection
     if lat is None or lon is None:
         col.remove(_STATION_ID)
         return None
@@ -491,5 +491,46 @@ def upsert_ground_station(lat: Optional[float], lon: Optional[float], *,
         label="本站",
         properties={"source": source} if source else {},
         valid=ANY_TIME)
+    col.upsert(feature)
+    return feature
+
+
+def upsert_position_report(report, *,
+                           track: Tuple[Tuple[float, float], ...] = (),
+                           ttl_s: float = 120.0,
+                           collection: Optional[FeatureCollection] = None
+                           ) -> Optional[SpatialFeature]:
+    """位置中枢报告 → 移动目标要素（真实数据，绝不造坐标）。
+
+    * ``kind`` 用 ``report.source_type``（adsb / aprs，与 SpatialFeature
+      文档口径一致）；``feature_id`` 带 ``pos:`` 前缀，不与站址冲突；
+    * 有效期 = ``[timestamp, timestamp+ttl_s]``：TTL 内是「当前位置」，
+      窗口外查询不命中——过期不算圈内，也不假装还活着；
+    * 没有位置的报告直接拒收（返回 None）。
+    """
+    lat = getattr(report, "lat", None)
+    lon = getattr(report, "lon", None)
+    if lat is None or lon is None:
+        return None
+    ts = float(getattr(report, "timestamp", 0.0) or 0.0)
+    props: Dict[str, Any] = {
+        "source_type": str(getattr(report, "source_type", "")),
+    }
+    for key in ("altitude_m", "speed_mps", "heading_deg"):
+        val = getattr(report, key, None)
+        if val is not None:
+            props[key] = val
+    props.update(getattr(report, "metadata", None) or {})
+    # 显式传入的空集合也是合法目标（FeatureCollection.__len__ 让空集合
+    # 为假值，用 `or` 会把目标悄悄换成全局集合）。
+    col = get_ground_features() if collection is None else collection
+    feature = SpatialFeature(
+        feature_id=f"pos:{report.source}",
+        kind=str(getattr(report, "source_type", "")) or "mobile",
+        lat=float(lat), lon=float(lon),
+        label=(props.get("callsign") or str(report.source)),
+        properties=props,
+        valid=TimeInterval(ts, ts + float(ttl_s)),
+        track=tuple(track))
     col.upsert(feature)
     return feature

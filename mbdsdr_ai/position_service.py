@@ -21,7 +21,9 @@ import time
 from dataclasses import dataclass, field
 from typing import Callable, Dict, List, Optional, Tuple
 
-__all__ = ["PositionService", "PositionReport"]
+__all__ = ["PositionService", "PositionReport",
+           "get_position_service", "reset_position_service",
+           "report_from_aircraft", "ingest_aircraft"]
 
 
 @dataclass
@@ -51,8 +53,23 @@ class PositionService:
         self._max_track = max_track_points
         self._subscribers: List[Callable[[PositionReport], None]] = []
 
-    def subscribe(self, cb: Callable[[PositionReport], None]) -> None:
+    def subscribe(self, cb: Callable[[PositionReport], None]
+                  ) -> Callable[[], None]:
+        """订阅增量上报；返回退订函数（与 TemporalBus.subscribe 同约定）。"""
         self._subscribers.append(cb)
+
+        def _unsubscribe() -> None:
+            try:
+                self._subscribers.remove(cb)
+            except ValueError:
+                pass
+
+        return _unsubscribe
+
+    @property
+    def ttl_s(self) -> float:
+        """位置有效期（秒）：过期未更新的源由 :meth:`remove_expired` 清除。"""
+        return self._ttl_s
 
     def report(self, report: PositionReport) -> None:
         if report.timestamp == 0.0:
@@ -120,3 +137,76 @@ class PositionService:
     def count(self) -> int:
         with self._lock:
             return len(self._latest)
+
+
+# ---------------------------------------------------------------------------
+# 进程级单例：与 get_time_engine / get_ground_features 同约定。
+# ---------------------------------------------------------------------------
+_global_service: Optional[PositionService] = None
+
+
+def get_position_service() -> PositionService:
+    global _global_service
+    if _global_service is None:
+        _global_service = PositionService()
+    return _global_service
+
+
+def reset_position_service() -> PositionService:
+    """测试隔离：换一个干净单例并返回它（仿 desktop.iq_bus.reset_iq_bus）。"""
+    global _global_service
+    _global_service = PositionService()
+    return _global_service
+
+
+_FT_TO_M = 0.3048
+_KT_TO_MPS = 0.514444
+
+
+def report_from_aircraft(ac: Any) -> Optional[PositionReport]:
+    """``adsb_map.Aircraft`` → :class:`PositionReport`（纯换算，不带副作用）。
+
+    没有配对出位置（lat/lon 为 None）时返回 ``None``——不造坐标。
+    单位口径：ft→m、kt→m/s、航向 = 地速航向 track_deg。
+    """
+    lat = getattr(ac, "lat", None)
+    lon = getattr(ac, "lon", None)
+    if lat is None or lon is None:
+        return None
+    alt_ft = getattr(ac, "altitude_ft", None)
+    gs_kt = getattr(ac, "groundspeed_kt", None)
+    meta: Dict[str, str] = {}
+    cs = (getattr(ac, "callsign", "") or "").strip()
+    if cs:
+        meta["callsign"] = cs
+    return PositionReport(
+        source=str(getattr(ac, "icao_hex", "")).strip().upper() or f"{lat},{lon}",
+        source_type="adsb",
+        lat=float(lat),
+        lon=float(lon),
+        altitude_m=None if alt_ft is None else float(alt_ft) * _FT_TO_M,
+        speed_mps=None if gs_kt is None else float(gs_kt) * _KT_TO_MPS,
+        heading_deg=getattr(ac, "track_deg", None),
+        timestamp=float(getattr(ac, "last_seen", 0.0) or 0.0),
+        metadata=meta,
+    )
+
+
+def ingest_aircraft(ac: Any,
+                    service: Optional[PositionService] = None
+                    ) -> Optional[PositionReport]:
+    """跟踪器出口：合并出位置就上报到位置中枢，返回本次报告（没位置返 None）。
+
+    **同位置去重**：位置没动就不重复上报——否则每个识别帧都会往轨迹里
+    塞同一个点，轨迹被刷屏（航向/高度更新等下一次位置解算再带）。任何
+    异常就地吞掉，绝不拖累解码合并主链。
+    """
+    report = report_from_aircraft(ac)
+    if report is None:
+        return None
+    svc = service or get_position_service()
+    prev = svc.get(report.source)
+    if prev is not None and prev.lat == report.lat and prev.lon == report.lon:
+        return None
+    svc.report(report)
+    return report

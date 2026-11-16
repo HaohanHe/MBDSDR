@@ -214,3 +214,54 @@ def satellite_footprint(name_or_catnr: Union[str, int],
         "ellipsoid": "WGS-72",
         "unit": "km",
     }
+
+
+def resolve_tle_lines(name_or_catnr: Union[str, int]
+                      ) -> Tuple[Tuple[str, str], str]:
+    """真 TLE 取数，返回 ``((line1, line2), source)``。
+
+    取数走本模块 :data:`fetch_tle`（测试注入点不变）。``fetch_tle`` 返回的
+    都是 celestrak 真数据（联网或其磁盘/内存缓存），故 source 如实记
+    "celestrak"；取不到就抛 :class:`TLEUnavailableError`——**绝不回退合成
+    根数**，地图不画假轨迹（这是既有钉扎契约，不是新规矩）。
+    """
+    lines = fetch_tle(_catnr_for(name_or_catnr))
+    return lines, "celestrak"
+
+
+def satellite_situation(name_or_catnr: Union[str, int],
+                        when_unix: Optional[float] = None,
+                        minutes: float = DEFAULT_TRACK_MINUTES,
+                        min_elevation_deg: float = DEFAULT_MIN_ELEVATION_DEG,
+                        points: int = DEFAULT_FOOTPRINT_POINTS,
+                        tle: Optional[Tuple[str, str]] = None,
+                        tle_source: Optional[str] = None) -> Dict[str, Any]:
+    """一颗星在指定时刻的地面态势：覆盖圈 + 轨迹 + TLE 出处与新鲜度。
+
+    * ``tle`` 注入时（测试/钉扎）source 记 "injected"，不冒充联网；
+    * 未注入时经 :func:`resolve_tle_lines` 取真 TLE；
+    * 新鲜度走 :func:`mbdsdr_ai.new_spacetime_tle.tle_freshness`（年龄的
+      唯一实现），解析不了就诚实返回 ``status: "none"``，不编历元。
+    """
+    if tle is None:
+        tle, tle_source = resolve_tle_lines(name_or_catnr)
+    elif tle_source is None:
+        tle_source = "injected"
+    footprint = satellite_footprint(name_or_catnr, when_unix=when_unix,
+                                    min_elevation_deg=min_elevation_deg,
+                                    points=points, tle=tle)
+    track = ground_track(name_or_catnr, when_unix=when_unix,
+                         minutes=minutes, tle=tle)
+    try:
+        from .new_spacetime_tle import tle_freshness
+        fresh = tle_freshness(tle[0])
+    except Exception:  # pragma: no cover - 新鲜度算不出不拖累态势
+        fresh = {"status": "none", "epoch_utc": None, "age_days": None}
+    return {
+        "name": str(name_or_catnr),
+        "footprint": footprint,
+        "track": track,
+        "tle_source": tle_source,
+        "tle_freshness": fresh,
+        "at_unix": footprint["subpoint"].unix_s,
+    }
