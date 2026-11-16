@@ -2535,6 +2535,7 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `docs/COORDINATION.md` | QGIS复核线/常量口径（QGIS 第三轮：椭球唯一真值/单位口径登记收工段（非纯追加，整档 claim）） | 2026-11-14 21:26 | 本笔 |
 | `docs/COORDINATION.md` | QGIS时空线/地图要素（QGIS 时空要素层落到地图上：收工段（非纯追加，整档 claim）） | 2026-11-14 23:06 | 本笔 |
 | `docs/COORDINATION.md` | QGIS时空线/地图要素（11-16：对面收官归档+地面态势端到端收工段（非纯追加，整档 claim）） | 2026-11-16 16:28 | 本笔 |
+| `docs/COORDINATION.md` | QGIS时空线/地图要素（11-16夜：全量首次完整跑完+红归属+真机取证收口段（非纯追加，整档 claim）） | 2026-11-16 17:27 | 本笔 |
 
 > 上表各行均由 `claim` 台账推导：owner 原文与 `acquired_at` 直接取自台账，
 > 目的优先用台账里的 `claim_reason`，没有就如实写「未声明」，不补编。时间列只是
@@ -5690,3 +5691,26 @@ HEAD 基线反证（既有红归属）                    1 failed, 9 passed（�
 
 **下一坐标**：全量结果出来后按结果收口；真机回插后跑
 `probe_sdr_real_validate.py` 一键出真实链路证据。
+
+## 2026-11-16 夜补记：权威全量首次完整跑完 + 真机在位取证 + 红归属
+
+- **全量不再中断**：`python -m pytest tests -q`（Python 3.14）首次完整跑完
+  **2752.82s / 8003 passed / 12 skipped / 9 xfailed / 23 failed / 1 error**，
+  此前多轮「49% 处收集序第 3961 条 C 层中断」本轮未复现。仍非全绿。
+- **红归属（干净基线 a2ea6cd5 对比 + 单跑复验，证据见仓库外
+  `output/full_pytest_attribution_2026-11-16.md`）**：本轮引入 2 条已修
+  （`position_service` 漏 `Any` 导入、`sat_track_panel` 透传 tooltip 未登记）；
+  既有低风险 2 条顺手修（`dateutil→python-dateutil` 声明、主题切换恢复态
+  showMessage 补显式 timeout）；**11 条基线同样红**（既有欠账，需逐条业务
+  裁决，不硬改不放宽断言）；**8 条单跑绿**（全量长序列 Qt 状态顺序污染）。
+  已修 4 处提交 `bcca2200`。
+- **真机回插取证**（此前多轮 not_verified 的硬件项）：SDR 枚举 1 台 RTL/FC0012、
+  GNSS COM4 在位。七环跑 R1/R2/R3/R5/R6：R1 开关 PASS、R2 调谐增益 PASS
+  （ppm≈+30.2）、R5 录音 PASS、R3 频谱对拍 FAIL 已定性为邻台拉质心（非回归，
+  不放宽断言）、R6 APRS 当地无台 UNVERIFIABLE（解码链在真 OTA 音频跑通无崩）。
+  ADS-B 1090MHz 本机物理不可达是历史结案。证据仓库外
+  `output/real_hw_acceptance_2026-11-16.md`。
+- 性能审查：时间广播全量重算 8 星 ≈8ms，不卡帧，无需优化（DISMISS）。
+
+**下一坐标**：修完 4 处后权威全量复跑中（`UmZhe2`）；剩余 11 条既有红按
+业务裁决逐条处理或走台账登记，不伪装全绿。
