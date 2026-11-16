@@ -101,6 +101,16 @@ class AircraftTracker:
 
     def __init__(self) -> None:
         self._ac: Dict[str, Aircraft] = {}
+        # CPR 偶/奇缓冲：icao -> {is_odd: (cpr_lat, cpr_lon, 时刻)}。
+        # adsb_lite 只吐原始 CPR 字段，配对（全球解码）在这里做——不做这步，
+        # IQ 路径的飞机永远没有 lat/lon，地图上永远没有点。
+        self._cpr: Dict[str, Dict[bool, Tuple[int, int, float]]] = {}
+
+    #: 偶/奇帧相隔超过这个秒数不做全球解码（dump1090 同口径：全球解码
+    #: 要求两帧在短时间内；超窗等下一对，不用旧对凑数）。
+    CPR_PAIR_MAX_AGE_S = 10.0
+    #: ICAO 老化窗口：与 mbdsdr_ai.adsb 的 CPR 缓冲清理口径一致。
+    CPR_STALE_S = 60.0
 
     # ------------------------------------------------------------------ #
     def update(self, frame: dict) -> Optional[Aircraft]:
@@ -142,6 +152,29 @@ class AircraftTracker:
         if lon is not None:
             ac.lon = float(lon)
 
+        # CPR 偶/奇配对（全球解码）：单帧只有 17bit 格式坐标，必须
+        # 偶+奇配对才能解出经纬度。配对成功才写 ac.lat/lon，失败保持
+        # 上一次值（不造坐标）。调用方直接给 lat/lon 的帧不受影响。
+        now = time.time()
+        cpr_lat = frame.get("cpr_lat")
+        cpr_lon = frame.get("cpr_lon")
+        odd = frame.get("cpr_odd")
+        if cpr_lat is not None and cpr_lon is not None and odd is not None:
+            slot = self._cpr.setdefault(icao, {})
+            slot[bool(odd)] = (int(cpr_lat), int(cpr_lon), now)
+            even = slot.get(False)
+            oddv = slot.get(True)
+            if (even is not None and oddv is not None
+                    and abs(even[2] - oddv[2]) <= self.CPR_PAIR_MAX_AGE_S):
+                try:
+                    from .adsb import decode_cpr_airborne
+                    plat, plon = decode_cpr_airborne(
+                        even[0], even[1], oddv[0], oddv[1], 0)
+                    ac.lat = float(plat)
+                    ac.lon = float(plon)
+                except (ValueError, TypeError):
+                    pass  # 跨纬度带/坏值：等下一对，不硬凑
+
         ac.last_seen = time.time()
 
         # 位置上报到统一位置中枢（全仓唯一出口：跟踪器一合并出位置就上报，
@@ -156,12 +189,23 @@ class AircraftTracker:
 
     # ------------------------------------------------------------------ #
     def prune(self, ttl_sec: float = 60.0) -> None:
-        """删除超过 ``ttl_sec`` 未更新的航空器。"""
+        """删除超过 ``ttl_sec`` 未更新的航空器（CPR 缓冲同步清）。"""
         now = time.time()
         stale = [k for k, a in self._ac.items()
                  if now - a.last_seen >= ttl_sec]
         for k in stale:
             del self._ac[k]
+        # CPR 缓冲老化：过窗的对不可能再配（新鲜度判据），清掉防无限增长。
+        for k in list(self._cpr):
+            if k in stale:
+                del self._cpr[k]
+                continue
+            slot = self._cpr[k]
+            for odd in list(slot):
+                if now - slot[odd][2] >= self.CPR_STALE_S:
+                    del slot[odd]
+            if not slot:
+                del self._cpr[k]
 
     def all(self) -> List[Aircraft]:
         """按 ``last_seen`` 降序返回全部航空器。"""

@@ -245,10 +245,16 @@ _ME0 = 32
 
 
 def _me_gb(bits: Sequence[int], first: int, last: int) -> int:
-    """复刻 dump1090 getbits(me, first, last)：ME 内 1-based 闭区间，作用于整帧 bits。"""
+    """复刻 dump1090 getbits(me, first, last)：ME 内 1-based 闭区间，作用于整帧 bits。
+
+    ``int(bits[i])`` 不能省：``_decode_bits_at`` 返回 numpy.uint8 数组，
+    ``(v << 1) | bits[i]`` 在 numpy 里每步回绕 8 位——CPR 17bit、高度 12bit、
+    速度 10bit 全部静默解错（2026-11-16 实测：同帧 hex 逐字节一致，位提取
+    却得 204 而不是 85196）。
+    """
     v = 0
     for i in range(_ME0 + first - 1, _ME0 + last):
-        v = (v << 1) | (bits[i] & 1)
+        v = (v << 1) | (int(bits[i]) & 1)
     return v
 
 
