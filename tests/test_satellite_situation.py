@@ -70,9 +70,7 @@ def test_ring_vertices_are_on_the_central_angle():
     fp = sit["footprint"]
     sub = fp["subpoint"]
     for lat, lon in fp["ring"][:-1]:
-        ang = gt.great_circle_angle_deg(sub.lat_deg, sub.lon_deg, lat, lon) \
-            if hasattr(gt, "great_circle_angle_deg") else _angle(
-                sub.lat_deg, sub.lon_deg, lat, lon)
+        ang = _angle(sub.lat_deg, sub.lon_deg, lat, lon)
         assert ang == pytest.approx(fp["central_angle_deg"], abs=0.01)
 
 
