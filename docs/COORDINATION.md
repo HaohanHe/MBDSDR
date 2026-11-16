@@ -2538,6 +2538,8 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `docs/COORDINATION.md` | QGIS时空线/地图要素（11-16夜：全量首次完整跑完+红归属+真机取证收口段（非纯追加，整档 claim）） | 2026-11-16 17:27 | 本笔 |
 | `mbdsdr_ai/pointing_fusion.py` | 指向融合契约线/7c3e91ab（新增指向融合契约：IMU/GNSS/视觉三源合成、质量分级与不确定度） | 2026-11-16 20:33 | 本笔 |
 | `tests/test_pointing_fusion.py` | 指向融合契约线/7c3e91ab（指向融合契约行为测试：星对准恢复、共线拒绝、过期降级、缺姿态不可用） | 2026-11-16 20:33 | 本笔 |
+| `desktop/aprs_panel.py` | S4-APRS实时解调/7c3e91ab（S4 第一刀：流式滑动窗口解调、静默门限、帧去重、采样率对齐与诊断快照） | 2026-11-16 20:47 | 本笔 |
+| `tests/test_aprs_stream_continuity.py` | S4-APRS实时解调/7c3e91ab（跨块连续性回归：旧实现 7 红，修复后 8 绿） | 2026-11-16 20:47 | 本笔 |
 
 > 上表各行均由 `claim` 台账推导：owner 原文与 `acquired_at` 直接取自台账，
 > 目的优先用台账里的 `claim_reason`，没有就如实写「未声明」，不补编。时间列只是

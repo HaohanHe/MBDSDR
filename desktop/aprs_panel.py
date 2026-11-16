@@ -85,6 +85,12 @@ class AprsPanel(QWidget):
         self._packets: List[dict] = []   # 全部包（未过滤）
         self._filter = "全部"
         self._modem = AFSKModem() if _HAS_AX25 else None
+        # 流式解调用的滑动窗口（见 feed_audio 的注释）
+        self._audio_buf = None           # np.ndarray | None
+        self._recent_frames: dict = {}   # 帧签名 -> 上次上报时刻
+        self._feed_count = 0
+        self._decode_ms_total = 0.0      # 累计解调耗时，供诊断
+        self._decode_calls = 0
         self._build_ui()
         self.packet_ready.connect(self._add_packet)  # Auto: 同线程同步/跨线程排队
 
@@ -153,18 +159,131 @@ class AprsPanel(QWidget):
         self._sdr_connected = bool(connected)
         self._refresh_header()
 
+    #: 流式解调窗口（秒）。一个 AX.25 帧最长约 2 s（256 字节 @1200bd + 前导），
+    #: 窗口必须能完整装下一帧，否则永远解不出来。
+    STREAM_WINDOW_S = 2.0
+
+    #: 静默门限。整窗峰值低于它就不跑解调——没有信号时白跑 2 s 的相关运算
+    #: 是纯浪费（每块几十毫秒，够把 UI 拖顿）。
+    STREAM_ENERGY_FLOOR = 1e-3
+
+    #: 同一帧在这个时间内重复出现，只报一次。滑动窗口会让同一帧在连续几次
+    #: 解调里反复出现，不去重的话一条报文会刷十几行。
+    STREAM_DEDUP_S = 3.0
+
+    #: 单次最多上报多少帧。避免启动/突发时一屏灌满。
+    STREAM_MAX_FRAMES = 8
+
     def feed_audio(self, audio, sample_rate: float) -> None:
-        """喂入 FM 鉴频后的 AFSK 音频；解调 + APRS 解析。"""
+        """喂入 FM 鉴频后的 AFSK 音频；**滑动窗口解调**后交给 APRS 解析。
+
+        为什么不能"每块独立解调"
+        ------------------------
+        `AFSKModem.demodulate()` 内部的位定时（PLL）是**从零起相位**的，
+        它假设输入是一个完整独立的录音。实时喂进来的音频是一块一块的
+        （典型 1024–8192 样本 @48k ≈ 21–170 ms），而一个 AX.25 帧约
+        300–500 ms（含前导）——**几乎每个帧都跨块**。逐块独立解调的结果是
+        "看着在实时跑、实际解不出长帧"，比明确不支持更隐蔽。
+
+        所以这里维护一个 2 秒滑动窗口：每来一块就追加、裁掉最旧，然后对
+        **整个窗口**解调。窗口能装下完整帧，跨块问题就消失了；代价是每块
+        重解 2 秒音频，用静默门限与去重把浪费压下去。
+
+        去重：窗口滑动会让同一帧在连续几次解调里反复出现，按帧字节签名
+        在 `STREAM_DEDUP_S` 内只报一次。
+        """
         if not (_HAS_AX25 and _HAS_APRS and self._modem is not None):
             return
         if audio is None or len(audio) == 0:
             return
+
+        import numpy as np
+
         try:
-            frames = self._modem.demodulate(audio)
+            arr = np.asarray(audio, dtype=np.float64).reshape(-1)
+        except (TypeError, ValueError):
+            return
+        if arr.size == 0:
+            return
+
+        target_fs = float(getattr(self._modem, "sample_rate", 48000.0) or 48000.0)
+        fs = float(sample_rate or target_fs)
+        if abs(fs - target_fs) > 1.0:
+            # 采样率不一致时做线性插值对齐。1200 bd 的 AFSK 只占 1–2.4 kHz，
+            # 线性插值足够；换成"直接丢样本/复制样本"会把音调整体搬移，
+            # 解出来全是错的。
+            n_out = int(round(arr.size * target_fs / fs))
+            if n_out <= 1:
+                return
+            arr = np.interp(np.linspace(0.0, arr.size - 1.0, n_out),
+                            np.arange(arr.size, dtype=np.float64), arr)
+            fs = target_fs
+
+        # --- 滑动窗口 ---
+        if self._audio_buf is None or self._audio_buf.size == 0:
+            self._audio_buf = arr
+        else:
+            self._audio_buf = np.concatenate([self._audio_buf, arr])
+        cap = int(round(self.STREAM_WINDOW_S * fs))
+        if cap > 0 and self._audio_buf.size > cap:
+            self._audio_buf = self._audio_buf[-cap:]
+        if self._audio_buf.size == 0:
+            return
+
+        # 静默不白跑（整窗都没有能量，解调必然空转）
+        if float(np.max(np.abs(self._audio_buf))) < self.STREAM_ENERGY_FLOOR:
+            return
+
+        self._feed_count += 1
+        t0 = time.perf_counter()
+        try:
+            frames = self._modem.demodulate(self._audio_buf)
         except Exception:
             return
-        for fr in frames:
+        dt_ms = (time.perf_counter() - t0) * 1000.0
+        self._decode_ms_total += dt_ms
+        self._decode_calls += 1
+
+        # 去重窗口用单调时钟：墙钟被 NTP 回拨时，按 wall clock 算间隔会让
+        # 同一帧在「时间倒流」后重复上报。
+        now = time.monotonic()
+        reported = 0
+        for fr in frames or []:
+            if reported >= self.STREAM_MAX_FRAMES:
+                break
+            if not getattr(fr, "fcs_valid", False):
+                continue
+            try:
+                signature = bytes(fr.to_bytes())
+            except Exception:
+                signature = b""
+            if signature:
+                last = self._recent_frames.get(signature)
+                if last is not None and (now - last) < self.STREAM_DEDUP_S:
+                    continue
+                self._recent_frames[signature] = now
+            reported += 1
             self._consume_frame(fr)
+
+        # 去重表清理：只留还在窗口期内的签名，避免长跑无限增长
+        if self._recent_frames:
+            stale = [k for k, ts in self._recent_frames.items()
+                     if (now - ts) >= self.STREAM_DEDUP_S * 4]
+            for k in stale:
+                self._recent_frames.pop(k, None)
+
+    def stream_diagnostics(self) -> dict:
+        """流式解调的自检快照（平均块耗时等），供诊断面板/测试读取。"""
+        calls = max(1, self._decode_calls)
+        return {
+            "feed_count": self._feed_count,
+            "decode_calls": self._decode_calls,
+            "avg_decode_ms": round(self._decode_ms_total / calls, 2),
+            "window_s": self.STREAM_WINDOW_S,
+            "buffered_samples": int(0 if self._audio_buf is None
+                                    else self._audio_buf.size),
+            "dedup_entries": len(self._recent_frames),
+        }
 
     def submit_frame(self, frame) -> None:
         """直接喂一个 AX25Frame（测试/外部后端用）。"""
