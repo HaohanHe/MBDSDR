@@ -4122,6 +4122,165 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         xs, ys = self._sky_to_screen_many(az_deg, alt_deg)
         return [QPointF(float(x), float(y)) for x, y in zip(xs, ys)]
 
+    # ---- 指向绑定：让外部解算结果直接驱动视图（PRD v2 F7）----------------
+    #
+    # 为什么要这一层：星官连线图层早就有了（`_draw_constellations`），但它的
+    # 视图中心一直由鼠标 pan/zoom 决定——那是"看天"，不是"这把线该画在望远镜
+    # 真实指向的哪里"。把解算出的光轴/A FOV 绑到 view_state 上，既有图层不用改
+    # 一行代码就落到正确位置。
+    #
+    # 边界：只接受已经过校验的有限值；拒绝时返回 False 并保持原状，绝不"尽力
+    # 凑一个"——指向错了，线就会整体偏移，那比不画更糟。
+
+    POINTING_DRIFT_TOLERANCE_DEG = 0.5
+    """视图与绑定值的偏差超过它就视为"用户已接管"（手动拖过/缩过）。"""
+
+    def bind_pointing(self, azimuth_deg: float, elevation_deg: float,
+                      fov_deg: float, *, roll_deg: Optional[float] = None,
+                      source: str = "",
+                      uncertainty_deg: Optional[float] = None,
+                      now_unix: Optional[float] = None) -> bool:
+        """把视图指向绑定到外部解算结果（望远镜/相机求出的真实光轴）。
+
+        Args:
+            azimuth_deg / elevation_deg: 光轴地平坐标（度）。
+            fov_deg: 视场直径（度）；允许小于视图默认下限之外的任何合法值。
+            roll_deg: 画面旋转（度）；None = 不动当前旋转。
+            source: 自由标签（"solve:field" / "hint:imu" / …），只记录不解释。
+            uncertainty_deg: 自报不确定度，用于上层决定线的置信度形态。
+            now_unix: 绑定时刻（测试可注入）。
+
+        Returns:
+            是否绑定成功。任一输入非有限/越界 → False，视图保持原状。
+        """
+        try:
+            az = float(azimuth_deg) % 360.0
+            alt = float(elevation_deg)
+            fov = float(fov_deg)
+        except (TypeError, ValueError):
+            return False
+        if not (math.isfinite(az) and math.isfinite(alt) and math.isfinite(fov)):
+            return False
+        if not (-90.0 <= alt <= 90.0):
+            return False
+        if not (0.0 < fov <= float(self.view_state.max_fov)):
+            return False
+
+        prev = getattr(self, "_pointing_binding", None)
+        if not prev or not prev.get("active"):
+            self._pointing_restore = (
+                float(self.view_state.center_az),
+                float(self.view_state.center_alt),
+                float(self.view_state.fov_deg),
+                float(getattr(self, "_rotation", 0.0) or 0.0),
+            )
+
+        self.view_state.look_at(az, alt)
+        self.view_state.zoom_to(max(float(self.view_state.min_fov), fov))
+        if roll_deg is not None:
+            try:
+                roll = float(roll_deg)
+            except (TypeError, ValueError):
+                roll = None
+            if roll is not None and math.isfinite(roll):
+                self._rotation = roll
+                self.view_state.rotation = roll
+
+        self._pointing_binding = {
+            "active": True,
+            "az_deg": az,
+            "alt_deg": alt,
+            "fov_deg": float(self.view_state.fov_deg),
+            "requested_fov_deg": fov,
+            "roll_deg": None if roll_deg is None else float(roll_deg),
+            "source": str(source or ""),
+            "uncertainty_deg": (None if uncertainty_deg is None
+                                else float(uncertainty_deg)),
+            "bound_at_unix": time.time() if now_unix is None else float(now_unix),
+        }
+        self.update()
+        return True
+
+    def clear_pointing_binding(self, *, restore: bool = True) -> None:
+        """解除绑定。``restore=True`` 时回到绑定前的视角（用户手动接管后不该被拽走）。"""
+        prev = getattr(self, "_pointing_binding", None)
+        if prev:
+            prev["active"] = False
+        if restore:
+            saved = getattr(self, "_pointing_restore", None)
+            if saved:
+                az, alt, fov, rot = saved
+                try:
+                    self.view_state.look_at(az, alt)
+                    self.view_state.zoom_to(fov)
+                    self._rotation = rot
+                    self.view_state.rotation = rot
+                except (TypeError, ValueError):  # pragma: no cover - 恢复失败不阻断
+                    pass
+        self._pointing_restore = None
+        self.update()
+
+    @property
+    def pointing_binding(self) -> Optional[Dict[str, object]]:
+        """当前绑定快照，含"用户是否已接管"的实时判定。
+
+        偏差判定不靠 pan/zoom 里挂钩子（那会侵入交互代码），而是每次读的时候
+        比一次：视图当前 az/alt/fov 与绑定值差超过容差 → ``still_bound=False``。
+        这样"用户拖了一下就自动算接管"，不需要额外的状态机。
+        """
+        info = getattr(self, "_pointing_binding", None)
+        if not info or not info.get("active"):
+            return None
+        out = dict(info)
+        az_now = float(self.view_state.center_az)
+        alt_now = float(self.view_state.center_alt)
+        d_az = abs((az_now - float(info["az_deg"]) + 180.0) % 360.0 - 180.0)
+        d_alt = abs(alt_now - float(info["alt_deg"]))
+        d_fov = abs(float(self.view_state.fov_deg) - float(info["fov_deg"]))
+        drift = max(d_az, d_alt, d_fov)
+        out["view_az_deg"] = az_now
+        out["view_alt_deg"] = alt_now
+        out["view_fov_deg"] = float(self.view_state.fov_deg)
+        out["drift_deg"] = drift
+        out["still_bound"] = drift <= float(self.POINTING_DRIFT_TOLERANCE_DEG)
+        return out
+
+    def overlay_for_current_view(self, *, site, jd_ut1: float,
+                                 axis_error_deg: Optional[float] = None,
+                                 min_confident_axis_deg: Optional[float] = None,
+                                 culture: str = "chinese",
+                                 include_regions: bool = True):
+        """按**当前视图指向**构造星官叠加数据（PRD v2 T08）。
+
+        投影直接用本视图的 ``_sky_to_screen_many``——不另造第二套投影，
+        这是"线要落在星上"的前提。
+
+        返回 ``OverlayResult``；数据不可用/拒画时 ``drawable=False`` 且不含折线。
+        """
+        from mbdsdr_ai.overlay_asterisms import OverlayViewport, build_overlay
+
+        binding = self.pointing_binding
+        if binding and binding.get("uncertainty_deg") is not None:
+            if axis_error_deg is None:
+                axis_error_deg = float(binding["uncertainty_deg"])
+        vp = OverlayViewport(
+            width_px=int(self.width()),
+            height_px=int(self.height()),
+            fov_deg=float(self.view_state.fov_deg),
+            center_az_deg=float(self.view_state.center_az),
+            center_alt_deg=float(self.view_state.center_alt),
+            roll_deg=float(getattr(self, "_rotation", 0.0) or 0.0),
+            projection=str(self.projection_name),
+        )
+        return build_overlay(
+            site=site, jd_ut1=float(jd_ut1), viewport=vp,
+            project=self._sky_to_screen_many,
+            axis_error_deg=axis_error_deg,
+            min_confident_axis_deg=min_confident_axis_deg,
+            culture=culture, include_regions=include_regions,
+        )
+
+
     def _sky_to_screen_finite(self, azimuth_deg: float,
                               elevation_deg: float) -> Optional[QPointF]:
         """同 _sky_to_screen, 但视界外/相机背后返回 None。
