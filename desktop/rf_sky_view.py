@@ -4156,6 +4156,68 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
     POINTING_DRIFT_TOLERANCE_DEG = 0.5
     """视图与绑定值的偏差超过它就视为"用户已接管"（手动拖过/缩过）。"""
 
+    CONFIDENT_FOV_FRACTION = 0.10
+    """光轴误差 ≤ 视场×这个比例 → 线按实线画（"你看到的形状是对的"）。"""
+
+    COARSE_FOV_FRACTION = 0.33
+    """误差 ≤ 视场×这个比例 → 线画虚线（"方向大致对，形状别当真"）；
+    再大就一条线都不画。
+
+    门槛用**视场比例**而不是绝对角度：2.3° 目镜要求 0.23°，60° 广角允许 6°，
+    同一个绝对阈值在两种视场下一个太松一个太紧。用比例就不需要按倍率重新标定。
+
+    这两个数字是**起点**，不是实测结论——PRD v2 §14.2 要求门槛由真实目镜画面
+    实测后写进常量登记；在那之前它们只用来把"准/不准"三档分开，不参与任何
+    精度宣称。
+    """
+
+    def _constellation_confidence(self) -> Tuple[str, Optional[float]]:
+        """星官连线当前该用什么置信度形态。
+
+        返回 ``(档位, 误差/视场比)``，档位含义：
+
+        ``ideal``      虚拟天空（没绑定真实指向）——星表算出来的，本身精确，实线
+        ``confident``  已绑定且误差小——实线
+        ``coarse``     已绑定但误差较大——虚线
+        ``unknown``    已绑定但**没自报误差**——虚线（不敢说准）
+        ``none``       误差超限——一条都不画
+
+        "没自报误差就画虚线"是刻意的：一旦进入"指向识别"语义，
+        "不知道准不准"和"准"必须长得不一样。画成实线等于替解算器担保。
+        """
+        binding = self.pointing_binding
+        if binding is None:
+            return ("ideal", None)
+        if not binding.get("still_bound"):
+            # 用户拖过/缩过 = 已接管，回到"看天"语义，星表几何仍然精确。
+            return ("ideal", None)
+
+        uncertainty = binding.get("uncertainty_deg")
+        if uncertainty is None:
+            return ("unknown", None)
+        try:
+            unc = float(uncertainty)
+        except (TypeError, ValueError):
+            return ("unknown", None)
+        if not math.isfinite(unc) or unc < 0.0:
+            return ("unknown", None)
+
+        fov = binding.get("view_fov_deg") or binding.get("fov_deg") or 0.0
+        try:
+            fov = float(fov)
+        except (TypeError, ValueError):
+            return ("unknown", None)
+        if fov <= 0.0:
+            return ("unknown", None)
+
+        ratio = unc / fov
+        if ratio <= float(self.CONFIDENT_FOV_FRACTION):
+            return ("confident", ratio)
+        if ratio <= float(self.COARSE_FOV_FRACTION):
+            return ("coarse", ratio)
+        return ("none", ratio)
+
+
     def bind_pointing(self, azimuth_deg: float, elevation_deg: float,
                       fov_deg: float, *, roll_deg: Optional[float] = None,
                       source: str = "",
@@ -5197,6 +5259,14 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         detail_alpha, label_alpha = self._constellation_layer_alpha()
         night = self._sky_brightness < 0.5
 
+        # 置信度形态：线是自证的，所以"准"与"不准"不能长得一样。
+        # 误差超限时**一条线都不画**——画一条偏十几度的线比不画更糟，
+        # 用户会记住错的形状（PRD v2 §13.2）。
+        confidence, _ratio = self._constellation_confidence()
+        if confidence == "none":
+            return
+        dashed = confidence in ("coarse", "unknown")
+
         for layer in layers:
             if layer.system_id == _constel.SYSTEM_IAU:
                 base_line = QColor(112, 142, 190, 95 if night else 55)
@@ -5209,13 +5279,19 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
             points = self._layer_points(prepared, gs, jd)
 
             painter.save()
-            painter.setPen(QPen(base_line, 1))
+            pen = QPen(base_line, 1)
+            if dashed:
+                pen.setStyle(Qt.PenStyle.DashLine)
+            painter.setPen(pen)
             painter.drawPath(self._constel_path(prepared["region"], points))
             if detail_alpha > 0.0 and prepared["detail"]:
                 dcol = QColor(base_line)
                 dcol.setAlpha(int(base_line.alpha() * detail_alpha))
                 if dcol.alpha() >= 8:
-                    painter.setPen(QPen(dcol, 1))
+                    dpen = QPen(dcol, 1)
+                    if dashed:
+                        dpen.setStyle(Qt.PenStyle.DashLine)
+                    painter.setPen(dpen)
                     painter.drawPath(
                         self._constel_path(prepared["detail"], points))
             painter.restore()
