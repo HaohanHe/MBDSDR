@@ -1286,7 +1286,7 @@ class SatTrackPanel(QFrame):
         """
         try:
             self.ground_hint.setText(text)
-            self.ground_hint.setToolTip(suggestion)
+            self.ground_hint.setToolTip(f"地面对象：{suggestion}")
         except (AttributeError, RuntimeError):
             pass
 

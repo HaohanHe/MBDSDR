@@ -35,6 +35,7 @@ _IMPORT2DIST = {
     "serial": "pyserial",
     "websocket": "websocket-client",
     "yaml": "pyyaml",
+    "dateutil": "python-dateutil",  # dateutil.tz 的 PyPI 发行名带 python- 前缀
 }
 
 # 系统级硬件绑定：不走 PyPI（apt / 厂商渠道安装），诚实豁免而非假声明。

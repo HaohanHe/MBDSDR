@@ -19,7 +19,7 @@ from __future__ import annotations
 import threading
 import time
 from dataclasses import dataclass, field
-from typing import Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 __all__ = ["PositionService", "PositionReport",
            "get_position_service", "reset_position_service",

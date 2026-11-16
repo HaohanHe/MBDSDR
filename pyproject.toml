@@ -59,6 +59,9 @@ net = ["websocket-client", "websockets", "zstandard"]
 # 的 cryptography 同理）。缺失时自动退回 gzip / 内置 ssl，不阻断任何请求。
 http = ["brotli", "cryptography"]
 configs = ["PyYAML"]  # frame_layout_tool 布局表 YAML 面（可选，缺失显式报错）
+# time_format.py 的 Windows 本地时区回退用 dateutil.tz（tzwinlocal/tzlocal），
+# try/except 降级；缺它只废该回退路径，不影响主包导入。
+timezone = ["python-dateutil"]
 test = ["pytest"]
 
 [project.urls]

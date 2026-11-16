@@ -5803,7 +5803,7 @@ class MainWindow(QMainWindow):
             if _app is not None:
                 QApplication.restoreOverrideCursor()
             if prev_status:
-                self.statusBar().showMessage(prev_status)
+                self.statusBar().showMessage(prev_status, 0)  # 恢复原提示，驻留档 0
             else:
                 self.statusBar().clearMessage()
 
