@@ -1,0 +1,934 @@
+{
+ "meta": {
+  "schema": "mbdsdr.mobile.sky_projection_golden.v1",
+  "generator": "scripts/build_sky_projection_golden.py",
+  "generated_utc": "2026-11-16T11:42:28Z",
+  "source_of_truth": "mbdsdr_ai.sky_interaction.sky_to_screen with PerspectiveProjection",
+  "projection": "perspective",
+  "tolerance_px": 0.5,
+  "tolerance_reason": "同一公式的两次实现，差只应来自 float32/float64 舍入；0.5 像素在显示意义上就是同一个位置",
+  "clamped_points_skipped": 6,
+  "clamped_skip_reason": "桌面把画布外有限点钳到 ±4×短边（SCREEN_OFFSCREEN_CLAMP_FACTOR），手机端不钳、用真实坐标交给段裁剪；两种做法都对但数值不同，故不入本表",
+  "case_count": 15
+ },
+ "cases": [
+  {
+   "name": "due_south_60deg_1080x1920",
+   "view": {
+    "center_az_deg": 180.0,
+    "center_alt_deg": 45.0,
+    "fov_deg": 60.0,
+    "rotation_deg": 0.0,
+    "min_fov_deg": 0.5,
+    "max_fov_deg": 180.0,
+    "width": 1080,
+    "height": 1920
+   },
+   "points": [
+    {
+     "az_deg": 180.0,
+     "alt_deg": 45.0,
+     "visible": true,
+     "px": 540.0,
+     "py": 960.0
+    },
+    {
+     "az_deg": 180.0,
+     "alt_deg": 65.0,
+     "visible": true,
+     "px": 540.0,
+     "py": 619.575933376423
+    },
+    {
+     "az_deg": 180.0,
+     "alt_deg": 25.0,
+     "visible": true,
+     "px": 540.0,
+     "py": 1300.424066623577
+    },
+    {
+     "az_deg": 200.0,
+     "alt_deg": 45.0,
+     "visible": true,
+     "px": 773.2320105355086,
+     "py": 930.9201655842687
+    },
+    {
+     "az_deg": 160.0,
+     "alt_deg": 45.0,
+     "visible": true,
+     "px": 306.76798946449134,
+     "py": 930.9201655842686
+    },
+    {
+     "az_deg": 190.0,
+     "alt_deg": 55.0,
+     "visible": true,
+     "px": 635.1897652070422,
+     "py": 788.1529056825377
+    },
+    {
+     "az_deg": 0.0,
+     "alt_deg": -45.0,
+     "visible": false,
+     "px": null,
+     "py": null
+    }
+   ]
+  },
+  {
+   "name": "due_south_60deg_1920x1080",
+   "view": {
+    "center_az_deg": 180.0,
+    "center_alt_deg": 45.0,
+    "fov_deg": 60.0,
+    "rotation_deg": 0.0,
+    "min_fov_deg": 0.5,
+    "max_fov_deg": 180.0,
+    "width": 1920,
+    "height": 1080
+   },
+   "points": [
+    {
+     "az_deg": 180.0,
+     "alt_deg": 45.0,
+     "visible": true,
+     "px": 960.0,
+     "py": 540.0
+    },
+    {
+     "az_deg": 180.0,
+     "alt_deg": 65.0,
+     "visible": true,
+     "px": 960.0,
+     "py": 199.575933376423
+    },
+    {
+     "az_deg": 180.0,
+     "alt_deg": 25.0,
+     "visible": true,
+     "px": 960.0,
+     "py": 880.4240666235769
+    },
+    {
+     "az_deg": 200.0,
+     "alt_deg": 45.0,
+     "visible": true,
+     "px": 1193.2320105355086,
+     "py": 510.92016558426866
+    },
+    {
+     "az_deg": 160.0,
+     "alt_deg": 45.0,
+     "visible": true,
+     "px": 726.7679894644914,
+     "py": 510.92016558426866
+    },
+    {
+     "az_deg": 190.0,
+     "alt_deg": 55.0,
+     "visible": true,
+     "px": 1055.1897652070422,
+     "py": 368.1529056825377
+    },
+    {
+     "az_deg": 0.0,
+     "alt_deg": -45.0,
+     "visible": false,
+     "px": null,
+     "py": null
+    }
+   ]
+  },
+  {
+   "name": "due_south_60deg_800x800",
+   "view": {
+    "center_az_deg": 180.0,
+    "center_alt_deg": 45.0,
+    "fov_deg": 60.0,
+    "rotation_deg": 0.0,
+    "min_fov_deg": 0.5,
+    "max_fov_deg": 180.0,
+    "width": 800,
+    "height": 800
+   },
+   "points": [
+    {
+     "az_deg": 180.0,
+     "alt_deg": 45.0,
+     "visible": true,
+     "px": 400.0,
+     "py": 400.00000000000006
+    },
+    {
+     "az_deg": 180.0,
+     "alt_deg": 65.0,
+     "visible": true,
+     "px": 400.0,
+     "py": 147.8340247232763
+    },
+    {
+     "az_deg": 180.0,
+     "alt_deg": 25.0,
+     "visible": true,
+     "px": 400.0,
+     "py": 652.1659752767237
+    },
+    {
+     "az_deg": 200.0,
+     "alt_deg": 45.0,
+     "visible": true,
+     "px": 572.764452248525,
+     "py": 378.4593819142731
+    },
+    {
+     "az_deg": 160.0,
+     "alt_deg": 45.0,
+     "visible": true,
+     "px": 227.23554775147505,
+     "py": 378.4593819142731
+    },
+    {
+     "az_deg": 190.0,
+     "alt_deg": 55.0,
+     "visible": true,
+     "px": 470.5109371904017,
+     "py": 272.705856061139
+    },
+    {
+     "az_deg": 0.0,
+     "alt_deg": -45.0,
+     "visible": false,
+     "px": null,
+     "py": null
+    }
+   ]
+  },
+  {
+   "name": "near_zenith_50deg_1080x1920",
+   "view": {
+    "center_az_deg": 90.0,
+    "center_alt_deg": 89.0,
+    "fov_deg": 50.0,
+    "rotation_deg": 0.0,
+    "min_fov_deg": 0.5,
+    "max_fov_deg": 180.0,
+    "width": 1080,
+    "height": 1920
+   },
+   "points": [
+    {
+     "az_deg": 90.0,
+     "alt_deg": 89.0,
+     "visible": true,
+     "px": 540.0,
+     "py": 960.0
+    },
+    {
+     "az_deg": 90.0,
+     "alt_deg": 89.0,
+     "visible": true,
+     "px": 540.0,
+     "py": 960.0
+    },
+    {
+     "az_deg": 90.0,
+     "alt_deg": 69.0,
+     "visible": true,
+     "px": 540.0,
+     "py": 1381.4898105714124
+    },
+    {
+     "az_deg": 110.0,
+     "alt_deg": 89.0,
+     "visible": true,
+     "px": 546.9125166839676,
+     "py": 958.7813224427875
+    },
+    {
+     "az_deg": 70.0,
+     "alt_deg": 89.0,
+     "visible": true,
+     "px": 533.0874833160324,
+     "py": 958.7813224427875
+    },
+    {
+     "az_deg": 100.0,
+     "alt_deg": 89.0,
+     "visible": true,
+     "px": 543.5095284710723,
+     "py": 959.6930028087413
+    },
+    {
+     "az_deg": 270.0,
+     "alt_deg": -89.0,
+     "visible": false,
+     "px": null,
+     "py": null
+    }
+   ]
+  },
+  {
+   "name": "near_zenith_50deg_1920x1080",
+   "view": {
+    "center_az_deg": 90.0,
+    "center_alt_deg": 89.0,
+    "fov_deg": 50.0,
+    "rotation_deg": 0.0,
+    "min_fov_deg": 0.5,
+    "max_fov_deg": 180.0,
+    "width": 1920,
+    "height": 1080
+   },
+   "points": [
+    {
+     "az_deg": 90.0,
+     "alt_deg": 89.0,
+     "visible": true,
+     "px": 960.0,
+     "py": 540.0
+    },
+    {
+     "az_deg": 90.0,
+     "alt_deg": 89.0,
+     "visible": true,
+     "px": 960.0,
+     "py": 540.0
+    },
+    {
+     "az_deg": 90.0,
+     "alt_deg": 69.0,
+     "visible": true,
+     "px": 960.0,
+     "py": 961.4898105714124
+    },
+    {
+     "az_deg": 110.0,
+     "alt_deg": 89.0,
+     "visible": true,
+     "px": 966.9125166839676,
+     "py": 538.7813224427875
+    },
+    {
+     "az_deg": 70.0,
+     "alt_deg": 89.0,
+     "visible": true,
+     "px": 953.0874833160324,
+     "py": 538.7813224427875
+    },
+    {
+     "az_deg": 100.0,
+     "alt_deg": 89.0,
+     "visible": true,
+     "px": 963.5095284710723,
+     "py": 539.6930028087413
+    },
+    {
+     "az_deg": 270.0,
+     "alt_deg": -89.0,
+     "visible": false,
+     "px": null,
+     "py": null
+    }
+   ]
+  },
+  {
+   "name": "near_zenith_50deg_800x800",
+   "view": {
+    "center_az_deg": 90.0,
+    "center_alt_deg": 89.0,
+    "fov_deg": 50.0,
+    "rotation_deg": 0.0,
+    "min_fov_deg": 0.5,
+    "max_fov_deg": 180.0,
+    "width": 800,
+    "height": 800
+   },
+   "points": [
+    {
+     "az_deg": 90.0,
+     "alt_deg": 89.0,
+     "visible": true,
+     "px": 400.0,
+     "py": 400.0
+    },
+    {
+     "az_deg": 90.0,
+     "alt_deg": 89.0,
+     "visible": true,
+     "px": 400.0,
+     "py": 400.0
+    },
+    {
+     "az_deg": 90.0,
+     "alt_deg": 69.0,
+     "visible": true,
+     "px": 400.0,
+     "py": 712.2146744973425
+    },
+    {
+     "az_deg": 110.0,
+     "alt_deg": 89.0,
+     "visible": true,
+     "px": 405.1203827288649,
+     "py": 399.09727588354633
+    },
+    {
+     "az_deg": 70.0,
+     "alt_deg": 89.0,
+     "visible": true,
+     "px": 394.8796172711351,
+     "py": 399.09727588354633
+    },
+    {
+     "az_deg": 100.0,
+     "alt_deg": 89.0,
+     "visible": true,
+     "px": 402.59965071931276,
+     "py": 399.7725946731417
+    },
+    {
+     "az_deg": 270.0,
+     "alt_deg": -89.0,
+     "visible": false,
+     "px": null,
+     "py": null
+    }
+   ]
+  },
+  {
+   "name": "rotated_25deg_1080x1920",
+   "view": {
+    "center_az_deg": 270.0,
+    "center_alt_deg": 30.0,
+    "fov_deg": 25.0,
+    "rotation_deg": 17.0,
+    "min_fov_deg": 0.5,
+    "max_fov_deg": 180.0,
+    "width": 1080,
+    "height": 1920
+   },
+   "points": [
+    {
+     "az_deg": 270.0,
+     "alt_deg": 30.0,
+     "visible": true,
+     "px": 540.0,
+     "py": 960.0
+    },
+    {
+     "az_deg": 270.0,
+     "alt_deg": 50.0,
+     "visible": true,
+     "px": 799.2028250014862,
+     "py": 112.18576112540245
+    },
+    {
+     "az_deg": 270.0,
+     "alt_deg": 10.0,
+     "visible": true,
+     "px": 280.7971749985139,
+     "py": 1807.814238874597
+    },
+    {
+     "az_deg": 290.0,
+     "alt_deg": 30.0,
+     "visible": true,
+     "px": 1282.1124948862291,
+     "py": 1117.2215370378967
+    },
+    {
+     "az_deg": 250.0,
+     "alt_deg": 30.0,
+     "visible": true,
+     "px": -163.1563091075982,
+     "py": 675.358520701921
+    },
+    {
+     "az_deg": 280.0,
+     "alt_deg": 40.0,
+     "visible": true,
+     "px": 989.0105482470931,
+     "py": 628.3082319955554
+    },
+    {
+     "az_deg": 90.0,
+     "alt_deg": -30.0,
+     "visible": false,
+     "px": null,
+     "py": null
+    }
+   ]
+  },
+  {
+   "name": "rotated_25deg_1920x1080",
+   "view": {
+    "center_az_deg": 270.0,
+    "center_alt_deg": 30.0,
+    "fov_deg": 25.0,
+    "rotation_deg": 17.0,
+    "min_fov_deg": 0.5,
+    "max_fov_deg": 180.0,
+    "width": 1920,
+    "height": 1080
+   },
+   "points": [
+    {
+     "az_deg": 270.0,
+     "alt_deg": 30.0,
+     "visible": true,
+     "px": 960.0,
+     "py": 540.0
+    },
+    {
+     "az_deg": 270.0,
+     "alt_deg": 50.0,
+     "visible": true,
+     "px": 1219.2028250014862,
+     "py": -307.81423887459755
+    },
+    {
+     "az_deg": 270.0,
+     "alt_deg": 10.0,
+     "visible": true,
+     "px": 700.7971749985139,
+     "py": 1387.814238874597
+    },
+    {
+     "az_deg": 290.0,
+     "alt_deg": 30.0,
+     "visible": true,
+     "px": 1702.1124948862291,
+     "py": 697.2215370378967
+    },
+    {
+     "az_deg": 250.0,
+     "alt_deg": 30.0,
+     "visible": true,
+     "px": 256.8436908924018,
+     "py": 255.35852070192095
+    },
+    {
+     "az_deg": 280.0,
+     "alt_deg": 40.0,
+     "visible": true,
+     "px": 1409.010548247093,
+     "py": 208.3082319955554
+    },
+    {
+     "az_deg": 90.0,
+     "alt_deg": -30.0,
+     "visible": false,
+     "px": null,
+     "py": null
+    }
+   ]
+  },
+  {
+   "name": "rotated_25deg_800x800",
+   "view": {
+    "center_az_deg": 270.0,
+    "center_alt_deg": 30.0,
+    "fov_deg": 25.0,
+    "rotation_deg": 17.0,
+    "min_fov_deg": 0.5,
+    "max_fov_deg": 180.0,
+    "width": 800,
+    "height": 800
+   },
+   "points": [
+    {
+     "az_deg": 270.0,
+     "alt_deg": 30.0,
+     "visible": true,
+     "px": 400.0,
+     "py": 400.0
+    },
+    {
+     "az_deg": 270.0,
+     "alt_deg": 50.0,
+     "visible": true,
+     "px": 592.0020925936935,
+     "py": -228.01054731451677
+    },
+    {
+     "az_deg": 270.0,
+     "alt_deg": 10.0,
+     "visible": true,
+     "px": 207.99790740630664,
+     "py": 1028.0105473145163
+    },
+    {
+     "az_deg": 290.0,
+     "alt_deg": 30.0,
+     "visible": true,
+     "px": 949.7129591749845,
+     "py": 516.4603978058494
+    },
+    {
+     "az_deg": 250.0,
+     "alt_deg": 30.0,
+     "visible": true,
+     "px": -120.8565252648876,
+     "py": 189.1544597792007
+    },
+    {
+     "az_deg": 280.0,
+     "alt_deg": 40.0,
+     "visible": true,
+     "px": 732.6004061089579,
+     "py": 154.30239407078176
+    },
+    {
+     "az_deg": 90.0,
+     "alt_deg": -30.0,
+     "visible": false,
+     "px": null,
+     "py": null
+    }
+   ]
+  },
+  {
+   "name": "narrow_5deg_1080x1920",
+   "view": {
+    "center_az_deg": 0.0,
+    "center_alt_deg": 20.0,
+    "fov_deg": 5.0,
+    "rotation_deg": 0.0,
+    "min_fov_deg": 0.5,
+    "max_fov_deg": 180.0,
+    "width": 1080,
+    "height": 1920
+   },
+   "points": [
+    {
+     "az_deg": 0.0,
+     "alt_deg": 20.0,
+     "visible": true,
+     "px": 540.0,
+     "py": 960.0000000000002
+    },
+    {
+     "az_deg": 20.0,
+     "alt_deg": 20.0,
+     "visible": true,
+     "px": 4738.596126562873,
+     "py": 706.793671228557
+    },
+    {
+     "az_deg": 340.0,
+     "alt_deg": 20.0,
+     "visible": true,
+     "px": -3658.596126562872,
+     "py": 706.793671228557
+    },
+    {
+     "az_deg": 10.0,
+     "alt_deg": 30.0,
+     "visible": true,
+     "px": 2452.6555240472026,
+     "py": -1305.7765350982158
+    },
+    {
+     "az_deg": 180.0,
+     "alt_deg": -20.0,
+     "visible": false,
+     "px": null,
+     "py": null
+    }
+   ]
+  },
+  {
+   "name": "narrow_5deg_1920x1080",
+   "view": {
+    "center_az_deg": 0.0,
+    "center_alt_deg": 20.0,
+    "fov_deg": 5.0,
+    "rotation_deg": 0.0,
+    "min_fov_deg": 0.5,
+    "max_fov_deg": 180.0,
+    "width": 1920,
+    "height": 1080
+   },
+   "points": [
+    {
+     "az_deg": 0.0,
+     "alt_deg": 20.0,
+     "visible": true,
+     "px": 960.0,
+     "py": 540.0000000000002
+    },
+    {
+     "az_deg": 20.0,
+     "alt_deg": 20.0,
+     "visible": true,
+     "px": 5158.596126562873,
+     "py": 286.79367122855695
+    },
+    {
+     "az_deg": 340.0,
+     "alt_deg": 20.0,
+     "visible": true,
+     "px": -3238.596126562872,
+     "py": 286.79367122855695
+    },
+    {
+     "az_deg": 10.0,
+     "alt_deg": 30.0,
+     "visible": true,
+     "px": 2872.6555240472026,
+     "py": -1725.7765350982158
+    },
+    {
+     "az_deg": 180.0,
+     "alt_deg": -20.0,
+     "visible": false,
+     "px": null,
+     "py": null
+    }
+   ]
+  },
+  {
+   "name": "narrow_5deg_800x800",
+   "view": {
+    "center_az_deg": 0.0,
+    "center_alt_deg": 20.0,
+    "fov_deg": 5.0,
+    "rotation_deg": 0.0,
+    "min_fov_deg": 0.5,
+    "max_fov_deg": 180.0,
+    "width": 800,
+    "height": 800
+   },
+   "points": [
+    {
+     "az_deg": 0.0,
+     "alt_deg": 20.0,
+     "visible": true,
+     "px": 400.0,
+     "py": 400.0000000000002
+    },
+    {
+     "az_deg": 20.0,
+     "alt_deg": 20.0,
+     "visible": true,
+     "px": 3510.0712048613877,
+     "py": 212.43975646559775
+    },
+    {
+     "az_deg": 340.0,
+     "alt_deg": 20.0,
+     "visible": true,
+     "px": -2710.071204861387,
+     "py": 212.43975646559775
+    },
+    {
+     "az_deg": 10.0,
+     "alt_deg": 30.0,
+     "visible": true,
+     "px": 1816.7818696645943,
+     "py": -1278.3529889616414
+    },
+    {
+     "az_deg": 180.0,
+     "alt_deg": -20.0,
+     "visible": false,
+     "px": null,
+     "py": null
+    }
+   ]
+  },
+  {
+   "name": "wide_110deg_1080x1920",
+   "view": {
+    "center_az_deg": 135.0,
+    "center_alt_deg": 60.0,
+    "fov_deg": 110.0,
+    "rotation_deg": 0.0,
+    "min_fov_deg": 0.5,
+    "max_fov_deg": 180.0,
+    "width": 1080,
+    "height": 1920
+   },
+   "points": [
+    {
+     "az_deg": 135.0,
+     "alt_deg": 60.0,
+     "visible": true,
+     "px": 540.0,
+     "py": 960.0
+    },
+    {
+     "az_deg": 135.0,
+     "alt_deg": 80.0,
+     "visible": true,
+     "px": 540.0,
+     "py": 822.3784610727396
+    },
+    {
+     "az_deg": 135.0,
+     "alt_deg": 40.0,
+     "visible": true,
+     "px": 540.0000000000001,
+     "py": 1097.6215389272604
+    },
+    {
+     "az_deg": 155.0,
+     "alt_deg": 60.0,
+     "visible": true,
+     "px": 605.6507789002836,
+     "py": 949.9748867867559
+    },
+    {
+     "az_deg": 115.0,
+     "alt_deg": 60.0,
+     "visible": true,
+     "px": 474.3492210997164,
+     "py": 949.9748867867559
+    },
+    {
+     "az_deg": 145.0,
+     "alt_deg": 70.0,
+     "visible": true,
+     "px": 562.8632637424566,
+     "py": 891.4199987005393
+    },
+    {
+     "az_deg": 315.0,
+     "alt_deg": -60.0,
+     "visible": false,
+     "px": null,
+     "py": null
+    }
+   ]
+  },
+  {
+   "name": "wide_110deg_1920x1080",
+   "view": {
+    "center_az_deg": 135.0,
+    "center_alt_deg": 60.0,
+    "fov_deg": 110.0,
+    "rotation_deg": 0.0,
+    "min_fov_deg": 0.5,
+    "max_fov_deg": 180.0,
+    "width": 1920,
+    "height": 1080
+   },
+   "points": [
+    {
+     "az_deg": 135.0,
+     "alt_deg": 60.0,
+     "visible": true,
+     "px": 960.0,
+     "py": 540.0
+    },
+    {
+     "az_deg": 135.0,
+     "alt_deg": 80.0,
+     "visible": true,
+     "px": 960.0,
+     "py": 402.3784610727395
+    },
+    {
+     "az_deg": 135.0,
+     "alt_deg": 40.0,
+     "visible": true,
+     "px": 960.0000000000001,
+     "py": 677.6215389272604
+    },
+    {
+     "az_deg": 155.0,
+     "alt_deg": 60.0,
+     "visible": true,
+     "px": 1025.6507789002835,
+     "py": 529.9748867867559
+    },
+    {
+     "az_deg": 115.0,
+     "alt_deg": 60.0,
+     "visible": true,
+     "px": 894.3492210997164,
+     "py": 529.9748867867559
+    },
+    {
+     "az_deg": 145.0,
+     "alt_deg": 70.0,
+     "visible": true,
+     "px": 982.8632637424566,
+     "py": 471.4199987005393
+    },
+    {
+     "az_deg": 315.0,
+     "alt_deg": -60.0,
+     "visible": false,
+     "px": null,
+     "py": null
+    }
+   ]
+  },
+  {
+   "name": "wide_110deg_800x800",
+   "view": {
+    "center_az_deg": 135.0,
+    "center_alt_deg": 60.0,
+    "fov_deg": 110.0,
+    "rotation_deg": 0.0,
+    "min_fov_deg": 0.5,
+    "max_fov_deg": 180.0,
+    "width": 800,
+    "height": 800
+   },
+   "points": [
+    {
+     "az_deg": 135.0,
+     "alt_deg": 60.0,
+     "visible": true,
+     "px": 400.0,
+     "py": 400.0
+    },
+    {
+     "az_deg": 135.0,
+     "alt_deg": 80.0,
+     "visible": true,
+     "px": 400.0,
+     "py": 298.0581193131404
+    },
+    {
+     "az_deg": 135.0,
+     "alt_deg": 40.0,
+     "visible": true,
+     "px": 400.00000000000006,
+     "py": 501.9418806868596
+    },
+    {
+     "az_deg": 155.0,
+     "alt_deg": 60.0,
+     "visible": true,
+     "px": 448.63020659280266,
+     "py": 392.57399021241173
+    },
+    {
+     "az_deg": 115.0,
+     "alt_deg": 60.0,
+     "visible": true,
+     "px": 351.36979340719734,
+     "py": 392.57399021241173
+    },
+    {
+     "az_deg": 145.0,
+     "alt_deg": 70.0,
+     "visible": true,
+     "px": 416.93575092033825,
+     "py": 349.19999903743656
+    },
+    {
+     "az_deg": 315.0,
+     "alt_deg": -60.0,
+     "visible": false,
+     "px": null,
+     "py": null
+    }
+   ]
+  }
+ ]
+}
