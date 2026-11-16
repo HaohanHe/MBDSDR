@@ -81,6 +81,36 @@ def _cache_dir() -> str:
     return tle_cache_dir()
 
 
+def user_tle_dir() -> str:
+    """用户 TLE 目录（``~/.mbdsdr/tle``）的**唯一**路径来源。
+
+    这里是"用户显式导入"的位置：把 ``任意名.tle`` 放进去即可，文件名不必是
+    NORAD 号（与缓存目录的 ``<NORAD>.tle`` 约定不同——缓存是程序写的，
+    这里是用户手放的）。
+
+    以前这个路径字面量至少出现在两个模块里（桌面加载器 + 文档），
+    改目录要改多处；现在只有这一处。
+    """
+    override = os.environ.get("MBDSDR_USER_TLE_DIR")
+    if override:
+        return os.path.abspath(os.path.expanduser(override))
+    return os.path.expanduser(os.path.join("~", ".mbdsdr", "tle"))
+
+
+def user_tle_files(directory: Optional[str] = None) -> List[str]:
+    """列出用户 TLE 目录下的 ``*.tle`` 绝对路径（按文件名排序）。
+
+    目录不存在/无权限返回空表——没有文件不是错误，是常态。
+    """
+    target = directory or user_tle_dir()
+    try:
+        names = sorted(os.listdir(target))
+    except OSError:
+        return []
+    return [os.path.join(target, n) for n in names
+            if n.lower().endswith(".tle")]
+
+
 def _norad_from_line1(line1: str) -> Optional[int]:
     """从 TLE 第一行取 NORAD 号（第 3–7 列，1-based）。
 

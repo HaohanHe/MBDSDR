@@ -250,6 +250,10 @@ class SatelliteTracker:
         # 再读回磁盘缓存：上次刷新落盘的 TLE 若比内置新，覆盖对应条目。
         # 否则每次重启都退回 2026-09-25 内置快照，「更新 TLE」等于白做。
         self._load_disk_cache()
+        # 最后并入**用户导入的星**：缓存目录里不属于内置基线的 TLE，
+        # 以及 `~/.mbdsdr/tle/*.tle`。不并这一步，用户加的星只在天空图上
+        # 看得见，跟踪/过境/刷新这一侧完全不知道它存在——一套系统两个目录。
+        self._load_extra_catalog()
 
     # ------------------------------------------------------------------ TLE
     @property
@@ -309,6 +313,59 @@ class SatelliteTracker:
             if self.load_tle(block):
                 count += 1
         return count
+
+    def _load_extra_catalog(self) -> int:
+        """并入用户导入的星，并补齐内置基线里缺的星。
+
+        两件事合在一次扫描里做：
+
+        1. **补齐内置基线**。`_BUILTIN_TLES` 是离线兜底的 TLE 快照，它的成员
+           与 `sat_catalog.BUILTIN_META` **不是同一个集合**：快照里是
+           NOAA×3 + ISS + AO-73 + FOX-1B，而目录基线是 NOAA×3 + ISS +
+           METEOR M2 + FENGYUN 3D。于是「天空图看得到 METEOR」而
+           「跟踪/过境看不到它」——同一套系统两个目录。这里以目录基线为准，
+           快照缺的那几颗从磁盘缓存补（缓存也没有就确实没有，不编）。
+        2. **并入用户导入的星**：缓存目录里不属于基线的 TLE，以及
+           `~/.mbdsdr/tle/*.tle`。
+
+        去重交给 `load_tle`（同名或同 NORAD 覆盖旧条目），这里只负责喂。
+        坏文件跳过：一颗坏星不该让整份目录不可用。
+        """
+        from .sat_catalog import (
+            BUILTIN_META,
+            discover_cached,
+            user_tle_files,
+        )
+
+        loaded = 0
+        cache_dir = _tle_cache_dir()
+
+        def _present() -> set:
+            return {str(c.get("norad_id")) for c in self._catalog}
+
+        def _load_catnr(norad: int) -> int:
+            path = os.path.join(cache_dir, f"{int(norad)}.tle")
+            return self.load_satellites_from_file(path)
+
+        # 1) 先补目录基线里**快照没有**的星。
+        #    不能靠 `discover_cached()` 找它们——那个函数按设计会跳过基线
+        #    NORAD（避免重复列），正好把这里最需要补的两颗排除掉。
+        for meta in BUILTIN_META.values():
+            if str(meta.catnr) in _present():
+                continue
+            loaded += _load_catnr(meta.catnr)
+
+        # 2) 再并入缓存目录里的额外星（非基线）。
+        for entry in discover_cached(cache_dir):
+            norad = str(int(entry.catnr))
+            if norad in _present():
+                continue
+            loaded += _load_catnr(int(entry.catnr))
+
+        # 3) 用户显式目录（文件名不必是 NORAD 号，一个文件可含多颗）。
+        for path in user_tle_files():
+            loaded += self.load_satellites_from_file(path)
+        return loaded
 
     # ------------------------------------------------------------ 磁盘缓存
     @staticmethod
