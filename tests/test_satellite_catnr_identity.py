@@ -39,18 +39,30 @@ from rf_sky_view import (  # noqa: E402
 
 
 def _meta_table() -> dict:
-    """从生产加载器拿目录表（函数内局部变量，测试通过解析函数源码不可靠，
-    改为直接引用其内部表：加载器把 SATELLITE_META 定义在函数体内，
-    这里用一次性执行截取——保持与生产数据单一来源）。"""
+    """生产加载器实际使用的目录表。
+
+    以前的做法是从 `_load_celestrak_tle_catalog` 的源码里正则抠出
+    `SATELLITE_META` 字面量再 `eval`。那是把"字面量还在不在"当成契约——
+    而目录真值已经收进 `mbdsdr_ai/sat_catalog.BUILTIN_META`（三处同抄一份
+    正是要消灭的东西），源码里**故意不再有**字面量。
+
+    所以改为：表内容取自唯一真值，另断言生产加载器确实引用了它
+    （防止有人绕开 sat_catalog 再抄一份）。
+    """
     import inspect
-    import re as _re
     import rf_sky_view
+
+    from mbdsdr_ai.sat_catalog import BUILTIN_META
+
     src = inspect.getsource(rf_sky_view._load_celestrak_tle_catalog)
-    m = _re.search(r"SATELLITE_META[^=]*=\s*(\{.*?\n    \})", src, _re.DOTALL)
-    assert m, "生产加载器里找不到 SATELLITE_META 表"
-    # 表体是纯字面量 dict（name/catnr/freq_mhz/kind），安全 eval
-    table = eval(m.group(1), {"__builtins__": {}})
-    return {str(k): dict(v) for k, v in table.items()}
+    assert "_SAT_BUILTIN_META" in src, (
+        "生产加载器没引用 sat_catalog.BUILTIN_META —— 目录可能又被抄了一份")
+    return {
+        name: {"catnr": meta.catnr,
+               "freq_mhz": meta.freq_mhz,
+               "kind": meta.kind}
+        for name, meta in BUILTIN_META.items()
+    }
 
 
 # ---------------------------------------------------------------------------

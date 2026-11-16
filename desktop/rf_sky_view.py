@@ -120,6 +120,10 @@ from mbdsdr_ai.sky_interaction import (
     screen_to_sky,
 )
 from mbdsdr_ai import skyengine
+from mbdsdr_ai.sat_catalog import (
+    BUILTIN_CATNRS as _SAT_BUILTIN_CATNRS,
+    BUILTIN_META as _SAT_BUILTIN_META,
+)
 from mbdsdr_ai.skyengine import stars as _stars
 from mbdsdr_ai.skyengine import constellations as _constel
 from mbdsdr_ai.skyengine import xingguan as _xingguan
@@ -1624,29 +1628,42 @@ def _load_celestrak_tle_catalog() -> List[Dict[str, object]]:
 
     # 已知卫星元数据（名称 -> CATNR / 默认频率 / 类型）
     # 注意：这里只存目录索引，不存 TLE 元素本身。
+    #
+    # **值从 `mbdsdr_ai.sat_catalog.BUILTIN_META` 派生，不手抄。**
+    # 历史上这一份和 `orbit.BUILTIN_SATS` 各写了一遍 6 颗星，改一处漏一处；
+    # 现在唯一真值在 sat_catalog，本表只是给绘制层用的视图。
+    #
     # CATNR 与名称的一致性由 tests/test_satellite_catnr_identity.py 用
     # 真实 TLE line0 双向钉扎（44016/54234 错配事故的回归锁）：
     #   METEOR M2 = 40069（不是 44016 箭体碎片 ATLAS 5 CENTAUR DEB）；
     #   FENGYUN 3D = 43010（不是 54234 NOAA 21 JPSS-2）。
     SATELLITE_META: Dict[str, Dict[str, object]] = {
-        "NOAA 15":      {"catnr": 25338, "freq_mhz": 137.620, "kind": "weather"},
-        "NOAA 18":      {"catnr": 28654, "freq_mhz": 137.9125, "kind": "weather"},
-        "NOAA 19":      {"catnr": 33591, "freq_mhz": 137.100, "kind": "weather"},
-        "ISS (ZARYA)":  {"catnr": 25544, "freq_mhz": 145.800, "kind": "amateur"},
-        "METEOR M2":    {"catnr": 40069, "freq_mhz": 137.900, "kind": "weather"},
-        "FENGYUN 3D":   {"catnr": 43010, "freq_mhz": 136.900, "kind": "weather"},
+        name: {"catnr": meta.catnr,
+               "freq_mhz": meta.freq_mhz,
+               "kind": meta.kind}
+        for name, meta in _SAT_BUILTIN_META.items()
     }
 
-    for name, meta in SATELLITE_META.items():
-        catnr = int(meta["catnr"])
+    # 目录 = 内置基线 + 磁盘缓存里发现的星（`sat_catalog.merged_catalog`）。
+    #
+    # 这一步是"卫星只有 6 颗"的解药：用户把任意 `<NORAD>.tle` 放进
+    # `~/.mbdsdr/tle_cache/` 就算导入，天空图/过境/跟踪都能看到它。
+    # 目录里不含 TLE 元素本身（元素有时效），每颗仍走 `orbit.fetch_tle` 取。
+    from mbdsdr_ai.sat_catalog import merged_catalog as _merged_sat_catalog
+
+    for entry in _merged_sat_catalog():
+        name = entry.name
+        catnr = int(entry.catnr)
         try:
             line1, line2 = orbit.fetch_tle(catnr)
         except Exception:
-            # Celestrak 不可用或缓存过期：跳过此卫星，不造假
+            # Celestrak 不可用且无缓存：跳过此卫星，不造假
             continue
-        # 下行频点优先取链路目录 sat_links（皮进配置，源码表只留兜底）；
-        # 目录没有的星才用表里默认值。
-        freq_mhz = float(meta["freq_mhz"])
+        # 下行频点优先取链路目录 sat_links（进了配置，源码表只留兜底）；
+        # 缓存发现的星表里没有频率，`entry.freq_mhz` 就是 None——
+        # 下游已按 None 处理（`_positive_mhz_or_none` / frequency_hz=None），
+        # **不要在这里猜一个 137.x 顶上**：猜错频点会让用户按错频去听。
+        freq_mhz = entry.freq_mhz
         try:
             from mbdsdr_ai.sat_links import find_tuning_for
             found = find_tuning_for(name)
@@ -1654,13 +1671,17 @@ def _load_celestrak_tle_catalog() -> List[Dict[str, object]]:
                 freq_mhz = float(found["downlink"]["freq_hz"]) / 1e6
         except Exception:
             pass
+        builtin = catnr in _SAT_BUILTIN_CATNRS
         catalog.append({
             "name": name,
             "line1": line1,
             "line2": line2,
             "freq_mhz": freq_mhz,
-            "kind": str(meta["kind"]),
-            "tle_source": f"Celestrak CATNR {catnr}（在线/缓存 ~/.mbdsdr/tle_cache/）",
+            "kind": entry.kind,
+            "tle_source": (
+                f"Celestrak CATNR {catnr}（内置基线，在线/缓存）"
+                if builtin else
+                f"本地缓存 CATNR {catnr}（用户导入 ~/.mbdsdr/tle_cache/）"),
             "tle_epoch": orbit.tle_epoch_iso(line1),
         })
     return catalog
@@ -8911,21 +8932,48 @@ class SatelliteTracker:
 
     # ------------------------------------------------------------------ TLE
     def _reload_catalog(self):
-        """加载 TLE 目录：用户文件优先，Celestrak 缓存补充。"""
+        """加载 TLE 目录：内置基线 + 缓存发现的星 + 用户文件，**合并**而非二选一。
+
+        以前是「用户有 TLE 就完全不用内置」——`if not self._catalog` 那段。
+        后果不是"只有 6 颗"，而是更别扭的**二选一**：用户想加一颗自己的星，
+        NOAA/ISS/METEOR/FY-3D 就全部消失。想同时要，做不到。
+
+        现在按归一化名称去重，**同名时用户文件优先**（用户可能自己改了频率
+        或换了 TLE 源）。这样：
+          * 什么都没放 → 内置 6 颗（开箱可用）
+          * 放了一颗   → 内置 6 颗 + 这一颗
+          * 放了同名   → 用用户那份覆盖内置那份
+        """
         self._catalog = []
         self._satrec_cache = {}
 
-        # 1) 用户 TLE 文件
-        user_cat = _load_user_tle_catalog()
-        if user_cat:
-            self._catalog.extend(user_cat)
+        combined: List[Dict[str, object]] = []
+        index_by_name: Dict[str, int] = {}
 
-        # 2) Celestrak 目录（仅当用户未提供任何 TLE 时尝试在线获取）
-        #    如果用户已有自定义 TLE 文件，不覆盖
-        if not self._catalog:
-            cel_cat = _load_celestrak_tle_catalog()
-            self._catalog.extend(cel_cat)
+        def _key(row: Dict[str, object]) -> str:
+            return _norm_sat_name(row.get("name") or "")
 
+        # 1) 内置基线 + 磁盘缓存里发现的星（后者是"用户把 tle 放进
+        #    `~/.mbdsdr/tle_cache/` 就算导入"的那条路径）。
+        for row in _load_celestrak_tle_catalog():
+            key = _key(row)
+            if key and key in index_by_name:
+                continue
+            if key:
+                index_by_name[key] = len(combined)
+            combined.append(row)
+
+        # 2) 用户 TLE 文件（`~/.mbdsdr/tle/*.tle`）：同名覆盖上一步的条目。
+        for row in _load_user_tle_catalog():
+            key = _key(row)
+            if key and key in index_by_name:
+                combined[index_by_name[key]] = row
+            else:
+                if key:
+                    index_by_name[key] = len(combined)
+                combined.append(row)
+
+        self._catalog = combined
         self.sky_view.set_tle_loaded(len(self._catalog) > 0)
 
     def set_catalog_source(self, provider):
