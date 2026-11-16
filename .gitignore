@@ -16,6 +16,11 @@
 *.o
 *.a
 
+# 上面的 *.bin 是为了排编译产物，但手机端天球数据是**随包分发的数据资产**
+# 不是编译中间物：`scripts/build_mobile_sky_assets.py` 生成、必须入库，
+# 否则 App 打包出来是个空白天空。
+!mobile/assets/sky/*.bin
+
 # 重复投板包目录（源文件在 ai-sdr-mini-kicad/）
 ai-sdr-mini-原理图PCB-v0.7.1-投板包/
 
