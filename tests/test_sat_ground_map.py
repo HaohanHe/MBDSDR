@@ -182,6 +182,9 @@ def test_position_report_lands_on_map_collection(monkeypatch):
     col = get_ground_features()
     col.remove("pos:QTMAP1")
     widget = SatelliteGroundMap(online=False)  # 订阅位置中枢
+    # 图层必须拿住同一个集合对象：空集合 falsy 曾让图层悄悄换私有集合，
+    # 全局上报的要素一个都画不出来（2026-11-16 实测踩坑）。
+    assert widget.spacetime_layer.collection is col
     assert all(f.feature_id != "pos:QTMAP1" for f in col.all())
 
     ingest_aircraft(Aircraft(icao_hex="QTMAP1", callsign="ONEMAP",
