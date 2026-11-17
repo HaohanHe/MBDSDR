@@ -28,7 +28,7 @@ sys.path.insert(0, _ROOT)
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
 from desktop.status_panel import (  # noqa: E402
-    StatusPanel, format_decode_result, is_decode_tool,
+    DECODE_EVIDENCE_LABELS, StatusPanel, format_decode_result, is_decode_tool,
 )
 
 app = QApplication.instance() or QApplication(sys.argv)
@@ -167,12 +167,15 @@ class TestMessageLanding:
         2048 样本 @12kHz 只有 0.17s，连一个 NAVTEX 定相+报文都不够：
         现在必须显式 insufficient_samples，而不是 ok=true + 0 条。
         """
+        from mbdsdr_ai.decode_router import DIGITAL_MODE_CAPABILITIES
         from mbdsdr_ai.decoders import decode_digital_mode
         f = _write_wav(tmp_path / "silence.wav", np.zeros(2048))
         res = decode_digital_mode(f, "navtex", output_dir=str(tmp_path / "o"))
         view = format_decode_result("sdr_decode_navtex", res)
-        assert res["evidence_level"] == "no_sample"
-        assert "真实度: 缺样本" in view["summary"]
+        # 证据等级以能力表为单一事实源，不在这里手抄一个等级字面量。
+        evidence = DIGITAL_MODE_CAPABILITIES["navtex"].evidence
+        assert res["evidence_level"] == evidence
+        assert f"真实度: {DECODE_EVIDENCE_LABELS[evidence]}" in view["summary"]
         assert view["error_code"] == "insufficient_samples"
         assert "样本不足一帧" in view["summary"]
 

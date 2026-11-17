@@ -263,36 +263,45 @@ def test_send_controls_clickable_at_every_width(window, qtapp):
             f"宽 {width}：AI 助手发送按钮必须可用")
 
 
-def test_planetarium_one_click_fullscreen(window):
-    """一键全屏：星象仪里必须有一颗 ⛶，点一下真全屏、文案随状态走。
+def test_planetarium_one_click_immersive(window):
+    """一键沉浸：星象仪里的 ⛶ 与 IDE 同语义，不代替 F11 改窗口全屏。
 
-    用户原话（2026-11-07）："我希望这个星象仪模式我能点一个一键全屏"。
-    只留菜单项 / F11 不算——那一层是给熟手的，产品面必须有一眼看得见的入口
-    （demo 右上角那颗 ⛶ 就是这个位置）。
+    历史：5572687e 最初这颗按钮是 showFullScreen；用户 2026-11-16 追问
+    "那个按钮不应该是沉浸式全屏吗"——所以它现在收浮层与频谱槽，窗口
+    fullscreen 仍只归 F11（进形态那一刻的自动全屏不归这颗按钮管）。
     """
     w, mw = window
     w.set_app_mode("planetarium")
     strip = w._planetarium_strip
     btn = strip.findChild(QPushButton, "planetariumFullscreen")
-    assert btn is not None, "星象仪必须有一键全屏按钮"
+    assert btn is not None, "星象仪必须有沉浸按钮"
     assert btn.isVisible(), "按钮必须在浮层里可见"
     assert btn.sizeHint().width() <= strip.width() - 8, (
         f"窄条里文字要放得下，sizeHint={btn.sizeHint().width()}")
     assert btn.toolTip(), "按钮必须有 tooltip 说明"
-
-    # 进形态会自动全屏（独立天空窗真全屏，主窗口留在 IDE）→ 文案必须同步
+    assert "沉浸" in btn.text() and "退出" not in btn.text(), \
+        f"进形态后文案应为「沉浸」，实际: {btn.text()}"
+    # 进形态会自动全屏天空窗（与按钮语义无关，按钮碰不得这个状态）
     assert w._planetarium_window.isFullScreen() is True, "进星象仪应自动全屏"
     assert w.isFullScreen() is False, "主窗口不该跟着全屏（要能放另一块屏）"
-    assert "退出全屏" in btn.text(), f"自动全屏后文案未同步: {btn.text()}"
 
-    btn.click()                      # 一键回窗口
-    assert w._planetarium_window.isFullScreen() is False, "点一下应回到窗口模式"
-    assert "退出" not in btn.text() and "全屏" in btn.text(), \
-        f"回窗口后文案应为「全屏」，实际: {btn.text()}"
+    btn.click()                      # 进沉浸
+    assert w._planetarium_immersive is True
+    assert strip.isVisible(), "浮层不能整条消失：⛶ 是唯一退出入口"
+    assert btn.isVisible(), "沉浸后 ⛶ 必须仍可点（不留困住状态）"
+    assert "退出沉浸" in btn.text(), f"沉浸后文案未同步: {btn.text()}"
+    wf = strip.findChild(QPushButton, "planetariumWaterfall")
+    assert wf is not None and wf.isHidden(), "沉浸应收起除 ⛶ 外的浮层按钮"
+    assert w._planetarium_window.isFullScreen() is True, \
+        "沉浸不得改窗口全屏（那是 F11 的语义）"
 
-    btn.click()                      # 再一键回全屏
-    assert w._planetarium_window.isFullScreen() is True, "再点一下应回到全屏"
-    assert "退出全屏" in btn.text()
+    btn.click()                      # 退出沉浸
+    assert w._planetarium_immersive is False
+    assert wf.isVisible(), "退出沉浸后浮层按钮恢复"
+    assert "退出" not in btn.text() and "沉浸" in btn.text(), \
+        f"回浮层后文案应为「沉浸」，实际: {btn.text()}"
+    assert w._planetarium_window.isFullScreen() is True, \
+        "退出沉浸只恢复界面，不动窗口全屏"
 
     w.set_app_mode("ide")
 
@@ -491,6 +500,49 @@ def test_night_vision_veil_covers_every_overlay(window, qtapp):
         f"关闭夜视后按钮条应回到冷灰底，实际 {back.getRgb()}")
     w._planetarium_ai_card.setVisible(False)
     w._planetarium_layer_btn.setChecked(False)
+
+
+def test_layer_popover_never_covers_ai_bar(window, qtapp):
+    """图层面板不得盖住命令栏（麦克风/回车是星象仪里唯一的 AI 入口）。
+
+    2026-11-11 实拍：1000px 宽时面板左缘 651、命令栏右缘 663，正好压住
+    麦克风按钮右半——点击被面板截走。面板可以下移，命令栏不能被挡。
+    """
+    w, mw = window
+    w.set_app_mode("planetarium")
+    qtapp.processEvents()
+    sky = w.sky_view
+    bar = w._ai_cmd_bar
+    bar.setMinimumWidth(0)
+    bar.setMaximumWidth(16777215)
+    try:
+        for width in (800, 1000, 1280):
+            sky.resize(width, sky.height())
+            w._position_planetarium_overlay()
+            w._planetarium_layer_btn.click()
+            qtapp.processEvents()
+            pop = w._layer_popover
+            assert pop.isVisible() is True, f"宽 {width}：图层面板必须打开"
+            tl = sky.mapFromGlobal(bar.mapToGlobal(QPoint(0, 0)))
+            bar_rect = QRect(tl, bar.size())
+            pop_rect = QRect(pop.x(), pop.y(), pop.width(), pop.height())
+            assert pop_rect.intersects(bar_rect) is False, (
+                f"宽 {width}：面板压住命令栏 "
+                f"pop={pop_rect.getRect()} bar={bar_rect.getRect()}")
+            mic = sky.mapFromGlobal(
+                w.cmd_mic_btn.mapToGlobal(w.cmd_mic_btn.rect().center()))
+            assert pop_rect.contains(mic) is False, (
+                f"宽 {width}：面板盖住麦克风中心点 {mic.x()},{mic.y()}")
+            assert pop_rect.bottom() < sky.height(), (
+                f"宽 {width}：面板露出天空下缘，"
+                f"bottom={pop_rect.bottom()} sky={sky.height()}")
+            w._planetarium_layer_btn.setChecked(False)
+            qtapp.processEvents()
+    finally:
+        bar.setFixedWidth(min(560, max(240, sky.width() - 40)))
+        w.set_app_mode("ide")
+        w.resize(1280, 800)
+        qtapp.processEvents()
 
 
 def test_planetarium_spectrum_strip_is_compact_and_fits(window, qtapp):
@@ -730,4 +782,28 @@ def test_escape_dismisses_innermost_overlay_before_leaving(window, qtapp):
     assert w._app_mode == "ide", "没有覆盖层时 Esc 才退出星象仪"
     w.resize(1280, 800)
     qtapp.processEvents()
+
+
+def test_sky_immersive_is_layout_not_window_fullscreen(window, qtapp):
+    """⛶ 是"天空铺满应用窗口"，不是把窗口丢进 OS 全屏（那是 F11 的语义）。"""
+    w, mw = window
+    w.set_app_mode("ide")
+    qtapp.processEvents()
+    assert w.isFullScreen() is False
+
+    w._toggle_sky_immersive()
+    qtapp.processEvents()
+    assert w._sky_immersive is True
+    assert w.isFullScreen() is False, "沉浸不得改窗口全屏状态"
+    assert not w._main_splitter.widget(1).isVisible(), "中栏(地图)应收起"
+    assert not w._main_splitter.widget(2).isVisible(), "右栏应收起"
+    assert not w.left_tab.tabBar().isVisible(), "左页签条应收起"
+    assert w.left_tab.currentWidget() is w.sky_view
+
+    w._toggle_sky_immersive()
+    qtapp.processEvents()
+    assert w._sky_immersive is False
+    assert w._main_splitter.widget(1).isVisible()
+    assert w._main_splitter.widget(2).isVisible()
+    assert w.left_tab.tabBar().isVisible()
 

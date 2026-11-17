@@ -73,6 +73,9 @@ def panel(monkeypatch):
         type("_QP", (), {"globalInstance": staticmethod(lambda: pool)}))
     widget = dp.DevicePanel()
     widget._hotplug_timer.stop()   # 全部由用例手动驱动，结果可复现
+    # 首帧自动枚举也停掉：用例把 ENUM_TIMEOUT_MS 压到 100ms，若它晚到
+    # 会和手动刷新混在一起，派发次数就不再可复现。
+    widget._first_enum_timer.stop()
     yield widget, dp, pool
     widget.close()
 

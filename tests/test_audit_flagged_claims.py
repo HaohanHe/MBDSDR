@@ -50,7 +50,7 @@ def _marker(directory: Path, name: str, **overrides) -> Path:
 def test_mismatched_and_reasonless_claim_is_listed(tmp_path):
     _marker(tmp_path, "scripts/safe_commit.py", issued_by="乙线",
             owner_mismatch=True, reason_missing=True, claim_reason="")
-    rows = audit._flagged_claims(time.time(), tmp_path)
+    rows = audit._flagged_claims(time.time(), tmp_path)  # timeguard: allow — 被测函数的第一参数就是「审计基准时刻」，台账 TTL 以墙钟为界；换固定 epoch 会让过期判定与真实台账脱节
     assert len(rows) == 1
     row = rows[0]
     assert row["path"] == "scripts/safe_commit.py"
@@ -64,26 +64,26 @@ def test_mismatched_and_reasonless_claim_is_listed(tmp_path):
 def test_clean_claim_is_not_listed(tmp_path):
     _marker(tmp_path, "scripts/a.py", issued_by="甲线",
             owner_mismatch=False, reason_missing=False, claim_reason="K25 断言补证")
-    assert audit._flagged_claims(time.time(), tmp_path) == []
+    assert audit._flagged_claims(time.time(), tmp_path) == []  # timeguard: allow — 审计基准时刻就是墙钟，台账 TTL 以它为界
 
 
 def test_expired_claim_is_not_listed(tmp_path):
     old = time.time() - 3600
     _marker(tmp_path, "scripts/b.py", acquired_at=old, heartbeat_at=old,
             owner_mismatch=True, reason_missing=True)
-    assert audit._flagged_claims(time.time(), tmp_path) == []
+    assert audit._flagged_claims(time.time(), tmp_path) == []  # timeguard: allow — 审计基准时刻就是墙钟，台账 TTL 以它为界
 
 
 def test_legacy_marker_without_flags_is_not_called_impersonation(tmp_path):
     """旧占位没有 owner_mismatch 键：显示「未记录」，不升级成冒名。"""
     _marker(tmp_path, "scripts/c.py", claim_reason="K25 断言补证")
-    assert audit._flagged_claims(time.time(), tmp_path) == []
+    assert audit._flagged_claims(time.time(), tmp_path) == []  # timeguard: allow — 审计基准时刻就是墙钟，台账 TTL 以它为界
 
 
 def test_legacy_marker_with_empty_reason_is_listed_as_reason_missing(tmp_path):
     """旧占位没有 reason_missing 键：退回读 claim_reason，空串算空理由。"""
     _marker(tmp_path, "scripts/d.py", claim_reason="")
-    rows = audit._flagged_claims(time.time(), tmp_path)
+    rows = audit._flagged_claims(time.time(), tmp_path)  # timeguard: allow — 被测函数的第一参数就是「审计基准时刻」，台账 TTL 以墙钟为界；换固定 epoch 会让过期判定与真实台账脱节
     assert len(rows) == 1
     assert rows[0]["owner_mismatch"] is None  # 未记录，不是 False
     assert rows[0]["reason_missing"] is True

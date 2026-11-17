@@ -374,10 +374,15 @@ class TestRTKFloat:
         sol = RTKFloatSolver().solve(inp)
         assert sol["fix_type"] == "NONE"
 
-    def test_lambda_fix_is_todo(self):
+    def test_fix_ambiguities_returns_contract(self):
+        """LAMBDA 固定接口必须可调用并返回结构化结果（不再是 TODO 异常）。"""
         solver = RTKFloatSolver()
-        with pytest.raises(NotImplementedError):
-            solver.fix_ambiguities()
+        inp = self._make_input()
+        solver.solve(inp)
+        out = solver.fix_ambiguities()
+        assert out["fix_type"] in ("FIXED", "FLOAT")
+        assert "ratio" in out and "integers" in out
+        assert "failure_reason" in out and "covariance" in out
 
 
 # ============================================================

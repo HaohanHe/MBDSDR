@@ -50,7 +50,7 @@ def _roots(tmp_path) -> list[str]:
 def _scan(tmp_path, since: float | None = None):
     rc = _load()
     return rc._scan_userprofile_log_writes(
-        time.time() - 5 if since is None else since,
+        time.time() - 5 if since is None else since,  # timeguard: allow — 扫描窗口起点就是「最近 5 秒」，被测实现按墙钟过滤
         home=str(tmp_path), roots=_roots(tmp_path))
 
 
@@ -126,7 +126,7 @@ def test_log_outside_declared_roots_is_not_scanned(tmp_path):
 def _scan_full(tmp_path, since: float | None = None):
     rc = _load()
     return rc._scan_userprofile_log_writes(
-        time.time() - 5 if since is None else since,
+        time.time() - 5 if since is None else since,  # timeguard: allow — 扫描窗口起点就是「最近 5 秒」，被测实现按墙钟过滤
         home=str(tmp_path), roots=None, full=True)
 
 

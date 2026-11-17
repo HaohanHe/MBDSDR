@@ -26,6 +26,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, _ROOT)
 sys.path.insert(0, os.path.join(_ROOT, "desktop"))
+sys.path.insert(0, os.path.join(_ROOT, "tests", "fixtures"))
 
 from datetime import datetime, timezone  # noqa: E402
 
@@ -36,7 +37,7 @@ app = QApplication.instance() or QApplication(sys.argv)
 
 import rf_sky_view as rsv  # noqa: E402
 from rf_sky_view import RFSkyView, angular_separation_deg  # noqa: E402
-from mbdsdr_ai.decoders import BUILTIN_TLE  # noqa: E402
+from tle_samples import ISS_TLE, NOAA19_TLE  # noqa: E402
 from mbdsdr_ai.new_spacetime import get_time_engine  # noqa: E402
 from mbdsdr_ai import orbit  # noqa: E402
 
@@ -44,8 +45,8 @@ from mbdsdr_ai import orbit  # noqa: E402
 LAT, LON = 43.9, 125.3
 ISS = "ISS (ZARYA)"
 NOAA19 = "NOAA 19"
-LINE1_ISS, LINE2_ISS = BUILTIN_TLE[ISS]
-LINE1_N19, LINE2_N19 = BUILTIN_TLE[NOAA19]
+LINE1_ISS, LINE2_ISS = ISS_TLE
+LINE1_N19, LINE2_N19 = NOAA19_TLE
 TLE = {ISS: (LINE1_ISS, LINE2_ISS), NOAA19: (LINE1_N19, LINE2_N19)}
 
 # 探测得到的锚点：ISS 仰角≈55°，且 t0+220s 内始终保持 >9°。

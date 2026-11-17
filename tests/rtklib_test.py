@@ -250,6 +250,28 @@ class TestSPPLocator(unittest.TestCase):
         self.assertLess(abs(out["x"] - rr_true[0]), 0.01)
         self.assertLess(abs(out["z"] - rr_true[2]), 0.01)
 
+    def test_spp_below_four_satellites_fails_loudly(self):
+        """少于 4 星是欠定：**必须显式报错**，不许返回 rms≈0 的假位置。
+
+        旧行为：H 是 (n,4)，np.linalg.lstsq 最小范数解让残差恰好为 0，
+        1 颗卫星也能「解出」一个坐标且 rms_m=0.0——物理上毫无意义。
+        """
+        rr_true = np.array([6378137.0 + 100.0, 0.0, 0.0])
+        R = 26560000.0
+        rs_l, dts_l, pr_l = [], [], []
+        for d in [(1.0, 0.3, 0.2), (0.2, 1.0, 0.3), (0.3, 0.2, 1.0)]:
+            dv = np.array(d) / np.linalg.norm(d)
+            rs = dv * R
+            r, _ = ra.CoordinateConverter.geodist(rs, rr_true)
+            rs_l.append(rs.tolist())
+            dts_l.append(0.0)
+            pr_l.append(r)
+        with self.assertRaises(ValueError) as ctx:
+            ra.spp_locate(rs_l, dts_l, pr_l)
+        msg = str(ctx.exception)
+        self.assertIn("4", msg)
+        self.assertIn("3", msg)
+
 
 class TestNTRIPStream(unittest.TestCase):
     """NTRIP 请求构造（不实际连网）。"""

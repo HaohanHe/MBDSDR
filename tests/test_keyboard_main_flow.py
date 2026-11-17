@@ -414,7 +414,7 @@ def test_tab_order_does_not_jump_from_right_column_to_bottom_dock(win):
         after = [r for r in after if r != "dock"]
     assert "right" not in after, (
         "底坞之后、回到顶栏之前又进了右栏（%s）：底坞应排在整条右栏之后，"
-        "而不是插在「新时空」和「扫频」之间" % ">".join(after))
+        "而不是插在「模块」和「扫频」之间" % ">".join(after))
 
 
 def test_narrow_window_overlay_shows_right_column(win):

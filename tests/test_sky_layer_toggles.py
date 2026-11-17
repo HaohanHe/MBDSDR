@@ -27,7 +27,7 @@ from PySide6.QtWidgets import QApplication  # noqa: E402
 
 app = QApplication.instance() or QApplication(sys.argv)
 
-from rf_sky_view import RFSkyView, RFSkyViewPanel  # noqa: E402
+from rf_sky_view import RFSkyView, RFSkyViewPanel, HeatmapCell  # noqa: E402
 
 # 按钮标签 -> (视图属性, 默认值)
 _EXPECTED = {
@@ -90,6 +90,35 @@ class TestLayerToggleWiring:
         assert p.sky_view._show_compass is False
         assert btn.isChecked() is False
         p.close()
+
+
+class TestHeatmapDrawWiring:
+    """set_heatmap 的契约：喂入数据后 paintEvent 必须真的调用绘制层。
+
+    修复前 ``_draw_heatmap`` 只在类里定义、paintEvent 从未调用：外部
+    ``set_heatmap(cells)`` 只设了 ``_show_heatmap`` 标志，画面永远空白，
+    与「喂入真实扫描数据即绘制」的文档承诺不一致。
+    """
+
+    def test_paint_calls_heatmap_only_when_data_present(self):
+        v = RFSkyView()
+        v.resize(400, 400)
+        v._observer = {"lat": 40.0, "lon": 116.0, "alt_m": 0.0}
+        calls = []
+        real = v._draw_heatmap
+
+        def spy(painter):
+            calls.append(1)
+            return real(painter)
+
+        v._draw_heatmap = spy
+        v.grab()
+        assert calls == [], "无热力图数据时不应进入绘制层"
+
+        v.set_heatmap([HeatmapCell(90.0, 45.0, -80.0)])
+        v.grab()
+        assert len(calls) == 1, "set_heatmap 喂入后 paintEvent 必须调用绘制层"
+        v.close()
 
 
 class TestEqGridSetter:

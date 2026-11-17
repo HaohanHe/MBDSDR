@@ -46,7 +46,7 @@ BLOCKED_PARAM_PANELS = {"VfoPanel", "ServiceSettingsPanel", "SettingsPanel"}
 #: 必须经 `_create_panel("id")` / `registry().create("id")` 构造的面板。
 EXPECTED_IDS = {
     "spectrum", "rf_sky", "sat_track", "adsb", "control", "status", "ai",
-    "module", "weather", "new_spacetime", "aprs", "sat_image",
+    "module", "weather", "aprs", "sat_image",
     "scanner", "modulation", "bookmark", "anr", "constellation", "device",
     "gain", "adsb_list",
 }
@@ -181,7 +181,6 @@ def test_main_window_panels_attached_by_id(main_window):
         ("module", main_window.module_panel),
         ("sat_track", main_window.sat_track_panel),
         ("weather", main_window.weather_panel),
-        ("new_spacetime", main_window.new_spacetime_panel),
         ("adsb", main_window.adsb_map_panel),
         # 右栏固定页签
         ("scanner", main_window.scanner_panel),

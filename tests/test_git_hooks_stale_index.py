@@ -66,6 +66,10 @@ def repo_env(tmp_path):
     env["MBDSDR_HOOK_MARKER_DIR"] = str(tmp_path / "hook_ok")
     env["MBDSDR_LOCKS_DIR"] = str(tmp_path / "locks")
     env["MBDSDR_RESIDUE_LOG"] = str(tmp_path / "residue.log")
+    # post-commit 还会写两份构建自检台账（head_build_smoke / head_symbol_check）：
+    # 不重定向就会落到主仓共享目录，多工作树并行时无法区分记录来源。
+    env["MBDSDR_HEAD_BUILD_LOG"] = str(tmp_path / "head_build_smoke.log")
+    env["MBDSDR_SYMBOL_LOG"] = str(tmp_path / "head_symbol_check.log")
     _git(repo, env, "init", "-q")
     _git(repo, env, "config", "user.email", "hook-test@example.invalid")
     _git(repo, env, "config", "user.name", "hook-test")

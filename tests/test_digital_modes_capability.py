@@ -9,7 +9,8 @@
      不许混成一句「解码失败」。
 
 来源口径：能力表字段与证据等级的取值来自 P1/P2 的解码器盘点结论
-（AIS/NAVTEX 缺真录、LRPT/FT8/ADS-B 有真录），不是凭印象填的。
+（AIS/NAVTEX 有仓内合成端到端证据但无 OTA 真录，FT8/ADS-B 有外部金标），
+不是凭印象填的。逐行依据见各行的 evidence_source 字段。
 """
 import os
 import sys

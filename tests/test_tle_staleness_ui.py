@@ -41,7 +41,7 @@ def test_usable_shows_refresh_hint_without_blocking(panel):
     panel.set_tle_date("2026-11-09", age_days=2.0, tier="usable")
     text = panel.tle_date_label.text()
     assert "星历可用" in text
-    assert "2 天前" in text
+    assert "TLE 已 2 天" in text
     assert "建议更新星历" in text
     assert "需确认" not in text
     # 不阻断：调谐入口与刷新入口都可点
@@ -54,7 +54,7 @@ def test_expired_40_days_requires_confirm(panel):
     panel.set_tle_date("2026-10-02", age_days=40.0, tier="expired")
     text = panel.tle_date_label.text()
     assert "星历过期" in text
-    assert "40 天前" in text
+    assert "TLE 已 40 天" in text
     assert "需确认后调谐（云台禁用）" in text
     assert "建议更新星历" not in text
     assert panel.tle_refresh_btn.isEnabled()
@@ -67,6 +67,39 @@ def test_wording_lives_only_in_tle_integrity(panel, monkeypatch):
     text = panel.tle_date_label.text()
     assert "请刷新星历" in text
     assert "建议更新星历" not in text
+
+
+def test_no_tle_says_cannot_predict_not_no_passes(panel):
+    """无 TLE：日期行与倒计时都写「无 TLE，无法预报」，不说「窗口内无过境」。"""
+    panel.set_tle_date("", age_days=None, tier=None)
+    assert "无 TLE，无法预报" in panel.tle_date_label.text()
+
+    panel.populate_satellites(["NOAA 19"])
+
+    def _must_not_be_called(_name):
+        raise AssertionError("没有 TLE 时不应向 provider 要过境列表")
+
+    panel.set_pass_provider(_must_not_be_called)
+    panel._update_countdown(1_000_000.0)
+    assert "无 TLE，无法预报" in panel.countdown_label.text()
+    assert "窗口内无过境" not in panel.countdown_label.text()
+
+
+def test_tle_meta_line_exposes_source_epoch_fetch_and_age(panel):
+    """上游 fetch_tle_record 的 dict 可直接渲染：来源/历元/抓取/已 N 天。"""
+    panel.set_tle_meta({
+        "line1": "1 33591U 09005A   26268.85039999  .00000028  00000+0  38838-4 0  9994",
+        "upstream_source": "celestrak",
+        "epoch_utc": "2026-09-25T20:24:34Z",
+        "fetched_utc": "2026-09-26T00:00:00Z",
+        "age_days": 2.0,
+        "stale": False,
+    })
+    text = panel.tle_date_label.text()
+    assert "TLE 已 2 天" in text
+    assert "来源 celestrak" in text
+    assert "历元 2026-09-25T20:24:34Z" in text
+    assert "抓取 2026-09-26T00:00:00Z" in text
 
 
 class _TrackerStub:

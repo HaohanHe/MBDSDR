@@ -57,7 +57,9 @@ def _marker(repo: Path, path: str) -> None:
     digest = hashlib.sha1(_norm(path).encode("utf-8")).hexdigest()[:16]
     (markers / f"{digest}.claim").write_text(json.dumps({
         "path": _norm(path), "owner": OWNER,
-        "acquired_at": time.time(), "heartbeat_at": time.time(), "ttl_min": 60,
+        "acquired_at": time.time(),  # timeguard: allow — 领取/心跳时刻就是墙钟，锁的 TTL 按它算
+        "heartbeat_at": time.time(),  # timeguard: allow — 同上
+        "ttl_min": 60,
     }), encoding="utf-8")
 
 
@@ -67,7 +69,7 @@ def _registry(repo: Path, released_ago_s: float | None) -> Path:
     entry: dict = {"path": _norm(TARGET), "current": None, "history": []}
     if released_ago_s is not None:
         entry["history"].append({
-            "owner": OWNER, "released_at": time.time() - released_ago_s,
+            "owner": OWNER, "released_at": time.time() - released_ago_s,  # timeguard: allow — 造「N 秒前释放」，冷却判定按墙钟
         })
     path = locks / "claims.json"
     path.write_text(json.dumps({"version": 1, "claims": {_norm(TARGET): entry}}),

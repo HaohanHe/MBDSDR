@@ -436,15 +436,27 @@ def test_planetarium_entry_is_left_tab_not_topbar():
     assert "左栏" in body and "星象仪模式" in body and "视图" in body, body
 
 
-def test_observer_hint_points_at_live_change_location_button(main_window):
-    """E5 回归：观测地点提示指向真实按钮，不再提已删除的经纬度输入框。"""
-    from new_spacetime_panel import _NO_OBSERVER_HINT
-    from PySide6.QtWidgets import QPushButton
+def test_observer_hint_points_at_live_change_location_button():
+    """E5 回归：观测地点提示指向真实按钮，不再提已删除的经纬度输入框。
 
+    这条曾被从工作树里删掉，但提示文案与「更改地点…」按钮都还在。原先的
+    写法去主窗控件树里找按钮——右栏已改按需构建，该断言变成"测面板是否
+    被提前实例化"，与文案真实性无关，所以改为直接建面板验真实控件。
+    """
+    from PySide6.QtWidgets import QApplication
+    from new_spacetime_panel import NewSpacetimePanel, _NO_OBSERVER_HINT
+
+    _app = QApplication.instance() or QApplication([])
     assert "更改地点…" in _NO_OBSERVER_HINT
     assert "输入框" not in _NO_OBSERVER_HINT
-    buttons = [b.text() for b in main_window.findChildren(QPushButton)]
-    assert "更改地点…" in buttons, buttons[:20]
+    panel = NewSpacetimePanel()
+    try:
+        assert panel.change_location_btn.text() == "更改地点…"
+        # 提示点名的控件必须真在这块面板里（不是别处同名按钮）
+        assert panel.isAncestorOf(panel.change_location_btn)
+    finally:
+        panel.deleteLater()
+    assert _app is not None
 
 
 def test_exception_table_is_frozen():

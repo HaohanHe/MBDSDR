@@ -49,6 +49,12 @@ def win(isolated_profile, qapp):
     # 红绿翻转。这里把 860×736 与 [260,240,352] 显式落地后再量横幅。
     w.resize(860, 736)
     w._main_splitter.setSizes([260, 240, 352])
+    # 三栏「展开记忆」也必须钉：QSettings 虽是会话级临时 store，但同一
+    # session 里别的文件（如 test_right_column_collapse）会存下自己的三栏
+    # 比例，本模块恢复出来后，宽窗展开就按那份记忆分栏——右栏若记忆很宽，
+    # 左栏停在 260，横幅永远是窄形态（2026-11-17 grp0a 实测）。本条用例
+    # 只验横幅文案形态，布局前提必须自持。
+    w._expanded_column_sizes = [260, 240, 352]
     for _ in range(20):
         qapp.processEvents()
     assert (w.width(), w.height()) == (860, 736)
@@ -98,12 +104,16 @@ def test_night_time_is_real_solar_altitude_not_fixed_clock():
         "跳过去的时刻，太阳几何高度必须真的接近 -18°"
 
     # 换一个站点：真实日落时刻必须变，证明不是写死「今晚 22:00」。
-    # 按 UTC 日扫描时两地天文暮光终可能只差几十分钟，但绝不该完全相同。
+    # 注意：按 UTC 日扫描时，两地的天文暮光终在 UTC 里可能只差几十秒
+    # （2026-11-16 实测 55.5s），所以差值只证明「不是同一时刻」；真正
+    # 反「写死钟点」的是下面这条——两地各自的时刻都必须落在太阳 -18°，
+    # 一个固定钟点不可能同时满足两个纬度/经度。
     other, _ = _night_observation_time(-33.8688, 151.2093)   # 悉尼
-    # 天文暮光终随季节变化，两站差值实测可低至约 10 分钟；
-    # 断言本意是「不是写死时刻」，不是硬卡 10 分钟，且仍要求确实不同。
+    jd_other = other.timestamp() / 86400.0 + 2440587.5
+    assert abs(sun_altitude_deg(jd_other, -33.8688, 151.2093) + 18.0) < 0.3, \
+        "悉尼的暮光终也必须真的落在太阳 -18°"
     delta = abs((other - t).total_seconds())
-    assert 60 < delta < 6 * 3600, f"两站暮光终差值异常：{delta:.1f}s"
+    assert 0 < delta < 6 * 3600, f"两站暮光终差值异常：{delta:.1f}s"
 
 
 # ---------------------------------------------------------------------------

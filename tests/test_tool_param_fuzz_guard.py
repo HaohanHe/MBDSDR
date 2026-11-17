@@ -209,6 +209,68 @@ def test_failure_without_error_code_is_structured():
     assert r.content.strip()
 
 
+# ── 2b. 数组下限（minItems）必须写进真实 schema ──────────────────
+# 背景：handler 里的「至少 N 个」是运行期知识，模型看不到；schema 才是
+# 模型可读的契约。更糟的是欠定最小二乘会静默给出 rms≈0 的假解。
+def test_spp_locate_schema_requires_four_satellites():
+    reg = ToolRegistry()
+    reg.register_rtklib_tools()
+    sat3 = [[15600000.0, 7540000.0, 20100000.0]] * 3
+    res = reg.call("spp_locate", {
+        "rs": sat3, "dts": [0.0, 0.0, 0.0], "pr": [2.1e7] * 3})
+    assert res.success is False
+    assert res.error == "param_out_of_range"
+    assert "4" in res.content
+
+
+def test_spp_locate_with_four_satellites_still_solves():
+    import numpy as np
+    from mbdsdr_ai import rtklib_adapter as ra
+
+    rr_true = np.array([6378137.0 + 100.0, 0.0, 0.0])
+    rs_l, pr_l = [], []
+    for d in [(1.0, 0.3, 0.2), (0.2, 1.0, 0.3), (0.3, 0.2, 1.0),
+              (-0.5, 0.6, 0.6)]:
+        dv = np.array(d) / np.linalg.norm(d)
+        rs = dv * 26560000.0
+        r, _ = ra.CoordinateConverter.geodist(rs, rr_true)
+        rs_l.append(rs.tolist())
+        pr_l.append(float(r))
+    reg = ToolRegistry()
+    reg.register_rtklib_tools()
+    res = reg.call("spp_locate",
+                   {"rs": rs_l, "dts": [0.0] * 4, "pr": pr_l})
+    assert res.success is True, res.content
+    assert res.data["n_sat"] == 4
+
+
+def test_array_df_schema_requires_two_elements():
+    from mbdsdr_ai.df_position import register_tool_registry as reg_df
+    reg = ToolRegistry()
+    reg_df(reg)
+    res = reg.call("array_correlator_df", {
+        "snapshots": [[1 + 0j, 0 + 0j]],
+        "freq_hz": 145e6,
+        "element_positions_m": [[0.0, 0.0]],
+    })
+    assert res.success is False
+    assert res.error == "param_out_of_range"
+    assert "2" in res.content
+
+
+def test_tdoa_schema_requires_three_stations():
+    from mbdsdr_ai.df_position import register_tool_registry as reg_df
+    reg = ToolRegistry()
+    reg_df(reg)
+    res = reg.call("multistation_tdoa_fix", {
+        "stations_m": [[0.0, 0.0], [1000.0, 0.0]],
+        "tdoa_s": [0.0, 1e-6],
+    })
+    assert res.success is False
+    assert res.error == "param_out_of_range"
+    assert "3" in res.content
+
+
 # ── 3. 抽样轰炸（全量手动跑 scripts/tool_param_fuzz.py）───────────
 @pytest.fixture(scope="module")
 def fuzz_sample():

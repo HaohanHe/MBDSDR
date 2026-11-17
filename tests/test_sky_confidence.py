@@ -34,6 +34,7 @@ from PySide6.QtWidgets import QApplication  # noqa: E402
 app = QApplication.instance() or QApplication(sys.argv)
 
 from rf_sky_view import RFSkyView  # noqa: E402
+from mbdsdr_ai.skyengine import constellations as _constel  # noqa: E402
 
 
 def _new_view(size: int = 500) -> RFSkyView:
@@ -159,3 +160,76 @@ class TestDrawGuards:
         idx = src.index("CONFIDENT_FOV_FRACTION")
         window = src[idx:idx + 1200]
         assert "实测" in window, "门槛常量必须声明为待实测校准，不能当成精度宣称"
+
+
+class TestStatusCardHonesty:
+    """状态卡必须与画布说同一句话：画不出线时卡片不许显示正常体。"""
+
+    def test_over_limit_says_not_drawn(self):
+        v = _new_view()
+        _bind(v, 180.0, 45.0, 30.0, uncertainty=15.0)  # 50% > 33% → 不画
+        text = v.constellation_systems_text()
+        assert text.startswith("IAU")
+        assert "未画线" in text and "超限" in text
+        v.close()
+
+    def test_unknown_uncertainty_says_dashed(self):
+        v = _new_view()
+        _bind(v, 180.0, 45.0, 30.0, uncertainty=None)
+        assert "虚线(未自报误差)" in v.constellation_systems_text()
+        v.close()
+
+    def test_coarse_says_dashed_with_error(self):
+        v = _new_view()
+        _bind(v, 180.0, 45.0, 30.0, uncertainty=6.0)  # 20%
+        assert "虚线(误差 6.00°)" in v.constellation_systems_text()
+        v.close()
+
+    def test_confident_has_no_suffix(self):
+        v = _new_view()
+        _bind(v, 180.0, 45.0, 30.0, uncertainty=1.0)
+        assert v.constellation_systems_text() == "IAU"
+        v.close()
+
+    def test_user_takeover_has_no_suffix(self):
+        v = _new_view()
+        _bind(v, 180.0, 45.0, 30.0, uncertainty=15.0)
+        v.view_state.look_at(20.0, 70.0)
+        v.view_state.zoom_to(100.0)
+        assert v.constellation_systems_text() == "IAU"
+        v.close()
+
+    def test_unbound_has_no_suffix(self):
+        v = _new_view()
+        assert v.constellation_systems_text() == "IAU"
+        v.close()
+
+    def test_incomplete_asterisms_counted_when_chinese_layer_on(self):
+        v = _new_view()
+        v.set_constellation_systems(
+            [_constel.SYSTEM_IAU, _constel.SYSTEM_CHINESE])
+        _bind(v, 180.0, 45.0, 30.0, uncertainty=1.0)  # confident：只有数据后缀
+        text = v.constellation_systems_text()
+        assert "数据不全 4 官" in text
+
+        # 独立推导：不信产品里的计数函数，直接遍历数据层的未解析 token。
+        # 数据变化时这个数字必须是有意为之，改测试前先确认数据层确实变了。
+        from mbdsdr_ai.skyengine import xingguan as _xingguan
+
+        data = _xingguan.get_xingguan()
+        expected = 0
+        for region in data.regions:
+            if region.unresolved_tokens:
+                expected += 1
+            expected += sum(1 for xg in region.xingguan if xg.unresolved_tokens)
+        assert expected == 4
+        assert f"数据不全 {expected} 官" in text
+        v.close()
+
+    def test_unbound_never_reports_incomplete_data(self):
+        """纯看天模式不受数据口径影响：没绑定就不追任何状态后缀。"""
+        v = _new_view()
+        v.set_constellation_systems(
+            [_constel.SYSTEM_IAU, _constel.SYSTEM_CHINESE])
+        assert v.constellation_systems_text() == "IAU + 中国星官"
+        v.close()

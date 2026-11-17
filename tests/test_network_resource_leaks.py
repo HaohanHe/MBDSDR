@@ -368,7 +368,11 @@ def test_ring_reader_stop_timeout_keeps_thread_reference():
         gate.wait(30.0)      # 模拟只能在外部解除的阻塞（bulk 传输 / recv）
         return None
 
-    reader = _ThreadedRingReader(read_fn, block_size=8192, ring_size=1024)
+    # 生产线程的读现在有界（默认 2.0 s）。这里把有界上限放到 join 上限
+    # （2.0 s）之外，才能复现「join 超时、线程仍卡在驱动里」这一分支；
+    # 否则读在本用例断言前就超时返回、生产者正常退出，测的就不是 join 超时。
+    reader = _ThreadedRingReader(read_fn, block_size=8192, ring_size=1024,
+                                 read_timeout_s=5.0)
     reader.start()
     try:
         assert entered.wait(2.0), "生产者没有进入 read_fn"

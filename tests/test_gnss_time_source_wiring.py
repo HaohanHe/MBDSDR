@@ -135,47 +135,9 @@ class TestMonitorPassthrough:
 
 
 # ---------------------------------------------------------------------------
-# 接线守卫：这一条是本文件的重点。
+# 接线守卫（已随「新时空」聚合面板一并移除）
 #
-# 缺陷 D5 的形态不是"代码写错"，是"代码写对但没人调"。任何针对函数的
-# 单测都会绿，只有**查调用点**才能发现。所以这里直接读源码断言接线存在。
+# 2026-11-16：授时展示并入卫星跟踪/状态读数，不再有独立面板，
+# 原先针对 _push_gnss_time_source / _clear_gnss_time_source 的接线断言
+# 失去对象，故删除。
 # ---------------------------------------------------------------------------
-
-def _main_window_source() -> str:
-    path = os.path.join(
-        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-        "desktop", "main_window.py")
-    with open(path, encoding="utf-8") as fh:
-        return fh.read()
-
-
-class TestWiringGuards:
-    def test_poll_gnss_calls_push(self):
-        src = _main_window_source()
-        assert "_push_gnss_time_source()" in src, \
-            "投递授时凭据的调用消失了——面板会退回恒显示'未同步'"
-
-    def test_poll_gnss_calls_clear(self):
-        src = _main_window_source()
-        assert "_clear_gnss_time_source()" in src, \
-            "丢 fix 时不收回凭据，面板会拿过期 RMC 冒充当前已同步"
-
-    def test_push_reads_raw_rmc_not_synthesized(self):
-        """推送必须取原文，不许用已解析字段拼一条 NMEA 出来。"""
-        src = _main_window_source()
-        start = src.index("def _push_gnss_time_source")
-        end = src.index("def _clear_gnss_time_source")
-        body = src[start:end]
-        assert "get_last_rmc()" in body, \
-            "没走 get_last_rmc()，说明凭据来源不是原文"
-        # 拼假语句的常见形态：f"$GPxxx,...*{校验和}" 或 + "*" 之类
-        assert "nmea_checksum" not in body, \
-            "在拼 NMEA——那是伪造观测，应当直接传原文或传空"
-        assert "f\"$" not in body and "f'$" not in body
-
-    def test_clear_really_clears(self):
-        """收回时传空串，面板才会回到未同步；传 None 也等价但语义更糊。"""
-        src = _main_window_source()
-        start = src.index("def _clear_gnss_time_source")
-        body = src[start:start + 600]
-        assert 'set_gnss_nmea("")' in body

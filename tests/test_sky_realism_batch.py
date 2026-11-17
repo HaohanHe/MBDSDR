@@ -26,6 +26,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, _ROOT)
 sys.path.insert(0, os.path.join(_ROOT, "desktop"))
+sys.path.insert(0, os.path.join(_ROOT, "tests", "fixtures"))
 
 import pytest  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
@@ -167,8 +168,8 @@ class TestSatellitePositionFreshness:
 
 
 def rsv_iss():
-    from mbdsdr_ai.decoders import BUILTIN_TLE
-    return BUILTIN_TLE["ISS (ZARYA)"]
+    from tle_samples import ISS_TLE
+    return ISS_TLE
 
 
 # ---------------------------------------------------------------------------

@@ -111,6 +111,62 @@ class TestPerspectiveProjection(unittest.TestCase):
         self.assertTrue(math.isinf(x))
 
 
+class TestOrthographicBackFace(unittest.TestCase):
+    """QGIS 对照结论 P1 的验收：正射背面不得折到圆心（2026-11-17）。"""
+
+    def test_back_hemisphere_has_no_screen_point(self):
+        import numpy as np
+        from mbdsdr_ai.celestial_geometry import OrthographicProjection
+        p = OrthographicProjection()
+        x, y = p.project_vec(np.array([0.0, 0.0, 1.0]))  # 对跖点
+        self.assertTrue(math.isinf(x) and math.isinf(y))
+        xs, ys = p.project_vec_many(
+            np.array([[0.0, 0.0, 1.0], [0.0, 0.0, -1.0]]))
+        self.assertTrue(math.isnan(xs[0]) and math.isnan(ys[0]))
+        self.assertAlmostEqual(xs[1], 0.0, places=12)
+        self.assertAlmostEqual(ys[1], 0.0, places=12)
+
+    def test_aep_batch_center_and_antipode(self):
+        """等距方位：批量与逐点在中心/对跖点同口径（QGIS P4 批量解析式）。"""
+        import numpy as np
+        from mbdsdr_ai.celestial_geometry import AzimuthalEquidistantProjection
+        p = AzimuthalEquidistantProjection()
+        vecs = np.array([[0.0, 0.0, -1.0], [0.0, 0.0, 1.0],
+                         [0.6, 0.0, -0.8]])
+        xs, ys = p.project_vec_many(vecs)
+        # 天顶（视轴中心）→ 画面正中，不是「不可见」
+        self.assertEqual((float(xs[0]), float(ys[0])), (0.0, 0.0))
+        # 对跖点 → 非有限，绘制端丢弃（与 _forward 的 inf 一致）
+        self.assertTrue(math.isinf(xs[1]) and math.isinf(ys[1]))
+        # 非中心点：x = h * atan2(h, -z)/h = atan2(0.6, 0.8)
+        self.assertAlmostEqual(xs[2], math.atan2(0.6, 0.8), places=12)
+        self.assertAlmostEqual(ys[2], 0.0, places=12)
+        for i, v in enumerate(vecs):
+            sx, sy = p.project_vec(v)
+            self.assertEqual(math.isinf(sx), math.isinf(xs[i]))
+            if not math.isinf(sx):
+                self.assertAlmostEqual(xs[i], sx, places=12)
+                self.assertAlmostEqual(ys[i], sy, places=12)
+
+    def test_batch_matches_scalar_for_all_projections(self):
+        import numpy as np
+        from mbdsdr_ai.celestial_geometry import (
+            make_projection, projection_names, vec_from_azalt,
+        )
+        az_deg = [0.0, 37.0, 90.0, 181.0, 300.0]
+        alt_deg = [5.0, 25.0, 60.0, 88.0, 45.0]
+        vecs = np.array([vec_from_azalt(a, h) for a, h in zip(az_deg, alt_deg)])
+        for name in projection_names():
+            p = make_projection(name)
+            xs, ys = p.project_vec_many(vecs)
+            for i, v in enumerate(vecs):
+                sx, sy = p.project_vec(v)
+                self.assertEqual(math.isinf(sx), math.isinf(xs[i]), name)
+                if not math.isinf(sx):
+                    self.assertAlmostEqual(xs[i], sx, places=12, msg=name)
+                    self.assertAlmostEqual(ys[i], sy, places=12, msg=name)
+
+
 class TestStarsAndSatMeta(unittest.TestCase):
     def test_star_draw_monotonic(self):
         from mbdsdr_ai.skyengine.stars import star_draw

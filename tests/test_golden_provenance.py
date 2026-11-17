@@ -108,9 +108,13 @@ def _sha256(rel_file: str) -> str:
     内容归一成「将要入库的 blob」，再对 blob 原始字节取哈希。这样同一份
     资产在任何平台、任何检出方式下指纹一致；如果有人真的提交了不同的
     行尾字节，blob 会变，指纹也跟着变，仍然能抓住。
+
+    这里用 ``-w`` 把归一后的 blob 写进对象库：新入仓、尚未 commit 的
+    fixture 也能被校验（否则 ``cat-file`` 找不到对象，新资产入库前必红）。
+    写进去的是可被 gc 回收的悬空 blob，不改 index、不改工作区。
     """
     oid = subprocess.run(
-        ["git", "hash-object", "--", rel_file],
+        ["git", "hash-object", "-w", "--", rel_file],
         cwd=_ROOT, capture_output=True, text=True, check=True,
     ).stdout.strip()
     blob = subprocess.run(
@@ -222,14 +226,14 @@ def test_self_generated_never_claimed_external() -> None:
 
 
 def test_capability_real_rows_are_external_truth() -> None:
-    """能力表 evidence=real ⇒ truth_source=external-truth；点名资产同口径。"""
+    """能力表 evidence=ota_golden ⇒ truth_source=external-truth；点名资产同口径。"""
     registry = _all_declarations()
     problems = []
     for row in _matrix_rows():
-        if row["truth"] != "real":
+        if row["truth"] != "ota_golden":
             continue
         if row["truth_source"] != "external-truth":
-            problems.append(f"{row['mode']}: evidence=real 但 truth_source={row['truth_source']}")
+            problems.append(f"{row['mode']}: evidence=ota_golden 但 truth_source={row['truth_source']}")
         for asset in EXTERNAL_TRUTH_ASSETS.get(row["mode"], []):
             entry = registry.get(asset)
             if entry is None:
@@ -296,6 +300,6 @@ def test_known_self_generated_assets_are_labeled() -> None:
     # AIS / POCSAG / ACARS / NAVTEX 的合成往返不得混进「真实」
     for mode in ("ais", "pocsag", "acars", "navtex"):
         row = next(r for r in _matrix_rows() if r["mode"] == mode)
-        assert row["truth"] != "real", f"{mode} 是合成往返，不得标真实"
+        assert row["truth"] != "ota_golden", f"{mode} 是合成往返，不得标真实"
         assert row["truth_source"] == "synthetic-loopback", (
             f"{mode} 的来历应为 synthetic-loopback，实际 {row['truth_source']}")

@@ -31,6 +31,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, _ROOT)
 sys.path.insert(0, os.path.join(_ROOT, "desktop"))
+sys.path.insert(0, os.path.join(_ROOT, "tests", "fixtures"))
 
 import math  # noqa: E402
 
@@ -44,11 +45,12 @@ from rf_sky_view import (  # noqa: E402
     RFSkyView, format_angle_deg, format_azimuth, format_arcmin, format_arcsec,
     format_distance_au, format_distance_km, format_magnitude, format_percent,
     format_speed_kms, format_utc_time, format_local_time, format_hms_ra,
-    format_dms_deg, format_view_axis, local_sidereal_time_deg,
+    format_dms_deg, format_view_axis, format_view_axis_human,
+    local_sidereal_time_deg,
     star_catalog_credit_text,
     format_satellite_description, compass_point,
 )
-from mbdsdr_ai.decoders import BUILTIN_TLE  # noqa: E402
+from tle_samples import ISS_TLE, NOAA19_TLE, TEST_TLE  # noqa: E402
 from mbdsdr_ai.new_spacetime import get_time_engine  # noqa: E402
 from mbdsdr_ai import orbit  # noqa: E402
 from mbdsdr_ai.skyengine import jtime as _jtime  # noqa: E402
@@ -57,8 +59,8 @@ from mbdsdr_ai.skyengine import jtime as _jtime  # noqa: E402
 LAT, LON = 43.9, 125.3
 ISS = "ISS (ZARYA)"
 NOAA19 = "NOAA 19"
-LINE1_ISS, LINE2_ISS = BUILTIN_TLE[ISS]
-LINE1_N19, LINE2_N19 = BUILTIN_TLE[NOAA19]
+LINE1_ISS, LINE2_ISS = ISS_TLE
+LINE1_N19, LINE2_N19 = NOAA19_TLE
 
 # 与快转用例同一锚点：ISS 仰角≈55°，避免地平附近的折射/几何退化
 UNIX = 1790532300.0
@@ -224,6 +226,8 @@ class TestSatelliteReadouts:
         # 内部值本身也必须是当帧后端值（不是缓存/上一帧）
         assert abs(obj.elevation_deg - el) < 1e-9
         assert abs(obj.azimuth_deg - az) < 1e-9
+        # 距离也落字段（全精度），信息卡不再依赖文案正则
+        assert obj.range_km == km
 
         # 对象文案（视图快转重算与 tracker 同一口径）逐项对拍
         desc = obj.description or ""
@@ -259,6 +263,57 @@ class TestSatelliteReadouts:
         assert f"升 {format_utc_time(rise_u)}" in joined
         assert format_local_time(rise_u, ZoneInfo("Asia/Shanghai"),
                                  "%H:%M") not in joined
+
+
+    def test_missing_distance_is_dash_not_zero(self, sky):
+        """文案里没有「距离 X km」时，卡片不许把未知写成 0.00 km。"""
+        v, _ = sky
+        obj = rsv.SkyObject(
+            name="TEST-NO-DIST", azimuth_deg=180.0, elevation_deg=45.0,
+            obj_type="satellite",
+            description="仰角 45.0° · 径向速度 1.0 km/s")
+        v._build_selected_info(obj)
+        assert v._selected_info["dist_km"] is None, \
+            "读不到距离时必须返回 None，不能用 0.0 冒充"
+        v._hovered_object = obj
+        rec = _TextRecorder()
+        v._draw_picked_info(rec)
+        joined = "\n".join(rec.texts)
+        assert "0.00 km" not in joined, "缺距离时信息卡不许写 0.00 km"
+
+
+    def test_range_field_wins_over_description_text(self, sky):
+        """range_km 字段是主路径：文案缺失或带旧值时卡片仍读真值。"""
+        v, _ = sky
+        obj = rsv.SkyObject(
+            name="TEST-RANGE-FIELD", azimuth_deg=180.0, elevation_deg=45.0,
+            obj_type="satellite",
+            description="仰角 45.0° · 距离 999.99 km · 径向速度 1.0 km/s",
+            range_km=412.3456)
+        v._build_selected_info(obj)
+        assert v._selected_info["dist_km"] == 412.3456, \
+            "有 range_km 时不许退回文案正则"
+        v._hovered_object = obj
+        rec = _TextRecorder()
+        v._draw_picked_info(rec)
+        joined = "\n".join(rec.texts)
+        # 卡片距离行画的是字段值（412.35）；描述原文那句仍按对象自述显示，
+        # 不在这条断言里——两者在真实喂入路径同源（同一个 state 快照）。
+        assert "412.35 km" in joined, joined
+
+
+    def test_missing_aliases_shows_dash(self, sky):
+        """无别名时不许留空白的「又名：」，要和距离一样给占位。"""
+        v, _ = sky
+        obj = rsv.SkyObject(
+            name="TEST-NO-ALIAS", azimuth_deg=180.0, elevation_deg=45.0,
+            obj_type="satellite", description="")
+        v._build_selected_info(obj)
+        v._hovered_object = obj
+        rec = _TextRecorder()
+        v._draw_picked_info(rec)
+        joined = "\n".join(rec.texts)
+        assert "又名：—" in joined, f"缺别名时必须写占位，实测：{joined!r}"
 
 
 def _parse_km(obj):
@@ -368,7 +423,7 @@ class TestPassPanelReadouts:
         row = rows[0]
         peak = float(row["peak_unix"])
         name = str(row["name"])
-        st = _state_at(name, *BUILTIN_TLE[name], peak)
+        st = _state_at(name, *TEST_TLE[name], peak)
         assert st is not None
         true_el = float(st["elevation"])
 
@@ -508,7 +563,9 @@ class TestSingleFormatterAndUnitLabels:
         assert f"{format_utc_time(utc_dt, '%H:%M:%S')} [模拟]" in texts
         assert format_local_time(utc_dt) in texts
         axis = next(t for t in texts if t.startswith("AZ ") and "· ALT " in t)
+        # 专业数值行恢复旧格式：只有一个数值 + 单位，行尾是「°」。
         assert axis.endswith("°")
+        assert "°" in axis
         assert all(" deg" not in t for t in texts), texts
 
     def test_no_ad_hoc_numeric_formatting_left(self):
@@ -550,7 +607,44 @@ class TestSpacetimeReadouts:
         assert txt.startswith("AZ 123.4°")
         assert "SE" in txt                 # 16 方位名与度数同给
         assert "ALT 45.0°" in txt
+        assert txt.endswith("°")            # 旧格式：专业行不带中文括注
         assert "几何" not in txt             # 口径在行标签上，不重复塞进值里
+        assert "（" not in txt               # 中文说明已移到独立人话行
+
+    def test_view_axis_exact_text_keeps_numeric_format(self):
+        """恢复旧格式后整行文案可钉死，不多一个字符。"""
+        assert format_view_axis(135.0, 45.0) == "AZ 135.0° SE · ALT 45.0°"
+        # 359.96° 折回 0.0° N（不写越界方位）
+        assert format_view_axis(359.96, 0.0) == "AZ 0.0° N · ALT 0.0°"
+
+    @pytest.mark.parametrize("az, name", [
+        (0.0, "北"), (22.5, "东北"), (45.0, "东北"), (90.0, "东"),
+        (135.0, "东南"), (180.0, "南"), (225.0, "西南"), (270.0, "西"),
+        (315.0, "西北"), (337.4, "西北"), (337.5, "北"), (359.9, "北"),
+    ])
+    def test_view_axis_human_compass_uses_8_points(self, az, name):
+        """人话行用 8 方位（比 16 方位短），45° 一档左闭右开。"""
+        assert format_view_axis_human(az, 45.0) == f"朝向{name} · 仰角中天"
+
+    @pytest.mark.parametrize("alt, label", [
+        (-6.5, "地平线下"), (-90.0, "地平线下"),
+        (-6.0, "贴近地平"), (0.0, "贴近地平"), (4.9, "贴近地平"),
+        (5.0, "低空"), (29.9, "低空"),
+        (30.0, "中天"), (59.9, "中天"),
+        (60.0, "高空"), (84.9, "高空"),
+        (85.0, "天顶"), (90.0, "天顶"),
+    ])
+    def test_view_axis_human_altitude_bands_and_boundaries(self, alt, label):
+        """高度短档：区间左闭右开，5°/30°/60°/85° 各归上一档。"""
+        assert format_view_axis_human(180.0, alt) == f"朝向南 · 仰角{label}"
+
+    @pytest.mark.parametrize("az, alt", [
+        (float("nan"), 45.0), (180.0, float("nan")),
+        (float("inf"), 45.0), (180.0, float("-inf")),
+        (None, 45.0), (180.0, None),
+    ])
+    def test_view_axis_human_non_finite_is_empty(self, az, alt):
+        assert format_view_axis_human(az, alt) == ""
 
     def test_card_rows_use_single_fact_source(self, engine):
         """渲染状态卡：恒星时/视轴/星表来源都来自单一事实源，无站址给空态。"""
@@ -572,6 +666,27 @@ class TestSpacetimeReadouts:
         rec2 = _TextRecorder()
         v2._draw_info_overlay(rec2)
         assert "—（无站址）" in rec2.texts
+
+    def test_status_card_has_human_axis_line_fitting_card_width(self):
+        """状态卡把「朝向… · 仰角…」单独一行画出，且宽度 ≤ 158px。"""
+        from PySide6.QtGui import QFontMetrics
+        v = RFSkyView()
+        v.resize(900, 900)
+        v.set_observer(LAT, LON, 0.0)
+        rec = _TextRecorder()
+        v._draw_info_overlay(rec)
+        human = next(t for t in rec.texts if t.startswith("朝向"))
+        assert " · 仰角" in human
+        # 值列从 card_x+76 起，卡内可用宽 = 240-82 = 158px
+        assert RFSkyView.INFO_CARD_W - 82 == 158
+        width = QFontMetrics(v._mono_font).horizontalAdvance(human)
+        assert width <= 158, f"人话视轴行超宽 {width}px: {human!r}"
+        # 专业行仍是旧格式，没有把中文塞回去
+        axis = next(t for t in rec.texts
+                    if t.startswith("AZ ") and "· ALT " in t)
+        assert axis.endswith("°") and "（" not in axis
+        # 人话行独立于专业行：两行是不同文本，不是同一行拼接
+        assert human != axis
 
     def test_catalog_credit_from_meta(self):
         txt = star_catalog_credit_text()

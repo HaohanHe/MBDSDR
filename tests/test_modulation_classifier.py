@@ -153,3 +153,29 @@ def test_center_freq_estimate():
     r = clf.classify(sig, SR)
     # 中心频率应接近 FC=50kHz（±10kHz 容差）
     assert abs(r.center_freq - FC) < 10_000
+
+
+@pytest.mark.parametrize("amp", [0.02, 0.05, 0.2])
+def test_elevated_noise_is_not_reported_as_modulation(amp):
+    """高于能量门限的纯噪声不得报成 OOK/AM。
+
+    旧规则下复高斯噪声会因 Rayleigh 幅度起伏得到 zero_frac≈0.23、
+    mag_cv≈0.52，被判成「OOK 0.85」——这是把噪声当信号（假分类）。
+    谱平坦度才是分界：噪声 ≈0.85，五类调制信号 ≤0.30。
+    """
+    rng = np.random.RandomState(7)
+    noise = (rng.randn(20000) + 1j * rng.randn(20000)) * amp
+    r = ModulationClassifier().classify(noise, SR)
+    assert r.modulation == "NOISE", f"amp={amp}: got {r.modulation} conf={r.confidence}"
+    assert r.confidence <= 0.7
+    assert r.suggestions, "判为噪声也要给出可操作建议"
+
+
+def test_noise_structure_gate_does_not_swallow_real_signals():
+    """噪声门不能把五类合成信号吞掉（平坦度余量必须够）。"""
+    t = _make_t_array()
+    clf = ModulationClassifier()
+    for expected, maker in [("AM", _make_am), ("FM", _make_fm)]:
+        feat = clf.classify(maker(t), SR)
+        assert feat.modulation == expected
+        assert feat.features["spectral_flatness"] < 0.6

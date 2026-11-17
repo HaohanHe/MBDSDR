@@ -138,7 +138,8 @@ def test_append_success_reports_waits(tmp_path: Path) -> None:
     assert claimed.returncode == 0, claimed.stderr
     locks.mkdir(parents=True, exist_ok=True)
     (locks / "waiting.log").write_text(json.dumps({
-        "at": time.time(), "at_iso": "2026-11-13 21:00:00",
+        "at": time.time(),  # timeguard: allow — 等待日志的「发生时刻」就是墙钟，被测逻辑按它判新鲜度
+        "at_iso": "2026-11-13 21:00:00",
         "path": "docs/COORDINATION.md", "key": "docs/coordination.md",
         "waiter": OWNER_B, "holder": OWNER_A, "kind": "held",
     }, ensure_ascii=False) + "\n", encoding="utf-8")

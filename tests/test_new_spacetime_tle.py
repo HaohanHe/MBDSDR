@@ -169,6 +169,7 @@ def test_fetch_group_parse(tmp_path, monkeypatch):
     """用预置文本模拟群组响应，验证解析出多颗卫星。"""
     mgr = _make_manager(tmp_path)
     monkeypatch.delenv("MBDSDR_OFFLINE", raising=False)
+    monkeypatch.setenv("MBDSDR_ALLOW_NETWORK", "1")   # 默认离线优先，须显式允许
 
     def _fake_urlopen(req, *args, **kwargs):
         assert "GROUP=" in req.full_url
@@ -205,6 +206,7 @@ def test_fetch_keeps_true_object_name_and_flags_mismatch(tmp_path, monkeypatch):
     """P10 回归锁：按 44016 取件、声明名 METEOR M2，但真实对象是 ATLAS 残骸——
     不得用声明名覆盖 TLE line0，必须留痕 identity_status=mismatch 且不可用时。"""
     monkeypatch.delenv("MBDSDR_OFFLINE", raising=False)
+    monkeypatch.setenv("MBDSDR_ALLOW_NETWORK", "1")   # 默认离线优先，须显式允许
     atlas_text = (
         "ATLAS 5 CENTAUR DEB\n"
         "1 44016U 14055BX  26251.53597745 -.00000086  00000+0  00000+0 0  9994\n"

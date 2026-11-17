@@ -118,6 +118,10 @@ def value_for(pname, schema):
     if "offset_hz" in n or n == "offset":
         return 1000
     # --- 时间/数量 ---
+    if n.startswith("jd_") or n == "jd":
+        # 合法儒略日（2023-02 附近）。给 1.0 会被输入卫生门拒绝，
+        # 审计只能看到「诚实不可用」，测不出计算路径。
+        return 2460000.5
     if n in ("duration", "duration_s", "seconds", "secs"):
         return 1
     if n in ("n", "count", "num", "samples", "num_samples", "trials", "num_trials", "size"):

@@ -205,11 +205,11 @@ def _card_state(v: RFSkyView, obj=None) -> QImage:
     v._selected_info = None
     if obj is not None:
         v._build_selected_info(obj)
-    # 受晒行基线 y=card_y+202（指向 20 / 可见卫星 38 / 太阳高度 56 /
-    # UTC 76 / 本地 94 / 恒星时 112 / 观测站 130 / 视轴 148 / 视角 166 /
-    # 调谐 184 / 受晒 202），文字上沿约 baseline-12=190。
-    # 旧值 210 截到的是银河行「无数据·不提供」，不随受晒状态变化。
-    return _card_row_crop(v, 190, 20)
+    # 受晒行基线 y=card_y+238（指向 20 / 可见卫星 38 / 太阳高度 56 /
+    # UTC 76 / 本地 94 / 恒星时 112 / 儒略日 130（2026-11-17 起独立成行）/
+    # 观测站 148 / 视轴 166 / 朝向 184（2026-11-18 起人话行独立）/
+    # 视角 202 / 调谐 220 / 受晒 238），文字上沿约 baseline-12=226。
+    return _card_row_crop(v, 226, 20)
 
 
 def test_status_card_states_differ_per_state():

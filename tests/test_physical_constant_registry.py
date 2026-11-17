@@ -310,10 +310,16 @@ def test_refraction_single_entry_for_below_horizon():
 
 
 def test_altaz_below_horizon_does_not_fake_known_weather():
-    """地平线下的天体：无实测气象标 unknown，有实测气象才是 known/0.0。"""
-    from mbdsdr_ai.astronomy import EquatorialCoord, Observer, unix_to_jd
+    """地平线下的天体：无实测气象标 unknown，有实测气象才是 known/0.0。
 
-    jd = unix_to_jd()
+    用**固定历元**而不是 `unix_to_jd()`：同一赤道坐标的高度角随恒星时变化，
+    「拿当前时刻断言它在地平线下」只在一天中的一段时间成立
+    （2026-11-17 实测 alt=+22.8，真红）。JD 2461041.71875 =
+    2026-01-01T05:15:00Z，上海站该坐标 alt≈-31.8°。
+    """
+    from mbdsdr_ai.astronomy import EquatorialCoord, Observer
+
+    jd = 2461041.71875
     eq = EquatorialCoord(ra_deg=150.0, dec_deg=20.0)
     unknown = eq.to_altaz(Observer(latitude_deg=31.2, longitude_deg=121.5), jd)
     assert unknown.alt_deg < -2.0

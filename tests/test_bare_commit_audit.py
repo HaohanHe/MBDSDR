@@ -211,7 +211,7 @@ def test_missing_ledger_reports_not_checked_not_clean(tmp_path: Path) -> None:
     locks = tmp_path / "locks"       # 故意不写 claims.json
     trend = tmp_path / "trend.jsonl"
     _commit(repo, {"a.py": "x = 1\n"}, "feat: no ledger\n\nclaim-line: 甲线",
-            time.time() - 10.0)
+            time.time() - 10.0)  # timeguard: allow — 构造「10 秒前」的提交时间戳，审计按墙钟算「新提交」
 
     proc = _run(repo, locks, "--range", "HEAD", "--rule-since", "0", "--json",
                 "--trend", str(trend))

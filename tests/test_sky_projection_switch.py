@@ -116,6 +116,33 @@ def test_unknown_projection_raises(qapp):
         v.close()
 
 
+def test_orthographic_back_hemisphere_is_not_drawn_at_center():
+    """正射只显示前半球：背面点必须不可见，不能折到屏幕正中。
+
+    回归（2026-11-17，QGIS/投影对照发现）：旧 `_forward` 用 h=1/‖v‖，
+    对跖点 v=[0,0,1] 算出 (0,0)——正中凭空一个点；背面整个半球还会被
+    镜像叠到前半球。与 PerspectiveProjection 同口径：不可见返回非有限值。
+    """
+    import math
+
+    import numpy as np
+
+    from mbdsdr_ai.celestial_geometry import OrthographicProjection
+
+    p = OrthographicProjection()
+    for v in ([0.0, 0.0, 1.0], [0.6, 0.0, 0.8]):
+        x, y = p.project_vec(np.array(v, dtype=float))
+        assert not math.isfinite(x) and not math.isfinite(y), \
+            f"背面 {v} 不应有屏幕坐标，实际 ({x}, {y})"
+    # 批量与单点同口径：背面 NaN，圆心 (0,0) 仍来自正面天顶
+    xs, ys = p.project_vec_many(np.array(
+        [[0.0, 0.0, -1.0], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]]))
+    assert xs[0] == 0.0 and ys[0] == 0.0
+    assert not np.isfinite(xs[1]) and not np.isfinite(ys[1])
+    # v[2]==0 是天球边缘（90°），仍可见
+    assert xs[2] == 1.0 and ys[2] == 0.0
+
+
 def test_projection_change_is_visible_in_screen_coords(qapp):
     """换投影必须真的改变画面（不是只改了个名字）。"""
     from rf_sky_view import RFSkyView

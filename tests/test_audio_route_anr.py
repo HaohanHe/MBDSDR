@@ -113,6 +113,27 @@ def test_anr_tap_wired_in_main_path(mw_window, monkeypatch):
         "无 tap 时应直通原音频"
 
 
+def test_muted_still_feeds_audio_tap_but_not_sound_card():
+    """「不收听」只掐写卡，不许把 audio_tap 一起掐掉。
+
+    tap 是 APRS / 卫星 APT 等解码器的音频入口。旧实现在 tap 之前就 return，
+    与 UI 文案和 set_muted docstring（"解调/AGC/tap 照跑，只是不写声卡"）矛盾。
+    """
+    from receive_pipeline import DemodWorker, SharedDemodConfig
+
+    cfg = SharedDemodConfig(mode="FM")
+    cfg.agc_speed = "off"
+    player = _FakePlayer()
+    dw = DemodWorker(None, None, player, cfg, 48_000.0)
+    seen = []
+    dw.audio_tap = lambda audio: (seen.append(np.array(audio, copy=True)), audio)[1]
+    dw.set_muted(True)
+    writes_before = len(player.writes)
+    dw._push_audio(np.zeros(32, dtype=np.float32), player, "FM")
+    assert len(seen) == 1, "「不收听」必须继续喂 audio_tap（解码器靠它拿音频）"
+    assert len(player.writes) == writes_before, "「不收听」不得写声卡"
+
+
 class _FakeDemod1:
     def __init__(self):
         self.audio_tap = None

@@ -19,6 +19,7 @@ os.environ.setdefault("MBDSDR_NO_HW", "1")
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, _ROOT)
 sys.path.insert(0, os.path.join(_ROOT, "desktop"))
+sys.path.insert(0, os.path.join(_ROOT, "tests", "fixtures"))
 
 import pytest  # noqa: E402
 from PySide6.QtCore import Qt  # noqa: E402
@@ -29,7 +30,7 @@ app = QApplication.instance() or QApplication(sys.argv)
 
 from desktop.rf_sky_view import RFSkyView, SkyObject  # noqa: E402
 from mbdsdr_ai import orbit  # noqa: E402
-from mbdsdr_ai.decoders import BUILTIN_TLE  # noqa: E402
+from tle_samples import TEST_TLE  # noqa: E402
 from mbdsdr_ai.new_spacetime import get_time_engine  # noqa: E402
 
 LAT, LON = 43.9, 125.3
@@ -40,7 +41,7 @@ SAT_A, SAT_B = "NOAA 19", "NOAA 18"
 
 
 def _azalt_at(name: str, t_unix: float) -> tuple:
-    l1, l2 = BUILTIN_TLE[name]
+    l1, l2 = TEST_TLE[name]
     from sgp4.api import Satrec
     sat = Satrec.twoline2rv(l1, l2)
     st = orbit._state_from_satrec(
@@ -60,11 +61,11 @@ def engine():
 
 def _catalog():
     return [
-        {"name": SAT_A, "line1": BUILTIN_TLE[SAT_A][0],
-         "line2": BUILTIN_TLE[SAT_A][1], "freq_mhz": 137.1,
+        {"name": SAT_A, "line1": TEST_TLE[SAT_A][0],
+         "line2": TEST_TLE[SAT_A][1], "freq_mhz": 137.1,
          "kind": "weather"},
-        {"name": SAT_B, "line1": BUILTIN_TLE[SAT_B][0],
-         "line2": BUILTIN_TLE[SAT_B][1], "freq_mhz": 137.1,
+        {"name": SAT_B, "line1": TEST_TLE[SAT_B][0],
+         "line2": TEST_TLE[SAT_B][1], "freq_mhz": 137.1,
          "kind": "weather"},
     ]
 
@@ -174,16 +175,16 @@ class TestFourCombinations:
 
     def test_status_card_rows_reflect_each_loop(self, ):
         v = _new_view()
-        # 视角行基线 y=card_y+166、调谐行 y=card_y+184（按
-        # _draw_info_overlay 逐行累加实测），文字上沿约 baseline-12。
-        # 旧值 172/190 截到的是下一行，两行都不随对应开关变化。
-        before = _card_crop(v, 154)
+        # 视角行基线 y=card_y+202、调谐行 y=card_y+220（「朝向」人话行
+        # 独立后整体下移 18px，按 _draw_info_overlay 逐行累加实测），
+        # 文字上沿约 baseline-12。
+        before = _card_crop(v, 190)
         _cam_on(v)
-        after = _card_crop(v, 154)
+        after = _card_crop(v, 190)
         assert _ink(before) != _ink(after)
-        t_before = _card_crop(v, 172)
+        t_before = _card_crop(v, 208)
         _track_on(v)
-        t_after = _card_crop(v, 172)
+        t_after = _card_crop(v, 208)
         assert _ink(t_before) != _ink(t_after)
         v.close()
 

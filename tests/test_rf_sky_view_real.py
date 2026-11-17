@@ -24,6 +24,7 @@ _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, _ROOT)
 sys.path.insert(0, os.path.join(_ROOT, "desktop"))
 
+from PySide6.QtGui import QColor  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
 app = QApplication.instance() or QApplication(sys.argv)
@@ -276,6 +277,126 @@ class TestTwilightGradient:
         bottom = img.pixelColor(150, 295)
         lum = lambda c: 0.299 * c.red() + 0.587 * c.green() + 0.114 * c.blue()
         assert lum(bottom) > lum(top), "夜空应上暗下亮（地平线微亮）"
+
+
+def _horizon_view(brightness=1.0, atmosphere=True):
+    """星象仪入口视角（alt=25 / fov=90）的离屏画布。
+
+    关闭网格与地景：本组用例校验的是**天空渐变与雾带**，网格虚线/剪影会
+    覆盖采样点（2026-11-17 实测：同一列隔行出现 196→216→137 的带状跳变，
+    全部来自网格与地平线描边）。
+    """
+    from desktop.rf_sky_view import RFSkyView
+    v = RFSkyView()
+    v.resize(800, 600)
+    v.set_observer(40.0, 116.0, 0.0)
+    v.enter_horizon_view()
+    v._sky_brightness = brightness
+    v._show_atmosphere = atmosphere
+    v._show_landscape = False
+    v._show_grid = False
+    return v
+
+
+def _horizon_y(view):
+    p = view._sky_to_screen_finite(view.view_state.center_az, 0.0)
+    assert p is not None, "星象仪入口视角下地平线应在屏内"
+    return p.y()
+
+
+def _lum(c):
+    return 0.299 * c.red() + 0.587 * c.green() + 0.114 * c.blue()
+
+
+def _median_rgb(img, y, x_lo=120, x_hi=680, step=4):
+    """横向取样带的中位色（逐通道）。
+
+    单点取样会把**随时间移动的真实天体**（恒星/行星/月亮）和每帧随机的闪烁
+    算进"天空颜色"：2026-11-17 grp1 全量跑到 03:5x 时，西天地平正有一颗亮星
+    落在 (400, hy-1)，三条用例同时红；半小时后单独重跑同一文件 22 passed。
+    中位数对这类少数像素免疫，而渐变/雾带在横向上是均匀的，口径不变。
+    """
+    rr, gg, bb = [], [], []
+    for x in range(x_lo, x_hi, step):
+        c = img.pixelColor(x, int(y))
+        rr.append(c.red())
+        gg.append(c.green())
+        bb.append(c.blue())
+    rr.sort(), gg.sort(), bb.sort()
+    m = len(rr) // 2
+    return QColor(rr[m], gg[m], bb[m])
+
+
+def _median_lum(img, y, **kw):
+    return _lum(_median_rgb(img, y, **kw))
+
+
+class TestSkyGradientAnchoredToHorizon:
+    """渐变的地平色必须落在**真实地平线**上，而不是窗口底边。
+
+    旧实现把 stops 铺满 0→height：星象仪入口真实地平在 ~73% 高度，底边已是
+    alt≈-20°，可见地平拿到的是更暗一档的颜色（Stellarium 对照见
+    docs/learn/2026-11-17-stellarium-planetarium-visuals.md §3.1）。
+    """
+
+    @pytest.mark.parametrize("brightness", [0.0, 1.0])
+    def test_horizon_stop_lands_on_geometric_horizon(self, brightness):
+        from desktop.rf_sky_view import _twilight_stops
+        v = _horizon_view(brightness, atmosphere=False)
+        img = v.grab().toImage()
+        hy = _horizon_y(v)
+        got = _median_rgb(img, hy - 1)
+        want = _twilight_stops(brightness)[-1][1]
+        diff = max(abs(got.red() - want.red()),
+                   abs(got.green() - want.green()),
+                   abs(got.blue() - want.blue()))
+        assert diff <= 8, (
+            f"地平色没锚到真实地平线：y={hy:.1f} 实得 {got.getRgb()[:3]} "
+            f"期望 {want.getRgb()[:3]}（差 {diff}）")
+
+    def test_sky_still_brighter_near_horizon(self):
+        v = _horizon_view(0.0, atmosphere=False)
+        img = v.grab().toImage()
+        hy = _horizon_y(v)
+        near = _median_lum(img, hy - 2)
+        high = _median_lum(img, hy - 120)
+        assert near > high, "仰角越低应越亮（暮光梯度方向）"
+
+
+class TestHorizonHaze:
+    """近地平雾带：按等仰角分带、加法混合、只在地平以上生效。"""
+
+    def test_haze_adds_light_above_horizon_only(self):
+        on = _horizon_view(1.0).grab().toImage()
+        off = _horizon_view(1.0, atmosphere=False).grab().toImage()
+        v = _horizon_view(1.0)
+        hy = _horizon_y(v)
+        above = _median_lum(on, hy - 2) - _median_lum(off, hy - 2)
+        c_on = _median_rgb(on, hy + 60)
+        c_off = _median_rgb(off, hy + 60)
+        below = max(abs(c_on.red() - c_off.red()),
+                    abs(c_on.green() - c_off.green()),
+                    abs(c_on.blue() - c_off.blue()))
+        assert above > 1.0, f"地平以上没有可见雾带增量（{above:.2f}）"
+        assert below <= 6, f"雾带越过了地平线，把地面提亮了（Δ={below}）"
+
+    def test_haze_follows_twilight_not_fixed_alpha(self):
+        """暮光（太阳 -4°）应明显强于天文夜（-40°）：不是一条固定灰带。"""
+        def delta(sun_alt):
+            v = _horizon_view(0.0)
+            v._sun = {"az": 150.0, "alt": sun_alt}
+            on = v.grab().toImage()
+            v2 = _horizon_view(0.0, atmosphere=False)
+            v2._sun = {"az": 150.0, "alt": sun_alt}
+            off = v2.grab().toImage()
+            hy = _horizon_y(v)
+            y = int(hy) - 2
+            return _median_lum(on, y) - _median_lum(off, y)
+
+        twilight = delta(-4.0)
+        night = delta(-40.0)
+        assert twilight > night + 3.0, (
+            f"雾带没跟随太阳高度：暮光 Δ={twilight:.2f} / 夜 Δ={night:.2f}")
 
 
 class TestPaintingRobust:

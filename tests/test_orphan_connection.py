@@ -5,10 +5,9 @@
 
 审计发现 5 个面板 UI 存在但从未收到真实数据。本测试 offscreen 验证：
 
-  1. 无后端时，5 个面板（new_spacetime / aprs / satellite_image / modulation /
+  1. 无后端时，4 个面板（aprs / satellite_image / modulation /
      anr）都能实例化、显示空态（"未连接"/"等待数据"/"--"），不崩、不伪造数值；
   2. main_window 的数据 tap 真的把数据接到面板：
-       - ``_tap_new_spacetime_iq`` 可见时调用面板 ``update_iq``；
        - ``_tap_demod_audio`` 把 48k 音频分给 APRS / 卫星云图面板（dock 可见才喂）；
        - ANR 开启时 ``_tap_demod_audio`` 真的跑谱减降噪，``_on_anr_learn_noise``
          用最近音频块学习噪声底；
@@ -60,14 +59,6 @@ def mw(isolated_profile):
 # 1. 无后端空态：5 个面板都在、都显示空态、不崩
 # ---------------------------------------------------------------------------
 class TestEmptyStateNoBackend:
-    def test_new_spacetime_panel_exists_and_empty(self, mw):
-        p = mw.new_spacetime_panel
-        assert p is not None
-        # 无信号：大字号显"未检测到信号"，指标全 "--"
-        assert "未检测到" in p.amr_mod_label.text()
-        assert p.bw_label.text() == "--"
-        assert p.snr_label.text() == "--"
-
     def test_aprs_panel_empty(self, mw):
         p = mw.digital_aprs_panel
         assert p is not None
@@ -101,47 +92,7 @@ class TestEmptyStateNoBackend:
 
 
 # ---------------------------------------------------------------------------
-# 2. new_spacetime tap：可见时 update_iq 被调用，无信号显空态
-# ---------------------------------------------------------------------------
-class TestNewSpacetimeTap:
-    def test_tap_calls_update_iq_when_visible(self, mw):
-        p = mw.new_spacetime_panel
-        # 切到新时空 Tab。offscreen 平台不真正 map 窗口，isVisible() 恒 False，
-        # 这里用 monkeypatch 模拟"用户切到了这个 Tab"的可见态。
-        mw.left_tab.setCurrentWidget(p)
-        p.isVisible = lambda: True  # type: ignore[assignment]
-
-        calls = []
-        orig = p.update_iq
-        def spy(iq, sr, cf=0.0):
-            calls.append((len(iq), sr, cf))
-            return orig(iq, sr, cf)
-        p.update_iq = spy
-
-        iq = np.random.default_rng(0).standard_normal(16384).astype(np.complex64)
-        mw._tap_new_spacetime_iq(iq, 2_048_000.0)
-        p.update_iq = orig
-
-        assert len(calls) == 1, "面板可见时 _tap_new_spacetime_iq 应调用 update_iq"
-        assert calls[0][1] == pytest.approx(2_048_000.0)
-        # 纯噪声 IQ：分析器应判为未检测到信号（绝不伪造调制方式）
-        assert "未检测到" in p.amr_mod_label.text()
-
-    def test_tap_noop_when_hidden(self, mw):
-        p = mw.new_spacetime_panel
-        # 显式模拟不可见（offscreen 本就不 map，这里也防止前一个测试的 monkeypatch 残留）
-        p.isVisible = lambda: False  # type: ignore[assignment]
-        calls = []
-        orig = p.update_iq
-        p.update_iq = lambda *a, **k: calls.append(1)
-        iq = np.zeros(1024, dtype=np.complex64)
-        mw._tap_new_spacetime_iq(iq, 2_048_000.0)
-        p.update_iq = orig
-        assert calls == [], "面板不可见时 tap 应零开销"
-
-
-# ---------------------------------------------------------------------------
-# 3. APRS / 卫星云图 音频 tap：dock 可见才喂 48k 音频
+# 2. APRS / 卫星云图 音频 tap：dock 可见才喂 48k 音频
 # ---------------------------------------------------------------------------
 class TestAudioTap:
     def test_aprs_feed_called_when_dock_visible(self, mw):

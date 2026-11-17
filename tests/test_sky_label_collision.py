@@ -238,6 +238,39 @@ def test_constellation_cap_drops_farthest_not_queue_order():
     assert all(abs(float(items[i][1].x())) >= 24.0 for i in dropped)
 
 
+def test_wide_fov_spreads_tier_cap_across_screen():
+    """宽 FOV 名额摊开：条数不变，但边缘名字不能被中心那一坨挤掉。
+
+    场景按真机复现：40 条座名挤在屏幕中央一小块（±40px），另有 4 条在
+    四角/两侧。旧口径"离中心最近优先"会把 24 个名额全给中央那一坨，
+    边缘名字整批丢弃；spread=True 按屏幕网格轮转，边缘必须至少各留一条。
+    把 spread 退回旧逻辑，两条边缘断言必红。
+    """
+    from PySide6.QtCore import QPointF
+    items = [(LABEL_PRIORITY_CONSTELLATION,
+              QPointF(430.0 + (i % 10) * 8.0, 430.0 + (i // 10) * 8.0),
+              [("中央", False, 0.0)], QColor(255, 255, 255))
+             for i in range(40)]
+    edges = [(30.0, 60.0), (870.0, 60.0), (30.0, 840.0), (870.0, 840.0)]
+    items.extend((LABEL_PRIORITY_CONSTELLATION, QPointF(x, y),
+                  [("边缘", False, 0.0)], QColor(255, 255, 255))
+                 for x, y in edges)
+    near = label_tier_keep(items, 450.0, 450.0)
+    spread = label_tier_keep(items, 450.0, 450.0,
+                             bounds=(0.0, 0.0, 900.0, 900.0), spread=True)
+    assert len(near) == len(spread) == LABEL_TIER_CAPS[2]
+    near_pts = [(float(items[i][1].x()), float(items[i][1].y())) for i in near]
+    assert not [p for p in near_pts if p[0] < 100.0 or p[0] > 800.0], \
+        "旧口径本来就只留中心那一坨——这是分桶要修的现象"
+    spread_pts = [(float(items[i][1].x()), float(items[i][1].y())) for i in spread]
+    assert [p for p in spread_pts if p[0] < 100.0], "左侧边缘名字必须保留"
+    assert [p for p in spread_pts if p[0] > 800.0], "右侧边缘名字必须保留"
+    assert [p for p in spread_pts if p[1] < 100.0], "上方边缘名字必须保留"
+    assert [p for p in spread_pts if p[1] > 800.0], "下方边缘名字必须保留"
+    # 缺 bounds 时不得静默分桶（调用方忘了传屏幕矩形应当退回旧语义）。
+    assert label_tier_keep(items, 450.0, 450.0, spread=True) == near
+
+
 def test_tier_caps_apply_per_tier_independently():
     from PySide6.QtCore import QPointF
     items = []

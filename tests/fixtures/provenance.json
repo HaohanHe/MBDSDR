@@ -25,6 +25,13 @@
       "sha256": "c2ab2cf665133012c9ce58e4a12ee2ada4f94b3cce8b0e3e3ea52c224078d12a",
       "derivation": "6 类 42 条中文说法由仓内人工编写，只做长期趋势观测，不设通过阈值",
       "date": "2026-11-05"
+    },
+    "tle_samples.py": {
+      "provenance": "self-generated",
+      "source_name": "仓内人工凑整的测试 TLE（非生产数据）",
+      "sha256": "cf3818b684807e83f1bc7d1dd46e994bea96a9bbec2f72293ff79c3cd9791249",
+      "derivation": "D4 把合成熟整 TLE 从生产路径移出后，测试固定轨道根数用的只读常量表；历元为整天/半整天凑整，只适合几何/链路回归",
+      "date": "2026-11-18"
     }
   }
 }

@@ -12,6 +12,7 @@ SoapySDRBackend 单元测试
 - enumerate_all_sdr_devices() 跨后端去重。
 """
 
+import os
 import sys
 import types
 import unittest
@@ -182,12 +183,18 @@ class TestEnumerateAllDedup(unittest.TestCase):
         # 与 TestSoapySDREnumerate 同纪律：假 SoapySDR 模块不许泄漏到后续文件，
         # 否则 hackrf_params_test 的"无硬件不得枚举到 hackrf"会被假 SN0001 咬红。
         self._saved = sys.modules.pop("SoapySDR", None)
+        # 大套件里别的文件会 setdefault("MBDSDR_NO_HW","1")，而
+        # enumerate_all_sdr_devices 见到它就直接返回 []——本用例测的是
+        # 去重逻辑本身，必须临时摘掉这个进程级短路（用例结束原样放回）。
+        self._saved_no_hw = os.environ.pop("MBDSDR_NO_HW", None)
 
     def tearDown(self):
         if self._saved is not None:
             sys.modules["SoapySDR"] = self._saved
         else:
             sys.modules.pop("SoapySDR", None)
+        if self._saved_no_hw is not None:
+            os.environ["MBDSDR_NO_HW"] = self._saved_no_hw
 
     def test_dedup_across_backends(self):
         """enumerate_all_sdr_devices()：SoapySDR 与原生 RTL-SDR 同 serial 去重。"""

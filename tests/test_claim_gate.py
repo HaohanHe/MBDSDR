@@ -219,7 +219,7 @@ def test_claim_expired_passes(repo_env):
     """claim 已过 TTL → 放行（视同无 claim）。"""
     repo, env, locks = repo_env
     _write_claim(locks, "a.txt", "别的线/stale", ttl_min=10.0,
-                 acquired_at=time.time() - 3600.0)
+                 acquired_at=time.time() - 3600.0)  # timeguard: allow — 造「一小时前领取」以触发 TTL 过期，钩子按墙钟判定
     _stage(repo, env)
 
     proc = _commit(repo, env)

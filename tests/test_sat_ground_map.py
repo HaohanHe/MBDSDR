@@ -33,6 +33,27 @@ def _non_black(pix):
                if img.pixelColor(x, y).lightness() > 20)
 
 
+def test_split_lonlat_does_not_draw_fake_edge_across_map():
+    """跨日界线的闭合覆盖圈切段后，不得再把首点追加回尾部。
+
+    回归（2026-11-17）：旧实现给最后一段补了首点，等经纬地图上首点在一端
+    ±180、末点在另一端，QPolygonF 闭合时画出一条横穿全图的假边。
+    """
+    from sat_ground_map import _split_lonlat
+
+    ring = [(10.0, 170.0), (12.0, 176.0), (14.0, 179.0),
+            (14.0, -179.0), (12.0, -176.0), (10.0, -170.0), (10.0, 170.0)]
+    chunks = _split_lonlat(ring, closed=True)
+    assert [len(c) for c in chunks] == [3, 3]
+    # 每段内部不允许出现 ±180 的反向跳变（那就是横穿全图的边）
+    for chunk in chunks:
+        for a, b in zip(chunk, chunk[1:]):
+            assert abs(b[1] - a[1]) <= 180.0
+    # 且不得把首点塞回尾部
+    for chunk in chunks:
+        assert chunk[0] != chunk[-1]
+
+
 def test_draws_track_and_footprint_pixels(monkeypatch):
     app = QApplication.instance() or QApplication(sys.argv)
     import mbdsdr_ai.ground_track as gt
@@ -41,10 +62,11 @@ def test_draws_track_and_footprint_pixels(monkeypatch):
 
     widget = SatelliteGroundMap(online=False)
     assert widget.view is not None
-    # 基线重定标（2026-11-14）：新增 spacetime_features 图层后，图层清单
-    # 由两层变三层。不是放宽断言，而是把新层也钉进契约。
+    # 基线重定标（2026-11-17）：新增 observing_sites 台址打点层后，图层
+    # 清单由三层变四层。不是放宽断言，而是把新层也钉进契约。
     assert widget.view.layer_names() == [
-        "sat_footprint", "sat_ground_track", "spacetime_features"]
+        "sat_footprint", "observing_sites", "sat_ground_track",
+        "spacetime_features"]
     assert widget.update_satellite("ISS (ZARYA)", minutes=90,
                                    min_elevation_deg=5) is True
     assert "覆盖半径" in widget.summary_text
@@ -62,6 +84,41 @@ def test_draws_track_and_footprint_pixels(monkeypatch):
     feature_cb(painter, _project)
     painter.end()
     assert _non_black(pix) > 200, "图层回调没有画出可见像素"
+    app.processEvents()
+
+
+def test_observing_sites_layer_paints_coordinate_sourced_markers():
+    """台址层真的落笔：内置点都来自 observing_sites（带 source_url）。
+
+    低缩放只画点（名字会叠），放大后名字也要出现在画布上。
+    点位数不写死：新增/调整台址不应重写这条测试。
+    """
+    app = QApplication.instance() or QApplication(sys.argv)
+    from sat_ground_map import SatelliteGroundMap
+    from mbdsdr_ai.astronomy.observing_sites import SITES
+
+    widget = SatelliteGroundMap(online=False)
+    assert len(SITES) >= 6, "内置台址不应少于 6 个"
+    cb = dict(widget.view._layers).get("observing_sites")
+    assert cb is not None, "台址打点层未注册"
+
+    pix = QPixmap(320, 220)
+    pix.fill(Qt.black)
+    painter = QPainter(pix)
+    cb(painter, _project)
+    painter.end()
+    low_zoom = _non_black(pix)
+    assert low_zoom > 100, f"{len(SITES)} 个台址点必须真画出像素"
+
+    # 放大后每点带名称标签：像素数应明显增加（不是只改内部状态）。
+    widget.view.set_view(39.9, 116.4, 6)
+    pix2 = QPixmap(320, 220)
+    pix2.fill(Qt.black)
+    painter = QPainter(pix2)
+    cb(painter, _project)
+    painter.end()
+    assert _non_black(pix2) > low_zoom
+    widget.shutdown()
     app.processEvents()
 
 

@@ -354,6 +354,16 @@ def test_no_guard_marker_abuse():
         # 本身用墙钟（tle_integrity.py）。改用 TimeEngine 会造出生产侧不存在
         # 的口径；该值不参与指向/多普勒/录制对齐。
         os.path.join("tests", "test_tle_tracking_policy.py"),
+        # 领取/协调台账族：被测对象就是「claim 的 TTL、冷却、等待日志新鲜度
+        # 以墙钟为界」。这些测试构造 acquired_at / heartbeat_at / released_at /
+        # waiting.log.at 后立刻交给生产函数判定，换成固定 epoch 反而测不到
+        # 「与真实时钟比较」这条契约。
+        os.path.join("tests", "test_audit_flagged_claims.py"),
+        os.path.join("tests", "test_bare_commit_audit.py"),
+        os.path.join("tests", "test_claim_gate.py"),
+        os.path.join("tests", "test_claim_wait_visibility.py"),
+        os.path.join("tests", "test_coordination_gate_blocking.py"),
+        os.path.join("tests", "test_release_check_log_scan.py"),
     }
     misplaced = [o for o in offenders
                  if os.path.normpath(o.split(":")[0]) not in

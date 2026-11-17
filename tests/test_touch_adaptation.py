@@ -47,9 +47,13 @@ def _reset_touch_override():
     from touch_manager import touch_manager
     tm = touch_manager()
     saved = tm._mode_override
+    saved_cached = tm._cached_touch_available
     tm.set_override(None)
     yield
     tm.set_override(saved)
+    # 自动检测缓存也是进程级状态：运行时补测用例会把它改成 True，
+    # 不复原会让后面的用例在"有触屏"的假前提下跑。
+    tm._cached_touch_available = saved_cached
 
 
 # --------------------------------------------------------------------------- #
@@ -105,6 +109,44 @@ class TestTouchManager:
         tm.set_override(True)
         tm.set_override(False)
         assert received == [True, False]
+        tm.set_override(None)
+
+    def test_auto_detect_uses_os_capability(self, monkeypatch):
+        """自动检测不能只看 Qt 枚举：Qt6 已无 QTouchDevice，Windows 枚举也常为 0。
+
+        这里把 Win32 标志伪造成"有触屏"，auto 必须自动开启（旧实现恒 False，
+        用户只能靠菜单里的"强制触屏"——这就是用户问"为什么有一个触屏模式"）。
+        """
+        from touch_manager import touch_manager
+        tm = touch_manager()
+        tm.set_override(None)
+        monkeypatch.setattr(type(tm), "_windows_has_touch", staticmethod(lambda: True))
+        monkeypatch.setattr(type(tm), "_qt_touch_devices", staticmethod(lambda: []))
+        tm._cached_touch_available = None
+        assert tm.is_touch_mode() is True
+
+    def test_runtime_touch_event_upgrades_auto_mode(self):
+        """枚举不到也能自动升级：第一根真手指按下 = 有触屏的硬证据。"""
+        from touch_manager import touch_manager
+        tm = touch_manager()
+        tm.set_override(None)
+        tm._cached_touch_available = False
+        assert tm.is_touch_mode() is False
+        received = []
+        tm.touch_mode_changed.connect(lambda on: received.append(on))
+        tm.note_touch_event()
+        assert tm.touch_available() is True
+        assert tm.is_touch_mode() is True
+        assert received == [True]
+
+    def test_manual_override_beats_runtime_detection(self):
+        """手动"强制鼠标"是排障逃生口，运行时有触控事件也不许被改写。"""
+        from touch_manager import touch_manager
+        tm = touch_manager()
+        tm.set_override(False)
+        tm._cached_touch_available = False
+        tm.note_touch_event()
+        assert tm.is_touch_mode() is False
         tm.set_override(None)
 
 

@@ -53,10 +53,13 @@ def test_rerun_paths_exist():
 
 
 def test_truth_labels_cover_all_levels():
+    """三种证据等级的措辞映射必须齐全；每行的标注必须来自这张映射。"""
     report = _load_report()
-    rows = report.build_rows()
-    labels = {r["truth_label"] for r in rows}
-    assert labels == {"真实", "部分", "缺样本"}, labels
+    labels = report.TRUTH_LABELS
+    assert set(labels) == {"ota_golden", "synthetic_only", "no_sample"}, labels
+    for row in report.build_rows():
+        assert row["truth"] in labels, row
+        assert row["truth_label"] == labels[row["truth"]], row
 
 
 def test_doc_has_row_per_mode():

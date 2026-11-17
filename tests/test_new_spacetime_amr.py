@@ -137,3 +137,89 @@ def test_bandwidth_peak_count():
     assert 2000.0 <= res.bandwidth_hz <= 6000.0
     # 中心偏移应接近 0（关于 DC 对称放置）
     assert abs(res.center_offset_hz) < 500.0
+
+
+# ── 9. 粗分辨率纯噪声：宽度判据不得退化成 1 bin ────────────────
+def test_noise_at_coarse_resolution_not_detected():
+    """实测回归：bin_hz ≫ min_bandwidth_hz 时 ceil() 曾退化成 1 bin。
+
+    旧实现在 fs=2.4 MHz / n=2048（bin 1172 Hz）下把每个噪声段都当「宽信号」，
+    720/720 帧纯噪声全被判为检测到信号。宽度判据现在带 19 bin 地板
+    （实测噪声最长连续段 18 bin），峰值判据带噪声实测上界，两者都不放水。
+    """
+    an = _analyzer()
+    for fs in (2.4e6, 1.024e6):
+        for n in (2048, 8192, 32768):
+            for seed in range(4):
+                rng = np.random.default_rng(seed)
+                iq = (rng.standard_normal(n) + 1j * rng.standard_normal(n)) * 1e-3
+                spec = 10.0 * np.log10(
+                    np.abs(np.fft.fftshift(np.fft.fft(iq))) ** 2 / n + 1e-12)
+                freqs = np.fft.fftshift(np.fft.fftfreq(n, d=1.0 / fs))
+                res = an.analyze_spectrum(spec, freqs)
+                assert res.signal_detected is False, (
+                    f"pure noise detected at fs={fs:g} n={n} seed={seed} "
+                    f"(mod={res.modulation}, bw={res.bandwidth_hz:.0f} Hz)")
+                assert res.modulation == "未检测到信号"
+                assert res.bandwidth_hz == 0.0 and res.peak_count == 0
+
+
+def test_noise_at_coarse_resolution_iq_path():
+    """IQ 路径同样不得把粗分辨率单帧噪声判成信号（会真跑分类器）。"""
+    an = _analyzer()
+    for n in (2048, 8192):
+        for seed in range(4):
+            rng = np.random.default_rng(seed)
+            iq = (rng.standard_normal(n) + 1j * rng.standard_normal(n)) * 1e-3
+            res = an.analyze_iq(iq, 2.4e6, 0.0)
+            assert res.signal_detected is False
+            assert res.modulation == "未检测到信号"
+
+
+# ── 10. 「检测到」标志与最终标签必须一致 ───────────────────────
+def test_detected_flag_matches_final_label():
+    """不允许「已检测」+「未检测到信号」并存（旧实现会把噪声段的带宽摆出来）。"""
+    an = _analyzer()
+    cases = []
+    for kind in ("NOISE", "CW", "AM", "FM", "FSK"):
+        rng = np.random.default_rng(31)
+        cases.append(synthesize_modulation_iq(kind, rng, snr_db=25, fs=FS, n=N))
+    for iq in cases:
+        res = an.analyze_iq(iq, FS)
+        no_signal = res.modulation == "未检测到信号"
+        assert res.signal_detected is (not no_signal)
+        if no_signal:
+            assert res.confidence == 0.0
+            assert res.bandwidth_hz == 0.0
+            assert res.peak_count == 0
+
+
+# ── 11. 真实 OTA FM：不得判成 USB/LSB（带宽上限） ──────────────
+def test_real_ota_fm_not_labeled_ssb():
+    """真实广播 186 kHz 宽、偏离中心 178 kHz —— 只按边带比会判成 USB。
+
+    样本：tests/fixtures/real_fm_88m1（SigMF cu8，中心 88.1 MHz，1.024 MS/s）。
+    夹具缺失时 skip，不写死期望值。
+    """
+    import pytest
+
+    from pathlib import Path
+    root = Path(__file__).resolve().parent.parent
+    data = root / "tests" / "fixtures" / "real_fm_88m1" / "capture.sigmf-data"
+    if not data.is_file():
+        pytest.skip(f"real OTA fixture missing: {data}")
+    raw = np.fromfile(data, dtype=np.uint8)
+    v = (raw.astype(np.float64) - 127.5) / 127.5
+    iq = v[0::2] + 1j * v[1::2]
+
+    an = _analyzer()
+    res = an.analyze_iq(iq, 1_024_000.0, 88.1e6)
+    assert res.signal_detected is True
+    assert res.modulation not in ("USB", "LSB")
+    assert res.bandwidth_hz > 100_000.0       # 广播占用带，远宽于 SSB
+    assert res.snr_db > 21.0                  # 实测 34.1 dB
+
+    # 边带判定本身仍要工作：窄带偏离中心的信号必须继续给出 USB/LSB
+    usb = an.analyze_iq(_tone_band(1000.0, 3000.0), FS)
+    assert usb.modulation == "USB"
+

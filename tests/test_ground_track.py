@@ -106,9 +106,23 @@ class GroundTrackTest(unittest.TestCase):
 
     def test_split_function_breaks_on_lon_jump(self):
         pts = [Subpoint(0.0, 179.0, 400.0, 0.0),
-               Subpoint(0.0, -179.0, 400.0, 1.0)]
+               Subpoint(2.0, -179.0, 500.0, 1.0)]
         segs = split_at_dateline(pts)
-        self.assertEqual([len(s) for s in segs], [1, 1])
+        # 切段后每段两侧各补一个 ±180° 边界点，不留断头（2026-11-17）
+        self.assertEqual([len(s) for s in segs], [2, 2])
+        self.assertEqual(segs[0][0], pts[0])
+        self.assertEqual(segs[0][1].lon_deg, 180.0)
+        self.assertEqual(segs[1][0].lon_deg, -180.0)
+        self.assertEqual(segs[1][1], pts[1])
+        # 边界点用线性插值：中点半程（纬度 1°，高度 450 km，时刻 0.5 s）
+        self.assertAlmostEqual(segs[0][1].lat_deg, 1.0, places=6)
+        self.assertAlmostEqual(segs[0][1].sat_alt_km, 450.0, places=6)
+        self.assertAlmostEqual(segs[0][1].unix_s, 0.5, places=6)
+        # 反向（西行穿越 -180）同样补点且方向正确
+        segs = split_at_dateline([Subpoint(0.0, -179.0, 400.0, 0.0),
+                                  Subpoint(2.0, 179.0, 500.0, 1.0)])
+        self.assertEqual(segs[0][1].lon_deg, -180.0)
+        self.assertEqual(segs[1][0].lon_deg, 180.0)
 
     def test_invalid_window_rejected(self):
         with self.assertRaises(ValueError):

@@ -124,7 +124,8 @@ class TestDescriptionSection:
         card = v._info_card_rect
         row_h = 17.0
         n_rows = 3 + 6 + 1 + (6 + 1)        # head3 + kv6 + 空行 + 描述6+1
-        assert card.height() <= (n_rows + 1) * row_h + 20
+        # D3 后卫星卡底部另有一行动作按钮（24px + 6px 间隔），上界相应加一行
+        assert card.height() <= (n_rows + 2) * row_h + 20
 
 
 # ----------------------------------------------------------------------
@@ -243,3 +244,152 @@ class TestObserverChip:
         v2.grab()
         assert calls[-1] is None, \
             "无观测站时绘制必须仍经格式化函数走诚实空状态"
+
+
+# ----------------------------------------------------------------------
+class TestPickedCardCameraLockLine:
+    """D4：卫星卡内明示视角锁定语义（不许只靠左下角状态卡）。
+
+    口径只有一个事实源 ``_camera_lock``：
+      * 未锁定 → 不加行；
+      * 锁本目标 → 「锁定 · 天动星静」；
+      * 锁别的目标 → 「未锁定（锁在 <名字>）」——不靠「没有这行」去猜。
+    """
+
+    def test_row_semantics(self):
+        v = _new_view()
+        obj = _pick(v)
+        v._camera_lock = None
+        assert v.picked_camera_lock_row(obj.name) is None
+
+        v._camera_lock = obj.name
+        assert v.picked_camera_lock_row(obj.name) == ("视角", "锁定 · 天动星静")
+
+        v._camera_lock = "ISS (ZARYA)"
+        row = v.picked_camera_lock_row(obj.name)
+        assert row is not None and row[0] == "视角"
+        assert "未锁定" in row[1] and "ISS (ZARYA)" in row[1]
+
+    def test_lock_on_this_target_grows_card_by_one_row(self):
+        v = _new_view()
+        obj = _pick(v)
+        v._selected_info = {}
+        v._camera_lock = None
+        v.grab()
+        h_free = v._info_card_rect.height()
+        v._camera_lock = obj.name
+        v.grab()
+        h_locked = v._info_card_rect.height()
+        assert h_locked == pytest.approx(h_free + 17.0), \
+            "锁定本目标后卡片必须多一行（行高 17px）"
+
+    def test_lock_on_other_target_also_states_it(self):
+        v = _new_view()
+        _pick(v)
+        v._selected_info = {}
+        v._camera_lock = None
+        v.grab()
+        h_free = v._info_card_rect.height()
+        v._camera_lock = "ISS (ZARYA)"
+        v.grab()
+        assert v._info_card_rect.height() == pytest.approx(h_free + 17.0), \
+            "锁定别的目标时也必须写明「本目标未锁定」，占同样一行"
+
+    def test_free_camera_card_paints_without_lock_row(self):
+        v = _new_view()
+        _pick(v)
+        v._camera_lock = None
+        v.grab()                      # 未锁定→不加行，也不许崩
+        assert v._info_card_rect is not None
+
+
+# ----------------------------------------------------------------------
+class TestPickedCardActionButtons:
+    """D3：卫星卡内动作按钮「接收 / 追踪 / 指向」。
+
+    三个入口必须与左下浮动按钮共用同一执行体：
+      * 接收 → ``_on_tune_satellite``（发调谐请求）；
+      * 追踪 / 指向 → 切换同一个 QPushButton 的勾选态（既有 toggled 处理器发信号）；
+      * 按钮不可用时点击为空操作（置灰即不可点）。
+    """
+
+    def test_three_rects_inside_card_and_disjoint(self):
+        v = _new_view()
+        _pick(v)
+        rects = v._info_action_rects
+        assert set(rects) == {"tune", "track", "gimbal"}
+        card = v._info_card_rect
+        for r in rects.values():
+            assert r.width() > 0 and r.height() > 0
+            assert card.contains(r)
+        assert rects["tune"].right() < rects["track"].left()
+        assert rects["track"].right() < rects["gimbal"].left()
+        assert not rects["gimbal"].intersects(v._info_close_rect)
+
+    def test_tune_click_calls_shared_handler(self):
+        v = _new_view()
+        _pick(v)
+        v._tune_btn.setEnabled(True)
+        v.grab()
+        calls = []
+        v._on_tune_satellite = lambda: calls.append(1)
+        c = v._info_action_rects["tune"].center()
+        _click(v, c.x(), c.y())
+        assert calls == [1]
+
+    def test_tune_click_is_noop_when_disabled(self):
+        v = _new_view()
+        _pick(v)
+        assert not v._tune_btn.isEnabled()
+        calls = []
+        v._on_tune_satellite = lambda: calls.append(1)
+        c = v._info_action_rects["tune"].center()
+        _click(v, c.x(), c.y())
+        assert calls == []
+
+    def test_track_click_drives_same_button_and_signal(self):
+        v = _new_view()
+        _pick(v)
+        v._track_btn.setEnabled(True)
+        v._compute_tune = lambda: {"satellite": "TEST-SAT",
+                                   "base_freq_hz": 137e6}
+        seen = []
+        v.track_toggled.connect(
+            lambda on, name, freq: seen.append((on, name, freq)))
+        v.grab()
+        c = v._info_action_rects["track"].center()
+        _click(v, c.x(), c.y())
+        assert v._track_btn.isChecked(), "卡内「追踪」必须切换浮动按钮的勾选态"
+        assert seen == [(True, "TEST-SAT", 137e6)]
+
+    def test_gimbal_click_noop_when_unavailable(self):
+        v = _new_view()
+        _pick(v)
+        v._gimbal_available = False
+        v._gimbal_btn.setEnabled(False)
+        v.grab()
+        c = v._info_action_rects["gimbal"].center()
+        _click(v, c.x(), c.y())
+        assert not v._gimbal_btn.isChecked()
+
+    def test_gimbal_click_toggles_when_available(self):
+        v = _new_view()
+        _pick(v)
+        v._gimbal_available = True
+        v._gimbal_btn.setEnabled(True)
+        seen = []
+        v.gimbal_follow_toggled.connect(seen.append)
+        v.grab()
+        c = v._info_action_rects["gimbal"].center()
+        _click(v, c.x(), c.y())
+        assert v._gimbal_btn.isChecked()
+        assert seen == [True]
+
+    def test_body_card_has_no_action_buttons(self):
+        v = _new_view()
+        obj = SkyObject(name="Vega", azimuth_deg=10.0, elevation_deg=70.0,
+                        obj_type="star")
+        v.on_object_picked(obj)
+        v.grab()
+        assert v._info_action_rects == {}
+

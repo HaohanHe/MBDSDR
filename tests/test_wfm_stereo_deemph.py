@@ -63,6 +63,10 @@ def test_deemphasis_attenuates_highs():
 def test_rtl_enumeration_dedups_native_and_osmo(monkeypatch):
     import mbdsdr_ai.sdr_backend as sb
 
+    # 大套件里别的文件会 setdefault("MBDSDR_NO_HW","1")，枚举会被短路成 []；
+    # 本用例测的是去重逻辑，必须临时摘掉这个进程级开关（monkeypatch 自动还原）。
+    monkeypatch.delenv("MBDSDR_NO_HW", raising=False)
+
     class _FakeNative:
         @staticmethod
         def list_devices():

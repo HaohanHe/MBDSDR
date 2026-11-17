@@ -1,9 +1,9 @@
 # SPDX-License-Identifier: MIT
-"""右栏 20 节跳转落点 + 「跳到分组」菜单覆盖（roadmap W50 / P1-01+P1-02）。
+"""右栏 19 节跳转落点 + 「跳到分组」菜单覆盖（roadmap W50 / P1-01+P1-02）。
 
 判据都对着真 MainWindow 量，不看「调用了某个函数」：
 
-1. **逐节落点**：对 20 节逐个 ``setCurrentIndex(i)``（菜单 / ``_show_right_tab_of``
+1. **逐节落点**：对 19 节逐个 ``setCurrentIndex(i)``（菜单 / ``_show_right_tab_of``
    / 浮动面板归位走的都是它），目标节必须展开、标题**完整落在视口内**且顶在
    视口顶（``y <= 2``）；唯一例外是滚动条已到上限（贴底），此时物理上无法再
    往上滚，只要求标题完整可见。改前 ``ensureWidgetVisible(s, 0, 8)`` 的两种
@@ -11,8 +11,8 @@
    目标比视口高时把标题压到视口底边（y=529/562）。
 2. **菜单条数与目标一致**：现有菜单项触发后，落点节的标题必须等于菜单项
    文本（不允许「点了 A 跳到 B」）。
-3. **菜单覆盖 20/20**：这条目前是 **xfail(strict)**——W31 未落库，菜单只有
-   后 13 节，前 7 节（控制/状态/AI 智能体/卫星跟踪/模块/气象云图/新时空）
+3. **菜单覆盖 19/19**：这条目前是 **xfail(strict)**——W31 未落库，菜单只有
+   后 13 节，前 6 节（控制/状态/AI 智能体/卫星跟踪/模块/气象云图）
    是 ``right_nav`` 创建之前注册的，没有对应菜单项。W31 落地后本用例会
    XPASS→红，强制把 xfail 拆掉，别让缺口静默留着。
 
@@ -40,7 +40,7 @@ sys.path.insert(0, os.path.join(_ROOT, "desktop"))
 from PySide6.QtCore import QPoint, QTimer  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
-_SECTION_COUNT = 20
+_SECTION_COUNT = 19
 _TOLERANCE_PX = 2          # 标题顶与视口顶的最大偏差（取整/边框余量）
 
 
@@ -109,10 +109,10 @@ def _landing_problem(col, index):
 
 
 def test_each_section_jump_lands_at_viewport_top(main_window, qapp):
-    """20 节逐个跳转：该节、展开、标题完整可见且贴顶（P1-01）。"""
+    """19 节逐个跳转：该节、展开、标题完整可见且贴顶（P1-01）。"""
     col = main_window.right_tab
     assert col.count() == _SECTION_COUNT, (
-        f"右栏节数不是 20 而是 {col.count()}")
+        f"右栏节数不是 19 而是 {col.count()}")
     assert col.viewport().height() > 100
 
     failures = []
@@ -152,11 +152,11 @@ def test_menu_actions_land_on_the_section_they_name(main_window, qapp):
 
 
 @pytest.mark.xfail(strict=True, reason=(
-    "W31 未落库：「跳到分组」菜单只有后 13 节；前 7 节（控制/状态/AI 智能体/"
-    "卫星跟踪/模块/气象云图/新时空）在 right_nav 创建之前注册，没有菜单项。"
+    "W31 未落库：「跳到分组」菜单只有后 13 节；前 6 节（控制/状态/AI 智能体/"
+    "卫星跟踪/模块/气象云图）在 right_nav 创建之前注册，没有菜单项。"
     "W31 落地后本用例 XPASS→红，届时删掉 xfail。"))
 def test_nav_menu_covers_all_sections(main_window):
-    """菜单集合 20/20：条数、顺序、文本都与右栏节一致（P1-02）。"""
+    """菜单集合 19/19：条数、顺序、文本都与右栏节一致（P1-02）。"""
     col = main_window.right_tab
     titles = [col.tabText(i) for i in range(col.count())]
     acts = _nav_actions(main_window)

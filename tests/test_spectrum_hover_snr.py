@@ -61,6 +61,9 @@ def _feed_tone(panel, frames: int = 4) -> None:
 def _panel_with_tone(qapp, frames: int = 4):
     panel = sw.SpectrumPanel()
     panel.set_connected(True)
+    # 峰值标注现已默认关（2026-11-16 用户裁定：不是他放的标记就不显示）。
+    # 本文件验的是"峰值提示与悬停读数同源同值"，所以显式打开再比。
+    panel._state.show_peaks = True
     _feed_tone(panel, frames)
     return panel
 
@@ -254,10 +257,39 @@ def test_draw_hover_renders_second_line(qapp):
     assert "SNR（相对本帧中位）" in rec.texts[1][1]
 
 
+def test_peaks_off_by_default_and_hover_readout_clears_on_leave(qapp):
+    """用户 2026-11-16 裁定：
+
+    1. 谱面上的浮动频率标签是"用户放上去才显示"的标记——默认关，没开就
+       不许自己冒出来跟着谱线跳；
+    2. 悬停读数只在鼠标真的在谱面上时显示，鼠标一走必须收回（旧的
+       leaveEvent 不清状态位，读数会永远钉在左上角逐帧跳）。
+    """
+    panel = sw.SpectrumPanel()
+    panel.set_connected(True)
+    _feed_tone(panel, 4)
+    state = panel._state
+    assert state.show_peaks is False, "峰值标注必须默认关"
+    assert sw._peak_annotations(state) == [], "没打开就不该有任何浮动标签"
+
+    # 悬停中 → 有读数；鼠标离开 → 状态位清空、读数不再绘制
+    state.mouse_x_ratio = 0.5
+    state.mouse_in_spectrum = True
+    from PySide6.QtCore import QEvent
+    panel._plot.leaveEvent(QEvent(QEvent.Leave))
+    assert state.mouse_in_spectrum is False, "离开谱面必须清悬停态"
+    assert state.mouse_x_ratio is None, "离开谱面必须清光标位置"
+    rec = _RecPainter()
+    sw._draw_hover_readout(rec, state, QRectF(0, 0, 300, 200),
+                           QColor("white"), QColor("white"))
+    assert rec.texts == [], "没有悬停时不许再画左上角读数"
+
+
 def test_hover_render_smoke(qapp):
     """离屏整条绘制路径不崩（悬停状态由状态位驱动，无需真实鼠标）。"""
     panel = sw.SpectrumPanel()
     panel.set_connected(True)
+    panel._state.show_peaks = True         # 峰值标注默认关，见 _panel_with_tone
     panel._plot.resize(800, 300)
     panel._plot.grab()          # 先定画布：resize 会 reconfigure 清峰跟踪
     _feed_tone(panel, 4)

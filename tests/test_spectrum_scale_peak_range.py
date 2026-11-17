@@ -373,6 +373,9 @@ def test_db_drag_clamps_to_axis_bounds(qapp):
 # ---------------------------------------------------------------------------
 def _panel_with_one_peak(qapp, center_hz=100e6, span_hz=2.4e6, bin_idx=200):
     panel = _panel(qapp)
+    # 自动峰值标注默认关（用户口径："我没往上放你别显示"），
+    # 这里测的正是"标签/命中"，所以显式打开这个显示开关。
+    panel._state.show_peaks = True
     gen = panel.generator
     gen.center_freq_hz = center_hz
     gen.sample_rate_hz = span_hz
@@ -472,6 +475,7 @@ def test_peak_click_moves_current_vfo_exact_in_normal_mode(qapp):
 def _panel_with_known_floor_peak(qapp, floor_db=-100.0, peak_db=-40.0,
                                  bin_idx=200):
     panel = _panel(qapp)
+    panel._state.show_peaks = True     # 自动峰值标注默认关，用例显式打开
     gen = panel.generator
     gen.center_freq_hz = 100e6
     gen.sample_rate_hz = 2.4e6

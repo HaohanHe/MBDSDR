@@ -413,8 +413,9 @@ def test_decoders_module(result: TestResult, agent: MBDSDRAgent):
         detect_fhss, decode_digital_mode, BUILTIN_TLE,
     )
 
-    # 内置 TLE
-    result.record("内置 TLE 数量 >= 5", len(BUILTIN_TLE) >= 5, f"实际 {len(BUILTIN_TLE)}")
+    # 生产路径不内置合成 TLE（D4）；测试样本在 tests/fixtures
+    result.record("内置 TLE 为空（不伪造）", len(BUILTIN_TLE) == 0,
+                  f"实际 {len(BUILTIN_TLE)}")
 
     # 可见卫星列表
     try:

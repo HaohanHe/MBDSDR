@@ -162,13 +162,20 @@ def test_status_and_reason_contract(catalog):
 
 
 def test_unwired_digital_modes_are_marked_unavailable(catalog):
-    from mbdsdr_ai.decode_router import DIGITAL_MODE_CAPABILITIES
+    from mbdsdr_ai.decode_router import (
+        DIGITAL_MODE_CAPABILITIES, EVIDENCE_NO_SAMPLE,
+    )
     rows = {x.title: x for x in _by_prefix(catalog, "decode_router:")}
     for key, cap in DIGITAL_MODE_CAPABILITIES.items():
         row = rows[cap.mode.upper()]
         if not cap.dependency:
             assert row.status == "unavailable"
             assert "not_implemented" in row.note
+        elif cap.evidence == EVIDENCE_NO_SAMPLE:
+            # 无样本：有入口但不得显示为「已支持」。
+            assert row.status == "conditional"
+            assert "未验证" in row.note and "不宣称已支持" in row.note
+            assert "--decode-file" in row.trigger
         else:
             assert row.status == "available"
             assert "--decode-file" in row.trigger

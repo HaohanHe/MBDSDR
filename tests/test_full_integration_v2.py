@@ -325,7 +325,9 @@ def test_decoders_module(result, agent):
     )
     import numpy as np
 
-    result.record("内置 TLE 数量 >= 5", len(BUILTIN_TLE) >= 5, f"实际 {len(BUILTIN_TLE)}")
+    # 生产路径不内置合成 TLE（D4）；测试样本在 tests/fixtures
+    result.record("内置 TLE 为空（不伪造）", len(BUILTIN_TLE) == 0,
+                  f"实际 {len(BUILTIN_TLE)}")
 
     try:
         sats = list_visible_satellites(observer_lat=45.0, observer_lon=120.0,
@@ -545,7 +547,7 @@ def test_scheduler_module(result, agent):
             task_id = scheduler.add_task(
                 name="测试任务", task_type="workflow",
                 target="test_workflow", params={},
-                schedule_type="once", run_at=time.time() + 3600,  # timeguard: allow
+                schedule_type="once", run_at=time.time() + 3600,  # timeguard: allow — 相对未来时刻（一小时后执行），调度器按墙钟排序
             )
             result.record("添加一次性任务", task_id is not None)
 

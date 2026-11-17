@@ -15,6 +15,7 @@
   gmsk  → `ais_decode_iq`             AIS GMSK，差分相位解调
   ppm   → `decode_baseband_any_fs`    ADS-B PPM/OOK，包络脉冲
   qpsk  → `meteor_lrpt_demod`         Meteor LRPT 恒包络 QPSK
+  ook   → `envelope_from_iq`          rtl_433 ISM OOK，包络检波后切片
 """
 
 from __future__ import annotations
@@ -32,6 +33,7 @@ DEMOD_FAMILY = {
     "ais_decode_iq": "gmsk",
     "decode_baseband_any_fs": "ppm",
     "meteor_lrpt_demod": "qpsk",
+    "envelope_from_iq": "ook",
 }
 
 KIND_FAMILY = {
@@ -40,6 +42,7 @@ KIND_FAMILY = {
     "gmsk": "gmsk",
     "ppm": "ppm",
     "qpsk": "qpsk",
+    "ook": "ook",
     "ssb_audio": "audio",
 }
 

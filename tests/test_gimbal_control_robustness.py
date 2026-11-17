@@ -331,5 +331,94 @@ class TestDisconnectRecovery:
         assert mw._gimbal_task is None
 
 
+class CommandOnlyGimbal(FakeGimbal):
+    """只确认「指令已下发」、没有姿态回读的后端（板载无 IMU 的真实形态）。"""
+
+    def point_to_satellite(self, az, el):
+        self.pointed.append((az, el))
+        return {"dispatched": True, "pose_valid": False}
+
+
+# ---------------------------------------------------------------------------
+# 5. 指向回写天空图：实测 / 模拟 / 指令必须分档
+# ---------------------------------------------------------------------------
+class TestSkyPointingWriteBack:
+    """云台角回写 `sky_view` 时，来源标签不得混用（指令角≠机械位置）。"""
+
+    def test_simulated_pose_is_labelled_simulated(self, mw, monkeypatch):
+        from rf_sky_view import antenna_pointing_label
+        g = FakeGimbal()          # pose_source="simulated"，回读角=指令角
+        _active_tracking(mw, monkeypatch, _pos(), g)
+        mw._on_sky_gimbal_follow_toggled(True)
+        mw._poll_satellite_track()
+        a = mw.sky_view._antenna
+        assert a.has_pointing is True
+        assert a.pointing_source == "simulated"
+        assert a.is_tracking is True
+        assert (a.azimuth_deg, a.elevation_deg) == pytest.approx(g.pointed[-1])
+        assert antenna_pointing_label(a) == "指向(模拟)"
+
+    def test_real_readback_is_labelled_measured(self, mw, monkeypatch):
+        from rf_sky_view import antenna_pointing_label
+        g = FakeGimbal()
+        orig = g.point_to_satellite
+
+        def _readback(az, el):
+            r = orig(az, el)
+            r.update({"pose_source": "rotctld",
+                      "current_az": 101.0, "current_el": 22.0})
+            return r
+
+        monkeypatch.setattr(g, "point_to_satellite", _readback)
+        _active_tracking(mw, monkeypatch, _pos(), g)
+        mw._on_sky_gimbal_follow_toggled(True)
+        mw._poll_satellite_track()
+        a = mw.sky_view._antenna
+        assert a.pointing_source == "readback"
+        # 有回读就以回读为准，绝不拿指令角冒充机械位置
+        assert (a.azimuth_deg, a.elevation_deg) == pytest.approx((101.0, 22.0))
+        assert antenna_pointing_label(a) == "指向(实测)"
+
+    def test_command_without_readback_is_labelled_command(self, mw, monkeypatch):
+        from rf_sky_view import antenna_pointing_label
+        g = CommandOnlyGimbal()
+        _active_tracking(mw, monkeypatch, _pos(), g)
+        mw._on_sky_gimbal_follow_toggled(True)
+        mw._poll_satellite_track()
+        a = mw.sky_view._antenna
+        assert a.has_pointing is True
+        assert a.pointing_source == "command"
+        assert (a.azimuth_deg, a.elevation_deg) == pytest.approx(g.pointed[-1])
+        assert antenna_pointing_label(a) == "指向(指令)"
+
+    def test_stop_clears_pointing(self, mw, monkeypatch):
+        from rf_sky_view import antenna_pointing_label
+        g = FakeGimbal()
+        _active_tracking(mw, monkeypatch, _pos(), g)
+        mw._on_sky_gimbal_follow_toggled(True)
+        mw._poll_satellite_track()
+        assert mw.sky_view._antenna.has_pointing is True
+        mw._on_sky_gimbal_follow_toggled(False)
+        a = mw.sky_view._antenna
+        assert a.has_pointing is False, "停止跟随后不得留着上一拍的指向"
+        assert a.pointing_source == ""
+        assert antenna_pointing_label(a) == "指向(几何)"
+
+    def test_timeout_clears_pointing(self, mw, monkeypatch):
+        """超时停止同样要清指向：失败路径不得留下「看起来还在跟随」。"""
+        import main_window as mwmod
+        monkeypatch.setattr(mwmod, "GIMBAL_DISPATCH_GRACE_S", 0.05)
+        monkeypatch.setattr(mwmod, "GIMBAL_DISPATCH_TIMEOUT_S", 0.30)
+        hang = HangGimbal()
+        _active_tracking(mw, monkeypatch, _pos(), hang)
+        mw._on_sky_gimbal_follow_toggled(True)
+        mw._poll_satellite_track()          # 投递，在途
+        time.sleep(0.40)
+        mw._poll_satellite_track()          # 收：超时 → 停机
+        assert mw._gimbal_follow is False
+        assert mw.sky_view._antenna.has_pointing is False
+        hang.release()
+
+
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__, "-v"]))

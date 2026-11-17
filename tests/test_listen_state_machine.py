@@ -23,6 +23,54 @@ def qtapp():
     return QApplication.instance() or QApplication([])
 
 
+class _TrickleStream:
+    """每次 read 都返回一小块 IQ 的假流（RecordTap 的输入侧）。"""
+
+    def __init__(self):
+        self.flushes = 0
+
+    def read(self):
+        import time as _t
+        _t.sleep(0.002)
+        import numpy as _np
+        return _np.ones(16, dtype=_np.complex64), 16
+
+    def flush(self):
+        self.flushes += 1
+
+    def stop_reader(self):
+        pass
+
+
+def test_record_tap_skips_copy_when_disabled(qtapp):
+    """未录音时 RecordTap 只排水、不复制、不回调（idle 态不该白烧 CPU）。
+
+    旧实现无论录不录都 ``np.array(buf[:n])`` + 回调：2.4 MS/s 下每秒
+    ~18 MB memcpy。反证口径：enabled=False 期间回调次数必须为 0，
+    打开后必须立刻恢复回调。
+    """
+    import time as _t
+    from receive_pipeline import RecordTap
+
+    got = []
+    flag = {"on": False}
+    stream = _TrickleStream()
+    tap = RecordTap(stream, lambda iq: got.append(iq), enabled=lambda: flag["on"])
+    tap.start()
+    try:
+        _t.sleep(0.12)
+        assert not got, "录制关闭时不许产生任何回调"
+        assert stream.flushes > 0, "关闭时仍要排水，不能把乒乓流堵死"
+        flag["on"] = True
+        deadline = _t.time() + 2.0
+        while not got and _t.time() < deadline:
+            _t.sleep(0.01)
+        assert got, "打开录制后必须恢复回调"
+    finally:
+        tap.shutdown()
+        tap.wait(2000)
+
+
 @pytest.fixture(scope="module")
 def win(qtapp, isolated_profile):
     """module 共用 MainWindow：每例新建会累积挂起（本项目已知坑）。
@@ -189,6 +237,159 @@ def test_muted_state_keeps_demod_running(win, monkeypatch):
     assert pushed[-1] == (True, True), "静音态必须继续解调，否则解码/星座图没数据"
 
 
+def test_switch_vfo_while_stopped_keeps_demod_off(win, monkeypatch):
+    """停止解调时切 VFO 不得把解调偷偷拉起来（真机反馈的根因）。
+
+    _apply_primary_vfo 只决定"哪一路写声卡"，是否解调由 _listen_state 唯一决定。
+    """
+
+    class _W:
+        def __init__(self):
+            self.audio = None
+            self.muted = None
+
+        def set_audio_enabled(self, v):
+            self.audio = v
+
+        def set_muted(self, v):
+            self.muted = v
+
+    a, b = _W(), _W()
+    monkeypatch.setattr(win, "_vfo_workers", {"vfo-a": a, "vfo-b": b}, False)
+    monkeypatch.setattr(win, "_vfo_mgr", None, False)
+    monkeypatch.setattr(win, "_listen_state", "idle", False)
+
+    win._apply_primary_vfo("vfo-b")
+
+    assert a.audio is False and b.audio is False, "停止解调时任何一路都不该使能"
+    assert a.muted is False and b.muted is False
+
+    # 收听态下切 VFO：只有主听那一路使能
+    monkeypatch.setattr(win, "_listen_state", "listen", False)
+    win._apply_primary_vfo("vfo-b")
+    assert a.audio is False and b.audio is True
+
+
+def test_listen_flags_single_source(win):
+    """三档 → (跑解调, 静音) 的单一判定点，流水线重建也走它。
+
+    旧缺陷：重建时只看 _listening，静音态会被误停成「停止解调」。
+    """
+    win._listen_state = "listen"
+    assert win._listen_flags() == (True, False)
+    win._listen_state = "muted"
+    assert win._listen_flags() == (True, True)
+    win._listen_state = "idle"
+    assert win._listen_flags() == (False, False)
+
+
+def test_idle_skips_ddc_and_demod_inside_worker():
+    """停止解调必须在 worker 里就停：DDC（VFO.process）一次都不许跑。
+
+    只把声卡静音不算数——那是「不收听」。用户真机反馈的"点了停止解调，
+    频谱/解调还在跑"，机械判据就是 VFO.process 的调用次数必须为 0。
+    """
+    assert _run_worker_vfo_calls(audio_enabled=False) == 0
+    assert _run_worker_vfo_calls(audio_enabled=True) > 0, \
+        "对照组必须有解调，否则本用例证明不了门控存在"
+
+
+def _run_worker_vfo_calls(audio_enabled: bool) -> int:
+    """跑一次 DemodWorker：固定 3 块 IQ 后流结束，返回 VFO.process 次数。"""
+    return _run_worker_counts(audio_enabled)[0]
+
+
+def _run_worker_counts(audio_enabled: bool):
+    """跑一次 DemodWorker，返回 (VFO.process 次数, frames_demod, frames_skipped)。"""
+    import numpy as np
+    from receive_pipeline import DemodWorker, SharedDemodConfig
+
+    class _Stream:
+        def __init__(self):
+            self._left = 3
+
+        def read(self):
+            if self._left <= 0:
+                return None, -1
+            self._left -= 1
+            return np.zeros(2048, dtype=np.complex64), 2048
+
+        def flush(self):
+            pass
+
+        def stop_reader(self):
+            self._left = 0
+
+    class _Vfo:
+        def __init__(self):
+            self.calls = 0
+
+        def process(self, iq):
+            self.calls += 1
+            return np.zeros(480, dtype=np.complex64)
+
+        def set_offset(self, *_a, **_k):
+            pass
+
+    class _Player:
+        available = True
+
+        def write(self, _audio):
+            pass
+
+        def set_muted(self, _m):
+            pass
+
+        def start(self):
+            return True
+
+        def stop(self):
+            pass
+
+    vfo = _Vfo()
+    w = DemodWorker(_Stream(), vfo, _Player(),
+                    SharedDemodConfig(mode="FM", squelch_db=-50.0),
+                    sr=2.4e6, audio_enabled=audio_enabled)
+    w.start()
+    assert w.wait(5000), "DemodWorker 没能在 5 s 内退出（流已结束）"
+    return vfo.calls, w.frames_demod, w.frames_skipped
+
+
+def test_idle_worker_counts_skipped_frames():
+    """帧计数是可观测证据：idle 下 frames_demod 不增长、frames_skipped 增长。
+
+    只看 VFO.process==0 能证明 DDC 没跑；计数则让界面/排障能直接读
+    "解调 0 帧"，不必靠推断（2026-11-17 审计 §8 建议的落点）。
+    """
+    assert _run_worker_counts(False) == (0, 0, 3)
+    calls, demod, skipped = _run_worker_counts(True)
+    assert (calls, demod, skipped) == (3, 3, 0), \
+        f"对照组计数不符：calls={calls} demod={demod} skipped={skipped}"
+
+
+def test_pipeline_audio_gate_is_explicit_opt_in(qtapp):
+    """非 GUI 消费者要「造出来就解调」，必须显式 audio_enabled=True。
+
+    流水线默认不为写卡解调（idle 红线）；基准/浸泡脚本走的是完整链路，
+    已在构造处显式打开。这里把契约钉在构造参数上，改回默认 True 就会红。
+    """
+    from receive_pipeline import ReceivePipeline, SharedDemodConfig
+
+    class _Gen:
+        num_bins = 64
+        fft_size = 64
+
+    def _make(**kw):
+        return ReceivePipeline(
+            read_fn=lambda n: None, sr=960000.0, gen=_Gen(),
+            center_getter=lambda: 100e6, main_vfo_dsp=None, vfo2_dsp=None,
+            player=None, config=SharedDemodConfig(mode="FM"),
+            on_record_iq=lambda iq: None, **kw)
+
+    assert _make()._demod1._audio_enabled is False
+    assert _make(audio_enabled=True)._demod1._audio_enabled is True
+
+
 def test_disconnect_resets_listening(win, monkeypatch):
     """断连必须复位收听态与按钮，否则重连会偷偷出声。"""
     player = getattr(win, "_audio_player", None)
@@ -329,3 +530,155 @@ def test_live_repaint_has_no_30fps_override(win, monkeypatch):
     assert getattr(win, "_repaint_timer", None) is None
     assert plot_timer.interval() == PROFILES["quality"]["spectrum_interval_ms"] == 50
     win._apply_perf_profile("eco")
+
+
+def test_pipeline_detaches_demod_streams_when_idle(qtapp):
+    """停止解调必须连 splitter → VFO 的逐帧拷贝一起停（SDR++ 口径）。
+
+    只停 worker 不够：2.4 MS/s 下 splitter 仍为 VFO 通道每帧 memcpy 128 KiB
+    （≈146 帧/s）。反证口径：idle 时通道必须不在 splitter 输出里，
+    恢复收听必须重新挂上（否则点了收听却永远没数据）。
+    """
+    from receive_pipeline import ReceivePipeline, SharedDemodConfig
+
+    class _Gen:
+        num_bins = 64
+        fft_size = 64
+
+    pipe = ReceivePipeline(
+        read_fn=lambda n: None, sr=960000.0, gen=_Gen(),
+        center_getter=lambda: 100e6, main_vfo_dsp=None, vfo2_dsp=None,
+        player=None, config=SharedDemodConfig(mode="FM"),
+        on_record_iq=lambda iq: None)
+    outputs = pipe._splitter._outputs
+    # start() 才做绑定；这里只钉 set_demod_enabled 的增删语义，不起线程。
+    pipe._splitter.bind(pipe._spectrum_stream)
+    pipe._splitter.bind(pipe._vfo1_stream)
+    assert pipe._vfo1_stream in outputs, "播放态 VFO 通道应处于绑定状态"
+
+    pipe.set_demod_enabled(False)
+    assert pipe._vfo1_stream not in outputs, "idle 时仍在为解调拷贝 IQ"
+    assert pipe._spectrum_stream in outputs, "频谱通道必须不受影响（SDR++：频谱照跑）"
+
+    pipe.set_demod_enabled(True)
+    assert pipe._vfo1_stream in outputs, "恢复收听必须重新挂上 VFO 通道"
+
+
+def test_idle_pauses_replay_and_listen_resumes(win, monkeypatch):
+    """停止解调必须暂停回放：回放是第二个真解调入口（50 ms 定时器）。
+
+    旧实现只停 worker / 声卡，回放定时器照跑 VFO.process——声卡已停所以听不见，
+    但 CPU 仍在解调，正是用户说的「点了停止还在跑」。
+    """
+    from PySide6.QtCore import QTimer
+    player = getattr(win, "_audio_player", None)
+    assert player is not None
+    monkeypatch.setattr(player, "start", lambda: True)
+    monkeypatch.setattr(player, "stop", lambda: None)
+    monkeypatch.setattr(player, "set_muted", lambda m: None)
+    monkeypatch.setattr(win, "_active_sdr_backend", object(), raising=False)
+
+    timer = QTimer(win)
+    timer.setInterval(50)
+    timer.start()
+    monkeypatch.setattr(win, "_replay_timer", timer, raising=False)
+    win._replay_paused_by_idle = False
+
+    # splitter 解绑也要跟着收听态走（审计 §4 #5）：只停 worker 不够。
+    calls = []
+
+    class _Pipe:
+        def set_demod_enabled(self, on):
+            calls.append(bool(on))
+
+    monkeypatch.setattr(win, "_pipeline", _Pipe(), raising=False)
+    monkeypatch.setattr(win, "_demod1", None, raising=False)
+    monkeypatch.setattr(win, "_demod2", None, raising=False)
+    monkeypatch.setattr(win, "_vfo_workers", {}, raising=False)
+
+    win._apply_listen_state("idle")
+    assert not timer.isActive(), "停止解调后回放定时器必须停（不许继续解调）"
+    assert win._replay_paused_by_idle is True
+    assert calls == [False], f"idle 没把解调通道从 splitter 摘掉：{calls}"
+
+    win._apply_listen_state("listen")
+    assert timer.isActive(), "恢复收听必须从原位置继续回放"
+    assert win._replay_paused_by_idle is False
+    assert calls == [False, True], f"恢复收听没重绑解调通道：{calls}"
+
+    timer.stop()
+    monkeypatch.setattr(win, "_replay_timer", None, raising=False)
+    win._apply_listen_state("idle")
+
+
+def test_idle_stops_constellation_feed(win, monkeypatch):
+    """停止解调后星座图不再被喂：否则星座点继续跳，用户会认定「解调没停」。
+
+    同时钉住 10 Hz 节流（旧注释写「节流 ~10fps」但每帧都喂）。
+    """
+    import numpy as np
+
+    class _Panel:
+        def __init__(self):
+            self.feeds = 0
+            self.visible = True
+
+        def feed_iq(self, iq):
+            self.feeds += 1
+
+        def isVisible(self):
+            return self.visible
+
+    panel = _Panel()
+    for name in ("_update_rssi_from_iq", "_refresh_vfo_panel",
+                 "_update_status_bar"):
+        monkeypatch.setattr(win, name, lambda *a, **k: None, raising=False)
+    monkeypatch.setattr(win.spectrum, "_refresh_status_labels",
+                        lambda *a, **k: None, raising=False)
+    monkeypatch.setattr(win, "digital_adsb_panel", None, raising=False)
+    monkeypatch.setattr(win, "constellation_panel", panel, raising=False)
+    monkeypatch.setattr(win, "adsb_dock", None, raising=False)
+    monkeypatch.setattr(win, "_constellation_t", -1e9, raising=False)
+    iq = np.ones(4096, dtype=np.complex64) * 0.1
+
+    win._listen_state = "idle"
+    win._on_pipeline_frame_ready(iq, 2.4e6)
+    win._on_pipeline_frame_ready(iq, 2.4e6)
+    assert panel.feeds == 0, "停止解调时星座图仍在被喂（观感上等于没停）"
+
+    win._listen_state = "listen"
+    win._on_pipeline_frame_ready(iq, 2.4e6)
+    assert panel.feeds == 1, "收听态必须恢复喂入"
+    win._on_pipeline_frame_ready(iq, 2.4e6)
+    assert panel.feeds == 1, "相邻两帧必须被 10 Hz 节流合并"
+    win._listen_state = "idle"
+
+
+def test_status_shows_zero_demod_frames_when_idle(win, monkeypatch):
+    """状态位给出可读的帧率：停止解调时必须是 0，积压提示优先。"""
+    import time as _t
+
+    prev_state = win._listen_state
+    prev_text = win.status_processing.text()
+    prev_until = getattr(win, "_buffer_warn_until", None)
+    try:
+        win._listen_state = "idle"
+        win._show_demod_fps(0)
+        assert win.status_processing.text() == "待机 · 解调 0 帧/s"
+
+        win._listen_state = "listen"
+        win._show_demod_fps(146)
+        assert "146" in win.status_processing.text()
+
+        win._listen_state = "idle"
+        win._buffer_warn_until = _t.monotonic() + 5.0
+        win._show_demod_fps(0)
+        assert "0 帧/s" not in win.status_processing.text(), \
+            "积压提示被 1 Hz 帧率刷新顶掉了"
+    finally:
+        win._listen_state = prev_state
+        win._set_processing_status(prev_text)
+        if prev_until is None:
+            win.__dict__.pop("_buffer_warn_until", None)
+        else:
+            win._buffer_warn_until = prev_until

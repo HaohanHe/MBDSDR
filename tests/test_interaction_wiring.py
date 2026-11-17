@@ -134,20 +134,6 @@ def _make_item(panel):
     return item
 
 
-def test_refresh_passes_explains_missing_tle(main_window):
-    """拿不到 TLE 时不能说"无数据"了事，必须说清楚是离线/无网络。"""
-    panel = main_window.new_spacetime_panel
-    # 站址已配置，才能真正走到「拿不到 TLE」这一分支（未配站址会先报站址）
-    panel.set_observer(39.9, 116.4, 0.0)
-    panel._tle_mgr.fetch = lambda *_a, **_k: None
-    panel.refresh_passes()
-    app.processEvents()
-    assert not panel.passes_hint.isHidden(), "空态提示必须可见"
-    text = panel.passes_hint.text()
-    assert "TLE" in text and ("网络" in text or "离线" in text), (
-        f"空态提示没有说明原因：{text!r}")
-
-
 def test_device_refresh_gives_feedback(main_window):
     """设备列表刷新：列表没变化时也要给按钮一个明确反馈。"""
     panel = main_window.module_panel

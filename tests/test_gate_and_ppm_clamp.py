@@ -71,7 +71,7 @@ class ElevationGateTest(unittest.TestCase):
         def fake_position(name, *_args, **_kwargs):
             return types.SimpleNamespace(name=name, elevation=rows[name])
 
-        with mock.patch.object(decoders, "BUILTIN_TLE", {k: None for k in rows}), \
+        with mock.patch.object(decoders, "KNOWN_SATELLITE_NAMES", set(rows)), \
                 mock.patch.object(decoders, "compute_satellite_position",
                                   side_effect=fake_position):
             high = decoders.list_visible_satellites(

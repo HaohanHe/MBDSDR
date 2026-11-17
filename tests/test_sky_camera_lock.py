@@ -26,6 +26,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, _ROOT)
 sys.path.insert(0, os.path.join(_ROOT, "desktop"))
+sys.path.insert(0, os.path.join(_ROOT, "tests", "fixtures"))
 
 from datetime import datetime, timezone  # noqa: E402
 
@@ -37,7 +38,7 @@ from PySide6.QtWidgets import QApplication  # noqa: E402
 app = QApplication.instance() or QApplication(sys.argv)
 
 from rf_sky_view import RFSkyView, SkyObject  # noqa: E402
-from mbdsdr_ai.decoders import BUILTIN_TLE  # noqa: E402
+from tle_samples import ISS_TLE, NOAA19_TLE  # noqa: E402
 from mbdsdr_ai.new_spacetime import get_time_engine  # noqa: E402
 from mbdsdr_ai import orbit  # noqa: E402
 
@@ -45,8 +46,8 @@ from mbdsdr_ai import orbit  # noqa: E402
 LAT, LON = 43.9, 125.3
 ISS = "ISS (ZARYA)"
 NOAA19 = "NOAA 19"
-LINE1_ISS, LINE2_ISS = BUILTIN_TLE[ISS]
-LINE1_N19, LINE2_N19 = BUILTIN_TLE[NOAA19]
+LINE1_ISS, LINE2_ISS = ISS_TLE
+LINE1_N19, LINE2_N19 = NOAA19_TLE
 
 _BASE_UNIX = datetime(2026, 9, 27, 12, 0,
                       tzinfo=timezone.utc).timestamp()

@@ -60,19 +60,20 @@ def test_onboard_record_gnss_writes_and_reads_back(tmp_path):
     with open(meta_path, encoding="utf-8") as f:
         meta = json.load(f)
     cap = meta["captures"][0]
-    # GNSS 时间写入 core:datetime，并显式标注来源
+    # GNSS 时间写入 core:datetime，并显式标注来源级别（无 PPS → nmea）
     assert cap["core:datetime"] == "2026-10-02T07:25:45Z"
-    assert cap["mbdsdr:time_source"] == "gnss"
+    assert cap["mbdsdr:time_source"] == "nmea"
+    assert cap["mbdsdr:time_precision"]
 
     # 读取端 playback.parse_sigmf_meta 对齐
     from mbdsdr_ai.playback import parse_sigmf_meta
     parsed = parse_sigmf_meta(meta_path)
     assert parsed["datetime"] == "2026-10-02T07:25:45Z"
-    assert parsed["time_source"] == "gnss"
+    assert parsed["time_source"] == "nmea"
 
 
 def test_onboard_record_no_gnss_falls_back_system(tmp_path):
-    """无 --gnss：core:datetime=注入的系统时钟，标 time_source=system。"""
+    """无 --gnss：core:datetime=注入的系统时钟，标 time_source=none。"""
     from tools.onboarding.onboard import step_record
 
     raw = tmp_path / "raw.bin"
@@ -85,7 +86,7 @@ def test_onboard_record_no_gnss_falls_back_system(tmp_path):
     with open(res.detail["sigmf_meta"], encoding="utf-8") as f:
         cap = json.load(f)["captures"][0]
     assert cap["core:datetime"] == "2026-10-02T08:00:00Z"
-    assert cap["mbdsdr:time_source"] == "system"
+    assert cap["mbdsdr:time_source"] == "none"
 
 
 def test_onboard_record_gga_only_falls_back_system(tmp_path):
@@ -103,4 +104,4 @@ def test_onboard_record_gga_only_falls_back_system(tmp_path):
     assert res.status == "PASS"
     with open(res.detail["sigmf_meta"], encoding="utf-8") as f:
         cap = json.load(f)["captures"][0]
-    assert cap["mbdsdr:time_source"] == "system"
+    assert cap["mbdsdr:time_source"] == "none"

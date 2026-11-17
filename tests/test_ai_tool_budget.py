@@ -89,6 +89,12 @@ def test_selection_is_deterministic():
     b = select_tools(defs, req, budget_tokens=300)
     assert a.kept_names == b.kept_names
     assert a.tokens == b.tokens
+    # Task 41：同输入两次裁剪的逐工具理由也必须逐字一致，且可按键查询。
+    assert a.decisions == b.decisions
+    assert a.decision_for("list_tools")["reason"].startswith("core:")
+    for name in a.evicted_names:
+        assert a.decision_for(name)["reason"].startswith("evicted:")
+        assert a.decision_for(name)["kept"] is False
 
 
 def test_relevant_kept_and_trap_excluded():

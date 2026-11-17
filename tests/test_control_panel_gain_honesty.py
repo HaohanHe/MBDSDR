@@ -114,3 +114,23 @@ def test_mismatch_wording_does_not_call_request_device_actual(qapp):
         assert "设备实际" not in tip, "没有回读通道时不得写成设备实际增益"
     finally:
         panel.deleteLater()
+
+
+def test_agc_on_does_not_report_manual_gain_missed(qapp):
+    """AGC 开启时手动增益不下发，「意图 20 / 读数 7.1」不是未生效。
+
+    真机启动路径（main_window 自动连接）就是 ``agc=True, gain=20``：
+    旧实现拿停灰的滑杆去比读数，每次启动都刷一条假的「未生效」告警。
+    """
+    panel = _panel()
+    try:
+        panel.set_sdr_connected(True)
+        panel.set_gain(20.0)
+        panel.set_agc(True)
+        assert panel.set_gain_applied(7.1) is True
+        assert panel.gain_val.text() == "7.1 dB", "读数照常显示设备当前档位"
+        tip = panel.gain_val.toolTip()
+        assert "未生效" not in tip
+        assert "AGC" in tip
+    finally:
+        panel.deleteLater()

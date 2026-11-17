@@ -404,15 +404,16 @@ def _diff_pixels(a, b) -> int:
 def test_status_card_draws_star_row_and_truncation_warning():
     v = _new_view()
     try:
-        # 星表行基线 dy=238（指向20/可见卫星38/太阳56/UTC76/本地94/
-        # 恒星时112/观测站130/视轴148/视角166/调谐184/受晒202/银河220/
-        # 星表238）；字形带实测 228–236，裁 226–240 刚好罩住。
+        # 星表行基线 dy=274（指向20/可见卫星38/太阳56/UTC76/本地94/
+        # 恒星时112/儒略日130/观测站148/视轴166/朝向184（人话行独立）/
+        # 视角202/调谐220/受晒238/银河256/星表274）；字形带实测 264–272，
+        # 裁 262–276 刚好罩住。
         v._star_sel = SimpleNamespace(returned=1232, available=1232,
                                       limit_mag=6.5, truncated=False)
-        normal = _card_crop(v, 226, 14)
+        normal = _card_crop(v, 262, 14)
         v._star_sel = SimpleNamespace(returned=20000, available=83479,
                                       limit_mag=9.0, truncated=True)
-        truncated = _card_crop(v, 226, 14)
+        truncated = _card_crop(v, 262, 14)
     finally:
         v.close()
     assert _diff_pixels(normal, truncated) > 20, \

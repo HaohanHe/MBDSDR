@@ -42,7 +42,9 @@ from PySide6.QtWidgets import QApplication  # noqa: E402
 app = QApplication.instance() or QApplication(sys.argv)
 
 from mbdsdr_ai.sky_actions import (SkyActionBus, _reset_sky_bus_for_tests,  # noqa: E402
-                                   get_sky_bus, validate_sky_action)
+                                   apply_look_at, get_sky_bus,
+                                   validate_sky_action)
+from mbdsdr_ai.sky_interaction import ViewState  # noqa: E402
 from mbdsdr_ai.sky_negotiation import (CAPABILITY_SLOTS, CapabilityLedger,  # noqa: E402
                                        SatelliteActionContext,
                                        build_action_prompt,
@@ -230,6 +232,73 @@ class TestSkyActionBus:
         res = bus.drain()[0]
         assert res["ok"] is False
         assert "backend exploded" in res["reason"]
+
+
+# ---------------------------------------------------------------------------
+# look_at：只改视角、不碰硬件
+# ---------------------------------------------------------------------------
+class _SkyStub:
+    """最小天空视图替身：只提供 view_state + update 计数。"""
+
+    def __init__(self):
+        self.view_state = ViewState(center_az=0.0, center_alt=90.0,
+                                    fov_deg=120.0,
+                                    min_fov=0.5, max_fov=120.0)
+        self.updates = 0
+
+    def update(self):
+        self.updates += 1
+
+
+class TestLookAtAction:
+    def test_does_not_require_satellite(self):
+        assert validate_sky_action(
+            {"action": "look_at", "az_deg": 180.0, "alt_deg": 30.0}) is None
+
+    def test_rejects_bad_angles(self):
+        assert validate_sky_action({"action": "look_at", "az_deg": 180.0})
+        assert validate_sky_action(
+            {"action": "look_at", "az_deg": 180.0, "alt_deg": 120.0})
+        assert validate_sky_action(
+            {"action": "look_at", "az_deg": "南", "alt_deg": 30.0})
+        assert validate_sky_action(
+            {"action": "look_at", "az_deg": 180.0, "alt_deg": 30.0,
+             "fov_deg": 0}) is not None
+        assert validate_sky_action(
+            {"action": "look_at", "az_deg": 180.0, "alt_deg": 30.0,
+             "fov_deg": 180.0}) is None
+
+    def test_apply_moves_view_and_reports_actual(self):
+        sky = _SkyStub()
+        res = apply_look_at(sky, {"action": "look_at", "az_deg": -20.0,
+                                  "alt_deg": 30.0, "fov_deg": 20.0})
+        assert res["ok"] is True and res["status"] == "DONE"
+        assert sky.view_state.center_az == 340.0        # 负方位归一到 0..360
+        assert res["az_deg"] == 340.0
+        assert sky.view_state.center_alt == 30.0
+        assert sky.view_state.fov_deg == 20.0
+        assert sky.updates == 1
+
+    def test_apply_without_fov_keeps_current_fov(self):
+        sky = _SkyStub()
+        apply_look_at(sky, {"action": "look_at", "az_deg": 90.0,
+                            "alt_deg": 10.0})
+        assert sky.view_state.fov_deg == 120.0
+
+    def test_apply_without_sky_view_is_honest(self):
+        res = apply_look_at(None, {"action": "look_at", "az_deg": 0.0,
+                                   "alt_deg": 0.0})
+        assert res["ok"] is False and res["status"] == "UNAVAILABLE"
+
+    def test_bus_queues_and_executes_look_at(self):
+        sky = _SkyStub()
+        bus = SkyActionBus(executor=lambda a: apply_look_at(sky, a))
+        queued = bus.enqueue({"action": "look_at", "az_deg": 45.0,
+                              "alt_deg": 45.0})
+        assert queued["status"] == "QUEUED"
+        res = bus.drain()[0]
+        assert res["status"] == "DONE"
+        assert sky.view_state.center_az == 45.0
 
 
 # ---------------------------------------------------------------------------

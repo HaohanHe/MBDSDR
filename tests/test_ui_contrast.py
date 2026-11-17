@@ -215,21 +215,16 @@ _SEMANTIC_TOKENS = ("danger", "success", "accent", "status_busy",
 #:   TEST   测试自己断言 token 原值。
 #: 修完一条必须**同一笔**做两件事：删掉对应基线行 + `_BASELINE_CEILING -= 1`。
 #: 门禁按 `==` 判定（不是 `<=`）：漏降上限 → 红，漏删基线行 → 也红（见
-#: 「基线里已不存在的直读」那条断言）。否则棘轮会退化成「11 就对了」。
+#: 「基线里已不存在的直读」那条断言）。否则棘轮会退化成「7 就对了」。
 _BASELINE = (
-    # ---- A1 待迁（11 个单元 / 12 行）----
+    # ---- A1 待迁（7 个单元 / 7 行）----
     ("desktop/status_panel.py", 360, "danger", "A1", "status:360"),
     ("desktop/status_panel.py", 867, "danger", "A1", "status:867"),
     ("desktop/status_panel.py", 965, "danger", "A1", "status:965"),
     ("desktop/status_panel.py", 1019, "danger", "A1", "status:1019"),
-    ("desktop/sat_track_panel.py", 453, "danger", "A1", "sat:453"),
-    ("desktop/sat_track_panel.py", 518, "danger", "A1", "sat:518"),
-    ("desktop/sat_track_panel.py", 522, "danger", "A1", "sat:522"),
     ("desktop/vfo_panel.py", 232, "danger", "A1", "vfo:232"),
     ("desktop/ntrip_panel.py", 48, "danger", "A1", "ntrip:48"),
     ("desktop/ntrip_panel.py", 49, "status_busy", "A1", "ntrip:49"),
-    ("desktop/control_panel.py", 999, "danger", "A1", "control:invalid"),
-    ("desktop/control_panel.py", 1007, "danger", "A1", "control:invalid"),
     # ---- A2 等拍板（success/accent 当正文/填充）----
     ("desktop/status_panel.py", 855, "success", "A2", ""),
     ("desktop/status_panel.py", 857, "accent", "A2", ""),
@@ -240,8 +235,6 @@ _BASELINE = (
     ("desktop/status_panel.py", 1016, "accent", "A2", ""),
     ("desktop/status_panel.py", 1049, "success", "A2", ""),
     ("desktop/status_panel.py", 1093, "success", "A2", ""),
-    ("desktop/sat_track_panel.py", 526, "success", "A2", ""),
-    ("desktop/sat_track_panel.py", 528, "success", "A2", ""),
     ("desktop/vfo_panel.py", 191, "accent", "A2", ""),
     ("desktop/ntrip_panel.py", 50, "success", "A2", ""),
     # ---- FROZEN 冻结期登记 ----
@@ -280,10 +273,15 @@ _BASELINE = (
     ("desktop/rf_sky_view.py", 8967, "accent", "ISLAND", ""),
     # ---- TEST 测试断言 token 原值 ----
     ("tests/test_theme_tokens.py", 65, "accent", "TEST", ""),
+    ("tests/test_tokens_semantic_color.py", 51, "accent", "TEST", ""),
+    ("tests/test_tokens_semantic_color.py", 51, "accent", "TEST", ""),
 )
 
-#: A1 单元数上限（只许降）：当前 11 = status 4 + sat 3 + vfo 1 + ntrip 2 + control 1。
-_BASELINE_CEILING = 11
+#: A1 单元数上限（只许降）：当前 7 = status 4 + vfo 1 + ntrip 2。
+#: 2026-11-16：sat_track_panel 3 单元（polar/doppler 画布）与 control_panel
+#: 1 单元（频率输入拒绝态）已迁到 ``tokens().semantic_color`` /
+#: ``tokens().status_color``，同笔删行并 11 → 7。
+_BASELINE_CEILING = 7
 
 #: 非语义 token 的直读欠账（2026-11-12 扩面后按「文件 × token 计数」重建）。
 #: 与 `_BASELINE` 同一口径：只许降不许涨；改掉一处就同笔减数，减到 0 删键。
@@ -316,13 +314,13 @@ _LEGACY_READS = {
         "light_accent": 4, "light_bg": 1, "sky_day_ink": 1,
         "sky_day_zenith": 1, "sky_night_glow": 1, "sky_night_horizon": 1,
         "sky_night_zenith": 1, "text_primary": 2},
-    "desktop/sat_track_panel.py": {"card_2": 1, "gray_300": 1, "gray_400": 1},
     "desktop/satellite_image_panel.py": {"image_placeholder_bg": 1},
     "desktop/status_panel.py": {"card_2": 1, "gray_300": 5, "gray_400": 1},
     "desktop/tokens.py": {"light_accent": 1, "light_bg": 1, "light_bg_alt": 1,
                           "light_border": 1, "light_card": 1, "light_text": 1},
     "desktop/vfo_panel.py": {"card_2": 1, "gray_200": 1, "text_primary": 1},
     "tests/test_theme_tokens.py": {"bg_dark": 1},
+    "tests/test_tokens_semantic_color.py": {"card_2": 1, "gray_400": 1},
     "tests/test_ui_contrast.py": {"disabled_gray": 1},
 }
 

@@ -49,7 +49,7 @@ sys.path.insert(0, os.path.join(_ROOT, "desktop"))
 
 from datetime import datetime, timezone  # noqa: E402
 
-import pytest  # noqa: E402
+import numpy as np  # noqa: E402
 
 from PySide6.QtGui import QColor, QImage, QPainter  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
@@ -64,7 +64,8 @@ from mbdsdr_ai.celestial_geometry import (  # noqa: E402
     azalt_from_vec, vec_from_azalt, altaz_to_j2000, radec_from_vec,
 )
 from mbdsdr_ai.new_spacetime import get_time_engine  # noqa: E402
-from mbdsdr_ai.skyengine.stars import BrightStar  # noqa: E402
+from mbdsdr_ai.skyengine.star_catalog import StarSelection  # noqa: E402
+from mbdsdr_ai.skyengine.stars import extinction_delta_mag  # noqa: E402
 
 LAT, LON = 40.0, 116.0
 # 固定历元（不绑墙钟）下探针实测的一处高仰角、偏心 100..250px 的天区：
@@ -237,19 +238,75 @@ def _pick_planet(v, mag, bortle=3):
     return v._find_body_at(float(cx), float(cy))
 
 
+def _only_probe_star(monkeypatch, v, ra_deg, dec_deg, vmag, az_deg, alt_deg):
+    """把星表查询换成「只返回一颗探针星」的等价实现（真实链路注入）。
+
+    `_star_selection()` 走的是
+    `mbdsdr_ai.skyengine.star_catalog.select_for_view(...)`，与
+    `_constel.merged_star_index` 不是同一条链——patch 后者从写出来就是空操作
+    （K01–K04 的原始根因）。这里 patch 真实链路，返回形状与真实现一致的
+    `StarSelection`。
+
+    有效星等仍用产品同一条消光公式（`extinction_delta_mag`）算，**不在这里
+    预过滤极限门**：超限与否要由绘制层与拾取层各自用 `_star_visual` 的同一个门
+    去判，那才是本组用例钉的契约。
+    """
+    import mbdsdr_ai.skyengine.star_catalog as star_catalog
+
+    def fake_select_for_view(_station, _jd_ut1, _caz, _calt, fov, *,
+                             bortle=3, limit_mag=None,
+                             extinction_k=0.2, **_ignored):
+        limit = (float(limit_mag) if limit_mag is not None
+                 else float(star_catalog.limit_magnitude(
+                     float(fov), bortle=int(bortle))))
+        limit = min(limit, float(star_catalog.CATALOG_DEPTH_MAG))
+        eff = float(vmag) + float(extinction_delta_mag(
+            float(alt_deg), k=float(extinction_k)))
+
+        def one(value, dtype=None):
+            return np.array([value], dtype=dtype)
+        return StarSelection(
+            hyg_id=one(-1, np.int32),
+            hip=one(0, np.int32),
+            name=one(STAR_NAME),
+            con=one(""),
+            spect=one(""),
+            ra_deg=one(ra_deg),
+            dec_deg=one(dec_deg),
+            az_deg=one(az_deg),
+            alt_deg=one(alt_deg),
+            vmag=one(vmag),
+            eff_mag=one(eff),
+            bv=one(0.0),
+            dist_pc=one(float("nan")),
+            fov_deg=float(fov),
+            limit_mag=float(limit),
+            requested_limit_mag=float(limit),
+            bortle=int(bortle),
+            available=1,
+        )
+
+    monkeypatch.setattr(star_catalog, "select_for_view", fake_select_for_view)
+    # 绘制层与拾取层共用 `_star_sel` 缓存（这正是"同一门"的实现方式）。
+    # `_new_view()` 的 show + processEvents 已用真星表算过一次并缓存；不清掉
+    # 两层都读旧集合。`_star_sel_key` 一起清是防御性的：本组四条里拾取走的是
+    # 非缓存入口（`_find_body_at` 直接调 `_star_selection`）、`_place` 又改了
+    # 视线中心（缓存键本就变化），实测只清 `_star_sel` 也绿；但只要将来有条路径
+    # 在键不变时重画，`_star_selection_cached` 就会直接返回旧 `_star_sel_cached`，
+    # patch 失效。
+    v._star_sel = None
+    v._star_sel_key = None
+
+
 def _pick_star(v, monkeypatch, vmag, bortle=3):
     """星表只留一颗假星（排除真星干扰），返回取样像素处的拾取结果。"""
     cx, cy, _alt = _screen_pos(v)
     v._bortle = bortle
     v._planet_positions = lambda jd: {}
-    fake = {STAR_NAME: BrightStar(STAR_NAME, RA, DEC, vmag, 0.0)}
-    monkeypatch.setattr(rf_sky_view._constel, "merged_star_index",
-                        lambda: fake)
-    # 绘制层与拾取层共用 `_star_sel` 缓存（这正是"同一门"的实现方式）。
-    # 清缓存是**必要但不充分**：`_new_view()` 已用真星表算过一次，不清掉两层
-    # 都读旧集合；但清掉后重算仍走 `star_catalog.select_for_view`，探针依旧
-    # 进不去——见 docs/known-red-register.md 的 K01-K04 与 xfail 标记。
-    v._star_sel = None
+    vv = j2000_to_altaz(vec_from_radec(RA, DEC), v._ground_station(),
+                        v._current_jd())
+    az, alt = azalt_from_vec(vv)
+    _only_probe_star(monkeypatch, v, RA, DEC, vmag, az, alt)
     return v._find_body_at(float(cx), float(cy))
 
 
@@ -310,7 +367,6 @@ class TestPickGateMatchesDrawGate:
             (f"天王星(5.73) > Bortle 9 极限 4.4，画不出也就点不中，实测 {city}"
              "——若这里也点得中，说明拾取门没接上极限星等，上一条绿是巧合")
 
-    @pytest.mark.xfail(strict=True, reason="KNOWN-RED-K01: 探针星被真星表抢命中——探针注入 patch 的 merged_star_index 不在 _star_selection 链上，装置失效；转绿条件见 docs/known-red-register.md")
     def test_faint_star_inside_limit_is_pickable(self, monkeypatch):
         """4.5 < vmag < 极限的星：画得出（旧写死门槛下点不中，本条即修复）。"""
         v = _new_view()
@@ -352,12 +408,7 @@ class TestStarExtinctionKeepsDrawAndPickInSync:
             vec_from_azalt(self.AZ, alt), gs, jd))
         v._bortle = 3
         v._planet_positions = lambda j: {}
-        fake = {STAR_NAME: BrightStar(STAR_NAME, ra, dec, vmag, 0.0)}
-        monkeypatch.setattr(rf_sky_view._constel, "merged_star_index",
-                            lambda: fake)
-        # 同上：清掉 `_new_view()` 留下的真星缓存（必要但不充分，
-        # 根因与转绿条件见 docs/known-red-register.md K01-K04）。
-        v._star_sel = None
+        _only_probe_star(monkeypatch, v, ra, dec, vmag, self.AZ, alt)
         p = v._sky_to_screen(self.AZ, alt)
         return int(round(p.x())), int(round(p.y()))
 
@@ -381,7 +432,6 @@ class TestStarExtinctionKeepsDrawAndPickInSync:
                     n += 1
         return n
 
-    @pytest.mark.xfail(strict=True, reason="KNOWN-RED-K02: 探针星被真星表抢命中——探针注入 patch 的 merged_star_index 不在 _star_selection 链上，装置失效；转绿条件见 docs/known-red-register.md")
     def test_faint_star_extinguished_near_horizon_draws_nothing(self,
                                                                monkeypatch):
         v = _new_view()
@@ -395,7 +445,6 @@ class TestStarExtinctionKeepsDrawAndPickInSync:
         finally:
             v.close()
 
-    @pytest.mark.xfail(strict=True, reason="KNOWN-RED-K03: 探针星被真星表抢命中——探针注入 patch 的 merged_star_index 不在 _star_selection 链上，装置失效；转绿条件见 docs/known-red-register.md")
     def test_same_star_high_up_draws_and_is_pickable(self, monkeypatch):
         v = _new_view()
         try:
@@ -408,7 +457,6 @@ class TestStarExtinctionKeepsDrawAndPickInSync:
         finally:
             v.close()
 
-    @pytest.mark.xfail(strict=True, reason="KNOWN-RED-K04: 探针星被真星表抢命中——探针注入 patch 的 merged_star_index 不在 _star_selection 链上，装置失效；转绿条件见 docs/known-red-register.md")
     def test_visible_star_near_horizon_stays_pickable(self, monkeypatch):
         """消光还没把星推出极限时，拾取门不能抢跑（不过度收紧）。"""
         v = _new_view()
@@ -419,5 +467,40 @@ class TestStarExtinctionKeepsDrawAndPickInSync:
             res = v._find_body_at(float(cx), float(cy))
             assert res is not None and res.get("key") == STAR_NAME, \
                 f"画得出就该点得中，实测 {res}"
+        finally:
+            v.close()
+
+
+class TestStarFovGain:
+    """星点随视场放大：Stellarium `lnfovFactor` 的观感等价物。
+
+    只改落笔/拾取半径，不动星等、亮度、极限；参考 60° 时增益恰为 1，
+    所以 90°/120° 构图逐像素不变（既有截图不被迫重拍）。
+    """
+
+    def test_identity_at_wide_fields_and_cap_at_tight(self):
+        gain = rf_sky_view.RFSkyView._star_fov_gain
+        for fov in (60.0, 90.0, 120.0, 180.0):
+            assert gain(fov) == 1.0, f"{fov}° 应保持原尺寸（增益=1）"
+        assert gain(10.0) > 2.0, "10° 应明显放大"
+        assert gain(0.5) == rf_sky_view.RFSkyView.STAR_FOV_GAIN_MAX
+        assert gain(None) == 1.0, "只传星等的纯函数调用必须逐像素不变"
+        assert gain(0.0) == rf_sky_view.RFSkyView.STAR_FOV_GAIN_MAX
+
+    def test_scalar_and_vector_share_the_gain(self):
+        v = rf_sky_view.RFSkyView()
+        try:
+            for fov in (120.0, 30.0, 5.0):
+                r_s, _b, _g, a_s = v._star_visual(1.0, 6.5, 3, fov_deg=fov)
+                r_v, _bv, _gv, a_v = v._star_visual_many(
+                    [1.0], 6.5, 3, fov_deg=fov)
+                assert abs(r_s - float(r_v[0])) < 1e-9, \
+                    f"fov={fov}° 标量/向量半径不一致（绘制与拾取会分叉）"
+                assert a_s == int(a_v[0])
+            wide = v._star_visual(1.0, 6.5, 3, fov_deg=120.0)[0]
+            tight = v._star_visual(1.0, 6.5, 3, fov_deg=5.0)[0]
+            assert tight > wide, "视场越紧星点应越大"
+            assert v._star_visual(1.0, 6.5, 3)[0] == wide, \
+                "不传 fov 时必须等价于宽视场参考值"
         finally:
             v.close()

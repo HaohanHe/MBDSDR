@@ -118,7 +118,12 @@ def test_offset_tuning_rejection_is_visible(mw, monkeypatch):
 
 
 def test_ppm_without_backend_capability_is_visible(mw, monkeypatch):
-    """后端没有 set_ppm：既不能调用，也不能装作已生效。"""
+    """后端声明有能力但对象上没有 set_ppm：既不能调用，也不能装作已生效。
+
+    能力门（``_backend_capability("ppm")``）先于方法探测；这里放行能力门，
+    才能走到「能力说有、方法没有」这条防御分支（两处都要各说各的人话）。
+    """
+    monkeypatch.setattr(mw, "_backend_capability", lambda _cap: True)
     monkeypatch.setattr(mw, "_active_sdr_backend", SimpleNamespace())
     mw._on_ppm_changed(5)
     assert "PPM 未下发" in mw.statusBar().currentMessage()

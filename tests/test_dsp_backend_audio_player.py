@@ -27,6 +27,25 @@ if REPO_ROOT not in sys.path:
 from mbdsdr_ai.audio_out import AudioPlayer
 
 
+def test_start_reprobes_hardware_instead_of_staying_unavailable(monkeypatch):
+    """available 不能是"一次失败终身钉死"。
+
+    旧实现 start() 首行 `if not self.available: return False`，而 available
+    只在构造时探一次；之后声卡被占用/拔插一次，用户再点「收听」永远没声音。
+    这里只证"会重新探测"（真实打开设备与否取决于本机有无声卡）。
+    """
+    from mbdsdr_ai import audio_out
+
+    player = AudioPlayer(sample_rate=48000)
+    player.available = False
+    probes = []
+    monkeypatch.setattr(audio_out, "sd_available",
+                        lambda: (probes.append(1), False)[1])
+    assert player.start() is False
+    assert len(probes) == 1, "不可用时 start() 必须重新探测硬件，不能直接返回"
+    player.stop()
+
+
 def test_player_start_returns_bool():
     player = AudioPlayer(sample_rate=48000)
     result = player.start()
