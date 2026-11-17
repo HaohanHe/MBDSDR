@@ -143,6 +143,19 @@ def _is_escaped_newline_email(text: str, start: int, matched: str) -> bool:
     return start > 0 and text[start - 1] == "\\" and len(local) == 1
 
 
+#: 第三方文化语料（Stellarium skycultures 派生，逐包带来源与许可）：
+#: 正文是引自外部文化资料的原文/原名，不是本仓作者自述。日本包里的
+#: 「Daigakuryō（だいがくりょう）」是古代学府官职/星官原名，改名等于
+#: 伪造文化来源。只对**词汇类**规则豁免；邮箱/手机号等联系方式规则照常
+#: 扫（外部语料里更不该出现我们的联系方式）。
+THIRD_PARTY_DATA_PREFIXES = ("mbdsdr_ai/data/skycultures/",)
+_VOCAB_RULES = ("就业类措辞", "学校措辞", "居所/行踪措辞")
+
+
+def _is_third_party_corpus(rel: str) -> bool:
+    return rel.replace("\\", "/").startswith(THIRD_PARTY_DATA_PREFIXES)
+
+
 def test_no_personal_info_in_tracked_files():
     hits = []
     for rel in _tracked_files():
@@ -154,7 +167,10 @@ def test_no_personal_info_in_tracked_files():
                 text = f.read()
         except OSError:
             continue
+        third_party = _is_third_party_corpus(rel)
         for label, pat in RULES:
+            if third_party and label in _VOCAB_RULES:
+                continue
             for m in pat.finditer(text):
                 if label.startswith("邮箱"):
                     dom = m.group(1).lower()
@@ -170,6 +186,16 @@ def test_no_personal_info_in_tracked_files():
                     continue
                 hits.append(f"{rel}: {label} -> {m.group(0)[:40]}")
     assert not hits, "身份红线命中（AGENTS.md 第 1 条）:\n" + "\n".join(hits[:30])
+
+
+def test_third_party_corpus_exemption_is_narrow():
+    """豁免只覆盖第三方文化语料的词汇类规则，不能扩到别处。"""
+    assert _is_third_party_corpus("mbdsdr_ai/data/skycultures/japanese.json")
+    assert not _is_third_party_corpus("mbdsdr_ai/data/other.json")
+    assert not _is_third_party_corpus("tests/test_identity_redline.py")
+    # 联系方式类规则不在豁免里：外部语料里出现的邮箱/手机号照常命中。
+    assert "邮箱(非 example 域)" not in _VOCAB_RULES
+    assert "手机号" not in _VOCAB_RULES
 
 
 def test_phone_rule_ignores_hashes_but_flags_prose():

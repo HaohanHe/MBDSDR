@@ -73,7 +73,7 @@ SITES = (
         lat_deg=40.39417, lon_deg=117.57500, alt_m=960.0,
         access="research",
         source_url="http://www.xinglong-naoc.cn/html/en/",
-        note="国家天文台兴隆站，LAMOST 所在地；科研台址，不对外开放。",
+        note="国家天文台兴隆站，LAMOST 台址；科研台址，不对外开放。",
     ),
     Site(
         site_id="lijiang-gaomeigu",
@@ -82,7 +82,7 @@ SITES = (
         lat_deg=26.70889, lon_deg=100.03083, alt_m=3193.0,
         access="research",
         source_url="https://www.ynao.cas.cn/kyzb/202306/t20230617_6779436.html",
-        note="云南天文台丽江站，2.4 米望远镜所在地；科研台址，不对外开放。",
+        note="云南天文台丽江站，2.4 米望远镜台址；科研台址，不对外开放。",
     ),
     Site(
         site_id="ali",
@@ -111,7 +111,7 @@ SITES = (
         source_url="https://pmo.cas.cn/jgsz2019/gctz2019/xygcz2025/",
         note=("紫金山天文台盱眙站，铁山寺跑马山。官方页：东经 118°28′、"
               "北纬 32°44′（分精度，约 1.5–1.9 km）、海拔 180 m；"
-              "近地天体探测望远镜所在地。科研台址，不对外开放。"),
+              "近地天体探测望远镜台址。科研台址，不对外开放。"),
         verified_on="2026-11-17",
     ),
     Site(
