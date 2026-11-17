@@ -78,9 +78,9 @@
 | `sat_link_get` | 卫星链路 | no_device | `SDRUserError` | false | 否 | 诚实 | 抛出用户可见错误 |
 | `sat_link_identify` | 卫星链路 | no_device | `ok` | true | 否 | 诚实 |  |
 | `sat_link_tuning` | 卫星链路 | no_device | `ok` | true | 否 | 诚实 | ok=true 且说明了不可测/未应用 |
-| `add_bookmark` | 书签扫描卫星 | no_device | `PermissionError` | false | 否 | 诚实 | 抛出用户可见错误 |
+| `add_bookmark` | 书签扫描卫星 | no_device | `ok` | true | 否 | 诚实 |  |
 | `list_bookmarks` | 书签扫描卫星 | no_device | `ok` | true | 否 | 诚实 |  |
-| `delete_bookmark` | 书签扫描卫星 | no_device | `PermissionError` | false | 否 | 诚实 | 抛出用户可见错误 |
+| `delete_bookmark` | 书签扫描卫星 | no_device | `ok` | true | 否 | 诚实 |  |
 | `find_nearest_bookmark` | 书签扫描卫星 | no_device | `ok` | true | 否 | 诚实 |  |
 | `start_recording` | 导出演制 | no_device | `not_connected` | false | 否 | 诚实 |  |
 | `stop_recording` | 导出演制 | no_device | `ok` | true | 否 | 诚实 | ok=true 且说明了不可测/未应用 |
@@ -161,9 +161,9 @@
 | `sat_link_get` | 卫星链路 | offline | `SDRUserError` | false | 否 | 不适用 | 工具不访问外网，离线环境对它无区分力 |
 | `sat_link_identify` | 卫星链路 | offline | `ok` | true | 否 | 不适用 | 工具不访问外网，离线环境对它无区分力 |
 | `sat_link_tuning` | 卫星链路 | offline | `ok` | true | 否 | 不适用 | 工具不访问外网，离线环境对它无区分力 |
-| `add_bookmark` | 书签扫描卫星 | offline | `PermissionError` | false | 否 | 不适用 | 工具不访问外网，离线环境对它无区分力 |
+| `add_bookmark` | 书签扫描卫星 | offline | `ok` | true | 否 | 不适用 | 工具不访问外网，离线环境对它无区分力 |
 | `list_bookmarks` | 书签扫描卫星 | offline | `ok` | true | 否 | 不适用 | 工具不访问外网，离线环境对它无区分力 |
-| `delete_bookmark` | 书签扫描卫星 | offline | `PermissionError` | false | 否 | 不适用 | 工具不访问外网，离线环境对它无区分力 |
+| `delete_bookmark` | 书签扫描卫星 | offline | `ok` | true | 否 | 不适用 | 工具不访问外网，离线环境对它无区分力 |
 | `find_nearest_bookmark` | 书签扫描卫星 | offline | `ok` | true | 否 | 不适用 | 工具不访问外网，离线环境对它无区分力 |
 | `start_recording` | 导出演制 | offline | `not_connected` | false | 否 | 不适用 | 工具不访问外网，离线环境对它无区分力 |
 | `stop_recording` | 导出演制 | offline | `ok` | true | 否 | 不适用 | 工具不访问外网，离线环境对它无区分力 |
@@ -244,9 +244,9 @@
 | `sat_link_get` | 卫星链路 | no_api_key | `SDRUserError` | false | 否 | 不适用 | 本表无模型类工具（模型调用在 agent/provider 层） |
 | `sat_link_identify` | 卫星链路 | no_api_key | `ok` | true | 否 | 不适用 | 本表无模型类工具（模型调用在 agent/provider 层） |
 | `sat_link_tuning` | 卫星链路 | no_api_key | `ok` | true | 否 | 不适用 | 本表无模型类工具（模型调用在 agent/provider 层） |
-| `add_bookmark` | 书签扫描卫星 | no_api_key | `PermissionError` | false | 否 | 不适用 | 本表无模型类工具（模型调用在 agent/provider 层） |
+| `add_bookmark` | 书签扫描卫星 | no_api_key | `ok` | true | 否 | 不适用 | 本表无模型类工具（模型调用在 agent/provider 层） |
 | `list_bookmarks` | 书签扫描卫星 | no_api_key | `ok` | true | 否 | 不适用 | 本表无模型类工具（模型调用在 agent/provider 层） |
-| `delete_bookmark` | 书签扫描卫星 | no_api_key | `PermissionError` | false | 否 | 不适用 | 本表无模型类工具（模型调用在 agent/provider 层） |
+| `delete_bookmark` | 书签扫描卫星 | no_api_key | `ok` | true | 否 | 不适用 | 本表无模型类工具（模型调用在 agent/provider 层） |
 | `find_nearest_bookmark` | 书签扫描卫星 | no_api_key | `ok` | true | 否 | 不适用 | 本表无模型类工具（模型调用在 agent/provider 层） |
 | `start_recording` | 导出演制 | no_api_key | `not_connected` | false | 否 | 不适用 | 本表无模型类工具（模型调用在 agent/provider 层） |
 | `stop_recording` | 导出演制 | no_api_key | `ok` | true | 否 | 不适用 | 本表无模型类工具（模型调用在 agent/provider 层） |

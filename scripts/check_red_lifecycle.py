@@ -78,7 +78,7 @@ SCAN_ROOT = ROOT
 EXEMPTION_FILE = "docs/red-lifecycle-exemptions.md"
 BANNER_TEXT = "历史快照，不作现状依据"
 HISTORICAL_PATH_RE = re.compile(r"^docs/learn/phase\d+/")
-ALLOWED_MECHANISMS = {"content-hash-ledger"}
+ALLOWED_MECHANISMS = {"content-hash-ledger", "generated-mirror"}
 
 SNAPSHOT_TITLE = "本文为当时状态快照"
 SNAPSHOT_REQUIRED = ("未逐条复核", "不作现状依据")
@@ -925,6 +925,12 @@ def _validate_exemption(path: Path, mechanism: str) -> Tuple[bool, str]:
         if re.search(r"\|[^\n]*\|\s*[0-9a-f]{12}\s*\|", text):
             return True, ""
         return False, "声明 content-hash-ledger，但文件里没有 12 位行内容 hash 列"
+    if mechanism == "generated-mirror":
+        if re.search(r"<!--\s*generated-by:\s*\S+\s*-->", text) and \
+                "不构成本文件的独立断言" in text:
+            return True, ""
+        return False, ("声明 generated-mirror，但缺少 `<!-- generated-by: … -->` "
+                       "标记或「不构成本文件的独立断言」声明")
     return False, "机制不可验证"
 
 

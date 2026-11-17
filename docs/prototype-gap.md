@@ -7,9 +7,9 @@
 > 本清单只把原型当**交互意图基准**；原型里的演示数据、固定星数、示意卫星方位、
 > 脚本对话一律不作为验收基线（见 §4 与 PRD §2.4.4）。
 >
-> 结论：**43 条判级：缺 4 / 弱 2 / 偏 3 / 已达标 34；另列演示不抄 6 条。**
-> 其中 3 条「缺」在批 1 实现（B8 / B9 / G3），A4 仅登记、不实现；
-> 批 2 实现 A10（DSO 四步）；B3 给出保留 120° 的理由与后续提案。
+> 结论：**43 条判级：缺 1 / 弱 0 / 偏 1 / 已达标 41；另列演示不抄 6 条。**
+> A4 仅登记、不实现；批 1 已实现 B8 / B9 / G3，批 2 已实现 A10，
+> 批 3 已实现 D3 / D4 / F3 与全天入口；B3 保留 120° 并给出后续提案。
 
 ---
 
@@ -40,7 +40,7 @@
 | A7 | 恒星按 B-V 真实着色、按星等定大小/辉光、按高度消光（L3000-3020） | `rf_sky_view.py:3331` `_draw_stars`；`:3280` `_star_selection` | 已达标 | 颜色/大小来自 HYG B-V 与 eff_mag；消光由 `select_for_view` 算，绘制层不二次叠加 | 无需改。AC-02.1 |
 | A8 | 星名标签只给 named/亮星，随视场自适应（L3020-3035） | `rf_sky_view.py:287` `_star_label_limit_mag`；`:3348`；`_queue_label` 统一避让 | 已达标 | 无名星不编名；门限随 FOV 收紧；沿用同一避让队列 | 无需改 |
 | A9 | 星座线 + 座名随 FOV 浮现（L3000-3010） | `rf_sky_view.py:3736` `_draw_constellations`；`:3583-3588` FOV ramp | 已达标 | IAU 88 座 / 中国星官两套，强制带 system_id；标签优先级低于天体 | 无需改 |
-| A10 | DSO 按类型画符号，不用一种形状糊弄（L2546-2558） | `rf_sky_view.py:3488` `_draw_dso`；`:3533` `_draw_dso_glyph`；`:5264` 卡片 desc | **弱** | `cluster_nebula`（M16/M17/M20/M45/NGC2070）与 `double_star`（M40）落入 else 被画成星云虚线菱形；标签仍用编号 `e.name`；星系轴比固定 0.55 | 批 2：补两型 glyph；标签改 `display_name/zh_name`（空值回退编号）；轴比用 `size_minor/size`，缺字段标「轴比未知」。AC-02.5、H-10 |
+| A10 | DSO 按类型画符号，不用一种形状糊弄（L2546-2558） | `rf_sky_view.py:3488` `_draw_dso`；`:3533` `_draw_dso_glyph`；`:5264` 卡片 desc | **已达标**（批 2） | `cluster_nebula` 虚线椭圆+内点环、`double_star` 双点中心留空；标签走 `display_name/zh_name`，缺失退回编号；星系轴比用 `size_minor/size`，缺字段写「轴比未知」 | 证据：`pytest tests/test_sky_dso_layer.py -q` → 34 passed。AC-02.5、H-10 |
 | A11 | 日/月/行星走真实历表与相位（L2560-2568） | `rf_sky_view.py:4811` `_draw_planets`；`:4434` 月球；`_compute_sun_moon` :6519 | 已达标 | 视直径/相位/距离来自 solar_system；缺测只画位置标记，不编角直径 | 无需改 |
 
 ### B. 摄像机 / 视场
@@ -54,8 +54,8 @@
 | B5 | 双击/搜索 goto 大圆移动（L2520） | `rf_sky_view.py` `goto`；`sky_interaction` 大圆插值 | 已达标 | 双击目标居中，不瞬移 | 无需改。AC-09.1 |
 | B6 | 摄像机锁定目标，天动星静（L2524） | `rf_sky_view.py:2011` `_apply_camera_lock`；状态卡 :5696-5704 | 已达标 | 锁定后每帧把目标 az/alt 拉回中心；锁星≠跟踪天线，两行分开写 | 无需改 |
 | B7 | 入场 1.8 s 暗适应 + FOV 160→100（L2520-2530） | 无 | **演示不抄** | 纯观感、固定机位动画，不承载产品语义；照抄会掩盖真实初始视场 | 不做。见 §4 |
-| B8 | HUD 给视轴 Az/Alt/FOV（L2969-2982） | 状态卡 `rf_sky_view.py:5740-5748`「视轴(几何)」；FOV 仍在右上角 | **缺 → 批 1 已实现** | 原型有明确读数；本仓此前状态卡只有天线「指向」与「视角」，没有摄像机中心 az/alt。补上后「视场在对准哪」可独立复算。 | `format_view_axis()` 统一格式化；值来自 view_state，标注几何口径。AC-05.1、H-6 |
-| B9 | HUD 给 LST / JD / 时间源（L2969-2982） | 状态卡 `rf_sky_view.py:5701-5716`「恒星时 + JD」；UTC/本地仍在 :5684-5699 | **缺 → 批 1 已实现** | 星象仪以时空为主导，原型把 LST/JD 放 HUD；本仓此前完全没有这两个读数。 | `local_sidereal_time_deg()` 复用后端 GMST；无站址写「—（无站址）」。AC-03.4、H-6 |
+| B8 | HUD 给视轴 Az/Alt/FOV（L2969-2982） | 状态卡 `rf_sky_view.py:5740-5748`「视轴(几何)」；FOV 仍在右上角 | **已达标**（批 1） | 原型有明确读数；`format_view_axis()` 统一格式化，值来自 view_state 并标注几何口径 | 证据：`pytest tests/test_sky_readouts.py -q` → 34 passed。AC-05.1、H-6 |
+| B9 | HUD 给 LST / JD / 时间源（L2969-2982） | 状态卡 `rf_sky_view.py:5701-5716`「恒星时 + JD」；UTC/本地仍在 :5684-5699 | **已达标**（批 1） | `local_sidereal_time_deg()` 复用后端 GMST；无站址写「—（无站址）」 | 证据：`pytest tests/test_sky_readouts.py -q` → 34 passed。AC-03.4、H-6 |
 
 ### C. 卫星 / 轨道
 
@@ -74,8 +74,8 @@
 | --- | --- | --- | --- | --- | --- |
 | D1 | 卫星卡：NORAD 标题、别名/COSPAR、升落、下行、方案、TLE epoch、数据政策（L459-477） | `rf_sky_view.py:4589` `_draw_picked_info` | 已达标 | 标题/别名/COSPAR/星等/距离/RA-Dec/Az-Alt/升落/下行/TLE 齐全；TLE 来源可追溯 | 无需改 |
 | D2 | 恒星/DSO/行星卡：中文名 + 西名 + 星等 + 距离 + 光谱 + 文化（L459-477） | `rf_sky_view.py:5312` `_draw_body_info`（star :5191、dso :5246） | 已达标 | 文化注记按 name/id 关联；距离 ly、光谱型、角大小、类型齐全 | 无需改。D2 与 A10 的标签改动分开，不混 |
-| D3 | 卡内动作按钮「追踪 / 接收 / 指向」（L459-477） | `rf_sky_view.py:1507-1530` 视口浮动按钮 + 主窗口接线 | **偏** | 三个动作都可达成，但入口在视口浮动层/主窗口，不在卡内；原型把动作放卡内是语义重心 | 若改成卡内按钮，需要重排按钮与信号，改 `main_window.py` 前须报备。本批不动。AC-09.1 |
-| D4 | 卡内写「摄像机锁定 · 天动星静」（L459-477） | 只有状态卡 `rf_sky_view.py:5696-5704`「视角」行 | **弱** | 用户看单张卫星卡时不知道视图是否已锁定；状态卡在左下角，容易漏读 | 批 3：卫星卡在锁定本目标时加一行「视角锁定 · 天动星静」。AC-05.1 |
+| D3 | 卡内动作按钮「追踪 / 接收 / 指向」（L459-477） | `rf_sky_view.py::_draw_picked_info` 卡底按钮行 + `_on_info_action`；执行体仍是既有浮动按钮 | **达标** | 三个动作写进卫星卡本身，点击切换的是同一个 `_tune_btn/_track_btn/_gimbal_btn`（信号已接主窗口），不存在第二份状态；不可用时置灰即不可点 | 视图层独立完成，未改 `main_window.py`。证据：`pytest tests/test_info_card_hud.py` → 31 passed（新增 7 条：三格不重叠且在卡内、接收调用共享处理器、置灰空操作、追踪切换同按钮并发信号、指向可用/不可用、天体卡无动作行）。AC-09.1 |
+| D4 | 卡内写「摄像机锁定 · 天动星静」（L459-477） | `rf_sky_view.py::picked_camera_lock_row` → 卫星卡 `kv` 追加「视角」行 | **达标** | 锁定态写进卡片本身：锁本目标→「锁定 · 天动星静」；锁别的目标→「未锁定（锁在 X）」；未锁定不加行（状态卡已写） | 批 3 已做。AC-05.1 |
 | D5 | 卡可关闭、语言可重译、来源可追溯（L459-477、L510） | `rf_sky_view.py:4589` 关闭按钮；`retranslateUi`；TLE 来源行 | 已达标 | 关闭/重译/来源都在；演示目录值不进卡 | 无需改。H-10 |
 
 ### E. 频谱与天球
@@ -92,7 +92,7 @@
 | --- | --- | --- | --- | --- | --- |
 | F1 | 搜索卫星/天体即选目标并 goto（L414-417） | `rf_sky_view.py` `_on_search_text`；搜索星/DSO/卫星 | 已达标（比原型强） | 三种对象都能搜；命中后选中并居中 | 无需改。AC-09.1 |
 | F2 | 图层可单独开关（L486-501） | `rf_sky_view.py` `set_show_*`、`set_constellation_layer_visible`、`set_constellation_systems` | 已达标 | 星座/星官/网格/轨迹/地景/大气都有独立开关 | 无需改 |
-| F3 | 顶部 14 个按钮的一体化工具栏（L486-501） | 入口分散在主窗口菜单/图层面板；视图只提供 setter | **偏** | 每个功能都可达成，但没有原型同款的单条工具栏；这是产品外层布局，不在本线 | 改 `main_window.py` 前须报备；本批不动。AC-09.1 |
+| F3 | 顶部 14 个按钮的一体化工具栏（L486-501） | `main_window.py` `_layer_popover`（11 个图层开关）+ 时间流速/沉浸/频谱/退出动作条 | **已达标** | 原型 14 颗里除「银河」（无数据·不提供）外全部可达；形态是 Stellarium 式「一颗按钮展开」竖条+浮层，不是单条横栏；按钮不私留状态，一律从 `layer_state()` 读回 | 证据：`pytest tests/test_ui_gap_fill.py tests/test_planetarium_entry_visibility.py tests/test_shortcut_focus_priority.py -q` → 38 passed（11 项一个不少、点击改真实图层状态、夜视同步、时间流速）。AC-09.1 |
 | F4 | 时间倍率/暂停/倒放入口（L486-501） | `rf_sky_view.py` 时间标签 + TimeEngine；`main_window` 时间面板 | 已达标 | 标签写「实时/暂停/×N/倒放」，与 TimeEngine 同源 | 无需改。AC-03.1 |
 | F5 | 全屏星象仪（L486-501） | `main_window.py:1753` | 已达标 | 全屏后天空铺满、频谱只剩底栏 | 无需改 |
 
@@ -102,7 +102,7 @@
 | --- | --- | --- | --- | --- | --- |
 | G1 | 站址真实或显式未知，不许 0,0（L505） | `rf_sky_view.py` `format_observer_chip`；`:5632-5646` 未设置时整层方位/恒星不画 | 已达标 | 无站址时状态卡「观测站 未设置」，罗盘/方位网格/星层不画；没有 0,0 默认 | 无需改。AC-05.4、H-2 |
 | G2 | 全量星表 + 视场 LOD + Bortle/消光极限星等（L2532 原型固定 25,792/7.5 等） | `rf_sky_view.py:3279`；`star_catalog.select_for_view`（83,479 颗，V≤9） | 已达标（比原型强） | 星数/极限星等来自 npz meta + Bortle + 消光；不固定 7.5 等 | 不照抄 25,792/7.5。AC-02.1–02.3、H-9 |
-| G3 | 侧栏有星表来源与许可（L454） | 状态卡 `rf_sky_view.py:5822-5831`「星表来源」；npz meta 读取 | **缺 → 批 1 已实现** | 原型有署名；本仓此前视图层零署名。现在从 `get_catalog().meta` 读 `source/source_license`，读不到写「来源不可用/不完整」。 | 显示短名 `HYG v4.1 · CC BY-SA 4.0`，不改来源身份。H-9 |
+| G3 | 侧栏有星表来源与许可（L454） | 状态卡 `rf_sky_view.py:5822-5831`「星表来源」；npz meta 读取 | **已达标**（批 1） | 从 `get_catalog().meta` 读 `source/source_license`，读不到写「来源不可用/不完整」 | 显示短名 `HYG v4.1 · CC BY-SA 4.0`，不改来源身份。证据：`pytest tests/test_sky_readouts.py -q` → 34 passed。H-9 |
 | G4 | 无数据不画（银河/星云/地形）（L2536、L2956-2960） | 同 A5/A3；DSO 只画有星表条目的类型 | 已达标 | 没有表面亮度数据就不做亮度渐变；没有地形数据就只画标注过的示意 | 保持。H-4 |
 | G5 | AI 协商由模型现场组织，不是预制问卷（L514-524、L3359-3401） | 视图层无问句清单、无固定顺序；协商账本在 `sky_negotiation` 对方线 | 已达标（本线只留位） | 视图没有内置问卷，符合「视图不许内置问句清单」；账本不在本线 | 不新增任何问句。P0-08、AC-08.1 |
 
@@ -148,7 +148,7 @@
 | --- | --- | --- |
 | 批 1（已完成） | B8 视轴读数、B9 恒星时/JD、G3 星表署名 | `pytest tests/test_sky_readouts.py -q` → 26 passed；固定时刻截图 `D:/mbdsdr/output/sky-batch1-readouts.png`（UTC 1790532300 = 2026-09-27 12:05:00，站址 43.9N/125.3E，FOV 90°，视轴 AZ 210°/ALT 35°）。状态卡高度 276→330；银河行下移 36px，受晒行下移 36px，相关行裁剪测试已同步并写明原因。 |
 | 批 2（已完成） | A10 DSO 四步（两型 glyph、中文标签、真实轴比、轴比未知）；状态卡超高滚动 | `pytest tests/test_sky_dso_layer.py tests/test_sky_readouts.py tests/test_dso.py -q` → 82 passed（**OpenNGC v2 已落地**，`mbdsdr_ai/data/dso_catalog.json` 真实数据）。A10：`cluster_nebula` 虚线椭圆+内点环、`double_star` 双点中心留空；标签走 `display_name/zh_name`，缺失退回编号，最差「深空天体」；星系椭圆按 `size_minor_arcmin/size_arcmin`；缺小轴/空星等/空尺寸写「轴比未知/星等未知/角大小 未知」，不拿 0 或 0.55 冒充真值。状态卡：卡高 `min(INFO_CARD_H, 视口高-24)`，内容裁剪+平移+右侧滚动条，光标在卡内滚轮只滚卡（卡外仍缩放）。 〔证：`f0c8fa25` — `mbdsdr_ai/data/dso_catalog.json:3` — `dso_catalog.v2`〕 |
-| 批 3 | D4 卡内锁定语义、D3/F3 跨线入口（需报备 `main_window.py`）；方案③ 2/4（全天入口、160° 性能实测） | 单测 + 截图；跨线项先报备 |
+| 批 3（全部完成） | D3 卡内动作按钮 ✅（视图层复用既有信号）；D4 卡内锁定语义 ✅；F3 一体化工具栏 ✅（既有「▦ 图层」浮层 + 动作条，复核为达标，不重复造第二条横栏）；方案③ 全天入口 ✅（`main_window.py` 菜单动作 + A 键 + 命令面板，状态单向读视图） | D3：`pytest tests/test_info_card_hud.py -q` → 31 passed（新增 7 条）；天空回归 11 文件 → 212 passed。D4：81 passed（新增 4 条）。F3：`pytest tests/test_ui_gap_fill.py tests/test_planetarium_entry_visibility.py tests/test_shortcut_focus_priority.py -q` → 38 passed（11 项图层一个不少、点击改真实状态、夜视同步、时间流速）。全天入口：63 passed（A 键进入/退出、频谱获焦时 A 不抢键、命令面板搜「全天」真进入、状态回写菜单勾选）。离屏截图暂不作证：本仓离屏渲染中文可能缺字，避免以假截图充当证据 |
 | 不动 | A4 地景遮挡（仅登记） | 文档登记，无代码 |
 
 **OpenNGC v2 换源口径（已落地）**：`dso_catalog.json` 已是〔证：`f0c8fa25` — `mbdsdr_ai/data/dso_catalog.json:3` — `dso_catalog.v2`〕
@@ -172,8 +172,14 @@ DSO 基线就是 `tests/test_sky_dso_layer.py` 套件（仓内无 DSO 截图基�
   `pytest tests -k sky -q` → 422 passed；`pytest tests/test_astronomy.py -q`
   → 28 passed（120° 断言未改）。可逆性覆盖画布四角/正中/地平线/近
   160° 边缘，透视与球极均 <1e-6 px / 1e-6°。
-- 未做（下一步 2/4，按用户指令）：`main_window.py` 入口（需先报备）、
-  160° 星数/单帧/拾取实测与性能预算。
+- 第 2 步 `main_window.py` 入口已接（菜单「全天模式（160°）」+ A 键
+  `view.all_sky` + 命令面板 + 左下按钮状态同步）；校验态一律从
+  `sky_view.all_sky_active` 单向回写，频谱获焦时 A 归频谱、不进全天。
+  证据：`pytest tests/test_shortcut_focus_priority.py
+  tests/test_sky_projection_single_source.py
+  tests/test_planetarium_entry_visibility.py tests/test_command_palette.py -q`
+  → 63 passed。
+- 第 4 步 160° 星数/单帧/拾取实测与性能预算：见下节。
 
 **方案③ 第 2/4 步（160° 全天实测，2026-11-05）**：
 - 口径：1280×720 offscreen，站址 40°N/116°E，UTC 2026-09-27 12:05，中心

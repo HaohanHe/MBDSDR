@@ -47,8 +47,8 @@ def _load_sensitivity():
 SENSITIVITY = _load_sensitivity()
 
 TRUTH_LABELS = {
-    "real": "真实",
-    "partial": "部分",
+    "ota_golden": "真实",
+    "synthetic_only": "部分",
     "no_sample": "缺样本",
 }
 
@@ -137,14 +137,18 @@ EVIDENCE = {
         "半个真：合成链自洽，缺真实航司报文真录",
     ),
     "ais": (
-        "tests/test_ais_decoder.py（GMSK→HDLC→FCS-16→M.1371 字段，合成链）",
-        "python -m pytest tests/test_ais_decoder.py -q",
-        "尚不算真：无 AIS 信道真录，只有协议性质钉扎",
+        "tests/test_capability_claims_live.py（run_digital_mode 对入库 240kS/s "
+        "合成 fixture 端到端解出报文）；tests/test_ais_decoder.py"
+        "（GMSK→HDLC→FCS-16→M.1371 字段，合成链）",
+        "python -m pytest tests/test_capability_claims_live.py tests/test_ais_decoder.py -q",
+        "半个真：合成 fixture 端到端可解、算法链自洽；无 AIS 信道真录",
     ),
     "navtex": (
-        "tests/test_navtex_decoder.py（SITOR-B 100bd + CCIR 476 + 时间分集，合成链）",
-        "python -m pytest tests/test_navtex_decoder.py -q",
-        "尚不算真：无 518kHz 真录，只有协议性质钉扎",
+        "tests/test_capability_claims_live.py（run_digital_mode 对入库合成 WAV "
+        "端到端解出报文）；tests/test_navtex_decoder.py"
+        "（SITOR-B 100bd + CCIR 476 + 时间分集，合成链）",
+        "python -m pytest tests/test_capability_claims_live.py tests/test_navtex_decoder.py -q",
+        "半个真：合成 WAV 端到端可解、算法链自洽；无 518kHz 真录",
     ),
     "aprs": (
         "tests/test_decode_pipeline_e2e.py（合成 2 帧：NFM 鉴频→Bell202 AFSK"
@@ -155,10 +159,18 @@ EVIDENCE = {
         "逐字节对拍，无 OTA 证据",
     ),
     "meteor": (
-        "tests/test_meteor_lrpt.py（合成向量）；真录证据在 LRPT 链见下一行",
-        "python -m pytest tests/test_meteor_lrpt.py -q",
-        "半个真：通用入口只到解调骨架（输出 symbols/bits，不产图像）；"
-        "图像链真录证据在 LRPT 真录链",
+        "tests/test_apt_meteor_roundtrip.py（meteor_sat QPSK→Viterbi 合成回环 "
+        "BER）；tests/test_decode_router_honesty.py（采样率硬约束）；"
+        "通用入口无正样本端到端用例，真录证据在 LRPT 图像链（下一行）",
+        "python -m pytest tests/test_apt_meteor_roundtrip.py tests/test_decode_router_honesty.py -q",
+        "半个真：解调骨架的 QPSK/Viterbi 组件有合成回环；通用入口无正样本"
+        "端到端测试、不产图像；LRPT 图像链真录证据见下一行",
+    ),
+    "rtl433": (
+        "tests/test_rtl433_roundtrip.py（曼彻斯特/PPM/PWM 切片 + 7 个 ISM 设备"
+        "已知合法帧与校验和往返）",
+        "python -m pytest tests/test_rtl433_roundtrip.py -q",
+        "合成验证：只有已知比特流/合成包络往返，无 OTA 真录",
     ),
 }
 
@@ -286,7 +298,7 @@ OFFSET_SNAPSHOT = {
 EXTRA_CHAINS = [
     {
         "mode": "lrpt（LRPT 图像链）",
-        "truth": "real",
+        "truth": "ota_golden",
         "truth_label": "真实",
         "truth_source": "external-truth",
         "evidence": (
@@ -303,7 +315,7 @@ EXTRA_CHAINS = [
     },
     {
         "mode": "dvbs2-sof（DVB-S2 SOF 同步层）",
-        "truth": "partial",
+        "truth": "synthetic_only",
         "truth_label": "部分",
         "truth_source": "synthetic-loopback",
         "evidence": (
@@ -316,7 +328,7 @@ EXTRA_CHAINS = [
     },
     {
         "mode": "dvbs2-vcdu（DATAFIELD→VCDU 重组）",
-        "truth": "partial",
+        "truth": "synthetic_only",
         "truth_label": "部分",
         "truth_source": "synthetic-loopback",
         "evidence": (
@@ -589,7 +601,7 @@ def render() -> str:
                "能否收到还取决于天线、增益、过境时间与多普勒补偿。")
     out.append("- 标 `not_implemented` 的模式（仅 ft8 通用入口）不会假装解码，"
                "调用会得到明确错误码而不是空结果。")
-    out.append("- 缺真录的模式（ais/navtex/aprs）在补到真录之前，"
+    out.append("- 缺 OTA 真录的模式（ais/navtex/aprs）在补到真录之前，"
                "任何「空口已解码」的宣称都不成立。")
     out.append("- **APRS 已接线但不等于「空口支持」**：`run_aprs_pipeline` 真实"
                "执行 NFM 鉴频→Bell202 AFSK→NRZI→HDLC→CRC-16→AX.25，但现有证据"

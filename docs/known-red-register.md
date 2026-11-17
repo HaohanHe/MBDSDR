@@ -24,7 +24,11 @@
 
 ---
 
-## K01–K04：星等门探针插件失效（4 条，存量）
+## K01–K04：星等门探针插件失效（4 条，存量；2026-11-18 已销账）
+
+> 销账方式：**只修注入装置**，四条断言（含像素门限 `== 0` / `> 0`）一字未改。
+> 本条始终是「测试装置失效」，不是产品缺陷。下面保留 2026-11-09 的原始记录，
+> 收口证据另起「2026-11-18 销账」小节。
 
 **统一复跑命令**
 
@@ -42,11 +46,11 @@ MBDSDR_TEST_LOCK=0 QT_QPA_PLATFORM=offscreen \
 
 - **首次记录**：2026-11-09（`51c01a57` 之后实跑确认；更早的 11-08 记录里这几条被笼统写成"7 条存量红"，没点名）
 - **分类**：存量。**不是产品缺陷**——拾取返回 `HYG104742` / `Capella` 是真实存在的星，方向正确。
-- **症状**：断言期望 `PickProbeStar`（合成探针），实际拿到真星表里的星：
+- **原始症状**：断言期望 `PickProbeStar`（合成探针），实际拿到真星表里的星：
   - K03 → `HYG104742`（RA 319.31°, Dec 55.80°, vmag 6.0）
   - K04 → `Capella`（RA 79.17°, Dec 46.00°, vmag 0.08）
   - K02 → 期望"近地平不画"，实测画出 25 个亮像素（真星被画了）
-- **根因**（已核到行号）：
+- **原始根因**（行号会漂，结论不变）：
   1. 探针注入用 `monkeypatch.setattr(rf_sky_view._constel, "merged_star_index", ...)`
      （`tests/test_planet_brightness_model.py:244`、`:348`）；
   2. 但 `RFSkyView._star_selection()`
@@ -59,17 +63,78 @@ MBDSDR_TEST_LOCK=0 QT_QPA_PLATFORM=offscreen \
      所以两层都读真星。
   4. 2026-11-09 已尝试清缓存（`v._star_sel = None`，两处），**必要但不充分**：
      清掉后重算仍读真星表，四条依旧红。该行保留并注明了原因。
-- **转绿条件**（任一条即可）：
+- **原始转绿条件**（任一条即可）：
   - 把 monkeypatch 目标改成 `mbdsdr_ai.skyengine.star_catalog.select_for_view`，
     返回只含探针星的 `StarSelection`；或
   - 直接 patch 实例方法 `v._star_selection`，返回同样的 fake；
   - 并在 patch 后清 `v._star_sel` / `v._star_sel_key`，确保缓存不复活旧集合。
   - 验收：`--runxfail` 后四条转绿；不再出现 `HYG104742` / `Capella`。
-- **为什么现在不修**：修它要构造完整的 `StarSelection`（19 个 numpy 字段）并重新
-  核对 4 条断言里的像素门限，属于独立一小批；本轮主线是地点面板，按用户决定
-  先点名 + `xfail(strict=True)`，防止"半修当全修"。
-- **锁定方式**：四条已加 `@pytest.mark.xfail(strict=True, reason="KNOWN-RED-K01…K04: ...")`。
-  修好后 strict 会把它变成 `XPASS` → 红，强制销账删标记。
+- **原「为什么当时不修」**（历史评估，已被本节收口取代）：修它要构造完整的
+  `StarSelection`（19 个 numpy 字段）并重新核对 4 条断言里的像素门限，属于独立
+  一小批；当时主线是地点面板，按用户决定先点名 + `xfail(strict=True)`。
+- **原锁定方式**（已解除）：四条曾加
+  `@pytest.mark.xfail(strict=True, reason="KNOWN-RED-K01…K04: ...")`。
+
+### 2026-11-18 销账（注入装置修好，断言一字未改）
+
+- **选了哪条注入路线**：转绿条件第 1 条——patch 真实链路
+  `mbdsdr_ai.skyengine.star_catalog.select_for_view`，返回只含探针星（`PickProbeStar`）
+  的 `StarSelection`。`_star_selection()` 里是函数内
+  `from mbdsdr_ai.skyengine.star_catalog import select_for_view`，每次调用都重新
+  取模块属性，所以 patch 模块属性即可命中真实链路（patch `_constel.merged_star_index`
+  那条空操作已删除）。
+- **改了哪些东西**（全部在 `tests/test_planet_brightness_model.py`）：
+  - 新增 helper `_only_probe_star(monkeypatch, v, ra, dec, vmag, az, alt)`：
+    按真实现签名接住 `bortle / limit_mag / extinction_k / max_count`，构造 19 字段
+    的 `StarSelection`；`eff_mag` 用产品同一条 `extinction_delta_mag(alt, k)` 算，
+    **不在假星表里预过滤极限门**——超限与否交给绘制/拾取共用的 `_star_visual` 判，
+    那正是本组用例要钉的契约。
+  - `_pick_star()` 与 `TestStarExtinctionKeepsDrawAndPickInSync._place()` 改调该 helper；
+    `_place()` 的探针赤经赤纬仍由 `altaz_to_j2000` 现算，az/alt 直接用 `(AZ, alt)`。
+  - patch 后**同时清 `v._star_sel` 与 `v._star_sel_key`**（清前者是必要的：`_new_view()` 的
+    show 已把真星集合缓存在 `_star_sel`）。清 `_star_sel_key` 是**防御性**的，实测口径：
+    临时只清 `_star_sel`、留着旧键跑这四条 → 仍 `4 passed in 1.63s`，因为拾取层走的是
+    非缓存入口（`_find_body_at` 直接调 `_star_selection`），而 `_place` 改了视线中心、
+    `_star_selection_cached` 的键本就变化；但只要有路径在键不变（同一中心/时刻/视场/
+    Bortle/消光/太阳高度）时重画，它就会直接返回旧 `_star_sel_cached`，patch 失效。
+    按转绿条件一并清，且反证读数如实写在这里，不把"没测到"说成"必须"。
+- **为什么不会再弄丢探针**：注入点与消费点都是同一个模块属性；缓存键清空后
+  绘制层（`_draw_stars → _star_selection_cached`）与拾取层
+  （`_find_body_at` 在 `_star_sel is None` 时重算）各自重算，都只能拿到探针星。
+- **实跑（HEAD `f12187b4` + 本节两份未提交改动；Windows PowerShell）**：
+
+  ```powershell
+  $env:QT_QPA_PLATFORM='offscreen'; $env:MBDSDR_NO_HW='1'
+  python -m pytest tests/test_planet_brightness_model.py -q -rf
+  # [mbdsdr-lock] 已获得 Qt 测试互斥锁（等待 0.0s，…）：D:\mbdsdr\.locks\qt_test.lock
+  # ..................                                                       [100%]
+  # 18 passed in 2.20s
+
+  python -m pytest tests/test_planet_brightness_model.py -q -rf --runxfail
+  # 18 passed in 2.09s
+
+  python -m pytest tests/test_sky_constellations.py tests/test_sky_readouts.py -q --tb=short
+  # 102 passed, 8 warnings in 3.89s
+  ```
+
+- **稳定性（连跑 3 次四条节点，`--runxfail`）**：`4 passed in 1.52s` /
+  `4 passed in 1.67s` / `4 passed in 1.65s`。三次全绿，无抖动。
+- **xfail 标记**：四条全部删除；删除前后 `--runxfail` 与普通跑的读数一致
+  （18 passed），说明四条本来就是绿的，不是标记掩盖。
+- **产品 bug**：**无**。修好装置后没有暴露「画了却点不中 / 点了没画」的分叉，
+  `desktop/rf_sky_view.py` 一行未改。
+- **再检绑定（义务仍在，待提交后补）**：本次改动尚未提交（任务禁止 `git add/commit`）。
+  提交后必须补一行
+  `- **再检绑定**：验证提交 \`<sha>\`；文件集合 \`tests/test_planet_brightness_model.py\``；
+  在此之前本条只算「工作树已销账」，R8 不会把它当已绑定条目兜底。
+- **剩余风险（如实写）**：
+  - 假 `StarSelection` 只做到形状等价：`available`/`truncated`/`beyond_catalog_limit`
+    与 `CATALOG_DEPTH_MAG` 夹断这些真实现细节没有复刻（探针仅 1 颗星，不触发预算
+    与深度分支），所以这些分支仍只有真星表用例覆盖。
+  - 探针星的 `bv` 固定 0.0、`spect`/`con` 为空串，不覆盖颜色/光谱分支；
+    颜色与标签由既有真星用例覆盖。
+  - `_star_sel_key` 的完整语义（含 `_star_sel_cached` 只在键命中时被读）是读代码
+    结合实测确认的，没有单独的反证用例钉住「键不变时只清 `_star_sel` 会复活旧集合」。
 
 ---
 
@@ -132,6 +197,20 @@ python3 tools/evidence/test_suites.py --suite desktop --desktop-timeout 5400
 另处理一条**本线自己引入**的 ratchet 噪声：`tests/test_station_sync.py` 的
 三个键名字面量被扫描器当成源码文本 pin，收敛成模块级常量 + 集合交集后
 该文件的 pin 归零；但 `test_source_pin_ratchet` 仍因上面 5 条存量而红。
+
+**再检（2026-11-17，主工作树）**：`tests/test_help_path_truthfulness.py` 单跑
+**12 passed / 1 failed**，失败的仍是 `test_doc_render_points_still_exist`：
+越界引用是 HEAD 快照里 `docs/error-code-visibility.md` 的三条
+`mbdsdr_ai/core/errors.py:158/173/179`（HEAD 的 `errors.py` 只有 55 行，
+码 68/69/70 三个服务端 envelope 码早已不在那些行上）。
+
+判定证据：该用例默认按 **HEAD 快照**读文档
+（`check_help_paths.set_source("head")`），而工作区的同一文档已不再引用这三行；
+`python scripts/check_help_paths.py --worktree` 的渲染点核验**通过**
+（剩余 3 条是「设置 → 卫星与多普勒」旧分组，属他人占用、闸门外）。
+也就是说：红只挂在「文档修正尚未进入 HEAD」这一点上，是**提交绑定红**，
+不是代码回归；不要为了让工作区变绿去改断言或伪造 hash。提交该文档改动后
+此红自然消失。
 
 ### 验证与口径
 
@@ -886,6 +965,24 @@ QT_QPA_PLATFORM=offscreen python -m pytest "<nodeid>" -q
   待复核」的机制。本条现由 R8 自动退回待复核；2026-11-13 已按上面的判定逐条
   改写并重跑，绑定更新为 `d3b91c19`。
 
+- **再检（2026-11-17，主工作树）**：本条再次红，维持未清。实跑
+  `python -m pytest tests/test_source_pin_ratchet.py -q` → **1 failed, 2 passed**，
+  `新增源码文本 pin` **51 处 / 17 个文件**；对应
+  `python scripts/audit_source_text_pins.py` 首行「扫描 813 个测试文件；命中 108 处 / 35 个文件」，
+  基线仍是 58 条（`BUILT_AT` 未上调）。为区分「本地未提交改动」与「HEAD 既有」，
+  另把 HEAD 的 `tests/` 与基线归档到临时目录复算：**108 处 / 基线 58 / 新增 52**，
+  说明这不是本轮改动引入的，而是基线之后的提交又往测试里加回 pin（同一失守形态）。
+  主要来源（按处数）：`tests/test_append_coordination_row.py` 8、
+  `tests/test_safe_commit_exclude.py` 8、`tests/test_spacetime_features.py` 5、
+  `tests/test_gmst_single_source.py` 4、`tests/test_tle_policy_single_source.py` 4；
+  其余 12 个文件各 1–3 处。转绿条件不变：逐条改成行为/AST 断言，**不许往基线加行**，
+  改完按下面复跑命令复核。
+- **再检（2026-11-17，grp0b 分段全量跑）**：`tests/test_source_pin_ratchet.py::test_no_new_source_text_pins`
+  仍在红，报**新增 51 处 / 17 个文件**，与上一条再检的 51 处逐一对应（同一批
+  存量 pin，非本轮改动引入）。日志 `d:/mbdsdr/output/_grp0b_20261117.log`
+  （该分段 `2 failed, 2086 passed`，另一条红是 swallow 白名单行号随注释漂移，
+  已按扫描器行号把 `scripts/swallow_whitelist.json` 的 ring6 条目 105→107 改正，
+  见 COORDINATION「2026-11-17 续四」13）。转绿条件与判定口径不变。
 - **nodeid**：`tests/test_source_pin_ratchet.py::test_no_new_source_text_pins`
 - **复跑命令**：
   ```bash

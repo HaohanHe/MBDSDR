@@ -1,0 +1,736 @@
+﻿<manifest versionCode=3060000 versionName='3.6.0' compileSdkVersion=36 compileSdkVersionCodename='16' package='com.twtapp' platformBuildVersionCode=36 platformBuildVersionName=16>
+<uses-sdk minSdkVersion=24 targetSdkVersion=36>
+</uses-sdk>
+<uses-permission name='android.permission.ACCESS_FINE_LOCATION'>
+</uses-permission>
+<uses-permission name='android.permission.ACCESS_COARSE_LOCATION'>
+</uses-permission>
+<uses-permission name='android.permission.INTERNET'>
+</uses-permission>
+<uses-permission name='android.permission.READ_EXTERNAL_STORAGE'>
+</uses-permission>
+<uses-permission name='android.permission.WRITE_EXTERNAL_STORAGE' maxSdkVersion=28>
+</uses-permission>
+<uses-permission name='android.permission.ACCESS_NETWORK_STATE'>
+</uses-permission>
+<uses-permission name='android.permission.READ_MEDIA_IMAGES'>
+</uses-permission>
+<uses-permission name='android.permission.CAMERA'>
+</uses-permission>
+<uses-feature name='android.hardware.camera' required=False>
+</uses-feature>
+<uses-feature name='android.hardware.camera.autofocus' required=False>
+</uses-feature>
+<uses-feature name='android.hardware.camera.any' required=False>
+</uses-feature>
+<uses-feature name='android.hardware.location.gps' required=False>
+</uses-feature>
+<uses-permission name='android.permission.POST_NOTIFICATIONS'>
+</uses-permission>
+<uses-permission name='android.permission.RECEIVE_BOOT_COMPLETED'>
+</uses-permission>
+<uses-permission name='android.permission.GET_TASKS'>
+</uses-permission>
+<uses-permission name='android.permission.WAKE_LOCK'>
+</uses-permission>
+<uses-permission name='android.permission.QUERY_ALL_PACKAGES'>
+</uses-permission>
+<queries >
+<intent >
+<action name='android.intent.action.PROCESS_TEXT'>
+</action>
+<data mimeType='text/plain'>
+</data>
+</intent>
+<intent >
+<action name='android.intent.action.VIEW'>
+</action>
+<data scheme='https'>
+</data>
+</intent>
+<intent >
+<action name='android.intent.action.SENDTO'>
+</action>
+<data scheme='mailto'>
+</data>
+</intent>
+<intent >
+<action name='android.intent.action.VIEW'>
+</action>
+<data scheme='market'>
+</data>
+</intent>
+<intent >
+<action name='android.intent.action.VIEW'>
+</action>
+<data scheme='mimarket'>
+</data>
+</intent>
+<intent >
+<action name='android.intent.action.VIEW'>
+</action>
+<data scheme='appmarket'>
+</data>
+</intent>
+<intent >
+<action name='android.intent.action.VIEW'>
+</action>
+<data scheme='honormarket'>
+</data>
+</intent>
+<intent >
+<action name='android.intent.action.VIEW'>
+</action>
+<data scheme='oaps'>
+</data>
+</intent>
+<intent >
+<action name='android.intent.action.VIEW'>
+</action>
+<data scheme='vivomarket'>
+</data>
+</intent>
+<intent >
+<action name='android.intent.action.VIEW'>
+</action>
+<data scheme='samsungapps'>
+</data>
+</intent>
+<intent >
+<action name='android.intent.action.VIEW'>
+</action>
+<data scheme='tmast'>
+</data>
+</intent>
+<intent >
+<action name='android.intent.action.VIEW'>
+</action>
+<data scheme='coolmarket'>
+</data>
+</intent>
+<package name='com.tencent.mm'>
+</package>
+<package name='com.google.android.apps.maps'>
+</package>
+<package name='com.google.android.apps.mapslite'>
+</package>
+<package name='com.autonavi.minimap'>
+</package>
+<package name='com.baidu.BaiduMap'>
+</package>
+<package name='com.waze'>
+</package>
+<package name='ru.yandex.yandexnavi'>
+</package>
+<package name='ru.yandex.yandexmaps'>
+</package>
+<package name='com.citymapper.app.release'>
+</package>
+<package name='net.osmand'>
+</package>
+<package name='net.osmand.plus'>
+</package>
+<package name='ru.dublgis.dgismobile'>
+</package>
+<package name='com.tencent.map'>
+</package>
+<package name='com.here.app.maps'>
+</package>
+<package name='com.huawei.maps.app'>
+</package>
+<package name='com.alk.copilot.mapviewer'>
+</package>
+<package name='com.tomtom.gplay.navapp'>
+</package>
+<package name='com.tomtom.gplay.navapp.gofleet'>
+</package>
+<package name='com.sygic.truck'>
+</package>
+<package name='nl.flitsmeister'>
+</package>
+<package name='nl.flitsmeister.flux'>
+</package>
+<package name='com.nhn.android.nmap'>
+</package>
+<package name='net.daum.android.map'>
+</package>
+<package name='com.skt.tmap.ku'>
+</package>
+<package name='cz.seznam.mapy'>
+</package>
+<package name='com.mmi.maps'>
+</package>
+<package name='com.tranzmate'>
+</package>
+<package name='org.rajman.neshan.traffic.tehran.navigator'>
+</package>
+<package name='com.xample.airnavigation'>
+</package>
+<intent >
+<action name='android.support.customtabs.action.CustomTabsService'>
+</action>
+</intent>
+<intent >
+<action name='com.android.vending.billing.InAppBillingService.BIND'>
+</action>
+</intent>
+<intent >
+<action name='com.google.android.apps.play.billingtestcompanion.BillingOverrideService.BIND'>
+</action>
+</intent>
+<intent >
+<action name='android.intent.action.VIEW'>
+</action>
+<category name='android.intent.category.BROWSABLE'>
+</category>
+<data scheme='https'>
+</data>
+</intent>
+<intent >
+<action name='android.intent.action.INSERT'>
+</action>
+<data mimeType='vnd.android.cursor.dir/event'>
+</data>
+</intent>
+<intent >
+<action name='android.intent.action.VIEW'>
+</action>
+<data scheme='sms'>
+</data>
+</intent>
+<intent >
+<action name='android.intent.action.DIAL'>
+</action>
+<data path='tel:'>
+</data>
+</intent>
+<intent >
+<action name='android.intent.action.MAIN'>
+</action>
+<category name='android.intent.category.LAUNCHER'>
+</category>
+</intent>
+<package name='com.ss.android.ugc.aweme'>
+</package>
+<package name='com.ss.android.ugc.aweme.lite'>
+</package>
+</queries>
+<uses-permission name='android.permission.REQUEST_INSTALL_PACKAGES'>
+</uses-permission>
+<uses-permission name='android.permission.READ_PHONE_STATE'>
+</uses-permission>
+<permission name='com.twtapp.openadsdk.permission.TT_PANGOLIN' protectionLevel=2>
+</permission>
+<uses-permission name='com.twtapp.openadsdk.permission.TT_PANGOLIN'>
+</uses-permission>
+<uses-permission name='com.android.vending.BILLING'>
+</uses-permission>
+<uses-permission name='android.permission.VIBRATE'>
+</uses-permission>
+<uses-permission name='com.google.android.gms.permission.AD_ID'>
+</uses-permission>
+<uses-permission name='android.permission.ACCESS_ADSERVICES_AD_ID'>
+</uses-permission>
+<uses-permission name='android.permission.ACCESS_ADSERVICES_ATTRIBUTION'>
+</uses-permission>
+<uses-permission name='android.permission.ACCESS_ADSERVICES_TOPICS'>
+</uses-permission>
+<uses-permission name='android.permission.FOREGROUND_SERVICE'>
+</uses-permission>
+<permission name='com.twtapp.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION' protectionLevel=2>
+</permission>
+<uses-permission name='com.twtapp.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION'>
+</uses-permission>
+<uses-permission name='freemme.permission.msa'>
+</uses-permission>
+<uses-permission name='android.permission.CHANGE_NETWORK_STATE'>
+</uses-permission>
+<uses-permission name='android.permission.REORDER_TASKS'>
+</uses-permission>
+<uses-permission name='com.asus.msa.SupplementaryDID.ACCESS'>
+</uses-permission>
+<application label='@ref/0x7f100024' icon='@ref/0x7f0e0001' name='com.twtapp.MyApplication' allowBackup=False hardwareAccelerated=True supportsRtl=True extractNativeLibs=False usesCleartextTraffic=True networkSecurityConfig='@ref/0x7f13000f' appComponentFactory='androidx.core.app.CoreComponentFactory' requestLegacyExternalStorage=True enableOnBackInvokedCallback=True>
+<activity theme='@ref/0x7f1100d8' name='com.twtapp.MainActivity' exported=True launchMode=2 configChanges=1073758132 windowSoftInputMode=16 hardwareAccelerated=True resizeableActivity=True>
+<meta-data name='io.flutter.embedding.android.NormalTheme' resource='@ref/0x7f1100da'>
+</meta-data>
+<intent-filter >
+<action name='android.intent.action.MAIN'>
+</action>
+<category name='android.intent.category.LAUNCHER'>
+</category>
+</intent-filter>
+<intent-filter autoVerify=True>
+<action name='android.intent.action.VIEW'>
+</action>
+<category name='android.intent.category.DEFAULT'>
+</category>
+<category name='android.intent.category.BROWSABLE'>
+</category>
+<data scheme='twtapp'>
+</data>
+</intent-filter>
+<intent-filter autoVerify=True>
+<action name='android.intent.action.VIEW'>
+</action>
+<category name='android.intent.category.DEFAULT'>
+</category>
+<category name='android.intent.category.BROWSABLE'>
+</category>
+<data scheme='https' host='twtapp.com'>
+</data>
+<data scheme='https' host='stargazinghub.com'>
+</data>
+</intent-filter>
+</activity>
+<activity theme='@ref/0x7f1100ad' name='com.twtapp.wxapi.WXEntryActivity' exported=True taskAffinity='com.twtapp' launchMode=1>
+</activity>
+<activity theme='@ref/0x7f1100ad' name='com.twtapp.wxapi.WXPayEntryActivity' exported=True launchMode=3>
+</activity>
+<meta-data name='io.flutter.embedding.android.EnableImpeller' value=False>
+</meta-data>
+<meta-data name='flutterEmbedding' value=2>
+</meta-data>
+<meta-data name='com.google.android.gms.ads.APPLICATION_ID' value='ca-app-pub-3690176774157673~1364282704'>
+</meta-data>
+<provider name='com.qq.e.comm.GDTFileProvider' exported=False authorities='com.twtapp.gdt.fileprovider' grantUriPermissions=True>
+<meta-data name='android.support.FILE_PROVIDER_PATHS' resource='@ref/0x7f13000b'>
+</meta-data>
+</provider>
+<activity theme='@ref/0x0103000d' name='com.qq.e.ads.PortraitADActivity' exported=False multiprocess=True screenOrientation=1 configChanges=1200>
+</activity>
+<activity theme='@ref/0x0103000d' name='com.qq.e.ads.LandscapeADActivity' exported=False multiprocess=True screenOrientation=0 configChanges=1200>
+</activity>
+<service name='com.qq.e.comm.DownloadService' exported=False multiprocess=True>
+</service>
+<activity name='com.qq.e.ads.ADActivity' exported=False multiprocess=True configChanges=1200>
+</activity>
+<activity theme='@ref/0x7f11016e' name='com.yalantis.ucrop.UCropActivity' screenOrientation=1>
+</activity>
+<receiver label='@ref/0x7f1000db' name='com.twtapp.AstroMoonWidgetProvider' exported=True>
+<intent-filter >
+<action name='android.appwidget.action.APPWIDGET_UPDATE'>
+</action>
+<action name='miui.appwidget.action.APPWIDGET_UPDATE'>
+</action>
+</intent-filter>
+<meta-data name='android.appwidget.provider' resource='@ref/0x7f130004'>
+</meta-data>
+</receiver>
+<receiver label='@ref/0x7f1000d9' name='com.twtapp.AstroDarkWindowWidgetProvider' exported=True>
+<intent-filter >
+<action name='android.appwidget.action.APPWIDGET_UPDATE'>
+</action>
+<action name='miui.appwidget.action.APPWIDGET_UPDATE'>
+</action>
+</intent-filter>
+<meta-data name='android.appwidget.provider' resource='@ref/0x7f130001'>
+</meta-data>
+</receiver>
+<receiver label='@ref/0x7f1000dc' name='com.twtapp.AstroMoonCalendarWidgetProvider' enabled=False exported=True>
+<intent-filter >
+<action name='android.appwidget.action.APPWIDGET_UPDATE'>
+</action>
+<action name='miui.appwidget.action.APPWIDGET_UPDATE'>
+</action>
+</intent-filter>
+<meta-data name='android.appwidget.provider' resource='@ref/0x7f130000'>
+</meta-data>
+</receiver>
+<receiver label='@ref/0x7f1000de' name='com.twtapp.AstroPlanetsWidgetProvider' enabled=False exported=True>
+<intent-filter >
+<action name='android.appwidget.action.APPWIDGET_UPDATE'>
+</action>
+<action name='miui.appwidget.action.APPWIDGET_UPDATE'>
+</action>
+</intent-filter>
+<meta-data name='android.appwidget.provider' resource='@ref/0x7f130005'>
+</meta-data>
+</receiver>
+<receiver label='@ref/0x7f1000da' name='com.twtapp.AstroMeteorWidgetProvider' exported=True>
+<intent-filter >
+<action name='android.appwidget.action.APPWIDGET_UPDATE'>
+</action>
+<action name='miui.appwidget.action.APPWIDGET_UPDATE'>
+</action>
+</intent-filter>
+<meta-data name='android.appwidget.provider' resource='@ref/0x7f130003'>
+</meta-data>
+</receiver>
+<receiver label='@ref/0x7f1000dd' name='com.twtapp.AstroNextEventWidgetProvider' enabled=False exported=True>
+<intent-filter >
+<action name='android.appwidget.action.APPWIDGET_UPDATE'>
+</action>
+<action name='miui.appwidget.action.APPWIDGET_UPDATE'>
+</action>
+</intent-filter>
+<meta-data name='android.appwidget.provider' resource='@ref/0x7f130002'>
+</meta-data>
+</receiver>
+<receiver name='com.twtapp.CelestialReminderReceiver' exported=False>
+</receiver>
+<receiver name='com.twtapp.CelestialReminderBootReceiver' enabled=False exported=True>
+<intent-filter >
+<action name='android.intent.action.BOOT_COMPLETED'>
+</action>
+<action name='android.intent.action.MY_PACKAGE_REPLACED'>
+</action>
+</intent-filter>
+</receiver>
+<activity theme='@ref/0x7f1100ad' name='com.jarvan.fluwx.wxapi.FluwxWXEntryActivity' exported=False taskAffinity='com.twtapp' launchMode=2>
+</activity>
+<provider name='com.jarvan.fluwx.FluwxFileProvider' exported=False authorities='com.twtapp.fluwxprovider' grantUriPermissions=True>
+<meta-data name='android.support.FILE_PROVIDER_PATHS' resource='@ref/0x7f13000a'>
+</meta-data>
+</provider>
+<provider name='dev.fluttercommunity.plus.share.ShareFileProvider' exported=False authorities='com.twtapp.flutter.share_provider' grantUriPermissions=True>
+<meta-data name='android.support.FILE_PROVIDER_PATHS' resource='@ref/0x7f130009'>
+</meta-data>
+</provider>
+<receiver name='dev.fluttercommunity.plus.share.SharePlusPendingIntent' exported=False>
+<intent-filter >
+<action name='EXTRA_CHOSEN_COMPONENT'>
+</action>
+</intent-filter>
+</receiver>
+<activity theme='@ref/0x01030007' name='io.flutter.plugins.urllauncher.WebViewActivity' exported=False>
+</activity>
+<meta-data name='io.flutter.embedded_views_preview' value=True>
+</meta-data>
+<service name='androidx.camera.core.impl.MetadataHolderService' enabled=False exported=False>
+<meta-data name='androidx.camera.core.impl.MetadataHolderService.DEFAULT_CONFIG_PROVIDER' value='androidx.camera.camera2.Camera2Config$DefaultProvider'>
+</meta-data>
+</service>
+<activity theme='@ref/0x7f110006' name='com.pichillilorenzo.flutter_inappwebview_android.in_app_browser.InAppBrowserActivity' exported=False configChanges=1073755572>
+</activity>
+<activity theme='@ref/0x7f11017b' name='com.pichillilorenzo.flutter_inappwebview_android.chrome_custom_tabs.ChromeCustomTabsActivity' exported=False>
+</activity>
+<activity theme='@ref/0x7f11017b' name='com.pichillilorenzo.flutter_inappwebview_android.chrome_custom_tabs.TrustedWebActivity' exported=False>
+</activity>
+<activity theme='@ref/0x7f11017b' name='com.pichillilorenzo.flutter_inappwebview_android.chrome_custom_tabs.ChromeCustomTabsActivitySingleInstance' exported=False launchMode=3>
+</activity>
+<activity theme='@ref/0x7f11017b' name='com.pichillilorenzo.flutter_inappwebview_android.chrome_custom_tabs.TrustedWebActivitySingleInstance' exported=False launchMode=3>
+</activity>
+<receiver name='com.pichillilorenzo.flutter_inappwebview_android.chrome_custom_tabs.ActionBroadcastReceiver' enabled=True exported=False>
+</receiver>
+<activity theme='@ref/0x7f11011b' name='com.zero.flutteradscore.page.AdSplashActivity' screenOrientation=1 configChanges=1168>
+</activity>
+<provider name='com.bytedance.sdk.openadsdk.TTFileProvider' exported=False authorities='com.twtapp.TTFileProvider' grantUriPermissions=True>
+<meta-data name='android.support.FILE_PROVIDER_PATHS' resource='@ref/0x7f130010'>
+</meta-data>
+</provider>
+<activity name='com.revenuecat.purchases.ui.revenuecatui.activity.PaywallActivity' exported=False>
+</activity>
+<activity theme='@ref/0x01030006' name='com.revenuecat.purchases.ui.revenuecatui.customercenter.CustomerCenterActivity' exported=False>
+</activity>
+<service name='com.baseflow.geolocator.GeolocatorLocationService' enabled=True exported=False foregroundServiceType=8>
+</service>
+<activity theme='@ref/0x01030010' name='com.revenuecat.purchases.amazon.purchasing.ProxyAmazonBillingActivity' configChanges=1456>
+</activity>
+<activity theme='@ref/0x01030226' name='com.revenuecat.purchases.SimulatedStoreErrorDialogActivity' excludeFromRecents=True configChanges=1152>
+</activity>
+<meta-data name='com.google.android.play.billingclient.version' value='8.3.0'>
+</meta-data>
+<activity theme='@ref/0x01030010' name='com.android.billingclient.api.ProxyBillingActivity' exported=False configChanges=1456>
+</activity>
+<activity theme='@ref/0x01030010' name='com.android.billingclient.api.ProxyBillingActivityV2' exported=False configChanges=1456>
+</activity>
+<provider name='io.flutter.plugins.imagepicker.ImagePickerFileProvider' exported=False authorities='com.twtapp.flutter.image_provider' grantUriPermissions=True>
+<meta-data name='android.support.FILE_PROVIDER_PATHS' resource='@ref/0x7f130008'>
+</meta-data>
+</provider>
+<service name='com.google.android.gms.metadata.ModuleDependencies' enabled=False exported=False>
+<intent-filter >
+<action name='com.google.android.gms.metadata.MODULE_DEPENDENCIES'>
+</action>
+</intent-filter>
+<meta-data name='photopicker_activity:0:required' value=''>
+</meta-data>
+</service>
+<activity theme='@ref/0x01030010' name='com.google.android.gms.common.api.GoogleApiActivity' exported=False>
+</activity>
+<activity theme='@ref/0x0103000f' name='com.google.android.gms.ads.AdActivity' exported=False configChanges=4016 enableOnBackInvokedCallback=False>
+</activity>
+<provider name='com.google.android.gms.ads.MobileAdsInitProvider' exported=False authorities='com.twtapp.mobileadsinitprovider' initOrder=100>
+</provider>
+<service name='com.google.android.gms.ads.AdService' enabled=True exported=False>
+</service>
+<activity name='com.google.android.gms.ads.OutOfContextTestingActivity' exported=False configChanges=4016>
+</activity>
+<activity theme='@ref/0x01030010' name='com.google.android.gms.ads.NotificationHandlerActivity' exported=False taskAffinity='' excludeFromRecents=True launchMode=2>
+</activity>
+<meta-data name='com.google.android.gms.ads.flag.OPTIMIZE_AD_LOADING' value=True>
+</meta-data>
+<meta-data name='com.google.android.gms.ads.flag.OPTIMIZE_INITIALIZATION' value=True>
+</meta-data>
+<meta-data name='com.google.android.gms.version' value='@ref/0x7f0a0004'>
+</meta-data>
+<service name='androidx.core.widget.RemoteViewsCompatService' permission='android.permission.BIND_REMOTEVIEWS'>
+</service>
+<provider name='androidx.startup.InitializationProvider' exported=False authorities='com.twtapp.androidx-startup'>
+<meta-data name='androidx.work.WorkManagerInitializer' value='androidx.startup'>
+</meta-data>
+<meta-data name='androidx.emoji2.text.EmojiCompatInitializer' value='androidx.startup'>
+</meta-data>
+<meta-data name='androidx.lifecycle.ProcessLifecycleInitializer' value='androidx.startup'>
+</meta-data>
+<meta-data name='okhttp3.internal.platform.PlatformInitializer' value='androidx.startup'>
+</meta-data>
+<meta-data name='androidx.profileinstaller.ProfileInstallerInitializer' value='androidx.startup'>
+</meta-data>
+</provider>
+<service name='androidx.work.impl.background.systemalarm.SystemAlarmService' enabled='@ref/0x7f050003' exported=False directBootAware=False>
+</service>
+<service name='androidx.work.impl.background.systemjob.SystemJobService' permission='android.permission.BIND_JOB_SERVICE' enabled='@ref/0x7f050005' exported=True directBootAware=False>
+</service>
+<service name='androidx.work.impl.foreground.SystemForegroundService' enabled='@ref/0x7f050004' exported=False directBootAware=False>
+</service>
+<receiver name='androidx.work.impl.utils.ForceStopRunnable$BroadcastReceiver' enabled=True exported=False directBootAware=False>
+</receiver>
+<receiver name='androidx.work.impl.background.systemalarm.ConstraintProxy$BatteryChargingProxy' enabled=False exported=False directBootAware=False>
+<intent-filter >
+<action name='android.intent.action.ACTION_POWER_CONNECTED'>
+</action>
+<action name='android.intent.action.ACTION_POWER_DISCONNECTED'>
+</action>
+</intent-filter>
+</receiver>
+<receiver name='androidx.work.impl.background.systemalarm.ConstraintProxy$BatteryNotLowProxy' enabled=False exported=False directBootAware=False>
+<intent-filter >
+<action name='android.intent.action.BATTERY_OKAY'>
+</action>
+<action name='android.intent.action.BATTERY_LOW'>
+</action>
+</intent-filter>
+</receiver>
+<receiver name='androidx.work.impl.background.systemalarm.ConstraintProxy$StorageNotLowProxy' enabled=False exported=False directBootAware=False>
+<intent-filter >
+<action name='android.intent.action.DEVICE_STORAGE_LOW'>
+</action>
+<action name='android.intent.action.DEVICE_STORAGE_OK'>
+</action>
+</intent-filter>
+</receiver>
+<receiver name='androidx.work.impl.background.systemalarm.ConstraintProxy$NetworkStateProxy' enabled=False exported=False directBootAware=False>
+<intent-filter >
+<action name='android.net.conn.CONNECTIVITY_CHANGE'>
+</action>
+</intent-filter>
+</receiver>
+<receiver name='androidx.work.impl.background.systemalarm.ConstraintProxyUpdateReceiver' enabled='@ref/0x7f050003' exported=False directBootAware=False>
+<intent-filter >
+<action name='androidx.work.impl.background.systemalarm.UpdateProxies'>
+</action>
+</intent-filter>
+</receiver>
+<receiver name='androidx.work.impl.diagnostics.DiagnosticsReceiver' permission='android.permission.DUMP' enabled=True exported=True directBootAware=False>
+<intent-filter >
+<action name='androidx.work.diagnostics.REQUEST_DIAGNOSTICS'>
+</action>
+</intent-filter>
+</receiver>
+<uses-library name='android.ext.adservices' required=False>
+</uses-library>
+<uses-library name='androidx.window.extensions' required=False>
+</uses-library>
+<uses-library name='androidx.window.sidecar' required=False>
+</uses-library>
+<receiver name='androidx.profileinstaller.ProfileInstallReceiver' permission='android.permission.DUMP' enabled=True exported=True directBootAware=False>
+<intent-filter >
+<action name='androidx.profileinstaller.action.INSTALL_PROFILE'>
+</action>
+</intent-filter>
+<intent-filter >
+<action name='androidx.profileinstaller.action.SKIP_FILE'>
+</action>
+</intent-filter>
+<intent-filter >
+<action name='androidx.profileinstaller.action.SAVE_PROFILE'>
+</action>
+</intent-filter>
+<intent-filter >
+<action name='androidx.profileinstaller.action.BENCHMARK_OPERATION'>
+</action>
+</intent-filter>
+</receiver>
+<service name='androidx.room.MultiInstanceInvalidationService' exported=False directBootAware=True>
+</service>
+<service name='com.google.android.datatransport.runtime.backends.TransportBackendDiscovery' exported=False>
+<meta-data name='backend:com.google.android.datatransport.cct.CctBackendFactory' value='cct'>
+</meta-data>
+</service>
+<service name='com.google.android.datatransport.runtime.scheduling.jobscheduling.JobInfoSchedulerService' permission='android.permission.BIND_JOB_SERVICE' exported=False>
+</service>
+<receiver name='com.google.android.datatransport.runtime.scheduling.jobscheduling.AlarmManagerSchedulerBroadcastReceiver' exported=False>
+</receiver>
+<activity theme='@ref/0x0103000d' name='com.qq.e.ads.RewardvideoPortraitADActivity' exported=False multiprocess=True configChanges=1200>
+<meta-data name='android.notch_support' value=True>
+</meta-data>
+</activity>
+<activity theme='@ref/0x0103000d' name='com.qq.e.ads.RewardvideoLandscapeADActivity' exported=False multiprocess=True screenOrientation=0 configChanges=1200>
+<meta-data name='android.notch_support' value=True>
+</meta-data>
+</activity>
+<activity theme='@ref/0x01030011' name='com.qq.e.ads.DialogActivity' exported=False multiprocess=True>
+</activity>
+<receiver name='com.byazt.zj.Collector' enabled=True exported=False>
+</receiver>
+<activity theme='@ref/0x01030010' name='com.ss.android.downloadlib.activity.TTDelegateActivity' exported=False launchMode=2>
+</activity>
+<activity theme='@ref/0x01030010' name='com.byazt.wm.JumpKllkActivity' exported=False launchMode=2>
+</activity>
+<receiver name='com.byazt.yq.DownloadReceiver' exported=False>
+</receiver>
+<activity name='com.ss.android.socialbase.appdownloader.view.DownloadHandleNotificationActivity' exported=False launchMode=2>
+</activity>
+<service name='com.byazt.wx.DownloadHandlerService' exported=False stopWithTask=True>
+</service>
+<activity theme='@ref/0x0103000b' name='com.ss.android.socialbase.appdownloader.view.DownloadTaskDeleteActivity' exported=False launchMode=2>
+</activity>
+<activity theme='@ref/0x0103000b' name='com.byazt.zs.JumpUnknownSourceActivity' exported=False launchMode=2>
+</activity>
+<service name='com.byazt.wx.RetryJobSchedulerService' permission='android.permission.BIND_JOB_SERVICE' enabled=True exported=False stopWithTask=True>
+</service>
+<service name='com.byazt.hb.DownloadNotificationService' exported=False stopWithTask=True>
+</service>
+<service name='com.byazt.qa.CSJDownloadService' exported=False stopWithTask=True>
+</service>
+<service name='com.byazt.nj.DownloadHandleService' exported=False stopWithTask=True>
+</service>
+<service name='com.byazt.qa.SqlDownloadCacheService' exported=False stopWithTask=True>
+</service>
+<service name='com.byazt.qa.CSJIndependentProcessDownloadService' exported=False process=':downloader' stopWithTask=True>
+<intent-filter >
+<action name='com.ss.android.socialbase.downloader.remote'>
+</action>
+</intent-filter>
+</service>
+<activity name='com.bytedance.sdk.openadsdk.core.activity.base.TTNativePageActivity' exported=False launchMode=0 configChanges=1184 windowSoftInputMode=2>
+</activity>
+<activity name='com.bytedance.sdk.openadsdk.core.activity.base.TTWebPageActivity' exported=False launchMode=0 configChanges=1184 windowSoftInputMode=2>
+</activity>
+<activity theme='@ref/0x01030010' name='com.bytedance.sdk.openadsdk.core.activity.base.TTSevenScreenWebPageActivity' exported=False launchMode=0 configChanges=1184 windowSoftInputMode=2>
+</activity>
+<activity name='com.bytedance.sdk.openadsdk.core.activity.base.TTVideoWebPageActivity' exported=False launchMode=0 configChanges=1184 windowSoftInputMode=2>
+</activity>
+<activity name='com.bytedance.sdk.openadsdk.core.activity.base.TTVideoScrollWebPageActivity' exported=False launchMode=0 configChanges=1184 windowSoftInputMode=2>
+</activity>
+<activity theme='@ref/0x01030010' name='com.bytedance.sdk.openadsdk.core.activity.base.TTDelegateActivity' exported=False launchMode=0>
+</activity>
+<activity name='com.bytedance.sdk.openadsdk.core.component.reward.activity.TTRewardVideoActivity' exported=False launchMode=0 screenOrientation=1 configChanges=1184>
+</activity>
+<activity name='com.bytedance.sdk.openadsdk.core.component.reward.activity.TTFullScreenVideoActivity' exported=False launchMode=0 screenOrientation=1 configChanges=1184>
+</activity>
+<activity name='com.bytedance.sdk.openadsdk.core.component.reward.activity.TTRewardVideoLandscapeActivity' exported=False launchMode=0 screenOrientation=0 configChanges=1184>
+</activity>
+<activity name='com.bytedance.sdk.openadsdk.core.component.reward.activity.TTFullScreenVideoLandscapeActivity' exported=False launchMode=0 screenOrientation=0 configChanges=1184>
+</activity>
+<service name='com.byazt.jqe.BinderPoolService' exported=False>
+</service>
+<activity theme='@ref/0x01030006' name='com.byazt.cef.Stub_Standard_Activity' exported=False launchMode=0 configChanges=1248 windowSoftInputMode=18>
+</activity>
+<activity theme='@ref/0x01030006' name='com.byazt.cef.Stub_Standard_Portrait_Activity' exported=False launchMode=0 screenOrientation=1 configChanges=1760 windowSoftInputMode=18>
+</activity>
+<activity theme='@ref/0x0103000f' name='com.byazt.cef.Stub_Standard_Activity_T' exported=False launchMode=0 configChanges=1248 windowSoftInputMode=18>
+</activity>
+<activity theme='@ref/0x01030006' name='com.byazt.cef.Stub_Standard_Landscape_Activity' exported=False launchMode=0 screenOrientation=0 configChanges=1760 windowSoftInputMode=18>
+</activity>
+<activity theme='@ref/0x01030006' name='com.byazt.cef.Stub_Activity' exported=False configChanges=1248 windowSoftInputMode=18>
+</activity>
+<activity theme='@ref/0x0103000f' name='com.byazt.cef.Stub_SingleTask_Activity_T' exported=False launchMode=2 configChanges=1248 windowSoftInputMode=18>
+</activity>
+<activity name='com.byazt.cef.Stub_SingleTask_Activity' exported=False launchMode=2 configChanges=1248 windowSoftInputMode=18>
+</activity>
+<provider name='com.byazt.lnu.DownloaderServerManager' exported=False process=':downloader' authorities='com.twtapp.pangle.servermanager.downloader.com.bytedance.sdk.openadsdk.adhost'>
+</provider>
+<provider name='com.byazt.lnu.MainServerManager' exported=False authorities='com.twtapp.pangle.servermanager.main'>
+</provider>
+<provider name='com.byazt.qk.TTMultiProvider' exported=False authorities='com.twtapp.TTMultiProvider'>
+</provider>
+<service name='com.byazt.nt.ApiDownloadHandlerService' exported=False stopWithTask=True>
+</service>
+<activity name='com.byazt.nt.ApiDownloadHandleNotificationActivity' exported=False launchMode=2>
+</activity>
+<provider name='com.byazt.hx.MainServerManager' exported=False authorities='com.twtapp.pangle.servermanager.main'>
+</provider>
+<provider name='com.byazt.gv.MainProcessProviderProxy' exported=False authorities='com.twtapp.pangle.provider.proxy.main'>
+</provider>
+<provider name='com.byazt.jr.FileProvider' exported=False authorities='com.twtapp.pangle.fileprovider' grantUriPermissions=True>
+</provider>
+<activity name='com.bytedance.android.openliveplugin.stub.activity.DouyinAuthorizeActivityProxy' exported=True>
+</activity>
+<activity name='com.bytedance.android.openliveplugin.stub.activity.DouyinAuthorizeActivityLiveProcessProxy' exported=True process=':bytelive'>
+</activity>
+<provider name='com.bytedance.android.openliveplugin.process.server.LiveServerManager' exported=False process=':bytelive' authorities='com.twtapp.bytedance.android.openliveplugin.process.server.LiveServerManager'>
+</provider>
+<activity theme='@ref/0x0103000d' name='com.bytedance.android.openliveplugin.stub.activity.StubActivity$Activity_Portrait' exported=False screenOrientation=1 configChanges=17056>
+</activity>
+<activity theme='@ref/0x0103000d' name='com.bytedance.android.openliveplugin.stub.activity.StubActivity$Activity_Portrait2' exported=False screenOrientation=1 configChanges=17056>
+</activity>
+<activity theme='@ref/0x0103000d' name='com.bytedance.android.openliveplugin.stub.activity.StubActivity$Activity_Portrait3' exported=False screenOrientation=1 configChanges=17056>
+</activity>
+<activity theme='@ref/0x0103000d' name='com.bytedance.android.openliveplugin.stub.activity.StubActivity$Activity_Portrait4' exported=False screenOrientation=1 configChanges=17056>
+</activity>
+<activity theme='@ref/0x0103000d' name='com.bytedance.android.openliveplugin.stub.activity.StubActivity$Activity_Portrait5' exported=False screenOrientation=1 configChanges=17056>
+</activity>
+<activity name='com.byted.live.lite.Activity_bytelive_singleTask4' exported=False process=':bytelive' launchMode=2 configChanges=1248 windowSoftInputMode=18>
+</activity>
+<activity name='com.byted.live.lite.Activity_bytelive_singleTop3' exported=False process=':bytelive' launchMode=1 configChanges=1248 windowSoftInputMode=18>
+</activity>
+<activity name='com.byted.live.lite.Activity_bytelive_singleTop2' exported=False process=':bytelive' launchMode=1 configChanges=1248 windowSoftInputMode=18>
+</activity>
+<activity name='com.byted.live.lite.Activity_bytelive_singleTop5' exported=False process=':bytelive' launchMode=1 configChanges=1248 windowSoftInputMode=18>
+</activity>
+<activity name='com.byted.live.lite.Activity_bytelive_singleTop4' exported=False process=':bytelive' launchMode=1 configChanges=1248 windowSoftInputMode=18>
+</activity>
+<activity name='com.byted.live.lite.Activity_bytelive_standard' exported=False process=':bytelive' launchMode=0 configChanges=1248 windowSoftInputMode=18>
+</activity>
+<activity name='com.byted.live.lite.Activity_bytelive_singleTop1' exported=False process=':bytelive' launchMode=1 configChanges=1248 windowSoftInputMode=18>
+</activity>
+<activity name='com.byted.live.lite.Activity_bytelive_singleTask1' exported=False process=':bytelive' launchMode=2 configChanges=1248 windowSoftInputMode=18>
+</activity>
+<activity name='com.byted.live.lite.Activity_bytelive_singleTop6' exported=False process=':bytelive' launchMode=1 configChanges=1248 windowSoftInputMode=18>
+</activity>
+<activity name='com.byted.live.lite.Activity_bytelive_singleTask2' exported=False process=':bytelive' launchMode=2 configChanges=1248 windowSoftInputMode=18>
+</activity>
+<activity name='com.byted.live.lite.Activity_bytelive_singleTask3' exported=False process=':bytelive' launchMode=2 configChanges=1248 windowSoftInputMode=18>
+</activity>
+<activity name='com.byted.live.lite.Activity_main_singleTask1' exported=False launchMode=2 configChanges=1248 windowSoftInputMode=18>
+</activity>
+<activity name='com.byted.live.lite.Activity_main_singleTask2' exported=False launchMode=2 configChanges=1248 windowSoftInputMode=18>
+</activity>
+<activity name='com.byted.live.lite.Activity_main_singleTask3' exported=False launchMode=2 configChanges=1248 windowSoftInputMode=18>
+</activity>
+<activity name='com.byted.live.lite.Activity_main_singleTask4' exported=False launchMode=2 configChanges=1248 windowSoftInputMode=18>
+</activity>
+<activity name='com.byted.live.lite.Activity_main_standard' exported=False launchMode=0 configChanges=1248 windowSoftInputMode=18>
+</activity>
+<activity name='com.byted.live.lite.Activity_main_singleTop1' exported=False launchMode=1 configChanges=1248 windowSoftInputMode=18>
+</activity>
+<activity name='com.byted.live.lite.Activity_main_singleTop2' exported=False launchMode=1 configChanges=1248 windowSoftInputMode=18>
+</activity>
+<activity name='com.byted.live.lite.Activity_main_singleInstance1' exported=False launchMode=3 configChanges=1248 windowSoftInputMode=18>
+</activity>
+<activity name='com.byted.live.lite.Activity_main_singleTop5' exported=False launchMode=1 configChanges=1248 windowSoftInputMode=18>
+</activity>
+<activity name='com.byted.live.lite.Activity_main_singleTop6' exported=False launchMode=1 configChanges=1248 windowSoftInputMode=18>
+</activity>
+<activity name='com.byted.live.lite.Activity_main_singleTop3' exported=False launchMode=1 configChanges=1248 windowSoftInputMode=18>
+</activity>
+<activity name='com.byted.live.lite.Activity_main_singleTop4' exported=False launchMode=1 configChanges=1248 windowSoftInputMode=18>
+</activity>
+<activity name='com.byted.live.lite.Activity_bytelive_singleInstance1' exported=False process=':bytelive' launchMode=3 configChanges=1248 windowSoftInputMode=18>
+</activity>
+<provider name='com.byted.live.lite.ServerManager_bytelive' exported=False process=':bytelive' authorities='com.twtapp.pangle.servermanager.bytelive.com.byted.live.lite'>
+</provider>
+<provider name='com.byted.live.lite.ServerManager_push' exported=False process=':push' authorities='com.twtapp.pangle.servermanager.push.com.byted.live.lite'>
+</provider>
+<provider name='com.byted.live.lite.ServerManager_downloader' exported=False process=':downloader' authorities='com.twtapp.pangle.servermanager.downloader.com.byted.live.lite'>
+</provider>
+<activity theme='@ref/0x01030010' name='com.bytedance.msdk.api.activity.TTDelegateActivity' exported=False>
+</activity>
+<activity theme='@ref/0x01030010' name='com.bytedance.msdk.api.activity.TTTransparentActivity' exported=False configChanges=1168>
+</activity>
+<activity theme='@ref/0x7f110171' name='com.google.android.play.core.common.PlayCoreDialogWrapperActivity' exported=False stateNotNeeded=True>
+</activity>
+</application>
+</manifest>

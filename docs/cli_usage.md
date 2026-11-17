@@ -88,6 +88,25 @@ python -m mbdsdr_ai --config /path/to/configdir --list-bookmarks
 - **记录落在哪**：**落盘审计** `D:\mbdsdr\logs\tx_audit.jsonl`（JSONL，单文件 10 MB × 保留 5 个文件轮转；路径可用 `MBDSDR_TX_AUDIT_PATH` 覆盖）。每次签发/放行/拒绝/过期落一条：本地+UTC 时间戳、工具名、已剔除门参数的参数摘要、token **前 8 位**（不落全串）、TTL、结果（`armed`/`allowed`/`refused`/`expired`）、原因码、来源（`desktop`/`test`/`script`）。审计写失败按 **fail-closed** 处理：不签发、不放行，失败原因见 `tx_guard.tx_audit_status()` 与 `get_tx_gate().snapshot()["audit"]`。
 - **缺口的实际影响**：无头/CLI 用户今天无法自己签发 token，发射必须由桌面确认面或受信任脚本代签。补齐形态应是受信任的 CLI 子命令（绑定动作摘要、TTL、写审计日志），且该签发能力不得暴露到模型工具面。
 
+## 远程控制命令（v1）
+
+`--remote-port` 启动的 TCP 服务只承诺下列五条命令（`q` / `Q` 同一行为）：
+
+| 命令 | 含义 |
+|---|---|
+| `f` | 读频率（Hz） |
+| `f <hz>` | 设频率 |
+| `m` | 读解调模式 |
+| `m <mode>` | 设解调模式（FM/AM/NFM/WFM/USB/LSB/CW） |
+| `g` | 读增益（dB） |
+| `g <db>` | 设增益 |
+| `q` / `Q` | 关闭连接 |
+
+应答为 hamlib rigctld 风格：成功 `RPRT 0`，失败 `RPRT 1`。
+`mbdsdr_ai/remote_control_v2.py` 里的 GQRX 扩展命令（静噪 `l/L`、DSP `s`、
+录制 `u`、AGC `A`、版本 `v`、设备列表 `d`）**尚未接线**；对它们明确返回
+`RPRT -3`（未实现），不会假装成功。服务仅监听 `127.0.0.1`。
+
 ## 退出码
 
 | 退出码 | 含义 |
@@ -95,8 +114,9 @@ python -m mbdsdr_ai --config /path/to/configdir --list-bookmarks
 | 0 | 成功 |
 | 1 | 用户错误（如非法解调模式、设备被其它程序占用、设备占用登记不可读），stderr 打印 message + 建议 |
 | 2 | 未连接设备就执行数据动作（已提示 `--connect`）|
-| 3 | 频谱无数据（后端无样本）|
-| 4 | 录制打开失败 |
+| 3 | 频谱无数据（后端无样本/读超时）、录制无样本、扫描中止、`--tool` 名称不存在或 `--args` 非法 |
+| 4 | 参数下发被拒（频率/采样率/带宽）或录制打开失败 |
+| 5 | 文件级解码（`--decode-file`）失败，或 `--tool` 工具自动发现失败 |
 
 设备占用的两种拒绝**共用退出码 1**，靠文案区分（脚本只该判 `!= 0`）：
 被占用报 `设备当前由<程序>持有（pid N，进程仍在运行）` + 关掉/释放；

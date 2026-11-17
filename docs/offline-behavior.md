@@ -62,3 +62,17 @@
 | 9 | `new_spacetime_tle._http_get` 超时不覆盖 DNS（可能挂死） | 无截止阻塞 | 改走 `orbit._bounded_urlopen`（请求超时 + 墙钟硬截止） |
 
 另有 P12 自登记两缺口同批收口：`TleFetcher.fetch_group` 接入同源最小间隔 + 指数退避 + 健康度（`GROUP_SCOPE_KEY` 与单星共用账本）；`sat_tracker` 刷新改为 `(connect, read)` 元组 + daemon 线程 join 硬截止，DNS 卡死也能在上限内返回明确「超时」。
+
+## 四、默认本机处理（隐私与离线默认值，Task 63）
+
+- **默认离线优先**：`net_policy.network_allowed()` 在未显式设置
+  `MBDSDR_ALLOW_NETWORK=1` 时恒为 `False`；按名称取 TLE、算可见卫星等自动路径
+  只读本地缓存，无缓存即诚实报「离线且无缓存」，**socket 连接与 urlopen 调用次数为 0**。
+  显式联网才可能访问外部服务，且当次调用须自报来源。
+- **相机帧 / 位置只在本机处理**：相机帧、GNSS/NMEA、站点坐标与录制数据只在
+  本机内存与本地文件使用；日志只记事件、计数与错误类型，**不写坐标原文、不写帧内容**。
+  机械护栏：`tests/test_offline_privacy.py` 静态扫描 `mbdsdr_ai/` 与 `desktop/`
+  的日志调用，坐标字段一旦进入日志参数即红。
+- **上传需显式开启**：本仓默认路径没有上传行为；任何外部上传必须由用户显式开启
+  并在当次告知，不得静默发送。
+

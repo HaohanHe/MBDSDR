@@ -125,7 +125,7 @@ ctrl.shutdown()
 ### 服务
 | 方法 | 签名 |
 |---|---|
-| `start_remote_control(port=7356)` | `-> dict`（GQRX rigctl 风格 TCP）|
+| `start_remote_control(port=7356)` | `-> dict`（GQRX rigctl 风格 TCP；仅 f/m/g/q/Q 五命令，见 `cli_usage.md`）|
 | `stop_remote_control()` | `-> None` |
 | `start_web_server(port=8000)` | `-> dict` |
 | `stop_web_server()` | `-> None` |

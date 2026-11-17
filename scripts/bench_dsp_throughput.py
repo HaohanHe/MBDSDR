@@ -283,6 +283,8 @@ def bench_e2e(sr: float, seconds: float = E2E_SECONDS) -> dict:
         center_getter=lambda: 98.5e6,
         main_vfo_dsp=None, vfo2_dsp=None,
         player=player, config=cfg, on_record_iq=recorder,
+        # 吞吐基准统计的是"解调 + 写卡 + 录音"整链，显式打开解调。
+        audio_enabled=True,
     )
     cpu0 = time.process_time()
     pipe.start()

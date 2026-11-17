@@ -36,10 +36,10 @@ python scripts/axioms.py --prioritize \
 
 ### 当前计数（工具生成，按基准 sha 钉住，勿手改）
 
-<!-- axioms-current-stats:begin（由 python -m tools.axioms.current_stats 生成；基准 294924e4be4136ab3dc5253016367e44992a7004 生成于 2026-11-14T12:37:38+08:00） -->
-违规 659 条：应修 72，复核 428，豁免 159。
-D1 7 / D2 171 / D3 248 / D4 28 / D5 138 / D6 67 / D7 0 / D8 0。
-校验指纹 sha256:a98c4adc39b63bcd23e9b620f4955d29728ce551d3c426ad852da2b577e89768
+<!-- axioms-current-stats:begin（由 python -m tools.axioms.current_stats 生成；基准 f12187b45f02c0e49c0a8a4b4f3fbe935336bbbb 生成于 2026-11-16T23:41:04+08:00） -->
+违规 653 条：应修 73，复核 421，豁免 159。
+D1 8 / D2 169 / D3 248 / D4 28 / D5 141 / D6 59 / D7 0 / D8 0。
+校验指纹 sha256:186abc5b89b1e33ce40a89ad06a8e9867439d2d7440b6a2cdf9b3e704c487d1b
 <!-- axioms-current-stats:end -->
 
 `tests/test_axioms_doc_current_stats.py` 只做三种检查，且**不跟 HEAD 比**：

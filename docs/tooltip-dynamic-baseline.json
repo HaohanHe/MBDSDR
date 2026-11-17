@@ -87,12 +87,6 @@
     },
     {
       "file": "desktop/device_panel.py",
-      "expr": "_NO_DEVICE_TIP",
-      "reason": "passthrough",
-      "runtime_test": "tests/test_tooltip_dynamic_runtime.py::test_device_panel_passthrough_tooltips_self_describe"
-    },
-    {
-      "file": "desktop/device_panel.py",
       "expr": "tip",
       "reason": "passthrough",
       "runtime_test": "tests/test_tooltip_dynamic_runtime.py::test_device_panel_passthrough_tooltips_self_describe"

@@ -98,12 +98,12 @@
 * 未知 `detail` 值 → JSON-RPC 错误 `-32602`，message 诚实列出 `name/desc/schema`。
 * 实测线报体积：`detail=name` 序列化长度明显小于 `detail=schema`（进程级用例钉死）。
 
-**缓存语义（`listChanged`）**：`initialize` 的 `capabilities.tools` 现在声明
-`"listChanged": true`。客户端可**缓存 tools/list 结果**，无需每次重拉；当工具表变化时，
-服务端发 `notifications/tools/list_changed`，客户端收到即失效重建。
-当前工具表是**静态**的（进程内不变），故服务端此刻**不会**主动发该通知——这是诚实声明，
-为未来动态注册预留；若客户端反向把它当请求发回，无 id 则不回 stdout，带 id 则诚实回
-`result:null`（不当成未知方法）。
+**缓存语义（`listChanged`）**：`initialize` 的 `capabilities.tools` 声明
+`"listChanged": false`。工具表是**静态快照**（进程内不变），服务端**未实现**
+`notifications/tools/list_changed` 主动通知，因此不声明 true——客户端不应缓存
+依赖该通知，需要最新工具表时重新 `tools/list`。若客户端反向把它当请求发回，
+无 id 则不回 stdout，带 id 则诚实回 `result:null`（不当成未知方法）。未来若做
+动态注册，必须先实现通知再把声明改成 true。
 
 **客户端建议的发现节奏**：先 `tools/list`（默认 name 目录）→ 锁定要下钻的域后用
 `{"domain":<域>,"detail":"desc"}` 读描述 → 真要调用时再 `{"domain":<域>,"detail":"schema"}`

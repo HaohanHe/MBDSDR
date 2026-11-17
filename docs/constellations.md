@@ -117,17 +117,23 @@ Xingguans”（星官只表示恒星分布，没有具体边界）。因此本�
 ```python
 from mbdsdr_ai.skyengine.constellations import overlay_layers
 
-layers = overlay_layers()            # 默认两套都开
+layers = overlay_layers()            # 全部可用体系（不含开关状态）
 for layer in layers:
     print(layer.system_id, layer.tag, layer.display_name, len(layer.items))
 ```
 
-输出：
+输出（基础两套在前，其后是各文化包；这里只列前两行）：
 
 ```
 iau_88            IAU       IAU 88 星座            88
 chinese_xingguan  中国星官   中国星官（三垣二十八宿）   31
+…（其余已注册文化包按注册表顺序顺延）
 ```
+
+**开关在渲染方，不在数据层**：`overlay_layers()` 不记录「开/关」，默认只开
+`iau_88` 由界面决定（`desktop/rf_sky_view.py` 的 `_constellation_systems`
+初值为 `{SYSTEM_IAU}`）。要只取某几层就显式传子集：
+`overlay_layers(("chinese_xingguan",))`。
 
 **渲染纪律**：界面必须为每层显示 `display_name` 或 `tag`；不得把
 `Ori` 与 `角宿` 合并成同一个名称空间，也不得把两套连线画成同一种
@@ -492,7 +498,7 @@ from mbdsdr_ai.skyengine import constellations as iau
 from mbdsdr_ai.skyengine import xingguan
 
 layer = iau.constellation_layer("iau_88")          # 或 "chinese_xingguan"
-layers = iau.overlay_layers()                      # 默认两套；可传 (sid, …) 子集
+layers = iau.overlay_layers()                      # 全部可用体系；可传 (sid, …) 子集
 ```
 
 `ConstellationLayer`（`@dataclass(frozen=True)`，两套体系同一个类）：
@@ -506,9 +512,10 @@ layers = iau.overlay_layers()                      # 默认两套；可传 (sid,
 | `items` | `tuple` | IAU：`IAUConstellation`；星官：`XingguanRegion` |
 | `keys()` | `tuple[str, …]` | IAU 为三字母缩写，星官为区域键（`角宿`…） |
 
-`overlay_layers()`：按 `(iau_88, chinese_xingguan)` 顺序返回列表，重复
-`system_id` 去重，未知 `system_id` 抛 `KeyError`；**不做任何跨体系合并**。
-`system_ids()` 返回固定二元组；`system_info(sid)` 返回
+`overlay_layers()`：无参时按 `system_ids()` 顺序返回**全部可用体系**（基础
+`iau_88` / `chinese_xingguan` + 各已注册文化包），重复 `system_id` 去重，
+未知 `system_id` 抛 `KeyError`；**不做任何跨体系合并**，也不记录开关。
+`system_ids()` 返回全部可用体系 id 的元组；`system_info(sid)` 返回
 `system_id / display_name_zh / display_name_en / tag / source / source_url /
 source_license / lines_are_iau_official / count`（星官额外带
 `region_count / xingguan_count / unmapped_count`）。

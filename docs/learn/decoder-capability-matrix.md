@@ -20,13 +20,14 @@
 |---|---|---|---|---|---|---|
 | `acars` | **部分** | 合成回环 | tests/test_acars_roundtrip.py / tests/test_acars_consistency.py（MSK 往返：默认 1200 bd + 2400 bd 兼容档 + 字段一致性） | `python -m pytest tests/test_acars_roundtrip.py tests/test_acars_consistency.py -q` | 131.55MHz AM 下行解调音频 ≥ 5s，含 ≥ 1 条 1200baud MSK ACARS报文且 CRC 通过 | 半个真：合成链自洽，缺真实航司报文真录 |
 | `adsb` | **真实** | 外部真值 | tests/test_adsb_dump1090_golden.py（dump1090 官方 modes1.bin 逐帧对拍）；tests/test_adsb_consistency.py（合成链）；本机 1090MHz 真录 2026-10-29 三次 0 CRC 帧 = 负证据（如实保留） | `python -m pytest tests/test_adsb_dump1090_golden.py tests/test_adsb_consistency.py -q` | 1090MHz 下行 .cf32，fs ≥ 2 MS/s（任意档由 any_fs 入口带限重采样），≥ 3 个干净 DF17 前导（CRC-24 通过与 dump1090 对拍；多帧扫描见 adsb.decode_baseband） | 真（外部真值）：dump1090 官方样本两条帧逐字命中；通用入口已做多帧扫描（每个前导独立 CRC），但本机 OTA 真录尚未破零 |
-| `ais` | **缺样本** | 合成回环 | tests/test_ais_decoder.py（GMSK→HDLC→FCS-16→M.1371 字段，合成链） | `python -m pytest tests/test_ais_decoder.py -q` | 161.975/162.025MHz 信道化复基带 .cf32，fs=192000 或 96000，≥ 5s 且含 ≥ 3 条 FCS 通过的 AIS 报文（含 Type 1 位置） | 尚不算真：无 AIS 信道真录，只有协议性质钉扎 |
+| `ais` | **部分** | 合成回环 | tests/test_capability_claims_live.py（run_digital_mode 对入库 240kS/s 合成 fixture 端到端解出报文）；tests/test_ais_decoder.py（GMSK→HDLC→FCS-16→M.1371 字段，合成链） | `python -m pytest tests/test_capability_claims_live.py tests/test_ais_decoder.py -q` | 161.975/162.025MHz 信道化复基带 .cf32，fs=192000 或 96000，≥ 5s 且含 ≥ 3 条 FCS 通过的 AIS 报文（含 Type 1 位置） | 半个真：合成 fixture 端到端可解、算法链自洽；无 AIS 信道真录 |
 | `aprs` | **部分** | 合成回环 | tests/test_decode_pipeline_e2e.py（合成 2 帧：NFM 鉴频→Bell202 AFSK→NRZI→HDLC→CRC-16→AX.25，呼号/digipeater 路径/payload 逐字节对拍；噪声/截断/CRC 三条失败原因码） | `python -m pytest tests/test_decode_pipeline_e2e.py -q` | 现有证据仅为**合成验证**（仓内调制 2 帧、逐字节对拍），**无 OTA 证据**；补真录条件：144.640/144.390/144.800MHz NFM 下行复基带 ≥ 5s，含至少 1 个 1200bd Bell202 AX.25 帧（CRC-16 通过） | 合成验证（synthetic, NOT OTA）：链路已接线，但只有仓内调制 fixture 逐字节对拍，无 OTA 证据 |
 | `ft4` | **部分** | 合成回环 | mbdsdr_ai/tests/test_decoders_ft4_wspr.py（自体往返 + 窄带拒绝契约） | `python -m pytest mbdsdr_ai/tests/test_decoders_ft4_wspr.py -q` | SSB 解调后 12kHz PCM16 单声道 .wav，含完整 FT4 帧（105 符号 / 5.04s）；本实现**无 FT4 官方样例对拍**，真值仅为仓内合成帧（provenance: self-generated） | 半个真：算法链自洽，缺 OTA 真录对拍 |
 | `ft8` | **真实** | 外部真值 | tests/test_ft8_wsjtx_golden.py（WSJT-X 官方 210703_133430.wav，5/14 精确命中、零假接受）；tests/test_ft8_cross_impl_fixture.py | `python -m pytest tests/test_ft8_wsjtx_golden.py tests/test_ft8_cross_impl_fixture.py -q` | 真录已在 test_ft8_* 中对拍；通用 WAV 入口未接线，需调用ft8_lite.decode_ft8_audio 或走专用工具 | 真（外部真值）：官方样本 5/14 命中；通用 WAV 入口未接线（not_implemented） |
-| `meteor` | **部分** | 合成回环 | tests/test_meteor_lrpt.py（合成向量）；真录证据在 LRPT 链见下一行 | `python -m pytest tests/test_meteor_lrpt.py -q` | Meteor-M2 137.9MHz 下行 .cf32 ≥ 20s，Viterbi 可锁且 RS 全纠帧 ≥ 2（本仓 LRPT 真录链可作真值） | 半个真：通用入口只到解调骨架（输出 symbols/bits，不产图像）；图像链真录证据在 LRPT 真录链 |
-| `navtex` | **缺样本** | 合成回环 | tests/test_navtex_decoder.py（SITOR-B 100bd + CCIR 476 + 时间分集，合成链） | `python -m pytest tests/test_navtex_decoder.py -q` | 518/490kHz USB 解调后音频 ≥ 60s，含完整 ZCZC 帧与至少 3 行正文（SITOR-B 相位锁定成立） | 尚不算真：无 518kHz 真录，只有协议性质钉扎 |
+| `meteor` | **部分** | 合成回环 | tests/test_apt_meteor_roundtrip.py（meteor_sat QPSK→Viterbi 合成回环 BER）；tests/test_decode_router_honesty.py（采样率硬约束）；通用入口无正样本端到端用例，真录证据在 LRPT 图像链（下一行） | `python -m pytest tests/test_apt_meteor_roundtrip.py tests/test_decode_router_honesty.py -q` | Meteor-M2 137.9MHz 下行 .cf32 ≥ 20s，Viterbi 可锁且 RS 全纠帧 ≥ 2（本仓 LRPT 真录链可作真值） | 半个真：解调骨架的 QPSK/Viterbi 组件有合成回环；通用入口无正样本端到端测试、不产图像；LRPT 图像链真录证据见下一行 |
+| `navtex` | **部分** | 合成回环 | tests/test_capability_claims_live.py（run_digital_mode 对入库合成 WAV 端到端解出报文）；tests/test_navtex_decoder.py（SITOR-B 100bd + CCIR 476 + 时间分集，合成链） | `python -m pytest tests/test_capability_claims_live.py tests/test_navtex_decoder.py -q` | 518/490kHz USB 解调后音频 ≥ 60s，含完整 ZCZC 帧与至少 3 行正文（SITOR-B 相位锁定成立） | 半个真：合成 WAV 端到端可解、算法链自洽；无 518kHz 真录 |
 | `pocsag` | **部分** | 合成回环 | tests/test_pocsag_roundtrip.py（BCH(31,21) 纠错 + 报文往返） | `python -m pytest tests/test_pocsag_roundtrip.py -q` | 137/153/466MHz NFM 下行 .cf32 ≥ 10s（fs ≥ 2×占用带宽），含 ≥ 2 条 POCSAG 批（1200bd、±4.5kHz 偏移、BCH(31,21) 可纠）；仓内已用真实 NFM-FSK 合成 IQ 端到端验证，无 OTA 真录 | 半个真：合成链自洽，缺真实寻呼台真录 |
+| `rtl433` | **部分** | 合成回环 | tests/test_rtl433_roundtrip.py（曼彻斯特/PPM/PWM 切片 + 7 个 ISM 设备已知合法帧与校验和往返） | `python -m pytest tests/test_rtl433_roundtrip.py -q` | 433.92MHz 下变频复基带 .cf32 ≥ 1s（fs ≥ 250kS/s），含 ≥ 1 个完整 ISM 传感器帧；本仓现有证据仅为已知合法比特流/合成包络往返，无 OTA 真录 | 合成验证：只有已知比特流/合成包络往返，无 OTA 真录 |
 | `wspr` | **部分** | 合成回环 | mbdsdr_ai/tests/test_decoders_ft4_wspr.py（四音网格 + 时间/频率偏移搜索） | `python -m pytest mbdsdr_ai/tests/test_decoders_ft4_wspr.py -q` | USB 解调后 12kHz PCM16 .wav，含完整 110.592s WSPR 传输；本实现**未做 OTA/弱信号灵敏度验收**，不声明 dB 门限（wsprd/wsjtx 仅作外部工具登记，不代表已对拍） | 半个真：算法链自洽，缺 OTA 真录对拍 |
 | `lrpt（LRPT 图像链）` | **真实** | 外部真值 | tests/test_lrpt_meteor_real_golden.py（TU Berlin 79MB Meteor-M2 真录，SHA-256 钉真值）；tests/test_lrpt_iq_chain.py；tests/test_lrpt_cross_impl_fixture.py | `python -m pytest tests/test_lrpt_meteor_real_golden.py tests/test_lrpt_iq_chain.py -q` | Meteor-M2 137.9MHz .cf32 ≥ 20s，重采样到整数倍符号率（如 144kS/s = 2sps） | 真（真录）：79MB 过境真录帧同步锁定（ham=0 完美命中） |
 | `dvbs2-sof（DVB-S2 SOF 同步层）` | **部分** | 合成回环 | tests/test_dvbs2_sof_sync.py（ETSI EN 302 307-1 §5.1.2 同步字/π 旋转，合成链 + 标准原文口径） | `python -m pytest tests/test_dvbs2_sof_sync.py -q` | 卫星下行符号率级复基带 .cf32 ≥ 3 个 PLFRAME，CFO ≪ 符号率/26 | 半个真：标准层逐位钉扎，缺 DVB-S2 OTA 真录 |
@@ -40,7 +41,7 @@
 |---|---|---|---|
 | `mbdsdr_ai/tests/fixtures` | 外部真值 | 1 | 外部真值 1 |
 | `mbdsdr_ai/tests/fixtures/openngc` | 外部真值 | 2 | 外部真值 2 |
-| `tests/fixtures` | 自生成 | 3 | 自生成 3 |
+| `tests/fixtures` | 自生成 | 4 | 自生成 4 |
 | `tests/fixtures/decode_pipeline` | 自生成 | 9 | 自生成 9 |
 | `tests/fixtures/iridium107` | 外部真值 | 2 | 外部真值 2 |
 | `tests/fixtures/real_fm_88m1` | 外部真值 | 2 | 外部真值 2 |
@@ -151,7 +152,7 @@ python scripts/decode_captures.py --mode all --dir captures/ --out report.json
 
 - 「真实」不等于「现在能在你的设备上收到」：外部真值证明解码链正确，能否收到还取决于天线、增益、过境时间与多普勒补偿。
 - 标 `not_implemented` 的模式（仅 ft8 通用入口）不会假装解码，调用会得到明确错误码而不是空结果。
-- 缺真录的模式（ais/navtex/aprs）在补到真录之前，任何「空口已解码」的宣称都不成立。
+- 缺 OTA 真录的模式（ais/navtex/aprs）在补到真录之前，任何「空口已解码」的宣称都不成立。
 - **APRS 已接线但不等于「空口支持」**：`run_aprs_pipeline` 真实执行 NFM 鉴频→Bell202 AFSK→NRZI→HDLC→CRC-16→AX.25，但现有证据仅为仓内合成 fixture（synthetic, NOT OTA）逐字节对拍；不得写成「OTA 验证通过」。失败时给 `nothing_detected` / `truncated_frame` / `crc_failed` 等具体原因码。
 - **本矩阵与 UI 都不声称「实时解码」**：解码是离线/同步处理，实时率与跟不上时的后果见 `mbdsdr_ai.decode_pipeline.performance_summary` / `behind_report`；后者明说积压恒为 0 且观测不到 SDR 缓冲层溢出。
 - **两种「丢」的用词**：`dropped_frames` 只计 FCS/CRC 校验失败，不包含「跟不上导致样本没被处理」——后者不归本模块计数。

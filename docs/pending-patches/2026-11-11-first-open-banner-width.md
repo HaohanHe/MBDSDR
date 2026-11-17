@@ -151,3 +151,33 @@
   相对断言。
 - 以上只让红**确定性复现**；转绿仍须 §三 的结构修复（横幅移出左栏或
   换行，并重跑余量矩阵），不砍到丢「星象仪」。
+
+## 六、2026-11-17 再红：不是文案/预算，是三栏「展开记忆」被解码放大
+
+grp0a（0..212 分段全量）里该用例在 1280 宽仍返回窄句。现场与 §三·五 的
+「标签没被布局过」不同：`hint.width()` 停在 258，`left_tab` 也是 260——
+窗口已到 1280，但**左栏根本没跟着变宽**。
+
+根因链（全部实测）：
+
+1. `QSplitter.saveState()` 只存比例；`_decode_three_column_state()` 在
+   100000 宽的临时 splitter 上还原，解出的是被放大的绝对值
+   （本机实测 `[43943, 30894, 25155]`）。
+2. 旧实现把这份解码值原样记成 `_expanded_column_sizes`。
+3. 窄窗收起右栏后再展开，`_expand_right_column_inline` 里
+   `right = max(base[2], mins[2])` 取到 25155 级，`rest = avail - right`
+   被压到 1，全部剩余宽度按比例落到右栏 → 实测
+   `[260, 240, 772]`（左/中停在下限），横幅永远按窄预算选形态。
+
+处置（工作区，未提交）：
+
+- `_restore_three_column_sizes` 对解码值按默认三栏总量归一（只留比例）；
+- `_three_column_structure` 加下限：任一栏 < `_RIGHT_STRIP_W`(48) 判结构非法，
+  挡住把坏分配存回去的存量值；
+- 用例 fixture 除窗口/splitter 尺寸外，也钉 `_expanded_column_sizes`
+  （同一 session 别的文件会存自己的三栏比例，布局前提必须自持）；
+- 另修「迟一拍」：`_no_device_hint` / `_spectrum_header` 收到自身 `Resize`
+  时补量一次 `_apply_responsive_chrome`（`resizeEvent` 里子控件几何还没生效）。
+
+判据不变：860 窄形态、1280 长形态、两边都不许有省略号。
+

@@ -88,13 +88,14 @@ print(call("tools/call", {"name":"get_color_maps","arguments":{}}))
    "params":{"protocolVersion":"2024-11-05","capabilities":{"tools":{}},
              "clientInfo":{"name":"generic-python-stdio-client","version":"0.0.1"}}}
 ← {"id":1,"jsonrpc":"2.0","result":{
-     "capabilities":{"tools":{"listChanged":true}},
+     "capabilities":{"tools":{"listChanged":false}},
      "protocolVersion":"2024-11-05",
      "serverInfo":{"name":"mbdsdr-core","version":"0.1.0"}}}
 ```
 
 服务端自报 `protocolVersion=="2024-11-05"`，`serverInfo.name=="mbdsdr-core"`，
-`capabilities.tools.listChanged==true`。握手成功，进程不要求任何模型字段。
+`capabilities.tools.listChanged==false`（服务端不主动推送工具表变更通知）。
+握手成功，进程不要求任何模型字段。
 
 ### 3.2 `tools/list` —— 10 域、83 工具
 

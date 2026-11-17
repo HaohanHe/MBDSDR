@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
 # -*- coding: utf-8 -*-
-"""P13：495 个 AI 工具的逐个可执行性审计。
+"""AI 工具的逐个可执行性审计（工具数以注册表实取为准）。
 
 离线 + 无硬件 + 静音 + offscreen，用替身（假设备 id / 合成 IQ 与音频 /
 临时目录 / 仓库内真实小样本）逐个调用注册表里的每个工具，按四类归档：
@@ -120,8 +120,9 @@ GROUP_ACTION = {
 }
 
 # 名字先于文案判定：这些工具缺的是外设而不是「基本 SDR」
-_G2_NAME_PREFIX = ("gimbal_", "sky_gimbal", "sky_track", "sky_tune", "vna_",
-                   "radio_", "instrument", "satdump")
+# sky_look_at 不碰硬件，只缺桌面 UI 执行器 → 按 G2 的「界面类需在桌面端运行」归类。
+_G2_NAME_PREFIX = ("gimbal_", "sky_gimbal", "sky_track", "sky_tune", "sky_look_at",
+                   "vna_", "radio_", "instrument", "satdump")
 
 
 def _group_for(name, reason):

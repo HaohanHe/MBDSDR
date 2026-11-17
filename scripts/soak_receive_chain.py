@@ -289,6 +289,8 @@ def main() -> int:
         center_getter=lambda: 98.5e6,
         main_vfo_dsp=None, vfo2_dsp=None,
         player=player, config=cfg, on_record_iq=recorder,
+        # 浸泡跑的是完整接收链（含解调与音频写出），显式打开解调。
+        audio_enabled=True,
     )
 
     jsonl = open(out_path, "w", encoding="utf-8")

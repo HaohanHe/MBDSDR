@@ -185,10 +185,10 @@ FAILED tests/test_error_remedy_links.py::test_every_catalog_code_is_registered -
 | 64 | `station_untrusted` | 站点不在受控端可信列表 | 否 | — | `mbdsdr_ai/core/controller.py:1043,1217`；桌面零调用 | 不补：服务端协议细项，不进我方 UI |
 | 65 | `no_pass` | 服务端当前时间窗无可用过境 | 否 | — | `mbdsdr_ai/core/controller.py:1122`；桌面零调用 | 不补：同上；桌面卫星面板有独立通用提示 |
 | 66 | `no_downlink_known` | 服务端查不到该卫星下行频点 | 否 | — | `mbdsdr_ai/core/controller.py:1237`；桌面零调用 | 不补：服务端返回值，不进我方 UI |
-| 67 | `sdr_error` | `core.errors.SdrError` 的默认码；异常路径被改写成 `exception:<Type>` | 否 | — | `mbdsdr_ai/core/errors.py:36`；`mbdsdr_ai/tool_registry.py:945` 用 `exception_code(e)` 覆盖 | 不补：兜底类默认码不会作为 UI 文案出现 |
-| 68 | `invalid_argument` | `core.errors` 参数校验异常默认码 | 否 | — | `mbdsdr_ai/core/errors.py:158`；同样被 `exception_code` 覆盖 | 不补：同上，异常码统一改写 |
-| 69 | `export_path_out_of_root` | 导出路径越界（服务端 / MCP envelope） | 否 | — | `mbdsdr_ai/core/errors.py:173`；桌面零 import | 不补：MCP 服务端安全拒绝码，外部客户端可见 |
-| 70 | `decoder_not_available` | 解码器不可用（服务端 envelope） | 否 | — | `mbdsdr_ai/core/errors.py:179`；桌面零 import | 不补：同上 |
+| 67 | `sdr_error` | `mbdsdr_ai.error_handler.SDRUserError` 的默认码；异常路径被改写成 `exception:<Type>` | 否 | — | `mbdsdr_ai/error_handler.py:84`；`mbdsdr_ai/tool_registry.py:945` 用 `exception_code(e)` 覆盖 | 不补：兜底类默认码不会作为 UI 文案出现 |
+| 68 | `invalid_argument` | `InvalidArgumentError` 参数校验异常默认码 | 否 | — | `mbdsdr_ai/error_handler.py:310`（`core/errors.py` 只再导出）；同样被 `exception_code` 覆盖 | 不补：同上，异常码统一改写 |
+| 69 | `export_path_out_of_root` | `ExportPathOutOfRootError` 导出路径越界（服务端 / MCP envelope） | 否 | — | `mbdsdr_ai/error_handler.py:322`（`core/errors.py` 只再导出）；桌面零 import | 不补：MCP 服务端安全拒绝码，外部客户端可见 |
+| 70 | `decoder_not_available` | `DecoderNotAvailableError` 解码器不可用（服务端 envelope） | 否 | — | `mbdsdr_ai/error_handler.py:330`（`core/errors.py` 只再导出）；桌面零 import | 不补：同上 |
 | 71 | `not_available` | 后端 / 模块缺失，`core.controller` 返回 dict | 否 | — | `mbdsdr_ai/core/controller.py:737`；桌面零调用 | 不补：服务端字典，桌面不读 |
 | 72 | `spill_write_failed` | MCP 大字段落盘失败 | 否 | — | `mbdsdr_ai/core/mcp_server.py:1586` | 不补：MCP 服务端 envelope，桌面不渲染 |
 | 73 | `denied_by_policy` | 工具策略拒绝执行（外部 MCP 客户端调用） | 否 | — | `mbdsdr_ai/core/mcp_server.py:1813-1814` | 不补：桌面写操作走自己的确认门，文案自写 |

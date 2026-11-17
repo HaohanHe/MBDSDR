@@ -253,6 +253,9 @@ def measure_rate(sr: float, seconds: float = RUN_SECONDS,
         center_getter=lambda: 98.5e6,
         main_vfo_dsp=None, vfo2_dsp=None,
         player=player, config=cfg, on_record_iq=recorder,
+        # 基准要测"音频写出"这一环：流水线默认不为写卡而解调（idle 红线），
+        # 这里显式声明"本测量就是要解调并写卡"。
+        audio_enabled=True,
     )
     pipe.frame_ready.connect(probe.handle)
     pipe.start()

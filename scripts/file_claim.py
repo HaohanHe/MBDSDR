@@ -673,20 +673,100 @@ def _carry_content_baseline(new: Dict[str, Any], old: Dict[str, Any]) -> None:
         new["content_baseline_from"] = "renew"
 
 
+def _write_all(fd: int, data: bytes) -> None:
+    """把内容写完整：并发瞬时失败（EACCES/EBUSY）重试几次再放弃。
+
+    占位文件只有几百字节，重试 3 次 × 5ms 足够跨过「另一进程刚建好文件、
+    句柄还没关」的窗口。Windows 实测：`test_two_processes_race_exactly_one_wins`
+    里败方进程在 `os.write` 上收到 `PermissionError(EACCES)`，进程退出码变成
+    1，而不是约定的「被拒绝 = 2」。
+    """
+    view = memoryview(data)
+    last_error: Optional[OSError] = None
+    for _ in range(3):
+        try:
+            while view:
+                written = os.write(fd, view)
+                if written <= 0:
+                    raise OSError("os.write 返回 0，占位文件未写完整")
+                view = view[written:]
+            return
+        except PermissionError as exc:
+            last_error = exc
+            time.sleep(0.005)
+    assert last_error is not None
+    raise last_error
+
+
 def _create_marker(path: Path, payload: Dict[str, Any]) -> bool:
-    """O_CREAT|O_EXCL 原子创建；已被占用返回 False。"""
+    """原子创建占位文件；已被占用返回 False。
+
+    先写同目录临时文件、fsync，再 `os.link` 到目标路径：目标要么不存在、要么
+    是**完整内容**，不存在「文件已出现但还没写完」的窗口。这一点是必须的——
+    Windows 字节锁是强制的，读者在 `_read_marker_fd` 里锁着首字节等内容时，
+    创建者向同一文件写入会收到 `EACCES`；旧的「O_EXCL 建空文件再写」在并发下
+    会让两个进程同时失败（2026-11-17 grp0a 实测退出码 `[2, 1]`，不是约定的
+    `[0, 2]`）。`os.link` 在目标已存在时抛 `FileExistsError`，语义仍是「别人
+    先占了」，不会冒泡成退出码 1。
+
+    文件系统不支持硬链接（部分网络盘）时回落到 `_create_marker_excl`。
+    """
+    data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
     try:
-        fd = os.open(str(path), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+        path.parent.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        pass
+    tmp = path.with_name(f"{path.name}.tmp{os.getpid()}")
+    fd: Optional[int] = None
+    try:
+        fd = os.open(str(tmp), os.O_CREAT | os.O_TRUNC | os.O_WRONLY, 0o600)
+        _write_all(fd, data)
+        os.fsync(fd)
+    finally:
+        if fd is not None:
+            os.close(fd)
+    try:
+        os.link(str(tmp), str(path))
+        return True
     except FileExistsError:
         return False
-    except FileNotFoundError:
-        path.parent.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        return _create_marker_excl(path, data)
+    finally:
+        try:
+            tmp.unlink()
+        except OSError:
+            pass
+
+
+def _create_marker_excl(path: Path, data: bytes) -> bool:
+    """回落路径：O_EXCL 建文件并持锁写（读者等锁，不会读到半截）。"""
+    fd: Optional[int] = None
+    for attempt in range(2):
         try:
             fd = os.open(str(path), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
-        except FileExistsError:
+            break
+        except (FileExistsError, PermissionError):
             return False
+        except FileNotFoundError:
+            if attempt:
+                raise
+            path.parent.mkdir(parents=True, exist_ok=True)
+    if fd is None:  # pragma: no cover - 循环必然 break 或 raise
+        return False
     try:
-        os.write(fd, json.dumps(payload, ensure_ascii=False).encode("utf-8"))
+        # 创建者也必须持同一把首字节锁，否则读者持锁等待内容时会挡住写入。
+        deadline = time.monotonic() + 1.0
+        while not _try_lock(fd):
+            if time.monotonic() >= deadline:
+                os.close(fd)
+                try:
+                    path.unlink()
+                except OSError:
+                    pass
+                return False
+            time.sleep(0.005)
+        _write_all(fd, data)
         os.fsync(fd)
     except OSError:
         os.close(fd)
@@ -695,6 +775,11 @@ def _create_marker(path: Path, payload: Dict[str, Any]) -> bool:
         except OSError:
             pass
         raise
+    try:
+        os.lseek(fd, 0, os.SEEK_SET)
+        _unlock(fd)
+    except OSError:
+        pass
     os.close(fd)
     return True
 
