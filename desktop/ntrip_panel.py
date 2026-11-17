@@ -117,13 +117,22 @@ class NtripConfigDialog(QDialog):
         self._poll_timer = QTimer(self)
         self._poll_timer.setInterval(1000)
         self._poll_timer.timeout.connect(self._refresh_status)
-        self._poll_timer.start()
+        # 状态轮询只在面板可见时跑：不可见时没人看，1s 一次纯空转。
 
         # 后台连接/拉取结果回主线程
         self._connect_finished.connect(self._on_connect_finished)
         self._pull_finished.connect(self._on_pull_finished)
 
         self._set_state("idle")
+
+    def showEvent(self, event):  # noqa: N802 - Qt 命名
+        super().showEvent(event)
+        if not self._poll_timer.isActive():
+            self._poll_timer.start()
+
+    def hideEvent(self, event):  # noqa: N802 - Qt 命名
+        self._poll_timer.stop()
+        super().hideEvent(event)
 
     # ------------------------------------------------------------------
     # UI 构建

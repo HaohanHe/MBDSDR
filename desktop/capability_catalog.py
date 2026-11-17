@@ -11,6 +11,9 @@ MBDSDR 桌面端「能力目录」数据层
   * 数字解码    ← mbdsdr_ai/decode_router.py 的 DIGITAL_MODE_CAPABILITIES
   * 长尾解码器  ← mbdsdr_ai/decoder_registry.py（含「未接主调度」的诚实标注）
   * AI 工具域   ← mbdsdr_ai/core/mcp_server.py 的域摘要 + 工具→域映射
+                  （MCP 面按域汇总）
+  * AI 工具全量 ← ToolRegistry 实取（``tool_registry_capabilities``，一人一行，
+                  域/读写/可用性逐项标注；这是模型真正可见的全部注册工具）
   * 快捷操作    ← desktop/shortcuts.py（键位与菜单标签，标题直接用 label）
   * 静态能力    ← 直接用 code 符号校验（PTT 按钮、天空搜索框）
   * 设备硬件能力 ← docs/backend-capability-matrix.md（生成物；逐后端类调用
@@ -41,7 +44,8 @@ import mode_registry as _modes  # noqa: E402
 from shortcuts import BY_ID as _SHORTCUTS  # noqa: E402
 from mbdsdr_ai import decoder_registry as _decoders  # noqa: E402
 from mbdsdr_ai.decode_router import (  # noqa: E402
-    DIGITAL_MODE_CAPABILITIES, EVIDENCE_REAL, EVIDENCE_PARTIAL,
+    DIGITAL_MODE_CAPABILITIES, EVIDENCE_NO_SAMPLE, EVIDENCE_OTA_GOLDEN,
+    EVIDENCE_SYNTHETIC_ONLY,
 )
 from mbdsdr_ai.core import mcp_server as _mcp  # noqa: E402
 from mbdsdr_ai.core.mcp_server import (  # noqa: E402
@@ -118,14 +122,46 @@ STATIC_CAPABILITIES: Tuple[Tuple[str, str, str, str, str, str, str], ...] = (
      "表是逐类静态对照；实例级差异（例如 RTL-SDR 的 Offset 需连接后按驱动"
      "判定）已在表内逐项标注",
      "doc:docs/backend-capability-matrix.md"),
+    ("天空", "今夜可看性",
+     "按云量、地磁活动、采样时刻月光与流星雨活动期粗判今晚能不能看；"
+     "缺测就说缺测，不按晴天假设",
+     "AI 助手：sky_tonight（工具，需联网取云量/空间天气）",
+     "available",
+     "MBDSDR_OFFLINE 或无快照时明确「未联网，不猜」；极光按 Kp 与地磁纬度"
+     "经验门槛粗判，低纬外推避免 Kp=9 假阳性；流星雨只给活动期与峰值 ZHR，"
+     "不折算「今晚每小时几颗」",
+     "module:mbdsdr_ai/astronomy/tonight.py:assess_tonight"),
+    ("天空", "附近台址与公众观星点",
+     "内置 4 个科研台址 + 3 个公众点，全部带官方坐标与来源 URL；"
+     "按站址算球面距离",
+     "AI 助手：sky_observing_sites（工具）；卫星地面轨迹地图上也画出这批点",
+     "available",
+     "research 是科研台址、不对外开放；public 也需预约/开放日，不是旅游推荐；"
+     "官方页没给海拔的记 null，不用 0 顶替",
+     "module:mbdsdr_ai/astronomy/observing_sites.py:nearest_sites"),
+    ("AI", "本地模型端点体检",
+     "只打 GET /v1/models，区分未启动 / 无模型 / 模型名不对 / 认证失败 / 离线",
+     "AI 面板 → 配置 → 检测端点",
+     "available",
+     "不加载模型、不生成文本、不改配置；离线模式一次网络都不打。"
+     "空 API Key + 本机/内网端点（Ollama 等）可直接使用，不用为了过校验乱填 Key",
+     "module:desktop/ai_panel.py:_probe_local_endpoint"),
+    ("AI", "IQ 样本清单体检与切分方案",
+     "校验 JSONL 清单必需字段并查结构硬伤（单类别、同文件跨标签、重复 ID），"
+     "再按 iq_path 分组给出可复现的训练/验证切分名单",
+     "AI 助手：iq_manifest_audit / iq_split_plan（只读工具，读磁盘上的清单）",
+     "available",
+     "只是数据契约层：不读样本内容、不写文件、不训练；本机无 HF 运行时与"
+     "真实多类样本，structural_ready 不代表能训出可用模型",
+     "module:mbdsdr_ai/iq_tools.py:register_iq_tools"),
 )
 
 #: 证据等级 → 人话标注（数字解码状态说明）
 _EVIDENCE_NOTE = {
-    EVIDENCE_REAL: "真录/真值对拍已验证",
-    EVIDENCE_PARTIAL: "合成链自洽，尚无真实空中样本",
+    EVIDENCE_OTA_GOLDEN: "真实空口金标对拍已验证",
+    EVIDENCE_SYNTHETIC_ONLY: "合成链自洽，尚无真实空中样本",
 }
-_DEFAULT_EVIDENCE_NOTE = "无真样本，仅按协议数学性质钉扎"
+_DEFAULT_EVIDENCE_NOTE = "无样本，仅按协议数学性质钉扎（不宣称已支持）"
 
 
 @dataclass(frozen=True)
@@ -139,6 +175,14 @@ class Capability:
     source: str
     status: str = "available"
     note: str = ""
+    # 数字解码条目的证据级别（ota_golden/synthetic_only/no_sample）；
+    # 非解码条目留空。no_sample 的 status 不得为 available。
+    evidence: str = ""
+    # registry 工具的域归属（MCP 中文域名优先，否则用 registry 分类；
+    # 两者都没有时 = 「未分组」）。非工具条目留空。
+    domain: str = ""
+    # registry 工具的读写标记：read / write；非工具条目留空。
+    access: str = ""
 
     @property
     def available(self) -> bool:
@@ -207,13 +251,19 @@ def _digital_capabilities() -> List[Capability]:
             note += ("；解码对拍用 dump1090 官方 OTA 实录，只证明重采样/解码"
                      "路径等价，不代表本机前端能覆盖 1090 MHz")
         status, trigger = "available", ""
-        if cap.dependency:
-            trigger = (f"命令行：python -m mbdsdr_ai --decode-file <文件> "
-                       f"--mode {cap.mode}")
-        else:
+        if not cap.dependency:
             status = "unavailable"
             trigger = "无（通用解码入口未接线，桌面/AI 界面暂无入口）"
             note += "；通用入口未接线，直接走 decode_digital_mode 会返回 not_implemented"
+        elif cap.evidence == EVIDENCE_NO_SAMPLE:
+            # 有代码不等于「已支持」：无样本时只给入口与条件，明确标注未验证。
+            status = "conditional"
+            trigger = (f"命令行：python -m mbdsdr_ai --decode-file <文件> "
+                       f"--mode {cap.mode}")
+            note += "；无样本，未验证，不宣称已支持"
+        else:
+            trigger = (f"命令行：python -m mbdsdr_ai --decode-file <文件> "
+                       f"--mode {cap.mode}")
         out.append(Capability(
             category="解码",
             title=cap.mode.upper(),
@@ -223,6 +273,7 @@ def _digital_capabilities() -> List[Capability]:
             source=f"decode_router:{key}",
             status=status,
             note=note,
+            evidence=cap.evidence,
         ))
     return out
 
@@ -319,6 +370,91 @@ def _static_capabilities() -> List[Capability]:
                    source=s, status=st, note=n)
         for (c, t, d, tr, st, n, s) in STATIC_CAPABILITIES
     ]
+
+
+#: registry 分类前缀 → 帮助面板分类（粗分，仅决定界面分组顺序；
+#: 域字段 ``Capability.domain`` 仍保留 registry 原分类，不丢细粒度）。
+#: 长的具体前缀在前，避免 ``sdr_decode`` 被 ``sdr`` 抢走。
+_TOOL_CATEGORY_RULES: Tuple[Tuple[str, str], ...] = (
+    ("sdr_decode", "解码"), ("sdr_demod", "解码"), ("sdr_protocol", "解码"),
+    ("decode", "解码"), ("digital", "解码"), ("demod", "解码"),
+    ("modulation", "解码"), ("protocol", "解码"), ("fec", "解码"),
+    ("modem", "解码"), ("encode", "解码"), ("broadcast", "解码"),
+    ("multimon", "解码"), ("voice", "解码"), ("amr", "解码"),
+    ("wireless", "解码"), ("rds", "解码"), ("ham_modes", "解码"),
+    ("ssdv", "解码"), ("acquisition", "解码"),
+    ("sdr_satellite", "卫星"), ("sat", "卫星"), ("orbit", "卫星"),
+    ("gnss", "卫星"), ("gps", "卫星"), ("pointing", "卫星"),
+    ("new_spacetime", "卫星"),
+    ("sky", "天空"), ("astro", "天空"),
+    ("sdr_record", "录制"), ("record", "录制"), ("capture", "录制"),
+    ("file_tracker", "录制"),
+    ("radio_control", "发射"), ("tx", "发射"),
+    ("sdr_ui", "设置"), ("ui", "设置"), ("meta", "设置"), ("camera", "设置"),
+    ("sdr", "接收"), ("spectrum", "接收"), ("signal", "接收"),
+    ("dsp", "接收"), ("hal", "接收"), ("vna", "接收"),
+    ("doppler", "接收"), ("pose", "接收"), ("sync", "接收"),
+)
+
+
+def _tool_catalog_category(category: str) -> str:
+    """registry 分类 → 帮助面板分类；认不出的一律进 AI（工具面）。"""
+    c = (category or "").strip().lower()
+    for prefix, cat in _TOOL_CATEGORY_RULES:
+        if c.startswith(prefix):
+            return cat
+    return "AI"
+
+
+def tool_registry_capabilities(registry) -> List[Capability]:
+    """把 ToolRegistry 里的每个工具变成一行能力（一个不丢）。
+
+    与 :func:`_domain_capabilities`（MCP 面按域汇总）互补：这里覆盖
+    模型真正可见的全部注册工具，逐项标注域/读写/可用性。域取 MCP 中文域名
+    （若有），否则用 registry 分类；两者都没有则落「未分组」——不许丢弃。
+
+    ``registry`` 只需提供 ``tools`` 映射（ToolRegistry 或同形替身）。
+    """
+    mcp_domain = {name: dom
+                  for dom, names in _mcp.tool_domain_view().items()
+                  for name in names}
+    out: List[Capability] = []
+    for name, tool in sorted(registry.tools.items()):
+        category = str(tool.get("category") or "").strip()
+        domain = mcp_domain.get(name) or category or "未分组"
+        write = bool(tool.get("write"))
+        if tool.get("available", True):
+            status = "available"
+            trigger = (f"AI 助手：调用工具 {name}"
+                       + ("（写操作，执行前需外部确认 token）" if write else "（只读）"))
+            note = ("写工具：执行走 tx_guard 一次性 confirm_token，"
+                    "模型不能自备授权" if write else "")
+        else:
+            status = "unavailable"
+            trigger = "无（注册表标记为不可用）"
+            note = "注册表 available=False：入口未接线或依赖缺失"
+        desc = (tool.get("definition", {}).get("function", {})
+                .get("description") or "").strip()
+        out.append(Capability(
+            category=_tool_catalog_category(category),
+            title=name,
+            description=desc or f"工具 {name}",
+            trigger=trigger,
+            source=f"tool_registry:{name}",
+            status=status,
+            note=note,
+            domain=domain,
+            access="write" if write else "read",
+        ))
+    return out
+
+
+def build_full_catalog(registry) -> List[Capability]:
+    """完整目录 = 既有目录（面板/解码/MCP 域/快捷/静态）+ registry 全量工具。"""
+    items = build_catalog() + tool_registry_capabilities(registry)
+    order = {c: i for i, c in enumerate(CATEGORIES)}
+    return sorted(items, key=lambda x: (order.get(x.category, len(order)),
+                                        x.title))
 
 
 def build_catalog() -> List[Capability]:

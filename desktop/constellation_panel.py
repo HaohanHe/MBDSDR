@@ -558,7 +558,16 @@ class ConstellationPanel(QWidget):
         self._tick = QTimer(self)
         self._tick.setInterval(100)
         self._tick.timeout.connect(self._on_tick)
-        self._tick.start()
+        # 不随构造常驻：不可见时停表（10fps 空转也要吃 CPU）。
+
+    def showEvent(self, event):  # noqa: N802 - Qt 命名
+        super().showEvent(event)
+        if not self._tick.isActive():
+            self._tick.start()
+
+    def hideEvent(self, event):  # noqa: N802 - Qt 命名
+        self._tick.stop()
+        super().hideEvent(event)
 
     # ------------------------------------------------------------------ 状态
     def set_sdr_connected(self, connected: bool) -> None:

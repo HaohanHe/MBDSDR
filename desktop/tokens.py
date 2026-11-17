@@ -458,6 +458,21 @@ class DesignTokens:
         base = self.THEME_COLORS.get(name, self.THEME_COLORS["default"])
         return dict(base)
 
+    def semantic_color(self, key: str) -> str:
+        """当前主题的语义色（accent/success/danger/grid 等），供绘制路径取色。
+
+        与 :meth:`status_color` 同一口径：优先当前生效主题的
+        ``THEME_COLORS[name][key]``；主题没这个键（如 ``gray_400``/``card_2``
+        这类中性档）回落全局 ``COLORS[key]``。绘制代码用它可以不再直读全局
+        ``COLORS``——浅色主题下 accent/success 的压暗档才会生效。
+        """
+        palette = self.theme_colors(self._theme_name)
+        if key in palette:
+            return palette[key]
+        if key in self.COLORS:
+            return self.COLORS[key]
+        raise KeyError(f"未知颜色 token: {key}")
+
     def status_color(self, kind: str, bg: str = "", theme: str = "") -> str:
         """状态色统一入口（status_warning / status_danger / status_success）。
 

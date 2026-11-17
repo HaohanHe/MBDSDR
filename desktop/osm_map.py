@@ -904,6 +904,11 @@ class OsmMapView(QWidget, _PinchMixin):
     zoom_changed = Signal(int)
     map_error = Signal(str)
 
+    #: 当前层级没瓦片时，往上一级找已缓存瓦片放大顶替（QGIS / OpenLayers
+    #: 的 parent-tile fallback 同一套做法）。最多上溯 4 级：再往上放大会糊成
+    #: 一片色块，不如留虚线占位让人知道这里还没下。
+    PARENT_FALLBACK_LEVELS = 4
+
     def __init__(self, parent: Optional[QWidget] = None, *,
                  online: bool = True, cache: Optional[TileCache] = None,
                  tile_source: Optional[Callable] = None,
@@ -938,6 +943,8 @@ class OsmMapView(QWidget, _PinchMixin):
         self._plan: Optional[dict] = None
         #: 上一帧真正画出的瓦片数：署名只在 >0 时显示（零瓦片不许挂 OSM 署名）
         self._drawn_tiles = 0
+        #: 其中有多少格是「上级瓦片放大顶替」——只作诊断，不影响署名
+        self._drawn_fallback = 0
         # 触摸手势走 mixin 的 event()；这里只连信号
         try:
             self.init_pinch_zoom()
@@ -1109,6 +1116,7 @@ class OsmMapView(QWidget, _PinchMixin):
             plan = self._tile_plan()
             missing = []
             drawn = 0
+            fallback = 0
             w, h = self.width(), self.height()
             for d, px, py, tx, ty in plan["items"]:
                 if px > w or py > h:
@@ -1119,6 +1127,15 @@ class OsmMapView(QWidget, _PinchMixin):
                 if pm is not None:
                     p.drawPixmap(int(px), int(py), TILE_SIZE, TILE_SIZE, pm)
                     drawn += 1
+                    continue
+                anc = self._ancestor_tile(tx, ty)
+                if anc is not None:
+                    apm, src = anc
+                    p.setRenderHint(QPainter.SmoothPixmapTransform, True)
+                    p.drawPixmap(QRectF(px, py, TILE_SIZE, TILE_SIZE), apm, src)
+                    p.setRenderHint(QPainter.SmoothPixmapTransform, False)
+                    drawn += 1
+                    fallback += 1
                     continue
                 p.fillRect(QRectF(px, py, TILE_SIZE, TILE_SIZE), _LOADING)
                 p.setPen(QPen(_GRID, 1, Qt.DotLine))
@@ -1139,19 +1156,56 @@ class OsmMapView(QWidget, _PinchMixin):
             self._draw_marker(p)
             self._draw_pick_marker(p)
             self._drawn_tiles = drawn
+            self._drawn_fallback = fallback
             self._draw_hud(p)
         finally:
             p.end()
 
     def _cached_tile(self, x: int, y: int) -> Optional[QPixmap]:
         """只取缓存（注入源直接调用），绝不在这里发请求。"""
+        return self._cached_at(self._zoom, x, y)
+
+    def _cached_at(self, z: int, x: int, y: int) -> Optional[QPixmap]:
+        """指定层级只查缓存（内存→磁盘），不发任何请求。"""
         if self._tile_source is not None:
             try:
-                got = self._tile_source(self._zoom, x, y)
+                got = self._tile_source(z, x, y)
             except Exception:  # noqa: BLE001
                 return None
             return got if isinstance(got, QPixmap) else None
-        return self._loader.peek(self._zoom, x, y)
+        return self._loader.peek(z, x, y)
+
+    def _ancestor_tile(self, tx: int, ty: int
+                       ) -> Optional[Tuple[QPixmap, "QRectF"]]:
+        """当前层级缺瓦片时，找已缓存的上级瓦片顶替这一格。
+
+        返回 ``(pixmap, 源矩形)``：源矩形是上级瓦片里对应这一格的像素范围，
+        画的时候放大到整格。**只读缓存、不发请求**——离线时上级瓦片也是
+        缓存里的真实 OSM 像素，比满屏虚线占位有用，署名也不会变假。
+
+        几何：第 k 级上级瓦片覆盖 2^k × 2^k 格，每格在它里面是
+        ``256 >> k`` 像素见方，偏移由 (x mod 2^k, y mod 2^k) 决定。
+        """
+        found = False
+        pm = None
+        src = QRectF()
+        for k in range(1, self.PARENT_FALLBACK_LEVELS + 1):
+            z = self._zoom - k
+            if z < MIN_ZOOM:
+                break
+            n = 2 ** z
+            px, py = int(tx) >> k, int(ty) >> k
+            if py < 0 or py >= n:
+                break
+            pm = self._cached_at(z, px % n, py)
+            if pm is None:
+                continue
+            size = TILE_SIZE >> k
+            src = QRectF((int(tx) % (2 ** k)) * size,
+                         (int(ty) % (2 ** k)) * size, size, size)
+            found = True
+            break
+        return (pm, src) if found and pm is not None else None
 
     def _draw_grid(self, p: QPainter) -> None:
         """没瓦片时的经纬网（真正的坐标参考，不是假海岸线）。"""
@@ -1209,12 +1263,19 @@ class OsmMapView(QWidget, _PinchMixin):
         return bool(self._show_attr and self._drawn_tiles > 0)
 
     def _loading_hud(self) -> Tuple[str, str]:
-        """HUD 的加载态判定（不绘制）：``(状态, 文案)``，状态 = loading/failed/idle。
+        """HUD 的加载态判定（不绘制）：``(状态, 文案)``，状态 =
+        loading/failed/offline/idle。
 
         离线时必须能落到 failed——这是「蓝条挂十几分钟」那个缺陷的判据所在。
+        ``online=False`` 是主动离线（测试/离线演示）：不报网络失败，但也不
+        能一声不吭留一屏虚线——那会被读成「地图坏了」。
         """
         if self._tile_source is not None:
             return ("idle", "")
+        if not self._loader.online:
+            if self._drawn_tiles > 0:
+                return ("idle", "")
+            return ("offline", "离线：本区域没有已缓存的瓦片（联网后可下载）")
         state, why = self._loader.status_line()
         if state == "loading":
             return ("loading", "正在加载地图…（首次经代理会慢几秒，之后走缓存）")
@@ -1242,6 +1303,9 @@ class OsmMapView(QWidget, _PinchMixin):
             if state == "loading":
                 p.fillRect(QRectF(10, 28, fw, 19), QColor(20, 34, 52, 210))
                 p.setPen(QPen(QColor("#9fc4ee"), 1))
+            elif state == "offline":
+                p.fillRect(QRectF(10, 28, fw, 19), QColor(26, 30, 38, 220))
+                p.setPen(QPen(QColor("#b9c0cc"), 1))
             else:
                 p.fillRect(QRectF(10, 28, fw, 19), QColor(90, 26, 26, 210))
                 p.setPen(QPen(QColor("#ffb0a6"), 1))

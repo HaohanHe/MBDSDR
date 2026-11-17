@@ -5,6 +5,15 @@
 卫星仰角/方位角，反向指挥人把天线/手机转到正对卫星；同时通过 rtl_tcp
 直连一台外置 RTL-SDR，让 AI 用 function calling 真正完成调谐。
 
+## 验证状态：`not_verified`（2026-11-17）
+
+- **本机没有 Flutter SDK**（`flutter` 不在 PATH），本轮**未执行**
+  `flutter pub get` / `flutter analyze` / `flutter test`，也**未编译** Android/iOS 产物。
+- 因此手机端当前状态是 **`not_verified`**：本文件下方的构建命令与历史基线
+  只是仓库记录，**不是本轮验证结果**。
+- 有 SDK 的环境需重新跑 `flutter analyze` 与 `flutter test`；全部通过后才能
+  把本项从「未验证」除名。不得据此宣称可运行或已验收。
+
 ## 架构
 
 ```
@@ -70,8 +79,9 @@ flutter run
 
 ## 已知限制（诚实声明）
 
-- **本仓库云端没有 Android/iOS 构建工具链**，本版未做真机构建，只保证 Dart 侧
-  编译与单元测试通过；真机表现需在本地开发机验证。
+- **本仓库云端没有 Android/iOS 构建工具链，本机也没有 Flutter SDK**，本版
+  未做真机构建；代码可能通过 Dart 静态检查，但**本轮未运行 analyze/test**，
+  状态为 `not_verified`，真机表现与测试结果都需在本地开发机验证。
 - 解调音频本版只产出 Float32 音频流，**尚未接扬声器**（音频路由/采样率匹配
   留待后续）。
 - SGP4 为公开参考实现移植，**忽略章动与极移**，对低仰角指向有约 0.1° 量级误差。

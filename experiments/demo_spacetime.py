@@ -9,8 +9,8 @@ Phase9 P3 — 新时空融合 · 一条命令确定性演示
 
   1. 注入固定 GNSS UTC 时间（不读串口/不联网）->
      ``mbdsdr_ai.gnss_timestamps.resolve_capture_datetime`` ->
-     得 ``CaptureTime(time_source="gnss")``，把 ``core:datetime`` 与
-     ``mbdsdr:time_source`` 写进 SigMF sidecar；
+     得 ``CaptureTime(time_source="nmea")``，把 ``core:datetime`` 与
+     ``mbdsdr:time_source`` / ``mbdsdr:time_precision`` 写进 SigMF sidecar；
   2. 合成一段**带多普勒**的基带信号（固定种子），写成 cf32_le SigMF；
   3. 用 ``mbdsdr_ai.doppler_compensation.remove_doppler_shift``（NCO 数字下混频）
      对已知多普勒做逆运算补偿；
@@ -188,7 +188,7 @@ def main(argv=None) -> int:
     # 回放端读回 meta（与桌面 C++ 同一字段约定）。
     meta_back = playback.parse_sigmf_meta(data_path.replace(".sigmf-data",
                                                            ".sigmf-meta"))
-    assert meta_back["time_source"] == "gnss", meta_back
+    assert meta_back["time_source"] == gt.TIME_SOURCE_GNSS, meta_back
     assert meta_back["datetime"] == cap.datetime_iso
 
     # 3) NCO 补偿：用已知多普勒逆运算回基带。

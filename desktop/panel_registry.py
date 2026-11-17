@@ -153,11 +153,7 @@ class PanelRegistry:
                       collapsible=False, min_w=center_min,
                       summary="选卫星后闭环跟踪：500ms 更新方位/仰角/多普勒并自动调谐",
                       factory=_cls_factory("sat_track_panel", "SatTrackPanel")),
-            PanelSpec("new_spacetime","新时空",    "◷", AREA_CENTER,
-                      collapsible=False, min_w=center_min,
-                      summary="调制自动识别 + 卫星过境时间线与授时 + 频率-轨道关系图",
-                      factory=_cls_factory("new_spacetime_panel",
-                                           "NewSpacetimePanel")),
+            # （2026-11-16 移除「新时空」聚合面板：调制识别/卫星跟踪各有专页）
             PanelSpec("adsb",       "ADS-B 航路", "✈", AREA_CENTER,
                       collapsible=False, min_w=center_min,
                       summary="ADS-B 飞机位置图与航班列表；只画真实解算出的经纬度",

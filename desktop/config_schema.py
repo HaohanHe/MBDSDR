@@ -161,9 +161,10 @@ ALL_ITEMS: Tuple[SettingItem, ...] = (
     SettingItem(
         key="touch_mode", group="通用", kind="enum",
         label="触屏适配", default="auto",
-        help="自动检测触屏设备；强制触屏会放大按钮/滚动条，强制鼠标则保持桌面手感。",
-        source="desktop/settings.py DEFAULTS['touch_mode']；检测语义见 desktop/touch_manager.py TouchManager.set_override",
-        choices=(_e("auto", "自动检测"), _e("on", "强制触屏"), _e("off", "强制鼠标")),
+        help="默认自动：检测到触屏硬件（Qt 指针设备 / Windows 数字化仪标志），"
+             "或收到真实触控事件时，自动放大按钮与滚动条；强制项仅用于排障。",
+        source="desktop/settings.py DEFAULTS['touch_mode']；检测语义见 desktop/touch_manager.py TouchManager",
+        choices=(_e("auto", "自动检测（推荐）"), _e("on", "强制触屏"), _e("off", "强制鼠标")),
     ),
 
     # --- 身份与硬件接线：从主界面收进设置（用户 2026-11-07 明确要求） ---
@@ -347,10 +348,11 @@ ALL_ITEMS: Tuple[SettingItem, ...] = (
     ),
     SettingItem(
         key="show_peaks", group="频谱与解码", kind="bool",
-        label="标注峰值", default=True,
-        help=("在谱面上画出超过阈值的峰点与频率标签。"
+        label="标注峰值", default=False,
+        help=("在谱面上画出超过阈值的峰点与频率标签。默认关：峰位按每帧现算，"
+              "谱线一抖标签就逐帧换位置，静止时也读不稳。"
               "联动：标不标由「峰值判定阈值」决定，阈值越大画出的峰越少。"),
-        source="desktop/spectrum_widget.py: _PlotState.show_peaks（默认 True）",
+        source="desktop/spectrum_widget.py: _PlotState.show_peaks（默认 False）",
     ),
     SettingItem(
         key="waterfall_smooth", group="频谱与解码", kind="bool",

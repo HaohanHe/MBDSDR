@@ -169,7 +169,17 @@ class AdsbMapPanel(QWidget):
         self._bus_timer = QTimer(self)
         self._bus_timer.setInterval(200)
         self._bus_timer.timeout.connect(self._poll_iq_bus)
-        self._bus_timer.start()
+        # 不在构造时 start：面板没展开/没显示就不该消费 IQ 总线（用户口径：
+        # 没开启的功能不许在后台烧 CPU）。首次 showEvent 启动，hideEvent 停止。
+
+    def showEvent(self, event):  # noqa: N802 - Qt 命名
+        super().showEvent(event)
+        if not self._bus_timer.isActive():
+            self._bus_timer.start()
+
+    def hideEvent(self, event):  # noqa: N802 - Qt 命名
+        self._bus_timer.stop()
+        super().hideEvent(event)
 
     # ------------------------------------------------------------------ #
     # 诊断文本（对外可读；原来挂在画布上，现在挂面板上——画布是公用组件，

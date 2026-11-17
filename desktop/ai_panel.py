@@ -276,6 +276,18 @@ def _forwardable_args(raw_args: Any) -> Tuple[Optional[Dict[str, Any]], str]:
     return None, f"参数类型不受支持（{type(raw_args).__name__}）"
 
 
+def issue_desktop_confirmation(tool_name: str,
+                               args: Optional[Dict[str, Any]]) -> str:
+    """桌面确认面：为这次真实点击签发绑定动作摘要的一次性 token。
+
+    只有这里（以及测试/受信任脚本）可以调用，模型永远拿不到签发能力。
+    ``source="desktop"`` 让审计能区分「用户在本机点过」与「模型自报」。
+    """
+    from mbdsdr_ai.tx_guard import issue_confirmation
+    return issue_confirmation(tool_name, args, source="desktop",
+                              note="桌面确认执行")
+
+
 class AIPanel(QWidget):
     """AI 对话面板。"""
 
@@ -652,7 +664,9 @@ class AIPanel(QWidget):
             QMessageBox.warning(self, "AI 内核不可用", "mbdsdr_ai 模块未找到，请检查安装。")
             return
 
-        from PySide6.QtWidgets import QDialog, QFormLayout, QLineEdit, QDialogButtonBox
+        from PySide6.QtWidgets import (
+            QApplication, QDialog, QDialogButtonBox, QFormLayout, QLineEdit,
+        )
 
         dialog = QDialog(self)
         dialog.setWindowTitle(self.tr("AI 配置"))
@@ -661,7 +675,8 @@ class AIPanel(QWidget):
 
         api_key_edit = QLineEdit()
         api_key_edit.setEchoMode(QLineEdit.Password)
-        api_key_edit.setPlaceholderText("sk-...（留空则不使用 LLM）")
+        api_key_edit.setPlaceholderText(
+            "sk-...（云端必填；本机/内网端点如 Ollama 可留空）")
         if self.agent and self.agent.config.api_key:
             api_key_edit.setText(self.agent.config.api_key)
         elif self._saved_config.get("api_key"):
@@ -682,6 +697,41 @@ class AIPanel(QWidget):
         )
         form.addRow(self.tr("模型:"), model_edit)
 
+        # 端点体检：只打死 GET /v1/models，不加载模型、不生成文本。
+        # 结果必须区分「没启动 / 没模型 / 名字不对 / 认证失败 / 离线」，
+        # 只写「不可用」用户修不了（见 mbdsdr_ai/local_ai_probe.py）。
+        probe_row = QHBoxLayout()
+        probe_btn = QPushButton(self.tr("检测端点"))
+        probe_btn.setToolTip("GET /v1/models：只探测，不加载模型、不生成文本")
+        probe_row.addWidget(probe_btn)
+        probe_row.addStretch(1)
+        form.addRow(self.tr("端点状态:"), probe_row)
+
+        probe_label = QLabel(self.tr("尚未检测"))
+        probe_label.setWordWrap(True)
+        probe_label.setStyleSheet(
+            "font-size: 8pt; color: palette(placeholder-text);")
+        form.addRow("", probe_label)
+
+        def _detect():
+            probe_btn.setEnabled(False)
+            probe_label.setText(self.tr("检测中…"))
+            QApplication.setOverrideCursor(Qt.WaitCursor)
+            try:
+                QApplication.processEvents()
+                text, level = self._probe_local_endpoint(
+                    base_url_edit.text().strip(),
+                    api_key_edit.text().strip(),
+                    model_edit.text().strip())
+                probe_label.setText(text)
+                probe_label.setStyleSheet(
+                    f"font-size: 8pt; color: {_tok().status_color(level)};")
+            finally:
+                QApplication.restoreOverrideCursor()
+                probe_btn.setEnabled(True)
+
+        probe_btn.clicked.connect(_detect)
+
         buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         buttons.accepted.connect(dialog.accept)
         buttons.rejected.connect(dialog.reject)
@@ -692,6 +742,29 @@ class AIPanel(QWidget):
                 api_key_edit.text().strip(),
                 base_url_edit.text().strip(),
                 model_edit.text().strip())
+
+    def _probe_local_endpoint(self, base_url: str, api_key: str = "",
+                              model: str = "", *, http_get=None):
+        """端点体检 → (人话结论, 主题等级)；``http_get`` 供测试注入。
+
+        只读 GET ``/v1/models``：不加载模型、不生成、不改配置。
+        探测异常不抛给 UI——配置对话框里弹异常栈，用户还是不知道该修哪。
+        """
+        try:
+            from mbdsdr_ai.local_ai_probe import format_probe, probe_endpoint
+            result = probe_endpoint(base_url, api_key=api_key, model=model,
+                                    http_get=http_get)
+        except Exception as exc:  # pragma: no cover - 导入/探测异常兜底
+            return (f"端点体检失败（{type(exc).__name__}: {exc}）", "danger")
+        status = str(result.get("status") or "error")
+        # 只有真的可用才挂绿；离线/无模型/模型名不在列表是 warning，
+        # 其余是 danger。「服务在但名字写错」不能显示成可用。
+        if status == "ready" and result.get("model_present") is False:
+            level = "warning"
+        else:
+            level = {"ready": "success", "offline": "warning",
+                     "no_models": "warning"}.get(status, "danger")
+        return format_probe(result), level
 
     def _apply_config_from_dialog(self, api_key: str, base_url: str,
                                   model: str) -> None:
@@ -705,8 +778,10 @@ class AIPanel(QWidget):
         }
         saved = self._save_config(self._saved_config)
 
-        if not api_key:
-            # 未填写 API Key：不初始化 agent，避免后续调用失败
+        from mbdsdr_ai.model_manager import is_local_endpoint
+        keyless_local = bool(base_url) and is_local_endpoint(base_url)
+        if not api_key and not keyless_local:
+            # 未填写 API Key 且不是本机/内网端点：不初始化 agent，避免后续调用失败
             self.agent = None
             self._update_ai_status()
             self._add_system_message(
@@ -726,7 +801,8 @@ class AIPanel(QWidget):
         self._update_ai_status()
         if saved:
             self._add_system_message(
-                f"AI 已配置并保存: {model}（配置文件: ~/.mbdsdr/config.json）")
+                f"AI 已配置并保存: {model}（配置文件: ~/.mbdsdr/config.json）"
+                + ("（本地端点，无需 API Key）" if keyless_local else ""))
         else:
             self._add_system_message(
                 f"AI 配置未能写入磁盘（{self._last_save_error}）："
@@ -784,7 +860,9 @@ class AIPanel(QWidget):
             or os.environ.get("MBDSDR_MODEL", "Qwen/Qwen3.6-35B-A3B")
         )
 
-        if not final_api_key:
+        from mbdsdr_ai.model_manager import is_local_endpoint
+        keyless_local = bool(final_base_url) and is_local_endpoint(final_base_url)
+        if not final_api_key and not keyless_local:
             # 没有 API Key 也装载 Agent 内核（用户 2026-11-08：「作为 Agent」
             # 「常驻化」「人工智能编排 / Hooks 有没有」）。
             # 工具注册表、Hooks、编排器、插件系统都是本进程的能力，不该因为
@@ -805,6 +883,11 @@ class AIPanel(QWidget):
         self.agent = self._create_agent(config)
         self._apply_pending_mcp_tools()
         self._update_ai_status()
+        if keyless_local and not final_api_key:
+            self._add_system_message(
+                f"AI 内核已初始化: {final_model}（本地端点 {final_base_url}，"
+                "无需 API Key；服务未启动时请先启动本地推理服务）")
+            return
         source = "参数" if api_key else ("配置文件" if self._saved_config.get("api_key") else ("环境变量" if os.environ.get("MBDSDR_API_KEY") else "默认"))
         self._add_system_message(f"AI 内核已初始化: {final_model}（配置来源: {source}）")
 
@@ -1195,6 +1278,25 @@ class AIPanel(QWidget):
         self._refresh_live_bar()
         self.reply_received.emit(reply or "")
 
+    def _confirm_execute(self, tool_name: str,
+                         args: Optional[Dict[str, Any]]) -> bool:
+        """用户点击「确认执行」：签发一次性 token 后再交给执行方。
+
+        布尔 ``confirm=True`` 已不再是授权——执行方只认绑定动作摘要的
+        token。签发失败（审计不可写等）时 fail-closed，不执行。
+        """
+        try:
+            token = issue_desktop_confirmation(tool_name, args)
+        except Exception as e:  # noqa: BLE001 - 签发失败必须可见且不执行
+            self._add_system_message(
+                "确认授权签发失败，本次未执行：%s: %s"
+                % (type(e).__name__, e))
+            return False
+        payload = dict(args or {})
+        payload["confirm_token"] = token
+        return self._local_dispatch("确认执行 " + tool_name, confirm=True,
+                                    only_tool=tool_name, only_args=payload)
+
     def _render_tool_card(self, card: dict, status_label: dict) -> None:
         """工具回执卡（对齐原型 .toolcard）：工具名 + 真实状态 + 真实结果。"""
         status = card.get("status", "failed")
@@ -1226,8 +1328,7 @@ class AIPanel(QWidget):
                 "color:#0B0E14;border:none;border-radius:5px;")
             btn.clicked.connect(
                 lambda _c=False, n=name, a=cargs:
-                    self._local_dispatch("确认执行 " + n, confirm=True,
-                                         only_tool=n, only_args=a))
+                    self._confirm_execute(n, a))
             lay = getattr(self, "_confirm_layout", None)
             if lay is not None:
                 lay.insertWidget(lay.count() - 1, btn)

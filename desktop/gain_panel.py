@@ -50,7 +50,9 @@ class _StageSlider(QWidget):
 
         row = QHBoxLayout()
         self.name_label = QLabel(f"{logical}:")
-        self.value_label = QLabel("-- dB")
+        #: 未连接时没有真实施加，读数用「—」；不许把滑杆下限（-48 之类）
+        #: 当成设备读数摆出来（离屏走查 gain.png）。
+        self.value_label = QLabel("—")
         row.addWidget(self.name_label)
         row.addStretch()
         row.addWidget(self.value_label)
@@ -280,11 +282,15 @@ class GainPanel(QWidget):
 
     def _apply_connected_state(self):
         ready = self._connected
-        for sl in (self.lna, self.mixer, self.vga):
-            # 滑块本身已按 supported 置灰；这里只控制 AGC
-            pass
         self.agc_chk.setEnabled(ready)
         if not ready:
+            # 未连接/无设备：三档全部禁用，数值标签回到「—」。
+            # 只置灰 AGC 不够——断开前支持的档位会带着上一次的滑块位置和
+            # 数值继续显示（-48 之类的下限值会被当成设备读数）。
+            for sl in (self.lna, self.mixer, self.vga):
+                sl.slider.setEnabled(False)
+                sl.value_label.setText("—")
+                sl.value_label.setToolTip("")
             self.total_label.setText("总增益: 未连接")
 
     # ------------------------------------------------------------------ 槽

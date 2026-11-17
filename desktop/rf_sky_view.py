@@ -82,14 +82,14 @@ from typing import Optional, List, Dict, Tuple, Set
 
 from mbdsdr_ai.time_format import resolve_tz_info
 
-from PySide6.QtCore import Qt, QTimer, QPointF, QRectF, Signal
+from PySide6.QtCore import Qt, QTimer, QPointF, QRectF, Signal, QEvent
 from PySide6.QtGui import (
     QPainter, QColor, QPen, QBrush, QFont, QFontMetrics,
     QPainterPath, QPolygonF, QTransform,
     QLinearGradient, QRadialGradient,
-    QMouseEvent, QWheelEvent, QResizeEvent,
+    QMouseEvent, QWheelEvent, QResizeEvent, QAction,
 )
-from PySide6.QtWidgets import QWidget, QFrame, QVBoxLayout, QLabel
+from PySide6.QtWidgets import QWidget, QFrame, QVBoxLayout, QLabel, QMenu
 
 from constants import cons_of_talker
 
@@ -119,6 +119,9 @@ from mbdsdr_ai.sky_interaction import (
     sky_to_screen_many,
     screen_to_sky,
 )
+from mbdsdr_ai.sky_hud import build_hud as build_sky_hud
+from mbdsdr_ai.sky_pointing import apply_calibration as sky_apply_calibration
+from mbdsdr_ai.sky_pointing import view_params as sky_view_params
 from mbdsdr_ai import skyengine
 from mbdsdr_ai.sat_catalog import (
     BUILTIN_CATNRS as _SAT_BUILTIN_CATNRS,
@@ -788,13 +791,76 @@ def label_tier(priority: float) -> int:
     return 4
 
 
+#: 宽 FOV 标签分桶网格（列, 行）。见 label_tier_keep 的 spread 参数。
+LABEL_SPREAD_GRID = (4, 3)
+#: 启用屏幕分桶的 FOV 门。取 65° = 座名渐显上界（CONSTEL_LABEL_FOV[1]）：
+#: 再往里就是"盯着某一个座看"，名字本来就该跟着那个座集中，不该摊满屏。
+LABEL_SPREAD_MIN_FOV_DEG = 65.0
+
+
+def _spread_pick(rows, items, cap: int,
+                 bounds: Tuple[float, float, float, float]) -> List[int]:
+    """宽 FOV 名额分配：按屏幕网格轮转，别把名额全给中心那一圈。
+
+    成因（实测，见 docs/learn/stellarium-constellation-labels.md）：旧逻辑只
+    保留"离视场中心最近"的 cap 条，而标签是画在自己的锚点上的——150° 投影下
+    中心角距压缩、星座名本就更靠近中心，于是 24 条名额被中心一圈吃光，
+    屏幕边缘全空、中心挤成一坨。这里把屏幕划成 LABEL_SPREAD_GRID 个格子，
+    每格内按"到格心距离"排序，然后逐轮每格取一条直到 cap：
+    条数上限不变，但名字摊到全屏。
+    """
+    x0, y0, x1, y1 = bounds
+    cols, nrows = LABEL_SPREAD_GRID
+    cw = max(1.0, (float(x1) - float(x0)) / cols)
+    ch = max(1.0, (float(y1) - float(y0)) / nrows)
+    cells: Dict[Tuple[int, int], List[Tuple[float, int]]] = {}
+    for _d, i in rows:
+        pos = items[i][1]
+        px, py = float(pos.x()), float(pos.y())
+        cx = min(cols - 1, max(0, int((px - float(x0)) // cw)))
+        cy = min(nrows - 1, max(0, int((py - float(y0)) // ch)))
+        cell_cx = float(x0) + (cx + 0.5) * cw
+        cell_cy = float(y0) + (cy + 0.5) * ch
+        cells.setdefault((cy, cx), []).append(
+            (math.hypot(px - cell_cx, py - cell_cy), i))
+    for lst in cells.values():
+        lst.sort()
+    order = sorted(cells)
+    picked: List[int] = []
+    r = 0
+    while len(picked) < cap:
+        progressed = False
+        for key in order:
+            lst = cells[key]
+            if r < len(lst):
+                picked.append(lst[r][1])
+                progressed = True
+                if len(picked) >= cap:
+                    break
+        if not progressed:
+            break
+        r += 1
+    return picked
+
+
 def label_tier_keep(items, center_x: float, center_y: float,
-                    caps: Tuple[int, ...] = LABEL_TIER_CAPS) -> List[int]:
+                    caps: Tuple[int, ...] = LABEL_TIER_CAPS,
+                    bounds: Optional[Tuple[float, float, float, float]] = None,
+                    spread: bool = False,
+                    spread_tiers: Tuple[int, ...] = (2,)) -> List[int]:
     """按档限流：每档只保留离视场中心最近的 cap 条。
 
     items: [(priority, pos, lines, color)]，pos 有 x()/y()。同档按距离升序，
     距离相同再按登记顺序（稳定）。这样被丢的是**远处**座名，不是随机或
     按目录顺序硬截断；近处用户正在看的名字不会被远处挤掉。
+
+    spread=True（配合 bounds 屏幕矩形）改走 :func:`_spread_pick` 的屏幕分桶：
+    条数上限不变，但名额摊到全屏。只在宽 FOV 用——窄 FOV 下"中心优先"仍然
+    是对的语义，调用方按 LABEL_SPREAD_MIN_FOV_DEG 决定。
+
+    spread_tiers 默认只作用于 P2（星座/星官名）：宽 FOV 下唯一会挤满 24 条
+    名额的就是这一档（实测 31 区域名），而行星/卫星/星名本来就稀疏且分布
+    全屏，改它们的挑选口径没有收益。
     """
     buckets: Dict[int, List[Tuple[float, int]]] = {}
     for i, (prio, pos, _lines, _color) in enumerate(items):
@@ -805,6 +871,10 @@ def label_tier_keep(items, center_x: float, center_y: float,
     keep: List[int] = []
     for tier, rows in buckets.items():
         cap = int(caps[tier]) if tier < len(caps) else 0
+        if (spread and bounds is not None and cap > 0
+                and tier in spread_tiers):
+            keep.extend(_spread_pick(rows, items, max(0, cap), bounds))
+            continue
         rows.sort(key=lambda r: (r[0], r[1]))
         keep.extend(i for _d, i in rows[:max(0, cap)])
     return sorted(keep)
@@ -983,6 +1053,8 @@ AU_KM = 149597870.7
 # 16 方位名：方位角语义（N/NE/E…）与度数同时显示，不让人猜 0° 是哪边。
 _COMPASS_16 = ("N", "NNE", "NE", "ENE", "E", "ESE", "SE", "SSE",
                "S", "SSW", "SW", "WSW", "W", "WNW", "NW", "NNW")
+# 8 方位中文名（人话视轴行用：比 16 方位短，不会撑破卡宽）。
+_COMPASS_8_CN = ("北", "东北", "东", "东南", "南", "西南", "西", "西北")
 
 
 def _round_half_up(value: float, digits: int) -> float:
@@ -1098,8 +1170,58 @@ def local_sidereal_time_deg(jd_ut1: float, lon_deg: float) -> float:
 
 
 def format_view_axis(az_deg: float, alt_deg: float) -> str:
-    """摄像机视轴读数：AZ（16 方位）+ ALT（几何高度）。"""
+    """摄像机视轴读数：AZ（16 方位）+ ALT（几何高度）。
+
+    例 ``AZ 123.4° ESE · ALT 45.0°``。专业数值行只放数值与单位，保证
+    240px 卡片里不超宽；中文人话另见 :func:`format_view_axis_human`。
+    """
     return f"AZ {format_azimuth(az_deg)} · ALT {format_angle_deg(alt_deg)}"
+
+
+def _compass_name_8_cn(azimuth_deg: float) -> str:
+    """方位角的中文 8 方位名（0°=北，顺时针，每档 45°）。"""
+    try:
+        az = float(azimuth_deg)
+    except (TypeError, ValueError):
+        return ""
+    if not math.isfinite(az):
+        return ""
+    return _COMPASS_8_CN[int((az % 360.0 + 22.5) // 45.0) % 8]
+
+
+def _altitude_short_cn(alt_deg: float) -> str:
+    """高度角的短档中文名（区间左闭右开，边界值归入上界所在档）。
+
+    < -6° 地平线下；[-6°, 5°) 贴近地平；[5°, 30°) 低空；
+    [30°, 60°) 中天；[60°, 85°) 高空；>= 85° 天顶。
+    """
+    try:
+        alt = float(alt_deg)
+    except (TypeError, ValueError):
+        return ""
+    if not math.isfinite(alt):
+        return ""
+    if alt < -6.0:
+        return "地平线下"
+    for upper, label in ((5.0, "贴近地平"), (30.0, "低空"),
+                         (60.0, "中天"), (85.0, "高空")):
+        if alt < upper:
+            return label
+    return "天顶"
+
+
+def format_view_axis_human(az_deg: float, alt_deg: float) -> str:
+    """视轴的人话短句：``朝向东南 · 仰角中天``。
+
+    方位用 8 方位（比 16 方位短），高度用 6 个短档；中文词间不加空格，
+    保证最长档（``朝向西南 · 仰角贴近地平``）也不超过卡内 158px。
+    非有限值返回空串（不编造方向，由调用方给空态）。
+    """
+    az_cn = _compass_name_8_cn(az_deg)
+    alt_cn = _altitude_short_cn(alt_deg)
+    if not az_cn or not alt_cn:
+        return ""
+    return f"朝向{az_cn} · 仰角{alt_cn}"
 
 
 def star_catalog_credit_text() -> str:
@@ -1415,6 +1537,7 @@ class SkyObject:
         sunlit_status: Optional[str] = None,
         boundary_uncertainty_s: Optional[float] = None,
         range_rate_kms: Optional[float] = None,
+        range_km: Optional[float] = None,
     ):
         self.name = name
         self.azimuth_deg = azimuth_deg  # 方位角 0-360°（北=0，东=90）
@@ -1443,6 +1566,9 @@ class SkyObject:
         # 文案只保留 2 位小数（10 m/s），437 MHz 上就是 ~14 Hz 量化误差，
         # 且改一次文案就会静默变成 0 Hz。
         self.range_rate_kms = range_rate_kms
+        # 站心距离 (km)：同上，**字段优先于从 description 文本里正则抠**。
+        # 文案只有 2 位小数且改文案会静默让卡片退回占位；None = 未提供。
+        self.range_km = range_km
         self.visible = True
 
     def is_above_horizon(self) -> bool:
@@ -1450,7 +1576,21 @@ class SkyObject:
 
 
 class AntennaPointing:
-    """天线指向状态。"""
+    """天线指向状态。
+
+    ``has_pointing`` 是「这个指向是真实测得的」开关：默认 False 表示**没有**
+    旋转器/天线指向数据。此时视图不画波束、不画十字指针、状态卡显示「—」，
+    而不是拿构造函数的占位值（正北 45°、30° 波束、5 dBi）当真数据画出来。
+    只有 ``RFSkyView.set_antenna_pointing()`` 或测试显式构造 ``has_pointing=True``
+    时才算已知指向。
+
+    ``pointing_source`` 记录这个角**从哪来**，状态卡按它换标签，绝不混口径：
+
+    - ``"readback"``：IMU/旋转器实测回读 → 「指向(实测)」；
+    - ``"simulated"``：模拟服务器回读（协议是回读、机械不是真机）→「指向(模拟)」；
+    - ``"command"``：只下发了指令、没有回读 → 「指向(指令)」（指令角不是机械位置）；
+    - ``""``：来源未标 → 「指向(几何)」。
+    """
 
     def __init__(
         self,
@@ -1460,6 +1600,8 @@ class AntennaPointing:
         gain_dbi: float = 5.0,
         is_tracking: bool = False,
         target_name: str = "",
+        has_pointing: bool = False,
+        pointing_source: str = "",
     ):
         self.azimuth_deg = azimuth_deg
         self.elevation_deg = elevation_deg
@@ -1467,6 +1609,18 @@ class AntennaPointing:
         self.gain_dbi = gain_dbi
         self.is_tracking = is_tracking
         self.target_name = target_name
+        self.has_pointing = has_pointing
+        self.pointing_source = pointing_source
+
+
+def antenna_pointing_label(antenna) -> str:
+    """状态卡「指向」行标签：按来源分档，不把指令角/模拟回读写成实测。"""
+    if not getattr(antenna, "has_pointing", False):
+        return "指向(几何)"
+    src = str(getattr(antenna, "pointing_source", "") or "")
+    return {"readback": "指向(实测)",
+            "simulated": "指向(模拟)",
+            "command": "指向(指令)"}.get(src, "指向(几何)")
 
 
 class HeatmapCell:
@@ -1764,6 +1918,29 @@ def _landscape_alpha(fov_deg: float, center_alt_deg: float) -> float:
     return max(0.0, min(1.0, a_fov * a_down))
 
 
+@lru_cache(maxsize=1)
+def _incomplete_asterism_count() -> int:
+    """数据层 `unresolved_tokens` 非空的区域/星官个数（数据事实，只算一次）。
+
+    为什么不去数"画的时候跳过了几条折线"：实测那几颗未映射星根本不进
+    折线（解析阶段已剔除），按折线跳过计数恒为 0，是死信号。这里读的是
+    数据层自己记账的未解析 token，那才是"这一官的数据不全"的事实源。
+    地域/星官都算：三台、西咸、积尸、羽林军这类是**数据**缺项，不是缺星。
+    """
+    try:
+        data = _xingguan.get_xingguan()
+    except Exception:
+        return 0
+    count = 0
+    for region in getattr(data, "regions", ()) or ():
+        if getattr(region, "unresolved_tokens", ()):
+            count += 1
+        for xg in getattr(region, "xingguan", ()) or ():
+            if getattr(xg, "unresolved_tokens", ()):
+                count += 1
+    return count
+
+
 # ============================================================================
 # 天空模式视图主组件
 # ============================================================================
@@ -1833,6 +2010,9 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
     # 盖不到。主窗口据此把这些浮层也压成红光——否则夜里一点按钮，白底按钮
     # 就在瞳孔上炸开，暗适应白保了。
     night_vision_changed = Signal(bool)
+    # 本控件在界面上被看见/被收起。卫星跟踪器据此启停自己的刷新定时器：
+    # 星象仪页签没展开时还在跑 sgp4 与过境粗扫，就是拿用户的 CPU 烤火。
+    visibility_changed = Signal(bool)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -1964,6 +2144,8 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         # HUD 命中区 (绘制时刷新; None = 该控件当前不可点)
         self._info_card_rect: Optional[QRectF] = None
         self._info_close_rect: Optional[QRectF] = None
+        # D3 卡内动作按钮命中区（key: tune/track/gimbal，绘制时刷新）
+        self._info_action_rects: Dict[str, QRectF] = {}
         self._ask_rect: Optional[QRectF] = None
         self._preview_rect: Optional[QRectF] = None
         self._location_rect: Optional[QRectF] = None
@@ -2005,6 +2187,19 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         self._sun: Optional[Dict[str, float]] = None
         self._moon: Optional[Dict[str, float]] = None
         self._sky_brightness: float = 0.0
+
+        # AR 指向模式（Task 55）：默认关闭。关闭时 paintEvent 不画 HUD，
+        # look_at/pan/zoom/pick 的既有路径一行都不改。
+        self._sky_pointing_mode: bool = False
+        self._sky_pose: Optional[Dict[str, object]] = None
+        self._sky_targets: List[object] = []
+        self._sky_level: str = "L0"          # 当前绘制级别（手动时为 L4）
+        self._sky_pose_level: str = "L0"     # 位姿链路最近一次自报级别
+        self._sky_manual_override: bool = False
+        self._sky_hud: Optional[Dict[str, object]] = None
+        self._sky_hud_error: str = ""
+        # 最近一次校准应用失败的原因（成功/未传档案时为空串）。
+        self._sky_calibration_error: str = ""
 
         # 显示层折射（只影响天球对象的绘制位置与视高度读数，不回写后端）。
         # 默认口径 1013.25 hPa / 10 °C，可用 set_refraction_params 覆盖。
@@ -2215,6 +2410,10 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         # 帧耗时超过预算时拉长间隔，避免 30fps 定时器持续把事件循环塞满。
         self._paint_ms_ema = 0.0
         self._pacing_interval_ms = 33
+        # 最近一次用户交互（拖/缩/点）的墙钟时刻：交互窗口内保持 30fps，
+        # 之后降到空闲节拍——静止的天空没必要每秒重画 30 次（py-spy 实测
+        # 旧实现主线程约 100% 在 _draw_stars，等于插着棒子就烤一个核）。
+        self._interact_until = 0.0
         self._refresh_timer = QTimer(self)
         self._refresh_timer.timeout.connect(self._on_refresh_tick)
         self._refresh_timer.start(33)
@@ -2232,15 +2431,29 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
     # 星象仪在主窗口里是一个页签：切走后本控件不可见，但 33ms 定时器原先照跑
     # （每帧 update() + 快转时逐帧 sgp4 + 整帧 paint 被调度），把 GUI 线程白烧。
     # 隐藏即停表、显示即按当前自适应间隔恢复——不改变任何画面内容。
+    #: 需要在交互时保持 30fps 的事件（之后 1.2s 内仍按 30fps，然后转空闲节拍）。
+    _INTERACT_EVENTS = frozenset((
+        QEvent.MouseButtonPress, QEvent.MouseButtonDblClick, QEvent.MouseMove,
+        QEvent.Wheel, QEvent.TouchBegin, QEvent.TouchUpdate,
+    ))
+
+    def event(self, ev):
+        """记下交互时刻（只影响重绘节拍，不改变任何交互语义）。"""
+        if ev.type() in self._INTERACT_EVENTS:
+            self._interact_until = time.monotonic() + self.FRAME_INTERACT_HOLD_S
+        return super().event(ev)
+
     def showEvent(self, event):
         super().showEvent(event)
         if not self._refresh_timer.isActive():
             self._refresh_timer.start(int(self._pacing_interval_ms))
+        self.visibility_changed.emit(True)
 
     def hideEvent(self, event):
         super().hideEvent(event)
         if self._refresh_timer.isActive():
             self._refresh_timer.stop()
+        self.visibility_changed.emit(False)
 
     def _on_refresh_tick(self):
         """33ms 节拍：快转重算位置/轨迹 + 步进 goto 动画 + 摄像机锁定跟随。"""
@@ -2254,9 +2467,31 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
     FRAME_BUDGET_MS = 20.0
     FRAME_MIN_INTERVAL_MS = 33
     FRAME_MAX_INTERVAL_MS = 250
+    #: 无动画、无交互时的重绘间隔（2.5fps）。实测单帧 paint ≈ 57ms（星表/星座/
+    #: 方位网格全量重画），30fps 连绘时主线程几乎全耗在这里；而 1× 实时速率下
+    #: 星点每秒移动 ≈0.02px，400ms 一帧肉眼无差别。
+    FRAME_IDLE_INTERVAL_MS = 400
+    #: 交互后继续保持 30fps 的时长（秒），覆盖拖拽/缩放的连贯手感。
+    FRAME_INTERACT_HOLD_S = 1.2
+
+    def _sky_busy(self) -> bool:
+        """天空当前是否需要连续平滑重绘（动画/跟随/交互窗口/快转）。
+
+        不忙时降到 ``FRAME_IDLE_INTERVAL_MS``：内容不变，只是少画。
+        """
+        if self._goto_anim is not None or self._camera_lock:
+            return True
+        if self._selected_info is not None:
+            return True
+        if time.monotonic() < self._interact_until:
+            return True
+        try:
+            return abs(self._time_rate() - 1.0) > 1e-9
+        except Exception:
+            return True
 
     def _adapt_refresh_interval(self) -> None:
-        """按实测帧耗时调整重绘间隔（只改调度，不改任何绘制内容）。
+        """按「是否忙 + 实测帧耗时」调整重绘间隔（只改调度，不改绘制内容）。
 
         实测：700×700 / 120° 视场单帧 paint ≈ 57 ms，而定时器固定 33 ms
         触发——Qt 会把重绘请求连续排队，GUI 线程约 100% 忙于画天空，其它
@@ -2266,9 +2501,11 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         不改变任何位置或画面内容。
         """
         ema = self._paint_ms_ema
-        if ema <= 0.0:
+        if not self._sky_busy():
+            target = self.FRAME_IDLE_INTERVAL_MS
+        elif ema <= 0.0:
             return
-        if ema <= self.FRAME_BUDGET_MS:
+        elif ema <= self.FRAME_BUDGET_MS:
             target = self.FRAME_MIN_INTERVAL_MS
         else:
             target = int(min(self.FRAME_MAX_INTERVAL_MS, ema * 1.35))
@@ -2361,6 +2598,8 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
             obj.visible = True
             # 全精度径向速度：绘制/信息卡文案只到 0.01 km/s，多普勒不能吃这个量化
             obj.range_rate_kms = rr
+            # 站心距离同口径落字段：信息卡读字段，不再依赖文案正则
+            obj.range_km = dist_km
             # 与 SatelliteTracker 喂入的文案同口径（信息卡不因刷新来源而变）
             obj.description = format_satellite_description(alt_d, dist_km, rr)
 
@@ -2463,6 +2702,23 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         elif cam:
             lines.append("调谐跟踪: 未开启（仅视角，未在调谐）")
         return lines
+
+    def picked_camera_lock_row(self, obj_name: Optional[str]):
+        """选中卡里的「视角」行（D4）：锁定态必须写进卡片本身。
+
+        状态卡在左下角、信息卡在左上角，用户单看一张卡时无法判断视图是否
+        被锁定。三种口径（同一事实源 ``_camera_lock``）：
+          * 未锁定 → None（不占行，状态卡已写「未锁定」）；
+          * 锁的是本目标 → ``("视角", "锁定 · 天动星静")``；
+          * 锁的是别的目标 → ``("视角", "未锁定（锁在 <名字>）")``，
+            不许靠「没有这行」去猜。
+        """
+        cam = self._camera_lock
+        if not cam:
+            return None
+        if obj_name is not None and str(cam) == str(obj_name):
+            return ("视角", "锁定 · 天动星静")
+        return ("视角", f"未锁定（锁在 {cam}）")
 
     def set_camera_lock(self, name: Optional[str]) -> bool:
         """设定/解除摄像机锁定。成功锁定返回 True；目标不可解算返回 False。"""
@@ -2845,6 +3101,41 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
                 self.set_data_source("real")
         self.update()
 
+    def set_antenna_pointing(self, azimuth_deg: float, elevation_deg: float,
+                             beamwidth_deg: Optional[float] = None,
+                             gain_dbi: Optional[float] = None,
+                             is_tracking: bool = False,
+                             target_name: str = "",
+                             pointing_source: str = "") -> None:
+        """注入**真实**天线指向（旋转器/云台/跟踪环），并标记为已知指向。
+
+        这是「波束 + 十字指针 + 状态卡 AZ/EL」唯一的事实来源。没人调用时
+        视图一律按「无指向数据」处理：不画占位波束、状态卡写「—」，
+        绝不把构造函数的默认值（正北 45°、30° 波束、5 dBi）当真数据。
+
+        ``pointing_source``（``readback`` / ``simulated`` / ``command`` / ``""``）
+        决定状态卡标签，见 ``AntennaPointing``：指令角不得标成实测。
+        """
+        self._antenna = AntennaPointing(
+            azimuth_deg=float(azimuth_deg) % 360.0,
+            elevation_deg=float(elevation_deg),
+            beamwidth_deg=(self._antenna.beamwidth_deg
+                           if beamwidth_deg is None else float(beamwidth_deg)),
+            gain_dbi=(self._antenna.gain_dbi
+                      if gain_dbi is None else float(gain_dbi)),
+            is_tracking=bool(is_tracking),
+            target_name=str(target_name),
+            has_pointing=True,
+            pointing_source=str(pointing_source or ""),
+        )
+        self.update()
+
+    def clear_antenna_pointing(self) -> None:
+        """旋转器断开时清除指向：波束/指针消失，状态卡回到「—」。"""
+        self._antenna.has_pointing = False
+        self._antenna.pointing_source = ""
+        self.update()
+
     def _on_station_lost(self) -> None:
         """站址失效：两个环各自收口，不留单边假状态。
 
@@ -2887,10 +3178,19 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
             # 一旦来 fix，上面的分支会直接覆盖它，主窗口随即清掉标注。
             if self._site_note:
                 self.update()
-                return
-            self._observer = None
-            self.set_data_source("none")
-            self._on_station_lost()
+            else:
+                self._observer = None
+                self.set_data_source("none")
+                self._on_station_lost()
+        self._record_runtime_fix(fix_dict)
+
+    def _record_runtime_fix(self, fix_dict: dict) -> None:
+        """把 fix 交给进程级运行时快照（时间/站址/来源），失败不影响绘制。"""
+        try:
+            from mbdsdr_ai.runtime_sources import get_runtime_sources
+            get_runtime_sources().record_fix(fix_dict)
+        except Exception:  # 模块缺失或记录失败都不得打断星图绘制
+            pass
 
     def get_observer(self) -> Optional[Dict[str, float]]:
         return self._observer
@@ -3564,7 +3864,11 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
             "boundary_uncertainty_s": getattr(
                 obj, "boundary_uncertainty_s", None),
             "norad": None, "cospar": "", "aliases": [],
-            "dist_km": self._parse_distance_km(obj),
+            # 距离优先读 SkyObject.range_km（sgp4 原值）；description 正则只是
+            # 兜底（兼容只喂了文案的外部构造路径），改文案不会让卡片变「—」。
+            "dist_km": (obj.range_km
+                        if getattr(obj, "range_km", None) is not None
+                        else self._parse_distance_km(obj)),
             "az": obj.azimuth_deg, "alt": obj.elevation_deg,
             "ra": None, "dec": None, "mag": None,
             "rise": None, "set": None,
@@ -4328,6 +4632,207 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         out["still_bound"] = drift <= float(self.POINTING_DRIFT_TOLERANCE_DEG)
         return out
 
+    # ---- AR 指向模式与 HUD（Task 55）--------------------------------------
+    #
+    # 默认关闭：开关为 False 时 paintEvent 不调用任何 HUD 绘制，update_sky_pose
+    # 也直接返回 False，既有 look_at/pan/zoom/pick 路径不受影响。
+
+    @property
+    def sky_pointing_mode(self) -> bool:
+        """指向模式是否开启（默认 False）。"""
+        return bool(getattr(self, "_sky_pointing_mode", False))
+
+    @property
+    def sky_manual_override(self) -> bool:
+        """是否已由用户手动接管（L4）。"""
+        return bool(getattr(self, "_sky_manual_override", False))
+
+    @property
+    def sky_hud(self) -> Optional[Dict[str, object]]:
+        """最近一帧的 HUD 绘制指令；模式关闭或尚未更新时为 None。"""
+        return getattr(self, "_sky_hud", None)
+
+    @property
+    def sky_calibration_error(self) -> str:
+        """最近一次校准应用失败的原因；成功或未传档案时为空串。"""
+        return str(getattr(self, "_sky_calibration_error", ""))
+
+    def set_sky_pointing_mode(self, enabled: bool) -> None:
+        """开关指向模式（默认关闭）。
+
+        关闭时只清空 HUD 状态并重绘，不恢复/不改动当前视角——用户关掉
+        指向模式后仍是刚才看到的天空。开启时先按「还没有位姿」生成一帧
+        诚实空态（准星 +「还没对准」），不画任何假目标。
+        """
+        enabled = bool(enabled)
+        if enabled == self._sky_pointing_mode:
+            return
+        self._sky_pointing_mode = enabled
+        if not enabled:
+            self._sky_pose = None
+            self._sky_targets = []
+            self._sky_level = "L0"
+            self._sky_pose_level = "L0"
+            self._sky_manual_override = False
+            self._sky_hud = None
+            self._sky_hud_error = ""
+            self._sky_calibration_error = ""
+        else:
+            self._refresh_sky_hud()
+        self.update()
+
+    def set_manual_override(self, enabled: bool) -> None:
+        """手动接管开关（L4）：开启后位姿更新不再覆盖当前视角。
+
+        用户微调（滚轮/拖拽/FOV 按钮/双击 goto/触屏手势）会自动进入 L4；
+        也可由外部显式调用。关闭后回到位姿链路最近一次自报的级别。
+        """
+        enabled = bool(enabled)
+        if enabled == self._sky_manual_override:
+            return
+        self._sky_manual_override = enabled
+        self._sky_level = "L4" if enabled else self._sky_pose_level
+        self._refresh_sky_hud()
+        self.update()
+
+    def _note_sky_manual_adjust(self) -> None:
+        """用户动了视角 → 进入 L4；指向模式关闭时是完全的空操作。"""
+        if self._sky_pointing_mode and not self._sky_manual_override:
+            self.set_manual_override(True)
+
+    def update_sky_pose(self, pose: dict,
+                        targets: Optional[List[object]] = None,
+                        level: str = "L1",
+                        calibration: Optional[dict] = None) -> bool:
+        """喂入一帧位姿/目标；模式关闭时不做任何事并返回 False。
+
+        Args:
+            pose: ``sky_pointing.fuse_poses`` 的输出（或至少含
+                ``az_deg``/``alt_deg`` 的 dict）。
+            targets: 识别目标序列；``None`` = 保留上一帧目标。
+            level: 链路自报级别 L0–L4（默认 L1）。
+            calibration: 可选校准档案（``sky_calibration`` schema v1）。
+                传入时先用 ``sky_pointing.apply_calibration`` 叠加偏置，
+                再按校准后的视场套用视图；档案损坏/字段非法则退回未校准
+                的原行为，原因记在 ``sky_calibration_error``——不静默
+                采用半套偏置。
+
+        Returns:
+            本帧是否真的驱动了视图。手动接管（L4）或位姿不可用时返回
+            False，但 HUD 仍会更新（分别是「手动」/「还没对准」）。
+        """
+        if not self._sky_pointing_mode:
+            return False
+        effective: object = pose
+        if calibration is not None:
+            calibrated = (sky_apply_calibration(pose, calibration)
+                          if isinstance(pose, dict)
+                          else {"valid": False, "error": "bad_pose",
+                                "reason": "位姿不是 dict"})
+            if calibrated.get("valid"):
+                effective = calibrated
+                self._sky_calibration_error = ""
+            else:
+                # 只有「档案本身有问题」才记成校准错误；位姿不可用交给
+                # HUD 的「还没对准」，不把责任推给校准档案。
+                self._sky_calibration_error = (
+                    str(calibrated.get("reason") or "校准失败")
+                    if calibrated.get("error") == "bad_calibration" else "")
+        else:
+            self._sky_calibration_error = ""
+        self._sky_pose = (dict(effective) if isinstance(effective, dict)
+                          else effective)
+        if targets is not None:
+            try:
+                self._sky_targets = list(targets)
+            except TypeError:
+                self._sky_targets = []
+        self._sky_pose_level = str(level)
+        applied = False
+        if self._sky_manual_override:
+            self._sky_level = "L4"
+        else:
+            self._sky_level = self._sky_pose_level
+            applied = self._apply_sky_pose(effective)
+        self._refresh_sky_hud()
+        self.update()
+        return applied
+
+    def _apply_sky_pose(self, pose: object) -> bool:
+        """把位姿套到 view_state；非法/缺视场时保持原状（不猜）。"""
+        if not isinstance(pose, dict):
+            return False
+        if pose.get("valid") is False:
+            return False
+        candidate = dict(pose)
+        if "valid" not in candidate:
+            # 也接受只含 az/alt 的简单位姿；但只有数值合法才算「有效」，
+            # 缺字段/NaN/越界一律当没有位姿。
+            try:
+                az = float(candidate.get("az_deg"))
+                alt = float(candidate.get("alt_deg"))
+            except (TypeError, ValueError):
+                return False
+            if not (math.isfinite(az) and math.isfinite(alt)
+                    and -90.0 <= alt <= 90.0):
+                return False
+            candidate["valid"] = True
+        # 位姿没给视场就沿用当前视图 FOV——不凭空发明一个「标准视场」。
+        fov = candidate.get("fov_deg")
+        if fov is None:
+            fov = self.view_state.fov_deg
+        # 校准档案给的视场就是本帧的目标视场；把它同时作为 min_fov，
+        # 2.3° 这类窄视场才不会被桌面默认的 30° 下限夹掉。
+        min_fov = fov if candidate.get("calibration_applied") else None
+        try:
+            params = sky_view_params(
+                candidate, fov_deg=fov,
+                min_fov=min_fov if min_fov is not None
+                else self.view_state.min_fov)
+        except (TypeError, ValueError):
+            return False
+        if not params.get("valid"):
+            return False
+        self.view_state.look_at(params["center_az"], params["center_alt"])
+        self.view_state.zoom_to(params["fov_deg"])
+        if pose.get("roll_deg") is not None:
+            roll = float(params["rotation_deg"])
+            self._rotation = roll
+            self.view_state.rotation = roll
+        return True
+
+    def _refresh_sky_hud(self) -> None:
+        """按当前视图与最新位姿生成绘制指令；失败不进入绘制层。"""
+        if not self._sky_pointing_mode:
+            self._sky_hud = None
+            return
+        params = {
+            "center_az": float(self.view_state.center_az),
+            "center_alt": float(self.view_state.center_alt),
+            "fov_deg": float(self.view_state.fov_deg),
+            "rotation_deg": float(self.view_state.rotation),
+            "min_fov": float(getattr(self.view_state, "min_fov", 0.5)),
+            "projection": self.projection,
+        }
+        level = "L4" if self._sky_manual_override else self._sky_level
+        # 数据源快照只用来在 HUD 上如实显示「SDR/GNSS 此刻是否在线」；
+        # 读不到就不传（不编造），失败也不得影响 HUD 与整帧绘制。
+        try:
+            from mbdsdr_ai.runtime_sources import get_runtime_sources
+            runtime_sources = get_runtime_sources().snapshot()
+        except Exception as exc:  # noqa: BLE001 - 快照失败按「没有数据」处理
+            runtime_sources = None
+            _log.debug("运行时数据源快照读取失败：%s", exc)
+        try:
+            self._sky_hud = build_sky_hud(
+                self._sky_pose, self._sky_targets, level, params,
+                self._widget_size_tuple(), runtime_sources=runtime_sources)
+            self._sky_hud_error = ""
+        except Exception as exc:  # noqa: BLE001 - HUD 失败不得拖垮整帧绘制
+            self._sky_hud = None
+            self._sky_hud_error = f"{type(exc).__name__}: {exc}"
+            _log.warning("HUD 绘制指令生成失败：%s", self._sky_hud_error)
+
     def overlay_for_current_view(self, *, site, jd_ut1: float,
                                  axis_error_deg: Optional[float] = None,
                                  min_confident_axis_deg: Optional[float] = None,
@@ -4376,6 +4881,15 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
                                self._widget_size_tuple())
         if not (math.isfinite(px) and math.isfinite(py)):
             return None
+        # 与批量路径同口径的坐标钳位（sky_interaction.SCREEN_OFFSCREEN_CLAMP_FACTOR）：
+        # 透视在 -v[2] 极小时会给出"有限但巨大"的坐标（0.5° 视场下可达 1e6 px），
+        # Qt 定点栅格可能在那种量级上溢出成屏内一个假点。超出 4 个屏宽的一律
+        # 按"不可投影"处理——反正肉眼看不见。
+        min_dim = float(min(self.width(), self.height()))
+        if min_dim > 0:
+            lim = 4.0 * min_dim
+            if abs(px) > lim or abs(py) > lim:
+                return None
         return QPointF(px, py)
 
     def _screen_to_sky(self, screen_x: float, screen_y: float) -> Tuple[float, float]:
@@ -4450,6 +4964,8 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
             self._draw_stars(painter)
             self._draw_constellations(painter)
             self._draw_dso(painter)
+            # 2.4) 流星雨辐射点：只在活动期且在地平线上才画（数据驱动，无手动开关）
+            self._draw_meteor_radiants(painter)
             # 2.5) 大气加法辉光：日落/日出方位暖红，加法叠在星空之上
             #      （SWE §4「加法混合 (ONE,ONE) 画在星空后」）——洗淡近辉光
             #      的星、给地平抹上暖色；地景随后盖在其上（山影遮地平辉光）。
@@ -4459,6 +4975,10 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
             self._draw_horizon_line(painter)
             if self._show_landscape:
                 self._draw_landscape(painter)
+            # 3.5) 近地平雾带：加法混合，画在地景之后（把剪影底边提亮，
+            #      与 Stellarium「fog 在 ground 之后」一致）、网格之前，
+            #      避免把网格线一起洗淡。
+            self._draw_horizon_haze(painter)
             # 4) 网格: 方位 / 赤道 (独立开关)
             if self._show_grid and self._show_azgrid:
                 self._draw_az_grid(painter)
@@ -4466,6 +4986,10 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
                 self._draw_eq_grid(painter)
             if self._show_trajectories:
                 self._draw_trajectories(painter)
+            # 4.5) 热力图：只有外部 set_heatmap() 喂入真实扫描数据时才开
+            #      （_show_heatmap 由数据驱动，没有手动图层开关）
+            if self._show_heatmap:
+                self._draw_heatmap(painter)
             # 5) 天体/卫星层
             self._draw_antenna_beam(painter)
             self._draw_celestial_bodies(painter)
@@ -4496,6 +5020,9 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         self._draw_data_source_overlay(painter)
         # 未定位空态（仅星象仪）：画在最上层，保证「先看看示例天空」可点。
         self._draw_unlocated_state(painter)
+        # AR 指向 HUD（Task 55）：模式关闭时不画任何像素。
+        if self._sky_pointing_mode:
+            self._draw_sky_pointing_hud(painter)
 
         # 7) 夜视：最后一道，盖住包括卡片在内的全部像素
         if self._night_vision:
@@ -4521,6 +5048,112 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         painter.fillRect(self.rect(), QColor(22, 0, 0))
         painter.setCompositionMode(QPainter.CompositionMode_SourceOver)
 
+    def _draw_sky_pointing_hud(self, painter: QPainter) -> None:
+        """绘制 AR 指向 HUD（准星/星官线/标签/卫星/人话提示）。
+
+        只在 ``_sky_pointing_mode`` 为真时由 paintEvent 调用；指令全部来自
+        ``sky_hud.build_hud``，本方法只负责像素，不重算投影或级别。
+        """
+        hud = self._sky_hud
+        if not hud:
+            return
+        painter.save()
+        _t = tokens()
+        accent = QColor(_t.COLORS["accent"])
+        ink = QColor(_t.COLORS["gray_100"])
+        manual = bool(hud.get("manual"))
+        mark = QColor(_t.COLORS["light_accent"] if manual else _t.COLORS["accent"])
+
+        # 1) 星官线段：只画 build_hud 已投影/裁剪过的可见段。
+        seg_col = QColor(accent)
+        seg_col.setAlpha(150)
+        painter.setBrush(Qt.NoBrush)
+        painter.setPen(QPen(seg_col, 1.2))
+        for seg in hud.get("asterism_segments") or []:
+            pts = [QPointF(float(p[0]), float(p[1]))
+                   for p in (seg.get("points") or [])]
+            if len(pts) >= 2:
+                painter.drawPolyline(QPolygonF(pts))
+
+        # 2) 准星：圆环 + 四向刻度；L4 用手动色。
+        ch = hud.get("crosshair") or {}
+        cx = float(ch.get("x", self.width() / 2.0))
+        cy = float(ch.get("y", self.height() / 2.0))
+        radius = float(ch.get("radius", 12.0))
+        painter.setPen(QPen(mark, 1.6))
+        painter.drawEllipse(QPointF(cx, cy), radius, radius)
+        for dx, dy in ((1.0, 0.0), (-1.0, 0.0), (0.0, 1.0), (0.0, -1.0)):
+            painter.drawLine(
+                QPointF(cx + dx * radius * 0.6, cy + dy * radius * 0.6),
+                QPointF(cx + dx * radius * 1.8, cy + dy * radius * 1.8))
+
+        # 3) 标签：精确级用浅色，粗级用强调色；先画一层深色描边保证可读。
+        f = QFont(self._font)
+        f.setPointSize(max(8, f.pointSize() - 1))
+        painter.setFont(f)
+        for lab in hud.get("labels") or []:
+            text = str(lab.get("text") or "")
+            if not text:
+                continue
+            x = float(lab.get("x", cx))
+            y = float(lab.get("y", cy)) - 8.0
+            painter.setPen(QColor(0, 0, 0, 170))
+            painter.drawText(QPointF(x + 1.0, y + 1.0), text)
+            painter.setPen(ink if lab.get("detail") == "precise" else accent)
+            painter.drawText(QPointF(x, y), text)
+
+        # 4) 卫星标记：小方块 + 名字。
+        sat_col = QColor(_t.COLORS["success"])
+        for sat in hud.get("satellite_markers") or []:
+            x = float(sat.get("x", cx))
+            y = float(sat.get("y", cy))
+            painter.setPen(QPen(sat_col, 1.2))
+            painter.setBrush(Qt.NoBrush)
+            painter.drawRect(QRectF(x - 4.0, y - 4.0, 8.0, 8.0))
+            text = str(sat.get("text") or sat.get("name") or "")
+            if text:
+                painter.setPen(sat_col)
+                painter.drawText(QPointF(x + 8.0, y + 4.0), text)
+
+        # 5) 底部提示：借用底部角标上方的空位，避开 FOV 控件。
+        hint = str(hud.get("hint") or "")
+        if hint:
+            fh = QFont(self._font)
+            fh.setBold(True)
+            fh.setPointSize(max(9, fh.pointSize()))
+            painter.setFont(fh)
+            fm = QFontMetrics(fh)
+            tw = float(fm.horizontalAdvance(hint))
+            th = float(fm.height())
+            bx = cx - tw / 2.0 - 10.0
+            by = max(8.0, float(self.height()) - th - 54.0)
+            bg = QColor(_t.COLORS["card_2"])
+            bg.setAlpha(220)
+            painter.setPen(QPen(mark, 1.0))
+            painter.setBrush(QBrush(bg))
+            painter.drawRoundedRect(QRectF(bx, by, tw + 20.0, th + 8.0), 6, 6)
+            painter.setPen(mark)
+            painter.drawText(QPointF(bx + 10.0, by + th - 2.0), hint)
+
+        # 6) 数据源行：让「SDR/GNSS 此刻插没插着」在指向 HUD 上一眼可见。
+        sources_text = str(hud.get("sources_text") or "")
+        if sources_text:
+            fs = QFont(self._font)
+            fs.setPointSize(max(8, fs.pointSize() - 1))
+            painter.setFont(fs)
+            fm_s = QFontMetrics(fs)
+            tw_s = float(fm_s.horizontalAdvance(sources_text))
+            th_s = float(fm_s.height())
+            sx, sy = 12.0, 8.0
+            bg_s = QColor(_t.COLORS["card_2"])
+            bg_s.setAlpha(200)
+            painter.setPen(Qt.NoPen)
+            painter.setBrush(QBrush(bg_s))
+            painter.drawRoundedRect(QRectF(sx, sy, tw_s + 16.0, th_s + 6.0), 6, 6)
+            painter.setPen(ink)
+            painter.drawText(QPointF(sx + 8.0, sy + th_s - 2.0), sources_text)
+        painter.restore()
+
     # ------------------------------------------------------------------ #
     # 天空背景: 透视窗口全屏, 近地平线大气散射渐变 (Preetham 简化)
     # ------------------------------------------------------------------ #
@@ -4528,12 +5161,45 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         # 暮光渐变 hex 表 (S4): 多段 stops, 夜/昼按太阳高度混合
         painter.save()
         painter.setPen(Qt.NoPen)
-        grad = QLinearGradient(0, 0, 0, self.height())
-        for pos, color in _twilight_stops(self._sky_brightness):
-            grad.setColorAt(pos, color)
-        painter.setBrush(QBrush(grad))
+        painter.setBrush(QBrush(self._sky_gradient(_twilight_stops(
+            self._sky_brightness))))
         painter.drawRect(self.rect())
         painter.restore()
+
+    def _sky_gradient(self, stops) -> QLinearGradient:
+        """把「pos: 天顶 0 → 地平 1」的色表锚到真实仰角上。
+
+        旧实现把渐变铺满整屏（0 → height），于是 pos=1 的地平色落在屏幕
+        底边。星象仪入口是 alt=25 / fov=90，真实地平在约 73% 高度，底边
+        已是 alt≈-20°——可见地平拿到的是更暗的一档颜色（Stellarium 对照见
+        `docs/learn/2026-11-17-stellarium-planetarium-visuals.md` §3.1）。
+
+        做法：逐 stop 反算仰角 `alt = 90*(1-pos)`，投到当前视轴下的屏幕 y。
+        视轴背面/超屏的 stop 直接跳过（Qt 会用端点色延展）；有效点不足
+        2 个或纵向跨度 < 8px 时回退到旧的全屏渐变，保证极端视角不崩。
+        """
+        az = float(self.view_state.center_az)
+        projected = []
+        for pos, color in stops:
+            p = self._sky_to_screen_finite(az, 90.0 * (1.0 - float(pos)))
+            if p is not None:
+                projected.append((p.y(), color))
+        legacy = QLinearGradient(0, 0, 0, self.height())
+        if len(projected) < 2:
+            for pos, color in stops:
+                legacy.setColorAt(pos, color)
+            return legacy
+        projected.sort(key=lambda item: item[0])
+        y_first, y_last = projected[0][0], projected[-1][0]
+        if y_last - y_first < 8.0:
+            for pos, color in stops:
+                legacy.setColorAt(pos, color)
+            return legacy
+        grad = QLinearGradient(0, y_first, 0, y_last)
+        span = y_last - y_first
+        for y, color in projected:
+            grad.setColorAt((y - y_first) / span, color)
+        return grad
 
     # ------------------------------------------------------------------ #
     # 大气加法辉光: 日落/日出方位暖红 (SWE §4 加法混合, 画在星空后)
@@ -4556,7 +5222,9 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         strength = sun_glow_strength(float(alt))
         if strength <= 0.01:
             return
-        center = self._sky_to_screen(float(az), max(0.0, float(alt)))
+        center = self._sky_to_screen_finite(float(az), max(0.0, float(alt)))
+        if center is None:
+            return      # 太阳在视轴背面：兜到中心会变成整屏假霞光
         radius = max(self.width(), self.height()) * 0.55
         if radius <= 1.0:
             return
@@ -4688,13 +5356,37 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
     # 只在绘制层乘一份增益，会变成"画得更大但点不中边缘"——画得出就点得中
     # 是硬契约（test_planet_brightness_model）。
     STAR_RENDER_GAIN = 1.15
+    #: 星点随视场放大的观感增益（Stellarium `lnfovFactor` 的等价物：只改落笔/
+    #: 拾取半径，不动星等、亮度、极限任何数值口径）。参考 60° 时增益恰为 1，
+    #: 既有 90°/120° 构图逐像素不变；指数 0.45 比 Stellarium 等效的 0.84 保守，
+    #: 避免 8px 上限 + 3.6r 辉光下亮星糊成一团。
+    STAR_FOV_REF_DEG = 60.0
+    STAR_FOV_GAIN_MAX = 2.4
+    STAR_FOV_GAIN_EXP = 0.45
+
+    @classmethod
+    def _star_fov_gain(cls, fov_deg: float) -> float:
+        """视场越紧，星点落笔半径越大（1.0 → 2.4 封顶）。
+
+        `None`/非法值给 1.0：只传星等的纯函数调用逐像素不变。
+        """
+        try:
+            fov = max(0.5, float(fov_deg))
+        except (TypeError, ValueError):
+            return 1.0
+        return min(cls.STAR_FOV_GAIN_MAX,
+                   max(1.0, (cls.STAR_FOV_REF_DEG / fov)
+                       ** cls.STAR_FOV_GAIN_EXP))
 
     def _star_visual(self, mag_eff: float, limit_mag: float,
-                     bortle: int) -> Tuple[float, float, float, int]:
+                     bortle: int,
+                     fov_deg: Optional[float] = None
+                     ) -> Tuple[float, float, float, int]:
         """(半径, 亮度, 辉光, alpha) —— 绘制与拾取共用同一份视觉模型。"""
+        gain = 1.0 if fov_deg is None else self._star_fov_gain(fov_deg)
         r, bright, bloom = _stars.star_draw(mag_eff, bortle)
         if r > 0.0:
-            return (r * self.STAR_RENDER_GAIN, bright, bloom,
+            return (r * self.STAR_RENDER_GAIN * gain, bright, bloom,
                     int(255 * (0.35 + 0.65 * bright)))
         try:
             from mbdsdr_ai.skyengine.star_catalog import naked_eye_limit_mag
@@ -4707,12 +5399,15 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         span = max(1e-6, lim - base)
         fade = max(0.0, min(1.0, (lim - float(mag_eff)) / span))
         # 22..94 /255：暗星可见但不假装和裸眼星一样亮。
-        return (self.STAR_LOD_MIN_R_PX * self.STAR_RENDER_GAIN,
+        return (self.STAR_LOD_MIN_R_PX * self.STAR_RENDER_GAIN * gain,
                 0.0, 0.0, int(255 * (0.09 + 0.28 * fade)))
 
     def _star_visual_many(self, mag_eff, limit_mag: float,
-                          bortle: int) -> Tuple[np.ndarray, ...]:
+                          bortle: int,
+                          fov_deg: Optional[float] = None
+                          ) -> Tuple[np.ndarray, ...]:
         """`_star_visual` 的向量化镜像（标量版是事实源，测试逐点对拍）。"""
+        gain = 1.0 if fov_deg is None else self._star_fov_gain(fov_deg)
         m = np.asarray(mag_eff, dtype=float).reshape(-1)
         r, bright, bloom = _stars.star_draw_many(m, int(bortle))
         alpha = (255.0 * (0.35 + 0.65 * bright)).astype(np.int64)
@@ -4736,7 +5431,7 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
                 r = np.where(lod, lod_r, r)
                 alpha = np.where(lod, lod_a, alpha)
         # 与标量版同一份增益（r<=0 的隐藏星保持 0，不因乘增益复活）
-        r = np.where(r > 0.0, r * float(self.STAR_RENDER_GAIN), r)
+        r = np.where(r > 0.0, r * float(self.STAR_RENDER_GAIN) * gain, r)
         return r, bright, bloom, alpha
 
     def _draw_stars(self, painter: QPainter):
@@ -4770,7 +5465,8 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         alt_draw_arr = self._display_alt_many(sel.alt_deg)
         px_arr, py_arr = self._sky_to_screen_many(sel.az_deg, alt_draw_arr)
         r_arr, bright_arr, bloom_arr, alpha_arr = self._star_visual_many(
-            sel.eff_mag, sel.limit_mag, self._bortle)
+            sel.eff_mag, sel.limit_mag, self._bortle,
+            fov_deg=self.view_state.fov_deg)
         cr_arr, cg_arr, cb_arr = _stars.bv_to_rgb_many(sel.bv)
         # 星色按可视亮度去饱和：暗视觉下色觉失效，暗星应近白，只有亮星
         # 才看得出橙/蓝。少了这一步，B-V>=1.0 的三分之一恒星全画成满饱和
@@ -4878,11 +5574,16 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
     # 全天星表每帧最多返回/绘制条数（与 star_catalog.DEFAULT_MAX_COUNT 同口径）。
     # 超出时 StarSelection.truncated=True,界面如实写「已按上限显示 N / 可用 M」。
     STAR_MAX_DRAW = 20000
+    # 流星雨辐射点标签：座名(1.0)之后、深空天体(1.5)之前——它是「今夜去哪看」
+    # 的导航信息，比单个 DSO 名字更该先占位。
+    METEOR_LABEL_PRIORITY = 1.2
 
     # 左下信息卡尺寸（绘制与测试的唯一事实源，避免测试写死像素值漂移）
     INFO_CARD_W = 240
     # +54：恒星时/视轴/星表来源三行（时空读数与署名，见 docs/prototype-gap.md 批1）
-    INFO_CARD_H = 330
+    # +18：儒略日独立成行（合在恒星时行会超出卡宽被裁，2026-11-17 真实字体实测）
+    # +18：视轴人话行独立（「朝向东南 · 仰角中天」不挤 AZ/ALT 数值行）
+    INFO_CARD_H = 366
 
     def _dso_symbol_geometry(self, az: float, alt: float,
                              dia_arcmin: Optional[float]) -> Tuple[float, bool]:
@@ -4929,6 +5630,59 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         painter.drawRoundedRect(QRectF(bx, by, tw, th), 2, 2)
         painter.setPen(QPen(col))
         painter.drawText(QRectF(bx, by, tw, th), Qt.AlignCenter, "已限幅")
+        painter.restore()
+
+    def _draw_meteor_radiants(self, painter: QPainter):
+        """活动期流星雨的辐射点（静态星历 + 当日活动包络）。
+
+        门与恒星/DSO 同一套：没有站点不画、白天不画、辐射点地平线下不画。
+        不做手动图层开关——没有活动项时整层自然为空（数据驱动）。
+        符号是**虚线圆 + 四向刻线**，与实心星点/DSO 类型符号可区分；
+        文案只写「接近峰值/活动期 + 峰值 ZHR」，不编造今晚每小时流星数。
+        """
+        gs = self._ground_station()
+        if gs is None:
+            return
+        if self._stars_hidden_by_daylight():
+            return
+        try:
+            from mbdsdr_ai.astronomy import meteor_showers as _ms
+        except Exception:
+            return
+        now = datetime.fromtimestamp(self._engine_unix(), timezone.utc)
+        active = _ms.active_showers(now, min_fraction=_ms.DRAW_MIN_ACTIVITY)
+        if not active:
+            return
+        vecs = np.array([vec_from_radec(s.ra_deg, s.dec_deg)
+                         for s, _f in active], dtype=float)
+        altaz = j2000_to_altaz_many(vecs, gs, self._current_jd())
+        az_arr, alt_arr = azalt_from_vec_many(altaz)
+        painter.save()
+        for (s, frac), az, alt in zip(active, az_arr, alt_arr):
+            alt = float(alt)
+            if not math.isfinite(alt) or alt < 0.0:
+                continue
+            alt_draw = self._display_alt_deg(alt)
+            if alt_draw < 0.0:
+                continue
+            pos = self._sky_to_screen(float(az), alt_draw)
+            if pos is None or not self._on_screen(pos, 12.0):
+                continue
+            alpha = int(round(90.0 + 140.0 * float(frac)))
+            pen = QPen(QColor(196, 132, 92, alpha))
+            pen.setWidthF(1.2)
+            pen.setStyle(Qt.DashLine)
+            painter.setPen(pen)
+            painter.setBrush(Qt.NoBrush)
+            painter.drawEllipse(pos, 7.0, 7.0)
+            # 四向刻线：辐射点更像「方向标记」而非第 13 种 DSO 符号
+            for dx, dy in ((11.0, 0.0), (-11.0, 0.0), (0.0, 11.0), (0.0, -11.0)):
+                painter.drawLine(QPointF(pos.x() + dx * 0.36, pos.y() + dy * 0.36),
+                                 QPointF(pos.x() + dx, pos.y() + dy))
+            self._queue_label(self.METEOR_LABEL_PRIORITY,
+                              QPointF(pos.x() + 10.0, pos.y() - 10.0),
+                              _ms.describe(s, float(frac)), self._ink(),
+                              small=True)
         painter.restore()
 
     def _draw_dso(self, painter: QPainter):
@@ -5180,7 +5934,7 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
                 if anchor is not None:
                     refs[anchor.hyg_id] = (anchor.ra_deg, anchor.dec_deg)
                     labels.append((con.abbr, anchor.hyg_id))
-        else:
+        elif sid == _constel.SYSTEM_CHINESE:
             seen: Set[Tuple[int, int]] = set()
             for region in layer.items:
                 for sa, sb in region.segments():
@@ -5207,6 +5961,20 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
                 if anchor is not None:     # None 时数据层给原因码，这里如实不画
                     refs[anchor.hip] = (anchor.ra_deg, anchor.dec_deg)
                     labels.append((region.key, anchor.hip))
+        else:
+            # 文件文化包（日本/印度/北欧/...）：与 IAU、中国走同一套
+            # prepared 结构，只是数据来自统一注册表。没有「区域/细节」两层，
+            # 全部进 region；星表缺 HIP 的段已在适配层跳过，这里拿到的
+            # 每个端点都带坐标。标签用该组在本文化下的名称。
+            for item in layer.items:
+                for sa, sb in item.segments:
+                    refs[sa.hip] = (sa.ra_deg, sa.dec_deg)
+                    refs[sb.hip] = (sb.ra_deg, sb.dec_deg)
+                    region_segs.append((sa.hip, sb.hip))
+                anchor = item.anchor()
+                if anchor is not None:
+                    refs[anchor.hip] = (anchor.ra_deg, anchor.dec_deg)
+                    labels.append((item.display_name, anchor.hip))
 
         # RA/Dec 是静态几何：这里一次性转成单位向量，避免每帧重算 N 次。
         keys = tuple(refs.keys())
@@ -5237,7 +6005,13 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         return path
 
     def _draw_constellations(self, painter: QPainter):
-        """星座/星官图层：按 FOV 分层浮现 + 座名标签（低于天体名优先级）。"""
+        """星座/星官图层：按 FOV 分层浮现 + 座名标签（低于天体名优先级）。
+
+        本函数是唯一的实时渲染实现；``mbdsdr_ai.overlay_asterisms.build_overlay``
+        （T08）只是共享数据契约/参考实现，不要为了「统一实现」把它接进热路径
+        （每帧约 170 ms，本层同款批量坐标换算约 0.05 ms）；依据见
+        ``overlay_asterisms`` 模块文档与 ``tests/test_asterism_overlay_drift.py``。
+        """
         if not self._show_constellations:
             return
         systems = tuple(s for s in _constel.system_ids()
@@ -5271,9 +6045,15 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
             if layer.system_id == _constel.SYSTEM_IAU:
                 base_line = QColor(112, 142, 190, 95 if night else 55)
                 base_label = QColor(150, 170, 205, 165 if night else 105)
-            else:  # 中国星官：暖色系，与 IAU 蓝灰在视觉上即可区分
+            elif layer.system_id == _constel.SYSTEM_CHINESE:
+                # 中国星官：暖色系，与 IAU 蓝灰在视觉上即可区分
                 base_line = QColor(196, 150, 96, 105 if night else 60)
                 base_label = QColor(214, 176, 122, 175 if night else 115)
+            else:
+                # 其余文件文化包统一青绿：不按文化各写一条分支，
+                # 新增文化包自动获得可辨识配色（alpha 沿用上面两套比例）。
+                base_line = QColor(96, 186, 160, 105 if night else 60)
+                base_label = QColor(126, 206, 182, 175 if night else 115)
 
             prepared = self._constellation_prepared(layer)
             points = self._layer_points(prepared, gs, jd)
@@ -5309,9 +6089,13 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
                 if layer.system_id == _constel.SYSTEM_IAU:
                     text = _constel.iau_constellation_label(
                         key, with_system_tag=multi)
-                else:
+                elif layer.system_id == _constel.SYSTEM_CHINESE:
                     text = _xingguan.xingguan_label(
                         key, with_system_tag=multi)
+                else:
+                    # 文件文化包：key 在 prepared 阶段存的就是 display_name，
+                    # 直接使用；多体系同开时按同一语义加体系徽标前缀。
+                    text = f"[{layer.tag}] {key}" if multi else key
                 self._queue_label(LABEL_PRIORITY_CONSTELLATION,
                                   QPointF(pos.x() + 8, pos.y() - 8),
                                   text, col, small=True)
@@ -5433,7 +6217,11 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
                      if s in self._constellation_systems)
 
     def constellation_systems_text(self) -> str:
-        """状态卡用体系徽标：单开给 tag，双开写「IAU + 中国星官」。"""
+        """状态卡用体系徽标：单开给 tag，双开写「IAU + 中国星官」。
+
+        徽标只说明"开了哪层"，不改口径；后面按当前画面追加状态后缀
+        （误差超限/虚线/数据不全），让卡片与画布说同一句话。
+        """
         ids = self.constellation_systems()
         if not ids:
             return "关闭"
@@ -5445,7 +6233,104 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
                 tags.append(str(_constel.system_info(sid).get("tag", sid)))
             except Exception:
                 tags.append(sid)
-        return " + ".join(tags)
+        return " + ".join(tags) + self._constellation_status_suffix()
+
+    # -- 天空文化右键菜单（视图内直接开关，不经过主窗口） ------------------
+    CULTURE_MENU_TITLE = "天空文化"
+    CULTURE_CLOSE_ALL_TEXT = "关闭全部天空文化"
+
+    def _build_culture_menu(self, parent=None) -> QMenu:
+        """构建「天空文化」菜单：每套体系一个勾选项 + 一键关闭全部。
+
+        菜单项跟随 ``_constel.system_ids()``，不写死文化清单。构建本身不改
+        视图状态（勾选只是当前状态的镜像）：只有 action 被触发才写入。
+        返回的菜单由调用方持有并 exec。
+        """
+        menu = QMenu(self if parent is None else parent)
+        menu.setTitle(self.CULTURE_MENU_TITLE)
+        enabled = set(self.constellation_systems())
+        for sid in _constel.system_ids():
+            info = _constel.system_info(sid)
+            label = str(info.get("display_name_zh") or sid)
+            tag = str(info.get("tag") or sid)
+            act = menu.addAction(f"{label}（{tag}）")
+            act.setCheckable(True)
+            act.setChecked(sid in enabled)
+            act.setData(sid)
+            act.triggered.connect(
+                lambda _checked=False, _a=act: self._on_culture_action(_a))
+        close_all = menu.addAction(self.CULTURE_CLOSE_ALL_TEXT)
+        close_all.triggered.connect(
+            lambda _checked=False, _m=menu: self._close_all_cultures(_m))
+        menu.aboutToShow.connect(
+            lambda _m=menu: self._sync_culture_menu(_m))
+        return menu
+
+    def _sync_culture_menu(self, menu: QMenu) -> None:
+        """把菜单勾选状态对齐到视图当前打开的体系集合。"""
+        enabled = set(self.constellation_systems())
+        for act in menu.actions():
+            sid = act.data()
+            if isinstance(sid, str):
+                act.setChecked(sid in enabled)
+
+    def _on_culture_action(self, action: QAction) -> None:
+        """菜单项触发：按 action 当前勾选态开关对应文化体系。"""
+        sid = action.data()
+        if not isinstance(sid, str):
+            return
+        self.set_constellation_layer_visible(sid, action.isChecked())
+        # 让勾选以视图状态为准（未知体系等异常不会留下假勾选）
+        action.setChecked(sid in self.constellation_systems())
+
+    def _close_all_cultures(self, menu: Optional[QMenu] = None) -> None:
+        """清空全部天空文化并刷新（图层整体回到"关闭"）。"""
+        self.set_constellation_systems(())
+        if menu is not None:
+            for act in menu.actions():
+                if isinstance(act.data(), str):
+                    act.setChecked(False)
+
+    def contextMenuEvent(self, event) -> None:
+        """右键在鼠标位置弹出天空文化菜单；其它鼠标事件不在此改变。"""
+        menu = self._build_culture_menu()
+        try:
+            pos = event.globalPos() if hasattr(event, "globalPos") else \
+                self.mapToGlobal(event.pos())
+            menu.exec(pos)
+        finally:
+            menu.deleteLater()
+
+    def _constellation_status_suffix(self) -> str:
+        """状态卡后缀：画面当前实际形态（至多一条精度措辞 + 数据不全）。
+
+        未绑定 / 用户已接管时返回空串——那是"看天"语义，星表几何本身精确，
+        徽标必须与改动前逐字相同。已绑定时只复用 ``_constellation_confidence``
+        的档位与既有阈值常量，不新造第二套判定。
+        """
+        binding = self.pointing_binding
+        if binding is None or not binding.get("still_bound"):
+            return ""
+
+        confidence, _ratio = self._constellation_confidence()
+        parts: List[str] = []
+        if confidence == "none":
+            unc = float(binding["uncertainty_deg"])
+            parts.append(f"未画线(误差 {unc:.2f}° 超限)")
+        elif confidence == "unknown":
+            parts.append("虚线(未自报误差)")
+        elif confidence == "coarse":
+            unc = float(binding["uncertainty_deg"])
+            parts.append(f"虚线(误差 {unc:.2f}°)")
+
+        if self.chinese_layer_visible():
+            n = _incomplete_asterism_count()
+            if n > 0:
+                parts.append(f"数据不全 {n} 官")
+
+        if not parts:
+            return ""
+        return " · " + " · ".join(parts)
 
     def _display_alt_deg(self, geom_alt_deg: float) -> float:
         """天球对象（恒星/DSO/行星/太阳/月亮）绘制与读数用的**视高度**。
@@ -5539,9 +6424,15 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
             return
         if not items:
             return
-        # 先按档限流（每档只留离视场中心最近的 N 条），再做二维避让。
-        # 限流先于避让：否则远处座名会先占掉像素位，把近处名字挤没。
-        kept = label_tier_keep(items, self.width() / 2.0, self.height() / 2.0)
+        # 先按档限流（每档只留 N 条），再做二维避让。限流先于避让：否则远处
+        # 座名会先占掉像素位，把近处名字挤没。宽 FOV 改用屏幕分桶摊开名额
+        # （否则 24 条名额会被中心一圈吃光，中心挤、边缘空）。
+        fov = float(getattr(self.view_state, "fov_deg", 0.0) or 0.0)
+        w, h = float(self.width()), float(self.height())
+        kept = label_tier_keep(
+            items, w / 2.0, h / 2.0,
+            bounds=(0.0, 0.0, w, h),
+            spread=fov >= LABEL_SPREAD_MIN_FOV_DEG)
         items = [items[i] for i in kept]
         fonts = {False: self._font, True: self._gnss_label_font}
         metrics = {k: QFontMetrics(f) for k, f in fonts.items()}
@@ -5623,30 +6514,9 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         painter.save()
         painter.setOpacity(alpha)
 
-        # 暮光辉光带：剪影后方暖灰渐变，向上渐隐（仅夜；昼由天空渐变自带亮度）
-        # 强度必须跟随太阳高度衰减：太阳到 -18°（天文夜）以下时天空里没有任何
-        # 暮光，再画一条固定 alpha=170 的灰带，就是在深夜地平线上糊一道"灰墙"
-        # ——它不但不美，还让人以为地景渲染出错了。留下的是纯剪影。
-        if night:
-            sun_alt = self._sun["alt"] if self._sun else None
-            twi = 0.0
-            if sun_alt is not None:
-                try:
-                    twi = _smoothstep(-18.0, -2.0, float(sun_alt))
-                except (TypeError, ValueError):
-                    twi = 0.0
-            if twi > 0.004:
-                glow_h = int(self.height() * 0.14)
-                glow = QLinearGradient(0, horizon_y - glow_h, 0, horizon_y)
-                gc = QColor(_t.COLORS["sky_night_glow"])
-                glow.setColorAt(0.0, QColor(gc.red(), gc.green(), gc.blue(), 0))
-                glow.setColorAt(
-                    1.0, QColor(gc.red(), gc.green(), gc.blue(),
-                                int(170 * twi)))
-                painter.setPen(Qt.NoPen)
-                painter.setBrush(QBrush(glow))
-                painter.drawRect(0, int(horizon_y - glow_h),
-                                 self.width(), glow_h)
+        # 近地平增亮已上移为独立的等仰角雾带 `_draw_horizon_haze`（画在剪影
+        # 之后、按 0–18° 分带，任何 fov 下形状都对）。旧实现按像素高度画在
+        # 剪影**之前**，紧 fov 下会糊成一条灰墙，且白天完全没有。
 
         layer_cols = ((None if not night else "ground_far_night"),
                       (None if not night else "ground_mid_night"),
@@ -5701,6 +6571,63 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
             painter.drawPath(path)
         painter.restore()
 
+    #: 近地平雾带的仰角分带（度）与逐带透明度系数（相对峰值）。
+    #: 上界 18° 与 Stellarium 的 fog 覆盖范围（约 -3°..+17°）对齐；我们只画
+    #: alt≥0，以下部分本来就被地面/剪影盖住。
+    _HAZE_BANDS = ((0.0, 2.0), (2.0, 4.0), (4.0, 6.0),
+                   (6.0, 9.0), (9.0, 13.0), (13.0, 18.0))
+    _HAZE_FALLOFF = (0.55, 0.42, 0.30, 0.20, 0.12, 0.06)
+
+    def _draw_horizon_haze(self, painter: QPainter) -> None:
+        """地平上方 0–18° 的柔和光带（加法混合，Stellarium fog 的等价物）。
+
+        为什么按等仰角分带而不是按像素高度：紧 fov 下「窗口高的 14%」可能
+        只有几度，旧夜光带会糊成一块灰墙；等仰角带在任何视角下形状都对，
+        全天模式下还会自然连成整圈。亮度保持克制（白天峰值 alpha≈45、
+        深夜≈6 的暖灰底光），避免重蹈「固定 alpha=170 灰墙」的覆辙。
+
+        逐段四边形而不是整圈路径：相机背后的方位会返回 NaN/超屏坐标，
+        整圈 QPainterPath 会斜穿画面；四个角都在屏内（`_on_screen`）才画。
+        """
+        if not self._show_atmosphere:
+            return
+        b = max(0.0, min(1.0, float(self._sky_brightness)))
+        sun_alt = self._sun["alt"] if self._sun else None
+        twi = 0.0
+        if sun_alt is not None:
+            try:
+                twi = _smoothstep(-18.0, -2.0, float(sun_alt))
+            except (TypeError, ValueError):
+                twi = 0.0
+        # 没有太阳数据时也按昼夜给雾：白天（b=1）不该比夜里还干净。
+        bright = max(twi, b * 0.55)
+        peak = 10.0 + 62.0 * bright
+        horizon = QColor(_twilight_stops(b)[-1][1])
+        night = QColor(tokens().COLORS["sky_night_glow"])
+        k = 0.55 * (1.0 - b)          # 越夜越偏向暖灰光害
+        base = QColor(
+            int(round(horizon.red() * (1.0 - k) + night.red() * k)),
+            int(round(horizon.green() * (1.0 - k) + night.green() * k)),
+            int(round(horizon.blue() * (1.0 - k) + night.blue() * k)))
+        az_seq = np.arange(0.0, 360.5, 6.0, dtype=float)
+        painter.save()
+        painter.setPen(Qt.NoPen)
+        painter.setCompositionMode(QPainter.CompositionMode_Plus)
+        for (lo, hi), fac in zip(self._HAZE_BANDS, self._HAZE_FALLOFF):
+            alpha = int(round(peak * fac))
+            if alpha <= 0:
+                continue
+            col = QColor(base)
+            col.setAlpha(min(255, alpha))
+            painter.setBrush(QBrush(col))
+            bottom = self._screen_points_many(az_seq, np.full_like(az_seq, lo))
+            top = self._screen_points_many(az_seq, np.full_like(az_seq, hi))
+            for i in range(len(az_seq) - 1):
+                quad = [bottom[i], bottom[i + 1], top[i + 1], top[i]]
+                if all(self._on_screen(p) for p in quad):
+                    painter.drawPolygon(QPolygonF(quad))
+        painter.restore()
+
     # ------------------------------------------------------------------ #
     # 方位网格 (等方位射线 + 等高圈), lines.c azimuthal
     # ------------------------------------------------------------------ #
@@ -5712,9 +6639,12 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         # 逐段 drawPath 是 15 次独立的描边提交（每帧约 0.8 ms/次），
         # 同色同笔宽的线没有任何理由分开提交。
         path = QPainterPath()
-        # 等方位射线 (每 30°), 从地平 alt=0 向天顶 alt=90
+        # 等方位射线 (每 30°), 从地平 alt=0 向天顶采样。
+        # 不采到 alt=90：12 条射线全在天顶汇成一点，而默认视线正是天顶
+        # （ViewState.center_alt=90），放大后就是"12 条线在正中扎成一朵"。
+        # 极点留空 6°，网格仍完整，且不会和视线中心叠出假十字。
         n_alt = 21
-        alt_km = np.arange(n_alt, dtype=float) * 4.5
+        alt_km = np.linspace(0.0, 84.0, n_alt)
         ray_az = np.repeat(np.arange(0, 360, 30, dtype=float), n_alt)
         ray_alt = np.tile(alt_km, 12)
         ray_pts = self._screen_points_many(ray_az, ray_alt)
@@ -5776,8 +6706,11 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
             path = QPainterPath()
             first = True
             for az, alt in zip(azs, alts):
-                p = self._sky_to_screen(float(az), self._display_alt_deg(float(alt)))
-                if not self._on_screen(p):
+                p = self._sky_to_screen_finite(float(az),
+                                               self._display_alt_deg(float(alt)))
+                if p is None or not self._on_screen(p):
+                    # None = 视轴背面。_sky_to_screen 会在背后兜到中心，
+                    # 于是星座连线会「凭空拉一根线到屏幕正中」。
                     first = True
                     continue
                 if first:
@@ -6357,12 +7290,14 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         if not obj:
             self._info_card_rect = None
             self._info_close_rect = None
+            self._info_action_rects = {}
             return
         pos = self._sky_to_screen_finite(obj.azimuth_deg, obj.elevation_deg)
         if pos is None:
             # 选中的对象转到相机背后：信息卡没有可信锚点，收起而不是钉在正中。
             self._info_card_rect = None
             self._info_close_rect = None
+            self._info_action_rects = {}
             return
 
         # 选中标记（4 段圆弧十字 + 2s 呼吸）由 _draw_objects 统一绘制，
@@ -6384,7 +7319,8 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         kv = [
             ("星等 (mag)", "—" if info.get("mag") is None
              else format_magnitude(info["mag"])),
-            ("距离 (km)", format_distance_km(info.get("dist_km", 0.0))),
+            ("距离 (km)", "—" if info.get("dist_km") is None
+             else format_distance_km(info["dist_km"])),
             ("赤经/赤纬",
              f"{format_hms_ra(info['ra'])}  {format_dms_deg(info['dec'])}"
              if info.get("ra") is not None else "—"),
@@ -6407,6 +7343,10 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
             kv.append(("TLE 历元", str(info["tle_epoch"])))
         if info.get("tle_source"):
             kv.append(("TLE 来源", str(info["tle_source"])))
+        # D4：视角锁定语义写进卡内（状态卡在左下角，单看这张卡会漏读）
+        lock_row = self.picked_camera_lock_row(obj.name)
+        if lock_row:
+            kv.append(lock_row)
 
         painter.save()
         painter.setFont(self._font)
@@ -6416,14 +7356,17 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         key_col_w = max(fm.horizontalAdvance(k) for k, _ in kv)
 
         head = [title, kind_label,
-                "又名：" + " · ".join(info.get("aliases", [obj.name]))
+                "又名：" + (" · ".join(info.get("aliases") or []) or "—")
                 + (f" · COSPAR {info['cospar']}" if info.get("cospar") else "")]
         widths = [fm.horizontalAdvance(t) for t in head]
         widths += [key_col_w + 10 + fm.horizontalAdvance(v) for _, v in kv]
         if info.get("culture"):
             widths.append(fm.horizontalAdvance(f"星性 {info['culture']}"))
         body_w = max(widths)
-        box_w = body_w + pad * 2 + close_reserve
+        # D3：卫星卡底部要有「接收 / 追踪 / 指向」一排按钮，卡宽至少容纳三格
+        show_actions = (str(getattr(obj, "obj_type", "")) == "satellite")
+        min_w = (3 * 52 + 2 * 6) + pad * 2 + close_reserve
+        box_w = max(body_w + pad * 2 + close_reserve, min_w)
         text_w = box_w - pad * 2 - close_reserve   # 描述换行用的正文宽度
 
         desc_lines: List[str] = []
@@ -6446,7 +7389,10 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         row_h = 17.0
         n_rows = 3 + len(kv) + (1 if info.get("culture") else 0) \
             + (len(desc_lines) + 1 if desc_lines else 0)
-        box_h = n_rows * row_h + 18
+        action_h = 24.0
+        action_gap = 6.0
+        box_h = n_rows * row_h + 18 \
+            + ((action_h + action_gap) if show_actions else 0.0)
         box_x, box_y = 14.0, 40.0
         bg = QColor(_t.COLORS["card_1"])
         bg.setAlpha(235)
@@ -6494,6 +7440,41 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
             for dl in desc_lines:
                 painter.drawText(QPointF(box_x + pad, ty), dl)
                 ty += row_h
+
+        # D3：卡内动作按钮（原型把「追踪 / 接收 / 指向」放在卡里）。
+        # 执行体与左下浮动按钮完全同源：点击只切换同一个 QPushButton 的
+        # 勾选态（信号已接到主窗口），不另造第二条动作链。
+        if show_actions:
+            inner_w = box_w - pad * 2
+            bw = (inner_w - action_gap * 2.0) / 3.0
+            by = box_y + box_h - 8.0 - action_h
+            specs = (
+                ("tune", "接收", self._tune_btn.isEnabled(), False,
+                 _t.COLORS["accent"]),
+                ("track", "追踪", self._track_btn.isEnabled(),
+                 self._track_btn.isChecked(), _t.COLORS["success"]),
+                ("gimbal", "指向", self._gimbal_btn.isEnabled(),
+                 self._gimbal_btn.isChecked(), _t.COLORS["light_accent"]),
+            )
+            rects: Dict[str, QRectF] = {}
+            for i, (key, label, enabled, checked, hi) in enumerate(specs):
+                rect = QRectF(box_x + pad + i * (bw + action_gap),
+                              by, bw, action_h)
+                if not enabled:
+                    fill, fg = _t.COLORS["card_1"], _t.text("disabled")
+                elif checked:
+                    fill, fg = hi, _t.COLORS["bg_dark"]
+                else:
+                    fill, fg = _t.COLORS["card_2"], _t.text("primary")
+                painter.setBrush(QBrush(QColor(fill)))
+                painter.setPen(QPen(QColor(_t.COLORS["gray_400"]), 1))
+                painter.drawRoundedRect(rect, 4, 4)
+                painter.setPen(QColor(fg))
+                painter.drawText(rect, Qt.AlignCenter, label)
+                rects[key] = rect
+            self._info_action_rects = rects
+        else:
+            self._info_action_rects = {}
         painter.restore()
 
     # ------------------------------------------------------------------ #
@@ -6621,7 +7602,11 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
             alt_draw = self._display_alt_deg(alt)
             if alt_draw < 0.0:
                 continue        # 地平线下不画（视高度门，与恒星/月亮同一判据）
-            scr = self._sky_to_screen(az, alt_draw)
+            scr = self._sky_to_screen_finite(az, alt_draw)
+            if scr is None:
+                # 视轴背面：_sky_to_screen 会把它兜到屏幕正中，画出一颗
+                # 假的「中心行星」。宁可这颗不画，也不在中心造假天体。
+                continue
             if not self._on_screen(scr):
                 continue
             mag = getattr(pos_eph, "magnitude", None)
@@ -6868,8 +7853,10 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
                     alt_draw = float(alt_draw_arr[i])
                     px_i, py_i = float(px_arr[i]), float(py_arr[i])
                 # 与 _draw_stars 同一份 _star_visual（含 LOD 放出的暗星）。
+                # fov 必须一起传：只在绘制层乘增益会变成「画得更大但点不中」。
                 r_pick = self._star_visual(
-                    mag_eff, sel.limit_mag, self._bortle)[0]
+                    mag_eff, sel.limit_mag, self._bortle,
+                    fov_deg=self.view_state.fov_deg)[0]
                 if r_pick <= 0:
                     continue
                 limit = max(float(tolerance), r_pick)
@@ -6901,6 +7888,7 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
                                       else f"star@{i}")),
                         "name": name,
                         "hyg_id": hyg,
+                        "hip": int(sel.hip[i]),
                         "ra_deg": float(sel.ra_deg[i]),
                         "dec_deg": float(sel.dec_deg[i]),
                         "vmag": vmag,
@@ -6924,6 +7912,7 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         self._hovered_object = None
         self._selected_info = None
         # 选中体不可调谐: 隐藏卫星三件套, 不残留假状态
+        self._info_action_rects = {}
         self._tune_sat_name = None
         self._stop_track_ui()
         self._track_btn.hide()
@@ -6975,6 +7964,66 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
             if out["rise_jd"] is not None and out["set_jd"] is not None:
                 break
         return out
+
+    #: 中国星官名不重复进「当前文化星名」行：卡片既有的 ``star_culture``
+    #: 默认中文名已经承担了这一套口径，同一颗星不在一张卡里报两种中文名。
+    _CULTURE_NAME_SKIP = (_constel.SYSTEM_CHINESE,)
+
+    def _culture_names_for_hip(self, hip, max_cultures: int = 3) -> str:
+        """当前开启文化下该 HIP 的星名，形如 ``日本：枢 · 印度：ध्रुवः``。
+
+        只查 ``self.constellation_systems()`` 里的文化；每种文化取一个名字
+        （优先 ``native``，其次 ``zh``/``en``，再退到任意非空字段），最多
+        ``max_cultures`` 个。没有名字、坏数据或异常一律返回空串（卡片少一行
+        而不是整卡报错）。中国星官见 ``_CULTURE_NAME_SKIP``。
+        """
+        try:
+            hip = int(hip)
+        except (TypeError, ValueError):
+            return ""
+        if hip <= 0:
+            return ""
+        try:
+            from mbdsdr_ai.skyengine.sky_culture import names_for_hip
+            enabled = set(self.constellation_systems())
+            all_names = names_for_hip(hip) or {}
+        except Exception:
+            return ""
+        if not isinstance(all_names, dict):
+            return ""
+        try:
+            limit = int(max_cultures)
+        except (TypeError, ValueError):
+            return ""
+        if limit <= 0:
+            return ""
+        bits: List[str] = []
+        for pack_id, entry in all_names.items():
+            if pack_id not in enabled or pack_id in self._CULTURE_NAME_SKIP:
+                continue
+            if not isinstance(entry, dict):
+                continue
+            name = ""
+            for key in ("native", "zh", "en"):
+                value = entry.get(key)
+                if isinstance(value, str) and value.strip():
+                    name = value.strip()
+                    break
+            if not name:
+                for value in entry.values():
+                    if isinstance(value, str) and value.strip():
+                        name = value.strip()
+                        break
+            if not name:
+                continue
+            try:
+                tag = str(_constel.system_info(pack_id).get("tag") or pack_id)
+            except Exception:
+                tag = str(pack_id)
+            bits.append(f"{tag}：{name}")
+            if len(bits) >= limit:
+                break
+        return " · ".join(bits)
 
     def _build_body_info(self, body: Dict[str, object]) -> None:
         """构建行星信息卡字段 (Stellarium 规格同款行: Mag/Dist/RaDec/AzAlt/
@@ -7062,6 +8111,9 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
                 con = _constel.CONSTELLATION_NAMES.get(str(body.get("con") or ""), "")
                 if con:
                     desc_bits.append(f"星座 {con}")
+                culture_names = self._culture_names_for_hip(body.get("hip"))
+                if culture_names:
+                    desc_bits.append(culture_names)
                 if c and c.get("note"):
                     desc_bits.append(c["note"])
                 desc_bits.append("HYG v4.1")
@@ -7180,6 +8232,7 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         if not body or not info:
             self._info_card_rect = None
             self._info_close_rect = None
+            self._info_action_rects = {}
             self._ask_rect = None
             return
         # 高亮环: 实时位置重算 (快转时跟着走)
@@ -7190,8 +8243,12 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
                 v = j2000_to_altaz(vec_from_radec(info["ra"], info["dec"]),
                                    gs, self._current_jd())
                 az, alt = azalt_from_vec(v)
-                pos = self._sky_to_screen(az,
-                                          max(self._display_alt_deg(alt), -2.0))
+                # None = 选中天体在视轴背面：不兜到中心画假环，信息卡照常出。
+                pos = self._sky_to_screen_finite(
+                    az, max(self._display_alt_deg(alt), -2.0))
+            except Exception:
+                pos = None
+            if pos is not None:
                 # 选中环同样是静态的：不再按 2s 呼吸缩放（理由同上）。
                 rr = max(1.0, breathing_ring_radius(0.0, 16.0))
                 pen = QPen(self._colors["accent"], 2, Qt.DashLine)
@@ -7201,8 +8258,6 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
                 painter.setBrush(Qt.NoBrush)
                 painter.drawEllipse(pos, rr, rr)
                 painter.restore()
-            except Exception:
-                pass
 
         _t = tokens()
 
@@ -7348,7 +8403,14 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         self._ask_rect = ask_rect
 
     @staticmethod
-    def _parse_distance_km(obj: SkyObject) -> float:
+    def _parse_distance_km(obj: SkyObject) -> Optional[float]:
+        """从对象文案读距离（**兜底路径**）；读不到返回 None。
+
+        主路径是 ``SkyObject.range_km``（sgp4 原值，见 ``_build_selected_info``）；
+        这里只服务「外部 set_objects 只喂了 description」的兼容场景。文案由
+        ``format_satellite_description`` 生成时必含「距离 X km」，缺这行就返回
+        None，信息卡显示「—」，绝不拿 0.00 km 冒充。
+        """
         import re
         m = re.search(r"距离\s*([0-9,]+(?:\.[0-9]+)?)\s*km",
                       obj.description or "")
@@ -7357,7 +8419,7 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
                 return float(m.group(1).replace(",", ""))
             except ValueError:
                 pass
-        return 0.0
+        return None
 
     @staticmethod
     def _estimate_doppler_hz(obj: SkyObject) -> Optional[float]:
@@ -7398,20 +8460,27 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         # 在画面正中糊一块灰色四边形，会被误读成渲染故障。
         if self._immersive:
             return
+        if not getattr(self._antenna, "has_pointing", False):
+            return
         if self._antenna.elevation_deg <= 0:
             return
-        painter.save()
         half_bw = self._antenna.beamwidth_deg / 2.0
+        # 背向相机的角点投影是 inf，_sky_to_screen 会兜到屏幕正中——四个角
+        # 全兜到同一点就退化成一个「中心的灰块」。这里改用 finite 版本，
+        # 任一角点不可投影就整块不画（宁缺，不造假）。
         corners = [
-            self._sky_to_screen(self._antenna.azimuth_deg - half_bw,
-                                self._antenna.elevation_deg + half_bw),
-            self._sky_to_screen(self._antenna.azimuth_deg + half_bw,
-                                self._antenna.elevation_deg + half_bw),
-            self._sky_to_screen(self._antenna.azimuth_deg + half_bw,
-                                max(0, self._antenna.elevation_deg - half_bw)),
-            self._sky_to_screen(self._antenna.azimuth_deg - half_bw,
-                                max(0, self._antenna.elevation_deg - half_bw)),
+            self._sky_to_screen_finite(self._antenna.azimuth_deg - half_bw,
+                                       self._antenna.elevation_deg + half_bw),
+            self._sky_to_screen_finite(self._antenna.azimuth_deg + half_bw,
+                                       self._antenna.elevation_deg + half_bw),
+            self._sky_to_screen_finite(self._antenna.azimuth_deg + half_bw,
+                                       max(0, self._antenna.elevation_deg - half_bw)),
+            self._sky_to_screen_finite(self._antenna.azimuth_deg - half_bw,
+                                       max(0, self._antenna.elevation_deg - half_bw)),
         ]
+        if any(c is None for c in corners):
+            return
+        painter.save()
         painter.setBrush(QBrush(self._colors["antenna_beam"]))
         painter.setPen(Qt.NoPen)
         path = QPainterPath()
@@ -7423,10 +8492,22 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         painter.restore()
 
     def _draw_antenna_pointer(self, painter: QPainter):
+        # 沉浸态（星象仪）：未跟踪时的默认指向（正北 45°）会被误读成渲染故障
+        # ——正中一个「十字 + 圆点」，正是用户报的"一根竖线中间一个点"。
+        # 波束层早已为同一原因在沉浸态主动不画，指针层必须同一道守卫。
+        if self._immersive:
+            return
+        if not getattr(self._antenna, "has_pointing", False):
+            return
         if self._antenna.elevation_deg <= 0:
             return
-        pos = self._sky_to_screen(self._antenna.azimuth_deg,
-                                  self._antenna.elevation_deg)
+        # 天线指向在视轴背面时，_sky_to_screen 会把人指向兜到屏幕正中，画成
+        # 「一根竖线 + 中心圆点」——这正是用户报的"中间总有一根线带个点"。
+        # 指向不在当前视场就如实不画。
+        pos = self._sky_to_screen_finite(self._antenna.azimuth_deg,
+                                         self._antenna.elevation_deg)
+        if pos is None or not self._on_screen(pos, margin=16):
+            return
         painter.save()
         painter.setPen(QPen(self._colors["antenna"], 2))
         s = 12
@@ -7465,19 +8546,38 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
                     color = QColor(obj.color) if obj.color else color
                     break
             for run in split_visible_track(points):
-                seg = [self._sky_to_screen(az, el) for az, el in run]
-                n = len(seg)
-                if n < 2:
-                    continue
-                for i in range(n - 1):
-                    a = _traj_alpha(i, n)
-                    c = QColor(color.red(), color.green(), color.blue(), a)
-                    painter.setPen(QPen(c, 1, Qt.DashLine))
-                    painter.drawLine(seg[i], seg[i + 1])
+                # 逐点投影；背向相机的点（视轴背面）在 _sky_to_screen 下会
+                # 被兜到屏幕正中，若直接连线就会出现「所有轨迹汇聚到中心一点」
+                # 的假图案。这里在 None 处断开，绝不跨背后连线。
+                seg = []
+                for az, el in run:
+                    p = self._sky_to_screen_finite(az, el)
+                    if p is None:
+                        if len(seg) >= 2:
+                            self._draw_traj_run(painter, seg, color)
+                        seg = []
+                        continue
+                    seg.append(p)
+                if len(seg) >= 2:
+                    self._draw_traj_run(painter, seg, color)
         painter.restore()
 
+    def _draw_traj_run(self, painter: QPainter, seg: List[QPointF],
+                       color: QColor) -> None:
+        """画一段连续可投影的轨迹（端部淡出，中段满 alpha）。"""
+        n = len(seg)
+        for i in range(n - 1):
+            a = _traj_alpha(i, n)
+            c = QColor(color.red(), color.green(), color.blue(), a)
+            painter.setPen(QPen(c, 1, Qt.DashLine))
+            painter.drawLine(seg[i], seg[i + 1])
+
     def _draw_heatmap(self, painter: QPainter):
-        """热力图：仅当外部喂入真实射频扫描数据时才绘制。"""
+        """热力图：仅当外部喂入真实射频扫描数据时才绘制。
+
+        由 paintEvent 在 ``_show_heatmap`` 为真时调用（``set_heatmap`` 按
+        数据是否为空同步该标志）；本层不再自持第二道开关。
+        """
         if not self._heatmap:
             return
         painter.save()
@@ -7485,7 +8585,13 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         for cell in self._heatmap:
             if cell.elevation_deg <= 0:
                 continue
-            pos = self._sky_to_screen(cell.azimuth_deg, cell.elevation_deg)
+            pos = self._sky_to_screen_finite(cell.azimuth_deg,
+                                             cell.elevation_deg)
+            if pos is None:
+                continue        # 视轴背面：兜到中心会变成一堆假热点
+            # 完全在视口外的不提交（半径 15px，边缘部分可见仍保留）
+            if not self._on_screen(pos, 15.0):
+                continue
             norm = max(0.0, min(1.0, (cell.signal_db + 100) / 70))
             lo, mid, hi = (self._colors["heatmap_low"],
                            self._colors["heatmap_mid"],
@@ -7836,12 +8942,19 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         y = card_y + 20
         painter.setPen(label_col)
         painter.setFont(self._font)
-        painter.drawText(card_x + 12, y, "指向(几何)")
+        # 标签跟着来源走：指令角绝不能标成「实测」，模拟服务器也不等于真机。
+        has_pt = bool(getattr(self._antenna, "has_pointing", False))
+        painter.drawText(card_x + 12, y, antenna_pointing_label(self._antenna))
         painter.setFont(self._mono_font)
-        painter.setPen(QPen(self._colors["antenna"], 2).color())
-        painter.drawText(card_x + 80, y,
-                         f"AZ {format_azimuth(self._antenna.azimuth_deg)} "
-                         f"EL {format_angle_deg(self._antenna.elevation_deg)}")
+        if not has_pt:
+            # 没接旋转器就没有指向数据：写「—」而不是把占位的正北 45° 当真值。
+            painter.setPen(dim)
+            painter.drawText(card_x + 80, y, "—（无指向数据）")
+        else:
+            painter.setPen(QPen(self._colors["antenna"], 2).color())
+            painter.drawText(card_x + 80, y,
+                             f"AZ {format_azimuth(self._antenna.azimuth_deg)} "
+                             f"EL {format_angle_deg(self._antenna.elevation_deg)}")
 
         y += 18
         painter.setFont(self._font)
@@ -7907,7 +9020,8 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         painter.setPen(dim)
         painter.drawText(card_x + 52, y, format_local_time(utc_now))
 
-        # 恒星时 + 儒略日：与上面同一个 jd_now（同基，不重算第二次）
+        # 恒星时 + 儒略日：与上面同一个 jd_now（同基，不重算第二次）。
+        # 分两行：合在一行时 "23h 30m 14.6s · JD 2461362.00756" 超出卡宽被裁。
         y += 18
         painter.setFont(self._font)
         painter.setPen(label_col)
@@ -7917,10 +9031,18 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
             lst = local_sidereal_time_deg(jd_now, self._observer["lon"])
             painter.setPen(dim)
             painter.drawText(card_x + 52, y,
-                             f"{format_hms_ra(lst, digits=1)} · JD {jd_now:.5f}")
+                             format_hms_ra(lst, digits=1))
         else:
             painter.setPen(dim)
             painter.drawText(card_x + 52, y, "—（无站址）")
+
+        y += 18
+        painter.setFont(self._font)
+        painter.setPen(label_col)
+        painter.drawText(card_x + 12, y, "儒略日")
+        painter.setFont(self._mono_font)
+        painter.setPen(dim)
+        painter.drawText(card_x + 52, y, f"JD {jd_now:.5f}")
 
         # 呼号是身份配置，归「设置 → 通用 → 操作员呼号」，不再在天空
         # 信息卡上占一行（用户 2026-11-07：页面只展示用户想看的频谱/天空，
@@ -7949,6 +9071,15 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         painter.drawText(card_x + 76, y,
                          format_view_axis(self.view_state.center_az,
                                           self.view_state.center_alt))
+
+        # 视轴人话版（8 方位 + 高度短档）：独立一行，不挤占上面 AZ/ALT
+        # 数值行——卡宽 240 时数值行只有 158px，塞不下中文括注。
+        y += 18
+        painter.setFont(self._mono_font)
+        painter.setPen(dim)
+        painter.drawText(card_x + 12, y,
+                         format_view_axis_human(self.view_state.center_az,
+                                                self.view_state.center_alt))
 
         # 两个环的状态各占一行（与 HUD 同一事实源 _camera_lock/_track_btn）：
         # 一个开着另一个没开时必须写出「未锁定 / 未开启」，不合并成一句
@@ -7979,7 +9110,7 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         y += 18
         painter.setFont(self._font)
         painter.setPen(label_col)
-        painter.drawText(card_x + 12, y, "受晒")
+        painter.drawText(card_x + 12, y, "光照")
         painter.setFont(self._mono_font)
         sel = self._selected_info or {}
         sunlit_txt = sunlit_state_label(sel.get("sunlit"),
@@ -8029,11 +9160,13 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         y += 18
         painter.setFont(self._font)
         painter.setPen(label_col)
+        # 「星表来源」四字标签比两字宽：值列右移到 +76，否则压住标签
+        #（真实字体截图实测 "星表来源" 与 "HYG…" 重叠）。
         painter.drawText(card_x + 12, y, "星表来源")
         painter.setFont(self._gnss_label_font)
         credit_txt = star_catalog_credit_text()
         painter.setPen(dim if credit_txt.startswith("来源") else ink)
-        painter.drawText(card_x + 52, y, credit_txt)
+        painter.drawText(card_x + 76, y, credit_txt)
 
         # 星座/星官图层：写明当前打开的体系（两套同开时必须能看到徽标），
         # 数据不可用时如实说，不把空图层写成「无星座」。
@@ -8065,10 +9198,16 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         y += 18
         painter.setFont(self._font)
         painter.setPen(dim)
-        painter.drawText(card_x + 12, y,
-                         ("正在看整片天 · 按 Esc 退回 | 滚轮缩放"
-                          if self._all_sky_active else
-                          "滚轮缩放 | 拖动看天 | 双击居中 | 按 A 看整片天"))
+        # 卡宽固定：提示语拆两行，宁可多一行也不把「按 A 看整片天」裁半截
+        hint_lines = (["正在看整片天 · 按 Esc 退回 | 滚轮缩放"]
+                      if self._all_sky_active else
+                      ["滚轮缩放 | 拖动看天", "双击居中 | 按 A 看整片天"])
+        fm_hint = QFontMetrics(self._font)
+        for i, ln in enumerate(hint_lines):
+            painter.drawText(
+                card_x + 12, y + 18 * i,
+                fm_hint.elidedText(ln, Qt.ElideRight,
+                                   max(1, int(card_w - 24))))
         # 结束内容裁剪与滚动偏移；滚动条画在裁剪区外，贴卡片右缘。
         painter.restore()
 
@@ -8215,43 +9354,39 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         使用与其他卫星相同的 _sky_to_screen 投影（支持 pan/zoom），
         而非独立的极坐标投影，保证视角一致。
         """
-        if not self._gnss_connected or not self._gnss_satellites:
+        # 卫星层关掉时 GNSS 点也一起消失：它们同属"卫星标记"，不能一方
+        # 被用户关掉、另一方还在画面上（2026-11-16 用户实指）。
+        if (not self._show_satellites or not self._gnss_connected
+                or not self._gnss_satellites):
             return
         painter.save()
-        painter.setFont(self._gnss_label_font)
-        # 数据点是标记，不是天体：以前半径 7px（定位星还套一圈 10.5px），
-        # 在窄栏/拉远视角里就是"一堆大橙圈"，把星空压成雷达屏
-        # （2026-11-10 真机截图实证）。缩到 3.5px，靠颜色/外圈区分状态。
-        dot_r = 3.5
+        # 数据点是背景标记，不是天体：2026-11-16 用户反馈实心大点 + PRN
+        # 数字像"跑马灯"，把星空压成雷达屏。改成小尺寸空心细环、低透明度，
+        # 不再逐星写 PRN 数字（需要具体编号时看 GNSS 图例/状态面板）。
+        dot_r = 2.2
         for sat in self._gnss_satellites:
-            pos = self._sky_to_screen(sat["azimuth"], sat["elevation"])
+            pos = self._sky_to_screen_finite(sat["azimuth"], sat["elevation"])
+            if pos is None:
+                # 视轴背面：不兜到中心，否则小视场/偏转视角下所有 GNSS 星
+                # 会堆成屏幕正中一圈「火星」。
+                continue
             base = self._gnss_colors.get(sat["constellation"],
                                          self._gnss_colors["未知"])
             snr = sat.get("snr_db")
             snr = float(snr) if snr is not None else 0.0
-            alpha = int(255.0 * max(0.3, min(1.0, snr / 50.0)))
+            # 110..200：弱星几乎融进背景，强星也只是细环，不做实心填充。
+            alpha = int(110.0 + 90.0 * max(0.0, min(1.0, snr / 50.0)))
             used = sat["prn"] in self._gnss_sats_used
 
+            painter.setBrush(Qt.NoBrush)
+            painter.setPen(QPen(QColor(base.red(), base.green(), base.blue(),
+                                       alpha), 1.0))
+            painter.drawEllipse(pos, dot_r, dot_r)
             if used:
-                fill = QBrush(QColor(base.red(), base.green(), base.blue(), alpha))
-                painter.setBrush(fill)
-                painter.setPen(QPen(QColor(base.red(), base.green(),
-                                           base.blue(), 255), 1.2))
-                painter.drawEllipse(pos, dot_r, dot_r)
-                painter.setPen(QPen(QColor(base.red(), base.green(),
-                                           base.blue(), 255), 1.6))
-                painter.setBrush(Qt.NoBrush)
-                painter.drawEllipse(pos, dot_r + 2.5, dot_r + 2.5)
-            else:
-                pen_col = QColor(base.red(), base.green(), base.blue(), alpha)
-                painter.setPen(QPen(pen_col, 1.0))
-                painter.setBrush(Qt.NoBrush)
-                painter.drawEllipse(pos, dot_r, dot_r)
-
-            # PRN 与卫星点同属操作对象（0.5 优先级），并入统一避让。
-            self._queue_label(0.5, QPointF(pos.x() + dot_r + 3,
-                                          pos.y() - dot_r - 2),
-                              str(sat["prn"]), self._ink(), small=True)
+                # 参与定位的星只加一圈更淡的外环，仍不填充。
+                painter.setPen(QPen(QColor(base.red(), base.green(), base.blue(),
+                                           max(60, alpha - 70)), 1.0))
+                painter.drawEllipse(pos, dot_r + 1.6, dot_r + 1.6)
         painter.restore()
 
     def _draw_gnss_overlay(self, painter: QPainter):
@@ -8438,6 +9573,11 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         if r is not None and r.contains(px, py):
             self.on_object_picked(None)
             return True
+        # D3：卡内动作按钮（接收/追踪/指向）
+        for key, rect in (self._info_action_rects or {}).items():
+            if rect.contains(px, py):
+                self._on_info_action(key)
+                return True
         # 卡身任意处点击只消费事件：点的是面板不是天空，不应反选天体
         r = self._info_card_rect
         if r is not None and r.contains(px, py):
@@ -8446,16 +9586,39 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         if r is not None and r.contains(px, py):
             self.view_state.zoom(1.0)     # 放大：FOV 变小
             self.on_view_changed()
+            self._note_sky_manual_adjust()
             return True
         r = self._fov_plus_rect
         if r is not None and r.contains(px, py):
             self.view_state.zoom(-1.0)    # 缩小：FOV 变大
             self.on_view_changed()
+            self._note_sky_manual_adjust()
             return True
         return False
 
+    def _on_info_action(self, key: str) -> None:
+        """卡内动作按钮（D3）：与左下浮动按钮共用同一执行体。
+
+        ``tune`` 走 ``_on_tune_satellite``（发调谐请求）；``track`` / ``gimbal``
+        只是切换同一个 QPushButton 的勾选态，由既有 ``toggled`` 处理器发信号，
+        因此两处入口的状态天然同源，不存在第二份布尔。
+        按钮不可用时点击是空操作（置灰即不可点）。
+        """
+        if key == "tune":
+            if self._tune_btn.isEnabled():
+                self._on_tune_satellite()
+            return
+        btn = self._track_btn if key == "track" else self._gimbal_btn
+        if not btn.isEnabled():
+            return
+        btn.setChecked(not btn.isChecked())
+        self._position_tune_overlay()
+        self.update()
+
     def mouseMoveEvent(self, event: QMouseEvent):
         SkyInteractionHandler.mouseMoveEvent(self, event)
+        if self._dragging:
+            self._note_sky_manual_adjust()
 
     def mouseReleaseEvent(self, event: QMouseEvent):
         """左键释放: 未拖拽 = 点击拾取。优先级: SkyObject(卫星) ->
@@ -8502,6 +9665,7 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         az, alt = screen_to_sky(px, py, self.view_state,
                                 self.projection, size)
         self.goto_animated(az, alt)
+        self._note_sky_manual_adjust()
 
     def wheelEvent(self, event: QWheelEvent):
         # 光标在状态卡内且卡内容超高时，滚轮只滚卡片，不改 FOV。
@@ -8509,6 +9673,7 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
             return
         self._cancel_goto_anim()  # 滚轮缩放打断飞行
         SkyInteractionHandler.wheelEvent(self, event)
+        self._note_sky_manual_adjust()
 
     # ------------------------------------------------------------------ 触屏手势
     def _on_touch_pinch_zoom(self, scale_factor: float, center_pos: QPointF) -> None:
@@ -8522,6 +9687,7 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
             cursor = ((float(center_pos.x()), float(center_pos.y()))
                       if center_pos is not None else None)
             self.zoom_at_cursor(num_steps, cursor)
+            self._note_sky_manual_adjust()
         except Exception:
             pass
 
@@ -8547,6 +9713,7 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
             dalt = alt1 - alt2
             self.view_state.pan(daz, dalt)
             self.on_view_changed()
+            self._note_sky_manual_adjust()
         except Exception:
             pass
 
@@ -8562,6 +9729,7 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
             self._selected_info = None
             self._info_card_rect = None
             self._info_close_rect = None
+            self._info_action_rects = {}
             # 卫星/行星选中态互斥清理
             self._picked_body = None
             self._body_info = None
@@ -8987,6 +10155,11 @@ class SatelliteTracker:
 
         self._timer = QTimer(self.sky_view)
         self._timer.timeout.connect(self.refresh)
+        # 视图收起就停表、展开就恢复并立刻算一帧：没在看星象仪时不该有
+        # 每 10s 一轮的 sgp4 + 过境粗扫在后台烧 CPU（用户明确要求）。
+        hook = getattr(self.sky_view, "visibility_changed", None)
+        if hook is not None:
+            hook.connect(self._on_view_visibility)
 
         # 加载 TLE 目录：优先向 owner 投影（不自己算一份会过期的），
         # owner 尚未就绪时才退回磁盘/用户文件。
@@ -9171,6 +10344,17 @@ class SatelliteTracker:
         return sun, moon, brightness
 
     # ------------------------------------------------------------------ 主刷新
+    def _on_view_visibility(self, visible: bool) -> None:
+        """星象仪页签显隐 → 启停定时刷新（手动 ``refresh()`` 不受影响）。"""
+        if visible:
+            if self.lat is None or self.lon is None:
+                return
+            if not self._timer.isActive():
+                self._timer.start(self._interval_ms)
+            self.refresh()
+        elif self._timer.isActive():
+            self._timer.stop()
+
     def set_location(self, lat: Optional[float], lon: Optional[float],
                      alt_km: Optional[float] = None):
         """更新观测站坐标；None 则停止计算并清空（空状态）。"""
@@ -9275,6 +10459,8 @@ class SatelliteTracker:
                 boundary_uncertainty_s=state.get("boundary_uncertainty_s"),
                 # 全精度径向速度（km/s）：多普勒读字段，不从文案正则抠
                 range_rate_kms=range_rate,
+                # 站心距离（km）：信息卡读字段，文案正则只作外部构造的兜底
+                range_km=dist_km,
             ))
 
             # 未来 10 分钟轨迹（每 60s 一点）

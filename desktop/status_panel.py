@@ -58,6 +58,14 @@ def _fmt_number(value, digits: int, unit: str = "") -> str:
     return f"{v:.{digits}f}{unit}"
 
 
+# GNSS 天线告警（Task 106）：GPTXT 回包里的 open/short 才告警；ok/unknown 不报。
+_GNSS_ANTENNA_ALARMS = {"open": "天线开路", "short": "天线短路"}
+
+# SDR 读停顿（Task 107）：socket/USB 还在（connected=True）但设备读超时、
+# 一直没样本时，连接行不能只写「已连接」——那会让人以为链路正常。
+_SDR_STALLED_TEXT = "已连接 · 无样本（超时）"
+
+
 # MCP 固件状态里的 RSSI 是 SI4732 的 dBµV（0–127），不是 dBFS：
 # ai-sdr-mini-kicad/ai_sdr_mini_firmware_v0.5_WebOTA.ino:336
 #   state.si4732_rssi = resp[4];  // RSSI (0-127 dBuV)
@@ -205,11 +213,14 @@ DECODE_ERROR_REMEDY = {
     "decoder_not_available": "换用 list_decoders 里登记的模式名",
 }
 
-# 证据等级 → 人话（与 P2 真样本盘点口径一致）
+# 证据等级 → 人话（超级 spec D2 口径）
 DECODE_EVIDENCE_LABELS = {
-    "real": "真实（真录/真值对拍）",
-    "partial": "部分（合成链自洽，无 OTA 实绩）",
+    "ota_golden": "真实（真录/金标对拍）",
+    "synthetic_only": "部分（合成链自洽，无 OTA 实绩）",
     "no_sample": "缺样本（无真录，仅协议性质钉扎）",
+    # 兼容旧结果载荷（real/partial），显示语义不变。
+    "real": "真实（真录/金标对拍）",
+    "partial": "部分（合成链自洽，无 OTA 实绩）",
 }
 
 
@@ -383,6 +394,10 @@ class StatusPanel(QWidget):
         self.decode_last = None          # 最近一次解码结果的显示快照（测试可查）
         self.fec_last = None             # 最近一次 FEC 纠错统计（12.1，测试可查）
         self.reassembly_last = None      # 最近一次文件重组统计（12.2，测试可查）
+        # 连接行的「读停顿」覆盖态：进入时记下原文/原样式，恢复时原样还回去。
+        self._sdr_stall_shown = False
+        self._sdr_stall_prev_text = ""
+        self._sdr_stall_prev_style = ""
         self._build_ui()
         self._start_utc_clock()
         # 初始即未连接：SDR 相关卡片整组置灰，绝不错误呈现"有数据"
@@ -790,6 +805,9 @@ class StatusPanel(QWidget):
         backend 为 None 或任意属性缺失时，对应字段显 "—"，绝不抛异常。
         主窗口应在 IQ 轮询周期 / 状态变化时调用本方法。
         """
+        # 连接行先按运行时快照刷新读停顿态：连着但读超时不能只写「已连接」。
+        self._refresh_sdr_stall_state()
+
         # ---- SDR 接收参数 ----
         status = None
         try:
@@ -1046,6 +1064,49 @@ class StatusPanel(QWidget):
         except Exception:
             return None
 
+    def _refresh_sdr_stall_state(self) -> None:
+        """按运行时快照刷新「连接」行，暴露「连着但读不出样本」。
+
+        数据源是进程级单例 ``get_runtime_sources().snapshot()["sdr"]``（与
+        天空 HUD 同源）：``connected=True`` 且 ``stalled=True`` 时显示
+        「已连接 · 无样本（超时）」并用 warning token；恢复有样本后还回
+        原文案。读快照失败就保持原样——既不打断刷新，也不把「读失败」
+        猜成「正常」。
+        """
+        try:
+            from mbdsdr_ai.runtime_sources import get_runtime_sources
+            snapshot = get_runtime_sources().snapshot() or {}
+            sdr = snapshot.get("sdr") or {}
+        except Exception:
+            return
+
+        connected = bool(sdr.get("connected"))
+        stalled = bool(sdr.get("stalled"))
+        if connected and stalled:
+            if not self._sdr_stall_shown:
+                self._sdr_stall_prev_text = self.conn_status.text()
+                self._sdr_stall_prev_style = self.conn_status.styleSheet()
+                self._sdr_stall_shown = True
+            self.conn_status.setText(_SDR_STALLED_TEXT)
+            self.conn_status.setStyleSheet(
+                "color: " + tokens().status_color("warning") + ";")
+            self.conn_status.setToolTip(str(sdr.get("last_read_reason") or ""))
+            return
+
+        if not self._sdr_stall_shown:
+            return
+        self._sdr_stall_shown = False
+        self.conn_status.setToolTip("")
+        if not connected:
+            # 断开时连接行文案归 on_connection_changed 管：只有还停在我们写的
+            # 停顿文案上才改成「未连接」，别拿旧文本盖掉断开原因。
+            if self.conn_status.text() == _SDR_STALLED_TEXT:
+                self.conn_status.setText("未连接")
+                self.conn_status.setStyleSheet("")
+            return
+        self.conn_status.setText(self._sdr_stall_prev_text)
+        self.conn_status.setStyleSheet(self._sdr_stall_prev_style)
+
     def _set_level_bar_color(self, hex_color: str):
         """用 stylesheet 设置 QProgressBar 高亮色（保留默认底色）。"""
         _t = tokens()
@@ -1201,9 +1262,17 @@ class StatusPanel(QWidget):
             self.gps_group.setTitle("GPS / 北斗")
             return
 
-        # 已定位：绿色（token success）
-        self.gps_fix.setText("已定位")
-        self.gps_fix.setStyleSheet("color: " + tokens().COLORS["success"] + ";")
+        # 已定位：绿色（token success）；天线开/短路时在定位文本后追告警并转
+        # warning 色——天线失效会让定位时有时无，比“已定位”更该被看见。
+        antenna_alarm = _GNSS_ANTENNA_ALARMS.get(self._gnss_antenna_state())
+        if antenna_alarm:
+            self.gps_fix.setText(f"已定位 · {antenna_alarm}")
+            self.gps_fix.setStyleSheet(
+                "color: " + tokens().status_color("warning") + ";")
+        else:
+            self.gps_fix.setText("已定位")
+            self.gps_fix.setStyleSheet(
+                "color: " + tokens().COLORS["success"] + ";")
         self.gps_group.setTitle("GPS / 北斗")
         lat = fix_dict.get("latitude")
         lon = fix_dict.get("longitude")
@@ -1218,6 +1287,23 @@ class StatusPanel(QWidget):
         self.gps_error.setText(format_gst_error(fix_dict.get("gst")))
         # 可选：最强 5 颗卫星 SNR（无 satellite_signals 字段时显示 '--'，不报错）
         self._update_signal_strength(fix_dict.get("satellite_signals"))
+
+    @staticmethod
+    def _gnss_antenna_state() -> str:
+        """读运行时 GNSS 快照里的 ``antenna``（open/short/ok/unknown）。
+
+        面板与主窗口共用同一份进程级数据源（``get_runtime_sources``），
+        fix_dict 本身不带天线状态，只能从这里取。延迟 import + 全部异常
+        吞掉：读不到就按 ``unknown`` 处理、不显示告警，绝不打断每秒刷新，
+        也绝不把「读失败」猜成「开路」。
+        """
+        try:
+            from mbdsdr_ai.runtime_sources import get_runtime_sources
+            snapshot = get_runtime_sources().snapshot() or {}
+            gnss = snapshot.get("gnss") or {}
+            return str(gnss.get("antenna") or "unknown")
+        except Exception:
+            return "unknown"
 
     def _update_signal_strength(self, signals):
         """可选：显示最强 5 颗卫星的 SNR。

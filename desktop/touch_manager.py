@@ -4,8 +4,9 @@ MBDSDR 桌面端触屏管理器
 ========================
 
 统一管理触屏/Surface/平板二合一设备的触控适配：
-  - 自动检测触屏设备（QTouchDevice.devices()）
-  - 手动覆盖（settings 里 touch_mode = auto/on/off）
+  - 自动检测触屏硬件（Qt 指针设备枚举 + Windows 数字化仪标志）
+  - 运行时补测：真收到触控事件就自动升级为触屏模式（枚举不到也不漏）
+  - 手动覆盖（settings 里 touch_mode = auto/on/off），只作逃生口，默认 auto
   - 提供触控目标尺寸（≥44×44 逻辑像素）
   - 全局 WA_AcceptTouchEvents 开关
   - touch_mode_changed 信号通知各控件重新适配
@@ -13,8 +14,11 @@ MBDSDR 桌面端触屏管理器
 设计原则：
   - 不破坏鼠标桌面手感：触屏模式只放大触控热区、补充手势，
     鼠标模式下行为与之前完全一致。
-  - 自动检测优先：有 QTouchDevice 且至少一个 TouchScreen 类型 → 自动开启。
-  - 可手动强制：settings.touch_mode="on" 强制开启，"off" 强制关闭。
+  - 自动检测优先：Qt6 的 QTouchDevice 已被移除（PySide6 里根本没有这个类），
+    旧写法必然恒为 False，用户只能靠"强制触屏"菜单——这就是"为什么有一个
+    触屏模式"的根因。现在改为 Qt6 QPointingDevice + Win32 SM_DIGITIZER，
+    并在真机触控事件到达时自动升级，无需用户选模式。
+  - 可手动强制：settings.touch_mode="on"/"off" 仅用于排障。
   - 单例全局：TouchManager.instance() 拿到唯一实例。
 
 红线：不造假触控事件；无触屏设备时自动检测返回 False，不假装支持。
@@ -22,13 +26,18 @@ MBDSDR 桌面端触屏管理器
 
 from __future__ import annotations
 
+import sys
 from typing import List, Optional
 
 from PySide6.QtCore import QObject, Signal
 try:
-    from PySide6.QtGui import QTouchDevice
-except Exception:  # pragma: no cover - 部分 PySide6 构建无 QTouchDevice
+    from PySide6.QtGui import QTouchDevice      # Qt5 路径
+except Exception:  # pragma: no cover - PySide6(Qt6) 无此类
     QTouchDevice = None  # type: ignore
+try:
+    from PySide6.QtGui import QPointingDevice   # Qt6 路径
+except Exception:  # pragma: no cover
+    QPointingDevice = None  # type: ignore
 
 
 # 触控目标最小尺寸（逻辑像素，对标 Apple HIG / Material Design 48dp）
@@ -68,25 +77,73 @@ class TouchManager(QObject):
     # 触屏设备检测
     # ------------------------------------------------------------------
     @staticmethod
-    def detect_touch_devices() -> List:
-        """返回所有 TouchScreen 类型的输入设备（不包括 TouchPad）。
+    def _qt_touch_devices() -> List:
+        """Qt 指针设备枚举（Qt6 用 QPointingDevice，Qt5 才用 QTouchDevice）。"""
+        if QPointingDevice is not None:
+            try:
+                return [d for d in QPointingDevice.devices()
+                        if d.deviceType() == QPointingDevice.DeviceType.TouchScreen]
+            except Exception:
+                pass
+        if QTouchDevice is not None:
+            try:
+                return [d for d in QTouchDevice.devices()
+                        if d.type() == QTouchDevice.DeviceType.TouchScreen]
+            except Exception:
+                pass
+        return []
 
-        部分 PySide6 构建/离屏平台无 QTouchDevice → 返回空列表（自动检测视为无触屏）。
+    @staticmethod
+    def _windows_has_touch() -> bool:
+        """Win32 数字化仪能力查询（Qt 枚举在 Windows 上常返回 0 个设备）。
+
+        SM_DIGITIZER(94) 的 0x40/0x80 位分别代表内置/外接触摸数字化仪；
+        SM_MAXIMUMTOUCHES(95) > 0 也说明存在触点。仅 Windows 生效。
         """
-        if QTouchDevice is None:
-            return []
+        if not sys.platform.startswith("win"):
+            return False
         try:
-            devices = QTouchDevice.devices()
-            return [d for d in devices
-                    if d.type() == QTouchDevice.DeviceType.TouchScreen]
+            # 离屏/最小平台没有真实输入通道：即便宿主有触屏也不该算数
+            # （否则 offscreen 测试结果随开发机硬件漂移）。
+            from PySide6.QtGui import QGuiApplication
+            app = QGuiApplication.instance()
+            if app is not None and app.platformName() in ("offscreen", "minimal"):
+                return False
+            import ctypes
+            user32 = ctypes.windll.user32
+            digitizer = int(user32.GetSystemMetrics(94))
+            max_touches = int(user32.GetSystemMetrics(95))
+            return bool(digitizer & 0xC0) or max_touches > 0
         except Exception:
-            return []
+            return False
+
+    @classmethod
+    def detect_touch_devices(cls) -> List:
+        """返回检测到的触控设备列表（空列表 = 没有触屏）。
+
+        Qt 枚举为空但当前处于真实触控事件上下文中时，会由
+        ``note_touch_event()`` 直接把能力标记为 True，不依赖这里。
+        """
+        return cls._qt_touch_devices()
 
     def touch_available(self) -> bool:
         """是否检测到触屏硬件（缓存结果，避免反复查询）。"""
         if self._cached_touch_available is None:
-            self._cached_touch_available = len(self.detect_touch_devices()) > 0
+            self._cached_touch_available = (
+                len(self.detect_touch_devices()) > 0 or self._windows_has_touch())
         return self._cached_touch_available
+
+    def note_touch_event(self) -> None:
+        """运行时补测：真收到触控事件就自动升级为触屏模式。
+
+        枚举不到触屏（Windows 常见）时，第一次真实触摸就是最硬的证据；
+        只改能力缓存，不碰用户的手动覆盖。
+        """
+        if self._cached_touch_available:
+            return
+        self._cached_touch_available = True
+        if self._mode_override is None:
+            self.touch_mode_changed.emit(self.is_touch_mode())
 
     def rescan(self) -> None:
         """重新扫描触屏设备（热插拔后调用）。"""

@@ -1802,11 +1802,7 @@ class SettingsPanel(QWidget):
             if key in ("pass_min_elevation_deg", "pass_window_hours",
                        "show_low_elevation_passes"):
                 # 读取入口是 settings.effective_pass_*；卫星/星空面板下次刷新时
-                # 会读到新值。这里只做尽力而为的即时刷新（面板公开方法存在才调）。
-                panel = getattr(h, "new_spacetime_panel", None)
-                refresh = getattr(panel, "refresh_passes", None)
-                if callable(refresh):
-                    refresh()
+                # 会读到新值（新时空聚合面板已于 2026-11-16 移除）。
                 return True
             if key == "record_dir":
                 # 目录只给消费方读；改值不影响已录文件（消费点在主窗口线）。

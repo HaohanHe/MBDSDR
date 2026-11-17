@@ -475,8 +475,23 @@ class SpectrumDataGenerator:
         self._reset_average()
 
     # ------------------------------------------------------------------ 状态
+    @property
+    def has_live_data(self) -> bool:
+        """是否有可绘制的真实 IQ 谱线——「画不画谱线」的**唯一判定点**。
+
+        两个条件同时成立才算有数据：确有一帧真实 IQ 进入（``push_iq`` 置位），
+        且当前频谱里至少有一个有限值。断开/清空后 ``clear_data`` 把谱线全部
+        填回 NaN 并复位标志，因此空态下渲染只走网格 + 「未连接 SDR」提示，
+        不会进入谱线/峰值/瀑布绘制分支。渲染层只读这一个属性，不各自判断。
+        """
+        if not self._has_real_data:
+            return False
+        spec = np.asarray(self.spectrum)
+        return bool(spec.size) and bool(np.any(np.isfinite(spec)))
+
     def has_data(self) -> bool:
-        return self._has_real_data
+        """兼容旧调用名；语义与 ``has_live_data`` 相同。"""
+        return self.has_live_data
 
     def clear_data(self):
         """断开/清空：回到"未连接"，不保留旧谱线。"""
@@ -1254,7 +1269,11 @@ class _PlotState:
         self.show_bandplan = True
         self.bandplan_hover: Optional[int] = None      # 悬停频段索引（提亮+气泡）
         self.bandplan_selected: Optional[int] = None   # 点击选中频段（常驻描边）
-        self.show_peaks = True
+        # 自动峰值标注默认关：它不是用户放上去的标记，而是按每帧门限现算的
+        # 浮标——谱线一抖，竖线与「98.687891 MHz」就会逐帧换位置，读都没法读
+        # （用户原话："我没往上放你别显示…跟着频谱一跳一点用都没有"）。
+        # 要看的用户可以在显示设置里自己打开。
+        self.show_peaks = False
         # 门限 = 本帧全谱中位数 + 6 dB（本侧默认比 C++ 的 15 dB 敏感）。
         # 不照抄 C++ tokens.h:352 的 15 dB / 12 峰：那边另有 -100 dBFS 绝对
         # 门与 kPeakMinSeenFrames=3 的持续门，宽带噪声不会碎成假峰；本侧
@@ -1512,7 +1531,8 @@ def _render_spectrum(painter: QPainter, state: _PlotState, w: int, h: int):
     """
     panel = state.panel
     gen = panel.generator
-    has_data = gen.has_data()
+    # 唯一判定点：无连接/无真实谱线时只画网格与「未连接 SDR」，不画谱线。
+    has_data = gen.has_live_data
 
     # 自动量程先于一切几何：谱线/瀑布/刻度都吃同一份 db_min/db_max。
     if has_data:
@@ -1586,14 +1606,14 @@ def _render_wf_only(painter: QPainter, state: _PlotState, w: int, h: int):
     # 瀑布与谱面是两块独立 widget，绘制顺序不由我们决定：自动量程必须
     # 在这里也算一次，否则瀑布先画时仍用旧量程上色，谱面再改量程 →
     # 同一帧里上下两半用两个色标（实拍：瀑布亮绿、刻度已到 0 dBFS）。
-    if panel.generator.has_data():
+    if panel.generator.has_live_data:
         _auto_db_range(state)
     if h > 0:
         # 瀑布不再单独画一条频率轴：谱面底部那条轴就在两区之间，是二者
         # 共用的唯一刻度；瀑布画布按同一 _px_to_freq 落列（见
         # _wf_paint_row_into），Ctrl 平移后仍与上方刻度对齐。
         wf_rect = QRectF(0, 0, w, h)
-        if not panel.generator.has_data():
+        if not panel.generator.has_live_data:
             _draw_wf_placeholder(painter, state, wf_rect)
         elif state.show_waterfall:
             _draw_waterfall(painter, wf_rect, state)
@@ -2191,7 +2211,7 @@ def _peak_annotations(state):
     dBFS/SNR 这类每秒跳几十次的量只在悬停提示里出现，绝不挂在谱面上。
     """
     gen = state.panel.generator
-    if not state.show_peaks or not gen.has_data():
+    if not state.show_peaks or not gen.has_live_data:
         return []
     return [(freq_hz, db, snr, format_frequency_hz(freq_hz))
             for freq_hz, db, snr in gen.find_peaks_with_snr(state.peak_rel_db)]
@@ -4382,6 +4402,13 @@ class _TuningPlotMixin:
         hover_stale = False
         if getattr(self.state, "bandplan_hover", None) is not None:
             self.state.bandplan_hover = None
+            hover_stale = True
+        # 光标读数（左上角「频率 · dBFS / SNR」）是"指着哪里读哪里"的东西：
+        # 鼠标一走就必须收回，否则它会留在原地按每一帧的值跳——用户原话
+        # "我没往上放你别显示"。读数一并清掉，下一次真正悬停再出现。
+        if getattr(self.state, "mouse_in_spectrum", False):
+            self.state.mouse_in_spectrum = False
+            self.state.mouse_x_ratio = None
             hover_stale = True
         if self._peak_hover_key is not None:
             self._peak_hover_key = None

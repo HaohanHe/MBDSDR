@@ -330,8 +330,10 @@ class LocalAgentBridge:
                only_args: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """处理一句输入。返回 UI 直接渲染的结构（全部来自真实回执）。
 
-        ``confirm=True`` 才允许执行 gated 工具；``only_tool`` 用于人工门
-        确认后精确重放，不重新做意图匹配（避免确认的是 A、跑的是 B）。
+        ``only_tool`` 用于人工门确认后精确重放，不重新做意图匹配（避免确认
+        的是 A、跑的是 B）。``confirm`` 仅为兼容旧调用保留，**不再构成授权**：
+        gated 工具必须携带 ``tx_guard.issue_confirmation()`` 签发的一次性
+        token（绑定工具名 + 参数摘要），否则仍返回 gated 卡。
         """
         text = (text or "").strip()
         out: Dict[str, Any] = {
@@ -383,38 +385,71 @@ class LocalAgentBridge:
             out["status"] = STATUS_FAILED
             return out
 
-        for tool, _score, args in matches:
+        from mbdsdr_ai.tx_guard import (GATE_PARAMS,
+                                        resolve_write_authorization,
+                                        tx_authorization)
+
+        for tool, _score, raw_args in matches:
             name = tool["name"]
-            gated = self._is_gated(tool) and not confirm
+            args = dict(raw_args or {})
+            call_args = {k: v for k, v in args.items() if k not in GATE_PARAMS}
+            token = str(args.get("confirm_token") or args.get("tx_token") or "")
+            gated = self._is_gated(tool)
+            decision = None
             veto = self._emit_hook("agent.tool_call",
-                                   {"tool": name, "args": args,
+                                   {"tool": name, "args": call_args,
                                     "gated": gated, "text": text})
             out["hooks"].append({"event": "agent.tool_call", "tool": name,
                                  "veto": bool(veto)})
             if veto:
                 out["cards"].append({
-                    "tool": name, "args": args, "status": STATUS_DENIED,
+                    "tool": name, "args": call_args, "status": STATUS_DENIED,
                     "content": "Hooks 否决了这次调用：%s" %
                                (veto.get("reason") or "未说明原因")})
                 out["status"] = STATUS_DENIED
                 continue
             if gated:
-                out["cards"].append({
-                    "tool": name, "args": args, "status": STATUS_GATED,
-                    "content": "这类能力会改动设备/配置，需要你点确认才执行。",
-                    "confirm_tool": name, "confirm_args": args})
-                out["status"] = STATUS_GATED
-                continue
+                # 桌面确认必须由真人签发的 token 放行；布尔 confirm=True 不再有效。
+                if not token:
+                    out["cards"].append({
+                        "tool": name, "args": call_args, "status": STATUS_GATED,
+                        "content": "这类能力会改动设备/配置，需要你点确认才执行。",
+                        "confirm_tool": name, "confirm_args": call_args})
+                    out["status"] = STATUS_GATED
+                    continue
+                try:
+                    decision = resolve_write_authorization(
+                        name, args, source="desktop")
+                except Exception as e:  # noqa: BLE001 - 门坏了 fail-closed
+                    out["cards"].append({
+                        "tool": name, "args": call_args, "status": STATUS_FAILED,
+                        "content": "确认授权检查失败（%s: %s），未执行。"
+                                   % (type(e).__name__, e)})
+                    out["status"] = STATUS_FAILED
+                    continue
+                if not decision.allowed:
+                    # token 换参数重放 / 过期 / 已消费：不放行，重新请用户确认。
+                    out["cards"].append({
+                        "tool": name, "args": call_args, "status": STATUS_GATED,
+                        "content": "确认授权无效（%s: %s），未执行；请重新确认。"
+                                   % (decision.code, decision.reason),
+                        "confirm_tool": name, "confirm_args": call_args})
+                    out["status"] = STATUS_GATED
+                    continue
             if not tool["available"]:
                 out["cards"].append({
-                    "tool": name, "args": args, "status": STATUS_OFFLINE,
+                    "tool": name, "args": call_args, "status": STATUS_OFFLINE,
                     "content": "能力在位，但当前设备/依赖未连接，未执行。"})
                 out["status"] = STATUS_OFFLINE
                 continue
 
             t0 = time.perf_counter()
             try:
-                result = reg.call(name, args)
+                if decision is not None:
+                    with tx_authorization(decision):
+                        result = reg.call(name, call_args)
+                else:
+                    result = reg.call(name, call_args)
                 ok = bool(tool_success(result))
                 content = result.content if ok else (result.error or result.content)
                 latency = (time.perf_counter() - t0) * 1000.0
@@ -425,10 +460,10 @@ class LocalAgentBridge:
                 result = ToolResult(success=False, content=content)
             status = STATUS_OK if ok else STATUS_FAILED
             out["cards"].append({
-                "tool": name, "args": args, "status": status,
+                "tool": name, "args": call_args, "status": status,
                 "content": str(content)[:1200], "latency_ms": latency})
             out["status"] = status
-            tid = self._record_task(name, name, args, result)
+            tid = self._record_task(name, name, call_args, result)
             if tid:
                 out["tasks"].append({"id": tid, "name": name,
                                      "status": "completed" if ok else "failed"})

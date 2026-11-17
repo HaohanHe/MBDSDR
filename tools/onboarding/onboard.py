@@ -364,9 +364,10 @@ def step_record(
 
     时空对齐（Q2）：
       - ``gnss_file`` 给定时，读取该 NMEA 日志文件，用 ZDA/RMC 解出 GNSS UTC，
-        写入 ``captures[0].core:datetime`` 并标 ``mbdsdr:time_source="gnss"``；
+        写入 ``captures[0].core:datetime`` 并标 ``mbdsdr:time_source="nmea"``
+        （有 PPS 时才标 ``"pps"``，精度写入 ``mbdsdr:time_precision``）；
       - 无 gnss_file / 解不出合法日期（如仅 GGA 无 RMC/ZDA）→ 退化为系统 UTC，
-        标 ``mbdsdr:time_source="system"``，绝不冒充 GNSS 授时。
+        标 ``mbdsdr:time_source="none"``，绝不冒充 GNSS 授时。
       - ``clock`` 可注入（callable -> tz-aware UTC datetime），便于确定性测试。
     """
     r = StepResult(step="record", status="FAIL")
@@ -1311,8 +1312,8 @@ def main(argv: list[str] | None = None) -> int:
                     help="capture 步 raw IQ 文件路径（默认临时文件）")
     ap.add_argument("--gnss", default="",
                     help="可选：录制同期的 NMEA 日志文件路径（GGA/RMC/ZDA）；"
-                         "存在合法 RMC/ZDA 时把 GNSS UTC 写入 SigMF core:datetime 并标 time_source=gnss，"
-                         "否则退回系统时间并标 system")
+                         "存在合法 RMC/ZDA 时把 GNSS UTC 写入 SigMF core:datetime 并标 time_source=nmea，"
+                         "否则退回系统时间并标 none")
     ap.add_argument("--sigmf-data", default="",
                     help="decode/output 步直接指定 SigMF data 文件（跳过 capture/record）")
     ap.add_argument("--ssdv-input", default="bytes",

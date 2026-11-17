@@ -40,6 +40,9 @@ __pycache__/
 venv/
 env/
 
+# 构建产物（PyInstaller 出包 / 便携 zip 等，体积大且可重建）
+dist/
+
 # 临时
 .tmp-tool-results/
 .audit_tmp/

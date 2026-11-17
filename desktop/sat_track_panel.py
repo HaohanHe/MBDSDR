@@ -38,6 +38,7 @@ from tokens import tokens
 #     按**峰值**仰角筛「这次过境值不值得列出来」，不是当前仰角门。
 from mbdsdr_ai.sat_passes import VISIBLE_MIN_ALT_DEG
 from mbdsdr_ai.tle_integrity import age_band, tracking_policy
+from mbdsdr_ai.tle_fetch import NO_TLE_TEXT
 # 时间口径的单一事实源：轨道计算只用 UTC；本地时区仅是显示变换。
 # 面板不自己算偏移、不读墙钟——倒计时的 now 由调用方（主窗口）用
 # mbdsdr_ai.new_spacetime.get_time_engine() 的同一时基传入。
@@ -169,7 +170,7 @@ class PolarPassPlot(QWidget):
         radius = max(10.0, min(w, h) / 2.0 - self.MARGIN_PX)
 
         p.setBrush(Qt.NoBrush)
-        p.setPen(QPen(QColor(t.COLORS["gray_400"]), 1))
+        p.setPen(QPen(QColor(t.semantic_color("grid")), 1))
         for el in (0, 30, 60):
             r = radius * (1.0 - el / 90.0)
             p.drawEllipse(QPointF(cx, cy), r, r)
@@ -192,10 +193,10 @@ class PolarPassPlot(QWidget):
             for az, el in pts[1:]:
                 x, y = polar_xy(az, el, cx, cy, radius)
                 path.lineTo(x, y)
-            p.setPen(QPen(QColor(t.COLORS["accent"]), 2))
+            p.setPen(QPen(QColor(t.semantic_color("accent")), 2))
             p.drawPath(path)
-            for (az, el), color in ((pts[0], t.COLORS["success"]),
-                                    (pts[-1], t.COLORS["danger"])):
+            for (az, el), color in ((pts[0], t.semantic_color("success")),
+                                    (pts[-1], t.semantic_color("danger"))):
                 x, y = polar_xy(az, el, cx, cy, radius)
                 p.setBrush(QColor(color))
                 p.setPen(Qt.NoPen)
@@ -207,8 +208,7 @@ class PolarPassPlot(QWidget):
         if self._current is not None:
             x, y = polar_xy(self._current[0], self._current[1], cx, cy, radius)
             p.setBrush(Qt.NoBrush)
-            p.setPen(QPen(QColor(t.COLORS.get("accent_warm",
-                                               t.COLORS["accent"])), 2))
+            p.setPen(QPen(QColor(t.semantic_color("accent_warm")), 2))
             p.drawEllipse(QPointF(x, y), 5.0, 5.0)
         p.end()
 
@@ -290,7 +290,7 @@ class DopplerCurvePlot(QWidget):
         top = self.MARGIN_TOP_PX
         bottom = max(top + 10.0, h - self.MARGIN_BOTTOM_PX)
 
-        p.setPen(QPen(QColor(t.COLORS["gray_400"]), 1))
+        p.setPen(QPen(QColor(t.semantic_color("grid")), 1))
         p.drawLine(QPointF(left, top), QPointF(left, bottom))
         p.drawLine(QPointF(left, bottom), QPointF(right, bottom))
         font = p.font()
@@ -337,8 +337,7 @@ class DopplerCurvePlot(QWidget):
             if mark is None or not (t_lo <= mark <= t_hi):
                 continue
             x = x_of(mark)
-            p.setPen(QPen(QColor(t.COLORS.get(color_key,
-                                              t.text("tertiary"))), 1, Qt.DashLine))
+            p.setPen(QPen(QColor(t.semantic_color(color_key)), 1, Qt.DashLine))
             p.drawLine(QPointF(x, top), QPointF(x, bottom))
             p.setPen(QPen(QColor(t.text("tertiary")), 1))
             p.drawText(QRectF(x - 18, bottom + 2, 36, 14), Qt.AlignCenter, label)
@@ -347,7 +346,7 @@ class DopplerCurvePlot(QWidget):
         path.moveTo(QPointF(x_of(ts[0]), y_of(fds[0])))
         for tv, fv in self._points[1:]:
             path.lineTo(QPointF(x_of(tv), y_of(fv)))
-        p.setPen(QPen(QColor(t.COLORS["accent"]), 2))
+        p.setPen(QPen(QColor(t.semantic_color("accent")), 2))
         p.drawPath(path)
 
         p.setPen(QPen(QColor(t.text("tertiary")), 1))
@@ -452,6 +451,11 @@ class SatTrackPanel(QFrame):
         self._passes_fetched_unix = None    # 上次取数时刻（冷却用）
         self._pass_warning = ""             # 负时长等异常：如实显示，不画假倒计时
         self._last_now_unix = None          # 最近一次显示用的时基（UTC 开关复用）
+        #: 当前星历是否确实缺失（无 TLE / 历元不可解析）。置位后倒计时必须写
+        #: 「无 TLE，无法预报」，不得把 0 条过境说成「窗口内无过境」。
+        self._tle_missing = False
+        #: 最近一次 set_tle_meta 收到的上游记录（来源/epoch/抓取/年龄）。
+        self._tle_meta: Dict = {}
         #: 已绑定完成回执的宿主；None=还没绑上（见 _bind_tle_completion）。
         self._tle_bound_host = None
         self._countdown_timer = QTimer(self)
@@ -880,15 +884,21 @@ class SatTrackPanel(QFrame):
                      tier: Optional[str] = None):
         """TLE 日期 + 陈旧档位 + 下一步提示（全部读 tracking_policy 字段）。
 
+        - 无日期/日期为空：显示「无 TLE，无法预报」，并把倒计时也切成该口径；
         - usable：显示「建议更新星历」，**不阻断**调谐；
         - expired/dead/unknown：显示「需确认/请更新」，云台入口由主窗口按
           同一份 policy 的 ``allow_gimbal`` 禁用；
         - 档位阈值与文案只在 ``mbdsdr_ai.tle_integrity`` 维护，本层不比较 tier。
         """
+        text_date = str(date_str or "").strip()
+        if text_date in ("", "--", "—", "无"):
+            self._set_tle_missing()
+            return
+        self._tle_missing = False
         pol = _tle_policy(age_days, tier)
-        text = f"TLE 日期: {date_str} · {pol['label']}"
+        text = f"TLE 日期: {text_date} · {pol['label']}"
         if pol["age_text"]:
-            text += f"（{pol['age_text']} 天前）"
+            text += f"（TLE 已 {pol['age_text']} 天）"
         if pol["hint"]:
             text += f" · {pol['hint']}"
         self.tle_date_label.setText(text)
@@ -897,12 +907,64 @@ class SatTrackPanel(QFrame):
         self.tle_date_label.setToolTip(
             "；".join(x for x in (pol["reason"], pol["next_action"]) if x))
 
+    def set_tle_meta(self, meta: Optional[Dict] = None) -> None:
+        """用上游 TLE 记录直接渲染日期行（``fetch_tle_record`` 的返回 dict）。
+
+        暴露的四项事实：来源（``upstream_source``）、TLE 自带历元
+        （``epoch_utc``）、抓取时刻（``fetched_utc``）、陈旧天数
+        （``age_days``）。无 ``line1``/``epoch_utc`` 视作「无 TLE」，
+        倒计时同步改成「无 TLE，无法预报」——空列表不再冒充「今天没有过境」。
+        """
+        self._tle_meta = dict(meta or {})
+        epoch = str(self._tle_meta.get("epoch_utc") or "")
+        line1 = str(self._tle_meta.get("line1") or "")
+        age = self._tle_meta.get("age_days")
+        if not line1 and not epoch:
+            self._set_tle_missing()
+            return
+        self._tle_missing = False
+        pol = _tle_policy(age)
+        parts = []
+        if pol["age_text"]:
+            parts.append(f"TLE 已 {pol['age_text']} 天")
+        else:
+            parts.append("TLE 年龄未知")
+        src = str(self._tle_meta.get("upstream_source")
+                  or self._tle_meta.get("source") or "")
+        if src:
+            parts.append(f"来源 {src}")
+        if epoch:
+            parts.append(f"历元 {epoch}")
+        fetched = self._tle_meta.get("fetched_utc")
+        if fetched:
+            parts.append(f"抓取 {fetched}")
+        parts.append(pol["label"])
+        if pol["hint"]:
+            parts.append(pol["hint"])
+        self.tle_date_label.setText(" · ".join(parts))
+        self.tle_date_label.setStyleSheet(
+            "color: " + self._tle_color(pol["severity"]) + "; font-size: 8.5pt;")
+        self.tle_date_label.setToolTip(
+            "；".join(x for x in (pol["reason"], pol["next_action"]) if x))
+
+    def _set_tle_missing(self) -> None:
+        """无 TLE 的统一显示（日期行 + 倒计时同一口径）。"""
+        self._tle_missing = True
+        self._passes = []
+        self._pass_warning = NO_TLE_TEXT
+        self.tle_date_label.setText(f"TLE: 无 · {NO_TLE_TEXT}")
+        self.tle_date_label.setStyleSheet(
+            "color: " + tokens().status_color("danger") + "; font-size: 8.5pt;")
+        self.tle_date_label.setToolTip(
+            "本地没有可用星历：联网刷新、导入 .tle 文件或检查 "
+            "MBDSDR_TLE_CACHE_DIR 后再预报过境。")
+
     @staticmethod
     def _tle_color(key: str) -> str:
         if key == "warning":
             return tokens().status_color("warning")
         if key == "danger":
-            return tokens().COLORS["danger"]
+            return tokens().status_color("danger")
         return tokens().text("tertiary")
 
     def set_tracking_state(self, tracking: bool):
@@ -941,7 +1003,7 @@ class SatTrackPanel(QFrame):
             self.corr_label.setText("--")
             self.range_label.setText("--")
             self.el_bar.setValue(0)
-            self._set_el_color(tokens().COLORS["gray_300"])
+            self._set_el_color(tokens().semantic_color("gray_300"))
             self.polar_plot.set_current(None)
             return
 
@@ -969,17 +1031,17 @@ class SatTrackPanel(QFrame):
             # 用户设置的「过境最低仰角」是峰值筛选门，**不用在这里**——
             # 25° 时卫星仍可跟踪，不能因为用户想少列过境就假装跟踪结束。
             _t = tokens()
-            self._set_el_color(_t.COLORS["danger"])
+            self._set_el_color(_t.status_color("danger"))
             self.state_label.setText(
                 f"跟踪已停止（仰角低于设定门限 {VISIBLE_MIN_ALT_DEG:g}°；"
                 "卫星尚未落下）")
-            self.state_label.setStyleSheet("color:" + _t.COLORS["danger"]
+            self.state_label.setStyleSheet("color:" + _t.status_color("danger")
                                            + "; font-weight:600;")
         else:
             _t = tokens()
-            self._set_el_color(_t.COLORS["success"])
+            self._set_el_color(_t.status_color("success"))
             self.state_label.setText("跟踪中")
-            self.state_label.setStyleSheet("color:" + _t.COLORS["success"]
+            self.state_label.setStyleSheet("color:" + _t.status_color("success")
                                            + "; font-weight:600;")
 
     def _resolved_settings(self):
@@ -1003,9 +1065,9 @@ class SatTrackPanel(QFrame):
     def _set_el_color(self, hex_color: str):
         _t = tokens()
         self.el_bar.setStyleSheet(
-            f"QProgressBar {{ border:1px solid {_t.COLORS['gray_400']}; "
+            f"QProgressBar {{ border:1px solid {_t.semantic_color('gray_400')}; "
             f"border-radius:3px; text-align:center; "
-            f"background:{_t.COLORS['card_2']}; "
+            f"background:{_t.semantic_color('card_2')}; "
             f"color:{_t.text('secondary')}; }}"
             f"QProgressBar::chunk {{ background:{hex_color}; }}"
         )
@@ -1025,7 +1087,7 @@ class SatTrackPanel(QFrame):
         self._passes = []
         self._passes_for = ""
         self._passes_fetched_unix = None
-        self._pass_warning = ""
+        self._pass_warning = NO_TLE_TEXT if self._tle_missing else ""
         self.polar_plot.set_track([])
         self.doppler_plot.set_curve([])
         # 注意：不清 ``_last_now_unix``——它只是「上次显示用的时基」，
@@ -1036,6 +1098,12 @@ class SatTrackPanel(QFrame):
         if not name:
             self._passes = []
             self._passes_for = ""
+            return
+        if self._tle_missing:
+            # 没有星历就没有预报：不向 provider 要空列表，也不进冷却。
+            self._passes = []
+            self._passes_for = name
+            self._pass_warning = NO_TLE_TEXT
             return
         if name != self._passes_for:
             # 切星：旧列表是别的卫星的过境，绝不能拿来给这颗星倒计时。
@@ -1146,6 +1214,14 @@ class SatTrackPanel(QFrame):
         if self._pass_provider is None:
             self.countdown_label.setText("--")
             self.pass_abs_label.setText("过境数据未接入（由主窗口注入预测结果）")
+            self.polar_plot.set_track([])
+            self.doppler_plot.set_curve([])
+            return
+        if self._tle_missing:
+            # 空列表 ≠ 今天没有过境：没有星历就是算不出来。
+            self.countdown_label.setText(NO_TLE_TEXT)
+            self.pass_abs_label.setText(
+                "本地没有可用 TLE：刷新星历或导入 .tle 文件后再预报过境")
             self.polar_plot.set_track([])
             self.doppler_plot.set_curve([])
             return

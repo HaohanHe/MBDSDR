@@ -1069,6 +1069,9 @@ class MainWindow(QMainWindow):
         self._loop_sat_tracker = None      # mbdsdr_ai.sat_tracker.SatelliteTracker
         # TLE 在线刷新后台线程（单星 5s 超时、内置最多 10 颗，最坏 50s，不能压 GUI）
         self._tle_update_thread: Optional[threading.Thread] = None
+        # 本次刷新是不是「开窗自动」触发：自动结果不得顶掉设备/连接关键消息
+        # （见 _hold_status / _status_hold_active）。
+        self._tle_update_auto: bool = False
         self._tle_update_result.connect(
             self._on_tle_update_result, Qt.QueuedConnection)
         # 事件过滤器只允许在「构造它的那个线程」上生效（见 eventFilter）。
@@ -1232,6 +1235,8 @@ class MainWindow(QMainWindow):
         self._replay_total: int = 0
         self._replay_block: int = 0
         self._replay_resume_poll: bool = False
+        #: 回放被「停止解调」暂停：恢复收听时从原位置继续（不丢进度）。
+        self._replay_paused_by_idle: bool = False
         # 读盘 worker：只负责 baseband_io.load_iq + emit；控件全留在 GUI 线程
         self._replay_load_thread: Optional[threading.Thread] = None
         self._replay_load_cancel = threading.Event()
@@ -1574,17 +1579,25 @@ class MainWindow(QMainWindow):
             action.triggered.connect(lambda checked, name=theme_name: self._apply_theme(name))
             theme_menu.addAction(action)
 
-        # 触屏模式（auto/on/off）：补上此前缺失的切换入口。设计上 _on_touch_mode_
-        # changed 早已预留重新适配路径，但一直没有 UI，用户只能手改 JSON 文件。
-        touch_menu = view_menu.addMenu("触屏模式")
+        # 触屏适配（auto/on/off）：默认 auto，跟随硬件自动判定；强制项只作
+        # 排障逃生口。早先自动检测在 Qt6 上恒为 False（QTouchDevice 已被移除），
+        # 才让用户觉得"必须手动选一个触屏模式"——根因已修，菜单语义随之澄清。
+        touch_menu = view_menu.addMenu("触屏适配")
+        touch_menu.setToolTip("默认自动：检测到触屏硬件或收到真实触控事件即启用")
         touch_group = QActionGroup(self)
         touch_group.setExclusive(True)
         current_tm = str(self.settings.get("touch_mode", "auto") or "auto")
-        for mode_key, label in (("auto", "自动检测"), ("on", "强制触屏"),
+        for mode_key, label in (("auto", "自动检测（推荐）"), ("on", "强制触屏"),
                                 ("off", "强制鼠标")):
             act = QAction(label, self)
             act.setCheckable(True)
             act.setChecked(current_tm == mode_key)
+            act.setToolTip({
+                "auto": "跟随硬件：Qt 指针设备 + Windows 数字化仪标志，"
+                        "并在收到真实触控事件时自动升级",
+                "on": "排障用：无视检测结果强制启用触控热区",
+                "off": "排障用：无视检测结果强制使用鼠标桌面手感",
+            }[mode_key])
             act.triggered.connect(
                 lambda _c, m=mode_key: self._set_touch_mode(m))
             touch_group.addAction(act)
@@ -1905,6 +1918,10 @@ class MainWindow(QMainWindow):
         self._listen_state = "idle"
         self.listen_combo.currentIndexChanged.connect(
             self._on_listen_state_changed)
+        # 用户"再点一次同一档"也必须落地：worker 可能被别的路径（切 VFO /
+        # 换声卡）重新使能，而下拉索引没变 → currentIndexChanged 不触发，
+        # 用户点了「停止解调」却仍在解调（2026-11-16 真机反馈）。
+        self.listen_combo.activated.connect(self._on_listen_state_changed)
 
         # 拉伸空白（QToolBar 没有 addStretch，用空白 QWidget 替代）
         spacer = QWidget()
@@ -2283,15 +2300,9 @@ class MainWindow(QMainWindow):
         # 12.1：真录链自带的 FEC 纠错统计 → 状态面板「信号质量」行
         self.weather_panel.decode_result.connect(self._on_weather_decode_result)
 
-        # 新时空（原中央页签 → 右栏 App）
-        self.new_spacetime_panel = self._create_panel("new_spacetime")
-        self._add_right_tab("新时空", self.new_spacetime_panel, "new_spacetime_dock")
-        # 面板里的「更改地点…」：站址唯一写入口在主窗，面板只发意图
-        try:
-            self.new_spacetime_panel.change_location_requested.connect(
-                self._open_location_panel)
-        except AttributeError:
-            pass
+        # （2026-11-16 移除「新时空」聚合面板：AMR 归「调制识别」、过境/
+        #  跟踪归「卫星跟踪」与天空视图，授时不再单开一页。一个工具只做
+        #  一件事，不再把三件不相干的事粘成"新工具"。）
 
         # ------------------------------------------------------------------
         # 三栏 QSplitter（handle 4px，可拖宽）
@@ -2443,7 +2454,6 @@ class MainWindow(QMainWindow):
             ("spectrum", self.spectrum), ("rf_sky", self.sky_view),
             ("weather", self.weather_panel), ("module", self.module_panel),
             ("sat_track", self.sat_track_panel),
-            ("new_spacetime", self.new_spacetime_panel),
             ("adsb", self.adsb_map_panel), ("control", self.control_panel),
             ("status", self.status_panel), ("ai", self.ai_panel),
             # 右栏固定页签（同样由注册表工厂构造，这里对称记账）
@@ -2607,6 +2617,10 @@ class MainWindow(QMainWindow):
     def _execute_sky_action(self, action: dict) -> dict:
         """执行模型协商后提交的天空动作（目标必须与当前选中一致）。"""
         kind = str(action.get("action", ""))
+        if kind == "look_at":
+            # 视图动作不需要卫星，也不下发硬件：先于目标一致性门处理。
+            from mbdsdr_ai.sky_actions import apply_look_at
+            return apply_look_at(getattr(self, "sky_view", None), action)
         satellite = str(action.get("satellite", "")).strip()
         current = self._sky_selected_name()
         if not current:
@@ -2776,6 +2790,14 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(self._mode_stack)
         self._app_mode = "ide"
         self._sky_restore_info: Optional[dict] = None
+        # IDE 形态下的「星象仪沉浸」：收起中/右两栏与左页签条，让天空铺满
+        # 应用窗口。它是**布局状态**，不改窗口的 fullscreen 标志——窗口全屏
+        # 只归 F11 / 菜单，两者语义互不冒充。
+        self._sky_immersive = False
+        self._sky_immersive_sizes: Optional[list] = None
+        # 星象仪独立形态的沉浸（收浮层条/频谱槽）。与 _sky_immersive 同语义，
+        # 同样不动窗口 fullscreen。
+        self._planetarium_immersive = False
         # 独立天空窗（懒建）：进星象仪时把 _planetarium_page 搬进去真全屏，
         # 主窗口留在 IDE——见 _PlanetariumWindow 的用户口径。
         self._planetarium_window: Optional[_PlanetariumWindow] = None
@@ -3052,14 +3074,15 @@ class MainWindow(QMainWindow):
         exit_btn.setMinimumHeight(44)
         exit_btn.clicked.connect(lambda: self.set_app_mode("ide"))
         exit_btn.setStyleSheet(_act_css)
-        # 一键全屏（对齐 demo 右上角那颗 ⛶）：用户要的是"点一下就满屏看天空"，
-        # 不该逼他去翻「视图」菜单或记 F11。文案随窗口状态切换（⛶ 全屏 /
-        # 🗗 退出全屏），进形态自动全屏后这颗按钮立刻显示"退出全屏"。
-        self._planetarium_fs_btn = QPushButton("⛶ 全屏")
+        # 星象仪沉浸（对齐 demo 右上角那颗 ⛶）：用户要的是"点一下天空铺满
+        # 应用窗口"，不是把整个软件窗口丢进 OS 全屏——后者按 F11 就有。
+        # 文案随沉浸状态切换（⛶ 沉浸 / ⊡ 退出沉浸）。
+        self._planetarium_fs_btn = QPushButton("⛶ 沉浸")
         self._planetarium_fs_btn.setObjectName("planetariumFullscreen")
-        self._planetarium_fs_btn.setToolTip("全屏看天空（F11；再点一次回到窗口）")
+        self._planetarium_fs_btn.setToolTip(
+            "收起左右栏，让星空铺满窗口（窗口本身仍可移动；窗口全屏按 F11）")
         self._planetarium_fs_btn.setMinimumHeight(36)
-        self._planetarium_fs_btn.clicked.connect(self._toggle_fullscreen)
+        self._planetarium_fs_btn.clicked.connect(self._toggle_sky_immersive)
         self._planetarium_fs_btn.setStyleSheet(_act_css)
         strip_lay.addWidget(self._planetarium_fs_btn, 0, Qt.AlignHCenter)
         # 频谱开合：星象仪是时空主导形态，频谱默认不进来抢 1/5 屏；
@@ -3091,9 +3114,10 @@ class MainWindow(QMainWindow):
         fs = QPushButton("⛶", self.sky_view)
         fs.setObjectName("skyFullscreenInline")
         fs.setFixedSize(30, 30)
-        fs.setToolTip("全屏看天空（F11；再点一次回到窗口）")
+        fs.setToolTip("收起左右栏，让星空铺满窗口（窗口全屏按 F11）")
         fs.setCursor(Qt.PointingHandCursor)
-        fs.clicked.connect(self._toggle_fullscreen)
+        fs.clicked.connect(self._toggle_sky_immersive)
+        self._sky_fs_btn = fs
         fs.setStyleSheet(
             "QPushButton#skyFullscreenInline {"
             " padding: 0px;"  # 30×30 的方按钮 + 全局 8/18 内边距 = 负内容区，字形被裁光
@@ -3641,6 +3665,9 @@ class MainWindow(QMainWindow):
     def _enter_planetarium(self) -> None:
         if getattr(self, "_app_mode", "ide") == "planetarium":
             return
+        # 天空要搬去独立窗：先还原 IDE 沉浸布局（否则主窗会留着"两栏已收起"
+        # 的状态，退出星象仪后像被吃掉半屏）。
+        self._set_sky_immersive(False)
         # 星象仪现在住**独立顶层窗口**（用户 2026-11-10：「要独立全屏，不是
         # 软件 windowed 全屏」）。主窗口留在 IDE 形态原样可用，所以这里不再
         # 收掉菜单栏/工具栏/状态栏——那些是 IDE 的工具，不是天空的。
@@ -3703,6 +3730,8 @@ class MainWindow(QMainWindow):
         self._sync_mode_action()
         self._sync_planetarium_recording()
         self._position_planetarium_overlay()
+        # 每次进形态都从「浮层可见」开始（沉浸只在上次形态里有效，不跨形态）。
+        self._planetarium_immersive = False
         self._planetarium_strip.show()
         self._planetarium_link_timer.start()
         self._sync_planetarium_link()
@@ -3834,6 +3863,7 @@ class MainWindow(QMainWindow):
         # 页面搬回形态栈页1 + 收掉独立天空窗；主窗口本来就没全屏，不用 showNormal
         self._reattach_planetarium_page()
         self.settings.set("app_mode", "ide")
+        self._planetarium_immersive = False
         self._planetarium_strip.hide()
         self._planetarium_link_timer.stop()
         # 浮层已经不在天空上：把「右下让开」的声明一起撤掉，否则 IDE 里
@@ -4131,6 +4161,13 @@ class MainWindow(QMainWindow):
             elif obj is getattr(self, "sky_view", None):
                 self._position_all_sky_btn()
                 self._position_planetarium_overlay()
+            elif (obj is getattr(self, "_no_device_hint", None)
+                  or obj is getattr(self, "_spectrum_header", None)):
+                # 横幅/频谱标题的宽窄形态按**这一栏自己的**真实宽判定，而
+                # 窗口 resizeEvent 里子控件还没拿到新几何（三栏比例、右栏
+                # 展开都在其后的布局里落地）。在控件自己收到 Resize（几何
+                # 已生效）时补量一次，窗口变宽/变窄都能立刻换成对应形态。
+                self._apply_responsive_chrome()
         elif etype == QEvent.MouseButtonPress:
             # 星象仪 AI 回复卡：点卡片任意位置收起（卡上另有 11px 提示）。
             card = getattr(self, "_planetarium_ai_card", None)
@@ -4147,6 +4184,13 @@ class MainWindow(QMainWindow):
                     obj is strip or strip.isAncestorOf(obj))
                 if not on_strip and obj is not ov and not ov.isAncestorOf(obj):
                     self._close_right_overlay()
+        elif etype == QEvent.TouchBegin:
+            # 触屏自动适配的运行时补测：Windows 上 Qt 枚举不到触屏设备，
+            # 第一根真手指按下就是最硬的证据（不再依赖用户手选"强制触屏"）。
+            try:
+                touch_manager().note_touch_event()
+            except Exception:
+                pass
         elif etype == QEvent.KeyPress:
             # Esc 关闭右栏浮层（浮层不抢焦点，所以只能在这里拦）。
             if (event.key() == Qt.Key_Escape
@@ -4654,6 +4698,7 @@ class MainWindow(QMainWindow):
                 except Exception:
                     pass
             self._sync_listen_workers(True, muted=False)
+            self._resume_replay_after_idle()
             self._set_processing_status("接收中")
             self.statusBar().showMessage(
                 "正在收听：解调 + 出声（选「停止解调」可让出 CPU）", MSG_NORMAL)
@@ -4666,6 +4711,7 @@ class MainWindow(QMainWindow):
                 except Exception:
                     pass
             self._sync_listen_workers(True, muted=True)
+            self._resume_replay_after_idle()
             self._set_processing_status("静音解调")
             self.statusBar().showMessage(
                 "不收听：解调继续（供解码/录制/星座图），不出声", MSG_NORMAL)
@@ -4676,33 +4722,90 @@ class MainWindow(QMainWindow):
                     player.stop()
                 except Exception:
                     pass
-            self._set_processing_status("待机")
+            paused = self._pause_replay_for_idle()
+            self._set_processing_status("待机 · 回放已暂停" if paused else "待机")
             self.statusBar().showMessage(
-                "已停止解调：保持连接，解调线程让出 CPU，频谱仍在工作", MSG_NORMAL)
+                "已停止解调：保持连接，解调线程与回放让出 CPU，频谱仍在工作"
+                if paused else
+                "已停止解调：保持连接，解调线程让出 CPU，频谱仍在工作",
+                MSG_NORMAL)
+
+    def _pause_replay_for_idle(self) -> bool:
+        """「停止解调」时暂停回放：回放也是第二个真解调入口。
+
+        回放走独立的 50 ms 定时器（``_replay_tick`` → ``_demod_and_play``），
+        与实时流水线无关；只停 worker 不足以让它停下（2026-11-17 审计 §4 #10）。
+        返回是否真的暂停了（用于状态文案）。
+        """
+        timer = getattr(self, "_replay_timer", None)
+        if timer is None or not timer.isActive():
+            return False
+        try:
+            timer.stop()
+        except RuntimeError:
+            return False
+        self._replay_paused_by_idle = True
+        return True
+
+    def _resume_replay_after_idle(self) -> None:
+        """回到收听/静音：若回放是被「停止解调」暂停的，从原位置继续。"""
+        if not getattr(self, "_replay_paused_by_idle", False):
+            return
+        self._replay_paused_by_idle = False
+        timer = getattr(self, "_replay_timer", None)
+        if timer is not None and not timer.isActive():
+            timer.start()
+
+    def _listen_flags(self):
+        """当前三档状态 → (是否跑解调, 是否静音)。
+
+        单一判定点：状态机与流水线重建都走这里，避免"重建后静音态被误停"
+        或"停止解调被误开"两种漂移。
+        """
+        state = getattr(self, "_listen_state", "idle")
+        return state in ("listen", "muted"), state == "muted"
 
     def _sync_listen_workers(self, on: bool, muted: bool = False) -> None:
         """把收听态推给流水线里全部解调 worker（含主听/次听）。
 
         on=False   → 连解调都不跑（停止解调，省 CPU）；
         on=True    → 主听解调；muted=True 时只解调不写声卡。
+        主听是 ``_main_vfo_id``（可能不是 _demod1），不能再按属性名写死。
         """
         pipe = getattr(self, "_pipeline", None)
         if pipe is None:
             return
+        primary_id = getattr(self, "_main_vfo_id", None)
+        vfo_workers = getattr(self, "_vfo_workers", {}) or {}
+        primary_worker = vfo_workers.get(primary_id) if primary_id else None
         for attr in ("_demod1", "_demod2"):
             w = getattr(pipe, attr, None)
+            if w is None:
+                continue
+            if primary_worker is not None:
+                is_primary = w is primary_worker
+            else:
+                is_primary = (attr == "_demod1")
             setter = getattr(w, "set_audio_enabled", None)
             if callable(setter):
                 try:
-                    setter(bool(on) and (attr == "_demod1"))
+                    setter(bool(on) and is_primary)
                 except (RuntimeError, TypeError):
                     pass
             muter = getattr(w, "set_muted", None)
             if callable(muter):
                 try:
-                    muter(bool(muted) and (attr == "_demod1"))
+                    muter(bool(muted) and is_primary)
                 except (RuntimeError, TypeError):
                     pass
+        # idle 时连 splitter → VFO 的逐帧拷贝也停掉（SDR++：停止解调后不再为
+        # 解调做任何工作）。只停 worker 不够：每帧仍有一次 128 KiB 的 memcpy。
+        enable = getattr(pipe, "set_demod_enabled", None)
+        if callable(enable):
+            try:
+                enable(bool(on))
+            except (RuntimeError, TypeError):
+                pass
 
     def _on_setting_changed(self, key: str, value) -> None:
         """设置页 / 导入 / 恢复默认 / 代码直接 set 的统一即时生效入口。"""
@@ -5148,8 +5251,31 @@ class MainWindow(QMainWindow):
     def _show_error_status(self, text: str, code=None, timeout: int = MSG_IMPORTANT):
         """状态栏错误消息 + 可点的「查看怎么办」入口（无条目则不出链接）。"""
         self.statusBar().showMessage(text, timeout)  # 先触发 messageChanged 清旧链接
+        self._status_hold = (str(text), time.monotonic() + timeout / 1000.0)
         if code:
             self._remedy_link.set_code(code)
+
+    def _hold_status(self, text: str, timeout: int = MSG_IMPORTANT) -> None:
+        """写一条「挡住后台低优先级播报」的关键状态（设备/连接/掉线/发射）。
+
+        状态栏只有一个消息位。自动星历刷新是开窗后 1.5 s 才回来的后台维护，
+        结果会顶掉用户此刻正在读的关键消息——2026-11-17 全量套件实测：
+        离线 TLE 失败文案覆盖了「切换失败…已恢复原设备」，回滚结论直接消失。
+        关键消息在这里登记展示窗口，``_status_hold_active`` 据此让后台自动
+        播报（``_tle_update_auto``）让位；用户手动触发的播报不受影响。
+        """
+        self.statusBar().showMessage(text, timeout)
+        self._status_hold = (str(text), time.monotonic() + timeout / 1000.0)
+
+    def _status_hold_active(self) -> bool:
+        """关键消息仍在展示窗口内、且没被别的消息换掉。"""
+        hold = getattr(self, "_status_hold", None)
+        if hold is None or time.monotonic() >= hold[1]:
+            return False
+        try:
+            return self.statusBar().currentMessage() == hold[0]
+        except (RuntimeError, AttributeError):
+            return False
 
     def _notify_error(self, code, *, fields=None, text=None, suggestion=None,
                       retry=None, timeout_ms=None) -> bool:
@@ -5302,6 +5428,34 @@ class MainWindow(QMainWindow):
             self.status_processing.setText(text)
         except Exception:
             pass
+
+    def _demod_frames(self) -> int:
+        """主/次解调 worker 的累计解调帧数（读不到就当 0）。"""
+        pipe = getattr(self, "_pipeline", None)
+        total = 0
+        for attr in ("_demod1", "_demod2"):
+            w = getattr(pipe, attr, None)
+            total += int(getattr(w, "frames_demod", 0) or 0)
+        return total
+
+    def _show_demod_fps(self, fps: int) -> None:
+        """底坞状态位显示每秒解调帧数：停止解调时必须读到 0。
+
+        只写「待机」两个字的旧实现无法反驳——用户没法分辨是真停还是只静音
+        （2026-11-17 审计 §8）。积压提示（8 s）优先，不被 1 Hz 刷新顶掉。
+        """
+        if time.monotonic() < getattr(self, "_buffer_warn_until", -math.inf):
+            return
+        state = getattr(self, "_listen_state", "idle")
+        if state == "listen":
+            text = f"接收中 · 解调 {fps} 帧/s"
+        elif state == "muted":
+            text = f"静音解调 · {fps} 帧/s"
+        elif getattr(self, "_replay_paused_by_idle", False):
+            text = "待机 · 回放已暂停"
+        else:
+            text = f"待机 · 解调 {fps} 帧/s"
+        self._set_processing_status(text)
 
     def _update_utc_clock(self):
         """每秒刷新顶部 UTC 时间（窄屏只显示时分秒，完整日期在 tooltip）。"""
@@ -6498,6 +6652,9 @@ class MainWindow(QMainWindow):
                 self._no_device_hint.setText(str(shown))
                 self._no_device_hint.setToolTip(message)
                 self._no_device_hint.setVisible(True)
+                # 标签刚可见时 width() 可能是旧值/默认宽（频谱页尚未布局）；
+                # 同步量一次，之后标签每次真实改宽都由 eventFilter 的
+                # Resize 分支补量（否则窗口变宽后横幅会一直停在窄形态）。
                 self._apply_responsive_chrome()
                 # S1：横幅在「频谱」页里，而首启默认页是「星象仪模式」——不切页
                 # 用户根本看不到（状态栏 8 秒后也消失）。提示出现即把该页带到
@@ -6995,8 +7152,8 @@ class MainWindow(QMainWindow):
         self.connect_btn.setEnabled(False)
         self.disconnect_btn.setEnabled(True)
         self._start_iq_streams()
-        self.statusBar().showMessage(
-            f"切换失败（{reason}），已恢复原设备 {name}", MSG_IMPORTANT)
+        self._hold_status(
+            f"切换失败（{reason}），已恢复原设备 {name}")
         return True
 
     def _connect_dialog(self):
@@ -7861,9 +8018,10 @@ class MainWindow(QMainWindow):
                 _run("增益", lambda: backend.set_gain(gain))
             else:
                 _skip("增益")
-        # 意图跟着连接参数走；AGC 打开时手动增益不生效，清空意图以免三块
-        # 面板把「AGC 自动增益」误报成「配置意图未生效」。
-        self._set_gain_intent(gain if not agc else None)
+        # 意图跟着连接参数走；AGC 打开或设备根本不支持增益时，手动增益
+        # 不是"待生效"，清空意图以免三块面板把"设备没这功能"误报成未生效。
+        self._set_gain_intent(
+            gain if (not agc and caps["gain"]) else None)
         cp = getattr(self, "control_panel", None)
         if cp is not None:
             set_caps = getattr(cp, "set_device_capabilities", None)
@@ -9586,6 +9744,8 @@ class MainWindow(QMainWindow):
             main_vfo_dsp=main_vfo, vfo2_dsp=vfo2,
             player=self._audio_player, config=self._demod_cfg,
             on_record_iq=self._on_pipeline_record_iq,
+            # 未录音时 RecordTap 只排水不复制（停止解调/纯看频谱时也别白烧 CPU）
+            record_enabled=lambda: bool(getattr(self, "_recording", False)),
         )
         pipe.frame_ready.connect(self._on_pipeline_frame_ready)
         # 读线程连续空读 ≈1s：查询后端真实 status，设备真掉线就如实断开（S8/S9）
@@ -9605,9 +9765,14 @@ class MainWindow(QMainWindow):
         self._vfo_workers = {
             self._main_vfo_id: pipe._demod1,
         }
-        # 流水线是重建出来的：把当前收听态推给新 worker，否则重建后
-        # worker 默认 audio_enabled=True，没点收听也会突然出声。
-        self._sync_listen_workers(self._listening)
+        # 流水线是重建出来的：把当前收听态推给新 worker。新 worker 由
+        # ReceivePipeline 以 audio_enabled=False 构造（不点收听不解调），
+        # 这里必须立刻回推一次，否则重建后"正在收听"会静默变成停止解调。
+        # 口径必须与状态机一致：「不收听」仍要解调（只是静音），只有
+        # 「停止解调」才把 DDC/解调一起停。旧写法只看 _listening，
+        # 会把静音态在重建后误停成停止解调（解码/录制没数据）。
+        _on, _muted = self._listen_flags()
+        self._sync_listen_workers(_on, muted=_muted)
         # 首帧：把 offset（= vfo_center - backend_center）推给 DDC
         self._update_main_vfo_offset()
 
@@ -9717,9 +9882,8 @@ class MainWindow(QMainWindow):
         final = f"{msg}（错误码 {code}）" if code else msg
         # 桌面端没有自动重连（ReconnectionManager 未接线），必须明说，
         # 否则用户会以为界面正在后台重试。
-        self.statusBar().showMessage(
-            f"设备已断开：{final}（不会自动重连，请点工具栏「连接」重试）",
-            MSG_IMPORTANT)
+        self._hold_status(
+            f"设备已断开：{final}（不会自动重连，请点工具栏「连接」重试）")
 
     def _on_health_tick(self) -> None:
         """S8：每秒按后端真实 health 判链路状态（读线程卡死时的兜底）。
@@ -9772,6 +9936,8 @@ class MainWindow(QMainWindow):
         if now - getattr(self, "_buffer_warn_last", -math.inf) < 30.0:
             return
         self._buffer_warn_last = now
+        # 8 s 内不让 1 Hz 的解调帧率刷新顶掉这条提示（见 `_show_demod_fps`）。
+        self._buffer_warn_until = now + 8.0
         # 不再用 statusBar().showMessage：那会在最底部多占一整行，
         # 屏幕空间有限（2026-11-10 用户实指）。写进底坞同一行的状态位，
         # 8 秒后自动回到当前接收态。错误码放 tooltip：状态位只有一行，
@@ -9785,8 +9951,18 @@ class MainWindow(QMainWindow):
             pass
 
         def _restore():
-            self._set_processing_status(
-                "接收中" if getattr(self, "_listening", False) else "待机")
+            # 按三档状态恢复（不能只看 _listening：muted 解调在跑，会被写成
+            # 「待机」；回放被停止解调暂停时也要如实显示）。
+            state = getattr(self, "_listen_state", "idle")
+            if state == "listen":
+                text = "接收中"
+            elif state == "muted":
+                text = "静音解调"
+            elif getattr(self, "_replay_paused_by_idle", False):
+                text = "待机 · 回放已暂停"
+            else:
+                text = "待机"
+            self._set_processing_status(text)
             try:
                 self.status_processing.setToolTip("")
             except Exception:
@@ -9883,11 +10059,20 @@ class MainWindow(QMainWindow):
         mgr = self._vfo_mgr
         if mgr is not None:
             mgr.set_primary(vfo_id)
-        # 切换声卡输出：在 vfo_id → worker 映射里，主听那路 audio_enabled=True
+        # 切换主听只决定「哪一路写声卡」，不改变收听状态：用户点了「停止
+        # 解调」时切 VFO / 换声卡不得把解调偷偷重新拉起来（2026-11-16 真机
+        # 反馈「点了停止仍在解调」的根因就在这）。状态只有 _listen_state 一个口径。
+        state = getattr(self, "_listen_state", "idle")
+        on = state in ("listen", "muted")
+        muted = state == "muted"
         workers = getattr(self, "_vfo_workers", {}) or {}
         for vid, worker in workers.items():
+            is_primary = vid == vfo_id
             try:
-                worker.set_audio_enabled(vid == vfo_id)
+                worker.set_audio_enabled(bool(on) and is_primary)
+                muter = getattr(worker, "set_muted", None)
+                if callable(muter):
+                    muter(bool(muted) and is_primary)
             except Exception:
                 pass
         # 更新控制面板频率/模式显示为主听 VFO 的参数
@@ -9967,22 +10152,24 @@ class MainWindow(QMainWindow):
         except Exception:
             pass
 
-        # 星座图面板 tap：喂入复基带 IQ（节流 ~10fps，取尾部 512 点）
-        try:
-            cp = getattr(self, "constellation_panel", None)
-            if cp is not None and hasattr(cp, "feed_iq"):
-                cp.feed_iq(iq)
-        except Exception:
-            pass
-
-        # 新时空面板 tap：可见时喂 IQ 做 AMR 实时识别（节流 ~5Hz；不可见零开销）
-        try:
-            self._nst_tick = getattr(self, "_nst_tick", 0) + 1
-            if self._nst_tick >= 4:
-                self._nst_tick = 0
-                self._tap_new_spacetime_iq(iq, sr)
-        except Exception:
-            pass
+        # 星座图面板 tap：喂入复基带 IQ。
+        # 三个门控缺一不可：
+        #  1) idle（停止解调）不喂——否则星座点继续跳，用户会认定"解调没停"
+        #     （2026-11-17 审计 §4 #6）；muted/listen 才喂，与"解调继续"一致；
+        #  2) 面板不可见不喂——旧实现 146 帧/s 每帧 abs+percentile+tolist，
+        #     即便停在别的页签也照烧 CPU（注释写"节流 ~10fps"，实际没实现）；
+        #  3) 10 Hz 节流——星座图是观感，不需要每帧刷新。
+        cp = getattr(self, "constellation_panel", None)
+        if cp is not None and hasattr(cp, "feed_iq"):
+            now_c = time.monotonic()
+            if (getattr(self, "_listen_state", "idle") != "idle"
+                    and cp.isVisible()
+                    and now_c - getattr(self, "_constellation_t", -math.inf) >= 0.1):
+                self._constellation_t = now_c
+                try:
+                    cp.feed_iq(iq)
+                except Exception:
+                    pass
 
         # VFO 面板列表刷新（节流：约每 10 帧）
         try:
@@ -9998,6 +10185,18 @@ class MainWindow(QMainWindow):
         if now - getattr(self, '_rssi_last_t', 0.0) >= 0.1:
             self._rssi_last_t = now
             self._update_rssi_from_iq(iq)
+
+        # 解调帧率（1 s 窗口）：把「停止解调」变成可读的数字。真 IQ 约 146 帧/s，
+        # 这里只按时间窗取值，不增加逐帧开销。
+        now_fps = time.monotonic()
+        prev_fps = getattr(self, "_demod_fps_prev", None)
+        if prev_fps is None:
+            self._demod_fps_prev = (now_fps, self._demod_frames())
+        elif now_fps - prev_fps[0] >= 1.0:
+            cur_frames = self._demod_frames()
+            fps = int(round((cur_frames - prev_fps[1]) / (now_fps - prev_fps[0])))
+            self._demod_fps_prev = (now_fps, cur_frames)
+            self._show_demod_fps(max(0, fps))
 
         # 节流：约每 10 帧（500ms）回读后端状态刷新底部状态栏 + status_panel
         self._backend_status_tick += 1
@@ -10123,36 +10322,6 @@ class MainWindow(QMainWindow):
             sr = float(DEFAULT_SAMPLE_RATE_HZ)
         return read, sr
 
-    def _tap_new_spacetime_iq(self, iq: np.ndarray, sr: float) -> None:
-        """新时空面板 tap：面板可见时喂一段复基带 IQ 做 AMR 识别。
-
-        不可见（非当前 Tab）时零开销。中心频率优先取后端 get_frequency()，
-        回退 self._backend_center_hz。全程 try/except，绝不崩。无信号时面板
-        内部 analyzer 自会显示“未检测到信号”，绝不伪造数值。
-        """
-        p = getattr(self, "new_spacetime_panel", None)
-        if p is None or not hasattr(p, "update_iq"):
-            return
-        try:
-            if not p.isVisible():
-                return
-        except Exception:
-            return
-        try:
-            cf = float(self._backend_center_hz)
-        except Exception:
-            cf = 0.0
-        be = getattr(self, "_active_sdr_backend", None)
-        if be is not None and hasattr(be, "get_frequency"):
-            try:
-                cf = float(be.get_frequency())
-            except Exception:
-                pass
-        try:
-            p.update_iq(iq, float(sr), cf)
-        except Exception:
-            pass
-
     def _poll_sdr_iq(self):
         """旧「GUI 线程直接读后端」轮询路径；当前默认链路是 ReceivePipeline。
 
@@ -10193,14 +10362,7 @@ class MainWindow(QMainWindow):
         except Exception:
             pass
 
-        # 新时空面板 tap：可见时喂 IQ 做 AMR 实时识别（节流 ~5Hz；不可见零开销）
-        try:
-            self._nst_poll_tick = getattr(self, "_nst_poll_tick", 0) + 1
-            if self._nst_poll_tick >= 4:
-                self._nst_poll_tick = 0
-                self._tap_new_spacetime_iq(iq, sr)
-        except Exception:
-            pass
+        # 其余 tap 一律由面板自身的可见性门控，主窗口不再额外分发。
 
         # 更新 RSSI 显示（从后端状态或 IQ 功率估计）
         self._update_rssi_from_iq(iq)
@@ -11184,8 +11346,102 @@ class MainWindow(QMainWindow):
                 return win
         return self
 
+    def _toggle_sky_immersive(self) -> None:
+        """⛶：星象仪沉浸 / 还原（两种形态语义一致）。
+
+        用户口径（2026-11-16）："我要的是星象仪全屏，不是软件全屏；软件
+        全屏我按 F11 就行"，并追问"那个按钮不应该是沉浸式全屏吗"。所以
+        这颗 ⛶ 在任何形态下都只做"让天空占满看得见的界面"，绝不代替 F11：
+          - IDE 页签形态：收起中/右两栏与左页签条，天空铺满**应用窗口**；
+          - 星象仪独立形态：收起浮层工具条与频谱槽，只留天空。
+        """
+        if getattr(self, "_app_mode", "ide") == "planetarium":
+            self._set_planetarium_immersive(
+                not getattr(self, "_planetarium_immersive", False))
+            return
+        self._set_sky_immersive(not getattr(self, "_sky_immersive", False))
+
+    def _set_planetarium_immersive(self, on: bool) -> None:
+        """星象仪独立形态的沉浸：收浮层条与频谱槽，窗口本身不动。
+
+        与 ``_set_sky_immersive`` 同一口径：⛶ 只管界面里的控件显隐，
+        OS 全屏仍归 F11 / 菜单（history: 5572687e 那颗按钮最初确实是
+        showFullScreen，用户明确否掉了这个语义）。
+        """
+        if bool(on) == bool(getattr(self, "_planetarium_immersive", False)):
+            return
+        self._planetarium_immersive = bool(on)
+        strip = getattr(self, "_planetarium_strip", None)
+        fs_btn = getattr(self, "_planetarium_fs_btn", None)
+        if strip is not None:
+            # 浮层不能整条消失：那颗 ⛶ 本身是唯一的"退出沉浸"入口，藏了
+            # 就把用户困在"全屏但没按钮"里（本项目已有同类反证）。沉浸 =
+            # 除 ⛶ 外的浮层按钮全部收起，条子缩成一颗小胶囊。
+            strip.setVisible(True)
+            lay = strip.layout()
+            if lay is not None:
+                for i in range(lay.count()):
+                    wdg = lay.itemAt(i).widget()
+                    if wdg is None or wdg is fs_btn:
+                        continue
+                    wdg.setVisible(not on)
+            strip.adjustSize()
+        slot = getattr(self, "_planetarium_waterfall_slot", None)
+        if slot is not None:
+            # 频谱槽在沉浸期间收起，但"用户开没开频谱"的选择不被改写。
+            slot.setVisible(bool(not on and bool(
+                getattr(self, "_planetarium_waterfall_on", False))))
+        try:
+            self._position_planetarium_overlay()
+        except (AttributeError, RuntimeError):
+            pass
+        self.statusBar().showMessage(
+            "星象仪沉浸：只留天空（⛶ 还原；窗口全屏按 F11）" if on
+            else "已退出星象仪沉浸", MSG_NORMAL)
+        self._sync_fullscreen_btn()
+
+    def _set_sky_immersive(self, on: bool) -> None:
+        """切换 IDE 形态的天空沉浸布局（只动布局，不动窗口 fullscreen）。"""
+        if bool(on) == bool(getattr(self, "_sky_immersive", False)):
+            return
+        splitter = getattr(self, "_main_splitter", None)
+        left = getattr(self, "left_tab", None)
+        if splitter is None or left is None:
+            return
+        if on:
+            self._sky_immersive_sizes = list(splitter.sizes())
+            if getattr(self, "sky_view", None) is not None:
+                left.setCurrentWidget(self.sky_view)
+            bar = left.tabBar() if hasattr(left, "tabBar") else None
+            if bar is not None:
+                bar.setVisible(False)
+            for idx in (1, 2):
+                wdg = splitter.widget(idx)
+                if wdg is not None:
+                    wdg.hide()
+            total = max(1, sum(self._sky_immersive_sizes))
+            splitter.setSizes([total, 0, 0])
+            self._sky_immersive = True
+            self.statusBar().showMessage(
+                "星象仪沉浸：天空已铺满窗口（⛶ 还原；窗口全屏按 F11）",
+                MSG_NORMAL)
+        else:
+            self._sky_immersive = False
+            for idx in (1, 2):
+                wdg = splitter.widget(idx)
+                if wdg is not None:
+                    wdg.show()
+            bar = left.tabBar() if hasattr(left, "tabBar") else None
+            if bar is not None:
+                bar.setVisible(True)
+            sizes = getattr(self, "_sky_immersive_sizes", None)
+            if sizes:
+                splitter.setSizes(sizes)
+            self.statusBar().showMessage("已退出星象仪沉浸", MSG_NORMAL)
+        self._sync_fullscreen_btn()
+
     def _toggle_fullscreen(self):
-        """全屏/还原（菜单 F11、星象仪那颗按钮共用同一入口）。
+        """窗口全屏/还原（F11、菜单共用）。
 
         星象仪形态下操作的是**独立天空窗**，不是主窗口——用户要的是天空
         自己全屏，主窗口仍留在 IDE（可放另一块屏）。
@@ -11196,33 +11452,44 @@ class MainWindow(QMainWindow):
         else:
             win.showFullScreen()
         # 不读回 isFullScreen() 断言结果：offscreen 与部分 WM 下窗口状态要等
-        # 下一轮事件循环才落地，立刻读回会说反话。只给「已切换」的诚实回执，
-        # 也避免页签形态那颗 ⛶ 点了界面零变化（交互审计判假活）。
-        self.statusBar().showMessage("已切换全屏状态（F11 可再切回）", MSG_NORMAL)
+        # 下一轮事件循环才落地，立刻读回会说反话。只给「已切换」的诚实回执。
+        self.statusBar().showMessage("已切换窗口全屏状态（F11 可再切回）",
+                                     MSG_NORMAL)
         self._sync_fullscreen_btn()
 
     def _sync_fullscreen_btn(self) -> None:
-        """全屏按钮文案跟着真实窗口状态走（不猜、不留过期文案）。"""
-        try:
-            full = bool(self._planetarium_screen_window().isFullScreen())
-        except RuntimeError:
-            return
+        """沉浸按钮文案跟着真实状态走（不猜、不留过期文案）。
+
+        两种形态都用同一语义（沉浸/退出沉浸）；窗口全屏是 F11 的事，
+        不在按钮上表达。
+        """
+        imm = bool(getattr(self, "_sky_immersive", False))
+        pimm = bool(getattr(self, "_planetarium_immersive", False))
+        in_planetarium = getattr(self, "_app_mode", "ide") == "planetarium"
         btn = getattr(self, "_planetarium_fs_btn", None)
         if btn is not None:
-            if full:
-                btn.setText("🗗 退出全屏")
-                btn.setToolTip("回到窗口模式（F11 同效）")
+            if in_planetarium:
+                btn.setText("⊡ 退出沉浸" if pimm else "⛶ 沉浸")
+                btn.setToolTip("恢复浮层工具条（窗口全屏按 F11）" if pimm
+                               else "收起浮层只留天空（窗口全屏按 F11）")
+            elif imm:
+                btn.setText("⊡ 退出沉浸")
+                btn.setToolTip("恢复左右栏（天空仍留在窗口里）")
             else:
-                btn.setText("⛶ 全屏")
-                btn.setToolTip("全屏看天空（F11；再点一次回到窗口）")
-        # 页签形态那颗 30×30 角标与浮层按钮共用 _toggle_fullscreen。旧实现
-        # 只同步浮层按钮，还因为 btn is None 直接 return：点角标全屏/还原后
-        # 界面零变化，交互审计判「假活」，用户也看不出当前状态。两颗一起跟。
+                btn.setText("⛶ 沉浸")
+                btn.setToolTip(
+                    "收起左右栏，让星空铺满窗口（窗口全屏按 F11）")
+        # 页签形态那颗 30×30 角标与浮层按钮共用同一入口，文案一起跟。
         fs = getattr(self, "_sky_fs_btn", None)
         if fs is not None:
-            fs.setText("⊞" if full else "⛶")
-            fs.setToolTip("回到窗口模式（F11 同效）" if full
-                          else "全屏看天空（F11；再点一次回到窗口）")
+            if in_planetarium:
+                fs.setText("⊡" if pimm else "⛶")
+                fs.setToolTip("退出星象仪沉浸" if pimm
+                              else "星象仪沉浸（窗口全屏按 F11）")
+            else:
+                fs.setText("⊡" if imm else "⛶")
+                fs.setToolTip("退出星象仪沉浸" if imm
+                              else "星空铺满窗口（窗口全屏按 F11）")
 
     # ------------------------------------------------------------------
     # 右侧 QDockWidget 停靠体系（控制 / 状态 / AI 助手）
@@ -12119,6 +12386,10 @@ class MainWindow(QMainWindow):
             "dispatch_ms": dispatch_ms,
             "total_ms": (time.monotonic() - t_cycle) * 1000.0,
         }
+        # 天空视图的波束/十字/状态卡：只回写**这一拍真的有**的角，并按来源
+        # 分档标注（实测 / 模拟 / 指令）。没有回读时画指令角但绝不标成实测。
+        self._sync_sky_antenna_pointing(effective, pose_valid,
+                                        pose_az, pose_el, pose_source)
         if note:
             # 越界夹取/归一必须让用户看见「已夹到 X°」，不许静默执行
             self.statusBar().showMessage(note, MSG_NORMAL)
@@ -12161,6 +12432,8 @@ class MainWindow(QMainWindow):
         self._gimbal_follow = False
         # 在途指令立即解除引用：停机后到达的应答不得再驱动任何动作
         self._drop_gimbal_task()
+        # 天空图上的波束/十字/状态卡随之清空：停止跟随不留「假指向」。
+        self._clear_sky_antenna_pointing()
         limiter = getattr(self, "_gimbal_limiter", None)
         if limiter is not None:
             limiter.reset()
@@ -12194,6 +12467,44 @@ class MainWindow(QMainWindow):
         sv = getattr(self, "sky_view", None)
         if sv is not None and hasattr(sv, "set_gimbal_accuracy_text"):
             sv.set_gimbal_accuracy_text(text)
+
+    def _sky_antenna_target_name(self) -> str:
+        """云台跟随的目标名（写进天空视图的指向卡）。"""
+        tracker = getattr(self, "_loop_sat_tracker", None)
+        return str(getattr(tracker, "selected_name", "") or "")
+
+    def _sync_sky_antenna_pointing(self, effective, pose_valid: bool,
+                                   pose_az, pose_el, pose_source: str) -> None:
+        """把云台指向回写到天空视图，**按来源分档**，不混口径。
+
+        - ``imu`` / ``rotctld`` 回读 → 画实测角，标签「指向(实测)」；
+        - ``simulated`` → 画模拟服务器回读角，标签「指向(模拟)」；
+        - 无回读但有已下发的指令角 → 画指令角，标签「指向(指令)」。
+
+        指令角是「我让它去哪」，不是「机械在哪」；没有回读时把它标成实测
+        就是造假。两条信息都有时以回读为准（回读才是机械位置）。
+        """
+        sv = getattr(self, "sky_view", None)
+        if sv is None or not hasattr(sv, "set_antenna_pointing"):
+            return
+        src = str(pose_source or "")
+        if pose_valid and pose_az is not None and pose_el is not None:
+            label = "simulated" if src == "simulated" else "readback"
+            az, el = float(pose_az), float(pose_el)
+        elif effective is not None:
+            label = "command"
+            az, el = float(effective[0]), float(effective[1])
+        else:
+            return
+        sv.set_antenna_pointing(az, el, is_tracking=True,
+                                target_name=self._sky_antenna_target_name(),
+                                pointing_source=label)
+
+    def _clear_sky_antenna_pointing(self) -> None:
+        """跟随停止/后端离线：清掉指向，波束与十字不再留在图上。"""
+        sv = getattr(self, "sky_view", None)
+        if sv is not None and hasattr(sv, "clear_antenna_pointing"):
+            sv.clear_antenna_pointing()
 
     def last_gimbal_cycle(self) -> Optional[Dict]:
         """最近一拍「卫星真角 → 指令角 → 姿态 → 耗时」原始数据。"""
@@ -12247,6 +12558,8 @@ class MainWindow(QMainWindow):
             limiter = getattr(self, "_gimbal_limiter", None)
             if limiter is not None:
                 limiter.reset()
+            # 关开关即清指向：天空图不得留着上一拍的波束/十字。
+            self._clear_sky_antenna_pointing()
             if was_on:
                 # 用户主动解锁：下发停机（固件负值=释放），不留持续指令。
                 # 有界等待：慢/挂死后端不得让「关开关」这个点击卡住界面。
@@ -12528,6 +12841,11 @@ class MainWindow(QMainWindow):
             return None, f"长度≠3（实际 {len(vals)}）"
         if any(v <= 0 for v in vals):
             return None, f"存在 ≤0 的栏宽（{vals}）"
+        # 任何一栏连 48px 图标条都放不下，就不是「三栏展开宽度」——
+        # 这类值只会是把坏分配存回去的产物（见 _restore_three_column_sizes
+        # 的比例归一注释），按结构非法回默认，不让它继续污染展开基准。
+        if any(v < self._RIGHT_STRIP_W for v in vals):
+            return None, f"存在 < {self._RIGHT_STRIP_W}px 的栏宽（{vals}）"
         return vals, ""
 
     def _three_column_min_widths(self) -> list:
@@ -12960,9 +13278,19 @@ class MainWindow(QMainWindow):
             except (TypeError, ValueError, OverflowError):
                 vec = None
         else:
-            # 正常格式是 QSplitter.saveState() 的 QByteArray：先解出存储的
-            # 真实 widths，再走与 list 完全相同的结构判定。
+            # 正常格式是 QSplitter.saveState() 的 QByteArray。saveState 只存
+            # **比例**：还原时按当时 splitter 的宽分配，所以解出来的是被放大
+            # 的绝对值（实测 [43943, 30894, 25155]，解于 100000 宽画布）。
+            # 旧实现把它当真实宽度记成 _expanded_column_sizes，收窄后再展开
+            # 时 right=max(base[2], …) 取到 9 万级 → 全部余量塞进右栏、左栏
+            # 停在 260，横幅永远窄形态（2026-11-17 全量套件实测）。这里按
+            # 默认三栏总量归一，只保留比例。
             vec = self._decode_three_column_state(sizes)
+            if vec is not None:
+                total = sum(vec)
+                if total > 0:
+                    ref = sum(self._DEFAULT_THREE_COLUMN_SIZES)
+                    vec = [max(1, int(round(v * ref / total))) for v in vec]
         vals, reason = (None, "无法解析存储值") if vec is None else \
             self._three_column_structure(vec)
         if vals is None:
@@ -13451,6 +13779,7 @@ class MainWindow(QMainWindow):
         self._replay_tune_notice_shown = False
         # 每 50ms 推一块（按采样率换算样本数），与实时 20fps 观感一致
         self._replay_block = max(1024, int(sr * 0.05))
+        self._replay_paused_by_idle = False
         self._replay_timer = QTimer(self)
         self._replay_timer.setInterval(50)
         self._replay_timer.timeout.connect(self._replay_tick)
@@ -13524,6 +13853,7 @@ class MainWindow(QMainWindow):
         self._replay_iq = None
         self._replay_pos = 0
         self._replay_tune_notice_shown = False
+        self._replay_paused_by_idle = False
         # 回放结束：若实时后端仍连着，恢复统一 IQ 轮询；否则保持未连接空白
         if self._replay_resume_poll and self._active_sdr_backend is not None:
             self._start_iq_streams()
@@ -13920,16 +14250,9 @@ class MainWindow(QMainWindow):
     def _push_site_to_panels(self, lat, lon, alt_m: float = 0.0) -> None:
         """把站址推给所有「按站址算数」的面板。
 
-        这些面板以前各读各的盘（ADS-B 直接读 gui_config，新时空面板干脆
-        自己存一份），主窗改了站址它们不知道。现在统一由这里推一次。
+        这些面板以前各读各的盘（ADS-B 直接读 gui_config），主窗改了站址
+        它们不知道。现在统一由这里推一次。
         """
-        panel = getattr(self, "new_spacetime_panel", None)
-        if panel is not None:
-            try:
-                panel.set_observer(lat, lon,
-                                   float(alt_m or 0.0) / 1000.0)
-            except (AttributeError, RuntimeError, TypeError, ValueError):
-                pass
         adsb = getattr(self, "adsb_map_panel", None)
         if adsb is not None and lat is not None and lon is not None:
             try:
@@ -14044,7 +14367,8 @@ class MainWindow(QMainWindow):
             _tle_timer = QTimer(self)
             _tle_timer.setSingleShot(True)
             _tle_timer.setInterval(1500)
-            _tle_timer.timeout.connect(self._on_update_sat_tle)
+            _tle_timer.timeout.connect(
+                lambda: self._on_update_sat_tle(automatic=True))
             _tle_timer.start()
             self._tle_boot_timer = _tle_timer
             # _build_ui 早于 __init__ 里 _startup_timers 的创建，这里可能还没有
@@ -14119,17 +14443,29 @@ class MainWindow(QMainWindow):
             if f > 0:
                 self.sat_track_panel.set_downlink_mhz(f / 1e6)
 
-    def _on_update_sat_tle(self):
-        """从 Celestrak 在线刷新内置 TLE；后台线程跑网络，失败保留内置，不崩。"""
+    def _on_update_sat_tle(self, *_args, automatic: bool = False):
+        """从 Celestrak 在线刷新内置 TLE；后台线程跑网络，失败保留内置，不崩。
+
+        ``automatic`` 只由开窗后的过期自检定时器传 True：这类后台维护的结果
+        不得顶掉用户正在读的设备/连接关键消息（见 ``_hold_status``）。
+        手动入口（菜单 / 面板按钮 / QAction 的 ``triggered(bool)``）保持默认
+        False，结果照常上状态栏。
+        """
         if (self._tle_update_thread is not None
                 and self._tle_update_thread.is_alive()):
-            self.statusBar().showMessage("TLE 正在更新中…，请稍候", MSG_NORMAL)
+            if not (automatic and self._status_hold_active()):
+                self.statusBar().showMessage("TLE 正在更新中…，请稍候", MSG_NORMAL)
             return
         if self._loop_sat_tracker is None:
             self._init_loop_sat_catalog()
         if self._loop_sat_tracker is None:
             return
-        self.statusBar().showMessage("正在更新 TLE…", MSG_NORMAL)
+        self._tle_update_auto = bool(automatic)
+        # 连「正在更新 TLE…」这条占位也不能写：状态栏只有一个消息位，
+        # 开窗自检常落在用户刚看到设备回滚/掉线结论之后，占位一写就把关键
+        # 消息顶掉，结果阶段再让位也已经晚了（2026-11-17 grp0a 复跑实测）。
+        if not (automatic and self._status_hold_active()):
+            self.statusBar().showMessage("正在更新 TLE…", MSG_NORMAL)
         tracker = self._loop_sat_tracker
 
         def _work():
@@ -14167,6 +14503,13 @@ class MainWindow(QMainWindow):
                     pass
         # 状态栏只渲染抓取链路给出的 code/label/reason/action：
         # 失败时必须有码和原因，绝不回落到与 code 无关的固定句子。
+        # 但开窗自动刷新的结果要给设备/连接关键消息让位：那类消息只占一个
+        # 展示窗口，被后台维护顶掉后用户就再也看不到（例：切换失败回滚）。
+        # 星历状态并未丢失——卫星面板的日期行/陈旧档位已在上方刷新。
+        if getattr(self, "_tle_update_auto", False) and self._status_hold_active():
+            logger.info("自动 TLE 刷新结果让位给关键状态消息（n=%s, failure=%s）",
+                        n, (failure or {}).get("code"))
+            return
         from mbdsdr_ai.tle_fetch import tle_refresh_status_text
         msg = tle_refresh_status_text(n, failure)
         ok = n > 0 and not failure
@@ -14607,6 +14950,8 @@ class MainWindow(QMainWindow):
                 limiter.reset()
             self._sync_sky_gimbal_btn(False)
             self._stop_gimbal_backend_bounded()
+            # 跟踪停止时天空图不再有「我的天线指向」：清掉波束与指针。
+            self._clear_sky_antenna_pointing()
         if self._sat_track_prev_freq_hz is not None:
             mode = self._sat_track_prev_mode or "FM"
             try:
@@ -14947,12 +15292,8 @@ class MainWindow(QMainWindow):
                             and not static_site)
             if has_fix:
                 self.sky_view.set_gnss_position(fix_dict)
-                # 授时状态：把**真实 RMC 原文**交给新时空面板。
-                # 面板的 set_gnss_nmea() 早就写好了，但全仓没人调它，
-                # 于是定时器每次都用 gnss_nmea=None 重算，授时标签恒显示
-                # "未同步"——插着真 GNSS 却不认，等于界面在否认硬件。
-                self._push_gnss_time_source()
-                if not static_site:                    self._observer_source = "gnss"
+                if not static_site:
+                    self._observer_source = "gnss"
                 # 只在"还没设过站"或"还在看示例站"时写真 GNSS；
                 # 不落盘（_apply_observer_location 只推内存面板）。
                 if ((self._observer_lat is None and self._observer_lon is None)
@@ -14964,9 +15305,6 @@ class MainWindow(QMainWindow):
             elif not static_site:
                 self.sky_view.set_gnss_position(fix_dict)
                 self._observer_source = None
-                # 丢了 fix 就收回授时凭据：不保留上一句 RMC，否则面板会
-                # 一直显示"GNSS 有效"——那是拿过期事实冒充当前状态。
-                self._clear_gnss_time_source()
         except Exception:
             pass
         # 真实 GNSS 卫星天空图：各星座可见卫星位置/信噪比 + GSA 定位卫星标记
@@ -14982,35 +15320,6 @@ class MainWindow(QMainWindow):
                 cp.update_gnss(gsv_frames, gsa_frame,
                                bool(self._gnss.is_connected()))
         except Exception:
-            pass
-
-    def _push_gnss_time_source(self) -> None:
-        """把真实串口最近一条 RMC 交给「新时空」面板，用于授时状态判断。
-
-        为什么必须是原文：RMC 的 A/V 标志位是"这句话可不可信"的唯一凭据，
-        解析成 fix 之后就丢了。拿一堆已解析字段拼一条 NMEA 交上去，等于
-        伪造观测——所以宁可传 None（面板显示未同步），也不拼假语句。
-        """
-        panel = getattr(self, "new_spacetime_panel", None)
-        if panel is None or self._gnss is None:
-            return
-        try:
-            nmea = self._gnss.get_last_rmc()
-        except Exception:
-            nmea = None
-        try:
-            panel.set_gnss_nmea(nmea or "")
-        except (AttributeError, RuntimeError, TypeError, ValueError):
-            pass
-
-    def _clear_gnss_time_source(self) -> None:
-        """收回授时凭据。丢 fix 时调用，避免拿过期 RMC 冒充当前已同步。"""
-        panel = getattr(self, "new_spacetime_panel", None)
-        if panel is None:
-            return
-        try:
-            panel.set_gnss_nmea("")
-        except (AttributeError, RuntimeError, TypeError, ValueError):
             pass
 
     def _on_sky_object_clicked(self, obj):

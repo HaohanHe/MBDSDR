@@ -13,7 +13,7 @@ MBDSDR 设备选择 / 热插拔面板（desktop/device_panel.py）
   * sounddevice 输出设备下拉枚举音频输出设备。
 
 红线：
-  * 无设备时列表显「未检测到 SDR 设备」，不造假设备。
+  * 无设备时列表显「未检测到设备」，不造假设备；枚举中/失败各有独立文案。
   * 连接动作只发信号，真正 connect 由主窗口走 _connect_backend。
 """
 from __future__ import annotations
@@ -58,9 +58,15 @@ import connect_request_store as _req_store
 
 logger = logging.getLogger(__name__)
 
-#: 无设备空态：下拉框说事实，状态行说下一步——两处都写「未检测到 SDR 设备」
+#: 枚举进行中：下拉框与状态行同说这一句，不残留上一轮的空态/失败结论。
+_ENUMERATING = "正在枚举设备…"
+#: 枚举超时：同样要换掉「正在枚举」，否则界面永远停在“还没结束”。
+_ENUM_TIMEOUT_COMBO = "枚举超时 · 点「刷新」重试"
+#: 枚举失败：不是没插设备，下拉框也不许说成空态。
+_ENUM_FAILED_COMBO = "枚举失败（原因见状态行）"
+#: 无设备空态：下拉框说事实，状态行说下一步——两处都写「未检测到设备」
 #: 等于同一句话念两遍，用户看不出该干什么。
-_NO_DEVICE_COMBO = "未检测到 SDR 设备"
+_NO_DEVICE_COMBO = "未检测到设备"
 _NO_DEVICE_STATUS = "未检测到设备 · 插上后点「刷新」"
 _NO_DEVICE_TIP = ("可能原因：USB 没插好、缺驱动，或设备被其他程序占用。"
                   "RTL-SDR 需要先用 Zadig 安装 WinUSB 驱动。")
@@ -245,9 +251,14 @@ class DevicePanel(QWidget):
         self._refresh_watchdog.timeout.connect(self._on_refresh_timeout)
         # 枚举完成前 dropdown 如实写「正在枚举」、连接按钮置灰：
         # 不假装「未检测到设备」，也不允许对着占位项点连接。
-        self.dev_combo.addItem("正在枚举设备…")
+        self.dev_combo.addItem(_ENUMERATING)
         self.connect_btn.setEnabled(False)
-        QTimer.singleShot(400, self.refresh_devices_async)
+        # 首次枚举用一个可取消的单次定时器：用户/看门狗先手动刷新时把它停掉，
+        # 避免"首帧自动列一遍 + 手动又列一遍"的重复 USB 枚举。
+        self._first_enum_timer = QTimer(self)
+        self._first_enum_timer.setSingleShot(True)
+        self._first_enum_timer.timeout.connect(self.refresh_devices_async)
+        self._first_enum_timer.start(400)
 
         # 热插拔轮询：每 2 秒派发一次后台枚举（枚举本身不在这条 GUI 线程里跑）
         self._enum_signals = _DeviceEnumSignals()
@@ -262,7 +273,17 @@ class DevicePanel(QWidget):
         self._hotplug_timer = QTimer(self)
         self._hotplug_timer.setInterval(2000)
         self._hotplug_timer.timeout.connect(self._on_hotplug_poll)
-        self._hotplug_timer.start()
+        # 热插拔轮询只在本面板可见时跑：隐藏时每 2s 一次 USB 枚举纯属白烧
+        # CPU/IO（用户口径：没开启的功能不许在后台跑）。
+
+    def showEvent(self, event):  # noqa: N802 - Qt 命名
+        super().showEvent(event)
+        if not self._hotplug_timer.isActive():
+            self._hotplug_timer.start()
+
+    def hideEvent(self, event):  # noqa: N802 - Qt 命名
+        self._hotplug_timer.stop()
+        super().hideEvent(event)
 
     # ------------------------------------------------------------------ UI
     def _build_ui(self):
@@ -332,9 +353,12 @@ class DevicePanel(QWidget):
         btn_row.addWidget(self.disconnect_btn)
         form.addRow("", btn_row)
 
-        self.status_label = QLabel(_NO_DEVICE_STATUS)
+        # 状态行与下拉框保持一致：构造/首次枚举期间同说「正在枚举」，
+        # 不再出现「下拉正在枚举 + 状态行未检测到设备」的自相矛盾。
+        self.status_label = QLabel(_ENUMERATING)
         self.status_label.setObjectName("statusValue")
-        self.status_label.setToolTip(_NO_DEVICE_TIP)
+        self.status_label.setToolTip("正在后台枚举 SDR 设备（不阻塞界面）；"
+                                     "完成后这里会写实际台数或失败原因。")
         form.addRow("", self.status_label)
 
         # 跨进程占用三态：空闲时不占地方；「被占用 / 状态未知」必须显式说
@@ -397,6 +421,26 @@ class DevicePanel(QWidget):
         self.sr_equiv.setText(f"= {shown}" if hz > 0 else "—")
 
     # ------------------------------------------------------------------ 设备枚举
+    def _set_combo_placeholder(self, text: str) -> None:
+        """把下拉框换成一句占位事实（清掉旧列表，连接中不动）。
+
+        枚举开始/超时/失败都必须换掉上一次的文本：残留「正在枚举设备…」会让
+        用户以为枚举还在跑，残留旧设备列表则会指向已经不存在的那台。
+        """
+        if self._connected:
+            return
+        self.dev_combo.blockSignals(True)
+        self.dev_combo.clear()
+        self.dev_combo.addItem(text)
+        self.dev_combo.blockSignals(False)
+        self.connect_btn.setEnabled(False)
+
+    def _show_enumerating(self) -> None:
+        """枚举开始：下拉框与状态行同说「正在枚举」，不继续展示上一轮结论。"""
+        self._set_combo_placeholder(_ENUMERATING)
+        self.status_label.setText(_ENUMERATING)
+        self.status_label.setToolTip("")
+
     def refresh_devices(self) -> None:
         """同步枚举 SDR 设备（同步调用入口，测试与显式请求用）。"""
         if not _ENUM_OK or enumerate_all_sdr_devices is None:
@@ -418,6 +462,10 @@ class DevicePanel(QWidget):
         if not _ENUM_OK or enumerate_all_sdr_devices is None:
             self._apply_devices([], enum_err="设备枚举不可用（枚举依赖缺失）")
             return
+        # 手动刷新优先：取消尚未触发的首帧自动枚举，不重复派发。
+        first = getattr(self, "_first_enum_timer", None)
+        if first is not None and first.isActive():
+            first.stop()
         if self._refresh_inflight or self._enum_inflight:
             return  # 上一拍还没回来，不堆积任务
         self._refresh_inflight = True
@@ -427,8 +475,9 @@ class DevicePanel(QWidget):
         # 每次手动刷新都给「正在枚举」这一拍：设备集合没变时，否则界面
         # 从点击到结果零变化，用户无法判断按钮到底有没有被响应（审计
         # 白名单里这条「幂等刷新」即由此而来）。结果回来照旧写实际台数。
-        self.status_label.setText("正在枚举设备…")
-        self.status_label.setToolTip("")
+        # 下拉框同一拍也要换掉：只改状态行会留下「未检测到设备 / 正在枚举」
+        # 这种自相矛盾的组合（离屏走查 device.png）。
+        self._show_enumerating()
         QThreadPool.globalInstance().start(
             _DeviceEnumTask(self._refresh_signals, self._refresh_token))
 
@@ -454,6 +503,8 @@ class DevicePanel(QWidget):
             "已复位 inflight，下一次刷新会重新发起枚举",
             ENUM_TIMEOUT_MS / 1000.0)
         self.status_label.setText("设备枚举超时 · 稍后自动重试")
+        # 超时也是「枚举没完成」：下拉框不能继续挂着「正在枚举设备…」。
+        self._set_combo_placeholder(_ENUM_TIMEOUT_COMBO)
         self.status_label.setToolTip(
             "枚举设备超过 %.0f 秒没有返回（这是本程序设置的等待上限，不是设备读数），"
             "通常是设备/驱动无响应（USB open 无超时）。"
@@ -473,15 +524,16 @@ class DevicePanel(QWidget):
         self._identities = _req_store.resolve(self._devices)
         self.dev_combo.clear()
         if not self._devices:
-            self.dev_combo.addItem(_NO_DEVICE_COMBO)
             if enum_err:
                 # 枚举失败 != 没插设备：不要把用户赶去拔插 USB
-                self.status_label.setText("设备枚举失败 · 这不等于没插设备")
+                self.dev_combo.addItem(_ENUM_FAILED_COMBO)
+                self.status_label.setText(f"枚举失败：{enum_err}")
                 self.status_label.setToolTip(
                     f"枚举设备时出错：{enum_err}\n"
                     "设备可能已插好，只是本次枚举失败。请点「刷新」重试，"
                     "或拔插设备后重试。")
             else:
+                self.dev_combo.addItem(_NO_DEVICE_COMBO)
                 self.status_label.setText(_NO_DEVICE_STATUS)
                 self.status_label.setToolTip(_NO_DEVICE_TIP)
             self.connect_btn.setEnabled(False)
@@ -571,6 +623,11 @@ class DevicePanel(QWidget):
             err = "枚举任务没有返回设备列表"
         events = monitor.observe(now, err or "")
         if not events:
+            if (not self._connected and now is not None and not self._devices
+                    and self.dev_combo.currentText() != _NO_DEVICE_COMBO):
+                # 上一轮刷新失败/超时留下的占位，这一拍枚举成功了：把真实
+                # 结果落下去，别让「正在枚举 / 超时」一直挂在界面上。
+                self._apply_devices(now)
             return
 
         now_locs = {self._locator_of(d) for d in (now or [])}
@@ -646,6 +703,9 @@ class DevicePanel(QWidget):
             self._enum_timeout_count, ENUM_TIMEOUT_MS / 1000.0)
         self.status_label.setText(
             f"设备枚举超时 · 已自动重试 {self._enum_timeout_count} 次")
+        # 热插拔枚举同样可能卡死：下拉框不许永远停在「正在枚举设备…」。
+        if not self._connected and not self._devices:
+            self._set_combo_placeholder(_ENUM_TIMEOUT_COMBO)
         self.status_label.setToolTip(
             "枚举设备超过 %.0f 秒没有返回（这是本程序设置的等待上限，不是设备读数），"
             "通常是设备/驱动无响应（USB open 无超时）。"

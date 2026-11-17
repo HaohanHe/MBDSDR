@@ -263,9 +263,13 @@ class DemodWorker(QThread):
       - AudioPlayer 内部 5ms ramp 消咔哒。
 
     audio_enabled=False（未点「收听」/ 静音 VFO）时，run() 每帧重算门控后
-    直接 msleep 让路，连 DDC+解调都不跑——把 CPU 让给频谱与 GNSS（对照
+    直接 flush 让路，连 DDC+解调都不跑——把 CPU 让给频谱与 GNSS（对照
     SDR++ main_window.cpp:51 playing=false）。当前共享单一声卡，只允许一个
     VFO 出声；门控每帧重算，运行时收听开关即时生效。
+
+    ``frames_demod`` / ``frames_skipped`` 是「停止解调是否真的停了」的可观测
+    证据：idle 下前者必须不再增长、后者按帧增长（此前界面只有「待机」两个字，
+    用户无法分辨是真停还是只静音）。
     """
 
     #: 单帧解调失败（可预期数据异常）：供状态栏/日志如实提示，不静默吞掉
@@ -295,6 +299,10 @@ class DemodWorker(QThread):
         self.last_demod_mode: str = "FM"
         # 解调失败日志限流时间戳（monotonic）
         self._last_demod_fail_ts = 0.0
+        # 帧计数（仅作可观测性/断言，GIL 下自增足够精确）：
+        # frames_demod = 真正走完 DDC+解调的帧；frames_skipped = idle 门控跳过。
+        self.frames_demod = 0
+        self.frames_skipped = 0
         # 有状态 WFM 接收器（WFM 模式下懒创建一次）
         self._wfm_rx = None
         # 静噪：唯一滑杆刻度（-100..-20，默认 -50）= 相对该模式噪声基线的余量。
@@ -411,14 +419,18 @@ class DemodWorker(QThread):
             self._report_demod_failure(mode, exc, stage="静噪判定")
 
     def _push_audio(self, audio, player, mode: str) -> None:
-        """AGC → tap → 写卡：设备/数据异常限流上报；编程错误原样上抛。"""
-        if getattr(self, "_muted", False):
-            return          # 「不收听」：只解调不写卡，省一次声卡写
+        """AGC → tap → 写卡：设备/数据异常限流上报；编程错误原样上抛。
+
+        「不收听」只掐最后一步写卡：AGC 与 ``audio_tap`` 必须照跑——APRS /
+        卫星 APT 等解码器就是靠 tap 拿音频的。旧实现在 tap 之前就 return，
+        等于"静音"连解码一起停了，和 UI 文案、``set_muted`` docstring 都不符。
+        """
         try:
             audio = self._apply_audio_agc(audio)
             if self.audio_tap is not None:
                 audio = self.audio_tap(audio)
-            player.write(audio)
+            if not getattr(self, "_muted", False):
+                player.write(audio)
         except self._DEVICE_ERRORS + self._FRAME_ERRORS as exc:
             self._report_demod_failure(mode, exc, stage="音频处理/写卡")
 
@@ -479,6 +491,14 @@ class DemodWorker(QThread):
                 break
             if n <= 0:
                 continue
+            # 停止解调 / 不收听（idle）：只归还缓冲区，不做任何数组转换、增益
+            # 检查或静噪档切换。旧实现先转换、再发现"没在解调"，白烧 CPU，
+            # 也让人怀疑"点了停止还在解调"。对照 SDR++ playing=false。
+            # 每帧重算 _player_ok()：运行时收听开关 / 声卡流状态会变。
+            if not _player_ok():
+                self.frames_skipped += 1
+                self._in.flush()
+                continue
             iq = np.asarray(buf[:n], dtype=np.complex64)
             self._in.flush()
 
@@ -494,13 +514,6 @@ class DemodWorker(QThread):
                 self.recalibrate()
             if mode in ("RAW", "DIG"):
                 continue
-            # 未点「收听」：连解调都不跑，把 CPU 让给频谱与 GNSS。
-            # 对照 SDR++ main_window.cpp:51 playing=false —— 设备连上不等于播。
-            # 每帧重算 _player_ok()：运行时收听开关 / 声卡流状态会变，
-            # 线程启动时算一次就固定会让开关永远不生效（真 bug）。
-            if not _player_ok():
-                self.msleep(10)
-                continue
 
             # ===== WFM 广播路径：信道就是全带宽，先鉴频解调，再据音频形态静噪 =====
             if mode == "WFM":
@@ -514,6 +527,7 @@ class DemodWorker(QThread):
                     break
                 if audio is None or audio.size == 0:
                     continue
+                self.frames_demod += 1
                 # 静噪门控（唯一刻度）：相对该模式噪声基线的余量。
                 # WFM 与窄带用同一判定，差别只在分析带/标定（见 squelch.py）。
                 try:
@@ -556,6 +570,7 @@ class DemodWorker(QThread):
             if audio is None or audio.size == 0:
                 continue
 
+            self.frames_demod += 1
             # 静噪门控（唯一刻度）：相对该模式噪声基线的余量（与 WFM 同口径）。
             try:
                 self._squelch_gate(audio, player, mode)
@@ -589,10 +604,15 @@ class RecordTap(QThread):
 
     def __init__(self, in_stream: PingPongStream,
                  on_iq: Callable[[np.ndarray], None],
+                 enabled: Optional[Callable[[], bool]] = None,
                  parent: Optional[QObject] = None):
         super().__init__(parent)
         self._in = in_stream
         self._on_iq = on_iq
+        #: 录制开关来源（UI 侧 _recording）。None = 恒开（兼容既有调用）。
+        #: 关时只排水不复制：旧版不录制也整帧 np.array 拷贝 + 回调，
+        #: 2.4 MS/s 下等于每秒白烧 ~18 MB 的 memcpy 和一次跨线程调用。
+        self._enabled = enabled or (lambda: True)
         self._running = False
 
     def run(self):
@@ -602,6 +622,9 @@ class RecordTap(QThread):
             if n < 0:
                 break
             if n <= 0:
+                continue
+            if not self._enabled():
+                self._in.flush()
                 continue
             iq = np.array(buf[:n], dtype=np.complex64)
             self._in.flush()
@@ -664,6 +687,8 @@ class ReceivePipeline(QObject):
                  player,
                  config: SharedDemodConfig,
                  on_record_iq: Callable[[np.ndarray], None],
+                 record_enabled: Optional[Callable[[], bool]] = None,
+                 audio_enabled: bool = False,
                  parent: Optional[QObject] = None):
         super().__init__(parent)
         self._read_fn = read_fn
@@ -689,8 +714,15 @@ class ReceivePipeline(QObject):
         self._reader.read_failed.connect(self.read_failed)
         self._fft = FftWorker(self._spectrum_stream, gen, self._sr, center_getter)
         self._fft.frame_ready.connect(self._on_fft_frame)
+        # 设备连上 ≠ 开始收听（对照 SDR++ playing=false）：两路解调初始都不
+        # 使能，等用户点「收听」由 _sync_listen_workers 打开。旧实现 _demod1
+        # 默认 True，一旦上面的同步没跑到（或异步顺序变化）就会"没点收听
+        # 却在解调"，这正是真机上"点了停止还在解调"的温床。
+        # 非 GUI 消费者（基准/浸泡脚本）确实要"一造出来就解调"，用
+        # audio_enabled=True 显式声明；默认仍是不解调，避免悄悄开跑。
         self._demod1 = DemodWorker(self._vfo1_stream, main_vfo_dsp, player,
-                                   config, self._sr, audio_enabled=True)
+                                   config, self._sr,
+                                   audio_enabled=bool(audio_enabled))
         self._demod2 = (DemodWorker(self._vfo2_stream, vfo2_dsp, player,
                                     config, self._sr, audio_enabled=False)
                         if vfo2_dsp is not None else None)
@@ -698,7 +730,8 @@ class ReceivePipeline(QObject):
         for w in (x for x in (self._demod1, self._demod2) if x is not None):
             w.demod_failed.connect(self.demod_failed)
             w.squelch_state.connect(self.squelch_state)
-        self._record = RecordTap(self._record_stream, on_record_iq)
+        self._record = RecordTap(self._record_stream, on_record_iq,
+                                 enabled=record_enabled)
 
         self._started = False
         #: 后台 join 线程（shutdown 后才有）
@@ -710,6 +743,23 @@ class ReceivePipeline(QObject):
     def _on_fft_frame(self, iq: np.ndarray, sr: float):
         # 转发给 UI（跨线程 queued 连接自动 marshal）
         self.frame_ready.emit(iq, sr)
+
+    def set_demod_enabled(self, on: bool) -> None:
+        """idle（停止解调）时把 VFO 通道从 splitter 解绑，收听时重新绑定。
+
+        DemodWorker 在 idle 下本就不跑 DDC（run() 门控），但 splitter 仍会为
+        它每帧做一次 128 KiB 拷贝（2.4 MS/s ≈ 146 帧/s，≈18 MB/s 纯 memcpy）。
+        SDR++ 的口径是"停止解调 = 不再为解调做任何工作"，所以这里把通道摘掉。
+        worker 会阻塞在 read()，重新 bind 后自动恢复，不需要重启线程。
+        """
+        streams = [self._vfo1_stream]
+        if self._vfo2_stream is not None:
+            streams.append(self._vfo2_stream)
+        for st in streams:
+            if on:
+                self._splitter.bind(st)
+            else:
+                self._splitter.unbind(st)
 
     def start(self):
         if self._started:

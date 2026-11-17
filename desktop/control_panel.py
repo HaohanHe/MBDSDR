@@ -238,6 +238,8 @@ class ControlPanel(QWidget):
         #: 会话占用态（gpredict 第三档）：占用期间连接参数置灰且 tooltip 写「怎么解除」。
         self._session_occupied = False
         self._session_reason = ""
+        #: 所连设备是否真支持手动增益（set_device_capabilities 写入）。
+        self._gain_supported = True
 
         self._build_ui()
         self._relax_combo_widths()
@@ -438,6 +440,7 @@ class ControlPanel(QWidget):
         统一置灰并还原 tooltip，重连后由 ``_apply_connect_params`` 重新收紧。
         """
         reason = "本设备不支持该项（已跳过，不会下发）"
+        self._gain_supported = bool(gain)
 
         # 状态先落：设备做不到的项不许停在「已勾选/已生效」。
         if not agc:
@@ -1134,14 +1137,14 @@ class ControlPanel(QWidget):
             # 该拒绝而不是猜：逗号当小数点会差 1000 倍。弹框写明两种可能，
             # 而不是只闪一下红框（用户不知道刚才那一下意味着什么）。
             self.freq_input.setStyleSheet(
-                "background-color:" + tokens().COLORS["danger"] + ";")
+                "background-color:" + tokens().status_color("danger") + ";")
             QTimer.singleShot(700, self._restore_freq_input)
             QMessageBox.warning(self, "频率写法不明确", str(e))
             return
         except (ValueError, OSError):
             # 解析失败：输入框变红，稍后恢复原值，绝不崩溃
             self.freq_input.setStyleSheet(
-                "background-color:" + tokens().COLORS["danger"] + ";")
+                "background-color:" + tokens().status_color("danger") + ";")
             QTimer.singleShot(700, self._restore_freq_input)
             return
         # 防呆：键入值超出可调范围时**拒绝下发**并明确告知，而不是
@@ -1149,7 +1152,7 @@ class ControlPanel(QWidget):
         # 程序内部路径（步进/预设/回填）仍走 _set_freq_hz 的边界钳位。
         if not (FREQ_MIN_HZ <= freq_hz <= FREQ_MAX_HZ):
             self.freq_input.setStyleSheet(
-                "background-color:" + tokens().COLORS["danger"] + ";")
+                "background-color:" + tokens().status_color("danger") + ";")
             QTimer.singleShot(700, self._restore_freq_input)
             QMessageBox.warning(
                 self, "频率超出可调范围",
@@ -1736,6 +1739,19 @@ class ControlPanel(QWidget):
         if not math.isfinite(value):
             return False
         self.gain_val.setText(format_gain_db(value))
+        if not getattr(self, "_gain_supported", True):
+            # 设备不支持手动增益：读数只是它当前档位，滑杆不是"待下发意图"，
+            # 不构成"未生效"。这里只陈述事实，不刷告警。
+            self.gain_val.setToolTip(
+                "本设备不支持增益调节：读数是设备当前档位，滑杆不会下发")
+            return True
+        if self.agc_check.isChecked():
+            # AGC 开启时手动增益根本不下发（增益由前端 AGC 自动控制）：
+            # 滑杆只是关闭 AGC 后的起点，拿它比对读数会把"本来就不该下发"
+            # 误报成"配置意图未生效"（真机启动即 agc=True、gain=20 的路径）。
+            self.gain_val.setToolTip(
+                "AGC 开启：读数是硬件自动增益下的当前档位，手动增益不下发")
+            return True
         requested = self.gain_slider.value()
         if gain_differs(value, requested):
             hint = gain_not_applied_hint(value, requested)

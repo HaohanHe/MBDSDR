@@ -46,7 +46,7 @@ def run_golden() -> int:
         return _emit("protocol_golden", "FAIL",
                      reason="golden provenance 标注被篡改（诚实纪律钉扎）")
     try:
-        from mbdsdr_ai.verify_chain import verify_sample
+        from mbdsdr_ai.verify_chain import run_p0_anchors, verify_sample
         vals = doc["field_values"]
         assertions = [
             {"field": "battery_mv", "op": "eq", "value": vals["battery_mv"]},
@@ -58,10 +58,19 @@ def run_golden() -> int:
                           profile_name=doc["profile"],
                           assertions=assertions)
         if r["overall_pass"] and r["crc"]["ok"]:
+            # P0-2/3/4/5 各一条最小锚点（Task 6.4）：帧链过了不代表工具集没坏，
+            # 所以同一 golden 步里顺带判；任一条红 → 整步 FAIL，绝不掩盖。
+            anchors = run_p0_anchors()
+            if not anchors["ok"]:
+                return _emit("protocol_golden", "FAIL",
+                             reason="P0 工具锚点失败（帧链 PASS 但工具集不可信）",
+                             anchors=anchors["items"])
             return _emit("protocol_golden", "PASS",
-                         detail="合成 golden 全链（ASM→CRC→字段→断言）PASS",
+                         detail=("合成 golden 全链（ASM→CRC→字段→断言）+ "
+                                 "P0-2/3/4/5 锚点 PASS"),
                          n_pass=r["n_pass"],
-                         provenance=doc["sample_provenance"])
+                         provenance=doc["sample_provenance"],
+                         anchors=anchors["items"])
         return _emit("protocol_golden", "FAIL",
                      detail=f"断言 {r['n_fail']} 条失败", result=r)
     except Exception as e:  # noqa: BLE001

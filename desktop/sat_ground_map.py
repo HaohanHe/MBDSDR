@@ -3,9 +3,10 @@
 
 本控件只做「把 :mod:`mbdsdr_ai.ground_track` 算好的点画到公用地图上」，
 不重复任何轨道/椭球计算。图层：``sat_footprint``（覆盖圈）、
-``sat_ground_track``（轨迹 + 星下点）、``spacetime_features``（地面对象 +
-此刻圈内高亮 + 时间角标，见 :mod:`spacetime_map_layer`）。
-轨迹跨日界线按段绘制，不横穿整图。
+``observing_sites``（内置台址/公众点打点，坐标源 :mod:`mbdsdr_ai.astronomy.
+observing_sites`）、``sat_ground_track``（轨迹 + 星下点）、
+``spacetime_features``（地面对象 + 此刻圈内高亮 + 时间角标，见
+:mod:`spacetime_map_layer`）。轨迹跨日界线按段绘制，不横穿整图。
 
 活的地面态势（2026-11-16）：
   * 多颗真实 TLE 卫星（:meth:`update_constellation`），覆盖圈/轨迹按
@@ -20,7 +21,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
-from PySide6.QtCore import QPointF, Qt, Signal
+from PySide6.QtCore import QPointF, QRectF, Qt, Signal
 from PySide6.QtGui import QBrush, QColor, QPainter, QPen, QPolygonF
 from PySide6.QtWidgets import (
     QFrame, QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget,
@@ -93,6 +94,8 @@ class SatelliteGroundMap(QWidget):
         self.view = OsmMapView(self, online=online)
         self.view.setMinimumHeight(180)
         self.view.add_layer("sat_footprint", self._paint_footprint)
+        # 台址/公众点垫在卫星轨迹下面：轨迹才是主角，点是参照物。
+        self.view.add_layer("observing_sites", self._paint_sites)
         self.view.add_layer("sat_ground_track", self._paint_track)
         layout.addWidget(self.view)
         # 详情抽屉：点中地面对象才展开（工程读数不占主面），「收起」= 返回。
@@ -396,6 +399,43 @@ class SatelliteGroundMap(QWidget):
             _draw_tag(painter, QPointF(pos.x() + 10.0, pos.y() - 10.0),
                       str(sit.get("name") or ""), color)
 
+    def _paint_sites(self, painter: QPainter, project) -> None:
+        """内置台址/公众点打点：科研=空心方，公众=实心圆。
+
+        形状 + 文字双通道，分辨不依赖颜色（色弱口径）。名字只在放大到
+        能分开时画：低缩放下 6 个名字会叠成一团，点本身仍然可见。
+        坐标来自 ``observing_sites.SITES``（每条带 source_url），本层不
+        另存一份坐标，也不写「大概位置」。
+        """
+        try:
+            from mbdsdr_ai.astronomy.observing_sites import SITES
+        except Exception:  # pragma: no cover - 数据模块缺失不拖累地图
+            return
+        try:
+            _z = getattr(self.view, "zoom", 3)
+            zoom = int(_z() if callable(_z) else _z)
+        except Exception:  # pragma: no cover
+            zoom = 3
+        white = QColor(255, 255, 255, 215)
+        for site in SITES:
+            public = site.access == "public"
+            color = QColor(_t.status_color("success" if public
+                                           else "warning"))
+            if not color.isValid():  # pragma: no cover - 主题缺 token
+                color = QColor("#009E73" if public else "#E69F00")
+            pos = project(site.lat_deg, site.lon_deg)
+            painter.setPen(QPen(white, 1.1))
+            painter.setBrush(QBrush(color) if public else Qt.NoBrush)
+            if public:
+                painter.drawEllipse(pos, 4.0, 4.0)
+            else:
+                painter.drawRect(QRectF(pos.x() - 3.5, pos.y() - 3.5,
+                                        7.0, 7.0))
+            if zoom >= 5:
+                _draw_tag(painter, QPointF(pos.x() + 9.0, pos.y() - 9.0),
+                          site.name_zh, color)
+        painter.setBrush(Qt.NoBrush)
+
 
 def _draw_tag(painter: QPainter, pos: QPointF, text: str,
               color: QColor) -> None:
@@ -432,7 +472,13 @@ def _format_tle_state(sats: List[Dict[str, Any]]) -> str:
 
 def _split_lonlat(points: List[Tuple[float, float]],
                   closed: bool = False) -> List[List[Tuple[float, float]]]:
-    """按经度跳变 >180° 切段；``closed`` 时去掉重复的闭合点再切。"""
+    """按经度跳变 >180° 切段；``closed`` 时去掉重复的闭合点再切。
+
+    切开的每段都**不能再把首点追加到尾部**：跨日界线的覆盖圈会切成两段，
+    每段首末都贴着同一侧边缘，由 QPolygonF 自动闭合成短边；若把首点追加
+    回去，等经纬/墨卡托地图上会从一端的 ±180 连到另一端，画出一条横穿
+    全图的假边（2026-11-17 实测）。
+    """
     src = list(points)
     if closed and len(src) > 1 and src[0] == src[-1]:
         src = src[:-1]
@@ -444,6 +490,5 @@ def _split_lonlat(points: List[Tuple[float, float]],
             current = []
         current.append((lat, lon))
     if current:
-        current.append(current[0])
         chunks.append(current)
     return chunks
