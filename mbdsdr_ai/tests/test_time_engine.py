@@ -22,6 +22,9 @@ _HERE = os.path.dirname(os.path.abspath(__file__))
 _PKG = os.path.dirname(_HERE)
 if _PKG not in sys.path:
     sys.path.insert(0, _PKG)
+sys.path.insert(0, os.path.join(os.path.dirname(_PKG), "tests", "fixtures"))
+
+from tle_samples import ISS_TLE, NOAA15_TLE  # noqa: E402
 
 from new_spacetime import (
     TimeEngine,
@@ -125,25 +128,29 @@ class TestTimeTravelAffectsSatellitePositions(unittest.TestCase):
         self.lat, self.lon = 45.0, 120.0
 
     def test_jump_24h_changes_satellite_az_alt(self):
-        from decoders import compute_satellite_position
+        from mbdsdr_ai import decoders as dec
 
         eng = get_time_engine()
+        prev_resolver = dec._resolve_tle
+        dec._resolve_tle = lambda name: (*ISS_TLE, "test")
+        try:
+            # 1) 取固定基准时刻的卫星位置（钉死时钟，不随 CI 日期漂移）
+            now_unix = BASE_DT.timestamp()
+            pos_now = dec.compute_satellite_position(
+                "ISS (ZARYA)", self.lat, self.lon, 0, timestamp=now_unix)
+            self.assertIsNotNone(pos_now)
 
-        # 1) 取固定基准时刻的卫星位置（钉死时钟，不随 CI 日期漂移）
-        now_unix = BASE_DT.timestamp()
-        pos_now = compute_satellite_position("ISS (ZARYA)", self.lat, self.lon, 0,
-                                             timestamp=now_unix)
-        self.assertIsNotNone(pos_now)
+            # 2) 把模拟时间跳到 24 小时后
+            future_dt = BASE_DT + timedelta(hours=24)
+            eng.set_utc(future_dt)
+            future_unix = eng.now_unix()
+            self.assertAlmostEqual(future_unix - now_unix, 24 * 3600, delta=5.0)
 
-        # 2) 把模拟时间跳到 24 小时后
-        future_dt = BASE_DT + timedelta(hours=24)
-        eng.set_utc(future_dt)
-        future_unix = eng.now_unix()
-        self.assertAlmostEqual(future_unix - now_unix, 24 * 3600, delta=5.0)
-
-        # 3) 用模拟时间算同一颗卫星位置
-        pos_future = compute_satellite_position("ISS (ZARYA)", self.lat, self.lon, 0,
-                                                timestamp=future_unix)
+            # 3) 用模拟时间算同一颗卫星位置
+            pos_future = dec.compute_satellite_position(
+                "ISS (ZARYA)", self.lat, self.lon, 0, timestamp=future_unix)
+        finally:
+            dec._resolve_tle = prev_resolver
         self.assertIsNotNone(pos_future)
 
         # 4) 关键断言：24 小时后卫星仰角/方位角必须与现在不同
@@ -178,13 +185,20 @@ class TestTimeTravelAffectsSatellitePositions(unittest.TestCase):
 
     def test_predict_pass_uses_sim_time(self):
         """predict_satellite_pass 起点应随 TimeEngine 移动。"""
+        from mbdsdr_ai import decoders as dec
+
         eng = get_time_engine()
         # 跳到一个固定未来时间
         fixed = datetime(2026, 10, 1, 12, 0, 0, tzinfo=timezone.utc)
         eng.set_utc(fixed)
 
-        p = predict_satellite_pass("NOAA 15", self.lat, self.lon, 0.0,
-                                   hours_ahead=6.0, min_elevation=5.0)
+        prev_resolver = dec._resolve_tle
+        dec._resolve_tle = lambda name: (*NOAA15_TLE, "test")
+        try:
+            p = predict_satellite_pass("NOAA 15", self.lat, self.lon, 0.0,
+                                       hours_ahead=6.0, min_elevation=5.0)
+        finally:
+            dec._resolve_tle = prev_resolver
         # 不要求一定有 pass，但即使是 None 也不能崩溃
         # 如果有 pass，rise_time 必须 >= 固定起点
         if p is not None and p.rise_time is not None:

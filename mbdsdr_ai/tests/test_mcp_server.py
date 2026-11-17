@@ -301,10 +301,16 @@ def test_domain_param_respects_explicit_detail():
         assert "inputSchema" not in t
 
 
-def test_initialize_declares_list_changed():
+def test_initialize_declares_list_changed_false_matching_implementation():
+    """声明必须与实现一致：本服务端不主动发 list_changed，故声明 False。
+
+    工具表是初始化时的静态快照，run_mcp_server 只按请求回包、从不推送
+    notifications/tools/list_changed——声明 true 会让客户端等一个永不到达
+    的通知。此断言同时钉住「声明 == 实现」。
+    """
     ts = _set()
     r = ts.handle_request({"jsonrpc": "2.0", "id": 1, "method": "initialize"})
-    assert r["result"]["capabilities"]["tools"]["listChanged"] is True
+    assert r["result"]["capabilities"]["tools"]["listChanged"] is False
 
 
 def test_notification_list_changed_no_stdout_when_untagged():

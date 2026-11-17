@@ -97,11 +97,12 @@ class TLEManager:
         """P12：TLE 取数统一走 tle_fetch（24h 门槛 + 退避 + 离线标注）。"""
         if self._tle_store is None:
             from .tle_fetch import FetchPolicy, TleFetcher
-            from .net_policy import network_disabled
+            from .net_policy import network_allowed, network_disabled
             self._tle_store = TleFetcher(
                 opener=lambda url, t, d: self._http_get(url),
                 cache_dir_provider=lambda: self.cache_dir,
                 offline_provider=network_disabled,
+                network_allowed_provider=network_allowed,
                 policy=FetchPolicy(
                     fresh_max_hours=_CACHE_TTL / 3600.0,
                     request_timeout_s=self.timeout,

@@ -15,8 +15,10 @@ import pytest
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(os.path.dirname(HERE))
 sys.path.insert(0, ROOT)
+sys.path.insert(0, os.path.join(ROOT, "tests", "fixtures"))
 
 from mbdsdr_ai.new_spacetime import TimeEngine  # noqa: E402
+from tle_samples import NOAA15_TLE  # noqa: E402
 
 
 class TestEngineAdvancement:
@@ -68,11 +70,10 @@ class TestEngineAdvancement:
 class TestPhysicsIsRateIndependent:
     def test_pass_prediction_identical_across_rates(self):
         """同一显式 start_time，×1/×60/×1800 结果逐字段一致。"""
-        from mbdsdr_ai.decoders import BUILTIN_TLE
         from mbdsdr_ai.sat_passes import (GroundStation, make_timescale,
                                           predict_passes)
 
-        line1, line2 = BUILTIN_TLE["NOAA 15"][:2]
+        line1, line2 = NOAA15_TLE
         start = make_timescale().utc(2026, 9, 26, 0, 0, 0)
         gs = GroundStation(lat_deg=45.0, lon_deg=120.0, alt_m=0.0)
 
@@ -92,16 +93,21 @@ class TestPhysicsIsRateIndependent:
                 assert a.rise_az == pytest.approx(b.rise_az)
                 assert a.max_alt == pytest.approx(b.max_alt)
 
-    def test_sky_position_same_explicit_timestamp(self):
+    def test_sky_position_same_explicit_timestamp(self, monkeypatch):
         """天空视图位置：同一 Unix 时刻，倍率改变不改变 az/el。"""
-        from mbdsdr_ai.decoders import compute_satellite_position
+        from mbdsdr_ai import decoders
+
+        monkeypatch.setattr(
+            decoders, "_resolve_tle",
+            lambda name: (*NOAA15_TLE, "test"))
 
         when = 1793000000.0   # 固定 UTC 时刻
         outs = []
         for rate in (1.0, 1800.0):
             eng = TimeEngine()
             eng.set_rate(rate)
-            outs.append(compute_satellite_position("NOAA 15", 45.0, 120.0, 0.0, when))
+            outs.append(decoders.compute_satellite_position(
+                "NOAA 15", 45.0, 120.0, 0.0, when))
         assert outs[0].elevation == pytest.approx(outs[1].elevation)
         assert outs[0].azimuth == pytest.approx(outs[1].azimuth)
 

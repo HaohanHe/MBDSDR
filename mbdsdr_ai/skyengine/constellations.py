@@ -37,12 +37,15 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import os
 from dataclasses import dataclass
 from functools import lru_cache
 from typing import Any, Dict, List, Optional, Tuple
 
 from .stars import BRIGHT_STARS, BrightStar
+
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # 星表扩员 (name, ra_deg, dec_deg, vmag, bv, dist_ly)
@@ -601,8 +604,22 @@ def _chinese_adapter() -> Any:
     return _CHINESE_ADAPTER
 
 
-def system_ids() -> Tuple[str, str]:
-    return (SYSTEM_IAU, SYSTEM_CHINESE)
+def system_ids() -> Tuple[str, ...]:
+    """所有可用天空文化体系：IAU、中国星官，再加已加载的文件文化包。
+
+    文件包由 ``sky_culture.load_registry`` 统一发现；这里刻意延迟导入，
+    避免 ``sky_culture`` 与 ``constellations`` 在模块级互相 import。单个
+    坏包不应让整个星空视图起不来：记 warning 并跳过，由渲染层报数据不可用。
+    """
+    base = (SYSTEM_IAU, SYSTEM_CHINESE)
+    try:
+        from .sky_culture import load_registry
+        extra = tuple(p.id for p in load_registry() if p.id not in base)
+    except Exception as exc:  # 坏包/缺文件：不阻断主视图
+        logger.warning("多文化天空包加载失败（已跳过）: %s: %s",
+                       type(exc).__name__, exc)
+        extra = ()
+    return base + extra
 
 
 def system_info(system_id: str) -> Dict[str, Any]:
@@ -622,7 +639,24 @@ def system_info(system_id: str) -> Dict[str, Any]:
         }
     if system_id == SYSTEM_CHINESE:
         return _chinese_adapter().system_info()
-    raise KeyError(f"未知天空文化体系: {system_id!r}")
+    try:
+        from .sky_culture import get_pack
+        from .culture_layer import culture_tag
+        pack = get_pack(system_id)
+    except KeyError:
+        raise KeyError(f"未知天空文化体系: {system_id!r}")
+    return {
+        "system_id": pack.id,
+        "display_name_zh": pack.display_name or pack.native_name or pack.id,
+        "display_name_en": pack.meta.get("display_name") or pack.display_name,
+        "tag": culture_tag(pack.id),
+        "source": pack.source,
+        "source_url": pack.source_url,
+        "source_license": pack.license,
+        "lines_are_iau_official": False,
+        "count": len(pack.groups),
+        "region": pack.region,
+    }
 
 
 def constellation_layer(system_id: str) -> ConstellationLayer:
@@ -638,7 +672,20 @@ def constellation_layer(system_id: str) -> ConstellationLayer:
         )
     if system_id == SYSTEM_CHINESE:
         return _chinese_adapter().xingguan_layer()
-    raise KeyError(f"未知天空文化体系: {system_id!r}")
+    try:
+        from .sky_culture import get_pack
+        from .culture_layer import build_group_adapters, culture_tag
+        pack = get_pack(system_id)
+    except KeyError:
+        raise KeyError(f"未知天空文化体系: {system_id!r}")
+    return ConstellationLayer(
+        system_id=pack.id,
+        display_name=pack.display_name or pack.native_name or pack.id,
+        tag=culture_tag(pack.id),
+        source=pack.source,
+        source_license=pack.license,
+        items=build_group_adapters(pack.id),
+    )
 
 
 def overlay_layers(

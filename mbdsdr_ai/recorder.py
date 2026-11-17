@@ -242,6 +242,9 @@ class IQRecorder:
         self.closed = True
 
         # ── 构造 SigMF meta（严格按规范）──
+        # 0 样本录制不是“完整录制”：设备有界读超时后仍无样本时，数据文件是
+        # 0 字节（真机实测），却把 complete=true 写进 meta 会自相矛盾。
+        complete = self.state != "failed" and self._n_samples > 0
         meta: Dict[str, Any] = {
             "global": {
                 "core:datatype": "cf32_le",     # complex float32 little-endian
@@ -253,8 +256,9 @@ class IQRecorder:
                 "mbdsdr:gain_db": self.gain_db,
                 "mbdsdr:device": self.device,
                 "mbdsdr:driver": self.driver,
-                # 只有无写入错误时才算完整；断电/磁盘满留下的文件不会冒充完整
-                "mbdsdr:complete": self.state != "failed",
+                # 只有真写入过样本且无写入错误时才算完整；断电/磁盘满/设备
+                # 无返回留下的文件不会冒充完整。
+                "mbdsdr:complete": complete,
                 "mbdsdr:error": self.last_error,
             },
             "captures": [
@@ -265,6 +269,14 @@ class IQRecorder:
             ],
             "annotations": [],
         }
+        if not complete:
+            if self._n_samples == 0:
+                reason = "未收到样本（0 字节）"
+                if self.last_error:
+                    reason += f"：{self.last_error}"
+            else:
+                reason = self.last_error or "录制未完整结束"
+            meta["global"]["mbdsdr:incomplete_reason"] = reason
         try:
             tmp = self.meta_path + ".tmp"
             with open(tmp, "w", encoding="utf-8") as f:

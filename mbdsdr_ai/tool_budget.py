@@ -163,6 +163,16 @@ class ToolSelection:
     matched_categories: List[str] = field(default_factory=list)
     trimmed: bool = False
     note: str = ""
+    # 逐工具决策（保持注册顺序）：{name, kept, reason}。恒在工具理由固定为
+    # 「core:恒在工具」，其余保留/丢弃都带可复现的分数或预算依据。
+    decisions: List[Dict[str, Any]] = field(default_factory=list)
+
+    def decision_for(self, name: str) -> Dict[str, Any] | None:
+        """按工具名查询本次裁剪决策（不存在返回 None）。"""
+        for d in self.decisions:
+            if d.get("name") == name:
+                return dict(d)
+        return None
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -175,6 +185,7 @@ class ToolSelection:
             "matched_categories": list(self.matched_categories),
             "trimmed": self.trimmed,
             "note": self.note,
+            "decisions": [dict(d) for d in self.decisions],
         }
 
 
@@ -224,43 +235,64 @@ def select_tools(definitions: Sequence[Dict[str, Any]], request: str,
     kept_defs: List[Dict[str, Any]] = []
     kept_tokens = 0
     evicted: List[str] = []
+    reasons: Dict[str, str] = {}
 
     def _tok(d: Dict[str, Any]) -> int:
         return estimate_definitions_tokens([d]) + 4
 
     for d in core_defs:
+        name = (d.get("function") or {}).get("name", "")
         kept_defs.append(d)
         kept_tokens += _tok(d)
+        reasons[name] = "core:恒在工具（CORE_TOOLS，预算再紧也保留）"
 
     has_scored = any(s >= MIN_SCORE for s, _, _, _ in others)
     kept_others = 0
-    for s, _, d, _nh in others:
+    for s, _, d, nh in others:
+        name = (d.get("function") or {}).get("name", "")
         t = _tok(d)
         # 只保留被本请求明显命中的工具。描述弱命中（< MIN_SCORE）也不进候选：
         # 否则「查频谱」时候选里会混进录音/开设备工具，等于给模型制造误调机会。
         if s < MIN_SCORE and has_scored:
-            evicted.append((d.get("function") or {}).get("name", ""))
+            evicted.append(name)
+            reasons[name] = (f"evicted:相关度 {s} < MIN_SCORE {MIN_SCORE}"
+                             f"（本请求已有强命中）")
             continue
         if kept_tokens + t > budget_tokens:
-            evicted.append((d.get("function") or {}).get("name", ""))
+            evicted.append(name)
+            reasons[name] = (f"evicted:预算不足（需 {t} tokens，"
+                             f"剩余 {max(0, budget_tokens - kept_tokens)}"
+                             f"/{budget_tokens}）")
             continue
         kept_defs.append(d)
         kept_tokens += t
         kept_others += 1
+        reasons[name] = (f"kept:{'name_hit' if nh else 'desc_or_category'}"
+                         f"（score={s}）")
 
     # 请求完全没命中任何工具（寒暄/空串）：用注册顺序兜底 min_tools 个，
     # 保证模型仍有一组基础工具可看，而不是只拿到 4 个核心工具。
     if not has_scored:
         for s, _, d, _nh in others[kept_others:]:
+            name = (d.get("function") or {}).get("name", "")
             t = _tok(d)
             if kept_others >= min_tools or kept_tokens + t > budget_tokens:
-                evicted.append((d.get("function") or {}).get("name", ""))
+                evicted.append(name)
+                reasons[name] = (f"evicted:兜底阶段超限（min_tools={min_tools}，"
+                                 f"已保留 {kept_others} 个）")
                 continue
             kept_defs.append(d)
             kept_tokens += t
             kept_others += 1
+            reasons[name] = "kept:fallback（请求无命中，按注册顺序兜底）"
 
     kept_names = [(d.get("function") or {}).get("name", "") for d in kept_defs]
+    kept_set = set(kept_names)
+    decisions = [
+        {"name": name, "kept": name in kept_set,
+         "reason": reasons.get(name, "evicted:未选择")}
+        for name in ((d.get("function") or {}).get("name", "") for d in defs)
+    ]
     total = len(defs)
     trimmed = len(kept_defs) < total
     note = ""
@@ -280,4 +312,5 @@ def select_tools(definitions: Sequence[Dict[str, Any]], request: str,
         matched_categories=sorted(wanted_cats),
         trimmed=trimmed,
         note=note,
+        decisions=decisions,
     )

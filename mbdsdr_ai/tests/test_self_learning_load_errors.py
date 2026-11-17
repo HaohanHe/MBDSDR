@@ -90,7 +90,7 @@ def test_backup_failure_blocks_save_to_same_path(tmp_path, monkeypatch):
     exp_dir.mkdir(parents=True)
     bad = exp_dir / "bad.json"
     bad.write_text("{ broken", encoding="utf-8")
-    monkeypatch.setattr(sl_mod, "backup_corrupt", lambda _p: None)
+    monkeypatch.setattr(sl_mod, "backup_corrupt_learning", lambda _p: None)
 
     engine = SelfLearningEngine(storage_dir=str(tmp_path))
     exp = Experience(experience_id="bad",
@@ -125,7 +125,7 @@ def test_save_target_backup_failure_blocks_write(tmp_path, monkeypatch):
     engine = SelfLearningEngine(storage_dir=str(tmp_path))
     target = tmp_path / "late.json"
     target.write_text("{ broken", encoding="utf-8")
-    monkeypatch.setattr(sl_mod, "backup_corrupt", lambda _p: None)
+    monkeypatch.setattr(sl_mod, "backup_corrupt_learning", lambda _p: None)
 
     assert engine._write_json(str(target), {"ok": 1}) is False
     assert target.read_text(encoding="utf-8") == "{ broken"

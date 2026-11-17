@@ -2086,11 +2086,12 @@ class MCPToolSet(ToolCallGate):
                     "error": {"code": code, "message": message}}
 
         if method == "initialize":
-            # 声明 listChanged，允许 MCP client 缓存 tools/list 并在收到
-            # notifications/tools/list_changed 时失效重建。工具表当前静态，
-            # 服务端不会主动发该通知；未来动态注册时再发。
+            # listChanged 明确声明为 False：工具表是静态快照（初始化后不变），
+            # 服务端**未实现** notifications/tools/list_changed 主动通知。
+            # 按 MCP 协议，不实现就不声明 true；客户端因此会每次按需拉取
+            # tools/list，不会依赖一个永远不会到达的通知。
             return ok({"protocolVersion": "2024-11-05",
-                       "capabilities": {"tools": {"listChanged": True}},
+                       "capabilities": {"tools": {"listChanged": False}},
                        "serverInfo": {"name": "mbdsdr-core", "version": __version__}})
         if method == "notifications/initialized":
             return None  # 通知无需回复

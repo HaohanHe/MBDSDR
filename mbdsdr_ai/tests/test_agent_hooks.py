@@ -8,6 +8,8 @@ AGENT_MESSAGE，且钩子异常绝不拖垮 chat。
 """
 import os
 import sys
+import threading
+import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -84,3 +86,28 @@ def test_error_event_emitted_on_model_failure(tmp_path):
     with patch.object(agent, "_cancel_pending", return_value=False):
         agent._chat_impl("x", max_tool_rounds=3)
     assert errors and errors[0]["code"] == "boom"
+
+
+def test_permanently_blocking_hook_does_not_hang_chat(tmp_path):
+    """Task 42：永久阻塞的钩子被短超时截断，工具调用与 chat 照常完成。"""
+    agent = _agent_with_hooks(tmp_path)
+    release = threading.Event()
+
+    def blocking_hook(event):
+        release.wait(10)  # 永久阻塞（直到测试收尾才释放）
+
+    agent.hook_manager = HookManager(hook_timeout_s=0.05, max_history=50)
+    agent.hook_manager.register("*", blocking_hook)
+
+    start = time.monotonic()
+    with patch.object(agent, "_cancel_pending", return_value=False):
+        result = agent._chat_impl("打开频谱", max_tool_rounds=5)
+    elapsed = time.monotonic() - start
+    release.set()
+
+    assert result["content"] == "最终回复", "坏钩子不得打断主流程"
+    assert elapsed < 2.0, f"钩子超时未生效，chat 被拖住 {elapsed:.2f}s"
+    diags = agent.hook_manager.get_diagnostics()
+    assert diags, "钩子超时必须写诊断"
+    assert "timeout" in diags[0]["error"]
+    assert agent.hook_manager.list_hooks()[0]["failure_count"] >= 1

@@ -324,16 +324,25 @@ def test_two_systems_are_separate(iau, xg):
 
 
 def test_overlay_layers_are_tagged(iau, xg):
+    """``overlay_layers()`` 是「所有可叠加层清单」，不是「当前启用层」。
+
+    启用状态由渲染方持有（``desktop/rf_sky_view.py`` 的
+    ``_constellation_systems`` 默认 ``{SYSTEM_IAU}``），数据层不记录开关。
+    """
+    ids = c.system_ids()
     layers = c.overlay_layers()
-    assert [l.system_id for l in layers] == [c.SYSTEM_IAU, c.SYSTEM_CHINESE]
+    assert [l.system_id for l in layers] == list(ids)
+    assert len(layers) == len(set(ids))
+    assert c.SYSTEM_IAU in ids and c.SYSTEM_CHINESE in ids
+    by_id = {l.system_id: l for l in layers}
     assert all(l.display_name and l.tag for l in layers)
-    assert layers[0].tag == "IAU"
-    assert layers[1].tag == "中国星官"
-    assert layers[0].source != layers[1].source
-    assert isinstance(layers[0].items[0], c.IAUConstellation)
-    assert isinstance(layers[1].items[0], x.XingguanRegion)
-    assert len(layers[0].items) == 88
-    assert len(layers[1].items) == 31
+    assert by_id[c.SYSTEM_IAU].tag == "IAU"
+    assert by_id[c.SYSTEM_CHINESE].tag == "中国星官"
+    assert by_id[c.SYSTEM_IAU].source != by_id[c.SYSTEM_CHINESE].source
+    assert isinstance(by_id[c.SYSTEM_IAU].items[0], c.IAUConstellation)
+    assert isinstance(by_id[c.SYSTEM_CHINESE].items[0], x.XingguanRegion)
+    assert len(by_id[c.SYSTEM_IAU].items) == 88
+    assert len(by_id[c.SYSTEM_CHINESE].items) == 31
     # 顺序可调，但逐层标注不变
     rev = c.overlay_layers((c.SYSTEM_CHINESE, c.SYSTEM_IAU))
     assert [l.system_id for l in rev] == [c.SYSTEM_CHINESE, c.SYSTEM_IAU]
@@ -605,8 +614,8 @@ def test_cache_survives_system_and_layer_switching(iau, xg):
 def test_overlay_toggle_does_not_reload(iau, xg):
     before = (c.load_iau_constellations.cache_info().misses,
               x.load_xingguan.cache_info().misses)
-    layers = c.overlay_layers()                       # 两套全开
-    assert [l.system_id for l in layers] == [c.SYSTEM_IAU, c.SYSTEM_CHINESE]
+    layers = c.overlay_layers()                       # 全部可叠加层
+    assert [l.system_id for l in layers] == list(c.system_ids())
     layers = c.overlay_layers((c.SYSTEM_CHINESE,))    # 只开星官
     assert len(layers) == 1 and layers[0].system_id == c.SYSTEM_CHINESE
     layers = c.overlay_layers((c.SYSTEM_IAU,))        # 再切回只开 IAU

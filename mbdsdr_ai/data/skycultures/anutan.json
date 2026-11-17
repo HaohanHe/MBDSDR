@@ -1,0 +1,461 @@
+{
+  "id": "anutan",
+  "meta": {
+    "schema": "mbdsdr.sky_culture.v1",
+    "id": "anutan",
+    "display_name": "Anutan",
+    "native_name": "",
+    "region": "Melanesia",
+    "classification": [
+      "ethnographic"
+    ],
+    "source": "Stellarium skyculture anutan",
+    "source_url": "https://github.com/Stellarium/stellarium/tree/master/skycultures/anutan",
+    "source_license": "CC BY-SA 4.0",
+    "source_license_url": "https://creativecommons.org/licenses/by-sa/4.0/",
+    "attribution": "Stellarium sky culture 'anutan'; authors: This sky culture was contributed to Stellarium by Dan Smale (CC BY-SA 4.0). Converted to HIP line segments only; no artwork or description images were copied.",
+    "source_file": "reference/stellarium/skycultures/anutan/index.json",
+    "source_file_sha256": "4821f6520765a83847405f3d811a9201da3641a5cfa446dc951a125c008a8b8e",
+    "description_file": "reference/stellarium/skycultures/anutan/description.md",
+    "description_file_sha256": "b09cc4f51987c428d52dd6cc2fe2ff17143c8aae03af7ac9abd62ef93cad4164",
+    "conversion_scope": "Only constellations[].lines, id and common_name (plus optional common_names star labels) are converted; illustrations, artwork and description text are not copied.",
+    "names_scope": "Explicit common_names labels take precedence; stars without an explicit label inherit the constellation/asterism name they belong to.",
+    "group_count": 11,
+    "edge_count": 49,
+    "name_count": 56,
+    "unresolved_hip_count": 0,
+    "unresolved_hips": [],
+    "unresolved_token_count": 0,
+    "unresolved_tokens": [],
+    "generated_utc": "2026-11-17T17:13:23Z",
+    "data_sha256": "c5f05fe9eefd528d595dc280f00b9a952e8acff2d68e9ca3b6dad0572bcd7dd1"
+  },
+  "groups": [
+    {
+      "group_id": "CON anutan 001",
+      "names": {
+        "en": "The Bamboo",
+        "native": "Te Kope"
+      },
+      "lines": [
+        [
+          112623,
+          112122,
+          111043,
+          109111,
+          108085
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON anutan 002",
+      "names": {
+        "en": "Path of Three",
+        "native": "Ara Toru"
+      },
+      "lines": [
+        [
+          25930,
+          26311,
+          26727
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON anutan 003",
+      "names": {
+        "en": "Bird of Flight",
+        "native": "Manu"
+      },
+      "lines": [
+        [
+          37279,
+          32349,
+          30438,
+          32607
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON anutan 004",
+      "names": {
+        "en": "The Tongs",
+        "native": "Te Angaanga"
+      },
+      "lines": [
+        [
+          21421,
+          21029,
+          20885,
+          20205,
+          20455,
+          20648,
+          20889
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON anutan 005",
+      "names": {
+        "en": "Octopus Tentacle",
+        "native": "Kaavei"
+      },
+      "lines": [
+        [
+          8903,
+          9884,
+          13209
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON anutan 006",
+      "names": {
+        "en": "Forward Precursor",
+        "native": "Taki Mua"
+      },
+      "lines": [
+        [
+          107354,
+          109176,
+          113881,
+          113963
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON anutan 007",
+      "names": {
+        "en": "Adze",
+        "native": "Toki"
+      },
+      "lines": [
+        [
+          101421,
+          101769,
+          101958,
+          102532,
+          102281,
+          101958
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON anutan 008",
+      "names": {
+        "en": "The Carrying Stick",
+        "native": "Te Aamonga"
+      },
+      "lines": [
+        [
+          97278,
+          97649,
+          98036
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON anutan 009",
+      "names": {
+        "en": "Sammara Squirrelfish",
+        "native": "Te Paka Poi Ika Tapu"
+      },
+      "lines": [
+        [
+          88635,
+          90496,
+          92855,
+          94141
+        ],
+        [
+          92855,
+          95865
+        ],
+        [
+          92855,
+          90185,
+          88635
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON anutan 010",
+      "names": {
+        "en": "Taro Plant",
+        "native": "Taro"
+      },
+      "lines": [
+        [
+          81266,
+          80763,
+          80112,
+          78401,
+          78820,
+          80473,
+          78401
+        ],
+        [
+          80763,
+          78265,
+          78104,
+          79881,
+          78265
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON anutan 011",
+      "names": {
+        "en": "The Net",
+        "native": "Te Kupenga"
+      },
+      "lines": [
+        [
+          71683,
+          68702,
+          62434,
+          61084,
+          59747,
+          60718,
+          62434
+        ]
+      ],
+      "kind": "constellation"
+    }
+  ],
+  "names": {
+    "1067": {
+      "native": "Taki Roto",
+      "en": "Middle Precursor"
+    },
+    "30438": {
+      "native": "Te Kapakau Tonga",
+      "en": "The East Wing"
+    },
+    "32349": {
+      "native": "Te Tino A Manu",
+      "en": "The Bird's Body"
+    },
+    "32607": {
+      "native": "Te Taki O Te Kapakau Tonga"
+    },
+    "37279": {
+      "native": "Te Kapakau Pakatokerau",
+      "en": "The North Wing"
+    },
+    "68702": {
+      "native": "Te Rua Tangata",
+      "en": "Double Man"
+    },
+    "71683": {
+      "native": "Te Rua Tangata",
+      "en": "Double Man"
+    },
+    "80763": {
+      "native": "Te Kau"
+    },
+    "112623": {
+      "en": "The Bamboo",
+      "native": "Te Kope"
+    },
+    "112122": {
+      "en": "The Bamboo",
+      "native": "Te Kope"
+    },
+    "111043": {
+      "en": "The Bamboo",
+      "native": "Te Kope"
+    },
+    "109111": {
+      "en": "The Bamboo",
+      "native": "Te Kope"
+    },
+    "108085": {
+      "en": "The Bamboo",
+      "native": "Te Kope"
+    },
+    "25930": {
+      "en": "Path of Three",
+      "native": "Ara Toru"
+    },
+    "26311": {
+      "en": "Path of Three",
+      "native": "Ara Toru"
+    },
+    "26727": {
+      "en": "Path of Three",
+      "native": "Ara Toru"
+    },
+    "21421": {
+      "en": "The Tongs",
+      "native": "Te Angaanga"
+    },
+    "21029": {
+      "en": "The Tongs",
+      "native": "Te Angaanga"
+    },
+    "20885": {
+      "en": "The Tongs",
+      "native": "Te Angaanga"
+    },
+    "20205": {
+      "en": "The Tongs",
+      "native": "Te Angaanga"
+    },
+    "20455": {
+      "en": "The Tongs",
+      "native": "Te Angaanga"
+    },
+    "20648": {
+      "en": "The Tongs",
+      "native": "Te Angaanga"
+    },
+    "20889": {
+      "en": "The Tongs",
+      "native": "Te Angaanga"
+    },
+    "8903": {
+      "en": "Octopus Tentacle",
+      "native": "Kaavei"
+    },
+    "9884": {
+      "en": "Octopus Tentacle",
+      "native": "Kaavei"
+    },
+    "13209": {
+      "en": "Octopus Tentacle",
+      "native": "Kaavei"
+    },
+    "107354": {
+      "en": "Forward Precursor",
+      "native": "Taki Mua"
+    },
+    "109176": {
+      "en": "Forward Precursor",
+      "native": "Taki Mua"
+    },
+    "113881": {
+      "en": "Forward Precursor",
+      "native": "Taki Mua"
+    },
+    "113963": {
+      "en": "Forward Precursor",
+      "native": "Taki Mua"
+    },
+    "101421": {
+      "en": "Adze",
+      "native": "Toki"
+    },
+    "101769": {
+      "en": "Adze",
+      "native": "Toki"
+    },
+    "101958": {
+      "en": "Adze",
+      "native": "Toki"
+    },
+    "102532": {
+      "en": "Adze",
+      "native": "Toki"
+    },
+    "102281": {
+      "en": "Adze",
+      "native": "Toki"
+    },
+    "97278": {
+      "en": "The Carrying Stick",
+      "native": "Te Aamonga"
+    },
+    "97649": {
+      "en": "The Carrying Stick",
+      "native": "Te Aamonga"
+    },
+    "98036": {
+      "en": "The Carrying Stick",
+      "native": "Te Aamonga"
+    },
+    "88635": {
+      "en": "Sammara Squirrelfish",
+      "native": "Te Paka Poi Ika Tapu"
+    },
+    "90496": {
+      "en": "Sammara Squirrelfish",
+      "native": "Te Paka Poi Ika Tapu"
+    },
+    "92855": {
+      "en": "Sammara Squirrelfish",
+      "native": "Te Paka Poi Ika Tapu"
+    },
+    "94141": {
+      "en": "Sammara Squirrelfish",
+      "native": "Te Paka Poi Ika Tapu"
+    },
+    "95865": {
+      "en": "Sammara Squirrelfish",
+      "native": "Te Paka Poi Ika Tapu"
+    },
+    "90185": {
+      "en": "Sammara Squirrelfish",
+      "native": "Te Paka Poi Ika Tapu"
+    },
+    "81266": {
+      "en": "Taro Plant",
+      "native": "Taro"
+    },
+    "80112": {
+      "en": "Taro Plant",
+      "native": "Taro"
+    },
+    "78401": {
+      "en": "Taro Plant",
+      "native": "Taro"
+    },
+    "78820": {
+      "en": "Taro Plant",
+      "native": "Taro"
+    },
+    "80473": {
+      "en": "Taro Plant",
+      "native": "Taro"
+    },
+    "78265": {
+      "en": "Taro Plant",
+      "native": "Taro"
+    },
+    "78104": {
+      "en": "Taro Plant",
+      "native": "Taro"
+    },
+    "79881": {
+      "en": "Taro Plant",
+      "native": "Taro"
+    },
+    "62434": {
+      "en": "The Net",
+      "native": "Te Kupenga"
+    },
+    "61084": {
+      "en": "The Net",
+      "native": "Te Kupenga"
+    },
+    "59747": {
+      "en": "The Net",
+      "native": "Te Kupenga"
+    },
+    "60718": {
+      "en": "The Net",
+      "native": "Te Kupenga"
+    }
+  },
+  "unresolved_hips": []
+}

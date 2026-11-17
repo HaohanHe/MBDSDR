@@ -133,3 +133,48 @@ def test_cascade_rejects_unavailable_short_mode() -> None:
         encode_dvbs2_fec([], "short", "9/10")
     with pytest.raises(ValueError, match="unsupported DVB-S2 BCH mode"):
         decode_dvbs2_fec([], "short", "9/10")
+
+
+# ── Task 2.4：FY-4 剖面驱动的级联路（MODCOD 只从配置注入） ──────
+@pytest.mark.parametrize("profile_name", ("fy4_a_lrit", "fy4_a_hrit23"))
+def test_fy4_profile_drives_cascade(profile_name: str) -> None:
+    """卫星参数库给 MODCOD/符号率，代码侧不出现 FY-4 数字。
+
+    链路：BBFrAME（前 32 bit 为两次遥测字）→ BCH → LDPC → 注入 BCH
+    可纠错数 → LDPC 收敛 → BCH 纠错 → 位级与字段级都回到原值。
+    """
+    from mbdsdr_ai.dvbs2_pl import MODCOD_TABLE
+    from mbdsdr_ai.sat_profile import load_sat_profile
+
+    profile = load_sat_profile(profile_name)
+    downlink = profile["downlink"]
+    assert downlink["modulation"] == "dvbs2_qpsk"
+    mode = MODCOD_TABLE[int(downlink["modcod"])]
+    assert mode.modulation == "QPSK"
+    frame, rate = "normal", mode.code_rate
+
+    parameters = bch_parameters(frame, rate)
+    rng = np.random.default_rng(20261117 + int(downlink["modcod"]))
+    message = rng.integers(0, 2, parameters["K_bch"], dtype=np.uint8)
+    counter, voltage_mv = 0x1234, 7500
+    message[:16] = [(counter >> (15 - i)) & 1 for i in range(16)]
+    message[16:32] = [(voltage_mv >> (15 - i)) & 1 for i in range(16)]
+
+    inner = encode_bch(message, frame, rate)
+    damaged = inner.copy()
+    positions = np.linspace(0, parameters["N_bch"] - 1,
+                            parameters["bch_t"], dtype=np.int64)
+    damaged[positions] ^= 1
+    outer = encode_ldpc(damaged, frame, rate)
+
+    result = decode_dvbs2_fec(_clean_llr(outer), frame, rate)
+    assert result["ldpc"]["converged"] is True
+    assert result["success"] is True
+    assert result["corrected"] is True
+    assert result["n_errors"] == parameters["bch_t"]
+    assert np.array_equal(result["bbframe"], message)
+
+    bits = [int(b) for b in result["bbframe"][:32]]
+    got_counter = int("".join(str(b) for b in bits[:16]), 2)
+    got_voltage = int("".join(str(b) for b in bits[16:32]), 2)
+    assert (got_counter, got_voltage) == (counter, voltage_mv)

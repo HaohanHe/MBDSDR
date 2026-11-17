@@ -1,0 +1,255 @@
+{
+  "id": "tikuna",
+  "meta": {
+    "schema": "mbdsdr.sky_culture.v1",
+    "id": "tikuna",
+    "display_name": "Tikuna",
+    "native_name": "",
+    "region": "South America",
+    "classification": [
+      "ethnographic"
+    ],
+    "source": "Stellarium skyculture tikuna",
+    "source_url": "https://github.com/Stellarium/stellarium/tree/master/skycultures/tikuna",
+    "source_license": "CC BY-SA 4.0",
+    "source_license_url": "https://creativecommons.org/licenses/by-sa/4.0/",
+    "attribution": "Stellarium sky culture 'tikuna'; authors: Priscila Faulhaber (Museum of Astronomy and Related Sciences); Fernando Vieira (Astronomer and Former Coordinator of Astronomy in The Planetarium Foundation of the City of Rio de Janeiro) helped with the interpretation of the astronomical correlations between Western and Tikuna constellations, identified by the Tikuna in November 2002, during a research visit at the Science Center and Planetarium of the Universidade do Pará (Belém/Brazil), using the Starry Night System. Vieira plotted the correspondence between the traces of Tikuna mythical animals and the Official IAU constellations of western astronomy. He also reviewed this text for any skyscape incongruences related to corresponding Western astronomy and Tikuna cosmovision. We are integrating in this investigation Walmir Thomazi Cardoso, a Physics Professor in the Postgraduate Program in History of Sciences and Techniques and Epistemology at the Federal University of Rio de Janeiro (HCTE-UFRJ) and researcher of astronomy in culture; he made some reinterpretations in a collaborative work with physics undergraduate students; and Youssif Ghantous Filho, adapting and anchoring original drawings to Stellarium. Nevertheless, every sky interpretation is contextual and circumstantial. Current collaborative investigations are looking for new astronomical observation together with the Tikuna, which will improve the initial findings. The data used in Cardoso & Ghantous Filho were a reinterpretation of charts used by the Tikunas, Pedro Inácio Pinheiro and Luís Angel Ramos, to interpret Tikuna constellations. The calculations were established based upon coordinates 70° W and 3°S with the help of Oswaldo dos Santos Barros, Pará State (CCPP). The different interpretations of the drawings developed from the ongoing collaborative investigation with Walmir T. Cardoso, researcher of astronomy in Culture, takes into consideration some changes, such as the ones shown in this work. <!-- GZ: I have removed this as there is no panorama horizon included. Such acknowledgement would be applicable in a separate \"landscape\" contribution. --> <!-- Barthelemy D’Ans (Instituto Peruano de Astronomia, Planetarium Maria Reich Lima-Ica-Nasca-Colca-Cusco), edited the panoramic picture and adapted it to the horizons of the Stellarium Astronomy Software. --> Marcio D´Olne Campos (UNICAMP and SULear/SOUTHing Proposal) helped map the location of the Tikuna village and define their latitude and longitude coordinates (See Tikuna Lands Atlas). The recording of this myth and the identification of the Jaguar’s eyes was inspired by Curt Nimuendajú, (1952 p.143) (CC BY-SA 4.0). Converted to HIP line segments only; no artwork or description images were copied.",
+    "source_file": "reference/stellarium/skycultures/tikuna/index.json",
+    "source_file_sha256": "1e8c19cd24dad3d4ec436e990712f914c755830861f8d9d95b920daada6f93e7",
+    "description_file": "reference/stellarium/skycultures/tikuna/description.md",
+    "description_file_sha256": "7d33748ed6e1e0d2c08fb692d65a71c2e253b040cbc246445f4bb16f480a8fe7",
+    "conversion_scope": "Only constellations[].lines, id and common_name (plus optional common_names star labels) are converted; illustrations, artwork and description text are not copied.",
+    "names_scope": "Explicit common_names labels take precedence; stars without an explicit label inherit the constellation/asterism name they belong to.",
+    "group_count": 4,
+    "edge_count": 26,
+    "name_count": 31,
+    "unresolved_hip_count": 0,
+    "unresolved_hips": [],
+    "unresolved_token_count": 0,
+    "unresolved_tokens": [],
+    "generated_utc": "2026-11-17T17:13:23Z",
+    "data_sha256": "ca9ff89abe79cf51021ad327fc5eec5c062c875c6ba1b11e9c8c6a7eafbc05d2"
+  },
+  "groups": [
+    {
+      "group_id": "CON tikuna 001",
+      "names": {
+        "en": "Turtle Collective",
+        "native": "Baweta"
+      },
+      "lines": [
+        [
+          17702,
+          17448
+        ],
+        [
+          17702,
+          18246
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON tikuna 002",
+      "names": {
+        "en": "Wücütcha's leg",
+        "native": "Wücütcha"
+      },
+      "lines": [
+        [
+          25930,
+          26311,
+          26727
+        ],
+        [
+          26311,
+          26241,
+          27366,
+          28103,
+          28816,
+          27654,
+          26862
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON tikuna 003",
+      "names": {
+        "en": "Cayman’s Jaw",
+        "native": "Coyatchicüra"
+      },
+      "lines": [
+        [
+          21421,
+          20205,
+          20889
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON tikuna 004",
+      "names": {
+        "en": "Anteater’s Jaguar",
+        "native": "Tchatü-Ai"
+      },
+      "lines": [
+        [
+          60718,
+          59747,
+          61084,
+          66657,
+          74395,
+          71683,
+          71908
+        ],
+        [
+          74395,
+          82396,
+          80763
+        ],
+        [
+          82396,
+          85927
+        ],
+        [
+          84143,
+          86228,
+          83081,
+          82363,
+          79664,
+          77952
+        ]
+      ],
+      "kind": "constellation"
+    }
+  ],
+  "names": {
+    "17702": {
+      "en": "Turtle Collective",
+      "native": "Baweta"
+    },
+    "17448": {
+      "en": "Turtle Collective",
+      "native": "Baweta"
+    },
+    "18246": {
+      "en": "Turtle Collective",
+      "native": "Baweta"
+    },
+    "25930": {
+      "en": "Wücütcha's leg",
+      "native": "Wücütcha"
+    },
+    "26311": {
+      "en": "Wücütcha's leg",
+      "native": "Wücütcha"
+    },
+    "26727": {
+      "en": "Wücütcha's leg",
+      "native": "Wücütcha"
+    },
+    "26241": {
+      "en": "Wücütcha's leg",
+      "native": "Wücütcha"
+    },
+    "27366": {
+      "en": "Wücütcha's leg",
+      "native": "Wücütcha"
+    },
+    "28103": {
+      "en": "Wücütcha's leg",
+      "native": "Wücütcha"
+    },
+    "28816": {
+      "en": "Wücütcha's leg",
+      "native": "Wücütcha"
+    },
+    "27654": {
+      "en": "Wücütcha's leg",
+      "native": "Wücütcha"
+    },
+    "26862": {
+      "en": "Wücütcha's leg",
+      "native": "Wücütcha"
+    },
+    "21421": {
+      "en": "Cayman’s Jaw",
+      "native": "Coyatchicüra"
+    },
+    "20205": {
+      "en": "Cayman’s Jaw",
+      "native": "Coyatchicüra"
+    },
+    "20889": {
+      "en": "Cayman’s Jaw",
+      "native": "Coyatchicüra"
+    },
+    "60718": {
+      "en": "Anteater’s Jaguar",
+      "native": "Tchatü-Ai"
+    },
+    "59747": {
+      "en": "Anteater’s Jaguar",
+      "native": "Tchatü-Ai"
+    },
+    "61084": {
+      "en": "Anteater’s Jaguar",
+      "native": "Tchatü-Ai"
+    },
+    "66657": {
+      "en": "Anteater’s Jaguar",
+      "native": "Tchatü-Ai"
+    },
+    "74395": {
+      "en": "Anteater’s Jaguar",
+      "native": "Tchatü-Ai"
+    },
+    "71683": {
+      "en": "Anteater’s Jaguar",
+      "native": "Tchatü-Ai"
+    },
+    "71908": {
+      "en": "Anteater’s Jaguar",
+      "native": "Tchatü-Ai"
+    },
+    "82396": {
+      "en": "Anteater’s Jaguar",
+      "native": "Tchatü-Ai"
+    },
+    "80763": {
+      "en": "Anteater’s Jaguar",
+      "native": "Tchatü-Ai"
+    },
+    "85927": {
+      "en": "Anteater’s Jaguar",
+      "native": "Tchatü-Ai"
+    },
+    "84143": {
+      "en": "Anteater’s Jaguar",
+      "native": "Tchatü-Ai"
+    },
+    "86228": {
+      "en": "Anteater’s Jaguar",
+      "native": "Tchatü-Ai"
+    },
+    "83081": {
+      "en": "Anteater’s Jaguar",
+      "native": "Tchatü-Ai"
+    },
+    "82363": {
+      "en": "Anteater’s Jaguar",
+      "native": "Tchatü-Ai"
+    },
+    "79664": {
+      "en": "Anteater’s Jaguar",
+      "native": "Tchatü-Ai"
+    },
+    "77952": {
+      "en": "Anteater’s Jaguar",
+      "native": "Tchatü-Ai"
+    }
+  },
+  "unresolved_hips": []
+}

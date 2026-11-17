@@ -200,7 +200,14 @@ def compute_moon(jd: float) -> PlanetPos:
     precession_deg = (5028.79619 * T + 1.112 * T * T - 0.000114 * T ** 3) / 3600.0
     lon = _norm360(lon - precession_deg)
 
-    dist_km = 385000.56 - 20905.355 * math.cos(Mp) - 3699.111 * math.cos(2 * D - Mp)
+    # Meeus ch.47 Σr 取前四项：旧实现只留前两项，漏掉 2D 项（±2956 km）
+    # 与 2M' 项（±570 km），月地距离可差 ~3000 km、视直径虚高 ~12″——
+    # 2026-11-17 与 DE421 对拍恰好卡在 12″ 容差线上。四项后实测差 ~1″。
+    dist_km = (385000.56
+               - 20905.355 * math.cos(Mp)
+               - 3699.111 * math.cos(2 * D - Mp)
+               - 2955.968 * math.cos(2 * D)
+               - 569.925 * math.cos(2 * Mp))
     dist_au = dist_km / 149597870.7
 
     ra, dec = _ecliptic_to_equatorial(lon, lat)

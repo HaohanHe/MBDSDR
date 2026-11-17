@@ -1,0 +1,7706 @@
+{
+  "id": "chinese_yuan_dynasty",
+  "meta": {
+    "schema": "mbdsdr.sky_culture.v1",
+    "id": "chinese_yuan_dynasty",
+    "display_name": "Chinese Yuan Dynasty (14th Century)",
+    "native_name": "",
+    "region": "Eastern Asia",
+    "classification": [
+      "historical"
+    ],
+    "source": "Stellarium skyculture chinese_yuan_dynasty",
+    "source_url": "https://github.com/Stellarium/stellarium/tree/master/skycultures/chinese_yuan_dynasty",
+    "source_license": "CC BY-SA 4.0",
+    "source_license_url": "https://creativecommons.org/licenses/by-sa/4.0/",
+    "attribution": "Stellarium sky culture 'chinese_yuan_dynasty'; authors: Lyu Haocheng. Statement: The basic reference for the cultural map of China's sky cultures is Tan Qixiang's Historical Atlas of China (中国历史地图集). It does not reflect any modern borders, nor does it reflect the political intentions of the artist, and is for reference only. The boundaries shown on the map have been significantly simplified and only indicate general outlines, without reflecting any detailed demarcation. The cartographer does not guarantee the accuracy of these boundaries, and any improvements with better delineations are welcome (CC BY-SA 4.0). Converted to HIP line segments only; no artwork or description images were copied.",
+    "source_file": "reference/stellarium/skycultures/chinese_yuan_dynasty/index.json",
+    "source_file_sha256": "3d33bfc125782e4d635051628e642d8d50cad35c42e5931dcbf923e328ba1ec9",
+    "description_file": "reference/stellarium/skycultures/chinese_yuan_dynasty/description.md",
+    "description_file_sha256": "c9c34934c9e07fadda3c163212012998f510ccc53eb2165ac5edc0c9d3416179",
+    "conversion_scope": "Only constellations[].lines, id and common_name (plus optional common_names star labels) are converted; illustrations, artwork and description text are not copied.",
+    "names_scope": "Explicit common_names labels take precedence; stars without an explicit label inherit the constellation/asterism name they belong to.",
+    "group_count": 187,
+    "edge_count": 579,
+    "name_count": 690,
+    "unresolved_hip_count": 2,
+    "unresolved_hips": [
+      55203,
+      78727
+    ],
+    "unresolved_token_count": 3,
+    "unresolved_tokens": [
+      "DSO:M31",
+      "DSO:M44",
+      "DSO:M7"
+    ],
+    "generated_utc": "2026-11-17T17:42:09Z",
+    "data_sha256": "b70900cd1d0b1f9d8be0864f14b399b6ef7d809ee51d1e43010c56567af2f8d4"
+  },
+  "groups": [
+    {
+      "group_id": "CON chinese_yuan_dynasty P00",
+      "names": {
+        "en": "Purple Forbidden Enclosure",
+        "native": "紫微垣",
+        "pronounce": "Zǐ Wēi Yuán",
+        "ipa": "t͡sɹ̩˨˩˩.weɪ˥.ɥæn˧˥"
+      },
+      "lines": [
+        [
+          75458,
+          78527,
+          80331,
+          83895,
+          89937,
+          101260,
+          116727,
+          3721
+        ],
+        [
+          68756,
+          61281,
+          56211,
+          46977,
+          29997,
+          17959,
+          12273
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_yuan_dynasty P01",
+      "names": {
+        "en": "Northern Pole",
+        "native": "北极",
+        "pronounce": "Běi Jí",
+        "ipa": "peɪ˨˩˩.t͡ɕi˧˥"
+      },
+      "lines": [
+        [
+          75097,
+          72607,
+          70692,
+          69112,
+          62572
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_yuan_dynasty P07",
+      "names": {
+        "en": "Hidden Virtue",
+        "native": "阴德",
+        "pronounce": "Yīn Dé",
+        "ipa": "jin˥.tɤ˧˥"
+      },
+      "lines": [
+        [
+          74605,
+          73199
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_yuan_dynasty P09",
+      "names": {
+        "en": "Female Protocol",
+        "native": "女史",
+        "pronounce": "Nǚ Shǐ",
+        "ipa": "ny˧˥.ʂɻ̍˨˩˦"
+      },
+      "lines": [
+        [
+          86614,
+          86614
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_yuan_dynasty P11",
+      "names": {
+        "en": "Maids-in-waiting",
+        "native": "御女",
+        "pronounce": "Yù Nǚ",
+        "ipa": "y˥˩.ny˨˩˦"
+      },
+      "lines": [
+        [
+          88136,
+          87234
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_yuan_dynasty P13",
+      "names": {
+        "en": "Chief Judge",
+        "native": "大理",
+        "pronounce": "Dà Lǐ",
+        "ipa": "ta˥˩.li˨˩˦"
+      },
+      "lines": [
+        [
+          78893,
+          80650
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_yuan_dynasty P14",
+      "names": {
+        "en": "Curved Array",
+        "native": "钩陈",
+        "pronounce": "Gōu Chén",
+        "ipa": "koʊ˥.t͡ʂʰən˧˥"
+      },
+      "lines": [
+        [
+          113116,
+          5372,
+          11767,
+          85822,
+          82080,
+          77055
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_yuan_dynasty P17",
+      "names": {
+        "en": "Interior Seats of the Five Emperors",
+        "native": "五帝内座",
+        "pronounce": "Wǔ Dì Nèi Zuò",
+        "ipa": "wu˨˩˩.ti˥˩.neɪ˥˩.t͡swo˥˩"
+      },
+      "lines": [
+        [
+          112519,
+          113116,
+          4283
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_yuan_dynasty P22",
+      "names": {
+        "en": "Celestial Kitchen",
+        "native": "天厨",
+        "pronounce": "Tiān Chú",
+        "ipa": "tʰjɛn˥.t͡ʂʰu˧˥"
+      },
+      "lines": [
+        [
+          94376,
+          97433,
+          98702,
+          95081,
+          94376,
+          92782,
+          94648,
+          97433
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_yuan_dynasty P24",
+      "names": {
+        "en": "Celestial Flail",
+        "native": "天棓",
+        "pronounce": "Tiān Bàng",
+        "ipa": "tʰjɛn˥.pɑŋ˥˩"
+      },
+      "lines": [
+        [
+          87585,
+          85819,
+          85670,
+          87833
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_yuan_dynasty P26",
+      "names": {
+        "en": "Inner Kitchen",
+        "native": "内厨",
+        "pronounce": "Nèi Chú",
+        "ipa": "neɪ˥˩.t͡ʂʰu˧˥"
+      },
+      "lines": [
+        [
+          62423,
+          63076
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_yuan_dynasty P27",
+      "names": {
+        "en": "Administrative Center",
+        "native": "文昌",
+        "pronounce": "Wén Chāng",
+        "ipa": "wən˧˥.t͡ʂʰɑŋ˥"
+      },
+      "lines": [
+        [
+          45075,
+          46733,
+          48319,
+          48402,
+          46853,
+          45493
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_yuan_dynasty P28",
+      "names": {
+        "en": "Three Top Instructors",
+        "native": "三师",
+        "pronounce": "Sān Shī",
+        "ipa": "san˥.ʂɻ̍˥"
+      },
+      "lines": [
+        [
+          50933,
+          51448
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_yuan_dynasty P29",
+      "names": {
+        "en": "Royals",
+        "native": "太尊",
+        "pronounce": "Tài Zūn",
+        "ipa": "tʰaɪ˥˩.t͡swən˥"
+      },
+      "lines": [
+        [
+          55266,
+          55266
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_yuan_dynasty P34",
+      "names": {
+        "en": "Three Excellencies (In Purple Forbidden Enclosure)",
+        "native": "三公(紫微垣)",
+        "pronounce": "Sān Gōng(Zǐ Wēi Yuán)",
+        "ipa": "san˥.kʊŋ˥(t͡sɹ̩˨˩˩.weɪ˥.ɥæn˧˥)"
+      },
+      "lines": [
+        [
+          66234,
+          65754,
+          64906
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_yuan_dynasty P35",
+      "names": {
+        "en": "Sombre Lance",
+        "native": "玄戈",
+        "pronounce": "Xuán Gē",
+        "ipa": "ɕɥæn˧˥.kɤ˥"
+      },
+      "lines": [
+        [
+          69732,
+          69732
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_yuan_dynasty P37",
+      "names": {
+        "en": "Northern Dipper",
+        "native": "北斗",
+        "pronounce": "Běi Dǒu",
+        "ipa": "peɪ˧˥.toʊ˨˩˦"
+      },
+      "lines": [
+        [
+          54061,
+          53910,
+          58001,
+          59774,
+          62956,
+          65378,
+          67301
+        ],
+        [
+          65378,
+          65477
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_yuan_dynasty S00",
+      "names": {
+        "en": "Supreme Palace Enclosure",
+        "native": "太微垣",
+        "pronounce": "Tài Wēi Yuán",
+        "ipa": "tʰaɪ˥˩.weɪ˥.ɥæn˧˥"
+      },
+      "lines": [
+        [
+          60129,
+          61941,
+          63090,
+          63608,
+          64241
+        ],
+        [
+          57757,
+          55434,
+          55642,
+          54879,
+          54872
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_yuan_dynasty S03",
+      "names": {
+        "en": "Usher to the Court",
+        "native": "谒者",
+        "pronounce": "Yè Zhě",
+        "ipa": "jɛ˥˩.t͡ʂɤ˨˩˦"
+      },
+      "lines": [
+        [
+          60172,
+          60172
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_yuan_dynasty S05",
+      "names": {
+        "en": "Nine Senior Officers",
+        "native": "九卿",
+        "pronounce": "Jiǔ Qīng",
+        "ipa": "t͡ɕjoʊ˨˩˩.t͡ɕʰiŋ˥"
+      },
+      "lines": [
+        [
+          61960,
+          62267,
+          61968
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_yuan_dynasty S06",
+      "names": {
+        "en": "Five Lords",
+        "native": "五诸侯(太微垣)",
+        "pronounce": "Wǔ Zhū Hóu(Tài Wēi Yuán)",
+        "ipa": "wu˨˩˩.t͡ʂu˥.xoʊ˧˥(tʰaɪ˥˩.weɪ˥.ɥæn˧˥)"
+      },
+      "lines": [
+        [
+          60202,
+          61418,
+          62356,
+          62541,
+          63355
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_yuan_dynasty S07",
+      "names": {
+        "en": "Inner Screen",
+        "native": "内屏",
+        "pronounce": "Nèi Píng",
+        "ipa": "neɪ˥˩.pʰiŋ˧˥"
+      },
+      "lines": [
+        [
+          57328,
+          57380,
+          58590,
+          58948
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_yuan_dynasty S08",
+      "names": {
+        "en": "Seats of the Five Emperors",
+        "native": "五帝座",
+        "pronounce": "Wǔ Dì Zuò",
+        "ipa": "wu˨˩˩.ti˥˩.t͡swo˥˩"
+      },
+      "lines": [
+        [
+          57632,
+          57632
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_yuan_dynasty S10",
+      "names": {
+        "en": "Crown Prince",
+        "native": "太子",
+        "pronounce": "Tài Zǐ",
+        "ipa": "tʰaɪ˥˩.t͡sɹ̩˨˩˦"
+      },
+      "lines": [
+        [
+          57565,
+          57565
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_yuan_dynasty S11",
+      "names": {
+        "en": "Retinue (In Supreme Palace Enclosure)",
+        "native": "从官(太微垣)",
+        "pronounce": "Cóng Guān(Tài Wēi Yuán)",
+        "ipa": "t͡sʰʊŋ˧˥.kwan˥(tʰaɪ˥˩.weɪ˥.ɥæn˧˥)"
+      },
+      "lines": [
+        [
+          56975,
+          56975
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_yuan_dynasty S12",
+      "names": {
+        "en": "Captain of the Bodyguards",
+        "native": "郎将",
+        "pronounce": "Láng Jiàng",
+        "ipa": "lɑŋ˧˥.t͡ɕjɑŋ˥˩"
+      },
+      "lines": [
+        [
+          63121,
+          63121
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_yuan_dynasty S13",
+      "names": {
+        "en": "Emperor's Bodyguard",
+        "native": "虎贲",
+        "pronounce": "Hǔ Bēn",
+        "ipa": "xu˨˩˩.pən˥"
+      },
+      "lines": [
+        [
+          54951,
+          54951
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_yuan_dynasty S15",
+      "names": {
+        "en": "Officers of the Imperial Guard",
+        "native": "郎位",
+        "pronounce": "Láng Wèi",
+        "ipa": "lɑŋ˧˥.weɪ˥˩"
+      },
+      "lines": [
+        [
+          60742,
+          60742
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_yuan_dynasty S16",
+      "names": {
+        "en": "The Hall of Glory",
+        "native": "明堂",
+        "pronounce": "Míng Táng",
+        "ipa": "miŋ˧˥.tʰɑŋ˧˥"
+      },
+      "lines": [
+        [
+          55084,
+          56127,
+          56647
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_yuan_dynasty S17",
+      "names": {
+        "en": "Astronomical Observatory",
+        "native": "灵台",
+        "pronounce": "Líng Tái",
+        "ipa": "liŋ˧˥.tʰaɪ˧˥"
+      },
+      "lines": [
+        [
+          54182,
+          53449,
+          53807
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_yuan_dynasty S20",
+      "names": {
+        "en": "Three Steps (Upper Step)",
+        "native": "三台(上台)",
+        "pronounce": "Sān Tái (Shàng Tái)",
+        "ipa": "san˥.tʰaɪ˧˥(ʂɑŋ˥˩.tʰaɪ˧˥)"
+      },
+      "lines": [
+        [
+          44127,
+          44471
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_yuan_dynasty S21",
+      "names": {
+        "en": "Three Steps (Middle Step)",
+        "native": "三台(中台)",
+        "pronounce": "Sān Tái (Zhōng Tái)",
+        "ipa": "san˥.tʰaɪ˧˥(t͡ʂʊŋ˥.tʰaɪ˧˥)"
+      },
+      "lines": [
+        [
+          50372,
+          50801
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_yuan_dynasty S22",
+      "names": {
+        "en": "Three Steps (Lower Step)",
+        "native": "三台(下台)",
+        "pronounce": "Sān Tái (Xià Tái)",
+        "ipa": "san˥.tʰaɪ˧˥(ɕja˥˩.tʰaɪ˧˥)"
+      },
+      "lines": [
+        [
+          55219,
+          55203
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_yuan_dynasty S23",
+      "names": {
+        "en": "Three Steps",
+        "native": "三台",
+        "pronounce": "Sān Tái (Xià Tái)",
+        "ipa": "san˥.tʰaɪ˧˥"
+      },
+      "lines": [
+        [
+          44127,
+          44471,
+          50372,
+          50801,
+          55219,
+          55203
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_yuan_dynasty H00",
+      "names": {
+        "en": "Heavenly Market Enclosure",
+        "native": "天市垣",
+        "pronounce": "Tiān Shì Yuán",
+        "ipa": "tʰjɛn˥.ʂɻ̍˥˩.ɥæn˧˥"
+      },
+      "lines": [
+        [
+          84379,
+          85693,
+          86974,
+          88794,
+          92043,
+          93747,
+          92946,
+          89962,
+          88048,
+          86263,
+          84012
+        ],
+        [
+          80816,
+          80170,
+          79043,
+          78072,
+          77233,
+          76276,
+          77070,
+          77622,
+          79593,
+          79882,
+          81377
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_yuan_dynasty H03",
+      "names": {
+        "en": "Municipal Office",
+        "native": "市楼",
+        "pronounce": "Shì Lóu",
+        "ipa": "ʂɻ̍˥˩.loʊ˧˥"
+      },
+      "lines": [
+        [
+          86565,
+          83262
+        ],
+        [
+          84880,
+          85365
+        ],
+        [
+          83962,
+          86284
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_yuan_dynasty H04",
+      "names": {
+        "en": "Commodity Market",
+        "native": "车肆",
+        "pronounce": "Chē Sì",
+        "ipa": "t͡ʂʰɤ˥.sɹ̩˥˩"
+      },
+      "lines": [
+        [
+          82162,
+          80693
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_yuan_dynasty H05",
+      "names": {
+        "en": "Official for the Royal Clan",
+        "native": "宗正",
+        "pronounce": "Zōng Zhèng",
+        "ipa": "t͡sʊŋ˥.t͡ʂɤŋ˥˩"
+      },
+      "lines": [
+        [
+          86742,
+          87108
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_yuan_dynasty H06",
+      "names": {
+        "en": "Official of Religious Ceremonies",
+        "native": "宗人",
+        "pronounce": "Zōng Rén",
+        "ipa": "t͡sʊŋ˥.ɻən˧˥"
+      },
+      "lines": [
+        [
+          88601,
+          88192
+        ],
+        [
+          88290,
+          88601,
+          88149
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_yuan_dynasty H07",
+      "names": {
+        "en": "Patriarchal Clan Stars",
+        "native": "宗星",
+        "pronounce": "Zōng Xīng",
+        "ipa": "t͡sʊŋ˥.ɕiŋ˥"
+      },
+      "lines": [
+        [
+          88765,
+          88771
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_yuan_dynasty H08",
+      "names": {
+        "en": "Textile Ruler",
+        "native": "帛度",
+        "pronounce": "Bó Dù",
+        "ipa": "pwo˧˥.tu˥˩"
+      },
+      "lines": [
+        [
+          88267,
+          88899
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_yuan_dynasty H09",
+      "names": {
+        "en": "Butcher's Shops",
+        "native": "屠肆",
+        "pronounce": "Tú Sì",
+        "ipa": "tʰu˧˥.sɹ̩˥˩"
+      },
+      "lines": [
+        [
+          88267,
+          88899
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_yuan_dynasty H10",
+      "names": {
+        "en": "Astrologer Star",
+        "native": "候星",
+        "pronounce": "Hòu Xīng",
+        "ipa": "xoʊ˥˩.ɕiŋ˥"
+      },
+      "lines": [
+        [
+          86032,
+          86032
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_yuan_dynasty H11",
+      "names": {
+        "en": "Emperor's Seat",
+        "native": "帝座",
+        "pronounce": "Dì Zuò",
+        "ipa": "ti˥˩.t͡swo˥˩"
+      },
+      "lines": [
+        [
+          84345,
+          84345
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_yuan_dynasty H12",
+      "names": {
+        "en": "Eunuch Official",
+        "native": "宦者",
+        "pronounce": "Huàn Zhě",
+        "ipa": "xwan˥˩.t͡ʂɤ˨˩˦"
+      },
+      "lines": [
+        [
+          83478,
+          83613
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_yuan_dynasty H13",
+      "names": {
+        "en": "Jewel Market",
+        "native": "列肆",
+        "pronounce": "Liè Sì",
+        "ipa": "ljɛ˥˩.sɹ̩˥˩"
+      },
+      "lines": [
+        [
+          80179,
+          80883
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_yuan_dynasty H14",
+      "names": {
+        "en": "Dipper for Liquids",
+        "native": "斗",
+        "pronounce": "Dǒu",
+        "ipa": "toʊ˨˩˦"
+      },
+      "lines": [
+        [
+          83000,
+          82673,
+          82073,
+          82402,
+          82216
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_yuan_dynasty H15",
+      "names": {
+        "en": "Dipper for Solids",
+        "native": "斛",
+        "pronounce": "Hú",
+        "ipa": "xu˧˥"
+      },
+      "lines": [
+        [
+          80351,
+          81007,
+          81641,
+          82216
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_yuan_dynasty H17",
+      "names": {
+        "en": "Seven Excellencies",
+        "native": "七公",
+        "pronounce": "Qī Gōng",
+        "ipa": "t͡ɕʰi˥.kʊŋ˥"
+      },
+      "lines": [
+        [
+          81833,
+          80460,
+          79119,
+          77655,
+          76669,
+          75411,
+          74666
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_yuan_dynasty H18",
+      "names": {
+        "en": "Celestial Discipline",
+        "native": "天纪",
+        "pronounce": "Tiān Jì",
+        "ipa": "tʰjɛn˥.t͡ɕi˥˩"
+      },
+      "lines": [
+        [
+          81693,
+          82587,
+          83207,
+          84573,
+          87808,
+          89826
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_yuan_dynasty H19",
+      "names": {
+        "en": "Woman's Bed",
+        "native": "女床",
+        "pronounce": "Nǚ Chuáng",
+        "ipa": "ny˨˩˩.t͡ʂʰwɑŋ˧˥"
+      },
+      "lines": [
+        [
+          84380,
+          84606,
+          85112
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_yuan_dynasty 01A",
+      "names": {
+        "en": "Horn",
+        "native": "角宿",
+        "pronounce": "Jiǎo Xiù",
+        "ipa": "t͡ɕjɑʊ˨˩˩.ɕjoʊ˥˩"
+      },
+      "lines": [
+        [
+          65474,
+          66249
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_yuan_dynasty 01B",
+      "names": {
+        "en": "Flat Road",
+        "native": "平道",
+        "pronounce": "Píng Dào",
+        "ipa": "pʰiŋ˧˥.tɑʊ˥˩"
+      },
+      "lines": [
+        [
+          65420,
+          66006
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_yuan_dynasty 01C",
+      "names": {
+        "en": "Celestial Farmland (In Horn Mansion)",
+        "native": "天田(角宿)",
+        "pronounce": "Tiān Tián(Jiǎo Xiù)",
+        "ipa": "tʰjɛn˥.tʰjɛn˧˥(t͡ɕjɑʊ˨˩˩.ɕjoʊ˥˩)"
+      },
+      "lines": [
+        [
+          66936,
+          66200
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_yuan_dynasty 01D",
+      "names": {
+        "en": "Recommending Virtuous Men",
+        "native": "进贤",
+        "pronounce": "Jìn Xián",
+        "ipa": "t͡ɕin˥˩.ɕjɛn˧˥"
+      },
+      "lines": [
+        [
+          64238,
+          64238
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_yuan_dynasty 01E",
+      "names": {
+        "en": "Tripod of the Zhou",
+        "native": "周鼎",
+        "pronounce": "Zhōu Dǐng",
+        "ipa": "t͡ʂoʊ˥.tiŋ˨˩˦"
+      },
+      "lines": [
+        [
+          67480,
+          66763,
+          66727
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_yuan_dynasty 01F",
+      "names": {
+        "en": "Celestial Gate",
+        "native": "天门",
+        "pronounce": "Tiān Mén",
+        "ipa": "tʰjɛn˥.mən˧˥"
+      },
+      "lines": [
+        [
+          64407,
+          65639
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_yuan_dynasty 01G",
+      "names": {
+        "en": "Judging Stars",
+        "native": "平星",
+        "pronounce": "Píng Xīng",
+        "ipa": "pʰiŋ˧˥.ɕiŋ˥"
+      },
+      "lines": [
+        [
+          68895,
+          64962
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_yuan_dynasty 02A",
+      "names": {
+        "en": "Neck",
+        "native": "亢宿",
+        "pronounce": "Kàng Xiù",
+        "ipa": "kʰɑŋ˥˩.ɕjoʊ˥˩"
+      },
+      "lines": [
+        [
+          69427,
+          69701,
+          70755
+        ],
+        [
+          69427,
+          69974
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_yuan_dynasty 02B",
+      "names": {
+        "en": "Great Horn",
+        "native": "大角",
+        "pronounce": "Dà Jiǎo",
+        "ipa": "ta˥˩.t͡ɕjɑʊ˨˩˦"
+      },
+      "lines": [
+        [
+          69673,
+          69673
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_yuan_dynasty 02D",
+      "names": {
+        "en": "Left Conductor",
+        "native": "左摄提",
+        "pronounce": "Zuǒ Shè Tí",
+        "ipa": "t͡swo˨˩˩.ʂɤ˥˩.tʰi˧˥"
+      },
+      "lines": [
+        [
+          72125,
+          71762,
+          71795
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_yuan_dynasty 02E",
+      "names": {
+        "en": "Right Conductor",
+        "native": "右摄提",
+        "pronounce": "Yòu Shè Tí",
+        "ipa": "joʊ˥˩.ʂɤ˥˩.tʰi˧˥"
+      },
+      "lines": [
+        [
+          67927,
+          67275,
+          67459
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_yuan_dynasty 03A",
+      "names": {
+        "en": "Root",
+        "native": "氐宿",
+        "pronounce": "Dī Xiù",
+        "ipa": "ti˥.ɕjoʊ˥˩"
+      },
+      "lines": [
+        [
+          72622,
+          74392,
+          76333,
+          74785
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_yuan_dynasty 03B",
+      "names": {
+        "en": "Celestial Milk",
+        "native": "天乳",
+        "pronounce": "Tiān Rǔ",
+        "ipa": "tʰjɛn˥.ɻu˨˩˦"
+      },
+      "lines": [
+        [
+          77516,
+          77516
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_yuan_dynasty 03C",
+      "names": {
+        "en": "Twinkling Indicator",
+        "native": "招摇",
+        "pronounce": "Zhāo Yáo",
+        "ipa": "t͡ʂɑʊ˥.jɑʊ˧˥"
+      },
+      "lines": [
+        [
+          71075,
+          71075
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_yuan_dynasty 03D",
+      "names": {
+        "en": "Celestial Lance",
+        "native": "梗河",
+        "pronounce": "Gěng Hé",
+        "ipa": "kɤŋ˨˩˩.xɤ˧˥"
+      },
+      "lines": [
+        [
+          72105,
+          71284,
+          71053
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_yuan_dynasty 03E",
+      "names": {
+        "en": "Mattress of the Emperor",
+        "native": "帝席",
+        "pronounce": "Dì Xí",
+        "ipa": "ti˥˩.ɕi˧˥"
+      },
+      "lines": [
+        [
+          72659,
+          72659
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_yuan_dynasty 03J",
+      "names": {
+        "en": "Celestial Spokes",
+        "native": "天辐",
+        "pronounce": "Tiān Fú",
+        "ipa": "tʰjɛn˥.fʋ̩˧˥"
+      },
+      "lines": [
+        [
+          76470,
+          76600
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_yuan_dynasty 04A",
+      "names": {
+        "en": "Room",
+        "native": "房宿",
+        "pronounce": "Fáng Xiù",
+        "ipa": "fɑŋ˧˥.ɕjoʊ˥˩"
+      },
+      "lines": [
+        [
+          78820,
+          78401,
+          78265,
+          78104
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_yuan_dynasty 04B",
+      "names": {
+        "en": "Door Bolt",
+        "native": "键闭",
+        "pronounce": "Jiàn Bì",
+        "ipa": "t͡ɕjɛn˥˩.pi˥˩"
+      },
+      "lines": [
+        [
+          79374,
+          79374
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_yuan_dynasty 04C",
+      "names": {
+        "en": "Lock (Vassal of Room)",
+        "native": "钩钤(附房宿)",
+        "pronounce": "Gōu Qián",
+        "ipa": "koʊ˥.t͡ɕʰjɛn˧˥"
+      },
+      "lines": [
+        [
+          78820,
+          78933,
+          78990
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_yuan_dynasty 04D",
+      "names": {
+        "en": "Punishment",
+        "native": "罚",
+        "pronounce": "Fá",
+        "ipa": "fa˧˥"
+      },
+      "lines": [
+        [
+          80343,
+          80569,
+          80894
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_yuan_dynasty 04E",
+      "names": {
+        "en": "Eastern Door",
+        "native": "东咸",
+        "pronounce": "Dōng Xián",
+        "ipa": "tʊŋ˥.ɕjɛn˧˥"
+      },
+      "lines": [
+        [
+          81724,
+          81754,
+          80975,
+          80473
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_yuan_dynasty 04F",
+      "names": {
+        "en": "Western Door",
+        "native": "西咸",
+        "pronounce": "Xī Xián",
+        "ipa": "ɕi˥.ɕjɛn˧˥"
+      },
+      "lines": [
+        [
+          79375,
+          78727,
+          78207,
+          77853
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_yuan_dynasty 04G",
+      "names": {
+        "en": "Solar Star",
+        "native": "日星",
+        "pronounce": "Rì Xīng",
+        "ipa": "ɻɻ̍˥˩.ɕiŋ˥"
+      },
+      "lines": [
+        [
+          77840,
+          77840
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_yuan_dynasty 04H",
+      "names": {
+        "en": "Retinue (In Room Mansion)",
+        "native": "从官(房宿)",
+        "pronounce": "Cóng Guān(Fáng Xiù)",
+        "ipa": "t͡sʰʊŋ˧˥.kwan˥(fɑŋ˧˥.ɕjoʊ˥˩)"
+      },
+      "lines": [
+        [
+          77634,
+          78105
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_yuan_dynasty 05A",
+      "names": {
+        "en": "Heart",
+        "native": "心宿",
+        "pronounce": "Xīn Xiù",
+        "ipa": "ɕin˥.ɕjoʊ˥˩"
+      },
+      "lines": [
+        [
+          80112,
+          80763,
+          81266
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_yuan_dynasty 06A",
+      "names": {
+        "en": "Tail",
+        "native": "尾宿",
+        "pronounce": "Wěi Xiù",
+        "ipa": "weɪ˨˩˩.ɕjoʊ˥˩"
+      },
+      "lines": [
+        [
+          82396,
+          82514,
+          82729,
+          84143,
+          86228,
+          87073,
+          86670,
+          85927
+        ],
+        [
+          86670,
+          85696
+        ],
+        [
+          82514,
+          82545
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_yuan_dynasty 06C",
+      "names": {
+        "en": "Celestial River",
+        "native": "天江",
+        "pronounce": "Tiān Jiāng",
+        "ipa": "tʰjɛn˥.t͡ɕjɑŋ˥"
+      },
+      "lines": [
+        [
+          85755,
+          85340,
+          84970,
+          84405
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_yuan_dynasty 06D",
+      "names": {
+        "en": "Fu Yue",
+        "native": "傅说",
+        "pronounce": "Fù Yuè",
+        "ipa": "fʋ̩˥˩.ɥɛ˥˩"
+      },
+      "lines": [
+        [
+          87261,
+          87261
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_yuan_dynasty 06F",
+      "names": {
+        "en": "Changing Room (Vassal of Tail)",
+        "native": "神宫(附房宿)",
+        "pronounce": "Shén Gōng",
+        "ipa": "ʂən˧˥.kʊŋ˥"
+      },
+      "lines": [
+        [
+          82545,
+          82545
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_yuan_dynasty 07A",
+      "names": {
+        "en": "Winnowing Basket",
+        "native": "箕宿",
+        "pronounce": "Jī Xiù",
+        "ipa": "t͡ɕi˥.ɕjoʊ˥˩"
+      },
+      "lines": [
+        [
+          88635,
+          89931,
+          90185,
+          89642
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_yuan_dynasty 07C",
+      "names": {
+        "en": "Chaff Star",
+        "native": "糠星",
+        "pronounce": "Kāng Xīng",
+        "ipa": "kʰɑŋ˥.ɕiŋ˥"
+      },
+      "lines": [],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_yuan_dynasty 08A",
+      "names": {
+        "en": "Dipper",
+        "native": "斗宿",
+        "pronounce": "Dǒu Xiù",
+        "ipa": "toʊ˨˩˩.ɕjoʊ˥˩"
+      },
+      "lines": [
+        [
+          89341,
+          90496,
+          92041,
+          92855,
+          93864,
+          93506
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_yuan_dynasty 08B",
+      "names": {
+        "en": "Establishment Stars",
+        "native": "建星",
+        "pronounce": "Jiàn Xīng",
+        "ipa": "t͡ɕjɛn˥˩.ɕiŋ˥"
+      },
+      "lines": [
+        [
+          93085,
+          93683,
+          94141,
+          94820,
+          95168,
+          95176
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_yuan_dynasty 08C",
+      "names": {
+        "en": "Market Officer",
+        "native": "天弁",
+        "pronounce": "Tiān Biàn",
+        "ipa": "tʰjɛn˥.pjɛn˥˩"
+      },
+      "lines": [
+        [
+          93805,
+          93429,
+          93026,
+          92175,
+          91845,
+          91726,
+          91117
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_yuan_dynasty 08E",
+      "names": {
+        "en": "Celestial Cock",
+        "native": "天鸡",
+        "pronounce": "Tiān Jī",
+        "ipa": "tʰjɛn˥.t͡ɕi˥"
+      },
+      "lines": [
+        [
+          96950,
+          97290
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_yuan_dynasty 08G",
+      "names": {
+        "en": "Territory of Dog",
+        "native": "狗国",
+        "pronounce": "Gǒu Guó",
+        "ipa": "koʊ˨˩˩.kwo˧˥"
+      },
+      "lines": [
+        [
+          98066,
+          98066
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_yuan_dynasty 08I",
+      "names": {
+        "en": "Dog Stars",
+        "native": "狗星",
+        "pronounce": "Gǒu Xīng",
+        "ipa": "koʊ˨˩˩.ɕiŋ˥"
+      },
+      "lines": [
+        [
+          95477,
+          96465
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_yuan_dynasty 09A",
+      "names": {
+        "en": "Ox",
+        "native": "牛宿",
+        "pronounce": "Niú Xiù",
+        "ipa": "njoʊ˧˥.ɕjoʊ˥˩"
+      },
+      "lines": [
+        [
+          100345,
+          100881,
+          101123,
+          101027,
+          100345,
+          100310
+        ],
+        [
+          100345,
+          100064
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_yuan_dynasty 09D",
+      "names": {
+        "en": "Drum at the River",
+        "native": "河鼓",
+        "pronounce": "Hé Gǔ",
+        "ipa": "xɤ˧˥.ku˨˩˦"
+      },
+      "lines": [
+        [
+          98036,
+          97649,
+          97278
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_yuan_dynasty 09E",
+      "names": {
+        "en": "Weaving Girl",
+        "native": "织女",
+        "pronounce": "Zhī Nǚ",
+        "ipa": "t͡ʂɻ̍˥.ny˨˩˦"
+      },
+      "lines": [
+        [
+          91919,
+          91262,
+          91971
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_yuan_dynasty 09F",
+      "names": {
+        "en": "Left Flag",
+        "native": "左旗",
+        "pronounce": "Zuǒ Qí",
+        "ipa": "t͡swo˨˩˩.t͡ɕʰi˧˥"
+      },
+      "lines": [
+        [
+          96757,
+          97365
+        ],
+        [
+          96837,
+          97365,
+          98337,
+          98920,
+          98738,
+          98819,
+          99742,
+          100256
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_yuan_dynasty 09G",
+      "names": {
+        "en": "Right Flag",
+        "native": "右旗",
+        "pronounce": "Yòu Qí",
+        "ipa": "joʊ˥˩.t͡ɕʰi˧˥"
+      },
+      "lines": [
+        [
+          96665,
+          96229
+        ],
+        [
+          95501,
+          96229,
+          94727,
+          94477,
+          95585,
+          96468,
+          95937,
+          96556
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_yuan_dynasty 09H",
+      "names": {
+        "en": "Celestial Drumstick",
+        "native": "天桴",
+        "pronounce": "Tiān Fú",
+        "ipa": "tʰjɛn˥.fʋ̩˧˥"
+      },
+      "lines": [
+        [
+          99473,
+          97804
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_yuan_dynasty 09I",
+      "names": {
+        "en": "Network of Dykes",
+        "native": "罗堰",
+        "pronounce": "Luó Yàn",
+        "ipa": "lwo˧˥.jan˥˩"
+      },
+      "lines": [
+        [
+          101923,
+          102026,
+          101984
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_yuan_dynasty 09J",
+      "names": {
+        "en": "Clepsydra Terrace",
+        "native": "渐台",
+        "pronounce": "Jiàn Tái",
+        "ipa": "t͡ɕjɛn˥˩.tʰaɪ˧˥"
+      },
+      "lines": [
+        [
+          92791,
+          92420,
+          93194,
+          93903,
+          92791
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_yuan_dynasty 09K",
+      "names": {
+        "en": "Imperial Passageway",
+        "native": "辇道",
+        "pronounce": "Niǎn Dào",
+        "ipa": "njɛn˨˩˩.tɑʊ˥˩"
+      },
+      "lines": [
+        [
+          92862,
+          94481,
+          94713,
+          95556,
+          96052
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_yuan_dynasty 10A",
+      "names": {
+        "en": "Girl",
+        "native": "女宿",
+        "pronounce": "Nǚ Xiù",
+        "ipa": "ny˨˩˩.ɕjoʊ˥˩"
+      },
+      "lines": [
+        [
+          102618,
+          103045,
+          103005,
+          102624
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_yuan_dynasty 10O",
+      "names": {
+        "en": "Pearls on Ladies' Wear",
+        "native": "离珠",
+        "pronounce": "Lí Zhū",
+        "ipa": "li˧˥.t͡ʂu˥"
+      },
+      "lines": [
+        [
+          101101,
+          101692,
+          101847,
+          101936
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_yuan_dynasty 10P",
+      "names": {
+        "en": "Rotten Gourd",
+        "native": "败瓜",
+        "pronounce": "Bài Guā",
+        "ipa": "paɪ˥˩.kwa˥"
+      },
+      "lines": [
+        [
+          101421,
+          101916,
+          101800,
+          101483,
+          101882
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_yuan_dynasty 10Q",
+      "names": {
+        "en": "Good Gourd",
+        "native": "瓠瓜",
+        "pronounce": "Hù Guā",
+        "ipa": "xu˥˩.kwa˥"
+      },
+      "lines": [
+        [
+          102532,
+          101958,
+          101769,
+          102281,
+          102532
+        ],
+        [
+          101769,
+          101589
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_yuan_dynasty 10R",
+      "names": {
+        "en": "Celestial Ford",
+        "native": "天津",
+        "pronounce": "Tiān Jīn",
+        "ipa": "tʰjɛn˥.t͡ɕin˥"
+      },
+      "lines": [
+        [
+          104732,
+          105138,
+          104887,
+          103413,
+          102098,
+          99639,
+          97165,
+          100453,
+          102488,
+          104732
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_yuan_dynasty 11A",
+      "names": {
+        "en": "Emptiness",
+        "native": "虚宿",
+        "pronounce": "Xū Xiù",
+        "ipa": "ɕy˥.ɕjoʊ˥˩"
+      },
+      "lines": [
+        [
+          106278,
+          104987
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_yuan_dynasty 11B",
+      "names": {
+        "en": "Deified Judge of Life",
+        "native": "司命",
+        "pronounce": "Sī Mìng",
+        "ipa": "sɹ̩˥.miŋ˥˩"
+      },
+      "lines": [
+        [
+          107575,
+          107575
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_yuan_dynasty 11C",
+      "names": {
+        "en": "Deified Judge of Rank",
+        "native": "司禄",
+        "pronounce": "Sī Lù",
+        "ipa": "sɹ̩˥.lu˥˩"
+      },
+      "lines": [
+        [
+          107151,
+          107151
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_yuan_dynasty 11D",
+      "names": {
+        "en": "Deified Judge of Disaster and Good Fortune",
+        "native": "司危",
+        "pronounce": "Sī Wēi",
+        "ipa": "sɹ̩˥.weɪ˥"
+      },
+      "lines": [
+        [
+          105570,
+          105570
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_yuan_dynasty 11E",
+      "names": {
+        "en": "Deified Judge of Right and Wrong",
+        "native": "司非",
+        "pronounce": "Sī Fēi",
+        "ipa": "sɹ̩˥.feɪ˥"
+      },
+      "lines": [
+        [
+          104521,
+          104858
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_yuan_dynasty 12A",
+      "names": {
+        "en": "Rooftop",
+        "native": "危宿",
+        "pronounce": "Wēi Xiù",
+        "ipa": "weɪ˥.ɕjoʊ˥˩"
+      },
+      "lines": [
+        [
+          109074,
+          109427,
+          107315
+        ],
+        [
+          109427,
+          110672
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_yuan_dynasty 12B",
+      "names": {
+        "en": "Humans Stars",
+        "native": "人星",
+        "pronounce": "Rén Xīng",
+        "ipa": "ɻən˧˥.ɕiŋ˥"
+      },
+      "lines": [
+        [
+          107763,
+          107975
+        ],
+        [
+          107763,
+          107310
+        ],
+        [
+          107763,
+          108022
+        ],
+        [
+          107763,
+          107354
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_yuan_dynasty 12F",
+      "names": {
+        "en": "Celestial Hook",
+        "native": "天钩",
+        "pronounce": "Tiān Gōu",
+        "ipa": "tʰjɛn˥.koʊ˥"
+      },
+      "lines": [
+        [
+          115088,
+          112724,
+          108917,
+          105199,
+          102422,
+          101093
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_yuan_dynasty 12H",
+      "names": {
+        "en": "Tomb (Vassal of Rooftop)",
+        "native": "坟墓(附危宿)",
+        "pronounce": "Fén Mù",
+        "ipa": "fən˧˥.mu˥˩"
+      },
+      "lines": [
+        [
+          110960,
+          110395
+        ],
+        [
+          110960,
+          111497
+        ],
+        [
+          110960,
+          110672
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_yuan_dynasty 13A",
+      "names": {
+        "en": "Encampment",
+        "native": "室宿",
+        "pronounce": "Shì Xiù",
+        "ipa": "ʂɻ̍˥˩.ɕjoʊ˥˩"
+      },
+      "lines": [
+        [
+          113963,
+          113881
+        ],
+        [
+          113881,
+          115250
+        ],
+        [
+          113881,
+          112748
+        ],
+        [
+          113881,
+          112051
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_yuan_dynasty 13B",
+      "names": {
+        "en": "Resting Palace (Vassal of Encampment)",
+        "native": "离宫(附室宿)",
+        "pronounce": "Lí Gōng",
+        "ipa": "li˧˥.kʊŋ˥"
+      },
+      "lines": [
+        [
+          112051,
+          112158
+        ],
+        [
+          112748,
+          112440
+        ],
+        [
+          115250,
+          115623
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_yuan_dynasty 13D",
+      "names": {
+        "en": "Line of Ramparts",
+        "native": "垒壁阵",
+        "pronounce": "Lěi Bì Zhèn",
+        "ipa": "leɪ˨˩˩.pi˥˩.t͡ʂən˥˩"
+      },
+      "lines": [
+        [
+          118209,
+          154,
+          443,
+          145,
+          118209,
+          114724,
+          112961,
+          111123,
+          109139,
+          107556,
+          106985,
+          106723,
+          107188,
+          107556
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_yuan_dynasty 13G",
+      "names": {
+        "en": "North Gate of the Military Camp",
+        "native": "北落师门",
+        "pronounce": "Běi Luò Shī Mén",
+        "ipa": "peɪ˨˩˩.lwo˥˩.ʂɻ̍˥.mən˧˥"
+      },
+      "lines": [
+        [
+          113368,
+          113368
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_yuan_dynasty 13I",
+      "names": {
+        "en": "Materials for Making Tents",
+        "native": "天纲",
+        "pronounce": "Tiān Gāng",
+        "ipa": "tʰjɛn˥.kɑŋ˥"
+      },
+      "lines": [
+        [
+          108085,
+          108085
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_yuan_dynasty 13J",
+      "names": {
+        "en": "Official for Materials Supply",
+        "native": "土公吏",
+        "pronounce": "Tǔ Gōng Lì",
+        "ipa": "tʰu˨˩˩.kʊŋ˥.li˥˩"
+      },
+      "lines": [
+        [
+          112447,
+          112029
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_yuan_dynasty 13K",
+      "names": {
+        "en": "Flying Serpent",
+        "native": "螣蛇",
+        "pronounce": "Téng Shé",
+        "ipa": "tʰɤŋ˧˥.ʂɤ˧˥"
+      },
+      "lines": [
+        [
+          111022,
+          111022
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_yuan_dynasty 14A",
+      "names": {
+        "en": "Wall",
+        "native": "壁宿",
+        "pronounce": "Bì Xiù",
+        "ipa": "pi˥˩.ɕjoʊ˥˩"
+      },
+      "lines": [
+        [
+          1067,
+          677
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_yuan_dynasty 14B",
+      "names": {
+        "en": "Thunderbolt",
+        "native": "霹雳",
+        "pronounce": "Pī Lì",
+        "ipa": "pʰi˥.li˥˩"
+      },
+      "lines": [
+        [
+          118268,
+          116771,
+          115830,
+          114971,
+          113889
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_yuan_dynasty 14C",
+      "names": {
+        "en": "Cloud and Rain",
+        "native": "云雨",
+        "pronounce": "Yún Yǔ",
+        "ipa": "yn˧˥.y˨˩˦"
+      },
+      "lines": [
+        [
+          116928,
+          117491,
+          117683
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_yuan_dynasty 15A",
+      "names": {
+        "en": "Legs",
+        "native": "奎宿",
+        "pronounce": "Kuí Xiù",
+        "ipa": "kʰweɪ˧˥.ɕjoʊ˥˩"
+      },
+      "lines": [
+        [
+          3881,
+          4436,
+          5447,
+          5544,
+          5586,
+          6193,
+          5742,
+          5131,
+          4463,
+          3693,
+          3031,
+          3092,
+          2912,
+          2942,
+          3231
+        ],
+        [
+          3881
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_yuan_dynasty 15B",
+      "names": {
+        "en": "Outer Fence",
+        "native": "外屏",
+        "pronounce": "Wài Píng",
+        "ipa": "waɪ˥˩.pʰiŋ˧˥"
+      },
+      "lines": [
+        [
+          9487,
+          8833,
+          7884,
+          7007,
+          5737,
+          4906,
+          3786
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_yuan_dynasty 15D",
+      "names": {
+        "en": "Master of Constructions (In Legs Mansion)",
+        "native": "土司空(奎宿)",
+        "pronounce": "Tǔ Sī Kōng(Kuí Xiù)",
+        "ipa": "tʰu˨˩˩.sɹ̩˥.kʰʊŋ˥(kʰweɪ˧˥.ɕjoʊ˥˩)"
+      },
+      "lines": [
+        [
+          3419,
+          3419
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_yuan_dynasty 15E",
+      "names": {
+        "en": "Southern Military Gate",
+        "native": "军南门",
+        "pronounce": "Jūn Nán Mén",
+        "ipa": "t͡ɕyn˥.nan˧˥.mən˧˥"
+      },
+      "lines": [
+        [
+          8796,
+          8796
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_yuan_dynasty 15F",
+      "names": {
+        "en": "Flying Corridor",
+        "native": "阁道",
+        "pronounce": "Gé Dào",
+        "ipa": "kɤ˧˥.tɑʊ˥˩"
+      },
+      "lines": [
+        [
+          5434,
+          5542,
+          7294,
+          8886
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_yuan_dynasty 15G",
+      "names": {
+        "en": "Auxiliary Road",
+        "native": "附路",
+        "pronounce": "Fù Lù",
+        "ipa": "fʋ̩˥˩.lu˥˩"
+      },
+      "lines": [
+        [
+          6686,
+          6686
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_yuan_dynasty 16A",
+      "names": {
+        "en": "Bond",
+        "native": "娄宿",
+        "pronounce": "Lóu Xiù",
+        "ipa": "loʊ˧˥.ɕjoʊ˥˩"
+      },
+      "lines": [
+        [
+          9884,
+          8903,
+          8832
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_yuan_dynasty 16D",
+      "names": {
+        "en": "Square Celestial Granary",
+        "native": "天仓",
+        "pronounce": "Tiān Cāng",
+        "ipa": "tʰjɛn˥.t͡sʰɑŋ˥"
+      },
+      "lines": [
+        [
+          3455,
+          5364,
+          6537,
+          8645,
+          8102,
+          9347
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_yuan_dynasty 16F",
+      "names": {
+        "en": "Great General of Heaven",
+        "native": "天大将军",
+        "pronounce": "Tiān Dà Jiāng Jūn",
+        "ipa": "tʰjɛn˥.ta˥˩.t͡ɕjɑŋ˥.t͡ɕyn˥"
+      },
+      "lines": [
+        [
+          8068,
+          7607,
+          7719,
+          7918,
+          7513,
+          7818,
+          9021,
+          9977,
+          10064,
+          10670,
+          9640,
+          8068
+        ],
+        [
+          7918,
+          9640,
+          7818
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_yuan_dynasty 17A",
+      "names": {
+        "en": "Stomach",
+        "native": "胃宿",
+        "pronounce": "Wèi Xiù",
+        "ipa": "weɪ˥˩.ɕjoʊ˥˩"
+      },
+      "lines": [
+        [
+          12719,
+          13061,
+          13209
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_yuan_dynasty 17B",
+      "names": {
+        "en": "Celestial Foodstuff",
+        "native": "天廪",
+        "pronounce": "Tiān Lǐn",
+        "ipa": "tʰjɛn˥.lin˨˩˦"
+      },
+      "lines": [
+        [
+          16369,
+          16322,
+          16083,
+          15900
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_yuan_dynasty 17C",
+      "names": {
+        "en": "Circular Celestial Granary",
+        "native": "天囷",
+        "pronounce": "Tiān Qūn",
+        "ipa": "tʰjɛn˥.t͡ɕʰyn˥"
+      },
+      "lines": [
+        [
+          14135,
+          13954,
+          12828,
+          11249,
+          10324,
+          11484,
+          12093,
+          12706,
+          12387
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_yuan_dynasty 17D",
+      "names": {
+        "en": "Mausoleum",
+        "native": "大陵",
+        "pronounce": "Dà Líng",
+        "ipa": "ta˥˩.liŋ˧˥"
+      },
+      "lines": [
+        [
+          13268,
+          13531,
+          14632,
+          14668,
+          14576,
+          14354,
+          13254,
+          12623
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_yuan_dynasty 17E",
+      "names": {
+        "en": "Celestial Boat",
+        "native": "天船",
+        "pronounce": "Tiān Chuán",
+        "ipa": "tʰjɛn˥.t͡ʂʰwan˧˥"
+      },
+      "lines": [
+        [
+          14382,
+          14328,
+          16244,
+          17358,
+          19343,
+          19812,
+          20070
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_yuan_dynasty 17F",
+      "names": {
+        "en": "Heap of Corpses (In Stomach Mansion)",
+        "native": "积尸(胃宿)",
+        "pronounce": "Jī Shī(Wèi Xiù)",
+        "ipa": "t͡ɕi˥.ʂɻ̍˥(weɪ˥˩.ɕjoʊ˥˩)"
+      },
+      "lines": [
+        [
+          13879,
+          13879
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_yuan_dynasty 17G",
+      "names": {
+        "en": "Stored water (In Stomach Mansion)",
+        "native": "积水(胃宿)",
+        "pronounce": "Jī Shuǐ(Wèi Xiù)",
+        "ipa": "t͡ɕi˥.ʂweɪ˨˩˦(weɪ˥˩.ɕjoʊ˥˩)"
+      },
+      "lines": [
+        [
+          19167,
+          19167
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_yuan_dynasty 18A",
+      "names": {
+        "en": "Hairy Head",
+        "native": "昴宿",
+        "pronounce": "Mǎo Xiù",
+        "ipa": "mɑʊ˨˩˩.ɕjoʊ˥˩"
+      },
+      "lines": [
+        [
+          17531,
+          17499,
+          17573,
+          17608,
+          17702,
+          17851
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_yuan_dynasty 18C",
+      "names": {
+        "en": "Lunar Star",
+        "native": "月",
+        "pronounce": "Yuè",
+        "ipa": "ɥɛ˥˩"
+      },
+      "lines": [
+        [
+          19038,
+          19038
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_yuan_dynasty 18D",
+      "names": {
+        "en": "Celestial Yin Force",
+        "native": "天阴",
+        "pronounce": "Tiān Yīn",
+        "ipa": "tʰjɛn˥.in˥"
+      },
+      "lines": [
+        [
+          14838,
+          15110
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_yuan_dynasty 18F",
+      "names": {
+        "en": "Celestial Meadows",
+        "native": "天苑",
+        "pronounce": "Tiān Yuàn",
+        "ipa": "tʰjɛn˥.ɥæn˥˩"
+      },
+      "lines": [
+        [
+          18543,
+          17593,
+          17378,
+          16537,
+          15197,
+          13701,
+          12770,
+          12843,
+          14146,
+          15474,
+          16611,
+          17651,
+          17717,
+          18216,
+          18673
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_yuan_dynasty 18G",
+      "names": {
+        "en": "Rolled Tongue",
+        "native": "卷舌",
+        "pronounce": "Juǎn Shé",
+        "ipa": "t͡ɕɥæn˨˩˩.ʂɤ˧˥"
+      },
+      "lines": [
+        [
+          17529,
+          18532,
+          18614,
+          18246,
+          17448,
+          17313
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_yuan_dynasty 18H",
+      "names": {
+        "en": "Celestial Slander",
+        "native": "天谗",
+        "pronounce": "Tiān Chán",
+        "ipa": "tʰjɛn˥.t͡ʂʰan˧˥"
+      },
+      "lines": [
+        [
+          17886,
+          17886
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_yuan_dynasty 19A",
+      "names": {
+        "en": "Net",
+        "native": "毕宿",
+        "pronounce": "Bì Xiù",
+        "ipa": "pi˥˩.ɕjoʊ˥˩"
+      },
+      "lines": [
+        [
+          20889,
+          20648,
+          20455,
+          20205
+        ],
+        [
+          21421,
+          20894,
+          20713,
+          20205,
+          18724
+        ],
+        [
+          21421,
+          21683
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_yuan_dynasty 19B",
+      "names": {
+        "en": "Whisper (Vassal of Net)",
+        "native": "附耳(附毕宿)",
+        "pronounce": "Fù Ěr",
+        "ipa": "fʋ̩˥˩.ɚ˨˩˦"
+      },
+      "lines": [
+        [
+          21683,
+          21683
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_yuan_dynasty 19C",
+      "names": {
+        "en": "Celestial Street",
+        "native": "天街",
+        "pronounce": "Tiān Jiē",
+        "ipa": "tʰjɛn˥.t͡ɕjɛ˥"
+      },
+      "lines": [
+        [
+          20711,
+          20635
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_yuan_dynasty 19E",
+      "names": {
+        "en": "Feudal Kings",
+        "native": "诸王",
+        "pronounce": "Zhū Wáng",
+        "ipa": "t͡ʂu˥.wɑŋ˧˥"
+      },
+      "lines": [
+        [
+          21881,
+          21881
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_yuan_dynasty 19F",
+      "names": {
+        "en": "Celestial High Terrace",
+        "native": "天高",
+        "pronounce": "Tiān Gāo",
+        "ipa": "tʰjɛn˥.kɑʊ˥"
+      },
+      "lines": [
+        [
+          22176,
+          22565
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_yuan_dynasty 19H",
+      "names": {
+        "en": "Five Chariots",
+        "native": "五车",
+        "pronounce": "Wǔ Chē",
+        "ipa": "wu˨˩˩.t͡ʂʰɤ˥"
+      },
+      "lines": [
+        [
+          23015,
+          24608,
+          28360,
+          28380,
+          25428
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_yuan_dynasty 19N",
+      "names": {
+        "en": "Celestial Pass",
+        "native": "天关",
+        "pronounce": "Tiān Guān",
+        "ipa": "tʰjɛn˥.kwan˥"
+      },
+      "lines": [
+        [
+          26451,
+          26451
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_yuan_dynasty 19O",
+      "names": {
+        "en": "Banner of Three Stars",
+        "native": "参旗",
+        "pronounce": "Shēn Qí",
+        "ipa": "ʂən˥.t͡ɕʰi˧˥"
+      },
+      "lines": [
+        [
+          24010,
+          23607,
+          22957,
+          22833,
+          22845,
+          22509,
+          22449,
+          22549,
+          22797
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_yuan_dynasty 20A",
+      "names": {
+        "en": "Turtle Beak",
+        "native": "觜宿",
+        "pronounce": "Zī Xiù",
+        "ipa": "t͡sɹ̩˥.ɕjoʊ˥˩"
+      },
+      "lines": [
+        [
+          26207,
+          26176
+        ],
+        [
+          26207,
+          26366
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_yuan_dynasty 20C",
+      "names": {
+        "en": "Deity in Charge of Monsters",
+        "native": "司怪",
+        "pronounce": "Sī Guài",
+        "ipa": "sɹ̩˥.kwaɪ˥˩"
+      },
+      "lines": [
+        [
+          27830,
+          28237,
+          28734
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_yuan_dynasty 21A",
+      "names": {
+        "en": "Three Stars",
+        "native": "参宿",
+        "pronounce": "Shēn Xiù",
+        "ipa": "ʂən˥.ɕjoʊ˥˩"
+      },
+      "lines": [
+        [
+          27989,
+          26727,
+          26311,
+          25930,
+          24436
+        ],
+        [
+          25930,
+          25336
+        ],
+        [
+          26727,
+          27366
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_yuan_dynasty 21B",
+      "names": {
+        "en": "Send Armed Forces To Suppress (Vassal of Three Stars)",
+        "native": "伐(附参宿)",
+        "pronounce": "Fá",
+        "ipa": "fa˧˥"
+      },
+      "lines": [
+        [
+          26237,
+          26235,
+          26241
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_yuan_dynasty 21C",
+      "names": {
+        "en": "Jade Well",
+        "native": "玉井",
+        "pronounce": "Yù Jǐng",
+        "ipa": "y˥˩.t͡ɕiŋ˨˩˦"
+      },
+      "lines": [
+        [
+          23972,
+          23364,
+          23875,
+          24674
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_yuan_dynasty 21E",
+      "names": {
+        "en": "Military Well",
+        "native": "军井",
+        "pronounce": "Jūn Jǐng",
+        "ipa": "t͡ɕyn˥.t͡ɕiŋ˨˩˦"
+      },
+      "lines": [
+        [
+          24244,
+          24327,
+          24845,
+          24873,
+          24244
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_yuan_dynasty 21F",
+      "names": {
+        "en": "Toilet",
+        "native": "厕",
+        "pronounce": "Cè",
+        "ipa": "t͡sʰɤ˥˩"
+      },
+      "lines": [
+        [
+          25985,
+          25606,
+          27072,
+          27654
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_yuan_dynasty 22A",
+      "names": {
+        "en": "Well",
+        "native": "井宿",
+        "pronounce": "Jǐng Xiù",
+        "ipa": "t͡ɕiŋ˨˩˩.ɕjoʊ˥˩"
+      },
+      "lines": [
+        [
+          35350,
+          34088,
+          32921,
+          32246
+        ],
+        [
+          32921,
+          30883,
+          30343
+        ],
+        [
+          30883,
+          31681,
+          34088
+        ],
+        [
+          31681,
+          32362
+        ],
+        [
+          30343,
+          29655
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_yuan_dynasty 22B",
+      "names": {
+        "en": "Battle Axe (Vassal of Well)",
+        "native": "钺(附井宿)",
+        "pronounce": "Yuè",
+        "ipa": "ɥɛ˥˩"
+      },
+      "lines": [
+        [
+          29655,
+          29655
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_yuan_dynasty 22C",
+      "names": {
+        "en": "South River",
+        "native": "南河",
+        "pronounce": "Nán Hé",
+        "ipa": "nan˧˥.xɤ˧˥"
+      },
+      "lines": [
+        [
+          37279,
+          36188,
+          36284
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_yuan_dynasty 22D",
+      "names": {
+        "en": "North River",
+        "native": "北河",
+        "pronounce": "Běi Hé",
+        "ipa": "peɪ˨˩˩.xɤ˧˥"
+      },
+      "lines": [
+        [
+          37826,
+          36850,
+          36366
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_yuan_dynasty 22E",
+      "names": {
+        "en": "Celestial Wine Cup",
+        "native": "天罇",
+        "pronounce": "Tiān Zūn",
+        "ipa": "tʰjɛn˥.t͡swən˥"
+      },
+      "lines": [
+        [
+          35550,
+          35699,
+          36238
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_yuan_dynasty 22F",
+      "names": {
+        "en": "Five Feudal Kings",
+        "native": "五诸侯(井宿)",
+        "pronounce": "Wǔ Zhū Hóu(Jǐng Xiù)",
+        "ipa": "wu˨˩˩.t͡ʂu˥.xoʊ˧˥(t͡ɕiŋ˨˩˩.ɕjoʊ˥˩)"
+      },
+      "lines": [
+        [
+          33018,
+          34693,
+          36046,
+          36962,
+          37740
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_yuan_dynasty 22G",
+      "names": {
+        "en": "Accumulated Water (In Well Mansion)",
+        "native": "积水(井宿)",
+        "pronounce": "Jī Shuǐ(Jǐng Xiù)",
+        "ipa": "t͡ɕi˥.ʂweɪ˨˩˦(t͡ɕiŋ˨˩˩.ɕjoʊ˥˩)"
+      },
+      "lines": [
+        [
+          38016,
+          38016
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_yuan_dynasty 22H",
+      "names": {
+        "en": "Pile of Firewood",
+        "native": "积薪",
+        "pronounce": "Jī Xīn",
+        "ipa": "t͡ɕi˥.ɕin˥"
+      },
+      "lines": [
+        [
+          39780,
+          39780
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_yuan_dynasty 22J",
+      "names": {
+        "en": "Water Level",
+        "native": "水位",
+        "pronounce": "Shuǐ Wèi",
+        "ipa": "ʂweɪ˨˩˩.weɪ˥˩"
+      },
+      "lines": [
+        [
+          36340,
+          36760,
+          37300,
+          37908
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_yuan_dynasty 22M",
+      "names": {
+        "en": "Wild Cockerel",
+        "native": "野鸡",
+        "pronounce": "Yě Jī",
+        "ipa": "jɛ˨˩˩.t͡ɕi˥"
+      },
+      "lines": [
+        [
+          30324,
+          30324
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_yuan_dynasty 22N",
+      "names": {
+        "en": "Grandson",
+        "native": "孙",
+        "pronounce": "Sūn",
+        "ipa": "swən˥"
+      },
+      "lines": [
+        [
+          30277,
+          30788
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_yuan_dynasty 22O",
+      "names": {
+        "en": "Son",
+        "native": "子",
+        "pronounce": "Zǐ",
+        "ipa": "t͡sɹ̩˨˩˦"
+      },
+      "lines": [
+        [
+          28199,
+          27628
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_yuan_dynasty 22P",
+      "names": {
+        "en": "Grandfather",
+        "native": "丈人",
+        "pronounce": "Zhàng Rén",
+        "ipa": "t͡ʂɑŋ˥˩.ɻən˧˥"
+      },
+      "lines": [
+        [
+          26634,
+          25859
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_yuan_dynasty 22R",
+      "names": {
+        "en": "Wolf Star",
+        "native": "狼星",
+        "pronounce": "Láng Xīng",
+        "ipa": "lɑŋ˧˥.ɕiŋ˥"
+      },
+      "lines": [
+        [
+          32349,
+          32349
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_yuan_dynasty 22S",
+      "names": {
+        "en": "Bow and Arrow",
+        "native": "弧矢",
+        "pronounce": "Hú Shǐ",
+        "ipa": "xu˧˥.ʂɻ̍˨˩˦"
+      },
+      "lines": [
+        [
+          36795,
+          35904,
+          32759,
+          33579,
+          33856,
+          34444,
+          35037,
+          35415,
+          36795
+        ],
+        [
+          33977,
+          34444,
+          35904
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_yuan_dynasty 23A",
+      "names": {
+        "en": "Ghosts",
+        "native": "鬼宿",
+        "pronounce": "Guǐ Xiù",
+        "ipa": "kweɪ˨˩˩.ɕjoʊ˥˩"
+      },
+      "lines": [
+        [
+          41822,
+          41909,
+          42806,
+          42911
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_yuan_dynasty 23B",
+      "names": {
+        "en": "Cumulative Corpse Gas",
+        "native": "积尸气",
+        "pronounce": "Jī Shī Qì",
+        "ipa": "t͡ɕi˥.ʂɻ̍˥.t͡ɕʰi˥˩"
+      },
+      "lines": [],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_yuan_dynasty 23G",
+      "names": {
+        "en": "Judge for Estimating the Age of Animals",
+        "native": "天记",
+        "pronounce": "Tiān Jì",
+        "ipa": "tʰjɛn˥.t͡ɕi˥˩"
+      },
+      "lines": [
+        [
+          43067,
+          43067
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_yuan_dynasty 24A",
+      "names": {
+        "en": "Willow",
+        "native": "柳宿",
+        "pronounce": "Liǔ Xiù",
+        "ipa": "ljoʊ˨˩˩.ɕjoʊ˥˩"
+      },
+      "lines": [
+        [
+          42799,
+          42402,
+          42313,
+          43109,
+          43234,
+          43813,
+          44659,
+          45336
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_yuan_dynasty 24B",
+      "names": {
+        "en": "Banner of Wine Shop",
+        "native": "酒旗",
+        "pronounce": "Jiǔ Qí",
+        "ipa": "t͡ɕjoʊ˨˩˩.t͡ɕʰi˧˥"
+      },
+      "lines": [
+        [
+          46771,
+          46774
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_yuan_dynasty 25A",
+      "names": {
+        "en": "Star",
+        "native": "星宿",
+        "pronounce": "Xīng Xiù",
+        "ipa": "ɕiŋ˥.ɕjoʊ˥˩"
+      },
+      "lines": [
+        [
+          46390,
+          46509,
+          46776,
+          47431
+        ],
+        [
+          46390,
+          45811,
+          45751,
+          46768,
+          46390
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_yuan_dynasty 25B",
+      "names": {
+        "en": "Xuanyuan",
+        "native": "轩辕",
+        "pronounce": "Xuān Yuán",
+        "ipa": "ɕɥæn˥.ɥæn˧˥"
+      },
+      "lines": [
+        [
+          44248,
+          44700,
+          45688,
+          45860,
+          46146,
+          46750,
+          47908,
+          48455,
+          50335,
+          50583,
+          49583,
+          49669,
+          47508
+        ],
+        [
+          49669,
+          51624
+        ],
+        [
+          49669,
+          49637
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_yuan_dynasty 26A",
+      "names": {
+        "en": "Extended Net",
+        "native": "张宿",
+        "pronounce": "Zhāng Xiù",
+        "ipa": "t͡ʂɑŋ˥.ɕjoʊ˥˩"
+      },
+      "lines": [
+        [
+          48356,
+          49841,
+          51069,
+          49569,
+          48356,
+          47452
+        ],
+        [
+          51069,
+          52085
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_yuan_dynasty 27A",
+      "names": {
+        "en": "Wings",
+        "native": "翼宿",
+        "pronounce": "Yì Xiù",
+        "ipa": "i˥˩.ɕjoʊ˥˩"
+      },
+      "lines": [
+        [
+          52943,
+          53740,
+          55282,
+          55705,
+          57283
+        ],
+        [
+          55705,
+          54682,
+          53740
+        ],
+        [
+          55282,
+          55687,
+          56633,
+          55106
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_yuan_dynasty 28A",
+      "names": {
+        "en": "Chariot",
+        "native": "轸宿",
+        "pronounce": "Zhěn Xiù",
+        "ipa": "t͡ʂən˨˩˩.ɕjoʊ˥˩"
+      },
+      "lines": [
+        [
+          61359,
+          60965,
+          59803,
+          59316
+        ],
+        [
+          60965,
+          61174
+        ],
+        [
+          59316,
+          59199
+        ],
+        [
+          59803,
+          60189
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_yuan_dynasty 28B",
+      "names": {
+        "en": "Changsha (Vassal of Chariot)",
+        "native": "长沙(附轸宿)",
+        "pronounce": "Cháng Shā",
+        "ipa": "t͡ʂʰɑŋ˧˥.ʂa˥"
+      },
+      "lines": [
+        [
+          60189,
+          60189
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_yuan_dynasty 28C",
+      "names": {
+        "en": "Left linchpin (Vassal of Chariot)",
+        "native": "左辖(附轸宿)",
+        "pronounce": "Zuǒ Xiá",
+        "ipa": "t͡swo˨˩˩.ɕja˧˥"
+      },
+      "lines": [
+        [
+          61174,
+          61174
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_yuan_dynasty 28D",
+      "names": {
+        "en": "Right linchpin (Vassal of Chariot)",
+        "native": "右辖(附轸宿)",
+        "pronounce": "Yòu Xiá",
+        "ipa": "joʊ˥˩.ɕja˧˥"
+      },
+      "lines": [
+        [
+          59199,
+          59199
+        ]
+      ],
+      "kind": "constellation"
+    }
+  ],
+  "names": {
+    "75097": {
+      "en": "Crown Prince",
+      "native": "太子",
+      "pronounce": "Tài Zǐ",
+      "ipa": "tʰaɪ˥˩.t͡sɹ̩˨˩˦"
+    },
+    "72607": {
+      "en": "Emperor",
+      "native": "帝",
+      "pronounce": "Dì",
+      "ipa": "ti˥˩"
+    },
+    "70692": {
+      "en": "Bastard",
+      "native": "庶子",
+      "pronounce": "Shù Zǐ",
+      "ipa": "ʂu˥˩.t͡sɹ̩˨˩˦"
+    },
+    "69112": {
+      "en": "Harem",
+      "native": "后宫",
+      "pronounce": "Hòu Gōng",
+      "ipa": "xoʊ˥˩.kʊŋ˥"
+    },
+    "62572": {
+      "en": "The Celestial Pivot",
+      "native": "天枢",
+      "pronounce": "Tiān Shū",
+      "ipa": "tʰjɛn˥.ʂu˥"
+    },
+    "62561": {
+      "en": "The Celestial Pivot",
+      "native": "天枢",
+      "pronounce": "Tiān Shū",
+      "ipa": "tʰjɛn˥.ʂu˥"
+    },
+    "68756": {
+      "en": "Right Pivot",
+      "native": "右枢",
+      "pronounce": "Yòu Shū",
+      "ipa": "joʊ˥˩.ʂu˥"
+    },
+    "61281": {
+      "en": "The Second Commandant",
+      "native": "少尉",
+      "pronounce": "Shào Wèi",
+      "ipa": "ʂɑʊ˥˩.weɪ˥˩"
+    },
+    "56211": {
+      "en": "The Great Advisor",
+      "native": "上辅",
+      "pronounce": "Shàng Fǔ",
+      "ipa": "ʂɑŋ˥˩.fʋ̩˨˩˦"
+    },
+    "46977": {
+      "en": "The Second Advisor",
+      "native": "少辅",
+      "pronounce": "Shào Fǔ",
+      "ipa": "ʂɑʊ˥˩.fʋ̩˨˩˦"
+    },
+    "29997": {
+      "en": "The Great Imperial Guard",
+      "native": "上卫",
+      "pronounce": "Shàng Wèi",
+      "ipa": "ʂɑŋ˥˩.weɪ˥˩"
+    },
+    "17959": {
+      "en": "The Second Imperial Guard",
+      "native": "少卫",
+      "pronounce": "Shào Wèi",
+      "ipa": "ʂɑʊ˥˩.weɪ˥˩"
+    },
+    "12273": {
+      "en": "The Great Imperial Minister",
+      "native": "上丞",
+      "pronounce": "Shàng Chéng",
+      "ipa": "ʂɑŋ˥˩.t͡ʂʰɤŋ˧˥"
+    },
+    "75458": {
+      "en": "Left Pivot",
+      "native": "左枢",
+      "pronounce": "Zuǒ Shū",
+      "ipa": "t͡swo˨˩˩.ʂu˥"
+    },
+    "78527": {
+      "en": "The Great Prime Minister",
+      "native": "上宰",
+      "pronounce": "Shàng Zǎi",
+      "ipa": "ʂɑŋ˥˩.t͡saɪ˨˩˦"
+    },
+    "78820": {
+      "en": "The Great Premier",
+      "native": "上相",
+      "pronounce": "Shàng Xiàng",
+      "ipa": "ʂɑŋ˥˩.ɕjɑŋ˥˩"
+    },
+    "80331": {
+      "en": "The Second Prime Minister",
+      "native": "少宰",
+      "pronounce": "Shào Zǎi",
+      "ipa": "ʂɑʊ˥˩.t͡saɪ˨˩˦"
+    },
+    "83895": {
+      "en": "The Great Protector",
+      "native": "上弼",
+      "pronounce": "Shàng Bì",
+      "ipa": "ʂɑŋ˥˩.pi˥˩"
+    },
+    "89937": {
+      "en": "The Second Protector",
+      "native": "少弼",
+      "pronounce": "Shào Bì",
+      "ipa": "ʂɑʊ˥˩.pi˥˩"
+    },
+    "101260": {
+      "en": "The Great Imperial Guard",
+      "native": "上卫",
+      "pronounce": "Shàng Wèi",
+      "ipa": "ʂɑŋ˥˩.weɪ˥˩"
+    },
+    "116727": {
+      "en": "The Second Imperial Guard",
+      "native": "少卫",
+      "pronounce": "Shào Wèi",
+      "ipa": "ʂɑʊ˥˩.weɪ˥˩"
+    },
+    "3721": {
+      "en": "The Second Imperial Minister",
+      "native": "少丞",
+      "pronounce": "Shào Chéng",
+      "ipa": "ʂɑʊ˥˩.t͡ʂʰɤŋ˧˥"
+    },
+    "54061": {
+      "en": "The Celestial Pivot",
+      "native": "天枢",
+      "pronounce": "Tiān Shū",
+      "ipa": "tʰjɛn˥.ʂu˥"
+    },
+    "53910": {
+      "en": "The Celestial Rotating Jade",
+      "native": "天璇",
+      "pronounce": "Tiān Xuán",
+      "ipa": "tʰjɛn˥.ɕɥæn˧˥"
+    },
+    "58001": {
+      "en": "The Celestial Shining Pearl",
+      "native": "天玑",
+      "pronounce": "Tiān Jī",
+      "ipa": "tʰjɛn˥.t͡ɕi˥"
+    },
+    "59774": {
+      "en": "The Celestial Balance",
+      "native": "天权",
+      "pronounce": "Tiān Quán",
+      "ipa": "tʰjɛn˥.t͡ɕʰɥæn˧˥"
+    },
+    "62956": {
+      "en": "The Jade Sighting-tube",
+      "native": "玉衡",
+      "pronounce": "Yù Héng",
+      "ipa": "y˥˩.xɤŋ˧˥"
+    },
+    "65378": {
+      "en": "The Opener of Heat",
+      "native": "开阳",
+      "pronounce": "Kāi Yáng",
+      "ipa": "kʰaɪ˥.jɑŋ˧˥"
+    },
+    "67301": {
+      "en": "The Twinkling Brilliance",
+      "native": "摇光",
+      "pronounce": "Yáo Guāng",
+      "ipa": "jɑʊ˧˥.kwɑŋ˥"
+    },
+    "57757": {
+      "en": "Right Law Administrator",
+      "native": "右执法",
+      "pronounce": "Yòu Zhí Fǎ",
+      "ipa": "joʊ˥˩.t͡ʂɻ̍˧˥.fa˨˩˦"
+    },
+    "55434": {
+      "en": "The Great General",
+      "native": "上将",
+      "pronounce": "Shàng Jiàng",
+      "ipa": "ʂɑŋ˥˩.t͡ɕjɑŋ˥˩"
+    },
+    "55642": {
+      "en": "The Second General",
+      "native": "次将",
+      "pronounce": "Cì Jiàng",
+      "ipa": "t͡sʰɹ̩˥˩.t͡ɕjɑŋ˥˩"
+    },
+    "54879": {
+      "en": "The Second Premier",
+      "native": "次相",
+      "pronounce": "Cì Xiàng",
+      "ipa": "t͡sʰɹ̩˥˩.ɕjɑŋ˥˩"
+    },
+    "54872": {
+      "en": "The Great Premier",
+      "native": "上相",
+      "pronounce": "Shàng Xiàng",
+      "ipa": "ʂɑŋ˥˩.ɕjɑŋ˥˩"
+    },
+    "60129": {
+      "en": "Left Law Administrator",
+      "native": "左执法",
+      "pronounce": "Zuǒ Zhí Fǎ",
+      "ipa": "t͡swo˨˩˩.t͡ʂɻ̍˧˥.fa˨˩˦"
+    },
+    "61941": {
+      "en": "The Great Premier",
+      "native": "上相",
+      "pronounce": "Shàng Xiàng",
+      "ipa": "ʂɑŋ˥˩.ɕjɑŋ˥˩"
+    },
+    "63090": {
+      "en": "The Second Premier",
+      "native": "次相",
+      "pronounce": "Cì Xiàng",
+      "ipa": "t͡sʰɹ̩˥˩.ɕjɑŋ˥˩"
+    },
+    "63608": {
+      "en": "The Second General",
+      "native": "次将",
+      "pronounce": "Cì Jiàng",
+      "ipa": "t͡sʰɹ̩˥˩.t͡ɕjɑŋ˥˩"
+    },
+    "64241": {
+      "en": "The Great General",
+      "native": "上将",
+      "pronounce": "Shàng Jiàng",
+      "ipa": "ʂɑŋ˥˩.t͡ɕjɑŋ˥˩"
+    },
+    "80816": {
+      "en": "Hezhong",
+      "native": "河中",
+      "pronounce": "Hé Zhōng",
+      "ipa": "xɤ˧˥.t͡ʂʊŋ˥"
+    },
+    "80170": {
+      "en": "Hejian",
+      "native": "河间",
+      "pronounce": "Hé Jiān",
+      "ipa": "xɤ˧˥.t͡ɕjɛn˥"
+    },
+    "79043": {
+      "en": "Jin",
+      "native": "晋",
+      "pronounce": "Jìn",
+      "ipa": "t͡ɕin˥˩"
+    },
+    "78072": {
+      "en": "Zheng",
+      "native": "郑",
+      "pronounce": "Zhèng",
+      "ipa": "t͡ʂɤŋ˥˩"
+    },
+    "77233": {
+      "en": "Zhou",
+      "native": "周",
+      "pronounce": "Zhōu",
+      "ipa": "t͡ʂoʊ˥"
+    },
+    "76276": {
+      "en": "Qin",
+      "native": "秦",
+      "pronounce": "Qín",
+      "ipa": "t͡ɕʰin˧˥"
+    },
+    "77070": {
+      "en": "Shu",
+      "native": "蜀",
+      "pronounce": "Shǔ",
+      "ipa": "ʂu˨˩˦"
+    },
+    "77622": {
+      "en": "Ba",
+      "native": "巴",
+      "pronounce": "Bā",
+      "ipa": "pa˥"
+    },
+    "79593": {
+      "en": "Liang",
+      "native": "梁",
+      "pronounce": "Liáng",
+      "ipa": "ljɑŋ˧˥"
+    },
+    "79882": {
+      "en": "Chu",
+      "native": "楚",
+      "pronounce": "Chǔ",
+      "ipa": "t͡ʂʰu˨˩˦"
+    },
+    "81377": {
+      "en": "Han",
+      "native": "韩",
+      "pronounce": "Hán",
+      "ipa": "xan˧˥"
+    },
+    "84379": {
+      "en": "Wei",
+      "native": "魏",
+      "pronounce": "Wèi",
+      "ipa": "weɪ˥˩"
+    },
+    "85693": {
+      "en": "Zhao",
+      "native": "赵",
+      "pronounce": "Zhào",
+      "ipa": "t͡ʂɑʊ˥˩"
+    },
+    "86974": {
+      "en": "Jiuhe",
+      "native": "九河",
+      "pronounce": "Jiǔ Hé",
+      "ipa": "t͡ɕjoʊ˨˩˩.xɤ˧˥"
+    },
+    "88794": {
+      "en": "Zhongshan",
+      "native": "中山",
+      "pronounce": "Zhōng Shān",
+      "ipa": "t͡ʂʊŋ˥.ʂan˥"
+    },
+    "92043": {
+      "en": "Qi",
+      "native": "齐",
+      "pronounce": "Qí",
+      "ipa": "t͡ɕʰi˧˥"
+    },
+    "93747": {
+      "en": "Wuyue",
+      "native": "吴越",
+      "pronounce": "Wú Yuè",
+      "ipa": "wu˧˥.ɥɛ˥˩"
+    },
+    "92946": {
+      "en": "Xu",
+      "native": "徐",
+      "pronounce": "Xú",
+      "ipa": "ɕy˧˥"
+    },
+    "89962": {
+      "en": "Donghai",
+      "native": "东海",
+      "pronounce": "Dōng Hǎi",
+      "ipa": "tʊŋ˥.xaɪ˨˩˦"
+    },
+    "88048": {
+      "en": "Yan",
+      "native": "燕",
+      "pronounce": "Yān",
+      "ipa": "jan˥˩"
+    },
+    "86263": {
+      "en": "Nanhai",
+      "native": "南海",
+      "pronounce": "Nán Hǎi",
+      "ipa": "nan˧˥.xaɪ˨˩˦"
+    },
+    "84012": {
+      "en": "Song",
+      "native": "宋",
+      "pronounce": "Sòng",
+      "ipa": "sʊŋ˥˩"
+    },
+    "74605": {
+      "en": "Hidden Virtue",
+      "native": "阴德",
+      "pronounce": "Yīn Dé",
+      "ipa": "jin˥.tɤ˧˥"
+    },
+    "73199": {
+      "en": "Hidden Virtue",
+      "native": "阴德",
+      "pronounce": "Yīn Dé",
+      "ipa": "jin˥.tɤ˧˥"
+    },
+    "86614": {
+      "en": "Female Protocol",
+      "native": "女史",
+      "pronounce": "Nǚ Shǐ",
+      "ipa": "ny˧˥.ʂɻ̍˨˩˦"
+    },
+    "88136": {
+      "en": "Maids-in-waiting",
+      "native": "御女",
+      "pronounce": "Yù Nǚ",
+      "ipa": "y˥˩.ny˨˩˦"
+    },
+    "87234": {
+      "en": "Maids-in-waiting",
+      "native": "御女",
+      "pronounce": "Yù Nǚ",
+      "ipa": "y˥˩.ny˨˩˦"
+    },
+    "78893": {
+      "en": "Chief Judge",
+      "native": "大理",
+      "pronounce": "Dà Lǐ",
+      "ipa": "ta˥˩.li˨˩˦"
+    },
+    "80650": {
+      "en": "Chief Judge",
+      "native": "大理",
+      "pronounce": "Dà Lǐ",
+      "ipa": "ta˥˩.li˨˩˦"
+    },
+    "113116": {
+      "en": "Curved Array",
+      "native": "钩陈",
+      "pronounce": "Gōu Chén",
+      "ipa": "koʊ˥.t͡ʂʰən˧˥"
+    },
+    "5372": {
+      "en": "Curved Array",
+      "native": "钩陈",
+      "pronounce": "Gōu Chén",
+      "ipa": "koʊ˥.t͡ʂʰən˧˥"
+    },
+    "11767": {
+      "en": "Curved Array",
+      "native": "钩陈",
+      "pronounce": "Gōu Chén",
+      "ipa": "koʊ˥.t͡ʂʰən˧˥"
+    },
+    "85822": {
+      "en": "Curved Array",
+      "native": "钩陈",
+      "pronounce": "Gōu Chén",
+      "ipa": "koʊ˥.t͡ʂʰən˧˥"
+    },
+    "82080": {
+      "en": "Curved Array",
+      "native": "钩陈",
+      "pronounce": "Gōu Chén",
+      "ipa": "koʊ˥.t͡ʂʰən˧˥"
+    },
+    "77055": {
+      "en": "Curved Array",
+      "native": "钩陈",
+      "pronounce": "Gōu Chén",
+      "ipa": "koʊ˥.t͡ʂʰən˧˥"
+    },
+    "112519": {
+      "en": "Interior Seats of the Five Emperors",
+      "native": "五帝内座",
+      "pronounce": "Wǔ Dì Nèi Zuò",
+      "ipa": "wu˨˩˩.ti˥˩.neɪ˥˩.t͡swo˥˩"
+    },
+    "4283": {
+      "en": "Interior Seats of the Five Emperors",
+      "native": "五帝内座",
+      "pronounce": "Wǔ Dì Nèi Zuò",
+      "ipa": "wu˨˩˩.ti˥˩.neɪ˥˩.t͡swo˥˩"
+    },
+    "94376": {
+      "en": "Celestial Kitchen",
+      "native": "天厨",
+      "pronounce": "Tiān Chú",
+      "ipa": "tʰjɛn˥.t͡ʂʰu˧˥"
+    },
+    "97433": {
+      "en": "Celestial Kitchen",
+      "native": "天厨",
+      "pronounce": "Tiān Chú",
+      "ipa": "tʰjɛn˥.t͡ʂʰu˧˥"
+    },
+    "98702": {
+      "en": "Celestial Kitchen",
+      "native": "天厨",
+      "pronounce": "Tiān Chú",
+      "ipa": "tʰjɛn˥.t͡ʂʰu˧˥"
+    },
+    "95081": {
+      "en": "Celestial Kitchen",
+      "native": "天厨",
+      "pronounce": "Tiān Chú",
+      "ipa": "tʰjɛn˥.t͡ʂʰu˧˥"
+    },
+    "92782": {
+      "en": "Celestial Kitchen",
+      "native": "天厨",
+      "pronounce": "Tiān Chú",
+      "ipa": "tʰjɛn˥.t͡ʂʰu˧˥"
+    },
+    "94648": {
+      "en": "Celestial Kitchen",
+      "native": "天厨",
+      "pronounce": "Tiān Chú",
+      "ipa": "tʰjɛn˥.t͡ʂʰu˧˥"
+    },
+    "87585": {
+      "en": "Celestial Flail",
+      "native": "天棓",
+      "pronounce": "Tiān Bàng",
+      "ipa": "tʰjɛn˥.pɑŋ˥˩"
+    },
+    "85819": {
+      "en": "Celestial Flail",
+      "native": "天棓",
+      "pronounce": "Tiān Bàng",
+      "ipa": "tʰjɛn˥.pɑŋ˥˩"
+    },
+    "85670": {
+      "en": "Celestial Flail",
+      "native": "天棓",
+      "pronounce": "Tiān Bàng",
+      "ipa": "tʰjɛn˥.pɑŋ˥˩"
+    },
+    "87833": {
+      "en": "Celestial Flail",
+      "native": "天棓",
+      "pronounce": "Tiān Bàng",
+      "ipa": "tʰjɛn˥.pɑŋ˥˩"
+    },
+    "62423": {
+      "en": "Inner Kitchen",
+      "native": "内厨",
+      "pronounce": "Nèi Chú",
+      "ipa": "neɪ˥˩.t͡ʂʰu˧˥"
+    },
+    "63076": {
+      "en": "Inner Kitchen",
+      "native": "内厨",
+      "pronounce": "Nèi Chú",
+      "ipa": "neɪ˥˩.t͡ʂʰu˧˥"
+    },
+    "45075": {
+      "en": "Administrative Center",
+      "native": "文昌",
+      "pronounce": "Wén Chāng",
+      "ipa": "wən˧˥.t͡ʂʰɑŋ˥"
+    },
+    "46733": {
+      "en": "Administrative Center",
+      "native": "文昌",
+      "pronounce": "Wén Chāng",
+      "ipa": "wən˧˥.t͡ʂʰɑŋ˥"
+    },
+    "48319": {
+      "en": "Administrative Center",
+      "native": "文昌",
+      "pronounce": "Wén Chāng",
+      "ipa": "wən˧˥.t͡ʂʰɑŋ˥"
+    },
+    "48402": {
+      "en": "Administrative Center",
+      "native": "文昌",
+      "pronounce": "Wén Chāng",
+      "ipa": "wən˧˥.t͡ʂʰɑŋ˥"
+    },
+    "46853": {
+      "en": "Administrative Center",
+      "native": "文昌",
+      "pronounce": "Wén Chāng",
+      "ipa": "wən˧˥.t͡ʂʰɑŋ˥"
+    },
+    "45493": {
+      "en": "Administrative Center",
+      "native": "文昌",
+      "pronounce": "Wén Chāng",
+      "ipa": "wən˧˥.t͡ʂʰɑŋ˥"
+    },
+    "50933": {
+      "en": "Three Top Instructors",
+      "native": "三师",
+      "pronounce": "Sān Shī",
+      "ipa": "san˥.ʂɻ̍˥"
+    },
+    "51448": {
+      "en": "Three Top Instructors",
+      "native": "三师",
+      "pronounce": "Sān Shī",
+      "ipa": "san˥.ʂɻ̍˥"
+    },
+    "55266": {
+      "en": "Royals",
+      "native": "太尊",
+      "pronounce": "Tài Zūn",
+      "ipa": "tʰaɪ˥˩.t͡swən˥"
+    },
+    "66234": {
+      "en": "Three Excellencies (In Purple Forbidden Enclosure)",
+      "native": "三公(紫微垣)",
+      "pronounce": "Sān Gōng(Zǐ Wēi Yuán)",
+      "ipa": "san˥.kʊŋ˥(t͡sɹ̩˨˩˩.weɪ˥.ɥæn˧˥)"
+    },
+    "65754": {
+      "en": "Three Excellencies (In Purple Forbidden Enclosure)",
+      "native": "三公(紫微垣)",
+      "pronounce": "Sān Gōng(Zǐ Wēi Yuán)",
+      "ipa": "san˥.kʊŋ˥(t͡sɹ̩˨˩˩.weɪ˥.ɥæn˧˥)"
+    },
+    "64906": {
+      "en": "Three Excellencies (In Purple Forbidden Enclosure)",
+      "native": "三公(紫微垣)",
+      "pronounce": "Sān Gōng(Zǐ Wēi Yuán)",
+      "ipa": "san˥.kʊŋ˥(t͡sɹ̩˨˩˩.weɪ˥.ɥæn˧˥)"
+    },
+    "69732": {
+      "en": "Sombre Lance",
+      "native": "玄戈",
+      "pronounce": "Xuán Gē",
+      "ipa": "ɕɥæn˧˥.kɤ˥"
+    },
+    "65477": {
+      "en": "Northern Dipper",
+      "native": "北斗",
+      "pronounce": "Běi Dǒu",
+      "ipa": "peɪ˧˥.toʊ˨˩˦"
+    },
+    "60172": {
+      "en": "Usher to the Court",
+      "native": "谒者",
+      "pronounce": "Yè Zhě",
+      "ipa": "jɛ˥˩.t͡ʂɤ˨˩˦"
+    },
+    "61960": {
+      "en": "Nine Senior Officers",
+      "native": "九卿",
+      "pronounce": "Jiǔ Qīng",
+      "ipa": "t͡ɕjoʊ˨˩˩.t͡ɕʰiŋ˥"
+    },
+    "62267": {
+      "en": "Nine Senior Officers",
+      "native": "九卿",
+      "pronounce": "Jiǔ Qīng",
+      "ipa": "t͡ɕjoʊ˨˩˩.t͡ɕʰiŋ˥"
+    },
+    "61968": {
+      "en": "Nine Senior Officers",
+      "native": "九卿",
+      "pronounce": "Jiǔ Qīng",
+      "ipa": "t͡ɕjoʊ˨˩˩.t͡ɕʰiŋ˥"
+    },
+    "60202": {
+      "en": "Five Lords",
+      "native": "五诸侯(太微垣)",
+      "pronounce": "Wǔ Zhū Hóu(Tài Wēi Yuán)",
+      "ipa": "wu˨˩˩.t͡ʂu˥.xoʊ˧˥(tʰaɪ˥˩.weɪ˥.ɥæn˧˥)"
+    },
+    "61418": {
+      "en": "Five Lords",
+      "native": "五诸侯(太微垣)",
+      "pronounce": "Wǔ Zhū Hóu(Tài Wēi Yuán)",
+      "ipa": "wu˨˩˩.t͡ʂu˥.xoʊ˧˥(tʰaɪ˥˩.weɪ˥.ɥæn˧˥)"
+    },
+    "62356": {
+      "en": "Five Lords",
+      "native": "五诸侯(太微垣)",
+      "pronounce": "Wǔ Zhū Hóu(Tài Wēi Yuán)",
+      "ipa": "wu˨˩˩.t͡ʂu˥.xoʊ˧˥(tʰaɪ˥˩.weɪ˥.ɥæn˧˥)"
+    },
+    "62541": {
+      "en": "Five Lords",
+      "native": "五诸侯(太微垣)",
+      "pronounce": "Wǔ Zhū Hóu(Tài Wēi Yuán)",
+      "ipa": "wu˨˩˩.t͡ʂu˥.xoʊ˧˥(tʰaɪ˥˩.weɪ˥.ɥæn˧˥)"
+    },
+    "63355": {
+      "en": "Five Lords",
+      "native": "五诸侯(太微垣)",
+      "pronounce": "Wǔ Zhū Hóu(Tài Wēi Yuán)",
+      "ipa": "wu˨˩˩.t͡ʂu˥.xoʊ˧˥(tʰaɪ˥˩.weɪ˥.ɥæn˧˥)"
+    },
+    "57328": {
+      "en": "Inner Screen",
+      "native": "内屏",
+      "pronounce": "Nèi Píng",
+      "ipa": "neɪ˥˩.pʰiŋ˧˥"
+    },
+    "57380": {
+      "en": "Inner Screen",
+      "native": "内屏",
+      "pronounce": "Nèi Píng",
+      "ipa": "neɪ˥˩.pʰiŋ˧˥"
+    },
+    "58590": {
+      "en": "Inner Screen",
+      "native": "内屏",
+      "pronounce": "Nèi Píng",
+      "ipa": "neɪ˥˩.pʰiŋ˧˥"
+    },
+    "58948": {
+      "en": "Inner Screen",
+      "native": "内屏",
+      "pronounce": "Nèi Píng",
+      "ipa": "neɪ˥˩.pʰiŋ˧˥"
+    },
+    "57632": {
+      "en": "Seats of the Five Emperors",
+      "native": "五帝座",
+      "pronounce": "Wǔ Dì Zuò",
+      "ipa": "wu˨˩˩.ti˥˩.t͡swo˥˩"
+    },
+    "57565": {
+      "en": "Crown Prince",
+      "native": "太子",
+      "pronounce": "Tài Zǐ",
+      "ipa": "tʰaɪ˥˩.t͡sɹ̩˨˩˦"
+    },
+    "56975": {
+      "en": "Retinue (In Supreme Palace Enclosure)",
+      "native": "从官(太微垣)",
+      "pronounce": "Cóng Guān(Tài Wēi Yuán)",
+      "ipa": "t͡sʰʊŋ˧˥.kwan˥(tʰaɪ˥˩.weɪ˥.ɥæn˧˥)"
+    },
+    "63121": {
+      "en": "Captain of the Bodyguards",
+      "native": "郎将",
+      "pronounce": "Láng Jiàng",
+      "ipa": "lɑŋ˧˥.t͡ɕjɑŋ˥˩"
+    },
+    "54951": {
+      "en": "Emperor's Bodyguard",
+      "native": "虎贲",
+      "pronounce": "Hǔ Bēn",
+      "ipa": "xu˨˩˩.pən˥"
+    },
+    "60742": {
+      "en": "Officers of the Imperial Guard",
+      "native": "郎位",
+      "pronounce": "Láng Wèi",
+      "ipa": "lɑŋ˧˥.weɪ˥˩"
+    },
+    "55084": {
+      "en": "The Hall of Glory",
+      "native": "明堂",
+      "pronounce": "Míng Táng",
+      "ipa": "miŋ˧˥.tʰɑŋ˧˥"
+    },
+    "56127": {
+      "en": "The Hall of Glory",
+      "native": "明堂",
+      "pronounce": "Míng Táng",
+      "ipa": "miŋ˧˥.tʰɑŋ˧˥"
+    },
+    "56647": {
+      "en": "The Hall of Glory",
+      "native": "明堂",
+      "pronounce": "Míng Táng",
+      "ipa": "miŋ˧˥.tʰɑŋ˧˥"
+    },
+    "54182": {
+      "en": "Astronomical Observatory",
+      "native": "灵台",
+      "pronounce": "Líng Tái",
+      "ipa": "liŋ˧˥.tʰaɪ˧˥"
+    },
+    "53449": {
+      "en": "Astronomical Observatory",
+      "native": "灵台",
+      "pronounce": "Líng Tái",
+      "ipa": "liŋ˧˥.tʰaɪ˧˥"
+    },
+    "53807": {
+      "en": "Astronomical Observatory",
+      "native": "灵台",
+      "pronounce": "Líng Tái",
+      "ipa": "liŋ˧˥.tʰaɪ˧˥"
+    },
+    "44127": {
+      "en": "Three Steps (Upper Step)",
+      "native": "三台(上台)",
+      "pronounce": "Sān Tái (Shàng Tái)",
+      "ipa": "san˥.tʰaɪ˧˥(ʂɑŋ˥˩.tʰaɪ˧˥)"
+    },
+    "44471": {
+      "en": "Three Steps (Upper Step)",
+      "native": "三台(上台)",
+      "pronounce": "Sān Tái (Shàng Tái)",
+      "ipa": "san˥.tʰaɪ˧˥(ʂɑŋ˥˩.tʰaɪ˧˥)"
+    },
+    "50372": {
+      "en": "Three Steps (Middle Step)",
+      "native": "三台(中台)",
+      "pronounce": "Sān Tái (Zhōng Tái)",
+      "ipa": "san˥.tʰaɪ˧˥(t͡ʂʊŋ˥.tʰaɪ˧˥)"
+    },
+    "50801": {
+      "en": "Three Steps (Middle Step)",
+      "native": "三台(中台)",
+      "pronounce": "Sān Tái (Zhōng Tái)",
+      "ipa": "san˥.tʰaɪ˧˥(t͡ʂʊŋ˥.tʰaɪ˧˥)"
+    },
+    "55219": {
+      "en": "Three Steps (Lower Step)",
+      "native": "三台(下台)",
+      "pronounce": "Sān Tái (Xià Tái)",
+      "ipa": "san˥.tʰaɪ˧˥(ɕja˥˩.tʰaɪ˧˥)"
+    },
+    "55203": {
+      "en": "Three Steps (Lower Step)",
+      "native": "三台(下台)",
+      "pronounce": "Sān Tái (Xià Tái)",
+      "ipa": "san˥.tʰaɪ˧˥(ɕja˥˩.tʰaɪ˧˥)"
+    },
+    "86565": {
+      "en": "Municipal Office",
+      "native": "市楼",
+      "pronounce": "Shì Lóu",
+      "ipa": "ʂɻ̍˥˩.loʊ˧˥"
+    },
+    "83262": {
+      "en": "Municipal Office",
+      "native": "市楼",
+      "pronounce": "Shì Lóu",
+      "ipa": "ʂɻ̍˥˩.loʊ˧˥"
+    },
+    "84880": {
+      "en": "Municipal Office",
+      "native": "市楼",
+      "pronounce": "Shì Lóu",
+      "ipa": "ʂɻ̍˥˩.loʊ˧˥"
+    },
+    "85365": {
+      "en": "Municipal Office",
+      "native": "市楼",
+      "pronounce": "Shì Lóu",
+      "ipa": "ʂɻ̍˥˩.loʊ˧˥"
+    },
+    "83962": {
+      "en": "Municipal Office",
+      "native": "市楼",
+      "pronounce": "Shì Lóu",
+      "ipa": "ʂɻ̍˥˩.loʊ˧˥"
+    },
+    "86284": {
+      "en": "Municipal Office",
+      "native": "市楼",
+      "pronounce": "Shì Lóu",
+      "ipa": "ʂɻ̍˥˩.loʊ˧˥"
+    },
+    "82162": {
+      "en": "Commodity Market",
+      "native": "车肆",
+      "pronounce": "Chē Sì",
+      "ipa": "t͡ʂʰɤ˥.sɹ̩˥˩"
+    },
+    "80693": {
+      "en": "Commodity Market",
+      "native": "车肆",
+      "pronounce": "Chē Sì",
+      "ipa": "t͡ʂʰɤ˥.sɹ̩˥˩"
+    },
+    "86742": {
+      "en": "Official for the Royal Clan",
+      "native": "宗正",
+      "pronounce": "Zōng Zhèng",
+      "ipa": "t͡sʊŋ˥.t͡ʂɤŋ˥˩"
+    },
+    "87108": {
+      "en": "Official for the Royal Clan",
+      "native": "宗正",
+      "pronounce": "Zōng Zhèng",
+      "ipa": "t͡sʊŋ˥.t͡ʂɤŋ˥˩"
+    },
+    "88601": {
+      "en": "Official of Religious Ceremonies",
+      "native": "宗人",
+      "pronounce": "Zōng Rén",
+      "ipa": "t͡sʊŋ˥.ɻən˧˥"
+    },
+    "88192": {
+      "en": "Official of Religious Ceremonies",
+      "native": "宗人",
+      "pronounce": "Zōng Rén",
+      "ipa": "t͡sʊŋ˥.ɻən˧˥"
+    },
+    "88290": {
+      "en": "Official of Religious Ceremonies",
+      "native": "宗人",
+      "pronounce": "Zōng Rén",
+      "ipa": "t͡sʊŋ˥.ɻən˧˥"
+    },
+    "88149": {
+      "en": "Official of Religious Ceremonies",
+      "native": "宗人",
+      "pronounce": "Zōng Rén",
+      "ipa": "t͡sʊŋ˥.ɻən˧˥"
+    },
+    "88765": {
+      "en": "Patriarchal Clan Stars",
+      "native": "宗星",
+      "pronounce": "Zōng Xīng",
+      "ipa": "t͡sʊŋ˥.ɕiŋ˥"
+    },
+    "88771": {
+      "en": "Patriarchal Clan Stars",
+      "native": "宗星",
+      "pronounce": "Zōng Xīng",
+      "ipa": "t͡sʊŋ˥.ɕiŋ˥"
+    },
+    "88267": {
+      "en": "Textile Ruler",
+      "native": "帛度",
+      "pronounce": "Bó Dù",
+      "ipa": "pwo˧˥.tu˥˩"
+    },
+    "88899": {
+      "en": "Textile Ruler",
+      "native": "帛度",
+      "pronounce": "Bó Dù",
+      "ipa": "pwo˧˥.tu˥˩"
+    },
+    "86032": {
+      "en": "Astrologer Star",
+      "native": "候星",
+      "pronounce": "Hòu Xīng",
+      "ipa": "xoʊ˥˩.ɕiŋ˥"
+    },
+    "84345": {
+      "en": "Emperor's Seat",
+      "native": "帝座",
+      "pronounce": "Dì Zuò",
+      "ipa": "ti˥˩.t͡swo˥˩"
+    },
+    "83478": {
+      "en": "Eunuch Official",
+      "native": "宦者",
+      "pronounce": "Huàn Zhě",
+      "ipa": "xwan˥˩.t͡ʂɤ˨˩˦"
+    },
+    "83613": {
+      "en": "Eunuch Official",
+      "native": "宦者",
+      "pronounce": "Huàn Zhě",
+      "ipa": "xwan˥˩.t͡ʂɤ˨˩˦"
+    },
+    "80179": {
+      "en": "Jewel Market",
+      "native": "列肆",
+      "pronounce": "Liè Sì",
+      "ipa": "ljɛ˥˩.sɹ̩˥˩"
+    },
+    "80883": {
+      "en": "Jewel Market",
+      "native": "列肆",
+      "pronounce": "Liè Sì",
+      "ipa": "ljɛ˥˩.sɹ̩˥˩"
+    },
+    "83000": {
+      "en": "Dipper for Liquids",
+      "native": "斗",
+      "pronounce": "Dǒu",
+      "ipa": "toʊ˨˩˦"
+    },
+    "82673": {
+      "en": "Dipper for Liquids",
+      "native": "斗",
+      "pronounce": "Dǒu",
+      "ipa": "toʊ˨˩˦"
+    },
+    "82073": {
+      "en": "Dipper for Liquids",
+      "native": "斗",
+      "pronounce": "Dǒu",
+      "ipa": "toʊ˨˩˦"
+    },
+    "82402": {
+      "en": "Dipper for Liquids",
+      "native": "斗",
+      "pronounce": "Dǒu",
+      "ipa": "toʊ˨˩˦"
+    },
+    "82216": {
+      "en": "Dipper for Liquids",
+      "native": "斗",
+      "pronounce": "Dǒu",
+      "ipa": "toʊ˨˩˦"
+    },
+    "80351": {
+      "en": "Dipper for Solids",
+      "native": "斛",
+      "pronounce": "Hú",
+      "ipa": "xu˧˥"
+    },
+    "81007": {
+      "en": "Dipper for Solids",
+      "native": "斛",
+      "pronounce": "Hú",
+      "ipa": "xu˧˥"
+    },
+    "81641": {
+      "en": "Dipper for Solids",
+      "native": "斛",
+      "pronounce": "Hú",
+      "ipa": "xu˧˥"
+    },
+    "81833": {
+      "en": "Seven Excellencies",
+      "native": "七公",
+      "pronounce": "Qī Gōng",
+      "ipa": "t͡ɕʰi˥.kʊŋ˥"
+    },
+    "80460": {
+      "en": "Seven Excellencies",
+      "native": "七公",
+      "pronounce": "Qī Gōng",
+      "ipa": "t͡ɕʰi˥.kʊŋ˥"
+    },
+    "79119": {
+      "en": "Seven Excellencies",
+      "native": "七公",
+      "pronounce": "Qī Gōng",
+      "ipa": "t͡ɕʰi˥.kʊŋ˥"
+    },
+    "77655": {
+      "en": "Seven Excellencies",
+      "native": "七公",
+      "pronounce": "Qī Gōng",
+      "ipa": "t͡ɕʰi˥.kʊŋ˥"
+    },
+    "76669": {
+      "en": "Seven Excellencies",
+      "native": "七公",
+      "pronounce": "Qī Gōng",
+      "ipa": "t͡ɕʰi˥.kʊŋ˥"
+    },
+    "75411": {
+      "en": "Seven Excellencies",
+      "native": "七公",
+      "pronounce": "Qī Gōng",
+      "ipa": "t͡ɕʰi˥.kʊŋ˥"
+    },
+    "74666": {
+      "en": "Seven Excellencies",
+      "native": "七公",
+      "pronounce": "Qī Gōng",
+      "ipa": "t͡ɕʰi˥.kʊŋ˥"
+    },
+    "81693": {
+      "en": "Celestial Discipline",
+      "native": "天纪",
+      "pronounce": "Tiān Jì",
+      "ipa": "tʰjɛn˥.t͡ɕi˥˩"
+    },
+    "82587": {
+      "en": "Celestial Discipline",
+      "native": "天纪",
+      "pronounce": "Tiān Jì",
+      "ipa": "tʰjɛn˥.t͡ɕi˥˩"
+    },
+    "83207": {
+      "en": "Celestial Discipline",
+      "native": "天纪",
+      "pronounce": "Tiān Jì",
+      "ipa": "tʰjɛn˥.t͡ɕi˥˩"
+    },
+    "84573": {
+      "en": "Celestial Discipline",
+      "native": "天纪",
+      "pronounce": "Tiān Jì",
+      "ipa": "tʰjɛn˥.t͡ɕi˥˩"
+    },
+    "87808": {
+      "en": "Celestial Discipline",
+      "native": "天纪",
+      "pronounce": "Tiān Jì",
+      "ipa": "tʰjɛn˥.t͡ɕi˥˩"
+    },
+    "89826": {
+      "en": "Celestial Discipline",
+      "native": "天纪",
+      "pronounce": "Tiān Jì",
+      "ipa": "tʰjɛn˥.t͡ɕi˥˩"
+    },
+    "84380": {
+      "en": "Woman's Bed",
+      "native": "女床",
+      "pronounce": "Nǚ Chuáng",
+      "ipa": "ny˨˩˩.t͡ʂʰwɑŋ˧˥"
+    },
+    "84606": {
+      "en": "Woman's Bed",
+      "native": "女床",
+      "pronounce": "Nǚ Chuáng",
+      "ipa": "ny˨˩˩.t͡ʂʰwɑŋ˧˥"
+    },
+    "85112": {
+      "en": "Woman's Bed",
+      "native": "女床",
+      "pronounce": "Nǚ Chuáng",
+      "ipa": "ny˨˩˩.t͡ʂʰwɑŋ˧˥"
+    },
+    "65474": {
+      "en": "Horn",
+      "native": "角宿",
+      "pronounce": "Jiǎo Xiù",
+      "ipa": "t͡ɕjɑʊ˨˩˩.ɕjoʊ˥˩"
+    },
+    "66249": {
+      "en": "Horn",
+      "native": "角宿",
+      "pronounce": "Jiǎo Xiù",
+      "ipa": "t͡ɕjɑʊ˨˩˩.ɕjoʊ˥˩"
+    },
+    "65420": {
+      "en": "Flat Road",
+      "native": "平道",
+      "pronounce": "Píng Dào",
+      "ipa": "pʰiŋ˧˥.tɑʊ˥˩"
+    },
+    "66006": {
+      "en": "Flat Road",
+      "native": "平道",
+      "pronounce": "Píng Dào",
+      "ipa": "pʰiŋ˧˥.tɑʊ˥˩"
+    },
+    "66936": {
+      "en": "Celestial Farmland (In Horn Mansion)",
+      "native": "天田(角宿)",
+      "pronounce": "Tiān Tián(Jiǎo Xiù)",
+      "ipa": "tʰjɛn˥.tʰjɛn˧˥(t͡ɕjɑʊ˨˩˩.ɕjoʊ˥˩)"
+    },
+    "66200": {
+      "en": "Celestial Farmland (In Horn Mansion)",
+      "native": "天田(角宿)",
+      "pronounce": "Tiān Tián(Jiǎo Xiù)",
+      "ipa": "tʰjɛn˥.tʰjɛn˧˥(t͡ɕjɑʊ˨˩˩.ɕjoʊ˥˩)"
+    },
+    "64238": {
+      "en": "Recommending Virtuous Men",
+      "native": "进贤",
+      "pronounce": "Jìn Xián",
+      "ipa": "t͡ɕin˥˩.ɕjɛn˧˥"
+    },
+    "67480": {
+      "en": "Tripod of the Zhou",
+      "native": "周鼎",
+      "pronounce": "Zhōu Dǐng",
+      "ipa": "t͡ʂoʊ˥.tiŋ˨˩˦"
+    },
+    "66763": {
+      "en": "Tripod of the Zhou",
+      "native": "周鼎",
+      "pronounce": "Zhōu Dǐng",
+      "ipa": "t͡ʂoʊ˥.tiŋ˨˩˦"
+    },
+    "66727": {
+      "en": "Tripod of the Zhou",
+      "native": "周鼎",
+      "pronounce": "Zhōu Dǐng",
+      "ipa": "t͡ʂoʊ˥.tiŋ˨˩˦"
+    },
+    "64407": {
+      "en": "Celestial Gate",
+      "native": "天门",
+      "pronounce": "Tiān Mén",
+      "ipa": "tʰjɛn˥.mən˧˥"
+    },
+    "65639": {
+      "en": "Celestial Gate",
+      "native": "天门",
+      "pronounce": "Tiān Mén",
+      "ipa": "tʰjɛn˥.mən˧˥"
+    },
+    "68895": {
+      "en": "Judging Stars",
+      "native": "平星",
+      "pronounce": "Píng Xīng",
+      "ipa": "pʰiŋ˧˥.ɕiŋ˥"
+    },
+    "64962": {
+      "en": "Judging Stars",
+      "native": "平星",
+      "pronounce": "Píng Xīng",
+      "ipa": "pʰiŋ˧˥.ɕiŋ˥"
+    },
+    "69427": {
+      "en": "Neck",
+      "native": "亢宿",
+      "pronounce": "Kàng Xiù",
+      "ipa": "kʰɑŋ˥˩.ɕjoʊ˥˩"
+    },
+    "69701": {
+      "en": "Neck",
+      "native": "亢宿",
+      "pronounce": "Kàng Xiù",
+      "ipa": "kʰɑŋ˥˩.ɕjoʊ˥˩"
+    },
+    "70755": {
+      "en": "Neck",
+      "native": "亢宿",
+      "pronounce": "Kàng Xiù",
+      "ipa": "kʰɑŋ˥˩.ɕjoʊ˥˩"
+    },
+    "69974": {
+      "en": "Neck",
+      "native": "亢宿",
+      "pronounce": "Kàng Xiù",
+      "ipa": "kʰɑŋ˥˩.ɕjoʊ˥˩"
+    },
+    "69673": {
+      "en": "Great Horn",
+      "native": "大角",
+      "pronounce": "Dà Jiǎo",
+      "ipa": "ta˥˩.t͡ɕjɑʊ˨˩˦"
+    },
+    "72125": {
+      "en": "Left Conductor",
+      "native": "左摄提",
+      "pronounce": "Zuǒ Shè Tí",
+      "ipa": "t͡swo˨˩˩.ʂɤ˥˩.tʰi˧˥"
+    },
+    "71762": {
+      "en": "Left Conductor",
+      "native": "左摄提",
+      "pronounce": "Zuǒ Shè Tí",
+      "ipa": "t͡swo˨˩˩.ʂɤ˥˩.tʰi˧˥"
+    },
+    "71795": {
+      "en": "Left Conductor",
+      "native": "左摄提",
+      "pronounce": "Zuǒ Shè Tí",
+      "ipa": "t͡swo˨˩˩.ʂɤ˥˩.tʰi˧˥"
+    },
+    "67927": {
+      "en": "Right Conductor",
+      "native": "右摄提",
+      "pronounce": "Yòu Shè Tí",
+      "ipa": "joʊ˥˩.ʂɤ˥˩.tʰi˧˥"
+    },
+    "67275": {
+      "en": "Right Conductor",
+      "native": "右摄提",
+      "pronounce": "Yòu Shè Tí",
+      "ipa": "joʊ˥˩.ʂɤ˥˩.tʰi˧˥"
+    },
+    "67459": {
+      "en": "Right Conductor",
+      "native": "右摄提",
+      "pronounce": "Yòu Shè Tí",
+      "ipa": "joʊ˥˩.ʂɤ˥˩.tʰi˧˥"
+    },
+    "72622": {
+      "en": "Root",
+      "native": "氐宿",
+      "pronounce": "Dī Xiù",
+      "ipa": "ti˥.ɕjoʊ˥˩"
+    },
+    "74392": {
+      "en": "Root",
+      "native": "氐宿",
+      "pronounce": "Dī Xiù",
+      "ipa": "ti˥.ɕjoʊ˥˩"
+    },
+    "76333": {
+      "en": "Root",
+      "native": "氐宿",
+      "pronounce": "Dī Xiù",
+      "ipa": "ti˥.ɕjoʊ˥˩"
+    },
+    "74785": {
+      "en": "Root",
+      "native": "氐宿",
+      "pronounce": "Dī Xiù",
+      "ipa": "ti˥.ɕjoʊ˥˩"
+    },
+    "77516": {
+      "en": "Celestial Milk",
+      "native": "天乳",
+      "pronounce": "Tiān Rǔ",
+      "ipa": "tʰjɛn˥.ɻu˨˩˦"
+    },
+    "71075": {
+      "en": "Twinkling Indicator",
+      "native": "招摇",
+      "pronounce": "Zhāo Yáo",
+      "ipa": "t͡ʂɑʊ˥.jɑʊ˧˥"
+    },
+    "72105": {
+      "en": "Celestial Lance",
+      "native": "梗河",
+      "pronounce": "Gěng Hé",
+      "ipa": "kɤŋ˨˩˩.xɤ˧˥"
+    },
+    "71284": {
+      "en": "Celestial Lance",
+      "native": "梗河",
+      "pronounce": "Gěng Hé",
+      "ipa": "kɤŋ˨˩˩.xɤ˧˥"
+    },
+    "71053": {
+      "en": "Celestial Lance",
+      "native": "梗河",
+      "pronounce": "Gěng Hé",
+      "ipa": "kɤŋ˨˩˩.xɤ˧˥"
+    },
+    "72659": {
+      "en": "Mattress of the Emperor",
+      "native": "帝席",
+      "pronounce": "Dì Xí",
+      "ipa": "ti˥˩.ɕi˧˥"
+    },
+    "76470": {
+      "en": "Celestial Spokes",
+      "native": "天辐",
+      "pronounce": "Tiān Fú",
+      "ipa": "tʰjɛn˥.fʋ̩˧˥"
+    },
+    "76600": {
+      "en": "Celestial Spokes",
+      "native": "天辐",
+      "pronounce": "Tiān Fú",
+      "ipa": "tʰjɛn˥.fʋ̩˧˥"
+    },
+    "78401": {
+      "en": "Room",
+      "native": "房宿",
+      "pronounce": "Fáng Xiù",
+      "ipa": "fɑŋ˧˥.ɕjoʊ˥˩"
+    },
+    "78265": {
+      "en": "Room",
+      "native": "房宿",
+      "pronounce": "Fáng Xiù",
+      "ipa": "fɑŋ˧˥.ɕjoʊ˥˩"
+    },
+    "78104": {
+      "en": "Room",
+      "native": "房宿",
+      "pronounce": "Fáng Xiù",
+      "ipa": "fɑŋ˧˥.ɕjoʊ˥˩"
+    },
+    "79374": {
+      "en": "Door Bolt",
+      "native": "键闭",
+      "pronounce": "Jiàn Bì",
+      "ipa": "t͡ɕjɛn˥˩.pi˥˩"
+    },
+    "78933": {
+      "en": "Lock (Vassal of Room)",
+      "native": "钩钤(附房宿)",
+      "pronounce": "Gōu Qián",
+      "ipa": "koʊ˥.t͡ɕʰjɛn˧˥"
+    },
+    "78990": {
+      "en": "Lock (Vassal of Room)",
+      "native": "钩钤(附房宿)",
+      "pronounce": "Gōu Qián",
+      "ipa": "koʊ˥.t͡ɕʰjɛn˧˥"
+    },
+    "80343": {
+      "en": "Punishment",
+      "native": "罚",
+      "pronounce": "Fá",
+      "ipa": "fa˧˥"
+    },
+    "80569": {
+      "en": "Punishment",
+      "native": "罚",
+      "pronounce": "Fá",
+      "ipa": "fa˧˥"
+    },
+    "80894": {
+      "en": "Punishment",
+      "native": "罚",
+      "pronounce": "Fá",
+      "ipa": "fa˧˥"
+    },
+    "81724": {
+      "en": "Eastern Door",
+      "native": "东咸",
+      "pronounce": "Dōng Xián",
+      "ipa": "tʊŋ˥.ɕjɛn˧˥"
+    },
+    "81754": {
+      "en": "Eastern Door",
+      "native": "东咸",
+      "pronounce": "Dōng Xián",
+      "ipa": "tʊŋ˥.ɕjɛn˧˥"
+    },
+    "80975": {
+      "en": "Eastern Door",
+      "native": "东咸",
+      "pronounce": "Dōng Xián",
+      "ipa": "tʊŋ˥.ɕjɛn˧˥"
+    },
+    "80473": {
+      "en": "Eastern Door",
+      "native": "东咸",
+      "pronounce": "Dōng Xián",
+      "ipa": "tʊŋ˥.ɕjɛn˧˥"
+    },
+    "79375": {
+      "en": "Western Door",
+      "native": "西咸",
+      "pronounce": "Xī Xián",
+      "ipa": "ɕi˥.ɕjɛn˧˥"
+    },
+    "78727": {
+      "en": "Western Door",
+      "native": "西咸",
+      "pronounce": "Xī Xián",
+      "ipa": "ɕi˥.ɕjɛn˧˥"
+    },
+    "78207": {
+      "en": "Western Door",
+      "native": "西咸",
+      "pronounce": "Xī Xián",
+      "ipa": "ɕi˥.ɕjɛn˧˥"
+    },
+    "77853": {
+      "en": "Western Door",
+      "native": "西咸",
+      "pronounce": "Xī Xián",
+      "ipa": "ɕi˥.ɕjɛn˧˥"
+    },
+    "77840": {
+      "en": "Solar Star",
+      "native": "日星",
+      "pronounce": "Rì Xīng",
+      "ipa": "ɻɻ̍˥˩.ɕiŋ˥"
+    },
+    "77634": {
+      "en": "Retinue (In Room Mansion)",
+      "native": "从官(房宿)",
+      "pronounce": "Cóng Guān(Fáng Xiù)",
+      "ipa": "t͡sʰʊŋ˧˥.kwan˥(fɑŋ˧˥.ɕjoʊ˥˩)"
+    },
+    "78105": {
+      "en": "Retinue (In Room Mansion)",
+      "native": "从官(房宿)",
+      "pronounce": "Cóng Guān(Fáng Xiù)",
+      "ipa": "t͡sʰʊŋ˧˥.kwan˥(fɑŋ˧˥.ɕjoʊ˥˩)"
+    },
+    "80112": {
+      "en": "Heart",
+      "native": "心宿",
+      "pronounce": "Xīn Xiù",
+      "ipa": "ɕin˥.ɕjoʊ˥˩"
+    },
+    "80763": {
+      "en": "Heart",
+      "native": "心宿",
+      "pronounce": "Xīn Xiù",
+      "ipa": "ɕin˥.ɕjoʊ˥˩"
+    },
+    "81266": {
+      "en": "Heart",
+      "native": "心宿",
+      "pronounce": "Xīn Xiù",
+      "ipa": "ɕin˥.ɕjoʊ˥˩"
+    },
+    "82396": {
+      "en": "Tail",
+      "native": "尾宿",
+      "pronounce": "Wěi Xiù",
+      "ipa": "weɪ˨˩˩.ɕjoʊ˥˩"
+    },
+    "82514": {
+      "en": "Tail",
+      "native": "尾宿",
+      "pronounce": "Wěi Xiù",
+      "ipa": "weɪ˨˩˩.ɕjoʊ˥˩"
+    },
+    "82729": {
+      "en": "Tail",
+      "native": "尾宿",
+      "pronounce": "Wěi Xiù",
+      "ipa": "weɪ˨˩˩.ɕjoʊ˥˩"
+    },
+    "84143": {
+      "en": "Tail",
+      "native": "尾宿",
+      "pronounce": "Wěi Xiù",
+      "ipa": "weɪ˨˩˩.ɕjoʊ˥˩"
+    },
+    "86228": {
+      "en": "Tail",
+      "native": "尾宿",
+      "pronounce": "Wěi Xiù",
+      "ipa": "weɪ˨˩˩.ɕjoʊ˥˩"
+    },
+    "87073": {
+      "en": "Tail",
+      "native": "尾宿",
+      "pronounce": "Wěi Xiù",
+      "ipa": "weɪ˨˩˩.ɕjoʊ˥˩"
+    },
+    "86670": {
+      "en": "Tail",
+      "native": "尾宿",
+      "pronounce": "Wěi Xiù",
+      "ipa": "weɪ˨˩˩.ɕjoʊ˥˩"
+    },
+    "85927": {
+      "en": "Tail",
+      "native": "尾宿",
+      "pronounce": "Wěi Xiù",
+      "ipa": "weɪ˨˩˩.ɕjoʊ˥˩"
+    },
+    "85696": {
+      "en": "Tail",
+      "native": "尾宿",
+      "pronounce": "Wěi Xiù",
+      "ipa": "weɪ˨˩˩.ɕjoʊ˥˩"
+    },
+    "82545": {
+      "en": "Tail",
+      "native": "尾宿",
+      "pronounce": "Wěi Xiù",
+      "ipa": "weɪ˨˩˩.ɕjoʊ˥˩"
+    },
+    "85755": {
+      "en": "Celestial River",
+      "native": "天江",
+      "pronounce": "Tiān Jiāng",
+      "ipa": "tʰjɛn˥.t͡ɕjɑŋ˥"
+    },
+    "85340": {
+      "en": "Celestial River",
+      "native": "天江",
+      "pronounce": "Tiān Jiāng",
+      "ipa": "tʰjɛn˥.t͡ɕjɑŋ˥"
+    },
+    "84970": {
+      "en": "Celestial River",
+      "native": "天江",
+      "pronounce": "Tiān Jiāng",
+      "ipa": "tʰjɛn˥.t͡ɕjɑŋ˥"
+    },
+    "84405": {
+      "en": "Celestial River",
+      "native": "天江",
+      "pronounce": "Tiān Jiāng",
+      "ipa": "tʰjɛn˥.t͡ɕjɑŋ˥"
+    },
+    "87261": {
+      "en": "Fu Yue",
+      "native": "傅说",
+      "pronounce": "Fù Yuè",
+      "ipa": "fʋ̩˥˩.ɥɛ˥˩"
+    },
+    "88635": {
+      "en": "Winnowing Basket",
+      "native": "箕宿",
+      "pronounce": "Jī Xiù",
+      "ipa": "t͡ɕi˥.ɕjoʊ˥˩"
+    },
+    "89931": {
+      "en": "Winnowing Basket",
+      "native": "箕宿",
+      "pronounce": "Jī Xiù",
+      "ipa": "t͡ɕi˥.ɕjoʊ˥˩"
+    },
+    "90185": {
+      "en": "Winnowing Basket",
+      "native": "箕宿",
+      "pronounce": "Jī Xiù",
+      "ipa": "t͡ɕi˥.ɕjoʊ˥˩"
+    },
+    "89642": {
+      "en": "Winnowing Basket",
+      "native": "箕宿",
+      "pronounce": "Jī Xiù",
+      "ipa": "t͡ɕi˥.ɕjoʊ˥˩"
+    },
+    "89341": {
+      "en": "Dipper",
+      "native": "斗宿",
+      "pronounce": "Dǒu Xiù",
+      "ipa": "toʊ˨˩˩.ɕjoʊ˥˩"
+    },
+    "90496": {
+      "en": "Dipper",
+      "native": "斗宿",
+      "pronounce": "Dǒu Xiù",
+      "ipa": "toʊ˨˩˩.ɕjoʊ˥˩"
+    },
+    "92041": {
+      "en": "Dipper",
+      "native": "斗宿",
+      "pronounce": "Dǒu Xiù",
+      "ipa": "toʊ˨˩˩.ɕjoʊ˥˩"
+    },
+    "92855": {
+      "en": "Dipper",
+      "native": "斗宿",
+      "pronounce": "Dǒu Xiù",
+      "ipa": "toʊ˨˩˩.ɕjoʊ˥˩"
+    },
+    "93864": {
+      "en": "Dipper",
+      "native": "斗宿",
+      "pronounce": "Dǒu Xiù",
+      "ipa": "toʊ˨˩˩.ɕjoʊ˥˩"
+    },
+    "93506": {
+      "en": "Dipper",
+      "native": "斗宿",
+      "pronounce": "Dǒu Xiù",
+      "ipa": "toʊ˨˩˩.ɕjoʊ˥˩"
+    },
+    "93085": {
+      "en": "Establishment Stars",
+      "native": "建星",
+      "pronounce": "Jiàn Xīng",
+      "ipa": "t͡ɕjɛn˥˩.ɕiŋ˥"
+    },
+    "93683": {
+      "en": "Establishment Stars",
+      "native": "建星",
+      "pronounce": "Jiàn Xīng",
+      "ipa": "t͡ɕjɛn˥˩.ɕiŋ˥"
+    },
+    "94141": {
+      "en": "Establishment Stars",
+      "native": "建星",
+      "pronounce": "Jiàn Xīng",
+      "ipa": "t͡ɕjɛn˥˩.ɕiŋ˥"
+    },
+    "94820": {
+      "en": "Establishment Stars",
+      "native": "建星",
+      "pronounce": "Jiàn Xīng",
+      "ipa": "t͡ɕjɛn˥˩.ɕiŋ˥"
+    },
+    "95168": {
+      "en": "Establishment Stars",
+      "native": "建星",
+      "pronounce": "Jiàn Xīng",
+      "ipa": "t͡ɕjɛn˥˩.ɕiŋ˥"
+    },
+    "95176": {
+      "en": "Establishment Stars",
+      "native": "建星",
+      "pronounce": "Jiàn Xīng",
+      "ipa": "t͡ɕjɛn˥˩.ɕiŋ˥"
+    },
+    "93805": {
+      "en": "Market Officer",
+      "native": "天弁",
+      "pronounce": "Tiān Biàn",
+      "ipa": "tʰjɛn˥.pjɛn˥˩"
+    },
+    "93429": {
+      "en": "Market Officer",
+      "native": "天弁",
+      "pronounce": "Tiān Biàn",
+      "ipa": "tʰjɛn˥.pjɛn˥˩"
+    },
+    "93026": {
+      "en": "Market Officer",
+      "native": "天弁",
+      "pronounce": "Tiān Biàn",
+      "ipa": "tʰjɛn˥.pjɛn˥˩"
+    },
+    "92175": {
+      "en": "Market Officer",
+      "native": "天弁",
+      "pronounce": "Tiān Biàn",
+      "ipa": "tʰjɛn˥.pjɛn˥˩"
+    },
+    "91845": {
+      "en": "Market Officer",
+      "native": "天弁",
+      "pronounce": "Tiān Biàn",
+      "ipa": "tʰjɛn˥.pjɛn˥˩"
+    },
+    "91726": {
+      "en": "Market Officer",
+      "native": "天弁",
+      "pronounce": "Tiān Biàn",
+      "ipa": "tʰjɛn˥.pjɛn˥˩"
+    },
+    "91117": {
+      "en": "Market Officer",
+      "native": "天弁",
+      "pronounce": "Tiān Biàn",
+      "ipa": "tʰjɛn˥.pjɛn˥˩"
+    },
+    "96950": {
+      "en": "Celestial Cock",
+      "native": "天鸡",
+      "pronounce": "Tiān Jī",
+      "ipa": "tʰjɛn˥.t͡ɕi˥"
+    },
+    "97290": {
+      "en": "Celestial Cock",
+      "native": "天鸡",
+      "pronounce": "Tiān Jī",
+      "ipa": "tʰjɛn˥.t͡ɕi˥"
+    },
+    "98066": {
+      "en": "Territory of Dog",
+      "native": "狗国",
+      "pronounce": "Gǒu Guó",
+      "ipa": "koʊ˨˩˩.kwo˧˥"
+    },
+    "95477": {
+      "en": "Dog Stars",
+      "native": "狗星",
+      "pronounce": "Gǒu Xīng",
+      "ipa": "koʊ˨˩˩.ɕiŋ˥"
+    },
+    "96465": {
+      "en": "Dog Stars",
+      "native": "狗星",
+      "pronounce": "Gǒu Xīng",
+      "ipa": "koʊ˨˩˩.ɕiŋ˥"
+    },
+    "100345": {
+      "en": "Ox",
+      "native": "牛宿",
+      "pronounce": "Niú Xiù",
+      "ipa": "njoʊ˧˥.ɕjoʊ˥˩"
+    },
+    "100881": {
+      "en": "Ox",
+      "native": "牛宿",
+      "pronounce": "Niú Xiù",
+      "ipa": "njoʊ˧˥.ɕjoʊ˥˩"
+    },
+    "101123": {
+      "en": "Ox",
+      "native": "牛宿",
+      "pronounce": "Niú Xiù",
+      "ipa": "njoʊ˧˥.ɕjoʊ˥˩"
+    },
+    "101027": {
+      "en": "Ox",
+      "native": "牛宿",
+      "pronounce": "Niú Xiù",
+      "ipa": "njoʊ˧˥.ɕjoʊ˥˩"
+    },
+    "100310": {
+      "en": "Ox",
+      "native": "牛宿",
+      "pronounce": "Niú Xiù",
+      "ipa": "njoʊ˧˥.ɕjoʊ˥˩"
+    },
+    "100064": {
+      "en": "Ox",
+      "native": "牛宿",
+      "pronounce": "Niú Xiù",
+      "ipa": "njoʊ˧˥.ɕjoʊ˥˩"
+    },
+    "98036": {
+      "en": "Drum at the River",
+      "native": "河鼓",
+      "pronounce": "Hé Gǔ",
+      "ipa": "xɤ˧˥.ku˨˩˦"
+    },
+    "97649": {
+      "en": "Drum at the River",
+      "native": "河鼓",
+      "pronounce": "Hé Gǔ",
+      "ipa": "xɤ˧˥.ku˨˩˦"
+    },
+    "97278": {
+      "en": "Drum at the River",
+      "native": "河鼓",
+      "pronounce": "Hé Gǔ",
+      "ipa": "xɤ˧˥.ku˨˩˦"
+    },
+    "91919": {
+      "en": "Weaving Girl",
+      "native": "织女",
+      "pronounce": "Zhī Nǚ",
+      "ipa": "t͡ʂɻ̍˥.ny˨˩˦"
+    },
+    "91262": {
+      "en": "Weaving Girl",
+      "native": "织女",
+      "pronounce": "Zhī Nǚ",
+      "ipa": "t͡ʂɻ̍˥.ny˨˩˦"
+    },
+    "91971": {
+      "en": "Weaving Girl",
+      "native": "织女",
+      "pronounce": "Zhī Nǚ",
+      "ipa": "t͡ʂɻ̍˥.ny˨˩˦"
+    },
+    "96757": {
+      "en": "Left Flag",
+      "native": "左旗",
+      "pronounce": "Zuǒ Qí",
+      "ipa": "t͡swo˨˩˩.t͡ɕʰi˧˥"
+    },
+    "97365": {
+      "en": "Left Flag",
+      "native": "左旗",
+      "pronounce": "Zuǒ Qí",
+      "ipa": "t͡swo˨˩˩.t͡ɕʰi˧˥"
+    },
+    "96837": {
+      "en": "Left Flag",
+      "native": "左旗",
+      "pronounce": "Zuǒ Qí",
+      "ipa": "t͡swo˨˩˩.t͡ɕʰi˧˥"
+    },
+    "98337": {
+      "en": "Left Flag",
+      "native": "左旗",
+      "pronounce": "Zuǒ Qí",
+      "ipa": "t͡swo˨˩˩.t͡ɕʰi˧˥"
+    },
+    "98920": {
+      "en": "Left Flag",
+      "native": "左旗",
+      "pronounce": "Zuǒ Qí",
+      "ipa": "t͡swo˨˩˩.t͡ɕʰi˧˥"
+    },
+    "98738": {
+      "en": "Left Flag",
+      "native": "左旗",
+      "pronounce": "Zuǒ Qí",
+      "ipa": "t͡swo˨˩˩.t͡ɕʰi˧˥"
+    },
+    "98819": {
+      "en": "Left Flag",
+      "native": "左旗",
+      "pronounce": "Zuǒ Qí",
+      "ipa": "t͡swo˨˩˩.t͡ɕʰi˧˥"
+    },
+    "99742": {
+      "en": "Left Flag",
+      "native": "左旗",
+      "pronounce": "Zuǒ Qí",
+      "ipa": "t͡swo˨˩˩.t͡ɕʰi˧˥"
+    },
+    "100256": {
+      "en": "Left Flag",
+      "native": "左旗",
+      "pronounce": "Zuǒ Qí",
+      "ipa": "t͡swo˨˩˩.t͡ɕʰi˧˥"
+    },
+    "96665": {
+      "en": "Right Flag",
+      "native": "右旗",
+      "pronounce": "Yòu Qí",
+      "ipa": "joʊ˥˩.t͡ɕʰi˧˥"
+    },
+    "96229": {
+      "en": "Right Flag",
+      "native": "右旗",
+      "pronounce": "Yòu Qí",
+      "ipa": "joʊ˥˩.t͡ɕʰi˧˥"
+    },
+    "95501": {
+      "en": "Right Flag",
+      "native": "右旗",
+      "pronounce": "Yòu Qí",
+      "ipa": "joʊ˥˩.t͡ɕʰi˧˥"
+    },
+    "94727": {
+      "en": "Right Flag",
+      "native": "右旗",
+      "pronounce": "Yòu Qí",
+      "ipa": "joʊ˥˩.t͡ɕʰi˧˥"
+    },
+    "94477": {
+      "en": "Right Flag",
+      "native": "右旗",
+      "pronounce": "Yòu Qí",
+      "ipa": "joʊ˥˩.t͡ɕʰi˧˥"
+    },
+    "95585": {
+      "en": "Right Flag",
+      "native": "右旗",
+      "pronounce": "Yòu Qí",
+      "ipa": "joʊ˥˩.t͡ɕʰi˧˥"
+    },
+    "96468": {
+      "en": "Right Flag",
+      "native": "右旗",
+      "pronounce": "Yòu Qí",
+      "ipa": "joʊ˥˩.t͡ɕʰi˧˥"
+    },
+    "95937": {
+      "en": "Right Flag",
+      "native": "右旗",
+      "pronounce": "Yòu Qí",
+      "ipa": "joʊ˥˩.t͡ɕʰi˧˥"
+    },
+    "96556": {
+      "en": "Right Flag",
+      "native": "右旗",
+      "pronounce": "Yòu Qí",
+      "ipa": "joʊ˥˩.t͡ɕʰi˧˥"
+    },
+    "99473": {
+      "en": "Celestial Drumstick",
+      "native": "天桴",
+      "pronounce": "Tiān Fú",
+      "ipa": "tʰjɛn˥.fʋ̩˧˥"
+    },
+    "97804": {
+      "en": "Celestial Drumstick",
+      "native": "天桴",
+      "pronounce": "Tiān Fú",
+      "ipa": "tʰjɛn˥.fʋ̩˧˥"
+    },
+    "101923": {
+      "en": "Network of Dykes",
+      "native": "罗堰",
+      "pronounce": "Luó Yàn",
+      "ipa": "lwo˧˥.jan˥˩"
+    },
+    "102026": {
+      "en": "Network of Dykes",
+      "native": "罗堰",
+      "pronounce": "Luó Yàn",
+      "ipa": "lwo˧˥.jan˥˩"
+    },
+    "101984": {
+      "en": "Network of Dykes",
+      "native": "罗堰",
+      "pronounce": "Luó Yàn",
+      "ipa": "lwo˧˥.jan˥˩"
+    },
+    "92791": {
+      "en": "Clepsydra Terrace",
+      "native": "渐台",
+      "pronounce": "Jiàn Tái",
+      "ipa": "t͡ɕjɛn˥˩.tʰaɪ˧˥"
+    },
+    "92420": {
+      "en": "Clepsydra Terrace",
+      "native": "渐台",
+      "pronounce": "Jiàn Tái",
+      "ipa": "t͡ɕjɛn˥˩.tʰaɪ˧˥"
+    },
+    "93194": {
+      "en": "Clepsydra Terrace",
+      "native": "渐台",
+      "pronounce": "Jiàn Tái",
+      "ipa": "t͡ɕjɛn˥˩.tʰaɪ˧˥"
+    },
+    "93903": {
+      "en": "Clepsydra Terrace",
+      "native": "渐台",
+      "pronounce": "Jiàn Tái",
+      "ipa": "t͡ɕjɛn˥˩.tʰaɪ˧˥"
+    },
+    "92862": {
+      "en": "Imperial Passageway",
+      "native": "辇道",
+      "pronounce": "Niǎn Dào",
+      "ipa": "njɛn˨˩˩.tɑʊ˥˩"
+    },
+    "94481": {
+      "en": "Imperial Passageway",
+      "native": "辇道",
+      "pronounce": "Niǎn Dào",
+      "ipa": "njɛn˨˩˩.tɑʊ˥˩"
+    },
+    "94713": {
+      "en": "Imperial Passageway",
+      "native": "辇道",
+      "pronounce": "Niǎn Dào",
+      "ipa": "njɛn˨˩˩.tɑʊ˥˩"
+    },
+    "95556": {
+      "en": "Imperial Passageway",
+      "native": "辇道",
+      "pronounce": "Niǎn Dào",
+      "ipa": "njɛn˨˩˩.tɑʊ˥˩"
+    },
+    "96052": {
+      "en": "Imperial Passageway",
+      "native": "辇道",
+      "pronounce": "Niǎn Dào",
+      "ipa": "njɛn˨˩˩.tɑʊ˥˩"
+    },
+    "102618": {
+      "en": "Girl",
+      "native": "女宿",
+      "pronounce": "Nǚ Xiù",
+      "ipa": "ny˨˩˩.ɕjoʊ˥˩"
+    },
+    "103045": {
+      "en": "Girl",
+      "native": "女宿",
+      "pronounce": "Nǚ Xiù",
+      "ipa": "ny˨˩˩.ɕjoʊ˥˩"
+    },
+    "103005": {
+      "en": "Girl",
+      "native": "女宿",
+      "pronounce": "Nǚ Xiù",
+      "ipa": "ny˨˩˩.ɕjoʊ˥˩"
+    },
+    "102624": {
+      "en": "Girl",
+      "native": "女宿",
+      "pronounce": "Nǚ Xiù",
+      "ipa": "ny˨˩˩.ɕjoʊ˥˩"
+    },
+    "101101": {
+      "en": "Pearls on Ladies' Wear",
+      "native": "离珠",
+      "pronounce": "Lí Zhū",
+      "ipa": "li˧˥.t͡ʂu˥"
+    },
+    "101692": {
+      "en": "Pearls on Ladies' Wear",
+      "native": "离珠",
+      "pronounce": "Lí Zhū",
+      "ipa": "li˧˥.t͡ʂu˥"
+    },
+    "101847": {
+      "en": "Pearls on Ladies' Wear",
+      "native": "离珠",
+      "pronounce": "Lí Zhū",
+      "ipa": "li˧˥.t͡ʂu˥"
+    },
+    "101936": {
+      "en": "Pearls on Ladies' Wear",
+      "native": "离珠",
+      "pronounce": "Lí Zhū",
+      "ipa": "li˧˥.t͡ʂu˥"
+    },
+    "101421": {
+      "en": "Rotten Gourd",
+      "native": "败瓜",
+      "pronounce": "Bài Guā",
+      "ipa": "paɪ˥˩.kwa˥"
+    },
+    "101916": {
+      "en": "Rotten Gourd",
+      "native": "败瓜",
+      "pronounce": "Bài Guā",
+      "ipa": "paɪ˥˩.kwa˥"
+    },
+    "101800": {
+      "en": "Rotten Gourd",
+      "native": "败瓜",
+      "pronounce": "Bài Guā",
+      "ipa": "paɪ˥˩.kwa˥"
+    },
+    "101483": {
+      "en": "Rotten Gourd",
+      "native": "败瓜",
+      "pronounce": "Bài Guā",
+      "ipa": "paɪ˥˩.kwa˥"
+    },
+    "101882": {
+      "en": "Rotten Gourd",
+      "native": "败瓜",
+      "pronounce": "Bài Guā",
+      "ipa": "paɪ˥˩.kwa˥"
+    },
+    "102532": {
+      "en": "Good Gourd",
+      "native": "瓠瓜",
+      "pronounce": "Hù Guā",
+      "ipa": "xu˥˩.kwa˥"
+    },
+    "101958": {
+      "en": "Good Gourd",
+      "native": "瓠瓜",
+      "pronounce": "Hù Guā",
+      "ipa": "xu˥˩.kwa˥"
+    },
+    "101769": {
+      "en": "Good Gourd",
+      "native": "瓠瓜",
+      "pronounce": "Hù Guā",
+      "ipa": "xu˥˩.kwa˥"
+    },
+    "102281": {
+      "en": "Good Gourd",
+      "native": "瓠瓜",
+      "pronounce": "Hù Guā",
+      "ipa": "xu˥˩.kwa˥"
+    },
+    "101589": {
+      "en": "Good Gourd",
+      "native": "瓠瓜",
+      "pronounce": "Hù Guā",
+      "ipa": "xu˥˩.kwa˥"
+    },
+    "104732": {
+      "en": "Celestial Ford",
+      "native": "天津",
+      "pronounce": "Tiān Jīn",
+      "ipa": "tʰjɛn˥.t͡ɕin˥"
+    },
+    "105138": {
+      "en": "Celestial Ford",
+      "native": "天津",
+      "pronounce": "Tiān Jīn",
+      "ipa": "tʰjɛn˥.t͡ɕin˥"
+    },
+    "104887": {
+      "en": "Celestial Ford",
+      "native": "天津",
+      "pronounce": "Tiān Jīn",
+      "ipa": "tʰjɛn˥.t͡ɕin˥"
+    },
+    "103413": {
+      "en": "Celestial Ford",
+      "native": "天津",
+      "pronounce": "Tiān Jīn",
+      "ipa": "tʰjɛn˥.t͡ɕin˥"
+    },
+    "102098": {
+      "en": "Celestial Ford",
+      "native": "天津",
+      "pronounce": "Tiān Jīn",
+      "ipa": "tʰjɛn˥.t͡ɕin˥"
+    },
+    "99639": {
+      "en": "Celestial Ford",
+      "native": "天津",
+      "pronounce": "Tiān Jīn",
+      "ipa": "tʰjɛn˥.t͡ɕin˥"
+    },
+    "97165": {
+      "en": "Celestial Ford",
+      "native": "天津",
+      "pronounce": "Tiān Jīn",
+      "ipa": "tʰjɛn˥.t͡ɕin˥"
+    },
+    "100453": {
+      "en": "Celestial Ford",
+      "native": "天津",
+      "pronounce": "Tiān Jīn",
+      "ipa": "tʰjɛn˥.t͡ɕin˥"
+    },
+    "102488": {
+      "en": "Celestial Ford",
+      "native": "天津",
+      "pronounce": "Tiān Jīn",
+      "ipa": "tʰjɛn˥.t͡ɕin˥"
+    },
+    "106278": {
+      "en": "Emptiness",
+      "native": "虚宿",
+      "pronounce": "Xū Xiù",
+      "ipa": "ɕy˥.ɕjoʊ˥˩"
+    },
+    "104987": {
+      "en": "Emptiness",
+      "native": "虚宿",
+      "pronounce": "Xū Xiù",
+      "ipa": "ɕy˥.ɕjoʊ˥˩"
+    },
+    "107575": {
+      "en": "Deified Judge of Life",
+      "native": "司命",
+      "pronounce": "Sī Mìng",
+      "ipa": "sɹ̩˥.miŋ˥˩"
+    },
+    "107151": {
+      "en": "Deified Judge of Rank",
+      "native": "司禄",
+      "pronounce": "Sī Lù",
+      "ipa": "sɹ̩˥.lu˥˩"
+    },
+    "105570": {
+      "en": "Deified Judge of Disaster and Good Fortune",
+      "native": "司危",
+      "pronounce": "Sī Wēi",
+      "ipa": "sɹ̩˥.weɪ˥"
+    },
+    "104521": {
+      "en": "Deified Judge of Right and Wrong",
+      "native": "司非",
+      "pronounce": "Sī Fēi",
+      "ipa": "sɹ̩˥.feɪ˥"
+    },
+    "104858": {
+      "en": "Deified Judge of Right and Wrong",
+      "native": "司非",
+      "pronounce": "Sī Fēi",
+      "ipa": "sɹ̩˥.feɪ˥"
+    },
+    "109074": {
+      "en": "Rooftop",
+      "native": "危宿",
+      "pronounce": "Wēi Xiù",
+      "ipa": "weɪ˥.ɕjoʊ˥˩"
+    },
+    "109427": {
+      "en": "Rooftop",
+      "native": "危宿",
+      "pronounce": "Wēi Xiù",
+      "ipa": "weɪ˥.ɕjoʊ˥˩"
+    },
+    "107315": {
+      "en": "Rooftop",
+      "native": "危宿",
+      "pronounce": "Wēi Xiù",
+      "ipa": "weɪ˥.ɕjoʊ˥˩"
+    },
+    "110672": {
+      "en": "Rooftop",
+      "native": "危宿",
+      "pronounce": "Wēi Xiù",
+      "ipa": "weɪ˥.ɕjoʊ˥˩"
+    },
+    "107763": {
+      "en": "Humans Stars",
+      "native": "人星",
+      "pronounce": "Rén Xīng",
+      "ipa": "ɻən˧˥.ɕiŋ˥"
+    },
+    "107975": {
+      "en": "Humans Stars",
+      "native": "人星",
+      "pronounce": "Rén Xīng",
+      "ipa": "ɻən˧˥.ɕiŋ˥"
+    },
+    "107310": {
+      "en": "Humans Stars",
+      "native": "人星",
+      "pronounce": "Rén Xīng",
+      "ipa": "ɻən˧˥.ɕiŋ˥"
+    },
+    "108022": {
+      "en": "Humans Stars",
+      "native": "人星",
+      "pronounce": "Rén Xīng",
+      "ipa": "ɻən˧˥.ɕiŋ˥"
+    },
+    "107354": {
+      "en": "Humans Stars",
+      "native": "人星",
+      "pronounce": "Rén Xīng",
+      "ipa": "ɻən˧˥.ɕiŋ˥"
+    },
+    "115088": {
+      "en": "Celestial Hook",
+      "native": "天钩",
+      "pronounce": "Tiān Gōu",
+      "ipa": "tʰjɛn˥.koʊ˥"
+    },
+    "112724": {
+      "en": "Celestial Hook",
+      "native": "天钩",
+      "pronounce": "Tiān Gōu",
+      "ipa": "tʰjɛn˥.koʊ˥"
+    },
+    "108917": {
+      "en": "Celestial Hook",
+      "native": "天钩",
+      "pronounce": "Tiān Gōu",
+      "ipa": "tʰjɛn˥.koʊ˥"
+    },
+    "105199": {
+      "en": "Celestial Hook",
+      "native": "天钩",
+      "pronounce": "Tiān Gōu",
+      "ipa": "tʰjɛn˥.koʊ˥"
+    },
+    "102422": {
+      "en": "Celestial Hook",
+      "native": "天钩",
+      "pronounce": "Tiān Gōu",
+      "ipa": "tʰjɛn˥.koʊ˥"
+    },
+    "101093": {
+      "en": "Celestial Hook",
+      "native": "天钩",
+      "pronounce": "Tiān Gōu",
+      "ipa": "tʰjɛn˥.koʊ˥"
+    },
+    "110960": {
+      "en": "Tomb (Vassal of Rooftop)",
+      "native": "坟墓(附危宿)",
+      "pronounce": "Fén Mù",
+      "ipa": "fən˧˥.mu˥˩"
+    },
+    "110395": {
+      "en": "Tomb (Vassal of Rooftop)",
+      "native": "坟墓(附危宿)",
+      "pronounce": "Fén Mù",
+      "ipa": "fən˧˥.mu˥˩"
+    },
+    "111497": {
+      "en": "Tomb (Vassal of Rooftop)",
+      "native": "坟墓(附危宿)",
+      "pronounce": "Fén Mù",
+      "ipa": "fən˧˥.mu˥˩"
+    },
+    "113963": {
+      "en": "Encampment",
+      "native": "室宿",
+      "pronounce": "Shì Xiù",
+      "ipa": "ʂɻ̍˥˩.ɕjoʊ˥˩"
+    },
+    "113881": {
+      "en": "Encampment",
+      "native": "室宿",
+      "pronounce": "Shì Xiù",
+      "ipa": "ʂɻ̍˥˩.ɕjoʊ˥˩"
+    },
+    "115250": {
+      "en": "Encampment",
+      "native": "室宿",
+      "pronounce": "Shì Xiù",
+      "ipa": "ʂɻ̍˥˩.ɕjoʊ˥˩"
+    },
+    "112748": {
+      "en": "Encampment",
+      "native": "室宿",
+      "pronounce": "Shì Xiù",
+      "ipa": "ʂɻ̍˥˩.ɕjoʊ˥˩"
+    },
+    "112051": {
+      "en": "Encampment",
+      "native": "室宿",
+      "pronounce": "Shì Xiù",
+      "ipa": "ʂɻ̍˥˩.ɕjoʊ˥˩"
+    },
+    "112158": {
+      "en": "Resting Palace (Vassal of Encampment)",
+      "native": "离宫(附室宿)",
+      "pronounce": "Lí Gōng",
+      "ipa": "li˧˥.kʊŋ˥"
+    },
+    "112440": {
+      "en": "Resting Palace (Vassal of Encampment)",
+      "native": "离宫(附室宿)",
+      "pronounce": "Lí Gōng",
+      "ipa": "li˧˥.kʊŋ˥"
+    },
+    "115623": {
+      "en": "Resting Palace (Vassal of Encampment)",
+      "native": "离宫(附室宿)",
+      "pronounce": "Lí Gōng",
+      "ipa": "li˧˥.kʊŋ˥"
+    },
+    "118209": {
+      "en": "Line of Ramparts",
+      "native": "垒壁阵",
+      "pronounce": "Lěi Bì Zhèn",
+      "ipa": "leɪ˨˩˩.pi˥˩.t͡ʂən˥˩"
+    },
+    "154": {
+      "en": "Line of Ramparts",
+      "native": "垒壁阵",
+      "pronounce": "Lěi Bì Zhèn",
+      "ipa": "leɪ˨˩˩.pi˥˩.t͡ʂən˥˩"
+    },
+    "443": {
+      "en": "Line of Ramparts",
+      "native": "垒壁阵",
+      "pronounce": "Lěi Bì Zhèn",
+      "ipa": "leɪ˨˩˩.pi˥˩.t͡ʂən˥˩"
+    },
+    "145": {
+      "en": "Line of Ramparts",
+      "native": "垒壁阵",
+      "pronounce": "Lěi Bì Zhèn",
+      "ipa": "leɪ˨˩˩.pi˥˩.t͡ʂən˥˩"
+    },
+    "114724": {
+      "en": "Line of Ramparts",
+      "native": "垒壁阵",
+      "pronounce": "Lěi Bì Zhèn",
+      "ipa": "leɪ˨˩˩.pi˥˩.t͡ʂən˥˩"
+    },
+    "112961": {
+      "en": "Line of Ramparts",
+      "native": "垒壁阵",
+      "pronounce": "Lěi Bì Zhèn",
+      "ipa": "leɪ˨˩˩.pi˥˩.t͡ʂən˥˩"
+    },
+    "111123": {
+      "en": "Line of Ramparts",
+      "native": "垒壁阵",
+      "pronounce": "Lěi Bì Zhèn",
+      "ipa": "leɪ˨˩˩.pi˥˩.t͡ʂən˥˩"
+    },
+    "109139": {
+      "en": "Line of Ramparts",
+      "native": "垒壁阵",
+      "pronounce": "Lěi Bì Zhèn",
+      "ipa": "leɪ˨˩˩.pi˥˩.t͡ʂən˥˩"
+    },
+    "107556": {
+      "en": "Line of Ramparts",
+      "native": "垒壁阵",
+      "pronounce": "Lěi Bì Zhèn",
+      "ipa": "leɪ˨˩˩.pi˥˩.t͡ʂən˥˩"
+    },
+    "106985": {
+      "en": "Line of Ramparts",
+      "native": "垒壁阵",
+      "pronounce": "Lěi Bì Zhèn",
+      "ipa": "leɪ˨˩˩.pi˥˩.t͡ʂən˥˩"
+    },
+    "106723": {
+      "en": "Line of Ramparts",
+      "native": "垒壁阵",
+      "pronounce": "Lěi Bì Zhèn",
+      "ipa": "leɪ˨˩˩.pi˥˩.t͡ʂən˥˩"
+    },
+    "107188": {
+      "en": "Line of Ramparts",
+      "native": "垒壁阵",
+      "pronounce": "Lěi Bì Zhèn",
+      "ipa": "leɪ˨˩˩.pi˥˩.t͡ʂən˥˩"
+    },
+    "113368": {
+      "en": "North Gate of the Military Camp",
+      "native": "北落师门",
+      "pronounce": "Běi Luò Shī Mén",
+      "ipa": "peɪ˨˩˩.lwo˥˩.ʂɻ̍˥.mən˧˥"
+    },
+    "108085": {
+      "en": "Materials for Making Tents",
+      "native": "天纲",
+      "pronounce": "Tiān Gāng",
+      "ipa": "tʰjɛn˥.kɑŋ˥"
+    },
+    "112447": {
+      "en": "Official for Materials Supply",
+      "native": "土公吏",
+      "pronounce": "Tǔ Gōng Lì",
+      "ipa": "tʰu˨˩˩.kʊŋ˥.li˥˩"
+    },
+    "112029": {
+      "en": "Official for Materials Supply",
+      "native": "土公吏",
+      "pronounce": "Tǔ Gōng Lì",
+      "ipa": "tʰu˨˩˩.kʊŋ˥.li˥˩"
+    },
+    "111022": {
+      "en": "Flying Serpent",
+      "native": "螣蛇",
+      "pronounce": "Téng Shé",
+      "ipa": "tʰɤŋ˧˥.ʂɤ˧˥"
+    },
+    "1067": {
+      "en": "Wall",
+      "native": "壁宿",
+      "pronounce": "Bì Xiù",
+      "ipa": "pi˥˩.ɕjoʊ˥˩"
+    },
+    "677": {
+      "en": "Wall",
+      "native": "壁宿",
+      "pronounce": "Bì Xiù",
+      "ipa": "pi˥˩.ɕjoʊ˥˩"
+    },
+    "118268": {
+      "en": "Thunderbolt",
+      "native": "霹雳",
+      "pronounce": "Pī Lì",
+      "ipa": "pʰi˥.li˥˩"
+    },
+    "116771": {
+      "en": "Thunderbolt",
+      "native": "霹雳",
+      "pronounce": "Pī Lì",
+      "ipa": "pʰi˥.li˥˩"
+    },
+    "115830": {
+      "en": "Thunderbolt",
+      "native": "霹雳",
+      "pronounce": "Pī Lì",
+      "ipa": "pʰi˥.li˥˩"
+    },
+    "114971": {
+      "en": "Thunderbolt",
+      "native": "霹雳",
+      "pronounce": "Pī Lì",
+      "ipa": "pʰi˥.li˥˩"
+    },
+    "113889": {
+      "en": "Thunderbolt",
+      "native": "霹雳",
+      "pronounce": "Pī Lì",
+      "ipa": "pʰi˥.li˥˩"
+    },
+    "116928": {
+      "en": "Cloud and Rain",
+      "native": "云雨",
+      "pronounce": "Yún Yǔ",
+      "ipa": "yn˧˥.y˨˩˦"
+    },
+    "117491": {
+      "en": "Cloud and Rain",
+      "native": "云雨",
+      "pronounce": "Yún Yǔ",
+      "ipa": "yn˧˥.y˨˩˦"
+    },
+    "117683": {
+      "en": "Cloud and Rain",
+      "native": "云雨",
+      "pronounce": "Yún Yǔ",
+      "ipa": "yn˧˥.y˨˩˦"
+    },
+    "3881": {
+      "en": "Legs",
+      "native": "奎宿",
+      "pronounce": "Kuí Xiù",
+      "ipa": "kʰweɪ˧˥.ɕjoʊ˥˩"
+    },
+    "4436": {
+      "en": "Legs",
+      "native": "奎宿",
+      "pronounce": "Kuí Xiù",
+      "ipa": "kʰweɪ˧˥.ɕjoʊ˥˩"
+    },
+    "5447": {
+      "en": "Legs",
+      "native": "奎宿",
+      "pronounce": "Kuí Xiù",
+      "ipa": "kʰweɪ˧˥.ɕjoʊ˥˩"
+    },
+    "5544": {
+      "en": "Legs",
+      "native": "奎宿",
+      "pronounce": "Kuí Xiù",
+      "ipa": "kʰweɪ˧˥.ɕjoʊ˥˩"
+    },
+    "5586": {
+      "en": "Legs",
+      "native": "奎宿",
+      "pronounce": "Kuí Xiù",
+      "ipa": "kʰweɪ˧˥.ɕjoʊ˥˩"
+    },
+    "6193": {
+      "en": "Legs",
+      "native": "奎宿",
+      "pronounce": "Kuí Xiù",
+      "ipa": "kʰweɪ˧˥.ɕjoʊ˥˩"
+    },
+    "5742": {
+      "en": "Legs",
+      "native": "奎宿",
+      "pronounce": "Kuí Xiù",
+      "ipa": "kʰweɪ˧˥.ɕjoʊ˥˩"
+    },
+    "5131": {
+      "en": "Legs",
+      "native": "奎宿",
+      "pronounce": "Kuí Xiù",
+      "ipa": "kʰweɪ˧˥.ɕjoʊ˥˩"
+    },
+    "4463": {
+      "en": "Legs",
+      "native": "奎宿",
+      "pronounce": "Kuí Xiù",
+      "ipa": "kʰweɪ˧˥.ɕjoʊ˥˩"
+    },
+    "3693": {
+      "en": "Legs",
+      "native": "奎宿",
+      "pronounce": "Kuí Xiù",
+      "ipa": "kʰweɪ˧˥.ɕjoʊ˥˩"
+    },
+    "3031": {
+      "en": "Legs",
+      "native": "奎宿",
+      "pronounce": "Kuí Xiù",
+      "ipa": "kʰweɪ˧˥.ɕjoʊ˥˩"
+    },
+    "3092": {
+      "en": "Legs",
+      "native": "奎宿",
+      "pronounce": "Kuí Xiù",
+      "ipa": "kʰweɪ˧˥.ɕjoʊ˥˩"
+    },
+    "2912": {
+      "en": "Legs",
+      "native": "奎宿",
+      "pronounce": "Kuí Xiù",
+      "ipa": "kʰweɪ˧˥.ɕjoʊ˥˩"
+    },
+    "2942": {
+      "en": "Legs",
+      "native": "奎宿",
+      "pronounce": "Kuí Xiù",
+      "ipa": "kʰweɪ˧˥.ɕjoʊ˥˩"
+    },
+    "3231": {
+      "en": "Legs",
+      "native": "奎宿",
+      "pronounce": "Kuí Xiù",
+      "ipa": "kʰweɪ˧˥.ɕjoʊ˥˩"
+    },
+    "9487": {
+      "en": "Outer Fence",
+      "native": "外屏",
+      "pronounce": "Wài Píng",
+      "ipa": "waɪ˥˩.pʰiŋ˧˥"
+    },
+    "8833": {
+      "en": "Outer Fence",
+      "native": "外屏",
+      "pronounce": "Wài Píng",
+      "ipa": "waɪ˥˩.pʰiŋ˧˥"
+    },
+    "7884": {
+      "en": "Outer Fence",
+      "native": "外屏",
+      "pronounce": "Wài Píng",
+      "ipa": "waɪ˥˩.pʰiŋ˧˥"
+    },
+    "7007": {
+      "en": "Outer Fence",
+      "native": "外屏",
+      "pronounce": "Wài Píng",
+      "ipa": "waɪ˥˩.pʰiŋ˧˥"
+    },
+    "5737": {
+      "en": "Outer Fence",
+      "native": "外屏",
+      "pronounce": "Wài Píng",
+      "ipa": "waɪ˥˩.pʰiŋ˧˥"
+    },
+    "4906": {
+      "en": "Outer Fence",
+      "native": "外屏",
+      "pronounce": "Wài Píng",
+      "ipa": "waɪ˥˩.pʰiŋ˧˥"
+    },
+    "3786": {
+      "en": "Outer Fence",
+      "native": "外屏",
+      "pronounce": "Wài Píng",
+      "ipa": "waɪ˥˩.pʰiŋ˧˥"
+    },
+    "3419": {
+      "en": "Master of Constructions (In Legs Mansion)",
+      "native": "土司空(奎宿)",
+      "pronounce": "Tǔ Sī Kōng(Kuí Xiù)",
+      "ipa": "tʰu˨˩˩.sɹ̩˥.kʰʊŋ˥(kʰweɪ˧˥.ɕjoʊ˥˩)"
+    },
+    "8796": {
+      "en": "Southern Military Gate",
+      "native": "军南门",
+      "pronounce": "Jūn Nán Mén",
+      "ipa": "t͡ɕyn˥.nan˧˥.mən˧˥"
+    },
+    "5434": {
+      "en": "Flying Corridor",
+      "native": "阁道",
+      "pronounce": "Gé Dào",
+      "ipa": "kɤ˧˥.tɑʊ˥˩"
+    },
+    "5542": {
+      "en": "Flying Corridor",
+      "native": "阁道",
+      "pronounce": "Gé Dào",
+      "ipa": "kɤ˧˥.tɑʊ˥˩"
+    },
+    "7294": {
+      "en": "Flying Corridor",
+      "native": "阁道",
+      "pronounce": "Gé Dào",
+      "ipa": "kɤ˧˥.tɑʊ˥˩"
+    },
+    "8886": {
+      "en": "Flying Corridor",
+      "native": "阁道",
+      "pronounce": "Gé Dào",
+      "ipa": "kɤ˧˥.tɑʊ˥˩"
+    },
+    "6686": {
+      "en": "Auxiliary Road",
+      "native": "附路",
+      "pronounce": "Fù Lù",
+      "ipa": "fʋ̩˥˩.lu˥˩"
+    },
+    "9884": {
+      "en": "Bond",
+      "native": "娄宿",
+      "pronounce": "Lóu Xiù",
+      "ipa": "loʊ˧˥.ɕjoʊ˥˩"
+    },
+    "8903": {
+      "en": "Bond",
+      "native": "娄宿",
+      "pronounce": "Lóu Xiù",
+      "ipa": "loʊ˧˥.ɕjoʊ˥˩"
+    },
+    "8832": {
+      "en": "Bond",
+      "native": "娄宿",
+      "pronounce": "Lóu Xiù",
+      "ipa": "loʊ˧˥.ɕjoʊ˥˩"
+    },
+    "3455": {
+      "en": "Square Celestial Granary",
+      "native": "天仓",
+      "pronounce": "Tiān Cāng",
+      "ipa": "tʰjɛn˥.t͡sʰɑŋ˥"
+    },
+    "5364": {
+      "en": "Square Celestial Granary",
+      "native": "天仓",
+      "pronounce": "Tiān Cāng",
+      "ipa": "tʰjɛn˥.t͡sʰɑŋ˥"
+    },
+    "6537": {
+      "en": "Square Celestial Granary",
+      "native": "天仓",
+      "pronounce": "Tiān Cāng",
+      "ipa": "tʰjɛn˥.t͡sʰɑŋ˥"
+    },
+    "8645": {
+      "en": "Square Celestial Granary",
+      "native": "天仓",
+      "pronounce": "Tiān Cāng",
+      "ipa": "tʰjɛn˥.t͡sʰɑŋ˥"
+    },
+    "8102": {
+      "en": "Square Celestial Granary",
+      "native": "天仓",
+      "pronounce": "Tiān Cāng",
+      "ipa": "tʰjɛn˥.t͡sʰɑŋ˥"
+    },
+    "9347": {
+      "en": "Square Celestial Granary",
+      "native": "天仓",
+      "pronounce": "Tiān Cāng",
+      "ipa": "tʰjɛn˥.t͡sʰɑŋ˥"
+    },
+    "8068": {
+      "en": "Great General of Heaven",
+      "native": "天大将军",
+      "pronounce": "Tiān Dà Jiāng Jūn",
+      "ipa": "tʰjɛn˥.ta˥˩.t͡ɕjɑŋ˥.t͡ɕyn˥"
+    },
+    "7607": {
+      "en": "Great General of Heaven",
+      "native": "天大将军",
+      "pronounce": "Tiān Dà Jiāng Jūn",
+      "ipa": "tʰjɛn˥.ta˥˩.t͡ɕjɑŋ˥.t͡ɕyn˥"
+    },
+    "7719": {
+      "en": "Great General of Heaven",
+      "native": "天大将军",
+      "pronounce": "Tiān Dà Jiāng Jūn",
+      "ipa": "tʰjɛn˥.ta˥˩.t͡ɕjɑŋ˥.t͡ɕyn˥"
+    },
+    "7918": {
+      "en": "Great General of Heaven",
+      "native": "天大将军",
+      "pronounce": "Tiān Dà Jiāng Jūn",
+      "ipa": "tʰjɛn˥.ta˥˩.t͡ɕjɑŋ˥.t͡ɕyn˥"
+    },
+    "7513": {
+      "en": "Great General of Heaven",
+      "native": "天大将军",
+      "pronounce": "Tiān Dà Jiāng Jūn",
+      "ipa": "tʰjɛn˥.ta˥˩.t͡ɕjɑŋ˥.t͡ɕyn˥"
+    },
+    "7818": {
+      "en": "Great General of Heaven",
+      "native": "天大将军",
+      "pronounce": "Tiān Dà Jiāng Jūn",
+      "ipa": "tʰjɛn˥.ta˥˩.t͡ɕjɑŋ˥.t͡ɕyn˥"
+    },
+    "9021": {
+      "en": "Great General of Heaven",
+      "native": "天大将军",
+      "pronounce": "Tiān Dà Jiāng Jūn",
+      "ipa": "tʰjɛn˥.ta˥˩.t͡ɕjɑŋ˥.t͡ɕyn˥"
+    },
+    "9977": {
+      "en": "Great General of Heaven",
+      "native": "天大将军",
+      "pronounce": "Tiān Dà Jiāng Jūn",
+      "ipa": "tʰjɛn˥.ta˥˩.t͡ɕjɑŋ˥.t͡ɕyn˥"
+    },
+    "10064": {
+      "en": "Great General of Heaven",
+      "native": "天大将军",
+      "pronounce": "Tiān Dà Jiāng Jūn",
+      "ipa": "tʰjɛn˥.ta˥˩.t͡ɕjɑŋ˥.t͡ɕyn˥"
+    },
+    "10670": {
+      "en": "Great General of Heaven",
+      "native": "天大将军",
+      "pronounce": "Tiān Dà Jiāng Jūn",
+      "ipa": "tʰjɛn˥.ta˥˩.t͡ɕjɑŋ˥.t͡ɕyn˥"
+    },
+    "9640": {
+      "en": "Great General of Heaven",
+      "native": "天大将军",
+      "pronounce": "Tiān Dà Jiāng Jūn",
+      "ipa": "tʰjɛn˥.ta˥˩.t͡ɕjɑŋ˥.t͡ɕyn˥"
+    },
+    "12719": {
+      "en": "Stomach",
+      "native": "胃宿",
+      "pronounce": "Wèi Xiù",
+      "ipa": "weɪ˥˩.ɕjoʊ˥˩"
+    },
+    "13061": {
+      "en": "Stomach",
+      "native": "胃宿",
+      "pronounce": "Wèi Xiù",
+      "ipa": "weɪ˥˩.ɕjoʊ˥˩"
+    },
+    "13209": {
+      "en": "Stomach",
+      "native": "胃宿",
+      "pronounce": "Wèi Xiù",
+      "ipa": "weɪ˥˩.ɕjoʊ˥˩"
+    },
+    "16369": {
+      "en": "Celestial Foodstuff",
+      "native": "天廪",
+      "pronounce": "Tiān Lǐn",
+      "ipa": "tʰjɛn˥.lin˨˩˦"
+    },
+    "16322": {
+      "en": "Celestial Foodstuff",
+      "native": "天廪",
+      "pronounce": "Tiān Lǐn",
+      "ipa": "tʰjɛn˥.lin˨˩˦"
+    },
+    "16083": {
+      "en": "Celestial Foodstuff",
+      "native": "天廪",
+      "pronounce": "Tiān Lǐn",
+      "ipa": "tʰjɛn˥.lin˨˩˦"
+    },
+    "15900": {
+      "en": "Celestial Foodstuff",
+      "native": "天廪",
+      "pronounce": "Tiān Lǐn",
+      "ipa": "tʰjɛn˥.lin˨˩˦"
+    },
+    "14135": {
+      "en": "Circular Celestial Granary",
+      "native": "天囷",
+      "pronounce": "Tiān Qūn",
+      "ipa": "tʰjɛn˥.t͡ɕʰyn˥"
+    },
+    "13954": {
+      "en": "Circular Celestial Granary",
+      "native": "天囷",
+      "pronounce": "Tiān Qūn",
+      "ipa": "tʰjɛn˥.t͡ɕʰyn˥"
+    },
+    "12828": {
+      "en": "Circular Celestial Granary",
+      "native": "天囷",
+      "pronounce": "Tiān Qūn",
+      "ipa": "tʰjɛn˥.t͡ɕʰyn˥"
+    },
+    "11249": {
+      "en": "Circular Celestial Granary",
+      "native": "天囷",
+      "pronounce": "Tiān Qūn",
+      "ipa": "tʰjɛn˥.t͡ɕʰyn˥"
+    },
+    "10324": {
+      "en": "Circular Celestial Granary",
+      "native": "天囷",
+      "pronounce": "Tiān Qūn",
+      "ipa": "tʰjɛn˥.t͡ɕʰyn˥"
+    },
+    "11484": {
+      "en": "Circular Celestial Granary",
+      "native": "天囷",
+      "pronounce": "Tiān Qūn",
+      "ipa": "tʰjɛn˥.t͡ɕʰyn˥"
+    },
+    "12093": {
+      "en": "Circular Celestial Granary",
+      "native": "天囷",
+      "pronounce": "Tiān Qūn",
+      "ipa": "tʰjɛn˥.t͡ɕʰyn˥"
+    },
+    "12706": {
+      "en": "Circular Celestial Granary",
+      "native": "天囷",
+      "pronounce": "Tiān Qūn",
+      "ipa": "tʰjɛn˥.t͡ɕʰyn˥"
+    },
+    "12387": {
+      "en": "Circular Celestial Granary",
+      "native": "天囷",
+      "pronounce": "Tiān Qūn",
+      "ipa": "tʰjɛn˥.t͡ɕʰyn˥"
+    },
+    "13268": {
+      "en": "Mausoleum",
+      "native": "大陵",
+      "pronounce": "Dà Líng",
+      "ipa": "ta˥˩.liŋ˧˥"
+    },
+    "13531": {
+      "en": "Mausoleum",
+      "native": "大陵",
+      "pronounce": "Dà Líng",
+      "ipa": "ta˥˩.liŋ˧˥"
+    },
+    "14632": {
+      "en": "Mausoleum",
+      "native": "大陵",
+      "pronounce": "Dà Líng",
+      "ipa": "ta˥˩.liŋ˧˥"
+    },
+    "14668": {
+      "en": "Mausoleum",
+      "native": "大陵",
+      "pronounce": "Dà Líng",
+      "ipa": "ta˥˩.liŋ˧˥"
+    },
+    "14576": {
+      "en": "Mausoleum",
+      "native": "大陵",
+      "pronounce": "Dà Líng",
+      "ipa": "ta˥˩.liŋ˧˥"
+    },
+    "14354": {
+      "en": "Mausoleum",
+      "native": "大陵",
+      "pronounce": "Dà Líng",
+      "ipa": "ta˥˩.liŋ˧˥"
+    },
+    "13254": {
+      "en": "Mausoleum",
+      "native": "大陵",
+      "pronounce": "Dà Líng",
+      "ipa": "ta˥˩.liŋ˧˥"
+    },
+    "12623": {
+      "en": "Mausoleum",
+      "native": "大陵",
+      "pronounce": "Dà Líng",
+      "ipa": "ta˥˩.liŋ˧˥"
+    },
+    "14382": {
+      "en": "Celestial Boat",
+      "native": "天船",
+      "pronounce": "Tiān Chuán",
+      "ipa": "tʰjɛn˥.t͡ʂʰwan˧˥"
+    },
+    "14328": {
+      "en": "Celestial Boat",
+      "native": "天船",
+      "pronounce": "Tiān Chuán",
+      "ipa": "tʰjɛn˥.t͡ʂʰwan˧˥"
+    },
+    "16244": {
+      "en": "Celestial Boat",
+      "native": "天船",
+      "pronounce": "Tiān Chuán",
+      "ipa": "tʰjɛn˥.t͡ʂʰwan˧˥"
+    },
+    "17358": {
+      "en": "Celestial Boat",
+      "native": "天船",
+      "pronounce": "Tiān Chuán",
+      "ipa": "tʰjɛn˥.t͡ʂʰwan˧˥"
+    },
+    "19343": {
+      "en": "Celestial Boat",
+      "native": "天船",
+      "pronounce": "Tiān Chuán",
+      "ipa": "tʰjɛn˥.t͡ʂʰwan˧˥"
+    },
+    "19812": {
+      "en": "Celestial Boat",
+      "native": "天船",
+      "pronounce": "Tiān Chuán",
+      "ipa": "tʰjɛn˥.t͡ʂʰwan˧˥"
+    },
+    "20070": {
+      "en": "Celestial Boat",
+      "native": "天船",
+      "pronounce": "Tiān Chuán",
+      "ipa": "tʰjɛn˥.t͡ʂʰwan˧˥"
+    },
+    "13879": {
+      "en": "Heap of Corpses (In Stomach Mansion)",
+      "native": "积尸(胃宿)",
+      "pronounce": "Jī Shī(Wèi Xiù)",
+      "ipa": "t͡ɕi˥.ʂɻ̍˥(weɪ˥˩.ɕjoʊ˥˩)"
+    },
+    "19167": {
+      "en": "Stored water (In Stomach Mansion)",
+      "native": "积水(胃宿)",
+      "pronounce": "Jī Shuǐ(Wèi Xiù)",
+      "ipa": "t͡ɕi˥.ʂweɪ˨˩˦(weɪ˥˩.ɕjoʊ˥˩)"
+    },
+    "17531": {
+      "en": "Hairy Head",
+      "native": "昴宿",
+      "pronounce": "Mǎo Xiù",
+      "ipa": "mɑʊ˨˩˩.ɕjoʊ˥˩"
+    },
+    "17499": {
+      "en": "Hairy Head",
+      "native": "昴宿",
+      "pronounce": "Mǎo Xiù",
+      "ipa": "mɑʊ˨˩˩.ɕjoʊ˥˩"
+    },
+    "17573": {
+      "en": "Hairy Head",
+      "native": "昴宿",
+      "pronounce": "Mǎo Xiù",
+      "ipa": "mɑʊ˨˩˩.ɕjoʊ˥˩"
+    },
+    "17608": {
+      "en": "Hairy Head",
+      "native": "昴宿",
+      "pronounce": "Mǎo Xiù",
+      "ipa": "mɑʊ˨˩˩.ɕjoʊ˥˩"
+    },
+    "17702": {
+      "en": "Hairy Head",
+      "native": "昴宿",
+      "pronounce": "Mǎo Xiù",
+      "ipa": "mɑʊ˨˩˩.ɕjoʊ˥˩"
+    },
+    "17851": {
+      "en": "Hairy Head",
+      "native": "昴宿",
+      "pronounce": "Mǎo Xiù",
+      "ipa": "mɑʊ˨˩˩.ɕjoʊ˥˩"
+    },
+    "19038": {
+      "en": "Lunar Star",
+      "native": "月",
+      "pronounce": "Yuè",
+      "ipa": "ɥɛ˥˩"
+    },
+    "14838": {
+      "en": "Celestial Yin Force",
+      "native": "天阴",
+      "pronounce": "Tiān Yīn",
+      "ipa": "tʰjɛn˥.in˥"
+    },
+    "15110": {
+      "en": "Celestial Yin Force",
+      "native": "天阴",
+      "pronounce": "Tiān Yīn",
+      "ipa": "tʰjɛn˥.in˥"
+    },
+    "18543": {
+      "en": "Celestial Meadows",
+      "native": "天苑",
+      "pronounce": "Tiān Yuàn",
+      "ipa": "tʰjɛn˥.ɥæn˥˩"
+    },
+    "17593": {
+      "en": "Celestial Meadows",
+      "native": "天苑",
+      "pronounce": "Tiān Yuàn",
+      "ipa": "tʰjɛn˥.ɥæn˥˩"
+    },
+    "17378": {
+      "en": "Celestial Meadows",
+      "native": "天苑",
+      "pronounce": "Tiān Yuàn",
+      "ipa": "tʰjɛn˥.ɥæn˥˩"
+    },
+    "16537": {
+      "en": "Celestial Meadows",
+      "native": "天苑",
+      "pronounce": "Tiān Yuàn",
+      "ipa": "tʰjɛn˥.ɥæn˥˩"
+    },
+    "15197": {
+      "en": "Celestial Meadows",
+      "native": "天苑",
+      "pronounce": "Tiān Yuàn",
+      "ipa": "tʰjɛn˥.ɥæn˥˩"
+    },
+    "13701": {
+      "en": "Celestial Meadows",
+      "native": "天苑",
+      "pronounce": "Tiān Yuàn",
+      "ipa": "tʰjɛn˥.ɥæn˥˩"
+    },
+    "12770": {
+      "en": "Celestial Meadows",
+      "native": "天苑",
+      "pronounce": "Tiān Yuàn",
+      "ipa": "tʰjɛn˥.ɥæn˥˩"
+    },
+    "12843": {
+      "en": "Celestial Meadows",
+      "native": "天苑",
+      "pronounce": "Tiān Yuàn",
+      "ipa": "tʰjɛn˥.ɥæn˥˩"
+    },
+    "14146": {
+      "en": "Celestial Meadows",
+      "native": "天苑",
+      "pronounce": "Tiān Yuàn",
+      "ipa": "tʰjɛn˥.ɥæn˥˩"
+    },
+    "15474": {
+      "en": "Celestial Meadows",
+      "native": "天苑",
+      "pronounce": "Tiān Yuàn",
+      "ipa": "tʰjɛn˥.ɥæn˥˩"
+    },
+    "16611": {
+      "en": "Celestial Meadows",
+      "native": "天苑",
+      "pronounce": "Tiān Yuàn",
+      "ipa": "tʰjɛn˥.ɥæn˥˩"
+    },
+    "17651": {
+      "en": "Celestial Meadows",
+      "native": "天苑",
+      "pronounce": "Tiān Yuàn",
+      "ipa": "tʰjɛn˥.ɥæn˥˩"
+    },
+    "17717": {
+      "en": "Celestial Meadows",
+      "native": "天苑",
+      "pronounce": "Tiān Yuàn",
+      "ipa": "tʰjɛn˥.ɥæn˥˩"
+    },
+    "18216": {
+      "en": "Celestial Meadows",
+      "native": "天苑",
+      "pronounce": "Tiān Yuàn",
+      "ipa": "tʰjɛn˥.ɥæn˥˩"
+    },
+    "18673": {
+      "en": "Celestial Meadows",
+      "native": "天苑",
+      "pronounce": "Tiān Yuàn",
+      "ipa": "tʰjɛn˥.ɥæn˥˩"
+    },
+    "17529": {
+      "en": "Rolled Tongue",
+      "native": "卷舌",
+      "pronounce": "Juǎn Shé",
+      "ipa": "t͡ɕɥæn˨˩˩.ʂɤ˧˥"
+    },
+    "18532": {
+      "en": "Rolled Tongue",
+      "native": "卷舌",
+      "pronounce": "Juǎn Shé",
+      "ipa": "t͡ɕɥæn˨˩˩.ʂɤ˧˥"
+    },
+    "18614": {
+      "en": "Rolled Tongue",
+      "native": "卷舌",
+      "pronounce": "Juǎn Shé",
+      "ipa": "t͡ɕɥæn˨˩˩.ʂɤ˧˥"
+    },
+    "18246": {
+      "en": "Rolled Tongue",
+      "native": "卷舌",
+      "pronounce": "Juǎn Shé",
+      "ipa": "t͡ɕɥæn˨˩˩.ʂɤ˧˥"
+    },
+    "17448": {
+      "en": "Rolled Tongue",
+      "native": "卷舌",
+      "pronounce": "Juǎn Shé",
+      "ipa": "t͡ɕɥæn˨˩˩.ʂɤ˧˥"
+    },
+    "17313": {
+      "en": "Rolled Tongue",
+      "native": "卷舌",
+      "pronounce": "Juǎn Shé",
+      "ipa": "t͡ɕɥæn˨˩˩.ʂɤ˧˥"
+    },
+    "17886": {
+      "en": "Celestial Slander",
+      "native": "天谗",
+      "pronounce": "Tiān Chán",
+      "ipa": "tʰjɛn˥.t͡ʂʰan˧˥"
+    },
+    "20889": {
+      "en": "Net",
+      "native": "毕宿",
+      "pronounce": "Bì Xiù",
+      "ipa": "pi˥˩.ɕjoʊ˥˩"
+    },
+    "20648": {
+      "en": "Net",
+      "native": "毕宿",
+      "pronounce": "Bì Xiù",
+      "ipa": "pi˥˩.ɕjoʊ˥˩"
+    },
+    "20455": {
+      "en": "Net",
+      "native": "毕宿",
+      "pronounce": "Bì Xiù",
+      "ipa": "pi˥˩.ɕjoʊ˥˩"
+    },
+    "20205": {
+      "en": "Net",
+      "native": "毕宿",
+      "pronounce": "Bì Xiù",
+      "ipa": "pi˥˩.ɕjoʊ˥˩"
+    },
+    "21421": {
+      "en": "Net",
+      "native": "毕宿",
+      "pronounce": "Bì Xiù",
+      "ipa": "pi˥˩.ɕjoʊ˥˩"
+    },
+    "20894": {
+      "en": "Net",
+      "native": "毕宿",
+      "pronounce": "Bì Xiù",
+      "ipa": "pi˥˩.ɕjoʊ˥˩"
+    },
+    "20713": {
+      "en": "Net",
+      "native": "毕宿",
+      "pronounce": "Bì Xiù",
+      "ipa": "pi˥˩.ɕjoʊ˥˩"
+    },
+    "18724": {
+      "en": "Net",
+      "native": "毕宿",
+      "pronounce": "Bì Xiù",
+      "ipa": "pi˥˩.ɕjoʊ˥˩"
+    },
+    "21683": {
+      "en": "Net",
+      "native": "毕宿",
+      "pronounce": "Bì Xiù",
+      "ipa": "pi˥˩.ɕjoʊ˥˩"
+    },
+    "20711": {
+      "en": "Celestial Street",
+      "native": "天街",
+      "pronounce": "Tiān Jiē",
+      "ipa": "tʰjɛn˥.t͡ɕjɛ˥"
+    },
+    "20635": {
+      "en": "Celestial Street",
+      "native": "天街",
+      "pronounce": "Tiān Jiē",
+      "ipa": "tʰjɛn˥.t͡ɕjɛ˥"
+    },
+    "21881": {
+      "en": "Feudal Kings",
+      "native": "诸王",
+      "pronounce": "Zhū Wáng",
+      "ipa": "t͡ʂu˥.wɑŋ˧˥"
+    },
+    "22176": {
+      "en": "Celestial High Terrace",
+      "native": "天高",
+      "pronounce": "Tiān Gāo",
+      "ipa": "tʰjɛn˥.kɑʊ˥"
+    },
+    "22565": {
+      "en": "Celestial High Terrace",
+      "native": "天高",
+      "pronounce": "Tiān Gāo",
+      "ipa": "tʰjɛn˥.kɑʊ˥"
+    },
+    "23015": {
+      "en": "Five Chariots",
+      "native": "五车",
+      "pronounce": "Wǔ Chē",
+      "ipa": "wu˨˩˩.t͡ʂʰɤ˥"
+    },
+    "24608": {
+      "en": "Five Chariots",
+      "native": "五车",
+      "pronounce": "Wǔ Chē",
+      "ipa": "wu˨˩˩.t͡ʂʰɤ˥"
+    },
+    "28360": {
+      "en": "Five Chariots",
+      "native": "五车",
+      "pronounce": "Wǔ Chē",
+      "ipa": "wu˨˩˩.t͡ʂʰɤ˥"
+    },
+    "28380": {
+      "en": "Five Chariots",
+      "native": "五车",
+      "pronounce": "Wǔ Chē",
+      "ipa": "wu˨˩˩.t͡ʂʰɤ˥"
+    },
+    "25428": {
+      "en": "Five Chariots",
+      "native": "五车",
+      "pronounce": "Wǔ Chē",
+      "ipa": "wu˨˩˩.t͡ʂʰɤ˥"
+    },
+    "26451": {
+      "en": "Celestial Pass",
+      "native": "天关",
+      "pronounce": "Tiān Guān",
+      "ipa": "tʰjɛn˥.kwan˥"
+    },
+    "24010": {
+      "en": "Banner of Three Stars",
+      "native": "参旗",
+      "pronounce": "Shēn Qí",
+      "ipa": "ʂən˥.t͡ɕʰi˧˥"
+    },
+    "23607": {
+      "en": "Banner of Three Stars",
+      "native": "参旗",
+      "pronounce": "Shēn Qí",
+      "ipa": "ʂən˥.t͡ɕʰi˧˥"
+    },
+    "22957": {
+      "en": "Banner of Three Stars",
+      "native": "参旗",
+      "pronounce": "Shēn Qí",
+      "ipa": "ʂən˥.t͡ɕʰi˧˥"
+    },
+    "22833": {
+      "en": "Banner of Three Stars",
+      "native": "参旗",
+      "pronounce": "Shēn Qí",
+      "ipa": "ʂən˥.t͡ɕʰi˧˥"
+    },
+    "22845": {
+      "en": "Banner of Three Stars",
+      "native": "参旗",
+      "pronounce": "Shēn Qí",
+      "ipa": "ʂən˥.t͡ɕʰi˧˥"
+    },
+    "22509": {
+      "en": "Banner of Three Stars",
+      "native": "参旗",
+      "pronounce": "Shēn Qí",
+      "ipa": "ʂən˥.t͡ɕʰi˧˥"
+    },
+    "22449": {
+      "en": "Banner of Three Stars",
+      "native": "参旗",
+      "pronounce": "Shēn Qí",
+      "ipa": "ʂən˥.t͡ɕʰi˧˥"
+    },
+    "22549": {
+      "en": "Banner of Three Stars",
+      "native": "参旗",
+      "pronounce": "Shēn Qí",
+      "ipa": "ʂən˥.t͡ɕʰi˧˥"
+    },
+    "22797": {
+      "en": "Banner of Three Stars",
+      "native": "参旗",
+      "pronounce": "Shēn Qí",
+      "ipa": "ʂən˥.t͡ɕʰi˧˥"
+    },
+    "26207": {
+      "en": "Turtle Beak",
+      "native": "觜宿",
+      "pronounce": "Zī Xiù",
+      "ipa": "t͡sɹ̩˥.ɕjoʊ˥˩"
+    },
+    "26176": {
+      "en": "Turtle Beak",
+      "native": "觜宿",
+      "pronounce": "Zī Xiù",
+      "ipa": "t͡sɹ̩˥.ɕjoʊ˥˩"
+    },
+    "26366": {
+      "en": "Turtle Beak",
+      "native": "觜宿",
+      "pronounce": "Zī Xiù",
+      "ipa": "t͡sɹ̩˥.ɕjoʊ˥˩"
+    },
+    "27830": {
+      "en": "Deity in Charge of Monsters",
+      "native": "司怪",
+      "pronounce": "Sī Guài",
+      "ipa": "sɹ̩˥.kwaɪ˥˩"
+    },
+    "28237": {
+      "en": "Deity in Charge of Monsters",
+      "native": "司怪",
+      "pronounce": "Sī Guài",
+      "ipa": "sɹ̩˥.kwaɪ˥˩"
+    },
+    "28734": {
+      "en": "Deity in Charge of Monsters",
+      "native": "司怪",
+      "pronounce": "Sī Guài",
+      "ipa": "sɹ̩˥.kwaɪ˥˩"
+    },
+    "27989": {
+      "en": "Three Stars",
+      "native": "参宿",
+      "pronounce": "Shēn Xiù",
+      "ipa": "ʂən˥.ɕjoʊ˥˩"
+    },
+    "26727": {
+      "en": "Three Stars",
+      "native": "参宿",
+      "pronounce": "Shēn Xiù",
+      "ipa": "ʂən˥.ɕjoʊ˥˩"
+    },
+    "26311": {
+      "en": "Three Stars",
+      "native": "参宿",
+      "pronounce": "Shēn Xiù",
+      "ipa": "ʂən˥.ɕjoʊ˥˩"
+    },
+    "25930": {
+      "en": "Three Stars",
+      "native": "参宿",
+      "pronounce": "Shēn Xiù",
+      "ipa": "ʂən˥.ɕjoʊ˥˩"
+    },
+    "24436": {
+      "en": "Three Stars",
+      "native": "参宿",
+      "pronounce": "Shēn Xiù",
+      "ipa": "ʂən˥.ɕjoʊ˥˩"
+    },
+    "25336": {
+      "en": "Three Stars",
+      "native": "参宿",
+      "pronounce": "Shēn Xiù",
+      "ipa": "ʂən˥.ɕjoʊ˥˩"
+    },
+    "27366": {
+      "en": "Three Stars",
+      "native": "参宿",
+      "pronounce": "Shēn Xiù",
+      "ipa": "ʂən˥.ɕjoʊ˥˩"
+    },
+    "26237": {
+      "en": "Send Armed Forces To Suppress (Vassal of Three Stars)",
+      "native": "伐(附参宿)",
+      "pronounce": "Fá",
+      "ipa": "fa˧˥"
+    },
+    "26235": {
+      "en": "Send Armed Forces To Suppress (Vassal of Three Stars)",
+      "native": "伐(附参宿)",
+      "pronounce": "Fá",
+      "ipa": "fa˧˥"
+    },
+    "26241": {
+      "en": "Send Armed Forces To Suppress (Vassal of Three Stars)",
+      "native": "伐(附参宿)",
+      "pronounce": "Fá",
+      "ipa": "fa˧˥"
+    },
+    "23972": {
+      "en": "Jade Well",
+      "native": "玉井",
+      "pronounce": "Yù Jǐng",
+      "ipa": "y˥˩.t͡ɕiŋ˨˩˦"
+    },
+    "23364": {
+      "en": "Jade Well",
+      "native": "玉井",
+      "pronounce": "Yù Jǐng",
+      "ipa": "y˥˩.t͡ɕiŋ˨˩˦"
+    },
+    "23875": {
+      "en": "Jade Well",
+      "native": "玉井",
+      "pronounce": "Yù Jǐng",
+      "ipa": "y˥˩.t͡ɕiŋ˨˩˦"
+    },
+    "24674": {
+      "en": "Jade Well",
+      "native": "玉井",
+      "pronounce": "Yù Jǐng",
+      "ipa": "y˥˩.t͡ɕiŋ˨˩˦"
+    },
+    "24244": {
+      "en": "Military Well",
+      "native": "军井",
+      "pronounce": "Jūn Jǐng",
+      "ipa": "t͡ɕyn˥.t͡ɕiŋ˨˩˦"
+    },
+    "24327": {
+      "en": "Military Well",
+      "native": "军井",
+      "pronounce": "Jūn Jǐng",
+      "ipa": "t͡ɕyn˥.t͡ɕiŋ˨˩˦"
+    },
+    "24845": {
+      "en": "Military Well",
+      "native": "军井",
+      "pronounce": "Jūn Jǐng",
+      "ipa": "t͡ɕyn˥.t͡ɕiŋ˨˩˦"
+    },
+    "24873": {
+      "en": "Military Well",
+      "native": "军井",
+      "pronounce": "Jūn Jǐng",
+      "ipa": "t͡ɕyn˥.t͡ɕiŋ˨˩˦"
+    },
+    "25985": {
+      "en": "Toilet",
+      "native": "厕",
+      "pronounce": "Cè",
+      "ipa": "t͡sʰɤ˥˩"
+    },
+    "25606": {
+      "en": "Toilet",
+      "native": "厕",
+      "pronounce": "Cè",
+      "ipa": "t͡sʰɤ˥˩"
+    },
+    "27072": {
+      "en": "Toilet",
+      "native": "厕",
+      "pronounce": "Cè",
+      "ipa": "t͡sʰɤ˥˩"
+    },
+    "27654": {
+      "en": "Toilet",
+      "native": "厕",
+      "pronounce": "Cè",
+      "ipa": "t͡sʰɤ˥˩"
+    },
+    "35350": {
+      "en": "Well",
+      "native": "井宿",
+      "pronounce": "Jǐng Xiù",
+      "ipa": "t͡ɕiŋ˨˩˩.ɕjoʊ˥˩"
+    },
+    "34088": {
+      "en": "Well",
+      "native": "井宿",
+      "pronounce": "Jǐng Xiù",
+      "ipa": "t͡ɕiŋ˨˩˩.ɕjoʊ˥˩"
+    },
+    "32921": {
+      "en": "Well",
+      "native": "井宿",
+      "pronounce": "Jǐng Xiù",
+      "ipa": "t͡ɕiŋ˨˩˩.ɕjoʊ˥˩"
+    },
+    "32246": {
+      "en": "Well",
+      "native": "井宿",
+      "pronounce": "Jǐng Xiù",
+      "ipa": "t͡ɕiŋ˨˩˩.ɕjoʊ˥˩"
+    },
+    "30883": {
+      "en": "Well",
+      "native": "井宿",
+      "pronounce": "Jǐng Xiù",
+      "ipa": "t͡ɕiŋ˨˩˩.ɕjoʊ˥˩"
+    },
+    "30343": {
+      "en": "Well",
+      "native": "井宿",
+      "pronounce": "Jǐng Xiù",
+      "ipa": "t͡ɕiŋ˨˩˩.ɕjoʊ˥˩"
+    },
+    "31681": {
+      "en": "Well",
+      "native": "井宿",
+      "pronounce": "Jǐng Xiù",
+      "ipa": "t͡ɕiŋ˨˩˩.ɕjoʊ˥˩"
+    },
+    "32362": {
+      "en": "Well",
+      "native": "井宿",
+      "pronounce": "Jǐng Xiù",
+      "ipa": "t͡ɕiŋ˨˩˩.ɕjoʊ˥˩"
+    },
+    "29655": {
+      "en": "Well",
+      "native": "井宿",
+      "pronounce": "Jǐng Xiù",
+      "ipa": "t͡ɕiŋ˨˩˩.ɕjoʊ˥˩"
+    },
+    "37279": {
+      "en": "South River",
+      "native": "南河",
+      "pronounce": "Nán Hé",
+      "ipa": "nan˧˥.xɤ˧˥"
+    },
+    "36188": {
+      "en": "South River",
+      "native": "南河",
+      "pronounce": "Nán Hé",
+      "ipa": "nan˧˥.xɤ˧˥"
+    },
+    "36284": {
+      "en": "South River",
+      "native": "南河",
+      "pronounce": "Nán Hé",
+      "ipa": "nan˧˥.xɤ˧˥"
+    },
+    "37826": {
+      "en": "North River",
+      "native": "北河",
+      "pronounce": "Běi Hé",
+      "ipa": "peɪ˨˩˩.xɤ˧˥"
+    },
+    "36850": {
+      "en": "North River",
+      "native": "北河",
+      "pronounce": "Běi Hé",
+      "ipa": "peɪ˨˩˩.xɤ˧˥"
+    },
+    "36366": {
+      "en": "North River",
+      "native": "北河",
+      "pronounce": "Běi Hé",
+      "ipa": "peɪ˨˩˩.xɤ˧˥"
+    },
+    "35550": {
+      "en": "Celestial Wine Cup",
+      "native": "天罇",
+      "pronounce": "Tiān Zūn",
+      "ipa": "tʰjɛn˥.t͡swən˥"
+    },
+    "35699": {
+      "en": "Celestial Wine Cup",
+      "native": "天罇",
+      "pronounce": "Tiān Zūn",
+      "ipa": "tʰjɛn˥.t͡swən˥"
+    },
+    "36238": {
+      "en": "Celestial Wine Cup",
+      "native": "天罇",
+      "pronounce": "Tiān Zūn",
+      "ipa": "tʰjɛn˥.t͡swən˥"
+    },
+    "33018": {
+      "en": "Five Feudal Kings",
+      "native": "五诸侯(井宿)",
+      "pronounce": "Wǔ Zhū Hóu(Jǐng Xiù)",
+      "ipa": "wu˨˩˩.t͡ʂu˥.xoʊ˧˥(t͡ɕiŋ˨˩˩.ɕjoʊ˥˩)"
+    },
+    "34693": {
+      "en": "Five Feudal Kings",
+      "native": "五诸侯(井宿)",
+      "pronounce": "Wǔ Zhū Hóu(Jǐng Xiù)",
+      "ipa": "wu˨˩˩.t͡ʂu˥.xoʊ˧˥(t͡ɕiŋ˨˩˩.ɕjoʊ˥˩)"
+    },
+    "36046": {
+      "en": "Five Feudal Kings",
+      "native": "五诸侯(井宿)",
+      "pronounce": "Wǔ Zhū Hóu(Jǐng Xiù)",
+      "ipa": "wu˨˩˩.t͡ʂu˥.xoʊ˧˥(t͡ɕiŋ˨˩˩.ɕjoʊ˥˩)"
+    },
+    "36962": {
+      "en": "Five Feudal Kings",
+      "native": "五诸侯(井宿)",
+      "pronounce": "Wǔ Zhū Hóu(Jǐng Xiù)",
+      "ipa": "wu˨˩˩.t͡ʂu˥.xoʊ˧˥(t͡ɕiŋ˨˩˩.ɕjoʊ˥˩)"
+    },
+    "37740": {
+      "en": "Five Feudal Kings",
+      "native": "五诸侯(井宿)",
+      "pronounce": "Wǔ Zhū Hóu(Jǐng Xiù)",
+      "ipa": "wu˨˩˩.t͡ʂu˥.xoʊ˧˥(t͡ɕiŋ˨˩˩.ɕjoʊ˥˩)"
+    },
+    "38016": {
+      "en": "Accumulated Water (In Well Mansion)",
+      "native": "积水(井宿)",
+      "pronounce": "Jī Shuǐ(Jǐng Xiù)",
+      "ipa": "t͡ɕi˥.ʂweɪ˨˩˦(t͡ɕiŋ˨˩˩.ɕjoʊ˥˩)"
+    },
+    "39780": {
+      "en": "Pile of Firewood",
+      "native": "积薪",
+      "pronounce": "Jī Xīn",
+      "ipa": "t͡ɕi˥.ɕin˥"
+    },
+    "36340": {
+      "en": "Water Level",
+      "native": "水位",
+      "pronounce": "Shuǐ Wèi",
+      "ipa": "ʂweɪ˨˩˩.weɪ˥˩"
+    },
+    "36760": {
+      "en": "Water Level",
+      "native": "水位",
+      "pronounce": "Shuǐ Wèi",
+      "ipa": "ʂweɪ˨˩˩.weɪ˥˩"
+    },
+    "37300": {
+      "en": "Water Level",
+      "native": "水位",
+      "pronounce": "Shuǐ Wèi",
+      "ipa": "ʂweɪ˨˩˩.weɪ˥˩"
+    },
+    "37908": {
+      "en": "Water Level",
+      "native": "水位",
+      "pronounce": "Shuǐ Wèi",
+      "ipa": "ʂweɪ˨˩˩.weɪ˥˩"
+    },
+    "30324": {
+      "en": "Wild Cockerel",
+      "native": "野鸡",
+      "pronounce": "Yě Jī",
+      "ipa": "jɛ˨˩˩.t͡ɕi˥"
+    },
+    "30277": {
+      "en": "Grandson",
+      "native": "孙",
+      "pronounce": "Sūn",
+      "ipa": "swən˥"
+    },
+    "30788": {
+      "en": "Grandson",
+      "native": "孙",
+      "pronounce": "Sūn",
+      "ipa": "swən˥"
+    },
+    "28199": {
+      "en": "Son",
+      "native": "子",
+      "pronounce": "Zǐ",
+      "ipa": "t͡sɹ̩˨˩˦"
+    },
+    "27628": {
+      "en": "Son",
+      "native": "子",
+      "pronounce": "Zǐ",
+      "ipa": "t͡sɹ̩˨˩˦"
+    },
+    "26634": {
+      "en": "Grandfather",
+      "native": "丈人",
+      "pronounce": "Zhàng Rén",
+      "ipa": "t͡ʂɑŋ˥˩.ɻən˧˥"
+    },
+    "25859": {
+      "en": "Grandfather",
+      "native": "丈人",
+      "pronounce": "Zhàng Rén",
+      "ipa": "t͡ʂɑŋ˥˩.ɻən˧˥"
+    },
+    "32349": {
+      "en": "Wolf Star",
+      "native": "狼星",
+      "pronounce": "Láng Xīng",
+      "ipa": "lɑŋ˧˥.ɕiŋ˥"
+    },
+    "36795": {
+      "en": "Bow and Arrow",
+      "native": "弧矢",
+      "pronounce": "Hú Shǐ",
+      "ipa": "xu˧˥.ʂɻ̍˨˩˦"
+    },
+    "35904": {
+      "en": "Bow and Arrow",
+      "native": "弧矢",
+      "pronounce": "Hú Shǐ",
+      "ipa": "xu˧˥.ʂɻ̍˨˩˦"
+    },
+    "32759": {
+      "en": "Bow and Arrow",
+      "native": "弧矢",
+      "pronounce": "Hú Shǐ",
+      "ipa": "xu˧˥.ʂɻ̍˨˩˦"
+    },
+    "33579": {
+      "en": "Bow and Arrow",
+      "native": "弧矢",
+      "pronounce": "Hú Shǐ",
+      "ipa": "xu˧˥.ʂɻ̍˨˩˦"
+    },
+    "33856": {
+      "en": "Bow and Arrow",
+      "native": "弧矢",
+      "pronounce": "Hú Shǐ",
+      "ipa": "xu˧˥.ʂɻ̍˨˩˦"
+    },
+    "34444": {
+      "en": "Bow and Arrow",
+      "native": "弧矢",
+      "pronounce": "Hú Shǐ",
+      "ipa": "xu˧˥.ʂɻ̍˨˩˦"
+    },
+    "35037": {
+      "en": "Bow and Arrow",
+      "native": "弧矢",
+      "pronounce": "Hú Shǐ",
+      "ipa": "xu˧˥.ʂɻ̍˨˩˦"
+    },
+    "35415": {
+      "en": "Bow and Arrow",
+      "native": "弧矢",
+      "pronounce": "Hú Shǐ",
+      "ipa": "xu˧˥.ʂɻ̍˨˩˦"
+    },
+    "33977": {
+      "en": "Bow and Arrow",
+      "native": "弧矢",
+      "pronounce": "Hú Shǐ",
+      "ipa": "xu˧˥.ʂɻ̍˨˩˦"
+    },
+    "41822": {
+      "en": "Ghosts",
+      "native": "鬼宿",
+      "pronounce": "Guǐ Xiù",
+      "ipa": "kweɪ˨˩˩.ɕjoʊ˥˩"
+    },
+    "41909": {
+      "en": "Ghosts",
+      "native": "鬼宿",
+      "pronounce": "Guǐ Xiù",
+      "ipa": "kweɪ˨˩˩.ɕjoʊ˥˩"
+    },
+    "42806": {
+      "en": "Ghosts",
+      "native": "鬼宿",
+      "pronounce": "Guǐ Xiù",
+      "ipa": "kweɪ˨˩˩.ɕjoʊ˥˩"
+    },
+    "42911": {
+      "en": "Ghosts",
+      "native": "鬼宿",
+      "pronounce": "Guǐ Xiù",
+      "ipa": "kweɪ˨˩˩.ɕjoʊ˥˩"
+    },
+    "43067": {
+      "en": "Judge for Estimating the Age of Animals",
+      "native": "天记",
+      "pronounce": "Tiān Jì",
+      "ipa": "tʰjɛn˥.t͡ɕi˥˩"
+    },
+    "42799": {
+      "en": "Willow",
+      "native": "柳宿",
+      "pronounce": "Liǔ Xiù",
+      "ipa": "ljoʊ˨˩˩.ɕjoʊ˥˩"
+    },
+    "42402": {
+      "en": "Willow",
+      "native": "柳宿",
+      "pronounce": "Liǔ Xiù",
+      "ipa": "ljoʊ˨˩˩.ɕjoʊ˥˩"
+    },
+    "42313": {
+      "en": "Willow",
+      "native": "柳宿",
+      "pronounce": "Liǔ Xiù",
+      "ipa": "ljoʊ˨˩˩.ɕjoʊ˥˩"
+    },
+    "43109": {
+      "en": "Willow",
+      "native": "柳宿",
+      "pronounce": "Liǔ Xiù",
+      "ipa": "ljoʊ˨˩˩.ɕjoʊ˥˩"
+    },
+    "43234": {
+      "en": "Willow",
+      "native": "柳宿",
+      "pronounce": "Liǔ Xiù",
+      "ipa": "ljoʊ˨˩˩.ɕjoʊ˥˩"
+    },
+    "43813": {
+      "en": "Willow",
+      "native": "柳宿",
+      "pronounce": "Liǔ Xiù",
+      "ipa": "ljoʊ˨˩˩.ɕjoʊ˥˩"
+    },
+    "44659": {
+      "en": "Willow",
+      "native": "柳宿",
+      "pronounce": "Liǔ Xiù",
+      "ipa": "ljoʊ˨˩˩.ɕjoʊ˥˩"
+    },
+    "45336": {
+      "en": "Willow",
+      "native": "柳宿",
+      "pronounce": "Liǔ Xiù",
+      "ipa": "ljoʊ˨˩˩.ɕjoʊ˥˩"
+    },
+    "46771": {
+      "en": "Banner of Wine Shop",
+      "native": "酒旗",
+      "pronounce": "Jiǔ Qí",
+      "ipa": "t͡ɕjoʊ˨˩˩.t͡ɕʰi˧˥"
+    },
+    "46774": {
+      "en": "Banner of Wine Shop",
+      "native": "酒旗",
+      "pronounce": "Jiǔ Qí",
+      "ipa": "t͡ɕjoʊ˨˩˩.t͡ɕʰi˧˥"
+    },
+    "46390": {
+      "en": "Star",
+      "native": "星宿",
+      "pronounce": "Xīng Xiù",
+      "ipa": "ɕiŋ˥.ɕjoʊ˥˩"
+    },
+    "46509": {
+      "en": "Star",
+      "native": "星宿",
+      "pronounce": "Xīng Xiù",
+      "ipa": "ɕiŋ˥.ɕjoʊ˥˩"
+    },
+    "46776": {
+      "en": "Star",
+      "native": "星宿",
+      "pronounce": "Xīng Xiù",
+      "ipa": "ɕiŋ˥.ɕjoʊ˥˩"
+    },
+    "47431": {
+      "en": "Star",
+      "native": "星宿",
+      "pronounce": "Xīng Xiù",
+      "ipa": "ɕiŋ˥.ɕjoʊ˥˩"
+    },
+    "45811": {
+      "en": "Star",
+      "native": "星宿",
+      "pronounce": "Xīng Xiù",
+      "ipa": "ɕiŋ˥.ɕjoʊ˥˩"
+    },
+    "45751": {
+      "en": "Star",
+      "native": "星宿",
+      "pronounce": "Xīng Xiù",
+      "ipa": "ɕiŋ˥.ɕjoʊ˥˩"
+    },
+    "46768": {
+      "en": "Star",
+      "native": "星宿",
+      "pronounce": "Xīng Xiù",
+      "ipa": "ɕiŋ˥.ɕjoʊ˥˩"
+    },
+    "44248": {
+      "en": "Xuanyuan",
+      "native": "轩辕",
+      "pronounce": "Xuān Yuán",
+      "ipa": "ɕɥæn˥.ɥæn˧˥"
+    },
+    "44700": {
+      "en": "Xuanyuan",
+      "native": "轩辕",
+      "pronounce": "Xuān Yuán",
+      "ipa": "ɕɥæn˥.ɥæn˧˥"
+    },
+    "45688": {
+      "en": "Xuanyuan",
+      "native": "轩辕",
+      "pronounce": "Xuān Yuán",
+      "ipa": "ɕɥæn˥.ɥæn˧˥"
+    },
+    "45860": {
+      "en": "Xuanyuan",
+      "native": "轩辕",
+      "pronounce": "Xuān Yuán",
+      "ipa": "ɕɥæn˥.ɥæn˧˥"
+    },
+    "46146": {
+      "en": "Xuanyuan",
+      "native": "轩辕",
+      "pronounce": "Xuān Yuán",
+      "ipa": "ɕɥæn˥.ɥæn˧˥"
+    },
+    "46750": {
+      "en": "Xuanyuan",
+      "native": "轩辕",
+      "pronounce": "Xuān Yuán",
+      "ipa": "ɕɥæn˥.ɥæn˧˥"
+    },
+    "47908": {
+      "en": "Xuanyuan",
+      "native": "轩辕",
+      "pronounce": "Xuān Yuán",
+      "ipa": "ɕɥæn˥.ɥæn˧˥"
+    },
+    "48455": {
+      "en": "Xuanyuan",
+      "native": "轩辕",
+      "pronounce": "Xuān Yuán",
+      "ipa": "ɕɥæn˥.ɥæn˧˥"
+    },
+    "50335": {
+      "en": "Xuanyuan",
+      "native": "轩辕",
+      "pronounce": "Xuān Yuán",
+      "ipa": "ɕɥæn˥.ɥæn˧˥"
+    },
+    "50583": {
+      "en": "Xuanyuan",
+      "native": "轩辕",
+      "pronounce": "Xuān Yuán",
+      "ipa": "ɕɥæn˥.ɥæn˧˥"
+    },
+    "49583": {
+      "en": "Xuanyuan",
+      "native": "轩辕",
+      "pronounce": "Xuān Yuán",
+      "ipa": "ɕɥæn˥.ɥæn˧˥"
+    },
+    "49669": {
+      "en": "Xuanyuan",
+      "native": "轩辕",
+      "pronounce": "Xuān Yuán",
+      "ipa": "ɕɥæn˥.ɥæn˧˥"
+    },
+    "47508": {
+      "en": "Xuanyuan",
+      "native": "轩辕",
+      "pronounce": "Xuān Yuán",
+      "ipa": "ɕɥæn˥.ɥæn˧˥"
+    },
+    "51624": {
+      "en": "Xuanyuan",
+      "native": "轩辕",
+      "pronounce": "Xuān Yuán",
+      "ipa": "ɕɥæn˥.ɥæn˧˥"
+    },
+    "49637": {
+      "en": "Xuanyuan",
+      "native": "轩辕",
+      "pronounce": "Xuān Yuán",
+      "ipa": "ɕɥæn˥.ɥæn˧˥"
+    },
+    "48356": {
+      "en": "Extended Net",
+      "native": "张宿",
+      "pronounce": "Zhāng Xiù",
+      "ipa": "t͡ʂɑŋ˥.ɕjoʊ˥˩"
+    },
+    "49841": {
+      "en": "Extended Net",
+      "native": "张宿",
+      "pronounce": "Zhāng Xiù",
+      "ipa": "t͡ʂɑŋ˥.ɕjoʊ˥˩"
+    },
+    "51069": {
+      "en": "Extended Net",
+      "native": "张宿",
+      "pronounce": "Zhāng Xiù",
+      "ipa": "t͡ʂɑŋ˥.ɕjoʊ˥˩"
+    },
+    "49569": {
+      "en": "Extended Net",
+      "native": "张宿",
+      "pronounce": "Zhāng Xiù",
+      "ipa": "t͡ʂɑŋ˥.ɕjoʊ˥˩"
+    },
+    "47452": {
+      "en": "Extended Net",
+      "native": "张宿",
+      "pronounce": "Zhāng Xiù",
+      "ipa": "t͡ʂɑŋ˥.ɕjoʊ˥˩"
+    },
+    "52085": {
+      "en": "Extended Net",
+      "native": "张宿",
+      "pronounce": "Zhāng Xiù",
+      "ipa": "t͡ʂɑŋ˥.ɕjoʊ˥˩"
+    },
+    "52943": {
+      "en": "Wings",
+      "native": "翼宿",
+      "pronounce": "Yì Xiù",
+      "ipa": "i˥˩.ɕjoʊ˥˩"
+    },
+    "53740": {
+      "en": "Wings",
+      "native": "翼宿",
+      "pronounce": "Yì Xiù",
+      "ipa": "i˥˩.ɕjoʊ˥˩"
+    },
+    "55282": {
+      "en": "Wings",
+      "native": "翼宿",
+      "pronounce": "Yì Xiù",
+      "ipa": "i˥˩.ɕjoʊ˥˩"
+    },
+    "55705": {
+      "en": "Wings",
+      "native": "翼宿",
+      "pronounce": "Yì Xiù",
+      "ipa": "i˥˩.ɕjoʊ˥˩"
+    },
+    "57283": {
+      "en": "Wings",
+      "native": "翼宿",
+      "pronounce": "Yì Xiù",
+      "ipa": "i˥˩.ɕjoʊ˥˩"
+    },
+    "54682": {
+      "en": "Wings",
+      "native": "翼宿",
+      "pronounce": "Yì Xiù",
+      "ipa": "i˥˩.ɕjoʊ˥˩"
+    },
+    "55687": {
+      "en": "Wings",
+      "native": "翼宿",
+      "pronounce": "Yì Xiù",
+      "ipa": "i˥˩.ɕjoʊ˥˩"
+    },
+    "56633": {
+      "en": "Wings",
+      "native": "翼宿",
+      "pronounce": "Yì Xiù",
+      "ipa": "i˥˩.ɕjoʊ˥˩"
+    },
+    "55106": {
+      "en": "Wings",
+      "native": "翼宿",
+      "pronounce": "Yì Xiù",
+      "ipa": "i˥˩.ɕjoʊ˥˩"
+    },
+    "61359": {
+      "en": "Chariot",
+      "native": "轸宿",
+      "pronounce": "Zhěn Xiù",
+      "ipa": "t͡ʂən˨˩˩.ɕjoʊ˥˩"
+    },
+    "60965": {
+      "en": "Chariot",
+      "native": "轸宿",
+      "pronounce": "Zhěn Xiù",
+      "ipa": "t͡ʂən˨˩˩.ɕjoʊ˥˩"
+    },
+    "59803": {
+      "en": "Chariot",
+      "native": "轸宿",
+      "pronounce": "Zhěn Xiù",
+      "ipa": "t͡ʂən˨˩˩.ɕjoʊ˥˩"
+    },
+    "59316": {
+      "en": "Chariot",
+      "native": "轸宿",
+      "pronounce": "Zhěn Xiù",
+      "ipa": "t͡ʂən˨˩˩.ɕjoʊ˥˩"
+    },
+    "61174": {
+      "en": "Chariot",
+      "native": "轸宿",
+      "pronounce": "Zhěn Xiù",
+      "ipa": "t͡ʂən˨˩˩.ɕjoʊ˥˩"
+    },
+    "59199": {
+      "en": "Chariot",
+      "native": "轸宿",
+      "pronounce": "Zhěn Xiù",
+      "ipa": "t͡ʂən˨˩˩.ɕjoʊ˥˩"
+    },
+    "60189": {
+      "en": "Chariot",
+      "native": "轸宿",
+      "pronounce": "Zhěn Xiù",
+      "ipa": "t͡ʂən˨˩˩.ɕjoʊ˥˩"
+    }
+  },
+  "unresolved_hips": [
+    55203,
+    78727
+  ]
+}

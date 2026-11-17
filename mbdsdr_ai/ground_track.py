@@ -110,13 +110,33 @@ def satellite_subpoint(name_or_catnr: Union[str, int],
 
 
 def split_at_dateline(points: Sequence[Subpoint]) -> List[List[Subpoint]]:
-    """按经度跳变 >180° 切段，避免轨迹在地图上横穿日界线。"""
+    """按经度跳变 >180° 切段，并在 ±180° 处插入边界点。
+
+    只切段不插点会在日界线两侧各留最多半个步长的缺口（30 s ISS 约
+    200 km），地图上表现为轨迹在地图边缘"断头"。插值只用于边界点：
+    纬度/高度/时刻按线性插值，经度直接取 ±180。
+    """
     segments: List[List[Subpoint]] = []
     current: List[Subpoint] = []
     for point in points:
         if current and abs(point.lon_deg - current[-1].lon_deg) > 180.0:
+            prev = current[-1]
+            # 先取最短路径的有符号经度差，再判断是往 +180 还是 -180 穿。
+            # 不能只比大小：-179 → +179 是向西穿 -180（差 358°，实际 -2°）。
+            delta = point.lon_deg - prev.lon_deg
+            if delta > 180.0:
+                delta -= 360.0
+            elif delta < -180.0:
+                delta += 360.0
+            edge = 180.0 if delta > 0.0 else -180.0
+            t = 0.0 if delta == 0.0 else (edge - prev.lon_deg) / delta
+            t = min(max(t, 0.0), 1.0)
+            lat_b = prev.lat_deg + t * (point.lat_deg - prev.lat_deg)
+            alt_b = prev.sat_alt_km + t * (point.sat_alt_km - prev.sat_alt_km)
+            when_b = prev.unix_s + t * (point.unix_s - prev.unix_s)
+            current.append(Subpoint(lat_b, edge, alt_b, when_b))
             segments.append(current)
-            current = []
+            current = [Subpoint(lat_b, -edge, alt_b, when_b)]
         current.append(point)
     if current:
         segments.append(current)
@@ -149,6 +169,40 @@ def ground_track(name_or_catnr: Union[str, int],
         "ellipsoid": "WGS-72",
         "unit": "km",
     }
+
+
+def to_geojson(track: Dict[str, Any],
+               source: str = "ground_track") -> Dict[str, Any]:
+    """把 :func:`ground_track` 的结果转成 GeoJSON FeatureCollection。
+
+    坐标序固定 ``[lon, lat]``（RFC 7946），与
+    :meth:`mbdsdr_ai.position_service.PositionService.geojson` 同一口径，
+    QGIS 可直接打开。日界线切段后**每段一条 LineString**——不画一条
+    横穿整个地图的假线（那是 180° 跳变，不是卫星真的绕回来）。
+    """
+    features: List[Dict[str, Any]] = []
+    for seg in track.get("segments") or []:
+        if len(seg) < 2:
+            continue
+        features.append({
+            "type": "Feature",
+            "geometry": {
+                "type": "LineString",
+                "coordinates": [[float(p.lon_deg), float(p.lat_deg)]
+                                for p in seg],
+            },
+            "properties": {
+                "source": source,
+                "role": "ground_track",
+                "start_unix": float(seg[0].unix_s),
+                "end_unix": float(seg[-1].unix_s),
+                "ellipsoid": track.get("ellipsoid"),
+                "unit": track.get("unit"),
+                "window_minutes": track.get("window_minutes"),
+                "step_s": track.get("step_s"),
+            },
+        })
+    return {"type": "FeatureCollection", "features": features}
 
 
 def footprint_central_angle_deg(alt_km: float,

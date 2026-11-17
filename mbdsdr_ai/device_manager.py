@@ -35,6 +35,8 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import numpy as np
 
+from .bounded_read import BoundedReader, DEFAULT_READ_TIMEOUT_S
+
 logger = logging.getLogger(__name__)
 
 
@@ -150,11 +152,27 @@ class OpenDevice:
     read_samples(n) 返回 complex64 ndarray；设备拔出抛 DeviceDisconnectedError。
     """
 
-    def __init__(self, info: DeviceInfo, backend: Any):
+    def __init__(self, info: DeviceInfo, backend: Any,
+                 read_timeout_s: Optional[float] = None):
         self.info = info
         self._backend = backend  # 具体驱动对象（rtlsdr.RtlSdr / SoapySDR.Device / ...）
         self._closed = False
         self._lock = threading.Lock()
+        #: 单次设备读的等待上限。pyrtlsdr 的 read_bytes 没有 timeout 形参，
+        #: 真机实测 read_bytes(16384) 12 秒无返回；没有上限时 CLI/录制会永久挂起。
+        self._read_timeout_s = (float(read_timeout_s)
+                                if read_timeout_s is not None
+                                else DEFAULT_READ_TIMEOUT_S)
+        self._reader = BoundedReader(
+            lambda n: self._backend.read_bytes(n),
+            self._read_timeout_s,
+            name=f"mbdsdr-read-{info.driver or 'dev'}",
+        )
+        #: 最近一次没拿到样本时的结构化原因（成功读后清空）：
+        #: ``{"code", "message", "device", "timeout_s", "requested_samples"}``。
+        self.last_read_reason: Optional[Dict[str, Any]] = None
+        #: 超时日志节流（录制泵/音频泵每几毫秒就重试，同一原因不能刷屏）。
+        self._last_timeout_log_at = 0.0
         #: open() 成功时登记的设备占用键；close() 时归还（空串=网络源不登记）。
         self._claim_key: str = ""
         # ── ReceiveChain 实时音频（信道滤波/立体声/去加重 → 声卡）──
@@ -206,7 +224,13 @@ class OpenDevice:
 
     # -- 读样本 -------------------------------------------------------------
     def read_samples(self, n: int) -> np.ndarray:
-        """读 n 个复样本（complex64）。设备拔出抛 DeviceDisconnectedError。"""
+        """读 n 个复样本（complex64）。设备拔出抛 DeviceDisconnectedError。
+
+        驱动读**有界**（默认 :data:`bounded_read.DEFAULT_READ_TIMEOUT_S`）：
+        pyrtlsdr 的 ``read_bytes`` 没有 timeout 形参，真机实测会 12 秒不返回；
+        超时返回空数组并把 ``code/message/device/timeout_s`` 写进
+        :attr:`last_read_reason`，绝不无限阻塞调用方。
+        """
         if self._closed:
             raise DeviceDisconnectedError("设备已关闭")
         n = int(n)
@@ -216,17 +240,48 @@ class OpenDevice:
             try:
                 # pyrtlsdr: read_bytes(n*2) -> bytes (uint8 I/Q 交织)
                 # 我们统一转 complex64
-                raw = self._backend.read_bytes(n * 2)
+                raw, code, message = self._reader.read(n * 2)
             except (OSError, IOError) as e:
                 self._closed = True
+                self.last_read_reason = {
+                    "code": "read_error",
+                    "message": f"读样本失败，设备可能已拔出: {e}",
+                    "device": self.info.name,
+                    "timeout_s": self._read_timeout_s,
+                    "requested_samples": n,
+                }
                 raise DeviceDisconnectedError(
                     f"读样本失败，设备可能已拔出: {e}"
                 ) from e
+            if raw is None and code:
+                # 驱动卡死/上一次读仍在途：如实返回空数组 + 原因，不伪造样本。
+                self.last_read_reason = {
+                    "code": code,
+                    "message": message,
+                    "device": self.info.name,
+                    "timeout_s": self._read_timeout_s,
+                    "requested_samples": n,
+                }
+                now = time.monotonic()
+                if now - self._last_timeout_log_at >= 1.0:
+                    self._last_timeout_log_at = now
+                    logger.warning("读样本未返回（%s）：%s", self.info.name, message)
+                return np.empty(0, dtype=np.complex64)
             if raw is None or len(raw) < n * 2:
+                # 驱动自己返回 None（rtl_tcp 断开等）或短读：仍按设备断开处理。
                 self._closed = True
+                self.last_read_reason = {
+                    "code": "short_read",
+                    "message": (f"读样本不足（{len(raw) if raw else 0}/"
+                                f"{n * 2} 字节），设备断开"),
+                    "device": self.info.name,
+                    "timeout_s": self._read_timeout_s,
+                    "requested_samples": n,
+                }
                 raise DeviceDisconnectedError(
                     f"读样本不足（{len(raw) if raw else 0}/{n*2} 字节），设备断开"
                 )
+            self.last_read_reason = None
             arr = np.frombuffer(bytes(raw), dtype=np.uint8).reshape(-1, 2)
             i = arr[:, 0].astype(np.float32)
             q = arr[:, 1].astype(np.float32)
@@ -416,6 +471,10 @@ class OpenDevice:
         except Exception:
             pass
         self._closed = True
+        try:
+            self._reader.close()
+        except Exception:
+            pass
         try:
             self._backend.close()
         except Exception:

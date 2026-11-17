@@ -166,6 +166,10 @@ class ToolResult:
     args: Dict[str, Any] = field(default_factory=dict)
     latency_ms: float = 0.0
     error: str = ""
+    # 结构化错误码 / 超时标记：重试判据只看这两个（+ exception: 前缀），
+    # 不再从面向用户的中文 error 文案里猜关键字。error 字段保留给人看。
+    error_code: str = ""
+    timed_out: bool = False
     truncated: bool = False
     data: Dict[str, Any] = field(default_factory=dict)
     # DSH（deepseek-harness）nextStep 模式：失败/部分成功时给模型的下一步
@@ -181,6 +185,8 @@ class ToolResult:
             "args": self.args,
             "latency_ms": self.latency_ms,
             "error": self.error,
+            "error_code": self.error_code,
+            "timed_out": self.timed_out,
             "truncated": self.truncated,
             "data": self.data,
             "next_step": self.next_step,

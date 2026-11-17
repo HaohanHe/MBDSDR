@@ -11,14 +11,18 @@ MBDSDR AI 内核 - 远程控制服务器
   - 应答 RPRT 0 / RPRT 1
   - q/Q 关闭连接
 
-支持命令（按本任务简化）：
+支持命令（v1 唯一承诺集，大小写不敏感）：
   * ``f``          读频率（Hz）
   * ``f <hz>``     设频率
   * ``m``          读模式
   * ``m <mode>``   设模式（FM/AM/NFM/WFM/USB/LSB/CW...）
   * ``g``          读增益（dB）
   * ``g <db>``     设增益
-  * ``q``          关闭连接
+  * ``q`` / ``Q``  关闭连接
+
+``remote_control_v2.py`` 的扩展命令（静噪 l/L、DSP s、录制 u、AGC A、
+版本 v、设备列表 d）**尚未接线**；本服务对它们返回 ``RPRT -3``（未实现），
+不假装成功。文档承诺见 ``docs/cli_usage.md`` 的「远程控制命令（v1）」。
 
 无后端（backend=None）时返回 ``RPRT 1`` 但绝不抛异常崩溃。
 
@@ -45,6 +49,16 @@ CLOSE_CONNECTION = "__CLOSE__"
 
 RPRT_OK = "RPRT 0\n"
 RPRT_ERR = "RPRT 1\n"
+
+#: v1 实际支持的命令集（大小写不敏感；q/Q 同义）。文档承诺必须与此一致。
+SUPPORTED_COMMANDS = frozenset({"f", "m", "g", "q", "Q"})
+
+#: hamlib 标准「未实现」应答（RIG_ENIMPL）。用于远程控制 v2 已定义但
+#: 本服务未接线的命令，和有后端失败的 RPRT 1 区分开。
+RPRT_UNSUPPORTED = "RPRT -3\n"
+
+#: v2 扩展命令（小写归一后）。收到时回 RPRT -3，而不是静默当作未知命令。
+_V2_ONLY_COMMANDS = frozenset({"l", "s", "u", "a", "v", "d"})
 
 
 class RemoteControl:
@@ -104,6 +118,9 @@ class RemoteControl:
                 return self._handle_gain(arg)
             if cmd == "q":
                 return CLOSE_CONNECTION
+            # v2 已定义但本服务未接线的命令 -> 明确的「未实现」，不冒充成功
+            if cmd in _V2_ONLY_COMMANDS:
+                return RPRT_UNSUPPORTED
             # 未知命令 -> RPRT 1（remote_control.cpp:271-276）
             return RPRT_ERR
 

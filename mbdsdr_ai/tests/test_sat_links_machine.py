@@ -336,6 +336,8 @@ def test_ensure_machine_refresh_skips_fresh_cache(monkeypatch):
 
 
 def test_ensure_machine_refresh_starts_once_when_cache_missing(monkeypatch):
+    # 默认离线优先：自动补刷必须显式允许联网才起线程。
+    monkeypatch.setenv("MBDSDR_ALLOW_NETWORK", "1")
     monkeypatch.setattr(SL, "_AUTO_REFRESH_DONE", False)
     called = []
     monkeypatch.setattr(SL, "start_machine_refresh",
@@ -345,6 +347,18 @@ def test_ensure_machine_refresh_starts_once_when_cache_missing(monkeypatch):
     # 第二次选中不再起线程
     assert SL.ensure_machine_refresh() is False
     assert len(called) == 1
+
+
+def test_ensure_machine_refresh_without_explicit_permission_never_starts(
+        monkeypatch):
+    """未设 MBDSDR_OFFLINE 但也没显式允许联网：不得偷偷拉 SatNOGS。"""
+    monkeypatch.delenv("MBDSDR_ALLOW_NETWORK", raising=False)
+    monkeypatch.setattr(SL, "_AUTO_REFRESH_DONE", False)
+    called = []
+    monkeypatch.setattr(SL, "start_machine_refresh",
+                        lambda path=None: called.append(path))
+    assert SL.ensure_machine_refresh() is False
+    assert called == []
 
 
 # --------------------------------------------------------------- 后台不阻塞
@@ -379,6 +393,68 @@ def test_write_failure_is_reported_not_hidden(monkeypatch):
     # 人工目录照常可用，不因写失败变空
     assert len(SL.list_link_sats()) == 8
     assert SL.load_sat_link("noaa_15")["links"][0]["freq_hz"] == 137620000.0
+
+
+def test_lock_open_permission_error_is_retried(monkeypatch, tmp_path):
+    """锁文件 open 瞬时 PermissionError 要退避重试，不能一次失败就判死。"""
+    import builtins
+
+    base = str(tmp_path / "retry.json")
+    lock_path = f"{base}.lock"
+    real_open = builtins.open
+    attempts = {"n": 0}
+
+    def flaky(path, *args, **kwargs):
+        if str(path) == lock_path:
+            attempts["n"] += 1
+            if attempts["n"] <= 3:
+                raise PermissionError(13, "denied", str(path))
+        return real_open(path, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "open", flaky)
+    lock = SF._CacheLock(base, deadline_s=0.2)
+    assert lock.acquire() is True
+    try:
+        assert attempts["n"] == 4          # 3 次失败后第 4 次真的打开
+        assert lock.last_error == ""
+        assert os.path.exists(lock_path)
+        assert not os.path.exists(cache_file())   # 只有锁文件，没写缓存
+    finally:
+        lock.release()
+
+
+def test_lock_unavailable_makes_refresh_fail_closed(monkeypatch):
+    """锁彻底不可用时绝不无锁直写：不写盘，旧缓存字节不变。"""
+    import builtins
+
+    assert SF.refresh(target(25338),
+                      opener=opener_map({25338: [tx("u-old", 137620000)]}))[
+        "written"]
+    cache = cache_file()
+    lock_path = f"{cache}.lock"
+    before = Path(cache).read_bytes()
+    SF.clear_cache_memo()
+
+    real_open = builtins.open
+
+    def denied(path, *args, **kwargs):
+        if str(path) == lock_path:
+            raise PermissionError(13, "denied", str(path))
+        return real_open(path, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "open", denied)
+    res = SF.refresh(target(28654, "noaa_18"),
+                     opener=opener_map({28654: [tx("u-new", 137912500)]}),
+                     lock_deadline_s=0.2)
+    assert res["written"] is False
+    assert res["lock_acquired"] is False
+    assert res["state"] == "write_failed"
+    assert "缓存锁" in res["detail"]
+    assert "PermissionError" in res["detail"]
+    assert Path(cache).read_bytes() == before       # 旧缓存一字节不动
+    data = read_cache()
+    assert list(data["satellites"]) == ["25338"]    # 预置的星还在
+    assert "28654" not in data["satellites"]
 
 
 def test_bad_json_says_unavailable_not_schema_mismatch():

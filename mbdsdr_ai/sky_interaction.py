@@ -199,8 +199,11 @@ class ViewState:
     Attributes:
         center_az:   视图中心方位角 (度), 北=0 东=90。
         center_alt:  视图中心仰角 (度), 天顶=90。
-        fov_deg:     视场角直径 (度), 30..180。越小越放大。
+        fov_deg:     视场角直径 (度), min_fov..max_fov。越小越放大。
         rotation:    屏幕整体旋转 (度, 顺时针), 对应 rf_sky_view._rotation。
+        min_fov:     本视图的视场下限 (度), 0.5..180；默认 30°, 桌面既有
+                     调用不传参即保持原口径。目镜级窄视场可传 0.5。
+        max_fov:     本视图的视场上限 (度), 默认 180。
     """
 
     center_az: float = 0.0
@@ -213,7 +216,34 @@ class ViewState:
     max_fov: float = DEFAULT_MAX_FOV_DEG
 
     def __post_init__(self) -> None:
+        self._validate_min_fov()
         self._clamp()
+
+    def _validate_min_fov(self) -> None:
+        """校验本视图的视场下限；非法值拒绝，不静默夹成别的口径。
+
+        ``min_fov`` 是**视图级**参数：桌面视图保持默认 30°，目镜级视图
+        可传 0.5°。非有限值、越界或大于 ``max_fov`` 都说明调用方口径有
+        误，直接报错比悄悄改成一个看似正常的视场更诚实。
+        """
+        try:
+            value = float(self.min_fov)
+        except (TypeError, ValueError):
+            raise ValueError(
+                f"min_fov 必须是 0.5..180 的有限数值，收到 {self.min_fov!r}"
+            ) from None
+        if not math.isfinite(value) or not (0.5 <= value <= 180.0):
+            raise ValueError(
+                f"min_fov 必须是 0.5..180 的有限数值，收到 {self.min_fov!r}")
+        try:
+            max_fov = float(self.max_fov)
+        except (TypeError, ValueError):
+            raise ValueError(
+                f"max_fov 必须是有限数值，收到 {self.max_fov!r}") from None
+        if value > max_fov:
+            raise ValueError(
+                f"min_fov 不能大于 max_fov（{value} > {self.max_fov!r}）")
+        self.min_fov = value
 
     def _clamp(self) -> None:
         self.fov_deg = max(self.min_fov, min(self.max_fov, self.fov_deg))

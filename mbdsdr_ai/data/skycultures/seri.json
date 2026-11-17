@@ -1,0 +1,548 @@
+{
+  "id": "seri",
+  "meta": {
+    "schema": "mbdsdr.sky_culture.v1",
+    "id": "seri",
+    "display_name": "Seri",
+    "native_name": "",
+    "region": "Central America",
+    "classification": [
+      "traditional"
+    ],
+    "source": "Stellarium skyculture seri",
+    "source_url": "https://github.com/Stellarium/stellarium/tree/master/skycultures/seri",
+    "source_license": "CC BY-SA 4.0",
+    "source_license_url": "https://creativecommons.org/licenses/by-sa/4.0/",
+    "attribution": "Stellarium sky culture 'seri'; authors: Raúl Pérez-Enríquez (CC BY-SA 4.0). Converted to HIP line segments only; no artwork or description images were copied.",
+    "source_file": "reference/stellarium/skycultures/seri/index.json",
+    "source_file_sha256": "b63aafe2811d54f2d04e1fbcb7c7acf8bab7bd39fd44046ef7ea9438051baa8f",
+    "description_file": "reference/stellarium/skycultures/seri/description.md",
+    "description_file_sha256": "c2cff551b0467567e87ff9eafba3e97781ed2331de7476aac549ffda20a838fe",
+    "conversion_scope": "Only constellations[].lines, id and common_name (plus optional common_names star labels) are converted; illustrations, artwork and description text are not copied.",
+    "names_scope": "Explicit common_names labels take precedence; stars without an explicit label inherit the constellation/asterism name they belong to.",
+    "group_count": 15,
+    "edge_count": 52,
+    "name_count": 63,
+    "unresolved_hip_count": 1,
+    "unresolved_hips": [
+      55203
+    ],
+    "unresolved_token_count": 0,
+    "unresolved_tokens": [],
+    "generated_utc": "2026-11-17T16:26:20Z",
+    "data_sha256": "3a97ee7e4ae217be48398756dff13d70045df00220fbbc358cc54789d6b4dead"
+  },
+  "groups": [
+    {
+      "group_id": "CON seri 001",
+      "names": {
+        "en": "Crab",
+        "native": "Zaamth"
+      },
+      "lines": [
+        [
+          25281,
+          24436,
+          26241,
+          26727,
+          26311,
+          25930,
+          25281,
+          24436
+        ],
+        [
+          25930,
+          26366,
+          27989,
+          26727
+        ],
+        [
+          25336,
+          26366
+        ],
+        [
+          24436,
+          23875
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON seri 002",
+      "names": {
+        "en": "The wife and husband",
+        "native": "Cohamc"
+      },
+      "lines": [
+        [
+          54061,
+          53910,
+          54539,
+          55219,
+          55203,
+          54951,
+          54872
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON seri 003",
+      "names": {
+        "en": "The deer hunter",
+        "native": "Haapjc"
+      },
+      "lines": [
+        [
+          37826,
+          36962,
+          36429,
+          36046,
+          36850,
+          37826
+        ],
+        [
+          37629,
+          20205
+        ],
+        [
+          21421,
+          20205,
+          20889
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON seri 004",
+      "names": {
+        "en": "Wheel game",
+        "native": "Caamoilcoj"
+      },
+      "lines": [
+        [
+          58001,
+          59774,
+          62956,
+          65378,
+          66634,
+          67301
+        ],
+        [
+          60485,
+          60988
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON seri 005",
+      "names": {
+        "en": "Pitahayas cutter",
+        "native": "Hácosa"
+      },
+      "lines": [
+        [
+          746,
+          4427,
+          6686
+        ],
+        [
+          3179,
+          4427
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON seri 006",
+      "names": {
+        "en": "He who comes at sunrise",
+        "native": "Hazoj canoj Hantificaü"
+      },
+      "lines": [
+        [
+          32349,
+          31758,
+          32349
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON seri 007",
+      "names": {
+        "en": "Young hunter",
+        "native": "Yay xapi hanopas"
+      },
+      "lines": [
+        [
+          30438,
+          31685,
+          30438
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON seri 008",
+      "names": {
+        "en": "Small dove",
+        "native": "Quetoh"
+      },
+      "lines": [
+        [
+          69673,
+          67927
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON seri 009",
+      "names": {
+        "en": "Hunter",
+        "native": "Coozactim"
+      },
+      "lines": [
+        [
+          24608,
+          27196,
+          28360
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON seri 010",
+      "names": {
+        "en": "Deer",
+        "native": "Hap"
+      },
+      "lines": [
+        [
+          23015,
+          25428,
+          26451
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON seri 011",
+      "names": {
+        "en": "Hare",
+        "native": "Hee"
+      },
+      "lines": [
+        [
+          91262,
+          92791
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON seri 012",
+      "names": {
+        "en": "Person",
+        "native": "Hazoj Koii"
+      },
+      "lines": [
+        [
+          80763,
+          79593,
+          86032,
+          80816,
+          86974
+        ],
+        [
+          86032,
+          87933
+        ],
+        [
+          80763,
+          84012,
+          86032
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON seri 013",
+      "names": {
+        "en": "Polar star",
+        "native": "Hazoj canoj Himatax"
+      },
+      "lines": [
+        [
+          11767,
+          11767
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON seri 014",
+      "names": {
+        "en": "Antares",
+        "native": "Hazoj Cöiiqui"
+      },
+      "lines": [
+        [
+          80763,
+          80763
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON seri 015",
+      "names": {
+        "en": "Sirius",
+        "native": "Hazoj canoj Hantificaü"
+      },
+      "lines": [
+        [
+          32349,
+          32349
+        ]
+      ],
+      "kind": "constellation"
+    }
+  ],
+  "names": {
+    "4427": {
+      "native": "Haacoosah"
+    },
+    "11767": {
+      "native": "Himatax"
+    },
+    "21421": {
+      "native": "Haxl'c"
+    },
+    "23015": {
+      "native": "Heepem"
+    },
+    "24608": {
+      "native": "Coozactim"
+    },
+    "25428": {
+      "native": "Hap"
+    },
+    "26311": {
+      "native": "Zaamth"
+    },
+    "30438": {
+      "native": "Yay Hapi Hanopas"
+    },
+    "32349": {
+      "native": "Caanooj Haantificaö"
+    },
+    "37279": {
+      "native": "Naapxah"
+    },
+    "37826": {
+      "native": "Hiasim"
+    },
+    "53229": {
+      "native": "Coamc"
+    },
+    "53910": {
+      "native": "Coohaamc"
+    },
+    "54061": {
+      "native": "Coam'c"
+    },
+    "54872": {
+      "native": "Coohaamc"
+    },
+    "55203": {
+      "native": "Coohaamc"
+    },
+    "55219": {
+      "native": "Coohaamc"
+    },
+    "62956": {
+      "native": "Caamooiilcooj"
+    },
+    "67301": {
+      "native": "Camoilcoj"
+    },
+    "69673": {
+      "native": "Quetoh"
+    },
+    "71075": {
+      "native": "Hazoj Cöiiqui"
+    },
+    "80763": {
+      "native": "Hazoj Köii"
+    },
+    "91262": {
+      "native": "Hee"
+    },
+    "25281": {
+      "en": "Crab",
+      "native": "Zaamth"
+    },
+    "24436": {
+      "en": "Crab",
+      "native": "Zaamth"
+    },
+    "26241": {
+      "en": "Crab",
+      "native": "Zaamth"
+    },
+    "26727": {
+      "en": "Crab",
+      "native": "Zaamth"
+    },
+    "25930": {
+      "en": "Crab",
+      "native": "Zaamth"
+    },
+    "26366": {
+      "en": "Crab",
+      "native": "Zaamth"
+    },
+    "27989": {
+      "en": "Crab",
+      "native": "Zaamth"
+    },
+    "25336": {
+      "en": "Crab",
+      "native": "Zaamth"
+    },
+    "23875": {
+      "en": "Crab",
+      "native": "Zaamth"
+    },
+    "54539": {
+      "en": "The wife and husband",
+      "native": "Cohamc"
+    },
+    "54951": {
+      "en": "The wife and husband",
+      "native": "Cohamc"
+    },
+    "36962": {
+      "en": "The deer hunter",
+      "native": "Haapjc"
+    },
+    "36429": {
+      "en": "The deer hunter",
+      "native": "Haapjc"
+    },
+    "36046": {
+      "en": "The deer hunter",
+      "native": "Haapjc"
+    },
+    "36850": {
+      "en": "The deer hunter",
+      "native": "Haapjc"
+    },
+    "37629": {
+      "en": "The deer hunter",
+      "native": "Haapjc"
+    },
+    "20205": {
+      "en": "The deer hunter",
+      "native": "Haapjc"
+    },
+    "20889": {
+      "en": "The deer hunter",
+      "native": "Haapjc"
+    },
+    "58001": {
+      "en": "Wheel game",
+      "native": "Caamoilcoj"
+    },
+    "59774": {
+      "en": "Wheel game",
+      "native": "Caamoilcoj"
+    },
+    "65378": {
+      "en": "Wheel game",
+      "native": "Caamoilcoj"
+    },
+    "66634": {
+      "en": "Wheel game",
+      "native": "Caamoilcoj"
+    },
+    "60485": {
+      "en": "Wheel game",
+      "native": "Caamoilcoj"
+    },
+    "60988": {
+      "en": "Wheel game",
+      "native": "Caamoilcoj"
+    },
+    "746": {
+      "en": "Pitahayas cutter",
+      "native": "Hácosa"
+    },
+    "6686": {
+      "en": "Pitahayas cutter",
+      "native": "Hácosa"
+    },
+    "3179": {
+      "en": "Pitahayas cutter",
+      "native": "Hácosa"
+    },
+    "31758": {
+      "en": "He who comes at sunrise",
+      "native": "Hazoj canoj Hantificaü"
+    },
+    "31685": {
+      "en": "Young hunter",
+      "native": "Yay xapi hanopas"
+    },
+    "67927": {
+      "en": "Small dove",
+      "native": "Quetoh"
+    },
+    "27196": {
+      "en": "Hunter",
+      "native": "Coozactim"
+    },
+    "28360": {
+      "en": "Hunter",
+      "native": "Coozactim"
+    },
+    "26451": {
+      "en": "Deer",
+      "native": "Hap"
+    },
+    "92791": {
+      "en": "Hare",
+      "native": "Hee"
+    },
+    "79593": {
+      "en": "Person",
+      "native": "Hazoj Koii"
+    },
+    "86032": {
+      "en": "Person",
+      "native": "Hazoj Koii"
+    },
+    "80816": {
+      "en": "Person",
+      "native": "Hazoj Koii"
+    },
+    "86974": {
+      "en": "Person",
+      "native": "Hazoj Koii"
+    },
+    "87933": {
+      "en": "Person",
+      "native": "Hazoj Koii"
+    },
+    "84012": {
+      "en": "Person",
+      "native": "Hazoj Koii"
+    }
+  },
+  "unresolved_hips": [
+    55203
+  ]
+}

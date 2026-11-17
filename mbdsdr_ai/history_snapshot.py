@@ -11,7 +11,9 @@
 只读（调用方只取字段，不写回）。
 
 不缓存反例（保持与优化前一致的静默跳过）：坏 JSON、非 dict 内容、无法
-stat 的路径。
+stat 的路径。调用方需要「哪条记录坏了」时可传 ``on_error``：解析失败与
+非 dict 的 (路径, 异常) 会逐条回调；缓存命中时同样重放，不会只在第一次
+加载时可见。
 """
 from __future__ import annotations
 
@@ -19,11 +21,12 @@ import hashlib
 import json
 import os
 import threading
-from typing import Any, Dict, List, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 _LOCK = threading.RLock()
-#: key = 归一化后的路径元组哈希；value = (内容签名, 已解析 dict 元组)
-_CACHE: Dict[str, Tuple[str, Tuple[Tuple[str, Dict[str, Any]], ...]]] = {}
+#: key = 归一化后的路径元组哈希；value = (内容签名, 已解析 dict 元组, 错误元组)
+_CACHE: Dict[str, Tuple[str, Tuple[Tuple[str, Dict[str, Any]], ...],
+                        Tuple[Tuple[str, BaseException], ...]]] = {}
 _MAX_ENTRIES = 16
 
 
@@ -40,12 +43,18 @@ def _signature(paths: Tuple[str, ...]) -> str:
     return h.hexdigest()
 
 
-def load_json_files(paths: List[str]) -> List[Tuple[str, Dict[str, Any]]]:
+def load_json_files(
+        paths: List[str],
+        on_error: Optional[Callable[[str, BaseException], None]] = None,
+) -> List[Tuple[str, Dict[str, Any]]]:
     """按路径读一组 .json；命中缓存时跳过 open + json.load。
 
     返回 (路径, 已解析 dict) 列表，路径保留给调用方做「哪条坏记录」的
     诚实告警。返回的是**新 list**，元组里的 dict 来自缓存，约定只读
     （调用方只取字段构造自己的对象，不写回）。
+
+    ``on_error(path, exc)``：坏 JSON / 非 dict 内容逐条回调；不传则保持
+    静默跳过。命中缓存时重放同一批错误，调用方不会只在首次加载时看见。
     """
     ordered = tuple(sorted(paths))
     if not ordered:
@@ -55,23 +64,34 @@ def load_json_files(paths: List[str]) -> List[Tuple[str, Dict[str, Any]]]:
     with _LOCK:
         hit = _CACHE.get(key)
         if hit is not None and sig and hit[0] == sig:
+            if on_error is not None:
+                for path, exc in hit[2]:
+                    on_error(path, exc)
             return list(hit[1])
 
     rows: List[Tuple[str, Dict[str, Any]]] = []
+    errors: List[Tuple[str, BaseException]] = []
     for path in ordered:
         try:
             with open(path, "r", encoding="utf-8") as f:
                 data = json.load(f)
-        except (OSError, ValueError, UnicodeError):
+        except (OSError, ValueError, UnicodeError) as exc:
+            errors.append((path, exc))
             continue
         if isinstance(data, dict):
             rows.append((path, data))
+        else:
+            errors.append((path, ValueError(
+                f"顶层不是 JSON 对象: {type(data).__name__}")))
 
     if sig:
         with _LOCK:
             if len(_CACHE) >= _MAX_ENTRIES:
                 _CACHE.clear()
-            _CACHE[key] = (sig, tuple(rows))
+            _CACHE[key] = (sig, tuple(rows), tuple(errors))
+    if on_error is not None:
+        for path, exc in errors:
+            on_error(path, exc)
     return list(rows)
 
 

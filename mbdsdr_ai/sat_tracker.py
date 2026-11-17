@@ -20,12 +20,15 @@ MBDSDR AI 内核 - 卫星闭环自动跟踪器
     f_corrected = f_downlink + doppler_hz = f_downlink * (1 - v_range/c)
 
 TLE 来源（不造假）：
-  1) 内置 6 颗常用气象/业余卫星的真实 TLE（Celestrak 抓取，见 BUILTIN_TLE_DATE）；
+  1) 内置快照：6 颗常用气象/业余卫星的 Celestrak **静态快照**
+     （``origin_kind=external_snapshot``，抓取日期见 ``BUILTIN_TLE_DATE``，
+     每条 TLE 自带 epoch）。这是「外部提供的历史快照」，不是在线实时数据；
   2) 用户 .tle 文件；
   3) "更新 TLE" 从 Celestrak active.txt 在线刷新内置目录；
   4) 刷新成功即原子落盘到 ~/.mbdsdr/tle_cache/<NORAD>.tle，启动时读回
      （只采用历元比内置新、且编号/名称核验一致的缓存）。
-下载失败时保留内置 TLE，绝不编造轨道根数。
+下载失败时保留静态快照，绝不编造轨道根数；``decoders.BUILTIN_TLE`` 的
+合成/凑整表已从生产路径移除，不在本模块的回退链路里。
 """
 from __future__ import annotations
 
@@ -65,7 +68,8 @@ from .sat_passes import (
     C_LIGHT_MPS,
 )
 
-__all__ = ["SatelliteTracker", "BUILTIN_DOWNLINK_HZ", "BUILTIN_TLE_DATE"]
+__all__ = ["SatelliteTracker", "BUILTIN_DOWNLINK_HZ", "BUILTIN_TLE_DATE",
+           "BUILTIN_TLE_ORIGIN_KIND", "BUILTIN_TLE_SOURCE"]
 
 
 # ---------------------------------------------------------------------------
@@ -87,7 +91,13 @@ BUILTIN_DOWNLINK_HZ: Dict[str, float] = {
 # 内置 TLE 的抓取日期（标注在 UI 上，提醒用户过期后点"更新 TLE"）。
 BUILTIN_TLE_DATE = "2026-09-25"
 
-# 内置默认 TLE（Celestrak 真实抓取，历元 2026-09-25，NORAD active 目录）。
+#: 内置快照的来历类别：外部提供的历史快照，不是在线实时数据。
+BUILTIN_TLE_ORIGIN_KIND = "external_snapshot"
+#: 内置快照的来源（供 UI/诊断如实标注；静态快照不会随源自动更新）。
+BUILTIN_TLE_SOURCE = "Celestrak active catalog（静态快照）"
+
+# 内置静态快照（Celestrak 抓取，历元 2026-09-25，NORAD active 目录）。
+# 来历类别见 BUILTIN_TLE_ORIGIN_KIND=external_snapshot：外部提供，不是实时。
 # 每项为 3 行：标题行 + line1 + line2。
 _BUILTIN_TLES: List[List[str]] = [
     [
@@ -246,7 +256,7 @@ class SatelliteTracker:
 
         # 启动即加载内置真实 TLE（失败不崩：单条无效跳过）。
         for tle in _BUILTIN_TLES:
-            self.load_tle(tle)
+            self.load_tle(tle, source=BUILTIN_TLE_ORIGIN_KIND)
         # 再读回磁盘缓存：上次刷新落盘的 TLE 若比内置新，覆盖对应条目。
         # 否则每次重启都退回 2026-09-25 内置快照，「更新 TLE」等于白做。
         self._load_disk_cache()
@@ -261,8 +271,13 @@ class SatelliteTracker:
         """当前内置/最近一次更新 TLE 的日期标注。"""
         return self._tle_date
 
-    def load_tle(self, tle_lines: Sequence[str]) -> bool:
-        """加载一条 TLE（标题行可选 + line1 + line2）。成功返回 True。"""
+    def load_tle(self, tle_lines: Sequence[str],
+                 source: str = "builtin_or_user") -> bool:
+        """加载一条 TLE（标题行可选 + line1 + line2）。成功返回 True。
+
+        ``source`` 如实标注来历：内置快照为 ``external_snapshot``，用户
+        .tle 为 ``user_file``（调用方传入），静态快照不等于在线实时。
+        """
         parsed = _parse_tle(tle_lines)
         if parsed is None:
             return False
@@ -279,7 +294,10 @@ class SatelliteTracker:
             "line1": line1,
             "line2": line2,
             "identity_status": "no_data" if not name else "verified",
-            "source": "builtin_or_user",
+            "source": source,
+            "provided_by": (BUILTIN_TLE_SOURCE
+                            if source == BUILTIN_TLE_ORIGIN_KIND
+                            else "用户/外部输入"),
         })
         self._annotate_entry(self._catalog[-1])
         # 若刷新的是当前选中星，重建传播器

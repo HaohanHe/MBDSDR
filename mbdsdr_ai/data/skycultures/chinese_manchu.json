@@ -1,0 +1,2402 @@
+{
+  "id": "chinese_manchu",
+  "meta": {
+    "schema": "mbdsdr.sky_culture.v1",
+    "id": "chinese_manchu",
+    "display_name": "Chinese Manchu",
+    "native_name": "",
+    "region": "Eastern Asia",
+    "classification": [
+      "ethnographic"
+    ],
+    "source": "Stellarium skyculture chinese_manchu",
+    "source_url": "https://github.com/Stellarium/stellarium/tree/master/skycultures/chinese_manchu",
+    "source_license": "CC BY-SA 4.0",
+    "source_license_url": "https://creativecommons.org/licenses/by-sa/4.0/",
+    "attribution": "Stellarium sky culture 'chinese_manchu'; authors: Lyu Haocheng (CC BY-SA 4.0). Converted to HIP line segments only; no artwork or description images were copied.",
+    "source_file": "reference/stellarium/skycultures/chinese_manchu/index.json",
+    "source_file_sha256": "e661c928d2db7bedc3ccfdd966865520ebd4aa06c108ae581461ccdd96564db9",
+    "description_file": "reference/stellarium/skycultures/chinese_manchu/description.md",
+    "description_file_sha256": "d6dc9aa3b6a13299de9126ba4e99b3b14da5149d6a3bf3cb4b4a060e52009996",
+    "conversion_scope": "Only constellations[].lines, id and common_name (plus optional common_names star labels) are converted; illustrations, artwork and description text are not copied.",
+    "names_scope": "Explicit common_names labels take precedence; stars without an explicit label inherit the constellation/asterism name they belong to.",
+    "group_count": 24,
+    "edge_count": 278,
+    "name_count": 271,
+    "unresolved_hip_count": 1,
+    "unresolved_hips": [
+      54483
+    ],
+    "unresolved_token_count": 0,
+    "unresolved_tokens": [],
+    "generated_utc": "2026-11-17T17:42:09Z",
+    "data_sha256": "e82e5143283f40bed2ded914b65dd28aa3c3190e94174f1367b6d8761879e3b4"
+  },
+  "groups": [
+    {
+      "group_id": "CON chinese_manchu Narhu",
+      "names": {
+        "en": "Seven Maidens",
+        "native": "ᠨᠠᡩᠠᠨ ᠨᠠᡵᡥᡡ",
+        "pronounce": "Nadan Narhū",
+        "ipa": "nä.tän när.χʊ"
+      },
+      "lines": [
+        [
+          17608,
+          17573,
+          17531,
+          17489,
+          17499,
+          17608,
+          17702,
+          17847
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_manchu Sengge",
+      "names": {
+        "en": "God of Hedgehogs",
+        "native": "ᡝᠨᡩᡠᡵᡳ ᠰᡝᠩᡤᡝ",
+        "pronounce": "Enduri Sengge",
+        "ipa": "ən.tu.ri səŋ.ŋə"
+      },
+      "lines": [
+        [
+          100453,
+          97165,
+          99675,
+          102098,
+          103413,
+          104887,
+          105138,
+          104732,
+          102488,
+          101474,
+          100453
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_manchu Taci",
+      "names": {
+        "en": "Taci (Goddess)",
+        "native": "ᡨᠠᠴᡳ ᠮᠠᠮᠠ",
+        "pronounce": "Taci Mama",
+        "ipa": "tʰä.t͡ɕʰi mämä"
+      },
+      "lines": [
+        [
+          746,
+          3179,
+          4427,
+          6686,
+          8886
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_manchu Tobo",
+      "names": {
+        "en": "Hut",
+        "native": "ᡨᠣᠪᠣ ᡠᠰᡳᡥᠠ",
+        "pronounce": "Tobo usiha",
+        "ipa": "tʰɔ.pɔ u.ɕi.χä"
+      },
+      "lines": [
+        [
+          14328,
+          15863,
+          17358,
+          17529,
+          18532
+        ],
+        [
+          15863,
+          14668,
+          14576,
+          14354
+        ],
+        [
+          14576,
+          13254
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_manchu Tehe",
+      "names": {
+        "en": "God of the Stand",
+        "native": "ᡝᠨᡩᡠᡵᡳ ᡨᡝᡥᡝ",
+        "pronounce": "Enduri Tehe",
+        "ipa": "ən.tu.ri tʰə.xə"
+      },
+      "lines": [
+        [
+          677,
+          113881,
+          113963,
+          1067,
+          677
+        ],
+        [
+          112158,
+          113881,
+          112051
+        ],
+        [
+          113963,
+          112029,
+          107315
+        ],
+        [
+          5447,
+          3092,
+          677,
+          2912,
+          4436
+        ],
+        [
+          1067,
+          1845
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_manchu Ilan",
+      "names": {
+        "en": "Three Stars",
+        "native": "ᡳᠯᠠᠨ ᡠᠰᡳᡥᠠ",
+        "pronounce": "Ilan usiha",
+        "ipa": "i.län u.ɕi.χä"
+      },
+      "lines": [
+        [
+          26727,
+          26311,
+          25930
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_manchu Nadan",
+      "names": {
+        "en": "Seven Stars",
+        "native": "ᠨᠠᡩᠠᠨ ᡠᠰᡳᡥᠠ",
+        "pronounce": "Nadan usiha",
+        "ipa": "nä.tän u.ɕi.χä"
+      },
+      "lines": [
+        [
+          59774,
+          54061,
+          53910,
+          58001,
+          59774,
+          62956,
+          65378,
+          67301
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_manchu Gasha",
+      "names": {
+        "en": "Divine Eagle",
+        "native": "ᡤᠠᠰᡥᠠ",
+        "pronounce": "Gasha",
+        "ipa": "qäs.χä"
+      },
+      "lines": [
+        [
+          25930,
+          25336,
+          27989,
+          26727,
+          27366,
+          26241,
+          24436,
+          25281,
+          25930
+        ],
+        [
+          25281,
+          24127,
+          23875,
+          21444,
+          19587,
+          16653
+        ],
+        [
+          25336,
+          21421,
+          18724,
+          17771,
+          18581,
+          18805,
+          19860,
+          20356,
+          21304,
+          21295,
+          22449,
+          25336
+        ],
+        [
+          21421,
+          17847
+        ],
+        [
+          27989,
+          30343,
+          32246,
+          32194,
+          33595,
+          34861,
+          34367,
+          35152,
+          36046,
+          36962,
+          37826,
+          36850,
+          31789,
+          28823,
+          29633,
+          29884,
+          29388,
+          28530,
+          27196,
+          23828,
+          23020,
+          22545,
+          22413,
+          22650,
+          23416,
+          21476,
+          18614,
+          16713,
+          17448,
+          18246,
+          19397,
+          18687,
+          19205,
+          20250,
+          20711,
+          21881,
+          21421
+        ],
+        [
+          30343,
+          29655,
+          28734,
+          28360,
+          24608,
+          25428,
+          24822,
+          23497
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_manchu Singgeri",
+      "names": {
+        "en": "Rat",
+        "native": "ᠰᡳᠩᡤᡝᡵᡳ ᡠᠰᡳᡥᠠ",
+        "pronounce": "Singgeri usiha",
+        "ipa": "ɕiŋ.ŋə.ri u.ɕi.χä"
+      },
+      "lines": [
+        [
+          54470,
+          54483,
+          54573,
+          54879,
+          57632,
+          54872,
+          50583,
+          49583,
+          49395,
+          49348,
+          49669,
+          52689,
+          51585,
+          51690,
+          51388,
+          51299
+        ],
+        [
+          49583,
+          48883,
+          49637,
+          51624
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_manchu Morin",
+      "names": {
+        "en": "Horse",
+        "native": "ᠮᠣᡵᡳᠨ ᡠᠰᡳᡥᠠ",
+        "pronounce": "Morin usiha",
+        "ipa": "mɔ.rin u.ɕi.χä"
+      },
+      "lines": [
+        [
+          32349,
+          32349
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_manchu Wadan",
+      "names": {
+        "en": "Wadan (The Celestial Altar)",
+        "native": "ᠸᠠᡩᠠᠨ",
+        "pronounce": "Wadan",
+        "ipa": "wä.tän"
+      },
+      "lines": [
+        [
+          59316,
+          61359,
+          60965,
+          59803,
+          59316,
+          59199
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_manchu Imcin",
+      "names": {
+        "en": "Drum",
+        "native": "ᡳᠮᠴᡳᠨ",
+        "pronounce": "Imcin",
+        "ipa": "im.t͡ɕʰin"
+      },
+      "lines": [
+        [
+          8796,
+          9884,
+          8903,
+          8832,
+          6193,
+          6512,
+          7513,
+          9640,
+          10064,
+          10280,
+          9884,
+          8832
+        ],
+        [
+          8903,
+          8796
+        ],
+        [
+          6193,
+          8796,
+          6512
+        ],
+        [
+          10064,
+          8796,
+          10280
+        ],
+        [
+          7513,
+          10064
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_manchu Gisun",
+      "names": {
+        "en": "Drumstick",
+        "native": "ᡤᡳᠰᡠᠨ",
+        "pronounce": "Gisun",
+        "ipa": "ki.sun"
+      },
+      "lines": [
+        [
+          7097,
+          5571,
+          4463,
+          3693
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_manchu Siri",
+      "names": {
+        "en": "Goddess of Carp",
+        "native": "ᠰᡳᡵᡳ ᠮᠠᠮᠠ",
+        "pronounce": "Siri Mama",
+        "ipa": "ɕi.ri mämä"
+      },
+      "lines": [
+        [
+          20517,
+          22783,
+          23522,
+          23040,
+          25346,
+          28358,
+          32261,
+          34912,
+          33908,
+          36145,
+          41075,
+          45860,
+          45290,
+          44127,
+          37406,
+          37609,
+          37111,
+          36634
+        ],
+        [
+          37111,
+          36434,
+          33449,
+          29490,
+          20517
+        ],
+        [
+          44248,
+          44248
+        ],
+        [
+          39847,
+          39847
+        ],
+        [
+          30060,
+          30060
+        ],
+        [
+          29919,
+          29919
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_manchu Terkin",
+      "names": {
+        "en": "Goddess of the Staircase Stars",
+        "native": "ᡨᡝᡵᡴᡳᠨ ᡠᠰᡳᡥᠠ ᠮᠠᠮᠠ",
+        "pronounce": "Terkin Usiha Mama",
+        "ipa": "tʰər.kʰin u.ɕi.χä mä.mä"
+      },
+      "lines": [
+        [
+          57757,
+          60129,
+          61941,
+          63090,
+          63608,
+          64823,
+          65721,
+          62356
+        ],
+        [
+          65721,
+          64241,
+          62886
+        ],
+        [
+          61941,
+          65474
+        ],
+        [
+          63090,
+          66249
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_manchu Buruhun",
+      "names": {
+        "en": "Star of Buruhun (The Dawn Beast)",
+        "native": "ᡠᠰᡳᡥᠠ ᠪᡠᡵᡠᡥᡠᠨ",
+        "pronounce": "Usiha Buruhun",
+        "ipa": "u.ɕi.χä pu.ru.xun"
+      },
+      "lines": [
+        [
+          71053,
+          71075,
+          73555,
+          74666,
+          75695,
+          73745,
+          72105
+        ],
+        [
+          74666,
+          72105,
+          69673,
+          67927,
+          72798,
+          71795,
+          69673,
+          71053,
+          67665,
+          64844,
+          61317,
+          59856,
+          60742,
+          63075,
+          62763,
+          63462,
+          64394
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_manchu Fodoho",
+      "names": {
+        "en": "Willow",
+        "native": "ᡶᠣᡩᠣᡥᠣ ᡠᠰᡳᡥᠠ",
+        "pronounce": "Fodoho usiha",
+        "ipa": "fɔ.tɔ.χɔ u.ɕi.χä"
+      },
+      "lines": [
+        [
+          43109,
+          43234,
+          42799,
+          43142,
+          42028,
+          42402,
+          42313,
+          43109,
+          43813,
+          44659,
+          45336,
+          46509
+        ],
+        [
+          43813,
+          44066,
+          45410
+        ],
+        [
+          44659,
+          47508,
+          49029
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_manchu Asu",
+      "names": {
+        "en": "Net",
+        "native": "ᠠᠰᡠ ᡠᠰᡳᡥᠠ",
+        "pronounce": "Asu usiha",
+        "ipa": "ä.su u.ɕi.χä"
+      },
+      "lines": [
+        [
+          80170,
+          80816,
+          84345,
+          84379,
+          80816,
+          81693,
+          84379,
+          84380,
+          87808
+        ],
+        [
+          84380,
+          81833,
+          79992
+        ],
+        [
+          81693,
+          81833,
+          84379
+        ],
+        [
+          84345,
+          86032
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_manchu Nimaha",
+      "names": {
+        "en": "Fishhook",
+        "native": "ᠨᡳᠮᠠᡥᠠ ᡠᠰᡳᡥᠠ",
+        "pronounce": "Nimaha usiha",
+        "ipa": "ɲi.mä.χä u.ɕi.χä"
+      },
+      "lines": [
+        [
+          78820,
+          78401,
+          78265,
+          78104
+        ],
+        [
+          78401,
+          80112,
+          80763,
+          81266,
+          82396,
+          82514,
+          82729,
+          84143,
+          86228,
+          87073,
+          86670,
+          85927
+        ],
+        [
+          86670,
+          85696
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_manchu Hadaha",
+      "names": {
+        "en": "Nail",
+        "native": "ᡥᠠᡩᠠᡥᠠ ᡠᠰᡳᡥᠠ",
+        "pronounce": "Hadaha usiha",
+        "ipa": "χä.tä.χä u.ɕi.χä"
+      },
+      "lines": [
+        [
+          11767,
+          11767
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_manchu Juru",
+      "names": {
+        "en": "Pair of Silver-Maned Steeds",
+        "native": "ᠵᡠᡵᡠ ᠰᡳᡵᡥᠠ",
+        "pronounce": "Juru Sirha",
+        "ipa": "t͡ʃu.ru ɕir.χä"
+      },
+      "lines": [
+        [
+          75097,
+          72607
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_manchu Ikiri",
+      "names": {
+        "en": "Ox-Leading Stars",
+        "native": "ᡳᡴᡳᡵᡳ ᡠᠰᡳᡥᠠ",
+        "pronounce": "Ikiri usiha",
+        "ipa": "i.kʰi.ri u.ɕi.χä"
+      },
+      "lines": [
+        [
+          97278,
+          97649,
+          98036
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_manchu Ilmahu",
+      "names": {
+        "en": "Prop-Stick Stars",
+        "native": "ᡳᠯᠮᠠᡥᡡ/ᡳᠯᠮᠣᡥᠣ ᡠᠰᡳᡥᠠ",
+        "pronounce": "Ilmahū/Ilmoho usiha",
+        "ipa": "il.mä.χʊ/il.mɔ.χɔ u.ɕi.χä"
+      },
+      "lines": [
+        [
+          26237,
+          26235,
+          26241
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON chinese_manchu Borboho",
+      "names": {
+        "en": "Coiled Thong",
+        "native": "ᠪᠣᡵᠪᠣᡥᠣ ᡠᠰᡳᡥᠠ",
+        "pronounce": "Borboho usiha",
+        "ipa": "pɔr.pɔ.χɔ u.ɕi.χä"
+      },
+      "lines": [
+        [
+          77048,
+          76127,
+          75695,
+          76267,
+          76952,
+          77512,
+          78159,
+          78493,
+          78459
+        ]
+      ],
+      "kind": "constellation"
+    }
+  ],
+  "names": {
+    "11767": {
+      "en": "Nail Star",
+      "native": "ᡥᠠᡩᠠᡥᠠ ᡠᠰᡳᡥᠠ",
+      "pronounce": "Hadaha usiha",
+      "ipa": "χä.tä.χä u.ɕi.χä"
+    },
+    "72607": {
+      "en": "Emperor",
+      "native": "ᡥᠠᠨ ᡠᠰᡳᡥᠠ",
+      "pronounce": "Han usiha",
+      "ipa": "χän u.ɕi.χä"
+    },
+    "97649": {
+      "en": "Ox-Leading",
+      "native": "ᡳᡤᡝᡵᡳ ᡠᠰᡳᡥᠠ",
+      "pronounce": "Igeri usiha",
+      "ipa": "i.kə.ri u.ɕi.χä"
+    },
+    "91262": {
+      "en": "Weaving Wife",
+      "native": "ᠵᠣᡩᠣᡵᡤᠠᠨ ᡠᠰᡳᡥᠠ",
+      "pronounce": "Jodorgan usiha",
+      "ipa": "t͡ʃɔ.tɔr.qän u.ɕi.χä"
+    },
+    "54061": {
+      "en": "The Celestial Pivot",
+      "native": "ᠠᠪᡴᠠᡳ ᡥᠣᡵᡤᡳᡴᡡ ᡠᠰᡳᡥᠠ",
+      "pronounce": "Abkai Horgikū usiha",
+      "ipa": "äp.qʰäi χɔr.ki.qʰʊ u.ɕi.χä"
+    },
+    "53910": {
+      "en": "The Celestial Rotating Jade",
+      "native": "ᠠᠪᡴᠠᡳ ᠨᡳᠴᡠᡥᡝ ᡠᠰᡳᡥᠠ",
+      "pronounce": "Abkai Nicuhe usiha",
+      "ipa": "äp.qʰäi ɲi.t͡ʃʰu.xə u.ɕi.χä"
+    },
+    "58001": {
+      "en": "The Celestial Shining Pearl",
+      "native": "ᠠᠪᡴᠠᡳ ᡧᡠᡵᡩᡝᡥᡝᠨ ᡠᠰᡳᡥᠠ",
+      "pronounce": "Abkai Šurdehen usiha",
+      "ipa": "äp.qʰäi ʃur.tə.xən u.ɕi.χä"
+    },
+    "59774": {
+      "en": "The Celestial Balance",
+      "native": "ᠠᠪᡴᠠᡳ ᡨᠣᠣᠰᡝ ᡠᠰᡳᡥᠠ",
+      "pronounce": "Abkai Toose usiha",
+      "ipa": "äp.qʰäi tʰoː.sə u.ɕi.χä"
+    },
+    "62956": {
+      "en": "The Jade Sighting-Tube",
+      "native": "ᡤᡠ᠎ᡳ ᠴᡳᠨᠴᡳᠯᠠᠨ ᡠᠰᡳᡥᠠ",
+      "pronounce": "Gu i Cincilan usiha",
+      "ipa": "ku i t͡ɕʰin.t͡ɕʰi.län u.ɕi.χä"
+    },
+    "65378": {
+      "en": "The Opener of Heat",
+      "native": "ᡶᠣᠰᠣᡵᡳ ᡠᠰᡳᡥᠠ",
+      "pronounce": "Fosori usiha",
+      "ipa": "fɔ.sɔ.ri u.ɕi.χä"
+    },
+    "67301": {
+      "en": "The Twinkling Brilliance",
+      "native": "ᡝᠯᡩᡝᡵᡳ ᡠᠰᡳᡥᠠ",
+      "pronounce": "Elderi usiha",
+      "ipa": "əl.tə.ri u.ɕi.χä"
+    },
+    "32349": {
+      "en": "Horse Star",
+      "native": "ᠮᠣᡵᡳᠨ ᡠᠰᡳᡥᠠ",
+      "pronounce": "Morin usiha",
+      "ipa": "mɔ.rin u.ɕi.χä"
+    },
+    "17608": {
+      "en": "Seven Maidens",
+      "native": "ᠨᠠᡩᠠᠨ ᠨᠠᡵᡥᡡ",
+      "pronounce": "Nadan Narhū",
+      "ipa": "nä.tän när.χʊ"
+    },
+    "17573": {
+      "en": "Seven Maidens",
+      "native": "ᠨᠠᡩᠠᠨ ᠨᠠᡵᡥᡡ",
+      "pronounce": "Nadan Narhū",
+      "ipa": "nä.tän när.χʊ"
+    },
+    "17531": {
+      "en": "Seven Maidens",
+      "native": "ᠨᠠᡩᠠᠨ ᠨᠠᡵᡥᡡ",
+      "pronounce": "Nadan Narhū",
+      "ipa": "nä.tän när.χʊ"
+    },
+    "17489": {
+      "en": "Seven Maidens",
+      "native": "ᠨᠠᡩᠠᠨ ᠨᠠᡵᡥᡡ",
+      "pronounce": "Nadan Narhū",
+      "ipa": "nä.tän när.χʊ"
+    },
+    "17499": {
+      "en": "Seven Maidens",
+      "native": "ᠨᠠᡩᠠᠨ ᠨᠠᡵᡥᡡ",
+      "pronounce": "Nadan Narhū",
+      "ipa": "nä.tän när.χʊ"
+    },
+    "17702": {
+      "en": "Seven Maidens",
+      "native": "ᠨᠠᡩᠠᠨ ᠨᠠᡵᡥᡡ",
+      "pronounce": "Nadan Narhū",
+      "ipa": "nä.tän när.χʊ"
+    },
+    "17847": {
+      "en": "Seven Maidens",
+      "native": "ᠨᠠᡩᠠᠨ ᠨᠠᡵᡥᡡ",
+      "pronounce": "Nadan Narhū",
+      "ipa": "nä.tän när.χʊ"
+    },
+    "100453": {
+      "en": "God of Hedgehogs",
+      "native": "ᡝᠨᡩᡠᡵᡳ ᠰᡝᠩᡤᡝ",
+      "pronounce": "Enduri Sengge",
+      "ipa": "ən.tu.ri səŋ.ŋə"
+    },
+    "97165": {
+      "en": "God of Hedgehogs",
+      "native": "ᡝᠨᡩᡠᡵᡳ ᠰᡝᠩᡤᡝ",
+      "pronounce": "Enduri Sengge",
+      "ipa": "ən.tu.ri səŋ.ŋə"
+    },
+    "99675": {
+      "en": "God of Hedgehogs",
+      "native": "ᡝᠨᡩᡠᡵᡳ ᠰᡝᠩᡤᡝ",
+      "pronounce": "Enduri Sengge",
+      "ipa": "ən.tu.ri səŋ.ŋə"
+    },
+    "102098": {
+      "en": "God of Hedgehogs",
+      "native": "ᡝᠨᡩᡠᡵᡳ ᠰᡝᠩᡤᡝ",
+      "pronounce": "Enduri Sengge",
+      "ipa": "ən.tu.ri səŋ.ŋə"
+    },
+    "103413": {
+      "en": "God of Hedgehogs",
+      "native": "ᡝᠨᡩᡠᡵᡳ ᠰᡝᠩᡤᡝ",
+      "pronounce": "Enduri Sengge",
+      "ipa": "ən.tu.ri səŋ.ŋə"
+    },
+    "104887": {
+      "en": "God of Hedgehogs",
+      "native": "ᡝᠨᡩᡠᡵᡳ ᠰᡝᠩᡤᡝ",
+      "pronounce": "Enduri Sengge",
+      "ipa": "ən.tu.ri səŋ.ŋə"
+    },
+    "105138": {
+      "en": "God of Hedgehogs",
+      "native": "ᡝᠨᡩᡠᡵᡳ ᠰᡝᠩᡤᡝ",
+      "pronounce": "Enduri Sengge",
+      "ipa": "ən.tu.ri səŋ.ŋə"
+    },
+    "104732": {
+      "en": "God of Hedgehogs",
+      "native": "ᡝᠨᡩᡠᡵᡳ ᠰᡝᠩᡤᡝ",
+      "pronounce": "Enduri Sengge",
+      "ipa": "ən.tu.ri səŋ.ŋə"
+    },
+    "102488": {
+      "en": "God of Hedgehogs",
+      "native": "ᡝᠨᡩᡠᡵᡳ ᠰᡝᠩᡤᡝ",
+      "pronounce": "Enduri Sengge",
+      "ipa": "ən.tu.ri səŋ.ŋə"
+    },
+    "101474": {
+      "en": "God of Hedgehogs",
+      "native": "ᡝᠨᡩᡠᡵᡳ ᠰᡝᠩᡤᡝ",
+      "pronounce": "Enduri Sengge",
+      "ipa": "ən.tu.ri səŋ.ŋə"
+    },
+    "746": {
+      "en": "Taci (Goddess)",
+      "native": "ᡨᠠᠴᡳ ᠮᠠᠮᠠ",
+      "pronounce": "Taci Mama",
+      "ipa": "tʰä.t͡ɕʰi mämä"
+    },
+    "3179": {
+      "en": "Taci (Goddess)",
+      "native": "ᡨᠠᠴᡳ ᠮᠠᠮᠠ",
+      "pronounce": "Taci Mama",
+      "ipa": "tʰä.t͡ɕʰi mämä"
+    },
+    "4427": {
+      "en": "Taci (Goddess)",
+      "native": "ᡨᠠᠴᡳ ᠮᠠᠮᠠ",
+      "pronounce": "Taci Mama",
+      "ipa": "tʰä.t͡ɕʰi mämä"
+    },
+    "6686": {
+      "en": "Taci (Goddess)",
+      "native": "ᡨᠠᠴᡳ ᠮᠠᠮᠠ",
+      "pronounce": "Taci Mama",
+      "ipa": "tʰä.t͡ɕʰi mämä"
+    },
+    "8886": {
+      "en": "Taci (Goddess)",
+      "native": "ᡨᠠᠴᡳ ᠮᠠᠮᠠ",
+      "pronounce": "Taci Mama",
+      "ipa": "tʰä.t͡ɕʰi mämä"
+    },
+    "14328": {
+      "en": "Hut",
+      "native": "ᡨᠣᠪᠣ ᡠᠰᡳᡥᠠ",
+      "pronounce": "Tobo usiha",
+      "ipa": "tʰɔ.pɔ u.ɕi.χä"
+    },
+    "15863": {
+      "en": "Hut",
+      "native": "ᡨᠣᠪᠣ ᡠᠰᡳᡥᠠ",
+      "pronounce": "Tobo usiha",
+      "ipa": "tʰɔ.pɔ u.ɕi.χä"
+    },
+    "17358": {
+      "en": "Hut",
+      "native": "ᡨᠣᠪᠣ ᡠᠰᡳᡥᠠ",
+      "pronounce": "Tobo usiha",
+      "ipa": "tʰɔ.pɔ u.ɕi.χä"
+    },
+    "17529": {
+      "en": "Hut",
+      "native": "ᡨᠣᠪᠣ ᡠᠰᡳᡥᠠ",
+      "pronounce": "Tobo usiha",
+      "ipa": "tʰɔ.pɔ u.ɕi.χä"
+    },
+    "18532": {
+      "en": "Hut",
+      "native": "ᡨᠣᠪᠣ ᡠᠰᡳᡥᠠ",
+      "pronounce": "Tobo usiha",
+      "ipa": "tʰɔ.pɔ u.ɕi.χä"
+    },
+    "14668": {
+      "en": "Hut",
+      "native": "ᡨᠣᠪᠣ ᡠᠰᡳᡥᠠ",
+      "pronounce": "Tobo usiha",
+      "ipa": "tʰɔ.pɔ u.ɕi.χä"
+    },
+    "14576": {
+      "en": "Hut",
+      "native": "ᡨᠣᠪᠣ ᡠᠰᡳᡥᠠ",
+      "pronounce": "Tobo usiha",
+      "ipa": "tʰɔ.pɔ u.ɕi.χä"
+    },
+    "14354": {
+      "en": "Hut",
+      "native": "ᡨᠣᠪᠣ ᡠᠰᡳᡥᠠ",
+      "pronounce": "Tobo usiha",
+      "ipa": "tʰɔ.pɔ u.ɕi.χä"
+    },
+    "13254": {
+      "en": "Hut",
+      "native": "ᡨᠣᠪᠣ ᡠᠰᡳᡥᠠ",
+      "pronounce": "Tobo usiha",
+      "ipa": "tʰɔ.pɔ u.ɕi.χä"
+    },
+    "677": {
+      "en": "God of the Stand",
+      "native": "ᡝᠨᡩᡠᡵᡳ ᡨᡝᡥᡝ",
+      "pronounce": "Enduri Tehe",
+      "ipa": "ən.tu.ri tʰə.xə"
+    },
+    "113881": {
+      "en": "God of the Stand",
+      "native": "ᡝᠨᡩᡠᡵᡳ ᡨᡝᡥᡝ",
+      "pronounce": "Enduri Tehe",
+      "ipa": "ən.tu.ri tʰə.xə"
+    },
+    "113963": {
+      "en": "God of the Stand",
+      "native": "ᡝᠨᡩᡠᡵᡳ ᡨᡝᡥᡝ",
+      "pronounce": "Enduri Tehe",
+      "ipa": "ən.tu.ri tʰə.xə"
+    },
+    "1067": {
+      "en": "God of the Stand",
+      "native": "ᡝᠨᡩᡠᡵᡳ ᡨᡝᡥᡝ",
+      "pronounce": "Enduri Tehe",
+      "ipa": "ən.tu.ri tʰə.xə"
+    },
+    "112158": {
+      "en": "God of the Stand",
+      "native": "ᡝᠨᡩᡠᡵᡳ ᡨᡝᡥᡝ",
+      "pronounce": "Enduri Tehe",
+      "ipa": "ən.tu.ri tʰə.xə"
+    },
+    "112051": {
+      "en": "God of the Stand",
+      "native": "ᡝᠨᡩᡠᡵᡳ ᡨᡝᡥᡝ",
+      "pronounce": "Enduri Tehe",
+      "ipa": "ən.tu.ri tʰə.xə"
+    },
+    "112029": {
+      "en": "God of the Stand",
+      "native": "ᡝᠨᡩᡠᡵᡳ ᡨᡝᡥᡝ",
+      "pronounce": "Enduri Tehe",
+      "ipa": "ən.tu.ri tʰə.xə"
+    },
+    "107315": {
+      "en": "God of the Stand",
+      "native": "ᡝᠨᡩᡠᡵᡳ ᡨᡝᡥᡝ",
+      "pronounce": "Enduri Tehe",
+      "ipa": "ən.tu.ri tʰə.xə"
+    },
+    "5447": {
+      "en": "God of the Stand",
+      "native": "ᡝᠨᡩᡠᡵᡳ ᡨᡝᡥᡝ",
+      "pronounce": "Enduri Tehe",
+      "ipa": "ən.tu.ri tʰə.xə"
+    },
+    "3092": {
+      "en": "God of the Stand",
+      "native": "ᡝᠨᡩᡠᡵᡳ ᡨᡝᡥᡝ",
+      "pronounce": "Enduri Tehe",
+      "ipa": "ən.tu.ri tʰə.xə"
+    },
+    "2912": {
+      "en": "God of the Stand",
+      "native": "ᡝᠨᡩᡠᡵᡳ ᡨᡝᡥᡝ",
+      "pronounce": "Enduri Tehe",
+      "ipa": "ən.tu.ri tʰə.xə"
+    },
+    "4436": {
+      "en": "God of the Stand",
+      "native": "ᡝᠨᡩᡠᡵᡳ ᡨᡝᡥᡝ",
+      "pronounce": "Enduri Tehe",
+      "ipa": "ən.tu.ri tʰə.xə"
+    },
+    "1845": {
+      "en": "God of the Stand",
+      "native": "ᡝᠨᡩᡠᡵᡳ ᡨᡝᡥᡝ",
+      "pronounce": "Enduri Tehe",
+      "ipa": "ən.tu.ri tʰə.xə"
+    },
+    "26727": {
+      "en": "Three Stars",
+      "native": "ᡳᠯᠠᠨ ᡠᠰᡳᡥᠠ",
+      "pronounce": "Ilan usiha",
+      "ipa": "i.län u.ɕi.χä"
+    },
+    "26311": {
+      "en": "Three Stars",
+      "native": "ᡳᠯᠠᠨ ᡠᠰᡳᡥᠠ",
+      "pronounce": "Ilan usiha",
+      "ipa": "i.län u.ɕi.χä"
+    },
+    "25930": {
+      "en": "Three Stars",
+      "native": "ᡳᠯᠠᠨ ᡠᠰᡳᡥᠠ",
+      "pronounce": "Ilan usiha",
+      "ipa": "i.län u.ɕi.χä"
+    },
+    "25336": {
+      "en": "Divine Eagle",
+      "native": "ᡤᠠᠰᡥᠠ",
+      "pronounce": "Gasha",
+      "ipa": "qäs.χä"
+    },
+    "27989": {
+      "en": "Divine Eagle",
+      "native": "ᡤᠠᠰᡥᠠ",
+      "pronounce": "Gasha",
+      "ipa": "qäs.χä"
+    },
+    "27366": {
+      "en": "Divine Eagle",
+      "native": "ᡤᠠᠰᡥᠠ",
+      "pronounce": "Gasha",
+      "ipa": "qäs.χä"
+    },
+    "26241": {
+      "en": "Divine Eagle",
+      "native": "ᡤᠠᠰᡥᠠ",
+      "pronounce": "Gasha",
+      "ipa": "qäs.χä"
+    },
+    "24436": {
+      "en": "Divine Eagle",
+      "native": "ᡤᠠᠰᡥᠠ",
+      "pronounce": "Gasha",
+      "ipa": "qäs.χä"
+    },
+    "25281": {
+      "en": "Divine Eagle",
+      "native": "ᡤᠠᠰᡥᠠ",
+      "pronounce": "Gasha",
+      "ipa": "qäs.χä"
+    },
+    "24127": {
+      "en": "Divine Eagle",
+      "native": "ᡤᠠᠰᡥᠠ",
+      "pronounce": "Gasha",
+      "ipa": "qäs.χä"
+    },
+    "23875": {
+      "en": "Divine Eagle",
+      "native": "ᡤᠠᠰᡥᠠ",
+      "pronounce": "Gasha",
+      "ipa": "qäs.χä"
+    },
+    "21444": {
+      "en": "Divine Eagle",
+      "native": "ᡤᠠᠰᡥᠠ",
+      "pronounce": "Gasha",
+      "ipa": "qäs.χä"
+    },
+    "19587": {
+      "en": "Divine Eagle",
+      "native": "ᡤᠠᠰᡥᠠ",
+      "pronounce": "Gasha",
+      "ipa": "qäs.χä"
+    },
+    "16653": {
+      "en": "Divine Eagle",
+      "native": "ᡤᠠᠰᡥᠠ",
+      "pronounce": "Gasha",
+      "ipa": "qäs.χä"
+    },
+    "21421": {
+      "en": "Divine Eagle",
+      "native": "ᡤᠠᠰᡥᠠ",
+      "pronounce": "Gasha",
+      "ipa": "qäs.χä"
+    },
+    "18724": {
+      "en": "Divine Eagle",
+      "native": "ᡤᠠᠰᡥᠠ",
+      "pronounce": "Gasha",
+      "ipa": "qäs.χä"
+    },
+    "17771": {
+      "en": "Divine Eagle",
+      "native": "ᡤᠠᠰᡥᠠ",
+      "pronounce": "Gasha",
+      "ipa": "qäs.χä"
+    },
+    "18581": {
+      "en": "Divine Eagle",
+      "native": "ᡤᠠᠰᡥᠠ",
+      "pronounce": "Gasha",
+      "ipa": "qäs.χä"
+    },
+    "18805": {
+      "en": "Divine Eagle",
+      "native": "ᡤᠠᠰᡥᠠ",
+      "pronounce": "Gasha",
+      "ipa": "qäs.χä"
+    },
+    "19860": {
+      "en": "Divine Eagle",
+      "native": "ᡤᠠᠰᡥᠠ",
+      "pronounce": "Gasha",
+      "ipa": "qäs.χä"
+    },
+    "20356": {
+      "en": "Divine Eagle",
+      "native": "ᡤᠠᠰᡥᠠ",
+      "pronounce": "Gasha",
+      "ipa": "qäs.χä"
+    },
+    "21304": {
+      "en": "Divine Eagle",
+      "native": "ᡤᠠᠰᡥᠠ",
+      "pronounce": "Gasha",
+      "ipa": "qäs.χä"
+    },
+    "21295": {
+      "en": "Divine Eagle",
+      "native": "ᡤᠠᠰᡥᠠ",
+      "pronounce": "Gasha",
+      "ipa": "qäs.χä"
+    },
+    "22449": {
+      "en": "Divine Eagle",
+      "native": "ᡤᠠᠰᡥᠠ",
+      "pronounce": "Gasha",
+      "ipa": "qäs.χä"
+    },
+    "30343": {
+      "en": "Divine Eagle",
+      "native": "ᡤᠠᠰᡥᠠ",
+      "pronounce": "Gasha",
+      "ipa": "qäs.χä"
+    },
+    "32246": {
+      "en": "Divine Eagle",
+      "native": "ᡤᠠᠰᡥᠠ",
+      "pronounce": "Gasha",
+      "ipa": "qäs.χä"
+    },
+    "32194": {
+      "en": "Divine Eagle",
+      "native": "ᡤᠠᠰᡥᠠ",
+      "pronounce": "Gasha",
+      "ipa": "qäs.χä"
+    },
+    "33595": {
+      "en": "Divine Eagle",
+      "native": "ᡤᠠᠰᡥᠠ",
+      "pronounce": "Gasha",
+      "ipa": "qäs.χä"
+    },
+    "34861": {
+      "en": "Divine Eagle",
+      "native": "ᡤᠠᠰᡥᠠ",
+      "pronounce": "Gasha",
+      "ipa": "qäs.χä"
+    },
+    "34367": {
+      "en": "Divine Eagle",
+      "native": "ᡤᠠᠰᡥᠠ",
+      "pronounce": "Gasha",
+      "ipa": "qäs.χä"
+    },
+    "35152": {
+      "en": "Divine Eagle",
+      "native": "ᡤᠠᠰᡥᠠ",
+      "pronounce": "Gasha",
+      "ipa": "qäs.χä"
+    },
+    "36046": {
+      "en": "Divine Eagle",
+      "native": "ᡤᠠᠰᡥᠠ",
+      "pronounce": "Gasha",
+      "ipa": "qäs.χä"
+    },
+    "36962": {
+      "en": "Divine Eagle",
+      "native": "ᡤᠠᠰᡥᠠ",
+      "pronounce": "Gasha",
+      "ipa": "qäs.χä"
+    },
+    "37826": {
+      "en": "Divine Eagle",
+      "native": "ᡤᠠᠰᡥᠠ",
+      "pronounce": "Gasha",
+      "ipa": "qäs.χä"
+    },
+    "36850": {
+      "en": "Divine Eagle",
+      "native": "ᡤᠠᠰᡥᠠ",
+      "pronounce": "Gasha",
+      "ipa": "qäs.χä"
+    },
+    "31789": {
+      "en": "Divine Eagle",
+      "native": "ᡤᠠᠰᡥᠠ",
+      "pronounce": "Gasha",
+      "ipa": "qäs.χä"
+    },
+    "28823": {
+      "en": "Divine Eagle",
+      "native": "ᡤᠠᠰᡥᠠ",
+      "pronounce": "Gasha",
+      "ipa": "qäs.χä"
+    },
+    "29633": {
+      "en": "Divine Eagle",
+      "native": "ᡤᠠᠰᡥᠠ",
+      "pronounce": "Gasha",
+      "ipa": "qäs.χä"
+    },
+    "29884": {
+      "en": "Divine Eagle",
+      "native": "ᡤᠠᠰᡥᠠ",
+      "pronounce": "Gasha",
+      "ipa": "qäs.χä"
+    },
+    "29388": {
+      "en": "Divine Eagle",
+      "native": "ᡤᠠᠰᡥᠠ",
+      "pronounce": "Gasha",
+      "ipa": "qäs.χä"
+    },
+    "28530": {
+      "en": "Divine Eagle",
+      "native": "ᡤᠠᠰᡥᠠ",
+      "pronounce": "Gasha",
+      "ipa": "qäs.χä"
+    },
+    "27196": {
+      "en": "Divine Eagle",
+      "native": "ᡤᠠᠰᡥᠠ",
+      "pronounce": "Gasha",
+      "ipa": "qäs.χä"
+    },
+    "23828": {
+      "en": "Divine Eagle",
+      "native": "ᡤᠠᠰᡥᠠ",
+      "pronounce": "Gasha",
+      "ipa": "qäs.χä"
+    },
+    "23020": {
+      "en": "Divine Eagle",
+      "native": "ᡤᠠᠰᡥᠠ",
+      "pronounce": "Gasha",
+      "ipa": "qäs.χä"
+    },
+    "22545": {
+      "en": "Divine Eagle",
+      "native": "ᡤᠠᠰᡥᠠ",
+      "pronounce": "Gasha",
+      "ipa": "qäs.χä"
+    },
+    "22413": {
+      "en": "Divine Eagle",
+      "native": "ᡤᠠᠰᡥᠠ",
+      "pronounce": "Gasha",
+      "ipa": "qäs.χä"
+    },
+    "22650": {
+      "en": "Divine Eagle",
+      "native": "ᡤᠠᠰᡥᠠ",
+      "pronounce": "Gasha",
+      "ipa": "qäs.χä"
+    },
+    "23416": {
+      "en": "Divine Eagle",
+      "native": "ᡤᠠᠰᡥᠠ",
+      "pronounce": "Gasha",
+      "ipa": "qäs.χä"
+    },
+    "21476": {
+      "en": "Divine Eagle",
+      "native": "ᡤᠠᠰᡥᠠ",
+      "pronounce": "Gasha",
+      "ipa": "qäs.χä"
+    },
+    "18614": {
+      "en": "Divine Eagle",
+      "native": "ᡤᠠᠰᡥᠠ",
+      "pronounce": "Gasha",
+      "ipa": "qäs.χä"
+    },
+    "16713": {
+      "en": "Divine Eagle",
+      "native": "ᡤᠠᠰᡥᠠ",
+      "pronounce": "Gasha",
+      "ipa": "qäs.χä"
+    },
+    "17448": {
+      "en": "Divine Eagle",
+      "native": "ᡤᠠᠰᡥᠠ",
+      "pronounce": "Gasha",
+      "ipa": "qäs.χä"
+    },
+    "18246": {
+      "en": "Divine Eagle",
+      "native": "ᡤᠠᠰᡥᠠ",
+      "pronounce": "Gasha",
+      "ipa": "qäs.χä"
+    },
+    "19397": {
+      "en": "Divine Eagle",
+      "native": "ᡤᠠᠰᡥᠠ",
+      "pronounce": "Gasha",
+      "ipa": "qäs.χä"
+    },
+    "18687": {
+      "en": "Divine Eagle",
+      "native": "ᡤᠠᠰᡥᠠ",
+      "pronounce": "Gasha",
+      "ipa": "qäs.χä"
+    },
+    "19205": {
+      "en": "Divine Eagle",
+      "native": "ᡤᠠᠰᡥᠠ",
+      "pronounce": "Gasha",
+      "ipa": "qäs.χä"
+    },
+    "20250": {
+      "en": "Divine Eagle",
+      "native": "ᡤᠠᠰᡥᠠ",
+      "pronounce": "Gasha",
+      "ipa": "qäs.χä"
+    },
+    "20711": {
+      "en": "Divine Eagle",
+      "native": "ᡤᠠᠰᡥᠠ",
+      "pronounce": "Gasha",
+      "ipa": "qäs.χä"
+    },
+    "21881": {
+      "en": "Divine Eagle",
+      "native": "ᡤᠠᠰᡥᠠ",
+      "pronounce": "Gasha",
+      "ipa": "qäs.χä"
+    },
+    "29655": {
+      "en": "Divine Eagle",
+      "native": "ᡤᠠᠰᡥᠠ",
+      "pronounce": "Gasha",
+      "ipa": "qäs.χä"
+    },
+    "28734": {
+      "en": "Divine Eagle",
+      "native": "ᡤᠠᠰᡥᠠ",
+      "pronounce": "Gasha",
+      "ipa": "qäs.χä"
+    },
+    "28360": {
+      "en": "Divine Eagle",
+      "native": "ᡤᠠᠰᡥᠠ",
+      "pronounce": "Gasha",
+      "ipa": "qäs.χä"
+    },
+    "24608": {
+      "en": "Divine Eagle",
+      "native": "ᡤᠠᠰᡥᠠ",
+      "pronounce": "Gasha",
+      "ipa": "qäs.χä"
+    },
+    "25428": {
+      "en": "Divine Eagle",
+      "native": "ᡤᠠᠰᡥᠠ",
+      "pronounce": "Gasha",
+      "ipa": "qäs.χä"
+    },
+    "24822": {
+      "en": "Divine Eagle",
+      "native": "ᡤᠠᠰᡥᠠ",
+      "pronounce": "Gasha",
+      "ipa": "qäs.χä"
+    },
+    "23497": {
+      "en": "Divine Eagle",
+      "native": "ᡤᠠᠰᡥᠠ",
+      "pronounce": "Gasha",
+      "ipa": "qäs.χä"
+    },
+    "54470": {
+      "en": "Rat",
+      "native": "ᠰᡳᠩᡤᡝᡵᡳ ᡠᠰᡳᡥᠠ",
+      "pronounce": "Singgeri usiha",
+      "ipa": "ɕiŋ.ŋə.ri u.ɕi.χä"
+    },
+    "54483": {
+      "en": "Rat",
+      "native": "ᠰᡳᠩᡤᡝᡵᡳ ᡠᠰᡳᡥᠠ",
+      "pronounce": "Singgeri usiha",
+      "ipa": "ɕiŋ.ŋə.ri u.ɕi.χä"
+    },
+    "54573": {
+      "en": "Rat",
+      "native": "ᠰᡳᠩᡤᡝᡵᡳ ᡠᠰᡳᡥᠠ",
+      "pronounce": "Singgeri usiha",
+      "ipa": "ɕiŋ.ŋə.ri u.ɕi.χä"
+    },
+    "54879": {
+      "en": "Rat",
+      "native": "ᠰᡳᠩᡤᡝᡵᡳ ᡠᠰᡳᡥᠠ",
+      "pronounce": "Singgeri usiha",
+      "ipa": "ɕiŋ.ŋə.ri u.ɕi.χä"
+    },
+    "57632": {
+      "en": "Rat",
+      "native": "ᠰᡳᠩᡤᡝᡵᡳ ᡠᠰᡳᡥᠠ",
+      "pronounce": "Singgeri usiha",
+      "ipa": "ɕiŋ.ŋə.ri u.ɕi.χä"
+    },
+    "54872": {
+      "en": "Rat",
+      "native": "ᠰᡳᠩᡤᡝᡵᡳ ᡠᠰᡳᡥᠠ",
+      "pronounce": "Singgeri usiha",
+      "ipa": "ɕiŋ.ŋə.ri u.ɕi.χä"
+    },
+    "50583": {
+      "en": "Rat",
+      "native": "ᠰᡳᠩᡤᡝᡵᡳ ᡠᠰᡳᡥᠠ",
+      "pronounce": "Singgeri usiha",
+      "ipa": "ɕiŋ.ŋə.ri u.ɕi.χä"
+    },
+    "49583": {
+      "en": "Rat",
+      "native": "ᠰᡳᠩᡤᡝᡵᡳ ᡠᠰᡳᡥᠠ",
+      "pronounce": "Singgeri usiha",
+      "ipa": "ɕiŋ.ŋə.ri u.ɕi.χä"
+    },
+    "49395": {
+      "en": "Rat",
+      "native": "ᠰᡳᠩᡤᡝᡵᡳ ᡠᠰᡳᡥᠠ",
+      "pronounce": "Singgeri usiha",
+      "ipa": "ɕiŋ.ŋə.ri u.ɕi.χä"
+    },
+    "49348": {
+      "en": "Rat",
+      "native": "ᠰᡳᠩᡤᡝᡵᡳ ᡠᠰᡳᡥᠠ",
+      "pronounce": "Singgeri usiha",
+      "ipa": "ɕiŋ.ŋə.ri u.ɕi.χä"
+    },
+    "49669": {
+      "en": "Rat",
+      "native": "ᠰᡳᠩᡤᡝᡵᡳ ᡠᠰᡳᡥᠠ",
+      "pronounce": "Singgeri usiha",
+      "ipa": "ɕiŋ.ŋə.ri u.ɕi.χä"
+    },
+    "52689": {
+      "en": "Rat",
+      "native": "ᠰᡳᠩᡤᡝᡵᡳ ᡠᠰᡳᡥᠠ",
+      "pronounce": "Singgeri usiha",
+      "ipa": "ɕiŋ.ŋə.ri u.ɕi.χä"
+    },
+    "51585": {
+      "en": "Rat",
+      "native": "ᠰᡳᠩᡤᡝᡵᡳ ᡠᠰᡳᡥᠠ",
+      "pronounce": "Singgeri usiha",
+      "ipa": "ɕiŋ.ŋə.ri u.ɕi.χä"
+    },
+    "51690": {
+      "en": "Rat",
+      "native": "ᠰᡳᠩᡤᡝᡵᡳ ᡠᠰᡳᡥᠠ",
+      "pronounce": "Singgeri usiha",
+      "ipa": "ɕiŋ.ŋə.ri u.ɕi.χä"
+    },
+    "51388": {
+      "en": "Rat",
+      "native": "ᠰᡳᠩᡤᡝᡵᡳ ᡠᠰᡳᡥᠠ",
+      "pronounce": "Singgeri usiha",
+      "ipa": "ɕiŋ.ŋə.ri u.ɕi.χä"
+    },
+    "51299": {
+      "en": "Rat",
+      "native": "ᠰᡳᠩᡤᡝᡵᡳ ᡠᠰᡳᡥᠠ",
+      "pronounce": "Singgeri usiha",
+      "ipa": "ɕiŋ.ŋə.ri u.ɕi.χä"
+    },
+    "48883": {
+      "en": "Rat",
+      "native": "ᠰᡳᠩᡤᡝᡵᡳ ᡠᠰᡳᡥᠠ",
+      "pronounce": "Singgeri usiha",
+      "ipa": "ɕiŋ.ŋə.ri u.ɕi.χä"
+    },
+    "49637": {
+      "en": "Rat",
+      "native": "ᠰᡳᠩᡤᡝᡵᡳ ᡠᠰᡳᡥᠠ",
+      "pronounce": "Singgeri usiha",
+      "ipa": "ɕiŋ.ŋə.ri u.ɕi.χä"
+    },
+    "51624": {
+      "en": "Rat",
+      "native": "ᠰᡳᠩᡤᡝᡵᡳ ᡠᠰᡳᡥᠠ",
+      "pronounce": "Singgeri usiha",
+      "ipa": "ɕiŋ.ŋə.ri u.ɕi.χä"
+    },
+    "59316": {
+      "en": "Wadan (The Celestial Altar)",
+      "native": "ᠸᠠᡩᠠᠨ",
+      "pronounce": "Wadan",
+      "ipa": "wä.tän"
+    },
+    "61359": {
+      "en": "Wadan (The Celestial Altar)",
+      "native": "ᠸᠠᡩᠠᠨ",
+      "pronounce": "Wadan",
+      "ipa": "wä.tän"
+    },
+    "60965": {
+      "en": "Wadan (The Celestial Altar)",
+      "native": "ᠸᠠᡩᠠᠨ",
+      "pronounce": "Wadan",
+      "ipa": "wä.tän"
+    },
+    "59803": {
+      "en": "Wadan (The Celestial Altar)",
+      "native": "ᠸᠠᡩᠠᠨ",
+      "pronounce": "Wadan",
+      "ipa": "wä.tän"
+    },
+    "59199": {
+      "en": "Wadan (The Celestial Altar)",
+      "native": "ᠸᠠᡩᠠᠨ",
+      "pronounce": "Wadan",
+      "ipa": "wä.tän"
+    },
+    "8796": {
+      "en": "Drum",
+      "native": "ᡳᠮᠴᡳᠨ",
+      "pronounce": "Imcin",
+      "ipa": "im.t͡ɕʰin"
+    },
+    "9884": {
+      "en": "Drum",
+      "native": "ᡳᠮᠴᡳᠨ",
+      "pronounce": "Imcin",
+      "ipa": "im.t͡ɕʰin"
+    },
+    "8903": {
+      "en": "Drum",
+      "native": "ᡳᠮᠴᡳᠨ",
+      "pronounce": "Imcin",
+      "ipa": "im.t͡ɕʰin"
+    },
+    "8832": {
+      "en": "Drum",
+      "native": "ᡳᠮᠴᡳᠨ",
+      "pronounce": "Imcin",
+      "ipa": "im.t͡ɕʰin"
+    },
+    "6193": {
+      "en": "Drum",
+      "native": "ᡳᠮᠴᡳᠨ",
+      "pronounce": "Imcin",
+      "ipa": "im.t͡ɕʰin"
+    },
+    "6512": {
+      "en": "Drum",
+      "native": "ᡳᠮᠴᡳᠨ",
+      "pronounce": "Imcin",
+      "ipa": "im.t͡ɕʰin"
+    },
+    "7513": {
+      "en": "Drum",
+      "native": "ᡳᠮᠴᡳᠨ",
+      "pronounce": "Imcin",
+      "ipa": "im.t͡ɕʰin"
+    },
+    "9640": {
+      "en": "Drum",
+      "native": "ᡳᠮᠴᡳᠨ",
+      "pronounce": "Imcin",
+      "ipa": "im.t͡ɕʰin"
+    },
+    "10064": {
+      "en": "Drum",
+      "native": "ᡳᠮᠴᡳᠨ",
+      "pronounce": "Imcin",
+      "ipa": "im.t͡ɕʰin"
+    },
+    "10280": {
+      "en": "Drum",
+      "native": "ᡳᠮᠴᡳᠨ",
+      "pronounce": "Imcin",
+      "ipa": "im.t͡ɕʰin"
+    },
+    "7097": {
+      "en": "Drumstick",
+      "native": "ᡤᡳᠰᡠᠨ",
+      "pronounce": "Gisun",
+      "ipa": "ki.sun"
+    },
+    "5571": {
+      "en": "Drumstick",
+      "native": "ᡤᡳᠰᡠᠨ",
+      "pronounce": "Gisun",
+      "ipa": "ki.sun"
+    },
+    "4463": {
+      "en": "Drumstick",
+      "native": "ᡤᡳᠰᡠᠨ",
+      "pronounce": "Gisun",
+      "ipa": "ki.sun"
+    },
+    "3693": {
+      "en": "Drumstick",
+      "native": "ᡤᡳᠰᡠᠨ",
+      "pronounce": "Gisun",
+      "ipa": "ki.sun"
+    },
+    "20517": {
+      "en": "Goddess of Carp",
+      "native": "ᠰᡳᡵᡳ ᠮᠠᠮᠠ",
+      "pronounce": "Siri Mama",
+      "ipa": "ɕi.ri mämä"
+    },
+    "22783": {
+      "en": "Goddess of Carp",
+      "native": "ᠰᡳᡵᡳ ᠮᠠᠮᠠ",
+      "pronounce": "Siri Mama",
+      "ipa": "ɕi.ri mämä"
+    },
+    "23522": {
+      "en": "Goddess of Carp",
+      "native": "ᠰᡳᡵᡳ ᠮᠠᠮᠠ",
+      "pronounce": "Siri Mama",
+      "ipa": "ɕi.ri mämä"
+    },
+    "23040": {
+      "en": "Goddess of Carp",
+      "native": "ᠰᡳᡵᡳ ᠮᠠᠮᠠ",
+      "pronounce": "Siri Mama",
+      "ipa": "ɕi.ri mämä"
+    },
+    "25346": {
+      "en": "Goddess of Carp",
+      "native": "ᠰᡳᡵᡳ ᠮᠠᠮᠠ",
+      "pronounce": "Siri Mama",
+      "ipa": "ɕi.ri mämä"
+    },
+    "28358": {
+      "en": "Goddess of Carp",
+      "native": "ᠰᡳᡵᡳ ᠮᠠᠮᠠ",
+      "pronounce": "Siri Mama",
+      "ipa": "ɕi.ri mämä"
+    },
+    "32261": {
+      "en": "Goddess of Carp",
+      "native": "ᠰᡳᡵᡳ ᠮᠠᠮᠠ",
+      "pronounce": "Siri Mama",
+      "ipa": "ɕi.ri mämä"
+    },
+    "34912": {
+      "en": "Goddess of Carp",
+      "native": "ᠰᡳᡵᡳ ᠮᠠᠮᠠ",
+      "pronounce": "Siri Mama",
+      "ipa": "ɕi.ri mämä"
+    },
+    "33908": {
+      "en": "Goddess of Carp",
+      "native": "ᠰᡳᡵᡳ ᠮᠠᠮᠠ",
+      "pronounce": "Siri Mama",
+      "ipa": "ɕi.ri mämä"
+    },
+    "36145": {
+      "en": "Goddess of Carp",
+      "native": "ᠰᡳᡵᡳ ᠮᠠᠮᠠ",
+      "pronounce": "Siri Mama",
+      "ipa": "ɕi.ri mämä"
+    },
+    "41075": {
+      "en": "Goddess of Carp",
+      "native": "ᠰᡳᡵᡳ ᠮᠠᠮᠠ",
+      "pronounce": "Siri Mama",
+      "ipa": "ɕi.ri mämä"
+    },
+    "45860": {
+      "en": "Goddess of Carp",
+      "native": "ᠰᡳᡵᡳ ᠮᠠᠮᠠ",
+      "pronounce": "Siri Mama",
+      "ipa": "ɕi.ri mämä"
+    },
+    "45290": {
+      "en": "Goddess of Carp",
+      "native": "ᠰᡳᡵᡳ ᠮᠠᠮᠠ",
+      "pronounce": "Siri Mama",
+      "ipa": "ɕi.ri mämä"
+    },
+    "44127": {
+      "en": "Goddess of Carp",
+      "native": "ᠰᡳᡵᡳ ᠮᠠᠮᠠ",
+      "pronounce": "Siri Mama",
+      "ipa": "ɕi.ri mämä"
+    },
+    "37406": {
+      "en": "Goddess of Carp",
+      "native": "ᠰᡳᡵᡳ ᠮᠠᠮᠠ",
+      "pronounce": "Siri Mama",
+      "ipa": "ɕi.ri mämä"
+    },
+    "37609": {
+      "en": "Goddess of Carp",
+      "native": "ᠰᡳᡵᡳ ᠮᠠᠮᠠ",
+      "pronounce": "Siri Mama",
+      "ipa": "ɕi.ri mämä"
+    },
+    "37111": {
+      "en": "Goddess of Carp",
+      "native": "ᠰᡳᡵᡳ ᠮᠠᠮᠠ",
+      "pronounce": "Siri Mama",
+      "ipa": "ɕi.ri mämä"
+    },
+    "36634": {
+      "en": "Goddess of Carp",
+      "native": "ᠰᡳᡵᡳ ᠮᠠᠮᠠ",
+      "pronounce": "Siri Mama",
+      "ipa": "ɕi.ri mämä"
+    },
+    "36434": {
+      "en": "Goddess of Carp",
+      "native": "ᠰᡳᡵᡳ ᠮᠠᠮᠠ",
+      "pronounce": "Siri Mama",
+      "ipa": "ɕi.ri mämä"
+    },
+    "33449": {
+      "en": "Goddess of Carp",
+      "native": "ᠰᡳᡵᡳ ᠮᠠᠮᠠ",
+      "pronounce": "Siri Mama",
+      "ipa": "ɕi.ri mämä"
+    },
+    "29490": {
+      "en": "Goddess of Carp",
+      "native": "ᠰᡳᡵᡳ ᠮᠠᠮᠠ",
+      "pronounce": "Siri Mama",
+      "ipa": "ɕi.ri mämä"
+    },
+    "44248": {
+      "en": "Goddess of Carp",
+      "native": "ᠰᡳᡵᡳ ᠮᠠᠮᠠ",
+      "pronounce": "Siri Mama",
+      "ipa": "ɕi.ri mämä"
+    },
+    "39847": {
+      "en": "Goddess of Carp",
+      "native": "ᠰᡳᡵᡳ ᠮᠠᠮᠠ",
+      "pronounce": "Siri Mama",
+      "ipa": "ɕi.ri mämä"
+    },
+    "30060": {
+      "en": "Goddess of Carp",
+      "native": "ᠰᡳᡵᡳ ᠮᠠᠮᠠ",
+      "pronounce": "Siri Mama",
+      "ipa": "ɕi.ri mämä"
+    },
+    "29919": {
+      "en": "Goddess of Carp",
+      "native": "ᠰᡳᡵᡳ ᠮᠠᠮᠠ",
+      "pronounce": "Siri Mama",
+      "ipa": "ɕi.ri mämä"
+    },
+    "57757": {
+      "en": "Goddess of the Staircase Stars",
+      "native": "ᡨᡝᡵᡴᡳᠨ ᡠᠰᡳᡥᠠ ᠮᠠᠮᠠ",
+      "pronounce": "Terkin Usiha Mama",
+      "ipa": "tʰər.kʰin u.ɕi.χä mä.mä"
+    },
+    "60129": {
+      "en": "Goddess of the Staircase Stars",
+      "native": "ᡨᡝᡵᡴᡳᠨ ᡠᠰᡳᡥᠠ ᠮᠠᠮᠠ",
+      "pronounce": "Terkin Usiha Mama",
+      "ipa": "tʰər.kʰin u.ɕi.χä mä.mä"
+    },
+    "61941": {
+      "en": "Goddess of the Staircase Stars",
+      "native": "ᡨᡝᡵᡴᡳᠨ ᡠᠰᡳᡥᠠ ᠮᠠᠮᠠ",
+      "pronounce": "Terkin Usiha Mama",
+      "ipa": "tʰər.kʰin u.ɕi.χä mä.mä"
+    },
+    "63090": {
+      "en": "Goddess of the Staircase Stars",
+      "native": "ᡨᡝᡵᡴᡳᠨ ᡠᠰᡳᡥᠠ ᠮᠠᠮᠠ",
+      "pronounce": "Terkin Usiha Mama",
+      "ipa": "tʰər.kʰin u.ɕi.χä mä.mä"
+    },
+    "63608": {
+      "en": "Goddess of the Staircase Stars",
+      "native": "ᡨᡝᡵᡴᡳᠨ ᡠᠰᡳᡥᠠ ᠮᠠᠮᠠ",
+      "pronounce": "Terkin Usiha Mama",
+      "ipa": "tʰər.kʰin u.ɕi.χä mä.mä"
+    },
+    "64823": {
+      "en": "Goddess of the Staircase Stars",
+      "native": "ᡨᡝᡵᡴᡳᠨ ᡠᠰᡳᡥᠠ ᠮᠠᠮᠠ",
+      "pronounce": "Terkin Usiha Mama",
+      "ipa": "tʰər.kʰin u.ɕi.χä mä.mä"
+    },
+    "65721": {
+      "en": "Goddess of the Staircase Stars",
+      "native": "ᡨᡝᡵᡴᡳᠨ ᡠᠰᡳᡥᠠ ᠮᠠᠮᠠ",
+      "pronounce": "Terkin Usiha Mama",
+      "ipa": "tʰər.kʰin u.ɕi.χä mä.mä"
+    },
+    "62356": {
+      "en": "Goddess of the Staircase Stars",
+      "native": "ᡨᡝᡵᡴᡳᠨ ᡠᠰᡳᡥᠠ ᠮᠠᠮᠠ",
+      "pronounce": "Terkin Usiha Mama",
+      "ipa": "tʰər.kʰin u.ɕi.χä mä.mä"
+    },
+    "64241": {
+      "en": "Goddess of the Staircase Stars",
+      "native": "ᡨᡝᡵᡴᡳᠨ ᡠᠰᡳᡥᠠ ᠮᠠᠮᠠ",
+      "pronounce": "Terkin Usiha Mama",
+      "ipa": "tʰər.kʰin u.ɕi.χä mä.mä"
+    },
+    "62886": {
+      "en": "Goddess of the Staircase Stars",
+      "native": "ᡨᡝᡵᡴᡳᠨ ᡠᠰᡳᡥᠠ ᠮᠠᠮᠠ",
+      "pronounce": "Terkin Usiha Mama",
+      "ipa": "tʰər.kʰin u.ɕi.χä mä.mä"
+    },
+    "65474": {
+      "en": "Goddess of the Staircase Stars",
+      "native": "ᡨᡝᡵᡴᡳᠨ ᡠᠰᡳᡥᠠ ᠮᠠᠮᠠ",
+      "pronounce": "Terkin Usiha Mama",
+      "ipa": "tʰər.kʰin u.ɕi.χä mä.mä"
+    },
+    "66249": {
+      "en": "Goddess of the Staircase Stars",
+      "native": "ᡨᡝᡵᡴᡳᠨ ᡠᠰᡳᡥᠠ ᠮᠠᠮᠠ",
+      "pronounce": "Terkin Usiha Mama",
+      "ipa": "tʰər.kʰin u.ɕi.χä mä.mä"
+    },
+    "71053": {
+      "en": "Star of Buruhun (The Dawn Beast)",
+      "native": "ᡠᠰᡳᡥᠠ ᠪᡠᡵᡠᡥᡠᠨ",
+      "pronounce": "Usiha Buruhun",
+      "ipa": "u.ɕi.χä pu.ru.xun"
+    },
+    "71075": {
+      "en": "Star of Buruhun (The Dawn Beast)",
+      "native": "ᡠᠰᡳᡥᠠ ᠪᡠᡵᡠᡥᡠᠨ",
+      "pronounce": "Usiha Buruhun",
+      "ipa": "u.ɕi.χä pu.ru.xun"
+    },
+    "73555": {
+      "en": "Star of Buruhun (The Dawn Beast)",
+      "native": "ᡠᠰᡳᡥᠠ ᠪᡠᡵᡠᡥᡠᠨ",
+      "pronounce": "Usiha Buruhun",
+      "ipa": "u.ɕi.χä pu.ru.xun"
+    },
+    "74666": {
+      "en": "Star of Buruhun (The Dawn Beast)",
+      "native": "ᡠᠰᡳᡥᠠ ᠪᡠᡵᡠᡥᡠᠨ",
+      "pronounce": "Usiha Buruhun",
+      "ipa": "u.ɕi.χä pu.ru.xun"
+    },
+    "75695": {
+      "en": "Star of Buruhun (The Dawn Beast)",
+      "native": "ᡠᠰᡳᡥᠠ ᠪᡠᡵᡠᡥᡠᠨ",
+      "pronounce": "Usiha Buruhun",
+      "ipa": "u.ɕi.χä pu.ru.xun"
+    },
+    "73745": {
+      "en": "Star of Buruhun (The Dawn Beast)",
+      "native": "ᡠᠰᡳᡥᠠ ᠪᡠᡵᡠᡥᡠᠨ",
+      "pronounce": "Usiha Buruhun",
+      "ipa": "u.ɕi.χä pu.ru.xun"
+    },
+    "72105": {
+      "en": "Star of Buruhun (The Dawn Beast)",
+      "native": "ᡠᠰᡳᡥᠠ ᠪᡠᡵᡠᡥᡠᠨ",
+      "pronounce": "Usiha Buruhun",
+      "ipa": "u.ɕi.χä pu.ru.xun"
+    },
+    "69673": {
+      "en": "Star of Buruhun (The Dawn Beast)",
+      "native": "ᡠᠰᡳᡥᠠ ᠪᡠᡵᡠᡥᡠᠨ",
+      "pronounce": "Usiha Buruhun",
+      "ipa": "u.ɕi.χä pu.ru.xun"
+    },
+    "67927": {
+      "en": "Star of Buruhun (The Dawn Beast)",
+      "native": "ᡠᠰᡳᡥᠠ ᠪᡠᡵᡠᡥᡠᠨ",
+      "pronounce": "Usiha Buruhun",
+      "ipa": "u.ɕi.χä pu.ru.xun"
+    },
+    "72798": {
+      "en": "Star of Buruhun (The Dawn Beast)",
+      "native": "ᡠᠰᡳᡥᠠ ᠪᡠᡵᡠᡥᡠᠨ",
+      "pronounce": "Usiha Buruhun",
+      "ipa": "u.ɕi.χä pu.ru.xun"
+    },
+    "71795": {
+      "en": "Star of Buruhun (The Dawn Beast)",
+      "native": "ᡠᠰᡳᡥᠠ ᠪᡠᡵᡠᡥᡠᠨ",
+      "pronounce": "Usiha Buruhun",
+      "ipa": "u.ɕi.χä pu.ru.xun"
+    },
+    "67665": {
+      "en": "Star of Buruhun (The Dawn Beast)",
+      "native": "ᡠᠰᡳᡥᠠ ᠪᡠᡵᡠᡥᡠᠨ",
+      "pronounce": "Usiha Buruhun",
+      "ipa": "u.ɕi.χä pu.ru.xun"
+    },
+    "64844": {
+      "en": "Star of Buruhun (The Dawn Beast)",
+      "native": "ᡠᠰᡳᡥᠠ ᠪᡠᡵᡠᡥᡠᠨ",
+      "pronounce": "Usiha Buruhun",
+      "ipa": "u.ɕi.χä pu.ru.xun"
+    },
+    "61317": {
+      "en": "Star of Buruhun (The Dawn Beast)",
+      "native": "ᡠᠰᡳᡥᠠ ᠪᡠᡵᡠᡥᡠᠨ",
+      "pronounce": "Usiha Buruhun",
+      "ipa": "u.ɕi.χä pu.ru.xun"
+    },
+    "59856": {
+      "en": "Star of Buruhun (The Dawn Beast)",
+      "native": "ᡠᠰᡳᡥᠠ ᠪᡠᡵᡠᡥᡠᠨ",
+      "pronounce": "Usiha Buruhun",
+      "ipa": "u.ɕi.χä pu.ru.xun"
+    },
+    "60742": {
+      "en": "Star of Buruhun (The Dawn Beast)",
+      "native": "ᡠᠰᡳᡥᠠ ᠪᡠᡵᡠᡥᡠᠨ",
+      "pronounce": "Usiha Buruhun",
+      "ipa": "u.ɕi.χä pu.ru.xun"
+    },
+    "63075": {
+      "en": "Star of Buruhun (The Dawn Beast)",
+      "native": "ᡠᠰᡳᡥᠠ ᠪᡠᡵᡠᡥᡠᠨ",
+      "pronounce": "Usiha Buruhun",
+      "ipa": "u.ɕi.χä pu.ru.xun"
+    },
+    "62763": {
+      "en": "Star of Buruhun (The Dawn Beast)",
+      "native": "ᡠᠰᡳᡥᠠ ᠪᡠᡵᡠᡥᡠᠨ",
+      "pronounce": "Usiha Buruhun",
+      "ipa": "u.ɕi.χä pu.ru.xun"
+    },
+    "63462": {
+      "en": "Star of Buruhun (The Dawn Beast)",
+      "native": "ᡠᠰᡳᡥᠠ ᠪᡠᡵᡠᡥᡠᠨ",
+      "pronounce": "Usiha Buruhun",
+      "ipa": "u.ɕi.χä pu.ru.xun"
+    },
+    "64394": {
+      "en": "Star of Buruhun (The Dawn Beast)",
+      "native": "ᡠᠰᡳᡥᠠ ᠪᡠᡵᡠᡥᡠᠨ",
+      "pronounce": "Usiha Buruhun",
+      "ipa": "u.ɕi.χä pu.ru.xun"
+    },
+    "43109": {
+      "en": "Willow",
+      "native": "ᡶᠣᡩᠣᡥᠣ ᡠᠰᡳᡥᠠ",
+      "pronounce": "Fodoho usiha",
+      "ipa": "fɔ.tɔ.χɔ u.ɕi.χä"
+    },
+    "43234": {
+      "en": "Willow",
+      "native": "ᡶᠣᡩᠣᡥᠣ ᡠᠰᡳᡥᠠ",
+      "pronounce": "Fodoho usiha",
+      "ipa": "fɔ.tɔ.χɔ u.ɕi.χä"
+    },
+    "42799": {
+      "en": "Willow",
+      "native": "ᡶᠣᡩᠣᡥᠣ ᡠᠰᡳᡥᠠ",
+      "pronounce": "Fodoho usiha",
+      "ipa": "fɔ.tɔ.χɔ u.ɕi.χä"
+    },
+    "43142": {
+      "en": "Willow",
+      "native": "ᡶᠣᡩᠣᡥᠣ ᡠᠰᡳᡥᠠ",
+      "pronounce": "Fodoho usiha",
+      "ipa": "fɔ.tɔ.χɔ u.ɕi.χä"
+    },
+    "42028": {
+      "en": "Willow",
+      "native": "ᡶᠣᡩᠣᡥᠣ ᡠᠰᡳᡥᠠ",
+      "pronounce": "Fodoho usiha",
+      "ipa": "fɔ.tɔ.χɔ u.ɕi.χä"
+    },
+    "42402": {
+      "en": "Willow",
+      "native": "ᡶᠣᡩᠣᡥᠣ ᡠᠰᡳᡥᠠ",
+      "pronounce": "Fodoho usiha",
+      "ipa": "fɔ.tɔ.χɔ u.ɕi.χä"
+    },
+    "42313": {
+      "en": "Willow",
+      "native": "ᡶᠣᡩᠣᡥᠣ ᡠᠰᡳᡥᠠ",
+      "pronounce": "Fodoho usiha",
+      "ipa": "fɔ.tɔ.χɔ u.ɕi.χä"
+    },
+    "43813": {
+      "en": "Willow",
+      "native": "ᡶᠣᡩᠣᡥᠣ ᡠᠰᡳᡥᠠ",
+      "pronounce": "Fodoho usiha",
+      "ipa": "fɔ.tɔ.χɔ u.ɕi.χä"
+    },
+    "44659": {
+      "en": "Willow",
+      "native": "ᡶᠣᡩᠣᡥᠣ ᡠᠰᡳᡥᠠ",
+      "pronounce": "Fodoho usiha",
+      "ipa": "fɔ.tɔ.χɔ u.ɕi.χä"
+    },
+    "45336": {
+      "en": "Willow",
+      "native": "ᡶᠣᡩᠣᡥᠣ ᡠᠰᡳᡥᠠ",
+      "pronounce": "Fodoho usiha",
+      "ipa": "fɔ.tɔ.χɔ u.ɕi.χä"
+    },
+    "46509": {
+      "en": "Willow",
+      "native": "ᡶᠣᡩᠣᡥᠣ ᡠᠰᡳᡥᠠ",
+      "pronounce": "Fodoho usiha",
+      "ipa": "fɔ.tɔ.χɔ u.ɕi.χä"
+    },
+    "44066": {
+      "en": "Willow",
+      "native": "ᡶᠣᡩᠣᡥᠣ ᡠᠰᡳᡥᠠ",
+      "pronounce": "Fodoho usiha",
+      "ipa": "fɔ.tɔ.χɔ u.ɕi.χä"
+    },
+    "45410": {
+      "en": "Willow",
+      "native": "ᡶᠣᡩᠣᡥᠣ ᡠᠰᡳᡥᠠ",
+      "pronounce": "Fodoho usiha",
+      "ipa": "fɔ.tɔ.χɔ u.ɕi.χä"
+    },
+    "47508": {
+      "en": "Willow",
+      "native": "ᡶᠣᡩᠣᡥᠣ ᡠᠰᡳᡥᠠ",
+      "pronounce": "Fodoho usiha",
+      "ipa": "fɔ.tɔ.χɔ u.ɕi.χä"
+    },
+    "49029": {
+      "en": "Willow",
+      "native": "ᡶᠣᡩᠣᡥᠣ ᡠᠰᡳᡥᠠ",
+      "pronounce": "Fodoho usiha",
+      "ipa": "fɔ.tɔ.χɔ u.ɕi.χä"
+    },
+    "80170": {
+      "en": "Net",
+      "native": "ᠠᠰᡠ ᡠᠰᡳᡥᠠ",
+      "pronounce": "Asu usiha",
+      "ipa": "ä.su u.ɕi.χä"
+    },
+    "80816": {
+      "en": "Net",
+      "native": "ᠠᠰᡠ ᡠᠰᡳᡥᠠ",
+      "pronounce": "Asu usiha",
+      "ipa": "ä.su u.ɕi.χä"
+    },
+    "84345": {
+      "en": "Net",
+      "native": "ᠠᠰᡠ ᡠᠰᡳᡥᠠ",
+      "pronounce": "Asu usiha",
+      "ipa": "ä.su u.ɕi.χä"
+    },
+    "84379": {
+      "en": "Net",
+      "native": "ᠠᠰᡠ ᡠᠰᡳᡥᠠ",
+      "pronounce": "Asu usiha",
+      "ipa": "ä.su u.ɕi.χä"
+    },
+    "81693": {
+      "en": "Net",
+      "native": "ᠠᠰᡠ ᡠᠰᡳᡥᠠ",
+      "pronounce": "Asu usiha",
+      "ipa": "ä.su u.ɕi.χä"
+    },
+    "84380": {
+      "en": "Net",
+      "native": "ᠠᠰᡠ ᡠᠰᡳᡥᠠ",
+      "pronounce": "Asu usiha",
+      "ipa": "ä.su u.ɕi.χä"
+    },
+    "87808": {
+      "en": "Net",
+      "native": "ᠠᠰᡠ ᡠᠰᡳᡥᠠ",
+      "pronounce": "Asu usiha",
+      "ipa": "ä.su u.ɕi.χä"
+    },
+    "81833": {
+      "en": "Net",
+      "native": "ᠠᠰᡠ ᡠᠰᡳᡥᠠ",
+      "pronounce": "Asu usiha",
+      "ipa": "ä.su u.ɕi.χä"
+    },
+    "79992": {
+      "en": "Net",
+      "native": "ᠠᠰᡠ ᡠᠰᡳᡥᠠ",
+      "pronounce": "Asu usiha",
+      "ipa": "ä.su u.ɕi.χä"
+    },
+    "86032": {
+      "en": "Net",
+      "native": "ᠠᠰᡠ ᡠᠰᡳᡥᠠ",
+      "pronounce": "Asu usiha",
+      "ipa": "ä.su u.ɕi.χä"
+    },
+    "78820": {
+      "en": "Fishhook",
+      "native": "ᠨᡳᠮᠠᡥᠠ ᡠᠰᡳᡥᠠ",
+      "pronounce": "Nimaha usiha",
+      "ipa": "ɲi.mä.χä u.ɕi.χä"
+    },
+    "78401": {
+      "en": "Fishhook",
+      "native": "ᠨᡳᠮᠠᡥᠠ ᡠᠰᡳᡥᠠ",
+      "pronounce": "Nimaha usiha",
+      "ipa": "ɲi.mä.χä u.ɕi.χä"
+    },
+    "78265": {
+      "en": "Fishhook",
+      "native": "ᠨᡳᠮᠠᡥᠠ ᡠᠰᡳᡥᠠ",
+      "pronounce": "Nimaha usiha",
+      "ipa": "ɲi.mä.χä u.ɕi.χä"
+    },
+    "78104": {
+      "en": "Fishhook",
+      "native": "ᠨᡳᠮᠠᡥᠠ ᡠᠰᡳᡥᠠ",
+      "pronounce": "Nimaha usiha",
+      "ipa": "ɲi.mä.χä u.ɕi.χä"
+    },
+    "80112": {
+      "en": "Fishhook",
+      "native": "ᠨᡳᠮᠠᡥᠠ ᡠᠰᡳᡥᠠ",
+      "pronounce": "Nimaha usiha",
+      "ipa": "ɲi.mä.χä u.ɕi.χä"
+    },
+    "80763": {
+      "en": "Fishhook",
+      "native": "ᠨᡳᠮᠠᡥᠠ ᡠᠰᡳᡥᠠ",
+      "pronounce": "Nimaha usiha",
+      "ipa": "ɲi.mä.χä u.ɕi.χä"
+    },
+    "81266": {
+      "en": "Fishhook",
+      "native": "ᠨᡳᠮᠠᡥᠠ ᡠᠰᡳᡥᠠ",
+      "pronounce": "Nimaha usiha",
+      "ipa": "ɲi.mä.χä u.ɕi.χä"
+    },
+    "82396": {
+      "en": "Fishhook",
+      "native": "ᠨᡳᠮᠠᡥᠠ ᡠᠰᡳᡥᠠ",
+      "pronounce": "Nimaha usiha",
+      "ipa": "ɲi.mä.χä u.ɕi.χä"
+    },
+    "82514": {
+      "en": "Fishhook",
+      "native": "ᠨᡳᠮᠠᡥᠠ ᡠᠰᡳᡥᠠ",
+      "pronounce": "Nimaha usiha",
+      "ipa": "ɲi.mä.χä u.ɕi.χä"
+    },
+    "82729": {
+      "en": "Fishhook",
+      "native": "ᠨᡳᠮᠠᡥᠠ ᡠᠰᡳᡥᠠ",
+      "pronounce": "Nimaha usiha",
+      "ipa": "ɲi.mä.χä u.ɕi.χä"
+    },
+    "84143": {
+      "en": "Fishhook",
+      "native": "ᠨᡳᠮᠠᡥᠠ ᡠᠰᡳᡥᠠ",
+      "pronounce": "Nimaha usiha",
+      "ipa": "ɲi.mä.χä u.ɕi.χä"
+    },
+    "86228": {
+      "en": "Fishhook",
+      "native": "ᠨᡳᠮᠠᡥᠠ ᡠᠰᡳᡥᠠ",
+      "pronounce": "Nimaha usiha",
+      "ipa": "ɲi.mä.χä u.ɕi.χä"
+    },
+    "87073": {
+      "en": "Fishhook",
+      "native": "ᠨᡳᠮᠠᡥᠠ ᡠᠰᡳᡥᠠ",
+      "pronounce": "Nimaha usiha",
+      "ipa": "ɲi.mä.χä u.ɕi.χä"
+    },
+    "86670": {
+      "en": "Fishhook",
+      "native": "ᠨᡳᠮᠠᡥᠠ ᡠᠰᡳᡥᠠ",
+      "pronounce": "Nimaha usiha",
+      "ipa": "ɲi.mä.χä u.ɕi.χä"
+    },
+    "85927": {
+      "en": "Fishhook",
+      "native": "ᠨᡳᠮᠠᡥᠠ ᡠᠰᡳᡥᠠ",
+      "pronounce": "Nimaha usiha",
+      "ipa": "ɲi.mä.χä u.ɕi.χä"
+    },
+    "85696": {
+      "en": "Fishhook",
+      "native": "ᠨᡳᠮᠠᡥᠠ ᡠᠰᡳᡥᠠ",
+      "pronounce": "Nimaha usiha",
+      "ipa": "ɲi.mä.χä u.ɕi.χä"
+    },
+    "75097": {
+      "en": "Pair of Silver-Maned Steeds",
+      "native": "ᠵᡠᡵᡠ ᠰᡳᡵᡥᠠ",
+      "pronounce": "Juru Sirha",
+      "ipa": "t͡ʃu.ru ɕir.χä"
+    },
+    "97278": {
+      "en": "Ox-Leading Stars",
+      "native": "ᡳᡴᡳᡵᡳ ᡠᠰᡳᡥᠠ",
+      "pronounce": "Ikiri usiha",
+      "ipa": "i.kʰi.ri u.ɕi.χä"
+    },
+    "98036": {
+      "en": "Ox-Leading Stars",
+      "native": "ᡳᡴᡳᡵᡳ ᡠᠰᡳᡥᠠ",
+      "pronounce": "Ikiri usiha",
+      "ipa": "i.kʰi.ri u.ɕi.χä"
+    },
+    "26237": {
+      "en": "Prop-Stick Stars",
+      "native": "ᡳᠯᠮᠠᡥᡡ/ᡳᠯᠮᠣᡥᠣ ᡠᠰᡳᡥᠠ",
+      "pronounce": "Ilmahū/Ilmoho usiha",
+      "ipa": "il.mä.χʊ/il.mɔ.χɔ u.ɕi.χä"
+    },
+    "26235": {
+      "en": "Prop-Stick Stars",
+      "native": "ᡳᠯᠮᠠᡥᡡ/ᡳᠯᠮᠣᡥᠣ ᡠᠰᡳᡥᠠ",
+      "pronounce": "Ilmahū/Ilmoho usiha",
+      "ipa": "il.mä.χʊ/il.mɔ.χɔ u.ɕi.χä"
+    },
+    "77048": {
+      "en": "Coiled Thong",
+      "native": "ᠪᠣᡵᠪᠣᡥᠣ ᡠᠰᡳᡥᠠ",
+      "pronounce": "Borboho usiha",
+      "ipa": "pɔr.pɔ.χɔ u.ɕi.χä"
+    },
+    "76127": {
+      "en": "Coiled Thong",
+      "native": "ᠪᠣᡵᠪᠣᡥᠣ ᡠᠰᡳᡥᠠ",
+      "pronounce": "Borboho usiha",
+      "ipa": "pɔr.pɔ.χɔ u.ɕi.χä"
+    },
+    "76267": {
+      "en": "Coiled Thong",
+      "native": "ᠪᠣᡵᠪᠣᡥᠣ ᡠᠰᡳᡥᠠ",
+      "pronounce": "Borboho usiha",
+      "ipa": "pɔr.pɔ.χɔ u.ɕi.χä"
+    },
+    "76952": {
+      "en": "Coiled Thong",
+      "native": "ᠪᠣᡵᠪᠣᡥᠣ ᡠᠰᡳᡥᠠ",
+      "pronounce": "Borboho usiha",
+      "ipa": "pɔr.pɔ.χɔ u.ɕi.χä"
+    },
+    "77512": {
+      "en": "Coiled Thong",
+      "native": "ᠪᠣᡵᠪᠣᡥᠣ ᡠᠰᡳᡥᠠ",
+      "pronounce": "Borboho usiha",
+      "ipa": "pɔr.pɔ.χɔ u.ɕi.χä"
+    },
+    "78159": {
+      "en": "Coiled Thong",
+      "native": "ᠪᠣᡵᠪᠣᡥᠣ ᡠᠰᡳᡥᠠ",
+      "pronounce": "Borboho usiha",
+      "ipa": "pɔr.pɔ.χɔ u.ɕi.χä"
+    },
+    "78493": {
+      "en": "Coiled Thong",
+      "native": "ᠪᠣᡵᠪᠣᡥᠣ ᡠᠰᡳᡥᠠ",
+      "pronounce": "Borboho usiha",
+      "ipa": "pɔr.pɔ.χɔ u.ɕi.χä"
+    },
+    "78459": {
+      "en": "Coiled Thong",
+      "native": "ᠪᠣᡵᠪᠣᡥᠣ ᡠᠰᡳᡥᠠ",
+      "pronounce": "Borboho usiha",
+      "ipa": "pɔr.pɔ.χɔ u.ɕi.χä"
+    }
+  },
+  "unresolved_hips": [
+    54483
+  ]
+}

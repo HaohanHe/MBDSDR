@@ -115,6 +115,22 @@ def test_classify_bad_sample_rate_rejected(signals):
         modulation_classify(signals["qpsk"].tolist(), -1e6)
 
 
+def test_classify_pure_noise_is_noise():
+    """白噪声不得被判成 8PSK：占用带宽铺满采样率就是「没有可辨结构」。"""
+    rng = np.random.default_rng(11)
+    x = (rng.standard_normal(N) + 1j * rng.standard_normal(N)) * 0.05
+    r = modulation_classify(x.tolist(), FS)
+    assert r["candidates"][0]["modulation"] == "noise", (
+        f"白噪声被识别为 {r['candidates'][0]['modulation']}，features={r['features']}")
+    assert r["features"]["bw_fraction"] > 0.85
+
+
+def test_classify_silence_is_noise_not_cw():
+    """全零样本（后端静音/未连接）不得报 CW 0.95。"""
+    r = modulation_classify([0j] * N, FS)
+    assert r["candidates"][0]["modulation"] == "noise"
+
+
 # ─────────────────────────────────────────────────────────────
 # 盲符号率
 # ─────────────────────────────────────────────────────────────

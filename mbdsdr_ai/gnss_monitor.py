@@ -393,7 +393,34 @@ class GNSSPosition:
     speed: _Opt[float] = None       # km/h
     course: _Opt[float] = None       # 度
     utc_time: _Opt[str] = None
+    # 完整 UTC（ISO-8601，带 UTC 时区）与 ddmmyy 日期；只有 hhmmss 时为 None。
+    # 授时链据此判断"能不能锚定日期"，不许拿当天日期硬拼。
+    utc_datetime: _Opt[str] = None
+    date: _Opt[str] = None
+    # 天线状态：由 GPTXT 明文告警解析而来；没收到明确状态时为 unknown。
+    antenna: str = "unknown"         # "open" / "short" / "ok" / "unknown"
+    antenna_text: _Opt[str] = None
     timestamp: _Opt[float] = None
+
+
+def _publish_runtime_fix(fix: Dict[str, Any]) -> None:
+    """把**原始 fix 字典**交给进程级运行时数据源（时间/站址/快照）。
+
+    接线点：``RealGNSSMonitor.get_position()`` 是桌面每秒轮询的**单一入口**
+    （``desktop/main_window._poll_gnss``），在这里发布是为了不改 UI 轮询代码。
+    数据仍来自同一个 reader 的 ``get_fix()``——这不是第二套数据源。
+    这里刻意做**延迟 import**，避免 ``gnss_monitor`` 与 ``runtime_sources``
+    在模块加载期互相依赖；任何失败（模块缺失、时间引擎异常等）都吞掉，
+    绝不影响 ``get_position()`` 的返回值。
+    """
+    try:
+        try:
+            from .runtime_sources import get_runtime_sources
+        except ImportError:  # 包外直接运行时降级
+            from runtime_sources import get_runtime_sources  # type: ignore
+        get_runtime_sources().record_fix(fix)
+    except Exception:
+        pass
 
 
 class RealGNSSMonitor:
@@ -417,6 +444,10 @@ class RealGNSSMonitor:
         self.baudrate = baudrate
         self._reader = SerialGNSSReader() if SerialGNSSReader is not None else None
         self._started = False
+        # 防重入：运行时快照可能回读 get_position()，避免发布 → 快照 → 发布
+        # 无限递归。也记录上次是否发布过 real fix，用于"断开"边沿。
+        self._publishing = False
+        self._published_real = False
 
     def start(self, port: Optional[str] = None,
               baudrate: Optional[int] = None) -> bool:
@@ -474,16 +505,23 @@ class RealGNSSMonitor:
         return self._started
 
     def get_position(self) -> GNSSPosition:
-        """返回最新定位。无串口/无 fix 时 source='none'，坐标全 None。"""
+        """返回最新定位。无串口/无 fix 时 source='none'，坐标全 None。
+
+        这是桌面每秒轮询的**单一入口**（``main_window._poll_gnss``）：real fix
+        会顺带 best-effort 发布给 ``runtime_sources``，让时间引擎/站址/快照
+        与状态面板、天空图看到同一份数据，不必在 ``main_window`` 里二次转发。
+        """
         if self._reader is None:
             return GNSSPosition(source="none")
         try:
             fix = self._reader.get_fix()
         except Exception:
+            self._publish_lost()
             return GNSSPosition(source="none")
         if not fix or fix.get("source") != "real":
+            self._publish_lost()
             return GNSSPosition(source="none")
-        return GNSSPosition(
+        pos = GNSSPosition(
             source="real",
             lat=fix.get("latitude"),
             lon=fix.get("longitude"),
@@ -493,8 +531,44 @@ class RealGNSSMonitor:
             speed=fix.get("speed_kmh"),
             course=fix.get("course_deg"),
             utc_time=fix.get("utc_time"),
+            utc_datetime=fix.get("utc_datetime"),
+            date=fix.get("date"),
+            antenna=str(fix.get("antenna") or "unknown").strip().lower()
+            or "unknown",
+            antenna_text=fix.get("antenna_text"),
             timestamp=fix.get("timestamp"),
         )
+        self._publish_fix(fix)
+        return pos
+
+    def _publish_fix(self, fix: Dict[str, Any]) -> None:
+        """发布一次 fix（best-effort）；``_publishing`` 防快照回读造成递归。"""
+        if self._publishing:
+            return
+        self._publishing = True
+        try:
+            payload = dict(fix)
+            # reader 的 fix 字典只带观测，不带「从哪个串口来的」。不补这一项，
+            # 一旦有 fix，快照会走 _read_fix_record 并把 port 显示成 null
+            # ——连接着却报不出端口，与 connected=true 自相矛盾。
+            if (str(payload.get("source") or "") == "real"
+                    and payload.get("port") is None and self.port):
+                payload["port"] = self.port
+            _publish_runtime_fix(payload)
+            self._published_real = str(fix.get("source") or "") == "real"
+        finally:
+            self._publishing = False
+
+    def _publish_lost(self) -> None:
+        """real → none 的**边沿**发布一次“未连接”，不每轮重复回退。
+
+        复用 ``record_fix`` 的既有语义：时间回系统时钟、站址恢复接线前的手动/
+        配置值（不标 gnss），用户手填站址不会被清掉。只在从 real 变为无 fix
+        的那一次调用，既让快照如实反映断开，又避免每秒重置。
+        """
+        if not self._published_real:
+            return
+        self._publish_fix({"source": "none", "connected": False})
 
     # -- 天空图卫星分布（GSV/GSA）透传 -------------------------------------
     def get_gsv_frames(self):

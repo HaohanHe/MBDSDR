@@ -1,0 +1,1121 @@
+{
+  "id": "ruanui_sky_tahiti_and_society_islands",
+  "meta": {
+    "schema": "mbdsdr.sky_culture.v1",
+    "id": "ruanui_sky_tahiti_and_society_islands",
+    "display_name": "Ruanui sky: Tahiti and Society islands",
+    "native_name": "",
+    "region": "Polynesia",
+    "classification": [
+      "traditional"
+    ],
+    "source": "Stellarium skyculture ruanui_sky_tahiti_and_society_islands",
+    "source_url": "https://github.com/Stellarium/stellarium/tree/master/skycultures/ruanui_sky_tahiti_and_society_islands",
+    "source_license": "CC BY-SA 4.0",
+    "source_license_url": "https://creativecommons.org/licenses/by-sa/4.0/",
+    "attribution": "Stellarium sky culture 'ruanui_sky_tahiti_and_society_islands'; authors: a working group composed of Christine Briant, Libor Prokop, Regis Plichart and Thibaud Guillaud-Saumur, with the help of association \"Fa'afaite i te Ao Ma'ohi\" (Rereao Carlson, Titaua Teipoarii) for the Maui's Hook/Hiro's Kite constellation and the association \"Te Fare Hiroà no Vavau\" for the mention of Ruanui in the skyculture name. WALKER Maurani did the translation of this text from French to English (CC BY-SA 4.0). Converted to HIP line segments only; no artwork or description images were copied.",
+    "source_file": "reference/stellarium/skycultures/ruanui_sky_tahiti_and_society_islands/index.json",
+    "source_file_sha256": "dd7a62b1bd471a9263a89150d2126bf1ee0368a4998b9b1750fc4bb7e7acf2c6",
+    "description_file": "reference/stellarium/skycultures/ruanui_sky_tahiti_and_society_islands/description.md",
+    "description_file_sha256": "13a627999447b70f0e42e273ef91d17bcda269f9ee537e6193d7442e3d2c76b0",
+    "conversion_scope": "Only constellations[].lines, id and common_name (plus optional common_names star labels) are converted; illustrations, artwork and description text are not copied.",
+    "names_scope": "Explicit common_names labels take precedence; stars without an explicit label inherit the constellation/asterism name they belong to.",
+    "group_count": 19,
+    "edge_count": 133,
+    "name_count": 145,
+    "unresolved_hip_count": 0,
+    "unresolved_hips": [],
+    "unresolved_token_count": 0,
+    "unresolved_tokens": [],
+    "generated_utc": "2026-11-17T17:13:23Z",
+    "data_sha256": "95209dd9860d1c36d8af573f479c18020c72aa59253a54ae40e558ed6880900f"
+  },
+  "groups": [
+    {
+      "group_id": "CON ruanui_sky_tahiti_and_society_islands 002",
+      "names": {
+        "en": "Cluster of four",
+        "native": "Tau-hā"
+      },
+      "lines": [
+        [
+          61084,
+          59747
+        ],
+        [
+          59747,
+          60718
+        ],
+        [
+          62434,
+          61084
+        ],
+        [
+          60718,
+          62434
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON ruanui_sky_tahiti_and_society_islands 003",
+      "names": {
+        "en": "Maui's hook",
+        "native": "Matau-a-maui"
+      },
+      "lines": [
+        [
+          85927,
+          86670
+        ],
+        [
+          86670,
+          87073
+        ],
+        [
+          87073,
+          86228
+        ],
+        [
+          86228,
+          84143
+        ],
+        [
+          84143,
+          82671
+        ],
+        [
+          82671,
+          82514
+        ],
+        [
+          82514,
+          82396
+        ],
+        [
+          82396,
+          81266
+        ],
+        [
+          81266,
+          80763
+        ],
+        [
+          80763,
+          78820
+        ],
+        [
+          78820,
+          78401
+        ],
+        [
+          78401,
+          78265
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON ruanui_sky_tahiti_and_society_islands 001",
+      "names": {
+        "en": "Small eyes",
+        "native": "Matari'i"
+      },
+      "lines": [
+        [
+          17847,
+          17702,
+          17608,
+          17499,
+          17489,
+          17531,
+          17573,
+          17702
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON ruanui_sky_tahiti_and_society_islands 004",
+      "names": {
+        "en": "Great valley",
+        "native": "Fa'a-nui"
+      },
+      "lines": [
+        [
+          28380,
+          28360
+        ],
+        [
+          28360,
+          24608
+        ],
+        [
+          24608,
+          23453
+        ],
+        [
+          23453,
+          23015
+        ],
+        [
+          25428,
+          23015
+        ],
+        [
+          25428,
+          28380
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON ruanui_sky_tahiti_and_society_islands 005",
+      "names": {
+        "en": "Little valley",
+        "native": "Fa'a-iti"
+      },
+      "lines": [
+        [
+          17448,
+          18246
+        ],
+        [
+          18246,
+          18614
+        ],
+        [
+          18614,
+          18532
+        ],
+        [
+          18532,
+          17358
+        ],
+        [
+          17358,
+          15863
+        ],
+        [
+          15863,
+          14576
+        ],
+        [
+          14576,
+          17448
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON ruanui_sky_tahiti_and_society_islands 007",
+      "names": {
+        "en": "Single bonito",
+        "native": "Atu-tahi"
+      },
+      "lines": [
+        [
+          113368,
+          111954
+        ],
+        [
+          111954,
+          108661
+        ],
+        [
+          108661,
+          107608
+        ],
+        [
+          107608,
+          109422
+        ],
+        [
+          109422,
+          111188
+        ],
+        [
+          111188,
+          113246
+        ],
+        [
+          113368,
+          115102
+        ],
+        [
+          115102,
+          113246
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON ruanui_sky_tahiti_and_society_islands 008",
+      "names": {
+        "en": "Numerous heavenly fishes",
+        "native": "Atu-ra'i-putuputu"
+      },
+      "lines": [
+        [
+          4889,
+          5742
+        ],
+        [
+          5742,
+          7097,
+          8198,
+          9487,
+          8833,
+          7884,
+          7007,
+          4906,
+          3760,
+          1645,
+          118268,
+          116771,
+          116928,
+          115738,
+          114971,
+          115830,
+          116771
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON ruanui_sky_tahiti_and_society_islands 010",
+      "names": {
+        "en": "White sea swallow",
+        "native": "Pira'e-tea"
+      },
+      "lines": [
+        [
+          94779,
+          95853,
+          97165,
+          100453,
+          102098
+        ],
+        [
+          100453,
+          102488,
+          104732,
+          107310
+        ],
+        [
+          100453,
+          98110,
+          95947
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON ruanui_sky_tahiti_and_society_islands 011",
+      "names": {
+        "en": "Parent eater of rock",
+        "native": "Metua-'ai-papa"
+      },
+      "lines": [
+        [
+          60965,
+          59803
+        ],
+        [
+          59803,
+          59316
+        ],
+        [
+          59316,
+          61359
+        ],
+        [
+          61359,
+          60965
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON ruanui_sky_tahiti_and_society_islands 012",
+      "names": {
+        "en": "The aligned stars of Mere",
+        "native": "Nā-hui-tārava-ia-mere"
+      },
+      "lines": [
+        [
+          25930,
+          26311
+        ],
+        [
+          26311,
+          26727
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON ruanui_sky_tahiti_and_society_islands 013",
+      "names": {
+        "en": "Vortex ocean in which to lose crime",
+        "native": "Moana-'ohu-noa-'ei-ha'amoe-hara"
+      },
+      "lines": [
+        [
+          53740,
+          54682,
+          55705,
+          55282,
+          53740
+        ],
+        [
+          55282,
+          55687,
+          56633,
+          58188,
+          57283,
+          55705
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON ruanui_sky_tahiti_and_society_islands 014",
+      "names": {
+        "en": "The two asking for food",
+        "native": "Nā-'ainanu"
+      },
+      "lines": [
+        [
+          36850,
+          37826
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON ruanui_sky_tahiti_and_society_islands 015",
+      "names": {
+        "en": "Open valley",
+        "native": "Fa'a-tā-potupotu"
+      },
+      "lines": [
+        [
+          31681,
+          34088,
+          35550,
+          36962,
+          37826,
+          36850,
+          34693,
+          32246,
+          30343
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON ruanui_sky_tahiti_and_society_islands 016",
+      "names": {
+        "en": "Two eyes",
+        "native": "Nā-matarua"
+      },
+      "lines": [
+        [
+          71683,
+          68702
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON ruanui_sky_tahiti_and_society_islands 017",
+      "names": {
+        "en": "Forest of parental yearnings",
+        "native": "Uru-meremere"
+      },
+      "lines": [
+        [
+          26727,
+          26311,
+          25930
+        ],
+        [
+          27989,
+          26727,
+          27366,
+          24436,
+          25930,
+          25336,
+          26207,
+          27989
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON ruanui_sky_tahiti_and_society_islands 018",
+      "names": {
+        "en": "Hiro's kite",
+        "native": "Te-'uo-a-hiro"
+      },
+      "lines": [
+        [
+          85927,
+          86670,
+          87073,
+          86228,
+          84143,
+          82671,
+          82514,
+          82396,
+          81266,
+          80763,
+          80079,
+          78265,
+          78401,
+          78820,
+          79374,
+          80343,
+          80975,
+          80079
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON ruanui_sky_tahiti_and_society_islands 019",
+      "names": {
+        "en": "Cavern of the parental yearnings",
+        "native": "Rua-o-mere"
+      },
+      "lines": [
+        [
+          100345,
+          104139,
+          105515,
+          106985,
+          107556
+        ],
+        [
+          100345,
+          102978,
+          105881
+        ],
+        [
+          105881,
+          107556
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON ruanui_sky_tahiti_and_society_islands 020",
+      "names": {
+        "en": "Stand in the sea of rank odor",
+        "native": "Tū-i-te-moana-urifā"
+      },
+      "lines": [
+        [
+          42799,
+          42402,
+          42313,
+          43109,
+          43234,
+          42799
+        ],
+        [
+          43234,
+          43813,
+          45336,
+          46776,
+          46509,
+          46390,
+          48356,
+          49841,
+          51069,
+          52943,
+          56343,
+          57936,
+          64166,
+          64962
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON ruanui_sky_tahiti_and_society_islands 021",
+      "names": {
+        "en": "The greedy",
+        "native": "Pipiri-ma"
+      },
+      "lines": [
+        [
+          85927,
+          85696
+        ]
+      ],
+      "kind": "constellation"
+    }
+  ],
+  "names": {
+    "24608": {
+      "native": "Tahi-ari'i"
+    },
+    "69673": {
+      "native": "'Ana-tahu'a-ta'ata-metua-te-tupu-mavae"
+    },
+    "32349": {
+      "native": "Ta'urua-nui-i-te-amo-'aha"
+    },
+    "37279": {
+      "native": "'Ana-tahu'a-vahine-o-toa-te-manava"
+    },
+    "30438": {
+      "native": "Ta'urua-nui-o-te-hiti-'apato'a"
+    },
+    "26634": {
+      "native": "Pou-haerera'a"
+    },
+    "102098": {
+      "native": "Pira'e-tea"
+    },
+    "36850": {
+      "native": "'Ainanu-i-raro"
+    },
+    "37826": {
+      "native": "'Ainanu-i-ni'a"
+    },
+    "49669": {
+      "native": "'Ana-roto"
+    },
+    "74785": {
+      "native": "'Ana-muri"
+    },
+    "91262": {
+      "native": "Meremere"
+    },
+    "27989": {
+      "native": "'Ana-varu"
+    },
+    "24436": {
+      "native": "Mere"
+    },
+    "113368": {
+      "native": "Ta'urua-nui-e-fa'atere-va'a-iā-atu-tahi"
+    },
+    "80763": {
+      "native": "'Ana-mua"
+    },
+    "21421": {
+      "native": "'Ana-muri"
+    },
+    "54061": {
+      "native": "'Ana-tīpū"
+    },
+    "11767": {
+      "native": "'Ana-ni'a"
+    },
+    "65474": {
+      "native": "'Ana-roto"
+    },
+    "46390": {
+      "native": "'Ana-heuheu-pō"
+    },
+    "85696": {
+      "native": "Rehua"
+    },
+    "85927": {
+      "native": "Pipiri"
+    },
+    "61084": {
+      "en": "Cluster of four",
+      "native": "Tau-hā"
+    },
+    "59747": {
+      "en": "Cluster of four",
+      "native": "Tau-hā"
+    },
+    "60718": {
+      "en": "Cluster of four",
+      "native": "Tau-hā"
+    },
+    "62434": {
+      "en": "Cluster of four",
+      "native": "Tau-hā"
+    },
+    "86670": {
+      "en": "Maui's hook",
+      "native": "Matau-a-maui"
+    },
+    "87073": {
+      "en": "Maui's hook",
+      "native": "Matau-a-maui"
+    },
+    "86228": {
+      "en": "Maui's hook",
+      "native": "Matau-a-maui"
+    },
+    "84143": {
+      "en": "Maui's hook",
+      "native": "Matau-a-maui"
+    },
+    "82671": {
+      "en": "Maui's hook",
+      "native": "Matau-a-maui"
+    },
+    "82514": {
+      "en": "Maui's hook",
+      "native": "Matau-a-maui"
+    },
+    "82396": {
+      "en": "Maui's hook",
+      "native": "Matau-a-maui"
+    },
+    "81266": {
+      "en": "Maui's hook",
+      "native": "Matau-a-maui"
+    },
+    "78820": {
+      "en": "Maui's hook",
+      "native": "Matau-a-maui"
+    },
+    "78401": {
+      "en": "Maui's hook",
+      "native": "Matau-a-maui"
+    },
+    "78265": {
+      "en": "Maui's hook",
+      "native": "Matau-a-maui"
+    },
+    "17847": {
+      "en": "Small eyes",
+      "native": "Matari'i"
+    },
+    "17702": {
+      "en": "Small eyes",
+      "native": "Matari'i"
+    },
+    "17608": {
+      "en": "Small eyes",
+      "native": "Matari'i"
+    },
+    "17499": {
+      "en": "Small eyes",
+      "native": "Matari'i"
+    },
+    "17489": {
+      "en": "Small eyes",
+      "native": "Matari'i"
+    },
+    "17531": {
+      "en": "Small eyes",
+      "native": "Matari'i"
+    },
+    "17573": {
+      "en": "Small eyes",
+      "native": "Matari'i"
+    },
+    "28380": {
+      "en": "Great valley",
+      "native": "Fa'a-nui"
+    },
+    "28360": {
+      "en": "Great valley",
+      "native": "Fa'a-nui"
+    },
+    "23453": {
+      "en": "Great valley",
+      "native": "Fa'a-nui"
+    },
+    "23015": {
+      "en": "Great valley",
+      "native": "Fa'a-nui"
+    },
+    "25428": {
+      "en": "Great valley",
+      "native": "Fa'a-nui"
+    },
+    "17448": {
+      "en": "Little valley",
+      "native": "Fa'a-iti"
+    },
+    "18246": {
+      "en": "Little valley",
+      "native": "Fa'a-iti"
+    },
+    "18614": {
+      "en": "Little valley",
+      "native": "Fa'a-iti"
+    },
+    "18532": {
+      "en": "Little valley",
+      "native": "Fa'a-iti"
+    },
+    "17358": {
+      "en": "Little valley",
+      "native": "Fa'a-iti"
+    },
+    "15863": {
+      "en": "Little valley",
+      "native": "Fa'a-iti"
+    },
+    "14576": {
+      "en": "Little valley",
+      "native": "Fa'a-iti"
+    },
+    "111954": {
+      "en": "Single bonito",
+      "native": "Atu-tahi"
+    },
+    "108661": {
+      "en": "Single bonito",
+      "native": "Atu-tahi"
+    },
+    "107608": {
+      "en": "Single bonito",
+      "native": "Atu-tahi"
+    },
+    "109422": {
+      "en": "Single bonito",
+      "native": "Atu-tahi"
+    },
+    "111188": {
+      "en": "Single bonito",
+      "native": "Atu-tahi"
+    },
+    "113246": {
+      "en": "Single bonito",
+      "native": "Atu-tahi"
+    },
+    "115102": {
+      "en": "Single bonito",
+      "native": "Atu-tahi"
+    },
+    "4889": {
+      "en": "Numerous heavenly fishes",
+      "native": "Atu-ra'i-putuputu"
+    },
+    "5742": {
+      "en": "Numerous heavenly fishes",
+      "native": "Atu-ra'i-putuputu"
+    },
+    "7097": {
+      "en": "Numerous heavenly fishes",
+      "native": "Atu-ra'i-putuputu"
+    },
+    "8198": {
+      "en": "Numerous heavenly fishes",
+      "native": "Atu-ra'i-putuputu"
+    },
+    "9487": {
+      "en": "Numerous heavenly fishes",
+      "native": "Atu-ra'i-putuputu"
+    },
+    "8833": {
+      "en": "Numerous heavenly fishes",
+      "native": "Atu-ra'i-putuputu"
+    },
+    "7884": {
+      "en": "Numerous heavenly fishes",
+      "native": "Atu-ra'i-putuputu"
+    },
+    "7007": {
+      "en": "Numerous heavenly fishes",
+      "native": "Atu-ra'i-putuputu"
+    },
+    "4906": {
+      "en": "Numerous heavenly fishes",
+      "native": "Atu-ra'i-putuputu"
+    },
+    "3760": {
+      "en": "Numerous heavenly fishes",
+      "native": "Atu-ra'i-putuputu"
+    },
+    "1645": {
+      "en": "Numerous heavenly fishes",
+      "native": "Atu-ra'i-putuputu"
+    },
+    "118268": {
+      "en": "Numerous heavenly fishes",
+      "native": "Atu-ra'i-putuputu"
+    },
+    "116771": {
+      "en": "Numerous heavenly fishes",
+      "native": "Atu-ra'i-putuputu"
+    },
+    "116928": {
+      "en": "Numerous heavenly fishes",
+      "native": "Atu-ra'i-putuputu"
+    },
+    "115738": {
+      "en": "Numerous heavenly fishes",
+      "native": "Atu-ra'i-putuputu"
+    },
+    "114971": {
+      "en": "Numerous heavenly fishes",
+      "native": "Atu-ra'i-putuputu"
+    },
+    "115830": {
+      "en": "Numerous heavenly fishes",
+      "native": "Atu-ra'i-putuputu"
+    },
+    "94779": {
+      "en": "White sea swallow",
+      "native": "Pira'e-tea"
+    },
+    "95853": {
+      "en": "White sea swallow",
+      "native": "Pira'e-tea"
+    },
+    "97165": {
+      "en": "White sea swallow",
+      "native": "Pira'e-tea"
+    },
+    "100453": {
+      "en": "White sea swallow",
+      "native": "Pira'e-tea"
+    },
+    "102488": {
+      "en": "White sea swallow",
+      "native": "Pira'e-tea"
+    },
+    "104732": {
+      "en": "White sea swallow",
+      "native": "Pira'e-tea"
+    },
+    "107310": {
+      "en": "White sea swallow",
+      "native": "Pira'e-tea"
+    },
+    "98110": {
+      "en": "White sea swallow",
+      "native": "Pira'e-tea"
+    },
+    "95947": {
+      "en": "White sea swallow",
+      "native": "Pira'e-tea"
+    },
+    "60965": {
+      "en": "Parent eater of rock",
+      "native": "Metua-'ai-papa"
+    },
+    "59803": {
+      "en": "Parent eater of rock",
+      "native": "Metua-'ai-papa"
+    },
+    "59316": {
+      "en": "Parent eater of rock",
+      "native": "Metua-'ai-papa"
+    },
+    "61359": {
+      "en": "Parent eater of rock",
+      "native": "Metua-'ai-papa"
+    },
+    "25930": {
+      "en": "The aligned stars of Mere",
+      "native": "Nā-hui-tārava-ia-mere"
+    },
+    "26311": {
+      "en": "The aligned stars of Mere",
+      "native": "Nā-hui-tārava-ia-mere"
+    },
+    "26727": {
+      "en": "The aligned stars of Mere",
+      "native": "Nā-hui-tārava-ia-mere"
+    },
+    "53740": {
+      "en": "Vortex ocean in which to lose crime",
+      "native": "Moana-'ohu-noa-'ei-ha'amoe-hara"
+    },
+    "54682": {
+      "en": "Vortex ocean in which to lose crime",
+      "native": "Moana-'ohu-noa-'ei-ha'amoe-hara"
+    },
+    "55705": {
+      "en": "Vortex ocean in which to lose crime",
+      "native": "Moana-'ohu-noa-'ei-ha'amoe-hara"
+    },
+    "55282": {
+      "en": "Vortex ocean in which to lose crime",
+      "native": "Moana-'ohu-noa-'ei-ha'amoe-hara"
+    },
+    "55687": {
+      "en": "Vortex ocean in which to lose crime",
+      "native": "Moana-'ohu-noa-'ei-ha'amoe-hara"
+    },
+    "56633": {
+      "en": "Vortex ocean in which to lose crime",
+      "native": "Moana-'ohu-noa-'ei-ha'amoe-hara"
+    },
+    "58188": {
+      "en": "Vortex ocean in which to lose crime",
+      "native": "Moana-'ohu-noa-'ei-ha'amoe-hara"
+    },
+    "57283": {
+      "en": "Vortex ocean in which to lose crime",
+      "native": "Moana-'ohu-noa-'ei-ha'amoe-hara"
+    },
+    "31681": {
+      "en": "Open valley",
+      "native": "Fa'a-tā-potupotu"
+    },
+    "34088": {
+      "en": "Open valley",
+      "native": "Fa'a-tā-potupotu"
+    },
+    "35550": {
+      "en": "Open valley",
+      "native": "Fa'a-tā-potupotu"
+    },
+    "36962": {
+      "en": "Open valley",
+      "native": "Fa'a-tā-potupotu"
+    },
+    "34693": {
+      "en": "Open valley",
+      "native": "Fa'a-tā-potupotu"
+    },
+    "32246": {
+      "en": "Open valley",
+      "native": "Fa'a-tā-potupotu"
+    },
+    "30343": {
+      "en": "Open valley",
+      "native": "Fa'a-tā-potupotu"
+    },
+    "71683": {
+      "en": "Two eyes",
+      "native": "Nā-matarua"
+    },
+    "68702": {
+      "en": "Two eyes",
+      "native": "Nā-matarua"
+    },
+    "27366": {
+      "en": "Forest of parental yearnings",
+      "native": "Uru-meremere"
+    },
+    "25336": {
+      "en": "Forest of parental yearnings",
+      "native": "Uru-meremere"
+    },
+    "26207": {
+      "en": "Forest of parental yearnings",
+      "native": "Uru-meremere"
+    },
+    "80079": {
+      "en": "Hiro's kite",
+      "native": "Te-'uo-a-hiro"
+    },
+    "79374": {
+      "en": "Hiro's kite",
+      "native": "Te-'uo-a-hiro"
+    },
+    "80343": {
+      "en": "Hiro's kite",
+      "native": "Te-'uo-a-hiro"
+    },
+    "80975": {
+      "en": "Hiro's kite",
+      "native": "Te-'uo-a-hiro"
+    },
+    "100345": {
+      "en": "Cavern of the parental yearnings",
+      "native": "Rua-o-mere"
+    },
+    "104139": {
+      "en": "Cavern of the parental yearnings",
+      "native": "Rua-o-mere"
+    },
+    "105515": {
+      "en": "Cavern of the parental yearnings",
+      "native": "Rua-o-mere"
+    },
+    "106985": {
+      "en": "Cavern of the parental yearnings",
+      "native": "Rua-o-mere"
+    },
+    "107556": {
+      "en": "Cavern of the parental yearnings",
+      "native": "Rua-o-mere"
+    },
+    "102978": {
+      "en": "Cavern of the parental yearnings",
+      "native": "Rua-o-mere"
+    },
+    "105881": {
+      "en": "Cavern of the parental yearnings",
+      "native": "Rua-o-mere"
+    },
+    "42799": {
+      "en": "Stand in the sea of rank odor",
+      "native": "Tū-i-te-moana-urifā"
+    },
+    "42402": {
+      "en": "Stand in the sea of rank odor",
+      "native": "Tū-i-te-moana-urifā"
+    },
+    "42313": {
+      "en": "Stand in the sea of rank odor",
+      "native": "Tū-i-te-moana-urifā"
+    },
+    "43109": {
+      "en": "Stand in the sea of rank odor",
+      "native": "Tū-i-te-moana-urifā"
+    },
+    "43234": {
+      "en": "Stand in the sea of rank odor",
+      "native": "Tū-i-te-moana-urifā"
+    },
+    "43813": {
+      "en": "Stand in the sea of rank odor",
+      "native": "Tū-i-te-moana-urifā"
+    },
+    "45336": {
+      "en": "Stand in the sea of rank odor",
+      "native": "Tū-i-te-moana-urifā"
+    },
+    "46776": {
+      "en": "Stand in the sea of rank odor",
+      "native": "Tū-i-te-moana-urifā"
+    },
+    "46509": {
+      "en": "Stand in the sea of rank odor",
+      "native": "Tū-i-te-moana-urifā"
+    },
+    "48356": {
+      "en": "Stand in the sea of rank odor",
+      "native": "Tū-i-te-moana-urifā"
+    },
+    "49841": {
+      "en": "Stand in the sea of rank odor",
+      "native": "Tū-i-te-moana-urifā"
+    },
+    "51069": {
+      "en": "Stand in the sea of rank odor",
+      "native": "Tū-i-te-moana-urifā"
+    },
+    "52943": {
+      "en": "Stand in the sea of rank odor",
+      "native": "Tū-i-te-moana-urifā"
+    },
+    "56343": {
+      "en": "Stand in the sea of rank odor",
+      "native": "Tū-i-te-moana-urifā"
+    },
+    "57936": {
+      "en": "Stand in the sea of rank odor",
+      "native": "Tū-i-te-moana-urifā"
+    },
+    "64166": {
+      "en": "Stand in the sea of rank odor",
+      "native": "Tū-i-te-moana-urifā"
+    },
+    "64962": {
+      "en": "Stand in the sea of rank odor",
+      "native": "Tū-i-te-moana-urifā"
+    }
+  },
+  "unresolved_hips": []
+}

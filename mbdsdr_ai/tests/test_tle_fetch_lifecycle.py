@@ -340,9 +340,9 @@ def test_synthetic_tle_policy_is_explicit():
     from mbdsdr_ai.builtin_tle_meta import synthetic_tle_policy
 
     p = synthetic_tle_policy()
-    assert p["decision"] == "keep_but_not_for_precise_passes"
+    assert p["decision"] == "removed_from_production"
     assert p["enforced_by"]
-    assert "精确" in p["summary"]
+    assert "不再内置" in p["summary"]
 
 
 # ------------------------------------------------------------ orbit 集成

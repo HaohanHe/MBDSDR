@@ -5,7 +5,7 @@ MBDSDR AI 内核 - 数字信号解码器模块
 Decoders：各种数字模式的解码器。
 
 实现：
-1. 卫星轨道计算（sgp4 + 内置 TLE）
+1. 卫星轨道计算（sgp4 + 外部/缓存 TLE；不内置轨道根数）
 2. NOAA APT 气象卫星图像解码
 3. SSTV 慢扫描电视解码（简化版）
 4. 跳频信号检测（FHSS）
@@ -32,39 +32,17 @@ except ImportError:
 
 
 # ═══════════════════════════════════════════════════════
-# 1. 常用卫星 TLE 数据（内置，无需联网）
+# 1. 卫星名称 ↔ NORAD 编号（仅映射，不含轨道根数）
 # ═══════════════════════════════════════════════════════
 
-# TLE 数据格式：(名称, 第一行, 第二行)
-# 内置仅作离线回退（近似值）。真实使用优先从 celestrak 联网拉最新 TLE。
-BUILTIN_TLE = {
-    "NOAA 15": (
-        "1 25338U 98030A   26250.50000000  .00000050  00000-0  10000-3 0  9993",
-        "2 25338  98.7000 100.0000 0010000  90.0000 270.0000 14.25000000400000",
-    ),
-    "NOAA 18": (
-        "1 28654U 05018A   26250.50000000  .00000050  00000-0  10000-3 0  9994",
-        "2 28654  99.1000 100.0000 0010000  90.0000 270.0000 14.10000000400000",
-    ),
-    "NOAA 19": (
-        "1 33591U 09005A   26250.50000000  .00000050  00000-0  10000-3 0  9995",
-        "2 33591  99.2000 100.0000 0010000  90.0000 270.0000 14.10000000400000",
-    ),
-    "ISS (ZARYA)": (
-        "1 25544U 98067A   26250.50000000  .00000050  00000-0  10000-3 0  9996",
-        "2 25544  51.6400 100.0000 0006700  90.0000 270.0000 15.50000000400000",
-    ),
-    "METEOR M2": (
-        "1 44016U 17008A   26250.50000000  .00000050  00000-0  10000-3 0  9997",
-        "2 44016  98.7000 100.0000 0001000  90.0000 270.0000 14.20000000400000",
-    ),
-    "FENGYUN 3D": (
-        "1 54234U 22152A   26250.50000000  .00000050  00000-0  10000-3 0  9998",
-        "2 54234  98.9000 100.0000 0010000  90.0000 270.0000 14.20000000400000",
-    ),
-}
+#: 历史 ``BUILTIN_TLE`` 表**已清空**：仓内不再内置任何合成/凑整轨道根数。
+#: 需要 TLE 时只走真实来源（Celestrak 在线/缓存、用户自备 .tle、或
+#: ``sat_tracker`` 里标注为 ``external_snapshot`` 的 Celestrak 静态快照）；
+#: 取不到就返回空态「无 TLE，无法预报」，绝不拿占位值凑过境。
+#: 测试所需的 TLE 样本放在 ``tests/fixtures/tle_samples.py``，不回到生产路径。
+BUILTIN_TLE: Dict[str, Tuple[str, str]] = {}
 
-# 卫星名称 -> NORAD CATNR（用于从 celestrak 联网拉最新 TLE）
+# 卫星名称 -> NORAD CATNR（用于从 celestrak 联网拉最新 TLE；只是编号映射）
 SATELLITE_CATNR = {
     "NOAA 15": 25338,
     "NOAA 18": 28654,
@@ -74,27 +52,31 @@ SATELLITE_CATNR = {
     "FENGYUN 3D": 54234,
 }
 
+#: 可解析/可联网取 TLE 的卫星名集合（不再依赖内置根数表是否存在）。
+KNOWN_SATELLITE_NAMES = frozenset(SATELLITE_CATNR)
+
 
 # TLE 联网拉取失败冷却表：satellite_name -> monotonic 到期时刻。
 # 卫星预测以 30s 步长扫窗口（24h = 2880 步），每步都过 _resolve_tle；
 # 失败若不进冷却，外网不可达时每步都要等满一次网络超时（fetch_tle 的
 # urlopen timeout=15s），单星预测被拖到小时量级、工具调用实际不可用
 # （tests/ 根 test_tool_callability dry-call 即因此挂起 10 分钟以上）。
-# 冷却期内直接回退内置 TLE，source 仍如实标 "builtin-fallback"——失败
-# 缓存只省重试，不伪造联网来源；成功拉取即清冷却，冷却到期自动恢复重试。
+# 冷却期内不再重试网络，且没有内置根数可回退——如实返回 ``("", "", "no-tle")``。
+# 失败缓存只省重试，不伪造联网来源；成功拉取即清冷却，冷却到期自动恢复重试。
 _TLE_FAIL_UNTIL: Dict[str, float] = {}
 _TLE_FAIL_COOLDOWN_S = 300.0
 
 
 def _resolve_tle(satellite_name: str):
-    """优先联网拉最新 TLE；失败回退内置近似值。返回 (line1, line2, source)。
+    """优先联网拉最新 TLE；失败/无来源返回 ``("", "", "no-tle")``。
 
-    联网失败进入 _TLE_FAIL_COOLDOWN_S（5 分钟）负缓存冷却：预测循环逐步
-    解析时不会每步重试网络；冷却到期后恢复重试。冷却期内 source 为
-    "builtin-fallback"（诚实标注回退路径，不冒充 celestrak）。
+    仓内不再内置合成轨道根数：冷却期内或联网失败时没有「近似值」可回退，
+    调用方必须按无 TLE 处理（返回 None / 空列表），不得拿占位值算过境。
     """
     catnr = SATELLITE_CATNR.get(satellite_name)
-    if catnr is not None and time.monotonic() >= _TLE_FAIL_UNTIL.get(satellite_name, 0.0):
+    if catnr is None:
+        return "", "", "no-tle"
+    if time.monotonic() >= _TLE_FAIL_UNTIL.get(satellite_name, 0.0):
         try:
             from .orbit import fetch_tle
             tle = fetch_tle(catnr)
@@ -102,13 +84,25 @@ def _resolve_tle(satellite_name: str):
             _TLE_FAIL_UNTIL[satellite_name] = time.monotonic() + _TLE_FAIL_COOLDOWN_S
         else:
             _TLE_FAIL_UNTIL.pop(satellite_name, None)
-            return (*tle, "celestrak")
-    return (*BUILTIN_TLE[satellite_name], "builtin-fallback")
+            if tle and tle[0] and tle[1]:
+                return (*tle, "celestrak")
+    return "", "", "no-tle"
+
+
+def any_tle_available() -> bool:
+    """是否存在任何可解析的真实 TLE（在线/缓存/测试注入），不伪造。
+
+    生产表为空时用于区分「无 TLE」与「有 TLE 但当前不可见/无过境」。
+    """
+    if BUILTIN_TLE:
+        return True
+    return any(_resolve_tle(name)[0] for name in SATELLITE_CATNR)
+
 
 def _load_satellite_frequencies() -> Dict[str, float]:
     """卫星下行频点表（MHz）：皮进加载自链路目录 sat_links.json，源码零字面量。
 
-    键是 TLE 名拼法（BUILTIN_TLE 的键）：目录 norad_name 与可选
+    键是 ``SATELLITE_CATNR`` 的名字拼法：目录 norad_name 与可选
     tle_aliases 都桥接进来。目录查不到的卫星不进表，消费方
     ``.get(name, 0.0)`` 软降级——FENGYUN 3D 即此类：其 AHRPT 下行在
     1698–1710 MHz L 波段（NSMC 公开资料），不在本目录 137/145 MHz
@@ -164,10 +158,10 @@ def _raw_state(
     observer_alt_m: float,
     timestamp: float = None,
 ):
-    """解析 TLE（联网优先/内置回退）+ 统一时刻 -> orbit 内核原始状态。
+    """解析 TLE（联网优先/无则空态）+ 统一时刻 -> orbit 内核原始状态。
 
-    本模块只保留「TLE 来源」这一处差异：离线允许回退内置近似 TLE，
-    而 ``orbit`` 的入口在无 TLE 时诚实返回 None。几何/多普勒一律走
+    本模块只保留「TLE 来源」这一处差异：无真实 TLE 就返回 None（诚实空态），
+    绝不再回退内置近似根数。几何/多普勒一律走
     ``orbit.satellite_raw_state``，不再在 decoders 内联一份。
     """
     if not HAS_SGP4:
@@ -188,8 +182,10 @@ def _raw_state(
     # 0.07~0.23°（K13：同一用例随当天过境几何在绿/红之间摇摆）。
     jd_utc = timestamp / 86400.0 + 2440587.5
 
-    # 从 TLE 创建卫星对象（优先联网最新，回退内置）
+    # 从 TLE 创建卫星对象（联网/缓存；无 TLE 即空态）
     line1, line2, _src = _resolve_tle(satellite_name)
+    if not line1 or not line2:
+        return None
     satellite = Satrec.twoline2rv(line1, line2)
 
     try:
@@ -215,7 +211,7 @@ def compute_satellite_position(
     if not HAS_SGP4:
         return None
 
-    if satellite_name not in BUILTIN_TLE:
+    if satellite_name not in KNOWN_SATELLITE_NAMES:
         return None
 
     try:
@@ -266,7 +262,11 @@ def list_visible_satellites(
     """
     列出当前天空中可见的卫星。
 
-    计算所有内置卫星的位置，筛选仰角大于 min_elevation 的卫星。
+    计算名称映射中已知卫星的位置（每颗按真实 TLE 解析），筛选仰角大于
+    min_elevation 的卫星；解析不到 TLE 的星跳过，不拿占位根数补。
+    默认离线优先：TLE 只读本地缓存，未显式开启 ``MBDSDR_ALLOW_NETWORK``
+    时不发起网络；无缓存时返回空列表（原因见
+    ``new_spacetime.compute_visible_satellite_count`` 的 ``reason``）。
     ``min_elevation`` 是**必传关键字**：本模块不再替调用方决定仰角门
     （历史上默认 0.0，等于留了一个没人认领的第三道门）。天空图枚举
     报 0°，桌面过境列表报 ``settings.effective_pass_visibility_gate_deg()``，
@@ -275,7 +275,10 @@ def list_visible_satellites(
               时间穿梭时由 TimeEngine.now_unix() 注入。
     """
     visible = []
-    for name in BUILTIN_TLE:
+    # 枚举名单来自「名称↔编号」映射，而不是 TLE 表：TLE 表可以为空（不再
+    # 内置合成根数），每颗星的真实 TLE 由 compute_satellite_position 按
+    # 在线/缓存解析；解析不到就跳过，绝不用占位值补。
+    for name in KNOWN_SATELLITE_NAMES:
         if satellite_type == "weather" and "NOAA" not in name and "METEOR" not in name and "FENGYUN" not in name:
             continue
         if satellite_type == "amateur" and "ISS" not in name:
@@ -307,7 +310,7 @@ def compute_doppler_correction(
 
     ``timestamp`` 为 Unix UTC 秒；缺省取 TimeEngine（与天空视图同一时刻）。
     """
-    if satellite_name not in BUILTIN_TLE:
+    if satellite_name not in KNOWN_SATELLITE_NAMES:
         return {"error": f"无法计算卫星 {satellite_name} 的位置"}
 
     try:

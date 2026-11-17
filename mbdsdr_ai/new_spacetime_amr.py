@@ -8,10 +8,13 @@
 
 设计原则（不瞎猜）：
 - 先用功率谱噪声基底 + SNR 阈值做信号检测；低于阈值或带宽过窄一律判为
-  "未检测到信号"，绝不输出猜测的调制方式。
+  "未检测到信号"，绝不输出猜测的调制方式。宽度判据带实测定出的 bin 地板
+  （粗分辨率下 1 bin 不算"宽"），窄段的峰值门同样不低于噪声实测上界
+  （``_NOISE_RUN_MAX_BINS`` / ``_NOISE_PEAK_MAX_DB``）。
 - 复用已有 :class:`mbdsdr_ai.amr.AMRClassifier`（懒加载），不重写分类器。
 - SSB 的上边带/下边带归属由频谱不对称性判定（模型本身没有 SSB 模板）：
-  基带上边带功率显著大于下边带记为 USB，反之为 LSB。
+  基带上边带功率显著大于下边带记为 USB，反之为 LSB；但占用带必须窄到
+  SSB 量级（``_SSB_MAX_BANDWIDTH_HZ``）——宽广播不得被当成单边带。
 - 仅吃功率谱的轻量路径 :meth:`analyze_spectrum` 不做 IQ 级分类，供频谱组件
   实时刷新使用。
 """
@@ -35,6 +38,23 @@ _SIDEBAND_RATIO = 1.5
 
 # 信号质心偏离基带中心超过该频率(Hz)才承认边带归属，避免中心处 CW 误判
 _OFF_CENTER_GATE_HZ = 200.0
+
+# 噪声连续越限段的最长 bin 数（实测，2026-11-17，本机）：
+# 单帧 FFT（无窗）+ p20 噪声底 + 6 dB 分段阈值下，噪声越限 bin 占比约 41%，
+# n=2048…131072 × 各 60 帧（约 10 万段）实测最长连续段 **18 bin**（p99 恒为 6）。
+# 因此「宽度判据」的 bin 下限必须 ≥ 19：粗分辨率（bin_hz > min_bandwidth_hz）
+# 时 ceil(min_bandwidth/bin_hz) 会退化成 1，1～18 bin 的噪声段就会被当成
+# 「宽信号」，纯噪声视频谱 720/720 全被判为检测到信号（实测）。
+_NOISE_RUN_MAX_BINS = 18
+
+# 噪声段峰值抬升的上界（相对 p20 噪声底，dB）：同上口径实测最大 18.7。
+# 窄段只靠宽度不够时，必须再满足峰值门（= snr_threshold + narrow_peak_margin）。
+_NOISE_PEAK_MAX_DB = 18.7
+
+# 单边带（SSB）占用带上限（Hz）：语音 SSB 实测/规范 ≤3 kHz（滤波裙边到 4 kHz）。
+# 超过这个宽度的信号不可能再是 SSB——真实 OTA FM 样本占 186 kHz，只按边带比
+# 会被判定为 USB（实测），那是假标签。
+_SSB_MAX_BANDWIDTH_HZ = 6000.0
 
 
 @dataclass
@@ -112,7 +132,16 @@ class AMRStreamAnalyzer:
 
         modulation, confidence = self._decide_modulation(
             raw_type, det["upper_power"], det["lower_power"],
-            det["center_offset_hz"], confidence)
+            det["center_offset_hz"], confidence,
+            bandwidth_hz=det["bandwidth_hz"])
+
+        # 分类器判 NOISE/UNKNOWN 时最终结论就是「没有可辨认的信号」：
+        # 若仍报 signal_detected=True，面板会走进「已检测」分支，把噪声段的
+        # 带宽/峰数/SNR 摆出来（标签却写未检测到信号）——自相矛盾且等于
+        # 把噪声当测量值展示。这里让标志与结论一致，判据（snr/峰数）随
+        # 无信号口径一起清零，绝不半真半假。
+        if modulation == "未检测到信号":
+            return self._no_signal(noise_floor_db=det["noise_floor_db"])
 
         return AMRStreamResult(
             signal_detected=True,
@@ -190,9 +219,14 @@ class AMRStreamAnalyzer:
                              sample_rate: float) -> Dict[str, Any]:
         """统一的信号检测 + 频谱特征提取，供 analyze_iq / analyze_spectrum 复用。
 
-        信号判据：在噪声基底之上，存在一段连续、宽度达到 min_bandwidth_hz 的
-        抬升区。纯白噪声的频谱近似平坦，超过阈值的只是离散窄毛刺（单段宽度
-        不足），因此不会被误判为信号 —— 宁可漏检也不瞎猜。
+        信号判据（两条，取或）：
+          1. 连续越限段宽度 ≥ ``max(ceil(min_bandwidth_hz/bin_hz),
+             _NOISE_RUN_MAX_BINS+1)`` —— 宽信号靠「比噪声能凑出的段更宽」；
+          2. 段峰值 ≥ 分段阈值 + ``narrow_peak_margin_db``（默认 21 dB 高于
+             噪声底）—— 窄强单音靠峰值。
+        宽度下限的 bin 地板是实测定出来的（见 ``_NOISE_RUN_MAX_BINS``）：没有
+        这个地板，粗分辨率下 1 bin 就算「宽」，纯噪声会被判成信号。峰值地板
+        同样来自实测（``_NOISE_PEAK_MAX_DB``），宁可漏检也不瞎猜。
         """
         n = spec_db.size
         bin_hz = sample_rate / n if n > 0 else 1.0
@@ -223,12 +257,15 @@ class AMRStreamAnalyzer:
         if not np.any(above):
             return _no_signal()
 
-        # 连续抬升段：真实信号是局部宽峰；噪声是离散窄毛刺。
-        # 宽信号(AM/FM/FSK/PSK/SSB)靠段宽过滤；窄强单音(CW)靠峰值余量接收——
-        # 噪声毛刺即使偶发过阈值，峰值余量也远达不到载波水平。
+        # 连续抬升段：真实信号是局部宽峰；噪声是窄毛刺。
+        # 宽度判据带实测 bin 地板（_NOISE_RUN_MAX_BINS+1）；峰值判据同时保证
+        # 峰值门不低于噪声实测上界（_NOISE_PEAK_MAX_DB），两处都不放水。
         run_edges = self._find_runs(above)
-        min_bins = max(1, int(math.ceil(self.min_bandwidth_hz / bin_hz)))
-        narrow_peak_threshold = threshold + self.narrow_peak_margin_db
+        min_bins = max(_NOISE_RUN_MAX_BINS + 1,
+                       int(math.ceil(self.min_bandwidth_hz / bin_hz)))
+        narrow_peak_threshold = max(
+            threshold + self.narrow_peak_margin_db,
+            noise_floor_db + _NOISE_PEAK_MAX_DB + 1.0)
         kept = []
         for s, e in run_edges:
             width_bins = e - s + 1
@@ -353,13 +390,18 @@ class AMRStreamAnalyzer:
     def _decide_modulation(self, raw_type: ModulationType,
                            upper_power: float, lower_power: float,
                            center_offset_hz: float,
-                           confidence: float):
+                           confidence: float,
+                           bandwidth_hz: float = 0.0):
         """把模型原始标签映射为面板展示标签，返回 (modulation, confidence)。
 
         决策优先级：
-        1. 强单边带不对称（信号显著偏离基带中心，且某一边带能量占绝对主导）：
-           这是 SSB 的确定性谱证据，即使模型（无 SSB 模板）误判为噪声，也据此
-           判定 USB/LSB —— 这不是猜测，而是谱测量。
+        1. 强单边带不对称（信号显著偏离基带中心、某一边带能量占绝对主导，
+           且占用带是 SSB 的窄带量级）：这是 SSB 的确定性谱证据，即使模型
+           （无 SSB 模板）误判为噪声，也据此判定 USB/LSB —— 谱测量，非猜测。
+           带宽上限是必需条件：真实 OTA FM 样本（tests/fixtures/real_fm_88m1）
+           占用 186 kHz、偏离中心 178 kHz，只按边带比会被判成「USB」（实测
+           0.40 置信度）——那是把广播当单边带，属于假标签。语音 SSB 占用
+           ≤3 kHz（含滤波器裙边到 4 kHz），6 kHz 上限足够宽。
         2. 模型判为 NOISE/UNKNOWN：不瞎猜，返回"未检测到信号"。
         3. 其余按模型标签直接映射。
         """
@@ -377,7 +419,8 @@ class AMRStreamAnalyzer:
         # 只有信号明显偏离基带中心时才承认边带归属；
         # 中心处的 CW/对称 AM-FM 即使两侧噪声有 1.5 倍起伏也不触发。
         off_center = abs(center_offset_hz) >= _OFF_CENTER_GATE_HZ
-        if off_center and (upper_dom or lower_dom):
+        ssb_narrow = 0.0 < bandwidth_hz <= _SSB_MAX_BANDWIDTH_HZ
+        if off_center and ssb_narrow and (upper_dom or lower_dom):
             return ("LSB" if lower_dom else "USB"), confidence
 
         if raw_type == ModulationType.SSB:

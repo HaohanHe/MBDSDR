@@ -23,6 +23,7 @@ import os
 from typing import Any, Dict, List, Optional
 
 from . import sat_links_fetch
+from .net_policy import network_allowed
 
 _DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
 
@@ -169,14 +170,15 @@ _AUTO_REFRESH_DONE = False
 def ensure_machine_refresh(path: Optional[str] = None) -> bool:
     """首次用到机器库时补一次后台刷新（每进程最多一次）。
 
-    缓存新鲜就直接用；离线模式不起线程；已刷新/已尝试过则不再重复。
+    缓存新鲜就直接用；**未显式允许联网**（``MBDSDR_ALLOW_NETWORK``）或
+    离线模式下不起线程；已刷新/已尝试过则不再重复。
     返回值只表示本次是否真的起了后台线程，不代表拉取成功。
     """
     global _AUTO_REFRESH_DONE
     if _AUTO_REFRESH_DONE:
         return False
     _AUTO_REFRESH_DONE = True
-    if sat_links_fetch.offline():
+    if sat_links_fetch.offline() or not network_allowed():
         return False
     state = machine_status(path=path)
     if state.get("state") == "ok" and not state.get("stale"):

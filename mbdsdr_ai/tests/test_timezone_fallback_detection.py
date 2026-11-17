@@ -9,8 +9,9 @@
    返回 ``degraded=True``、``local_time_note()`` 给得出固定偏移说明；
 3. 正常环境（探测到带规则的时区）判定为未降级，说明为空；
 4. 降级时区是冻结偏移：同一时区在冬/夏两个时刻偏移相同、``dst()==0``；
-5. 本地时间的呈现点拿到同一句说明（时间机器输入框 / 天空状态卡本地时钟 /
-   时间信息 ``local_note``），不让用户以为时间是对的。
+5. 本地时间的呈现点拿到同一句说明（时间机器输入框 / 时间信息
+   ``local_note``），不让用户以为时间是对的。天空状态卡那条要 import Qt，
+   按分层约定放在 ``tests/test_sky_local_clock_degraded_note.py``。
 
 反证（见提交说明）：把 ``_FixedOffsetTZ`` 的 ``mbdsdr_degraded`` 标记去掉，
 本文件断言降级的用例必须变红。
@@ -24,14 +25,9 @@ import sys
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
-import pytest
-
-os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
-
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(os.path.dirname(HERE))
 sys.path.insert(0, ROOT)
-sys.path.insert(0, os.path.join(ROOT, "desktop"))
 
 from mbdsdr_ai import time_format as tf  # noqa: E402
 
@@ -144,29 +140,14 @@ class TestCallersCanSeeDegradation:
         assert disp["tz_degraded"] is True
         assert disp["tz_state"] == tf.TZ_STATE_FIXED_OFFSET
 
-    def test_sky_status_card_local_clock_shows_note(self, monkeypatch):
-        pytest.importorskip("PySide6")
-        from PySide6.QtWidgets import QApplication
-
-        QApplication.instance() or QApplication(sys.argv)
-        import rf_sky_view as rsv
-
-        when = datetime(2026, 7, 15, 12, 0, tzinfo=UTC)
-
-        _system_tz_with_rules(monkeypatch)
-        normal = rsv.format_local_time(when)
-        assert "固定偏移" not in normal
-
-        _system_tz_unavailable(monkeypatch)
-        degraded = rsv.format_local_time(when)
-        assert "固定偏移" in degraded
-        assert "不随夏令时调整" in degraded
-
     def test_local_time_input_dialog_consults_note(self):
-        """时间机器输入框的说明行必须接降级说明（源级钉住，免开 GUI）。"""
-        import inspect
+        """时间机器输入框的说明行必须接降级说明（源级钉住，免开 GUI）。
 
-        import time_machine
-
-        src = inspect.getsource(time_machine)
+        ``mbdsdr_ai`` 是纯逻辑层，不得 import Qt/desktop（分层守卫
+        ``tests/test_import_direction_contract.py``），所以这里读源文件，
+        而不是 import 对话框模块。
+        """
+        path = os.path.join(ROOT, "desktop", "time_machine.py")
+        with open(path, "r", encoding="utf-8") as fh:
+            src = fh.read()
         assert "local_time_note(" in src

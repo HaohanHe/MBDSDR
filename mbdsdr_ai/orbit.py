@@ -170,9 +170,9 @@ _FETCH_HARD_DEADLINE_S = 20.0    # 含 DNS 的墙钟硬截止
 
 # 禁网判定是通用策略，定义在叶子 net_policy；这里直接用公开名。
 try:  # 包内正常路径
-    from .net_policy import network_disabled
+    from .net_policy import network_allowed, network_disabled
 except ImportError:  # 脚本 / 直接运行时（mbdsdr_ai 目录已在 sys.path）
-    from net_policy import network_disabled
+    from net_policy import network_allowed, network_disabled
 
 
 def _bounded_urlopen(req, timeout_s: float, hard_deadline_s: float):
@@ -333,6 +333,7 @@ def _get_fetcher():
             cache_dir_provider=lambda: tle_cache_dir(),
             memory_provider=lambda: _TLE_CACHE,
             offline_provider=network_disabled,
+            network_allowed_provider=network_allowed,
             clock=time.time,
             error_cls=TLEUnavailableError,
             source="celestrak",
@@ -353,19 +354,24 @@ def refresh_tle_round(entries, reason: str = "startup",
     return _get_fetcher().refresh_round(entries, reason=reason, now=now)
 
 
-def fetch_tle(catnr: int, max_age_hours: float = 24.0) -> Tuple[str, str]:
+def fetch_tle(catnr: int, max_age_hours: float = 24.0,
+              allow_network: Optional[bool] = None) -> Tuple[str, str]:
     """按 CATNR 从 celestrak 拉真实 TLE，内存+磁盘缓存。失败抛异常。
 
-    离线（MBDSDR_OFFLINE）或下载失败时：仅认缓存，无可用缓存即抛
-    TLEUnavailableError——绝不假造 TLE、绝不无限阻塞。刷新门槛、失败
-    退避与限速由 :mod:`mbdsdr_ai.tle_fetch` 统一执行。
+    离线优先：只有显式开启（``MBDSDR_ALLOW_NETWORK=1`` 或本次
+    ``allow_network=True``）才会联网；``MBDSDR_OFFLINE`` 始终优先。
+    其余情况只认缓存，无可用缓存即抛 TLEUnavailableError——绝不假造
+    TLE、绝不无限阻塞。刷新门槛、失败退避与限速由
+    :mod:`mbdsdr_ai.tle_fetch` 统一执行。
     """
-    rec = _get_fetcher().fetch_record(catnr, max_age_hours=max_age_hours)
+    rec = _get_fetcher().fetch_record(catnr, max_age_hours=max_age_hours,
+                                      allow_network=allow_network)
     return rec["line1"], rec["line2"]
 
 
 def fetch_tle_record(catnr: int, max_age_hours: float = 24.0,
-                     now: Optional[float] = None) -> Dict[str, Any]:
+                     now: Optional[float] = None,
+                     allow_network: Optional[bool] = None) -> Dict[str, Any]:
     """按 CATNR 取 TLE 并附带「是否刷新成功」的诚实记录（不静默）。
 
     与 :func:`fetch_tle` 的区别：取新数据失败时**保留旧缓存值**并在记录里
@@ -375,13 +381,21 @@ def fetch_tle_record(catnr: int, max_age_hours: float = 24.0,
     返回::
 
         {"catnr", "name"(line0 对象名), "line1", "line2", "source",
-         "fetched_at", "refresh_status", "refresh_error", "cache_path"}
+         "fetched_at", "fetched_utc", "refresh_status", "refresh_error",
+         "cache_path", "epoch_utc", "age_days", "cache_age_days",
+         "stale", "stale_threshold_days", "upstream_source", "provenance"}
 
     ``refresh_status``: ``memory`` / ``cache``（缓存未过期）/ ``network``
-    （本次联网成功）/ ``not_updated``（联网失败或离线，沿用旧值）。
+    （本次联网成功）/ ``not_updated``（联网失败、离线或未显式允许联网，
+    沿用旧值）。``network_used`` 如实标注本次是否真的发起了网络请求。
+
+    TLE 来历四要素（``upstream_source`` / ``epoch_utc`` / ``fetched_utc`` /
+    ``age_days``）由 :func:`mbdsdr_ai.tle_fetch.tle_provenance` 统一计算；
+    ``stale`` 只表示「按刷新门槛该重拉了」，不是 ``tle_integrity`` 的
+    可用性档位。
     """
     return _get_fetcher().fetch_record(catnr, max_age_hours=max_age_hours,
-                                       now=now)
+                                       now=now, allow_network=allow_network)
 
 
 @dataclass(frozen=True)

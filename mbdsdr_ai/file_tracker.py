@@ -319,6 +319,12 @@ class FileChangeTracker:
         # 就复用已解析的 JSON，省掉每个实例的 open + json.load。签名带
         # mtime_ns/size，新增或改写记录会让下一个实例立刻重读（语义不变）。
         from .history_snapshot import load_json_files
+
+        def _warn_bad_record(path: str, exc: BaseException) -> None:
+            # 解析阶段的坏记录由快照层跳过；这里必须补上可见告警，
+            # 否则损坏记录会无声消失（审计链断掉一截）。
+            print(f"警告: 变更记录加载失败，已跳过 {path}: {exc}")
+
         paths = []
         for date_dir in os.listdir(self.storage_dir):
             full_dir = os.path.join(self.storage_dir, date_dir)
@@ -327,7 +333,7 @@ class FileChangeTracker:
             for filename in os.listdir(full_dir):
                 if filename.endswith('.json'):
                     paths.append(os.path.join(full_dir, filename))
-        for path, data in load_json_files(paths):
+        for path, data in load_json_files(paths, on_error=_warn_bad_record):
             try:
                 change = FileChange(
                     change_id=data["change_id"],

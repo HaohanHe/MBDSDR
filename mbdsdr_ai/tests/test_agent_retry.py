@@ -222,3 +222,49 @@ class TestAgentRetryBehavior:
 
         assert call_count["n"] <= 2, "取消后不应继续重试"
         assert result.get("cancelled") or result.get("interrupted")
+
+
+# ── Task 40：只认结构化错误，不认中文关键字 ─────────────────────────
+
+def _run_one_tool(result_factory):
+    """用最小 agent 的 _exec_one_tool 跑一个返回指定结果的工具。"""
+    agent, _ = _make_minimal_agent(None, "")
+    calls = {"n": 0}
+
+    def handler(args):
+        calls["n"] += 1
+        return result_factory()
+
+    agent.tool_registry.register(
+        name="structured_tool", description="测试", parameters={
+            "type": "object", "properties": {}, "required": []},
+        handler=handler)
+    tc = {"id": "call_s", "type": "function",
+          "function": {"name": "structured_tool", "arguments": "{}"}}
+    with patch("time.sleep"):
+        result, _ = agent._exec_one_tool(tc, "call_s")
+    return calls["n"], result
+
+
+class TestStructuredRetryOnly:
+    def test_retryable_error_code_wins_over_chinese_text(self):
+        """error 是中文文案、但 error_code=device_busy → 仍重试。"""
+        n, result = _run_one_tool(lambda: ToolResult(
+            success=False, content="设备正忙，请稍后", error_code="device_busy",
+            error="设备正忙，请稍后"))
+        assert n == 3, f"应 1+2 次重试，实际 {n}"
+        assert result.success is False
+
+    def test_chinese_timeout_keyword_does_not_force_retry(self):
+        """error 文案含「超时/可重试」但码不可重试 → 不重试（无关键字匹配）。"""
+        n, _ = _run_one_tool(lambda: ToolResult(
+            success=False, content="超时了，可以重试", error_code="invalid_arguments",
+            error="超时了，可以重试"))
+        assert n == 1, "中文关键字不得触发重试"
+
+    def test_timeout_marker_is_retryable(self):
+        """没有 error_code 时，结构化 timed_out 标记仍按 tool_timeout 重试。"""
+        n, _ = _run_one_tool(lambda: ToolResult(
+            success=False, content="中文超时说明", error="中文超时说明",
+            timed_out=True))
+        assert n == 3

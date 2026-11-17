@@ -15,6 +15,26 @@ SDR Backend：统一的 SDR 硬件抽象层。
 （显式未连接），绝不实例化模拟后端并报 success=True。FileIQBackend 读取用户
 明确选择的真实录制文件（.wav/.cf32/.iq），属合法离线回放源，保留。
 
+双栈边界（与 :mod:`mbdsdr_ai.hal` 的分工）
+------------------------------------------
+* **产品接收（RX）走本模块**：连续采集、频谱/瀑布、解调、录制、设备占用
+  登记与热插拔恢复都在本模块统一实现，生命周期是长连接 + 环形缓冲。
+* **产品发射（TX）走 ``hal.HardwareManager``**：短促波形由 ``TxSession`` 在
+  ``tx_guard`` 授权上下文内写流；HAL 只负责「打开一台能发的设备 + 按授权
+  写流」，边界更窄，便于审计和 fail-closed。
+* 原因：接收链是长驻多线程数据面，发射链是一次性高风险动作。合并会把
+  「播放/录制/频谱」的线程与发射授权门缠在一起，也会让同一台设备被两个
+  生命周期同时打开。分开后每条链只有一种失败语义。
+* 本模块里 HackRF/PlutoSDR/USRP 的 ``write_tx`` 仅是驱动级直写能力，且同样
+  先过 ``tx_guard``；它不是产品发射入口，工具面一律走 ``hal``。
+* 两个栈必须同口径的字段：
+  - 设备身份：``driver``/``device_type`` 均为 ``soapy_<driver>``，序列号原样
+    保留；稳定身份键统一由 :func:`mbdsdr_ai.device_identity.device_identity_key`
+    生成（``driver|serial:<sn>``）。
+  - 采样率：单位 Hz，默认值取 :data:`mbdsdr_ai.sdr_status.DEFAULT_SAMPLE_RATE_HZ`
+    （2.4 MS/s），不接受 MHz 或「档位编号」。
+  - 增益：单位 dB（含小数，不是十分之一 dB），最终以设备接受/回读值为准。
+
 PlutoSDR 接入说明：
 - 首选 pylibiio（``pip install pylibiio``），USB/网络均走 ``iio.Context(uri)``；
   系统包等价物为 ``apt install libiio-dev python3-libiio``。
@@ -56,6 +76,10 @@ logger = logging.getLogger(__name__)
 from mbdsdr_ai.net_utils import parse_host_port  # noqa: E402
 
 from .error_catalog import user_message
+from .bounded_read import (
+    BoundedReader, DEFAULT_READ_TIMEOUT_S,
+    REASON_INFLIGHT, REASON_TIMEOUT,
+)
 
 from .device_identity import (
     IDENTITY_PROVISIONAL, IDENTITY_STABLE, device_identity_aliases,
@@ -248,8 +272,9 @@ class SDRBackend:
     """
 
     # 若某个后端在 __init__ 里没有显式设采样率（status.sample_rate_hz 仍为 None），
-    # connect() 时用 2.048M 兜底（1.024M 整数倍，便于 ADS-B/数字链路抽取）。
-    _FALLBACK_SAMPLE_RATE_HZ: float = 2_048_000.0
+    # connect() 时用项目统一默认值兜底（与 hal/desktop 同一常量，避免 2.048M
+    # 与 2.4M 两套「默认」在各入口各说各话）。
+    _FALLBACK_SAMPLE_RATE_HZ: float = float(DEFAULT_SAMPLE_RATE_HZ)
 
     def __init__(self, device: SDRDevice):
         self.device = device
@@ -1487,17 +1512,30 @@ class _ThreadedRingReader:
     """
 
     def __init__(self, read_fn, block_size: int = 8192,
-                 ring_size: int = 1_000_000, link_state_fn=None):
+                 ring_size: int = 1_000_000, link_state_fn=None,
+                 read_timeout_s: float = DEFAULT_READ_TIMEOUT_S):
         self._read_fn = read_fn
         self._block_size = int(block_size)
         self._ring_size = int(ring_size)
         #: 读失败退避阶梯要问「链路现在是什么状态」（见 reader_backoff_s）。
         #: None = 没人给状态，按「未断开」处理（不会升到 500ms）。
         self._link_state_fn = link_state_fn
+        #: 单次设备读的等待上限（秒）。驱动读本身没有 timeout 形参
+        #: （librtlsdr ``rtlsdr_read_sync`` 等），生产线程必须自己封顶，
+        #: 否则设备卡死时 stop()/disconnect() 也会被一起拖住。
+        self._read_timeout_s = float(read_timeout_s)
+        #: 有界读器在 start()/_produce_loop 时按当前 read_fn 懒建；
+        #: 同一轮生产只建一个，停止后由 stop() 关闭。
+        self._bounded: Optional[BoundedReader] = None
+        #: 设备读超时/在途 → True；成功拿到一次数据后清回 False。
+        self._stalled = False
+        self._last_read_reason: Optional[Dict[str, Any]] = None
         self._buf = np.zeros(self._ring_size, dtype=np.complex64)
         self._lock = threading.Lock()
         self._cond = threading.Condition(self._lock)
         self._stop = False
+        #: stop() 用它立刻叫醒退避等待，不必等 sleep 走完。
+        self._wake = threading.Event()
         self._thread: Optional[threading.Thread] = None
         self._write_idx = 0       # 下一个写入位置（0..R-1）
         self._produced = 0        # 已写入的绝对样点总数
@@ -1528,35 +1566,108 @@ class _ThreadedRingReader:
         if self._thread is not None and self._thread.is_alive():
             return
         self._stop = False
+        # 新一轮生产用新的有界读器：上一轮的 daemon 工作线程可能还卡在
+        # 驱动里（无法取消），不能把新请求排给它。
+        self._bounded = None
+        self._wake.clear()
         self._thread = threading.Thread(
             target=self._produce_loop, name="mbdsdr-ring-producer", daemon=True)
         self._thread.start()
 
     def _produce_loop(self):
         failures = 0
-        while not self._stop:
-            try:
-                chunk = self._read_fn(self._block_size)
-            except Exception as e:
-                if self._stop:
-                    break
-                failures += 1
-                logger.warning(f"环形缓冲生产者读设备失败: {e}")
-                self._sleep(reader_backoff_s(failures, self._link_state()))
-                continue
-            if chunk is None or len(chunk) == 0:
-                if self._stop:
-                    break
-                failures += 1
-                self._sleep(reader_backoff_s(failures, self._link_state()))
-                continue
-            # 任一次成功读立刻复位阶梯：设备回来了就不该继续按旧失败计数等待。
-            failures = 0
-            self._write(chunk)
+        reader = self._bounded
+        if reader is None:
+            reader = BoundedReader(
+                self._read_fn, self._read_timeout_s,
+                name="mbdsdr-ring-bounded-read")
+            self._bounded = reader
+        try:
+            while not self._stop:
+                try:
+                    chunk, code, message = reader.read(self._block_size)
+                except Exception as e:
+                    if self._stop:
+                        break
+                    failures += 1
+                    self._clear_stall()
+                    logger.warning(f"环形缓冲生产者读设备失败: {e}")
+                    self._sleep(reader_backoff_s(failures, self._link_state()))
+                    continue
+                if code:
+                    if self._stop:
+                        break
+                    # 设备读超时/上一次读仍在途：这是「后端读停顿」，
+                    # 记状态并退避，不忙等、也不再往驱动里堆新请求。
+                    failures += 1
+                    self._mark_stalled(code, message, failures)
+                    pause = reader_backoff_s(failures, self._link_state())
+                    if code == REASON_INFLIGHT:
+                        # 在途请求只能等它自己返回；退避至少一个读超时，
+                        # 避免每秒上百次空转。
+                        pause = max(pause, self._read_timeout_s)
+                    self._sleep(pause)
+                    continue
+                if chunk is None or len(chunk) == 0:
+                    if self._stop:
+                        break
+                    failures += 1
+                    self._clear_stall()
+                    self._sleep(reader_backoff_s(failures, self._link_state()))
+                    continue
+                # 任一次成功读立刻复位阶梯：设备回来了就不该继续按旧失败计数等待。
+                failures = 0
+                self._clear_stall()
+                self._write(chunk)
+        finally:
+            if self._bounded is reader:
+                reader.close()
+                self._bounded = None
+
+    def _mark_stalled(self, code: str, message: str, failures: int) -> None:
+        """记录「设备读没按时返回」。首次进入停顿只记一条 warning，不刷屏。"""
+        was_stalled = self._stalled
+        if code == REASON_TIMEOUT:
+            msg = message
+        else:
+            msg = (f"超时未收到样本（上一次读仍卡在驱动内未返回，"
+                   f"超过 {self._read_timeout_s:.1f}s）")
+        with self._lock:
+            self._stalled = True
+            self._last_read_reason = {
+                "code": code,
+                "message": msg,
+                "timeout_s": self._read_timeout_s,
+                "requested_samples": int(self._block_size),
+            }
+        if not was_stalled:
+            logger.warning(
+                "环形缓冲生产者读停顿: %s（连续 %d 次，%.1fs 内无样本）",
+                msg, failures, self._read_timeout_s)
+
+    def _clear_stall(self) -> None:
+        with self._lock:
+            self._stalled = False
+            self._last_read_reason = None
+
+    @property
+    def stalled(self) -> bool:
+        """生产线程是否处于「设备读超时/在途、没有新样本」的状态。"""
+        with self._lock:
+            return bool(self._stalled)
+
+    @property
+    def last_read_reason(self) -> Optional[Dict[str, Any]]:
+        """最近一次读停顿的结构化原因；正常或非超时失败时为 None。"""
+        with self._lock:
+            return dict(self._last_read_reason) if self._last_read_reason else None
 
     def _sleep(self, seconds: float) -> None:
-        """退避等待（单测替换点：驱动测试时记录请求值而不真等）。"""
-        time.sleep(seconds)
+        """退避等待（单测替换点：驱动测试时记录请求值而不真等）。
+
+        用 stop 事件等待：关闭时立刻醒来，不会把 close/join 拖满整个退避。
+        """
+        self._wake.wait(seconds)
 
     def _link_state(self) -> str:
         """当前链路状态；拿不到时按「未断开」处理（不升级到 500ms 档）。"""
@@ -1639,9 +1750,20 @@ class _ThreadedRingReader:
         return int(self._ring_size)
 
     def stop(self):
+        """停止生产：先置停止事件，再有界 join（≈2 s），绝不无限等待。
+
+        驱动里的阻塞读没有可用的取消手段，join 超时是**预期分支**：
+        线程仍是 daemon，引用保留给下一次 stop()/调用方收尸，不打无限等待。
+        """
         self._stop = True
+        self._wake.set()
         with self._cond:
             self._cond.notify_all()
+        if self._bounded is not None:
+            try:
+                self._bounded.close()
+            except Exception:
+                pass
         if self._thread is not None:
             self._thread.join(timeout=2.0)
             # join 超时 ≠ 线程已退出：保留引用，下一次 stop()/调用方还能 join
@@ -1649,6 +1771,16 @@ class _ThreadedRingReader:
             # 生产者（start() 只在 _thread 为 None 时新建）。
             if not self._thread.is_alive():
                 self._thread = None
+            else:
+                logger.warning(
+                    "环形缓冲生产者线程在 2.0s 内未退出（设备读仍阻塞），"
+                    "保留 daemon 线程，不无限等待")
+        # 停顿状态随停止一起清掉：下一次 connect 是新会话。
+        self._clear_stall()
+
+    def close(self):
+        """``stop()`` 的别名（与后端/设备的 close 语义一致）。"""
+        self.stop()
 
 
 class RTLSDRBackend(SDRBackend):
@@ -1833,6 +1965,13 @@ class RTLSDRBackend(SDRBackend):
         # main.cpp:526-539 worker()/asyncHandler() —— 生产者线程持续读设备写环形缓冲，
         # 消费者按帧取数。connect() 成功后创建并 start。
         self._ring_reader: Optional["_ThreadedRingReader"] = None
+        # 环形缓冲未启动时的同步兜底读：pyrtlsdr 的 read_bytes/read_samples 没有
+        # timeout 形参，用有界读避免设备卡死时把调用方挂住（见 bounded_read）。
+        self._direct_reader = None
+        #: 最近一次**兜底同步读**没拿到数据时的结构化原因（成功读后清空）。
+        #: 环缓冲生产线程的超时原因由 ``_ring_reader.last_read_reason`` 提供，
+        #: 对外统一经 :attr:`last_read_reason` 属性读取（见下）。
+        self._direct_read_reason: Optional[Dict[str, Any]] = None
         # 来源: librtlsdr src/librtlsdr.c:959-969 —— 真实离散增益表在
         # mbdsdr_ai/rtlsdr_params.py，连上探测到调谐器型号后填充。
         self._gain_table_db: list = []
@@ -2148,7 +2287,8 @@ class RTLSDRBackend(SDRBackend):
             self._tuner_faulted = False
             self.status.last_data_age_s = None
             self._start_time = time.time()
-            # 兜底：若子类未显式设采样率，用 2.048M 兜底（见 SDRBackend._FALLBACK_SAMPLE_RATE_HZ）
+            # 兜底：若子类未显式设采样率，用项目统一默认值兜底
+            # （见 SDRBackend._FALLBACK_SAMPLE_RATE_HZ）
             if self.status.sample_rate_hz is None:
                 self.status.sample_rate_hz = self._FALLBACK_SAMPLE_RATE_HZ
 
@@ -2377,6 +2517,14 @@ class RTLSDRBackend(SDRBackend):
             except Exception:
                 pass
             self._ring_reader = None
+        # 有界兜底读的常驻工作线程：断链时让它处理完在途请求后自行退出；
+        # 下一次 connect 重建，避免旧句柄卡死的读拖住新会话。
+        if self._direct_reader is not None:
+            try:
+                self._direct_reader.close()
+            except Exception:
+                pass
+            self._direct_reader = None
         if self._sdr:
             try:
                 self._sdr.close()
@@ -2821,6 +2969,25 @@ class RTLSDRBackend(SDRBackend):
         """
         return bool(self._offset_tuning)
 
+    @property
+    def stalled(self) -> bool:
+        """环缓冲生产线程是否卡在「设备读超时、无新样本」。
+
+        只有环缓冲路径会置位；未启动环缓冲（兜底同步读）时为 False，
+        此时超时原因看 :attr:`last_read_reason`。
+        """
+        rr = getattr(self, "_ring_reader", None)
+        return bool(getattr(rr, "stalled", False)) if rr is not None else False
+
+    @property
+    def last_read_reason(self) -> Optional[Dict[str, Any]]:
+        """最近一次读停顿的结构化原因（环缓冲优先，其次兜底同步读）。"""
+        rr = getattr(self, "_ring_reader", None)
+        ring_reason = getattr(rr, "last_read_reason", None) if rr is not None else None
+        if ring_reason:
+            return dict(ring_reason)
+        return getattr(self, "_direct_read_reason", None)
+
     def read_samples(self, num_samples: int) -> Optional[np.ndarray]:
         if not self.status.connected or not self._sdr:
             return None
@@ -2835,14 +3002,33 @@ class RTLSDRBackend(SDRBackend):
                 return None
             self._samples_read += len(samples)
             return samples
-        # 兜底：环形缓冲未启动时直接同步读（保持原行为）
+        # 兜底：环形缓冲未启动时直接同步读（保持原行为，但有界）
+        # pyrtlsdr 的 read_samples 内部走 rtlsdr_read_sync，没有 timeout 形参：
+        # 真机实测设备调谐后 read_bytes(16384) 12 秒无返回。用 BoundedReader
+        # 等待上限，超时返回 None + 结构化原因，绝不让调用方无限阻塞。
         try:
-            samples = self._sdr.read_samples(num_samples)
-            self._samples_read += num_samples
-            return samples
+            if self._direct_reader is None:
+                self._direct_reader = BoundedReader(
+                    lambda n: self._sdr.read_samples(n),
+                    DEFAULT_READ_TIMEOUT_S,
+                    name="mbdsdr-rtl-direct-read",
+                )
+            samples, code, message = self._direct_reader.read(num_samples)
         except Exception:
             # USB 拔出或设备错误，降级返回 None
             return None
+        if samples is None:
+            self._direct_read_reason = {
+                "code": code,
+                "message": message,
+                "device": self.device.name,
+                "timeout_s": DEFAULT_READ_TIMEOUT_S,
+                "requested_samples": int(num_samples),
+            }
+            return None
+        self._direct_read_reason = None
+        self._samples_read += len(samples)
+        return samples
 
 
 class AISDRMiniBackend(SDRBackend):

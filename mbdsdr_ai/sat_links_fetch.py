@@ -93,6 +93,7 @@ DEFAULT_TX_URL = (DEFAULT_SOURCE_URL
 DEFAULT_FRESH_HOURS = 24.0 * 7.0      # 发射机库变化慢，7 天算新鲜
 DEFAULT_TIMEOUT_S = 15.0
 DEFAULT_HARD_DEADLINE_S = 20.0
+DEFAULT_LOCK_DEADLINE_S = 10.0        # 打开/抢占跨进程缓存锁的总时限
 MATCH_TOL_HZ = 5000.0                 # 人工频点与机器边界的匹配容差
 CACHE_FILENAME = "sat_links_machine.json"
 OFFLINE_ENV = "MBDSDR_OFFLINE"
@@ -448,28 +449,56 @@ def _write_cache(payload: Dict[str, Any], path: str) -> Tuple[bool, str]:
 class _CacheLock:
     """跨进程缓存锁：只罩住「重读 + 合并 + 写盘」，不罩网络请求。
 
-    拿不到锁不阻断刷新（结果里 ``lock_acquired`` 如实为 False），
-    但写盘仍走原子替换，最坏是后写者覆盖，不会写出半个 JSON。
+    打开 ``.lock`` 文件与抢锁走同一条重试时间线（到 ``deadline_s`` 为止）：
+    Windows 上杀软/并发创建会让 ``open`` 瞬时抛 ``PermissionError(13)``，
+    一次失败就放弃会把本来可用的锁判死。最终仍拿不到锁则如实返回 False，
+    ``last_error`` 保留最后一次异常文本供上层上报——调用方必须 fail-closed
+    （本轮不写盘），不得静默降级成无锁直写。
     """
 
-    def __init__(self, path: Optional[str], deadline_s: float = 10.0):
+    def __init__(self, path: Optional[str],
+                 deadline_s: float = DEFAULT_LOCK_DEADLINE_S):
         self.path = f"{path}.lock" if path else None
         self.deadline_s = deadline_s
+        self.last_error = ""
         self._fh = None
 
+    def _open_file(self, end: float):
+        """打开（必要时创建）锁文件；共享冲突按 deadline 重试。"""
+        while True:
+            try:
+                fh = open(self.path, "a+b")
+                try:
+                    if fh.seek(0, os.SEEK_END) == 0:
+                        fh.write(b"\0")
+                        fh.flush()
+                except OSError:
+                    fh.close()
+                    raise
+                return fh
+            except OSError as e:
+                self.last_error = f"{type(e).__name__}: {e}"
+                if time.monotonic() >= end:
+                    logger.warning("卫星发射机缓存锁打不开（重试到 %.1fs）：%s",
+                                   self.deadline_s, self.last_error)
+                    return None
+                time.sleep(0.02)
+
     def acquire(self) -> bool:
+        self.last_error = ""
         if not self.path:
+            self.last_error = "无缓存路径"
             return False
+        end = time.monotonic() + max(0.0, float(self.deadline_s))
         try:
             os.makedirs(os.path.dirname(self.path), exist_ok=True)
-            fh = open(self.path, "a+b")
-            if fh.seek(0, os.SEEK_END) == 0:
-                fh.write(b"\0")
-                fh.flush()
         except OSError as e:
-            logger.warning("卫星发射机缓存锁打不开：%s", e)
+            self.last_error = f"{type(e).__name__}: {e}"
+            logger.warning("卫星发射机缓存锁目录不可用：%s", e)
             return False
-        end = time.monotonic() + self.deadline_s
+        fh = self._open_file(end)
+        if fh is None:
+            return False
         while True:
             try:
                 fh.seek(0)
@@ -478,12 +507,14 @@ class _CacheLock:
                 else:
                     fcntl.flock(fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
                 self._fh = fh
+                self.last_error = ""
                 return True
-            except OSError:
+            except OSError as e:
+                self.last_error = f"{type(e).__name__}: {e}"
                 if time.monotonic() >= end:
                     fh.close()
-                    logger.warning("卫星发射机缓存锁超时（%.0fs）",
-                                   self.deadline_s)
+                    logger.warning("卫星发射机缓存锁超时（%.1fs）：%s",
+                                   self.deadline_s, self.last_error)
                     return False
                 time.sleep(0.05)
 
@@ -508,8 +539,13 @@ def refresh(targets: Iterable[Any],
             opener: Optional[Callable[[str, float, float], Any]] = None,
             now: Optional[float] = None,
             offline: Optional[bool] = None,
-            fresh_hours: float = DEFAULT_FRESH_HOURS) -> Dict[str, Any]:
-    """拉取目标星的发射机并写盘；失败分类、保留旧缓存、绝不静默清空。"""
+            fresh_hours: float = DEFAULT_FRESH_HOURS,
+            lock_deadline_s: float = DEFAULT_LOCK_DEADLINE_S) -> Dict[str, Any]:
+    """拉取目标星的发射机并写盘；失败分类、保留旧缓存、绝不静默清空。
+
+    ``lock_deadline_s`` 只缩短「打开/抢占跨进程缓存锁」的等待上限（测试用），
+    不改变公开默认语义；拿不到锁时本轮 fail-closed 不写盘。
+    """
     del fresh_hours  # 由状态展示层使用；刷新本身不做年龄门槛
     ref = _now(now)
     target_path = path or cache_path()
@@ -586,25 +622,38 @@ def refresh(targets: Iterable[Any],
         return result
 
     # 只锁「重读 + 合并 + 写盘」：网络请求已经做完，锁内不留 I/O 等待。
-    lock = _CacheLock(target_path)
+    lock = _CacheLock(target_path, deadline_s=lock_deadline_s)
     acquired = lock.acquire()
     result["lock_acquired"] = acquired
+    if not acquired:
+        # fail-closed：无锁直写会用「只有本轮目标」的 satellites 覆盖并发
+        # 进程刚写的星；宁可本轮不写盘，让旧缓存原样保留。
+        reason = lock.last_error or "未知原因"
+        result["satellites"] = satellites
+        result["failures"] = failures
+        result["written"] = False
+        result["state"] = "write_failed"
+        result["detail"] = (f"跨进程缓存锁不可用（{reason}），"
+                            "为避免覆盖并发写入，本轮不写盘；旧缓存保留"
+                            + (f"，另有 {len(failures)} 颗拉取失败"
+                               if failures else ""))
+        logger.warning("卫星发射机库刷新未写盘：%s", result["detail"])
+        return result
     try:
-        if acquired:
-            clear_cache_memo()
-            current, _ = load_cache(target_path)
-            current_sats = dict(((current or {}).get("satellites")) or {})
-            target_keys = {str(e["norad_cat_id"]) for e in todo}
-            # 失败的星：优先采用临界区内较新的旧记录，只把失败原因挂上去。
-            for norad_s, failure in failures.items():
-                rec = current_sats.get(norad_s)
-                if isinstance(rec, dict):
-                    satellites[norad_s] = dict(
-                        rec, last_refresh_failure=dict(failure))
-            # 本轮没碰的星：以临界区内的当前缓存为准，避免覆盖并发写入。
-            for key, rec in current_sats.items():
-                if key not in target_keys:
-                    satellites.setdefault(key, rec)
+        clear_cache_memo()
+        current, _ = load_cache(target_path)
+        current_sats = dict(((current or {}).get("satellites")) or {})
+        target_keys = {str(e["norad_cat_id"]) for e in todo}
+        # 失败的星：优先采用临界区内较新的旧记录，只把失败原因挂上去。
+        for norad_s, failure in failures.items():
+            rec = current_sats.get(norad_s)
+            if isinstance(rec, dict):
+                satellites[norad_s] = dict(
+                    rec, last_refresh_failure=dict(failure))
+        # 本轮没碰的星：以临界区内的当前缓存为准，避免覆盖并发写入。
+        for key, rec in current_sats.items():
+            if key not in target_keys:
+                satellites.setdefault(key, rec)
         result["satellites"] = satellites
         result["failures"] = failures
         payload = {

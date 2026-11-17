@@ -1,0 +1,228 @@
+{
+  "id": "russian_siberian",
+  "meta": {
+    "schema": "mbdsdr.sky_culture.v1",
+    "id": "russian_siberian",
+    "display_name": "Russian (Siberian)",
+    "native_name": "",
+    "region": "Northern Asia",
+    "classification": [
+      "ethnographic"
+    ],
+    "source": "Stellarium skyculture russian_siberian",
+    "source_url": "https://github.com/Stellarium/stellarium/tree/master/skycultures/russian_siberian",
+    "source_license": "CC BY-SA 4.0",
+    "source_license_url": "https://creativecommons.org/licenses/by-sa/4.0/",
+    "attribution": "Stellarium sky culture 'russian_siberian'; authors: Alexander Wolf (CC BY-SA 4.0). Converted to HIP line segments only; no artwork or description images were copied.",
+    "source_file": "reference/stellarium/skycultures/russian_siberian/index.json",
+    "source_file_sha256": "4c72f8c366e13cfab18e57090ce8851aacf6aef50c362525cd3b2eb45e27a461",
+    "description_file": "reference/stellarium/skycultures/russian_siberian/description.md",
+    "description_file_sha256": "803caa4856468705908f1d678dbebdf6bcef844a4ce9218e9caa7cc865f3a0cf",
+    "conversion_scope": "Only constellations[].lines, id and common_name (plus optional common_names star labels) are converted; illustrations, artwork and description text are not copied.",
+    "names_scope": "Explicit common_names labels take precedence; stars without an explicit label inherit the constellation/asterism name they belong to.",
+    "group_count": 3,
+    "edge_count": 19,
+    "name_count": 21,
+    "unresolved_hip_count": 0,
+    "unresolved_hips": [],
+    "unresolved_token_count": 0,
+    "unresolved_tokens": [],
+    "generated_utc": "2026-11-17T17:00:44Z",
+    "data_sha256": "edc063f58997b23c2ba8153a42e7fa333d5dbc66b81e8f91023d16025d804a96"
+  },
+  "groups": [
+    {
+      "group_id": "CON russian_siberian Elk",
+      "names": {
+        "en": "Elk",
+        "native": "Лось",
+        "pronounce": "Los’",
+        "ipa": "ɫ̪o̞s̪ʲ"
+      },
+      "lines": [
+        [
+          67301,
+          65378,
+          62956,
+          59774,
+          58001,
+          53910,
+          54061,
+          59774
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON russian_siberian Kic",
+      "names": {
+        "en": "Threshers",
+        "native": "Кичиги",
+        "pronounce": "Kichigi",
+        "ipa": "k̟ʲɪˈt̠̪͡ʲɕ̪iɡ̟ʲɪ"
+      },
+      "lines": [
+        [
+          26241,
+          26268,
+          26727,
+          26311,
+          25930
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON russian_siberian DNe",
+      "names": {
+        "en": "Duck Nest",
+        "native": "Утиное гнездо",
+        "pronounce": "Utinoye gnyezdo",
+        "ipa": "uˈt̪ʲin̪ə.jə ɡn̪ʲɪˈz̪d̪o̞"
+      },
+      "lines": [
+        [
+          17499,
+          17489,
+          17531,
+          17579,
+          17664,
+          17851,
+          17847,
+          17608,
+          17499
+        ]
+      ],
+      "kind": "constellation"
+    }
+  ],
+  "names": {
+    "11767": {
+      "en": "Golden stake",
+      "native": "Золотой кол",
+      "pronounce": "Zolotoy kol",
+      "ipa": "z̪əɫ̪ɐˈt̪o̞j ko̞ɫ̪"
+    },
+    "67301": {
+      "en": "Elk",
+      "native": "Лось",
+      "pronounce": "Los’",
+      "ipa": "ɫ̪o̞s̪ʲ"
+    },
+    "65378": {
+      "en": "Elk",
+      "native": "Лось",
+      "pronounce": "Los’",
+      "ipa": "ɫ̪o̞s̪ʲ"
+    },
+    "62956": {
+      "en": "Elk",
+      "native": "Лось",
+      "pronounce": "Los’",
+      "ipa": "ɫ̪o̞s̪ʲ"
+    },
+    "59774": {
+      "en": "Elk",
+      "native": "Лось",
+      "pronounce": "Los’",
+      "ipa": "ɫ̪o̞s̪ʲ"
+    },
+    "58001": {
+      "en": "Elk",
+      "native": "Лось",
+      "pronounce": "Los’",
+      "ipa": "ɫ̪o̞s̪ʲ"
+    },
+    "53910": {
+      "en": "Elk",
+      "native": "Лось",
+      "pronounce": "Los’",
+      "ipa": "ɫ̪o̞s̪ʲ"
+    },
+    "54061": {
+      "en": "Elk",
+      "native": "Лось",
+      "pronounce": "Los’",
+      "ipa": "ɫ̪o̞s̪ʲ"
+    },
+    "26241": {
+      "en": "Threshers",
+      "native": "Кичиги",
+      "pronounce": "Kichigi",
+      "ipa": "k̟ʲɪˈt̠̪͡ʲɕ̪iɡ̟ʲɪ"
+    },
+    "26268": {
+      "en": "Threshers",
+      "native": "Кичиги",
+      "pronounce": "Kichigi",
+      "ipa": "k̟ʲɪˈt̠̪͡ʲɕ̪iɡ̟ʲɪ"
+    },
+    "26727": {
+      "en": "Threshers",
+      "native": "Кичиги",
+      "pronounce": "Kichigi",
+      "ipa": "k̟ʲɪˈt̠̪͡ʲɕ̪iɡ̟ʲɪ"
+    },
+    "26311": {
+      "en": "Threshers",
+      "native": "Кичиги",
+      "pronounce": "Kichigi",
+      "ipa": "k̟ʲɪˈt̠̪͡ʲɕ̪iɡ̟ʲɪ"
+    },
+    "25930": {
+      "en": "Threshers",
+      "native": "Кичиги",
+      "pronounce": "Kichigi",
+      "ipa": "k̟ʲɪˈt̠̪͡ʲɕ̪iɡ̟ʲɪ"
+    },
+    "17499": {
+      "en": "Duck Nest",
+      "native": "Утиное гнездо",
+      "pronounce": "Utinoye gnyezdo",
+      "ipa": "uˈt̪ʲin̪ə.jə ɡn̪ʲɪˈz̪d̪o̞"
+    },
+    "17489": {
+      "en": "Duck Nest",
+      "native": "Утиное гнездо",
+      "pronounce": "Utinoye gnyezdo",
+      "ipa": "uˈt̪ʲin̪ə.jə ɡn̪ʲɪˈz̪d̪o̞"
+    },
+    "17531": {
+      "en": "Duck Nest",
+      "native": "Утиное гнездо",
+      "pronounce": "Utinoye gnyezdo",
+      "ipa": "uˈt̪ʲin̪ə.jə ɡn̪ʲɪˈz̪d̪o̞"
+    },
+    "17579": {
+      "en": "Duck Nest",
+      "native": "Утиное гнездо",
+      "pronounce": "Utinoye gnyezdo",
+      "ipa": "uˈt̪ʲin̪ə.jə ɡn̪ʲɪˈz̪d̪o̞"
+    },
+    "17664": {
+      "en": "Duck Nest",
+      "native": "Утиное гнездо",
+      "pronounce": "Utinoye gnyezdo",
+      "ipa": "uˈt̪ʲin̪ə.jə ɡn̪ʲɪˈz̪d̪o̞"
+    },
+    "17851": {
+      "en": "Duck Nest",
+      "native": "Утиное гнездо",
+      "pronounce": "Utinoye gnyezdo",
+      "ipa": "uˈt̪ʲin̪ə.jə ɡn̪ʲɪˈz̪d̪o̞"
+    },
+    "17847": {
+      "en": "Duck Nest",
+      "native": "Утиное гнездо",
+      "pronounce": "Utinoye gnyezdo",
+      "ipa": "uˈt̪ʲin̪ə.jə ɡn̪ʲɪˈz̪d̪o̞"
+    },
+    "17608": {
+      "en": "Duck Nest",
+      "native": "Утиное гнездо",
+      "pronounce": "Utinoye gnyezdo",
+      "ipa": "uˈt̪ʲin̪ə.jə ɡn̪ʲɪˈz̪d̪o̞"
+    }
+  },
+  "unresolved_hips": []
+}

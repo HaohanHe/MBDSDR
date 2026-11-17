@@ -24,6 +24,7 @@ sys.path.insert(0, ROOT)
 
 from mbdsdr_ai.serial_gnss import nmea_checksum  # noqa: E402
 from mbdsdr_ai.gnss_timestamps import (  # noqa: E402
+    TIME_SOURCE_PRECISION,
     nmea_log_to_utc_datetime,
     resolve_capture_datetime,
     to_sigmf_iso,
@@ -60,17 +61,61 @@ def test_gga_only_no_date_is_honest_none():
     assert nmea_log_to_utc_datetime([GGA]) is None
 
 
-def test_resolve_gnss_vs_system():
+def test_resolve_nmea_vs_none():
+    """无 PPS 的 NMEA 授时 → nmea；无授时源 → none（本机时钟，如实标注）。"""
     dt = nmea_log_to_utc_datetime([RMC])
     ct = resolve_capture_datetime(dt)
-    assert ct.time_source == "gnss"
+    assert ct.time_source == "nmea"
     assert ct.datetime_iso == "2026-10-02T07:25:45Z"
+    # 无 PPS 时精度必须保守：只说秒级，不得宣称亚微秒级
+    assert ct.precision == TIME_SOURCE_PRECISION["nmea"]
+    assert "秒级" in ct.precision
+    assert "亚微秒" not in ct.precision
 
     fixed = lambda: datetime(2026, 10, 2, 8, 0, 0, tzinfo=timezone.utc)
     ct2 = resolve_capture_datetime(None, clock=fixed)
-    assert ct2.time_source == "system"
+    assert ct2.time_source == "none"
     assert ct2.datetime_iso == "2026-10-02T08:00:00Z"
-    assert ct2.as_capture_fields()["mbdsdr:time_source"] == "system"
+    assert ct2.as_capture_fields()["mbdsdr:time_source"] == "none"
+    assert ct2.as_capture_fields()["mbdsdr:time_precision"] == ct2.precision
+
+
+def test_resolve_pps_precision():
+    """有 PPS 才能真正宣称亚微秒级；自动升级与显式 pps 都要生效。"""
+    dt = nmea_log_to_utc_datetime([RMC, ZDA])
+    auto = resolve_capture_datetime(dt, has_pps=True)
+    assert auto.time_source == "pps"
+    assert auto.precision == TIME_SOURCE_PRECISION["pps"]
+    assert "亚微秒" in auto.precision
+
+    explicit = resolve_capture_datetime(dt, time_source="pps")
+    assert explicit.time_source == "pps"
+
+    # 声称 pps 却没给授时时刻：不得拿本机时钟冒充 → unknown
+    fixed = lambda: datetime(2026, 10, 2, 8, 0, 0, tzinfo=timezone.utc)
+    no_dt = resolve_capture_datetime(None, clock=fixed, time_source="pps")
+    assert no_dt.time_source == "unknown"
+
+
+def test_resolve_ntp_and_unknown():
+    """NTP 来源给毫秒级；未知来源按最保守口径。"""
+    fixed = lambda: datetime(2026, 10, 2, 8, 0, 0, tzinfo=timezone.utc)
+
+    ntp = resolve_capture_datetime(clock=fixed, time_source="ntp")
+    assert ntp.time_source == "ntp"
+    assert "毫秒" in ntp.precision
+
+    unknown = resolve_capture_datetime(
+        datetime(2026, 10, 2, 7, 25, 45, tzinfo=timezone.utc),
+        time_source="unknown")
+    assert unknown.time_source == "unknown"
+    assert unknown.precision == TIME_SOURCE_PRECISION["unknown"]
+
+    # 旧口径归一：gnss → nmea，system → none
+    dt = nmea_log_to_utc_datetime([RMC])
+    assert resolve_capture_datetime(dt, time_source="gnss").time_source == "nmea"
+    assert resolve_capture_datetime(None, clock=fixed,
+                                    time_source="system").time_source == "none"
 
 
 def test_to_sigmf_iso_utc_z():

@@ -21,11 +21,15 @@ HDLC → CRC-16 → AX.25），失败原因码沿用流水线
 （`nothing_detected`/`truncated_frame`/`crc_failed`/`insufficient_samples`/
 `sample_rate_mismatch`）。
 
-证据等级（`evidence`）口径与 P2 真样本盘点一致：
-  real      = 有真实 OTA/真值对拍（LRPT/FT8/ADS-B）
-  partial   = 合成链自洽 + 部分字段真值，尚无 OTA 实绩
-  no_sample = 无任何真录样本，只按标准/协议数学性质钉扎
+证据等级（`evidence`）口径（超级 spec D2）：
+  ota_golden     = 有真实空口金标样本并有测试对拍（ADS-B / FT8）
+  synthetic_only = 只有仓内合成回环测试，无 OTA 实绩
+  no_sample      = 无任何样本，只按标准/协议数学性质钉扎
+每一行必须用 `evidence_source` 指到仓内真实存在的测试/夹具，由
+`tests/test_decode_evidence.py` 校验路径存在（不再另抄一份结论表）。
 `min_sample_condition` 写明「补到什么样一段真录才能破零」，供以后取数。
+`capability_matrix()` / `supported()` 同时导出 `supported`：`no_sample`
+恒为 False，避免能力表把「无样本」写成「已支持」。
 
 一致性守卫：`tests/test_digital_modes_capability.py` 校验表 ↔ handler 注册
 双向齐全、依赖模块可导入、实现文件存在，并与 `core.controller` 的解码器
@@ -77,11 +81,16 @@ STATUS_EMPTY = "empty"
 _SIGNAL_RMS_FLOOR = 1e-3
 
 # ---- 证据等级（真实度）--------------------------------------------------
-EVIDENCE_REAL = "real"            # 真录/真值对拍
-EVIDENCE_PARTIAL = "partial"      # 合成链自洽，无 OTA 实绩
-EVIDENCE_NO_SAMPLE = "no_sample"  # 无真样本，仅协议数学性质
+EVIDENCE_OTA_GOLDEN = "ota_golden"          # 真实空口金标样本 + 测试对拍
+EVIDENCE_SYNTHETIC_ONLY = "synthetic_only"  # 仅仓内合成回环测试
+EVIDENCE_NO_SAMPLE = "no_sample"            # 无样本，仅协议数学性质
 
-EVIDENCE_LEVELS = (EVIDENCE_REAL, EVIDENCE_PARTIAL, EVIDENCE_NO_SAMPLE)
+EVIDENCE_LEVELS = (EVIDENCE_OTA_GOLDEN, EVIDENCE_SYNTHETIC_ONLY,
+                   EVIDENCE_NO_SAMPLE)
+
+# 旧字段名只做 import 兼容，值即新口径；不得再用 real/partial 字面量。
+EVIDENCE_REAL = EVIDENCE_OTA_GOLDEN
+EVIDENCE_PARTIAL = EVIDENCE_SYNTHETIC_ONLY
 
 
 @dataclass(frozen=True)
@@ -93,7 +102,7 @@ class DigitalModeCapability:
     input_formats: Tuple[str, ...]   # 接受的扩展名；("*",) 表示不设格式门
     output_kind: str          # messages / frames / image / text / note
     sample_rate_rule: str     # 采样率/带宽要求（人读）
-    evidence: str             # real / partial / no_sample
+    evidence: str             # ota_golden / synthetic_only / no_sample
     min_sample_condition: str # 最小采样条件（补真样本时按此取数）
     # 真实世界调制（协议依据）与 `.cf32/.cfile` 路由实际调用的解调入口：
     # modulation_kind 供机器校验（am/nfm/gmsk/ppm/qpsk/ssb_audio），
@@ -106,8 +115,11 @@ class DigitalModeCapability:
     #   external-truth    = 外部真值/标准原文/第三方实现输出；
     #   self-generated    = 仓内编码器或脚本产出；
     #   synthetic-loopback= 仓内编码→仓内解码自洽回环（无外部真值）。
-    # evidence=real 的行必须是 external-truth，由 tests/test_golden_provenance.py 守卫。
+    # evidence=ota_golden 的行必须是 external-truth，由 tests/test_golden_provenance.py 守卫。
     truth_source: str = "synthetic-loopback"
+    # 该证据在仓内的可溯源依据（相对仓库根）：测试文件 / 夹具 / 金标清单。
+    # 空元组 = 还没找到任何仓内依据，不得凭印象给证据等级。
+    evidence_source: Tuple[str, ...] = ()
     external_tools: Tuple[str, ...] = ()   # 可选外部增强，不虚构其解码结果
     # True = 格式校验由 handler 自己做（窄带入口有自己的 rejected 契约），
     # 路由层不再重复拦截，避免同一错误两套文案。
@@ -132,8 +144,13 @@ DIGITAL_MODE_CAPABILITIES: Dict[str, DigitalModeCapability] = {
         sample_rate_rule=("fs ≥ 2 MS/s；严格入口 decode_baseband 要求 1 MS/s "
                           "整数倍，路由走 decode_baseband_any_fs 带限重采样到 "
                           "8 MS/s 并回报 decode_fs_hz / resample_note"),
-        evidence=EVIDENCE_REAL,
+        evidence=EVIDENCE_OTA_GOLDEN,
         truth_source="external-truth",   # dump1090 官方样本逐帧对拍
+        evidence_source=(
+            "tests/test_adsb_dump1090_golden.py",
+            "tests/golden/dump1090_modes1_reference.txt",
+            "tests/fixtures/decode_pipeline/adsb_three_frames.cf32",
+        ),
         min_sample_condition=(
             "1090MHz 下行 .cf32，fs ≥ 2 MS/s（任意档由 any_fs 入口带限重采样），"
             "≥ 3 个干净 DF17 前导（CRC-24 通过与 dump1090 对拍；多帧扫描见 "
@@ -162,7 +179,12 @@ DIGITAL_MODE_CAPABILITIES: Dict[str, DigitalModeCapability] = {
             "实音频任意 fs（4-FSK 20.833 baud、105 符号/5.04s、四音间隔"
             "≈20.833Hz；解码前重采样到 12kHz，默认搜索中心 1500Hz）"
         ),
-        evidence=EVIDENCE_PARTIAL,
+        evidence=EVIDENCE_SYNTHETIC_ONLY,
+        evidence_source=(
+            "tests/test_capability_claims_live.py",
+            "tests/fixtures/sensitivity/ft4.cf32",
+            "mbdsdr_ai/tests/test_decoders_ft4_wspr.py",
+        ),
         min_sample_condition=(
             "SSB 解调后 12kHz PCM16 单声道 .wav，含完整 FT4 帧"
             "（105 符号 / 5.04s）；本实现**无 FT4 官方样例对拍**，"
@@ -182,8 +204,12 @@ DIGITAL_MODE_CAPABILITIES: Dict[str, DigitalModeCapability] = {
         modulation_kind="ssb_audio",
         modulation="8-FSK 音频音调（USB 发射；通用 IQ 入口未接线）",
         sample_rate_rule="实音频 12kHz 单声道（通用入口未接线，参数不生效）",
-        evidence=EVIDENCE_REAL,
+        evidence=EVIDENCE_OTA_GOLDEN,
         truth_source="external-truth",   # WSJT-X 官方样本 + 参考解码结果
+        evidence_source=(
+            "tests/test_ft8_wsjtx_golden.py",
+            "tests/test_ft8_cross_impl_fixture.py",
+        ),
         min_sample_condition=(
             "真录已在 test_ft8_* 中对拍；通用 WAV 入口未接线，需调用"
             "ft8_lite.decode_ft8_audio 或走专用工具"
@@ -205,7 +231,12 @@ DIGITAL_MODE_CAPABILITIES: Dict[str, DigitalModeCapability] = {
             "解码前重采样到 48kHz；.cf32：NFM 复基带 fs ≥ 16000Hz，解码前鉴频"
             "并重采样到 48kHz（40 样/bit）"
         ),
-        evidence=EVIDENCE_PARTIAL,
+        evidence=EVIDENCE_SYNTHETIC_ONLY,
+        evidence_source=(
+            "tests/test_digital_modes_capability.py",
+            "tests/test_decode_pipeline_e2e.py",
+            "tests/fixtures/decode_pipeline/aprs_two_frames.cf32",
+        ),
         min_sample_condition=(
             "现有证据仅为**合成验证**（仓内调制 2 帧、逐字节对拍），**无 OTA "
             "证据**；补真录条件：144.640/144.390/144.800MHz NFM 下行复基带 "
@@ -230,7 +261,12 @@ DIGITAL_MODE_CAPABILITIES: Dict[str, DigitalModeCapability] = {
         iq_demod="_demod_iq_to_audio",
         sample_rate_rule=("音频任意 fs（1200/2400 Hz AFSK 音调）；.cf32 走 FM "
                           "鉴频后按 NRZ 基带切片（fs ≥ 2×占用带宽）"),
-        evidence=EVIDENCE_PARTIAL,
+        evidence=EVIDENCE_SYNTHETIC_ONLY,
+        evidence_source=(
+            "tests/test_capability_claims_live.py",
+            "tests/fixtures/sensitivity/pocsag.wav",
+            "tests/test_pocsag_roundtrip.py",
+        ),
         min_sample_condition=(
             "137/153/466MHz NFM 下行 .cf32 ≥ 10s（fs ≥ 2×占用带宽），含 ≥ 2 条 "
             "POCSAG 批（1200bd、±4.5kHz 偏移、BCH(31,21) 可纠）；仓内已用真实 "
@@ -255,7 +291,12 @@ DIGITAL_MODE_CAPABILITIES: Dict[str, DigitalModeCapability] = {
         modulation="AM-MSK（VHF 1200 bd，mark 2400/space 1200 Hz）",
         iq_demod="_demod_am_to_audio",
         sample_rate_rule="音频任意 fs（内部 12.5kHz 走带）；.cf32 走 AM 包络检波",
-        evidence=EVIDENCE_PARTIAL,
+        evidence=EVIDENCE_SYNTHETIC_ONLY,
+        evidence_source=(
+            "tests/test_capability_claims_live.py",
+            "tests/fixtures/sensitivity/acars.wav",
+            "tests/test_acars_roundtrip.py",
+        ),
         min_sample_condition=(
             "131.55MHz AM 下行解调音频 ≥ 5s，含 ≥ 1 条 1200baud MSK ACARS"
             "报文且 CRC 通过"
@@ -281,7 +322,12 @@ DIGITAL_MODE_CAPABILITIES: Dict[str, DigitalModeCapability] = {
             "实音频 12kHz 单声道（1.4648 baud、四音间隔 1.464Hz、162 符号 / "
             "110.592s；内部下变频到 375Hz 网格）"
         ),
-        evidence=EVIDENCE_PARTIAL,
+        evidence=EVIDENCE_SYNTHETIC_ONLY,
+        evidence_source=(
+            "tests/test_capability_claims_live.py",
+            "tests/fixtures/sensitivity/wspr.cf32",
+            "mbdsdr_ai/tests/test_decoders_ft4_wspr.py",
+        ),
         min_sample_condition=(
             "USB 解调后 12kHz PCM16 .wav，含完整 110.592s WSPR 传输；"
             "本实现**未做 OTA/弱信号灵敏度验收**，不声明 dB 门限"
@@ -306,7 +352,12 @@ DIGITAL_MODE_CAPABILITIES: Dict[str, DigitalModeCapability] = {
         modulation="GMSK 9600 bd（BT=0.4，恒包络；差分相位解调）",
         iq_demod="ais_decode_iq",
         sample_rate_rule="fs 为 9600 整数倍且 ≥ 19200（GMSK BT=0.4、9600bd）",
-        evidence=EVIDENCE_NO_SAMPLE,
+        evidence=EVIDENCE_SYNTHETIC_ONLY,
+        evidence_source=(
+            "tests/test_capability_claims_live.py",
+            "tests/fixtures/decode_pipeline/ais_two_frames.cf32",
+            "tests/test_ais_decoder.py",
+        ),
         min_sample_condition=(
             "161.975/162.025MHz 信道化复基带 .cf32，fs=192000 或 96000，"
             "≥ 5s 且含 ≥ 3 条 FCS 通过的 AIS 报文（含 Type 1 位置）"
@@ -329,7 +380,12 @@ DIGITAL_MODE_CAPABILITIES: Dict[str, DigitalModeCapability] = {
         modulation_kind="ssb_audio",
         modulation="SITOR-B FSK 100 bd（±85 Hz 频移，接收端音频入口）",
         sample_rate_rule="音频任意 fs（100bd FSK，中心 1000Hz，±85Hz）",
-        evidence=EVIDENCE_NO_SAMPLE,
+        evidence=EVIDENCE_SYNTHETIC_ONLY,
+        evidence_source=(
+            "tests/test_capability_claims_live.py",
+            "tests/fixtures/sensitivity/navtex.wav",
+            "tests/test_navtex_decoder.py",
+        ),
         min_sample_condition=(
             "518/490kHz USB 解调后音频 ≥ 60s，含完整 ZCZC 帧与至少 3 行"
             "正文（SITOR-B 相位锁定成立）"
@@ -356,7 +412,11 @@ DIGITAL_MODE_CAPABILITIES: Dict[str, DigitalModeCapability] = {
             "fs ≥ 144000 且为 72k 符号率整数倍（LRPT QPSK），"
             "推荐 288000/576000"
         ),
-        evidence=EVIDENCE_PARTIAL,
+        evidence=EVIDENCE_SYNTHETIC_ONLY,
+        evidence_source=(
+            "tests/test_apt_meteor_roundtrip.py",
+            "tests/test_decode_router_honesty.py",
+        ),
         min_sample_condition=(
             "Meteor-M2 137.9MHz 下行 .cf32 ≥ 20s，Viterbi 可锁且 RS 全纠"
             "帧 ≥ 2（本仓 LRPT 真录链可作真值）"
@@ -369,6 +429,37 @@ DIGITAL_MODE_CAPABILITIES: Dict[str, DigitalModeCapability] = {
         # QPSK 每符号 2 bit → 1,290,240 符号 → 72k 符号率下 17.92s。
         min_duration_seconds=(36 * 35 * 2048) / 2 / 72000.0,
         min_duration_rule="一个完整 Forney 交织块（36×35×2048 bit）",
+    ),
+    "rtl433": DigitalModeCapability(
+        mode="rtl433",
+        impl="rtl433_decoder.py",
+        dependency="mbdsdr_ai.rtl433_decoder",
+        input_formats=(".cf32", ".cfile"),
+        output_kind="messages",
+        modulation_kind="ook",
+        modulation="OOK/PPM/PWM/Manchester（ISM 433.92MHz 传感器，包络检波）",
+        iq_demod="envelope_from_iq",
+        sample_rate_rule=(
+            "复基带 fs ≥ 250000（OOK 包络检波，默认 250000；"
+            "脉冲宽度为百微秒量级）"
+        ),
+        evidence=EVIDENCE_SYNTHETIC_ONLY,
+        truth_source="synthetic-loopback",
+        evidence_source=(
+            "tests/test_rtl433_roundtrip.py",
+        ),
+        min_sample_condition=(
+            "433.92MHz 下变频复基带 .cf32 ≥ 1s（fs ≥ 250kS/s），含 ≥ 1 个完整 "
+            "ISM 传感器帧；本仓现有证据仅为已知合法比特流/合成包络往返，"
+            "无 OTA 真录"
+        ),
+        failure_codes=(
+            ERR_UNSUPPORTED_FORMAT, ERR_INSUFFICIENT_SAMPLES, ERR_DECODE_ERROR,
+            ERR_NOTHING_DETECTED, ERR_SIGNAL_PRESENT_NO_FRAME,
+            ERR_MISSING_SAMPLE, ERR_MISSING_DEPENDENCY,
+        ),
+        min_duration_seconds=0.0,
+        min_duration_rule="handler 内部按脉冲/帧长自校验",
     ),
 }
 
@@ -717,6 +808,49 @@ def _route_meteor(ctx: _Ctx) -> Dict[str, Any]:
     return result
 
 
+def _route_rtl433(ctx: _Ctx) -> Dict[str, Any]:
+    """ISM 设备解码：OOK 包络 → 脉冲切片 → 逐协议解包（rtl_433 口径）。"""
+    from . import rtl433_decoder as R
+
+    result = ctx.result
+    if ctx.ext not in (".cf32", ".cfile"):
+        result["error"] = user_message(
+            "unsupported_format", mode="rtl433",
+            allowed=".cf32/.cfile 复基带（OOK 包络）", actual=ctx.ext)
+        result["error_code"] = ERR_UNSUPPORTED_FORMAT
+        return result
+
+    try:
+        import numpy as np
+        raw = np.fromfile(ctx.input_path, dtype=np.float32)
+        iq = raw[0::2] + 1j * raw[1::2]
+        envelope = R.envelope_from_iq(iq.tolist())
+        demod = R.PulseDemodulator(sample_rate=int(ctx.sample_rate))
+        pulses = demod.detect(envelope)
+        messages: List[Dict[str, Any]] = []
+        for desc in R.list_devices():
+            device_type = desc["device_type"]
+            try:
+                out = R.decode_pulses(pulses, device_type)
+            except Exception as exc:  # 单协议失败不拖垮其它协议
+                result.setdefault("protocol_errors", {})[device_type] = str(exc)
+                continue
+            if out:
+                messages.append({"device_type": device_type, **out})
+        result["messages"] = messages
+        result["num_messages"] = len(messages)
+        result["pulses"] = len(pulses)
+        result["note"] = (
+            "rtl_433 口径 ISM 解码：OOK 包络检波 → 脉冲/间隔切片 → "
+            f"逐协议校验；检出 {len(pulses)} 个脉冲，"
+            f"解出 {len(messages)} 条（证据为仓内比特流/合成包络往返，非 OTA）。"
+        )
+    except Exception as e:
+        result["error"] = f"rtl_433 解码失败: {e}"
+        result["error_code"] = ERR_DECODE_ERROR
+    return result
+
+
 DIGITAL_MODE_HANDLERS: Dict[str, Callable[[_Ctx], Dict[str, Any]]] = {
     "adsb": _route_adsb,
     "ft4": _route_ft4,
@@ -728,6 +862,7 @@ DIGITAL_MODE_HANDLERS: Dict[str, Callable[[_Ctx], Dict[str, Any]]] = {
     "ais": _route_ais,
     "navtex": _route_navtex,
     "meteor": _route_meteor,
+    "rtl433": _route_rtl433,
 }
 
 
@@ -735,7 +870,12 @@ DIGITAL_MODE_HANDLERS: Dict[str, Callable[[_Ctx], Dict[str, Any]]] = {
 # 能力表查询（文档 / UI / 测试共用）
 # =========================================================================
 def capability_matrix() -> List[Dict[str, Any]]:
-    """导出整张能力表（纯数据，供文档生成与一致性测试）。"""
+    """导出整张能力表（纯数据，供文档生成与一致性测试）。
+
+    `evidence` 是证据级别（ota_golden/synthetic_only/no_sample）；
+    `supported` 是「能否宣称已支持」的显式判断——`no_sample` 恒为 False，
+    既有调用方读 `supported` 不会把「无样本」误当「已支持」。
+    """
     rows = []
     for mode in sorted(DIGITAL_MODE_CAPABILITIES):
         cap = DIGITAL_MODE_CAPABILITIES[mode]
@@ -747,7 +887,9 @@ def capability_matrix() -> List[Dict[str, Any]]:
             "output_kind": cap.output_kind,
             "sample_rate_rule": cap.sample_rate_rule,
             "evidence": cap.evidence,
+            "supported": evidence_supported(cap.evidence),
             "truth_source": cap.truth_source,
+            "evidence_source": list(cap.evidence_source),
             "min_sample_condition": cap.min_sample_condition,
             "external_tools": list(cap.external_tools),
             "failure_codes": list(cap.failure_codes),
@@ -755,6 +897,11 @@ def capability_matrix() -> List[Dict[str, Any]]:
             "handler_registered": cap.mode in DIGITAL_MODE_HANDLERS,
         })
     return rows
+
+
+def evidence_supported(evidence: str) -> bool:
+    """`no_sample` 不得显示为「已支持」；其余两档有测试证据即可宣称支持。"""
+    return evidence != EVIDENCE_NO_SAMPLE
 
 
 def supported_modes() -> List[str]:
@@ -829,6 +976,7 @@ _DEFAULT_SAMPLE_RATE = {
     "ft4": 12000.0,
     "wspr": 12000.0,
     "navtex": 12000.0,
+    "rtl433": 250000.0,
 }
 
 

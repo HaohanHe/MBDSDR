@@ -52,6 +52,7 @@ import socket
 import time
 import urllib.error
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 
 from .error_catalog import (
@@ -61,19 +62,26 @@ from .error_catalog import (
     user_message,
 )
 from .time_format import iso_utc_z
+from .tle_epoch import parse_tle_epoch
 
 __all__ = [
     "DEFAULT_SOURCE",
     "SCHEDULED_INTERVAL_S",
     "GROUP_SCOPE_KEY",
     "FAILURE_LABELS",
+    "NO_TLE_TEXT",
     "FetchPolicy",
     "SourceHealth",
     "TleFetcher",
     "classify_failure",
     "failure_copy",
+    "tle_provenance",
     "tle_refresh_status_text",
 ]
+
+#: 无星历时的唯一口径文案：面板/状态/错误信封都复用它，不许各写一句
+#: 「今天没有过境」来冒充「算不出来」。
+NO_TLE_TEXT = "无 TLE，无法预报"
 
 # 群组拉取与单星拉取共用同一「源」限速/退避账本；群组本身没有 CATNR，
 # 用保留键参与对象级退避判定（不会与真实 NORAD 编号冲突）。
@@ -223,6 +231,59 @@ def tle_refresh_status_text(count: int,
             f"{copy['reason']}；建议：{copy['action']}")
 
 
+def tle_provenance(record: Dict[str, Any],
+                   now: Optional[float] = None,
+                   fresh_max_hours: float = 24.0,
+                   upstream: str = DEFAULT_SOURCE) -> Dict[str, Any]:
+    """从一条取数记录里算出 TLE 来历与陈旧度（纯函数，无 I/O）。
+
+    ``record`` 至少含 ``line1`` 与 （可选）``fetched_at`` / ``source``。
+    返回的**来源/历元/抓取时间/年龄**四项是同一份事实的三个不同时间：
+      * ``upstream_source``：上游（缺省 celestrak），与「本次从哪读到的」
+        （``cache_source``：network/memory/cache）分开，不许混为「来源」；
+      * ``epoch_utc``：TLE 行自带历元（轨道数据的时刻）；
+      * ``fetched_utc``：抓取/落盘时刻（缓存 mtime 或本次下载时刻）；
+      * ``age_days``：历元距今（天），``stale`` 按 ``fresh_max_hours`` 判定。
+
+    ``stale`` 是**刷新陈旧度**（该不该重新拉），不是 ``tle_integrity`` 的
+    可用性档位；两者门槛不同、用途不同，调用方不要拿它当「能否过境」。
+    """
+    rec = record if isinstance(record, dict) else {}
+    ref = time.time() if now is None else float(now)
+    line1 = str(rec.get("line1") or "")
+    epoch = parse_tle_epoch(line1)
+    fetched_at = rec.get("fetched_at")
+    if not isinstance(fetched_at, (int, float)):
+        fetched_at = None
+
+    age_days: Optional[float] = None
+    if epoch is not None:
+        age_days = (datetime.fromtimestamp(ref, tz=timezone.utc)
+                    - epoch).total_seconds() / 86400.0
+    cache_age_days: Optional[float] = None
+    if fetched_at is not None:
+        cache_age_days = (ref - float(fetched_at)) / 86400.0
+    threshold_days = float(fresh_max_hours) / 24.0
+
+    meta = {
+        "upstream_source": str(upstream),
+        "cache_source": str(rec.get("source") or ""),
+        "epoch_utc": (epoch.strftime("%Y-%m-%dT%H:%M:%SZ")
+                      if epoch is not None else None),
+        "fetched_at": fetched_at,
+        "fetched_utc": (iso_utc_z(float(fetched_at))
+                        if fetched_at is not None else None),
+        "age_days": None if age_days is None else round(age_days, 3),
+        "cache_age_days": (None if cache_age_days is None
+                           else round(cache_age_days, 3)),
+        "stale_threshold_days": round(threshold_days, 6),
+        "stale": bool(age_days is not None and age_days > threshold_days),
+    }
+    flat = {k: v for k, v in meta.items() if k != "cache_source"}
+    flat["provenance"] = meta
+    return flat
+
+
 @dataclass
 class SourceHealth:
     """单个 TLE 源的最近成功/失败、退避状态（全部真实，不造数）。"""
@@ -357,6 +418,7 @@ class TleFetcher:
                  cache_dir_provider: Callable[[], str],
                  memory_provider: Optional[Callable[[], Dict[str, Tuple[float, Tuple[str, str]]]]] = None,
                  offline_provider: Optional[Callable[[], bool]] = None,
+                 network_allowed_provider: Optional[Callable[[], bool]] = None,
                  policy: Optional[FetchPolicy] = None,
                  clock: Callable[[], float] = time.time,
                  sleep: Callable[[float], None] = time.sleep,
@@ -368,6 +430,10 @@ class TleFetcher:
         self._cache_dir = cache_dir_provider
         self._memory = memory_provider
         self._offline = offline_provider or (lambda: False)
+        # 直接构造（测试/嵌入方注入 opener）默认允许联网；生产组合根
+        # （orbit / TLEManager）传入 ``net_policy.network_allowed``，从而默认
+        # 离线优先——未显式开启 MBDSDR_ALLOW_NETWORK 时不发起任何请求。
+        self._allow_network = network_allowed_provider or (lambda: True)
         self.policy = policy or FetchPolicy()
         self._clock = clock
         self._sleep = sleep
@@ -508,15 +574,37 @@ class TleFetcher:
         self._sleep(wait)
         return now + wait
 
+    def _with_provenance(self, rec: Dict[str, Any], now: float) -> Dict[str, Any]:
+        """给任何一条返回记录补上「来源 / epoch / 抓取时间 / 陈旧天数」。
+
+        失败路径（``not_updated`` 沿用旧缓存）同样要带——旧根数同样有来历，
+        藏起来只会让用户以为这是刚拉到的实时轨道。
+        """
+        out = dict(rec)
+        out.update(tle_provenance(out, now=now,
+                                  fresh_max_hours=self.policy.fresh_max_hours,
+                                  upstream=self.source))
+        return out
+
     # ------------------------------------------------------------- 取数主链
     def fetch_record(self, catnr: int, max_age_hours: Optional[float] = None,
-                     now: Optional[float] = None) -> Dict[str, Any]:
-        """取一条 TLE 记录；始终写明来源、是否离线、失败原因与健康度。"""
+                     now: Optional[float] = None,
+                     allow_network: Optional[bool] = None) -> Dict[str, Any]:
+        """取一条 TLE 记录；始终写明来源、是否联网、失败原因与健康度。
+
+        ``allow_network`` 为本次调用的显式开关：``None`` 走注入的策略
+        （生产默认 ``net_policy.network_allowed``，即未设
+        ``MBDSDR_ALLOW_NETWORK`` 不联网）；``True`` 本次允许联网，
+        但 ``MBDSDR_OFFLINE`` 仍优先；``False`` 本次强制只读缓存。
+        """
         catnr = int(catnr)
         max_age = (self.policy.fresh_max_hours if max_age_hours is None
                    else float(max_age_hours))
         ref = self._clock() if now is None else float(now)
         offline = bool(self._offline())
+        permitted = (bool(self._allow_network()) if allow_network is None
+                     else bool(allow_network))
+        network_ok = permitted and not offline
         health = lambda: self.health.report(ref, self.policy, offline=offline)  # noqa: E731
 
         # 1) 内存缓存（未过期）
@@ -528,11 +616,14 @@ class TleFetcher:
                 # 不比对就会拿旧根数冒充最新值，最长可拖到 max_age（默认 24h）。
                 self._memory_set(catnr, cached["fetched_at"],
                                  cached["line1"], cached["line2"])
-                return dict(cached, source="cache", refresh_status="cache",
-                            refresh_error="", offline=offline,
-                            offline_label="离线·缓存" if offline else "",
-                            failure_kind="", failure_label="", health=health())
-            return {
+                return self._with_provenance(dict(
+                    cached, source="cache", refresh_status="cache",
+                    refresh_error="", offline=offline,
+                    offline_label="离线·缓存" if offline else "",
+                    failure_kind="", failure_label="",
+                    network_used=False, network_allowed=network_ok,
+                    health=health()), ref)
+            return self._with_provenance({
                 "catnr": catnr,
                 "name": cached["name"] if cached else "",
                 "line1": mem[1][0],
@@ -546,33 +637,56 @@ class TleFetcher:
                 "offline_label": "离线·缓存" if offline else "",
                 "failure_kind": "",
                 "failure_label": "",
+                "network_used": False,
+                "network_allowed": network_ok,
                 "health": health(),
-            }
+            }, ref)
 
         # 2) 磁盘缓存（未过期）
         disk = self._read_disk(catnr)
         if disk is not None and ref - disk["fetched_at"] < max_age * 3600.0:
             self._memory_set(catnr, disk["fetched_at"],
                              disk["line1"], disk["line2"])
-            return dict(disk, source="cache", refresh_status="cache",
-                        refresh_error="", offline=offline,
-                        offline_label="离线·缓存" if offline else "",
-                        failure_kind="", failure_label="", health=health())
+            return self._with_provenance(dict(
+                disk, source="cache", refresh_status="cache",
+                refresh_error="", offline=offline,
+                offline_label="离线·缓存" if offline else "",
+                failure_kind="", failure_label="",
+                network_used=False, network_allowed=network_ok,
+                health=health()), ref)
 
-        # 3) 离线：只用缓存，明示「离线·缓存」；无缓存诚实报错
-        if offline:
+        # 3) 离线 / 未显式允许联网：只用缓存，明示原因；无缓存诚实报错，
+        #    且**不发起任何网络请求**（因此也不会阻塞等待超时）。
+        if not network_ok:
             if disk is not None:
-                return dict(disk, source="cache", refresh_status="not_updated",
-                            refresh_error="离线模式（MBDSDR_OFFLINE），未联网刷新，沿用旧缓存",
-                            offline=True, offline_label="离线·缓存（未刷新）",
-                            failure_kind="offline", failure_label="离线",
-                            health=health())
+                if offline:
+                    why = "离线模式（MBDSDR_OFFLINE），未联网刷新，沿用旧缓存"
+                    label = "离线·缓存（未刷新）"
+                    kind, kind_label = "offline", "离线"
+                else:
+                    why = ("未显式开启联网刷新（MBDSDR_ALLOW_NETWORK），"
+                           "沿用旧缓存")
+                    label = "未联网·缓存（未刷新）"
+                    kind, kind_label = "network_not_allowed", "未允许联网"
+                return self._with_provenance(dict(
+                    disk, source="cache", refresh_status="not_updated",
+                    refresh_error=why,
+                    offline=offline, offline_label=label,
+                    failure_kind=kind, failure_label=kind_label,
+                    network_used=False, network_allowed=False,
+                    health=health()), ref)
+            reason = (
+                ("离线且无缓存 TLE：离线模式（MBDSDR_OFFLINE），"
+                 if offline else
+                 "离线且无缓存 TLE：未显式开启联网刷新（MBDSDR_ALLOW_NETWORK），")
+                + f"且无 CATNR {catnr} 的 TLE 缓存；未发起网络请求")
             _err = self._error_cls(
-                f"离线模式（MBDSDR_OFFLINE）且无 CATNR {catnr} 的 TLE 缓存；"
-                "拒绝编造轨道数据，也不以内置合成 TLE 冒充实时"
+                f"{NO_TLE_TEXT}：{reason}；拒绝编造轨道数据，"
+                "也不以内置合成 TLE 冒充实时"
             )
-            _err.failure = failure_copy(
-                "offline", "离线模式（MBDSDR_OFFLINE）且该编号无本地缓存")
+            _err.failure = failure_copy("offline", reason)
+            _err.network_used = False
+            _err.network_allowed = False
             raise _err
 
         # 4) 退避：不发起请求，不刷屏重试；最小间隔则排队等待
@@ -583,17 +697,21 @@ class TleFetcher:
             reason = (f"退避中（{decision['reason']}，还剩 "
                       f"{decision['retry_in_s']:.0f}s），不重试")
             if disk is not None:
-                return dict(disk, source="cache", refresh_status="not_updated",
-                            refresh_error=reason, offline=False,
-                            offline_label="", failure_kind=decision["reason"],
-                            failure_label=FAILURE_LABELS.get(
-                                self.health.last_error_kind or "", ""),
-                            health=health())
+                return self._with_provenance(dict(
+                    disk, source="cache", refresh_status="not_updated",
+                    refresh_error=reason, offline=False,
+                    offline_label="", failure_kind=decision["reason"],
+                    failure_label=FAILURE_LABELS.get(
+                        self.health.last_error_kind or "", ""),
+                    network_used=False, network_allowed=True,
+                    health=health()), ref)
             _err = self._error_cls(
-                f"无 CATNR {catnr} 的 TLE 缓存，且{reason}"
+                f"{NO_TLE_TEXT}：无 CATNR {catnr} 的 TLE 缓存，且{reason}"
             )
             _err.failure = failure_copy(
                 self.health.last_error_kind or "tle_unknown", reason)
+            _err.network_used = False
+            _err.network_allowed = True
             raise _err
 
         # 5) 联网取新（遵守最小间隔）
@@ -618,24 +736,30 @@ class TleFetcher:
                 is_offline = failure["kind"] == "network_unreachable"
                 label = ("离线·缓存（未刷新）" if is_offline
                          else "缓存回退（未刷新）")
-                return dict(disk, source="cache", refresh_status="not_updated",
-                            refresh_error=err, offline=is_offline,
-                            offline_label=label,
-                            failure_kind=failure["kind"],
-                            failure_label=failure["label"], health=health())
+                return self._with_provenance(dict(
+                    disk, source="cache", refresh_status="not_updated",
+                    refresh_error=err, offline=is_offline,
+                    offline_label=label,
+                    failure_kind=failure["kind"],
+                    failure_label=failure["label"],
+                    network_used=True, network_allowed=True,
+                    health=health()), ref)
             _err = self._error_cls(
-                f"获取 CATNR {catnr} 的 TLE 失败：{err}；且无缓存，拒绝编造"
+                f"{NO_TLE_TEXT}：获取 CATNR {catnr} 的 TLE 失败：{err}；"
+                "且无缓存，拒绝编造"
             )
             _err.failure = failure_copy(
                 failure["kind"], failure.get("detail", err),
                 failure.get("status"))
+            _err.network_used = True
+            _err.network_allowed = True
             raise _err
 
         name, line1, line2 = parsed
         self._record_success(ref)
         path = self._write_disk(catnr, name, line1, line2, ref)
         self._memory_set(catnr, ref, line1, line2)
-        return {
+        return self._with_provenance({
             "catnr": catnr, "name": name,
             "line1": line1, "line2": line2,
             "source": self.source, "fetched_at": ref,
@@ -643,30 +767,46 @@ class TleFetcher:
             "cache_path": path,
             "offline": False, "offline_label": "",
             "failure_kind": "", "failure_label": "",
+            "network_used": True, "network_allowed": True,
             "health": health(),
-        }
+        }, ref)
 
     # ------------------------------------------------------------- 群组取数
     def fetch_group(self, url: str,
-                    now: Optional[float] = None) -> Dict[str, Any]:
+                    now: Optional[float] = None,
+                    allow_network: Optional[bool] = None) -> Dict[str, Any]:
         """按群组 URL 拉取整组 TLE，与单星共用限速/退避/健康度账本。
 
-        离线时**明确拒绝**（群组没有本地缓存索引，无法标注时效），不做
-        「静默返回空」；退避期内也不发请求，直接给出剩余秒数。成功返回
+        ``allow_network`` 语义同 :meth:`fetch_record`。离线或未显式允许联网
+        时**明确拒绝**（群组没有本地缓存索引，无法标注时效），不做
+        「静默返回空」，也不发起请求；退避期内同样不发请求。成功返回
         ``refresh_status="network"`` 与解析出的条目；失败返回
         ``refresh_status="unavailable"`` + 分类 + 退避秒数。
         """
         ref = self._clock() if now is None else float(now)
         offline = bool(self._offline())
+        permitted = (bool(self._allow_network()) if allow_network is None
+                     else bool(allow_network))
+        network_ok = permitted and not offline
         health = lambda: self.health.report(ref, self.policy, offline=offline)  # noqa: E731
 
-        if offline:
+        if not network_ok:
+            if offline:
+                detail = ("离线模式（MBDSDR_OFFLINE），未发起群组拉取；"
+                          "群组无本地缓存，单星数据请走单星缓存路径")
+                kind, kind_label = "offline", "离线"
+            else:
+                detail = ("未显式开启联网刷新（MBDSDR_ALLOW_NETWORK），"
+                          "未发起群组拉取；群组无本地缓存，"
+                          "单星数据请走单星缓存路径")
+                kind, kind_label = "network_not_allowed", "未允许联网"
             return {
-                "entries": [], "refresh_status": "offline",
-                "refresh_error": ("离线模式（MBDSDR_OFFLINE），未发起群组拉取；"
-                                  "群组无本地缓存，单星数据请走单星缓存路径"),
-                "failure_kind": "offline", "failure_label": "离线",
-                "retry_in_s": 0.0, "offline": True, "health": health(),
+                "entries": [], "refresh_status": "offline" if offline else "unavailable",
+                "refresh_error": detail,
+                "failure_kind": kind, "failure_label": kind_label,
+                "retry_in_s": 0.0, "offline": offline,
+                "network_used": False, "network_allowed": False,
+                "health": health(),
             }
 
         decision = self.attempt_decision(GROUP_SCOPE_KEY, ref)
@@ -679,6 +819,7 @@ class TleFetcher:
                                   f"{decision['retry_in_s']:.0f}s），不重试"),
                 "failure_kind": decision["reason"], "failure_label": "",
                 "retry_in_s": decision["retry_in_s"], "offline": False,
+                "network_used": False, "network_allowed": True,
                 "health": health(),
             }
 
@@ -702,6 +843,7 @@ class TleFetcher:
                 "failure_kind": failure["kind"],
                 "failure_label": failure["label"],
                 "retry_in_s": round(wait, 1), "offline": False,
+                "network_used": True, "network_allowed": True,
                 "health": health(),
             }
 
@@ -710,7 +852,8 @@ class TleFetcher:
             "entries": entries, "refresh_status": "network",
             "refresh_error": "", "failure_kind": "", "failure_label": "",
             "retry_in_s": 0.0, "offline": False, "fetched_at": ref,
-            "url": url, "health": health(),
+            "url": url, "network_used": True, "network_allowed": True,
+            "health": health(),
         }
 
     # ------------------------------------------------------------- 刷新调度

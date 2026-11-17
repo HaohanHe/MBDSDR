@@ -1,0 +1,1164 @@
+{
+  "id": "norse_edda",
+  "meta": {
+    "schema": "mbdsdr.sky_culture.v1",
+    "id": "norse_edda",
+    "display_name": "Norse (Edda)",
+    "native_name": "",
+    "region": "Northern Europe",
+    "classification": [
+      "historical"
+    ],
+    "source": "Stellarium skyculture norse_edda",
+    "source_url": "https://github.com/Stellarium/stellarium/tree/master/skycultures/norse_edda",
+    "source_license": "CC BY 4.0",
+    "source_license_url": "https://creativecommons.org/licenses/by/4.0/",
+    "attribution": "Stellarium sky culture 'norse_edda'; authors: This sky culture was contributed to Stellarium by Jakob Eyermann consulting with Susanne M. Hoffmann as part of a German studies term paper (CC BY 4.0). Converted to HIP line segments only; no artwork or description images were copied.",
+    "source_file": "reference/stellarium/skycultures/norse_edda/index.json",
+    "source_file_sha256": "f243afd16065ec762e9c631e315a6b3f25e763d296709fd834032067ebe1cc86",
+    "description_file": "reference/stellarium/skycultures/norse_edda/description.md",
+    "description_file_sha256": "3653cbc0bac954032ddae75b69f103902e0562ce47bbb6e0dcdf31c3f58b8dc7",
+    "conversion_scope": "Only constellations[].lines, id and common_name (plus optional common_names star labels) are converted; illustrations, artwork and description text are not copied.",
+    "names_scope": "Explicit common_names labels take precedence; stars without an explicit label inherit the constellation/asterism name they belong to.",
+    "group_count": 19,
+    "edge_count": 114,
+    "name_count": 117,
+    "unresolved_hip_count": 0,
+    "unresolved_hips": [],
+    "unresolved_token_count": 18,
+    "unresolved_tokens": [
+      "[-5.03531691012675, 46.933598578498184]",
+      "[-5.092894987229619, 44.32115682979357]",
+      "[-5.28016044257056, 49.03467619857298]",
+      "[-5.397253739072692, 41.1526330979786]",
+      "[-5.5810372712159175, 40.99255881700904]",
+      "[-5.592305628737327, 49.138545158334765]",
+      "[-5.744519496520017, 47.87519094803032]",
+      "[-5.851636769370547, 43.8031522063734]",
+      "[-5.974290499885636, 46.77128448985017]",
+      "[6.479926387932717, 11.203780544069156]",
+      "[6.481070812126429, 12.353309187236734]",
+      "[6.505025192572181, 13.66333086584526]",
+      "[6.550797071299158, 10.292265110768989]",
+      "[6.562489215608356, 14.397203144692126]",
+      "[6.634435527517946, 10.905554764971294]",
+      "[6.693752297327157, 15.068426117121348]",
+      "[6.7081133309994225, 12.196857909778334]",
+      "[6.738253075313706, 13.93284467248427]"
+    ],
+    "generated_utc": "2026-11-17T17:00:44Z",
+    "data_sha256": "120dd4a1388254823517901d0c5f02dc5234194093ce4997627db6053b148ae2"
+  },
+  "groups": [
+    {
+      "group_id": "CON norse_edda Bif",
+      "names": {
+        "en": "Bifröst",
+        "native": "Bifrǫst"
+      },
+      "lines": [
+        [
+          102098,
+          112158
+        ],
+        [
+          112158,
+          113881
+        ],
+        [
+          113881,
+          677
+        ],
+        [
+          677,
+          5447
+        ],
+        [
+          5447,
+          9640
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON norse_edda Heim",
+      "names": {
+        "en": "Heimdall's Castle",
+        "native": "Himinbjörg"
+      },
+      "lines": [
+        [
+          113881,
+          113963
+        ],
+        [
+          113963,
+          1067
+        ],
+        [
+          1067,
+          677
+        ],
+        [
+          677,
+          113881
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON norse_edda Rat",
+      "names": {
+        "en": "Ratatosk",
+        "native": "Ratatoskr"
+      },
+      "lines": [
+        [
+          8886,
+          6686
+        ],
+        [
+          6686,
+          4427
+        ],
+        [
+          4427,
+          3179
+        ],
+        [
+          3179,
+          746
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON norse_edda ThV",
+      "names": {
+        "en": "Thor's Chariot",
+        "native": "Þórs vagn"
+      },
+      "lines": [
+        [
+          67301,
+          65378
+        ],
+        [
+          65378,
+          62956
+        ],
+        [
+          62956,
+          59774
+        ],
+        [
+          59774,
+          58001
+        ],
+        [
+          58001,
+          53910
+        ],
+        [
+          53910,
+          54061
+        ],
+        [
+          54061,
+          59774
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON norse_edda FrV",
+      "names": {
+        "en": "Freyja's Chariot",
+        "native": "Freyju vagn"
+      },
+      "lines": [
+        [
+          11767,
+          85822
+        ],
+        [
+          85822,
+          82080
+        ],
+        [
+          82080,
+          77055
+        ],
+        [
+          77055,
+          72607
+        ],
+        [
+          72607,
+          75097
+        ],
+        [
+          75097,
+          79822
+        ],
+        [
+          79822,
+          77055
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON norse_edda Thi",
+      "names": {
+        "en": "Thiazi's Eyes",
+        "native": "Þjázis augu"
+      },
+      "lines": [
+        [
+          37826,
+          36850
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON norse_edda Ulf",
+      "names": {
+        "en": "Jaw of the Wolf",
+        "native": "Ulf's Keptr"
+      },
+      "lines": [
+        [
+          20889,
+          20455
+        ],
+        [
+          20455,
+          20205
+        ],
+        [
+          20205,
+          20885
+        ],
+        [
+          20885,
+          21421
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON norse_edda Asr",
+      "names": {
+        "en": "The Asar Battlefield",
+        "native": "Asar Bardagi"
+      },
+      "lines": [
+        [
+          24608,
+          28360
+        ],
+        [
+          28360,
+          28380
+        ],
+        [
+          28380,
+          25428
+        ],
+        [
+          25428,
+          23015
+        ],
+        [
+          23015,
+          23453
+        ],
+        [
+          23453,
+          24608
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON norse_edda Fis",
+      "names": {
+        "en": "Fishermen",
+        "native": "Fiskikarlar"
+      },
+      "lines": [
+        [
+          26727,
+          26311
+        ],
+        [
+          26311,
+          25930
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON norse_edda OxH",
+      "names": {
+        "en": "Ox Head",
+        "native": "Himinhrjóðr"
+      },
+      "lines": [
+        [
+          37279,
+          36641
+        ],
+        [
+          36641,
+          34987
+        ],
+        [
+          34987,
+          34769
+        ],
+        [
+          34769,
+          36641
+        ],
+        [
+          34987,
+          36188
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON norse_edda Ser",
+      "names": {
+        "en": "Midgard Serpent",
+        "native": "Jǫrmungandr"
+      },
+      "lines": [
+        [
+          43813,
+          42799
+        ],
+        [
+          42799,
+          42402
+        ],
+        [
+          42402,
+          42008
+        ],
+        [
+          42008,
+          42313
+        ],
+        [
+          42313,
+          43109
+        ],
+        [
+          43109,
+          43813
+        ],
+        [
+          43813,
+          44659
+        ],
+        [
+          44659,
+          45336
+        ],
+        [
+          45336,
+          47431
+        ],
+        [
+          47431,
+          46390
+        ],
+        [
+          46390,
+          42835
+        ],
+        [
+          42835,
+          41307
+        ],
+        [
+          41307,
+          39863
+        ],
+        [
+          39863,
+          39079
+        ],
+        [
+          39079,
+          37447
+        ],
+        [
+          37447,
+          32349
+        ],
+        [
+          32349,
+          30324
+        ],
+        [
+          30324,
+          28103
+        ],
+        [
+          28103,
+          27288
+        ],
+        [
+          27288,
+          25985
+        ],
+        [
+          25985,
+          24305
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON norse_edda Thor",
+      "names": {
+        "en": "Thor",
+        "native": "Þórr"
+      },
+      "lines": [
+        [
+          27366,
+          26727
+        ],
+        [
+          26727,
+          26311
+        ],
+        [
+          26311,
+          25930
+        ],
+        [
+          25930,
+          24436
+        ],
+        [
+          26727,
+          27989
+        ],
+        [
+          27989,
+          25336
+        ],
+        [
+          25336,
+          25930
+        ],
+        [
+          25336,
+          26487
+        ],
+        [
+          26487,
+          26207
+        ],
+        [
+          27989,
+          26487
+        ],
+        [
+          25336,
+          22449
+        ],
+        [
+          22449,
+          22509
+        ],
+        [
+          22509,
+          22845
+        ],
+        [
+          22845,
+          22833
+        ],
+        [
+          22833,
+          21589
+        ],
+        [
+          21589,
+          21402
+        ],
+        [
+          21402,
+          22509
+        ],
+        [
+          27989,
+          31681
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON norse_edda FrS",
+      "names": {
+        "en": "Freyr's Sickle",
+        "native": "Freyjar sigð"
+      },
+      "lines": [
+        [
+          65474,
+          66249
+        ],
+        [
+          66249,
+          63090
+        ],
+        [
+          63090,
+          61941
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON norse_edda Van",
+      "names": {
+        "en": "River Van",
+        "native": "Ván"
+      },
+      "lines": [
+        [
+          21421,
+          21589
+        ],
+        [
+          21589,
+          21402
+        ],
+        [
+          21402,
+          21444
+        ],
+        [
+          21444,
+          19849
+        ],
+        [
+          19849,
+          19587
+        ],
+        [
+          19587,
+          17378
+        ],
+        [
+          17378,
+          16537
+        ],
+        [
+          16537,
+          15197
+        ],
+        [
+          15197,
+          13701
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON norse_edda Urd",
+      "names": {
+        "en": "Well of Urd",
+        "native": "Urðarbrunnr"
+      },
+      "lines": [
+        [
+          17529,
+          13905,
+          12719,
+          13209,
+          15549,
+          17448,
+          19810,
+          19815
+        ],
+        [
+          13209,
+          16181,
+          17531
+        ],
+        [
+          20704,
+          17531
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON norse_edda Mim",
+      "names": {
+        "en": "Mimir's Well",
+        "native": "Mímisbrunnr"
+      },
+      "lines": [],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON norse_edda Well",
+      "names": {
+        "en": "Boiling Well",
+        "native": "Hvergelmir"
+      },
+      "lines": [],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON norse_edda Hra",
+      "names": {
+        "en": "Eagle Giant",
+        "native": "Hræsvelgr"
+      },
+      "lines": [
+        [
+          93805,
+          95501
+        ],
+        [
+          95501,
+          97804
+        ],
+        [
+          97804,
+          99473
+        ],
+        [
+          99473,
+          93747
+        ],
+        [
+          93747,
+          95501
+        ],
+        [
+          95501,
+          97649
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON norse_edda Toe",
+      "names": {
+        "en": "Aurwandill's Toe",
+        "native": "Aurvandils tá"
+      },
+      "lines": [
+        [
+          78493,
+          78159
+        ],
+        [
+          78159,
+          77512
+        ],
+        [
+          77512,
+          76952
+        ],
+        [
+          76952,
+          76267
+        ],
+        [
+          76267,
+          75695
+        ],
+        [
+          75695,
+          76127
+        ]
+      ],
+      "kind": "constellation"
+    }
+  ],
+  "names": {
+    "102098": {
+      "en": "Bifröst",
+      "native": "Bifrǫst"
+    },
+    "112158": {
+      "en": "Bifröst",
+      "native": "Bifrǫst"
+    },
+    "113881": {
+      "en": "Bifröst",
+      "native": "Bifrǫst"
+    },
+    "677": {
+      "en": "Bifröst",
+      "native": "Bifrǫst"
+    },
+    "5447": {
+      "en": "Bifröst",
+      "native": "Bifrǫst"
+    },
+    "9640": {
+      "en": "Bifröst",
+      "native": "Bifrǫst"
+    },
+    "113963": {
+      "en": "Heimdall's Castle",
+      "native": "Himinbjörg"
+    },
+    "1067": {
+      "en": "Heimdall's Castle",
+      "native": "Himinbjörg"
+    },
+    "8886": {
+      "en": "Ratatosk",
+      "native": "Ratatoskr"
+    },
+    "6686": {
+      "en": "Ratatosk",
+      "native": "Ratatoskr"
+    },
+    "4427": {
+      "en": "Ratatosk",
+      "native": "Ratatoskr"
+    },
+    "3179": {
+      "en": "Ratatosk",
+      "native": "Ratatoskr"
+    },
+    "746": {
+      "en": "Ratatosk",
+      "native": "Ratatoskr"
+    },
+    "67301": {
+      "en": "Thor's Chariot",
+      "native": "Þórs vagn"
+    },
+    "65378": {
+      "en": "Thor's Chariot",
+      "native": "Þórs vagn"
+    },
+    "62956": {
+      "en": "Thor's Chariot",
+      "native": "Þórs vagn"
+    },
+    "59774": {
+      "en": "Thor's Chariot",
+      "native": "Þórs vagn"
+    },
+    "58001": {
+      "en": "Thor's Chariot",
+      "native": "Þórs vagn"
+    },
+    "53910": {
+      "en": "Thor's Chariot",
+      "native": "Þórs vagn"
+    },
+    "54061": {
+      "en": "Thor's Chariot",
+      "native": "Þórs vagn"
+    },
+    "11767": {
+      "en": "Freyja's Chariot",
+      "native": "Freyju vagn"
+    },
+    "85822": {
+      "en": "Freyja's Chariot",
+      "native": "Freyju vagn"
+    },
+    "82080": {
+      "en": "Freyja's Chariot",
+      "native": "Freyju vagn"
+    },
+    "77055": {
+      "en": "Freyja's Chariot",
+      "native": "Freyju vagn"
+    },
+    "72607": {
+      "en": "Freyja's Chariot",
+      "native": "Freyju vagn"
+    },
+    "75097": {
+      "en": "Freyja's Chariot",
+      "native": "Freyju vagn"
+    },
+    "79822": {
+      "en": "Freyja's Chariot",
+      "native": "Freyju vagn"
+    },
+    "37826": {
+      "en": "Thiazi's Eyes",
+      "native": "Þjázis augu"
+    },
+    "36850": {
+      "en": "Thiazi's Eyes",
+      "native": "Þjázis augu"
+    },
+    "20889": {
+      "en": "Jaw of the Wolf",
+      "native": "Ulf's Keptr"
+    },
+    "20455": {
+      "en": "Jaw of the Wolf",
+      "native": "Ulf's Keptr"
+    },
+    "20205": {
+      "en": "Jaw of the Wolf",
+      "native": "Ulf's Keptr"
+    },
+    "20885": {
+      "en": "Jaw of the Wolf",
+      "native": "Ulf's Keptr"
+    },
+    "21421": {
+      "en": "Jaw of the Wolf",
+      "native": "Ulf's Keptr"
+    },
+    "24608": {
+      "en": "The Asar Battlefield",
+      "native": "Asar Bardagi"
+    },
+    "28360": {
+      "en": "The Asar Battlefield",
+      "native": "Asar Bardagi"
+    },
+    "28380": {
+      "en": "The Asar Battlefield",
+      "native": "Asar Bardagi"
+    },
+    "25428": {
+      "en": "The Asar Battlefield",
+      "native": "Asar Bardagi"
+    },
+    "23015": {
+      "en": "The Asar Battlefield",
+      "native": "Asar Bardagi"
+    },
+    "23453": {
+      "en": "The Asar Battlefield",
+      "native": "Asar Bardagi"
+    },
+    "26727": {
+      "en": "Fishermen",
+      "native": "Fiskikarlar"
+    },
+    "26311": {
+      "en": "Fishermen",
+      "native": "Fiskikarlar"
+    },
+    "25930": {
+      "en": "Fishermen",
+      "native": "Fiskikarlar"
+    },
+    "37279": {
+      "en": "Ox Head",
+      "native": "Himinhrjóðr"
+    },
+    "36641": {
+      "en": "Ox Head",
+      "native": "Himinhrjóðr"
+    },
+    "34987": {
+      "en": "Ox Head",
+      "native": "Himinhrjóðr"
+    },
+    "34769": {
+      "en": "Ox Head",
+      "native": "Himinhrjóðr"
+    },
+    "36188": {
+      "en": "Ox Head",
+      "native": "Himinhrjóðr"
+    },
+    "43813": {
+      "en": "Midgard Serpent",
+      "native": "Jǫrmungandr"
+    },
+    "42799": {
+      "en": "Midgard Serpent",
+      "native": "Jǫrmungandr"
+    },
+    "42402": {
+      "en": "Midgard Serpent",
+      "native": "Jǫrmungandr"
+    },
+    "42008": {
+      "en": "Midgard Serpent",
+      "native": "Jǫrmungandr"
+    },
+    "42313": {
+      "en": "Midgard Serpent",
+      "native": "Jǫrmungandr"
+    },
+    "43109": {
+      "en": "Midgard Serpent",
+      "native": "Jǫrmungandr"
+    },
+    "44659": {
+      "en": "Midgard Serpent",
+      "native": "Jǫrmungandr"
+    },
+    "45336": {
+      "en": "Midgard Serpent",
+      "native": "Jǫrmungandr"
+    },
+    "47431": {
+      "en": "Midgard Serpent",
+      "native": "Jǫrmungandr"
+    },
+    "46390": {
+      "en": "Midgard Serpent",
+      "native": "Jǫrmungandr"
+    },
+    "42835": {
+      "en": "Midgard Serpent",
+      "native": "Jǫrmungandr"
+    },
+    "41307": {
+      "en": "Midgard Serpent",
+      "native": "Jǫrmungandr"
+    },
+    "39863": {
+      "en": "Midgard Serpent",
+      "native": "Jǫrmungandr"
+    },
+    "39079": {
+      "en": "Midgard Serpent",
+      "native": "Jǫrmungandr"
+    },
+    "37447": {
+      "en": "Midgard Serpent",
+      "native": "Jǫrmungandr"
+    },
+    "32349": {
+      "en": "Midgard Serpent",
+      "native": "Jǫrmungandr"
+    },
+    "30324": {
+      "en": "Midgard Serpent",
+      "native": "Jǫrmungandr"
+    },
+    "28103": {
+      "en": "Midgard Serpent",
+      "native": "Jǫrmungandr"
+    },
+    "27288": {
+      "en": "Midgard Serpent",
+      "native": "Jǫrmungandr"
+    },
+    "25985": {
+      "en": "Midgard Serpent",
+      "native": "Jǫrmungandr"
+    },
+    "24305": {
+      "en": "Midgard Serpent",
+      "native": "Jǫrmungandr"
+    },
+    "27366": {
+      "en": "Thor",
+      "native": "Þórr"
+    },
+    "24436": {
+      "en": "Thor",
+      "native": "Þórr"
+    },
+    "27989": {
+      "en": "Thor",
+      "native": "Þórr"
+    },
+    "25336": {
+      "en": "Thor",
+      "native": "Þórr"
+    },
+    "26487": {
+      "en": "Thor",
+      "native": "Þórr"
+    },
+    "26207": {
+      "en": "Thor",
+      "native": "Þórr"
+    },
+    "22449": {
+      "en": "Thor",
+      "native": "Þórr"
+    },
+    "22509": {
+      "en": "Thor",
+      "native": "Þórr"
+    },
+    "22845": {
+      "en": "Thor",
+      "native": "Þórr"
+    },
+    "22833": {
+      "en": "Thor",
+      "native": "Þórr"
+    },
+    "21589": {
+      "en": "Thor",
+      "native": "Þórr"
+    },
+    "21402": {
+      "en": "Thor",
+      "native": "Þórr"
+    },
+    "31681": {
+      "en": "Thor",
+      "native": "Þórr"
+    },
+    "65474": {
+      "en": "Freyr's Sickle",
+      "native": "Freyjar sigð"
+    },
+    "66249": {
+      "en": "Freyr's Sickle",
+      "native": "Freyjar sigð"
+    },
+    "63090": {
+      "en": "Freyr's Sickle",
+      "native": "Freyjar sigð"
+    },
+    "61941": {
+      "en": "Freyr's Sickle",
+      "native": "Freyjar sigð"
+    },
+    "21444": {
+      "en": "River Van",
+      "native": "Ván"
+    },
+    "19849": {
+      "en": "River Van",
+      "native": "Ván"
+    },
+    "19587": {
+      "en": "River Van",
+      "native": "Ván"
+    },
+    "17378": {
+      "en": "River Van",
+      "native": "Ván"
+    },
+    "16537": {
+      "en": "River Van",
+      "native": "Ván"
+    },
+    "15197": {
+      "en": "River Van",
+      "native": "Ván"
+    },
+    "13701": {
+      "en": "River Van",
+      "native": "Ván"
+    },
+    "17529": {
+      "en": "Well of Urd",
+      "native": "Urðarbrunnr"
+    },
+    "13905": {
+      "en": "Well of Urd",
+      "native": "Urðarbrunnr"
+    },
+    "12719": {
+      "en": "Well of Urd",
+      "native": "Urðarbrunnr"
+    },
+    "13209": {
+      "en": "Well of Urd",
+      "native": "Urðarbrunnr"
+    },
+    "15549": {
+      "en": "Well of Urd",
+      "native": "Urðarbrunnr"
+    },
+    "17448": {
+      "en": "Well of Urd",
+      "native": "Urðarbrunnr"
+    },
+    "19810": {
+      "en": "Well of Urd",
+      "native": "Urðarbrunnr"
+    },
+    "19815": {
+      "en": "Well of Urd",
+      "native": "Urðarbrunnr"
+    },
+    "16181": {
+      "en": "Well of Urd",
+      "native": "Urðarbrunnr"
+    },
+    "17531": {
+      "en": "Well of Urd",
+      "native": "Urðarbrunnr"
+    },
+    "20704": {
+      "en": "Well of Urd",
+      "native": "Urðarbrunnr"
+    },
+    "93805": {
+      "en": "Eagle Giant",
+      "native": "Hræsvelgr"
+    },
+    "95501": {
+      "en": "Eagle Giant",
+      "native": "Hræsvelgr"
+    },
+    "97804": {
+      "en": "Eagle Giant",
+      "native": "Hræsvelgr"
+    },
+    "99473": {
+      "en": "Eagle Giant",
+      "native": "Hræsvelgr"
+    },
+    "93747": {
+      "en": "Eagle Giant",
+      "native": "Hræsvelgr"
+    },
+    "97649": {
+      "en": "Eagle Giant",
+      "native": "Hræsvelgr"
+    },
+    "78493": {
+      "en": "Aurwandill's Toe",
+      "native": "Aurvandils tá"
+    },
+    "78159": {
+      "en": "Aurwandill's Toe",
+      "native": "Aurvandils tá"
+    },
+    "77512": {
+      "en": "Aurwandill's Toe",
+      "native": "Aurvandils tá"
+    },
+    "76952": {
+      "en": "Aurwandill's Toe",
+      "native": "Aurvandils tá"
+    },
+    "76267": {
+      "en": "Aurwandill's Toe",
+      "native": "Aurvandils tá"
+    },
+    "75695": {
+      "en": "Aurwandill's Toe",
+      "native": "Aurvandils tá"
+    },
+    "76127": {
+      "en": "Aurwandill's Toe",
+      "native": "Aurvandils tá"
+    }
+  },
+  "unresolved_hips": []
+}

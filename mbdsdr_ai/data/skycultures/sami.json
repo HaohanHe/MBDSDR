@@ -1,0 +1,304 @@
+{
+  "id": "sami",
+  "meta": {
+    "schema": "mbdsdr.sky_culture.v1",
+    "id": "sami",
+    "display_name": "Sami",
+    "native_name": "",
+    "region": "Northern Europe",
+    "classification": [
+      "traditional"
+    ],
+    "source": "Stellarium skyculture sami",
+    "source_url": "https://github.com/Stellarium/stellarium/tree/master/skycultures/sami",
+    "source_license": "CC BY-SA 4.0",
+    "source_license_url": "https://creativecommons.org/licenses/by-sa/4.0/",
+    "attribution": "Stellarium sky culture 'sami'; authors: Jonas Persson () (CC BY-SA 4.0). Converted to HIP line segments only; no artwork or description images were copied.",
+    "source_file": "reference/stellarium/skycultures/sami/index.json",
+    "source_file_sha256": "173f7d438807a1ea34c1065ffac1dae24099613dd97a56c21bd4a8a8b68eb835",
+    "description_file": "reference/stellarium/skycultures/sami/description.md",
+    "description_file_sha256": "fd6d9b48b101e35908018d03d0718f6626149898b6f0dfa1507c0f6af157ba52",
+    "conversion_scope": "Only constellations[].lines, id and common_name (plus optional common_names star labels) are converted; illustrations, artwork and description text are not copied.",
+    "names_scope": "Explicit common_names labels take precedence; stars without an explicit label inherit the constellation/asterism name they belong to.",
+    "group_count": 10,
+    "edge_count": 29,
+    "name_count": 33,
+    "unresolved_hip_count": 0,
+    "unresolved_hips": [],
+    "unresolved_token_count": 0,
+    "unresolved_tokens": [],
+    "generated_utc": "2026-11-17T17:00:44Z",
+    "data_sha256": "be3ca008c62ce65668ba062d1682014b52ed6b6b00ec2a7a38b89d0178967e3f"
+  },
+  "groups": [
+    {
+      "group_id": "CON sami 001",
+      "names": {
+        "en": "Sarva the Elk"
+      },
+      "lines": [
+        [
+          8886,
+          6686,
+          4427,
+          3179,
+          746
+        ],
+        [
+          6686,
+          14328,
+          15863,
+          14576
+        ],
+        [
+          15863,
+          17358,
+          18532,
+          18246
+        ],
+        [
+          17358,
+          24608,
+          25428
+        ],
+        [
+          24608,
+          23767,
+          23015
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON sami 002",
+      "names": {
+        "en": "Favdna's Bow and Arrow"
+      },
+      "lines": [
+        [
+          67301,
+          65378,
+          62956,
+          59774,
+          53910
+        ],
+        [
+          54061,
+          58001
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON sami 003",
+      "names": {
+        "en": "Galla's Sons"
+      },
+      "lines": [
+        [
+          26727,
+          26311,
+          25930
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON sami 004",
+      "names": {
+        "en": "Sky Support"
+      },
+      "lines": [
+        [
+          11767,
+          11767
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON sami 005",
+      "names": {
+        "en": "Favdna"
+      },
+      "lines": [
+        [
+          69673,
+          69673
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON sami 006",
+      "names": {
+        "en": "The Runner"
+      },
+      "lines": [
+        [
+          91262,
+          91262
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON sami 007",
+      "names": {
+        "en": "Morning Star"
+      },
+      "lines": [
+        [
+          97649,
+          97649
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON sami 008",
+      "names": {
+        "en": "Pack of Dogs"
+      },
+      "lines": [
+        [
+          17702,
+          17702
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON sami 009",
+      "names": {
+        "en": "Galla"
+      },
+      "lines": [
+        [
+          37279,
+          37279
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON sami 010",
+      "names": {
+        "en": "The Ski Runners"
+      },
+      "lines": [
+        [
+          36850,
+          36850
+        ],
+        [
+          37826,
+          37826
+        ]
+      ],
+      "kind": "constellation"
+    }
+  ],
+  "names": {
+    "8886": {
+      "en": "Sarva the Elk"
+    },
+    "6686": {
+      "en": "Sarva the Elk"
+    },
+    "4427": {
+      "en": "Sarva the Elk"
+    },
+    "3179": {
+      "en": "Sarva the Elk"
+    },
+    "746": {
+      "en": "Sarva the Elk"
+    },
+    "14328": {
+      "en": "Sarva the Elk"
+    },
+    "15863": {
+      "en": "Sarva the Elk"
+    },
+    "14576": {
+      "en": "Sarva the Elk"
+    },
+    "17358": {
+      "en": "Sarva the Elk"
+    },
+    "18532": {
+      "en": "Sarva the Elk"
+    },
+    "18246": {
+      "en": "Sarva the Elk"
+    },
+    "24608": {
+      "en": "Sarva the Elk"
+    },
+    "25428": {
+      "en": "Sarva the Elk"
+    },
+    "23767": {
+      "en": "Sarva the Elk"
+    },
+    "23015": {
+      "en": "Sarva the Elk"
+    },
+    "67301": {
+      "en": "Favdna's Bow and Arrow"
+    },
+    "65378": {
+      "en": "Favdna's Bow and Arrow"
+    },
+    "62956": {
+      "en": "Favdna's Bow and Arrow"
+    },
+    "59774": {
+      "en": "Favdna's Bow and Arrow"
+    },
+    "53910": {
+      "en": "Favdna's Bow and Arrow"
+    },
+    "54061": {
+      "en": "Favdna's Bow and Arrow"
+    },
+    "58001": {
+      "en": "Favdna's Bow and Arrow"
+    },
+    "26727": {
+      "en": "Galla's Sons"
+    },
+    "26311": {
+      "en": "Galla's Sons"
+    },
+    "25930": {
+      "en": "Galla's Sons"
+    },
+    "11767": {
+      "en": "Sky Support"
+    },
+    "69673": {
+      "en": "Favdna"
+    },
+    "91262": {
+      "en": "The Runner"
+    },
+    "97649": {
+      "en": "Morning Star"
+    },
+    "17702": {
+      "en": "Pack of Dogs"
+    },
+    "37279": {
+      "en": "Galla"
+    },
+    "36850": {
+      "en": "The Ski Runners"
+    },
+    "37826": {
+      "en": "The Ski Runners"
+    }
+  },
+  "unresolved_hips": []
+}

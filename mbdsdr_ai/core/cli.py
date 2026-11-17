@@ -20,6 +20,23 @@ from typing import List, Optional, Sequence
 from .controller import SDRController, VALID_MODES
 from .errors import SDRUserError
 
+# 进程退出码：唯一事实源。docs/cli_usage.md 的退出码表必须与本组常量一致
+# （tests/test_cli_exit_codes.py 解析文档表格做钉扎）。
+EXIT_OK = 0
+EXIT_USER_ERROR = 1
+EXIT_NOT_CONNECTED = 2
+EXIT_NO_DATA = 3
+EXIT_OPERATION_FAILED = 4
+EXIT_DECODE_FAILED = 5
+EXIT_CODES = (
+    EXIT_OK,
+    EXIT_USER_ERROR,
+    EXIT_NOT_CONNECTED,
+    EXIT_NO_DATA,
+    EXIT_OPERATION_FAILED,
+    EXIT_DECODE_FAILED,
+)
+
 
 def build_parser() -> argparse.ArgumentParser:
     """构建 CLI 参数解析器（独立出来便于测试）。"""
@@ -74,7 +91,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--record", metavar="PATH", help="开始 IQ 录制到 PATH（SigMF）")
 
     # 服务
-    p.add_argument("--remote-port", type=int, metavar="PORT", help="启动 GQRX 风格远程控制")
+    p.add_argument("--remote-port", type=int, metavar="PORT",
+                   help="启动 GQRX 风格远程控制（仅 f/m/g/q/Q 五命令，"
+                        "见 docs/cli_usage.md）")
     p.add_argument("--web-port", type=int, metavar="PORT", help="启动 Web 服务器")
 
     # 其它
@@ -103,6 +122,22 @@ def _print_audio(ctrl: SDRController) -> None:
         print(f"  [{d.index}] {d.name}  ({d.channels} ch, {d.default_samplerate:.0f} Hz)")
 
 
+def _no_sample_reason(ctrl: SDRController) -> str:
+    """把后端有界读超时翻译成一句可执行的 stderr 文案；无超时原因返回 ""。"""
+    reason = getattr(ctrl, "last_read_reason", None) or {}
+    if reason.get("code") not in ("read_timeout", "read_inflight"):
+        return ""
+    device = str(reason.get("device") or "")
+    if not device:
+        try:
+            device = str(ctrl.get_status().device or "")
+        except Exception:
+            device = ""
+    timeout_s = reason.get("timeout_s")
+    wait = f"，等待 {float(timeout_s):.1f} 秒" if timeout_s else ""
+    return f"超时未收到样本（设备: {device or '未知设备'}{wait}）"
+
+
 def run(argv: Optional[Sequence[str]] = None,
         controller: Optional[SDRController] = None) -> int:
     """执行 CLI。返回进程退出码（0 成功，非零失败）。
@@ -125,10 +160,10 @@ def run(argv: Optional[Sequence[str]] = None,
     # ---- 无需连接的只读命令 ----
     if args.list_devices:
         _print_devices(ctrl)
-        return 0
+        return EXIT_OK
     if args.list_audio:
         _print_audio(ctrl)
-        return 0
+        return EXIT_OK
 
     try:
         # ---- 连接 ----
@@ -142,7 +177,7 @@ def run(argv: Optional[Sequence[str]] = None,
             print("建议: 先用 --connect <device_id> 连接真实设备，"
                   "或 --connect debug 使用内置调试信号源测试。",
                   file=sys.stderr)
-            return 2
+            return EXIT_NOT_CONNECTED
 
         # ---- 参数下发 ----
         def _report(label: str, ok, describe) -> bool:
@@ -161,7 +196,7 @@ def run(argv: Optional[Sequence[str]] = None,
         if args.freq is not None:
             ok = ctrl.set_frequency(args.freq)
             if not _report("频率", ok, lambda: f"{ctrl.get_frequency():.0f} Hz"):
-                return 4
+                return EXIT_OPERATION_FAILED
         if args.demod:
             ctrl.set_demod(args.demod)
             print(f"解调 -> {ctrl.get_demod()}")
@@ -171,11 +206,11 @@ def run(argv: Optional[Sequence[str]] = None,
         if args.sample_rate is not None:
             ok = ctrl.set_sample_rate(args.sample_rate)
             if not _report("采样率", ok, lambda: f"{ctrl.get_sample_rate():.0f} Hz"):
-                return 4
+                return EXIT_OPERATION_FAILED
         if args.bandwidth is not None:
             ok = ctrl.set_bandwidth(args.bandwidth)
             if not _report("带宽", ok, lambda: f"{args.bandwidth:.0f} Hz"):
-                return 4
+                return EXIT_OPERATION_FAILED
         if args.squelch is not None:
             ctrl.set_squelch(args.squelch)
         if args.audio_out is not None:
@@ -189,8 +224,12 @@ def run(argv: Optional[Sequence[str]] = None,
         if args.spectrum is not None:
             spec = ctrl.read_spectrum(args.spectrum)
             if spec is None:
-                print("错误: 无数据（未连接或后端无样本）。", file=sys.stderr)
-                return 3
+                detail = _no_sample_reason(ctrl)
+                if detail:
+                    print(f"错误: {detail}。", file=sys.stderr)
+                else:
+                    print("错误: 无数据（未连接或后端无样本）。", file=sys.stderr)
+                return EXIT_NO_DATA
             print(f"频谱帧: nfft={spec.size}, "
                   f"mean={float(spec.mean()):.1f} dB, peak={float(spec.max()):.1f} dB")
 
@@ -206,7 +245,7 @@ def run(argv: Optional[Sequence[str]] = None,
             if state.get("error"):
                 # 扫描中止时结果为空，不能把「没扫成」播报成「没发现信号」。
                 print(f"错误: 扫频失败：{state['error']}", file=sys.stderr)
-                return 3
+                return EXIT_NO_DATA
             segs = ctrl.get_scan_results(handle)
             print(f"扫频 {start:.0f}-{stop:.0f} Hz (step {step:.0f}): "
                   f"发现 {len(segs)} 个活动段")
@@ -236,7 +275,7 @@ def run(argv: Optional[Sequence[str]] = None,
                 else:
                     print("文件级解码需 --mode（ft8/wspr/aprs/adsb/noaa_apt/sstv/"
                           "pocsag/acars/meteor）", file=sys.stderr)
-                    return 3
+                    return EXIT_NO_DATA
             # 解码采样率：--sample-rate 显式给；没给则按模式取默认
             # （noaa_apt 20800Hz 音频、数字模式 1MHz 基带）。
             dec_sr = args.sample_rate
@@ -266,7 +305,7 @@ def run(argv: Optional[Sequence[str]] = None,
                 print(_json.dumps(res, ensure_ascii=False, indent=2, default=str))
             except Exception as e:
                 print(f"文件级解码失败: {e}", file=sys.stderr)
-                return 5
+                return EXIT_DECODE_FAILED
 
         if args.tool:
             # 工具面逃生门：把 sdr_tools / 各模块 register_tool_registry 的
@@ -278,7 +317,7 @@ def run(argv: Optional[Sequence[str]] = None,
                 targs = _json.loads(args.args or "{}")
             except Exception as e:
                 print(f"--args 不是合法 JSON: {e}", file=sys.stderr)
-                return 3
+                return EXIT_NO_DATA
             from .. import tool_registry as _tr
             reg = _tr.ToolRegistry()
             try:
@@ -296,7 +335,7 @@ def run(argv: Optional[Sequence[str]] = None,
                         continue
             except Exception as e:
                 print(f"工具自动发现失败: {e}", file=sys.stderr)
-                return 5
+                return EXIT_DECODE_FAILED
             # sdr_tools 的 60+ 工具挂在 agent.tool_registry——duck-type 假 agent
             # 收编（register_sdr_tools 只用 tool_registry/sdr_manager/spectrum/
             # freq_manager/_plans/_todos 这几个属性，不需要 LLM）。
@@ -312,7 +351,7 @@ def run(argv: Optional[Sequence[str]] = None,
             if args.tool not in names:
                 print(f"工具不存在: {args.tool}", file=sys.stderr)
                 print(f"可用（{len(names)} 个）: {names[:40]}", file=sys.stderr)
-                return 3
+                return EXIT_NO_DATA
             res = reg.call(args.tool, targs)
             out = res.to_dict() if hasattr(res, "to_dict") else res
             print(_json.dumps(out, ensure_ascii=False, indent=2, default=str))
@@ -331,10 +370,16 @@ def run(argv: Optional[Sequence[str]] = None,
             res = ctrl.start_recording(args.record)
             if "error" in res:
                 print(f"录制失败: {res}", file=sys.stderr)
-                return 4
+                return EXIT_OPERATION_FAILED
             print(f"录制中 -> {res['path']}（10 秒后自动停止）")
             time.sleep(10.0)
             done = ctrl.stop_recording()
+            if int(done.get("samples", 0) or 0) <= 0:
+                # 设备读有界超时后仍无样本：0 字节录制不是成功，按“无数据”退出。
+                detail = _no_sample_reason(ctrl) or "未收到样本（0 字节）"
+                print(f"错误: {detail}；录制文件为空，meta 已标 complete=false。",
+                      file=sys.stderr)
+                return EXIT_NO_DATA
             print(f"录制结束: {done['samples']} samples")
 
         # ---- 服务 ----
@@ -359,10 +404,10 @@ def run(argv: Optional[Sequence[str]] = None,
             except KeyboardInterrupt:
                 pass
             ctrl.shutdown()
-            return 0
+            return EXIT_OK
 
         ctrl.shutdown()
-        return 0
+        return EXIT_OK
 
     except SDRUserError as e:
         # 排版与退出码是 CLI 唯一的职责：结论（谁占着 / 读不出来）由
@@ -375,7 +420,7 @@ def run(argv: Optional[Sequence[str]] = None,
         print(f"错误: {e.message}", file=sys.stderr)
         if e.suggestion:
             print(f"建议: {e.suggestion}", file=sys.stderr)
-        return 1
+        return EXIT_USER_ERROR
 
 
 def main() -> int:

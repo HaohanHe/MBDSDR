@@ -20,6 +20,7 @@ MBDSDR Core - 统一控制面 API（Headless-first）
 from __future__ import annotations
 
 import logging
+import os
 import threading
 import time
 from dataclasses import dataclass, field, asdict
@@ -37,6 +38,13 @@ from .errors import (
     DecoderNotAvailableError,
     DecoderNotStreamableError,
 )
+from ..sdr_link_supervisor import (
+    SdrLinkSupervisor,
+    DEFAULT_BASE_DELAY_S,
+    DEFAULT_MAX_ATTEMPTS,
+    DEFAULT_MAX_DELAY_S,
+)
+from ..modes_defaults import check_bandwidth
 
 logger = logging.getLogger(__name__)
 
@@ -55,6 +63,65 @@ SUPPORTED_DECODERS = STREAMABLE_DECODERS + FILE_ONLY_DECODERS
 
 # 音频输出采样率（解调后送声卡的统一速率）
 AUDIO_FS = 48_000.0
+
+# Task 78：SDR 常驻自动重连的 opt-in 开关。
+# 环境变量优先于配置文件键；两者都没设 = 关闭（默认），绝不自动打开设备。
+SDR_AUTORECONNECT_ENV = "MBDSDR_SDR_AUTORECONNECT"
+SDR_AUTORECONNECT_KEY = "sdr_autoreconnect"
+_AUTORECONNECT_ON = frozenset(("1", "true", "yes", "on"))
+_AUTORECONNECT_OFF = frozenset(("0", "false", "no", "off"))
+
+
+def _parse_autoreconnect_value(raw: Any) -> Optional[bool]:
+    """把配置值 / 环境变量解析成开关；无法判定返回 None（按关闭处理）。"""
+    if isinstance(raw, bool):
+        return raw
+    if isinstance(raw, (int, float)):
+        if float(raw) == 1.0:
+            return True
+        if float(raw) == 0.0:
+            return False
+        return None
+    text = str(raw).strip().lower()
+    if text in _AUTORECONNECT_ON:
+        return True
+    if text in _AUTORECONNECT_OFF:
+        return False
+    return None
+
+
+def read_sdr_autoreconnect_setting(config_dir: Optional[str] = None):
+    """读取 SDR 自动重连 opt-in 开关，返回 ``(enabled, source)``。
+
+    **优先级（不合并；环境变量绝对优先）**：
+
+    1. 环境变量 ``MBDSDR_SDR_AUTORECONNECT``：``1/true/yes/on`` 为开，
+       ``0/false/no/off`` 为关；其它非空值视为非法、按关处理。只要该变量
+       存在就以它为准，便于测试/脚本临时覆盖配置文件（含显式关闭）。
+    2. 配置文件键 ``sdr_autoreconnect``：读 ``<config_dir>/config.json``，
+       ``config_dir`` 缺省时读 ``~/.mbdsdr/config.json``——与
+       :class:`mbdsdr_ai.config.ConfigStore` 同一份文件。只读，不创建文件。
+    3. 两者都没有 → ``(False, "default")``。
+
+    ``source`` ∈ ``"env"`` / ``"config"`` / ``"default"``，供状态快照标明
+    「这个开关是谁定的」，不把配置来源藏起来。
+    """
+    if SDR_AUTORECONNECT_ENV in os.environ:
+        raw = os.environ.get(SDR_AUTORECONNECT_ENV)
+        return (_parse_autoreconnect_value(raw) is True, "env")
+    try:
+        from ..config import CONFIG_PATH, ConfigStore
+
+        path = (os.path.join(os.path.expanduser(str(config_dir)), "config.json")
+                if config_dir else os.path.expanduser(CONFIG_PATH))
+        data = ConfigStore(path).read()
+    except Exception as e:  # 配置不可读按关闭处理，绝不因此打开设备
+        logger.debug("读取 SDR 自动重连配置失败，按关闭处理: %s", e)
+        return False, "default"
+    if SDR_AUTORECONNECT_KEY in data:
+        ok = _parse_autoreconnect_value(data[SDR_AUTORECONNECT_KEY])
+        return (ok is True, "config")
+    return False, "default"
 
 
 # ======================================================================
@@ -139,12 +206,17 @@ class SystemStatus:
     sample_rate_hz: float = 0.0
     demod: str = "FM"
     gain_db: float = 0.0
+    #: 最近一次显式 set_bandwidth 与当前解调模式的默认通带不一致时的说明；
+    #: 一致/未设置时为空串（字段稳定，调用方无需判键存在）。
+    bandwidth_warning: str = ""
     audio_running: bool = False
     recording: bool = False
     remote_control: Dict[str, Any] = field(default_factory=dict)
     web_server: Dict[str, Any] = field(default_factory=dict)
     cpu_percent: Optional[float] = None
     mem_percent: Optional[float] = None
+    # Task 70-73：SDR/GNSS/时间/站址的运行时来源快照（既有字段保持不变）。
+    runtime_sources: Dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -193,12 +265,17 @@ class SDRController:
         会直接包装它。不传则在 ``connect("debug")`` 时自建调试信号源。
     config_dir :
         书签等持久化目录；默认 ``~/.mbdsdr``。
+    runtime_sources :
+        运行时数据源快照实例；默认取进程级单例
+        :func:`mbdsdr_ai.runtime_sources.get_runtime_sources`，与桌面天空图
+        入口共用同一份。需要隔离时显式注入替身。
     """
 
     def __init__(
         self,
         backend: Any = None,
         config_dir: Optional[str] = None,
+        runtime_sources: Any = None,
     ) -> None:
         self._config_dir = config_dir
 
@@ -207,6 +284,20 @@ class SDRController:
         self._connected: bool = False
         self._device_name: str = ""
         self._is_debug: bool = False
+        #: 最近一次读样本没拿到数据时的结构化原因（成功读后清空）。
+        #: 后端有界读超时会给 ``code=read_timeout``，CLI/工具面据此给出
+        #: 「超时未收到样本」而不是含糊的「无数据」。
+        self.last_read_reason: Optional[Dict[str, Any]] = None
+        # 最近一次 connect 的入口标识：自动重连复用它，不另造一套连接逻辑。
+        self._last_device_id: str = ""
+        # 显式启用的 SDR 常驻重连监督器；默认 None（不自动连任何硬件）。
+        self._sdr_supervisor: Optional[SdrLinkSupervisor] = None
+        # Task 78：opt-in 开关来源（env/config/default）与显式关闭抑制位。
+        # 用户显式 disable 之后，同进程内不再被 connect 成功自动拉起。
+        self._sdr_autoreconnect_source = "default"
+        self._sdr_autoreconnect_suppressed = False
+        # 监督器内部重连进行中：此时 connect() 的 disconnect() 不得停掉监督器。
+        self._sdr_reconnecting = False
 
         # ---- 接收参数（控制器侧真值，下发给后端）----
         self._freq_hz: float = 100_000_000.0
@@ -214,6 +305,8 @@ class SDRController:
         self._gain_db: float = 0.0
         self._demod: str = "FM"
         self._bandwidth_hz: float = 12_500.0
+        # 显式带宽与模式默认通带的一致性提示（只提示，不拦截下发）。
+        self._bandwidth_warning: str = ""
         self._squelch_db: float = -150.0
 
         # ---- 音频 ----
@@ -238,6 +331,22 @@ class SDRController:
         # P11：站址来源/精度显式化；0,0 与「未设置」一律判不可信
         self._gs_source: str = "none"
         self._gs_accuracy_m: Optional[float] = None
+
+        # ---- 运行时数据源快照（Task 70-73）----
+        # 只读 SDR/GNSS/时间/站址；GNSS 接线需显式 sync_runtime_sources()。
+        # 默认共用进程级单例：桌面天空图入口 record_fix 写入的状态可直接看到。
+        from ..runtime_sources import get_runtime_sources
+
+        self._gnss_monitor: Any = None
+        self._sdr_last_update_utc: Optional[str] = None
+        self._runtime_sources = (runtime_sources if runtime_sources is not None
+                                 else get_runtime_sources())
+        bind_sdr = getattr(self._runtime_sources, "set_sdr", None)
+        if callable(bind_sdr):
+            bind_sdr(self)
+        bind_station = getattr(self._runtime_sources, "set_station", None)
+        if callable(bind_station):
+            bind_station(self)
 
         # ---- 扫描 / 解码 / 录制句柄 ----
         self._scans: Dict[str, Dict[str, Any]] = {}
@@ -297,6 +406,8 @@ class SDRController:
             驱动缺失或找不到设备时抛出（带可操作建议）。
         """
         self.disconnect()
+        # 记住本次入口标识：显式启用自动重连时复用它，避免第二套连接逻辑。
+        self._last_device_id = str(device_id) if device_id else "debug"
 
         if device_id in (None, "", "debug", "debug-source", "DebugSignalGenerator"):
             from ..debug_source import DebugSource
@@ -308,6 +419,9 @@ class SDRController:
             self._is_debug = True
             self._device_name = "DebugSignalGenerator（调试信号源）"
             self._connected = True
+            from ..runtime_sources import utc_now_iso
+            self._sdr_last_update_utc = utc_now_iso()
+            self._maybe_opt_in_sdr_autoreconnect()
             logger.info("已连接调试信号源（非真实硬件）")
             return True
 
@@ -352,6 +466,8 @@ class SDRController:
         self._device_name = target.name
         self._is_debug = False
         self._connected = True
+        from ..runtime_sources import utc_now_iso
+        self._sdr_last_update_utc = utc_now_iso()
         # 下发初始参数：任何一项没落到硬件都必须让 connect 失败。
         # 以前只在异常时记一条 warning，返回 True——调用方以为"已连接且
         # 参数已生效"，实际设备仍跑默认值，属典型的失败当成功。
@@ -376,6 +492,7 @@ class SDRController:
             self._backend = None
             self._connected = False
             self._device_name = ""
+            self._sdr_last_update_utc = None
             try:
                 opened.disconnect()
             except Exception as e:
@@ -388,10 +505,18 @@ class SDRController:
                     "自检；参数未生效时不会把设备标记为已连接。"
                 ),
             )
+        self._maybe_opt_in_sdr_autoreconnect()
         return True
 
     def disconnect(self) -> None:
-        """断开当前设备，停止所有派生资源（音频/录制/扫描/解码）。"""
+        """断开当前设备，停止所有派生资源（音频/录制/扫描/解码）。
+
+        用户主动断开时同时停掉自动重连（不再对已断开的链路发起尝试）；
+        监督器自身的重连会经 ``connect()`` 走到这里，此时必须保留它，
+        否则第一次重连成功就把监督器关掉。
+        """
+        if not self._sdr_reconnecting and self._sdr_supervisor is not None:
+            self._sdr_supervisor.disable()
         self.stop_audio()
         self._stop_all_scans()
         self._stop_all_decoders()
@@ -409,10 +534,145 @@ class SDRController:
         self._connected = False
         self._is_debug = False
         self._device_name = ""
+        self._sdr_last_update_utc = None
 
     def is_connected(self) -> bool:
         """是否已连接后端。"""
         return self._connected
+
+    # ==================================================================
+    # SDR 常驻重连（Task 75；默认禁用，必须显式启用）
+    # Task 78：opt-in 开关（环境变量 > 配置文件键）只在首次连接成功后生效
+    # ==================================================================
+    def _maybe_opt_in_sdr_autoreconnect(self) -> None:
+        """首次连接成功后的 opt-in 挂载（Task 78）。
+
+        只在「开关为开 + 已知要重连哪台设备 + 未被用户显式关闭」时启用；
+        **不启动线程**（默认零后台线程），由 :meth:`sdr_reconnect_tick` 驱动。
+        开关为关时什么都不做，绝不扫描/连接硬件。
+        """
+        if self._sdr_autoreconnect_suppressed:
+            return
+        supervisor = self._sdr_supervisor
+        if supervisor is not None:
+            snap = supervisor.status()
+            # 已在工作（未达失败上限）就不重建，避免重连过程中自断；
+            # 若监督器已因连续失败停下，则允许本次成功连接重新挂载。
+            if snap.get("enabled") and not snap.get("stopped_reason"):
+                return
+        enabled, source = read_sdr_autoreconnect_setting(self._config_dir)
+        self._sdr_autoreconnect_source = source
+        if not enabled:
+            return
+        try:
+            self.enable_sdr_autoreconnect(
+                self._last_device_id, start_thread=False, source=source)
+        except SDRUserError as e:
+            # 没有设备标识就不猜；连接成功却拿不到标识属状态异常，留痕即可。
+            logger.warning("SDR 自动重连未启用: %s", e)
+        else:
+            logger.info("SDR 自动重连已启用（来源 %s，设备 %s；显式 tick 驱动）",
+                        source, self._last_device_id)
+
+    def enable_sdr_autoreconnect(
+        self,
+        device_id: Optional[str] = None,
+        *,
+        max_attempts: int = DEFAULT_MAX_ATTEMPTS,
+        base_delay_s: float = DEFAULT_BASE_DELAY_S,
+        max_delay_s: float = DEFAULT_MAX_DELAY_S,
+        start_thread: bool = True,
+        source: str = "manual",
+    ) -> dict:
+        """显式启用 SDR 常驻重连，返回重连状态。
+
+        真正连接复用 :meth:`connect`（同一套设备打开/参数下发逻辑），
+        不新造第二套。``device_id`` 省略时用最近一次 ``connect`` 的入口；
+        从未连接过则拒绝启用（不猜设备）。
+
+        ``start_thread=True`` 时用监督器的线程模式自动 tick；传 False 则
+        只置为启用，由调用方自行 ``tick``（Task 78 的自动 opt-in 走这条）。
+
+        ``source`` 只用于状态快照标明开关来源（``env`` / ``config`` /
+        ``manual``），不影响行为。
+        """
+        target = str(device_id or "").strip()
+        if not target:
+            target = str(self._last_device_id or "").strip()
+        if not target:
+            raise SDRUserError(
+                "未指定要自动重连的设备",
+                suggestion=("先 connect() 一次，或显式传入 device_id"
+                            "（如 'debug' 或真实设备序列号）。"),
+            )
+        if self._sdr_supervisor is not None:
+            self._sdr_supervisor.disable()
+
+        def _attempt() -> bool:
+            # 监督器内部重连会经 connect() → disconnect()：此时不能停掉
+            # 正在工作的监督器，否则第一次重连成功就把它关了。
+            self._sdr_reconnecting = True
+            try:
+                return bool(self.connect(target))
+            finally:
+                self._sdr_reconnecting = False
+
+        supervisor = SdrLinkSupervisor(
+            connect_fn=_attempt,
+            is_connected_fn=self.is_connected,
+            max_attempts=max_attempts,
+            base_delay_s=base_delay_s,
+            max_delay_s=max_delay_s,
+        )
+        self._sdr_autoreconnect_suppressed = False
+        self._sdr_autoreconnect_source = str(source or "manual")
+        self._sdr_supervisor = supervisor
+        supervisor.enable()
+        if start_thread:
+            supervisor.start()
+        return self.sdr_reconnect_status()
+
+    def disable_sdr_autoreconnect(self) -> dict:
+        """显式关闭 SDR 常驻重连（立即唤醒并停止线程），返回状态。
+
+        置抑制位：同进程内后续 connect 成功也不会再自动拉起监督器，
+        用户显式关闭的意图必须压过 opt-in 开关。
+        """
+        self._sdr_autoreconnect_suppressed = True
+        supervisor = self._sdr_supervisor
+        if supervisor is not None:
+            supervisor.disable()
+        return self.sdr_reconnect_status()
+
+    def sdr_reconnect_status(self) -> dict:
+        """当前重连状态；未启用过时返回完整空态（enabled=False）。
+
+        ``source`` 标明 opt-in 开关来源：``env`` / ``config`` / ``default``
+        （未开启且无配置）/ ``manual``（调用方显式 enable）。
+        """
+        source = self._sdr_autoreconnect_source
+        supervisor = self._sdr_supervisor
+        if supervisor is None:
+            return {
+                "enabled": False,
+                "connected": self.is_connected(),
+                "attempts": 0,
+                "max_attempts": 0,
+                "next_retry_in_s": 0.0,
+                "last_error": "",
+                "stopped_reason": "",
+                "source": source,
+            }
+        status = supervisor.status()
+        status["source"] = source
+        return status
+
+    def sdr_reconnect_tick(self, now: Optional[float] = None) -> bool:
+        """驱动一次重连检查（``start_thread=False`` 时由调用方周期性调用）。"""
+        supervisor = self._sdr_supervisor
+        if supervisor is None:
+            return self.is_connected()
+        return supervisor.tick(now)
 
     # ==================================================================
     # 接收参数
@@ -468,14 +728,25 @@ class SDRController:
                 suggestion=f"可用模式：{', '.join(VALID_MODES)}",
             )
         self._demod = m
+        # 模式变了：上一次「带宽与模式是否一致」的判断已失效，必须清掉，
+        # 否则状态面会把旧模式的结论贴到新模式上。
+        self._bandwidth_warning = ""
 
     def get_demod(self) -> str:
         """当前解调模式。"""
         return self._demod
 
     def set_bandwidth(self, hz: float) -> bool:
-        """设置信道带宽（Hz）。已连接时下发后端，失败不更新本地缓存。"""
+        """设置信道带宽（Hz）。已连接时下发后端，失败不更新本地缓存。
+
+        显式设带宽是**强制语义**：即使与当前解调模式的默认通带不一致也照
+        用户值下发；不一致只作为提示记录在 ``get_status().bandwidth_warning``
+        （成功后写入，失败保持原缓存与原提示，避免对未生效的值发警告）。
+        """
         hz = float(hz)
+        check = check_bandwidth(self._demod, hz)
+        if not check["ok"]:
+            logger.warning("带宽与解调模式不一致: %s", check["reason"])
         if self._connected and self._backend is not None:
             fn = getattr(self._backend, "set_bandwidth", None)
             if callable(fn):
@@ -489,6 +760,7 @@ class SDRController:
                                    self.setter_failure_text("带宽"))
                     return False
         self._bandwidth_hz = hz
+        self._bandwidth_warning = "" if check["ok"] else str(check["reason"])
         return True
 
     def set_gain(self, db: float) -> bool:
@@ -736,10 +1008,24 @@ class SDRController:
             arr = self._backend.read_samples(int(n))
         except Exception as e:
             logger.warning("read_samples 失败: %s", e)
+            self.last_read_reason = None
             return None
         if arr is None:
+            self._note_read_reason()
             return None
-        return np.asarray(arr, dtype=np.complex64)
+        out = np.asarray(arr, dtype=np.complex64)
+        if out.size == 0:
+            # 有界读超时/在途都会返回空数组：把后端给的结构化原因带到控制面，
+            # 上层（CLI/工具）才能说“超时未收到样本”，而不是含糊的“无数据”。
+            self._note_read_reason()
+            return out
+        self.last_read_reason = None
+        return out
+
+    def _note_read_reason(self) -> None:
+        """把后端 ``last_read_reason`` 抄到控制面（没有就留 None）。"""
+        reason = getattr(self._backend, "last_read_reason", None)
+        self.last_read_reason = reason if isinstance(reason, dict) else None
 
     def read_spectrum(self, nfft: int = 1024) -> Optional[np.ndarray]:
         """读一帧功率谱（dB，长度 nfft）。未连接返回 None。"""
@@ -1147,8 +1433,8 @@ class SDRController:
 
         真实数据优先：先用缓存/在线 TLE（含编号↔名称↔来源校验）；身份不符
         直接拒绝（绝不拿错轨道算过境）。取新失败时沿用旧缓存并标
-        ``refresh_status="not_updated"``；完全无数据才退回内置表，且明确标注
-        「未核实/合成回退」并把时刻降到分钟级。
+        ``refresh_status="not_updated"``；完全无数据返回 ``error="no_tle"`` 与
+        「无 TLE，无法预报」——仓内不再内置合成 TLE 回退。
 
         ``min_elevation_deg`` / ``window_hours`` 为**显式注入**的筛选门与搜索
         窗口：桌面侧可读同源设置 ``settings.effective_pass_min_elevation_deg()``
@@ -1221,7 +1507,19 @@ class SDRController:
             except Exception as e:  # noqa: BLE001 - 无真实数据 → 诚实回退并标注
                 fallback_reason = str(e)
             if not line1:
-                line1, line2 = BUILTIN_TLE[name]
+                builtin = BUILTIN_TLE.get(name)
+                if builtin is None:
+                    # 仓内已无合成 TLE：无真实来源就诚实空态，不拿占位值算过境。
+                    return {
+                        "error": "no_tle",
+                        "satellite": name,
+                        "catnr": int(norad),
+                        "suggestion": ("无 TLE，无法预报：在线/缓存均未取到该星"
+                                       "轨道根数，且仓内不再内置合成 TLE。"
+                                       "请联网刷新或导入用户 TLE 文件。"),
+                        "tle_source": "none（无内置合成 TLE）",
+                    }
+                line1, line2 = builtin
                 refresh_status = (f"not_updated（{fallback_reason}）"
                                   if fallback_reason else "builtin_fallback")
                 tle_source = ("builtin_table（内置合成 TLE 回退，"
@@ -1502,7 +1800,9 @@ class SDRController:
         def pump() -> None:
             while not self._recorder_stop.is_set():
                 iq = self._read_raw_iq(8192)
-                if iq is not None:
+                # stop 已置位就不写：有界读可能刚好在 stop 之后返回，
+                # 晚到的块不能写进已 close() 的录制器（否则写已关闭文件）。
+                if iq is not None and not self._recorder_stop.is_set():
                     rec.write(iq)
                 self._recorder_stop.wait(0.005)
 
@@ -1678,6 +1978,29 @@ class SDRController:
         return out
 
     # ==================================================================
+    # 运行时数据源快照（Task 70-73）
+    # ==================================================================
+    def set_gnss_monitor(self, monitor: Any) -> None:
+        """显式接入 GNSS 监视器（仅登记引用：不 start、不打开串口）。"""
+        self._gnss_monitor = monitor
+        self._runtime_sources.set_gnss(monitor)
+
+    def get_runtime_sources(self) -> dict:
+        """只读快照：SDR / GNSS / 时间 / 站址来源（不启动硬件）。"""
+        return self._runtime_sources.snapshot()
+
+    def sync_runtime_sources(self) -> dict:
+        """显式把当前 GNSS fix/UTC 推给时间引擎与站址，返回快照。
+
+        不做后台轮询/自动重连；调用方（UI/CLI/MCP）显式触发。
+        """
+        return self._runtime_sources.sync_gnss()
+
+    def release_runtime_sources(self, reason: str = "显式释放 GNSS 授时/站址") -> dict:
+        """显式释放 GNSS 授时/站址：回退系统时钟与手动/配置站址。"""
+        return self._runtime_sources.release(reason=reason)
+
+    # ==================================================================
     # 系统
     # ==================================================================
     def get_status(self) -> SystemStatus:
@@ -1698,6 +2021,7 @@ class SDRController:
             sample_rate_hz=self.get_sample_rate(),
             demod=self._demod,
             gain_db=self.get_gain(),
+            bandwidth_warning=self._bandwidth_warning,
             audio_running=self._audio_running,
             recording=self._recorder is not None,
             remote_control=(
@@ -1708,10 +2032,13 @@ class SDRController:
             ),
             cpu_percent=cpu,
             mem_percent=mem,
+            runtime_sources=self.get_runtime_sources(),
         )
 
     def shutdown(self) -> None:
         """优雅关闭：停音频/录制/扫描/解码/服务并断开设备。"""
+        # 先停重连，避免断开后又触发一次自动连接。
+        self.disable_sdr_autoreconnect()
         self.stop_web_server()
         self.stop_remote_control()
         self.stop_audio()

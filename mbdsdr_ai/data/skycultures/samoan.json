@@ -1,0 +1,573 @@
+{
+  "id": "samoan",
+  "meta": {
+    "schema": "mbdsdr.sky_culture.v1",
+    "id": "samoan",
+    "display_name": "Samoan",
+    "native_name": "",
+    "region": "Polynesia",
+    "classification": [
+      "traditional"
+    ],
+    "source": "Stellarium skyculture samoan",
+    "source_url": "https://github.com/Stellarium/stellarium/tree/master/skycultures/samoan",
+    "source_license": "CC BY-SA 4.0",
+    "source_license_url": "https://creativecommons.org/licenses/by-sa/4.0/",
+    "attribution": "Stellarium sky culture 'samoan'; authors: Jake Fitisemanu (jjfitisemanu (a^t^) gmail.com) with consultation of Samoan cultural custodians and published historical sources. Programming support from Dan Smale (CC BY-SA 4.0). Converted to HIP line segments only; no artwork or description images were copied.",
+    "source_file": "reference/stellarium/skycultures/samoan/index.json",
+    "source_file_sha256": "a03da7aef99a68dbf6873533d213113e45d323f1cb4f6f63a6d16494d4c76359",
+    "description_file": "reference/stellarium/skycultures/samoan/description.md",
+    "description_file_sha256": "48458974c3d4991eb1c74fa5a58c61fc6ee05efc1398f793139160280d874598",
+    "conversion_scope": "Only constellations[].lines, id and common_name (plus optional common_names star labels) are converted; illustrations, artwork and description text are not copied.",
+    "names_scope": "Explicit common_names labels take precedence; stars without an explicit label inherit the constellation/asterism name they belong to.",
+    "group_count": 14,
+    "edge_count": 60,
+    "name_count": 68,
+    "unresolved_hip_count": 0,
+    "unresolved_hips": [],
+    "unresolved_token_count": 0,
+    "unresolved_tokens": [],
+    "generated_utc": "2026-11-17T17:13:23Z",
+    "data_sha256": "25316832bc69c686d36b7b5df16524fd296020adfa4603981e21a47365eeb174"
+  },
+  "groups": [
+    {
+      "group_id": "CON samoan 001",
+      "names": {
+        "en": "Triggerfish",
+        "native": "Sumu"
+      },
+      "lines": [
+        [
+          61084,
+          60718
+        ],
+        [
+          62434,
+          59747
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON samoan 002",
+      "names": {
+        "en": "Two men",
+        "native": "Luatagata"
+      },
+      "lines": [
+        [
+          68702,
+          71683
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON samoan 003",
+      "names": {
+        "en": "Triad of moons",
+        "native": "Tolugāmāuli"
+      },
+      "lines": [
+        [
+          26727,
+          26311,
+          25930
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON samoan 004",
+      "names": {
+        "en": "Wild duck",
+        "native": "Toloa"
+      },
+      "lines": [
+        [
+          80763,
+          80112,
+          78401,
+          78820
+        ],
+        [
+          78401,
+          78104
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON samoan 005",
+      "names": {
+        "en": "Fishhook lure",
+        "native": "Faipā"
+      },
+      "lines": [
+        [
+          85696,
+          85927,
+          86670,
+          87073,
+          86228,
+          84143,
+          82671,
+          82514,
+          82396
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON samoan 006",
+      "names": {
+        "en": "Pigeon Perch",
+        "native": "Tūlālupe"
+      },
+      "lines": [
+        [
+          86228,
+          87073,
+          85927
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON samoan 007",
+      "names": {
+        "en": "Kingfisher",
+        "native": "Ti'otala"
+      },
+      "lines": [
+        [
+          102532,
+          102281,
+          101769,
+          101421
+        ],
+        [
+          102532,
+          101958,
+          101769
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON samoan 008",
+      "names": {
+        "en": "Grasshopper",
+        "native": "Sē"
+      },
+      "lines": [
+        [
+          107354,
+          112440,
+          113881,
+          113963
+        ],
+        [
+          112440,
+          115250
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON samoan 009",
+      "names": {
+        "en": "Carrying pole",
+        "native": "Amoga"
+      },
+      "lines": [
+        [
+          22449,
+          24331,
+          25930,
+          26311,
+          26727,
+          29651
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON samoan 010",
+      "names": {
+        "en": "Candlenut torch",
+        "native": "Tuigālama"
+      },
+      "lines": [
+        [
+          28614,
+          28716,
+          27913,
+          28614
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON samoan 011",
+      "names": {
+        "en": "Tongs",
+        "native": "I'ofi"
+      },
+      "lines": [
+        [
+          25428,
+          20205,
+          26451
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON samoan 012",
+      "names": {
+        "en": "Sea monster",
+        "native": "Tanifā"
+      },
+      "lines": [
+        [
+          12706,
+          14135,
+          13954,
+          12828,
+          11484,
+          12706,
+          10826,
+          9487
+        ],
+        [
+          10826,
+          8645,
+          8102,
+          9347
+        ],
+        [
+          8645,
+          6537,
+          5364,
+          3419,
+          1562,
+          5364
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON samoan 013",
+      "names": {
+        "en": "Heirloom Warclub",
+        "native": "'Anava"
+      },
+      "lines": [
+        [
+          24608,
+          33449,
+          41704,
+          58001,
+          59774,
+          41704
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON samoan 014",
+      "names": {
+        "en": "Great Adze",
+        "native": "To'ivā"
+      },
+      "lines": [
+        [
+          49669,
+          49583,
+          50583,
+          50335,
+          48455,
+          47908
+        ]
+      ],
+      "kind": "constellation"
+    }
+  ],
+  "names": {
+    "32349": {
+      "en": "Gliding Star",
+      "native": "Fētūsolonuʻu"
+    },
+    "68702": {
+      "en": "Mea",
+      "native": "Mea"
+    },
+    "71683": {
+      "en": "Filo",
+      "native": "Filo"
+    },
+    "61084": {
+      "en": "Triggerfish",
+      "native": "Sumu"
+    },
+    "60718": {
+      "en": "Triggerfish",
+      "native": "Sumu"
+    },
+    "62434": {
+      "en": "Triggerfish",
+      "native": "Sumu"
+    },
+    "59747": {
+      "en": "Triggerfish",
+      "native": "Sumu"
+    },
+    "26727": {
+      "en": "Triad of moons",
+      "native": "Tolugāmāuli"
+    },
+    "26311": {
+      "en": "Triad of moons",
+      "native": "Tolugāmāuli"
+    },
+    "25930": {
+      "en": "Triad of moons",
+      "native": "Tolugāmāuli"
+    },
+    "80763": {
+      "en": "Wild duck",
+      "native": "Toloa"
+    },
+    "80112": {
+      "en": "Wild duck",
+      "native": "Toloa"
+    },
+    "78401": {
+      "en": "Wild duck",
+      "native": "Toloa"
+    },
+    "78820": {
+      "en": "Wild duck",
+      "native": "Toloa"
+    },
+    "78104": {
+      "en": "Wild duck",
+      "native": "Toloa"
+    },
+    "85696": {
+      "en": "Fishhook lure",
+      "native": "Faipā"
+    },
+    "85927": {
+      "en": "Fishhook lure",
+      "native": "Faipā"
+    },
+    "86670": {
+      "en": "Fishhook lure",
+      "native": "Faipā"
+    },
+    "87073": {
+      "en": "Fishhook lure",
+      "native": "Faipā"
+    },
+    "86228": {
+      "en": "Fishhook lure",
+      "native": "Faipā"
+    },
+    "84143": {
+      "en": "Fishhook lure",
+      "native": "Faipā"
+    },
+    "82671": {
+      "en": "Fishhook lure",
+      "native": "Faipā"
+    },
+    "82514": {
+      "en": "Fishhook lure",
+      "native": "Faipā"
+    },
+    "82396": {
+      "en": "Fishhook lure",
+      "native": "Faipā"
+    },
+    "102532": {
+      "en": "Kingfisher",
+      "native": "Ti'otala"
+    },
+    "102281": {
+      "en": "Kingfisher",
+      "native": "Ti'otala"
+    },
+    "101769": {
+      "en": "Kingfisher",
+      "native": "Ti'otala"
+    },
+    "101421": {
+      "en": "Kingfisher",
+      "native": "Ti'otala"
+    },
+    "101958": {
+      "en": "Kingfisher",
+      "native": "Ti'otala"
+    },
+    "107354": {
+      "en": "Grasshopper",
+      "native": "Sē"
+    },
+    "112440": {
+      "en": "Grasshopper",
+      "native": "Sē"
+    },
+    "113881": {
+      "en": "Grasshopper",
+      "native": "Sē"
+    },
+    "113963": {
+      "en": "Grasshopper",
+      "native": "Sē"
+    },
+    "115250": {
+      "en": "Grasshopper",
+      "native": "Sē"
+    },
+    "22449": {
+      "en": "Carrying pole",
+      "native": "Amoga"
+    },
+    "24331": {
+      "en": "Carrying pole",
+      "native": "Amoga"
+    },
+    "29651": {
+      "en": "Carrying pole",
+      "native": "Amoga"
+    },
+    "28614": {
+      "en": "Candlenut torch",
+      "native": "Tuigālama"
+    },
+    "28716": {
+      "en": "Candlenut torch",
+      "native": "Tuigālama"
+    },
+    "27913": {
+      "en": "Candlenut torch",
+      "native": "Tuigālama"
+    },
+    "25428": {
+      "en": "Tongs",
+      "native": "I'ofi"
+    },
+    "20205": {
+      "en": "Tongs",
+      "native": "I'ofi"
+    },
+    "26451": {
+      "en": "Tongs",
+      "native": "I'ofi"
+    },
+    "12706": {
+      "en": "Sea monster",
+      "native": "Tanifā"
+    },
+    "14135": {
+      "en": "Sea monster",
+      "native": "Tanifā"
+    },
+    "13954": {
+      "en": "Sea monster",
+      "native": "Tanifā"
+    },
+    "12828": {
+      "en": "Sea monster",
+      "native": "Tanifā"
+    },
+    "11484": {
+      "en": "Sea monster",
+      "native": "Tanifā"
+    },
+    "10826": {
+      "en": "Sea monster",
+      "native": "Tanifā"
+    },
+    "9487": {
+      "en": "Sea monster",
+      "native": "Tanifā"
+    },
+    "8645": {
+      "en": "Sea monster",
+      "native": "Tanifā"
+    },
+    "8102": {
+      "en": "Sea monster",
+      "native": "Tanifā"
+    },
+    "9347": {
+      "en": "Sea monster",
+      "native": "Tanifā"
+    },
+    "6537": {
+      "en": "Sea monster",
+      "native": "Tanifā"
+    },
+    "5364": {
+      "en": "Sea monster",
+      "native": "Tanifā"
+    },
+    "3419": {
+      "en": "Sea monster",
+      "native": "Tanifā"
+    },
+    "1562": {
+      "en": "Sea monster",
+      "native": "Tanifā"
+    },
+    "24608": {
+      "en": "Heirloom Warclub",
+      "native": "'Anava"
+    },
+    "33449": {
+      "en": "Heirloom Warclub",
+      "native": "'Anava"
+    },
+    "41704": {
+      "en": "Heirloom Warclub",
+      "native": "'Anava"
+    },
+    "58001": {
+      "en": "Heirloom Warclub",
+      "native": "'Anava"
+    },
+    "59774": {
+      "en": "Heirloom Warclub",
+      "native": "'Anava"
+    },
+    "49669": {
+      "en": "Great Adze",
+      "native": "To'ivā"
+    },
+    "49583": {
+      "en": "Great Adze",
+      "native": "To'ivā"
+    },
+    "50583": {
+      "en": "Great Adze",
+      "native": "To'ivā"
+    },
+    "50335": {
+      "en": "Great Adze",
+      "native": "To'ivā"
+    },
+    "48455": {
+      "en": "Great Adze",
+      "native": "To'ivā"
+    },
+    "47908": {
+      "en": "Great Adze",
+      "native": "To'ivā"
+    }
+  },
+  "unresolved_hips": []
+}

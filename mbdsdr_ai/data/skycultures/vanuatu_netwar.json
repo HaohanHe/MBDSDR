@@ -1,0 +1,322 @@
+{
+  "id": "vanuatu_netwar",
+  "meta": {
+    "schema": "mbdsdr.sky_culture.v1",
+    "id": "vanuatu_netwar",
+    "display_name": "Vanuatu (Netwar)",
+    "native_name": "",
+    "region": "Melanesia",
+    "classification": [
+      "ethnographic"
+    ],
+    "source": "Stellarium skyculture vanuatu_netwar",
+    "source_url": "https://github.com/Stellarium/stellarium/tree/master/skycultures/vanuatu_netwar",
+    "source_license": "CC BY-SA 4.0",
+    "source_license_url": "https://creativecommons.org/licenses/by-sa/4.0/",
+    "attribution": "Stellarium sky culture 'vanuatu_netwar'; authors: Dominik M. Ramík. Web: dominicweb.eu, e-mail: . Elders from local communities on Tanna, who contributed with their ancestral knowledge to this project: Jimmy Napip from Ikumhala, Lomai Tain from Ielkes, Sylvano Kapalu from Ipai, Iawilu Naumusapen from Lowkweria, Kasékasé from Imapul, Nausien from Lamlu, Pierrot Nako Yaru from Lowanatom, Joe Natuman from Lowkweria (CC BY-SA 4.0). Converted to HIP line segments only; no artwork or description images were copied.",
+    "source_file": "reference/stellarium/skycultures/vanuatu_netwar/index.json",
+    "source_file_sha256": "20c9665dddd0df73cc0e92d87d317248bf187fd9057c2394ca3923bf4be467e3",
+    "description_file": "reference/stellarium/skycultures/vanuatu_netwar/description.md",
+    "description_file_sha256": "289e0fab403f7b5ab841069d9dd4544f04a12231e087f550352214ee20f4d5bb",
+    "conversion_scope": "Only constellations[].lines, id and common_name (plus optional common_names star labels) are converted; illustrations, artwork and description text are not copied.",
+    "names_scope": "Explicit common_names labels take precedence; stars without an explicit label inherit the constellation/asterism name they belong to.",
+    "group_count": 10,
+    "edge_count": 28,
+    "name_count": 31,
+    "unresolved_hip_count": 0,
+    "unresolved_hips": [],
+    "unresolved_token_count": 0,
+    "unresolved_tokens": [],
+    "generated_utc": "2026-11-17T17:13:23Z",
+    "data_sha256": "9a2c3bf0706bb3eaa6b6f6c439d4a1afa35c1050311c03944cdcc6549b68b3fa"
+  },
+  "groups": [
+    {
+      "group_id": "CON vanuatu_netwar 001",
+      "names": {
+        "en": "Long Yoke",
+        "native": "Kasulia apam"
+      },
+      "lines": [
+        [
+          26727,
+          26311,
+          25930
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON vanuatu_netwar 002",
+      "names": {
+        "en": "Short Yoke",
+        "native": "Kasulia rerparep"
+      },
+      "lines": [
+        [
+          26237,
+          26235,
+          26241
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON vanuatu_netwar 003",
+      "names": {
+        "en": "Tweezers for Hot Stones",
+        "native": "Kou"
+      },
+      "lines": [
+        [
+          21421,
+          20894,
+          20205,
+          20455,
+          20889
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON vanuatu_netwar 004",
+      "names": {
+        "en": "Rat",
+        "native": "Kahaur rul"
+      },
+      "lines": [
+        [
+          85927,
+          85696,
+          87073,
+          86670,
+          85927
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON vanuatu_netwar 005",
+      "names": {
+        "en": "Fan",
+        "native": "Kilil"
+      },
+      "lines": [
+        [
+          27989,
+          25336,
+          25930,
+          24436,
+          27366,
+          26727,
+          27989
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON vanuatu_netwar 006",
+      "names": {
+        "en": "Four roads",
+        "native": "Suatu kywer"
+      },
+      "lines": [
+        [
+          61084,
+          60718
+        ],
+        [
+          62434,
+          59747
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON vanuatu_netwar 007",
+      "names": {
+        "en": "Young Boys from Lapnuman, Young Girls from Lapnuman",
+        "native": "Nowaswas Lapnuman, Neperawen Lapnuman"
+      },
+      "lines": [
+        [
+          17847,
+          17702,
+          17608,
+          17499,
+          17573,
+          17702
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON vanuatu_netwar 008",
+      "names": {
+        "en": "Earth oven",
+        "native": "Nowanuman"
+      },
+      "lines": [
+        [
+          25482,
+          25482
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON vanuatu_netwar 009",
+      "names": {
+        "en": "Earth oven",
+        "native": "Nowanuman"
+      },
+      "lines": [
+        [
+          3042,
+          3042
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON vanuatu_netwar 010",
+      "names": {
+        "en": "Ashes",
+        "native": "Nemrau"
+      },
+      "lines": [
+        [
+          39429,
+          39429
+        ]
+      ],
+      "kind": "constellation"
+    }
+  ],
+  "names": {
+    "21421": {
+      "native": "Kapaumeta"
+    },
+    "26727": {
+      "en": "Long Yoke",
+      "native": "Kasulia apam"
+    },
+    "26311": {
+      "en": "Long Yoke",
+      "native": "Kasulia apam"
+    },
+    "25930": {
+      "en": "Long Yoke",
+      "native": "Kasulia apam"
+    },
+    "26237": {
+      "en": "Short Yoke",
+      "native": "Kasulia rerparep"
+    },
+    "26235": {
+      "en": "Short Yoke",
+      "native": "Kasulia rerparep"
+    },
+    "26241": {
+      "en": "Short Yoke",
+      "native": "Kasulia rerparep"
+    },
+    "20894": {
+      "en": "Tweezers for Hot Stones",
+      "native": "Kou"
+    },
+    "20205": {
+      "en": "Tweezers for Hot Stones",
+      "native": "Kou"
+    },
+    "20455": {
+      "en": "Tweezers for Hot Stones",
+      "native": "Kou"
+    },
+    "20889": {
+      "en": "Tweezers for Hot Stones",
+      "native": "Kou"
+    },
+    "85927": {
+      "en": "Rat",
+      "native": "Kahaur rul"
+    },
+    "85696": {
+      "en": "Rat",
+      "native": "Kahaur rul"
+    },
+    "87073": {
+      "en": "Rat",
+      "native": "Kahaur rul"
+    },
+    "86670": {
+      "en": "Rat",
+      "native": "Kahaur rul"
+    },
+    "27989": {
+      "en": "Fan",
+      "native": "Kilil"
+    },
+    "25336": {
+      "en": "Fan",
+      "native": "Kilil"
+    },
+    "24436": {
+      "en": "Fan",
+      "native": "Kilil"
+    },
+    "27366": {
+      "en": "Fan",
+      "native": "Kilil"
+    },
+    "61084": {
+      "en": "Four roads",
+      "native": "Suatu kywer"
+    },
+    "60718": {
+      "en": "Four roads",
+      "native": "Suatu kywer"
+    },
+    "62434": {
+      "en": "Four roads",
+      "native": "Suatu kywer"
+    },
+    "59747": {
+      "en": "Four roads",
+      "native": "Suatu kywer"
+    },
+    "17847": {
+      "en": "Young Boys from Lapnuman, Young Girls from Lapnuman",
+      "native": "Nowaswas Lapnuman, Neperawen Lapnuman"
+    },
+    "17702": {
+      "en": "Young Boys from Lapnuman, Young Girls from Lapnuman",
+      "native": "Nowaswas Lapnuman, Neperawen Lapnuman"
+    },
+    "17608": {
+      "en": "Young Boys from Lapnuman, Young Girls from Lapnuman",
+      "native": "Nowaswas Lapnuman, Neperawen Lapnuman"
+    },
+    "17499": {
+      "en": "Young Boys from Lapnuman, Young Girls from Lapnuman",
+      "native": "Nowaswas Lapnuman, Neperawen Lapnuman"
+    },
+    "17573": {
+      "en": "Young Boys from Lapnuman, Young Girls from Lapnuman",
+      "native": "Nowaswas Lapnuman, Neperawen Lapnuman"
+    },
+    "25482": {
+      "en": "Earth oven",
+      "native": "Nowanuman"
+    },
+    "3042": {
+      "en": "Earth oven",
+      "native": "Nowanuman"
+    },
+    "39429": {
+      "en": "Ashes",
+      "native": "Nemrau"
+    }
+  },
+  "unresolved_hips": []
+}

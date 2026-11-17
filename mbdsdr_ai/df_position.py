@@ -403,11 +403,11 @@ def register_tool_registry(registry) -> None:
             "能力边界：窄带平面波假设；不解相干多径（多径需空间平滑/去相干）。"
         ),
         parameters={"type": "object", "properties": {
-            "snapshots": {"type": "array",
+            "snapshots": {"type": "array", "minItems": 2,
                           "description": "K 阵元复基带快拍（复数列表的列表）"},
             "sample_rate_hz": {"type": "number", "default": 1000000.0},
             "freq_hz": {"type": "number", "description": "信号载频（Hz）"},
-            "element_positions_m": {"type": "array",
+            "element_positions_m": {"type": "array", "minItems": 2,
                                     "description": "K×2/K×3 阵元坐标（米）"},
             "scan_step_deg": {"type": "number", "default": 0.5},
             "ambig_ratio": {"type": "number", "default": _AMBIG_RATIO},
@@ -426,8 +426,12 @@ def register_tool_registry(registry) -> None:
             "能力边界：2D 平面定位；3D 需站间高程差或仰角观测（不在本工具）。"
         ),
         parameters={"type": "object", "properties": {
-            "stations_m": {"type": "array", "description": "M×2 站坐标（米）"},
-            "tdoa_s": {"type": "array", "description": "各站时延差（秒）"},
+            # 少于 3 站只能给方位线（2 站）或无从定位，几何解算会直接拒；
+            # 把这条下限写进 schema，模型侧在调用前就能看到。
+            "stations_m": {"type": "array", "minItems": 3,
+                           "description": "M×2 站坐标（米）"},
+            "tdoa_s": {"type": "array", "minItems": 3,
+                       "description": "各站时延差（秒）"},
             "reference_idx": {"type": "integer", "default": 0},
             "max_iter": {"type": "integer", "default": 20},
             "max_resid_m": {"type": "number", "default": 1.0},

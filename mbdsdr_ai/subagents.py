@@ -23,6 +23,7 @@ Subagents：子代理框架，让主 Agent 可以创建专门的子 Agent 处理
 - CodeEvolver：代码进化专家，专门做自编程、算法优化、代码审查
 """
 
+import contextvars
 import json
 import os
 import time
@@ -35,6 +36,24 @@ from enum import Enum
 
 from .context_manager import estimate_message_tokens
 from .session_log import SESSION_DIR, SessionLog
+
+# 子 agent 递归深度上限（默认 2：主 agent → 子 agent → 孙 agent）。
+# 显式白名单也不能绕过：达到上限后 subagent_* 工具从视图移除且调用本地拒绝。
+MAX_SUBAGENT_DEPTH = 2
+
+# 当前线程/上下文所处的子 agent 深度。主 agent 为 0；每进入 execute_task +1。
+# 用 contextvars 而不是实例字段：同一线程里嵌套调用能自然继承，线程池
+# （submit_task 的 worker）显式 copy_context 继承，互不串线。
+_SUBAGENT_DEPTH: contextvars.ContextVar[int] = contextvars.ContextVar(
+    "mbdsdr_subagent_depth", default=0)
+
+
+def current_subagent_depth() -> int:
+    """当前执行上下文的子 agent 深度（主 agent=0）。"""
+    try:
+        return int(_SUBAGENT_DEPTH.get())
+    except Exception:
+        return 0
 
 
 class SubagentStatus(str, Enum):
@@ -75,6 +94,7 @@ class SubagentResult:
     steps_used: int = 0       # 实际消耗的 LLM 循环步数
     tools_used: List[str] = field(default_factory=list)  # 实际执行过的工具名
     truncated: bool = False   # 是否因 max_steps 上限被截断（partial 结果）
+    depth: int = 0            # 本次执行所处的子 agent 深度（根子 agent=1）
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -91,6 +111,7 @@ class SubagentResult:
             "steps_used": self.steps_used,
             "tools_used": self.tools_used,
             "truncated": self.truncated,
+            "depth": self.depth,
         }
 
 
@@ -338,6 +359,13 @@ class Subagent:
            结果，绝不伪装成完成。
         """
         start_time = time.time()
+        depth = current_subagent_depth() + 1
+        if depth > MAX_SUBAGENT_DEPTH:
+            # 深度超限：结构化拒绝。即使调用方显式把 subagent_* 放进
+            # allowed_tools，也不能绕过——这里在进入 LLM 循环之前就拒绝。
+            return self._reject_depth(task, depth, start_time)
+
+        depth_token = _SUBAGENT_DEPTH.set(depth)
         self.status = SubagentStatus.RUNNING
         self.current_task = task
         task.started_at = start_time
@@ -354,6 +382,7 @@ class Subagent:
             success=False,  # 先设为 False，成功后改为 True
             subagent_id=self.subagent_id,
             task_id=task.task_id,
+            depth=depth,
         )
 
         try:
@@ -370,6 +399,7 @@ class Subagent:
 
             result.output = output
             result.data = data
+            result.data.setdefault("depth", depth)
             result.steps_used = steps_used
             result.tools_used = list(tools_used)
             result.truncated = truncated
@@ -430,6 +460,41 @@ class Subagent:
             except Exception:
                 pass
 
+        _SUBAGENT_DEPTH.reset(depth_token)
+        return result
+
+    def _reject_depth(self, task: SubagentTask, depth: int,
+                      start_time: float) -> SubagentResult:
+        """深度超限的结构化拒绝结果（不进入 LLM 循环、不执行任何工具）。"""
+        detail = (f"subagent_depth_exceeded: 子代理深度 {depth} 超过上限 "
+                  f"{MAX_SUBAGENT_DEPTH}（主 agent → 子 agent 最大嵌套 "
+                  f"{MAX_SUBAGENT_DEPTH} 层）")
+        result = SubagentResult(
+            success=False,
+            output="",
+            error=detail,
+            subagent_id=self.subagent_id,
+            task_id=task.task_id,
+            status="error",
+            depth=depth,
+            data={"error_code": "subagent_depth_exceeded",
+                  "depth": depth, "max_depth": MAX_SUBAGENT_DEPTH},
+        )
+        result.execution_time = time.time() - start_time
+        task.status = SubagentStatus.FAILED
+        task.completed_at = time.time()
+        task.result = result
+        self.total_tasks_failed += 1
+        self.task_history.append(task)
+        self.status = SubagentStatus.IDLE
+        self.current_task = None
+        self._emit("error", task_id=task.task_id,
+                   code="subagent_depth_exceeded", detail=detail)
+        if task.callback:
+            try:
+                task.callback(result)
+            except Exception:
+                pass
         return result
 
     # ── LLM 循环内部实现 ────────────────────────────────
@@ -446,13 +511,18 @@ class Subagent:
 
         allowed_tools 非空 = 该集合；为 None = 全部注册工具但排除 subagent_*
         （防子代理递归调 subagent_execute 造成无限自激——最小同步实现里分层
-        递归会指数放大 LLM 调用）。显式列入 allowed_tools 的 subagent_* 仍
-        可用（用户显式授权嵌套子代理，递归风险自担）。
+        递归会指数放大 LLM 调用）。显式列入 allowed_tools 的 subagent_* 在
+        深度未达 MAX_SUBAGENT_DEPTH 时仍可用；一旦达到上限，**白名单也不能
+        绕过**——subagent_* 从视图移除（调用侧再兜底拒绝）。
         """
-        if self.allowed_tools is not None:
-            return set(self.allowed_tools)
         if self.tool_registry is None:
             return set()
+        at_depth_limit = current_subagent_depth() >= MAX_SUBAGENT_DEPTH
+        if self.allowed_tools is not None:
+            names = set(self.allowed_tools)
+            if at_depth_limit:
+                names = {n for n in names if not n.startswith("subagent_")}
+            return names
         try:
             names = set(self.tool_registry.get_tool_names())
         except Exception:
@@ -634,6 +704,16 @@ class Subagent:
                     tool_content = (f"拒绝：子代理 {self.subagent_id} 未注入 "
                                     f"tool_registry，工具 {name} 无法执行")
                     outcome = "error"
+                elif name.startswith("subagent_") and \
+                        current_subagent_depth() >= MAX_SUBAGENT_DEPTH:
+                    # 深度兜底：即使白名单里显式写了 subagent_*（或视图构造
+                    # 被绕过），达到上限也一律本地拒绝，不触达 registry。
+                    tool_content = (
+                        f"拒绝：subagent_depth_exceeded（子代理深度 "
+                        f"{current_subagent_depth()} 已达上限 "
+                        f"{MAX_SUBAGENT_DEPTH}），工具 {name} 未执行。"
+                        f"显式白名单不能绕过递归深度限制。")
+                    outcome = "denied"
                 elif name not in visible:
                     # 工具视图过滤：越界调用本地拒绝，不触达 registry、不上抛
                     tool_content = (
@@ -754,6 +834,18 @@ class SubagentManager:
         self.tool_registry = tool_registry
         self.model_manager = model_manager
         self.max_concurrent = max_concurrent
+        # 真实并发闸门：submit_task 的 worker 线程先 acquire 再执行，超限任务
+        # 在信号量上排队（不丢任务、不静默超额）。max_concurrent<=0 视为不限。
+        try:
+            _limit = int(max_concurrent)
+        except Exception:
+            _limit = 0
+        self.max_concurrent = _limit if _limit > 0 else 0
+        self._concurrency_sem = (
+            threading.BoundedSemaphore(self.max_concurrent)
+            if self.max_concurrent > 0 else None)
+        self._active_tasks = 0
+        self._pending_tasks = 0
         self.subagents: Dict[str, Subagent] = {}
         self.task_queue: List[SubagentTask] = []
         self._lock = threading.Lock()
@@ -861,8 +953,9 @@ class SubagentManager:
         if subagent is None:
             raise ValueError(f"子代理不存在: {subagent_id}")
 
-        self._task_counter += 1
-        task_id = f"task_{self._task_counter}"
+        with self._lock:
+            self._task_counter += 1
+            task_id = f"task_{self._task_counter}"
 
         task = SubagentTask(
             task_id=task_id,
@@ -872,12 +965,36 @@ class SubagentManager:
             callback=callback,
         )
 
-        # 异步执行
-        thread = threading.Thread(
-            target=subagent.execute_task,
-            args=(task,),
-            daemon=True,
-        )
+        with self._lock:
+            self._pending_tasks += 1
+
+        def _worker():
+            # 信号量在 worker 内 acquire：submit_task 立即返回，超限任务排队。
+            # 但**嵌套提交不占许可**：父任务在等待子任务时仍持有一个许可，
+            # 若子任务再排队等同一批许可，4 个父任务就能把信号量占满并互相
+            # 等死。嵌套的规模已由 MAX_SUBAGENT_DEPTH 单独限制，这里放行。
+            sem = self._concurrency_sem
+            nested = current_subagent_depth() > 0
+            use_sem = sem is not None and not nested
+            if use_sem:
+                sem.acquire()
+            try:
+                with self._lock:
+                    self._pending_tasks = max(0, self._pending_tasks - 1)
+                    self._active_tasks += 1
+                try:
+                    subagent.execute_task(task)
+                finally:
+                    with self._lock:
+                        self._active_tasks = max(0, self._active_tasks - 1)
+            finally:
+                if use_sem:
+                    sem.release()
+
+        # 深度 contextvar 按线程隔离，必须显式复制到 worker，否则子代理里
+        # 再嵌套调用会被当成根层（深度限制失效）。
+        ctx = contextvars.copy_context()
+        thread = threading.Thread(target=ctx.run, args=(_worker,), daemon=True)
         thread.start()
 
         return task_id
@@ -928,12 +1045,19 @@ class SubagentManager:
         total_completed = sum(sa.total_tasks_completed for sa in self.subagents.values())
         total_failed = sum(sa.total_tasks_failed for sa in self.subagents.values())
         running = sum(1 for sa in self.subagents.values() if sa.status == SubagentStatus.RUNNING)
+        with self._lock:
+            active = self._active_tasks
+            pending = self._pending_tasks
 
         return {
             "total_subagents": len(self.subagents),
             "running_subagents": running,
             "total_tasks_completed": total_completed,
             "total_tasks_failed": total_failed,
-            "max_concurrent": self.max_concurrent,
+            "max_concurrent": self.max_concurrent or None,
+            # 并发闸门是否真实生效（信号量存在才是真限流；<=0 时不宣称上限）。
+            "concurrency_enforced": self._concurrency_sem is not None,
+            "active_tasks": active,
+            "queued_tasks": pending,
             "agent_types": list(set(sa.agent_type for sa in self.subagents.values())),
         }

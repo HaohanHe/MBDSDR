@@ -21,13 +21,14 @@ import pytest
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(os.path.dirname(HERE))
 sys.path.insert(0, ROOT)
+sys.path.insert(0, os.path.join(ROOT, "tests", "fixtures"))
 
 from mbdsdr_ai import orbit  # noqa: E402
-from mbdsdr_ai.decoders import BUILTIN_TLE  # noqa: E402
+from tle_samples import NOAA19_TLE, install_test_tle  # noqa: E402
 from mbdsdr_ai.sat_passes import GroundStation, make_timescale, predict_passes  # noqa: E402
 
 NAME = "NOAA 19"
-LINES = list(BUILTIN_TLE[NAME][:2])
+LINES = list(NOAA19_TLE)
 GS = GroundStation(lat_deg=39.9, lon_deg=116.4, alt_m=50.0)
 START = make_timescale().utc(2026, 9, 25, 0, 0, 0)
 
@@ -52,6 +53,7 @@ def same_tle_for_orbit(monkeypatch):
         raise RuntimeError("test: 其他卫星不参与本次断言")
 
     monkeypatch.setattr(orbit, "fetch_tle", fake_fetch_tle)
+    install_test_tle(monkeypatch)
     return catnr
 
 

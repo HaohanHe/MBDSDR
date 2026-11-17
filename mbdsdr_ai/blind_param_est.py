@@ -116,6 +116,15 @@ def _score_class(feat: Dict[str, float]) -> List[Dict[str, Any]]:
     line_bins = feat["line_bins"]
     scores: List[Dict[str, Any]] = []
 
+    # 噪声/无信号门：占用带宽几乎铺满采样率 = 谱是平的，没有可辨结构。
+    # 旧规则会把它送进 μ4 分支（μ4≈0 → 8PSK 0.85）；全零样本（后端静音/
+    # 未连接）更会被判成 CW 0.95——两者都是把噪声/静默当信号。
+    # 实测：白噪声 bw_fraction≈1.00、amp_std≈0.52；本文件所有调制
+    # 信号 bw_fraction≤0.20，0.85 留足余量。
+    if feat["bw_fraction"] > 0.85:
+        return [{"modulation": "noise", "score": 0.9},
+                {"modulation": "unknown", "score": 0.3}]
+
     if a < 0.12:
         # 真恒包络：CW / FM / FSK
         if ph < 1.0:

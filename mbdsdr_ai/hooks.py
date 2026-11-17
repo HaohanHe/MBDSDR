@@ -34,6 +34,10 @@ from enum import Enum
 
 logger = logging.getLogger(__name__)
 
+# 同步钩子默认超时（秒）。钩子是观测/联动面，绝不允许一个坏钩子把工具调用
+# 或 chat 主循环无限期挂住；<=0 表示不设超时（旧行为，仅供特殊场景）。
+DEFAULT_HOOK_TIMEOUT_S = 5.0
+
 
 class EventType(str, Enum):
     """事件类型枚举。"""
@@ -149,19 +153,73 @@ class Hook:
     created_at: float = field(default_factory=time.time)
     trigger_count: int = 0  # 触发次数
     last_triggered: float = 0.0  # 最后触发时间
+    failure_count: int = 0  # 异常/超时次数
+    last_error: str = ""  # 最近一次失败诊断
 
-    def trigger(self, event: Event) -> Any:
-        """触发钩子。"""
+    def trigger(self, event: Event, timeout_s: Optional[float] = None) -> Any:
+        """触发钩子（带超时与异常隔离）。
+
+        timeout_s > 0 时回调在 daemon 线程内跑，超时即放弃等待并记录诊断；
+        回调异常同样记录后返回 None。两种情况都不会向调用方抛出——坏钩子
+        不能阻塞或打断工具调用/主循环。
+        """
         if not self.enabled:
             return None
         self.trigger_count += 1
         self.last_triggered = time.time()
+
+        if timeout_s and timeout_s > 0:
+            box: Dict[str, Any] = {}
+            done = threading.Event()
+
+            def _run():
+                try:
+                    box["result"] = self.callback(event)
+                except Exception as exc:  # noqa: BLE001 - 钩子异常必须隔离
+                    box["error"] = exc
+                finally:
+                    done.set()
+
+            worker = threading.Thread(
+                target=_run, name=f"hook-{self.hook_id}", daemon=True)
+            worker.start()
+            if not done.wait(float(timeout_s)):
+                self._record_failure(
+                    f"timeout: 钩子 {self.hook_id}（{self.event_type}）"
+                    f"超过 {timeout_s}s 未返回，已放弃等待")
+                return None
+            if "error" in box:
+                exc = box["error"]
+                self._record_failure(
+                    f"{type(exc).__name__}: {exc}（钩子 {self.hook_id}，"
+                    f"{self.event_type}）")
+                return None
+            return box.get("result")
+
         try:
             return self.callback(event)
         except Exception as e:
-            # 钩子错误不应该影响主流程
-            print(f"[Hook Error] {self.hook_id} ({self.event_type}): {e}")
+            self._record_failure(
+                f"{type(e).__name__}: {e}（钩子 {self.hook_id}，"
+                f"{self.event_type}）")
             return None
+
+    def _record_failure(self, detail: str) -> None:
+        """记录失败诊断：计数 + 最近错误 + 日志（绝不抛异常）。
+
+        保留旧行为的标准输出留痕（既有测试/运维按 stdout 检索 Hook Error），
+        同时写 logger，便于结构化日志采集。
+        """
+        self.failure_count += 1
+        self.last_error = detail
+        try:
+            print(f"[Hook Error] {detail}")
+        except Exception:
+            pass
+        try:
+            logger.warning("[Hook Error] %s", detail)
+        except Exception:
+            pass
 
 
 class HookManager:
@@ -176,12 +234,18 @@ class HookManager:
     - 事件历史记录
     """
 
-    def __init__(self, max_history: int = 1000):
+    def __init__(self, max_history: int = 1000,
+                 hook_timeout_s: float = DEFAULT_HOOK_TIMEOUT_S,
+                 max_diagnostics: int = 200):
         self._hooks: Dict[str, List[Hook]] = {}  # event_type -> [Hook]
         self._all_hooks: List[Hook] = []  # 通配符钩子
         self._hook_index: Dict[str, Hook] = {}  # hook_id -> Hook
         self._history: List[Event] = []  # 事件历史
         self._max_history = max_history
+        self.hook_timeout_s = hook_timeout_s
+        self._max_diagnostics = max_diagnostics
+        self._diagnostics: List[Dict[str, Any]] = []
+        self._seen_failures: Dict[str, int] = {}
         self._lock = threading.Lock()
         self._async_enabled = False
         self._async_queue: List[Event] = []
@@ -271,17 +335,45 @@ class HookManager:
         # 执行特定事件类型的钩子
         hooks = self._hooks.get(event.event_type, [])
         for hook in hooks:
-            result = hook.trigger(event)
+            result = hook.trigger(event, timeout_s=self.hook_timeout_s)
             if result is not None:
                 results.append(result)
 
         # 执行通配符钩子
         for hook in self._all_hooks:
-            result = hook.trigger(event)
+            result = hook.trigger(event, timeout_s=self.hook_timeout_s)
             if result is not None:
                 results.append(result)
 
+        # 失败诊断落账（按 failure_count 增量记录，同一钩子每次新失败都留痕）
+        for hook in hooks + self._all_hooks:
+            prev = self._seen_failures.get(hook.hook_id, 0)
+            if hook.failure_count > prev:
+                self._seen_failures[hook.hook_id] = hook.failure_count
+                self._record_diagnostic(hook, event)
+
         return results
+
+    def _record_diagnostic(self, hook: Hook, event: Event) -> None:
+        """把钩子最近一次失败写入有界诊断队列（不抛异常）。"""
+        try:
+            with self._lock:
+                self._diagnostics.append({
+                    "hook_id": hook.hook_id,
+                    "event_type": event.event_type,
+                    "error": hook.last_error,
+                    "failure_count": hook.failure_count,
+                    "timestamp": time.time(),
+                })
+                if len(self._diagnostics) > self._max_diagnostics:
+                    self._diagnostics = self._diagnostics[-self._max_diagnostics:]
+        except Exception:
+            pass
+
+    def get_diagnostics(self, limit: int = 50) -> List[Dict[str, Any]]:
+        """读取最近的钩子失败诊断（默认 50 条）。"""
+        with self._lock:
+            return list(self._diagnostics[-limit:])
 
     def veto_for(self, event: Event) -> Optional[Dict[str, Any]]:
         """触发事件并提取否决决定（用于 AGENT_PRE_TOOL_USE 等可否决事件）。
@@ -361,6 +453,8 @@ class HookManager:
                     "enabled": hook.enabled,
                     "trigger_count": hook.trigger_count,
                     "last_triggered": hook.last_triggered,
+                    "failure_count": hook.failure_count,
+                    "last_error": hook.last_error,
                     "created_at": hook.created_at,
                 })
         return result
@@ -386,6 +480,8 @@ class HookManager:
             "event_types": event_types,
             "total_triggers": total_triggers,
             "history_size": len(self._history),
+            "diagnostics_size": len(self._diagnostics),
+            "hook_timeout_s": self.hook_timeout_s,
             "async_enabled": self._async_enabled,
         }
 

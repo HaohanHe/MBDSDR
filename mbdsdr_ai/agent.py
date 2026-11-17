@@ -33,7 +33,7 @@ from .context_manager import (
     get_model_context_window,
     estimate_tokens,
 )
-from .model_manager import ModelManager
+from .model_manager import ModelManager, is_local_endpoint
 from .tool_registry import ToolRegistry, ToolResult, hex_bytes, clean_exc
 from .conversation import ConversationStore
 from .session_log import SessionLog
@@ -60,7 +60,8 @@ from .orchestrator import Orchestrator, Task, TaskPriority
 from .code_editor import CodeEditor, EditRecord, EditStatus
 from .astronomy import Observer, EquatorialCoord, AltAzCoord, AntennaParams, unix_to_jd, jd_to_mjd, jd_to_gmst, jd_to_lst, lst_to_hms, compute_refraction, compute_airmass, compute_pointing_guidance
 from .amr import AMRClassifier, AMRResult, ModulationType
-from .error_catalog import retryable, suggestion, user_message
+from .error_catalog import (exception_code, retryable, suggestion,
+                            user_message)
 from .tool_guard import TRIGGER_MODEL
 
 
@@ -159,6 +160,35 @@ def _tool_result_to_model_content(result) -> str:
     if ns:
         content = content + "\n[下一步建议] " + ns
     return content
+
+
+def _structured_error_code(result) -> str:
+    """从 ToolResult 提取可重试判据用的结构化错误码。
+
+    只认三类来源（Task 40）：``error_code`` 字段、``timed_out`` 标记、
+    ToolResult 数据里的 ``error_code``/``code``。``error`` 字段仅当它本身
+    就是 ASCII 结构化标识（如 ``device_busy`` / ``exception:ValueError``）
+    时才采用；面向用户的中文文案一律不参与匹配——避免「文案改一个字，
+    重试行为就变」。
+    """
+    if getattr(result, "success", False):
+        return ""
+    code = str(getattr(result, "error_code", "") or "").strip()
+    if code:
+        return code
+    if bool(getattr(result, "timed_out", False)):
+        return "tool_timeout"
+    data = getattr(result, "data", None)
+    if isinstance(data, dict):
+        if data.get("timed_out") is True or data.get("timeout") is True:
+            return "tool_timeout"
+        cand = data.get("error_code") or data.get("code") or ""
+        if isinstance(cand, str) and cand.strip():
+            return cand.strip()
+    err = str(getattr(result, "error", "") or "").strip()
+    if err and all(c.isascii() and (c.isalnum() or c in "_:-") for c in err):
+        return err
+    return ""
 
 
 # 并发/取消相关的运行时字段是惰性创建的（测试里有些 agent 用 object.__new__
@@ -383,6 +413,21 @@ class MBDSDRAgent:
         # "那颗星是什么"——"AI 讲解层"这个差异点缺的正是这一块。
         from .sky_tools import register_sky_tools
         register_sky_tools(self)
+
+        # 注册 IQ 样本清单工具（只读）：把 Hugging Face 方向的「清单体检 +
+        # 按 iq_path 分组切分」接成模型可调用的入口，而不是只留 Python 函数。
+        from .iq_tools import register_iq_tools
+        register_iq_tools(self)
+
+        # 注册相机导演（只读规划）：让模型能决定用哪颗镜头、多大倍率。
+        # 相机在手机端，这里只产出方案与拒绝理由，不假装已经拍到了。
+        from .camera_tools import register_camera_tools
+        register_camera_tools(self)
+
+        # 注册 GNSS 粗指向：把 GSV 的每颗卫星仰角/SNR + 手机 IMU 变成可解释的
+        # 粗指向（或明确的拒绝理由）。只做计算，不自己去开串口。
+        from .gnss_tools import register_gnss_tools
+        register_gnss_tools(self)
 
         # 注册多模式数字解码（PSK31/RTTY/MFSK/FeldHell，依据公开无线电传标准实现）
         register_fldigi_modes_tools(self.tool_registry)
@@ -2531,6 +2576,34 @@ class MBDSDRAgent:
                         "缺硬件时不要调用，改用自然语言说明缺什么并给替代方案。")
 
         self.tool_registry.register(
+            name="sky_look_at",
+            description=(
+                "把天空视图的视轴转到指定方位/仰角（可选同时设定视场），"
+                "只改变本机视角，不碰任何硬件、不改变调谐。"
+                "用户说「看向天顶偏南」「把视角转到东边低空」这类话时调用。"
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "az_deg": {"type": "number",
+                               "description": "方位角（度，北=0，东=90）"},
+                    "alt_deg": {"type": "number",
+                                "description": "仰角（度，地平=0，天顶=90）"},
+                    "fov_deg": {"type": "number",
+                                "description": "可选：视场角（度）。越小越放大"},
+                },
+                "required": ["az_deg", "alt_deg"],
+            },
+            handler=lambda args: _enqueue({
+                "action": "look_at",
+                "az_deg": args.get("az_deg"),
+                "alt_deg": args.get("alt_deg"),
+                "fov_deg": args.get("fov_deg"),
+            }),
+            category="sky",
+        )
+
+        self.tool_registry.register(
             name="sky_tune_satellite",
             description=(
                 "把接收机调到天空视图当前选中的目标卫星（含实时多普勒修正）。"
@@ -4107,10 +4180,12 @@ class MBDSDRAgent:
             try:
                 return self.tool_registry.call_from_model(_tc)
             except Exception as _e:
+                _code = exception_code(_e)
                 return ToolResult(
                     success=False,
                     content=f"工具执行异常: {type(_e).__name__}: {_e}",
-                    error=str(_e),
+                    error=_code,
+                    error_code=_code,
                 )
 
         tool_start = time.time()
@@ -4118,7 +4193,9 @@ class MBDSDRAgent:
         for _attempt in range(2):  # 最多再重试 2 次
             if getattr(result, "success", False):
                 break
-            err_code = getattr(result, "error", "") or ""
+            # Task 40：只按结构化码（error_code / timed_out / exception:）判重试，
+            # 不再从中文 error 文案里匹配「超时/失败」等关键字。
+            err_code = _structured_error_code(result)
             if not err_code or not retryable(err_code):
                 break  # 无码或不可重试：交给模型改，不空转
             if self._cancel_pending():
@@ -4274,8 +4351,10 @@ class MBDSDRAgent:
         start_time = time.time()
         self.total_agent_calls += 1
 
-        # 检查 API key
-        if not self.config.api_key:
+        # 检查 API key：本机/内网端点（Ollama / vLLM / LM Studio）默认无鉴权，
+        # 不能因为没填 Key 就把「本地 DeepSeek 已可用」当成未配置。
+        if not self.config.api_key \
+                and not is_local_endpoint(getattr(self.config, "base_url", "")):
             return {
                 "content": "错误: API key 未设置。请配置硅基流动 API key 后使用。",
                 "tool_calls": [],
@@ -4831,16 +4910,24 @@ class MBDSDRAgent:
     def _subagents_status(self) -> Dict[str, Any]:
         """子代理子系统自报状态（Sprint 7）。无 manager 时降级为空。"""
         empty = {"available": False, "count": 0,
-                 "max_concurrent": None, "subagents": []}
+                 "max_concurrent": None, "concurrency_enforced": False,
+                 "active_tasks": 0, "queued_tasks": 0, "subagents": []}
         try:
             mgr = getattr(self, "subagent_manager", None)
             if mgr is None or not hasattr(mgr, "list_subagents"):
                 return empty
             subs = list(mgr.list_subagents())
+            stats = mgr.get_stats() if hasattr(mgr, "get_stats") else {}
             return {
                 "available": True,
                 "count": len(subs),
-                "max_concurrent": getattr(mgr, "max_concurrent", None),
+                "max_concurrent": stats.get(
+                    "max_concurrent", getattr(mgr, "max_concurrent", None)),
+                # 只有真实信号量存在时才宣称并发上限生效（Task 37）。
+                "concurrency_enforced": bool(
+                    stats.get("concurrency_enforced", False)),
+                "active_tasks": stats.get("active_tasks", 0),
+                "queued_tasks": stats.get("queued_tasks", 0),
                 "subagents": subs,
             }
         except Exception:
@@ -4868,8 +4955,13 @@ class MBDSDRAgent:
         else:
             lines.append("Hook 总线: 不可用")
         if sa.get("available"):
-            lines.append(f"子代理: {sa.get('count', 0)} 个存活"
-                         f"（并发上限 {sa.get('max_concurrent')}）")
+            if sa.get("concurrency_enforced"):
+                detail = (f"并发上限 {sa.get('max_concurrent')}（真实生效）"
+                          f" · 运行 {sa.get('active_tasks', 0)} / 排队 "
+                          f"{sa.get('queued_tasks', 0)}")
+            else:
+                detail = "未设并发上限"
+            lines.append(f"子代理: {sa.get('count', 0)} 个存活（{detail}）")
         else:
             lines.append("子代理: 不可用")
         return "\n".join(lines)
@@ -4989,10 +5081,15 @@ class MBDSDRAgent:
             sa = self._subagents_status()
             if not sa.get("available"):
                 return "子代理子系统不可用（无 subagent_manager）。"
+            if sa.get("concurrency_enforced"):
+                detail = (f"并发上限 {sa.get('max_concurrent')}（真实生效）"
+                          f"，运行 {sa.get('active_tasks', 0)} / 排队 "
+                          f"{sa.get('queued_tasks', 0)}")
+            else:
+                detail = "未设并发上限"
             lines = [
                 "子代理子系统:",
-                f"  存活子代理: {sa.get('count', 0)} 个"
-                f"（并发上限 {sa.get('max_concurrent')}）",
+                f"  存活子代理: {sa.get('count', 0)} 个（{detail}）",
             ]
             subs = sa.get("subagents", [])
             if subs:

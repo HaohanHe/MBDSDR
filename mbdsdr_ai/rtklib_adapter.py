@@ -15,7 +15,8 @@ rtklib_adapter.py — GNSS 时间/坐标/RINEX/SPP/NTRIP（独立 Python 实现�
 
 约定：
   - 物理常数采用公开 GPS/WGS-84 值：光速 c、GM、地球自转角速度、椭球参数。
-  - SPP 可用（合成星历 + 伪距 -> 解算位置）；PPP/RTK 仅留接口。
+  - SPP 可用（合成星历 + 伪距 -> 解算位置）；RTK 浮点解可用；
+    PPP 未实现：``ppp_locate`` 如实返回 ``unavailable`` 与原因，不冒充能力。
 
 RTKLIB 仅作技术参考与致谢，本仓未包含其源代码。
 """
@@ -555,6 +556,13 @@ class SPPLocator:
         ``error_budget.status`` 如实写 uncorrected，不退回典型值。
         """
         n = len(data.pr)
+        # 4 个未知数（X,Y,Z,钟差）。n<4 时 H 欠定，np.linalg.lstsq 会返回
+        # 最小范数解，且残差≈0——那是一个「数学上自洽、物理上无意义」的
+        # 假定位（1 颗星也能解出坐标）。宁可显式失败，不返回假位置。
+        if n < 4:
+            raise ValueError(
+                f"伪距单点定位至少需要 4 颗卫星（X,Y,Z,钟差 4 个未知数），"
+                f"收到 {n} 颗；少于 4 颗需已知高程/钟差约束，本实现不支持")
         t_use = data.t_gpst if t_gpst is None else t_gpst
  # 状态 x = [X, Y, Z, 接收机钟差 dtr(m)]
         x = np.array([x0[0], x0[1], x0[2], 0.0])
@@ -1038,6 +1046,30 @@ def spp_locate(rs_list: List[List[float]], dts_list: List[float],
                     dts=np.array(dts_list, dtype=float),
                     pr=np.array(pr_list, dtype=float))
     return SPPLocator().locate(data)
+
+
+PPP_UNAVAILABLE_REASON = "PPP 未实现：仅有接口"
+
+
+def ppp_locate(observations: Optional[List[Dict[str, Any]]] = None,
+               **_: Any) -> Dict[str, Any]:
+    """PPP 精密单点定位接口 —— 如实返回不可用，不冒充能力。
+
+    本仓没有 PPP 实现（需要精密星历/钟差、无电离层组合与相位模糊度处理）。
+    提供该入口只是为了契约完整：调用即返回结构化 ``unavailable``，绝不返回
+    ``None``，也绝不拿 SPP/RTK 结果顶替 PPP。
+
+    返回::
+
+        {"ok": False, "status": "unavailable", "fix_type": "NONE",
+         "reason": "PPP 未实现：仅有接口"}
+    """
+    return {
+        "ok": False,
+        "status": "unavailable",
+        "fix_type": "NONE",
+        "reason": PPP_UNAVAILABLE_REASON,
+    }
 
 
 def ntrip_connect(host: str, port: int = NTRIP_DEFAULT_PORT,

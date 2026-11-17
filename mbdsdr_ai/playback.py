@@ -74,9 +74,9 @@ def parse_sigmf_meta(meta_path: str) -> Dict[str, Any]:
         datatype, raw(原始 dict)
     缺字段时给安全默认值（sample_rate=0, freq=0, time_source=""），不抛异常。
 
-    time_source 取自 captures[0].mbdsdr:time_source（"gnss"|"system"），
-    由 mbdsdr_ai.gnss_timestamps 在录制端写入；旧文件无此字段时返回 ""（未知），
-    绝不臆断。
+    time_source 取自 captures[0].mbdsdr:time_source（"pps"|"nmea"|"ntp"|"none"|
+    "unknown"；旧文件可能是 "gnss"|"system"），由 mbdsdr_ai.gnss_timestamps 在
+    录制端写入；旧文件无此字段时返回 ""（未知），绝不臆断。
     """
     out: Dict[str, Any] = {
         "sample_rate_hz": 0.0,

@@ -128,3 +128,31 @@ def test_tool_handler_end_to_end(golden):
     bad = h({"bits": [0] * len(golden["bits"]),
              "layout_name": golden["layout"]})
     assert not bad.success
+
+
+# ── P0 工具锚点（Task 6.4）────────────────────────────────────
+def test_p0_anchor_suite_is_green():
+    """Task 2/3/4/5 各一条锚点必须在解码链回归网里真跑且 PASS。"""
+    from mbdsdr_ai.verify_chain import run_p0_anchors
+    r = run_p0_anchors()
+    failed = [i for i in r["items"] if not i["ok"]]
+    assert r["ok"], f"P0 锚点失败: {failed}"
+    assert {i["task"] for i in r["items"]} == {"P0-2", "P0-3", "P0-4", "P0-5"}
+    assert {i["tool"] for i in r["items"]} == {
+        "dvbs2_bch", "gps_nav", "df_position", "tc_uplink"}
+
+
+def test_p0_anchor_failure_is_reported_not_crashed(monkeypatch):
+    """锚点抛错 → 该项 ok=False 带原因，其余照跑（验收报告要看到是哪条）。"""
+    import mbdsdr_ai.verify_chain as vc
+
+    def _boom():
+        raise RuntimeError("bite")
+
+    monkeypatch.setattr(vc, "_anchor_tc_frame", _boom)
+    r = vc.run_p0_anchors()
+    assert not r["ok"]
+    assert len(r["items"]) == 4
+    bad = [i for i in r["items"] if not i["ok"]]
+    assert [i["tool"] for i in bad] == ["tc_uplink"]
+    assert "bite" in bad[0]["detail"]

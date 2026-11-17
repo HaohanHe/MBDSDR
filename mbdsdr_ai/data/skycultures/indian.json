@@ -1,0 +1,2644 @@
+{
+  "id": "indian",
+  "meta": {
+    "schema": "mbdsdr.sky_culture.v1",
+    "id": "indian",
+    "display_name": "Indian Vedic",
+    "native_name": "",
+    "region": "Southern Asia",
+    "classification": [
+      "traditional"
+    ],
+    "source": "Stellarium skyculture indian",
+    "source_url": "https://github.com/Stellarium/stellarium/tree/master/skycultures/indian",
+    "source_license": "CC BY-SA 4.0",
+    "source_license_url": "https://creativecommons.org/licenses/by-sa/4.0/",
+    "attribution": "Stellarium sky culture 'indian'; authors: - Tanmoy Saha; - Contributors from the sanskrit-coders community (esp Vishvas Vasuki) (CC BY-SA 4.0). Converted to HIP line segments only; no artwork or description images were copied.",
+    "source_file": "reference/stellarium/skycultures/indian/index.json",
+    "source_file_sha256": "6d84038cffeb37e0150e92e8c99d13238313baa0bedbf0f73cad654b894b93ef",
+    "description_file": "reference/stellarium/skycultures/indian/description.md",
+    "description_file_sha256": "ed3fba090fb2793db63e2ea1ad37db0af9473140f51b693ee7594184eab0f710",
+    "conversion_scope": "Only constellations[].lines, id and common_name (plus optional common_names star labels) are converted; illustrations, artwork and description text are not copied.",
+    "names_scope": "Explicit common_names labels take precedence; stars without an explicit label inherit the constellation/asterism name they belong to.",
+    "group_count": 49,
+    "edge_count": 281,
+    "name_count": 285,
+    "unresolved_hip_count": 1,
+    "unresolved_hips": [
+      33646
+    ],
+    "unresolved_token_count": 0,
+    "unresolved_tokens": [],
+    "generated_utc": "2026-11-17T16:26:20Z",
+    "data_sha256": "74a163cac90ba3dbb4a658a3c257b5f12e67feba5b6b1345c7c39dce97f91c87"
+  },
+  "groups": [
+    {
+      "group_id": "CON indian Aśv",
+      "names": {
+        "en": "With Horses",
+        "native": "अश्विनी",
+        "pronounce": "Aśvinī"
+      },
+      "lines": [
+        [
+          8832,
+          8903
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON indian Bhar",
+      "names": {
+        "en": "Bearer",
+        "native": "भरणी",
+        "pronounce": "Bharanī"
+      },
+      "lines": [
+        [
+          12719,
+          13061,
+          13209
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON indian Kṛt",
+      "names": {
+        "en": "Cutter",
+        "native": "कृत्तिकाः",
+        "pronounce": "Kṛttikā"
+      },
+      "lines": [
+        [
+          17851,
+          17847,
+          17702,
+          17608,
+          17499,
+          17531,
+          17573,
+          17579
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON indian Roh",
+      "names": {
+        "en": "Red",
+        "native": "रोहिणी",
+        "pronounce": "Rohiṇī"
+      },
+      "lines": [
+        [
+          21421,
+          21421
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON indian Mṛg",
+      "names": {
+        "en": "Deer's head",
+        "native": "मृगशिराः",
+        "pronounce": "Mṛgaśiras"
+      },
+      "lines": [
+        [
+          26207,
+          26176,
+          26366
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON indian MṛVy",
+      "names": {
+        "en": "Deer Hunter",
+        "native": "मृगव्याधः",
+        "pronounce": "Mṛgavyādha"
+      },
+      "lines": [
+        [
+          33160,
+          34045,
+          33347,
+          32349,
+          33977,
+          34444,
+          35037,
+          35904
+        ],
+        [
+          33579,
+          33856,
+          34444
+        ],
+        [
+          33152,
+          31592,
+          31416
+        ],
+        [
+          31592,
+          30324
+        ],
+        [
+          31592,
+          32349
+        ],
+        [
+          33579,
+          32759
+        ],
+        [
+          30122,
+          33579
+        ],
+        [
+          33347,
+          33160
+        ],
+        [
+          33152,
+          33579
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON indian Inv",
+      "names": {
+        "en": "Arrow",
+        "native": "इन्वकाः",
+        "pronounce": "Invakā"
+      },
+      "lines": [
+        [
+          26727,
+          26311,
+          25930
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON indian Śara",
+      "names": {
+        "en": "Reed forest",
+        "native": "शरवणम्",
+        "pronounce": "Śaravaṇa"
+      },
+      "lines": [
+        [
+          25044,
+          33646
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON indian Ārd",
+      "names": {
+        "en": "Moist",
+        "native": "आर्द्रा",
+        "pronounce": "Ārdrā"
+      },
+      "lines": [
+        [
+          27989,
+          27989
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON indian PVas",
+      "names": {
+        "en": "Wealth-restorer",
+        "native": "पुनर्वसू",
+        "pronounce": "Punarvasū"
+      },
+      "lines": [
+        [
+          36850,
+          37826
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON indian Puṣ",
+      "names": {
+        "en": "Nourisher",
+        "native": "पुष्यम्",
+        "pronounce": "Puṣya"
+      },
+      "lines": [
+        [
+          42911,
+          41822
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON indian Aśl",
+      "names": {
+        "en": "Embrace",
+        "native": "आश्लोषा",
+        "pronounce": "Aśleṣa"
+      },
+      "lines": [
+        [
+          43109,
+          42313,
+          42402,
+          42799,
+          43234
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON indian Magh",
+      "names": {
+        "en": "Bountiful",
+        "native": "मघा",
+        "pronounce": "Maghā"
+      },
+      "lines": [
+        [
+          49669,
+          49669
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON indian PPhā",
+      "names": {
+        "en": "Former Fruitful",
+        "native": "पूर्वफाल्गुनी",
+        "pronounce": "Pūrva phālgunī"
+      },
+      "lines": [
+        [
+          54872,
+          54879
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON indian UPhā",
+      "names": {
+        "en": "Latter Fruitful",
+        "native": "उत्तरफाल्गुनी",
+        "pronounce": "Uttara phālgunī"
+      },
+      "lines": [
+        [
+          57632,
+          57565
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON indian Hasta",
+      "names": {
+        "en": "Hand",
+        "native": "हस्तः",
+        "pronounce": "Hasta"
+      },
+      "lines": [
+        [
+          60965,
+          61359
+        ],
+        [
+          60965,
+          59803,
+          59316,
+          59199
+        ],
+        [
+          59316,
+          61359
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON indian Chitr",
+      "names": {
+        "en": "Spectacular",
+        "native": "चित्रा",
+        "pronounce": "Chitrā"
+      },
+      "lines": [
+        [
+          65474,
+          65474
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON indian Svā",
+      "names": {
+        "en": "Self mover",
+        "native": "स्वाती",
+        "pronounce": "Svātī"
+      },
+      "lines": [
+        [
+          69673,
+          69673
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON indian Viś",
+      "names": {
+        "en": "Well branched",
+        "native": "विशाखे",
+        "pronounce": "Viśākhā"
+      },
+      "lines": [
+        [
+          76333,
+          74785,
+          72622
+        ],
+        [
+          74785,
+          74392
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON indian Anur",
+      "names": {
+        "en": "Following Rādhā",
+        "native": "अनुराधाः",
+        "pronounce": "Anurādhā"
+      },
+      "lines": [
+        [
+          78820,
+          78401,
+          78265
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON indian Jyeṣ",
+      "names": {
+        "en": "Elder",
+        "native": "ज्येष्ठा",
+        "pronounce": "Jyeṣṭhā"
+      },
+      "lines": [
+        [
+          80112,
+          80763,
+          81266
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON indian Mūl",
+      "names": {
+        "en": "Root",
+        "native": "मूलम्",
+        "pronounce": "Mūla"
+      },
+      "lines": [
+        [
+          82396,
+          82545,
+          82729,
+          84143,
+          86228,
+          87073,
+          86670,
+          85927,
+          85696
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON indian PAṣ",
+      "names": {
+        "en": "Former invincible one",
+        "native": "पूर्वाषाढा",
+        "pronounce": "Pūrvāṣāḍhā"
+      },
+      "lines": [
+        [
+          90185,
+          89931
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON indian UAṣ",
+      "names": {
+        "en": "Latter invincible one",
+        "native": "उत्तराषाढा",
+        "pronounce": "Uttarāṣāḍhā"
+      },
+      "lines": [
+        [
+          92855,
+          93506
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON indian PBhā",
+      "names": {
+        "en": "Former blessed feet",
+        "native": "पूर्वप्रोष्ठपदाः",
+        "pronounce": "Pūrva bhādrapada"
+      },
+      "lines": [
+        [
+          113881,
+          113963
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON indian UBhā",
+      "names": {
+        "en": "Latter blessed feet",
+        "native": "उत्तरप्रोष्ठपदाः",
+        "pronounce": "Uttara bhādrapada"
+      },
+      "lines": [
+        [
+          1067,
+          667
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON indian Abh",
+      "names": {
+        "en": "Victorious",
+        "native": "अभिजित्",
+        "pronounce": "Abhijit"
+      },
+      "lines": [
+        [
+          91926,
+          91262,
+          91971
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON indian Śra",
+      "names": {
+        "en": "Ear",
+        "native": "श्रवणः",
+        "pronounce": "Śravaṇa"
+      },
+      "lines": [
+        [
+          98036,
+          97649,
+          97278
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON indian Dhani",
+      "names": {
+        "en": "Wealthiest",
+        "native": "धनिष्ठा",
+        "pronounce": "Dhaniṣṭhā"
+      },
+      "lines": [
+        [
+          102281,
+          101958
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON indian Śata",
+      "names": {
+        "en": "Hundred cures",
+        "native": "शतभिषक्",
+        "pronounce": "Śatabhiṣak"
+      },
+      "lines": [
+        [
+          110395,
+          110395
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON indian Rev",
+      "names": {
+        "en": "Leaper",
+        "native": "रेवती",
+        "pronounce": "Revatī"
+      },
+      "lines": [
+        [
+          5737,
+          5737
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON indian Meṣa",
+      "names": {
+        "en": "Aries",
+        "native": "मेषराशिः",
+        "pronounce": "Meṣa Rāśi"
+      },
+      "lines": [
+        [
+          13209,
+          9884,
+          8903,
+          9153,
+          9884
+        ],
+        [
+          13209,
+          13061
+        ],
+        [
+          13209,
+          13914,
+          14838
+        ],
+        [
+          13914,
+          10306,
+          9884
+        ],
+        [
+          10306,
+          8832
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON indian Vṛṣa",
+      "names": {
+        "en": "Taurus",
+        "native": "वृषराशिः",
+        "pronounce": "Vṛṣa Rāśi"
+      },
+      "lines": [
+        [
+          25428,
+          21881,
+          20889,
+          26451
+        ],
+        [
+          20205,
+          20455
+        ],
+        [
+          20205,
+          18724,
+          16369
+        ],
+        [
+          21421,
+          20889
+        ],
+        [
+          21421,
+          20894,
+          20205
+        ],
+        [
+          20889,
+          20648,
+          20455,
+          17847,
+          16369
+        ],
+        [
+          18907,
+          18724
+        ],
+        [
+          16369,
+          15900
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON indian Mith",
+      "names": {
+        "en": "Gemini",
+        "native": "मिथुनराशिः",
+        "pronounce": "Mithuna Rāśi"
+      },
+      "lines": [
+        [
+          31681,
+          34088,
+          35550,
+          35350,
+          32362
+        ],
+        [
+          35550,
+          36962,
+          37740
+        ],
+        [
+          36962,
+          37826
+        ],
+        [
+          36962,
+          36046,
+          34693,
+          36850
+        ],
+        [
+          34693,
+          33018
+        ],
+        [
+          34693,
+          32246,
+          30883
+        ],
+        [
+          32246,
+          30343,
+          29655,
+          28734
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON indian Kark",
+      "names": {
+        "en": "Cancer",
+        "native": "कर्कटराशिः",
+        "pronounce": "Karkaṭa Rāśi"
+      },
+      "lines": [
+        [
+          43103,
+          42806,
+          40843
+        ],
+        [
+          42806,
+          42911,
+          44066
+        ],
+        [
+          40526,
+          42911
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON indian Simh",
+      "names": {
+        "en": "Leo",
+        "native": "सिंहराशिः",
+        "pronounce": "Simha Rāśi"
+      },
+      "lines": [
+        [
+          55434,
+          55642,
+          54879,
+          49669,
+          49583,
+          50583,
+          54872,
+          57632
+        ],
+        [
+          50583,
+          50335,
+          48455,
+          47908
+        ],
+        [
+          54872,
+          54879
+        ],
+        [
+          49669,
+          47508
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON indian Kany",
+      "names": {
+        "en": "Virgo",
+        "native": "कन्याराशिः",
+        "pronounce": "Kanyā Rāśi"
+      },
+      "lines": [
+        [
+          57380,
+          60030,
+          61941,
+          65474,
+          69427,
+          69701,
+          71957
+        ],
+        [
+          65474,
+          66249,
+          68520,
+          72220
+        ],
+        [
+          66249,
+          63090,
+          63608
+        ],
+        [
+          63090,
+          61941
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON indian Tulā",
+      "names": {
+        "en": "Libra",
+        "native": "तुलाराशिः",
+        "pronounce": "Tulā Rāśi"
+      },
+      "lines": [
+        [
+          74785,
+          76333,
+          77853,
+          78207,
+          74785,
+          72622,
+          73714,
+          76600,
+          76470,
+          73714,
+          74392,
+          74785
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON indian Vṛśc",
+      "names": {
+        "en": "Scorpius",
+        "native": "वृश्चिकराशिः",
+        "pronounce": "Vṛścikā Rāśi"
+      },
+      "lines": [
+        [
+          80112,
+          80763,
+          81266
+        ],
+        [
+          78401,
+          80112,
+          80763,
+          81266,
+          82396,
+          82545,
+          82729,
+          84143,
+          86228,
+          87073,
+          86670,
+          85927,
+          85696
+        ],
+        [
+          80763,
+          78265
+        ],
+        [
+          80763,
+          78820
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON indian Dhan",
+      "names": {
+        "en": "Bow",
+        "native": "धनूराशिः",
+        "pronounce": "Dhanur Rāśi"
+      },
+      "lines": [
+        [
+          94141,
+          93683,
+          93085
+        ],
+        [
+          93683,
+          93864,
+          92855
+        ],
+        [
+          93864,
+          93506
+        ],
+        [
+          89931,
+          93506
+        ],
+        [
+          92855,
+          92041,
+          89931,
+          88635
+        ],
+        [
+          89642,
+          90185,
+          89931,
+          90496,
+          89341
+        ],
+        [
+          93864,
+          95168,
+          98162,
+          93864
+        ],
+        [
+          98162,
+          98688
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON indian Makr",
+      "names": {
+        "en": "Crocodile",
+        "native": "मकरराशिः",
+        "pronounce": "Makara Rāśi"
+      },
+      "lines": [
+        [
+          100064,
+          100345,
+          104139,
+          105515,
+          106985,
+          107556
+        ],
+        [
+          105515,
+          105881,
+          104139
+        ],
+        [
+          100345,
+          102485
+        ],
+        [
+          104139,
+          102978
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON indian Kumbh",
+      "names": {
+        "en": "Aquarius",
+        "native": "कुम्भराशिः",
+        "pronounce": "Kumbha Rāśi"
+      },
+      "lines": [
+        [
+          113136,
+          112716,
+          112961,
+          111497,
+          110960,
+          110395,
+          109074,
+          106278,
+          102618
+        ],
+        [
+          106278,
+          104459
+        ],
+        [
+          106278,
+          109139
+        ],
+        [
+          110003,
+          109074
+        ],
+        [
+          110003,
+          110395
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON indian Mīna",
+      "names": {
+        "en": "Pisces",
+        "native": "मीनराशिः",
+        "pronounce": "Mīna Rāśi"
+      },
+      "lines": [
+        [
+          4889,
+          5742
+        ],
+        [
+          4889,
+          6193,
+          5742,
+          7097,
+          8198,
+          9487,
+          8833,
+          7884,
+          7007,
+          4906,
+          3760,
+          1645,
+          118268,
+          116771,
+          116928,
+          115738,
+          114971,
+          115830,
+          116771
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON indian Shim",
+      "names": {
+        "en": "Dolphin",
+        "native": "शिंशुमारः",
+        "pronounce": "Shiṁśumāra"
+      },
+      "lines": [
+        [
+          87585,
+          87833,
+          85670,
+          85829,
+          87585,
+          94376,
+          97433,
+          94648,
+          89937,
+          83895,
+          80331,
+          78527,
+          75458,
+          68756,
+          61281,
+          56211
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON indian R̥kṣa",
+      "names": {
+        "en": "Ursa Major",
+        "native": "ऋक्षः",
+        "pronounce": "R̥kṣa"
+      },
+      "lines": [
+        [
+          67301,
+          65378,
+          62956,
+          59774,
+          54061,
+          53910,
+          58001,
+          59774
+        ],
+        [
+          58001,
+          57399,
+          54539,
+          50372
+        ],
+        [
+          54539,
+          50801
+        ],
+        [
+          53910,
+          48402,
+          46853,
+          44471
+        ],
+        [
+          46853,
+          44127
+        ],
+        [
+          48402,
+          48319,
+          41704,
+          46733,
+          54061
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON indian Sapt",
+      "names": {
+        "en": "7 Sages",
+        "native": "सप्तर्षयः",
+        "pronounce": "Saptarṣi"
+      },
+      "lines": [
+        [
+          54061,
+          53910,
+          58001,
+          59774,
+          62956,
+          65378,
+          67301
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON indian Sāra",
+      "names": {
+        "en": "Charioteer",
+        "native": "सारथिः",
+        "pronounce": "Sārathi"
+      },
+      "lines": [
+        [
+          28380,
+          28360,
+          24608,
+          23453,
+          23015
+        ],
+        [
+          25428,
+          23015
+        ],
+        [
+          25428,
+          28380
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON indian Tri",
+      "names": {
+        "en": "Trishanku",
+        "native": "त्रिशङ्कुः",
+        "pronounce": "Trishanku"
+      },
+      "lines": [
+        [
+          61084,
+          60718
+        ],
+        [
+          62434,
+          59747
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON indian Yam",
+      "names": {
+        "en": "River Yamunā",
+        "native": "यमुना",
+        "pronounce": "Yamunā"
+      },
+      "lines": [
+        [
+          7588,
+          9007,
+          10602,
+          11407,
+          12413,
+          12486,
+          13847,
+          15510,
+          17797,
+          17874,
+          20042,
+          20535,
+          21393,
+          17651,
+          16611,
+          15474,
+          14146,
+          12843,
+          13701,
+          15197,
+          16537,
+          17378,
+          21444,
+          22109,
+          22701,
+          23875,
+          23972,
+          21594
+        ]
+      ],
+      "kind": "constellation"
+    }
+  ],
+  "names": {
+    "746": {
+      "en": "Jamadagni",
+      "native": "जमदग्निः",
+      "pronounce": "Jamadagni"
+    },
+    "5737": {
+      "en": "Wealthy",
+      "native": "रेवती",
+      "pronounce": "Revatī"
+    },
+    "11767": {
+      "en": "Steadfast",
+      "native": "ध्रुवः",
+      "pronounce": "Dhruva"
+    },
+    "21421": {
+      "en": "Red",
+      "native": "रोहिणी",
+      "pronounce": "Rohiṇī"
+    },
+    "24436": {
+      "en": "Monarch",
+      "native": "Vānrājā",
+      "pronounce": "Vānrājā"
+    },
+    "24608": {
+      "en": "Creator's heart",
+      "native": "ब्रह्महृदयम्",
+      "pronounce": "Bramha-hṛdaya"
+    },
+    "25336": {
+      "en": "Kr̥ttikās' son",
+      "native": "कार्त्तिकेयः",
+      "pronounce": "Kārtikeya"
+    },
+    "25428": {
+      "en": "Fire",
+      "native": "अग्निः",
+      "pronounce": "Agni"
+    },
+    "25930": {
+      "en": "Picturesque",
+      "native": "चित्रलेखा",
+      "pronounce": "Chitralekhā"
+    },
+    "26311": {
+      "en": "Unbounded",
+      "native": "अनिरुद्धः",
+      "pronounce": "Aniruddha"
+    },
+    "26727": {
+      "en": "Dawn",
+      "native": "उषाः",
+      "pronounce": "Uṣā"
+    },
+    "27366": {
+      "en": "Kartavirya",
+      "native": "कार्त्तवीर्यः",
+      "pronounce": "Kārtavīrya"
+    },
+    "27989": {
+      "en": "Moist",
+      "native": "आर्द्रा",
+      "pronounce": "Ārdrā"
+    },
+    "30438": {
+      "en": "Agastya",
+      "native": "अगस्त्यः",
+      "pronounce": "Agastya"
+    },
+    "31681": {
+      "en": "Fire",
+      "native": "अनलः",
+      "pronounce": "Anala"
+    },
+    "32349": {
+      "en": "Hunter",
+      "native": "लुब्धकः",
+      "pronounce": "Lubdhaka"
+    },
+    "36850": {
+      "en": "Uncut (Kashyapa's wife)",
+      "native": "अदितिः",
+      "pronounce": "Aditi"
+    },
+    "37826": {
+      "en": "Cut (Kashyapa's wife)",
+      "native": "दितिः",
+      "pronounce": "Diti"
+    },
+    "49669": {
+      "en": "Bountiful one",
+      "native": "मघा",
+      "pronounce": "Maghā"
+    },
+    "53910": {
+      "en": "Pulaha",
+      "native": "पुलहः",
+      "pronounce": "Pulaha"
+    },
+    "54061": {
+      "en": "Kratu",
+      "native": "क्रतुः",
+      "pronounce": "Kratu"
+    },
+    "58001": {
+      "en": "Pulasta",
+      "native": "पुलस्तः",
+      "pronounce": "Pulasta"
+    },
+    "59774": {
+      "en": "Atri",
+      "native": "अत्रिः",
+      "pronounce": "Atri"
+    },
+    "62956": {
+      "en": "Angiras",
+      "native": "अङ्गिराः",
+      "pronounce": "Angirā"
+    },
+    "65378": {
+      "en": "Vaśisṭha",
+      "native": "वसिष्ठः",
+      "pronounce": "Vaśisṭha"
+    },
+    "65474": {
+      "en": "Spectacular",
+      "native": "चित्रा",
+      "pronounce": "Chitrā"
+    },
+    "65477": {
+      "en": "Arundhatī",
+      "native": "अरुन्धती",
+      "pronounce": "Arundhatī"
+    },
+    "67301": {
+      "en": "Mārīchi",
+      "native": "मरीचिः",
+      "pronounce": "Mārīchi"
+    },
+    "69673": {
+      "en": "Honest one",
+      "native": "स्वातिः",
+      "pronounce": "Svāti"
+    },
+    "80763": {
+      "en": "Eldest",
+      "native": "ज्येष्ठा",
+      "pronounce": "jyeṣṭhā"
+    },
+    "91262": {
+      "en": "Invincible",
+      "native": "अभिजित्",
+      "pronounce": "Abhijit"
+    },
+    "97649": {
+      "en": "Ear",
+      "native": "श्रवणः",
+      "pronounce": "Śravaṇa"
+    },
+    "110395": {
+      "en": "Satabhisak",
+      "native": "शतभिषक्",
+      "pronounce": "Śatabhiṣak"
+    },
+    "8832": {
+      "en": "With Horses",
+      "native": "अश्विनी",
+      "pronounce": "Aśvinī"
+    },
+    "8903": {
+      "en": "With Horses",
+      "native": "अश्विनी",
+      "pronounce": "Aśvinī"
+    },
+    "12719": {
+      "en": "Bearer",
+      "native": "भरणी",
+      "pronounce": "Bharanī"
+    },
+    "13061": {
+      "en": "Bearer",
+      "native": "भरणी",
+      "pronounce": "Bharanī"
+    },
+    "13209": {
+      "en": "Bearer",
+      "native": "भरणी",
+      "pronounce": "Bharanī"
+    },
+    "17851": {
+      "en": "Cutter",
+      "native": "कृत्तिकाः",
+      "pronounce": "Kṛttikā"
+    },
+    "17847": {
+      "en": "Cutter",
+      "native": "कृत्तिकाः",
+      "pronounce": "Kṛttikā"
+    },
+    "17702": {
+      "en": "Cutter",
+      "native": "कृत्तिकाः",
+      "pronounce": "Kṛttikā"
+    },
+    "17608": {
+      "en": "Cutter",
+      "native": "कृत्तिकाः",
+      "pronounce": "Kṛttikā"
+    },
+    "17499": {
+      "en": "Cutter",
+      "native": "कृत्तिकाः",
+      "pronounce": "Kṛttikā"
+    },
+    "17531": {
+      "en": "Cutter",
+      "native": "कृत्तिकाः",
+      "pronounce": "Kṛttikā"
+    },
+    "17573": {
+      "en": "Cutter",
+      "native": "कृत्तिकाः",
+      "pronounce": "Kṛttikā"
+    },
+    "17579": {
+      "en": "Cutter",
+      "native": "कृत्तिकाः",
+      "pronounce": "Kṛttikā"
+    },
+    "26207": {
+      "en": "Deer's head",
+      "native": "मृगशिराः",
+      "pronounce": "Mṛgaśiras"
+    },
+    "26176": {
+      "en": "Deer's head",
+      "native": "मृगशिराः",
+      "pronounce": "Mṛgaśiras"
+    },
+    "26366": {
+      "en": "Deer's head",
+      "native": "मृगशिराः",
+      "pronounce": "Mṛgaśiras"
+    },
+    "33160": {
+      "en": "Deer Hunter",
+      "native": "मृगव्याधः",
+      "pronounce": "Mṛgavyādha"
+    },
+    "34045": {
+      "en": "Deer Hunter",
+      "native": "मृगव्याधः",
+      "pronounce": "Mṛgavyādha"
+    },
+    "33347": {
+      "en": "Deer Hunter",
+      "native": "मृगव्याधः",
+      "pronounce": "Mṛgavyādha"
+    },
+    "33977": {
+      "en": "Deer Hunter",
+      "native": "मृगव्याधः",
+      "pronounce": "Mṛgavyādha"
+    },
+    "34444": {
+      "en": "Deer Hunter",
+      "native": "मृगव्याधः",
+      "pronounce": "Mṛgavyādha"
+    },
+    "35037": {
+      "en": "Deer Hunter",
+      "native": "मृगव्याधः",
+      "pronounce": "Mṛgavyādha"
+    },
+    "35904": {
+      "en": "Deer Hunter",
+      "native": "मृगव्याधः",
+      "pronounce": "Mṛgavyādha"
+    },
+    "33579": {
+      "en": "Deer Hunter",
+      "native": "मृगव्याधः",
+      "pronounce": "Mṛgavyādha"
+    },
+    "33856": {
+      "en": "Deer Hunter",
+      "native": "मृगव्याधः",
+      "pronounce": "Mṛgavyādha"
+    },
+    "33152": {
+      "en": "Deer Hunter",
+      "native": "मृगव्याधः",
+      "pronounce": "Mṛgavyādha"
+    },
+    "31592": {
+      "en": "Deer Hunter",
+      "native": "मृगव्याधः",
+      "pronounce": "Mṛgavyādha"
+    },
+    "31416": {
+      "en": "Deer Hunter",
+      "native": "मृगव्याधः",
+      "pronounce": "Mṛgavyādha"
+    },
+    "30324": {
+      "en": "Deer Hunter",
+      "native": "मृगव्याधः",
+      "pronounce": "Mṛgavyādha"
+    },
+    "32759": {
+      "en": "Deer Hunter",
+      "native": "मृगव्याधः",
+      "pronounce": "Mṛgavyādha"
+    },
+    "30122": {
+      "en": "Deer Hunter",
+      "native": "मृगव्याधः",
+      "pronounce": "Mṛgavyādha"
+    },
+    "25044": {
+      "en": "Reed forest",
+      "native": "शरवणम्",
+      "pronounce": "Śaravaṇa"
+    },
+    "33646": {
+      "en": "Reed forest",
+      "native": "शरवणम्",
+      "pronounce": "Śaravaṇa"
+    },
+    "42911": {
+      "en": "Nourisher",
+      "native": "पुष्यम्",
+      "pronounce": "Puṣya"
+    },
+    "41822": {
+      "en": "Nourisher",
+      "native": "पुष्यम्",
+      "pronounce": "Puṣya"
+    },
+    "43109": {
+      "en": "Embrace",
+      "native": "आश्लोषा",
+      "pronounce": "Aśleṣa"
+    },
+    "42313": {
+      "en": "Embrace",
+      "native": "आश्लोषा",
+      "pronounce": "Aśleṣa"
+    },
+    "42402": {
+      "en": "Embrace",
+      "native": "आश्लोषा",
+      "pronounce": "Aśleṣa"
+    },
+    "42799": {
+      "en": "Embrace",
+      "native": "आश्लोषा",
+      "pronounce": "Aśleṣa"
+    },
+    "43234": {
+      "en": "Embrace",
+      "native": "आश्लोषा",
+      "pronounce": "Aśleṣa"
+    },
+    "54872": {
+      "en": "Former Fruitful",
+      "native": "पूर्वफाल्गुनी",
+      "pronounce": "Pūrva phālgunī"
+    },
+    "54879": {
+      "en": "Former Fruitful",
+      "native": "पूर्वफाल्गुनी",
+      "pronounce": "Pūrva phālgunī"
+    },
+    "57632": {
+      "en": "Latter Fruitful",
+      "native": "उत्तरफाल्गुनी",
+      "pronounce": "Uttara phālgunī"
+    },
+    "57565": {
+      "en": "Latter Fruitful",
+      "native": "उत्तरफाल्गुनी",
+      "pronounce": "Uttara phālgunī"
+    },
+    "60965": {
+      "en": "Hand",
+      "native": "हस्तः",
+      "pronounce": "Hasta"
+    },
+    "61359": {
+      "en": "Hand",
+      "native": "हस्तः",
+      "pronounce": "Hasta"
+    },
+    "59803": {
+      "en": "Hand",
+      "native": "हस्तः",
+      "pronounce": "Hasta"
+    },
+    "59316": {
+      "en": "Hand",
+      "native": "हस्तः",
+      "pronounce": "Hasta"
+    },
+    "59199": {
+      "en": "Hand",
+      "native": "हस्तः",
+      "pronounce": "Hasta"
+    },
+    "76333": {
+      "en": "Well branched",
+      "native": "विशाखे",
+      "pronounce": "Viśākhā"
+    },
+    "74785": {
+      "en": "Well branched",
+      "native": "विशाखे",
+      "pronounce": "Viśākhā"
+    },
+    "72622": {
+      "en": "Well branched",
+      "native": "विशाखे",
+      "pronounce": "Viśākhā"
+    },
+    "74392": {
+      "en": "Well branched",
+      "native": "विशाखे",
+      "pronounce": "Viśākhā"
+    },
+    "78820": {
+      "en": "Following Rādhā",
+      "native": "अनुराधाः",
+      "pronounce": "Anurādhā"
+    },
+    "78401": {
+      "en": "Following Rādhā",
+      "native": "अनुराधाः",
+      "pronounce": "Anurādhā"
+    },
+    "78265": {
+      "en": "Following Rādhā",
+      "native": "अनुराधाः",
+      "pronounce": "Anurādhā"
+    },
+    "80112": {
+      "en": "Elder",
+      "native": "ज्येष्ठा",
+      "pronounce": "Jyeṣṭhā"
+    },
+    "81266": {
+      "en": "Elder",
+      "native": "ज्येष्ठा",
+      "pronounce": "Jyeṣṭhā"
+    },
+    "82396": {
+      "en": "Root",
+      "native": "मूलम्",
+      "pronounce": "Mūla"
+    },
+    "82545": {
+      "en": "Root",
+      "native": "मूलम्",
+      "pronounce": "Mūla"
+    },
+    "82729": {
+      "en": "Root",
+      "native": "मूलम्",
+      "pronounce": "Mūla"
+    },
+    "84143": {
+      "en": "Root",
+      "native": "मूलम्",
+      "pronounce": "Mūla"
+    },
+    "86228": {
+      "en": "Root",
+      "native": "मूलम्",
+      "pronounce": "Mūla"
+    },
+    "87073": {
+      "en": "Root",
+      "native": "मूलम्",
+      "pronounce": "Mūla"
+    },
+    "86670": {
+      "en": "Root",
+      "native": "मूलम्",
+      "pronounce": "Mūla"
+    },
+    "85927": {
+      "en": "Root",
+      "native": "मूलम्",
+      "pronounce": "Mūla"
+    },
+    "85696": {
+      "en": "Root",
+      "native": "मूलम्",
+      "pronounce": "Mūla"
+    },
+    "90185": {
+      "en": "Former invincible one",
+      "native": "पूर्वाषाढा",
+      "pronounce": "Pūrvāṣāḍhā"
+    },
+    "89931": {
+      "en": "Former invincible one",
+      "native": "पूर्वाषाढा",
+      "pronounce": "Pūrvāṣāḍhā"
+    },
+    "92855": {
+      "en": "Latter invincible one",
+      "native": "उत्तराषाढा",
+      "pronounce": "Uttarāṣāḍhā"
+    },
+    "93506": {
+      "en": "Latter invincible one",
+      "native": "उत्तराषाढा",
+      "pronounce": "Uttarāṣāḍhā"
+    },
+    "113881": {
+      "en": "Former blessed feet",
+      "native": "पूर्वप्रोष्ठपदाः",
+      "pronounce": "Pūrva bhādrapada"
+    },
+    "113963": {
+      "en": "Former blessed feet",
+      "native": "पूर्वप्रोष्ठपदाः",
+      "pronounce": "Pūrva bhādrapada"
+    },
+    "1067": {
+      "en": "Latter blessed feet",
+      "native": "उत्तरप्रोष्ठपदाः",
+      "pronounce": "Uttara bhādrapada"
+    },
+    "667": {
+      "en": "Latter blessed feet",
+      "native": "उत्तरप्रोष्ठपदाः",
+      "pronounce": "Uttara bhādrapada"
+    },
+    "91926": {
+      "en": "Victorious",
+      "native": "अभिजित्",
+      "pronounce": "Abhijit"
+    },
+    "91971": {
+      "en": "Victorious",
+      "native": "अभिजित्",
+      "pronounce": "Abhijit"
+    },
+    "98036": {
+      "en": "Ear",
+      "native": "श्रवणः",
+      "pronounce": "Śravaṇa"
+    },
+    "97278": {
+      "en": "Ear",
+      "native": "श्रवणः",
+      "pronounce": "Śravaṇa"
+    },
+    "102281": {
+      "en": "Wealthiest",
+      "native": "धनिष्ठा",
+      "pronounce": "Dhaniṣṭhā"
+    },
+    "101958": {
+      "en": "Wealthiest",
+      "native": "धनिष्ठा",
+      "pronounce": "Dhaniṣṭhā"
+    },
+    "9884": {
+      "en": "Aries",
+      "native": "मेषराशिः",
+      "pronounce": "Meṣa Rāśi"
+    },
+    "9153": {
+      "en": "Aries",
+      "native": "मेषराशिः",
+      "pronounce": "Meṣa Rāśi"
+    },
+    "13914": {
+      "en": "Aries",
+      "native": "मेषराशिः",
+      "pronounce": "Meṣa Rāśi"
+    },
+    "14838": {
+      "en": "Aries",
+      "native": "मेषराशिः",
+      "pronounce": "Meṣa Rāśi"
+    },
+    "10306": {
+      "en": "Aries",
+      "native": "मेषराशिः",
+      "pronounce": "Meṣa Rāśi"
+    },
+    "21881": {
+      "en": "Taurus",
+      "native": "वृषराशिः",
+      "pronounce": "Vṛṣa Rāśi"
+    },
+    "20889": {
+      "en": "Taurus",
+      "native": "वृषराशिः",
+      "pronounce": "Vṛṣa Rāśi"
+    },
+    "26451": {
+      "en": "Taurus",
+      "native": "वृषराशिः",
+      "pronounce": "Vṛṣa Rāśi"
+    },
+    "20205": {
+      "en": "Taurus",
+      "native": "वृषराशिः",
+      "pronounce": "Vṛṣa Rāśi"
+    },
+    "20455": {
+      "en": "Taurus",
+      "native": "वृषराशिः",
+      "pronounce": "Vṛṣa Rāśi"
+    },
+    "18724": {
+      "en": "Taurus",
+      "native": "वृषराशिः",
+      "pronounce": "Vṛṣa Rāśi"
+    },
+    "16369": {
+      "en": "Taurus",
+      "native": "वृषराशिः",
+      "pronounce": "Vṛṣa Rāśi"
+    },
+    "20894": {
+      "en": "Taurus",
+      "native": "वृषराशिः",
+      "pronounce": "Vṛṣa Rāśi"
+    },
+    "20648": {
+      "en": "Taurus",
+      "native": "वृषराशिः",
+      "pronounce": "Vṛṣa Rāśi"
+    },
+    "18907": {
+      "en": "Taurus",
+      "native": "वृषराशिः",
+      "pronounce": "Vṛṣa Rāśi"
+    },
+    "15900": {
+      "en": "Taurus",
+      "native": "वृषराशिः",
+      "pronounce": "Vṛṣa Rāśi"
+    },
+    "34088": {
+      "en": "Gemini",
+      "native": "मिथुनराशिः",
+      "pronounce": "Mithuna Rāśi"
+    },
+    "35550": {
+      "en": "Gemini",
+      "native": "मिथुनराशिः",
+      "pronounce": "Mithuna Rāśi"
+    },
+    "35350": {
+      "en": "Gemini",
+      "native": "मिथुनराशिः",
+      "pronounce": "Mithuna Rāśi"
+    },
+    "32362": {
+      "en": "Gemini",
+      "native": "मिथुनराशिः",
+      "pronounce": "Mithuna Rāśi"
+    },
+    "36962": {
+      "en": "Gemini",
+      "native": "मिथुनराशिः",
+      "pronounce": "Mithuna Rāśi"
+    },
+    "37740": {
+      "en": "Gemini",
+      "native": "मिथुनराशिः",
+      "pronounce": "Mithuna Rāśi"
+    },
+    "36046": {
+      "en": "Gemini",
+      "native": "मिथुनराशिः",
+      "pronounce": "Mithuna Rāśi"
+    },
+    "34693": {
+      "en": "Gemini",
+      "native": "मिथुनराशिः",
+      "pronounce": "Mithuna Rāśi"
+    },
+    "33018": {
+      "en": "Gemini",
+      "native": "मिथुनराशिः",
+      "pronounce": "Mithuna Rāśi"
+    },
+    "32246": {
+      "en": "Gemini",
+      "native": "मिथुनराशिः",
+      "pronounce": "Mithuna Rāśi"
+    },
+    "30883": {
+      "en": "Gemini",
+      "native": "मिथुनराशिः",
+      "pronounce": "Mithuna Rāśi"
+    },
+    "30343": {
+      "en": "Gemini",
+      "native": "मिथुनराशिः",
+      "pronounce": "Mithuna Rāśi"
+    },
+    "29655": {
+      "en": "Gemini",
+      "native": "मिथुनराशिः",
+      "pronounce": "Mithuna Rāśi"
+    },
+    "28734": {
+      "en": "Gemini",
+      "native": "मिथुनराशिः",
+      "pronounce": "Mithuna Rāśi"
+    },
+    "43103": {
+      "en": "Cancer",
+      "native": "कर्कटराशिः",
+      "pronounce": "Karkaṭa Rāśi"
+    },
+    "42806": {
+      "en": "Cancer",
+      "native": "कर्कटराशिः",
+      "pronounce": "Karkaṭa Rāśi"
+    },
+    "40843": {
+      "en": "Cancer",
+      "native": "कर्कटराशिः",
+      "pronounce": "Karkaṭa Rāśi"
+    },
+    "44066": {
+      "en": "Cancer",
+      "native": "कर्कटराशिः",
+      "pronounce": "Karkaṭa Rāśi"
+    },
+    "40526": {
+      "en": "Cancer",
+      "native": "कर्कटराशिः",
+      "pronounce": "Karkaṭa Rāśi"
+    },
+    "55434": {
+      "en": "Leo",
+      "native": "सिंहराशिः",
+      "pronounce": "Simha Rāśi"
+    },
+    "55642": {
+      "en": "Leo",
+      "native": "सिंहराशिः",
+      "pronounce": "Simha Rāśi"
+    },
+    "49583": {
+      "en": "Leo",
+      "native": "सिंहराशिः",
+      "pronounce": "Simha Rāśi"
+    },
+    "50583": {
+      "en": "Leo",
+      "native": "सिंहराशिः",
+      "pronounce": "Simha Rāśi"
+    },
+    "50335": {
+      "en": "Leo",
+      "native": "सिंहराशिः",
+      "pronounce": "Simha Rāśi"
+    },
+    "48455": {
+      "en": "Leo",
+      "native": "सिंहराशिः",
+      "pronounce": "Simha Rāśi"
+    },
+    "47908": {
+      "en": "Leo",
+      "native": "सिंहराशिः",
+      "pronounce": "Simha Rāśi"
+    },
+    "47508": {
+      "en": "Leo",
+      "native": "सिंहराशिः",
+      "pronounce": "Simha Rāśi"
+    },
+    "57380": {
+      "en": "Virgo",
+      "native": "कन्याराशिः",
+      "pronounce": "Kanyā Rāśi"
+    },
+    "60030": {
+      "en": "Virgo",
+      "native": "कन्याराशिः",
+      "pronounce": "Kanyā Rāśi"
+    },
+    "61941": {
+      "en": "Virgo",
+      "native": "कन्याराशिः",
+      "pronounce": "Kanyā Rāśi"
+    },
+    "69427": {
+      "en": "Virgo",
+      "native": "कन्याराशिः",
+      "pronounce": "Kanyā Rāśi"
+    },
+    "69701": {
+      "en": "Virgo",
+      "native": "कन्याराशिः",
+      "pronounce": "Kanyā Rāśi"
+    },
+    "71957": {
+      "en": "Virgo",
+      "native": "कन्याराशिः",
+      "pronounce": "Kanyā Rāśi"
+    },
+    "66249": {
+      "en": "Virgo",
+      "native": "कन्याराशिः",
+      "pronounce": "Kanyā Rāśi"
+    },
+    "68520": {
+      "en": "Virgo",
+      "native": "कन्याराशिः",
+      "pronounce": "Kanyā Rāśi"
+    },
+    "72220": {
+      "en": "Virgo",
+      "native": "कन्याराशिः",
+      "pronounce": "Kanyā Rāśi"
+    },
+    "63090": {
+      "en": "Virgo",
+      "native": "कन्याराशिः",
+      "pronounce": "Kanyā Rāśi"
+    },
+    "63608": {
+      "en": "Virgo",
+      "native": "कन्याराशिः",
+      "pronounce": "Kanyā Rāśi"
+    },
+    "77853": {
+      "en": "Libra",
+      "native": "तुलाराशिः",
+      "pronounce": "Tulā Rāśi"
+    },
+    "78207": {
+      "en": "Libra",
+      "native": "तुलाराशिः",
+      "pronounce": "Tulā Rāśi"
+    },
+    "73714": {
+      "en": "Libra",
+      "native": "तुलाराशिः",
+      "pronounce": "Tulā Rāśi"
+    },
+    "76600": {
+      "en": "Libra",
+      "native": "तुलाराशिः",
+      "pronounce": "Tulā Rāśi"
+    },
+    "76470": {
+      "en": "Libra",
+      "native": "तुलाराशिः",
+      "pronounce": "Tulā Rāśi"
+    },
+    "94141": {
+      "en": "Bow",
+      "native": "धनूराशिः",
+      "pronounce": "Dhanur Rāśi"
+    },
+    "93683": {
+      "en": "Bow",
+      "native": "धनूराशिः",
+      "pronounce": "Dhanur Rāśi"
+    },
+    "93085": {
+      "en": "Bow",
+      "native": "धनूराशिः",
+      "pronounce": "Dhanur Rāśi"
+    },
+    "93864": {
+      "en": "Bow",
+      "native": "धनूराशिः",
+      "pronounce": "Dhanur Rāśi"
+    },
+    "92041": {
+      "en": "Bow",
+      "native": "धनूराशिः",
+      "pronounce": "Dhanur Rāśi"
+    },
+    "88635": {
+      "en": "Bow",
+      "native": "धनूराशिः",
+      "pronounce": "Dhanur Rāśi"
+    },
+    "89642": {
+      "en": "Bow",
+      "native": "धनूराशिः",
+      "pronounce": "Dhanur Rāśi"
+    },
+    "90496": {
+      "en": "Bow",
+      "native": "धनूराशिः",
+      "pronounce": "Dhanur Rāśi"
+    },
+    "89341": {
+      "en": "Bow",
+      "native": "धनूराशिः",
+      "pronounce": "Dhanur Rāśi"
+    },
+    "95168": {
+      "en": "Bow",
+      "native": "धनूराशिः",
+      "pronounce": "Dhanur Rāśi"
+    },
+    "98162": {
+      "en": "Bow",
+      "native": "धनूराशिः",
+      "pronounce": "Dhanur Rāśi"
+    },
+    "98688": {
+      "en": "Bow",
+      "native": "धनूराशिः",
+      "pronounce": "Dhanur Rāśi"
+    },
+    "100064": {
+      "en": "Crocodile",
+      "native": "मकरराशिः",
+      "pronounce": "Makara Rāśi"
+    },
+    "100345": {
+      "en": "Crocodile",
+      "native": "मकरराशिः",
+      "pronounce": "Makara Rāśi"
+    },
+    "104139": {
+      "en": "Crocodile",
+      "native": "मकरराशिः",
+      "pronounce": "Makara Rāśi"
+    },
+    "105515": {
+      "en": "Crocodile",
+      "native": "मकरराशिः",
+      "pronounce": "Makara Rāśi"
+    },
+    "106985": {
+      "en": "Crocodile",
+      "native": "मकरराशिः",
+      "pronounce": "Makara Rāśi"
+    },
+    "107556": {
+      "en": "Crocodile",
+      "native": "मकरराशिः",
+      "pronounce": "Makara Rāśi"
+    },
+    "105881": {
+      "en": "Crocodile",
+      "native": "मकरराशिः",
+      "pronounce": "Makara Rāśi"
+    },
+    "102485": {
+      "en": "Crocodile",
+      "native": "मकरराशिः",
+      "pronounce": "Makara Rāśi"
+    },
+    "102978": {
+      "en": "Crocodile",
+      "native": "मकरराशिः",
+      "pronounce": "Makara Rāśi"
+    },
+    "113136": {
+      "en": "Aquarius",
+      "native": "कुम्भराशिः",
+      "pronounce": "Kumbha Rāśi"
+    },
+    "112716": {
+      "en": "Aquarius",
+      "native": "कुम्भराशिः",
+      "pronounce": "Kumbha Rāśi"
+    },
+    "112961": {
+      "en": "Aquarius",
+      "native": "कुम्भराशिः",
+      "pronounce": "Kumbha Rāśi"
+    },
+    "111497": {
+      "en": "Aquarius",
+      "native": "कुम्भराशिः",
+      "pronounce": "Kumbha Rāśi"
+    },
+    "110960": {
+      "en": "Aquarius",
+      "native": "कुम्भराशिः",
+      "pronounce": "Kumbha Rāśi"
+    },
+    "109074": {
+      "en": "Aquarius",
+      "native": "कुम्भराशिः",
+      "pronounce": "Kumbha Rāśi"
+    },
+    "106278": {
+      "en": "Aquarius",
+      "native": "कुम्भराशिः",
+      "pronounce": "Kumbha Rāśi"
+    },
+    "102618": {
+      "en": "Aquarius",
+      "native": "कुम्भराशिः",
+      "pronounce": "Kumbha Rāśi"
+    },
+    "104459": {
+      "en": "Aquarius",
+      "native": "कुम्भराशिः",
+      "pronounce": "Kumbha Rāśi"
+    },
+    "109139": {
+      "en": "Aquarius",
+      "native": "कुम्भराशिः",
+      "pronounce": "Kumbha Rāśi"
+    },
+    "110003": {
+      "en": "Aquarius",
+      "native": "कुम्भराशिः",
+      "pronounce": "Kumbha Rāśi"
+    },
+    "4889": {
+      "en": "Pisces",
+      "native": "मीनराशिः",
+      "pronounce": "Mīna Rāśi"
+    },
+    "5742": {
+      "en": "Pisces",
+      "native": "मीनराशिः",
+      "pronounce": "Mīna Rāśi"
+    },
+    "6193": {
+      "en": "Pisces",
+      "native": "मीनराशिः",
+      "pronounce": "Mīna Rāśi"
+    },
+    "7097": {
+      "en": "Pisces",
+      "native": "मीनराशिः",
+      "pronounce": "Mīna Rāśi"
+    },
+    "8198": {
+      "en": "Pisces",
+      "native": "मीनराशिः",
+      "pronounce": "Mīna Rāśi"
+    },
+    "9487": {
+      "en": "Pisces",
+      "native": "मीनराशिः",
+      "pronounce": "Mīna Rāśi"
+    },
+    "8833": {
+      "en": "Pisces",
+      "native": "मीनराशिः",
+      "pronounce": "Mīna Rāśi"
+    },
+    "7884": {
+      "en": "Pisces",
+      "native": "मीनराशिः",
+      "pronounce": "Mīna Rāśi"
+    },
+    "7007": {
+      "en": "Pisces",
+      "native": "मीनराशिः",
+      "pronounce": "Mīna Rāśi"
+    },
+    "4906": {
+      "en": "Pisces",
+      "native": "मीनराशिः",
+      "pronounce": "Mīna Rāśi"
+    },
+    "3760": {
+      "en": "Pisces",
+      "native": "मीनराशिः",
+      "pronounce": "Mīna Rāśi"
+    },
+    "1645": {
+      "en": "Pisces",
+      "native": "मीनराशिः",
+      "pronounce": "Mīna Rāśi"
+    },
+    "118268": {
+      "en": "Pisces",
+      "native": "मीनराशिः",
+      "pronounce": "Mīna Rāśi"
+    },
+    "116771": {
+      "en": "Pisces",
+      "native": "मीनराशिः",
+      "pronounce": "Mīna Rāśi"
+    },
+    "116928": {
+      "en": "Pisces",
+      "native": "मीनराशिः",
+      "pronounce": "Mīna Rāśi"
+    },
+    "115738": {
+      "en": "Pisces",
+      "native": "मीनराशिः",
+      "pronounce": "Mīna Rāśi"
+    },
+    "114971": {
+      "en": "Pisces",
+      "native": "मीनराशिः",
+      "pronounce": "Mīna Rāśi"
+    },
+    "115830": {
+      "en": "Pisces",
+      "native": "मीनराशिः",
+      "pronounce": "Mīna Rāśi"
+    },
+    "87585": {
+      "en": "Dolphin",
+      "native": "शिंशुमारः",
+      "pronounce": "Shiṁśumāra"
+    },
+    "87833": {
+      "en": "Dolphin",
+      "native": "शिंशुमारः",
+      "pronounce": "Shiṁśumāra"
+    },
+    "85670": {
+      "en": "Dolphin",
+      "native": "शिंशुमारः",
+      "pronounce": "Shiṁśumāra"
+    },
+    "85829": {
+      "en": "Dolphin",
+      "native": "शिंशुमारः",
+      "pronounce": "Shiṁśumāra"
+    },
+    "94376": {
+      "en": "Dolphin",
+      "native": "शिंशुमारः",
+      "pronounce": "Shiṁśumāra"
+    },
+    "97433": {
+      "en": "Dolphin",
+      "native": "शिंशुमारः",
+      "pronounce": "Shiṁśumāra"
+    },
+    "94648": {
+      "en": "Dolphin",
+      "native": "शिंशुमारः",
+      "pronounce": "Shiṁśumāra"
+    },
+    "89937": {
+      "en": "Dolphin",
+      "native": "शिंशुमारः",
+      "pronounce": "Shiṁśumāra"
+    },
+    "83895": {
+      "en": "Dolphin",
+      "native": "शिंशुमारः",
+      "pronounce": "Shiṁśumāra"
+    },
+    "80331": {
+      "en": "Dolphin",
+      "native": "शिंशुमारः",
+      "pronounce": "Shiṁśumāra"
+    },
+    "78527": {
+      "en": "Dolphin",
+      "native": "शिंशुमारः",
+      "pronounce": "Shiṁśumāra"
+    },
+    "75458": {
+      "en": "Dolphin",
+      "native": "शिंशुमारः",
+      "pronounce": "Shiṁśumāra"
+    },
+    "68756": {
+      "en": "Dolphin",
+      "native": "शिंशुमारः",
+      "pronounce": "Shiṁśumāra"
+    },
+    "61281": {
+      "en": "Dolphin",
+      "native": "शिंशुमारः",
+      "pronounce": "Shiṁśumāra"
+    },
+    "56211": {
+      "en": "Dolphin",
+      "native": "शिंशुमारः",
+      "pronounce": "Shiṁśumāra"
+    },
+    "57399": {
+      "en": "Ursa Major",
+      "native": "ऋक्षः",
+      "pronounce": "R̥kṣa"
+    },
+    "54539": {
+      "en": "Ursa Major",
+      "native": "ऋक्षः",
+      "pronounce": "R̥kṣa"
+    },
+    "50372": {
+      "en": "Ursa Major",
+      "native": "ऋक्षः",
+      "pronounce": "R̥kṣa"
+    },
+    "50801": {
+      "en": "Ursa Major",
+      "native": "ऋक्षः",
+      "pronounce": "R̥kṣa"
+    },
+    "48402": {
+      "en": "Ursa Major",
+      "native": "ऋक्षः",
+      "pronounce": "R̥kṣa"
+    },
+    "46853": {
+      "en": "Ursa Major",
+      "native": "ऋक्षः",
+      "pronounce": "R̥kṣa"
+    },
+    "44471": {
+      "en": "Ursa Major",
+      "native": "ऋक्षः",
+      "pronounce": "R̥kṣa"
+    },
+    "44127": {
+      "en": "Ursa Major",
+      "native": "ऋक्षः",
+      "pronounce": "R̥kṣa"
+    },
+    "48319": {
+      "en": "Ursa Major",
+      "native": "ऋक्षः",
+      "pronounce": "R̥kṣa"
+    },
+    "41704": {
+      "en": "Ursa Major",
+      "native": "ऋक्षः",
+      "pronounce": "R̥kṣa"
+    },
+    "46733": {
+      "en": "Ursa Major",
+      "native": "ऋक्षः",
+      "pronounce": "R̥kṣa"
+    },
+    "28380": {
+      "en": "Charioteer",
+      "native": "सारथिः",
+      "pronounce": "Sārathi"
+    },
+    "28360": {
+      "en": "Charioteer",
+      "native": "सारथिः",
+      "pronounce": "Sārathi"
+    },
+    "23453": {
+      "en": "Charioteer",
+      "native": "सारथिः",
+      "pronounce": "Sārathi"
+    },
+    "23015": {
+      "en": "Charioteer",
+      "native": "सारथिः",
+      "pronounce": "Sārathi"
+    },
+    "61084": {
+      "en": "Trishanku",
+      "native": "त्रिशङ्कुः",
+      "pronounce": "Trishanku"
+    },
+    "60718": {
+      "en": "Trishanku",
+      "native": "त्रिशङ्कुः",
+      "pronounce": "Trishanku"
+    },
+    "62434": {
+      "en": "Trishanku",
+      "native": "त्रिशङ्कुः",
+      "pronounce": "Trishanku"
+    },
+    "59747": {
+      "en": "Trishanku",
+      "native": "त्रिशङ्कुः",
+      "pronounce": "Trishanku"
+    },
+    "7588": {
+      "en": "River Yamunā",
+      "native": "यमुना",
+      "pronounce": "Yamunā"
+    },
+    "9007": {
+      "en": "River Yamunā",
+      "native": "यमुना",
+      "pronounce": "Yamunā"
+    },
+    "10602": {
+      "en": "River Yamunā",
+      "native": "यमुना",
+      "pronounce": "Yamunā"
+    },
+    "11407": {
+      "en": "River Yamunā",
+      "native": "यमुना",
+      "pronounce": "Yamunā"
+    },
+    "12413": {
+      "en": "River Yamunā",
+      "native": "यमुना",
+      "pronounce": "Yamunā"
+    },
+    "12486": {
+      "en": "River Yamunā",
+      "native": "यमुना",
+      "pronounce": "Yamunā"
+    },
+    "13847": {
+      "en": "River Yamunā",
+      "native": "यमुना",
+      "pronounce": "Yamunā"
+    },
+    "15510": {
+      "en": "River Yamunā",
+      "native": "यमुना",
+      "pronounce": "Yamunā"
+    },
+    "17797": {
+      "en": "River Yamunā",
+      "native": "यमुना",
+      "pronounce": "Yamunā"
+    },
+    "17874": {
+      "en": "River Yamunā",
+      "native": "यमुना",
+      "pronounce": "Yamunā"
+    },
+    "20042": {
+      "en": "River Yamunā",
+      "native": "यमुना",
+      "pronounce": "Yamunā"
+    },
+    "20535": {
+      "en": "River Yamunā",
+      "native": "यमुना",
+      "pronounce": "Yamunā"
+    },
+    "21393": {
+      "en": "River Yamunā",
+      "native": "यमुना",
+      "pronounce": "Yamunā"
+    },
+    "17651": {
+      "en": "River Yamunā",
+      "native": "यमुना",
+      "pronounce": "Yamunā"
+    },
+    "16611": {
+      "en": "River Yamunā",
+      "native": "यमुना",
+      "pronounce": "Yamunā"
+    },
+    "15474": {
+      "en": "River Yamunā",
+      "native": "यमुना",
+      "pronounce": "Yamunā"
+    },
+    "14146": {
+      "en": "River Yamunā",
+      "native": "यमुना",
+      "pronounce": "Yamunā"
+    },
+    "12843": {
+      "en": "River Yamunā",
+      "native": "यमुना",
+      "pronounce": "Yamunā"
+    },
+    "13701": {
+      "en": "River Yamunā",
+      "native": "यमुना",
+      "pronounce": "Yamunā"
+    },
+    "15197": {
+      "en": "River Yamunā",
+      "native": "यमुना",
+      "pronounce": "Yamunā"
+    },
+    "16537": {
+      "en": "River Yamunā",
+      "native": "यमुना",
+      "pronounce": "Yamunā"
+    },
+    "17378": {
+      "en": "River Yamunā",
+      "native": "यमुना",
+      "pronounce": "Yamunā"
+    },
+    "21444": {
+      "en": "River Yamunā",
+      "native": "यमुना",
+      "pronounce": "Yamunā"
+    },
+    "22109": {
+      "en": "River Yamunā",
+      "native": "यमुना",
+      "pronounce": "Yamunā"
+    },
+    "22701": {
+      "en": "River Yamunā",
+      "native": "यमुना",
+      "pronounce": "Yamunā"
+    },
+    "23875": {
+      "en": "River Yamunā",
+      "native": "यमुना",
+      "pronounce": "Yamunā"
+    },
+    "23972": {
+      "en": "River Yamunā",
+      "native": "यमुना",
+      "pronounce": "Yamunā"
+    },
+    "21594": {
+      "en": "River Yamunā",
+      "native": "यमुना",
+      "pronounce": "Yamunā"
+    }
+  },
+  "unresolved_hips": [
+    33646
+  ]
+}

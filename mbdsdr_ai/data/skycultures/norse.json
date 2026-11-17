@@ -1,0 +1,259 @@
+{
+  "id": "norse",
+  "meta": {
+    "schema": "mbdsdr.sky_culture.v1",
+    "id": "norse",
+    "display_name": "Norse",
+    "native_name": "",
+    "region": "Northern Europe",
+    "classification": [
+      "incomplete"
+    ],
+    "source": "Stellarium skyculture norse",
+    "source_url": "https://github.com/Stellarium/stellarium/tree/master/skycultures/norse",
+    "source_license": "CC BY-SA 4.0",
+    "source_license_url": "https://creativecommons.org/licenses/by-sa/4.0/",
+    "attribution": "Stellarium sky culture 'norse'; authors: Jonas Persson (CC BY-SA 4.0). Converted to HIP line segments only; no artwork or description images were copied.",
+    "source_file": "reference/stellarium/skycultures/norse/index.json",
+    "source_file_sha256": "40a10b1b031a6dda7451f801fcecce385d6a3a424202650effe0912899fa983e",
+    "description_file": "reference/stellarium/skycultures/norse/description.md",
+    "description_file_sha256": "cb7bc283617b8962cf337274d210afe8db49cf2cfc66415194e58df927f0782d",
+    "conversion_scope": "Only constellations[].lines, id and common_name (plus optional common_names star labels) are converted; illustrations, artwork and description text are not copied.",
+    "names_scope": "Explicit common_names labels take precedence; stars without an explicit label inherit the constellation/asterism name they belong to.",
+    "group_count": 6,
+    "edge_count": 32,
+    "name_count": 37,
+    "unresolved_hip_count": 0,
+    "unresolved_hips": [],
+    "unresolved_token_count": 0,
+    "unresolved_tokens": [],
+    "generated_utc": "2026-11-17T16:26:20Z",
+    "data_sha256": "8499e00f692b94f7eda59942efcb589fd08a9c2a8512c49ef1aac9328b7e5595"
+  },
+  "groups": [
+    {
+      "group_id": "CON norse 001",
+      "names": {
+        "en": "Aurvandil's Toe"
+      },
+      "lines": [
+        [
+          76127,
+          75695,
+          76267,
+          76952,
+          77512,
+          78159,
+          78493
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON norse 002",
+      "names": {
+        "en": "Wolf's Mouth"
+      },
+      "lines": [
+        [
+          21421,
+          20894,
+          20205,
+          20455,
+          20889
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON norse 003",
+      "names": {
+        "en": "The Fishermen"
+      },
+      "lines": [
+        [
+          26727,
+          26311,
+          25930
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON norse 004",
+      "names": {
+        "en": "Woman's Cart"
+      },
+      "lines": [
+        [
+          11767,
+          85822,
+          82080,
+          77055,
+          79822,
+          75097,
+          72607,
+          77055
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON norse 005",
+      "names": {
+        "en": "Man's Cart"
+      },
+      "lines": [
+        [
+          67301,
+          65378,
+          62956,
+          59774,
+          54061,
+          53910,
+          58001,
+          59774
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON norse 006",
+      "names": {
+        "en": "The Asar Battlefield"
+      },
+      "lines": [
+        [
+          28380,
+          28360,
+          24608,
+          23453,
+          23015
+        ],
+        [
+          25428,
+          23015
+        ],
+        [
+          25428,
+          28380
+        ]
+      ],
+      "kind": "constellation"
+    }
+  ],
+  "names": {
+    "11767": {
+      "en": "Guide Star"
+    },
+    "69673": {
+      "en": "Day Star"
+    },
+    "91262": {
+      "en": "South Star"
+    },
+    "76127": {
+      "en": "Aurvandil's Toe"
+    },
+    "75695": {
+      "en": "Aurvandil's Toe"
+    },
+    "76267": {
+      "en": "Aurvandil's Toe"
+    },
+    "76952": {
+      "en": "Aurvandil's Toe"
+    },
+    "77512": {
+      "en": "Aurvandil's Toe"
+    },
+    "78159": {
+      "en": "Aurvandil's Toe"
+    },
+    "78493": {
+      "en": "Aurvandil's Toe"
+    },
+    "21421": {
+      "en": "Wolf's Mouth"
+    },
+    "20894": {
+      "en": "Wolf's Mouth"
+    },
+    "20205": {
+      "en": "Wolf's Mouth"
+    },
+    "20455": {
+      "en": "Wolf's Mouth"
+    },
+    "20889": {
+      "en": "Wolf's Mouth"
+    },
+    "26727": {
+      "en": "The Fishermen"
+    },
+    "26311": {
+      "en": "The Fishermen"
+    },
+    "25930": {
+      "en": "The Fishermen"
+    },
+    "85822": {
+      "en": "Woman's Cart"
+    },
+    "82080": {
+      "en": "Woman's Cart"
+    },
+    "77055": {
+      "en": "Woman's Cart"
+    },
+    "79822": {
+      "en": "Woman's Cart"
+    },
+    "75097": {
+      "en": "Woman's Cart"
+    },
+    "72607": {
+      "en": "Woman's Cart"
+    },
+    "67301": {
+      "en": "Man's Cart"
+    },
+    "65378": {
+      "en": "Man's Cart"
+    },
+    "62956": {
+      "en": "Man's Cart"
+    },
+    "59774": {
+      "en": "Man's Cart"
+    },
+    "54061": {
+      "en": "Man's Cart"
+    },
+    "53910": {
+      "en": "Man's Cart"
+    },
+    "58001": {
+      "en": "Man's Cart"
+    },
+    "28380": {
+      "en": "The Asar Battlefield"
+    },
+    "28360": {
+      "en": "The Asar Battlefield"
+    },
+    "24608": {
+      "en": "The Asar Battlefield"
+    },
+    "23453": {
+      "en": "The Asar Battlefield"
+    },
+    "23015": {
+      "en": "The Asar Battlefield"
+    },
+    "25428": {
+      "en": "The Asar Battlefield"
+    }
+  },
+  "unresolved_hips": []
+}

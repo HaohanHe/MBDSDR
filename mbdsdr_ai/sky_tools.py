@@ -21,11 +21,15 @@
 * **光行时用年，不用秒**。用户能感知的单位是"光走了 8.6 年"，
   不是"2.7e17 秒"。
 
-三个工具的分工
+七个工具的分工
 --------------
 - `sky_whats_here`      ：我有指向，问这一片有什么（视场枚举）
 - `sky_object_lookup`   ：我有名字，问它是谁（身份查询）
 - `sky_asterism_lookup` ：我有星官名，问它由什么组成（结构查询）
+- `sky_culture_lookup`  ：同一颗星在不同天空文化下各叫什么（多文化查询）
+- `sky_meteor_showers`  ：我问今晚，答哪场流星雨在活动、辐射点在哪
+- `sky_tonight`         ：我问今晚能不能看，答云量与极光；缺测就说不猜
+- `sky_observing_sites` ：我在哪，附近有哪些有官方坐标的台址/公众点（距离参照）
 """
 
 from __future__ import annotations
@@ -50,6 +54,65 @@ MAX_STARS_RETURNED = 12
 
 #: 一次最多返回多少个星官。同理，星官条目比星条目长。
 MAX_ASTERISMS_RETURNED = 4
+
+#: 多文化查询的返回上限：条目按文化/组独立，不合并，但也得整份塞进输出预算。
+MAX_CULTURE_GROUPS_RETURNED = 6
+MAX_CULTURE_MATCHES_RETURNED = 5
+MAX_CULTURE_HIPS_RETURNED = 24
+
+#: 按 HIP 查多文化时单次最多返回多少个文化条目。
+#:
+#: 文化包扩到 30 个后，北极星（HIP 11767）命中 21 个包，全量输出约 8186 字符，
+#: 超过 tool_output_max_chars 的 8000 预算被头尾截断——JSON 直接变碎片。
+#: 宁可少给几个文化，也要让整份 JSON 完整可解析；其余文化由调用方用
+#: ``culture`` 参数逐个筛选。
+MAX_CULTURE_ITEMS = 10
+
+#: 每个文化条目最多保留多少个所属组（groups_omitted 如实报告省略数）。
+MAX_CULTURE_GROUPS_PER_ITEM = 2
+
+#: 核心体系优先出现；其余文化条目按 id 排序补齐。
+CORE_CULTURE_ORDER = (
+    "iau_88",
+    "chinese_xingguan",
+    "japanese",
+    "indian",
+    "norse",
+    "indian_nakshatras",
+    "seri",
+)
+
+
+def _culture_rank(culture_id: str):
+    """排序键：核心体系在前（按声明顺序），其余按 id 字典序。"""
+    try:
+        return (0, CORE_CULTURE_ORDER.index(culture_id))
+    except ValueError:
+        return (1, culture_id)
+
+
+#: 携带 ``jd_ut1`` 的工具接受的时间范围：2000-01-01 .. 2100-01-01（UT1 粗边界）。
+#:
+#: 不是天文限制，是**输入卫生**：Windows 的 ``datetime.fromtimestamp`` 对
+#: 超大/超小时间戳抛 ``OSError [Errno 22]``，模型随手给个 ``jd_ut1=1`` 就会
+#: 把异常抛到工具层。这里先拒，并告诉调用方合法区间。
+JD_MIN = 2451544.5
+JD_MAX = 2488069.5
+
+
+def _reject_bad_jd(raw: Any) -> Optional[Dict[str, Any]]:
+    """``jd_ut1`` 参数体检：非数值/非有限/越界都返回结构化失败。"""
+    try:
+        jd = float(raw)
+    except (TypeError, ValueError):
+        return {"ok": False, "error": "invalid_jd",
+                "reason": f"jd_ut1 必须是儒略日数值，收到 {raw!r}"}
+    if not math.isfinite(jd) or not (JD_MIN <= jd <= JD_MAX):
+        return {"ok": False, "error": "jd_out_of_range",
+                "reason": (f"jd_ut1 超出可换算区间 {JD_MIN}..{JD_MAX}"
+                           "（2000-01-01 .. 2100-01-01），收到 "
+                           f"{jd!r}；拒绝换算到本地时间")}
+    return None
 
 
 def _site_from_observer(agent) -> Dict[str, Any]:
@@ -196,6 +259,29 @@ def _asterism_of_hip(agent) -> Dict[int, List[str]]:
     return out
 
 
+def _groups_with_hip(pack, hip: int):
+    """该文化包里连线经过这颗星的所有组（星座/星群/星官）。"""
+    return [g for g in pack.groups
+            if any(hip in poly for poly in g.lines)]
+
+
+def _group_payload(group) -> Dict[str, Any]:
+    return {
+        "group_id": group.group_id,
+        "kind": group.kind,
+        "names": dict(group.names),
+    }
+
+
+def _hips_payload(hips: List[int]) -> Dict[str, Any]:
+    listed = hips[:MAX_CULTURE_HIPS_RETURNED]
+    return {
+        "hips": listed,
+        "hip_count": len(hips),
+        "hips_omitted": max(0, len(hips) - len(listed)),
+    }
+
+
 def register_sky_tools(agent) -> None:
     """把星空工具注册到 agent（只读，不触发任何确认门）。"""
     reg = agent.tool_registry
@@ -227,6 +313,10 @@ def register_sky_tools(agent) -> None:
             jd = _current_jd(agent)
             time_note = "取自时间引擎/当前时刻"
         else:
+            bad = _reject_bad_jd(jd)
+            if bad is not None:
+                return bad
+            jd = float(jd)
             time_note = "由调用参数给出"
 
         az = float(args["az_deg"])
@@ -236,6 +326,15 @@ def register_sky_tools(agent) -> None:
 
         if not (0.0 < fov <= 180.0):
             raise ValueError(f"视场角必须在 (0, 180] 度内，收到 {fov}")
+
+        culture_raw = args.get("culture_ids")
+        culture_requested = culture_raw is not None
+        requested_cultures: tuple = ()
+        unknown_cultures: tuple = ()
+        if culture_requested:
+            from .skyengine.sky_culture import split_culture_ids
+
+            requested_cultures, unknown_cultures = split_culture_ids(culture_raw)
 
         catalog = get_catalog()
         sel = select_for_view(station, float(jd), az, alt, fov,
@@ -307,7 +406,19 @@ def register_sky_tools(agent) -> None:
             a["truncated"] = a["members_in_view"] < a["members_total"]
 
         total = len(stars)
-        return {
+        listed = stars[:MAX_STARS_RETURNED]
+        if culture_requested:
+            from .skyengine.sky_culture import names_for_hip
+
+            for star in listed:
+                hip = star["hip"]
+                all_names = names_for_hip(hip) if hip > 0 else {}
+                # 缺名的文化不出现该键；不回退别家名字，也不拿西名冒充。
+                star["culture_names"] = {
+                    cid: dict(all_names[cid])
+                    for cid in requested_cultures if cid in all_names
+                }
+        out = {
             "ok": True,
             "site": {"lat_deg": float(station.latitude),
                      "lon_deg": float(station.longitude),
@@ -318,7 +429,7 @@ def register_sky_tools(agent) -> None:
             "pointing": {"az_deg": az, "alt_deg": alt, "fov_deg": fov},
             "limit_mag": limit_mag,
             "star_count": total,
-            "stars": stars[:MAX_STARS_RETURNED],
+            "stars": listed,
             # 如实告诉模型"这不是全部"：不说的话它会以为天上就这么多星。
             "stars_listed": min(total, MAX_STARS_RETURNED),
             "stars_omitted": max(0, total - MAX_STARS_RETURNED),
@@ -326,8 +437,14 @@ def register_sky_tools(agent) -> None:
             "catalog": {"name": "HYG v4.1", "license": "CC BY-SA 4.0"},
             "hint": ("讲距离用 light_years（光走了多少年），不要念 parsec；"
                      "asterisms 里 truncated=true 的要明说『你只看到其中一段』；"
-                     "stars_omitted>0 说明还有更暗的星没列，需要时可抬 limit_mag。"),
+                     "stars_omitted>0 说明还有更暗的星没列，需要时可抬 limit_mag。"
+                     + (" culture_names 按文化分开：某文化没有该星名时不会"
+                        "出现该键，不得用别家名字顶替。"
+                        if culture_requested else "")),
         }
+        if culture_requested:
+            out["unknown_cultures"] = list(unknown_cultures)
+        return out
 
     reg.register(
         name="sky_whats_here",
@@ -335,7 +452,11 @@ def register_sky_tools(agent) -> None:
             "视场枚举：给定指向(方位角/地平高度)与视场角，列出这一片天里"
             "肉眼可见的恒星与它们所属的中国星官。返回每颗星的名称/星等/"
             "距离/光行时，以及星官成员在视场内外的比例。"
-            "用于回答『我现在指的这一片有什么』『那几颗连起来像什么』。"
+            "传入 culture_ids 时另按文化取星名：每颗星带 culture_names"
+            "（{文化id: {语言: 名称}}），只看请求的文化；某文化没有该星名时"
+            "该键不出现，绝不回退成别家名字；未知 id 在 unknown_cultures 列出。"
+            "用于回答『我现在指的这一片有什么』『那几颗连起来像什么』"
+            "『这颗星在其他文化里叫什么』。"
             "站址与时刻默认取当前观测站与时间引擎；要用别的时间/地点就显式传。"
             "只会读取星表，不改任何状态。"),
         parameters={"type": "object", "properties": {
@@ -343,6 +464,12 @@ def register_sky_tools(agent) -> None:
             "alt_deg": {"type": "number", "description": "指向地平高度（度，地平线以上为正）"},
             "fov_deg": {"type": "number", "description": "视场角（度）。目镜约 2.3，寻星镜约 8，手机广角约 60-70"},
             "limit_mag": {"type": "number", "description": f"极限星等，默认 {DEFAULT_LIMIT_MAG}"},
+            "culture_ids": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": ("可选：要取星名的天空文化 id 列表"
+                                "（如 iau_88 / chinese_xingguan）；"
+                                "不传则不返回文化名")},
             "lat_deg": {"type": "number", "description": "可选：覆盖观测站纬度"},
             "lon_deg": {"type": "number", "description": "可选：覆盖观测站经度"},
             "alt_m": {"type": "number", "description": "可选：观测站海拔（米）"},
@@ -549,5 +676,403 @@ def register_sky_tools(agent) -> None:
             "name": {"type": "string", "description": "星官中文名，如 北斗"},
         }, "required": ["name"]},
         handler=_asterism,
+        category="sky",
+    )
+
+    # ------------------------------------------------------------------
+    # 4) 流星雨：今晚有没有、辐射点在哪
+    # ------------------------------------------------------------------
+    def _meteor_showers(args: Dict[str, Any]):
+        import datetime as _dt
+
+        from .astronomy import meteor_showers as _ms
+        from .celestial_geometry import (
+            azalt_from_vec, j2000_to_altaz, vec_from_radec)
+        from .skyengine import jtime as _jt
+
+        jd = args.get("jd_ut1")
+        if jd is None:
+            jd = _current_jd(agent)
+            time_note = "取自时间引擎/当前时刻"
+        else:
+            bad = _reject_bad_jd(jd)
+            if bad is not None:
+                return bad
+            jd = float(jd)
+            time_note = "由调用参数给出"
+
+        lat = args.get("lat_deg")
+        lon = args.get("lon_deg")
+        if lat is None or lon is None:
+            site = _site_from_observer(agent)
+            lat, lon = site["lat_deg"], site["lon_deg"]
+            alt_m = site["alt_m"]
+            site_note = "取自 agent 观测站"
+            site_warning = site["site_warning"]
+        else:
+            alt_m = float(args.get("alt_m") or 0.0)
+            site_note = "由调用参数给出"
+            site_warning = ""
+
+        gs = _station_from(lat, lon, alt_m)
+        now = _dt.datetime.fromtimestamp(
+            _jt.jd_to_unix(jd), _dt.timezone.utc)
+        rows = []
+        for s, frac in _ms.active_showers(now):
+            az, alt = azalt_from_vec(j2000_to_altaz(
+                vec_from_radec(s.ra_deg, s.dec_deg), gs, jd))
+            rows.append({
+                "code": s.code,
+                "name_zh": s.name_zh,
+                "name_en": s.name_en,
+                "activity": round(float(frac), 2),
+                "zhr_peak": s.zhr_peak,
+                "peak_utc": f"{s.peak_month:02d}-{s.peak_day:02d}",
+                "radiant_az_deg": round(float(az), 1),
+                "radiant_alt_deg": round(float(alt), 1),
+                "above_horizon": bool(float(alt) > 0.0),
+                "parent": s.parent,
+                "velocity_kms": s.velocity_kms,
+            })
+        return {
+            "ok": True,
+            "date_utc": now.strftime("%Y-%m-%d"),
+            "jd_ut1": jd,
+            "time_note": time_note,
+            "site": {"lat_deg": lat, "lon_deg": lon, "alt_m": alt_m,
+                     "note": site_note, "site_warning": site_warning},
+            "showers": rows,
+            "note": ("activity 是活动包络（1=峰值，0=活动期边界），"
+                     "不是今夜每小时流星数；zhr_peak 是理想暗空下的峰值"
+                     "参考值，实际可见数受月光/云量/光污染影响。"
+                     "radiant 在地平线下时 above_horizon=false。"),
+        }
+
+    reg.register(
+        name="sky_meteor_showers",
+        description=(
+            "流星雨查询：给时刻（可选给站址），返回当天活动的流星雨、"
+            "活动包络强度、峰值 ZHR、辐射点方位/高度与是否在地平线上。"
+            "用于回答『今晚有流星雨吗』『英仙座流星雨往哪看』。"
+            "只读，不改任何状态；没有活动项时返回空列表而不是编一场。"),
+        parameters={"type": "object", "properties": {
+            "jd_ut1": {"type": "number",
+                       "description": "可选：UT1 儒略日，默认当前时刻"},
+            "lat_deg": {"type": "number", "description": "可选：覆盖观测站纬度"},
+            "lon_deg": {"type": "number", "description": "可选：覆盖观测站经度"},
+            "alt_m": {"type": "number", "description": "可选：观测站海拔（米）"},
+        }},
+        handler=_meteor_showers,
+        category="sky",
+    )
+
+    # ------------------------------------------------------------------
+    # 5) 今晚能不能看：云量 + 极光粗判 + 单时刻月光；缺测不猜
+    # ------------------------------------------------------------------
+    def _moon_sample(lat: float, lon: float):
+        """本地历表算单时刻月球照亮比例/高度；算不出就返回 None（不猜）。
+
+        不联网下载历表：``get_moon_position`` 在缺文件且离线时返回 None，
+        异常也一律吞掉——月光是附加信息，不能拖垮云量结论。
+        """
+        try:
+            from .new_spacetime import jd_to_utc
+            from .solar_system import GroundStation as _SStation
+            from .solar_system import get_moon_position
+
+            when = jd_to_utc(_current_jd(agent))
+            pos = get_moon_position(when, _SStation(lat, lon, 0.0))
+            if pos is None or pos.illumination is None:
+                return None
+            return {
+                "illumination": float(pos.illumination),
+                "alt_deg": float(pos.alt_deg),
+                "at": when.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                "source": f"local_ephemeris:{pos.backend}",
+            }
+        except Exception:
+            return None
+
+    def _tonight(args: Dict[str, Any]):
+        from datetime import datetime, timezone
+
+        from . import space_weather as _sw
+        from .astronomy import tonight as _tn
+
+        site = _site_from_observer(agent)
+        lat = args.get("lat_deg")
+        lon = args.get("lon_deg")
+        if lat is None or lon is None:
+            lat, lon = site["lat_deg"], site["lon_deg"]
+            site_note = "取自 agent 观测站"
+            site_warning = site["site_warning"]
+        else:
+            lat, lon = float(lat), float(lon)
+            site_note = "由调用参数给出"
+            site_warning = ""
+
+        allow_live = bool(args.get("allow_live", True))
+        cached = _sw.latest_snapshot(max_age_h=0.25)
+        if cached is not None:
+            snap, path = cached
+            source_note = f"新鲜快照（15 分钟内）：{path}"
+        elif allow_live:
+            # 不落盘：工具调用不应留下用户没要求的文件。
+            snap = _sw.collect_snapshot(lat=lat, lon=lon)
+            source_note = "现采（未落盘）"
+        else:
+            snap = None
+            source_note = "没有新鲜快照，且 allow_live=false"
+
+        report = _tn.assess_tonight(snap, lat, lon,
+                                    moon=_moon_sample(float(lat), float(lon)),
+                                    at=datetime.now(timezone.utc))
+        out = dict(report)
+        out.update({
+            "ok": True,
+            "source_note": source_note,
+            "site": {"lat_deg": lat, "lon_deg": lon, "note": site_note,
+                     "site_warning": site_warning},
+        })
+        return out
+
+    reg.register(
+        name="sky_tonight",
+        description=(
+            "今夜可看性：给站址（可选覆盖），返回云量判定、极光粗判、"
+            "采样时刻的月光、处于活动期的流星雨与一句结论。用于回答"
+            "『今晚适合看星吗』『能看到极光吗』『今晚有什么流星雨』。"
+            "云量取采集时刻的实况，不是整夜预报；没有云量时说缺测并明确"
+            "『不按晴天假设』；极光只用 Kp 与地磁纬度的经验门槛，不是"
+            "极光椭圆预报；月光只按采样时刻算，不外推整夜；流星雨只给"
+            "活动期与峰值 ZHR，不给『今晚每小时几颗』。优先读 15 分钟内的"
+            "环境快照，没有才现采。"),
+        parameters={"type": "object", "properties": {
+            "lat_deg": {"type": "number", "description": "可选：覆盖观测站纬度"},
+            "lon_deg": {"type": "number", "description": "可选：覆盖观测站经度"},
+            "allow_live": {"type": "boolean",
+                           "description": "可选：没有新鲜快照时是否现采（默认 true）"},
+        }},
+        handler=_tonight,
+        category="sky",
+    )
+
+    # ------------------------------------------------------------------
+    # 6) 附近台址：官方坐标的科研台址 + 公众点，access 分开说
+    # ------------------------------------------------------------------
+    def _observing_sites(args: Dict[str, Any]):
+        from .astronomy import observing_sites as _obs
+
+        site = _site_from_observer(agent)
+        lat = args.get("lat_deg")
+        lon = args.get("lon_deg")
+        if lat is None or lon is None:
+            lat, lon = site["lat_deg"], site["lon_deg"]
+            site_note = "取自 agent 观测站"
+            site_warning = site["site_warning"]
+        else:
+            lat, lon = float(lat), float(lon)
+            site_note = "由调用参数给出"
+            site_warning = ""
+
+        limit = int(args.get("limit") or 3)
+        rows = _obs.nearest_sites(lat, lon, limit=limit)
+        return {
+            "ok": True,
+            "site": {"lat_deg": lat, "lon_deg": lon, "note": site_note,
+                     "site_warning": site_warning},
+            "sites": rows,
+            "caveat": ("内置点分两类：access=research 是科研台址，不对外开放；"
+                       "access=public 是科普基地/景区，也需预约、开放日或门票，"
+                       "public 不代表随时能进。两类都只用于距离参照，"
+                       "坐标来源见各项 source_url。"),
+        }
+
+    reg.register(
+        name="sky_observing_sites",
+        description=(
+            "按站址返回最近的台址与公众科普/观星点（内置 4 个科研台址 + "
+            "2 个公众点，均有官方坐标与来源 URL），带球面距离。"
+            "access=research 的科研台址不对外开放；access=public 也需预约"
+            "或开放日，不是旅游推荐。用于回答『附近有哪些天文台/观星地』。"),
+        parameters={"type": "object", "properties": {
+            "lat_deg": {"type": "number", "description": "可选：覆盖观测站纬度"},
+            "lon_deg": {"type": "number", "description": "可选：覆盖观测站经度"},
+            "limit": {"type": "integer", "minimum": 1, "maximum": 20,
+                      "description": "可选：返回数量，默认 3"},
+        }},
+        handler=_observing_sites,
+        category="sky",
+    )
+
+    # ------------------------------------------------------------------
+    # 7) 多文化查询：同一颗星在不同天空文化下各叫什么
+    # ------------------------------------------------------------------
+    def _culture_lookup(args: Dict[str, Any]):
+        from .skyengine import sky_culture as sc
+
+        hip_raw = args.get("hip")
+        name = str(args.get("name") or "").strip()
+        if hip_raw is None and not name:
+            raise ValueError("hip 与 name 至少给一个：hip 查星，name 查组/西名")
+        if hip_raw is not None and name:
+            raise ValueError("hip 与 name 只能二选一，不要同时给")
+
+        culture_id = str(args.get("culture") or "").strip()
+        registry = sc.load_registry()
+        packs = list(registry)
+        if culture_id:
+            pack = registry.get(culture_id)
+            if pack is None:
+                return {
+                    "ok": False,
+                    "matched": False,
+                    "reason": f"未知天空文化 id {culture_id!r}",
+                    "available_cultures": list(registry.ids()),
+                }
+            packs = [pack]
+
+        def _header(pack) -> Dict[str, Any]:
+            return {
+                "culture": pack.id,
+                "display_name": pack.display_name,
+                "license": pack.license,
+                "license_url": pack.license_url,
+            }
+
+        if hip_raw is not None:
+            if isinstance(hip_raw, bool):
+                raise ValueError("hip 必须是正整数")
+            try:
+                hip = int(hip_raw)
+            except (TypeError, ValueError):
+                raise ValueError(f"hip 必须是整数，收到 {hip_raw!r}") from None
+            if hip <= 0:
+                raise ValueError(f"hip 必须是正整数，收到 {hip_raw!r}")
+
+            cultures: List[Dict[str, Any]] = []
+            for pack in packs:
+                entry = pack.names.get(hip)
+                groups = _groups_with_hip(pack, hip)
+                if not entry and not groups:
+                    continue
+                item = _header(pack)
+                item.update({
+                    "names": dict(entry) if entry else {},
+                    "groups": [_group_payload(g)
+                               for g in groups[:MAX_CULTURE_GROUPS_PER_ITEM]],
+                    "group_count": len(groups),
+                    "groups_omitted": max(
+                        0, len(groups) - MAX_CULTURE_GROUPS_PER_ITEM),
+                })
+                cultures.append(item)
+
+            if not cultures:
+                scope = f"文化 {culture_id!r}" if culture_id else "任何文化包"
+                return {
+                    "ok": False,
+                    "matched": False,
+                    "hip": hip,
+                    "reason": f"HIP {hip} 不在{scope}的名称或连线里",
+                    "hint": ("只报数据里真实出现的 HIP；不返回最近邻，"
+                             "也不猜一个名字。"),
+                }
+            # 核心体系先出现，其余按 id 排序——模型先讲最该讲的那几种。
+            cultures.sort(key=lambda c: _culture_rank(c["culture"]))
+            total = len(cultures)
+            listed = cultures[:MAX_CULTURE_ITEMS]
+            truncated = total > len(listed)
+            out = {
+                "ok": True,
+                "matched": True,
+                "query": {"hip": hip},
+                "culture_count": total,
+                "cultures": listed,
+                "cultures_shown": len(listed),
+                "cultures_truncated": truncated,
+                "note": ("每个文化各自命名，绝不合并成一个名字；"
+                         "names 的语言键由该文化数据决定。"),
+            }
+            if truncated:
+                out["hint"] = (
+                    f"只列出 {len(listed)}/{total} 个文化（核心体系优先）；"
+                    "其余文化未返回，用 culture 参数筛选其余文化逐个查，"
+                    "不得把这里当成全量。")
+            return out
+
+        target = name.lower()
+        group_hits: List[Dict[str, Any]] = []
+        star_hits: List[Dict[str, Any]] = []
+        for pack in packs:
+            for group in pack.groups:
+                if any(str(v).strip().lower() == target
+                       for v in group.names.values()):
+                    item = _header(pack)
+                    item.update({"group": _group_payload(group)})
+                    item.update(_hips_payload(sorted({
+                        int(h) for poly in group.lines for h in poly})))
+                    group_hits.append(item)
+            for hip, entry in pack.names.items():
+                if not any(str(v).strip().lower() == target
+                           for v in entry.values()):
+                    continue
+                groups = _groups_with_hip(pack, hip)
+                if groups:
+                    for group in groups[:MAX_CULTURE_GROUPS_RETURNED]:
+                        item = _header(pack)
+                        item.update({"hip": int(hip),
+                                     "group": _group_payload(group)})
+                        item.update(_hips_payload(sorted({
+                            int(h) for poly in group.lines for h in poly})))
+                        star_hits.append(item)
+                else:
+                    item = _header(pack)
+                    item.update({"hip": int(hip), "group": None})
+                    item.update(_hips_payload([int(hip)]))
+                    star_hits.append(item)
+
+        # 组名优先：名字命中组名时不再按成员星重复列举，避免同一组出现两次。
+        matched_by = "group_name" if group_hits else "star_name"
+        hits = group_hits or star_hits
+        if not hits:
+            scope = f"文化 {culture_id!r}" if culture_id else "任何文化包"
+            return {
+                "ok": False,
+                "matched": False,
+                "name": name,
+                "reason": f"{name!r} 不在{scope}的组名或星名里",
+                "hint": ("可传文化 id 缩小范围，或改用 hip 查；"
+                         "无匹配时不返回最近邻凑数。"),
+            }
+        listed = hits[:MAX_CULTURE_MATCHES_RETURNED]
+        return {
+            "ok": True,
+            "matched": True,
+            "query": {"name": name},
+            "matched_by": matched_by,
+            "match_count": len(hits),
+            "matches": listed,
+            "matches_omitted": max(0, len(hits) - len(listed)),
+            "note": ("每项独立标注所属文化与许可，不跨文化合并；"
+                     "hips 是该组连线的成员，不是位置排序。"),
+        }
+
+    reg.register(
+        name="sky_culture_lookup",
+        description=(
+            "多文化天空查询：给 HIP 号或名称，返回同一颗星在不同天空文化"
+            "（IAU 88、中国星官、日本、印度、北欧、毛利、萨米等包）下各自"
+            "的名称、所属组（星座/星群/星官）与该文化的许可证。按名称查时"
+            "返回匹配的组与成员 HIP 列表。文化之间绝不合并名称；查不到就"
+            "明说查不到，不返回最近邻凑数。只读本地数据，不写盘、不联网。"),
+        parameters={"type": "object", "properties": {
+            "hip": {"type": "integer", "minimum": 1,
+                    "description": "Hipparcos 编号（如 11767 是北极星）"},
+            "name": {"type": "string",
+                     "description": "组名或西名（如 Ursa Minor / Polaris）"},
+            "culture": {"type": "string",
+                        "description": "可选：只查某个文化 id（如 japanese）"},
+        }},
+        handler=_culture_lookup,
         category="sky",
     )

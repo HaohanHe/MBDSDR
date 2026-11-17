@@ -16,8 +16,10 @@ MBDSDR AI 内核 - 工具注册表
 
 import fnmatch
 import json
+from datetime import datetime, timezone
 from functools import lru_cache
 import math
+import os
 import re
 import threading
 import time
@@ -374,34 +376,178 @@ def _auto_write(name: str, parameters: Any) -> bool:
     return _auto_write_by_name(name)
 
 
-#: 模型对话通道的**硬门**：会发射 / 删除 / 回滚 / 建立外部连接的动作。
+#: 写工具分级（**单一事实源**）。键 = 注册名，值 = ``(级别, 一句理由)``。
 #:
-#: 2026-11-08 对照 deepseek-harness 审计补的洞：此前 ``call()`` 完全不看
-#: write 标记，模型在对话里调 ``radio_ptt`` / ``radio_send_cw`` 会**直接
-#: 发射**，而同一个工具走 MCP / 桌面通道却被 ``tx_guard`` 拦住——两条路
-#: 安全等级不一致，违反"单一事实源"。这里只收不可逆 / 有外泄风险的动作；
-#: 可恢复的调谐（``sdr_set_*``、``vfo_*``）留给下一轮做分级确认，不在本轮
-#: 扩大拦截面，避免把日常对话全变成确认弹窗。
-MODEL_HARD_GATE_PATTERNS = (
-    # 发射（含 PTT / 上行 / CW / IQ / APRS）
-    "*transmit*", "*_ptt", "ptt_*", "*uplink*",
-    "*send_cw*", "*send_iq*", "*aprs_send*",
-    # 改源码 / 提版本 / 回滚
-    "code_modify_*", "code_git_commit", "code_rollback", "code_hot_reload",
-    "*_revert", "*_rollback", "git_clone_repo",
-    # 建立外部连接 / 定时外发
-    "*_connect", "*_schedule",
-    # 物理动作（云台转动）与持久记忆写入
-    "gimbal_move", "gimbal_point", "gimbal_stop", "gimbal_track_*",
-    "memory_write",
-)
+#: 三个级别的模型通道语义（见 ``ToolRegistry.call_from_model``）：
+#:   * ``hard_gate``：发射 / 不可逆 / 代码与系统状态改写 / 物理动作 /
+#:     对外连接，必须有外部确认通道签发的有效 token；
+#:   * ``confirm``：可恢复但有真实副作用（写盘、占设备、改配置），同样必须
+#:     有确认记录（一次性 token）；
+#:   * ``low_risk``：可随时撤销的调谐、查询型写入与本地计算，模型可直接执行。
+#:
+#: **未登记的写工具一律按 ``hard_gate`` 处理（fail-closed）**，新增写工具
+#: 必须显式登记并写清理由，否则模型通道不会静默放行。
+WRITE_TOOL_GRADE_HARD_GATE = "hard_gate"
+WRITE_TOOL_GRADE_CONFIRM = "confirm"
+WRITE_TOOL_GRADE_LOW_RISK = "low_risk"
+WRITE_TOOL_GRADES = {
+    # ── hard_gate：不可逆 / 射频发射 / 物理动作 / 代码与系统改写 ──
+    "tc_uplink_transmit": (WRITE_TOOL_GRADE_HARD_GATE, "卫星上行发射，射频发出后无法撤回"),
+    "radio_ptt": (WRITE_TOOL_GRADE_HARD_GATE, "直接切换电台发射状态，会实际发波"),
+    "radio_send_cw": (WRITE_TOOL_GRADE_HARD_GATE, "经电台键控发射 CW，属于真实射频输出"),
+    "sdr_transmit_cw": (WRITE_TOOL_GRADE_HARD_GATE, "SDR 发射连续波，属于真实射频输出"),
+    "sdr_transmit_iq": (WRITE_TOOL_GRADE_HARD_GATE, "SDR 发射任意 IQ 波形，属于真实射频输出"),
+    "code_modify_file": (WRITE_TOOL_GRADE_HARD_GATE, "直接改写源码文件，错误内容会立即进入下一次运行"),
+    "code_modify_section": (WRITE_TOOL_GRADE_HARD_GATE, "改写源码片段，可能破坏正在运行的程序"),
+    "code_git_commit": (WRITE_TOOL_GRADE_HARD_GATE, "写入版本历史，提交后难以无痕撤销"),
+    "code_rollback": (WRITE_TOOL_GRADE_HARD_GATE, "回滚源码状态，覆盖当前工作内容"),
+    "code_hot_reload": (WRITE_TOOL_GRADE_HARD_GATE, "运行中替换 Python 模块，可能立即令进程失效"),
+    "git_clone_repo": (WRITE_TOOL_GRADE_HARD_GATE, "把外部仓库代码落进工作区，可执行内容进入本机"),
+    "evolution_rollback": (WRITE_TOOL_GRADE_HARD_GATE, "回滚已应用的系统版本，直接影响运行态"),
+    "file_change_revert": (WRITE_TOOL_GRADE_HARD_GATE, "回滚文件变更并覆盖现有内容"),
+    "guardian_rollback": (WRITE_TOOL_GRADE_HARD_GATE, "系统级快照回滚，会替换当前实现"),
+    "memory_write": (WRITE_TOOL_GRADE_HARD_GATE, "写入跨会话长期记忆，模型可借此持久影响后续行为"),
+    "gimbal_move": (WRITE_TOOL_GRADE_HARD_GATE, "驱动云台/旋转器物理转动，可能损伤设备或天线"),
+    "gimbal_point": (WRITE_TOOL_GRADE_HARD_GATE, "驱动天线物理指向指定方位仰角"),
+    "gimbal_stop": (WRITE_TOOL_GRADE_HARD_GATE, "立即改变云台运动状态，属于物理机构控制"),
+    "gimbal_track_satellite": (WRITE_TOOL_GRADE_HARD_GATE, "持续驱动云台跟踪卫星，长时间物理运动"),
+    "gimbal_rssi_sweep": (WRITE_TOOL_GRADE_HARD_GATE, "带动定向天线逐方位物理扫描"),
+    "ntrip_connect": (WRITE_TOOL_GRADE_HARD_GATE, "向外部 NTRIP caster 发起带凭据的网络请求"),
+    "scheduler_add": (WRITE_TOOL_GRADE_HARD_GATE, "新增可自动执行工具的定时任务，等同于延迟授权"),
+    "scheduler_enable": (WRITE_TOOL_GRADE_HARD_GATE, "启用定时任务后会在无人值守时自动执行工具"),
+    "scheduler_tick": (WRITE_TOOL_GRADE_HARD_GATE, "立即执行所有到期任务，属于批量动作入口"),
+    "subagent_execute": (WRITE_TOOL_GRADE_HARD_GATE, "子代理可多步调用工具，等同于间接执行任意动作"),
+    "workflow_execute": (WRITE_TOOL_GRADE_HARD_GATE, "按工作流多步调用任意工具，授权会沿链条扩散"),
+    # ── confirm：可恢复但有真实副作用 ──
+    "sdr_connect": (WRITE_TOOL_GRADE_CONFIRM, "占用 SDR 设备并改变会话状态，不发射但需用户知情"),
+    "sdr_connect_hardware": (WRITE_TOOL_GRADE_CONFIRM, "按 device string 占用指定硬件，不发射但需确认设备选择"),
+    "radio_connect": (WRITE_TOOL_GRADE_CONFIRM, "建立电台 CAT 连接，尚未发射但会占用串口"),
+    "gimbal_connect": (WRITE_TOOL_GRADE_CONFIRM, "建立云台后端连接，尚未产生物理运动"),
+    "r2cloud_schedule": (WRITE_TOOL_GRADE_CONFIRM, "生成过境录制任务队列，不发射但会持续落盘"),
+    "sdr_aprs_send_position": (WRITE_TOOL_GRADE_CONFIRM, "生成 APRS 发射音频并落盘，内容面向外发"),
+    "sdr_record_start": (WRITE_TOOL_GRADE_CONFIRM, "开始录制会持续占用设备并写大文件"),
+    "baseband_save": (WRITE_TOOL_GRADE_CONFIRM, "把大段 IQ 落盘，需确认目标路径与容量"),
+    "satdump_live": (WRITE_TOOL_GRADE_CONFIRM, "启动 SatDump 实时接收，长时间占用 SDR 并落盘"),
+    "satdump_process": (WRITE_TOOL_GRADE_CONFIRM, "调用外部程序批量解码 IQ，产生大量输出文件"),
+    "sdrangel_remotecontrol": (WRITE_TOOL_GRADE_CONFIRM, "向外部 SDRangel 发送远程控制命令"),
+    "orbit_error_plot": (WRITE_TOOL_GRADE_CONFIRM, "PNG 落盘写操作，handler 已要求一次性 token"),
+    "orbit_sky_plot": (WRITE_TOOL_GRADE_CONFIRM, "PNG 落盘写操作，handler 已要求一次性 token"),
+    "set_ppm_correction": (WRITE_TOOL_GRADE_CONFIRM, "把晶振频偏校准值下发设备，会影响后续频率精度"),
+    "switch_model": (WRITE_TOOL_GRADE_CONFIRM, "切换当前 LLM 模型，改变后续对话行为"),
+    "judge_evaluate": (WRITE_TOOL_GRADE_CONFIRM, "调用外部 LLM 评分，会产生费用并外发内容"),
+    "evolution_commit": (WRITE_TOOL_GRADE_CONFIRM, "写入版本快照台账，不自动应用但会持久记录"),
+    "scheduler_disable": (WRITE_TOOL_GRADE_CONFIRM, "停用既有定时任务，影响无人值守行为"),
+    "subagent_create": (WRITE_TOOL_GRADE_CONFIRM, "创建可自主运行的子代理，尚未执行任务"),
+    # ── low_risk：可随时撤销的调谐、本地写盘与纯计算 ──
+    "sdr_set_frequency": (WRITE_TOOL_GRADE_LOW_RISK, "接收调谐可随时改回，不产生发射"),
+    "sdr_set_sample_rate": (WRITE_TOOL_GRADE_LOW_RISK, "接收采样率可随时改回"),
+    "sdr_set_bandwidth": (WRITE_TOOL_GRADE_LOW_RISK, "接收带宽可随时改回"),
+    "sdr_set_gain": (WRITE_TOOL_GRADE_LOW_RISK, "接收增益可随时改回"),
+    "sdr_set_agc": (WRITE_TOOL_GRADE_LOW_RISK, "增益策略可随时切换"),
+    "sdr_set_demod": (WRITE_TOOL_GRADE_LOW_RISK, "解调模式可随时切换"),
+    "sdr_set_squelch": (WRITE_TOOL_GRADE_LOW_RISK, "静噪阈值可随时调整"),
+    "sdr_set_volume": (WRITE_TOOL_GRADE_LOW_RISK, "音量可随时调整"),
+    "sdr_switch_device": (WRITE_TOOL_GRADE_LOW_RISK, "设备可切回，接收会话可重建"),
+    "sdr_disconnect": (WRITE_TOOL_GRADE_LOW_RISK, "释放设备是幂等安全动作"),
+    "sdr_open_iq_file": (WRITE_TOOL_GRADE_LOW_RISK, "打开本地 IQ 文件作为回放源，不改动原文件"),
+    "sdr_play_audio": (WRITE_TOOL_GRADE_LOW_RISK, "音频播放可随时停止"),
+    "sdr_record_stop": (WRITE_TOOL_GRADE_LOW_RISK, "停止录制是安全收尾动作"),
+    "sdr_ai_sweep": (WRITE_TOOL_GRADE_LOW_RISK, "自动扫频只改变接收调谐，可随时停止"),
+    "sdr_sweep_scan": (WRITE_TOOL_GRADE_LOW_RISK, "扫频只改变接收调谐，可随时停止"),
+    "sdr_fm_scan": (WRITE_TOOL_GRADE_LOW_RISK, "FM 搜台只改变接收调谐，可随时停止"),
+    "sdr_listen_fm": (WRITE_TOOL_GRADE_LOW_RISK, "FM 收听可随时停止"),
+    "sdr_watch_capture": (WRITE_TOOL_GRADE_LOW_RISK, "守听抓取只写可删除的本地 IQ 文件"),
+    "sdr_wfm_stereo": (WRITE_TOOL_GRADE_LOW_RISK, "本地立体声解码输出 WAV，可删除"),
+    "sdr_spectrum_screenshot": (WRITE_TOOL_GRADE_LOW_RISK, "频谱截图只写本地 PNG"),
+    "sdr_spill_save": (WRITE_TOOL_GRADE_LOW_RISK, "把长文本转存到本地临时目录"),
+    "sdr_fm_preset": (WRITE_TOOL_GRADE_LOW_RISK, "列出/保存 FM 预设，保存内容可覆盖"),
+    "sdr_bookmark_add": (WRITE_TOOL_GRADE_LOW_RISK, "保存用户书签，可删除或覆盖"),
+    "sdr_bookmark_goto": (WRITE_TOOL_GRADE_LOW_RISK, "跳到书签只是可恢复的接收调谐"),
+    "vfo_add": (WRITE_TOOL_GRADE_LOW_RISK, "新增监听频率预设，可删除"),
+    "vfo_remove": (WRITE_TOOL_GRADE_LOW_RISK, "删除监听频率预设，可重新添加"),
+    "vfo_select": (WRITE_TOOL_GRADE_LOW_RISK, "切换预设只是可恢复的接收调谐"),
+    "radio_set_frequency": (WRITE_TOOL_GRADE_LOW_RISK, "电台接收调谐可随时改回"),
+    "radio_set_mode": (WRITE_TOOL_GRADE_LOW_RISK, "电台解调模式可随时改回"),
+    "astro_set_observer": (WRITE_TOOL_GRADE_LOW_RISK, "观测站坐标是可重新写入的配置"),
+    "pnt_update_source": (WRITE_TOOL_GRADE_LOW_RISK, "喂入定位源数据只是重算融合，可覆盖"),
+    "pose_update_gps": (WRITE_TOOL_GRADE_LOW_RISK, "喂入 GNSS 位姿数据可被下一次更新覆盖"),
+    "pose_update_imu": (WRITE_TOOL_GRADE_LOW_RISK, "喂入 IMU 位姿数据可被下一次更新覆盖"),
+    "amr_add_sample": (WRITE_TOOL_GRADE_LOW_RISK, "追加训练样本，可删除或重建数据集"),
+    "learning_record": (WRITE_TOOL_GRADE_LOW_RISK, "记录学习经验，仅追加可清理的本地数据"),
+    "file_change_track": (WRITE_TOOL_GRADE_LOW_RISK, "只记录变更审计，不改动文件内容"),
+    "evolution_propose": (WRITE_TOOL_GRADE_LOW_RISK, "只记录改进建议，不改写运行时"),
+    "workflow_record_start": (WRITE_TOOL_GRADE_LOW_RISK, "开始录制宏，只影响本地录制缓冲"),
+    "workflow_record_stop": (WRITE_TOOL_GRADE_LOW_RISK, "停止录制宏，安全收尾"),
+    "workflow_template_create": (WRITE_TOOL_GRADE_LOW_RISK, "从录制生成模板文件，可删除"),
+    "doppler_tune_frequency": (WRITE_TOOL_GRADE_LOW_RISK, "多普勒补偿只是接收调谐，可随时改回"),
+    "doppler_orbit_determine": (WRITE_TOOL_GRADE_LOW_RISK, "定轨只做数值计算，不改动硬件"),
+    "lro_track": (WRITE_TOOL_GRADE_LOW_RISK, "轨道位置预测与画图，无发射或设备动作"),
+    "sat_image_enhance": (WRITE_TOOL_GRADE_LOW_RISK, "本地图像增强，输出文件可删除"),
+    "satdump_compose_image": (WRITE_TOOL_GRADE_LOW_RISK, "本地合成云图 PNG，可删除"),
+    "bladerf_set_params": (WRITE_TOOL_GRADE_LOW_RISK, "只计算并返回可下发的增益档，不直接动设备"),
+    "hackrf_set_params": (WRITE_TOOL_GRADE_LOW_RISK, "只计算并返回可下发的增益档，不直接动设备"),
+    "limesdr_set_params": (WRITE_TOOL_GRADE_LOW_RISK, "只计算并返回可下发的增益档，不直接动设备"),
+    "rtlsdr_set_params": (WRITE_TOOL_GRADE_LOW_RISK, "只计算并返回可下发的增益档，不直接动设备"),
+    "cubicsdr_drag_tune": (WRITE_TOOL_GRADE_LOW_RISK, "只计算拖拽调谐步进，不改动设备"),
+    "sdrsharp_make_window": (WRITE_TOOL_GRADE_LOW_RISK, "只计算 FFT 窗函数系数"),
+}
+
+
+def write_tool_grade(tool_name: str) -> str:
+    """写工具分级；**未登记 = ``hard_gate``（fail-closed）**。"""
+    entry = WRITE_TOOL_GRADES.get(str(tool_name))
+    return entry[0] if entry else WRITE_TOOL_GRADE_HARD_GATE
+
+
+def write_tool_grade_reason(tool_name: str) -> str:
+    """该写工具分级的一句理由；未登记给出 fail-closed 理由。"""
+    entry = WRITE_TOOL_GRADES.get(str(tool_name))
+    return entry[1] if entry else "未登记分级的写工具按 hard_gate 处理（fail-closed）"
+
+
+#: 兼容视图：既有文档/回归把「硬门」当名字模式集合引用。这里由分级表派生，
+#: 不是第二份事实源；新增 hard_gate 只需改 ``WRITE_TOOL_GRADES``。
+MODEL_HARD_GATE_PATTERNS = tuple(sorted(
+    name for name, (grade, _reason) in WRITE_TOOL_GRADES.items()
+    if grade == WRITE_TOOL_GRADE_HARD_GATE))
 
 
 @lru_cache(maxsize=4096)
 def _model_hard_gate(name: str) -> bool:
-    """模型通道必须人工授权的动作（名字命中即拦，不依赖模型自报）。"""
+    """``name`` 是否为 hard_gate 写工具（派生视图，仍不依赖模型自报）。"""
     return any(fnmatch.fnmatchcase(name, p)
                for p in MODEL_HARD_GATE_PATTERNS)
+
+
+#: 超长工具结果的全文落盘目录。
+#:
+#: 与 ``sdr_spill_save`` 共用 ``~/.mbdsdr/spill``：模型看到截断提示后，可以
+#: 直接用 ``sdr_spill_read`` 按行读回全文；MCP 面另有
+#: ``core/mcp_server.TOOL_RESULT_SPILL_DIR``（``~/.mbdsdr/tool_results``，
+#: 面向 JSON 信封），两者不是同一通道，不要合并。
+TOOL_OUTPUT_SPILL_DIR = "~/.mbdsdr/spill"
+
+
+def _spill_tool_output(tool_name: str, text: str):
+    """把超长工具结果全文落盘，返回 ``(path, locator, error)``。
+
+    成功时 ``error`` 为空串、``locator`` 可直接喂给 ``sdr_spill_read``；
+    失败时 ``path``/``locator`` 为 None，``error`` 带异常类型与消息——
+    调用方必须把失败原因写进返回内容，不能悄悄只给截断结果。
+    """
+    safe = "".join(c for c in tool_name
+                   if c.isalnum() or c in "-_.")[:60] or "tool"
+    spill_dir = os.path.expanduser(TOOL_OUTPUT_SPILL_DIR)
+    try:
+        os.makedirs(spill_dir, exist_ok=True)
+        stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S_%f")
+        locator = f"{safe}_{stamp}"
+        path = os.path.join(spill_dir, locator + ".txt")
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(text)
+        return path, locator, ""
+    except OSError as e:
+        return None, None, f"{type(e).__name__}: {e}"
 
 
 class ToolRegistry:
@@ -900,6 +1046,8 @@ class ToolRegistry:
                         tool_name=tool_name,
                         args=args,
                         error="tool_timeout",
+                        error_code="tool_timeout",
+                        timed_out=True,
                         next_step=error_suggestion("tool_timeout"),
                     )
                     result.latency_ms = round((time.time() - start_time) * 1000, 1)
@@ -948,6 +1096,9 @@ class ToolRegistry:
                     data=raw_result,
                     # handler 可在 dict 里带 error / next_step 给模型恢复指引（DSH 模式）
                     error=str(raw_result.get("error", "") or ""),
+                    error_code=str(raw_result.get("error_code")
+                                   or raw_result.get("code") or ""),
+                    timed_out=bool(raw_result.get("timed_out", False)),
                     next_step=str(raw_result.get("next_step", "") or ""),
                 )
             elif isinstance(raw_result, str):
@@ -976,6 +1127,7 @@ class ToolRegistry:
                 tool_name=tool_name,
                 args=args,
                 error=exception_code(e),
+                error_code=exception_code(e),
                 next_step=error_suggestion("exception"),
             )
 
@@ -991,6 +1143,13 @@ class ToolRegistry:
         # 统一补一个稳定码——否则审计/模型只能看到「失败」却无法按码判断原因。
         if not result.success and not result.error:
             result.error = "handler_error"
+        # 码只认 ASCII 结构化标识（如 device_busy / exception:ValueError）；
+        # 面向用户的中文 error 文案不得被当成重试判据。
+        if not result.success and not result.error_code:
+            _err = str(result.error or "")
+            if _err and all(c.isascii() and (c.isalnum() or c in "_:-")
+                            for c in _err):
+                result.error_code = _err
 
         # 失败但没有可见文本时，用 error 兜底（模型侧不能只看到空串）
         if not result.success and not (result.content or "").strip():
@@ -1013,15 +1172,27 @@ class ToolRegistry:
 
         # 输出裁剪（借鉴 DeepSeek harness tool-result-pruner：head/tail 保留，
         # 只砍中间）。频谱/扫频数据头部常有表头、尾部常有结论，纯从头切会丢结论。
+        # 全文同时落盘并给出 locator（DSH spill 机制）：只截断不落盘时，模型
+        # 想追问被砍掉的中间段就只能重跑一遍工具。
         if len(result.content) > self.tool_output_max_chars:
             original_len = len(result.content)
+            full_text = result.content
             head = int(self.tool_output_max_chars * 0.6)
             tail = self.tool_output_max_chars - head
             result.content = (
-                result.content[:head]
+                full_text[:head]
                 + f"\n...[中间 {original_len - head - tail} 字符已裁剪]...\n"
-                + result.content[-tail:]
+                + full_text[-tail:]
             )
+            spill_path, locator, spill_error = _spill_tool_output(
+                tool_name, full_text)
+            if spill_path:
+                result.content += (
+                    f"\n[全文 {original_len} 字符已落盘，locator={locator}；"
+                    f"可用 sdr_spill_read 按行读回：{spill_path}]")
+            else:
+                result.content += (
+                    f"\n[全文落盘失败（{spill_error}），以上仅为头尾保留内容]")
             result.truncated = True
 
         emit_tool_result(self.hooks, tool_name, result,
@@ -1072,17 +1243,22 @@ class ToolRegistry:
                     self._log_call(result)
                     return result
 
-        # ── 模型通道硬门（2026-11-08，对照 deepseek-harness 审计）──────
-        # 单一事实源仍是 ``tx_guard``：allowed-once + fail-closed；模型自报
-        # ``arm_manual`` 不参与判定。未授权 → 返回 gated 信封，**不执行**
-        # handler；已授权 → 把 decision 放进上下文，handler 内部再 resolve
-        # 时命中上下文，不会二次消费一次性 token。
-        if self.is_write_tool(name) and _model_hard_gate(name):
+        # ── 模型通道分级门（Task 35：写工具全量分级）──────────────
+        # 单一事实源是 ``WRITE_TOOL_GRADES``（未登记 = hard_gate，fail-closed）；
+        # 授权判定仍由 ``tx_guard`` 负责：allowed-once + 动作摘要绑定。
+        # 模型自报 ``arm_manual`` 不参与判定。未授权 → 返回 gated 信封，
+        # **不执行** handler；已授权 → 把 decision 放进上下文，handler 内部
+        # 再 resolve 时命中上下文，不会二次消费一次性 token。
+        if self.is_write_tool(name):
+            grade = write_tool_grade(name)
+            if grade == WRITE_TOOL_GRADE_LOW_RISK:
+                return self.call(name, args, trigger=TRIGGER_MODEL)
             try:
-                from .tx_guard import (resolve_write_authorization,
+                from .tx_guard import (GATE_PARAMS,
+                                       resolve_write_authorization,
                                        tx_authorization)
                 decision = resolve_write_authorization(
-                    name, args, source="model_chat")
+                    name, args, source="model")
             except Exception as e:      # 门本身坏了 → fail-closed，不放行
                 result = ToolResult(
                     success=False,
@@ -1091,27 +1267,35 @@ class ToolRegistry:
                     tool_name=name, args=args,
                     error="manual_gate_required",
                     next_step="先修好 tx_guard 与审计落盘，再重试该写操作。",
-                    data={"gated": True, "reason": "gate_error"},
+                    data={"gated": True, "reason": "gate_error", "grade": grade},
                 )
                 self._log_call(result)
                 return result
             if not decision.allowed:
+                what = ("发射/不可逆/物理动作类操作"
+                        if grade == WRITE_TOOL_GRADE_HARD_GATE
+                        else "会改动设备/配置/磁盘的写操作")
                 result = ToolResult(
                     success=False,
                     content=(
-                        f"「{name}」是发射/写入/外部连接类操作，需要用户在本机"
-                        f"确认通道授权（{decision.code}: {decision.reason}）。"
+                        f"「{name}」是{what}，需要用户在本机确认通道授权"
+                        f"（{decision.code}: {decision.reason}）。"
                         "模型无法自行获得或伪造授权。"),
                     tool_name=name, args=args,
                     error="manual_gate_required",
                     next_step=("请用户确认后再试；只读查询（get_/list_/状态类）"
                                "不需要授权，可先做那些。"),
-                    data={"gated": True, "reason": decision.code},
+                    data={"gated": True, "reason": decision.code,
+                          "grade": grade},
                 )
                 self._log_call(result)
                 return result
+            # 门参数只承载授权，不下发 handler、也不进调用日志（防 token 泄漏）。
+            call_args = ({k: v for k, v in args.items()
+                          if k not in GATE_PARAMS}
+                         if isinstance(args, dict) else args)
             with tx_authorization(decision):
-                return self.call(name, args, trigger=TRIGGER_MODEL)
+                return self.call(name, call_args, trigger=TRIGGER_MODEL)
 
         return self.call(name, args, trigger=TRIGGER_MODEL)
 
@@ -2226,11 +2410,14 @@ class ToolRegistry:
                 "单点定位残差与设计矩阵（最小二乘定位，公开 GNSS 方法）。返回 ECEF/经纬高/钟差/RMS。"
             ),
             parameters={"type": "object", "properties": {
-                "rs": {"type": "array", "items": {"type": "array", "items": {"type": "number"}},
-                       "description": "每颗卫星 ECEF 位置 [[x,y,z],...] (m)"},
-                "dts": {"type": "array", "items": {"type": "number"},
+                # 4 个未知数（x,y,z,钟差）：少于 4 星时最小二乘欠定，
+                # 旧实现会「解出」一个 rms≈0 的假位置，故把下限写进 schema。
+                "rs": {"type": "array", "minItems": 4,
+                       "items": {"type": "array", "items": {"type": "number"}},
+                       "description": "每颗卫星 ECEF 位置 [[x,y,z],...] (m)，至少 4 颗"},
+                "dts": {"type": "array", "minItems": 4, "items": {"type": "number"},
                         "description": "每颗卫星钟差 [s,...]"},
-                "pr": {"type": "array", "items": {"type": "number"},
+                "pr": {"type": "array", "minItems": 4, "items": {"type": "number"},
                        "description": "每颗卫星伪距 [m,...]"},
             }, "required": ["rs", "dts", "pr"]},
             handler=_spp_locate_result,

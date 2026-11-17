@@ -1,0 +1,7264 @@
+{
+  "id": "modern_rey",
+  "meta": {
+    "schema": "mbdsdr.sky_culture.v1",
+    "id": "modern_rey",
+    "display_name": "Modern (H.A. Rey)",
+    "native_name": "",
+    "region": "World",
+    "classification": [
+      "single"
+    ],
+    "source": "Stellarium skyculture modern_rey",
+    "source_url": "https://github.com/Stellarium/stellarium/tree/master/skycultures/modern_rey",
+    "source_license": "CC BY-SA 4.0",
+    "source_license_url": "https://creativecommons.org/licenses/by-sa/4.0/",
+    "attribution": "Stellarium sky culture 'modern_rey'; authors: This sky culture used to be for a long time an easy user-installable addon example contributed by Mike Richards. It has been reworked following the 41st reprint and completed with this description by Georg Zotti (CC BY-SA 4.0). Converted to HIP line segments only; no artwork or description images were copied.",
+    "source_file": "reference/stellarium/skycultures/modern_rey/index.json",
+    "source_file_sha256": "1963e864fe29b55d381be384e708af136d95d532fc5879acd73591ed02f508f6",
+    "description_file": "reference/stellarium/skycultures/modern_rey/description.md",
+    "description_file_sha256": "f7bcb637ec8c04a6200682edd936dcbd14c34c9d39476bfb227dd4dbec53a5ba",
+    "conversion_scope": "Only constellations[].lines, id and common_name (plus optional common_names star labels) are converted; illustrations, artwork and description text are not copied.",
+    "names_scope": "Explicit common_names labels take precedence; stars without an explicit label inherit the constellation/asterism name they belong to.",
+    "group_count": 170,
+    "edge_count": 877,
+    "name_count": 848,
+    "unresolved_hip_count": 2,
+    "unresolved_hips": [
+      1411,
+      55203
+    ],
+    "unresolved_token_count": 0,
+    "unresolved_tokens": [],
+    "generated_utc": "2026-11-17T17:42:09Z",
+    "data_sha256": "c4b6b0f0575213ef51444dbceaab127e8e72ac24566161a72ae47cf2088390c6"
+  },
+  "groups": [
+    {
+      "group_id": "CON modern_rey UMi",
+      "names": {
+        "en": "Ursa Minor",
+        "native": "LITTLE DIPPER"
+      },
+      "lines": [
+        [
+          11767,
+          85822,
+          82080,
+          77055,
+          79822,
+          75097,
+          72607,
+          77055
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON modern_rey .UMig",
+      "names": {
+        "en": "Guardians",
+        "native": "Guardians"
+      },
+      "lines": [
+        [
+          72607,
+          75097
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON modern_rey Dra",
+      "names": {
+        "en": "Draco",
+        "native": "DRAGON"
+      },
+      "lines": [
+        [
+          87585,
+          87833,
+          85670,
+          85829,
+          87585,
+          94376,
+          97433
+        ],
+        [
+          94376,
+          89908
+        ],
+        [
+          89937,
+          89908,
+          83895,
+          80331,
+          78527,
+          75458,
+          68756,
+          61281,
+          56211
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON modern_rey .Draf",
+      "names": {
+        "en": "feet",
+        "native": "feet"
+      },
+      "lines": [
+        [
+          89937,
+          89908,
+          94376,
+          97433
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON modern_rey .Drah",
+      "names": {
+        "en": "head",
+        "native": "head"
+      },
+      "lines": [
+        [
+          87585,
+          87833,
+          85670,
+          85829,
+          87585
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON modern_rey .Drat1",
+      "names": {
+        "en": "tail",
+        "native": "tail"
+      },
+      "lines": [
+        [
+          89908,
+          83895,
+          80331,
+          78527
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON modern_rey .Drat2",
+      "names": {
+        "en": "tail",
+        "native": "tail"
+      },
+      "lines": [
+        [
+          78527,
+          75458,
+          68756,
+          61281,
+          56211
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON modern_rey Cas",
+      "names": {
+        "en": "Cassiopeia",
+        "native": "CASSIOPEIA"
+      },
+      "lines": [
+        [
+          9598,
+          8886,
+          6686,
+          4427,
+          3179,
+          746
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON modern_rey Cep",
+      "names": {
+        "en": "Cepheus",
+        "native": "CEPHEUS"
+      },
+      "lines": [
+        [
+          110991,
+          112724,
+          106032,
+          105199,
+          102422,
+          101093
+        ],
+        [
+          105199,
+          107259,
+          109857,
+          109492,
+          110991
+        ],
+        [
+          109492,
+          107418
+        ],
+        [
+          112724,
+          116727,
+          106032
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON modern_rey Cam",
+      "names": {
+        "en": "Camelopardalis",
+        "native": "GIRAFFE"
+      },
+      "lines": [
+        [
+          23040,
+          23522,
+          17884,
+          16228
+        ],
+        [
+          17884,
+          17959,
+          22783,
+          23522
+        ],
+        [
+          22783,
+          33694,
+          29997
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON modern_rey UMa",
+      "names": {
+        "en": "Ursa Major",
+        "native": "GREAT BEAR"
+      },
+      "lines": [
+        [
+          67301,
+          65378,
+          62956,
+          59774,
+          54061,
+          53910,
+          58001,
+          59774
+        ],
+        [
+          54061,
+          46733,
+          41704,
+          44127,
+          44471,
+          50801
+        ],
+        [
+          50372,
+          46853,
+          48319,
+          46733
+        ],
+        [
+          50801,
+          55203
+        ],
+        [
+          55219,
+          54539,
+          57399,
+          67301
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON modern_rey .UMap",
+      "names": {
+        "en": "Pointers",
+        "native": "Pointers"
+      },
+      "lines": [
+        [
+          53910,
+          54061
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON modern_rey .UMah",
+      "names": {
+        "en": "head",
+        "native": "head"
+      },
+      "lines": [
+        [
+          64468,
+          64468
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON modern_rey .UMap1",
+      "names": {
+        "en": "paws",
+        "native": "paws"
+      },
+      "lines": [
+        [
+          55203,
+          50801
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON modern_rey .UMap2",
+      "names": {
+        "en": "paws",
+        "native": "paws"
+      },
+      "lines": [
+        [
+          50801,
+          44471
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON modern_rey .UMar",
+      "names": {
+        "en": "rump",
+        "native": "rump"
+      },
+      "lines": [
+        [
+          46853,
+          48319,
+          46733,
+          41704,
+          44127
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON modern_rey Leo",
+      "names": {
+        "en": "Leo",
+        "native": "LION"
+      },
+      "lines": [
+        [
+          57632,
+          54872,
+          54879,
+          55642,
+          55434
+        ],
+        [
+          54879,
+          51624
+        ],
+        [
+          54879,
+          49583,
+          49669
+        ],
+        [
+          49583,
+          47508
+        ],
+        [
+          49583,
+          50583,
+          53954,
+          54872
+        ],
+        [
+          50583,
+          50335,
+          48455,
+          46146,
+          46750,
+          47908,
+          48455
+        ],
+        [
+          47908,
+          49583
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON modern_rey .Leoh",
+      "names": {
+        "en": "head",
+        "native": "head"
+      },
+      "lines": [
+        [
+          48455,
+          46146,
+          46750,
+          47908,
+          48455
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON modern_rey .Leot",
+      "names": {
+        "en": "tail",
+        "native": "tail"
+      },
+      "lines": [
+        [
+          57632,
+          54872
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON modern_rey CVn",
+      "names": {
+        "en": "Canes Venatici",
+        "native": "HUNTING DOGS"
+      },
+      "lines": [
+        [
+          61317,
+          63125
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON modern_rey LMi",
+      "names": {
+        "en": "Leo Minor",
+        "native": "LITTLE LION"
+      },
+      "lines": [
+        [
+          53229,
+          51233,
+          49593,
+          46952
+        ],
+        [
+          49593,
+          51056,
+          53229
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON modern_rey Boo",
+      "names": {
+        "en": "Bootes",
+        "native": "HERDSMAN"
+      },
+      "lines": [
+        [
+          67275,
+          67459,
+          67927,
+          69673,
+          71795,
+          72105,
+          69673
+        ],
+        [
+          72105,
+          74666,
+          75411,
+          73555,
+          74666
+        ],
+        [
+          73555,
+          71075,
+          71053,
+          71284,
+          72105
+        ],
+        [
+          71075,
+          69732,
+          70497,
+          69483,
+          69732
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON modern_rey .Boob",
+      "names": {
+        "en": "body",
+        "native": "body"
+      },
+      "lines": [
+        [
+          69673,
+          71795,
+          72105,
+          69673
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON modern_rey .Booh",
+      "names": {
+        "en": "head",
+        "native": "head"
+      },
+      "lines": [
+        [
+          72105,
+          74666,
+          73555,
+          71075,
+          71053,
+          71284,
+          72105
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON modern_rey .Boop",
+      "names": {
+        "en": "pipe",
+        "native": "pipe"
+      },
+      "lines": [
+        [
+          71075,
+          69732,
+          70497,
+          69483,
+          69732
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON modern_rey CrB",
+      "names": {
+        "en": "Corona Borealis",
+        "native": "NORTHERN CROWN"
+      },
+      "lines": [
+        [
+          76127,
+          75695,
+          76267,
+          76952,
+          77512,
+          78159
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON modern_rey Com",
+      "names": {
+        "en": "Coma Berenices",
+        "native": "BERENICE'S HAIR"
+      },
+      "lines": [
+        [
+          64241,
+          64394,
+          60742
+        ],
+        [
+          64394,
+          60697
+        ],
+        [
+          64394,
+          60746
+        ],
+        [
+          64394,
+          60904
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON modern_rey Lyr",
+      "names": {
+        "en": "Lyra",
+        "native": "LYRE"
+      },
+      "lines": [
+        [
+          91262,
+          91926,
+          92862,
+          94481,
+          94713,
+          93194,
+          92420,
+          89826,
+          91262
+        ],
+        [
+          93194,
+          92791
+        ],
+        [
+          92420,
+          91971
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON modern_rey Cyg",
+      "names": {
+        "en": "Cygnus",
+        "native": "SWAN"
+      },
+      "lines": [
+        [
+          94779,
+          97165,
+          100453,
+          102098,
+          104060
+        ],
+        [
+          102098,
+          99848,
+          95853,
+          94779
+        ],
+        [
+          100453,
+          102488,
+          104732,
+          103413,
+          102098
+        ],
+        [
+          103413,
+          105102,
+          104887
+        ],
+        [
+          100453,
+          98110,
+          96683,
+          95947
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON modern_rey .Cygw1",
+      "names": {
+        "en": "wing",
+        "native": "wing"
+      },
+      "lines": [
+        [
+          100453,
+          97165,
+          94779,
+          95853,
+          99848,
+          102098
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON modern_rey .Cygw2",
+      "names": {
+        "en": "wing",
+        "native": "wing"
+      },
+      "lines": [
+        [
+          100453,
+          102488,
+          104732,
+          103413,
+          102098
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON modern_rey .Cygf",
+      "names": {
+        "en": "feet",
+        "native": "feet"
+      },
+      "lines": [
+        [
+          104060,
+          102098,
+          103413,
+          105102,
+          104887
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON modern_rey .Cygn",
+      "names": {
+        "en": "outstretched neck",
+        "native": "outstretched neck"
+      },
+      "lines": [
+        [
+          100453,
+          98110,
+          96683,
+          95947
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON modern_rey Her",
+      "names": {
+        "en": "Hercules",
+        "native": "HERCULES"
+      },
+      "lines": [
+        [
+          84345,
+          84379,
+          85693,
+          86974,
+          88794,
+          88267,
+          88886,
+          90139,
+          92043,
+          92161
+        ],
+        [
+          88794,
+          87933,
+          84380,
+          85112,
+          87808,
+          86414,
+          81126,
+          79101,
+          79992,
+          86414
+        ],
+        [
+          86974,
+          83207,
+          81693,
+          81833,
+          84380,
+          83207,
+          80816,
+          80170
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON modern_rey .Herk",
+      "names": {
+        "en": "Keystone",
+        "native": "Keystone"
+      },
+      "lines": [
+        [
+          84380,
+          81833,
+          81693,
+          83207,
+          84380
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON modern_rey .Herc",
+      "names": {
+        "en": "club",
+        "native": "club"
+      },
+      "lines": [
+        [
+          86414,
+          79992,
+          79101,
+          81126,
+          86414
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON modern_rey Vul",
+      "names": {
+        "en": "Vulpecula",
+        "native": "L. FOX"
+      },
+      "lines": [
+        [
+          95771,
+          98543
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON modern_rey And",
+      "names": {
+        "en": "Andromeda",
+        "native": "ANDROMEDA"
+      },
+      "lines": [
+        [
+          677,
+          3092,
+          2912,
+          5447,
+          3092,
+          3031,
+          3693,
+          4463
+        ],
+        [
+          5447,
+          7513,
+          9640
+        ],
+        [
+          5447,
+          4436,
+          3881,
+          5434,
+          7607
+        ],
+        [
+          2912,
+          1411,
+          116631
+        ],
+        [
+          116584,
+          116805,
+          116631,
+          113726
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON modern_rey .Andc",
+      "names": {
+        "en": "the chain",
+        "native": "the chain"
+      },
+      "lines": [
+        [
+          116584,
+          116805,
+          116631,
+          113726
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON modern_rey Peg",
+      "names": {
+        "en": "Pegasus",
+        "native": "PEGASUS"
+      },
+      "lines": [
+        [
+          113963,
+          113881,
+          1067,
+          113963,
+          112440,
+          112748,
+          112158,
+          109410
+        ],
+        [
+          114520,
+          113963,
+          114144
+        ],
+        [
+          113963,
+          112447,
+          112029,
+          109427
+        ],
+        [
+          112029,
+          107315
+        ],
+        [
+          112447,
+          109176,
+          107348
+        ],
+        [
+          112440,
+          109176,
+          107354,
+          105502
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON modern_rey .Pegh",
+      "names": {
+        "en": "head",
+        "native": "head"
+      },
+      "lines": [
+        [
+          112440,
+          112748,
+          112158,
+          109410
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON modern_rey .Pegt",
+      "names": {
+        "en": "tail",
+        "native": "tail"
+      },
+      "lines": [
+        [
+          114144,
+          113963,
+          114520
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON modern_rey .Pegw",
+      "names": {
+        "en": "wing",
+        "native": "wing"
+      },
+      "lines": [
+        [
+          113963,
+          113881,
+          1067,
+          113963
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON modern_rey Tri",
+      "names": {
+        "en": "Triangulum",
+        "native": "TRIANGLE"
+      },
+      "lines": [
+        [
+          10670,
+          10064,
+          8796,
+          10670
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON modern_rey Lac",
+      "names": {
+        "en": "Lacerta",
+        "native": "LIZARD"
+      },
+      "lines": [
+        [
+          109937,
+          109754,
+          111104,
+          111944,
+          111022,
+          110351,
+          111104
+        ],
+        [
+          111022,
+          110609,
+          110538,
+          111169,
+          111022
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON modern_rey Per",
+      "names": {
+        "en": "Perseus",
+        "native": "PERSEUS"
+      },
+      "lines": [
+        [
+          17448,
+          18246,
+          18614,
+          18532,
+          14576,
+          14354,
+          13254
+        ],
+        [
+          18532,
+          17529,
+          16335,
+          15863,
+          16826,
+          17358,
+          19343,
+          19812,
+          20070,
+          19167
+        ],
+        [
+          14576,
+          14668,
+          14632,
+          13531,
+          13268,
+          14328,
+          13531
+        ],
+        [
+          14328,
+          15863,
+          14632,
+          12777,
+          8068
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON modern_rey Tau",
+      "names": {
+        "en": "Taurus",
+        "native": "BULL"
+      },
+      "lines": [
+        [
+          25428,
+          21881,
+          20711,
+          17702
+        ],
+        [
+          21881,
+          26451,
+          21421,
+          20894,
+          20205,
+          20455,
+          20648,
+          20889,
+          20711
+        ],
+        [
+          20205,
+          21589,
+          21402
+        ],
+        [
+          20205,
+          19860
+        ],
+        [
+          20205,
+          18724,
+          16083,
+          16369
+        ],
+        [
+          16083,
+          15900,
+          16852
+        ],
+        [
+          15900,
+          18907
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON modern_rey .Tauh",
+      "names": {
+        "en": "head",
+        "native": "head"
+      },
+      "lines": [
+        [
+          20205,
+          20894,
+          21421,
+          26451,
+          21881,
+          20711,
+          20889,
+          20648,
+          20455,
+          20205
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON modern_rey .Tauc1",
+      "names": {
+        "en": "horn",
+        "native": "horn"
+      },
+      "lines": [
+        [
+          25428,
+          21881
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON modern_rey .Tauc2",
+      "names": {
+        "en": "horn",
+        "native": "horn"
+      },
+      "lines": [
+        [
+          17702,
+          20711
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON modern_rey .Taut",
+      "names": {
+        "en": "tail",
+        "native": "tail"
+      },
+      "lines": [
+        [
+          16083,
+          16369
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON modern_rey Ari",
+      "names": {
+        "en": "Aries",
+        "native": "RAM"
+      },
+      "lines": [
+        [
+          14838,
+          13914,
+          10306,
+          8832
+        ],
+        [
+          13914,
+          13209,
+          13061,
+          12719,
+          13209
+        ],
+        [
+          12719,
+          9884,
+          9153,
+          8903,
+          9884,
+          10306
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON modern_rey .Arih",
+      "names": {
+        "en": "head",
+        "native": "head"
+      },
+      "lines": [
+        [
+          9884,
+          8903,
+          9153,
+          9884
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON modern_rey .Arit",
+      "names": {
+        "en": "tail",
+        "native": "tail"
+      },
+      "lines": [
+        [
+          13209,
+          13061,
+          12719,
+          13209
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON modern_rey Gem",
+      "names": {
+        "en": "Gemini",
+        "native": "TWINS"
+      },
+      "lines": [
+        [
+          31681,
+          34088,
+          35550,
+          35350,
+          32362
+        ],
+        [
+          35550,
+          36962,
+          37740
+        ],
+        [
+          36962,
+          37826
+        ],
+        [
+          36962,
+          36046,
+          34693,
+          36366,
+          36850
+        ],
+        [
+          34693,
+          33018
+        ],
+        [
+          34693,
+          32246,
+          30883
+        ],
+        [
+          32246,
+          30343,
+          29655,
+          28734
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON modern_rey Aur",
+      "names": {
+        "en": "Auriga",
+        "native": "CHARIOTEER"
+      },
+      "lines": [
+        [
+          23015,
+          28380,
+          28360,
+          28358,
+          24608,
+          28360
+        ],
+        [
+          23015,
+          23767,
+          24608,
+          23416,
+          23453,
+          23767
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON modern_rey CMi",
+      "names": {
+        "en": "Canis Minor",
+        "native": "LITTLE DOG"
+      },
+      "lines": [
+        [
+          37279,
+          36188
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON modern_rey Cnc",
+      "names": {
+        "en": "Cancer",
+        "native": "CRAB"
+      },
+      "lines": [
+        [
+          43103,
+          42806,
+          40167,
+          40526,
+          42911,
+          42806
+        ],
+        [
+          42911,
+          44066
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON modern_rey Lyn",
+      "names": {
+        "en": "Lynx",
+        "native": "LYNX"
+      },
+      "lines": [
+        [
+          45860,
+          45688,
+          44248,
+          41075,
+          36145,
+          33449,
+          30060
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON modern_rey Ori",
+      "names": {
+        "en": "Orion",
+        "native": "ORION"
+      },
+      "lines": [
+        [
+          26727,
+          26311,
+          25930
+        ],
+        [
+          28716,
+          29426,
+          29038,
+          27913,
+          28716
+        ],
+        [
+          29239,
+          28614,
+          27989,
+          26727,
+          27366
+        ],
+        [
+          24436,
+          25281,
+          25930,
+          25336,
+          25813,
+          26207
+        ],
+        [
+          25813,
+          27989
+        ],
+        [
+          25336,
+          22449,
+          22549,
+          22797,
+          23123
+        ],
+        [
+          22449,
+          22509,
+          22845,
+          22957
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON modern_rey .Orib",
+      "names": {
+        "en": "belt",
+        "native": "belt"
+      },
+      "lines": [
+        [
+          26727,
+          26311,
+          25930
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON modern_rey .Oric",
+      "names": {
+        "en": "club",
+        "native": "club"
+      },
+      "lines": [
+        [
+          29426,
+          28716,
+          27913,
+          29038,
+          29426
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON modern_rey .Oris",
+      "names": {
+        "en": "shield",
+        "native": "shield"
+      },
+      "lines": [
+        [
+          22957,
+          22845,
+          22509,
+          22449,
+          22549,
+          22797,
+          23123
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON modern_rey CMa",
+      "names": {
+        "en": "Canis Major",
+        "native": "BIG DOG"
+      },
+      "lines": [
+        [
+          33160,
+          34045,
+          33347,
+          32349,
+          33977,
+          34444,
+          35037,
+          35904
+        ],
+        [
+          33579,
+          33856,
+          34444
+        ],
+        [
+          33579,
+          33152,
+          31592,
+          31125
+        ],
+        [
+          31592,
+          30324
+        ],
+        [
+          31592,
+          32349
+        ],
+        [
+          33579,
+          32759
+        ],
+        [
+          30122,
+          33579
+        ],
+        [
+          33347,
+          33160
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON modern_rey Lep",
+      "names": {
+        "en": "Lepus",
+        "native": "HARE"
+      },
+      "lines": [
+        [
+          28910,
+          28103,
+          27288,
+          25985,
+          24305
+        ],
+        [
+          28910,
+          27654,
+          27072,
+          25606,
+          23685
+        ],
+        [
+          25985,
+          25606
+        ],
+        [
+          24305,
+          24845
+        ],
+        [
+          24305,
+          24327
+        ],
+        [
+          23685,
+          24305
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON modern_rey Mon",
+      "names": {
+        "en": "Monoceros",
+        "native": "UNICORN"
+      },
+      "lines": [
+        [
+          41307,
+          39863
+        ],
+        [
+          29651,
+          30867,
+          34769,
+          32578,
+          30419
+        ],
+        [
+          34769,
+          39863,
+          37447
+        ],
+        [
+          32578,
+          31216
+        ],
+        [
+          30419,
+          31216,
+          31978
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON modern_rey Eri",
+      "names": {
+        "en": "Eridanus",
+        "native": "RIVER ERIDANUS"
+      },
+      "lines": [
+        [
+          7588,
+          9007,
+          10602,
+          11407,
+          12486,
+          13847,
+          15510,
+          17874,
+          20042,
+          20535,
+          21393,
+          18673,
+          18216,
+          17717,
+          17651,
+          16611,
+          15474,
+          14146,
+          13701,
+          16537,
+          17378,
+          18543,
+          19849,
+          19587,
+          21444,
+          22109,
+          23875,
+          21594
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON modern_rey Hya",
+      "names": {
+        "en": "Hydra",
+        "native": "HYDRA"
+      },
+      "lines": [
+        [
+          42799,
+          42402,
+          42313,
+          43109,
+          43813,
+          42799
+        ],
+        [
+          43813,
+          45336,
+          47431,
+          46390,
+          49841,
+          51069,
+          52943,
+          53740,
+          54682,
+          56343,
+          57936,
+          64962,
+          68895
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON modern_rey .Hyah",
+      "names": {
+        "en": "Hydra's head",
+        "native": "HYDRA's head"
+      },
+      "lines": [
+        [
+          43813,
+          43109,
+          42313,
+          42402,
+          42799,
+          43813
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON modern_rey .Hyat",
+      "names": {
+        "en": "Hydra's tail",
+        "native": "HYDRA's tail"
+      },
+      "lines": [
+        [
+          56343,
+          57936,
+          64962,
+          68895
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON modern_rey Crt",
+      "names": {
+        "en": "Crater",
+        "native": "CUP"
+      },
+      "lines": [
+        [
+          53740,
+          54682,
+          55705,
+          55282,
+          53740
+        ],
+        [
+          55282,
+          55687,
+          56633,
+          58188,
+          57283,
+          55705
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON modern_rey Ant",
+      "names": {
+        "en": "Antlia",
+        "native": "PUMP"
+      },
+      "lines": [
+        [
+          51172,
+          51172
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON modern_rey Vir",
+      "names": {
+        "en": "Virgo",
+        "native": "VIRGIN"
+      },
+      "lines": [
+        [
+          57380,
+          57757,
+          60129,
+          61941,
+          58948,
+          57380
+        ],
+        [
+          61941,
+          64238,
+          65474,
+          69427,
+          69701,
+          71957
+        ],
+        [
+          65474,
+          66249,
+          68520,
+          72220
+        ],
+        [
+          66249,
+          63090,
+          63608
+        ],
+        [
+          63090,
+          61941
+        ],
+        [
+          69701,
+          68520
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON modern_rey .Virh",
+      "names": {
+        "en": "head",
+        "native": "head"
+      },
+      "lines": [
+        [
+          61941,
+          58948,
+          57380,
+          57757,
+          60129,
+          61941
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON modern_rey .Virf",
+      "names": {
+        "en": "feet",
+        "native": "feet"
+      },
+      "lines": [
+        [
+          72220,
+          68520,
+          69701,
+          71957
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON modern_rey Lib",
+      "names": {
+        "en": "Libra",
+        "native": "SCALES"
+      },
+      "lines": [
+        [
+          73714,
+          72622,
+          74785,
+          76333,
+          72622
+        ],
+        [
+          76333,
+          76470,
+          76600
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON modern_rey Crv",
+      "names": {
+        "en": "Corvus",
+        "native": "CROW"
+      },
+      "lines": [
+        [
+          61174,
+          60965,
+          59803,
+          59316,
+          59199
+        ],
+        [
+          59316,
+          60189,
+          61359
+        ],
+        [
+          60189,
+          60965
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON modern_rey .Crvb",
+      "names": {
+        "en": "bill",
+        "native": "bill"
+      },
+      "lines": [
+        [
+          60965,
+          61174
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON modern_rey .Crvf",
+      "names": {
+        "en": "foot",
+        "native": "foot"
+      },
+      "lines": [
+        [
+          60189,
+          61359
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON modern_rey .Crvt",
+      "names": {
+        "en": "tail",
+        "native": "tail"
+      },
+      "lines": [
+        [
+          59316,
+          59199
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON modern_rey Oph",
+      "names": {
+        "en": "Ophiuchus",
+        "native": "SERPENT BEARER"
+      },
+      "lines": [
+        [
+          85423,
+          84405,
+          84970,
+          85340,
+          84893,
+          84012,
+          85365,
+          86742,
+          87108,
+          88601
+        ],
+        [
+          86742,
+          86032,
+          83000,
+          86742
+        ],
+        [
+          83000,
+          82673,
+          80883,
+          79593
+        ],
+        [
+          83000,
+          81377,
+          80894,
+          80569,
+          80343,
+          80975
+        ],
+        [
+          81377,
+          84012
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON modern_rey .Ophb",
+      "names": {
+        "en": "body",
+        "native": "body"
+      },
+      "lines": [
+        [
+          86742,
+          83000,
+          81377,
+          84012,
+          85365,
+          86742
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON modern_rey .Ophh",
+      "names": {
+        "en": "head",
+        "native": "head"
+      },
+      "lines": [
+        [
+          86742,
+          86032,
+          83000,
+          86742
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON modern_rey .Opha1",
+      "names": {
+        "en": "arm",
+        "native": "arm"
+      },
+      "lines": [
+        [
+          86742,
+          87108,
+          88601
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON modern_rey .Opha2",
+      "names": {
+        "en": "arm",
+        "native": "arm"
+      },
+      "lines": [
+        [
+          83000,
+          82673,
+          80883,
+          79593
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON modern_rey .Ophf1",
+      "names": {
+        "en": "foot",
+        "native": "foot"
+      },
+      "lines": [
+        [
+          84012,
+          84893,
+          85340,
+          84970,
+          84405,
+          85423
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON modern_rey .Ophf2",
+      "names": {
+        "en": "foot",
+        "native": "foot"
+      },
+      "lines": [
+        [
+          81377,
+          80894,
+          80569,
+          80343,
+          80975
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON modern_rey Ser",
+      "names": {
+        "en": "Serpens",
+        "native": "SERPENT"
+      },
+      "lines": [
+        [
+          92946,
+          88771,
+          88601,
+          89962,
+          88048,
+          86565,
+          86263,
+          84880
+        ],
+        [
+          80628,
+          79882,
+          79593,
+          77516,
+          77622,
+          77070,
+          77257,
+          76276,
+          77233,
+          78072,
+          77450,
+          76852,
+          77233
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON modern_rey .Serh",
+      "names": {
+        "en": "head",
+        "native": "head"
+      },
+      "lines": [
+        [
+          77233,
+          78072,
+          77450,
+          76852,
+          77233
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON modern_rey Sco",
+      "names": {
+        "en": "Scorpius",
+        "native": "SCORPION"
+      },
+      "lines": [
+        [
+          87261,
+          85927,
+          85696,
+          86170,
+          86670,
+          87073,
+          86228,
+          84143,
+          82729,
+          82514,
+          82396,
+          81266,
+          80763,
+          80112,
+          79404,
+          78104,
+          78265
+        ],
+        [
+          80112,
+          79374,
+          78820,
+          78401
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON modern_rey .Scoe",
+      "names": {
+        "en": "cat's eyes",
+        "native": "cat's eyes"
+      },
+      "lines": [
+        [
+          85696,
+          85927
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON modern_rey .Scoc",
+      "names": {
+        "en": "claws",
+        "native": "claws"
+      },
+      "lines": [
+        [
+          78401,
+          78820,
+          79374,
+          80112,
+          79404,
+          78104,
+          78265
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON modern_rey .Scot",
+      "names": {
+        "en": "tail",
+        "native": "tail"
+      },
+      "lines": [
+        [
+          82729,
+          84143,
+          86228,
+          87073,
+          86670,
+          86170
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON modern_rey Aql",
+      "names": {
+        "en": "Aquila",
+        "native": "EAGLE"
+      },
+      "lines": [
+        [
+          98036,
+          97649,
+          97278,
+          96229,
+          95501,
+          97804
+        ],
+        [
+          99473,
+          97804
+        ],
+        [
+          95501,
+          93747,
+          93244
+        ],
+        [
+          95501,
+          93805,
+          93429
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON modern_rey .Aqlh",
+      "names": {
+        "en": "head",
+        "native": "head"
+      },
+      "lines": [
+        [
+          96229,
+          97278,
+          97649,
+          98036
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON modern_rey .Aqlw1",
+      "names": {
+        "en": "wing",
+        "native": "wing"
+      },
+      "lines": [
+        [
+          95501,
+          93747,
+          93244
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON modern_rey .Aqlw2",
+      "names": {
+        "en": "wing",
+        "native": "wing"
+      },
+      "lines": [
+        [
+          95501,
+          97804,
+          99473
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON modern_rey .Aqlt",
+      "names": {
+        "en": "tail",
+        "native": "tail"
+      },
+      "lines": [
+        [
+          95501,
+          93805,
+          93429
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON modern_rey Sgr",
+      "names": {
+        "en": "Sagittarius",
+        "native": "ARCHER"
+      },
+      "lines": [
+        [
+          88635,
+          89931,
+          90185,
+          89642,
+          88635,
+          89341,
+          90496,
+          89931,
+          92041,
+          92855,
+          94141,
+          95168,
+          95176
+        ],
+        [
+          94141,
+          93085,
+          92855,
+          93864,
+          93506,
+          92041
+        ],
+        [
+          93864,
+          98412,
+          98032
+        ],
+        [
+          95241,
+          95347,
+          98412
+        ],
+        [
+          95347,
+          93506
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON modern_rey .Sgrh",
+      "names": {
+        "en": "head",
+        "native": "head"
+      },
+      "lines": [
+        [
+          92855,
+          94141,
+          93085,
+          92855
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON modern_rey .Sgrb",
+      "names": {
+        "en": "body",
+        "native": "body"
+      },
+      "lines": [
+        [
+          92855,
+          92041,
+          93506,
+          93864,
+          92855
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON modern_rey .Sgrs",
+      "names": {
+        "en": "skirt",
+        "native": "skirt"
+      },
+      "lines": [
+        [
+          93506,
+          95347,
+          98412,
+          93864,
+          93506
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON modern_rey .Sgrt",
+      "names": {
+        "en": "the bow",
+        "native": "the bow"
+      },
+      "lines": [
+        [
+          89931,
+          90496,
+          89341,
+          88635,
+          89642,
+          90185,
+          89931
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON modern_rey Sge",
+      "names": {
+        "en": "Sagitta",
+        "native": "ARROW"
+      },
+      "lines": [
+        [
+          98337,
+          97365,
+          96837
+        ],
+        [
+          97365,
+          96757
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON modern_rey Del",
+      "names": {
+        "en": "Delphinus",
+        "native": "DOLPHIN"
+      },
+      "lines": [
+        [
+          101421,
+          101916
+        ],
+        [
+          101421,
+          101800
+        ],
+        [
+          101916,
+          101800,
+          101882,
+          102281,
+          102532,
+          101958,
+          101769,
+          101483,
+          101800
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON modern_rey CrA",
+      "names": {
+        "en": "Corona Australis",
+        "native": "SOUTHERN CROWN"
+      },
+      "lines": [
+        [
+          92989,
+          93174,
+          93825,
+          94114,
+          94160,
+          94005,
+          93542,
+          92953
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON modern_rey Sct",
+      "names": {
+        "en": "Scutum",
+        "native": "SHIELD"
+      },
+      "lines": [
+        [
+          92175,
+          91726,
+          90595,
+          91117,
+          92175
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON modern_rey Cap",
+      "names": {
+        "en": "Capricornus",
+        "native": "GOAT"
+      },
+      "lines": [
+        [
+          100064,
+          100345,
+          104139,
+          105515,
+          106985,
+          107556
+        ],
+        [
+          105515,
+          106039,
+          105881,
+          104139,
+          104019,
+          104234
+        ],
+        [
+          104019,
+          101027
+        ],
+        [
+          100345,
+          101027,
+          102485,
+          102978
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON modern_rey Aqr",
+      "names": {
+        "en": "Aquarius",
+        "native": "WATER CARRIER"
+      },
+      "lines": [
+        [
+          102618,
+          103045,
+          104459,
+          106278,
+          109139
+        ],
+        [
+          106278,
+          109074,
+          110395,
+          111497,
+          110672,
+          109074,
+          110003,
+          112961,
+          114855,
+          114724,
+          112961,
+          112716,
+          113136,
+          114855,
+          114341,
+          114375,
+          114119
+        ],
+        [
+          114855,
+          115438,
+          115669,
+          116247
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON modern_rey .Aqrh",
+      "names": {
+        "en": "head",
+        "native": "head"
+      },
+      "lines": [
+        [
+          109074,
+          110395,
+          111497,
+          110672,
+          109074
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON modern_rey .Aqra",
+      "names": {
+        "en": "arm",
+        "native": "arm"
+      },
+      "lines": [
+        [
+          109074,
+          110003,
+          112961
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON modern_rey .Aqrv",
+      "names": {
+        "en": "vessel",
+        "native": "vessel"
+      },
+      "lines": [
+        [
+          114855,
+          114724,
+          112961,
+          112716,
+          113136,
+          114855,
+          112961
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON modern_rey Equ",
+      "names": {
+        "en": "Equuleus",
+        "native": "LITTLE HORSE"
+      },
+      "lines": [
+        [
+          104987,
+          104858,
+          104521
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON modern_rey PsA",
+      "names": {
+        "en": "Piscis Austrinus",
+        "native": "SOUTHERN FISH"
+      },
+      "lines": [
+        [
+          113368,
+          111954,
+          109285,
+          107380,
+          107608,
+          109285,
+          111188,
+          112948,
+          113246,
+          113368
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON modern_rey Gru",
+      "names": {
+        "en": "Grus",
+        "native": "CRANE"
+      },
+      "lines": [
+        [
+          114131,
+          110997,
+          109268,
+          112122,
+          114421,
+          114131
+        ],
+        [
+          112122,
+          113638
+        ],
+        [
+          112122,
+          112623
+        ],
+        [
+          109268,
+          109111,
+          108085
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON modern_rey Phe",
+      "names": {
+        "en": "Phoenix",
+        "native": "PHOENIX"
+      },
+      "lines": [
+        [
+          5348,
+          5165,
+          3245,
+          2072
+        ],
+        [
+          3245,
+          5348
+        ],
+        [
+          5165,
+          7083,
+          8837,
+          5165,
+          6867,
+          3245
+        ],
+        [
+          2072,
+          2081,
+          765,
+          2072
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON modern_rey Psc",
+      "names": {
+        "en": "Pisces",
+        "native": "FISHES"
+      },
+      "lines": [
+        [
+          5586,
+          5742
+        ],
+        [
+          5586,
+          6193,
+          5742,
+          6706,
+          7097,
+          8198,
+          9487,
+          7884,
+          7007,
+          5737,
+          4906,
+          3786,
+          118268,
+          116771,
+          116928,
+          115738,
+          114971,
+          115227,
+          115830,
+          116771
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON modern_rey .Psck",
+      "names": {
+        "en": "Knot",
+        "native": "Knot"
+      },
+      "lines": [
+        [
+          9487,
+          9487
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON modern_rey .Pscn",
+      "names": {
+        "en": "Northern Fish",
+        "native": "N. Fish"
+      },
+      "lines": [
+        [
+          5742,
+          6193,
+          5586,
+          5742
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON modern_rey .Pscw",
+      "names": {
+        "en": "Western Fish",
+        "native": "W. Fish"
+      },
+      "lines": [
+        [
+          116771,
+          115830,
+          115227,
+          114971,
+          115738,
+          116928,
+          116771
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON modern_rey Cet",
+      "names": {
+        "en": "Cetus",
+        "native": "WHALE"
+      },
+      "lines": [
+        [
+          12706,
+          11484,
+          12828,
+          13954,
+          14135,
+          12706,
+          12387,
+          10826,
+          8645,
+          6537,
+          1562,
+          3419,
+          8102
+        ],
+        [
+          3419,
+          9347,
+          12387
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON modern_rey .Cett",
+      "names": {
+        "en": "tail",
+        "native": "tail"
+      },
+      "lines": [
+        [
+          12706,
+          14135,
+          13954,
+          12828,
+          11484,
+          12706
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON modern_rey Scl",
+      "names": {
+        "en": "Sculptor",
+        "native": "SCULPTOR"
+      },
+      "lines": [
+        [
+          4577,
+          4577
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON modern_rey Car",
+      "names": {
+        "en": "Carina",
+        "native": "SHIP'S KEEL"
+      },
+      "lines": [
+        [
+          39953,
+          38827,
+          41037,
+          45556,
+          50371,
+          51232,
+          51849,
+          53253,
+          54463
+        ],
+        [
+          53253,
+          52468,
+          51576,
+          52419,
+          50099,
+          45238,
+          30438
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON modern_rey .Carh",
+      "names": {
+        "en": "figurehead",
+        "native": "figurehead"
+      },
+      "lines": [
+        [
+          51576,
+          52468,
+          53253,
+          54463
+        ],
+        [
+          53253,
+          51849,
+          51232,
+          50371
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON modern_rey Pup",
+      "names": {
+        "en": "Puppis",
+        "native": "SHIP'S STERN"
+      },
+      "lines": [
+        [
+          30438,
+          31685,
+          35264,
+          36917,
+          37229,
+          37173,
+          38170,
+          38070,
+          37677,
+          36917
+        ],
+        [
+          38170,
+          39757,
+          39429,
+          39953
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON modern_rey .Pupt",
+      "names": {
+        "en": "transom",
+        "native": "transom"
+      },
+      "lines": [
+        [
+          38170,
+          37173,
+          37229,
+          36917,
+          37677,
+          38070,
+          38170
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON modern_rey Vel",
+      "names": {
+        "en": "Vela",
+        "native": "SHIP's SAIL"
+      },
+      "lines": [
+        [
+          39953,
+          42913,
+          45941,
+          48774,
+          52727,
+          51986,
+          50191,
+          46651,
+          44816,
+          39953
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON modern_rey Pyx",
+      "names": {
+        "en": "Pyxis",
+        "native": "SHIP'S COMPASS"
+      },
+      "lines": [
+        [
+          39429,
+          42515,
+          42828,
+          43409
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON modern_rey Vol",
+      "names": {
+        "en": "Volans",
+        "native": "FLYING FISH"
+      },
+      "lines": [
+        [
+          37504,
+          34481,
+          39794,
+          37504
+        ],
+        [
+          39794,
+          35228
+        ],
+        [
+          39794,
+          41312,
+          44382,
+          39794
+        ],
+        [
+          40817,
+          39794
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON modern_rey .Volw1",
+      "names": {
+        "en": "wing",
+        "native": "wing"
+      },
+      "lines": [
+        [
+          39794,
+          40817
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON modern_rey .Volw2",
+      "names": {
+        "en": "wing",
+        "native": "wing"
+      },
+      "lines": [
+        [
+          39794,
+          35228
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON modern_rey Dor",
+      "names": {
+        "en": "Dorado",
+        "native": "SWORDFISH"
+      },
+      "lines": [
+        [
+          27100,
+          27890,
+          26069,
+          27100
+        ],
+        [
+          26069,
+          21281,
+          19893
+        ],
+        [
+          26069,
+          23693,
+          21281
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON modern_rey Col",
+      "names": {
+        "en": "Columba",
+        "native": "DOVE"
+      },
+      "lines": [
+        [
+          28328,
+          28199,
+          30277,
+          29807,
+          28199,
+          27628,
+          28328
+        ],
+        [
+          27628,
+          26634,
+          25859
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON modern_rey .Colh",
+      "names": {
+        "en": "head",
+        "native": "head"
+      },
+      "lines": [
+        [
+          27628,
+          26634,
+          25859
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON modern_rey .Colt",
+      "names": {
+        "en": "tail",
+        "native": "tail"
+      },
+      "lines": [
+        [
+          28199,
+          29807,
+          30277,
+          28199
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON modern_rey .Colw",
+      "names": {
+        "en": "wing",
+        "native": "wing"
+      },
+      "lines": [
+        [
+          28199,
+          27628,
+          28328,
+          28199
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON modern_rey Hyi",
+      "names": {
+        "en": "Hydrus",
+        "native": "HYDRUS"
+      },
+      "lines": [
+        [
+          2021,
+          17678,
+          12394,
+          11001,
+          8928,
+          9236
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON modern_rey Pic",
+      "names": {
+        "en": "Pictor",
+        "native": "EASEL"
+      },
+      "lines": [
+        [
+          32607,
+          27530,
+          27321
+        ],
+        [
+          32607,
+          27321
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON modern_rey Ret",
+      "names": {
+        "en": "Reticulum",
+        "native": "NET"
+      },
+      "lines": [
+        [
+          19780,
+          19921,
+          18597,
+          17440,
+          19780
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON modern_rey Hor",
+      "names": {
+        "en": "Horologium",
+        "native": "CLOCK"
+      },
+      "lines": [
+        [
+          19747,
+          19747
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON modern_rey For",
+      "names": {
+        "en": "Fornax",
+        "native": "FURNACE"
+      },
+      "lines": [
+        [
+          14879,
+          14879
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON modern_rey Cen",
+      "names": {
+        "en": "Centaurus",
+        "native": "CENTAUR"
+      },
+      "lines": [
+        [
+          72010,
+          71865,
+          73334,
+          71352,
+          68245,
+          68862,
+          70300,
+          70090,
+          68933,
+          67464,
+          68245
+        ],
+        [
+          67153,
+          67457
+        ],
+        [
+          67153,
+          67669
+        ],
+        [
+          67153,
+          67786
+        ],
+        [
+          67153,
+          65109,
+          65936,
+          67464,
+          67472,
+          68002,
+          68523,
+          68282,
+          68245
+        ],
+        [
+          68002,
+          66657,
+          71683
+        ],
+        [
+          66657,
+          68702
+        ],
+        [
+          66657,
+          61932,
+          68002
+        ],
+        [
+          61932,
+          60823,
+          59449,
+          56561
+        ],
+        [
+          60823,
+          59196,
+          55425
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON modern_rey .Cenh",
+      "names": {
+        "en": "head",
+        "native": "head"
+      },
+      "lines": [
+        [
+          68245,
+          68862,
+          70300,
+          70090,
+          68933,
+          67464,
+          68245
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON modern_rey .Cena1",
+      "names": {
+        "en": "arm",
+        "native": "arm"
+      },
+      "lines": [
+        [
+          68245,
+          71352,
+          73334,
+          71865,
+          72010
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON modern_rey .Cena2",
+      "names": {
+        "en": "arm",
+        "native": "arm"
+      },
+      "lines": [
+        [
+          67464,
+          65936,
+          65109,
+          67153,
+          67457
+        ],
+        [
+          67153,
+          67669
+        ],
+        [
+          67153,
+          67786
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON modern_rey .Cenb",
+      "names": {
+        "en": "body",
+        "native": "body"
+      },
+      "lines": [
+        [
+          68002,
+          61932,
+          66657,
+          68002
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON modern_rey .Cenl1",
+      "names": {
+        "en": "front legs",
+        "native": "front legs"
+      },
+      "lines": [
+        [
+          66657,
+          71683
+        ],
+        [
+          66657,
+          68702
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON modern_rey .Cenl2",
+      "names": {
+        "en": "hind legs",
+        "native": "hind legs"
+      },
+      "lines": [
+        [
+          60823,
+          59449,
+          56561
+        ],
+        [
+          60823,
+          59196,
+          55425
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON modern_rey Cru",
+      "names": {
+        "en": "Crux",
+        "native": "SOUTHERN CROSS"
+      },
+      "lines": [
+        [
+          61084,
+          60718
+        ],
+        [
+          62434,
+          59747
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON modern_rey Pav",
+      "names": {
+        "en": "Pavo",
+        "native": "PEACOCK"
+      },
+      "lines": [
+        [
+          100751,
+          105858,
+          102395,
+          99240,
+          100751
+        ],
+        [
+          99240,
+          98495,
+          91792,
+          93015,
+          99240
+        ],
+        [
+          93015,
+          92609,
+          90098,
+          88866,
+          92609
+        ],
+        [
+          88866,
+          86929
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON modern_rey TrA",
+      "names": {
+        "en": "Triangulum Australe",
+        "native": "SOUTHERN TRIANGLE"
+      },
+      "lines": [
+        [
+          82273,
+          74946,
+          76440,
+          77952,
+          82273
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON modern_rey Lup",
+      "names": {
+        "en": "Lupus",
+        "native": "WOLF"
+      },
+      "lines": [
+        [
+          78918,
+          77634,
+          76705,
+          75177,
+          78384
+        ],
+        [
+          75177,
+          75304,
+          75501,
+          76297,
+          76552,
+          76829
+        ],
+        [
+          75501,
+          75141,
+          74117,
+          74911,
+          75264
+        ],
+        [
+          74117,
+          73807,
+          74376,
+          74395
+        ],
+        [
+          73807,
+          71536,
+          71121
+        ],
+        [
+          71536,
+          71860,
+          69996
+        ],
+        [
+          71860,
+          70576
+        ],
+        [
+          71860,
+          72683,
+          73273,
+          75177
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON modern_rey .Lupt",
+      "names": {
+        "en": "tail",
+        "native": "tail"
+      },
+      "lines": [
+        [
+          75177,
+          76705,
+          77634,
+          78918
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON modern_rey .Lupe",
+      "names": {
+        "en": "ears",
+        "native": "ears"
+      },
+      "lines": [
+        [
+          71860,
+          70576
+        ],
+        [
+          71860,
+          69996
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON modern_rey Mus",
+      "names": {
+        "en": "Fly",
+        "native": "FLY"
+      },
+      "lines": [
+        [
+          62322,
+          61585,
+          63613,
+          61199,
+          61585,
+          59929,
+          57363
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON modern_rey Oct",
+      "names": {
+        "en": "Octans",
+        "native": "OCTANT"
+      },
+      "lines": [
+        [
+          107089,
+          112405,
+          70638,
+          107089
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON modern_rey Cir",
+      "names": {
+        "en": "Circinus",
+        "native": "DIVIDERS"
+      },
+      "lines": [
+        [
+          71908,
+          75323
+        ],
+        [
+          71908,
+          74824
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON modern_rey Nor",
+      "names": {
+        "en": "Norma",
+        "native": "SQUARE"
+      },
+      "lines": [
+        [
+          80000,
+          80582,
+          78914,
+          78639,
+          80000
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON modern_rey Aps",
+      "names": {
+        "en": "Apus",
+        "native": "BIRD OF PARADISE"
+      },
+      "lines": [
+        [
+          80047,
+          81065,
+          81852,
+          80047,
+          72370
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON modern_rey Cha",
+      "names": {
+        "en": "Chamaeleon",
+        "native": "CHAMELEON"
+      },
+      "lines": [
+        [
+          40702,
+          51839,
+          52595,
+          60000,
+          58484,
+          51839
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON modern_rey .Chae",
+      "names": {
+        "en": "eyes",
+        "native": "eyes"
+      },
+      "lines": [
+        [
+          40702,
+          40888
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON modern_rey Tuc",
+      "names": {
+        "en": "Tucana",
+        "native": "TOUCAN"
+      },
+      "lines": [
+        [
+          110130,
+          114996,
+          118322,
+          1599,
+          2484,
+          114996
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON modern_rey Ind",
+      "names": {
+        "en": "Indus",
+        "native": "INDIAN"
+      },
+      "lines": [
+        [
+          101772,
+          102333,
+          103227,
+          108870,
+          108431,
+          103227
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON modern_rey Tel",
+      "names": {
+        "en": "Telescopium",
+        "native": "TELESCOPE"
+      },
+      "lines": [
+        [
+          90568,
+          90422
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON modern_rey Ara",
+      "names": {
+        "en": "Ara",
+        "native": "ALTAR"
+      },
+      "lines": [
+        [
+          88714,
+          85792,
+          83153,
+          83081,
+          82363,
+          85727,
+          88714
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON modern_rey Mic",
+      "names": {
+        "en": "Microscopium",
+        "native": "MICROSCOPE"
+      },
+      "lines": [
+        [
+          102831,
+          102831
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON modern_rey Cae",
+      "names": {
+        "en": "Caelum",
+        "native": "CHISEL"
+      },
+      "lines": [
+        [
+          21770,
+          21770
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON modern_rey Men",
+      "names": {
+        "en": "Mensa",
+        "native": "TABLE MOUNTAIN"
+      },
+      "lines": [
+        [
+          29271,
+          29271
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON modern_rey Sex",
+      "names": {
+        "en": "Sextans",
+        "native": "SEXTANT"
+      },
+      "lines": [
+        [
+          49641,
+          49641
+        ]
+      ],
+      "kind": "constellation"
+    }
+  ],
+  "names": {
+    "7588": {
+      "en": "Achernar",
+      "native": "Achernar"
+    },
+    "8102": {
+      "en": "Tau Ceti",
+      "native": "Tau Ceti"
+    },
+    "9487": {
+      "en": "Knot",
+      "native": "Knot"
+    },
+    "10826": {
+      "en": "Mira",
+      "native": "Mira"
+    },
+    "11767": {
+      "en": "Pole Star",
+      "native": "Pole Star"
+    },
+    "14576": {
+      "en": "Algol",
+      "native": "Algol"
+    },
+    "17702": {
+      "en": "Pleiades",
+      "native": "Pleiades"
+    },
+    "21421": {
+      "en": "Aldebaran",
+      "native": "Aldebaran"
+    },
+    "24436": {
+      "en": "Rigel",
+      "native": "Rigel"
+    },
+    "24608": {
+      "en": "Capella",
+      "native": "Capella"
+    },
+    "27989": {
+      "en": "Betelgeuse",
+      "native": "Betelgeuse"
+    },
+    "30438": {
+      "en": "Canopus",
+      "native": "Canopus"
+    },
+    "32349": {
+      "en": "Sirius",
+      "native": "Sirius"
+    },
+    "36850": {
+      "en": "Castor",
+      "native": "Castor"
+    },
+    "37279": {
+      "en": "Procyon",
+      "native": "Procyon"
+    },
+    "37826": {
+      "en": "Pollux",
+      "native": "Pollux"
+    },
+    "46390": {
+      "en": "Alphard",
+      "native": "Alphard"
+    },
+    "49669": {
+      "en": "Regulus",
+      "native": "Regulus"
+    },
+    "57632": {
+      "en": "Denebola",
+      "native": "Denebola"
+    },
+    "60718": {
+      "en": "Acrux",
+      "native": "Acrux"
+    },
+    "63125": {
+      "en": "Cor Caroli",
+      "native": "Cor Caroli"
+    },
+    "65378": {
+      "en": "Mizar",
+      "native": "Mizar"
+    },
+    "65474": {
+      "en": "Spica",
+      "native": "Spica"
+    },
+    "65477": {
+      "en": "Alcor",
+      "native": "Alcor"
+    },
+    "68702": {
+      "en": "Beta Centauri",
+      "native": "Beta Centauri"
+    },
+    "68756": {
+      "en": "Thuban",
+      "native": "Thuban"
+    },
+    "69673": {
+      "en": "Arcturus",
+      "native": "Arcturus"
+    },
+    "71683": {
+      "en": "Alpha Centauri",
+      "native": "Alpha Centauri"
+    },
+    "72607": {
+      "en": "Kochab",
+      "native": "Kochab"
+    },
+    "76267": {
+      "en": "Gemma",
+      "native": "Gemma"
+    },
+    "80763": {
+      "en": "Antares",
+      "native": "Antares"
+    },
+    "91262": {
+      "en": "Vega",
+      "native": "Vega"
+    },
+    "95947": {
+      "en": "Albireo",
+      "native": "Albireo"
+    },
+    "97649": {
+      "en": "Altair",
+      "native": "Altair"
+    },
+    "102098": {
+      "en": "Deneb",
+      "native": "Deneb"
+    },
+    "113368": {
+      "en": "Fomalhaut",
+      "native": "Fomalhaut"
+    },
+    "85822": {
+      "en": "Ursa Minor",
+      "native": "LITTLE DIPPER"
+    },
+    "82080": {
+      "en": "Ursa Minor",
+      "native": "LITTLE DIPPER"
+    },
+    "77055": {
+      "en": "Ursa Minor",
+      "native": "LITTLE DIPPER"
+    },
+    "79822": {
+      "en": "Ursa Minor",
+      "native": "LITTLE DIPPER"
+    },
+    "75097": {
+      "en": "Ursa Minor",
+      "native": "LITTLE DIPPER"
+    },
+    "87585": {
+      "en": "Draco",
+      "native": "DRAGON"
+    },
+    "87833": {
+      "en": "Draco",
+      "native": "DRAGON"
+    },
+    "85670": {
+      "en": "Draco",
+      "native": "DRAGON"
+    },
+    "85829": {
+      "en": "Draco",
+      "native": "DRAGON"
+    },
+    "94376": {
+      "en": "Draco",
+      "native": "DRAGON"
+    },
+    "97433": {
+      "en": "Draco",
+      "native": "DRAGON"
+    },
+    "89908": {
+      "en": "Draco",
+      "native": "DRAGON"
+    },
+    "89937": {
+      "en": "Draco",
+      "native": "DRAGON"
+    },
+    "83895": {
+      "en": "Draco",
+      "native": "DRAGON"
+    },
+    "80331": {
+      "en": "Draco",
+      "native": "DRAGON"
+    },
+    "78527": {
+      "en": "Draco",
+      "native": "DRAGON"
+    },
+    "75458": {
+      "en": "Draco",
+      "native": "DRAGON"
+    },
+    "61281": {
+      "en": "Draco",
+      "native": "DRAGON"
+    },
+    "56211": {
+      "en": "Draco",
+      "native": "DRAGON"
+    },
+    "9598": {
+      "en": "Cassiopeia",
+      "native": "CASSIOPEIA"
+    },
+    "8886": {
+      "en": "Cassiopeia",
+      "native": "CASSIOPEIA"
+    },
+    "6686": {
+      "en": "Cassiopeia",
+      "native": "CASSIOPEIA"
+    },
+    "4427": {
+      "en": "Cassiopeia",
+      "native": "CASSIOPEIA"
+    },
+    "3179": {
+      "en": "Cassiopeia",
+      "native": "CASSIOPEIA"
+    },
+    "746": {
+      "en": "Cassiopeia",
+      "native": "CASSIOPEIA"
+    },
+    "110991": {
+      "en": "Cepheus",
+      "native": "CEPHEUS"
+    },
+    "112724": {
+      "en": "Cepheus",
+      "native": "CEPHEUS"
+    },
+    "106032": {
+      "en": "Cepheus",
+      "native": "CEPHEUS"
+    },
+    "105199": {
+      "en": "Cepheus",
+      "native": "CEPHEUS"
+    },
+    "102422": {
+      "en": "Cepheus",
+      "native": "CEPHEUS"
+    },
+    "101093": {
+      "en": "Cepheus",
+      "native": "CEPHEUS"
+    },
+    "107259": {
+      "en": "Cepheus",
+      "native": "CEPHEUS"
+    },
+    "109857": {
+      "en": "Cepheus",
+      "native": "CEPHEUS"
+    },
+    "109492": {
+      "en": "Cepheus",
+      "native": "CEPHEUS"
+    },
+    "107418": {
+      "en": "Cepheus",
+      "native": "CEPHEUS"
+    },
+    "116727": {
+      "en": "Cepheus",
+      "native": "CEPHEUS"
+    },
+    "23040": {
+      "en": "Camelopardalis",
+      "native": "GIRAFFE"
+    },
+    "23522": {
+      "en": "Camelopardalis",
+      "native": "GIRAFFE"
+    },
+    "17884": {
+      "en": "Camelopardalis",
+      "native": "GIRAFFE"
+    },
+    "16228": {
+      "en": "Camelopardalis",
+      "native": "GIRAFFE"
+    },
+    "17959": {
+      "en": "Camelopardalis",
+      "native": "GIRAFFE"
+    },
+    "22783": {
+      "en": "Camelopardalis",
+      "native": "GIRAFFE"
+    },
+    "33694": {
+      "en": "Camelopardalis",
+      "native": "GIRAFFE"
+    },
+    "29997": {
+      "en": "Camelopardalis",
+      "native": "GIRAFFE"
+    },
+    "67301": {
+      "en": "Ursa Major",
+      "native": "GREAT BEAR"
+    },
+    "62956": {
+      "en": "Ursa Major",
+      "native": "GREAT BEAR"
+    },
+    "59774": {
+      "en": "Ursa Major",
+      "native": "GREAT BEAR"
+    },
+    "54061": {
+      "en": "Ursa Major",
+      "native": "GREAT BEAR"
+    },
+    "53910": {
+      "en": "Ursa Major",
+      "native": "GREAT BEAR"
+    },
+    "58001": {
+      "en": "Ursa Major",
+      "native": "GREAT BEAR"
+    },
+    "46733": {
+      "en": "Ursa Major",
+      "native": "GREAT BEAR"
+    },
+    "41704": {
+      "en": "Ursa Major",
+      "native": "GREAT BEAR"
+    },
+    "44127": {
+      "en": "Ursa Major",
+      "native": "GREAT BEAR"
+    },
+    "44471": {
+      "en": "Ursa Major",
+      "native": "GREAT BEAR"
+    },
+    "50801": {
+      "en": "Ursa Major",
+      "native": "GREAT BEAR"
+    },
+    "50372": {
+      "en": "Ursa Major",
+      "native": "GREAT BEAR"
+    },
+    "46853": {
+      "en": "Ursa Major",
+      "native": "GREAT BEAR"
+    },
+    "48319": {
+      "en": "Ursa Major",
+      "native": "GREAT BEAR"
+    },
+    "55203": {
+      "en": "Ursa Major",
+      "native": "GREAT BEAR"
+    },
+    "55219": {
+      "en": "Ursa Major",
+      "native": "GREAT BEAR"
+    },
+    "54539": {
+      "en": "Ursa Major",
+      "native": "GREAT BEAR"
+    },
+    "57399": {
+      "en": "Ursa Major",
+      "native": "GREAT BEAR"
+    },
+    "64468": {
+      "en": "head",
+      "native": "head"
+    },
+    "54872": {
+      "en": "Leo",
+      "native": "LION"
+    },
+    "54879": {
+      "en": "Leo",
+      "native": "LION"
+    },
+    "55642": {
+      "en": "Leo",
+      "native": "LION"
+    },
+    "55434": {
+      "en": "Leo",
+      "native": "LION"
+    },
+    "51624": {
+      "en": "Leo",
+      "native": "LION"
+    },
+    "49583": {
+      "en": "Leo",
+      "native": "LION"
+    },
+    "47508": {
+      "en": "Leo",
+      "native": "LION"
+    },
+    "50583": {
+      "en": "Leo",
+      "native": "LION"
+    },
+    "53954": {
+      "en": "Leo",
+      "native": "LION"
+    },
+    "50335": {
+      "en": "Leo",
+      "native": "LION"
+    },
+    "48455": {
+      "en": "Leo",
+      "native": "LION"
+    },
+    "46146": {
+      "en": "Leo",
+      "native": "LION"
+    },
+    "46750": {
+      "en": "Leo",
+      "native": "LION"
+    },
+    "47908": {
+      "en": "Leo",
+      "native": "LION"
+    },
+    "61317": {
+      "en": "Canes Venatici",
+      "native": "HUNTING DOGS"
+    },
+    "53229": {
+      "en": "Leo Minor",
+      "native": "LITTLE LION"
+    },
+    "51233": {
+      "en": "Leo Minor",
+      "native": "LITTLE LION"
+    },
+    "49593": {
+      "en": "Leo Minor",
+      "native": "LITTLE LION"
+    },
+    "46952": {
+      "en": "Leo Minor",
+      "native": "LITTLE LION"
+    },
+    "51056": {
+      "en": "Leo Minor",
+      "native": "LITTLE LION"
+    },
+    "67275": {
+      "en": "Bootes",
+      "native": "HERDSMAN"
+    },
+    "67459": {
+      "en": "Bootes",
+      "native": "HERDSMAN"
+    },
+    "67927": {
+      "en": "Bootes",
+      "native": "HERDSMAN"
+    },
+    "71795": {
+      "en": "Bootes",
+      "native": "HERDSMAN"
+    },
+    "72105": {
+      "en": "Bootes",
+      "native": "HERDSMAN"
+    },
+    "74666": {
+      "en": "Bootes",
+      "native": "HERDSMAN"
+    },
+    "75411": {
+      "en": "Bootes",
+      "native": "HERDSMAN"
+    },
+    "73555": {
+      "en": "Bootes",
+      "native": "HERDSMAN"
+    },
+    "71075": {
+      "en": "Bootes",
+      "native": "HERDSMAN"
+    },
+    "71053": {
+      "en": "Bootes",
+      "native": "HERDSMAN"
+    },
+    "71284": {
+      "en": "Bootes",
+      "native": "HERDSMAN"
+    },
+    "69732": {
+      "en": "Bootes",
+      "native": "HERDSMAN"
+    },
+    "70497": {
+      "en": "Bootes",
+      "native": "HERDSMAN"
+    },
+    "69483": {
+      "en": "Bootes",
+      "native": "HERDSMAN"
+    },
+    "76127": {
+      "en": "Corona Borealis",
+      "native": "NORTHERN CROWN"
+    },
+    "75695": {
+      "en": "Corona Borealis",
+      "native": "NORTHERN CROWN"
+    },
+    "76952": {
+      "en": "Corona Borealis",
+      "native": "NORTHERN CROWN"
+    },
+    "77512": {
+      "en": "Corona Borealis",
+      "native": "NORTHERN CROWN"
+    },
+    "78159": {
+      "en": "Corona Borealis",
+      "native": "NORTHERN CROWN"
+    },
+    "64241": {
+      "en": "Coma Berenices",
+      "native": "BERENICE'S HAIR"
+    },
+    "64394": {
+      "en": "Coma Berenices",
+      "native": "BERENICE'S HAIR"
+    },
+    "60742": {
+      "en": "Coma Berenices",
+      "native": "BERENICE'S HAIR"
+    },
+    "60697": {
+      "en": "Coma Berenices",
+      "native": "BERENICE'S HAIR"
+    },
+    "60746": {
+      "en": "Coma Berenices",
+      "native": "BERENICE'S HAIR"
+    },
+    "60904": {
+      "en": "Coma Berenices",
+      "native": "BERENICE'S HAIR"
+    },
+    "91926": {
+      "en": "Lyra",
+      "native": "LYRE"
+    },
+    "92862": {
+      "en": "Lyra",
+      "native": "LYRE"
+    },
+    "94481": {
+      "en": "Lyra",
+      "native": "LYRE"
+    },
+    "94713": {
+      "en": "Lyra",
+      "native": "LYRE"
+    },
+    "93194": {
+      "en": "Lyra",
+      "native": "LYRE"
+    },
+    "92420": {
+      "en": "Lyra",
+      "native": "LYRE"
+    },
+    "89826": {
+      "en": "Lyra",
+      "native": "LYRE"
+    },
+    "92791": {
+      "en": "Lyra",
+      "native": "LYRE"
+    },
+    "91971": {
+      "en": "Lyra",
+      "native": "LYRE"
+    },
+    "94779": {
+      "en": "Cygnus",
+      "native": "SWAN"
+    },
+    "97165": {
+      "en": "Cygnus",
+      "native": "SWAN"
+    },
+    "100453": {
+      "en": "Cygnus",
+      "native": "SWAN"
+    },
+    "104060": {
+      "en": "Cygnus",
+      "native": "SWAN"
+    },
+    "99848": {
+      "en": "Cygnus",
+      "native": "SWAN"
+    },
+    "95853": {
+      "en": "Cygnus",
+      "native": "SWAN"
+    },
+    "102488": {
+      "en": "Cygnus",
+      "native": "SWAN"
+    },
+    "104732": {
+      "en": "Cygnus",
+      "native": "SWAN"
+    },
+    "103413": {
+      "en": "Cygnus",
+      "native": "SWAN"
+    },
+    "105102": {
+      "en": "Cygnus",
+      "native": "SWAN"
+    },
+    "104887": {
+      "en": "Cygnus",
+      "native": "SWAN"
+    },
+    "98110": {
+      "en": "Cygnus",
+      "native": "SWAN"
+    },
+    "96683": {
+      "en": "Cygnus",
+      "native": "SWAN"
+    },
+    "84345": {
+      "en": "Hercules",
+      "native": "HERCULES"
+    },
+    "84379": {
+      "en": "Hercules",
+      "native": "HERCULES"
+    },
+    "85693": {
+      "en": "Hercules",
+      "native": "HERCULES"
+    },
+    "86974": {
+      "en": "Hercules",
+      "native": "HERCULES"
+    },
+    "88794": {
+      "en": "Hercules",
+      "native": "HERCULES"
+    },
+    "88267": {
+      "en": "Hercules",
+      "native": "HERCULES"
+    },
+    "88886": {
+      "en": "Hercules",
+      "native": "HERCULES"
+    },
+    "90139": {
+      "en": "Hercules",
+      "native": "HERCULES"
+    },
+    "92043": {
+      "en": "Hercules",
+      "native": "HERCULES"
+    },
+    "92161": {
+      "en": "Hercules",
+      "native": "HERCULES"
+    },
+    "87933": {
+      "en": "Hercules",
+      "native": "HERCULES"
+    },
+    "84380": {
+      "en": "Hercules",
+      "native": "HERCULES"
+    },
+    "85112": {
+      "en": "Hercules",
+      "native": "HERCULES"
+    },
+    "87808": {
+      "en": "Hercules",
+      "native": "HERCULES"
+    },
+    "86414": {
+      "en": "Hercules",
+      "native": "HERCULES"
+    },
+    "81126": {
+      "en": "Hercules",
+      "native": "HERCULES"
+    },
+    "79101": {
+      "en": "Hercules",
+      "native": "HERCULES"
+    },
+    "79992": {
+      "en": "Hercules",
+      "native": "HERCULES"
+    },
+    "83207": {
+      "en": "Hercules",
+      "native": "HERCULES"
+    },
+    "81693": {
+      "en": "Hercules",
+      "native": "HERCULES"
+    },
+    "81833": {
+      "en": "Hercules",
+      "native": "HERCULES"
+    },
+    "80816": {
+      "en": "Hercules",
+      "native": "HERCULES"
+    },
+    "80170": {
+      "en": "Hercules",
+      "native": "HERCULES"
+    },
+    "95771": {
+      "en": "Vulpecula",
+      "native": "L. FOX"
+    },
+    "98543": {
+      "en": "Vulpecula",
+      "native": "L. FOX"
+    },
+    "677": {
+      "en": "Andromeda",
+      "native": "ANDROMEDA"
+    },
+    "3092": {
+      "en": "Andromeda",
+      "native": "ANDROMEDA"
+    },
+    "2912": {
+      "en": "Andromeda",
+      "native": "ANDROMEDA"
+    },
+    "5447": {
+      "en": "Andromeda",
+      "native": "ANDROMEDA"
+    },
+    "3031": {
+      "en": "Andromeda",
+      "native": "ANDROMEDA"
+    },
+    "3693": {
+      "en": "Andromeda",
+      "native": "ANDROMEDA"
+    },
+    "4463": {
+      "en": "Andromeda",
+      "native": "ANDROMEDA"
+    },
+    "7513": {
+      "en": "Andromeda",
+      "native": "ANDROMEDA"
+    },
+    "9640": {
+      "en": "Andromeda",
+      "native": "ANDROMEDA"
+    },
+    "4436": {
+      "en": "Andromeda",
+      "native": "ANDROMEDA"
+    },
+    "3881": {
+      "en": "Andromeda",
+      "native": "ANDROMEDA"
+    },
+    "5434": {
+      "en": "Andromeda",
+      "native": "ANDROMEDA"
+    },
+    "7607": {
+      "en": "Andromeda",
+      "native": "ANDROMEDA"
+    },
+    "1411": {
+      "en": "Andromeda",
+      "native": "ANDROMEDA"
+    },
+    "116631": {
+      "en": "Andromeda",
+      "native": "ANDROMEDA"
+    },
+    "116584": {
+      "en": "Andromeda",
+      "native": "ANDROMEDA"
+    },
+    "116805": {
+      "en": "Andromeda",
+      "native": "ANDROMEDA"
+    },
+    "113726": {
+      "en": "Andromeda",
+      "native": "ANDROMEDA"
+    },
+    "113963": {
+      "en": "Pegasus",
+      "native": "PEGASUS"
+    },
+    "113881": {
+      "en": "Pegasus",
+      "native": "PEGASUS"
+    },
+    "1067": {
+      "en": "Pegasus",
+      "native": "PEGASUS"
+    },
+    "112440": {
+      "en": "Pegasus",
+      "native": "PEGASUS"
+    },
+    "112748": {
+      "en": "Pegasus",
+      "native": "PEGASUS"
+    },
+    "112158": {
+      "en": "Pegasus",
+      "native": "PEGASUS"
+    },
+    "109410": {
+      "en": "Pegasus",
+      "native": "PEGASUS"
+    },
+    "114520": {
+      "en": "Pegasus",
+      "native": "PEGASUS"
+    },
+    "114144": {
+      "en": "Pegasus",
+      "native": "PEGASUS"
+    },
+    "112447": {
+      "en": "Pegasus",
+      "native": "PEGASUS"
+    },
+    "112029": {
+      "en": "Pegasus",
+      "native": "PEGASUS"
+    },
+    "109427": {
+      "en": "Pegasus",
+      "native": "PEGASUS"
+    },
+    "107315": {
+      "en": "Pegasus",
+      "native": "PEGASUS"
+    },
+    "109176": {
+      "en": "Pegasus",
+      "native": "PEGASUS"
+    },
+    "107348": {
+      "en": "Pegasus",
+      "native": "PEGASUS"
+    },
+    "107354": {
+      "en": "Pegasus",
+      "native": "PEGASUS"
+    },
+    "105502": {
+      "en": "Pegasus",
+      "native": "PEGASUS"
+    },
+    "10670": {
+      "en": "Triangulum",
+      "native": "TRIANGLE"
+    },
+    "10064": {
+      "en": "Triangulum",
+      "native": "TRIANGLE"
+    },
+    "8796": {
+      "en": "Triangulum",
+      "native": "TRIANGLE"
+    },
+    "109937": {
+      "en": "Lacerta",
+      "native": "LIZARD"
+    },
+    "109754": {
+      "en": "Lacerta",
+      "native": "LIZARD"
+    },
+    "111104": {
+      "en": "Lacerta",
+      "native": "LIZARD"
+    },
+    "111944": {
+      "en": "Lacerta",
+      "native": "LIZARD"
+    },
+    "111022": {
+      "en": "Lacerta",
+      "native": "LIZARD"
+    },
+    "110351": {
+      "en": "Lacerta",
+      "native": "LIZARD"
+    },
+    "110609": {
+      "en": "Lacerta",
+      "native": "LIZARD"
+    },
+    "110538": {
+      "en": "Lacerta",
+      "native": "LIZARD"
+    },
+    "111169": {
+      "en": "Lacerta",
+      "native": "LIZARD"
+    },
+    "17448": {
+      "en": "Perseus",
+      "native": "PERSEUS"
+    },
+    "18246": {
+      "en": "Perseus",
+      "native": "PERSEUS"
+    },
+    "18614": {
+      "en": "Perseus",
+      "native": "PERSEUS"
+    },
+    "18532": {
+      "en": "Perseus",
+      "native": "PERSEUS"
+    },
+    "14354": {
+      "en": "Perseus",
+      "native": "PERSEUS"
+    },
+    "13254": {
+      "en": "Perseus",
+      "native": "PERSEUS"
+    },
+    "17529": {
+      "en": "Perseus",
+      "native": "PERSEUS"
+    },
+    "16335": {
+      "en": "Perseus",
+      "native": "PERSEUS"
+    },
+    "15863": {
+      "en": "Perseus",
+      "native": "PERSEUS"
+    },
+    "16826": {
+      "en": "Perseus",
+      "native": "PERSEUS"
+    },
+    "17358": {
+      "en": "Perseus",
+      "native": "PERSEUS"
+    },
+    "19343": {
+      "en": "Perseus",
+      "native": "PERSEUS"
+    },
+    "19812": {
+      "en": "Perseus",
+      "native": "PERSEUS"
+    },
+    "20070": {
+      "en": "Perseus",
+      "native": "PERSEUS"
+    },
+    "19167": {
+      "en": "Perseus",
+      "native": "PERSEUS"
+    },
+    "14668": {
+      "en": "Perseus",
+      "native": "PERSEUS"
+    },
+    "14632": {
+      "en": "Perseus",
+      "native": "PERSEUS"
+    },
+    "13531": {
+      "en": "Perseus",
+      "native": "PERSEUS"
+    },
+    "13268": {
+      "en": "Perseus",
+      "native": "PERSEUS"
+    },
+    "14328": {
+      "en": "Perseus",
+      "native": "PERSEUS"
+    },
+    "12777": {
+      "en": "Perseus",
+      "native": "PERSEUS"
+    },
+    "8068": {
+      "en": "Perseus",
+      "native": "PERSEUS"
+    },
+    "25428": {
+      "en": "Taurus",
+      "native": "BULL"
+    },
+    "21881": {
+      "en": "Taurus",
+      "native": "BULL"
+    },
+    "20711": {
+      "en": "Taurus",
+      "native": "BULL"
+    },
+    "26451": {
+      "en": "Taurus",
+      "native": "BULL"
+    },
+    "20894": {
+      "en": "Taurus",
+      "native": "BULL"
+    },
+    "20205": {
+      "en": "Taurus",
+      "native": "BULL"
+    },
+    "20455": {
+      "en": "Taurus",
+      "native": "BULL"
+    },
+    "20648": {
+      "en": "Taurus",
+      "native": "BULL"
+    },
+    "20889": {
+      "en": "Taurus",
+      "native": "BULL"
+    },
+    "21589": {
+      "en": "Taurus",
+      "native": "BULL"
+    },
+    "21402": {
+      "en": "Taurus",
+      "native": "BULL"
+    },
+    "19860": {
+      "en": "Taurus",
+      "native": "BULL"
+    },
+    "18724": {
+      "en": "Taurus",
+      "native": "BULL"
+    },
+    "16083": {
+      "en": "Taurus",
+      "native": "BULL"
+    },
+    "16369": {
+      "en": "Taurus",
+      "native": "BULL"
+    },
+    "15900": {
+      "en": "Taurus",
+      "native": "BULL"
+    },
+    "16852": {
+      "en": "Taurus",
+      "native": "BULL"
+    },
+    "18907": {
+      "en": "Taurus",
+      "native": "BULL"
+    },
+    "14838": {
+      "en": "Aries",
+      "native": "RAM"
+    },
+    "13914": {
+      "en": "Aries",
+      "native": "RAM"
+    },
+    "10306": {
+      "en": "Aries",
+      "native": "RAM"
+    },
+    "8832": {
+      "en": "Aries",
+      "native": "RAM"
+    },
+    "13209": {
+      "en": "Aries",
+      "native": "RAM"
+    },
+    "13061": {
+      "en": "Aries",
+      "native": "RAM"
+    },
+    "12719": {
+      "en": "Aries",
+      "native": "RAM"
+    },
+    "9884": {
+      "en": "Aries",
+      "native": "RAM"
+    },
+    "9153": {
+      "en": "Aries",
+      "native": "RAM"
+    },
+    "8903": {
+      "en": "Aries",
+      "native": "RAM"
+    },
+    "31681": {
+      "en": "Gemini",
+      "native": "TWINS"
+    },
+    "34088": {
+      "en": "Gemini",
+      "native": "TWINS"
+    },
+    "35550": {
+      "en": "Gemini",
+      "native": "TWINS"
+    },
+    "35350": {
+      "en": "Gemini",
+      "native": "TWINS"
+    },
+    "32362": {
+      "en": "Gemini",
+      "native": "TWINS"
+    },
+    "36962": {
+      "en": "Gemini",
+      "native": "TWINS"
+    },
+    "37740": {
+      "en": "Gemini",
+      "native": "TWINS"
+    },
+    "36046": {
+      "en": "Gemini",
+      "native": "TWINS"
+    },
+    "34693": {
+      "en": "Gemini",
+      "native": "TWINS"
+    },
+    "36366": {
+      "en": "Gemini",
+      "native": "TWINS"
+    },
+    "33018": {
+      "en": "Gemini",
+      "native": "TWINS"
+    },
+    "32246": {
+      "en": "Gemini",
+      "native": "TWINS"
+    },
+    "30883": {
+      "en": "Gemini",
+      "native": "TWINS"
+    },
+    "30343": {
+      "en": "Gemini",
+      "native": "TWINS"
+    },
+    "29655": {
+      "en": "Gemini",
+      "native": "TWINS"
+    },
+    "28734": {
+      "en": "Gemini",
+      "native": "TWINS"
+    },
+    "23015": {
+      "en": "Auriga",
+      "native": "CHARIOTEER"
+    },
+    "28380": {
+      "en": "Auriga",
+      "native": "CHARIOTEER"
+    },
+    "28360": {
+      "en": "Auriga",
+      "native": "CHARIOTEER"
+    },
+    "28358": {
+      "en": "Auriga",
+      "native": "CHARIOTEER"
+    },
+    "23767": {
+      "en": "Auriga",
+      "native": "CHARIOTEER"
+    },
+    "23416": {
+      "en": "Auriga",
+      "native": "CHARIOTEER"
+    },
+    "23453": {
+      "en": "Auriga",
+      "native": "CHARIOTEER"
+    },
+    "36188": {
+      "en": "Canis Minor",
+      "native": "LITTLE DOG"
+    },
+    "43103": {
+      "en": "Cancer",
+      "native": "CRAB"
+    },
+    "42806": {
+      "en": "Cancer",
+      "native": "CRAB"
+    },
+    "40167": {
+      "en": "Cancer",
+      "native": "CRAB"
+    },
+    "40526": {
+      "en": "Cancer",
+      "native": "CRAB"
+    },
+    "42911": {
+      "en": "Cancer",
+      "native": "CRAB"
+    },
+    "44066": {
+      "en": "Cancer",
+      "native": "CRAB"
+    },
+    "45860": {
+      "en": "Lynx",
+      "native": "LYNX"
+    },
+    "45688": {
+      "en": "Lynx",
+      "native": "LYNX"
+    },
+    "44248": {
+      "en": "Lynx",
+      "native": "LYNX"
+    },
+    "41075": {
+      "en": "Lynx",
+      "native": "LYNX"
+    },
+    "36145": {
+      "en": "Lynx",
+      "native": "LYNX"
+    },
+    "33449": {
+      "en": "Lynx",
+      "native": "LYNX"
+    },
+    "30060": {
+      "en": "Lynx",
+      "native": "LYNX"
+    },
+    "26727": {
+      "en": "Orion",
+      "native": "ORION"
+    },
+    "26311": {
+      "en": "Orion",
+      "native": "ORION"
+    },
+    "25930": {
+      "en": "Orion",
+      "native": "ORION"
+    },
+    "28716": {
+      "en": "Orion",
+      "native": "ORION"
+    },
+    "29426": {
+      "en": "Orion",
+      "native": "ORION"
+    },
+    "29038": {
+      "en": "Orion",
+      "native": "ORION"
+    },
+    "27913": {
+      "en": "Orion",
+      "native": "ORION"
+    },
+    "29239": {
+      "en": "Orion",
+      "native": "ORION"
+    },
+    "28614": {
+      "en": "Orion",
+      "native": "ORION"
+    },
+    "27366": {
+      "en": "Orion",
+      "native": "ORION"
+    },
+    "25281": {
+      "en": "Orion",
+      "native": "ORION"
+    },
+    "25336": {
+      "en": "Orion",
+      "native": "ORION"
+    },
+    "25813": {
+      "en": "Orion",
+      "native": "ORION"
+    },
+    "26207": {
+      "en": "Orion",
+      "native": "ORION"
+    },
+    "22449": {
+      "en": "Orion",
+      "native": "ORION"
+    },
+    "22549": {
+      "en": "Orion",
+      "native": "ORION"
+    },
+    "22797": {
+      "en": "Orion",
+      "native": "ORION"
+    },
+    "23123": {
+      "en": "Orion",
+      "native": "ORION"
+    },
+    "22509": {
+      "en": "Orion",
+      "native": "ORION"
+    },
+    "22845": {
+      "en": "Orion",
+      "native": "ORION"
+    },
+    "22957": {
+      "en": "Orion",
+      "native": "ORION"
+    },
+    "33160": {
+      "en": "Canis Major",
+      "native": "BIG DOG"
+    },
+    "34045": {
+      "en": "Canis Major",
+      "native": "BIG DOG"
+    },
+    "33347": {
+      "en": "Canis Major",
+      "native": "BIG DOG"
+    },
+    "33977": {
+      "en": "Canis Major",
+      "native": "BIG DOG"
+    },
+    "34444": {
+      "en": "Canis Major",
+      "native": "BIG DOG"
+    },
+    "35037": {
+      "en": "Canis Major",
+      "native": "BIG DOG"
+    },
+    "35904": {
+      "en": "Canis Major",
+      "native": "BIG DOG"
+    },
+    "33579": {
+      "en": "Canis Major",
+      "native": "BIG DOG"
+    },
+    "33856": {
+      "en": "Canis Major",
+      "native": "BIG DOG"
+    },
+    "33152": {
+      "en": "Canis Major",
+      "native": "BIG DOG"
+    },
+    "31592": {
+      "en": "Canis Major",
+      "native": "BIG DOG"
+    },
+    "31125": {
+      "en": "Canis Major",
+      "native": "BIG DOG"
+    },
+    "30324": {
+      "en": "Canis Major",
+      "native": "BIG DOG"
+    },
+    "32759": {
+      "en": "Canis Major",
+      "native": "BIG DOG"
+    },
+    "30122": {
+      "en": "Canis Major",
+      "native": "BIG DOG"
+    },
+    "28910": {
+      "en": "Lepus",
+      "native": "HARE"
+    },
+    "28103": {
+      "en": "Lepus",
+      "native": "HARE"
+    },
+    "27288": {
+      "en": "Lepus",
+      "native": "HARE"
+    },
+    "25985": {
+      "en": "Lepus",
+      "native": "HARE"
+    },
+    "24305": {
+      "en": "Lepus",
+      "native": "HARE"
+    },
+    "27654": {
+      "en": "Lepus",
+      "native": "HARE"
+    },
+    "27072": {
+      "en": "Lepus",
+      "native": "HARE"
+    },
+    "25606": {
+      "en": "Lepus",
+      "native": "HARE"
+    },
+    "23685": {
+      "en": "Lepus",
+      "native": "HARE"
+    },
+    "24845": {
+      "en": "Lepus",
+      "native": "HARE"
+    },
+    "24327": {
+      "en": "Lepus",
+      "native": "HARE"
+    },
+    "41307": {
+      "en": "Monoceros",
+      "native": "UNICORN"
+    },
+    "39863": {
+      "en": "Monoceros",
+      "native": "UNICORN"
+    },
+    "29651": {
+      "en": "Monoceros",
+      "native": "UNICORN"
+    },
+    "30867": {
+      "en": "Monoceros",
+      "native": "UNICORN"
+    },
+    "34769": {
+      "en": "Monoceros",
+      "native": "UNICORN"
+    },
+    "32578": {
+      "en": "Monoceros",
+      "native": "UNICORN"
+    },
+    "30419": {
+      "en": "Monoceros",
+      "native": "UNICORN"
+    },
+    "37447": {
+      "en": "Monoceros",
+      "native": "UNICORN"
+    },
+    "31216": {
+      "en": "Monoceros",
+      "native": "UNICORN"
+    },
+    "31978": {
+      "en": "Monoceros",
+      "native": "UNICORN"
+    },
+    "9007": {
+      "en": "Eridanus",
+      "native": "RIVER ERIDANUS"
+    },
+    "10602": {
+      "en": "Eridanus",
+      "native": "RIVER ERIDANUS"
+    },
+    "11407": {
+      "en": "Eridanus",
+      "native": "RIVER ERIDANUS"
+    },
+    "12486": {
+      "en": "Eridanus",
+      "native": "RIVER ERIDANUS"
+    },
+    "13847": {
+      "en": "Eridanus",
+      "native": "RIVER ERIDANUS"
+    },
+    "15510": {
+      "en": "Eridanus",
+      "native": "RIVER ERIDANUS"
+    },
+    "17874": {
+      "en": "Eridanus",
+      "native": "RIVER ERIDANUS"
+    },
+    "20042": {
+      "en": "Eridanus",
+      "native": "RIVER ERIDANUS"
+    },
+    "20535": {
+      "en": "Eridanus",
+      "native": "RIVER ERIDANUS"
+    },
+    "21393": {
+      "en": "Eridanus",
+      "native": "RIVER ERIDANUS"
+    },
+    "18673": {
+      "en": "Eridanus",
+      "native": "RIVER ERIDANUS"
+    },
+    "18216": {
+      "en": "Eridanus",
+      "native": "RIVER ERIDANUS"
+    },
+    "17717": {
+      "en": "Eridanus",
+      "native": "RIVER ERIDANUS"
+    },
+    "17651": {
+      "en": "Eridanus",
+      "native": "RIVER ERIDANUS"
+    },
+    "16611": {
+      "en": "Eridanus",
+      "native": "RIVER ERIDANUS"
+    },
+    "15474": {
+      "en": "Eridanus",
+      "native": "RIVER ERIDANUS"
+    },
+    "14146": {
+      "en": "Eridanus",
+      "native": "RIVER ERIDANUS"
+    },
+    "13701": {
+      "en": "Eridanus",
+      "native": "RIVER ERIDANUS"
+    },
+    "16537": {
+      "en": "Eridanus",
+      "native": "RIVER ERIDANUS"
+    },
+    "17378": {
+      "en": "Eridanus",
+      "native": "RIVER ERIDANUS"
+    },
+    "18543": {
+      "en": "Eridanus",
+      "native": "RIVER ERIDANUS"
+    },
+    "19849": {
+      "en": "Eridanus",
+      "native": "RIVER ERIDANUS"
+    },
+    "19587": {
+      "en": "Eridanus",
+      "native": "RIVER ERIDANUS"
+    },
+    "21444": {
+      "en": "Eridanus",
+      "native": "RIVER ERIDANUS"
+    },
+    "22109": {
+      "en": "Eridanus",
+      "native": "RIVER ERIDANUS"
+    },
+    "23875": {
+      "en": "Eridanus",
+      "native": "RIVER ERIDANUS"
+    },
+    "21594": {
+      "en": "Eridanus",
+      "native": "RIVER ERIDANUS"
+    },
+    "42799": {
+      "en": "Hydra",
+      "native": "HYDRA"
+    },
+    "42402": {
+      "en": "Hydra",
+      "native": "HYDRA"
+    },
+    "42313": {
+      "en": "Hydra",
+      "native": "HYDRA"
+    },
+    "43109": {
+      "en": "Hydra",
+      "native": "HYDRA"
+    },
+    "43813": {
+      "en": "Hydra",
+      "native": "HYDRA"
+    },
+    "45336": {
+      "en": "Hydra",
+      "native": "HYDRA"
+    },
+    "47431": {
+      "en": "Hydra",
+      "native": "HYDRA"
+    },
+    "49841": {
+      "en": "Hydra",
+      "native": "HYDRA"
+    },
+    "51069": {
+      "en": "Hydra",
+      "native": "HYDRA"
+    },
+    "52943": {
+      "en": "Hydra",
+      "native": "HYDRA"
+    },
+    "53740": {
+      "en": "Hydra",
+      "native": "HYDRA"
+    },
+    "54682": {
+      "en": "Hydra",
+      "native": "HYDRA"
+    },
+    "56343": {
+      "en": "Hydra",
+      "native": "HYDRA"
+    },
+    "57936": {
+      "en": "Hydra",
+      "native": "HYDRA"
+    },
+    "64962": {
+      "en": "Hydra",
+      "native": "HYDRA"
+    },
+    "68895": {
+      "en": "Hydra",
+      "native": "HYDRA"
+    },
+    "55705": {
+      "en": "Crater",
+      "native": "CUP"
+    },
+    "55282": {
+      "en": "Crater",
+      "native": "CUP"
+    },
+    "55687": {
+      "en": "Crater",
+      "native": "CUP"
+    },
+    "56633": {
+      "en": "Crater",
+      "native": "CUP"
+    },
+    "58188": {
+      "en": "Crater",
+      "native": "CUP"
+    },
+    "57283": {
+      "en": "Crater",
+      "native": "CUP"
+    },
+    "51172": {
+      "en": "Antlia",
+      "native": "PUMP"
+    },
+    "57380": {
+      "en": "Virgo",
+      "native": "VIRGIN"
+    },
+    "57757": {
+      "en": "Virgo",
+      "native": "VIRGIN"
+    },
+    "60129": {
+      "en": "Virgo",
+      "native": "VIRGIN"
+    },
+    "61941": {
+      "en": "Virgo",
+      "native": "VIRGIN"
+    },
+    "58948": {
+      "en": "Virgo",
+      "native": "VIRGIN"
+    },
+    "64238": {
+      "en": "Virgo",
+      "native": "VIRGIN"
+    },
+    "69427": {
+      "en": "Virgo",
+      "native": "VIRGIN"
+    },
+    "69701": {
+      "en": "Virgo",
+      "native": "VIRGIN"
+    },
+    "71957": {
+      "en": "Virgo",
+      "native": "VIRGIN"
+    },
+    "66249": {
+      "en": "Virgo",
+      "native": "VIRGIN"
+    },
+    "68520": {
+      "en": "Virgo",
+      "native": "VIRGIN"
+    },
+    "72220": {
+      "en": "Virgo",
+      "native": "VIRGIN"
+    },
+    "63090": {
+      "en": "Virgo",
+      "native": "VIRGIN"
+    },
+    "63608": {
+      "en": "Virgo",
+      "native": "VIRGIN"
+    },
+    "73714": {
+      "en": "Libra",
+      "native": "SCALES"
+    },
+    "72622": {
+      "en": "Libra",
+      "native": "SCALES"
+    },
+    "74785": {
+      "en": "Libra",
+      "native": "SCALES"
+    },
+    "76333": {
+      "en": "Libra",
+      "native": "SCALES"
+    },
+    "76470": {
+      "en": "Libra",
+      "native": "SCALES"
+    },
+    "76600": {
+      "en": "Libra",
+      "native": "SCALES"
+    },
+    "61174": {
+      "en": "Corvus",
+      "native": "CROW"
+    },
+    "60965": {
+      "en": "Corvus",
+      "native": "CROW"
+    },
+    "59803": {
+      "en": "Corvus",
+      "native": "CROW"
+    },
+    "59316": {
+      "en": "Corvus",
+      "native": "CROW"
+    },
+    "59199": {
+      "en": "Corvus",
+      "native": "CROW"
+    },
+    "60189": {
+      "en": "Corvus",
+      "native": "CROW"
+    },
+    "61359": {
+      "en": "Corvus",
+      "native": "CROW"
+    },
+    "85423": {
+      "en": "Ophiuchus",
+      "native": "SERPENT BEARER"
+    },
+    "84405": {
+      "en": "Ophiuchus",
+      "native": "SERPENT BEARER"
+    },
+    "84970": {
+      "en": "Ophiuchus",
+      "native": "SERPENT BEARER"
+    },
+    "85340": {
+      "en": "Ophiuchus",
+      "native": "SERPENT BEARER"
+    },
+    "84893": {
+      "en": "Ophiuchus",
+      "native": "SERPENT BEARER"
+    },
+    "84012": {
+      "en": "Ophiuchus",
+      "native": "SERPENT BEARER"
+    },
+    "85365": {
+      "en": "Ophiuchus",
+      "native": "SERPENT BEARER"
+    },
+    "86742": {
+      "en": "Ophiuchus",
+      "native": "SERPENT BEARER"
+    },
+    "87108": {
+      "en": "Ophiuchus",
+      "native": "SERPENT BEARER"
+    },
+    "88601": {
+      "en": "Ophiuchus",
+      "native": "SERPENT BEARER"
+    },
+    "86032": {
+      "en": "Ophiuchus",
+      "native": "SERPENT BEARER"
+    },
+    "83000": {
+      "en": "Ophiuchus",
+      "native": "SERPENT BEARER"
+    },
+    "82673": {
+      "en": "Ophiuchus",
+      "native": "SERPENT BEARER"
+    },
+    "80883": {
+      "en": "Ophiuchus",
+      "native": "SERPENT BEARER"
+    },
+    "79593": {
+      "en": "Ophiuchus",
+      "native": "SERPENT BEARER"
+    },
+    "81377": {
+      "en": "Ophiuchus",
+      "native": "SERPENT BEARER"
+    },
+    "80894": {
+      "en": "Ophiuchus",
+      "native": "SERPENT BEARER"
+    },
+    "80569": {
+      "en": "Ophiuchus",
+      "native": "SERPENT BEARER"
+    },
+    "80343": {
+      "en": "Ophiuchus",
+      "native": "SERPENT BEARER"
+    },
+    "80975": {
+      "en": "Ophiuchus",
+      "native": "SERPENT BEARER"
+    },
+    "92946": {
+      "en": "Serpens",
+      "native": "SERPENT"
+    },
+    "88771": {
+      "en": "Serpens",
+      "native": "SERPENT"
+    },
+    "89962": {
+      "en": "Serpens",
+      "native": "SERPENT"
+    },
+    "88048": {
+      "en": "Serpens",
+      "native": "SERPENT"
+    },
+    "86565": {
+      "en": "Serpens",
+      "native": "SERPENT"
+    },
+    "86263": {
+      "en": "Serpens",
+      "native": "SERPENT"
+    },
+    "84880": {
+      "en": "Serpens",
+      "native": "SERPENT"
+    },
+    "80628": {
+      "en": "Serpens",
+      "native": "SERPENT"
+    },
+    "79882": {
+      "en": "Serpens",
+      "native": "SERPENT"
+    },
+    "77516": {
+      "en": "Serpens",
+      "native": "SERPENT"
+    },
+    "77622": {
+      "en": "Serpens",
+      "native": "SERPENT"
+    },
+    "77070": {
+      "en": "Serpens",
+      "native": "SERPENT"
+    },
+    "77257": {
+      "en": "Serpens",
+      "native": "SERPENT"
+    },
+    "76276": {
+      "en": "Serpens",
+      "native": "SERPENT"
+    },
+    "77233": {
+      "en": "Serpens",
+      "native": "SERPENT"
+    },
+    "78072": {
+      "en": "Serpens",
+      "native": "SERPENT"
+    },
+    "77450": {
+      "en": "Serpens",
+      "native": "SERPENT"
+    },
+    "76852": {
+      "en": "Serpens",
+      "native": "SERPENT"
+    },
+    "87261": {
+      "en": "Scorpius",
+      "native": "SCORPION"
+    },
+    "85927": {
+      "en": "Scorpius",
+      "native": "SCORPION"
+    },
+    "85696": {
+      "en": "Scorpius",
+      "native": "SCORPION"
+    },
+    "86170": {
+      "en": "Scorpius",
+      "native": "SCORPION"
+    },
+    "86670": {
+      "en": "Scorpius",
+      "native": "SCORPION"
+    },
+    "87073": {
+      "en": "Scorpius",
+      "native": "SCORPION"
+    },
+    "86228": {
+      "en": "Scorpius",
+      "native": "SCORPION"
+    },
+    "84143": {
+      "en": "Scorpius",
+      "native": "SCORPION"
+    },
+    "82729": {
+      "en": "Scorpius",
+      "native": "SCORPION"
+    },
+    "82514": {
+      "en": "Scorpius",
+      "native": "SCORPION"
+    },
+    "82396": {
+      "en": "Scorpius",
+      "native": "SCORPION"
+    },
+    "81266": {
+      "en": "Scorpius",
+      "native": "SCORPION"
+    },
+    "80112": {
+      "en": "Scorpius",
+      "native": "SCORPION"
+    },
+    "79404": {
+      "en": "Scorpius",
+      "native": "SCORPION"
+    },
+    "78104": {
+      "en": "Scorpius",
+      "native": "SCORPION"
+    },
+    "78265": {
+      "en": "Scorpius",
+      "native": "SCORPION"
+    },
+    "79374": {
+      "en": "Scorpius",
+      "native": "SCORPION"
+    },
+    "78820": {
+      "en": "Scorpius",
+      "native": "SCORPION"
+    },
+    "78401": {
+      "en": "Scorpius",
+      "native": "SCORPION"
+    },
+    "98036": {
+      "en": "Aquila",
+      "native": "EAGLE"
+    },
+    "97278": {
+      "en": "Aquila",
+      "native": "EAGLE"
+    },
+    "96229": {
+      "en": "Aquila",
+      "native": "EAGLE"
+    },
+    "95501": {
+      "en": "Aquila",
+      "native": "EAGLE"
+    },
+    "97804": {
+      "en": "Aquila",
+      "native": "EAGLE"
+    },
+    "99473": {
+      "en": "Aquila",
+      "native": "EAGLE"
+    },
+    "93747": {
+      "en": "Aquila",
+      "native": "EAGLE"
+    },
+    "93244": {
+      "en": "Aquila",
+      "native": "EAGLE"
+    },
+    "93805": {
+      "en": "Aquila",
+      "native": "EAGLE"
+    },
+    "93429": {
+      "en": "Aquila",
+      "native": "EAGLE"
+    },
+    "88635": {
+      "en": "Sagittarius",
+      "native": "ARCHER"
+    },
+    "89931": {
+      "en": "Sagittarius",
+      "native": "ARCHER"
+    },
+    "90185": {
+      "en": "Sagittarius",
+      "native": "ARCHER"
+    },
+    "89642": {
+      "en": "Sagittarius",
+      "native": "ARCHER"
+    },
+    "89341": {
+      "en": "Sagittarius",
+      "native": "ARCHER"
+    },
+    "90496": {
+      "en": "Sagittarius",
+      "native": "ARCHER"
+    },
+    "92041": {
+      "en": "Sagittarius",
+      "native": "ARCHER"
+    },
+    "92855": {
+      "en": "Sagittarius",
+      "native": "ARCHER"
+    },
+    "94141": {
+      "en": "Sagittarius",
+      "native": "ARCHER"
+    },
+    "95168": {
+      "en": "Sagittarius",
+      "native": "ARCHER"
+    },
+    "95176": {
+      "en": "Sagittarius",
+      "native": "ARCHER"
+    },
+    "93085": {
+      "en": "Sagittarius",
+      "native": "ARCHER"
+    },
+    "93864": {
+      "en": "Sagittarius",
+      "native": "ARCHER"
+    },
+    "93506": {
+      "en": "Sagittarius",
+      "native": "ARCHER"
+    },
+    "98412": {
+      "en": "Sagittarius",
+      "native": "ARCHER"
+    },
+    "98032": {
+      "en": "Sagittarius",
+      "native": "ARCHER"
+    },
+    "95241": {
+      "en": "Sagittarius",
+      "native": "ARCHER"
+    },
+    "95347": {
+      "en": "Sagittarius",
+      "native": "ARCHER"
+    },
+    "98337": {
+      "en": "Sagitta",
+      "native": "ARROW"
+    },
+    "97365": {
+      "en": "Sagitta",
+      "native": "ARROW"
+    },
+    "96837": {
+      "en": "Sagitta",
+      "native": "ARROW"
+    },
+    "96757": {
+      "en": "Sagitta",
+      "native": "ARROW"
+    },
+    "101421": {
+      "en": "Delphinus",
+      "native": "DOLPHIN"
+    },
+    "101916": {
+      "en": "Delphinus",
+      "native": "DOLPHIN"
+    },
+    "101800": {
+      "en": "Delphinus",
+      "native": "DOLPHIN"
+    },
+    "101882": {
+      "en": "Delphinus",
+      "native": "DOLPHIN"
+    },
+    "102281": {
+      "en": "Delphinus",
+      "native": "DOLPHIN"
+    },
+    "102532": {
+      "en": "Delphinus",
+      "native": "DOLPHIN"
+    },
+    "101958": {
+      "en": "Delphinus",
+      "native": "DOLPHIN"
+    },
+    "101769": {
+      "en": "Delphinus",
+      "native": "DOLPHIN"
+    },
+    "101483": {
+      "en": "Delphinus",
+      "native": "DOLPHIN"
+    },
+    "92989": {
+      "en": "Corona Australis",
+      "native": "SOUTHERN CROWN"
+    },
+    "93174": {
+      "en": "Corona Australis",
+      "native": "SOUTHERN CROWN"
+    },
+    "93825": {
+      "en": "Corona Australis",
+      "native": "SOUTHERN CROWN"
+    },
+    "94114": {
+      "en": "Corona Australis",
+      "native": "SOUTHERN CROWN"
+    },
+    "94160": {
+      "en": "Corona Australis",
+      "native": "SOUTHERN CROWN"
+    },
+    "94005": {
+      "en": "Corona Australis",
+      "native": "SOUTHERN CROWN"
+    },
+    "93542": {
+      "en": "Corona Australis",
+      "native": "SOUTHERN CROWN"
+    },
+    "92953": {
+      "en": "Corona Australis",
+      "native": "SOUTHERN CROWN"
+    },
+    "92175": {
+      "en": "Scutum",
+      "native": "SHIELD"
+    },
+    "91726": {
+      "en": "Scutum",
+      "native": "SHIELD"
+    },
+    "90595": {
+      "en": "Scutum",
+      "native": "SHIELD"
+    },
+    "91117": {
+      "en": "Scutum",
+      "native": "SHIELD"
+    },
+    "100064": {
+      "en": "Capricornus",
+      "native": "GOAT"
+    },
+    "100345": {
+      "en": "Capricornus",
+      "native": "GOAT"
+    },
+    "104139": {
+      "en": "Capricornus",
+      "native": "GOAT"
+    },
+    "105515": {
+      "en": "Capricornus",
+      "native": "GOAT"
+    },
+    "106985": {
+      "en": "Capricornus",
+      "native": "GOAT"
+    },
+    "107556": {
+      "en": "Capricornus",
+      "native": "GOAT"
+    },
+    "106039": {
+      "en": "Capricornus",
+      "native": "GOAT"
+    },
+    "105881": {
+      "en": "Capricornus",
+      "native": "GOAT"
+    },
+    "104019": {
+      "en": "Capricornus",
+      "native": "GOAT"
+    },
+    "104234": {
+      "en": "Capricornus",
+      "native": "GOAT"
+    },
+    "101027": {
+      "en": "Capricornus",
+      "native": "GOAT"
+    },
+    "102485": {
+      "en": "Capricornus",
+      "native": "GOAT"
+    },
+    "102978": {
+      "en": "Capricornus",
+      "native": "GOAT"
+    },
+    "102618": {
+      "en": "Aquarius",
+      "native": "WATER CARRIER"
+    },
+    "103045": {
+      "en": "Aquarius",
+      "native": "WATER CARRIER"
+    },
+    "104459": {
+      "en": "Aquarius",
+      "native": "WATER CARRIER"
+    },
+    "106278": {
+      "en": "Aquarius",
+      "native": "WATER CARRIER"
+    },
+    "109139": {
+      "en": "Aquarius",
+      "native": "WATER CARRIER"
+    },
+    "109074": {
+      "en": "Aquarius",
+      "native": "WATER CARRIER"
+    },
+    "110395": {
+      "en": "Aquarius",
+      "native": "WATER CARRIER"
+    },
+    "111497": {
+      "en": "Aquarius",
+      "native": "WATER CARRIER"
+    },
+    "110672": {
+      "en": "Aquarius",
+      "native": "WATER CARRIER"
+    },
+    "110003": {
+      "en": "Aquarius",
+      "native": "WATER CARRIER"
+    },
+    "112961": {
+      "en": "Aquarius",
+      "native": "WATER CARRIER"
+    },
+    "114855": {
+      "en": "Aquarius",
+      "native": "WATER CARRIER"
+    },
+    "114724": {
+      "en": "Aquarius",
+      "native": "WATER CARRIER"
+    },
+    "112716": {
+      "en": "Aquarius",
+      "native": "WATER CARRIER"
+    },
+    "113136": {
+      "en": "Aquarius",
+      "native": "WATER CARRIER"
+    },
+    "114341": {
+      "en": "Aquarius",
+      "native": "WATER CARRIER"
+    },
+    "114375": {
+      "en": "Aquarius",
+      "native": "WATER CARRIER"
+    },
+    "114119": {
+      "en": "Aquarius",
+      "native": "WATER CARRIER"
+    },
+    "115438": {
+      "en": "Aquarius",
+      "native": "WATER CARRIER"
+    },
+    "115669": {
+      "en": "Aquarius",
+      "native": "WATER CARRIER"
+    },
+    "116247": {
+      "en": "Aquarius",
+      "native": "WATER CARRIER"
+    },
+    "104987": {
+      "en": "Equuleus",
+      "native": "LITTLE HORSE"
+    },
+    "104858": {
+      "en": "Equuleus",
+      "native": "LITTLE HORSE"
+    },
+    "104521": {
+      "en": "Equuleus",
+      "native": "LITTLE HORSE"
+    },
+    "111954": {
+      "en": "Piscis Austrinus",
+      "native": "SOUTHERN FISH"
+    },
+    "109285": {
+      "en": "Piscis Austrinus",
+      "native": "SOUTHERN FISH"
+    },
+    "107380": {
+      "en": "Piscis Austrinus",
+      "native": "SOUTHERN FISH"
+    },
+    "107608": {
+      "en": "Piscis Austrinus",
+      "native": "SOUTHERN FISH"
+    },
+    "111188": {
+      "en": "Piscis Austrinus",
+      "native": "SOUTHERN FISH"
+    },
+    "112948": {
+      "en": "Piscis Austrinus",
+      "native": "SOUTHERN FISH"
+    },
+    "113246": {
+      "en": "Piscis Austrinus",
+      "native": "SOUTHERN FISH"
+    },
+    "114131": {
+      "en": "Grus",
+      "native": "CRANE"
+    },
+    "110997": {
+      "en": "Grus",
+      "native": "CRANE"
+    },
+    "109268": {
+      "en": "Grus",
+      "native": "CRANE"
+    },
+    "112122": {
+      "en": "Grus",
+      "native": "CRANE"
+    },
+    "114421": {
+      "en": "Grus",
+      "native": "CRANE"
+    },
+    "113638": {
+      "en": "Grus",
+      "native": "CRANE"
+    },
+    "112623": {
+      "en": "Grus",
+      "native": "CRANE"
+    },
+    "109111": {
+      "en": "Grus",
+      "native": "CRANE"
+    },
+    "108085": {
+      "en": "Grus",
+      "native": "CRANE"
+    },
+    "5348": {
+      "en": "Phoenix",
+      "native": "PHOENIX"
+    },
+    "5165": {
+      "en": "Phoenix",
+      "native": "PHOENIX"
+    },
+    "3245": {
+      "en": "Phoenix",
+      "native": "PHOENIX"
+    },
+    "2072": {
+      "en": "Phoenix",
+      "native": "PHOENIX"
+    },
+    "7083": {
+      "en": "Phoenix",
+      "native": "PHOENIX"
+    },
+    "8837": {
+      "en": "Phoenix",
+      "native": "PHOENIX"
+    },
+    "6867": {
+      "en": "Phoenix",
+      "native": "PHOENIX"
+    },
+    "2081": {
+      "en": "Phoenix",
+      "native": "PHOENIX"
+    },
+    "765": {
+      "en": "Phoenix",
+      "native": "PHOENIX"
+    },
+    "5586": {
+      "en": "Pisces",
+      "native": "FISHES"
+    },
+    "5742": {
+      "en": "Pisces",
+      "native": "FISHES"
+    },
+    "6193": {
+      "en": "Pisces",
+      "native": "FISHES"
+    },
+    "6706": {
+      "en": "Pisces",
+      "native": "FISHES"
+    },
+    "7097": {
+      "en": "Pisces",
+      "native": "FISHES"
+    },
+    "8198": {
+      "en": "Pisces",
+      "native": "FISHES"
+    },
+    "7884": {
+      "en": "Pisces",
+      "native": "FISHES"
+    },
+    "7007": {
+      "en": "Pisces",
+      "native": "FISHES"
+    },
+    "5737": {
+      "en": "Pisces",
+      "native": "FISHES"
+    },
+    "4906": {
+      "en": "Pisces",
+      "native": "FISHES"
+    },
+    "3786": {
+      "en": "Pisces",
+      "native": "FISHES"
+    },
+    "118268": {
+      "en": "Pisces",
+      "native": "FISHES"
+    },
+    "116771": {
+      "en": "Pisces",
+      "native": "FISHES"
+    },
+    "116928": {
+      "en": "Pisces",
+      "native": "FISHES"
+    },
+    "115738": {
+      "en": "Pisces",
+      "native": "FISHES"
+    },
+    "114971": {
+      "en": "Pisces",
+      "native": "FISHES"
+    },
+    "115227": {
+      "en": "Pisces",
+      "native": "FISHES"
+    },
+    "115830": {
+      "en": "Pisces",
+      "native": "FISHES"
+    },
+    "12706": {
+      "en": "Cetus",
+      "native": "WHALE"
+    },
+    "11484": {
+      "en": "Cetus",
+      "native": "WHALE"
+    },
+    "12828": {
+      "en": "Cetus",
+      "native": "WHALE"
+    },
+    "13954": {
+      "en": "Cetus",
+      "native": "WHALE"
+    },
+    "14135": {
+      "en": "Cetus",
+      "native": "WHALE"
+    },
+    "12387": {
+      "en": "Cetus",
+      "native": "WHALE"
+    },
+    "8645": {
+      "en": "Cetus",
+      "native": "WHALE"
+    },
+    "6537": {
+      "en": "Cetus",
+      "native": "WHALE"
+    },
+    "1562": {
+      "en": "Cetus",
+      "native": "WHALE"
+    },
+    "3419": {
+      "en": "Cetus",
+      "native": "WHALE"
+    },
+    "9347": {
+      "en": "Cetus",
+      "native": "WHALE"
+    },
+    "4577": {
+      "en": "Sculptor",
+      "native": "SCULPTOR"
+    },
+    "39953": {
+      "en": "Carina",
+      "native": "SHIP'S KEEL"
+    },
+    "38827": {
+      "en": "Carina",
+      "native": "SHIP'S KEEL"
+    },
+    "41037": {
+      "en": "Carina",
+      "native": "SHIP'S KEEL"
+    },
+    "45556": {
+      "en": "Carina",
+      "native": "SHIP'S KEEL"
+    },
+    "50371": {
+      "en": "Carina",
+      "native": "SHIP'S KEEL"
+    },
+    "51232": {
+      "en": "Carina",
+      "native": "SHIP'S KEEL"
+    },
+    "51849": {
+      "en": "Carina",
+      "native": "SHIP'S KEEL"
+    },
+    "53253": {
+      "en": "Carina",
+      "native": "SHIP'S KEEL"
+    },
+    "54463": {
+      "en": "Carina",
+      "native": "SHIP'S KEEL"
+    },
+    "52468": {
+      "en": "Carina",
+      "native": "SHIP'S KEEL"
+    },
+    "51576": {
+      "en": "Carina",
+      "native": "SHIP'S KEEL"
+    },
+    "52419": {
+      "en": "Carina",
+      "native": "SHIP'S KEEL"
+    },
+    "50099": {
+      "en": "Carina",
+      "native": "SHIP'S KEEL"
+    },
+    "45238": {
+      "en": "Carina",
+      "native": "SHIP'S KEEL"
+    },
+    "31685": {
+      "en": "Puppis",
+      "native": "SHIP'S STERN"
+    },
+    "35264": {
+      "en": "Puppis",
+      "native": "SHIP'S STERN"
+    },
+    "36917": {
+      "en": "Puppis",
+      "native": "SHIP'S STERN"
+    },
+    "37229": {
+      "en": "Puppis",
+      "native": "SHIP'S STERN"
+    },
+    "37173": {
+      "en": "Puppis",
+      "native": "SHIP'S STERN"
+    },
+    "38170": {
+      "en": "Puppis",
+      "native": "SHIP'S STERN"
+    },
+    "38070": {
+      "en": "Puppis",
+      "native": "SHIP'S STERN"
+    },
+    "37677": {
+      "en": "Puppis",
+      "native": "SHIP'S STERN"
+    },
+    "39757": {
+      "en": "Puppis",
+      "native": "SHIP'S STERN"
+    },
+    "39429": {
+      "en": "Puppis",
+      "native": "SHIP'S STERN"
+    },
+    "42913": {
+      "en": "Vela",
+      "native": "SHIP's SAIL"
+    },
+    "45941": {
+      "en": "Vela",
+      "native": "SHIP's SAIL"
+    },
+    "48774": {
+      "en": "Vela",
+      "native": "SHIP's SAIL"
+    },
+    "52727": {
+      "en": "Vela",
+      "native": "SHIP's SAIL"
+    },
+    "51986": {
+      "en": "Vela",
+      "native": "SHIP's SAIL"
+    },
+    "50191": {
+      "en": "Vela",
+      "native": "SHIP's SAIL"
+    },
+    "46651": {
+      "en": "Vela",
+      "native": "SHIP's SAIL"
+    },
+    "44816": {
+      "en": "Vela",
+      "native": "SHIP's SAIL"
+    },
+    "42515": {
+      "en": "Pyxis",
+      "native": "SHIP'S COMPASS"
+    },
+    "42828": {
+      "en": "Pyxis",
+      "native": "SHIP'S COMPASS"
+    },
+    "43409": {
+      "en": "Pyxis",
+      "native": "SHIP'S COMPASS"
+    },
+    "37504": {
+      "en": "Volans",
+      "native": "FLYING FISH"
+    },
+    "34481": {
+      "en": "Volans",
+      "native": "FLYING FISH"
+    },
+    "39794": {
+      "en": "Volans",
+      "native": "FLYING FISH"
+    },
+    "35228": {
+      "en": "Volans",
+      "native": "FLYING FISH"
+    },
+    "41312": {
+      "en": "Volans",
+      "native": "FLYING FISH"
+    },
+    "44382": {
+      "en": "Volans",
+      "native": "FLYING FISH"
+    },
+    "40817": {
+      "en": "Volans",
+      "native": "FLYING FISH"
+    },
+    "27100": {
+      "en": "Dorado",
+      "native": "SWORDFISH"
+    },
+    "27890": {
+      "en": "Dorado",
+      "native": "SWORDFISH"
+    },
+    "26069": {
+      "en": "Dorado",
+      "native": "SWORDFISH"
+    },
+    "21281": {
+      "en": "Dorado",
+      "native": "SWORDFISH"
+    },
+    "19893": {
+      "en": "Dorado",
+      "native": "SWORDFISH"
+    },
+    "23693": {
+      "en": "Dorado",
+      "native": "SWORDFISH"
+    },
+    "28328": {
+      "en": "Columba",
+      "native": "DOVE"
+    },
+    "28199": {
+      "en": "Columba",
+      "native": "DOVE"
+    },
+    "30277": {
+      "en": "Columba",
+      "native": "DOVE"
+    },
+    "29807": {
+      "en": "Columba",
+      "native": "DOVE"
+    },
+    "27628": {
+      "en": "Columba",
+      "native": "DOVE"
+    },
+    "26634": {
+      "en": "Columba",
+      "native": "DOVE"
+    },
+    "25859": {
+      "en": "Columba",
+      "native": "DOVE"
+    },
+    "2021": {
+      "en": "Hydrus",
+      "native": "HYDRUS"
+    },
+    "17678": {
+      "en": "Hydrus",
+      "native": "HYDRUS"
+    },
+    "12394": {
+      "en": "Hydrus",
+      "native": "HYDRUS"
+    },
+    "11001": {
+      "en": "Hydrus",
+      "native": "HYDRUS"
+    },
+    "8928": {
+      "en": "Hydrus",
+      "native": "HYDRUS"
+    },
+    "9236": {
+      "en": "Hydrus",
+      "native": "HYDRUS"
+    },
+    "32607": {
+      "en": "Pictor",
+      "native": "EASEL"
+    },
+    "27530": {
+      "en": "Pictor",
+      "native": "EASEL"
+    },
+    "27321": {
+      "en": "Pictor",
+      "native": "EASEL"
+    },
+    "19780": {
+      "en": "Reticulum",
+      "native": "NET"
+    },
+    "19921": {
+      "en": "Reticulum",
+      "native": "NET"
+    },
+    "18597": {
+      "en": "Reticulum",
+      "native": "NET"
+    },
+    "17440": {
+      "en": "Reticulum",
+      "native": "NET"
+    },
+    "19747": {
+      "en": "Horologium",
+      "native": "CLOCK"
+    },
+    "14879": {
+      "en": "Fornax",
+      "native": "FURNACE"
+    },
+    "72010": {
+      "en": "Centaurus",
+      "native": "CENTAUR"
+    },
+    "71865": {
+      "en": "Centaurus",
+      "native": "CENTAUR"
+    },
+    "73334": {
+      "en": "Centaurus",
+      "native": "CENTAUR"
+    },
+    "71352": {
+      "en": "Centaurus",
+      "native": "CENTAUR"
+    },
+    "68245": {
+      "en": "Centaurus",
+      "native": "CENTAUR"
+    },
+    "68862": {
+      "en": "Centaurus",
+      "native": "CENTAUR"
+    },
+    "70300": {
+      "en": "Centaurus",
+      "native": "CENTAUR"
+    },
+    "70090": {
+      "en": "Centaurus",
+      "native": "CENTAUR"
+    },
+    "68933": {
+      "en": "Centaurus",
+      "native": "CENTAUR"
+    },
+    "67464": {
+      "en": "Centaurus",
+      "native": "CENTAUR"
+    },
+    "67153": {
+      "en": "Centaurus",
+      "native": "CENTAUR"
+    },
+    "67457": {
+      "en": "Centaurus",
+      "native": "CENTAUR"
+    },
+    "67669": {
+      "en": "Centaurus",
+      "native": "CENTAUR"
+    },
+    "67786": {
+      "en": "Centaurus",
+      "native": "CENTAUR"
+    },
+    "65109": {
+      "en": "Centaurus",
+      "native": "CENTAUR"
+    },
+    "65936": {
+      "en": "Centaurus",
+      "native": "CENTAUR"
+    },
+    "67472": {
+      "en": "Centaurus",
+      "native": "CENTAUR"
+    },
+    "68002": {
+      "en": "Centaurus",
+      "native": "CENTAUR"
+    },
+    "68523": {
+      "en": "Centaurus",
+      "native": "CENTAUR"
+    },
+    "68282": {
+      "en": "Centaurus",
+      "native": "CENTAUR"
+    },
+    "66657": {
+      "en": "Centaurus",
+      "native": "CENTAUR"
+    },
+    "61932": {
+      "en": "Centaurus",
+      "native": "CENTAUR"
+    },
+    "60823": {
+      "en": "Centaurus",
+      "native": "CENTAUR"
+    },
+    "59449": {
+      "en": "Centaurus",
+      "native": "CENTAUR"
+    },
+    "56561": {
+      "en": "Centaurus",
+      "native": "CENTAUR"
+    },
+    "59196": {
+      "en": "Centaurus",
+      "native": "CENTAUR"
+    },
+    "55425": {
+      "en": "Centaurus",
+      "native": "CENTAUR"
+    },
+    "61084": {
+      "en": "Crux",
+      "native": "SOUTHERN CROSS"
+    },
+    "62434": {
+      "en": "Crux",
+      "native": "SOUTHERN CROSS"
+    },
+    "59747": {
+      "en": "Crux",
+      "native": "SOUTHERN CROSS"
+    },
+    "100751": {
+      "en": "Pavo",
+      "native": "PEACOCK"
+    },
+    "105858": {
+      "en": "Pavo",
+      "native": "PEACOCK"
+    },
+    "102395": {
+      "en": "Pavo",
+      "native": "PEACOCK"
+    },
+    "99240": {
+      "en": "Pavo",
+      "native": "PEACOCK"
+    },
+    "98495": {
+      "en": "Pavo",
+      "native": "PEACOCK"
+    },
+    "91792": {
+      "en": "Pavo",
+      "native": "PEACOCK"
+    },
+    "93015": {
+      "en": "Pavo",
+      "native": "PEACOCK"
+    },
+    "92609": {
+      "en": "Pavo",
+      "native": "PEACOCK"
+    },
+    "90098": {
+      "en": "Pavo",
+      "native": "PEACOCK"
+    },
+    "88866": {
+      "en": "Pavo",
+      "native": "PEACOCK"
+    },
+    "86929": {
+      "en": "Pavo",
+      "native": "PEACOCK"
+    },
+    "82273": {
+      "en": "Triangulum Australe",
+      "native": "SOUTHERN TRIANGLE"
+    },
+    "74946": {
+      "en": "Triangulum Australe",
+      "native": "SOUTHERN TRIANGLE"
+    },
+    "76440": {
+      "en": "Triangulum Australe",
+      "native": "SOUTHERN TRIANGLE"
+    },
+    "77952": {
+      "en": "Triangulum Australe",
+      "native": "SOUTHERN TRIANGLE"
+    },
+    "78918": {
+      "en": "Lupus",
+      "native": "WOLF"
+    },
+    "77634": {
+      "en": "Lupus",
+      "native": "WOLF"
+    },
+    "76705": {
+      "en": "Lupus",
+      "native": "WOLF"
+    },
+    "75177": {
+      "en": "Lupus",
+      "native": "WOLF"
+    },
+    "78384": {
+      "en": "Lupus",
+      "native": "WOLF"
+    },
+    "75304": {
+      "en": "Lupus",
+      "native": "WOLF"
+    },
+    "75501": {
+      "en": "Lupus",
+      "native": "WOLF"
+    },
+    "76297": {
+      "en": "Lupus",
+      "native": "WOLF"
+    },
+    "76552": {
+      "en": "Lupus",
+      "native": "WOLF"
+    },
+    "76829": {
+      "en": "Lupus",
+      "native": "WOLF"
+    },
+    "75141": {
+      "en": "Lupus",
+      "native": "WOLF"
+    },
+    "74117": {
+      "en": "Lupus",
+      "native": "WOLF"
+    },
+    "74911": {
+      "en": "Lupus",
+      "native": "WOLF"
+    },
+    "75264": {
+      "en": "Lupus",
+      "native": "WOLF"
+    },
+    "73807": {
+      "en": "Lupus",
+      "native": "WOLF"
+    },
+    "74376": {
+      "en": "Lupus",
+      "native": "WOLF"
+    },
+    "74395": {
+      "en": "Lupus",
+      "native": "WOLF"
+    },
+    "71536": {
+      "en": "Lupus",
+      "native": "WOLF"
+    },
+    "71121": {
+      "en": "Lupus",
+      "native": "WOLF"
+    },
+    "71860": {
+      "en": "Lupus",
+      "native": "WOLF"
+    },
+    "69996": {
+      "en": "Lupus",
+      "native": "WOLF"
+    },
+    "70576": {
+      "en": "Lupus",
+      "native": "WOLF"
+    },
+    "72683": {
+      "en": "Lupus",
+      "native": "WOLF"
+    },
+    "73273": {
+      "en": "Lupus",
+      "native": "WOLF"
+    },
+    "62322": {
+      "en": "Fly",
+      "native": "FLY"
+    },
+    "61585": {
+      "en": "Fly",
+      "native": "FLY"
+    },
+    "63613": {
+      "en": "Fly",
+      "native": "FLY"
+    },
+    "61199": {
+      "en": "Fly",
+      "native": "FLY"
+    },
+    "59929": {
+      "en": "Fly",
+      "native": "FLY"
+    },
+    "57363": {
+      "en": "Fly",
+      "native": "FLY"
+    },
+    "107089": {
+      "en": "Octans",
+      "native": "OCTANT"
+    },
+    "112405": {
+      "en": "Octans",
+      "native": "OCTANT"
+    },
+    "70638": {
+      "en": "Octans",
+      "native": "OCTANT"
+    },
+    "71908": {
+      "en": "Circinus",
+      "native": "DIVIDERS"
+    },
+    "75323": {
+      "en": "Circinus",
+      "native": "DIVIDERS"
+    },
+    "74824": {
+      "en": "Circinus",
+      "native": "DIVIDERS"
+    },
+    "80000": {
+      "en": "Norma",
+      "native": "SQUARE"
+    },
+    "80582": {
+      "en": "Norma",
+      "native": "SQUARE"
+    },
+    "78914": {
+      "en": "Norma",
+      "native": "SQUARE"
+    },
+    "78639": {
+      "en": "Norma",
+      "native": "SQUARE"
+    },
+    "80047": {
+      "en": "Apus",
+      "native": "BIRD OF PARADISE"
+    },
+    "81065": {
+      "en": "Apus",
+      "native": "BIRD OF PARADISE"
+    },
+    "81852": {
+      "en": "Apus",
+      "native": "BIRD OF PARADISE"
+    },
+    "72370": {
+      "en": "Apus",
+      "native": "BIRD OF PARADISE"
+    },
+    "40702": {
+      "en": "Chamaeleon",
+      "native": "CHAMELEON"
+    },
+    "51839": {
+      "en": "Chamaeleon",
+      "native": "CHAMELEON"
+    },
+    "52595": {
+      "en": "Chamaeleon",
+      "native": "CHAMELEON"
+    },
+    "60000": {
+      "en": "Chamaeleon",
+      "native": "CHAMELEON"
+    },
+    "58484": {
+      "en": "Chamaeleon",
+      "native": "CHAMELEON"
+    },
+    "40888": {
+      "en": "eyes",
+      "native": "eyes"
+    },
+    "110130": {
+      "en": "Tucana",
+      "native": "TOUCAN"
+    },
+    "114996": {
+      "en": "Tucana",
+      "native": "TOUCAN"
+    },
+    "118322": {
+      "en": "Tucana",
+      "native": "TOUCAN"
+    },
+    "1599": {
+      "en": "Tucana",
+      "native": "TOUCAN"
+    },
+    "2484": {
+      "en": "Tucana",
+      "native": "TOUCAN"
+    },
+    "101772": {
+      "en": "Indus",
+      "native": "INDIAN"
+    },
+    "102333": {
+      "en": "Indus",
+      "native": "INDIAN"
+    },
+    "103227": {
+      "en": "Indus",
+      "native": "INDIAN"
+    },
+    "108870": {
+      "en": "Indus",
+      "native": "INDIAN"
+    },
+    "108431": {
+      "en": "Indus",
+      "native": "INDIAN"
+    },
+    "90568": {
+      "en": "Telescopium",
+      "native": "TELESCOPE"
+    },
+    "90422": {
+      "en": "Telescopium",
+      "native": "TELESCOPE"
+    },
+    "88714": {
+      "en": "Ara",
+      "native": "ALTAR"
+    },
+    "85792": {
+      "en": "Ara",
+      "native": "ALTAR"
+    },
+    "83153": {
+      "en": "Ara",
+      "native": "ALTAR"
+    },
+    "83081": {
+      "en": "Ara",
+      "native": "ALTAR"
+    },
+    "82363": {
+      "en": "Ara",
+      "native": "ALTAR"
+    },
+    "85727": {
+      "en": "Ara",
+      "native": "ALTAR"
+    },
+    "102831": {
+      "en": "Microscopium",
+      "native": "MICROSCOPE"
+    },
+    "21770": {
+      "en": "Caelum",
+      "native": "CHISEL"
+    },
+    "29271": {
+      "en": "Mensa",
+      "native": "TABLE MOUNTAIN"
+    },
+    "49641": {
+      "en": "Sextans",
+      "native": "SEXTANT"
+    }
+  },
+  "unresolved_hips": [
+    1411,
+    55203
+  ]
+}

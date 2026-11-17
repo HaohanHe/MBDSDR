@@ -113,7 +113,8 @@ def test_backup_failure_blocks_save(tmp_path, monkeypatch):
     store = ConversationStore(directory=str(tmp_path))
     path = tmp_path / "conv_block.json"
     path.write_text("{ broken", encoding="utf-8")
-    monkeypatch.setattr(conversation_mod, "backup_corrupt", lambda _p: None)
+    monkeypatch.setattr(conversation_mod, "backup_corrupt_conversations",
+                        lambda _p: None)
 
     try:
         store.save("conv_block", [{"role": "user", "content": "新内容"}])

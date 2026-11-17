@@ -1,19 +1,22 @@
 # SPDX-License-Identifier: MIT
-"""内置 TLE 来源与可信度登记（P11-5）。
+"""内置 TLE 来源与可信度登记（P11-5 / D4）。
 
-历史验收提过：``decoders.BUILTIN_TLE`` 里有为「能用」而凑整的轨道根数
-（历元小数全 0、根数圆整）。这类值只配当占位演示，**不许当精确值算过境**。
+历史 ``decoders.BUILTIN_TLE`` 里有为「能用」而凑整的轨道根数（历元小数全 0、
+根数圆整）。按超级 spec D4「不得内置伪造 TLE」，这些合成值**已从生产路径
+移除**：``decoders.BUILTIN_TLE`` 现在是空表，取不到真实 TLE 就返回空态
+「无 TLE，无法预报」。测试所需的样本改放 ``tests/fixtures/tle_samples.py``。
 
-本模块不修改 ``decoders.py``（该文件属另一条线），而是在数据侧增加
-``来源 + 校验和 + 历元是否凑整 + 可信度`` 登记：
+本模块继续提供数据侧登记能力：
+``来源 + 校验和 + 历元是否凑整 + 可信度``——
 
     trust = "verified"            → 校验和正确、历元非凑整且在合理时间窗
-            "synthetic_rounded"   → 历元/根数明显凑整（占位值）
+            "synthetic_rounded"   → 历元/根数明显凑整（占位值，仅测试/登记用）
             "invalid_checksum"    → TLE 校验和错误
             "implausible_epoch"   → 历元越界/几十年偏差
             "unverified"          → 其他无法确认的情况
 
-只有 ``verified`` 才允许当精确数据用于过境/跟踪；其余必须在面板如实标注。
+生产内置表只剩 ``sat_tracker._BUILTIN_TLES`` 的 Celestrak 静态快照，
+``origin_kind`` 明确标为 ``external_snapshot``（外部提供，但不是在线实时）。
 """
 from __future__ import annotations
 
@@ -23,9 +26,15 @@ __all__ = [
     "analyze_tle_provenance",
     "builtin_provenance_table",
     "trust_label",
+    "EXTERNAL_SNAPSHOT_SOURCE",
     "SYNTHETIC_TLE_POLICY",
     "synthetic_tle_policy",
 ]
+
+#: 内置快照的**统一来源口径**：这些根数不是系统在线拉到的，而是外部
+#: （Celestrak）某次发布后被复制进仓库的**静态快照**。界面/诊断必须写
+#: 「外部提供（快照）」，不能写成「刚拉取的实时轨道」。
+EXTERNAL_SNAPSHOT_SOURCE = "外部提供（Celestrak 快照）"
 
 _TRUST_LABELS = {
     "verified": "已核实（校验和正确、历元非凑整）",
@@ -40,19 +49,21 @@ def trust_label(trust: str) -> str:
     return _TRUST_LABELS.get(trust, _TRUST_LABELS["unverified"])
 
 
-# P12-5 内置合成 TLE 处置策略（选「保留但不可用于精确过境」，不删数据）：
-# - 保留：离线/演示场景仍需有星可看，删掉会让天空图空白；
-# - 限制：trust=synthetic_rounded 的条目 usable_for_tracking=False，
-#   过境/跟踪/天空工具输出必须带「不可当精确值」告警（见 sdr_tools）；
-# - 兜底：精确场景请用 Celestrak 实时 TLE（fetch_tle/refresh_tle_round）
-#   或用户自备 .tle 文件；不存在「把合成值当实时」的路径。
+# P12-5 / D4 内置合成 TLE 处置（2026-11-17 收紧）：
+# - **从生产路径移除**：``decoders.BUILTIN_TLE`` 置空，不再用凑整根数回退；
+# - 无 TLE 时诚实空态「无 TLE，无法预报」，精确场景必须走 Celestrak
+#   在线/缓存或用户自备 .tle；
+# - 测试所需样本改放 ``tests/fixtures/tle_samples.py``，不回流生产表；
+# - ``sat_tracker._BUILTIN_TLES`` 的 Celestrak 快照保留，但必须标
+#   ``external_snapshot`` 并带来源/epoch，不得冒充在线实时。
 SYNTHETIC_TLE_POLICY: Dict[str, Any] = {
-    "decision": "keep_but_not_for_precise_passes",
-    "summary": "内置合成/凑整 TLE 保留用于离线演示，但禁止作为精确过境/跟踪数据",
+    "decision": "removed_from_production",
+    "summary": "生产路径不再内置合成/凑整 TLE；无真实 TLE 时如实空态",
     "enforced_by": [
-        "trust=synthetic_rounded → usable_for_tracking=False",
-        "sdr_tools 输出附带「不可当精确过境时刻」告警",
-        "orbit/decoders 取数不以内置合成值冒充实时（无缓存即诚实空态）",
+        "decoders.BUILTIN_TLE 为空表，_resolve_tle 失败返回 no-tle",
+        "controller.get_satellite_pass 无 TLE 返回 error=no_tle",
+        "sdr_tools 过境/可见卫星输出明写「无 TLE，无法预报」",
+        "测试样本位于 tests/fixtures/tle_samples.py，不进入生产表",
     ],
     "precise_source": "Celestrak 实时 TLE（缓存 24h 门槛）或用户自备 .tle",
 }
@@ -128,27 +139,28 @@ def analyze_tle_provenance(name: str, line1: str, line2: str,
 
 
 def builtin_provenance_table(include_real: bool = True) -> Dict[str, Dict[str, Any]]:
-    """登记内置 TLE 的可信度。
+    """登记内置 TLE 的可信度与来源属性。
 
-    - ``decoders.BUILTIN_TLE``：合成回退表（来源=内置演示数据）；
-    - ``sat_tracker._BUILTIN_TLES``：Celestrak 抓取的真实表（可用时）。
+    - ``decoders.BUILTIN_TLE``：**已清空**（生产路径不含合成/凑整根数），
+      因此不再出现在本表；测试样本请用 ``tests/fixtures/tle_samples.py``
+      调用 :func:`analyze_tle_provenance` 单独登记；
+    - ``sat_tracker._BUILTIN_TLES``：Celestrak 抓取的静态快照
+      （``origin_kind="external_snapshot"``，外部提供但不随源更新）。
+
+    「外部提供」只说明数据来自外部发布，**不等于在线实时**：静态快照的
+    历元年龄仍按 ``tle_integrity.freshness`` 判档。
     """
     out: Dict[str, Dict[str, Any]] = {}
-    try:
-        from .decoders import BUILTIN_TLE
-        for name, lines in BUILTIN_TLE.items():
-            out.setdefault(str(name), analyze_tle_provenance(
-                name, lines[0], lines[1],
-                source="decoders.BUILTIN_TLE（内置演示/回退表）"))
-    except Exception:
-        pass
     if include_real:
         try:
             from .sat_tracker import _BUILTIN_TLES
             for name, line1, line2 in _BUILTIN_TLES:
-                out[str(name)] = analyze_tle_provenance(
+                prov = analyze_tle_provenance(
                     name, line1, line2,
-                    source="sat_tracker.BUILTIN_TLES（Celestrak 抓取）")
+                    source=f"sat_tracker.BUILTIN_TLES（{EXTERNAL_SNAPSHOT_SOURCE}）")
+                prov["origin_kind"] = "external_snapshot"
+                prov["provided_by"] = EXTERNAL_SNAPSHOT_SOURCE
+                out[str(name)] = prov
         except Exception:
             pass
     return out

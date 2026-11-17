@@ -80,6 +80,12 @@ def _carrier_strength(iq: np.ndarray, sample_rate: float,
     两者之差即为信号强度（高于噪声底多少 dB）。
 
     要求 sample_rate > 3 * channel_bw，否则带外区域不足，退化为全谱中位数。
+
+    口径注意：信道取**均值**、带外取**中位数**，所以纯噪声的读数不是 0 dB，
+    而是均值/中位数之比 = 1/ln2 ≈ **+1.6 dB**（2026-11-17 实测：16k 点、
+    1 MS/s 下 20 次复高斯噪声读数 1.5/1.6/1.7 dB）。这意味着
+    ``carrier_threshold_db=2.0`` 实际只比纯噪声高约 0.4 dB——阈值是相对
+    这个噪声基线而言的，不要按「0 dB = 无信号」理解。
     """
     n = len(iq)
     if n < 16:

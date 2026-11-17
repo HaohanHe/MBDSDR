@@ -1,0 +1,215 @@
+{
+  "id": "mongolian",
+  "meta": {
+    "schema": "mbdsdr.sky_culture.v1",
+    "id": "mongolian",
+    "display_name": "Mongolian",
+    "native_name": "",
+    "region": "Eastern Asia",
+    "classification": [
+      "ethnographic"
+    ],
+    "source": "Stellarium skyculture mongolian",
+    "source_url": "https://github.com/Stellarium/stellarium/tree/master/skycultures/mongolian",
+    "source_license": "CC BY-SA 4.0",
+    "source_license_url": "https://creativecommons.org/licenses/by-sa/4.0/",
+    "attribution": "Stellarium sky culture 'mongolian'; authors: This skyculture is a contribution from two users of Stellarium, Anthony Lagain () and Batiste Rousseau () mainly based on oral tales of numerous Mongolians met during a two months stay in Mongolia. To learn more about them: www.souslecieldemongolie.wordpress.com (in French) (CC BY-SA 4.0). Converted to HIP line segments only; no artwork or description images were copied.",
+    "source_file": "reference/stellarium/skycultures/mongolian/index.json",
+    "source_file_sha256": "d6fed962729462f7e76eeb9cb37878b9364bbeb997bb17ea3893b3d66f814a75",
+    "description_file": "reference/stellarium/skycultures/mongolian/description.md",
+    "description_file_sha256": "5f14d719bcfe73ec5415c4313797ee16b70123729f78e17117119ef14d25bdb7",
+    "conversion_scope": "Only constellations[].lines, id and common_name (plus optional common_names star labels) are converted; illustrations, artwork and description text are not copied.",
+    "names_scope": "Explicit common_names labels take precedence; stars without an explicit label inherit the constellation/asterism name they belong to.",
+    "group_count": 4,
+    "edge_count": 23,
+    "name_count": 26,
+    "unresolved_hip_count": 0,
+    "unresolved_hips": [],
+    "unresolved_token_count": 0,
+    "unresolved_tokens": [],
+    "generated_utc": "2026-11-17T17:00:44Z",
+    "data_sha256": "0273fce97feee812dd06a778764eff120a8063412bc02c52f4bced044f9df9bb"
+  },
+  "groups": [
+    {
+      "group_id": "CON mongolian 001",
+      "names": {
+        "en": "The Bow and the Arrow",
+        "native": "Num Sum"
+      },
+      "lines": [
+        [
+          94779,
+          95853,
+          97165,
+          100453,
+          102098
+        ],
+        [
+          100453,
+          102488,
+          104732,
+          107310
+        ],
+        [
+          100453,
+          98110,
+          95947
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON mongolian 002",
+      "names": {
+        "en": "The Five Stars Woman",
+        "native": "Hun Tavan Od"
+      },
+      "lines": [
+        [
+          8886,
+          6686,
+          4427,
+          3179,
+          746
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON mongolian 003",
+      "names": {
+        "en": "The Seven Buddhas",
+        "native": "Doloon Burkhan"
+      },
+      "lines": [
+        [
+          67301,
+          65378,
+          62956,
+          59774,
+          58001,
+          53910,
+          54061,
+          59774
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON mongolian 004",
+      "names": {
+        "en": "The Three Stags",
+        "native": "Gurvan Maral Od"
+      },
+      "lines": [
+        [
+          102098,
+          91262,
+          97649,
+          102098
+        ]
+      ],
+      "kind": "constellation"
+    }
+  ],
+  "names": {
+    "11767": {
+      "en": "Golden Nail",
+      "native": "Altan Hadaas"
+    },
+    "53910": {
+      "en": "2.Ox / 9.Monkey"
+    },
+    "54061": {
+      "en": "1.Rat / 8.Sheep/Goat"
+    },
+    "58001": {
+      "en": "3.Tiger / 10.Rooster"
+    },
+    "59774": {
+      "en": "4.Rabbit / 11.Dog"
+    },
+    "62956": {
+      "en": "5.Dragon / 12.Pig"
+    },
+    "65378": {
+      "en": "6.Snake"
+    },
+    "65477": {
+      "en": "Recovery Star"
+    },
+    "67301": {
+      "en": "7.Horse"
+    },
+    "94779": {
+      "en": "The Bow and the Arrow",
+      "native": "Num Sum"
+    },
+    "95853": {
+      "en": "The Bow and the Arrow",
+      "native": "Num Sum"
+    },
+    "97165": {
+      "en": "The Bow and the Arrow",
+      "native": "Num Sum"
+    },
+    "100453": {
+      "en": "The Bow and the Arrow",
+      "native": "Num Sum"
+    },
+    "102098": {
+      "en": "The Bow and the Arrow",
+      "native": "Num Sum"
+    },
+    "102488": {
+      "en": "The Bow and the Arrow",
+      "native": "Num Sum"
+    },
+    "104732": {
+      "en": "The Bow and the Arrow",
+      "native": "Num Sum"
+    },
+    "107310": {
+      "en": "The Bow and the Arrow",
+      "native": "Num Sum"
+    },
+    "98110": {
+      "en": "The Bow and the Arrow",
+      "native": "Num Sum"
+    },
+    "95947": {
+      "en": "The Bow and the Arrow",
+      "native": "Num Sum"
+    },
+    "8886": {
+      "en": "The Five Stars Woman",
+      "native": "Hun Tavan Od"
+    },
+    "6686": {
+      "en": "The Five Stars Woman",
+      "native": "Hun Tavan Od"
+    },
+    "4427": {
+      "en": "The Five Stars Woman",
+      "native": "Hun Tavan Od"
+    },
+    "3179": {
+      "en": "The Five Stars Woman",
+      "native": "Hun Tavan Od"
+    },
+    "746": {
+      "en": "The Five Stars Woman",
+      "native": "Hun Tavan Od"
+    },
+    "91262": {
+      "en": "The Three Stags",
+      "native": "Gurvan Maral Od"
+    },
+    "97649": {
+      "en": "The Three Stags",
+      "native": "Gurvan Maral Od"
+    }
+  },
+  "unresolved_hips": []
+}

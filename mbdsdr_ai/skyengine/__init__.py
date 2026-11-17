@@ -8,6 +8,7 @@ mbdsdr_ai/skyengine — 天球渲染辅助子包（供 desktop/rf_sky_view 使�
   - star_catalog:   全天 HYG 星表 + 视场驱动的星等分层 (LOD)
   - constellations: IAU 88 星座数据（官方名/缩写/中文名/示意连线）
   - xingguan:       中国星官独立体系（三垣二十八宿，与 IAU 分开存储/标注）
+  - sky_culture:    统一多文化天空模型（IAU/中国星官适配器 + 可插拔文化包）
   - satellites:     卫星目录索引 / COSPAR 解析 / 升落预报
   - jtime:          儒略日 / GMST / 时间流速内核（IAU 1982 公式）
 
@@ -37,6 +38,13 @@ from .xingguan import (
     xingguan_culture, xingguan_anchor, xingguan_anchor_reason,
     load_xingguan_star_names, xingguan_star_name, xingguan_star_name_reason,
     xingguan_layer,
+)
+from .sky_culture import (
+    SkyCultureGroup, SkyCulturePack, SkyCultureRegistry,
+    SkyCultureMetadataError, SkyCultureIntegrityError,
+    load_pack, load_registry, get_pack, list_packs, segments_for,
+    names_for_hip, cultures_of_hip, stats, pack_from_iau,
+    pack_from_xingguan,
 )
 from .satellites import (SatelliteMeta, SATELLITE_INDEX, cospar_from_tle,
                          norad_from_tle, next_rise_set)
@@ -68,6 +76,11 @@ __all__ = [
     "xingguan_culture", "xingguan_anchor", "xingguan_anchor_reason",
     "load_xingguan_star_names", "xingguan_star_name",
     "xingguan_star_name_reason", "xingguan_layer",
+    "SkyCultureGroup", "SkyCulturePack", "SkyCultureRegistry",
+    "SkyCultureMetadataError", "SkyCultureIntegrityError",
+    "load_pack", "load_registry", "get_pack", "list_packs", "segments_for",
+    "names_for_hip", "cultures_of_hip", "stats", "pack_from_iau",
+    "pack_from_xingguan",
     "SatelliteMeta", "SATELLITE_INDEX", "cospar_from_tle", "norad_from_tle",
     "next_rise_set", "jtime",
 ]

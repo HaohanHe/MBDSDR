@@ -667,9 +667,28 @@ class OrthographicProjection(_BaseProjection):
     max_fov_deg = 179.999
 
     def _forward(self, v: np.ndarray) -> tuple[float, float]:
+        # 正射只显示前半球（视轴 -z）。背面 v[2] > 0 没有画面位置：
+        # 若不判，h=1/‖v‖ 会把对跖点算成 (0,0)——正中凭空多出一个点，
+        # 同时背面天体被镜像叠到前半球（实测 project_vec([0,0,1])==(0,0)）。
+        # 与 PerspectiveProjection 同口径：不可见返回 inf，绘制端按"不画"丢弃。
+        # v[2] == 0 是天球边缘（limb，恰在 90°），仍可见。
+        if v[2] > 0.0:
+            return math.inf, math.inf
         r = math.sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2])
         h = 1.0 / r
         return v[0] * h, v[1] * h
+
+    def project_vec_many(self, vv) -> tuple[np.ndarray, np.ndarray]:
+        """批量正射（解析式）：背面保持 NaN，绝不折到圆心。"""
+        arr = np.atleast_2d(np.asarray(vv, dtype=float))
+        r = np.sqrt(np.sum(arr * arr, axis=1))
+        ok = (arr[:, 2] <= 0.0) & (r > 1e-12)
+        xs = np.full(len(arr), np.nan, dtype=float)
+        ys = np.full(len(arr), np.nan, dtype=float)
+        f = 1.0 / r[ok]
+        xs[ok] = arr[ok, 0] * f
+        ys[ok] = arr[ok, 1] * f
+        return xs, ys
 
     def _backward(self, x: float, y: float) -> np.ndarray:
         dq = x * x + y * y
@@ -727,6 +746,30 @@ class AzimuthalEquidistantProjection(_BaseProjection):
             a = math.pi
         f = (math.sin(a) / a) if a > 1e-15 else 1.0
         return np.array([x * f, y * f, -math.cos(a)])
+
+    def project_vec_many(self, vv) -> tuple[np.ndarray, np.ndarray]:
+        """批量等距方位投影（解析式，与 `_forward` 同源）。
+
+        星象仪的星点/网格每帧上千点都走这条（QGIS 对照见
+        ``docs/learn/2026-11-17-qgis-local-study.md`` §2.4：PROJ 的
+        ``proj_trans_generic`` 一次变换整条数组，我们原来在基类里逐点循环）。
+        中心 x=y=0 按 v[2] 分流，与 `_forward` 完全一致：
+          - 天顶 (v[2]<0) → (0,0)；
+          - 对跖点 (v[2]>0) → inf，绘制端按「不可见」丢弃。
+        """
+        arr = np.atleast_2d(np.asarray(vv, dtype=float))
+        rq1 = arr[:, 0] * arr[:, 0] + arr[:, 1] * arr[:, 1]
+        h = np.sqrt(rq1)
+        ok = rq1 > 1e-30
+        xs = np.full(len(arr), np.inf, dtype=float)
+        ys = np.full(len(arr), np.inf, dtype=float)
+        c = np.arctan2(h[ok], -arr[ok, 2]) / h[ok]
+        xs[ok] = arr[ok, 0] * c
+        ys[ok] = arr[ok, 1] * c
+        center_zenith = (~ok) & (arr[:, 2] < 0.0)
+        xs[center_zenith] = 0.0
+        ys[center_zenith] = 0.0
+        return xs, ys
 
 
 class PerspectiveProjection(_BaseProjection):

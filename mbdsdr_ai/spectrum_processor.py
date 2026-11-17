@@ -33,6 +33,9 @@ class SpectrumData:
     peak_freq: float = 0.0
     peak_power_db: float = -100.0
     noise_floor_db: float = -100.0
+    # 数据来源（"live" = 实时设备，"replay" = 回放/离线样本，"unknown" = 未标注）。
+    # 下游（AI 报告/导出）据此区分「屏幕上的实时谱」与「回放样本」。
+    source: str = "unknown"
 
 
 @dataclass
@@ -43,6 +46,8 @@ class WaterfallData:
     powers_db: np.ndarray     # 2D 功率数组 [time, freq]
     center_freq: float = 0.0
     sample_rate: float = 0.0
+    # 与逐帧 SpectrumData.source 同义（多帧路径统一透传，不逐行混合来源）。
+    source: str = "unknown"
 
 
 class SpectrumProcessor:
@@ -92,6 +97,7 @@ class SpectrumProcessor:
         center_freq: float,
         sample_rate: float,
         fft_size: int = None,
+        source: str = "live",
     ) -> SpectrumData:
         """
         计算频谱。
@@ -100,6 +106,7 @@ class SpectrumProcessor:
         center_freq: 中心频率 Hz
         sample_rate: 采样率 Hz
         fft_size: FFT 大小（默认使用初始化时的值）
+        source: 数据来源（默认 "live" 实时设备；回放/离线样本显式传 "replay"）
         """
         if fft_size is None:
             fft_size = self.fft_size
@@ -153,6 +160,7 @@ class SpectrumProcessor:
             peak_freq=peak_freq,
             peak_power_db=peak_power,
             noise_floor_db=noise_floor,
+            source=source,
         )
 
     def find_signals(
@@ -289,18 +297,25 @@ class SpectrumProcessor:
         samples_blocks: List[np.ndarray],
         center_freq: float,
         sample_rate: float,
+        source: str = "live",
     ) -> WaterfallData:
         """
         计算瀑布图（多帧频谱堆叠）。
+
+        source 统一透传给每一帧 ``compute_spectrum`` 并写入结果，
+        多帧路径不混入不同来源。
         """
         spectra = []
+        freqs = np.array([])
         for samples in samples_blocks:
-            spec = self.compute_spectrum(samples, center_freq, sample_rate)
+            spec = self.compute_spectrum(samples, center_freq, sample_rate,
+                                         source=source)
+            if not len(spectra):
+                freqs = spec.frequencies
             spectra.append(spec.powers_db)
 
         powers_db = np.array(spectra)
         times = np.arange(len(samples_blocks))
-        freqs = spectra[0].frequencies if spectra else np.array([])
 
         return WaterfallData(
             frequencies=freqs,
@@ -308,6 +323,7 @@ class SpectrumProcessor:
             powers_db=powers_db,
             center_freq=center_freq,
             sample_rate=sample_rate,
+            source=source,
         )
 
     def extract_modulation_features(

@@ -402,20 +402,50 @@ class WebServer:
     def _backend_connected(self) -> bool:
         if self.backend is None:
             return False
-        return bool(getattr(self.backend, "connected", False))
+        # 后端可能暴露布尔属性（假后端/旧后端），也可能只提供 is_connected()
+        # （SDRController）。两者读的是同一份连接状态，不另建缓存。
+        connected = getattr(self.backend, "connected", None)
+        if connected is not None:
+            return bool(connected)
+        fn = getattr(self.backend, "is_connected", None)
+        if callable(fn):
+            try:
+                return bool(fn())
+            except Exception:
+                return False
+        return False
+
+    def _backend_value(self, *names: str) -> Any:
+        """按顺序读后端属性或零参方法；都没有/抛错 -> None（不造假）。"""
+        for name in names:
+            if self.backend is None:
+                return None
+            value = getattr(self.backend, name, None)
+            if value is None:
+                continue
+            if callable(value):
+                try:
+                    value = value()
+                except Exception:
+                    return None
+            if value is not None:
+                return value
+        return None
 
     def status(self) -> Dict[str, Any]:
         connected = self._backend_connected()
-        # 后端若暴露当前频率/模式/增益属性，一并上报（鸭型，缺失则不报）
-        be = self.backend
-        freq = getattr(be, "frequency", None) or getattr(be, "center_freq", None)
-        gain = getattr(be, "gain", None)
-        mode = getattr(be, "mode", None)
+        # 与 CLI / 控制器同源：优先属性，其次 getter（SDRController 只有 getter）
+        freq = self._backend_value("frequency", "center_freq", "get_frequency")
+        gain = self._backend_value("gain", "get_gain")
+        mode = self._backend_value("mode", "get_demod")
+        samp = self._backend_value(
+            "sample_rate", "sample_rate_hz", "get_sample_rate")
         return {
             "service": "mbdsdr_ai.web",
             "version": __version__,
             "connected": connected,
             "center_freq_hz": float(freq) if isinstance(freq, (int, float)) else None,
+            "samp_rate_hz": float(samp) if isinstance(samp, (int, float)) else None,
             "mode": mode if isinstance(mode, str) else None,
             "gain_db": float(gain) if isinstance(gain, (int, float)) else None,
             "annotations": self.spectrum_streamer.annotations(),
@@ -425,7 +455,22 @@ class WebServer:
             },
             "fft_fps": self.spectrum_streamer.fps,
             "fft_size": self.spectrum_streamer.fft_size,
+            "runtime_sources": self._runtime_sources_status(),
         }
+
+    def _runtime_sources_status(self) -> Dict[str, Any]:
+        """运行时数据源快照：控制器有整体快照就直接透传，否则只读后端。"""
+        getter = getattr(self.backend, "get_runtime_sources", None)
+        if callable(getter):
+            try:
+                return getter()
+            except Exception:
+                pass
+        try:
+            from ..runtime_sources import snapshot as _runtime_snapshot
+            return _runtime_snapshot(sdr=self.backend)
+        except Exception:
+            return {}
 
     # -- WebSocket 远程控制命令 ------------------------------------------- #
     def handle_command(self, msg: Dict[str, Any]) -> Dict[str, Any]:

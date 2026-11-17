@@ -22,6 +22,28 @@ MBDSDR AI - 硬件抽象层（HAL）
 - RX/TX 能力由设备能力标志决定
 - 无硬件时显式未连接，绝不降级模拟
 - 嵌入式部署（树莓派/Jetson/ARM）自动检测并优化
+
+双栈边界（与 :mod:`mbdsdr_ai.sdr_backend` 的分工）
+---------------------------------------------------
+* **产品接收（RX）走 ``sdr_backend``**：桌面/CLI/Web 的连续接收、频谱、解调、
+  录制、设备占用与热插拔都在那里统一实现，生命周期是长连接 + 环形缓冲。
+* **产品发射（TX）走本模块（HAL）**：``HardwareManager`` 打开设备后，由
+  ``TxSession`` 在 ``tx_guard`` 授权上下文内调用 ``write_tx`` 发短促波形。
+* 原因：接收链与发射链的生命周期、线程模型、失败语义完全不同。把 TX 塞进
+  桌面接收后端会让「播放/录制/频谱」线程与发射授权门互相纠缠；而 HAL 只负责
+  「打开一台能发的设备 + 按授权写流」，边界更窄、更容易审计。
+* 注意：``sdr_backend`` 里少数具体后端（HackRF/PlutoSDR/USRP）仍保留
+  ``write_tx``，那是驱动级直写能力，且同样先过 ``tx_guard``；它不是产品发射
+  入口，工具面一律经 ``HardwareManager``。
+* 两个栈必须同口径的字段：
+  - 设备身份：``driver`` 采用 ``soapy_<driver>``，序列号原样保留；稳定身份键
+    统一由 :func:`mbdsdr_ai.device_identity.device_identity_key` 生成
+    （``driver|serial:<sn>``）。
+  - 采样率：单位 Hz；默认值 RX 为 ``sdr_status.DEFAULT_SAMPLE_RATE_HZ``
+    （2.4 MS/s），TX（HAL）沿用历史默认 2.048 MS/s。默认值可以不同，**单位与
+    下发语义必须一致**：显式设置时一律按 Hz 原样下发，不接受 MHz 或档位编号。
+  - 增益：单位 dB（含小数，不是十分之一 dB），默认值只是初始目标，最终以
+    设备回读/接受值为准。
 """
 
 import numpy as np
@@ -85,6 +107,9 @@ class SDRBackendBase(ABC):
         self._rx_stream = None
         self._tx_stream = None
         self._center_freq = 100e6
+        # TX 侧沿用 HAL 的历史默认 2.048 MS/s：这是发射链的既有默认行为，
+        # 与 RX 的 2.4 MS/s 默认值不同不等于口径不一致——两边单位都是 Hz，
+        # 显式设置时都按 Hz 原样下发。改默认值属于行为变更，先不动。
         self._sample_rate = 2.048e6
         self._gain = 30.0
         self._running = False

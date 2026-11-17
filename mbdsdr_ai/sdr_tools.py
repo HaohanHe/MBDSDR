@@ -60,7 +60,7 @@ from .fm_scan import (
 from .decoders import (
     decode_noaa_apt, decode_sstv, decode_digital_mode,
     detect_fhss, list_visible_satellites, compute_doppler_correction,
-    BUILTIN_TLE, SATELLITE_FREQUENCIES,
+    BUILTIN_TLE, SATELLITE_FREQUENCIES, any_tle_available,
 )
 from .multimon_decoders import register_multimon_tools
 
@@ -1360,6 +1360,8 @@ def register_sdr_tools(agent):
             "QPSK，RRC α=0.6，Costas 环载波恢复+Gardner 位同步 → DQPSK 差分解码 → "
             "卷积去交织(I=36,J=2048) → Viterbi(0x79/0x5F) → LRPT 帧同步 0x1DFCDC。"
             "输入复数 IQ 采样与采样率，返回解调摘要（符号数/比特数/帧）。"
+            "采样率须为 72 kS/s 的整数倍且 ≥144 kS/s（如 288 kS/s = 4 sps）；"
+            "不满足会明确拒绝，不做静默取整。"
         ),
         parameters={
             "type": "object",
@@ -1467,7 +1469,7 @@ def register_sdr_tools(agent):
             },
             "required": ["input_path"],
         },
-        handler=lambda args: ToolResult(success=True, content=_decode_cw(args)),
+        handler=_decode_cw,
         category="sdr_decode",
     )
 
@@ -1482,7 +1484,7 @@ def register_sdr_tools(agent):
             },
             "required": ["input_path"],
         },
-        handler=lambda args: ToolResult(success=True, content=_decode_ft8(args)),
+        handler=_decode_ft8,
         category="sdr_decode",
     )
 
@@ -3964,7 +3966,9 @@ def _meteor_lrpt_demod_fn_tool(args) -> "ToolResult":
     import json as _json
     import base64 as _b64
     from .meteor_sat import meteor_lrpt_demod, METEOR_SYM_RATE
-    sr = float(args.get("sample_rate", 72000))
+    # 缺省必须是实现真正接受的值：符号率 72k，最少 2 sps = 144k。
+    # 旧缺省 72000 会被 meteor_lrpt_demod 直接拒绝（自相矛盾）。
+    sr = float(args.get("sample_rate", 144000))
     b64 = args.get("iq_base64")
     if not b64:
         # 无信号不得回"成功 + 占位说明"——显式失败并说明缺什么
@@ -3978,7 +3982,23 @@ def _meteor_lrpt_demod_fn_tool(args) -> "ToolResult":
         return ToolResult(success=False, content=msg, data=out)
     raw = np.frombuffer(_b64.b64decode(b64), dtype=np.float32)
     iq = (raw[0::2] + 1j * raw[1::2]).astype(np.complex64)
-    summary = meteor_lrpt_demod(iq, sr)
+    try:
+        summary = meteor_lrpt_demod(iq, sr)
+    except ValueError as e:
+        # 采样率不合契约（非 72k 符号率整数倍等）是**可解释的拒绝**，
+        # 不是崩溃：回结构化失败信封，让模型/用户看到原因与要求。
+        logger.warning("Meteor LRPT 解调参数拒绝（fs=%s）: %s", sr, e)
+        return ToolResult(
+            success=False, content=f"Meteor LRPT 解调失败: {e}", error=str(e),
+            error_code="sample_rate_mismatch",
+            data={"error_code": "sample_rate_mismatch", "sample_rate": sr,
+                  "sym_rate": METEOR_SYM_RATE})
+    except Exception as e:  # noqa: BLE001 - 工具边界必须回信封，不能抛
+        logger.warning("Meteor LRPT 解调异常（fs=%s）: %s", sr, e)
+        return ToolResult(
+            success=False, content=f"Meteor LRPT 解调异常: {e}", error=str(e),
+            error_code="decode_failed",
+            data={"error_code": "decode_failed", "sample_rate": sr})
     return ToolResult(success=True, content=_json.dumps(summary), data=summary)
 
 
@@ -3991,7 +4011,9 @@ def _meteor_lrpt_decode_iq_fn_tool(args) -> "ToolResult":
     from .lrpt_vcdu import (blocks_to_meteor_segments,
                             meteor_segments_to_image)
 
-    sr = float(args.get("sample_rate", 72000))
+    # 缺省必须是实现真正接受的值：符号率 72k，最少 2 sps = 144k。
+    # 旧缺省 72000 会被 meteor_lrpt_demod 直接拒绝（自相矛盾）。
+    sr = float(args.get("sample_rate", 144000))
     iq_path = args.get("iq_path")
     b64 = args.get("iq_base64")
     if not iq_path and not b64:
@@ -4558,11 +4580,16 @@ def _decode_sstv(args):
         output += f"降级说明: {fallback_reason}\n"
     return output
 
-def _decode_cw(args):
-    """CW 莫尔斯解码：读 wav，提取幅度包络，调 cw_decoder。"""
+def _decode_cw(args) -> "ToolResult":
+    """CW 莫尔斯解码：读 wav，提取幅度包络，调 cw_decoder。
+
+    失败必须是 ``success=False`` 的信封：旧实现把「解不出来」的文案包进
+    ``success=True``，模型会当成已成功；``wave.Error`` 也不在旧 except
+    列表里，会直接抛给上层。
+    """
+    import wave
     input_path = args["input_path"]
     try:
-        import wave
         import struct
         with wave.open(input_path, "rb") as w:
             rate = w.getframerate()
@@ -4585,18 +4612,29 @@ def _decode_cw(args):
         out += f"置信度: {res['confidence']}\n"
         if res["chars"]:
             out += "逐字符: " + " ".join(f"{c['char']}({c['code']})" for c in res["chars"]) + "\n"
-        return out
-    except (ImportError, OSError, ValueError, TypeError, RuntimeError) as e:
+        return ToolResult(success=True, content=out, data={
+            "input_path": input_path, "text": res["text"],
+            "wpm_est": res["wpm_est"], "confidence": res["confidence"]})
+    except Exception as e:  # noqa: BLE001 - 工具边界必须回信封，不能抛
         logger.warning("CW 解码失败（%s）: %s", input_path, e)
-        return f"CW 解码失败: {e}"
+        code = "invalid_wav" if isinstance(e, wave.Error) else "decode_failed"
+        return ToolResult(
+            success=False, content=f"CW 解码失败: {e}", error=str(e),
+            error_code=code,
+            data={"error_code": code, "input_path": input_path})
 
 
-def _decode_ft8(args):
-    """FT8：内置轻量分析（找音峰+8FSK硬判决）+ 外部 jt9 完整译码提示。"""
+def _decode_ft8(args) -> "ToolResult":
+    """FT8：内置轻量分析（找音峰+8FSK硬判决）+ 外部 jt9 完整译码提示。
+
+    同 ``_decode_cw``：分析失败必须 ``success=False``，不能把异常文案
+    当成功结果交回模型（旧实现正是如此，且 ``wave.Error`` 会外抛）。
+    """
+    import wave
     input_path = args["input_path"]
     out = f"=== FT8 分析 ===\n输入: {input_path}\n"
     try:
-        import wave, struct
+        import struct
         from .ft8_lite import analyze_ft8_audio
         with wave.open(input_path, "rb") as w:
             rate = w.getframerate(); n = w.getnframes(); ch = w.getnchannels(); sw = w.getsampwidth()
@@ -4613,10 +4651,16 @@ def _decode_ft8(args):
             out += f"检测到 FT8：中心 {res['center_hz']}Hz，SNR {res['snr_est_db']}dB\n"
             out += f"原始符号 {res['num_symbols']} 个，判决裕度 {res['avg_margin']}\n"
             out += "呼号文本还原需 jt9/wsjtx（LDPC 译码）\n"
-    except (ImportError, OSError, ValueError, TypeError, RuntimeError) as e:
+        return ToolResult(success=True, content=out, data={
+            "input_path": input_path, "detected": bool(res.get("detected")),
+            "reason": res.get("reason", "")})
+    except Exception as e:  # noqa: BLE001 - 工具边界必须回信封，不能抛
         logger.warning("FT8 内置分析异常（%s）: %s", input_path, e)
-        out += f"内置分析异常: {e}\n"
-    return out
+        code = "invalid_wav" if isinstance(e, wave.Error) else "decode_failed"
+        return ToolResult(
+            success=False, content=out + f"内置分析异常: {e}\n", error=str(e),
+            error_code=code,
+            data={"error_code": code, "input_path": input_path})
 
 def _decode_aprs(args):
     """APRS 自动位置报告解码：有 direwolf 时真调，无则给出安装指引。"""
@@ -5553,9 +5597,10 @@ def _analyze_recording(args):
     else:
         iq_diag = {"skipped": True}
 
-    # 频谱分析
+    # 频谱分析（录制文件是离线样本，来源标 "replay"，不许冒充 "live"）
     spec = SpectrumProcessor(fft_size=fft_size)
-    spectrum = spec.compute_spectrum(samples, center_freq, sample_rate, fft_size=fft_size)
+    spectrum = spec.compute_spectrum(samples, center_freq, sample_rate,
+                                     fft_size=fft_size, source="replay")
     signals = spec.find_signals(spectrum, threshold_db=-40)
 
     # SNR 和带宽
@@ -6341,8 +6386,9 @@ def _satellite_predict_pass(args):
 
     if p is None:
         return (_station_warning_text(ev) +
-                f"卫星 {name} 在未来 {hours:.0f} 小时内没有仰角超过 {min_elev:.0f}° 的过境\n"
-                f"建议: 降低最小仰角或延长预测时间")
+                f"无 TLE，无法预报：卫星 {name} 没有可用的真实 TLE，"
+                f"或未来 {hours:.0f} 小时内没有仰角超过 {min_elev:.0f}° 的过境。\n"
+                f"建议: 先联网刷新 TLE 或导入用户 TLE 文件，再降低最小仰角/延长预测时间")
 
     lines = [p.summary()]
     lines.append("")
@@ -6385,6 +6431,10 @@ def _satellite_predict_all(args):
 
     catalog_notes = _tle_provenance_lines(list(BUILTIN_TLE.keys()))
     if not passes:
+        if not any_tle_available():
+            return (_station_warning_text(ev) +
+                    "无 TLE，无法预报：当前没有可用的真实 TLE 目录"
+                    "（仓内无内置合成 TLE；请联网刷新或导入 TLE 文件）")
         msg = _station_warning_text(ev) + \
               f"未来 {hours:.0f} 小时内没有卫星过境（仰角 > {min_elev:.0f}°）"
         if catalog_notes:
@@ -6431,6 +6481,9 @@ def _sky_view_visible(args):
     at_utc, at_local = _utc_local(when)
     lines = [f"=== 天空图可见卫星（仰角 > {min_elev:.0f}°）==="]
     lines.append(f"时刻: {at_utc}（本地 {at_local}）")
+    if result.get("no_tle"):
+        lines.append("无 TLE，无法预报：" + str(result.get("note") or ""))
+        return '\n'.join(lines)
     lines.append(f"可见数量: {result['total_visible']} 颗")
     lines.append("")
     for sat in result['satellites']:

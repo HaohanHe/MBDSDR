@@ -4,12 +4,22 @@ MBDSDR - GNSS 授时 → SigMF captures 对齐（时空链路时间基准）
 ================================================================
 
 把串口 GNSS（NMEA-0183 GGA/RMC/ZDA）解出的 UTC 时间，对齐写到 SigMF
-``captures[0].core:datetime``，并**显式标注时间来源**：
+``captures[0].core:datetime``，并**显式标注时间来源级别与精度**：
 
-- ``mbdsdr:time_source = "gnss"``  —— ``core:datetime`` 来自 GNSS 授时
-  （ZDA 整句，或 RMC 的 日期+时间 组合）。
-- ``mbdsdr:time_source = "system"`` —— 无可用 GNSS fix，``core:datetime`` 退化为
-  本机时钟 UTC。此时**绝不**冒充 GNSS 授时，如实标注 system。
+- ``mbdsdr:time_source = "pps"``   —— 有 GNSS PPS 秒脉冲对齐；仅此级别可谈
+  亚微秒级。
+- ``mbdsdr:time_source = "nmea"``  —— 只靠 NMEA 语句（ZDA 整句，或 RMC 的
+  日期+时间）授时，无 PPS；精度按 0.1–1 秒级保守表述。
+- ``mbdsdr:time_source = "ntp"``    —— ``core:datetime`` 来自 NTP 校准的系统时钟；
+  毫秒到几十毫秒级。
+- ``mbdsdr:time_source = "none"``   —— 无授时源，``core:datetime`` 退化为本机时钟
+  UTC；绝不冒充 GNSS 授时。
+- ``mbdsdr:time_source = "unknown"`` —— 来源无法判定，按最保守精度处理。
+
+同一份级别到精度文案的映射由 ``TIME_SOURCE_PRECISION`` 单一维护，并写入
+``mbdsdr:time_precision``。旧文件里的 ``"gnss"`` / ``"system"`` 分别视为
+``"nmea"`` / ``"none"`` 的旧口径（``TIME_SOURCE_GNSS`` / ``TIME_SOURCE_SYSTEM``
+仅作兼容别名）。
 
 红线（与 serial_gnss.py / playback.py 的诚实空态风格一致）：
 - 无 GNSS 时不造假坐标/假授时；只退化为系统时间并标注。
@@ -35,9 +45,40 @@ except Exception:  # pragma: no cover - 包外直接运行时降级
         NMEAParser = None  # type: ignore
 
 
-# 时间来源枚举（写入 SigMF captures 的 mbdsdr:time_source）
-TIME_SOURCE_GNSS = "gnss"
-TIME_SOURCE_SYSTEM = "system"
+# 时间来源级别（写入 SigMF captures 的 mbdsdr:time_source）
+TIME_SOURCE_PPS = "pps"
+TIME_SOURCE_NMEA = "nmea"
+TIME_SOURCE_NTP = "ntp"
+TIME_SOURCE_NONE = "none"
+TIME_SOURCE_UNKNOWN = "unknown"
+
+# 旧口径别名："gnss" = 无 PPS 的 NMEA 授时；"system" = 无授时源的本机时钟。
+# 仅为读写旧 SigMF 文件/旧调用方保留，不再产生新值。
+TIME_SOURCE_GNSS = TIME_SOURCE_NMEA
+TIME_SOURCE_SYSTEM = TIME_SOURCE_NONE
+
+TIME_SOURCE_LEVELS = (TIME_SOURCE_PPS, TIME_SOURCE_NMEA, TIME_SOURCE_NTP,
+                      TIME_SOURCE_NONE, TIME_SOURCE_UNKNOWN)
+
+_LEGACY_TIME_SOURCES = {"gnss": TIME_SOURCE_NMEA, "system": TIME_SOURCE_NONE}
+
+# 每种来源级别一句人话精度说明（单一事实源，写入 mbdsdr:time_precision）。
+# 口径：只有 pps 允许宣称亚微秒级；nmea 无 PPS 只说秒级；none 是本机未校准钟。
+TIME_SOURCE_PRECISION = {
+    TIME_SOURCE_PPS: "PPS 秒脉冲硬同步：可达亚微秒级（取决于接收机与硬件时戳）",
+    TIME_SOURCE_NMEA: "NMEA 整秒授时：约 0.1–1 秒级（无 PPS 对齐）",
+    TIME_SOURCE_NTP: "NTP 授时：约 1–50 毫秒级（受网络往返与抖动影响）",
+    TIME_SOURCE_NONE: "本机时钟（未授时）：偏差可能达秒级或更大",
+    TIME_SOURCE_UNKNOWN: "来源未知：无法判定精度，按秒级或更差保守处理",
+}
+
+_TIME_SOURCE_NOTES = {
+    TIME_SOURCE_PPS: "core:datetime 由 GNSS PPS 秒脉冲对齐的授时给出",
+    TIME_SOURCE_NMEA: "core:datetime 来自 GNSS NMEA (ZDA/RMC) 整秒授时，无 PPS",
+    TIME_SOURCE_NTP: "core:datetime 来自 NTP 校准的系统时钟",
+    TIME_SOURCE_NONE: "无授时源；core:datetime 来自本机时钟 UTC（未校准）",
+    TIME_SOURCE_UNKNOWN: "授时来源无法判定；core:datetime 精度未知",
+}
 
 
 def _default_clock() -> datetime:
@@ -158,51 +199,80 @@ def nmea_log_to_utc_datetime(lines: Iterable[str],
 # 捕获时刻解析（时间源显式化）
 # ---------------------------------------------------------------------------
 class CaptureTime:
-    """一次 SigMF 捕获的对齐时刻 + 时间来源（不可变语义快照）。"""
+    """一次 SigMF 捕获的对齐时刻 + 时间来源级别 + 精度（不可变语义快照）。
 
-    def __init__(self, datetime_iso: str, time_source: str, note: str = ""):
+    字段口径：
+      - ``time_source``：来源级别，取值见 ``TIME_SOURCE_LEVELS``
+        （``pps`` / ``nmea`` / ``ntp`` / ``none`` / ``unknown``）；
+        传入旧口径 ``"gnss"`` / ``"system"`` 会分别归一为 ``"nmea"`` / ``"none"``。
+      - ``precision``：该级别的一句人话精度说明，来自 ``TIME_SOURCE_PRECISION``。
+      - ``note``：面向人的来源说明。
+    """
+
+    def __init__(self, datetime_iso: str, time_source: str, note: str = "",
+                 precision: Optional[str] = None):
         self.datetime_iso = datetime_iso
-        self.time_source = time_source
+        self.time_source = _LEGACY_TIME_SOURCES.get(time_source, time_source)
+        self.precision = (precision or TIME_SOURCE_PRECISION.get(self.time_source)
+                          or TIME_SOURCE_PRECISION[TIME_SOURCE_UNKNOWN])
         self.note = note
 
     def as_capture_fields(self) -> dict:
         """产出应写入 SigMF ``captures[0]`` 的额外字段（除 core:datetime 外）。"""
         return {
             "mbdsdr:time_source": self.time_source,
+            "mbdsdr:time_precision": self.precision,
             "mbdsdr:time_note": self.note,
         }
 
     def __repr__(self) -> str:  # pragma: no cover - 调试用
         return (f"CaptureTime({self.datetime_iso!r}, source={self.time_source!r}, "
-                f"note={self.note!r})")
+                f"precision={self.precision!r}, note={self.note!r})")
 
 
 def resolve_capture_datetime(gnss_dt: Optional[datetime] = None,
-                             clock: Optional[Callable[[], datetime]] = None
-                             ) -> CaptureTime:
-    """决定一次捕获的 ``core:datetime`` 并显式标注时间来源。
+                             clock: Optional[Callable[[], datetime]] = None,
+                             time_source: Optional[str] = None,
+                             has_pps: bool = False) -> CaptureTime:
+    """决定一次捕获的 ``core:datetime`` 并显式标注来源级别与精度。
 
     参数:
-        gnss_dt: GNSS 解出的 UTC datetime（来自 ZDA/RMC）。给了且合法 → 用 GNSS 授时。
-        clock:   无 GNSS 时取系统 UTC 的时钟（callable -> tz-aware datetime）。
-                 默认本机时钟；测试时注入固定时钟以做确定性断言。
+        gnss_dt: 授时解出的 UTC datetime（GNSS ZDA/RMC，或 NTP 时刻）。
+                 给了且合法 → 用它；否则退回 ``clock()``。
+        clock:   无 ``gnss_dt`` 时取系统 UTC 的时钟（callable -> tz-aware
+                 datetime）。默认本机时钟；测试时注入固定时钟做确定性断言。
+        time_source: 显式级别，取值 ``pps`` / ``nmea`` / ``ntp`` / ``none`` /
+                 ``unknown``（旧口径 ``gnss`` / ``system`` 归一为 ``nmea`` /
+                 ``none``）。``None`` 时自动判定：有 ``gnss_dt`` → ``nmea``；
+                 无 → ``none``（本机时钟，诚实标注）。
+        has_pps: 是否真有 PPS 秒脉冲对齐。仅在级别为 ``nmea`` 时升级为 ``pps``；
+                 没有 PPS 绝不宣称更高精度。
 
-    返回 CaptureTime：
-        - gnss_dt 有效 → time_source="gnss"；
-        - 否则         → time_source="system"（本机时钟，诚实标注）。
+    返回 CaptureTime。``nmea`` / ``pps`` 若没有 ``gnss_dt``，说明调用方并未提供
+    该来源的时刻，按 ``unknown`` 处理，不把本机时钟冒充成 GNSS 授时。
     """
     clk = clock or _default_clock
+    if time_source is None:
+        level = TIME_SOURCE_NMEA if gnss_dt is not None else TIME_SOURCE_NONE
+    else:
+        level = _LEGACY_TIME_SOURCES.get(time_source, time_source)
+        if level not in TIME_SOURCE_LEVELS:
+            raise ValueError(
+                f"未知时间来源级别 {time_source!r}；允许 {TIME_SOURCE_LEVELS}")
+    if has_pps and level == TIME_SOURCE_NMEA:
+        level = TIME_SOURCE_PPS
+    if level in (TIME_SOURCE_NMEA, TIME_SOURCE_PPS) and gnss_dt is None:
+        # 声称 NMEA/PPS 却没有对应时刻：不能拿本机时钟冒充，退为来源未知
+        level = TIME_SOURCE_UNKNOWN
+
     if gnss_dt is not None:
         if not isinstance(gnss_dt, datetime):
             raise TypeError("gnss_dt 必须是 datetime 或 None")
-        return CaptureTime(
-            datetime_iso=to_sigmf_iso(gnss_dt),
-            time_source=TIME_SOURCE_GNSS,
-            note="core:datetime 来自 GNSS NMEA (ZDA/RMC) 授时",
-        )
-    now = clk()
+        dt = gnss_dt
+    else:
+        dt = clk()
     return CaptureTime(
-        datetime_iso=to_sigmf_iso(now),
-        time_source=TIME_SOURCE_SYSTEM,
-        note="无可用 GNSS fix；core:datetime 来自本机时钟 UTC（非 GNSS 授时）",
+        datetime_iso=to_sigmf_iso(dt),
+        time_source=level,
+        note=_TIME_SOURCE_NOTES[level],
     )

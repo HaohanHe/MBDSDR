@@ -14,13 +14,45 @@ MBDSDR AI 内核 - 模型管理器
 - 调用统计（token 用量、调用次数、延迟）
 """
 
+import ipaddress
 import json
 import time
 import requests
 from dataclasses import dataclass
 from typing import List, Dict, Any, Optional, Tuple
+from urllib.parse import urlsplit
 
 from .error_catalog import user_message, retryable
+
+
+def is_local_endpoint(base_url: str) -> bool:
+    """``base_url`` 是否指向本机/内网（本地推理服务通常不需要 API Key）。
+
+    Ollama(11434)、vLLM(8000)、LM Studio(1234) 都是 OpenAI 兼容且默认
+    无鉴权；此前「没有 api_key 就不查模型、不开口对话」把这类端点当成
+    云端服务，导致端点体检显示「可用」而聊天仍报 api_key 未设置。
+    只按主机名/IP 判断，不看端口；解析失败一律 False——宁可多要一个 Key，
+    也不把云端地址误当免 Key 端点。
+    """
+    raw = (base_url or "").strip()
+    if not raw:
+        return False
+    if "://" not in raw:
+        raw = "//" + raw
+    try:
+        host = (urlsplit(raw).hostname or "").strip("[]").lower()
+    except ValueError:
+        return False
+    if not host:
+        return False
+    if host in ("localhost", "host.docker.internal") \
+            or host.endswith(".localhost") or host.endswith(".local"):
+        return True
+    try:
+        ip = ipaddress.ip_address(host)
+    except ValueError:
+        return False
+    return ip.is_loopback or ip.is_private or ip.is_link_local
 
 
 def classify_llm_exception(exc: BaseException, timeout: float) -> Tuple[str, str]:
@@ -137,6 +169,17 @@ class ModelManager:
         self._last_error = None
         self._last_error_code = ""
 
+    def _request_headers(self) -> Dict[str, str]:
+        """请求头；空 Key 时不发 ``Authorization: Bearer ``。
+
+        本地服务通常忽略空 Bearer，但反向代理/网关会把它当坏凭据拒掉；
+        没有 Key 就不该声称自己带了认证。
+        """
+        headers = {"Content-Type": "application/json"}
+        if self.api_key:
+            headers["Authorization"] = f"Bearer {self.api_key}"
+        return headers
+
     # ── 模型列表查询 ────────────────────────────────────
 
     def fetch_models(self, force_refresh: bool = False) -> List[ModelInfo]:
@@ -155,13 +198,16 @@ class ModelManager:
                 "使用内置模型列表（本地静态，无时效问题）")
             return self.available_models
 
-        if not self.api_key:
-            self._last_error = "api_key 为空，使用内置模型列表"
+        # 无 Key 时只有本机/内网端点才值得查询：本地推理服务默认无鉴权，
+        # 云端端点缺 Key 一定 401，不浪费一次往返。
+        if not self.api_key and not is_local_endpoint(self.base_url):
+            self._last_error = (
+                "api_key 为空，且端点不是本机/内网，使用内置模型列表")
             return self.available_models
 
         try:
             url = f"{self.base_url}/models"
-            headers = {"Authorization": f"Bearer {self.api_key}"}
+            headers = self._request_headers()
             resp = self._session.get(url, headers=headers, timeout=self.timeout)
             resp.raise_for_status()
             data = resp.json()
@@ -276,10 +322,7 @@ class ModelManager:
             }
 
         url = f"{self.base_url}/chat/completions"
-        headers = {
-            "Authorization": f"Bearer {self.api_key}",
-            "Content-Type": "application/json",
-        }
+        headers = self._request_headers()
 
         payload = {
             "model": self.model,
@@ -408,10 +451,7 @@ class ModelManager:
             return
 
         url = f"{self.base_url}/chat/completions"
-        headers = {
-            "Authorization": f"Bearer {self.api_key}",
-            "Content-Type": "application/json",
-        }
+        headers = self._request_headers()
         payload = {
             "model": self.model,
             "messages": messages,

@@ -205,7 +205,13 @@ class AudioPlayer:
         已启动时幂等返回 True；sounddevice 不可用或打开设备失败时返回 False。
         """
         if not self.available:
-            return False
+            # 可用性只在构造时探过一次（:118 sd_available()），随后一次打开失败
+            # 会把 available 永久钉成 False：声卡被别的程序占用、耳机拔了再插回，
+            # 用户再点「收听」也永远没声音（状态栏却显示接收中）。
+            # start() 是显式用户意图，这里重新探一次硬件再决定。
+            self.available = sd_available()
+            if not self.available:
+                return False
         with self._lock:
             if self._stream is not None:
                 return True

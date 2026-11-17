@@ -9,8 +9,6 @@ collection error，而 3.12 环境毫无感知。本测试在任意解释器下�
 避免 373 个元测试用例稀释产品回归基线计数。
 """
 import os
-import py_compile
-import tempfile
 
 PKG_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -25,18 +23,25 @@ def _iter_py_files():
 
 
 def test_all_package_files_compile_under_running_interpreter():
-    """mbdsdr_ai 包全部 .py 必须能在当前运行的解释器版本下编译。"""
+    """mbdsdr_ai 包全部 .py 必须能在当前运行的解释器版本下编译。
+
+    用内置 ``compile()`` 而不是 ``py_compile``：后者每次都要把 .pyc 原子替换
+    到磁盘，连续 300+ 次在 Windows 上会被杀软/索引器偶发占用
+    （实测 `PermissionError [WinError 5] ... -> out.pyc`），那是文件系统
+    噪声，不是语法问题，会把守卫变成随机红。本测试要判的只是「当前解释器
+    能否解析」，``compile`` 正好覆盖且无副作用。
+    """
     failures = []
     count = 0
-    with tempfile.TemporaryDirectory() as td:
-        cfile = os.path.join(td, "out.pyc")
-        for path in _iter_py_files():
-            count += 1
-            try:
-                py_compile.compile(path, cfile=cfile, doraise=True)
-            except py_compile.PyCompileError as e:
-                rel = os.path.relpath(path, PKG_ROOT)
-                failures.append(f"{rel}: {e}")
+    for path in _iter_py_files():
+        count += 1
+        try:
+            with open(path, "rb") as fh:
+                source = fh.read()
+            compile(source, path, "exec")
+        except (SyntaxError, ValueError) as e:
+            rel = os.path.relpath(path, PKG_ROOT)
+            failures.append(f"{rel}: {e}")
     # 守卫自身有效性：目录若被移动/清空，必须显式失败而不是空跑通过
     assert count > 300, f"扫描范围异常，仅 {count} 个 .py（预期 300+）"
     assert not failures, (

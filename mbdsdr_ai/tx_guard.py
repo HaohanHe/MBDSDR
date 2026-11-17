@@ -81,7 +81,7 @@ GATE_AUDIT_FAILED = "audit_write_failed"
 # 而不是降级为"只打 logger"。代价是磁盘异常时发射不可用；这是可接受的，
 # 因为射频发射是高风险动作，宁可停发也不能留下无法追溯的发射。
 
-AUDIT_SOURCES = ("desktop", "test", "script")
+AUDIT_SOURCES = ("desktop", "model", "test", "script")
 
 # ── 落盘策略（默认值都在 docs/limitations-register.md 附 G 记了依据）──────
 #: 单文件上限 50 MB。依据：一次发射约 3 条记录（armed / allowed / tx_ok），
@@ -332,7 +332,7 @@ def tx_audit_status() -> Dict[str, Any]:
 
 
 def _detect_source(explicit: str = "") -> str:
-    """来源归类：desktop / test / script（显式值优先）。"""
+    """来源归类：desktop / model / test / script（显式值优先）。"""
     src = str(explicit or "").strip().lower()
     if src in AUDIT_SOURCES:
         return src
@@ -711,6 +711,9 @@ class TxGate:
                 "last_decision": self._last_decision.to_dict()
                 if self._last_decision else None,
                 "audit": tx_audit_status(),
+                # 法规校验是否真的启用：未配置 MBDSDR_TX_BANDS 时必须明示
+                # 「发射法规校验未启用」，不把「没检查」伪装成「已合规」。
+                "regulatory": tx_regulatory_status(),
             }
 
 
@@ -854,6 +857,12 @@ LIMIT_DURATION = "duration_out_of_range"
 LIMIT_CAP_UNKNOWN = "capability_unknown"
 LIMIT_REGULATORY = "regulatory_out_of_range"
 LIMIT_REG_UNCONFIGURED = "regulatory_unconfigured"
+
+#: ``check_tx_request`` 的法规门默认值。默认 **False** 是为了不把历史调用方
+#: 一刀切拒绝（未配置频段时请求仍会按设备能力检查）；但「未强制」不等于
+#: 「已合规」——健康快照必须把这一事实显式说出来，见
+#: :func:`tx_regulatory_status`。
+REQUIRE_REGULATORY_DEFAULT = False
 
 
 @dataclass(frozen=True)
@@ -1071,6 +1080,38 @@ def policy_from_env(env: Optional[Dict[str, str]] = None) -> Optional[Regulatory
                             basis="操作员通过环境变量声明")
 
 
+def tx_regulatory_status(env: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
+    """发射法规校验的健康状态（供 UI/诊断/审计快照直接透出）。
+
+    事实口径：
+      * ``enabled`` 为 True 只表示操作员声明了允许频段（``MBDSDR_TX_BANDS``），
+        发射请求会按该频段检查；
+      * 未声明时 ``enabled=False``，``message`` 必须明写
+        「发射法规校验未启用」——不能因为请求「看起来安全」就默认合规；
+      * ``require_regulatory`` 是 ``check_tx_request`` 的严格门默认值（False）。
+        即使它为 False，只要 ``enabled=False``，风险提示仍然出现在健康状态里。
+    """
+    policy = policy_from_env(env)
+    enabled = policy is not None
+    if enabled:
+        bands = [b.label or f"{b.lo_hz:.0f}-{b.hi_hz:.0f}Hz"
+                 for b in policy.bands]
+        message = ("发射法规校验已启用：允许频段 " + ", ".join(bands) +
+                   f"（{policy.basis}）")
+    else:
+        bands = []
+        message = ("发射法规校验未启用：未配置 MBDSDR_TX_BANDS，"
+                   "发射请求只做设备能力检查，不假设频点合规")
+    return {
+        "enabled": bool(enabled),
+        "require_regulatory": bool(REQUIRE_REGULATORY_DEFAULT),
+        "configured_env": "MBDSDR_TX_BANDS",
+        "bands": bands,
+        "max_tx_duration_s": (policy.max_tx_duration_s if policy else None),
+        "message": message,
+    }
+
+
 def check_tx_request(
     caps: Optional[TxCapabilities],
     *,
@@ -1079,7 +1120,7 @@ def check_tx_request(
     gain_db: Optional[float] = None,
     duration_s: Optional[float] = None,
     regulatory: Optional[RegulatoryPolicy] = None,
-    require_regulatory: bool = False,
+    require_regulatory: bool = REQUIRE_REGULATORY_DEFAULT,
 ) -> TxLimitCheck:
     """逐项检查频率/带宽/增益/时长；越界或能力未知一律拒绝，不静默截断。"""
     caps = caps or TxCapabilities(known=False, source="未提供设备能力")

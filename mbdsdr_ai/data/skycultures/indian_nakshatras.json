@@ -1,0 +1,1415 @@
+{
+  "id": "indian_nakshatras",
+  "meta": {
+    "schema": "mbdsdr.sky_culture.v1",
+    "id": "indian_nakshatras",
+    "display_name": "Indian (Nakshatras)",
+    "native_name": "",
+    "region": "Southern Asia",
+    "classification": [
+      "single"
+    ],
+    "source": "Stellarium skyculture indian_nakshatras",
+    "source_url": "https://github.com/Stellarium/stellarium/tree/master/skycultures/indian_nakshatras",
+    "source_license": "CC BY 4.0",
+    "source_license_url": "https://creativecommons.org/licenses/by/4.0/",
+    "attribution": "Stellarium sky culture 'indian_nakshatras'; authors: Susanne M Hoffmann (CC BY 4.0). Converted to HIP line segments only; no artwork or description images were copied.",
+    "source_file": "reference/stellarium/skycultures/indian_nakshatras/index.json",
+    "source_file_sha256": "382b4d0d82d50cbe407994e45575aae892b82b795da8e8e8049ac5788cf67628",
+    "description_file": "reference/stellarium/skycultures/indian_nakshatras/description.md",
+    "description_file_sha256": "9b17f2e8d7a1f1534af274a63c682237cd4efe20e04b791b93a3fd5b95bfa1a9",
+    "conversion_scope": "Only constellations[].lines, id and common_name (plus optional common_names star labels) are converted; illustrations, artwork and description text are not copied.",
+    "names_scope": "Explicit common_names labels take precedence; stars without an explicit label inherit the constellation/asterism name they belong to.",
+    "group_count": 28,
+    "edge_count": 109,
+    "name_count": 124,
+    "unresolved_hip_count": 0,
+    "unresolved_hips": [],
+    "unresolved_token_count": 5,
+    "unresolved_tokens": [
+      "3322665628802212864",
+      "3322757815980493440",
+      "3322799833642696960",
+      "3322978749099757824",
+      "3323003346373075840"
+    ],
+    "generated_utc": "2026-11-17T16:26:20Z",
+    "data_sha256": "de23f7e9c1199edfa7369e38fd36d3d99bb673877fdece6445b8d212a2ad0218"
+  },
+  "groups": [
+    {
+      "group_id": "CON indian_nakshatras Naks02",
+      "names": {
+        "en": "Bharani",
+        "native": "भरणी",
+        "pronounce": "Bharani"
+      },
+      "lines": [
+        [
+          13061,
+          13209
+        ],
+        [
+          13209,
+          12719
+        ],
+        [
+          12719,
+          13061
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON indian_nakshatras Naks03",
+      "names": {
+        "en": "Krittika",
+        "native": "कृत्तिका",
+        "pronounce": "Kṛttika"
+      },
+      "lines": [
+        [
+          17851,
+          17579
+        ],
+        [
+          17579,
+          17489
+        ],
+        [
+          17489,
+          17499
+        ],
+        [
+          17499,
+          17608
+        ],
+        [
+          17608,
+          17847
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON indian_nakshatras Naks01",
+      "names": {
+        "en": "Ashvini",
+        "native": "अश्विनी",
+        "pronounce": "Aśvini"
+      },
+      "lines": [
+        [
+          9110,
+          8832
+        ],
+        [
+          8832,
+          8903
+        ],
+        [
+          8903,
+          9884
+        ],
+        [
+          9884,
+          10306
+        ],
+        [
+          10306,
+          10732
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON indian_nakshatras Naks04",
+      "names": {
+        "en": "Rohini",
+        "native": "रोहिणी",
+        "pronounce": "Rohiṇī"
+      },
+      "lines": [
+        [
+          21421,
+          20894
+        ],
+        [
+          20894,
+          20205
+        ],
+        [
+          20205,
+          20455
+        ],
+        [
+          20455,
+          20889
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON indian_nakshatras Naks05",
+      "names": {
+        "en": "Mrigashira",
+        "native": "मृगशिर",
+        "pronounce": "Mṛgaśira"
+      },
+      "lines": [
+        [
+          26207,
+          26176
+        ],
+        [
+          26176,
+          26366
+        ],
+        [
+          26366,
+          26207
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON indian_nakshatras Naks06",
+      "names": {
+        "en": "Ardra",
+        "native": "आर्द्रा",
+        "pronounce": "Ardra"
+      },
+      "lines": [],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON indian_nakshatras Naks07",
+      "names": {
+        "en": "Punarvasu",
+        "native": "पुनर्वसु",
+        "pronounce": "Punarvasu"
+      },
+      "lines": [
+        [
+          36850,
+          37826
+        ],
+        [
+          37826,
+          37740
+        ],
+        [
+          37740,
+          35550
+        ],
+        [
+          35550,
+          34088
+        ],
+        [
+          34088,
+          34088
+        ],
+        [
+          34088,
+          34088
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON indian_nakshatras Naks09",
+      "names": {
+        "en": "Ashlesha",
+        "native": "पुनर्वसु",
+        "pronounce": "Āshleshā"
+      },
+      "lines": [
+        [
+          43813,
+          43109
+        ],
+        [
+          43109,
+          42313
+        ],
+        [
+          42313,
+          42402
+        ],
+        [
+          42402,
+          42799
+        ],
+        [
+          42799,
+          43234
+        ],
+        [
+          43234,
+          43234
+        ],
+        [
+          43234,
+          43234
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON indian_nakshatras Naks08",
+      "names": {
+        "en": "Pushya",
+        "native": "पुष्य",
+        "pronounce": "Puṣya"
+      },
+      "lines": [
+        [
+          42806,
+          41909
+        ],
+        [
+          41909,
+          41822
+        ],
+        [
+          41822,
+          42911
+        ],
+        [
+          42911,
+          42806
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON indian_nakshatras Naks10",
+      "names": {
+        "en": "Magha",
+        "native": "मघा",
+        "pronounce": "Maghā"
+      },
+      "lines": [
+        [
+          50335,
+          50583
+        ],
+        [
+          50583,
+          49583
+        ],
+        [
+          49583,
+          49669
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON indian_nakshatras Naks11",
+      "names": {
+        "en": "Purva Phalguni",
+        "native": "पूर्व फाल्गुनी",
+        "pronounce": "Pūrva Phalgunī"
+      },
+      "lines": [
+        [
+          54872,
+          54879
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON indian_nakshatras Naks12",
+      "names": {
+        "en": "Uttara Phalguni",
+        "native": "उत्तर फाल्गुनी",
+        "pronounce": "Uttara Phalgunī"
+      },
+      "lines": [
+        [
+          57565,
+          57632
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON indian_nakshatras Naks13",
+      "names": {
+        "en": "Hasta",
+        "native": "हस्त",
+        "pronounce": "Hasta"
+      },
+      "lines": [
+        [
+          61359,
+          61174
+        ],
+        [
+          61174,
+          60965
+        ],
+        [
+          60965,
+          59803
+        ],
+        [
+          59803,
+          59316
+        ],
+        [
+          59316,
+          59199
+        ],
+        [
+          59199,
+          61359
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON indian_nakshatras Naks15",
+      "names": {
+        "en": "Svati",
+        "native": "स्वाति",
+        "pronounce": "Svati"
+      },
+      "lines": [
+        [
+          71795,
+          69673
+        ],
+        [
+          69673,
+          67927
+        ],
+        [
+          67927,
+          67275
+        ],
+        [
+          67275,
+          67459
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON indian_nakshatras Naks14",
+      "names": {
+        "en": "Chitra",
+        "native": "चित्रा",
+        "pronounce": "Citrā"
+      },
+      "lines": [
+        [
+          66006,
+          65474
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON indian_nakshatras Naks16",
+      "names": {
+        "en": "Vishakha",
+        "native": "विशाखा",
+        "pronounce": "Viśākhā"
+      },
+      "lines": [
+        [
+          74785,
+          73165
+        ],
+        [
+          73165,
+          71957
+        ],
+        [
+          71957,
+          69427
+        ],
+        [
+          69427,
+          69974
+        ],
+        [
+          69974,
+          72622
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON indian_nakshatras Naks17",
+      "names": {
+        "en": "Anuradha",
+        "native": "अनुराधा",
+        "pronounce": "Anuradha"
+      },
+      "lines": [
+        [
+          79374,
+          78820
+        ],
+        [
+          78820,
+          78401
+        ],
+        [
+          78401,
+          78265
+        ],
+        [
+          78265,
+          78104
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON indian_nakshatras Naks18",
+      "names": {
+        "en": "Jyeshtha",
+        "native": "ज्येष्ठा",
+        "pronounce": "Jyeṣṭha"
+      },
+      "lines": [
+        [
+          81266,
+          80799
+        ],
+        [
+          80799,
+          80112
+        ],
+        [
+          80112,
+          79980
+        ],
+        [
+          79980,
+          81266
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON indian_nakshatras Naks19",
+      "names": {
+        "en": "Mula",
+        "native": "मूल",
+        "pronounce": "Mūlā"
+      },
+      "lines": [
+        [
+          88038,
+          87261
+        ],
+        [
+          87261,
+          86698
+        ],
+        [
+          86698,
+          85927
+        ],
+        [
+          85927,
+          86170
+        ],
+        [
+          86170,
+          87073
+        ],
+        [
+          87073,
+          87390
+        ],
+        [
+          85696,
+          85927
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON indian_nakshatras Naks20",
+      "names": {
+        "en": "Purva Ashadha",
+        "native": "पूर्व आषाढा",
+        "pronounce": "Purvaṣādha"
+      },
+      "lines": [
+        [
+          90185,
+          89642
+        ],
+        [
+          89642,
+          88635
+        ],
+        [
+          88635,
+          89931
+        ],
+        [
+          89931,
+          90185
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON indian_nakshatras Naks21",
+      "names": {
+        "en": "Uttara Ashadha",
+        "native": "उत्तर आषाढा",
+        "pronounce": "Uttara Āṣāḍhā"
+      },
+      "lines": [
+        [
+          93506,
+          93864
+        ],
+        [
+          93864,
+          92855
+        ],
+        [
+          92855,
+          92041
+        ],
+        [
+          92041,
+          93506
+        ],
+        [
+          93506,
+          93506
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON indian_nakshatras Naks22",
+      "names": {
+        "en": "Shravana",
+        "native": "श्रवण",
+        "pronounce": "Śravana"
+      },
+      "lines": [
+        [
+          97278,
+          97649
+        ],
+        [
+          97649,
+          98036
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON indian_nakshatras Naks23",
+      "names": {
+        "en": "Dhanishta",
+        "native": "श्रविष्ठा",
+        "pronounce": "Dhaniṣṭhā"
+      },
+      "lines": [
+        [
+          102532,
+          101958
+        ],
+        [
+          101958,
+          101769
+        ],
+        [
+          101769,
+          101421
+        ],
+        [
+          101421,
+          101916
+        ],
+        [
+          101916,
+          102532
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON indian_nakshatras Naks26",
+      "names": {
+        "en": "Uttara Bhadrapada",
+        "native": "उत्तर भाद्रपदा",
+        "pronounce": "Uttara Bhādrapada"
+      },
+      "lines": [
+        [
+          677,
+          1067
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON indian_nakshatras Naks25",
+      "names": {
+        "en": "Purva Bhadrapada",
+        "native": "पूर्व भाद्रपदा",
+        "pronounce": "Purvābhādra"
+      },
+      "lines": [
+        [
+          113881,
+          113963
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON indian_nakshatras Naks27",
+      "names": {
+        "en": "Revati",
+        "native": "रेवती",
+        "pronounce": "Revati"
+      },
+      "lines": [
+        [
+          7097,
+          7710
+        ],
+        [
+          7710,
+          8327
+        ],
+        [
+          8327,
+          8198
+        ],
+        [
+          8198,
+          7456
+        ],
+        [
+          7456,
+          6915
+        ],
+        [
+          5737,
+          5737
+        ],
+        [
+          5737,
+          6915
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON indian_nakshatras Naks24",
+      "names": {
+        "en": "Shatabhisha",
+        "native": "शतभिष",
+        "pronounce": "Śatabhiṣa"
+      },
+      "lines": [
+        [
+          114855,
+          112961
+        ],
+        [
+          112961,
+          113136
+        ],
+        [
+          110960,
+          112961
+        ],
+        [
+          154,
+          115033
+        ],
+        [
+          115033,
+          116971
+        ],
+        [
+          115438,
+          113136
+        ],
+        [
+          113136,
+          114341
+        ],
+        [
+          113136,
+          111449
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON indian_nakshatras Naks28",
+      "names": {
+        "en": "Abhijit",
+        "native": "अभिजित",
+        "pronounce": "Abhijit"
+      },
+      "lines": [
+        [
+          94713,
+          93279
+        ],
+        [
+          93279,
+          89156
+        ],
+        [
+          89156,
+          90720
+        ],
+        [
+          90720,
+          95056
+        ],
+        [
+          95056,
+          94713
+        ]
+      ],
+      "kind": "constellation"
+    }
+  ],
+  "names": {
+    "13061": {
+      "en": "Bharani",
+      "native": "भरणी",
+      "pronounce": "Bharani"
+    },
+    "13209": {
+      "en": "Bharani",
+      "native": "भरणी",
+      "pronounce": "Bharani"
+    },
+    "12719": {
+      "en": "Bharani",
+      "native": "भरणी",
+      "pronounce": "Bharani"
+    },
+    "17851": {
+      "en": "Krittika",
+      "native": "कृत्तिका",
+      "pronounce": "Kṛttika"
+    },
+    "17579": {
+      "en": "Krittika",
+      "native": "कृत्तिका",
+      "pronounce": "Kṛttika"
+    },
+    "17489": {
+      "en": "Krittika",
+      "native": "कृत्तिका",
+      "pronounce": "Kṛttika"
+    },
+    "17499": {
+      "en": "Krittika",
+      "native": "कृत्तिका",
+      "pronounce": "Kṛttika"
+    },
+    "17608": {
+      "en": "Krittika",
+      "native": "कृत्तिका",
+      "pronounce": "Kṛttika"
+    },
+    "17847": {
+      "en": "Krittika",
+      "native": "कृत्तिका",
+      "pronounce": "Kṛttika"
+    },
+    "9110": {
+      "en": "Ashvini",
+      "native": "अश्विनी",
+      "pronounce": "Aśvini"
+    },
+    "8832": {
+      "en": "Ashvini",
+      "native": "अश्विनी",
+      "pronounce": "Aśvini"
+    },
+    "8903": {
+      "en": "Ashvini",
+      "native": "अश्विनी",
+      "pronounce": "Aśvini"
+    },
+    "9884": {
+      "en": "Ashvini",
+      "native": "अश्विनी",
+      "pronounce": "Aśvini"
+    },
+    "10306": {
+      "en": "Ashvini",
+      "native": "अश्विनी",
+      "pronounce": "Aśvini"
+    },
+    "10732": {
+      "en": "Ashvini",
+      "native": "अश्विनी",
+      "pronounce": "Aśvini"
+    },
+    "21421": {
+      "en": "Rohini",
+      "native": "रोहिणी",
+      "pronounce": "Rohiṇī"
+    },
+    "20894": {
+      "en": "Rohini",
+      "native": "रोहिणी",
+      "pronounce": "Rohiṇī"
+    },
+    "20205": {
+      "en": "Rohini",
+      "native": "रोहिणी",
+      "pronounce": "Rohiṇī"
+    },
+    "20455": {
+      "en": "Rohini",
+      "native": "रोहिणी",
+      "pronounce": "Rohiṇī"
+    },
+    "20889": {
+      "en": "Rohini",
+      "native": "रोहिणी",
+      "pronounce": "Rohiṇī"
+    },
+    "26207": {
+      "en": "Mrigashira",
+      "native": "मृगशिर",
+      "pronounce": "Mṛgaśira"
+    },
+    "26176": {
+      "en": "Mrigashira",
+      "native": "मृगशिर",
+      "pronounce": "Mṛgaśira"
+    },
+    "26366": {
+      "en": "Mrigashira",
+      "native": "मृगशिर",
+      "pronounce": "Mṛgaśira"
+    },
+    "36850": {
+      "en": "Punarvasu",
+      "native": "पुनर्वसु",
+      "pronounce": "Punarvasu"
+    },
+    "37826": {
+      "en": "Punarvasu",
+      "native": "पुनर्वसु",
+      "pronounce": "Punarvasu"
+    },
+    "37740": {
+      "en": "Punarvasu",
+      "native": "पुनर्वसु",
+      "pronounce": "Punarvasu"
+    },
+    "35550": {
+      "en": "Punarvasu",
+      "native": "पुनर्वसु",
+      "pronounce": "Punarvasu"
+    },
+    "34088": {
+      "en": "Punarvasu",
+      "native": "पुनर्वसु",
+      "pronounce": "Punarvasu"
+    },
+    "43813": {
+      "en": "Ashlesha",
+      "native": "पुनर्वसु",
+      "pronounce": "Āshleshā"
+    },
+    "43109": {
+      "en": "Ashlesha",
+      "native": "पुनर्वसु",
+      "pronounce": "Āshleshā"
+    },
+    "42313": {
+      "en": "Ashlesha",
+      "native": "पुनर्वसु",
+      "pronounce": "Āshleshā"
+    },
+    "42402": {
+      "en": "Ashlesha",
+      "native": "पुनर्वसु",
+      "pronounce": "Āshleshā"
+    },
+    "42799": {
+      "en": "Ashlesha",
+      "native": "पुनर्वसु",
+      "pronounce": "Āshleshā"
+    },
+    "43234": {
+      "en": "Ashlesha",
+      "native": "पुनर्वसु",
+      "pronounce": "Āshleshā"
+    },
+    "42806": {
+      "en": "Pushya",
+      "native": "पुष्य",
+      "pronounce": "Puṣya"
+    },
+    "41909": {
+      "en": "Pushya",
+      "native": "पुष्य",
+      "pronounce": "Puṣya"
+    },
+    "41822": {
+      "en": "Pushya",
+      "native": "पुष्य",
+      "pronounce": "Puṣya"
+    },
+    "42911": {
+      "en": "Pushya",
+      "native": "पुष्य",
+      "pronounce": "Puṣya"
+    },
+    "50335": {
+      "en": "Magha",
+      "native": "मघा",
+      "pronounce": "Maghā"
+    },
+    "50583": {
+      "en": "Magha",
+      "native": "मघा",
+      "pronounce": "Maghā"
+    },
+    "49583": {
+      "en": "Magha",
+      "native": "मघा",
+      "pronounce": "Maghā"
+    },
+    "49669": {
+      "en": "Magha",
+      "native": "मघा",
+      "pronounce": "Maghā"
+    },
+    "54872": {
+      "en": "Purva Phalguni",
+      "native": "पूर्व फाल्गुनी",
+      "pronounce": "Pūrva Phalgunī"
+    },
+    "54879": {
+      "en": "Purva Phalguni",
+      "native": "पूर्व फाल्गुनी",
+      "pronounce": "Pūrva Phalgunī"
+    },
+    "57565": {
+      "en": "Uttara Phalguni",
+      "native": "उत्तर फाल्गुनी",
+      "pronounce": "Uttara Phalgunī"
+    },
+    "57632": {
+      "en": "Uttara Phalguni",
+      "native": "उत्तर फाल्गुनी",
+      "pronounce": "Uttara Phalgunī"
+    },
+    "61359": {
+      "en": "Hasta",
+      "native": "हस्त",
+      "pronounce": "Hasta"
+    },
+    "61174": {
+      "en": "Hasta",
+      "native": "हस्त",
+      "pronounce": "Hasta"
+    },
+    "60965": {
+      "en": "Hasta",
+      "native": "हस्त",
+      "pronounce": "Hasta"
+    },
+    "59803": {
+      "en": "Hasta",
+      "native": "हस्त",
+      "pronounce": "Hasta"
+    },
+    "59316": {
+      "en": "Hasta",
+      "native": "हस्त",
+      "pronounce": "Hasta"
+    },
+    "59199": {
+      "en": "Hasta",
+      "native": "हस्त",
+      "pronounce": "Hasta"
+    },
+    "71795": {
+      "en": "Svati",
+      "native": "स्वाति",
+      "pronounce": "Svati"
+    },
+    "69673": {
+      "en": "Svati",
+      "native": "स्वाति",
+      "pronounce": "Svati"
+    },
+    "67927": {
+      "en": "Svati",
+      "native": "स्वाति",
+      "pronounce": "Svati"
+    },
+    "67275": {
+      "en": "Svati",
+      "native": "स्वाति",
+      "pronounce": "Svati"
+    },
+    "67459": {
+      "en": "Svati",
+      "native": "स्वाति",
+      "pronounce": "Svati"
+    },
+    "66006": {
+      "en": "Chitra",
+      "native": "चित्रा",
+      "pronounce": "Citrā"
+    },
+    "65474": {
+      "en": "Chitra",
+      "native": "चित्रा",
+      "pronounce": "Citrā"
+    },
+    "74785": {
+      "en": "Vishakha",
+      "native": "विशाखा",
+      "pronounce": "Viśākhā"
+    },
+    "73165": {
+      "en": "Vishakha",
+      "native": "विशाखा",
+      "pronounce": "Viśākhā"
+    },
+    "71957": {
+      "en": "Vishakha",
+      "native": "विशाखा",
+      "pronounce": "Viśākhā"
+    },
+    "69427": {
+      "en": "Vishakha",
+      "native": "विशाखा",
+      "pronounce": "Viśākhā"
+    },
+    "69974": {
+      "en": "Vishakha",
+      "native": "विशाखा",
+      "pronounce": "Viśākhā"
+    },
+    "72622": {
+      "en": "Vishakha",
+      "native": "विशाखा",
+      "pronounce": "Viśākhā"
+    },
+    "79374": {
+      "en": "Anuradha",
+      "native": "अनुराधा",
+      "pronounce": "Anuradha"
+    },
+    "78820": {
+      "en": "Anuradha",
+      "native": "अनुराधा",
+      "pronounce": "Anuradha"
+    },
+    "78401": {
+      "en": "Anuradha",
+      "native": "अनुराधा",
+      "pronounce": "Anuradha"
+    },
+    "78265": {
+      "en": "Anuradha",
+      "native": "अनुराधा",
+      "pronounce": "Anuradha"
+    },
+    "78104": {
+      "en": "Anuradha",
+      "native": "अनुराधा",
+      "pronounce": "Anuradha"
+    },
+    "81266": {
+      "en": "Jyeshtha",
+      "native": "ज्येष्ठा",
+      "pronounce": "Jyeṣṭha"
+    },
+    "80799": {
+      "en": "Jyeshtha",
+      "native": "ज्येष्ठा",
+      "pronounce": "Jyeṣṭha"
+    },
+    "80112": {
+      "en": "Jyeshtha",
+      "native": "ज्येष्ठा",
+      "pronounce": "Jyeṣṭha"
+    },
+    "79980": {
+      "en": "Jyeshtha",
+      "native": "ज्येष्ठा",
+      "pronounce": "Jyeṣṭha"
+    },
+    "88038": {
+      "en": "Mula",
+      "native": "मूल",
+      "pronounce": "Mūlā"
+    },
+    "87261": {
+      "en": "Mula",
+      "native": "मूल",
+      "pronounce": "Mūlā"
+    },
+    "86698": {
+      "en": "Mula",
+      "native": "मूल",
+      "pronounce": "Mūlā"
+    },
+    "85927": {
+      "en": "Mula",
+      "native": "मूल",
+      "pronounce": "Mūlā"
+    },
+    "86170": {
+      "en": "Mula",
+      "native": "मूल",
+      "pronounce": "Mūlā"
+    },
+    "87073": {
+      "en": "Mula",
+      "native": "मूल",
+      "pronounce": "Mūlā"
+    },
+    "87390": {
+      "en": "Mula",
+      "native": "मूल",
+      "pronounce": "Mūlā"
+    },
+    "85696": {
+      "en": "Mula",
+      "native": "मूल",
+      "pronounce": "Mūlā"
+    },
+    "90185": {
+      "en": "Purva Ashadha",
+      "native": "पूर्व आषाढा",
+      "pronounce": "Purvaṣādha"
+    },
+    "89642": {
+      "en": "Purva Ashadha",
+      "native": "पूर्व आषाढा",
+      "pronounce": "Purvaṣādha"
+    },
+    "88635": {
+      "en": "Purva Ashadha",
+      "native": "पूर्व आषाढा",
+      "pronounce": "Purvaṣādha"
+    },
+    "89931": {
+      "en": "Purva Ashadha",
+      "native": "पूर्व आषाढा",
+      "pronounce": "Purvaṣādha"
+    },
+    "93506": {
+      "en": "Uttara Ashadha",
+      "native": "उत्तर आषाढा",
+      "pronounce": "Uttara Āṣāḍhā"
+    },
+    "93864": {
+      "en": "Uttara Ashadha",
+      "native": "उत्तर आषाढा",
+      "pronounce": "Uttara Āṣāḍhā"
+    },
+    "92855": {
+      "en": "Uttara Ashadha",
+      "native": "उत्तर आषाढा",
+      "pronounce": "Uttara Āṣāḍhā"
+    },
+    "92041": {
+      "en": "Uttara Ashadha",
+      "native": "उत्तर आषाढा",
+      "pronounce": "Uttara Āṣāḍhā"
+    },
+    "97278": {
+      "en": "Shravana",
+      "native": "श्रवण",
+      "pronounce": "Śravana"
+    },
+    "97649": {
+      "en": "Shravana",
+      "native": "श्रवण",
+      "pronounce": "Śravana"
+    },
+    "98036": {
+      "en": "Shravana",
+      "native": "श्रवण",
+      "pronounce": "Śravana"
+    },
+    "102532": {
+      "en": "Dhanishta",
+      "native": "श्रविष्ठा",
+      "pronounce": "Dhaniṣṭhā"
+    },
+    "101958": {
+      "en": "Dhanishta",
+      "native": "श्रविष्ठा",
+      "pronounce": "Dhaniṣṭhā"
+    },
+    "101769": {
+      "en": "Dhanishta",
+      "native": "श्रविष्ठा",
+      "pronounce": "Dhaniṣṭhā"
+    },
+    "101421": {
+      "en": "Dhanishta",
+      "native": "श्रविष्ठा",
+      "pronounce": "Dhaniṣṭhā"
+    },
+    "101916": {
+      "en": "Dhanishta",
+      "native": "श्रविष्ठा",
+      "pronounce": "Dhaniṣṭhā"
+    },
+    "677": {
+      "en": "Uttara Bhadrapada",
+      "native": "उत्तर भाद्रपदा",
+      "pronounce": "Uttara Bhādrapada"
+    },
+    "1067": {
+      "en": "Uttara Bhadrapada",
+      "native": "उत्तर भाद्रपदा",
+      "pronounce": "Uttara Bhādrapada"
+    },
+    "113881": {
+      "en": "Purva Bhadrapada",
+      "native": "पूर्व भाद्रपदा",
+      "pronounce": "Purvābhādra"
+    },
+    "113963": {
+      "en": "Purva Bhadrapada",
+      "native": "पूर्व भाद्रपदा",
+      "pronounce": "Purvābhādra"
+    },
+    "7097": {
+      "en": "Revati",
+      "native": "रेवती",
+      "pronounce": "Revati"
+    },
+    "7710": {
+      "en": "Revati",
+      "native": "रेवती",
+      "pronounce": "Revati"
+    },
+    "8327": {
+      "en": "Revati",
+      "native": "रेवती",
+      "pronounce": "Revati"
+    },
+    "8198": {
+      "en": "Revati",
+      "native": "रेवती",
+      "pronounce": "Revati"
+    },
+    "7456": {
+      "en": "Revati",
+      "native": "रेवती",
+      "pronounce": "Revati"
+    },
+    "6915": {
+      "en": "Revati",
+      "native": "रेवती",
+      "pronounce": "Revati"
+    },
+    "5737": {
+      "en": "Revati",
+      "native": "रेवती",
+      "pronounce": "Revati"
+    },
+    "114855": {
+      "en": "Shatabhisha",
+      "native": "शतभिष",
+      "pronounce": "Śatabhiṣa"
+    },
+    "112961": {
+      "en": "Shatabhisha",
+      "native": "शतभिष",
+      "pronounce": "Śatabhiṣa"
+    },
+    "113136": {
+      "en": "Shatabhisha",
+      "native": "शतभिष",
+      "pronounce": "Śatabhiṣa"
+    },
+    "110960": {
+      "en": "Shatabhisha",
+      "native": "शतभिष",
+      "pronounce": "Śatabhiṣa"
+    },
+    "154": {
+      "en": "Shatabhisha",
+      "native": "शतभिष",
+      "pronounce": "Śatabhiṣa"
+    },
+    "115033": {
+      "en": "Shatabhisha",
+      "native": "शतभिष",
+      "pronounce": "Śatabhiṣa"
+    },
+    "116971": {
+      "en": "Shatabhisha",
+      "native": "शतभिष",
+      "pronounce": "Śatabhiṣa"
+    },
+    "115438": {
+      "en": "Shatabhisha",
+      "native": "शतभिष",
+      "pronounce": "Śatabhiṣa"
+    },
+    "114341": {
+      "en": "Shatabhisha",
+      "native": "शतभिष",
+      "pronounce": "Śatabhiṣa"
+    },
+    "111449": {
+      "en": "Shatabhisha",
+      "native": "शतभिष",
+      "pronounce": "Śatabhiṣa"
+    },
+    "94713": {
+      "en": "Abhijit",
+      "native": "अभिजित",
+      "pronounce": "Abhijit"
+    },
+    "93279": {
+      "en": "Abhijit",
+      "native": "अभिजित",
+      "pronounce": "Abhijit"
+    },
+    "89156": {
+      "en": "Abhijit",
+      "native": "अभिजित",
+      "pronounce": "Abhijit"
+    },
+    "90720": {
+      "en": "Abhijit",
+      "native": "अभिजित",
+      "pronounce": "Abhijit"
+    },
+    "95056": {
+      "en": "Abhijit",
+      "native": "अभिजित",
+      "pronounce": "Abhijit"
+    }
+  },
+  "unresolved_hips": []
+}

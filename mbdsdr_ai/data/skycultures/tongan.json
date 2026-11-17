@@ -1,0 +1,414 @@
+{
+  "id": "tongan",
+  "meta": {
+    "schema": "mbdsdr.sky_culture.v1",
+    "id": "tongan",
+    "display_name": "Tongan",
+    "native_name": "",
+    "region": "Polynesia",
+    "classification": [
+      "ethnographic"
+    ],
+    "source": "Stellarium skyculture tongan",
+    "source_url": "https://github.com/Stellarium/stellarium/tree/master/skycultures/tongan",
+    "source_license": "CC BY-SA 4.0",
+    "source_license_url": "https://creativecommons.org/licenses/by-sa/4.0/",
+    "attribution": "Stellarium sky culture 'tongan'; authors: Dan Smale (CC BY-SA 4.0). Converted to HIP line segments only; no artwork or description images were copied.",
+    "source_file": "reference/stellarium/skycultures/tongan/index.json",
+    "source_file_sha256": "f99e33822f1a5d89a9600205ee3f56b06e5518dcfc02cf9419e2026e00214565",
+    "description_file": "reference/stellarium/skycultures/tongan/description.md",
+    "description_file_sha256": "600d81f6ad2ed0b49ee608c1d1e2b6fbb25dad243d3cf8bef0e7fc0d14a53778",
+    "conversion_scope": "Only constellations[].lines, id and common_name (plus optional common_names star labels) are converted; illustrations, artwork and description text are not copied.",
+    "names_scope": "Explicit common_names labels take precedence; stars without an explicit label inherit the constellation/asterism name they belong to.",
+    "group_count": 11,
+    "edge_count": 32,
+    "name_count": 50,
+    "unresolved_hip_count": 0,
+    "unresolved_hips": [],
+    "unresolved_token_count": 0,
+    "unresolved_tokens": [],
+    "generated_utc": "2026-11-17T17:13:23Z",
+    "data_sha256": "3cab4da2427778564144c5d84ed9015e7a0f1a588ad00d7c615a6ca07cc2fada"
+  },
+  "groups": [
+    {
+      "group_id": "CON tongan 001",
+      "names": {
+        "en": "Southern Wild Duck",
+        "native": "Toloatonga"
+      },
+      "lines": [
+        [
+          61084,
+          60718
+        ],
+        [
+          62434,
+          59747
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON tongan 002",
+      "names": {
+        "en": "Two Men",
+        "native": "Lua tangata"
+      },
+      "lines": [
+        [
+          36850,
+          37826
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON tongan 003",
+      "names": {
+        "en": "Wild Duck",
+        "native": "Toloa"
+      },
+      "lines": [
+        [
+          26727,
+          26311,
+          25930
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON tongan 004",
+      "names": {
+        "en": "Pigeon Perch",
+        "native": "Tu'ulalupe"
+      },
+      "lines": [
+        [
+          21421,
+          20885,
+          20205,
+          20455,
+          20889
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON tongan 005",
+      "names": {
+        "en": "Big Wild Duck",
+        "native": "Toloalahi"
+      },
+      "lines": [
+        [
+          42913,
+          45556
+        ],
+        [
+          41037,
+          45941
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON tongan 006",
+      "names": {
+        "en": "Mound Top",
+        "native": "Fungasia"
+      },
+      "lines": [
+        [
+          71683,
+          68702
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON tongan 007",
+      "names": {
+        "en": "String of fishes",
+        "native": "Tuinga ika"
+      },
+      "lines": [
+        [
+          25281,
+          25930,
+          26311,
+          26727,
+          26549,
+          26263,
+          26237,
+          26258,
+          26241
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON tongan 008",
+      "names": {
+        "en": "Wild Duck's Point of Land",
+        "native": "Houmatoloa"
+      },
+      "lines": [
+        [
+          26311,
+          45496,
+          60781
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON tongan 009",
+      "names": {
+        "en": "Two Carriers",
+        "native": "Fatanalua"
+      },
+      "lines": [
+        [
+          60742,
+          64394,
+          64241
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON tongan 010",
+      "names": {
+        "en": "Cloud of 'Uvea",
+        "native": "ʻAo ʻo ʻUvea"
+      },
+      "lines": [
+        [
+          78493,
+          78159,
+          77512,
+          76952,
+          76267,
+          75695,
+          76127
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON tongan 011",
+      "names": {
+        "en": "Wing of Tafahi",
+        "native": "Kapakau'o'tafahi"
+      },
+      "lines": [
+        [
+          8886,
+          6686,
+          4427,
+          3179,
+          746
+        ]
+      ],
+      "kind": "constellation"
+    }
+  ],
+  "names": {
+    "17499": {
+      "native": "Motuliki"
+    },
+    "24436": {
+      "native": "Velitoa hififo"
+    },
+    "26207": {
+      "native": "Monuafe"
+    },
+    "27989": {
+      "native": "Velitoa hahake"
+    },
+    "30438": {
+      "native": "Ma'afutoka"
+    },
+    "32349": {
+      "native": "Ma'afulele"
+    },
+    "69673": {
+      "native": "Hikule'o"
+    },
+    "61084": {
+      "en": "Southern Wild Duck",
+      "native": "Toloatonga"
+    },
+    "60718": {
+      "en": "Southern Wild Duck",
+      "native": "Toloatonga"
+    },
+    "62434": {
+      "en": "Southern Wild Duck",
+      "native": "Toloatonga"
+    },
+    "59747": {
+      "en": "Southern Wild Duck",
+      "native": "Toloatonga"
+    },
+    "36850": {
+      "en": "Two Men",
+      "native": "Lua tangata"
+    },
+    "37826": {
+      "en": "Two Men",
+      "native": "Lua tangata"
+    },
+    "26727": {
+      "en": "Wild Duck",
+      "native": "Toloa"
+    },
+    "26311": {
+      "en": "Wild Duck",
+      "native": "Toloa"
+    },
+    "25930": {
+      "en": "Wild Duck",
+      "native": "Toloa"
+    },
+    "21421": {
+      "en": "Pigeon Perch",
+      "native": "Tu'ulalupe"
+    },
+    "20885": {
+      "en": "Pigeon Perch",
+      "native": "Tu'ulalupe"
+    },
+    "20205": {
+      "en": "Pigeon Perch",
+      "native": "Tu'ulalupe"
+    },
+    "20455": {
+      "en": "Pigeon Perch",
+      "native": "Tu'ulalupe"
+    },
+    "20889": {
+      "en": "Pigeon Perch",
+      "native": "Tu'ulalupe"
+    },
+    "42913": {
+      "en": "Big Wild Duck",
+      "native": "Toloalahi"
+    },
+    "45556": {
+      "en": "Big Wild Duck",
+      "native": "Toloalahi"
+    },
+    "41037": {
+      "en": "Big Wild Duck",
+      "native": "Toloalahi"
+    },
+    "45941": {
+      "en": "Big Wild Duck",
+      "native": "Toloalahi"
+    },
+    "71683": {
+      "en": "Mound Top",
+      "native": "Fungasia"
+    },
+    "68702": {
+      "en": "Mound Top",
+      "native": "Fungasia"
+    },
+    "25281": {
+      "en": "String of fishes",
+      "native": "Tuinga ika"
+    },
+    "26549": {
+      "en": "String of fishes",
+      "native": "Tuinga ika"
+    },
+    "26263": {
+      "en": "String of fishes",
+      "native": "Tuinga ika"
+    },
+    "26237": {
+      "en": "String of fishes",
+      "native": "Tuinga ika"
+    },
+    "26258": {
+      "en": "String of fishes",
+      "native": "Tuinga ika"
+    },
+    "26241": {
+      "en": "String of fishes",
+      "native": "Tuinga ika"
+    },
+    "45496": {
+      "en": "Wild Duck's Point of Land",
+      "native": "Houmatoloa"
+    },
+    "60781": {
+      "en": "Wild Duck's Point of Land",
+      "native": "Houmatoloa"
+    },
+    "60742": {
+      "en": "Two Carriers",
+      "native": "Fatanalua"
+    },
+    "64394": {
+      "en": "Two Carriers",
+      "native": "Fatanalua"
+    },
+    "64241": {
+      "en": "Two Carriers",
+      "native": "Fatanalua"
+    },
+    "78493": {
+      "en": "Cloud of 'Uvea",
+      "native": "ʻAo ʻo ʻUvea"
+    },
+    "78159": {
+      "en": "Cloud of 'Uvea",
+      "native": "ʻAo ʻo ʻUvea"
+    },
+    "77512": {
+      "en": "Cloud of 'Uvea",
+      "native": "ʻAo ʻo ʻUvea"
+    },
+    "76952": {
+      "en": "Cloud of 'Uvea",
+      "native": "ʻAo ʻo ʻUvea"
+    },
+    "76267": {
+      "en": "Cloud of 'Uvea",
+      "native": "ʻAo ʻo ʻUvea"
+    },
+    "75695": {
+      "en": "Cloud of 'Uvea",
+      "native": "ʻAo ʻo ʻUvea"
+    },
+    "76127": {
+      "en": "Cloud of 'Uvea",
+      "native": "ʻAo ʻo ʻUvea"
+    },
+    "8886": {
+      "en": "Wing of Tafahi",
+      "native": "Kapakau'o'tafahi"
+    },
+    "6686": {
+      "en": "Wing of Tafahi",
+      "native": "Kapakau'o'tafahi"
+    },
+    "4427": {
+      "en": "Wing of Tafahi",
+      "native": "Kapakau'o'tafahi"
+    },
+    "3179": {
+      "en": "Wing of Tafahi",
+      "native": "Kapakau'o'tafahi"
+    },
+    "746": {
+      "en": "Wing of Tafahi",
+      "native": "Kapakau'o'tafahi"
+    }
+  },
+  "unresolved_hips": []
+}

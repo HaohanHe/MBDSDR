@@ -21,6 +21,25 @@ mbdsdr_ai/overlay_asterisms.py — 星官叠加数据层（T08）
   通常是天空视图自己的 ``_sky_to_screen_many``。这一层不猜投影类型、
   不近似视场几何——投影只能有一个真源。
 
+**本层不是桌面实时渲染路径。** 桌面唯一渲染实现是
+``desktop/rf_sky_view.py`` 的 ``_draw_constellations``。本层的定位是
+「共享数据契约 + 移动端对拍基准（``mobile/lib/astro/asterism_overlay.dart``、
+``tests/test_mobile_asterism_overlay.py`` 以本层为基准）+ 未来解算路径的
+参考实现」，不接入渲染热路径。依据（实测：800×800 视口、3° 视场、
+31 区域 / 1244 颗成员星）：
+
+- 成本：``build_overlay()`` 首次 288 ms、稳态约 170 ms/次（``_build_one``
+  对每颗星单独调一次 ``j2000_to_altaz_many``）；实时层同款批量换算
+  （``j2000_to_altaz_many`` 全表一次）约 0.05 ms；
+- 范围：本层只支持 ``culture="chinese"``，没有 IAU 88 星座数据，接进主路径
+  只能换掉一半，另一半仍在旧实现；
+- 口径：本层用几何高度投影；实时层 ``_constellation_screen_points`` 先经
+  ``_display_alt_deg`` 转视高度（含大气折射）再投影，近地平差可达约 0.5°
+  （2.3° 目镜视场约 20% 画幅），接进去线就不落在星上。
+
+一致性由 ``tests/test_asterism_overlay_drift.py``（漂移守卫）与
+``tests/test_asterism_overlay_frame_budget.py``（每帧坐标换算次数上限）锁住。
+
 为什么在屏幕空间裁剪（而不是照搬 Stellarium 的球面大圆裁剪）
 ------------------------------------------------------------
 窄视场（2–8°，望远镜工况）下透视投影在画面上近似线性，屏幕空间直线裁剪与

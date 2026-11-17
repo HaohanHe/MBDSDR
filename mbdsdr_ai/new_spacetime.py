@@ -820,13 +820,22 @@ def predict_satellite_pass(satellite_name: str, observer_lat: float, observer_lo
     """
     预测卫星下一次过境。
     使用 sgp4 计算卫星位置，时间步长 30 秒。
+
+    TLE 只取真实来源（在线/缓存）；仓内已无内置合成根数，取不到就返回
+    ``None``（调用方显示「无 TLE，无法预报」），不拿占位值凑过境。
     """
     try:
-        from .decoders import compute_satellite_position, BUILTIN_TLE, SATELLITE_FREQUENCIES
+        from .decoders import (
+            compute_satellite_position, KNOWN_SATELLITE_NAMES,
+            SATELLITE_FREQUENCIES,
+        )
     except ImportError:
-        from decoders import compute_satellite_position, BUILTIN_TLE, SATELLITE_FREQUENCIES
+        from mbdsdr_ai.decoders import (
+            compute_satellite_position, KNOWN_SATELLITE_NAMES,
+            SATELLITE_FREQUENCIES,
+        )
 
-    if satellite_name not in BUILTIN_TLE:
+    if satellite_name not in KNOWN_SATELLITE_NAMES:
         return None
 
     if frequency_hz == 0 and satellite_name in SATELLITE_FREQUENCIES:
@@ -909,14 +918,21 @@ def predict_satellite_pass(satellite_name: str, observer_lat: float, observer_lo
 def predict_all_passes(observer_lat: float, observer_lon: float, observer_alt: float = 0.0,
                         hours_ahead: float = 24.0, min_elevation: float = 5.0,
                         start_unix: Optional[float] = None) -> List[SatellitePass]:
-    """预测所有内置卫星的过境。start_unix 显式时刻优先，缺省取 TimeEngine。"""
+    """预测所有已知卫星的过境。start_unix 显式时刻优先，缺省取 TimeEngine。
+
+    枚举名单来自名称↔编号映射；每颗星的真实 TLE 按在线/缓存解析。仓内已无
+    内置合成 TLE，全部解析失败时返回 ``[]``，调用方必须把它当
+    「无 TLE，无法预报」而不是「今天没有过境」。
+    """
     try:
-        from .decoders import BUILTIN_TLE, SATELLITE_FREQUENCIES
+        from .decoders import BUILTIN_TLE, KNOWN_SATELLITE_NAMES, SATELLITE_FREQUENCIES
     except ImportError:
-        from decoders import BUILTIN_TLE, SATELLITE_FREQUENCIES
+        from mbdsdr_ai.decoders import (
+            BUILTIN_TLE, KNOWN_SATELLITE_NAMES, SATELLITE_FREQUENCIES,
+        )
 
     passes = []
-    for name in BUILTIN_TLE:
+    for name in KNOWN_SATELLITE_NAMES:
         freq = SATELLITE_FREQUENCIES.get(name, 0.0) * 1e6  # MHz -> Hz
         p = predict_satellite_pass(name, observer_lat, observer_lon, observer_alt,
                                     hours_ahead, min_elevation, freq,
@@ -1166,11 +1182,21 @@ def compute_visible_satellite_count(observer_lat: float, observer_lon: float,
     """计算当前可见卫星数量（新时空天空图用）。
 
  时间全局 TimeEngine.now_unix，而非 time.time。
- 对应 Stellarium：StelCore::getJD 驱动所有天体位置计算"""
+ 对应 Stellarium：StelCore::getJD 驱动所有天体位置计算。
+ 无 TLE 时返回 ``total_visible=0`` 并带 ``no_tle=True`` / ``unavailable=True``
+ 与 ``reason``，调用方必须显示「无 TLE，无法预报」，不得把空列表伪装成
+ 「今天没有卫星」。默认离线优先：只有显式开启 ``MBDSDR_ALLOW_NETWORK``
+ 才会联网刷新，``network_used`` 如实标注本次是否发起过网络。"""
     try:
-        from .decoders import list_visible_satellites
+        from .decoders import (
+            BUILTIN_TLE, KNOWN_SATELLITE_NAMES, any_tle_available,
+            list_visible_satellites,
+        )
     except ImportError:
-        from decoders import list_visible_satellites
+        from mbdsdr_ai.decoders import (
+            BUILTIN_TLE, KNOWN_SATELLITE_NAMES, any_tle_available,
+            list_visible_satellites,
+        )
 
     # 注入模拟时间：显式 timestamp 优先；否则取 sim time（不是系统墙钟）
     sim_ts = (get_time_engine().now_unix() if timestamp is None
@@ -1178,8 +1204,35 @@ def compute_visible_satellite_count(observer_lat: float, observer_lon: float,
     visible = list_visible_satellites(observer_lat, observer_lon, 0,
                                       min_elevation=min_elevation,
                                       timestamp=sim_ts)
+    # 生产表为空且一颗都不可见时，才区分「无 TLE」与「有 TLE 但当前不可见」；
+    # 可见列表已非空就不必再探测，避免重复解析。
+    if not BUILTIN_TLE and not visible and not any_tle_available():
+        try:
+            from .net_policy import network_allowed, network_disabled
+        except ImportError:  # 脚本 / 直接运行时（mbdsdr_ai 目录已在 sys.path）
+            from net_policy import network_allowed, network_disabled
+        allowed = network_allowed()
+        if network_disabled():
+            reason = "离线且无缓存 TLE（离线模式 MBDSDR_OFFLINE）"
+        elif not allowed:
+            reason = ("离线且无缓存 TLE（未显式开启联网刷新 "
+                      "MBDSDR_ALLOW_NETWORK）")
+        else:
+            reason = "无 TLE，无法预报（已允许联网，但刷新失败且无本地缓存）"
+        return {
+            "total_visible": 0,
+            "satellites": [],
+            "no_tle": True,
+            "unavailable": True,
+            "reason": reason,
+            "network_used": bool(allowed),
+            "network_allowed": allowed,
+            "note": (f"{reason}；仓内无内置合成 TLE，"
+                     "请联网刷新（MBDSDR_ALLOW_NETWORK=1）或导入 TLE 文件"),
+        }
     return {
         "total_visible": len(visible),
+        "no_tle": False,
         "satellites": [
             {
                 "name": v.name,

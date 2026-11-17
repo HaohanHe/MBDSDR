@@ -49,12 +49,16 @@ def _deterministic_rng():
 # ── 单频点分析 ──────────────────────────────────────────────
 
 def test_carrier_strength_separates_station_from_noise():
-    """强 FM 台信道 PSD 明显高于带外噪声底；纯噪声两者接近 0dB。"""
+    """强 FM 台信道 PSD 明显高于带外噪声底；纯噪声两者相差约 +1.6 dB。
+
+    纯噪声不是 0 dB：信道用均值、带外用中位数，均值/中位数 = 1/ln2 ≈ 1.6 dB
+    （实测 1.5–1.7）。钉住这个基线，避免有人把「阈值」理解成绝对 0 dB 口径。
+    """
     np.random.seed(SEED)
     s_str, s_nf = _carrier_strength(_station(), SR)
     n_str, n_nf = _carrier_strength(_noise(), SR)
     assert s_str > 20.0                    # 恒包络宽带台：信道内能量集中
-    assert n_str < 5.0                     # 白噪声：信道内外 PSD 同量级
+    assert 1.0 < n_str < 2.5                # 纯噪声基线 ≈ +1.6 dB（1/ln2）
     assert s_str - n_str > 15.0
     assert s_nf < 0.0                      # 0.05 幅度噪声的带外底为有限负 dB
 

@@ -74,6 +74,17 @@ TALKER_IDS = ("GP", "GL", "GA", "GB", "BD", "GN")
 KNOWN_SENTENCE_TYPES = ("GGA", "RMC", "GSA", "GSV", "VTG", "ZDA",
                         "GLL", "GST", "TXT")
 
+# GPTXT 里的天线状态词（大小写/多余空格由 _parse_antenna_status 归一）。
+# 只认这三种明确状态，其余文本一律 unknown——不拿“没有告警”冒充“天线正常”。
+_ANTENNA_STATUS_TOKENS = (
+    ("ANTENNA OPEN", "open"),
+    ("ANTENNA SHORT", "short"),
+    ("ANTENNA OK", "ok"),
+)
+
+# antenna_text 只保留原文前 80 字：够定位问题，又不把整段厂商文本塞进快照。
+_ANTENNA_TEXT_LIMIT = 80
+
 # auto_detect 优先探测的 GNSS 关键字（出现在 description/manufacturer 中即优先）
 _GNSS_KEYWORDS = (
     "gps", "gnss", "u-blox", "ublox", "neo-m", "neo-6", "neo-7", "neo-8",
@@ -99,6 +110,46 @@ def nmea_checksum(body: str) -> int:
     for ch in body:
         cs ^= ord(ch)
     return cs & 0xFF
+
+
+def _utc_iso(dt: Optional[datetime]) -> Optional[str]:
+    """tz-aware UTC datetime → ISO-8601 串；None 原样返回 None。"""
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc).isoformat()
+
+
+def _rmc_utc_datetime(utc_time: str, date_str: str) -> Optional[datetime]:
+    """RMC 的 hhmmss.ss + ddmmyy → UTC datetime。
+
+    直接复用 :mod:`mbdsdr_ai.gnss_timestamps` 的合并规则（含 yy 世纪归并、
+    字段合法性校验），不另造一套解析；任一字段缺失/非法返回 None
+    （绝不拿接收时刻或当天日期冒充）。
+    """
+    try:
+        from .gnss_timestamps import combine_nmea_time_date
+    except ImportError:  # pragma: no cover - 包外直接运行时降级
+        from gnss_timestamps import combine_nmea_time_date  # type: ignore
+    return combine_nmea_time_date(utc_time or "", date_str or "")
+
+
+def _parse_antenna_status(text: str) -> str:
+    """从 GPTXT 文本提取天线状态：``open``/``short``/``ok``/``unknown``。
+
+    容错：大小写不敏感、连续空白/制表符按单个空格归一。同一文本出现多个
+    状态词时取最先出现的一个；找不到返回 ``unknown``（不编造“正常”）。
+    """
+    norm = " ".join(str(text or "").upper().split())
+    best: Optional[Tuple[int, str]] = None
+    for token, status in _ANTENNA_STATUS_TOKENS:
+        idx = norm.find(token)
+        if idx < 0:
+            continue
+        if best is None or idx < best[0]:
+            best = (idx, status)
+    return best[1] if best is not None else "unknown"
 
 
 def _ddmm_to_deg(value: str, hemi: str, is_latitude: bool) -> Optional[float]:
@@ -369,11 +420,17 @@ class NMEAParser:
     # $--TXT,...任意逗号分隔文本...*CC
     def _parse_txt(self, talker: str, f: List[str]) -> Dict[str, Any]:
         # 把 f[1:] 全部拼成文本（TXT 载荷本身可能含逗号）
-        text = ",".join(f[1:]) if len(f) > 1 else ""
-        return {
+        text = (",".join(f[1:]) if len(f) > 1 else "").strip()
+        rec: Dict[str, Any] = {
             "talker": talker, "sentence": "TXT",
             "text": text,
         }
+        status = _parse_antenna_status(text)
+        if status != "unknown":
+            # 只在确实出现状态词时才带字段：普通厂商文本不冒充天线状态。
+            rec["antenna"] = status
+            rec["antenna_text"] = text[:_ANTENNA_TEXT_LIMIT]
+        return rec
 
     # ---- VTG: 航迹角 + 地面速度 ----
     # $GNVTG,c,T,m,M,k,K,N*CC
@@ -434,6 +491,10 @@ class SerialGNSSReader:
         self._lock = threading.Lock()
         self._port: Optional[str] = None
         self._baudrate: Optional[int] = None
+        # 最近一次 start() 打开失败的原因（类型: 消息）。诊断脚本据此把
+        # 「被占用 PermissionError 13」与「本机没有该口」区分开，而不是统一
+        # 报成一句无信息量的 False。
+        self.last_error: Optional[str] = None
         # 行缓冲：批量读进来的原始字节先攒着，再按 \n 切行（见 _read_loop）
         self._buf = b""
         # 热插拔状态
@@ -442,6 +503,10 @@ class SerialGNSSReader:
         self._reconnect_interval = 2.0   # 重连尝试间隔（秒）
         # 最新融合状态
         self._fix: Dict[str, Any] = self._empty_fix()
+        # 完整 UTC 缓存：ZDA 与 RMC 各存一份，融合时 ZDA 优先；断线重连清空，
+        # 避免上一段会话的旧日期继续冒充当前 UTC。
+        self._zda_dt: Optional[datetime] = None
+        self._rmc_dt: Optional[datetime] = None
         # 最近一条**原始** RMC 语句（不含 CR/LF）。
         #
         # 为什么保留原文：新时空面板的授时状态要判断"这条 RMC 有效吗"，
@@ -467,7 +532,12 @@ class SerialGNSSReader:
             "satellites": None, "hdop": None,
             "speed_kmh": None, "course_deg": None,
             "utc_time": None, "fix_quality": 0,
+            # 完整 UTC（ZDA 优先，其次 RMC 日期+时间）；只有 hhmmss 时为 None。
+            "utc_datetime": None, "date": None,
             "gst": None,
+            # 天线状态：只有 GPTXT 明确报出 OPEN/SHORT/OK 才有值，
+            # 否则 unknown（不拿“没收到告警”冒充“天线正常”）。
+            "antenna": "unknown", "antenna_text": None,
             "timestamp": None,
         }
 
@@ -636,15 +706,18 @@ class SerialGNSSReader:
         if port is None:
             info = self.auto_detect()
             if info is None:
+                self.last_error = "自动探测未找到任何可用串口"
                 return False
             port, baudrate = info["port"], info["baudrate"]
         elif baudrate is None:
             # 用户指定了串口号但没给波特率：CH340 GNSS 模块默认 9600
             baudrate = 9600
+        self.last_error = None
         try:
             self._ser = self._open_serial(port, baudrate)
-        except Exception:
+        except Exception as exc:
             self._ser = None
+            self.last_error = f"{type(exc).__name__}: {exc}"
             return False
         self._port, self._baudrate = port, baudrate
         self._connected = True
@@ -665,6 +738,9 @@ class SerialGNSSReader:
                 pass
             self._ser = None
         self._connected = False
+        # 停止后旧 UTC 缓存作废，下次启动由新语句重新锚定
+        self._zda_dt = None
+        self._rmc_dt = None
 
     def is_connected(self) -> bool:
         """返回串口是否真正打开且在读数据（后台线程维护状态）。"""
@@ -694,6 +770,9 @@ class SerialGNSSReader:
         self._connected = False
         # 断线时丢掉半行缓冲：重连后从行首开始解析，不把上一条的血尾拼进去
         self._buf = b""
+        # 旧会话的完整 UTC 不再可信：重连后必须由新 RMC/ZDA 重新锚定日期
+        self._zda_dt = None
+        self._rmc_dt = None
 
     def _reconnect(self) -> bool:
         """后台线程内重连：每隔 _reconnect_interval 秒尝试重开当前 port/baud。
@@ -811,6 +890,15 @@ class SerialGNSSReader:
                 f["speed_kmh"] = rec.get("speed_kmh")
                 f["course_deg"] = rec.get("course_deg")
                 f["utc_time"] = rec.get("utc_time")
+                # RMC 自带 ddmmyy 日期：与 hhmmss 合并出完整 UTC（ZDA 在场时
+                # 仍以 ZDA 为准，见下方统一取值）。日期非法/缺失 → 保持 None。
+                self._rmc_dt = _rmc_utc_datetime(rec.get("utc_time", ""),
+                                                 rec.get("date", ""))
+            elif s == "ZDA":
+                # ZDA 自带完整年月日时分：授时优先级最高。
+                dt = rec.get("datetime_utc")
+                if isinstance(dt, datetime):
+                    self._zda_dt = dt
             elif s == "VTG":
                 if rec.get("speed_kmh") is not None:
                     f["speed_kmh"] = rec["speed_kmh"]
@@ -836,6 +924,19 @@ class SerialGNSSReader:
                 talker = rec.get("talker")
                 if talker:
                     self._latest_gsa[talker] = dict(rec)
+            elif s == "TXT":
+                # 天线状态以**最新一条**带状态词的 GPTXT 为准：
+                # OPEN/SHORT 告警之后收到 OK 必须清除，不能被旧语句钉住。
+                antenna = str(rec.get("antenna") or "").strip().lower()
+                if antenna in ("open", "short", "ok"):
+                    f["antenna"] = antenna
+                    f["antenna_text"] = rec.get("antenna_text")
+            if s in ("GGA", "RMC", "ZDA"):
+                # 时间类语句统一投影完整 UTC：ZDA 优先，其次 RMC（日期+时间）。
+                # GGA 只有 hhmmss，绝不拼当天日期；无缓存时显式写 None。
+                dt = self._zda_dt or self._rmc_dt
+                f["utc_datetime"] = _utc_iso(dt)
+                f["date"] = dt.strftime("%d%m%y") if dt is not None else None
 
     def get_fix(self) -> Dict[str, Any]:
         """返回最新 fix 快照。

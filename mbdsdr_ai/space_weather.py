@@ -177,9 +177,10 @@ def _fetch_weather(fetcher: Callable[..., Any], fetched_at: str,
     if lat is None or lon is None:
         raise ValueError("未配置地面站坐标（~/.mbdsdr/config.json 的 ground_station_lat/lon）")
     # 同一个请求同时取降水与折射/对流层需要的三件套（不另开采集点）。
+    # cloud_cover 是「今夜能不能看」的主判据，和降水一起取，不另开采集点。
     url = (f"{SOURCES['weather']['url']}?latitude={lat:.4f}&longitude={lon:.4f}"
            "&current=temperature_2m,relative_humidity_2m,precipitation,"
-           "surface_pressure,weather_code")
+           "surface_pressure,weather_code,cloud_cover")
     data = fetcher(url)
     cur = (data or {}).get("current") or {}
     if "precipitation" not in cur:
@@ -189,7 +190,10 @@ def _fetch_weather(fetcher: Callable[..., Any], fetched_at: str,
     humidity = cur.get("relative_humidity_2m")
     pressure = cur.get("surface_pressure")
     code = cur.get("weather_code")
+    cloud = cur.get("cloud_cover")
     bits = [f"降水 {prec:g} mm"]
+    if cloud is not None:
+        bits.append(f"云量 {float(cloud):g}%")
     if temp is not None:
         bits.append(f"气温 {float(temp):g} ℃")
     if humidity is not None:
@@ -206,6 +210,8 @@ def _fetch_weather(fetcher: Callable[..., Any], fetched_at: str,
         measurements["relative_humidity_pct"] = float(humidity)
     if pressure is not None:
         measurements["surface_pressure_hpa"] = float(pressure)
+    if cloud is not None:
+        measurements["cloud_cover_pct"] = float(cloud)
     return _sample("weather", prec, "，".join(bits), str(cur.get("time", "")),
                    fetched_at, unit="mm", measurements=measurements)
 

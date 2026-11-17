@@ -48,7 +48,8 @@ class TestTleFetchCooldown:
     背景：predict_satellite_pass 以 30s 步长扫窗口（24h=2880 步），每步
     经 _resolve_tle 走一次 fetch_tle。失败无冷却时，外网不可达每步都要等
     满 urlopen 超时——工具调用被拖到小时量级（实测 tests/ 根 dry-call
-    挂起 10 分钟以上）。冷却期内如实回退内置 TLE，source 不变。
+    挂起 10 分钟以上）。冷却期内不再重试网络，且没有内置合成 TLE 可回退，
+    source 如实为 ``no-tle``。
     """
 
     @pytest.fixture
@@ -78,7 +79,7 @@ class TestTleFetchCooldown:
         return calls
 
     def test_failure_cools_down_no_retry_storm(self, monkeypatch, cooldown):
-        """失败后冷却期内多次解析只真正尝试一次，且如实回退内置 TLE。"""
+        """失败后冷却期内多次解析只真正尝试一次，且如实返回无 TLE。"""
         from mbdsdr_ai import decoders
         calls = self._patch_fetch(monkeypatch, OSError("blackholed (test stub)"))
         name = "ISS (ZARYA)"
@@ -87,8 +88,8 @@ class TestTleFetchCooldown:
 
         assert calls["n"] == 1
         for l1, l2, src in results:
-            assert src == "builtin-fallback"
-            assert (l1, l2) == decoders.BUILTIN_TLE[name]
+            assert src == "no-tle"
+            assert (l1, l2) == ("", "")
 
     def test_cooldown_expiry_allows_retry(self, monkeypatch, cooldown):
         """冷却到期后恢复重试（不把一次失败当成永久断网）。"""
@@ -117,7 +118,8 @@ class TestTleFetchCooldown:
         name = "NOAA 18"
 
         l1, l2, src = decoders._resolve_tle(name)
-        assert src == "builtin-fallback"            # 首次失败 → 回退
+        assert src == "no-tle"                      # 首次失败 → 无 TLE 空态
+        assert (l1, l2) == ("", "")
         cooldown[name] = time.monotonic() - 1.0     # 越过冷却
         l1, l2, src = decoders._resolve_tle(name)
         assert src == "celestrak"

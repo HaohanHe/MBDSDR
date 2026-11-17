@@ -1,0 +1,1669 @@
+{
+  "id": "boorong",
+  "meta": {
+    "schema": "mbdsdr.sky_culture.v1",
+    "id": "boorong",
+    "display_name": "Boorong",
+    "native_name": "",
+    "region": "Australasia",
+    "classification": [
+      "ethnographic"
+    ],
+    "source": "Stellarium skyculture boorong",
+    "source_url": "https://github.com/Stellarium/stellarium/tree/master/skycultures/boorong",
+    "source_license": "CC BY-SA 4.0",
+    "source_license_url": "https://creativecommons.org/licenses/by-sa/4.0/",
+    "attribution": "Stellarium sky culture 'boorong'; authors: John Morieson and Alex Cherney (CC BY-SA 4.0). Converted to HIP line segments only; no artwork or description images were copied.",
+    "source_file": "reference/stellarium/skycultures/boorong/index.json",
+    "source_file_sha256": "d027010c97f3d4ba1565828eb7c1a33fac93121b96891e8872bb1268388046ef",
+    "description_file": "reference/stellarium/skycultures/boorong/description.md",
+    "description_file_sha256": "858cf72240faf01b445225a17041cc32e7e6dfd56df64b5dc20e344619fa3683",
+    "conversion_scope": "Only constellations[].lines, id and common_name (plus optional common_names star labels) are converted; illustrations, artwork and description text are not copied.",
+    "names_scope": "Explicit common_names labels take precedence; stars without an explicit label inherit the constellation/asterism name they belong to.",
+    "group_count": 29,
+    "edge_count": 207,
+    "name_count": 226,
+    "unresolved_hip_count": 0,
+    "unresolved_hips": [],
+    "unresolved_token_count": 30,
+    "unresolved_tokens": [
+      "[-10.21921, -60.42577]",
+      "[-10.3954, -63.11061]",
+      "[-10.87714, -63.72848]",
+      "[-10.98202, -59.92449]",
+      "[-11.45954, -62.47984]",
+      "[-11.46236, -64.12586]",
+      "[-11.51128, -66.20397]",
+      "[-5.50882, -12.41289]",
+      "[-5.593302, -17.50052]",
+      "[-5.64924, -10.72988]",
+      "[-5.70859, -22.64103]",
+      "[-5.798369, -10.78444]",
+      "[-5.914634, -29.39651]",
+      "[-5.990241, -13.25596]",
+      "[-6.219623, -36.2911]",
+      "[-6.230378, -14.13574]",
+      "[-6.570875, -16.9396]",
+      "[-6.66395, -43.91716]",
+      "[-6.716642, -18.83887]",
+      "[-6.8716, -22.74237]",
+      "[-7.136401, -49.45355]",
+      "[-7.148623, -27.7604]",
+      "[-7.343154, -29.81219]",
+      "[-7.844108, -54.34944]",
+      "[-7.901405, -38.18463]",
+      "[-8.099084, -45.74809]",
+      "[-8.382928, -52.41912]",
+      "[-8.518719, -58.61221]",
+      "[-9.320251, -58.11606]",
+      "[-9.377692, -61.4579]"
+    ],
+    "generated_utc": "2026-11-17T17:00:44Z",
+    "data_sha256": "5a874fa2b333de0f3d7235a3c7fc1f606f53e58ed43c216d2159f431f617624f"
+  },
+  "groups": [
+    {
+      "group_id": "CON boorong Wjl",
+      "names": {
+        "en": "Long-necked tortoise",
+        "native": "Wanjel"
+      },
+      "lines": [
+        [
+          37740,
+          38538
+        ],
+        [
+          37740,
+          36962
+        ],
+        [
+          38538,
+          37629
+        ],
+        [
+          36962,
+          37629,
+          36393,
+          35941
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON boorong Yur",
+      "names": {
+        "en": "Fan-tailed cockatoo",
+        "native": "Yurree"
+      },
+      "lines": [
+        [
+          36366,
+          36850
+        ],
+        [
+          36896,
+          36850,
+          37204
+        ],
+        [
+          36850,
+          38319
+        ],
+        [
+          37204,
+          37265,
+          37580,
+          38016,
+          38319
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON boorong Kul",
+      "names": {
+        "en": "Two teenage boys",
+        "native": "Kulkunbulla"
+      },
+      "lines": [
+        [
+          26594,
+          26795,
+          26870,
+          26885,
+          26762,
+          26727
+        ],
+        [
+          26762,
+          27253,
+          27588,
+          27750
+        ],
+        [
+          25930,
+          25737
+        ],
+        [
+          26727,
+          26549
+        ],
+        [
+          26213,
+          26210,
+          26188,
+          26149,
+          25976,
+          25930
+        ],
+        [
+          26149,
+          26762
+        ],
+        [
+          26213,
+          26174,
+          26106,
+          26063,
+          25980,
+          26020,
+          26117,
+          26319,
+          26439,
+          26508,
+          26727
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON boorong Lnk",
+      "names": {
+        "en": "Girls",
+        "native": "Lamankurrk"
+      },
+      "lines": [
+        [
+          17664,
+          17579,
+          17531,
+          17489,
+          17499,
+          17608,
+          17702,
+          17851,
+          17847,
+          17900,
+          17776
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON boorong Pur",
+      "names": {
+        "en": "Red kangaroo",
+        "native": "Purra"
+      },
+      "lines": [
+        [
+          18246,
+          18614,
+          19811,
+          21476
+        ],
+        [
+          23416,
+          21928,
+          19811
+        ],
+        [
+          21928,
+          24608
+        ],
+        [
+          24902,
+          24813
+        ],
+        [
+          23767,
+          24902,
+          24813,
+          25143
+        ],
+        [
+          24902,
+          25143
+        ],
+        [
+          23767,
+          23453,
+          21476,
+          19811
+        ],
+        [
+          23416,
+          25816
+        ],
+        [
+          25143,
+          25816
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON boorong Bun",
+      "names": {
+        "en": "Ring-tail possum",
+        "native": "Bunya"
+      },
+      "lines": [
+        [
+          60851,
+          60718,
+          59747,
+          61084
+        ],
+        [
+          60969,
+          60870,
+          60308,
+          60379,
+          60781,
+          61136,
+          61966,
+          62434,
+          63007
+        ],
+        [
+          59397,
+          59747
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON boorong Djt",
+      "names": {
+        "en": "Red-rumped parrot",
+        "native": "Djuit"
+      },
+      "lines": [
+        [
+          78820,
+          78401,
+          78265,
+          78104
+        ],
+        [
+          81266,
+          80763,
+          80112,
+          76742
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON boorong War",
+      "names": {
+        "en": "Crow",
+        "native": "War"
+      },
+      "lines": [
+        [
+          32402,
+          31407,
+          30438,
+          29990,
+          30104
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON boorong Cwr",
+      "names": {
+        "en": "Female crow, wife of War",
+        "native": "Collowgulloric War"
+      },
+      "lines": [
+        [
+          50785,
+          51232,
+          52102,
+          52405,
+          52558,
+          52922,
+          53253,
+          54463
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON boorong Ydk",
+      "names": {
+        "en": "Owlet nightjar",
+        "native": "Yerredetkurrk"
+      },
+      "lines": [
+        [
+          7506,
+          7387,
+          7588,
+          7699,
+          7751
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON boorong Tbg",
+      "names": {
+        "en": "Needlewood hakea and willie wagtails",
+        "native": "Tourtchinboiongerra"
+      },
+      "lines": [
+        [
+          65245,
+          64394,
+          64022,
+          62763,
+          62576,
+          60746,
+          60351
+        ],
+        [
+          64394,
+          64417,
+          63950,
+          61418
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON boorong Bbg",
+      "names": {
+        "en": "Red-kneed dotterel",
+        "native": "Berm-Berm-Gle"
+      },
+      "lines": [
+        [
+          73776,
+          72131,
+          71908
+        ],
+        [
+          72131,
+          73036
+        ],
+        [
+          72131,
+          70035
+        ],
+        [
+          72131,
+          71683
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON boorong Krk",
+      "names": {
+        "en": "Australian kestrel",
+        "native": "Karik Karik"
+      },
+      "lines": [
+        [
+          85927,
+          86670
+        ],
+        [
+          85696,
+          86670,
+          87073
+        ],
+        [
+          86670,
+          85889,
+          84143
+        ],
+        [
+          86670,
+          89642
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON boorong Nln",
+      "names": {
+        "en": "Mallee fowl",
+        "native": "Neilloan"
+      },
+      "lines": [
+        [
+          91262,
+          91971
+        ],
+        [
+          91926,
+          91971
+        ],
+        [
+          91926,
+          92791,
+          92833,
+          93017,
+          93194,
+          93279,
+          92405,
+          92420,
+          91852,
+          91971
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON boorong Unu",
+      "names": {
+        "en": "Jacky lizard",
+        "native": "Unurgunite"
+      },
+      "lines": [
+        [
+          33152,
+          33478,
+          33575,
+          33804,
+          34041,
+          34318,
+          34579,
+          34798,
+          34981,
+          35037,
+          35044,
+          34924,
+          34814,
+          34624,
+          34331
+        ],
+        [
+          33804,
+          33817,
+          33611,
+          33532,
+          33492
+        ],
+        [
+          33532,
+          33040
+        ],
+        [
+          33492,
+          33856,
+          33760,
+          33492
+        ],
+        [
+          33856,
+          33817
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON boorong Kts",
+      "names": {},
+      "lines": [
+        [
+          2021,
+          2021
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON boorong Ktc",
+      "names": {
+        "en": "Male and female brolga",
+        "native": "Kourt-chin"
+      },
+      "lines": [
+        [
+          15371,
+          16245,
+          17440,
+          24372,
+          34481,
+          33682,
+          35228
+        ],
+        [
+          24372,
+          37331
+        ],
+        [
+          24372,
+          26069
+        ],
+        [
+          24372,
+          17678
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON boorong Otc",
+      "names": {
+        "en": "Great fish",
+        "native": "Otchocut"
+      },
+      "lines": [
+        [
+          101589,
+          102080,
+          102281,
+          102532,
+          102029,
+          101958
+        ],
+        [
+          102029,
+          101909
+        ],
+        [
+          102029,
+          101589
+        ],
+        [
+          102532,
+          102611
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON boorong Wpl",
+      "names": {
+        "en": "Wedge tailed eagle",
+        "native": "Warepil"
+      },
+      "lines": [
+        [
+          30324,
+          31592,
+          32349,
+          33347,
+          34045
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON boorong Cwp",
+      "names": {
+        "en": "Female eagle, wife of Warepil",
+        "native": "Collowgulloric Warepil"
+      },
+      "lines": [
+        [
+          22701,
+          23364,
+          23972,
+          24244,
+          24327,
+          24305
+        ],
+        [
+          23972,
+          24436
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON boorong Tch",
+      "names": {
+        "en": "Emu",
+        "native": "Tchingal"
+      },
+      "lines": [],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON boorong Tot",
+      "names": {
+        "en": "Purple crowned lorikeet",
+        "native": "Totyarguil"
+      },
+      "lines": [
+        [
+          96229,
+          97229,
+          97938,
+          98526,
+          99158
+        ],
+        [
+          97278,
+          97649,
+          98036
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON boorong Mar",
+      "names": {
+        "en": "Meat ant",
+        "native": "Marpeankurrk"
+      },
+      "lines": [
+        [
+          67459,
+          67275,
+          67927,
+          69673,
+          71762,
+          71795
+        ],
+        [
+          69673,
+          72105
+        ],
+        [
+          69673,
+          71053
+        ],
+        [
+          72105,
+          74666
+        ],
+        [
+          71053,
+          73555,
+          74666
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON boorong Wrn",
+      "names": {
+        "en": "Milky Way",
+        "native": "Warring"
+      },
+      "lines": [
+        [
+          89931,
+          89931
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON boorong Wkr",
+      "names": {
+        "en": "Singing bushlark",
+        "native": "Weetkurrk"
+      },
+      "lines": [
+        [
+          67480,
+          67480
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON boorong Gel",
+      "names": {
+        "en": "Pink cockatoo",
+        "native": "Gellarlec"
+      },
+      "lines": [
+        [
+          21421,
+          21421
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON boorong Col",
+      "names": {
+        "en": "Species of ant",
+        "native": "Collenbitchick"
+      },
+      "lines": [
+        [
+          100064,
+          100064
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON boorong Won",
+      "names": {
+        "en": "Boomerang",
+        "native": "Won"
+      },
+      "lines": [
+        [
+          92953,
+          93542,
+          94005,
+          94160,
+          94114,
+          93825,
+          93174,
+          91875
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON boorong Min",
+      "names": {
+        "en": "The maned snake",
+        "native": "Mindi"
+      },
+      "lines": [
+        [
+          44816,
+          44816
+        ]
+      ],
+      "kind": "constellation"
+    }
+  ],
+  "names": {
+    "7588": {
+      "en": "Yerredetkurrk"
+    },
+    "17702": {
+      "en": "Lamankurrk"
+    },
+    "21421": {
+      "en": "Gellarlec"
+    },
+    "24372": {
+      "en": "Kourt-chin"
+    },
+    "24436": {
+      "en": "Colowgulloric Warepil"
+    },
+    "24608": {
+      "en": "Purra"
+    },
+    "26311": {
+      "en": "Kulkanbulla"
+    },
+    "30438": {
+      "en": "War"
+    },
+    "32349": {
+      "en": "Warepil"
+    },
+    "33856": {
+      "en": "Unurgunite"
+    },
+    "36850": {
+      "en": "Yurree"
+    },
+    "37826": {
+      "en": "Wanjel"
+    },
+    "52526": {
+      "en": "Collowgulloric War"
+    },
+    "61084": {
+      "en": "Bunya"
+    },
+    "64394": {
+      "en": "Tourchingboiongerra"
+    },
+    "67480": {
+      "en": "Weetkurrk"
+    },
+    "68702": {
+      "en": "Berm-berm-gle"
+    },
+    "69673": {
+      "en": "Marpeankurrk"
+    },
+    "71683": {
+      "en": "Berm-berm-gle"
+    },
+    "80763": {
+      "en": "Djuit"
+    },
+    "85927": {
+      "en": "Karik Karik"
+    },
+    "89931": {
+      "en": "Warring"
+    },
+    "91262": {
+      "en": "Neilloan"
+    },
+    "94114": {
+      "en": "Won"
+    },
+    "97649": {
+      "en": "Totyarguil"
+    },
+    "100027": {
+      "en": "Collenbitchick"
+    },
+    "101958": {
+      "en": "Otchocut"
+    },
+    "37740": {
+      "en": "Long-necked tortoise",
+      "native": "Wanjel"
+    },
+    "38538": {
+      "en": "Long-necked tortoise",
+      "native": "Wanjel"
+    },
+    "36962": {
+      "en": "Long-necked tortoise",
+      "native": "Wanjel"
+    },
+    "37629": {
+      "en": "Long-necked tortoise",
+      "native": "Wanjel"
+    },
+    "36393": {
+      "en": "Long-necked tortoise",
+      "native": "Wanjel"
+    },
+    "35941": {
+      "en": "Long-necked tortoise",
+      "native": "Wanjel"
+    },
+    "36366": {
+      "en": "Fan-tailed cockatoo",
+      "native": "Yurree"
+    },
+    "36896": {
+      "en": "Fan-tailed cockatoo",
+      "native": "Yurree"
+    },
+    "37204": {
+      "en": "Fan-tailed cockatoo",
+      "native": "Yurree"
+    },
+    "38319": {
+      "en": "Fan-tailed cockatoo",
+      "native": "Yurree"
+    },
+    "37265": {
+      "en": "Fan-tailed cockatoo",
+      "native": "Yurree"
+    },
+    "37580": {
+      "en": "Fan-tailed cockatoo",
+      "native": "Yurree"
+    },
+    "38016": {
+      "en": "Fan-tailed cockatoo",
+      "native": "Yurree"
+    },
+    "26594": {
+      "en": "Two teenage boys",
+      "native": "Kulkunbulla"
+    },
+    "26795": {
+      "en": "Two teenage boys",
+      "native": "Kulkunbulla"
+    },
+    "26870": {
+      "en": "Two teenage boys",
+      "native": "Kulkunbulla"
+    },
+    "26885": {
+      "en": "Two teenage boys",
+      "native": "Kulkunbulla"
+    },
+    "26762": {
+      "en": "Two teenage boys",
+      "native": "Kulkunbulla"
+    },
+    "26727": {
+      "en": "Two teenage boys",
+      "native": "Kulkunbulla"
+    },
+    "27253": {
+      "en": "Two teenage boys",
+      "native": "Kulkunbulla"
+    },
+    "27588": {
+      "en": "Two teenage boys",
+      "native": "Kulkunbulla"
+    },
+    "27750": {
+      "en": "Two teenage boys",
+      "native": "Kulkunbulla"
+    },
+    "25930": {
+      "en": "Two teenage boys",
+      "native": "Kulkunbulla"
+    },
+    "25737": {
+      "en": "Two teenage boys",
+      "native": "Kulkunbulla"
+    },
+    "26549": {
+      "en": "Two teenage boys",
+      "native": "Kulkunbulla"
+    },
+    "26213": {
+      "en": "Two teenage boys",
+      "native": "Kulkunbulla"
+    },
+    "26210": {
+      "en": "Two teenage boys",
+      "native": "Kulkunbulla"
+    },
+    "26188": {
+      "en": "Two teenage boys",
+      "native": "Kulkunbulla"
+    },
+    "26149": {
+      "en": "Two teenage boys",
+      "native": "Kulkunbulla"
+    },
+    "25976": {
+      "en": "Two teenage boys",
+      "native": "Kulkunbulla"
+    },
+    "26174": {
+      "en": "Two teenage boys",
+      "native": "Kulkunbulla"
+    },
+    "26106": {
+      "en": "Two teenage boys",
+      "native": "Kulkunbulla"
+    },
+    "26063": {
+      "en": "Two teenage boys",
+      "native": "Kulkunbulla"
+    },
+    "25980": {
+      "en": "Two teenage boys",
+      "native": "Kulkunbulla"
+    },
+    "26020": {
+      "en": "Two teenage boys",
+      "native": "Kulkunbulla"
+    },
+    "26117": {
+      "en": "Two teenage boys",
+      "native": "Kulkunbulla"
+    },
+    "26319": {
+      "en": "Two teenage boys",
+      "native": "Kulkunbulla"
+    },
+    "26439": {
+      "en": "Two teenage boys",
+      "native": "Kulkunbulla"
+    },
+    "26508": {
+      "en": "Two teenage boys",
+      "native": "Kulkunbulla"
+    },
+    "17664": {
+      "en": "Girls",
+      "native": "Lamankurrk"
+    },
+    "17579": {
+      "en": "Girls",
+      "native": "Lamankurrk"
+    },
+    "17531": {
+      "en": "Girls",
+      "native": "Lamankurrk"
+    },
+    "17489": {
+      "en": "Girls",
+      "native": "Lamankurrk"
+    },
+    "17499": {
+      "en": "Girls",
+      "native": "Lamankurrk"
+    },
+    "17608": {
+      "en": "Girls",
+      "native": "Lamankurrk"
+    },
+    "17851": {
+      "en": "Girls",
+      "native": "Lamankurrk"
+    },
+    "17847": {
+      "en": "Girls",
+      "native": "Lamankurrk"
+    },
+    "17900": {
+      "en": "Girls",
+      "native": "Lamankurrk"
+    },
+    "17776": {
+      "en": "Girls",
+      "native": "Lamankurrk"
+    },
+    "18246": {
+      "en": "Red kangaroo",
+      "native": "Purra"
+    },
+    "18614": {
+      "en": "Red kangaroo",
+      "native": "Purra"
+    },
+    "19811": {
+      "en": "Red kangaroo",
+      "native": "Purra"
+    },
+    "21476": {
+      "en": "Red kangaroo",
+      "native": "Purra"
+    },
+    "23416": {
+      "en": "Red kangaroo",
+      "native": "Purra"
+    },
+    "21928": {
+      "en": "Red kangaroo",
+      "native": "Purra"
+    },
+    "24902": {
+      "en": "Red kangaroo",
+      "native": "Purra"
+    },
+    "24813": {
+      "en": "Red kangaroo",
+      "native": "Purra"
+    },
+    "23767": {
+      "en": "Red kangaroo",
+      "native": "Purra"
+    },
+    "25143": {
+      "en": "Red kangaroo",
+      "native": "Purra"
+    },
+    "23453": {
+      "en": "Red kangaroo",
+      "native": "Purra"
+    },
+    "25816": {
+      "en": "Red kangaroo",
+      "native": "Purra"
+    },
+    "60851": {
+      "en": "Ring-tail possum",
+      "native": "Bunya"
+    },
+    "60718": {
+      "en": "Ring-tail possum",
+      "native": "Bunya"
+    },
+    "59747": {
+      "en": "Ring-tail possum",
+      "native": "Bunya"
+    },
+    "60969": {
+      "en": "Ring-tail possum",
+      "native": "Bunya"
+    },
+    "60870": {
+      "en": "Ring-tail possum",
+      "native": "Bunya"
+    },
+    "60308": {
+      "en": "Ring-tail possum",
+      "native": "Bunya"
+    },
+    "60379": {
+      "en": "Ring-tail possum",
+      "native": "Bunya"
+    },
+    "60781": {
+      "en": "Ring-tail possum",
+      "native": "Bunya"
+    },
+    "61136": {
+      "en": "Ring-tail possum",
+      "native": "Bunya"
+    },
+    "61966": {
+      "en": "Ring-tail possum",
+      "native": "Bunya"
+    },
+    "62434": {
+      "en": "Ring-tail possum",
+      "native": "Bunya"
+    },
+    "63007": {
+      "en": "Ring-tail possum",
+      "native": "Bunya"
+    },
+    "59397": {
+      "en": "Ring-tail possum",
+      "native": "Bunya"
+    },
+    "78820": {
+      "en": "Red-rumped parrot",
+      "native": "Djuit"
+    },
+    "78401": {
+      "en": "Red-rumped parrot",
+      "native": "Djuit"
+    },
+    "78265": {
+      "en": "Red-rumped parrot",
+      "native": "Djuit"
+    },
+    "78104": {
+      "en": "Red-rumped parrot",
+      "native": "Djuit"
+    },
+    "81266": {
+      "en": "Red-rumped parrot",
+      "native": "Djuit"
+    },
+    "80112": {
+      "en": "Red-rumped parrot",
+      "native": "Djuit"
+    },
+    "76742": {
+      "en": "Red-rumped parrot",
+      "native": "Djuit"
+    },
+    "32402": {
+      "en": "Crow",
+      "native": "War"
+    },
+    "31407": {
+      "en": "Crow",
+      "native": "War"
+    },
+    "29990": {
+      "en": "Crow",
+      "native": "War"
+    },
+    "30104": {
+      "en": "Crow",
+      "native": "War"
+    },
+    "50785": {
+      "en": "Female crow, wife of War",
+      "native": "Collowgulloric War"
+    },
+    "51232": {
+      "en": "Female crow, wife of War",
+      "native": "Collowgulloric War"
+    },
+    "52102": {
+      "en": "Female crow, wife of War",
+      "native": "Collowgulloric War"
+    },
+    "52405": {
+      "en": "Female crow, wife of War",
+      "native": "Collowgulloric War"
+    },
+    "52558": {
+      "en": "Female crow, wife of War",
+      "native": "Collowgulloric War"
+    },
+    "52922": {
+      "en": "Female crow, wife of War",
+      "native": "Collowgulloric War"
+    },
+    "53253": {
+      "en": "Female crow, wife of War",
+      "native": "Collowgulloric War"
+    },
+    "54463": {
+      "en": "Female crow, wife of War",
+      "native": "Collowgulloric War"
+    },
+    "7506": {
+      "en": "Owlet nightjar",
+      "native": "Yerredetkurrk"
+    },
+    "7387": {
+      "en": "Owlet nightjar",
+      "native": "Yerredetkurrk"
+    },
+    "7699": {
+      "en": "Owlet nightjar",
+      "native": "Yerredetkurrk"
+    },
+    "7751": {
+      "en": "Owlet nightjar",
+      "native": "Yerredetkurrk"
+    },
+    "65245": {
+      "en": "Needlewood hakea and willie wagtails",
+      "native": "Tourtchinboiongerra"
+    },
+    "64022": {
+      "en": "Needlewood hakea and willie wagtails",
+      "native": "Tourtchinboiongerra"
+    },
+    "62763": {
+      "en": "Needlewood hakea and willie wagtails",
+      "native": "Tourtchinboiongerra"
+    },
+    "62576": {
+      "en": "Needlewood hakea and willie wagtails",
+      "native": "Tourtchinboiongerra"
+    },
+    "60746": {
+      "en": "Needlewood hakea and willie wagtails",
+      "native": "Tourtchinboiongerra"
+    },
+    "60351": {
+      "en": "Needlewood hakea and willie wagtails",
+      "native": "Tourtchinboiongerra"
+    },
+    "64417": {
+      "en": "Needlewood hakea and willie wagtails",
+      "native": "Tourtchinboiongerra"
+    },
+    "63950": {
+      "en": "Needlewood hakea and willie wagtails",
+      "native": "Tourtchinboiongerra"
+    },
+    "61418": {
+      "en": "Needlewood hakea and willie wagtails",
+      "native": "Tourtchinboiongerra"
+    },
+    "73776": {
+      "en": "Red-kneed dotterel",
+      "native": "Berm-Berm-Gle"
+    },
+    "72131": {
+      "en": "Red-kneed dotterel",
+      "native": "Berm-Berm-Gle"
+    },
+    "71908": {
+      "en": "Red-kneed dotterel",
+      "native": "Berm-Berm-Gle"
+    },
+    "73036": {
+      "en": "Red-kneed dotterel",
+      "native": "Berm-Berm-Gle"
+    },
+    "70035": {
+      "en": "Red-kneed dotterel",
+      "native": "Berm-Berm-Gle"
+    },
+    "86670": {
+      "en": "Australian kestrel",
+      "native": "Karik Karik"
+    },
+    "85696": {
+      "en": "Australian kestrel",
+      "native": "Karik Karik"
+    },
+    "87073": {
+      "en": "Australian kestrel",
+      "native": "Karik Karik"
+    },
+    "85889": {
+      "en": "Australian kestrel",
+      "native": "Karik Karik"
+    },
+    "84143": {
+      "en": "Australian kestrel",
+      "native": "Karik Karik"
+    },
+    "89642": {
+      "en": "Australian kestrel",
+      "native": "Karik Karik"
+    },
+    "91971": {
+      "en": "Mallee fowl",
+      "native": "Neilloan"
+    },
+    "91926": {
+      "en": "Mallee fowl",
+      "native": "Neilloan"
+    },
+    "92791": {
+      "en": "Mallee fowl",
+      "native": "Neilloan"
+    },
+    "92833": {
+      "en": "Mallee fowl",
+      "native": "Neilloan"
+    },
+    "93017": {
+      "en": "Mallee fowl",
+      "native": "Neilloan"
+    },
+    "93194": {
+      "en": "Mallee fowl",
+      "native": "Neilloan"
+    },
+    "93279": {
+      "en": "Mallee fowl",
+      "native": "Neilloan"
+    },
+    "92405": {
+      "en": "Mallee fowl",
+      "native": "Neilloan"
+    },
+    "92420": {
+      "en": "Mallee fowl",
+      "native": "Neilloan"
+    },
+    "91852": {
+      "en": "Mallee fowl",
+      "native": "Neilloan"
+    },
+    "33152": {
+      "en": "Jacky lizard",
+      "native": "Unurgunite"
+    },
+    "33478": {
+      "en": "Jacky lizard",
+      "native": "Unurgunite"
+    },
+    "33575": {
+      "en": "Jacky lizard",
+      "native": "Unurgunite"
+    },
+    "33804": {
+      "en": "Jacky lizard",
+      "native": "Unurgunite"
+    },
+    "34041": {
+      "en": "Jacky lizard",
+      "native": "Unurgunite"
+    },
+    "34318": {
+      "en": "Jacky lizard",
+      "native": "Unurgunite"
+    },
+    "34579": {
+      "en": "Jacky lizard",
+      "native": "Unurgunite"
+    },
+    "34798": {
+      "en": "Jacky lizard",
+      "native": "Unurgunite"
+    },
+    "34981": {
+      "en": "Jacky lizard",
+      "native": "Unurgunite"
+    },
+    "35037": {
+      "en": "Jacky lizard",
+      "native": "Unurgunite"
+    },
+    "35044": {
+      "en": "Jacky lizard",
+      "native": "Unurgunite"
+    },
+    "34924": {
+      "en": "Jacky lizard",
+      "native": "Unurgunite"
+    },
+    "34814": {
+      "en": "Jacky lizard",
+      "native": "Unurgunite"
+    },
+    "34624": {
+      "en": "Jacky lizard",
+      "native": "Unurgunite"
+    },
+    "34331": {
+      "en": "Jacky lizard",
+      "native": "Unurgunite"
+    },
+    "33817": {
+      "en": "Jacky lizard",
+      "native": "Unurgunite"
+    },
+    "33611": {
+      "en": "Jacky lizard",
+      "native": "Unurgunite"
+    },
+    "33532": {
+      "en": "Jacky lizard",
+      "native": "Unurgunite"
+    },
+    "33492": {
+      "en": "Jacky lizard",
+      "native": "Unurgunite"
+    },
+    "33040": {
+      "en": "Jacky lizard",
+      "native": "Unurgunite"
+    },
+    "33760": {
+      "en": "Jacky lizard",
+      "native": "Unurgunite"
+    },
+    "15371": {
+      "en": "Male and female brolga",
+      "native": "Kourt-chin"
+    },
+    "16245": {
+      "en": "Male and female brolga",
+      "native": "Kourt-chin"
+    },
+    "17440": {
+      "en": "Male and female brolga",
+      "native": "Kourt-chin"
+    },
+    "34481": {
+      "en": "Male and female brolga",
+      "native": "Kourt-chin"
+    },
+    "33682": {
+      "en": "Male and female brolga",
+      "native": "Kourt-chin"
+    },
+    "35228": {
+      "en": "Male and female brolga",
+      "native": "Kourt-chin"
+    },
+    "37331": {
+      "en": "Male and female brolga",
+      "native": "Kourt-chin"
+    },
+    "26069": {
+      "en": "Male and female brolga",
+      "native": "Kourt-chin"
+    },
+    "17678": {
+      "en": "Male and female brolga",
+      "native": "Kourt-chin"
+    },
+    "101589": {
+      "en": "Great fish",
+      "native": "Otchocut"
+    },
+    "102080": {
+      "en": "Great fish",
+      "native": "Otchocut"
+    },
+    "102281": {
+      "en": "Great fish",
+      "native": "Otchocut"
+    },
+    "102532": {
+      "en": "Great fish",
+      "native": "Otchocut"
+    },
+    "102029": {
+      "en": "Great fish",
+      "native": "Otchocut"
+    },
+    "101909": {
+      "en": "Great fish",
+      "native": "Otchocut"
+    },
+    "102611": {
+      "en": "Great fish",
+      "native": "Otchocut"
+    },
+    "30324": {
+      "en": "Wedge tailed eagle",
+      "native": "Warepil"
+    },
+    "31592": {
+      "en": "Wedge tailed eagle",
+      "native": "Warepil"
+    },
+    "33347": {
+      "en": "Wedge tailed eagle",
+      "native": "Warepil"
+    },
+    "34045": {
+      "en": "Wedge tailed eagle",
+      "native": "Warepil"
+    },
+    "22701": {
+      "en": "Female eagle, wife of Warepil",
+      "native": "Collowgulloric Warepil"
+    },
+    "23364": {
+      "en": "Female eagle, wife of Warepil",
+      "native": "Collowgulloric Warepil"
+    },
+    "23972": {
+      "en": "Female eagle, wife of Warepil",
+      "native": "Collowgulloric Warepil"
+    },
+    "24244": {
+      "en": "Female eagle, wife of Warepil",
+      "native": "Collowgulloric Warepil"
+    },
+    "24327": {
+      "en": "Female eagle, wife of Warepil",
+      "native": "Collowgulloric Warepil"
+    },
+    "24305": {
+      "en": "Female eagle, wife of Warepil",
+      "native": "Collowgulloric Warepil"
+    },
+    "96229": {
+      "en": "Purple crowned lorikeet",
+      "native": "Totyarguil"
+    },
+    "97229": {
+      "en": "Purple crowned lorikeet",
+      "native": "Totyarguil"
+    },
+    "97938": {
+      "en": "Purple crowned lorikeet",
+      "native": "Totyarguil"
+    },
+    "98526": {
+      "en": "Purple crowned lorikeet",
+      "native": "Totyarguil"
+    },
+    "99158": {
+      "en": "Purple crowned lorikeet",
+      "native": "Totyarguil"
+    },
+    "97278": {
+      "en": "Purple crowned lorikeet",
+      "native": "Totyarguil"
+    },
+    "98036": {
+      "en": "Purple crowned lorikeet",
+      "native": "Totyarguil"
+    },
+    "67459": {
+      "en": "Meat ant",
+      "native": "Marpeankurrk"
+    },
+    "67275": {
+      "en": "Meat ant",
+      "native": "Marpeankurrk"
+    },
+    "67927": {
+      "en": "Meat ant",
+      "native": "Marpeankurrk"
+    },
+    "71762": {
+      "en": "Meat ant",
+      "native": "Marpeankurrk"
+    },
+    "71795": {
+      "en": "Meat ant",
+      "native": "Marpeankurrk"
+    },
+    "72105": {
+      "en": "Meat ant",
+      "native": "Marpeankurrk"
+    },
+    "71053": {
+      "en": "Meat ant",
+      "native": "Marpeankurrk"
+    },
+    "74666": {
+      "en": "Meat ant",
+      "native": "Marpeankurrk"
+    },
+    "73555": {
+      "en": "Meat ant",
+      "native": "Marpeankurrk"
+    },
+    "100064": {
+      "en": "Species of ant",
+      "native": "Collenbitchick"
+    },
+    "92953": {
+      "en": "Boomerang",
+      "native": "Won"
+    },
+    "93542": {
+      "en": "Boomerang",
+      "native": "Won"
+    },
+    "94005": {
+      "en": "Boomerang",
+      "native": "Won"
+    },
+    "94160": {
+      "en": "Boomerang",
+      "native": "Won"
+    },
+    "93825": {
+      "en": "Boomerang",
+      "native": "Won"
+    },
+    "93174": {
+      "en": "Boomerang",
+      "native": "Won"
+    },
+    "91875": {
+      "en": "Boomerang",
+      "native": "Won"
+    },
+    "44816": {
+      "en": "The maned snake",
+      "native": "Mindi"
+    }
+  },
+  "unresolved_hips": []
+}

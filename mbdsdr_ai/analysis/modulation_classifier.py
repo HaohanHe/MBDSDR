@@ -178,6 +178,7 @@ class ModulationClassifier:
     决策树（按顺序判定）::
 
         energy 低                → NOISE
+        谱平坦（无载波/边带）     → NOISE
         zero_frac 高             → OOK
         mag_cv 高 + 频率稳定      → AM / ASK
         mag_cv 低 + 频率双峰      → FSK
@@ -233,6 +234,13 @@ class ModulationClassifier:
         bw = f["bandwidth"]
         freq_std = f["freq_std"]
 
+        # 噪声结构门：谱接近平坦 = 没有载波/边带结构可辨。必须排在 OOK/AM
+        # 之前——抬高的噪声底因 Rayleigh 幅度起伏会 zero_frac≈0.23、
+        # mag_cv≈0.52，旧规则会报成「OOK 0.85 / AM 0.75」，等于把噪声当信号。
+        # 实测平坦度：AM/FM/ASK/FSK/PSK 均 ≤0.30，复高斯噪声 ≈0.85。
+        if f.get("spectral_flatness", 0.0) > 0.6:
+            return "NOISE", 0.7
+
         # OOK：幅度有明显近零期
         if zero > 0.2:
             return "OOK", 0.85
@@ -273,7 +281,10 @@ class ModulationClassifier:
     @staticmethod
     def _suggest(modulation: str, feat: dict) -> list:
         suggestions = []
-        if modulation in ("OOK", "ASK"):
+        if modulation == "NOISE":
+            suggestions.append("频谱平坦、无载波/边带结构：这里可能只有噪声底")
+            suggestions.append("降低增益或换到有信号的信道再看")
+        elif modulation in ("OOK", "ASK"):
             suggestions.append("用包络检波 + 阈值判决")
             suggestions.append("尝试 ±5% 采样率偏移补偿")
         elif modulation == "FSK":

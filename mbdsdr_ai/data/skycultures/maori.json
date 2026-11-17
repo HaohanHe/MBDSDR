@@ -1,0 +1,341 @@
+{
+  "id": "maori",
+  "meta": {
+    "schema": "mbdsdr.sky_culture.v1",
+    "id": "maori",
+    "display_name": "Maori",
+    "native_name": "",
+    "region": "Australasia",
+    "classification": [
+      "traditional"
+    ],
+    "source": "Stellarium skyculture maori",
+    "source_url": "https://github.com/Stellarium/stellarium/tree/master/skycultures/maori",
+    "source_license": "CC BY-SA 4.0",
+    "source_license_url": "https://creativecommons.org/licenses/by-sa/4.0/",
+    "attribution": "Stellarium sky culture 'maori'; authors: Dan Smale (CC BY-SA 4.0). Converted to HIP line segments only; no artwork or description images were copied.",
+    "source_file": "reference/stellarium/skycultures/maori/index.json",
+    "source_file_sha256": "024222e41a3f39a508c45d12cc1e24aecfd238301ef5003203814e8591b9fee7",
+    "description_file": "reference/stellarium/skycultures/maori/description.md",
+    "description_file_sha256": "6d3e7530606958162b59c107a63142d18209bf4d7e2b7f8d7ba1b54fba58eba9",
+    "conversion_scope": "Only constellations[].lines, id and common_name (plus optional common_names star labels) are converted; illustrations, artwork and description text are not copied.",
+    "names_scope": "Explicit common_names labels take precedence; stars without an explicit label inherit the constellation/asterism name they belong to.",
+    "group_count": 6,
+    "edge_count": 20,
+    "name_count": 46,
+    "unresolved_hip_count": 0,
+    "unresolved_hips": [],
+    "unresolved_token_count": 0,
+    "unresolved_tokens": [],
+    "generated_utc": "2026-11-17T17:00:44Z",
+    "data_sha256": "e11d48dacbf2c5b184255d78c21a48c19f33fa8ae0791bcae5fc34cf398a6dda"
+  },
+  "groups": [
+    {
+      "group_id": "CON maori 001",
+      "names": {
+        "en": "Taki-o-Autahi",
+        "native": "Taki-o-Autahi"
+      },
+      "lines": [
+        [
+          61084,
+          60718
+        ],
+        [
+          62434,
+          59747
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON maori 002",
+      "names": {
+        "en": "Te Taura-o-te-waka-o-tamarereti",
+        "native": "Te Taura-o-te-waka-o-tamarereti"
+      },
+      "lines": [
+        [
+          68702,
+          71683
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON maori 003",
+      "names": {
+        "en": "Tau-toro",
+        "native": "Tau-toro"
+      },
+      "lines": [
+        [
+          26727,
+          26311,
+          25930
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON maori 004",
+      "names": {
+        "en": "The Great Boat of Tama Rereti",
+        "native": "Te-Waka-o-Tama-Rereti"
+      },
+      "lines": [
+        [
+          82396,
+          82514,
+          82671,
+          84143,
+          86228,
+          87073,
+          86670,
+          85927,
+          85696
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON maori 005",
+      "names": {
+        "en": "Matakarehu",
+        "native": "Matakarehu"
+      },
+      "lines": [
+        [
+          21421,
+          20894,
+          20205,
+          20455,
+          20889
+        ]
+      ],
+      "kind": "constellation"
+    },
+    {
+      "group_id": "CON maori 006",
+      "names": {
+        "en": "The Sail of Tainui",
+        "native": "Te-Ra-o-Tainui"
+      },
+      "lines": [
+        [
+          21421,
+          20894,
+          20205,
+          20455,
+          20889
+        ],
+        [
+          21421,
+          20889
+        ],
+        [
+          20205,
+          25930
+        ],
+        [
+          17499,
+          20205
+        ],
+        [
+          26727,
+          26311,
+          25930
+        ]
+      ],
+      "kind": "constellation"
+    }
+  ],
+  "names": {
+    "7588": {
+      "en": "Turu",
+      "native": "Turu"
+    },
+    "17489": {
+      "en": "Hiwa-i-te-rangi",
+      "native": "Hiwa-i-te-rangi"
+    },
+    "17499": {
+      "en": "Waipunarangi",
+      "native": "Waipunarangi"
+    },
+    "17531": {
+      "en": "Waita",
+      "native": "Waita"
+    },
+    "17573": {
+      "en": "Waiti",
+      "native": "Waiti"
+    },
+    "17579": {
+      "en": "Pohutukawa",
+      "native": "Pohutukawa"
+    },
+    "17608": {
+      "en": "Ururangi",
+      "native": "Ururangi"
+    },
+    "17702": {
+      "en": "Matariki",
+      "native": "Matariki"
+    },
+    "17847": {
+      "en": "Tupuarangi",
+      "native": "Tupuarangi"
+    },
+    "17851": {
+      "en": "Tupuanuku",
+      "native": "Tupuanuku"
+    },
+    "21421": {
+      "en": "Taumata-kuku",
+      "native": "Taumata-kuku"
+    },
+    "24436": {
+      "en": "Puanga",
+      "native": "Puanga"
+    },
+    "30438": {
+      "en": "Atutahi",
+      "native": "Atutahi"
+    },
+    "32349": {
+      "en": "Takarua",
+      "native": "Takarua"
+    },
+    "36850": {
+      "en": "Whakaahu",
+      "native": "Whakaahu"
+    },
+    "37279": {
+      "en": "Puanga Hori",
+      "native": "Puanga Hori"
+    },
+    "50583": {
+      "en": "Pipiri",
+      "native": "Pipiri"
+    },
+    "65474": {
+      "en": "Mariao",
+      "native": "Mariao"
+    },
+    "69673": {
+      "en": "Ruawahia",
+      "native": "Ruawahia"
+    },
+    "80112": {
+      "en": "Pekehawani",
+      "native": "Pekehawani"
+    },
+    "80763": {
+      "en": "Rehua",
+      "native": "Rehua"
+    },
+    "81266": {
+      "en": "Whakaonge-kai",
+      "native": "Whakaonge-kai"
+    },
+    "91262": {
+      "en": "Whanui",
+      "native": "Whanui"
+    },
+    "97649": {
+      "en": "Poutu-te-Rangi",
+      "native": "Poutu-te-Rangi"
+    },
+    "61084": {
+      "en": "Taki-o-Autahi",
+      "native": "Taki-o-Autahi"
+    },
+    "60718": {
+      "en": "Taki-o-Autahi",
+      "native": "Taki-o-Autahi"
+    },
+    "62434": {
+      "en": "Taki-o-Autahi",
+      "native": "Taki-o-Autahi"
+    },
+    "59747": {
+      "en": "Taki-o-Autahi",
+      "native": "Taki-o-Autahi"
+    },
+    "68702": {
+      "en": "Te Taura-o-te-waka-o-tamarereti",
+      "native": "Te Taura-o-te-waka-o-tamarereti"
+    },
+    "71683": {
+      "en": "Te Taura-o-te-waka-o-tamarereti",
+      "native": "Te Taura-o-te-waka-o-tamarereti"
+    },
+    "26727": {
+      "en": "Tau-toro",
+      "native": "Tau-toro"
+    },
+    "26311": {
+      "en": "Tau-toro",
+      "native": "Tau-toro"
+    },
+    "25930": {
+      "en": "Tau-toro",
+      "native": "Tau-toro"
+    },
+    "82396": {
+      "en": "The Great Boat of Tama Rereti",
+      "native": "Te-Waka-o-Tama-Rereti"
+    },
+    "82514": {
+      "en": "The Great Boat of Tama Rereti",
+      "native": "Te-Waka-o-Tama-Rereti"
+    },
+    "82671": {
+      "en": "The Great Boat of Tama Rereti",
+      "native": "Te-Waka-o-Tama-Rereti"
+    },
+    "84143": {
+      "en": "The Great Boat of Tama Rereti",
+      "native": "Te-Waka-o-Tama-Rereti"
+    },
+    "86228": {
+      "en": "The Great Boat of Tama Rereti",
+      "native": "Te-Waka-o-Tama-Rereti"
+    },
+    "87073": {
+      "en": "The Great Boat of Tama Rereti",
+      "native": "Te-Waka-o-Tama-Rereti"
+    },
+    "86670": {
+      "en": "The Great Boat of Tama Rereti",
+      "native": "Te-Waka-o-Tama-Rereti"
+    },
+    "85927": {
+      "en": "The Great Boat of Tama Rereti",
+      "native": "Te-Waka-o-Tama-Rereti"
+    },
+    "85696": {
+      "en": "The Great Boat of Tama Rereti",
+      "native": "Te-Waka-o-Tama-Rereti"
+    },
+    "20894": {
+      "en": "Matakarehu",
+      "native": "Matakarehu"
+    },
+    "20205": {
+      "en": "Matakarehu",
+      "native": "Matakarehu"
+    },
+    "20455": {
+      "en": "Matakarehu",
+      "native": "Matakarehu"
+    },
+    "20889": {
+      "en": "Matakarehu",
+      "native": "Matakarehu"
+    }
+  },
+  "unresolved_hips": []
+}

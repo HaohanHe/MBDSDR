@@ -17,6 +17,7 @@
   const $ = (id) => document.getElementById(id);
   const connEl = $("conn"), waitingEl = $("waiting");
   const roFreq = $("ro-freq"), roSr = $("ro-sr"), roMode = $("ro-mode"), roGain = $("ro-gain");
+  const roSources = $("ro-sources");
   const specCanvas = $("spectrum"), wfCanvas = $("waterfall");
   const sctx = specCanvas.getContext("2d"), wctx = wfCanvas.getContext("2d");
   const toastEl = $("toast");
@@ -123,6 +124,8 @@
       if (typeof msg.samp_rate_hz === "number") roSr.textContent = msg.samp_rate_hz.toLocaleString();
       if (msg.mode) roMode.textContent = msg.mode;
       if (typeof msg.gain_db === "number") roGain.textContent = msg.gain_db;
+      const sources = fmtRuntimeSources(msg.runtime_sources);
+      if (sources) roSources.textContent = sources;
       if (Array.isArray(msg.annotations)) annotations = msg.annotations;
     } else if (msg.type === "error") {
       toast(msg.error || "error");
@@ -135,6 +138,55 @@
     if (hz >= 1e6) return (hz / 1e6).toFixed(3) + " MHz";
     if (hz >= 1e3) return (hz / 1e3).toFixed(1) + " kHz";
     return String(hz);
+  }
+
+  // 运行时数据源 → 一行人话（与桌面状态面板 / HUD 同口径）。
+  // 只说快照里写明的状态：字段缺失时该段整段不出现，绝不补默认值。
+  function fmtRuntimeSources(rs) {
+    if (!rs || typeof rs !== "object") return "";
+    const block = (name) => (
+      rs[name] && typeof rs[name] === "object" ? rs[name] : null);
+    const sdr = block("sdr"), gnss = block("gnss");
+    const time = block("time"), site = block("site");
+    const parts = [];
+
+    if (sdr && typeof sdr.connected === "boolean") {
+      // stalled = USB/socket 还在但读不出样本：不能只写「已连接」。
+      if (sdr.stalled) parts.push("SDR 已连接 · 无样本（超时）");
+      else parts.push(sdr.connected ? "SDR 已连接" : "SDR 未连接");
+    }
+
+    if (gnss && typeof gnss.connected === "boolean") {
+      if (!gnss.connected) {
+        parts.push("GNSS 未连接");
+      } else if (gnss.fix) {
+        let text = "GNSS 已定位";
+        // 天线开路/短路只在 GPTXT 明确告警时追加；ok/unknown 不打扰。
+        if (gnss.antenna === "open") text += " · 天线开路";
+        else if (gnss.antenna === "short") text += " · 天线短路";
+        parts.push(text);
+      } else {
+        parts.push("GNSS 已连接（未定位）");
+      }
+    }
+
+    const timeSrc = (time && typeof time.source === "string")
+      ? time.source.toLowerCase() : "";
+    const gnssTime = (gnss && typeof gnss.time_source === "string")
+      ? gnss.time_source.toLowerCase() : "";
+    if (timeSrc || gnssTime) {
+      const bySatellite = timeSrc === "gnss"
+        || gnssTime === "pps" || gnssTime === "nmea";
+      parts.push("时间：" + (bySatellite ? "卫星授时" : "系统时钟"));
+    }
+
+    if (site && typeof site.source === "string") {
+      const src = site.source.toLowerCase();
+      parts.push("位置：" + (src === "gnss" ? "GNSS"
+        : (src === "manual" ? "手动" : "未设置")));
+    }
+
+    return parts.join(" · ");
   }
 
   let toastTimer = null;
