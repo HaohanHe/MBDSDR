@@ -21,7 +21,7 @@
 * **光行时用年，不用秒**。用户能感知的单位是"光走了 8.6 年"，
   不是"2.7e17 秒"。
 
-七个工具的分工
+八个工具的分工
 --------------
 - `sky_whats_here`      ：我有指向，问这一片有什么（视场枚举）
 - `sky_object_lookup`   ：我有名字，问它是谁（身份查询）
@@ -30,6 +30,7 @@
 - `sky_meteor_showers`  ：我问今晚，答哪场流星雨在活动、辐射点在哪
 - `sky_tonight`         ：我问今晚能不能看，答云量与极光；缺测就说不猜
 - `sky_observing_sites` ：我在哪，附近有哪些有官方坐标的台址/公众点（距离参照）
+- `sky_dso_lookup`      ：那团模糊是什么（梅西耶/亮 NGC：角径、视场、星等）
 """
 
 from __future__ import annotations
@@ -1088,5 +1089,164 @@ def register_sky_tools(agent) -> None:
                         "description": "可选：只查某个文化 id（如 japanese）"},
         }},
         handler=_culture_lookup,
+        category="sky",
+    )
+
+    # ------------------------------------------------------------------
+    # 8) DSO 查询：那团模糊是什么（梅西耶/亮 NGC）
+    # ------------------------------------------------------------------
+    def _dso_lookup(args: Dict[str, Any]):
+        """按名称或天区查深空天体。数据只有公开来源，距离缺失就说缺失。"""
+        import json
+        from pathlib import Path
+
+        data_path = Path(__file__).resolve().parent / "data" / "dso_catalog.json"
+        try:
+            catalog = json.loads(data_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as exc:
+            raise ValueError(f"DSO 目录不可读：{exc}") from exc
+        objects = catalog.get("objects") or []
+        if not objects:
+            raise ValueError("DSO 目录为空——不编造天体")
+
+        query = str(args.get("name") or "").strip().lower()
+        az = args.get("az_deg")
+        alt = args.get("alt_deg")
+        fov = args.get("fov_deg")
+
+        def _names(o):
+            out = []
+            for key in ("name", "name_en", "zh_name"):
+                v = o.get(key)
+                if v:
+                    out.append(str(v).lower())
+            for v in (o.get("aliases_en") or []) + (o.get("aliases_zh") or []):
+                if v:
+                    out.append(str(v).lower())
+            cross = o.get("cross_ids") or {}
+            for key in ("m", "ngc", "ic"):
+                if cross.get(key) is not None:
+                    out.extend([f"{key}{cross[key]}".lower(),
+                                f"{key} {cross[key]}".lower()])
+            return out
+
+        hits = []
+        if query:
+            for o in objects:
+                if any(query == n or query in n for n in _names(o)):
+                    hits.append(o)
+            if not hits:
+                return {
+                    "ok": False,
+                    "reason": f"DSO 目录里没有 {query!r}",
+                    "hint": "试试 M31 / M42 / 仙女座星系，或给 az_deg + alt_deg 按天区查",
+                }
+        elif az is not None and alt is not None:
+            # 按天区查：需要站址+时刻把 az/alt 转成 J2000 才能与目录比。
+            # 这里走视场枚举的思路：用当前观测者与时刻算每个 DSO 的 az/alt。
+            from .celestial_geometry import (
+                GroundStation, vec_from_azalt, vec_from_radec,
+                j2000_to_altaz, azalt_from_vec)
+            from .new_spacetime import utc_to_jd
+            import datetime
+
+            def _sep_deg(az1, alt1, az2, alt2):
+                """两地平方向的角距：向量点积，与 span_deg 同一数学口径。"""
+                v1 = vec_from_azalt(float(az1), float(alt1))
+                v2 = vec_from_azalt(float(az2), float(alt2))
+                d = max(-1.0, min(1.0, float(v1 @ v2)))
+                return math.degrees(math.acos(d))
+
+            lat = args.get("lat_deg")
+            lon = args.get("lon_deg")
+            if lat is None or lon is None:
+                obs = getattr(agent, "observer", None)
+                if obs is None:
+                    raise ValueError("按天区查 DSO 需要站址：请传 lat_deg/lon_deg "
+                                     "或先设置观测站")
+                lat, lon = obs.latitude_deg, obs.longitude_deg
+            station = GroundStation(float(lon), float(lat), 0.0, "dso_lookup")
+            jd = args.get("jd_ut1") or utc_to_jd(
+                datetime.datetime.now(datetime.timezone.utc))
+            fov = float(fov) if fov is not None else 30.0
+            if fov <= 0 or fov > 180:
+                raise ValueError("fov_deg 必须在 (0, 180] 之间")
+            for o in objects:
+                if o.get("ra_deg") is None or o.get("dec_deg") is None:
+                    continue
+                v = j2000_to_altaz(
+                    vec_from_radec(float(o["ra_deg"]), float(o["dec_deg"])),
+                    station, float(jd))
+                o_az, o_alt = azalt_from_vec(v)
+                if float(o_alt) < -6.0:
+                    continue
+                if _sep_deg(az, alt, float(o_az), float(o_alt)) <= fov / 2.0:
+                    hits.append(o)
+            if not hits:
+                return {
+                    "ok": True, "count": 0, "objects": [],
+                    "note": (f"以 {float(az):g}°/{float(alt):g}° 为中心 "
+                             f"{fov:g}° 内没有目录中的 DSO（目录仅 117 条："
+                             "Messier 全量 + 少数亮 NGC），没有不等于天上没有"),
+                }
+        else:
+            raise ValueError("请给 name（名称/编号）或 az_deg + alt_deg（天区）")
+
+        listed = []
+        for o in hits[:12]:
+            size = o.get("size_arcmin")
+            rec = {
+                "name": o.get("name") or o.get("name_en") or o.get("zh_name"),
+                "zh_name": o.get("zh_name"),
+                "type": o.get("dso_type") or o.get("catalog_type"),
+                "ra_deg": o.get("ra_deg"),
+                "dec_deg": o.get("dec_deg"),
+                "magnitude": o.get("magnitude"),
+                "size_arcmin": size,
+                "constellation": o.get("constellation"),
+            }
+            # 角径 → 推荐视场（与星官同一口径：×1.2 向上取整到 5°）。
+            # 单位换算：角分 → 度。缺角径就留 null，不猜。
+            if size is not None and float(size) > 0:
+                span_deg = float(size) / 60.0
+                rec["recommended_fov_deg"] = int(math.ceil(span_deg * 1.2 / 5.0) * 5)
+            else:
+                rec["recommended_fov_deg"] = None
+            listed.append(rec)
+
+        return {
+            "ok": True,
+            "count": len(listed),
+            "objects_omitted": max(0, len(hits) - len(listed)),
+            "objects": listed,
+            "catalog": {"name": "dso_catalog", "source": "OpenNGC",
+                        "license": "CC BY-SA 4.0", "count": len(objects)},
+            "note": ("DSO 目录只有 117 条（Messier 全量 + 少数亮 NGC），"
+                     "查不到不等于天上没有深空天体；距离字段本目录不提供，"
+                     "不要替它编一个"),
+            "hint": ("讲的时候用『角径约 X 度，适合用约 Y° 视场』；"
+                     "角径为 null 就说体积未知，不要估"),
+        }
+
+    reg.register(
+        name="sky_dso_lookup",
+        description=(
+            "深空天体查询：给梅西耶编号/中文名/英文俗名（如 M42 / 猎户座大星云），"
+            "返回身份、赤经赤纬、星等、角径、所属星座与推荐观测视场。"
+            "也可给 az_deg+alt_deg+fov_deg 按当前天区查。"
+            "距离字段本目录不提供——必须说『距离未知』，不许编。"
+            "目录只含 Messier 全量与少数亮 NGC（117 条），查不到不等于天上没有。"
+            "只读本地公开数据（OpenNGC CC BY-SA 4.0），不写盘不联网。"),
+        parameters={"type": "object", "properties": {
+            "name": {"type": "string",
+                     "description": "编号或名称，如 M31 / M42 / 仙女座星系"},
+            "az_deg": {"type": "number", "description": "方位角（度，0=北）；与 alt_deg 一起用"},
+            "alt_deg": {"type": "number", "description": "高度角（度）；与 az_deg 一起用"},
+            "fov_deg": {"type": "number", "description": "视场（度，0-180），默认 30"},
+            "lat_deg": {"type": "number", "description": "按天区查时的观测站纬度；不传则用 agent 当前观测站"},
+            "lon_deg": {"type": "number", "description": "按天区查时的观测站经度；不传则用 agent 当前观测站"},
+            "jd_ut1": {"type": "number", "description": "按天区查时的儒略日；不传则用当前时刻"},
+        }},
+        handler=_dso_lookup,
         category="sky",
     )
