@@ -26,6 +26,7 @@
 
 import datetime
 import json
+import math
 import os
 import sys
 
@@ -288,6 +289,27 @@ class TestAsterismLookup:
             assert h in hips, f"北斗缺 HIP {h}"
         # 全官跨度（含增星）约 31°；七星本身 25.7°。
         assert 28.0 <= d["span_deg"] <= 35.0, d["span_deg"]
+
+    def test_recommended_fov_is_a_sayable_number(self, agent):
+        """FR-01：工具直接给'该用多大镜看'，不让用户拿跨度自己换算。"""
+        d = _call(agent, "sky_asterism_lookup", {"name": "北斗"})
+        fov = d["recommended_fov_deg"]
+        assert fov is not None
+        # 北斗全官跨度 31.2° ×1.2 留边 ≈ 37° → 向上取整到 40°
+        assert fov >= d["span_deg"], (fov, d["span_deg"])
+        assert fov == int(math.ceil(d["span_deg"] * 1.2 / 5.0) * 5), fov
+        assert 30 <= fov <= 50, fov
+        assert "视场" in d["fov_note"] and str(fov) in d["fov_note"]
+
+    def test_recommended_fov_never_below_span(self, agent):
+        """推荐视场必须装得下跨度；单测北斗抓不到昴宿的舍入坑。"""
+        for name in ("北斗", "昴宿", "天狼", "参宿", "心宿"):
+            d = _call(agent, "sky_asterism_lookup", {"name": name})
+            if not d.get("ok") or d.get("recommended_fov_deg") is None:
+                continue
+            fov, span = d["recommended_fov_deg"], d["span_deg"]
+            assert fov >= span, f"{name}: fov={fov} < span={span}"
+            assert fov == int(math.ceil(span * 1.2 / 5.0) * 5), name
 
     def test_seven_star_span_matches_known_value(self, agent):
         """只取七星算跨度应约 25.7°——这是本项目全量实算值，可外部核对。"""

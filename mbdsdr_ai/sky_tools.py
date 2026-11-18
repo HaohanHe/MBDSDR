@@ -645,6 +645,18 @@ def register_sky_tools(agent) -> None:
             sim = np.clip(mat @ mat.T, -1.0, 1.0)
             span = float(np.degrees(np.arccos(sim.min())))
 
+        # 推荐视场（FR-01）：跨度 × 1.2 留边，**向上**取整到 5°。
+        # 必须向上——四舍五入会把 5.51°×1.2=6.6° 压成 5°，装不下星官，
+        # 那样"推荐"就是在骗人（实测踩到：昴宿 span=5.51° 曾算出 fov=5°）。
+        # 只用现有 span，不新造第二套跨度算法；无成员（span=0）时留 null。
+        recommended_fov = (int(math.ceil(span * 1.2 / 5.0) * 5)
+                           if span > 0 else None)
+        fov_note = (
+            f"这个星官跨度约 {span:.0f}°，用约 {recommended_fov}° 的视场看得全"
+            if recommended_fov is not None
+            else "成员星数据不足，无法给出推荐视场"
+        )
+
         polys = [[int(st.hip) for st in poly] for poly in target.lines
                  if len(poly) >= 2]
         return {
@@ -656,6 +668,8 @@ def register_sky_tools(agent) -> None:
             "star_count": len(members),
             "segment_count": sum(len(p) - 1 for p in polys),
             "span_deg": round(span, 2),
+            "recommended_fov_deg": recommended_fov,
+            "fov_note": fov_note,
             "members": members,
             "has_lines": bool(polys),
             "note": ("这个星官只有一颗星，画不出连线，但它确实是一个『官』"
