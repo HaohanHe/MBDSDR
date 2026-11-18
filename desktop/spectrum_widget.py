@@ -4457,6 +4457,17 @@ class SpectrumCurveWidget(*_PinchBases, _TuningPlotMixin, QWidget):
         self._timer.timeout.connect(self.update)
         self._timer.start(50)
 
+    def showEvent(self, event):
+        """重新可见时恢复重绘；隐藏时由 hideEvent 停表，不为看不见的谱面烧 CPU。"""
+        super().showEvent(event)
+        if not self._timer.isActive():
+            self._timer.start(50)
+
+    def hideEvent(self, event):
+        super().hideEvent(event)
+        if self._timer.isActive():
+            self._timer.stop()
+
     # ---- 触屏手势回调：复用既有 wheel 缩放 / mouseMove 平移数学 ----
     def _on_touch_pinch_zoom(self, scale_factor: float, center_pos: QPointF) -> None:
         """双指捏合：以捏合中心为锚点缩放频率 span（与 Ctrl+滚轮同数学）。
@@ -4512,6 +4523,17 @@ class WaterfallWidget(QWidget):
         self._timer = QTimer(self)
         self._timer.timeout.connect(self.update)
         self._timer.start(100)
+
+    def showEvent(self, event):
+        """同 SpectrumCurveWidget：隐藏即停表，显示即恢复。"""
+        super().showEvent(event)
+        if not self._timer.isActive():
+            self._timer.start(100)
+
+    def hideEvent(self, event):
+        super().hideEvent(event)
+        if self._timer.isActive():
+            self._timer.stop()
 
     def freq_at_x(self, x_px: float) -> float:
         """瀑布某 x 像素对应的绝对频率：与上方谱面 _freq_at_x 同一公式。"""
