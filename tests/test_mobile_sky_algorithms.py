@@ -485,12 +485,15 @@ class TestDartSourceConstants:
                      "clip(-dy, y0)", "clip(dy, height - y0)"):
             assert edge in src, f"Liang–Barsky 缺边：{edge}"
 
-    def test_dart_files_declare_unverified(self):
-        """本机无工具链是事实，Dart 文件必须自带这条声明，别让后人以为跑过。"""
+    def test_dart_files_record_verification(self):
+        """2026-11-18 起本机有 Flutter 工具链，Dart 实测通过；
+        文件头必须记录验证事实（版本 + 命令 + 结果），不许再挂 `未验证` 假标记。"""
         for name in ("sky_transform.dart", "sky_projection.dart"):
             src = _read_dart(name)
-            assert "未验证" in src or "flutter test" in src, \
-                f"{name} 缺少未验证声明"
+            assert "未验证" not in src, f"{name} 仍挂着过期的未验证声明"
+            assert "验证记录" in src, f"{name} 缺验证记录段"
+            assert "Flutter 3.50.0" in src, f"{name} 未写明工具链版本"
+            assert "flutter test" in src, f"{name} 未写明验证命令"
 
 
 class TestClipBehaviour:

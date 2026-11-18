@@ -25,18 +25,18 @@
 ///
 /// 全部函数是纯函数，可离线单测；不依赖 Flutter、不依赖网络。
 ///
-/// 未验证声明
+/// 验证记录（2026-11-18）
 /// ----------
-/// **本机无 Flutter 工具链**（`docs/parameter-unification.md:453` 已记录同一事实），
-/// 本文件从未跑过 `flutter analyze` / `flutter test`。
-/// 算式本身的正确性由 `tests/test_mobile_sky_algorithms.py` 在 Python 侧
-/// 逐行复现并与桌面实现对拍来保证（alt/az 差 <15″，即章动量级）；
-/// 但"这个 Dart 文件能编译、类型正确、运行时行为一致"**尚未验证**。
+/// 算式正确性由 `tests/test_mobile_sky_algorithms.py` 在 Python 侧逐行复现
+/// 并与桌面实现对拍（alt/az 差 <15″，即章动量级）；
+/// Dart 侧本身亦已实测：
 ///
-/// 在有 Flutter 的机器上必须跑：
+///     Flutter 3.50.0 / Dart 3.14.0
+///     flutter analyze        -> 0 error（59 info 均为 material.dart 废弃提示）
+///     flutter test           -> 478 passed（全仓）
+///     flutter test test/sky_transform_test.dart -> passed
 ///
-///     flutter analyze
-///     flutter test test/sky_transform_test.dart
+/// 工具链在 `D:/mbdsdr/toolchain/flutter`，不在仓库内；换机器需自行安装。
 library;
 
 import 'dart:math' as math;

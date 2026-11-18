@@ -269,9 +269,12 @@ void main() {
     await tester.pumpWidget(_wrap(radio));
     await tester.pump();
 
-    final readout = tester.widget<Text>(
-      find.textContaining('145.0000 MHz'),
+    // 频率读数精度由页面决定（曾从 4 位改到 6 位），这里只认"数值 + MHz"，
+    // 不把小数位数写死——否则产品调精度就把审美守卫误判成失败。
+    final heroText = find.byWidgetPredicate(
+      (w) => w is Text && RegExp(r'^145\.0+ MHz$').hasMatch(w.data ?? ''),
     );
+    final readout = tester.widget<Text>(heroText);
     expect(readout.style?.fontWeight, AppTokens.weightMedium);
     expect(readout.style?.fontSize, AppTokens.freqReadout.fontSize);
   });
@@ -285,7 +288,9 @@ void main() {
     await tester.pumpWidget(_wrap(radio));
     await tester.pump();
 
-    final readout = find.textContaining('145.0000 MHz');
+    final readout = find.byWidgetPredicate(
+      (w) => w is Text && RegExp(r'^145\.0+ MHz$').hasMatch(w.data ?? ''),
+    );
     expect(readout, findsOneWidget);
 
     // 包裹读数的 GestureDetector 即触控热区；其渲染高度应 ≥ 44。

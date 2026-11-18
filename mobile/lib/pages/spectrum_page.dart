@@ -761,9 +761,9 @@ class _ControlPanel extends StatelessWidget {
                     // 绝不用 AppTokens.sampleRatesHz 之类的本地常量兜底。
                     final options = controller.sampleRateOptionsHz;
                     if (options == null || options.isEmpty) {
-                      return const DropdownButton<double>(
+                      return DropdownButton<double>(
                         items: <DropdownMenuItem<double>>[],
-                        hint: Text('未知（设备未报告采样率范围）'),
+                        hint: const Text('未知（设备未报告采样率范围）'),
                         isExpanded: true,
                         onChanged: null,
                       );

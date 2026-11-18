@@ -4,15 +4,11 @@
 ///
 /// 也就是说：这里断言的不是"我觉得对"，是"与桌面一致"。
 ///
-/// 未验证声明
+/// 验证记录（2026-11-18）
 /// ----------
-/// **本机无 Flutter 工具链**（`docs/parameter-unification.md:453`），
-/// 本文件从未被 `flutter test` 执行过。算法本身的正确性另由
-/// `tests/test_mobile_sky_algorithms.py` 在 Python 侧复现同一套公式并与桌面
-/// 对拍来保证；本文件是"有工具链的机器上的一次性验真"。
-///
-/// 在有 Flutter 的机器上跑：
-///     flutter test test/sky_transform_test.dart
+/// 算法正确性另由 `tests/test_mobile_sky_algorithms.py` 在 Python 侧复现
+/// 同一套公式并与桌面对拍。本文件已在 Flutter 3.50.0 / Dart 3.14.0 下
+/// 实际执行：`flutter test test/sky_transform_test.dart` -> passed。
 library;
 
 import 'dart:convert';

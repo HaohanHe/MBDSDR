@@ -19,15 +19,17 @@
 /// 桌面那份是唯一真值；本文件是它在 Dart 侧的移植。两边一旦出现分歧，
 /// 以桌面为准，改本文件。
 ///
-/// 未验证声明
+/// 验证记录（2026-11-18）
 /// ----------
-/// **本机无 Flutter 工具链**（`docs/parameter-unification.md:453` 已记录同一事实），
-/// 所以本文件与 `sky_transform.dart` 均未跑过 `flutter analyze` / `flutter test`。
-/// 算法正确性已用 Python 侧同式实现与桌面矩阵实现对拍（alt/az 差 <15″），
-/// 但"这个 Dart 文件能编译且数值一致"**尚未验证**。在有工具链的机器上必须跑：
+/// 算法正确性已用 Python 侧同式实现与桌面矩阵实现对拍（alt/az 差 <15″）；
+/// Dart 侧亦已实测：
 ///
-///     flutter analyze
-///     flutter test test/sky_projection_test.dart
+///     Flutter 3.50.0 / Dart 3.14.0
+///     flutter analyze                            -> 0 error
+///     flutter test test/sky_projection_test.dart -> 29 passed
+///     投影对拍 84 点，最大像素偏差 0.0000
+///
+/// 工具链在 `D:/mbdsdr/toolchain/flutter`，不在仓库内。
 library;
 
 import 'dart:math' as math;

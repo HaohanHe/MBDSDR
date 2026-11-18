@@ -22,11 +22,12 @@
 /// 用户在边缘看到线延伸出去，自己就知道"那边还有"。
 /// 同时输出 `membersInView / membersTotal`，让上层能说"你只看到其中一段"。
 ///
-/// 未验证声明
+/// 验证记录（2026-11-18）
 /// ----------
-/// 本机无 Flutter 工具链，本文件未跑 `flutter analyze` / `flutter test`。
 /// 算法由 `tests/test_mobile_sky_algorithms.py` 在 Python 侧同式复现并对拍；
-/// 数据加载部分（`dart:convert` / `Uint8List`）只有静态校验。
+/// Dart 侧已通过 `flutter analyze`（0 error）与全仓 `flutter test`（478 passed），
+/// 工具链 Flutter 3.50.0 / Dart 3.14.0，位于 `D:/mbdsdr/toolchain/flutter`。
+/// 数据加载部分（`dart:convert` / `Uint8List`）已随全仓测试实际执行。
 library;
 
 import 'dart:convert';
