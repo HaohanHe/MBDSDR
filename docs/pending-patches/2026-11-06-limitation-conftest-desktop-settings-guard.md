@@ -1,5 +1,9 @@
 # 限制登记补充：conftest 真实配置守卫在「重定向 HOME」下被既有用例误红（已修）
 
+> **本文为当时状态快照**：记录当日工作状态与结论，未逐条复核；
+> 不作现状依据。共 3 条未复核；需要现状请查 `docs/COORDINATION.md`、
+> `docs/known-red-register.md` 与 checklist。
+
 > 目标文件：`docs/limitations-register.md` · 文末追加「附 T」（本文件**不直接改**
 > 共享台账，交由限制总账 owner 合并）。
 > 生成时间：2026-11-06；执行人：解码流水线 P5；状态：**已修**。

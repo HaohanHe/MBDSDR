@@ -22,7 +22,6 @@ from mbdsdr_ai import sat_passes, new_spacetime_timeline, builtin_tle_meta
 
 ROOT = Path(__file__).resolve().parents[1]
 ORBIT_SRC = ROOT / "mbdsdr_ai" / "orbit.py"
-PANEL_SRC = ROOT / "desktop" / "sat_track_panel.py"
 
 #: 独立 oracle：写死在测试里，不读产品常量。
 ORACLE = {
@@ -92,22 +91,47 @@ def test_no_hardcoded_threshold_literals_in_orbit():
     for key in ORACLE:
         pattern = r'["\']' + re.escape(key) + r'["\']\s*:\s*[0-9]'
         assert not re.search(pattern, src), f"发现 {key} 的硬编码字面量"
-    assert src.count('"tle_policy": _report_tle_policy(allow_stale)') == 3, \
-        "三条返回路径都必须走唯一入口"
+    # 三条返回路径都必须走唯一入口（AST：dict 键 tle_policy 的值是
+    # 调用 _report_tle_policy(allow_stale)，不是文本计数）。
+    tree = ast.parse(src)
+    entry_calls = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Dict):
+            continue
+        for key, value in zip(node.keys, node.values):
+            if not (isinstance(key, ast.Constant) and key.value == "tle_policy"):
+                continue
+            if not (isinstance(value, ast.Call) and isinstance(value.func, ast.Name)
+                    and value.func.id == "_report_tle_policy"):
+                continue
+            if (len(value.args) == 1 and isinstance(value.args[0], ast.Name)
+                    and value.args[0].id == "allow_stale"):
+                entry_calls.append(value)
+    assert len(entry_calls) == 3, (
+        f"三条返回路径都必须走唯一入口，实际 {len(entry_calls)} 处")
+
+
+def test_display_policy_delegates_to_tracking_policy():
+    """桌面展示策略必须等于 ``tracking_policy`` 的输出（不是自己拼一份）。
+
+    行为判据：若面板改回直接读 ``FRESH_MAX_HOURS`` / ``EXPIRED_MAX_DAYS``
+    自己拼字段，下面任一年龄的字典都会与权威入口对不上。
+    """
+    from desktop import sat_track_panel as panel
+
+    for age in (0.5, 3.0, 8.0, 120.0):
+        expected = ti.tracking_policy(
+            {"tier": ti.age_band(age), "age_days": age})
+        assert panel._tle_policy(age) == expected, f"age={age}"
+    # stale（31–90 天）在展示层被并入 dead 档——这是既有映射，不是另一套口径。
+    assert panel._tle_policy(60.0) == ti.tracking_policy(
+        {"tier": "dead", "age_days": 60.0})
+    # 展示口径不含新鲜度阈值字段（那是过境报告的口径）
+    assert not (set(panel._tle_policy(3.0)) & set(ORACLE))
 
 
 def test_display_and_synthetic_policies_are_different_contracts():
     """口径登记：同名 policy 的三个事实源不许合并。"""
-    # 桌面展示/闸门层走 tracking_policy，不读新鲜度阈值常量。
-    panel = PANEL_SRC.read_text(encoding="utf-8-sig")
-    tree = ast.parse(panel)
-    fn = next(n for n in tree.body
-              if isinstance(n, ast.FunctionDef) and n.name == "_tle_policy")
-    body = ast.unparse(fn)
-    assert "tracking_policy(" in body
-    assert "FRESH_MAX_HOURS" not in body
-    assert "EXPIRED_MAX_DAYS" not in body
-
     # 合成 TLE 处置策略是另一套字段，不暴露新鲜度阈值。
     synthetic = builtin_tle_meta.synthetic_tle_policy()
     assert not (set(synthetic) & set(ORACLE))

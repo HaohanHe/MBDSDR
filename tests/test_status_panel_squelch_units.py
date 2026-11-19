@@ -120,6 +120,13 @@ def _squelch_field_problems(source: str):
     return []
 
 
+def _defines_class(source: str, name: str) -> bool:
+    """源码里是否有该名字的**类定义**（AST；注释/字符串里的同名文本不算）。"""
+    tree = ast.parse(source)
+    return any(isinstance(n, ast.ClassDef) and n.name == name
+               for n in ast.walk(tree))
+
+
 def test_static_guard_no_bare_dbfs_on_margin():
     src = open(os.path.join(_ROOT, "desktop", "status_panel.py"),
                encoding="utf-8").read()
@@ -132,7 +139,7 @@ def test_static_guard_no_bare_dbfs_on_margin():
 
     owner = _owner_file()
     owner_src = open(owner, encoding="utf-8").read()
-    assert "class SDRStatus" in owner_src, (
+    assert _defines_class(owner_src, "SDRStatus"), (
         f"按类名定位到的 {owner} 里没有 SDRStatus 定义")
     assert _squelch_field_problems(owner_src) == [], (
         "squelch_db 字段说明必须写明「余量」语义")
@@ -161,7 +168,7 @@ def test_guard_goes_red_on_bad_field_doc_and_rejects_old_module():
 
     old = os.path.join(_ROOT, "mbdsdr_ai", "sdr_backend.py")
     old_src = open(old, encoding="utf-8").read()
-    assert "class SDRStatus" not in old_src, (
+    assert not _defines_class(old_src, "SDRStatus"), (
         "旧文件又开始定义 SDRStatus，需复核守卫目标")
     assert _squelch_field_problems(old_src), (
         "把旧路径当守卫目标时必须报错，不能静默通过")

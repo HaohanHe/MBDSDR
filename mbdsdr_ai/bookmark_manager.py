@@ -92,6 +92,23 @@ def _from_legacy_entry(d: dict) -> "Bookmark":
     )
 
 
+class StoreWriteError(RuntimeError):
+    """书签/频率存储写盘失败：只读盘、文件被占用、磁盘错误等可预期 I/O 失败。
+
+    存储层留一个类型化出口，调用方（工具 handler / 控制器 / 桌面面板）不必
+    再分别猜 ``OSError`` 的子类：只要接住本异常，就能拿到真实 ``path`` 与
+    ``reason``，如实失败而不是崩到上层。读路径（文件不存在、损坏文件备份）
+    不抛这个异常；写盘被拒绝（损坏且备份失败）与 ``OSError`` 都从这里出。
+    """
+
+    def __init__(self, path: os.PathLike, reason: str, *,
+                 original: Optional[BaseException] = None):
+        self.path = str(path)
+        self.reason = str(reason)
+        self.original = original
+        super().__init__(f"写入失败：{self.reason}（路径：{self.path}）")
+
+
 def backup_corrupt_bookmarks(path: Path) -> Optional[str]:
     """把损坏的书签文件改名成 ``*.corrupt-时间戳``，返回备份路径。
 
@@ -261,22 +278,38 @@ class BookmarkManager:
                        reason, self.corrupt_backup or "（备份失败）")
 
     def save(self) -> bool:
-        """写回书签；损坏且未能备份时拒绝写入，避免覆盖唯一证据。"""
+        """写回书签；损坏且未能备份时拒绝写入，避免覆盖唯一证据。
+
+        写盘失败（``OSError``）或拒绝写入时抛 :class:`StoreWriteError`：
+        旧实现返回 ``False``，但 ``add/remove/update/import`` 都不看返回值，
+        会在只读盘上假装写成功。
+        """
         if self._save_blocked:
-            self.last_error = (
+            message = (
                 f"书签未保存：{self.bookmarks_path} 已损坏且备份失败；"
                 "为避免覆盖唯一证据，本次不写入。"
                 "请检查目录权限或手动移走该文件后重试")
+            self.last_error = message
             logger.error("书签保存被拒绝（损坏文件未能备份）：%s",
                          self.bookmarks_path)
-            return False
+            raise StoreWriteError(self.bookmarks_path, message)
         data = {
             "tag_colors": self._tag_colors,
             "bookmarks": [asdict(b) for b in self._bookmarks],
         }
-        self.bookmarks_path.write_text(
-            json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8"
-        )
+        try:
+            self.bookmarks_path.write_text(
+                json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8"
+            )
+        except OSError as exc:
+            # 只读/占用/磁盘错误是用户环境问题，不是程序 bug：包成带 path 与
+            # 真实原因的 StoreWriteError，让所有写入口都能给出同一句人话。
+            # 不换路径重试、不吞成成功——文件内容保持失败前原样。
+            logger.warning("书签写入失败（%s：%s）：%s",
+                           type(exc).__name__, exc, self.bookmarks_path)
+            raise StoreWriteError(
+                self.bookmarks_path, f"{type(exc).__name__}: {exc}",
+                original=exc) from exc
         return True
 
     # ------------------------------------------------------------ CSV import/export

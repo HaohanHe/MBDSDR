@@ -1,5 +1,9 @@
 # 星象仪放大后“中心一堆点 / 一根竖线”审计（只读）
 
+> **本文为当时状态快照**：记录当日工作状态与结论，未逐条复核；
+> 不作现状依据。共 4 条未复核；需要现状请查 `docs/COORDINATION.md`、
+> `docs/known-red-register.md` 与 checklist。
+
 - 审计对象：`d:\mbdsdr\MBDSDR\desktop\rf_sky_view.py`（主脚本）、`mbdsdr_ai/sky_interaction.py`、`mbdsdr_ai/celestial_geometry.py`；顺带核对 `desktop/spectrum_widget.py`。
 - 快照：commit `f12187b4` + 工作区未提交改动；`rf_sky_view.py` SHA256 前缀 `116DC252…`，mtime `2026-11-17 00:21:30`。
 - **行号会漂移**：审计期间该文件仍在被其它任务编辑（两次读取之间整体后移 60 余行）。定位时请以**函数名 + 引用的代码片段**为准，行号只作本次快照的索引。

@@ -1,5 +1,9 @@
 # 待落库补丁：QSS 字号钉死 10pt（无障碍「假支持」）
 
+> **本文为当时状态快照**：记录当日工作状态与结论，未逐条复核；
+> 不作现状依据。共 2 条未复核；需要现状请查 `docs/COORDINATION.md`、
+> `docs/known-red-register.md` 与 checklist。
+
 > 提出：2026-11-11 夜；来源：裁定①（本轮优先级最高）
 > **状态：已落地**（2026-11-11 深夜，裁定①「选 A + 自动降档」后）。
 > 落地文件：`desktop/themes.py`（`BASE_FONT_PT` / `font_scale()` /

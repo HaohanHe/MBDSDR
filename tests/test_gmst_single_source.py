@@ -84,16 +84,35 @@ def test_golden_j2000():
         280.460618375, abs=1e-9)
 
 
+def _module_ast(mod):
+    import ast
+    return ast.parse(Path(mod.__file__).read_text(encoding="utf-8-sig"))
+
+
+def _float_constants(tree) -> set:
+    import ast
+    return {n.value for n in ast.walk(tree)
+            if isinstance(n, ast.Constant) and isinstance(n.value, float)}
+
+
+def _identifiers(tree) -> set:
+    import ast
+    names = {n.id for n in ast.walk(tree) if isinstance(n, ast.Name)}
+    names |= {n.attr for n in ast.walk(tree) if isinstance(n, ast.Attribute)}
+    return names
+
+
 def test_no_duplicated_polynomial():
     """同一口径内不许再抄一遍折叠式多项式。
 
     gpredict_adapter 是登记过的口径 D（整链镜像上游 gpredict），不在本检查内。
+    AST 判据：模块里不存在该多项式的数值常量（注释/文档字符串里的数字不算）。
     """
-    needle = "8640184.812866"
     for mod in (orbit, orbit_determination, new_spacetime_timeline, astronomy,
                 decoders, jtime):
-        src = Path(mod.__file__).read_text(encoding="utf-8-sig")
-        assert needle not in src, f"{mod.__name__} 又抄了一遍 A 口径多项式"
+        tree = _module_ast(mod)
+        assert 8640184.812866 not in _float_constants(tree), \
+            f"{mod.__name__} 又抄了一遍 A 口径多项式"
 
 
 # ── B / C / D 口径：登记边界，防误合并 ──────────────────────────────────
@@ -122,10 +141,29 @@ def test_gpredict_thetajd_is_a_separate_numeric_path():
     所以「必须差多少」是假判据，会随取样历元翻车；改钉结构：只要还有
     gpredict 的当日 0h 常数与自转项，就说明没被并进 A。
     """
-    src = Path(gpredict_adapter.__file__).read_text(encoding="utf-8-sig")
-    for marker in ("24110.54841", "OMEGA_E_DAY", "modulus(gmst + SEC_DAY"):
-        assert marker in src, f"gpredict 特征项 {marker} 不见了：是不是被换成 A 内核？"
-    assert "from .gmst import" not in src and "from mbdsdr_ai.gmst import" not in src
+    tree = _module_ast(gpredict_adapter)
+    assert 24110.54841 in _float_constants(tree), \
+        "gpredict 的当日 0h 常数 24110.54841 不见了：是不是被换成 A 内核？"
+    assert "OMEGA_E_DAY" in _identifiers(tree), \
+        "gpredict 的自转项 OMEGA_E_DAY 不见了：是不是被换成 A 内核？"
+    import ast
+
+    modulus_ok = any(
+        isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+        and node.func.id == "modulus"
+        and {"gmst", "SEC_DAY"} <= {n.id for n in ast.walk(node) if isinstance(n, ast.Name)}
+        for node in ast.walk(tree)
+    )
+    assert modulus_ok, "gpredict 的 modulus(gmst + SEC_DAY…) 路径不见了"
+    imported = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom):
+            module = "." * node.level + (node.module or "")
+            imported.add(module)
+        elif isinstance(node, ast.Import):
+            imported.update(alias.name for alias in node.names)
+    assert not ({"gmst", ".gmst", "mbdsdr_ai.gmst"} & imported), \
+        f"gpredict 不得 import 我们的 gmst 内核：{sorted(imported)}"
     # 上界仍然要钉：差值再大就说明某一边的公式真错了。
     for jd in JDS:
         d = abs(_arcsec_delta(gmst.gmst_rad_iau1982(jd),

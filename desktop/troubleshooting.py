@@ -184,7 +184,7 @@ VISIBLE_BY_FAMILY: Dict[str, Tuple[str, ...]] = {
         # 返 hook_vetoed——两者同样在 AI 步骤卡渲染 code 字面量。
         "device_session_locked", "hook_vetoed",
     ),
-    "AI 会话": ("agent_busy", "cancelled"),
+    "AI 会话": ("agent_busy", "cancelled", "subagent_depth_exceeded"),
     "设备能力": (
         "device_unavailable", "ptt_not_on", "capability_unknown", "NEED_HW",
     ),
@@ -194,6 +194,14 @@ VISIBLE_BY_FAMILY: Dict[str, Tuple[str, ...]] = {
         # P0-03 起 start_decoder 对流式入口缺失的模式返该码，AI 步骤卡会
         # 显示 code 字面量（tool 失败路径），因此必须给「怎么办」。
         "decoder_not_streamable",
+    ),
+    # 天空/校准工具（sky_tools / sky_calibration）失败时把 code 放进
+    # ToolResult.error，AI 步骤卡渲染 ``错误 {code}``；2026-11-19 补登这批
+    # 已在 error_catalog 的真实码，逐码写可执行动作（校准码的修法彼此不同）。
+    "天文校准": (
+        "invalid_jd", "jd_out_of_range", "bad_input", "too_few_points",
+        "pathological", "residual_too_large", "invalid", "bad_path",
+        "write_failed", "unreadable", "unsupported_version",
     ),
     # 状态面板解码卡显式映射了这 15 个 code（DECODE_ERROR_LABELS）。
     "解码结果": (
@@ -231,7 +239,8 @@ VISIBLE_BY_FAMILY: Dict[str, Tuple[str, ...]] = {
     # 时抛出（目录 message 会随连接失败原文进入状态栏）；usb_probe_failed 的
     # message 由「设备」面板状态行与悬停详情原样渲染。两者的补救动作不同，
     # 逐码写在 CODE_NEXT_STEPS，避免把「登记表不可读」误当成「设备被占用」。
-    "设备接入": ("owner_registry_unavailable", "usb_probe_failed"),
+    "设备接入": ("owner_registry_unavailable", "usb_probe_failed",
+                 "read_error", "short_read"),
     # TLE 抓取族：状态栏 ``_on_tle_update_result`` 走
     # ``tle_fetch.tle_refresh_status_text`` 渲染
     # ``TLE 在线更新失败（{code}：{label}）：{reason}；建议：{action}``，
@@ -243,6 +252,9 @@ VISIBLE_BY_FAMILY: Dict[str, Tuple[str, ...]] = {
     "TLE 抓取": (
         "rate_limited", "http_4xx", "http_5xx", "network_other",
         "parse_failure", "empty_response", "tle_unknown",
+        # 无 TLE 时过境/跟踪工具直接失败，AI 步骤卡与状态栏都会显示码原文；
+        # 修法是刷新星历或导入用户 TLE，不是重试同一个空缓存。
+        "no_tle",
     ),
 }
 
@@ -263,6 +275,10 @@ VISIBLE_NEXT_STEPS: Dict[str, str] = {
     "解码工具": (
         "在「AI 助手」页签改用「能力目录」里已接线的解码工具，并把输入换成"
         "完整样本；采样率与增益到「控制」页签核对后重试。"),
+    "天文校准": (
+        "在「AI 助手」页签按「能力目录」的校准参数重发：先确认儒略日是数值、"
+        "校准点至少两个且方向不过近，再核对档案版本与路径；涉及站址的到"
+        "「设置」页的「观测地点纬度」「观测地点经度」核对后重试。"),
     "解码结果": (
         "在「状态」页签看「解码结果」卡片，换用可用模式或完整样本；采样率到"
         "「控制」页签核对后重试。"),
@@ -302,6 +318,15 @@ CODE_NEXT_STEPS: Dict[str, str] = {
     "usb_probe_failed": (
         "拔插一次设备看「设备」面板状态行是否恢复；持续失败时拔插只能按枚举判断"
         "（可能把被占用误报成已拔出），点「查看诊断」把日志反馈开发者。"),
+    "read_error": (
+        "在「设备」面板点「刷新」重新枚举；拔插 USB 并重新连接后再采集，"
+        "持续读失败就换一个 USB 口。"),
+    "short_read": (
+        "在「设备」面板点「刷新」后拔插 USB 重新连接；短读按设备断开处理，"
+        "不当作正常数据使用。"),
+    "subagent_depth_exceeded": (
+        "在「AI 助手」页签让主助手一次完成任务，减少子代理嵌套层数；"
+        "不要用子代理再创建子代理。"),
     "crc_failed": (
         "「控制」页签降低解调带宽并提高增益，改善天线后重录；"
         "APRS 类录满一整帧（实战建议 ≥5s），ADS-B 保持 1090MHz 与 fs=2 MS/s 或 4 MS/s。"),
@@ -339,6 +364,35 @@ CODE_NEXT_STEPS: Dict[str, str] = {
         "「观测地点纬度」「观测地点经度」输入框重新填成合法数字；"
         "若配置文件本身损坏（JSON 语法错/不是对象/字段类型非法），"
         "修好 ~/.mbdsdr/config.json 或删掉损坏文件后再重填。"),
+    # ── 天文校准族：逐码写修法（儒略日、点数、几何、档案 schema 各不相同）──
+    "invalid_jd": (
+        "在「AI 助手」页签让调用方把 jd_ut1 传成数值型儒略日（如 2460000.5），"
+        "不要传字符串或本地时间。"),
+    "jd_out_of_range": (
+        "把 jd_ut1 调到 2460000.5–2524593.5（2000-01-01 至 2100-01-01）之间，"
+        "再从「AI 助手」页签重发天空工具调用。"),
+    "bad_input": (
+        "在「AI 助手」页签按「能力目录」的参数说明修正校准点、设备名或视场后重试，"
+        "不要传空值或非法枚举。"),
+    "too_few_points": (
+        "在「AI 助手」页签补足至少两个夹角 ≥5° 的不同方向校准点后重新校准。"),
+    "pathological": (
+        "换两个夹角足够大、不接近天顶的校准方向，再从「AI 助手」页签重新校准。"),
+    "residual_too_large": (
+        "核对观测目标后从「AI 助手」页签重新校准；残差仍超阈值就换更准的目标，"
+        "不要放大阈值硬存。"),
+    "invalid": (
+        "按 schema v1 在「AI 助手」页签补齐版本、设备名、视场、偏置、时间戳与"
+        "来源后重新导出校准档案。"),
+    "bad_path": (
+        "在「AI 助手」页签传入非空文件路径后重试；目录不存在会在写入时创建。"),
+    "write_failed": (
+        "检查目标目录写权限与磁盘空间后在「AI 助手」页签重试；原文件未被改动。"),
+    "unreadable": (
+        "检查校准档案的文件权限与编码后在「AI 助手」页签重试，必要时重新导出档案。"),
+    "unsupported_version": (
+        "用本机支持的 schema 版本重新导出校准档案，再从「AI 助手」页签重试；"
+        "不要手改原文件的版本号。"),
     # ── TLE 抓取族：逐码与 tle_fetch.failure_copy 的 action 对齐 ──────
     "rate_limited": (
         "这是 TLE 源返回 429 限流，不是本机故障：等退避结束（首次约 1 分钟，"
@@ -365,6 +419,10 @@ CODE_NEXT_STEPS: Dict[str, str] = {
         "这次刷新没拿到可判定的失败原因（常见于离线模式或缺依赖）：先确认网络"
         "可用，再在「卫星跟踪」页签点「刷新星历」复现一次；仍只有这个码就把状态栏"
         "原文记下来反馈，别当成星历已过期。"),
+    "no_tle": (
+        "在「卫星跟踪」页签点「刷新星历」联网刷新 TLE，或把 .tle 文件放进 "
+        "~/.mbdsdr/tle/ 后重启程序；离线无缓存时如实显示无星历，"
+        "不要用占位轨道算过境。"),
 }
 
 #: 上述各族的扁平索引（测试与映射完整性检查用）

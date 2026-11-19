@@ -1,5 +1,9 @@
 # 交接：P0 13 条 roadmap 回填单元格（给 roadmap 合成线）
 
+> **本文为当时状态快照**：记录当日工作状态与结论，未逐条复核；
+> 不作现状依据。共 3 条未复核；需要现状请查 `docs/COORDINATION.md`、
+> `docs/known-red-register.md` 与 checklist。
+
 日期：2026-11-11（第四轮改口：触控已修、快照硬纪律、首拍真屏判据）
 来源：`docs/research/2026-11-11-p0-static-inference-check-rest.md`（当前实测快照 `c3b48881`；
 历史 `33b8de5e` / `a2837671` / `c899eb51`）。本文件只是建议文本，roadmap 由持有方写入，本线不抢文件。

@@ -155,14 +155,28 @@ class TestDiagnostics:
 
 class TestWiringGuard:
     def test_feed_audio_uses_window_not_raw_block(self):
-        """源码守卫：不许退回"直接把这一块丢给 demodulate"。"""
+        """源码守卫：不许退回"直接把这一块丢给 demodulate"（AST 结构断言）。"""
+        import ast
+
         import aprs_panel as mod
 
-        src = open(mod.__file__, encoding="utf-8").read()
-        start = src.index("def feed_audio")
-        end = src.index("def stream_diagnostics", start)
-        body = src[start:end]
-        assert "_audio_buf" in body, "没有滑动缓冲"
-        assert "demodulate(self._audio_buf)" in body, \
+        tree = ast.parse(open(mod.__file__, encoding="utf-8").read())
+        fn = next(n for n in ast.walk(tree)
+                  if isinstance(n, ast.FunctionDef) and n.name == "feed_audio")
+
+        def _is_audio_buf(node) -> bool:
+            return (isinstance(node, ast.Attribute) and node.attr == "_audio_buf"
+                    and isinstance(node.value, ast.Name)
+                    and node.value.id == "self")
+
+        assert any(_is_audio_buf(n) for n in ast.walk(fn)), "没有滑动缓冲"
+        demod_calls = [
+            n for n in ast.walk(fn)
+            if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
+            and n.func.attr == "demodulate"
+        ]
+        assert any(n.args and _is_audio_buf(n.args[0]) for n in demod_calls), \
             "解调的不是窗口，说明又退回逐块独立解调"
-        assert "STREAM_DEDUP_S" in body, "没有去重，同一帧会被反复上报"
+        names = {n.id for n in ast.walk(fn) if isinstance(n, ast.Name)}
+        attrs = {n.attr for n in ast.walk(fn) if isinstance(n, ast.Attribute)}
+        assert "STREAM_DEDUP_S" in (names | attrs), "没有去重，同一帧会被反复上报"

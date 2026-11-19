@@ -190,9 +190,14 @@ def test_probe_still_catches_noop_button(main_window):
     这条用例钉住另一半责任：一个接了槽但槽里什么都不做的按钮，
     不能被这些新维度洗成「有效果」——否则扩大观察面就等于放宽标准。
     """
-    from PySide6.QtWidgets import QPushButton
+    from PySide6.QtWidgets import QPushButton, QWidget
 
-    btn = QPushButton("空槽（测试用）", main_window)
+    # 快照根只放被测按钮：主窗口里有秒级跳动的 UTC 时钟（statusValue），
+    # 点击瞬间正好跨秒就会被 _diff 记成「界面变化」，而 _probe 的
+    # volatile 识别只在两次 processEvents 的微秒窗口里采样，跨秒是随机事件
+    # （时序 flake）。换成固定控件作观察根，样本里就没有时钟，判据不变。
+    host = QWidget(main_window)
+    btn = QPushButton("空槽（测试用）", host)
     btn.clicked.connect(lambda: None)
     row = {"kind": "按钮", "name": btn.text(), "loc": "-", "panel": "-",
            "obj": btn, "wired": True, "note": "", "enabled": True,
@@ -200,13 +205,13 @@ def test_probe_still_catches_noop_button(main_window):
            "skipped": "", "switched": [], "pre": []}
     evidence = {"msg": [], "dialog": [], "file": [], "stat": [], "close": [],
                 "new_top": []}
-    audit._probe(main_window, row, evidence, set())
+    audit._probe(host, row, evidence, set())
     assert not evidence["new_top"], f"空槽不该弹窗：{evidence['new_top']}"
     assert not evidence["stat"], f"空槽不该写状态栏：{evidence['stat']}"
     assert not evidence["dialog"], f"空槽不该开对话框：{evidence['dialog']}"
     changes = [o for o in row["obs"] if "界面变化" in o]
     assert not changes, f"空槽被误判成有界面变化：{changes}"
-    btn.deleteLater()
+    host.deleteLater()
 
 
 def test_float_menu_is_nonmodal(main_window, monkeypatch):

@@ -608,7 +608,7 @@ rtty **1,198 → 179MB**；耗时 feldhell +16%、psk31 +10%，rtty 反而 -12%
   （`limit + 1` 字符即拒绝，`data.limit` 等于常量）。
 - `tests/test_fldigi_roundtrip.py`（优化前后往返结果仍然正确）。
 
-#### D.1 `rtty_decode` 长帧往返失配：是编解码缺陷，不是测试期望错（已修）
+#### D.1 `rtty_decode` 长帧往返失配：是编解码缺陷，不是测试期望错（已修 `26fb3d75`；复跑 `pytest tests/test_fldigi_roundtrip.py -q` → `9 passed`）
 
 证据（同一段 `A` 重复文本，分别取编码侧 bit 流与解调侧 bit 流）：
 

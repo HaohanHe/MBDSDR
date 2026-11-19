@@ -1,5 +1,9 @@
 # 待应用 patch：device_panel 把「枚举失败」与「没插设备」分开
 
+> **本文为当时状态快照**：记录当日工作状态与结论，未逐条复核；
+> 不作现状依据。共 1 条未复核；需要现状请查 `docs/COORDINATION.md`、
+> `docs/known-red-register.md` 与 checklist。
+
 - 目标文件：`desktop/device_panel.py`
 - 基线：`598aea18`（本文件另有未提交改动，行号请以 rebase 后为准）
 - 提出者：W92（审计线），**不直接改该文件**；请设备线 owner 应用

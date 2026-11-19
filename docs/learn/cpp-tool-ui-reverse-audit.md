@@ -1,5 +1,9 @@
 # C++ 端「UI 有控件、工具面无对应」反向对拍审计
 
+> **本文为当时状态快照**：记录当日工作状态与结论，未逐条复核；
+> 不作现状依据。共 1 条未复核；需要现状请查 `docs/COORDINATION.md`、
+> `docs/known-red-register.md` 与 checklist。
+
 > 证据状态：E4——本文件数字未逐条绑定原始件/复跑命令，引用前须复核（判据见 docs/evidence-standard.md）。
 日期：2026-10-30 · 范围：`cpp/src/ui/`（UI 控件）↔ `cpp/src/ai/tool_schema.cpp` `registeredToolSpecs()`（90 个工具）
 方法：脚本提取全部 6 类可调控件实例化点（含上下文）→ 逐条对照工具 schema/执行器/校验器/tokens → D1/D2/D3 分类。

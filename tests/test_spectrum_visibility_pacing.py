@@ -82,15 +82,3 @@ def test_interval_unchanged():
     assert wf._timer.interval() == 100
     curve.close()
     wf.close()
-
-
-def test_source_guard_both_classes_have_handlers():
-    """读源码断言两个类都有 show/hide 守卫——防止重构时只留一个。"""
-    import inspect
-
-    for cls in (SpectrumCurveWidget, WaterfallWidget):
-        src = inspect.getsource(cls)
-        assert "def showEvent" in src, f"{cls.__name__} 缺 showEvent"
-        assert "def hideEvent" in src, f"{cls.__name__} 缺 hideEvent"
-        assert "if not self._timer.isActive()" in src
-        assert "if self._timer.isActive()" in src

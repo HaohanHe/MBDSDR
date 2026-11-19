@@ -34,7 +34,12 @@ import 'tokens.dart';
 // ============================================================================
 
 class HomeShell extends StatefulWidget {
-  const HomeShell({super.key});
+  const HomeShell({super.key, @visibleForTesting this.skyPageBuilder});
+
+  /// 天空页构建注入（仅测试）：生产不传，走真实 SkyPage（系统定位/真实
+  /// TLE/IMU）。「首次成功」端到端用例借此注入 fake 定位与固定时钟，
+  /// 但仍走 HomeShell 的真实导航与页面栈，不会绕开被测路径。
+  final Widget Function(Station? manualStation, RadioApi? radio)? skyPageBuilder;
 
   @override
   State<HomeShell> createState() => _HomeShellState();
@@ -260,7 +265,8 @@ class _HomeShellState extends State<HomeShell> {
               },
               onOpenSettings: _openSettings,
             ),
-            SkyPage(manualStation: station, radio: radio),
+            widget.skyPageBuilder?.call(station, radio) ??
+                SkyPage(manualStation: station, radio: radio),
             ChatPage(
               isConfigured: settings.apiKey.isNotEmpty,
               // 每次发送时新建 client：闭包实时读取当前 aiManualMode，

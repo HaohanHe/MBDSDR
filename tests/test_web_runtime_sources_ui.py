@@ -32,11 +32,44 @@ def _js_text() -> str:
 # 静态契约
 # --------------------------------------------------------------------------- #
 def test_html_has_sources_readout():
+    from html.parser import HTMLParser
+
+    class _Readout(HTMLParser):
+        """按 DOM 结构收集：元素 id、该元素内文本、整页文本。"""
+
+        def __init__(self):
+            super().__init__()
+            self.ids = set()
+            self.page_text = []
+            self._depth = 0
+            self._buffer = []
+            self.inner = None
+
+        def handle_starttag(self, tag, attrs):
+            attributes = dict(attrs)
+            if attributes.get("id") == "ro-sources":
+                self.ids.add("ro-sources")
+                self._depth = 1
+                self._buffer = []
+
+        def handle_endtag(self, tag):
+            if self._depth == 1:
+                self.inner = "".join(self._buffer).strip()
+            if self._depth:
+                self._depth -= 1
+
+        def handle_data(self, data):
+            self.page_text.append(data)
+            if self._depth:
+                self._buffer.append(data)
+
     html = _HTML.read_text(encoding="utf-8")
-    assert 'id="ro-sources"' in html
-    assert "数据源" in html
-    # 初始空态不是假值
-    assert 'id="ro-sources">--<' in html
+    parser = _Readout()
+    parser.feed(html)
+    assert "ro-sources" in parser.ids, "缺数据源读数行"
+    assert "数据源" in "".join(parser.page_text)
+    # 初始空态不是假值：元素内文本必须是 "--"
+    assert parser.inner == "--", f"初始空态被写成了 {parser.inner!r}"
 
 
 def test_appjs_consumes_runtime_sources():

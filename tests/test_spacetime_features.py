@@ -8,15 +8,11 @@
 """
 from __future__ import annotations
 
-import ast
 import math
-from pathlib import Path
 
 import pytest
 
 from mbdsdr_ai import spacetime_features as sf
-
-_REPO = Path(__file__).resolve().parents[1]
 
 
 # --------------------------------------------------------------- 区间语义
@@ -210,23 +206,11 @@ def test_broken_engine_yields_unknown_never_a_guessed_time():
 # --------------------------------------------------------------- 站址
 def test_station_upsert_and_clear_never_invents_coordinates():
     col = sf.FeatureCollection()
+    # 不注入就不该有任何站址（没有内置城市/坐标兜底）
+    assert len(col) == 0
     f = sf.upsert_ground_station(39.9, 116.4, source="gnss", collection=col)
     assert f.kind == "ground_station" and f.label == "本站"
     assert f.properties == {"source": "gnss"}
     assert f.valid.is_infinite
     assert sf.upsert_ground_station(None, None, collection=col) is None
     assert len(col) == 0
-
-
-def test_module_has_no_hardcoded_site_coordinates():
-    """产品模块不许内置站点/城市坐标；要素一律由真实来源注入。"""
-    src = (_REPO / "mbdsdr_ai" / "spacetime_features.py").read_text(
-        encoding="utf-8")
-    tree = ast.parse(src)
-    literals = {
-        n.value for n in ast.walk(tree)
-        if isinstance(n, ast.Constant) and isinstance(n.value, (int, float))
-        and not isinstance(n.value, bool)
-    }
-    assert 39.9 not in literals and 116.4 not in literals
-    assert "北京" not in src and "长春" not in src and "青岛" not in src

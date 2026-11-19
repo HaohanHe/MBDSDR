@@ -171,7 +171,7 @@ python scripts/ui_narrow_breakdown.py --json     # 机器对账
 > 优先级：**§3 高度先做**（真屏溢出 71 px）；本节用于 offscreen 指纹的
 > 1360 验收，以及给内容留余量。不要先做本节再回头砍高度。
 
-### §2.1 频谱工具栏：1941 → 688（省 1253）——**已落地（本批第一笔）**
+### §2.1 频谱工具栏：1941 → 688（省 1253）——**已落地（本批第一笔，`9d5fb92e`；复跑 `pytest tests/test_narrow_gate_selfcheck.py -q` → `8 passed`）**
 
 | # | 改什么 | 常驻/折叠 | 省下 |
 | --- | --- | --- | --- |
@@ -256,7 +256,7 @@ python scripts/ui_narrow_breakdown.py --json     # 机器对账
 
 原计划估算 1128；实际只做前两项（用户 2026-11-05 零折叠优先裁定），实测见下。
 
-### §2.3.1 顶栏收窄——已落地（本笔，2026-11-05）
+### §2.3.1 顶栏收窄——已落地（本笔，2026-11-05，`9d5fb92e`；复跑 `pytest tests/test_narrow_gate_selfcheck.py -q` → `8 passed`）
 
 只改两处，其余顶栏控件宽度一字未动：
 `UTC` 只留 `HH:MM:SS`（完整日期时间进 tooltip）；`txCapability` 由 204px 常驻文字
@@ -534,7 +534,7 @@ windows N=16 **216** / N=8 **144**；offscreen N=16 **280** / N=8 **176**。
 两套指纹均 ≤1360（也 ≤1344×700），见 §2.3.1 与 §4。
 
 
-### §3.2 底坞 74→48——已落地（同批第二笔）
+### §3.2 底坞 74→48——已落地（同批第二笔，`9d5fb92e`；复跑 `pytest tests/test_narrow_gate_selfcheck.py -q` → `8 passed`）
 
 `desktop/main_window.py::_build_bottom_dock` 的
 `setFixedHeight(tokens().SIZE["dock_h"] + 10)`（64+10=74）改为 `setFixedHeight(48)`；

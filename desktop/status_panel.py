@@ -80,6 +80,39 @@ def _fmt_rssi_mcp(value) -> str:
 
 
 # ---------------------------------------------------------------------------
+# 读数来源口径（P2）：上屏的每个数都要能说清「从哪来、准不准」。
+# 文案统一由 _provenance() 追加，面板各处只传常量，不再各自拼后缀。
+# ---------------------------------------------------------------------------
+_SRC_LOCAL_CLOCK = "本机时钟（未校准）"
+_SRC_MEASURED = "实测"
+_SRC_DEVICE = "设备报告"
+_SRC_BACKEND = "后端报告"
+_SRC_SETPOINT = "设定值"
+_SRC_SMETER = "按 dBFS 校准参考"
+_SRC_AUTO = "自动"
+_SRC_USER = "用户配置"
+_SRC_GNSS_ELLIPSOID = "GNSS 椭球高"
+_SRC_RECEIVER = "接收机报告"
+_SRC_IMU_RAW = "未校准原始读数"
+
+
+def _provenance(text, source: str) -> str:
+    """给读数追加中文来源后缀；空态原样返回，不把空值包装成读数。
+
+    ``text`` 为空/已是空态（「—」）或文本本身就等于来源（如带宽的「自动」）
+    时不做包装——宁可少一个后缀，也不把「没有读数」写成「—（实测）」。
+    """
+    if text is None:
+        return _EMPTY
+    txt = str(text)
+    if txt in ("", _EMPTY):
+        return _EMPTY
+    if txt == source:
+        return txt
+    return f"{txt}（{source}）"
+
+
+# ---------------------------------------------------------------------------
 # S-meter 校准参考（业余无线电通用约定）
 #   S9  = -73 dBFS（在 500 Hz 带宽内）
 #   S0  = -127 dBFS
@@ -763,7 +796,8 @@ class StatusPanel(QWidget):
 
     def _update_utc(self):
         now = datetime.datetime.now(datetime.timezone.utc)
-        self.utc_label.setText(f"UTC: {now.strftime('%H:%M:%S')}")
+        self.utc_label.setText(_provenance(
+            f"UTC: {now.strftime('%H:%M:%S')}", _SRC_LOCAL_CLOCK))
 
     # ========================================================================
     # 统一后端驱动入口（新增）
@@ -827,10 +861,16 @@ class StatusPanel(QWidget):
             self.rx_squelch.setText("—")
             self.rx_volume.setText("—")
         else:
-            self.rx_freq.setText(format_frequency_hz(self._safe_get(status, "frequency_hz")))
-            self.rx_srate.setText(_fmt_rate(self._safe_get(status, "sample_rate_hz")))
-            self.rx_bw.setText(format_bandwidth_hz(
-                self._safe_get(status, "bandwidth_hz"), zero_text="自动"))
+            self.rx_freq.setText(_provenance(
+                format_frequency_hz(self._safe_get(status, "frequency_hz")),
+                _SRC_SETPOINT))
+            self.rx_srate.setText(_provenance(
+                _fmt_rate(self._safe_get(status, "sample_rate_hz")),
+                _SRC_DEVICE))
+            self.rx_bw.setText(_provenance(
+                format_bandwidth_hz(
+                    self._safe_get(status, "bandwidth_hz"), zero_text=_SRC_AUTO),
+                _SRC_AUTO))
             self.rx_demod.setText(self._safe_get(status, "demod_mode") or "—")
             gain = self._safe_get(status, "gain_db")
             self._apply_gain_readout(gain)
@@ -855,12 +895,13 @@ class StatusPanel(QWidget):
             # SNR（从 status 读取，保持信号质量组同步）
             snr = self._safe_get(status, "snr_db")
             if snr is not None:
-                self.snr_value.setText(f"{snr:.1f} dB")
+                self.snr_value.setText(_provenance(f"{snr:.1f} dB", _SRC_BACKEND))
 
             # 频率/模式同步到信号质量组（避免主窗口重复槽函数）
             freq = self._safe_get(status, "frequency_hz")
             if freq is not None:
-                self.freq_value.setText(format_frequency_hz(freq))
+                self.freq_value.setText(_provenance(
+                    format_frequency_hz(freq), _SRC_SETPOINT))
             demod = self._safe_get(status, "demod_mode")
             if demod:
                 self.mode_value.setText(str(demod))
@@ -871,7 +912,8 @@ class StatusPanel(QWidget):
             self.rx_ppm.setText("—")
         else:
             try:
-                self.rx_ppm.setText(f"{float(ppm):+.0f} ppm")
+                self.rx_ppm.setText(_provenance(
+                    f"{float(ppm):+.0f} ppm", _SRC_USER))
             except (TypeError, ValueError):
                 self.rx_ppm.setText("—")
 
@@ -964,8 +1006,9 @@ class StatusPanel(QWidget):
             self._set_level_bar_color(tokens().COLORS["gray_300"])
             return
 
-        self.rssi_value.setText(format_dbfs(dbfs))
-        self.smeter_value.setText(_dbfs_to_smeter(dbfs))
+        self.rssi_value.setText(_provenance(format_dbfs(dbfs), _SRC_MEASURED))
+        self.smeter_value.setText(_provenance(
+            _dbfs_to_smeter(dbfs), _SRC_SMETER))
 
         # 电平条映射：[-120, 0] -> [0, 120]
         clamped = max(_LEVEL_MIN, min(_LEVEL_MAX, dbfs))
@@ -1159,10 +1202,12 @@ class StatusPanel(QWidget):
 
         # U-02：此路径是 MCP 固件 get_status，RSSI 为 SI4732 dBµV（0–127）；
         # 缺键/None/NaN 显「—」，绝不用 0 兜底。引擎 IQ 路径仍是 dBFS。
-        self.rssi_value.setText(_fmt_rssi_mcp(rssi))
-        self.snr_value.setText(_fmt_number(snr, 1, " dB"))
+        self.rssi_value.setText(_provenance(_fmt_rssi_mcp(rssi), _SRC_DEVICE))
+        self.snr_value.setText(_provenance(
+            _fmt_number(snr, 1, " dB"), _SRC_BACKEND))
         self.mode_value.setText(mode if mode else _EMPTY)
-        self.freq_value.setText(freq if freq else _EMPTY)
+        self.freq_value.setText(_provenance(
+            freq if freq else _EMPTY, _SRC_SETPOINT))
 
         # 运行时间
         try:
@@ -1223,10 +1268,13 @@ class StatusPanel(QWidget):
             alt = gps.get("alt")
             hdop = gps.get("hdop")
             sats = gps.get("sats")
-            self.gps_sats.setText(str(sats) if sats is not None else "—")
+            self.gps_sats.setText(_provenance(
+                str(sats) if sats is not None else _EMPTY, _SRC_RECEIVER))
             self.gps_lat.setText(f"{lat:.6f}" if lat is not None else "—")
             self.gps_lon.setText(f"{lon:.6f}" if lon is not None else "—")
-            self.gps_alt.setText(f"{alt:.1f} m" if alt is not None else "—")
+            self.gps_alt.setText(_provenance(
+                f"{alt:.1f} m" if alt is not None else _EMPTY,
+                _SRC_GNSS_ELLIPSOID))
             self.gps_hdop.setText(f"{hdop:.1f}" if hdop is not None else "—")
             self.gps_error.setText(format_gst_error(gps.get("gst")))
 
@@ -1279,10 +1327,12 @@ class StatusPanel(QWidget):
         alt = fix_dict.get("altitude_m")
         hdop = fix_dict.get("hdop")
         sats = fix_dict.get("satellites")
-        self.gps_sats.setText(str(sats) if sats is not None else "—")
+        self.gps_sats.setText(_provenance(
+            str(sats) if sats is not None else _EMPTY, _SRC_RECEIVER))
         self.gps_lat.setText(f"{lat:.6f}" if lat is not None else "—")
         self.gps_lon.setText(f"{lon:.6f}" if lon is not None else "—")
-        self.gps_alt.setText(f"{alt:.1f} m" if alt is not None else "—")
+        self.gps_alt.setText(_provenance(
+            f"{alt:.1f} m" if alt is not None else _EMPTY, _SRC_GNSS_ELLIPSOID))
         self.gps_hdop.setText(f"{hdop:.1f}" if hdop is not None else "—")
         self.gps_error.setText(format_gst_error(fix_dict.get("gst")))
         # 可选：最强 5 颗卫星 SNR（无 satellite_signals 字段时显示 '--'，不报错）
@@ -1327,7 +1377,7 @@ class StatusPanel(QWidget):
             self.gps_signals.setText("—")
             return
         parts = [f"#{s.get('id', '?')} {float(s['snr_db']):.0f}dB" for s in ranked]
-        self.gps_signals.setText("  ".join(parts))
+        self.gps_signals.setText(_provenance("  ".join(parts), _SRC_RECEIVER))
 
     @Slot(dict)
     def on_imu_updated(self, imu: dict):
@@ -1367,7 +1417,9 @@ class StatusPanel(QWidget):
         temp = imu.get("temp")
 
         def _fmt(v, nd):
-            return f"{v:.{nd}f}" if v is not None else "—"
+            txt = f"{v:.{nd}f}" if v is not None else _EMPTY
+            # 九轴与温度都是未经标定的原始读数：不标就等同于宣称已校准。
+            return _provenance(txt, _SRC_IMU_RAW)
 
         self.acc_x.setText(_fmt(acc[0], 2))
         self.acc_y.setText(_fmt(acc[1], 2))

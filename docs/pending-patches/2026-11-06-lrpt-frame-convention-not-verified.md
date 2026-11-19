@@ -1,5 +1,9 @@
 # LRPT 帧约定未对齐（not_verified 登记，2026-11-06）
 
+> **本文为当时状态快照**：记录当日工作状态与结论，未逐条复核；
+> 不作现状依据。共 3 条未复核；需要现状请查 `docs/COORDINATION.md`、
+> `docs/known-red-register.md` 与 checklist。
+
 > 状态：**未验证 / 未打通**。本单只登记事实与边界，不声称链路已接通。
 > 触发原因：`weather_panel.DecodeWorker._run_meteor` 曾把上游 CADU 直接喂
 > `compose_visible_image`，返回 None 却报成「段不全或数据损坏」——把格式错

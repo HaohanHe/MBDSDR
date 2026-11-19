@@ -32,33 +32,41 @@ import 'pcm_sink.dart';
 /// | `setMuted`  | `{"muted": bool}`                         | 静音（原生可映射为 gain=0）。 |
 /// | `dispose`   | 无                                        | 停止并释放输出资源。 |
 ///
-/// 原生侧**尚未要求** Dart 返回值；原生可用任意 MethodChannel.Result 应答。
+/// Dart 侧不消费原生返回值；两端实现都以 `result.success(null)` / `result(nil)` 应答。
 ///
 /// ---------------------------------------------------------------
-/// Android（Kotlin/Java，在 MainActivity 的 configureFlutterEngine 注册）
+/// Android（Kotlin，实现在
+/// `mobile/android/app/src/main/kotlin/mbdsdr/app/MainActivity.kt`）
 /// ---------------------------------------------------------------
+/// - channel 在 `configureFlutterEngine` 注册，`when (call.method)` 分支覆盖
+///   `start` / `write` / `setVolume` / `setMuted` / `dispose`（另有文件回放分支）；
 /// - 用 `android.media.AudioTrack`，模式 `MODE_STREAM` 流式写入；
-/// - 配置：采样率 48000、声道 `CHANNEL_OUT_MONO`、编码 `ENCODING_PCM_16BIT`；
+/// - 配置：采样率随 `start` 传入（约定 48000）、声道 `CHANNEL_OUT_MONO`、
+///   编码 `ENCODING_PCM_16BIT`；
 /// - 音频流类型 `AudioManager.STREAM_MUSIC`；
-/// - `write`：`audioTrack.write(bytes, 0, bytes.size, AudioTrack.WRITE_BLOCKING)`；
+/// - `write`：`audioTrack.write(bytes, 0, bytes.size)`（阻塞写）；
 /// - `setVolume`：`audioTrack.setVolume(gain)`；`setMuted`：gain=0；
 /// - `start` 时 `play()`，`dispose` 时 `stop()` + `release()`；
 /// - 播放本身无需危险权限；如要兼容旧设备可声明 `MODIFY_AUDIO_SETTINGS`。
 ///
 /// ---------------------------------------------------------------
-/// iOS（Swift，在 AppDelegate 的 didFinishLaunchingWithOptions 注册）
+/// iOS（Swift，实现在 `mobile/ios/Runner/AppDelegate.swift` 的 `AudioEngineSwift`）
 /// ---------------------------------------------------------------
-/// - 用 `AVAudioEngine` + `AVAudioPlayerNode`（等价的 AudioQueue 亦可）；
+/// - 用 `AVAudioEngine` + `AVAudioPlayerNode`；
 /// - 输出格式：`AVAudioFormat(commonFormat: .pcmFormatInt16, sampleRate: 48000,
 ///   channels: 1, interleaved: false)`；
 /// - 启动前：`AVAudioSession.sharedInstance()` 设 `.playback` category 并 `setActive(true)`；
 /// - `write`：把 `Uint8List` 包成 `AVAudioPCMBuffer` 后 `playerNode.scheduleBuffer(...)` 入队；
 /// - `setVolume`：`playerNode.volume = Float(0..1)`；`setMuted`：volume=0；
-/// - `dispose`：停止 node、断开 engine、deactivate session。
+/// - `dispose`：停止 node、断开 engine、deactivate session；
+/// - 接线状态：同名 channel 与 `start` / `write` / `setVolume` / `setMuted` / `dispose`
+///   分支已在文件内，但 `attach` 注册点目前仍以注释保留
+///   （`didInitializeImplicitFlutterEngine` 里未启用），iOS 链路要在 Xcode 下接线才算接上。
 ///
-/// > 真机待验：本仓库云测环境无法编译/运行 Android/iOS 原生工程，上述 Kotlin/Swift
-/// > 端实现尚未落地、真机出声与原生构建均未验证。Dart 侧契约、量化与单测已就绪，
-/// > 原生侧由后续集成方按本文件契约实现并在真机验证。
+/// > 验证状态：Dart 侧契约、量化（`floatTo16BitPcm`）与单测已就绪；Android 侧实现已进
+/// > `configureFlutterEngine` 的 dispatch，iOS 侧为契约级实现、待接线。**真机出声与原生
+/// > 构建均未验证**——本机没有 Android/iOS 设备，扬声器出声、音量/路由、48 kHz 采样率
+/// > 匹配都没实测。因此文档与产品文案不得宣称「已能听」，也不得称真机已验收。
 class PlatformPcmSink implements PcmSink {
   PlatformPcmSink({MethodChannel? channel})
       : _channel = channel ?? _defaultChannel;

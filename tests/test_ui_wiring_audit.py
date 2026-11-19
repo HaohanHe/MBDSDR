@@ -52,6 +52,23 @@ def _process_events(_unused=None):
     app.processEvents()
 
 
+@pytest.fixture(autouse=True)
+def _isolate_connect_requests():
+    """每个用例前后清空进程级连接请求/会话存储。
+
+    ``connect_request_store`` 是模块级全局状态：别的测试文件里的面板
+    ``set_connected(True)`` 会按设备身份键留下一个尚未结束的会话。
+    本文件断言的是「控件 → 连接载荷」这一层，前提是一次**全新**连接；
+    若沿用外部遗留的会话，写门会拒绝本例的采样率改动，载荷退回归属该
+    会话的默认值（2.4 MS/s），与下拉选中的 1.024 MS/s 不一致。
+    这里只隔离外部状态，不放宽任何断言。
+    """
+    import connect_request_store as store
+    store.reset()
+    yield
+    store.reset()
+
+
 @pytest.fixture(scope="module")
 def mw_window(isolated_profile):
     """真实 MainWindow（隔离 profile）：接线类断言走行为，不扫源码文本。"""

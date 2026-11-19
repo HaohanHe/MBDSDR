@@ -90,7 +90,8 @@ class TestSoapyReadbackTruth:
         from status_panel import StatusPanel
         panel = StatusPanel()
         panel.update_from_backend(backend)
-        assert panel.rx_srate.text() == format_sample_rate(1_000_000.0), \
+        assert panel.rx_srate.text() == (
+            format_sample_rate(1_000_000.0) + "（设备报告）"), \
             "界面必须显示实际值而不是 2.400 MS/s"
 
     def test_no_driver_reply_falls_back_to_request(self, qtapp):

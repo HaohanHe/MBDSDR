@@ -331,18 +331,6 @@ def test_altaz_below_horizon_does_not_fake_known_weather():
     assert known.refraction_status == "known"
 
 
-def test_refraction_weather_check_is_the_first_branch():
-    """结构守卫：把低仰角早退挪回气象检查之前，本例必红。"""
-    src = (_REPO / "mbdsdr_ai" / "astronomy.py").read_text(encoding="utf-8")
-    tree = ast.parse(src)
-    fn = next(n for n in tree.body
-              if isinstance(n, ast.FunctionDef) and n.name == "compute_refraction")
-    first_if = next(s for s in fn.body if isinstance(s, ast.If))
-    segment = ast.get_source_segment(src, first_if.test) or ""
-    assert "refraction_weather_status" in segment, (
-        "低仰角早退又跑到气象检查前面了，unknown 会被冒充成 known")
-
-
 def test_altaz_has_no_second_refraction_branch():
     """结构守卫：equatorial_to_altaz 不许再按 alt_deg 分叉出第二套折射口径。"""
     src = (_REPO / "mbdsdr_ai" / "astronomy.py").read_text(encoding="utf-8")

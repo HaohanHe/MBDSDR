@@ -128,9 +128,9 @@ def test_u02_rssi_is_dbfs_and_missing_is_dash_not_zero():
     panel.on_status_updated({})
     assert panel.rssi_value.text() == "—", "缺键不得默认成 0 造假读数"
     panel.on_status_updated({"rssi": 42})
-    assert panel.rssi_value.text() == "42 dBµV"
+    assert panel.rssi_value.text() == "42 dBµV（设备报告）"
     panel.update_signal_level(-45.2)
-    assert panel.rssi_value.text() == "-45.2 dBFS"
+    assert panel.rssi_value.text() == "-45.2 dBFS（实测）"
     labels = [w.text() for w in panel.findChildren(QLabel)]
     assert all("dBm" not in t for t in labels), labels
     for out in (mw._fmt_rssi_mcp(42), mw._fmt_dbfs(-45.2)):
@@ -703,7 +703,7 @@ def test_u03_troubleshooting_next_steps_use_ms_per_s_for_adsb_fs():
     assert "（ADS-B 需 fs=2 MS/s 或 4 MS/s）" in _TR
 
 
-def test_u02_gnss_psd_fields_never_labeled_dbm():
+def test_u02_gnss_psd_fields_never_labeled_dbm(monkeypatch):
     """U-02：GNSS PSD 字段名沿用 *_dbm，但注释与展示必须写「相对读数，非 dBm」。"""
     _GNSS = open(os.path.join(_ROOT, "mbdsdr_ai", "gnss_monitor.py"),
                  encoding="utf-8").read()
@@ -721,14 +721,16 @@ def test_u02_gnss_psd_fields_never_labeled_dbm():
                            peak_power_dbm=-38.0,
                            interference_type=SimpleNamespace(value="cw"),
                            confidence=0.9)
-    gm.monitor_gnss_band = lambda *a, **k: fake
+    # 必须用 monkeypatch：直接赋值会把替身留在模块全局，污染同进程后续用例
+    # （gnss_monitor_all 会拿到这个缺 band_name 的 SimpleNamespace 而 AttributeError）。
+    monkeypatch.setattr(gm, "monitor_gnss_band", lambda *a, **k: fake)
     out = tools._gnss_monitor_band(
         {"band_name": "L1", "center_freq_hz": 1575.42e6})
     assert "平均功率: -40.0 dB（相对读数，非 dBm）" in out
     assert "峰值功率: -38.0 dB（相对读数，非 dBm）" in out
-    gm.interference_direction_finding = lambda d: {
+    monkeypatch.setattr(gm, "interference_direction_finding", lambda d: {
         "estimated_direction_deg": 90.0, "peak_rssi_dbm": -70,
-        "confidence": 0.8, "note": "", "symmetric_check": ""}
+        "confidence": 0.8, "note": "", "symmetric_check": ""})
     txt, data = tools._gnss_direction_find({"rssi_by_azimuth": {"0": -82}})
     assert "峰值RSSI: -70（相对读数 dB，非 dBm）" in txt
     assert data["interference_az"] == 90.0

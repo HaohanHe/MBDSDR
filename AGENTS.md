@@ -160,9 +160,11 @@ offscreen）基线 **155/155 全绿**（2026-10-20 实测；含跨语言对拍 c
 i18n l10n、freq_input、快速调谐/首启向导接线、core::AppSettings 设置隔离）。
 新增测试目标只增不减；测试目标数与 ctest 注册数对不上按 bug 处理。
 
-移动端（`mobile/`）：`flutter test` 基线 **447 passed**（整合轮本地 Flutter 3.47.7
-实测：phase67 帮助页/首跑引导 5 项 + AI 工具描述门禁 15 项 + phase67.1 工具面
-i18n 三语约 40 项全绿；404→447 是远端新增测试入库后的实数，只升不降）。
-`flutter analyze` 零问题（Flutter 3.47.7，SDK 约束 >=3.9，勿用 /opt/flutter
-旧版 3.0 跑）。注意：跑测试前若报 `AppLocalizations` 未定义，先
-`flutter gen-l10n`（gen 产物按 l10n.yaml 输出到 lib/l10n/gen，不入库）。
+移动端（`mobile/`）：`flutter test` 基线 **527 passed**（2026-11-19 Flutter 3.50.0 /
+Dart 3.14.0 实测；旧记录 478 为指天视图落地前、503 为指天视图落地后，只升不降）。
+`flutter analyze` **0 error / 0 warning**（3.50.0；62 条 info，其中 58 条是
+`material.dart` 等包废弃提示，其余为风格提示）；`flutter build apk --debug` 可出包。工具链装在仓库外
+（`D:\mbdsdr\toolchain\{flutter,android-sdk,gradle-home,pub-cache}`），
+AGP 最低 9.1.1（项目 `settings.gradle.kts` 已对齐），`launcher` 图标在
+`android/app/src/main/res/mipmap-*`。注意：跑测试前若报 `AppLocalizations`
+未定义，先 `flutter gen-l10n`（gen 产物按 l10n.yaml 输出到 lib/l10n/gen，不入库）。

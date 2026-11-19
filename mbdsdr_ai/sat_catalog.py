@@ -5,7 +5,8 @@
 ----------------
 在它之前，同一份 6 颗星的目录被抄了两遍：
 ``orbit.BUILTIN_SATS``（名称→NORAD）与 ``rf_sky_view.SATELLITE_META``
-（名称→NORAD/频率/类别），而 Celestrak 刷新也只更新这 6 个 NORAD。
+（名称→NORAD/频率/类别，该局部重复表现已删除），而 Celestrak 刷新也只更新
+这 6 个 NORAD。
 结果是：**过境、跟踪、点星调谐、气象解码全被这 6 颗卡住**——
 用户手里有别的星的 TLE，系统认不出来。
 
@@ -27,8 +28,11 @@
 与既有模块的关系
 ----------------
 不替代 ``SatelliteTracker``（它管 TLE 取用与刷新）；本模块只管"目录"。
-``orbit.BUILTIN_SATS`` / ``rf_sky_view.SATELLITE_META`` 从这里的
-``BUILTIN_META`` 派生，由 ``tests/test_sat_catalog.py`` 钉住一致性。
+``orbit.BUILTIN_SATS`` 从这里的 ``BUILTIN_META`` 派生，由
+``tests/test_sat_catalog.py`` 钉住一致性。桌面加载器
+``desktop/rf_sky_view._load_celestrak_tle_catalog`` 已删除自带的
+``SATELLITE_META`` 重复表，只消费本模块的 ``merged_catalog()`` 与
+``BUILTIN_CATNRS``。
 """
 
 from __future__ import annotations

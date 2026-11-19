@@ -9,6 +9,7 @@
 // 用内存 FakeRadioApi（实现 RadioApi），不触碰真实网络。
 library;
 
+import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
@@ -145,6 +146,23 @@ class _PanelRadio extends ChangeNotifier implements RadioApi {
   void resumeScan() {}
 }
 
+/// 已连接 fake：可注入单帧，用于状态栏读数来源断言。
+class _ConnectedPanelRadio extends _PanelRadio {
+  final StreamController<SpectrumFrame> _frames =
+      StreamController<SpectrumFrame>.broadcast();
+
+  void addFrame(SpectrumFrame frame) => _frames.add(frame);
+
+  @override
+  Stream<SpectrumFrame> get spectrumStream => _frames.stream;
+
+  @override
+  void dispose() {
+    _frames.close();
+    super.dispose();
+  }
+}
+
 Widget _wrap(_PanelRadio radio) => MaterialApp(
       debugShowCheckedModeBanner: false,
       home: Scaffold(
@@ -258,6 +276,36 @@ void main() {
     expect(selectedColor, AppTokens.selectedFill);
     final normalColor = bg.resolve(<WidgetState>{});
     expect(normalColor, Colors.transparent);
+  });
+
+  testWidgets('状态栏读数带来源后缀（设定值/实测峰值/设备报告）', (tester) async {
+    tester.view.physicalSize = const Size(390, 844);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
+
+    final radio = _ConnectedPanelRadio();
+    radio.status = ConnectionStatus.connected;
+    radio.autoGain = false;
+    await tester.pumpWidget(_wrap(radio));
+    await tester.pump();
+
+    // 无帧：RSSI 空态原样「—」，不叠来源后缀。
+    expect(find.text('RSSI —'), findsOneWidget);
+
+    radio.addFrame(SpectrumFrame(
+      db: Float64List.fromList(<double>[-80.0, -40.0]),
+      centerFreqHz: 145e6,
+      sampleRateHz: 2.048e6,
+      fftSize: 2,
+    ));
+    await tester.pump();
+    await tester.pump();
+
+    // 数值本身仍按原格式断言；来源只是后缀。
+    expect(find.text('145.000000 MHz（设定值）'), findsOneWidget);
+    expect(find.text('RSSI -40.0 dBFS（实测峰值）'), findsOneWidget);
+    expect(find.text('2.048 MS/s（设备报告）'), findsOneWidget);
+    expect(find.text('增益 20.0 dB（设备报告）'), findsOneWidget);
   });
 
   testWidgets('hero 大频率读数为 medium 字重且不裁切', (tester) async {

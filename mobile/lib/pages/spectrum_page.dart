@@ -10,6 +10,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import '../app/readout_source.dart';
 import '../app/tokens.dart';
 import '../dsp/fft_processor.dart';
 import '../models/bookmark.dart';
@@ -373,12 +374,20 @@ class _StatusBar extends StatelessWidget {
         crossAxisAlignment: WrapCrossAlignment.center,
         children: [
           _StatusChip(
-            '${(controller.freqHz / 1e6).toStringAsFixed(6)} MHz',
+            withSource(
+              '${(controller.freqHz / 1e6).toStringAsFixed(6)} MHz',
+              ReadoutSources.setpoint,
+            ),
             primary: true,
           ),
           _StatusChip(controller.mode.label),
           _StatusChip(
-            rssi == null ? 'RSSI —' : 'RSSI ${rssi.toStringAsFixed(1)} dBFS',
+            rssi == null
+                ? 'RSSI —'
+                : withSource(
+                    'RSSI ${rssi.toStringAsFixed(1)} dBFS',
+                    ReadoutSources.measuredPeak,
+                  ),
           ),
           // 静噪：基于解调音频真实 RMS 电平的门控开合，克制小字。
           _StatusChip(
@@ -386,11 +395,17 @@ class _StatusBar extends StatelessWidget {
                 ? (controller.squelchOpen ? '静噪 有信号' : '静噪 静音')
                 : '静噪关闭',
           ),
-          _StatusChip('${(controller.sampleRateHz / 1e6).toStringAsFixed(3)} MS/s'),
+          _StatusChip(withSource(
+            '${(controller.sampleRateHz / 1e6).toStringAsFixed(3)} MS/s',
+            ReadoutSources.deviceReport,
+          )),
           _StatusChip(
             controller.autoGain
                 ? '自动增益'
-                : '增益 ${controller.gainDb.toStringAsFixed(1)} dB',
+                : withSource(
+                    '增益 ${controller.gainDb.toStringAsFixed(1)} dB',
+                    ReadoutSources.deviceReport,
+                  ),
           ),
         ],
       ),

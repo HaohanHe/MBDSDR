@@ -9,7 +9,7 @@
 > 指纹 = sha256(`文档\0断言原文`)[:12]；断言原文改动即指纹变化 = 按新增判红。
 > 在途未提交的 docs 改动不享本白名单——那正是门禁要拦的「修改后无证据」。
 
-<!-- waived-total: 8 -->
+<!-- waived-total: 6 -->
 
 建表口径：HEAD 断言 144 条 = 可证实 2 + 文档过期 46 + 无 hash 96；白名单只覆盖后两类。
 
@@ -22,6 +22,4 @@
 | 16 | docs/COORDINATION.md | d8cb2fdab266 | 95 passed，agent 采样相关 21 passed。文档 §10-3 已改为"已落地"。 | 未写 commit hash，无法用 git 复核；本轮只锁增量，存量由该文档 owner 逐条补 hash 或删断言 |
 | 47 | docs/design-basis-sky-figma-note.md | 3eea4e7e7446 | **对「334×334 大圆」这一描述的更正**：`284_177/index.module.scss` 写的是 | 未写 commit hash，无法用 git 复核；本轮只锁增量，存量由该文档 owner 逐条补 hash 或删断言 |
 | 52 | docs/hardcoded-parameters.md | 707ff33e1312 | - **A11 调谐步进**：**更正**——C++ 调谐步进本就是 10 kHz（§D-2 撤回）， | 未写 commit hash，无法用 git 复核；本轮只锁增量，存量由该文档 owner 逐条补 hash 或删断言 |
-| 64 | docs/limitations-register.md | 3ca1335288b3 | enum 校验先于 handler），**真红、已修**； | 未写 commit hash，无法用 git 复核；本轮只锁增量，存量由该文档 owner 逐条补 hash 或删断言 |
 | 93 | docs/reference-mechanisms.md | 815c7035b8d7 | > **2026-11-05 更正**：`reference/` 下不存在 `decoders`、`blackmagic` 目录；`satdump` 已在本轮补读。见 §8。 | 未写 commit hash，无法用 git 复核；本轮只锁增量，存量由该文档 owner 逐条补 hash 或删断言 |
-| 96 | docs/reference-mechanisms.md | a8b23ef93460 | > - 「决定」三态：**照做**（机制已按参考思路落地，保持）／**改良后做**（路线不同或只落一半，已落地或已排给某条线）／**明确不做**（给理由与可追踪的挂账/验收门）。 | 未写 commit hash，无法用 git 复核；本轮只锁增量，存量由该文档 owner 逐条补 hash 或删断言 |

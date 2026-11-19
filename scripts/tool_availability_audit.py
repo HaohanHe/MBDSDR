@@ -47,6 +47,7 @@ RUNS, HONEST, STUB, BROKEN = "RUNS", "HONEST", "STUB", "BROKEN"
 
 # 缺什么才能跑——按提示词归类，用于 md 的「缺什么」列
 _MISSING_HINTS = (
+    (("赤道仪",), "硬件：赤道仪/望远镜（Alpaca）"),
     (("无设备", "未连接", "not connected", "no device", "no sdr", "设备未", "未发现可用",
       "无连接设备", "无连接仪器", "请先连接", "未找到设备", "could not open", "failed to open",
       "无法打开", "permission denied", "需先连接", "未插", "无可用设备", "实时 sdr",
@@ -121,7 +122,7 @@ GROUP_ACTION = {
 
 # 名字先于文案判定：这些工具缺的是外设而不是「基本 SDR」
 # sky_look_at 不碰硬件，只缺桌面 UI 执行器 → 按 G2 的「界面类需在桌面端运行」归类。
-_G2_NAME_PREFIX = ("gimbal_", "sky_gimbal", "sky_track", "sky_tune", "sky_look_at",
+_G2_NAME_PREFIX = ("gimbal_", "mount_", "sky_gimbal", "sky_track", "sky_tune", "sky_look_at",
                    "vna_", "radio_", "instrument", "satdump")
 
 
@@ -357,6 +358,15 @@ _SPECIAL_ARGS = {
     "ccsds_encode_frame": lambda tmp: {"data": [1, 2, 3, 4, 5]},
     "groestl_hash": lambda tmp: {"data": "test"},
     "wfreq_demod": lambda tmp: {"iq": _cplx_iq(2048)},
+    # 星点解算需要合法星点/时刻/站址；替身只用来走到 solver 探测，
+    # 不证明夜空已对准（tetra3 未装时如实报 solver_unavailable）。
+    "sky_pointing_check": lambda tmp: {
+        "stars": [[100.0 + 10.0 * i, 200.0 + 7.0 * i] for i in range(8)],
+        "width_px": 1920, "height_px": 1080, "fov_deg": 8.0,
+        "commanded_az_deg": 180.0, "commanded_el_deg": 45.0,
+        "site_lat_deg": 45.0, "site_lon_deg": 0.0,
+        "at_utc": "2026-11-19T12:00:00Z",
+    },
     # ── P13 复核批：把「替身不满足输入」改成「合法替身」，验证是真能跑 ──
     "coord_ecef_to_eci": lambda tmp: {"pos_ecef": [7000.0, 0.0, 0.0],
                                       "vel_ecef": [0.0, 6.0, 0.0],

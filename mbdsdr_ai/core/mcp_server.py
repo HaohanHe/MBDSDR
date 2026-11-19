@@ -46,6 +46,7 @@ from ..tool_guard import AUDIT_LOG_DEFAULT as _AUDIT_LOG_DEFAULT
 from ..tool_guard import AUDIT_LOG_ENV as _AUDIT_LOG_ENV
 from ..tool_guard import AuditLog as _AuditLog
 from ..error_catalog import suggestion, user_message
+from ..bookmark_manager import StoreWriteError
 from ..tool_policy import ToolPolicy, normalize_key
 from ..mcp_client import MCPClientManager
 from ..tx_guard import (GATE_MANUAL_UNTRUSTED, GateDecision, action_digest,
@@ -1078,11 +1079,26 @@ def _build_tool_table(toolset: Optional["MCPToolSet"] = None) -> List[Dict[str, 
         _schema({"norad_name": _STR}, ["norad_name"]), _sat_link_tuning)
 
     # ---- 书签 ----
+    def _add_bookmark_tool(c: SDRController, a: Dict[str, Any]) -> Any:
+        try:
+            return c.add_bookmark(float(a["freq_hz"]), a["name"],
+                                  a.get("mode", "FM"), a.get("group", ""))
+        except StoreWriteError as e:
+            # 只读/占用盘：如实返回可读失败，不吞成成功、不换路径重试。
+            return {"ok": False, "error": "write_failed", "message": str(e),
+                    "outcome": "error"}
+
+    def _delete_bookmark_tool(c: SDRController, a: Dict[str, Any]) -> Any:
+        try:
+            return {"ok": c.delete_bookmark(int(a["id"]))}
+        except StoreWriteError as e:
+            return {"ok": False, "error": "write_failed", "message": str(e),
+                    "outcome": "error"}
+
     add("add_bookmark", "添加书签。",
         _schema({"freq_hz": _NUM, "name": _STR, "mode": _STR, "group": _STR},
                 ["freq_hz", "name"]),
-        lambda c, a: c.add_bookmark(float(a["freq_hz"]), a["name"],
-                                    a.get("mode", "FM"), a.get("group", "")), write=True)
+        _add_bookmark_tool, write=True)
 
     add("list_bookmarks", "列出书签（可按 group 过滤）。",
         _schema({"group": _STR}),
@@ -1090,7 +1106,7 @@ def _build_tool_table(toolset: Optional["MCPToolSet"] = None) -> List[Dict[str, 
 
     add("delete_bookmark", "按 id（频率 Hz）删除书签。",
         _schema({"id": _INT}, ["id"]),
-        lambda c, a: {"ok": c.delete_bookmark(int(a["id"]))}, write=True)
+        _delete_bookmark_tool, write=True)
 
     add("find_nearest_bookmark", "找离给定频率最近的书签。",
         _schema({"freq_hz": _NUM}, ["freq_hz"]),

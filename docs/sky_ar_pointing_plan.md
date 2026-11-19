@@ -81,18 +81,18 @@ tools   工具面：模型编排以上能力
 
 ## 7. 落地切片（每片可独立验收）
 
-1. **位姿融合（纯逻辑）**：**已落地**。`fuse_poses` / `view_params` / `identify_direction`；`tests/test_sky_pointing.py` 16 条。
-2. **解算适配（契约 + 接入）**：**已落地（替身验证）**。`solver_status` / `solve_frame` / `solve_tetra3` / `solve_astap`；星点 < 8、超时、乱码等分支有测试；真实解算与真实夜空未验证。
-3. **桌面指向模式**：**已落地（离屏）**。HUD 按 L0–L4 差异化；`RFSkyView` 开关默认关，只改 `rf_sky_view.py`，未改 `main_window.py`；真实相机/IMU 未验证。
+1. **位姿融合（纯逻辑）**：**已落地**〔证：`18d1a06b` — `mbdsdr_ai/sky_pointing.py:103` — `def fuse_poses`〕。`fuse_poses` / `view_params` / `identify_direction`；`tests/test_sky_pointing.py` 16 条。
+2. **解算适配（契约 + 接入）**：**已落地（替身验证）**〔证：`18d1a06b` — `mbdsdr_ai/sky_solve.py:305` — `def solve_tetra3`〕。`solver_status` / `solve_frame` / `solve_tetra3` / `solve_astap`；星点 < 8、超时、乱码等分支有测试；真实解算与真实夜空未验证（缺真实相机/星点）。
+3. **桌面指向模式**：**已落地（离屏）**〔证：`30f62a49` — `desktop/rf_sky_view.py:2193` — `self._sky_pointing_mode`〕。HUD 按 L0–L4 差异化；`RFSkyView` 开关默认关，只改 `rf_sky_view.py`，未改 `main_window.py`；真实相机/IMU 未验证（缺硬件）。
 4. **望远镜前视**：**未验证**。无真实手机/望远镜/IMU；目镜后仅作可选增强。
 
 ### 已知阻塞
 
-窄视场已解决：`ViewState` 支持按视图覆盖 `min_fov`（0.5–180°），桌面默认仍 30°。
+窄视场已解决〔证：`18d1a06b` — `mbdsdr_ai/sky_interaction.py:215` — `min_fov`〕：`ViewState` 支持按视图覆盖 `min_fov`（0.5–180°），桌面默认仍 30°。
 目镜 2.3° 可原样渲染（`tests/test_sky_view_fov_override.py`）。
 
 真实硬件（相机/IMU/GNSS 模块/望远镜）与真实星点解算仍未在夜空验证，相关项在
-checklist 保持 `not_verified`。
+checklist 保持 `not_verified`（缺真实相机/IMU/望远镜与夜空窗口，无法验证）。
 
 
 

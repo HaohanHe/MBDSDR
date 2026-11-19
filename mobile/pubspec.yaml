@@ -29,6 +29,10 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+  # 指天视图的数据包：恒星表（J2000）+ 星官目录 + 数据许可。
+  # 由 scripts/build_mobile_sky_assets.py 生成；不入资产声明就等于设备上读不到。
+  assets:
+    - assets/sky/
   # 官方 gen-l10n：pub get / run / test 时按 l10n.yaml 生成 AppLocalizations
   # 到 lib/l10n/gen/（生成进源码目录，非 synthetic package）。
   generate: true

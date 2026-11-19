@@ -1,5 +1,9 @@
 # 频谱 / 瀑布显示层缺口调研（只读）
 
+> **本文为当时状态快照**：记录当日工作状态与结论，未逐条复核；
+> 不作现状依据。共 8 条未复核；需要现状请查 `docs/COORDINATION.md`、
+> `docs/known-red-register.md` 与 checklist。
+
 > 证据状态：E4——本文件数字未逐条绑定原始件/复跑命令，引用前须复核（判据见 docs/evidence-standard.md）。
 - 日期：2026-11-11
 - 基线：`MBDSDR@b6bc856c`（工作区另有他线未提交改动，本次未触碰）

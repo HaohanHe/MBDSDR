@@ -1,5 +1,9 @@
 # 待落库补丁：`docs/known-red-register.md`（`check_red_lifecycle` 7 条 FAIL 清账）
 
+> **本文为当时状态快照**：记录当日工作状态与结论，未逐条复核；
+> 不作现状依据。共 1 条未复核；需要现状请查 `docs/COORDINATION.md`、
+> `docs/known-red-register.md` 与 checklist。
+
 > **状态**：**已落库**（register 提交 `b4e06787`，`APPLY_HEAD=20d71e92`）。
 > 实际执行 §0、§3、§4：K18 的绑定在落库前又被并行更新推进，已按当次 HEAD
 > `20d71e92` 重跑并更新（`1 passed` / `文档块一致`）；K20 已由另一条线以

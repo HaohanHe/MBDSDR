@@ -62,6 +62,11 @@ configs = ["PyYAML"]  # frame_layout_tool 布局表 YAML 面（可选，缺失�
 # time_format.py 的 Windows 本地时区回退用 dateutil.tz（tzwinlocal/tzlocal），
 # try/except 降级；缺它只废该回退路径，不影响主包导入。
 timezone = ["python-dateutil"]
+# pointing：星点解算只在 sky_solve.py 的函数内探测（import tetra3 被
+# try/except ImportError 包住），缺失时 solver_status() 返回
+# available=False 并给出原因，ASTAP 外部可执行文件仍可用；因此是可选
+# 依赖，不进核心依赖。
+pointing = ["tetra3"]
 test = ["pytest"]
 
 [project.urls]

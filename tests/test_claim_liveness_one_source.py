@@ -42,13 +42,32 @@ def _write_marker(tmp_path: Path, path: str, age_min: float, ttl_min: float = 60
     return now
 
 
-def test_liveness_function_lives_in_claim_window():
-    """两侧都 import 它，且谁都不再自己算 TTL。"""
-    assert callable(cw.claim_active)
-    for name in ("check_claim_coordination.py", "audit_unclaimed_changes.py"):
-        src = (ROOT / "scripts" / name).read_text(encoding="utf-8")
-        assert "claim_active" in src, f"{name} 没有用 claim_active"
-        assert 'payload.get("ttl_min")' not in src, f"{name} 仍在自算 TTL"
+def test_both_scripts_call_the_single_liveness_function(tmp_path, monkeypatch):
+    """闸与审计都必须真的调用 ``claim_window.claim_active``（行为计数）。
+
+    不再扫源码：给两边模块里的 `claim_active` 各装一个计数器，跑真实路径，
+    两边都必须至少调一次。谁改回自己算 TTL，这个计数器就归零。
+    """
+    calls = {"gate": 0, "audit": 0}
+    real = cw.claim_active
+
+    def _gate_spy(payload, now):
+        calls["gate"] += 1
+        return real(payload, now)
+
+    def _audit_spy(payload, now):
+        calls["audit"] += 1
+        return real(payload, now)
+
+    monkeypatch.setattr(gate, "claim_active", _gate_spy)
+    monkeypatch.setattr(audit, "claim_active", _audit_spy)
+
+    now = _write_marker(tmp_path, "desktop/y.py", age_min=5)
+    gate.active_claims_for_paths(["desktop/y.py"], now=now, marker_dir=tmp_path)
+    audit._active_owner("desktop/y.py", now, marker_dir=tmp_path)
+
+    assert calls["gate"] > 0, "闸没有调用 claim_active（可能又自己算 TTL）"
+    assert calls["audit"] > 0, "审计没有调用 claim_active（可能又自己算 TTL）"
 
 
 def test_55_minutes_both_say_active(tmp_path):

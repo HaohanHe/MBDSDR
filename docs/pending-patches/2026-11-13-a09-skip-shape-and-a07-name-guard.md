@@ -1,5 +1,9 @@
 # 待修：A09 skip 形状判据 + A07 调用参数守卫判据
 
+> **本文为当时状态快照**：记录当日工作状态与结论，未逐条复核；
+> 不作现状依据。共 2 条未复核；需要现状请查 `docs/COORDINATION.md`、
+> `docs/known-red-register.md` 与 checklist。
+
 > 生成：2026-11-13（A03/A09 收口线）
 > **本单只写判据修法与反证设计，不改 `tools/axioms/*`、不改 `scripts/axioms.py`。**
 > 归属：**公理棘轮线**。

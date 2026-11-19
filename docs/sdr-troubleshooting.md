@@ -138,9 +138,7 @@ python scripts/sdr_diag.py --json
 -Force` 报成功却杀不掉，`taskkill /F` 报「There is no running instance of
 the task」。原因：旧版脚本在自身进程内 `TerminateProcess`，而 librtlsdr 的
 同步读卡在驱动里，内核无法回收该线程。这些进程很可能一直占着 RTL-SDR 的
-USB 句柄。**处置：重启系统**（拔插设备不一定够）。此后的版本已改为设备
-I/O 子进程隔离 + 启动预检（退出码 5），不会再生新残留；已存在的残留仍需
-重启清理。
+USB 句柄。**处置：重启系统**（拔插设备不一定够）。此后的版本已改为设备 I/O 子进程隔离 + 启动预检（退出码 5）〔证：`48f6a1ba` — `scripts/sdr_diag.py:19` — `--_worker`〕，不会再生新残留；已存在的残留仍需重启清理。
 
 同期旁证：
 

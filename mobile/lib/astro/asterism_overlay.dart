@@ -22,12 +22,12 @@
 /// 用户在边缘看到线延伸出去，自己就知道"那边还有"。
 /// 同时输出 `membersInView / membersTotal`，让上层能说"你只看到其中一段"。
 ///
-/// 验证记录（2026-11-18）
+/// 验证记录
 /// ----------
 /// 算法由 `tests/test_mobile_sky_algorithms.py` 在 Python 侧同式复现并对拍；
-/// Dart 侧已通过 `flutter analyze`（0 error）与全仓 `flutter test`（478 passed），
-/// 工具链 Flutter 3.50.0 / Dart 3.14.0，位于 `D:/mbdsdr/toolchain/flutter`。
-/// 数据加载部分（`dart:convert` / `Uint8List`）已随全仓测试实际执行。
+/// Dart 侧行为用例见 `test/asterism_overlay_test.dart`（合成星表解析、坏字节
+/// 必抛、视场对准 / 裁边 / 转开三态），全仓验证状态与数字以 `mobile/README.md`
+/// 为准。工具链 Flutter 3.50.0 / Dart 3.14.0，位于 `D:/mbdsdr/toolchain/flutter`。
 library;
 
 import 'dart:convert';

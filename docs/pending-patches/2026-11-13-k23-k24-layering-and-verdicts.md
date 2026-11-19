@@ -1,5 +1,9 @@
 # pending patch：K23 分层收敛 + K24 逐项定性（2026-11-13）
 
+> **本文为当时状态快照**：记录当日工作状态与结论，未逐条复核；
+> 不作现状依据。共 6 条未复核；需要现状请查 `docs/COORDINATION.md`、
+> `docs/known-red-register.md` 与 checklist。
+
 **为什么是 pending**：`docs/known-red-register.md` 现由「残留收口线/6ae85f56」持有
 （claim 至 06:11 左右），本线 `claim` 被拒。按协调规矩不抢、不在工作树改共享文件，
 两段替换文本先落在这里；谁拿到 claim 谁整段替换。

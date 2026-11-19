@@ -1,5 +1,9 @@
 # 交接单：2026-11-06 深夜 SDR 后端 / 回放链只读审计（本线未代改部分）
 
+> **本文为当时状态快照**：记录当日工作状态与结论，未逐条复核；
+> 不作现状依据。共 1 条未复核；需要现状请查 `docs/COORDINATION.md`、
+> `docs/known-red-register.md` 与 checklist。
+
 > 来源：Explore 只读审计（thoroughness: very thorough），本线逐条核过证据位置。
 > 本线**已修并落库**的是 `bd2f8878`（配置/增益/布局三域）与下一提交
 > （`sat_passes.py` 窗口硬上界 + 擦边补点、`skyengine/satellites.py` 升落二分）。

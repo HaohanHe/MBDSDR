@@ -430,6 +430,9 @@ def test_clamped_dso_pick_radius_follows_symbol(monkeypatch):
             vmag = np.array([3.0])
             name = np.array([""])
             hyg_id = np.array([-1])
+            # 生产 _find_body_at 会读 sel.hip[i]（HIP 编号，用于星官名查询）；
+            # 假星没有真实 HIP，用 -1 占位，与 hyg_id 的缺省口径一致。
+            hip = np.array([-1])
             ra_deg = np.array([ra_s])
             dec_deg = np.array([dec_s])
             bv = np.array([np.nan])

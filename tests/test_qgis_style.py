@@ -202,11 +202,12 @@ class TestNoFabricatedFields:
                 f"{layer} 引用了不存在的 elevation 字段（真实字段是 alt_m）"
             assert "lat" not in used and "lon" not in used, \
                 f"{layer} 坐标是几何，不是属性字段"
-        # 文本级兜底：不允许以任何形式出现 "elevation" 属性名
+        # 结构级兜底：QML 是 XML，按元素属性查，不做子串匹配
         for filename in STYLES.values():
-            text = (tmp_path / "styles" / filename).read_text(encoding="utf-8")
-            assert 'name="elevation"' not in text
-            assert 'fieldName="elevation"' not in text
+            root_el = ET.parse(tmp_path / "styles" / filename).getroot()
+            assert not any(el.get("name") == "elevation" for el in root_el.iter())
+            assert not any(el.get("fieldName") == "elevation"
+                           for el in root_el.iter())
 
 
 class TestFailureMode:

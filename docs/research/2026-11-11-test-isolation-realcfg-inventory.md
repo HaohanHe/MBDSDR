@@ -1,5 +1,9 @@
 # 测试配置隔离系统修复：真实配置污染清单（REALCFG）
 
+> **本文为当时状态快照**：记录当日工作状态与结论，未逐条复核；
+> 不作现状依据。共 2 条未复核；需要现状请查 `docs/COORDINATION.md`、
+> `docs/known-red-register.md` 与 checklist。
+
 > 日期：2026-11-11
 > 范围：`tests/` 下所有构造 `MainWindow()` 的 fixture + 用例体内直接构造
 > 结论口径：全部数据来自实测（pytest 输出 / 审计钩子 / reg export），静态推断单独标注

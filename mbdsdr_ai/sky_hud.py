@@ -261,9 +261,11 @@ def _format_label(name: str, mag: Optional[float],
     if name:
         parts.append(name)
     if distance is not None:
-        parts.append(f"{distance:.2f}°")
+        # 角距由融合位姿与目标坐标现算（模型推算），不是独立观测。
+        parts.append(f"{distance:.2f}°（推算）")
     if mag is not None:
-        parts.append(f"{mag:.1f}等")
+        # 星等来自星表/目标自述，非本次观测。
+        parts.append(f"{mag:.1f}等（星表）")
     return " · ".join(parts)
 
 
@@ -373,15 +375,16 @@ def _sources_text(sources: Mapping[str, Any]) -> str:
     time_source = str(time_block.get("source") or "").strip().lower()
     gnss_time = str(gnss.get("time_source") or "").strip().lower()
     if time_source == "gnss" or gnss_time in ("pps", "nmea"):
-        parts.append("时间：卫星授时")
+        # 本仓无 PPS 接线：卫星授时只到整秒级，别读成高精度时间。
+        parts.append("时间：卫星授时（整秒级，无秒脉冲）")
     else:
-        parts.append("时间：系统时钟")
+        parts.append("时间：系统时钟（未校准）")
 
     site_source = str(site.get("source") or "").strip().lower()
     if site_source == "gnss":
-        parts.append("位置：GNSS")
+        parts.append("位置：GNSS（接收机观测）")
     elif site_source == "manual":
-        parts.append("位置：手动位置")
+        parts.append("位置：手动位置（未校准）")
     else:
         parts.append("位置：未设置")
 

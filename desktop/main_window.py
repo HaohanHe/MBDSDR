@@ -940,6 +940,23 @@ class _ConnectRelay(QObject):
     finished = Signal(int)
 
 
+#: 冷启动形态的合法取值；与设置项 app_mode_default 的枚举一致。
+_APP_MODE_DEFAULT_CHOICES = ("ide", "planetarium")
+
+
+def _normalize_app_mode_default(value) -> str:
+    """把 app_mode_default 归一为 ide/planetarium；空/坏值/坏类型一律 ide。
+
+    不抛异常：配置是用户可手改的明文 JSON，坏值不能让主窗口起不来。
+    大小写与首尾空白按 app_mode 既有口径归一（"Planetarium" 视为合法）。
+    """
+    try:
+        text = str(value or "").strip().lower()
+    except Exception:
+        return "ide"
+    return text if text in _APP_MODE_DEFAULT_CHOICES else "ide"
+
+
 class MainWindow(QMainWindow):
     """MBDSDR 主窗口。"""
 
@@ -2788,7 +2805,9 @@ class MainWindow(QMainWindow):
         self._planetarium_page = self._build_planetarium_page()
         self._mode_stack.addWidget(self._planetarium_page)
         self.setCentralWidget(self._mode_stack)
-        self._app_mode = "ide"
+        # 冷启动初始形态来自设置项 app_mode_default（默认 ide；未配置/坏值/
+        # 读异常一律 ide——旧行为不变）。真正的换页在下面走既有入口。
+        self._app_mode = self._read_app_mode_default()
         self._sky_restore_info: Optional[dict] = None
         # IDE 形态下的「星象仪沉浸」：收起中/右两栏与左页签条，让天空铺满
         # 应用窗口。它是**布局状态**，不改窗口的 fullscreen 标志——窗口全屏
@@ -2802,6 +2821,12 @@ class MainWindow(QMainWindow):
         # 主窗口留在 IDE——见 _PlanetariumWindow 的用户口径。
         self._planetarium_window: Optional[_PlanetariumWindow] = None
         self._planetarium_window_layout = None
+        # 初始标志位不是切换本身：_enter_planetarium 以 _app_mode=="planetarium"
+        # 判「已在形态内」并直接返回，所以首次进入必须先回到 ide，再走既有
+        # set_app_mode（它负责换页/换父/写 app_mode）。默认 ide 时下方是空操作。
+        if self._app_mode == "planetarium":
+            self._app_mode = "ide"
+            self.set_app_mode("planetarium")
 
     def _build_planetarium_page(self) -> QWidget:
         """星象仪容器页：天空铺满 + 底部瀑布 + 天空右上角形态浮层。
@@ -3955,6 +3980,14 @@ class MainWindow(QMainWindow):
             return
         if getattr(self, "_app_mode", "ide") == "planetarium":
             self.set_app_mode("ide")
+
+    def _read_app_mode_default(self) -> str:
+        """读冷启动默认形态；未配置/坏值/读异常一律 ide（不崩、不改旧行为）。"""
+        try:
+            raw = self.settings.get("app_mode_default", "ide")
+        except Exception:
+            return "ide"
+        return _normalize_app_mode_default(raw)
 
     def _restore_app_mode(self) -> None:
         """启动恢复上次顶层形态（settings 权威源；读不到/异常回退 IDE）。"""
@@ -13679,7 +13712,11 @@ class MainWindow(QMainWindow):
         self._replay_load_thread = None
         if rec.get("cancelled"):
             # 取消不打断录音：原实现是"文件确认可播后才停录"，这里直接返回。
-            self.statusBar().showMessage(
+            # 关键操作结果用 _hold_status，防止同进程其他测试/后台自动刷新
+            # （如自动 TLE 更新）顶掉用户此刻正在读的结论——2026-11-19 grp1
+            # 实测：单独跑 pass，和 main_window_hw_truthfulness 等一起跑被
+            # "正在更新 TLE…" 覆盖。
+            self._hold_status(
                 "已取消读取录音（录音与实时接收未受影响）", MSG_NORMAL)
             return
         if rec.get("error"):

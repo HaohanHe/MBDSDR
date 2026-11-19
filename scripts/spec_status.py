@@ -379,7 +379,7 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
     out = args.out
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(render_markdown(report, report["generated_at_display"]),
-                   encoding="utf-8")
+                   encoding="utf-8", newline="\n")
     _print_summary(report, out)
     return 0
 

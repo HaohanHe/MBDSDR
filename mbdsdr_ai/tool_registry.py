@@ -334,6 +334,12 @@ WRITE_TOOL_NAME_PATTERNS = (
     "radio_connect", "radio_ptt", "radio_send_*", "radio_set_*",
     "gimbal_connect", "gimbal_move", "gimbal_point", "gimbal_stop",
     "gimbal_track_*", "gimbal_rssi_sweep",
+    # 2026-11-19：agent.py 的 `_register_mount_tools` 新增两个写工具
+    # （`mount_slew` 注册时 write=True、`mount_abort` 同；分级见
+    # WRITE_TOOL_GRADES：hard_gate / low_risk）。名字表是写判定的快照，
+    # 新增写工具必须同步，否则 is_write_tool 与本表分叉（钉扎见
+    # tests/test_backend_startup_cache.py::test_write_classification_unchanged）。
+    "mount_slew", "mount_abort",
     "vfo_add", "vfo_remove", "vfo_select",
     # ── 状态/参数写入 ──
     "astro_set_observer", "pose_update_*", "pnt_update_source",
@@ -412,6 +418,7 @@ WRITE_TOOL_GRADES = {
     "gimbal_stop": (WRITE_TOOL_GRADE_HARD_GATE, "立即改变云台运动状态，属于物理机构控制"),
     "gimbal_track_satellite": (WRITE_TOOL_GRADE_HARD_GATE, "持续驱动云台跟踪卫星，长时间物理运动"),
     "gimbal_rssi_sweep": (WRITE_TOOL_GRADE_HARD_GATE, "带动定向天线逐方位物理扫描"),
+    "mount_slew": (WRITE_TOOL_GRADE_HARD_GATE, "驱动赤道仪/望远镜物理转动，需要人工确认"),
     "ntrip_connect": (WRITE_TOOL_GRADE_HARD_GATE, "向外部 NTRIP caster 发起带凭据的网络请求"),
     "scheduler_add": (WRITE_TOOL_GRADE_HARD_GATE, "新增可自动执行工具的定时任务，等同于延迟授权"),
     "scheduler_enable": (WRITE_TOOL_GRADE_HARD_GATE, "启用定时任务后会在无人值守时自动执行工具"),
@@ -449,6 +456,7 @@ WRITE_TOOL_GRADES = {
     "sdr_set_volume": (WRITE_TOOL_GRADE_LOW_RISK, "音量可随时调整"),
     "sdr_switch_device": (WRITE_TOOL_GRADE_LOW_RISK, "设备可切回，接收会话可重建"),
     "sdr_disconnect": (WRITE_TOOL_GRADE_LOW_RISK, "释放设备是幂等安全动作"),
+    "mount_abort": (WRITE_TOOL_GRADE_LOW_RISK, "中止机械运动，属安全动作"),
     "sdr_open_iq_file": (WRITE_TOOL_GRADE_LOW_RISK, "打开本地 IQ 文件作为回放源，不改动原文件"),
     "sdr_play_audio": (WRITE_TOOL_GRADE_LOW_RISK, "音频播放可随时停止"),
     "sdr_record_stop": (WRITE_TOOL_GRADE_LOW_RISK, "停止录制是安全收尾动作"),

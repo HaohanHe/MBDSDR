@@ -11,6 +11,7 @@
 """
 import os
 import sys
+from datetime import datetime, timezone
 
 import pytest
 
@@ -66,6 +67,17 @@ def _noaa15(tracker):
 
 def test_refresh_persists_and_new_instance_reads_back(monkeypatch, _isolated_cache):
     """刷新成功即写 `<NORAD>.tle`；新实例（等价重启）读到新历元，不回退内置。"""
+    # 新鲜度分级按「参考时刻 − TLE 历元」算，参考时刻缺省是墙钟；fixture 历元
+    # 2026-11-11T12:00Z，用真时钟跑到第 8 天就跨过 usable_max_days=7 变 expired。
+    # 这里只把参考时刻钉到历元 +1 天（2026-11-12T12:00Z），阈值与断言都不动。
+    _real_freshness = sat_tracker.freshness
+    _pinned_ref = datetime(2026, 11, 12, 12, 0, tzinfo=timezone.utc)
+
+    def _freshness(line1, fetched_at=None, now=None):
+        return _real_freshness(line1, fetched_at, _pinned_ref)
+
+    monkeypatch.setattr(sat_tracker, "freshness", _freshness)
+
     t1 = SatelliteTracker(_GS)
     assert t1.tle_date == BUILTIN_TLE_DATE          # 无缓存时仍是内置基线
     assert _refresh(t1, monkeypatch) >= 1

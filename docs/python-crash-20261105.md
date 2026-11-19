@@ -377,7 +377,7 @@ python -u scripts\tool_param_fuzz.py --only feldhell_decode psk31_decode rtty_de
 | --- | --- | --- | --- | --- | --- |
 | 基线 | 无 | 0 | 无 | **1 条** | 中断被吞，事件循环继续；退出靠别的回调 |
 | ① | `eventFilter` 外层 `try/except BaseException: return False` | 0 | 无 | 1 条（最小控件上 0 条） | 机制可行（异常不再出界），但**只覆盖 `eventFilter`**，覆盖不到其它回调；且本轮**未落地**——`desktop/main_window.py` 是另一条线的未提交改动，按纪律不动 |
-| ② | `desktop/main.py::_install_sigint_graceful_quit()`：`signal.SIGINT` 只置标志 + 0.2 s `QTimer` 调 `app.quit()` | **0** | **无** | **0 条** | **已落地**（仅入口文件）；同时消除“中断吃掉退出回调 → Ctrl+C 没反应/卡死” |
+| ② | `desktop/main.py::_install_sigint_graceful_quit()`：`signal.SIGINT` 只置标志 + 0.2 s `QTimer` 调 `app.quit()` | **0** | **无** | **0 条** | **已落地**（`10efa40c`，仅入口文件）；同时消除“中断吃掉退出回调 → Ctrl+C 没反应/卡死” |
 
 ②的其它行为：`pythonw`/打包版无控制台 → 收不到 SIGINT，行为不变；只在 `python desktop/main.py` 的开发场景生效。
 

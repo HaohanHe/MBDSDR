@@ -1,5 +1,9 @@
 # 设备会话锁（gpredict 第三档）：待建单
 
+> **本文为当时状态快照**：记录当日工作状态与结论，未逐条复核；
+> 不作现状依据。共 1 条未复核；需要现状请查 `docs/COORDINATION.md`、
+> `docs/known-red-register.md` 与 checklist。
+
 **状态：§一~§四已落地（会话占用态 + 面板层）；2026-11-13 追加 §五写门与
 §六 `main_window.py` 符号级后续清单。**
 （历史：本单最初因 `desktop/device_panel.py` 里 5 行零读写的空壳声明而回退重写。）

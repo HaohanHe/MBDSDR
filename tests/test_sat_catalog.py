@@ -20,7 +20,7 @@
 
 本文件覆盖
 ----------
-* 三处目录表一致（防再抄一份）
+* 目录表单一来源（orbit 派生自 sat_catalog；桌面层已删除重复表）
 * 缓存发现：跳过内置、坏文件不崩、无缓存不编
 * 合并语义：并存 + 同名用户优先 + 顺序稳定
 * 诚实口径：缓存星没有频率就是 None，不猜
@@ -68,18 +68,33 @@ class TestCatalogSingleSource:
     def test_rf_sky_view_no_longer_hardcodes_catnrs(self):
         """桌面绘制层的目录必须派生，不能在源码里再写一遍 6 个 NORAD。
 
-        `SATELLITE_META` 是 `_load_celestrak_tle_catalog()` 里的**局部**
-        变量（每次调用重建），所以不能从模块属性断言；改为直接读源码：
-        只要它还写着 `"catnr": 25338` 这类字面量，就是第二份真值。
+        `SATELLITE_META` 那张重复表已从 `_load_celestrak_tle_catalog()`
+        删除，加载器只走 `sat_catalog.merged_catalog()` + `BUILTIN_CATNRS`；
+        因此改为解析源码 AST：必须 import sat_catalog，且不存在
+        `{"catnr": <数字>}` 这类字面量（防止重复表回流）。
         """
+        import ast
+
         import desktop.rf_sky_view as rsv
 
-        src = open(rsv.__file__, encoding="utf-8").read()
-        assert "from mbdsdr_ai.sat_catalog import" in src, \
-            "绘制层没从 sat_catalog 取目录，说明又抄了一份"
-        for catnr in BUILTIN_CATNRS:
-            assert f'"catnr": {catnr}' not in src, \
-                f"源码里仍硬编码 NORAD {catnr}，唯一真值应只在 sat_catalog"
+        tree = ast.parse(open(rsv.__file__, encoding="utf-8").read())
+        imports_sat_catalog = any(
+            isinstance(node, ast.ImportFrom) and node.module == "mbdsdr_ai.sat_catalog"
+            for node in ast.walk(tree)
+        )
+        assert imports_sat_catalog, "绘制层没从 sat_catalog 取目录，说明又抄了一份"
+        hardcoded = set()
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Dict):
+                continue
+            for key, value in zip(node.keys, node.values):
+                if (isinstance(key, ast.Constant) and key.value == "catnr"
+                        and isinstance(value, ast.Constant)
+                        and isinstance(value.value, int)):
+                    hardcoded.add(value.value)
+        assert not (hardcoded & set(BUILTIN_CATNRS)), (
+            f"源码里仍硬编码 NORAD {sorted(hardcoded & set(BUILTIN_CATNRS))}，"
+            "唯一真值应只在 sat_catalog")
 
     def test_builtin_catnrs_match_meta(self):
         assert BUILTIN_CATNRS == frozenset(m.catnr for m in BUILTIN_META.values())

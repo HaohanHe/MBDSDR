@@ -496,6 +496,8 @@ class MBDSDRAgent:
         self._register_signal_quality_tools()
         self._register_orbit_tools()
         self._register_pointing_tools()
+        self._register_pointing_check_tool()
+        self._register_mount_tools()
         self._register_doppler_tools()
         # 轨道动力学原子积木（多普勒换算/取状态/STM/观测模型/RLS单步/校时/坐标）：
         # 每块一个独立小工具，模型现场编排，不打包成「定轨工具」大黑盒。
@@ -1814,7 +1816,7 @@ class MBDSDRAgent:
                 el = float(args["elevation_deg"])
                 ok = c.set_position(az, el)
                 if ok:
-                    return ToolResult(True, f"云台已指向 方位{az:.0f}° 仰角{el:.0f}°")
+                    return ToolResult(True, f"云台指向指令已下发（未验证）：方位{az:.0f}° 仰角{el:.0f}°")
                 return ToolResult(False, "云台连接失败，检查 rotctld 是否运行")
             except Exception as e:
                 return ToolResult(False, f"云台控制失败: {clean_exc(e)}")
@@ -1834,6 +1836,269 @@ class MBDSDRAgent:
             },
             handler=_gimbal_move,
             category="pointing",
+        )
+
+    def _register_pointing_check_tool(self):
+        """拍星解算 → 指向残差（只读）：只报数字，不判定「已对准」。"""
+
+        def _parse_utc(value):
+            from datetime import datetime, timezone
+
+            if not isinstance(value, str) or not value.strip():
+                raise ValueError("at_utc 需要 ISO 8601 字符串")
+            text = value.strip()
+            if text.endswith(("Z", "z")):
+                text = text[:-1] + "+00:00"
+            parsed = datetime.fromisoformat(text)
+            return (parsed.replace(tzinfo=timezone.utc)
+                    if parsed.tzinfo is None else parsed)
+
+        def _pointing_check(args):
+            from mbdsdr_ai.sky_pointing_pipeline import (
+                CameraParams,
+                RESIDUAL_TOLERANCE_DEG,
+                solve_and_verify,
+            )
+
+            try:
+                at_utc = _parse_utc(args.get("at_utc"))
+            except (TypeError, ValueError) as exc:
+                return ToolResult(
+                    False,
+                    f"未解算：bad_command（at_utc 不是合法 ISO 8601：{exc}）")
+            try:
+                outcome = solve_and_verify(
+                    args.get("stars"),
+                    CameraParams(width_px=args.get("width_px"),
+                                 height_px=args.get("height_px"),
+                                 fov_deg=args.get("fov_deg")),
+                    args.get("commanded_az_deg"),
+                    args.get("commanded_el_deg"),
+                    args.get("site_lat_deg"),
+                    args.get("site_lon_deg"),
+                    at_utc,
+                )
+            except Exception as exc:
+                return ToolResult(
+                    False,
+                    f"未解算：solver_failed（{type(exc).__name__}: {exc}）")
+            if not outcome.ok:
+                return ToolResult(
+                    False, f"未解算：{outcome.error}（{outcome.reason}）")
+            return ToolResult(
+                True,
+                f"解算中心 RA={outcome.ra_deg:.4f}° Dec={outcome.dec_deg:+.4f}°；"
+                f"残差 {outcome.residual_deg:.2f}°"
+                f"（阈值 {RESIDUAL_TOLERANCE_DEG}°，仅分级）；未判定已对准")
+
+        self.tool_registry.register(
+            name="sky_pointing_check",
+            description=(
+                "用一帧星点像素坐标做拍星解算，计算解算指向与指令指向的球面"
+                "角距残差。只算解算残差，不判定「已对准」：残差小于阈值也只"
+                "做分级，是否对准由上层结合系统误差决定。tetra3 未安装、星点"
+                "不足或输入不合法时返回结构化原因（too_few_points / no_site / "
+                "bad_camera / solver_unavailable / bad_command），不猜坐标。"),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "stars": {
+                        "type": "array",
+                        "description": "星点像素坐标数组，每项 [x_px, y_px]；"
+                                       "至少 5 个，解算管线实际下限为 "
+                                       "MIN_SOLVE_STARS=8（不足时由管线返回 "
+                                       "too_few_points，不猜坐标）",
+                        "items": {
+                            "type": "array",
+                            "items": {"type": "number"},
+                            "minItems": 2,
+                        },
+                    },
+                    "width_px": {"type": "number", "description": "图像宽度（像素）"},
+                    "height_px": {"type": "number", "description": "图像高度（像素）"},
+                    "fov_deg": {"type": "number",
+                                "description": "相机视场直径（度，0–180]）"},
+                    "commanded_az_deg": {"type": "number",
+                                         "description": "云台/赤道仪指令方位（度）"},
+                    "commanded_el_deg": {"type": "number",
+                                         "description": "云台/赤道仪指令仰角（度，-90–90）"},
+                    "site_lat_deg": {"type": "number",
+                                     "description": "观测站纬度（度）"},
+                    "site_lon_deg": {"type": "number",
+                                     "description": "观测站经度（度）"},
+                    "at_utc": {"type": "string",
+                               "description": "观测时刻（ISO 8601，如 "
+                                              "2026-11-19T12:00:00Z）"},
+                },
+                "required": ["stars", "width_px", "height_px", "fov_deg",
+                             "commanded_az_deg", "commanded_el_deg",
+                             "site_lat_deg", "site_lon_deg", "at_utc"],
+            },
+            handler=_pointing_check,
+            category="pointing",
+            write=False,
+        )
+
+    def _register_mount_tools(self):
+        """赤道仪/望远镜（ASCOM Alpaca）：只读状态 + 指向 + 中止。
+
+        指向工具只承诺「已下发」，对准与否必须由图像解算残差判定；本层
+        不宣称「已对准/已锁定」。能力位与位置来源的诚实语义在
+        ``mbdsdr_ai/mount.py`` 里实现，这里只做工具面适配。
+        """
+        from mbdsdr_ai.mount import AlpacaMount, MountError
+
+        def _mount_of(args):
+            return AlpacaMount(host=str(args.get("host", "127.0.0.1")),
+                               port=int(args.get("port", 11111)),
+                               device_id=int(args.get("device_id", 0)))
+
+        def _mount_status(args):
+            try:
+                client = _mount_of(args)
+                caps = client.capabilities()
+                pos = client.position()
+            except MountError as e:
+                return ToolResult(False, f"赤道仪未连接：{e.code}: {e.message}")
+            except Exception as e:
+                return ToolResult(False, f"赤道仪状态读取失败: {clean_exc(e)}")
+            source_text = ("encoder（编码器读数）" if pos.source == "encoder"
+                           else "model（模型推算，非机械真值）")
+            caps_text = (
+                f"RA/Dec指向={'是' if caps.can_slew_radec else '否'}, "
+                f"地平指向={'是' if caps.can_slew_altaz else '否'}, "
+                f"中止={'是' if caps.can_abort else '否'}, "
+                f"跟踪={'是' if caps.can_track else '否'}, "
+                f"归位={'是' if caps.can_park else '否'}, "
+                f"位置回读={'是' if caps.can_read_position else '否'}, "
+                f"编码器={'是' if caps.has_encoder else '否'}")
+            if pos.ra_deg is not None and pos.dec_deg is not None:
+                where = f"RA {pos.ra_deg:.4f}° / Dec {pos.dec_deg:.4f}°"
+            else:
+                where = "位置不可读（设备未返回 RA/Dec）"
+            return ToolResult(
+                True,
+                f"赤道仪状态：能力[{caps_text}]\n"
+                f"当前位置：{where}\n"
+                f"来源：{source_text}；slewing={'true' if pos.slewing else 'false'}\n"
+                "（source=model 是模型推算，不能当作角分级精度证据）",
+                data={
+                    "capabilities": {
+                        "can_slew_radec": caps.can_slew_radec,
+                        "can_slew_altaz": caps.can_slew_altaz,
+                        "can_abort": caps.can_abort,
+                        "can_track": caps.can_track,
+                        "can_park": caps.can_park,
+                        "can_read_position": caps.can_read_position,
+                        "has_encoder": caps.has_encoder,
+                    },
+                    "position": {
+                        "ra_deg": pos.ra_deg,
+                        "dec_deg": pos.dec_deg,
+                    },
+                    "source": pos.source,
+                    "slewing": pos.slewing,
+                })
+
+        def _mount_slew(args):
+            mode = str(args.get("mode", "") or "").strip().lower()
+            try:
+                client = _mount_of(args)
+                if mode == "radec":
+                    if args.get("ra_hours") is None or args.get("dec_deg") is None:
+                        return ToolResult(False, "mode=radec 需要 ra_hours 与 dec_deg")
+                    client.slew_to_radec(float(args["ra_hours"]),
+                                         float(args["dec_deg"]))
+                    target = (f"RA {float(args['ra_hours']):.4f}h / "
+                              f"Dec {float(args['dec_deg']):.4f}°")
+                elif mode == "altaz":
+                    if args.get("az_deg") is None or args.get("el_deg") is None:
+                        return ToolResult(False, "mode=altaz 需要 az_deg 与 el_deg")
+                    client.slew_to_altaz(float(args["az_deg"]),
+                                         float(args["el_deg"]))
+                    target = (f"Az {float(args['az_deg']):.4f}° / "
+                              f"El {float(args['el_deg']):.4f}°")
+                else:
+                    return ToolResult(False, "mode 必须是 'radec' 或 'altaz'")
+            except MountError as e:
+                return ToolResult(False, f"赤道仪指向指令未下发：{e.code}: {e.message}")
+            except Exception as e:
+                return ToolResult(False, f"赤道仪指向失败: {clean_exc(e)}")
+            return ToolResult(
+                True,
+                f"已下发指向指令（未验证对准）：{target}。"
+                "是否真正对准需由图像解算残差判定，本工具不做该判定；"
+                "可用 mount_status 复核设备回读。")
+
+        def _mount_abort(args):
+            try:
+                _mount_of(args).abort_slew()
+            except MountError as e:
+                return ToolResult(False, f"赤道仪中止指令未下发：{e.code}: {e.message}")
+            except Exception as e:
+                return ToolResult(False, f"赤道仪中止失败: {clean_exc(e)}")
+            return ToolResult(
+                True,
+                "已下发中止指令（abortslew）；"
+                "设备是否已停止需用 mount_status 复核 slewing。")
+
+        mount_common = {
+            "host": {"type": "string", "default": "127.0.0.1"},
+            "port": {"type": "integer", "default": 11111},
+            "device_id": {"type": "integer", "default": 0},
+        }
+
+        self.tool_registry.register(
+            name="mount_status",
+            description="读取赤道仪/望远镜（ASCOM Alpaca）状态：能力位摘要 + 当前 RA/Dec "
+                        "+ 读数来源（encoder 编码器 / model 模型推算）+ slewing。"
+                        "连不上或读失败会如实报错，不把失败读成 0°。",
+            parameters={
+                "type": "object",
+                "properties": dict(mount_common),
+            },
+            handler=_mount_status,
+            category="pointing",
+        )
+
+        self.tool_registry.register(
+            name="mount_slew",
+            description="向赤道仪/望远镜下发指向指令（mode=radec 用 ra_hours/dec_deg，"
+                        "mode=altaz 用 az_deg/el_deg）。只表示「已下发」，不表示已对准；"
+                        "对准与否需图像解算残差判定。",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "mode": {"type": "string", "enum": ["radec", "altaz"],
+                             "description": "指向坐标系：radec 或 altaz"},
+                    "ra_hours": {"type": "number",
+                                 "description": "赤经，小时（0–24），mode=radec 时必填"},
+                    "dec_deg": {"type": "number",
+                                "description": "赤纬，度，mode=radec 时必填"},
+                    "az_deg": {"type": "number",
+                               "description": "方位角，度，mode=altaz 时必填"},
+                    "el_deg": {"type": "number",
+                               "description": "高度角，度，mode=altaz 时必填"},
+                    **mount_common,
+                },
+                "required": ["mode"],
+            },
+            handler=_mount_slew,
+            category="pointing",
+            write=True,
+        )
+
+        self.tool_registry.register(
+            name="mount_abort",
+            description="中止赤道仪/望远镜当前机械运动（ASCOM Alpaca AbortSlew）。"
+                        "属安全动作，应立即执行。",
+            parameters={
+                "type": "object",
+                "properties": dict(mount_common),
+            },
+            handler=_mount_abort,
+            category="pointing",
+            write=True,
         )
 
     def _register_doppler_tools(self):

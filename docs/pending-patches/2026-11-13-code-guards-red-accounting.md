@@ -1,5 +1,9 @@
 # 待落库：docs/code-guards.md 的两行守卫登记（2026-11-13）
 
+> **本文为当时状态快照**：记录当日工作状态与结论，未逐条复核；
+> 不作现状依据。共 3 条未复核；需要现状请查 `docs/COORDINATION.md`、
+> `docs/known-red-register.md` 与 checklist。
+
 **为什么不直接改**：`docs/code-guards.md` 当前被 `合规入口线/6ae85f56` 持有
 （claim 2026-11-13 05:02:31 起；05:58 复测时已续租为 TTL 120min，剩余 116.4min，
 即到 **07:02 左右**）。05:58 本线 `claim` 复测被拒（CLAIM DENIED）。按本线约定，

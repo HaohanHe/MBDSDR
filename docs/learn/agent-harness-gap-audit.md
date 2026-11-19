@@ -1,5 +1,9 @@
 # Agent Harness 对照审计（2026-11-08）
 
+> **本文为当时状态快照**：记录当日工作状态与结论，未逐条复核；
+> 不作现状依据。共 3 条未复核；需要现状请查 `docs/COORDINATION.md`、
+> `docs/known-red-register.md` 与 checklist。
+
 审计参照：`D:\mbdsdr\deepseek-harness-master`（DeepSeek Harness，Cordis 插件化，
 文档见其 `docs/architecture.zh.md` 与 `docs/subsystems/*.zh.md`）。
 被审对象：`mbdsdr_ai/agent.py`、`tool_registry.py`、`context_manager.py`、

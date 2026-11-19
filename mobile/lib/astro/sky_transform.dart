@@ -33,8 +33,10 @@
 ///
 ///     Flutter 3.50.0 / Dart 3.14.0
 ///     flutter analyze        -> 0 error（59 info 均为 material.dart 废弃提示）
-///     flutter test           -> 478 passed（全仓）
 ///     flutter test test/sky_transform_test.dart -> passed
+///
+/// 全仓测试总数与真机验证状态以 `mobile/README.md` 为准（不在此处写死，
+/// 数字会随用例增减过期）。
 ///
 /// 工具链在 `D:/mbdsdr/toolchain/flutter`，不在仓库内；换机器需自行安装。
 library;

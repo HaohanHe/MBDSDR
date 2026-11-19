@@ -2,7 +2,9 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import 'package:mbdsdr_mobile/app/readout_source.dart';
 import 'package:mbdsdr_mobile/app/tokens.dart';
+import 'package:mbdsdr_mobile/astro/asterism_overlay.dart';
 import 'package:mbdsdr_mobile/astro/coordinates.dart';
 import 'package:mbdsdr_mobile/astro/nav_satellites.dart';
 import 'package:mbdsdr_mobile/astro/passes.dart';
@@ -12,6 +14,7 @@ import 'package:mbdsdr_mobile/astro/tle_freshness.dart';
 import 'package:mbdsdr_mobile/models/radio_state.dart';
 import 'package:mbdsdr_mobile/models/satellite.dart';
 import 'package:mbdsdr_mobile/models/satellite_downlink.dart';
+import 'package:mbdsdr_mobile/pages/pointing_page.dart';
 import 'package:mbdsdr_mobile/pages/spacetime_status.dart';
 import 'package:mbdsdr_mobile/services/doppler_step_limiter.dart';
 import 'package:mbdsdr_mobile/services/location_service.dart';
@@ -110,6 +113,10 @@ class SkyController extends ChangeNotifier {
   /// 是否已载入导航星历（决定是否显示空态提示）。
   bool get hasNavTle => _navTles.isNotEmpty;
   DeviceOrientation get orientation => _orientation;
+
+  /// 姿态事件流：指天视图与过境页共用同一个传感器源（广播流），
+  /// 不另建第二套 IMU 订阅。
+  Stream<DeviceOrientation> get orientationStream => _ori.stream;
   String? get selectedName => _selectedName;
   bool get refreshing => _refreshing;
   String? get error => _error;
@@ -493,6 +500,11 @@ class _SkyPageState extends State<SkyPage> {
         title: const Text('天空过境', style: AppTokens.appTitle),
         actions: [
           IconButton(
+            icon: const Icon(Icons.explore_outlined, color: AppTokens.accent),
+            tooltip: '指天视图',
+            onPressed: _openPointing,
+          ),
+          IconButton(
             icon: const Icon(Icons.refresh, color: AppTokens.accent),
             onPressed: _c.refreshing ? null : _c.refresh,
           ),
@@ -502,12 +514,41 @@ class _SkyPageState extends State<SkyPage> {
     );
   }
 
+  /// 打开指天视图：站址与目标都取当前控制器的真实值，无站址时页面自会
+  /// 显示诚实空态（不悄悄用 (0,0) 顶替）。
+  void _openPointing() {
+    final Station? st = _c.station;
+    final SatVisibility? v = _c.selectedVisibility;
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => PointingPage(
+          site: st == null ? null : SkySite(latDeg: st.lat, lonDeg: st.lon),
+          orientationStream: _c.orientationStream,
+          targetAzDeg: v?.az,
+          targetElDeg: v?.el,
+          targetLabel: v?.name,
+          clock: widget._clock,
+        ),
+      ),
+    );
+  }
+
   Widget _buildBody() {
     if (_c.locStatus != LocationStatus.available &&
         widget.manualStation == null) {
       return _LocationEmpty(status: _c.locStatus, onEnable: _c.openLocationSettings);
     }
     return _buildMain();
+  }
+
+  /// 本站坐标来源：设置里手填的坐标标「手填」，系统定位标「系统定位」，
+  /// 没有可核实来源时标「未知」，不猜。
+  String _stationSource() {
+    if (_c.station == null) return ReadoutSources.unknown;
+    if (widget.manualStation != null) return ReadoutSources.manualStation;
+    return _c.locStatus == LocationStatus.available
+        ? ReadoutSources.systemLocation
+        : ReadoutSources.unknown;
   }
 
   Widget _buildMain() {
@@ -572,7 +613,11 @@ class _SkyPageState extends State<SkyPage> {
             Expanded(flex: 4, child: side),
           ]);
     return Column(children: [
-      _StatusBar(clock: _wallClock, station: _c.station),
+      _StatusBar(
+        clock: _wallClock,
+        station: _c.station,
+        stationSource: _stationSource(),
+      ),
       _TimeScrubber(
         enabled: _c.station != null && _c.hasTle,
         geometryTime: _c.geometryTime,
@@ -641,21 +686,33 @@ class _DopplerAutoControl extends StatelessWidget {
 /// 诚实时态条：左侧设备真实本地时钟（秒级刷新），右侧本站位置。
 /// 无定位/无手填坐标时如实显示「未定位」，绝不编造经纬度。
 class _StatusBar extends StatelessWidget {
-  const _StatusBar({required this.clock, required this.station});
+  const _StatusBar({
+    required this.clock,
+    required this.station,
+    required this.stationSource,
+  });
 
   final DateTime clock;
   final Station? station;
+
+  /// 本站坐标来源（手填 / 系统定位 / 未知），由页面按真实分支传入。
+  final String stationSource;
 
   String _two(int n) => n.toString().padLeft(2, '0');
 
   @override
   Widget build(BuildContext context) {
     final t = clock.toLocal();
-    final timeText =
-        '${_two(t.hour)}:${_two(t.minute)}:${_two(t.second)}';
+    final timeText = withSource(
+      '${_two(t.hour)}:${_two(t.minute)}:${_two(t.second)}',
+      ReadoutSources.deviceClock,
+    );
     final stationText = station == null
         ? '未定位'
-        : '本站 ${station!.lat}, ${station!.lon}';
+        : withSource(
+            '本站 ${station!.lat}, ${station!.lon}',
+            stationSource,
+          );
     return Container(
       padding: const EdgeInsets.symmetric(
           horizontal: AppTokens.spacingM, vertical: AppTokens.spacingS),
@@ -979,7 +1036,10 @@ class _GuidanceCard extends StatelessWidget {
         Text(azText, style: AppTokens.body),
         Text(elText, style: AppTokens.body),
         Text(
-          '目标 az ${v.az.toStringAsFixed(0)}° / el ${v.el.toStringAsFixed(0)}°',
+          withSource(
+            '目标 az ${v.az.toStringAsFixed(0)}° / el ${v.el.toStringAsFixed(0)}°',
+            ReadoutSources.prediction,
+          ),
           style: AppTokens.mono,
         ),
       ]),
@@ -1013,8 +1073,11 @@ class _PassList extends StatelessWidget {
               color: AppTokens.accent, size: AppTokens.iconSizeInlineLg),
           title: Text(p.name, style: AppTokens.body),
           subtitle: Text(
-            '$hh:$mm 升起 · 最高仰角 ${p.maxEl.toStringAsFixed(0)}° · '
-            '持续 ${p.duration.inMinutes} 分 · 升起方位 ${p.riseAz.toStringAsFixed(0)}°',
+            withSource(
+              '$hh:$mm 升起 · 最高仰角 ${p.maxEl.toStringAsFixed(0)}° · '
+              '持续 ${p.duration.inMinutes} 分 · 升起方位 ${p.riseAz.toStringAsFixed(0)}°',
+              ReadoutSources.sgp4Prediction,
+            ),
             style: AppTokens.auxiliary,
           ),
           // 有真实下行频率才可捕获；无频率者禁用并诚实提示。

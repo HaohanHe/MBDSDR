@@ -1,4 +1,8 @@
 # MBDSDR 重复实现与一致性台账
+
+> **本文为当时状态快照**：记录当日工作状态与结论，未逐条复核；
+> 不作现状依据。共 3 条未复核；需要现状请查 `docs/COORDINATION.md`、
+> `docs/known-red-register.md` 与 checklist。
 > SPDX-License-Identifier: MIT
 >
 > **为什么有这张表**：同一份公开协议/算法在仓里出现两份实现，是"隐性分叉"的最大来源——

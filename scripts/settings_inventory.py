@@ -107,6 +107,12 @@ INTERNAL_REASONS: Dict[str, str] = {
         "状态记忆，用户的表达方式就是点节标题本身；把内部 id 做成设置页文本项"
         "既不可读也不该由人手填，故不暴露。读取点 right_column.py:_restore_expanded"
         "（坏值/未知 id 回落只展开首节），本键只负责持久化"),
+    "app_mode_default": (
+        "桌面冷启动默认形态（ide/planetarium）。本刀只加配置键、默认形态仍是 "
+        "ide；没有设置面板控件，也没有首次启动询问——那是用户未选的另一方案。"
+        "消费点只在一处：main_window.py:_build_mode_shell 读取后交给既有 "
+        "set_app_mode，未配置/坏值/读异常一律回落 ide。",
+    ),
 }
 
 #: 服务页签（独立 ServiceSettingsPanel）里的键 → 控件属性名。

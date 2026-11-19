@@ -152,21 +152,34 @@ class TestStateToolIncludesProbe:
 class TestWiringGuard:
     def test_state_handler_calls_probe(self):
         """缺陷 S2 的形态是"函数有了但没人调"，任何纯函数单测都会绿。"""
+        import ast
+
         import mbdsdr_ai.agent as mod
 
-        src = open(mod.__file__, encoding="utf-8").read()
-        start = src.index("def _state(_args):")
-        end = src.index("def _report(args):", start)
-        body = src[start:end]
-        assert "probe_hardware_capabilities()" in body, \
+        tree = ast.parse(open(mod.__file__, encoding="utf-8").read())
+        fn = next(n for n in ast.walk(tree)
+                  if isinstance(n, ast.FunctionDef) and n.name == "_state")
+        called = set()
+        for node in ast.walk(fn):
+            if isinstance(node, ast.Call):
+                if isinstance(node.func, ast.Name):
+                    called.add(node.func.id)
+                elif isinstance(node.func, ast.Attribute):
+                    called.add(node.func.attr)
+        assert "probe_hardware_capabilities" in called, \
             "状态工具没先探测——账本里又只有模型自述"
 
     def test_note_explains_skipped_not_absent(self):
         """提示语必须说清"skipped ≠ 没有"，否则模型会把未知读成缺硬件。"""
+        import ast
+
         import mbdsdr_ai.agent as mod
 
-        src = open(mod.__file__, encoding="utf-8").read()
-        start = src.index("def _state(_args):")
-        end = src.index("def _report(args):", start)
-        body = src[start:end]
-        assert "没有探测手段" in body or "不等于没有" in body
+        tree = ast.parse(open(mod.__file__, encoding="utf-8").read())
+        fn = next(n for n in ast.walk(tree)
+                  if isinstance(n, ast.FunctionDef) and n.name == "_state")
+        strings = {n.value for n in ast.walk(fn)
+                   if isinstance(n, ast.Constant) and isinstance(n.value, str)}
+        assert any(("没有探测手段" in text) or ("不等于没有" in text)
+                   for text in strings), \
+            "提示语必须写明 skipped ≠ 没有（否则模型会把未知读成缺硬件）"

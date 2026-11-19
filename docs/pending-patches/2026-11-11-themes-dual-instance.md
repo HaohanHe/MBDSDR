@@ -1,5 +1,9 @@
 # themes 双实例：裸导入 × 包导入 = 两套全局状态
 
+> **本文为当时状态快照**：记录当日工作状态与结论，未逐条复核；
+> 不作现状依据。共 2 条未复核；需要现状请查 `docs/COORDINATION.md`、
+> `docs/known-red-register.md` 与 checklist。
+
 日期：2026-11-11（2026-11-12 补记入仓与归属）
 状态：**只出单 + 只加测试，未改任何产品文件**（`desktop/themes.py` 一步未碰）
 复现脚本：`D:\mbdsdr\output\tmp\repro_dual_themes_orders.py`、`verify_alias_patch.py`、

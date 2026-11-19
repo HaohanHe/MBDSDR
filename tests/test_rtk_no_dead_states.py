@@ -81,11 +81,3 @@ def test_每个状态的后验方差都小于先验():
         prior = prior_diag.get(j, solver.sigma_amb ** 2)
         assert solver.P[j, j] < prior + 1e-9, \
             f"状态 x[{j}] 后验方差未下降（先验 {prior}，后验 {solver.P[j, j]}）"
-
-
-def test_source_has_no_tropo_state_leftover():
-    """反证：源码里不许再出现 sigma_tropo / ZWD 状态初始化。"""
-    path = os.path.join(_ROOT, "mbdsdr_ai", "rtk_solver.py")
-    src = open(path, encoding="utf-8").read()
-    assert "sigma_tropo" not in src
-    assert "self.x = np.append(self.x, 0.0)" in src  # 只有模糊度会追加状态

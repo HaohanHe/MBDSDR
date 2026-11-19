@@ -1,5 +1,9 @@
 # A1 / A2 解冻后执行计划（按文件分组）
 
+> **本文为当时状态快照**：记录当日工作状态与结论，未逐条复核；
+> 不作现状依据。共 3 条未复核；需要现状请查 `docs/COORDINATION.md`、
+> `docs/known-red-register.md` 与 checklist。
+
 > 前置：用户对 `2026-11-12-landed-visual-changes.md` 的追认/回退答复，以及解冻放行。
 > 本文档只读，未改任何代码（`themes.py` / `tokens.py` 未动）。
 > 定义：**A1 = 只换取值路径，不产生配色决定**；**A2 = 必须先有一次拍板**。

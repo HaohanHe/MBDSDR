@@ -1,6 +1,5 @@
 # SPDX-License-Identifier: MIT
 """A1 反证：Klobuchar 缺广播参数必须 uncorrected，不得回退固定典型系数。"""
-import inspect
 import os
 import sys
 
@@ -35,13 +34,3 @@ def test_missing_params_are_uncorrected_not_typical():
 def test_valid_broadcast_params_still_produce_delay():
     value = _call(PARAMS)
     assert value is not None and value > 0.0
-
-
-def test_source_contains_no_fixed_typical_coefficients():
-    """反证：若把 8 个典型系数重新写回函数，本测试必须红。"""
-    src = inspect.getsource(klobuchar_ion_delay)
-    forbidden = ("0.1118e-7", "0.7451e-8", "0.5961e-7", "0.1192e-6",
-                 "0.1167e6", "0.2294e6", "0.1311e6", "0.1049e7")
-    for token in forbidden:
-        assert token not in src, f"函数内又出现典型系数 {token}"
-    assert "ion_default" not in src

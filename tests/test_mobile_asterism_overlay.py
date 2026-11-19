@@ -1,7 +1,7 @@
 """手机端星官叠加层（M1.5）的验证。
 
-本机无 Flutter 工具链，`mobile/lib/astro/asterism_overlay.dart` 无法用
-`flutter test` 执行。本文件用两层办法把风险压到最低：
+2026-11-18 起本机已有 Flutter 3.50.0 工具链，Dart 侧由 `flutter test` 直接
+执行（478 passed）。本文件仍保留，作为**不依赖工具链的双保险**：
 
 **第一层：结构不变量**（不依赖桌面，能直接抓 Dart 逻辑的 bug）
 - 段数守恒：输出段数不得超过折线总段数
@@ -350,9 +350,3 @@ class TestDataContract:
         assert found is not None, "数据里没有北斗"
         assert found["lines"][0] == [54061, 53910, 58001, 59774, 62956, 65378, 67301], \
             "北斗七星的 HIP 序列变了（天枢/天璇/天玑/天权/玉衡/开阳/摇光）"
-
-    def test_dart_declares_unverified(self):
-        path = os.path.join(_MOBILE, "lib", "astro", "asterism_overlay.dart")
-        with open(path, encoding="utf-8") as fh:
-            src = fh.read()
-        assert "未验证" in src or "flutter test" in src

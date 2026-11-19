@@ -47,6 +47,7 @@ from .dsp import front_end, demodulate, DCBlocker, IQCalibrator, compute_snr, es
 from .audio_out import AudioPlayer
 from .sweep import sweep_scan
 from .frequency_manager import FrequencyManager
+from .bookmark_manager import StoreWriteError
 from .ppm_calibration import estimate_ppm, clamp_ppm
 from .watcher import watch_capture
 from .adsb_lite import decode_adsb
@@ -1055,7 +1056,7 @@ def register_sdr_tools(agent):
             },
             "required": ["name", "freq_mhz"],
         },
-        handler=lambda args: ToolResult(success=True, content=_bookmark_add(fm, args)),
+        handler=lambda args: _bookmark_add(fm, args),
         category="sdr_device",
     )
 
@@ -3581,19 +3582,37 @@ def _bookmark_goto(mgr, fm, args) -> "ToolResult":
                       content=f"已跳转到 {b.name}\n  " + "，".join(actions) + skipped_line + tip + note)
 
 
-def _bookmark_add(fm, args) -> str:
+def _bookmark_add(fm, args) -> "ToolResult":
     name = str(args.get("name", "")).strip()
     freq = args.get("freq_mhz")
     if not name or freq is None:
-        return "错误: 需要 name 和 freq_mhz"
-    bm = fm.add(
-        name=name,
-        freq_hz=float(freq) * 1e6,
-        mode=str(args.get("mode", "") or "").upper(),
-        bandwidth_hz=float(args.get("bandwidth_khz", 0) or 0) * 1e3,
-        note=str(args.get("note", "") or ""),
-    )
-    return f"已保存书签：{_fmt_bookmark(bm)}"
+        return ToolResult(success=False, content="错误: 需要 name 和 freq_mhz")
+    try:
+        bm = fm.add(
+            name=name,
+            freq_hz=float(freq) * 1e6,
+            mode=str(args.get("mode", "") or "").upper(),
+            bandwidth_hz=float(args.get("bandwidth_khz", 0) or 0) * 1e3,
+            note=str(args.get("note", "") or ""),
+        )
+    except StoreWriteError as e:
+        # 存储层已把 PermissionError/只读/占用等包成带 path 与真实原因的
+        # StoreWriteError；这里只负责转成可读失败，不换路径重试、不吞成成功。
+        logger.warning("书签写入失败（%s）：%s", type(e).__name__, e)
+        return ToolResult(
+            success=False,
+            content=f"写入书签失败：{e.reason}（路径：{e.path}；文件可能被占用或只读）",
+            error_code="handler_error",
+        )
+    except OSError as e:
+        # 构造 store 时的 mkdir 等仍在 save() 之外的 I/O：同样如实失败。
+        logger.warning("书签写入失败（%s）：%s", type(e).__name__, e)
+        return ToolResult(
+            success=False,
+            content=f"写入书签失败：{type(e).__name__}: {e}（文件可能被占用或只读）",
+            error_code="handler_error",
+        )
+    return ToolResult(success=True, content=f"已保存书签：{_fmt_bookmark(bm)}")
 
 
 def _watch_capture_tool(mgr, fm, args) -> "ToolResult":
@@ -8349,7 +8368,7 @@ def _gimbal_point(args):
     lines.append(f"偏差: 方位 {r.get('az_error_deg', 0):+.1f}°  仰角 {r.get('el_error_deg', 0):+.1f}°")
     lines.append("")
     if r.get('aligned'):
-        lines.append("已对准（偏差在波束宽度内），可以开始接收。")
+        lines.append("已进入波束宽度（粗指向，未验证）。是否有信号请用频谱/解码确认。")
     else:
         lines.append(f"引导: {r.get('guidance', '')}")
         if r.get('backend') == 'manual':
@@ -8370,8 +8389,7 @@ def _gimbal_track_satellite(args):
     lines.append(f"偏差: 方位 {r.get('az_error_deg', 0):+.1f}°  仰角 {r.get('el_error_deg', 0):+.1f}°")
     lines.append("")
     if r.get('aligned'):
-        lines.append("已对准卫星，开始接收过境信号。")
-        lines.append("提示：过境期间卫星持续移动，应按 sky_view_visible 刷新方位角后重复调用本工具跟踪。")
+        lines.append("已进入波束宽度（粗指向，未验证）。过境期间卫星持续移动，应按 sky_view_visible 刷新方位角后重复调用本工具跟踪。")
     else:
         lines.append(f"引导: {r.get('guidance', '')}")
     return '\n'.join(lines)

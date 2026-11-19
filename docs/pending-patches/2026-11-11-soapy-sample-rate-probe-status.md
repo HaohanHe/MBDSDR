@@ -1,5 +1,9 @@
 # 交接单：SoapySDR 连接后把采样率范围登记为 probed（让采样率下拉能回填）
 
+> **本文为当时状态快照**：记录当日工作状态与结论，未逐条复核；
+> 不作现状依据。共 2 条未复核；需要现状请查 `docs/COORDINATION.md`、
+> `docs/known-red-register.md` 与 checklist。
+
 > 提出：2026-11-11，设备缺口修复线。
 > 落点：`mbdsdr_ai/sdr_backend.py` `SoapySDRBackend.readback_hw_state()`
 > （约 `:3797-3819`）。

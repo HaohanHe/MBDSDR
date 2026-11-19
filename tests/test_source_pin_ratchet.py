@@ -50,8 +50,47 @@ def _current_hits() -> list[dict]:
         for hit in scanner.scan_file(path):
             if "error" in hit:
                 raise AssertionError(f"扫描器解析失败，闸门不能带病放行：{hit}")
+            # 读回测试自己写在 tmp_path 下的运行期数据（报告/临时仓库/生成物）
+            # 属于行为断言，不是源码文本 pin；扫描器按 origin 明确区分。
+            if hit.get("origin") == "tmp":
+                continue
             hits.append(hit)
     return hits
+
+
+def test_tmp_path_reads_are_not_source_pins(tmp_path, monkeypatch):
+    """读回测试自己写到 tmp_path 的运行期数据 → origin=tmp，棘轮不计。"""
+    monkeypatch.setattr(scanner, "ROOT", tmp_path)
+    target = tmp_path / "test_sample.py"
+    target.write_text(
+        "def test_x(tmp_path):\n"
+        "    p = tmp_path / 'a.md'\n"
+        "    p.write_text('hi', encoding='utf-8')\n"
+        "    raw = p.read_text(encoding='utf-8')\n"
+        "    assert 'hi' in raw\n",
+        encoding="utf-8",
+    )
+    hits = scanner.scan_file(target)
+    assert hits, "扫描器应仍逐条报告（不静默）"
+    assert all(hit["origin"] == "tmp" for hit in hits), hits
+
+
+def test_source_file_reads_stay_pins(tmp_path, monkeypatch):
+    """读仓库内源码文本 → origin=source，棘轮仍按源码 pin 计。"""
+    monkeypatch.setattr(scanner, "ROOT", tmp_path)
+    (tmp_path / "mod.py").write_text("FOO = 1\n", encoding="utf-8")
+    target = tmp_path / "test_sample.py"
+    target.write_text(
+        "from pathlib import Path\n"
+        "ROOT = Path(__file__).parent\n"
+        "def test_x():\n"
+        "    src = (ROOT / 'mod.py').read_text(encoding='utf-8')\n"
+        "    assert 'FOO = 1' in src\n",
+        encoding="utf-8",
+    )
+    hits = scanner.scan_file(target)
+    assert hits, "真源码 pin 不能被 tmp 规则漏掉"
+    assert all(hit["origin"] == "source" for hit in hits), hits
 
 
 def test_baseline_is_well_formed():

@@ -1,5 +1,9 @@
 # R2 深度审查报告：mbdsdr_ai/dsp.py
 
+> **本文为当时状态快照**：记录当日工作状态与结论，未逐条复核；
+> 不作现状依据。共 1 条未复核；需要现状请查 `docs/COORDINATION.md`、
+> `docs/known-red-register.md` 与 checklist。
+
 > 证据状态：E4——本文件数字未逐条绑定原始件/复跑命令，引用前须复核（判据见 docs/evidence-standard.md）。
 **审查范围**：`mbdsdr_ai/dsp.py`（747 行）
 **审查日期**：2026-09-24

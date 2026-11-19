@@ -169,11 +169,11 @@ def test_frequency_is_the_same_string_in_all_three_panels():
 
     # freq_input 是**输入控件**（可编辑优先，允许简写），不参与读数一致性
     # 比较——要求输入框显示 145.500000 是拿可编辑性换一致性。
-    assert status_text == vfo_text, (
+    assert status_text == vfo_text + "（设定值）", (
         "同一频率 145.5 MHz 在两处读数不同：\n"
         f"  状态面板 rx_freq: {status_text!r}\n"
         f"  VFO 面板 列1:     {vfo_text!r}")
-    assert status_text == "145.500000 MHz", (
+    assert status_text == "145.500000 MHz（设定值）", (
         f"频率读数精度不是 1 Hz（六位小数 MHz）：{status_text!r}")
     assert dial_digits == re.sub(r"\D", "", status_text), (
         "控制面板数字盘与状态面板读数不是同一个数：\n"
@@ -257,11 +257,14 @@ def test_s_level_is_the_same_dbfs_string_in_both_panels():
         "状态面板 rssi_value": st.rssi_value.text(),
         "控制面板 smeter_label": cp.smeter_label.text(),
     }
-    assert len(set(shown.values())) == 1, (
+    # 状态面板追加「（实测）」来源后缀；剥离已登记后缀后，数值/单位/精度
+    # 仍必须与纯读数逐字相同（不是放宽成 in，也不改比较对象）。
+    assert len({st.rssi_value.text().removesuffix("（实测）"),
+                cp.smeter_label.text()}) == 1, (
         "同一电平 -73 dBFS 在两块面板显示成了不同字符串：\n"
         + "\n".join(f"  {k}: {v!r}" for k, v in shown.items())
     )
-    assert st.rssi_value.text() == "-73.0 dBFS", (
+    assert st.rssi_value.text() == "-73.0 dBFS（实测）", (
         f"电平读数不是一位小数：{st.rssi_value.text()!r}")
 
 
@@ -286,10 +289,10 @@ def _bandwidth_token(text):
     """取带宽文本的「数字+单位」部分。
 
     控制面板的 ``vfo_bw_combo`` 是输入控件的**档位标签**，带模式注释
-    （``"2.4kHz (SSB)"``）；状态面板与 VFO 面板是纯读数。注释不是带宽，
-    剥离后再逐字比较——但两个纯读数之间必须逐字相同，不做任何归一化。
+    （``"2.4kHz (SSB)"``）；状态面板读数带「（自动）」来源后缀。注释与
+    来源后缀都不是带宽，剥离后再逐字比较——数值、单位、精度一个字不能差。
     """
-    return text.split("(")[0].replace(" ", "")
+    return text.split("(")[0].split("（")[0].replace(" ", "")
 
 
 def test_bandwidth_is_the_same_string_where_rendered():
@@ -303,8 +306,9 @@ def test_bandwidth_is_the_same_string_where_rendered():
         "控制面板 vfo_bw_combo": cp.vfo_bw_combo.currentText(),
         "VFO 面板 列3": vp.table.item(0, 3).text(),
     }
-    # 两个纯读数：必须逐字相同（2400 Hz 显示成 "2 kHz" 就是读数失真）。
-    assert shown["状态面板 rx_bw"] == shown["VFO 面板 列3"], (
+    # 两个纯读数：数值+单位必须逐字相同（2400 Hz 显示成 "2 kHz" 就是读数失真）。
+    # 状态面板多一个来源后缀「（自动）」，剥离后按 `==` 比，不做模糊匹配。
+    assert shown["状态面板 rx_bw"] == shown["VFO 面板 列3"] + "（自动）", (
         "同一带宽 2400 Hz 在两处读数不同：\n"
         + "\n".join(f"  {k}: {v!r}" for k, v in shown.items())
     )

@@ -586,6 +586,14 @@ ALL_ITEMS: Tuple[SettingItem, ...] = (
                        "ide/planetarium（写入点 :2117/:2153）",
                 choices=(_e("ide", "ide"), _e("planetarium", "planetarium")),
                 exposed=False),
+    SettingItem(key="app_mode_default", group="", kind="enum", label="",
+                help="", default="ide",
+                source="desktop/main_window.py:_build_mode_shell 原先写死 "
+                       "_app_mode = \"ide\"（默认值出处）；合法值只认 "
+                       "ide/planetarium，坏值/读异常回落 ide，随后交给 "
+                       "set_app_mode",
+                choices=(_e("ide", "ide"), _e("planetarium", "planetarium")),
+                exposed=False),
     SettingItem(key="settings_expanded_groups", group="", kind="text", label="",
                 help="", default="",
                 source="W51（D-10 裁定）：设置面板 6 个用途分组的展开态，"

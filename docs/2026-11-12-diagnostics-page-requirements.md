@@ -111,7 +111,7 @@
 `default_scan_directories`**。以后若有 store 改成「按 id 建子目录放源文件」，
 必须同步登记，否则一级扫描会漏——这是约束，不是当前缺陷。
 
-## 数据层（已落地，`mbdsdr_ai/diagnostics.py`）
+## 数据层（已落地 `340319be`，`mbdsdr_ai/diagnostics.py`；复跑 `pytest tests/test_diagnostics_data.py -q` → `8 passed`）
 
 `collect_diagnostics()`：无参、只读，返回三块：
 

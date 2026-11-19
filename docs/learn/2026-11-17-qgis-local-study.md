@@ -1,5 +1,9 @@
 # 本机 QGIS 源码学习（只读调研）
 
+> **本文为当时状态快照**：记录当日工作状态与结论，未逐条复核；
+> 不作现状依据。共 5 条未复核；需要现状请查 `docs/COORDINATION.md`、
+> `docs/known-red-register.md` 与 checklist。
+
 - 调研日期：2026-11-17
 - 项目根：`d:\mbdsdr\MBDSDR`
 - 约束：只读。未修改任何源码/测试，未运行 pytest，未启动 GUI，未安装任何东西，未联网。

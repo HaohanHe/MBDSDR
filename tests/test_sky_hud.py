@@ -160,6 +160,45 @@ def test_invalid_size_raises():
             build_hud(POSE, [], "L1", VIEW, size)
 
 
+def test_precise_label_states_number_provenance():
+    """L3 标签里的角距/星等必须注明来源，数值本身不变。"""
+    hud = build_hud(POSE, _targets(), "L3", VIEW, SIZE)
+    star = next(lab for lab in hud["labels"] if lab["name"] == "角宿一")
+    assert "0.36°" in star["text"], star["text"]
+    assert "推算" in star["text"], "角距是模型推算，必须标注"
+    assert "1.0等" in star["text"], star["text"]
+    assert "星表" in star["text"], "星等来自星表，必须标注"
+    sat = next(m for m in hud["satellite_markers"]
+               if m["name"] == "试验卫星")
+    assert "0.39°" in sat["text"] and "推算" in sat["text"], sat["text"]
+    assert "3.2等" in sat["text"] and "星表" in sat["text"], sat["text"]
+
+
+def test_sources_text_labels_time_and_site_uncertainty():
+    """人话数据源行：卫星授时/系统时钟、GNSS/手动位置都要带精度口径。"""
+    online = {
+        "sdr": {"connected": True},
+        "gnss": {"connected": True, "time_source": "nmea", "fix": True},
+        "time": {"source": "gnss", "time_source": "nmea"},
+        "site": {"source": "gnss", "lat_deg": 48.1, "lon_deg": 11.5},
+    }
+    text = build_hud(POSE, [], "L3", VIEW, SIZE,
+                     runtime_sources=online)["sources_text"]
+    assert "时间：卫星授时（整秒级，无秒脉冲）" in text, text
+    assert "位置：GNSS（接收机观测）" in text, text
+
+    manual = {
+        "sdr": {"connected": False},
+        "gnss": {"connected": False, "time_source": "none", "fix": False},
+        "time": {"source": "system", "time_source": "none"},
+        "site": {"source": "manual", "lat_deg": 45.0, "lon_deg": 120.0},
+    }
+    text = build_hud(POSE, [], "L3", VIEW, SIZE,
+                     runtime_sources=manual)["sources_text"]
+    assert "时间：系统时钟（未校准）" in text, text
+    assert "位置：手动位置（未校准）" in text, text
+
+
 def test_performance_1080p_2_3deg_1000_targets():
     """1080p / 2.3° / 1000 目标：单次 ≤ 33 ms（取 3 次最优，打印每次）。"""
     rng = random.Random(20261117)

@@ -9,17 +9,18 @@ roadmap 断言（原文）：
 做法（不联网、不需要 SDR）：
   * ``orbit.BUILTIN_SATS``：名称 → NORAD CATNR（唯一事实源候选）
   * ``new_spacetime_tle.DEFAULT_SATELLITES``：模块 ``__getattr__`` 惰性投影
-  * ``rf_sky_view._load_celestrak_tle_catalog`` 内的 ``SATELLITE_META``：
-    用 AST 取字面量（不触发网络/缓存读取）
+  * ``rf_sky_view._load_celestrak_tle_catalog`` 内曾有的 ``SATELLITE_META``
+    重复表：已删除（目录真值收敛到 ``sat_catalog``）。脚本仍用 AST 探测
+    该字面量是否回流；探测不到时如实报「目标已不存在」，不假装取到表
   * ``sat_tracker.BUILTIN_DOWNLINK_HZ``：下行频率表的名称集合
   逐名求交集/并集，并检查同名 CATNR 是否冲突；再扫 TLE 缓存目录口径。
 
 退出码（三态）：
     0  复现成功   —— 四份清单名称集合仍不一致（交集 < 并集），或同名 CATNR 冲突
     1  未复现     —— 四份清单名称集合完全一致且无 CATNR 冲突
-    2  无法判定   —— 某个源码表已不存在/无法解析（前置不成立）
+    2  无法判定   —— 目标重复表已不存在（历史取证），或某个源码表无法解析
 
-反证对照：把 ``orbit.BUILTIN_SATS`` 当作唯一源，检查另外三份是否只是投影。
+反证对照：把 ``orbit.BUILTIN_SATS`` 当作唯一源，检查其余清单是否只是投影。
 若某份是独立字面量且与唯一源不同，脚本会打印具体差异——这正是旧行为。
 
 用法：
@@ -45,7 +46,11 @@ def _hr(title: str) -> None:
 
 
 def _ast_satellite_meta(path: str):
-    """从 rf_sky_view 的 _load_celestrak_tle_catalog 里取 SATELLITE_META 字面量。"""
+    """探测 rf_sky_view 里是否又出现 SATELLITE_META 字面量。
+
+    该重复表已随单一来源收敛删除；返回 None 即「目标已不存在」，调用方
+    必须如实报告，不得把缺目标伪装成已完成取证。
+    """
     with open(path, "r", encoding="utf-8") as f:
         tree = ast.parse(f.read(), filename=path)
     candidates = []
@@ -139,7 +144,9 @@ def main() -> int:
     rf_path = os.path.join(ROOT, "desktop", "rf_sky_view.py")
     rf_map = _ast_satellite_meta(rf_path) if os.path.exists(rf_path) else None
     if not rf_map:
-        print("[无法判定] 未找到 rf_sky_view.SATELLITE_META 字面量")
+        print("[目标已不存在] rf_sky_view._load_celestrak_tle_catalog 的 "
+              "SATELLITE_META 重复表已删除（目录真值收敛到 sat_catalog）；"
+              "本脚本保留作历史取证，无法再按四份清单复现，退出码 2。")
         return 2
 
     downlink_names = set(str(k) for k in sat_tracker.BUILTIN_DOWNLINK_HZ)

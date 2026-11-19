@@ -1,5 +1,9 @@
 # Stellarium 星座/星官标签与连线机制
 
+> **本文为当时状态快照**：记录当日工作状态与结论，未逐条复核；
+> 不作现状依据。共 1 条未复核；需要现状请查 `docs/COORDINATION.md`、
+> `docs/known-red-register.md` 与 checklist。
+
 只读研究：参考实现位于 `reference/stellarium/`（GPL-2.0-or-later，仅学习机制，不复制代码/数据）。
 目的：解释 150° 全天图里「中间全是标签」的成因，并给出比 Stellarium 更适配本仓的修正方向。
 

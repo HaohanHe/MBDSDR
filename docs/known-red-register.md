@@ -606,7 +606,11 @@ skyfield 参考：首场峰值 5.025°（贴 5° 门限的掠射场）
 
 ## K13 — 场景 B 天空视图仰角与 sgp4 直算差 0.23°（2026-11-09 23:05，已转绿 `dad6324f`）
 
-- **再检绑定**：验证提交 `dad6324f`；文件集合 `mbdsdr_ai/decoders.py`、`tests/test_e2e_operation_scenarios.py`
+- **再检绑定**：验证提交 `87141024`；文件集合 `mbdsdr_ai/decoders.py`、`tests/test_e2e_operation_scenarios.py`
+- **再检（2026-11-18，主工作树，R8 清账）**：`dad6324f` 之后 `decoders.py` 有 5 笔、本文件
+  1 笔后继改动（见 R8 点名），按再检义务重跑：
+  `MBDSDR_OFFLINE=1 QT_QPA_PLATFORM=offscreen python -m pytest tests/test_e2e_operation_scenarios.py::test_scenario_b_sky_to_spectrum tests/test_e2e_operation_scenarios.py::test_scenario_b_sky_guard_is_live -q`
+  → `2 passed in 2.08s`。绑定更新为 `87141024`。
 
 ```
 tests/test_e2e_operation_scenarios.py::test_scenario_b_sky_to_spectrum
@@ -791,7 +795,13 @@ QT_QPA_PLATFORM=offscreen python -m pytest "<nodeid>" -q
 
 ## K17 — 设置向前覆盖：3 个字段无 UI 入口也无理由（2026-11-13 实跑，已转绿 `dad6324f`）
 
-- **再检绑定**：验证提交 `f549f78a`；文件集合 `scripts/settings_inventory.py`、`tests/test_settings_ui_coverage.py`、`desktop/config_schema.py`、`desktop/control_panel.py`、`desktop/settings_panel.py`
+- **再检绑定**：验证提交 `87141024`；文件集合 `scripts/settings_inventory.py`、`tests/test_settings_ui_coverage.py`、`desktop/config_schema.py`、`desktop/control_panel.py`、`desktop/settings_panel.py`
+- **再检（2026-11-18，主工作树，R8 清账）**：`f549f78a` 之后 `desktop/control_panel.py` 有 4 笔、
+  `desktop/settings_panel.py` 有 3 笔、`desktop/config_schema.py` 有 1 笔后继改动，按再检义务重跑：
+  `MBDSDR_OFFLINE=1 QT_QPA_PLATFORM=offscreen python -m pytest tests/test_settings_ui_coverage.py::test_forward_every_field_has_ui_entry_or_reason -q`
+  → `1 passed`；`python scripts/settings_inventory.py` →
+  `字段 55 / 有 UI 入口 51 / 有理由 4 / 缺失 0 / 幽灵键 0 / source_commit 30f62a49`。
+  绑定更新为 `87141024`。
 - **再检（2026-11-13，R8 第二轮清账）**：`d7448d2d` 之后绑定文件又被两笔 tooltip 去重改动
   碰过——`01ce69f9` 改 `desktop/control_panel.py`（折叠头 tooltip 去掉重复分组标题，未动
   `AGC` 控件文案/锚点）、`ec2e20f5` 改 `desktop/settings_panel.py`（删与相邻注释逐字重复的
@@ -865,7 +875,17 @@ QT_QPA_PLATFORM=offscreen python -m pytest "<nodeid>" -q
 
 ## K18 — 设置盘点表与脚本读数不一致（2026-11-13 实跑，已转绿 `dad6324f`）
 
-- **再检绑定**：验证提交 `20d71e92`；文件集合 `docs/settings-inventory.md`、`scripts/settings_inventory.py`、`tests/test_settings_ui_coverage.py`、`desktop/config_schema.py`
+- **再检绑定**：验证提交 `87141024`；文件集合 `docs/settings-inventory.md`、`scripts/settings_inventory.py`、`tests/test_settings_ui_coverage.py`、`desktop/config_schema.py`
+- **再检（2026-11-18，主工作树，R8 清账）**：`20d71e92` 之后 `docs/settings-inventory.md` 被两笔
+  文档提交、`desktop/config_schema.py` 被 `30f62a49` 碰过，R8 退回待复核。复跑发现**真漂移**：
+  `test_inventory_table_matches_script` 红，块内 `source_commit` 仍是 `ce1ed9ef`
+  （`30f62a49` 之后 `config_schema.py` 已变），数字三项一致。
+  按生成器的设计口径 `python scripts/settings_inventory.py --write` 重生成后：
+  `python -m pytest tests/test_settings_ui_coverage.py::test_inventory_table_matches_script -q`
+  → `1 passed`；`python scripts/settings_inventory.py --check` → `文档块一致`；
+  `python scripts/settings_inventory.py` → `字段 55 / 有 UI 入口 51 / 有理由 4 / 缺失 0 / 幽灵键 0 / source_commit 30f62a49`。
+  **未提交披露**：本次 `--write` 改动（`ce1ed9ef`→`30f62a49`，仅 commit 单元格一行）
+  仍在工作树；提交后本绑定会按 R8 自动退回，需换绑到含该改动的提交。
 - **再检（2026-11-13 晨，R8 三次清账）**：`docs/settings-inventory.md` 在 `8199fcd2`
   之后又被 `b6b2bb34`（块级标记后补空行）与 `cda691ae`（块级 E4 标记第 2 批）
   改动，R8 再次退回待复核。本次在 `20d71e92` 工作树实跑
@@ -919,9 +939,33 @@ QT_QPA_PLATFORM=offscreen python -m pytest "<nodeid>" -q
 
 ---
 
-## K19 — 源码文本 pin 棘轮（2026-11-13 收口，已转绿 `d3b91c19`）
+## K19 — 源码文本 pin 棘轮（2026-11-13 收口后 2026-11-17 复红，未清）
 
-- **再检绑定**：验证提交 `d0881d80`；文件集合 `tests/test_usb_hotplug.py`、`tests/test_file_source_robust.py`、`tests/test_safe_commit_exclude.py`、`tests/test_source_pin_ratchet.py`
+- **历史绑定（已失效：2026-11-17 复红）**：验证提交 `d3b91c19`；文件集合 `tests/test_usb_hotplug.py`、`tests/test_file_source_robust.py`、`tests/test_safe_commit_exclude.py`、`tests/test_source_pin_ratchet.py`
+- **再检（2026-11-18，主工作树，本轮收尾）**：
+  `MBDSDR_OFFLINE=1 QT_QPA_PLATFORM=offscreen python -m pytest tests/test_source_pin_ratchet.py -q`
+  → `1 failed, 4 passed`（4 passed 含本轮新增的两条扫描器精度用例）；
+  `python scripts/audit_source_text_pins.py` →
+  `扫描 900 个测试文件；命中 100 处 / 31 个文件（其中 47 处读的是 tmp_path 运行期数据，不计入源码 pin）`。
+  按 `(path, func, pinned)` 与基线 `docs/source-pin-ratchet-baseline.json`（58 条）做差集
+  （跳过 `origin=tmp`）：**源码 pin 53 处，新增 2 处**（上一读数是新增 14 处）。
+  本轮改写/删除的结构性 pin：`test_spacetime_features` 的源码扫描用例删除
+  （`test_station_upsert_and_clear_never_invents_coordinates` 补 `assert len(col) == 0`）、
+  `test_klobuchar_no_default` / `test_rtk_no_dead_states` 的源码扫描用例删除（同文件行为用例已覆盖）、
+  `test_physical_constant_registry` 的首个 if 分支守卫删除
+  （`compute_refraction(-23.0, Observer()) is None` 已覆盖「气象未知不许返回 0.0」）、
+  `test_satellite_catnr_identity` 改为直接取 `sat_catalog.BUILTIN_META`，并新增
+  `test_loader_labels_builtin_from_sat_catalog`（注入目录 → 内置/本地缓存标签跟着变）、
+  `test_tle_policy_single_source` 改为 `test_display_policy_delegates_to_tracking_policy`
+  （面板 `_tle_policy(age)` 与 `tracking_policy(...)` 逐档对拍）、
+  `test_claim_liveness_one_source` 改为 spy 行为计数（两边 `claim_active` 都必须被调用）；
+  `desktop/rf_sky_view.py` 删除从未使用的局部 `SATELLITE_META` 及其 `BUILTIN_META` 导入。
+  **余 2 处改写为 Dart 行为用例**：
+  - 删 `tests/test_mobile_asterism_overlay.py::test_dart_declares_unverified`（只扫 Dart 注释里的
+    `flutter test` / `未验证` 字样，无运行时等价），改为 `mobile/test/asterism_overlay_test.dart`
+    的 11 条行为用例（合成 `stars.bin` 字节解析、坏字节必抛、星官 JSON、`compute` 对准/裁边/转开）。
+  **工作树 0 条新增 pin；销账待提交后换绑 hash**：本轮不允许提交，条目状态保持未清。
+  **本条不宣称已绿**；转绿条件见下（逐条改行为/AST 断言，不许加基线行）。
 - **再检（2026-11-13 07:05，R8 清账）**：`tests/test_safe_commit_exclude.py` 在验证提交
   `d3b91c19` 之后又被三笔改动——`c18976f4`（`--files` 重复传参合并）、`d6bd34d0`
   （计时探针行误带入）、`d0881d80`（把探针行移除），R8 退回待复核。本次在 `d0881d80`
@@ -1083,7 +1127,11 @@ baseline 56 → 58（`BUILT_AT` 同步 58），每条带 owner + reason：
 
 ## K20 — tooltip 守卫 4 条（2026-11-13 收口，已转绿 `5e0bb563`）
 
-- **再检绑定**：验证提交 `d4277a3d`；文件集合 `desktop/sat_track_panel.py`、`tests/test_tooltip_guard.py`、`tests/test_tooltip_dynamic_runtime.py`、`tests/test_sat_track_tle_landing.py`、`tests/test_sat_track_panel_timer_lifecycle.py`
+- **再检绑定**：验证提交 `87141024`；文件集合 `desktop/sat_track_panel.py`、`tests/test_tooltip_guard.py`、`tests/test_tooltip_dynamic_runtime.py`、`tests/test_sat_track_tle_landing.py`、`tests/test_sat_track_panel_timer_lifecycle.py`
+- **再检（2026-11-18，主工作树，R8 清账）**：`d4277a3d` 之后 `desktop/sat_track_panel.py` 有 8 笔、
+  `tests/test_tooltip_guard.py` 有 1 笔后继改动，按再检义务重跑：
+  `MBDSDR_OFFLINE=1 QT_QPA_PLATFORM=offscreen python -m pytest tests/test_tooltip_guard.py tests/test_tooltip_dynamic_runtime.py tests/test_sat_track_tle_landing.py tests/test_sat_track_panel_timer_lifecycle.py -q`
+  → `26 passed, 1 warning in 19.43s`。绑定更新为 `87141024`。
 - **再检（2026-11-13，R8 三次清账）**：`d4277a3d` 只改 `desktop/sat_track_panel.py`
   （删掉逐字复写可见文字的冗余透传 tooltip）。在该 sha 的干净 worktree 上实跑：
   `pytest tests/test_tooltip_guard.py tests/test_tooltip_dynamic_runtime.py`
@@ -1221,7 +1269,11 @@ baseline 56 → 58（`BUILT_AT` 同步 58），每条带 owner + reason：
 > 本条原为 K20 段末一句「属存量问题」，没有 K 编号：机检抓不到、下一班翻 K 表
 > 也看不到。2026-11-13 按正式条目补编号，结论（存量、非 K20 引入）不变。
 
-- **再检绑定**：验证提交 `f549f78a`；文件集合 `tests/test_tooltip_dynamic_runtime.py`、`desktop/settings_panel.py`
+- **再检绑定**：验证提交 `87141024`；文件集合 `tests/test_tooltip_dynamic_runtime.py`、`desktop/settings_panel.py`
+- **再检（2026-11-18，主工作树，R8 清账）**：`f549f78a` 之后 `desktop/settings_panel.py` 有 3 笔后继改动，
+  按再检义务重跑：
+  `MBDSDR_OFFLINE=1 QT_QPA_PLATFORM=offscreen python -m pytest tests/test_tooltip_dynamic_runtime.py::test_settings_panel_passthrough_tooltips_self_describe -q`
+  → `1 passed in 1.50s`；同文件另一组 `tests/test_tooltip_guard.py` + 本文件 → `26 passed`。绑定更新为 `87141024`。
 - **再检（2026-11-13，R8 第二轮清账）**：`d3b91c19` 之后 `desktop/settings_panel.py` 被
   `ec2e20f5`（删与相邻注释逐字重复的 tooltip、同步缩 baseline）碰过，按 R8 重跑换绑定。
   在干净 worktree `D:\mbdsdr\.wt-k17rebind`（`f549f78a`）实跑：
@@ -1368,7 +1420,15 @@ baseline 56 → 58（`BUILT_AT` 同步 58），每条带 owner + reason：
 
 ## K24 — `release_manifest` 发布清单 5 项 FAIL：逐项定性与处置（2026-11-13，3 类已修 `aaf98c44`/`686f8313`/`cb5602f4`·登记表已落库）
 
-- **再检绑定**：验证提交 `20d71e92`；文件集合 `scripts/release_manifest.py`、`desktop/settings.py`、`pyproject.toml`、`desktop/requirements.txt`、`desktop/MBDSDR.spec`
+- **再检绑定**：验证提交 `87141024`；文件集合 `scripts/release_manifest.py`、`desktop/settings.py`、`pyproject.toml`、`desktop/requirements.txt`、`desktop/MBDSDR.spec`
+- **再检（2026-11-18，主工作树，R8 清账）**：`20d71e92` 之后 `desktop/settings.py` 被 `47640254`、
+  `pyproject.toml` 被 `bcca2200` 碰过，按再检义务在产物 `D:\mbdsdr\.tmp\pyi-dist19` 上重跑三条：
+  - `python scripts/release_manifest.py --only version` → `FAIL=0 WARN=0 PASS=16 BY-DESIGN=1 SKIP=0 -> PASS`；
+  - `python scripts/release_manifest.py --only deps` → `FAIL=0 WARN=0 PASS=43 BY-DESIGN=0 SKIP=1 -> PASS`；
+  - `python scripts/release_manifest.py --only secrets` → `FAIL=0 WARN=0 PASS=1 -> PASS`（4 处登记误报）。
+  期间 `--only version` 曾红 1 条（`tests/test_readme_contract.py:77` 写死 `v0.2.0`），
+  已把该反证改为从 README 首行动态取版本再篡改（`9 passed`），版本号升级后不再复发。
+  绑定更新为 `87141024`。
 - **首次记录**：2026-11-13（工作树 HEAD `90452159`，`python scripts/release_manifest.py`，
   自动取到 `.tmp/pyi-dist16`）。
 - **复跑口径**：产物 `pyi-dist16` 由 HEAD `6b19aa89` 构建，**比当前 HEAD 旧**；

@@ -137,14 +137,33 @@ ISS_TLE = (
     "2 25544  51.6335  21.6229 0006884 302.9098  57.1228 15.49030149591752",
 )
 
+#: 该 TLE 的历元是 2026-10-24T05:01:11Z；provider 用「当前时刻」起算过境，
+#: 用系统时钟跑测会让 SGP4 越传越远（历元 25 天后几何已漂，过境两端 fd
+#: 会变成同号）。把时刻钉在历元 +1h = 2026-10-24T06:01:11Z：此时 24h 窗口
+#: 内的首过境（17:34Z）两端 fd = +9634 / -9642 Hz——AOS 接近为正、
+#: LOS 远离为负（f_d = -v_r/c·f0），异号是该几何下的物理必然。
+PINNED_NOW_UNIX = 1_792_821_671.0
 
-def test_main_window_provider_emits_tca_freq_and_doppler(qapp, isolated_profile):
+
+def test_main_window_provider_emits_tca_freq_and_doppler(
+        qapp, isolated_profile, monkeypatch):
     """宿主 provider 必须一次给出 AOS/TCA/LOS + 频率 + 整条 f_d(t)。"""
     from types import SimpleNamespace
 
     from desktop.main_window import MainWindow
     from desktop.sat_track_panel import SatTrackPanel
+    from mbdsdr_ai import new_spacetime
     from mbdsdr_ai.sat_passes import GroundStation
+
+    # 钉死 provider 内部的「当前时刻」入口（predict_passes 缺省取 TimeEngine），
+    # 只在本次测试生效；断言口径不变。
+    class _FixedEngine:
+        @staticmethod
+        def now_unix():
+            return PINNED_NOW_UNIX
+
+    monkeypatch.setattr(new_spacetime, "get_time_engine",
+                        lambda: _FixedEngine())
 
     panel = SatTrackPanel()
     panel.populate_satellites(["ISS"])

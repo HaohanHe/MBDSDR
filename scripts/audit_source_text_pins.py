@@ -36,6 +36,11 @@ DEFAULT_TEST_DIR = ROOT / "tests"
 
 _READ_ATTRS = {"read_text", "getsource", "read", "read_bytes", "open"}
 _REGEX_FUNCS = {"search", "match", "findall", "finditer", "fullmatch"}
+#: pytest 的临时目录 fixture：由它们派生出的文件是**测试自己刚写的运行期数据**，
+#: 读回来断言内容属于行为断言，不是「钉源码文本」。只认标准名；改名/包装的
+#: fixture 检测不到 → 仍按源码 pin 计（保守，不放过真 pin）。
+TMP_FIXTURES = {"tmp_path", "tmp_path_factory", "tmpdir", "tmpdir_factory"}
+TMP_TARGET = "<tmp>"
 
 
 def _call_name(call: ast.Call) -> str:
@@ -120,6 +125,42 @@ def _scope_local_names(scope: ast.AST) -> Set[str]:
     return names
 
 
+def _tmp_names_for_scope(scope: ast.AST, inherited: Set[str]) -> Set[str]:
+    """本作用域里由 pytest 临时目录 fixture 派生的路径变量（含传递闭包）。
+
+    只在本作用域内传播（不进入嵌套作用域）：`path = tmp_path / "x"` 之后
+    `path.read_text()` 读的是测试自己刚写的临时文件。
+    """
+    names: Set[str] = set(inherited)
+    changed = True
+    while changed:
+        changed = False
+        for node in _iter_scope_nodes(scope):
+            if isinstance(node, (ast.Assign, ast.AnnAssign)):
+                targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+                value = node.value
+                if value is None:
+                    continue
+                ids = _names_in(value)
+                if ids & TMP_FIXTURES or ids & names:
+                    for target in targets:
+                        for name in ast.walk(target):
+                            if isinstance(name, ast.Name) and name.id not in names:
+                                names.add(name.id)
+                                changed = True
+            elif isinstance(node, ast.With):
+                for item in node.items:
+                    if item.optional_vars is None:
+                        continue
+                    ids = _names_in(item.context_expr)
+                    if ids & TMP_FIXTURES or ids & names:
+                        for name in ast.walk(item.optional_vars):
+                            if isinstance(name, ast.Name) and name.id not in names:
+                                names.add(name.id)
+                                changed = True
+    return names
+
+
 def _collect_source_vars(tree: ast.AST) -> Dict[ast.AST, Dict[str, str]]:
     """按词法作用域跟踪「读文本的变量」及其派生物。
 
@@ -152,6 +193,10 @@ def _collect_source_vars(tree: ast.AST) -> Dict[ast.AST, Dict[str, str]]:
             tracked.update(compute(ancestor))
         for name in _scope_local_names(scope):
             tracked.pop(name, None)
+        inherited_tmp: Set[str] = set()
+        for ancestor in reversed(chain):
+            inherited_tmp |= _tmp_names_for_scope(ancestor, set())
+        tmp_names = _tmp_names_for_scope(scope, inherited_tmp)
         changed = True
         while changed:
             changed = False
@@ -174,10 +219,14 @@ def _collect_source_vars(tree: ast.AST) -> Dict[ast.AST, Dict[str, str]]:
                         ),
                         None,
                     )
+                    derived = _names_in(value) & set(tracked)
                     if call is not None:
-                        target = _load_target(call)
-                    elif _names_in(value) & set(tracked):
-                        target = ""
+                        # 读的是 tmp_path 派生文件 → 运行期数据，不是源码文本
+                        tmp_origin = bool(_names_in(value) & tmp_names)
+                        target = TMP_TARGET if tmp_origin else _load_target(call)
+                    elif derived:
+                        inherited = [tracked[n] for n in derived]
+                        target = TMP_TARGET if any(t == TMP_TARGET for t in inherited) else ""
                     else:
                         continue
                     for t in targets:
@@ -198,7 +247,11 @@ def _collect_source_vars(tree: ast.AST) -> Dict[ast.AST, Dict[str, str]]:
                         )
                         if call is None:
                             continue
-                        target = _load_target(call)
+                        target = (
+                            TMP_TARGET
+                            if _names_in(item.context_expr) & tmp_names
+                            else _load_target(call)
+                        )
                         for n in ast.walk(item.optional_vars):
                             if isinstance(n, ast.Name) and n.id not in tracked:
                                 tracked[n.id] = target
@@ -326,6 +379,9 @@ def scan_file(path: Path) -> List[dict]:
         if not matched:
             continue
         targets = {t for name in matched for t in [tracked[name]] if t}
+        # origin=tmp：断言的是测试自己刚写到 tmp_path 下的运行期数据，
+        # 不是被钉的源码文本；棘轮据此豁免，但工具仍逐条打印（不静默）。
+        origin = "tmp" if targets and all(t == TMP_TARGET for t in targets) else "source"
         for snippet in _pipe_hits(test, tracked):
             hits.append(
                 {
@@ -333,6 +389,7 @@ def scan_file(path: Path) -> List[dict]:
                     "line": getattr(node, "lineno", 0),
                     "func": _func_at(getattr(node, "lineno", 0)),
                     "source_vars": sorted(matched),
+                    "origin": origin,
                     "target_file": sorted(targets)[0] if targets else "",
                     "kind": _kind(sorted(targets)[0] if targets else "", sorted(matched)),
                     "pinned": snippet,
@@ -458,9 +515,12 @@ def main(argv: List[str] | None = None) -> int:
         print(json.dumps(payload, ensure_ascii=False, indent=2))
         return 0
 
-    print(f"扫描 {len(targets)} 个测试文件；命中 {len(all_hits)} 处 / {len(files)} 个文件")
+    print(f"扫描 {len(targets)} 个测试文件；命中 {len(all_hits)} 处 / {len(files)} 个文件"
+          f"（其中 {sum(1 for h in all_hits if h.get('origin') == 'tmp')} 处读的是 "
+          "tmp_path 运行期数据，不计入源码 pin）")
     for hit in all_hits:
-        print(f"  {hit['path']}:{hit['line']}  钉：{hit['pinned']}")
+        tag = " [tmp]" if hit.get("origin") == "tmp" else ""
+        print(f"  {hit['path']}:{hit['line']}{tag}  钉：{hit['pinned']}")
     if errors:
         print(f"\n解析失败 {len(errors)} 个文件（跳过，不猜测）：")
         for err in errors:

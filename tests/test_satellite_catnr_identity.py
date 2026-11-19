@@ -39,24 +39,15 @@ from rf_sky_view import (  # noqa: E402
 
 
 def _meta_table() -> dict:
-    """生产加载器实际使用的目录表。
+    """目录真值：唯一来源 `mbdsdr_ai/sat_catalog.BUILTIN_META`。
 
-    以前的做法是从 `_load_celestrak_tle_catalog` 的源码里正则抠出
-    `SATELLITE_META` 字面量再 `eval`。那是把"字面量还在不在"当成契约——
-    而目录真值已经收进 `mbdsdr_ai/sat_catalog.BUILTIN_META`（三处同抄一份
-    正是要消灭的东西），源码里**故意不再有**字面量。
-
-    所以改为：表内容取自唯一真值，另断言生产加载器确实引用了它
-    （防止有人绕开 sat_catalog 再抄一份）。
+    以前从加载器源码里正则抠字面量——那是把「字面量还在不在」当契约。
+    现在加载器直接用 `sat_catalog.merged_catalog()`，本表也从同一处取；
+    「加载器没有另抄一份」由下面 `test_loader_labels_builtin_from_sat_catalog`
+    用行为断言钉住（改目录会改标签），不再扫源码。
     """
-    import inspect
-    import rf_sky_view
-
     from mbdsdr_ai.sat_catalog import BUILTIN_META
 
-    src = inspect.getsource(rf_sky_view._load_celestrak_tle_catalog)
-    assert "_SAT_BUILTIN_META" in src, (
-        "生产加载器没引用 sat_catalog.BUILTIN_META —— 目录可能又被抄了一份")
     return {
         name: {"catnr": meta.catnr,
                "freq_mhz": meta.freq_mhz,
@@ -145,6 +136,48 @@ class TestCatalogScan:
             table, lambda c: None)
         assert mismatches == []
         assert sorted(n for n, _c in no_data) == sorted(table.keys())
+
+
+# ---------------------------------------------------------------------------
+# 加载器目录来源（行为：改目录 → 标签跟着变，不是「源码里有没有这行」）
+# ---------------------------------------------------------------------------
+class TestLoaderCatalogSource:
+    def test_loader_labels_builtin_from_sat_catalog(self, monkeypatch):
+        """加载器必须按 `sat_catalog.merged_catalog()` 出目录。
+
+        注入两条假目录（一条在「内置基线」集合里、一条不在），
+        改内置集合就会改标签——若加载器又自己抄了一份写死目录，
+        这两个标签不会跟着走。
+        """
+        from types import SimpleNamespace
+
+        import mbdsdr_ai.orbit as _orbit
+        import mbdsdr_ai.sat_catalog as _sat_catalog
+        import rf_sky_view as _rf
+
+        fake_entries = [
+            SimpleNamespace(name="FAKE BUILTIN", catnr=43010,
+                            freq_mhz=136.9, kind="weather"),
+            SimpleNamespace(name="FAKE CACHED", catnr=99001,
+                            freq_mhz=None, kind="other"),
+        ]
+        monkeypatch.setattr(_sat_catalog, "merged_catalog",
+                            lambda: list(fake_entries))
+        monkeypatch.setattr(_rf, "_SAT_BUILTIN_CATNRS", frozenset({43010}))
+        monkeypatch.setattr(
+            _orbit, "fetch_tle",
+            lambda _c: ("1 43010U 17072A   26297.32660775  .00000262 "
+                        "00000+0  14549-3 0  9992",
+                        "2 43010  99.0307 274.1912 0002437  56.2336 "
+                        "303.9071 14.19764186463312"))
+        monkeypatch.setattr(_orbit, "tle_epoch_iso",
+                            lambda _line1: "2026-10-24T07:50:18Z")
+
+        cat = _rf._load_celestrak_tle_catalog()
+        by_name = {e["name"]: e for e in cat}
+        assert set(by_name) == {"FAKE BUILTIN", "FAKE CACHED"}
+        assert "内置基线" in by_name["FAKE BUILTIN"]["tle_source"]
+        assert "本地缓存" in by_name["FAKE CACHED"]["tle_source"]
 
 
 # ---------------------------------------------------------------------------

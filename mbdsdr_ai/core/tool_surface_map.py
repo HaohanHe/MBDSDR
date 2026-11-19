@@ -370,6 +370,9 @@ modulate_symbols
 modulation_classify
 morse_decode
 morse_encode
+mount_abort
+mount_slew
+mount_status
 multistation_tdoa_fix
 nav_bit_sync
 noaa_apt_decode
@@ -560,6 +563,8 @@ sky_culture_lookup
 sky_gimbal_follow
 sky_look_at
 sky_meteor_showers
+sky_pointing_check
+sky_dso_lookup
 sky_object_lookup
 sky_observing_sites
 sky_tonight

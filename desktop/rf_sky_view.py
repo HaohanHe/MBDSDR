@@ -125,7 +125,6 @@ from mbdsdr_ai.sky_pointing import view_params as sky_view_params
 from mbdsdr_ai import skyengine
 from mbdsdr_ai.sat_catalog import (
     BUILTIN_CATNRS as _SAT_BUILTIN_CATNRS,
-    BUILTIN_META as _SAT_BUILTIN_META,
 )
 from mbdsdr_ai.skyengine import stars as _stars
 from mbdsdr_ai.skyengine import constellations as _constel
@@ -1780,23 +1779,13 @@ def _load_celestrak_tle_catalog() -> List[Dict[str, object]]:
     except Exception:
         return catalog
 
-    # 已知卫星元数据（名称 -> CATNR / 默认频率 / 类型）
-    # 注意：这里只存目录索引，不存 TLE 元素本身。
-    #
-    # **值从 `mbdsdr_ai.sat_catalog.BUILTIN_META` 派生，不手抄。**
-    # 历史上这一份和 `orbit.BUILTIN_SATS` 各写了一遍 6 颗星，改一处漏一处；
-    # 现在唯一真值在 sat_catalog，本表只是给绘制层用的视图。
+    # 目录真值只在 `mbdsdr_ai/sat_catalog.py`：本函数不再抄一份名字/CATNR 表，
+    # 只把 `merged_catalog()` 的结果取 TLE 后给绘制层用。
     #
     # CATNR 与名称的一致性由 tests/test_satellite_catnr_identity.py 用
     # 真实 TLE line0 双向钉扎（44016/54234 错配事故的回归锁）：
     #   METEOR M2 = 40069（不是 44016 箭体碎片 ATLAS 5 CENTAUR DEB）；
     #   FENGYUN 3D = 43010（不是 54234 NOAA 21 JPSS-2）。
-    SATELLITE_META: Dict[str, Dict[str, object]] = {
-        name: {"catnr": meta.catnr,
-               "freq_mhz": meta.freq_mhz,
-               "kind": meta.kind}
-        for name, meta in _SAT_BUILTIN_META.items()
-    }
 
     # 目录 = 内置基线 + 磁盘缓存里发现的星（`sat_catalog.merged_catalog`）。
     #

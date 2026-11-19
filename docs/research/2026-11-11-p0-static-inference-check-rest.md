@@ -1,5 +1,9 @@
 # 2026-11-11 P0 逐条实测核查（第二批 · 含跨线数字对齐）
 
+> **本文为当时状态快照**：记录当日工作状态与结论，未逐条复核；
+> 不作现状依据。共 8 条未复核；需要现状请查 `docs/COORDINATION.md`、
+> `docs/known-red-register.md` 与 checklist。
+
 > 证据状态：E4——本文件数字未逐条绑定原始件/复跑命令，引用前须复核（判据见 docs/evidence-standard.md）。
 > 范围：`docs/research/2026-11-11-roadmap.md` §1 中除 P0-03/04/10/11 之外的 13 条。
 > P0-03/04/10/11 见 `2026-11-11-p0-static-inference-check.md`。

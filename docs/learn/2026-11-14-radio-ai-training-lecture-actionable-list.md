@@ -1,5 +1,9 @@
 # 《无线电与人工智能应用培训课》可落地清单
 
+> **本文为当时状态快照**：记录当日工作状态与结论，未逐条复核；
+> 不作现状依据。共 1 条未复核；需要现状请查 `docs/COORDINATION.md`、
+> `docs/known-red-register.md` 与 checklist。
+
 - 日期：2026-11-14
 - 原文：`c:\Users\xxhzb\.trae-cn\attachments\5c895893-116e-4563-be37-e33c081d48bd_98e64baa-bd36-4cde-a2f1-86cf5a6f2a95_无线电与人工智能应用....txt`（1410 行，00:00–59:56）
 - 范围：通读全文；只读检索本仓库 `mbdsdr_ai/`、`desktop/`、`docs/`、`mobile/`。

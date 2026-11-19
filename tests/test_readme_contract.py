@@ -6,6 +6,7 @@
 """
 from __future__ import annotations
 
+import re
 import sys
 from pathlib import Path
 
@@ -73,6 +74,8 @@ def test_guard_catches_frozen_tool_table():
 
 
 def test_guard_catches_version_drift():
+    """首行版本与 canonical 不一致必须红；版本号不写死，随 README 升级自动跟随。"""
     lines = _text().splitlines()
-    lines[0] = lines[0].replace("v0.2.0", "v9.9.9")
+    lines[0] = re.sub(r"v\d+\.\d+\.\d+", "v9.9.9", lines[0], count=1)
+    assert "v9.9.9" in lines[0], "README 首行没有可篡改的版本号，本反证已失效"
     assert any("≠ canonical" in x for x in vr.check_version("\n".join(lines)))
