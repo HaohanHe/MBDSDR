@@ -378,27 +378,6 @@ def xingguan_culture(key: str) -> Optional[Dict[str, str]]:
     }
 
 
-def xingguan_name_for_hip(hip: int) -> Optional[str]:
-    """该 HIP 所属中国星官的中文名（如"北斗"）；查不到返回 None，不编造。
-
-    只认 ``mapped=True`` 的星（真实映射到星表），遍历三垣/二十八宿下各星官。
-    同一颗星若出现在多个星官，返回第一个（数据顺序即权威顺序）；不合并、
-    不猜测。供认星卡把"属于谁"讲成中国传统星官，而不是 IAU 拉丁星座。
-    """
-    try:
-        target = int(hip)
-    except (TypeError, ValueError):
-        return None
-    if target <= 0:
-        return None
-    for region in load_xingguan().by_key.values():
-        for xg in region.xingguan:
-            for star in xg.stars:
-                if star.hip == target and star.mapped and xg.name_zh:
-                    return xg.name_zh
-    return None
-
-
 _AnchorTarget = Union[str, XingguanRegion, Xingguan]
 
 

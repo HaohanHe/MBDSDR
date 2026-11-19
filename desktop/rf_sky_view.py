@@ -1351,28 +1351,6 @@ def format_distance_ly(ly: float, digits: int = 1) -> str:
     return _format_number(ly, digits, " ly")
 
 
-def format_star_intro(dist_ly: Optional[float], asterism: str = "") -> str:
-    """认星瞬间的人话主句：``光走了 123.4 年 · 属于北斗``。
-
-    与 ``sky_tools._fmt_ly`` 同一口径（FR-07）：把物理量讲成"光走了多久"，
-    距离缺失/非有限/非正一律说"距离未知"，绝不编一个数糊弄；归属（星官/
-    星座）只有真实存在时才附"属于 X"段，没有就只给光行时。这是选中星卡
-    标题下的第一行——用户认出形状后抬头看的就是这句，不是仪表盘。
-    """
-    try:
-        years = float(dist_ly) if dist_ly is not None else None
-    except (TypeError, ValueError):
-        years = None
-    if years is None or not math.isfinite(years) or years <= 0.0:
-        lead = "距离未知"
-    elif years < 100.0:
-        lead = f"光走了 {years:.1f} 年"
-    else:
-        lead = f"光走了 {years:.0f} 年"
-    who = str(asterism or "").strip()
-    return f"{lead} · 属于{who}" if who else lead
-
-
 def format_distance_au(au: float, digits: int = 3) -> str:
     """行星/太阳距离：AU + 十进制换算（万/亿 km），单位写明不缩写。"""
     try:
@@ -7430,16 +7408,6 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         ty += row_h
         painter.drawText(QPointF(box_x + pad, ty), head[2])
         ty += row_h
-        # 认星瞬间的人话主句：标题/别名之后第一眼读到"光走了多久、属于谁"。
-        # 只有恒星卡写入 intro；卫星/太阳系天体没有就是空串，不画这行。
-        _intro = str(info.get("intro") or "").strip()
-        if _intro:
-            fi = QFont(self._font); fi.setBold(True)
-            painter.setFont(fi)
-            painter.setPen(QColor(_t.COLORS["accent"]))
-            painter.drawText(QPointF(box_x + pad, ty), _intro)
-            painter.setFont(self._font)
-            ty += row_h
 
         key_pen = QColor(_t.COLORS["gray_300"])
         val_pen = QColor(_t.COLORS["text_primary"])
@@ -8120,19 +8088,8 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
                 info["ra"] = float(body["ra_deg"])
                 info["dec"] = float(body["dec_deg"])
                 dist_pc = float(body.get("dist_pc") or 0.0)
-                dist_ly = dist_pc * 3.26156 if dist_pc > 0 else None
-                info["dist_ly"] = dist_ly
-                # 归属优先级：中国星官（真实 HIP 映射）> 星座中文名。
-                # 两者都拿不到就留空，format_star_intro 不硬塞"属于"。
-                _xg_name = _xingguan.xingguan_name_for_hip(body.get("hip"))
-                if not _xg_name:
-                    _cc = _constel.constellation_culture(
-                        str(body.get("con") or ""))
-                    _xg_name = (_cc.get("zh", "") if _cc else "")
-                info["asterism"] = _xg_name or ""
-                info["intro"] = format_star_intro(dist_ly, info["asterism"])
-                info["dist_text"] = (format_distance_ly(dist_ly)
-                                     if dist_ly is not None else "—")
+                info["dist_text"] = (format_distance_ly(dist_pc * 3.26156)
+                                     if dist_pc > 0 else "—")
                 jd = self._current_jd()
                 rs = self._body_rise_set(info["ra"], info["dec"], jd)
                 info["rise"] = rs["rise_jd"]
@@ -8162,14 +8119,8 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
                     info["mag"] = float(star.vmag)
                     info["ra"] = float(star.ra_deg)
                     info["dec"] = float(star.dec_deg)
-                    dist_ly = float(star.dist_ly) if star.dist_ly > 0 else None
-                    info["dist_ly"] = dist_ly
-                    _cc = _constel.constellation_culture(
-                        str(getattr(star, "con", "") or ""))
-                    info["asterism"] = (_cc.get("zh", "") if _cc else "")
-                    info["intro"] = format_star_intro(dist_ly, info["asterism"])
-                    info["dist_text"] = (format_distance_ly(dist_ly)
-                                         if dist_ly is not None else "—")
+                    info["dist_text"] = (format_distance_ly(star.dist_ly)
+                                         if star.dist_ly > 0 else "—")
                     jd = self._current_jd()
                     rs = self._body_rise_set(star.ra_deg, star.dec_deg, jd)
                     info["rise"] = rs["rise_jd"]
@@ -8343,12 +8294,7 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
 
         head = [str(info.get("title") or ""), str(info.get("kind_label") or ""),
                 "又名：" + " · ".join(info.get("aliases") or ["—"])]
-        # 认星瞬间的人话主句（FR-07）：标题下第一眼看到的是"光走了多久、
-        # 属于谁"，不是仪表盘。无光行时时为恒星/太阳系天体算不出，不画这行。
-        intro = str(info.get("intro") or "").strip()
         widths = [fm.horizontalAdvance(t) for t in head]
-        if intro:
-            widths.append(fm.horizontalAdvance(intro))
         widths += [key_col_w + 10 + fm.horizontalAdvance(v) for _, v in kv]
         raw_desc = str(info.get("desc") or "")
         body_w = max(widths)   # 卡宽由键值行决定; 描述换行适配, 不撑宽
@@ -8374,8 +8320,7 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
 
         row_h = 17.0
         # 多留一行给「问模型」入口：点完星之后往哪走，不能是个死胡同
-        n_rows = (3 + (1 if intro else 0) + len(kv)
-                  + (len(desc_lines) + 1 if desc_lines else 0) + 1)
+        n_rows = 3 + len(kv) + (len(desc_lines) + 1 if desc_lines else 0) + 1
         box_h = n_rows * row_h + 18
         box_x, box_y = 14.0, 40.0
         bg = QColor(_t.COLORS["card_1"])
@@ -8402,16 +8347,6 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         ty += row_h
         painter.drawText(QPointF(box_x + pad, ty), head[2])
         ty += row_h
-        # 认星瞬间的人话主句：标题/别名之后第一眼读到"光走了多久、属于谁"。
-        # 只有恒星卡写入 intro；卫星/太阳系天体没有就是空串，不画这行。
-        _intro = str(info.get("intro") or "").strip()
-        if _intro:
-            fi = QFont(self._font); fi.setBold(True)
-            painter.setFont(fi)
-            painter.setPen(QColor(_t.COLORS["accent"]))
-            painter.drawText(QPointF(box_x + pad, ty), _intro)
-            painter.setFont(self._font)
-            ty += row_h
 
         key_pen = QColor(_t.COLORS["gray_300"])
         val_pen = QColor(_t.COLORS["text_primary"])

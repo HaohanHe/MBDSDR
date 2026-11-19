@@ -46,7 +46,7 @@ from rf_sky_view import (  # noqa: E402
     format_distance_au, format_distance_km, format_magnitude, format_percent,
     format_speed_kms, format_utc_time, format_local_time, format_hms_ra,
     format_dms_deg, format_view_axis, format_view_axis_human,
-    format_star_intro, local_sidereal_time_deg,
+    local_sidereal_time_deg,
     star_catalog_credit_text,
     format_satellite_description, compass_point,
 )
@@ -540,85 +540,6 @@ class TestSingleFormatterAndUnitLabels:
         azalt = next(t for t in texts if "几何" in t and "视(" in t)
         assert "°" in azalt and "ALT" not in azalt
         assert all(" deg" not in t for t in texts), texts
-
-    def test_star_intro_humanizes_light_time_and_asterism(self):
-        """认星主句：光行时讲成"光走了多久"，有归属才附"属于 X"。"""
-        # 近星保留一位小数，与 sky_tools._fmt_ly 同口径
-        assert format_star_intro(8.6, "") == "光走了 8.6 年"
-        # 远星取整，不写小数尾巴（Python f"{x:.0f}" 银行家舍入）
-        assert format_star_intro(1234.5, "猎户座") == \
-            "光走了 1234 年 · 属于猎户座"
-        # 带归属（近星 <100 年保留一位小数）
-        assert format_star_intro(99.6, "北斗") == \
-            "光走了 99.6 年 · 属于北斗"
-
-    @pytest.mark.parametrize("bad", [None, float("nan"), float("inf"),
-                                     -1.0, 0.0, "not-a-number"])
-    def test_star_intro_missing_distance_says_unknown(self, bad):
-        """距离缺失/非有限/非正一律说"距离未知"，绝不编一个数。"""
-        assert format_star_intro(bad, "北斗") == "距离未知 · 属于北斗"
-
-    def test_star_intro_blank_asterism_has_no_belonging_clause(self):
-        """无真实归属时不硬塞"属于"，只给光行时。"""
-        assert format_star_intro(95.0, "") == "光走了 95.0 年"
-        assert format_star_intro(95.0, "   ") == "光走了 95.0 年"
-
-    def test_star_card_renders_intro_line(self, engine):
-        """恒星卡必须把人话主句画出来，且工程行仍在（专业可选不强制）。"""
-        v = RFSkyView()
-        v.set_observer(LAT, LON, 0.0)
-        v._picked_body = {"kind": "star", "name": "天枢", "ra_deg": 165.0,
-                          "dec_deg": 61.75, "vmag": 1.79, "dist_pc": 30.0,
-                          "con": "UMa"}
-        v._build_body_info(v._picked_body)
-        info = v._body_info
-        assert "intro" in info
-        assert "光走了" in info["intro"]
-        # 归属是中文星座名，不是拉丁名/Ursa Major（FR-07 默认界面说人话）
-        assert "属于大熊座" in info["intro"]
-        assert "Ursa" not in info["intro"]
-        rec = _TextRecorder()
-        v._draw_body_info(rec)
-        texts = rec.texts
-        assert any("光走了" in t and "属于大熊座" in t for t in texts), texts
-        # 工程行没被挤掉（专业界面可选但不强制）
-        assert "星等 (mag)" in texts
-        assert "赤经/赤纬" in texts
-
-    def test_star_card_prefers_chinese_xingguan_over_iau_constellation(self,
-                                                                        engine):
-        """有真实 HIP 星官映射时说"属于勾陈"，不退回 IAU 大熊座。"""
-        from mbdsdr_ai.skyengine.xingguan import xingguan_name_for_hip
-        assert xingguan_name_for_hip(11767) == "勾陈"  # 天枢在数据里的真实归属
-        v = RFSkyView()
-        v.set_observer(LAT, LON, 0.0)
-        v._picked_body = {"kind": "star", "name": "天枢", "ra_deg": 165.0,
-                          "dec_deg": 61.75, "vmag": 1.79, "dist_pc": 30.0,
-                          "con": "UMa", "hip": 11767}
-        v._build_body_info(v._picked_body)
-        assert "属于勾陈" in v._body_info["intro"]
-        assert "大熊座" not in v._body_info["intro"]
-
-    def test_xingguan_lookup_never_invents(self):
-        """HIP 查不到星官就返回 None，不拿 IAU 星座冒充中国星官。"""
-        from mbdsdr_ai.skyengine.xingguan import xingguan_name_for_hip
-        assert xingguan_name_for_hip(6961) is None
-        assert xingguan_name_for_hip(0) is None
-        assert xingguan_name_for_hip(-5) is None
-        assert xingguan_name_for_hip(None) is None
-        assert xingguan_name_for_hip("not-an-int") is None
-
-    def test_star_card_missing_distance_says_unknown(self, engine):
-        """点中无距离数据的星：卡上说"距离未知"，不编一个数。"""
-        v = RFSkyView()
-        v.set_observer(LAT, LON, 0.0)
-        v._picked_body = {"kind": "star", "name": "无名星", "ra_deg": 10.0,
-                          "dec_deg": 20.0, "vmag": 5.0, "con": "UMa"}
-        v._build_body_info(v._picked_body)
-        assert v._body_info["intro"].startswith("距离未知")
-        rec = _TextRecorder()
-        v._draw_body_info(rec)
-        assert any("距离未知" in t for t in rec.texts), rec.texts
 
     def test_status_card_states_utc_and_local_offset(self, engine):
         """渲染状态卡：UTC 与本地（带偏移）两个时刻都要真的画出来。
