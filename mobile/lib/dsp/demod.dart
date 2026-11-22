@@ -29,8 +29,11 @@ abstract class FmDemod {
   /// 直接送进 16-bit 满量程：模拟器实测 25 s 真实记录中 **39% 样本贴
   /// 在 ±32767**（其中 -32767 出现 24.9 万次），属静默削顶失真。
   /// 这里统一除以 π（物理最大相位差），两种解调模式共用同一出口。
-  Float64List _discriminate(Float64x2List x) {
-    final out = Float64List(x.length);
+  ///
+  /// 返回 Float32List 直接作为音频帧：省掉「Float64 计算 → 再建一份
+  /// Float32」的整块拷贝（每块最多 3 万个样本、每秒数十块）。
+  Float32List _discriminate(Float64x2List x) {
+    final out = Float32List(x.length);
     for (var n = 0; n < x.length; n++) {
       final cur = x[n];
       final p = _prev;
@@ -67,9 +70,8 @@ class NfmDemod extends FmDemod {
   @override
   Float32List process(Float64x2List iq) {
     final channelized = _chan.process(iq);
-    final freq = _discriminate(channelized);
-    // NFM 不强制去加重；直接输出鉴频结果（弧度/样点）。
-    return Float32List.fromList(freq);
+    // NFM 不强制去加重；鉴频结果已归一到 [-1, 1]，直接作为音频帧返回。
+    return _discriminate(channelized);
   }
 }
 
@@ -119,15 +121,19 @@ class WfmDemod extends FmDemod {
     final freq = _discriminate(channelized);
 
     // 75µs RC 去加重（单极点低通）：y[n] = y[n-1] + α(x[n]-y[n-1])。
-    final audio = <double>[];
+    // 预分配输出，避免逐样本 List.add 的扩容与装箱（旧实现每次 append
+    // 都可能触发 growable 列表扩容，256k/s 下是持续的 GC 压力）。
+    final cap = freq.length ~/ _finalDecimation + 2;
+    final audio = Float32List(cap);
+    var written = 0;
     for (var n = 0; n < freq.length; n++) {
       _deemphState += _deemphAlpha * (freq[n] - _deemphState);
       // 第二级整数抽取到 ~48k。去加重本身是低通，兼作抗混叠。
       if (_finalCount == 0) {
-        audio.add(_deemphState);
+        audio[written++] = _deemphState;
       }
       _finalCount = (_finalCount + 1) % _finalDecimation;
     }
-    return Float32List.fromList(audio);
+    return written == cap ? audio : Float32List.sublistView(audio, 0, written);
   }
 }

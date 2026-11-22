@@ -14,15 +14,17 @@
   **0 error / 0 warning / 64 info**，耗时 1.1 s。info 为 `deprecated_member_use`
   （Flutter 3.50 起 `package:flutter/material.dart` 提示改用 `material_ui`）与 2 条测试内
   `avoid_dynamic_calls`，不影响编译，未批量改。原始输出：`D:\mbdsdr\output\flutter_analyze_ab52.log`。
-- `flutter test`（2026-11-22 实测）：**543 passed / 0 failed**，耗时 24 s
+- `flutter test`（2026-11-22 实测）：**545 passed / 0 failed**，耗时 22 s
   （含天空投影对拍 84 点、反投影往返、四态裁剪、投影有效性域/跨域裁剪 4 条、
   指天视图 21 条、星表资产 4 条、asterism overlay 行为 11 条、首次成功端到端 5 条）。
   历史锚点：539（首次模拟器验证轮）→ 541（设置页「输入即落盘」1 条 +
   频谱页「竖屏主操作置顶 / 宽屏仍在底部」1 条）→ 543（鉴频输出归一化 2 条：
-  NFM 幅度/不越界 + WFM 不越界）。
-- `flutter build apk --debug`（2026-11-22 实测）：**成功**；鉴频归一化修复后复跑 Gradle
-  `assembleDebug` 33.5 s，产物 `build/app/outputs/flutter-apk/app-debug.apk`
-  （190,119,009 B；历史：190,118,996 B / 190,116,539 B / 首次 190,110,524 B）。
+  NFM 幅度/不越界 + WFM 不越界）→ 545（抽取型 FIR 与旧口径逐点等价 1 条、
+  offset=0 跳过混频 1 条）。
+- `flutter build apk --debug`（2026-11-22 实测）：**成功**；DSP 优化后复跑 Gradle
+  `assembleDebug` 42.6 s，产物 `build/app/outputs/flutter-apk/app-debug.apk`
+  （190,120,531 B；历史：190,119,009 B / 190,118,996 B / 190,116,539 B / 首次 190,110,524 B）；
+  `flutter build apk --profile` 也可出包（`app-profile.apk` 74.8 MB）。
   仅有两条工具链前瞻告警（AGP 9.1.1 将不再支持，建议 ≥9.3.1；Kotlin 2.4.10 建议 ≥2.4.20），
   不影响本次出包，未擅自升级（升级需单独回归）。
 - **模拟器安装与运行（2026-11-22 首次验证）**：AVD `mbdsdr35`（Android 15 / API 35，
@@ -59,6 +61,18 @@
   `D:\mbdsdr\output\_shots\mobile_fix_*.png`。
   （注：软件渲染下瀑布高频刷新时 `uiautomator dump` 偶发 `null root node`，
   属采集工具限制，以截图与宿主服务端日志为证。）
+- **DSP 实时性优化（2026-11-22）**：`Channelizer` 从「每个输入样点算完整 129/161 抽头
+  卷积、随后丢掉 39/40 的结果」改为**抽取型 FIR**（只在输出时刻卷积，
+  O(N·fs/D)）；offsetHz=0 时跳过逐样点 sin/cos；NFM/WFM 音频帧改预分配
+  （去掉逐样本 `List.add` 与 Float64→Float32 整块拷贝）。等价性由
+  `filters_test` 钉死：decim=8 的每个输出都等于 decim=1 结果每隔 8 个取样
+  （逐点 1e-12）。
+- **模拟器交互 ANR（2026-11-22，未定位；不宣称性能已修好）**：API 35 +
+  swiftshader、2.048 MS/s 实时流下，多次点面板（读数/步进/断开）后系统弹
+  「MBDSDR isn't responding」，logcat 为 `Input dispatching timed out`（>5 s）；
+  **debug 与 profile 构建都复现**，期间 `uiautomator dump` 常返回 `null root node`。
+  ANR trace 的 main 线程在 dump 时刻已回到 `nativePollOnce`，未定位到具体线程；
+  这不作为产品缺陷结论，也**没有**据此宣称性能达标。真机未验。
 - **设备内录制（2026-11-22 模拟器复验，含一处真缺陷修复）**：连接真实 SDR 后滚到
   「录制」→ 红点 `录制中…` → 停止 → 设备目录落 `.wav` + sidecar；录音页签同步列出
   `144.0000 MHz · NFM · 20s / 25s`（索引刷新已实测）。

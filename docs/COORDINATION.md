@@ -10997,3 +10997,26 @@ group1 **5083** = **10297 passed / 0 failed / 0 fatal**。
 - `flutter test` 全量 **543 passed / 0 failed**（+2）；`flutter build apk --debug` 33.5 s 成功；`flutter analyze` 0 error / 0 warning / 64 info。
 
 **诚实边界**：仍是模拟器，扬声器出声/音频路由未验；只做样本统计（削顶率/电平），**未做听感与谐波失真测量**；静噪门限语义随电平下移约 10 dB（同一 dBFS 域内自洽，自动门限=噪声底+8 dB 不受影响），未单独做阈值回归。
+
+## 218. 手机 DSP 抽取型 FIR 优化 + 模拟器交互 ANR 观察（2026-11-22）
+
+**起因**：想在模拟器里用真实 SDR 录一段 88.1 MHz WFM 广播，验证另一条解调链；交互过程中反复出现系统 ANR（`MBDSDR isn't responding`）。先查 DSP 实时成本。
+
+**发现的真实开销（`mobile/lib/dsp/`）**
+- `Channelizer` 每个输入样点都算完整 129/161 抽头复数卷积，随后丢掉 39/40 的结果：2.048 MS/s × 161 抽头 ≈ 3.3 亿复数 MAC/s，且**每个样点都调 sin/cos**（NFM/WFM 的 offsetHz 实际为 0，混频是空转）。
+- `WfmDemod` 用 growable `List<double>` 逐样本 add，再整块转 Float32；NFM 也是 Float64 计算后再整块拷贝。
+
+**修复（输出等价，`filters_test` 钉死）**
+- `Channelizer.process`：每输入只做 O(1) 写入（+必要时混频），卷积只在**输出时刻**做一次 → O(N·fs/D)；`offsetHz == 0` 跳过逐样点 sin/cos。
+- `_discriminate` 直接产出 `Float32List`（NFM 不再二次拷贝）；WFM 去加重输出预分配 + `sublistView` 收尾，去掉逐样本扩容。
+- 等价性：`filters_test` 新增 2 条——decim=8 的每个输出 = decim=1 结果每隔 8 个取样（逐点 1e-12）；offset=0 + 冲激抽头 [1,0,0] 输出等于输入。
+- 验证：`flutter test` **545 passed / 0 failed**；`flutter analyze` 0 error / 0 warning；`build apk --debug` 42.6 s、`--profile` 74.8 MB 均可出包。
+
+**仍未解决（不写成「已修复」）**
+- 同一模拟器（API 35 / swiftshader / 2.048 MS/s 实时流）下，多次点面板（读数、步进、断开）后依然弹 ANR，logcat 为 `Input dispatching timed out`（>5 s）；**debug 与 profile 构建都复现**，DSP 优化没有消除它。
+- ANR trace 的 `main` 线程在 dump 时刻已回到 `nativePollOnce`，没有抓到持续占用栈；期间 `uiautomator dump` 频繁返回 `null root node`。因此**不归因**为某段产品代码，也不宣称性能达标。
+- 受此影响，本轮「88.1 MHz WFM 广播录音 + 波形统计」**未完成**；WFM 路径仍只有合成信号单测（1 kHz 恢复、不越界）与「与 NFM 共用归一化出口」的证据。
+
+**环境侧一个可复现事实**：宿主最小 rtl_tcp 进程被终止不彻底时，新进程打开 SDR 会报 `LIBUSB_ERROR_ACCESS (-3)` / `LIBUSB_ERROR_IO (-1)`；确认无残留 python 进程后直接 `RtlSdr()` 打开成功（FC0012 tuner）。属运维注意项，不是设备故障。
+
+**证据**：`D:\mbdsdr\output\_shots\mobile_profile_dialog3.png`（ANR 弹窗）、`mobile_profile_ui.xml` 缺失记录、`D:\mbdsdr\output\rtl_tcp_run5.log`（单会话持续送流）。未提交前的工作区改动见下一次提交。

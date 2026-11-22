@@ -53,6 +53,46 @@ void main() {
     expect(passE / stopE, greaterThan(100));
   });
 
+  test('抽取版 FIR 与「逐样点卷积再每 D 个取一个」逐点等价', () {
+    // 性能优化（抽取型 FIR）不得改动输出：以 decimation=1 的旧口径卷积
+    // 结果做参照，隔 D 个取一个，与新实现逐点比较。
+    final taps = firLowpassTaps(cutoffNorm: 0.1, numTaps: 33);
+    const n = 4096;
+    const d = 8;
+    final input = tone(0.05, n);
+
+    final refFull =
+        Channelizer(taps: taps, decimation: 1, sampleRateHz: fs).process(input);
+    final decimated = Channelizer(
+      taps: taps,
+      decimation: d,
+      sampleRateHz: fs,
+    ).process(input);
+
+    expect(decimated.length, (n + d - 1) ~/ d);
+    // 跳过滤波建立期，逐点比对（浮点误差只允许极小）。
+    for (var m = 2; m < decimated.length; m++) {
+      final ref = refFull[m * d];
+      expect(decimated[m].x, closeTo(ref.x, 1e-12), reason: '样本 $m 实部');
+      expect(decimated[m].y, closeTo(ref.y, 1e-12), reason: '样本 $m 虚部');
+    }
+  });
+
+  test('offsetHz=0 不改变样本（跳过混频）', () {
+    // 冲激抽头 [1,0,0]：输出应等于输入（无频移、无滤波延迟外的影响）。
+    final identity = Channelizer(
+      taps: Float64List.fromList(<double>[1, 0, 0]),
+      decimation: 1,
+      sampleRateHz: fs,
+    );
+    final input = tone(0.05, 256);
+    final out = identity.process(input);
+    for (var k = 0; k < 8; k++) {
+      expect(out[k].x, closeTo(input[k].x, 1e-12));
+      expect(out[k].y, closeTo(input[k].y, 1e-12));
+    }
+  });
+
   test('FIR 抽头直流增益归一化到 1', () {
     final taps = firLowpassTaps(cutoffNorm: 0.1, numTaps: 65);
     var sum = 0.0;

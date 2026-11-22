@@ -71,45 +71,63 @@ class Channelizer {
   double get outputRateHz => sampleRateHz / decimation;
 
   /// 处理一段连续复采样，返回抽取后的复采样。保持内部状态跨调用连续。
+  ///
+  /// 抽取型 FIR：每个输入样点只做 O(1) 的写入 + 混频，卷积只在**输出时刻**
+  /// 计算一次，复杂度 O(N·fs/D) 而不是 O(N·fs)。旧实现每个输入样点都算完整
+  /// 卷积、随后丢掉 39/40 的结果：2.048 MS/s × 161 抽头 = 3.3 亿复数 MAC/s，
+  /// Android debug（JIT + 软件渲染）下主 isolate 被打满，实测触发输入分发
+  /// ANR。输出样点与旧实现逐点等价（都在每组的第一个样点上取卷积）。
+  ///
+  /// offsetHz == 0（NFM/WFM 的默认路径）时不跑逐样点 sin/cos 混频。
   Float64x2List process(Float64x2List input) {
-    final out = <Float64x2>[];
-    final mixPerSample = -2 * math.pi * offsetHz / sampleRateHz;
     final numTaps = taps.length;
+    final outCount = (input.length + decimation - 1) ~/ decimation;
+    final out = Float64x2List(outCount);
+    final hasOffset = offsetHz != 0.0;
+    final mixPerSample = -2 * math.pi * offsetHz / sampleRateHz;
+    var written = 0;
     for (var idx = 0; idx < input.length; idx++) {
       final s = input[idx];
-      // 复混频：x * exp(-i*2π*offset/fs*n)。
-      _phase += mixPerSample;
-      if (_phase > math.pi) {
-        _phase -= 2 * math.pi;
-      } else if (_phase < -math.pi) {
-        _phase += 2 * math.pi;
+      Float64x2 mixed;
+      if (hasOffset) {
+        // 复混频：x * exp(-i*2π·offset/fs·n)。
+        _phase += mixPerSample;
+        if (_phase > math.pi) {
+          _phase -= 2 * math.pi;
+        } else if (_phase < -math.pi) {
+          _phase += 2 * math.pi;
+        }
+        final cosP = math.cos(_phase);
+        final sinP = math.sin(_phase);
+        mixed = Float64x2(
+          s.x * cosP - s.y * sinP,
+          s.x * sinP + s.y * cosP,
+        );
+      } else {
+        mixed = s;
       }
-      final cosP = math.cos(_phase);
-      final sinP = math.sin(_phase);
-      final mixed = Float64x2(
-        s.x * cosP - s.y * sinP,
-        s.x * sinP + s.y * cosP,
-      );
 
-      // FIR（环形延迟线）。
+      // 环形延迟线：每输入只写一格。
       _line[_pos] = mixed;
-      var accRe = 0.0;
-      var accIm = 0.0;
-      for (var k = 0; k < numTaps; k++) {
-        final j = (_pos - k) % numTaps;
-        final v = _line[j < 0 ? j + numTaps : j];
-        final tk = taps[k];
-        accRe += tk * v.x;
-        accIm += tk * v.y;
-      }
-      _pos = (_pos + 1) % numTaps;
 
-      // 整数抽取。
+      // 只在抽取点上做卷积（从最新样点往回 numTaps 个）。
       if (_decimCount == 0) {
-        out.add(Float64x2(accRe, accIm));
+        var accRe = 0.0;
+        var accIm = 0.0;
+        var j = _pos;
+        for (var k = 0; k < numTaps; k++) {
+          final v = _line[j];
+          final tk = taps[k];
+          accRe += tk * v.x;
+          accIm += tk * v.y;
+          j = j == 0 ? numTaps - 1 : j - 1;
+        }
+        out[written++] = Float64x2(accRe, accIm);
       }
+
+      _pos = (_pos + 1) % numTaps;
       _decimCount = (_decimCount + 1) % decimation;
     }
-    return Float64x2List.fromList(out);
+    return written == outCount ? out : Float64x2List.sublistView(out, 0, written);
   }
 }
