@@ -2583,6 +2583,9 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `tests/test_answer_guard.py` | 引导深度线/20261122（UI 假短语/真实事实/组合 10 条） | 2026-11-22 20:03 | 本笔 |
 | `tests/test_skills_tool_refs.py` | 引导深度线/20261122（技能 UI 事实段门禁） | 2026-11-22 20:03 | 本笔 |
 | `docs/COORDINATION.md` | 引导深度线/20261122（§230 UI 幻觉护栏，提交后释放） | 2026-11-22 20:03 | 本笔 |
+| `mobile/lib/pages/sky_page.dart` | 手机收星指向线/20261122（currentPointingTarget + 捕获后跳指天视图） | 2026-11-22 20:17 | 本笔 |
+| `mobile/test/sky_page_test.dart` | 手机收星指向线/20261122（跳转与 az/el 不可算回退 2 条） | 2026-11-22 20:17 | 本笔 |
+| `docs/COORDINATION.md` | 手机收星指向线/20261122（§231 子 agent 收星指向，提交后释放） | 2026-11-22 20:17 | 本笔 |
 
 > 上表各行均由 `claim` 台账推导：owner 原文与 `acquired_at` 直接取自台账，
 > 目的优先用台账里的 `claim_reason`，没有就如实写「未声明」，不补编。时间列只是
@@ -11463,3 +11466,40 @@ group1 **5083** = **10297 passed / 0 failed / 0 fatal**。
   不能替代模型能力。
 - 未在手机/头显端复跑；UI 事实以 `mobile/lib/pages/pointing_page.dart` 与
   `sky_page.dart` 的实际实现为准，桌面端未逐项对照。
+
+## 231. 手机「捕获 → 指向」闭环 + UI 事实复核（2026-11-22，子 agent 执行）
+
+**动机**：过境列表原本只有「捕获」调谐，没有把用户带到指向视图；
+与「点卫星 → 指向 → 接收」的闭环缺最后一跳。
+
+**子 agent A（general-purpose，写代码）**
+- `sky_page.dart` 新增 `CapturePointingTarget` 与
+  `SkyController.currentPointingTarget(Pass)`：用该星真实 TLE + 本站坐标 +
+  当前时钟做单点 SGP4，返回当前 az/el；缺站址/缺 TLE/SGP4 失败时返回
+  `target=null` + 具体原因，**不拿过境预测值或 (0,0) 顶替**。
+- `_PassList._onCapture`：`CaptureApplied` 后打开 `PointingPage`，带
+  `targetLabel=p.name` 与当前 az/el；若几何不可算，不跳转，SnackBar 合并
+  「已捕获…；未打开指天视图：<真实原因>」。
+- 为可测性给 `SkyPage` 增加 `@visibleForTesting controller` 注入口；
+  生产不传，行为不变。
+
+**子 agent B（Explore，只读）**
+- 逐条核对 `skills/sky-first-light/SKILL.md` 的【已确认的 UI 事实】与
+  `sky_page.dart` / `pointing_page.dart`：天空页 tooltip「指天视图」、准星、
+  星名+距中心角距、方位/仰角/视场状态条、60→25→8、手动对齐 ±5° 均 **PASS**；
+  绿色光晕/拖动/点击屏幕中央/长按/双指缩放均未在实现中出现。
+- 未发现与技能文案冲突的 UI 事实。
+
+**验证**
+- `flutter test test/sky_page_test.dart` → **+5 passed**（新增：捕获成功按
+  当前 az/el 跳转并带目标名；az/el 不可算时不跳转且 SnackBar 说明原因）。
+- 全量 `flutter test` → **563 passed**（原 561，+2）。
+- `flutter analyze` → **0 error / 0 warning / 64 info**（与改动前同量；
+  新增文件无新告警）。
+
+**诚实边界**
+- 「az/el 不可算」在生产路径几乎不触发（有捕获按钮的过境必然已有站址与
+  TLE），该分支主要为测试注入而存在；仍保留真实失败语义，不造假。
+- 跳转沿用既有 `_openPointing` 写法，未加额外 `mounted` 防护（与既有页面一致）。
+- 未在模拟器/真机点击验证；证据为 widget 测试与代码核对。
+- 子 agent 未自行提交；本笔由主 agent 复核 diff、跑全量测试后提交。

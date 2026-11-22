@@ -24,6 +24,9 @@ import 'package:mbdsdr_mobile/services/satellite_capture.dart';
 import 'package:mbdsdr_mobile/services/tle_client.dart';
 import 'package:mbdsdr_mobile/widgets/compass_dial.dart';
 
+/// 捕获后跳指天视图所需的目标几何；[target] 为 null 时 [reason] 说明缺什么。
+typedef CapturePointingTarget = ({AzEl? target, String? reason});
+
 /// 天空页逻辑收口：注入 TleClient / LocationService / OrientationService，
 /// 便于 widget 测试灌 fake。绝不伪造坐标/姿态。
 class SkyController extends ChangeNotifier {
@@ -290,6 +293,35 @@ class SkyController extends ChangeNotifier {
     );
   }
 
+  /// 捕获成功后指天视图需要的「当前时刻」目标几何。
+  ///
+  /// [target] 为 null 表示无法从真实数据算出当前 az/el，[reason] 说明缺什么；
+  /// 调用方必须放弃跳转并如实提示，绝不拿过境预测值或 (0, 0) 顶替。
+  CapturePointingTarget currentPointingTarget(Pass p) {
+    final st = _station;
+    if (st == null) {
+      return (target: null, reason: '缺少本站坐标，无法计算当前方位/仰角');
+    }
+    Tle? tle;
+    for (final t in _tles) {
+      if (t.catalogNumber == p.catalogNumber) {
+        tle = t;
+        break;
+      }
+    }
+    if (tle == null) {
+      return (target: null, reason: '缺少该卫星 TLE，无法计算当前方位/仰角');
+    }
+    try {
+      return (
+        target: azElAt(Sgp4(tle), _clock().toUtc(), st),
+        reason: null,
+      );
+    } on Sgp4Exception {
+      return (target: null, reason: 'SGP4 传播失败，无法计算当前方位/仰角');
+    }
+  }
+
   void setGroup(TleGroup g) {
     _group = g;
     refresh();
@@ -421,17 +453,22 @@ class SkyPage extends StatefulWidget {
     @visibleForTesting TleClient? tleClient,
     @visibleForTesting LocationService? locationService,
     @visibleForTesting OrientationService? orientationService,
+    @visibleForTesting SkyController? controller,
     this.radio,
     @visibleForTesting DateTime Function()? clock,
   })  : _tleClient = tleClient,
         _locationService = locationService,
         _orientationService = orientationService,
+        _controller = controller,
         _clock = clock;
 
   final Station? manualStation;
   final TleClient? _tleClient;
   final LocationService? _locationService;
   final OrientationService? _orientationService;
+
+  /// 测试注入的控制器；null 时按注入服务自建（生产路径）。
+  final SkyController? _controller;
 
   /// 真实/测试注入的射频接口：用于过境「捕获」。生产由外壳传入。
   final RadioApi? radio;
@@ -449,16 +486,17 @@ class _SkyPageState extends State<SkyPage> {
   @override
   void initState() {
     super.initState();
-    _c = SkyController(
-      tleClient: widget._tleClient ?? TleClient(),
-      locationService:
-          widget._locationService ?? GeolocatorLocationService(),
-      orientationService:
-          widget._orientationService ?? ImuOrientationService(),
-      manualStation: widget.manualStation,
-      radio: widget.radio,
-      clock: widget._clock,
-    );
+    _c = widget._controller ??
+        SkyController(
+          tleClient: widget._tleClient ?? TleClient(),
+          locationService:
+              widget._locationService ?? GeolocatorLocationService(),
+          orientationService:
+              widget._orientationService ?? ImuOrientationService(),
+          manualStation: widget.manualStation,
+          radio: widget.radio,
+          clock: widget._clock,
+        );
     _c.start();
     _c.addListener(_onChange);
     // 诚实时钟：始终显示设备真实本地时间，秒级刷新。
@@ -596,7 +634,14 @@ class _SkyPageState extends State<SkyPage> {
         ),
         if (_c.selectedVisibility != null)
           Expanded(child: _GuidanceCard(controller: _c)),
-        Expanded(flex: 2, child: _PassList(passes: _c.passes, controller: _c)),
+        Expanded(
+          flex: 2,
+          child: _PassList(
+            passes: _c.passes,
+            controller: _c,
+            clock: widget._clock,
+          ),
+        ),
         Expanded(flex: 2, child: _NavSatList(controller: _c)),
       ],
     );
@@ -1048,9 +1093,16 @@ class _GuidanceCard extends StatelessWidget {
 }
 
 class _PassList extends StatelessWidget {
-  const _PassList({required this.passes, required this.controller});
+  const _PassList({
+    required this.passes,
+    required this.controller,
+    this.clock,
+  });
   final List<Pass> passes;
   final SkyController controller;
+
+  /// 指天视图的时间源；与天空页共用，测试可注入。
+  final DateTime Function()? clock;
 
   @override
   Widget build(BuildContext context) {
@@ -1101,14 +1153,49 @@ class _PassList extends StatelessWidget {
 
   Future<void> _onCapture(BuildContext context, Pass p) async {
     final messenger = ScaffoldMessenger.of(context);
-    final outcome = await controller.capture(p);
+    final navigator = Navigator.of(context);
+    final CaptureOutcome outcome = await controller.capture(p);
     final String msg = switch (outcome) {
       CaptureApplied() => outcome.describe(),
       CaptureUnavailable() => outcome.reason,
     };
+    if (outcome is! CaptureApplied) {
+      messenger
+        ..clearSnackBars()
+        ..showSnackBar(
+            SnackBar(content: Text(msg, style: AppTokens.auxiliary)));
+      return;
+    }
+    // 捕获成功：按「当前时刻」真实几何打开指天视图。算不出就不跳，并如实
+    // 说明原因——绝不拿过境预测值或 (0, 0) 顶替。
+    final CapturePointingTarget pointing = controller.currentPointingTarget(p);
+    final AzEl? target = pointing.target;
+    final Station? st = controller.station;
+    if (target == null || st == null) {
+      final String reason = pointing.reason ?? '缺少本站坐标，无法计算当前方位/仰角';
+      messenger
+        ..clearSnackBars()
+        ..showSnackBar(SnackBar(
+          content: Text('$msg；未打开指天视图：$reason',
+              style: AppTokens.auxiliary),
+        ));
+      return;
+    }
     messenger
       ..clearSnackBars()
       ..showSnackBar(SnackBar(content: Text(msg, style: AppTokens.auxiliary)));
+    await navigator.push(
+      MaterialPageRoute<void>(
+        builder: (_) => PointingPage(
+          site: SkySite(latDeg: st.lat, lonDeg: st.lon),
+          orientationStream: controller.orientationStream,
+          targetAzDeg: target.az,
+          targetElDeg: target.el,
+          targetLabel: p.name,
+          clock: clock,
+        ),
+      ),
+    );
   }
 }
 

@@ -2,11 +2,18 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:mbdsdr_mobile/astro/coordinates.dart';
+import 'package:mbdsdr_mobile/astro/passes.dart';
+import 'package:mbdsdr_mobile/astro/sgp4.dart';
 import 'package:mbdsdr_mobile/astro/tle.dart';
+import 'package:mbdsdr_mobile/models/radio_state.dart';
 import 'package:mbdsdr_mobile/models/satellite.dart';
+import 'package:mbdsdr_mobile/pages/pointing_page.dart';
 import 'package:mbdsdr_mobile/pages/sky_page.dart';
 import 'package:mbdsdr_mobile/services/location_service.dart';
 import 'package:mbdsdr_mobile/services/orientation_service.dart';
+import 'package:mbdsdr_mobile/services/radio_controller.dart';
+import 'package:mbdsdr_mobile/services/satellite_capture.dart';
 import 'package:mbdsdr_mobile/services/tle_client.dart';
 
 class _DeniedLocation implements LocationService {
@@ -61,6 +68,111 @@ class _FakeTleClient extends TleClient {
   @override
   DateTime? lastUpdated(TleGroup group) => DateTime.utc(2024);
 }
+
+/// NOAA 19（编目号 33591，命中真实下行目录）的 fake TLE；历元即测试时钟。
+class _NoaaTleClient extends TleClient {
+  static const String l1 =
+      '1 33591U 98067A   26300.50000000  .00016717  00000-0  10270-3 0  0864';
+  static const String l2 =
+      '2 33591  51.6400 247.4627 0006703 130.5360 325.0288 15.72125391563537';
+
+  @override
+  Future<List<Tle>> fetch(TleGroup group) async =>
+      group == TleGroup.gnss ? const <Tle>[] : <Tle>[Tle.fromLines(l1, l2)];
+
+  @override
+  DateTime? lastUpdated(TleGroup group) => DateTime.utc(2026, 10, 27);
+}
+
+/// 记录调谐的最小射频 fake。
+class _FakeRadio implements RadioApi {
+  int? tunedHz;
+  DemodMode? tunedMode;
+
+  @override
+  ConnectionStatus get status => ConnectionStatus.connected;
+
+  @override
+  int get freqHz => tunedHz ?? 144000000;
+
+  @override
+  Future<void> setFrequencyHz(int hz) async {
+    tunedHz = hz;
+  }
+
+  @override
+  void setMode(DemodMode m) {
+    tunedMode = m;
+  }
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) =>
+      throw UnimplementedError(invocation.memberName.toString());
+}
+
+/// 只提供列表/捕获的控制器 fake：用于构造「az/el 不可计算」的诚实分支。
+class _FakeSkyController extends SkyController {
+  _FakeSkyController(this._pass)
+      : super(
+          tleClient: _NoaaTleClient(),
+          locationService: _DeniedLocation(),
+          orientationService: _UnavailableOrientation(),
+        );
+
+  final Pass _pass;
+  int captureCalls = 0;
+
+  @override
+  void start() {}
+
+  @override
+  Future<void> refresh() async {}
+
+  @override
+  List<Pass> get passes => <Pass>[_pass];
+
+  @override
+  Station? get station => const Station(lat: 40, lon: -100);
+
+  @override
+  LocationStatus get locStatus => LocationStatus.available;
+
+  @override
+  bool get hasTle => true;
+
+  @override
+  bool hasDownlink(Pass p) => true;
+
+  @override
+  Future<CaptureOutcome> capture(Pass p) async {
+    captureCalls += 1;
+    return const CaptureApplied(
+      label: 'NOAA 19 APT',
+      downlinkHz: 137.1e6,
+      centerHz: 137100000,
+      dopplerHz: 0,
+      mode: DemodMode.wfm,
+    );
+  }
+
+  @override
+  CapturePointingTarget currentPointingTarget(Pass p) =>
+      (target: null, reason: '缺少该卫星 TLE，无法计算当前方位/仰角');
+}
+
+const Station _station = Station(lat: 40, lon: -100);
+final DateTime _captureTime = DateTime.utc(2026, 10, 27, 12);
+
+Pass _fakePass() => Pass(
+      name: 'NORAD 33591',
+      catalogNumber: 33591,
+      riseTime: _captureTime,
+      riseAz: 20,
+      setTime: _captureTime.add(const Duration(minutes: 10)),
+      setAz: 300,
+      maxEl: 40,
+      maxTime: _captureTime.add(const Duration(minutes: 5)),
+    );
 
 Widget _wrap(Widget child) =>
     MaterialApp(home: child);
@@ -122,5 +234,71 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(seconds: 1));
     expect(find.text('本站 31.25, 121.5（系统定位）'), findsOneWidget);
+  });
+
+  testWidgets('捕获成功：按当前 az/el 打开指天视图，带上目标名', (tester) async {
+    tester.view.physicalSize = const Size(800, 2400);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
+
+    final radio = _FakeRadio();
+    await tester.pumpWidget(_wrap(SkyPage(
+      manualStation: _station,
+      orientationService: _UnavailableOrientation(),
+      tleClient: _NoaaTleClient(),
+      locationService: _DeniedLocation(),
+      radio: radio,
+      clock: () => _captureTime,
+    )));
+    await tester.pump();
+    await tester.pump(const Duration(seconds: 1));
+
+    final Finder captureBtn = find.widgetWithText(TextButton, '捕获');
+    expect(captureBtn, findsWidgets, reason: '有下行频率的过境必须可捕获');
+    tester.widget<TextButton>(captureBtn.first).onPressed!.call();
+    await tester.pump(); // 完成 capture future 并发起 push
+    await tester.pump(); // 路由首帧
+    await tester.pump(const Duration(milliseconds: 500)); // 转场
+
+    expect(radio.tunedHz, isNotNull, reason: '真实下发 NOAA 19 下行频率');
+    expect((radio.tunedHz! - 137100000).abs(), lessThan(50e3),
+        reason: '中心频率落在一次性多普勒偏置范围内');
+    final PointingPage page =
+        tester.widget<PointingPage>(find.byType(PointingPage));
+    expect(page.targetLabel, 'NORAD 33591');
+
+    final AzEl expected = azElAt(
+      Sgp4(Tle.fromLines(_NoaaTleClient.l1, _NoaaTleClient.l2)),
+      _captureTime,
+      _station,
+    );
+    expect(page.targetAzDeg, closeTo(expected.az, 1e-6));
+    expect(page.targetElDeg, closeTo(expected.el, 1e-6));
+  });
+
+  testWidgets('当前 az/el 算不出：不跳指天视图，SnackBar 说明真实原因', (tester) async {
+    tester.view.physicalSize = const Size(800, 2400);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
+
+    final controller = _FakeSkyController(_fakePass());
+    await tester.pumpWidget(_wrap(SkyPage(
+      controller: controller,
+      orientationService: _UnavailableOrientation(),
+    )));
+    await tester.pump();
+    await tester.pump(const Duration(seconds: 1));
+
+    final Finder captureBtn = find.widgetWithText(TextButton, '捕获');
+    expect(captureBtn, findsOneWidget);
+    tester.widget<TextButton>(captureBtn).onPressed!.call();
+    await tester.pump();
+    await tester.pump();
+
+    expect(controller.captureCalls, 1);
+    expect(find.byType(PointingPage), findsNothing,
+        reason: '算不出当前 az/el 就绝不打开指天视图');
+    expect(find.textContaining('未打开指天视图'), findsOneWidget);
+    expect(find.textContaining('缺少该卫星 TLE'), findsOneWidget);
   });
 }
