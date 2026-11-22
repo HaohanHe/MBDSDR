@@ -11020,3 +11020,26 @@ group1 **5083** = **10297 passed / 0 failed / 0 fatal**。
 **环境侧一个可复现事实**：宿主最小 rtl_tcp 进程被终止不彻底时，新进程打开 SDR 会报 `LIBUSB_ERROR_ACCESS (-3)` / `LIBUSB_ERROR_IO (-1)`；确认无残留 python 进程后直接 `RtlSdr()` 打开成功（FC0012 tuner）。属运维注意项，不是设备故障。
 
 **证据**：`D:\mbdsdr\output\_shots\mobile_profile_dialog3.png`（ANR 弹窗）、`mobile_profile_ui.xml` 缺失记录、`D:\mbdsdr\output\rtl_tcp_run5.log`（单会话持续送流）。未提交前的工作区改动见下一次提交。
+
+## 219. 手机 ANR 根因：主线程阻塞写 AudioTrack；修复后完成 88.1 MHz WFM 真广播录音（2026-11-22）
+
+**根因（§218 遗留的「未定位」关掉）**：`mobile/android/app/src/main/kotlin/mbdsdr/app/MainActivity.kt` 的 `mbdsdr/audio` MethodChannel 回调运行在 **Android 平台主线程**，而 `writeStream` 直接调用阻塞的 `AudioTrack.write`。模拟器以 `-no-audio` 运行时音频下沉极慢，主线程被拖住 >5 s，系统报 `Input dispatching timed out` 并弹 ANR——这解释了为什么 debug 与 profile 都复现、而 ANR trace 里 Dart/`main` 线程在 dump 时刻已回到 `nativePollOnce`。
+
+**修复**：实时流写入改为「有界队列（3 帧）+ 专用写线程 `mbdsdr-audio-writer`」。
+- `writeStream` 只做非阻塞 `offer`，队列满时丢最旧帧（实时性优先于完整性）。
+- 每一代流有自己的队列；`stopStream` 换掉队列引用，旧写线程下一轮自然退出，不会把上一代帧写进新轨道。
+- `AudioTrack.write` 仍在写线程里阻塞，但不再占平台主线程；`start/stop/setVolume` 契约不变。
+
+**验证（模拟器 API 35 + 真实 RTL-SDR，2.048 MS/s）**
+- 安装含修复的 debug APK（`classes14.dex` 内可检索到 `mbdsdr-audio-writer`）。
+- 连续送流 20 s 后，**首次点击**频率读数立即弹出对话框（修复前同条件下多次点击无响应并 ANR）。
+- 完成 88.1 MHz 调谐（服务端记录 `freq=88100000`），频谱 `PK 88.002 MHz / RSSI -14.1 dBFS / SNR 36 dB`，瀑布可见真实广播台。
+- 切 WFM、面板录制 16.57 s：设备内 `1795339681003_88100000_wfm.wav`（795,453 帧 / 48 kHz mono / 16-bit），
+  **削顶 0 样本（0.0000%）**、峰值 26,333（0.80 FS）、RMS -5.4 dBFS，10 段 RMS 16,072–20,609（有节目动态）。
+- 录音页签同步出现 `88.1000 MHz · WFM · 17s`；整个过程未再弹 ANR。
+- 证据：`D:\mbdsdr\output\_shots\mobile_wfm_881.wav` / `.json`、`mobile_wfm_recordings_tab.png`、`rtl_tcp_run6.log`（单会话 18,600 块 ≈ 1.19 GB，仅一次 `freq=` 变更）。
+
+**诚实边界**
+- 这是模拟器交互证据；**没有**真机，出声、音频路由、端到端延迟均未验；native 改动无单元测试。
+- 有界队列满时确实会丢帧（设计如此），实际丢帧率未测；立体声导频/RDS 未实现也未验证。
+- DSP 抽取型 FIR（§218）保持输出等价，本轮未见回归（545 Dart 测试 + 上述端到端）。

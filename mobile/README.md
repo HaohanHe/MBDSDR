@@ -67,12 +67,18 @@
   （去掉逐样本 `List.add` 与 Float64→Float32 整块拷贝）。等价性由
   `filters_test` 钉死：decim=8 的每个输出都等于 decim=1 结果每隔 8 个取样
   （逐点 1e-12）。
-- **模拟器交互 ANR（2026-11-22，未定位；不宣称性能已修好）**：API 35 +
-  swiftshader、2.048 MS/s 实时流下，多次点面板（读数/步进/断开）后系统弹
-  「MBDSDR isn't responding」，logcat 为 `Input dispatching timed out`（>5 s）；
-  **debug 与 profile 构建都复现**，期间 `uiautomator dump` 常返回 `null root node`。
-  ANR trace 的 main 线程在 dump 时刻已回到 `nativePollOnce`，未定位到具体线程；
-  这不作为产品缺陷结论，也**没有**据此宣称性能达标。真机未验。
+- **模拟器交互 ANR：根因已定位并修复（2026-11-22）**：现象是 API 35 + swiftshader、
+  2.048 MS/s 实时流下点面板后弹「MBDSDR isn't responding」，logcat 为
+  `Input dispatching timed out`（>5 s），debug 与 profile 都复现。根因不在 Dart：
+  `MainActivity.kt` 的 `mbdsdr/audio` MethodChannel 回调跑在 **Android 主线程**，
+  里面直接调阻塞的 `AudioTrack.write`；模拟器 `-no-audio` 时下沉很慢，主线程被卡住，
+  输入分发超时。
+  修复：有界队列（3 帧）+ 专用写线程 `mbdsdr-audio-writer`，`writeStream` 只入队
+  立即返回，队列满丢最旧帧（实时性优先）；每代流独立队列，旧写线程自然退出，
+  不会把旧帧写进新轨道。
+  验证：连续送流 20 s 后**首次点击**频率读数即弹对话框；随后完成 88.1 MHz 调谐、
+  16.6 s WFM 录音、录音页签刷新，全程未再出现 ANR。native 改动无单元测试，
+  证据是交互实测；**真机出声与音频延迟仍未验证**。
 - **设备内录制（2026-11-22 模拟器复验，含一处真缺陷修复）**：连接真实 SDR 后滚到
   「录制」→ 红点 `录制中…` → 停止 → 设备目录落 `.wav` + sidecar；录音页签同步列出
   `144.0000 MHz · NFM · 20s / 25s`（索引刷新已实测）。
@@ -83,6 +89,13 @@
     RMS 13,195（-7.9 dBFS）、峰值 32,767、均值 -405（前值：39.32% / 24,456 / -1,634）。
     证据：`D:\mbdsdr\output\_shots\mobile_rec.wav`（前）、`mobile_rec_norm.wav`（后）。
   - 未验证：扬声器出声/音频路由、听感与失真测量（只做了样本统计）。
+- **WFM 真实广播（2026-11-22 模拟器 + 真实 RTL-SDR）**：88.1 MHz 收到真实调频广播，
+  频谱 `PK 88.002 MHz / RSSI -14.1 dBFS / SNR 36 dB / BW 2.048M`，瀑布可见多台信号。
+  面板录制 16.57 s → `1795339681003_88100000_wfm.wav`（795,453 帧，48 kHz mono 16-bit）：
+  **削顶 0 样本（0.0000%）**、峰值 26,333（0.80 FS）、RMS -5.4 dBFS，10 段 RMS
+  16,072–20,609（有节目动态，不是恒定噪声）。录音页签同步列出 `88.1000 MHz · WFM · 17s`。
+  证据：`D:\mbdsdr\output\_shots\mobile_wfm_881.wav` / `.json`。
+  仍未验证：真的听到声音（本机无音频路由/真机）、立体声导频与 RDS、音频延迟。
 - 真机数据通路（2026-11-22，**宿主 Dart VM**）：本机 `rtl_tcp` + 真实 RTL-SDR，
   移动端 `RtlTcpClient` 连 127.0.0.1:1237、下发 100.100 MHz / 2.400 MS/s / 自动增益，
   收到 **183 个 IQ 块 / 7,208,960 样本（3 s）**。这验证的是移动端协议与解码代码
@@ -170,8 +183,9 @@ flutter build apk --debug
 
 ## 已知限制（诚实声明）
 
-- **真机未验证**：本机没有连接 Android 设备，APK 能出包但**未安装运行**；
-  真机罗盘/IMU 的户外指向精度、星表在真机上的渲染帧率都未实测。
+- **物理手机未验证**：本机没有连接 Android 真机；安装与运行证据来自 API 35 模拟器
+  （含真实 SDR 连接/录制）。真机罗盘/IMU 的户外指向精度、星表渲染帧率、
+  扬声器出声/音频路由与延迟都未实测。
 - 解调音频链路：`PlatformPcmSink` → MethodChannel `mbdsdr/audio`；**Android 已接线**
   （`android/app/src/main/kotlin/mbdsdr/app/MainActivity.kt`，`AudioTrack` `MODE_STREAM`，
   另含文件回放），Dart 侧契约与 Float32→16-bit 量化有单测。

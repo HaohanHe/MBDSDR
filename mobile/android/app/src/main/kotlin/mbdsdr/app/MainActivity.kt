@@ -115,11 +115,20 @@ class MainActivity : FlutterActivity() {
 // [云未编译·真机待验]
 // ============================================================================
 private class AudioEngine {
-    private var streamTrack: AudioTrack? = null
+    @Volatile private var streamTrack: AudioTrack? = null
     private var fileTrack: AudioTrack? = null
     private var fileThread: Thread? = null
     @Volatile private var fileRunning = false
     @Volatile private var filePaused = false
+
+    // 实时流写线程：MethodChannel 回调跑在 Android 主线程上，而 AudioTrack.write
+    // 是阻塞调用（软/无声设备或缓冲满时能卡住数秒）。若在这里直接写，主线程会被
+    // 拖住，系统报「Input dispatching timed out（>5s）」——2026-11-22 模拟器实测
+    // 的 ANR 就是这个形态（debug/profile 都复现，与 Dart 侧无关）。
+    // 改为有界队列 + 专用写线程：调用方只入队立即返回；队列满时丢最旧帧保实时。
+    @Volatile private var streamQueue =
+        java.util.concurrent.ArrayBlockingQueue<ByteArray>(3)
+    private var streamWriter: Thread? = null
     private var fileBytesWritten = 0L
     private var fileTotalBytes = 0L
     private var fileSampleRate = 48000
@@ -146,18 +155,47 @@ private class AudioEngine {
 
     fun startStream(sr: Int, ch: Int) {
         stopStream()
-        streamTrack = makeTrack(sr, ch).also { it.play() }
+        val track = makeTrack(sr, ch).also { it.play() }
+        streamTrack = track
+        // 每一代流各自一个队列：旧写线程靠「队列已被换掉」自然退出，
+        // 不会把上一代的帧写进新轨道。
+        val queue = java.util.concurrent.ArrayBlockingQueue<ByteArray>(3)
+        streamQueue = queue
+        streamWriter = thread(start = true, name = "mbdsdr-audio-writer") {
+            while (streamQueue === queue) {
+                val pcm = try {
+                    queue.poll(200, java.util.concurrent.TimeUnit.MILLISECONDS)
+                } catch (_: InterruptedException) {
+                    null
+                } ?: continue
+                try {
+                    track.write(pcm, 0, pcm.size)
+                } catch (_: Throwable) {
+                    // 设备被拔出/轨道已释放：丢弃该帧，线程继续等下一帧或退出
+                }
+            }
+        }
     }
 
     fun writeStream(pcm: ByteArray) {
-        val t = streamTrack ?: return
-        t.write(pcm, 0, pcm.size) // WRITE_BLOCKING 等价
+        if (streamTrack == null) return
+        // 非阻塞入队：满了丢最旧的帧（实时性优先于完整性）。
+        val queue = streamQueue
+        if (!queue.offer(pcm)) {
+            queue.poll()
+            queue.offer(pcm)
+        }
     }
 
     fun setVolume(v: Float) { streamTrack?.setVolume(v) }
     fun setMuted(m: Boolean) { streamTrack?.setVolume(if (m) 0f else 1f) }
 
     fun stopStream() {
+        // 换掉队列引用 → 当前写线程下一轮循环自然退出（不依赖 interrupt 打断
+        // 阻塞中的 AudioTrack.write）。
+        streamQueue = java.util.concurrent.ArrayBlockingQueue<ByteArray>(3)
+        streamWriter?.interrupt()
+        streamWriter = null
         streamTrack?.let { try { it.stop(); it.release() } catch (_: Throwable) {} }
         streamTrack = null
     }
