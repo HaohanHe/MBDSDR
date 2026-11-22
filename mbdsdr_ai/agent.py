@@ -29,6 +29,7 @@ from concurrent.futures import ThreadPoolExecutor
 from typing import List, Dict, Any, Optional, Callable
 
 from .config import AgentConfig
+from .answer_guard import StreamGuard, sanitize_unknown_claims
 from .context_manager import (
     ContextManager,
     SYSTEM_PROMPT,
@@ -4623,12 +4624,34 @@ class MBDSDRAgent:
             # 只有拿到锁、真正开始处理时才清取消标志：空闲时的取消是 no-op
             self._cancel_event.clear()
             self._chat_active = True
-            return self._chat_impl(user_input, max_tool_rounds, on_delta,
-                                   images=images)
+            # 低参数模型会把 unknown 说成「未检测到/未连接」；流式与非流式
+            # 都过同一条窄护栏（只改 unknown 槽位的硬件断言，missing 保留原话）。
+            guard = None
+            if on_delta is not None:
+                guard = StreamGuard(on_delta, self._unknown_slots())
+                on_delta = guard.feed
+            try:
+                result = self._chat_impl(user_input, max_tool_rounds, on_delta,
+                                         images=images)
+            finally:
+                if guard is not None:
+                    guard.flush()
+            if isinstance(result, dict) and isinstance(result.get("content"), str):
+                result["content"] = sanitize_unknown_claims(
+                    result["content"], self._unknown_slots())
+            return result
         finally:
             self._chat_active = False
             self._cancel_event.clear()
             self._chat_lock.release()
+
+    def _unknown_slots(self):
+        """本会话账本里仍未确认（unknown）的硬件槽位。"""
+        try:
+            ledger = getattr(self, "sky_ledger", None)
+            return ledger.unknown_slots() if ledger is not None else ()
+        except Exception:
+            return ()
 
     def _exec_one_tool(self, tc: Dict[str, Any], tc_id: str):
         """执行单个工具（含 retryable 重试与取消安全点）。返回 (result, elapsed_ms)。

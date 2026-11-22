@@ -2572,6 +2572,10 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `tests/test_ai_tool_budget.py` | 引导深度线/20261122（CORE_TOOLS 期望成对更新） | 2026-11-22 19:44 | 本笔 |
 | `scripts/ai_guidance_smoke.py` | 引导深度线/20261122（工具结果/候选记录 + 新观察项 + allow-hw） | 2026-11-22 19:44 | 本笔 |
 | `docs/COORDINATION.md` | 引导深度线/20261122（§228 真实模型三轮回溯，提交后释放） | 2026-11-22 19:44 | 本笔 |
+| `mbdsdr_ai/answer_guard.py` | 引导深度线/20261122（unknown 硬件断言窄改写 + 流式护栏） | 2026-11-22 19:55 | 本笔 |
+| `mbdsdr_ai/agent.py` | 引导深度线/20261122（chat 双路径接入 answer_guard） | 2026-11-22 19:55 | 本笔 |
+| `tests/test_answer_guard.py` | 引导深度线/20261122（护栏/流式/agent 集成 19 条） | 2026-11-22 19:55 | 本笔 |
+| `docs/COORDINATION.md` | 引导深度线/20261122（§229 护栏与 8B 复测，提交后释放） | 2026-11-22 19:55 | 本笔 |
 
 > 上表各行均由 `claim` 台账推导：owner 原文与 `acquired_at` 直接取自台账，
 > 目的优先用台账里的 `claim_reason`，没有就如实写「未声明」，不补编。时间列只是
@@ -11387,3 +11391,35 @@ group1 **5083** = **10297 passed / 0 failed / 0 fatal**。
 - 专家路径在无头探针里被人工门正确挡住，未完成真机调谐；桌面 UI 点击确认后的
   闭环未在本探针验证。
 - 本轮是 Python agent 面；手机/头显端对话未跑。key 未入库、未落文档。
+
+## 229. 低参数模型的回答侧诚实护栏：unknown 不得被说成「未检测到」（2026-11-22）
+
+**问题**：§228 已把「unknown ≠ 未连接」写进系统提示词与
+`sky_capability_state` 的 note，但 `Qwen3-VL-8B-Thinking` 仍回答
+"当前设备未检测到IMU姿态传感器"（账本里该槽位是 **unknown**）。用户会把它
+读成"没有硬件"，直接违反诚实红线。用户明确要求继续用 8B（省成本），
+所以不能靠换大模型解决。
+
+**修复（确定性、极窄）**
+- 新增 `mbdsdr_ai/answer_guard.py`：
+  - `sanitize_unknown_claims(text, unknown_slots)`：只在该槽位确为 `unknown`
+    时，把「未检测到/未连接/没有/无 + 槽位名」改写为「<槽位>尚未确认」；
+  - `missing` 不传进来，模型说"没有"保留原话；
+  - 「未检测到GNSS信号 / 北斗卫星 / GNSS定位」这类信号/定位结果不改；
+  - 槽位名词限定（设备/模块/传感器/天线等），不吞普通名词。
+- `MBDSDRAgent.chat()`：流式走 `StreamGuard`（句末缓冲改写），非流式在返回前
+  统一改写；两者共用同一规则，桌面打字机效果也不会漏出「未检测到 IMU」。
+
+**验证**
+- `tests/test_answer_guard.py` **19 passed**（unknown 改写、missing 保留、
+  信号/卫星/定位不误改、幂等、流式句末、长段强制放行、agent.chat 双路径）。
+- 真实 8B 复跑：direct 回答出现「例如手机 **IMU尚未确认**」——护栏在真实
+  输出上确实生效；novice 只用指天视图、无外部 App/无编造天气数字；
+  expert 被人工门挡下后只要求本机界面确认，不再编 token。
+
+**仍未解决（不粉饰）**
+- 8B 仍会编造未确认的 UI 细节（如"屏幕顶部按钮""绿色光晕"）；这类语义幻觉
+  没有可靠的确定性规则，只能继续收紧提示词或换更强模型。
+- expert 本轮先调了 `sdr_set_*` 再被 `sdr_connect` 挡住；无设备时这些调用
+  不会成功，但"先动作后连接"的顺序仍不理想，未在本次修复。
+- 护栏只处理 `unknown` 硬件断言；不处理其它类型的事实幻觉。
