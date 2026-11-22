@@ -2629,6 +2629,12 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `mbdsdr_ai/answer_guard.py` | AI护栏线/nosteps1（编号清单确定性护栏 + 意图判断） | 2026-11-22 21:50 | 本笔 |
 | `mbdsdr_ai/agent.py` | AI护栏线/nosteps1（chat 传 allow_numbered） | 2026-11-22 21:50 | 本笔 |
 | `tests/test_answer_guard.py` | AI护栏线/nosteps1（编号护栏测试 8 条） | 2026-11-22 21:50 | 本笔 |
+| `docs/COORDINATION.md` | 移动端走查线/22（§245 手机模拟器走查正文） | 2026-11-22 23:05 | 本笔 |
+| `mobile/lib/pages/sky_page.dart` | 移动端走查线/22（小屏整页滚动 + 状态条两行） | 2026-11-22 23:05 | 本笔 |
+| `mobile/lib/widgets/compass_dial.dart` | 移动端走查线/22（导航星标签 8 向避让） | 2026-11-22 23:05 | 本笔 |
+| `mobile/test/sky_layout_small_screen_test.dart` | 移动端走查线/22（360×640 无溢出 + 避让单测） | 2026-11-22 23:05 | 本笔 |
+| `mbdsdr_ai/context_manager.py` | 移动端走查线/22（指天入口图标已核实事实） | 2026-11-22 23:05 | 本笔 |
+| `tests/test_agent_guidance_policy.py` | 移动端走查线/22（入口图标事实钉扎） | 2026-11-22 23:05 | 本笔 |
 
 > 上表各行均由 `claim` 台账推导：owner 原文与 `acquired_at` 直接取自台账，
 > 目的优先用台账里的 `claim_reason`，没有就如实写「未声明」，不补编。时间列只是
@@ -11960,3 +11966,63 @@ AI 仍在按建 agent 时的默认 (0,0) 计算——两套站址，且默认 (0
 - 只去掉行首编号，不删步骤内容；用户明确要完整步骤表时保留编号。
 - 编号在非行首（如正文中的「1.」）不会被改；这属于有意收窄。
 - 单次真实采样未触发编号；不能据此宣称真实模型行为已被覆盖。
+
+## 245. 手机端模拟器实机走查：三处真缺陷与 SDR 真机回环（2026-11-22）
+
+**动机**：spec 四端里手机端此前只有 widget 测试、没有真实安装运行。本轮在
+Android 模拟器装 `app-debug`，真跑首屏/天空/指天，并把桌面 RTL2832U 经
+rtl_tcp 接进手机端。
+
+**走查环境（如实记）**
+- 模拟器 37.3.10，AVD `mbdsdr35`（android-35 google_apis x86_64，
+  720×1280 / 320 dpi = 360×640 dp），参数 `-no-window -gpu off -no-snapshot-load`。
+- `mbdsdr36`（android-36.1 playstore）+ SwiftShader 打开天空页时 surfaceflinger
+  触发 `Assertion failed: !rcEnc->featureInfo()->hasReadColorBufferDma`，宿主
+  `0xC0000005`；`-feature -ReadColorBufferDma` 是无效 feature 名。换 API35 +
+  `-gpu off` 后稳定（screencap 可用）。这是宿主模拟器图形栈限制，不是 App 崩溃。
+
+**发现并修复（截图前后对照）**
+1. 竖屏 360×640 dp 天空页 `BOTTOM OVERFLOWED BY 71 PIXELS`：固定卡片（分组
+   chips + 时空状态卡 + 多普勒开关）加列表最小高超过 4/7 分栏。修：竖屏整页
+   `SingleChildScrollView`，雷达固定高（屏宽 0.92 / 可视高 0.55 取小），两个
+   列表给固定高内部滚动；横屏保持原分栏。
+2. 顶部状态条把「本站 纬度, 经度（来源）」压成「本站 39…」：窄屏（<420 dp）
+   改两行，站址不设 ellipsis、允许换行。
+3. 雷达里几十个「预: GPS/BEIDOU…」导航星标签没有避让，在中天叠成一团：
+   新增纯函数 `placeLabelAvoiding`（8 向试位 + 已占矩形），真实卫星标签先
+   占位，导航星标签共用同一 `occupied`，放不下就不画（宁缺不叠）。
+4. 提示词补一条已核实事实：指天视图入口在天空页顶部右上角，是罗盘样式图标
+   （`sky_page.dart` 的 `Icons.explore_outlined` + tooltip「指天视图」）。
+
+**真实硬件回环（SDR 真机）**
+- 宿主 `C:\rtl-sdr\bin\rtl_tcp.exe -a 127.0.0.1 -p 1234 -f 144.000M -s 2.4M`，
+  RTL2832U（serial 7777…5700）在 USB 上；模拟器内 App 连接 `10.0.2.2:1234`。
+- 截图 `mw_07_sdr_live.png`：状态「rtl_tcp 已连接」；144.000000 MHz（设定值）；
+  RSSI −30.7 dBFS（实测峰值）；2.048 MS/s（设备报告）；自动增益；峰值
+  PK 144.600 MHz / −31 dBFS / SNR 12 dB；瀑布有真实纹理。
+- GNSS 同时在线：`scripts/serial_gnss_probe.py --port COM10` → 11–13 星，
+  HDOP 1.1–1.4（**坐标不入库、不写进台账**）。
+- 指天视图真实渲染：虚拟罗盘给航向 90°，页面显示方位/仰角/视场/罗盘波动/
+  星 409 · 线 59，准星下方「列肆增一 · 距中心 1.2°」，底部只有
+  「左 5°」「右 5°」「复位」——与提示词白名单逐条一致。
+
+**验证**
+- `flutter test`（sky_page / doppler_auto / time_scrub / timing_placement /
+  screenshot / polar / first_run / nav_overlay / 新小屏守卫）→ **44 passed**。
+- `flutter analyze`：0 error / 0 warning（65 条 info 均为 `material.dart` 弃用的
+  全仓既有提示）。
+- `flutter build apk --debug` → Built；APK 真装进模拟器，截图在
+  `D:\mbdsdr\output\mobile_walk\mw_0{1,4,5,6,7}*.png`。
+- `pytest tests/test_answer_guard.py tests/test_agent_guidance_policy.py -q`
+  → **101 passed**。
+
+**诚实边界**
+- 模拟器航向/姿态来自虚拟传感器（罗盘 ±0°），**不能**代表真机罗盘精度；
+  真机手机仍未验。
+- 真机手机无实物；PICO 真机四窗/手势/空间音频、真实相机/望远镜夜空仍未验。
+- 手机端 GNSS 走 USB 串口，模拟器无法直通 CH340，未在手机端验证；桌面
+  COM10 本轮已复测。
+- 截图是 `stations` 分组、条目显示「无下行频率数据」，**未点击**「捕获 → 指向」
+  闭环（该闭环仍只有 widget 测试）。
+- 模拟器两次宿主 `0xC0000005` 分别出现在「SwiftShader + 天空页」与「构建
+  APK 同时开指天页」；换 `-gpu off` 且不与构建并发后稳定，未归因为 App 缺陷。

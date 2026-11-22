@@ -43,6 +43,43 @@ Offset polarPoint(Offset center, double radius, double azDeg, double elDeg) {
   return (az: az, el: el);
 }
 
+/// 标签避让：以 [point] 为锚，先上方再顺时针试 8 个方向。
+///
+/// 返回可用的标签外框与文字左上锚点；8 个方向都越界或与 [occupied]
+/// 重叠时返回 null（宁可少画一个标签，也不叠成不可读的一团）。
+/// 纯函数，单测可直接构造重叠点验证。
+@visibleForTesting
+({Rect rect, Offset anchor})? placeLabelAvoiding({
+  required Offset point,
+  required double labelWidth,
+  required double labelHeight,
+  required Size canvasSize,
+  required List<Rect> occupied,
+  double pad = AppTokens.kSkyLabelPad,
+  double anchorRadius = AppTokens.kSkyLabelAnchorRadius,
+  double edgeInset = AppTokens.kSkyEdgeInset,
+}) {
+  for (var k = 0; k < 8; k++) {
+    // 先上方（-90°），再顺时针每 45° 试一次。
+    final ang = -math.pi / 2 + k * math.pi / 4.0;
+    final anchor = point + Offset(math.cos(ang), math.sin(ang)) * anchorRadius;
+    final rect = Rect.fromCenter(
+      center: anchor,
+      width: labelWidth + pad * 2,
+      height: labelHeight + pad * 2,
+    );
+    if (rect.left < edgeInset ||
+        rect.right > canvasSize.width - edgeInset ||
+        rect.top < edgeInset ||
+        rect.bottom > canvasSize.height - edgeInset) {
+      continue;
+    }
+    if (occupied.any((r) => r.overlaps(rect))) continue;
+    return (rect: rect, anchor: anchor);
+  }
+  return null;
+}
+
 /// 一条未来过境轨迹弧（采样点，az/el 度）。
 class _PassArc {
   const _PassArc({required this.name, required this.samples});
@@ -225,8 +262,11 @@ class _PolarPainter extends CustomPainter {
     _paintGrid(canvas, c, R);
     _paintArcs(canvas, c, R);
     _paintSelectedTrajectory(canvas, c, R);
-    _paintNavOverlay(canvas, c, R, size);
-    _paintSatellites(canvas, c, R, size);
+    _paintNavRings(canvas, c, R);
+    // 真实卫星标签优先占位；导航星标签最后画，复用同一批已占矩形，
+    // 避免「预: GPS…」几十个标签在中天叠成一团。
+    final occupied = _paintSatellites(canvas, c, R, size);
+    _paintNavLabels(canvas, c, R, size, occupied);
   }
 
   // ---- 网格：极淡，不喧宾夺主 --------------------------------------------
@@ -375,10 +415,10 @@ class _PolarPainter extends CustomPainter {
     canvas.drawPath(path, paint);
   }
 
-  // ---- 在视导航卫星预测叠加层：空心圈 + 「预:」标签 ------------------------
+  // ---- 在视导航卫星预测叠加层：空心圈（先画，不压真实点）----------------
   // 与真实接收点（实心圆点）区分：warning 色空心圈，复用 polarPoint 投影，
   // 不重造几何。无数据直接返回，绝不画假星。
-  void _paintNavOverlay(Canvas canvas, Offset c, double R, Size size) {
+  void _paintNavRings(Canvas canvas, Offset c, double R) {
     final items = navVisible.where((v) => v.el > 0.0).toList();
     if (items.isEmpty) return;
 
@@ -391,7 +431,16 @@ class _PolarPainter extends CustomPainter {
       final p = polarPoint(c, R, v.az, v.el);
       // 空心圈（直径约 10px），与实心接收点明显区分。
       canvas.drawCircle(p, AppTokens.kSkyNavRingRadius, ring);
+    }
+  }
 
+  // ---- 导航星「预:」标签：与真实卫星标签共用避让，宁缺不叠 --------------
+  void _paintNavLabels(
+      Canvas canvas, Offset c, double R, Size size, List<Rect> occupied) {
+    final items = navVisible.where((v) => v.el > 0.0).toList()
+      ..sort((a, b) => b.el.compareTo(a.el));
+    for (final v in items) {
+      final p = polarPoint(c, R, v.az, v.el);
       final tp = TextPainter(
         text: TextSpan(
           text: '预: ${v.name}',
@@ -403,25 +452,24 @@ class _PolarPainter extends CustomPainter {
         textDirection: TextDirection.ltr,
       )..layout(maxWidth: AppTokens.kSkyNavLabelMaxWidth);
 
-      // 标签优先放点上方，越界则收进画布。
-      var at = p + Offset(-tp.width / 2, -tp.height - AppTokens.kSkyLabelGap);
-      if (at.dy < AppTokens.kSkyEdgeInset) {
-        at = p + Offset(-tp.width / 2, AppTokens.kSkyLabelGap);
-      }
-      if (at.dx < AppTokens.kSkyEdgeInset) {
-        at = Offset(AppTokens.kSkyEdgeInset, at.dy);
-      }
-      if (at.dx + tp.width > size.width - AppTokens.kSkyEdgeInset) {
-        at = Offset(size.width - AppTokens.kSkyEdgeInset - tp.width, at.dy);
-      }
-      tp.paint(canvas, at);
+      final placed = placeLabelAvoiding(
+        point: p,
+        labelWidth: tp.width,
+        labelHeight: tp.height,
+        canvasSize: size,
+        occupied: occupied,
+      );
+      if (placed == null) continue;
+      occupied.add(placed.rect);
+      tp.paint(canvas, placed.anchor - Offset(tp.width / 2, tp.height / 2));
     }
   }
 
   // ---- 卫星点 + 避让标签 --------------------------------------------------
-  void _paintSatellites(Canvas canvas, Offset c, double R, Size size) {
+  /// 返回已占用的标签矩形，供导航星标签继续避让（真实卫星优先）。
+  List<Rect> _paintSatellites(Canvas canvas, Offset c, double R, Size size) {
     final items = visible.where((v) => v.el > 0.0).toList();
-    if (items.isEmpty) return;
+    if (items.isEmpty) return <Rect>[];
 
     // 仰角最高（最接近过顶）者用 accent 高亮。
     SatVisibility? top;
@@ -510,6 +558,7 @@ class _PolarPainter extends CustomPainter {
       }
       tp.paint(canvas, anchor - Offset(tp.width / 2, tp.height / 2));
     }
+    return occupied;
   }
 
   @override

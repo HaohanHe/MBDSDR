@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
@@ -600,63 +601,91 @@ class _SkyPageState extends State<SkyPage> {
       now: _c.geometryTime,
       navVisible: _c.visibleNav,
     );
-    final side = Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        _GroupChips(
-          group: _c.group,
-          onChanged: _c.setGroup,
-          lastUpdated: _c.lastUpdated,
-          freshnessLabel: _c.freshnessLabel,
-          stale: _c.tleStale,
-        ),
-        if (_c.error != null) _ErrorBanner(error: _c.error!, onRetry: _c.refresh),
-        // 顶部刷新指示：2px 发丝进度条，不抢视觉。
-        if (_c.refreshing)
-          const LinearProgressIndicator(minHeight: 2, color: AppTokens.accent),
-        // 时空状态四格：复用真实 radio 连接/频率与选中目标；GNSS fix 流本端未接线
-        // -> 走诚实空态（无 fix），绝不编造。
-        // G6：已接通选中目标的瞬时多普勒读数（仅显值）；无目标/无下行频率时为 null。
-        // P49：在用户显式开启「实时多普勒补偿」后，该格升级为「补偿中·累计 xxx Hz」
-        // （1 Hz 闭环真实改频，步进限幅）；未开启时保持仅显值，绝不自动改频。
-        SpacetimeStatusCard(
-          radioConnected: widget.radio?.status == ConnectionStatus.connected,
-          freqHz: widget.radio?.freqHz,
-          targetName: _c.selectedName,
-          dopplerHz: _c.dopplerHz,
-          dopplerActive: _c.dopplerCompensating,
-          dopplerAppliedHz: _c.dopplerAppliedHz,
-        ),
-        _DopplerAutoControl(
-          enabled: _dopplerSwitchEnabled(),
-          value: _c.dopplerAuto,
-          onChanged: _c.setDopplerAuto,
-        ),
-        if (_c.selectedVisibility != null)
-          Expanded(child: _GuidanceCard(controller: _c)),
-        Expanded(
-          flex: 2,
-          child: _PassList(
-            passes: _c.passes,
-            controller: _c,
-            clock: widget._clock,
+    // 竖屏（尤其 360×640 dp 小机）里固定卡片 + 两个列表的最小高度会超过
+    // 4/7 分栏，Flutter 会报 BOTTOM OVERFLOWED。这里让竖屏整页可滚：
+    // 雷达给固定高，列表给固定高内部滚动，固定卡片按自然高度排。
+    // 横屏仍有足够宽度，保持原有分栏。
+    Widget buildSide({required bool scrollable}) {
+      Widget slot(Widget child, {int flex = 1, required double height}) =>
+          scrollable
+              ? SizedBox(height: height, child: child)
+              : Expanded(flex: flex, child: child);
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          _GroupChips(
+            group: _c.group,
+            onChanged: _c.setGroup,
+            lastUpdated: _c.lastUpdated,
+            freshnessLabel: _c.freshnessLabel,
+            stale: _c.tleStale,
           ),
-        ),
-        Expanded(flex: 2, child: _NavSatList(controller: _c)),
-      ],
-    );
+          if (_c.error != null)
+            _ErrorBanner(error: _c.error!, onRetry: _c.refresh),
+          // 顶部刷新指示：2px 发丝进度条，不抢视觉。
+          if (_c.refreshing)
+            const LinearProgressIndicator(minHeight: 2, color: AppTokens.accent),
+          // 时空状态四格：复用真实 radio 连接/频率与选中目标；GNSS fix 流本端未接线
+          // -> 走诚实空态（无 fix），绝不编造。
+          // G6：已接通选中目标的瞬时多普勒读数（仅显值）；无目标/无下行频率时为 null。
+          // P49：在用户显式开启「实时多普勒补偿」后，该格升级为「补偿中·累计 xxx Hz」
+          // （1 Hz 闭环真实改频，步进限幅）；未开启时保持仅显值，绝不自动改频。
+          SpacetimeStatusCard(
+            radioConnected: widget.radio?.status == ConnectionStatus.connected,
+            freqHz: widget.radio?.freqHz,
+            targetName: _c.selectedName,
+            dopplerHz: _c.dopplerHz,
+            dopplerActive: _c.dopplerCompensating,
+            dopplerAppliedHz: _c.dopplerAppliedHz,
+          ),
+          _DopplerAutoControl(
+            enabled: _dopplerSwitchEnabled(),
+            value: _c.dopplerAuto,
+            onChanged: _c.setDopplerAuto,
+          ),
+          if (_c.selectedVisibility != null)
+            slot(_GuidanceCard(controller: _c), height: 104),
+          slot(
+            _PassList(
+              passes: _c.passes,
+              controller: _c,
+              clock: widget._clock,
+            ),
+            flex: 2,
+            height: 168,
+          ),
+          slot(_NavSatList(controller: _c), flex: 2, height: 168),
+        ],
+      );
+    }
+
     final body = isLandscape
         ? Row(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               Expanded(flex: 3, child: Center(child: radar)),
-              Expanded(flex: 2, child: side),
+              Expanded(flex: 2, child: buildSide(scrollable: false)),
             ],
           )
-        : Column(children: [
-            Expanded(flex: 3, child: radar),
-            Expanded(flex: 4, child: side),
-          ]);
+        : LayoutBuilder(
+            builder: (BuildContext context, BoxConstraints constraints) {
+              // 雷达高度取屏宽九成、但不超过可视高的 55%，保证下方内容露头。
+              final double radarH = math.min(
+                constraints.maxWidth * 0.92,
+                constraints.maxHeight * 0.55,
+              );
+              return SingleChildScrollView(
+                key: const Key('sky-portrait-scroll'),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    SizedBox(height: radarH, child: radar),
+                    buildSide(scrollable: true),
+                  ],
+                ),
+              );
+            },
+          );
     return Column(children: [
       _StatusBar(
         clock: _wallClock,
@@ -765,21 +794,44 @@ class _StatusBar extends StatelessWidget {
         color: AppTokens.card1,
         border: Border(bottom: BorderSide(color: AppTokens.cardEdge)),
       ),
-      child: Row(children: [
-        const Icon(Icons.schedule, size: AppTokens.iconSizeInline, color: AppTokens.textSecondary),
-        const SizedBox(width: AppTokens.spacingS),
-        Text(timeText, style: AppTokens.mono),
-        const Spacer(),
-        const Icon(Icons.place, size: AppTokens.iconSizeInline, color: AppTokens.textSecondary),
-        const SizedBox(width: AppTokens.spacingS),
-        Flexible(
-          child: Text(
-            stationText,
-            style: AppTokens.auxiliary,
-            overflow: TextOverflow.ellipsis,
-          ),
-        ),
-      ]),
+      // 窄屏（360 dp 级手机）横排会把「本站 纬度, 经度」挤成「本站 39…」，
+      // 读数被裁掉等于没显示。窄屏改成两行：时间一行、站址一行，站址允许
+      // 换行但不省略；宽屏仍保持一行。
+      child: LayoutBuilder(
+        builder: (BuildContext context, BoxConstraints constraints) {
+          final Widget timeRow = Row(mainAxisSize: MainAxisSize.min, children: [
+            const Icon(Icons.schedule,
+                size: AppTokens.iconSizeInline, color: AppTokens.textSecondary),
+            const SizedBox(width: AppTokens.spacingS),
+            Text(timeText, style: AppTokens.mono),
+          ]);
+          final Widget stationRow =
+              Row(mainAxisSize: MainAxisSize.min, children: [
+            const Icon(Icons.place,
+                size: AppTokens.iconSizeInline, color: AppTokens.textSecondary),
+            const SizedBox(width: AppTokens.spacingS),
+            Flexible(
+              child: Text(stationText, style: AppTokens.auxiliary),
+            ),
+          ]);
+          if (constraints.maxWidth >= 420) {
+            return Row(children: [
+              timeRow,
+              const Spacer(),
+              Flexible(child: stationRow),
+            ]);
+          }
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              timeRow,
+              const SizedBox(height: AppTokens.spacingS),
+              stationRow,
+            ],
+          );
+        },
+      ),
     );
   }
 }

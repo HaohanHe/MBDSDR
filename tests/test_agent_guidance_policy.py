@@ -137,6 +137,11 @@ class TestVerifiedUiFactsInPrompt:
         assert "「左 5°」「右 5°」「复位」" in SYSTEM_PROMPT
         assert "60°→25°→8°" in SYSTEM_PROMPT
         assert "底部一行" in SYSTEM_PROMPT
+        # 入口图标已按 sky_page.dart 的 IconButton 核实（Icons.explore +
+        # tooltip「指天视图」），写进白名单，避免模型猜成别的图标。
+        assert "顶部右上角" in SYSTEM_PROMPT
+        assert "罗盘样式" in SYSTEM_PROMPT
+        assert "提示文字「指天视图」" in SYSTEM_PROMPT
 
     def test_prompt_forbids_inventing_unlisted_ui(self):
         assert "以实际界面为准" in SYSTEM_PROMPT
