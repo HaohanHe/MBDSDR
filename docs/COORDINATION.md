@@ -2556,6 +2556,7 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `mobile/README.md` | 手机指哪认哪线/20261122（更新测试数 561 与新功能/诚实边界） | 2026-11-22 18:47 | 本笔 |
 | `docs/COORDINATION.md` | 手机指哪认哪线/20261122（§226 手机中心识别证据，提交后释放） | 2026-11-22 18:47 | 本笔 |
 | `mobile/lib/pages/pointing_page.dart` | 手机指哪认哪线/20261122（准星中心识别 UI + 星名不可用提示） | 2026-11-22 18:47 | 本笔 |
+| `mobile/README.md` | 手机指哪认哪线/20261122（修正用例计数 25→26（提交后释放）） | 2026-11-22 18:49 | 本笔 |
 
 > 上表各行均由 `claim` 台账推导：owner 原文与 `acquired_at` 直接取自台账，
 > 目的优先用台账里的 `claim_reason`，没有就如实写「未声明」，不补编。时间列只是
