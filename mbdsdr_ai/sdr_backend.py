@@ -297,6 +297,12 @@ class SDRBackend:
         self._receive_chain: Optional[ReceiveChain] = None
         self._audio_player: Optional[AudioPlayer] = None
         self._audio_thread: Optional[threading.Thread] = None
+        # IQ 读线程与 DSP 处理线程分离：读线程持续阻塞读，处理线程吃队列。
+        # 旧实现两者同一线程，产出率 = 1/(1/读速率 + 1/链速率)，实测只有
+        # 0.698× 实时（30 s 窗口只出 21 s 音频）。
+        self._iq_reader_thread: Optional[threading.Thread] = None
+        self._iq_read_q: "collections.deque" = collections.deque()
+        self._iq_read_lock = threading.Lock()
         self._audio_stop_event = threading.Event()
         # 音频线程产出块的有界队列，供 read_audio() 拉取（不抢实时循环）
         self._audio_out_q: "collections.deque" = collections.deque()
@@ -1075,6 +1081,10 @@ class SDRBackend:
         if num_samples <= 0:
             return np.zeros(0, dtype=np.float32)
 
+        # 没有播放线程时也优先起「无声卡」数据面工作线程：并行读+算，
+        # 不退化到同步串行（那会把产出率压到 ~0.7× 实时）。
+        self.ensure_audio_worker()
+
         # 音频线程在跑 → 从其输出队列凑够 num_samples
         if self._audio_thread is not None and self._audio_thread.is_alive():
             collected = []
@@ -1093,6 +1103,11 @@ class SDRBackend:
             if not collected:
                 return None
             out = np.concatenate(collected, axis=0)
+            if out.shape[0] > num_samples:
+                # 多凑的样本放回队首，不在每次调用里静默丢掉（块级截断累积
+                # 会让录音/拉流比墙钟短）。
+                with self._audio_out_lock:
+                    self._audio_out_q.appendleft(out[num_samples:].astype(np.float32))
             return out[:num_samples].astype(np.float32)
 
         # 音频线程没跑：自己拉 IQ 跑一块
@@ -1117,20 +1132,19 @@ class SDRBackend:
             return None
         return audio[:num_samples].astype(np.float32)
 
-    def _audio_loop(self) -> None:
-        """实时音频线程：读 IQ → ReceiveChain → 声卡（+ 供 read_audio 拉取）。"""
+    def _iq_reader_loop(self) -> None:
+        """IQ 读线程：持续取数入有界队列，与 DSP 处理并行。
+
+        拆开的原因：阻塞读与链处理同线程时，产出率被叠加成
+        1/(1/读速率 + 1/链速率)；NFM 2.4 MS/s 实测 0.698×、1.024 MS/s
+        实测 0.832×（R6 30 s 窗口只出 21 s 音频）。拆开后读线程满速取数，
+        处理线程只要比读快就能跟上；队列有界（≈0.5 s），溢出丢最旧保实时。
+        """
         iq_block = 8192
         while not self._audio_stop_event.is_set():
-            chain = self._ensure_receive_chain()
-            if chain is None:
-                time.sleep(0.05)
-                continue
-            if getattr(self, "_audio_sub", None) is None:
-                try:
-                    self._audio_sub = self.subscribe_iq("audio")
-                except Exception:
-                    self._audio_sub = None
             try:
+                if getattr(self, "_audio_sub", None) is None:
+                    self._audio_sub = self.subscribe_iq("audio")
                 if self._audio_sub is not None:
                     iq = self._audio_sub.read(iq_block, timeout=1.0)
                 else:
@@ -1141,6 +1155,29 @@ class SDRBackend:
                 if self._audio_stop_event.is_set():
                     break
                 time.sleep(0.005)
+                continue
+            fs = float(getattr(self.status, "sample_rate", 0.0) or 2.4e6)
+            cap = max(16384, int(fs * 0.5))
+            with self._iq_read_lock:
+                self._iq_read_q.append(iq)
+                total = 0
+                for b in self._iq_read_q:
+                    total += len(b)
+                while total > cap and self._iq_read_q:
+                    old = self._iq_read_q.popleft()
+                    total -= len(old)
+
+    def _audio_loop(self) -> None:
+        """实时音频线程：从 IQ 队列取块 → ReceiveChain → 声卡（+ 供 read_audio）。"""
+        while not self._audio_stop_event.is_set():
+            chain = self._ensure_receive_chain()
+            if chain is None:
+                time.sleep(0.05)
+                continue
+            with self._iq_read_lock:
+                iq = self._iq_read_q.popleft() if self._iq_read_q else None
+            if iq is None:
+                time.sleep(0.002)
                 continue
             try:
                 audio = chain.process(iq)
@@ -1172,6 +1209,34 @@ class SDRBackend:
                     old = self._audio_out_q.popleft()
                     total -= len(old)
 
+    def ensure_audio_worker(self) -> bool:
+        """确保「IQ 读线程 + 链处理线程」在跑（不碰声卡）。
+
+        `read_audio()` 在无播放线程时曾退化为「同步读一块 + 同步算一块」：
+        产出率 = 1/(1/读 + 1/链)，实测 NFM 2.4 MS/s 仅 0.698× 实时
+        （R6 30 s 窗口只出 21 s 音频）。这里把数据面工作线程与声卡解耦，
+        纯拉流/录音也走并行队列，不再被串行读拖慢。
+        """
+        if self._audio_thread is not None and self._audio_thread.is_alive():
+            return True
+        if not self.status.connected:
+            return False
+        if self._ensure_receive_chain() is None:
+            return False
+        self._audio_stop_event.clear()
+        with self._audio_out_lock:
+            self._audio_out_q.clear()
+        with self._iq_read_lock:
+            self._iq_read_q.clear()
+        # 读线程先起，处理线程后起；两者通过有界 IQ 队列解耦。
+        self._iq_reader_thread = threading.Thread(
+            target=self._iq_reader_loop, name="mbdsdr-iq-reader", daemon=True)
+        self._iq_reader_thread.start()
+        self._audio_thread = threading.Thread(
+            target=self._audio_loop, name="mbdsdr-audio", daemon=True)
+        self._audio_thread.start()
+        return True
+
     def start_audio(self) -> bool:
         """启动声卡实时播放线程。
 
@@ -1194,13 +1259,7 @@ class SDRBackend:
                 logger.info("声卡不可用：音频降级为只缓冲（不出声）")
         except Exception as e:
             logger.info("AudioPlayer 启动异常（降级只缓冲）: %s", e)
-        self._audio_stop_event.clear()
-        with self._audio_out_lock:
-            self._audio_out_q.clear()
-        self._audio_thread = threading.Thread(
-            target=self._audio_loop, name="mbdsdr-audio", daemon=True)
-        self._audio_thread.start()
-        return True
+        return self.ensure_audio_worker()
 
     def stop_audio(self) -> None:
         """停止声卡播放线程（可重复调用，安全）。"""
@@ -1209,6 +1268,12 @@ class SDRBackend:
         if t is not None:
             t.join(timeout=1.0)
             self._audio_thread = None
+        r = self._iq_reader_thread
+        if r is not None:
+            r.join(timeout=1.0)
+            self._iq_reader_thread = None
+        with self._iq_read_lock:
+            self._iq_read_q.clear()
         if self._audio_player is not None:
             try:
                 self._audio_player.stop()

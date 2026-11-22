@@ -29,6 +29,7 @@ from __future__ import annotations
 import logging
 import threading
 import time
+import queue
 import collections
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Tuple
@@ -38,6 +39,11 @@ import numpy as np
 from .bounded_read import BoundedReader, DEFAULT_READ_TIMEOUT_S
 
 logger = logging.getLogger(__name__)
+
+#: 纯拉流（没开声卡）时，``read_audio`` 停止调用多久后音频工作线程自动退出。
+#: 设备读是单通道（``OpenDevice._reader`` 只允许一次在途请求），闲着还占着会
+#: 把读谱/录制饿死；2 秒足够覆盖正常拉流间隔，又不会让空闲进程永久持锁。
+AUDIO_PULL_IDLE_S = 2.0
 
 
 # ---------------------------------------------------------------------------
@@ -190,6 +196,10 @@ class OpenDevice:
         self._audio_stop = threading.Event()
         self._audio_out_q: "collections.deque" = collections.deque()
         self._audio_lock = threading.Lock()
+        #: 最近一次 ``read_audio`` 拉流的 monotonic 时刻。纯拉流（无声卡）时
+        #: 读线程按它判空闲：没人拉了必须停，否则会永久独占设备的单读通道，
+        #: 让读谱/录制这些同样走 ``read_samples`` 的消费者永远拿 ``read_inflight``。
+        self._audio_last_pull = 0.0
 
     # -- 配置 ---------------------------------------------------------------
     @staticmethod
@@ -403,62 +413,123 @@ class OpenDevice:
         return True
 
     def start_audio(self, mode: str = "WFM") -> bool:
-        """启动 ReceiveChain 实时播放线程。已在跑返回 True；无法建链返回 False。"""
-        if self._audio_thread is not None and self._audio_thread.is_alive():
+        """启动 ReceiveChain 实时播放线程。已在跑返回 True；无法建链返回 False。
+
+        注意「线程在跑」不等于「有声音」：纯 ``read_audio`` 拉流会先起同一对
+        工作线程但没有声卡。这里只在播放器缺失时补建，已跑的数据面直接复用。
+        """
+        if self._audio_threads_alive() and self._audio_player is not None:
             return True
         chain = self._ensure_chain(mode)
         if chain is None:
             return False
-        try:
-            from .audio_out import AudioPlayer
-            channels = 2 if chain.is_stereo else 1
-            self._audio_player = AudioPlayer(sample_rate=48000, channels=channels)
+        if self._audio_player is None:
             try:
-                self._audio_player.start()
+                from .audio_out import AudioPlayer
+                channels = 2 if chain.is_stereo else 1
+                self._audio_player = AudioPlayer(sample_rate=48000,
+                                                 channels=channels)
+                try:
+                    self._audio_player.start()
+                except Exception:
+                    pass  # 无声卡时降级为只缓冲，不崩
             except Exception:
-                pass  # 无声卡时降级为只缓冲，不崩
-        except Exception:
-            self._audio_player = None
-        import queue as _queue
-        self._raw_q = _queue.Queue(maxsize=8)
-        self._audio_stop.clear()
+                self._audio_player = None
+        return self.ensure_audio_worker(mode)
+
+    def _audio_threads_alive(self) -> bool:
+        """读线程与链线程是否都在跑（半死状态按「没跑」处理，需整体重启）。"""
+        t = self._audio_thread
+        r = self._reader_thread
+        return bool(t is not None and t.is_alive()
+                    and r is not None and r.is_alive())
+
+    def ensure_audio_worker(self, mode: str = "") -> bool:
+        """确保「设备读线程 + 链处理线程」在跑（不需要声卡）。
+
+        过去只有 ``start_audio()`` 才会起这两条线程，于是只用 ``read_audio()``
+        的调用方（CLI/录制/工具面）每次都在同一个线程里同步「读 192k 样本 +
+        跑链」——2.4 MS/s NFM 真机实测只有 0.675× 实时，30 s 窗口只出 21 s
+        音频。这里把数据面线程与声卡解耦：只拉流也走并行队列。
+
+        每次重启都换一个**新的** stop 事件/队列并作为参数交给新线程：旧线程
+        可能还阻塞在设备读里（有界读最多 2 s），共享同一个事件会让它醒来后
+        继续跑，和新线程争抢同一个队列。
+        """
+        self._audio_last_pull = time.monotonic()
+        if self._audio_threads_alive():
+            return True
+        if self._closed:
+            return False
+        chain = self._ensure_chain(mode or self._chain_mode)
+        if chain is None:
+            return False
+        # 停旧一代：旧线程持有旧事件，join 超时也不会被“复活”。
+        self._audio_stop.set()
+        for old in (self._reader_thread, self._audio_thread):
+            if old is not None and old.is_alive():
+                old.join(timeout=0.3)
+        stop = threading.Event()
+        raw_q: "queue.Queue" = queue.Queue(maxsize=8)
+        self._audio_stop = stop
+        self._raw_q = raw_q
         with self._audio_lock:
             self._audio_out_q.clear()
         self._reader_thread = threading.Thread(
-            target=self._reader_loop, name="dev-reader", daemon=True)
+            target=self._reader_loop, args=(stop, raw_q),
+            name="dev-reader", daemon=True)
         self._audio_thread = threading.Thread(
-            target=self._audio_loop, name="dev-dsp", daemon=True)
+            target=self._audio_loop, args=(stop, raw_q),
+            name="dev-dsp", daemon=True)
         self._reader_thread.start()
         self._audio_thread.start()
         return True
 
-    def _reader_loop(self) -> None:
+    def _audio_pull_active(self) -> bool:
+        """数据面是否还有消费需求：有声卡就永远有，纯拉流看最近一次调用。"""
+        if self._audio_player is not None:
+            return True
+        return (time.monotonic() - self._audio_last_pull) <= AUDIO_PULL_IDLE_S
+
+    def _reader_loop(self, stop: threading.Event,
+                     raw_q: "queue.Queue") -> None:
         READ_BLOCK = 16384
-        while not self._audio_stop.is_set():
+        while not stop.is_set():
+            if not self._audio_pull_active():
+                break  # 纯拉流空闲：让出设备读通道，别饿死读谱/录制
             try:
                 iq = self.read_samples(READ_BLOCK)
             except Exception:
-                self._audio_stop.wait(0.02)
+                stop.wait(0.02)
                 continue
             if iq is None or len(iq) == 0:
-                self._audio_stop.wait(0.01)
+                stop.wait(0.01)
                 continue
             # 有界投递：DSP 跟不上时阻塞形成背压，不占内存
-            while not self._audio_stop.is_set():
+            while not stop.is_set() and self._audio_pull_active():
                 try:
-                    self._raw_q.put(iq, timeout=0.1)
+                    raw_q.put(iq, timeout=0.1)
                     break
                 except Exception:
                     continue
 
-    def _audio_loop(self) -> None:
-        while not self._audio_stop.is_set():
+    def _audio_loop(self, stop: threading.Event,
+                    raw_q: "queue.Queue") -> None:
+        while not stop.is_set():
+            if not self._audio_pull_active():
+                break
             try:
-                iq = self._raw_q.get(timeout=0.1)
+                iq = raw_q.get(timeout=0.1)
             except Exception:
                 continue
+            # 每轮重新解析链：set_sample_rate()/set_demod() 会把 _chain 置空或
+            # 换模式，若继续用旧引用会静默死在 AttributeError 里（不出声也不报错）。
+            chain = self._ensure_chain(self._chain_mode)
+            if chain is None:
+                stop.wait(0.01)
+                continue
             try:
-                audio = self._chain.process(iq)
+                audio = chain.process(iq)
             except Exception:
                 continue
             if audio is None or len(audio) == 0:
@@ -477,17 +548,28 @@ class OpenDevice:
                     total -= old.shape[0] if hasattr(old, "shape") else len(old)
 
     def read_audio(self, num_samples: int, mode: str = "WFM"):
-        """取 num_samples 个 48k 音频（float32）。线程在跑从队列取，否则跑一块。"""
+        """取 num_samples 个 48k 音频（float32）。
+
+        **不再退化为同步串行**：无播放线程时也先把「读线程 + 链线程」拉起来，
+        再从输出队列凑数。旧实现的同步分支在 2.4 MS/s NFM 下只有 0.675× 实时
+        （读与链串行叠加），R6 30 s 录制窗口只出 21 s 音频。
+        """
         num_samples = int(num_samples)
         if num_samples <= 0:
             return np.zeros(0, dtype=np.float32)
-        if self._audio_thread is not None and self._audio_thread.is_alive():
+        # 先续上「有人在拉」的心跳：工作线程按它判空闲，空闲 2 s 自动让出设备。
+        self._audio_last_pull = time.monotonic()
+        if not self._audio_threads_alive():
+            self.ensure_audio_worker(mode)
+        if self._audio_threads_alive():
             collected, got = [], 0
             deadline = time.time() + 1.0
             while got < num_samples and time.time() < deadline:
                 with self._audio_lock:
                     blk = self._audio_out_q.popleft() if self._audio_out_q else None
                 if blk is None:
+                    if self._audio_stop.is_set():
+                        break
                     time.sleep(0.002)
                     continue
                 collected.append(blk)
@@ -495,23 +577,14 @@ class OpenDevice:
             if not collected:
                 return None
             out = np.concatenate(collected, axis=0)
+            if out.shape[0] > num_samples:
+                # 多凑的样本不能丢：放回队首给下一次调用。块只有 ~328 样本，
+                # 请求 1024 时若直接截断每轮丢 22%，录音会静默变短。
+                with self._audio_lock:
+                    self._audio_out_q.appendleft(out[num_samples:].astype(np.float32))
             return out[:num_samples].astype(np.float32)
-        chain = self._ensure_chain(mode)
-        if chain is None:
-            return None
-        try:
-            iq = self.read_samples(max(num_samples * 4, 8192))
-        except Exception:
-            return None
-        if iq is None or len(iq) == 0:
-            return None
-        try:
-            audio = chain.process(iq)
-        except Exception:
-            return None
-        if audio is None or len(audio) == 0:
-            return None
-        return audio[:num_samples].astype(np.float32)
+        # 工作线程起不来（未设采样率 / 已关闭）：诚实返回 None，不造假音频。
+        return None
 
     def stop_audio(self) -> None:
         """停止实时音频线程与声卡。可重复调用。"""
@@ -524,6 +597,7 @@ class OpenDevice:
         if t is not None:
             t.join(timeout=1.0)
         self._audio_thread = None
+        self._audio_last_pull = 0.0
         if self._audio_player is not None:
             try:
                 self._audio_player.stop()

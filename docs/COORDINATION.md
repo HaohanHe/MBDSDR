@@ -2541,6 +2541,11 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `desktop/aprs_panel.py` | S4-APRS实时解调/7c3e91ab（S4 第一刀：流式滑动窗口解调、静默门限、帧去重、采样率对齐与诊断快照） | 2026-11-16 20:47 | 本笔 |
 | `tests/test_aprs_stream_continuity.py` | S4-APRS实时解调/7c3e91ab（跨块连续性回归：旧实现 7 红，修复后 8 绿） | 2026-11-16 20:47 | 本笔 |
 | `docs/COORDINATION.md` | 认星闭环收口线/e42fd1fa（§90+ 取证登记 + not_verified 补原因，随 6b21ddfd 功能线收口落库） | 2026-11-19 17:07 | 本笔 |
+| `mbdsdr_ai/device_manager.py` | 音频实时吞吐线/20261122（read_audio 数据面解耦（无声卡也起读/链双线程）+ 块余量回填；0.675x->1.000x） | 2026-11-22 18:04 | 本笔 |
+| `mbdsdr_ai/sdr_backend.py` | 音频实时吞吐线/20261122（SdrBackend 读线程/处理线程解耦收尾 + 块余量回填） | 2026-11-22 18:04 | 本笔 |
+| `mbdsdr_ai/core/controller.py` | 音频实时吞吐线/20261122（后端 read_audio 双签名自适应，禁止静默退回极简鉴频） | 2026-11-22 18:04 | 本笔 |
+| `tests/test_audio_realtime_pull.py` | 音频实时吞吐线/20261122（解耦线程与块余量不丢的回归用例） | 2026-11-22 18:04 | 本笔 |
+| `docs/COORDINATION.md` | 音频实时吞吐线/20261122（§223 吞吐修复与本批登记行，提交后释放） | 2026-11-22 18:04 | 本笔 |
 
 > 上表各行均由 `claim` 台账推导：owner 原文与 `acquired_at` 直接取自台账，
 > 目的优先用台账里的 `claim_reason`，没有就如实写「未声明」，不补编。时间列只是
@@ -11122,3 +11127,57 @@ group1 **5083** = **10297 passed / 0 failed / 0 fatal**。
 - R7 跑的是已存在 `cpp/build-local/dist/mbdsdr-0.2.0-win64-portable`，本轮未重编 C++；
   包内 `mbdsdr.exe` 与本轮改动的脚本/文档无关。
 - R2 的 ppm 仍是「候选里最好情况」，无法区分台偏频与本振误差。
+
+## 223. 纯拉流音频实时吞吐修复：0.675× → 1.000×（2026-11-22）
+
+**症状**：R6 用 `controller.read_audio(48000)` 录 30 s 窗口，实际只落 21.0 s
+音频（0.675× 实时）；同一台 FC0012、2.4 MS/s NFM 下稳定复现。
+
+**根因**（真机实测 + 代码双向核对）
+- `device_manager.OpenDevice.read_audio()` 只有「播放线程已在跑」才走并行队列；
+  否则在调用线程里同步 `read_samples(max(n*4, 8192))` + `chain.process()`，
+  把阻塞读与 DSP 串在一条线程上，产出率被叠加成 1/(1/读 + 1/链)。裸 IQ 读
+  0.97×、离线链 2.85×，合成 ≈0.68×，与实测吻合。
+- `controller.read_audio()` 调后端只按 `(n, mode)` 两参；`SdrBackend.read_audio(n)`
+  一参签名会 TypeError 并被 `except Exception` 静默吞掉，退回极简鉴频
+  `_demod_to_audio`（无语道滤波/去加重，且同样串行）。
+- 出队时 `out[:num_samples]` 直接截断：NFM 2.4 MS/s 每块约 328 样本，请求 1024
+  时每轮丢 22%，录音会静默变短。
+
+**修复**
+- `OpenDevice.ensure_audio_worker()`：不碰声卡也起 `dev-reader` + `dev-dsp`
+  双线程（有界 `_raw_q` maxsize=8）；`start_audio()` 复用它，`read_audio()`
+  删除同步回退分支。
+- 纯拉流空闲 `AUDIO_PULL_IDLE_S=2.0 s` 后双线程自动退出：设备读是单通道
+  （`BoundedReader` 只允许一次在途），闲着占住会让读谱/录制永远拿
+  `read_inflight`；半死状态（一条退出、一条还在）整体重启，不抢同一个队列。
+- 块余量 `appendleft` 回队首（`OpenDevice` 与 `SdrBackend` 同口径）。
+- `_audio_loop` 每轮重新 `_ensure_chain`：`set_sample_rate()` 会把 `_chain` 置空，
+  旧引用会静默 AttributeError（不出声也不报错）。
+- `controller.read_audio` 后端签名自适应（先 `(n, mode)`，TypeError 再 `(n)`）。
+- `SdrBackend` 同批：IQ 读线程 / DSP 线程解耦、`ensure_audio_worker()`、
+  `stop_audio` 双 join、块余量回填。
+
+**真机复测**（同一根 FC0012，10 s 窗口、2.4 MS/s，脚本在 `%TEMP%\kilo\`；
+最终代码：读/链双线程 + 空闲让出 + 块余量回填）
+- NFM 144.640 MHz：elapsed 10.99 s / audio 10.99 s / **1.000×**，calls 11、none 0
+- WFM 103.300 MHz：elapsed 10.99 s / audio 10.99 s / **1.000×**
+- NFM `n=1024`：elapsed 10.02 s / audio 10.03 s / **1.000×**，470 calls、short 0
+- 端到端 R6（`--ring 6 --aprs-seconds 15`）：`aprs_audio_seconds=15.0`
+  （修前 30 s 窗口只出 21.0 s）；APRS 解码仍 **UNVERIFIABLE**——当地无台、
+  89 个候选帧 CRC-16 全失败、无外部解码器。本修复只销掉时长差异，不改该结论。
+
+**测试**：`tests/test_audio_realtime_pull.py` 4 条——同步回退反证（设备读必须是
+整块 16384 样本 = 32768 字节且不止一块）、块余量 1200 → 1000 + 200 回填、
+纯拉流后 `start_audio()` 必须补建声卡（「线程在跑」≠「有声音」）、
+空闲 0.05 s（测试值）双线程退出后能重启；连同 `test_read_timeout` /
+`test_tuner_range_guard` / `test_cli_open_owner_gate` /
+`test_sdr_rtltcp_registration` → 33 passed / 2 skipped / 1 xfailed。
+`mbdsdr_ai/tests` 全包 3024 passed / 4 skipped（202 子测试）。
+
+**诚实边界**
+- 单台 FC0012、单机、10 s 窗口；未做长时间长稳与 USB 抖动压测。
+- 空闲阈值 2 s 是「正常拉流间隔」的经验值：调用间隔 >2 s 时每轮会重启线程，
+  有几十毫秒级预热（清空输出队列），不丢设备样本但不是零代价。
+- 本轮两次 R6 的 `gnss_sats` 分别为 `None` 与 12（两次 lat/lon 均有效、
+  `station_source=gnss`）；单轮卫星数缺失未归因，不按正常记账。

@@ -1105,8 +1105,18 @@ class SDRController:
         backend = self._backend if self._connected else None
         bstart = getattr(backend, "start_audio", None)
         if callable(bstart):
+            # 后端签名有两代：device_manager 的 start_audio(mode) 与
+            # sdr_backend 的 start_audio()（模式取自 status.demod_mode）。
+            # 以前只按 (mode) 调，SdrBackend 每次都 TypeError → 永远走串行
+            # 回退泵，实测音频只有 0.7× 实时。这里按签名自适应。
+            ok = False
             try:
                 ok = bool(bstart(self._demod))
+            except TypeError:
+                try:
+                    ok = bool(bstart())
+                except Exception:
+                    ok = False
             except Exception:
                 ok = False
             if ok:
@@ -1269,8 +1279,16 @@ class SDRController:
             return None
         bread = getattr(self._backend, "read_audio", None)
         if callable(bread):
+            # 后端签名有两代：device_manager 的 read_audio(n, mode) 与
+            # sdr_backend 的 read_audio(n)。只按前者调会让后者每次都
+            # TypeError 并被静默吞掉，退回极简鉴频（同步串行、音质与速率都差）。
             try:
                 a = bread(int(n), self._demod)
+            except TypeError:
+                try:
+                    a = bread(int(n))
+                except Exception:
+                    a = None
             except Exception:
                 a = None
             if a is not None and getattr(a, "size", 0):
