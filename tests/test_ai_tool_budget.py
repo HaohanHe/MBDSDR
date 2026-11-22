@@ -51,7 +51,8 @@ def test_budget_constants_pinned():
     assert tool_budget.DESC_WEIGHT == 1
     assert tool_budget.DESC_CAP == 3
     assert MIN_SCORE == 4
-    assert CORE_TOOLS == ("list_tools", "context_status", "model_status", "tool_log")
+    assert CORE_TOOLS == ("list_tools", "context_status", "model_status",
+                          "tool_log", "skill_load")
     assert tool_budget_tokens(32768) == 8192
     assert tool_budget_tokens(2048) == 1000        # 25% 不足下限时取 1000
     assert tool_budget_tokens(0) == 1000
@@ -74,7 +75,8 @@ def _def(name: str, desc: str = "") -> dict:
 
 def test_core_survives_tiny_budget():
     defs = [_def("list_tools"), _def("context_status"), _def("model_status"),
-            _def("tool_log"), _def("sdr_set_frequency", "设置接收频率")]
+            _def("tool_log"), _def("skill_load"),
+            _def("sdr_set_frequency", "设置接收频率")]
     sel = select_tools(defs, "把频率调到 145 MHz", budget_tokens=50)
     assert set(CORE_TOOLS) <= set(sel.kept_names)
     assert sel.trimmed is True

@@ -184,6 +184,24 @@ class SkillRegistry:
         self._scan()
         return [s.to_summary() for s in self._cache.values()]
 
+    def catalog_prompt(self) -> str:
+        """系统提示词用的紧凑技能目录（name + when_to_use，不含正文）。
+
+        为什么需要它：``skill_list`` 是工具，模型不一定想起来调用；实测
+        Qwen3-VL-8B 在新手「看星星」请求里既没调 ``skill_list``，也拒绝了
+        天文问题。把**触发条件**放进系统提示词，技能才真正可见；正文仍按需
+        ``skill_load``，不占常驻 token。
+        """
+        items = self.list()
+        if not items:
+            return ""
+        lines = ["【可用技能（只是目录；命中后用 skill_load 读正文）】"]
+        for s in sorted(items, key=lambda x: x.get("name", "")):
+            trigger = (s.get("when_to_use") or "").strip()
+            desc = (s.get("description") or "").strip()
+            lines.append(f"- {s['name']}：{trigger or desc}")
+        return "\n".join(lines)
+
     def load(self, name: str) -> Optional[str]:
         """按需读取某个技能的完整正文。"""
         self._scan()

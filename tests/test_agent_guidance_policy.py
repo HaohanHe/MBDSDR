@@ -15,6 +15,7 @@ import importlib.util
 import os
 
 from mbdsdr_ai.context_manager import SYSTEM_PROMPT
+from mbdsdr_ai.skill_registry import SkillRegistry
 from mbdsdr_ai.sky_negotiation import (
     CapabilityLedger,
     build_capability_system_section,
@@ -76,6 +77,50 @@ class TestGuidancePolicy:
         # 既有口径仍在：用自然语言问，不生成表单
         assert "不要生成表单" in SYSTEM_PROMPT
 
+    def test_sky_identity_cannot_be_refused_as_out_of_scope(self):
+        """实测弱模型曾以「我专注无线电」拒绝天文问题；身份段必须堵住。"""
+        assert "你也是星空与观测助手" in SYSTEM_PROMPT
+        assert "不得以“我专注无线电 / 不属于我的范围”拒绝" in SYSTEM_PROMPT \
+            or "不得以" in SYSTEM_PROMPT
+        assert "把手机架上望远镜" in SYSTEM_PROMPT
+        # 实测模型把用户推给 Star Walk/SkyView，必须明确禁止替代本产品
+        assert "Star Walk" in SYSTEM_PROMPT and "SkyView" in SYSTEM_PROMPT
+        assert "替代" in SYSTEM_PROMPT
+
+    def test_gate_rejection_must_not_invent_token_steps(self):
+        """实测模型让用户输入 arm_manual 并编造 confirm_token，必须钉死。"""
+        assert "arm_manual" in SYSTEM_PROMPT
+        assert "不得" in SYSTEM_PROMPT and "编造" in SYSTEM_PROMPT
+        assert "本机界面点击确认" in SYSTEM_PROMPT
+
+    def test_unknown_is_not_missing_and_no_fake_camera_claim(self):
+        """实测模型把 unknown 说成未连接，并宣称摄像头对准即自动认星。"""
+        assert "`unknown` 只能读作「未确认」" in SYSTEM_PROMPT
+        assert "不得" in SYSTEM_PROMPT and "未连接 / 没有" in SYSTEM_PROMPT
+        assert "摄像头一对准就能自动认星" in SYSTEM_PROMPT
+        assert "依赖罗盘/IMU" in SYSTEM_PROMPT
+
+    def test_no_invented_weather_numbers_without_tool_result(self):
+        """实测模型没调 sky_tonight 却报「云量 30%/月光 22%/流星雨 10 颗」。"""
+        assert "没有调用 sky_tonight" in SYSTEM_PROMPT
+        assert "云量、月光、流星雨、极光" in SYSTEM_PROMPT
+        assert "没有工具结果就不报数字" in SYSTEM_PROMPT
+
+    def test_no_numbered_list_style(self):
+        assert "不要出现 \"1.\" \"2.\" \"3.\"" in SYSTEM_PROMPT
+        assert "只给当前一步" in SYSTEM_PROMPT
+
+    def test_skill_catalog_is_injected_and_lists_first_light(self):
+        """技能目录要进系统提示词，否则弱模型不会主动调 skill_list。"""
+        assert "【技能目录（按需加载）】" in SYSTEM_PROMPT
+        catalog = SkillRegistry(
+            os.path.join(_ROOT, "skills"), user_dir="").catalog_prompt()
+        assert "sky-first-light" in catalog
+        assert "第一次看天空" in catalog
+        # 目录只给触发条件，不把正文倒进常驻提示词
+        assert "<skill_content" not in catalog
+        assert "## 先判断" not in catalog
+
 
 class TestSmokeHeuristics:
     """探针的软观察要能指出「写工具 / 一次灌太多 / 对专家讲基础」。"""
@@ -104,6 +149,28 @@ class TestSmokeHeuristics:
             "tool_calls": [],
         }])
         assert any("基础词" in n for n in notes)
+
+    def test_external_app_and_invented_token_are_flagged(self):
+        mod = _load_smoke()
+        notes = mod._observations("novice", [{
+            "content": "安装 Star Walk 2，然后输入 arm_manual 获取 confirm_token。",
+            "tool_calls": [],
+        }])
+        assert any("外部 App" in n for n in notes)
+        assert any("令牌" in n for n in notes)
+
+    def test_numbered_list_is_flagged_but_frequency_is_not(self):
+        mod = _load_smoke()
+        numbered = mod._observations("novice", [{
+            "content": "1. 打开相机\n2. 对准天空\n3. 等十秒",
+            "tool_calls": [],
+        }])
+        assert any("编号清单" in n for n in numbered)
+        freq = mod._observations("novice", [{
+            "content": "把频率调到 145.500 MHz，带宽 12.5 kHz。",
+            "tool_calls": [],
+        }])
+        assert not any("编号清单" in n for n in freq)
 
     def test_expert_write_tool_is_observed_not_rejected(self):
         mod = _load_smoke()

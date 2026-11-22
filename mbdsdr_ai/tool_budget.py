@@ -49,6 +49,10 @@ MIN_SCORE = 4                  # 低于此分视为「本请求无关」，不�
 
 CORE_TOOLS: Tuple[str, ...] = (
     "list_tools", "context_status", "model_status", "tool_log",
+    # 技能正文加载器是「模型决定引导深度」的最后一跳：技能目录已常驻系统
+    # 提示词（skill_registry.catalog_prompt），所以只需保证 skill_load 恒在；
+    # skill_list 仍可按请求/类目进入候选，但不必占每个请求的常驻额度。
+    "skill_load",
 )
 
 # 请求词 -> (匹配关键词, 相关类目)。按命中累加，多个领域可同时命中。
@@ -77,6 +81,14 @@ _TERM_RULES: Tuple[Tuple[Tuple[str, ...], Tuple[str, ...], Tuple[str, ...]], ...
     (("卫星", "轨道", "过境", "tle", "天空", "云图", "多普勒", "假彩色", "satellite", "orbit", "doppler"),
      ("satellite", "orbit", "tle", "sky", "pass", "doppler", "卫星", "轨道", "过境", "天空", "云图", "多普勒", "星历", "假彩色", "falsecolor"),
      ("satellite", "orbit", "sky", "sdr_satellite", "doppler", "sat_groundstation", "sat_profile", "pointing")),
+    # 星空/观星：弱模型实测「看星星/架望远镜」请求一个 sky 工具都没进候选，
+    # 于是把人推给外部 App。这里给足触发词与 sky 类目，让 sky_* / 相机工具可见。
+    (("星星", "星空", "看星", "观星", "天文", "望远镜", "星图", "认星", "指天", "星座",
+      "流星雨", "月光", "云量", "极光", "天气", "气象", "stargazing", "star", "meteor",
+      "aurora", "constellation", "planet", "telescope"),
+     ("sky", "astronomy", "star", "stargazing", "meteor", "aurora", "moon", "cloud",
+      "weather", "planet", "constellation", "telescope"),
+     ("sky", "astronomy", "camera", "capture", "weather")),
     (("工作流", "任务", "定时", "自动化", "调度", "workflow", "schedule", "subagent"),
      ("workflow", "task", "schedule", "cron", "工作流", "任务", "定时", "自动化", "子代理", "调度"),
      ("workflow", "workflow_recorder", "scheduler", "subagent")),

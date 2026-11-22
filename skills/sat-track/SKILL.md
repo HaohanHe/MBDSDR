@@ -8,12 +8,12 @@ when_to_use: 用户说收卫星/NOAA/ISS/过境预测/多普勒/指向天线/锅
 
 ## 流程
 
-1. **查过境**：用 `astronomy`/TLE 计算目标卫星下一次过境，给 AOS/LOS 时间、仰角、方位角、最大仰角。
+1. **查过境**：用 `satellite_predict_pass` 计算目标卫星下一次过境，给 AOS/LOS 时间、仰角、方位角、最大仰角；需要批量/可见性时用 `sdr_satellite_passes` 或 `sky_view_visible`。
 2. **AI 反向指挥人架天线**：
    - 过境前提醒用户把锅/八木架到预测方位；
    - 仰角变化时指挥用户转怪手/方位；
    - 手机端可当指向器（IMU+罗盘），在天空图上标出当前卫星位置。
-3. **多普勒校正**：接收时按过境曲线估多普勒频偏，用 `cfo` 工具校正本振。
+3. **多普勒校正**：接收时按过境曲线估多普勒频偏，用 `doppler_calc` 算频偏、`sdr_doppler_compensation` / `sdr_satellite_doppler_track` 施加。
 4. **接收与解码**：
    - NOAA APT：过境时连续录 IQ/音频，过站后 `sdr_decode_noaa_apt`；
    - SSTV/RS、FM 中继：对准后按对应模式解调；

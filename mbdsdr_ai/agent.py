@@ -898,7 +898,8 @@ class MBDSDRAgent:
         self.tool_registry.register(
             name="skill_list",
             description="列出当前所有可用技能的名称和简短描述。技能是按需加载的操作指引，"
-                        "比如找干扰源、卫星过境跟踪、SSTV 解码。先看目录，需要细节时再 skill_load。",
+                        "比如第一次看天空/架手机望远镜、找干扰源、卫星过境跟踪、SSTV 解码。"
+                        "先看目录，需要细节时再 skill_load。",
             parameters={"type": "object", "properties": {}},
             handler=lambda args: ToolResult(
                 success=True,
@@ -2920,6 +2921,7 @@ class MBDSDRAgent:
             payload["probe"] = probe
             payload["note"] = (
                 "只反映本会话已确认的结论；未确认项为 unknown。"
+                "**unknown / 未确认 ≠ 未连接 / 没有**：不得据此说设备不存在。"
                 "probe 段是本次自动探测的结果：probed 里的槽位来自真实枚举，"
                 "skipped 里的槽位**本进程没有探测手段**（不等于没有硬件，"
                 "需要在桌面侧补写或问用户）。不要假设型号。")
@@ -4875,6 +4877,14 @@ class MBDSDRAgent:
         if memory_context:
             system_prompt += memory_context
         system_prompt += f"\n\n当前可用工具数: {len(self.tool_registry.get_tool_names())}。调用工具前先用 list_tools 确认工具列表。"
+        # 技能目录常驻系统提示词（只 name+when_to_use，正文仍按需 skill_load）。
+        # 实测弱模型不会主动调 skill_list，目录不进提示词等于技能不存在。
+        try:
+            catalog = self.skill_registry.catalog_prompt()
+            if catalog:
+                system_prompt += "\n\n" + catalog
+        except Exception as e:  # noqa: BLE001 - 技能目录失败不阻断对话
+            logger.debug("技能目录注入失败: %s", e)
         if tool_selection is not None and tool_selection.trimmed:
             system_prompt += "\n\n" + tool_selection.note
         self.context_manager.set_system_prompt(system_prompt)

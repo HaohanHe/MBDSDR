@@ -28,11 +28,15 @@ import argparse
 import datetime as dt
 import json
 import os
+import re
 import sys
 import time
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
+
+#: 行首编号清单（"1. " / "1) "），用来抓模型无视「不要编号」的风格漂移。
+_NUMBERED_LIST_RE = re.compile(r"(?m)^\s*\d+[.)、]\s")
 
 #: 不该在「只问怎么用」的对话里出现的动手写工具（发现即记硬观察，供人复核）。
 WRITE_TOOLS = {
@@ -100,6 +104,12 @@ def _observations(persona: str, turns) -> list:
             basics = [w for w in ("什么是", "基础", "科普", "先了解") if w in content]
             if basics:
                 notes.append(f"{persona}#{i} 对专家讲了基础词 {basics}")
+        if any(w in content for w in ("Star Walk", "SkyView", "Stellarium")):
+            notes.append(f"{persona}#{i} 推荐了外部 App（用户未明确要求时属偏离本产品）")
+        if "arm_manual" in content or "confirm_token" in content:
+            notes.append(f"{persona}#{i} 出现确认门内部术语/令牌，疑似编造操作步骤")
+        if len(_NUMBERED_LIST_RE.findall(content)) >= 2:
+            notes.append(f"{persona}#{i} 出现行首编号清单（违反「只给当前一步」）")
         if persona == "novice" and i == 1 and not content:
             notes.append(f"{persona}#{i} 空回答")
     return notes
@@ -128,12 +138,31 @@ def run(cfg, personas, max_out):
         for text in PERSONAS[name]:
             t0 = time.time()
             r = agent.chat(text)
+            sel = getattr(agent, "last_tool_selection", None)
+            cands = list(getattr(sel, "kept_names", []) or [])
+            results = []
+            for x in (r.get("tool_results") or []):
+                if not isinstance(x, dict):
+                    continue
+                results.append({
+                    "tool": x.get("tool_name") or "?",
+                    "success": bool(x.get("success")),
+                    "preview": str(x.get("content") or "")[:200],
+                    "error": str(x.get("error") or "")[:160],
+                })
             turns.append({
                 "user": text,
                 "elapsed_s": round(time.time() - t0, 2),
                 "error": r.get("error") or r.get("error_code") or "",
                 "content": r.get("content") or "",
                 "tool_calls": [_tool_name(tc) for tc in (r.get("tool_calls") or [])],
+                "tool_results": results,
+                "candidates": {
+                    "count": len(cands),
+                    "has_skill_tools": all(
+                        n in cands for n in ("skill_list", "skill_load")),
+                    "sky_tools": sorted(n for n in cands if n.startswith("sky_"))[:12],
+                },
             })
             if r.get("error"):
                 hard_fail = True
@@ -154,13 +183,17 @@ def run(cfg, personas, max_out):
 def main() -> int:
     # 只在真正跑探针时改环境：import 本模块（测试会 import 纯函数）不得
     # 给整个 pytest 进程留下 MBDSDR_NO_HW，否则会影响其他硬件用例。
-    os.environ.setdefault("MBDSDR_NO_HW", "1")
-    os.environ.setdefault("MBDSDR_NULL_AUDIO", "1")
     ap = argparse.ArgumentParser()
     ap.add_argument("--persona", choices=sorted(PERSONAS) + ["all"], default="all")
     ap.add_argument("--max-output-tokens", type=int, default=1024)
     ap.add_argument("--out", default=None)
+    ap.add_argument("--allow-hw", action="store_true",
+                    help="允许探测真实硬件（默认 NO_HW，只测引导文本；"
+                         "要验证「专家-直接调谐」必须带此开关）")
     args = ap.parse_args()
+    if not args.allow_hw:
+        os.environ.setdefault("MBDSDR_NO_HW", "1")
+    os.environ.setdefault("MBDSDR_NULL_AUDIO", "1")
 
     cfg = load_agent_config()
     if not cfg.api_key:

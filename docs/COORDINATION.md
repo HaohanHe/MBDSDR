@@ -2561,6 +2561,17 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `scripts/ai_guidance_smoke.py` | 引导深度线/20261122（三段人设真实模型冒烟，无 key 自动 SKIP） | 2026-11-22 18:58 | 本笔 |
 | `tests/test_agent_guidance_policy.py` | 引导深度线/20261122（提示词策略 + 探针启发式确定性测试） | 2026-11-22 18:58 | 本笔 |
 | `docs/COORDINATION.md` | 引导深度线/20261122（§227 引导深度策略与真实模型待跑边界，提交后释放） | 2026-11-22 18:58 | 本笔 |
+| `mbdsdr_ai/context_manager.py` | 引导深度线/20261122（星空身份/外部App禁令/unknown/禁编令牌/禁编号） | 2026-11-22 19:44 | 本笔 |
+| `mbdsdr_ai/agent.py` | 引导深度线/20261122（技能目录注入 + capability note 明确 unknown≠missing） | 2026-11-22 19:44 | 本笔 |
+| `mbdsdr_ai/tool_budget.py` | 引导深度线/20261122（skill_load 进 CORE_TOOLS + 星空触发词/类目） | 2026-11-22 19:44 | 本笔 |
+| `mbdsdr_ai/skill_registry.py` | 引导深度线/20261122（catalog_prompt 紧凑技能目录） | 2026-11-22 19:44 | 本笔 |
+| `skills/sky-first-light/SKILL.md` | 引导深度线/20261122（新增首次看天空技能（按水平分支）） | 2026-11-22 19:44 | 本笔 |
+| `skills/sat-track/SKILL.md` | 引导深度线/20261122（修正 astronomy/cfo 幻名） | 2026-11-22 19:44 | 本笔 |
+| `tests/test_agent_guidance_policy.py` | 引导深度线/20261122（新增身份/禁令/编号/启发式用例） | 2026-11-22 19:44 | 本笔 |
+| `tests/test_skills_tool_refs.py` | 引导深度线/20261122（技能反引号工具名门禁） | 2026-11-22 19:44 | 本笔 |
+| `tests/test_ai_tool_budget.py` | 引导深度线/20261122（CORE_TOOLS 期望成对更新） | 2026-11-22 19:44 | 本笔 |
+| `scripts/ai_guidance_smoke.py` | 引导深度线/20261122（工具结果/候选记录 + 新观察项 + allow-hw） | 2026-11-22 19:44 | 本笔 |
+| `docs/COORDINATION.md` | 引导深度线/20261122（§228 真实模型三轮回溯，提交后释放） | 2026-11-22 19:44 | 本笔 |
 
 > 上表各行均由 `claim` 台账推导：owner 原文与 `acquired_at` 直接取自台账，
 > 目的优先用台账里的 `claim_reason`，没有就如实写「未声明」，不补编。时间列只是
@@ -11324,3 +11335,55 @@ group1 **5083** = **10297 passed / 0 failed / 0 fatal**。
   `observations` 与三段回答，再决定是否调提示词；key 只进配置/环境变量，
   不进仓库、不进文档、不进 commit。
 - 探针的软观察是启发式（字数/问号数/关键词），不能替代人读语义。
+
+## 228. 模型决定引导：真实模型三轮回溯 + 身份/技能/工具面修正（2026-11-22）
+
+**测试条件**：SiliconFlow `Qwen/Qwen3-VL-8B-Thinking`（用户提供的 key 只在本机
+环境变量里用一次，未写入仓库/文档/commit）；`scripts/ai_guidance_smoke.py
+--allow-hw` 跑三段人设；真实 SDR 已插。
+
+**第一轮（修正前）暴露 4 个真实问题**
+1. 新手说"天文望远镜 + 看星星"，模型以"我专注无线电"拒绝，推荐 Stellarium；
+2. "手机架好了"被理解成 SDR 设置，直接调 96 MHz，并给三段编号清单；
+3. 专家请求触发 `sdr_connect` 人工门后，模型编造"输入 arm_manual → 返回
+   confirm_token"的操作步骤；
+4. 新手说"你直接来"后，模型推荐 Star Walk 2 / SkyView（外部 App）。
+
+**第二轮修复后（星空身份 + 技能目录 + skill_load）**
+- 新手不再拒绝，`skill_load` 被真实调用；direct 开始使用本产品指天视图；
+- 仍有：推荐外部 App（SkyView/地图）、编号清单、把 unknown 说成"未连接"、
+  宣称"摄像头一对准就自动认星"、没调 `sky_tonight` 却报"云量 30% / 月光 22% /
+  流星雨 10 颗"。
+
+**第三轮（本轮最终修复与复测）**
+- 系统提示词：星空是本职、不得推给外部 App/地图；指天视图依赖罗盘/IMU；
+  无 `sky_solve` 证据不得宣称相机自动认星；无 `sky_tonight` 结果不得报天气数字；
+  `unknown` 只能读作"未确认"（≠未连接/没有）；确认门被拒只能说"需要在本机
+  界面点击确认"，禁止 `arm_manual`/编造 token；禁止编号清单；首次看天空先
+  `skill_load("sky-first-light")`。
+- 技能目录常驻系统提示词（`SkillRegistry.catalog_prompt()`，只 name+when_to_use）；
+  `skill_load` 进入 `CORE_TOOLS`；新增星空/天文触发词与 sky/camera/weather 类目
+  ——天文请求的候选工具从 **0 个 sky 工具** 变为 **19 个**（含 `sky_tonight`、
+  `sky_whats_here`、`sky_identify_at` 等）。
+- 新增 `skills/sky-first-light/SKILL.md`（按水平分支、只给当前一步、硬边界）；
+  修正 `sat-track` 里两个不存在的工具名（`astronomy`→`satellite_predict_pass`、
+  `cfo`→`doppler_calc`）。
+- 新增 `tests/test_skills_tool_refs.py`：技能正文反引号里的工具名必须在 agent
+  注册表里真实存在（本次已抓到 sat-track 两个幻名）。
+
+**最新一轮 8B 实测**
+- direct：单段话，指天视图 + 罗盘缺失时手动输入方位；无外部 App、无编造数字。
+- novice：调 `sky_capability_state`，单步引导；仍把 unknown 说成"未检测到 IMU"
+  （模型残留，提示词已明确 unknown≠missing，但小模型不保证遵守）。
+- expert：本轮 API 连接被对端重置（`ChunkedEncodingError`），无有效回答；**上一轮**
+  同一身份/门禁规则下已正确回"需要在本机界面点击确认"，不再编令牌。
+- 确定性验证：affected 10 个测试文件 **143 passed**；intent regression **40/40**；
+  技能工具名门禁 **9 passed**。
+
+**诚实边界**
+- 只测 `Qwen3-VL-8B-Thinking` 一个模型；`Qwen3.6-35B-A3B` 对照请求 8 分钟无响应，
+  已终止，不作任何结论。
+- 8B 仍会把 unknown 说成"未检测到"；提示词能加固，但不能保证小模型 100% 遵守。
+- 专家路径在无头探针里被人工门正确挡住，未完成真机调谐；桌面 UI 点击确认后的
+  闭环未在本探针验证。
+- 本轮是 Python agent 面；手机/头显端对话未跑。key 未入库、未落文档。
