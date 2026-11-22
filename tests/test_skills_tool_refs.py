@@ -129,3 +129,11 @@ class TestSkyFirstLight:
         assert "绿色光晕" in self.body
         assert "指天视图" in self.body
         assert "准星" in self.body and "距中心角距" in self.body
+
+    def test_no_fake_heading_input_in_instructions(self):
+        """实测 8B 曾照抄技能里的“手动输入方位”；源头不得再教不存在的控件。"""
+        assert "手动输入方位" not in self.body
+        assert "「左 5°」「右 5°」" in self.body
+        assert "方位输入框" in self.body          # 只出现在“不存在/没有”清单里
+        assert "滑动屏幕" in self.body            # 同上
+        assert "准星自动追踪" in self.body

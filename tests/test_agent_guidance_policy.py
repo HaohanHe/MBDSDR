@@ -122,6 +122,27 @@ class TestGuidancePolicy:
         assert "## 先判断" not in catalog
 
 
+class TestVerifiedUiFactsInPrompt:
+    """8B 会编造 UI 手势/输入框；提示词只给已核实控件，未列出的答“以实际界面为准”。
+
+    真实 8B 三轮复跑暴露「滑动屏幕」「手动输入方位/方位角」「屏幕两侧」，
+    其中“手动输入方位”是从技能正文照抄的。这里钉住源头：常驻提示词必须是
+    白名单，而不是让模型自由想象。
+    """
+
+    def test_prompt_whitelists_verified_controls(self):
+        assert "本机界面事实（只许讲这些）" in SYSTEM_PROMPT
+        assert "准星下方显示星名 + 距中心角距" in SYSTEM_PROMPT
+        assert "「左 5°」「右 5°」「复位」" in SYSTEM_PROMPT
+        assert "60°→25°→8°" in SYSTEM_PROMPT
+        assert "底部一行" in SYSTEM_PROMPT
+
+    def test_prompt_forbids_inventing_unlisted_ui(self):
+        assert "以实际界面为准" in SYSTEM_PROMPT
+        assert "不得编造按钮、手势、图标" in SYSTEM_PROMPT
+        assert "输入框或提示语" in SYSTEM_PROMPT
+
+
 class TestSmokeHeuristics:
     """探针的软观察要能指出「写工具 / 一次灌太多 / 对专家讲基础」。"""
 

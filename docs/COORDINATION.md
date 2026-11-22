@@ -2592,6 +2592,11 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `docs/COORDINATION.md` | AI护栏线/8bfix2（§233 真实 8B 交互幻觉正文） | 2026-11-22 20:39 | 本笔 |
 | `tests/test_answer_guard.py` | AI护栏线/8bfix2（交互幻觉测试 43→65） | 2026-11-22 20:39 | 本笔 |
 | `mbdsdr_ai/answer_guard.py` | AI护栏线/8bfix2（滑动/输入方位/两侧窄规则） | 2026-11-22 20:39 | 本笔 |
+| `docs/COORDINATION.md` | AI护栏线/uifact1（§234 UI 事实白名单正文） | 2026-11-22 20:43 | 本笔 |
+| `mbdsdr_ai/context_manager.py` | AI护栏线/uifact1（提示词 UI 事实白名单） | 2026-11-22 20:43 | 本笔 |
+| `skills/sky-first-light/SKILL.md` | AI护栏线/uifact1（修正手动输入方位源头） | 2026-11-22 20:43 | 本笔 |
+| `tests/test_skills_tool_refs.py` | AI护栏线/uifact1（技能 UI 事实钉扎） | 2026-11-22 20:43 | 本笔 |
+| `tests/test_agent_guidance_policy.py` | AI护栏线/uifact1（提示词 UI 事实钉扎） | 2026-11-22 20:43 | 本笔 |
 
 > 上表各行均由 `claim` 台账推导：owner 原文与 `acquired_at` 直接取自台账，
 > 目的优先用台账里的 `claim_reason`，没有就如实写「未声明」，不补编。时间列只是
@@ -11590,3 +11595,37 @@ group1 **5083** = **10297 passed / 0 failed / 0 fatal**。
   响应模板，而不是继续堆短语黑名单。
 - 第三轮仍有未核实表述：「准星自动追踪」「罗盘图标」「方位数据缺失」提示语；
   专家路径仍输出编号清单（smoke 软观察）。均未逐条收口。
+
+## 234. 结构修正：UI 事实白名单进常驻提示词 + 修正技能源头（2026-11-22）
+
+**根因**：§233 的输出改写只能事后补救。复查技能正文发现
+`skills/sky-first-light/SKILL.md` 第 21–22 行自己就写着「手动输入方位」作为
+无罗盘时的替代——**模型是照抄技能**。继续堆输出规则是治标。
+
+**改动**
+- `SKILL.md`：把「手动输入方位」改为底部「左 5°」「右 5°」按钮手动对齐，
+  并明说界面没有方位输入框；UI 事实段补底部三按钮；「不存在的交互」补
+  滑动屏幕、方位输入框、罗盘图标、准星自动追踪。
+- `mbdsdr_ai/context_manager.py`：`SYSTEM_PROMPT` 新增
+  【本机界面事实（只许讲这些）】白名单——入口在天空页顶部、准星 + 星名 +
+  距中心角距、顶部状态条、视场 60°→25°→8°、底部三按钮（会话内有效）；
+  并加「未列出只说‘以实际界面为准’，不得编造按钮、手势、图标、输入框或
+  提示语」。
+- 测试：`test_agent_guidance_policy.py` +2 条提示词钉扎；
+  `test_skills_tool_refs.py` +1 条「技能不得再教手动输入方位」。
+
+**验证**
+- `pytest tests/test_agent_guidance_policy.py tests/test_skills_tool_refs.py tests/test_answer_guard.py tests/test_ai_tool_budget.py -q`
+  → **105 passed**。
+- 真实 8B 复跑（`Qwen/Qwen3-VL-8B-Thinking`）：
+  - direct 两轮：只讲底部「左 5°」「右 5°」按钮，无滑动/输入方位；
+  - novice：底部按钮 + 顶部状态条 + 视场 60°，无编造图标/自动追踪；
+  - expert：无 UI 幻觉，但仍输出编号清单（软观察）。
+- 与 §233 最后一轮对比：同一组 persona，UI 交互幻觉从三条降到零
+  （**仅就本次采样输出而言**）。
+
+**诚实边界**
+- 单次采样，不保证 8B 永不复发；输出侧窄规则仍保留兜底。
+- expert 的编号清单未收口：提示词已禁止但模型不遵守；输出侧强制去编号会
+  误伤「用户明确要完整步骤表」的正当场景。
+- 未在手机/头显端逐字核对真实 UI 文案与白名单是否一致。
