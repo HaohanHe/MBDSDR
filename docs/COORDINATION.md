@@ -2557,6 +2557,10 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `docs/COORDINATION.md` | 手机指哪认哪线/20261122（§226 手机中心识别证据，提交后释放） | 2026-11-22 18:47 | 本笔 |
 | `mobile/lib/pages/pointing_page.dart` | 手机指哪认哪线/20261122（准星中心识别 UI + 星名不可用提示） | 2026-11-22 18:47 | 本笔 |
 | `mobile/README.md` | 手机指哪认哪线/20261122（修正用例计数 25→26（提交后释放）） | 2026-11-22 18:49 | 本笔 |
+| `mbdsdr_ai/context_manager.py` | 引导深度线/20261122（新增引导深度策略（专家/新手/未知/直接来四支）） | 2026-11-22 18:58 | 本笔 |
+| `scripts/ai_guidance_smoke.py` | 引导深度线/20261122（三段人设真实模型冒烟，无 key 自动 SKIP） | 2026-11-22 18:58 | 本笔 |
+| `tests/test_agent_guidance_policy.py` | 引导深度线/20261122（提示词策略 + 探针启发式确定性测试） | 2026-11-22 18:58 | 本笔 |
+| `docs/COORDINATION.md` | 引导深度线/20261122（§227 引导深度策略与真实模型待跑边界，提交后释放） | 2026-11-22 18:58 | 本笔 |
 
 > 上表各行均由 `claim` 台账推导：owner 原文与 `acquired_at` 直接取自台账，
 > 目的优先用台账里的 `claim_reason`，没有就如实写「未声明」，不补编。时间列只是
@@ -11282,3 +11286,41 @@ group1 **5083** = **10297 passed / 0 failed / 0 fatal**。
   只报 HIP；
 - 像素容差随视场缩放（60° 约 3.3°），但结果永远附带真实角距，不宣称「精准」；
 - 星名目录 2,906 条来自仓库既有生成脚本，未扩表、未引入新数据源。
+
+## 227. 引导深度由模型判断：策略落地，真实模型回归**待 key**（2026-11-22）
+
+**要求（用户原话归纳）**：引导不能是固定向导；「用户非常明白那就不需要引导了」，
+必须由模型根据用户水平决定讲多少。API 是给测试用的，用户自己填，不入库。
+
+**本轮落地（不依赖网络的那半）**
+- `mbdsdr_ai/context_manager.py` 的 `SYSTEM_PROMPT` 新增
+  【引导深度由你判断，不由流程决定】：
+  - 专家/明确指令 → 最短路径，不重复基础术语、不逐项确认已知硬件；
+  - 新手/描述目标 → 只给当前一步（1–2 个动作），不一次灌整套流程、不要求先学术语；
+  - 水平未知 → 先给最小可行一步 + 一个可选分支，不先发一串问题；
+  - 用户说「你直接来」→ 以执行/结论为主，解释为辅；缺硬件说缺什么与替代方案。
+  只给判断依据与边界，**没有**固定问题清单或编号步骤。
+- `scripts/ai_guidance_smoke.py`（新）：三段人设（新手架手机 / 老火腿直接调
+  145.500 NFM / 新手说「你直接来」）跑真实 agent，记录回答与工具调用；
+  软观察标出「调用写工具 / 回复过长 / 连续提问 / 对专家讲基础」。**没有 key
+  时打印 SKIP 并返回 0，不联网、不伪造任何结果**。
+- `tests/test_agent_guidance_policy.py`（新）：机械钉住策略文本（四支都存在、
+  无编号步骤/问号）与探针启发式；不 import 时污染 `MBDSDR_NO_HW`（环境
+  setdefault 已挪进 `main()`）。
+
+**验证**
+- `python -m pytest tests/test_agent_guidance_policy.py
+  tests/test_sky_capability_negotiation.py tests/test_ai_context_budget.py
+  tests/test_competition_wording_audit.py -q` → **63 passed**。
+- `python scripts/ai_guidance_smoke.py` → **SKIP**：本机
+  `~/.mbdsdr/config.json` 的 `api_key` 为空串；用户级/机器级
+  `MBDSDR_API_KEY`、`OPENAI_API_KEY` 均未设置；IDE 配置中也没有可用的模型
+  key（只扫了键名与长度，未打印值）。因此**本轮没有真实模型行为证据**。
+
+**诚实边界**
+- 「模型会按水平调整引导」目前只有提示词策略与确定性测试，**未用真实模型验证**；
+  不据此宣称「模型已会自适应」。
+- 填好 key 后跑 `python scripts/ai_guidance_smoke.py`，看报告里的
+  `observations` 与三段回答，再决定是否调提示词；key 只进配置/环境变量，
+  不进仓库、不进文档、不进 commit。
+- 探针的软观察是启发式（字数/问号数/关键词），不能替代人读语义。
