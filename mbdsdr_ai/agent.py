@@ -29,7 +29,7 @@ from concurrent.futures import ThreadPoolExecutor
 from typing import List, Dict, Any, Optional, Callable
 
 from .config import AgentConfig
-from .answer_guard import StreamGuard, sanitize_answer
+from .answer_guard import StreamGuard, sanitize_answer, wants_numbered_steps
 from .context_manager import (
     ContextManager,
     SYSTEM_PROMPT,
@@ -4627,8 +4627,11 @@ class MBDSDRAgent:
             # 低参数模型会把 unknown 说成「未检测到/未连接」；流式与非流式
             # 都过同一条窄护栏（只改 unknown 槽位的硬件断言，missing 保留原话）。
             guard = None
+            # 用户明确要“完整步骤/清单”时才保留编号；否则按系统提示词去掉。
+            allow_numbered = wants_numbered_steps(user_input)
             if on_delta is not None:
-                guard = StreamGuard(on_delta, self._unknown_slots())
+                guard = StreamGuard(on_delta, self._unknown_slots(),
+                                    allow_numbered=allow_numbered)
                 on_delta = guard.feed
             try:
                 result = self._chat_impl(user_input, max_tool_rounds, on_delta,
@@ -4638,7 +4641,8 @@ class MBDSDRAgent:
                     guard.flush()
             if isinstance(result, dict) and isinstance(result.get("content"), str):
                 result["content"] = sanitize_answer(
-                    result["content"], self._unknown_slots())
+                    result["content"], self._unknown_slots(),
+                    allow_numbered=allow_numbered)
             return result
         finally:
             self._chat_active = False

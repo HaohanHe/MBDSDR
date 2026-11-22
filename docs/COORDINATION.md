@@ -2625,6 +2625,10 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `mbdsdr_ai/answer_guard.py` | AI护栏线/aignss1（位置+动词+标签 / 视场自动切换护栏） | 2026-11-22 21:43 | 本笔 |
 | `tests/test_answer_guard.py` | AI护栏线/aignss1（新增护栏测试） | 2026-11-22 21:43 | 本笔 |
 | `tests/test_agent_guidance_policy.py` | AI护栏线/aignss1（GNSS 注入助手 + 路由钉扎） | 2026-11-22 21:43 | 本笔 |
+| `docs/COORDINATION.md` | AI护栏线/nosteps1（§244 正文） | 2026-11-22 21:50 | 本笔 |
+| `mbdsdr_ai/answer_guard.py` | AI护栏线/nosteps1（编号清单确定性护栏 + 意图判断） | 2026-11-22 21:50 | 本笔 |
+| `mbdsdr_ai/agent.py` | AI护栏线/nosteps1（chat 传 allow_numbered） | 2026-11-22 21:50 | 本笔 |
+| `tests/test_answer_guard.py` | AI护栏线/nosteps1（编号护栏测试 8 条） | 2026-11-22 21:50 | 本笔 |
 
 > 上表各行均由 `claim` 台账推导：owner 原文与 `acquired_at` 直接取自台账，
 > 目的优先用台账里的 `claim_reason`，没有就如实写「未声明」，不补编。时间列只是
@@ -11929,3 +11933,30 @@ AI 仍在按建 agent 时的默认 (0,0) 计算——两套站址，且默认 (0
   传统星名（工具输出如此，未编造）。
 - 编号清单在其他场景仍会出现；一次运行 stall 未归因。
 - 探针的 GNSS 注入只覆盖桌面进程；手机/头显未验。
+
+## 244. 编号清单确定性护栏（2026-11-22）
+
+**动机**：系统提示词明确「不要 1. 2. 3. 编号清单」，但 8B 在 expert/novice
+多轮里反复输出，属于长期残留。
+
+**改动**
+- `answer_guard.sanitize_numbered_steps(text, allow_numbered=False)`：去掉
+  行首「1. / 2) / 3、」编号；`allow_numbered=True` 原样保留。
+- `wants_numbered_steps(user_message)`：只有用户明确说「完整步骤/一步一步/
+  步骤表/列个清单」等才允许编号。
+- `StreamGuard` 增 `allow_numbered` 参数；`agent.chat` 按用户原话计算并同时
+  传给流式与非流式路径（两条路径同一规则）。
+- `tests/test_answer_guard.py` +8：默认去编号、允许时保留、单条也去、
+  `145.500` / `2.4 MS/s` 不误伤、流式逐行去、流式允许时保留。
+
+**验证**
+- `pytest tests/test_answer_guard.py tests/test_agent_guidance_policy.py -q`
+  → **101 passed**。
+- 真实 8B expert 复跑：本轮先命中人工确认门（`gate_not_armed`），回答是
+  「请在本机界面点击确认」，**没有产生编号清单**；因此本轮没有“真实触发
+  后被去掉”的直接证据，只有确定性单测覆盖。
+
+**诚实边界**
+- 只去掉行首编号，不删步骤内容；用户明确要完整步骤表时保留编号。
+- 编号在非行首（如正文中的「1.」）不会被改；这属于有意收窄。
+- 单次真实采样未触发编号；不能据此宣称真实模型行为已被覆盖。

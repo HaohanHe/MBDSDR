@@ -213,11 +213,36 @@ def sanitize_unverified_ui_positions(text: str) -> str:
     return _POSITION_AFTER_LABEL.sub(_neutralize_ui_position, out)
 
 
-def sanitize_answer(text: str, unknown_slots: Iterable[str]) -> str:
-    """对模型回答统一施加的诚实护栏（unknown 断言 + 未核实 UI 事实）。"""
-    return sanitize_unverified_ui_positions(
+def sanitize_answer(text: str, unknown_slots: Iterable[str],
+                    allow_numbered: bool = False) -> str:
+    """对模型回答统一施加的诚实护栏（unknown 断言 + 未核实 UI + 编号）。"""
+    out = sanitize_unverified_ui_positions(
         sanitize_unverified_ui_claims(
             sanitize_unknown_claims(text, unknown_slots)))
+    return sanitize_numbered_steps(out, allow_numbered)
+
+
+#: 用户明确要“完整步骤表”时才允许编号；其余场景按系统提示词去掉。
+_STEP_REQUEST_WORDS = ("完整步骤", "全部步骤", "一步一步", "步骤表",
+                       "详细步骤", "分步骤", "列个清单", "清单形式", "编号步骤")
+
+#: 行首编号（「1. 」「2) 」「3、」）；只认行首，不碰 145.500 这类数字。
+_NUMBERED_LINE_RE = re.compile(r"(?m)^[ \t]*\d{1,2}[.、)]\s+")
+
+
+def wants_numbered_steps(text: str) -> bool:
+    """用户是否明确要求完整步骤/清单（命中才允许编号）。"""
+    return any(w in (text or "") for w in _STEP_REQUEST_WORDS)
+
+
+def sanitize_numbered_steps(text: str, allow_numbered: bool = False) -> str:
+    """去掉行首编号；用户明确要步骤表时原样保留。
+
+    按行处理，流式与非流式同一规则（StreamGuard 每行到达即改写）。
+    """
+    if not text or allow_numbered:
+        return text
+    return _NUMBERED_LINE_RE.sub("", text)
 
 
 def _deliver(sink: Callable[[str], None], text: str) -> None:
@@ -238,9 +263,11 @@ class StreamGuard:
     """
 
     def __init__(self, emit: Callable[[str], None],
-                 unknown_slots: Iterable[str]):
+                 unknown_slots: Iterable[str],
+                 allow_numbered: bool = False):
         self._sink = emit
         self._slots = tuple(unknown_slots)
+        self._allow_numbered = bool(allow_numbered)
         self._buf = ""
 
     def feed(self, piece: str) -> None:
@@ -253,12 +280,15 @@ class StreamGuard:
                 break
             end = m.end()
             seg, self._buf = self._buf[:end], self._buf[end:]
-            _deliver(self._sink, sanitize_answer(seg, self._slots))
+            _deliver(self._sink, sanitize_answer(
+                seg, self._slots, self._allow_numbered))
         if len(self._buf) >= 80:
             seg, self._buf = self._buf, ""
-            _deliver(self._sink, sanitize_answer(seg, self._slots))
+            _deliver(self._sink, sanitize_answer(
+                seg, self._slots, self._allow_numbered))
 
     def flush(self) -> None:
         if self._buf:
             seg, self._buf = self._buf, ""
-            _deliver(self._sink, sanitize_answer(seg, self._slots))
+            _deliver(self._sink, sanitize_answer(
+                seg, self._slots, self._allow_numbered))

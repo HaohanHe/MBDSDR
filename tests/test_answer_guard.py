@@ -13,9 +13,11 @@ import pytest
 from mbdsdr_ai.answer_guard import (
     StreamGuard,
     sanitize_answer,
+    sanitize_numbered_steps,
     sanitize_unknown_claims,
     sanitize_unverified_ui_claims,
     sanitize_unverified_ui_positions,
+    wants_numbered_steps,
 )
 
 
@@ -302,6 +304,50 @@ class TestPositionWithVerbAndFovSwitch:
     def test_fov_manual_instruction_untouched(self):
         text = "点顶部视场按钮切到 8°。"
         assert sanitize_unverified_ui_claims(text) == text
+
+
+class TestNumberedSteps:
+    """系统提示词禁止编号清单，但 8B 反复给「1. 2. 3.」；用确定性格栏收口。"""
+
+    def test_markers_removed_by_default(self):
+        text = "1. 打开指天视图\n2. 对准亮星\n3. 看准星"
+        assert sanitize_numbered_steps(text) == (
+            "打开指天视图\n对准亮星\n看准星")
+
+    def test_allow_keeps_markers(self):
+        text = "1. A\n2. B"
+        assert sanitize_numbered_steps(text, allow_numbered=True) == text
+
+    def test_single_marker_removed(self):
+        assert sanitize_numbered_steps("1. 只有一步") == "只有一步"
+
+    def test_decimal_numbers_untouched(self):
+        text = "145.500 MHz 是频率\n2.4 MS/s 是采样率"
+        assert sanitize_numbered_steps(text) == text
+
+    def test_wants_numbered_steps(self):
+        assert wants_numbered_steps("给我完整步骤")
+        assert wants_numbered_steps("一步一步教我")
+        assert not wants_numbered_steps("怎么收 145.500？")
+
+    def test_sanitize_answer_respects_flag(self):
+        text = "1. A\n2. B"
+        assert sanitize_answer(text, []) == "A\nB"
+        assert sanitize_answer(text, [], allow_numbered=True) == text
+
+    def test_stream_guard_strips_per_line(self):
+        out = []
+        guard = StreamGuard(out.append, [], allow_numbered=False)
+        guard.feed("1. 打开指天视图\n2. 对准亮星\n")
+        guard.flush()
+        assert "".join(out) == "打开指天视图\n对准亮星\n"
+
+    def test_stream_guard_keeps_when_allowed(self):
+        out = []
+        guard = StreamGuard(out.append, [], allow_numbered=True)
+        guard.feed("1. A\n2. B\n")
+        guard.flush()
+        assert "".join(out) == "1. A\n2. B\n"
 
 
 class TestAgentIntegration:
