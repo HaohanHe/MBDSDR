@@ -97,6 +97,10 @@ _FAKE_UI_CLAIMS: tuple[tuple[Pattern[str], str], ...] = (
         r"(?:手动)?输入(?:一个)?方位(?:角)?"
         r"(?:[（(][^）)\n]{0,16}[）)]|(?![\u4e00-\u9fff]))"),
      "按界面上的「左 5°」「右 5°」按钮调整"),
+    # 实测 8B 幻觉「重新对齐后视场会切换至 8°」；视场三档必须由用户点
+    # 顶部视场按钮切换，页面不会自动改档。
+    (re.compile(r"视场(?:会)?(?:自动)?切换(?:至|到)?\s*(60|25|8)\s*°?"),
+     r"视场需要手动切到 \1°"),
 )
 
 
@@ -153,9 +157,11 @@ _POSITION_TOKEN = _UI_SCOPE + r"(?P<pos>" + "|".join(_POSITION_WORDS) + r")"
 _LABEL_SPAN = r"(?P<label>「[^」\n]{1,24}」|“[^”\n]{1,24}”)"
 _UI_SCOPE_STRIP = re.compile(r"^(?:屏幕|页面|界面|画面)?")
 
-#: 「屏幕右下角「左/右 5°」按钮」：位置在标签前。
+#: 「屏幕右下角「左/右 5°」按钮」：位置在标签前。允许中间夹动词
+#: （「顶部点击「手动对齐」」），否则「点击」会把位置与标签拆开漏判。
 _POSITION_BEFORE_LABEL = re.compile(
-    _POSITION_TOKEN + r"(?:的|有|是|为|处|上|中|里)?\s*" + _LABEL_SPAN)
+    _POSITION_TOKEN + r"(?P<verb>点击|长按|点|按)?"
+    r"(?:的|有|是|为|处|上|中|里)?\s*" + _LABEL_SPAN)
 #: 「「复位」按钮位于屏幕右下角」：位置在标签后。
 _POSITION_AFTER_LABEL = re.compile(
     _LABEL_SPAN + r"(?P<ctl>按钮|控件|入口|开关)?"
@@ -179,15 +185,17 @@ def _neutralize_ui_position(match: re.Match[str]) -> str:
     span = match.group("label")
     label = span[1:-1]
     allowed = _verified_positions(label)
-    ctl = match.groupdict().get("ctl") or ""
+    groups = match.groupdict()
+    ctl = groups.get("ctl") or ""
+    verb = groups.get("verb") or ""
     token = _UI_SCOPE_STRIP.sub("", match.group("pos") or "")
     if allowed is not None and token in allowed:
         return match.group(0)
     if allowed is not None:
-        return span + ctl
+        return verb + span + ctl
     if ctl == "控件":          # 「对应控件控件」读起来像 bug
         ctl = ""
-    return "对应控件" + ctl
+    return verb + "对应控件" + ctl
 
 
 def sanitize_unverified_ui_positions(text: str) -> str:

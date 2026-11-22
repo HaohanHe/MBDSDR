@@ -281,6 +281,29 @@ class TestUnverifiedUiPositions:
         assert sanitize_unverified_ui_positions("") == ""
 
 
+class TestPositionWithVerbAndFovSwitch:
+    """实测 8B：「屏幕顶部点击「手动对齐」」「视场会切换至 8°」。"""
+
+    def test_position_then_verb_then_label_is_neutralized(self):
+        out = sanitize_unverified_ui_positions("屏幕顶部点击「手动对齐」按钮。")
+        assert "顶部" not in out
+        assert "对应控件" in out
+        assert out.startswith("点击")
+
+    def test_verified_position_with_verb_stays(self):
+        text = "屏幕底部点击「左 5°」按钮。"
+        assert sanitize_unverified_ui_positions(text) == text
+
+    def test_fov_auto_switch_is_rewritten(self):
+        out = sanitize_unverified_ui_claims("重新对齐后视场会切换至8°（最窄档）。")
+        assert "自动" not in out
+        assert "视场需要手动切到 8°" in out
+
+    def test_fov_manual_instruction_untouched(self):
+        text = "点顶部视场按钮切到 8°。"
+        assert sanitize_unverified_ui_claims(text) == text
+
+
 class TestAgentIntegration:
     def test_chat_sanitizes_final_content_and_stream(self, monkeypatch):
         """agent.chat 的流式与非流式都必须过同一条护栏。"""

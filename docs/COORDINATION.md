@@ -2619,6 +2619,12 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `docs/COORDINATION.md` | AI护栏线/spatial2（§241 授时链路补证正文） | 2026-11-22 21:21 | 本笔 |
 | `docs/COORDINATION.md` | AI护栏线/realbundle1（§242 跨语言真实包校验正文） | 2026-11-22 21:24 | 本笔 |
 | `spatial/app/src/test/java/com/mbdsdr/spatial/RealBundleExternalTest.kt` | AI护栏线/realbundle1（外部真实 bundle 的 Kotlin 校验） | 2026-11-22 21:24 | 本笔 |
+| `docs/COORDINATION.md` | AI护栏线/aignss1（§243 正文） | 2026-11-22 21:43 | 本笔 |
+| `scripts/ai_guidance_smoke.py` | AI护栏线/aignss1（GNSS 注入 + 自定义问题） | 2026-11-22 21:43 | 本笔 |
+| `mbdsdr_ai/context_manager.py` | AI护栏线/aignss1（星表查询路由 + 视场不自动切换） | 2026-11-22 21:43 | 本笔 |
+| `mbdsdr_ai/answer_guard.py` | AI护栏线/aignss1（位置+动词+标签 / 视场自动切换护栏） | 2026-11-22 21:43 | 本笔 |
+| `tests/test_answer_guard.py` | AI护栏线/aignss1（新增护栏测试） | 2026-11-22 21:43 | 本笔 |
+| `tests/test_agent_guidance_policy.py` | AI护栏线/aignss1（GNSS 注入助手 + 路由钉扎） | 2026-11-22 21:43 | 本笔 |
 
 > 上表各行均由 `claim` 台账推导：owner 原文与 `acquired_at` 直接取自台账，
 > 目的优先用台账里的 `claim_reason`，没有就如实写「未声明」，不补编。时间列只是
@@ -11890,3 +11896,36 @@ AI 仍在按建 agent 时的默认 (0,0) 计算——两套站址，且默认 (0
 **诚实边界**
 - 只校验结构、来源字段与非空性，不逐颗比对星点数值（那是 Python 侧测试的职责）。
 - PICO 真机仍未验证四窗/手势/空间音频。
+
+## 243. 实时 GNSS 引导探针 + 星表查询路由修正（2026-11-22）
+
+**动机**：`ai_guidance_smoke.py` 只能跑固定 persona，不能把真实 GNSS 站址/授时
+注入给 8B；也就无法验证「AI 用真实站址回答看天问题」。
+
+**改动**
+- 探针新增 `--gnss-port / --gnss-baud / --question`：真实 fix 经
+  `runtime_sources.record_fix` 发布（站址/授时同源），并写入
+  `agent.observer`；**坐标不打印**。纯函数 `fix_from_position` /
+  `apply_fix_to_agent` / `publish_fix`，测试 +2。
+- 提示词新增路由：用户给方位/仰角问「这一片有什么星」→ `sky_whats_here`；
+  **不要**用 `sky_pointing_check`（它要真实星点像素、只算残差，不查星表）；
+  视场切换要用户点顶部按钮，**不会自动切换**。
+- 护栏补两刀：位置词与标签之间允许动词（「屏幕顶部点击「手动对齐」」→
+  去掉位置并中性化标签）；「视场会切换至 8°」→「视场需要手动切到 8°」。
+
+**真实验证（同一问题，改前/改后）**
+- 改前：`tools=[gimbal_read_pose, sky_pointing_check]`，答“当前视场过宽无法
+  解算”，并编造“天空页顶部点击「手动对齐」”“重新对齐后视场会切换至 8°”，
+  还给编号清单。
+- 改后：`tools=[context_status, sky_whats_here, sky_whats_here]`，答
+  「内阶 3 颗，最亮 HIP 42527（4.59 等），当前仰角 35.41°，大熊座」——
+  基于工具返回，没有上述两类 UI 句。
+- 中间有一次运行 **>6 分钟未返回，已中止，不作结论**；第三次 111.93 s 正常。
+- `pytest tests/test_answer_guard.py tests/test_agent_guidance_policy.py tests/test_skills_tool_refs.py tests/test_ai_tool_budget.py -q`
+  → **114 passed**。
+
+**诚实边界**
+- 单次采样；问题是「有名字的星」，模型答的是 HIP 编号 + 中国星官，不是
+  传统星名（工具输出如此，未编造）。
+- 编号清单在其他场景仍会出现；一次运行 stall 未归因。
+- 探针的 GNSS 注入只覆盖桌面进程；手机/头显未验。

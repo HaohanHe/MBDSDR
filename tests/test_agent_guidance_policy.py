@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import importlib.util
 import os
+from types import SimpleNamespace
 
 from mbdsdr_ai.context_manager import SYSTEM_PROMPT
 from mbdsdr_ai.skill_registry import SkillRegistry
@@ -141,6 +142,47 @@ class TestVerifiedUiFactsInPrompt:
         assert "以实际界面为准" in SYSTEM_PROMPT
         assert "不得编造按钮、手势、图标" in SYSTEM_PROMPT
         assert "输入框或提示语" in SYSTEM_PROMPT
+
+    def test_sky_query_routes_to_whats_here_not_pointing_check(self):
+        assert "`sky_whats_here`" in SYSTEM_PROMPT
+        assert "不要用 `sky_pointing_check`" in SYSTEM_PROMPT
+        assert "不会自动切换" in SYSTEM_PROMPT
+
+
+class TestGnssInjectionHelpers:
+    """真实模型探针的 GNSS 注入：站址写进 agent.observer，坐标不打印。"""
+
+    def test_fix_from_position_keeps_fields_without_coords_leak(self):
+        mod = _load_smoke()
+        pos = SimpleNamespace(
+            lat=1.5, lon=2.5, alt=30.0,
+            utc_time="120000.00",
+            utc_datetime="2026-11-22T12:00:00+00:00",
+            date="221126", sats=9, hdop=1.3,
+            antenna="open", timestamp=123.0)
+        fix = mod.fix_from_position(pos, "COM10")
+        assert fix["source"] == "real"
+        assert fix["latitude"] == 1.5
+        assert fix["longitude"] == 2.5
+        assert fix["altitude_m"] == 30.0
+        assert fix["satellites"] == 9
+        assert fix["hdop"] == 1.3
+        assert fix["antenna"] == "open"
+        assert fix["port"] == "COM10"
+
+    def test_apply_fix_to_agent_sets_observer_or_refuses(self):
+        from mbdsdr_ai.astronomy import Observer
+
+        mod = _load_smoke()
+        agent = SimpleNamespace(observer=Observer())
+        assert mod.apply_fix_to_agent(
+            agent, {"latitude": 1.0, "longitude": 2.0, "altitude_m": 3.0})
+        assert agent.observer.latitude_deg == 1.0
+        assert agent.observer.longitude_deg == 2.0
+        assert agent.observer.height_m == 3.0
+        # 无坐标不得把 observer 写成 (0,0)
+        assert mod.apply_fix_to_agent(agent, {"latitude": None}) is False
+        assert agent.observer.latitude_deg == 1.0
 
 
 class TestSmokeHeuristics:

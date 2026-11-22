@@ -126,7 +126,80 @@ def _observations(persona: str, turns) -> list:
     return notes
 
 
-def run(cfg, personas, max_out):
+def fix_from_position(pos, port: str = "") -> dict:
+    """把 ``GNSSPosition`` 转成 ``runtime_sources.record_fix`` 需要的 fix 字典。"""
+    return {
+        "source": "real",
+        "latitude": getattr(pos, "lat", None),
+        "longitude": getattr(pos, "lon", None),
+        "altitude_m": getattr(pos, "alt", None) or 0.0,
+        "utc_time": getattr(pos, "utc_time", None),
+        "utc_datetime": getattr(pos, "utc_datetime", None),
+        "date": getattr(pos, "date", None),
+        "satellites": getattr(pos, "sats", None),
+        "hdop": getattr(pos, "hdop", None),
+        "antenna": getattr(pos, "antenna", "unknown"),
+        "timestamp": getattr(pos, "timestamp", None),
+        "port": port or None,
+    }
+
+
+def apply_fix_to_agent(agent, fix) -> bool:
+    """把真实 fix 写进 ``agent.observer``（站址）；无坐标返回 False。"""
+    lat = (fix or {}).get("latitude")
+    lon = (fix or {}).get("longitude")
+    obs = getattr(agent, "observer", None)
+    if obs is None or lat is None or lon is None:
+        return False
+    obs.latitude_deg = float(lat)
+    obs.longitude_deg = float(lon)
+    obs.height_m = float((fix or {}).get("altitude_m") or 0.0)
+    return True
+
+
+def publish_fix(fix) -> bool:
+    """发布到运行时快照（与桌面 1s 轮询同路径），让时间/站址同源。"""
+    try:
+        from mbdsdr_ai.runtime_sources import get_runtime_sources
+        get_runtime_sources().record_fix(fix)
+        return True
+    except Exception:
+        return False
+
+
+def _capture_turn(agent, text: str) -> dict:
+    """跑一轮对话并记录工具调用/候选/结果（不判红）。"""
+    t0 = time.time()
+    r = agent.chat(text)
+    sel = getattr(agent, "last_tool_selection", None)
+    cands = list(getattr(sel, "kept_names", []) or [])
+    results = []
+    for x in (r.get("tool_results") or []):
+        if not isinstance(x, dict):
+            continue
+        results.append({
+            "tool": x.get("tool_name") or "?",
+            "success": bool(x.get("success")),
+            "preview": str(x.get("content") or "")[:200],
+            "error": str(x.get("error") or "")[:160],
+        })
+    return {
+        "user": text,
+        "elapsed_s": round(time.time() - t0, 2),
+        "error": r.get("error") or r.get("error_code") or "",
+        "content": r.get("content") or "",
+        "tool_calls": [_tool_name(tc) for tc in (r.get("tool_calls") or [])],
+        "tool_results": results,
+        "candidates": {
+            "count": len(cands),
+            "has_skill_tools": all(
+                n in cands for n in ("skill_list", "skill_load")),
+            "sky_tools": sorted(n for n in cands if n.startswith("sky_"))[:12],
+        },
+    }
+
+
+def run(cfg, personas, max_out, *, custom_question=None, gnss_fix=None):
     from mbdsdr_ai.agent import MBDSDRAgent
 
     cfg.max_output_tokens = max_out
@@ -145,39 +218,16 @@ def run(cfg, personas, max_out):
     hard_fail = False
     for name in personas:
         agent = MBDSDRAgent(cfg)
+        applied = apply_fix_to_agent(agent, gnss_fix) if gnss_fix else False
+        texts = [custom_question] if custom_question else list(PERSONAS[name])
         turns = []
-        for text in PERSONAS[name]:
-            t0 = time.time()
-            r = agent.chat(text)
-            sel = getattr(agent, "last_tool_selection", None)
-            cands = list(getattr(sel, "kept_names", []) or [])
-            results = []
-            for x in (r.get("tool_results") or []):
-                if not isinstance(x, dict):
-                    continue
-                results.append({
-                    "tool": x.get("tool_name") or "?",
-                    "success": bool(x.get("success")),
-                    "preview": str(x.get("content") or "")[:200],
-                    "error": str(x.get("error") or "")[:160],
-                })
-            turns.append({
-                "user": text,
-                "elapsed_s": round(time.time() - t0, 2),
-                "error": r.get("error") or r.get("error_code") or "",
-                "content": r.get("content") or "",
-                "tool_calls": [_tool_name(tc) for tc in (r.get("tool_calls") or [])],
-                "tool_results": results,
-                "candidates": {
-                    "count": len(cands),
-                    "has_skill_tools": all(
-                        n in cands for n in ("skill_list", "skill_load")),
-                    "sky_tools": sorted(n for n in cands if n.startswith("sky_"))[:12],
-                },
-            })
-            if r.get("error"):
+        for text in texts:
+            turn = _capture_turn(agent, text)
+            turns.append(turn)
+            if turn["error"]:
                 hard_fail = True
         item = {"persona": name, "turns": turns,
+                "gnss_applied": applied,
                 "observations": _observations(name, turns)}
         report["personas"].append(item)
         print(f"\n=== {name} ===")
@@ -201,6 +251,11 @@ def main() -> int:
     ap.add_argument("--allow-hw", action="store_true",
                     help="允许探测真实硬件（默认 NO_HW，只测引导文本；"
                          "要验证「专家-直接调谐」必须带此开关）")
+    ap.add_argument("--gnss-port", default=None,
+                    help="可选：真实 GNSS 串口（如 COM10）；注入站址/授时后再跑")
+    ap.add_argument("--gnss-baud", type=int, default=9600)
+    ap.add_argument("--question", default=None,
+                    help="可选：只跑一条自定义问题（替代 persona 列表）")
     args = ap.parse_args()
     if not args.allow_hw:
         os.environ.setdefault("MBDSDR_NO_HW", "1")
@@ -212,8 +267,43 @@ def main() -> int:
               "~/.mbdsdr/config.json 的 api_key）。未联网、未生成任何结果。")
         return 0
 
-    names = sorted(PERSONAS) if args.persona == "all" else [args.persona]
-    report, hard_fail = run(cfg, names, args.max_output_tokens)
+    gnss = None
+    fix = None
+    if args.gnss_port:
+        try:
+            from mbdsdr_ai.gnss_monitor import RealGNSSMonitor
+            gnss = RealGNSSMonitor()
+            if not gnss.start(args.gnss_port, args.gnss_baud):
+                print("GNSS: 串口不可用（不注入站址/时间）")
+            else:
+                deadline = time.time() + 15
+                pos = None
+                while time.time() < deadline:
+                    pos = gnss.get_position()
+                    if (pos is not None and pos.lat is not None
+                            and pos.sats is not None):
+                        break
+                    time.sleep(0.3)
+                if pos is not None and pos.lat is not None:
+                    fix = fix_from_position(pos, args.gnss_port)
+                    publish_fix(fix)
+                    print(f"GNSS: {args.gnss_port} fix, sats={pos.sats}, "
+                          f"antenna={pos.antenna}（站址/授时已注入，坐标不打印）")
+                else:
+                    print("GNSS: 已连接但未定位（不注入站址/时间）")
+        except Exception as exc:
+            print(f"GNSS: 注入失败 {type(exc).__name__}: {exc}")
+
+    if args.question:
+        names = ["custom"]
+    else:
+        names = sorted(PERSONAS) if args.persona == "all" else [args.persona]
+    try:
+        report, hard_fail = run(cfg, names, args.max_output_tokens,
+                                custom_question=args.question, gnss_fix=fix)
+    finally:
+        if gnss is not None:
+            gnss.stop()
 
     out_dir = os.path.join(ROOT, "output", "ai")
     os.makedirs(out_dir, exist_ok=True)
