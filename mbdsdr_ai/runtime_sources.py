@@ -26,6 +26,7 @@ GNSS → 时间/站址的接线有两条显式入口：读监视器的
 """
 from __future__ import annotations
 
+import copy
 import math
 import threading
 import time
@@ -61,6 +62,8 @@ _TIME_SOURCES = ("pps", "nmea", "ntp", "none", "unknown")
 _FIX_SOURCES = ("real", "gnss", "fix", "valid")
 # 天线状态（GPTXT）：只认这三种明确状态，其余一律 unknown。
 _ANTENNA_STATES = ("open", "short", "ok")
+# GSV/GSA 快照有效期：桌面 1s 轮询；超过这个时长就不再提供给 AI 粗指向。
+_GSV_TTL_S = 10.0
 
 # SDR 重连状态（Task 75）：与 connected 分开，只描述"自动重连"这件事。
 # ``source``（Task 78）标明 opt-in 开关来源：env / config / default / manual。
@@ -366,6 +369,11 @@ class RuntimeSources:
         self._prev_station: Optional[Dict[str, Any]] = None
         # 天空图入口最近一次 fix（无监视器时的快照来源）
         self._fix_record: Optional[Dict[str, Any]] = None
+        # 最近一帧 GSV/GSA（桌面 1s 轮询发布），供 AI 粗指向工具读取；
+        # 超过 _GSV_TTL_S 秒视为过期，snapshot 不再给出。
+        self._gsv_frames: list = []
+        self._gsa_frame: Optional[Dict[str, Any]] = None
+        self._gsv_ts: Optional[float] = None
 
     # ------------------------------------------------------------------
     # 显式绑定（不启动任何资源）
@@ -613,6 +621,24 @@ class RuntimeSources:
     # ------------------------------------------------------------------
     # 快照
     # ------------------------------------------------------------------
+    def record_gsv(self, frames, gsa: Optional[Mapping[str, Any]] = None,
+                   now: Optional[float] = None) -> None:
+        """记录最近一帧 GSV（各星座可见卫星）/GSA，供 AI 粗指向工具读取。
+
+        ``frames`` 是 ``SerialGNSSReader.get_gsv_frames()`` 的值转成的
+        帧列表（``[{talker, sats:[{id,elevation,azimuth,snr_db}]}]``）；
+        空值不覆盖上一帧（串口断开时由快照 TTL 判过期）。
+        """
+        if isinstance(frames, Mapping):
+            frames = list(frames.values())
+        frames = list(frames or [])
+        if not frames:
+            return
+        with self._lock:
+            self._gsv_frames = copy.deepcopy(frames)
+            self._gsa_frame = copy.deepcopy(dict(gsa)) if gsa else None
+            self._gsv_ts = _now(now)
+
     def snapshot(self, now_utc: Optional[float] = None) -> Dict[str, Any]:
         """只读快照。字段口径见模块文档。"""
         now = _now(now_utc)
@@ -676,9 +702,23 @@ class RuntimeSources:
             "last_update_utc": _iso_utc(gnss_info["timestamp"]),
             "reason": reason,
         }
+        with self._lock:
+            gsv_frames = self._gsv_frames
+            gsa_frame = self._gsa_frame
+            gsv_ts = self._gsv_ts
+        gsv_age = None if gsv_ts is None else max(0.0, now - gsv_ts)
+        gsv_fresh = gsv_age is not None and gsv_age <= _GSV_TTL_S
+        gnss_sats = {
+            "frames": gsv_frames if gsv_fresh else None,
+            "gsa": gsa_frame if gsv_fresh else None,
+            "age_s": gsv_age,
+            "reason": ("最近 GSV 已过期（>10s）" if gsv_age is not None
+                       and not gsv_fresh else ""),
+        }
         return {
             "sdr": sdr,
             "gnss": gnss,
+            "gnss_sats": gnss_sats,
             "time": time_block,
             "site": site,
         }

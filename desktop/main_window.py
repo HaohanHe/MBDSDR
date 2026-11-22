@@ -15844,6 +15844,12 @@ class MainWindow(QMainWindow):
         try:
             gsv_frames = self._gnss.get_gsv_frames()
             gsa_frame = self._gnss.get_gsa()
+            # 同一帧 GSV/GSA 也发布给 AI 粗指向工具（10s 内有效，过期不读）。
+            try:
+                from mbdsdr_ai.runtime_sources import get_runtime_sources
+                get_runtime_sources().record_gsv(gsv_frames, gsa_frame)
+            except Exception:
+                pass
             self.sky_view.update_gnss_satellites(gsv_frames, gsa_frame)
             # 星座图页以 GNSS 为主视图：同一份 GSV/GSA 真值直接喂过去，
             # 不再只靠 SDR 的 I/Q 画散点（SDR 全向天线收不到卫星）。

@@ -32,10 +32,22 @@ SCOPE = ("GNSS 的方位/仰角是接收机用星历算出来的，不说明镜�
          "只有 SNR 随天线方向图变化。本工具给的是几度到几十度的粗指向，"
          "且要求天线（手机）随镜筒一起转，不能替代视觉解算。")
 
-_NO_INPUT_HINT = ("需要 NMEA GSV 帧（serial_gnss 的 get_gsv_frames() 输出，"
+_NO_INPUT_HINT = ("未给 frames 时会读本机最近一帧 GSV（10 秒内）；"
+                  "需要 NMEA GSV 帧（serial_gnss 的 get_gsv_frames() 输出，"
                   "含每颗卫星 elevation/azimuth/snr_db），或直接给 "
                   "satellites[{azimuth_deg, elevation_deg, snr_db_hz}]。"
                   "没有真实观测就不给角度。")
+
+
+def _live_gsv_frames():
+    """本机最近一帧 GSV（桌面轮询发布的运行时快照）；过期/没有则 None。"""
+    try:
+        from .runtime_sources import get_runtime_sources
+        block = (get_runtime_sources().snapshot() or {}).get("gnss_sats") or {}
+        frames = block.get("frames")
+        return frames if frames else None
+    except Exception:
+        return None
 
 
 def _satellites_from_args(args: Dict[str, Any]) -> Tuple[List[GnssSatellite], str]:
@@ -63,6 +75,10 @@ def _satellites_from_args(args: Dict[str, Any]) -> Tuple[List[GnssSatellite], st
 def sky_fit_from_args(args: Dict[str, Any]) -> Dict[str, Any]:
     """工具与测试共用的纯函数：参数字典 → 粗指向结果。"""
     sats, source = _satellites_from_args(args)
+    if not sats:
+        live = _live_gsv_frames()
+        if live:
+            sats, source = satellites_from_gsv_frames(live), "live_gsv"
     if not sats:
         return {"ok": False, "reason": "no_satellites",
                 "hint": _NO_INPUT_HINT, "scope": SCOPE}
@@ -104,8 +120,9 @@ def register_gnss_tools(agent) -> None:
         description=(
             "GNSS 卫星 SNR 粗指向：输入 NMEA GSV 帧（每颗卫星的仰角/方位/信噪比）"
             "与可选的手机 IMU 方位/俯仰，拟合出镜筒（天线）大概指向，并检查与 IMU"
-            "是否一致。卫星方位/仰角本身不携带指向信息，只有 SNR 携带；"
-            "数据没有分辨力时明确拒绝并给出两个基线数字，不编角度。"),
+            "是否一致。省略 frames/satellites 时会读本机最近一帧 GSV（10 秒内），"
+            "过期或无数据则明确拒绝，不编角度。卫星方位/仰角本身不携带指向信息，"
+            "只有 SNR 携带；数据没有分辨力时明确拒绝并给出两个基线数字。"),
         parameters={"type": "object", "properties": {
             "frames": {
                 "type": "array",

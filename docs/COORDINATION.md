@@ -2606,6 +2606,11 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `mbdsdr_ai/runtime_sources.py` | AI护栏线/gpsai1（快照补 satellites/hdop） | 2026-11-22 21:02 | 本笔 |
 | `mbdsdr_ai/sdr_tools.py` | AI护栏线/gpsai1（AI get_gps 走实时快照 + 天线告警） | 2026-11-22 21:02 | 本笔 |
 | `tests/test_sdr_get_gps_runtime.py` | AI护栏线/gpsai1（get_gps 实时数据测试 5 条） | 2026-11-22 21:02 | 本笔 |
+| `docs/COORDINATION.md` | AI护栏线/gsv1（§238 实时 GSV 粗指向正文） | 2026-11-22 21:08 | 本笔 |
+| `mbdsdr_ai/runtime_sources.py` | AI护栏线/gsv1（record_gsv + gnss_sats 快照（10s TTL）） | 2026-11-22 21:08 | 本笔 |
+| `mbdsdr_ai/gnss_tools.py` | AI护栏线/gsv1（粗指向工具读 live_gsv） | 2026-11-22 21:08 | 本笔 |
+| `desktop/main_window.py` | AI护栏线/gsv1（_poll_gnss 发布 GSV/GSA） | 2026-11-22 21:08 | 本笔 |
+| `tests/test_gnss_sky_live.py` | AI护栏线/gsv1（实时 GSV 粗指向测试 6 条） | 2026-11-22 21:08 | 本笔 |
 
 > 上表各行均由 `claim` 台账推导：owner 原文与 `acquired_at` 直接取自台账，
 > 目的优先用台账里的 `claim_reason`，没有就如实写「未声明」，不补编。时间列只是
@@ -11738,3 +11743,33 @@ GNGGA/GNRMC/GSV/ZDA）。COM6/7 是蓝牙串口，不是 GNSS。
 - 若运行在独立 MCP worker 进程且该进程没有 GNSS 发布者，工具会如实报
   「未连接」，不会跨进程伪造 fix。
 - 单次采样；未在手机/头显端验证该工具路径。
+
+## 238. GNSS 粗指向工具接本机实时 GSV（2026-11-22）
+
+**动机**：`gnss_sky_fit` 原本只能由模型把 GSV 帧当参数传进来，而模型拿不到
+串口——工具面存在，但端到端不可用。
+
+**改动**
+- `runtime_sources` 新增 `record_gsv(frames, gsa)` 与快照
+  `snapshot()["gnss_sats"]`（`frames`/`gsa`/`age_s`，**10 秒 TTL**；过期
+  返回 `frames=None` 并注明原因）。只读、不启线程、不开串口。
+- `desktop/main_window._poll_gnss` 在原有 1 s 轮询里把同一帧 GSV/GSA 发布
+  给运行时快照（异常吞掉，不影响天空图）。
+- `gnss_tools.sky_fit_from_args`：省略 `frames`/`satellites` 时读
+  `live_gsv`；仍按原口径拒绝无分辨力观测，不给假角度。
+- 新增 `tests/test_gnss_sky_live.py` 6 条（快照/TTL/映射/list 输入优先/
+  无输入拒绝）。
+
+**验证**
+- `pytest tests/test_gnss_sky_live.py tests/test_runtime_sources.py tests/test_gnss_sky_reference.py -q`
+  → **27 passed**；`tests/test_gnss_tools.py` → **7 passed**。
+- 真机（COM10 9600）：GSV talker `BD`/`GP`，`satellite_count=16`、
+  `satellites_with_snr=8`、`input_source=live_gsv`；拟合返回
+  `ok=False, reason=fit_below_horizon: el=-10.0°`——**如实拒绝**，没有输出
+  假指向角。
+
+**诚实边界**
+- 普通全向贴片的 SNR 不随指向变化，本轮真机拟合被拒绝；要得到可用粗指向
+  需定向天线，或改用 IMU/视觉。
+- 快照 TTL 10 s：串口断开后工具最多 10 s 内仍会读到上一帧，之后拒绝。
+- 未在手机/头显端验证；桌面 UI 未做人工视觉走查。
