@@ -2615,6 +2615,7 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `desktop/main_window.py` | AI护栏线/obssync1（站址写入口同步 agent.observer） | 2026-11-22 21:15 | 本笔 |
 | `desktop/ai_panel.py` | AI护栏线/obssync1（建 agent 后回灌站址） | 2026-11-22 21:15 | 本笔 |
 | `tests/test_desktop_observation_ui.py` | AI护栏线/obssync1（站址同步 + AI 读点测试 +2） | 2026-11-22 21:15 | 本笔 |
+| `docs/COORDINATION.md` | AI护栏线/spatial1（§240 头显离线包真机验证正文） | 2026-11-22 21:19 | 本笔 |
 
 > 上表各行均由 `claim` 台账推导：owner 原文与 `acquired_at` 直接取自台账，
 > 目的优先用台账里的 `claim_reason`，没有就如实写「未声明」，不补编。时间列只是
@@ -11806,3 +11807,32 @@ AI 仍在按建 agent 时的默认 (0,0) 计算——两套站址，且默认 (0
 - 清空站址后，AI 天空工具会报「缺站址」而不是自动回退 GNSS/配置；这与
   「未知就是未知」一致，但需要用户重新设置或等 GNSS 再定位。
 - 未在手机/头显端验证（手机端是独立的 OrientationService，不走这条链）。
+
+## 240. 头显离线包：真机 GNSS 站址 + 真实录制导出（2026-11-22）
+
+**动机**：`spatial/` 的 PICO 四窗数据只来自 bundle；此前没有一次
+「GNSS → 录制 → 导出 bundle」的真机端到端证据。
+
+**流程（真机）**
+1. `RealGNSSMonitor` 打开 COM10@9600，等到真实 fix（10 星）。
+2. `SDRController.connect("rtlsdr:7777…")` → `set_ground_station_from_gnss`
+   → 91.60 MHz 录 1.8 s（4,308,992 样本）。
+3. 档案 `rec_gnss.observation.json` 的 `site.source=gnss`，含 lat/lon/alt。
+4. `export_spatial_bundle.py`（48 帧 / 128 bins / HYG 2000 / WFM / 12h 过境）。
+
+**bundle 校验**（`mbdsdr.spatial/1`）
+- `site.source=gnss`，`time.source=system`。
+- `sky.stars=2000`（visible 958），`altaz_pm_applied=2000`、`missing=0`。
+- `sky.passes=12`。
+- `spectrum.frames=48 × 128` bins（真实 IQ 能量）。
+- `audio=[("demod:wfm", true)]`；`timeline=2`；`blockers=[]`。
+
+**Kotlin（PICO Spatial）**
+- JBR + Gradle 8.10.2，`gradlew :app:testDebugUnitTest --rerun-tasks --offline`
+  → **BUILD SUCCESSFUL**；15 个 test XML，**128 tests / 0 failures / 0 skipped**。
+
+**诚实边界**
+- bundle 的 `time.source=system`：录制时刻取系统钟；GNSS 只用于站址，未做
+  授时接线验证（两者同期但不等价）。
+- PICO 真机仍无：四窗实际显示、手势、空间音频未验证；频谱只读回放。
+- 真实坐标只在本机临时目录，未写入仓库。
