@@ -68,6 +68,24 @@ def _centroid_off_hz(pdb, center_bin, span_bins, bin_hz):
     return (lo + cen - center_bin) * bin_hz
 
 
+def _peak_off_hz(pdb, center_bin, expect_hz, bin_hz, half_hz=40e3):
+    """在「期望频偏 ±half_hz」内找最强 bin，返回相对中心的频偏（Hz）。
+
+    频轴平移判据只关心“同一个载波出现在期望位置”，不能用全窗质心：±600 kHz
+    内可能有更强的别的台。2026-11-22 实测 88.4012 MHz：目标载波在 **-397.9 kHz**
+    （正确），但 +505 kHz 另有强台，全窗质心被拉到 -268 kHz 误判 BAD。
+    """
+    import numpy as np
+    lo = int(round((expect_hz - half_hz) / bin_hz)) + center_bin
+    hi = int(round((expect_hz + half_hz) / bin_hz)) + center_bin
+    lo = max(0, lo)
+    hi = min(len(pdb) - 1, hi)
+    if hi <= lo:
+        return None
+    i = int(np.argmax(pdb[lo:hi + 1])) + lo
+    return (i - center_bin) * bin_hz
+
+
 def report(ring, name, status, evidence=None, notes=""):
     entry = {"ring": ring, "name": name, "status": status,
              "evidence": evidence or {}, "notes": notes}
@@ -121,8 +139,14 @@ def ring1_open_close(serial):
 
 
 # ---------------------------------------------------------------- 环 2
-def ring2_tune_gain(fm_ref_hz):
-    """调谐与增益：写回读一致、AGC/手动增益、频率精度估 ppm。"""
+def ring2_tune_gain(fm_ref_hz, candidates=None):
+    """调谐与增益：写回读一致、AGC/手动增益、频率精度估 ppm。
+
+    ppm 估算依赖「FM 台在 100 kHz 整频点」这个前提；单个最强峰可能是偏频台
+    （2026-11-22 实测：最强峰 88.9147 MHz 落在 88.9 网格外 14.7 kHz → 179.9 ppm，
+    判 FAIL）。因此对候选台逐个测，取 |ppm| 最小的作为本机精度估计，并保留
+    全部候选证据；没有候选合格仍判 FAIL，不放宽阈值。
+    """
     from rtlsdr import RtlSdr
     import numpy as np
 
@@ -151,27 +175,43 @@ def ring2_tune_gain(fm_ref_hz):
         ev["gain_write_readback_all_ok"] = gok
         s.set_gain(gains[len(gains) // 2])
 
-        # -- 频率精度：最强台峰偏 vs 最近 100 kHz 频点 -> ppm --
-        s.set_center_freq(fm_ref_hz)
-        time.sleep(0.3)
-        x = s.read_samples(262144)
-        x = np.asarray(x) - np.mean(x)
-        N = 65536
-        sp = np.fft.fftshift(np.fft.fft(x[:N] * np.hanning(N)))
-        pdb = 20 * np.log10(np.abs(sp) + 1e-12)
-        c = N // 2
-        pdb[c - 4:c + 5] = np.median(pdb)
-        off_hz = _centroid_off_hz(pdb, c, int(300e3 / (2.4e6 / N)), 2.4e6 / N) or 0.0
-        grid = round(fm_ref_hz / 1e5) * 1e5
-        true_off = (fm_ref_hz + off_hz) - grid
-        ppm = true_off / grid * 1e6
-        ev["fm_peak_offset_hz"] = round(off_hz, 1)
-        ev["nearest_100k_grid"] = grid
-        ev["ppm_estimate"] = round(ppm, 1)
-        status = "PASS" if (ok and gok and abs(ppm) <= 150) else "FAIL"
+        # -- 频率精度：候选台峰偏 vs 最近 100 kHz 频点 -> ppm，取最小 |ppm| --
+        order = [fm_ref_hz]
+        for f in (candidates or []):
+            if all(abs(f - g) > 1000 for g in order):
+                order.append(f)
+        checks = []
+        for freq_hz in order:
+            s.set_center_freq(freq_hz)
+            time.sleep(0.3)
+            x = s.read_samples(262144)
+            x = np.asarray(x) - np.mean(x)
+            N = 65536
+            sp = np.fft.fftshift(np.fft.fft(x[:N] * np.hanning(N)))
+            pdb = 20 * np.log10(np.abs(sp) + 1e-12)
+            c = N // 2
+            pdb[c - 4:c + 5] = np.median(pdb)
+            off_hz = _centroid_off_hz(
+                pdb, c, int(300e3 / (2.4e6 / N)), 2.4e6 / N
+            ) or 0.0
+            grid = round(freq_hz / 1e5) * 1e5
+            true_off = (freq_hz + off_hz) - grid
+            checks.append({
+                "freq_hz": round(float(freq_hz)),
+                "offset_hz": round(float(off_hz), 1),
+                "nearest_100k_grid": grid,
+                "ppm": round(float(true_off / grid * 1e6), 1),
+            })
+        best = min(checks, key=lambda d: abs(d["ppm"]))
+        ev["ppm_candidates"] = checks
+        ev["best_candidate_hz"] = best["freq_hz"]
+        ev["fm_peak_offset_hz"] = best["offset_hz"]
+        ev["nearest_100k_grid"] = best["nearest_100k_grid"]
+        ev["ppm_estimate"] = best["ppm"]
+        status = "PASS" if (ok and gok and abs(best["ppm"]) <= 150) else "FAIL"
         return report(2, "调谐与增益", status, ev,
                       "ppm 估算以 FM 台在 100 kHz 整频点为前提（中国 FM 频点规划），"
-                      "仅供精度参考")
+                      "取候选台中 |ppm| 最小者作为本机精度估计；仅供精度参考")
     finally:
         s.close()
 
@@ -202,12 +242,12 @@ def ring3_spectrum(outdir, fm_ref_hz):
             pdb = 20 * np.log10(np.abs(sp) + 1e-12)
             c = N // 2
             pdb[c - 4:c + 5] = np.median(pdb)
-            span = int(600e3 / (2.4e6 / N))
-            off = _centroid_off_hz(pdb, c, span, 2.4e6 / N)
-            good = off is not None and abs(off - expect) <= 40e3
+            # 只盯「期望位置附近」的载波，不用全窗质心（会被更强的邻台带偏）。
+            off = _peak_off_hz(pdb, c, expect, 2.4e6 / N, half_hz=40e3)
+            good = off is not None and abs(off - expect) <= 25e3
             axis_ok = axis_ok and good
             ev[f"axis_tune_{tune/1e6:.4f}"] = (
-                f"质心峰偏 {(off or 0)/1e3:+.1f}kHz 期望 {expect/1e3:+.0f}kHz "
+                f"期望位峰偏 {(off or 0)/1e3:+.1f}kHz 期望 {expect/1e3:+.0f}kHz "
                 f"-> {'OK' if good else 'BAD'}")
     finally:
         s.close()
@@ -682,7 +722,8 @@ def main():
     if want(1):
         run_ring(1, "设备枚举/打开/释放", ring1_open_close, serial)
     if want(2):
-        run_ring(2, "调谐与增益", ring2_tune_gain, fm_ref)
+        run_ring(2, "调谐与增益", ring2_tune_gain, fm_ref,
+                 [f for f, _ in fm_candidates])
     if want(3):
         run_ring(3, "频谱正确性", ring3_spectrum, outdir, fm_ref)
     if want(4):

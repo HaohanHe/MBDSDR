@@ -46,6 +46,33 @@ def test_noise_without_pilot_is_rejected():
     assert pm["pilot_ok"] is False
 
 
+def test_axis_peak_check_ignores_stronger_neighbour_station():
+    """频轴判据只盯期望位置：目标 -397.9 kHz，邻台 +505 kHz 更强也不能带偏。
+
+    旧口径（±600 kHz 质心）在这组谱上会落到 -350 kHz 以内，正是 2026-11-22
+    真机 R3 误判 BAD（实测 -268 kHz）的成因。
+    """
+    n = 65536
+    fs = 2_400_000.0
+    bin_hz = fs / n
+    c = n // 2
+    pdb = np.full(n, -60.0)
+
+    def put(off_hz, db, half_bins=6):
+        i = c + int(round(off_hz / bin_hz))
+        pdb[i - half_bins:i + half_bins + 1] = db
+
+    put(-397_900.0, 34.0)
+    put(+505_000.0, 35.0)
+
+    off = hw._peak_off_hz(pdb, c, -400e3, bin_hz, half_hz=40e3)
+    assert abs(off + 400_000) <= 2_500, off
+
+    span = int(600e3 / bin_hz)
+    cen = hw._centroid_off_hz(pdb, c, span, bin_hz)
+    assert cen > -350_000, f"回归对照：旧质心应被邻台带偏，实际 {cen}"
+
+
 def test_rank_peaks_dedups_close_peaks_and_keeps_prominence_order():
     """同一台的多条谱线只留一条；候选按峰底比降序，供 R4 逐个验导频。"""
     peaks = [
