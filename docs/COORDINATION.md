@@ -2611,6 +2611,10 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `mbdsdr_ai/gnss_tools.py` | AI护栏线/gsv1（粗指向工具读 live_gsv） | 2026-11-22 21:08 | 本笔 |
 | `desktop/main_window.py` | AI护栏线/gsv1（_poll_gnss 发布 GSV/GSA） | 2026-11-22 21:08 | 本笔 |
 | `tests/test_gnss_sky_live.py` | AI护栏线/gsv1（实时 GSV 粗指向测试 6 条） | 2026-11-22 21:08 | 本笔 |
+| `docs/COORDINATION.md` | AI护栏线/obssync1（§239 站址同步正文） | 2026-11-22 21:15 | 本笔 |
+| `desktop/main_window.py` | AI护栏线/obssync1（站址写入口同步 agent.observer） | 2026-11-22 21:15 | 本笔 |
+| `desktop/ai_panel.py` | AI护栏线/obssync1（建 agent 后回灌站址） | 2026-11-22 21:15 | 本笔 |
+| `tests/test_desktop_observation_ui.py` | AI护栏线/obssync1（站址同步 + AI 读点测试 +2） | 2026-11-22 21:15 | 本笔 |
 
 > 上表各行均由 `claim` 台账推导：owner 原文与 `acquired_at` 直接取自台账，
 > 目的优先用台账里的 `claim_reason`，没有就如实写「未声明」，不补编。时间列只是
@@ -11773,3 +11777,32 @@ GNGGA/GNRMC/GSV/ZDA）。COM6/7 是蓝牙串口，不是 GNSS。
   需定向天线，或改用 IMU/视觉。
 - 快照 TTL 10 s：串口断开后工具最多 10 s 内仍会读到上一帧，之后拒绝。
 - 未在手机/头显端验证；桌面 UI 未做人工视觉走查。
+
+## 239. 主窗站址同步到 AI 的 Observer（2026-11-22）
+
+**根因**：`main_window.set_observer_site` 是站址唯一写入口，但只同步
+`sky_view` / `SatelliteTracker` / 各面板，**没有同步 `agent.observer`**。
+AI 的 `sky_*` 工具按 `agent.observer` 算方位/过境，于是界面/GNSS 站址已更新，
+AI 仍在按建 agent 时的默认 (0,0) 计算——两套站址，且默认 (0,0) 还会被误读
+成几内亚湾的真实观测点。
+
+**改动**
+- `main_window`：新增 `_observer_alt_m`；`_apply_observer_location` 在有站址
+  与清空两条出口都调用 `_sync_observer_to_agent`；新增该方法与公开的
+  `sync_agent_observer()`。清空时把 AI Observer 坐标写 `None`，让天空工具
+  如实报「缺站址」，不填 (0,0) 假坐标，也不留旧点。
+- `ai_panel.init_agent`：两处 `_create_agent` 后调用
+  `_sync_observer_from_host()`（经 `self.window()` 回调主窗），覆盖
+  「站址先到、agent 后建」的启动顺序。
+- `tests/test_desktop_observation_ui.py` +2：写入口同步（含直接断言
+  `sky_tools._site_from_observer` 看到同步值）；建 agent 后回灌。
+
+**验证**
+- `pytest tests/test_desktop_observation_ui.py -q` → **31 passed**（含 2 新增）。
+- 只同步坐标字段；气象字段仍按实测口径，不因位置同步被填默认值。
+
+**诚实边界**
+- 未在真机 UI 点击验证（Qt offscreen 测试）。
+- 清空站址后，AI 天空工具会报「缺站址」而不是自动回退 GNSS/配置；这与
+  「未知就是未知」一致，但需要用户重新设置或等 GNSS 再定位。
+- 未在手机/头显端验证（手机端是独立的 OrientationService，不走这条链）。

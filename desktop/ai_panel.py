@@ -901,6 +901,7 @@ class AIPanel(QWidget):
         # 重新初始化 agent
         config = AgentConfig(api_key=api_key, base_url=base_url, model=model)
         self.agent = self._create_agent(config)
+        self._sync_observer_from_host()
         self._apply_pending_mcp_tools()
         self._update_ai_status()
         if saved:
@@ -936,6 +937,19 @@ class AIPanel(QWidget):
             session = DesktopSdrSession(window=lambda: self.window())
             self._sdr_session_obj = session
         return session
+
+    def _sync_observer_from_host(self) -> None:
+        """建好 agent 后把主窗当前站址回灌给它的 Observer。
+
+        主窗站址可能早于 AI 面板初始化；只靠站址写入时同步会漏掉这种顺序。
+        """
+        host = self.window()
+        sync = getattr(host, "sync_agent_observer", None)
+        if callable(sync):
+            try:
+                sync()
+            except Exception:
+                pass
 
     def init_agent(self, api_key: str = "", base_url: str = "", model: str = ""):
         """初始化 AI Agent（由外部调用）。
@@ -985,6 +999,7 @@ class AIPanel(QWidget):
 
         config = AgentConfig(api_key=final_api_key, base_url=final_base_url, model=final_model)
         self.agent = self._create_agent(config)
+        self._sync_observer_from_host()
         self._apply_pending_mcp_tools()
         self._update_ai_status()
         if keyless_local and not final_api_key:

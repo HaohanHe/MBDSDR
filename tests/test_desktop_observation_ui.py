@@ -490,3 +490,47 @@ def test_failed_segment_metadata_rebuild_never_enables_guessed_replay(window, ru
         panel.record_product_combo.findData(str(second.with_suffix(".observation.json"))))
     panel.record_review_button.click()
     assert calls == ["tx", str(second)]
+
+
+def test_set_observer_site_syncs_ai_agent_observer(window):
+    """站址唯一写入口必须同步给 AI 的 Observer（否则天空工具仍按 (0,0) 算）。"""
+    from mbdsdr_ai.astronomy import Observer
+
+    old = getattr(window.ai_panel, "agent", None)
+    agent = SimpleNamespace(observer=Observer())
+    window.ai_panel.agent = agent
+    try:
+        assert window.set_observer_site(43.5, 125.5, 200.0,
+                                        source="manual", persist=False)
+        assert agent.observer.latitude_deg == pytest.approx(43.5)
+        assert agent.observer.longitude_deg == pytest.approx(125.5)
+        assert agent.observer.height_m == pytest.approx(200.0)
+        # AI 天空工具的实际读点就是这里，必须直接看到同步后的站址
+        from mbdsdr_ai.sky_tools import _site_from_observer
+        site = _site_from_observer(agent)
+        assert site["lat_deg"] == pytest.approx(43.5)
+        assert site["lon_deg"] == pytest.approx(125.5)
+        assert site["site_warning"] == ""
+        # 清空站址：不把 agent 留在旧点，也不填 (0,0) 假坐标
+        assert window.set_observer_site(None, None, persist=False)
+        assert agent.observer.latitude_deg is None
+        assert agent.observer.longitude_deg is None
+    finally:
+        window.ai_panel.agent = old
+
+
+def test_sync_agent_observer_after_agent_created(window):
+    """启动顺序反了（站址先到、agent 后建）也要回灌。"""
+    from mbdsdr_ai.astronomy import Observer
+
+    old = getattr(window.ai_panel, "agent", None)
+    window.set_observer_site(10.0, 20.0, 30.0, source="manual", persist=False)
+    agent = SimpleNamespace(observer=Observer())
+    window.ai_panel.agent = agent
+    try:
+        window.sync_agent_observer()
+        assert agent.observer.latitude_deg == pytest.approx(10.0)
+        assert agent.observer.longitude_deg == pytest.approx(20.0)
+        assert agent.observer.height_m == pytest.approx(30.0)
+    finally:
+        window.ai_panel.agent = old

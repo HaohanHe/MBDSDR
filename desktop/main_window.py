@@ -1091,6 +1091,7 @@ class MainWindow(QMainWindow):
         # 观测站坐标：默认 None 表示“未配置观测站位置”（不再硬编码示例坐标）。
         self._observer_lat: Optional[float] = None
         self._observer_lon: Optional[float] = None
+        self._observer_alt_m: Optional[float] = None
         # 站址来源（决定它会不会被 GNSS 丢 fix 抹掉）：
         #   "config" = 用户手填/配置文件写死的静态事实 —— 永不因 GNSS 失效清空；
         #   "gnss"   = 由 GNSS 实时 fix 自动写入 —— 丢 fix 时收回，回到未知态。
@@ -14729,6 +14730,7 @@ class MainWindow(QMainWindow):
 
         self._observer_lat = new_lat
         self._observer_lon = new_lon
+        self._observer_alt_m = float(alt_m or 0.0) if has else None
         self._observer_source = source if has else None
         if has:
             self._observer_from_gnss = (source == "gnss")
@@ -14802,6 +14804,7 @@ class MainWindow(QMainWindow):
             # （不写 _observer_lat/lon，所以不算"已定位"）。
             if self.sky_view.get_site_note():
                 self._push_site_to_panels(None, None)
+                self._sync_observer_to_agent(None, None)
                 return
             # 天空图站址若当前是 GNSS 实时注入的，由 _poll_gnss 按 fix 有无
             # 单独收口；这里再清一次会把刚拿到的定位打回空状态（两条写路径
@@ -14810,6 +14813,7 @@ class MainWindow(QMainWindow):
                 self.sky_view.set_observer(None, None)
                 self.sky_view.set_data_source("none")
             self._push_site_to_panels(None, None)
+            self._sync_observer_to_agent(None, None)
             return
 
         if self.sat_tracker is None:
@@ -14840,6 +14844,32 @@ class MainWindow(QMainWindow):
             except Exception:
                 pass
         self._push_site_to_panels(lat, lon)
+        self._sync_observer_to_agent(lat, lon, self._observer_alt_m or 0.0)
+
+    def _sync_observer_to_agent(self, lat, lon, alt_m: float = 0.0) -> None:
+        """把主窗唯一站址同步给 AI agent 的 ``Observer``。
+
+        天空工具（``sky_*``）按 ``agent.observer`` 算方位/过境；不同步的话，
+        界面/GNSS 站址已经更新，AI 仍在按建 agent 时的默认 (0,0) 算。
+        清空站址时写 ``None``，让天空工具如实报「缺站址」，不按旧点算。
+        只动坐标字段——气象字段是实测口径，不在这里填默认值。
+        """
+        panel = getattr(self, "ai_panel", None)
+        obs = getattr(getattr(panel, "agent", None), "observer", None)
+        if obs is None:
+            return
+        try:
+            obs.latitude_deg = None if lat is None else float(lat)
+            obs.longitude_deg = None if lon is None else float(lon)
+            obs.height_m = 0.0 if lat is None else float(alt_m or 0.0)
+        except (AttributeError, TypeError, ValueError):
+            return
+
+    def sync_agent_observer(self) -> None:
+        """AI 面板建好 agent 后回灌当前站址（启动顺序可能反）。"""
+        self._sync_observer_to_agent(
+            self._observer_lat, self._observer_lon,
+            self._observer_alt_m or 0.0)
 
     # ========================================================================
     # 卫星闭环自动跟踪（过境预测 -> 实时 az/el/多普勒 -> 自动调谐 SDR）
