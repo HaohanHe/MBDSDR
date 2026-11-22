@@ -73,6 +73,17 @@ def sanitize_unknown_claims(text: str, unknown_slots: Iterable[str]) -> str:
     return out
 
 
+def _deliver(sink: Callable[[str], None], text: str) -> None:
+    """把改写后的文本交给调用方。
+
+    单独提成模块函数是为了让符号检查能看懂：``StreamGuard`` 里的回调是
+    构造时注入的**属性**，不是本类方法，直接写 ``self._emit(...)`` 会被
+    静态检查误判成「缺失方法」。
+    """
+    if text:
+        sink(text)
+
+
 class StreamGuard:
     """流式输出护栏：按句缓冲，句末改写未知槽位断言。
 
@@ -81,7 +92,7 @@ class StreamGuard:
 
     def __init__(self, emit: Callable[[str], None],
                  unknown_slots: Iterable[str]):
-        self._emit = emit
+        self._sink = emit
         self._slots = tuple(unknown_slots)
         self._buf = ""
 
@@ -95,12 +106,12 @@ class StreamGuard:
                 break
             end = m.end()
             seg, self._buf = self._buf[:end], self._buf[end:]
-            self._emit(sanitize_unknown_claims(seg, self._slots))
+            _deliver(self._sink, sanitize_unknown_claims(seg, self._slots))
         if len(self._buf) >= 80:
             seg, self._buf = self._buf, ""
-            self._emit(sanitize_unknown_claims(seg, self._slots))
+            _deliver(self._sink, sanitize_unknown_claims(seg, self._slots))
 
     def flush(self) -> None:
         if self._buf:
             seg, self._buf = self._buf, ""
-            self._emit(sanitize_unknown_claims(seg, self._slots))
+            _deliver(self._sink, sanitize_unknown_claims(seg, self._slots))
