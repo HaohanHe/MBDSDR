@@ -193,6 +193,8 @@ def _as_mapping(obj: Any) -> Dict[str, Any]:
         "valid": ("valid",),
         "has_pps": ("has_pps", "pps"),
         "antenna": ("antenna",),
+        "satellites": ("satellites", "sats", "numsats"),
+        "hdop": ("hdop",),
     }
     for key, names in aliases.items():
         for name in names:
@@ -492,6 +494,8 @@ class RuntimeSources:
             "accuracy_m": None,
             "timestamp": None,
             "antenna": "unknown",
+            "satellites": None,
+            "hdop": None,
             "reason": "",
         }
         if obj is None:
@@ -521,6 +525,13 @@ class RuntimeSources:
         info["accuracy_m"] = _finite(data.get("accuracy_m"))
         info["timestamp"] = _finite(data.get("timestamp"))
         info["antenna"] = _normalize_antenna(data.get("antenna"))
+        info["hdop"] = _finite(data.get("hdop"))
+        try:
+            info["satellites"] = (int(data["satellites"])
+                                  if data.get("satellites") is not None
+                                  else None)
+        except (TypeError, ValueError):
+            info["satellites"] = None
 
         if not info["connected"]:
             info["reason"] = "GNSS 未连接（时间回退系统时钟，站址回退手动/配置）"
@@ -545,6 +556,8 @@ class RuntimeSources:
             "accuracy_m": rec.get("accuracy_m") if valid else None,
             "timestamp": rec.get("timestamp"),
             "antenna": _normalize_antenna(rec.get("antenna")),
+            "satellites": rec.get("satellites") if valid else None,
+            "hdop": rec.get("hdop") if valid else None,
             "reason": "",
         }
         if valid:
@@ -658,6 +671,8 @@ class RuntimeSources:
             "lat_deg": gnss_info["lat_deg"],
             "lon_deg": gnss_info["lon_deg"],
             "antenna": gnss_info["antenna"],
+            "satellites": gnss_info["satellites"],
+            "hdop": gnss_info["hdop"],
             "last_update_utc": _iso_utc(gnss_info["timestamp"]),
             "reason": reason,
         }
@@ -793,6 +808,12 @@ class RuntimeSources:
         acc = _finite(data.get("accuracy_m"))
         utc = _fix_datetime(data)
         ts = _finite(data.get("timestamp"))
+        try:
+            sats = (int(data["satellites"])
+                    if data.get("satellites") is not None else None)
+        except (KeyError, TypeError, ValueError):
+            sats = None
+        hdop = _finite(data.get("hdop"))
         valid = source in _FIX_SOURCES and lat is not None and lon is not None
 
         with self._lock:
@@ -812,6 +833,8 @@ class RuntimeSources:
                 "accuracy_m": acc if valid else None,
                 "timestamp": ts,
                 "antenna": _normalize_antenna(data.get("antenna")),
+                "satellites": sats if valid else None,
+                "hdop": hdop if valid else None,
             }
 
         engine = self._resolve_engine()

@@ -2602,6 +2602,10 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `docs/COORDINATION.md` | AI护栏线/smoke1（§236 探针软观察正文） | 2026-11-22 20:58 | 本笔 |
 | `scripts/ai_guidance_smoke.py` | AI护栏线/smoke1（UI 幻觉软观察词表） | 2026-11-22 20:58 | 本笔 |
 | `tests/test_agent_guidance_policy.py` | AI护栏线/smoke1（探针 UI 幻觉观察测试 +2） | 2026-11-22 20:58 | 本笔 |
+| `docs/COORDINATION.md` | AI护栏线/gpsai1（§237 AI get_gps 实时化正文） | 2026-11-22 21:02 | 本笔 |
+| `mbdsdr_ai/runtime_sources.py` | AI护栏线/gpsai1（快照补 satellites/hdop） | 2026-11-22 21:02 | 本笔 |
+| `mbdsdr_ai/sdr_tools.py` | AI护栏线/gpsai1（AI get_gps 走实时快照 + 天线告警） | 2026-11-22 21:02 | 本笔 |
+| `tests/test_sdr_get_gps_runtime.py` | AI护栏线/gpsai1（get_gps 实时数据测试 5 条） | 2026-11-22 21:02 | 本笔 |
 
 > 上表各行均由 `claim` 台账推导：owner 原文与 `acquired_at` 直接取自台账，
 > 目的优先用台账里的 `claim_reason`，没有就如实写「未声明」，不补编。时间列只是
@@ -11701,3 +11705,36 @@ GNGGA/GNRMC/GSV/ZDA）。COM6/7 是蓝牙串口，不是 GNSS。
 **诚实边界**
 - 软观察只覆盖词表，模型换说法仍可能漏；不替代 `answer_guard` 的输出护栏。
 - 命中只提示人复核，不是自动判定为幻觉（避免把真实“拖动窗口”等场景误杀）。
+
+## 237. AI 侧 GPS 工具接实时 GNSS（2026-11-22）
+
+**动机**：桌面每秒把真实 GNSS fix 发布到 `runtime_sources`，但
+`sdr_get_gps` 旧实现只查 `mgr.gnss.status()`，而 `SDRBackendManager`
+根本没有 `gnss` 属性——AI 永远读不到实时定位，也看不到天线告警。
+
+**改动**
+- `runtime_sources.record_fix` 保留 `satellites` / `hdop`（有效 fix 才写），
+  `_read_gnss` / `_read_fix_record` / `snapshot()["gnss"]` 同步投影；
+  `_as_mapping` 增加 `sats/numsats` 与 `hdop` 别名。
+- `sdr_tools._get_gps`：**快照优先**（`get_runtime_sources().snapshot()
+  ["gnss"]`），legacy `mgr.gnss.status()` 兜底；无数据如实报「未连接」
+  「搜索中」；有效 fix 输出纬度/经度、卫星数、HDOP，并在 `open/short` 时
+  追加「天线开路/短路（建议检查天线/馈线）」。
+- 新增 `tests/test_sdr_get_gps_runtime.py` 5 条（真实 fix + 天线告警、
+  已连接未定位、未连接、legacy 兜底、record_fix 保留 sats/hdop）。
+
+**验证**
+- `pytest tests/test_sdr_get_gps_runtime.py tests/test_runtime_sources.py tests/test_gnss_antenna_status.py tests/test_gnss_poll_publish.py tests/test_system_diag.py -q`
+  → **29 passed**。
+- 真机（COM10 9600）走真实工具路径：`_get_gps(None)` 输出
+  「GPS 定位: <坐标已脱敏>　卫星 9 颗　HDOP 1.3　天线开路（建议检查天线/馈线）」。
+- 同一时段 `system_diag.py --timeout 8 --json`：SDR `verdict=ok`（RTL-SDR #0
+  FC0012，读到 256 样本，平均功率 -15.4 dBFS），GNSS `verdict=ok`
+  （自动探测命中 COM10，9 星，HDOP 1.3），聚合 `verdict=ok`、退出码 0。
+
+**诚实边界**
+- 天线开路是物理告警（模块仍能定位），工具只负责如实转达，需用户检查
+  天线/馈线。
+- 若运行在独立 MCP worker 进程且该进程没有 GNSS 发布者，工具会如实报
+  「未连接」，不会跨进程伪造 fix。
+- 单次采样；未在手机/头显端验证该工具路径。

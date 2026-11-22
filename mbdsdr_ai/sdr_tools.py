@@ -5127,23 +5127,60 @@ def _satellite_doppler_track(mgr, args):
     return ToolResult(success=True, content="\n".join(lines))
 
 
+def _antenna_note(status) -> str:
+    return {
+        "open": "天线开路（建议检查天线/馈线）",
+        "short": "天线短路（建议检查天线/馈线）",
+    }.get(str(status or "").strip().lower(), "")
+
+
 def _get_gps(mgr):
-    # 真实数据源：GNSS monitor（串口 NMEA）。无连接/无 fix 就如实报，
-    # 绝不编造经纬度/星数冒充已定位。
-    gnss = getattr(mgr, "gnss", None)
-    if gnss is None:
-        return "GPS 定位: 未连接（请在工具菜单连接 GNSS 串口）"
+    # 首选进程级运行时快照：桌面每秒把真实 GNSS fix 发布到
+    # ``runtime_sources``，卫星数/HDOP/天线告警同源；没有快照时才退回注入的
+    # ``mgr.gnss``。两条路径都没有就如实报未连接，绝不编造经纬度。
+    data = None
     try:
-        d = gnss.status()
-    except (OSError, RuntimeError, ValueError, TypeError, AttributeError) as e:
-        logger.warning("GNSS 状态读取失败: %s", e)
-        return f"GPS 定位: 读取失败（{e}）；GNSS 串口可能已断开"
-    if not d or not d.get("fix"):
-        return "GPS 定位: 搜索中（未定位，无卫星 fix）"
-    return (
-        f"GPS 定位: {d.get('lat', '?'):.5f}, {d.get('lon', '?'):.5f}　"
-        f"卫星 {d.get('numsats', '?')} 颗　HDOP {d.get('hdop', '?')}"
-    )
+        from .runtime_sources import get_runtime_sources
+        data = (get_runtime_sources().snapshot() or {}).get("gnss")
+    except Exception:
+        data = None
+    if not data or (not data.get("connected") and not data.get("fix")):
+        gnss = getattr(mgr, "gnss", None)
+        if gnss is None:
+            return "GPS 定位: 未连接（未检测到 GNSS 串口）"
+        try:
+            d = gnss.status()
+        except (OSError, RuntimeError, ValueError, TypeError, AttributeError) as e:
+            logger.warning("GNSS 状态读取失败: %s", e)
+            return f"GPS 定位: 读取失败（{e}）；GNSS 串口可能已断开"
+        if not d or not d.get("fix"):
+            return "GPS 定位: 搜索中（未定位，无卫星 fix）"
+        data = {
+            "fix": True,
+            "lat_deg": d.get("lat"),
+            "lon_deg": d.get("lon"),
+            "satellites": d.get("numsats"),
+            "hdop": d.get("hdop"),
+            "antenna": "unknown",
+        }
+    if not data.get("fix"):
+        return ("GPS 定位: 搜索中（已连接，等待定位）"
+                if data.get("connected")
+                else "GPS 定位: 未连接（未检测到 GNSS 串口）")
+    lat, lon = data.get("lat_deg"), data.get("lon_deg")
+    if lat is None or lon is None:
+        return "GPS 定位: 搜索中（定位数据不完整）"
+    sats = data.get("satellites")
+    hdop = data.get("hdop")
+    parts = [
+        f"GPS 定位: {lat:.5f}, {lon:.5f}",
+        f"卫星 {sats if sats is not None else '?'} 颗",
+        f"HDOP {hdop if hdop is not None else '?'}",
+    ]
+    note = _antenna_note(data.get("antenna"))
+    if note:
+        parts.append(note)
+    return "　".join(parts)
 
 
 def _get_imu(mgr):
