@@ -94,10 +94,105 @@ def sanitize_unverified_ui_claims(text: str) -> str:
     return out
 
 
+def _norm_label(label: str) -> str:
+    """去掉标签内空白，便于比对「左/右 5°」与「左/右5°」。"""
+    return re.sub(r"\s+", "", label)
+
+
+#: 已按 mobile 代码核实的「控件标签 → 允许方位」白名单。
+#: 只写代码里真的摆在那里的组合；同一标签的其它方位仍按未核实处理，
+#: 因此这里不会变成需要无限增长的短语黑名单。
+#:
+#: 来源：
+#: * ``mobile/lib/pages/pointing_page.dart`` 636-673 ``_AlignControls``：
+#:   「左 5°」「右 5°」「复位」是 ``Positioned(bottom: ...)`` 里的底部按钮行；
+#: * 同文件 269-278 AppBar actions 的「视场 N°」按钮、516-583 ``_StatusRow``
+#:   （``Positioned(top: ...)``）的「方位/仰角/视场」状态 chips 在顶部；
+#: * ``mobile/lib/pages/sky_page.dart`` 540-544：AppBar actions 的
+#:   「指天视图」入口（右上）。
+#:
+#: 注意：「准星下方」「顶部状态」这类真实关系没有方位词绑定，不经过本规则。
+_VERIFIED_UI_POSITIONS: dict[str, frozenset[str]] = {
+    "左 5°": frozenset({"底部"}),
+    "右 5°": frozenset({"底部"}),
+    "左/右 5°": frozenset({"底部"}),
+    "左 5°/右 5°": frozenset({"底部"}),
+    "复位": frozenset({"底部"}),
+    "视场": frozenset({"顶部", "右上角"}),
+    "指天视图": frozenset({"顶部", "右上角"}),
+}
+_VERIFIED_UI_POSITIONS_NORM = {
+    _norm_label(label): allowed
+    for label, allowed in _VERIFIED_UI_POSITIONS.items()
+}
+
+#: 「视场 60°」「视场 25°」等是真实按钮/状态标签（视场值随档位变）。
+_VERIFIED_FOV_LABEL = re.compile(r"^视场\d+(?:\.\d+)?°$")
+
+_POSITION_WORDS = ("左上角", "右上角", "左下角", "右下角",
+                   "顶部", "底部", "左侧", "右侧", "中央")
+_UI_SCOPE = r"(?:屏幕|页面|界面|画面)?"
+_POSITION_TOKEN = _UI_SCOPE + r"(?P<pos>" + "|".join(_POSITION_WORDS) + r")"
+_LABEL_SPAN = r"(?P<label>「[^」\n]{1,24}」|“[^”\n]{1,24}”)"
+_UI_SCOPE_STRIP = re.compile(r"^(?:屏幕|页面|界面|画面)?")
+
+#: 「屏幕右下角「左/右 5°」按钮」：位置在标签前。
+_POSITION_BEFORE_LABEL = re.compile(
+    _POSITION_TOKEN + r"(?:的|有|是|为|处|上|中|里)?\s*" + _LABEL_SPAN)
+#: 「「复位」按钮位于屏幕右下角」：位置在标签后。
+_POSITION_AFTER_LABEL = re.compile(
+    _LABEL_SPAN + r"(?P<ctl>按钮|控件|入口|开关)?"
+    r"(?:就|则)?(?:位于|在|放在|处于|显示在|显示于)\s*"
+    + _POSITION_TOKEN)
+
+
+def _verified_positions(label: str) -> frozenset[str] | None:
+    """返回该标签允许的方位；空标签/未核实标签返回 None。"""
+    key = _norm_label(label)
+    allowed = _VERIFIED_UI_POSITIONS_NORM.get(key)
+    if allowed is not None:
+        return allowed
+    if _VERIFIED_FOV_LABEL.fullmatch(key):
+        return _VERIFIED_UI_POSITIONS["视场"]
+    return None
+
+
+def _neutralize_ui_position(match: re.Match[str]) -> str:
+    """只去掉未核实的位置断言；已核实标签和真实位置原样保留。"""
+    span = match.group("label")
+    label = span[1:-1]
+    allowed = _verified_positions(label)
+    ctl = match.groupdict().get("ctl") or ""
+    token = _UI_SCOPE_STRIP.sub("", match.group("pos") or "")
+    if allowed is not None and token in allowed:
+        return match.group(0)
+    if allowed is not None:
+        return span + ctl
+    if ctl == "控件":          # 「对应控件控件」读起来像 bug
+        ctl = ""
+    return "对应控件" + ctl
+
+
+def sanitize_unverified_ui_positions(text: str) -> str:
+    """中性化「未核实位置 + UI 标签」的绑定，保留已核实标签。
+
+    实测 8B 会把真实存在的底部按钮说成「屏幕右下角「左/右 5°」按钮」。
+    本规则只处理同一分句内、位置词与「…」/“…”标签紧邻的断言：
+    位置已在白名单中则原样保留；位置未核实则只删位置；标签本身也不在
+    已核实集合时换成「对应控件」。编号清单与无位置断言的文本不受影响。
+    幂等：改写后不再有位置词与标签紧邻。
+    """
+    if not text:
+        return text
+    out = _POSITION_BEFORE_LABEL.sub(_neutralize_ui_position, text)
+    return _POSITION_AFTER_LABEL.sub(_neutralize_ui_position, out)
+
+
 def sanitize_answer(text: str, unknown_slots: Iterable[str]) -> str:
-    """对模型回答统一施加的诚实护栏（unknown 断言 + 未核实 UI 细节）。"""
-    return sanitize_unverified_ui_claims(
-        sanitize_unknown_claims(text, unknown_slots))
+    """对模型回答统一施加的诚实护栏（unknown 断言 + 未核实 UI 事实）。"""
+    return sanitize_unverified_ui_positions(
+        sanitize_unverified_ui_claims(
+            sanitize_unknown_claims(text, unknown_slots)))
 
 
 def _deliver(sink: Callable[[str], None], text: str) -> None:

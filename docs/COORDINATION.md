@@ -2586,6 +2586,9 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `mobile/lib/pages/sky_page.dart` | 手机收星指向线/20261122（currentPointingTarget + 捕获后跳指天视图） | 2026-11-22 20:17 | 本笔 |
 | `mobile/test/sky_page_test.dart` | 手机收星指向线/20261122（跳转与 az/el 不可算回退 2 条） | 2026-11-22 20:17 | 本笔 |
 | `docs/COORDINATION.md` | 手机收星指向线/20261122（§231 子 agent 收星指向，提交后释放） | 2026-11-22 20:17 | 本笔 |
+| `mbdsdr_ai/answer_guard.py` | AI护栏线/6e1f32c2（8B 未核实 UI 位置护栏（白名单+窄改写）） | 2026-11-22 20:26 | 本笔 |
+| `tests/test_answer_guard.py` | AI护栏线/6e1f32c2（位置护栏测试 +14） | 2026-11-22 20:26 | 本笔 |
+| `docs/COORDINATION.md` | AI护栏线/6e1f32c2（§232 位置护栏正文 + 两行代码登记） | 2026-11-22 20:27 | 本笔 |
 
 > 上表各行均由 `claim` 台账推导：owner 原文与 `acquired_at` 直接取自台账，
 > 目的优先用台账里的 `claim_reason`，没有就如实写「未声明」，不补编。时间列只是
@@ -11503,3 +11506,43 @@ group1 **5083** = **10297 passed / 0 failed / 0 fatal**。
 - 跳转沿用既有 `_openPointing` 写法，未加额外 `mounted` 防护（与既有页面一致）。
 - 未在模拟器/真机点击验证；证据为 widget 测试与代码核对。
 - 子 agent 未自行提交；本笔由主 agent 复核 diff、跑全量测试后提交。
+
+## 232. 8B 未核实 UI **位置**幻觉：已核实位置白名单 + 窄改写（2026-11-22，子 agent 执行）
+
+**动机**：§230 只拦已核实为假的固定短语；实测 8B 仍把**真实存在**的底部按钮
+说成「屏幕右下角「左/右 5°」按钮」，并在编号清单里夹带这类断言。错的是
+**位置**，不是按钮名——继续堆短语黑名单覆盖不了。
+
+**子 agent A（general-purpose，写代码）**
+- `mbdsdr_ai/answer_guard.py` 新增 `_VERIFIED_UI_POSITIONS`（标签→允许方位）
+  与 `sanitize_unverified_ui_positions()`：只在「位置词 + 「…」/“…”标签」
+  紧邻时判定；位置已核实则原样保留；未核实则只删位置、保留真实标签；标签
+  本身也未核实则换成「对应控件」。接入 `sanitize_answer`，流式 `StreamGuard`
+  与非流式共用；`_FAKE_UI_CLAIMS` 原行为不变。
+- 白名单依据 mobile 源码：`mobile/lib/pages/pointing_page.dart` 636–673
+  `_AlignControls`（左 5°/右 5°/复位 在底部）、269–278 与 516–583
+  （视场/方位/仰角 在顶部）、`mobile/lib/pages/sky_page.dart` 540–544
+  （指天视图 在 AppBar 右上）。
+- `tests/test_answer_guard.py` 新增 14 条：真实位置不动、未核实位置删除且
+  标签保留、未核实标签中性化、普通编号清单原样、编号清单只中性化断言、
+  幂等、流式、组合、空文本。
+
+**子 agent B（Explore，只读）**
+- 核对「8B 先调 `sdr_set_*` 再被 `sdr_connect` 挡住」：`mbdsdr_ai/sdr_tools.py`
+  686–706 无后端直接返回「当前无连接设备，请先 sdr_connect 或
+  sdr_open_iq_file」；`sdr_backend.py` 445–487 未连接时不发硬件参数；
+  `sdr_set_bandwidth/gain/demod` 的工具描述已写明前置条件。
+- 结论：**fail-closed，不是产品缺陷**；不改工具语义，也不再加提示词顺序约束。
+
+**验证**
+- `pytest tests/test_answer_guard.py tests/test_agent_guidance_policy.py tests/test_ai_tool_budget.py -q`
+  → **70 passed**（answer_guard 29→43）。
+- 真实 8B 复跑：`python scripts/ai_guidance_smoke.py` → **SKIP（本 shell 无
+  API key，未联网、未生成结果）**；本轮无真实模型证据，只有确定性单测。
+- 未改 mobile/桌面代码。
+
+**诚实边界**
+- 规则只覆盖「位置词与引号标签紧邻」的断言；无位置词的 UI 行为/文案幻觉
+  仍可能漏过。
+- 编号清单本身不禁止，只中性化其中未核实的 UI 断言。
+- 白名单是**代码事实快照**；mobile UI 布局改动后需同步复核。
