@@ -10,22 +10,24 @@
 - 工具链：**Flutter 3.50.0 / Dart 3.14.0**（仓库外 `D:\mbdsdr\toolchain\flutter`），
   Android SDK / Gradle 缓存同在 D 盘，均不随仓库分发。
 - `flutter pub get`：**成功**（依赖从 pub 缓存/镜像解析，未离线失败；24 个包有更新但受约束锁定）。
-- `flutter analyze`（2026-11-22 实测，155 个源码 Dart 文件 = lib 83 + test 72）：
-  **0 error / 0 warning / 64 info**，耗时 1.1 s。info 为 `deprecated_member_use`
+- `flutter analyze`（2026-11-22 复跑，156 个源码 Dart 文件 = lib 83 + test 73）：
+  **0 error / 0 warning / 65 info**。info 为 `deprecated_member_use`
   （Flutter 3.50 起 `package:flutter/material.dart` 提示改用 `material_ui`）与 2 条测试内
-  `avoid_dynamic_calls`，不影响编译，未批量改。原始输出：`D:\mbdsdr\output\flutter_analyze_ab52.log`。
-- `flutter test`（2026-11-22 实测）：**561 passed / 0 failed**，耗时 20 s
+  `avoid_dynamic_calls`，不影响编译，未批量改。原始输出：`D:\mbdsdr\output\mobile_walk\flutter_analyze.log`。
+- `flutter test`（2026-11-22 复跑）：**567 passed / 0 failed**
   （含天空投影对拍 84 点、反投影往返、四态裁剪、投影有效性域/跨域裁剪 4 条、
   指天视图 26 条、星名目录与中心识别 12 条、星表资产 4 条、asterism overlay 行为 11 条、
-  首次成功端到端 5 条）。
+  首次成功端到端 5 条、小屏布局 + 标签避让 4 条）。
   历史锚点：539（首次模拟器验证轮）→ 541（设置页「输入即落盘」1 条 +
   频谱页「竖屏主操作置顶 / 宽屏仍在底部」1 条）→ 543（鉴频输出归一化 2 条：
   NFM 幅度/不越界 + WFM 不越界）→ 545（抽取型 FIR 与旧口径逐点等价 1 条、
   offset=0 跳过混频 1 条）→ 561（星名目录解析/中心识别文案 12 条 +
-  指天页中心识别 4 条）。
-- `flutter build apk --debug`（2026-11-22 实测）：**成功**；DSP 优化后复跑 Gradle
-  `assembleDebug` 42.6 s，产物 `build/app/outputs/flutter-apk/app-debug.apk`
-  （190,120,531 B；历史：190,119,009 B / 190,118,996 B / 190,116,539 B / 首次 190,110,524 B）；
+  指天页中心识别 4 条）→ 563（捕获→指向闭环 2 条）→ 567（小屏无溢出 +
+  状态条不省略 1 条、标签避让 3 条）。
+- `flutter build apk --debug`（2026-11-22 复跑）：**成功**；Gradle
+  `assembleDebug` 36.6 s，产物 `build/app/outputs/flutter-apk/app-debug.apk`
+  （190,135,569 B；历史：190,120,531 B / 190,119,009 B / 190,118,996 B /
+  190,116,539 B / 首次 190,110,524 B）；
   `flutter build apk --profile` 也可出包（`app-profile.apk` 74.8 MB）。
   仅有两条工具链前瞻告警（AGP 9.1.1 将不再支持，建议 ≥9.3.1；Kotlin 2.4.10 建议 ≥2.4.20），
   不影响本次出包，未擅自升级（升级需单独回归）。
@@ -207,7 +209,16 @@ flutter build apk --debug
   波动是观测统计，不是误差上界，也不是传感器标称精度。
 - 中心识别是「准星附近最近命名星」：候选只来自已投影的 ≤6.5 等星点，
   像素半径随视场缩放，**不是**图像识别或 plate solving；未收录名字的星
-  只报 HIP。本轮 UI 证据是 widget 测试，未在模拟器/真机重跑该页。
+  只报 HIP。2026-11-22 已在 API 35 模拟器重跑该页：虚拟罗盘给航向 90°，
+  画面显示「方位 90°（罗盘观测）/仰角 −0°（姿态观测）/视场 60°/罗盘 ±0°/
+  未手动对齐/星 409 · 线 59」，准星下「列肆增一 · 距中心 1.2°」，底部只有
+  「左 5°」「右 5°」「复位」（证据 `D:\mbdsdr\output\mobile_walk\mw_06_pointing_honest.png`）。
+  **模拟器罗盘是虚拟传感器（±0°），不能代表真机罗盘精度。**
+- 小屏竖屏（360×640 dp）布局：天空页原报 `BOTTOM OVERFLOWED BY 71 PIXELS`、
+  状态条把站址压成「本站 39…」；2026-11-22 已改为整页可滚 + 雷达固定高、
+  窄屏状态条两行且站址不省略，导航星「预:」标签补 8 向避让
+  （`placeLabelAvoiding`，真实卫星标签优先、放不下不画）。守卫见
+  `test/sky_layout_small_screen_test.dart`。
 - 不内置任何 FM 电台频率、地理位置或密钥；所有连接参数与 key 都由用户自己填写。
 - 手机读数的来源标注覆盖 sky / spectrum；真机上的 GNSS/罗盘来源仍未实测。
 
