@@ -2549,6 +2549,13 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `mbdsdr_ai/device_manager.py` | 音频实时吞吐线/20261122（read_audio 返回量口径修正（至多 n 个，流式按批循环）） | 2026-11-22 18:24 | 本笔 |
 | `docs/COORDINATION.md` | 音频实时吞吐线/20261122（§224 R4 候选回退真机首次触发记录，提交后释放） | 2026-11-22 18:24 | 本笔 |
 | `docs/COORDINATION.md` | 七环复跑线/20261122（§225 七环全会话复跑（吞吐修复后），提交后释放） | 2026-11-22 18:46 | 本笔 |
+| `mobile/lib/astro/star_names.dart` | 手机指哪认哪线/20261122（新增星名目录解析 + 中心识别文案（纯函数）） | 2026-11-22 18:47 | 本笔 |
+| `mobile/lib/astro/sky_assets.dart` | 手机指哪认哪线/20261122（加载 star_names.json，失败降级并写明原因） | 2026-11-22 18:47 | 本笔 |
+| `mobile/test/star_names_test.dart` | 手机指哪认哪线/20261122（星名解析/中心文案 12 条） | 2026-11-22 18:47 | 本笔 |
+| `mobile/test/pointing_page_test.dart` | 手机指哪认哪线/20261122（中心识别 widget 4 条） | 2026-11-22 18:47 | 本笔 |
+| `mobile/README.md` | 手机指哪认哪线/20261122（更新测试数 561 与新功能/诚实边界） | 2026-11-22 18:47 | 本笔 |
+| `docs/COORDINATION.md` | 手机指哪认哪线/20261122（§226 手机中心识别证据，提交后释放） | 2026-11-22 18:47 | 本笔 |
+| `mobile/lib/pages/pointing_page.dart` | 手机指哪认哪线/20261122（准星中心识别 UI + 星名不可用提示） | 2026-11-22 18:47 | 本笔 |
 
 > 上表各行均由 `claim` 台账推导：owner 原文与 `acquired_at` 直接取自台账，
 > 目的优先用台账里的 `claim_reason`，没有就如实写「未声明」，不补编。时间列只是
@@ -11232,3 +11239,45 @@ group1 **5083** = **10297 passed / 0 failed / 0 fatal**。
   「通过」，也不写成产品缺陷。
 - R3 的 MBDSDR 读谱峰偏 +1,223 Hz 是本次实测值，未做长期漂移统计。
 - R7 跑的是既有 `cpp/build-local/dist/mbdsdr-0.2.0-win64-portable`，本轮未重编 C++。
+
+## 226. 手机指天视图「指哪认哪」：准星中心星名 + 角距（2026-11-22）
+
+**动机**：PRD 的「降低门槛」在手机端的直接体现——不懂星名的人举起手机，
+准星对着哪颗星就该知道它叫什么。`assets/sky/star_names.json`（生成脚本早已
+产出，2,906 条）此前打进仓库却**从未被加载**；指天页只画星点与星官线，
+答不了「这是什么」。
+
+**实现**
+- `mobile/lib/astro/star_names.dart`（新）：解析 `star_names.json`
+  （HIP → zh/alt/en/asterisms/regions/con）；顶层或条目结构错误抛
+  `FormatException`（名字对不上号比没名字更危险）；HIP 非数字/≤0 跳过；
+  `centerStarText()` 为纯函数；角距保留 1 位小数。
+- `sky_assets.dart`：加载 `star_names.json`；星名是**可选叠加层**——读不到或
+  解析失败不拖垮星点/星官显示，但 `namesError` 必须上屏。
+- `pointing_page.dart`：准星中心用 `SkyOverlayEngine.pickStar`（只从已投影
+  星点里选最近，像素半径 `min(28, minDim×5%)`）；角距用 `altAzFromJ2000` +
+  `angularSeparationDeg` 现算；准星下 44 px 显示胶囊；状态条在星名不可用时
+  给警告 chip。不做第二次坐标链，也不做图像识别/plate solving。
+- 文案口径：命中→「织女一（Vega） · 距中心 0.4°」；未收录→「HIP 12345 ·
+  距中心 1.3° · 4.6等」；附近无星→「中心附近无亮星」；星名不可用→
+  「星名数据不可用，无法识别中心星」。
+
+**验证**
+- 新增 `test/star_names_test.dart` 12 条（解析/坏结构/HIP 跳过/主名回退/
+  四种文案状态/角距不四舍五入）。
+- 新增 `test/pointing_page_test.dart` 中心识别 4 条（命名星命中/附近无星/
+  未收录只报 HIP/星名不可用双处提示）；用 `j2000FromAltAz` 反算中心星，
+  不依赖外部资产。
+- `flutter test` 全量 **561 passed / 0 failed**（原 545，+16）；
+  `flutter analyze` **0 error / 0 warning / 64 info**（全部既有
+  `material.dart` 废弃与风格 info，新增文件 0 条）；`flutter build apk --debug`
+  成功；APK 内确认含 `assets/flutter_assets/assets/sky/star_names.json`
+  （259,774 B）。
+- 未在模拟器/真机重跑该页（本轮无 UI 运行环境）；真机罗盘指向精度仍
+  `not_verified`。
+
+**诚实边界**
+- 中心识别是「投影星点最近邻」，不是相机图像解算；≤6.5 等、无名字的星
+  只报 HIP；
+- 像素容差随视场缩放（60° 约 3.3°），但结果永远附带真实角距，不宣称「精准」；
+- 星名目录 2,906 条来自仓库既有生成脚本，未扩表、未引入新数据源。

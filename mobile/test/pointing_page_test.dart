@@ -16,6 +16,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mbdsdr_mobile/astro/asterism_overlay.dart';
 import 'package:mbdsdr_mobile/astro/sky_assets.dart';
+import 'package:mbdsdr_mobile/astro/sky_transform.dart';
+import 'package:mbdsdr_mobile/astro/star_names.dart';
 import 'package:mbdsdr_mobile/pages/pointing_page.dart';
 import 'package:mbdsdr_mobile/services/orientation_service.dart';
 
@@ -110,6 +112,52 @@ Future<void> _feedHeadings(
   }
   await tester.pump();
   await tester.pump();
+}
+
+/// 测试固定站址/时刻：与 `_page` 的 `clock` 一致，中心星才能算得出来。
+const SkySite _testSite = SkySite(latDeg: 45, lonDeg: 120);
+final DateTime _testWhen = DateTime.utc(2026, 11, 18, 12);
+
+/// 造一颗「此刻位于 (az, alt)」的 J2000 恒星（用地平→J2000 逆变换）。
+SkyStar _starAt({
+  required double az,
+  double alt = 45,
+  required int hip,
+  double vmag = 0.0,
+}) {
+  final ({double raDeg, double decDeg}) radec = j2000FromAltAz(
+    azDeg: az,
+    altDeg: alt,
+    latDeg: _testSite.latDeg,
+    lonDeg: _testSite.lonDeg,
+    jdUt1: julianDateFromUtc(_testWhen),
+  );
+  return SkyStar(
+    raDeg: radec.raDeg,
+    decDeg: radec.decDeg,
+    vmag: vmag,
+    bv: 0.0,
+    hip: hip,
+  );
+}
+
+SkyAssets _assetsWith({
+  required List<SkyStar> stars,
+  Map<int, StarNameEntry> names = const <int, StarNameEntry>{},
+  String namesError = '',
+}) {
+  return SkyAssets(
+    stars: stars,
+    catalog: const AsterismCatalog(
+      asterisms: <Asterism>[],
+      regionNames: <String, String>{},
+      singleStarNames: <String>[],
+      license: 'CC BY 4.0（测试）',
+    ),
+    license: 'CC BY 4.0（测试）',
+    names: names,
+    namesError: namesError,
+  );
 }
 
 void main() {
@@ -411,6 +459,103 @@ void main() {
 
       expect(find.text('已进入目标天区（±5°），罗盘波动 ±0°'), findsOneWidget);
       expect(find.textContaining('精准'), findsNothing);
+    });
+  });
+
+  group('准星中心识别（指哪认哪）', () {
+    testWidgets('命中命名星：显示中文名（西名）+ 距中心角距',
+        (WidgetTester tester) async {
+      final StreamController<DeviceOrientation> controller =
+          StreamController<DeviceOrientation>.broadcast();
+      addTearDown(controller.close);
+      await tester.pumpWidget(_page(
+        stream: controller.stream,
+        targetAz: null,
+        targetEl: null,
+        source: _FakeAssetSource(_assetsWith(
+          stars: <SkyStar>[_starAt(az: 123, hip: 91262, vmag: 0.03)],
+          names: const <int, StarNameEntry>{
+            91262: StarNameEntry(zh: '织女一', en: 'Vega'),
+          },
+        )),
+      ));
+      await tester.pump();
+      await _feedHeadings(tester, controller, <double>[123]);
+
+      expect(find.byKey(const Key('pointing-center-id')), findsOneWidget);
+      expect(find.textContaining('织女一（Vega）'), findsOneWidget);
+      expect(find.textContaining('距中心 0.0°'), findsOneWidget);
+    });
+
+    testWidgets('中心附近无亮星：明说「附近无亮星」，不拿远处星凑数',
+        (WidgetTester tester) async {
+      final StreamController<DeviceOrientation> controller =
+          StreamController<DeviceOrientation>.broadcast();
+      addTearDown(controller.close);
+      // 星在天的另一侧（方位 243°），准星附近确实没有星。
+      await tester.pumpWidget(_page(
+        stream: controller.stream,
+        targetAz: null,
+        targetEl: null,
+        source: _FakeAssetSource(_assetsWith(
+          stars: <SkyStar>[_starAt(az: 243, hip: 1, vmag: 1.0)],
+          names: const <int, StarNameEntry>{1: StarNameEntry(zh: '别处星')},
+        )),
+      ));
+      await tester.pump();
+      await _feedHeadings(tester, controller, <double>[123]);
+
+      expect(find.text('中心附近无亮星'), findsOneWidget);
+      expect(find.textContaining('别处星'), findsNothing);
+    });
+
+    testWidgets('命中未收录名字的星：只报 HIP/星等，绝不编名',
+        (WidgetTester tester) async {
+      final StreamController<DeviceOrientation> controller =
+          StreamController<DeviceOrientation>.broadcast();
+      addTearDown(controller.close);
+      await tester.pumpWidget(_page(
+        stream: controller.stream,
+        targetAz: null,
+        targetEl: null,
+        source: _FakeAssetSource(_assetsWith(
+          stars: <SkyStar>[
+            _starAt(az: 123, hip: 1, vmag: 1.0),
+            _starAt(az: 243, hip: 2, vmag: 2.0),
+          ],
+          // 有星名目录（hasStarNames=true），但中心这颗未收录。
+          names: const <int, StarNameEntry>{
+            2: StarNameEntry(zh: '别处星'),
+          },
+        )),
+      ));
+      await tester.pump();
+      await _feedHeadings(tester, controller, <double>[123]);
+
+      expect(find.textContaining('HIP 1'), findsOneWidget);
+      expect(find.textContaining('距中心 0.0°'), findsOneWidget);
+      expect(find.textContaining('别处星'), findsNothing);
+    });
+
+    testWidgets('星名不可用：状态条与准星都明确写「不可用」',
+        (WidgetTester tester) async {
+      final StreamController<DeviceOrientation> controller =
+          StreamController<DeviceOrientation>.broadcast();
+      addTearDown(controller.close);
+      await tester.pumpWidget(_page(
+        stream: controller.stream,
+        targetAz: null,
+        targetEl: null,
+        source: _FakeAssetSource(_assetsWith(
+          stars: <SkyStar>[_starAt(az: 123, hip: 91262, vmag: 0.03)],
+          namesError: '星名目录读取失败：测试注入',
+        )),
+      ));
+      await tester.pump();
+      await _feedHeadings(tester, controller, <double>[123]);
+
+      expect(find.text('星名数据不可用，无法识别中心星'), findsOneWidget);
+      expect(find.textContaining('星名不可用：星名目录读取失败'), findsOneWidget);
     });
   });
 }

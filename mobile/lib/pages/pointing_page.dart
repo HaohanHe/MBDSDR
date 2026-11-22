@@ -33,6 +33,7 @@ import '../astro/asterism_overlay.dart';
 import '../astro/sky_assets.dart';
 import '../astro/sky_projection.dart';
 import '../astro/sky_transform.dart';
+import '../astro/star_names.dart';
 import '../services/orientation_service.dart';
 import '../widgets/empty_state.dart';
 
@@ -354,6 +355,35 @@ class _PointingPageState extends State<PointingPage> {
           jdUt1: jd,
           view: view,
         );
+        // 准星中心识别：只从「已经投影出来的星点」里挑最近的一颗，
+        // 不另造一套坐标链；像素半径随视场缩放，避免广角下把很远的天区
+        // 说成「就在准星上」。文案会带上真实角距，读者能自己判断准不准。
+        final SkyStar? centerStar = engine.pickStar(
+          at: ScreenPoint(view.centerX, view.centerY),
+          screenPoints: overlay.starScreenPoints,
+          hips: overlay.starHips,
+          maxPx: math.min(28.0, view.minDim * 0.05),
+        );
+        CenterStarIdentification? centerId;
+        if (centerStar != null) {
+          final AzAlt? starAltAz =
+              engine.starAltAz(hip: centerStar.hip, site: site, jdUt1: jd);
+          if (starAltAz != null) {
+            centerId = CenterStarIdentification(
+              hip: centerStar.hip,
+              vmag: centerStar.vmag,
+              separationDeg: angularSeparationDeg(
+                starAltAz,
+                AzAlt(azDeg: heading, altDeg: pitch ?? 0.0),
+              ),
+              name: assets.names[centerStar.hip],
+            );
+          }
+        }
+        final String centerText = centerStarText(
+          namesAvailable: assets.hasStarNames,
+          identification: centerId,
+        );
         final Map<int, SkyStar> byHip = <int, SkyStar>{
           for (final SkyStar s in assets.stars)
             if (s.hip != 0) s.hip: s,
@@ -383,6 +413,21 @@ class _PointingPageState extends State<PointingPage> {
                 targetLabel: widget.targetLabel,
               ),
             ),
+            // 准星下方一行「这是什么星」：名字 + 距中心角距。
+            // 只读展示，不拦截手势；星名不可用时明确写「不可用」。
+            Positioned.fill(
+              child: IgnorePointer(
+                child: Center(
+                  child: Transform.translate(
+                    offset: const Offset(0, 44),
+                    child: _CenterIdPill(
+                      text: centerText,
+                      warn: !assets.hasStarNames || centerId == null,
+                    ),
+                  ),
+                ),
+              ),
+            ),
             Positioned(
               left: AppTokens.spacingM,
               right: AppTokens.spacingM,
@@ -396,6 +441,8 @@ class _PointingPageState extends State<PointingPage> {
                 license: assets.license,
                 spreadDeg: spreadDeg,
                 manualOffsetDeg: _manualOffsetDeg,
+                namesAvailable: assets.hasStarNames,
+                namesError: assets.namesError,
               ),
             ),
             Positioned(
@@ -430,6 +477,41 @@ class _PointingPageState extends State<PointingPage> {
   }
 }
 
+/// 准星下方一行「中心识别」：星名 + 距中心角距，或明确的不可用原因。
+///
+/// 只读、不拦截手势；名字命中用主文字色，未命中/不可用用警告色，
+/// 让「没认出来」和「认出来了」在视觉上不可能混淆。
+class _CenterIdPill extends StatelessWidget {
+  const _CenterIdPill({required this.text, required this.warn});
+
+  final String text;
+  final bool warn;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      key: const Key('pointing-center-id'),
+      padding: const EdgeInsets.symmetric(
+        horizontal: AppTokens.spacingM,
+        vertical: AppTokens.spacingS,
+      ),
+      decoration: BoxDecoration(
+        color: AppTokens.bgMain.withValues(alpha: 0.72),
+        borderRadius: BorderRadius.circular(AppTokens.radiusPill),
+        border: Border.all(
+          color: warn ? AppTokens.warning : AppTokens.accent,
+        ),
+      ),
+      child: Text(
+        text,
+        style: AppTokens.auxiliary.copyWith(
+          color: warn ? AppTokens.warning : AppTokens.textPrimary,
+        ),
+      ),
+    );
+  }
+}
+
 /// 顶部状态：方位/仰角/视场/星数/线数/罗盘波动/手动对齐；许可缺失时明说。
 class _StatusRow extends StatelessWidget {
   const _StatusRow({
@@ -441,6 +523,8 @@ class _StatusRow extends StatelessWidget {
     required this.license,
     required this.spreadDeg,
     required this.manualOffsetDeg,
+    required this.namesAvailable,
+    required this.namesError,
   });
 
   final double heading;
@@ -456,6 +540,12 @@ class _StatusRow extends StatelessWidget {
   /// 手动对齐偏移（度，会话内）。
   final double manualOffsetDeg;
 
+  /// 星名目录是否可用（决定中心识别能否给出名字）。
+  final bool namesAvailable;
+
+  /// 星名目录不可用的真实原因（空串=无错误）。
+  final String namesError;
+
   @override
   Widget build(BuildContext context) {
     final double? spread = spreadDeg;
@@ -463,6 +553,9 @@ class _StatusRow extends StatelessWidget {
         ? '未手动对齐'
         : '手动对齐 ${manualOffsetDeg > 0 ? '+' : ''}'
             '${manualOffsetDeg.toStringAsFixed(0)}°';
+    final String namesWarn = namesError.length > 48
+        ? '${namesError.substring(0, 48)}…'
+        : namesError;
     final List<Widget> chips = <Widget>[
       // 方位/仰角来自传感器实时读数（观测），不是目标几何预测值。
       _chip('方位 ${heading.toStringAsFixed(0)}°（罗盘观测）'),
@@ -476,6 +569,11 @@ class _StatusRow extends StatelessWidget {
       _chip(manualText),
       _chip('星 $starCount · 线 $segmentCount'),
       if (license.isEmpty) _chip('许可缺失', warn: true),
+      if (!namesAvailable)
+        _chip(
+          namesWarn.isEmpty ? '星名不可用（无法识别中心星）' : '星名不可用：$namesWarn',
+          warn: true,
+        ),
     ];
     return Wrap(
       spacing: AppTokens.spacingM,

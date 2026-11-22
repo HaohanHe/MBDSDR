@@ -10,17 +10,19 @@
 - 工具链：**Flutter 3.50.0 / Dart 3.14.0**（仓库外 `D:\mbdsdr\toolchain\flutter`），
   Android SDK / Gradle 缓存同在 D 盘，均不随仓库分发。
 - `flutter pub get`：**成功**（依赖从 pub 缓存/镜像解析，未离线失败；24 个包有更新但受约束锁定）。
-- `flutter analyze`（2026-11-22 实测，152 个源码 Dart 文件 = lib 82 + test 70）：
+- `flutter analyze`（2026-11-22 实测，155 个源码 Dart 文件 = lib 83 + test 72）：
   **0 error / 0 warning / 64 info**，耗时 1.1 s。info 为 `deprecated_member_use`
   （Flutter 3.50 起 `package:flutter/material.dart` 提示改用 `material_ui`）与 2 条测试内
   `avoid_dynamic_calls`，不影响编译，未批量改。原始输出：`D:\mbdsdr\output\flutter_analyze_ab52.log`。
-- `flutter test`（2026-11-22 实测）：**545 passed / 0 failed**，耗时 22 s
+- `flutter test`（2026-11-22 实测）：**561 passed / 0 failed**，耗时 20 s
   （含天空投影对拍 84 点、反投影往返、四态裁剪、投影有效性域/跨域裁剪 4 条、
-  指天视图 21 条、星表资产 4 条、asterism overlay 行为 11 条、首次成功端到端 5 条）。
+  指天视图 25 条、星名目录与中心识别 12 条、星表资产 4 条、asterism overlay 行为 11 条、
+  首次成功端到端 5 条）。
   历史锚点：539（首次模拟器验证轮）→ 541（设置页「输入即落盘」1 条 +
   频谱页「竖屏主操作置顶 / 宽屏仍在底部」1 条）→ 543（鉴频输出归一化 2 条：
   NFM 幅度/不越界 + WFM 不越界）→ 545（抽取型 FIR 与旧口径逐点等价 1 条、
-  offset=0 跳过混频 1 条）。
+  offset=0 跳过混频 1 条）→ 561（星名目录解析/中心识别文案 12 条 +
+  指天页中心识别 4 条）。
 - `flutter build apk --debug`（2026-11-22 实测）：**成功**；DSP 优化后复跑 Gradle
   `assembleDebug` 42.6 s，产物 `build/app/outputs/flutter-apk/app-debug.apk`
   （190,120,531 B；历史：190,119,009 B / 190,118,996 B / 190,116,539 B / 首次 190,110,524 B）；
@@ -144,6 +146,13 @@ lib/
   并可「左/右 5°」手动对齐；进入 ±5° 只说「已进入目标天区」。星表/星官来自
   `assets/sky/`（`stars.bin` + `asterisms.json`），
   读不到显示真实原因，不退回空星表。
+- **指哪认哪**（2026-11-22）：准星下方一行显示中心最近的命名星，
+  如「织女一（Vega） · 距中心 0.4°」；名字来自 `assets/sky/star_names.json`
+  （2906 颗，含中文名/西名/星官/星区/星座）。未收录名字的星只报
+  `HIP`/星等/角距，绝不编名；附近没有亮星就写「中心附近无亮星」；
+  星名目录读不到时状态条与准星都明说「星名不可用」。识别只用**已投影的
+  星点**做最近邻（像素半径随视场缩放），不做第二次坐标链，也不把
+  3° 外的星说成「就在准星上」——角距原样显示，由用户判断。
 
 ### 3. AI 对话（Chat）
 - 硅基流动 OpenAI 兼容接口，SSE 流式输出；
@@ -196,6 +205,9 @@ flutter build apk --debug
 - SGP4 为公开参考实现移植，**忽略章动与极移**，对低仰角指向有约 0.1° 量级误差。
 - 指天显示航向近 2 s 波动并可手动对齐（±5°，会话内、不落盘）；真机指向精度仍未验证。
   波动是观测统计，不是误差上界，也不是传感器标称精度。
+- 中心识别是「准星附近最近命名星」：候选只来自已投影的 ≤6.5 等星点，
+  像素半径随视场缩放，**不是**图像识别或 plate solving；未收录名字的星
+  只报 HIP。本轮 UI 证据是 widget 测试，未在模拟器/真机重跑该页。
 - 不内置任何 FM 电台频率、地理位置或密钥；所有连接参数与 key 都由用户自己填写。
 - 手机读数的来源标注覆盖 sky / spectrum；真机上的 GNSS/罗盘来源仍未实测。
 
