@@ -25,6 +25,7 @@ from mbdsdr_ai.sky_pointing_pipeline import (  # noqa: E402
     RESIDUAL_TOLERANCE_DEG,
     SolveOutcome,
     StarCentroid,
+    apply_solve,
     solve_and_verify,
 )
 from mbdsdr_ai.sky_solve import solver_status  # noqa: E402
@@ -85,7 +86,75 @@ def _assert_failed_without_coordinates(outcome: SolveOutcome):
     assert outcome.dec_deg is None
     assert outcome.residual_deg is None
     assert outcome.within_tolerance is False
+    assert outcome.az_deg is None
+    assert outcome.alt_deg is None
     assert "已对准" not in outcome.reason
+
+
+# ---------------------------------------------------------------------------
+# 内置 quad 解算（Task 10.1 接线）
+# ---------------------------------------------------------------------------
+def _builtin_scene():
+    """真实 HYG 星表 + 合成的小角度指向误差。"""
+    import datetime as _dt
+
+    from mbdsdr_ai.celestial_geometry import GroundStation, PerspectiveProjection
+    from mbdsdr_ai.new_spacetime import utc_to_jd
+    from mbdsdr_ai.sky_interaction import ViewState, sky_to_screen
+    from mbdsdr_ai.skyengine.star_catalog import select_for_view
+
+    at = _dt.datetime(2026, 9, 27, 12, 0, tzinfo=_dt.timezone.utc)
+    jd = utc_to_jd(at)
+    lat, lon, az, el, fov = 40.0, 116.0, 210.0, 35.0, 20.0
+    gs = GroundStation(lon, lat)
+    sel = select_for_view(gs, jd, az, el, fov, limit_mag=6.5,
+                          max_count=400, margin_deg=0.5)
+    assert len(sel) >= 12, f"该天区亮星只有 {len(sel)} 颗"
+    proj = PerspectiveProjection()
+    true = ViewState(center_az=az + 0.3, center_alt=el - 0.2, fov_deg=fov,
+                     rotation=0.5, min_fov=0.5, max_fov=120.0)
+    pts = []
+    # 星表返回暗→亮；检测列表按契约亮星在前，所以反向遍历。
+    for a, e in zip(sel.az_deg[::-1], sel.alt_deg[::-1]):
+        x, y = sky_to_screen(float(a), float(e), true, proj, (1000, 1000))
+        if (math.isfinite(x) and math.isfinite(y)
+                and 0.0 <= x <= 1000.0 and 0.0 <= y <= 1000.0):
+            pts.append((x, y))
+    assert len(pts) >= MIN_SOLVE_STARS
+    camera = CameraParams(width_px=1000, height_px=1000, fov_deg=fov)
+    return pts, camera, az, el, lat, lon, at
+
+
+def _assert_recovered(out, az: float, el: float):
+    """内置解算应恢复到注入的真值位姿；residual 是与指令指向的真实偏差。"""
+    from mbdsdr_ai.sky_interaction import angular_distance_deg
+
+    assert out.ok, (out.error, out.reason)
+    assert out.matched_stars >= MIN_SOLVE_STARS
+    assert out.az_deg == pytest.approx((az + 0.3) % 360.0, abs=0.03)
+    assert out.alt_deg == pytest.approx(el - 0.2, abs=0.03)
+    assert out.roll_deg == pytest.approx(0.5, abs=0.05)
+    expected = angular_distance_deg(az + 0.3, el - 0.2, az, el)
+    assert out.residual_deg == pytest.approx(expected, abs=0.02)
+
+
+def test_builtin_solver_corrects_small_pointing_error():
+    pts, camera, az, el, lat, lon, at = _builtin_scene()
+    out = solve_and_verify(pts, camera, az, el, lat, lon, at,
+                           solver="builtin")
+    _assert_recovered(out, az, el)
+
+
+def test_auto_falls_back_to_builtin_when_external_unavailable(monkeypatch):
+    import mbdsdr_ai.sky_solve as sky_solve
+
+    monkeypatch.setattr(
+        sky_solve, "solver_status",
+        lambda *a, **k: {"available": False, "name": "",
+                         "reason": "stub: tetra3/ASTAP 都不在"})
+    pts, camera, az, el, lat, lon, at = _builtin_scene()
+    out = solve_and_verify(pts, camera, az, el, lat, lon, at)
+    _assert_recovered(out, az, el)
 
 
 # ---------------------------------------------------------------------------
@@ -158,8 +227,11 @@ def test_solver_unavailable_uses_real_solver_status():
     _assert_failed_without_coordinates(out)
     status = solver_status()
     if not status["available"]:
-        assert out.error == "solver_unavailable"
+        # 外部库不在时会自动回退到内置 quad 解算；这组随机星点匹配不上，
+        # 因此结论是 solver_failed（不是「没有解算器」），原因里两边都要有。
+        assert out.error == "solver_failed"
         assert status["reason"] in out.reason
+        assert "内置解算" in out.reason
     else:
         # 装了 tetra3 / 配了 ASTAP 时不能把「解算失败」谎报成「库不可用」。
         assert out.error != "solver_unavailable"
@@ -274,6 +346,23 @@ def test_sky_solve_shaped_result_contract_is_accepted():
     assert out.residual_deg == pytest.approx(0.0, abs=0.01)
     assert out.roll_deg == pytest.approx(7.0)
     assert out.matched_stars == 12
+
+
+def test_solved_horizontal_coordinates_are_reported_and_applicable():
+    # 解算结果必须带出地平 az/alt，apply_solve 才能把它变成新位姿。
+    lat, lon = _site_for_lst_zero(45.0)
+    out = _run(lat, lon, 180.0, 45.0, _fake_solver(0.0, 0.0, roll_deg=7.0))
+    assert out.ok is True, out.reason
+    assert out.az_deg == pytest.approx(180.0, abs=0.02)
+    assert out.alt_deg == pytest.approx(45.0, abs=0.02)
+
+    update = apply_solve(
+        {"az_deg": 170.0, "alt_deg": 40.0, "roll_deg": 0.0}, out)
+    assert update.applied is True
+    assert update.level == "L3"
+    assert update.az_deg == pytest.approx(out.az_deg)
+    assert update.alt_deg == pytest.approx(out.alt_deg)
+    assert update.roll_deg == pytest.approx(7.0)
 
 
 def test_solver_receives_camera_prior_and_observed_site():

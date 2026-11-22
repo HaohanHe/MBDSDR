@@ -326,11 +326,34 @@ def test_selection_order_faint_to_bright(catalog):
 
 
 def test_selection_uses_existing_coordinate_chain(catalog):
+    """批量选择的 az/alt 必须等于既有单星链（含恒星自行传播）。
+
+    ``select_for_view`` 的 az/alt 已含 J2000→观测时刻的自行；参考链若只做
+    ``j2000_to_altaz`` 会漏掉这步，低自行星看不出来、高自行星（如天狼星）
+    会差到角秒级。这里用同一份自行表复算，断言仍按 1e-6 度钉死。
+    """
+    from mbdsdr_ai.skyengine.proper_motion import (
+        load_pm_table,
+        pm_for_hyg_ids,
+        propagate_vectors_many,
+    )
+
     sel = sc.select_for_view(GS, JD, 180.0, 45.0, 60.0, bortle=3)
     assert len(sel) > 0
+    pm_table = load_pm_table()
     for i in (0, len(sel) // 2, len(sel) - 1):
-        v = j2000_to_altaz(vec_from_radec(float(sel.ra_deg[i]),
-                                          float(sel.dec_deg[i])), GS, JD)
+        ra = float(sel.ra_deg[i])
+        dec = float(sel.dec_deg[i])
+        v = vec_from_radec(ra, dec)
+        if pm_table is not None:
+            pmra, pmdec = pm_for_hyg_ids(
+                np.asarray([sel.hyg_id[i]], dtype=np.int64), pm_table)
+            v = propagate_vectors_many(
+                np.asarray([v], dtype=float),
+                np.asarray([ra], dtype=float),
+                np.asarray([dec], dtype=float),
+                pmra, pmdec, JD)[0]
+        v = j2000_to_altaz(v, GS, JD)
         az, alt = azalt_from_vec(v)
         assert sel.az_deg[i] == pytest.approx(az, abs=1e-6)
         assert sel.alt_deg[i] == pytest.approx(alt, abs=1e-6)

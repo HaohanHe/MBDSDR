@@ -144,7 +144,8 @@ def test_tetra3_success_maps_deltas_stars_residual(monkeypatch):
 
 def test_tetra3_is_reported_available_when_module_imports(monkeypatch):
     _inject_tetra3(monkeypatch, None)
-    assert solver_status() == {"available": True, "name": "tetra3"}
+    assert solver_status() == {"available": True, "name": "tetra3",
+                               "deprecated": {}}
 
 
 def test_too_few_stars_is_reported_before_solver(monkeypatch):

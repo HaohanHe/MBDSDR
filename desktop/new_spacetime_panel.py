@@ -72,7 +72,7 @@ except ImportError:  # pragma: no cover - 直接以脚本方式运行时
 from readouts import format_bandwidth_hz  # noqa: E402
 
 # 采样步长引用 sat_passes 的单一事实源（不在本面板另写 60/2 之类字面量）。
-from mbdsdr_ai.sat_passes import PASS_COARSE_STEP_S  # noqa: E402
+from mbdsdr_ai.sat_passes import PASS_COARSE_STEP_S, grid_manifest  # noqa: E402
 
 
 # 以包方式从仓库根 import（如 import desktop.new_spacetime_panel）时本目录不在
@@ -390,6 +390,22 @@ class NewSpacetimePanel(QWidget):
         self._countdown_timer.setInterval(1000)
         self._countdown_timer.timeout.connect(self._update_next_pass_countdown)
         self._countdown_timer.start()
+
+    def showEvent(self, event):  # noqa: N802 - Qt 命名
+        """回到可见时恢复两个定时器，并立即刷一遍，避免等下一拍。"""
+        super().showEvent(event)
+        if not self._sync_timer.isActive():
+            self._sync_timer.start()
+        if not self._countdown_timer.isActive():
+            self._countdown_timer.start()
+        self._refresh_time_sync_local()
+        self._update_next_pass_countdown()
+
+    def hideEvent(self, event):  # noqa: N802 - Qt 命名
+        """面板收起就停表：60s 授时刷新与 1Hz 倒计时不为看不见的界面烧 CPU。"""
+        self._sync_timer.stop()
+        self._countdown_timer.stop()
+        super().hideEvent(event)
 
     # ------------------------------------------------------------------ UI
     def _build_ui(self) -> None:
@@ -866,16 +882,33 @@ class NewSpacetimePanel(QWidget):
     def _pass_time_basis_line(self, passes: List[SatellitePass]) -> str:
         """标明「这些时刻是怎么算出来的」——来源与精度。
 
-        同一份界面里绝不能出现两种精度却不说明：本面板用 TimelineEngine
-        的 60 秒网格（无细扫），AI/工具链走 sat_passes 的 60 秒粗扫 + 2 秒
-        细扫 + 二分。实测偏差（60 s 网格 vs 2 s 细扫，24 小时 28 条过境）：
-        峰值时刻最大 30 秒、升落最大 58 秒、峰值仰角最大差 7.6°。
+        同一份界面里绝不能出现两种精度却不说明：升起/落在
+        TimelineEngine 粗扫网格基础上做 AOS/LOS 二分收敛；未收敛的过境
+        退回粗扫网格点并明说；中天时刻与峰值仰角经
+        ``sat_passes.refine_culmination`` 的 2 秒细扫校正（与 AI/工具链共用
+        同一实现，P1-13）。网格参数只从 ``sat_passes.grid_manifest()`` 取，
+        不在界面另写一套「±30 秒 / 7.6°」的旧数字。
         """
         steps = [getattr(p, "sampling_step_s", 0.0) or 0.0 for p in passes]
-        step = max(steps) if steps else PASS_COARSE_STEP_S
-        return (f"时刻来源：本面板 TimelineEngine（{step:g} 秒网格，未细扫）；"
-                "峰值时刻偏差 ≤30 秒、升落 ≤58 秒、峰值仰角最大差 7.6°"
-                "（不是卫星位置精度）。")
+        # 缺采样步长（0.0）不能说成「0 秒粗扫」——那会把未知精度写成无限准。
+        positive = [float(s) for s in steps if float(s) > 0]
+        step = max(positive) if positive else PASS_COARSE_STEP_S
+        manifest = grid_manifest()
+        fine = float(manifest["fine_step_s"])
+        culm = float(manifest["culmination_precision_s"])
+        cross = float(manifest["crossing_precision_s"])
+        refined = [bool(getattr(p, "aos_refined", False)
+                        and getattr(p, "los_refined", False)) for p in passes]
+        if refined and all(refined):
+            rise_set = (f"升起/落下在 {step:g} 秒粗扫基础上经 {cross:g} 秒"
+                        f"二分收敛（±{cross:g} 秒）")
+        else:
+            rise_set = (f"升起/落下在 {step:g} 秒粗扫基础上经 {cross:g} 秒"
+                        f"二分收敛；未收敛的过境退回粗扫网格点，"
+                        f"按 ≤{step:g} 秒承诺")
+        return (f"时刻来源：本面板 TimelineEngine（{rise_set}；"
+                f"中天经 {fine:g} 秒细扫校正，约 ±{culm:g} 秒）。"
+                "这是预测时刻精度，不是卫星位置精度。")
 
     def _pass_warning_lines(self, passes: List[SatellitePass],
                             station_ev: dict) -> List[str]:
@@ -1116,3 +1149,19 @@ class NewSpacetimePanel(QWidget):
             return dt.strftime("%m-%d %H:%M")
         except (AttributeError, ValueError):
             return _NA
+
+    def shutdown(self) -> None:
+        """关窗收尾：等后台刷新线程退出。
+
+        背景：:meth:`refresh_passes_async` 起的 ``_refresh_thread`` 是
+        daemon=True 的 ``threading.Thread``，闭包捕获 ``self``（本 QWidget）。
+        若主窗口析构时线程还活着，它会成为本 panel 的最后持有者 → 非 GUI
+        线程析构 QWidget → Windows 堆损坏（Task 158 同根因）。这里主动 join，
+        让主线程等它自然结束；timeout=35s 覆盖 TLE 联网拉取 + 过境计算上限。
+        """
+        th = getattr(self, "_refresh_thread", None)
+        if th is not None and th.is_alive():
+            try:
+                th.join(timeout=35.0)
+            except Exception:  # noqa: BLE001 - 收尾不许因 join 异常中断
+                pass

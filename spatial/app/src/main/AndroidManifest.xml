@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <application
+        android:name=".SpatialApplication"
+        android:label="@string/app_name"
+        android:supportsRtl="true"
+        android:theme="@android:style/Theme.Translucent.NoTitleBar.Fullscreen"
+        tools:targetApi="35">
+
+        <activity
+            android:name=".LaunchActivity"
+            android:exported="true"
+            android:label="@string/app_name"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar.Fullscreen">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+
+            <!-- WindowContainer's name/id -->
+            <meta-data
+                android:name="pico.spatial.windowcontainer.id"
+                android:value="Default" />
+            <!-- WindowContainer's form: 1 = Planar -->
+            <meta-data
+                android:name="pico.spatial.windowcontainer.style"
+                android:value="1" />
+            <!-- Default size of the WindowContainer, uses dp as the default unit -->
+            <meta-data
+                android:name="pico.spatial.windowcontainer.defaultsize"
+                android:value="1280x720" />
+            <!-- WindowContainer's resize type: 2 = ContentSize -->
+            <meta-data
+                android:name="pico.spatial.windowcontainer.resizetype"
+                android:value="2" />
+            <!-- WindowContainer's scale type: 1 = Dynamic -->
+            <meta-data
+                android:name="pico.spatial.windowcontainer.worldscaletype"
+                android:value="1" />
+            <!-- Whether to enable material background, 0: disable, 1: enable -->
+            <meta-data
+                android:name="pico.spatial.windowcontainer.materialbackground"
+                android:value="1" />
+        </activity>
+    </application>
+
+</manifest>

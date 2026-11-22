@@ -245,7 +245,11 @@ class _FakeRecordSelf:
         self.stopped_replay = 0
         self.status = []
         self.record_btn = _FakeButton()
-        self.control_panel = type("_CP", (), {"record_button": _FakeButton()})()
+        self.control_panel = type("_CP", (), {
+            "record_button": _FakeButton(),
+            # 产品起录时会先清空上一轮的产物列表（无产物即空表）。
+            "set_record_products": lambda self, *a, **k: None,
+        })()
 
     def _stop_replay(self):
         self.stopped_replay += 1

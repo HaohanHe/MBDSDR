@@ -8,6 +8,7 @@
 * 输入框是**本地时间**（用户脑子里想的是"今晚九点"，不是 UTC）；
 * 应用时只交出一个 Unix 秒给主窗，由主窗调 ``new_spacetime.set_unix``
   并立刻刷历表——本模块不碰时间引擎、不碰天空视图，避免两条事实源；
+* 「回到现在」用独立 on_now 回调立即恢复实况；无回调时仅填框，明示未应用；
 * 状态行如实写「模拟中 · 比现在 +2 天 3 小时」，不把跳过去说成实时。
 
 不做什么：不提供"假日期"（比如永远停在某个好看的夜晚）。跳过去之后
@@ -16,6 +17,8 @@
 from __future__ import annotations
 
 import time
+from datetime import datetime
+from math import floor
 from typing import Callable, Optional, Tuple
 
 from PySide6.QtCore import QDateTime, Qt
@@ -79,7 +82,10 @@ class TimeMachineDialog(QDialog):
                  real_unix: Optional[float] = None,
                  night_resolver: Optional[Callable[[], Optional[Tuple[datetime, float]]]] = None,
                  on_apply: Optional[Callable[[float], None]] = None,
-                 real_now_provider: Optional[Callable[[], float]] = None):
+                 real_now_provider: Optional[Callable[[], float]] = None,
+                 night_resolver_for_date: Optional[
+                     Callable[[QDateTime], Optional[Tuple[datetime, float]]]] = None,
+                 on_now: Optional[Callable[[], Optional[bool]]] = None):
         super().__init__(parent)
         self.setWindowTitle("时间机器")
         self.setModal(True)
@@ -90,7 +96,10 @@ class TimeMachineDialog(QDialog):
         self._real_unix = float(real_unix if real_unix is not None else self._real_now())
         self._now_unix = float(now_unix if now_unix is not None else self._real_unix)
         self._night_resolver = night_resolver
+        # 显式区分新旧契约，不靠捕获 TypeError 猜回调签名。
+        self._night_resolver_for_date = night_resolver_for_date
         self._on_apply = on_apply
+        self._on_now = on_now
         #: 最近一次动作的终态回执（已在现在/已回到现在、天文暮光终、
         #: 极昼极夜没有事件、跳转失败）。刷新路径只回显它，不能把回执
         #: 改写成「模拟中 · 比现在 …」；用户重新选时刻才清空。
@@ -108,7 +117,8 @@ class TimeMachineDialog(QDialog):
         title.setObjectName("tmTitle")
         lay.addWidget(title)
 
-        hint_text = "跳到任意时刻看那时的天空 · 观测条件设定，不是观测数据"
+        hint_text = ("跳到任意时刻看那时的天空 · 观测条件设定，不是观测数据\n"
+                     "输入为本机本地时间，不是站址时区；入夜按所选日，不固定为今天")
         note = local_time_note()
         if note:
             # 本地时间不可信时先说实话，再让用户继续输入。
@@ -139,13 +149,23 @@ class TimeMachineDialog(QDialog):
         jump.setSpacing(6)
         self.now_btn = QPushButton("回到现在", self)
         self.now_btn.setToolTip(
-            "把时刻归零到今天此刻（点「跳过去」才改引擎）")
+            "立即恢复跟随系统当前时间和 1× 流速"
+            if self._on_now is not None else
+            "仅把输入框填到点击时的现在，尚未应用（点「跳过去」才改引擎）")
         self.now_btn.clicked.connect(self._go_now)
         jump.addWidget(self.now_btn)
-        self.night_btn = QPushButton("今夜", self)
+        self.night_btn = QPushButton(
+            "今夜" if self._night_resolver and not self._night_resolver_for_date
+            else "所选日入夜", self)
         self.night_btn.setToolTip(
-            "按站点真实日落算天文暮光终（太阳 −18°），天全黑的时刻")
-        self.night_btn.setEnabled(self._night_resolver is not None)
+            "按输入框的本机本地日期和当前站址求暮光终；判据是太阳几何高度 "
+            "-18°（天文暮光终定义，不是设备回读）。仅填入时刻，点「跳过去」生效"
+            if self._night_resolver_for_date else
+            "按调用方提供的今夜求解器填入时刻，点「跳过去」生效")
+        self.night_btn.setEnabled(
+            self._night_resolver_for_date is not None or self._night_resolver is not None)
+        if not self.night_btn.isEnabled():
+            self.night_btn.setToolTip("入夜不可用：未设置站址或暮光求解器")
         self.night_btn.clicked.connect(self._go_night)
         jump.addWidget(self.night_btn)
         jump.addStretch(1)
@@ -204,36 +224,56 @@ class TimeMachineDialog(QDialog):
     def _go_now(self) -> None:
         # 「现在」要现取：对话框开 10 分钟后点它，必须跳到此刻，而不是
         # 构造对话框那一刻（旧实现复用 _real_unix 快照）。
-        fresh = float(self._real_now())
+        try:
+            if self._on_now is not None and self._on_now() is False:
+                raise RuntimeError("返回现在未成功")
+            fresh = float(self._real_now())
+        except Exception:
+            # 引擎或刷新链可能只完成了一部分，不能宣称时刻未变或已实时。
+            self._terminal_status = "回到现在失败：未能确认实时状态"
+            self.status.setText(self._terminal_status)
+            return
         was_real = abs(float(self._now_unix) - fresh) < 0.5
         self._real_unix = fresh
         self._now_unix = fresh
         self._load_current()
         # 幂等动作也要有回执：本来就在「现在」时界面一个字都不变，
         # 用户会以为按钮坏了（UI 交互守卫专门抓这类「点了没反应」）。
-        # 只改输入框、不改引擎，所以文案不能说「实时 / 已恢复流速」，
-        # 要写明还得点「跳过去」才生效。
-        self.status.setText("已在现在 · 点「跳过去」生效" if was_real
-                            else "已回到现在 · 点「跳过去」生效")
+        if self._on_now is not None:
+            self.status.setText("已回到现在 · 实时跟随系统时间 · 1×")
+        else:
+            # 独立面板没有返回实况回调：仍保留只填框的旧契约。
+            self.status.setText(("已在现在" if was_real else "已回到现在")
+                                + " · 仅填入，未应用 · 点「跳过去」生效")
         self._terminal_status = self.status.text()
 
     def _go_night(self) -> None:
-        if self._night_resolver is None:
+        if self._night_resolver_for_date is None and self._night_resolver is None:
             return
         try:
-            got = self._night_resolver()
+            if self._night_resolver_for_date is not None:
+                got = self._night_resolver_for_date(self.edit.dateTime())
+            else:
+                got = self._night_resolver()
         except Exception:
-            got = None
+            self._terminal_status = "暮光终计算失败：时刻未改变，不猜时刻"
+            self.status.setText(self._terminal_status)
+            return
         if not got:
             # 极昼/极夜没有这个事件：明说，不硬凑一个时刻。
-            self._terminal_status = "这个纬度当天没有天文暮光终（极昼/极夜），不猜时刻"
+            day_label = "所选本地日" if self._night_resolver_for_date else "求解日期"
+            self._terminal_status = (
+                f"当前站址在{day_label}没有暮光终事件（可能极昼/极夜），不猜时刻")
             self.status.setText(self._terminal_status)
             return
         t, alt_deg = got
-        qdt = qdatetime_from_unix(t.timestamp())
+        # 输入框精度为秒；取事件所在秒，避免午夜前的事件显示成隔日。
+        qdt = qdatetime_from_unix(floor(t.timestamp())).toTimeZone(self.edit.timeZone())
         self.edit.setDateTime(qdt)
+        label = "天文暮光终" if alt_deg == -18.0 else "民用暮光终，天未全黑"
         self.status.setText(
-            f"天文暮光终：太阳 {alt_deg:g}° · {qdt.toString('MM-dd HH:mm')}")
+            f"{label}：太阳 {alt_deg:g}° · {qdt.toString('MM-dd HH:mm')}"
+            " · 仅填入，点「跳过去」生效")
         self._terminal_status = self.status.text()
 
     def _on_time_edited(self) -> None:
@@ -251,6 +291,8 @@ class TimeMachineDialog(QDialog):
             self.status.setText("当前就是现在（点「跳过去」生效）")
         else:
             self.status.setText(f"模拟中 · 比现在 {format_offset(delta)}")
+        if not self.night_btn.isEnabled():
+            self.status.setText(self.status.text() + " · " + self.night_btn.toolTip())
 
     def _apply(self) -> None:
         ts = self.selected_unix()

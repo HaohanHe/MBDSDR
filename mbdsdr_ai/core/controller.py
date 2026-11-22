@@ -19,15 +19,19 @@ MBDSDR Core - 统一控制面 API（Headless-first）
 
 from __future__ import annotations
 
+import json
 import logging
+import math
 import os
 import threading
 import time
 from dataclasses import dataclass, field, asdict
+from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional
 
 import numpy as np
 
+from ..observation_record import MAX_TIMELINE_EVENTS, make_event
 from .errors import (
     SDRUserError,
     DriverNotFoundError,
@@ -64,6 +68,10 @@ SUPPORTED_DECODERS = STREAMABLE_DECODERS + FILE_ONLY_DECODERS
 # 音频输出采样率（解调后送声卡的统一速率）
 AUDIO_FS = 48_000.0
 
+# 同一解码器的 decode_hit 事件最小间隔（秒）：解码器每个 IQ 块都跑，
+# 逐块记录会把时间轴刷爆；间隔内的命中聚合进下一次事件（count 累加）。
+DECODE_HIT_MIN_INTERVAL_S = 1.0
+
 # Task 78：SDR 常驻自动重连的 opt-in 开关。
 # 环境变量优先于配置文件键；两者都没设 = 关闭（默认），绝不自动打开设备。
 SDR_AUTORECONNECT_ENV = "MBDSDR_SDR_AUTORECONNECT"
@@ -88,6 +96,56 @@ def _parse_autoreconnect_value(raw: Any) -> Optional[bool]:
     if text in _AUTORECONNECT_OFF:
         return False
     return None
+
+
+def _parse_iso_utc(text: Any):
+    """ISO8601 → aware datetime；解析不了返回 ``None``（不猜时区）。
+
+    时间轴事件的 ``utc`` 由不同来源写入（``isoformat()`` 带微秒、
+    ``utc_now_iso()`` 以 ``Z`` 结尾），统一在这里解析。无时区信息的串按
+    UTC 处理——本项目所有时间戳都是 UTC。
+    """
+    if not isinstance(text, str) or not text:
+        return None
+    raw = text[:-1] + "+00:00" if text.endswith("Z") else text
+    try:
+        value = datetime.fromisoformat(raw)
+    except ValueError:
+        return None
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return value
+
+
+def _brief_message(message: Dict[str, Any], max_keys: int = 8,
+                   max_len: int = 120) -> Dict[str, Any]:
+    """压缩一条报文为时间轴摘要：前 8 个键，长值截到 120 字符。"""
+    out: Dict[str, Any] = {}
+    for i, (key, value) in enumerate(message.items()):
+        if i >= max_keys:
+            break
+        if isinstance(value, (int, float, bool)) or value is None:
+            out[key] = value
+        else:
+            out[key] = str(value)[:max_len]
+    return out
+
+
+def _decode_message_is_hit(message: Any) -> bool:
+    """解码器返回的一条「报文信息」是否算真实命中。
+
+    只排除解码器自己声明的未命中/错误形态；不认识的结构按命中处理
+    （宁可多记一条真实报文，也不把真结果藏起来）。
+    """
+    if not isinstance(message, dict) or not message:
+        return False
+    if message.get("error"):
+        return False
+    if message.get("success") is False:
+        return False
+    if "rds_present" in message and not message.get("rds_present"):
+        return False
+    return True
 
 
 def read_sdr_autoreconnect_setting(config_dir: Optional[str] = None):
@@ -254,6 +312,79 @@ class _RCShim:
 # ======================================================================
 # SDRController
 # ======================================================================
+def _pump_backoff_seconds(empty: bool, is_debug: bool) -> float:
+    """录音泵每轮退避秒数（0 表示立即下一轮）。
+
+    真机有界读本身按采样率阻塞，不需要额外 sleep；只有空读要退避避免
+    忙转，调试源读不阻塞、保留 1 ms 小睡。2026-11-22 真机实测：旧实现
+    每轮固定 5 ms，2.4 MS/s 下 2.5 s 墙钟只录到 0.53 s 样本；改为真机
+    0 退避后恢复到 99.7% 实时（5 s → 4.983 s）。
+    """
+    if empty:
+        return 0.005
+    if is_debug:
+        return 0.001
+    return 0.0
+
+
+def _sample_shortfall(wall_s: Optional[float], sample_rate: float,
+                      samples: int, tol: float = 0.98
+                      ) -> Optional[Dict[str, Any]]:
+    """墙钟时长 vs 实际样本：短录超过 2% 返回证据 dict，正常返回 None。
+
+    录音泵曾因每轮固定 sleep 5 ms 在 2.4 MS/s 下只录到约 1/5 样本（2026-11-22
+    真机实测：2.5 s 墙钟仅 0.53 s 样本）。读空会记 ``read_gap``，但「读成功
+    却不够快」没有任何事件——必须在这里用墙钟对账，不能静默。
+    """
+    if wall_s is None:
+        return None
+    try:
+        wall = float(wall_s)
+        rate = float(sample_rate)
+        n = int(samples)
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(wall) or not math.isfinite(rate) or wall <= 0 or rate <= 0:
+        return None
+    expected = int(round(wall * rate))
+    if expected <= 0 or n <= 0:
+        return None
+    ratio = n / float(expected)
+    if ratio >= tol:
+        return None
+    return {
+        "wall_s": round(wall, 3),
+        "expected_samples": expected,
+        "accounted_samples": n,
+        "ratio": round(ratio, 4),
+        "sample_rate_hz": rate,
+        "reason": "录制样本数明显少于墙钟×采样率（吞吐不足或设备丢样）",
+    }
+
+
+def _resolve_default_gain(gain_db: float, tuner_name: str) -> float:
+    """0 dB 视为「未指定」：调谐器离散表里没有 0 dB 时取中档。
+
+    FC0012 的最近档是 -4 dB；2026-11-22 真机实测 144.64 MHz 的 IQ RMS
+    0.274，而中档 7.1 dB 只有 0.063（噪声底低约 13 dB）。控制器的默认
+    `_gain_db=0.0` 若直接下发，会把 APRS 这类弱信号淹掉。显式非零值原样保留。
+    """
+    try:
+        value = float(gain_db)
+    except (TypeError, ValueError):
+        return gain_db
+    if abs(value) > 1e-9:
+        return value
+    try:
+        from ..rtlsdr_params import get_gain_table
+        table = sorted(float(g) for g in get_gain_table(str(tuner_name or "")))
+    except Exception:  # noqa: BLE001 - 无表/未知调谐器就保持原值
+        return value
+    if not table or any(abs(g) < 1e-9 for g in table):
+        return value
+    return table[len(table) // 2]
+
+
 class SDRController:
     """统一控制面：所有能力的唯一入口。
 
@@ -284,6 +415,9 @@ class SDRController:
         self._connected: bool = False
         self._device_name: str = ""
         self._is_debug: bool = False
+        #: 最近一次 setter 抛出的异常文本（"类名: 消息"）。后端吞异常返回
+        #: False 时，用户仍需要看到「为什么失败」，不能只剩一句「未生效」。
+        self._last_setter_error: str = ""
         #: 最近一次读样本没拿到数据时的结构化原因（成功读后清空）。
         #: 后端有界读超时会给 ``code=read_timeout``，CLI/工具面据此给出
         #: 「超时未收到样本」而不是含糊的「无数据」。
@@ -357,6 +491,29 @@ class SDRController:
         self._recorder_thread: Optional[threading.Thread] = None
         self._recorder_stop = threading.Event()
         self._recording_path: Optional[str] = None
+        #: 录制开始那一刻的运行时快照（时间/站址/设备）。观测档案用它，
+        #: 而不是结束时再取——结束时设备往往已断开、GNSS 已掉 fix。
+        self._recording_snapshot: Optional[Dict[str, Any]] = None
+        #: 录制开始的第一个时间轴事件（含当时的频率/采样率/增益）。
+        self._recording_start_event: Optional[Dict[str, Any]] = None
+        #: 录制期间的时间轴事件（调谐/增益/采样率/解码命中/读空…）。
+        #: 只在录制中累积；停止时快照后清空，避免污染下一次录制。
+        self._recording_events: List[Dict[str, Any]] = []
+        self._recording_events_lock = threading.Lock()
+        #: 因超过 :data:`MAX_TIMELINE_EVENTS` 被丢弃的事件数。
+        self._recording_events_dropped: int = 0
+        #: 录制开始墙钟（monotonic 秒）与当时采样率：停止时核对
+        #: 「墙钟时长 vs 实际样本」，短录要进时间轴，不能静默。
+        self._recording_start_mono: Optional[float] = None
+        self._recording_sample_rate: float = 0.0
+        #: 按解码器聚合、尚未到发送间隔的 decode_hit 状态：
+        #: ``{decoder: {"pending": int, "last_emit": float, "first": dict|None}}``。
+        self._decode_hit_pending: Dict[str, Dict[str, Any]] = {}
+        self._decode_hit_lock = threading.Lock()
+        #: 录制期间流式解码线程从同一设备读走的样本数。它不进录音文件，
+        #: 但必须在档案里写明，否则「录了 N 秒只有 M 秒样本」会被误读成丢包。
+        self._decoder_samples_read: int = 0
+        self._decoder_samples_lock = threading.Lock()
 
         # ---- 服务 ----
         self._rc: Any = None
@@ -468,6 +625,14 @@ class SDRController:
         self._connected = True
         from ..runtime_sources import utc_now_iso
         self._sdr_last_update_utc = utc_now_iso()
+        # 0 dB 是「未指定」：按调谐器离散表取中档（FC0012 → 7.1 dB），
+        # 避免默认 -4 dB 把噪声底抬高十几 dB。
+        gain_value = _resolve_default_gain(
+            self._gain_db, getattr(opened, "tuner_name", ""))
+        if gain_value != self._gain_db:
+            logger.info("默认增益 0 dB → %.1f dB（调谐器 %s）",
+                        gain_value, getattr(opened, "tuner_name", ""))
+            self._gain_db = gain_value
         # 下发初始参数：任何一项没落到硬件都必须让 connect 失败。
         # 以前只在异常时记一条 warning，返回 True——调用方以为"已连接且
         # 参数已生效"，实际设备仍跑默认值，属典型的失败当成功。
@@ -475,7 +640,7 @@ class SDRController:
         for what, fn_name, value in (
             ("采样率", "set_sample_rate", self._sample_rate),
             ("频率", "set_frequency", self._freq_hz),
-            ("增益", "set_gain", self._gain_db),
+            ("增益", "set_gain", gain_value),
         ):
             fn = getattr(opened, fn_name, None)
             if not callable(fn):
@@ -696,6 +861,8 @@ class SDRController:
         CLI / MCP 的调用方必须把这句话展示给用户：只写日志等于用户看不见，
         「设了但没生效」与「设成功」在使用者侧无法区分。
         """
+        if self._last_setter_error:
+            return self._last_setter_error
         status = getattr(self._backend, "status", None)
         err = getattr(status, "error", "") if status is not None else ""
         return err or f"{what}未生效（后端返回 False）"
@@ -703,16 +870,22 @@ class SDRController:
     def set_frequency(self, hz: float) -> bool:
         """调谐到中心频率（Hz）。成功才更新本地缓存；未连接时仅记录目标值。"""
         hz = float(hz)
+        old = self._freq_hz
+        self._last_setter_error = ""
         if self._connected and self._backend is not None:
             try:
                 ok = self._backend.set_frequency(hz)
             except Exception as e:
+                self._last_setter_error = f"{type(e).__name__}: {e}"
                 logger.warning("set_frequency 失败: %s", e)
                 return False
             if ok is False:
                 logger.warning("set_frequency 未生效: %s", self.setter_failure_text("调谐"))
                 return False
         self._freq_hz = hz
+        if hz != old:
+            self.note_observation_event(
+                "tune", {"from_hz": old, "to_hz": hz})
         return True
 
     def get_frequency(self) -> float:
@@ -765,17 +938,24 @@ class SDRController:
 
     def set_gain(self, db: float) -> bool:
         """设置总增益（dB）。成功才更新本地缓存。"""
-        db = float(db)
+        db = _resolve_default_gain(
+            float(db), getattr(self._backend, "tuner_name", ""))
+        old = self._gain_db
+        self._last_setter_error = ""
         if self._connected and self._backend is not None:
             try:
                 ok = self._backend.set_gain(db)
             except Exception as e:
+                self._last_setter_error = f"{type(e).__name__}: {e}"
                 logger.warning("set_gain 失败: %s", e)
                 return False
             if ok is False:
                 logger.warning("set_gain 未生效: %s", self.setter_failure_text("增益"))
                 return False
         self._gain_db = db
+        if db != old:
+            self.note_observation_event(
+                "gain", {"from_db": old, "to_db": db})
         return True
 
     def get_gain(self) -> float:
@@ -795,10 +975,13 @@ class SDRController:
     def set_sample_rate(self, sr: float) -> bool:
         """设置基带采样率（Hz）。成功才更新本地缓存；失败明确抛错。"""
         sr = float(sr)
+        old = self._sample_rate
+        self._last_setter_error = ""
         if self._connected and self._backend is not None:
             try:
                 ok = self._backend.set_sample_rate(sr)
             except Exception as e:
+                self._last_setter_error = f"{type(e).__name__}: {e}"
                 raise SampleRateNotSupportedError(
                     f"设备不支持采样率 {sr}", technical_detail=e
                 ) from e
@@ -808,6 +991,9 @@ class SDRController:
                     technical_detail=self.setter_failure_text("采样率"),
                 )
         self._sample_rate = sr
+        if sr != old:
+            self.note_observation_event(
+                "sample_rate", {"from_hz": old, "to_hz": sr})
         return True
 
     def get_sample_rate(self) -> float:
@@ -1230,6 +1416,59 @@ class SDRController:
     # ==================================================================
     # 解码
     # ==================================================================
+    def _record_decode_hits(self, decoder: str, messages: List[Any]) -> None:
+        """把一批解码结果里的真实命中聚合后记进观测时间轴。
+
+        同一解码器在 :data:`DECODE_HIT_MIN_INTERVAL_S` 内只发一条
+        ``decode_hit``（``count`` 为累计条数，``first`` 为首条真实报文）；
+        首条立刻发，间隔内的其余命中留待下次或 :meth:`_flush_decode_hits`。
+        没有真实命中就什么都不记——解码器自报的「未命中」不是观测事件。
+        """
+        hits = [m for m in messages if _decode_message_is_hit(m)]
+        if not hits:
+            return
+        now = time.monotonic()
+        detail: Optional[Dict[str, Any]] = None
+        with self._decode_hit_lock:
+            state = self._decode_hit_pending.get(decoder)
+            if state is None:
+                state = {"pending": 0, "last_emit": 0.0, "first": None}
+                self._decode_hit_pending[decoder] = state
+            state["pending"] = int(state["pending"]) + len(hits)
+            if state["first"] is None:
+                state["first"] = hits[0]
+            if (not state["last_emit"]
+                    or now - float(state["last_emit"]) >= DECODE_HIT_MIN_INTERVAL_S):
+                detail = {"decoder": decoder, "count": int(state["pending"]),
+                          "first": _brief_message(state["first"])}
+                state["pending"] = 0
+                state["first"] = None
+                state["last_emit"] = now
+        if detail is not None:
+            self.note_observation_event("decode_hit", detail)
+
+    def _flush_decode_hits(self) -> None:
+        """把各解码器尚未到发送间隔的命中一次性发出（停止录制前调用）。
+
+        锁内取快照、锁外发事件，避免与 :meth:`note_observation_event` 的
+        事件锁交叉等待；``count`` 是该解码器累计未发的条数。
+        """
+        with self._decode_hit_lock:
+            pending = self._decode_hit_pending
+            self._decode_hit_pending = {}
+            snapshots = [
+                {"decoder": decoder, "count": int(state["pending"]),
+                 "first": (state["first"] if isinstance(state["first"], dict)
+                           else None)}
+                for decoder, state in pending.items()
+                if int(state.get("pending", 0)) > 0
+            ]
+        for detail in snapshots:
+            self.note_observation_event("decode_hit", {
+                "decoder": detail["decoder"], "count": detail["count"],
+                "first": _brief_message(detail["first"]) if detail["first"] else {},
+            })
+
     def start_decoder(self, decoder_type: str, params: Optional[dict] = None) -> str:
         """启动一个流式后台解码器（仅 adsb/rds），返回句柄。
 
@@ -1272,6 +1511,15 @@ class SDRController:
                     continue
                 try:
                     iq = self._read_raw_iq(8192)
+                    # 录制中的流式解码与录制泵共用同一条设备读流：解码线程
+                    # 每读一块，录音文件就少一块。必须计数并在档案里写明，
+                    # 否则「录了 16 s 只有 3.5 s 样本」会被当成设备丢包。
+                    if iq is not None and self._recorder is not None:
+                        try:
+                            with self._decoder_samples_lock:
+                                self._decoder_samples_read += int(iq.size)
+                        except (TypeError, ValueError):
+                            pass
                     if iq is not None and decode_fn is not None:
                         msgs = decode_fn(iq, self._sample_rate, state["params"])
                         if isinstance(msgs, dict):
@@ -1280,6 +1528,7 @@ class SDRController:
                             for m in msgs:
                                 if isinstance(m, dict):
                                     state["messages"].append(m)
+                            self._record_decode_hits(dt, msgs)
                 except Exception as e:  # pragma: no cover
                     logger.debug("decoder %s 块处理异常: %s", dt, e)
                 state["stop"].wait(0.05)
@@ -1473,6 +1722,7 @@ class SDRController:
                 GroundStation,
                 PASS_MIN_ALT_DEG,
                 PASS_WINDOW_HOURS,
+                grid_manifest,
                 predict_passes,
             )
             from ..orbit import fetch_tle_record, tle_epoch_iso
@@ -1588,7 +1838,7 @@ class SDRController:
             # 决定的精度，这里补「采样路径」与采样本身带来的偏差（两者
             # 不是一回事，混着说会让用户以为 60 秒是轨道位置精度）。
             out["pass_time_source"] = (
-                "sat_passes.predict_passes（60 秒粗扫 + 2 秒细扫 + 0.5 秒二分）")
+                f"sat_passes.predict_passes（{grid_manifest()['accuracy_note']}）")
             out["pass_time_sampling_precision_s"] = 1.0
             # 显式 (0,0)/海上坐标被计算口径放行时，把可疑位置原因原样带给
             # 用户，不许静默算完。
@@ -1767,6 +2017,39 @@ class SDRController:
     # ==================================================================
     # 录制
     # ==================================================================
+    def note_observation_event(self, kind: str,
+                               detail: Optional[Dict[str, Any]] = None) -> bool:
+        """记一条观测时间轴事件；返回是否真的记下。
+
+        只在录制中有效：没在录制就不记任何东西——「观测中途事件」属于某
+        次真实录制，脱离录制单独记录等于编造观测过程。超过
+        :data:`MAX_TIMELINE_EVENTS` 时第一次追加一条 ``timeline_truncated``
+        并返回 False，后续超限事件不再进入时间轴。
+        """
+        if self._recorder is None:
+            return False
+        k = str(kind or "").strip()
+        if not k:
+            return False
+        event = make_event(k, dict(detail or {}))
+        # 事件落点用「此刻已写入的样本数」，不用墙上时钟 × 采样率：录制期间
+        # 若有别的消费者（如流式解码线程）也在读设备，样本会被分流，墙上时钟
+        # 换算出的偏移会比文件实际长度大。样本索引才是回放时能直接 seek 的量。
+        try:
+            event["samples"] = int(getattr(self._recorder, "n_samples", 0))
+        except (TypeError, ValueError):
+            pass
+        with self._recording_events_lock:
+            if len(self._recording_events) >= MAX_TIMELINE_EVENTS:
+                if not self._recording_events_dropped:
+                    self._recording_events.append(make_event(
+                        "timeline_truncated",
+                        {"max_events": int(MAX_TIMELINE_EVENTS)}))
+                self._recording_events_dropped += 1
+                return False
+            self._recording_events.append(event)
+        return True
+
     def start_recording(self, path: str) -> dict:
         """开始 IQ 录制（SigMF cf32_le）。未连接返回错误 dict。"""
         if not self._connected:
@@ -1775,12 +2058,18 @@ class SDRController:
         try:
             from ..recorder import IQRecorder
 
+            # driver 写进 SigMF meta，观测档案才有设备来源可查。
+            # controller 没有单独的 _driver 字段，用 connect 时记下的
+            # ``driver:serial`` 入口标识解析（debug 源不在其列，留空）。
+            _dev_id = str(getattr(self, "_last_device_id", "") or "")
+            _driver = _dev_id.split(":", 1)[0] if ":" in _dev_id else ""
             rec = IQRecorder(
                 path,
                 sample_rate=self._sample_rate,
                 center_freq_hz=self._freq_hz,
                 gain_db=self._gain_db,
                 device=self._device_name,
+                driver=_driver,
             )
             if not rec.open():
                 # 旧实现把所有打不开的情形一律写成"无法打开 {path} 写入"：
@@ -1796,19 +2085,87 @@ class SDRController:
         self._recorder = rec
         self._recording_path = rec.data_path
         self._recorder_stop.clear()
+        # 新一轮录制从空时间轴开始：上一轮的事件不能混进这次观测。
+        with self._recording_events_lock:
+            self._recording_events = []
+            self._recording_events_dropped = 0
+        # 解码命中的未发聚合同样清零：录制开始前解码线程攒下的条数如果留着，
+        # 会被算进本次观测的第一条 decode_hit，等于给档案多记几条没发生的命中。
+        with self._decode_hit_lock:
+            self._decode_hit_pending = {}
+        # 分流计数按新一轮录制重新累计。
+        with self._decoder_samples_lock:
+            self._decoder_samples_read = 0
+        # 时空快照必须在录制**开始**时定格：结束再取会得到「设备已断开、
+        # GNSS 已掉 fix」的空值（2026-11-20 真机实测：GNSS 15 星定位在录，
+        # 录 2 s 后取快照变成 site.source=none）。
+        try:
+            from ..runtime_sources import get_runtime_sources
+            self._recording_snapshot = get_runtime_sources().snapshot()
+        except Exception:  # noqa: BLE001 - 快照失败不阻止录制
+            self._recording_snapshot = None
+        # 时间轴起点：频率/采样率/增益取「开始录制那一刻」的值，之后改了也不回写。
+        # 统一用 make_event 生成 utc（微秒精度 + +00:00），与后续事件同格式——
+        # 时间轴按 utc 字符串排序，混合精度（Z 截秒）会把 start 排到中间。
+        try:
+            self._recording_start_event = make_event("record_start", {
+                "center_freq_hz": float(self._freq_hz),
+                "sample_rate_hz": float(self._sample_rate),
+                "gain_db": float(self._gain_db),
+            })
+            # 起点就是文件第 0 个样本；显式写出来，annotations 才有确定的锚点。
+            self._recording_start_event["samples"] = 0
+        except Exception:  # noqa: BLE001 - 时间轴是附带信息
+            self._recording_start_event = None
+        if self._recording_start_event is not None:
+            with self._recording_events_lock:
+                self._recording_events.append(self._recording_start_event)
+
+        # 读空检测状态：空读起点/次数/原因。只由 pump 线程读写，用 nonlocal
+        # 维护，不新增线程。
+        gap_started: Optional[float] = None
+        gap_empty_reads = 0
+        gap_reason: Optional[Dict[str, Any]] = None
 
         def pump() -> None:
+            nonlocal gap_started, gap_empty_reads, gap_reason
             while not self._recorder_stop.is_set():
                 iq = self._read_raw_iq(8192)
-                # stop 已置位就不写：有界读可能刚好在 stop 之后返回，
-                # 晚到的块不能写进已 close() 的录制器（否则写已关闭文件）。
-                if iq is not None and not self._recorder_stop.is_set():
-                    rec.write(iq)
-                self._recorder_stop.wait(0.005)
+                empty = iq is None or getattr(iq, "size", 0) == 0
+                if empty:
+                    if gap_started is None:
+                        gap_started = time.monotonic()
+                        gap_empty_reads = 0
+                        reason = getattr(self._backend, "last_read_reason", None)
+                        gap_reason = reason if isinstance(reason, dict) else None
+                    gap_empty_reads += 1
+                else:
+                    if gap_started is not None:
+                        self.note_observation_event("read_gap", {
+                            "duration_s": round(time.monotonic() - gap_started, 3),
+                            "empty_reads": gap_empty_reads,
+                            "reason": gap_reason,
+                        })
+                        gap_started = None
+                        gap_empty_reads = 0
+                        gap_reason = None
+                    # stop 已置位就不写：有界读可能刚好在 stop 之后返回，
+                    # 晚到的块不能写进已 close() 的录制器（否则写已关闭文件）。
+                    if not self._recorder_stop.is_set():
+                        rec.write(iq)
+                # 真机有界读本身按采样率阻塞；再固定退避 5 ms 会在 2.4 MS/s
+                # 下丢样本（2026-11-22 真机实测：2.5 s 墙钟只录到 0.53 s）。
+                # 只有空读或调试源（读不阻塞）才退避，避免忙转。
+                delay = _pump_backoff_seconds(
+                    empty, bool(getattr(self, "_is_debug", False)))
+                if delay > 0:
+                    self._recorder_stop.wait(delay)
 
         self._recorder_thread = threading.Thread(
             target=pump, name="recorder-pump", daemon=True
         )
+        self._recording_start_mono = time.monotonic()
+        self._recording_sample_rate = float(self._sample_rate)
         self._recorder_thread.start()
         return {"recording": True, "path": rec.data_path}
 
@@ -1819,16 +2176,191 @@ class SDRController:
         if t is not None:
             t.join(timeout=1.0)
         self._recorder_thread = None
+        rec = self._recorder
+        # 最后不到一个间隔的命中必须在取事件快照之前发出，否则随录制结束丢失。
+        self._flush_decode_hits()
+        # 事件快照必须在 close() **之前**取：close 落 annotations 之后，
+        # 录制器进入收尾状态，时间轴也不该再被 pump/解码线程改动。
+        with self._recording_events_lock:
+            events = list(self._recording_events)
+            self._recording_events = []
+            self._recording_events_dropped = 0
         meta = None
-        if self._recorder is not None:
+        if rec is not None:
             try:
-                meta = self._recorder.close()
+                rec.set_annotations(self._sigmf_annotations(events))
+            except Exception:  # noqa: BLE001 - 注释是附带信息，不拖垮收尾
+                logger.warning("写入 SigMF annotations 失败", exc_info=True)
+            try:
+                meta = rec.close()
             except Exception:  # pragma: no cover
                 meta = None
-        n = getattr(self._recorder, "n_samples", 0) if self._recorder else 0
+        n = getattr(rec, "n_samples", 0) if rec is not None else 0
+        # 墙钟对账：读成功但吞吐不足时没有 read_gap 事件，必须在这里发现。
+        wall_s = (time.monotonic() - self._recording_start_mono
+                  if self._recording_start_mono is not None else None)
+        self._recording_start_mono = None
+        rate = self._recording_sample_rate or self._sample_rate
+        self._recording_sample_rate = 0.0
+        with self._decoder_samples_lock:
+            shared = int(self._decoder_samples_read)
+        shortfall = _sample_shortfall(wall_s, rate, int(n) + shared)
         self._recorder = None
         self._recording_path = None
-        return {"recording": False, "samples": int(n), "meta_path": meta}
+        snapshot = self._recording_snapshot
+        self._recording_snapshot = None
+        start_event = self._recording_start_event
+        self._recording_start_event = None
+        # 时间轴 = 录制期间累计的事件。只有「确实开始了」且「确实落了 meta」
+        # 时才补 record_stop，避免给一次失败的录制编出一段不存在的观测过程。
+        timeline: List[Dict[str, Any]] = events
+        if start_event and meta:
+            try:
+                if shortfall:
+                    loss_event = make_event("sample_loss", shortfall)
+                    loss_event["samples"] = int(n)
+                    timeline.append(loss_event)
+                stop_event = make_event("record_stop", {"samples": int(n)})
+                stop_event["samples"] = int(n)
+                timeline.append(stop_event)
+            except Exception:  # noqa: BLE001 - 时间轴是附带信息
+                pass
+        result: Dict[str, Any] = {
+            "recording": False, "samples": int(n), "meta_path": meta}
+        if shortfall:
+            result["sample_loss"] = shortfall
+        # 录制期间被流式解码线程分流的样本数：录音文件里没有它们，档案必须写明，
+        # 否则「录了 16 s 只有 3.5 s 样本」会被误读成设备丢包。
+        if shared > 0:
+            result["decoder_shared_samples"] = shared
+        # 录制是「一次观测」的主产物；停止成功后顺手落一份观测档案（P1-08）。
+        # 桌面 / CLI / MCP 三个入口都走这里，所以只需接线一处，三端拿到同一份。
+        # 档案失败不影响录制结论——但必须在返回值里如实报出，不许静默。
+        if meta:
+            obs_path, obs_err = self._write_observation_record(
+                meta, snapshot=snapshot, timeline=timeline,
+                extra_notes=([f"录制期间流式解码线程分流了 {shared} 个样本，"
+                              "未写入录音文件"] if shared > 0 else None),
+                extra_result=({"decoder_shared_samples": shared}
+                              if shared > 0 else None))
+            if obs_path:
+                result["observation_record"] = obs_path
+            if obs_err:
+                result["observation_error"] = obs_err
+        return result
+
+    def _write_observation_record(self, meta_path: str, snapshot=None,
+                                  timeline=None, extra_notes=None,
+                                  extra_result=None):
+        """把刚结束的录制落成观测档案；返回 ``(path, error)``，二选一非空。
+
+        不完整录制（0 样本 / 写入失败）**不生成档案**——按 P1-08「无产物拒绝
+        导出」的口径，档案不能把「什么都没录到」包装成一次观测。
+
+        ``snapshot`` 应传录制**开始时**的运行时快照；省略时退回当前快照。
+        观测的时空属性属于「观测发生的那一刻」，不属于「停止按钮按下的那一刻」。
+        """
+        try:
+            import uuid
+
+            from ..observation_record import (
+                product_from_sigmf,
+                record_from_snapshot,
+            )
+            from ..runtime_sources import get_runtime_sources
+
+            prod = product_from_sigmf(meta_path)
+            if not prod.get("complete"):
+                reason = (prod.get("incomplete_reason")
+                          or "录制不完整（没有可用样本），不生成观测档案")
+                return None, reason
+
+            snap = (snapshot if snapshot is not None
+                    else get_runtime_sources().snapshot())
+            notes = (["时间/站址取自观测开始时刻的快照"]
+                     if snapshot is not None else [])
+            if extra_notes:
+                notes.extend(str(x) for x in extra_notes if str(x or "").strip())
+            result: Dict[str, Any] = {
+                "summary": f"录制 {prod.get('samples')} 个 IQ 样本"}
+            if extra_result:
+                result.update(extra_result)
+            rec = record_from_snapshot(
+                f"obs-{uuid.uuid4().hex[:12]}",
+                snap,
+                started_utc=prod.get("started_utc"),
+                tuning={
+                    "center_freq_hz": prod.get("center_freq_hz"),
+                    "sample_rate_hz": prod.get("sample_rate_hz"),
+                    "gain_db": prod.get("gain_db"),
+                    "doppler_residual_hz": None,
+                },
+                products=[prod],
+                result=result,
+                evidence="real_hw",
+                notes=notes,
+                timeline=timeline,
+            )
+            path = os.path.splitext(meta_path)[0] + ".observation.json"
+            ok, err = rec.write_json(path)
+            return (path, None) if ok else (None, err)
+        except Exception as exc:  # noqa: BLE001 - 档案是附带产物，不许拖垮录制
+            logger.warning("观测档案写入失败: %s: %s", type(exc).__name__, exc)
+            return None, f"{type(exc).__name__}: {exc}"
+
+    def _sigmf_annotations(self, events) -> List[Dict[str, Any]]:
+        """把时间轴事件映射成 SigMF annotations（core:sample_start 按录制起点换算）。
+
+        起点用录制器 ``open()`` 时记下的 ``_start_time``，采样率用录制器
+        当时的 ``sample_rate``；任缺或采样率非正就返回空列表——没有可靠的
+        时间基准时宁可不写，也不把事件挂到一个猜出来的样本偏移上。
+        """
+        rec = self._recorder
+        if rec is None:
+            return []
+        start = _parse_iso_utc(getattr(rec, "_start_time", None))
+        if start is None:
+            return []
+        try:
+            sample_rate = float(getattr(rec, "sample_rate", 0.0) or 0.0)
+        except (TypeError, ValueError):
+            return []
+        if sample_rate <= 0:
+            return []
+        try:
+            total = int(getattr(rec, "n_samples", 0) or 0)
+        except (TypeError, ValueError):
+            total = 0
+        out: List[Dict[str, Any]] = []
+        for event in events or []:
+            if not isinstance(event, dict):
+                continue
+            kind = str(event.get("kind") or "")
+            detail = event.get("detail")
+            # 优先用事件落点样本数（录制期间由 note_observation_event 记下）：
+            # 录制中若样本被别的消费者分流，墙上时钟换算会超出文件实际长度。
+            offset = event.get("samples")
+            if isinstance(offset, int) and offset >= 0:
+                sample_start = min(offset, total)
+            else:
+                stamp = _parse_iso_utc(event.get("utc"))
+                if stamp is None:
+                    continue
+                seconds = (stamp - start).total_seconds()
+                sample_start = int(round(seconds * sample_rate))
+                sample_start = max(0, min(sample_start, total))
+            try:
+                comment = json.dumps(detail, ensure_ascii=False)
+            except (TypeError, ValueError):
+                comment = json.dumps(str(detail), ensure_ascii=False)
+            out.append({
+                "core:sample_start": sample_start,
+                "core:label": kind,
+                "core:comment": comment,
+                "mbdsdr:utc": event.get("utc"),
+                "mbdsdr:kind": kind,
+            })
+        return out
 
     def get_recording_status(self) -> dict:
         """当前录制状态。"""

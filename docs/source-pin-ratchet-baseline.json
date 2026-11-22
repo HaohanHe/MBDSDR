@@ -2,7 +2,7 @@
   "schema": 1,
   "built_at": "2026-11-06",
   "scanner": "scripts/audit_source_text_pins.py",
-  "built_count": 58,
+  "built_count": 72,
   "entries": [
     {
       "path": "tests/test_ai_panel_behavior.py",
@@ -549,8 +549,134 @@
       "reason": "保留：回放比区间 0.3 – 3.0 只在人工验收卡里以文本呈现，ring4 常量没有可供行为断言调用的消费入口；区间串由 PLAYBACK_RMS_RATIO_MIN/MAX 拼出，任一侧改动都会红。若要删此条，必须先让验收卡由常量生成。",
       "legacy": false,
       "verdict": "keep"
+    },
+    {
+      "path": "tests/test_pass_time_single_source.py",
+      "func": "test_limitations_register_timeline_row_matches_manifest",
+      "pinned": "\"未细扫\"",
+      "owner": "时间线（AOS/LOS 二分）",
+      "reason": "保留：docs/limitations-register.md 的 TimelineEngine 行是给用户看的实现口径台账；数值由 grid_manifest 拼出，而「不是卫星位置精度 / 保留粗扫网格点 / AOS/LOS 二分」这类定性语义只能文本断言。改台账或改清单任一侧都会红。",
+      "legacy": false,
+      "verdict": "keep"
+    },
+    {
+      "path": "tests/test_pass_time_single_source.py",
+      "func": "test_limitations_register_timeline_row_matches_manifest",
+      "pinned": "\"无细扫\"",
+      "owner": "时间线（AOS/LOS 二分）",
+      "reason": "保留：同上——台账行不得再写「无细扫」，这是对旧口径的负向守卫，行为测试无法证明。",
+      "legacy": false,
+      "verdict": "keep"
+    },
+    {
+      "path": "tests/test_pass_time_single_source.py",
+      "func": "test_limitations_register_timeline_row_matches_manifest",
+      "pinned": "\"7.6\"",
+      "owner": "时间线（AOS/LOS 二分）",
+      "reason": "保留：负向守卫——台账不得残留旧版「7.6」口径；只能文本断言。",
+      "legacy": false,
+      "verdict": "keep"
+    },
+    {
+      "path": "tests/test_pass_time_single_source.py",
+      "func": "test_limitations_register_timeline_row_matches_manifest",
+      "pinned": "f\"{m['coarse_step_s']:g} 秒\"",
+      "owner": "时间线（AOS/LOS 二分）",
+      "reason": "保留：台账粗扫秒数必须由 grid_manifest 拼出；文档行是唯一呈现面。",
+      "legacy": false,
+      "verdict": "keep"
+    },
+    {
+      "path": "tests/test_pass_time_single_source.py",
+      "func": "test_limitations_register_timeline_row_matches_manifest",
+      "pinned": "f\"{m['fine_step_s']:g} 秒\"",
+      "owner": "时间线（AOS/LOS 二分）",
+      "reason": "保留：台账细扫秒数必须由 grid_manifest 拼出；文档行是唯一呈现面。",
+      "legacy": false,
+      "verdict": "keep"
+    },
+    {
+      "path": "tests/test_pass_time_single_source.py",
+      "func": "test_limitations_register_timeline_row_matches_manifest",
+      "pinned": "\"refine_culmination\"",
+      "owner": "时间线（AOS/LOS 二分）",
+      "reason": "保留：台账必须写明中天细化开关名，便于操作员对照清单；只能文本断言。",
+      "legacy": false,
+      "verdict": "keep"
+    },
+    {
+      "path": "tests/test_pass_time_single_source.py",
+      "func": "test_limitations_register_timeline_row_matches_manifest",
+      "pinned": "\"不是卫星位置精度\"",
+      "owner": "时间线（AOS/LOS 二分）",
+      "reason": "保留：台账必须保留「不是卫星位置精度」这句边界声明，防止把过境时刻精度误读成定位精度；这是产品口径，不是可执行行为。",
+      "legacy": false,
+      "verdict": "keep"
+    },
+    {
+      "path": "tests/test_pass_time_single_source.py",
+      "func": "test_limitations_register_timeline_row_matches_manifest",
+      "pinned": "\"AOS/LOS 二分\"",
+      "owner": "时间线（AOS/LOS 二分）",
+      "reason": "保留：台账必须写明升落已二分；定性语义只能文本断言。",
+      "legacy": false,
+      "verdict": "keep"
+    },
+    {
+      "path": "tests/test_pass_time_single_source.py",
+      "func": "test_limitations_register_timeline_row_matches_manifest",
+      "pinned": "f\"{m['bisect_tol_s']:g} 秒\"",
+      "owner": "时间线（AOS/LOS 二分）",
+      "reason": "保留：台账二分容差必须由 grid_manifest 拼出；文档行是唯一呈现面。",
+      "legacy": false,
+      "verdict": "keep"
+    },
+    {
+      "path": "tests/test_pass_time_single_source.py",
+      "func": "test_limitations_register_timeline_row_matches_manifest",
+      "pinned": "\"保留粗扫网格点\"",
+      "owner": "时间线（AOS/LOS 二分）",
+      "reason": "保留：台账必须写明二分失败时的兜底语义（保留粗扫网格点）；行为测试只能证明二分成功路径。",
+      "legacy": false,
+      "verdict": "keep"
+    },
+    {
+      "path": "tests/test_pass_time_single_source.py",
+      "func": "test_limitations_register_timeline_row_matches_manifest",
+      "pinned": "\"los_refined\"",
+      "owner": "时间线（AOS/LOS 二分）",
+      "reason": "保留：台账必须列出 los_refined 字段名，供操作员/排查对照；只能文本断言。",
+      "legacy": false,
+      "verdict": "keep"
+    },
+    {
+      "path": "tests/test_pass_time_single_source.py",
+      "func": "test_limitations_register_timeline_row_matches_manifest",
+      "pinned": "\"aos_refined\"",
+      "owner": "时间线（AOS/LOS 二分）",
+      "reason": "保留：台账必须列出 aos_refined 字段名；只能文本断言。",
+      "legacy": false,
+      "verdict": "keep"
+    },
+    {
+      "path": "tests/test_pass_time_single_source.py",
+      "func": "test_time_basis_text_consumers_use_grid_manifest",
+      "pinned": "old",
+      "owner": "时间线（AOS/LOS 二分）",
+      "reason": "保留：跨文件负向守卫——agent/controller/sdr_tools 不得再手写旧秒数文案；行为测试无法证明「整文件没有旧文案」。重新评估条件：三个消费方改为共享格式化函数后。",
+      "legacy": false,
+      "verdict": "keep"
+    },
+    {
+      "path": "tests/test_pass_time_single_source.py",
+      "func": "test_time_basis_text_consumers_use_grid_manifest",
+      "pinned": "\"accuracy_note\"",
+      "owner": "时间线（AOS/LOS 二分）",
+      "reason": "保留：跨文件真值源守卫——三个消费方必须引用 grid_manifest()['accuracy_note']；重新评估条件同左。",
+      "legacy": false,
+      "verdict": "keep"
     }
   ],
-  "revised_at": "2026-11-13",
+  "revised_at": "2026-11-22",
   "classification_note": "分类器（_literal_of / 邻近 assert 归组）会把同一函数的多条 pin 重复计入不同判定：看条数前必须按 (path, func, pinned) 去重并回读 assert 原文。条数会虚高；砍条数时若只按 C/B 标签操作，可能删掉真判据。"
 }

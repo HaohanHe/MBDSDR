@@ -55,6 +55,8 @@ __all__ = [
     "screen_to_sky",
     "sky_to_screen",
     "sky_to_screen_many",
+    "direction_is_drawable",
+    "clip_segment_to_domain",
     "pick_object",
     "angular_distance_deg",
     "build_view_rotation",
@@ -479,6 +481,88 @@ def sky_to_screen_many(az_deg, alt_deg,
     vec = np.column_stack((ca * np.cos(az), ca * np.sin(az), -np.sin(alt)))
     v_view = vec @ _cached_view_rotation(view.center_az, view.center_alt).T
     return _to_screen_arrays(v_view, view, projection, widget_size)
+
+
+# ---------------------------------------------------------------------------
+# 投影有效性域裁剪（参考 aladin-lite 的 ProjDef / SDF 思路，代码重写）
+#
+# 参考实现（LGPLv3，只读思路）把「投影有效区域」写成有符号距离函数
+# （sdf <= 0 为域内），并对越界顶点做 ray marching 推回边界。我们的域都是
+# 解析的（相机前半球 / 去掉对跖点的球面 / 归一化圆盘），所以不需要沿 SDF
+# 迭代推进：在两点间的大圆弧上二分就能精确落到边界，且与绘制端共用同一个
+# `is_valid_vec` / `is_in_domain` 判据，不另造一套几何。
+# ---------------------------------------------------------------------------
+def direction_is_drawable(az_deg: float, alt_deg: float,
+                          view: "ViewState", projection: Any) -> bool:
+    """该天球方向是否有**确定的**屏幕坐标（有效性域唯一判据）。
+
+    三层依次判：投影有定义（不在相机背后/不是对跖点）→ 坐标有限 →
+    落在投影的归一化有效域内（正射/等距方位的圆盘）。
+    """
+    v = vec_from_azalt(float(az_deg), float(alt_deg))
+    v_view = _cached_view_rotation(view.center_az, view.center_alt) @ v
+    if not projection.is_valid_vec(v_view):
+        return False
+    x_n, y_n = projection.project_vec(v_view)
+    if not (math.isfinite(x_n) and math.isfinite(y_n)):
+        return False
+    return projection.is_in_domain(x_n, y_n)
+
+
+def clip_segment_to_domain(az0: float, alt0: float,
+                           az1: float, alt1: float,
+                           drawable, project,
+                           *, iterations: int = 24
+                           ) -> List[Tuple[float, float]]:
+    """把一条天球大圆段裁到调用方给定的有效域。
+
+    Args:
+        az0, alt0, az1, alt1: 段两端的地平坐标（度）。
+        drawable: ``(az, alt) -> bool``，该方向是否在有效域内。
+        project: ``(az, alt) -> (px, py)``，与绘制端同一条投影链。
+        iterations: 二分次数（24 次 ≈ 1e-7 段长，远小于 1 像素）。
+
+    Returns:
+        0 或 2 个屏幕点：两端都在域内 → 原样两点；一端在域外 → 域内端点
+        + 边界点（按原段方向排序）；两端都在域外 → 空（整段不可见）。
+
+    为什么二分而不是 SDF 推进：本仓四个投影的有效域都是解析的（半球 /
+    去掉单点的球面 / 归一化圆盘），当 ``drawable`` 就是投影有效性域时，
+    两端同在域内的大圆弧不会中途穿出再穿回；只有「一内一外」才会触发，
+    二分一次到位且无状态。调用方若叠加了额外判据（例如地平余量），这一
+    凸性不由本函数保证——星官段很短，实际不会出现中途穿出再穿回。
+    """
+    inside0 = bool(drawable(az0, alt0))
+    inside1 = bool(drawable(az1, alt1))
+    if inside0 and inside1:
+        return [project(az0, alt0), project(az1, alt1)]
+    if not inside0 and not inside1:
+        return []
+
+    # 统一成「起点在域内」，二分完再按原始方向还原顺序。
+    flipped = bool(inside1)
+    if flipped:
+        az_in, alt_in = az1, alt1
+        az_out, alt_out = az0, alt0
+    else:
+        az_in, alt_in = az0, alt0
+        az_out, alt_out = az1, alt1
+
+    v_in = vec_from_azalt(az_in, alt_in)
+    v_out = vec_from_azalt(az_out, alt_out)
+    lo, hi = 0.0, 1.0
+    for _ in range(max(1, int(iterations))):
+        mid = 0.5 * (lo + hi)
+        az_m, alt_m = azalt_from_vec(_slerp_unit(v_in, v_out, mid))
+        if drawable(az_m, alt_m):
+            lo = mid
+        else:
+            hi = mid
+
+    az_b, alt_b = azalt_from_vec(_slerp_unit(v_in, v_out, lo))
+    boundary = project(az_b, alt_b)
+    edge = project(az_in, alt_in)
+    return [boundary, edge] if flipped else [edge, boundary]
 
 
 # ---------------------------------------------------------------------------

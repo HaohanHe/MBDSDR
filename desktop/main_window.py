@@ -14,6 +14,7 @@ import math
 import threading
 import time
 from datetime import datetime
+from copy import deepcopy
 from typing import Optional, Dict
 
 import shiboken6
@@ -428,34 +429,49 @@ def _preview_site():
             float(SAMPLE_SITE.longitude_deg))
 
 
-def _night_observation_time(lat_deg: float, lon_deg: float):
-    """下一次「天文暮光终」（太阳 -18°，天全黑）的时刻与所用高度角。
+def _night_observation_time(lat_deg: float, lon_deg: float, local_time=None):
+    """输入 QDateTime 所在本地日的暮光终；省略时用本机实际今天。
 
-    对齐 Stellarium ``AstroCalcAlmanacWidget.cpp:103-115``：那里的
-    「日落后 / 自定义日落 / 天文昏影终」按钮把 ``core->setJD(...)`` 接到
-    ``getRTSTime(core, altitude)`` 算出的真实 JD 上，**不是写死 22:00**。
-    这里用仓库同口径的 ``compute_twilight_times``；取 **-18°** 而不是
-    民用暮光终 -6°，因为 -6° 天还亮着、极限星等被压到 0.3 等，摁一下
-    照样看不见星。高纬夏季无天文暮光时退回 -6° 并如实标注角度。
-
-    优先当天事件（和 Stellarium 一样按"今天"跳，不因为刚过去几分钟就
-    顺延到明晚、却还管它叫「今夜」）；极昼/极夜两档都没有就返回 None。
+    站址没有时区数据，不从经度猜时区。Qt 输入的时区负责本地日边界和
+    DST；求解器按 UTC 自然日扫描，因此先求覆盖本地日的 UTC 日候选，
+    再按输入时区筛回所选日期。只在该日内优先 -18°、退回 -6°；没有
+    事件就返回 None，不能悄悄捡明晚。
     """
     from datetime import datetime, timedelta, timezone
     from types import SimpleNamespace
+    from PySide6.QtCore import QDateTime
+    from math import floor
+    from time_machine import qdatetime_from_unix, unix_from_qdatetime
     from mbdsdr_ai.atmosphere import (ASTRONOMICAL_TWILIGHT_ALT_DEG,
                                       CIVIL_TWILIGHT_ALT_DEG,
                                       compute_twilight_times)
 
-    now = datetime.now(timezone.utc)
+    selected = QDateTime.currentDateTime() if local_time is None else local_time
+    if not selected.isValid():
+        raise ValueError("本地日期无效")
+    zone, local_day = selected.timeZone(), selected.date()
+    start = local_day.startOfDay(zone)
+    end = local_day.addDays(1).startOfDay(zone)
+    if not start.isValid() or not end.isValid():
+        raise ValueError("本地日边界不可用")
+    day = datetime.fromtimestamp(unix_from_qdatetime(start), timezone.utc).date()
+    last = datetime.fromtimestamp(unix_from_qdatetime(end) - 1, timezone.utc).date()
     station = SimpleNamespace(lat_deg=float(lat_deg), lon_deg=float(lon_deg))
-    for delta in (0, 1):
-        day = (now + timedelta(days=delta)).date()
+    astronomical, civil = [], []
+    while day <= last:
         info = compute_twilight_times(day, station)
-        if info.astronomical_twilight_end is not None:
-            return info.astronomical_twilight_end, ASTRONOMICAL_TWILIGHT_ALT_DEG
-        if info.civil_twilight_end is not None:
-            return info.civil_twilight_end, CIVIL_TWILIGHT_ALT_DEG
+        for event, candidates in ((info.astronomical_twilight_end, astronomical),
+                                  (info.civil_twilight_end, civil)):
+            # 日期筛选不能把午夜前的分数秒四舍五入到隔日。
+            if (event is not None and
+                    qdatetime_from_unix(floor(event.timestamp())).toTimeZone(zone).date()
+                    == local_day):
+                candidates.append(event)
+        day += timedelta(days=1)
+    if astronomical:
+        return min(astronomical), ASTRONOMICAL_TWILIGHT_ALT_DEG
+    if civil:
+        return min(civil), CIVIL_TWILIGHT_ALT_DEG
     return None
 
 
@@ -1224,6 +1240,9 @@ class MainWindow(QMainWindow):
                            else None)
         # 当前运行的流水线对象（连接后建，断开时拆）
         self._pipeline = None  # type: Optional[object]
+        # 已退役、但回收线程可能还没 join 完的流水线。保留强引用是为了防止
+        # 宿主 QObject 在子 QThread 仍 run() 时被析构（见 _retire_pipeline）。
+        self._retired_pipelines: list = []
         # S8：数据流健康轮询（只在流水线运行期间启动，拆流水线即停）
         self._health_timer = QTimer(self)
         self._health_timer.setInterval(HEALTH_POLL_MS)
@@ -1259,6 +1278,9 @@ class MainWindow(QMainWindow):
         self._replay_load_cancel = threading.Event()
         self._replay_load_path = ""
         self._replay_progress_dialog: Optional[QProgressDialog] = None
+        # 观测档案回放计划（replay_plan 的返回值）；普通 IQ 文件回放时为 None
+        self._replay_plan: Optional[Dict] = None
+        self._replay_plan_index: int = -1
         # 显式 QueuedConnection：回调必须落在 GUI 线程（DirectConnection 会在
         # worker 线程里改 QProgressDialog，Qt 直接断言/崩溃）
         self.replay_load_progress.connect(
@@ -2223,6 +2245,7 @@ class MainWindow(QMainWindow):
         self.control_panel.tune_am_requested.connect(self._on_tune_am)
         self.control_panel.volume_changed.connect(self._on_volume_changed)
         self.control_panel.record_toggled.connect(self._on_record_toggled)
+        self.control_panel.record_product_requested.connect(self._review_record_product)
         self.control_panel.mode_changed.connect(self._on_mode_changed)
         self.control_panel.gain_changed.connect(self._on_gain_changed)
         self.control_panel.squelch_changed.connect(self._on_squelch_changed)
@@ -2418,6 +2441,13 @@ class MainWindow(QMainWindow):
         self.notification_bar = NotificationBar(root)
         root_lay.addWidget(self.notification_bar, 0)
         root_lay.addWidget(self._main_splitter, stretch=1)
+        # 回放工具条只在载入成功后出现，不新增主导航或改变默认 IDE 布局。
+        from replay_timeline import ReplayTimeline
+        self.replay_timeline = ReplayTimeline(root)
+        self.replay_timeline.seek_requested.connect(self._seek_replay_sample)
+        self.replay_timeline.toggle_requested.connect(self._toggle_replay)
+        self.replay_timeline.stop_requested.connect(self._stop_replay)
+        root_lay.addWidget(self.replay_timeline)
         self._build_bottom_dock(root_lay)
         self.setCentralWidget(root)
 
@@ -3039,24 +3069,20 @@ class MainWindow(QMainWindow):
         self._planetarium_proj_combo.currentIndexChanged.connect(
             self._on_projection_changed)
         strip_lay.addWidget(self._planetarium_proj_combo, 0, Qt.AlignHCenter)
-        # 「☾ 今夜」：Stellarium AstroCalc 的玩法，摁一下切到真实日落后
-        # （民用暮光终 / 太阳 -6°），不是写死钟点、也不是伪造星空。
+        # 今夜按本机实际今天求暮光终；不同于时间面板里的所选日。
         self._planetarium_tonight_btn = QPushButton("今夜", strip)
         self._planetarium_tonight_btn.setObjectName("planetariumTonight")
-        self._planetarium_tonight_btn.setToolTip(
-            "切到今夜天文暮光终（太阳 -18°，按站点真实日落算，天全黑）。"
-            "这是观测条件设定、不是观测数据；⏱ 走一圈回到此刻")
+        self._sync_tonight_btn()
         self._planetarium_tonight_btn.setMinimumHeight(30)
         self._planetarium_tonight_btn.setStyleSheet(_act_css)
         self._planetarium_tonight_btn.clicked.connect(self._jump_to_tonight)
         strip_lay.addWidget(self._planetarium_tonight_btn, 0, Qt.AlignHCenter)
         # 时间流速（原型第 9 颗 ⏱）：1× → 60× → 600× → 停 → 1×。
         # 直接驱动 new_spacetime 时间引擎，天空按同一份 JD 走；不是另起动画。
-        self._planetarium_time_btn = QPushButton("⏱ 1×", strip)
+        self._planetarium_time_btn = QPushButton("时间流速", strip)
         self._planetarium_time_btn.setObjectName("planetariumTimeRate")
         self._planetarium_time_btn.setToolTip(
-            "时间流速：1× → 60× → 600× → 停 → 1×（回到此刻）。"
-            "天空跟着同一份时刻走")
+            "时间流速：1×不等于实时；直接返回实况：时间→回到现在")
         self._planetarium_time_btn.setMinimumHeight(30)
         self._planetarium_time_btn.setStyleSheet(_act_css)
         self._planetarium_time_btn.clicked.connect(self._cycle_time_rate)
@@ -3160,6 +3186,8 @@ class MainWindow(QMainWindow):
         self._planetarium_link_timer = QTimer(self)
         self._planetarium_link_timer.setInterval(1000)
         self._planetarium_link_timer.timeout.connect(self._sync_planetarium_link)
+        # 复用现有 UI 节拍：GNSS/手动站址变化后，今夜入口随之启停。
+        self._planetarium_link_timer.timeout.connect(self._sync_tonight_btn)
         self._sync_planetarium_link()
         strip.hide()  # 只在星象仪形态显示；不占布局，天空视图保持满宽
 
@@ -3302,7 +3330,7 @@ class MainWindow(QMainWindow):
 
     _TIME_RATE_STEPS = (1.0, 60.0, 600.0, 0.0)
 
-    def _sync_time_rate_btn(self) -> None:
+    def _sync_time_rate_btn(self, *, strict: bool = False) -> None:
         """按钮文案与时间引擎的实际倍率对齐（0 显示「停」，从不编造）。
 
         跳时刻 / 改倍率 / 回到此刻都调用本方法，故在这里发布一次
@@ -3312,34 +3340,49 @@ class MainWindow(QMainWindow):
         try:
             from mbdsdr_ai.new_spacetime import get_time_engine
             from mbdsdr_ai.spacetime_features import get_temporal_bus
-            get_temporal_bus().publish_from_engine(get_time_engine())
+            eng = get_time_engine()
+            get_temporal_bus().publish_from_engine(eng)
+            rate = float(eng.get_rate())
+            following = eng.is_following_system()
         except Exception:
-            pass
+            if strict:
+                raise
+            rate, following = None, False
         btn = getattr(self, "_planetarium_time_btn", None)
         if btn is None:
             return
-        try:
-            from mbdsdr_ai.new_spacetime import get_time_engine
-            rate = float(get_time_engine().get_rate())
-        except Exception:
-            rate = 1.0
-        if abs(rate) < 1e-9:
-            btn.setText("⏸ 停")
-        elif rate >= 1000:
-            btn.setText(f"⏩ {rate:g}×")
+        if rate is None:
+            btn.setText("时间不可用")
         else:
-            btn.setText(f"⏱ {rate:g}×")
+            speed = "停" if abs(rate) < 1e-9 else f"{rate:g}×"
+            btn.setText(f"{'实时' if following else '模拟'} {speed}")
+        btn.setToolTip(
+            "1×只表示流速；模拟时刻不等于现在。"
+            "循环：1× → 60× → 600× → 停 → 1×（兼容返回此刻）。"
+            "直接返回实况：时间→回到现在")
+
+    def _sync_tonight_btn(self) -> None:
+        """缺站址不能求暮光；不猜观测地点的时区。"""
+        btn = getattr(self, "_planetarium_tonight_btn", None)
+        if btn is None:
+            return
+        try:
+            obs = self.sky_view.get_observer()
+        except Exception:
+            obs = None
+        available = bool(obs and obs.get("lat") is not None and obs.get("lon") is not None)
+        btn.setEnabled(available)
+        hint = (
+            "按本机今天（不是时间框所选日）求当前站址的暮光终。"
+            "优先天文暮光终 -18°，否则民用暮光终 -6°（天未全黑）。"
+            "观测条件设定，非观测数据；时间→回到现在")
+        btn.setToolTip(hint if available else "今夜不可用：未设置站址。" + hint)
 
     def _jump_to_tonight(self) -> None:
-        """☾ 今夜：把观测时刻切到按真实太阳高度算出的「民用暮光终」。
+        """今夜：按本机实际今天求暮光终，与输入框的所选日无关。
 
-        照 Stellarium ``src/gui/AstroCalcAlmanacWidget.cpp`` 的按钮链：
-        ``buttonCustomSunset / buttonAfterSunset -> core->setJD(...)``，
-        时刻由 ``getRTSTime(core, -7)`` 求解，不是写死晚上几点。这里用
-        仓库 ``compute_twilight_times`` 的 civil_twilight_end（太阳 -6°）。
-
-        诚实口径：改的是**观测条件**，不是观测数据；所有星/日月/行星
-        位置按该时刻真实计算，状态栏与沉浸卡都明写「非实时」。
+        首选天文暮光终 -18°，否则民用暮光终 -6°并明示天未全黑。
+        改的是观测条件，不是观测数据；不把模拟 1×叫作实时。
         """
         obs = self.sky_view.get_observer()
         if not obs:
@@ -3373,9 +3416,10 @@ class MainWindow(QMainWindow):
             self._sync_time_rate_btn()
             self.sky_view.update()
             local = t.astimezone().strftime("%m-%d %H:%M")
+            label = "天文暮光终" if alt_deg == -18.0 else "民用暮光终，天未全黑"
             self.statusBar().showMessage(
-                f"观测条件：切到今夜 {local}（太阳 {alt_deg:g}°，"
-                "非实时、非观测数据）· ⏱ 走一圈回到此刻", MSG_NORMAL)
+                f"观测条件：切到本机今天 {local}（{label}，太阳 {alt_deg:g}°，"
+                "非实时、非观测数据）· 时间→回到现在", MSG_NORMAL)
         except Exception:
             pass
 
@@ -3399,9 +3443,8 @@ class MainWindow(QMainWindow):
         try:
             eng.set_rate(steps[idx])
             if steps[idx] == 1.0:
-                # 循环回「1×」就是回到此刻：预览时刻 / 快转偏移一并归零。
-                # 否则按钮写着 1×（tooltip 明说 = 实时），画面却还停在
-                # 今晚 21:00，是假信息。
+                # 保留旧循环末档返回此刻的语义；直接入口在时间面板。
+                # 1×本身不代表实时，其他跳时入口仍然可以是模拟 1×。
                 eng.set_time_now()
                 tracker = getattr(self, "sat_tracker", None)
                 if tracker is not None:
@@ -3455,10 +3498,10 @@ class MainWindow(QMainWindow):
             return time.time()
 
     def _open_time_machine(self) -> None:
-        """🕒 时间：Stellarium ``DateTimeDialog`` 的等价物。
+        """时间：编辑本机本地时刻不改引擎，显式按钮才应用。
 
-        对话框只负责收集本地时刻；真正改引擎走 ``_apply_time_jump``，
-        和「☾ 今夜」「⏱ 流速」共用同一份时间事实源。
+        跳时刻走 ``_apply_time_jump``，返回实况走 ``_return_to_now``；
+        与今夜、流速共用同一份时间事实源。
         """
         sv = getattr(self, "sky_view", None)
         obs = None
@@ -3468,16 +3511,31 @@ class MainWindow(QMainWindow):
             except Exception:
                 obs = None
         resolver = None
-        if obs:
-            lat, lon = obs.get("lat"), obs.get("lon")
-
-            def resolver():  # noqa: F811 - 有意遮蔽，闭包带住站点坐标
-                return _night_observation_time(lat, lon)
+        if obs and obs.get("lat") is not None and obs.get("lon") is not None:
+            def resolver(local_time):  # noqa: F811 - 显式日期回调，保留 Qt 时区
+                current = sv.get_observer()
+                if not current or current.get("lat") is None or current.get("lon") is None:
+                    raise ValueError("未设置站址")
+                return _night_observation_time(current["lat"], current["lon"], local_time)
 
         dlg = TimeMachineDialog(
             self, now_unix=self._engine_now_unix(),
-            night_resolver=resolver, on_apply=self._apply_time_jump)
+            night_resolver_for_date=resolver, on_apply=self._apply_time_jump,
+            on_now=self._return_to_now)
         dlg.exec()
+
+    def _return_to_now(self) -> None:
+        """显式返回实况，不把墙钟快照误当跟随系统的时间状态。"""
+        from mbdsdr_ai.new_spacetime import get_time_engine
+        eng = get_time_engine()
+        eng.set_time_now()
+        eng.set_rate(1.0)
+        tracker = getattr(self, "sat_tracker", None)
+        if tracker is not None:
+            tracker.refresh()
+        self._sync_time_rate_btn(strict=True)
+        self.sky_view.update()
+        self.statusBar().showMessage("已回到现在：实时跟随系统时间 · 1×", MSG_NORMAL)
 
     def _apply_time_jump(self, unix_ts: float) -> None:
         """把观测时刻跳到给定 Unix 秒，并立刻按新 JD 重算天空。
@@ -3500,13 +3558,10 @@ class MainWindow(QMainWindow):
         local = datetime.fromtimestamp(float(unix_ts)).strftime("%m-%d %H:%M")
         delta = float(unix_ts) - time.time()
         try:
-            if abs(delta) < 60.0:
-                self.statusBar().showMessage(f"时刻已回到此刻 {local}（实时）",
-                                             MSG_NORMAL)
-            else:
-                self.statusBar().showMessage(
-                    f"观测条件：跳到 {local}（{format_offset(delta)}；"
-                    "模拟、非观测数据）· ⏱ 走一圈回到此刻", MSG_NORMAL)
+            offset = "与现在相差不到 1 分" if abs(delta) < 60.0 else format_offset(delta)
+            self.statusBar().showMessage(
+                f"观测条件：跳到 {local}（{offset}；模拟 1×、非观测数据）"
+                " · 时间→回到现在", MSG_NORMAL)
         except RuntimeError:
             pass
 
@@ -4611,6 +4666,24 @@ class MainWindow(QMainWindow):
                 pass
         return float(DEFAULT_SAMPLE_RATE_HZ)
 
+    def _startup_sample_rate(self) -> float:
+        """启动自动连接的采样率：用户显式选过的优先，否则跟随性能档默认。
+
+        性能档只决定「还没人显式选过」时的默认值。用户已在控制面板/设置里
+        选过采样率（``settings.sample_rate_hz`` 且标记 explicit）时不能越权
+        覆盖——否则状态栏会拿「显式请求 1.536 MS/s」去和「性能档 2.4 MS/s」
+        对比，打出假的「配置请求未生效」（2026-11-22 真机截图实证：设备实际
+        跑 2.4、设置里写着 1.536、界面同屏出现三条互斥的采样率）。
+        """
+        try:
+            if self.settings.is_explicit("sample_rate_hz"):
+                v = float(self.settings.get("sample_rate_hz", 0.0) or 0.0)
+                if math.isfinite(v) and v > 0.0:
+                    return v
+        except Exception:
+            pass
+        return float(self._perf_default_sample_rate())
+
     def _apply_perf_profile(self, key: str, *, announce: bool = True) -> None:
         """切档即时生效：只改 GNSS 轮询 / 频谱刷新间隔与送绘上限。
 
@@ -4699,7 +4772,9 @@ class MainWindow(QMainWindow):
         if state not in self._LISTEN_STATES:
             state = "idle"
         player = getattr(self, "_audio_player", None)
-        if state == "listen" and self._active_sdr_backend is None:
+        replay_loaded = (getattr(self, "_replay_iq", None) is not None
+                         and getattr(self, "_replay_timer", None) is not None)
+        if state == "listen" and self._active_sdr_backend is None and not replay_loaded:
             # 没设备还点收听：如实说清楚，不偷偷开一个空流
             self._listen_state = "idle"
             self._listening = False
@@ -4718,9 +4793,14 @@ class MainWindow(QMainWindow):
                     self._listening = False
                     self._set_listen_combo("idle")
                     self._sync_listen_workers(False)
+                    self._pause_replay_for_idle()
+                    self._sync_replay_timeline()
                     return
-            except Exception:
-                pass
+            except Exception as exc:
+                if replay_loaded:
+                    self._apply_listen_state("idle")
+                    self.statusBar().showMessage(f"回放音频启动失败：{exc}", MSG_IMPORTANT)
+                    return
         self._listen_state = state
         self._set_listen_combo(state)
         self._listening = state == "listen"
@@ -4762,6 +4842,7 @@ class MainWindow(QMainWindow):
                 if paused else
                 "已停止解调：保持连接，解调线程让出 CPU，频谱仍在工作",
                 MSG_NORMAL)
+        self._sync_replay_timeline()
 
     def _pause_replay_for_idle(self) -> bool:
         """「停止解调」时暂停回放：回放也是第二个真解调入口。
@@ -6584,12 +6665,13 @@ class MainWindow(QMainWindow):
                 return
             self._connect_backend(
                 backend,
-                sample_rate=float(self._perf_default_sample_rate()),
+                sample_rate=float(self._startup_sample_rate()),
                 gain=20.0,
                 ppm=0,
                 agc=True,
                 offset_tuning=False,
                 already_connected=True,
+                device=payload.get("device"),
             )
             return
         if "error" in payload:
@@ -6645,11 +6727,12 @@ class MainWindow(QMainWindow):
 
         ok = self._connect_backend(
             backend,
-            sample_rate=float(self._perf_default_sample_rate()),
+            sample_rate=float(self._startup_sample_rate()),
             gain=20.0,
             ppm=0,
             agc=True,
             offset_tuning=False,
+            device=chosen,
         )
         if not ok:
             # 连接失败：状态栏已由 _connect_backend 写了错误；补充无设备引导。
@@ -6859,7 +6942,8 @@ class MainWindow(QMainWindow):
                          gain: float = 20.0, ppm: int = 0,
                          agc: bool = True, offset_tuning: bool = False,
                          bandwidth: float = 0.0,
-                         already_connected: bool = False) -> bool:
+                         already_connected: bool = False,
+                         device: Optional[dict] = None) -> bool:
         """通用后端连接流程：connect → 成功则切状态 + 下发参数 + 启动 IQ 流。
 
         被 _connect_dialog（用户手动选设备）和 _auto_enumerate_and_connect
@@ -6916,6 +7000,7 @@ class MainWindow(QMainWindow):
                 ok = self._connect_backend_in_background(
                     backend,
                     meta={"previous": previous, "carried_freq": carried_freq,
+                          "device": device,
                           "params": dict(
                               sample_rate=float(sample_rate),
                               gain=float(gain), ppm=int(ppm),
@@ -6946,7 +7031,8 @@ class MainWindow(QMainWindow):
         self._finalize_connect_success(
             backend, sample_rate=float(sample_rate), gain=float(gain),
             ppm=int(ppm), agc=bool(agc), offset_tuning=bool(offset_tuning),
-            bandwidth=float(bandwidth), carried_freq=carried_freq)
+            bandwidth=float(bandwidth), carried_freq=carried_freq,
+            device=device)
         return True
 
     def _report_connect_failure(self, backend, previous, *,
@@ -7023,7 +7109,8 @@ class MainWindow(QMainWindow):
             ppm=int(params.get("ppm", 0)),
             agc=bool(params.get("agc", True)),
             offset_tuning=bool(params.get("offset_tuning", False)),
-            bandwidth=float(params.get("bandwidth", 0.0)))
+            bandwidth=float(params.get("bandwidth", 0.0)),
+            device=context.get("device"))
 
     def _close_late_backend(self, backend, why: str) -> None:
         """迟到的结果已作废：由回投方负责释放后端，界面保持用户当前状态。"""
@@ -7037,11 +7124,14 @@ class MainWindow(QMainWindow):
                                   gain: float, ppm: int, agc: bool,
                                   offset_tuning: bool, bandwidth: float,
                                   carried_freq: Optional[float],
-                                  late: bool = False) -> None:
+                                  late: bool = False,
+                                  device: Optional[dict] = None) -> None:
         """连接成功后的唯一挂接路径：正常返回与「迟到成功」都走这里。
 
         状态条与设备面板必须一起改——只改一处就等于又造了第二个真值源。
         ``late=True`` 表示等待循环已按「结果未知」返回过，这里把终态补回来。
+        ``device`` 是本次实际连上的枚举字典：传给设备面板确认身份，否则
+        面板只能显示「已连接: 设备」且不检测拔出（2026-11-22 真机日志实证）。
         """
         # 连接成功：停掉旧 worker，切换到真实后端
         self._last_connect_code = None
@@ -7058,7 +7148,8 @@ class MainWindow(QMainWindow):
                 sample_rate_hz=float(sample_rate),
                 gain_db=(None if agc else float(gain)),
                 ppm=int(ppm),
-                bandwidth_hz=float(bandwidth)))
+                bandwidth_hz=float(bandwidth)),
+            connected_device=device)
         # 面板入口连上 ≠ 设备收得到 1090；上限提示必须在连接成功路径同步。
         self._sync_adsb_tuner_limit()
         # 设备名必须受保护取值：BladeRF/Lime 后端没有 `.device`，直取会抛
@@ -7086,11 +7177,13 @@ class MainWindow(QMainWindow):
             pass
         # 迟到的成功：等待循环已按「结果未知」返回过，终态文案要说明它是补上的。
         late_note = "（后台完成后补上）" if late else ""
+        # 「已连接 X」是用户判断链路是否成立的唯一结论，必须挡住紧随其后的
+        # 能力协商播报（紧随的 _apply_connect_params 会写「本设备不支持：…」，
+        # 裸 showMessage 会把它顶掉——真机实测用户看不到「已连接」）。
         if name_readable:
-            self.statusBar().showMessage(
-                f"已连接 {device_name}{late_note}", MSG_NORMAL)
+            self._hold_status(f"已连接 {device_name}{late_note}", MSG_NORMAL)
         else:
-            self.statusBar().showMessage(
+            self._hold_status(
                 f"已连接 {device_name}，但设备名称不可读（后端未提供 device.name）"
                 f"{late_note}", MSG_IMPORTANT)
 
@@ -7426,6 +7519,7 @@ class MainWindow(QMainWindow):
             ppm=chosen_ppm,
             agc=chosen_agc,
             offset_tuning=chosen_offset,
+            device=data,
         )
         if not ok:
             # _connect_backend 已在状态栏写了详细错误；对话框额外弹一次提醒。
@@ -7516,7 +7610,8 @@ class MainWindow(QMainWindow):
         if isinstance(reassembly, dict):
             self.status_panel.set_reassembly_quality(reassembly)
 
-    def _panels_set_sdr_connected(self, connected: bool, session_initial=None):
+    def _panels_set_sdr_connected(self, connected: bool, session_initial=None,
+                                  connected_device=None):
         """把真实 SDR 连接状态同步到各操作控件。
         未连接时：气象云图面板的实时 SDR 按钮置灰；
         控制面板的调谐/音量/模式/预设控件与录音按钮一并禁用，绝不暴露假可控状态；
@@ -7633,7 +7728,8 @@ class MainWindow(QMainWindow):
             if dp is not None and hasattr(dp, "set_connected"):
                 # 会话起点随连接一次性交给 store：快照=本次实际下发值，
                 # 这样连接流程不会在门关闭后自己撞门（docs §5.2）。
-                dp.set_connected(bool(connected), initial=session_initial)
+                dp.set_connected(bool(connected), device=connected_device,
+                                 initial=session_initial)
                 # 设备面板已建好会话 → 现在才有关闭参数的键；控制面板据此
                 # 置灰并说明怎么解除（gpredict 第三档）。
                 cp2 = getattr(self, "control_panel", None)
@@ -8061,9 +8157,17 @@ class MainWindow(QMainWindow):
             if callable(set_caps):
                 set_caps(**caps)
         if skipped:
-            self.statusBar().showMessage(
-                f"本设备不支持：{'、'.join(skipped)}（已跳过，不计失败）",
-                MSG_NORMAL)
+            # 能力缺失是交代，不是结论：状态栏唯一消息位若正展示「已连接 X」，
+            # 就不抢占——用户看不到连接结论会以为没连上。控件侧已由
+            # control_panel.set_device_capabilities 置灰并写明原因，这里
+            # 只补一条日志留证。
+            if self._status_hold_active():
+                logger.info("连接后能力协商（状态栏已占用，仅记录）：不支持 %s",
+                            "、".join(skipped))
+            else:
+                self.statusBar().showMessage(
+                    f"本设备不支持：{'、'.join(skipped)}（已跳过，不计失败）",
+                    MSG_NORMAL)
         if failures:
             logger.warning("连接后参数未全部生效: %s", "、".join(failures))
             self.statusBar().showMessage(
@@ -8697,7 +8801,7 @@ class MainWindow(QMainWindow):
                         next_index)
                     if not self._open_record_segment(
                             new_path, old_sr, float(self._record_center_hz),
-                            datetime.now().isoformat(timespec="seconds"),
+                            datetime.now().astimezone().isoformat(),
                             next_index):
                         # 新段打不开：录音已被 S7 收口停止，接收链仍需继续
                         self._start_iq_streams()
@@ -8724,7 +8828,7 @@ class MainWindow(QMainWindow):
                 self._record_session_path or self._record_file_path or "", next_index)
             if not self._open_record_segment(
                     new_path, rate, center_hz,
-                    datetime.now().isoformat(timespec="seconds"), next_index):
+                    datetime.now().astimezone().isoformat(), next_index):
                 # 新段打不开：录音已被 S7 收口停止，接收链仍需继续
                 self._start_iq_streams()
                 return
@@ -9710,10 +9814,7 @@ class MainWindow(QMainWindow):
         if self._pipeline is not None:
             # 已存在流水线不能直接 return：旧 reader 仍指向旧后端/旧采样率，
             # 新连接会"界面已切换、数据还是旧的"。先干净关停再按当前后端重建。
-            try:
-                self._pipeline.shutdown()
-            except Exception:
-                pass
+            self._retire_pipeline(self._pipeline)
             self._pipeline = None
         if ReceivePipeline is None or self._demod_cfg is None:
             return
@@ -10279,6 +10380,30 @@ class MainWindow(QMainWindow):
             except Exception as exc:  # noqa: BLE001 - 未预期异常也必须中止录音
                 self._report_record_abort(f"录音写入异常: {exc}")
 
+    def _retire_pipeline(self, pipe) -> None:
+        """关停流水线并**延迟**释放其 QObject 宿主。
+
+        ``ReceivePipeline.shutdown()`` 按设计是非阻塞的——它只置停止标志、
+        唤醒阻塞点，join 交给 ``mbdsdr-pipeline-reap`` 后台线程。因此返回时
+        reader / fft / demod 等 QThread 可能仍在 ``run()`` 里。
+
+        此时若丢掉最后一个 Python 引用，宿主 QObject 会在 C++ 侧析构并连带
+        删除子 QThread；运行中的线程再去访问它，就是 ``0xC0000005``
+        （2026-11-20 group 1 实测崩溃点：``_stop_iq_streams`` 置 None 之后）。
+
+        这里保留最近两个已退役 pipeline 的强引用，覆盖回收线程的 join 窗口。
+        真正释放发生在本窗口析构时——那时 GUI 线程已结束，不再有并发访问。
+        """
+        if pipe is None:
+            return
+        try:
+            pipe.shutdown()
+        except Exception as exc:  # noqa: BLE001 - 关停失败更要留引用
+            logger.warning("流水线关停失败（保留引用避免悬空）: %s: %s",
+                           type(exc).__name__, exc)
+        self._retired_pipelines.append(pipe)
+        del self._retired_pipelines[:-2]
+
     def _stop_iq_streams(self):
         """断开时：停流水线全部线程 + 清 VfoManager 绑定 + 关声卡 + 停 IQ 轮询。
 
@@ -10297,10 +10422,7 @@ class MainWindow(QMainWindow):
         self._health_grace_until = 0.0
         self._health_has_data = False
         if self._pipeline is not None:
-            try:
-                self._pipeline.shutdown()
-            except Exception:
-                pass
+            self._retire_pipeline(self._pipeline)
             self._pipeline = None
         # 清 vfo_id → worker 映射
         self._vfo_workers = {}
@@ -10616,8 +10738,9 @@ class MainWindow(QMainWindow):
                 return
             processed = self._tap_demod_audio(audio_in)
             opened = self._replay_squelch_gate(processed, mode)
-            player.set_muted(not opened)
-            if opened:
+            muted = (self._replay_timer is not None and self._listen_state != "listen")
+            player.set_muted(not opened or muted)
+            if opened and not muted:
                 player.write(processed)
 
         # 2) WFM 广播特殊处理：跳过 VFO，直接对原始全带宽 IQ 鉴频（内部已重采样到 48k）
@@ -11003,7 +11126,8 @@ class MainWindow(QMainWindow):
                             "segment_index": int(self._record_segment_index),
                             "size_bytes": n * 8, "sidecar": None,
                             "complete": not bool(aborted_reason),
-                            "aborted_reason": str(aborted_reason or "")}
+                            "aborted_reason": str(aborted_reason or ""),
+                            "sidecar_error": str(e)}
         else:
             # 流从未成功打开（S7）：没有落盘数据可记，不得拿内存缓冲冒充存盘
             info = None
@@ -11077,9 +11201,103 @@ class MainWindow(QMainWindow):
             return True
         return False
 
+    def _review_record_product(self, path: str) -> None:
+        """录音组的显式回看意图，不复用导航按钮的停播/取消语义。"""
+        if self._recording:
+            self.statusBar().showMessage("仍在录音，请先停止录音再回看；录音未受影响", MSG_IMPORTANT)
+            return
+        if self._replay_timer is not None or self._replay_load_thread is not None:
+            self.statusBar().showMessage(
+                "正在回放或读取录音，请先停止回放或取消读取再回看；当前操作未受影响", MSG_IMPORTANT)
+            return
+        if not self.control_panel.record_product_available(path):
+            self.statusBar().showMessage("回看文件或录音元数据已不可用，请检查原路径", MSG_IMPORTANT)
+            self.control_panel._sync_record_product()
+            return
+        # 与普通回放一致的停波安全门，必须在任何载入之前执行。
+        self._stop_tx("回放开始", wait=True)
+        if path.lower().endswith(".observation.json"):
+            # blocker 原样交给既有入口展示，绝不自动退到 IQ。
+            self._open_observation_archive(path)
+        elif path.lower().endswith(".iq"):
+            self._clear_replay_plan_view()
+            self._start_replay_load(path)
+
+    def _snapshot_recording_context(self) -> dict:
+        """只读起录上下文；桌面天空/来源一致才认站址，不触发定位或授时。"""
+        started_at = datetime.now().astimezone().isoformat()
+        try:
+            from mbdsdr_ai.runtime_sources import get_runtime_sources
+            snapshot = deepcopy(get_runtime_sources().snapshot())
+        except Exception as exc:
+            snapshot = {"time": {}, "gnss": {},
+                        "snapshot_error": f"运行时快照不可用：{exc}"}
+        snapshot["recording_started_at"] = started_at
+        site = {"source": "none", "lat_deg": None, "lon_deg": None,
+                "alt_m": None, "reason": "起录时没有可核实的桌面站址"}
+        snapshot["site"] = site  # shared 可能绑定 controller，不是桌面手动站址。
+        try:
+            observer = deepcopy(self.sky_view.get_observer())
+            source = str(self._observer_source or "").lower()
+            if source == "preview":
+                site["reason"] = "起录时为示例天空（preview），不是实际站址"
+                return snapshot
+            if source not in ("user", "config", "place", "manual", "gnss"):
+                return snapshot
+            if not isinstance(observer, dict):
+                site["reason"] = "起录时天空没有观测站坐标"
+                return snapshot
+            lat, lon = float(observer["lat"]), float(observer["lon"])
+            main_lat, main_lon = float(self._observer_lat), float(self._observer_lon)
+            if not (-90 <= lat <= 90 and -180 <= lon <= 180):
+                raise ValueError("天空站址坐标无效")
+            if not (math.isclose(lat, main_lat, rel_tol=0, abs_tol=1e-7)
+                    and math.isclose(lon, main_lon, rel_tol=0, abs_tol=1e-7)):
+                site["reason"] = "起录时主窗来源坐标与天空站址冲突"
+                return snapshot
+            gnss = snapshot.get("gnss") or {}
+            has_fix = gnss.get("connected") is True and gnss.get("fix") is True
+            if source == "gnss" and not has_fix:
+                site["reason"] = "起录时 GNSS 没有已发布的有效连接/定位状态"
+                return snapshot
+            # 只有「站址来源就是 GNSS」时才要求它与快照里的 fix 对得上。
+            # config/place/manual 是用户显式站址（优先级高于 GNSS 实时 fix）；
+            # GNSS 在另一处有定位只说明接收机位置不同，不能据此判档案无站址。
+            if source == "gnss" and has_fix:
+                if not (math.isclose(lat, float(gnss.get("lat_deg")), rel_tol=0, abs_tol=1e-7)
+                        and math.isclose(lon, float(gnss.get("lon_deg")), rel_tol=0, abs_tol=1e-7)):
+                    site["reason"] = "起录时 GNSS 定位与桌面站址冲突，未猜测来源"
+                    return snapshot
+            if source != "gnss" and has_fix:
+                try:
+                    if not (math.isclose(lat, float(gnss.get("lat_deg")), rel_tol=0, abs_tol=1e-7)
+                            and math.isclose(lon, float(gnss.get("lon_deg")), rel_tol=0, abs_tol=1e-7)):
+                        notes = snapshot.setdefault("recording_notes", [])
+                        notes.append(
+                            "GNSS 实时定位与用户配置站址不同；站址按配置值记录，"
+                            "GNSS 位置未用于站址。")
+                except (TypeError, ValueError):
+                    pass
+            alt = observer.get("alt_m")
+            if observer.get("alt_assumed") or alt is None:
+                alt = None
+            else:
+                alt = float(alt)
+                if not math.isfinite(alt):
+                    alt = None
+            site.update(source="gnss" if source == "gnss" else "manual",
+                        lat_deg=lat, lon_deg=lon, alt_m=alt,
+                        reason="站址来自起录时桌面天空与主窗来源核对；未主动定位/授时")
+        except (AttributeError, KeyError, TypeError, ValueError, RuntimeError) as exc:
+            site["reason"] = f"起录站址不可核实：{exc}"
+        return snapshot
+
     def _start_recording(self):
         """开始录制：检查后端 → 建文件名 → 清 buffer → 状态栏提示。
         无 SDR 后端时弹提示且不造假文件（按钮会被调用方弹回）。"""
+        self.control_panel.set_record_products()
+        self._record_context = None
+        self._record_export_result = {"archives": [], "errors": []}
         # 半开态防御：前序会话/异步回调可能留下「_recording 为真但流句柄
         # 没建立」的残骸。此时任何一帧 IQ 都会被 _record_write_chunk 判成
         # 「句柄丢失」并中止录音，把这次新会话一起带崩（2026-11-09 全量
@@ -11122,8 +11340,7 @@ class MainWindow(QMainWindow):
         except Exception:
             center_hz = 0.0
 
-        # sidecar 元数据：从真实后端捕获开始时间 / 射频增益 / 设备名 / 驱动
-        self._record_start_time = datetime.now().isoformat(timespec="seconds")
+        # sidecar 元数据：从真实后端捕获射频增益 / 设备名 / 驱动
         try:
             self._record_gain_db = float(getattr(backend.status, "gain_db", 0.0))
         except Exception:
@@ -11173,6 +11390,9 @@ class MainWindow(QMainWindow):
             except Exception:
                 pass
             return
+        # 确认和目录检查均成功后才截取一次；后续改站址/掉线不改此快照。
+        self._record_context = self._snapshot_recording_context()
+        self._record_start_time = self._record_context["recording_started_at"]
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
         # 防呆：同名 .iq/.json 已存在则换名，绝不覆盖上一段录音（L3）
         path = _unique_record_path(os.path.join(rec_dir, f"baseband_{ts}.iq"))
@@ -11200,8 +11420,8 @@ class MainWindow(QMainWindow):
             self._record_timer.timeout.connect(self._update_record_time)
         self._record_timer.start(1000)
 
-        # UI：录音中按钮变红显示"停止中"（danger 色取自 tokens）
-        self.record_btn.setText("停止中")
+        # UI：录音中按钮表示下一步动作，不是「正在停止/保存」。
+        self.record_btn.setText("停止录音")
         self.record_btn.setStyleSheet(
             f"background-color:{self._tok('danger', '#B85C5C')};"
             f" color:{self._tok('text_primary', '#FFFFFF')}; font-weight:600;")
@@ -11221,11 +11441,12 @@ class MainWindow(QMainWindow):
         各段自己的 ``sample_rate``/``samples``/``duration_s`` 保持不变；
         追加 ``segments`` 与会话汇总，读取端据此按段还原，不再靠猜。
         """
+        errors = []
         try:
             from mbdsdr_ai.baseband_io import write_sidecar
         except Exception as e:
             logger.warning("会话 sidecar 写入不可用: %s", e)
-            return
+            return [f"会话 sidecar 写入不可用：{e}"]
         changes = getattr(self, "_record_rate_changes", None)
         for seg in segments:
             spath = seg["path"] + ".json"
@@ -11234,6 +11455,7 @@ class MainWindow(QMainWindow):
                     meta = json.load(f)
             except Exception as e:
                 logger.warning("读取分段 sidecar 失败，按段信息重建: %s", e)
+                errors.append(f"读取分段 sidecar 失败（{spath}）：{e}")
                 meta = {
                     "sample_rate": float(seg["sample_rate"]),
                     "samples": int(seg["samples"]),
@@ -11254,9 +11476,11 @@ class MainWindow(QMainWindow):
             except Exception as e:
                 logger.warning("会话 sidecar 写盘失败（%s）: %s",
                                os.path.basename(seg["path"]), e)
+                errors.append(f"会话 sidecar 写盘失败（{seg['path']}）：{e}")
                 self.statusBar().showMessage(
                     f"会话 sidecar 写盘失败（{os.path.basename(seg['path'])}）: {e}",
                     MSG_NORMAL)
+        return errors
 
     def _stop_recording(self, error: Optional[str] = None,
                         aborted_reason: Optional[str] = None):
@@ -11280,6 +11504,8 @@ class MainWindow(QMainWindow):
         self._finalize_record_segment(
             aborted_reason if aborted_reason is not None else error)
         segments = list(getattr(self, "_record_segments", None) or [])
+        sidecar_errors = [f"录音 sidecar 写盘失败（{s['path']}）：{s['sidecar_error']}"
+                          for s in segments if s.get("sidecar_error")]
         if segments:
             total_samples = sum(int(s["samples"]) for s in segments)
             total_bytes = sum(int(s.get("size_bytes") or 0) for s in segments)
@@ -11298,8 +11524,8 @@ class MainWindow(QMainWindow):
                         "start_time": seg.get("start_time", ""),
                     })
                     offset += int(seg["samples"])
-                self._write_session_sidecars(
-                    segments, manifest, total_samples, session_duration)
+                sidecar_errors.extend(self._write_session_sidecars(
+                    segments, manifest, total_samples, session_duration) or [])
                 info = {"path": segments[0]["path"],
                         "samples": total_samples,
                         "size_bytes": total_bytes,
@@ -11357,6 +11583,35 @@ class MainWindow(QMainWindow):
                 pass
             # 中止就只说中止：不拼「录制完成」，与 docstring 的承诺一致。
             msg = str(error)
+        # 所有段与会话 sidecar 已收尾；只复用适配器，不读 IQ/不做哈希。
+        # 导出结果独立于录音结果：部分成功、失败与原中止原因都必须保留。
+        try:
+            from desktop.recording_observation import export_desktop_observations
+            exported = export_desktop_observations(
+                segments, getattr(self, "_record_context", None),
+                ended_utc=datetime.now().astimezone().isoformat())
+        except Exception as exc:
+            logger.exception("录音观测档案导出失败")
+            exported = {"archives": [], "errors": [f"观测档案导出失败：{exc}"]}
+        exported["errors"] = sidecar_errors + exported["errors"]
+        self._record_export_result = exported
+        products = []
+        archives = {os.path.normcase(os.path.abspath(p)): p for p in exported["archives"]}
+        for seg in segments:
+            path = os.path.abspath(seg["path"])
+            duration = int(seg["samples"]) / float(seg["sample_rate"])
+            archive = archives.get(os.path.normcase(os.path.splitext(path)[0] + ".observation.json"))
+            if archive:
+                products.append({"path": archive, "kind": "archive", "duration_s": duration})
+            # sidecar 缺失时不能用当前设备参数猜测速率；保留条目但不允许回看。
+            products.append({"path": path, "kind": "iq", "duration_s": duration,
+                             "available": bool(seg.get("sidecar")),
+                             "complete": seg.get("complete", False)})
+        self.control_panel.set_record_products(products, exported["errors"])
+        if exported["archives"]:
+            msg += f"；观测档案已保存 {len(exported['archives'])} 份"
+        if exported["errors"]:
+            msg += "；观测档案/元数据错误：" + "；".join(exported["errors"])
         self.statusBar().showMessage(msg, MSG_IMPORTANT)
 
     def _toggle_waterfall(self):
@@ -11970,6 +12225,7 @@ class MainWindow(QMainWindow):
             ppm=int(dev.get("_ppm", 0)),
             agc=False,
             bandwidth=float(dev.get("_bandwidth", 0.0)),
+            device=dev,
         )
         if ok:
             try:
@@ -13608,8 +13864,7 @@ class MainWindow(QMainWindow):
 
         **读盘在后台线程，进度可见、可取消；GUI 线程只做播放器起停。**
         """
-        if (self._replay_load_thread is not None
-                and self._replay_load_thread.is_alive()):
+        if self._replay_load_thread is not None:
             # 正在读盘：再点「回放」= 取消读取（录音/实时接收都不受影响）。
             self._replay_load_cancel.set()
             self.statusBar().showMessage("正在取消读取录音…", MSG_NORMAL)
@@ -13627,21 +13882,202 @@ class MainWindow(QMainWindow):
         path, _ = QFileDialog.getOpenFileName(
             self, "选择录音文件",
             self.settings.record_dir,
-            "Baseband IQ (*.iq *.cf32 *.cs16 *.wav);;All Files (*)")
+            "Baseband IQ (*.iq *.cf32 *.cs16 *.wav);;"
+            "观测档案 (*.observation.json);;All Files (*)")
         if not path:
             self.statusBar().showMessage("未选择录音文件", MSG_NORMAL)
+            return
+        if path.lower().endswith(".observation.json"):
+            # 档案是 JSON，不是 IQ：必须先解析出 replay_plan 和数据文件，
+            # 绝不能把 JSON 字节当基带样本交给 load_iq。
+            self._open_observation_archive(path)
             return
         try:
             from mbdsdr_ai import baseband_io
         except Exception as e:  # noqa: BLE001
+            self._clear_replay_plan_view()
             QMessageBox.warning(self, "回放失败", f"baseband_io 不可用：\n{e}")
             return
+        # 普通 IQ 文件：清掉上一份档案的计划，避免套用到这段录音上
+        self._replay_plan = None
+        self._replay_plan_index = -1
         self._start_replay_load(path)
+
+    def _open_observation_archive(self, archive_path: str) -> bool:
+        """打开 ``.observation.json`` 档案：解析 → 校验 → 载入首个数据产物。
+
+        档案本身不是 IQ；能否回放由 :func:`replay_plan` 判定，阻塞项逐条
+        展示给用户，绝不在缺数据时"看起来回放了"。
+        """
+        from mbdsdr_ai.observation_record import load_record, replay_plan
+
+        if self._replay_timer is not None or self._replay_load_thread is not None:
+            self.statusBar().showMessage("请先停止当前回放或取消读取，再打开档案", MSG_NORMAL)
+            return False
+        record, err = load_record(archive_path)
+        if err:
+            QMessageBox.warning(self, "打开观测档案", err)
+            return False
+        plan = replay_plan(record)
+        if not plan.get("can_replay"):
+            QMessageBox.warning(
+                self, "观测档案无法回放",
+                "；\n".join(plan.get("blockers") or []))
+            return False
+        # 模型因缺时间索引跳过的事件仍供详情查看，但绝不猜位置/允许跳转。
+        unmatched = list(record.timeline or [])
+        for step in plan.get("steps", []):
+            for i, event in enumerate(unmatched):
+                if (isinstance(event, dict) and event.get("kind") == step.get("kind")
+                        and event.get("utc") == step.get("utc")
+                        and (event.get("detail") or {}) == step.get("detail")):
+                    unmatched.pop(i)
+                    break
+        plan["unindexed_events"] = [dict(e, sample=None, at_s=None)
+                                     for e in unmatched if isinstance(e, dict)]
+        self._replay_plan = plan
+        self._replay_plan_index = -1
+        self._start_replay_load(plan["data_paths"][0])
+        return True
+
+    def _apply_replay_plan_step(self, t_s: float, *, sample: Optional[int] = None) -> Optional[dict]:
+        """按回放时间推进档案计划：返回当前生效的步骤（无计划时 None）。
+
+        只改中心频率；采样率一律沿用文件自身的速率——块长（50 ms）和时轴
+        都按它换算，中途换速率会让回放抖动，且与已播样本对不上。
+        """
+        plan = getattr(self, "_replay_plan", None)
+        if not plan:
+            return None
+        try:
+            t = float(t_s)
+        except (TypeError, ValueError):
+            t = 0.0
+        if not math.isfinite(t) or t < 0.0:
+            t = 0.0
+        steps = plan.get("steps") or []
+        # samples 是定位真值；at_s 仅给旧计划兼容，不能反过来覆盖样本界。
+        sr = getattr(self, "_replay_sr", 0.0)
+        target = sample if sample is not None else int(round(t * sr)) if sr > 0 else None
+        eligible = []
+        for i, step in enumerate(steps):
+            pos = self._replay_step_sample(step)
+            if target is not None and pos is not None:
+                due = pos <= target
+            else:
+                try:
+                    at = float(step.get("at_s", 0.0))
+                    due = math.isfinite(at) and 0 <= at <= t
+                except (TypeError, ValueError):
+                    due = False
+            if due:
+                eligible.append(i)
+        if not eligible:
+            return None
+        idx = eligible[-1]
+        previous = getattr(self, "_replay_plan_index", -1)
+        if idx == previous:
+            return steps[idx]
+        # 同一样本的多事件也逐个应用，末尾 record_stop 不得被跨块略过。
+        for i in eligible:
+            if previous < i <= idx or idx < previous:
+                step = steps[i]
+                center = (step.get("state") or {}).get("center_freq_hz")
+                try:
+                    center = float(center)
+                except (TypeError, ValueError):
+                    continue
+                if math.isfinite(center) and center >= 0:
+                    if center != self._replay_center_hz:
+                        self._reset_replay_history()
+                    self._replay_center_hz = center
+        self._replay_plan_index = idx
+        return steps[idx]
+
+    def _replay_step_sample(self, step: dict) -> Optional[int]:
+        """计划的精确样本位置；没有索引的旧计划才用文件速率换算。"""
+        try:
+            value = step.get("sample")
+            if value is None:
+                value = float(step["at_s"]) * self._replay_sr
+            value = float(value)
+            if math.isfinite(value) and value >= 0:
+                return int(round(value))
+        except (KeyError, TypeError, ValueError, OverflowError):
+            pass
+        return None
+
+    def _reset_replay_history(self, *, flush_audio: bool = False) -> None:
+        """不跨定位/调谐复用滤波、静噪和旧谱；不触发设备或起播。"""
+        self._replay_wfm_rx = None
+        self._replay_squelch = None
+        self._vfo = None
+        self._vfo_in_sr = 0.0
+        self._last_demod_audio = None
+        self.spectrum.generator.clear_data()
+        self.spectrum.set_markers([])
+        if flush_audio and self._audio_player is not None:
+            # stop 是 AudioPlayer 的公开清队列接口；是否恢复交给调用方状态机。
+            self._audio_player.stop()
+            # stop 清了播放队列；可选输出重采样器仍有延迟线，定位时也不能沿用。
+            getattr(self._audio_player, "_resamp_cache", {}).clear()
+
+    def _seek_replay_sample(self, sample) -> bool:
+        """定位已载入数组；失败不改位置，暂停定位绝不自动播放/连接设备。"""
+        if self._replay_iq is None or self._replay_timer is None:
+            return False
+        try:
+            value = float(sample)
+            if (not math.isfinite(value) or not value.is_integer()
+                    or isinstance(sample, bool) or not 0 <= value <= self._replay_total):
+                return False
+        except (TypeError, ValueError, OverflowError):
+            return False
+        playing = self._replay_timer.isActive() and not self._replay_paused_by_idle
+        self._reset_replay_history(flush_audio=True)
+        self._replay_pos = int(value)
+        self._replay_plan_index = -1
+        self._replay_center_hz = self._replay_initial_center_hz
+        self._apply_replay_plan_step(self._replay_pos / self._replay_sr,
+                                     sample=self._replay_pos)
+        self.spectrum.generator.sample_rate_hz = self._replay_sr
+        self.spectrum.set_center_freq(self._replay_center_hz / 1e6)
+        if playing:
+            self._apply_listen_state(self._listen_state)
+        playing = self._replay_timer.isActive()
+        self._sync_replay_timeline()
+        self.statusBar().showMessage(
+            f"回放{'中' if playing else '已暂停'} · 已定位到 "
+            f"{self._replay_pos / self._replay_sr:.3f}s（样本 {self._replay_pos:,}）",
+            MSG_NORMAL)
+        return True
+
+    def _toggle_replay(self) -> None:
+        if self._replay_timer is None or self._replay_iq is None:
+            return
+        if self._replay_timer.isActive():
+            self._apply_listen_state("idle")
+        else:
+            if self._replay_pos == self._replay_total:
+                self._seek_replay_sample(0)
+            self._apply_listen_state("listen")
+
+    def _clear_replay_plan_view(self) -> None:
+        self._replay_plan = None
+        self._replay_plan_index = -1
+        timeline = getattr(self, "replay_timeline", None)
+        if timeline is not None:
+            timeline.clear_recording()
+
+    def _sync_replay_timeline(self) -> None:
+        timeline = getattr(self, "replay_timeline", None)
+        if timeline is not None and self._replay_timer is not None:
+            timeline.set_progress(self._replay_pos, self._replay_timer.isActive(),
+                                  self._replay_center_hz)
 
     def _start_replay_load(self, path: str) -> None:
         """后台读盘：worker 只读文件 + emit，控件一律留在 GUI 线程。"""
-        if (self._replay_load_thread is not None
-                and self._replay_load_thread.is_alive()):
+        if self._replay_load_thread is not None:
             # 已在读盘：再点「回放」= 取消读取（不打断录音），状态栏说明。
             self._replay_load_cancel.set()
             self.statusBar().showMessage("正在取消读取录音…", MSG_NORMAL)
@@ -13649,6 +14085,7 @@ class MainWindow(QMainWindow):
         try:
             from mbdsdr_ai import baseband_io
         except Exception as e:  # noqa: BLE001
+            self._clear_replay_plan_view()
             QMessageBox.warning(self, "回放失败", f"baseband_io 不可用：\n{e}")
             return
 
@@ -13706,11 +14143,14 @@ class MainWindow(QMainWindow):
         self._replay_progress_dialog = None
         if dlg is not None:
             try:
+                # QProgressDialog.close 也会发 canceled；收结果不是用户取消。
+                dlg.blockSignals(True)
                 dlg.close()
             finally:
                 dlg.deleteLater()
         self._replay_load_thread = None
-        if rec.get("cancelled"):
+        if rec.get("cancelled") or self._replay_load_cancel.is_set():
+            self._clear_replay_plan_view()
             # 取消不打断录音：原实现是"文件确认可播后才停录"，这里直接返回。
             # 关键操作结果用 _hold_status，防止同进程其他测试/后台自动刷新
             # （如自动 TLE 更新）顶掉用户此刻正在读的结论——2026-11-19 grp1
@@ -13720,6 +14160,7 @@ class MainWindow(QMainWindow):
                 "已取消读取录音（录音与实时接收未受影响）", MSG_NORMAL)
             return
         if rec.get("error"):
+            self._clear_replay_plan_view()
             QMessageBox.warning(self, "回放失败", str(rec["error"]))
             return
         self._begin_replay_from_rec(rec, self._replay_load_path)
@@ -13727,9 +14168,20 @@ class MainWindow(QMainWindow):
     def _begin_replay_from_rec(self, rec: dict, path: str):
         """读盘完成后在 GUI 线程起播（原同步正文整体搬来，只多 path 参数）。"""
         if rec.get("error"):
+            self._clear_replay_plan_view()
             QMessageBox.warning(self, "回放失败", str(rec["error"]))
             return
-        iq = np.asarray(rec["iq"], dtype=np.complex64)
+        try:
+            iq = np.asarray(rec["iq"], dtype=np.complex64)
+            sr = float(rec.get("sample_rate", DEFAULT_SAMPLE_RATE_HZ))
+            center_hz = float(rec.get("center_freq_hz", 0.0))
+            if (iq.ndim != 1 or iq.size == 0 or not math.isfinite(sr) or sr <= 0
+                    or not math.isfinite(center_hz) or center_hz < 0):
+                raise ValueError("有效 IQ 样本为空或采样率/中心频率无效")
+        except (KeyError, TypeError, ValueError, OverflowError) as exc:
+            self._clear_replay_plan_view()
+            QMessageBox.warning(self, "回放失败", str(exc))
+            return
         if rec.get("truncated"):
             # 截断必须先说出来再起播：把「只载入前 N 个」装成「回放完成」
             # 等于把 17% 的播放伪装成 100%，是另一种假读数。
@@ -13743,11 +14195,6 @@ class MainWindow(QMainWindow):
                 f"（上限 {REPLAY_MAX_SAMPLES:,}）。\n"
                 "原因：整文件读入需要数 GB 内存。\n"
                 "下一步：分段录音回放；完整回放的分块流式播放在后续版本提供。")
-        if iq.size < 64:
-            QMessageBox.information(self, "回放", "文件中有效样本太少，无法回放。")
-            return
-        sr = float(rec.get("sample_rate", DEFAULT_SAMPLE_RATE_HZ))
-        center_hz = float(rec.get("center_freq_hz", 0.0))
         # 速率/格式/完整性归因：状态栏会被 50ms 一帧的回放进度覆盖，必须用
         # 对话框把「文件什么速率、当前什么设置、是不是半成品」说清楚，
         # 否则用户只看到「没声」或音调不对，无从归因。
@@ -13792,14 +14239,8 @@ class MainWindow(QMainWindow):
         self._replay_squelch = None
         self._replay_resume_poll = self._active_sdr_backend is not None
         self._stop_iq_streams()
-        # _stop_iq_streams 会关掉声卡；回放本身要出声，这里重新拉起声卡
-        # （AudioPlayer.start 幂等：已启动直接返回 True）。回放结束 _stop_replay
-        # 不关声卡：实时后端仍连着时由 _start_iq_streams 继续管理。
-        if self._audio_player is not None:
-            try:
-                self._audio_player.start()
-            except Exception:
-                pass
+        # 声卡稍后由同一收听状态机启动；失败则停在可定位的暂停态。
+        self._reset_replay_history(flush_audio=True)
         try:
             self.spectrum.set_connected(True)
         except Exception:
@@ -13811,19 +14252,41 @@ class MainWindow(QMainWindow):
         self._replay_pos = 0
         self._replay_sr = sr
         self._replay_center_hz = center_hz
+        self._replay_initial_center_hz = center_hz
+        # 观测档案：起播即对齐到 0 秒时的档案状态（中心频率），之后逐块推进
+        if getattr(self, "_replay_plan", None):
+            self._replay_plan_index = -1
+            self._apply_replay_plan_step(0.0)
         self._replay_total = int(iq.size)
         # 每次回放只提示一次「调谐被拦下」，避免拖频谱时刷屏
         self._replay_tune_notice_shown = False
         # 每 50ms 推一块（按采样率换算样本数），与实时 20fps 观感一致
-        self._replay_block = max(1024, int(sr * 0.05))
+        self._replay_block = max(1, int(round(sr * 0.05)))
         self._replay_paused_by_idle = False
         self._replay_timer = QTimer(self)
         self._replay_timer.setInterval(50)
         self._replay_timer.timeout.connect(self._replay_tick)
+        scope = "仅当前产物 / 载入范围"
+        plan = self._replay_plan or {}
+        if len(plan.get("data_paths", [])) > 1:
+            scope += f"（档案共 {len(plan['data_paths'])} 个产物，本次仅第 1 个）"
+        if rec.get("truncated"):
+            scope += "；文件已截断载入，非完整回放"
+        if segments and len(segments) > 1:
+            scope += f"；仅第 {rec.get('segment_index', 1)} 段"
+        if (self._replay_unknown_duration
+                or any(s.get("kind") == "sample_rate" for s in plan.get("steps", []))
+                or plan.get("sample_rate_hz", sr) != sr):
+            scope += "；混速率：按当前文件固定速率估算秒数，非完整时轴"
+        self._replay_scope_note = scope
+        events = [dict(step, sample=self._replay_step_sample(step))
+                  for step in plan.get("steps", [])]
+        events.extend(plan.get("unindexed_events", []))
+        self.replay_timeline.set_recording(os.path.basename(path), self._replay_total,
+                                           sr, events, scope)
         self._replay_timer.start()
-        self.statusBar().showMessage(
-            f"回放中: {os.path.basename(path)}  "
-            f"0.0/{self._replay_total/sr:.1f}s", 0)  # 常驻：回放进度每帧覆盖，直到用户停止
+        self._apply_listen_state("muted" if self._listen_state == "muted" else "listen")
+        self._sync_replay_timeline()
         self._refresh_tx_readout()  # 回放不预偏：读数显式说明保持原频率
         # 回放保持原频率：自动预偏开关置灰 + PTT 置灰（tooltip 说明原因）
         self.doppler_chip.setEnabled(False)
@@ -13842,59 +14305,78 @@ class MainWindow(QMainWindow):
         if self._replay_iq is None or self._replay_timer is None:
             self._stop_replay()
             return
-        n = self._replay_block
-        seg = self._replay_iq[self._replay_pos:self._replay_pos + n]
-        if seg.size >= 64:
-            try:
-                self.spectrum.update_iq(seg, self._replay_center_hz, self._replay_sr)
-            except Exception:
-                pass
-            # 真送解调链：VFO DDC → 按 _demod_cfg.mode 解调 → 声卡（带静噪门控）
-            try:
-                self._demod_and_play(seg, self._replay_sr)
-            except Exception:
-                pass
-        self._replay_pos += n
-        cur_s = self._replay_pos / self._replay_sr
-        tot_s = self._replay_total / self._replay_sr
+        if self._replay_paused_by_idle:
+            return
+        sr = self._replay_sr
+        end = min(self._replay_pos + self._replay_block, self._replay_total)
+        boundaries = {end}
+        for event in (self._replay_plan or {}).get("steps", []):
+            pos = self._replay_step_sample(event)
+            if pos is not None and self._replay_pos < pos < end:
+                boundaries.add(pos)
+        # 在事件样本界切开 50 ms 块：每片都用该位置的中心频率，短尾也消费。
+        for boundary in sorted(boundaries):
+            self._apply_replay_plan_step(self._replay_pos / sr, sample=self._replay_pos)
+            seg = self._replay_iq[self._replay_pos:boundary]
+            if seg.size:
+                try:
+                    self.spectrum.update_iq(seg, self._replay_center_hz, sr)
+                    self._demod_and_play(seg, sr)
+                except Exception as exc:
+                    self._stop_replay()
+                    self.statusBar().showMessage(f"回放处理失败：{exc}", MSG_IMPORTANT)
+                    return
+                self._replay_pos += int(seg.size)
+        # 消费到边界后也应用事件，包括文件最后一个样本之后的停止事件。
+        step = self._apply_replay_plan_step(self._replay_pos / sr, sample=self._replay_pos)
+        cur_s = self._replay_pos / sr
+        tot_s = self._replay_total / sr
+        from replay_timeline import event_label, event_offset
+        step_note = (f" · {event_label(step)} @ 录制偏移 {event_offset(step)}"
+                     + ("（墙钟估算）" if step.get("index_source") == "wall" else "")) if step else ""
+        self._sync_replay_timeline()
         if getattr(self, "_replay_unknown_duration", False):
             self.statusBar().showMessage(
-                f"回放中: {cur_s:.1f}s（总时长未知：录制中改过采样率）", 0)  # 常驻：回放进度每帧覆盖，直到用户停止
+                f"回放中: {cur_s:.1f}s（总时长未知：录制中改过采样率）"
+                f"{step_note}", 0)  # 常驻：回放进度每帧覆盖，直到用户停止
         else:
             self.statusBar().showMessage(
-                f"回放中: {min(cur_s, tot_s):.1f}/{tot_s:.1f}s", 0)  # 常驻：回放进度每帧覆盖，直到用户停止
+                f"回放中: {min(cur_s, tot_s):.1f}/{tot_s:.1f}s"
+                f"{step_note}", 0)  # 常驻：回放进度每帧覆盖，直到用户停止
         if self._replay_pos >= self._replay_total:
-            done = ("回放完成（时长未知：录制中改过采样率）"
-                    if getattr(self, "_replay_unknown_duration", False)
-                    else f"回放完成（{tot_s:.1f}s）")
+            done = (f"当前产物载入范围播放完成（{self._replay_total:,} 样本）"
+                    f" · {getattr(self, '_replay_scope_note', '仅载入范围')}{step_note}")
             self._stop_replay()
             self.statusBar().showMessage(done, MSG_NORMAL)
 
     def _stop_replay(self):
-        """停止回放并恢复实时状态。
-
-        注意：这里不主动关声卡。回放期间声卡是回放启动时拉起的；若实时后端仍连着，
-        下面 _start_iq_streams() 会继续复用同一条 OutputStream（start 幂等）；
-        若后端未连接，声卡留空跑也无害（无数据入队即静音）。
-        """
-        if (self._replay_load_thread is not None
-                and self._replay_load_thread.is_alive()):
+        """停止回放、清掉缓冲和视图；仅原本连接的实时后端允许恢复。"""
+        if self._replay_load_thread is not None:
             # 关窗/停止走同一处：先把读盘 worker 叫停，避免窗口销毁后还在读文件。
             self._replay_load_cancel.set()
+        had_replay = self._replay_timer is not None or self._replay_iq is not None
         if self._replay_timer is not None:
             try:
                 self._replay_timer.stop()
-            except Exception:
+                self._replay_timer.deleteLater()
+            except RuntimeError:
                 pass
             self._replay_timer = None
+        if had_replay:
+            self._reset_replay_history(flush_audio=True)
         self._replay_iq = None
+        self._replay_total = 0
         self._replay_pos = 0
         self._replay_tune_notice_shown = False
         self._replay_paused_by_idle = False
+        # 档案计划只属于本次回放；取消尚未交付的读盘也清掉视图。
+        self._clear_replay_plan_view()
         # 回放结束：若实时后端仍连着，恢复统一 IQ 轮询；否则保持未连接空白
         if self._replay_resume_poll and self._active_sdr_backend is not None:
             self._start_iq_streams()
         elif self._active_sdr_backend is None:
+            if had_replay:
+                self._apply_listen_state("idle")
             try:
                 self.spectrum.set_connected(False)
             except Exception:
@@ -15109,7 +15591,11 @@ class MainWindow(QMainWindow):
         if os.environ.get("MBDSDR_OFFLINE") == "1":
             return                      # 测试/CI 进程不碰真实串口
         try:
-            if self._gnss.is_connected():
+            # is_connected 是 @property（gnss_monitor.py:488），不是方法。
+            # 旧写法 ``is_connected()`` 会对 bool 调用，抛 TypeError 被吞掉，
+            # 后果是「已连接时不会提前返回」→ 线程结束后再次 start(None, 9600)
+            # 重扫串口 → 把已有连接打断（真机实测出现过 12.6 s 无有效 NMEA）。
+            if self._gnss.is_connected:
                 return
         except Exception:
             pass
@@ -15284,9 +15770,12 @@ class MainWindow(QMainWindow):
             self.status_panel.update_gnss(fix_dict)
         except Exception:
             pass
-        # 底部状态栏 GNSS 标签：三态文案（同一串口数据源，不走 worker 双写）
+        # 底部状态栏 GNSS 标签：三态文案（同一串口数据源，不走 worker 双写）。
+        # is_connected 是 @property（gnss_monitor.py:488）：旧写法加成 () 会对
+        # bool 调用抛 TypeError，被这里吞掉后**永远**显示「GNSS: 未连接」，
+        # 哪怕串口真的开着、状态面板已有有效经纬度（2026-11-22 真机截图实证）。
         try:
-            connected = bool(self._gnss.is_connected())
+            connected = bool(self._gnss.is_connected)
         except Exception:
             connected = False
         try:
@@ -15328,7 +15817,13 @@ class MainWindow(QMainWindow):
             preview_site = (self._observer_source == "preview"
                             and not static_site)
             if has_fix:
-                self.sky_view.set_gnss_position(fix_dict)
+                # 站址优先级是「用户配置站址（静态事实）> GNSS 实时 fix」：
+                # 有配置站址时不许把 sky_view 覆盖成 GNSS 坐标，否则主窗与
+                # 天空各说一套，起录时被判定「坐标冲突」→ 观测档案 site=none，
+                # 回放直接拒绝（2026-11-22 真机 7s 录制复现）。GNSS 面板自己
+                # 仍照常显示接收机定位；示例站则允许被真 fix 顶掉。
+                if not static_site or preview_site:
+                    self.sky_view.set_gnss_position(fix_dict)
                 if not static_site:
                     self._observer_source = "gnss"
                 # 只在"还没设过站"或"还在看示例站"时写真 GNSS；
@@ -15355,7 +15850,7 @@ class MainWindow(QMainWindow):
             cp = getattr(self, "constellation_panel", None)
             if cp is not None and hasattr(cp, "update_gnss"):
                 cp.update_gnss(gsv_frames, gsa_frame,
-                               bool(self._gnss.is_connected()))
+                               bool(self._gnss.is_connected))
         except Exception:
             pass
 
@@ -15546,6 +16041,38 @@ class MainWindow(QMainWindow):
             reg = registry()
             for pid, wgt in getattr(self, "_panel_attachments", ()):
                 reg.detach_widget(pid, wgt)
+        except Exception:  # noqa: BLE001
+            pass
+        # 6. 等所有 daemon 后台线程退出。Task 158 实证：绑定方法 / 闭包捕获 self
+        #    的 threading.Thread 会成为 MainWindow 最后一个 Python 持有者——
+        #    线程析构时若窗口已无其他引用，会在 worker 线程上下文销毁
+        #    QMainWindow（C++ 对象）→ Windows 堆损坏（0xC0000374）。
+        #    这里统一 join，主线程主动等线程结束，杜绝"线程是最后持有者"。
+        #    每个线程的 timeout 设为它预期最长阻塞时间 + 余量；超过则放弃等待
+        #    （daemon=True 会在进程退出时被强制终止，不会造成僵尸进程）。
+        for _attr, _to in (
+                ("_auto_enum_thread", 5.0),       # enumerate + connect ≈ 2s + 余量
+                ("_gnss_auto_thread", 16.0),      # auto_detect 最长 15s
+                ("_tx_thread", 3.0),
+                ("_replay_load_thread", 10.0),    # 大文件读盘
+                ("_tle_update_thread", 5.0),      # 网络拉取
+                ("_time_info_thread", 2.0),
+        ):
+            _th = getattr(self, _attr, None)
+            if _th is not None and _th.is_alive():
+                try:
+                    _th.join(timeout=_to)
+                except Exception:  # noqa: BLE001 - 关窗收尾不许因 join 异常中断
+                    pass
+        # 7. 面板级后台线程：NewSpacetimePanel 有 _refresh_thread（闭包捕获 self），
+        #    没有 self 属性持有——通过 findChildren 按类名匹配调 shutdown()。
+        try:
+            for _w in self.findChildren(QWidget):
+                if _w.__class__.__name__ == "NewSpacetimePanel":
+                    try:
+                        _w.shutdown()
+                    except Exception:  # noqa: BLE001
+                        pass
         except Exception:  # noqa: BLE001
             pass
 

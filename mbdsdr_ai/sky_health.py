@@ -13,8 +13,12 @@
 * ``L0``：没有可用观测（空、全部陈旧/非法），或位姿融合不可用；
 * ``L1``：单源粗略位姿（典型是 IMU，方位精度 5–15°）；
 * ``L2``：多源融合位姿（IMU + GNSS 时间/位置等）；
-* ``L3``：星点解算成功（调用方在 ``solver_status`` 里给 ``solved=True``）；
+* ``L3``：星点解算成功（调用方在 ``solver_status`` 里给 ``solved=True``），
+  且残差未超阈值（``solve_within_tolerance`` 不是 ``False``）；
 * ``L4``：手动接管（``manual_override=True``，最高优先级）。
+
+残差超阈值（``solve_within_tolerance=False``）时，即使解算成功也不进 L3，
+按融合来源数退回 L2/L1——解算本身成功了，但这次的修正量不可信。
 
 相机超过 ``CAMERA_NO_FRAME_S`` 秒没有新帧时，``camera_no_frame=True``；
 若原本靠解算到达 L3，则**降级**回融合级别（解算所需的新帧已经不可信），
@@ -39,6 +43,7 @@ from .sky_pointing import fuse_poses
 __all__ = [
     "CAMERA_NO_FRAME_S",
     "DEFAULT_MAX_OBS_AGE_S",
+    "classify_level",
     "health_snapshot",
 ]
 
@@ -120,14 +125,19 @@ def _source_snapshots(observations: Iterable[Any],
     return [latest[name] for name in order]
 
 
-def _classify_level(pose_valid: bool, source_count: int, solve_ok: bool,
-                    manual_override: bool) -> str:
-    """级别判定的唯一出处（L0–L4）；上层只消费结果，不再各写一套。"""
+def classify_level(pose_valid: bool, source_count: int, solve_ok: bool,
+                   manual_override: bool,
+                   within_tolerance: Optional[bool] = None) -> str:
+    """级别判定的唯一出处（L0–L4）；上层只消费结果，不再各写一套。
+
+    ``within_tolerance=None`` 表示调用方没给残差信息，保持旧行为（解算成功
+    即 L3）；显式 ``False`` 时解算成功也不进 L3，按来源数退回 L2/L1。
+    """
     if manual_override:
         return "L4"
     if not pose_valid or source_count <= 0:
         return "L0"
-    if solve_ok:
+    if solve_ok and within_tolerance is not False:
         return "L3"
     if source_count >= 2:
         return "L2"
@@ -162,7 +172,9 @@ def health_snapshot(observations: Iterable[Any],
                     *,
                     manual_override: bool = False,
                     last_error: Optional[str] = None,
-                    runtime_sources: Optional[Mapping[str, Any]] = None) -> Dict[str, Any]:
+                    runtime_sources: Optional[Mapping[str, Any]] = None,
+                    solve_within_tolerance: Optional[bool] = None
+                    ) -> Dict[str, Any]:
     """生成当前 AR 指向链路的健康快照。
 
     Args:
@@ -178,6 +190,9 @@ def health_snapshot(observations: Iterable[Any],
         last_error: 调用方持有的最近一次错误文本；本模块原样透传。
         runtime_sources: 可选的 ``SDRController.get_runtime_sources()`` 快照；
             原样放进结果的 ``runtime_sources`` 字段，本模块不另造时间/站址。
+        solve_within_tolerance: 最近一次解算的残差是否在阈值内。``False`` 时
+            即使 ``solved=True`` 也不报 L3；``None`` 表示调用方没提供残差
+            信息，保持旧行为（解算成功即 L3）。
 
     Returns:
         dict 字段：
@@ -257,9 +272,14 @@ def health_snapshot(observations: Iterable[Any],
         solve_ok = False
         degraded = (f"；相机超过 {CAMERA_NO_FRAME_S:g}s 无帧，"
                     "星点解算不可用，级别按融合结果降级")
+    if (solve_within_tolerance is False and solver["solved"]
+            and not manual_override):
+        # 解算成功但残差超阈值：修正量不可信，不提升到 L3。
+        degraded += "；残差超阈值，级别按融合结果降级"
 
-    level = _classify_level(pose_valid, len(pose_sources), solve_ok,
-                            bool(manual_override))
+    level = classify_level(pose_valid, len(pose_sources), solve_ok,
+                           bool(manual_override),
+                           within_tolerance=solve_within_tolerance)
     if pose_valid or level == "L4":
         reason = _reason_for_level(level, pose_sources, str(solver["name"]))
     else:

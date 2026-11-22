@@ -615,8 +615,8 @@ python -c "from mbdsdr_ai.core.mcp_server import MCPToolSet; print(len(MCPToolSe
 
 | 路径 | 用户可见面 | 采样/细化 | 实测偏差 | 界面标注 |
 | --- | --- | --- | --- | --- |
-| `TimelineEngine`（`new_spacetime_timeline`） | 新时空面板表格 + 提示区 | **60 秒网格，无细扫** | 相对 2 秒细扫（24 h / 28 条过境）：峰值时刻 **≤30 秒**、升落 **≤58 秒**、峰值仰角最大差 **7.6°** | 面板提示区原文：「时刻来源：本面板 TimelineEngine（60 秒网格，未细扫）；峰值时刻偏差 ≤30 秒、升落 ≤58 秒、峰值仰角最大差 7.6°（不是卫星位置精度）。」 |
-| `sat_passes.predict_passes` | SDR 工具文本 / controller / MCP `get_satellite_pass` / agent `_passes` | 60 秒粗扫 + **2 秒细扫** + 0.5 秒二分 | 升落二分容差 0.5 秒；中天为 2 秒细采样的一格（≤1 秒） | SDR 文本「时刻来源：sat_passes（60 秒粗扫 + 2 秒细扫 + 0.5 秒二分；…不是卫星位置精度）」；controller/MCP 带 `pass_time_source` 与 `pass_time_sampling_precision_s=1.0`；agent `_passes` 同名字段 |
+| `TimelineEngine`（`new_spacetime_timeline`） | 新时空面板表格 + 提示区 | 60 秒粗扫网格 + **AOS/LOS 二分**（容差 0.5 秒，单一来源 `sat_passes.PASS_BISECT_TOL_S`）+ **2 秒细扫**校正中天/峰值仰角（与 `sat_passes.refine_culmination` 同一实现） | 中天时刻约 ±1 秒（2 秒网格半格）；AOS/LOS 二分容差 0.5 秒——固定 ISS 夹具（2008-09-20 06:00Z，39.9°N/116.4°E）实测升落仰角残差 ≤0.014°，同一过境最近的 60 秒网格点残差为 1.6°/2.4°；峰值仰角同 2 秒细扫口径。若二分区间不成立/端点仰角异常/传播失败，**保留粗扫网格点**并置 `aos_refined=False`/`los_refined=False`（`crossing_tol_s=0`），窗末截断的落下同样不标收敛，不静默声称已收敛 | 面板提示区已同步：全部收敛时给「±0.5 秒」；存在未收敛过境时明说「退回粗扫网格点，按 ≤60 秒承诺」。完整口径见本行。这是预测时刻精度，不是卫星位置精度。与 `sat_passes.predict_passes` 的逐条对拍已做（2026-11-22，同一 ISS TLE/站址/UTC 起点/仰角门，24 h 窗）：2008 TLE 夹具 6 条过境 AOS 差 ≤0.469 s、LOS 差 0 s、中天差 ≤1.531 s、最大仰角差 ≤0.0055°；2026 TLE 夹具 4 条过境时刻差全 0 s、最大仰角差 ≤0.0010°（`tests/test_pass_time_single_source.py::test_timeline_matches_sat_passes_predict_passes`）。仍未覆盖：非 ISS 倾角（极轨/太阳同步）、高轨与大偏心率、<5° 的极低仰角擦边门、超过 24 h 的窗末截断配对。 |
+| `sat_passes.predict_passes` | SDR 工具文本 / controller / MCP `get_satellite_pass` / agent `_passes` | 60 秒粗扫 + **2 秒细扫** + 0.5 秒二分 | 升落二分容差 0.5 秒；中天为 2 秒细采样的一格（≤1 秒） | SDR 文本、controller 与 agent 的 `pass_time_source` 均消费 `sat_passes.grid_manifest()['accuracy_note']`，不再各自写秒数；controller/MCP 另带 `pass_time_sampling_precision_s=1.0` |
 | `compute_pass_peaks`（`rf_sky_view`） | 天空图「未来过境」列表 | 60 秒粗扫 + 2 秒细扫（无二分） | 同 sat_passes 细扫口径（无 0.5 秒升落二分） | 列表标题追加「· 2s采样」；完整口径见本表与面板提示区 |
 
 ---
@@ -993,6 +993,24 @@ python -c "from mbdsdr_ai.sdr_backend import HackRFBackend as K;be=K(device_inde
 | 验了什么（假 Alpaca 服务） | `python -m pytest tests/test_mount_alpaca.py -q` → 16 passed（`http.server` 后台假服务，端口 0）：能力位全 true、五类能力位为 false 时 PUT 数为 0、RA/Dec 与 Alt/Az 官方字段、坏信封、HTTP 500、不可达端口 0.2 s 超时、encoder/model 两态、读失败抛错；`python -m pytest tests/test_mount_tools.py -q` → 11 passed：三个工具的注册与写分级、能力位拒绝时零 PUT、abort 两态、`source=model`、连不上不报 0°、文案不含「已对准」 |
 | 没验什么 | 真赤道仪/望远镜（ASCOM Alpaca 真服务或 ASCOM Remote）：`connect` 握手、`CanSlew*` 等能力位的真实取值、真实 slew 的异步完成时刻、`AbortSlew` 的物理停止距离、`hasencoder` 等非标准扩展是否上报；`source=model` 只是模型推算不是机械真值；「已对准」需 `mbdsdr_ai/sky_solve.py` 的图像解算残差，本轮只有假服务闭环。以上均无真机证据 |
 | 怎么验 | ①准备真 Alpaca 服务（ASCOM Remote 或望远镜厂商驱动，默认 `http://<host>:11111`）或 ASCOM Alpaca 模拟器；②跑 `python -c "from mbdsdr_ai.mount import AlpacaMount;m=AlpacaMount('http://<host>:11111',0);m.connect();print(m.capabilities());print(m.position())"`，通过=能力位与厂商手册一致、无编码器时 `position().source` 为 `model`；③从「AI 助手」页签调用 `mount_status` 核对读数，再以小角度、有人看守为前提调 `mount_slew` 核对物理转动，最后 `mount_abort` 验证 1 s 内停止；④用 `sky_solve.py`（tetra3 或外部 ASTAP）解星点图，残差达标才可说「已对准」；无设备时保持未验证 |
+
+### U.14 星点检测与帧级解算接线（`mbdsdr_ai/star_detect.py`；`sky_pointing_pipeline.solve_from_frame`）
+
+| 问题 | 答案 |
+| --- | --- |
+| 哪条路径 | `mbdsdr_ai/star_detect.py:detect_stars`（二维数组 → 亚像素质心；`DetectConfig` / `DetectResult` 同在此文件）；`mbdsdr_ai/sky_pointing_pipeline.py:solve_from_frame`（检测 → `solve_and_verify`，检测失败不调解算器）；用例 `tests/test_star_detect.py`。对应声明位置：`.trae/specs/mbdsdr-system-lifecycle/spec.md` D4「帧级星点检测的输入边界」；`.trae/specs/mbdsdr-system-lifecycle/checklist.md` 第 136 行 |
+| 验了什么（合成图） | `python -m pytest tests/test_star_detect.py tests/test_sky_pointing_pipeline.py -q` → 38 passed：已知真值高斯 PSF 的质心偏差 < 0.3 px、背景/噪声稳健估计、纯平场→`flat_image`、NaN/Inf/非二维/过小→`bad_image`、纯噪声→`no_stars`、单像素热点与超大面积块被面积过滤、贴边星被边界过滤、阈值单调性、`max_stars` 按流量降序截断、检测失败时解算器零调用、成功路径残差可算。全部为固定种子合成图，不接相机、不读磁盘、不联网 |
+| 没验什么 | 真机相机采集（桌面无取景通道，手机端未接线）：曝光/增益、滚动快门、镜头畸变与暗角、真实 PSF 与拖线；真实夜空帧与真实星表上的检测率/误检率；高背景梯度（月光/光污染）下 MAD 噪声估计与四连通分割的行为；饱和星点的质心偏移；解算精度本身（tetra3/ASTAP 未在真实星表/二进制上验证）。以上均无真机证据，「合成图通过」不等于夜空可用 |
+| 怎么验 | ①在真实夜空用固定三脚架拍一帧（建议 5–15 s，FOV 先验已知），存为 `.npy`；②`python -c "import numpy as np; from mbdsdr_ai.star_detect import detect_stars; r=detect_stars(np.load('frame.npy')); print(r.ok, len(r.centroids), r.background, r.noise_sigma, r.error)"`，通过=检出星数与同一天区星表目视计数同阶、无大面积误检；③把该帧交给 `solve_from_frame`（注入真实解算器或 `sky_solve.solve_frame`）看残差是否可算；④只有残差与重复性达标才可对用户说「指向准确」，检测成功本身不构成对准结论 |
+
+### U.15 观测档案的接线与未覆盖形态（`mbdsdr_ai/observation_record.py`；`controller.stop_recording`；工具 `observation_export`）
+
+| 问题 | 答案 |
+| --- | --- |
+| 哪条路径 | `mbdsdr_ai/observation_record.py`（`ObservationRecord` / `validate_for_export` / `record_from_snapshot` / `product_from_sigmf`）；`mbdsdr_ai/core/controller.py:stop_recording` 在录制结束后自动落 `*.observation.json`；`mbdsdr_ai/agent.py:_register_observation_tools` 注册 `observation_export`（`confirm` 级）。对应声明位置：`docs/PRD.md` P1-08；`.trae/specs/mbdsdr-system-lifecycle/tasks.md` Task 164 |
+| 验了什么 | ①单元：`tests/test_observation_record.py` 14 条 + `tests/test_recording_observation.py` 6 条——空产物拒绝导出（JSON/CSV 都不留文件）、非法证据强度拒绝、`time.source=system` 不冒充 GNSS、`site.source=none` 时经纬度留 `None`、设备断开后从 SigMF meta 回填并在 `notes` 标注来源、`sdr.device` 是字符串的真实形状、原子写无 `.tmp` 残留、0 样本录制不落档、录制开始快照不被结束时的空快照覆盖、`timeline` 起止事件有序且空时不编造；②工具面：`tool_surface_audit.py` → registry/能力目录/文档 515/515/515 一致；③**真机端到端（无 GNSS）**：RTL-SDR 录 2 s IQ（4,849,664 样本 @2.4 MS/s、100.1 MHz）→ SigMF meta → `write_json` 成功；④**真机端到端（GNSS 在线）**：`RealGNSSMonitor` 18 星定位 → `controller.start_recording` → `stop_recording` → 档案内 `time.source=gnss` / `time_source=nmea` / 精度「约 0.1–1 秒级（无 PPS 对齐）」、`site.source=gnss` 带真实经纬度、`device.driver=rtlsdr`、`evidence=real_hw`；`timeline` 为 `record_start`+`record_stop` 两条，UTC 间隔与录制时长一致 |
+| 没验什么 | ①**非录制类观测**没有自动落档：只解码不录 IQ、只看过境不录信号、只做指向解算这几种情形仍需手动调 `observation_export`，且参数（`observation_id` / `products`）要调用方自己填；②时间轴现在接入 `record_start`/`tune`/`gain`/`sample_rate`/`decode_hit`/`read_gap`/`record_stop`（`controller.note_observation_event`，`decode_hit` 按解码器节流聚合）；仍没验真实解码链路上 `decode_hit`/`read_gap` 的字段完整性与节流行为端到端；③回放现在有实现：`observation_record.replay_plan()` 产出按时间轴的调谐/增益/解码步骤，桌面 `main_window` 按计划重放（`tests/test_replay_plan.py`、`test_replay_timeline.py`、`test_replay_archive_ui.py`）；仍没验回放驱动真实电台/天线的硬件联动，以及跨文件缺失时的用户可见降级；④档案 `site.alt_m` 现在随站址输出（gnss 取 GGA 海拔、manual 原样透传、无站址 `None`）；仍没验 GNSS 海拔是 MSL、未做椭球高/正高换算，真机 GNSS 海拔链路未复测；⑤多产物合并（一次观测同时录 IQ + 解码输出）只在单元测试里用合成 meta 验过，没有真实多产物样本；⑥CSV 每观测一行，多产物只给总数/总字节，明细要读 JSON |
+| 怎么验 | ①真机录一段同时开着 GNSS：`python scripts/sdr_diag.py --timeout 2.0` 确认设备后再录，检查生成的 `*.observation.json` 里 `time.source` 是否为 `nmea`、`site.source` 是否为 `gnss`、经纬度是否来自 GNSS 而非手填；②非录制类：带 `products` 指向一份真实 SigMF meta 调 `observation_export`，确认档案落盘且 `evidence` 与产物完整性一致；③时间轴回放：`replay_plan` + 桌面重放已有可复跑用例（见上），对外可写「可回放」，但不得声称「驱动真实硬件重演」——真机电台/天线联动仍未验 |
 
 ## 附 V：RTL-SDR 3.2 MS/s 标称上限（代码照写、不二次确认；2026-11-13，G1采样率线追加）
 

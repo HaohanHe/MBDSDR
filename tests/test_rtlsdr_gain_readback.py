@@ -114,6 +114,25 @@ def test_backend_with_own_gain_table_still_reports_snapped():
     assert backend.status.gain_db == pytest.approx(25.0)
 
 
+def test_unset_zero_gain_uses_mid_step_not_nearest_low_step():
+    """0 dB = 未指定；FC0012 的最近档 -4 dB 噪声底比中档 7.1 dB 高约 13 dB。"""
+    fake = _SnappingSdr((-99, -40, 71, 179, 192))
+    backend = _backend(fake)
+    backend._gain_table_db = [-9.9, -4.0, 7.1, 17.9, 19.2]
+
+    assert backend.set_gain(0.0) is True
+
+    assert backend.status.gain_db == pytest.approx(7.1)
+
+
+def test_controller_default_gain_uses_tuner_mid_step():
+    from mbdsdr_ai.core.controller import _resolve_default_gain
+
+    assert _resolve_default_gain(0.0, "FC0012") == pytest.approx(7.1)
+    assert _resolve_default_gain(20.0, "FC0012") == pytest.approx(20.0)
+    assert _resolve_default_gain(0.0, "Unknown") == pytest.approx(0.0)
+
+
 def test_rtl_tcp_does_not_claim_readback():
     """rtl_tcp 协议不回执增益：只能显示下发值，并标「未回读」。"""
     backend = _backend(_SnappingSdr(), host="127.0.0.1")

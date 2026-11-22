@@ -104,6 +104,32 @@ BRIGHT_STARS: list[BrightStar] = [
     BrightStar("Ankaa",     6.5708,   -42.3060,  2.40,  1.08,     84.7, "K0III..."),  # K0III... Phe
 ]
 
+# 亮星到 HYG 主表 `hyg_id` 的对照（供搜索兜底结果查自行侧车）。
+# 生成方式：按 proper 名精确匹配 HYG v4.1，`Regor`（HYG 无 proper 名）
+# 按坐标 1″ 内吸附；54 颗全部命中，坐标差均 <0.2″。测试会复核
+# 「每颗亮星都有 id、id 不重复、按 id 取出的坐标与亮星表 1″ 内一致」。
+# 不含 EXTENSION_STARS（当前兜底搜索只遍历 BRIGHT_STARS）。
+BRIGHT_STAR_HYG_IDS: Dict[str, int] = {
+    "Sirius": 32263, "Canopus": 30365, "Arcturus": 69451, "Vega": 90979,
+    "Capella": 24549, "Rigel": 24378, "Procyon": 37173,
+    "Betelgeuse": 27919, "Achernar": 7574, "Hadar": 68483,
+    "Altair": 97338, "Acrux": 60530, "Aldebaran": 21368,
+    "Antares": 80519, "Spica": 65269, "Pollux": 37718,
+    "Fomalhaut": 113008, "Deneb": 101767, "Mimosa": 62239,
+    "Regulus": 49528, "Adhara": 33492, "Castor": 36744,
+    "Shaula": 85665, "Gacrux": 60893, "Bellatrix": 25273,
+    "Elnath": 25364, "Miaplacidus": 45106, "Alnilam": 26246,
+    "Alnair": 108922, "Regor": 39840, "Alioth": 62757,
+    "Alnitak": 26662, "Dubhe": 53905, "Mirfak": 15824,
+    "Wezen": 34354, "Kaus Australis": 89906, "Alkaid": 67088,
+    "Avior": 40921, "Sargas": 85965, "Menkalinan": 28288,
+    "Alhena": 31601, "Peacock": 100425, "Alphard": 46259,
+    "Polaris": 11734, "Hamal": 9861, "Diphda": 3413,
+    "Alpheratz": 676, "Mirach": 5436, "Algieba": 50440,
+    "Denebola": 57459, "Algol": 14540, "Mizar": 65173,
+    "Naos": 39318, "Ankaa": 2076,
+}
+
 
 def mag_to_lux(vmag: float) -> float:
     """照度 E(lux) = 10.7646e4/R2AS^2 * 10^(-0.4*vmag)（Pogson 定律）。"""

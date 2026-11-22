@@ -97,10 +97,20 @@ cmake --install $BuildDir --prefix $stage
 if ($LASTEXITCODE -ne 0) { throw "cmake --install 失败" }
 
 # ---- Qt/MinGW 运行库 ----
-& $windeployqt --release --no-translations (Join-Path $stage "bin\mbdsdr.exe")
-if ($LASTEXITCODE -ne 0) { throw "windeployqt(mbdsdr) 失败" }
-& $windeployqt --release --no-translations (Join-Path $stage "bin\mbdsdr_mcp.exe")
-if ($LASTEXITCODE -ne 0) { throw "windeployqt(mbdsdr_mcp) 失败" }
+# windeployqt 会把「找不到 dxcompiler.dll」这类可忽略警告写到 stderr；
+# PS 5.1 在 $ErrorActionPreference=Stop 下会把它升级成终止错误。这里临时
+# 改为 Continue 并把 stderr 并进日志，真正的失败仍由退出码判定。
+$prevEap = $ErrorActionPreference
+$ErrorActionPreference = "Continue"
+& $windeployqt --release --no-translations (Join-Path $stage "bin\mbdsdr.exe") 2>&1 | ForEach-Object { Write-Host $_ }
+$windeployRc = $LASTEXITCODE
+$ErrorActionPreference = $prevEap
+if ($windeployRc -ne 0) { throw "windeployqt(mbdsdr) 失败（exit=$windeployRc）" }
+$ErrorActionPreference = "Continue"
+& $windeployqt --release --no-translations (Join-Path $stage "bin\mbdsdr_mcp.exe") 2>&1 | ForEach-Object { Write-Host $_ }
+$windeployRc = $LASTEXITCODE
+$ErrorActionPreference = $prevEap
+if ($windeployRc -ne 0) { throw "windeployqt(mbdsdr_mcp) 失败（exit=$windeployRc）" }
 
 # ---- librtlsdr.dll（真 RTL-SDR 运行库；位置由 CMakeCache 推导，缺了即红）----
 Copy-Item $rtlDll (Join-Path $stage "bin\librtlsdr.dll") -Force
@@ -146,11 +156,13 @@ if (-not (Test-Path $snap) -or (Get-Item $snap).Length -eq 0) {
 Write-Host ("冒烟通过：--snapshot PNG {0} 字节（干净 PATH，包内运行库自洽）" -f (Get-Item $snap).Length)
 
 # ---- 发布产物凭据硬门（打包前）：任何 BLOCK 命中的文件都不许进 zip ----
-# 与 release_manifest.py 的第 5 项同一判据（scripts/secret_scan.py），这里放在
-# 压包之前，保证「打出来的包」本身干净；找不到 python 也按失败关闭，不静默跳过。
-$scanner = Join-Path (Split-Path -Parent $PSScriptRoot) "scripts\secret_scan.py"
-if (-not (Test-Path $scanner)) { throw "凭据扫描器缺失：$scanner（拒绝打包）" }
-python $scanner --artifact $stage
+# 与 release_manifest 的第 5 项同一判据，但必须走 release_manifest 的
+# check_secrets：它带 ARTIFACT_SECRET_ALLOWLIST（Qt TLS DLL 的 PEM 头常量
+# 是已登记误报，按路径+sha+规则+复核期限放行）。直接调 secret_scan 会绕过
+# 登记表，把 Qt 自带的解析字符串当成真密钥而拒绝打包。
+$gate = Join-Path (Split-Path -Parent $PSScriptRoot) "scripts\release_manifest.py"
+if (-not (Test-Path $gate)) { throw "发布产物门禁缺失：$gate（拒绝打包）" }
+python $gate --dist $stage --only secrets
 if ($LASTEXITCODE -ne 0) {
     throw "发布产物凭据扫描未通过：$stage（删除或移出命中文件后重跑，不许绕过）"
 }

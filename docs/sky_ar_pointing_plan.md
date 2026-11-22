@@ -59,16 +59,21 @@ tools   工具面：模型编排以上能力
 4. **可降级**：粗对准 → 精解算 → 手动，任一级缺失都必须明说当前级别；
 5. **无置信度不宣称**：识别结果必须带来源与误差。
 
-## 5. 工具契约（名字先定，实现可后补）
+## 5. 工具契约（按已注册工具对拍）
 
 | 工具 | 输入 | 输出 | 失败语义 |
 |---|---|---|---|
-| `sky_pose_fuse` | 观测列表（source/t_utc/az/alt/roll/accuracy） | 融合位姿 + 各级来源 + 剩余误差 | 全部陈旧/缺失 → `unavailable`，不猜 |
-| `sky_pose_view` | 位姿 + fov + 屏幕尺寸 | 可直接套用的 ViewState 参数 | 位姿非法 → `invalid` |
-| `sky_identify_at` | 屏幕点或 az/alt + 时间/站点 | 目标（恒星/星官/行星/卫星）+ 名称 + 误差 | 无匹配 → `no_match`，不返回最近邻凑数 |
-| `sky_solve_frame` | 星点像素 + FOV 先验 | 修正量 + 解算星数 + 残差 | 库缺失/星不足 → `unavailable` + 原因 |
+| `sky_pose_fuse` | 观测列表（source/t_utc/az/alt/roll/accuracy） | 融合位姿 + 各级来源 + 剩余误差 | 全部陈旧/缺失 → `valid=false` + 人话原因，不猜 |
+| `sky_identify_at` | az/alt + fov，可选 jd/lat/lon | 恒星（+ 中国星官）+ 角距 | 无匹配 → `matched=false` + 原因，不返回最近邻凑数 |
+| `sky_solve_status` | 无 | `available/name/reason/deprecated` | 未安装 → `available=false`，不冒充可用 |
+| `sky_health` | 观测数组 + now，可选相机帧时间 | 级别 L0–L4 + 各源年龄/可用性 + 降级原因 | 无观测 → L0 + 原因 |
+| `sky_calibration_save`（写） | 校准点 + 设备名 + fov + 路径 | 路径 + 最大残差 + 档案摘要 | 求解失败/残差超阈值 → 拒绝写入（不写文件）；模型通道需一次性确认 token |
 
-（`sky_identify_at` 复用现有 `pick_object` / `sky_whats_here`，不另写星表。）
+`sky_pose_view` / `sky_solve_frame` 是计划名，**未单独注册为工具**：视图参数由
+`sky_pointing.view_params` 在内部产生，解算由解算流程与 `sky_solve_status` 覆盖；
+这里只列已注册、可被模型调用的名字，避免「文档说有、代码没有」。
+
+（`sky_identify_at` 复用现有星表 / 星官查询，不另写星表。）
 
 ## 6. 天文通反编译结论（只作功能参考）
 
@@ -83,7 +88,7 @@ tools   工具面：模型编排以上能力
 
 1. **位姿融合（纯逻辑）**：**已落地**〔证：`18d1a06b` — `mbdsdr_ai/sky_pointing.py:103` — `def fuse_poses`〕。`fuse_poses` / `view_params` / `identify_direction`；`tests/test_sky_pointing.py` 16 条。
 2. **解算适配（契约 + 接入）**：**已落地（替身验证）**〔证：`18d1a06b` — `mbdsdr_ai/sky_solve.py:305` — `def solve_tetra3`〕。`solver_status` / `solve_frame` / `solve_tetra3` / `solve_astap`；星点 < 8、超时、乱码等分支有测试；真实解算与真实夜空未验证（缺真实相机/星点）。
-3. **桌面指向模式**：**已落地（离屏）**〔证：`30f62a49` — `desktop/rf_sky_view.py:2193` — `self._sky_pointing_mode`〕。HUD 按 L0–L4 差异化；`RFSkyView` 开关默认关，只改 `rf_sky_view.py`，未改 `main_window.py`；真实相机/IMU 未验证（缺硬件）。
+3. **桌面指向模式**：**已落地（离屏）**〔证：`30f62a49` — `desktop/rf_sky_view.py:2193` — `self._sky_pointing_mode`〕。HUD 按 L0–L4 差异化；`RFSkyView` 开关默认关，只改 `rf_sky_view.py`，未改 `main_window.py`；开启时自动读取默认校准档案并在 HUD 显示「已校准（日期）」。**产品 UI 目前没有开关调用方，也没有真实 IMU/相机位姿来源**——真实指向未验证（缺硬件）。
 4. **望远镜前视**：**未验证**。无真实手机/望远镜/IMU；目镜后仅作可选增强。
 
 ### 已知阻塞
@@ -93,6 +98,13 @@ tools   工具面：模型编排以上能力
 
 真实硬件（相机/IMU/GNSS 模块/望远镜）与真实星点解算仍未在夜空验证，相关项在
 checklist 保持 `not_verified`（缺真实相机/IMU/望远镜与夜空窗口，无法验证）。
+
+### 适配器维护约定
+
+替换解算适配器（`mbdsdr_ai/sky_solve.py`）时，旧适配器**至少保留一个版本**：
+继续留在 `_SOLVERS` 里可显式调用，并在 `_DEPRECATED_SOLVERS` 登记替代建议；
+`solver_status()["deprecated"]` 如实输出这些条目（未登记/已删除的名字不会出现，
+当前为空）。删除旧适配器属 BREAKING 变更，须更新变更台账。
 
 
 

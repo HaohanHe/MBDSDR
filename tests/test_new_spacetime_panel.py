@@ -293,6 +293,51 @@ def _mk_pass(name, rise, mx, st, max_elevation=45.0):
         max_doppler_hz=-2500.0)
 
 
+def test_time_basis_text_uses_fine_scan_manifest(qapp):
+    """中天已由 2 秒细扫校正，界面不得再写「未细扫 / 峰值仰角差 7.6°」。
+
+    反证：把 ``_pass_time_basis_line`` 改回旧的「60 秒网格，未细扫；峰值
+    时刻偏差 ≤30 秒…峰值仰角最大差 7.6°」文本，本用例变红。
+    """
+    from mbdsdr_ai.sat_passes import grid_manifest
+
+    panel = NewSpacetimePanel()
+    try:
+        line = panel._pass_time_basis_line([_mk_pass("ISS", None, None, None)])
+    finally:
+        panel.close()
+
+    m = grid_manifest()
+    assert "时刻来源" in line and "TimelineEngine" in line
+    assert "未细扫" not in line
+    assert "7.6" not in line
+    assert "为 0 秒粗扫" not in line  # 缺 sampling_step_s 时不能把未知精度写成 0 秒
+    assert f"{m['coarse_step_s']:g} 秒粗扫" in line
+    assert f"{m['fine_step_s']:g} 秒细扫" in line
+    assert "二分" in line
+    assert "不是卫星位置精度" in line
+
+
+def test_time_basis_text_reports_bisection_when_refined(qapp):
+    """升落已二分收敛的过境：文案给二分精度，不再说「退回粗扫网格点」。"""
+    from mbdsdr_ai.sat_passes import grid_manifest
+
+    p = _mk_pass("ISS", None, None, None)
+    p.aos_refined = True
+    p.los_refined = True
+    panel = NewSpacetimePanel()
+    try:
+        line = panel._pass_time_basis_line([p])
+    finally:
+        panel.close()
+
+    m = grid_manifest()
+    assert "二分" in line
+    assert f"{m['crossing_precision_s']:g} 秒" in line
+    assert "退回粗扫网格点" not in line
+    assert "不是卫星位置精度" in line
+
+
 def test_cross_utc_day_pass_shows_date(qapp):
     """跨 UTC 日界的行逐时刻带日期；同日行仍只留时分。
 

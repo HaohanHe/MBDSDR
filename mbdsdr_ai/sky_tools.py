@@ -31,12 +31,20 @@
 - `sky_tonight`         ：我问今晚能不能看，答云量与极光；缺测就说不猜
 - `sky_observing_sites` ：我在哪，附近有哪些有官方坐标的台址/公众点（距离参照）
 - `sky_dso_lookup`      ：那团模糊是什么（梅西耶/亮 NGC：角径、视场、星等）
+- `sky_pose_fuse`       ：多条带时间/精度的位姿观测 → 融合位姿（或明确不可用）
+- `sky_identify_at`     ：给定地平指向 → 视场内的肉眼可见恒星（认星）
+- `sky_solve_status`    ：星点解算器是否可用（tetra3 / ASTAP，如实报）
+- `sky_health`          ：当前指向链路的健康级别与降级原因
+- `sky_calibration_save`：校准并落盘指向档案（唯一的写工具，走确认门）
 """
 
 from __future__ import annotations
 
 import math
+import time
 from typing import Any, Dict, List, Optional
+
+from .tool_results import ToolResult
 
 #: 一 parsec 合多少光年。光行时 = 距离(pc) × 这个数。
 PC_TO_LIGHT_YEAR = 3.261563777
@@ -162,6 +170,94 @@ def _station_from(lat: float, lon: float, alt_m: float = 0.0):
     from .celestial_geometry import GroundStation
 
     return GroundStation(float(lon), float(lat), float(alt_m), "tool")
+
+
+def _finite_number(value: Any) -> Optional[float]:
+    """转有限 float；非数值/NaN/Inf 返回 None（调用方负责给原因）。"""
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        return None
+    return v if math.isfinite(v) else None
+
+
+def _failure(code: str, reason: str) -> ToolResult:
+    """统一失败信封：``<code>（<人话原因>）``，error 同时带稳定码。"""
+    return ToolResult(False, f"{code}（{reason}）", error=code)
+
+
+#: 校准档案写入失败时给模型的下一步；键沿用 ``sky_calibration`` 的既有错误码，
+#: 不新增错误码（``mbdsdr_ai/error_catalog.py`` 已登记这些码）。
+_CALIBRATION_NEXT_STEP = {
+    "too_few_points": "至少给两个不同方向的校准点（夹角 ≥ 5°）后重试。",
+    "pathological": "换两个夹角足够大且不接近天顶的方向，再重新校准。",
+    "residual_too_large": "核对观测目标与读数后重新校准；不要放宽阈值硬存。",
+    "bad_path": "给一个可写的 JSON 文件路径（目录不存在会自动创建）后重试。",
+    "write_failed": "检查目标目录权限与磁盘空间后重试；原档案未被改动。",
+    "verify_failed": "检查磁盘/编码后重试；目标档案未被替换。",
+    "invalid": "检查设备名、视场与校准来源后重试。",
+}
+_CALIBRATION_DEFAULT_NEXT_STEP = (
+    "按 reason 修正 observations/device_id/fov_deg/source 后重试。")
+
+
+def _calibration_next_step(code: str) -> str:
+    return _CALIBRATION_NEXT_STEP.get(code, _CALIBRATION_DEFAULT_NEXT_STEP)
+
+
+def _parse_pose_observations(raw: Any):
+    """把工具参数里的观测数组转成 ``PoseObservation`` 序列。
+
+    返回 ``(observations, code, reason)``：结构/数值非法时 observations 为
+    None，并给出稳定错误码与人话原因；语义问题（陈旧/低精度/相互抵消）交给
+    ``fuse_poses`` 自己如实拒绝，这里不预判朝向。
+    """
+    from .sky_pointing import PoseObservation
+
+    if not isinstance(raw, (list, tuple)):
+        return None, "bad_observations", (
+            "observations 必须是数组，每项含 source/t_utc/az_deg/alt_deg/"
+            f"accuracy_deg；收到 {type(raw).__name__}")
+    required = ("source", "t_utc", "az_deg", "alt_deg", "accuracy_deg")
+    out: List[Any] = []
+    for i, item in enumerate(raw):
+        if not isinstance(item, dict):
+            return None, "bad_observations", (
+                f"第 {i} 项不是对象，收到 {type(item).__name__}")
+        missing = [k for k in required if k not in item]
+        if missing:
+            return None, "bad_observations", (
+                f"第 {i} 项缺少字段 {', '.join(missing)}")
+        t = _finite_number(item["t_utc"])
+        az = _finite_number(item["az_deg"])
+        alt = _finite_number(item["alt_deg"])
+        acc = _finite_number(item["accuracy_deg"])
+        roll_raw = item.get("roll_deg", 0.0)
+        roll = _finite_number(roll_raw)
+        if None in (t, az, alt, acc, roll):
+            return None, "bad_observations", (
+                f"第 {i} 项的 t_utc/az_deg/alt_deg/accuracy_deg/roll_deg "
+                "必须是有限数值（不允许 NaN/Inf）")
+        fov: Optional[float] = None
+        if item.get("fov_deg") is not None:
+            fov = _finite_number(item["fov_deg"])
+            if fov is None:
+                return None, "bad_observations", (
+                    f"第 {i} 项的 fov_deg 必须是有限数值")
+        out.append(PoseObservation(
+            source=str(item["source"]), t_utc=float(t), az_deg=float(az),
+            alt_deg=float(alt), accuracy_deg=float(acc),
+            roll_deg=float(roll), fov_deg=fov))
+    return out, "", ""
+
+
+def _pose_level_text(level: str) -> str:
+    """融合级别的中文说明；不出现「是否对准」的结论。"""
+    return {
+        "single": "单一来源粗位姿",
+        "fused": "多源融合位姿",
+    }.get(level, "无可用位姿")
+
 
 
 def _light_years(dist_pc: Optional[float]) -> Optional[float]:
@@ -437,6 +533,8 @@ def register_sky_tools(agent) -> None:
             "asterisms": asterisms,
             "catalog": {"name": "HYG v4.1", "license": "CC BY-SA 4.0"},
             "hint": ("讲距离用 light_years（光走了多少年），不要念 parsec；"
+                     "light_years 为 null 表示星表没有可靠距离，"
+                     "必须说『距离未知』，不许填 0；"
                      "asterisms 里 truncated=true 的要明说『你只看到其中一段』；"
                      "stars_omitted>0 说明还有更暗的星没列，需要时可抬 limit_mag。"
                      + (" culture_names 按文化分开：某文化没有该星名时不会"
@@ -1195,6 +1293,8 @@ def register_sky_tools(agent) -> None:
         listed = []
         for o in hits[:12]:
             size = o.get("size_arcmin")
+            dist_pc = o.get("distance_pc")
+            ly = _light_years(dist_pc)
             rec = {
                 "name": o.get("name") or o.get("name_en") or o.get("zh_name"),
                 "zh_name": o.get("zh_name"),
@@ -1204,7 +1304,19 @@ def register_sky_tools(agent) -> None:
                 "magnitude": o.get("magnitude"),
                 "size_arcmin": size,
                 "constellation": o.get("constellation"),
+                # 距离来自 OpenNGC 自带视差；缺失/非正一律 None，不编。
+                "distance_pc": dist_pc if ly is not None else None,
+                "light_years": ly,
+                "distance_source": o.get("distance_source"),
             }
+            # σ 源不提供时省略字段（null 语义），避免把 12 条对象撑爆输出预算。
+            if o.get("distance_uncertainty_pc") is not None:
+                rec["distance_uncertainty_pc"] = o["distance_uncertainty_pc"]
+            # 长轴方向只对星系说（与桌面信息卡同一口径）；星团/星云即使
+            # 目录里有 PosAng 也不展示，避免把「成员星分布」说成星系朝向。
+            if rec["type"] == "galaxy" and o.get("position_angle_deg") is not None:
+                rec["position_angle_deg"] = o["position_angle_deg"]
+                rec["position_angle_source"] = o.get("position_angle_source")
             # 角径 → 推荐视场（与星官同一口径：×1.2 向上取整到 5°）。
             # 单位换算：角分 → 度。缺角径就留 null，不猜。
             if size is not None and float(size) > 0:
@@ -1221,20 +1333,22 @@ def register_sky_tools(agent) -> None:
             "objects": listed,
             "catalog": {"name": "dso_catalog", "source": "OpenNGC",
                         "license": "CC BY-SA 4.0", "count": len(objects)},
-            "note": ("DSO 目录只有 117 条（Messier 全量 + 少数亮 NGC），"
-                     "查不到不等于天上没有深空天体；距离字段本目录不提供，"
-                     "不要替它编一个"),
-            "hint": ("讲的时候用『角径约 X 度，适合用约 Y° 视场』；"
-                     "角径为 null 就说体积未知，不要估"),
+            "note": ("DSO 目录仅 117 条（Messier + 亮 NGC），查不到≠天上没有；"
+                     "距离取自 OpenNGC 自带视差（71/117），缺失说未知，不要编"),
+            "hint": ("角径→『约 X 度，适合 Y° 视场』；有距离说『约 Z 光年"
+                     "（目录视差）』；星系有长轴方向说『约 N°（目录）』；"
+                     "null 说未知，不要估"),
         }
 
     reg.register(
         name="sky_dso_lookup",
         description=(
             "深空天体查询：给梅西耶编号/中文名/英文俗名（如 M42 / 猎户座大星云），"
-            "返回身份、赤经赤纬、星等、角径、所属星座与推荐观测视场。"
+            "返回身份、赤经赤纬、星等、角径、所属星座与推荐观测视场；"
+            "有目录数据的再给距离与星系长轴方向（带来源，缺失即 null）。"
             "也可给 az_deg+alt_deg+fov_deg 按当前天区查。"
-            "距离字段本目录不提供——必须说『距离未知』，不许编。"
+            "距离取自 OpenNGC 自带视差（71/117 有值，带来源）；缺失必须说"
+            "『距离未知』，不许编。"
             "目录只含 Messier 全量与少数亮 NGC（117 条），查不到不等于天上没有。"
             "只读本地公开数据（OpenNGC CC BY-SA 4.0），不写盘不联网。"),
         parameters={"type": "object", "properties": {
@@ -1250,3 +1364,413 @@ def register_sky_tools(agent) -> None:
         handler=_dso_lookup,
         category="sky",
     )
+
+    # ------------------------------------------------------------------
+    # 9) 位姿融合：把多条带时间/精度的读数合成一个位姿，或如实说不可用
+    # ------------------------------------------------------------------
+    def _pose_fuse(args: Dict[str, Any]):
+        from .sky_pointing import fuse_poses
+
+        observations, code, reason = _parse_pose_observations(
+            args.get("observations"))
+        if observations is None:
+            return _failure(code, reason)
+
+        now = args.get("now_utc")
+        if now is None:
+            now_value = time.time()
+            time_note = "未提供 now_utc，按当前 UTC Unix 秒判定陈旧"
+        else:
+            now_value = _finite_number(now)
+            if now_value is None:
+                return _failure("bad_now_utc",
+                                f"now_utc 必须是有限 Unix 秒，收到 {now!r}")
+            time_note = "由调用参数给出"
+
+        pose = fuse_poses(observations, now_value)
+        return {
+            "ok": True,
+            "valid": bool(pose.get("valid")),
+            "az_deg": pose.get("az_deg"),
+            "alt_deg": pose.get("alt_deg"),
+            "roll_deg": pose.get("roll_deg"),
+            "fov_deg": pose.get("fov_deg"),
+            "accuracy_deg": pose.get("accuracy_deg"),
+            "sources": pose.get("sources", []),
+            "dropped": pose.get("dropped", []),
+            "level": pose.get("level", "none"),
+            "level_text": _pose_level_text(pose.get("level", "none")),
+            "reason": pose.get("reason", ""),
+            "now_utc": now_value,
+            "time_note": time_note,
+            "units": "角度为度，时间为 UTC Unix 秒",
+            "hint": ("valid=true 时 az_deg/alt_deg 可直接用于显示；accuracy_deg "
+                     "是统计标准误，不是保证误差；valid=false 时按 reason 如实"
+                     "说明不可用，不要猜朝向。"),
+        }
+
+    reg.register(
+        name="sky_pose_fuse",
+        description=(
+            "位姿融合：给定多条传感器观测（每项含 source、t_utc、az_deg、"
+            "alt_deg、accuracy_deg，可选 roll_deg/fov_deg），按精度加权融合成"
+            "一个地平位姿，并逐条报告哪些观测被丢弃及原因（陈旧/低精度/非法/"
+            "相互抵消）。全部不可用时 valid=false 且给 reason，不猜朝向。"
+            "只做纯数值融合，不读写设备、不写盘。"),
+        parameters={"type": "object", "properties": {
+            "observations": {
+                "type": "array",
+                "description": "位姿观测数组",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "source": {"type": "string",
+                                   "description": "来源标签，如 imu / gnss / camera"},
+                        "t_utc": {"type": "number",
+                                  "description": "观测时刻（UTC Unix 秒）"},
+                        "az_deg": {"type": "number",
+                                   "description": "方位角（度，北=0 东=90）"},
+                        "alt_deg": {"type": "number",
+                                    "description": "地平高度（度，-90..90）"},
+                        "accuracy_deg": {"type": "number",
+                                         "description": "自报 1σ 精度（度，>0）"},
+                        "roll_deg": {"type": "number",
+                                     "description": "画面横滚（度），默认 0"},
+                        "fov_deg": {"type": "number",
+                                    "description": "可选：该观测的视场直径（度）"},
+                    },
+                    "required": ["source", "t_utc", "az_deg", "alt_deg",
+                                 "accuracy_deg"],
+                },
+            },
+            "now_utc": {"type": "number",
+                        "description": "当前 UTC Unix 秒；缺省用系统当前时刻"},
+        }, "required": ["observations"]},
+        handler=_pose_fuse,
+        category="sky",
+        write=False,
+    )
+
+    # ------------------------------------------------------------------
+    # 10) 指向即识别：给定地平指向，返回视场内的肉眼可见恒星
+    # ------------------------------------------------------------------
+    def _identify_at(args: Dict[str, Any]):
+        from .sky_pointing import identify_direction
+
+        az = _finite_number(args.get("az_deg"))
+        alt = _finite_number(args.get("alt_deg"))
+        fov = _finite_number(args.get("fov_deg"))
+        if az is None or alt is None or fov is None:
+            return _failure("bad_query",
+                            "az_deg/alt_deg/fov_deg 必须是有限数值")
+        if not (-90.0 <= alt <= 90.0):
+            return _failure("bad_query",
+                            f"alt_deg 越界（{alt}°，合法范围 -90..90）")
+        if not (0.0 < fov <= 180.0):
+            return _failure("bad_query",
+                            f"fov_deg 必须在 (0, 180] 度内，收到 {fov}")
+
+        jd = args.get("jd")
+        if jd is None:
+            jd_value = _current_jd(agent)
+            time_note = "取自时间引擎/当前时刻"
+        else:
+            bad = _reject_bad_jd(jd)
+            if bad is not None:
+                return _failure("bad_jd", bad["reason"])
+            jd_value = float(jd)
+            time_note = "由调用参数给出"
+
+        lat_raw = args.get("lat_deg")
+        lon_raw = args.get("lon_deg")
+        if (lat_raw is None) != (lon_raw is None):
+            return _failure("bad_query",
+                            "lat_deg 与 lon_deg 必须同时提供，或都不提供")
+        if lat_raw is None:
+            try:
+                site = _site_from_observer(agent)
+            except ValueError as exc:
+                return _failure("no_site", str(exc))
+            lat, lon = site["lat_deg"], site["lon_deg"]
+            site_note = "取自当前观测站"
+            site_warning = site["site_warning"]
+        else:
+            lat = _finite_number(lat_raw)
+            lon = _finite_number(lon_raw)
+            if lat is None or lon is None:
+                return _failure("bad_query",
+                                "lat_deg/lon_deg 必须是有限数值")
+            site_note = "由调用参数给出"
+            site_warning = ""
+
+        result = identify_direction(az, alt, fov, jd_value, lat, lon, limit=3)
+        if not result.get("matched"):
+            return _failure("no_stars",
+                            str(result.get("reason") or "视场内没有可用恒星"))
+
+        return {
+            "ok": True,
+            "matched": True,
+            "query": result.get("query"),
+            "site": {"lat_deg": lat, "lon_deg": lon, "note": site_note,
+                     "warning": site_warning},
+            "time_note": time_note,
+            "limit_mag": result.get("limit_mag"),
+            "total_matched": result.get("total_matched"),
+            "truncated": result.get("truncated"),
+            "stars": result.get("stars", []),
+            "catalog": result.get("catalog"),
+            "hint": ("数值单位为度；angular_distance_deg 是相对指向的角距。"
+                     "只说星表里有的星与星官，不要补编目标。"),
+        }
+
+    reg.register(
+        name="sky_identify_at",
+        description=(
+            "指向即识别：给定地平指向 az_deg/alt_deg 与视场直径 fov_deg，"
+            "返回视场内的肉眼可见恒星（按星等从亮到暗，最多 3 颗）及所属中国"
+            "星官、相对指向的角距。站址与时刻默认取当前观测站与时间引擎，"
+            "也可显式传 jd/lat_deg/lon_deg。无站址、参数非法或视场内没有"
+            "星表恒星时返回结构化失败原因，不拿最近邻凑数。只读星表。"),
+        parameters={"type": "object", "properties": {
+            "az_deg": {"type": "number",
+                       "description": "指向方位角（度，北=0 东=90）"},
+            "alt_deg": {"type": "number",
+                        "description": "指向地平高度（度，-90..90）"},
+            "fov_deg": {"type": "number",
+                        "description": "视场直径（度，0-180）"},
+            "jd": {"type": "number",
+                   "description": "可选：UT1 儒略日，默认当前时刻"},
+            "lat_deg": {"type": "number",
+                        "description": "可选：观测站纬度；与 lon_deg 同时给"},
+            "lon_deg": {"type": "number",
+                        "description": "可选：观测站经度；与 lat_deg 同时给"},
+        }, "required": ["az_deg", "alt_deg", "fov_deg"]},
+        handler=_identify_at,
+        category="sky",
+        write=False,
+    )
+
+    # ------------------------------------------------------------------
+    # 11) 解算器状态：装了没有、叫什么、不可用为什么
+    # ------------------------------------------------------------------
+    def _solve_status(args: Dict[str, Any]):
+        from . import sky_solve
+
+        status = sky_solve.solver_status()
+        available = bool(status.get("available"))
+        return {
+            "ok": True,
+            "available": available,
+            "name": str(status.get("name") or ""),
+            "reason": str(status.get("reason") or ""),
+            # 已弃用但仍保留一版的适配器（名字 → 替代建议）；当前通常为空。
+            "deprecated": dict(status.get("deprecated") or {}),
+            "probed": ["tetra3", "astap"],
+            "note": ("只探测本机是否安装/可定位解算器；available=false 时"
+                     "不得说解算可用，也不得假装已解算。deprecated 里的"
+                     "适配器仍可用，只是已知会被替代。"),
+        }
+
+    reg.register(
+        name="sky_solve_status",
+        description=(
+            "星点解算器状态：探测本机是否可用 tetra3（Python 库）或 ASTAP"
+            "（外部可执行文件，路径由 MBDSDR_ASTAP_PATH 指定）。如实返回"
+            "available/name/reason；未安装或不可用时不得说可用；deprecated"
+            "列出仍保留一版但已知会被替代的适配器（名字 → 替代建议）。无参数，"
+            "只读探测，不安装、不下载、不启动外部进程。"),
+        parameters={"type": "object", "properties": {}},
+        handler=_solve_status,
+        category="sky",
+        write=False,
+    )
+
+    # ------------------------------------------------------------------
+    # 12) 指向链路健康：级别、来源快照、降级原因
+    # ------------------------------------------------------------------
+    def _health(args: Dict[str, Any]):
+        from . import sky_solve
+        from .sky_health import health_snapshot
+
+        raw = args.get("observations")
+        if raw is None:
+            return _failure("bad_observations",
+                            "observations 不能省略；没有观测时请传空数组")
+        observations, code, reason = _parse_pose_observations(raw)
+        if observations is None:
+            return _failure(code, reason)
+
+        now = args.get("now_utc")
+        if now is None:
+            now_value = time.time()
+            time_note = "未提供 now_utc，按当前系统时刻"
+        else:
+            now_value = _finite_number(now)
+            if now_value is None:
+                return _failure("bad_now_utc",
+                                f"now_utc 必须是有限 Unix 秒，收到 {now!r}")
+            time_note = "由调用参数给出"
+
+        snapshot = health_snapshot(
+            observations, now_value, sky_solve.solver_status(),
+            camera_last_frame_utc=args.get("camera_last_frame_utc"),
+            manual_override=bool(args.get("manual_override") or False),
+            solve_within_tolerance=args.get("solve_within_tolerance"),
+        )
+        out = dict(snapshot)
+        out["time_note"] = time_note
+        out["units"] = "时间字段为 UTC Unix 秒"
+        out["hint"] = ("level 只是链路分级（L0-L4），不是对目标的判定；"
+                       "reason 已写明降级原因与相机无帧状态。")
+        return out
+
+    reg.register(
+        name="sky_health",
+        description=(
+            "指向链路健康快照：给定位姿观测数组与当前时刻，报告级别 L0-L4、"
+            "每个来源的可用性与年龄、融合位姿是否可用、解算器状态、相机是否"
+            "无帧，以及人话降级原因。manual_override=true 表示用户已手动接管；"
+            "solve_within_tolerance=false 表示解算残差超阈值，不提升到 L3。"
+            "只读计算，不接硬件、不写盘。"),
+        parameters={"type": "object", "properties": {
+            "observations": {
+                "type": "array",
+                "description": "位姿观测数组（同 sky_pose_fuse；可为空数组）",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "source": {"type": "string",
+                                   "description": "来源标签，如 imu / gnss / camera"},
+                        "t_utc": {"type": "number",
+                                  "description": "观测时刻（UTC Unix 秒）"},
+                        "az_deg": {"type": "number",
+                                   "description": "方位角（度，北=0 东=90）"},
+                        "alt_deg": {"type": "number",
+                                    "description": "地平高度（度，-90..90）"},
+                        "accuracy_deg": {"type": "number",
+                                         "description": "自报 1σ 精度（度，>0）"},
+                        "roll_deg": {"type": "number",
+                                     "description": "画面横滚（度），默认 0"},
+                        "fov_deg": {"type": "number",
+                                    "description": "可选：该观测的视场直径（度）"},
+                    },
+                    "required": ["source", "t_utc", "az_deg", "alt_deg",
+                                 "accuracy_deg"],
+                },
+            },
+            "now_utc": {"type": "number",
+                        "description": "当前 UTC Unix 秒；缺省用系统当前时刻"},
+            "camera_last_frame_utc": {
+                "type": "number",
+                "description": "相机最后一帧的 UTC Unix 秒；不给则按未知处理"},
+            "manual_override": {
+                "type": "boolean",
+                "description": "用户是否已手动接管指向（true → L4）"},
+            "solve_within_tolerance": {
+                "type": "boolean",
+                "description": "最近一次解算残差是否在阈值内；false 时不报 L3"},
+        }, "required": ["observations"]},
+        handler=_health,
+        category="sky",
+        write=False,
+    )
+
+    # ------------------------------------------------------------------
+    # 13) 校准档案落盘：唯一的写工具，确认门由 tool_registry/tx_guard 统一拦截
+    # ------------------------------------------------------------------
+    def _calibration_save(args: Dict[str, Any]):
+        from . import sky_calibration
+
+        max_residual = args.get("max_residual_deg")
+        if max_residual is None:
+            max_residual = sky_calibration.MAX_CALIBRATION_RESIDUAL_DEG
+        result = sky_calibration.calibrate_and_save(
+            args.get("observations"),
+            device_id=args.get("device_id"),
+            fov_deg=args.get("fov_deg"),
+            path=args.get("path"),
+            source=args.get("source") or "two_star",
+            max_residual_deg=max_residual,
+        )
+        if not result.get("ok"):
+            code = str(result.get("error") or "bad_input")
+            failure = {
+                "ok": False,
+                "error": code,
+                "reason": str(result.get("reason") or "校准失败且未给出原因"),
+                "next_step": _calibration_next_step(code),
+            }
+            if result.get("residual_deg") is not None:
+                failure["residual_deg"] = result["residual_deg"]
+            return failure
+
+        profile = result.get("profile") or {}
+        return {
+            "ok": True,
+            "path": result.get("path"),
+            "residual_deg": result.get("residual_deg"),
+            # 只回界面可见的档案摘要；boresight/roll 是内部修正量，刻意不暴露。
+            "profile": {
+                "device_id": profile.get("device_id"),
+                "fov_deg": profile.get("fov_deg"),
+                "created_utc": profile.get("created_utc"),
+                "verified_utc": profile.get("verified_utc"),
+                "source": profile.get("source"),
+            },
+            "reason": "",
+            "note": ("residual_deg 是逐点残差的最大值；超过阈值的校准会被拒绝，"
+                     "不会写入文件。档案已原子写入并读回校验。"),
+        }
+
+    reg.register(
+        name="sky_calibration_save",
+        description=(
+            "指向校准落盘：给定至少两个「已知方向 ↔ 当前读数」校准点，解出"
+            "方位/俯仰偏置与横滚零位，并原子写入 JSON 校准档案。"
+            "会写盘、可能覆盖同名文件——需用户确认目标路径；校准求解失败或"
+            "最大残差超过阈值时拒绝写入，失败时不写文件（原档案保持原样），"
+            "不产出「差不多能用」的档案。"
+            "成功只返回路径、最大残差与档案摘要（设备名/视场/时间/来源），"
+            "不返回内部偏置数值。写操作受外部确认门约束：模型不能自备授权。"),
+        parameters={"type": "object", "properties": {
+            "observations": {
+                "type": "array",
+                "description": ("校准点数组，至少 2 项且已知方向夹角 ≥ 5°；"
+                                "每项含 known_az_deg/known_alt_deg/"
+                                "read_az_deg/read_alt_deg（度）"),
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "known_az_deg": {"type": "number",
+                                         "description": "已知方向方位角（度）"},
+                        "known_alt_deg": {"type": "number",
+                                          "description": "已知方向高度角（度）"},
+                        "read_az_deg": {"type": "number",
+                                        "description": "当前读数方位角（度）"},
+                        "read_alt_deg": {"type": "number",
+                                         "description": "当前读数高度角（度）"},
+                    },
+                    "required": ["known_az_deg", "known_alt_deg",
+                                 "read_az_deg", "read_alt_deg"],
+                },
+            },
+            "device_id": {"type": "string",
+                          "description": "用户命名的设备标识，写入档案"},
+            "fov_deg": {"type": "number",
+                        "description": "校准时使用的视场直径（度，0-180]"},
+            "path": {"type": "string",
+                     "description": ("目标 JSON 档案路径；目录不存在会创建，"
+                                     "同名文件会被原子替换")},
+            "source": {"type": "string", "enum": ["two_star", "landmark"],
+                       "description": "校准来源，默认 two_star"},
+            "max_residual_deg": {
+                "type": "number",
+                "description": ("允许的最大逐点残差（度），默认 0.5；"
+                                "超过即拒绝写入")},
+        }, "required": ["observations", "device_id", "fov_deg", "path"]},
+        handler=_calibration_save,
+        category="sky",
+        write=True,
+    )
+

@@ -33,7 +33,7 @@ mbdsdr_ai/overlay_asterisms.py — 星官叠加数据层（T08）
   （``j2000_to_altaz_many`` 全表一次）约 0.05 ms；
 - 范围：本层只支持 ``culture="chinese"``，没有 IAU 88 星座数据，接进主路径
   只能换掉一半，另一半仍在旧实现；
-- 口径：本层用几何高度投影；实时层 ``_constellation_screen_points`` 先经
+- 口径：本层用几何高度投影；实时层 ``_layer_points_full`` 先经
   ``_display_alt_deg`` 转视高度（含大气折射）再投影，近地平差可达约 0.5°
   （2.3° 目镜视场约 20% 画幅），接进去线就不落在星上。
 

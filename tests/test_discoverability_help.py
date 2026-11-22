@@ -261,20 +261,434 @@ def test_shortcut_search_filters():
 
 
 # ---------------------------------------------------------------------------
-# 三步上手
+# 按目的选路（旧三步上手 API 保留，内容不再串行）
 # ---------------------------------------------------------------------------
 def test_onboarding_steps_use_registered_shortcuts():
     from help_panel import onboarding_steps
     from shortcuts import BY_ID
     steps = onboarding_steps()
-    assert len(steps) == 3
+    assert [s["title"] for s in steps] == ["听信号", "回看已有录音", "看天空"]
+    assert [s["shortcut_id"] for s in steps] == ["file.connect", "vfo.replay", "view.planetarium"]
     ids = [s["shortcut_id"] for s in steps if s["shortcut_id"]]
     for sid in ids:
         assert sid in BY_ID
         assert BY_ID[sid].key
         assert BY_ID[sid].key in next(s["body"] for s in steps
                                       if s["shortcut_id"] == sid)
-    assert "伪造" in steps[0]["body"]  # 明确不演示假数据
+    listen, replay, sky = [s["body"] for s in steps]
+    assert "伪造" in listen  # 明确不演示假数据
+    assert "连接不等于自动出声" in listen and "由你" in listen
+    assert "实际支持的频率和解调" in listen and "不猜电台频率" in listen
+    assert "不需要连接设备" in replay and "录音不是直播" in replay
+    assert "不需要 SDR" in sky and "真实观测地点" in sky
+    assert "缺地点请选地点" in sky and "TLE" in sky and "缺失或过期请更新轨道" in sky
+    assert "左栏" in sky and "独立星象仪窗口，两者不同" in sky
+    assert "不代表已定位" in sky and "不代表收到信号" in sky
+
+
+# ---------------------------------------------------------------------------
+# 路线使用真实 Qt 动作/主窗口接口，不造 SDR 数据
+# ---------------------------------------------------------------------------
+@pytest.fixture
+def route_window(qtapp, isolated_profile):
+    from PySide6.QtGui import QAction
+    from PySide6.QtWidgets import QComboBox, QMainWindow, QPushButton, QTabWidget, QWidget
+    from main_window import MainWindow
+    from shortcuts import BY_ID
+
+    class Window(QMainWindow):
+        def select_tab(self, key):
+            self.calls.append(key)
+            return MainWindow.select_tab(self, key)
+
+    window = Window()
+    window.calls = []
+    window._app_mode = "ide"
+    window.left_tab = QTabWidget(window)
+    window.setCentralWidget(window.left_tab)
+    for key in ("rf_sky", "spectrum"):
+        i = window.left_tab.addTab(QWidget(), key)
+        window.left_tab.tabBar().setTabData(i, key)
+    window.right_tab = QTabWidget(window)
+    window.device_panel = QWidget()
+    window.device_panel.dev_combo = QComboBox(window.device_panel)
+    window.right_tab.addTab(window.device_panel, "设备")
+    window.right_tab.tabBar().setTabData(0, "device")
+    window.listen_combo = QComboBox(window)
+    window.listen_combo.addItem("停止解调", "idle")
+    window.listen_combo.addItem("收听", "listen")
+    window.listen_combo.currentIndexChanged.connect(lambda: window.calls.append("listen"))
+    window.replay_btn = QPushButton("回放", window)
+    window.replay_btn.clicked.connect(lambda: window.calls.append("replay"))
+    window._planetarium_location_btn = QPushButton("地点", window)
+    window._planetarium_location_btn.clicked.connect(lambda: window.calls.append("location"))
+    window._planetarium_window = QWidget()
+    window.menu_actions = {}
+
+    def toggle():
+        window.calls.append("planetarium")
+        window._app_mode = "ide" if window._app_mode == "planetarium" else "planetarium"
+
+    for menu, sid, slot in (
+        ("文件(&F)", "file.connect", lambda: window.calls.append("connect")),
+        ("视图(&V)", "view.planetarium", toggle),
+        ("工具(&T)", "tools.sat_tle", lambda: window.calls.append("tle")),
+    ):
+        action = QAction(BY_ID[sid].label, window)
+        action.triggered.connect(slot)
+        window.menuBar().addMenu(menu).addAction(action)
+        window.menu_actions[sid] = action
+    yield window
+    window._planetarium_window.close()
+    window._planetarium_window.deleteLater()
+    window.close()
+    window.deleteLater()
+
+
+def _route_button(panel, source):
+    from PySide6.QtWidgets import QPushButton
+    button = panel.findChild(QPushButton, f"help:{source}")
+    assert button is not None, source
+    return button
+
+
+def test_help_routes_use_index_and_run_once(route_window, monkeypatch):
+    import command_palette
+    from dataclasses import replace
+    from help_panel import HelpPanel
+    from PySide6.QtWidgets import QGroupBox
+
+    indexed, ran = [], []
+    original = command_palette.build_index
+
+    def build(window):
+        indexed.append(window)
+        commands = []
+        for command in original(window):
+            if command.run is not None:
+                def run(c=command):
+                    ran.append(c.source)
+                    return c.run()
+                command = replace(command, run=run)
+            commands.append(command)
+        return commands
+
+    monkeypatch.setattr(command_palette, "build_index", build)
+    panel = HelpPanel(route_window)
+    assert [g.title() for g in panel.tabs.widget(0).findChildren(QGroupBox)] == [
+        "看天空", "听信号", "回看已有录音"]
+    assert route_window.calls == [] and ran == []
+    route_window.left_tab.setCurrentIndex(1)
+    _route_button(panel, "tab:rf_sky").click()
+    assert route_window.calls == ["rf_sky"]
+    assert ran == ["tab:rf_sky"]
+    assert route_window.left_tab.tabBar().tabData(route_window.left_tab.currentIndex()) == "rf_sky"
+    _route_button(panel, "tab:rf_sky").click()
+    assert route_window.calls == ["rf_sky", "rf_sky"]
+    assert route_window.left_tab.currentIndex() == 0
+    _route_button(panel, "panel:device").click()
+    _route_button(panel, "tab:spectrum").click()
+    assert route_window.calls == ["rf_sky", "rf_sky", "device", "spectrum"]
+    assert ran == ["tab:rf_sky", "tab:rf_sky", "panel:device", "tab:spectrum"]
+    assert route_window.listen_combo.currentData() == "idle"
+    assert all(w is route_window for w in indexed)
+
+
+def test_help_planetarium_is_idempotent_and_distinct(route_window):
+    from help_panel import HelpPanel
+    panel = HelpPanel(route_window)
+    _route_button(panel, "menu:view.planetarium").click()
+    assert route_window.calls == ["planetarium"]
+    assert route_window._app_mode == "planetarium"
+    _route_button(panel, "menu:view.planetarium").click()
+    assert route_window.calls == ["planetarium"]  # 不能反向 toggle
+    assert route_window._app_mode == "planetarium"
+    assert not _route_button(panel, "tab:rf_sky").isEnabled()
+    assert "独立星象仪" in _route_button(panel, "tab:rf_sky").toolTip()
+    assert route_window._planetarium_window.isVisible()
+
+
+@pytest.mark.parametrize("source,call", [
+    ("control:_planetarium_location_btn", "location"),
+    ("menu:tools.sat_tle", "tle"),
+    ("control:replay_btn", "replay"),
+])
+def test_help_explicit_actions_only_once(route_window, source, call):
+    from help_panel import HelpPanel
+    panel = HelpPanel(route_window)
+    assert route_window.calls == []
+    _route_button(panel, source).click()
+    assert route_window.calls == [call]
+    assert panel.last_route_result["ok"]
+
+
+@pytest.mark.parametrize("after_open", [False, True], ids=["already-busy", "becomes-busy"])
+@pytest.mark.parametrize("state,reason", [
+    ("playing", "正在回放或已暂停，请先在回放条停止当前回放。"),
+    ("paused", "正在回放或已暂停，请先在回放条停止当前回放。"),
+    ("loading", "正在读取录音，请在现有回放入口取消或等待。"),
+    ("load-finished", "正在读取录音，请在现有回放入口取消或等待。"),
+])
+def test_help_replay_preserves_busy_work(route_window, state, reason, after_open):
+    """选择文件不能退化成停止/取消；帮助打开后的状态变化也必须重检。"""
+    import threading
+    from PySide6.QtCore import QTimer
+    from help_panel import HelpPanel
+
+    panel = None
+    timer = QTimer(route_window)
+    release = threading.Event()
+    loader = threading.Thread(target=release.wait)
+    route_window._replay_timer = None
+    route_window._replay_load_thread = None
+    try:
+        if after_open:
+            panel = HelpPanel(route_window)
+            panel.show()
+            assert _route_button(panel, "control:replay_btn").isEnabled()
+        if state in ("loading", "load-finished"):
+            loader.start()
+            route_window._replay_load_thread = loader
+            if state == "load-finished":
+                # worker 已结束，但 GUI 尚未消费结果，原回放按钮仍会取消。
+                release.set()
+                loader.join(timeout=5)
+            assert loader.is_alive() == (state == "loading")
+        else:
+            route_window._replay_timer = timer
+            if state == "playing":
+                timer.start(60000)
+            assert timer.isActive() == (state == "playing")
+        if panel is None:
+            panel = HelpPanel(route_window)
+            assert not _route_button(panel, "control:replay_btn").isEnabled()
+            panel.show()
+        button = _route_button(panel, "control:replay_btn")
+        assert route_window.replay_btn.isEnabled()
+        assert route_window.calls == []
+        button.click()
+        assert route_window.calls == [], "帮助选文件入口不得触发原回放按钮的停止/取消动作"
+        assert not button.isEnabled()
+        assert reason in button.toolTip()
+        assert reason in button.accessibleDescription()
+        note = next(n for b, n, _s in panel._route_entries if b is button)
+        assert reason in note.text() and not note.isHidden()
+        assert panel.isVisible()
+        if after_open:
+            assert panel.last_route_result == {
+                "ok": False, "status": "UNAVAILABLE", "reason": reason}
+        if state in ("loading", "load-finished"):
+            assert route_window._replay_load_thread is loader
+            assert loader.is_alive() == (state == "loading")
+        else:
+            assert route_window._replay_timer is timer
+            assert timer.isActive() == (state == "playing")
+    finally:
+        timer.stop()
+        release.set()
+        if loader.ident is not None:
+            loader.join(timeout=5)
+        if panel is not None:
+            panel.close()
+
+
+def test_help_without_parent_disables_routes_with_visible_reasons(qtapp, isolated_profile):
+    from help_panel import HelpPanel
+    panel = HelpPanel()
+    for button, note, _source in panel._route_entries:
+        assert not button.isEnabled()
+        assert "没有主窗口" in note.text()
+        assert not note.isHidden()
+        button.click()
+    assert panel.last_route_result == {}
+    panel.deleteLater()
+
+
+@pytest.mark.parametrize("missing", ["tab", "select", "control", "menu", "state", "device"])
+def test_help_missing_entry_is_not_a_dead_link(route_window, missing):
+    from help_panel import HelpPanel
+    if missing == "tab":
+        route_window.left_tab.removeTab(0)
+        source, reason = "tab:rf_sky", "没有这个页签"
+    elif missing == "select":
+        route_window.select_tab = None
+        source, reason = "tab:rf_sky", "select_tab"
+    elif missing == "control":
+        route_window.replay_btn = None
+        source, reason = "control:replay_btn", "没有这个按钮"
+    elif missing == "menu":
+        route_window.menu_actions["tools.sat_tle"].setText("入口已移除")
+        source, reason = "menu:tools.sat_tle", "真实命令入口"
+    elif missing == "state":
+        del route_window._app_mode
+        source, reason = "menu:view.planetarium", "无法确认"
+    else:
+        route_window.device_panel.dev_combo.setEnabled(False)
+        source, reason = "panel:device", "设备选择控件"
+    panel = HelpPanel(route_window)
+    button = _route_button(panel, source)
+    assert not button.isEnabled() and reason in button.toolTip()
+    note = next(n for b, n, _s in panel._route_entries if b is button)
+    assert reason in note.text() and not note.isHidden()
+    button.click()
+    assert route_window.calls == []
+
+
+@pytest.mark.parametrize("source", ["tab:rf_sky", "menu:tools.sat_tle", "control:replay_btn"])
+def test_help_rechecks_disabled_targets_at_click(route_window, source):
+    from help_panel import HelpPanel
+    panel = HelpPanel(route_window)
+    button = _route_button(panel, source)
+    assert button.isEnabled()
+    if source.startswith("tab:"):
+        route_window.left_tab.setTabEnabled(0, False)
+    elif source.startswith("menu:"):
+        action = route_window.menu_actions["tools.sat_tle"]
+        action.setEnabled(False)
+        action.setToolTip("离线，暂不能更新轨道")
+    else:
+        route_window.replay_btn.setEnabled(False)
+        route_window.replay_btn.setToolTip("录音读取中")
+    button.click()  # 面板仍开着，不能使用旧索引里的 run
+    assert not button.isEnabled()
+    assert not panel.last_route_result["ok"]
+    assert panel.last_route_result["reason"]
+    assert route_window.calls == []
+
+
+def test_help_failed_command_keeps_reason_visible(route_window, monkeypatch):
+    from help_panel import HelpPanel
+    monkeypatch.setattr(route_window, "select_tab", lambda _key: {
+        "ok": False, "status": "ERROR", "reason": "目标页签已移除"})
+    panel = HelpPanel(route_window)
+    panel.show()
+    _route_button(panel, "tab:rf_sky").click()
+    assert panel.isVisible()
+    assert panel.last_route_result == {"ok": False, "status": "ERROR", "reason": "目标页签已移除"}
+    note = next(n for _b, n, s in panel._route_entries if s == "tab:rf_sky")
+    assert note.text() == "目标页签已移除" and not note.isHidden()
+
+
+def test_help_keyboard_navigation_and_escape(route_window, qtapp):
+    from PySide6.QtCore import Qt
+    from PySide6.QtTest import QTest
+    from PySide6.QtWidgets import QTextBrowser
+    from help_panel import HelpPanel
+    panel = HelpPanel(route_window)
+    panel.show()
+    panel.activateWindow()
+    qtapp.processEvents()
+    buttons = [b for b, _n, _s in panel._route_entries]
+    buttons[0].setFocus()
+    qtapp.processEvents()
+    for previous, current in zip(buttons, buttons[1:]):
+        QTest.keyClick(previous, Qt.Key_Tab)
+        assert current.hasFocus(), current.text()
+    for button in buttons:
+        assert button.focusPolicy() == Qt.StrongFocus and not button.autoDefault()
+    # 回放只有焦点上的空格才激活；Tab 穿越不产生动作。
+    assert route_window.calls == []
+    QTest.keyClick(buttons[-1], Qt.Key_Space)
+    assert route_window.calls == ["replay"]
+    panel.show()
+    QTest.keyClick(buttons[0], Qt.Key_Escape)
+    assert not panel.isVisible()
+    assert route_window.calls == ["replay"]
+    assert all(not b.openLinks() for b in panel.findChildren(QTextBrowser))
+
+
+def test_help_route_targets_exist_on_real_main_window(main_window, qtapp, monkeypatch):
+    """真实 MainWindow + 真命令索引：只导航，不执行连接/TLE/文件播放。"""
+    from help_panel import HelpPanel
+    from PySide6.QtTest import QSignalSpy
+    original = main_window.select_tab
+    selected = []
+
+    def select(key):
+        selected.append(key)
+        return original(key)
+
+    monkeypatch.setattr(main_window, "select_tab", select)
+    replay = QSignalSpy(main_window.replay_btn.clicked)
+    connect = QSignalSpy(main_window._shortcut_actions["file.connect"].triggered)
+    listening = QSignalSpy(main_window.listen_combo.currentIndexChanged)
+    mode = main_window._app_mode
+    panel = HelpPanel(main_window)
+    for button, note, _source in panel._route_entries:
+        assert button.isEnabled(), note.text()
+    for source in ("tab:rf_sky", "tab:rf_sky", "panel:device", "tab:spectrum"):
+        _route_button(panel, source).click()
+        assert panel.last_route_result["ok"], panel.last_route_result
+    assert selected == ["rf_sky", "rf_sky", "device", "spectrum"]
+    assert main_window._app_mode == mode
+    assert replay.count() == connect.count() == listening.count() == 0
+    assert main_window._listen_state == "idle"
+    panel.close()
+    qtapp.processEvents()
+
+
+def test_help_idle_replay_opens_file_picker_once(main_window, monkeypatch):
+    """空闲入口沿用真实回放接线；只替换文件对话框边界，不读盘/播放。"""
+    from PySide6.QtTest import QSignalSpy
+    from PySide6.QtWidgets import QFileDialog
+    from help_panel import HelpPanel
+
+    assert main_window._replay_timer is None
+    assert main_window._replay_load_thread is None
+    choices = []
+
+    def choose_file(*args):
+        choices.append(args)
+        return "", ""  # 用户取消选择：不启动读取或播放。
+
+    monkeypatch.setattr(QFileDialog, "getOpenFileName", choose_file)
+    replay = QSignalSpy(main_window.replay_btn.clicked)
+    panel = HelpPanel(main_window)
+    try:
+        panel.show()
+        button = _route_button(panel, "control:replay_btn")
+        assert button.isEnabled()
+        assert choices == [] and replay.count() == 0
+        button.click()
+        assert replay.count() == 1
+        assert len(choices) == 1
+        assert choices[0][0] is main_window and choices[0][1] == "选择录音文件"
+        assert panel.last_route_result["ok"]
+        assert not panel.isVisible()
+        assert main_window._replay_timer is None
+        assert main_window._replay_load_thread is None
+    finally:
+        panel.close()
+
+
+def test_help_real_planetarium_does_not_toggle_back(main_window, qtapp):
+    from help_panel import HelpPanel
+    from PySide6.QtTest import QSignalSpy
+    assert main_window._app_mode == "ide"
+    assert "未连接" in main_window._tx_block_reason()
+    action = QSignalSpy(main_window._planetarium_action.triggered)
+    connect = QSignalSpy(main_window._shortcut_actions["file.connect"].triggered)
+    listening = QSignalSpy(main_window.listen_combo.currentIndexChanged)
+    panel = HelpPanel(main_window)
+    try:
+        assert panel._resolve_route("control:replay_btn")[0] is main_window.replay_btn
+        assert panel._resolve_route("control:_planetarium_location_btn")[0] is main_window._planetarium_location_btn
+        button = _route_button(panel, "menu:view.planetarium")
+        button.click()
+        qtapp.processEvents()
+        assert main_window._app_mode == "planetarium"
+        assert action.count() == 1
+        assert main_window._planetarium_window.isVisible()
+        panel.show()
+        button.click()
+        qtapp.processEvents()
+        assert main_window._app_mode == "planetarium"
+        assert action.count() == 1
+        assert connect.count() == listening.count() == 0
+        assert main_window._listen_state == "idle"
+    finally:
+        panel.close()
+        main_window.set_app_mode("ide")
 
 
 # ---------------------------------------------------------------------------

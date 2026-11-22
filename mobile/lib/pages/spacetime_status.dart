@@ -139,6 +139,7 @@ class SpacetimeStatusCard extends StatelessWidget {
     this.dopplerHz,
     this.dopplerActive = false,
     this.dopplerAppliedHz,
+    this.showMechanism = false,
   });
 
   /// gnss 服务层最新 fix（默认空 = 无 NMEA，走诚实空态）。
@@ -161,6 +162,14 @@ class SpacetimeStatusCard extends StatelessWidget {
 
   /// 闭环当前施加的 VFO 偏移（Hz）；未在补偿为 null。
   final double? dopplerAppliedHz;
+
+  /// 是否显示「时间源 / GNSS 定位」两格底层机制读数。
+  ///
+  /// 默认 false：手机主界面只留与观测直接相关的「接收目标 / 多普勒补偿」；
+  /// 授时与定位属底层机制（spec 规则 1：机制不上界面），移动端 GNSS fix 流
+  /// 尚未接线时这两格还会是恒定的诚实空态，展示它们只是噪声。需要诊断时由
+  /// 设置页/工具面提供，不占观测主界面。
+  final bool showMechanism;
 
   Color _color(SpRole r) => switch (r) {
         SpRole.ok => AppTokens.success,
@@ -215,11 +224,17 @@ class SpacetimeStatusCard extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,
         children: [
-          const Text('时空状态', style: AppTokens.sectionTitle),
+          Text(
+            showMechanism ? '时空状态' : '接收状态',
+            style: AppTokens.sectionTitle,
+          ),
           const SizedBox(height: AppTokens.spacingS),
-          row(s.timeSource, s.target),
-          const SizedBox(height: AppTokens.spacingS),
-          row(s.doppler, s.gnss),
+          if (showMechanism) ...[
+            row(s.timeSource, s.target),
+            const SizedBox(height: AppTokens.spacingS),
+            row(s.doppler, s.gnss),
+          ] else
+            row(s.target, s.doppler),
         ],
       ),
     );

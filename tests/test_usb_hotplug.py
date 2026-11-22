@@ -146,6 +146,47 @@ def test_replug_same_identity_is_a_plug_event_not_another_device():
     assert events[0].verified is True
 
 
+def test_serial_key_loss_is_rekey_not_unplug():
+    """打开设备后读不到 EEPROM 序列号：键从 serial 退到 index，不是拔出。
+
+    真机实测（2026-11-22，RTL2832U）：枚举前 serial=77771111153705700，
+    本进程打开设备后枚举 serial 变为空。旧实现把「serial 键消失」报成
+    「设备从枚举中消失，但无法确认是否已拔出」，一直挂在设备面板上。
+    """
+    probe = _Probe(_presence())          # 无序列号可核 → 不能判拔出
+    monitor = uh.HotplugMonitor(probe=probe)
+    closed = _dev("77771111153705700", index=0, label="RTL-SDR #0")
+    opened = _dev("", index=0, label="RTL-SDR #0")
+    monitor.observe([closed])            # 基线：serial 键
+    monitor.expect("rtlsdr|serial:77771111153705700", closed)
+
+    events = monitor.observe([opened])   # 打开后：index 键
+    kinds = _kinds(events)
+    assert uh.EVENT_UNPLUGGED not in kinds
+    assert uh.EVENT_DISAPPEARED_UNVERIFIED not in kinds
+    assert uh.EVENT_RECOVERED in kinds
+    assert "77771111153705700" not in events[0].user_text, (
+        "user_text 不许内嵌内部身份键")
+
+    # 换键后稳定：同一台设备下一拍零事件
+    assert monitor.observe([opened]) == []
+
+
+def test_reappear_after_unverified_emits_recovery():
+    """报过「消失但无法确认」的键重新出现：必须收回告警，不能停在旧结论。"""
+    monitor = uh.HotplugMonitor(probe=_Probe(
+        uh.Presence(uh.PROBE_PERMISSION, authoritative=False,
+                    detail="Access denied")))
+    a = _dev("A-0001", index=0, label="RTL-A")
+    monitor.observe([a])
+    first = monitor.observe([])
+    assert uh.EVENT_DISAPPEARED_UNVERIFIED in _kinds(first)
+
+    events = monitor.observe([a])
+    assert uh.EVENT_RECOVERED in _kinds(events)
+    assert "已连接" in [e for e in events if e.kind == uh.EVENT_RECOVERED][0].user_text
+
+
 # ------------------------------------------------------------------ unplug vs 在位打不开
 def test_present_device_is_not_reported_as_unplugged():
     a = _dev("A-0001", index=0, label="RTL-A")

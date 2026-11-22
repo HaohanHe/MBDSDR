@@ -1032,9 +1032,48 @@ class StatusPanel(QWidget):
         else:
             self.rssi_value.setStyleSheet("color: " + _t.COLORS["danger"] + ";")
 
+    #: 「连接」卡片里由本面板自己写的占位文案。真实连接/断开结果来自
+    #: ``on_connection_changed``（MCP worker 路径）或 ``set_sdr_connected``
+    #: （直连后端路径）；只有停在这些占位值上时才允许改写，避免盖掉
+    #: worker 给出的具体失败原因（「连接失败：…」）。
+    _CONN_PLACEHOLDER_TEXTS = frozenset({"", "未连接", "OFF"})
+
+    def _mark_conn_card(self, connected: bool) -> None:
+        """同步「连接」卡片指示灯与占位文案（直连后端路径的唯一出口）。
+
+        2026-11-22 真机：RTL-SDR 已连、频谱在动、设备信息齐全，卡片却仍
+        显示 `OFF / 未连接`——因为只有 MCP worker 的 ``connection_changed``
+        会写这张卡，而直连后端走的是 ``set_sdr_connected``。这里把两条路径
+        收口到同一张卡。
+        """
+        try:
+            if connected:
+                self.conn_indicator.setStyleSheet(
+                    "color: " + tokens().COLORS["success"]
+                    + "; font-size: 12pt; font-weight: 600;")
+                self.conn_indicator.setText("ON")
+                if self.conn_status.text().strip() in self._CONN_PLACEHOLDER_TEXTS:
+                    name = self.dev_name.text().strip()
+                    self.conn_status.setText(
+                        f"已连接: {name}" if name and name != "未连接" else "已连接")
+            else:
+                self.conn_indicator.setStyleSheet(
+                    "color: " + tokens().COLORS["danger"]
+                    + "; font-size: 12pt; font-weight: 600;")
+                self.conn_indicator.setText("OFF")
+                text = self.conn_status.text().strip()
+                # 「已连接 …」「已连接 · 无样本（超时）」都要收回「未连接」；
+                # 具体失败原因（不以「已连接」开头）保持原样。
+                if text in self._CONN_PLACEHOLDER_TEXTS or text.startswith("已连接"):
+                    self.conn_status.setText("未连接")
+                    self.conn_status.setStyleSheet("")
+        except Exception:
+            pass
+
     def set_sdr_connected(self, connected: bool):
         """连接状态切换：连接时正常显示；断开时把 SDR 相关字段全部 "—" 并整组置灰。"""
         self._sdr_connected = bool(connected)
+        self._mark_conn_card(bool(connected))
         if connected:
             # 连接：恢复信号质量 / 接收参数 / GPS / 设备信息四组的可用视觉
             for grp in (self.signal_group, self.rx_group, self.gps_group, self.info_group):

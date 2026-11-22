@@ -229,6 +229,11 @@ void main() {
     await tester.pump(const Duration(milliseconds: 100));
 
     expect(find.text('天空过境'), findsOneWidget);
+    // spec 规则 1：天空页默认只显示与观测直接相关的「接收状态」；
+    // 时间源 / GNSS 定位两格属底层机制，默认不上主界面。
+    expect(find.text('接收状态'), findsOneWidget);
+    expect(find.text('时间源'), findsNothing);
+    expect(find.text('GNSS 定位'), findsNothing);
     // 真星空判据：极坐标图里的可见卫星来自真实 TLE + SGP4（不是标题/占位）。
     final SkyRadar radar = tester.widget<SkyRadar>(find.byType(SkyRadar));
     expect(

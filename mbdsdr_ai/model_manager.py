@@ -127,6 +127,7 @@ class CallStats:
 
 # 内置模型列表（API 不可用时的 fallback）
 BUILTIN_MODELS = [
+    ModelInfo(id="Qwen/Qwen3-VL-8B-Thinking", owned_by="Qwen", description="通义千问 3-VL 8B 视觉/多模态推理（上下文 256K）", context_window=262144, is_weak=False),
     ModelInfo(id="Qwen/Qwen3.6-35B-A3B", owned_by="Qwen", description="通义千问 3.6 35B (MoE A3B 激活)", context_window=131072, is_weak=False),
     ModelInfo(id="Qwen/Qwen3.5-4B", owned_by="Qwen", description="通义千问 3.5 4B 轻量版（弱模型测试用）", context_window=32768, is_weak=True),
     ModelInfo(id="Qwen/Qwen3.5-9B", owned_by="Qwen", description="通义千问 3.5 9B", context_window=32768, is_weak=True),
@@ -147,7 +148,7 @@ class ModelManager:
         self,
         api_key: str = "",
         base_url: str = "https://api.siliconflow.cn/v1",
-        model: str = "Qwen/Qwen3.6-35B-A3B",
+        model: str = "Qwen/Qwen3-VL-8B-Thinking",
         temperature: float = 0.7,
         top_p: float = 0.9,
         max_output_tokens: int = 2048,

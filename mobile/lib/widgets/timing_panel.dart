@@ -12,6 +12,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../app/tokens.dart';
+import '../l10n/gen/app_localizations.dart';
 
 /// GNSS 授时质量三态。
 enum TimingQuality {
@@ -103,6 +104,12 @@ class _TimingPanelState extends State<TimingPanel> {
   @override
   Widget build(BuildContext context) {
     final q = _snap.quality;
+    // 有 gen-l10n 上下文时用三语文案；独立构造（如单测未挂 delegates）时
+    // 回退到中文原文，行为与历史逐字一致。
+    final AppLocalizations? l10n = AppLocalizations.of(context);
+    final String systemLine =
+        l10n?.timingSystemClock(_hhmmss(_snap.systemTimeUtc)) ??
+            '系统 ${_hhmmss(_snap.systemTimeUtc)} UTC';
     final Color badgeColor = switch (q) {
       TimingQuality.hasFix => AppTokens.success,
       TimingQuality.noFix => AppTokens.warning,
@@ -110,9 +117,12 @@ class _TimingPanelState extends State<TimingPanel> {
     };
     final String gnssLine = switch (q) {
       TimingQuality.hasFix =>
-        'fix ${_hhmmss(_snap.gnssFixTimeUtc!)}  Δt ${_snap.delta!.inMilliseconds} ms',
-      TimingQuality.noFix => 'GNSS 无 fix',
-      TimingQuality.noModule => '无 GNSS 授时',
+        l10n?.timingFixLine(_hhmmss(_snap.gnssFixTimeUtc!),
+                _snap.delta!.inMilliseconds) ??
+            'fix ${_hhmmss(_snap.gnssFixTimeUtc!)}  '
+                'Δt ${_snap.delta!.inMilliseconds} ms',
+      TimingQuality.noFix => l10n?.timingGnssNoFix ?? 'GNSS 无 fix',
+      TimingQuality.noModule => l10n?.timingNoGnss ?? '无 GNSS 授时',
     };
 
     return Container(
@@ -128,7 +138,7 @@ class _TimingPanelState extends State<TimingPanel> {
         children: [
           Row(
             children: [
-              const Text('授时', style: AppTokens.auxiliary),
+              Text(l10n?.timingTitle ?? '授时', style: AppTokens.auxiliary),
               const Spacer(),
               Container(
                 width: AppTokens.spacingS,
@@ -139,7 +149,7 @@ class _TimingPanelState extends State<TimingPanel> {
           ),
           const SizedBox(height: AppTokens.spacingS),
           Text(
-            '系统 ${_hhmmss(_snap.systemTimeUtc)} UTC',
+            systemLine,
             style: AppTokens.mono.copyWith(
               color: AppTokens.textPrimary,
               fontWeight: AppTokens.weightMedium,

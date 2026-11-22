@@ -11,6 +11,7 @@ library;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:mbdsdr_mobile/l10n/gen/app_localizations.dart';
 import 'package:mbdsdr_mobile/models/radio_state.dart';
 import 'package:mbdsdr_mobile/services/radio_controller.dart';
 import 'package:mbdsdr_mobile/widgets/device_info_card.dart';
@@ -142,5 +143,58 @@ void main() {
     expect(find.text('2.048 MS/s'), findsOneWidget);
     expect(find.text('144.000000 MHz'), findsOneWidget);
     expect(find.text('—'), findsNothing);
+  });
+
+  testWidgets('en locale：设备信息标签与状态显示英文', (tester) async {
+    final radio = FakeRadioApi(
+      status: ConnectionStatus.connected,
+      sampleRateHz: 2.048e6,
+      freqHz: 144000000,
+    );
+    await tester.pumpWidget(MaterialApp(
+      localizationsDelegates: AppLocalizations.localizationsDelegates,
+      supportedLocales: AppLocalizations.supportedLocales,
+      locale: const Locale('en'),
+      home: Scaffold(body: Center(child: DeviceInfoCard(radio: radio))),
+    ));
+
+    expect(find.text('Status'), findsOneWidget);
+    expect(find.text('Connected'), findsOneWidget);
+    expect(find.text('Backend'), findsOneWidget);
+    expect(find.text('Sample rate'), findsOneWidget);
+    expect(find.text('Frequency'), findsOneWidget);
+    // 不再中英混排。
+    expect(find.text('已连接'), findsNothing);
+    expect(find.text('状态'), findsNothing);
+
+    radio.status = ConnectionStatus.disconnected;
+    await tester.pumpWidget(MaterialApp(
+      localizationsDelegates: AppLocalizations.localizationsDelegates,
+      supportedLocales: AppLocalizations.supportedLocales,
+      locale: const Locale('en'),
+      home: Scaffold(body: Center(child: DeviceInfoCard(radio: radio))),
+    ));
+    expect(find.text('Not connected'), findsOneWidget);
+  });
+
+  testWidgets('ja locale：设备信息标签与状态显示日文', (tester) async {
+    final radio = FakeRadioApi(
+      status: ConnectionStatus.connected,
+      sampleRateHz: 2.048e6,
+      freqHz: 144000000,
+    );
+    await tester.pumpWidget(MaterialApp(
+      localizationsDelegates: AppLocalizations.localizationsDelegates,
+      supportedLocales: AppLocalizations.supportedLocales,
+      locale: const Locale('ja'),
+      home: Scaffold(body: Center(child: DeviceInfoCard(radio: radio))),
+    ));
+
+    expect(find.text('状態'), findsOneWidget);
+    expect(find.text('接続済み'), findsOneWidget);
+    expect(find.text('バックエンド'), findsOneWidget);
+    expect(find.text('サンプルレート'), findsOneWidget);
+    expect(find.text('周波数'), findsOneWidget);
+    expect(find.text('已连接'), findsNothing);
   });
 }

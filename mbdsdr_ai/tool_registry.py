@@ -357,6 +357,10 @@ WRITE_TOOL_NAME_PATTERNS = (
     # ── 出图/图像合成落盘 ──
     "orbit_error_plot", "orbit_sky_plot", "sat_image_enhance",
     "satdump_compose_image", "satdump_process", "satdump_live",
+    # ── 观测档案落盘（2026-11-20 Task 164）──
+    "observation_export",
+    # ── AR 指向校准档案落盘（2026-11-21 Task 15.2；write=True + confirm 分级）──
+    "sky_calibration_save",
     # ── 设备参数下发/对外连接 ──
     "bladerf_set_params", "hackrf_set_params", "limesdr_set_params",
     "rtlsdr_set_params", "set_ppm_correction", "doppler_tune_frequency",
@@ -439,6 +443,8 @@ WRITE_TOOL_GRADES = {
     "sdrangel_remotecontrol": (WRITE_TOOL_GRADE_CONFIRM, "向外部 SDRangel 发送远程控制命令"),
     "orbit_error_plot": (WRITE_TOOL_GRADE_CONFIRM, "PNG 落盘写操作，handler 已要求一次性 token"),
     "orbit_sky_plot": (WRITE_TOOL_GRADE_CONFIRM, "PNG 落盘写操作，handler 已要求一次性 token"),
+    "observation_export": (WRITE_TOOL_GRADE_CONFIRM, "把观测档案写到磁盘，会落盘且可能覆盖同名文件，需确认目标路径"),
+    "sky_calibration_save": (WRITE_TOOL_GRADE_CONFIRM, "写入指向校准档案（可能覆盖同名文件），需确认目标路径"),
     "set_ppm_correction": (WRITE_TOOL_GRADE_CONFIRM, "把晶振频偏校准值下发设备，会影响后续频率精度"),
     "switch_model": (WRITE_TOOL_GRADE_CONFIRM, "切换当前 LLM 模型，改变后续对话行为"),
     "judge_evaluate": (WRITE_TOOL_GRADE_CONFIRM, "调用外部 LLM 评分，会产生费用并外发内容"),

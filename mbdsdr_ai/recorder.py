@@ -41,7 +41,7 @@ import shutil
 import time
 import wave as _wave
 from datetime import datetime, timezone
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 import numpy as np
 
@@ -136,6 +136,9 @@ class IQRecorder:
         self.state: str = "closed"
         self.last_error: str = ""
         self.error_code: str = ""
+        #: SigMF annotations（由上层在停止前通过 :meth:`set_annotations` 设置）。
+        #: 默认空列表——不看时间轴时 meta 与旧版逐字节一致。
+        self._annotations: List[Dict[str, Any]] = []
 
     # ------------------------------------------------------------------
     def open(self) -> bool:
@@ -219,6 +222,23 @@ class IQRecorder:
             return 0
 
     # ------------------------------------------------------------------
+    def set_annotations(self, items) -> int:
+        """设置 SigMF annotations（close 时写入 meta）；返回接受条数。
+
+        只接受含 ``core:sample_start`` 的 dict——缺样本偏移的条目会让 meta
+        不合规，宁可拒收也不写半条。
+        """
+        accepted: List[Dict[str, Any]] = []
+        for item in items or []:
+            if not isinstance(item, dict):
+                continue
+            if "core:sample_start" not in item:
+                continue
+            accepted.append(dict(item))
+        self._annotations = accepted
+        return len(accepted)
+
+    # ------------------------------------------------------------------
     def close(self) -> Optional[str]:
         """关闭数据文件并写 SigMF meta。返回 meta 路径（失败 None）。"""
         if self._fp is not None:
@@ -267,7 +287,7 @@ class IQRecorder:
                     "core:datetime": self._start_time or "",
                 }
             ],
-            "annotations": [],
+            "annotations": [dict(a) for a in self._annotations],
         }
         if not complete:
             if self._n_samples == 0:

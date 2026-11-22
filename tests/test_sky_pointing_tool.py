@@ -93,7 +93,11 @@ def test_solver_unavailable_is_structured_not_success(registry, monkeypatch):
                                          "reason": "未安装 tetra3"})
     res = _call(registry)
     assert res.success is False
-    assert "solver_unavailable" in res.content
+    # 外部库不可用会自动回退内置 quad 解算；这组共线星点解不出，因此是
+    # solver_failed（不是「没有解算器」），但内容要同时写明两边。
+    assert "solver_failed" in res.content
+    assert "未安装 tetra3" in res.content
+    assert "内置解算" in res.content
 
 
 def test_success_reports_residual_without_alignment_claim(registry,

@@ -92,6 +92,8 @@ NGC 5866，故条目数保持 117。**
 | 视星等 `magnitude` | **0** | （已补齐：`16f075f3` — `mbdsdr_ai/data/dso_catalog.json:44` — `heasarc_messier`；HEASARC `MESSIER`） |
 | 长轴 `size_arcmin` | **0** | （已补齐：`16f075f3` — `mbdsdr_ai/data/dso_catalog.json:54` — `lynga`；M40←WDS、M73←Lynga） |
 | 短轴 `size_minor_arcmin` | **66** | 见 `meta.missing.size_minor_arcmin.designations` |
+| 长轴位置角 `position_angle_deg` | **74** | 见 `meta.missing.position_angle_deg.designations` |
+| 距离 `distance_pc` | **46** | 见 `meta.missing.distance_pc.designations`（OpenNGC 无 `Pax`） |
 | 英文常用名 `name_en` | **81** | 见 `meta.missing.name_en.designations` |
 | 中文名 `zh_name` | **83** | 见 `meta.missing.zh_name.designations` |
 
@@ -113,6 +115,19 @@ NGC 5866，故条目数保持 117。**
   `axis_ratio_source="catalog"`（51 条）；缺短轴一律 `axis_ratio=null` +
   `axis_ratio_source="unknown"`（66 条）。**数据层不产生 `estimated`**：
   估计是视图的事，必须单独标注「估计」，不能让默认 0.55 看起来像实测。
+- **长轴位置角 `position_angle_deg`**：取 OpenNGC `PosAng` 原值（度，
+  长轴位置角），43/117 有值并标 `position_angle_source="openngc"`；
+  缺失留 `null` + `unknown` 并计数，不做推算。视图仅在星系卡片显示
+  「长轴方向 X°（目录）」，星团/星云即使目录有 `PosAng` 也不显示。
+- **距离 `distance_pc` / `parallax_mas` / `distance_uncertainty_pc` /
+  `distance_source`**：只由 OpenNGC `Pax`（视差，mas）换算，
+  `distance_pc = 1000 / Pax` 并保留 1 位小数（M4 = 0.5560 mas → 1798.6 pc，
+  M13 = 0.1270 mas → 7874.0 pc）。71/117 有距离，标
+  `distance_source="openngc_parallax"`；无 `Pax` 的 46 条三个距离键全为
+  `null` + `"unknown"`，**不估算**。OpenNGC **不提供视差误差 σ**，所以
+  `distance_uncertainty_pc` 恒为 `null`，不编误差数字。视图在有距离的
+  卡片追加「距离 约 X 光年（目录视差）」，无距离不写占位。
+- **Caldwell 目录本轮仍未提供**：本地无权威源，不估算、不联网抓取。
 
 ## 4. 中文名：Wikidata（CC0）优先，自译逐条标注
 
@@ -200,3 +215,7 @@ CC BY-SA 4.0 要求**署名**且**改编数据库以同许可分发**。本文�
 
 `cross_ids` 一律取 OpenNGC `Name` 中的编号；`NGC`/`IC` 交叉列在 Dup 行
 附近可能与 `Name` 互换（如 `NGC6523` 行写 `NGC=6533`），故不采用。
+
+星系椭圆的朝向使用目录 `position_angle_deg`：按 QPainter rotate 绘制长轴
+（屏幕 y 向下，正角顺时针）；PA 缺失或轴比未知的条目保持水平椭圆/虚线圆，
+不猜朝向。

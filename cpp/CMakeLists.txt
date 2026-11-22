@@ -571,6 +571,11 @@ target_include_directories(test_dc_blocker PRIVATE src)
 target_link_libraries(test_dc_blocker PRIVATE Qt6::Test Qt6::Core)
 add_test(NAME dc_blocker COMMAND test_dc_blocker)
 
+add_executable(test_text_util tests/test_text_util.cpp)
+target_include_directories(test_text_util PRIVATE src)
+target_link_libraries(test_text_util PRIVATE Qt6::Test Qt6::Core)
+add_test(NAME text_util COMMAND test_text_util)
+
 # Phase35 W2: block-level lookahead anti-clip for dsp::Agc. Pure DSP (no Qt
 # widgets) -- burst first-sample no-clip, steady-state no over-suppression,
 # empty/zero/single-sample boundaries.

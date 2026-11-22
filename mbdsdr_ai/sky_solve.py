@@ -83,7 +83,21 @@ DEFAULT_TIMEOUT_S: float = 10.0
 #: 支持的解算器名称。
 _SOLVERS = ("tetra3", "astap")
 
+#: 已弃用但仍保留一个版本的解算器 → 替代建议。
+#:
+#: 规则：替换适配器时，旧适配器至少保留一个版本，并在本表登记替代建议；
+#: 旧适配器继续留在 ``_SOLVERS`` 里（仍可显式调用），只是由
+#: ``solver_status()`` 的 ``deprecated`` 键如实标注。删除旧适配器是
+#: BREAKING 变更，需更新变更台账。
+_DEPRECATED_SOLVERS: Dict[str, str] = {}
+
 _UNAVAILABLE_REASON = "未安装 tetra3；ASTAP 需外部可执行文件"
+
+
+def _deprecated_solvers() -> Dict[str, str]:
+    """返回已登记弃用的解算器；只输出 ``_SOLVERS`` 内真实存在的名字。"""
+    return {name: _DEPRECATED_SOLVERS[name] for name in _SOLVERS
+            if name in _DEPRECATED_SOLVERS}
 
 
 def solver_status(astap_path: Optional[str] = None) -> Dict[str, Any]:
@@ -97,10 +111,16 @@ def solver_status(astap_path: Optional[str] = None) -> Dict[str, Any]:
             ``MBDSDR_ASTAP_PATH``。
 
     Returns:
-        ``{"available": True, "name": "tetra3"|"astap"}`` 或
-        ``{"available": False, "reason": "..."}``。tetra3 缺失且 ASTAP
-        未配置时原因与既有契约逐字一致。
+        ``{"available": True, "name": "tetra3"|"astap", "deprecated": {...}}``
+        或 ``{"available": False, "reason": "...", "deprecated": {...}}``。
+        ``deprecated`` 是「解算器名 → 弃用说明」的字典：只有登记在
+        ``_DEPRECATED_SOLVERS`` 里、且仍在 ``_SOLVERS`` 内的名字才会出现；
+        当前没有适配器被弃用时为 ``{}``。被登记弃用的适配器仍可用，只是
+        如实标注替代建议：替换适配器时，旧适配器至少保留一个版本并在
+        ``_DEPRECATED_SOLVERS`` 标注替代建议；删除它是 BREAKING 变更，
+        需更新变更台账。tetra3 缺失且 ASTAP 未配置时原因与既有契约逐字一致。
     """
+    deprecated = _deprecated_solvers()
     tetra3_reason = _UNAVAILABLE_REASON
     try:
         import tetra3  # noqa: F401
@@ -109,16 +129,18 @@ def solver_status(astap_path: Optional[str] = None) -> Dict[str, Any]:
     except Exception as exc:  # 装了但导入失败（缺原生库等）也要如实报告
         tetra3_reason = f"tetra3 导入失败：{type(exc).__name__}: {exc}"
     else:
-        return {"available": True, "name": "tetra3"}
+        return {"available": True, "name": "tetra3", "deprecated": deprecated}
 
     exe = astap_path if astap_path is not None else os.environ.get(ASTAP_ENV_VAR)
     if exe:
         try:
             if os.path.isfile(os.path.expanduser(str(exe))):
-                return {"available": True, "name": "astap"}
+                return {"available": True, "name": "astap",
+                        "deprecated": deprecated}
         except (OSError, TypeError, ValueError):
             pass
-    return {"available": False, "reason": tetra3_reason}
+    return {"available": False, "reason": tetra3_reason,
+            "deprecated": deprecated}
 
 
 def _finite(value: Any) -> Optional[float]:

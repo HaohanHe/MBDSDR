@@ -24,7 +24,7 @@
 
 **P0 规模**：11 条。按**当前代码**逐条复核后为：**有 4 条、半有 7 条、无 0 条**。两条主轴的主体已经落地；剩下的 7 条半有集中在站址单一来源、断源状态、录音状态机、真模型协商、收星编排、诚实性反例与动态 UI 边界。`docs/interaction-flows.md` 按真实用户路径审出 **30 条缺陷（阻断 2 / 严重 15 / 一般 10 / 观感 3）**；其中与 P0 相关的 23 条（B1/B2、S1–S15、M2/M4/M5/M10、L1/L3）逐条工单化，见 [PRD-现状对照.md](PRD-现状对照.md) §2。
 
-> 复核口径提醒：审计文档与代码存在时间差。当前代码里 **B1、S2、S3、S5、S13、S15 改动在位**（详见对照表"现状"列），全星表 UI 也已接线（`desktop/rf_sky_view.py:3268-3292/3320-3345`）；`docs/star-catalog.md` §7 第 7 条仍写"UI 接线未做"，属**文档滞后**，以代码为准并应在该文档补记。
+> 复核口径提醒：审计文档与代码存在时间差。当前代码里 **B1、S2、S3、S5、S13、S15 改动在位**（详见对照表"现状"列），全星表 UI 也已接线（`desktop/rf_sky_view.py` 约 :5805 起走 `select_for_view`，绘制与拾取共用同一份 selection）；`docs/star-catalog.md` §7 第 2/7 条已同步为当前口径。
 
 **三条硬约束（任何功能不得违反）**
 
@@ -75,6 +75,25 @@ MBDSDR 是**单机桌面观测台**，不是在线服务、不是专业仪器软
 
 > 这条非目标表是范围控制工具：任何新需求先问「它服务上面四类目标用户中的哪一类」，答不上来就不进 P0。
 
+### 1.4 硬件路线（2026-11-19 用户确认）
+
+**软件优先，硬件后置。前期已经有一块可制板的 PCB，本轮不做量产、不做硬件适配。**
+
+| 阶段 | 做什么 | 不做什么 |
+|---|---|---|
+| 当前 | 软件与算法；硬件只到「技术预览板可制板」 | 量产、结构件、认证、AD9361/Zynq 驱动与固件、硬件验收 |
+| 硬件重启用（三条同时满足才谈） | ① AR 指向 L0–L4 真机夜空跑通；② RTL-SDR 之外的真机后端（HackRF/USRP/PlutoSDR/bladeRF/LimeSDR/SoapySDR）至少各一路真验通过；③ v2 Gerber 过嘉立创 DRC 实际投板无阻断 | 跳过前置条件直接上硬件 |
+
+已有硬件资产（按**技术预览资产**对待，不得据此宣称硬件能力已交付）：
+
+| 路径 | 内容 |
+|---|---|
+| `hardware/v2/` | MBDSDR v2 技术预览板：4 层 128.9 × 85.7 mm，457 器件 / 329 网络；XC7Z020（Zynq 7020）+ DDR3L 512 MB + QSPI；AD9361（70 MHz–6 GHz，2 收 2 发，56 MHz 瞬时带宽）；ATGM336H 北斗/GPS + UM980 RTK 双天线；BMI260 IMU + TMAG5273 磁力计；CH334 USB Hub、RTL8211F 千兆网口、CH343 串口。交付 Gerber / BOM / PickPlace |
+| `ai-sdr-mini-kicad/` | v1 双层板（ESP32-S3 + SI4732，仅接收）KiCad 工程 + 固件 v0.5 WebOTA + 网表 / BOM |
+| `ai-sdr-mini-PCB重排指令-v0.9.md` | v1 布局体检结论与重排坐标（USB 差分、晶振、北斗 RF 走线约束） |
+
+**软件不得等硬件**：无板时必须给诚实空态；任何功能不得因为「等硬件」而阻塞或不交付。完整的待办与前置条件见 [spec.md](../.trae/specs/mbdsdr-system-lifecycle/spec.md) 「硬件路线」一节。
+
 ---
 
 ## 2. 问题与产品决策
@@ -87,7 +106,7 @@ MBDSDR 是**单机桌面观测台**，不是在线服务、不是专业仪器软
 | 2 | 天空与频谱是两套世界：天空按时间引擎算，部分工具按墙钟算 | `docs/limitations-register.md` L23：同一时刻两工具给出不同可见结论 | 用户看到"天上明明有"，AI 说"不可见" |
 | 3 | 能力缺口容易被"看起来正常"掩盖 | `docs/limitations-register.md` L24–L34：白天整层消隐、无银河、DSO 仅符号、受晒未知 | 用户把"简化模型"当成"真实观测" |
 | 4 | 硬件现实与界面状态可能分裂 | 站址有两个输入面（见 P0-05 证据）；无设备时按钮置灰但理由分散 | 用户不知道到底缺什么 |
-| 5 | AI 工具面很大但真实模型未验 | 514 个工具、406 可跑/107 诚实不可用/1 环境性不可写（`docs/tool-availability.md`）；L12–L15 均"仅自测" | "AI 能收星"目前是工程假设，不是已验证结论 |
+| 5 | AI 工具面很大但真实模型未验 | 515 个工具、407 可跑/108 诚实不可用/0 环境性不可写（`docs/tool-availability.md`）；L12–L15 均"仅自测" | "AI 能收星"目前是工程假设，不是已验证结论 |
 
 ### 2.2 产品决策（本 PRD 拍板）
 
@@ -210,7 +229,7 @@ MBDSDR 是**单机桌面观测台**，不是在线服务、不是专业仪器软
 |---|---|---|
 | 基准统一 | 时刻、站址、频率各有唯一权威来源；天空、过境、多普勒与 AI 读同一个 `TimeEngine` 和同一份运行时快照，不另起第二套 | `mbdsdr_ai/new_spacetime.py` 的 `TimeEngine`；`mbdsdr_ai/runtime_sources.py` 的 `site_source` / `time_source`；`mbdsdr_ai/gmst.py`（CRS 唯一真值）；`tests/test_gmst_single_source.py`、`tests/test_runtime_sources.py`、`tests/test_frequency_manager_single_source.py`、`tests/test_sample_rate_single_source.py` |
 | 覆盖无缝 / 泛在 | 离线优先：默认路径无网络可用；无 SDR、无 GNSS、无 TLE 时降级并说清缺什么，不给假数据 | `MBDSDR_OFFLINE`（`docs/offline-behavior.md`、`tests/test_offline_privacy.py`）；`tests/test_tle_offline_guard.py`；`tests/test_disconnected_panels_honest.py` |
-| 弹性智能 | AI 协商 + 全部能力工具化 + 写门分级；模型只能提议，写操作必须过门 | `scripts/tool_surface_audit.py`（registry / 能力目录 / 文档 514/514/514）；98 个写工具分 `hard_gate` / `confirm` / `low_risk`（`tests/test_write_tool_grading.py`） |
+| 弹性智能 | AI 协商 + 全部能力工具化 + 写门分级；模型只能提议，写操作必须过门 | `scripts/tool_surface_audit.py`（registry / 能力目录 / 文档 515/515/515）；99 个写工具分 `hard_gate` / `confirm` / `low_risk`（`tests/test_write_tool_grading.py`） |
 | 安全可信 | 结论可复算、写操作人工确认、不伪造数据 | `scripts/verify_claims.py`、`scripts/check_red_lifecycle.py`；`desktop/ai_panel.issue_desktop_confirmation` 的确认 token（`tests/test_desktop_confirm_token.py`） |
 | 便捷高效 | 冷启动到「看见真实星空」或「听见真实信号」≤3 步，不先填技术参数 | spec「应然形态」P1 判据；`tests/test_first_open_welcome.py`、`tests/test_startup_first_frame.py` 只覆盖首屏与首帧，3 步自动化用例**待建** |
 | 时空空间一体 | 天空与频谱是同一目标上下文的两个面；指向延伸到硬件时按三级承诺逐级收紧精度 | spec D4「指向闭环的三级承诺」；`tests/test_four_entry_state_parity.py`（四端同一状态模型） |
@@ -600,8 +619,8 @@ MBDSDR 是**单机桌面观测台**，不是在线服务、不是专业仪器软
 | P1-04 | dB 自动量程 + Y 轴拖动 | 强信号进来后不要整屏发黑 | P5/P95 ±5 dB，滞回 ≥3 dB；拖动线性、越界回夹；与滑杆双向同步 | 无（只有两个滑杆 `spectrum_widget.py:1699-1711`，量程默认写死） |
 | P1-05 | 录音库真实副本迁移 | 我不想因为升级丢录音 | 副本预演通过；原件零改动；回收站可恢复 | 有实现/仅自测（L10） |
 | P1-06 | AI 真模型回归 | "AI 收星"要真能跑 | 语料规模建议 ≥40 条（**未拍板，不设阈值**）+ 流式中断/取消/超时终态正确 + token 计数对上 | 无（L12–L15） |
-| P1-07 | MCP 面与 AI 面统一 | 我用外部工具也该能调这些能力 | 决定是否镜像 514 工具；若不镜像，文档写明边界 | 半有（L21，83 vs 514） |
-| P1-08 | 观测会话导出 | 我要把一次观测（时刻/站址/目标/频点/结果）存档复算 | 导出 JSON/CSV，字段含来源与证据强度；无产物则拒绝导出 | 无 |
+| P1-07 | MCP 面与 AI 面统一 | 我用外部工具也该能调这些能力 | 决定是否镜像 515 工具；若不镜像，文档写明边界 | 半有（L21，83 vs 515） |
+| P1-08 | 观测会话导出 | 我要把一次观测（时刻/站址/目标/频点/结果）存档复算 | 导出 JSON/CSV，字段含来源与证据强度；无产物则拒绝导出；档案带可回放的时间轴 | 半有（`mbdsdr_ai/observation_record.py` 数据模型与 `observation_export` 工具在位；`controller.stop_recording()` 在录制停止后自动在同目录生成 `*.observation.json`，桌面/CLI/MCP 共用；档案 `timeline` 已接中途事件——调谐/增益/采样率变更、解码命中（同解码器 1 s 聚合、排除未命中）、读空 `read_gap`，事件落点用真实样本索引并同步写进 SigMF `annotations`；录制中被流式解码分流的样本数在 `result.decoder_shared_samples` 与 `notes` 里明示；22 条以上测试覆盖「无产物拒绝 / 来源不冒充 / 原子写 / SigMF 读产物 / 不完整录制不落档 / 时间轴排序与上限 / 未命中去噪 / 命中聚合与 flush / 样本索引锚点 / 分流披露」；**非录制类观测仍靠工具手动导出**；按档案重演已有 `replay_context`（输入契约）与 `replay_plan`（逐事件步骤 + 状态演进）+ 只读 CLI `scripts/replay_observation.py`（`--list/--at/--read/--json`），桌面回放对话框也能直接打开 `*.observation.json`（有 blockers 逐条弹窗，能放则按档案事件切中心频率回放，采样率保持文件值不加变速）；仍不做「解码命中标在频谱上」与多产物串联） |
 | P1-09 | 触屏/DPI 适配回归 | 在小屏/高分屏上按钮不挤、字不糊 | 100%/125%/150%/200% 四档布局基线通过；触屏模式可用 | 半有（`main.py:94-95` PassThrough；触屏管理器在） |
 | P1-10 | 指向闭环（云台粗指向 → 赤道仪精调 → 解算验证） | 我要把望远镜架到云台上，先粗对准再精调 | 云台只报度级；赤道仪仅在能力位允许时动；解算成功才显示「已对准」并给残差；全流程人工确认 + Abort | 半有（`mbdsdr_ai/gimbal.py` 的 `RotctldClient`/`GimbalPose.angular_error` 已在；赤道仪 Alpaca 客户端 `mbdsdr_ai/mount.py` 已接入 AI 工具面；`sky_solve.py` 的 tetra3 为可选依赖、ASTAP 外部；真机未验） |
 
@@ -613,7 +632,7 @@ MBDSDR 是**单机桌面观测台**，不是在线服务、不是专业仪器软
 | P2-02 | JSON 导览（观测会话） | 步骤 `select/goto/wait/set_rate/label`；可中断可回放；不引入脚本语言 | 无（S11/I5） |
 | P2-03 | 受晒驱动的光学可见性 | 只有 `sunlit=True` 且仰角够高才标"可见"；未知不标 | 无 |
 | P2-04 | 多显示器/窗口状态恢复 | 布局、Dock、DPI、显示器变化后恢复正确 | 半有 |
-| P2-05 | 打包与许可交付 | 星表已进 wheel/sdist 并有包内断言（`test_star_catalog_packaging.py`）；再分发需保留 HYG 署名与 CC BY-SA 声明；第三方许可清单 [TBD] | 有（`star-catalog.md` §7 第 10 条：改动在位） |
+| P2-05 | 打包与许可交付 | 星表已进 wheel/sdist 并有包内断言（`test_star_catalog_packaging.py`）；再分发需保留 HYG 署名与 CC BY-SA 声明；第三方许可清单以 `NOTICE.md` 为唯一事实源（含 `cpp/NOTICE.md`、`mobile/NOTICE.md`，共 10.8 KB，列 GPL/librtlsdr 逐项登记与 Qt LGPL 动态链接说明） | 有（`star-catalog.md` §7 第 10 条：改动在位；`NOTICE.md` 存在且完整） |
 | P2-06 | 只读远程视图 | 手机/浏览器只读天空与状态；不上传录音 | 无 |
 
 ---
@@ -791,10 +810,23 @@ MBDSDR 是**单机桌面观测台**，不是在线服务、不是专业仪器软
 | **QGIS** | GIS 平台与插件生态（插件约 4518）；Temporal Controller 只管图层时间轴，Live GPS 无授时（qgis.org / plugins.qgis.org / docs.qgis.org） | 把 CRS、时空区间与 GeoJSON 契约搬进天文 + 射电场景 | 不做空间分析平台 |
 | **天文通** | 闭源消费级观星 App：HYG v4.2 11.5 万星、本地相机解算（`skysolve`）、15 天天气/极光/79 个暗夜点、订阅 6 元每月（twtapp.com、App Store id1478601599） | 射频闭环 + 授时 + 可编程 + 开源 | 不做内容生态、插画、音效、广告内购 |
 | **Look4Sat** | GPL-3.0、Kotlin、离线过境 + 多普勒调谐，2026-10 仍维护（github.com/rt-bishop/Look4Sat） | 调谐之后还有解调/录音/解码，且与天空同源 | 不重做纯过境 App |
-| **Seestar** | 封闭硬件生态，S50 $549 起，App 内 GoTo/tracking/plate solve 一体（zwoastro.com、ZWO 手册） | 开放、可编程、跨硬件 | 不做成品相机/堆栈 |
+| **振旺光电 ZWO** | 四层产品把「拍到照片」全链路焊死：Seestar S30/S30 Pro/S50/S50 Pro（$299–844，一体机）、ASIAIR + AM5/AM3 赤道仪 + ASI 相机的模块化生态（$300–2000+）、ASI2600/6200 Pro 专业制冷相机（$600–5600）、ASI2600 Air 把相机+导星+控制器+电源+WiFi 压进一个盒子（$1699–1999）。统一承诺是「插上电 10 分钟出图」。封闭性明确：ASIAIR 官方 FAQ 写明不支持第三方相机/电调，单反新机型长期不响应（[zwoastro.com](https://www.zwoastro.com/)、[ZWO Product FAQs](https://www.zwoastro.com/product-faqs/)） | 开放工具面（514 工具 + MCP，与硬件品牌解耦）、可复算的诚实读数、射频维度（ZWO 全系不碰 SDR/频谱/卫星信号接收）、一次观测的可回放时间轴 | 不做成品相机、不做堆栈、不做一体化智能望远镜、不做硬件。这条赛道 ZWO 用软硬一体与供应链成本焊死，软件侧单点切入没有胜算 |
 | **通用 agent** | 工具由宿主执行，computer use 需沙箱/VM，无本机硬件权限模型（platform.openai.com/docs/guides/tools、platform.claude.com/docs/en/agents-and-tools/tool-use/overview） | 514 工具 + 写门 + 离线 | 不拼通用语言能力 |
 
 **结论**：优势在交叉点，不在单项。
+
+### 9.5 从 ZWO 学什么、不学什么
+
+ZWO 是这组参照物里唯一「卖结果而不是卖过程」、也是唯一有完整商业闭环的一家。只学三件，不学第四件：
+
+| 学什么 | ZWO 的做法 | 我们怎么落（不许照搬） |
+|---|---|---|
+| **Air 化：把 N 个盒子压成 1 个** | ASI2600 Air 把相机/导星/控制器/电源/WiFi 压进一个 SKU，解决「线缆地狱」 | 我们的「盒子」不是硬件，是**认知**：把天空视图 / 频谱 / 过境 / AI 对话 / 录音 / 解算结果压成**一条可回放的时间轴**。现状：档案导出仍在 P1，尚未成为第一公民 |
+| **10 分钟开箱** | Seestar 开箱到出图 10 分钟 | 对齐 spec P1 判据「冷启动到看见真实星空或听见真实信号 ≤3 步」。现状：只有首屏/首帧测试（`test_first_open_welcome.py`、`test_startup_first_frame.py`），**3 步自动化用例待建** |
+| **吃它的封闭性** | ASIAIR 不认第三方相机 → 存在一批「设备手里有、但不在 ZWO 名单里」的用户 | 用开放工具面（514 工具 + MCP）接住这类人。前置条件：真机后端要扩——现在只有 RTL-SDR（RTL2832U + FC0012）真验过，其余后端全部 `not_verified` |
+| **不学：自己造硬件** | ZWO 垂直整合相机 / 赤道仪 / 盒子 / 软件 | 我们软件优先、硬件后置。量产、结构件、认证一律不做（见 §1.4 硬件路线） |
+
+**一个 PRD 尚未回答的商业模式问题**：ZWO 卖硬件、软件免费送；我们没有硬件，软件凭什么收费？目前唯一说得通的答案是 §1.2 第 3 类用户——**科普教学 / 社团**。只有这个群体会为「可复算、可存档、断网能演的观测记录」付费，而不会为「一张更漂亮的星云图」付费（后者他们会直接买 Seestar）。这条尚未拍板，标注为开放项。
 
 ---
 
@@ -814,7 +846,7 @@ MBDSDR 是**单机桌面观测台**，不是在线服务、不是专业仪器软
 ### 10.2 容量与并发
 
 - 星表：83,479 颗；单次绘制预算 `max_count` 默认 20,000。
-- 同时 VFO 数量：`[TBD]`（现状未定义上限，需拍板）。
+- 同时 VFO 数量：**当前不设上限**（实现按无上限运行，不阻塞、不报错）。这是一个已登记的开放项：上限应由真实硬件（RTL-SDR 2.4 MS/s 下多 VFO 的 CPU 占用）实测后再定，不要凭空拍一个数字。在那之前，UI 与文档都不得宣称「支持 N 个 VFO」。
 - 并发：UI 单线程；模型动作经 150 ms 总线排空；录音/解码在后台线程；AI 流式必须可取消。
 - 长时运行：≥8 小时连续接收不得内存单调增长（以录音与瀑布缓冲为观察点）。
 
@@ -827,7 +859,7 @@ MBDSDR 是**单机桌面观测台**，不是在线服务、不是专业仪器软
 | 会话内容 | 仅在用户配置模型时发送给该 provider；离线模式拒绝 |
 | 联网调用 | 逐次可感知（工具名可见）；`MBDSDR_OFFLINE=1` 全拒 |
 
-验收：强制离线 + 网络桩抛错，全链路无出站调用；日志不得含完整路径以外的隐私字段（`[TBD]`：日志脱敏范围）。
+验收：强制离线 + 网络桩抛错，全链路无出站调用；日志不得含完整路径以外的隐私字段。**日志脱敏范围当前口径**（这是当前实现，不是待定项）：站址经纬度、录音/IQ 绝对路径、会话内容一律不入日志；异常栈里的本地路径保留（排查必需），但只保留到文件名层级。新增日志点按此口径执行，改动需同步 `tests/test_offline_privacy.py`。
 
 ### 10.4 平台
 

@@ -48,8 +48,9 @@ schema v1
 
 原子写
 ------
-``tempfile.mkstemp`` 同目录临时文件 + ``fsync`` + ``os.replace``；任何一步
-失败都清掉临时文件，目标文件保持原样（中断不会留半文件）。
+``tempfile.mkstemp`` 同目录临时文件 + ``fsync``，替换目标文件前先用
+``load_profile`` 读回临时文件校验（写后读回）；任何一步失败都清掉临时
+文件，目标文件保持原样（中断不会留半文件，也不会落入读不回的内容）。
 
 不新增依赖，不联网，不 import Qt。
 """
@@ -71,6 +72,7 @@ __all__ = [
     "SCHEMA_VERSION",
     "SUPPORTED_SCHEMA_VERSIONS",
     "calibrate",
+    "calibrate_and_save",
     "load_profile",
     "save_profile",
 ]
@@ -517,6 +519,26 @@ def calibrate(observations: Sequence[Mapping[str, Any]],
     }
 
 
+def _verify_written(tmp: str, payload: Mapping[str, Any]) -> Optional[str]:
+    """读回刚写好的临时文件并比对已知字段；通过返回 None，否则返回原因。
+
+    只比已知 schema 字段：``load_profile`` 可能补充的 ``extra_fields`` 容器
+    与迁移元数据不参与比对。
+    """
+    result = load_profile(tmp)  # 按全局名调用，测试可替换
+    if not isinstance(result, Mapping) or not result.get("ok"):
+        reason = result.get("reason") if isinstance(result, Mapping) else None
+        return str(reason or "读回失败且未给出原因")
+    profile = result.get("profile")
+    if not isinstance(profile, Mapping):
+        return "读回结果缺少 profile"
+    mismatched = sorted(key for key in _SCHEMA_FIELDS
+                        if profile.get(key) != payload.get(key))
+    if mismatched:
+        return f"字段 {', '.join(mismatched)} 与写盘内容不一致"
+    return None
+
+
 def save_profile(profile: Mapping[str, Any],
                  path: str) -> Dict[str, Any]:
     """原子写入校准档案；失败不破坏原文件。
@@ -554,6 +576,11 @@ def save_profile(profile: Mapping[str, Any],
             json.dump(payload, fh, indent=2, ensure_ascii=False)
             fh.flush()
             os.fsync(fh.fileno())
+        # 写后读回：临时文件必须能被完整读回且字段一致，才替换目标文件。
+        verify_error = _verify_written(tmp, payload)
+        if verify_error is not None:
+            return {"ok": False, "error": "verify_failed",
+                    "reason": f"写后读回校验失败：{verify_error}"}
         os.replace(tmp, target)
         tmp = None
         return {"ok": True, "path": target}
@@ -567,6 +594,30 @@ def save_profile(profile: Mapping[str, Any],
                 os.unlink(tmp)
             except OSError:
                 pass
+
+
+def calibrate_and_save(observations: Sequence[Mapping[str, Any]],
+                       *,
+                       device_id: str,
+                       fov_deg: float,
+                       path: str,
+                       source: str = "two_star",
+                       max_residual_deg: float = MAX_CALIBRATION_RESIDUAL_DEG
+                       ) -> Dict[str, Any]:
+    """校准并落盘的一步入口：求解失败不写文件，保存失败原样返回失败信封。
+
+    成功返回 ``{"ok": True, "path": 绝对路径, "profile": {...},
+    "residual_deg": float, "reason": ""}``。
+    """
+    solved = calibrate(observations, device_id=device_id, fov_deg=fov_deg,
+                       source=source, max_residual_deg=max_residual_deg)
+    if not solved.get("ok"):
+        return solved
+    saved = save_profile(solved["profile"], path)
+    if not saved.get("ok"):
+        return saved
+    return {"ok": True, "path": saved["path"], "profile": solved["profile"],
+            "residual_deg": float(solved["residual_deg"]), "reason": ""}
 
 
 def load_profile(path: str) -> Dict[str, Any]:

@@ -381,6 +381,13 @@ def run(argv: Optional[Sequence[str]] = None,
                       file=sys.stderr)
                 return EXIT_NO_DATA
             print(f"录制结束: {done['samples']} samples")
+            loss = done.get("sample_loss")
+            if loss:
+                print(
+                    f"警告: 录制样本 {loss['accounted_samples']} 少于墙钟预期 "
+                    f"{loss['expected_samples']}（{loss['ratio'] * 100:.1f}%），"
+                    "可能存在吞吐不足或设备丢样；已写入 sample_loss 时间轴。",
+                    file=sys.stderr)
 
         # ---- 服务 ----
         if args.remote_port:

@@ -122,12 +122,11 @@ def test_mock_connect_success():
     _fill(dlg)
 
     dlg._on_connect_clicked()
-    # 后台线程跑 manager.start()，等信号回主线程
-    QTest.qWait(120)
-    app.processEvents()
-
-    assert "start" in mgr.calls, f"manager.start 未被调用: {mgr.calls}"
-    assert "已连接" in dlg._state_label.text(), \
+    assert _wait_until(lambda: "start" in mgr.calls), \
+        f"manager.start 未被调用: {mgr.calls}"
+    # 后台线程跑 manager.start()，经进程级信号桥排队回主线程。固定 qWait
+    # 会在机器负载高时偶发「线程还没被调度」（30 轮里 4 次），改成等条件。
+    assert _wait_until(lambda: "已连接" in dlg._state_label.text()), \
         f"状态应为已连接, 实际: {dlg._state_label.text()}"
     assert "2048" in dlg._state_label.text(), \
         f"应显示字节数 2048, 实际: {dlg._state_label.text()}"
@@ -142,9 +141,8 @@ def test_mock_disconnect():
     dlg = NtripConfigDialog(manager=mgr)
     _fill(dlg)
     dlg._on_connect_clicked()
-    QTest.qWait(120)
-    app.processEvents()
-    assert "已连接" in dlg._state_label.text()
+    assert _wait_until(lambda: "已连接" in dlg._state_label.text()), \
+        f"连接后应为已连接, 实际: {dlg._state_label.text()}"
 
     dlg._on_disconnect_clicked()
     assert "stop" in mgr.calls, f"manager.stop 未被调用: {mgr.calls}"
@@ -273,6 +271,81 @@ def test_pull_mountpoints_failure_restores_button(monkeypatch):
     assert dlg.mount_combo.currentText() == "KEEP0", \
         f"失败不应改动已填挂载点: {dlg.mount_combo.currentText()}"
     dlg.close()
+
+
+def test_pull_worker_holds_dialog_weakly(monkeypatch):
+    """护栏：后台拉取线程不得成为对话框的最后一个持有者。
+
+    反证（2026-11-19 实测）：worker 若是绑定方法（强引用 self），线程退出时
+    会在**非 GUI 线程**销毁 QDialog，全量套件 46% 处必现堆损坏
+    （`0xC0000374` / `0xC0000005`）。这里用阻塞版拉取把线程卡在途中，主线程
+    丢弃引用后对话框必须立即回收——说明线程只持弱引用。
+    """
+    import gc
+    import threading
+    import weakref
+
+    import ntrip_panel as np_mod
+
+    entered = threading.Event()
+    release = threading.Event()
+
+    def _blocking(_url):
+        entered.set()
+        release.wait(5.0)
+        return [], "probe"
+
+    monkeypatch.setattr(np_mod, "_fetch_mountpoints", _blocking)
+    dlg = NtripConfigDialog(manager=FakeManager())
+    dlg.host_edit.setText("ntrip.example.com")
+    dlg._pull_mountpoints()
+    assert entered.wait(2.0), "后台拉取未启动"
+
+    ref = weakref.ref(dlg)
+    dlg.close()
+    del dlg
+    gc.collect()
+    alive = ref() is not None
+    release.set()
+    for thread in threading.enumerate():
+        if thread.name.startswith("Thread-"):
+            thread.join(2.0)
+    assert not alive, "worker 线程仍持有对话框：QDialog 可能在非 GUI 线程被销毁"
+
+
+def test_connect_worker_holds_manager_not_dialog(monkeypatch):
+    """护栏：连接线程阻塞段只持 manager，不持对话框。"""
+    import gc
+    import threading
+    import weakref
+
+    import ntrip_panel as np_mod
+
+    entered = threading.Event()
+    release = threading.Event()
+
+    class _SlowManager(FakeManager):
+        def start(self):
+            entered.set()
+            release.wait(5.0)
+            return super().start()
+
+    mgr = _SlowManager()
+    dlg = NtripConfigDialog(manager=mgr)
+    _fill(dlg)
+    dlg._on_connect_clicked()
+    assert entered.wait(2.0), "后台连接未启动"
+
+    ref = weakref.ref(dlg)
+    del dlg
+    gc.collect()
+    alive = ref() is not None
+    release.set()
+    for thread in threading.enumerate():
+        if thread.name.startswith("Thread-"):
+            thread.join(2.0)
+    assert not alive, "worker 线程仍持有对话框：QDialog 可能在非 GUI 线程被销毁"
+    assert "start" in mgr.calls
 
 
 if __name__ == "__main__":

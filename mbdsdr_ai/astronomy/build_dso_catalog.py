@@ -73,8 +73,8 @@ M102_TARGET = "NGC5866"
 M102_DUP_NOTE = "addendum.csv: M102, Type=Dup, M=101"
 
 REQUIRED_COLUMNS = (
-    "Name", "Type", "RA", "Dec", "Const", "MajAx", "MinAx",
-    "V-Mag", "B-Mag", "M", "NGC", "IC", "Common names",
+    "Name", "Type", "RA", "Dec", "Const", "MajAx", "MinAx", "PosAng",
+    "V-Mag", "B-Mag", "M", "NGC", "IC", "Common names", "Pax",
 )
 
 # OpenNGC 类型 -> 视图渲染类型。``Other``（M73 星群）显式映射为 cluster，
@@ -221,6 +221,40 @@ def _size(rec: dict, column: str) -> Optional[float]:
     return value if value is not None and value > 0.0 else None
 
 
+def _position_angle(rec: dict) -> Tuple[Optional[float], str]:
+    """OpenNGC ``PosAng``（长轴位置角，度）；缺省/非法一律 None + unknown。"""
+    text = (rec.get("PosAng") or "").strip()
+    if not text:
+        return None, "unknown"
+    try:
+        value = float(text)
+    except ValueError:
+        return None, "unknown"
+    if not math.isfinite(value) or not (0.0 <= value < 360.0):
+        return None, "unknown"
+    return value, "openngc"
+
+
+def _distance(rec: dict) -> Tuple[Optional[float], Optional[float], str]:
+    """OpenNGC ``Pax``（视差，mas）→ (Pax, 距离 pc, 来源)。
+
+    距离按 ``d[pc] = 1000 / Pax[mas]`` 换算并保留 1 位小数。缺省/非法/
+    ``<=0`` 一律 None + ``unknown``，不做估算；OpenNGC 不提供视差误差 σ，
+    调用方把 ``distance_uncertainty_pc`` 恒写 null。
+    """
+    text = (rec.get("Pax") or "").strip()
+    if not text:
+        return None, None, "unknown"
+    try:
+        parallax = float(text)
+    except ValueError:
+        return None, None, "unknown"
+    if not math.isfinite(parallax) or parallax <= 0.0:
+        return None, None, "unknown"
+    distance = math.floor((1000.0 / parallax) * 10.0 + 0.5) / 10.0
+    return parallax, distance, "openngc_parallax"
+
+
 def _common_names(rec: dict) -> List[str]:
     out: List[str] = []
     for part in rec.get("Common names", "").split(","):
@@ -352,6 +386,8 @@ def _record(key: str, rec: dict, snapshot: dict,
 
     axis_ratio = None if size is None or minor is None else minor / size
     axis_ratio_source = "catalog" if axis_ratio is not None else "unknown"
+    position_angle, position_angle_source = _position_angle(rec)
+    parallax_mas, distance_pc, distance_source = _distance(rec)
     ra_deg = _parse_ra(rec["RA"])
     dec_deg = _parse_dec(rec["Dec"])
     if not (0.0 <= ra_deg < 360.0 and -90.0 <= dec_deg <= 90.0):
@@ -403,6 +439,12 @@ def _record(key: str, rec: dict, snapshot: dict,
         "size_source": size_source,
         "axis_ratio": axis_ratio,
         "axis_ratio_source": axis_ratio_source,
+        "position_angle_deg": position_angle,
+        "position_angle_source": position_angle_source,
+        "parallax_mas": parallax_mas,
+        "distance_pc": distance_pc,
+        "distance_uncertainty_pc": None,
+        "distance_source": distance_source,
         "constellation": constellation,
         "cross_ids": cross,
         "source_file": rec["_file"],
@@ -424,6 +466,8 @@ def _missing(objects: List[dict]) -> dict:
         "magnitude": bucket("magnitude"),
         "size_arcmin": bucket("size_arcmin"),
         "size_minor_arcmin": bucket("size_minor_arcmin"),
+        "position_angle_deg": bucket("position_angle_deg"),
+        "distance_pc": bucket("distance_pc"),
         "name_en": bucket("name_en"),
         "zh_name": bucket("zh_name"),
         "magnitude_band_counts": dict(sorted(bands.items())),
@@ -456,6 +500,15 @@ def _counts(objects: List[dict], missing: dict) -> dict:
         "with_size_minor_arcmin": sum(
             1 for o in objects if o["size_minor_arcmin"] is not None),
         "without_size_minor_arcmin": missing["size_minor_arcmin"]["count"],
+        "with_position_angle": sum(
+            1 for o in objects if o["position_angle_deg"] is not None),
+        "without_position_angle": missing["position_angle_deg"]["count"],
+        "no_position_angle_designations":
+            missing["position_angle_deg"]["designations"],
+        "with_distance": sum(
+            1 for o in objects if o["distance_pc"] is not None),
+        "without_distance": missing["distance_pc"]["count"],
+        "no_distance_designations": missing["distance_pc"]["designations"],
         "magnitude_band_counts": missing["magnitude_band_counts"],
         "raw_type_counts": dict(sorted(raw.items())),
         "render_type_counts": dict(sorted(render.items())),
@@ -655,6 +708,9 @@ def build(opengnc: Path, zh_path: Path,
             "HEASARC MESSIER (compiled from Sky Catalogue 2000.0 Vol. 2, "
             "1985skca.book.....H), the Washington Double Star Catalog "
             "(USNO), and Lynga's Catalogue of Open Cluster Data (VII/92A). "
+            "Distances are derived only from OpenNGC Pax parallaxes "
+            "(distance_pc = 1000 / Pax); no parallax uncertainty is "
+            "provided by the source. "
             "This derived catalog is distributed under CC BY-SA 4.0."),
         "source_dir": SOURCE_DIR_LABEL,
         "source_files": {
@@ -740,6 +796,10 @@ def build(opengnc: Path, zh_path: Path,
             "两者皆缺写 null。",
             "cross_ids 取 OpenNGC Name 中的编号；NGC/IC 列仅作交叉引用，"
             "在 Dup 行附近可能与 Name 互换，故不采用。",
+            "距离仅由 OpenNGC Pax（视差，mas）换算：distance_pc = "
+            "1000 / Pax，保留 1 位小数，distance_source=openngc_parallax；"
+            "OpenNGC 不提供视差误差 σ，distance_uncertainty_pc 恒为 null，"
+            "不估算。无 Pax 的条目距离留 null 并计入 missing.distance_pc。",
         ],
         "generated_at": _dt.datetime.now(
             _dt.timezone.utc).isoformat(timespec="seconds"),

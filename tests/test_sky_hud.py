@@ -199,6 +199,34 @@ def test_sources_text_labels_time_and_site_uncertainty():
     assert "位置：手动位置（未校准）" in text, text
 
 
+def test_narrative_uses_plain_language_without_terms():
+    """正常位姿 + 中文目标：口语文本含方向与「附近能看到」，无英文术语。"""
+    pose = {"valid": True, "az_deg": 225.0, "alt_deg": 20.0,
+            "roll_deg": 0.0, "fov_deg": 2.3}
+    targets = [{"name": "角宿一", "az_deg": 225.2, "alt_deg": 20.1,
+                "vmag": 0.98}]
+    hud = build_hud(pose, targets, "L3", VIEW, SIZE)
+    text = hud["narrative"]
+    assert text
+    assert "西南" in text
+    assert "附近能看到" in text
+    for term in ("az", "alt", "vmag", "GMST", "FOV"):
+        assert term.lower() not in text.lower(), (text, term)
+
+
+def test_narrative_without_pose_is_not_aligned_and_hint_unchanged():
+    """没有位姿只说「还没对准」，旧键 hint 仍是 L0 原文。"""
+    hud = build_hud(None, _targets(), "L3", VIEW, SIZE)
+    assert hud["narrative"] == "还没对准，先让设备看到星空"
+    assert hud["hint"] == HUD_HINTS["L0"]
+
+
+def test_narrative_manual_override_mentions_takeover():
+    """L4 + 有效位姿：口语文本明确说「手动接管」。"""
+    hud = build_hud(POSE, _targets(), "L4", VIEW, SIZE)
+    assert "手动接管" in hud["narrative"]
+
+
 def test_performance_1080p_2_3deg_1000_targets():
     """1080p / 2.3° / 1000 目标：单次 ≤ 33 ms（取 3 次最优，打印每次）。"""
     rng = random.Random(20261117)

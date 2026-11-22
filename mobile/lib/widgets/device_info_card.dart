@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../app/tokens.dart';
+import '../l10n/gen/app_localizations.dart';
 import '../models/radio_state.dart';
 import '../services/radio_controller.dart';
 
@@ -37,17 +38,28 @@ class DeviceInfoCard extends StatelessWidget {
     // 仅在「已连接」时才展示后端/采样率/频率——这些是设备在线时的真实读数；
     // 其余状态（未连接/连接中/重连中/失败）一律空态「—」。
     final bool live = radio.status == ConnectionStatus.connected;
+    // 有 gen-l10n 上下文时用三语文案；独立构造（单测未挂 delegates）时回退中文。
+    final AppLocalizations? l10n = AppLocalizations.of(context);
 
     final (String statusText, Color dotColor) = switch (radio.status) {
       ConnectionStatus.connected => (
-          '已连接',
+          l10n?.connStatusConnected ?? '已连接',
           AppTokens.success.withValues(alpha: 0.8),
         ),
-      ConnectionStatus.connecting => ('连接中…', AppTokens.textSecondary),
-      ConnectionStatus.reconnecting => ('等待重连', AppTokens.textSecondary),
-      ConnectionStatus.error => ('连接失败', AppTokens.warning),
+      ConnectionStatus.connecting => (
+          l10n?.connStatusConnecting ?? '连接中…',
+          AppTokens.textSecondary,
+        ),
+      ConnectionStatus.reconnecting => (
+          l10n?.connStatusReconnecting ?? '等待重连',
+          AppTokens.textSecondary,
+        ),
+      ConnectionStatus.error => (
+          l10n?.connStatusError ?? '连接失败',
+          AppTokens.warning,
+        ),
       ConnectionStatus.disconnected => (
-          '未连接',
+          l10n?.connStatusDisconnected ?? '未连接',
           AppTokens.textAt(AppTokens.textAlphaFaint),
         ),
     };
@@ -69,7 +81,7 @@ class DeviceInfoCard extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: <Widget>[
         _InfoRow(
-          label: '状态',
+          label: l10n?.deviceStatusLabel ?? '状态',
           value: statusText,
           dot: dotColor,
           valueColor: live
@@ -93,13 +105,13 @@ class DeviceInfoCard extends StatelessWidget {
         ],
         const SizedBox(height: AppTokens.spacingS),
         _InfoRow(
-          label: '后端',
+          label: l10n?.deviceBackendLabel ?? '后端',
           value: live ? backendLabel : '—',
           valueColor: valueColor,
         ),
         const SizedBox(height: AppTokens.spacingS),
         _InfoRow(
-          label: '采样率',
+          label: l10n?.deviceSampleRateLabel ?? '采样率',
           value: live
               ? '${(radio.sampleRateHz / 1e6).toStringAsFixed(3)} MS/s'
               : '—',
@@ -108,7 +120,7 @@ class DeviceInfoCard extends StatelessWidget {
         ),
         const SizedBox(height: AppTokens.spacingS),
         _InfoRow(
-          label: '频率',
+          label: l10n?.deviceFrequencyLabel ?? '频率',
           value: live
               ? '${(radio.freqHz / 1e6).toStringAsFixed(6)} MHz'
               : '—',

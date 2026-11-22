@@ -2,7 +2,7 @@
 """写工具全量分级（spec D6 / Task 35）。
 
 钉住三件事：
-  1. 98 个写工具每一个都已登记 ``hard_gate`` / ``confirm`` / ``low_risk`` +
+  1. 100 个写工具每一个都已登记 ``hard_gate`` / ``confirm`` / ``low_risk`` +
      理由，不允许未分级项；
   2. 未登记分级的写工具默认按 ``hard_gate`` 处理（fail-closed），
      模型通道拿不到 token 就一次 handler 都不执行；
@@ -73,7 +73,7 @@ def _call(reg: ToolRegistry, name: str, args=None):
 def test_all_write_tools_are_graded(agent):
     writes = {name for name, tool in agent.tool_registry.tools.items()
               if tool.get("write")}
-    assert len(writes) == 98, "写工具总数变化时需同步补分级并更新此断言"
+    assert len(writes) == 100, "写工具总数变化时需同步补分级并更新此断言"
 
     missing = sorted(writes - set(WRITE_TOOL_GRADES))
     assert missing == [], f"未分级写工具必须列名：{missing}"

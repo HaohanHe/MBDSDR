@@ -117,3 +117,42 @@ def test_disconnect_clears_connected_status_message(window):
         f"断开后状态栏标签仍含已连接: {labels!r}"
     assert ("断开" in msg) or ("未连接" in msg), \
         f"断开后缺少收口文案: {msg!r}"
+
+
+class _FakeRetirablePipeline:
+    def __init__(self):
+        self.shutdown_calls = 0
+
+    def shutdown(self):
+        self.shutdown_calls += 1
+
+
+def test_stop_iq_streams_retires_pipeline_reference(window):
+    """断连时不能立刻丢掉流水线引用：子 QThread 可能还在 run()。
+
+    回归背景（2026-11-20 group 1 实测 ``0xC0000005``）：``ReceivePipeline``
+    的 ``shutdown()`` 是非阻塞的（join 交给 ``mbdsdr-pipeline-reap``），旧
+    ``_stop_iq_streams`` 在它返回后立即把 ``_pipeline`` 置 None；宿主 QObject
+    的 C++ 析构连带删除运行中的子 QThread，线程再访问已删除对象即崩溃。
+    """
+    pipe = _FakeRetirablePipeline()
+    window._pipeline = pipe
+
+    window._stop_iq_streams()
+
+    assert pipe.shutdown_calls == 1, "必须先请求关停"
+    assert window._pipeline is None, "逻辑上应已断开"
+    assert pipe in window._retired_pipelines, \
+        "退役流水线必须保留强引用，等回收线程 join 完再释放"
+    window._pipeline = None
+
+
+def test_retired_pipelines_stay_bounded(window):
+    """保留引用但不能无限堆积：最多两个。"""
+    pipes = [_FakeRetirablePipeline() for _ in range(5)]
+    for p in pipes:
+        window._retire_pipeline(p)
+
+    assert len(window._retired_pipelines) == 2
+    assert pipes[-2:] == window._retired_pipelines
+    assert all(p.shutdown_calls == 1 for p in pipes)

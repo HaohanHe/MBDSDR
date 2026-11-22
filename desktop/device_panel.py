@@ -38,10 +38,14 @@ try:  # pragma: no cover
         owner_state_text as _owner_state_text,
     )
     from mbdsdr_ai import usb_hotplug
+    from mbdsdr_ai.device_identity import (
+        device_identity_aliases as _device_identity_aliases,
+    )
     _ENUM_OK = True
 except Exception:  # noqa: BLE001
     enumerate_all_sdr_devices = None  # type: ignore
     usb_hotplug = None  # type: ignore
+    _device_identity_aliases = None  # type: ignore
     _ENUM_OK = False
     _OWNER_STATE_UNKNOWN = "unknown"
     _get_owner_state = None  # type: ignore
@@ -646,6 +650,18 @@ class DevicePanel(QWidget):
                 continue
             if event.kind == usb_hotplug.EVENT_RECOVERED:
                 if self._connected:
+                    # 身份键抖动（RTL-SDR 打开后读不到序列号 → 键从 serial
+                    # 退到 index）：当前键必须跟到新键上，否则后续真正的拔出
+                    # 事件会因为「不是当前设备」被过滤掉。
+                    if event.key and event.key != self._current_dev_key:
+                        try:
+                            aliases = set(_device_identity_aliases(
+                                self._connected_device or {})) \
+                                if _device_identity_aliases else set()
+                        except Exception:  # noqa: BLE001
+                            aliases = set()
+                        if event.key in aliases:
+                            self._current_dev_key = event.key
                     dev = self._connected_device or {}
                     self.status_label.setText(
                         f"已连接: {dev.get('label') or '设备'}")

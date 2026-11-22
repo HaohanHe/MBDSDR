@@ -1,0 +1,8 @@
+# Gradle / Kotlin / IDE 本地产物（不入库）
+.gradle/
+.kotlin/
+build/
+local.properties
+*.iml
+.idea/
+captures/

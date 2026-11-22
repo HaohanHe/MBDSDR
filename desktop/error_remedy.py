@@ -50,6 +50,9 @@ _NO_ENTRY_BY_REASON: Dict[str, tuple] = {
     "AI/MCP 工具层细项：code 不进入任何桌面 UI 控件（仅工具返回值/服务端响应），不设入口": (
         "workflow_executor_missing", "unknown_tool", "parallel_exec_error",
         # Sprint 5 并行执行核内部异常：只在 ToolResult.error 里，桌面无渲染点
+        # AR 指向细项：verify_failed/clock_skew/no_pose/residual_missing 只经
+        # 工具返回值或 provider 读数出现，桌面 UI 无渲染点。
+        "verify_failed", "clock_skew", "no_pose", "residual_missing",
     ),
     "工具执行超时：桌面 AI 面板直接展示目录 message 原文，状态栏/帮助面板不另设入口": (
         "tool_timeout",
@@ -80,6 +83,13 @@ _NO_ENTRY_BY_REASON: Dict[str, tuple] = {
     ),
     "回放标注（非故障）：回放面板在频率读数旁直接渲染「录制真实值 / 上报值」双值标注，不设帮助入口": (
         "freq_reported_only",
+    ),
+    "星场解算/识别细项（sky_pointing_pipeline / sky_field_solve / sky_solve）："
+    "code 只经解算管线、检查脚本或 AI 工具的返回值出现，桌面星图不渲染该码，"
+    "用户侧动作已由返回文案给出": (
+        "bad_points", "no_match", "no_consistent_transform",
+        "too_few_catalog_stars", "bad_widget_size", "bad_projection",
+        "pose_fit_failed",
     ),
     "遗留 stdio MCP 壳（core/mcp_server.py）细项：code 只经 MCP 协议返回调用方"
     "（桌面硬件工具走 mcp_worker/MBDSDRClient），桌面 UI 无渲染点": (

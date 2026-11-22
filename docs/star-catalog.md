@@ -31,7 +31,8 @@
 | 文件 | `mbdsdr_ai/data/full_sky_hyg_v41.npz`（约 1.9 MiB） |
 | 星数 | **83,479** |
 | 筛选 | 剔除 Sol，保留 V ≤ **9.0**（见 §3 的口径） |
-| 坐标系 | J2000/ICRS（HYG 原始发布坐标，未做自行传播） |
+| 坐标系 | J2000/ICRS（HYG 原始发布坐标；**文件里不做自行传播**） |
+| 自行侧车 | `mbdsdr_ai/data/hyg_pm_v41.npz`（83,479 行，pmra/pmdec，缺失 0；源 CSV SHA 与主表一致）；运行时由 `skyengine/proper_motion.py` 传播到查询时刻 |
 | 许可 | 衍生数据同样按 **CC BY-SA 4.0** 分发；代码仍为 MIT |
 | 来源指纹 | `meta.source_file_sha256` 记录源 CSV 的 SHA-256 |
 | 数据指纹 | `meta.data_sha256` 记录全部星表数组的规范化 SHA-256 |
@@ -277,6 +278,18 @@ python -m mbdsdr_ai.skyengine.build_full_sky_catalog `
 `dec_order` → 计算数据 SHA-256 → 写入含来源/许可/源文件 SHA-256/
 数据 SHA-256 的 `meta`。
 
+**自行侧车**（同一份源 CSV，SHA 必须与主表 `meta.source_file_sha256` 一致）：
+
+```powershell
+python scripts/build_hyg_pm.py        # 默认读 ..\scratch\hygdata_v41.csv
+```
+
+输出 `mbdsdr_ai/data/hyg_pm_v41.npz`（`hyg_id`/`pmra_mas`/`pmdec_mas` +
+`meta`）。运行时 `skyengine/proper_motion.py` 用切向基向量把 J2000 方向
+传播到查询时刻，**不改主星表、不烘焙进数据**；侧车缺失/损坏时整表按静态
+处理，`StarSelection.pm_applied_count/pm_missing_count` 如实计数。
+口径边界：只做自行，不含周年视差、光行差、径向速度透视加速。
+
 ---
 
 ## 6. 性能实测
@@ -313,13 +326,11 @@ python -m mbdsdr_ai.skyengine.build_full_sky_catalog `
    深空巡天表。当前上限 9.0 等；请求更深时接口用
    `beyond_catalog_limit=True` 明确标记（§4.3）。若真要更深星场，需
    Gaia DR3 / Tycho-2 等来源（体积、许可与转换成本另议，本次未下载）。
-2. **自行（proper motion）——未做，登记为缺口**：本表只存/只用 HYG 发布的
-   J2000 位置，**没有存 `pmra/pmdec`，也没有按观测历元传播**；近距高自行星
-   （如 Barnard's Star）在数十年尺度会有可见偏移。HYG 源 CSV 确实带
-   `pmra/pmdec` 字段，但各子库（Hipparcos、Gliese 等）精度和历元不齐
-   （Hipparcos 约 1 mas/yr 量级，汇编来源参差）。若以后要做，必须同时
-   存 `pmra/pmdec` 及其不确定度/历元，并做 J2000→观测历元的传播与误差
-   预算；本次不做，不悄悄忽略。
+2. **自行（proper motion）——已接入，仍有边界**：HYG 的 `pmra/pmdec` 由
+   `skyengine/proper_motion` 侧车表载入，`select_for_view` 在 J2000→`jd_tt`
+   传播后只改 alt/az（`ra_deg/dec_deg` 仍是 J2000）；缺表或查不到自行的
+   星保持静态。仍缺：自行不确定度与历元误差预算未入表；侧车缺失时整表
+   退回静态，界面只能按静态口径展示。
 3. **距离/光谱型**：HYG 各来源口径不一，未知一律 NaN/空串；未做统一
    光度校准，不应用作测光结论。
 4. **双星/聚星**：HYG 中分量的独立行会被当作独立星点绘制，未做系统合并。
@@ -327,8 +338,10 @@ python -m mbdsdr_ai.skyengine.build_full_sky_catalog `
    折射抬升、地平雾霾模型；低空极限与真实观测可能有偏差。
 6. **视场增益**是渲染 LOD 经验式，不是物理测光；不同 Bortle 的基线也沿用
    `star_draw` 的既有简化（Bortle ≤ 3 都是 6.5）。
-7. **UI 接线**未做：`desktop/rf_sky_view.py` 仍走旧亮星子集；
-   本模块只提供稳定接口与测试，实际替换由界面线负责。
+7. **UI 接线**：`desktop/rf_sky_view.py` 已走全星表 `select_for_view`
+   （约 :5805 起），绘制与拾取共用同一份 selection；状态文案见
+   `star_catalog_status_text`，星表不可用时界面显式报错。仍缺：低配机/
+   打包环境的帧率复测（见第 8 条）。
 8. **性能**只在本机 CPython 上实测，未在低配机/打包环境复测；Qt 绘制
    成本未计入。
 9. **许可合规**：随仓 npz 是 HYG 的衍生数据（CC BY-SA 4.0），再分发需保留

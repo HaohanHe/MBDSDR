@@ -26,7 +26,7 @@ import urllib.request
 import urllib.error
 from typing import Dict, Optional
 
-from PySide6.QtCore import Qt, QTimer, Signal
+from PySide6.QtCore import QObject, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QPixmap, QPainter, QBrush
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QFormLayout, QHBoxLayout, QLineEdit, QSpinBox,
@@ -86,6 +86,91 @@ def parse_sourcetable(text: str) -> list:
     return mounts
 
 
+def _fetch_mountpoints(url: str) -> "tuple[list, Optional[str]]":
+    """同步拉取 sourcetable 并解析挂载点；不持有任何 QObject。
+
+    返回 ``(mounts, err)``；失败时 mounts 为空、err 为中文可操作说明。
+    """
+    mounts: list = []
+    err: Optional[str] = None
+    try:
+        req = urllib.request.Request(url, headers={
+            "Ntrip-Version": "Ntrip/2.0",
+            "User-Agent": "MBDSDR-NTRIP/0.1",
+            "Accept": "*/*",
+        })
+        with urllib.request.urlopen(req, timeout=8.0) as resp:
+            raw = resp.read()
+        text = raw.decode("latin-1", "ignore")
+        mounts = parse_sourcetable(text)
+        if not mounts:
+            err = ("NTRIP 服务器没有返回可用的挂载点（数据流列表为空）。"
+                   "请核对地址与端口，或换一个 CORS 源后重试。")
+    except urllib.error.HTTPError as e:
+        err = f"NTRIP 连接失败：HTTP {e.code} {e.reason}。请核对地址与端口后重试。"
+    except (urllib.error.URLError, OSError, TimeoutError) as e:
+        err = f"NTRIP 连接失败：{_clean_exc(e)}。请核对地址与网络后重试。"
+    except Exception as e:  # 兜底：拉取失败绝不崩
+        err = f"NTRIP 拉取失败：{_clean_exc(e)}。请核对地址与网络后重试。"
+    return mounts, err
+
+
+class _WorkerBridge(QObject):
+    """进程级信号桥：后台线程只碰它，永不碰任何 QWidget。
+
+    ``token`` 是每个对话框自建的哨兵对象（按身份比较），用于把结果投递给
+    发起请求的那个对话框；对话框销毁时 Qt 会自动断开它的槽，因此桥可以
+    比对话框活得久。
+    """
+
+    pull_finished = Signal(object, object, str)   # token, mounts, err
+    connect_finished = Signal(object, bool)       # token, ok
+
+
+_BRIDGE: Optional[_WorkerBridge] = None
+
+
+def _bridge() -> "_WorkerBridge":
+    """取进程级桥（首次在 GUI 线程里懒创建）。"""
+    global _BRIDGE
+    if _BRIDGE is None:
+        _BRIDGE = _WorkerBridge()
+    return _BRIDGE
+
+
+def _pull_mountpoints_worker(token, url: str) -> None:
+    """后台拉取线程体：**完全不碰对话框**，结果经进程级信号桥回主线程。
+
+    2026-11-19 实测（A/B group 0 全量 46% 处，单文件循环 3/20 复现）：
+    worker 只要在执行期间持有对话框的强引用（绑定方法、或 emit 前后短暂
+    取回），线程退出/释放引用的那一刻就可能成为最后一个持有者，从而在
+    **非 GUI 线程**销毁 QDialog → 堆损坏（`0xC0000374` / `0xC0000005`）。
+    因此这里连信号都不在对话框上发，只发到进程级 `_WorkerBridge`。
+
+    结果回主线程必须走 Qt 信号（auto connection 把回调投到接收者线程）：
+    旧实现用 `QTimer.singleShot(0, _apply)`，timer 建在 worker 线程上、
+    该线程没有事件循环，回调永不执行，按钮会永久停在「拉取中...」。
+    """
+    mounts, err = _fetch_mountpoints(url)
+    try:
+        _bridge().pull_finished.emit(token, mounts, err or "")
+    except RuntimeError:
+        pass
+
+
+def _connect_worker(mgr, token) -> None:
+    """后台连接线程体：只持 manager（普通对象）与 token，不碰对话框。"""
+    ok = False
+    try:
+        ok = bool(mgr.start())
+    except Exception:
+        ok = False
+    try:
+        _bridge().connect_finished.emit(token, ok)
+    except RuntimeError:
+        pass
+
+
 class NtripConfigDialog(QDialog):
     """NTRIP caster 配置对话框（非模态）。
 
@@ -119,9 +204,16 @@ class NtripConfigDialog(QDialog):
         self._poll_timer.timeout.connect(self._refresh_status)
         # 状态轮询只在面板可见时跑：不可见时没人看，1s 一次纯空转。
 
-        # 后台连接/拉取结果回主线程
+        # 后台连接/拉取结果回主线程（同步调用路径仍走本对象信号）
         self._connect_finished.connect(self._on_connect_finished)
         self._pull_finished.connect(self._on_pull_finished)
+
+        # 后台线程的结果经进程级桥投递；token 按身份区分本对话框的请求
+        self._worker_token = object()
+        self._workers = _bridge()
+        self._workers.pull_finished.connect(self._on_worker_pull_finished)
+        self._workers.connect_finished.connect(
+            self._on_worker_connect_finished)
 
         self._set_state("idle")
 
@@ -264,38 +356,22 @@ class NtripConfigDialog(QDialog):
 
         self.pull_btn.setEnabled(False)
         self.pull_btn.setText("拉取中...")
-        # 网络请求放后台线程，避免卡死 UI
+        # 网络请求放后台线程，避免卡死 UI；线程只持 token + url，不碰对话框
+        # （见 _pull_mountpoints_worker 的实测记录）。
         threading.Thread(
-            target=self._pull_worker, args=(url,), daemon=True
+            target=_pull_mountpoints_worker,
+            args=(self._worker_token, url), daemon=True
         ).start()
 
-    def _pull_worker(self, url: str):
-        mounts = []
-        err: Optional[str] = None
-        try:
-            req = urllib.request.Request(url, headers={
-                "Ntrip-Version": "Ntrip/2.0",
-                "User-Agent": "MBDSDR-NTRIP/0.1",
-                "Accept": "*/*",
-            })
-            with urllib.request.urlopen(req, timeout=8.0) as resp:
-                raw = resp.read()
-            text = raw.decode("latin-1", "ignore")
-            mounts = parse_sourcetable(text)
-            if not mounts:
-                err = ("NTRIP 服务器没有返回可用的挂载点（数据流列表为空）。"
-                       "请核对地址与端口，或换一个 CORS 源后重试。")
-        except urllib.error.HTTPError as e:
-            err = f"NTRIP 连接失败：HTTP {e.code} {e.reason}。请核对地址与端口后重试。"
-        except (urllib.error.URLError, OSError, TimeoutError) as e:
-            err = f"NTRIP 连接失败：{_clean_exc(e)}。请核对地址与网络后重试。"
-        except Exception as e:  # 兜底：拉取失败绝不崩
-            err = f"NTRIP 拉取失败：{_clean_exc(e)}。请核对地址与网络后重试。"
+    def _on_worker_pull_finished(self, token, mounts, err: str) -> None:
+        """桥回调（主线程）：只认本对话框发出的那一笔请求。"""
+        if token is not self._worker_token:
+            return
+        self._on_pull_finished(mounts, err)
 
-        # 回主线程更新 UI：必须走 Qt 信号排队（auto connection 把回调投到
-        # 接收者所在线程）。原先用 QTimer.singleShot(0, _apply)：timer 建在
-        # worker 线程上，该线程没有事件循环、随后就结束，回调永远不执行，
-        # 按钮会永久停在「拉取中...」——成功没列表、失败没提示。
+    def _pull_worker(self, url: str):
+        """同步拉取版（测试与旧调用点）：结果经信号投回 GUI 线程。"""
+        mounts, err = _fetch_mountpoints(url)
         try:
             self._pull_finished.emit(mounts, err or "")
         except RuntimeError:
@@ -347,16 +423,17 @@ class NtripConfigDialog(QDialog):
         self._set_state("busy")
         self.connect_btn.setEnabled(False)
 
-        # NTRIPStream.connect() 会阻塞在 socket 握手（最长 timeout），放后台线程
-        def _worker():
-            ok = False
-            try:
-                ok = bool(self._manager.start())
-            except Exception:
-                ok = False
-            self._connect_finished.emit(ok)
+        # NTRIPStream.connect() 会阻塞在 socket 握手（最长 timeout），放后台线程。
+        # 线程体只持 manager，不持对话框（见 _connect_worker 的实测记录）。
+        threading.Thread(target=_connect_worker,
+                         args=(self._manager, self._worker_token),
+                         daemon=True).start()
 
-        threading.Thread(target=_worker, daemon=True).start()
+    def _on_worker_connect_finished(self, token, ok: bool) -> None:
+        """桥回调（主线程）：只认本对话框发出的那一笔请求。"""
+        if token is not self._worker_token:
+            return
+        self._on_connect_finished(ok)
 
     def _on_connect_finished(self, ok: bool):
         self.connect_btn.setEnabled(True)

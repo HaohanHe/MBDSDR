@@ -317,6 +317,114 @@ def test_axis_ratio_counts_match_known_axes(payload):
                if o["axis_ratio_source"] == "unknown") == 117 - known
 
 
+def test_position_angle_is_openngc_only(cat, payload):
+    """位置角只取 OpenNGC PosAng；缺值一律 None + unknown，不猜 0。"""
+    m31 = cat.get("M31")
+    assert m31.position_angle_deg == pytest.approx(35.0)
+    assert m31.position_angle_source == "openngc"
+    # M42（猎户座大星云）在 OpenNGC 的 PosAng 为空
+    m42 = cat.get("M42")
+    assert m42.position_angle_deg is None
+    assert m42.position_angle_source == "unknown"
+    for entry in cat:
+        if entry.position_angle_deg is None:
+            assert entry.position_angle_source == "unknown"
+        else:
+            assert 0.0 <= entry.position_angle_deg < 360.0
+            assert entry.position_angle_source == "openngc"
+
+    counts = payload["meta"]["counts"]
+    assert counts["with_position_angle"] == 43
+    assert counts["without_position_angle"] == 74
+    missing = payload["meta"]["missing"]["position_angle_deg"]
+    assert missing["count"] == 74
+    assert len(missing["designations"]) == 74
+    assert "M42" in missing["designations"]
+    assert "M31" not in missing["designations"]
+
+
+def test_guard_position_angle_source_consistency(payload):
+    clone = _rewrite(payload)
+    target = next(o for o in clone["objects"]
+                  if o["position_angle_deg"] is not None)
+    target["position_angle_source"] = "unknown"
+    clone = _rewrite(clone)
+    with pytest.raises(dso.DSOIntegrityError, match="position_angle_deg"):
+        dso._validate_payload(clone)
+
+    clone = _rewrite(payload)
+    target = next(o for o in clone["objects"]
+                  if o["position_angle_deg"] is None)
+    target["position_angle_source"] = "openngc"
+    clone = _rewrite(clone)
+    with pytest.raises(dso.DSOIntegrityError, match="position_angle_deg"):
+        dso._validate_payload(clone)
+
+
+def test_distance_from_parallax_is_openngc_only(cat, payload):
+    """M4/M13 距离必须等于 1000/Pax；σ 源不提供 → 恒 None。"""
+    for name in ("M4", "M13"):
+        row, _dup = _source_row(name)
+        pax = float(row["Pax"])
+        entry = cat.get(name)
+        assert entry is not None
+        assert entry.parallax_mas == pytest.approx(pax, abs=1e-9)
+        expected_pc = round(1000.0 / pax, 1)
+        assert entry.distance_pc == pytest.approx(expected_pc, abs=1e-6)
+        assert abs(1000.0 / entry.parallax_mas - entry.distance_pc) < 0.11
+        assert entry.distance_source == "openngc_parallax"
+        assert entry.distance_uncertainty_pc is None
+
+    assert cat.get("M4").distance_pc == pytest.approx(1798.6, abs=1e-6)
+    assert cat.get("M13").distance_pc == pytest.approx(7874.0, abs=1e-6)
+
+    counts = payload["meta"]["counts"]
+    assert counts["with_distance"] == 71
+    assert counts["without_distance"] == 46
+    missing = payload["meta"]["missing"]["distance_pc"]
+    assert missing["count"] == 46
+    assert len(missing["designations"]) == 46
+    for obj in payload["objects"]:
+        assert obj["distance_uncertainty_pc"] is None
+        if obj["distance_pc"] is None:
+            assert obj["parallax_mas"] is None
+            assert obj["distance_source"] == "unknown"
+        else:
+            assert obj["parallax_mas"] > 0
+            assert obj["distance_pc"] > 0
+            assert obj["distance_source"] == "openngc_parallax"
+
+
+def test_galaxy_without_parallax_has_no_distance(cat):
+    """M31 在 OpenNGC 无 Pax：三个距离键全空，不估算。"""
+    m31 = cat.get("M31")
+    assert m31 is not None
+    assert m31.parallax_mas is None
+    assert m31.distance_pc is None
+    assert m31.distance_uncertainty_pc is None
+    assert m31.distance_source == "unknown"
+
+
+def test_guard_distance_requires_parallax(payload):
+    clone = _rewrite(payload)
+    target = next(o for o in clone["objects"]
+                  if o["distance_pc"] is not None)
+    target["parallax_mas"] = None
+    clone = _rewrite(clone)
+    with pytest.raises(dso.DSOIntegrityError, match="视差"):
+        dso._validate_payload(clone)
+
+
+def test_guard_distance_parallax_mismatch(payload):
+    clone = _rewrite(payload)
+    target = next(o for o in clone["objects"]
+                  if o["distance_pc"] is not None)
+    target["distance_pc"] = target["distance_pc"] * 2.0
+    clone = _rewrite(clone)
+    with pytest.raises(dso.DSOIntegrityError, match="1000/Pax"):
+        dso._validate_payload(clone)
+
+
 def test_guard_axis_ratio_mismatch_and_estimated_rejected(payload):
     clone = json.loads(json.dumps(payload, ensure_ascii=False))
     target = next(o for o in clone["objects"] if o["axis_ratio"] is not None)
@@ -478,7 +586,7 @@ OPENNGC_COLUMNS = (
 # 本文件所有断言实际读取的列（外加 _read_rows 注入的 _file/_row）。
 TEST_USED_COLUMNS = {
     "Name", "Type", "RA", "Dec", "Const", "MajAx", "MinAx",
-    "B-Mag", "V-Mag", "M", "NGC", "IC", "Common names",
+    "B-Mag", "V-Mag", "M", "NGC", "IC", "Common names", "Pax",
 }
 
 EXPECTED_INVENTORY = {

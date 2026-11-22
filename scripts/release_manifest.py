@@ -1095,6 +1095,21 @@ ARTIFACT_SECRET_ALLOWLIST = (
         "review_by": "2027-03-31",
     },
     {
+        "path": "bin/Qt6Network.dll",  # pragma: allowlist secret — 产物相对路径，非凭据
+        "sha256": "ce0daecd065db34b732727a6aca5c366950950af97d1e0a959205f5e0482c704",
+        "rules": ("pem-private-key",),
+        "reason": "C++ Windows 便携包 Qt 网络模块的 PEM 头常量（命中的是 "
+                  "'-----BEGIN … PRIVATE KEY-----' 标记字符串本身，不含密钥正文）",
+        "review_by": "2027-03-31",
+    },
+    {
+        "path": "bin/tls/qschannelbackend.dll",
+        "sha256": "a48e141998a69bf250c513618874c5d0e1838b72f15d0a28efd2dda314b90499",
+        "rules": ("pem-private-key",),
+        "reason": "C++ Windows 便携包 Schannel 后端的 PEM 头常量（同上，非密钥）",
+        "review_by": "2027-03-31",
+    },
+    {
         "path": "MBDSDR/_internal/scipy/optimize/_highspy/_core.cp314-win_amd64.pyd",
         "sha256": "564565e0809b47fd20acd530667e5dc32b14102cb10cbe23d10e1b49f617d5ac",
         "rules": ("github-pat-classic",),

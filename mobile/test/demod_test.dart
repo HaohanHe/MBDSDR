@@ -67,6 +67,33 @@ void main() {
     expect(peakMag, greaterThan(0.01), reason: '主峰幅度应合理');
   });
 
+  test('鉴频输出归一到 [-1,1]：大频偏也不越界（16-bit 量化契约）', () {
+    const fs = 1.024e6;
+    final demod = NfmDemod(inputRateHz: fs);
+    // 6 kHz 频偏：归一化振幅应为 6000/(51200/2) = 0.234；
+    // 修复前这里是 0.736 弧度，下游乘 32767 后不越界但量纲错，
+    // 更大频偏/脉冲噪声则直接贴 ±π → ±32767（实测 39% 削顶）。
+    final audio = demod.process(fmSignal(fs, 6000, 1000, (fs * 0.05).round()));
+    var peak = 0.0;
+    for (final s in audio) {
+      final a = s.abs();
+      if (a > peak) peak = a;
+    }
+    expect(peak, lessThanOrEqualTo(1.0), reason: '任何样本都不得超出满量程');
+    expect(peak, closeTo(6000 / 25600, 0.02),
+        reason: '归一化振幅 = 频偏/半采样率，实际 $peak');
+  });
+
+  test('WFM 鉴频输出同样不越界（共用归一化出口）', () {
+    const fs = 2.048e6;
+    final demod = WfmDemod(inputRateHz: fs);
+    // 120 kHz 频偏在第一级 256k 抽取率上远超 ±π（会解卷绕到 ±π）。
+    final audio = demod.process(fmSignal(fs, 120000, 1000, (fs * 0.05).round()));
+    for (final s in audio) {
+      expect(s.abs(), lessThanOrEqualTo(1.0));
+    }
+  });
+
   test('WFM 合成信号自检，非硬件：恢复出 1 kHz 调制音', () {
     const fs = 2.048e6;
     final demod = WfmDemod(inputRateHz: fs);

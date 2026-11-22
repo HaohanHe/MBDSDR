@@ -565,6 +565,38 @@ class _BaseProjection:
             return 1.0
         return min_dim_px / deg2rad(fov_deg)
 
+    # -- 有效性域（三层判定的第 2、3 层）------------------------------------
+    # 参考 aladin-lite（LGPLv3）`math/projection/domain/` 的 ProjDef 思路，
+    # **只读思路、代码重写**：那里把「投影在画面上的有效区域」写成有符号距离
+    # 函数（sdf <= 0 为域内），越界顶点沿方向推回边界。
+    #
+    # 我们沿用同一分层，但判据放在本仓已有的归一化坐标上：
+    #   1. `is_valid_vec`：这个 3D 视方向有没有屏幕坐标（相机背后 / 对跖点）；
+    #   2. `domain_sdf` / `is_in_domain`：有了坐标之后，它在不在投影的
+    #      有效域里（正射是单位圆盘、等距方位是半径 π 的圆盘；透视/球极
+    #      的有限坐标处处有效）。
+    # 绘制层据此「裁剪到边界」，而不是把整条线丢掉。
+    def domain_sdf(self, x_n: float, y_n: float) -> float:
+        """归一化屏幕坐标到有效域的有符号距离（``<= 0`` 表示域内）。
+
+        默认全平面有效：有限坐标都有定义（透视/球极）。
+        """
+        return -math.inf
+
+    def is_in_domain(self, x_n: float, y_n: float) -> bool:
+        """归一化屏幕坐标是否落在本投影的有效域内（唯一判据）。"""
+        return self.domain_sdf(x_n, y_n) <= 0.0
+
+    def is_valid_vec(self, v: np.ndarray) -> bool:
+        """视空间单位方向是否有屏幕坐标（相机背后/对跖点 -> False）。"""
+        x, y = self._forward(np.asarray(v, dtype=float))
+        return math.isfinite(x) and math.isfinite(y)
+
+    def validity_mask(self, vv) -> np.ndarray:
+        """批量版 ``is_valid_vec``（子类给解析式，避免逐点 Python 循环）。"""
+        arr = np.atleast_2d(np.asarray(vv, dtype=float))
+        return np.array([self.is_valid_vec(v) for v in arr], dtype=bool)
+
     # -- 对外接口 (接受 az/alt 角度或 Vec3d) --------------------------------
     def project_azalt(self, az_deg: float, alt_deg: float) -> tuple[float, float]:
         """(az, alt) 度 -> 归一化屏幕坐标 (x, y)。"""
@@ -624,6 +656,17 @@ class StereographicProjection(_BaseProjection):
         v = np.array([x, y, lqq - 1.0])
         v /= (lqq + 1.0)
         return v
+
+    def is_valid_vec(self, v: np.ndarray) -> bool:
+        """对跖点 (h == 0) 是球极投影的固有奇点：没有屏幕坐标。"""
+        v = np.asarray(v, dtype=float)
+        r = math.sqrt(float(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]))
+        return 0.5 * (r - float(v[2])) > 1e-15
+
+    def validity_mask(self, vv) -> np.ndarray:
+        arr = np.atleast_2d(np.asarray(vv, dtype=float))
+        r = np.sqrt(np.sum(arr * arr, axis=1))
+        return 0.5 * (r - arr[:, 2]) > 1e-15
 
     def screen_scale(self, min_dim_px: float, fov_deg: float) -> float:
         """半视场角 -> min_dim/2 像素。
@@ -698,6 +741,20 @@ class OrthographicProjection(_BaseProjection):
             return np.array([x * s, y * s, 0.0])
         return np.array([x, y, -math.sqrt(1.0 - dq)])
 
+    def domain_sdf(self, x_n: float, y_n: float) -> float:
+        """正射有效域 = 单位圆盘（归一化半径 = sin(离轴角) <= 1）。"""
+        return math.hypot(x_n, y_n) - 1.0
+
+    def is_valid_vec(self, v: np.ndarray) -> bool:
+        v = np.asarray(v, dtype=float)
+        r = math.sqrt(float(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]))
+        return float(v[2]) <= 0.0 and r > 1e-12
+
+    def validity_mask(self, vv) -> np.ndarray:
+        arr = np.atleast_2d(np.asarray(vv, dtype=float))
+        r = np.sqrt(np.sum(arr * arr, axis=1))
+        return (arr[:, 2] <= 0.0) & (r > 1e-12)
+
     def screen_scale(self, min_dim_px: float, fov_deg: float) -> float:
         """半视场角 -> min_dim/2 像素。
 
@@ -746,6 +803,20 @@ class AzimuthalEquidistantProjection(_BaseProjection):
             a = math.pi
         f = (math.sin(a) / a) if a > 1e-15 else 1.0
         return np.array([x * f, y * f, -math.cos(a)])
+
+    def domain_sdf(self, x_n: float, y_n: float) -> float:
+        """等距方位有效域 = 半径 π 的圆盘（半张天球以外没有定义）。"""
+        return math.hypot(x_n, y_n) - math.pi
+
+    def is_valid_vec(self, v: np.ndarray) -> bool:
+        v = np.asarray(v, dtype=float)
+        rq1 = float(v[0] * v[0] + v[1] * v[1])
+        return rq1 > 1e-30 or float(v[2]) < 0.0
+
+    def validity_mask(self, vv) -> np.ndarray:
+        arr = np.atleast_2d(np.asarray(vv, dtype=float))
+        rq1 = arr[:, 0] * arr[:, 0] + arr[:, 1] * arr[:, 1]
+        return (rq1 > 1e-30) | (arr[:, 2] < 0.0)
 
     def project_vec_many(self, vv) -> tuple[np.ndarray, np.ndarray]:
         """批量等距方位投影（解析式，与 `_forward` 同源）。
@@ -799,6 +870,14 @@ class PerspectiveProjection(_BaseProjection):
     def _backward(self, x: float, y: float) -> np.ndarray:
         d = math.sqrt(1.0 + x * x + y * y)
         return np.array([x / d, y / d, -1.0 / d])
+
+    def is_valid_vec(self, v: np.ndarray) -> bool:
+        v = np.asarray(v, dtype=float)
+        return -float(v[2]) > 1e-12
+
+    def validity_mask(self, vv) -> np.ndarray:
+        arr = np.atleast_2d(np.asarray(vv, dtype=float))
+        return -arr[:, 2] > 1e-12
 
     def screen_scale(self, min_dim_px: float, fov_deg: float) -> float:
         """半视场角 -> min_dim/2 像素。

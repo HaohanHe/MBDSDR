@@ -14,6 +14,9 @@ mbdsdr_ai/astronomy/dso.py — 深空天体 (DSO) 目录
 - M102 按历史约定固定映射 NGC 5866（OpenNGC 记为 Dup，M=101），
   故 Messier 仍为 110 条、总数仍为 117 条；
 - 源目录缺失的星等/角径写 ``None``（未知），绝不用 0/99 冒充。
+- 距离只由 OpenNGC ``Pax``（视差，mas）换算：``distance_pc = 1000 /
+  Pax``；无 ``Pax`` 留 ``None``，不估算。源不提供视差误差 σ，故
+  ``distance_uncertainty_pc`` 恒为 ``None``。
 
 旧版 ``a3aadd8`` 及更早的 ``dso_catalog.json`` 由 Stellarium
 ``catalog.txt``/``zh_CN.po`` 生成，含 GPL-2.0-or-later 来源数据，已废弃。
@@ -97,6 +100,12 @@ class DSOEntry:
     size_source: str = "none"
     zh_name_source: str = ""
     zh_name_ref: str = ""
+    position_angle_deg: Optional[float] = None
+    position_angle_source: str = "unknown"
+    parallax_mas: Optional[float] = None
+    distance_pc: Optional[float] = None
+    distance_uncertainty_pc: Optional[float] = None
+    distance_source: str = "unknown"
 
     @property
     def ra_deg(self) -> float:
@@ -245,6 +254,61 @@ def _check_entry(rec: dict, meta: dict) -> None:
     if ratio_source == "estimated":
         raise DSOIntegrityError(
             f"{name} 数据层不得出现 axis_ratio_source=estimated（估计属视图）")
+    angle = rec.get("position_angle_deg")
+    angle_source = rec.get("position_angle_source") or "unknown"
+    if angle is None:
+        if angle_source != "unknown":
+            raise DSOIntegrityError(
+                f"{name} position_angle_deg=null 却标来源 {angle_source!r}")
+    else:
+        try:
+            angle = float(angle)
+        except (TypeError, ValueError) as exc:
+            raise DSOIntegrityError(f"{name} 位置角非法") from exc
+        if not math.isfinite(angle) or not (0.0 <= angle < 360.0):
+            raise DSOIntegrityError(f"{name} 位置角越界: {angle}")
+        if angle_source != "openngc":
+            raise DSOIntegrityError(
+                f"{name} position_angle_deg 有值却标来源 {angle_source!r}")
+    # 距离三键是 v2 的可选附加字段：旧数据没有 distance_pc 键时整段跳过。
+    if "distance_pc" in rec:
+        parallax = rec.get("parallax_mas")
+        distance = rec.get("distance_pc")
+        uncertainty = rec.get("distance_uncertainty_pc")
+        dist_source = rec.get("distance_source") or "unknown"
+        if uncertainty is not None:
+            raise DSOIntegrityError(
+                f"{name} 源不提供视差误差，distance_uncertainty_pc 必须为 null")
+        if distance is None:
+            if parallax is not None:
+                raise DSOIntegrityError(
+                    f"{name} distance_pc=null 却给出了视差 {parallax!r}")
+            if dist_source != "unknown":
+                raise DSOIntegrityError(
+                    f"{name} distance_pc=null 却标来源 {dist_source!r}")
+        else:
+            try:
+                distance = float(distance)
+            except (TypeError, ValueError) as exc:
+                raise DSOIntegrityError(f"{name} distance_pc 非法") from exc
+            if not math.isfinite(distance) or distance <= 0.0:
+                raise DSOIntegrityError(f"{name} distance_pc 越界: {distance}")
+            if parallax is None:
+                raise DSOIntegrityError(
+                    f"{name} 有距离却缺视差，无法追溯 1000/Pax")
+            try:
+                parallax = float(parallax)
+            except (TypeError, ValueError) as exc:
+                raise DSOIntegrityError(f"{name} parallax_mas 非法") from exc
+            if not math.isfinite(parallax) or parallax <= 0.0:
+                raise DSOIntegrityError(f"{name} parallax_mas 越界: {parallax}")
+            if dist_source != "openngc_parallax":
+                raise DSOIntegrityError(
+                    f"{name} 有距离却标来源 {dist_source!r}")
+            if abs(1000.0 / parallax - distance) >= 0.11:
+                raise DSOIntegrityError(
+                    f"{name} distance_pc 与 1000/Pax 不一致: "
+                    f"{distance} vs {1000.0 / parallax:.4f}")
     catalog_type = rec.get("catalog_type")
     expected_render = (meta.get("type_mapping") or {}).get(catalog_type)
     if expected_render != rec.get("dso_type") or expected_render not in _RENDER_TYPES:
@@ -314,6 +378,13 @@ def _check_counts(objects: List[dict], meta: dict) -> None:
     without_size = [o["name"] for o in objects if o.get("size_arcmin") is None]
     without_minor = [o["name"] for o in objects
                      if o.get("size_minor_arcmin") is None]
+    without_angle = [o["name"] for o in objects
+                     if o.get("position_angle_deg") is None]
+    without_distance = [o["name"] for o in objects
+                        if o.get("distance_pc") is None]
+    # 位置角是 v2 的可选附加键：旧数据无此字段时不强制其计数/缺失清单。
+    tracks_angle = any("position_angle_deg" in obj for obj in objects)
+    tracks_distance = any("distance_pc" in obj for obj in objects)
     bands: Dict[str, int] = {}
     raw: Dict[str, int] = {}
     render: Dict[str, int] = {}
@@ -345,14 +416,32 @@ def _check_counts(objects: List[dict], meta: dict) -> None:
         "render_type_counts": dict(sorted(render.items())),
         "m102_resolved_to_ngc": 5866,
     }
+    if tracks_angle:
+        expected.update({
+            "with_position_angle": total - len(without_angle),
+            "without_position_angle": len(without_angle),
+            "no_position_angle_designations": without_angle,
+        })
+    if tracks_distance:
+        expected.update({
+            "with_distance": total - len(without_distance),
+            "without_distance": len(without_distance),
+            "no_distance_designations": without_distance,
+        })
     for key, value in expected.items():
         if counts.get(key) != value:
             raise DSOIntegrityError(
                 f"meta.counts.{key} 与数据不一致: {counts.get(key)!r} != {value!r}")
-    for key, names in (
-            ("magnitude", without_mag), ("size_arcmin", without_size),
-            ("size_minor_arcmin", without_minor), ("name_en", without_en),
-            ("zh_name", without_zh)):
+    missing_fields = [
+        ("magnitude", without_mag), ("size_arcmin", without_size),
+        ("size_minor_arcmin", without_minor), ("name_en", without_en),
+        ("zh_name", without_zh),
+    ]
+    if tracks_angle:
+        missing_fields.append(("position_angle_deg", without_angle))
+    if tracks_distance:
+        missing_fields.append(("distance_pc", without_distance))
+    for key, names in missing_fields:
         if missing.get(key, {}).get("count") != len(names):
             raise DSOIntegrityError(f"meta.missing.{key}.count 与数据不一致")
         if missing[key].get("designations") != names:
@@ -396,10 +485,44 @@ def _validate_payload(payload: dict) -> dict:
     return payload
 
 
+def _position_angle_fields(rec: dict) -> Tuple[Optional[float], str]:
+    """位置角（度）：非有限/越界 → None + unknown，不猜。"""
+    raw = rec.get("position_angle_deg")
+    if raw is None:
+        return None, "unknown"
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        return None, "unknown"
+    if not math.isfinite(value) or not (0.0 <= value < 360.0):
+        return None, "unknown"
+    return value, rec.get("position_angle_source") or "unknown"
+
+
+def _distance_fields(rec: dict) -> Tuple[Optional[float], Optional[float],
+                                         Optional[float], str]:
+    """视差（mas）/距离（pc）/误差/来源：非有限或 <=0 一律 None，不猜。"""
+    def positive(key: str) -> Optional[float]:
+        raw = rec.get(key)
+        if raw is None:
+            return None
+        try:
+            value = float(raw)
+        except (TypeError, ValueError):
+            return None
+        return value if math.isfinite(value) and value > 0.0 else None
+
+    return (positive("parallax_mas"), positive("distance_pc"),
+            positive("distance_uncertainty_pc"),
+            rec.get("distance_source") or "unknown")
+
+
 def _entry_from_record(rec: dict) -> DSOEntry:
     cross = tuple((k, v) for k, v in rec["cross_ids"].items() if v is not None)
     magnitude = rec.get("magnitude")
     size = rec.get("size_arcmin")
+    position_angle, position_angle_source = _position_angle_fields(rec)
+    parallax, distance, uncertainty, distance_source = _distance_fields(rec)
     return DSOEntry(
         name=rec["name"],
         dso_type=rec["dso_type"],
@@ -427,6 +550,12 @@ def _entry_from_record(rec: dict) -> DSOEntry:
         size_source=rec.get("size_source") or "none",
         zh_name_source=rec.get("zh_name_source") or "",
         zh_name_ref=rec.get("zh_name_ref") or "",
+        position_angle_deg=position_angle,
+        position_angle_source=position_angle_source,
+        parallax_mas=parallax,
+        distance_pc=distance,
+        distance_uncertainty_pc=uncertainty,
+        distance_source=distance_source,
     )
 
 

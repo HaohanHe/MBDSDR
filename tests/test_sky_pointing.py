@@ -203,15 +203,25 @@ def _visible_named_star():
     """按星等从亮到暗找一个此刻地平高度 > 30° 且有专名的星。"""
     from mbdsdr_ai.celestial_geometry import (
         GroundStation, azalt_from_vec, j2000_to_altaz, vec_from_radec)
+    from mbdsdr_ai.skyengine.proper_motion import (
+        load_pm_table, pm_for_hyg_ids, propagate_radec_many)
     from mbdsdr_ai.skyengine.star_catalog import get_catalog
 
     cat = get_catalog()
     gs = GroundStation(_LON, _LAT, 0.0, "test")
+    pm_table = load_pm_table()
     for i in np.argsort(cat.vmag)[:400]:
         name = str(cat.name[i]).strip()
         if not name:
             continue
-        v = vec_from_radec(float(cat.ra_deg[i]), float(cat.dec_deg[i]))
+        ra = float(cat.ra_deg[i])
+        dec = float(cat.dec_deg[i])
+        if pm_table is not None:
+            pmra, pmdec = pm_for_hyg_ids(
+                np.array([int(cat.hyg_id[i])]), pm_table)
+            ra, dec = propagate_radec_many(
+                ra, dec, float(pmra[0]), float(pmdec[0]), _JD)
+        v = vec_from_radec(ra, dec)
         az, alt = azalt_from_vec(j2000_to_altaz(v, gs, _JD))
         if float(alt) > 30.0:
             return name, float(az), float(alt)

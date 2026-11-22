@@ -76,6 +76,7 @@ logger = logging.getLogger(__name__)
 from mbdsdr_ai.net_utils import parse_host_port  # noqa: E402
 
 from .error_catalog import user_message
+from . import rtlsdr_params
 from .bounded_read import (
     BoundedReader, DEFAULT_READ_TIMEOUT_S,
     REASON_INFLIGHT, REASON_TIMEOUT,
@@ -999,7 +1000,12 @@ class SDRBackend:
         chain = self._ensure_receive_chain()
         if chain is None:
             self._doppler_comp_enabled = bool(enabled)
-            self._doppler_error = "未连接设备，接收链不存在，无法接入多普勒补偿"
+            # 区分「设备没连」与「连着但还没选目标」：后者说成"未连接设备"
+            # 会让用户以为 SDR 掉了（2026-11-22 真机详细栏实证）。
+            self._doppler_error = (
+                "已连接，但接收链未建立（未选择目标），无法接入多普勒补偿"
+                if self.status.connected
+                else "未连接设备，接收链不存在，无法接入多普勒补偿")
             return False
         self._bind_receive_chain_doppler(chain)
         try:
@@ -1043,7 +1049,9 @@ class SDRBackend:
                 "tle_age_days": st.get("tle_age_days"),
                 "application": st.get("application", "baseband"),
                 "python_stream_owner": bool(st.get("python_stream_owner")),
-                "reason": "未连接设备，接收链不存在（无目标，未补偿）",
+                "reason": ("已连接，但接收链未建立（未选择目标，未补偿）"
+                           if self.status.connected
+                           else "未连接设备，接收链不存在（无目标，未补偿）"),
                 "error": self._doppler_error,
                 "blocks": 0, "samples": 0,
             }
@@ -1806,7 +1814,16 @@ class RTLSDRBackend(SDRBackend):
     #: 但本机 2026-11-06 实测：948.500 MHz 写频回读一致，948.600 MHz 起
     #: librtlsdr 报 ``[FC0012] no valid PLL combination found``。宁可按实测
     #: 上界提前拒绝，也不把请求下发给硬件——写频失败会让句柄进入不可恢复态。
-    _MEASURED_TUNER_MAX_HZ = {"FC0012": 948_500_000}
+    #: 唯一来源在 :mod:`mbdsdr_ai.rtlsdr_params`（DeviceManager 栈同用一份）。
+    _MEASURED_TUNER_MAX_HZ = rtlsdr_params.MEASURED_TUNER_MAX_HZ
+
+    # 进程内所有 rtlsdr_open 必须串行。真机实测（2026-11-19）：桌面冷启动时
+    # 枚举（module_panel 构造即跑 / device_panel 400 ms 首枚举 / 2 s 热插拔）
+    # 与自动连接（200 ms 后台线程）会在同一瞬间打开同一台设备；libusb 对
+    # 同一 WinUSB 设备的第二次 open 返回 LIBUSB_ERROR_ACCESS(-3)，与「权限
+    # 不足」同码，用户被误导去装 Zadig。冷启动 5 次里 3 次失败。
+    # 锁只覆盖 open→close（毫秒级~2.4 s），不覆盖读流与调谐，不会拖慢稳态。
+    _RTL_OPEN_LOCK = threading.RLock()
 
     # 调谐器型号是设备的静态属性；每次热插拔轮询都 rtlsdr_open 一次在本机实测
     # 0.2–2.4 s（设备被占用时更长），2 s 一次的轮询会把 GUI 线程吃满。
@@ -1836,19 +1853,45 @@ class RTLSDRBackend(SDRBackend):
             import ctypes
             import rtlsdr as _r
             lib = _r.librtlsdr
-            dev = ctypes.c_void_p()
-            if int(lib.rtlsdr_open(ctypes.byref(dev), int(index))) != 0:
-                RTLSDRBackend._TUNER_PROBE_CACHE[key] = (0, now)
-                return 0
-            try:
-                tcode = int(lib.rtlsdr_get_tuner_type(dev))
-            finally:
-                lib.rtlsdr_close(dev)
+            with RTLSDRBackend._RTL_OPEN_LOCK:
+                dev = ctypes.c_void_p()
+                if int(lib.rtlsdr_open(ctypes.byref(dev), int(index))) != 0:
+                    RTLSDRBackend._TUNER_PROBE_CACHE[key] = (0, now)
+                    return 0
+                try:
+                    tcode = int(lib.rtlsdr_get_tuner_type(dev))
+                finally:
+                    lib.rtlsdr_close(dev)
             RTLSDRBackend._TUNER_PROBE_CACHE[key] = (tcode, now)
             return tcode
         except Exception:
             RTLSDRBackend._TUNER_PROBE_CACHE[key] = (0, now)
             return 0
+
+    @staticmethod
+    def _open_rtlsdr_with_retry(open_fn, attempts: int = 3,
+                                delay_s: float = 0.2):
+        """调用 ``open_fn()``；遇到 ``-3``（ACCESS / 被占用）时短重试。
+
+        区别对待的原因：``LIBUSB_ERROR_ACCESS`` 的语义按平台分裂——Linux 上
+        是权限，Windows 上同一设备被另一句柄持有时也是 -3。跨进程占用（另
+        一份本程序、SDR#、热插拔服务）无法靠进程内锁消除，只能短暂重试。
+        非占用类异常立即抛，不掩盖真正的驱动/权限问题。
+        """
+        last_exc = None
+        for i in range(max(1, int(attempts))):
+            try:
+                return open_fn()
+            except Exception as exc:  # noqa: BLE001 - 只对占用类重试
+                last_exc = exc
+                txt = f"{type(exc).__name__}: {exc}"
+                low = txt.lower()
+                if not ("-3" in txt or "libusb_error_access" in low
+                        or "access denied" in low or "insufficient permissions" in low):
+                    raise
+                if i + 1 < attempts:
+                    time.sleep(delay_s)
+        raise last_exc
 
     # 来源: librtlsdr src/librtlsdr.c:1100-1104 — 合法采样率区间为
     # (225000, 300000] ∪ (900000, 3200000]，300k~900k 是死区（库直接返回 -EINVAL）。
@@ -2098,13 +2141,14 @@ class RTLSDRBackend(SDRBackend):
             # 开设备读真实调谐器型号（FC0012 等）；打不开就如实 Unknown
             tuner = "Unknown"
             try:
-                dev = ctypes.c_void_p()
-                if int(lib.rtlsdr_open(ctypes.byref(dev), int(i))) == 0:
-                    try:
-                        tuner = RTLSDRBackend._TUNER_NAMES.get(
-                            int(lib.rtlsdr_get_tuner_type(dev)), "Unknown")
-                    finally:
-                        lib.rtlsdr_close(dev)
+                with RTLSDRBackend._RTL_OPEN_LOCK:
+                    dev = ctypes.c_void_p()
+                    if int(lib.rtlsdr_open(ctypes.byref(dev), int(i))) == 0:
+                        try:
+                            tuner = RTLSDRBackend._TUNER_NAMES.get(
+                                int(lib.rtlsdr_get_tuner_type(dev)), "Unknown")
+                        finally:
+                            lib.rtlsdr_close(dev)
             except Exception:
                 tuner = "Unknown"
 
@@ -2263,8 +2307,12 @@ class RTLSDRBackend(SDRBackend):
                     # 该设备句柄时，ctypes 再 rtlsdr_open 会失败、tuner 恒 Unknown，
                     # 频率上界协商就失去依据（2026-11-06 实测：先开后探 → Unknown；
                     # 先探后开 → FC0012）。
-                    tcode_hint = self._probe_tuner_type(self._device_index)
-                    self._sdr = RtlSdr(self._device_index)
+                    # 探测与打开必须同锁：否则另一线程的枚举会在两步之间插进来
+                    # 打开设备，第二步拿到 -3（真机冷启动 3/5 失败的直接原因）。
+                    with RTLSDRBackend._RTL_OPEN_LOCK:
+                        tcode_hint = self._probe_tuner_type(self._device_index)
+                        self._sdr = self._open_rtlsdr_with_retry(
+                            lambda: RtlSdr(self._device_index))
             # 调谐器型号：本地 USB 用上面打开前探测到的结果；rtl_tcp 网络模式
             # 用握手包带回的 tuner_type（rtl_tcp.c:623），不再开本地 USB 棒。
             if self._host is not None:
@@ -2725,12 +2773,23 @@ class RTLSDRBackend(SDRBackend):
             # 内部再做隐式四舍五入造成与回读值不一致。
             target = gain_db
             if self._gain_table_db:
-                snapped = min(self._gain_table_db, key=lambda g: abs(g - gain_db))
-                if abs(snapped - gain_db) > 1e-6:
+                table = sorted(self._gain_table_db)
+                if abs(gain_db) < 1e-9 and not any(abs(g) < 1e-9 for g in table):
+                    # 0 dB 在本仓表示「未指定/默认」，不是精确档位。FC0012 的
+                    # 最近档是 -4 dB，2026-11-22 真机实测它在 144.64 MHz 的
+                    # IQ RMS 0.274，而中档 7.1 dB 只有 0.063（噪声底低约 13 dB），
+                    # 会让 APRS 这类弱信号直接淹掉。默认值取中档而非最近档。
+                    target = table[len(table) // 2]
                     logger.info(
-                        f"RTL-SDR 增益 {gain_db:.1f}dB 吸附到最近离散档 {snapped:.1f}dB "
-                        f"(调谐器 {self.tuner_name})")
-                target = snapped
+                        "RTL-SDR 未指定增益（0 dB），默认取中档 %.1f dB"
+                        "（调谐器 %s）", target, self.tuner_name)
+                else:
+                    snapped = min(table, key=lambda g: abs(g - gain_db))
+                    if abs(snapped - gain_db) > 1e-6:
+                        logger.info(
+                            f"RTL-SDR 增益 {gain_db:.1f}dB 吸附到最近离散档 {snapped:.1f}dB "
+                            f"(调谐器 {self.tuner_name})")
+                    target = snapped
             try:
                 self._sdr.set_manual_gain_mode(1)  # 1 = manual tuner gain
             except Exception:
@@ -6223,24 +6282,36 @@ def rtlsdr_native_entry(dev: Dict[str, Any]) -> Dict[str, Any]:
     各话——看着都在判，实际互不拦。
     """
     index = dev.get("index", 0)
+    product = str(dev.get("tuner", "") or "")
+    # 声明区间随真实调谐器收窄：经典 24-1764 MHz 只对 R820T 类成立，
+    # FC0012 实测上界 948.5 MHz，1090 MHz 写频会直接写坏句柄。
+    freq_lo, freq_hi = rtlsdr_params.effective_frequency_range(product)
+    if freq_hi > 0.0:
+        freq_status = "declared"
+        freq_note = f"按调谐器 {product} 实测范围"
+    else:
+        freq_status = "unknown"
+        freq_note = "调谐器型号未识别，未声明频率范围"
     return {
         "driver": "rtlsdr",
         "source": "rtl_native",  # 原生 pyrtlsdr 条目：build_backend 走 RTLSDRBackend
         "label": f"RTL-SDR #{index} ({dev.get('tuner', '?')})",
         "serial": dev.get("serial", ""),
         "manufacturer": "",
-        "product": dev.get("tuner", ""),
+        "product": product,
         "gain_range": (0.0, 49.6),
         # 来源: SoapyRTLSDR/Settings.cpp:489-497 —— RTL-SDR 两段合法采样率
         "sample_rate_range": (225001, 3_200_000),
-        # 来源: SoapyRTLSDR/Settings.cpp:410-427 —— R820T 类默认 24MHz~1.764GHz
-        "freq_range": (24e6, 1764e6),
+        # 来源: SoapyRTLSDR/Settings.cpp:410-427 —— R820T 类默认 24MHz~1.764GHz；
+        # 具体型号按 rtlsdr_params.effective_frequency_range 收窄。
+        "freq_range": (freq_lo, freq_hi),
         "capability_status": {
-            "freq_range": "declared", "sample_rate_range": "declared",
+            "freq_range": freq_status, "sample_rate_range": "declared",
             "gain_range": "declared", "bandwidth_range": "unknown",
             "tx": "unknown", "antenna": "unknown",
         },
         "capability_note": {
+            "freq_range": freq_note,
             "bandwidth_range": "原生枚举未查询带宽",
             "tx": "原生枚举未查询 TX 通道",
             "antenna": "原生枚举未查询天线口",

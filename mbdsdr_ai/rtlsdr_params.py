@@ -34,12 +34,15 @@ TUNER_FC2580 = "FC2580"
 TUNER_R820T = "R820T"
 TUNER_R828D = "R828D"
 
-# rtl-sdr.h:172-180 的枚举序号 → 名称（与 RTLSDRBackend._TUNER_NAMES 对齐）
+# 枚举序号 → 名称（官方 rtl-sdr.h:172-180 顺序；与 RTLSDRBackend._TUNER_NAMES 对齐）
+# 证据：头文件枚举为 UNKNOWN=0, E4000=1, FC0012=2, FC0013=3, FC2580=4,
+# R820T=5, R828D=6；pyrtlsdr 对本机 RTL2832U（SN 77771111153705700）实测
+# get_tuner_type()==2 并打印 "Found Fitipower FC0012 tuner"，2 即 FC0012。
 TUNER_ENUM_TO_NAME: Dict[int, str] = {
     0: "Unknown",
     1: TUNER_E4000,
-    2: TUNER_FC0013,   # 注意：枚举序号 2 是 FC0013
-    3: "FC0025",
+    2: TUNER_FC0012,
+    3: TUNER_FC0013,
     4: TUNER_FC2580,
     5: TUNER_R820T,
     6: TUNER_R828D,
@@ -205,6 +208,23 @@ def get_frequency_range(tuner_type: str) -> Tuple[float, float]:
         return (0.0, 0.0)
     lo, hi = p["freq_range_hz"]
     return (float(lo), float(hi))
+
+
+#: 实测可调上界（Hz）。来源：docs/pending-patches/2026-11-06-limitation-adsb-1090-fc0012.md
+#: 2026-11-06 本机实测 FC0012：948.500 MHz 写频回读一致；948.600 MHz 起
+#: librtlsdr 报 [FC0012] no valid PLL combination found，且失败句柄不可复用。
+MEASURED_TUNER_MAX_HZ: Dict[str, float] = {"FC0012": 948_500_000}
+
+
+def effective_frequency_range(tuner_type: str) -> Tuple[float, float]:
+    """设备声明区间 ∩ 实测上界；未知 tuner 返回 ``(0.0, 0.0)``（= 不声明）。"""
+    lo, hi = get_frequency_range(tuner_type)
+    if hi <= 0.0:
+        return (0.0, 0.0)
+    measured = MEASURED_TUNER_MAX_HZ.get(tuner_type)
+    if measured is not None:
+        hi = min(hi, float(measured))
+    return (lo, hi)
 
 
 def get_supported_sample_rates() -> List[int]:

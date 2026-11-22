@@ -35,6 +35,7 @@ HYG，3 颗映射不到；2,906 颗在随仓 V≤9.0 星表内。
 
 from __future__ import annotations
 
+import math
 import os
 from dataclasses import dataclass
 from functools import lru_cache
@@ -59,6 +60,9 @@ __all__ = [
     "XingguanAnchor",
     "XingguanStarName",
     "XingguanStarNameIndex",
+    "PREFERRED_FOV_FACTOR",
+    "PREFERRED_FOV_MIN",
+    "PREFERRED_FOV_MAX",
     "load_xingguan",
     "get_xingguan",
     "xingguan_regions",
@@ -90,6 +94,25 @@ _REQUIRED_META = (
     "unique_star_hip_count", "mapped_count", "in_catalog_count",
     "unmapped_count", "mapping",
 )
+
+# 推荐视场由星官自身的成员星坐标推导，不写进 JSON（避免第二份事实源）。
+# 1.05 只是把最大角距加一点**取景余量**，属于构图/UI 口径，不是观测事实；
+# 上下限是为了让很小的星官仍能被看到、很大的星官不至于把整个天空拉进来。
+PREFERRED_FOV_FACTOR = 1.05
+PREFERRED_FOV_MIN = 5.0
+PREFERRED_FOV_MAX = 60.0
+
+# UI 推荐排序的**编辑口径**，不是天文数据，也不是观测/文献结论。
+# 数值越小越优先；只收录值得在推荐列表里主动露出的星官。
+# 新增条目必须有明确理由（例如用户常用目标），且不得拿它冒充星等/亮度排名。
+_XINGGUAN_PRIORITY: Dict[str, int] = {
+    "北斗": 1,
+    "参宿": 1,
+    "心宿": 1,
+    "昴宿": 2,
+    "天狼": 2,
+    "织女": 2,
+}
 
 
 @dataclass(frozen=True)
@@ -126,6 +149,53 @@ class Xingguan:
     unresolved_tokens: Tuple[str, ...]
     primary_star_count_source: str
     added_star_count_source: str
+
+    @property
+    def angular_extent_deg(self) -> Optional[float]:
+        """成员星之间最大的球面角距（度）；有效坐标星不足 2 颗返回 ``None``。
+
+        只用**确有 ra/dec 的星**：未映射星不当作 (0, 0) 参与计算，否则会把
+        星官撑到虚假的跨度上。
+        """
+        coords = [
+            (math.radians(s.ra_deg), math.radians(s.dec_deg))
+            for s in self.stars
+            if s.ra_deg is not None and s.dec_deg is not None
+        ]
+        if len(coords) < 2:
+            return None
+        best = 0.0
+        for i, (ra1, dec1) in enumerate(coords):
+            for ra2, dec2 in coords[i + 1:]:
+                cos_sep = (math.sin(dec1) * math.sin(dec2)
+                           + math.cos(dec1) * math.cos(dec2)
+                           * math.cos(ra1 - ra2))
+                sep = math.degrees(math.acos(max(-1.0, min(1.0, cos_sep))))
+                if sep > best:
+                    best = sep
+        return best
+
+    @property
+    def preferred_fov_deg(self) -> Optional[float]:
+        """推荐视场（度）：最大角距 × 取景余量后夹在上下限内。
+
+        1.05 是构图余量，不是观测事实；无坐标可用时返回 ``None``。
+        """
+        extent = self.angular_extent_deg
+        if extent is None:
+            return None
+        fov = round(extent * PREFERRED_FOV_FACTOR, 1)
+        return max(PREFERRED_FOV_MIN, min(PREFERRED_FOV_MAX, fov))
+
+    @property
+    def priority(self) -> Optional[int]:
+        """UI 推荐排序号（编辑口径，非天文数据）；表外为 ``None``。"""
+        return _XINGGUAN_PRIORITY.get(self.name_zh)
+
+    @property
+    def emphasized(self) -> bool:
+        """是否进入推荐视场构图（编辑口径）；表外为 ``False``。"""
+        return self.name_zh in _XINGGUAN_PRIORITY
 
 
 @dataclass(frozen=True)

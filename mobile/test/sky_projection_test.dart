@@ -5,7 +5,7 @@
 /// ----------
 /// 公式正确性由 `tests/test_mobile_sky_algorithms.py` 在 Python 侧
 /// 复现同一套算式并与桌面实现对拍。本文件已在 Flutter 3.50.0 / Dart 3.14.0
-/// 下实际执行：`flutter test test/sky_projection_test.dart` -> 29 passed
+/// 下实际执行：`flutter test test/sky_projection_test.dart` -> 20 passed
 /// （含 84 点投影对拍，最大像素偏差 0.0000）。
 library;
 
@@ -215,6 +215,55 @@ void main() {
       const p = ScreenPoint(405, 200);
       expect(isOnCanvas(p, 400, 400), isFalse);
       expect(isOnCanvas(p, 400, 400, margin: 10), isTrue);
+    });
+  });
+
+  group('投影有效性域与跨域裁剪（Task 10.2）', () {
+    const v = SkyView(
+        centerAzDeg: 0, centerAltDeg: 0, fovDeg: 60, width: 1080, height: 1920);
+
+    test('相机前方可画，背面/地平线不可画', () {
+      expect(isDirectionDrawable(0, 0, v), isTrue);
+      expect(isDirectionDrawable(80, 0, v), isTrue);
+      expect(isDirectionDrawable(90, 0, v), isFalse); // 离轴 90° = 透视地平线
+      expect(isDirectionDrawable(180, 0, v), isFalse);
+    });
+
+    test('一端在相机背后：裁到边界返回 2 点，不再整段丢弃', () {
+      final pts = clipSegmentToSkyDomain(0, 0, 180, 0, v);
+      expect(pts.length, 2);
+      expect(pts[0].x, closeTo(v.centerX, 1e-6));
+      expect(pts[1].x.isFinite, isTrue);
+      // 边界在离轴 90°，落屏远在画布外（由画布裁剪收边）。对跖点的大圆
+      // 不唯一，边界可能落在横向或纵向，任一轴出画即可。
+      final dx = (pts[1].x - v.centerX).abs();
+      final dy = (pts[1].y - v.centerY).abs();
+      expect(math.max(dx, dy), greaterThan(v.minDim));
+    });
+
+    test('两端都不可画 -> 空；两端都可画 -> 原样两点', () {
+      expect(clipSegmentToSkyDomain(100, 0, 180, 0, v), isEmpty);
+      final both = clipSegmentToSkyDomain(0, 0, 10, 0, v);
+      expect(both.length, 2);
+      expect(both[0].x, closeTo(v.centerX, 1e-6));
+    });
+
+    test('drawable 回调可叠额外域（地平余量），边界按回调走', () {
+      // 赤道上 az 单调递增；把域限成 az <= 10°，边界应落在 10°。
+      final pts = clipSegmentToSkyDomain(
+        0,
+        0,
+        30,
+        0,
+        v,
+        drawable: (double az, double alt) => az <= 10.0 + 1e-9,
+        iterations: 40,
+      );
+      expect(pts.length, 2);
+      final boundary = unprojectToAzAlt(pts[1].x, pts[1].y, v);
+      expect(boundary, isNotNull);
+      expect(boundary!.altDeg, closeTo(0.0, 1e-6));
+      expect(boundary.azDeg, closeTo(10.0, 1e-6));
     });
   });
 }

@@ -9292,3 +9292,1708 @@ P1「冷启动看见真实星空」在默认路径仍不成立；首次启动询
 `StoreWriteError` / MCP 结构化失败，而不是 `success=False`；桌面面板仍用通用
 `except Exception` 展示真实原因，未改文案。未改审计判据，未碰真实用户目录的
 书签文件。
+
+## 118. 一次观测 = 一条时间轴：中途事件进档案，也进 SigMF（2026-11-20 第八十六刀）
+
+**做了什么**：`ObservationRecord.timeline` 从「只有起止两条」扩到「录制期间的
+真实事件」。`controller.note_observation_event(kind, detail)` 是唯一入口，只在
+录制中生效；事件来源三处：setter 成功且值真的变了（`tune` / `gain` /
+`sample_rate`，带 from/to）、录制 pump 连续空读后恢复（`read_gap`，带持续
+时长/次数/后端 `read_last_reason`）、流式解码批量命中（`decode_hit`）。
+`IQRecorder.set_annotations()` 把同一批事件映射成 SigMF `annotations`
+（`core:sample_start` / `core:label` / `core:comment` + `mbdsdr:utc/kind`）。
+
+**两条真机教训**（都不是测试能先发现的）：
+
+1. **未命中被记成命中**。首版把 `start_decoder` 每块返回的 dict 都当命中，
+   录 12 s 写出 246 条 `decode_hit`，每条 `rds_present=false, reason=too_short`。
+   修法：`_decode_message_is_hit()` 排除解码器自报的未命中；同一解码器 1 s
+   内聚合成一条（`count` 累加），`stop_recording` 前 flush，`start_recording`
+   清空录制前的聚合——否则档案第一条命中会多算。
+2. **墙上时钟换算的样本偏移不可信**。录制同时起流式解码时，两个线程共用
+   同一条设备读流，12 s 只写进 3.5 s 样本（8,421,376 / 2.4 MS/s），
+   `utc × 采样率` 算出的偏移全部撞到文件末尾。修法：事件落点直接记
+   `rec.n_samples`，annotations 优先用它；并把被解码分流的样本数写进档案
+   `result.decoder_shared_samples` + `notes`，不让「样本变少」被误读成丢包。
+
+**证据（实跑）**：
+
+- `python -m pytest tests/test_observation_timeline.py -q` → `14 passed`
+- 11 文件定向回归 → `122 passed`
+- 真机（RTL-SDR FC0012 + GNSS 17 星）：档案 timeline
+  = `record_start / tune / gain / tune / record_stop`，`samples`
+  单调且首尾对齐文件；SigMF annotations 4 条，`core:comment` 带 from/to
+
+**诚实边界**：命中 1 s 一条上限、事件 2000 条上限（超出只记一条
+`timeline_truncated`）；`read_gap` 不区分设备丢包与总线超时，原因原样带
+后端结构；中途 `tune` 不改写 SigMF `global.core:frequency`（那是录制起点）。
+
+## 119. 越界调谐会把设备写坏：两条栈补同一道预检（2026-11-20 第八十七刀）
+
+**发现方式**：真机探针按「ADS-B 该在 1090 MHz」起录，`set_frequency(1090e6)`
+→ `LIBUSB_ERROR_IO "Could not set center_freq to 1090000000 Hz"`；紧接着
+`set_gain(30)` 与 `read_samples()` 全部抛原生层
+`exception: access violation reading 0x0000000000000008`，`OpenDevice` 置
+`_closed`，整段会话报废。
+
+**根因**：`docs/pending-patches/2026-11-06-limitation-adsb-1090-fc0012.md`
+记过同一件事，当时只在 `sdr_backend.RTLSDRBackend` 栈加了「越界不下发 +
+故障态保护」。`DeviceManager → OpenDevice` 这条栈（controller / CLI / MCP）
+没有，且 `rtlsdr_native_entry` 把 `freq_range` 写死成 R820T 的 24–1764 MHz，
+对 FC0012 是假值——启动校验放行 1090，请求直接打到驱动。
+
+**修复**：`rtlsdr_params` 修正 `TUNER_ENUM_TO_NAME`（2=FC0012、3=FC0013；
+实测 pyrtlsdr `get_tuner_type()==2` 打印 `Found Fitipower FC0012 tuner`），
+新增 `MEASURED_TUNER_MAX_HZ={"FC0012": 948_500_000}` 与
+`effective_frequency_range()`；`OpenDevice.set_frequency` 越界直接抛
+`FrequencyOutOfRangeError`、不触达硬件；三个 setter 任一生异常即置
+`_closed + _close_reason`，后续调用提示重连，不再把命令发给可能已损坏的句柄；
+controller 用 `_last_setter_error` 把原始原因带给 CLI/MCP。
+
+**证据（实跑）**：
+
+- `python -m pytest tests/test_tuner_range_guard.py tests/test_sdr_tuner_limit.py
+  tests/test_hal_device_identity.py tests/test_device_identity_unified.py
+  tests/test_device_capability_probe.py tests/test_device_capabilities_switch_policy.py
+  tests/test_dual_stack_boundary.py tests/test_backend_connect_init.py
+  tests/test_rtl_open_serialization.py tests/rtlsdr_params_test.py -q` → `82 passed`
+- 真机对照：`set_frequency(1090e6)` → False，原因「超出调谐器 FC0012 的实际
+  可调范围 22.000-948.500 MHz」；随后仍读到 16384 样本，100.1 MHz / 增益 30
+  均成功——设备没再被写坏
+
+**诚实边界**：预检只覆盖 RTL-SDR 原生与 rtl_tcp 两条路径（静态表 + 本机实测
+上界）；Soapy/HackRF/Pluto 仍依赖驱动返回值。「失败即关闭句柄」是有意保守：
+宁可让用户重连一次，也不再向可能已损坏的句柄发命令。
+
+## 120. 档案能「重演」到什么程度：回放计划 + 只读 CLI（2026-11-20 第八十八刀）
+
+**做了什么**：`observation_record.replay_plan(record)` 把 `timeline` 展开成
+可执行步骤——每一步给 `at_s` / `sample` / `kind` / `state`
+（中心频率/增益/采样率从 `record.tuning` 起按 `tune`/`gain`/`sample_rate`
+演进）。新增 `scripts/replay_observation.py`：`--list` 打表、`--at` 取该时刻
+生效状态、`--read` 用 `IQPlayback` seek 后读一段并报 `rms_dbfs/peak_dbfs`、
+`--json` 输出结构化结果。不播音频、不碰设备。
+
+**真机证据**：新档案（含 Task 167 的 `samples` 锚点）`--list` 5 步
+（0 / 6,283,264 / 6,299,648 / 7,905,280 / 8,429,568），
+`duration=3.512320s`；`--at 2.62 --read 0.1` 命中 `tune` 步骤
+（`freq=98.000MHz`），读到 240,000 样本。
+
+**反向证据**：对 Task 167 之前生成的旧档案（事件无样本索引），墙钟换算
+（16.1 s × 2.4 MS/s）超出实际录制长度（3.5 s），CLI 如实报
+「时间轴事件超出录制长度」并以 2 退出——不强行播放。
+
+**辨别力**：`tests/test_replay_plan.py` 8 条（排序/状态演进、墙钟换算、
+跳过无索引事件、越界、缺采样率、空时间轴、`--list`、`--read` 与直接计算的
+dBFS 对拍）。`python -m pytest tests/test_replay_plan.py
+tests/test_observation_replay.py tests/test_observation_record.py
+tests/test_playback.py -q` → `35 passed`。
+
+**诚实边界**：这是「回放计划 + 只读检查」，不是播放器；不驱动 UI/声卡/硬件，
+也不重设设备参数。dBFS 以文件样本为准，不换算成天线口功率。
+
+## 121. 桌面能打开观测档案了：按档案切频率回放（2026-11-20 第八十九刀）
+
+**做了什么**：回放按钮的文件对话框多了 `观测档案 (*.observation.json)`；
+选中档案先 `load_record` → `replay_plan`，有 blockers 就逐条弹窗、不起播；
+能回放则挂上计划，只把 `data_paths[0]` 交给原有 `baseband_io.load_iq` 加载。
+回放每 50 ms 取一次「`at_s <= t` 的最后一步」，按 `state.center_freq_hz`
+切频谱中心频率，状态栏追加 `· kind @ t`。采样率**不动**——块长、时轴、
+解调滤波器都按文件速率标定，中途换速率会让回放抖动且与已播样本对不上。
+
+**关键防线**：档案是 JSON，不是 IQ。若不拦截扩展名，`load_iq` 会把 JSON
+字节当基带样本读，得到「有波形、没内容」的假回放——这条在代码里显式写了
+注释与分支，并有测试钉住「只把 `.sigmf-data` 交给加载器」。
+
+**辨别力**：`tests/test_replay_archive_ui.py` 4 条（合法档案/缺数据文件
+warning 含「不存在」且不起播/3 步计划按 0.5·1.5·2.5 s 推进且重复调用不
+改状态/`_stop_replay` 清计划）。合并回归
+`python -m pytest tests/test_replay_archive_ui.py tests/test_replay_timeline.py
+tests/test_record_replay_config.py tests/test_replay_plan.py
+tests/test_ui_flow_guards.py tests/test_ui_hard_defects.py -q`
+→ `57 passed, 1 skipped`。
+
+**诚实边界**：多产物只放第一个；`sample_rate` 变更只记录不执行（不做重采样）；
+仍受 `REPLAY_MAX_SAMPLES` 截断，截断照旧弹窗说明；桌面回放仍不会把
+「档案里的解码命中」标在频谱上，只体现在状态栏的步骤名。
+
+## 122. AR 指向台账校准 + 解算闭环落地（2026-11-21 第九十刀）
+
+**做了什么**：按 `sky-ar-pointing-lifecycle/tasks.md` 逐条对照代码与测试，
+把过期的 `[ ]` 改成有证据的 `[x]`，并把缺口写清楚。已完成项：Task 3.1、
+4.1/4.3、5.1/5.2、6（全部）、7.2、8（全部）、9（全部）、12.1、13（全部）、
+14.1/14.3、16（全部）、19.1/19.2。部分项都注明了差什么：3.2 replace/能力
+查询、3.3 `clock_skew`、3.4 按 provider 配 `max_age_s`、4.2 写后读回、
+5.3 校准写入档案与「已校准（日期）」、7.1 2.3° 绘制数量断言、11 行星/卫星
+与口语文本、12.2 极端纬度与跨 0°、14.2 identify 生产入口、15 四个只读工具
+与确认门、17 端到端、19.3 发布门；18 手动脚本仍 `not_verified`（缺 IMU/相机/头显设备才能验）。
+
+**解算闭环（Task 10）**：`sky_pointing_pipeline.py` 新增 `PoseUpdate` 与
+`apply_solve()`——只有解算成功且残差 ≤ `RESIDUAL_TOLERANCE_DEG` 才采用
+解算地平坐标（az 归一、alt 夹取、roll 缺失继承上一级）；解算失败、残差缺失、
+超阈值、缺地平坐标一律逐字段保留上一级位姿，`applied=False`，不把旧结果
+当新结果。级别判定收敛到 `sky_health.classify_level(..., within_tolerance)`：
+显式 `False` 时即使解算成功也不进 L3，双源退 L2、单源退 L1；`None` 保持旧
+行为以兼容既有调用。`health_snapshot` 增加同名关键字参数透传。
+
+**辨别力**：新增 `tests/test_sky_pointing_apply_solve.py` 21 条（成功环绕/
+夹取/继承、超阈值双源 L2、单源 L1、残差缺失、失败透传、无上一级位姿 L0、
+`PoseUpdate` 入参、健康快照三种残差口径、manual L4）。核心 7 文件 72 passed；
+扩展 11 文件 **189 passed**；AR 相关 13 文件 166 passed 作为台账校准基线。
+
+**诚实边界**：没有真实星空、没有真机；tetra3/ASTAP 仍是适配层替身验证，
+未安装真实库；Task 10 的「新位姿」只在这条纯函数链里成立，桌面/头显尚未
+接入生产调用方。
+
+## 123. Provider 契约收口 + 校准写后读回（2026-11-21 第九十一刀）
+
+**做了什么**：把 Task 3/4 的剩余缺口补齐。`sky_providers.py`：
+`register(capabilities=..., max_age_s=...)`、`replace()`（未注册 KeyError）、
+`names(capability=...)`、`capabilities(name)`；读数 `source` 必须是非空字符串
+且与注册名一致，否则进 errors；`read_all(now_utc)` 对未来 `t_utc` 保留原值
+只加 `warnings[name].code="clock_skew"`（仅非空时出现该键）；按 provider 的
+`max_age_s` 把过期读数移入 `errors[name].type="StaleReading"`。
+`sky_calibration.py`：`save_profile` 在 `os.replace` 前对 tmp 调
+`load_profile` 并比对 9 个 schema 字段，失败返回 `verify_failed` 且目标文件
+不动；新增 `calibrate_and_save()`（校准→保存一步，失败不写文件）。
+
+**辨别力**：`tests/test_sky_providers.py` 11 → 22 条；校准新增 6 条；
+合并回归 `tests/test_sky_providers.py tests/test_sky_calibration.py
+tests/test_sky_calibration_apply.py tests/test_sky_calibration_migration.py
+tests/test_sky_pointing.py tests/test_sky_health.py
+tests/test_sky_pointing_pipeline.py tests/test_sky_pointing_apply_solve.py
+tests/test_sky_pointing_e2e.py -q` → **155 passed**。
+
+**诚实边界**：没有真实 provider 设备；`warnings` 只在非空时出现是为兼容
+既有「空注册表结果严格相等」断言；校准档案的「已校准（日期）」界面仍未接线，
+Task 5.3 只完成程序化写入。
+
+## 124. AR 识别边界测试（Task 12.2，2026-11-21 第九十二刀）
+
+**做了什么**：新增 `tests/test_sky_identify_edges.py` 9 条（参数化后 12 例），
+钉住 `identify_direction` 的边界：方位跨 0°（用星表真实亮星 Errai 反查，
+fov=2° 命中，证明不是线性截断）、`az=0` 与 `az=360` 等价、±89.9° 极纬结构
+完整、地平线下/NaN/Inf 给人话原因且不含 nan/inf 字样、0.5°/180° FOV、
+`limit=1` 截断、命中星不伪造 `HIP -1`。
+
+**辨别力**：`python -m pytest tests/test_sky_identify_edges.py
+tests/test_sky_pointing.py -q` → **28 passed**（0 失败 0 skip）。
+
+**诚实边界**：固定 jd/lat/lon 的确定性用例；跨 0° 用例依赖随仓 HYG 在该
+时刻确有一颗 az 355°–5° 的亮星，找不到时明确 skip，不伪造。
+
+## 125. 错误码目录收口 + ab26 全量回归（2026-11-21 第九十三刀）
+
+**守卫抓到的问题**：ab26 group1 第一次跑时
+`tests/test_error_catalog_guard.py::test_no_wild_codes` 红——
+`sky_calibration.save_profile` 的 `verify_failed` 与
+`sky_providers.read_all` 的 `clock_skew` 是未登记的野码。按「不许塞白名单」
+的纪律，把 `verify_failed / clock_skew / no_pose / residual_missing` 四个码
+登记进 `mbdsdr_ai/error_catalog.py` 与 `docs/error-catalog.md`（module 与
+文档镜像逐码一致），再跑守卫 **7 passed**。
+
+**回归**：ab26 group0 **4810 passed / 0 failed / 0 fatal**（17:22）；
+group1 重跑 **5234 passed / 0 failed / 0 fatal**（27:27）；两组合计
+**10044 passed**。静态闸门 8 文件 **90 passed**；AR 指向相关 20 文件
+**315 passed**。日志扫描无 `0xc0000005` / `0xc0000374` / `Fatal Python error`。
+
+**诚实边界**：新增测试文件后分组会重排，单组数字不与 ab25 比；只看两组之和。
+本轮没有真实星空/真机，tetra3/ASTAP 仍是替身路径。
+
+## 126. AR 只读工具上架（Task 15.1，2026-11-21 第九十四刀）
+
+**做了什么**：在 `sky_tools.register_sky_tools` 里注册四个只读工具，全部
+`write=False`、`category="sky"`：
+`sky_pose_fuse`（多源位姿融合 + 逐条丢弃原因）、`sky_identify_at`（指向即
+识别，默认取当前站址/时刻，也可显式给 jd/lat/lon）、`sky_solve_status`
+（tetra3/ASTAP 可用性如实探测）、`sky_health`（L0–L4、来源年龄、相机无帧、
+`solve_within_tolerance` 透传）。非法输入统一返回 `ToolResult(False, "<code>（原因）")`，
+不抛异常、不猜朝向；输出不含「已对准」。
+
+**工具面同步**：`tool_surface_map.REGISTRY_ONLY_WHITELIST` 显式登记四个
+registry 独有工具（这是机制要求的台账，不是审计豁免）；能力目录从 registry
+动态取，无需静态表；`_TOOL_DOMAIN` 是 MCP 静态面（83 项），与 registry
+（519 项）分离，按现有守卫不需要补。`scripts/tool_availability_audit.py`
+为四个工具补合法合成输入，`docs/tool-availability.md` 重写：总数 519、
+一类 412 / 二类 107，四个新工具均在「一类·真跑」。
+
+**辨别力**：`tests/test_sky_tools_register.py` 9 条；合并
+`test_sky_tools_register / test_tool_surface_audit /
+test_tool_availability_ledger / test_ai_tool_consistency / test_sky_tools`
+→ **73 passed**；`tool_surface_audit.py` → registry=519 / 能力目录=519 /
+文档=519 / MCP=83，「结论：一致」。
+
+**诚实边界**：只做了只读工具；写工具 `sky_calibration_save` 与确认门仍未做
+（Task 15.2）。没有真机/真实解算库，`sky_solve_status` 的不可用分支是
+monkeypatch 钉住的。
+
+**全量回归（ab27）**：group0 **4676 passed / 0 failed**（15:26）；
+group1 **5368 passed / 9 failed**（31:15）。group1 的 9 条全是
+`test_ui_layout_locks`（8）与 `test_spectrum_slider_overflow`（1），症状是
+面板高度一致偏小 3–13 px、频谱工具栏 94px vs 期望 ~120px；单跑两个文件
+**78 passed**、加本轮新工具测试 **135 passed**、加 `test_sky_body_context`
+**88 passed**、group1 末 33 文件 + 它们 **460 passed**——**顺序依赖，
+非本轮产品改动**。新文件只改变 `ci_pytest_groups` 奇偶分桶，使布局测试从
+group0 挪到 group1。**根因未定位：不销账、不加 xfail、不改基线**，
+下次全量前按 group1 前缀二分继续查。
+
+**同轮另修**：ab27 第一次 group0 红 3 条（`test_error_remedy_links` /
+`test_connect_error_ordering`），原因是新登记的四个码没有帮助入口映射；
+已在 `desktop/error_remedy.py` 的「AI/MCP 工具层细项」登记为不设入口，
+相关三文件 **27 passed**，group0 重跑 0 失败。
+
+## 127. AR 口语文本模块（Task 11.3 的代码层，2026-11-21 第九十五刀）
+
+**做了什么**：新增 `mbdsdr_ai/sky_narration.py`（纯逻辑、无 Qt）：
+`direction_word`（八方向 22.5° 扇区）、`altitude_phrase`（五档）、
+`narrate_pose`（未对准 / L4 手动接管 / 方向+高度+附近目标）、
+`narrate_targets`（空表如实说「附近没有星表里的亮星」）。目标按 `vmag`
+从亮到暗、同名去重、最多 3 个；缺 `name` 跳过，缺 `vmag` 只省略亮度词。
+输出不出现 `az/alt/vmag/GMST/FOV` 等英文术语。
+
+**辨别力**：`tests/test_sky_narration.py` 12 个函数 / 47 个参数化用例，
+覆盖扇区与高度边界、非法位姿、L4、目标排序去重上限、空表与全分支术语扫描；
+实跑 **47 passed**。
+
+**诚实边界**：只是代码层与测试，**默认界面尚未调用它**（Task 14.2 的接线
+未做），因此 tasks/checklist 对应条仍不勾；英文星名（如 Altair）作为数据
+原样保留，不当作界面术语。
+
+## 128. AR 手动核对脚本（Task 18.1，2026-11-21 第九十六刀）
+
+**做了什么**：新增 `scripts/sky_pointing_check.py`（只读 CLI）：
+`--input report.json [--now-utc] [--json]`。报告最小字段为
+`observations / site / at_utc`，可选 `camera / commanded / stars`。输出：
+① `health_snapshot` 的级别 L0–L4 与人话原因；② 用融合位姿调
+`identify_direction` 的目标；③ 齐全时调 `solve_and_verify` + `apply_solve`
+并打印残差与 `applied`，缺输入则明说「跳过残差」。退出码 0 正常 / 2 输入
+非法 / 3 `solver_unavailable` / 1 内部错误。不补默认站址/时刻，不伪造残差，
+不写「已对准」。
+
+**辨别力**：`tests/test_sky_pointing_check_script.py` 6 条（help、合法
+fixture 的级别与跳过残差、缺 site、缺 observations、解算不可用分支按
+`solver_status()` 动态判定、输出无「已对准」）→ **6 passed**；`--help`
+实测正常。
+
+**诚实边界**：本机未装 tetra3/ASTAP，只实测 `solver_unavailable` 分支；
+真实解算残差与真实夜空未验证。
+
+## 129. 行星/月球目标识别（Task 11.1 的一半，2026-11-21 第九十七刀）
+
+**做了什么**：新增 `mbdsdr_ai/sky_bodies.py::identify_bodies(...)`——给定
+地平指向、视场、jd 与站址，复用 `astronomy.planets.compute_all` 与
+`celestial_geometry` 算出 8 行星+月球的地平坐标，只保留地平以上且与指向
+角距 ≤ fov/2 的目标，按星等从亮到暗排序取 limit；每项含 `name_zh`、
+`kind`（planet/moon）、RA/Dec、az/alt、星等、角径、距离与角距。输入非法或
+无目标时 `matched=False` + 人话原因，不拿最近邻凑数。纯函数、无 Qt。
+
+**辨别力**：`tests/test_sky_bodies.py` 12 条（木星/金星/月球命中、反方向
+无目标、地平以下排除、非法输入、fov=180 排序与截断、字段齐全、中英名映射）；
+`tests/test_sky_bodies.py tests/test_sky_pointing.py` → **27 passed**。
+
+**诚实边界**：只做行星与月球，**卫星目标未接入**（Task 11.1 不勾）；
+未与真实相机/IMU 指向联动。
+
+## 130. 桌面指向模式接上准星识别（Task 11.2 / 14.2，2026-11-21 第九十八刀）
+
+**做了什么**：新增 `mbdsdr_ai/sky_targets.py::merge_targets()`——把恒星与
+行星/月球识别结果合一份：去重键 `(kind|"star", name)`，同键保留更亮/更近；
+排序有星等→升序、缺星等最后、同星等按角距；不改入参、不补默认值。
+`desktop/rf_sky_view.py` 新增 `_identify_at_crosshair()`：用视图中心
+（准星）调 `identify_direction` + `identify_bodies`，再 `merge_targets`；
+无站址/取不到时间/异常都返回空并记 `_sky_identify_error`，不猜、不抛；
+缓存键为（整秒, 站址, 0.2° 方位, 0.2° 俯仰, 0.1° 视场），只留最近一帧。
+`update_sky_pose` 仅在 `targets is None` 时自动识别，显式喂 targets 的路径
+行为完全不变；手动接管 L4 也按准星识别。未改 `desktop/main_window.py`。
+
+**辨别力**：`tests/test_sky_targets.py` 7 个函数/12 条；
+`tests/test_rf_sky_pointing_mode.py` 新增 4 条（关闭不识别、开启命中已知
+亮星、无站址空态、显式 targets 不被覆盖）；指定 5 文件合并 **59 passed**。
+
+**诚实边界**：没有真实相机/IMU/实时位姿链路，离屏测试用固定站址与固定
+历元；缓存只保留最近一帧，站址已进键，但跨进程/跨设备未验证。
+
+## 131. 定位并修掉 9 条顺序依赖红：进程字体库被测试污染（2026-11-21 第九十九刀）
+
+**现象**：ab27 group1 有 9 条红（`test_ui_layout_locks` 8 +
+`test_spectrum_slider_overflow` 1），单跑全绿；另有
+`test_sky_label_collision::test_southern_galactic_field_labels_never_overlap`
+在 9 文件批次里红（`assert 24 > 24`）。
+
+**根因（二分实跑）**：`tests/test_sky_target_ui.py` 的 fixture 在 setup 里
+`QFontDatabase.addApplicationFont("msyh.ttc"/"segoeui.ttf")`，teardown 从不
+撤销。字体库是**进程级**的，后序文件继续用被污染的 CJK 度量：面板高度一致
+偏小 3–13 px、频谱工具栏最小宽 126→94、标签碰撞结果变化。定位过程：
+① 9 文件批次红 → ② 前 4 个仍红 → ③ `body_context + target_ui` 红 →
+④ `body_context + 标签用例` 绿、`target_ui + 标签用例` 红，锁定 target_ui。
+
+**修复**：该 fixture 不再改进程字体库（本文件只断言文本/交互，CJK 交给系统
+字体引擎），只保留对自身 widget 的 `setFont`；**断言一字未改**。
+
+**验证**：`target_ui + spectrum_slider + label_collision` → **35 passed**；
+9 文件批次 → **183 passed**；再加 `ui_layout_locks` 的 11 文件批次 →
+**261 passed / 4 skipped**；**ab28 全量两组 4771 + 5362 = 10133 passed /
+0 failed / 0 fatal**。未加 xfail、未改基线、未改产品代码。
+
+## 132. 卫星目标识别 + 桌面三路合并（Task 11.1 收口，2026-11-21 第一百刀）
+
+**做了什么**：新增 `mbdsdr_ai/sky_satellites.py::identify_satellites()`——
+复用 `orbit.visible_satellites`（真 SGP4 + 现有 TLE 缓存），只保留
+`elevation>0` 且与指向角距 ≤ fov/2 的卫星，按角距升序取 limit；每项含
+`name/kind="satellite"/az_deg/alt_deg/angular_distance_deg/range_km/
+range_rate_kms/altitude_km/sunlit`。站址高度对外是**米**，内部 `/1000`
+换成公里传给 orbit；位置计算异常转成「卫星位置计算失败：…」，不吞成
+「没有卫星」。`desktop/rf_sky_view._identify_at_crosshair()` 用
+`_engine_unix()` 作时刻，把恒星、行星/月球、卫星三路交给 `merge_targets`；
+卫星调用独立 try/except，失败只丢卫星一路，不影响其余目标。
+
+**辨别力**：`tests/test_sky_satellites.py` 8 条（命中/视场外/排序截断/
+米→公里换算/elevation≤0 排除/非法输入/异常原因/空表）；
+`test_rf_sky_pointing_mode.py` 新增 1 条（注入假卫星 → `_sky_targets`
+含 `kind=="satellite"`）；5 文件合并 **57 passed**。
+
+**诚实边界**：测试全部用注入的 `visible_fn`，**未跑真实 TLE/sgp4 端到端**，
+也未在 HUD 上目视卫星标签；真实 TLE 缓存缺失时该路返回空，不联网抓取。
+
+**全量回归（ab29）**：group0 **4981 passed / 0 failed / 0 fatal**（18:28）；
+group1 **5161 passed / 0 failed / 0 fatal**（29:15）；合计 **10142 passed**。
+静态闸门 75 passed；日志无 `0xc0000005` / `0xc0000374` / `Fatal Python error`。
+
+## 133. 口语文本接进 HUD（Task 11.3 收口，2026-11-21 第一百零一刀）
+
+**做了什么**：`sky_hud.build_hud` 新增 `narrative` 键——延迟调用
+`sky_narration.narrate_pose(pose, targets, level=level_eff)`，失败降级空串，
+旧键/旧值一字不改。`desktop/rf_sky_view` 在 hint 提示框上方绘制一行
+narrative（小一号、正常字重、同样的半透明圆角底）；narrative 为空、与
+hint 相同或越界时不画。默认指向 HUD 现在显示「你正看向西南，离地平线
+不太高。附近能看到：…」这类人话，不出现 az/alt/vmag/GMST/FOV 术语。
+
+**辨别力**：`test_sky_hud.py` 新增 3 条（正常/L0/L4 的 narrative 与术语扫描，
+同时断言 `hint` 仍是旧值）；`test_rf_sky_pointing_mode.py` 新增 2 条；
+4 文件合并 **81 passed**；HUD 其他消费方（gnss_antenna_status /
+sdr_ring_stall / sky_calibration_apply）**32 passed**。
+
+**诚实边界**：离屏只验证文案与不崩溃，**实际屏幕排版/行间重叠未目视**；
+英文星名（如 Altair）作为数据保留，不当作界面术语。
+
+## 134. 桌面加载校准档案 + 「已校准（日期）」（Task 5.3 收口，2026-11-21 第一百零二刀）
+
+**做了什么**：`desktop/rf_sky_view.py` 新增 `default_sky_calibration_path()`
+（与 `settings.default_config_path()` 同目录的 `sky_calibration.json`，
+`MBDSDR_SKY_CALIBRATION_PATH` 可整条覆盖，仍走 `MBDSDR_SETTINGS_DIR` 隔离）、
+`calibration_note(profile)`（取 `verified_utc`，缺失再取 `created_utc`，
+都不合法只说「已校准」，不拿今天冒充）、`load_sky_calibration(path=None)`
+（**构造期不读盘**，显式调用；失败记 `sky_calibration_error` 且按未校准
+处理，不覆盖原文件）与只读 `sky_calibration_note`。`update_sky_pose` 的
+`calibration=None` 时改用已加载档案（显式传参优先）；HUD 在 narrative 上方
+画一行小字「已校准（YYYY-MM-DD）」，复用 hint 的底色，不新增直接读
+`COLORS` 的点位。
+
+**辨别力**：`test_rf_sky_pointing_mode.py` 新增 6 条——日期文案只含日期、
+默认路径与 env 覆盖、缺失/损坏降级且不采用半套偏置、档案偏置真生效
+（az+1/alt+0.5/roll+20/fov 2.3）、显式 `calibration=` 优先、HUD 文案不含
+`boresight/roll_zero/偏置` 也无独立偏置键。独立复跑 `test_rf_sky_pointing_mode
++ test_sky_calibration_apply + test_sky_hud + test_ui_contrast +
+test_sky_pointing_binding` → **142 passed**。
+
+**诚实边界**：离屏验证文案与位姿数值，**未在真实设备上目视 HUD 那一行**；
+校准求解仍用合成观测，真实两星/地标校准未验证。
+
+## 135. 2.3° 绘制数量断言（Task 7.1 收口，2026-11-21 第一百零三刀）
+
+**做了什么**：只补断言，**不改产品代码**。`test_2_3_deg_draws_only_targets_inside_cone`
+在离屏 `RFSkyView` 上开指向模式、`fov_deg=2.3`，喂 4 个目标（2 个约 0.5°、
+2 个约 5°），断言 `targets_total=4`、`targets_visible=2`、`labels` 只有
+锥内两条（L3 精确标签不抽稀丢目标）。锥外目标在透视投影下越界，由
+`build_hud` 既有可见性过滤排除——不是放宽断言，而是先实测确认行为正确。
+
+**辨别力**：新增 1 条 + 既有 `test_label_threshold_shrinks_when_zooming_out`
+保持绿；与 5.3 合并跑 **142 passed**。
+
+**诚实边界**：断言的是 HUD 绘制指令数量，**未做像素级截图比对**。
+
+## 136. 校准落盘写工具走确认门（Task 15.2 收口，2026-11-21 第百零四刀）
+
+**做了什么**：`sky_tools.py` 新增 `sky_calibration_save`（`write=True`、
+`category="sky"`，参数 observations/device_id/fov_deg/path/source/
+max_residual_deg），handler 调 `sky_calibration.calibrate_and_save`，失败
+翻译成 `ok=False/error/reason/next_step`，成功只回路径/最大残差/档案摘要
+（device_id/fov/时间/source），**不暴露 boresight/roll**。`tool_registry.WRITE_TOOL_GRADES`
+登记为 `confirm`（未登记写工具默认 `hard_gate`，fail-closed）；模型通道
+`call_from_model` 经 `tx_guard.resolve_write_authorization` 判定，无一次性
+token 直接返回 `manual_gate_required` 且 handler 不执行。`REGISTRY_ONLY_WHITELIST`
+登记；`docs/tool-availability.md` 总数 519→**520**（一类 413 / 二类 107）；
+`scripts/tool_availability_audit.py` 补合成两星观测 + tmpdir 路径；
+`tests/test_write_tool_grading.py` 写工具计数 99→100。
+
+**辨别力**：`tests/test_sky_calibration_save_tool.py` 5 条——注册且分级
+`confirm`；**无 token 被拦且目标文件不存在**；`tx_guard.issue_confirmation`
+签发 token 后真写并 `load_profile` 读回；残差约 12.65° 拒绝且无文件；
+非法观测/空路径结构化失败无异常。独立复跑 9 文件 → **59 passed**；
+`python scripts/tool_surface_audit.py` → registry=520 / 能力目录=520 /
+文档=520 / MCP=83「一致」。
+
+**诚实边界**：门由框架统一实现，本工具未新增任何自签路径；真实用户
+配置目录未被测试触碰（全部 tmpdir）。`sdr_bookmark_add` 在后台全量测试
+并发时曾因 `bookmarks.json` 被置只读误判二类，已按干净环境恢复为一类。
+
+## 137. 天空指向发布门（Task 19.3 收口，2026-11-21 第一百零五刀）
+
+**做了什么**：`scripts/release_gate.py` 新增「天空指向发布门」
+（`check_sky_ar_pointing`），三条判据：**离线**（`network_allowed()` 为真
+时如实 `not_verified`；否则给 `socket.socket.connect`/`urlopen` 打计数补丁
+跑 `health_snapshot` + `build_hud`，调用数必须 0，`finally` 还原）；
+**诚实空态**（零观测必须 L0 且 reason 说明缺观测，`labels=[]`、
+`targets_visible=0`，L0 文本不得出现「已对准/已锁定/已融合」）；
+**无术语**（`HUD_HINTS` 全量 + L0/L1 narrative 共 7 条，ASCII 词边界扫
+az/alt/vmag/GMST/FOV/JD/ICRS/J2000 与中文「方位角/地平高度/视场/儒略日」）。
+新增 `tests/test_sky_ar_release_gate.py` 4 条（通过 + 两个负向证明扫描非
+空转 + 检查项确在 `build_checks`），并入 `KEY_TESTS`。
+
+**实测**：`python scripts/release_gate.py` → 通过 3 / 失败 0 / 未验证 1
+（关键测试需 `--with-tests`）；`--json` 里天空指向门 `passed`；
+`--with-tests` → 通过 4 / 失败 0 / 未验证 0，关键测试 **30 passed**；
+`pytest tests/test_sky_ar_release_gate.py tests/test_release_gate.py -q`
+→ **12 passed**。
+
+**诚实边界**：门只证明「软件默认路径不联网、空态诚实、默认文案无术语」；
+真实设备上「打开 → 指 → 认出」仍未验证（硬件项保持 `not_verified`，缺 PICO/真机硬件才能验）。
+
+## 138. 解算适配器弃用登记（维护项，2026-11-21 第一百零六刀）
+
+**做了什么**：`mbdsdr_ai/sky_solve.py` 新增 `_DEPRECATED_SOLVERS`
+（名字 → 替代建议，当前为空）与 `_deprecated_solvers()`（只输出 `_SOLVERS`
+内的已登记名字）；`solver_status()` 三个返回分支都带 `deprecated` 键。
+`sky_tools._solve_status` 把 `deprecated` 透传给工具 `sky_solve_status`，
+描述同步写明「仍可用但已知会被替代」。`docs/sky_ar_pointing_plan.md` §7
+追加「适配器维护约定」：替换时旧适配器至少保留一版并登记替代建议，删除
+属 BREAKING 需更新台账。校准档案的「可复验/可迁移」沿用既有实现
+（`load_profile` 读回校验 + `MIGRATIONS`），本轮未动。
+
+**辨别力**：`tests/test_sky_solve.py` 新增 2 条（默认 `deprecated == {}` 且
+不含 tetra3/astap；monkeypatch 登记 `tetra3` 后如实出现、`_SOLVERS` 仍含它，
+退出后还原）；`test_sky_solve_adapters.py` 的严格相等断言补 `deprecated`
+键（**不是放宽**）。复跑 `test_sky_solve / test_sky_solve_adapters /
+test_sky_tools_register / test_tool_surface_audit /
+test_tool_availability_ledger` → **37 passed**；
+`tool_availability_audit.py --only sky_solve_status` 实测 `content_len=224`，
+`docs/tool-availability.md` 该行同步为 224 字符。
+
+**诚实边界**：当前没有真正的弃用适配器，`deprecated` 为空是事实；
+机制只保证「将来登记后仍可用且如实标注」，未验证真实替换流程。
+
+## 139. 指向模式开启即加载默认校准档案（5.3 产品路径接线，2026-11-21 第一百零七刀）
+
+**做了什么**：`rf_sky_view.set_sky_pointing_mode(True)` 在 False→True 的那一次
+调用 `_autoload_default_sky_calibration()`（约 `:4962`）：按
+`default_sky_calibration_path()` 读一次档案；抽出
+`_adopt_sky_calibration_result()` 让显式 `load_sky_calibration()` 与自动加载
+共用落地逻辑，并用 `_sky_calibration_explicit` 保证「显式加载过自定义档案
+后，开关模式不再被默认路径覆盖」。四种状态：有档案→显示「已校准（日期）」
+且偏置参与位姿；无档案（`not_found`）→**视为未校准、不报错**；损坏/非法→
+note 空、`sky_calibration_error` 带中文原因、位姿不套半套偏置；显式优先。
+读盘只在开启那一次，`update_sky_pose` 多帧不重复读（测试用计数包装
+`sky_load_calibration_profile` 断言调用次数为 1）。
+
+**辨别力**：`test_rf_sky_pointing_mode.py` 追加 4 条（合法/缺失/损坏/显式
+优先），并把既有默认路径用例的档案清理掉，避免会话共享默认目录污染未校准
+基线；复跑 `test_rf_sky_pointing_mode / test_ui_contrast / test_sky_hud /
+test_sky_pointing_binding / test_sky_calibration_apply` → **146 passed**。
+
+**诚实边界（重要）**：`desktop/` 全仓**没有 `set_sky_pointing_mode` 的生产
+调用方**（只有测试调用），因为 Task 14 明令不改 `desktop/main_window.py`。
+也就是说：视图层开关、HUD、校准加载都已可用并且有测试，但**产品入口与
+真实位姿来源（IMU/相机）尚未接入**——没有 IMU 就没有航向，L1 以上无法在
+真机上成立。这条不写成「界面已交付」。
+
+## 140. ab31 全量回归 + 写工具名字表补登记（2026-11-21 第一百零八刀）
+
+**ab31 第一次 group1 红 1 条**：
+`tests/test_backend_startup_cache.py::test_write_classification_unchanged`——
+`sky_calibration_save` 注册时 `write=True`，但没进
+`tool_registry.WRITE_TOOL_NAME_PATTERNS`，于是 `is_write_tool()` 与
+「名字模式参考实现」分叉（该测试逐名对拍所有工具，正是为此设的快照钉扎）。
+**修复**：在该表「落盘」段补 `sky_calibration_save`（一行，附日期与分级
+注释），不放宽任何断言。复跑 9 个引用写判定/分级的测试文件 → **119 passed**。
+
+**ab31 最终全量（干净）**：
+- group0：**5002 passed / 7 skipped / 2 xfailed / 0 failed / 0 fatal**（21:12）
+- group1：**5166 passed / 5 skipped / 3 xfailed / 0 failed / 0 fatal**（28:32）
+- 合计 **10168 passed / 0 failed**；日志扫描
+  `Windows fatal exception / access violation / 0xc0000005 / 0xc0000374 /
+  Fatal Python error` 零命中。
+- 与 ab29（10142）相比新增 26 条：5.3 +6、自动加载 +4、7.1 +1、
+  15.2 写工具 +5、19.3 发布门 +4、适配器弃用 +2，其余为参数化/拆分差异；
+  两组数字随新增测试分桶变化，只比总和。
+
+**硬件复测（同日）**：`scripts/sdr_diag.py --timeout 3.0` 五段全 PASS
+（RTL-SDR #0 FC0012，2.400 MS/s / 100.100 MHz，256 样本 -13.8 dBFS）；
+`scripts/gnss_diag.py --timeout 3.0` 五段全 PASS（COM4 @ 9600，18 星，
+43.773271N 125.393292E，HDOP 0.8，UTC 2026-11-21T02:27:26Z），
+仍唯一告警 `ANTENNA OPEN`（天线开路，定位可用但精度受影响，界面须如实上报）。
+
+**诚实边界**：全量绿只覆盖软件与替身；真机 AR 指向（IMU/相机）仍未验证。
+
+## 141. Tripo 大赛积分 → 3D 资产脚本（空间线 S12.3，2026-11-21）
+
+**背景**：PICO 大赛公告给每队 5000 Tripo 积分（约 200 个模型），每周一
+发放、**11-25 截止**，须用报名邮箱在 `developers.tripo3d.ai` 注册。
+飞书《Tripo 积分发放教程》已读，教程 PDF 落在 `output/tripo-api-tutorial.pdf`。
+
+**做了什么**：新增 `mbdsdr_ai/tripo_assets.py::generate_model()`
+（提交 `POST /v3/generation/text-to-model` → 轮询 `GET /v3/tasks/{id}` →
+下载 `output.model_url` 为 `.glb`）与薄壳 `scripts/tripo_asset_gen.py`。
+默认**离线拒绝**（复用 `net_policy`，`MBDSDR_OFFLINE` 优先，需显式
+`MBDSDR_ALLOW_NETWORK=1`）；Key 只从 `TRIPO_API_KEY`/参数读，不进日志、
+不进返回值；无 key / 离线时 transport 零调用；下载仅允许 https、拒绝私网
+DNS、tmp + `os.replace` 原子落盘；失败状态/超时/缺字段全部结构化错误码。
+
+**辨识力**：`tests/test_tripo_asset_gen.py` + `test_offline_privacy.py`
+→ **29 passed**；`--help` 正常。
+
+**诚实边界**：**没有调用真实 Tripo API**（本机 `TRIPO_API_KEY` 未设置）；
+积分到账、模型质量与 `spatial/` 内 GLB 接入都未验证。S12.1（用户注册取
+Key）与 S12.2（资产清单/预算）仍待用户侧输入。
+
+## 142. 空间线今日推进：声源方向数学 + Tripo 批量清单（2026-11-21 第一百零九刀）
+
+> 用户说明天积分才到账，今天先推进不依赖 Key/真机的部分。
+
+**S9.2a：声源方向纯数学（JVM 可测）**：新增
+`spatial/.../audio/SpatialPlacement.kt`：
+`worldDirection(altDeg, azDeg)`（+x 东 / +y 天顶 / +z 北，非法输入 null）、
+`headRelative(..., headYawDeg, headPitchDeg)`（yaw 向右为正、pitch 抬头为正，
+`Ry(yaw)·P(pitch)` 的逆变换）、`distanceGain(distanceM, referenceM)`（`r/(r+d)`，
+夹 `[0.05,1]`）。不 import PICO SDK / Android 类，**真机绑定仍未做**。
+
+**S12.2/S12.3：Tripo 批量**：`tripo_assets.py` 新增
+`load_manifest()`（version=1、name 唯一且仅 `[A-Za-z0-9_-]`、拒绝 `../`、
+prompt 非空、未知顶层键忽略）与 `generate_batch()`（串行、单条失败继续、
+`max_models=200` 截断标 `skipped`、总校验失败零调用不建目录）；
+CLI 新增 `--manifest PATH --out-dir DIR`（与 `--prompt/--out` 互斥）。
+示例清单 `spatial/assets/models/manifest.json`：11 条（月球/火星/木星/土星/
+北斗/猎户/地面站天线/短波电台/气象卫星/CubeSat/空间望远镜），约 275 积分；
+**条目待用户确认**，S12.2 不勾。
+
+**辨识力**：Python `test_tripo_asset_gen + test_offline_privacy` → **47 passed**；
+无 Key 跑示例清单 → 11 行结构化失败、退出码 3、输出目录未创建；
+Kotlin `testDebugUnitTest --rerun-tasks --no-daemon --offline` → **13 类 /
+107 条 / 0 失败**（含新增 `SpatialPlacementTest` 12 条），`BUILD SUCCESSFUL`。
+
+**诚实边界**：没有真实 Tripo 生成；没有真机/模拟器，声源世界锁定与出声
+仍是 `not_verified`；本机模拟器仍因 Intel UHD `0xc0000005` 不可用。
+
+## 143. AI 问答/能力探测口径验收测试（settle spec Task 14，2026-11-21）
+
+**做了什么**：新增 `tests/test_sky_qa_contracts.py` 13 条（全离线、无设备），
+把三条口径钉死：① DSO/星表距离缺失 → `light_years=null`、文案「距离未知」，
+扫描输出不得出现 `0 光年 / 0 ly`；② 有距离 → 光行时 = `dist_pc × 3.261563777`
+（直接复用实现常量，来源 HYG v4.1）；③ 能力探测抛异常 → `sdr=unknown`、
+`probe.skipped=["sdr"]`、`written=0`，保留 `sdr_error`，能力状态与能力报告
+读同一账本。测试先把「`sky_whats_here` hint 未说明 null 即未知」写成红，
+再补两行 hint（`mbdsdr_ai/sky_tools.py:535-537`）。
+
+**辨别力**：目标 5 文件 **119 passed**；相邻 `test_sky_dso_lookup +
+test_capability_probe` **27 passed**；独立复跑 3 文件 **40 passed**。
+`docs/tool-availability.md` 的 `sky_whats_here` 实测长度 500→**546** 已同步。
+
+**诚实边界**：DSO 目录 v2 无 distance 字段（Task 13 未做），「DSO 有距离」
+分支无实现可测；HYG 无逐星距离 σ，不确定度标注未实现。
+
+## 144. 星官推荐视场字段（settle spec Task 11，2026-11-21）
+
+**做了什么**：`mbdsdr_ai/skyengine/xingguan.py` 给 `Xingguan` 增加三个只读
+属性（**不加 dataclass 字段、不改 JSON**）：`angular_extent_deg`（有坐标
+成员星两两最大球面角距，`acos` 夹取；未映射星不参与，<2 颗返回 None）、
+`preferred_fov_deg`（`clamp(round(extent×1.05,1),5,60)`，常量
+`PREFERRED_FOV_FACTOR/MIN/MAX` 单点定义）、`priority`/`emphasized`
+（模块级编辑表：北斗/参宿/心宿=1，昴宿/天狼/织女=2；表外 None/False）。
+
+**辨识力**：新增 `tests/test_xingguan_preferred_fov.py` 9 条——北斗
+extent **31.201°** → preferred **32.8°** 且落在 spec 硬要求 25–35；其余
+星官逐个对 `clamp(extent×1.05)` 公式；合成星官（0/1 颗有坐标）→ None；
+未映射星不参与 extent；表外不编优先级。四文件 **86 passed**。
+
+**诚实边界**：UI/HUD/工具尚未消费这些字段（本轮只做数据模型）；1.05 是
+构图余量（编辑选择），不是天文事实；`priority` 是编辑排序，不是数据源。
+
+## 145. 恒星自行传播接入星表（settle spec Task 12，2026-11-21）
+
+**做了什么**：新增 `mbdsdr_ai/skyengine/proper_motion.py`（懒加载侧车 +
+`propagate_radec_many/propagate_vectors_many`，切向基向量法，
+`pmra` 按 HYG 的 μα* 口径直接作东向角速度，极点无 cos 除零；NaN/缺表
+原样返回）与 `scripts/build_hyg_pm.py`（**源 CSV SHA 必须等于主星表
+`meta.source_file_sha256`**，不符退出码 2）。生成侧车
+`mbdsdr_ai/data/hyg_pm_v41.npz`：83,479 行、缺失 0、661 KiB
+（Sirius 32263：-546.01 / -1223.08 mas/yr）。`star_catalog.select_for_view`
+在 J2000→地平矩阵乘**之前**传播方向向量；`StarSelection` 末尾新增
+`pm_applied_count/pm_missing_count`（按最终保留集合统计），
+**RA/Dec 输出仍是 J2000**，只让 alt/az 含自行。
+
+**辨识力**：`tests/test_proper_motion.py` 10 条（合成 1000 mas/yr×100 年
+= 0.0277778°；极点不产生 NaN；NaN/无表原样；Sirius 100 年总位移
+0.0371° 与独立估算对拍；`select_for_view` 开/关对比）。独立复核：
+Sirius 在 JD 2461359.5 位移 Δalt **-0.009497°**、Δaz **-0.003122°**
+（≈0.0100°，与 26.9 年 × 1339.5 mas/yr 一致），counts (1,0)/(0,1)。
+目标 6 文件 **65 passed**；ab32 全量 group0 **5067 passed** + group1
+**5175 passed** = **10242 passed / 0 failed / 0 fatal**。
+
+**诚实边界**：不含周年视差、光行差、径向速度透视加速；主星表未烘焙自行；
+头显 bundle 的 alt/az 仍静态（差 ≤0.02°，未接）；`BRIGHT_STARS`
+标签/搜索层仍是 J2000；`docs/star-catalog.md` 与 `docs/data-inventory.md`
+已补侧车说明。
+
+## 146. DSO 长轴位置角入目录（settle spec Task 13 部分，2026-11-21）
+
+**做了什么**：`build_dso_catalog.py` 解析 OpenNGC `PosAng`，输出
+`position_angle_deg` + `position_angle_source`（有值 openngc / 缺失 unknown），
+`_check_entry` 校验 `[0,360)` 与来源一致（两方向都抛错），meta counts 与
+missing 汇总同步；重生成 `dso_catalog.json`（schema 仍 v2）。`dso.py`
+`DSOEntry` 末尾加两个可选字段；桌面星系卡追加「长轴方向 35°（目录）」，
+**星团/星云即使目录有 PosAng 也不显示**（M45=90° 不显示），缺 PA 不写占位。
+
+**数据**：117 条中 **43 条有 PA**（M31=35、M33=23、M32=170、M24=90、
+M45=90），74 条 null/unknown，**不做推算**；源 CSV 与 meta 登记
+SHA 一致（NGC `54abea0b…`、addendum `c93f983d…`）。
+
+**辨识力**：`test_dso_catalog` 断言 43/74、M31=35、M42=None、越界/来源
+不一致抛 `DSOIntegrityError`；`test_sky_dso_layer` 断言 M31 卡片含
+「长轴方向 35°（目录）」、无 PA 不占位、M45 星团不显示。三组定向
+**69 + 60 + 42 passed**；ab33 全量 group0 **5067** + group1 **5178** =
+**10245 passed / 0 failed / 0 fatal**。
+
+**诚实边界**：**距离与 Caldwell 未做**——本地无权威距离表、OpenNGC 无
+Caldwell 列；不抓网、不估算、不编造。PA 只进卡片，未用于椭圆朝向绘制。
+
+## 147. 星系椭圆按 PA 朝向绘制（settle Task 13.1 扩展，2026-11-21）
+
+**做了什么**：新增 `mbdsdr_ai/dso_orientation.py`——`basis_offsets()`
+（北点 dec+0.2°、东点 ra+0.2°/cosδ，RA 归一、极点有下限）与
+`major_axis_screen_deg()`（长轴 = 北·cosPA + 东·sinPA，返回 y 向下屏幕角，
+与 `QPainter.rotate` 同口径；退化/非法 → None）。`_draw_dso` 只为
+「星系 + PA 有效 + 轴比已知/估计」攒北/东点，**各一次**批量矩阵与投影
+（不逐条建矩阵）；`_draw_dso_glyph` 新增 `rotation_deg`，仅星系椭圆旋转，
+轴比未知的虚线圆与其它类型不旋转。
+
+**辨识力**：`tests/test_dso_orientation.py` 21 条（四方向、y 向下、退化/
+越界 None、basis 极点/回绕）；`tests/test_sky_dso_layer.py` 新增 3 条——
+M31 生产链旋转 **167.6835°** 与独立单点投影链一致（差 ≈1e-12°）；
+抹掉 PA 的克隆不旋转；星团不显示朝向。定向 4 文件 **156 passed**；
+ab34 全量 group0 **4999** + group1 **5270** = **10269 passed / 0 failed /
+0 fatal**（分组因新测试文件重排，只比总和）。
+
+**诚实边界**：基点用固定 0.2° 步长，极点/超广角近似误差未单独量化；
+DSO 层与既往一致仍用 J2000 坐标，不叠加自行；未做像素级截图比对。
+
+## 148. 空间观测包接入恒星自行（2026-11-21）
+
+**做了什么**：`star_catalog.brightest_stars()` 输出增加 `hyg_id`；
+`spatial_bundle._stars_payload` 每条星固定携带 `hyg_id`（用户 JSON 缺失
+→ None）；`build_spatial_bundle` 的地平循环先按 `propagate_radec_many`
+把 J2000 ra/dec 传播到观测时刻，再算 `alt/az/visible`，`sky` 新增
+`altaz_pm_applied` / `altaz_pm_missing`（始终存在；站址/时刻不可用时
+均为 0），`altaz_source` 仍是 `geometric`。**RA/Dec 仍 J2000，只有
+alt/az 含自行**；与桌面 `select_for_view` 同一侧车、同一口径。
+
+**辨识力**：`test_spatial_bundle` 更新精确相等断言（0/0，契约扩展非放宽），
+新增 Sirius（applied=1，PM 与静态差 **Δalt -0.003578°/Δaz +0.012754°**，
+且与独立传播值 1e-6 一致）、缺 hyg_id（静态 + missing 计数）、缺表
+（全体静态、applied=0、不抛）三条；`test_star_catalog_brightest` 字段
+集合同步加 `hyg_id`。定向 5 文件 **73 passed**；ab35 全量 group0
+**5002** + group1 **5270** = **10272 passed / 0 failed / 0 fatal**。
+
+**诚实边界**：Kotlin 侧未改（Gson 忽略新键，读的仍是 alt/az）；未做
+周年视差/光行差；`BRIGHT_STARS` 标签/搜索层仍 J2000。
+
+## 149. 搜索「跳到恒星」接入自行（2026-11-21）
+
+**做了什么**：`desktop/rf_sky_view.py::_on_search_picked` 恒星分支在结果
+带 `hyg_id` 时，先 `proper_motion.propagate_radec_many` 把 J2000 传播到
+当前 `jd` 再算 alt/az；缺 `hyg_id`、自行表缺失或查询异常 → 退回静态，
+不阻塞跳转。至此「星图绘制 / 识别 / 头显观测包 / 搜索定位」四处同口径。
+
+**辨识力**：新增 `tests/test_sky_search_star_goto.py` 3 条（PM 生效 1e-6
+对拍、缺表、缺 hyg_id），合并 `test_sky_search_interaction + test_sky_pointing`
+→ **30 passed**；Altair 实测 PM 与静态差 Δaz≈0.00336°、Δalt≈0.00379°。
+ab36 全量 group0 **5163** + group1 **5112** = **10275 passed / 0 failed /
+0 fatal**（新增测试文件改变分组，只比总和）。
+
+**诚实边界**：旧 `BRIGHT_STARS` 兜底搜索结果没有 hyg_id，仍按静态
+（差 ≤0.02°，未接）；未做视差/光行差。
+
+## 150. 移动端 Flutter 静态分析与单测复跑（2026-11-21）
+
+**做了什么**：用本机工具链 `D:\mbdsdr\toolchain\flutter\bin\flutter.bat`
+（加入 PATH）在 `mobile/` 下依次执行 `flutter --version`（3.50.0 stable /
+Dart 3.14.0）、`flutter pub get`、`flutter analyze`（日志落
+`D:\mbdsdr\output\flutter_analyze.log`）、`flutter test`。**未改任何源码**：
+本轮 analyze 没有 error 级问题，按「只修阻塞项」不动 warning/info。
+
+**数字**：`pub get` 成功（24 个包有新版本但被约束锁定）。`analyze` →
+**0 error / 0 warning / 62 info**，2.7 s；info 全部是
+`deprecated_member_use`（Flutter 3.50 提示 `package:flutter/material.dart`
+改用 `material_ui`）+ 测试内 2 条 `avoid_dynamic_calls`。`test` →
+**527 passed / 0 failed**，33.4 s。Dart 文件 **152** 个（`lib/` 82 +
+`test/` 69 = 151 源码，另 1 个 `.dart_tool` 生成物）。
+
+**诚实边界**：只覆盖「静态分析 + 单测」；`flutter build apk --debug` 本轮
+未重跑（上次 2026-11-19 成功）；真机安装/运行、真机罗盘与 IMU 指向精度、
+星表真机渲染帧率仍 `not_verified`（缺真机与长时间运行环境才能验）。62 条 info 未修（不属 error 级，避免
+为绿批量改风格/加 ignore）。
+
+## 151. DSO 距离（OpenNGC 视差，settle Task 13.2a，2026-11-21）
+
+**做了什么**：`build_dso_catalog.py` 解析 OpenNGC `Pax`（mas）→
+`parallax_mas`、`distance_pc = 1000/Pax`（1 位小数）、
+`distance_source="openngc_parallax"`；源不给 σ，`distance_uncertainty_pc`
+一律 `null`（不编）。`dso.py::DSOEntry` 新增 5 个字段，
+`_check_entry` 校验 `pax>0` 且 `|1000/pax - distance_pc| < 0.11`。
+`dso_catalog.json` 已重生成：**71/117 有距离**，46 条 null 不推算
+（M4=1798.6 pc≈5900 ly、M13=7874.0 pc≈26000 ly、M2=12195.1 pc；
+M31 源无 Pax，仍 null）。桌面 DSO 卡在有距离时追加一行
+「距离 约 5900 光年（目录视差）」（两位有效数字，pc×3.26156），
+无距离不写占位、不显示 0。
+
+**辨识力**：`test_dso_catalog + test_sky_dso_layer` **78 passed**
+（含 Pax 换算对拍、σ 必须为 null、越界拒绝）；`test_sky_full_catalog +
+test_sky_tools + test_dso` **70 passed**。ab37 全量 group0 **5165** +
+group1 **5112** = **10277 passed / 0 failed / 0 fatal**（新增测试改变分桶，
+只比总和）。
+
+**诚实边界**：距离只来自 OpenNGC 自带视差，未接 GAIA/ SIMBAD 等外部
+星表；σ 与距离置信区间仍空；Caldwell 编号（13.2b）仍未做——OpenNGC
+无该列、本地无权威映射，不抓网不推算。视差距离对星团/星云实际是
+「目录所属星体」的量，展示文案已写「目录视差」限定。
+
+## 152. 兜底亮星搜索接入自行（settle Task 12 收口，2026-11-21）
+
+**做了什么**：`stars.py` 新增 `BRIGHT_STAR_HYG_IDS`（54 颗亮星 →
+HYG v4.1 `hyg_id`）。`desktop/rf_sky_view.py` 的 `BRIGHT_STARS` 兜底
+搜索结果现在也带 `hyg_id`，选中定位与全天星表结果走**同一条自行链路**
+（J2000 → 查询时刻再算 alt/az）。此前该兜底分支缺 id，只能按静态，
+差 ≤0.02° 但口径不统一。
+
+**对照表怎么来的（可复核）**：按 HYG `proper` 名精确匹配 53 颗；
+`Regor` 在 HYG 无 proper 名，按坐标 1″ 内吸附（实测差 0.1″）。
+54 颗全部命中，坐标差均 <0.2″，id 无重复；测试逐颗复核并断言
+按 id 取自行全部有限。
+
+**辨识力**：`test_sky_search_star_goto` 新增 2 条——对照表
+覆盖/唯一/坐标一致；monkeypatch 星表不可用后搜 Altair，兜底行
+`hyg_id=97338`，定位结果与自行传播值差 <1e-6°，且与静态差 >0.001°
+（证明真的用上了自行）。6 文件 **74 passed**；ab39 全量 group0
+**4934** + group1 **5348** = **10282 passed / 0 failed / 0 fatal**
+（日志扫描致命标记零命中；新增测试改变分桶，只比总和）。
+
+**诚实边界**：兜底只在星表加载失败时触发，正常路径仍走全天星表；
+仍不含周年视差/光行差；`EXTENSION_STARS` 不在这张对照表里（兜底搜索
+只遍历 `BRIGHT_STARS`）。
+
+## 153. 真机七环验收复跑 + R6 假 PASS 修复（2026-11-21）
+
+**设备在位（只读核对）**：SDR = RTL2832U，SN `77771111153705700`，
+`rtl_test -t` 识别 **Fitipower FC0012**、2.048 MS/s 采样可开；GNSS =
+USB-SERIAL CH340 在 **COM4**，9600 8N1，`serial_gnss_probe` 读到真实
+fix（12 星、HDOP 1.5）。两台设备本轮全程插着。
+
+**抓到的假 PASS（本轮修正）**：第一次跑 `acceptance_suite.py` 时 R6 判
+PASS，但 `result.json` 里 `lat/lon/alt/sats_used/hdop` **全是 null**。
+根因两条：
+1. `serial_gnss.get_fix()` 在「收到合法 NMEA 但尚未定位」时按设计返回
+   `source="real"`、坐标 None；R6 只等 `source=="real"` 就收工。
+2. 坐标检查写成 `-90 <= (pos.lat or 0) <= 90`，None 被 `or 0` 变成 0，
+   于是「没坐标」也判 True。
+
+修法（`scripts/hw_acceptance/acceptance_suite.py::ring6`）：等待条件改为
+`source=="real" 且 lat/lon 均非 None`；超时仍不完整 → `SKIP
+(NEEDS_TIME_WINDOW)` 且 metrics 不补坐标；`coordinates_valid` 显式
+`float(pos.lat)`，另加 `hdop_reported`（缺值标 skipped，不判假绿）。
+新增 `tests/test_hw_acceptance_ring6_fix.py` 3 条（部分 fix→继续等到完整、
+只收到 NMEA→SKIP 不 PASS、无 NMEA→SKIP）。**未放宽任何既有断言**。
+
+**新增测试怎么验的**：`tests/test_hw_acceptance_ring6_fix.py` 3 条先红后绿
+（部分 fix→继续等到完整、只收到 NMEA→SKIP 不 PASS、无 NMEA→SKIP）；
+`test_hw_acceptance_contract + r5_evidence + ring6_degradation + 新文件`
+**36 passed**；ab39 全量 group0 **4934** + group1 **5348** =
+**10282 passed / 0 failed / 0 fatal**（首轮 group1 曾红 1 条
+`test_claims_guard`，原因是本节初稿用了「已修」触发文档断言闸门；改词后
+`test_claims_guard` **7 passed**，group1 复跑全绿，未改文档闸门逻辑）。
+
+**复跑结果（真实硬件，`D:\mbdsdr\tmp\hw_suite_ab38b`）**：
+`PASS 6 / FAIL 0 / SKIP 1 / SIMULATED 1`；R1 连接 709.7 ms / 释放
+15.8 ms / tuner=2；R2 首帧 **3.0 ms**、32 帧、噪声底 -47.2 dB、SNR
+28.94 dB；R3 吞吐比 **1.0**、短读 0；R4 音频 7680 帧、RMS 0.29237；
+R6 COM4 **TTFF 0.81 s**、lat **43.773381**、lon **125.3933813**、
+alt 236.3 m、**sats_used 13**、HDOP 1.5；R7 太阳误差 0.0052°、月球
+vs JPL DE421 29.8″、渲染 554.6 ms、PNG 87,157 B。R5 云台 `SKIP(NO_HW)`
+（未接 rotctld/板载云台，模拟替代不计 PASS）。
+
+**诚实边界**：首跑那份「PASS 但坐标为 null」的结果作废，以 ab38b 为准；
+R7 是 offscreen 渲染，人眼观感未验；R6 的 `sats_visible` 依赖 GSV，
+本轮 GSV 未进窗口，故只报 `sats_used`（GGA 实测 13），不拿 0 当结论。
+
+## 154. 情境音效（FR-11，settle Task 15，2026-11-21）
+
+**做了什么**：新增 `desktop/situation_sound.py`，运行时合成 3 类**自制**
+正弦短音——恒星 1046.5 Hz / 90 ms，行星 659→988 Hz 两级 / 160 ms，
+深空 440 Hz / 180 ms；5 ms 淡入淡出防爆音，WAV 缓存在系统临时目录。
+仓库不新增音频二进制，也不含任何第三方素材（对 FR-11「自制或 CC0」
+取自制路线）。默认开启、音量 **0.2**（低音量）。
+
+**接线**：`rf_sky_view._identify_at_crosshair` 在准星识别命中（含缓存
+命中）时调 `_maybe_play_identify_sound`；`on_body_picked` 点中目标同样
+触发。同一目标 **3 秒内只响一次**，换目标立即响；卫星等未知类别静默
+（不硬凑音）。`RFSkyViewPanel` 底部控制条新增「提示音」勾选按钮，
+默认勾选，取消即静音。
+
+**降级口径**：静音、未知类别、`QMediaDevices.audioOutputs()` 为空、
+QtMultimedia 导入失败——一律返回 False 并写 `last_error`，不抛异常、
+不打断星图；`set_volume` 夹取到 0–1。
+
+**辨识力**：`test_situation_sound.py` 6 条（类别映射 / WAV 有效且非静音 /
+默认 0.2 / 静音与未知类别不播 / 无设备诚实空操作 / 音量夹取）+
+`test_rf_sky_situation_sound.py` 4 条（同目标去重、静音开关、点中触发、
+面板默认开）→ **10 passed**；相邻 7 文件（图层/时间/速率/提示/主题/
+指向/HUD/搜索）→ **83 passed**。真机侧 `QSoundEffect` 加载生成的 WAV
+状态 `Ready`（4,012 B），**未主动外放**以免打扰用户。ab40 全量 group0
+**4820** + group1 **5472** = **10292 passed / 0 failed / 0 fatal**
+（日志扫描致命标记零命中；新增 2 个测试文件改变分桶，只比总和）。
+
+**诚实边界**：开关与音量**不跨进程持久化**（重启回默认开/0.2）；
+只有恒星/行星/深空三类有音，卫星无音；实际听感与 0.2 音量是否合适
+仍要人耳确认（本轮只验加载与调用，不宣称「听感已验收」）。
+
+## 155. 移动端诚实空态与依赖盘点（settle Task 8.1 / 9.1，2026-11-21）
+
+**Task 8.1（RSSI 空态）**：`mobile/lib/pages/spectrum_page.dart:351-388`
+的 `_rssiDb` 只取最新真实帧峰值 dBFS；无帧时状态栏读 `RSSI —`，
+有帧才读 `RSSI -40.0 dBFS` 并标来源「实测峰值」。空态文案
+`:231-232` 明写「当前无实时 IQ，不显示模拟数据」。验证：
+`flutter test test/spectrum_panel_audit_test.dart` → **12 passed**
+（含 `RSSI —` 空态与带来源后缀两条断言）。
+
+**Task 9.1（依赖盘点）**：`mobile/pubspec.yaml` 直接依赖 9 个，逐个核对
+使用点——`provider` 3 处 import、`fftea` 1、`geolocator` 2、
+`flutter_compass` 1、`sensors_plus` 1、`path_provider` 1、
+`flutter_secure_storage` 1、`shared_preferences` 2；`intl` 由
+`flutter_localizations` + `l10n.yaml` 锁定，属官方 i18n 工具链。
+**没有仅桌面才需要的依赖，无可去项。**
+
+**诚实边界**：只做静态盘点与单测，没有真机安装/运行；RSSI 空态是
+离屏 widget 测试，不替代真机弱信号场景。Task 8.3（9 个页面筛选）
+与 9.2（中低端机实测帧率）仍未做。
+
+## 156. 不展开就不跑收口（settle Task 7，2026-11-21）
+
+**盘点了什么**：用 AST 扫 `desktop/` 的 **40 个 `QTimer` 创建点**，逐个
+列出 start/stop 位置，再按四类归档：面板级（show/hide 或分组守卫）、
+会话级（显式 stop）、一次性（singleShot/启动链）、应用级常驻（随主窗
+销毁）。线程侧另核 `DeviceWatchdog`、`ReceivePipeline`、扫频/AI/定位/
+调制/ntrip/新时空刷新、`QThreadPool` 与 TX。
+
+**本轮修掉 2 处「隐藏仍空转」**：
+1. `new_spacetime_panel` 的 60 s 授时刷新 + 1 Hz 过境倒计时原先构造即
+   start、无 hide 守卫 → 补 `showEvent/hideEvent`，显示时立即各刷一遍。
+2. `RFSkyViewPanel._time_ui_timer`（500 ms 时间标签）原先页签收起仍跑 →
+   补 `showEvent/hideEvent`，显示时立即刷一遍。
+
+**未删的 1 处**：`main_window._iq_poll_timer` 只 connect 不 start（真实 IQ
+走 `ReceivePipeline.frame_ready`），生产零 CPU；测试用它复现「旧实现把
+定时器状态当恢复判据」的回归，保留并在注释写明。
+
+**辨识力**：新增 `test_new_spacetime_timer_lifecycle.py` 2 条（停/恢复 +
+隐藏后 0.3 s 计数保持 0 再显示恢复）与 `test_sky_panel_timer_lifecycle.py`
+1 条（500 ms 停/恢复）；相关 10 文件 **65 passed**（含既有
+`test_spectrum_visibility_pacing`、`test_sat_track_panel_timer_lifecycle`、
+`test_sky_tracker_visibility_gate`）。ab41 全量 group0 **5054** +
+ab41b group1 **5241** = **10295 passed / 0 failed / 0 fatal**。
+
+**首轮 group1 的一次原生崩溃（如实记录）**：`test_backend_reconnect_stress.py::
+test_receive_pipeline_ten_rebuilds_signal` 在整组跑到该处时发生一次
+`Windows fatal exception: access violation`（退出码 0xC0000005）。
+该文件单独复跑 **3 passed**，整组复跑 **5241 passed**；**未改产品代码、
+未改断言**，按长会话下的原生/线程偶发记录，不冒充「已定位根因」。
+
+**诚实边界**：应用级常驻定时器（天空刷新/状态栏/总线）不按面板隐藏
+停表，因为消费方始终可见；连接期间的解码是产品主功能，不因某个面板
+隐藏而停。Task 6（底层机制不给界面）与 8.3/9.2 仍未做。
+
+## 157. 默认界面术语扫描（settle Task 6.2 / 5.4 默认态，2026-11-21）
+
+**做了什么**：新增 `tests/test_default_surface_no_mechanism_terms.py`——
+按现有 `MainWindow` fixture 的方式真实构造主窗（`app_mode=ide`、
+`isolated_profile`、停启动定时器、show 后 `processEvents`），只扫
+**当前可见**的 `QLabel`/`QAbstractButton`/`QGroupBox`/`QTabWidget`
+文本（断言 ≥20 条，避免空扫）。
+
+**两条断言**：
+1. 不含「授时状态 / 能力协商中 / 已同步」这类底层机制字样（Task 6.2）；
+2. 不含独立 `az/alt/vmag/GMST/FOV/JD/ICRS/J2000` 与中文「方位角/
+   地平高度/视场/儒略日」（Task 5.4 的默认态一半）。
+
+**结果**：两条均通过（`2 passed`）。即默认主界面已经是干净的：授时
+状态只存在于未展开的右栏专业页签里，手机 `TimingPanel` 也只在频谱页
+的内嵌区，不是启动即可见的第一屏。ab42 全量 group0 **5214** +
+group1 **5083** = **10297 passed / 0 failed / 0 fatal**。
+
+**诚实边界**：只验「默认可见」这一层。Task 6.1 的「有则摘掉、只留
+日志」没有擅自执行——桌面 `new_spacetime_panel.time_sync_label` 与
+手机 `TimingPanel` 都是已有诚实空态测试的用户可见状态，直接删会丢
+信息；这一步属产品取舍。Task 5.4 的「展开详细面板后读数完整可读」
+也还没写成断言。
+
+## 158. DSO 距离接入 AI 工具面（settle Task 13.2a / 14 收口，2026-11-21）
+
+**发现的漂移**：DSO 目录上一轮已带 OpenNGC 视差距离（71/117），但
+`sky_dso_lookup` 仍按旧口径写「距离字段本目录不提供」，并且不输出距离；
+`test_sky_qa_contracts` 也还断言「DSO 没有距离」。
+
+**做了什么**：`_dso_lookup` 每条对象新增
+`distance_pc` / `light_years`（pc × 3.261563777）/ `distance_source`；
+缺失保持 `null`，不填 0；源不提供 σ 时**省略** `distance_uncertainty_pc`
+（避免 12 条对象撑爆 4000 字输出预算，null 语义仍由 `distance_pc=null`
+表达）。note 改为「距离取自 OpenNGC 视差（71/117），缺失说未知」，
+工具 description 同步；hint 增加「有距离就说约 Z 光年（目录视差）」。
+
+**辨识力**：`test_sky_dso_lookup` 改为两条更强断言——M13 距离
+7874.0 pc / 光年 = ×3.261563777 / 来源 `openngc_parallax`；M31 距离
+全 null、note 说未知、输出无 `0 光年`。`test_sky_qa_contracts` 的旧
+「DSO 没有距离」断言按新契约改写为「缺失必须 null」。5 文件
+**90 passed**（DSO 查询/QA/工具/注册/一致性）。ab44 全量 group0
+**5216** + group1 **5083** = **10299 passed / 0 failed / 0 fatal**。
+
+**诚实边界**：DSO 距离仍是 OpenNGC 自带视差，不是 GAIA 等外部测距；
+σ 省略不等于 0；Caldwell 仍未做。
+
+**补（同轮）**：星系长轴方向也进 AI 工具面——`position_angle_deg` /
+`position_angle_source` 只对 `type="galaxy"` 输出（M31=35°）；M45/M13
+即使目录有 PosAng 也不输出，避免把「成员星分布」说成星系朝向。
+`test_output_budget` 增加 M8 查询（3958 字 < 4000），防止新字段撑爆
+工具输出；DSO/QA 两文件 **28 passed**。
+
+## 159. SiliconFlow 8B 模型接入与真实冒烟（2026-11-22）
+
+**背景**：项目 AI 内核早已默认 SiliconFlow 端点，但默认模型是 35B；用户要求测试只用 8B 及以下，避免产生费用。
+
+**做了什么**：运行期默认模型统一改为 `Qwen/Qwen3-VL-8B-Thinking`——`mbdsdr_ai/config.py`（`DEFAULT_CONFIG` 与 `AgentConfig` 两处）、`mbdsdr_ai/model_manager.py`（`ModelManager` 默认值与 `BUILTIN_MODELS` 新增 262144 窗口条目）、`mbdsdr_ai_mcp_server.py`（docstring/构造/`--model`）、`desktop/ai_panel.py`（错误提示示例与两处兜底）、`scripts/star_intent_observer.py` 兜底。用户机上的持久化配置 `~/.mbdsdr/config.json` 也把 model 改成新值（先备份 `config.json.bak-20261122-015042`，原子写，`api_key` 保持为空）。新增 `tests/test_ai_default_model.py` 四条纯本地断言。
+
+**验证**：`pytest tests/test_agent_context.py tests/test_ai_default_model.py -q` → **15 passed**；`pytest mbdsdr_ai/tests -q -k "config or model"` → **86 passed / 2942 deselected**；`pytest tests/test_identity_redline.py -q` → **6 passed**。真实联网冒烟（Key 只经进程环境变量注入，不落文件）：纯文本 HTTP 200（usage 19/278，reasoning 256）；64×64 红色 PNG 多模态 HTTP 200，回答「红色」（usage 87/38）；function calling HTTP 200，返回 `get_frequency` 调用（finish_reason=tool_calls）。改完复扫仓库 tracked 文件与 143 个改动文件，未发现 Key 落盘。
+
+**诚实边界**：8B 只是模型选择约束，不承诺账单；多模态与工具调用只在 API 层验过，项目 `agent.chat` 目前仍只发文本，未接图片输入；推理模型的 reasoning token 会占用 completion 预算（本次单问 reasoning 138–256 tokens），长任务需关注 `max_output_tokens=2048` 是否够。
+
+## 160. 空间/头显线：星点独立复算 + 同名事件高亮（2026-11-22）
+
+**做了什么**：S4.1d 新增数据层独立复算验收——只用观测包内 `sky.stars[].ra/dec` 与 `site`/`time.utc`，走 `astronomy.equatorial_to_altaz`（不经 `_altaz_geometric`）复算 HYG 前 50 颗亮星，逐颗球面角距 ≤0.1°。S6.4 新增选中目标同名事件高亮：`TimelineFormat.relatedIndices()` 递归扫 `detail`，只有逐字同名才返回索引；`ArchivePanel` 用 `◆` 标记，选中星提升到 `ObservationState.selectedStar`，换包清空。
+
+**验证**：`pytest tests/test_spatial_bundle.py -q` → **36 passed**；连同 consistency/brightest/identity 四文件 → **52 passed**；JVM `:app:testDebugUnitTest` → **BUILD SUCCESSFUL**，13 类 / 110 条 / 0 失败；`:app:assembleDebug` → **BUILD SUCCESSFUL**，APK 29,454,810 字节（2026-11-22 01:53）。
+
+**诚实边界**：头显屏幕方向与高亮的设备目视仍是 `not_verified`——本机 PICO 模拟器在 Intel UHD 上崩溃、无真机可测，缺 PICO 设备或可用模拟器才能验；逻辑层由 JVM 单测覆盖。
+
+## 161. 时空线：站址海拔入快照 + 时刻口径单一来源（2026-11-22）
+
+**做了什么**：`RuntimeSources._site_block` 的 gnss/manual/none 三支都输出 `alt_m`——GNSS 有有效 fix 时取 GGA 海拔、手填站址原样透传、无可信站址显式 `None`；观测档案 `site.alt_m` 不再恒 `null`。新时空面板 `_pass_time_basis_line` 改从 `sat_passes.grid_manifest()` 取粗扫/细扫与中天精度，文案改为「升落 60 秒粗扫、中天 2 秒细扫约 ±1 秒」，并修掉 `sampling_step_s` 缺失时显示「0 秒粗扫」的旧缺陷。
+
+**验证**：`pytest tests/test_new_spacetime_panel.py tests/test_new_spacetime_timer_lifecycle.py tests/test_runtime_sources.py tests/test_observation_record.py tests/test_pass_ui_warnings.py -q` → **43 passed**；runtime/web/status/观测/回放相关七文件 → **59 passed**；时空面板其余四文件 → **35 passed**；`test_spec_status` + `test_identity_redline` → **20 passed**。主线复核复跑 `test_new_spacetime_panel/test_runtime_sources/test_observation_record` → **39 passed**。
+
+**诚实边界**：GNSS 海拔是 GGA 的 MSL 高度，未做椭球高/正高换算；真机 GNSS 海拔链路本轮未复测（本机无 GNSS，缺设备才能验）。赤道仪/望远镜真机指向仍 `not_verified`（缺赤道仪硬件）。
+
+## 162. Agent 多模态图片输入（2026-11-22）
+
+**做了什么**：`MBDSDRAgent.chat` / `_chat_impl` 新增可选 `images`：接受本地路径或 data URL，本地文件 base64 成 `data:image/...`，仅 png/jpg/jpeg/webp/gif。无图时 content 仍是字符串（与旧版一致）；有图时构造 text + image_url parts。坏输入在写上下文前返回错误信封（`image_not_found` / `image_type_unsupported` / `image_invalid` / `image_read_failed`），不调用模型、不落 history。`ModelManager.chat_stream` 与 `ContextManager` 无需改动（messages 原样透传、token 估算只计 text part）。MCP server 没有 chat 工具，GUI 暂无附件入口。
+
+**验证**：`pytest tests/test_agent_multimodal.py tests/test_agent_context.py -q` → **22 passed**；相关既有 agent 用例 35 + 47 passed；身份红线 6 passed。真实端到端：`agent.chat("这张图的主色是什么？", images=[红色 64×64 PNG])` → 内容「红色」，usage 10243/133（提示词大头是工具 schema）。
+
+**诚实边界**：GUI 未接图片选择/渲染；MCP 没有对话入口；多模态只在 `chat` 单轮路径验过，工具调用循环里的图片上下文未单独验。
+
+## 163. 空间/头显：未知态共享夹具 + 事件中文名单一真源（2026-11-22）
+
+**做了什么**：S10.2a 导出 CLI 真实生成 `bundle_unknown_state.json`（无站址/无观测时刻/无 IQ/未知 kind），Python 复算除 `created_utc` 外逐键相等，Kotlin 读同一份字节做展示断言。S10.3 把头显事件中文名对齐桌面 `desktop/replay_timeline.py::_EVENT_LABELS` 的 14 种，并加跨语言钉扎测试；头显不再另起一套事件叫法。
+
+**验证**：`pytest tests/test_spatial_consistency.py tests/test_spatial_bundle.py tests/test_star_catalog_brightest.py tests/test_identity_redline.py -q` → **54 passed**；主线复跑前两文件 → **42 passed**；JVM `testDebugUnitTest` → **BUILD SUCCESSFUL**，14 类 / 112 条 / 0 失败；`assembleDebug` → **BUILD SUCCESSFUL**，APK 29,526,674 字节。
+
+**诚实边界**：S10.2 四窗实际排布与设备目视仍是 `not_verified`（缺 PICO 真机/可用模拟器才能验）；S4.1b-run、S2.3、S8.x、S9.2 等真机项原样保留。
+
+## 164. 时空：过境步长/多普勒/时刻文案收口（2026-11-22）
+
+**做了什么**：`TimelineEngine.compute_passes` 的 `step_sec` 默认值不再自藏 30 秒，改为缺省/非法值回落 `sat_passes.PASS_COARSE_STEP_S`；顺带修掉 `step_sec=0` 除零与 NaN 在 `round()` 抛错。`new_spacetime_timeline._state_at` 的多普勒改用 `sat_passes.doppler_hz_from_range_rate`，光速常量从 `C_LIGHT_MPS/1000` 派生，删除第二份字面量。另把 AI/控制器/工具报告里三处硬编码的「60 秒粗扫 + 2 秒细扫 + 0.5 秒二分」改为消费 `grid_manifest()["accuracy_note"]`，并把 AI 侧来源名纠正为它实际调用的 `orbit.predict_passes`。默认步长 30→60 只影响不显式传参的调用方，桌面面板显式传参行为不变。
+
+**验证**：`pytest tests/test_pass_time_single_source.py -q` → **10 passed**；时空/过境相关五文件 → **53 passed**；面板/策略/定时器相关七文件 → **34 passed**；主线复跑 `test_pass_time_single_source + test_new_spacetime_timeline + test_pass_step_alignment` → **24 passed**。
+
+**诚实边界**：TimelineEngine 的 AOS/LOS 仍未二分，升落时刻仍按粗扫步长承诺；`docs/research/2026-11-12-dead-code-inventory.md` 的 `grid_manifest` 零引用是历史快照，未改。
+
+## 165. 真机在位复核：RTL-SDR 与 GNSS 五段（2026-11-22）
+
+**做了什么**：本轮改动后复跑两套只读自诊断，确认硬件仍在线、链路未被本轮代码影响。
+
+**证据**：`python scripts/sdr_diag.py --timeout 2.0` → 五段全 PASS，RTL-SDR #0 (FC0012)，2.400 MS/s / 100.100 MHz，读到 256 样本（平均功率 1.1 dBFS）。`python scripts/gnss_diag.py --timeout 10` → 五段全 PASS，COM4 @ 9600，17 星，`fix_quality=1`，`hdop=0.8`，完整 UTC；站址坐标按身份红线不落库；天线状态 GPTXT `ANTENNA OPEN` 告警。
+
+**诚实边界**：`ANTENNA OPEN` 表示天线开路/未接天线，定位可用性可能受影响；本次只验「端口能开、能出样例、能定位」，未验长时间稳定性与定位精度。
+
+## 166. AI 面板图片附件入口（2026-11-22）
+
+**做了什么**：`desktop/ai_panel.py` 新增「图片」附件按钮（png/jpg/jpeg/webp/gif，多选）、附件 chip（文件名 + 移除），发送时把路径列表经 `AIWorker(images=...)` 传给 `agent.chat(..., images=...)`；发送后清空附件，用户气泡只显示「附图 N 张」，路径不进会话文本/日志。无附件时保持旧调用签名。未配置 Key / AI 内核不可用 / 本地协商路径若带图片，显式提示「N 张图片未发送」及原因，不静默丢弃。agent 的 `image_*` 错误码接入面板错误指引分类。
+
+**验证**：`pytest tests/test_ai_panel_image_attachments.py -q` → **10 passed**；AI 面板相关五文件 → **93 passed**；AI 面板/设置/UI 流相关 → **202 passed**；主线复跑 `test_new_spacetime_panel + test_ai_panel_image_attachments + test_ai_panel_behavior` → **97 passed**。
+
+**诚实边界**：对话区不做图片缩略图/大图预览，只做附件 chip + 文本回答；斜杠命令不消费附件（附件留在输入区，避免静默丢弃）；agent 错误信封原文可能带本机路径（后端既有诊断文案），面板自身不把路径拼进用户文本或日志。
+
+## 167. 时空：TimelineEngine AOS/LOS 二分收敛（2026-11-22）
+
+**做了什么**：`TimelineEngine.compute_passes` 在 60 秒粗扫基础上，对仰角跨 `min_elevation` 的相邻点做 AOS/LOS 二分，容差取 `sat_passes.PASS_BISECT_TOL_S`（0.5 秒，与 `grid_manifest()["crossing_precision_s"]` 同值）；二分成功后重算升落方位角。新增 `aos_refined`/`los_refined`/`crossing_tol_s`（向后兼容默认 False/0）；端点同侧、仰角非有限、区间退化、传播失败或窗末截断时保留粗扫网格点并如实标未收敛。面板提示文案同步：全部收敛给「±0.5 秒」，存在未收敛过境时明说「退回粗扫网格点，按 ≤60 秒承诺」。
+
+**验证**：固定 ISS 夹具（2008-09-20 06:00Z，39.9°N/116.4°E，5° 门）实测 AOS 仰角残差 +2.3930° → −0.0131°、LOS −2.8105° → −0.0111°；AOS 距最近网格点 −29.8 s、LOS +20.4 s。反证：把容差放大到 3600 s 后退回网格点，`aos_refined=los_refined=False`。`pytest tests/test_pass_time_single_source.py tests/test_new_spacetime_timeline.py tests/test_pass_step_alignment.py -q` → **28 passed**；面板/策略/定时器七文件 → **58 passed**；主线复跑 `test_pass_time_single_source + test_new_spacetime_timeline + test_new_spacetime_panel` → **42 passed**。
+
+**诚实边界**：未与 `sat_passes.predict_passes` 做逐秒数值对拍；0.5 秒二分容差不等价于固定角度精度（残差随仰角速率变化）；未复测全表 72 小时性能（每次升落新增约 8 次 SGP4 传播）。
+
+## 168. 空间/头显：0 帧空态诚实化 + 回放 CLI 对读（2026-11-22）
+
+**做了什么**：`SpectrumFormat.emptyHint(bundle)` 区分「未加载」与「已加载但 0 帧」：已加载且无频谱帧时显示「这段观测没有频谱帧：<原因>」，原因只从包内 `blockers` 原样引用并按频谱/IQ/瀑布关键词筛选；站址/时刻类阻塞不会被冒充成频谱原因，无相关条目只写标题。`SpectrumCanvas` 两态分开，`Main.kt` 传入提示。另补 `replay_observation.py --list` 与包内时间轴逐条对读测试：`sample` 相等、`t(s) == samples / sample_rate_hz`（1e-6）。
+
+**验证**：`pytest tests/test_spatial_consistency.py tests/test_spatial_bundle.py tests/test_star_catalog_brightest.py tests/test_identity_redline.py -q` → **55 passed**；主线复跑前两文件 → **43 passed**；JVM `testDebugUnitTest` → **BUILD SUCCESSFUL**，14 类 / 114 条 / 0 失败；`assembleDebug` → **BUILD SUCCESSFUL**，APK 29,454,810 字节；新文案已进入 APK dex。
+
+**诚实边界**：S5 真机/模拟器录制包截图与录屏、S6 设备四窗联动与高亮目视仍 `not_verified`（缺可用模拟器/真机才能验）；S7 的 GNSS/无 GNSS 双档案需真机，且真实坐标不入库；S8.1/S8.2/S8.3 依赖设备输入，未动。
+
+## 169. 星表选择测试与自行链对齐（维护项，2026-11-22）
+
+**发现**：`mbdsdr_ai/tests/test_star_catalog.py::test_selection_uses_existing_coordinate_chain` 仍用 `j2000_to_altaz(vec_from_radec(...))` 作参考链，而 `select_for_view` 的 az/alt 已含 J2000→观测时刻的恒星自行（Task 12）。高自行星（天狼星）差约 0.5″，`abs=1e-6` 断言稳定红；这是测试与实现漂移，不是星表或坐标链缺陷。
+
+**做了什么**：参考链改为用同一份 `skyengine.proper_motion` 表先传播再 `j2000_to_altaz`；断言仍按 1e-6 度钉死，没有放松。
+
+**验证**：`pytest mbdsdr_ai/tests/test_star_catalog.py -q` → **29 passed**；`pytest mbdsdr_ai/tests -q` → **3024 passed / 4 skipped / 0 failed / 202 subtests**（188.50 s）。
+
+**诚实边界**：修的是测试参考链，没有改星表坐标；自行表缺失时参考链退回静态，与 `select_for_view` 同口径。
+
+## 170. 落地页补 AI 看图与秒级过境（2026-11-22）
+
+**做了什么**：更新 `mbdsdr-landing.html`：meta description、hero lede 与能力芯片加入「AI 还能直接看图：截图、星图、频谱图都能问它」「AI 看图」；跑马灯两段各加「Qwen3-VL · 看图问信号」；L01 时空层写「卫星过境升落二分到 0.5 秒」并加标签；L05 智能层补「也能直接附图…回答仍要指回真实读数」与「多模态看图」标签。文案按实现口径写，不承诺未验能力。
+
+**验证**：本地 `python -m http.server 8765` + 浏览器实测：hero 含「AI 看图」、marquee 含「Qwen3-VL · 看图问信号」、L05 含「多模态看图」；桌面宽度 `scrollWidth <= clientWidth` 无横向滚动；console 无错误。
+
+**诚实边界**：只验桌面视口与文案存在；移动端布局本轮未重新截图；页面为视觉示意（页脚已注明），不包含真实设备读数。
+
+## 171. 时空：TimelineEngine ↔ sat_passes 过境逐秒对拍（2026-11-22）
+
+**做了什么**：新增参数化对拍用例（两条夹具：2008 ISS / 39.9°N,116.4°E / 24 h / 5°；2026 ISS / 0°,0° / 24 h / 10°），同一 TLE、站址、UTC 起点、仰角门下整跑 `TimelineEngine.compute_passes` 与 `sat_passes.predict_passes`，按 AOS 升序一对一配对；条数不等或窗末截断口径不一致直接判红，不静默跳过。断言 AOS/LOS ≤1.0 s、中天 ≤2.0 s、最大仰角 ≤0.5°。
+
+**实测**：2008 夹具 AOS ≤0.469 s（6 条中 2 条 0.469，其余 0）、LOS 全 0、中天 ≤1.531 s、仰角 ≤0.0055°；2026 夹具 AOS/LOS/中天全 0、仰角 ≤0.0010°。诊断性 60 s 逐点仰角最大 |Δ| 0.0058°/0.0034°。`pytest tests/test_pass_time_single_source.py tests/test_new_spacetime_timeline.py -q` → **25 passed**；sat_passes 相关五文件 → **25 passed**；身份红线 6 passed。
+
+**诚实边界**：只覆盖 ISS 倾角与 24 h 窗；极轨/太阳同步、GEO/HEO 大偏心率、<5° 擦边、>24 h 窗末截断未覆盖；只对拍时刻与峰值仰角，方位角/距离/多普勒未对拍。
+
+## 172. 空间/头显：默认布局单一真源 + 跳转决策纯函数（2026-11-22）
+
+**做了什么**：新增 `WindowLayout`（三伴随窗口尺寸/锚点/方位 + `resetPlan()`：全部 CLOSE→OPEN，不关主窗），`Main.kt` 的容器尺寸、placement、开窗与「复位布局」按钮统一读它；回看选中行改为 `remember(loadKey)`，换包清空。新增 `TimelineFormat.JumpDecision` / `jumpDecision()`，逐项说明缺 `at_s`/`samples`/`sample_rate_hz`，修掉「有 samples、缺采样率」时误报缺 samples 的问题。
+
+**验证**：JVM `testDebugUnitTest` → **BUILD SUCCESSFUL**，15 类 / 126 条 / 0 失败 / 0 跳过（基线 14/114）；`assembleDebug` → **BUILD SUCCESSFUL**，APK 29,496,750 字节；`pytest tests/test_spatial_consistency.py tests/test_spatial_bundle.py tests/test_star_catalog_brightest.py tests/test_identity_redline.py -q` → **55 passed**；主线复跑前两文件 → **43 passed**。
+
+**诚实边界**：S8.1 的设备实际落位、S8.2/S8.3 手柄/手势/视线、S6 跳转目视与灰字仍 `not_verified`（本机模拟器启动即崩、无真机，缺设备才能验）；复位机制是 close+reopen，不是直接定位，真机需验证伴随窗口播放进度是否被重开复位。
+
+## 173. 真机端到端：录制→观测档案→空间包→回放，并修掉录音泵丢样（2026-11-22）
+
+**做了什么**：用真实 RTL-SDR（FC0012）+ GNSS（COM4）跑完整链路：GNSS 定位 → 控制器连接/调谐/增益 → 录 2.5 s IQ → 自动落观测档案 → `export_spatial_bundle.py` 出 `mbdsdr.spatial/1` → `replay_observation.py` 出回放计划。过程中发现录音泵在每次非空读后固定 `wait(0.005)`，2.4 MS/s 下大量丢样（同一脚本：修前 2.5 s 墙钟仅 1,277,952 样本≈0.53 s；修后 5,971,968 样本≈2.49 s，接近 2.4 MS/s 满速）。改为仅空读或调试源退避，真机有界读自然按采样率阻塞。
+
+**证据**：修后快照 `time.source=gnss`、`site.source=gnss`、`site.alt_m` 有值；观测档案 `evidence=real_hw`、`timeline=['record_start','tune','record_stop']`、1 个产物；空间包 `site.source=gnss`、`alt_m` 有值、8 帧、200 星、3 条时间轴、`blockers=[]`；回放计划 `can_replay=true`、3 步、`at_s/sample` 与 2.4 MS/s 对齐。5 s 录制复测 → 11,960,320 样本 ≈ 4.983 s（99.7% 实时）；30 s 复测 → 71,884,800 样本 ≈ 29.952 s（99.8% 实时）；120 s 复测 → 287,350,784 样本 ≈ 119.73 s（99.8% 实时），`sample_loss=None`。录音相关回归 `tests/test_recording_observation.py` 等四文件 **37 passed**。
+
+**诚实边界**：只验 2.5 s / 5 s / 30 s / 120 s 四次录制；未验更长时间的硬件缓冲溢出边界；未做与 `rtl_power` 的逐点幅度对拍；GNSS 天线仍报 `ANTENNA OPEN`（定位可用但天线状态异常）。
+
+## 174. 星表文档与实现对齐（维护项，2026-11-22）
+
+**发现**：`docs/star-catalog.md` §7 第 2 条仍写「自行未做」、第 7 条仍写「UI 接线未做」；`docs/PRD.md` 第 27 行仍指向旧的 `rf_sky_view.py:3268-3292/3320-3345`。实际 `select_for_view` 已接自行传播，`rf_sky_view` 约 :5805 起已走全星表选择。
+
+**做了什么**：第 2 条改为「已接入，缺不确定度/历元误差预算」；第 7 条改为「已接线，拾取与绘制共用 selection」；PRD 行号改为约 :5805，并标注两处已同步。未改代码。
+
+**诚实边界**：只核了自行与 UI 接线两处；星表性能、低配机帧率仍未复测。
+
+## 175. AI 对话图片缩略图 + 点击预览（2026-11-22）
+
+**做了什么**：`desktop/ai_panel.py` 用户气泡内嵌缩略图（最大边 144 px，等比），点击弹非模态 `QDialog` 大图；坏图显示「无法预览：文件名」，不抛异常。因 `QTextEdit` 不支持 `anchorClicked`、也不能嵌 QWidget，采用 `_ConversationView` 子类 + `mouseReleaseEvent`/`anchorAt` 的文档内嵌图方案；`_thumb_sources` 只存进程内路径用于点击重读，会话文本/`toHtml()`/日志仍不含本机路径。`clear_conversation` 一并清理。
+
+**验证**：`pytest tests/test_ai_panel_image_attachments.py tests/test_ai_panel_behavior.py tests/test_ui_wiring_audit.py -q` → **93 passed**；`mbdsdr_ai/tests -q` 全包 → **3024 passed / 4 skipped / 0 failed**（189.45 s）。
+
+**诚实边界**：缩略图不持久化（会话不落盘）；预览不支持缩放/左右切换；未做真机窗口人工视觉走查（无头 Qt 断言覆盖尺寸/比例/点击/坏图）。
+
+## 176. 真机环形验收 R1–R5 + R4 导频测量纠偏（2026-11-22）
+
+**做了什么**：跑真机五环：R1 枚举/开关 10+5 次、R2 五点调谐回读+增益/AGC、R3 频谱平移对拍+rtl_fm 音频、R4 信号级 19 kHz 导频+链路音频、R5 录音流式增长与采样率 sidecar。R4 首次 FAIL：旧实现用 15–23 kHz 全带 argmax，弱导频时把 22.7 kHz 噪声峰当导频（pilot_hz 22759/18475）；改为只在 18.7–19.3 kHz 找峰、噪声中位数排除导频窗口，并新增 `pilot_metrics()` 与三条合成 MPX 测试（含 22.7 kHz 强峰反证）。另把录音泵退避策略抽成 `_pump_backoff_seconds()` 并加三条守卫测试，防止「真机非空读固定 sleep」回潮。
+
+**证据**：R1 PASS（10/10 + 5/5，末次新句柄可开）；R2 PASS（5 个频点回读全等，gains −9.9…19.2 dB，ppm≈−3.6）；R3 PASS（±400k 平移误差 −1.5/+399.7/−401.3 kHz，rtl_fm 237568 样本）；R4 PASS（导频 19171 Hz、8.9 dB 高于邻域；音频 2 声道、RMS 0.0701、<15k 能量 16.6×）；R5 PASS（13,369,344→26,738,688 字节，3,358,720 样本，2.4/1.2 MSps sidecar 正确）。新增/回归 `test_recorder_pump_backoff + test_real_hw_pilot_metric + recording/observation` → **26 passed**。
+
+**诚实边界**：R4 导频强度随电台而变（同日四台实测 7.4–11.0 dB），阈值 6 dB 配 200 Hz 频率窗只用于「是否验到导频」，不代表解调音质；R6/R7 结果见 §178；未验数分钟以上连续录制。
+
+## 177. 空间/头显：频谱来源不再冒充、站址来源口语化（2026-11-22）
+
+**做了什么**：`spatial_bundle.spectrum.source` 改为只有确有帧才 `recorded`，0 帧写 `none`；头显 `SpectrumFormat.sourceText(source, frameCount)` 对 0 帧一律显示「无频谱帧」，旧包即使仍写 `recorded` 也不会在空态旁说「录制回放」。新增 `StationFormat.sourceText()`：`gnss→GNSS`、`manual→手填`、`none/缺失→未知`，未知来源原样保留；站址行与未知行共用。跨语言未知态夹具同步 `spectrum.source=none`，仍由导出 CLI 复算逐键比对。
+
+**验证**：`pytest tests/test_spatial_bundle.py tests/test_spatial_consistency.py tests/test_star_catalog_brightest.py tests/test_identity_redline.py -q` → **56 passed**；主线复跑 spatial bundle/consistency + 本轮 helper → **50 passed**；JVM `testDebugUnitTest --rerun-tasks` → **BUILD SUCCESSFUL**，15 类 / **128 条 / 0 失败 / 0 错误 / 0 跳过**；`assembleDebug` → **BUILD SUCCESSFUL**，APK 29,503,306 字节。
+
+**诚实边界**：S5/S6/S7/S8 父任务仍 `not_verified`——设备/模拟器不可用（Intel UHD 模拟器启动即崩），窗口排布、点按跳转、灰字/高亮、四窗联动均未目视；S7 的 GNSS/无 GNSS 双档案设备重放仍缺。
+
+## 178. 真机 R6/R7：GNSS 站址注入 + 便携包启动（2026-11-22）
+
+**做了什么**：R6 原先未接 GNSS，过境查询全部 `station_untrusted`；改为先启动 `RealGNSSMonitor`、把 fix 写入 `SDRController.set_ground_station_from_gnss`，再查过境。R7 直接跑便携包 offscreen 启动。
+
+**证据**：R6 → `station_source=gnss`、18 星；NOAA 19/18/15 三条真实过境（maxEl 33.37°/68.69°/12.09°）；NORAD 44016 `identity_mismatch`（如实拒绝）；APRS 30 s 窗口 121 个候选帧全 CRC 失败、无 OTA 报文，整体 **UNVERIFIABLE**（当地无台活动属正常，不是解码链崩溃）。R7 → PASS：便携包 `mbdsdr.exe` 干净 PATH + offscreen + NULL_AUDIO，exit 0，3.7 s，PNG 13,815 字节。
+
+**诚实边界**：R6 仍无真实 APRS 报文证据（需当地有台发射）；ADS-B 受 FC0012 调谐上限 948.6 MHz 物理不可达；R7 只验启动与截图，不验交互。
+
+## 179. 录音墙钟对账：短录不再静默（2026-11-22）
+
+**做了什么**：`stop_recording` 现在用「录制开始 monotonic 时间 × 当时采样率」对账实际样本（含解码线程分流样本），短录超过 2% 时在返回值写 `sample_loss` 证据并追加 `sample_loss` 时间轴事件（wall/expected/accounted/ratio/reason）。新增纯函数 `_sample_shortfall()` 与 7 条测试；`observation_record.TIMELINE_KINDS`、桌面 `replay_timeline._EVENT_LABELS`、头显 `TimelineFormat.LABELS` 同步新增「录制短录 / 样本丢失」，跨语言标签钉扎仍绿。
+
+**验证**：`pytest tests/test_sample_loss_detection.py -q` → **7 passed**；`test_spatial_consistency + recording/observation + replay_timeline` → **30 passed**；真机 3 s 录制 → 7,184,384 样本（≈2.993 s，99.8%），`sample_loss=None`（无误报）。
+
+**诚实边界**：2% 容差是经验值，未对「设备短暂丢样但整体达标」做逐块追溯；`sample_loss` 只说明总量不足，不定位具体丢样时刻。
+
+## 180. 短录告警到 CLI + 系统级双硬件自检（2026-11-22）
+
+**做了什么**：CLI 录制停止时若 `sample_loss` 存在，向 stderr 打「样本少于墙钟预期…已写入 sample_loss 时间轴」，不再只打印样本数。
+
+**证据**：`python scripts/system_diag.py` → SDR 五段 PASS（FC0012，2.4 MS/s / 100.1 MHz，256 样本 −13.2 dBFS）；GNSS 五段 PASS（COM4，18 星，`fix_quality=1`，`hdop=0.8`，完整 UTC），天线 `ANTENNA OPEN` 告警；总体 `verdict=ok`，退出码 0。
+
+**诚实边界**：系统自检只证明「能开、能出样例、能定位」；天线开路可能影响定位可用性；未验长时间稳定性。
+
+## 181. R7 便携包快照可读性 + 首屏视觉走查（2026-11-22）
+
+**问题**：R7 原先 offscreen 快照中文全是方框（13,815 字节），只能判活，不能看布局。根因是 offscreen 平台不自动加载系统字体。
+
+**做了什么**：R7 环境增加 `QT_QPA_FONTDIR=C:\Windows\Fonts`（可用既有环境变量覆盖）。复跑后快照 98,210 字节，中文正常渲染。
+
+**视觉走查（960×720 无头快照）**：主窗完整渲染；左侧「源与连接 / 设备信息」、中部频谱与 Smith/S21、右侧解码、底部状态栏均在；SDR 已连接真实硬件，97.750 MHz，RSSI 0.8 dBFS / SNR 8.0 dB；VNA 未接时 S11/Smith/S21 显示空态/占位，不画假曲线。
+
+**发现（待修 UI）**：960 宽下「设备信息」长文本右侧被裁切（如 librtlsdr 驱动说明），底部工具栏按钮也有溢出。底部 S-meter 标签是既有的弹性抽稀设计（tokens.h），不算缺陷；「设备信息」裁切已在 §182 修复源码，便携 dist 待重打包。
+
+**诚实边界**：这是无头快照，不是人眼在真机桌面上的交互走查；未验点击/拖动/缩放，D8「人工视觉走查」仍保持 `not_verified`。
+
+## 182. 桌面 960 宽「设备信息」裁切修复（2026-11-22）
+
+**问题**：R7 快照（960×720）里「来源」整段 provenance 被右侧裁切，显示到 librtlsdr 说明一半就断。
+
+**做了什么**：`devProvenanceLabel_` 默认只显示括号前主句（如「设备身份来自本机驱动查询」），完整 provenance 放 tooltip；四个设备信息 QLabel 统一 `Ignored/Preferred` 尺寸策略 + `minimumWidth(0)`，允许窄列收缩；新增 `ui/text_util.h::softBreakable()`（零宽空格）并用于主句，长 ASCII 标识可折行。新增 `cpp/tests/test_text_util.cpp` 3 条（6 个软断点、去 ZWSP 复原、纯中文不变），注册 ctest `text_util`。
+
+**验证**：`cmake --build build-local -j8` 通过；重建后的 `build-local/mbdsdr.exe` 960×720 快照：来源显示「设备身份来自本机驱动查询」完整不裁切，设备名/调谐/采样率行正常，快照 `D:\mbdsdr\output\cpp_rtl_fix_snapshot3.png`。`ctest --test-dir build` 全量 **164/164 passed**（含新增 `text_util`）。
+
+**诚实边界**：只验 960×720 无头快照；未在更窄/更宽窗口与真机人眼下走查；便携 dist 已在 §183 重打包，R7 复验带上了本修复。
+
+## 183. 便携包重打包 + 凭据门禁误报登记（2026-11-22）
+
+**问题**：重打便携包时 `windeployqt` 的 dxcompiler 警告被 PS 5.1 升级成终止错误；放行后又发现发布凭据门禁把 `Qt6Network.dll` / `qschannelbackend.dll` 里的 PEM 头常量当私钥，直接拒绝打包。
+
+**做了什么**：`package_windows.ps1` 对 `windeployqt` 临时 `ErrorActionPreference=Continue` 并合并 stderr，仍按退出码判失败；凭据门禁改走 `release_manifest.py --only secrets`，让 `ARTIFACT_SECRET_ALLOWLIST` 生效；为 `bin/Qt6Network.dll`、`bin/tls/qschannelbackend.dll` 登记 `pem-private-key` 误报（路径 + sha256 + 规则 + 2027-03-31 复核期限），未改扫描规则。
+
+**验证**：`pytest tests/test_release_secrets.py tests/test_secret_scan.py -q` → **24 passed**；`package_windows.ps1 -SkipBuild` 出包成功，zip SHA256 `43ffebfa…c171e0`，冒烟 PNG 108,828 字节；R7 复跑 **PASS**，新便携包快照「来源」完整显示「设备身份来自本机驱动查询」，不再裁切（`.tmp-tool-results/hw_acceptance/20261122_040337/portable_snapshot.png`）。
+
+**诚实边界**：只验 960×720 无头快照；zip 未上传服务器；Qt TLS DLL 的误报登记需在 2027-03-31 前复核（升级 Qt 后 sha 变化会自动重新红）。
+
+## 184. APRS 真机窗口无台活动的判定（2026-11-22）
+
+**背景**：R6 五次真机 144.64 MHz 采集（11-03 两段、11-16 一段、11-22 两段）解码全部 CRC 失败，候选帧 121–258 个，需要判断是「无台」还是解码链退化。
+
+**诊断**：对最近两段 48 kHz 录音做 10 ms 窗 RMS + 1200/2200 Hz 双音能量：全程 RMS 中位 0.281/0.281、峰值 0.365/0.360，无任何 10 ms 窗超过 3× 中位（`loud10ms=0`），即没有 AFSK 突发；峰值双音比虽高，但只是稳态噪声的单音偏置，不是 1200/2200 交替。
+
+**结论**：窗口内确实没有可解 APRS 突发，CRC 全失败是噪声候选的正常结果，不构成解码链退化证据；合成 fixture 仍通过，真机报文证据仍缺（需当地有台发射）。
+
+**诚实边界**：只分析最近两段；更早三段只看了解码统计（183–258 候选、0 报文）。高噪声底（RMS 0.28）本身可疑，可能来自 SDR 增益/天线（GNSS 天线 OPEN），未做前端增益复核。
+
+## 185. 默认增益 0 dB 的噪声底修复（2026-11-22）
+
+**发现**：控制器默认 `_gain_db=0.0` 在 FC0012 上实际下发 0 dB（离散表最近档 −4），144.64 MHz IQ RMS 0.274–0.289；而中档 7.1 dB 只有 0.058–0.063，噪声底低约 13–14 dB。APRS 采集的音频 RMS 0.28 与此吻合，是前端默认增益问题，不是解码链。
+
+**做了什么**：新增 `_resolve_default_gain(gain_db, tuner)`：0 dB 视为「未指定」，若调谐器离散表不含 0 dB 则取中档（FC0012 → 7.1）；显式非零值原样保留。`SDRController.connect` 与 `set_gain` 都走该归一；`RTLSDRBackend._apply_gain` 同步同口径（0 dB → 中档）。新增 2 条测试（后端吸附 + 控制器纯函数）。
+
+**验证**：`pytest tests/test_rtlsdr_gain_readback.py -q` → **9 passed**；真机同频 144.64 MHz：修前 `controller_gain=0.0`、IQ RMS 0.289；修后 `controller_gain=7.1`、IQ RMS 0.058（约 −14 dB）。R6 20 s 复跑：`station_source=gnss`、13 星、NOAA 18/15/19 三条过境；APRS 仍 78 候选/0 报文（窗口内无台，非回归）。
+
+**诚实边界**：只测 FC0012 一台/一频点；其他调谐器按各自离散表中档，未逐台实测；0 dB 现在语义为「默认/中档」，显式要 0 dB 的用户需选具体档位（表里无 0 时本来也无法精确下发）。
+
+## 186. 投影有效性域与跨域裁剪（参考 aladin-lite，2026-11-22）
+
+**背景**：星官连线原来「任一端不可见（相机背后/地平下）就整段丢弃」，大视场下折线在画面边缘整条消失；球极投影的对跖点还会给出有限哨兵值，被当成可画点画到钳制角上。
+
+**参考**：`reference/aladin-lite/src/core/src/math/projection/domain/`（LGPLv3，只读思路、代码零复制）把投影有效区域写成有符号距离（`sdf <= 0` 为域内），越界顶点推回边界。我们四个投影的域都是解析的，改用大圆弧二分求边界，不逐点 ray marching。
+
+**做了什么**：`celestial_geometry._BaseProjection` 新增 `is_valid_vec` / `validity_mask` / `domain_sdf` / `is_in_domain`（正射=单位圆盘、等距方位=半径 π 圆盘、透视/球极全平面；球极对跖点判无效）；`sky_interaction` 新增 `direction_is_drawable` 与 `clip_segment_to_domain`；`rf_sky_view` 把落屏拆成 `_layer_points_full`（点表 + 本帧 az/alt 数组），`_constel_path` 对「一内一外」的段裁到边界落笔。热点仍是每帧一次批量换算（frame-budget 测试仍绿）。手机端同口径：`sky_projection.dart` 的 `isDirectionDrawable` / `clipSegmentToSkyDomain` + `asterism_overlay.dart` 接线（查不到的 HIP 仍跳过，不编坐标）。
+
+**验证**：新增 `tests/test_sky_projection_domain.py` **9 passed**；投影/星官六文件 **72 passed**；全部 `tests/test_sky_*.py + tests/test_asterism_*.py` **1234 passed**。
+
+**反证**：同一输入（一端在相机背后）旧路径 `elementCount=0`、新路径 `2`（`D:\mbdsdr\output\_probe_t102_old_drop.py`）。性能 900×900、IAU+中国两层：3.81 → 5.84 ms/帧（中位；12 次二分，边界在画布外，精度不影响像素）。
+
+**诚实边界**：只接线星官连线；恒星/DSO 是点符号不需要裁，卫星轨线仍走既有地平穿越切分。Task 10.3（HiPS 图像层）**未做**——本地只有 `NGC.csv` 表列、没有可再分发的图像瓦片，且 spec 禁止联网，不做假图。
+
+## 187. 真机在位复核（SDR + GNSS，2026-11-22）
+
+**现状**：用户要求「SDR 和 GNSS 时刻都插着」。本轮在当前工作区（91 文件在途）上复跑：
+
+- **SDR**：`RTL2832U`（FC0012）在位；`python scripts/real_hw_acceptance.py --ring 1` → **PASS**（pyrtlsdr 10/10 + controller 5/5 开关，末次新句柄可开）；`--ring 2` → **PASS**（5 频点写回读全对、增益写回读全对、FM 峰偏 −912.5 Hz、ppm 估计 14.6）。
+- **GNSS**：`USB-SERIAL CH340 (COM4)` 在位；`python scripts/gnss_diag.py --port COM4` → 五段全 **PASS**：打开 → NMEA → 有效定位（12 星，hdop 0.9；坐标不落仓库）→ 完整 UTC `2026-11-21T20:24:25Z` → 天线状态观测到 `ANTENNA OPEN`。
+
+**诚实边界**：GNSS 天线 OPEN 是硬件/天线现状（定位仍可用），不是软件回归；本轮未重跑 R3–R7（频谱/解调/录制/APRS/便携包），它们依赖的信号环境与上一轮相同。
+
+## 188. 落地页同步本轮已验证能力（2026-11-22）
+
+**做了什么**（`D:\mbdsdr\mbdsdr-landing.html`，非仓库文件）：L01 写明「SDR 与 GNSS 同时在线才构成完整观测，缺哪个界面说哪个」；L02 补「大视场/边缘星官连线裁到投影有效域边界，不整条消失」；L03 补「默认增益从调谐器中档起步，不让 0 dB 抬噪底」；marquee 两半各加一条「SDR + GNSS · 同时在位」；新增 `VERIFIED / 现场验过` 三卡（RF 真机 / GNSS 真机 / SKY 离线），不含易过期测试计数。SKY 卡补充「没有 tetra3/ASTAP 时内置 quad 解算也能靠先验纠正小角度指向」（见 §189）。
+
+**验证**：静态检查 `D:\mbdsdr\output\_check_landing.py` → **PASS**（div/section/article 配平、无重复 id、marquee 20 spans 前后半逐字一致、5 条新增文案在位）；本地 `http.server` + browser-use 实渲染 → VERIFIED 标题、三张卡与「COM4 五段通过」可见，`scrollWidth == clientWidth` 无水平滚动。
+
+**诚实边界**：浏览器会话视口是窄屏（clientWidth 622），**宽屏三列并排只做了 CSS/结构静态确认，未截宽屏图**；页面仍是「界面示意，非实时运行截图」。
+
+## 189. 参考落地：quad 不变式 + 分层验证的星场解算（2026-11-22）
+
+**参考**：`reference/astrometry.net/solver/quad-utils.c` + `verify.c`。该仓 `LICENSE` 写明部分代码 BSD-3，但因 vendored GSL 等 GPL 依赖，**整份按 GPLv3 分发**——只读思路、代码零复制。
+
+**做了什么**：新增 `mbdsdr_ai/sky_field_solve.py`：
+- quad 规范描述子：最近点对作 A/B、`Cx≤Dx`、`mean(Cx,Dx)≤0.5`，平移/旋转/缩放不变且与输入顺序无关（镜像显式不支持）；
+- 匹配：格点邻域 + 4D 精确距离（20 星 = 4845 个 quad/侧）；
+- verify 两层：相似变换内点统计选候选 → 一阶位姿联合最小二乘（δaz/δalt/δroll/εfov，3×MAD 剔离群 + 两轮重线性化）；
+- 入口：`solve_similarity` / `solve_field`（先验 `ViewState` + 星表地平坐标）/ `solve_frame_builtin`（与 `sky_solve.solve_frame` 同一增量契约，不依赖 tetra3/ASTAP）。
+- 接线：`sky_pointing_pipeline` 支持 `solver="builtin"`；`solver=None` 且外部库不可用时自动回退到内置解算（星表来自本仓 HYG `select_for_view`），两边都失败时原因同时写明。
+
+**验证**：`tests/test_sky_field_solve.py` **13 passed**：描述子不变/顺序无关/退化、已知相似变换、无关星场拒绝、端到端、纯横滚符号、错误天区、20 星预算、内置入口与坏输入；「增量加回先验重投影」复现残差 <1 px。实测 20 星（1000×1000、透视 20°、真值 δaz 1.2°/δalt −0.8°/δroll 1.8°/fov×0.985）：**523 ms，δaz 1.202° / δalt −0.800° / δroll 1.802° / fov 0.98505 / 残差 0.01 px / 20 内点**。`tests/test_sky_pointing_pipeline.py` **23 passed**，含真实 HYG 星表 + 合成 0.3°/−0.2°/0.5° 误差恢复（210.300°/34.800°/roll 0.499°，管线残差等于注入真实偏差 0.317°）与自动回退。指向工具/端到端/检查脚本 **57 passed**。
+**契约调整**：`scripts/sky_pointing_check.py` 的退出码 3 从「仅 `solver_unavailable`」扩为「任何解算未完成」；AI 工具 `sky_pointing_check` 与 e2e 的失败文案改为同时写明外部库缺失 + 内置失败，不再把「内置也解不出」谎报成「没有解算器」。`docs/tool-availability.md` 的对应行按 `--only sky_pointing_check` 单工具审计结果同步（class/count 未变，仅 snippet 更新；全量重生成仍待下次复跑）。
+全部 `tests/test_sky_*.py + tests/test_asterism_*.py` **1249 passed**；typing/import/swallow 守卫 28 passed + 1 xfailed。
+
+**诚实边界**：仅合成星场验证几何，**真实相机图像/镜头畸变/检测噪声未验证**；`roll_delta` 是画面表观旋转（含视中心移动引起的局部竖直变化），不要与 `ViewState.rotation` 参数差逐字比较；已接指向管线 API，**尚未接 UI 与真实星点检测页面**；验证层是「内点 + 残差」，不是 astrometry.net 的 Bayes log-odds。
+
+## 190. spec Task 5 收口：默认星空只讲人话（2026-11-22）
+
+**做了什么**：确认默认 `focus_mode=True` 时星空画的是沉浸卡（位置/星空/天色），数值视轴 `AZ/ALT` 只出现在展开「详细」后的完整状态卡里；新增 `test_immersive_sky_card_uses_human_words_not_engineering_terms` 钉住「默认卡不含 az/alt/vmag/gmst/fov 与中文工程术语」，同时断言 `format_view_axis`（数值）与 `format_view_axis_human`（人话）两个 API 都还在——功能没删，只是默认不露。
+
+**验证**：`tests/test_default_surface_no_mechanism_terms.py` **4 passed**（默认可见文本、展开九项读数、沉浸卡人话、底层机制词）。
+
+**诚实边界**：断言读的是**绘制文本的生产者/几何内容**（`_immersive_card_geometry` + 格式化函数），不是对像素做 OCR；未截图比对渲染效果。spec 侧 Task 5 / 5.1–5.4 与 checklist 对应行已勾，证据见 `.trae/specs/settle-asterism-overlay-single-source/tasks.md`。
+
+## 191. K19 源码文本 pin 棘轮收口（2026-11-22）
+
+**根因**：`tests/test_pass_time_single_source.py` 的 14 处新增 pin 未登记，棘轮按「新增即红」拦住。逐条判定后确认都是**只能文本断言**的文档/跨文件守卫：TimelineEngine 台账行（数值由 `grid_manifest()` 拼出；负向守卫「无细扫/7.6」；定性口径「不是卫星位置精度/保留粗扫网格点/AOS-LOS 二分」）与 `agent`/`controller`/`sdr_tools` 的「必须引用 `accuracy_note` 且不得再手写旧秒数」守卫。
+
+**处置**：按棘轮允许的例外写入 `docs/source-pin-ratchet-baseline.json`（`owner=时间线（AOS/LOS 二分）` + 逐条 reason），基线 **58→72**，`tests/test_source_pin_ratchet.py::BUILT_AT` 同步 72，并在模块 docstring 写明追加缘由。
+
+**验证**：`pytest tests/test_source_pin_ratchet.py tests/test_pass_time_single_source.py -q` → **21 passed**；`tests/test_help_path_truthfulness.py` → **17 passed**（另一条存量红已不在）；docs/claims/coordination/identity **23 passed**，known-red 守卫 **3 passed**。
+
+**诚实边界**：未提交，K19 条目保留「待提交后换绑 hash」；本轮未整段复跑全量 `tests/`（原生崩溃需分段），所以 Task 7.2 仍不勾。
+
+## 192. 落地页补「守正创新」方法区（2026-11-22）
+
+**做了什么**（`D:\mbdsdr\mbdsdr-landing.html`，非仓库文件）：在「一个夜晚，四个动作」与「VERIFIED / 现场验过」之间新增 `METHOD / 守正创新` 区，四张卡：读参考 / 自己写 / 对拍 / 留边界。措辞只写已发生的事实（aladin-lite、astrometry.net、OpenNGC 只读思路；quad 不变式/投影有效域/相似变换按本仓模型重写；行为断言优先于源码 pin；真机未跑就写未验证），不含易过期计数。
+
+**验证**：静态检查 `D:\mbdsdr\output\_check_landing.py` → **PASS**（标签配平、无重复 id、marquee 两半一致、新增 6 条文案在位）；本地 `http.server` + browser-use 实渲染 → 区块位于四动作与 VERIFIED 之间，标题「先读懂，再自己写」与四张卡（读参考/自己写/对拍/留边界）可见，`scrollWidth == clientWidth`，无水平滚动。
+
+**诚实边界**：浏览器会话仍是窄视口（622px），宽屏四列并排只由既有 `.principles` 响应式规则保证，未截宽屏图。
+
+## 193. spec Task 8 收口：手机页面筛选（2026-11-22）
+
+**做了什么**：盘点 `mobile/lib/pages` 的 9 个 `.dart`。主入口 `home_shell.dart` 只有 6 个宽屏/5 个窄屏导航位（频谱、星空、AI、录音、动态、设置），都服务观测/识别主链或事后回看；其余全在一级入口之外——`PointingPage` 由星空页 push（`sky_page.dart:524`）、`ToolsCatalogPage` 由 AI 页 push（`chat_page.dart:692`）、`HelpPage` 由外壳菜单 push（`home_shell.dart:204`）、`SpacetimeStatusCard` 是星空页内嵌组件（`sky_page.dart:584`）而非独立页。
+
+**结论**：非核心页本来就不在一级导航，**无需再降级/合并，也未新增页面**；Task 8 / 8.3 勾选，8.1/8.2 既有证据保留（8.2 复跑计数随后由 §194 更新为 533 passed）。
+
+**诚实边界**：只做页面入口与职责筛选，不改页面内容；真机安装/罗盘/IMU/帧率仍未验证（见 Task 9.2 与 8.2 的 not_verified）。
+
+## 194. spec Task 6.1 收口：手机授时面板移入设置页（2026-11-22）
+
+**做了什么**：按 6.1 盘点里「只在展开的专业面板/设置页显示」的建议落地，**保留诚实状态、只挪位置**：
+
+- `mobile/lib/pages/spectrum_page.dart` 删除内嵌 `TimingPanel`。它此前在 `_ControlPanel` 里常驻（不论连接与否），1 Hz 计时器一直跑；观测主界面不再出现授时读数与工程口径。
+- `mobile/lib/pages/settings_page.dart` 在「设备信息」之后新增「时间与授时」分区：`ExpansionTile(maintainState: false)` **默认收起**——收起时子组件不创建（计时器不跑），展开才创建 `TimingPanel`，再收起即销毁并取消计时器。面板内保留系统钟 + GNSS 三态与「不伪造 fix」说明（`settingsTimingHelp`）。
+- 三语 arb 同步新增 `settingsSectionTiming` / `settingsTimingHelp`，`flutter gen-l10n` 重新生成；桌面 `new_spacetime_panel` 不动（本来就在右栏页签、默认不可见，已符合「专业面板可选可达」）。
+
+**验证**：新增 `mobile/test/timing_panel_placement_test.dart` **2 passed**——频谱页 `find.byType(TimingPanel)` 为空且无「无 GNSS 授时」；设置页收起不创建、展开出现「无 GNSS 授时」与 help、再收起 `findsNothing`（证明组件销毁）。`flutter test` 全量 **533 passed / 0 failed**（24 s）；`flutter analyze` **0 error / 0 warning / 63 info**（+1 为新测试文件既有的 `deprecated_member_use`，日志 `D:\mbdsdr\output\flutter_analyze_ab45.log`）。`mobile/README.md` 与 spec Task 6/6.1、7.1、8.2 台账同步。
+
+**诚实边界**：测试只断言组件是否被创建/销毁，**未在真机上点开看排版**；真机安装运行、罗盘/IMU 指向精度、星表渲染帧率仍未验证。
+
+## 195. 全量分段回归收口（ab45→ab47）与三处真回归修复（2026-11-22）
+
+**为什么跑两轮**：ab45 首轮（group0 **4820 passed + 1 failed**；group1 **5342 passed + 2 failed**）暴露的是工作区里**上次全量（ab44，00:23）之后才合入、尚未被全量覆盖**的真问题；修完后在**冻结树**上重跑 ab46（group1）/ab47（group0）。判据不降级、断言不放宽。
+
+**三处真回归（均自引入，非存量）**：
+
+1. `tests/test_error_catalog_guard.py::test_no_wild_codes`：`sky_field_solve.py` 把 7 个结构化码放进返回字典（`bad_points` / `no_match` / `no_consistent_transform` / `too_few_catalog_stars` / `bad_widget_size` / `bad_projection` / `pose_fit_failed`），但 `error_catalog` 未登记。修法：`mbdsdr_ai/error_catalog.py` 增 7 条 `ErrorSpec`（层/可重试/含义/文案/建议），`docs/error-catalog.md` 同步镜像；**不删分支、不缩扫描面**。
+2. `tests/test_tooltip_guard.py` 两条：`desktop/ai_panel.py:1371` 的附件删除按钮 tooltip「移除附件」长度 <12 且与按钮语义重复。修法：改成「移除这个附件（不会删除本地文件）」，**基线不加条目**（该守卫只允许收缩）。
+3. 连带暴露：`test_error_remedy_links` 的缺口/删条目两条因新增 7 码变红——在 `desktop/error_remedy.py` 的 `NO_ENTRY_REASONS` 增一组「星场解算/识别细项」并写明原因（只经解算管线/检查脚本/AI 工具返回，桌面星图不渲染该码）；`docs/error-code-visibility.md` 顶部补 2026-11-22 增补（历史 129/114 标为旧快照，总数以 `len(ERRORS)` 为准，本轮实测 **197**，不手写）。
+
+**逐项验证**：`pytest tests/test_error_catalog_guard.py` → **7 passed**；错误族 5 文件（`test_error_remedy_links` / `test_troubleshooting_help` / `test_error_catalog_guard` / `test_tooltip_guard` / `test_link_error_codes`）→ **49 passed**。
+
+**全量（冻结树，两轮不相交文件组）**：
+
+- ab47 group0（468 文件）：**4821 passed / 4 skipped / 3 xfailed / 0 failed**，1869.61 s，`EXIT=0`（`D:\mbdsdr\output\ab47_group0.log`）。
+- ab46 group1（467 文件）：**5344 passed / 8 skipped / 2 xfailed / 0 failed / 29 subtests passed**，952.65 s，`EXIT=0`（`D:\mbdsdr\output\ab46_group1.log`）。
+- 合计 **10165 passed / 0 failed**。两次运行期间工作区无任何代码/文档改动（最后一次编辑 06:08:48，两轮分别在 06:41 与 07:03 之后开跑）。
+
+**中途一条非确定性红（如实记录）**：ab46 group0 的 `test_network_resource_leaks::test_spyserver_connect_disconnect_200_cycles_no_resource_growth` 在最后窗口报 `handles 593 → 598 (+5, 容差 2)`（同时 `num_threads 39→40`，在容差内）。同一用例单跑 **3/3 passed**（10.38 / 4.49 / 4.56 s），ab47 整组复跑绿。**判据与容差一字未改**，按「整套进程句柄读数受同进程其它线程收尾影响」记为套件上下文抖动，不据此放宽阈值。
+
+**真机在位复核（用户要求 SDR + GNSS 始终插着）**：RTL2832U（FC0012）在位；`real_hw_acceptance.py --ring 1` **PASS**（pyrtlsdr 10/10 + controller 5/5 开关成功，末次新句柄可开）；`--ring 2` **PASS**（5 频点调谐回读全对、5 档增益写回读全对、FM 峰偏 18262.7 Hz、ppm 估计 −124.7）。GNSS CH340（COM4）在位；`gnss_diag.py --port COM4` **五段全 PASS**：打开 → NMEA → 有效定位（14 星，hdop 1.1）→ 完整 UTC `2026-11-21T23:35:01Z` → 天线状态观测到 `ANTENNA OPEN`。
+
+**诚实边界**：GNSS `ANTENNA OPEN` 是天线硬件现状（定位仍可用），不是软件回归；R3–R7 未重跑；全量只覆盖桌面 Python `tests/`，手机端另见 §194 的 `flutter test` 533 passed；未提交。
+
+## 196. 落地页同步「机制不上主界面」+ 手机 debug 包复跑（2026-11-22）
+
+**落地页**（`D:\mbdsdr\mbdsdr-landing.html`，非仓库文件）：把 §194 的行为写进两条已有规则，不新增区块——RULE 02「不挡路」补「授时、坐标链这类底层机制根本不上主界面」；RULE 03「不打扰夜」补「手机把授时收进设置页折叠区，不展开就不创建控件、计时器不跑」。措辞只写已发生的行为，不含测试计数。
+
+**验证**：`python output\_check_landing.py` → **PASS**（div 128/128、section 9/9、article 13/13、main/footer 配平、无重复 id、marquee 20 spans 前后半一致、METHOD/VERIFIED 既有 11 条文案在位）。本地 `http.server` + 浏览器实渲染（窄视口 622 px）：两张卡片文案逐字在位，`scrollWidth == clientWidth == 622`，无水平滚动。
+
+**手机 debug 包复跑**：`flutter build apk --debug` → **成功**（Gradle `assembleDebug` 44.8 s，`build/app/outputs/flutter-apk/app-debug.apk` **190,110,524 B**）。工具链只给两条前瞻告警：AGP 9.1.1 将不再支持（建议 ≥9.3.1）、Kotlin 2.4.10 建议 ≥2.4.20；**不影响本次出包，未擅自升级**（升级需单独回归）。`mobile/README.md` 与 spec Task 8.2 的 not_verified 行已同步：「能出包」改为实测成功，真机安装/罗盘/IMU/帧率仍保持未验证。
+
+**诚实边界**：浏览器实渲染仍是**窄视口（622 px）**，宽屏并排未截图；APK 成功只证明可编译出包，**不等于真机可运行**。
+
+## 197. 工具可用性账本全量重生成 + 认知门槛清单收口（2026-11-22）
+
+**做了什么**：§189 留下的「`docs/tool-availability.md` 全量重生成仍待下次复跑」本轮兑现。先跑 `python scripts/tool_availability_audit.py --no-write --json D:\mbdsdr\output\tool_audit_ab48.json` 获取全量审计记录（脚本自带 `QT_QPA_PLATFORM=offscreen` + `MBDSDR_NO_HW=1` + `MBDSDR_NULL_AUDIO=1` + `MBDSDR_OFFLINE=1`，**无真机、无联网**），再用同一脚本的 `render_md()` 从这份 JSON 渲染落盘——**不再重复探测**，文档与生成器同源。
+
+**结果**：`total=520`，**一类 413 / 二类 107 / 三类 0 / 四类 0**（分类 78 个）。与旧文档相比 diff 仅 **+40 / −34 行**：总数与分类数更新；临时路径/返回字节数随本轮运行刷新；`sky_pointing_check` 的一行从 `solver_unavailable` 变为 `solver_failed（…；内置解算：没有 quad 描述子落在容差内）`，与 §189 的契约调整一致（外部库缺失时内置解算也失败，原因同时写明）。
+
+**验证**：`pytest tests/test_tool_availability_ledger.py tests/test_docs_consistency_audit.py tests/test_tool_surface_audit.py` → **17 passed**。
+
+**清单收口**：`checklist.md` 三项由「未勾」改为已勾并写明证据——规则与盘点表在位；152 个源码 Dart 全部纳入 analyze 且 debug APK 实测出包（「未编译」缺口消失，真机运行仍 `not_verified`）；本轮没有往主路径加读数/面板/新依赖（反而把授时移出主界面）。仍未勾的两项保持诚实：授时「只进日志」的字面口径（设置页仍可见诚实状态，属已接受的产品取舍）、真机帧率（无设备）。
+
+**诚实边界**：审计为**无真机替身环境**，`一类 413` 只代表「工具在替身输入下能真跑并返回 data」，不代表真机全链路；未提交。
+
+## 198. C++ 侧重建 + ctest 全绿（2026-11-22）
+
+**为什么本轮补**：spec Task 7 的收口条件包含「ctest 目标全绿」，此前只跑了 Python 侧。本轮把 C++ 侧也按现状重验：
+
+- 增量重建：`cmake --build D:\mbdsdr\build_cpp -j 8`（MinGW Makefiles / Release；构建目录 `cmake` 3.x 配置，Qt 5/6 工具链在 `C:/QtLocal`）→ **100% 成功**（含 163 个可执行目标）。
+- 测试：`ctest --output-on-failure -j 4` → **164/164 passed / 0 failed**，`Total Test time (real) = 76.75 s`，`EXIT=0`；日志 `D:\mbdsdr\output\ctest_ab48.log`。标签统计：`mainwindow` 8 条（31.68 s·proc）、`slow` 18 条（167.17 s·proc）。
+- 计数校正：spec 原文写「ctest 158 目标」，实际注册数已是 **164**，已在 `.trae/specs/build-p0-capability-tools/tasks.md` 的 Task 7 下按实数补记，不改旧文案里的历史数字。
+
+**诚实边界**：ctest 是 **C++ 子项目**（`cpp/`）的测试，不等于桌面 Python 应用的全链路；CI 8 job 与提交推送仍待用户裁决。本轮未改 C++ 源码，重建只是把构建目录与当前源码对齐；未提交。
+
+## 199. 真机七环补跑：R3/R4/R5/R7 PASS，R6 诚实标 UNVERIFIABLE（2026-11-22）
+
+**做了什么**：§195 只重跑了 R1/R2，本轮把剩余环一次补上（`python scripts/real_hw_acceptance.py --ring 3..7`，每环单独结果 JSON）：
+
+- **R3 频谱正确性（对拍）**：**PASS**（`…/20261122_080826/results.json`）。
+- **R4 解调与音频链路（静音）**：**PASS**（`…/20261122_080843/results.json`）。
+- **R5 录音落盘**：**PASS**（`…/20261122_080851/results.json`）。
+- **R7 便携包真机启动**：**PASS**（`…/20261122_080949/results.json`）。
+- **R6 数字模式解码**：**UNVERIFIABLE（不是 PASS，也不是软件回归）**，`…/20261122_080900/results.json` 原文：
+  - ADS-B：`FC0012 调谐上限约 948.6 MHz < 1090 MHz（物理不可达）`；
+  - APRS：31.0 s 窗口内 `169 个候选帧全部 CRC-16 失败（丢弃 104）`，`external_tools_available=[]`；结果注明「当地时段无台活动属正常；解码链已在真实 OTA 数据上跑通无崩溃」；
+  - `pass_44016: identity_mismatch`（逐星状态原样保留，未折叠成成功）；
+  - `station_source: gnss`（R6 查询使用 GNSS 站址链路）。
+
+**诚实边界**：R6 的「不解出」由**硬件频段上限 + 当地无台活动**决定，不据此宣称数字解码已验证；七环每次末尾都确认「设备可被新句柄打开（已释放）」，SDR 未被遗留占用。本轮未改任何代码。**落地页同步**：`VERIFIED` 的 RF 卡补「频谱对拍、解调与音频、录音落盘、便携包启动也在本机逐环跑通；1090 MHz 超出本机调谐上限时如实标「不可验」」，`_check_landing.py` → **PASS**。
+
+## 200. 手机小屏布局守卫 + R6 加长窗口复测（2026-11-22）
+
+**手机端补一条小屏守卫**：`mobile/test/timing_panel_placement_test.dart` 增「320×640 展开『时间与授时』不溢出」——在 320 px 宽的真实小屏尺寸下滚到分区、展开 `TimingPanel`，断言 `takeException()` 为空且面板在位。结果：该文件 **3 passed**；`flutter test` 全量 **534 passed / 0 failed**（23 s）。`mobile/README.md` 与 spec 6.1/8.2 的计数同步为 534（+3 条授时用例）。
+
+**R6 加长窗口复测（诚实记录）**：把 APRS 窗口从 31 s 加到 150 s（实际采到 100.2 s）再跑一次 R6，仍是 **UNVERIFIABLE**：`aprs_decode` 报 **574 个候选帧全部 CRC-16 失败（丢弃 300）**、`external_tools_available=[]`、无 OTA 报文；ADS-B 仍是 FC0012 上限 948.6 MHz < 1090 MHz 不可达；`station_source=gnss`、GNSS **13 星**；`pass_44016: identity_mismatch` 是 44016/54234 历史错号防线的**预期拒绝**，不是新故障。结果 JSON：`…/20261122_081356/results.json`。
+
+**诚实边界**：两次窗口（08:09 / 08:14 本地）都没有 APRS 台活动，**不能据此说 APRS 解码已验证**，只能说明链路在真实接收下无崩溃、候选帧被 CRC 如实拒绝；本轮未改任何代码。手机守卫只证明小屏布局不溢出，**不是帧率实测**。
+
+## 201. 授时面板三语化（gen-l10n）+ en locale 回归（2026-11-22）
+
+**做了什么**：`TimingPanel` 的文案此前硬编码中文，移入设置页后 en/ja 界面会中英混排。本轮把面板文案纳入既有 gen-l10n：
+
+- 三语 arb 新增 5 个键：`timingTitle` / `timingSystemClock` / `timingFixLine` / `timingGnssNoFix` / `timingNoGnss`（后两者为参数化消息，zh 模板带 placeholders 元数据），`flutter gen-l10n` 重新生成（生成物在 `lib/l10n/gen/`，已在 .gitignore）。
+- `TimingPanel.build` 读 `AppLocalizations.of(context)`；**无 l10n 上下文时回退中文原文**（独立构造/旧单测不受影响，既有 4 条 `timing_panel_test` 逐字断言仍绿）。
+- `timing_panel_placement_test.dart` 增第 4 条用例：en locale 下展开「Time & timing」，断言 `No GNSS timing` 与 `System … UTC` 可见、中文「无 GNSS 授时」不出现。
+
+**验证**：`flutter test test/timing_panel_placement_test.dart test/timing_panel_test.dart test/l10n_locale_test.dart` → **13 passed**（含三语键集合一致）；`flutter test` 全量 **535 passed / 0 failed**（20 s）；`flutter analyze` **0 error / 0 warning / 63 info**（日志 `D:\mbdsdr\output\flutter_analyze_ab49.log`）。`mobile/README.md` 与 spec 6.1/8.2 计数同步为 535。
+
+**诚实边界**：只对 **en** 做了 widget 渲染验证；ja 仅由「三语键集合完全一致」守卫保证键存在，**未逐条看日文排版**；仍未做真机安装/帧率。
+
+## 202. 设备信息卡三语化 + en locale 回归（2026-11-22）
+
+**做了什么**：设置页「设备信息」的 `DeviceInfoCard` 仍全是硬编码中文（状态/后端/采样率/频率与五种连接状态），en/ja 下与已本地化的分区标题混排。本轮：
+
+- 三语 arb 新增 9 个键：`deviceStatusLabel` / `deviceBackendLabel` / `deviceSampleRateLabel` / `deviceFrequencyLabel` / `connStatusConnected|Connecting|Reconnecting|Error|Disconnected`；`flutter gen-l10n` 重新生成。
+- `DeviceInfoCard.build` 读 `AppLocalizations.of(context)`，**无 l10n 上下文时回退中文原文**；`rtl_tcp` 作为协议名不翻译。
+- `device_info_card_test.dart` 增 en locale 用例：已连接态断言 `Status/Connected/Backend/Sample rate/Frequency` 且中文不出现；切到未连接断言 `Not connected`。
+
+**验证**：`flutter test test/device_info_card_test.dart test/l10n_locale_test.dart test/timing_panel_placement_test.dart` → **16 passed**（含三语键集合一致）；`flutter test` 全量 **536 passed / 0 failed**（43 s）；`flutter analyze` **0 error / 0 warning / 63 info**（日志 `D:\mbdsdr\output\flutter_analyze_ab50.log`）。`mobile/README.md` 与 spec 8.2 计数同步为 536。
+
+**诚实边界**：只验证 en 渲染；ja 仍只有键集合守卫；状态文案之外的诊断原文（`errorMessage` 来自后端）保持原样，不翻译——错误详情不做二次包装。
+
+## 203. 授时/设备信息 ja 渲染回归（2026-11-22）
+
+**做了什么**：§201/§202 只验证了 en，ja 只靠「三语键集合一致」保证键存在。本轮补两条 ja 渲染用例，把这两块 widget 的日文从「键在」提升到「实际渲染过」：
+
+- `timing_panel_placement_test.dart`：ja locale 展开「時刻と同期」，断言 `GNSS 時刻なし`、`システム … UTC` 可见、中文「无 GNSS 授时」不出现（该文件现 **5 条**）。
+- `device_info_card_test.dart`：ja locale 已连接态断言 `状態 / 接続済み / バックエンド / サンプルレート / 周波数`，中文「已连接」不出现（该文件 **2 条 i18n 用例**）。
+
+**验证**：`flutter test test/device_info_card_test.dart test/timing_panel_placement_test.dart test/l10n_locale_test.dart` → **18 passed**；`flutter test` 全量 **538 passed / 0 failed**（25 s）；`flutter analyze` **0 error / 0 warning / 63 info**（日志 `D:\mbdsdr\output\flutter_analyze_ab51.log`）。`mobile/README.md` 与 spec 6.1/8.2 计数同步为 538。
+
+**诚实边界**：只有**授时面板**与**设备信息卡**这两块做过 en/ja 实际渲染；手机端频谱/星空/帮助等页面仍有大量硬编码中文（本轮只把它从「键在」推进到「渲染过」，**没有**宣称全应用三语完成）；真机安装/帧率仍未验证。
+
+## 204. 协议验收步手动实跑：golden PASS + OTA 诚实 SKIP（2026-11-22）
+
+**做了什么**：不经 `acceptance_run.sh` 全流程，单独手动跑 P0 验收脊柱的第 ③.5 步，确认 golden 锚点与 OTA 缺样本分支的现状：
+
+- `python tools/protocol_verify_step.py golden` → **PASS**，`n_pass=4`，`provenance=synthetic_encoder_generated`：
+  - P0-2 `dvbs2_bch`：short/1/2 K=7032 N=7200 t=12，注入 3 错 → 全部纠回；
+  - P0-3 `gps_nav`：golden LNAV → 4 星 PVT，位置误差 **0.000 m**、钟差误差 **0.000 mm**；
+  - P0-4 `df_position`：3×3 阵 37° → **37.00°**（误差 0.00°）；
+  - P0-5 `tc_uplink`：Annex F Example 10 → `001B000E06010203040506070814BB`（CRC OK）。
+- `python tools/protocol_verify_step.py ota` → **SKIP**（退出码 2，**不是 FAIL**）：未提供真实 OTA 录制件（`--iq complex64 raw`），提示「合成 golden 步已覆盖协议链正确性；真机样本录到后传入即真跑，不 mock」。
+
+**诚实边界**：golden 是**合成编码器生成**的回归（provenance 如实标注），证明协议链与四个锚点按定义正确，**不等于**真实 OTA 样本已验证；OTA 分支仍缺样本。本轮未改任何代码。
+
+## 205. 真实 SDR「服务端断→恢复」探针（2026-11-22）
+
+**背景**：spec 的 D10 清单还有一条「真机断线重连验证」未勾（假后端覆盖、真实 SDR 未复测）。当前会话**不是管理员**，无法用 `Disable-PnpDevice` 模拟 USB 拔插；因此做了能做的真实边界：让**真实 RTL-SDR** 背后的 `rtl_tcp` 服务端突然退出，再重启。
+
+**实测**（`D:\mbdsdr\output\_hw_reconnect_probe.py`，`RESULT=PASS`）：
+
+- 首连：`RtlTcpBackend.connect()=True`，读到 **4096 样本**；
+- 杀 `rtl_tcp` 后：`read_samples` 干净返回 **None**（没有异常泄漏/卡死）；
+- 重启 `rtl_tcp`：新连接 `connect()=True`，再读到 **4096 样本**；
+- 服务端再次退出后：`pyrtlsdr` **新句柄可打开**并读 **256 样本** —— 真实设备没有被卡在 busy。
+
+**台账处置**：`.trae/specs/mbdsdr-system-lifecycle/checklist.md` 第 211 行**保持未勾**（USB 级拔插/重新枚举仍未验），但补上这条部分证据；tasks Task 135 下同步补记。`python scripts/spec_status.py` 已重新生成 `docs/spec-status.md`，避免统计与行号漂移。
+
+**诚实边界**：这是**数据通路恢复**，不是 USB 热插拔；客户端自动重连状态机仍由假后端用例覆盖，**不能**据此宣称「真机断线重连已验」。本轮未改任何代码。
+
+## 206. 天空页「时空状态」按规则 1 收口：机制两格默认不上界面（2026-11-22）
+
+**发现了什么**：`mobile/lib/pages/sky_page.dart` 一直内嵌 `SpacetimeStatusCard` 四格（时间源 / GNSS 定位 / 接收目标 / 多普勒补偿）。其中「时间源」「GNSS 定位」属 spec 规则 1 明列的底层机制；且移动端 `fix` 流**本端未接线**，这两格恒为「system（非 GNSS）」与「无 fix」——既占主界面又永远不提供新信息。Task 6.1 的盘点清单漏了这一处。
+
+**做了什么**（行为改动，保留诊断能力）：
+
+- `SpacetimeStatusCard` 新增 `showMechanism` 参数，**默认 false**：标题为「接收状态」，只渲染「接收目标 / 多普勒补偿」两格。
+- `showMechanism: true` 时保持原四格与「时空状态」标题不变（诊断/将来接线后仍可用）。
+- 天空页调用点无需改参数，自动落到合规默认值。
+- 测试：`spacetime_status_test.dart` 改为两条 widget 用例——默认态断言机制两格与「无 fix」**不出现**、目标/多普勒在；诊断态断言四格仍能渲染。
+
+**验证**：`flutter test test/spacetime_status_test.dart test/first_run_success_test.dart` → **15 passed**；`flutter test` 全量 **539 passed / 0 failed**（21 s）；`flutter analyze` **0 error / 0 warning / 63 info**（日志 `D:\mbdsdr\output\flutter_analyze_ab52.log`）。spec 6.1/8.2 与 `mobile/README.md` 已同步（Task 6.1 处置补一条天空页同规则）。
+
+**诚实边界**：只改**手机天空页的默认可见性**；GNSS/time 的真实状态仍由定位空态、设置页「时间与授时」与工具面提供，**没有删数据**。移动端 GNSS fix 流仍未接线（既有边界，未借本轮改动宣称已接）。真机安装/帧率仍未验证。
+
+## 207. 天空页默认面的调用点守卫 + 改动后 APK 复跑（2026-11-22）
+
+**做了什么**：§206 的默认值只在组件层验证，若有人哪天在天空页显式传 `showMechanism: true`，组件测试不会红。本轮把守卫补到**真实页面调用点**：
+
+- `mobile/test/first_run_success_test.dart` 的「冷启动→点天空」用例里加三条断言：天空页出现「接收状态」，且「时间源」「GNSS 定位」不出现。它走真实 `HomeShell + SkyPage`（真实 TLE/SGP4/定位替身），不是组件直构。
+- 结果：该文件 **5 passed**，全量 `flutter test` **539 passed / 0 failed**（32 s，计数不变，只是原用例内加断言）。
+
+**改动后重新出包**：`flutter build apk --debug` → **成功**，Gradle `assembleDebug` **57.7 s**，APK **190,116,539 B**（首次构建 44.8 s / 190,110,524 B）。仍是那两条 AGP/Kotlin 前瞻告警，未升级。`mobile/README.md` 与 spec 8.2 已同步两组数字。
+
+**诚实边界**：页面级守卫断言的是**这次构建的这个调用点**；它不阻止未来有人新增另一个有理由的诊断入口。APK 只证明可编译出包，真机运行仍未验。
+
+## 208. 真机聚合自诊断：SDR + GNSS 同命令 verdict=ok（2026-11-22）
+
+**做了什么**：用一条命令同时复检两侧，确认「SDR 与 GNSS 时刻都插着」不是只靠分脚本的旧记录：
+
+`python scripts/system_diag.py --gnss-port COM4 --timeout 5 --json` →
+
+- 总体 `verdict=ok`，**退出码 0**；
+- summary：**「SDR：样本正常；GNSS：定位正常（天线开路）」**；
+- GNSS `antenna.status=open`、`text=01,01,01,ANTENNA OPEN`、`warning=true`（天线开路是硬件现状，定位仍正常）。
+
+**台账处置**：`.trae/specs/mbdsdr-system-lifecycle/checklist.md` 的「一键系统诊断」行补上这次真机实跑；`python scripts/spec_status.py` 重新生成 `docs/spec-status.md`。
+
+**诚实边界**：这是**当前会话的状态快照**（设备在位、样本/定位可用），不是长时稳定性测试；天线开路告警不因 verdict=ok 而消失。未改任何代码。
+
+## 209. 落地页去掉未验证的「中低端机」性能暗示（2026-11-22）
+
+**发现了什么**：`mbdsdr-landing.html` 的「随身指天 / 手机」卡原写「认星主流程在中低端机上也保持克制」。spec Task 9.2（中低端机实测帧率）**仍未勾**，这句话会被读成性能已验。按「没跑过就写未验证」的页面原则，这是不该留的暗示。
+
+**改法**：换成**已发生的行为事实**——「主界面只留接收目标与频率补偿，授时、定位这类机制默认收起，不挡星空」（对应 §206/§207 的真实默认面），不再提中低端机或流畅度。
+
+**验证**：`python output\_check_landing.py` → **PASS**；本地 `http.server` + 浏览器实渲染（622 px）：新文案逐字可见、旧句「中低端机上」已不存在，`scrollWidth == clientWidth == 622`，无水平滚动。
+
+**诚实边界**：只改文案，不动任何能力声明之外的代码；**Task 9.2 的帧率仍未验**，本轮也没有新增性能证据。
+
+## 210. 真机三端联跑：GNSS→SDR 录制→观测档案→手机客户端/头显数据包（2026-11-22）
+
+**背景**：用户要求别只停在台账上，SDR + GNSS 都已插好，手机端 / 电脑端 / 头显端同时推进。本轮用同一台真机把三端各跑通一段真实链路。
+
+**1. 电脑端（真机 → 观测档案）**：`D:\mbdsdr\output\_real_session_probe.py`
+
+- GNSS COM4 真实 RMC：lat **43.77309** / lon **125.39336** / UTC `2026-11-22T00:52:28Z`；应用后 `site_source=gnss`、`time_source=gnss`；
+- 真实 RTL2832U 录制 100.100 MHz / 2.400 MS/s：**14,360,576 样本 / 5.98 s**；
+- 自动落档案 `D:\mbdsdr\output\real_obs\real_20261122_085230.observation.json`：`evidence=real_hw`、`site.source=gnss`、products=1；`scripts/replay_observation.py --list` 读出 `record_start`/`record_stop` 两条，调谐/增益（7.1 dB）/采样率与录制一致。
+- **顺序坑（已记录）**：`record_fix` 必须在 `SDRController` 建好站址对象之后应用；否则 `station=None` 时只写 `fix_record`，随后 `set_station` 会清掉它（本轮第一次录制就是这样得到 `site=none`，第二次修正后才是 `gnss`）。
+
+**2. 头显端（真实档案 → spatial bundle → 构建）**：
+
+- `python scripts/export_spatial_bundle.py <档案> -o D:\mbdsdr\output\real_bundle` → `bundle.json` **764,775 B**：`blockers=0 frames=48 stars=2000 visible=930 passes=0 audio=0`；档案里的真实调谐/时间轴进入回放帧。
+- `spatial`：`gradlew testDebugUnitTest :app:assembleDebug --no-daemon --offline` → **BUILD SUCCESSFUL in 21s**（40 tasks）。**未在头显/模拟器上运行**。
+
+**3. 手机端（手机自己的 Dart 客户端 → 真实 SDR）**：
+
+- 本机起 `rtl_tcp`（真实 RTL-SDR，127.0.0.1:1237），用移动端 `RtlTcpClient`（dart:io，不经过桌面 Python）连接并下发采样率/频率/自动增益：**183 个 IQ 块 / 7,208,960 样本（3 s）**，连接保持 `connected`。
+- 探针 `D:\mbdsdr\output\_mobile_rtl_probe.dart`；这是**宿主 Dart VM** 跑移动端代码，不是手机/模拟器上的安装运行。
+
+**诚实边界**：三端都只到「真实数据链路跑通」这一层——手机未装机、头显未上头显/模拟器、桌面未做人眼视觉走查；APRS/ADS-B 等真实空口解码仍按既有 `not_verified`。未提交。
+
+## 211. 桌面真机人眼走查：5 处「同屏互相打脸」修掉（2026-11-22）
+
+**背景**：§210 之后按用户「三端同时推」的口径，先补桌面端的人眼级走查。真机在位（RTL2832U + GNSS CH340/COM4），`python desktop/main.py` 真窗口截图核对。走查一开就抓到 5 处**同一屏互相矛盾**的读数，全部按真机证据修掉并复验。
+
+**1. 底栏 GNSS 恒写「未连接」**（`desktop/main_window.py`）
+- 根因：`RealGNSSMonitor.is_connected` 是 `@property`，`_poll_gnss` 与星座图喂数两处写成 `is_connected()` → `TypeError` 被 `except` 吞掉 → `connected` 恒 False。
+- 修：两处改读属性（`main_window.py:15733`、`:15820`）。
+- 真机复验：底栏 `GNSS: 43.7733°N 125.3934°E 16星`（值随 fix 跳动），状态面板同时有 259.8 m / HDOP 1.0。
+
+**2. 状态面板「连接」卡片恒 OFF/未连接**（`desktop/status_panel.py`）
+- 根因：只有 MCP worker 的 `connection_changed` 会写这张卡；直连后端走 `set_sdr_connected`，不改指示灯与文案。
+- 修：`set_sdr_connected` 内新增 `_mark_conn_card`，两路收口到同一张卡；只在占位文案（空/未连接/OFF）上改写，不覆盖 worker 给出的「连接失败：…」具体原因。
+- 真机复验：绿色 ON + 「已连接」；断开路径仍有单测钉住。
+
+**3. 采样率「配置请求 1.536 MS/s 未生效」是假警报**（`desktop/main_window.py`）
+- 根因：启动自动连接用性能档默认（quality=2.4 MS/s），完全无视用户在设置里**显式**选过的 1.536 MS/s；状态栏又拿设置值去对比实际值，于是同屏出现 1.024（设备面板）、1.536（设置/请求）、2.400（实际）三个数。
+- 修：新增 `_startup_sample_rate()`——`settings.is_explicit("sample_rate_hz")` 为真且值合法时优先，否则才回性能档默认；两条自动连接入口都改用它。
+- 真机复验：详细栏 `采样率: 1.536 MS/s`，不再带「未生效」；设备面板同步 `1.536e+06`。
+
+**4. 详细栏「多普勒」把「连着但没选目标」说成「未连接设备」**（`mbdsdr_ai/sdr_backend.py`）
+- 修：`get_doppler_compensation_status` 的 reason 与 `set_doppler_compensation` 的错误文案按 `status.connected` 分流：「已连接，但接收链未建立（未选择目标，未补偿）」/「未连接设备…」。
+- 真机复验：详细栏原文已是前者。
+
+**5. 设备面板恒「已连接: 设备」+ 不检测拔出 + 假「设备从枚举中消失」**（`main_window.py` / `device_panel.py` / `mbdsdr_ai/usb_hotplug.py`）
+- 根因链（真机探针实测）：RTL-SDR **打开前**枚举能读到 EEPROM 序列号 `77771111153705700`，**本进程打开后**枚举读不到（serial 变空）→ 身份键在 `rtlsdr|serial:X` 与 `rtlsdr|index:0` 之间翻转。旧快照按 serial 键登记期待设备，后续每拍只有 index 键 → 报「设备从枚举中消失，但无法确认是否已拔出」（设备面板未注入物理探针，`presence=None` → state unknown）。同时自动连接路径没把枚举字典交给设备面板，身份无法确认，采样率框停在旧值 1024000。
+- 修：① `_connect_backend` / `_finalize_connect_success` / `_panels_set_sdr_connected` 增加 `device` 透传，自动/对话框/面板三条连接路径都把本次实际枚举字典交给设备面板确认身份；② `HotplugMonitor` 增加**换键恢复**：旧键的别名（index/label/uri）在本拍枚举出现 = 同一台设备换键，不报拔出，发 `EVENT_RECOVERED`；同键重新出现也收回告警（此前会永久停在旧告警）；自定义 `identity_fn`（反证用）不走别名合并；③ 设备面板收到 `EVENT_RECOVERED` 时把 `_current_dev_key` 跟到新键，否则后续真拔出会被「不是当前设备」过滤掉。
+- 真机复验：设备面板 `已连接: RTL-SDR #0 (FC0012)`，采样率 `1.536e+06 / = 1.536 MS/s`，15 秒后未回退，悬停无告警 tooltip。
+
+**验证（本机实测）**：
+- 新增/扩充用例：`tests/test_status_panel_sdr_stalled.py`（+3，直连路径点亮/收回/不覆盖失败原因）、`tests/test_ui_stability_resources.py`（+2，GNSS 属性读法 + 启动采样率优先级）、`tests/test_usb_hotplug.py`（+2，serial→index 换键不报拔出 + 告警重新出现即收回）。
+- 回归批次：状态面板/跨面板/连接守卫 19 passed；连接与设备会话组 43 passed；热插拔组 40 passed / 1 xfailed；桌面主窗+面板+GNSS+断开态 14 文件 **144 passed**。
+- 真机截图：`D:\mbdsdr\output\_shots\desktop_01..14*.png`（首轮问题现场 + 修复后复验）。
+
+**诚实边界**：本轮只做「可启动、无崩溃、读数一致」的走查与修复；**人工视觉审美走查仍待用户确认**。手机端仍无真机、本机 Android SDK 无 cmdline-tools/avdmanager/emulator/AVD（`system-images/android-36.1` 之外没有可运行镜像），**安装运行未验证**；PICO Emulator 仍 `0xC0000005`、无真机，**头显运行未验证**。未提交。
+
+## 212. 真机 UI 录制跑通，并修掉「档案 site=none 导致回放被拒」（2026-11-22）
+
+**背景**：§211 之后继续桌面真机走查。用界面菜单「工具 → 开始/停止录音」（Ctrl+R）做真实 IQ 录制，发现录出来的 `.observation.json` 里 `site.source=none`，`scripts/replay_observation.py --list` 直接以退出码 2 拒绝回放——真机最常见的「配置过站址 + GNSS 已插」组合下，档案全部不可回放。
+
+**根因（两条，叠在一起）**
+1. `_poll_gnss` 无条件 `sky_view.set_gnss_position(fix)`：主窗站址按既有优先级停在 gui_config（静态事实），天空却被覆盖成 GNSS 坐标。起录快照要求「天空站址 == 主窗站址」，于是判 `起录时主窗来源坐标与天空站址冲突` → `site=none`。
+2. `_snapshot_recording_context` 又在「站址来源不是 gnss、但 GNSS 有 fix 且位置不同」时判冲突并置 none。真实数据里 gui_config 站址 (43.786975, 126.628990) 与 GNSS (43.7732, 125.3934) 相差约 100 km，必然命中。
+
+**修**
+- `_poll_gnss`：只有站址来源不是静态事实（或当前是示例站）时才把 GNSS fix 注入天空；有配置站址时天空与主窗保持同一站址。GNSS 面板/星座图照常显示接收机真实定位。
+- `_snapshot_recording_context`：GNSS 与站址的一致性校验只在 `source=="gnss"` 时执行；静态站址（config/place/manual）按用户显式值记录，并把「GNSS 定位与配置站址不同、未用于站址」写进快照备注。
+- `desktop/recording_observation.py`：把快照里的 `recording_notes` 原样并入档案 `notes`（否则备注只活在内存里，档案看不到）。
+
+**真机验证**
+- 录制 `baseband_20261122_105907.iq`：6,569,984 样本 / 4.28 s / 51,328 KB；档案 `site.source=manual`、`lat_deg=43.78697533333333`、`lon_deg=126.62898983333334`、`reason=站址来自起录时桌面天空与主窗来源核对；未主动定位/授时`。
+- `python scripts/replay_observation.py --list <档案>` → **退出码 0**，读出 `record_start`/`record_stop` 两条，`sr=1.536MS/s`。
+- 旧档案（site=none，如 `baseband_20261122_104322.observation.json`）仍按原逻辑拒绝重演，如实保留，不改历史档案。
+
+**验证（本机实测）**
+- 新增用例：`test_ui_stability_resources.py` +2（GNSS fix 不覆盖配置站址；GNSS 在别处时档案仍按配置站址、备注可见）；`test_desktop_observation_ui.py` 把 `manual_gnss_conflict` 从「必须 site=none」的旧口径改成专门用例「配置站址仍可回放」，其余 `missing/preview/coordinate_conflict/gnss_without_fix/gnss_mismatch` 仍必须 blocker。
+- 回归：GNSS/站址/录制/回放 14 文件 **354 passed**（改口径后复跑）；录制/档案三文件 **119 passed**；UI 稳定性 30 passed。
+
+**诚实边界**：档案时间轴仍以桌面 sidecar 的墙钟为基点（`time.source=system`，精度标注「未验证」），**没有**改用 GNSS NMEA 授时；`runtime_snapshot_time` 里同时保留 GNSS 来源，两者不混。真机只验到「录制 → 档案 → 回放清单」这一层，未验 IQ 内容解调；未提交。
+
+## 213. 真机 UI 回放 + UI 档案出头显包：补上「非 SigMF 容器」这一环（2026-11-22）
+
+**1. 桌面 UI 回放真机验证（PASS）**
+- 工具栏「回放」→ 文件框（第二项过滤器就是 `观测档案 (*.observation.json)`）选 `baseband_20261122_105907.observation.json`。
+- 时间轴真实推进：`0.200 / 4.277s · 307,200/6,569,984 样本` → `0.450 / 4.277s · 691,200/6,569,984 样本 · 98.000000 MHz`；暂停/停止可用；无任何阻塞对话框；自然结束后频谱恢复实时、底部 `接收中 · 解调 93 帧/s`。
+- 截图：`D:\mbdsdr\output\_shots\desktop_18_replay_archive.png` / `desktop_19_replay_state.png`。
+
+**2. 同一份 UI 档案 → 头显包（发现并修跨国链缺陷）**
+- 首跑 `export_spatial_bundle.py`：**blockers=1 frames=0**，原因 `IQPlayback: SigMF meta 缺 core:sample_rate`。桌面 UI 录的是 `.iq` + 自有 `.iq.json`，而 `IQPlayback` 只认 SigMF；§210 那条能出 48 帧的是探针写出的 `.sigmf-data/meta`，所以此前没照到这层。
+- 修（`scripts/export_spatial_bundle.py`）：当档案 products 已给出 `sample_rate_hz` / `format=cf32` / `samples`（同一档案的既有事实）且数据不是 `.sigmf-data` 时，直接按 cf32 memmap 取帧与解调；SigMF 路径原样保留。新增 `_product_hints` / `_is_raw_cf32` / `_cf32_spectrum_frames` / `_demod_audio_block`。
+- 复跑：`blockers=0 frames=48 stars=2000 visible=938`；加 `--audio-out` 时 `audio=1`（WFM→WAV 解调链也走通）。
+- 测试：`tests/test_spatial_bundle.py` 新增 1 条「桌面 sidecar 录音也出 4 帧、blockers=0」；spatial bundle/consistency **45 passed**。
+
+**诚实边界**：头显包仍是**数据层**产物，未在 PICO 真机/模拟器运行；音频只证「能解调出非空 48 kHz WAV」，未验听感。未提交。
+
+## 214. 手机端首次安装运行 + 模拟器内连真实 SDR（2026-11-22）
+
+**背景**：手机上一条只到「宿主 Dart VM 跑移动端代码」。本轮补 Android 模拟器，把「安装 → 启动 → 五页签 → 连真实 SDR」整条链跑通。
+
+**环境补齐**
+- `sdkmanager` 安装 `emulator` + `platform-tools`；`avdmanager` 建 AVD `mbdsdr35`（`system-images;android-35;google_apis;x86_64`）。
+- 两个坑（都实测）：① 旧 avdmanager 默认 `hw.ramSize=96M`，Android 根本起不来——手改 4096 后 `RUNNING_UNLOCKED`；② Android 36.1 Play Store 镜像在本机 `-gpu swiftshader_indirect/host/guest` 三种模式都在 `surfaceflinger` 的 `mapper.ranchu readFromHost` 断言（`hasReadColorBufferDma`）崩溃，用户永远 BOOTING，故改用 API 35。
+- 启动参数：`-avd mbdsdr35 -no-window -no-audio -no-boot-anim -gpu swiftshader_indirect -no-snapshot`；启动约 49 s。
+
+**安装与运行（真镜像，非 WebView）**
+- `adb install -r mobile/build/app/outputs/flutter-apk/app-debug.apk` → **Success**（190,116,539 B）；`am start -W -n mbdsdr.app/.MainActivity` → **Status: ok / LaunchState: COLD / TotalTime 8.8 s**；进程存活（`pidof` 有值）。
+- 首次启动弹系统定位权限，选「While using the app」后进入主界面；`uiautomator dump` 读到 5 个页签（频谱/天空/AI/录音/设置）与空态文案；截图 `mobile_emulator_01..05`。
+- 天空页诚实空态：「定位服务未开启。过境预测需要您的位置。」+「开启定位」；设置页显示 rtl_tcp 主机/端口与桌面 ControlHub 分组。
+
+**模拟器内 App → 真实 SDR**
+- 宿主起最小 `rtl_tcp` 服务（`D:\mbdsdr\output\_rtl_tcp_min_server.py`，pyrtlsdr + 真实 RTL2832U，0.0.0.0:1234）；模拟器内把 rtl_tcp 主机设为 `10.0.2.2`、端口 1234，点「连接 10.0.2.2:1234」。
+- 服务端记录：`rate=2048000`、`gain_mode=0`（自动）、`freq=144000000`；连续送出 **1750 块 / 114,688,000 B（约 114 MB）** 后由我们停止模拟器。
+- App 页头 **`rtl_tcp 已连接`**；状态行 `144.000000 MHz（设定值） NFM · RSSI -31.1 dBFS（实测峰值） · 2.048 MS/s（设备报告） · 自动增益 · S2`；截图 `mobile_emulator_13_connected.png`。
+
+**发现（未修，已登记）**
+- 设置页 rtl_tcp 主机/端口只在键盘 Enter/完成键时保存；直接收起键盘会丢输入（本次按返回键后连接按钮仍是「设置 rtl_tcp 地址」，按完成键才出现「连接 10.0.2.2:1234」）。
+- 频谱页在竖屏下控制面板可滚动，但音量滑杆位于滚动区中央，手指拖动容易改音量而不是滚动（本次靠边缘滑动才找到连接按钮）。
+
+**诚实边界**：以上均为 **Android 15 模拟器**（API 35，x86_64，软件渲染），**不是物理手机**；真机传感器（罗盘/IMU）、扬声器出声、音频路由与星表渲染帧率仍未验证；宿主 `rtl_tcp` 是最小实现（只覆盖 freq/rate/gain/AGC 命令），不等于 osmocom 全功能服务。未提交。
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+## 215. 手机端两个已登记缺陷：修复 + 模拟器复验（2026-11-22）
+
+§214 登记的两条移动端缺陷本轮修掉，并在同一个 AVD（API 35，720×1280，swiftshader）上复验。
+
+**1. 设置页输入只在键盘「完成」时保存 → 改为输入即落盘**
+- 根因：`settings_page.dart` 的 rtl_tcp / ControlHub 主机与端口只挂 `onEditedComplete`/`onSubmitted`；Android 返回键收起键盘不触发提交，刚输入的地址丢失。
+- 修：四个字段加 `onChanged` → `_commitHost/_commitPort/_commitControlHubHost/_commitControlHubPort` 静默写回（值未变不写；端口不在 1–65535 或半截输入不写，避免 setter 抛 `FormatException`）；显式提交仍走原 `_saveX` 给 toast 反馈；另加 `onTapOutside` 收起键盘。
+- 模拟器实测：设置页输入 `10.0.2.9` 后只按系统返回键（不按完成）→ 回频谱页按钮为 `连接 10.0.2.9:1234`；改为 `10.0.2.2` 同样即时生效。
+
+**2. 竖屏连接按钮埋在长列表底部 → 窄屏主操作置顶**
+- 修：`_ControlPanel` 新增 `primaryActionFirst`（`SpectrumPage` 传 `!wide`，阈值 600 dp）；窄屏把「连接/断开」放到面板首项，宽屏位置不变。抽 `_primaryAction()` 单一实现，避免两份按钮文案漂移。
+- 模拟器实测（竖屏 720×1280）：面板首项即 `连接 10.0.2.2:1234`（bounds y≈652–748），其下才是 `144.000000 MHz`（y≈780）；`uiautomator dump` 的控件树与截图一致。
+
+**3. 顶部主操作连真实 SDR + 断开诚实性**
+- 宿主最小 `rtl_tcp`（真实 RTL2832U）→ 点顶部按钮连接：页头 `rtl_tcp 已连接`，状态行 `RSSI -31.2 dBFS（实测峰值） · 2.048 MS/s（设备报告） · 自动增益 · S2`。
+- 服务端两次连接会话分别送出 **3800 块 / 249,036,800 B** 与 **1250 块 / 81,920,000 B**。
+- 点「断开」：服务端 `client ... done`，页头回 `rtl_tcp 未连接`、按钮回 `连接 10.0.2.2:1234`、显示「当前无实时 IQ，不显示模拟数据。」；静置 5 s 无自动重连、无新会话。
+- 注：软件渲染下瀑布高频刷新时 `uiautomator dump` 偶发 `null root node`，以截图 + 宿主日志为证。
+
+**4. 测试与门禁**
+- 新增 `mobile/test/settings_page_commit_test.dart`（输入即落盘、端口越界不写）；`spectrum_panel_audit_test.dart` 新增竖屏置顶 / 宽屏置底位置断言。
+- `flutter test` 全量 **541 passed / 0 failed**；`flutter analyze` **0 error / 0 warning / 64 info**（新增 1 条来自新测试文件的 material 导入提示）；`flutter build apk --debug` 成功（32.5 s，190,118,996 B）。
+
+**诚实边界**：仍是 Android 15 **模拟器**，不是物理手机；真机传感器/扬声器出声/音频路由仍未验证。未提交。
+
+## 216. 手机端录制链路：真实 SDR → 解调 → 设备内 WAV（模拟器复验，2026-11-22）
+
+**动机**：§214/§215 只验到「频谱/连接」，录音开关此前只有 Dart 单测，没有一次设备内的真实落盘证据。
+
+**现场**：首启引导卡仍占上半屏（本 AVD 从未点「知道了」），竖屏控制面板只剩约 250 px 高——这正是「要滚很久才找到按钮」的直接原因。点「知道了」后面板与频谱/瀑布同时变高，真实峰值标记 `PK 144.4xx MHz · -31 dBFS · SNR 10~17 dB`、瀑布热图正常出现。
+
+**步骤与证据**
+- 连接：顶部主操作 → `rtl_tcp 已连接`（宿主最小 `rtl_tcp`，真实 RTL2832U；服务端单会话送出 **13,250 块 / 868,352,000 B**，直到我们关闭模拟器）。
+- 录制：面板内滚到「录制」→ 点圆点 → 变为 **红点 + 录制中…**；约 25 s 后点同一位置 → 回灰圈 + `录制`，频谱继续实时。
+- 设备内产物（`run-as mbdsdr.app ls app_flutter/recordings`）：`1795323229361_144000000_nfm.wav` **2,374,982 B** + 同名 sidecar JSON。
+- sidecar：`sampleRateHz=48000`、`channels=1`、`bitsPerSample=16`、`sampleCount=1,187,469`、`durationMs=24,739`、`frequencyHz=144000000`、`mode=nfm`、`deviceSource=connected`。
+- 宿主复核（拉回 WAV 用 Python `wave` 读）：`ch=1 / width=2 / rate=48000 / frames=1,187,469`，RMS **24,458**、峰值 **32,767**——有真实音频内容，不是静音。
+
+**诚实边界**
+- 仍是 **Android 15 模拟器**（API 35，软件渲染），不是物理手机；**扬声器出声/音频路由未验**，本机无真机。
+- WAV 只证明「真实 IQ → NFM 解调 → 16-bit PCM 落盘」这条链与文件参数，**不评价听感/音质**；RMS 接近满刻度、峰值 32,767 说明当前（自动增益）电平偏高、存在削顶风险，未做失真测量。
+- 未验证录音页签索引与列表刷新（只读了文件系统与 sidecar）；未做「停止录制时正在断连」等竞态验证。
+- 证据文件：`D:\mbdsdr\output\_shots\mobile_rec_recording.png`、`mobile_rec_stopped.png`、`mobile_rec_scroll3.png`、`mobile_rec.wav`、`mobile_rec.json`。未提交。
+
+## 217. 录音暴露的真缺陷：鉴频输出量纲错（弧度→满量程削顶 39%）已修（2026-11-22）
+
+**发现路径**：§216 的设备内录音不是只证明「文件能落盘」——把 WAV 拉回宿主做样本统计，发现 1,187,469 个样本里 **466,935（39.32%）** 贴满 ±32767，RMS -2.5 dBFS。这不是「信号太强」，是量纲错误。
+
+**根因**：`mobile/lib/dsp/demod.dart` 的 `_discriminate` 输出是「弧度/样点」（atan2 值域 ±π），但下游 `floatTo16BitPcm` 的契约是 [-1, 1]（先乘 32767 再 clamp）。第 3 步 clamp 把 ±π 静默压成 ±1 → 39% 样本削顶、失真。WFM 走的 `_deemphState` 同源，整条音频链都受影响。
+
+**修复**：`_discriminate` 统一除以 π（物理最大相位差），NFM/WFM 共用一个出口；输出严格落在 [-1, 1]。
+- 归一化后的物理含义：12.5 kHz NFM 信道 6.25 kHz 频偏 ≈ 0.25 满量程（注释已写明）。
+- 未加 AGC/限幅器，避免用「自动增益」掩盖量纲问题；电平仍由真实频偏决定。
+
+**验证（同机同频点同增益，模拟器 + 真实 RTL-SDR）**
+- 修复前：25 s，削顶 **466,935 / 1,187,469 = 39.32%**，RMS 24,456（-2.5 dBFS），均值 -1,634。
+- 修复后：20.04 s，削顶 **3 / 961,741 = 0.0003%**，RMS 13,195（-7.9 dBFS），均值 -405。
+- 证据：`D:\mbdsdr\output\_shots\mobile_rec.wav`（前）、`mobile_rec_norm.wav`（后）；sidecar 均 `48000 Hz / mono / 16-bit / connected`。
+- 附带补验：录音页签同步列出两条真实录音（`144.0000 MHz · NFM · 20s / 25s`），索引刷新不再是未验项。
+
+**测试**
+- `mobile/test/demod_test.dart` 新增 2 条：NFM 6 kHz 频偏归一化振幅 = 6000/25600（±0.02）且不越界；WFM 120 kHz 频偏全部 |x| ≤ 1。
+- `flutter test` 全量 **543 passed / 0 failed**（+2）；`flutter build apk --debug` 33.5 s 成功；`flutter analyze` 0 error / 0 warning / 64 info。
+
+**诚实边界**：仍是模拟器，扬声器出声/音频路由未验；只做样本统计（削顶率/电平），**未做听感与谐波失真测量**；静噪门限语义随电平下移约 10 dB（同一 dBFS 域内自洽，自动门限=噪声底+8 dB 不受影响），未单独做阈值回归。

@@ -114,15 +114,20 @@ from mbdsdr_ai.celestial_geometry import (
 from mbdsdr_ai.sky_interaction import (
     ViewState,
     SkyInteractionHandler,
+    build_view_rotation,
+    clip_segment_to_domain,
+    direction_is_drawable,
     pick_object,
     sky_to_screen,
     sky_to_screen_many,
     screen_to_sky,
 )
 from mbdsdr_ai.sky_hud import build_hud as build_sky_hud
+from mbdsdr_ai.sky_calibration import load_profile as sky_load_calibration_profile
 from mbdsdr_ai.sky_pointing import apply_calibration as sky_apply_calibration
 from mbdsdr_ai.sky_pointing import view_params as sky_view_params
 from mbdsdr_ai import skyengine
+from mbdsdr_ai import dso_orientation
 from mbdsdr_ai.sat_catalog import (
     BUILTIN_CATNRS as _SAT_BUILTIN_CATNRS,
 )
@@ -141,6 +146,7 @@ from mbdsdr_ai.sat_passes import (
 )
 
 try:
+    import settings as _desktop_settings
     from settings import (
         effective_pass_min_elevation_deg,
         effective_pass_visibility_gate_deg,
@@ -148,6 +154,7 @@ try:
         effective_show_low_elevation_passes,
     )
 except ImportError:  # pragma: no cover - 兼容 desktop 目录直接上 sys.path
+    from . import settings as _desktop_settings  # type: ignore
     from .settings import (  # type: ignore
         effective_pass_min_elevation_deg,
         effective_pass_visibility_gate_deg,
@@ -165,6 +172,12 @@ try:
     from touch_helpers import PinchZoomMixin
 except Exception:  # pragma: no cover
     PinchZoomMixin = object  # type: ignore
+
+# 情境音效（FR-11）：认出目标时按类别播自制短音；缺 QtMultimedia 时静默降级。
+try:
+    from situation_sound import SituationSound
+except ImportError:  # pragma: no cover - 兼容 desktop 目录直接上 sys.path
+    from .situation_sound import SituationSound  # type: ignore
 
 
 # ============================================================================
@@ -720,6 +733,51 @@ def sky_phase_word(sun_alt_deg: Optional[float]) -> str:
     return "深夜"
 
 
+#: 校准档案的文件名；默认与 desktop_settings.json 同目录（用户配置目录）。
+SKY_CALIBRATION_FILENAME = "sky_calibration.json"
+
+#: 默认校准档案路径的显式覆盖点（测试/CI 用；生产进程不设即沿用配置目录）。
+SKY_CALIBRATION_PATH_ENV = "MBDSDR_SKY_CALIBRATION_PATH"
+
+
+def default_sky_calibration_path() -> str:
+    """返回校准档案的默认绝对路径。
+
+    沿用仓库既有的用户配置目录约定：与 ``settings.default_config_path()``
+    （desktop_settings.json）同目录，文件名 ``sky_calibration.json``。
+    ``MBDSDR_SKY_CALIBRATION_PATH`` 可显式覆盖整条路径；
+    ``MBDSDR_SETTINGS_DIR`` 仍会把整个配置目录改到临时目录（测试兜底，
+    保证不会写/读用户真实配置）。
+    """
+    override = os.environ.get(SKY_CALIBRATION_PATH_ENV)
+    if override:
+        return override
+    # 走 settings 模块属性（而非 import 时绑定的函数），测试对
+    # default_config_path 的隔离替换才能一并生效。
+    return os.path.join(
+        os.path.dirname(_desktop_settings.default_config_path()),
+        SKY_CALIBRATION_FILENAME)
+
+
+def calibration_note(profile: Dict[str, object]) -> str:
+    """校准档案 → 界面文案「已校准（YYYY-MM-DD）」。
+
+    日期取 ``verified_utc``；缺失/不可解析再取 ``created_utc``。两者都不
+    可用时只说「已校准」——不拿今天冒充校准日期，也不显示偏置数值。
+    """
+    for key in ("verified_utc", "created_utc"):
+        value = profile.get(key)
+        if not isinstance(value, str) or not value.strip():
+            continue
+        try:
+            moment = datetime.fromisoformat(
+                value.strip().replace("Z", "+00:00"))
+        except ValueError:
+            continue
+        return f"已校准（{moment.year:04d}-{moment.month:02d}-{moment.day:02d}）"
+    return "已校准"
+
+
 def moon_lit_path(cos_alpha: float) -> QPainterPath:
     """单位半径月面亮区路径（局部坐标系: +x 指向太阳, +y 屏幕向下）。
 
@@ -1261,6 +1319,47 @@ def dso_size_arcmin(entry) -> Optional[float]:
         if not math.isfinite(v) or v <= 0.0:
             return None
         return v
+    except (TypeError, ValueError):
+        return None
+
+
+def dso_distance_ly(entry) -> Optional[float]:
+    """DSO 距离（ly）：只认目录视差换算值；缺失/非法/来源不明 → None。"""
+    try:
+        pc = getattr(entry, "distance_pc", None)
+        if pc is None:
+            return None
+        pc = float(pc)
+        source = str(getattr(entry, "distance_source", "") or "")
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(pc) or pc <= 0.0 or source != "openngc_parallax":
+        return None
+    return pc * 3.26156
+
+
+def format_dso_distance_ly(ly: float) -> str:
+    """视差距离只保留两位有效数字（5866.5 → 5900），不假装精确到光年。"""
+    try:
+        v = float(ly)
+    except (TypeError, ValueError):
+        return "—"
+    if not math.isfinite(v) or v <= 0.0:
+        return "—"
+    exp = math.floor(math.log10(v))
+    step = 10.0 ** (exp - 1)
+    rounded = _round_half_up(v / step, 0) * step
+    return _format_number(rounded, max(0, 1 - exp), "")
+
+
+def dso_position_angle(entry) -> Optional[float]:
+    """DSO 长轴位置角（度）；缺失/非有限/越界返回 None（不猜）。"""
+    try:
+        v = getattr(entry, "position_angle_deg", None)
+        if v is None:
+            return None
+        v = float(v)
+        return v if math.isfinite(v) and 0.0 <= v < 360.0 else None
     except (TypeError, ValueError):
         return None
 
@@ -2128,6 +2227,8 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         # 逐步开放, 批 1 先行星)。body 为 {"kind","key","ra_deg","dec_deg",...}
         self._picked_body: Optional[Dict[str, object]] = None
         self._body_info: Optional[Dict[str, object]] = None
+        #: 信息卡对应的 (时刻, 站址) 指纹；跳时/换址后重算，不每帧重扫升降。
+        self._body_info_key = None
         # 信号出现点亮的卫星名集合（跟踪闭环下半场：频带里听到它，星就亮）
         self._signal_sats: set = set()
         # HUD 命中区 (绘制时刷新; None = 该控件当前不可点)
@@ -2189,6 +2290,22 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         self._sky_hud_error: str = ""
         # 最近一次校准应用失败的原因（成功/未传档案时为空串）。
         self._sky_calibration_error: str = ""
+        # 已加载的校准档案（schema v1）与只读展示文案。__init__ 不读盘；
+        # 必须由调用方显式调用 load_sky_calibration() 触发（测试会大量
+        # 实例化本视图，构造期不碰文件系统）。
+        self._sky_calibration_profile: Optional[Dict[str, object]] = None
+        self._sky_calibration_note: str = ""
+        # 最近一次显式加载失败的原因；保留到下次显式加载，不被普通位姿
+        # 帧抹掉（否则首帧就把「档案坏了」的诊断吞了）。
+        self._sky_calibration_load_error: str = ""
+        # 显式加载过自定义路径的档案：指向模式开启时不再用默认路径覆盖
+        # （显式优先）。只在 load_sky_calibration(自定义路径) 时置位。
+        self._sky_calibration_explicit: bool = False
+        # 准星自动识别的最近一帧缓存（同量化键直接复用，避免每帧重算
+        # 星表）；只存最近一帧，不跨站址/时刻累积。
+        self._sky_identify_cache: Optional[Dict[str, object]] = None
+        # 最近一次准星识别失败的原因（成功/无站址时为空串）。
+        self._sky_identify_error: str = ""
 
         # 显示层折射（只影响天球对象的绘制位置与视高度读数，不回写后端）。
         # 默认口径 1013.25 hPa / 10 °C，可用 set_refraction_params 覆盖。
@@ -2198,6 +2315,11 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
 
         # 未来过境列表
         self._upcoming_passes: List[Dict[str, float]] = []
+        # 情境音效：默认开启、低音量；静音开关在面板底部控制条。
+        self._situation_sound = SituationSound()
+        # 同一目标 3 秒内只响一次；换目标立即响（准星扫过一条星官时不连响）。
+        self._last_sound_key: Optional[Tuple[str, str]] = None
+        self._last_sound_ts: float = 0.0
         # 列表口径（供面板标题显示）：峰值门 / 搜索窗口 / 是否含低仰角
         self._pass_gate_deg: Optional[float] = None
         self._pass_window_hours: Optional[float] = None
@@ -2427,7 +2549,16 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
     ))
 
     def event(self, ev):
-        """记下交互时刻（只影响重绘节拍，不改变任何交互语义）。"""
+        """记下交互时刻；收起搜索后消费原结果行上的双击尾部。"""
+        tail = getattr(self, "_search_click_tail", None)
+        if tail and ev.type() in (QEvent.MouseButtonPress,
+                                  QEvent.MouseButtonRelease,
+                                  QEvent.MouseButtonDblClick):
+            deadline, rect = tail
+            if time.monotonic() <= deadline and rect.contains(ev.position().toPoint()):
+                ev.accept()
+                return True
+            self._search_click_tail = None
         if ev.type() in self._INTERACT_EVENTS:
             self._interact_until = time.monotonic() + self.FRAME_INTERACT_HOLD_S
         return super().event(ev)
@@ -2965,7 +3096,21 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
     # ========================================================================
     def _build_search_widgets(self):
         """顶部搜索框 + 分类结果下拉。"""
-        from PySide6.QtWidgets import QLineEdit, QListWidget, QListWidgetItem
+        from PySide6.QtCore import QSize
+        from PySide6.QtWidgets import (
+            QLineEdit, QListWidget, QListWidgetItem, QStyledItemDelegate)
+
+        class _WrapDelegate(QStyledItemDelegate):
+            """行宽交给视图：长文本的默认 sizeHint 会把整行撑出视口。
+
+            水平滚动条已关，撑出去的部分等于看不到；把宽度报成 0 让
+            QListView 按 viewport 宽折行，高度仍按真实换行后的行数算。
+            """
+
+            def sizeHint(self, option, index):  # noqa: N802 (Qt 命名)
+                hint = super().sizeHint(option, index)
+                return QSize(0, hint.height())
+
         self._QLineEdit = QLineEdit
         self._QListWidget = QListWidget
         self._QListWidgetItem = QListWidgetItem
@@ -2982,7 +3127,16 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
             "QLineEdit:focus { border-color: rgba(120,170,255,0.78); }")
         self._search_edit.textChanged.connect(self._on_search_text)
         self._search_popup = QListWidget(self)
-        self._search_popup.setWindowFlags(Qt.Popup)
+        # 子浮层沿用 _show_search_popup 的视图内坐标；不让 Qt.Popup 抢走
+        # 键盘抓取，连续输入和输入法始终留在 QLineEdit。
+        self._search_popup.setFocusProxy(self._search_edit)
+        self._search_popup.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        # 长说明折行显示，绝不靠横向滚动/省略号藏字（用户看不到的那截等于没说）。
+        self._search_popup.setWordWrap(True)
+        self._search_popup.setTextElideMode(Qt.ElideNone)
+        self._search_popup.setItemDelegate(_WrapDelegate(self._search_popup))
+        self._search_popup.hide()
+        self._search_edit.installEventFilter(self)
         # 结果是夜空上的浮层，跟输入框同一套深色；白底黑字会把星辰全压掉。
         self._search_popup.setStyleSheet(
             "QListWidget { background-color: #14161c; color: #D8DEEA;"
@@ -2993,6 +3147,61 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
             " background-color: rgba(90,140,255,0.38); color: #FFFFFF; }")
         self._search_popup.clicked.connect(self._on_search_picked)
         self._search_results: List[Dict[str, object]] = []
+        self._search_click_tail = None
+        # 独立浮层表头，不占结果行号；长说明可滚动，输入焦点仍在找星框。
+        from PySide6.QtWidgets import QTextEdit
+        self._target_header = QTextEdit(self._search_popup)
+        self._target_header.setReadOnly(True)
+        self._target_header.setFocusPolicy(Qt.NoFocus)
+        self._target_header.setTextInteractionFlags(Qt.NoTextInteraction)
+        self._target_header.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self._target_header.setStyleSheet(
+            "QTextEdit { background: #14161c; color: #D8DEEA; border: none; }")
+        self._target_header.hide()
+        self._target_snapshot = None
+        # 只在已有绘制事件中检查快照，不加推荐 timer，不在绘制中计算候选。
+        self.installEventFilter(self)
+
+    def eventFilter(self, watched, event):  # noqa: N802 (Qt 命名)
+        if watched is self:
+            if event.type() in (QEvent.Hide, QEvent.WindowDeactivate):
+                self._search_popup.hide()
+            elif event.type() == QEvent.Paint:
+                self._check_target_snapshot()
+        if watched is getattr(self, "_search_edit", None):
+            popup = self._search_popup
+            if event.type() == QEvent.FocusOut:
+                popup.hide()
+            elif event.type() in (QEvent.ShortcutOverride, QEvent.KeyPress):
+                key = event.key()
+                if (key == Qt.Key_F5 and popup.isVisible()
+                        and not self._search_edit.text().strip()):
+                    event.accept()
+                    if event.type() == QEvent.KeyPress:
+                        self._show_target_results()
+                    return True
+                if key in (Qt.Key_Up, Qt.Key_Down, Qt.Key_Return,
+                           Qt.Key_Enter, Qt.Key_Escape):
+                    # 不把搜索导航键交给天空/时间快捷键。
+                    event.accept()
+                    if event.type() == QEvent.ShortcutOverride:
+                        return True
+                    if key == Qt.Key_Escape:
+                        if popup.isVisible():
+                            popup.hide()
+                        else:
+                            self.hide_search()
+                    elif popup.isVisible() and self._search_results:
+                        if key in (Qt.Key_Return, Qt.Key_Enter):
+                            self._on_search_picked(popup.currentIndex())
+                        else:
+                            row = popup.currentRow()
+                            step = 1 if key == Qt.Key_Down else -1
+                            row = max(0, min(popup.count() - 1, row + step))
+                            popup.setCurrentRow(row)
+                            popup.scrollToItem(popup.item(row))
+                    return True
+        return super().eventFilter(watched, event)
 
     def set_satellite_catalog(self, catalog: List[Dict[str, object]]):
         """SatelliteTracker 喂入当前 TLE 目录, 供信息卡/搜索分类。"""
@@ -3511,7 +3720,7 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
             wdg = getattr(self, attr, None)
             if wdg is not None:
                 try:
-                    wdg.setVisible(not on)
+                    wdg.setVisible(not on and attr == "_search_edit")
                 except RuntimeError:
                     pass
         self._place_search_ui()
@@ -3572,6 +3781,8 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
             if focus:
                 edit.setFocus(Qt.ShortcutFocusReason)
                 edit.selectAll()
+            if not edit.text().strip():
+                self._show_target_results()
             self.update()
             return True
         except RuntimeError:
@@ -3639,28 +3850,123 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         try:
             popup.setMinimumWidth(edit.width())
             popup.setMaximumWidth(max(edit.width(), 200))
+            popup.ensurePolished()
             rows = popup.count()
             row_h = popup.sizeHintForRow(0) if rows else 0
             row_h = row_h if row_h and row_h > 0 else 22
-            want_h = row_h * min(max(rows, 1), 8) + 8
+            frame = 2 * popup.frameWidth()
+            # 浮层永远不超出视图：窗口矮时先压缩表头，至少保住一行结果。
+            max_h = max(frame + row_h, self.height() - 2)
+            header_w = max(1, edit.width() - 12)
+            header_h = 0
+            if not self._target_header.isHidden():
+                self._target_header.document().setTextWidth(max(1, edit.width() - 24))
+                header_h = int(self._target_header.document().size().height()) + 12
+            want_h = min(row_h * min(max(rows, 1), 8) + frame + header_h, max_h)
+            header_h = min(header_h, max(0, want_h - frame - row_h))
+            if not self._target_header.isHidden():
+                self._target_header.setGeometry(6, 6, header_w, header_h)
+            popup.setViewportMargins(0, header_h, 0, 0)
+            popup.setFixedHeight(want_h)
             below = edit.mapTo(self, edit.rect().bottomLeft())
             above = edit.mapTo(self, edit.rect().topLeft())
-            if below.y() + want_h > self.height() and above.y() - want_h >= 0:
-                above.setY(max(0, above.y() - want_h))
-                popup.move(above)
-            else:
-                popup.move(below)
+            y = below.y()
+            if y + want_h > self.height():
+                y = max(0, above.y() - want_h)
+            y = max(0, min(y, max(0, self.height() - want_h)))
+            popup.move(below.x(), y)
             popup.show()
             popup.raise_()
         except RuntimeError:
             pass
 
+    def _target_site_key(self):
+        # 包括海拔与预览口径；GNSS 与手动站址路径都在这里校验。
+        obs = self._observer or {}
+        return tuple(str(obs.get(k)) for k in ("lat", "lon", "alt_m")), self._site_note
+
+    def _check_target_snapshot(self) -> bool:
+        """快照最多保留 60 模拟秒；跳时/换址立即失效，选中前再检查。
+
+        与墙钟按倍率推进的差 >2 秒视为跳时（容纳事件派发误差）。
+        失效只撤掉旧行，不自动重新推荐；打开入口/F5 才计算下一份。
+        """
+        snapshot = self._target_snapshot
+        if snapshot is None or not self._search_popup.isVisible():
+            return False
+        jd, site, clock, rate = snapshot
+        delta = (self._current_jd() - jd) * 86400.0
+        elapsed = time.monotonic() - clock
+        if (site == self._target_site_key() and self._time_rate() == rate
+                and abs(delta) < 60.0 and abs(delta - elapsed * rate) < 2.0):
+            return True
+        self._target_snapshot = None
+        self._search_results = []
+        self._search_popup.clear()
+        tip = self._QListWidgetItem("候选已失效；按 F5 或重新打开找星刷新")
+        tip.setFlags(Qt.NoItemFlags)
+        self._search_popup.addItem(tip)
+        self._target_header.setPlainText(
+            "此时目标 · 已失效（时刻或站址已变化）\n"
+            "按 F5 或重新打开找星刷新；下方为旧快照说明，不能选中\n"
+            + self._target_header.toPlainText())
+        self._show_search_popup()
+        return False
+
+    def _show_target_results(self) -> None:
+        """按需计算空查询候选，沿用找星的行索引与选中链路。"""
+        if not self.isVisible() or not self.search_visible():
+            return
+        from desktop.sky_target_candidates import build_target_results
+        obs = self._observer or {}
+        jd = self._current_jd()
+        self._target_snapshot = (jd, self._target_site_key(), time.monotonic(),
+                                 self._time_rate())
+        result = build_target_results(
+            jd, obs.get("lat"), obs.get("lon"),
+            planet_labels={key: str(style["zh"])
+                           for key, style in _PLANET_STYLE.items()})
+        stamp = format_utc_time(_jtime.jd_to_unix(jd), "%Y-%m-%d %H:%M:%S UTC")
+        site = (f"已有站址：纬度 {obs['lat']:.4f}°，经度 {obs['lon']:.4f}°"
+                if obs else "未设置观测地点")
+        valid_site = (obs and math.isfinite(obs["lat"]) and math.isfinite(obs["lon"])
+                      and -90 <= obs["lat"] <= 90 and -180 <= obs["lon"] <= 180)
+        if not valid_site:
+            status = "观测地点未设置或无效；请先设置站址"
+        elif result.errors:
+            status = "部分来源失败" if result.rows else "候选计算失败；请查看来源错误"
+        else:
+            status = "计算快照" if result.rows else "此时无符合条件的候选"
+        self._target_header.setPlainText(
+            f"此时目标 · {status}\n{stamp}\n{site}\n"
+            + (f"{self._site_note}\n" if self._site_note else "")
+            + result.caveat
+            + ("\n" + "\n".join(result.errors) if result.errors else ""))
+        self._target_header.show()
+        self._search_results = result.rows
+        self._search_popup.clear()
+        for row in result.rows:
+            self._search_popup.addItem(self._QListWidgetItem(
+                f"{row['label']} · {row['kind_label']}\n{row['sub']}"))
+        if result.rows:
+            self._search_popup.setCurrentRow(0)
+        else:
+            tip = self._QListWidgetItem(status)
+            tip.setFlags(Qt.NoItemFlags)
+            self._search_popup.addItem(tip)
+        self._show_search_popup()
+
     def _on_search_text(self, text: str):
         text = (text or "").strip().lower()
         self._search_results = []
         if not text:
-            self._search_popup.hide()
+            if self._search_edit.hasFocus():
+                self._show_target_results()
+            else:
+                self._search_popup.hide()
             return
+        self._target_header.hide()
+        self._target_snapshot = None
         # 1) 卫星: 按名称 + 别名 + NORAD 号匹配
         for name, info in self._sat_catalog.items():
             hay = (name + " " + " ".join(info.get("aliases", [])) + " "
@@ -3685,24 +3991,13 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
             catalog = get_catalog()
             # 别名整组要一颗不漏：Merak/Phecda/Megrez 不在 54 颗亮星表里，
             # 只能从全天星表按专名精确取（北斗七星 = 7 颗，少一颗就是谎报）。
+            matches = []
             for nm in alias_names:
-                for cs in catalog.search_by_name(nm, limit=1)[:1]:
-                    if cs.name.lower() in seen_star:
-                        continue
-                    seen_star.add(cs.name.lower())
-                    zh = ""
-                    c = _stars.star_culture(cs.name)
-                    if c:
-                        zh = c.get("zh", "")
-                    self._search_results.append({
-                        "kind": "star", "kind_label": "恒星",
-                        "label": zh if zh else cs.name,
-                        "sub": (f"Star · {cs.name} · {cs.con}" if zh
-                                else f"Star · {cs.con}"),
-                        "ra": cs.ra_deg, "dec": cs.dec_deg, "vmag": cs.vmag,
-                        "name": cs.name,
-                    })
-            for cs in catalog.search_by_name(text, limit=20):
+                matches.extend(catalog.search_by_name(nm, limit=1)[:1])
+            matches.extend(catalog.search_by_name(text, limit=20))
+            for cs in matches:
+                if cs.name.lower() in seen_star:
+                    continue
                 seen_star.add(cs.name.lower())
                 zh = ""
                 c = _stars.star_culture(cs.name)
@@ -3714,7 +4009,11 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
                     "sub": (f"Star · {cs.name} · {cs.con}" if zh
                             else f"Star · {cs.con}"),
                     "ra": cs.ra_deg, "dec": cs.dec_deg, "vmag": cs.vmag,
-                    "name": cs.name,
+                    # 选中卡与定位共用这一条 HYG 结果，不退回旧亮星索引。
+                    "name": cs.name, "hyg_id": cs.hyg_id, "hip": cs.hip,
+                    "ra_deg": cs.ra_deg, "dec_deg": cs.dec_deg,
+                    "bv": cs.bv, "dist_pc": cs.dist_pc,
+                    "con": cs.con, "spect": cs.spect,
                 })
         except Exception as exc:      # 星表不可用不该让整个搜索失效
             self._camera_notice = (
@@ -3736,6 +4035,9 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
                     "sub": f"Star · {st.name}" if zh else "Star",
                     "ra": st.ra_deg, "dec": st.dec_deg, "vmag": st.vmag,
                     "name": st.name,
+                    # 兜底结果也带 hyg_id，选中定位与星图同一自行口径；
+                    # 对照表覆盖全部 54 颗亮星（测试复核）。
+                    "hyg_id": _stars.BRIGHT_STAR_HYG_IDS.get(st.name),
                 })
         # 3) 行星: 西名 + 中文名双匹配 (文化对位层)
         for en, style in _PLANET_STYLE.items():
@@ -3773,6 +4075,7 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
             item = self._QListWidgetItem(f"{icon}  {r['label']}   —   {r['sub']}")
             self._search_popup.addItem(item)
         if self._search_results:
+            self._search_popup.setCurrentRow(0)
             # 下拉弹窗跟随搜索框宽度（弹性，不写死像素）
             self._show_search_popup()
         elif text:
@@ -3785,10 +4088,26 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
             self._show_search_popup()
 
     def _on_search_picked(self, item):
+        # 首次激活即收起，后续 Enter/双击释放事件不能重复定位。
+        if self._search_popup.isHidden():
+            return
+        if not self._target_header.isHidden() and not self._check_target_snapshot():
+            return
         row = self._search_popup.currentRow()
-        if row < 0 or row >= len(self._search_results):
+        current = self._search_popup.currentItem()
+        if (row < 0 or row >= len(self._search_results) or current is None
+                or not current.flags() & Qt.ItemIsEnabled
+                or not current.flags() & Qt.ItemIsSelectable):
             return
         r = self._search_results[row]
+        if self.sender() is self._search_popup:
+            # 单击即关闭后，原行上的第二击会落到天空；不能再触发天空 goto。
+            from PySide6.QtWidgets import QApplication
+            rect = self._search_popup.visualItemRect(current)
+            rect.moveTopLeft(self._search_popup.viewport().mapTo(self, rect.topLeft()))
+            self._search_click_tail = (
+                time.monotonic() + QApplication.doubleClickInterval() / 1000.0,
+                rect)
         self._search_popup.hide()
         # 卫星 -> 统一选中入口（清 body/发 object_clicked/居中, 不绕过）
         if r["kind"] in ("space_station", "satellite", "weather", "amateur"):
@@ -3798,10 +4117,25 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
                     return
         # 恒星 -> 居中 + 选中出卡 (点星即读)
         if r["kind"] == "star" and self._require_station_for_search():
-            self.on_body_picked({"kind": "star", "key": r["name"]})
+            self.on_body_picked(dict(r, key=r["name"]))
             jd = self._current_jd()
             gs = self._ground_station()
-            v = j2000_to_altaz(vec_from_radec(r["ra"], r["dec"]), gs, jd)
+            ra, dec = r["ra"], r["dec"]
+            # 搜索定位与星图同一自行口径（J2000 -> jd）；缺 hyg_id/自行表或
+            # 查询异常时退回静态 J2000（与含自行最多差 ~0.02°，不宣称）。
+            hyg_id = r.get("hyg_id")
+            if hyg_id is not None:
+                try:
+                    from mbdsdr_ai.skyengine import proper_motion
+                    table = proper_motion.load_pm_table()
+                    if table is not None:
+                        pmra, pmdec = proper_motion.pm_for_hyg_ids(
+                            np.asarray([int(hyg_id)]), table)
+                        ra, dec = proper_motion.propagate_radec_many(
+                            float(ra), float(dec), pmra[0], pmdec[0], jd)
+                except Exception:
+                    ra, dec = r["ra"], r["dec"]
+            v = j2000_to_altaz(vec_from_radec(ra, dec), gs, jd)
             from mbdsdr_ai.celestial_geometry import azalt_from_vec
             az, alt = azalt_from_vec(v)
             self.goto_animated(az, alt)
@@ -4643,8 +4977,80 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
 
     @property
     def sky_calibration_error(self) -> str:
-        """最近一次校准应用失败的原因；成功或未传档案时为空串。"""
-        return str(getattr(self, "_sky_calibration_error", ""))
+        """最近一次校准应用/加载失败的原因；成功或未加载时为空串。"""
+        return str(getattr(self, "_sky_calibration_error", "")
+                   or getattr(self, "_sky_calibration_load_error", ""))
+
+    @property
+    def sky_calibration_note(self) -> str:
+        """HUD 上的校准展示文案：「已校准（YYYY-MM-DD）」或空串。
+
+        只含日期，不含 boresight/roll 等偏置数值；未加载档案时为空串。
+        """
+        return str(getattr(self, "_sky_calibration_note", ""))
+
+    def load_sky_calibration(self, path: Optional[str] = None) -> bool:
+        """显式加载校准档案（schema v1），成功返回 True。
+
+        构造 RFSkyView 时**不读盘**——加载必须由调用方显式触发，避免每个
+        视图实例都碰文件系统。``path=None`` 时沿用
+        :func:`default_sky_calibration_path` 的约定（与 desktop_settings.json
+        同目录的 ``sky_calibration.json``，可用 ``MBDSDR_SKY_CALIBRATION_PATH``
+        或 ``MBDSDR_SETTINGS_DIR`` 重定向）。
+
+        成功后档案用于 ``update_sky_pose`` 的缺省校准（显式传参优先），
+        展示文案只写「已校准（日期）」，绝不显示偏置数值。失败（未找到/
+        损坏/字段非法）返回 False，``reason`` 记进 ``sky_calibration_error``，
+        不抛异常、不覆盖原文件、不自动修复；后续位姿按未校准处理。
+        """
+        target = (path if path is not None
+                  else default_sky_calibration_path())
+        result = sky_load_calibration_profile(target)
+        # 显式给了自定义路径 → 记录显式优先，指向模式开关不再读默认档案。
+        self._sky_calibration_explicit = path is not None
+        loaded = self._adopt_sky_calibration_result(result)
+        self._refresh_sky_hud()
+        self.update()
+        return loaded
+
+    def _adopt_sky_calibration_result(self, result: dict) -> bool:
+        """把一次 load_profile 结果写进视图状态，返回是否加载成功。
+
+        只做纯状态落地，不碰文件系统、不抛异常；「未找到档案算不算错误」
+        由调用方先判定。
+        """
+        profile = result.get("profile") if result.get("ok") else None
+        if isinstance(profile, dict):
+            self._sky_calibration_profile = dict(profile)
+            self._sky_calibration_note = calibration_note(profile)
+            self._sky_calibration_error = ""
+            self._sky_calibration_load_error = ""
+            return True
+        self._sky_calibration_profile = None
+        self._sky_calibration_note = ""
+        self._sky_calibration_error = ""
+        self._sky_calibration_load_error = str(
+            result.get("reason") or "校准档案加载失败")
+        return False
+
+    def _autoload_default_sky_calibration(self) -> None:
+        """指向模式开启时按默认路径读一次档案（每段开启只读一次）。
+
+        默认档案不存在是正常状态（未校准），不记错误；损坏/字段非法才把
+        中文原因记进 ``sky_calibration_error``，位姿仍按未校准处理。
+        显式加载过自定义档案时直接跳过——显式优先，不被默认路径覆盖。
+        """
+        if getattr(self, "_sky_calibration_explicit", False):
+            return
+        result = sky_load_calibration_profile(default_sky_calibration_path())
+        if not result.get("ok") and result.get("error") == "not_found":
+            # 「没有档案」= 未校准，不是故障：清掉旧错误但保留空文案。
+            self._sky_calibration_profile = None
+            self._sky_calibration_note = ""
+            self._sky_calibration_error = ""
+            self._sky_calibration_load_error = ""
+            return
+        self._adopt_sky_calibration_result(result)
 
     def set_sky_pointing_mode(self, enabled: bool) -> None:
         """开关指向模式（默认关闭）。
@@ -4652,6 +5058,9 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         关闭时只清空 HUD 状态并重绘，不恢复/不改动当前视角——用户关掉
         指向模式后仍是刚才看到的天空。开启时先按「还没有位姿」生成一帧
         诚实空态（准星 +「还没对准」），不画任何假目标。
+
+        开启这一刻会按默认路径读一次校准档案（每段开启只读一次，绝不在
+        每帧读盘）；未显式加载过自定义档案时才读，显式优先。
         """
         enabled = bool(enabled)
         if enabled == self._sky_pointing_mode:
@@ -4666,9 +5075,42 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
             self._sky_hud = None
             self._sky_hud_error = ""
             self._sky_calibration_error = ""
+            self._sky_identify_cache = None
+            self._sky_identify_error = ""
         else:
+            self._autoload_default_sky_calibration()
             self._refresh_sky_hud()
         self.update()
+
+    def set_situation_sound_enabled(self, enabled: bool) -> None:
+        """情境音效静音开关（FR-11）：默认开启、低音量。"""
+        self._situation_sound.set_enabled(bool(enabled))
+
+    def situation_sound_enabled(self) -> bool:
+        return self._situation_sound.enabled
+
+    def set_situation_sound_volume(self, volume: float) -> None:
+        self._situation_sound.set_volume(volume)
+
+    def _maybe_play_identify_sound(self, targets) -> None:
+        """认出目标时按类别播短音；同一目标 3 秒内只响一次。
+
+        未知类别（卫星等）由 ``SituationSound.play`` 静默返回 False，不硬凑音。
+        """
+        if not targets:
+            return
+        top = targets[0]
+        if not isinstance(top, dict):
+            return
+        kind = str(top.get("kind") or "")
+        name = str(top.get("name") or top.get("key") or top.get("zh") or "")
+        key = (kind, name)
+        now = time.monotonic()
+        if key == self._last_sound_key and now - self._last_sound_ts < 3.0:
+            return
+        if self._situation_sound.play(kind):
+            self._last_sound_key = key
+            self._last_sound_ts = now
 
     def set_manual_override(self, enabled: bool) -> None:
         """手动接管开关（L4）：开启后位姿更新不再覆盖当前视角。
@@ -4704,7 +5146,8 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
                 传入时先用 ``sky_pointing.apply_calibration`` 叠加偏置，
                 再按校准后的视场套用视图；档案损坏/字段非法则退回未校准
                 的原行为，原因记在 ``sky_calibration_error``——不静默
-                采用半套偏置。
+                采用半套偏置。为 ``None`` 时改用 ``load_sky_calibration``
+                已加载的档案（显式传参优先）；都没有则逐字保持未校准行为。
 
         Returns:
             本帧是否真的驱动了视图。手动接管（L4）或位姿不可用时返回
@@ -4713,8 +5156,11 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         if not self._sky_pointing_mode:
             return False
         effective: object = pose
-        if calibration is not None:
-            calibrated = (sky_apply_calibration(pose, calibration)
+        # 显式传参优先；未传时用已加载档案（未加载时行为与旧版逐字一致）。
+        calibration_used = (calibration if calibration is not None
+                            else self._sky_calibration_profile)
+        if calibration_used is not None:
+            calibrated = (sky_apply_calibration(pose, calibration_used)
                           if isinstance(pose, dict)
                           else {"valid": False, "error": "bad_pose",
                                 "reason": "位姿不是 dict"})
@@ -4743,6 +5189,10 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         else:
             self._sky_level = self._sky_pose_level
             applied = self._apply_sky_pose(effective)
+        # 没外部喂 targets 时，按准星自动识别（含手动接管 L4）；显式传
+        # targets 的路径行为完全不变，不被自动识别覆盖。
+        if targets is None:
+            self._sky_targets = self._identify_at_crosshair()
         self._refresh_sky_hud()
         self.update()
         return applied
@@ -4789,6 +5239,76 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
             self._rotation = roll
             self.view_state.rotation = roll
         return True
+
+    def _identify_at_crosshair(self) -> List[dict]:
+        """按当前视图中心（准星）识别恒星与行星/月球。
+
+        没有站址或拿不到时间时返回空列表——不猜站址/时刻；识别异常也
+        返回空列表，原因记在 ``_sky_identify_error``，绝不抛给调用方。
+        识别键按（整秒, 站址, 0.2° 方位, 0.2° 俯仰, 0.1° 视场）量化：静止画面
+        连续重绘直接复用上一帧结果，不每帧重算星表；缓存只留最近一帧。
+        """
+        observer = self._observer
+        if not observer:
+            # 无站址不是错误，但也不能沿用上一站址的缓存。
+            self._sky_identify_cache = None
+            self._sky_identify_error = ""
+            return []
+        try:
+            jd = float(self._current_jd())
+            lat = float(observer["lat"])
+            lon = float(observer["lon"])
+            az = float(self.view_state.center_az)
+            alt = float(self.view_state.center_alt)
+            fov = float(self.view_state.fov_deg)
+            key = (int(round(jd * 86400.0)),
+                   round(lat, 4), round(lon, 4),
+                   int(round(az / 0.2)),
+                   int(round(alt / 0.2)),
+                   int(round(fov / 0.1)))
+            cache = self._sky_identify_cache
+            if isinstance(cache, dict) and cache.get("key") == key:
+                targets = cache.get("targets")
+                if isinstance(targets, list):
+                    self._maybe_play_identify_sound(targets)
+                    return list(targets)
+                return []
+
+            from mbdsdr_ai import sky_satellites
+            from mbdsdr_ai.sky_bodies import identify_bodies
+            from mbdsdr_ai.sky_pointing import identify_direction
+            from mbdsdr_ai.sky_targets import merge_targets
+
+            self._sky_identify_error = ""
+            stars = identify_direction(az, alt, fov, jd, lat, lon, limit=4)
+            bodies = identify_bodies(az, alt, fov, jd, lat, lon, limit=4)
+            # 卫星识别独立成段：TLE 缺失/位置计算失败只丢掉卫星这一路，
+            # 绝不拖垮已经算出的恒星/行星。时刻必须用引擎模拟秒
+            # （_engine_unix），与恒星/行星的 JD 同源；站址高度是米，
+            # 单位换算交给 identify_satellites 内部完成。
+            satellites: List[dict] = []
+            try:
+                sat_report = sky_satellites.identify_satellites(
+                    az, alt, fov, self._engine_unix(), lat, lon, limit=3,
+                    observer_alt_m=observer.get("alt_m") or 0.0)
+                satellites = list(sat_report.get("satellites") or [])
+            except Exception as sat_exc:  # noqa: BLE001 - 卫星失败不影响其余目标
+                satellites = []
+                if not self._sky_identify_error:
+                    self._sky_identify_error = (
+                        f"{type(sat_exc).__name__}: {sat_exc}")
+                _log.debug("准星卫星识别失败：%s", self._sky_identify_error)
+            targets = merge_targets(stars.get("stars") or [],
+                                    bodies.get("bodies") or [],
+                                    satellites, limit=6)
+            self._sky_identify_cache = {"key": key, "targets": targets}
+            self._maybe_play_identify_sound(targets)
+            return targets
+        except Exception as exc:  # noqa: BLE001 - 识别失败不得拖垮位姿链路
+            self._sky_identify_cache = None
+            self._sky_identify_error = f"{type(exc).__name__}: {exc}"
+            _log.debug("准星识别失败：%s", self._sky_identify_error)
+            return []
 
     def _refresh_sky_hud(self) -> None:
         """按当前视图与最新位姿生成绘制指令；失败不进入绘制层。"""
@@ -5123,6 +5643,56 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
             painter.drawRoundedRect(QRectF(bx, by, tw + 20.0, th + 8.0), 6, 6)
             painter.setPen(mark)
             painter.drawText(QPointF(bx + 10.0, by + th - 2.0), hint)
+
+        # 5.1) 口语提示：在 hint 框上方一行，正常字重、比 hint 小一号；
+        #      文案由 sky_hud 的 narrative 提供，已把 az/alt 等术语译成人话。
+        narrative = str(hud.get("narrative") or "")
+        narrative_drawn = False
+        if hint and narrative and narrative != hint:
+            fn = QFont(self._font)
+            fn.setPointSize(max(8, fn.pointSize() - 1))
+            fn.setBold(False)
+            painter.setFont(fn)
+            fmn = QFontMetrics(fn)
+            tw2 = float(fmn.horizontalAdvance(narrative))
+            th2 = float(fmn.height())
+            bx2 = cx - tw2 / 2.0 - 10.0
+            by2 = by - th2 - 6.0
+            if by2 >= 8.0:
+                # 复用 hint 框已算好的底色，避免新增直接读全局 COLORS 的点位
+                # （对照度守卫来说，颜色必须走既有 token/统一入口）。
+                bg2 = QColor(bg)
+                painter.setPen(QPen(mark, 1.0))
+                painter.setBrush(QBrush(bg2))
+                painter.drawRoundedRect(
+                    QRectF(bx2, by2, tw2 + 20.0, th2 + 8.0), 6, 6)
+                painter.setPen(ink)
+                painter.drawText(QPointF(bx2 + 10.0, by2 + th2 - 2.0),
+                                 narrative)
+                narrative_drawn = True
+
+        # 5.2) 校准状态：只显示「已校准（日期）」，绝不显示 boresight/
+        #      roll 等偏置数值；文案为空时不画这一行。
+        calibration = self.sky_calibration_note
+        if calibration and hint:
+            fc = QFont(self._font)
+            fc.setPointSize(max(8, fc.pointSize() - 1))
+            fc.setBold(False)
+            painter.setFont(fc)
+            fmc = QFontMetrics(fc)
+            tw3 = float(fmc.horizontalAdvance(calibration))
+            th3 = float(fmc.height())
+            bx3 = cx - tw3 / 2.0 - 10.0
+            by3 = (by2 - th3 - 4.0) if narrative_drawn else (by - th3 - 6.0)
+            if by3 >= 8.0:
+                bg3 = QColor(bg)
+                painter.setPen(QPen(mark, 1.0))
+                painter.setBrush(QBrush(bg3))
+                painter.drawRoundedRect(
+                    QRectF(bx3, by3, tw3 + 20.0, th3 + 8.0), 6, 6)
+                painter.setPen(ink)
+                painter.drawText(QPointF(bx3 + 10.0, by3 + th3 - 2.0),
+                                 calibration)
 
         # 6) 数据源行：让「SDR/GNSS 此刻插没插着」在指向 HUD 上一眼可见。
         sources_text = str(hud.get("sources_text") or "")
@@ -5692,12 +6262,34 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         # 不再逐条重建矩阵（124 条 × 3 个矩阵曾占单帧 ~11ms）。
         entries: List[object] = []
         vecs: List[np.ndarray] = []
+        # 星系长轴朝向：候选条目的北点/东点先攒起来，后面与主表分开各做
+        # 一次批量投影（不能逐条建矩阵，见下方 altaz/落屏的批量注释）。
+        rot_vecs: List[np.ndarray] = []
+        rot_slots: Dict[int, int] = {}
         for e in _dso.BUILTIN_CATALOG:
             try:
                 vecs.append(vec_from_radec(e.ra_deg, e.dec_deg))
-                entries.append(e)
             except Exception:
                 continue
+            entry_index = len(entries)
+            entries.append(e)
+            # 只有「星系 + 目录 PA 有效 + 轴比已知/估计」才值得换算朝向；
+            # 其余条目（星团/星云/无 PA）保持旧的水平椭圆或虚线圆。
+            if (e.dso_type == "galaxy"
+                    and dso_position_angle(e) is not None
+                    and dso_axis_ratio(e) is not None
+                    and dso_axis_ratio_source(e) in (
+                        AXIS_RATIO_SOURCE_CATALOG,
+                        AXIS_RATIO_SOURCE_ESTIMATED)):
+                try:
+                    n_ra, n_dec, ea_ra, ea_dec = dso_orientation.basis_offsets(
+                        e.ra_deg, e.dec_deg)
+                    n_vec = vec_from_radec(n_ra, n_dec)
+                    ea_vec = vec_from_radec(ea_ra, ea_dec)
+                except Exception:
+                    continue
+                rot_slots[entry_index] = len(rot_vecs) // 2
+                rot_vecs.extend((n_vec, ea_vec))
         if not entries:
             return
         altaz = j2000_to_altaz_many(np.array(vecs, dtype=float), gs, jd)
@@ -5714,6 +6306,16 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         az_k, alt_k = az_k[keep], alt_k[keep]
         alt_draw_k = alt_draw_k[keep]
         px_k, py_k = self._sky_to_screen_many(az_k, alt_draw_k)
+        # 北点/东点：一次批量赤道->地平 + 一次批量投影，北点同样过显示层折射。
+        rot_px: Optional[np.ndarray] = None
+        rot_py: Optional[np.ndarray] = None
+        if rot_vecs:
+            rot_altaz = j2000_to_altaz_many(
+                np.array(rot_vecs, dtype=float), gs, jd)
+            rot_az, rot_alt = azalt_from_vec_many(rot_altaz)
+            rot_alt_draw = np.array(
+                [self._display_alt_deg(float(a)) for a in rot_alt], dtype=float)
+            rot_px, rot_py = self._sky_to_screen_many(rot_az, rot_alt_draw)
         painter.save()
         for j in range(len(idx)):
             e = entries[int(idx[j])]
@@ -5737,8 +6339,17 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
                     continue            # 与恒星同一亮度门（看不清的不画）
             r, clamped = self._dso_symbol_geometry(az, alt_draw, dso_size_arcmin(e))
             alpha = int(round(70.0 + 150.0 * bright))
+            rotation_deg: Optional[float] = None
+            slot = rot_slots.get(int(idx[j]))
+            if slot is not None and rot_px is not None and rot_py is not None:
+                k = 2 * slot
+                rotation_deg = dso_orientation.major_axis_screen_deg(
+                    dso_position_angle(e),
+                    float(rot_px[k]) - px, float(rot_py[k]) - py,
+                    float(rot_px[k + 1]) - px, float(rot_py[k + 1]) - py)
             self._draw_dso_glyph(painter, pos, r, e.dso_type, alpha,
-                                 dso_axis_ratio(e), dso_axis_ratio_source(e))
+                                 dso_axis_ratio(e), dso_axis_ratio_source(e),
+                                 rotation_deg)
             if clamped:
                 self._draw_dso_clamp_marker(painter, pos, r, alpha)
             # 小而不亮的条目（1.6px 符号）不挂名，避免宽 FOV 下满屏缩写；
@@ -5752,7 +6363,8 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
     def _draw_dso_glyph(self, painter: QPainter, pos: QPointF, r: float,
                         dso_type: str, alpha: int,
                         axis_ratio: Optional[float] = None,
-                        axis_ratio_source: str = AXIS_RATIO_SOURCE_UNKNOWN) -> None:
+                        axis_ratio_source: str = AXIS_RATIO_SOURCE_UNKNOWN,
+                        rotation_deg: Optional[float] = None) -> None:
         """按类型画不同符号；r 为星表视大小换算出的像素半径。
 
         形状约定（只用轮廓，不做亮度渐变——本视图没有表面亮度模型）：
@@ -5763,6 +6375,10 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
           cluster_nebula      虚线椭圆 + 内部星点（星团+星云复合体）
           double_star         两个实心点（双星）
           supernova_remnant   双同心圆
+
+        星系长轴朝向：``rotation_deg`` 是目录 PA（从北向东量）经本帧投影
+        换算出**屏幕**上的角度。屏幕 y 向下，故与 ``QPainter.rotate()``
+        同口径——正角顺时针。``None`` = 不旋转（水平椭圆，旧口径）。
         """
         col = self._ink()
         pen = QPen(QColor(col.red(), col.green(), col.blue(), min(255, alpha)), 1)
@@ -5773,9 +6389,20 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
             if axis_ratio_source in (AXIS_RATIO_SOURCE_CATALOG,
                                      AXIS_RATIO_SOURCE_ESTIMATED) \
                     and axis_ratio is not None:
-                painter.drawEllipse(pos, max(1.0, r), max(0.7, r * float(axis_ratio)))
+                major = max(1.0, r)
+                minor = max(0.7, r * float(axis_ratio))
+                if rotation_deg is not None and math.isfinite(rotation_deg):
+                    # 绕符号中心旋转后再画椭圆；save/restore 不污染其它符号。
+                    painter.save()
+                    painter.translate(pos)
+                    painter.rotate(float(rotation_deg))
+                    painter.drawEllipse(QPointF(0.0, 0.0), major, minor)
+                    painter.restore()
+                else:
+                    painter.drawEllipse(pos, major, minor)
             else:
                 # 轴比未知：中性虚线圆（圆率=1），信息卡同时标「轴比未知」。
+                # 圆没有长轴，不套 PA，避免伪造朝向。
                 pen.setStyle(Qt.DashLine)
                 painter.setPen(pen)
                 rr = max(1.2, r)
@@ -5861,22 +6488,33 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
                               self.CONSTEL_LABEL_FOV[1])
         return detail, label
 
-    def _constellation_screen_points(self, az, alt) \
-            -> List[Optional[QPointF]]:
-        """批量落屏；地平以下（视高度 < -6°）或相机背后返回 None。"""
+    def _layer_points_full(self, prepared: Dict[str, object], gs, jd):
+        """预备几何 -> (本帧点表, 本帧 az 数组, 本帧 alt 数组)。
+
+        点表值：``QPointF`` = 可画；``None`` = 地平以下（视高度 < -6°）、
+        投影无定义（相机背后/对跖点）或落在投影有效域之外。**有效性由
+        ``projection.validity_mask`` 统一判定**，不再用「坐标是否有限」
+        去猜（球极对跖点会给出有限哨兵值）。
+        """
+        keys = prepared["keys"]
+        if len(keys) == 0:
+            return {}, None, None
+        altaz = j2000_to_altaz_many(prepared["vecs"], gs, jd)
+        az, alt = azalt_from_vec_many(altaz)
         alt_draw = np.array([self._display_alt_deg(float(a)) for a in alt],
                             dtype=float)
+        rotation = build_view_rotation(self.view_state)
+        valid = self.projection.validity_mask(altaz @ rotation.T)
+        valid = np.asarray(valid, dtype=bool) & (alt_draw >= -6.0)
         px, py = self._sky_to_screen_many(az, alt_draw)
-        out: List[Optional[QPointF]] = []
-        for i in range(len(px)):
+        points: Dict[object, Optional[QPointF]] = {}
+        for i, key in enumerate(keys):
             x, y = float(px[i]), float(py[i])
-            if not (math.isfinite(x) and math.isfinite(y)):
-                out.append(None)
-            elif float(alt_draw[i]) < -6.0:
-                out.append(None)
+            if valid[i] and math.isfinite(x) and math.isfinite(y):
+                points[key] = QPointF(x, y)
             else:
-                out.append(QPointF(x, y))
-        return out
+                points[key] = None
+        return points, az, alt
 
     def _layer_points(self, prepared: Dict[str, object], gs, jd) \
             -> Dict[object, Optional[QPointF]]:
@@ -5886,12 +6524,8 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         每帧在变，但恒星几何不变，不再每帧从 RA/Dec 重算一遍向量
         （实测这段重建占本层耗时的一半）。
         """
-        keys = prepared["keys"]
-        if len(keys) == 0:
-            return {}
-        altaz = j2000_to_altaz_many(prepared["vecs"], gs, jd)
-        az, alt = azalt_from_vec_many(altaz)
-        return dict(zip(keys, self._constellation_screen_points(az, alt)))
+        points, _az, _alt = self._layer_points_full(prepared, gs, jd)
+        return points
 
     def _constellation_prepared(self, layer) -> Dict[str, object]:
         """按体系预计算折线拓扑与标签锚点，缓存后跨帧复用。
@@ -5973,6 +6607,9 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         prepared = {
             "keys": keys,
             "vecs": vecs,
+            # 本帧 az/alt 数组与 keys 同序；裁剪时按端点键取回坐标，不再
+            # 每帧建一份 key->坐标的字典。
+            "index": {k: i for i, k in enumerate(keys)},
             "region": tuple(region_segs),
             "detail": tuple(detail_segs),
             "labels": tuple(labels),
@@ -5980,17 +6617,67 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         self._constel_prepared[sid] = prepared
         return prepared
 
-    @staticmethod
-    def _constel_path(segments, points) -> QPainterPath:
-        """已加载折线元组 + 本帧投影点 -> 一个 QPainterPath（一次绘制）。"""
+    CONSTEL_CLIP_ITERATIONS = 12
+    """跨有效域边界的线段二分次数。
+
+    12 次 ≈ 段长的 2.4e-4：最长星官段 35° 时边界误差 ≤ 0.0085°，在 120°
+    视场/900px 下 ≈ 0.06 px；而透视/球极的有效域边界（90°/180° 离轴）
+    本来就在画布之外，可见部分由画布边缘决定，边界精度不影响像素。
+    """
+
+    def _constel_project(self, az_deg: float, alt_deg: float):
+        """裁剪落屏：与绘制端同一条「显示高度（折射）+ 投影」链。"""
+        return sky_to_screen(float(az_deg),
+                             self._display_alt_deg(float(alt_deg)),
+                             self.view_state, self.projection,
+                             self._widget_size_tuple())
+
+    def _constel_drawable(self, az_deg: float, alt_deg: float) -> bool:
+        """线段点是否可画：地平以上 + 投影有效域内（唯一判据）。"""
+        alt_draw = self._display_alt_deg(float(alt_deg))
+        if alt_draw < -6.0:
+            return False
+        return direction_is_drawable(float(az_deg), alt_draw,
+                                     self.view_state, self.projection)
+
+    def _constel_path(self, segments, points, prepared, az, alt) -> QPainterPath:
+        """已加载折线元组 + 本帧投影点 -> 一个 QPainterPath（一次绘制）。
+
+        两端都可画 → 整段画；两端都不可画 → 跳过；**一端可画** → 用
+        ``clip_segment_to_domain`` 裁到有效域边界后在边界处落笔，不再把
+        整条线丢掉（参考 aladin-lite 的 SDF 有效性域思路，代码重写）。
+        """
         path = QPainterPath()
+        if az is None or alt is None:
+            return path
+        index = prepared.get("index") or {}
         for ka, kb in segments:
             pa = points.get(ka)
             pb = points.get(kb)
-            if pa is None or pb is None:
+            if pa is not None and pb is not None:
+                path.moveTo(pa)
+                path.lineTo(pb)
                 continue
-            path.moveTo(pa)
-            path.lineTo(pb)
+            if pa is None and pb is None:
+                continue
+            ia = index.get(ka)
+            ib = index.get(kb)
+            if ia is None or ib is None:
+                continue
+            # 可画端已经远在画布外：裁出来的段也看不见，省掉二分开销。
+            anchor = pa if pa is not None else pb
+            if not self._on_screen(anchor, margin=64.0):
+                continue
+            clipped = clip_segment_to_domain(
+                float(az[ia]), float(alt[ia]),
+                float(az[ib]), float(alt[ib]),
+                drawable=self._constel_drawable,
+                project=self._constel_project,
+                iterations=self.CONSTEL_CLIP_ITERATIONS,
+            )
+            if len(clipped) == 2:
+                path.moveTo(QPointF(clipped[0][0], clipped[0][1]))
+                path.lineTo(QPointF(clipped[1][0], clipped[1][1]))
         return path
 
     def _draw_constellations(self, painter: QPainter):
@@ -6045,14 +6732,15 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
                 base_label = QColor(126, 206, 182, 175 if night else 115)
 
             prepared = self._constellation_prepared(layer)
-            points = self._layer_points(prepared, gs, jd)
+            points, az_arr, alt_arr = self._layer_points_full(prepared, gs, jd)
 
             painter.save()
             pen = QPen(base_line, 1)
             if dashed:
                 pen.setStyle(Qt.PenStyle.DashLine)
             painter.setPen(pen)
-            painter.drawPath(self._constel_path(prepared["region"], points))
+            painter.drawPath(self._constel_path(prepared["region"], points,
+                                               prepared, az_arr, alt_arr))
             if detail_alpha > 0.0 and prepared["detail"]:
                 dcol = QColor(base_line)
                 dcol.setAlpha(int(base_line.alpha() * detail_alpha))
@@ -6062,7 +6750,8 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
                         dpen.setStyle(Qt.PenStyle.DashLine)
                     painter.setPen(dpen)
                     painter.drawPath(
-                        self._constel_path(prepared["detail"], points))
+                        self._constel_path(prepared["detail"], points,
+                                           prepared, az_arr, alt_arr))
             painter.restore()
 
             if label_alpha <= 0.0:
@@ -7671,9 +8360,10 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
             _log.warning("拾取降级：%s", self._pick_degrade, exc_info=True)
         # 恒星候选改由当帧 select_for_view 集合直接给出（见循环尾部）；
         # 不再从 merged_star_index 另取一套坐标。
-        # DSO 图层已画 → 星表里画得出来的都能点（与绘制层同一门：白天/地平/
-        # 星等亮度三条都在下面循环里统一判）。
-        if not self._stars_hidden_by_daylight():
+        # DSO 图层已画 → 星表里画得出来的都能点（可见性开关也须与绘制同门）。
+        # 关闭时不为普通拾取加载/遍历目录；显式选中标记是下面的独立入口。
+        dso_layer_visible = self._show_dso and not self._stars_hidden_by_daylight()
+        if dso_layer_visible:
             # DSO 目录是可选模块（外部边界）：缺模块只记日志 + 状态位，
             # 不把整个星球候选清空；目录内单条数据的编程错误照常抛出。
             try:
@@ -7688,16 +8378,17 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
                     candidates.append(("dso", e.name, e.ra_deg, e.dec_deg,
                                        dso_magnitude(e),
                                        None if size is None else size / 60.0))
-        # 已选 DSO 有标记环, 可再点中（星表内条目用真实星等；目录外不给点）
+        # 隐层时只保留 _draw_body_info 真正绘制的已选标记，不恢复整颗
+        # DSO 的隐藏符号命中区。坐标同信息卡；原有地平/星等门仍在下面。
         pb = self._picked_body
-        if pb and pb.get("kind") == "dso":
-            ra_d, de_d = pb.get("ra_deg"), pb.get("dec_deg")
-            ent = self._dso_entry(str(pb.get("key")))
-            if ra_d is not None and ent is not None:
-                size = dso_size_arcmin(ent)
-                candidates.append(("dso", ent.name, float(ra_d),
-                                   float(de_d), dso_magnitude(ent),
-                                   None if size is None else size / 60.0))
+        info = self._body_info or {}
+        if not dso_layer_visible and pb and pb.get("kind") == "dso":
+            ra_d, de_d = info.get("ra"), info.get("dec")
+            if ra_d is not None and de_d is not None:
+                ent = self._dso_entry(str(pb.get("key")))
+                if ent is not None:
+                    candidates.append(("dso", ent.name, float(ra_d),
+                                       float(de_d), dso_magnitude(ent), None))
 
         best: Optional[Dict[str, object]] = None
         best_score: Optional[float] = None
@@ -7756,7 +8447,10 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
             # 拾取半径跟随"画出来的大小"：已分辨的行星圆面用圆面半径，
             # 与 _draw_planets 里 disc["r"] >= 2.0 走真实圆面同一条判据。
             limit = max(float(tolerance), r_pick)
-            if kind == "planet" and dia_deg is not None and dia_deg > 0.0:
+            if kind == "dso" and not dso_layer_visible:
+                # 与 _draw_body_info 的静态选中环同半径，而非已隐藏的角大小。
+                limit = max(float(tolerance), breathing_ring_radius(0.0, 16.0))
+            elif kind == "planet" and dia_deg is not None and dia_deg > 0.0:
                 disc = self._planet_screen_disc(az, alt_draw, float(dia_deg))
                 if disc is not None and float(disc["r"]) >= 2.0:
                     limit = max(limit, float(disc["r"]))
@@ -7896,6 +8590,7 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         if body is None:
             self._picked_body = None
             self._body_info = None
+            self._body_info_key = None
             self.update()
             return
         self._hovered_object = None
@@ -7914,7 +8609,10 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         self._doppler_label.hide()
         self._tune_refresh_timer.stop()
         self._picked_body = dict(body)
+        # 点中目标也给一声（与准星识别共用 3 秒去重，不连响）。
+        self._maybe_play_identify_sound([self._picked_body])
         self._build_body_info(self._picked_body)
+        self._body_info_key = self._body_context_key()
         self.update()
 
     def _body_rise_set(self, ra_deg: float, dec_deg: float, jd_now: float,
@@ -8014,6 +8712,27 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
                 break
         return " · ".join(bits)
 
+    def _body_context_key(self):
+        """信息卡的上下文指纹：时刻（分钟粒度）+ 站址三元组。
+
+        分钟粒度是刻意取舍：1× 实时下每帧时刻都变，按秒重算会让 24 h
+        升降扫描每帧跑一次；跳时（≥1 分钟）和换址仍能立刻识别。
+        """
+        jd = self._current_jd()
+        obs = self._observer or {}
+        return (int(math.floor(jd * 1440.0)), obs.get("lat"), obs.get("lon"),
+                obs.get("alt_m"))
+
+    def _ensure_body_info_current(self) -> None:
+        """跳时/换址后重算选中天体信息卡；上下文未变则复用（不重扫升降）。"""
+        if not self._picked_body:
+            return
+        key = self._body_context_key()
+        if key == self._body_info_key:
+            return
+        self._build_body_info(self._picked_body)
+        self._body_info_key = key
+
     def _build_body_info(self, body: Dict[str, object]) -> None:
         """构建行星信息卡字段 (Stellarium 规格同款行: Mag/Dist/RaDec/AzAlt/
         Visibility)。无值给占位, 不编造。"""
@@ -8028,6 +8747,9 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
             key = str(body.get("key"))
             jd = self._current_jd()
             pos = self._planet_positions(jd).get(key)
+            if pos is None:
+                # 没算过 ≠ 观测到的「不升不落」：缺历表时卡片必须说未知。
+                info["rise_set_unknown"] = "未知（历表缺测，未计算升降）"
             if key == "moon":
                 # 月球走同一条历表（compute_all 含 moon）与同一张信息卡骨架，
                 # 但它不是行星：标题给中文"月亮"、类别标"Moon"。_PLANET_STYLE
@@ -8076,7 +8798,7 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
                 info["set"] = rs["set_jd"]
         elif kind == "star":
             if body.get("ra_deg") is not None:
-                # 全天星表选中：数据全部来自当帧 select_for_view 行，
+                # 全天星表选中：数据来自当帧 select_for_view 或搜索结果行，
                 # 不另查第二套坐标/第二份星等。
                 name = str(body.get("name") or "")
                 label = name if name else f"HYG {body.get('hyg_id')}"
@@ -8155,6 +8877,11 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
                 size = dso_size_arcmin(entry)
                 bits = [("角大小 " + format_arcmin(size)) if size is not None
                         else "角大小 未知"]
+                dist_ly = dso_distance_ly(entry)
+                if dist_ly is not None:
+                    bits.append(
+                        f"距离 约 {format_dso_distance_ly(dist_ly)} 光年"
+                        f"（目录视差）")
                 if str(dso_type) == "galaxy":
                     ratio = dso_axis_ratio(entry)
                     src = dso_axis_ratio_source(entry)
@@ -8164,6 +8891,12 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
                         tag = ("目录" if src == AXIS_RATIO_SOURCE_CATALOG
                                else "估计")
                         bits.append(f"轴比 {ratio:.2f}（{tag}）")
+                    # 只有目录给出位置角时才写；缺失不占位（轴比未知已够）。
+                    pa = dso_position_angle(entry)
+                    if pa is not None:
+                        digits = 0 if pa.is_integer() else 1
+                        bits.append(
+                            f"长轴方向 {format_angle_deg(pa, digits)}（目录）")
                 if mag is None:
                     bits.append("星等未知")
                 bits.append("公开星表数据")
@@ -8187,6 +8920,9 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
                     info["ra"], info["dec"] = float(ra_s), float(de_s)
                 except (TypeError, ValueError):
                     pass
+            if info["ra"] is None or info["dec"] is None:
+                # 缺太阳历表时根本没做 24h 扫描，不能报成「拱极或不可见」。
+                info["rise_set_unknown"] = "未知（太阳历表缺测，未计算升降）"
             dist_au = s.get("distance_au")
             if dist_au:
                 info["dist_text"] = format_distance_au(float(dist_au), digits=5)
@@ -8216,6 +8952,8 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
 
     def _draw_body_info(self, painter: QPainter):
         """行星/恒星/DSO 信息卡: 与卫星卡同骨架 (Stellarium 规格)。"""
+        # 跳时/换址后先让卡片跟上当前历表与站址，再取绘制数据。
+        self._ensure_body_info_current()
         body = self._picked_body
         info = self._body_info or {}
         if not body or not info:
@@ -8256,7 +8994,9 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
             return format_utc_time(_jtime.jd_to_unix(jd))
 
         rise = info.get("rise"); sset = info.get("set")
-        if rise is None and sset is None:
+        if info.get("rise_set_unknown"):
+            vis = str(info["rise_set_unknown"])
+        elif rise is None and sset is None:
             vis = "24h 内无升降 (拱极或不可见)"
         else:
             vis = f"升 {_hm(rise)}   落 {_hm(sset)}"
@@ -9784,6 +10524,10 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
     def resizeEvent(self, event: QResizeEvent):
         # 搜索框几何随形态/尺寸走（顶部居中 / 星象仪底部居中）
         self._place_search_ui()
+        # 已弹出的结果浮层必须跟着重排，窗口缩小后不能留在视图外。
+        popup = getattr(self, "_search_popup", None)
+        if popup is not None and popup.isVisible():
+            self._show_search_popup()
         # 调谐按钮覆盖层跟随尺寸
         self._position_tune_overlay()
         self.update()
@@ -9904,12 +10648,37 @@ class RFSkyViewPanel(QFrame):
         self._xingguan_button = xb
         # 快捷键 C 改的是画布状态，这里跟着同步按钮，避免两套显示
         self.sky_view.chinese_layer_changed.connect(self._sync_xingguan_button)
+        # 情境音效开关（FR-11）：默认开、低音量；取消勾选即静音。
+        sb = QPushButton("提示音")
+        sb.setCheckable(True)
+        sb.setChecked(self.sky_view.situation_sound_enabled())
+        sb.setToolTip(
+            "认出目标时按类别播自制短音（恒星/行星/深空），默认低音量；"
+            "取消勾选即静音。音效不经过任何第三方素材。")
+        sb.clicked.connect(
+            lambda _c=False, btn=sb:
+            self.sky_view.set_situation_sound_enabled(btn.isChecked()))
+        bar.addWidget(sb)
+        self._sound_button = sb
         self.layout().addWidget(control_bar)
         self._offset = 0.0
         # 快转时 UTC 标签随模拟时钟滚动（500ms 刷新足够读出秒级流动）
         self._time_ui_timer = QTimer(self)
         self._time_ui_timer.timeout.connect(self._update_label)
         self._time_ui_timer.start(500)
+
+    def showEvent(self, event):  # noqa: N802 - Qt 命名
+        """面板可见时恢复 500ms 时间标签刷新，并立即刷一遍。"""
+        super().showEvent(event)
+        if not self._time_ui_timer.isActive():
+            self._time_ui_timer.start(500)
+        self._update_label()
+
+    def hideEvent(self, event):  # noqa: N802 - Qt 命名
+        """星象仪页签收起就停表：不替看不见的标签每 500ms 重算。"""
+        if self._time_ui_timer.isActive():
+            self._time_ui_timer.stop()
+        super().hideEvent(event)
 
     # -- 中国星官图层（画布持有状态，面板只做入口与按钮同步） -----------
     def set_chinese_layer(self, visible: bool) -> None:
@@ -10360,9 +11129,16 @@ class SatelliteTracker:
             self.sky_view.set_celestial_bodies(None, None, 0.0)
             self.sky_view.set_data_source("none")
             return
-        if not self._timer.isActive():
-            self._timer.start(self._interval_ms)
-        self.refresh()
+        # 视图收起时换址只更新坐标，不重启周期刷新（收起=停表是硬约定；
+        # 重新显示由 _on_view_visibility 恢复并立即算一帧）。
+        try:
+            visible = self.sky_view.isVisible()
+        except RuntimeError:
+            visible = False
+        if visible:
+            if not self._timer.isActive():
+                self._timer.start(self._interval_ms)
+            self.refresh()
 
     def refresh(self):
         """每帧：取时间 -> sgp4 算卫星 -> 投影喂给天空图。"""

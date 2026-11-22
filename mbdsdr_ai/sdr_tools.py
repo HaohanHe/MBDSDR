@@ -4850,8 +4850,9 @@ def _satellite_passes(args):
         return (out + f"未来 {hours}h 内没有仰角 >= {min_elev}° 的卫星过境"
                        "（可用的真实 TLE 不足时不会拿错轨道凑数）。")
     out += f"=== 未来 {hours}h 卫星过境预测 (仰角>={min_elev}°) ===\n共 {len(passes)} 次\n"
-    out += ("时刻来源：sat_passes（60 秒粗扫 + 2 秒细扫 + 0.5 秒二分；"
-            "升落时刻偏差 ≤0.5 秒、中天采样偏差 ≤1 秒；不是卫星位置精度）\n\n")
+    from .sat_passes import grid_manifest
+    out += (f"时刻来源：orbit.predict_passes（{grid_manifest()['accuracy_note']}；"
+            "不是卫星位置精度）\n\n")
     # TLE 刷新状态是**本次报告全局共享**的一份缓存，不是每次过境的属性。
     # 旧式逐条写 `[未更新] 离线模式…`，25 次过境就重复 25 遍、吃掉约 1/4
     # 输出预算，把列表尾部挤出 tool_output_max_chars 的截断窗口（用户看不到

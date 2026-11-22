@@ -325,7 +325,9 @@ ALLOWED_UNCONNECTED = {
     # 只读展示控件（NoEditTriggers / readOnly / NoSelection），本来就不该有信号
     "adsb_map_panel.py:self.table": "只读飞机列表（NoEditTriggers+NoSelection）",
     "aprs_panel.py:self.detail": "只读报文详情 QTextEdit",
-    "ai_panel.py:self.conversation_view": "只读对话历史 QTextEdit",
+    # 2026-11-22 删：ai_panel.py:self.conversation_view 已接
+    # image_clicked → _open_image_preview（气泡内缩略图点击放大），
+    # 不再是「只读且无信号」的控件，白名单条目按门禁规则过期即删。
     # 2026-11-11 删（不许续期）：`new_spacetime_panel.py:self.passes_table`
     # 已被 cb3250f4 接上 itemClicked → _on_pass_clicked（行定位/联动），
     # 不再是「只读过境表」，白名单条目过期即删。

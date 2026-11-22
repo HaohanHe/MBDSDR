@@ -291,6 +291,23 @@ def test_rf_sky_view_passthrough_tooltips_self_describe(qapp):
     _check_file(calls, "desktop/rf_sky_view.py")
 
 
+def test_replay_timeline_passthrough_tooltips_self_describe(qapp):
+    from replay_timeline import ReplayTimeline
+
+    def triggers(p):
+        p.set_recording("sample.iq", 1000, 2_048_000.0, [
+            {"kind": "record_start", "at_s": 0.0, "sample": 0,
+             "utc": "2026-01-15T00:00:00Z"},
+            {"kind": "tune", "at_s": 1.0, "sample": 100,
+             "utc": "2026-01-15T00:00:01Z"},
+        ], "仅当前产物 / 载入范围")
+        # 事件面板懒填充：展开时才给每一行挂定位口径 tooltip。
+        p.events_button.setChecked(True)
+
+    _, calls = _record(ReplayTimeline, [triggers])
+    _check_file(calls, "desktop/replay_timeline.py")
+
+
 def test_settings_panel_passthrough_tooltips_self_describe(qapp):
     from settings_panel import SettingsPanel
 

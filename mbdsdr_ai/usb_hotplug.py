@@ -80,6 +80,7 @@ from .device_identity import (
     GRADE_USB_PATH,
     describe as describe_identity,
     describe_all as describe_identities,
+    device_identity_aliases,
     serial_from_key,
     usb_port_path,
 )
@@ -502,6 +503,14 @@ class HotplugMonitor:
             for key, value in now.items():
                 self._seen.setdefault(key, value)
 
+        # 之前报过「消失/歧义/在位打不开」、这一拍又出现的键：条件已不成立，
+        # 必须收回告警（否则界面永远停在「设备从枚举中消失」）。
+        reappeared = sorted(
+            k for k in now_keys
+            if k in self._unverified_reported
+            or k in self._ambiguous_reported
+            or k in self._present_unopenable)
+
         for key in now_keys:
             self._ambiguous_reported.discard(key)
             self._present_unopenable.discard(key)
@@ -509,6 +518,27 @@ class HotplugMonitor:
             self._missing.pop(key, None)
 
         absent = sorted(prev_keys - now_keys)
+
+        # 身份键抖动不是拔出：RTL-SDR 被本进程打开后读不到 EEPROM 序列号，
+        # 枚举键会从 ``rtlsdr|serial:X`` 变成 ``rtlsdr|index:0``（真机实测：
+        # 打开前 serial=77771111153705700，打开后为空）。若旧键的别名
+        # （index/label/uri）在本拍枚举里出现，说明是同一台设备换了键。
+        rekeyed: Dict[str, str] = {}
+        canonical_ids = self._identity_fn is resolve_hotplug_identities
+        if absent and not first and canonical_ids:
+            alias_now: Dict[str, str] = {}
+            for nk in now_keys:
+                for alias in device_identity_aliases(now[nk][1] or {}):
+                    alias_now.setdefault(alias, nk)
+            for key in list(absent):
+                old_device = self._seen[key][1] or {}
+                for alias in device_identity_aliases(old_device):
+                    target = alias_now.get(alias)
+                    if target and target != key:
+                        rekeyed[key] = target
+                        absent.remove(key)
+                        break
+
         presence = None
         if absent or first:
             if first or any(self._needs_probe(self._seen[k][0]) for k in absent):
@@ -518,6 +548,30 @@ class HotplugMonitor:
         for key in absent:
             ident, device = self._seen[key]
             events.extend(self._handle_absent(ident, device, presence))
+
+        # 换键恢复：同一台设备从序列号键退到序号键，收回「消失」告警。
+        for old_key, new_key in sorted(rekeyed.items()):
+            ident, device = now[new_key]
+            self._seen.pop(old_key, None)
+            self._missing.pop(old_key, None)
+            events.append(HotplugEvent(
+                kind=EVENT_RECOVERED, key=new_key, grade=ident.grade,
+                label=_label(device), verified=True,
+                user_text=f"已连接: {_label(device)}",
+                detail=("设备身份键从 "
+                        f"{old_key} 变为 {new_key}（打开设备后读不到序列号），"
+                        "是同一台设备，不是拔出。"),
+                device=device))
+
+        # 同键恢复：已报过的告警要收回，否则界面停在旧结论上。
+        for key in reappeared:
+            ident, device = now[key]
+            events.append(HotplugEvent(
+                kind=EVENT_RECOVERED, key=key, grade=ident.grade,
+                label=_label(device), verified=True,
+                user_text=f"已连接: {_label(device)}",
+                detail="设备重新出现在枚举中，之前的告警已收回。",
+                device=device))
 
         if not first:
             # 键没变但端口变了：同一台设备换了 USB 口（序列号身份才有意义）。

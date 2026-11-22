@@ -7,6 +7,13 @@
 （2026-11-06 新增 6 个存量野码，第八节；目录总数不在此手写，实时值见
 `len(error_catalog.ERRORS)`。）
 
+> **2026-11-22 增补**：`sky_field_solve` 的 7 个结构化码（`bad_points` / `no_match` /
+> `no_consistent_transform` / `too_few_catalog_stars` / `bad_widget_size` /
+> `bad_projection` / `pose_fit_failed`）已登记进 `error_remedy.NO_ENTRY_REASONS`——
+> 它们只经解算管线 / 检查脚本 / AI 工具返回值出现，桌面星图不渲染该码。
+> 本文标题与第一节的 129/114 是 2026-11-05 快照，**当前总数以
+> `len(error_catalog.ERRORS)` 为准**（本轮实测随目录增长已不再是 129）。
+
 三条判据（逐条都问，缺一即判不可见）：
 
 1. 有没有任何路径把 `message` 或 `code` 原文送到用户可见面（状态栏、弹窗、

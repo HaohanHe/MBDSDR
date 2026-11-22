@@ -361,10 +361,171 @@ class TestNoBackendAndExtremeInputs:
         mw._update_utc_clock()
         qapp.processEvents()
 
+    def test_gnss_connected_shows_coordinates_not_disconnected(self, mw, qapp):
+        """``is_connected`` 是 @property：真连接时底栏必须显示经纬度。
+
+        2026-11-22 真机：状态面板已有有效 fix，底栏却恒写「GNSS: 未连接」——
+        旧代码把@property 当方法调用（``is_connected()``），TypeError 被吞后
+        connected 恒 False。本用例用布尔属性替身钉住，防回退。
+        """
+        from types import SimpleNamespace
+
+        pos = SimpleNamespace(
+            source="real", lat=43.7732, lon=125.3934, alt=266.0,
+            sats=17, hdop=0.8, speed=None, course=None,
+            utc_time=None, timestamp=None)
+
+        class _FakeMonitor:
+            is_connected = True
+
+            def get_position(self):
+                return pos
+
+            def get_gsv_frames(self):
+                return []
+
+            def get_gsa(self):
+                return None
+
+        saved = (mw._gnss, mw._observer_source, mw._observer_lat,
+                 mw._observer_lon, mw._observer_from_gnss)
+        mw._gnss = _FakeMonitor()
+        try:
+            mw._poll_gnss()
+            qapp.processEvents()
+            text = mw.status_gps.text()
+            assert text.startswith("GNSS: 43.7732"), text
+            assert "未连接" not in text
+        finally:
+            (mw._gnss, mw._observer_source, mw._observer_lat,
+             mw._observer_lon, mw._observer_from_gnss) = saved
+
     def test_status_panel_update_from_backend_none(self, mw, qapp):
         mw.status_panel.update_from_backend(None)
         qapp.processEvents()
         assert mw.status_panel.dev_name.text() == "未连接"
+
+    def test_gnss_fix_does_not_override_configured_site(self, mw, qapp):
+        """有配置站址时 GNSS fix 不改站址（gui_config 静态事实优先）。
+
+        2026-11-22 真机：主窗站址来自 gui_config，`_poll_gnss` 却把 sky_view
+        覆盖成 GNSS 坐标；起录时两处坐标不一致 → 档案 `site.source=none`，
+        回放直接拒绝。本用例同时钉住主窗与天空必须指向同一个站址。
+        """
+        from types import SimpleNamespace
+
+        CONFIG_LAT, CONFIG_LON = 43.78697533333333, 126.62898983333334
+        pos = SimpleNamespace(
+            source="real", lat=43.7732, lon=125.3934, alt=266.0,
+            sats=17, hdop=0.8, speed=None, course=None,
+            utc_time=None, timestamp=None)
+
+        class _FakeMonitor:
+            is_connected = True
+
+            def get_position(self):
+                return pos
+
+            def get_gsv_frames(self):
+                return []
+
+            def get_gsa(self):
+                return None
+
+        saved = (mw._gnss, mw._observer_source, mw._observer_lat,
+                 mw._observer_lon, mw._observer_from_gnss)
+        mw._gnss = _FakeMonitor()
+        try:
+            mw.set_observer_site(CONFIG_LAT, CONFIG_LON, source="config",
+                                 persist=False)
+            mw._poll_gnss()
+            qapp.processEvents()
+
+            assert mw._observer_source == "config"
+            assert mw._observer_lat == CONFIG_LAT
+            observer = mw.sky_view.get_observer()
+            assert observer is not None
+            assert abs(observer["lat"] - CONFIG_LAT) < 1e-9
+            assert abs(observer["lon"] - CONFIG_LON) < 1e-9
+        finally:
+            (mw._gnss, mw._observer_source, mw._observer_lat,
+             mw._observer_lon, mw._observer_from_gnss) = saved
+            try:
+                mw._apply_observer_location()
+            except Exception:  # noqa: BLE001 - 复原失败不影响断言结果
+                pass
+
+    def test_recording_snapshot_keeps_config_site_when_gnss_differs(
+            self, mw, monkeypatch):
+        """GNSS 在别处有定位 ≠ 配置站址无效：档案仍按配置站址落盘。
+
+        2026-11-22 真机 7s 录制：两份坐标相差约 100 km，旧逻辑写
+        「起录时 GNSS 定位与桌面站址冲突」并把 site 置 none，回放报
+        「没有可用站址」。站址来源不是 gnss 时不该要求与 GNSS 一致。
+        """
+        import mbdsdr_ai.runtime_sources as rs
+
+        CONFIG_LAT, CONFIG_LON = 43.78697533333333, 126.62898983333334
+
+        class _Snap:
+            def snapshot(self):
+                return {"time": {}, "gnss": {
+                    "connected": True, "fix": True,
+                    "lat_deg": 43.7732, "lon_deg": 125.3934}}
+
+        saved = (mw._observer_source, mw._observer_lat,
+                 mw._observer_lon, mw._observer_from_gnss)
+        try:
+            mw.set_observer_site(CONFIG_LAT, CONFIG_LON, source="config",
+                                 persist=False)
+            monkeypatch.setattr(rs, "get_runtime_sources", lambda: _Snap())
+            snap = mw._snapshot_recording_context()
+
+            site = snap["site"]
+            assert site["source"] == "manual"
+            assert site["lat_deg"] == pytest.approx(CONFIG_LAT)
+            assert site["lon_deg"] == pytest.approx(CONFIG_LON)
+            assert "冲突" not in str(site.get("reason") or "")
+            assert any("GNSS" in n for n in snap.get("recording_notes", []))
+        finally:
+            (mw._observer_source, mw._observer_lat,
+             mw._observer_lon, mw._observer_from_gnss) = saved
+            try:
+                mw._apply_observer_location()
+            except Exception:  # noqa: BLE001
+                pass
+
+    def test_startup_sample_rate_prefers_explicit_choice(self, mw):
+        """启动自动连接沿用用户显式选过的采样率，性能档只做兜底。
+
+        2026-11-22 真机：设置里显式写着 1.536 MS/s，自动连接却按性能档开
+        2.4 MS/s，状态栏随后拿设置值对比实际值，打出假的「配置请求未生效」。
+        """
+        class _FakeSettings:
+            def __init__(self, explicit, value):
+                self.explicit = explicit
+                self.value = value
+
+            def is_explicit(self, key):
+                return self.explicit
+
+            def get(self, key, default=None):
+                if key == "sample_rate_hz":
+                    return self.value
+                return default
+
+        saved = mw.settings
+        try:
+            mw.settings = _FakeSettings(True, 1_536_000.0)
+            assert mw._startup_sample_rate() == 1_536_000.0
+
+            # 没显式选过 / 值非法 → 跟随性能档默认（假 settings 的未知档回落 eco）
+            mw.settings = _FakeSettings(False, 1_536_000.0)
+            assert mw._startup_sample_rate() == 1_024_000.0
+            mw.settings = _FakeSettings(True, 0.0)
+            assert mw._startup_sample_rate() == 1_024_000.0
+        finally:
+            mw.settings = saved
 
     def test_spectrum_extreme_inputs_no_crash(self, mw, qapp):
         import numpy as np

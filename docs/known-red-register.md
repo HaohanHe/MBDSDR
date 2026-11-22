@@ -795,7 +795,14 @@ QT_QPA_PLATFORM=offscreen python -m pytest "<nodeid>" -q
 
 ## K17 — 设置向前覆盖：3 个字段无 UI 入口也无理由（2026-11-13 实跑，已转绿 `dad6324f`）
 
-- **再检绑定**：验证提交 `87141024`；文件集合 `scripts/settings_inventory.py`、`tests/test_settings_ui_coverage.py`、`desktop/config_schema.py`、`desktop/control_panel.py`、`desktop/settings_panel.py`
+- **再检绑定**：验证提交 `ae392d09`；文件集合 `scripts/settings_inventory.py`、`tests/test_settings_ui_coverage.py`、`desktop/config_schema.py`、`desktop/control_panel.py`、`desktop/settings_panel.py`
+- **再检（2026-11-19，主工作树，R8 清账）**：`87141024` 之后 `6b21ddfd`（手机指天页 + AR 指向闭环 + 赤道仪抽象落地）
+  改了 `desktop/config_schema.py` 与 `scripts/settings_inventory.py`，按再检义务重跑：
+  `MBDSDR_OFFLINE=1 QT_QPA_PLATFORM=offscreen python -m pytest tests/test_settings_ui_coverage.py -q`
+  → `69 passed in 2.27s`；`python scripts/settings_inventory.py` →
+  `字段 56 / 有 UI 入口 51 / 有理由 5 / 缺失 0 / 幽灵键 0 / source_commit 6b21ddfd`
+  （与 `87141024` 时点的 55/51/4/0/0 相比，是 `app_mode_default` 字段落地带来的真实增量，不是判据放宽）。
+  绑定更新为 `ae392d09`。
 - **再检（2026-11-18，主工作树，R8 清账）**：`f549f78a` 之后 `desktop/control_panel.py` 有 4 笔、
   `desktop/settings_panel.py` 有 3 笔、`desktop/config_schema.py` 有 1 笔后继改动，按再检义务重跑：
   `MBDSDR_OFFLINE=1 QT_QPA_PLATFORM=offscreen python -m pytest tests/test_settings_ui_coverage.py::test_forward_every_field_has_ui_entry_or_reason -q`
@@ -875,7 +882,15 @@ QT_QPA_PLATFORM=offscreen python -m pytest "<nodeid>" -q
 
 ## K18 — 设置盘点表与脚本读数不一致（2026-11-13 实跑，已转绿 `dad6324f`）
 
-- **再检绑定**：验证提交 `87141024`；文件集合 `docs/settings-inventory.md`、`scripts/settings_inventory.py`、`tests/test_settings_ui_coverage.py`、`desktop/config_schema.py`
+- **再检绑定**：验证提交 `ae392d09`；文件集合 `docs/settings-inventory.md`、`scripts/settings_inventory.py`、`tests/test_settings_ui_coverage.py`、`desktop/config_schema.py`
+- **再检（2026-11-19，主工作树，R8 清账）**：`87141024` 之后 `6b21ddfd` 改了 `docs/settings-inventory.md`
+  与 `desktop/config_schema.py`，复跑 `test_inventory_table_matches_script` 红：块内 `source_commit` 仍是
+  `30f62a49`，脚本已算到 `6b21ddfd`（`app_mode_default` 落地）。按生成器口径
+  `python scripts/settings_inventory.py --write` 重生成后：`--check` → `文档块一致`；
+  `python -m pytest tests/test_settings_ui_coverage.py -q` → `69 passed in 2.27s`；
+  `python scripts/settings_inventory.py` → `字段 56 / 有 UI 入口 51 / 有理由 5 / 缺失 0 / 幽灵键 0 / source_commit 6b21ddfd`。
+  **未提交披露**：本次 `--write` 改动（仅 `source_commit` 单元格）仍在工作树；提交后本绑定会按 R8 自动退回，
+  需换绑到含该改动的提交。
 - **再检（2026-11-18，主工作树，R8 清账）**：`20d71e92` 之后 `docs/settings-inventory.md` 被两笔
   文档提交、`desktop/config_schema.py` 被 `30f62a49` 碰过，R8 退回待复核。复跑发现**真漂移**：
   `test_inventory_table_matches_script` 红，块内 `source_commit` 仍是 `ce1ed9ef`
@@ -940,6 +955,10 @@ QT_QPA_PLATFORM=offscreen python -m pytest "<nodeid>" -q
 ---
 
 ## K19 — 源码文本 pin 棘轮（2026-11-13 收口后 2026-11-17 复红，未清）
+
+- **收口（2026-11-22，工作树，未提交）**：复红根因是 `tests/test_pass_time_single_source.py` 的 **14 处新增 pin 未登记**。逐条判定：TimelineEngine 台账行 12 处（数值由 `grid_manifest()` 拼出；「无细扫/7.6」是负向守卫，「不是卫星位置精度/保留粗扫网格点/AOS-LOS 二分」是定性口径）与三处消费方文本守卫 2 处（`agent/controller/sdr_tools` 必须引用 `accuracy_note` 且不得再手写旧秒数）——行为测试无法等价覆盖。按棘轮允许的例外逐条写入基线（`owner=时间线（AOS/LOS 二分）` + 理由），基线 **58→72**，`BUILT_AT` 同步 72。
+  复跑 `python -m pytest tests/test_source_pin_ratchet.py tests/test_pass_time_single_source.py -q` → **21 passed**；`tests/test_help_path_truthfulness.py` 同批 **17 passed**（上一读数的另一条存量红已不存在）。
+  **未清原因**：仍不允许提交，条目保留「待提交后换绑 hash」；工作树已绿。
 
 - **历史绑定（已失效：2026-11-17 复红）**：验证提交 `d3b91c19`；文件集合 `tests/test_usb_hotplug.py`、`tests/test_file_source_robust.py`、`tests/test_safe_commit_exclude.py`、`tests/test_source_pin_ratchet.py`
 - **再检（2026-11-18，主工作树，本轮收尾）**：
@@ -1420,13 +1439,19 @@ baseline 56 → 58（`BUILT_AT` 同步 58），每条带 owner + reason：
 
 ## K24 — `release_manifest` 发布清单 5 项 FAIL：逐项定性与处置（2026-11-13，3 类已修 `aaf98c44`/`686f8313`/`cb5602f4`·登记表已落库）
 
-- **再检绑定**：验证提交 `87141024`；文件集合 `scripts/release_manifest.py`、`desktop/settings.py`、`pyproject.toml`、`desktop/requirements.txt`、`desktop/MBDSDR.spec`
+- **再检绑定**：验证提交 `ae392d09`；文件集合 `scripts/release_manifest.py`、`desktop/settings.py`、`pyproject.toml`、`desktop/requirements.txt`、`desktop/MBDSDR.spec`
+- **再检（2026-11-19，主工作树，R8 清账）**：`87141024` 之后 `6b21ddfd` 改了 `pyproject.toml`，
+  按再检义务在产物 `D:\mbdsdr\.tmp\pyi-dist19` 上重跑三条：
+  - `python scripts/release_manifest.py --only version` → `FAIL=0 WARN=0 PASS=16 BY-DESIGN=1 SKIP=0 -> PASS`；
+  - `python scripts/release_manifest.py --only deps` → `FAIL=0 WARN=0 PASS=43 BY-DESIGN=0 SKIP=1 -> PASS`；
+  - `python scripts/release_manifest.py --only secrets` → `FAIL=0 WARN=0 PASS=1 -> PASS`。
+  绑定更新为 `ae392d09`。
 - **再检（2026-11-18，主工作树，R8 清账）**：`20d71e92` 之后 `desktop/settings.py` 被 `47640254`、
   `pyproject.toml` 被 `bcca2200` 碰过，按再检义务在产物 `D:\mbdsdr\.tmp\pyi-dist19` 上重跑三条：
   - `python scripts/release_manifest.py --only version` → `FAIL=0 WARN=0 PASS=16 BY-DESIGN=1 SKIP=0 -> PASS`；
   - `python scripts/release_manifest.py --only deps` → `FAIL=0 WARN=0 PASS=43 BY-DESIGN=0 SKIP=1 -> PASS`；
   - `python scripts/release_manifest.py --only secrets` → `FAIL=0 WARN=0 PASS=1 -> PASS`（4 处登记误报）。
-  期间 `--only version` 曾红 1 条（`tests/test_readme_contract.py:77` 写死 `v0.2.0`），
+  期间 `--only version` 曾红 1 条（`tests/test_readme_contract.py:77` 写死当时的版本号字面量），
   已把该反证改为从 README 首行动态取版本再篡改（`9 passed`），版本号升级后不再复发。
   绑定更新为 `87141024`。
 - **首次记录**：2026-11-13（工作树 HEAD `90452159`，`python scripts/release_manifest.py`，

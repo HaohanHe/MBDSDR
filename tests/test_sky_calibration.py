@@ -24,6 +24,7 @@ from mbdsdr_ai.sky_calibration import (  # noqa: E402
     MIN_PAIR_SEPARATION_DEG,
     SCHEMA_VERSION,
     calibrate,
+    calibrate_and_save,
     load_profile,
     save_profile,
 )
@@ -257,3 +258,108 @@ def test_opposite_directions_are_pathological():
     out = calibrate(obs, device_id="示例设备", fov_deg=8.0)
     assert out["ok"] is False
     assert out["error"] == "pathological"
+
+
+# ---------------------------------------------------------------------------
+# 写后读回校验
+# ---------------------------------------------------------------------------
+def _tmp_leftovers(directory):
+    return [p for p in os.listdir(directory) if p.startswith(".sky-cal-")]
+
+
+def test_save_profile_reads_back_written_fields(tmp_path):
+    path = tmp_path / "calibration.json"
+    profile = _good_profile()
+    out = save_profile(profile, str(path))
+    assert out["ok"] is True, out["reason"]
+    assert out["path"] == os.path.abspath(str(path))
+    assert path.exists()
+    loaded = load_profile(str(path))
+    assert loaded["ok"] is True
+    assert {key: loaded["profile"][key] for key in _FIELDS} == profile
+
+
+def test_readback_failure_keeps_existing_file(tmp_path, monkeypatch):
+    path = tmp_path / "calibration.json"
+    assert save_profile(_good_profile(), str(path))["ok"] is True
+    before = path.read_bytes()
+
+    changed = dict(_good_profile())
+    changed["device_id"] = "另一个设备"
+    monkeypatch.setattr(
+        "mbdsdr_ai.sky_calibration.load_profile",
+        lambda _path: {"ok": False, "calibrated": False, "profile": None,
+                       "error": "corrupt", "reason": "模拟读回失败"})
+    out = save_profile(changed, str(path))
+    assert out["ok"] is False
+    assert out["error"] == "verify_failed"
+    assert "写后读回校验失败" in out["reason"]
+    assert "模拟读回失败" in out["reason"]
+    assert path.read_bytes() == before
+    assert _tmp_leftovers(tmp_path) == []
+
+
+def test_readback_mismatch_keeps_existing_file(tmp_path, monkeypatch):
+    path = tmp_path / "calibration.json"
+    assert save_profile(_good_profile(), str(path))["ok"] is True
+    before = path.read_bytes()
+
+    def tampered(target):
+        result = load_profile(target)
+        profile = dict(result["profile"])
+        profile["fov_deg"] = 3.0
+        result["profile"] = profile
+        return result
+
+    monkeypatch.setattr("mbdsdr_ai.sky_calibration.load_profile", tampered)
+    out = save_profile(dict(_good_profile()), str(path))
+    assert out["ok"] is False
+    assert out["error"] == "verify_failed"
+    assert "fov_deg" in out["reason"]
+    assert path.read_bytes() == before
+    assert _tmp_leftovers(tmp_path) == []
+
+
+# ---------------------------------------------------------------------------
+# 校准 + 落盘
+# ---------------------------------------------------------------------------
+def test_calibrate_and_save_writes_matching_profile(tmp_path):
+    path = tmp_path / "calibration.json"
+    out = calibrate_and_save(_offset_obs(), device_id="示例设备",
+                             fov_deg=8.0, path=str(path))
+    assert out["ok"] is True, out["reason"]
+    assert os.path.isabs(out["path"])
+    assert out["residual_deg"] <= MAX_CALIBRATION_RESIDUAL_DEG
+    assert path.exists()
+
+    loaded = load_profile(str(path))
+    assert loaded["ok"] is True
+    assert loaded["profile"]["device_id"] == "示例设备"
+    assert loaded["profile"]["fov_deg"] == pytest.approx(8.0)
+    assert loaded["profile"] == out["profile"]
+
+
+def test_calibrate_and_save_does_not_write_on_pathological_input(tmp_path):
+    path = tmp_path / "calibration.json"
+    obs = [
+        {"known_az_deg": 100.0, "known_alt_deg": 40.0,
+         "read_az_deg": 100.1, "read_alt_deg": 40.0},
+        {"known_az_deg": 100.0 + MIN_PAIR_SEPARATION_DEG * 0.5,
+         "known_alt_deg": 40.0,
+         "read_az_deg": 100.0, "read_alt_deg": 40.0},
+    ]
+    out = calibrate_and_save(obs, device_id="示例设备", fov_deg=8.0,
+                             path=str(path))
+    assert out["ok"] is False
+    assert out["error"] == "pathological"
+    assert not path.exists()
+    assert _tmp_leftovers(tmp_path) == []
+
+
+def test_calibrate_and_save_returns_save_failure(tmp_path):
+    out = calibrate_and_save(_offset_obs(), device_id="示例设备",
+                             fov_deg=8.0, path=None)
+    assert out["ok"] is False
+    assert out["error"] == "bad_path"
+    assert out["reason"]
+    assert _tmp_leftovers(tmp_path) == []

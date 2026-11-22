@@ -6,10 +6,11 @@ import '../l10n/gen/app_localizations.dart';
 import '../services/radio_controller.dart';
 import '../services/settings_service.dart';
 import '../widgets/device_info_card.dart';
+import '../widgets/timing_panel.dart';
 
 // ============================================================================
-// 设置页：rtl_tcp / 桌面 ControlHub / 设备信息 / 音频 / AI 助手 / 本站位置 /
-//        语言 / 外观
+// 设置页：rtl_tcp / 桌面 ControlHub / 设备信息 / 时间与授时 / 音频 /
+//        AI 助手 / 本站位置 / 语言 / 外观
 // 保存即时生效（失焦提交即写回 SettingsService），不硬编码任何坐标或 key。
 // 文案全部走 gen-l10n（AppLocalizations）；语言选择写 uiLocaleCode 即持久化。
 // ============================================================================
@@ -137,6 +138,33 @@ class _SettingsPageState extends State<SettingsPage> {
     } on FormatException catch (e) {
       _toast(e.message, error: true);
     }
+  }
+
+  // 输入即静默落盘（不弹 toast）：Android 返回键收起键盘不会触发
+  // onSubmitted / onEditingComplete，只在提交时保存会丢掉刚输入的地址
+  // （实测缺陷：填完按返回键，频谱页仍显示「设置 rtl_tcp 地址」）。
+  // 显式提交仍走 _saveX 给 toast 反馈；这里值没变就什么都不做。
+  void _commitHost() {
+    final String v = _hostCtrl.text.trim();
+    if (v != widget.settings.rtlHost) widget.settings.rtlHost = v;
+  }
+
+  void _commitPort() {
+    final int? port = int.tryParse(_portCtrl.text.trim());
+    // 越界/半截输入不落盘（setter 会抛 FormatException），等用户改完整。
+    if (port == null || port < 1 || port > 65535) return;
+    if (port != widget.settings.rtlPort) widget.settings.rtlPort = port;
+  }
+
+  void _commitControlHubHost() {
+    final String v = _chHostCtrl.text.trim();
+    if (v != widget.settings.controlHubHost) widget.settings.controlHubHost = v;
+  }
+
+  void _commitControlHubPort() {
+    final int? port = int.tryParse(_chPortCtrl.text.trim());
+    if (port == null || port < 1 || port > 65535) return;
+    if (port != widget.settings.controlHubPort) widget.settings.controlHubPort = port;
   }
 
   void _saveApiKey() {
@@ -333,6 +361,8 @@ class _SettingsPageState extends State<SettingsPage> {
                 prefixIcon: const Icon(Icons.lan_outlined),
               ),
               keyboardType: TextInputType.url,
+              onChanged: (_) => _commitHost(),
+              onTapOutside: (_) => FocusManager.instance.primaryFocus?.unfocus(),
               onEditingComplete: _saveHost,
               onSubmitted: (_) => _saveHost(),
             ),
@@ -345,6 +375,8 @@ class _SettingsPageState extends State<SettingsPage> {
                 prefixIcon: const Icon(Icons.numbers),
               ),
               keyboardType: TextInputType.number,
+              onChanged: (_) => _commitPort(),
+              onTapOutside: (_) => FocusManager.instance.primaryFocus?.unfocus(),
               onEditingComplete: _savePort,
               onSubmitted: (_) => _savePort(),
             ),
@@ -371,6 +403,8 @@ class _SettingsPageState extends State<SettingsPage> {
                 prefixIcon: const Icon(Icons.dns_outlined),
               ),
               keyboardType: TextInputType.url,
+              onChanged: (_) => _commitControlHubHost(),
+              onTapOutside: (_) => FocusManager.instance.primaryFocus?.unfocus(),
               onEditingComplete: _saveControlHubHost,
               onSubmitted: (_) => _saveControlHubHost(),
             ),
@@ -383,6 +417,8 @@ class _SettingsPageState extends State<SettingsPage> {
                 prefixIcon: const Icon(Icons.numbers),
               ),
               keyboardType: TextInputType.number,
+              onChanged: (_) => _commitControlHubPort(),
+              onTapOutside: (_) => FocusManager.instance.primaryFocus?.unfocus(),
               onEditingComplete: _saveControlHubPort,
               onSubmitted: (_) => _saveControlHubPort(),
             ),
@@ -406,6 +442,42 @@ class _SettingsPageState extends State<SettingsPage> {
                   DeviceInfoCard(radio: widget.radio),
             ),
           ],
+        ),
+
+        // ---------------------------------------------------- 时间与授时（默认折叠）
+        // 系统钟 + GNSS 授时三态属底层机制，不占观测主界面；本分区默认收起，
+        // 展开才真正创建 TimingPanel，收起即销毁（maintainState: false）——
+        // 不展开就不跑 1 Hz 计时器，与「不展开就不跑」同一条规则。
+        Container(
+          margin: const EdgeInsets.symmetric(
+            horizontal: AppTokens.spacingL,
+            vertical: AppTokens.spacingM,
+          ),
+          decoration: AppTokens.cardDecoration(),
+          clipBehavior: Clip.antiAlias,
+          child: ExpansionTile(
+            maintainState: false,
+            shape: const Border(),
+            collapsedShape: const Border(),
+            title: Text(
+              l10n.settingsSectionTiming,
+              style: AppTokens.sectionTitle,
+            ),
+            childrenPadding: const EdgeInsets.fromLTRB(
+              AppTokens.spacingL,
+              0,
+              AppTokens.spacingL,
+              AppTokens.spacingL,
+            ),
+            children: <Widget>[
+              const TimingPanel(),
+              const SizedBox(height: AppTokens.spacingS),
+              Text(
+                l10n.settingsTimingHelp,
+                style: AppTokens.auxiliary,
+              ),
+            ],
+          ),
         ),
 
         // ---------------------------------------------------- 音频

@@ -154,3 +154,142 @@ def test_provider_reading_to_observation_keeps_all_fields():
     assert (obs.source, obs.az_deg, obs.alt_deg, obs.accuracy_deg,
             obs.t_utc, obs.fov_deg) == ("imu", 359.0, -5.0, 1.5,
                                         NOW - 0.25, 2.3)
+
+
+def test_replace_swaps_provider_and_keeps_capabilities_and_max_age():
+    reg = ProviderRegistry()
+    reg.register("imu", lambda: _reading("imu", az=1.0),
+                 capabilities=("motion", "imu"), max_age_s=1.0)
+    reg.register("phone", lambda: _reading("phone"))
+
+    reg.replace("imu", lambda: _reading("imu", az=99.0, t=NOW - 10.0))
+
+    assert reg.names() == ("imu", "phone")
+    assert reg.capabilities("imu") == ("motion", "imu")
+    assert reg.names(capability="motion") == ("imu",)
+    out = reg.read_all(now_utc=NOW)
+    # 保留原 max_age_s：新读数 10 s 前，超过 1 s，必须判陈旧。
+    assert set(out["readings"]) == {"phone"}
+    assert out["errors"]["imu"]["type"] == "StaleReading"
+
+
+def test_replace_unknown_name_raises_key_error():
+    reg = ProviderRegistry()
+    reg.register("imu", lambda: _reading("imu"))
+    with pytest.raises(KeyError):
+        reg.replace("phone", lambda: _reading("phone"))
+    assert reg.names() == ("imu",)
+
+
+def test_replace_validates_provider_like_register():
+    reg = ProviderRegistry()
+    reg.register("imu", lambda: _reading("imu"))
+    with pytest.raises(TypeError):
+        reg.replace("imu", object())
+    assert reg.names() == ("imu",)
+
+
+def test_names_filters_by_capability_in_registration_order():
+    reg = ProviderRegistry()
+    reg.register("camera", lambda: _reading("camera"),
+                 capabilities=("camera", "solve"))
+    reg.register("imu", lambda: _reading("imu"),
+                 capabilities=("motion",))
+    reg.register("phone", lambda: _reading("phone"),
+                 capabilities=("motion", "camera"))
+
+    assert reg.names() == ("camera", "imu", "phone")
+    assert reg.names(capability="motion") == ("imu", "phone")
+    assert reg.names(capability="camera") == ("camera", "phone")
+    assert reg.names(capability="unknown") == ()
+    assert reg.names(capability="") == ()
+
+
+def test_capabilities_returns_registered_values_and_rejects_unknown():
+    reg = ProviderRegistry()
+    reg.register("imu", lambda: _reading("imu"),
+                 capabilities=("motion", "imu"))
+    reg.register("bare", lambda: _reading("bare"))
+
+    assert reg.capabilities("imu") == ("motion", "imu")
+    assert reg.capabilities("bare") == ()
+    with pytest.raises(KeyError):
+        reg.capabilities("phone")
+
+
+def test_register_rejects_bad_capabilities_and_max_age():
+    reg = ProviderRegistry()
+    for caps in (("",), ("imu", " "), ("imu", 3), "imu"):
+        with pytest.raises(ValueError):
+            reg.register("bad", lambda: _reading("bad"), capabilities=caps)
+    for bad_age in (0, -1.0, float("nan"), float("inf"), "nope"):
+        with pytest.raises(ValueError):
+            reg.register("bad", lambda: _reading("bad"), max_age_s=bad_age)
+    assert reg.names() == ()
+
+
+def test_reading_source_mismatch_is_isolated_as_value_error():
+    reg = ProviderRegistry()
+    reg.register("imu", lambda: _reading("phone"))
+
+    out = reg.read_all(now_utc=NOW)
+    assert out["readings"] == {}
+    assert out["errors"]["imu"]["type"] == "ValueError"
+    assert "phone" in out["errors"]["imu"]["message"]
+    assert "imu" in out["errors"]["imu"]["message"]
+
+
+def test_blank_source_is_isolated_as_type_error():
+    reg = ProviderRegistry()
+    reg.register("imu", lambda: {"source": "   ", "az_deg": 10.0,
+                                "alt_deg": 20.0, "accuracy_deg": 2.0})
+
+    out = reg.read_all(now_utc=NOW)
+    assert out["readings"] == {}
+    assert out["errors"]["imu"]["type"] == "TypeError"
+    assert "source" in out["errors"]["imu"]["message"]
+
+
+def test_future_timestamp_warns_without_changing_timestamp():
+    reg = ProviderRegistry()
+    reg.register("imu", lambda: _reading("imu", t=NOW + 5.0))
+
+    out = reg.read_all(now_utc=NOW)
+    assert out["errors"] == {}
+    assert out["readings"]["imu"].t_utc == pytest.approx(NOW + 5.0)
+    assert out["warnings"]["imu"]["code"] == "clock_skew"
+    assert "now_utc" in out["warnings"]["imu"]["message"]
+
+
+def test_result_without_warnings_keeps_old_shape():
+    reg = ProviderRegistry()
+    reg.register("imu", lambda: _reading("imu"))
+
+    out = reg.read_all(now_utc=NOW)
+    assert "warnings" not in out
+    assert set(out) == {"readings", "errors"}
+    assert out["errors"] == {}
+    assert out["readings"]["imu"].source == "imu"
+
+
+def test_stale_reading_goes_to_errors_others_survive():
+    reg = ProviderRegistry()
+    reg.register("old", lambda: _reading("old", t=NOW - 10.0),
+                 max_age_s=1.0)
+    reg.register("imu", lambda: _reading("imu", t=NOW - 1.0),
+                 max_age_s=60.0)
+
+    out = reg.read_all(now_utc=NOW)
+    assert set(out["readings"]) == {"imu"}
+    assert out["errors"]["old"]["type"] == "StaleReading"
+    assert "10.000" in out["errors"]["old"]["message"]
+    assert "max_age_s=1" in out["errors"]["old"]["message"]
+
+
+def test_provider_without_max_age_is_never_stale():
+    reg = ProviderRegistry()
+    reg.register("imu", lambda: _reading("imu", t=NOW - 10_000.0))
+
+    out = reg.read_all(now_utc=NOW)
+    assert out["errors"] == {}
+    assert out["readings"]["imu"].t_utc == pytest.approx(NOW - 10_000.0)

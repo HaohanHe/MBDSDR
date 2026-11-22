@@ -1,0 +1,61 @@
+{
+  "_note": "空间观测台 PICO 头显 3D 资产批量清单：由 Tripo 文生 3D（text-to-model）生成，5000 积分≈200 个模型，本清单 11 个；明天积分到账后直接编辑本条与 items 再跑 scripts/tripo_asset_gen.py --manifest spatial/assets/models/manifest.json --out-dir <目录>。切勿写入任何真实 API Key/账号（Key 只走环境变量 TRIPO_API_KEY）。",
+  "version": 1,
+  "items": [
+    {
+      "name": "moon",
+      "prompt": "a photorealistic 3D model of the Moon as a full sphere, gray cratered surface with dark maria and bright highlands, seamless 4k PBR albedo and normal textures",
+      "model": "v3.1-20260211"
+    },
+    {
+      "name": "mars",
+      "prompt": "a photorealistic Mars globe, rust-red rocky surface with polar ice caps, Valles Marineris canyon and Olympus Mons volcano, 4k PBR albedo and normal textures",
+      "model": "v3.1-20260211"
+    },
+    {
+      "name": "jupiter",
+      "prompt": "a gas giant Jupiter sphere with swirling cream and orange cloud bands, the Great Red Spot storm, subtle atmospheric haze, 4k PBR textures",
+      "model": "v3.1-20260211"
+    },
+    {
+      "name": "saturn",
+      "prompt": "the ringed planet Saturn, pale gold banded atmosphere, broad flat icy rings with visible gaps, tilted ring plane, 4k PBR textures",
+      "model": "v3.1-20260211"
+    },
+    {
+      "name": "beidou",
+      "prompt": "the Big Dipper constellation as a set of seven faceted blue-white crystal star spheres on a thin dark connecting frame, glowing emissive material, PBR",
+      "model": "v3.1-20260211"
+    },
+    {
+      "name": "orion",
+      "prompt": "the Orion constellation panel: seven bright star spheres, orange Betelgeuse and blue Rigel, thin glowing connecting lines on a flat dark slab, PBR materials",
+      "model": "v3.1-20260211"
+    },
+    {
+      "name": "ground-station-antenna",
+      "prompt": "a ground station parabolic dish antenna on a concrete pedestal, steel lattice mount, feed horn on a tripod, cable runs, weathered industrial PBR metal and concrete",
+      "model": "v3.1-20260211"
+    },
+    {
+      "name": "shortwave-radio",
+      "prompt": "a vintage shortwave radio transceiver with brushed aluminum body, round analog tuning dial, metal knobs, speaker grille and a telescopic whip antenna, PBR materials",
+      "model": "v3.1-20260211"
+    },
+    {
+      "name": "weather-satellite",
+      "prompt": "a meteorological satellite with a boxy gold-foil body, two rectangular solar panel wings on hinged booms, a cylindrical sensor instrument package and dish antenna, PBR",
+      "model": "v3.1-20260211"
+    },
+    {
+      "name": "cubesat",
+      "prompt": "a small CubeSat with gold thermal foil body, four deployable dark blue solar panels, patch antennas and a thruster nozzle, detailed PBR materials",
+      "model": "v3.1-20260211"
+    },
+    {
+      "name": "space-telescope",
+      "prompt": "a space telescope with a silver cylindrical tube, open aperture with mirror, radiator fins, solar panels and a star-tracker box, space-grade PBR materials",
+      "model": "v3.1-20260211"
+    }
+  ]
+}

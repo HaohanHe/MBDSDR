@@ -46,7 +46,7 @@ MCP 协议 (JSON-RPC 2.0 over stdio):
 
 配置:
   - API Key: 环境变量 MBDSDR_API_KEY 或 --api-key 参数
-  - 模型: 环境变量 MBDSDR_MODEL 或 --model 参数 (默认 Qwen/Qwen3.6-35B-A3B)
+  - 模型: 环境变量 MBDSDR_MODEL 或 --model 参数 (默认 Qwen/Qwen3-VL-8B-Thinking)
   - API Base: 环境变量 MBDSDR_BASE_URL（规范名；兼容旧名 MBDSDR_API_BASE）(默认 https://api.siliconflow.cn/v1)
 
 依赖: pip install numpy (MBDSDR AI 内核依赖)
@@ -89,7 +89,7 @@ class MBSDRAIMCPServer:
     def __init__(
         self,
         api_key: str = None,
-        model: str = "Qwen/Qwen3.6-35B-A3B",
+        model: str = "Qwen/Qwen3-VL-8B-Thinking",
         api_base: str = "https://api.siliconflow.cn/v1",
         verbose: bool = False,
         agent: Any = None,
@@ -511,7 +511,7 @@ def main():
         default=None,
         help="从文件读 API Key（优先级最高；推荐）",
     )
-    parser.add_argument("--model", default="Qwen/Qwen3.6-35B-A3B", help="默认模型")
+    parser.add_argument("--model", default="Qwen/Qwen3-VL-8B-Thinking", help="默认模型")
     parser.add_argument("--api-base", default="https://api.siliconflow.cn/v1", help="API 基础 URL")
     parser.add_argument("--verbose", "-v", action="store_true", help="输出调试信息")
 

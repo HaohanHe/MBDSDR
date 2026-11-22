@@ -32,7 +32,9 @@ V 星等/B-V/距离/光谱型/proper 名/星座。生成物是 HYG 的衍生数�
 - 大气消光直接复用 ``stars.extinction_delta_mag`` 的 k/sin(alt) 模型
   （常量也取自 stars，矢量化只为批量计算，测试锁定与标量逐点相等）。
 - 坐标链复用 ``celestial_geometry`` 的 J2000 -> 岁差/章动 -> 赤道
-  -> 地平矩阵；本模块只做批量矩阵乘，不另造坐标系。
+  -> 地平矩阵；本模块只做批量矩阵乘，不另造坐标系。恒星自行走
+  ``proper_motion`` 的切向位移（J2000 -> 查询时刻），只改 alt/az；
+  输出的 ``ra_deg/dec_deg`` 保持 J2000。
 - 视场只增加一个**有界深度增益**（见 ``detail_gain_mag``）：宽视场
   等于或低于裸眼基线，小视场才逐层露出更暗的星。这不是第二个阈值，
   而是同一基线上的 LOD 调制；显式 ``limit_mag`` 可覆盖它。
@@ -79,6 +81,11 @@ from ..celestial_geometry import (
     precession_matrix,
     vec_from_azalt,
 )
+from .proper_motion import (
+    load_pm_table,
+    pm_for_hyg_ids,
+    propagate_vectors_many,
+)
 from .stars import (
     DEFAULT_BORTLE,
     EXTINCTION_K,
@@ -99,6 +106,7 @@ __all__ = [
     "StarCatalog",
     "StarSelection",
     "get_catalog",
+    "brightest_stars",
     "load_catalog",
     "compute_data_sha256",
     "limit_magnitude",
@@ -294,6 +302,13 @@ class StarSelection:
             界面应诚实提示“更深星需 Gaia/Tycho-2”，而不是以为星就这么多。
         available: 预算截断前的命中数；returned = len(vmag)。
         truncated: 是否因 ``max_count`` 预算降级。
+        pm_applied_count: 本帧真正按自行传播过的星数（自行表可用且两分量
+            均有效）。
+        pm_missing_count: 本帧无自行/自行缺失（NaN）而按 J2000 静态处理的
+            星数；计数只针对最终返回的集合（截断/排序之后）。
+
+    坐标口径：``az_deg/alt_deg`` 已把恒星自行从 J2000 传播到查询时刻；
+    ``ra_deg/dec_deg`` 仍是星表原始 J2000 坐标，不含自行。
     """
 
     hyg_id: np.ndarray
@@ -316,6 +331,8 @@ class StarSelection:
     available: int
     truncated: bool = False
     beyond_catalog_limit: bool = False
+    pm_applied_count: int = 0
+    pm_missing_count: int = 0
 
     def __len__(self) -> int:
         return int(len(self.vmag))
@@ -371,6 +388,22 @@ class StarCatalog:
     def count_below(self, limit_mag: float) -> int:
         """星等 <= limit 的星数（星表已按 mag 升序，二分即可）。"""
         return int(np.searchsorted(self.vmag, float(limit_mag), side="right"))
+
+    def brightest(self, limit: int,
+                  max_mag: Optional[float] = None) -> List[CatalogStar]:
+        """取最亮的 ``limit`` 颗（星表已按 vmag 升序，直接取前 N 条）。
+
+        ``max_mag`` 非 None 时只保留 ``vmag <= max_mag`` 的星；``limit <= 0``
+        返回空表。不排序、不修改内部数组，也不抛异常——这是一个只读快照接口。
+        """
+        if limit <= 0:
+            return []
+        if max_mag is None:
+            n = self.count
+        else:
+            n = self.count_below(float(max_mag))
+        n = min(int(limit), n)
+        return [self._star_at(i) for i in range(n)]
 
     def find_by_name(self, name: str) -> Optional[CatalogStar]:
         """按 proper 名精确查找（大小写不敏感）；无名/未收录返回 None。"""
@@ -453,6 +486,8 @@ class StarCatalog:
 
         Returns:
             ``StarSelection``；数组按有效星等从暗到亮排序（亮星后画）。
+            ``az_deg/alt_deg`` 已含恒星自行（J2000 -> ``jd`` 的自行传播）；
+            ``ra_deg/dec_deg`` 仍是 J2000 星表坐标，不含自行。
             若请求深度 > 9.0（本表覆盖上限），``limit_mag`` 会夹到 9.0 并
             置 ``beyond_catalog_limit=True``、``requested_limit_mag`` 保留原值。
         """
@@ -502,6 +537,17 @@ class StarCatalog:
         v_j2000 = np.column_stack((cd * np.sin(ra),
                                    np.sin(dec),
                                    -cd * np.cos(ra)))
+        # 3b) 恒星自行：J2000 历元 -> 本帧时刻（只改方向向量，不改 ra/dec
+        # 输出）。侧车缺失/损坏时 pm_table=None，所有星保持静态。
+        pm_table = load_pm_table()
+        if pm_table is not None:
+            pmra, pmdec = pm_for_hyg_ids(self.hyg_id[cand], pm_table)
+            v_j2000 = propagate_vectors_many(
+                v_j2000,
+                self.ra_deg[cand].astype(np.float64),
+                self.dec_deg[cand].astype(np.float64),
+                pmra, pmdec,
+                float(jd_tt if jd_tt is not None else jd_ut1))
         v_alt = v_j2000 @ M.T
 
         alt = np.degrees(np.arcsin(np.clip(-v_alt[:, 2], -1.0, 1.0)))
@@ -546,6 +592,16 @@ class StarCatalog:
         cand, m, alt, az, eff = (cand[order], m[order], alt[order],
                                  az[order], eff[order])
 
+        # 自行统计按**最终保留**的集合重新查表，截断/排序掉的星不计入。
+        if pm_table is None:
+            pm_applied = 0
+            pm_missing = int(len(cand))
+        else:
+            pmra_f, pmdec_f = pm_for_hyg_ids(self.hyg_id[cand], pm_table)
+            ok = np.isfinite(pmra_f) & np.isfinite(pmdec_f)
+            pm_applied = int(np.count_nonzero(ok))
+            pm_missing = int(len(cand) - pm_applied)
+
         return StarSelection(
             hyg_id=self.hyg_id[cand].copy(),
             hip=self.hip[cand].copy(),
@@ -567,6 +623,8 @@ class StarCatalog:
             available=available,
             truncated=truncated,
             beyond_catalog_limit=bool(beyond),
+            pm_applied_count=pm_applied,
+            pm_missing_count=pm_missing,
         )
 
 
@@ -640,6 +698,32 @@ def load_catalog(path: Optional[str] = None) -> StarCatalog:
 def get_catalog() -> StarCatalog:
     """进程级单例星表（首次调用解压/加载，之后零成本复用）。"""
     return load_catalog()
+
+
+def brightest_stars(limit: int = 2000,
+                    max_mag: Optional[float] = None) -> List[Dict[str, Any]]:
+    """用单例星表返回最亮的 ``limit`` 颗（可选 ``vmag <= max_mag``）。
+
+    输出是纯 JSON 友好的 dict 列表（供离线导出等不依赖 numpy 的调用方）::
+
+        [{"name": str, "ra_deg": float, "dec_deg": float,
+          "mag": float, "hip": int, "hyg_id": int}, ...]
+
+    ``name`` 保持星表原值（无名就是空串，不编名字），``hip``/``hyg_id``
+    取整（``hyg_id`` 供下游查自行侧车，赤经/赤纬仍保持 J2000）。
+    星等来源是星表的 V 星等（HYG v4.1 的 ``vmag``），不另做换算。
+    """
+    return [
+        {
+            "name": star.name,
+            "ra_deg": star.ra_deg,
+            "dec_deg": star.dec_deg,
+            "mag": star.vmag,
+            "hip": int(star.hip),
+            "hyg_id": int(star.hyg_id),
+        }
+        for star in get_catalog().brightest(limit, max_mag)
+    ]
 
 
 def select_for_view(

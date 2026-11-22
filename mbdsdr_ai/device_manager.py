@@ -157,6 +157,10 @@ class OpenDevice:
         self.info = info
         self._backend = backend  # 具体驱动对象（rtlsdr.RtlSdr / SoapySDR.Device / ...）
         self._closed = False
+        #: 置 ``_closed`` 的原因（句柄写坏/原生异常）；空串=正常关闭。
+        self._close_reason: str = ""
+        #: 调谐器型号（"FC0012" / "R820T" / "Unknown" / ""）。频率预检的唯一依据。
+        self.tuner_name: str = self._resolve_tuner_name(info, backend)
         self._lock = threading.Lock()
         #: 单次设备读的等待上限。pyrtlsdr 的 read_bytes 没有 timeout 形参，
         #: 真机实测 read_bytes(16384) 12 秒无返回；没有上限时 CLI/录制会永久挂起。
@@ -188,39 +192,103 @@ class OpenDevice:
         self._audio_lock = threading.Lock()
 
     # -- 配置 ---------------------------------------------------------------
+    @staticmethod
+    def _resolve_tuner_name(info: DeviceInfo, backend: Any) -> str:
+        """解析调谐器型号，供频率预检使用（解析不出给 ``"Unknown"``/``""``）。
+
+        - rtlsdr：优先统一身份条目的 ``product``（= 枚举到的 tuner 名），
+          其次从显示名括号里取（如 ``RTL-SDR #0 (FC0012)``）。
+        - rtltcp：手包里带回的 tuner_type 枚举值（rtl_tcp.c:623）。
+        - 其他驱动：空串（不适用 RTL 调谐器频率表）。
+        """
+        driver = str(getattr(info, "driver", "") or "")
+        if driver == "rtlsdr":
+            identity = getattr(info, "identity", None) or {}
+            product = str(identity.get("product", "") or "").strip()
+            if product:
+                return product
+            name = str(getattr(info, "name", "") or "").strip()
+            if name.endswith(")") and "(" in name:
+                inner = name[:-1].rsplit("(", 1)[1].strip()
+                if inner:
+                    return inner
+            return "Unknown"
+        if driver == "rtltcp":
+            from . import rtlsdr_params
+            try:
+                tcode = int(getattr(backend, "tuner_type", 0) or 0)
+            except (TypeError, ValueError):
+                tcode = 0
+            return rtlsdr_params.TUNER_ENUM_TO_NAME.get(tcode, "Unknown")
+        return ""
+
+    @property
+    def tuning_range_hz(self) -> Tuple[float, float]:
+        """调谐器实际可调区间 (min_hz, max_hz)；``(0.0, 0.0)`` = 不声明。"""
+        from . import rtlsdr_params
+        return rtlsdr_params.effective_frequency_range(self.tuner_name)
+
+    def _disconnected_text(self, fallback: str) -> str:
+        """故障关断后的错误文案：带原因时优先（用户才知道要重连）。"""
+        return self._close_reason or fallback
+
+    def _fault(self, action: str, exc: BaseException) -> None:
+        """原生层异常后把句柄判死：后续任何访问都只报错，不再触达硬件。"""
+        self._closed = True
+        self._close_reason = (
+            f"{action}失败后设备句柄不可复用（{exc}），请重新连接")
+        raise DeviceDisconnectedError(self._close_reason) from exc
+
     def set_sample_rate(self, rate_hz: float) -> None:
         if self._closed:
-            raise DeviceDisconnectedError("设备已关闭")
+            raise DeviceDisconnectedError(
+                self._disconnected_text("设备已关闭"))
         try:
             self._backend.sample_rate = float(rate_hz)
-        except OSError as e:
-            raise DeviceDisconnectedError(f"设置采样率失败: {e}") from e
+        except Exception as e:
+            self._fault("设置采样率", e)
         self._sample_rate_hz = float(rate_hz)
         # 链按旧采样率构建，速率变了必须重建
         self._chain = None
 
     def set_frequency(self, freq_hz: float) -> None:
         if self._closed:
-            raise DeviceDisconnectedError("设备已关闭")
+            raise DeviceDisconnectedError(
+                self._disconnected_text("设备已关闭"))
+        hz = float(freq_hz)
+        # 越界预检必须在下发之前：真机实测一次 1090 MHz 写频失败就会写坏
+        # 句柄（随后 gain/读样本 access violation），只能重连换新句柄。
+        lo, hi = self.tuning_range_hz
+        if hi > 0.0 and not (lo <= hz <= hi):
+            # 延迟导入：mbdsdr_ai.core 反向 import 本模块，模块级会成环。
+            from .core.errors import FrequencyOutOfRangeError
+            raise FrequencyOutOfRangeError(
+                f"请求频率 {hz / 1e6:.3f} MHz 超出调谐器 {self.tuner_name} "
+                f"的实际可调范围 {lo / 1e6:.3f}-{hi / 1e6:.3f} MHz",
+                min_freq=lo, max_freq=hi,
+            )
         try:
-            self._backend.center_freq = float(freq_hz)
-        except OSError as e:
-            raise DeviceDisconnectedError(f"设置频率失败: {e}") from e
+            self._backend.center_freq = hz
+        except Exception as e:
+            self._fault("设置频率", e)
 
     def set_gain(self, gain_db: float) -> None:
         if self._closed:
-            raise DeviceDisconnectedError("设备已关闭")
+            raise DeviceDisconnectedError(
+                self._disconnected_text("设备已关闭"))
+        db = float(gain_db)
         try:
-            self._backend.gain = float(gain_db)
+            self._backend.gain = db
         except (OSError, AttributeError) as e:
             # 有些设备 gain 是 set_gain(value) 方法
-            if hasattr(self._backend, "set_gain"):
-                try:
-                    self._backend.set_gain(float(gain_db))
-                    return
-                except Exception as e2:
-                    raise DeviceDisconnectedError(f"设置增益失败: {e2}") from e2
-            raise DeviceDisconnectedError(f"设置增益失败: {e}") from e
+            if not hasattr(self._backend, "set_gain"):
+                self._fault("设置增益", e)
+            try:
+                self._backend.set_gain(db)
+            except Exception as e2:
+                self._fault("设置增益", e2)
+        except Exception as e:
+            self._fault("设置增益", e)
 
     # -- 读样本 -------------------------------------------------------------
     def read_samples(self, n: int) -> np.ndarray:
@@ -232,7 +300,8 @@ class OpenDevice:
         :attr:`last_read_reason`，绝不无限阻塞调用方。
         """
         if self._closed:
-            raise DeviceDisconnectedError("设备已关闭")
+            raise DeviceDisconnectedError(
+                self._disconnected_text("设备已关闭"))
         n = int(n)
         if n <= 0:
             return np.empty(0, dtype=np.complex64)

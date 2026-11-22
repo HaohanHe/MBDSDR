@@ -199,6 +199,7 @@ class ControlPanel(QWidget):
     tune_sdr_requested = Signal(float, str)  # 请求调谐 SDR (Hz, 模式)
     volume_changed = Signal(int)          # 音量改变 (0-100 人类量纲)
     record_toggled = Signal(bool)         # 录音开关
+    record_product_requested = Signal(str)  # 用户选择的档案/IQ 路径；主窗负责忙态/安全门
     mode_changed = Signal(str)            # 模式改变
     gain_changed = Signal(int)             # 硬件增益 (dB, RTL-SDR LNA 0~49)
     squelch_changed = Signal(float)        # 静噪门限（相对该模式噪声基线的余量刻度，-100~-20）
@@ -958,6 +959,26 @@ class ControlPanel(QWidget):
         self.record_status.setAlignment(Qt.AlignCenter)
         record_layout.addWidget(self.record_status)
 
+        # 只在本次录音有产物/导出说明时出现，不增加常驻导航或折叠组。
+        self.record_product_combo = QComboBox()
+        self.record_product_combo.setObjectName("recordProductCombo")
+        self.record_product_combo.setSizeAdjustPolicy(
+            QComboBox.AdjustToMinimumContentsLengthWithIcon)
+        self.record_product_combo.setMinimumContentsLength(12)
+        self.record_product_combo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.record_product_combo.currentIndexChanged.connect(self._sync_record_product)
+        record_layout.addWidget(self.record_product_combo)
+        self.record_review_button = QPushButton("回看刚录内容")
+        self.record_review_button.setObjectName("recordReviewButton")
+        self.record_review_button.clicked.connect(self._on_record_product_requested)
+        record_layout.addWidget(self.record_review_button)
+        self.record_products_status = QLabel()
+        self.record_products_status.setWordWrap(True)
+        self.record_products_status.setTextFormat(Qt.PlainText)
+        self.record_products_status.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        record_layout.addWidget(self.record_products_status)
+        self.set_record_products()
+
         self._add_foldable(layout, "录音", record_group)
 
         # 弹性空间
@@ -1486,6 +1507,77 @@ class ControlPanel(QWidget):
             if self._record_outcome is None:
                 self.record_status.setText("未录音")
         self.record_toggled.emit(checked)
+
+    def set_record_products(self, products=(), errors=()) -> None:
+        """独立展示产物与导出错误，绝不覆盖 set_record_outcome 的录音结论。
+
+        products 每项含真实 path、kind(archive/iq)、duration_s、complete；
+        available=False 表示没有可靠的录音元数据，不允许猜测参数播放。
+        不扫目录/不读 IQ；缺文件或缺 IQ sidecar 的条目不可点击。
+        """
+        self.record_product_combo.blockSignals(True)
+        self.record_product_combo.clear()
+        archive_count = 0
+        for product in products:
+            path = _os.path.abspath(product["path"])
+            archive = product["kind"] == "archive"
+            kind = "观测档案" if archive else "仅回放录音（不重演观测上下文）"
+            duration = float(product["duration_s"])
+            incomplete = " · 不完整" if not product.get("complete", True) else ""
+            label = f"{kind} · {_os.path.basename(path)} · {duration:.3f} s{incomplete}"
+            self.record_product_combo.addItem(label, path)
+            index = self.record_product_combo.count() - 1
+            self.record_product_combo.setItemData(
+                index, f"{label}\n{path}", Qt.ToolTipRole)
+            if product.get("available", True) and self._record_product_exists(path):
+                archive_count += int(archive)
+            else:
+                self.record_product_combo.model().item(index).setEnabled(False)
+        self.record_product_combo.blockSignals(False)
+        has_products = self.record_product_combo.count() > 0
+        self.record_product_combo.setVisible(has_products)
+        self.record_review_button.setVisible(has_products)
+        messages = []
+        if archive_count:
+            messages.append(f"观测档案已保存 {archive_count} 份；回放前仍需校验站址等上下文。")
+        if has_products:
+            messages.append("仅回放录音不会重演观测上下文；文件或元数据不可用的产物不能回看。")
+        messages.extend(f"观测档案/元数据错误：{error}" for error in errors)
+        self.record_products_status.setText("\n".join(messages))
+        self.record_products_status.setVisible(bool(messages))
+        self._sync_record_product()
+
+    @staticmethod
+    def _record_product_exists(path: str) -> bool:
+        try:
+            return (bool(path) and _os.path.isfile(path) and _os.path.getsize(path) > 0
+                    and (not path.lower().endswith(".iq")
+                         or _os.path.isfile(path + ".json")))
+        except OSError:
+            return False
+
+    def record_product_available(self, path: str) -> bool:
+        """校验已登记的产物；旧会话的排队意图与缺元数据条目也不得播放。"""
+        index = self.record_product_combo.findData(_os.path.abspath(path)) if path else -1
+        item = self.record_product_combo.model().item(index)
+        return bool(item and item.isEnabled() and self._record_product_exists(path))
+
+    def _sync_record_product(self, *_args) -> None:
+        path = self.record_product_combo.currentData() or ""
+        tip = self.record_product_combo.currentData(Qt.ToolTipRole) or ""
+        available = self.record_product_available(path)
+        self.record_review_button.setEnabled(available)
+        if path and not available:
+            tip += "\n文件或录音元数据不可用，不能回看。"
+        self.record_product_combo.setToolTip(
+            tip or "选中一份已落盘的录音或观测档案；产物写完并校验通过才可回看")
+        self.record_review_button.setToolTip(
+            tip or "回看所选录音：先录一段，产物写完并通过校验后才能点")
+
+    def _on_record_product_requested(self) -> None:
+        self._sync_record_product()
+        if self.record_review_button.isEnabled():
+            self.record_product_requested.emit(self.record_product_combo.currentData())
 
     def set_record_outcome(self, kind: str, text: str = "") -> None:
         """写入一次录音结果（三分支：取消 / 失败 / 正常保存）。

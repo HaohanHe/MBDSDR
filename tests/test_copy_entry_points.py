@@ -35,6 +35,10 @@ import troubleshooting as ts  # noqa: E402
 #: 不因为它们不在启动态树里就放弃核验。
 _DIALOG_ONLY = {
     "远程 rtl_tcp 源": "desktop/main_window.py",
+    # 设置页改成按需构造的对话框后，这两个字段标签不再出现在启动态控件树里；
+    # 字面量仍在 config_schema 的 SettingItem.label 上，由 _literal_ok 兜底核验。
+    "观测地点纬度": "desktop/config_schema.py",
+    "观测地点经度": "desktop/config_schema.py",
 }
 
 _TOKEN_RE = re.compile(r"「([^」]+)」")
@@ -115,7 +119,10 @@ _ACTION_VERBS = ("点", "选", "输入")
 _VIEW_VERBS = ("看", "查看", "确认")
 
 #: 例外表冻结条数：出现第 N+1 条即红「新增例外需评审」，防止长成白名单。
-_EXCEPTION_LIMIT = 1
+#: 2026-11-19：设置页改为按需构造的对话框后，「观测地点纬度/经度」两个字段
+#: 标签在启动态树里必然找不到（不是文案失真），按「既无可操作控件、又无稳定
+#: 可见文字承载区」的登记条件各记 1 条，上限随之下调到 3。
+_EXCEPTION_LIMIT = 3
 
 #: 分句里出现这些容器名时，把该段的同名候选限到那个容器（显式词表，
 #: 不做自然语言解析）。值为 MainWindow 属性名；``None`` 表示按 QGroupBox 标题认。

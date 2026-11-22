@@ -21,7 +21,6 @@ import '../widgets/empty_state.dart';
 import '../widgets/remote_decoder_panel.dart';
 import '../widgets/s_meter.dart';
 import '../widgets/spectrum_display.dart';
-import '../widgets/timing_panel.dart';
 
 /// 由解调模式派生的信道带宽（Hz）。移动端带宽随模式而定，不单独控制。
 int bandwidthForMode(DemodMode mode) => switch (mode) {
@@ -150,6 +149,8 @@ class _SpectrumPageState extends State<SpectrumPage> {
                   controlHubHost: widget.controlHubHost,
                   controlHubPort: widget.controlHubPort,
                   onOpenSettings: widget.onOpenSettings,
+                  // 竖屏：连接/断开置顶，不必先滚过整列滑杆。
+                  primaryActionFirst: !wide,
                 );
                 final display = _DisplayArea(
                   controller: controller,
@@ -459,6 +460,12 @@ class _ControlPanel extends StatelessWidget {
   final int controlHubPort;
   final VoidCallback? onOpenSettings;
 
+  /// 竖屏（窄屏）时把「连接/断开」主操作提到面板顶部。
+  ///
+  /// 竖屏里控制面板只分到一半屏高，主操作原本压在整列滑杆最底部；
+  /// 未连接时用户要先滚过一屏禁用控件才能点到「连接」。宽屏保持原位置。
+  final bool primaryActionFirst;
+
   const _ControlPanel({
     required this.controller,
     required this.rtlHost,
@@ -480,9 +487,33 @@ class _ControlPanel extends StatelessWidget {
     this.controlHubHost = '',
     this.controlHubPort = 8080,
     this.onOpenSettings,
+    this.primaryActionFirst = false,
   });
 
   bool get _hasHost => rtlHost.trim().isNotEmpty;
+
+  /// 「连接/断开」主操作：未配置 host 时退化为去设置页。
+  Widget _primaryAction(BuildContext context, bool connected) {
+    return FilledButton.icon(
+      style: FilledButton.styleFrom(
+        // 主操作胶囊化，与 Chip/步进按钮同圆角层级。
+        shape: const StadiumBorder(),
+        padding: const EdgeInsets.symmetric(
+          horizontal: AppTokens.spacingL,
+          vertical: AppTokens.spacingM,
+        ),
+      ),
+      onPressed: _hasHost ? () => _connectOrDisconnect(context) : onOpenSettings,
+      icon: Icon(connected ? Icons.link_off : Icons.rss_feed),
+      label: Text(
+        !_hasHost
+            ? '设置 rtl_tcp 地址'
+            : connected
+                ? '断开'
+                : '连接 ${rtlHost.trim()}:$rtlPort',
+      ),
+    );
+  }
 
   Future<void> _connectOrDisconnect(BuildContext context) async {
     if (controller.status == ConnectionStatus.connected ||
@@ -705,6 +736,11 @@ class _ControlPanel extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
+            // 竖屏：主操作置顶（面板高度只有半屏，先给连接/断开）。
+            if (primaryActionFirst) ...[
+              _primaryAction(context, connected),
+              const SizedBox(height: AppTokens.spacingL),
+            ],
             // ---- 组 A：调谐（hero 读数 + 模式 + 步进）----
             Center(
               // Hero 频率读数：触控热区补足到 ≥ touchMin(44)，文字在热区内
@@ -949,30 +985,12 @@ class _ControlPanel extends StatelessWidget {
               selected: {persistence},
               onSelectionChanged: (s) => onPersistenceChanged(s.first),
             ),
-            // ---- 组间分段：主操作 ----
-            const SizedBox(height: AppTokens.spacingL),
-            // 连接 / 断开。
-            FilledButton.icon(
-              style: FilledButton.styleFrom(
-                // 主操作胶囊化，与 Chip/步进按钮同圆角层级。
-                shape: const StadiumBorder(),
-                padding: const EdgeInsets.symmetric(
-                  horizontal: AppTokens.spacingL,
-                  vertical: AppTokens.spacingM,
-                ),
-              ),
-              onPressed: _hasHost
-                  ? () => _connectOrDisconnect(context)
-                  : onOpenSettings,
-              icon: Icon(connected ? Icons.link_off : Icons.rss_feed),
-              label: Text(
-                !_hasHost
-                    ? '设置 rtl_tcp 地址'
-                    : connected
-                        ? '断开'
-                        : '连接 ${rtlHost.trim()}:$rtlPort',
-              ),
-            ),
+            // ---- 组间分段：主操作（宽屏留在底部；竖屏已提前到面板顶部）----
+            if (!primaryActionFirst) ...[
+              const SizedBox(height: AppTokens.spacingL),
+              // 连接 / 断开。
+              _primaryAction(context, connected),
+            ],
             // ---- 录音开关：真实落盘 16-bit WAV + sidecar。仅在已连接（有真实解调
             // 音频）时可开始；未连接/重连中诚实禁用并说明原因；录制中亮红点、可停。
             const SizedBox(height: AppTokens.spacingM),
@@ -1194,9 +1212,8 @@ class _ControlPanel extends StatelessWidget {
                 ),
               ],
             ),
-            // ---- 授时面板：真实系统钟 + GNSS 授时三态（无 NMEA 诚实空态）----
-            const SizedBox(height: AppTokens.spacingL),
-            const TimingPanel(),
+            // 授时（系统钟 + GNSS 三态）属底层机制，已移至设置页「时间与授时」，
+            // 默认折叠、展开才建面板（不展开就不跑 1 Hz 计时器）。
             // ---- 远程解码面板：只读查看桌面 ControlHub 的 POCSAG/M17/VOR 结果。
             // 与本机 rtl_tcp IQ 链路相互独立；host 为空 -> 面板内部退化为「去设置」空态。
             const SizedBox(height: AppTokens.spacingL),

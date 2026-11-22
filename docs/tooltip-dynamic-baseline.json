@@ -182,6 +182,13 @@
       "runtime_test": "tests/test_tooltip_dynamic_runtime.py::test_rf_sky_view_passthrough_tooltips_self_describe"
     },
     {
+      "file": "desktop/replay_timeline.py",
+      "expr": "3",
+      "reason": "passthrough",
+      "note": "QTreeWidgetItem.setToolTip(3, location_note)：列号 3 是静态扫描的 args[0]，真正文案在第二参；location_note 由样本/墙钟判定来源拼成完整短句。解除条件：改用非 setToolTip 的等价写法或文案退化成裸值时删本条。",
+      "runtime_test": "tests/test_tooltip_dynamic_runtime.py::test_replay_timeline_passthrough_tooltips_self_describe"
+    },
+    {
       "file": "desktop/settings_panel.py",
       "expr": "purpose",
       "reason": "passthrough",

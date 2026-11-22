@@ -142,10 +142,17 @@ checkout 时 CRLF 改写导致 SHA 分叉。
 | `size_arcmin` | 0 | 已补齐（`16f075f3` — `mbdsdr_ai/data/dso_catalog.json:54` — `lynga`）：M40←WDS 双星分离 0.887′、M73←Lynga `VII/92A` 2.8′ | — |
 | `size_minor_arcmin` | 66 | 无短轴，不能画椭圆 | 与 `axis_ratio` 同一批 |
 | `axis_ratio` | 66 | 按圆形绘制；查询/推荐不读该字段（有钉扎测试） | 30 GCl / 27 OCl / 5 PN / 1 Neb / 1 `**` / 1 Other / 1 RfN |
+| `position_angle_deg` | 74 | OpenNGC `PosAng` 原值（度，长轴位置角），43/117 有值；缺失留 `null` + `position_angle_source="unknown"`，不做推算 | 见 `meta.missing.position_angle_deg.designations` |
+| `distance_pc` | 46 | OpenNGC `Pax`（视差，mas）换算 `1000/Pax`，71/117 有值并标 `distance_source="openngc_parallax"`；无 `Pax` 留 `null`，不估算 | 见 `meta.missing.distance_pc.designations` |
 | `zh_name` | 83 | 界面回退 `name_en`；中文名覆盖 34/117 | — |
 | `aliases_en` | 107 | 仅 10 条有英文别名，别名搜索覆盖有限 | — |
 
 - `size_source` 分布：`catalog` 115 / `wds` 1 / `lynga` 1（合计 117）。
+- `position_angle_source` 分布：`openngc` 43 / `unknown` 74。
+- `distance_source` 分布：`openngc_parallax` 71 / `unknown` 46；
+  `distance_uncertainty_pc` 恒为 `null`（OpenNGC 不提供视差误差 σ，
+  不编数字）。Caldwell 目录**本轮仍未提供**：没有本地权威源，不估算、
+  不联网抓取。
 - 坐标实测域：RA `[10.0920°, 351.2017°]`、Dec `[−69.1009°, +69.6794°]`，
   全部落在 RA ∈ [0°, 360°)、Dec ∈ [−90°, 90°]，无越界、无非有限值
   （实测值，随星表更新需重算）。
@@ -169,11 +176,11 @@ Cstar U-Mag, Cstar B-Mag, Cstar V-Mag, M, NGC, IC, Cstar Names,
 Identifiers, Common names, NED notes, OpenNGC notes, Sources
 ```
 
-测试实际读取的 13 列：
+测试实际读取的 14 列：
 
 ```
 Name, Type, RA, Dec, Const, MajAx, MinAx, B-Mag, V-Mag, M, NGC, IC,
-Common names
+Common names, Pax
 ```
 
 钉扎测试：`mbdsdr_ai/tests/test_dso_catalog.py`
@@ -242,6 +249,7 @@ python scripts/check_data_licenses.py --list
 | 文件 | license | source |
 |---|---|---|
 | `mbdsdr_ai/data/full_sky_hyg_v41.npz` | CC BY-SA 4.0 | HYG Database v4.1 |
+| `mbdsdr_ai/data/hyg_pm_v41.npz` | CC BY-SA 4.0（HYG v4.1 衍生：pmra/pmdec） | HYG Database v4.1（源 CSV SHA 与主星表 meta 一致） |
 | `mbdsdr_ai/data/dso_catalog.json` | CC-BY-SA-4.0 | OpenNGC |
 | `mbdsdr_ai/data/constellations_iau.json` | CC BY-SA 4.0（连线；中文名 Wikidata CC0，见 `docs/constellations.md` §1.1.1） | Stellarium skyculture modern_iau |
 | `mbdsdr_ai/data/constellation_names_cc0.json` | CC0-1.0 | Wikidata |

@@ -327,6 +327,41 @@ void main() {
     expect(readout.style?.fontSize, AppTokens.freqReadout.fontSize);
   });
 
+  testWidgets('竖屏主操作置顶、宽屏仍在底部（连接按钮可达性）', (tester) async {
+    // 竖屏（390×844）：控制面板只分到半屏高，主操作置顶，
+    // 未连接时不必先滚过整列禁用滑杆才能点到「连接」。
+    tester.view.physicalSize = const Size(390, 844);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
+
+    final radio = _PanelRadio();
+    await tester.pumpWidget(_wrap(radio));
+    await tester.pump();
+
+    final connect = find.text('连接 127.0.0.1:1234');
+    final hero = find.byWidgetPredicate(
+      (w) => w is Text && RegExp(r'^145\.0+ MHz$').hasMatch(w.data ?? ''),
+    );
+    expect(connect, findsOneWidget, reason: '有 host 时主操作应为「连接 host:port」');
+    expect(hero, findsOneWidget);
+    expect(
+      tester.getTopLeft(connect).dy,
+      lessThan(tester.getTopLeft(hero).dy),
+      reason: '竖屏主操作应在面板顶部、hero 读数之上',
+    );
+
+    // 宽屏（1000×800）：布局保持原状，主操作仍在底部。
+    tester.view.physicalSize = const Size(1000, 800);
+    await tester.pumpWidget(_wrap(radio));
+    await tester.pump();
+    expect(connect, findsOneWidget);
+    expect(
+      tester.getTopLeft(connect).dy,
+      greaterThan(tester.getTopLeft(hero).dy),
+      reason: '宽屏主操作保持底部位置',
+    );
+  });
+
   testWidgets('hero 频率读数触控热区 ≥ touchMin(44) 且可命中', (tester) async {
     tester.view.physicalSize = const Size(390, 844);
     tester.view.devicePixelRatio = 1.0;

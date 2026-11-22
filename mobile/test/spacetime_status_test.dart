@@ -134,9 +134,25 @@ void main() {
     });
   });
 
-  testWidgets('widget：空态渲染四格标题与诚实文案', (tester) async {
+  testWidgets('widget 默认：主界面只留目标/多普勒，机制两格不上界面', (tester) async {
     await tester.pumpWidget(const MaterialApp(
       home: Scaffold(body: SpacetimeStatusCard()),
+    ));
+    expect(find.text('接收状态'), findsOneWidget);
+    expect(find.text('接收目标'), findsOneWidget);
+    expect(find.text('多普勒补偿'), findsOneWidget);
+    expect(find.text('无接收目标'), findsOneWidget);
+    expect(find.text('未补偿（无目标）'), findsOneWidget);
+    // 时间源 / GNSS 定位属底层机制（spec 规则 1），默认不出现。
+    expect(find.text('时空状态'), findsNothing);
+    expect(find.text('时间源'), findsNothing);
+    expect(find.text('GNSS 定位'), findsNothing);
+    expect(find.text('无 fix'), findsNothing);
+  });
+
+  testWidgets('widget showMechanism：诊断态仍能渲染四格与诚实文案', (tester) async {
+    await tester.pumpWidget(const MaterialApp(
+      home: Scaffold(body: SpacetimeStatusCard(showMechanism: true)),
     ));
     expect(find.text('时空状态'), findsOneWidget);
     expect(find.text('时间源'), findsOneWidget);

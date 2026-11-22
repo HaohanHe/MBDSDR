@@ -363,9 +363,33 @@ class SkyOverlayEngine {
 
       for (final poly in ast.polylines) {
         for (var i = 0; i + 1 < poly.length; i++) {
-          final pa = screenOf(poly[i]);
-          final pb = screenOf(poly[i + 1]);
-          if (pa == null || pb == null) continue; // 地平线下或背对相机
+          var pa = screenOf(poly[i]);
+          var pb = screenOf(poly[i + 1]);
+          if (pa == null && pb == null) continue;
+          if (pa == null || pb == null) {
+            // 查不到的 HIP 绝不编坐标（`altAzOf` 给 −91° 哨兵）；它不参与连线。
+            if (!_byHip.containsKey(poly[i]) ||
+                !_byHip.containsKey(poly[i + 1])) {
+              continue;
+            }
+            // 一端在相机背后/地平余量以下：裁到有效域边界继续画，不再
+            // 整段丢弃（spec Task 10.2，与桌面同一 SDF 思路）。
+            final aaA = altAzOf(poly[i]);
+            final aaB = altAzOf(poly[i + 1]);
+            final pts = clipSegmentToSkyDomain(
+              aaA.azDeg,
+              aaA.altDeg,
+              aaB.azDeg,
+              aaB.altDeg,
+              view,
+              drawable: (double az, double alt) =>
+                  alt > -altMarginDeg &&
+                  isDirectionDrawable(az, alt, view),
+            );
+            if (pts.length != 2) continue;
+            pa = pts[0];
+            pb = pts[1];
+          }
 
           final clipped =
               clipSegmentToRect(pa, pb, view.width, view.height);

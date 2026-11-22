@@ -16,10 +16,12 @@ MBDSDR AI 内核 - Agent 主循环
 这是 MBDSDR 的智能体核心，桌面端/移动端/CLI 都通过这个 Agent 交互。
 """
 
+import base64
 import json
 import logging
 import math
 import os
+import re
 import time
 import tempfile
 import threading
@@ -218,6 +220,92 @@ def _percentile(values: List[float], q: float) -> Optional[float]:
     frac = pos - lo
     return round(xs[lo] + (xs[hi] - xs[lo]) * frac, 1)
 
+
+# ── 图片输入（多模态）───────────────────────────────────────
+# 只接受明确列出的图片类型；未列出的一律拒绝，不按魔数猜格式。
+SUPPORTED_IMAGE_EXTS = {
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".webp": "image/webp",
+    ".gif": "image/gif",
+}
+
+_IMAGE_DATA_URL_RE = re.compile(
+    r"^data:image/(png|jpeg|jpg|webp|gif);base64,(.+)$",
+    re.IGNORECASE | re.DOTALL)
+
+
+class ImageInputError(ValueError):
+    """图片输入不合法（不存在 / 类型不支持 / data URL 格式坏）。"""
+
+    def __init__(self, code: str, message: str):
+        super().__init__(message)
+        self.code = code
+
+
+def image_to_data_url(item) -> str:
+    """把本地图片路径或 data URL 归一成 OpenAI 兼容的 data URL。
+
+    本地文件读取后 base64 编码，不依赖外网/图床。类型只按扩展名判定
+    （png/jpg/jpeg/webp/gif）；不支持的类型、缺失的文件都抛
+    ``ImageInputError``，绝不静默跳过。
+    """
+    if isinstance(item, os.PathLike):
+        item = os.fspath(item)
+    if not isinstance(item, str) or not item.strip():
+        raise ImageInputError(
+            "image_invalid", "图片输入必须是非空路径字符串或 data URL")
+    raw_item = item.strip()
+
+    if raw_item[:5].lower() == "data:":
+        m = _IMAGE_DATA_URL_RE.match(raw_item)
+        if not m or not m.group(2).strip():
+            raise ImageInputError(
+                "image_invalid",
+                "data URL 需形如 data:image/png;base64,<数据>，"
+                "且仅支持 png/jpg/jpeg/webp/gif")
+        return raw_item
+
+    path = os.path.expanduser(raw_item)
+    if not os.path.isfile(path):
+        raise ImageInputError("image_not_found", f"图片文件不存在: {path}")
+    ext = os.path.splitext(path)[1].lower()
+    mime = SUPPORTED_IMAGE_EXTS.get(ext)
+    if not mime:
+        raise ImageInputError(
+            "image_type_unsupported",
+            f"不支持的图片类型 {ext or '（无扩展名）'}；"
+            "仅支持 png/jpg/jpeg/webp/gif")
+    try:
+        with open(path, "rb") as f:
+            raw = f.read()
+    except OSError as e:
+        raise ImageInputError(
+            "image_read_failed", f"读取图片失败: {type(e).__name__}: {e}")
+    if not raw:
+        raise ImageInputError("image_invalid", f"图片文件为空: {path}")
+    return f"data:{mime};base64,{base64.b64encode(raw).decode('ascii')}"
+
+
+def build_user_content(user_input: str, images=None):
+    """构造 user 消息 content。
+
+    没有图片时原样返回字符串（与旧消息形状逐字节一致，向后兼容）；
+    有图片时返回 OpenAI 多模态 parts：文本 part + 每个图片一个
+    ``{"type": "image_url", "image_url": {"url": <data URL>}}``。
+    """
+    if not images:
+        return user_input
+    if isinstance(images, (str, os.PathLike)):
+        images = [images]
+    parts: List[Dict[str, Any]] = [{"type": "text", "text": user_input}]
+    for item in images:
+        parts.append({
+            "type": "image_url",
+            "image_url": {"url": image_to_data_url(item)},
+        })
+    return parts
 
 
 class MBDSDRAgent:
@@ -497,6 +585,7 @@ class MBDSDRAgent:
         self._register_orbit_tools()
         self._register_pointing_tools()
         self._register_pointing_check_tool()
+        self._register_observation_tools()
         self._register_mount_tools()
         self._register_doppler_tools()
         # 轨道动力学原子积木（多普勒换算/取状态/STM/观测模型/RLS单步/校时/坐标）：
@@ -1713,13 +1802,17 @@ class MBDSDRAgent:
                     return ToolResult(False, f"时间基准不可用，无法计算过境：{e}")
             except Exception as e:
                 return ToolResult(False, f"过境预测失败: {e}")
+            # 时刻口径与采样精度同源：文案从 sat_passes.grid_manifest() 取，
+            # 不在 AI 侧再写一份「60 秒 / 2 秒 / 0.5 秒」。
+            from .sat_passes import grid_manifest
+            time_basis = grid_manifest()["accuracy_note"]
             return ToolResult(True, json.dumps(
                 {"passes": ps, "count": len(ps),
                  "station_warning": ev.get("station_warning") or "",
                  # 时刻来源与采样精度：AI 回答里贴出的时刻必须能追问出处，
                  # 不能与面板的 60 秒网格（±30 秒）混为一谈。
                  "pass_time_source": (
-                     "sat_passes.predict_passes（60 秒粗扫 + 2 秒细扫 + 0.5 秒二分）"),
+                     f"orbit.predict_passes（{time_basis}）"),
                  "pass_time_sampling_precision_s": 1.0},
                 ensure_ascii=False, default=str))
 
@@ -1937,6 +2030,106 @@ class MBDSDRAgent:
             handler=_pointing_check,
             category="pointing",
             write=False,
+        )
+
+    def _register_observation_tools(self):
+        """观测档案导出（PRD P1-08）：一次观测 → 可复算 JSON/CSV。"""
+
+        def _export(args):
+            from mbdsdr_ai.observation_record import (
+                product_from_sigmf,
+                record_from_snapshot,
+            )
+            from mbdsdr_ai.runtime_sources import get_runtime_sources
+
+            fmt = str(args.get("format") or "json").strip().lower()
+            if fmt not in ("json", "csv"):
+                return ToolResult(
+                    False, "未导出：bad_command（format 只支持 json / csv）")
+            path = str(args.get("path") or "").strip()
+            if not path:
+                return ToolResult(False, "未导出：bad_command（缺少 path）")
+
+            products = [product_from_sigmf(str(p))
+                        for p in (args.get("products") or [])]
+            try:
+                snap = get_runtime_sources().snapshot()
+            except Exception as exc:  # noqa: BLE001 - 快照失败要如实报
+                return ToolResult(
+                    False,
+                    f"未导出：snapshot_failed（{type(exc).__name__}: {exc}）")
+
+            rec = record_from_snapshot(
+                str(args.get("observation_id") or ""),
+                snap,
+                started_utc=args.get("started_utc"),
+                ended_utc=args.get("ended_utc"),
+                target=args.get("target"),
+                tuning=args.get("tuning"),
+                products=products,
+                result=args.get("result"),
+                evidence=str(args.get("evidence") or "unverified"),
+            )
+            ok, err = (rec.write_csv(path) if fmt == "csv"
+                       else rec.write_json(path))
+            if not ok:
+                return ToolResult(False, f"未导出：{err}")
+            return ToolResult(
+                True,
+                f"已导出 {fmt.upper()}：{path}（产物 {len(products)} 个）；"
+                f"时间来源 {rec.time.get('source')}、"
+                f"站址来源 {rec.site.get('source')}")
+
+        self.tool_registry.register(
+            name="observation_export",
+            description=(
+                "把一次观测导出成可复算档案（JSON 或 CSV）。字段覆盖时刻、站址、"
+                "设备、目标、频点、产物与结果；时间/站址/设备取自本进程运行时"
+                "快照，频率与样本数取自 SigMF meta，各组字段保留自己的来源标注。"
+                "**没有任何产物时拒绝导出**，不产出「什么也没收到」的空档案。"
+                "证据强度只接受 real_hw / self_test / unverified，其余值会被"
+                "校验拒绝（不静默降级）。"),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "observation_id": {
+                        "type": "string",
+                        "description": "本次观测的唯一标识（必填）"},
+                    "path": {
+                        "type": "string",
+                        "description": "导出文件路径（必填）"},
+                    "format": {
+                        "type": "string",
+                        "enum": ["json", "csv"],
+                        "description": "导出格式，默认 json"},
+                    "products": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "SigMF meta 文件路径列表；为空时导出被拒绝"},
+                    "started_utc": {"type": "string",
+                                    "description": "观测开始（ISO 8601）"},
+                    "ended_utc": {"type": "string",
+                                  "description": "观测结束（ISO 8601）"},
+                    "target": {
+                        "type": "object",
+                        "description": "目标：name / norad_id"},
+                    "tuning": {
+                        "type": "object",
+                        "description": "center_freq_hz / sample_rate_hz / "
+                                       "gain_db / doppler_residual_hz"},
+                    "result": {
+                        "type": "object",
+                        "description": "result.summary：这次收到了什么"},
+                    "evidence": {
+                        "type": "string",
+                        "enum": ["real_hw", "self_test", "unverified"],
+                        "description": "证据强度，默认 unverified"},
+                },
+                "required": ["observation_id", "path"],
+            },
+            handler=_export,
+            category="observation",
+            write=True,
         )
 
     def _register_mount_tools(self):
@@ -4391,13 +4584,15 @@ class MBDSDRAgent:
             return []
 
     def chat(self, user_input: str, max_tool_rounds: int = 10,
-             on_delta=None) -> Dict[str, Any]:
+             on_delta=None, images=None) -> Dict[str, Any]:
         """处理用户输入（并发安全 + 可取消的外壳）。
 
         - 同一 agent 同时只允许一个请求执行；第二个请求**不排队、不共享
           上下文**，立刻返回 ``error=agent_busy``（调用方可提示稍后再试）。
         - 执行期间可用 request_cancel() 请求取消；取消在安全点生效，
           返回 ``cancelled=True`` 且本轮不算成功。
+        - ``images``：可选图片输入，接受本地文件路径或 data URL（png/jpg/
+          jpeg/webp/gif）。为空时消息形状与旧版完全一致。
         """
         self._ensure_concurrency_state()
         if not self._chat_lock.acquire(blocking=False):
@@ -4426,7 +4621,8 @@ class MBDSDRAgent:
             # 只有拿到锁、真正开始处理时才清取消标志：空闲时的取消是 no-op
             self._cancel_event.clear()
             self._chat_active = True
-            return self._chat_impl(user_input, max_tool_rounds, on_delta)
+            return self._chat_impl(user_input, max_tool_rounds, on_delta,
+                                   images=images)
         finally:
             self._chat_active = False
             self._cancel_event.clear()
@@ -4585,12 +4781,12 @@ class MBDSDRAgent:
         return wall_ms
 
     def _chat_impl(self, user_input: str, max_tool_rounds: int = 10,
-                   on_delta=None) -> Dict[str, Any]:
+                   on_delta=None, images=None) -> Dict[str, Any]:
         """
         处理用户输入，返回 Agent 回复。
 
         流程：
-        1. 添加用户消息到上下文
+        1. 添加用户消息到上下文（有 images 时构造多模态 parts）
         2. 检索相关记忆
         3. 构建系统提示词（含记忆）
         4. 调用 LLM
@@ -4616,6 +4812,26 @@ class MBDSDRAgent:
         start_time = time.time()
         self.total_agent_calls += 1
 
+        # 0. 图片输入校验/编码：坏输入在写上下文之前就明确拒绝，不静默降级
+        #    成纯文本，也不把半张图带进后续轮次。
+        try:
+            user_content = build_user_content(user_input, images)
+        except ImageInputError as e:
+            return {
+                "content": f"错误: {e}",
+                "tool_calls": [],
+                "tool_results": [],
+                "usage": {},
+                "latency_ms": 0,
+                "compacted": False,
+                "error": e.code,
+                "error_code": e.code,
+                "interrupted": False,
+                "cancelled": False,
+                "busy": False,
+                "rounds": 0,
+            }
+
         # 检查 API key：本机/内网端点（Ollama / vLLM / LM Studio）默认无鉴权，
         # 不能因为没填 Key 就把「本地 DeepSeek 已可用」当成未配置。
         if not self.config.api_key \
@@ -4636,10 +4852,12 @@ class MBDSDRAgent:
             }
 
         # 1. 添加用户消息
-        self.context_manager.add_user_message(user_input)
+        self.context_manager.add_user_message(user_content)
         self._slog("turn_start", max_tool_rounds=max_tool_rounds,
                    model=getattr(self.model_manager, "model", ""))
-        self._slog("user_message", content=user_input)
+        self._slog("user_message", content=user_input,
+                   images=(len(user_content) - 1)
+                   if isinstance(user_content, list) else 0)
 
         # 2. 检索相关记忆
         memory_context = self.memory.build_memory_context(user_input)

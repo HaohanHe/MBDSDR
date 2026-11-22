@@ -202,7 +202,9 @@ def test_start_recording_stops_replay_first(window, monkeypatch, tmp_path):
 
     _isolate_home(monkeypatch, tmp_path)
     iq_path = str(tmp_path / "replay_src2.iq")
-    baseband_io.save_iq(np.ones(4096, dtype=np.complex64), iq_path,
+    # 300k 样本 ≈ 0.15s，确保「回放中点录音」时回放仍在进行；4096 样本
+    # 只需一个 50ms tick 就播完，轮询还没看到 _replay_timer 就已归零。
+    baseband_io.save_iq(np.ones(300_000, dtype=np.complex64), iq_path,
                         sample_rate=2_048_000.0, center_freq_hz=100e6)
     monkeypatch.setattr(mw.QFileDialog, "getOpenFileName",
                         lambda *a, **k: (iq_path, ""))

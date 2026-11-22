@@ -108,6 +108,7 @@
 #include "ui/shortcuts_dialog.h"
 #include "ui/shortcuts_catalog.h"
 #include "ui/status_format.h"
+#include "ui/text_util.h"
 #include "ui/spacetime_format.h"
 #include <QGridLayout>
 #include <QListWidget>
@@ -427,16 +428,24 @@ MainWindow::MainWindow(QWidget* parent)
         devNameLabel_ = new QLabel(QStringLiteral("RTL-SDR 未连接"), gDev);
         devNameLabel_->setObjectName("dockHint");
         devNameLabel_->setWordWrap(true);
+        devNameLabel_->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
+        devNameLabel_->setMinimumWidth(0);
         gDevLay->addRow(QStringLiteral("设备"), devNameLabel_);
         devTunerRangeLabel_ = new QLabel(QStringLiteral("--"), gDev);
         devTunerRangeLabel_->setWordWrap(true);
+        devTunerRangeLabel_->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
+        devTunerRangeLabel_->setMinimumWidth(0);
         gDevLay->addRow(QStringLiteral("调谐范围"), devTunerRangeLabel_);
         devSrRangeLabel_ = new QLabel(QStringLiteral("--"), gDev);
         devSrRangeLabel_->setWordWrap(true);
+        devSrRangeLabel_->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
+        devSrRangeLabel_->setMinimumWidth(0);
         gDevLay->addRow(QStringLiteral("采样率范围"), devSrRangeLabel_);
         devProvenanceLabel_ = new QLabel(QString(), gDev);
         devProvenanceLabel_->setObjectName("dockHint");
         devProvenanceLabel_->setWordWrap(true);
+        devProvenanceLabel_->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
+        devProvenanceLabel_->setMinimumWidth(0);
         gDevLay->addRow(QStringLiteral("来源"), devProvenanceLabel_);
         leftLay->addWidget(gDev);
     }
@@ -6217,8 +6226,17 @@ void MainWindow::refreshDeviceCapabilities() {
         devTunerRangeLabel_->setText(fmtRange(caps.tunableMinHz, caps.tunableMaxHz));
     if (devSrRangeLabel_)
         devSrRangeLabel_->setText(fmtRange(caps.sampleRateMinHz, caps.sampleRateMaxHz));
-    if (devProvenanceLabel_)
-        devProvenanceLabel_->setText(caps.provenance);
+    if (devProvenanceLabel_) {
+        // 列宽有限：默认只显示「来源」主句，括号里的驱动细节放 tooltip。
+        // 直接塞整段会让 QLabel 以整段宽度排版、再被窄列裁掉右半截
+        // （2026-11-22 960×720 快照实测）。
+        QString shortText = caps.provenance;
+        const int paren = shortText.indexOf(QStringLiteral("（"));
+        if (paren > 0)
+            shortText = shortText.left(paren).trimmed();
+        devProvenanceLabel_->setText(ui::softBreakable(shortText));
+        devProvenanceLabel_->setToolTip(caps.provenance);
+    }
 
     // Change detector: only rebuild the combo when the device identity / range
     // actually changed. The 1 Hz telemetry poll otherwise re-enters this every

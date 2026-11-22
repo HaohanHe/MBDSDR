@@ -26,8 +26,12 @@
 ///
 ///     Flutter 3.50.0 / Dart 3.14.0
 ///     flutter analyze                            -> 0 error
-///     flutter test test/sky_projection_test.dart -> 29 passed
+///     flutter test test/sky_projection_test.dart -> 20 passed
 ///     投影对拍 84 点，最大像素偏差 0.0000
+///
+/// 2026-11-22 增补：`isDirectionDrawable` / `clipSegmentToSkyDomain` 与桌面
+/// `is_valid_vec` / `clip_segment_to_domain` 同口径（投影有效域 + 大圆二分），
+/// 该文件用例数随之为 20。
 ///
 /// 工具链在 `D:/mbdsdr/toolchain/flutter`，不在仓库内。
 library;
@@ -271,3 +275,132 @@ bool isOnCanvas(ScreenPoint p, double width, double height,
       p.y >= -margin &&
       p.y <= height + margin;
 }
+
+// ---------------------------------------------------------------------------
+// 投影有效性域与跨域裁剪（spec Task 10.2）
+//
+// 参考 aladin-lite `src/core/src/math/projection/domain/`（LGPLv3）的
+// **ProjDef + SDF 思路**：先判「这个方向在不在投影有效域内」，再把越界
+// 端点推到边界。代码全部重写，未复制其源码。
+//
+// 手机端只有透视：有效域 = 相机前方（`-v_z > 0` 的全平面），域外只有
+// 「相机背后」。桌面同口径见 `mbdsdr_ai/celestial_geometry.py` 的
+// `is_valid_vec` 与 `mbdsdr_ai/sky_interaction.py` 的
+// `clip_segment_to_domain`。
+// ---------------------------------------------------------------------------
+
+/// 该地平方向在透视投影下是否有屏幕坐标（相机背后 -> false）。
+bool isDirectionDrawable(double azDeg, double altDeg, SkyView view) {
+  final az = azDeg * math.pi / 180.0;
+  final alt = altDeg * math.pi / 180.0;
+  final ca = math.cos(alt);
+  final v = _Vec3(ca * math.cos(az), ca * math.sin(az), -math.sin(alt));
+  final rot = _viewRotation(view.centerAzDeg, view.centerAltDeg);
+  return -_dot(rot[2], v) > 1e-12;
+}
+
+_Vec3 _unitFromAzAlt(double azDeg, double altDeg) {
+  final az = azDeg * math.pi / 180.0;
+  final alt = altDeg * math.pi / 180.0;
+  final ca = math.cos(alt);
+  return _Vec3(ca * math.cos(az), ca * math.sin(az), -math.sin(alt));
+}
+
+_Vec3 _normalize(_Vec3 v) {
+  final n = math.sqrt(v.x * v.x + v.y * v.y + v.z * v.z);
+  if (n <= 0.0 || !n.isFinite) return const _Vec3(0.0, 0.0, -1.0);
+  return _Vec3(v.x / n, v.y / n, v.z / n);
+}
+
+/// 单位向量球面线性插值；对跖点走一条确定的垂面路径，不产生 NaN。
+_Vec3 _slerp(_Vec3 a, _Vec3 b, double t) {
+  final e = t.clamp(0.0, 1.0);
+  final dot = _dot(a, b).clamp(-1.0, 1.0);
+  final theta = math.acos(dot);
+  if (theta < 1e-9) return e >= 1.0 ? b : a;
+  if (math.pi - theta < 1e-6) {
+    final axis = a.x.abs() < 0.9
+        ? const _Vec3(1.0, 0.0, 0.0)
+        : const _Vec3(0.0, 1.0, 0.0);
+    final u = _normalize(_Vec3(
+      a.y * axis.z - a.z * axis.y,
+      a.z * axis.x - a.x * axis.z,
+      a.x * axis.y - a.y * axis.x,
+    ));
+    return _normalize(_Vec3(
+      a.x * math.cos(e * math.pi) + u.x * math.sin(e * math.pi),
+      a.y * math.cos(e * math.pi) + u.y * math.sin(e * math.pi),
+      a.z * math.cos(e * math.pi) + u.z * math.sin(e * math.pi),
+    ));
+  }
+  final s = math.sin(theta);
+  final wa = math.sin((1.0 - e) * theta) / s;
+  final wb = math.sin(e * theta) / s;
+  return _normalize(_Vec3(
+    a.x * wa + b.x * wb,
+    a.y * wa + b.y * wb,
+    a.z * wa + b.z * wb,
+  ));
+}
+
+/// 把一条天球大圆段裁到调用方给定的有效域，返回 0 或 2 个屏幕点。
+///
+/// [drawable] 默认只判投影有效域；调用方要叠地平余量时传自己的谓词
+/// （例如 `alt > -altMarginDeg && isDirectionDrawable(...)`）。
+/// 两端都在域内 -> 原样两点；一端在域外 -> 域内端点 + 边界点（保持原段
+/// 方向顺序）；两端都在域外 -> 空。相邻星官段很短，域解析，用大圆二分
+/// 求边界即可，不需要逐点 ray marching。
+List<ScreenPoint> clipSegmentToSkyDomain(
+  double az0Deg,
+  double alt0Deg,
+  double az1Deg,
+  double alt1Deg,
+  SkyView view, {
+  bool Function(double azDeg, double altDeg)? drawable,
+  int iterations = 12,
+}) {
+  final inside =
+      drawable ?? (double az, double alt) => isDirectionDrawable(az, alt, view);
+  final d0 = inside(az0Deg, alt0Deg);
+  final d1 = inside(az1Deg, alt1Deg);
+  if (d0 && d1) {
+    final p0 = projectAzAlt(az0Deg, alt0Deg, view);
+    final p1 = projectAzAlt(az1Deg, alt1Deg, view);
+    if (p0 == null || p1 == null) return const <ScreenPoint>[];
+    return <ScreenPoint>[p0, p1];
+  }
+  if (!d0 && !d1) return const <ScreenPoint>[];
+
+  final flipped = d1;
+  final azIn = flipped ? az1Deg : az0Deg;
+  final altIn = flipped ? alt1Deg : alt0Deg;
+  final azOut = flipped ? az0Deg : az1Deg;
+  final altOut = flipped ? alt1Deg : alt0Deg;
+
+  final vIn = _unitFromAzAlt(azIn, altIn);
+  final vOut = _unitFromAzAlt(azOut, altOut);
+  var lo = 0.0;
+  var hi = 1.0;
+  for (var i = 0; i < iterations; i++) {
+    final mid = 0.5 * (lo + hi);
+    final vm = _slerp(vIn, vOut, mid);
+    final az = math.atan2(vm.y, vm.x) * 180.0 / math.pi;
+    final alt = math.asin((-vm.z).clamp(-1.0, 1.0)) * 180.0 / math.pi;
+    if (inside(az, alt)) {
+      lo = mid;
+    } else {
+      hi = mid;
+    }
+  }
+
+  final vb = _slerp(vIn, vOut, lo);
+  final azB = math.atan2(vb.y, vb.x) * 180.0 / math.pi;
+  final altB = math.asin((-vb.z).clamp(-1.0, 1.0)) * 180.0 / math.pi;
+  final edge = projectAzAlt(azIn, altIn, view);
+  final boundary = projectAzAlt(azB, altB, view);
+  if (edge == null || boundary == null) return const <ScreenPoint>[];
+  return flipped
+      ? <ScreenPoint>[boundary, edge]
+      : <ScreenPoint>[edge, boundary];
+}
+

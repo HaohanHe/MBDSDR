@@ -1,0 +1,67 @@
+{
+  "schema": "mbdsdr.spatial/1",
+  "created_utc": "2026-11-22T00:00:00+00:00",
+  "observation_id": "obs-spatial-unknown",
+  "site": {
+    "lat_deg": null,
+    "lon_deg": null,
+    "alt_m": null,
+    "source": "none"
+  },
+  "time": {
+    "utc": null,
+    "source": null,
+    "precision": null
+  },
+  "sky": {
+    "stars": [
+      {
+        "name": "A",
+        "ra_deg": 10.0,
+        "dec_deg": 20.0,
+        "mag": 1.0,
+        "hyg_id": null
+      }
+    ],
+    "passes": [],
+    "total_stars": 1,
+    "truncated": false,
+    "source": "external",
+    "altaz_source": "unavailable",
+    "altaz_refraction": false,
+    "altaz_pm_applied": 0,
+    "altaz_pm_missing": 0
+  },
+  "spectrum": {
+    "center_freq_hz": 100100000.0,
+    "sample_rate_hz": 2400000.0,
+    "frames": [],
+    "duration_s": null,
+    "total_samples": null,
+    "source": "none"
+  },
+  "audio": [],
+  "timeline": [
+    {
+      "kind": "weird_kind",
+      "samples": null,
+      "detail": {
+        "note": "外部事件"
+      }
+    },
+    {
+      "kind": "tune",
+      "samples": 2400000,
+      "detail": {
+        "from_hz": 100100000.0,
+        "to_hz": 98000000.0
+      }
+    }
+  ],
+  "evidence": "unverified",
+  "blockers": [
+    "没有可用站址（source=none）",
+    "没有观测时刻，无法换算 alt/az",
+    "未生成频谱帧（--no-spectrum）"
+  ]
+}

@@ -62,6 +62,25 @@ def _require_sgp4() -> None:
             "sgp4 未安装：过境时间线需要它（pip install sgp4，"
             "或 pip install 'mbdsdr_ai[satellite]'）")
 
+
+def _resolve_sampling_step(step_sec: Optional[float]) -> float:
+    """过境粗扫步长：缺省/非法值一律回落 ``sat_passes.PASS_COARSE_STEP_S``。
+
+    本模块不再自藏「30 秒」字面量——粗扫步长是 P1-13 的单一事实源。
+    ``0``（除零）/ 负数 / NaN / Inf 会让 ``hours*3600/step`` 抛异常或退化
+    成 1 步，这里统一按缺省处理，不把畸形输入变成无结果的空列表。
+    """
+    if step_sec is None:
+        return float(_sat_passes.PASS_COARSE_STEP_S)
+    try:
+        value = float(step_sec)
+    except (TypeError, ValueError):
+        return float(_sat_passes.PASS_COARSE_STEP_S)
+    if not math.isfinite(value) or value <= 0:
+        return float(_sat_passes.PASS_COARSE_STEP_S)
+    return value
+
+
 # 复用 new_spacetime 里已经写好的授时 / GNSS 解析能力（解耦：不依赖 TLE 模块）
 try:
     from .new_spacetime import (
@@ -86,7 +105,9 @@ except ImportError:  # 脚本 / 直接运行时
 WGS84_A_KM = 6378.137          # 地球长半轴（km）
 WGS84_E2 = 0.00669437999014    # 偏心率平方
 MU_EARTH_KM3_S2 = 398600.4418  # 地球引力常数 GM（km^3/s^2）
-SPEED_OF_LIGHT_KM_S = 299792.458  # 光速（km/s）
+# 光速（km/s）。保留本模块公开常量以兼容既有导入，值来自 sat_passes 的
+# C_LIGHT_MPS，不再自成第二份字面量（多普勒公式见该模块单一实现）。
+SPEED_OF_LIGHT_KM_S = _sat_passes.C_LIGHT_MPS / 1000.0
 
 
 # ============================================================
@@ -134,8 +155,21 @@ class SatellitePass:
     policy: Dict[str, Any] = field(default_factory=dict)
     # 轨迹采样步长（秒）。用户要能区分「星历精度」与「轨迹绘制精度」；
     # 中天时刻/仰角已由 sat_passes 的 2 s 细扫网格校正（见 _refine_peak），
-    # 与 AI 口径一致，不再是「网格点即峰值」。
+    # 与 AI 口径一致，不再是「网格点即峰值」。本字段仍只表示**粗扫**步长，
+    # AOS/LOS 的二分收敛不改变它的语义。
     sampling_step_s: float = 0.0
+    # AOS/LOS 是否由二分收敛到 ``sat_passes.PASS_BISECT_TOL_S``。
+    # 任一交叉点区间不成立 / 端点仰角异常 / 传播失败时保留粗扫网格点并置
+    # False——不静默声称已收敛。
+    aos_refined: bool = False
+    los_refined: bool = False
+    # 实际生效的升落二分容差（秒）；0.0 表示本次过境没有任何交叉点被二分。
+    crossing_tol_s: float = 0.0
+
+    @property
+    def crossing_refined(self) -> bool:
+        """升起与落下是否都已二分收敛（窗末截断 / 网格兜底时为 False）。"""
+        return self.aos_refined and self.los_refined
 
 
 @dataclass
@@ -256,8 +290,49 @@ def _state_at(sat, obs_ecef: Tuple[float, float, float],
     range_rate = ((vs_ecef[0]) * dx + (vs_ecef[1]) * dy
                   + (vs_ecef[2]) * dz) / range_km
     # 约定：接近时多普勒为正（接收频率升高），远离为负。
-    doppler_hz = -freq_hz * range_rate / SPEED_OF_LIGHT_KM_S
+    # 公式唯一实现在 sat_passes.doppler_hz_from_range_rate，本模块不再
+    # 重写一份符号约定（两条曲线必须同号同量）。
+    doppler_hz = _sat_passes.doppler_hz_from_range_rate(freq_hz, range_rate)
     return elevation, azimuth, range_km, doppler_hz
+
+
+def _bisect_elevation_crossing(el_at_s, lo_s: float, hi_s: float,
+                               el_lo: float, el_hi: float,
+                               target: float) -> Optional[float]:
+    """在 ``[lo_s, hi_s]``（相对秒）内二分仰角穿越 ``target`` 的时刻。
+
+    容差复用 ``sat_passes.PASS_BISECT_TOL_S``（全仓单一事实源，与
+    ``grid_manifest()["crossing_precision_s"]`` 同值），本模块不另写魔数。
+    端点必须在门限异侧，且区间宽度必须大于容差；任一采样失败或端点异常时
+    返回 ``None``——调用方保留粗扫网格点并置 ``aos_refined``/``los_refined``
+    为 False，不拿区间中点冒充收敛值。
+    """
+    tol = float(_sat_passes.PASS_BISECT_TOL_S)
+    if not (math.isfinite(lo_s) and math.isfinite(hi_s)
+            and math.isfinite(el_lo) and math.isfinite(el_hi)
+            and math.isfinite(target)):
+        return None
+    if hi_s <= lo_s:
+        return None
+    if (el_lo < target) == (el_hi < target):
+        return None
+    if not math.isfinite(tol) or tol <= 0.0 or tol >= (hi_s - lo_s):
+        # 容差不小于粗扫区间：没有可观测的细化收益，如实退回网格点。
+        return None
+    lo, hi = lo_s, hi_s
+    flo = el_lo
+    for _ in range(64):
+        if hi - lo <= tol:
+            break
+        mid = 0.5 * (lo + hi)
+        fm = el_at_s(mid)
+        if fm is None or not math.isfinite(fm):
+            return None
+        if (fm < target) == (flo < target):
+            lo, flo = mid, fm
+        else:
+            hi = mid
+    return 0.5 * (lo + hi)
 
 
 class TimelineEngine:
@@ -281,7 +356,7 @@ class TimelineEngine:
                        satellites: List[Tuple[str, str, str]],
                        hours_ahead: float = 24.0,
                        min_elevation: float = 5.0,
-                       step_sec: float = 30.0,
+                       step_sec: Optional[float] = None,
                        frequencies: Optional[Dict[str, float]] = None,
                        now_unix: Optional[float] = None
                        ) -> List[SatellitePass]:
@@ -297,8 +372,9 @@ class TimelineEngine:
             预测窗长度（小时）。
         min_elevation : float
             最低过境仰角（度）。
-        step_sec : float
-            时间采样步长（秒）。
+        step_sec : float, optional
+            时间采样步长（秒）。缺省取 ``sat_passes.PASS_COARSE_STEP_S``
+            （全仓唯一事实源）；非正/NaN/Inf 同样回落到该值。
         frequencies : dict, optional
             ``{name: 下行频率 Hz}``，用于多普勒计算。
         now_unix : float, optional
@@ -306,6 +382,7 @@ class TimelineEngine:
             与时间机器/快转同源；显式传入只用于复算或测试钉死时刻。
         """
         _require_sgp4()
+        step_sec = _resolve_sampling_step(step_sec)
         frequencies = frequencies or {}
         obs_ecef = _observer_ecef(observer_lat, observer_lon, observer_alt)
         # 时间基准只有一个来源（docs/time-source.md）：默认取 TimeEngine。
@@ -349,6 +426,9 @@ class TimelineEngine:
             current: Optional[SatellitePass] = None
             in_pass = False
             traj: List[PassPoint] = []
+            # 粗扫网格上的上一个有效点，供 AOS/LOS 二分取异侧端点。
+            prev_t: Optional[datetime] = None
+            prev_state: Optional[Tuple[float, float, float, float]] = None
 
             for i in range(n_steps + 1):
                 t = start + timedelta(seconds=i * step_sec)
@@ -363,19 +443,35 @@ class TimelineEngine:
                     in_pass = False
                     current = None
                     traj = []
+                    prev_t = None
+                    prev_state = None
                     continue
 
                 elevation, azimuth, range_km, doppler_hz = st
 
                 if elevation >= min_elevation:
                     if not in_pass:
-                        # 升起
+                        # 升起：在「上一个粗扫点 < 门限」与「本点 ≥ 门限」
+                        # 之间二分，失败则保留本网格点并如实标记未收敛。
+                        rise_time = t
+                        rise_azimuth = azimuth
+                        aos_refined = False
+                        if (prev_t is not None and prev_state is not None
+                                and prev_state[0] < min_elevation):
+                            refined = self._refine_crossing(
+                                sat, obs_ecef, observer_lat, observer_lon,
+                                freq_hz, prev_t, t, prev_state[0], elevation,
+                                min_elevation)
+                            if refined is not None:
+                                rise_time, rise_st = refined
+                                rise_azimuth = rise_st[1]
+                                aos_refined = True
                         in_pass = True
                         traj = []
                         current = SatellitePass(
                             name=name,
-                            rise_time=t,
-                            rise_azimuth=azimuth,
+                            rise_time=rise_time,
+                            rise_azimuth=rise_azimuth,
                             max_time=t,
                             max_elevation=elevation,
                             max_azimuth=azimuth,
@@ -384,6 +480,7 @@ class TimelineEngine:
                             duration_sec=0.0,
                             frequency_hz=freq_hz,
                             sampling_step_s=step_sec,
+                            aos_refined=aos_refined,
                             **tle_meta,
                         )
                     pt = PassPoint(
@@ -396,16 +493,33 @@ class TimelineEngine:
                     traj.append(pt)
                 else:
                     if in_pass:
-                        # 落下
+                        # 落下：同样在上一个「≥ 门限」点与本点之间二分。
+                        set_time = t
+                        set_azimuth = azimuth
+                        los_refined = False
+                        if (prev_state is not None
+                                and prev_state[0] >= min_elevation):
+                            refined = self._refine_crossing(
+                                sat, obs_ecef, observer_lat, observer_lon,
+                                freq_hz, prev_t, t, prev_state[0], elevation,
+                                min_elevation)
+                            if refined is not None:
+                                set_time, set_st = refined
+                                set_azimuth = set_st[1]
+                                los_refined = True
                         in_pass = False
-                        current.set_time = t
-                        current.set_azimuth = azimuth
+                        current.set_time = set_time
+                        current.set_azimuth = set_azimuth
+                        current.los_refined = los_refined
                         self._refine_peak(sat, obs_ecef, observer_lat,
                                           observer_lon, freq_hz, current)
                         self._finalize_pass(current, traj, freq_hz)
                         all_passes.append(current)
                         current = None
                         traj = []
+
+                prev_t = t
+                prev_state = st
 
             # 窗末仍在过境中（未等到落下）
             if in_pass and current is not None and current.rise_time is not None:
@@ -418,6 +532,37 @@ class TimelineEngine:
 
         all_passes.sort(key=lambda p: p.rise_time or end)
         return all_passes
+
+    @staticmethod
+    def _refine_crossing(sat, obs_ecef, lat_deg: float, lon_deg: float,
+                         freq_hz: float, lo_t: datetime, hi_t: datetime,
+                         el_lo: float, el_hi: float, target: float
+                         ) -> Optional[Tuple[datetime,
+                                             Tuple[float, float, float,
+                                                   float]]]:
+        """对相邻粗扫点做 AOS/LOS 二分，返回 ``(时刻, 该时刻状态)``。
+
+        二分容差与手法复用 ``sat_passes``（``PASS_BISECT_TOL_S`` + 过零
+        二分）；区间不成立 / 传播失败时返回 ``None``，调用方保留粗扫网格点。
+        """
+        span = (hi_t - lo_t).total_seconds()
+        if span <= 0:
+            return None
+
+        def _el(sec: float) -> Optional[float]:
+            st = _state_at(sat, obs_ecef, lat_deg, lon_deg,
+                           lo_t + timedelta(seconds=sec), freq_hz)
+            return st[0] if st else None
+
+        sec = _bisect_elevation_crossing(_el, 0.0, span, el_lo, el_hi,
+                                         target)
+        if sec is None:
+            return None
+        t = lo_t + timedelta(seconds=sec)
+        st = _state_at(sat, obs_ecef, lat_deg, lon_deg, t, freq_hz)
+        if st is None or not math.isfinite(st[0]):
+            return None
+        return t, st
 
     @staticmethod
     def _refine_peak(sat, obs_ecef, lat_deg: float, lon_deg: float,
@@ -464,6 +609,8 @@ class TimelineEngine:
             p.duration_sec = (p.set_time - p.rise_time).total_seconds()
         if traj:
             p.max_doppler_hz = max(abs(pt.doppler_hz) for pt in traj)
+        if p.aos_refined or p.los_refined:
+            p.crossing_tol_s = float(_sat_passes.PASS_BISECT_TOL_S)
 
     # --------------------------------------------------------
     # 授时状态

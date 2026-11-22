@@ -142,7 +142,7 @@ def resolve_model_config() -> dict:
         "base_url": (os.environ.get("MBDSDR_BASE_URL")
                      or cfg.base_url or "https://api.siliconflow.cn/v1"),
         "model": (os.environ.get("MBDSDR_MODEL") or cfg.model
-                  or "Qwen/Qwen3.6-35B-A3B"),
+                  or "Qwen/Qwen3-VL-8B-Thinking"),
     }
 
 

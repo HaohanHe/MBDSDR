@@ -113,7 +113,7 @@ def _assert_gnss_fields(snap: dict) -> None:
         assert key in snap["gnss"], f"gnss 缺字段 {key}: {snap['gnss']}"
     for key in ("source", "precision"):
         assert key in snap["time"], f"time 缺字段 {key}: {snap['time']}"
-    for key in ("source", "lat_deg", "lon_deg"):
+    for key in ("source", "lat_deg", "lon_deg", "alt_m"):
         assert key in snap["site"], f"site 缺字段 {key}: {snap['site']}"
     for key in ("connected", "device", "reason", "last_update_utc"):
         assert key in snap["sdr"], f"sdr 缺字段 {key}: {snap['sdr']}"
@@ -142,6 +142,8 @@ def test_gnss_online_marks_time_and_site_as_gnss(tmp_path):
     assert snap["site"]["source"] == "gnss"
     assert snap["site"]["lat_deg"] == pytest.approx(FIX_LAT)
     assert snap["site"]["lon_deg"] == pytest.approx(FIX_LON)
+    # GNSS 的海拔与经纬度同源，快照里不能只剩经纬度（观测档案 site.alt_m）
+    assert snap["site"]["alt_m"] == pytest.approx(545.4)
 
     assert RMC_UTC is not None
     assert engine.set_unix_calls == [pytest.approx(RMC_UTC.timestamp())]
@@ -181,6 +183,7 @@ def test_gnss_offline_falls_back_without_forging_coordinates(tmp_path):
     assert offline["site"]["source"] == "manual"
     assert offline["site"]["lat_deg"] == pytest.approx(45.0)
     assert offline["site"]["lon_deg"] == pytest.approx(120.0)
+    assert offline["site"]["alt_m"] == pytest.approx(10.0)
 
 
 def test_gnss_offline_without_manual_site_reports_none(tmp_path):
@@ -197,6 +200,7 @@ def test_gnss_offline_without_manual_site_reports_none(tmp_path):
     assert snap["site"]["source"] == "none"
     assert snap["site"]["lat_deg"] is None
     assert snap["site"]["lon_deg"] is None
+    assert snap["site"]["alt_m"] is None
     assert snap["gnss"]["lat_deg"] is None
 
 

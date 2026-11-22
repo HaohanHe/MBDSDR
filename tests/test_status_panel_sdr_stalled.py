@@ -126,3 +126,39 @@ class TestSdrStalled:
         panel.on_connection_changed(True, "已连接: Fake SDR")
         panel.update_from_backend(None)  # 不抛
         assert panel.conn_status.text() == "已连接: Fake SDR"
+
+
+class TestDirectBackendConnCard:
+    """直连后端（不经过 MCP worker）也要点亮「连接」卡片。
+
+    2026-11-22 真机实证：RTL-SDR 已连、频谱在动、设备信息齐全，卡片却仍
+    显示 ``OFF / 未连接``——只有 worker 的 ``connection_changed`` 会写这张
+    卡，直连路径只调 ``set_sdr_connected``。
+    """
+
+    def test_set_sdr_connected_true_marks_on(self, monkeypatch):
+        _patch(monkeypatch, connected=True, stalled=False)
+        panel = StatusPanel()
+        panel.dev_name.setText("RTL-SDR #0")
+        panel.set_sdr_connected(True)
+
+        assert panel.conn_indicator.text() == "ON"
+        assert panel.conn_status.text() == "已连接: RTL-SDR #0"
+
+    def test_set_sdr_connected_false_marks_off(self, monkeypatch):
+        _patch(monkeypatch, connected=False, stalled=False)
+        panel = StatusPanel()
+        panel.set_sdr_connected(True)
+        panel.set_sdr_connected(False)
+
+        assert panel.conn_indicator.text() == "OFF"
+        assert panel.conn_status.text() == "未连接"
+
+    def test_specific_failure_reason_not_overwritten(self, monkeypatch):
+        """worker 给出的具体失败原因不能被直连路径的占位文案盖掉。"""
+        _patch(monkeypatch, connected=False, stalled=False)
+        panel = StatusPanel()
+        panel.on_connection_changed(False, "连接失败：设备被占用")
+        panel.set_sdr_connected(False)
+
+        assert panel.conn_status.text() == "连接失败：设备被占用"

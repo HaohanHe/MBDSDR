@@ -269,6 +269,36 @@ def ring3_spectrum(outdir, fm_ref_hz):
 
 
 # ---------------------------------------------------------------- 环 4
+def pilot_metrics(mpx, fs: float) -> dict:
+    """从 MPX 信号测 19 kHz 导频：只在该频窗口找峰，噪声取窗口外邻域。
+
+    旧实现是在 15–23 kHz 全带 argmax，弱导频时会把 22.7 kHz 噪声峰当成
+    「导频」并误报频率；正确做法是只在 18.7–19.3 kHz 找峰，噪声中位数
+    必须排除导频窗口自身。2026-11-22 真机四台实测：19 kHz 附近
+    7.4–11.0 dB（91.6/95.3/97.6/101.9 MHz），频率偏差 ≤134 Hz。
+    """
+    import numpy as np
+
+    dec = max(1, int(float(fs) // 192000))
+    m = np.asarray(mpx)[::dec]
+    fs2 = float(fs) / dec
+    n = min(131072, len(m))
+    sp = np.abs(np.fft.fft(m[:n] * np.hanning(n)))
+    f = np.arange(n) * fs2 / n
+    context = (f > 15000) & (f < 23000)
+    pilot_band = (f > 18700) & (f < 19300)
+    i = int(np.argmax(sp[pilot_band]))
+    pilot_hz = float(f[pilot_band][i])
+    pilot_mag = float(sp[pilot_band][i])
+    noise = float(np.median(sp[context & ~pilot_band]) + 1e-12)
+    ratio_db = float(20 * np.log10(pilot_mag / noise))
+    return {
+        "pilot_hz": round(pilot_hz, 0),
+        "pilot_above_neigh_db": round(ratio_db, 1),
+        "pilot_ok": abs(pilot_hz - 19000) < 200 and ratio_db > 6.0,
+    }
+
+
 def ring4_demod_audio(fm_ref_hz):
     """解调与音频链路（静音数据面，不开声卡）。"""
     import numpy as np
@@ -297,21 +327,10 @@ def ring4_demod_audio(fm_ref_hz):
         x = x - np.mean(x)
         dphi = np.diff(np.unwrap(np.angle(x)))
         mpx = dphi * fs / (2 * np.pi)
-        dec = int(fs // 192000)
-        mpx192 = mpx[::dec]
-        fs2 = fs / dec
-        N = min(131072, len(mpx192))
-        sp = np.fft.fft(mpx192[:N] * np.hanning(N))
-        f2 = np.arange(N) * fs2 / N
-        band = (f2 > 15000) & (f2 < 23000)
-        pidx = int(np.argmax(np.abs(sp[band])))
-        pilot_f = f2[band][pidx]
-        pilot_mag = float(np.abs(sp[band])[pidx])
-        neigh = float(np.median(np.abs(sp[band])) + 1e-12)
-        pilot_ratio = 20 * np.log10(pilot_mag / neigh)
-        ev["pilot_hz"] = round(float(pilot_f), 0)
-        ev["pilot_above_neigh_db"] = round(pilot_ratio, 1)
-        pilot_ok = abs(pilot_f - 19000) < 300 and pilot_ratio > 10
+        pm = pilot_metrics(mpx, fs)
+        ev["pilot_hz"] = pm["pilot_hz"]
+        ev["pilot_above_neigh_db"] = pm["pilot_above_neigh_db"]
+        pilot_ok = bool(pm["pilot_ok"])
 
         # -- 链路级：controller.read_audio（ReceiveChain），不开声卡 --
         a = ctrl.read_audio(96000)
@@ -398,9 +417,36 @@ def ring6_digital(outdir, aprs_seconds):
     from mbdsdr_ai.core import SDRController
 
     ev = {"adsb": "无法验：FC0012 调谐上限约 948.6 MHz < 1090 MHz（物理不可达）"}
+    ctrl = SDRController()
+
+    # -- 站址：有 GNSS 就注入，过境才不是 station_untrusted --
+    gnss = None
+    try:
+        from mbdsdr_ai.gnss_monitor import RealGNSSMonitor
+        gnss = RealGNSSMonitor()
+        if gnss.start():
+            pos = None
+            for _ in range(40):
+                pos = gnss.get_position()
+                if pos is not None and pos.lat is not None:
+                    break
+                time.sleep(0.25)
+            if pos is not None and pos.lat is not None:
+                ctrl.set_ground_station_from_gnss(
+                    float(pos.lat), float(pos.lon), float(pos.alt or 0.0))
+                ev["station_source"] = "gnss"
+                ev["gnss_sats"] = pos.sats
+            else:
+                ev["station_source"] = "none（GNSS 已开但未定位）"
+        else:
+            ev["station_source"] = "none（GNSS 串口不可用）"
+    except Exception as exc:  # noqa: BLE001 - 验收不因 GNSS 异常中断
+        ev["station_source"] = f"none（{type(exc).__name__}: {exc}）"
+    finally:
+        if gnss is not None:
+            gnss.stop()
 
     # -- 过境可行性（不连设备；线程限时，防网络拖死）--
-    ctrl = SDRController()
     passes = {}
 
     def q(norad):
@@ -475,6 +521,10 @@ def ring7_portable(outdir, exe_path):
     env = {"PATH": os.pathsep.join(
                [r"C:\Windows\System32", r"C:\Windows"]),
            "QT_QPA_PLATFORM": "offscreen",
+           # offscreen 平台不会自动找系统字体；不指 FONTDIR 时中文全是方框
+           # （2026-11-22 实测 portable_snapshot.png 满是 □）。
+           "QT_QPA_FONTDIR": os.environ.get("QT_QPA_FONTDIR",
+                                            r"C:\Windows\Fonts"),
            "MBDSDR_NULL_AUDIO": "1",
            "SystemRoot": os.environ.get("SystemRoot", r"C:\Windows"),
            "TEMP": os.environ.get("TEMP", ""), "TMP": os.environ.get("TMP", "")}

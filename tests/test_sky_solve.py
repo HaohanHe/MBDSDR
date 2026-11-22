@@ -15,6 +15,7 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from mbdsdr_ai import sky_solve  # noqa: E402
 from mbdsdr_ai.sky_solve import (  # noqa: E402
     MIN_SOLVE_STARS,
     solve_frame,
@@ -34,7 +35,8 @@ def test_solver_status_is_honest_without_tetra3():
         pytest.skip("环境已安装 tetra3，本用例只验证缺失分支")
     status = solver_status()
     assert status == {"available": False,
-                      "reason": "未安装 tetra3；ASTAP 需外部可执行文件"}
+                      "reason": "未安装 tetra3；ASTAP 需外部可执行文件",
+                      "deprecated": {}}
 
 
 def test_solve_frame_rejects_too_few_stars():
@@ -83,3 +85,23 @@ def test_solve_frame_valid_input_reports_unavailable_or_unimplemented():
     assert out["ok"] is False
     # 无 tetra3：如实不可用；有 tetra3：本期只交付契约，也不许伪造结果。
     assert ("tetra3" in out["reason"]) or ("契约" in out["reason"])
+
+
+def test_solver_status_deprecated_is_empty_by_default():
+    deprecated = solver_status()["deprecated"]
+    assert isinstance(deprecated, dict)
+    # 当前没有适配器被弃用：不得为了有内容而编造条目。
+    assert "tetra3" not in deprecated
+    assert "astap" not in deprecated
+
+
+def test_deprecated_solver_stays_listed_and_is_reported(monkeypatch):
+    with monkeypatch.context() as m:
+        m.setattr(sky_solve, "_DEPRECATED_SOLVERS",
+                  {"tetra3": "建议改用 astap"})
+        status = solver_status()
+        assert status["deprecated"] == {"tetra3": "建议改用 astap"}
+        # 弃用只是标注：旧适配器仍保留一个版本，不能被从 _SOLVERS 删掉。
+        assert "tetra3" in sky_solve._SOLVERS
+    # monkeypatch 退出后登记还原，未登记的名字不得残留在 deprecated 里。
+    assert "tetra3" not in solver_status()["deprecated"]

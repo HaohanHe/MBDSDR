@@ -477,25 +477,34 @@ def ring6() -> dict:
             notes="本机不可验：未检测到串口 GNSS 接收机（可用 COM 口/驱动检查）。")
     deadline = time.perf_counter() + float(os.environ.get("MBDSDR_GNSS_WAIT_S", "30"))
     pos = mon.get_position()
-    while pos.source != "real" and time.perf_counter() < deadline:
+    # 收到 NMEA（source="real"）不等于已定位：serial_gnss 在「有语句但没 fix」
+    # 时同样返回 source="real"、坐标 None。必须等到经纬度齐全，否则会把
+    # 「正在搜星」判成 PASS（2026-11-21 实测抓到：lat/lon 全 null 却 PASS）。
+    while ((pos.source != "real" or pos.lat is None or pos.lon is None)
+           and time.perf_counter() < deadline):
         time.sleep(0.5)
         pos = mon.get_position()
-    ttff_s = None if pos.source != "real" else round(time.perf_counter() - t0, 2)
+    has_fix = (pos.source == "real" and pos.lat is not None
+               and pos.lon is not None)
+    ttff_s = round(time.perf_counter() - t0, 2) if has_fix else None
     gsv = mon.get_gsv_frames()
     sats_visible = sum(len(getattr(f, "satellites", []) or []) for f in gsv) if gsv else None
     mon.stop()
-    if pos.source != "real":
+    if not has_fix:
         return skip_result(
             "R6", "GNSS 定位", "NEEDS_TIME_WINDOW",
             metrics={"port": mon.port, "wait_s": round(time.perf_counter() - t0, 1),
                      "fix": "none", "sats_visible": sats_visible},
-            checks=[common.check("fix", False, "串口已开但等待窗口内无有效定位", skipped=True)],
-            notes="本机不可验：串口已打开但无 fix（室内/天线遮挡常见），未编造坐标。")
+            checks=[common.check("fix", False, "串口已开但等待窗口内无完整经纬度",
+                                 skipped=True)],
+            notes="本机不可验：串口已打开但没有完整 fix（室内/天线遮挡常见），未编造坐标。")
     checks = [
         common.check("fix", True, "source=real"),
-        common.check("coordinates_valid", -90 <= (pos.lat or 0) <= 90
-                     and -180 <= (pos.lon or 0) <= 180,
+        common.check("coordinates_valid",
+                     -90 <= float(pos.lat) <= 90 and -180 <= float(pos.lon) <= 180,
                      f"lat={pos.lat}, lon={pos.lon}"),
+        common.check("hdop_reported", pos.hdop is not None,
+                     f"hdop={pos.hdop}", skipped=pos.hdop is None),
     ]
     metrics = {
         "port": mon.port,

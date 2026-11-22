@@ -429,9 +429,10 @@ def build_hud(pose: Any,
 
     Returns:
         dict：``level``（生效级别）/ ``requested_level`` / ``hint`` /
-        ``crosshair`` / ``labels`` / ``asterism_segments`` /
-        ``satellite_markers`` / ``manual`` / ``pose_used`` /
-        ``targets_total`` / ``targets_visible`` / ``reason``；
+        ``narrative``（不含工程术语的一整句人话）/ ``crosshair`` /
+        ``labels`` / ``asterism_segments`` / ``satellite_markers`` /
+        ``manual`` / ``pose_used`` / ``targets_total`` /
+        ``targets_visible`` / ``reason``；
         传入 ``runtime_sources`` 时另有 ``sources`` / ``sources_text``。
 
     Raises:
@@ -545,10 +546,18 @@ def build_hud(pose: Any,
 
         segments = _project_segments(asterism_segments, view, projection, size_wh)
 
+    # 口语文本是附加层：翻译失败绝不能拖垮 HUD，失败就留空串。
+    try:
+        from .sky_narration import narrate_pose
+        narrative = narrate_pose(pose, target_list, level=level_eff)
+    except Exception:  # noqa: BLE001 - HUD 不因口语文本失败而失败
+        narrative = ""
+
     hud = {
         "level": level_eff,
         "requested_level": requested_level,
         "hint": HUD_HINTS[level_eff],
+        "narrative": narrative,
         "crosshair": {"x": float(cross_x), "y": float(cross_y),
                       "radius": float(radius)},
         "labels": labels,

@@ -678,6 +678,8 @@ class RuntimeSources:
                     "source": "gnss",
                     "lat_deg": gnss.get("lat_deg"),
                     "lon_deg": gnss.get("lon_deg"),
+                    # 海拔随经纬度同一口径：有效 fix 才给，缺值就照实 None。
+                    "alt_m": gnss.get("alt_m"),
                     "reason": "",
                 }
             # GNSS 站址已失去定位：不拿旧坐标继续冒充「当前站址」。
@@ -685,6 +687,7 @@ class RuntimeSources:
                 "source": "none",
                 "lat_deg": None,
                 "lon_deg": None,
+                "alt_m": None,
                 "reason": "GNSS 无有效定位，站址不可用（未回退到手动站址）",
             }
         if source == "manual":
@@ -692,12 +695,14 @@ class RuntimeSources:
                 "source": "manual",
                 "lat_deg": station.get("lat_deg"),
                 "lon_deg": station.get("lon_deg"),
+                "alt_m": station.get("alt_m"),
                 "reason": "",
             }
         return {
             "source": "none",
             "lat_deg": None,
             "lon_deg": None,
+            "alt_m": None,
             "reason": "未设置站址（无 GNSS 定位且未手动配置）",
         }
 

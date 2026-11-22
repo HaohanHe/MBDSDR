@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 DEFAULT_CONFIG = {
     "api_key": "",
     "base_url": "https://api.siliconflow.cn/v1",
-    "model": "Qwen/Qwen3.6-35B-A3B",
+    "model": "Qwen/Qwen3-VL-8B-Thinking",
     "max_context_tokens": 8192,
     "max_output_tokens": 2048,
     "compaction_threshold": 0.8,       # 上下文使用超过 80% 时触发压缩
@@ -83,7 +83,7 @@ class AgentConfig:
     """Agent 配置数据类。"""
     api_key: str = ""
     base_url: str = "https://api.siliconflow.cn/v1"
-    model: str = "Qwen/Qwen3.6-35B-A3B"
+    model: str = "Qwen/Qwen3-VL-8B-Thinking"
 
     # 上下文管理
     max_context_tokens: int = 8192

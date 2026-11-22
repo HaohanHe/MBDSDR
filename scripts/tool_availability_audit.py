@@ -339,6 +339,33 @@ _VERIFIABLE = {
     "ft8_encode": lambda t, d: "CQ" in t.upper() or bool(d),
 }
 
+# 审计替身：造一份最小完整 SigMF 录制，给观测档案当产物
+def _audit_sigmf_meta(tmpdir) -> str:
+    """审计用的最小完整 SigMF 录制（8 个样本 + meta），给观测档案当产物。"""
+    d = str(tmpdir)
+    with open(os.path.join(d, "audit_cap.sigmf-data"), "wb") as f:
+        f.write(b"\x00" * 64)
+    meta = os.path.join(d, "audit_cap.sigmf-meta")
+    with open(meta, "w", encoding="utf-8") as f:
+        json.dump({
+            "global": {
+                "core:datatype": "cf32_le",
+                "core:sample_rate": 2_400_000.0,
+                "core:frequency": 100_100_000.0,
+                "core:total_num_samples": 8,
+                "core:dataset": "audit_cap.sigmf-data",
+                "mbdsdr:gain_db": 20.0,
+                "mbdsdr:device": "audit-sdr",
+                "mbdsdr:driver": "rtlsdr",
+                "mbdsdr:complete": True,
+            },
+            "captures": [{"core:sample_start": 0,
+                          "core:datetime": "2026-11-19T12:00:00+00:00"}],
+            "annotations": [],
+        }, f, ensure_ascii=False)
+    return meta
+
+
 # 需要专门替身参数（真实样本 / 合法文本），否则只能得到"缺样本"而非真跑
 _SPECIAL_ARGS = {
     "ft8_encode": lambda tmp: {"text": "CQ BI1AAA OM74"},
@@ -366,6 +393,57 @@ _SPECIAL_ARGS = {
         "commanded_az_deg": 180.0, "commanded_el_deg": 45.0,
         "site_lat_deg": 45.0, "site_lon_deg": 0.0,
         "at_utc": "2026-11-19T12:00:00Z",
+    },
+    # AR 只读工具（Task 15.1）：喂合法的合成观测/指向，验证纯计算链路能跑；
+    # sky_identify_at 的 az/alt 是织女星在固定 jd/站址下的地平坐标，
+    # 保证视场内确有星表恒星（替身不代表真机对准）。
+    "sky_pose_fuse": lambda tmp: {
+        "observations": [
+            {"source": "imu", "t_utc": 1.7e9, "az_deg": 100.0,
+             "alt_deg": 45.0, "accuracy_deg": 2.0, "roll_deg": 0.0,
+             "fov_deg": 8.0},
+            {"source": "camera", "t_utc": 1.7e9 + 0.5, "az_deg": 101.0,
+             "alt_deg": 44.5, "accuracy_deg": 3.0},
+        ],
+        "now_utc": 1.7e9 + 1.0,
+    },
+    "sky_identify_at": lambda tmp: {
+        "az_deg": 300.244, "alt_deg": 25.594, "fov_deg": 10.0,
+        "jd": 2461361.0416666665, "lat_deg": 45.0, "lon_deg": 120.0,
+    },
+    "sky_solve_status": lambda tmp: {},
+    "sky_health": lambda tmp: {
+        "observations": [
+            {"source": "imu", "t_utc": 1.7e9, "az_deg": 100.0,
+             "alt_deg": 45.0, "accuracy_deg": 2.0},
+            {"source": "camera", "t_utc": 1.7e9 + 0.5, "az_deg": 101.0,
+             "alt_deg": 44.5, "accuracy_deg": 3.0},
+        ],
+        "now_utc": 1.7e9 + 1.0,
+        "camera_last_frame_utc": 1.7e9,
+        "manual_override": False,
+        "solve_within_tolerance": True,
+    },
+    # 校准档案写工具（Task 15.2）：两个整体偏 1° 的合成校准点足以解出档案；
+    # path 指向本次审计的临时目录，绝不写真实用户目录。
+    "sky_calibration_save": lambda tmp: {
+        "observations": [
+            {"known_az_deg": 100.0, "known_alt_deg": 40.0,
+             "read_az_deg": 99.0, "read_alt_deg": 39.0},
+            {"known_az_deg": 130.0, "known_alt_deg": 50.0,
+             "read_az_deg": 129.0, "read_alt_deg": 49.0},
+        ],
+        "device_id": "audit-device",
+        "fov_deg": 8.0,
+        "path": os.path.join(str(tmp), "audit_calibration.json"),
+    },
+    # 观测档案导出需要「真实存在的完整产物」；替身造一份最小 SigMF 录制，
+    # 只用来验证导出链路能跑通，不代表真机观测（evidence 标 self_test）。
+    "observation_export": lambda tmp: {
+        "observation_id": "audit-obs-1",
+        "path": os.path.join(str(tmp), "audit_obs.json"),
+        "products": [_audit_sigmf_meta(tmp)],
+        "evidence": "self_test",
     },
     # ── P13 复核批：把「替身不满足输入」改成「合法替身」，验证是真能跑 ──
     "coord_ecef_to_eci": lambda tmp: {"pos_ecef": [7000.0, 0.0, 0.0],

@@ -1,7 +1,7 @@
 """sky_dso_lookup：让 AI 能答"那团模糊是什么"。
 
-数据只有公开源（OpenNGC CC BY-SA 4.0），距离不提供就说不知道。
-目录只有 117 条，查不到不等于天上没有。
+数据只有公开源（OpenNGC CC BY-SA 4.0）；距离取自 OpenNGC 自带视差，
+缺失就说不知道，不许编。目录只有 117 条，查不到不等于天上没有。
 """
 import json
 import math
@@ -92,26 +92,53 @@ class TestDSOLookup:
             assert fov >= span, f"{q}: fov={fov} < span={span}"
             assert fov == int(math.ceil(span * 1.2 / 5.0) * 5), q
 
-    def test_never_invents_distance(self, agent):
-        """目录不提供距离——输出里不许有 distance 字段让别人误用。"""
-        d = _call(agent, "sky_dso_lookup", {"name": "M42"})
-        for o in d["objects"]:
-            assert "distance_ly" not in o
-            assert "distance_km" not in o
-        assert "距离未知" in d["note"] or "不提供" in d["note"]
+    def test_reports_catalog_distance_with_source(self, agent):
+        """目录带 OpenNGC 视差时，输出距离并标来源；不许出现第二个距离字段。"""
+        from mbdsdr_ai.sky_tools import PC_TO_LIGHT_YEAR
+
+        d = _call(agent, "sky_dso_lookup", {"name": "M13"})
+        o = d["objects"][0]
+        assert o["distance_pc"] == pytest.approx(7874.0)
+        assert o["light_years"] == pytest.approx(7874.0 * PC_TO_LIGHT_YEAR)
+        assert o["distance_source"] == "openngc_parallax"
+        assert o.get("distance_uncertainty_pc") is None, "源不给 σ，不许编"
+        assert "distance_ly" not in o and "distance_km" not in o
+
+    def test_missing_distance_stays_null(self, agent):
+        """目录没视差的天体：距离全 null，文案说未知/缺失，不填 0。"""
+        d = _call(agent, "sky_dso_lookup", {"name": "M31"})
+        o = d["objects"][0]
+        assert o["distance_pc"] is None
+        assert o["light_years"] is None
+        assert o.get("distance_uncertainty_pc") is None
+        assert "distance_ly" not in o and "distance_km" not in o
+        assert "未知" in d["note"]
+        assert "0 光年" not in d["note"] and "0 ly" not in d["note"]
+        # 星系有目录 PosAng → 输出长轴方向与来源；与桌面星系卡同口径。
+        assert o["position_angle_deg"] == 35.0
+        assert o["position_angle_source"] == "openngc"
+
+    def test_position_angle_only_for_galaxies(self, agent):
+        """M45/M13 是星团，即使目录有 PosAng 也不输出「星系朝向」。"""
+        for q in ("M45", "M13"):
+            d = _call(agent, "sky_dso_lookup", {"name": q})
+            o = d["objects"][0]
+            assert "position_angle_deg" not in o, q
+            assert "position_angle_source" not in o, q
 
     def test_catalog_is_honest_about_coverage(self, agent):
         d = _call(agent, "sky_dso_lookup", {"name": "M42"})
         assert d["catalog"]["count"] == 117
         assert d["catalog"]["license"] == "CC BY-SA 4.0"
-        assert "不等于天上没有" in d["note"]
+        assert "天上没有" in d["note"]
 
     def test_output_budget(self, agent):
         """注册表会砍超长输出，整份 JSON 必须还在上限内。"""
-        r = agent.tool_registry.call("sky_dso_lookup", {"name": "M"})
-        assert r.success
-        assert len(r.content) < 4000
-        json.loads(r.content)
+        for q in ("M", "M8"):
+            r = agent.tool_registry.call("sky_dso_lookup", {"name": q})
+            assert r.success, q
+            assert len(r.content) < 4000, f"{q}: {len(r.content)} 字"
+            json.loads(r.content)
 
 
 class TestDSORegionLookup:

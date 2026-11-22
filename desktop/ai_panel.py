@@ -15,13 +15,16 @@ from datetime import datetime
 from html import escape as _esc
 from typing import Optional, List, Dict, Any, Tuple
 
-from PySide6.QtCore import Qt, Signal, Slot, QTimer, QThread, QObject
+from PySide6.QtCore import Qt, Signal, Slot, QTimer, QThread, QObject, QUrl
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QTextEdit, QLineEdit, QFrame, QGroupBox, QComboBox,
-    QSplitter, QSizePolicy, QMessageBox, QScrollArea
+    QSplitter, QSizePolicy, QMessageBox, QScrollArea, QFileDialog,
+    QDialog, QToolTip
 )
-from PySide6.QtGui import QFont, QTextCursor
+from PySide6.QtGui import (
+    QFont, QTextCursor, QTextDocument, QImage, QImageReader, QPixmap
+)
 
 logger = logging.getLogger(__name__)
 
@@ -66,7 +69,7 @@ _AI_NEXT_STEPS = {
         "发生了什么：请求被服务端拒绝（HTTP 400）或模型名不存在——通常是模型名"
         "写错，或这个账号没有该模型的权限。\n"
         "下一步：在右栏「AI 智能体」→ 右上角「配置」，把「模型」改成服务商"
-        "控制台里显示的完整模型 ID（如 Qwen/Qwen3.6-35B-A3B），Base URL 与模型"
+        "控制台里显示的完整模型 ID（如 Qwen/Qwen3-VL-8B-Thinking），Base URL 与模型"
         "必须属于同一家服务商。保存后重新发送。"
     ),
     "rate_limit": (
@@ -101,6 +104,13 @@ _AI_NEXT_STEPS = {
         "发生了什么：上一条请求还在处理，这次输入没有发出（没有排队）。\n"
         "下一步：等上一条结束再点「发送」，或先点「取消」中止当前请求。"
     ),
+    "image": (
+        "发生了什么：本轮附带的图片没有被接受（文件不存在、类型不支持、"
+        "文件为空或 data URL 格式坏）。\n"
+        "下一步：确认图片仍在原路径，扩展名为 png/jpg/jpeg/webp/gif 且文件"
+        "非空，然后重新点「图片」选择附件再发送。本轮没有把图片悄悄当成"
+        "纯文本发出去。"
+    ),
     "unknown": (
         "发生了什么：AI 调用失败，错误原文见上。\n"
         "下一步：先看原文里的 HTTP 状态码或异常名——凭据问题在右栏「AI 智能体」"
@@ -124,6 +134,9 @@ def _ai_failure_kind(error_code: str = "", error_text: str = "") -> str:
     if m:
         status = int(m.group(1))
 
+    if code in ("image_not_found", "image_type_unsupported",
+                "image_invalid", "image_read_failed"):
+        return "image"
     if code == "api_key_not_set":
         return "credential"
     if code == "llm_offline":
@@ -233,18 +246,28 @@ class AIWorker(QObject):
     error = Signal(str)     # 错误
     delta = Signal(str)     # 流式增量文本
 
-    def __init__(self, agent: "MBDSDRAgent", user_input: str):
+    def __init__(self, agent: "MBDSDRAgent", user_input: str,
+                 images: Optional[List[str]] = None):
         super().__init__()
         self.agent = agent
         self.user_input = user_input
+        self.images = list(images or [])
 
     @Slot()
     def run(self):
         try:
-            result = self.agent.chat(
-                self.user_input,
-                on_delta=lambda d: self.delta.emit(d),
-            )
+            if self.images:
+                result = self.agent.chat(
+                    self.user_input,
+                    on_delta=lambda d: self.delta.emit(d),
+                    images=list(self.images),
+                )
+            else:
+                # 无附件时保持旧调用签名（不给所有 agent 替身强加 images 参数）
+                result = self.agent.chat(
+                    self.user_input,
+                    on_delta=lambda d: self.delta.emit(d),
+                )
             self.finished.emit(result)
         except Exception as e:
             # 只给可读失败原因，不把英文堆栈漏进对话区（clean_exc 战役先例）
@@ -288,12 +311,57 @@ def issue_desktop_confirmation(tool_name: str,
                               note="桌面确认执行")
 
 
+#: 对话区用户气泡缩略图的最大边（px）。QTextEdit 不能嵌入 QWidget，
+#: 缩略图以文档内嵌图片（外层包可点击锚点）呈现，尺寸信息同时写进
+#: QTextImageFormat，便于按「最大边 + 等比」校验。
+THUMBNAIL_MAX_EDGE = 144
+
+
+class _ConversationView(QTextEdit):
+    """只读对话历史视图：内嵌缩略图可点击。
+
+    QTextEdit 没有 ``anchorClicked``（那是 QTextBrowser 的），这里在
+    ``mouseReleaseEvent`` 里用 ``anchorAt`` 取锚点，只对缩略图的
+    ``mbdsdr-image:N`` href 发信号；普通文本消息行为不变。
+    文档图片本身没有 tooltip 语义，悬停时按锚点反查文件名——只显示文件名，
+    绝不把本机路径带到用户可见面。
+    """
+
+    image_clicked = Signal(str)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._thumb_names: Dict[str, str] = {}
+        self.setMouseTracking(True)
+
+    def set_thumbnail_name(self, href: str, name: str) -> None:
+        self._thumb_names[href] = name
+
+    def mouseReleaseEvent(self, event):
+        href = self.anchorAt(event.position().toPoint())
+        if href:
+            self.image_clicked.emit(href)
+            event.accept()
+            return
+        super().mouseReleaseEvent(event)
+
+    def mouseMoveEvent(self, event):
+        href = self.anchorAt(event.position().toPoint())
+        name = self._thumb_names.get(href, "") if href else ""
+        if name:
+            QToolTip.showText(event.globalPosition().toPoint(), name, self)
+        super().mouseMoveEvent(event)
+
+
 class AIPanel(QWidget):
     """AI 对话面板。"""
 
     # 配置文件路径
     CONFIG_DIR = os.path.expanduser("~/.mbdsdr")
     CONFIG_FILE = os.path.join(CONFIG_DIR, "config.json")
+    #: 附件选择过滤；真正的类型/存在性校验在 agent（backend 权威），
+    #: 前端只负责把用户选的路径原样交出去，不自己判成功。
+    IMAGE_FILTER = "图片 (*.png *.jpg *.jpeg *.webp *.gif)"
 
     # 信号：请求调用工具（外部 MCP 客户端处理）
     tool_call_requested = Signal(str, dict)  # (tool_name, params)
@@ -317,6 +385,15 @@ class AIPanel(QWidget):
         self._worker_thread: Optional[QThread] = None
         self._worker: Optional[AIWorker] = None
         self._is_processing = False
+        # 待发送的图片附件（本机路径）。只在面板里显示文件名；路径仅交给 agent，
+        # 不进对话文本、不写日志（agent 的会话日志只记图片数量）。
+        self._attachments: List[str] = []
+        # 已发送消息的缩略图登记：href → (本机路径, 文件名)。路径只用于点击
+        # 预览时重新读原图，绝不写进文档资源名/会话文本/工具提示。
+        self._thumb_sources: Dict[str, Tuple[str, str]] = {}
+        self._thumb_seq = 0
+        # 非模态大图预览对话框；持有引用避免 Python 侧提前回收。
+        self._preview_dialogs: List[QDialog] = []
         # 流式状态默认位：finished 槽可能先于（或压根没有）_call_ai 被触发，
         # 没有默认位会在 _on_ai_finished 里 AttributeError 撞死。
         self._streamed_any = False
@@ -490,7 +567,8 @@ class AIPanel(QWidget):
 
         # 对话历史
         _chat = _chat_colors()
-        self.conversation_view = QTextEdit()
+        self.conversation_view = _ConversationView()
+        self.conversation_view.image_clicked.connect(self._open_image_preview)
         self.conversation_view.setReadOnly(True)
         self.conversation_view.setStyleSheet(f"""
             QTextEdit {{
@@ -535,9 +613,35 @@ class AIPanel(QWidget):
         self._confirm_layout.addStretch(1)
         layout.addWidget(self._confirm_bar)
 
+        # 图片附件条：选中后显示「文件名 + 移除」chip，不预览大图。
+        # 路径不写进对话文本；发送后整条清空。
+        self.attach_bar = QWidget()
+        self.attach_layout = QHBoxLayout(self.attach_bar)
+        self.attach_layout.setContentsMargins(0, 0, 0, 0)
+        self.attach_layout.setSpacing(4)
+        self.attach_layout.addStretch(1)
+        self.attach_bar.setVisible(False)
+        layout.addWidget(self.attach_bar)
+
         # 输入栏
         input_bar = QHBoxLayout()
         input_bar.setSpacing(6)
+
+        self.attach_btn = QPushButton(self.tr("图片"))
+        self.attach_btn.setObjectName("aiAttachBtn")
+        self.attach_btn.setFixedWidth(44)
+        self.attach_btn.setMinimumHeight(28)
+        self.attach_btn.setMaximumHeight(40)
+        self.attach_btn.setToolTip(
+            "附加本地图片（png/jpg/jpeg/webp/gif，可多选）")
+        self.attach_btn.setStyleSheet(
+            "QPushButton { font-size: 8pt; background: transparent;"
+            " color: palette(placeholder-text);"
+            " border: 1px solid palette(mid); border-radius: 6px;"
+            " padding: 0px; }"
+            "QPushButton:hover { background: palette(button); }")
+        self.attach_btn.clicked.connect(self._on_pick_images)
+        input_bar.addWidget(self.attach_btn)
 
         self.input_field = QLineEdit()
         self.input_field.setPlaceholderText("对 AI 说点什么...（如：扫频找台、调谐、录音）")
@@ -693,7 +797,7 @@ class AIPanel(QWidget):
         model_edit = QLineEdit()
         model_edit.setText(
             (self.agent.config.model if self.agent else None)
-            or self._saved_config.get("model", "Qwen/Qwen3.6-35B-A3B")
+            or self._saved_config.get("model", "Qwen/Qwen3-VL-8B-Thinking")
         )
         form.addRow(self.tr("模型:"), model_edit)
 
@@ -857,7 +961,7 @@ class AIPanel(QWidget):
         final_model = (
             model
             or self._saved_config.get("model", "")
-            or os.environ.get("MBDSDR_MODEL", "Qwen/Qwen3.6-35B-A3B")
+            or os.environ.get("MBDSDR_MODEL", "Qwen/Qwen3-VL-8B-Thinking")
         )
 
         from mbdsdr_ai.model_manager import is_local_endpoint
@@ -926,16 +1030,140 @@ class AIPanel(QWidget):
             "没配 API Key 时走本地工具协商（按工具描述匹配，不是语言模型理解）。"
         )
 
-    def _add_user_message(self, text: str):
+    def _add_user_message(self, text: str, image_count: int = 0,
+                          images: Optional[List[str]] = None):
+        """追加一条用户气泡。
+
+        ``images`` 给出时在气泡内画缩略图（可点击放大）；没给时保持旧行为
+        （只有 ``image_count`` 时显示「附图 N 张」）。会话记录只存用户原话，
+        附件只登记缩略图句柄，绝不把本机路径写进会话文本。
+        """
         self._conversation.append({"role": "user", "content": text, "time": datetime.now()})
         c = _chat_colors()
         # 用户原话原文入视图：<&> 等字符必须先转义，否则被 rich text 当标签吞掉
         # （实测 "a < b" 只剩 "a "、"<script>..." 整句消失），显示与原文不符。
+        images = list(images or [])
+        if images:
+            attach_note = "".join(self._thumbnail_html(path) for path in images)
+        else:
+            attach_note = (
+                f'<br><span style="color: {c["text_secondary"]}; font-size: 8pt;">'
+                f'（附图 {image_count} 张）</span>' if image_count else "")
         self._append_to_view(
             f'<div style="margin: 6px 0; padding: 8px; background: {c["user_bg"]};'
             f' border-radius: 6px; border-left: 3px solid {c["user_edge"]};'
             f'"><span style="color: {c["user_edge"]}; font-size: 8pt;">你</span><br>'
-            f'<span style="color: {c["text"]};">{_esc(text)}</span></div>')
+            f'<span style="color: {c["text"]};">{_esc(text)}</span>'
+            f'{attach_note}</div>')
+
+    def _thumbnail_html(self, path: str) -> str:
+        """把一张本地图片做成对话框内嵌缩略图（失败则「无法预览」占位）。
+
+        只显示文件名：文档资源名 / 锚点 href / 悬停提示都不含目录。
+        读图失败（文件被移走、伪造扩展名、空文件）不抛异常，也不留空白。
+        """
+        name = os.path.basename(str(path)) or "图片"
+        c = _chat_colors()
+        image = self._load_thumbnail(path)
+        if image is None:
+            return (f'<br><span style="color: {c["text_secondary"]};'
+                    f' font-size: 8pt;">（无法预览：{_esc(name)}）</span>')
+        self._thumb_seq += 1
+        token = str(self._thumb_seq)
+        href = f"mbdsdr-image:{token}"
+        src = f"mbdsdr-thumb-{token}"
+        # 文档资源用 token，不放路径——toHtml() 里也不会出现本机目录。
+        self.conversation_view.document().addResource(
+            QTextDocument.ImageResource, QUrl(src), image)
+        self._thumb_sources[href] = (str(path), name)
+        self.conversation_view.set_thumbnail_name(href, name)
+        return (f'<br><a href="{href}" style="text-decoration: none;">'
+                f'<img src="{src}" width="{image.width()}"'
+                f' height="{image.height()}" alt="{_esc(name)}"></a>')
+
+    @staticmethod
+    def _load_thumbnail(path: str) -> Optional[QImage]:
+        """按最大边等比缩放读取图片；不可读/不是图片时返回 None。"""
+        try:
+            reader = QImageReader(str(path))
+            reader.setAutoTransform(True)
+            size = reader.size()
+            if size.isValid() and size.width() > 0 and size.height() > 0:
+                w, h = size.width(), size.height()
+                if max(w, h) > THUMBNAIL_MAX_EDGE:
+                    scale = THUMBNAIL_MAX_EDGE / float(max(w, h))
+                    w = max(1, int(round(w * scale)))
+                    h = max(1, int(round(h * scale)))
+                reader.setScaledSize(size.scaled(w, h, Qt.IgnoreAspectRatio))
+            image = reader.read()
+            if not image.isNull():
+                # 某些格式 reader.size() 在 read 之前不可用：补一次等比上限，
+                # 保证任何路径下缩略图的最大边都不超过常量。
+                if max(image.width(), image.height()) > THUMBNAIL_MAX_EDGE:
+                    image = image.scaled(
+                        THUMBNAIL_MAX_EDGE, THUMBNAIL_MAX_EDGE,
+                        Qt.KeepAspectRatio, Qt.SmoothTransformation)
+                return image
+        except Exception as exc:  # noqa: BLE001 - 坏文件只降级为占位
+            logger.debug("缩略图读取失败 %s: %s", os.path.basename(str(path)),
+                         _clean_exc(exc))
+        return None
+
+    @Slot(str)
+    def _open_image_preview(self, href: str):
+        """缩略图点击 → 非模态大图预览（纯 Qt，不依赖系统图片关联）。"""
+        item = self._thumb_sources.get(href)
+        if not item:
+            return
+        path, name = item
+        dialog = QDialog(self)
+        dialog.setWindowTitle(name)
+        dialog.setAttribute(Qt.WA_DeleteOnClose)
+        lay = QVBoxLayout(dialog)
+        lay.setContentsMargins(8, 8, 8, 8)
+        lay.setSpacing(6)
+        image = self._load_preview(path)
+        if image is None:
+            label = QLabel(f"无法预览：{name}\n（文件可能已被移动，或不是图片）")
+            label.setWordWrap(True)
+        else:
+            label = QLabel()
+            label.setPixmap(QPixmap.fromImage(image))
+        lay.addWidget(label)
+        close_btn = QPushButton("关闭")
+        close_btn.clicked.connect(dialog.close)
+        lay.addWidget(close_btn, 0, Qt.AlignRight)
+        dialog.finished.connect(
+            lambda _r=0, d=dialog: self._forget_preview(d))
+        self._preview_dialogs.append(dialog)
+        dialog.open()
+
+    @staticmethod
+    def _load_preview(path: str) -> Optional[QImage]:
+        """读原图用于预览；超大图按 1200px 等比收一下，失败返回 None。"""
+        try:
+            reader = QImageReader(str(path))
+            reader.setAutoTransform(True)
+            size = reader.size()
+            if size.isValid() and max(size.width(), size.height()) > 1200:
+                reader.setScaledSize(
+                    size.scaled(1200, 1200, Qt.KeepAspectRatio))
+            image = reader.read()
+            if not image.isNull():
+                if max(image.width(), image.height()) > 1200:
+                    image = image.scaled(1200, 1200, Qt.KeepAspectRatio,
+                                         Qt.SmoothTransformation)
+                return image
+        except Exception as exc:  # noqa: BLE001 - 预览失败只显示占位
+            logger.debug("预览读取失败 %s: %s", os.path.basename(str(path)),
+                         _clean_exc(exc))
+        return None
+
+    def _forget_preview(self, dialog: QDialog):
+        try:
+            self._preview_dialogs.remove(dialog)
+        except ValueError:
+            pass
 
     def _add_ai_message(self, text: str):
         self._conversation.append({"role": "assistant", "content": text, "time": datetime.now()})
@@ -1083,10 +1311,80 @@ class AIPanel(QWidget):
         if cmd:
             self._send_quick_command(cmd)
 
+    # ── 图片附件（chip 只显示文件名；路径只交 agent）────────────────
+    def _on_pick_images(self):
+        """选择本地图片附件（可多选）。
+
+        这里不做扩展名预判，也不检查文件是否能读——不存在/类型不支持/空图
+        都由 agent 的 ``image_to_data_url`` 返回错误信封，界面按后端结果展示。
+        """
+        paths, _ = QFileDialog.getOpenFileNames(
+            self, self.tr("选择图片附件"), "", self.IMAGE_FILTER)
+        if not paths:
+            return
+        for path in paths:
+            path = str(path)
+            if path and path not in self._attachments:
+                self._attachments.append(path)
+        self._render_attachment_chips()
+
+    def _remove_attachment(self, path: str):
+        try:
+            self._attachments.remove(path)
+        except ValueError:
+            pass
+        self._render_attachment_chips()
+
+    def _clear_attachments(self):
+        self._attachments.clear()
+        self._render_attachment_chips()
+
+    def _render_attachment_chips(self):
+        """重建附件 chip 行：文件名 + 「×」移除按钮，不预览大图。"""
+        lay = getattr(self, "attach_layout", None)
+        if lay is None:
+            return
+        while lay.count() > 1:  # 保留末位 stretch
+            item = lay.takeAt(0)
+            w = item.widget()
+            if w is not None:
+                w.setParent(None)
+                w.deleteLater()
+        _t = _tok().COLORS
+        for path in self._attachments:
+            chip = QFrame()
+            chip.setObjectName("aiAttachmentChip")
+            chip.setStyleSheet(
+                f"QFrame#aiAttachmentChip {{ background: {_t['card_1']};"
+                f" border: 1px solid {_t['gray_400']}; border-radius: 9px; }}")
+            row = QHBoxLayout(chip)
+            row.setContentsMargins(8, 1, 2, 1)
+            row.setSpacing(2)
+            name = QLabel(os.path.basename(path))
+            name.setMaximumWidth(180)
+            name.setStyleSheet(
+                f"font-size: 8pt; color: {_t['gray_100']};"
+                " background: transparent; border: none;")
+            row.addWidget(name)
+            remove = QPushButton("×")
+            remove.setFixedSize(16, 16)
+            remove.setToolTip("移除这个附件（不会删除本地文件）")
+            remove.setStyleSheet(
+                "QPushButton { font-size: 9pt; border: none;"
+                " background: transparent; color: palette(placeholder-text);"
+                " padding: 0px; }"
+                "QPushButton:hover { color: palette(window-text); }")
+            remove.clicked.connect(
+                lambda _checked=False, p=path: self._remove_attachment(p))
+            row.addWidget(remove)
+            lay.insertWidget(lay.count() - 1, chip)
+        self.attach_bar.setVisible(bool(self._attachments))
+
     @Slot()
     def _on_submit(self):
         text = self.input_field.text().strip()
-        if not text or self._is_processing:
+        images = list(self._attachments)
+        if (not text and not images) or self._is_processing:
             return
 
         # 斜杠命令
@@ -1101,20 +1399,32 @@ class AIPanel(QWidget):
             return
 
         self.input_field.clear()
-        self._add_user_message(text)
+        # 发送即消费：无论下面走模型、本地协商还是未配置，附件都不滞留输入区。
+        self._clear_attachments()
+        self._add_user_message(text, image_count=len(images), images=images)
         self.command_submitted.emit(text)
 
         # 使用真正的 AI Agent
         if self.agent and AI_CORE_AVAILABLE:
-            self._call_ai(text)
+            if images:
+                self._call_ai(text, images=images)
+            else:
+                # 无附件时保持旧调用形状（外部/测试对 _call_ai 的猴子补丁不受影响）
+                self._call_ai(text)
         elif not AI_CORE_AVAILABLE:
             # AI 内核完全不可用
+            if images:
+                self._add_system_message(
+                    f"本轮 {len(images)} 张图片未发送（AI 内核不可用）")
             self._add_ai_message(
                 "AI 内核模块未安装（mbdsdr_ai 不可用）。\n"
                 "请先安装依赖：pip install -r requirements.txt。"
             )
         else:
             # AI 内核可用但未配置 API Key —— 不编造回复，不假装执行工具
+            if images:
+                self._add_system_message(
+                    f"本轮 {len(images)} 张图片未发送：图片需要已配置的模型通道。")
             self._add_ai_message(
                 "AI 未配置 API Key。\n\n"
                 "请点击右上角「配置」按钮填入 API Key 后使用完整 AI 功能。\n"
@@ -1122,7 +1432,7 @@ class AIPanel(QWidget):
                 "（这是匹配，不是模型理解）；写/发射类工具仍需人工确认。"
             )
 
-    def _call_ai(self, text: str) -> bool:
+    def _call_ai(self, text: str, images: Optional[List[str]] = None) -> bool:
         """调用真正的 AI Agent（后台线程）。忙时拒绝并返回 False。
 
         没配 API Key 时不返回「错误: API key 未设置」就撂挑子：转本地能力
@@ -1137,6 +1447,11 @@ class AIPanel(QWidget):
             return False
         if self._bridge_obj() is not None and not bool(
                 getattr(getattr(self.agent, "config", None), "api_key", "")):
+            if images:
+                # 本地能力协商只吃文字：不把图片悄悄丢掉，也不假装看过。
+                self._add_system_message(
+                    f"本轮 {len(images)} 张图片未发送：图片需要已配置的模型"
+                    "通道；本地能力协商只处理文字。")
             return self._local_dispatch(text)
         self._is_processing = True
         self.send_btn.setEnabled(False)
@@ -1145,7 +1460,7 @@ class AIPanel(QWidget):
 
         # 创建后台线程
         self._worker_thread = QThread()
-        self._worker = AIWorker(self.agent, text)
+        self._worker = AIWorker(self.agent, text, images=images)
         self._worker.moveToThread(self._worker_thread)
 
         self._worker_thread.started.connect(self._worker.run)
@@ -1565,6 +1880,8 @@ class AIPanel(QWidget):
     def clear_conversation(self):
         self._conversation.clear()
         self.conversation_view.clear()
+        self._thumb_sources.clear()
+        self.conversation_view._thumb_names.clear()
         self._tool_log.clear()
         while self.step_list_layout.count() > 1:  # 末位 stretch 保留
             item = self.step_list_layout.takeAt(0)

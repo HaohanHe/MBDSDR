@@ -31,6 +31,7 @@ sys.path.insert(0, _ROOT)
 sys.path.insert(0, os.path.join(_ROOT, "desktop"))
 
 import math  # noqa: E402
+import re  # noqa: E402
 from datetime import datetime, timezone  # noqa: E402
 
 import pytest  # noqa: E402
@@ -705,6 +706,95 @@ def test_estimated_axis_ratio_card_says_estimated(monkeypatch):
     assert "轴比 0.55（估计）" in desc
 
 
+# --------------------------------------------------------------------------
+# 12. 长轴位置角：仅星系且 OpenNGC 有 PosAng 时写卡片
+# --------------------------------------------------------------------------
+def test_real_galaxy_card_shows_catalog_position_angle(monkeypatch):
+    e = _entry("M31")
+    assert e.position_angle_deg == pytest.approx(35.0)
+    v = _new_view()
+    try:
+        monkeypatch.setattr(RFSkyView, "_dso_entry",
+                            staticmethod(lambda name: e))
+        v._build_body_info({"kind": "dso", "key": "M31"})
+        desc = str(v._body_info["desc"])
+    finally:
+        v.close()
+    assert "长轴方向 35°（目录）" in desc
+
+
+def test_galaxy_without_position_angle_has_no_placeholder(monkeypatch):
+    from types import SimpleNamespace
+    base = _entry("M31")
+    fake = SimpleNamespace(
+        name="M31", display_name="", zh_name="", name_en="",
+        magnitude=3.4, size_arcmin=180.0, size_minor_arcmin=100.0,
+        axis_ratio=100.0 / 180.0, axis_ratio_source="catalog",
+        position_angle_deg=None, position_angle_source="unknown",
+        dso_type="galaxy", constellation="And",
+        ra_deg=base.ra_deg, dec_deg=base.dec_deg)
+    v = _new_view()
+    try:
+        monkeypatch.setattr(RFSkyView, "_dso_entry",
+                            staticmethod(lambda name: fake))
+        v._build_body_info({"kind": "dso", "key": "M31"})
+        desc = str(v._body_info["desc"])
+    finally:
+        v.close()
+    assert "轴比" in desc
+    assert "长轴方向" not in desc
+
+
+def test_cluster_card_does_not_show_position_angle(monkeypatch):
+    """M45 在 OpenNGC 有 PosAng=90，但星团卡片不显示长轴方向。"""
+    e = _entry("M45")
+    assert e.position_angle_deg == pytest.approx(90.0)
+    assert e.dso_type == "cluster"
+    v = _new_view()
+    try:
+        monkeypatch.setattr(RFSkyView, "_dso_entry",
+                            staticmethod(lambda name: e))
+        v._build_body_info({"kind": "dso", "key": "M45"})
+        desc = str(v._body_info["desc"])
+    finally:
+        v.close()
+    assert "长轴方向" not in desc
+
+
+def test_cluster_card_shows_parallax_distance(monkeypatch):
+    """有目录视差的星团卡片写「距离 约 X 光年（目录视差）」，不给 σ。"""
+    e = _entry("M4")
+    assert e.distance_pc is not None
+    assert e.distance_source == "openngc_parallax"
+    expected = rf_sky_view.format_dso_distance_ly(e.distance_pc * 3.26156)
+    v = _new_view()
+    try:
+        monkeypatch.setattr(RFSkyView, "_dso_entry",
+                            staticmethod(lambda name: e))
+        v._build_body_info({"kind": "dso", "key": "M4"})
+        desc = str(v._body_info["desc"])
+    finally:
+        v.close()
+    assert f"距离 约 {expected} 光年（目录视差）" in desc
+    assert re.search(r"距离 约 \d+ 光年（目录视差）", desc)
+    assert "±" not in desc and "不确定" not in desc
+
+
+def test_dso_card_without_distance_has_no_distance_text(monkeypatch):
+    """M31 无 Pax：卡片不写距离占位，保持简短。"""
+    e = _entry("M31")
+    assert e.distance_pc is None
+    v = _new_view()
+    try:
+        monkeypatch.setattr(RFSkyView, "_dso_entry",
+                            staticmethod(lambda name: e))
+        v._build_body_info({"kind": "dso", "key": "M31"})
+        desc = str(v._body_info["desc"])
+    finally:
+        v.close()
+    assert "距离" not in desc
+
+
 def _galaxy_img(v, ratio=None, source="unknown", r: float = 10.0) -> QImage:
     img = QImage(80, 80, QImage.Format_ARGB32)
     img.fill(QColor(0, 0, 0))
@@ -754,3 +844,266 @@ def test_axis_ratio_does_not_affect_pick_or_clamp():
     import inspect
     for fn in (RFSkyView._find_body_at, RFSkyView._dso_symbol_geometry):
         assert "axis_ratio" not in inspect.getsource(fn), fn.__name__
+
+
+@pytest.fixture
+def neutral_dso_view(isolated_profile):
+    """Isolated synthetic station/sun; positions and magnitudes use real catalogs."""
+    engine = get_time_engine()
+    engine.set_unix(datetime(2026, 9, 27, tzinfo=timezone.utc).timestamp())
+    engine.pause()
+    v = RFSkyView()
+    v.resize(1000, 800)
+    v.set_observer(0.0, 0.0, 0.0)
+    v.set_site_note("隔离测试示例站点（非真实位置）")
+    v.set_celestial_bodies({"az": 180.0, "alt": -30.0}, None, 0.0)
+    e = _entry("M31")
+    az, alt = _altaz(e, v._ground_station(), v._current_jd())
+    assert alt > 20.0
+    v.view_state.look_at(az, alt)
+    v.view_state.fov_deg = 30.0
+    yield v, e, az, alt
+    v.close()
+    v.deleteLater()
+    from PySide6.QtCore import QEvent
+    app.sendPostedEvents(None, QEvent.DeferredDelete)
+
+
+def test_disabled_dso_layer_not_pickable_and_does_not_read_catalog(neutral_dso_view,
+                                                                 monkeypatch):
+    v, entry, az, alt = neutral_dso_view
+    pos = v._sky_to_screen_finite(az, v._display_alt_deg(alt))
+    assert _ink(_render_dso(v, 1000)) > 0
+    assert v._find_body_at(pos.x(), pos.y())["key"] == entry.name
+    v.set_layer("dso", False)
+    assert _ink(_render_dso(v, 1000)) == 0
+    hidden = v._find_body_at(pos.x(), pos.y())
+    assert hidden is None or hidden["kind"] != "dso"
+
+    class UnreadableCatalog:
+        def __iter__(self):
+            raise AssertionError("disabled unselected DSO layer read its catalog")
+
+    with monkeypatch.context() as guard:
+        guard.setattr(_dso, "BUILTIN_CATALOG", UnreadableCatalog())
+        v._find_body_at(pos.x(), pos.y())
+    v.set_layer("dso", True)
+    assert _ink(_render_dso(v, 1000)) > 0
+    assert v._find_body_at(pos.x(), pos.y())["key"] == entry.name
+
+
+def _render_selected_body(v):
+    image = QImage(v.width(), v.height(), QImage.Format_ARGB32)
+    image.fill(QColor(0, 0, 0))
+    painter = QPainter(image)
+    try:
+        v._draw_body_info(painter)
+    finally:
+        painter.end()
+    return image
+
+
+@pytest.mark.parametrize("daylight", [False, True])
+def test_hidden_layer_selected_dso_only_its_drawn_marker_is_pickable(neutral_dso_view,
+                                                                   daylight):
+    v, entry, az, alt = neutral_dso_view
+    v.view_state.fov_deg = 5.0
+    pos = v._sky_to_screen_finite(az, v._display_alt_deg(alt))
+    v.on_body_picked(v._find_body_at(pos.x(), pos.y()))
+    v.set_layer("dso", False)
+    if daylight:
+        v.set_celestial_bodies({"az": 180.0, "alt": 30.0}, None, 0.0)
+    image = _render_selected_body(v)
+    x, y = int(pos.x()), int(pos.y())
+    # The marker really is drawn here, independent of the now-hidden DSO glyph.
+    assert not v._info_card_rect.contains(pos)
+    assert _ink_px(image, x - 20, x + 21, y - 20, y + 21) > 0
+    assert v._find_body_at(pos.x(), pos.y())["key"] == entry.name
+    r_sym, _ = v._dso_symbol_geometry(az, v._display_alt_deg(alt), entry.size_arcmin)
+    outside_x = int(x + r_sym * 0.65)
+    assert outside_x - x > 40
+    assert _ink_px(image, outside_x - 4, outside_x + 5, y - 4, y + 5) == 0
+    outside = v._find_body_at(outside_x, y)
+    assert outside is None or outside["kind"] != "dso"
+
+    # No info -> _draw_body_info returns before drawing any selection marker.
+    v._body_info = None
+    assert _ink(_render_selected_body(v)) == 0
+    hidden = v._find_body_at(pos.x(), pos.y())
+    assert hidden is None or hidden["kind"] != "dso"
+
+
+def test_dso_layer_toggle_does_not_bypass_daylight_or_horizon(neutral_dso_view):
+    v, entry, az, alt = neutral_dso_view
+    v.set_celestial_bodies({"az": 180.0, "alt": 30.0}, None, 0.0)
+    pos = v._sky_to_screen_finite(az, v._display_alt_deg(alt))
+    for enabled in (False, True):
+        v.set_layer("dso", enabled)
+        body = v._find_body_at(pos.x(), pos.y())
+        assert body is None or body["kind"] != "dso"
+    assert _ink(_render_dso(v, 1000)) == 0
+
+    engine = get_time_engine()
+    engine.set_unix(engine.now_unix() + 12 * 3600)
+    v.set_celestial_bodies({"az": 180.0, "alt": -30.0}, None, 0.0)
+    az, alt = _altaz(entry, v._ground_station(), v._current_jd())
+    assert alt < -20.0
+    v.view_state.look_at(az, 0.0)
+    v.view_state.fov_deg = 120.0
+    pos = v._sky_to_screen_finite(az, v._display_alt_deg(alt))
+    assert pos is not None and v._on_screen(pos)
+    for enabled in (False, True):
+        v.set_layer("dso", enabled)
+        body = v._find_body_at(pos.x(), pos.y())
+        assert body is None or body["kind"] != "dso"
+    image = _render_dso(v, 1000)
+    x, y = int(pos.x()), int(pos.y())
+    assert _ink_px(image, x - 10, x + 11, y - 10, y + 11) == 0
+
+
+def test_dso_layer_toggle_preserves_real_star_and_planet_picking(neutral_dso_view):
+    from mbdsdr_ai.skyengine.star_catalog import get_catalog
+
+    v, _entry_m31, _az, _alt = neutral_dso_view
+
+    gs, jd = v._ground_station(), v._current_jd()
+    star = get_catalog().find_by_name("Acamar")
+    targets = [("star", star.name, star)]
+    for key, planet in v._planet_positions(jd).items():
+        if key == "moon" or planet.magnitude is None or planet.magnitude > 4:
+            continue
+        _az, alt = _altaz(planet, gs, jd)
+        if alt > 20:
+            targets.append(("planet", key, planet))
+            break
+    assert len(targets) == 2, "real ephemeris must supply a visible bright planet"
+    for kind, key, target in targets:
+        az, alt = _altaz(target, gs, jd)
+        assert alt > 20
+        v.view_state.look_at(az, alt)
+        v._star_sel = None
+        pos = v._sky_to_screen_finite(az, v._display_alt_deg(alt))
+        for enabled in (True, False, True):
+            v.set_layer("dso", enabled)
+            body = v._find_body_at(pos.x(), pos.y())
+            assert body and body["kind"] == kind and body["key"] == key
+
+
+# --------------------------------------------------------------------------
+# 13. 星系长轴按目录 PA 旋转（屏幕 y 向下；QPainter.rotate 顺时针为正）
+# --------------------------------------------------------------------------
+def _project_radec(v, gs, jd, ra_deg, dec_deg):
+    """单点投影链（与生产批量链是不同实现路径，用于独立对拍）。"""
+    az, alt = azalt_from_vec(j2000_to_altaz(
+        vec_from_radec(ra_deg, dec_deg), gs, jd))
+    return v._sky_to_screen(az, v._display_alt_deg(alt))
+
+
+def _capture_glyph_rotations(monkeypatch):
+    """拦截符号绘制，记录 (屏幕 x, 屏幕 y, rotation_deg)。"""
+    records = []
+
+    def spy(self, painter, pos, r, dso_type, alpha, axis_ratio=None,
+            axis_ratio_source=rf_sky_view.AXIS_RATIO_SOURCE_UNKNOWN,
+            rotation_deg=None):
+        records.append((float(pos.x()), float(pos.y()), rotation_deg))
+
+    monkeypatch.setattr(RFSkyView, "_draw_dso_glyph", spy)
+    return records
+
+
+def _rotation_of(records, v, gs, jd, entry, tol: float = 1.0):
+    """按独立投影位置找该条目的绘制记录（名称→最近记录，避免改符号签名）。"""
+    p = _project_radec(v, gs, jd, entry.ra_deg, entry.dec_deg)
+    best = None
+    for x, y, rot in records:
+        d = math.hypot(x - p.x(), y - p.y())
+        if best is None or d < best[0]:
+            best = (d, rot)
+    assert best is not None and best[0] <= tol, (entry.name, best)
+    return best[1]
+
+
+def _ang_diff_deg(a: float, b: float) -> float:
+    return abs((a - b + 180.0) % 360.0 - 180.0)
+
+
+def test_galaxy_rotation_matches_independent_projection(monkeypatch):
+    """M31 有 PA=35°，画符号时的旋转角必须复现投影出来的长轴朝向。"""
+    from mbdsdr_ai.dso_orientation import basis_offsets, major_axis_screen_deg
+
+    v = _new_view()
+    gs = GroundStation(LON, LAT, 0.0)
+    jd = v._current_jd()
+    e = _entry("M31")
+    az, alt = _altaz(e, gs, jd)
+    assert alt > 20.0, alt
+    v.view_state.look_at(az, alt)
+    v.view_state.fov_deg = 30.0
+    records = _capture_glyph_rotations(monkeypatch)
+    try:
+        _render_dso(v)
+        got = _rotation_of(records, v, gs, jd, e)
+        # 独立计算：对象/北点/东点全走单点链，再套同一 PA 公式。
+        p = _project_radec(v, gs, jd, e.ra_deg, e.dec_deg)
+        n_ra, n_dec, ea_ra, ea_dec = basis_offsets(e.ra_deg, e.dec_deg)
+        pn = _project_radec(v, gs, jd, n_ra, n_dec)
+        pe = _project_radec(v, gs, jd, ea_ra, ea_dec)
+        expected = major_axis_screen_deg(
+            e.position_angle_deg,
+            pn.x() - p.x(), pn.y() - p.y(),
+            pe.x() - p.x(), pe.y() - p.y())
+    finally:
+        v.close()
+    assert expected is not None
+    assert got is not None, "M31 有目录 PA，符号却被画成水平椭圆"
+    assert _ang_diff_deg(got, expected) < 0.5, (got, expected)
+
+
+def test_galaxy_without_position_angle_not_rotated(monkeypatch):
+    """目录没有 PA 的星系必须画水平椭圆（rotation_deg=None），不猜朝向。
+
+    实测当前 41 条星系全部带 PA（43 条含别的类型），没有「真实无 PA 星系」
+    可取样；这里用同坐标克隆把 M31 的 PA 抹成 None，验证生产门确实按字段
+    取值而不是无条件旋转。
+    """
+    import dataclasses
+
+    v = _new_view()
+    gs = GroundStation(LON, LAT, 0.0)
+    jd = v._current_jd()
+    base = _entry("M31")
+    fake = dataclasses.replace(base, position_angle_deg=None,
+                               position_angle_source="unknown")
+    catalog = [fake if x.name == "M31" else x for x in _dso.BUILTIN_CATALOG]
+    monkeypatch.setattr(_dso, "BUILTIN_CATALOG", catalog)
+    az, alt = _altaz(fake, gs, jd)
+    v.view_state.look_at(az, alt)
+    v.view_state.fov_deg = 30.0
+    records = _capture_glyph_rotations(monkeypatch)
+    try:
+        _render_dso(v)
+        got = _rotation_of(records, v, gs, jd, fake)
+    finally:
+        v.close()
+    assert got is None
+
+
+def test_cluster_glyph_never_rotated(monkeypatch):
+    """M45 此刻在地平线下 1.8°，取同一时刻可见的 M13：星团不套 PA。"""
+    v = _new_view()
+    gs = GroundStation(LON, LAT, 0.0)
+    jd = v._current_jd()
+    e = _entry("M13")
+    az, alt = _altaz(e, gs, jd)
+    assert alt > 20.0, alt
+    v.view_state.look_at(az, alt)
+    v.view_state.fov_deg = 30.0
+    records = _capture_glyph_rotations(monkeypatch)
+    try:
+        _render_dso(v)
+        got = _rotation_of(records, v, gs, jd, e)
+    finally:
+        v.close()
+    assert e.dso_type == "cluster"
+    assert got is None

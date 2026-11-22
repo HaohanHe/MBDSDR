@@ -36,6 +36,7 @@ from __future__ import annotations
 import math
 import os
 import sys
+from dataclasses import dataclass
 from typing import List, Optional
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -93,10 +94,34 @@ def download_summary(ok: int, bad: int) -> str:
     return "下载结束：没有可下载的瓦片"
 
 
+@dataclass(frozen=True)
+class _SearchResult:
+    query: str
+    hits: tuple[object, ...]
+    error: str = ""
+
+
+def _search_once(provider, query: str) -> _SearchResult:
+    """同步/异步共用：立即快照本次错误，不在 UI 收信时再读 provider。"""
+    try:
+        if provider is None:
+            return _SearchResult(query, (), "地点检索不可用")
+        ok, reason = provider.available()
+        if not ok:
+            return _SearchResult(query, (), str(reason or "地点检索不可用"))
+        hits = provider.search(query, 8)
+        error = str(getattr(provider, "last_error", "") or "")
+        if hits is None and not error:
+            error = "地点检索未返回结果"
+        return _SearchResult(query, tuple(hits or ()), error)
+    except Exception as exc:  # noqa: BLE001
+        return _SearchResult(query, (), f"{type(exc).__name__}: {exc}")
+
+
 class _SearchWorker(QThread):
     """把 6 秒超时的网络请求挪出 UI 线程。"""
 
-    done = Signal(object)      # List[Place] | None（None = 失败）
+    done = Signal(object)      # _SearchResult（查询、结果、错误不可拆开传）
 
     def __init__(self, provider, query: str, parent=None):
         super().__init__(parent)
@@ -104,10 +129,7 @@ class _SearchWorker(QThread):
         self._query = query
 
     def run(self) -> None:
-        try:
-            self.done.emit(self._provider.search(self._query, 8))
-        except Exception:  # noqa: BLE001
-            self.done.emit(None)
+        self.done.emit(_search_once(self._provider, self._query))
 
 
 class LocationPanel(QFrame):
@@ -226,16 +248,17 @@ class LocationPanel(QFrame):
 
         map_hint = QLabel("拖拽平移 · 滚轮缩放 · 单击选点", self)
         map_hint.setObjectName("lpHint")
+        map_hint.setWordWrap(True)
         map_hint.setToolTip(
             "拖拽平移 · 滚轮缩放 · 双击放大\n"
             "单击选点只出琥珀色虚线圈（待确认），按「用这个位置」才换站址")
         self.map_hint = map_hint
-        mrow.addWidget(map_hint, 0)
         mrow.addStretch(1)
         self.map_zoom_label = QLabel("z—", self)
         self.map_zoom_label.setObjectName("lpHint")
         mrow.addWidget(self.map_zoom_label, 0)
         lay.addLayout(mrow)
+        lay.addWidget(map_hint)
 
         self.current_label = QLabel("当前：未设置", self)
         self.current_label.setObjectName("lpCurrent")
@@ -580,43 +603,39 @@ class LocationPanel(QFrame):
         q = self.search_edit.text().strip()
         if not q:
             return
-        prov = self._provider_or_none()
-        if prov is None:
-            self._set_hint("地点检索不可用：直接在地图上点，或在设置里手填经纬度",
-                           error=True)
-            return
-        try:
-            ok, reason = prov.available()
-        except Exception:  # noqa: BLE001
-            ok, reason = False, "provider 异常"
-        if not ok:
-            self._set_hint(f"离线：{reason}。可直接在地图上点，或手填经纬度",
-                           error=True)
-            return
-
-        self.search_btn.setEnabled(False)
-        self._set_hint("搜索中…")
-        if self._async_search and self._worker is not None \
-                and self._worker.isRunning():
+        if self._async_search and self._worker is not None:
             # 上一轮还没回来：新关键词不能静默丢。记下来等它结束再搜，
             # 并在提示里写明「这次还没搜」，避免把旧结果当新词的答案。
             self._queued_query = q
+            self._results = []
+            self._show_list_hint(f"「{q}」等待上一次搜索结束")
             self._set_hint(f"上一次搜索还在进行；结束后自动搜索「{q}」")
             return
         self._queued_query = None
-        self._run_search(prov, q)
+        self._run_search(self._provider_or_none(), q)
 
     def _run_search(self, prov, q: str) -> None:
+        self.search_btn.setEnabled(False)
+        self._set_hint(f"搜索中…（「{q}」）")
+        self._results = []
+        self._show_list_hint(f"正在搜索「{q}」…")
         if self._async_search:
             self._worker = _SearchWorker(prov, q, self)
             self._worker.done.connect(self._on_search_done)
+            self._worker.finished.connect(self._on_search_finished)
             self._worker.start()
         else:
-            try:
-                hits = prov.search(q, 8)
-            except Exception:  # noqa: BLE001
-                hits = None
-            self._on_search_done(hits)
+            self._on_search_done(_search_once(prov, q))
+
+    def _on_search_finished(self) -> None:
+        worker = self.sender()
+        if worker is not self._worker:
+            return
+        # done 只是数据就绪；等 run 真正退出才放手，避免两个线程重叠。
+        self._worker = None
+        worker.deleteLater()
+        self.search_btn.setEnabled(True)
+        self._start_queued_search()
 
     def _start_queued_search(self) -> None:
         """上一轮结束后，把期间排队的关键词真正搜出来（不是只记一笔）。"""
@@ -624,14 +643,7 @@ class LocationPanel(QFrame):
         if not q:
             return
         self._queued_query = None
-        prov = self._provider_or_none()
-        if prov is None:
-            self._set_hint("地点检索不可用：直接在地图上点，或在设置里手填经纬度",
-                           error=True)
-            return
-        self.search_btn.setEnabled(False)
-        self._set_hint(f"搜索中…（「{q}」）")
-        self._run_search(prov, q)
+        self._run_search(self._provider_or_none(), q)
 
     def _show_list_hint(self, text: str) -> None:
         """列表空态：一条不可选的灰字提示（不是假结果）。"""
@@ -643,30 +655,38 @@ class LocationPanel(QFrame):
         except (AttributeError, RuntimeError):
             pass
 
-    def _on_search_done(self, hits) -> None:
-        self.search_btn.setEnabled(True)
+    def _search_fallback_hint(self) -> str:
+        if OsmMapView is None or not isinstance(self.map_view, OsmMapView):
+            return "地图控件不可用；可在设置里手填经纬度。"
+        if not self._map_online:
+            return "在线底图已关闭；经纬网仍可点选坐标，也可在设置里手填经纬度。"
+        return "可直接在地图上点选坐标；底图未加载时经纬网仍可用，也可在设置里手填经纬度。"
+
+    def _on_search_done(self, result: _SearchResult) -> None:
+        if self._queued_query is not None:
+            # 已提交新查询：保持排队提示，不把旧结果/旧错误贴到新查询上。
+            return
+        self.search_btn.setEnabled(self._worker is None)
         self.result_list.clear()
-        self._results = list(hits or [])
-        if hits is None:
+        self._results = [] if result.error else list(result.hits)
+        if result.error:
+            self._show_list_hint(f"「{result.query}」搜索失败：{result.error}")
             self._set_hint(
-                "搜索失败：可能没网或被限流。可直接在地图上点，或手填经纬度",
+                f"「{result.query}」搜索失败：{result.error}。"
+                "请检查网络或代理，恢复网络后再搜索。" + self._search_fallback_hint(),
                 error=True)
-            self._start_queued_search()
             return
-        if not hits:
-            item = QListWidgetItem("没有匹配的地名（换个写法试试，或直接点地图）")
-            item.setFlags(Qt.NoItemFlags)
-            self.result_list.addItem(item)
-            self._set_hint("没有匹配。可直接在地图上点。", error=True)
-            self._start_queued_search()
+        if not result.hits:
+            self._show_list_hint(f"「{result.query}」没有匹配的地名（换个写法试试）")
+            self._set_hint(f"「{result.query}」没有匹配，换个写法试试。"
+                           + self._search_fallback_hint())
             return
-        for p in hits:
+        for p in result.hits:
             extra = f"  ·  {p.detail}" if getattr(p, "detail", "") else ""
             it = QListWidgetItem(f"{p.name}   {p.coord_text()}{extra}")
             it.setData(Qt.UserRole, p)
             self.result_list.addItem(it)
-        self._set_hint(f"找到 {len(hits)} 个结果，点一条选中")
-        self._start_queued_search()
+        self._set_hint(f"「{result.query}」找到 {len(result.hits)} 个结果，点一条选中")
 
     # ------------------------------------------------------------- 选择
     def _on_item(self, item: QListWidgetItem) -> None:

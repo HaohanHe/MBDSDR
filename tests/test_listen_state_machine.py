@@ -78,13 +78,6 @@ def win(qtapp, isolated_profile):
     直接构造 MainWindow 会写用户真实 %APPDATA% 配置，所以隔离 HOME/
     USERPROFILE/APPDATA 到本模块临时目录（同 conftest.isolated_profile）。
     """
-    import tempfile
-    tmp = tempfile.mkdtemp(prefix="mbdsdr_listen_")
-    for key in ("HOME", "USERPROFILE"):
-        os.environ[key] = tmp
-    os.environ["APPDATA"] = os.path.join(tmp, "appdata")
-    os.environ.setdefault("MBDSDR_OFFLINE", "1")
-    os.makedirs(os.environ["APPDATA"], exist_ok=True)
     import main_window as MW
     w = MW.MainWindow()
     yield w
@@ -93,6 +86,10 @@ def win(qtapp, isolated_profile):
     except Exception:
         pass
     w.close()
+    qtapp.processEvents()
+    w.deleteLater()
+    from PySide6.QtCore import QCoreApplication, QEvent
+    QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
 
 
 def test_listen_defaults_off(win):
@@ -609,6 +606,33 @@ def test_idle_pauses_replay_and_listen_resumes(win, monkeypatch):
     timer.stop()
     monkeypatch.setattr(win, "_replay_timer", None, raising=False)
     win._apply_listen_state("idle")
+
+
+def test_offline_replay_resumes_through_listen_combo(win, monkeypatch):
+    """真实回放数组 + 定时器：无 SDR 也能从 idle 恢复，不启动设备。"""
+    import numpy as np
+    from PySide6.QtCore import QTimer
+
+    timer = QTimer(win)
+    timer.setInterval(50)
+    timer.start()
+    monkeypatch.setattr(win, "_replay_timer", timer)
+    monkeypatch.setattr(win, "_replay_iq", np.zeros(2048, dtype=np.complex64))
+    monkeypatch.setattr(win, "_active_sdr_backend", None)
+    monkeypatch.setattr(win._audio_player, "start", lambda: True)
+    monkeypatch.setattr(win, "_start_iq_streams",
+                        lambda: pytest.fail("离线恢复不得启动设备"))
+    try:
+        win.listen_combo.setCurrentIndex(win.listen_combo.findData("idle"))
+        win._apply_listen_state("idle")
+        assert not timer.isActive()
+        win.listen_combo.setCurrentIndex(win.listen_combo.findData("listen"))
+        assert timer.isActive(), "无硬件的离线回放被收听前置检查误挡"
+        assert win._listen_state == "listen"
+        assert not win._replay_paused_by_idle
+    finally:
+        timer.stop()
+        win._apply_listen_state("idle")
 
 
 def test_idle_stops_constellation_feed(win, monkeypatch):
