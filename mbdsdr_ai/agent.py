@@ -29,7 +29,7 @@ from concurrent.futures import ThreadPoolExecutor
 from typing import List, Dict, Any, Optional, Callable
 
 from .config import AgentConfig
-from .answer_guard import StreamGuard, sanitize_unknown_claims
+from .answer_guard import StreamGuard, sanitize_answer
 from .context_manager import (
     ContextManager,
     SYSTEM_PROMPT,
@@ -4637,7 +4637,7 @@ class MBDSDRAgent:
                 if guard is not None:
                     guard.flush()
             if isinstance(result, dict) and isinstance(result.get("content"), str):
-                result["content"] = sanitize_unknown_claims(
+                result["content"] = sanitize_answer(
                     result["content"], self._unknown_slots())
             return result
         finally:

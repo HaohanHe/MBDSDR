@@ -121,3 +121,11 @@ class TestSkyFirstLight:
     def test_paths_are_one_step_at_a_time(self):
         assert "一次只给当前一步" in self.body
         assert "不要从第一步讲起" in self.body
+
+    def test_ui_facts_section_lists_only_verified_controls(self):
+        """实测 8B 会编造绿色光晕/点击屏幕中央；技能必须给出已核实清单。"""
+        assert "已确认的 UI 事实" in self.body
+        assert "不存在的交互" in self.body
+        assert "绿色光晕" in self.body
+        assert "指天视图" in self.body
+        assert "准星" in self.body and "距中心角距" in self.body

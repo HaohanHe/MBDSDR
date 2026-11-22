@@ -10,7 +10,12 @@ from __future__ import annotations
 
 import pytest
 
-from mbdsdr_ai.answer_guard import StreamGuard, sanitize_unknown_claims
+from mbdsdr_ai.answer_guard import (
+    StreamGuard,
+    sanitize_answer,
+    sanitize_unknown_claims,
+    sanitize_unverified_ui_claims,
+)
 
 
 class TestSanitizeUnknown:
@@ -82,6 +87,34 @@ class TestStreamGuard:
         guard.feed("IMU未连接。")
         guard.flush()
         assert out == ["IMU未连接。"]
+
+
+class TestUnverifiedUi:
+    @pytest.mark.parametrize("text,want", [
+        ("当前指向的天区会以绿色光晕显示。", "当前指向的天区会以实际界面效果显示。"),
+        ("点击屏幕中央查看实时星图。", "按实际界面提示查看实时星图。"),
+        ("拖动可调整视角。", "按实际界面提示操作。"),
+        ("长按屏幕触发识别。", "按实际界面提示触发识别。"),
+        ("双指缩放星图。", "按实际界面提示缩放星图。"),
+    ])
+    def test_fake_ui_phrases_are_neutralized(self, text, want):
+        assert sanitize_unverified_ui_claims(text) == want
+
+    @pytest.mark.parametrize("text", [
+        "准星下方会显示星名与距中心角距。",
+        "点「视场 60°」可切到 25°、8°。",
+        "用「左/右 5°」手动对齐。",
+        "顶部有「指天视图」入口。",
+    ])
+    def test_verified_ui_facts_are_untouched(self, text):
+        assert sanitize_unverified_ui_claims(text) == text
+
+    def test_sanitize_answer_composes_both_rules(self):
+        text = "未检测到IMU，天区会有绿色光晕。"
+        out = sanitize_answer(text, ["imu"])
+        assert "IMU尚未确认" in out
+        assert "绿色光晕" not in out
+        assert "实际界面效果" in out
 
 
 class TestAgentIntegration:

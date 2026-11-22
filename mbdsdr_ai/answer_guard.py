@@ -73,6 +73,33 @@ def sanitize_unknown_claims(text: str, unknown_slots: Iterable[str]) -> str:
     return out
 
 
+#: 实测 8B 编造过的、本产品并不存在的 UI 细节。只列已核实为假的短语，
+#: 不做通用「UI 词」拦截（那会误伤真实存在的准星/状态条/手动对齐）。
+_FAKE_UI_CLAIMS: tuple[tuple[Pattern[str], str], ...] = (
+    (re.compile(r"绿色光晕|彩色光晕"), "实际界面效果"),
+    (re.compile(r"拖动(?:屏幕)?(?:可)?调整(?:视角)?"), "按实际界面提示操作"),
+    (re.compile(r"点击屏幕中央"), "按实际界面提示"),
+    (re.compile(r"长按屏幕"), "按实际界面提示"),
+    (re.compile(r"双指缩放"), "按实际界面提示缩放"),
+)
+
+
+def sanitize_unverified_ui_claims(text: str) -> str:
+    """把已核实的「本产品没有的 UI 交互」换成中性表述。"""
+    if not text:
+        return text
+    out = text
+    for pat, replacement in _FAKE_UI_CLAIMS:
+        out = pat.sub(replacement, out)
+    return out
+
+
+def sanitize_answer(text: str, unknown_slots: Iterable[str]) -> str:
+    """对模型回答统一施加的诚实护栏（unknown 断言 + 未核实 UI 细节）。"""
+    return sanitize_unverified_ui_claims(
+        sanitize_unknown_claims(text, unknown_slots))
+
+
 def _deliver(sink: Callable[[str], None], text: str) -> None:
     """把改写后的文本交给调用方。
 
@@ -106,12 +133,12 @@ class StreamGuard:
                 break
             end = m.end()
             seg, self._buf = self._buf[:end], self._buf[end:]
-            _deliver(self._sink, sanitize_unknown_claims(seg, self._slots))
+            _deliver(self._sink, sanitize_answer(seg, self._slots))
         if len(self._buf) >= 80:
             seg, self._buf = self._buf, ""
-            _deliver(self._sink, sanitize_unknown_claims(seg, self._slots))
+            _deliver(self._sink, sanitize_answer(seg, self._slots))
 
     def flush(self) -> None:
         if self._buf:
             seg, self._buf = self._buf, ""
-            _deliver(self._sink, sanitize_unknown_claims(seg, self._slots))
+            _deliver(self._sink, sanitize_answer(seg, self._slots))
