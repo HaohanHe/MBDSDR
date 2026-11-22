@@ -2576,6 +2576,7 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `mbdsdr_ai/agent.py` | 引导深度线/20261122（chat 双路径接入 answer_guard） | 2026-11-22 19:55 | 本笔 |
 | `tests/test_answer_guard.py` | 引导深度线/20261122（护栏/流式/agent 集成 19 条） | 2026-11-22 19:55 | 本笔 |
 | `docs/COORDINATION.md` | 引导深度线/20261122（§229 护栏与 8B 复测，提交后释放） | 2026-11-22 19:55 | 本笔 |
+| `mbdsdr_ai/answer_guard.py` | 引导深度线/20261122（符号检查误判收口（回调属性不按方法调用）） | 2026-11-22 19:56 | 本笔 |
 
 > 上表各行均由 `claim` 台账推导：owner 原文与 `acquired_at` 直接取自台账，
 > 目的优先用台账里的 `claim_reason`，没有就如实写「未声明」，不补编。时间列只是
