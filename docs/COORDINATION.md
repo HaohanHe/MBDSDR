@@ -11099,3 +11099,26 @@ group1 **5083** = **10297 passed / 0 failed / 0 fatal**。
 **验证**：`tests/test_real_hw_pilot_metric.py` +1（期望位峰值 vs 旧质心对照），
 5 passed；真机 R1/R2/R3/R4/R5 均为 PASS。**未跑** R6（数字/APRS，需空口业务与
 外部解码器）与 R7（便携包，需先构建）；不据此宣称七环全绿。
+
+## 222. 真机七环全会话状态：R1–R5/R7 PASS，R6 UNVERIFIABLE（2026-11-22）
+
+串行跑完七个环（同一台 FC0012）：
+- **R1 PASS**：pyrtlsdr 10/10、controller 5/5 开关，末次新句柄可开。
+- **R2 PASS**：候选台取最小 |ppm| = -18.7（103.3012 MHz）；写回读 5/5、增益全对。
+- **R3 PASS**：期望位峰偏 +15.2 / +401.3 / -397.6 kHz；MBDSDR 读谱 -882 Hz / 29.0 dB；
+  rtl_fm 237,568 样本。
+- **R4 PASS**：103.80 MHz，19 kHz 导频 19,006 Hz / 9.9 dB。
+- **R5 PASS**：写盘 13.1→26.5 MB，sidecar 2.4 / 1.2 MS/s。
+- **R6 UNVERIFIABLE**：144.64 MHz NFM 录 30 s 窗口（实际音频 21.0 s），
+  APRS 候选帧 104 个全部 CRC-16 失败、外部解码器 `external_tools_available=[]`；
+  当地时段无有效台活动属正常，**不判 PASS，也不判产品缺陷**。
+  同环顺带：站址来源 `gnss`、10 颗卫星；NOAA 15/18/19 下一过境时间由真实 GNSS+TLE 算出；
+  ADS-B 因 FC0012 调谐上限约 948.6 MHz < 1090 MHz，物理不可达。
+- **R7 PASS**：干净 PATH + offscreen + NULL_AUDIO 启动便携包 4.4 s，PNG 90,642 B。
+
+**诚实边界**
+- R6 未通过（无可解 APRS 业务）；「21 s / 30 s」的音频窗口差异本轮未归因，
+  不写成缺陷，后续在有空口业务时复测。
+- R7 跑的是已存在 `cpp/build-local/dist/mbdsdr-0.2.0-win64-portable`，本轮未重编 C++；
+  包内 `mbdsdr.exe` 与本轮改动的脚本/文档无关。
+- R2 的 ppm 仍是「候选里最好情况」，无法区分台偏频与本振误差。
