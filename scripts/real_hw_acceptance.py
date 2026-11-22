@@ -299,35 +299,62 @@ def pilot_metrics(mpx, fs: float) -> dict:
     }
 
 
-def ring4_demod_audio(fm_ref_hz):
-    """解调与音频链路（静音数据面，不开声卡）。"""
+def ring4_demod_audio(fm_ref_hz, candidates=None):
+    """解调与音频链路（静音数据面，不开声卡）。
+
+    [candidates] 为按峰底比排序的候选台频；R4 逐个试，取第一个 19 kHz 导频
+    合格的台，避免把“最强峰”当成干净模拟 FM 台（见 pick_fm_candidates 注释）。
+    """
     import numpy as np
     from mbdsdr_ai.core import SDRController
 
     ev = {}
     ctrl = SDRController()
     ctrl.connect("rtlsdr:" + _serial())
+    fs = 2.4e6
     try:
-        ctrl.set_frequency(fm_ref_hz)
-        ctrl.set_demod("WFM")
-        time.sleep(0.3)
+        order = [fm_ref_hz]
+        for f in (candidates or []):
+            if all(abs(f - g) > 1000 for g in order):
+                order.append(f)
+        ev["candidates_tried"] = []
+        chosen_hz = None
+        pm = None
+        for freq_hz in order:
+            ctrl.set_frequency(freq_hz)
+            ctrl.set_demod("WFM")
+            time.sleep(0.3)
 
-        # -- 信号级：自有 numpy 鉴频 -> MPX 频谱验 19 kHz 导频 --
-        iq = None
-        for _ in range(20):  # 多次取，攒够 ~0.4s
-            chunk = ctrl.read_iq(131072)
-            if chunk is not None and len(chunk) >= 65536:
-                iq = chunk
+            # -- 信号级：自有 numpy 鉴频 -> MPX 频谱验 19 kHz 导频 --
+            iq = None
+            for _ in range(20):  # 多次取，攒够 ~0.4s
+                chunk = ctrl.read_iq(131072)
+                if chunk is not None and len(chunk) >= 65536:
+                    iq = chunk
+                    break
+            if iq is None:
+                return report(4, "解调与音频链路（静音）", "FAIL",
+                              {"read_iq": "None"}, "取不到 IQ")
+            x = np.asarray(iq, dtype=np.complex128)
+            x = x - np.mean(x)
+            dphi = np.diff(np.unwrap(np.angle(x)))
+            mpx = dphi * fs / (2 * np.pi)
+            pm = pilot_metrics(mpx, fs)
+            ev["candidates_tried"].append({
+                "freq_hz": round(float(freq_hz)),
+                "pilot_hz": pm["pilot_hz"],
+                "pilot_above_neigh_db": pm["pilot_above_neigh_db"],
+                "pilot_ok": pm["pilot_ok"],
+            })
+            if pm["pilot_ok"]:
+                chosen_hz = freq_hz
                 break
-        if iq is None:
-            return report(4, "解调与音频链路（静音）", "FAIL",
-                          {"read_iq": "None"}, "取不到 IQ")
-        fs = 2.4e6
-        x = np.asarray(iq, dtype=np.complex128)
-        x = x - np.mean(x)
-        dphi = np.diff(np.unwrap(np.angle(x)))
-        mpx = dphi * fs / (2 * np.pi)
-        pm = pilot_metrics(mpx, fs)
+        if chosen_hz is None:
+            # 没有合格台：保留最后测的指标，继续验音频链，但结论 FAIL。
+            chosen_hz = order[-1]
+            ctrl.set_frequency(chosen_hz)
+            time.sleep(0.2)
+        ev["ref_hz"] = round(float(chosen_hz))
         ev["pilot_hz"] = pm["pilot_hz"]
         ev["pilot_above_neigh_db"] = pm["pilot_above_neigh_db"]
         pilot_ok = bool(pm["pilot_ok"])
@@ -557,12 +584,33 @@ def _serial():
     return _SERIAL_CACHE
 
 
-def pick_fm_reference():
-    """纯设备扫描 88–108（10 跳 × 2 MHz，36.6 Hz/bin）定最强真实台频。"""
+def rank_peaks(peaks, limit: int = 3, min_sep_hz: float = 400_000.0):
+    """按峰底比排序，并去掉彼此太近的重复峰（同一台的多谱线）。
+
+    纯函数，便于单测；真机扫描只负责把 (freq, prominence_db) 交进来。
+    """
+    ranked = sorted(peaks, key=lambda t: t[1], reverse=True)
+    picked = []
+    for f, pf in ranked:
+        if all(abs(f - g) > min_sep_hz for g, _ in picked):
+            picked.append((float(f), float(pf)))
+        if len(picked) >= limit:
+            break
+    return picked
+
+
+def pick_fm_candidates(limit: int = 3):
+    """纯设备扫描 88–108（10 跳 × 2 MHz，36.6 Hz/bin）返回前几个真实台频。
+
+    返回 [(freq_hz, prominence_db), ...]，按峰底比降序、彼此间隔 > 400 kHz。
+    单个“最强峰”不一定是干净的模拟 FM 台（2026-11-22 实测：106.29 MHz 的
+    19 kHz 导频测得 19,280 Hz / 7.7 dB，而 88.10 MHz 是 19,006 Hz / 10.3 dB），
+    所以 R4 需要候选列表逐个验导频，而不是盲信最强峰。
+    """
     import numpy as np
     from rtlsdr import RtlSdr
     s = RtlSdr()
-    best_f, best_pf = None, 0.0
+    peaks = []
     try:
         s.set_sample_rate(2.4e6)
         s.set_agc_mode(False)
@@ -580,14 +628,20 @@ def pick_fm_reference():
             med = float(np.median(pdb))
             pk = int(np.argmax(pdb))
             pf = float(pdb[pk] - med)
-            if pf > best_pf:
-                best_pf = pf
-                best_f = center + (pk - c) * 2.4e6 / N
+            if pf >= 12.0:
+                peaks.append((center + (pk - c) * 2.4e6 / N, pf))
     finally:
         s.close()
-    if best_f is None or best_pf < 18:
-        raise RuntimeError(f"88-108 MHz 扫描找不到显著台峰（最强峰底比 {best_pf:.1f} dB）")
-    return best_f
+    picked = rank_peaks(peaks, limit=limit)
+    if not picked or picked[0][1] < 18:
+        best = picked[0][1] if picked else 0.0
+        raise RuntimeError(f"88-108 MHz 扫描找不到显著台峰（最强峰底比 {best:.1f} dB）")
+    return picked
+
+
+def pick_fm_reference():
+    """纯设备扫描 88–108（10 跳 × 2 MHz，36.6 Hz/bin）定最强真实台频。"""
+    return pick_fm_candidates(1)[0][0]
 
 
 def _portable_version() -> str:
@@ -616,9 +670,14 @@ def main():
     fm_ref = None
     want = lambda r: args.ring in (0, r)
 
+    fm_candidates = []
     if any(want(r) for r in (2, 3, 4, 5)) and args.ring != 6:
-        fm_ref = pick_fm_reference()
+        fm_candidates = pick_fm_candidates(3)
+        fm_ref = fm_candidates[0][0]
         print(f"FM 已知信号基准: {fm_ref/1e6:.2f} MHz（rtl_power 最强峰）")
+        if len(fm_candidates) > 1:
+            others = ", ".join(f"{f/1e6:.2f}" for f, _ in fm_candidates[1:])
+            print(f"R4 备选台（逐个验 19k 导频）: {others} MHz")
 
     if want(1):
         run_ring(1, "设备枚举/打开/释放", ring1_open_close, serial)
@@ -627,7 +686,8 @@ def main():
     if want(3):
         run_ring(3, "频谱正确性", ring3_spectrum, outdir, fm_ref)
     if want(4):
-        run_ring(4, "解调与音频链路（静音）", ring4_demod_audio, fm_ref)
+        run_ring(4, "解调与音频链路（静音）", ring4_demod_audio, fm_ref,
+                 [f for f, _ in fm_candidates])
     if want(5):
         run_ring(5, "录音落盘", ring5_recording, outdir, fm_ref)
     if want(6):

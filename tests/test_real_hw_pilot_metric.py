@@ -44,3 +44,17 @@ def test_neighbour_spur_does_not_steal_pilot_detection():
 def test_noise_without_pilot_is_rejected():
     pm = hw.pilot_metrics(_mpx(pilot_amp=0.0, noise=0.2), FS)
     assert pm["pilot_ok"] is False
+
+
+def test_rank_peaks_dedups_close_peaks_and_keeps_prominence_order():
+    """同一台的多条谱线只留一条；候选按峰底比降序，供 R4 逐个验导频。"""
+    peaks = [
+        (106_290_000.0, 25.0),
+        (106_300_000.0, 24.0),   # 与 106.29 太近，应被合并
+        (88_100_000.0, 20.0),
+        (91_600_000.0, 19.0),
+        (95_300_000.0, 18.5),
+    ]
+    picked = hw.rank_peaks(peaks, limit=3)
+    assert [round(f / 1e6, 2) for f, _ in picked] == [106.29, 88.1, 91.6]
+    assert hw.rank_peaks(peaks, limit=1) == [(106_290_000.0, 25.0)]
