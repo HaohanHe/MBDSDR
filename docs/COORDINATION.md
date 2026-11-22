@@ -2616,6 +2616,7 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `desktop/ai_panel.py` | AI护栏线/obssync1（建 agent 后回灌站址） | 2026-11-22 21:15 | 本笔 |
 | `tests/test_desktop_observation_ui.py` | AI护栏线/obssync1（站址同步 + AI 读点测试 +2） | 2026-11-22 21:15 | 本笔 |
 | `docs/COORDINATION.md` | AI护栏线/spatial1（§240 头显离线包真机验证正文） | 2026-11-22 21:19 | 本笔 |
+| `docs/COORDINATION.md` | AI护栏线/spatial2（§241 授时链路补证正文） | 2026-11-22 21:21 | 本笔 |
 
 > 上表各行均由 `claim` 台账推导：owner 原文与 `acquired_at` 直接取自台账，
 > 目的优先用台账里的 `claim_reason`，没有就如实写「未声明」，不补编。时间列只是
@@ -11836,3 +11837,32 @@ AI 仍在按建 agent 时的默认 (0,0) 计算——两套站址，且默认 (0
   授时接线验证（两者同期但不等价）。
 - PICO 真机仍无：四窗实际显示、手势、空间音频未验证；频谱只读回放。
 - 真实坐标只在本机临时目录，未写入仓库。
+
+## 241. 头显包 GNSS 授时链路补证（2026-11-22，更正 §240 的口径）
+
+**更正**：§240 的 `time.source=system` **不是产品缺陷**，是采集脚本只调了
+`set_ground_station_from_gnss`、没有发布 GNSS fix，时间引擎因此没拿到 UTC。
+
+**按桌面真实路径重做**
+1. GNSS COM10 等到 fix（10 星）；
+2. 按 `_poll_gnss` 的真实路径调用 `runtime_sources.record_fix(fix)`
+   （含 `utc_datetime`）→ 快照 `time.source=gnss / time_source=nmea`、
+   `site.source=gnss`；
+3. RTL 录 91.60 MHz 1.8 s（4,308,992 样本），档案
+   `time.source=gnss / time_source=nmea`、`site.source=gnss`；
+4. 导出 `mbdsdr.spatial/1`。
+
+**bundle 校验**
+- `time.source=gnss`（`time.time_source` 字段不在 bundle schema 内，为 None）；
+  `site.source=gnss`。
+- 2000 星 / 959 可见；`altaz_pm_applied=2000`、`missing=0`。
+- 12 条过境、48×128 频谱、WFM 音频、timeline 2、`blockers=[]`。
+
+**结论**
+- 「GNSS 授时 + 站址 → 真实录制 → 头显离线包」在同一次采集里成立；
+  §240 的 system 是我脚本少了一步，已在本条更正。
+- 未改产品代码，因此不重跑 Kotlin 单测（上一轮 128 tests 仍有效）。
+
+**诚实边界**
+- `time.time_source` 不在 bundle 公开 schema 里；头显只消费 `time.source`。
+- PICO 真机仍未验证四窗/手势/空间音频。
