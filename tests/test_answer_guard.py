@@ -118,6 +118,103 @@ class TestUnverifiedUi:
         assert "实际界面效果" in out
 
 
+class TestSlideGestureHallucination:
+    """实测 8B 反复编造「左右滑动屏幕」；真实控件是底部三个按钮。
+
+    pointing_page.dart 的 _AlignControls（约 636-673 行）只有「左 5°」
+    「右 5°」「复位」三个 TextButton，没有滑动手势。
+    """
+
+    @pytest.mark.parametrize("text", [
+        "如果罗盘未连接，会提示“方向未知”，这时可以手动左右滑动屏幕调整5°对齐。",
+        "请左右滑动屏幕手动对齐5°，直到准星稳定锁定目标。",
+        "如果屏幕提示“方向未知”，请左右滑动屏幕手动对齐5°",
+        "也可以左右滑动手机屏幕微调方位。",
+    ])
+    def test_slide_gesture_is_rewritten_to_real_buttons(self, text):
+        out = sanitize_unverified_ui_claims(text)
+        assert "滑动" not in out
+        assert "「左 5°」「右 5°」按钮" in out
+
+    @pytest.mark.parametrize("text", [
+        "请转动手机调整方位。",
+        "转动身体让准星对准目标。",
+    ])
+    def test_real_physical_actions_are_untouched(self, text):
+        assert sanitize_unverified_ui_claims(text) == text
+
+    def test_idempotent(self):
+        once = sanitize_unverified_ui_claims("请左右滑动屏幕手动对齐5°")
+        assert sanitize_unverified_ui_claims(once) == once
+
+    def test_empty_text(self):
+        assert sanitize_unverified_ui_claims("") == ""
+
+
+class TestFakeHeadingInput:
+    """实测 8B 编造「手动输入方位」；pointing_page.dart 没有方位输入框。"""
+
+    @pytest.mark.parametrize("text", [
+        "若罗盘未连接，需手动输入方位（如\"朝北\"），但当前设备未检测到航向数据，"
+        "请先确认手机是否已连接罗盘/IMU。",
+        "当前设备未检测到航向数据，请手动输入方位（例如\"朝北\"），"
+        "或先将手机放在桌面使用星图软件辅助定位。",
+        "请手动输入一个方位。",
+    ])
+    def test_heading_input_is_rewritten_to_real_buttons(self, text):
+        out = sanitize_unverified_ui_claims(text)
+        assert "输入方位" not in out
+        assert "「左 5°」「右 5°」按钮" in out
+
+    @pytest.mark.parametrize("text", [
+        "界面会显示当前方位角。",
+        "请手动转动手机调整方位。",
+    ])
+    def test_real_heading_facts_are_untouched(self, text):
+        assert sanitize_unverified_ui_claims(text) == text
+
+    def test_idempotent(self):
+        once = sanitize_unverified_ui_claims("请手动输入方位（如\"朝北\"）。")
+        assert sanitize_unverified_ui_claims(once) == once
+
+    def test_empty_text(self):
+        assert sanitize_unverified_ui_claims("") == ""
+
+
+class TestSidePositionAndHeadingAngle:
+    """实测 8B 把底部一行按钮说成「屏幕两侧」，并编造「输入方位角」。"""
+
+    @pytest.mark.parametrize("text,want", [
+        ("点击屏幕两侧的「左/右 5°」按钮进行手动对齐",
+         "点击「左/右 5°」按钮进行手动对齐"),
+        ("可点击屏幕两侧的「左/右 5°」手动对齐",
+         "可点击「左/右 5°」手动对齐"),
+    ])
+    def test_unverified_side_position_is_removed(self, text, want):
+        out = sanitize_answer(text, [])
+        assert out == want
+        assert "两侧" not in out
+
+    def test_heading_angle_input_is_rewritten(self):
+        out = sanitize_answer("此时可手动输入方位角（如\"正北 0°\"）继续操作。", [])
+        assert "输入方位角" not in out
+        assert "「左 5°」「右 5°」按钮" in out
+
+    @pytest.mark.parametrize("text", [
+        "状态行显示当前方位角。",
+        "屏幕底部「左 5°」「右 5°」按钮用于手动对齐。",
+    ])
+    def test_real_position_and_angle_display_are_untouched(self, text):
+        assert sanitize_answer(text, []) == text
+
+    def test_idempotent(self):
+        once = sanitize_answer("点击屏幕两侧的「左/右 5°」按钮进行手动对齐", [])
+        assert sanitize_answer(once, []) == once
+
+    def test_empty_text(self):
+        assert sanitize_answer("", []) == ""
+
+
 class TestUnverifiedUiPositions:
     """实测 8B 把底部真实按钮说成「屏幕右下角「左/右 5°」按钮」。"""
 
