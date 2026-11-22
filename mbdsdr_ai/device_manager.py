@@ -548,11 +548,15 @@ class OpenDevice:
                     total -= old.shape[0] if hasattr(old, "shape") else len(old)
 
     def read_audio(self, num_samples: int, mode: str = "WFM"):
-        """取 num_samples 个 48k 音频（float32）。
+        """取**至多** num_samples 个 48k 音频（float32）。
 
         **不再退化为同步串行**：无播放线程时也先把「读线程 + 链线程」拉起来，
         再从输出队列凑数。旧实现的同步分支在 2.4 MS/s NFM 下只有 0.675× 实时
         （读与链串行叠加），R6 30 s 录制窗口只出 21 s 音频。
+
+        一次调用最多等 1 s：攒够 num_samples 立即返回，攒不够就返回已攒到的
+        部分（流式调用方按批循环；旧同步实现每次也只返回一块，且对较大 n
+        远少于请求量）。
         """
         num_samples = int(num_samples)
         if num_samples <= 0:
