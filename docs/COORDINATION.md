@@ -2597,6 +2597,8 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `skills/sky-first-light/SKILL.md` | AI护栏线/uifact1（修正手动输入方位源头） | 2026-11-22 20:43 | 本笔 |
 | `tests/test_skills_tool_refs.py` | AI护栏线/uifact1（技能 UI 事实钉扎） | 2026-11-22 20:43 | 本笔 |
 | `tests/test_agent_guidance_policy.py` | AI护栏线/uifact1（提示词 UI 事实钉扎） | 2026-11-22 20:43 | 本笔 |
+| `docs/COORDINATION.md` | AI护栏线/hwgnss1（§235 七环+GNSS 证据正文） | 2026-11-22 20:52 | 本笔 |
+| `scripts/real_hw_acceptance.py` | AI护栏线/hwgnss1（GNSS sats 采样竞态修复 + 天线证据） | 2026-11-22 20:52 | 本笔 |
 
 > 上表各行均由 `claim` 台账推导：owner 原文与 `acquired_at` 直接取自台账，
 > 目的优先用台账里的 `claim_reason`，没有就如实写「未声明」，不补编。时间列只是
@@ -11629,3 +11631,49 @@ group1 **5083** = **10297 passed / 0 failed / 0 fatal**。
 - expert 的编号清单未收口：提示词已禁止但模型不遵守；输出侧强制去编号会
   误伤「用户明确要完整步骤表」的正当场景。
 - 未在手机/头显端逐字核对真实 UI 文案与白名单是否一致。
+
+## 235. 真机七环复验 + GNSS 实测（2026-11-22）
+
+**硬件**：RTL2832U（FC0012）在线；GNSS 是 COM10 CH340（9600，
+GNGGA/GNRMC/GSV/ZDA）。COM6/7 是蓝牙串口，不是 GNSS。
+
+**七环**（`python scripts/real_hw_acceptance.py`，证据目录
+`.tmp-tool-results/hw_acceptance/20261122_204714/`）
+- **R1 PASS**：pyrtlsdr 10/10 + controller 5/5 开关，末次新句柄可开，
+  tuner_type=2。
+- **R2 PASS**：5 个频点读回==目标；5 档增益写读一致；AGC 可切；
+  ppm 估 -45.2（仅精度参考）。
+- **R3 PASS**：±400k 频轴自洽；MBDSDR 读谱质心 +311 Hz（高于局部
+  23.1 dB，3 次）；rtl_fm 独立解调 237,568 样本。
+- **R4 PASS（静音）**：91.6016 MHz 验出 19 kHz 导频（+6.7 dB）；链路音频
+  44,574 样本、RMS 0.167；全程未开声卡。
+- **R5 PASS**：SigMF 13.2 MB→26.6 MB 流式增长；两次采样率 sidecar
+  2.4/1.2 MSps 正确。
+- **R6 UNVERIFIABLE**：当地 45.9 s 无 APRS 台（257 个候选帧全 CRC 失败，
+  属无信号）；ADS-B 物理不可达（FC0012 上限约 948.6 MHz）；NOAA 19/18/15
+  过境正常；44016 `identity_mismatch` 是已知错号保护。
+- **R7 PASS**：便携包 offscreen + 干净 PATH + NULL_AUDIO，exit 0，3.5 s，
+  PNG 90,237 字节。
+
+**GNSS 实测**（`SerialGNSSReader`，COM10 9600，6 s）
+- `source=real`、`has_latlon=True`、`fix_quality=1`、`satellites=9`、
+  `hdop=1.4`、UTC 与系统一致。
+- **`antenna=open`（原始 GPTXT：`ANTENNA OPEN`）**：模块报天线开路但仍定位；
+  状态面板 / `sky_hud` / `gnss_diag` 已如实表面化，需用户检查天线/馈线
+  （物理项，本轮未代替用户处理）。
+
+**发现并修复**
+- 七环首跑 R6 记录 `station_source=gnss` 但 `gnss_sats=None`：RMC 先于
+  同历元 GGA 到达，脚本在拿到坐标时立即 break。改为等 `lat` 与 `sats`
+  同时就绪再落证据，并补采 `gnss_antenna`。
+- 复验（`--ring 6 --aprs-seconds 15`，证据目录
+  `.tmp-tool-results/hw_acceptance/20261122_205137/`）：
+  `gnss_sats: 9`、`gnss_antenna: open`。
+- 测试：`test_gnss_antenna_status.py` + `test_gnss_diag.py` **17 passed**；
+  `test_real_hw_pilot_metric.py` **5 passed**；脚本 `py_compile` 通过。
+
+**诚实边界**
+- R6 仍是 UNVERIFIABLE，不是 PASS：当地无 APRS 活动，且 ADS-B 物理不可达。
+- ppm 估算依赖「FM 台在 100 kHz 整频点」前提，只作精度参考。
+- GNSS 天线开路未修复（需用户检查天线）；本轮只确认真实定位与告警可见。
+- 未在手机/头显端跑；SDR/GNSS 均为桌面链路。

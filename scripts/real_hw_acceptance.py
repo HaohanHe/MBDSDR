@@ -495,7 +495,11 @@ def ring6_digital(outdir, aprs_seconds):
             pos = None
             for _ in range(40):
                 pos = gnss.get_position()
-                if pos is not None and pos.lat is not None:
+                # RMC 可能先于同历元的 GGA 到达：坐标已有但 satellites 还是
+                # None。等 GGA 补齐卫星数再落证据，避免把「已定位 9 星」
+                # 记成 gnss_sats=None（真实 2026-11-22 验收踩到）。
+                if (pos is not None and pos.lat is not None
+                        and pos.sats is not None):
                     break
                 time.sleep(0.25)
             if pos is not None and pos.lat is not None:
@@ -503,6 +507,7 @@ def ring6_digital(outdir, aprs_seconds):
                     float(pos.lat), float(pos.lon), float(pos.alt or 0.0))
                 ev["station_source"] = "gnss"
                 ev["gnss_sats"] = pos.sats
+                ev["gnss_antenna"] = pos.antenna
             else:
                 ev["station_source"] = "none（GNSS 已开但未定位）"
         else:
