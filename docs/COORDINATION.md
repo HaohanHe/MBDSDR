@@ -2617,6 +2617,8 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `tests/test_desktop_observation_ui.py` | AI护栏线/obssync1（站址同步 + AI 读点测试 +2） | 2026-11-22 21:15 | 本笔 |
 | `docs/COORDINATION.md` | AI护栏线/spatial1（§240 头显离线包真机验证正文） | 2026-11-22 21:19 | 本笔 |
 | `docs/COORDINATION.md` | AI护栏线/spatial2（§241 授时链路补证正文） | 2026-11-22 21:21 | 本笔 |
+| `docs/COORDINATION.md` | AI护栏线/realbundle1（§242 跨语言真实包校验正文） | 2026-11-22 21:24 | 本笔 |
+| `spatial/app/src/test/java/com/mbdsdr/spatial/RealBundleExternalTest.kt` | AI护栏线/realbundle1（外部真实 bundle 的 Kotlin 校验） | 2026-11-22 21:24 | 本笔 |
 
 > 上表各行均由 `claim` 台账推导：owner 原文与 `acquired_at` 直接取自台账，
 > 目的优先用台账里的 `claim_reason`，没有就如实写「未声明」，不补编。时间列只是
@@ -11865,4 +11867,26 @@ AI 仍在按建 agent 时的默认 (0,0) 计算——两套站址，且默认 (0
 
 **诚实边界**
 - `time.time_source` 不在 bundle 公开 schema 里；头显只消费 `time.source`。
+- PICO 真机仍未验证四窗/手势/空间音频。
+
+## 242. 跨语言校验：真实导出的 bundle 被 Kotlin 解析器直接吃下（2026-11-22）
+
+**动机**：Python 生产者与 Kotlin 消费者此前只共享仓内 fixture；真实
+`export_spatial_bundle.py` 的输出从未被头显解析器读过，schema 漂移只能靠人眼。
+
+**改动**
+- 新增 `spatial/app/src/test/java/com/mbdsdr/spatial/RealBundleExternalTest.kt`：
+  从环境变量 `MBDSDR_SPATIAL_BUNDLE` 读本机真实 bundle（**真实坐标绝不入仓**），
+  未设置时用 `assumeFalse` 跳过。
+- 断言：`schema=mbdsdr.spatial/1`、`site.source=gnss`、`time.source=gnss`、
+  星表非空且有可见星、频谱帧非空、`blockers` 为空。
+
+**验证**
+- 有 env（§241 的真实 bundle）：
+  `gradlew :app:testDebugUnitTest --rerun-tasks --offline` → **BUILD SUCCESSFUL**；
+  16 个 test XML，**129 tests / 0 failures / 0 skipped**。
+- 无 env：同样 129 tests / 0 failures / **1 skipped**（按设计跳过，不误报成功）。
+
+**诚实边界**
+- 只校验结构、来源字段与非空性，不逐颗比对星点数值（那是 Python 侧测试的职责）。
 - PICO 真机仍未验证四窗/手势/空间音频。
