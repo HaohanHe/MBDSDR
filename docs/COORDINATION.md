@@ -2599,6 +2599,9 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `tests/test_agent_guidance_policy.py` | AI护栏线/uifact1（提示词 UI 事实钉扎） | 2026-11-22 20:43 | 本笔 |
 | `docs/COORDINATION.md` | AI护栏线/hwgnss1（§235 七环+GNSS 证据正文） | 2026-11-22 20:52 | 本笔 |
 | `scripts/real_hw_acceptance.py` | AI护栏线/hwgnss1（GNSS sats 采样竞态修复 + 天线证据） | 2026-11-22 20:52 | 本笔 |
+| `docs/COORDINATION.md` | AI护栏线/smoke1（§236 探针软观察正文） | 2026-11-22 20:58 | 本笔 |
+| `scripts/ai_guidance_smoke.py` | AI护栏线/smoke1（UI 幻觉软观察词表） | 2026-11-22 20:58 | 本笔 |
+| `tests/test_agent_guidance_policy.py` | AI护栏线/smoke1（探针 UI 幻觉观察测试 +2） | 2026-11-22 20:58 | 本笔 |
 
 > 上表各行均由 `claim` 台账推导：owner 原文与 `acquired_at` 直接取自台账，
 > 目的优先用台账里的 `claim_reason`，没有就如实写「未声明」，不补编。时间列只是
@@ -11677,3 +11680,24 @@ GNGGA/GNRMC/GSV/ZDA）。COM6/7 是蓝牙串口，不是 GNSS。
 - ppm 估算依赖「FM 台在 100 kHz 整频点」前提，只作精度参考。
 - GNSS 天线开路未修复（需用户检查天线）；本轮只确认真实定位与告警可见。
 - 未在手机/头显端跑；SDR/GNSS 均为桌面链路。
+
+## 236. 真实模型探针增加 UI 幻觉软观察（2026-11-22）
+
+**动机**：§233/§234 的 UI 幻觉发现只存在于人眼复核；换模型或改提示词后，
+回归没有自动报警。把已发现的词面变成探针的软观察，至少能看见同类复发。
+
+**改动**
+- `scripts/ai_guidance_smoke.py`：新增 `_UI_AFFORDANCE_WORDS`（滑动、拖动、
+  长按、双指、输入框、输入方位、罗盘图标、自动追踪/跟踪）与
+  `_observations` 观察项——命中即记「护栏可能漏过，需人复核」，**不判红**；
+  真实的「点击按钮 / 转动手机」不误报。
+- `tests/test_agent_guidance_policy.py` +2：幻觉句能被观察、真实动作不误报。
+
+**验证**
+- `pytest tests/test_agent_guidance_policy.py tests/test_answer_guard.py tests/test_skills_tool_refs.py tests/test_ai_tool_budget.py -q`
+  → **107 passed**；`py_compile scripts/ai_guidance_smoke.py` 通过。
+- 未再跑真实 8B（本轮只为探针增加观察项，不改变模型输入）。
+
+**诚实边界**
+- 软观察只覆盖词表，模型换说法仍可能漏；不替代 `answer_guard` 的输出护栏。
+- 命中只提示人复核，不是自动判定为幻觉（避免把真实“拖动窗口”等场景误杀）。

@@ -203,6 +203,23 @@ class TestSmokeHeuristics:
         # 探针只记录，不判红；这里验证记录本身可解释。
         assert any("写工具" in n for n in notes)
 
+    def test_unverified_ui_affordances_are_flagged(self):
+        """真实 8B 编造过滑动/输入方位/罗盘图标/自动追踪；探针要能看见。"""
+        mod = _load_smoke()
+        notes = mod._observations("novice", [{
+            "content": "左右滑动屏幕，或手动输入方位角，看到罗盘图标后自动追踪。",
+            "tool_calls": [],
+        }])
+        assert any("UI 交互" in n for n in notes)
+
+    def test_real_ui_actions_are_not_flagged(self):
+        mod = _load_smoke()
+        notes = mod._observations("novice", [{
+            "content": "点击底部「左 5°」「右 5°」按钮，转动手机对准亮星。",
+            "tool_calls": [],
+        }])
+        assert not any("UI 交互" in n for n in notes)
+
     def test_personas_cover_novice_expert_and_direct(self):
         mod = _load_smoke()
         assert set(mod.PERSONAS) == {"novice", "expert", "direct"}

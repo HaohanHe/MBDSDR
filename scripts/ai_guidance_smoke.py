@@ -38,6 +38,12 @@ sys.path.insert(0, ROOT)
 #: 行首编号清单（"1. " / "1) "），用来抓模型无视「不要编号」的风格漂移。
 _NUMBERED_LIST_RE = re.compile(r"(?m)^\s*\d+[.)、]\s")
 
+#: 本产品指天视图**没有**的 UI 交互词（2026-11-22 真实 8B 连续编造过
+#: 滑动屏幕/输入方位/罗盘图标/准星自动追踪）。出现即软观察，供人复核
+#: 护栏是否漏过；真实的“点击按钮/转动手机”不在此列。
+_UI_AFFORDANCE_WORDS = ("滑动", "拖动", "长按", "双指", "输入框",
+                        "输入方位", "罗盘图标", "自动追踪", "自动跟踪")
+
 #: 不该在「只问怎么用」的对话里出现的动手写工具（发现即记硬观察，供人复核）。
 WRITE_TOOLS = {
     "set_frequency", "set_mode", "set_gain", "set_sample_rate", "set_bandwidth",
@@ -110,6 +116,11 @@ def _observations(persona: str, turns) -> list:
             notes.append(f"{persona}#{i} 出现确认门内部术语/令牌，疑似编造操作步骤")
         if len(_NUMBERED_LIST_RE.findall(content)) >= 2:
             notes.append(f"{persona}#{i} 出现行首编号清单（违反「只给当前一步」）")
+        ui_hits = [w for w in _UI_AFFORDANCE_WORDS if w in content]
+        if ui_hits:
+            notes.append(
+                f"{persona}#{i} 出现未核实的 UI 交互词 {ui_hits}"
+                "（护栏可能漏过，需人复核）")
         if persona == "novice" and i == 1 and not content:
             notes.append(f"{persona}#{i} 空回答")
     return notes
