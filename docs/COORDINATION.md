@@ -2905,6 +2905,15 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `docs/COORDINATION.md` | 多机线/42（§275 记录 + §6.1） | 2026-11-23 23:42 | 本笔 |
 | `.trae/specs/multi-device-interconnect/spec.md` | 多机线/42（§276 契约 5.3/5.4 + 验收现状 + 诚实边界） | 2026-11-23 23:44 | 本笔 |
 | `docs/COORDINATION.md` | 多机线/42（§276 记录 + §6.1） | 2026-11-23 23:44 | 本笔 |
+| `spatial/app/src/main/java/com/mbdsdr/spatial/net/RtlTcpProtocol.kt` | 多机线/42（§277 rtl_tcp 头/命令/IQ8 编解码） | 2026-11-23 23:48 | 本笔 |
+| `spatial/app/src/test/java/com/mbdsdr/spatial/RtlTcpProtocolTest.kt` | 多机线/42（§277 协议 6 条用例） | 2026-11-23 23:48 | 本笔 |
+| `spatial/README.md` | 多机线/42（§277 协议层边界） | 2026-11-23 23:48 | 本笔 |
+| `.trae/specs/multi-device-interconnect/tasks.md` | 多机线/42（§277 M4.2 协议层状态） | 2026-11-23 23:48 | 本笔 |
+| `.trae/specs/multi-device-interconnect/checklist.md` | 多机线/42（§277 协议层项） | 2026-11-23 23:48 | 本笔 |
+| `.trae/specs/mbdsdr-system-lifecycle/tasks.md` | 多机线/42（§277 Task 232） | 2026-11-23 23:48 | 本笔 |
+| `.trae/specs/mbdsdr-system-lifecycle/checklist.md` | 多机线/42（§277 Task 232） | 2026-11-23 23:48 | 本笔 |
+| `docs/PRD-现状对照.md` | 多机线/42（§277 P1-11 补协议层） | 2026-11-23 23:48 | 本笔 |
+| `docs/COORDINATION.md` | 多机线/42（§277 记录 + §6.1） | 2026-11-23 23:48 | 本笔 |
 
 > 上表各行均由 `claim` 台账推导：owner 原文与 `acquired_at` 直接取自台账，
 > 目的优先用台账里的 `claim_reason`，没有就如实写「未声明」，不补编。时间列只是
@@ -13355,6 +13364,35 @@ spec 的 M4.3 要求「未联网时显示上次结果/包内内容，不伪造�
 **诚实边界**
 - spec 里的 `mbdsdr.sdr-lease/1` 样例时间/lease id 是示意，不是实测回执。
 - 「四窗增量替换」仍是未实现项，文档已如实标注。
+
+## 277. M4.2 头显 rtl_tcp 线协议基础层（2026-11-23）
+
+**依据**：§271–§276 打通了「谁可以用 SDR」，但从拿到授权到真正收 I/Q 之间
+还缺线协议。rtl_tcp 的问候头/命令字节一旦写错，会静默调错频率或读数错位；
+先把**纯字节层**锁死并单测，再谈 socket 与频谱。
+
+**做了什么**
+- 新 `spatial/.../net/RtlTcpProtocol.kt`（纯对象，无 socket）：
+  - 解析 12 字节 `RTL0` 头 → `tunerType`/`gainCount`（小端 uint32），
+    支持偏移读取；短包/坏魔数返回 null，不抛异常。
+  - 生成 5 字节命令：0x01 中心频率、0x02 采样率、0x03 增益模式、
+    0x04 手动增益（0.1 dB）、0x05 ppm（负数补码）、0x08 AGC。
+  - 频率 24 MHz–1.766 GHz、采样率 225 001–3 200 000、增益 0–496（0.1 dB）、
+    ppm ±1000；越界 `require` 直接拒绝，不发半条命令。
+  - `decodeIq8`：8-bit 无符号 I/Q → `[-1,1)`，尊重输出缓冲与奇数字节。
+
+**验证**
+- 新 `RtlTcpProtocolTest` 6 条：命令逐字节（含 100 MHz/2.4 MSPS/增益/AGC）、
+  负 ppm 补码、8 组越界、头解析（含偏移/坏魔数/短包）、IQ8 归一化、
+  小缓冲与奇数长度不越读。
+- `./gradlew.bat testDebugUnitTest --rerun-tasks --no-daemon --offline`：
+  **19 suite / 168 用例 / 0 失败 / 1 跳过**。
+- 未改 Python/手机；未连接真实 rtl_tcp（dongle 仍由模拟器会话占用）。
+
+**诚实边界**
+- 这层没有 socket、没有定时器、没接 UI：**不能**据此声称头显能直连收频谱。
+- 「RTL0」头字段语义按 rtl_tcp 公开实现；不同 tuner 的增益档数只透传，不解释。
+- 真机联调与频谱显示仍是后续任务。
 
 
 
