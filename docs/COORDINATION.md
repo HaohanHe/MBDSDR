@@ -2636,6 +2636,8 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `mbdsdr_ai/context_manager.py` | 移动端走查线/22（指天入口图标已核实事实） | 2026-11-22 23:05 | 本笔 |
 | `tests/test_agent_guidance_policy.py` | 移动端走查线/22（入口图标事实钉扎） | 2026-11-22 23:05 | 本笔 |
 | `mobile/readme.md` | 移动端走查线/22（§6.1 补登记（pre-commit ④ 拦截）） | 2026-11-22 23:08 | 本笔 |
+| `docs/PRD-现状对照.md` | 文档刷新线/prd-1123（刷新至2026-11-23代码事实（HEAD 3d26432e）+方向评估节；21条四元组独立复核全过） | 2026-11-23 17:22 | 本笔 |
+| `docs/tool-availability.md` | 文档刷新线/prd-1123（审计脚本复跑同步刷新：520=412+108（sdr_get_gps归①SDR组）） | 2026-11-23 17:22 | 本笔 |
 
 > 上表各行均由 `claim` 台账推导：owner 原文与 `acquired_at` 直接取自台账，
 > 目的优先用台账里的 `claim_reason`，没有就如实写「未声明」，不补编。时间列只是

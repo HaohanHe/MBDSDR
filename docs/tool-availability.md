@@ -2,18 +2,18 @@
 
 - 工具总数：**520**（分类 78 个）
 - 审计环境：`QT_QPA_PLATFORM=offscreen` + `MBDSDR_NO_HW=1` + `MBDSDR_NULL_AUDIO=1` + `MBDSDR_OFFLINE=1`，**无真机；输入为合成替身**
-- 结论：一类 413 / 二类 107 / 三类 0 / 四类 0
+- 结论：一类 412 / 二类 108 / 三类 0 / 四类 0
 
 复跑：`python scripts/tool_availability_audit.py`（`--only <工具名>` 单跑）。
 证据列：`OK` = 当次调用成功且非空；`断言:`= 往返/还原断言；`降级:`= 诚实不可用原因；`坏:`= 真坏原因。
 
 ## 补齐清单（二类按「需要什么」分组）
 
-分组计数合计 **107** = 二类 107
+分组计数合计 **108** = 二类 108
 
 | 补齐组 | 数量 | 最少补齐动作 |
 | --- | --- | --- |
-| ① SDR | 38 | 接一根 RTL-SDR（或 rtl_tcp / SoapySDR 后端），sdr_connect 后重跑 |
+| ① SDR | 39 | 接一根 RTL-SDR（或 rtl_tcp / SoapySDR 后端），sdr_connect 后重跑 |
 | ② 额外硬件/外部程序 | 19 | 接对应外设：云台 rotctld、GNSS/串口仪器、NanoVNA、电台或发射设备；SatDump 类需安装外部程序；界面类需在桌面端运行（UI 执行器） |
 | ③ 真样本 | 36 | 提供真实 OTA 录音 / IQ 文件（含合法同步字与完整帧），或按协议构造的合法帧；或先录制/先建提案 |
 | ④ 网络/API | 8 | 联网或填 API key；离线时保持诚实拒绝 |
@@ -21,7 +21,7 @@
 
 各组工具名（与上表「补齐组」列逐行一致）：
 
-- ① SDR（38）：`sdr_adsb_decode`、`sdr_ai_find_center`、`sdr_ai_sweep`、`sdr_bookmark_goto`、`sdr_connect`、`sdr_decode_noaa_apt`、`sdr_demodulate`、`sdr_detect_fhss`、`sdr_doppler_compensation`、`sdr_fm_scan`、`sdr_get_frequency`、`sdr_get_imu`、`sdr_identify_modulation`、`sdr_iq_correct`、`sdr_listen_fm`、`sdr_measure_signal`、`sdr_rds_decode`、`sdr_record_start`、`sdr_satellite_doppler_track`、`sdr_set_agc`、`sdr_set_bandwidth`、`sdr_set_demod`、`sdr_set_frequency`、`sdr_set_gain`、`sdr_set_sample_rate`、`sdr_set_squelch`、`sdr_set_volume`、`sdr_spectrum_analyze`、`sdr_spectrum_center_offset`、`sdr_spectrum_find_signals`、`sdr_spectrum_screenshot`、`sdr_spectrum_text`、`sdr_sweep_scan`、`sdr_switch_device`、`sdr_watch_capture`、`sdr_wfm_stereo`、`signal_detect`、`signal_detect_interference`
+- ① SDR（39）：`sdr_adsb_decode`、`sdr_ai_find_center`、`sdr_ai_sweep`、`sdr_bookmark_goto`、`sdr_connect`、`sdr_decode_noaa_apt`、`sdr_demodulate`、`sdr_detect_fhss`、`sdr_doppler_compensation`、`sdr_fm_scan`、`sdr_get_frequency`、`sdr_get_gps`、`sdr_get_imu`、`sdr_identify_modulation`、`sdr_iq_correct`、`sdr_listen_fm`、`sdr_measure_signal`、`sdr_rds_decode`、`sdr_record_start`、`sdr_satellite_doppler_track`、`sdr_set_agc`、`sdr_set_bandwidth`、`sdr_set_demod`、`sdr_set_frequency`、`sdr_set_gain`、`sdr_set_sample_rate`、`sdr_set_squelch`、`sdr_set_volume`、`sdr_spectrum_analyze`、`sdr_spectrum_center_offset`、`sdr_spectrum_find_signals`、`sdr_spectrum_screenshot`、`sdr_spectrum_text`、`sdr_sweep_scan`、`sdr_switch_device`、`sdr_watch_capture`、`sdr_wfm_stereo`、`signal_detect`、`signal_detect_interference`
 - ② 额外硬件/外部程序（19）：`gimbal_move`、`gimbal_rssi_sweep`、`instrument_query`、`mount_abort`、`mount_slew`、`mount_status`、`radio_send_cw`、`satdump_compose_image`、`satdump_live`、`satdump_process`、`sky_gimbal_follow`、`sky_look_at`、`sky_pointing_check`、`sky_track_satellite`、`sky_tune_satellite`、`ui_layout_control`、`ui_layout_undo`、`vna_list_ports`、`vna_sweep`
 - ③ 真样本（36）：`acars_decode_iq`、`amr_classify`、`amr_extract_features`、`astu_telemetry_decode`、`camera_capture_plan`、`cma_equalize`、`code_git_commit`、`code_modify_file`、`code_modify_section`、`code_rollback`、`dab_decode_iq`、`dab_eti_parse`、`dmr_decode`、`doppler_orbit_determine`、`fy4_lrit_decode`、`fy4_lrit_decode_iq`、`gk2a_lrit_decode`、`gnss_sky_fit`、`goes_extract_image`、`goes_hrit_parse`、`goes_lrit_parse`、`gps_code_acquire`、`interferometry_tdoa`、`iq_split_plan`、`meteor_lrpt_decode_iq`、`meteor_lrpt_demod`、`noaa_apt_decode`、`sat_image_enhance`、`sdr_decode_cw`、`sdr_decode_ft8`、`sdrangel_ogn_decode`、`sky_asterism_lookup`、`sky_culture_lookup`、`sky_object_lookup`、`ssdv_ccsds_decode`、`verify_decode_chain`
 - ④ 网络/API（8）：`git_clone_repo`、`openapi_aircraft_nearby`、`openapi_iss_position`、`openapi_people_in_space`、`openapi_weather`、`subagent_execute`、`time_sync_ntp`、`web_fetch_url`
@@ -36,7 +36,7 @@
 
 | 工具 | 分类 | 结论 | 证据（本次调用） | 不可用时缺什么 | 补齐组 |
 | --- | --- | --- | --- | --- | --- |
-| `iq_split_plan` | ai | 二类·诚实不可用 | 降级：有效输入：合成替身不满足该工具的输入要求｜{"ok": false, "path": "C:\\Users\\xxhzb\\AppData\\Local\\Temp\\mbdsdr_audit_f6rpc_j6\\path.bin", "reason": "va | 有效输入：合成替身不满足该工具的输入要求 | ③ 真样本 |
+| `iq_split_plan` | ai | 二类·诚实不可用 | 降级：有效输入：合成替身不满足该工具的输入要求｜{"ok": false, "path": "C:\\Users\\xxhzb\\AppData\\Local\\Temp\\mbdsdr_audit_q1skwm64\\path.bin", "reason": "va | 有效输入：合成替身不满足该工具的输入要求 | ③ 真样本 |
 | `amr_classify` | amr | 二类·诚实不可用 | 降级：有效输入：合成替身不满足该工具的输入要求｜错误：未提供足够的 IQ 样本（至少 2 个交替 I/Q 实数）。AMR 只对真实信号分类；为空时不会用正弦/模拟数据冒充输入，请从接收机或录制文件提供 iq_samples。 | 有效输入：合成替身不满足该工具的输入要求 | ③ 真样本 |
 | `amr_extract_features` | amr | 二类·诚实不可用 | 降级：有效输入：合成替身不满足该工具的输入要求｜错误：未提供足够的 IQ 样本（至少 2 个交替 I/Q 实数）。为空时不会用正弦/模拟数据冒充输入，请提供真实 iq_samples。 | 有效输入：合成替身不满足该工具的输入要求 | ③ 真样本 |
 | `dab_decode_iq` | broadcast | 二类·诚实不可用 | 降级：有效输入：合成替身不满足该工具的输入要求｜DAB 解码失败：未找到 ETI FSYNC 同步——请确认输入为 ETI(NI) 字节流（可含前缀杂质，工具会自动搜索同步），制式为 DAB Mode I | 有效输入：合成替身不满足该工具的输入要求 | ③ 真样本 |
@@ -73,9 +73,9 @@
 | `gps_code_acquire` | satellite | 二类·诚实不可用 | 降级：有效输入：合成替身不满足该工具的输入要求｜{"per_code": {"PRN1": {"peak": 2.181236839175987, "chip_phase": 174, "doppler_hz": -4100.0}, "PRN2": {"peak":  | 有效输入：合成替身不满足该工具的输入要求 | ③ 真样本 |
 | `interferometry_tdoa` | satellite | 二类·诚实不可用 | 降级：有效输入：合成替身不满足该工具的输入要求｜{"lag_samples": 1548.2356462052346, "delay_s": 0.19352945577565434, "peak": 0.15542614220190815, "min_peak": 0 | 有效输入：合成替身不满足该工具的输入要求 | ③ 真样本 |
 | `sat_image_enhance` | satellite | 二类·诚实不可用 | 降级：有效输入：合成替身不满足该工具的输入要求｜工具 'sat_image_enhance' 参数不合法： - 参数 'image' 需要 number 数组，收到 第 1 项类型不是 number（收到 list）；未执行该工具。 | 有效输入：合成替身不满足该工具的输入要求 | ③ 真样本 |
-| `satdump_compose_image` | satellite | 二类·诚实不可用 | 降级：有效输入：合成替身不满足该工具的输入要求｜=== 云图合成 ===  输入目录: test 输出文件: C:\Users\xxhzb\AppData\Local\Temp\mbdsdr_audit_f6rpc_j6\output_file.bin 增强: 是   | 有效输入：合成替身不满足该工具的输入要求 | ② 额外硬件/外部程序 |
-| `satdump_live` | satellite | 二类·诚实不可用 | 降级：外部程序/依赖：未安装｜=== SatDump 实时接收 ===  卫星: noaa19_apt 频率: 100.000 MHz 输出目录: C:\Users\xxhzb\AppData\Local\Temp\mbdsdr_audit_f6rp | 外部程序/依赖：未安装 | ② 额外硬件/外部程序 |
-| `satdump_process` | satellite | 二类·诚实不可用 | 降级：外部程序/依赖：未安装｜=== SatDump 离线处理 ===  输入文件: C:\Users\xxhzb\AppData\Local\Temp\mbdsdr_audit_f6rpc_j6\input_file.bin 卫星: noaa19_ | 外部程序/依赖：未安装 | ② 额外硬件/外部程序 |
+| `satdump_compose_image` | satellite | 二类·诚实不可用 | 降级：有效输入：合成替身不满足该工具的输入要求｜=== 云图合成 ===  输入目录: test 输出文件: C:\Users\xxhzb\AppData\Local\Temp\mbdsdr_audit_q1skwm64\output_file.bin 增强: 是   | 有效输入：合成替身不满足该工具的输入要求 | ② 额外硬件/外部程序 |
+| `satdump_live` | satellite | 二类·诚实不可用 | 降级：外部程序/依赖：未安装｜=== SatDump 实时接收 ===  卫星: noaa19_apt 频率: 100.000 MHz 输出目录: C:\Users\xxhzb\AppData\Local\Temp\mbdsdr_audit_q1sk | 外部程序/依赖：未安装 | ② 额外硬件/外部程序 |
+| `satdump_process` | satellite | 二类·诚实不可用 | 降级：外部程序/依赖：未安装｜=== SatDump 离线处理 ===  输入文件: C:\Users\xxhzb\AppData\Local\Temp\mbdsdr_audit_q1skwm64\input_file.bin 卫星: noaa19_ | 外部程序/依赖：未安装 | ② 额外硬件/外部程序 |
 | `tc_uplink_transmit` | satellite | 二类·诚实不可用 | 降级：人工确认：arm_manual 安全门｜{"status": "GATED", "code": "gate_not_armed", "reason_code": "gate_not_armed", "gate_state": "disarmed", "reas | 人工确认：arm_manual 安全门 | ⑤ 人工确认 |
 | `verify_decode_chain` | satellite | 二类·诚实不可用 | 降级：有效输入：合成替身不满足该工具的输入要求｜验证链失败: CRC crc16_ccitt_false 校验失败：帧 5555 ≠ 计算 75B0——帧内容损坏，不产出字段结论 | 有效输入：合成替身不满足该工具的输入要求 | ③ 真样本 |
 | `openapi_aircraft_nearby` | sdr_ai | 二类·诚实不可用 | 降级：网络：外网访问/在线数据源｜=== 附近飞机（ADS-B） ===  位置: 43.8868°, 125.3245° 半径: 50 km  错误: 离线模式（MBDSDR_OFFLINE）：附近飞机（OpenSky ADS-B） 需要联网，已拒绝； | 网络：外网访问/在线数据源 | ④ 网络/API |
@@ -95,7 +95,7 @@
 | `noaa_apt_decode` | sdr_decode | 二类·诚实不可用 | 降级：有效输入：合成替身不满足该工具的输入要求｜读取 WAV 失败: File format b'\x00\x00\x00\x00' not understood. Only 'RIFF', 'RIFX', and 'RF64' supported. | 有效输入：合成替身不满足该工具的输入要求 | ③ 真样本 |
 | `sdr_adsb_decode` | sdr_decode | 二类·诚实不可用 | 降级：硬件：SDR 设备｜错误: 设备未连接 | 硬件：SDR 设备 | ① SDR |
 | `sdr_decode_cw` | sdr_decode | 二类·诚实不可用 | 降级：有效输入：合成替身不满足该工具的输入要求｜CW 解码失败: file does not start with RIFF id | 有效输入：合成替身不满足该工具的输入要求 | ③ 真样本 |
-| `sdr_decode_ft8` | sdr_decode | 二类·诚实不可用 | 降级：有效输入：合成替身不满足该工具的输入要求｜=== FT8 分析 === 输入: C:\Users\xxhzb\AppData\Local\Temp\mbdsdr_audit_f6rpc_j6\input_path.bin 内置分析异常: file does no | 有效输入：合成替身不满足该工具的输入要求 | ③ 真样本 |
+| `sdr_decode_ft8` | sdr_decode | 二类·诚实不可用 | 降级：有效输入：合成替身不满足该工具的输入要求｜=== FT8 分析 === 输入: C:\Users\xxhzb\AppData\Local\Temp\mbdsdr_audit_q1skwm64\input_path.bin 内置分析异常: file does no | 有效输入：合成替身不满足该工具的输入要求 | ③ 真样本 |
 | `sdr_decode_noaa_apt` | sdr_decode | 二类·诚实不可用 | 降级：硬件：SDR 设备｜错误: 设备未连接（给 input_path 可离线解码 WAV/IQ 文件） | 硬件：SDR 设备 | ① SDR |
 | `sdr_listen_fm` | sdr_decode | 二类·诚实不可用 | 降级：硬件：SDR 设备｜设备未连接，无法收听。请先 sdr_connect 连接 SDR 设备（RTL-SDR/HackRF 等），。 | 硬件：SDR 设备 | ① SDR |
 | `sdr_rds_decode` | sdr_decode | 二类·诚实不可用 | 降级：硬件：SDR 设备｜错误: 设备未连接 | 硬件：SDR 设备 | ① SDR |
@@ -105,7 +105,7 @@
 | `sdr_set_squelch` | sdr_demod | 二类·诚实不可用 | 降级：硬件：SDR 设备｜操作失败：当前无连接设备，请先 sdr_connect 或 sdr_open_iq_file | 硬件：SDR 设备 | ① SDR |
 | `sdr_set_volume` | sdr_demod | 二类·诚实不可用 | 降级：硬件：SDR 设备｜操作失败：当前无连接设备，请先 sdr_connect 或 sdr_open_iq_file | 硬件：SDR 设备 | ① SDR |
 | `sdr_bookmark_goto` | sdr_device | 二类·诚实不可用 | 降级：硬件：SDR 设备｜错误: 设备未连接，无法跳转频率 | 硬件：SDR 设备 | ① SDR |
-| `sdr_connect` | sdr_device | 二类·诚实不可用 | 降级：硬件：SDR 设备｜连接失败：上次使用的设备 'usb' 当前不在枚举列表中，未连接。可用设备：（未发现任何设备） | 硬件：SDR 设备 | ① SDR |
+| `sdr_connect` | sdr_device | 二类·诚实不可用 | 降级：硬件：SDR 设备｜连接失败：上次使用的设备 'honest_stub_debug' 当前不在枚举列表中，未连接。可用设备：（未发现任何设备） | 硬件：SDR 设备 | ① SDR |
 | `sdr_switch_device` | sdr_device | 二类·诚实不可用 | 降级：硬件：SDR 设备｜切换失败：设备 mock 不存在或无法打开（先用 sdr_list_devices 核对 device_id） | 硬件：SDR 设备 | ① SDR |
 | `sdr_get_frequency` | sdr_frequency | 二类·诚实不可用 | 降级：硬件：SDR 设备｜未连接设备或未打开 IQ 文件，无法查询频率（先 sdr_connect / sdr_open_iq_file） | 硬件：SDR 设备 | ① SDR |
 | `sdr_set_bandwidth` | sdr_frequency | 二类·诚实不可用 | 降级：硬件：SDR 设备｜操作失败：当前无连接设备，请先 sdr_connect 或 sdr_open_iq_file | 硬件：SDR 设备 | ① SDR |
@@ -114,6 +114,7 @@
 | `set_ppm_correction` | sdr_frequency | 二类·诚实不可用 | 降级：人工确认：arm_manual 安全门｜未执行 set_ppm_correction（gate_not_armed: 未过人工门：需外部确认通道签发的一次性 token） | 人工确认：arm_manual 安全门 | ⑤ 人工确认 |
 | `sdr_set_agc` | sdr_gain | 二类·诚实不可用 | 降级：硬件：SDR 设备｜操作失败：当前无连接设备，请先 sdr_connect 或 sdr_open_iq_file | 硬件：SDR 设备 | ① SDR |
 | `sdr_set_gain` | sdr_gain | 二类·诚实不可用 | 降级：硬件：SDR 设备｜操作失败：当前无连接设备，请先 sdr_connect 或 sdr_open_iq_file | 硬件：SDR 设备 | ① SDR |
+| `sdr_get_gps` | sdr_location | 二类·诚实不可用 | 降级：硬件：SDR 设备｜GPS 定位: 未连接（未检测到 GNSS 串口） | 硬件：SDR 设备 | ① SDR |
 | `sdr_get_imu` | sdr_location | 二类·诚实不可用 | 降级：硬件：SDR 设备｜IMU 姿态: 未连接（未检测到九轴硬件） | 硬件：SDR 设备 | ① SDR |
 | `sdr_record_start` | sdr_record | 二类·诚实不可用 | 降级：硬件：SDR 设备｜错误: 设备未连接 | 硬件：SDR 设备 | ① SDR |
 | `sdr_doppler_compensation` | sdr_satellite | 二类·诚实不可用 | 降级：硬件：SDR 设备｜尚未连接设备，无法执行 接收链多普勒补偿。 | 硬件：SDR 设备 | ① SDR |
@@ -127,7 +128,7 @@
 | `sdr_sweep_scan` | sdr_spectrum | 二类·诚实不可用 | 降级：硬件：SDR 设备｜错误: 设备未连接，无法扫频 | 硬件：SDR 设备 | ① SDR |
 | `sdr_watch_capture` | sdr_spectrum | 二类·诚实不可用 | 降级：硬件：SDR 设备｜错误: 设备未连接，无法守听 | 硬件：SDR 设备 | ① SDR |
 | `cma_equalize` | signal_analysis | 二类·诚实不可用 | 降级：有效输入：合成替身不满足该工具的输入要求｜{"cost_initial": 1.437035, "cost_final": 1.320546, "evm_before_db": 0.012, "evm_after_db": -1.059, "samples_us | 有效输入：合成替身不满足该工具的输入要求 | ③ 真样本 |
-| `gnss_sky_fit` | sky | 二类·诚实不可用 | 降级：有效输入：合成替身不满足该工具的输入要求｜{"ok": false, "reason": "no_satellites", "hint": "需要 NMEA GSV 帧（serial_gnss 的 get_gsv_frames() 输出，含每颗卫星 elevat | 有效输入：合成替身不满足该工具的输入要求 | ③ 真样本 |
+| `gnss_sky_fit` | sky | 二类·诚实不可用 | 降级：有效输入：合成替身不满足该工具的输入要求｜{"ok": false, "reason": "no_satellites", "hint": "未给 frames 时会读本机最近一帧 GSV（10 秒内）；需要 NMEA GSV 帧（serial_gnss 的 g | 有效输入：合成替身不满足该工具的输入要求 | ③ 真样本 |
 | `sky_asterism_lookup` | sky | 二类·诚实不可用 | 降级：有效输入：合成替身不满足该工具的输入要求｜{"ok": false, "reason": "星官数据里没有 'test'", "hint": "可尝试其中一些：三公、三师、五帝内座、传舍、八谷、六甲、内厨、内阶、势、勾陈、北斗、北极、华盖、四辅、大理、天乙、天厨 | 有效输入：合成替身不满足该工具的输入要求 | ③ 真样本 |
 | `sky_culture_lookup` | sky | 二类·诚实不可用 | 降级：有效输入：合成替身不满足该工具的输入要求｜{"ok": false, "matched": false, "hip": 1, "reason": "HIP 1 不在任何文化包的名称或连线里", "hint": "只报数据里真实出现的 HIP；不返回最近邻，也不猜 | 有效输入：合成替身不满足该工具的输入要求 | ③ 真样本 |
 | `sky_gimbal_follow` | sky | 二类·诚实不可用 | 降级：桌面：需在桌面端运行（UI 执行器未挂载）｜{"ok": false, "status": "UNAVAILABLE", "reason": "天空动作执行器未挂载（非桌面环境），硬件未动作"} | 桌面：需在桌面端运行（UI 执行器未挂载） | ② 额外硬件/外部程序 |
@@ -159,17 +160,17 @@
 | `astro_antenna_params` | astronomy | 一类·真跑 | OK（245 字符，data=有） |  | — |
 | `astro_compute_airmass` | astronomy | 一类·真跑 | OK（20 字符，data=无） |  | — |
 | `astro_compute_refraction` | astronomy | 一类·真跑 | OK（92 字符，data=无） |  | — |
-| `astro_equatorial_to_altaz` | astronomy | 一类·真跑 | OK（205 字符，data=有） |  | — |
+| `astro_equatorial_to_altaz` | astronomy | 一类·真跑 | OK（210 字符，data=有） |  | — |
 | `astro_get_observer` | astronomy | 一类·真跑 | OK（280 字符，data=有） |  | — |
 | `astro_pointing_guidance` | astronomy | 一类·真跑 | OK（618 字符，data=有） |  | — |
 | `astro_set_observer` | astronomy | 一类·真跑 | OK（108 字符，data=无） |  | — |
-| `astro_time_info` | astronomy | 一类·真跑 | OK（193 字符，data=有） |  | — |
+| `astro_time_info` | astronomy | 一类·真跑 | OK（194 字符，data=有） |  | — |
 | `dab_fic_decode` | broadcast | 一类·真跑 | OK（78 字符，data=有） |  | — |
 | `hdradio_decode_iq` | broadcast | 一类·真跑 | OK（58 字符，data=有） |  | — |
 | `hdradio_frame_parse` | broadcast | 一类·真跑 | OK（29 字符，data=有） |  | — |
 | `hdradio_ofdm_demod` | broadcast | 一类·真跑 | OK（69 字符，data=有） |  | — |
 | `baseband_save` | capture | 一类·真跑 | OK（386 字符，data=有） |  | — |
-| `code_git_status` | code_editor | 一类·真跑 | OK（7540 字符，data=有） |  | — |
+| `code_git_status` | code_editor | 一类·真跑 | OK（618 字符，data=有） |  | — |
 | `code_hot_reload` | code_editor | 一类·真跑 | OK（15 字符，data=无） |  | — |
 | `code_list_edits` | code_editor | 一类·真跑 | OK（2 字符，data=无） |  | — |
 | `code_read_file` | code_editor | 一类·真跑 | OK（8180 字符，data=无） |  | — |
@@ -260,7 +261,7 @@
 | `file_change_history` | file_tracker | 一类·真跑 | OK（8190 字符，data=有） |  | — |
 | `file_change_revert` | file_tracker | 一类·真跑 | OK（483 字符，data=有） |  | — |
 | `file_change_stats` | file_tracker | 一类·真跑 | OK（284 字符，data=有） |  | — |
-| `file_change_track` | file_tracker | 一类·真跑 | OK（288 字符，data=有） |  | — |
+| `file_change_track` | file_tracker | 一类·真跑 | OK（289 字符，data=有） |  | — |
 | `gimbal_connect` | gimbal | 一类·真跑 | OK（41 字符，data=无） |  | — |
 | `gimbal_modes` | gimbal | 一类·真跑 | OK（333 字符，data=无） |  | — |
 | `gimbal_point` | gimbal | 一类·真跑 | OK（125 字符，data=无） |  | — |
@@ -279,7 +280,7 @@
 | `spp_locate` | gnss | 一类·真跑 | OK（760 字符，data=有） |  | — |
 | `subframe_assemble` | gnss | 一类·真跑 | OK（39 字符，data=有） |  | — |
 | `gnss_direction_find` | gnss_monitor | 一类·真跑 | OK（129 字符，data=有） |  | — |
-| `gnss_monitor_all` | gnss_monitor | 一类·真跑 | OK（814 字符，data=无） |  | — |
+| `gnss_monitor_all` | gnss_monitor | 一类·真跑 | OK（816 字符，data=无） |  | — |
 | `gnss_monitor_band` | gnss_monitor | 一类·真跑 | OK（223 字符，data=无） |  | — |
 | `guardian_list` | guardian | 一类·真跑 | OK（2 字符，data=无） |  | — |
 | `guardian_rollback` | guardian | 一类·真跑 | OK（11 字符，data=无） |  | — |
@@ -301,10 +302,10 @@
 | `xastir_decode_frame` | ham_modes | 一类·真跑 | OK（37 字符，data=有） |  | — |
 | `xastir_encode_object` | ham_modes | 一类·真跑 | OK（40 字符，data=有） |  | — |
 | `xastir_geofence` | ham_modes | 一类·真跑 | OK（24 字符，data=有） |  | — |
-| `judge_evaluate` | judge | 一类·真跑 | OK（399 字符，data=有） |  | — |
-| `judge_history` | judge | 一类·真跑 | OK（443 字符，data=有） |  | — |
+| `judge_evaluate` | judge | 一类·真跑 | OK（400 字符，data=有） |  | — |
+| `judge_history` | judge | 一类·真跑 | OK（444 字符，data=有） |  | — |
 | `judge_stats` | judge | 一类·真跑 | OK（347 字符，data=有） |  | — |
-| `learning_experiences` | learning | 一类·真跑 | OK（5954 字符，data=有） |  | — |
+| `learning_experiences` | learning | 一类·真跑 | OK（5955 字符，data=有） |  | — |
 | `learning_patterns` | learning | 一类·真跑 | OK（2 字符，data=无） |  | — |
 | `learning_record` | learning | 一类·真跑 | OK（270 字符，data=有） |  | — |
 | `learning_stats` | learning | 一类·真跑 | OK（357 字符，data=有） |  | — |
@@ -344,15 +345,15 @@
 | `time_ntp_sync` | new_spacetime | 一类·真跑 | OK（78 字符，data=无） |  | — |
 | `observation_export` | observation | 一类·真跑 | OK（109 字符，data=无） |  | — |
 | `calibrate_time_offset` | orbit | 一类·真跑 | OK（56 字符，data=有） |  | — |
-| `doppler_tune_frequency` | orbit | 一类·真跑 | OK（350 字符，data=有） |  | — |
+| `doppler_tune_frequency` | orbit | 一类·真跑 | OK（351 字符，data=有） |  | — |
 | `initial_orbit_laplace` | orbit | 一类·真跑 | OK（530 字符，data=有） |  | — |
 | `lro_track` | orbit | 一类·真跑 | OK（51 字符，data=有） |  | — |
 | `orbit_propagate_stm_j2` | orbit | 一类·真跑 | OK（615 字符，data=有） |  | — |
-| `predict_satellite_passes` | orbit | 一类·真跑 | OK（180 字符，data=有） |  | — |
+| `predict_satellite_passes` | orbit | 一类·真跑 | OK（1253 字符，data=有） |  | — |
 | `propagate_state_stm` | orbit | 一类·真跑 | OK（34 字符，data=有） |  | — |
 | `pseudorange_rate_model` | orbit | 一类·真跑 | OK（28 字符，data=有） |  | — |
 | `rls_update` | orbit | 一类·真跑 | OK（53 字符，data=有） |  | — |
-| `satellite_now_pointing` | orbit | 一类·真跑 | OK（394 字符，data=有） |  | — |
+| `satellite_now_pointing` | orbit | 一类·真跑 | OK（397 字符，data=有） |  | — |
 | `tle_state_ecef` | orbit | 一类·真跑 | OK（66 字符，data=有） |  | — |
 | `sdr_plan` | planning | 一类·真跑 | OK（80 字符，data=无） |  | — |
 | `sdr_spill_read` | planning | 一类·真跑 | OK（34 字符，data=无） |  | — |
@@ -361,7 +362,7 @@
 | `ar_pointing_guidance` | pose | 一类·真跑 | OK（278 字符，data=有） |  | — |
 | `ar_project_satellite` | pose | 一类·真跑 | OK（234 字符，data=有） |  | — |
 | `pose_get` | pose | 一类·真跑 | OK（312 字符，data=有） |  | — |
-| `pose_update_gps` | pose | 一类·真跑 | OK（318 字符，data=有） |  | — |
+| `pose_update_gps` | pose | 一类·真跑 | OK（319 字符，data=有） |  | — |
 | `pose_update_imu` | pose | 一类·真跑 | OK（308 字符，data=有） |  | — |
 | `crc_check` | protocol | 一类·真跑 | OK（83 字符，data=有） |  | — |
 | `field_extract` | protocol | 一类·真跑 | OK（8 字符，data=有） |  | — |
@@ -369,7 +370,7 @@
 | `morse_decode` | radio_control | 一类·真跑 | OK（54 字符，data=有） |  | — |
 | `morse_encode` | radio_control | 一类·真跑 | OK（54 字符，data=有） |  | — |
 | `radio_connect` | radio_control | 一类·真跑 | OK（189 字符，data=无） |  | — |
-| `radio_list_ports` | radio_control | 一类·真跑 | OK（136 字符，data=无） |  | — |
+| `radio_list_ports` | radio_control | 一类·真跑 | OK（104 字符，data=无） |  | — |
 | `radio_ptt` | radio_control | 一类·真跑 | OK（27 字符，data=无） |  | — |
 | `radio_set_frequency` | radio_control | 一类·真跑 | OK（51 字符，data=无） |  | — |
 | `radio_set_mode` | radio_control | 一类·真跑 | OK（28 字符，data=无） |  | — |
@@ -406,7 +407,7 @@
 | `sat_link_identify` | satellite | 一类·真跑 | OK（51 字符，data=有） |  | — |
 | `sat_link_list` | satellite | 一类·真跑 | OK（91 字符，data=有） |  | — |
 | `sat_link_tuning` | satellite | 一类·真跑 | OK（29 字符，data=有） |  | — |
-| `sat_pass_predict` | satellite | 一类·真跑 | OK（2154 字符，data=有） |  | — |
+| `sat_pass_predict` | satellite | 一类·真跑 | OK（2436 字符，data=有） |  | — |
 | `sat_project_image` | satellite | 一类·真跑 | OK（25 字符，data=有） |  | — |
 | `satdump_check` | satellite | 一类·真跑 | OK（202 字符，data=无） |  | — |
 | `satdump_list_sats` | satellite | 一类·真跑 | OK（704 字符，data=无） |  | — |
@@ -431,7 +432,7 @@
 | `limesdr_set_params` | sdr | 一类·真跑 | OK（383 字符，data=有） |  | — |
 | `osmosdr_create_source` | sdr | 一类·真跑 | OK（329 字符，data=有） |  | — |
 | `osmosdr_get_gain_ranges` | sdr | 一类·真跑 | OK（96 字符，data=有） |  | — |
-| `osmosdr_list_devices` | sdr | 一类·真跑 | OK（139 字符，data=有） |  | — |
+| `osmosdr_list_devices` | sdr | 一类·真跑 | OK（2 字符，data=有） |  | — |
 | `rtlsdr_get_freq_range` | sdr | 一类·真跑 | OK（353 字符，data=有） |  | — |
 | `rtlsdr_list_gains` | sdr | 一类·真跑 | OK（617 字符，data=有） |  | — |
 | `rtlsdr_set_params` | sdr | 一类·真跑 | OK（580 字符，data=有） |  | — |
@@ -440,7 +441,7 @@
 | `estimate_ppm_offset` | sdr_analysis | 一类·真跑 | OK（246 字符，data=有） |  | — |
 | `sdr_analyze_recording` | sdr_analysis | 一类·真跑 | OK（391 字符，data=无） |  | — |
 | `sdr_cfo_correct` | sdr_analysis | 一类·真跑 | OK（293 字符，data=无） |  | — |
-| `signal_extract_features` | sdr_analysis | 一类·真跑 | OK（131 字符，data=无） |  | — |
+| `signal_extract_features` | sdr_analysis | 一类·真跑 | OK（130 字符，data=无） |  | — |
 | `signal_identify_modulation` | sdr_analysis | 一类·真跑 | OK（144 字符，data=无） |  | — |
 | `meteor_viterbi_decode` | sdr_decode | 一类·真跑 | OK（131 字符，data=有） |  | — |
 | `sdr_decode_adsb` | sdr_decode | 一类·真跑 | OK（35 字符，data=无） |  | — |
@@ -450,7 +451,7 @@
 | `hdsdr_bandwidth_preset` | sdr_demod | 一类·真跑 | OK（167 字符，data=有） |  | — |
 | `sdr_play_audio` | sdr_demod | 一类·真跑 | OK（66 字符，data=无） |  | — |
 | `sdr_bookmark_add` | sdr_device | 一类·真跑 | OK（34 字符，data=无） |  | — |
-| `sdr_bookmark_list` | sdr_device | 一类·真跑 | OK（4569 字符，data=无） |  | — |
+| `sdr_bookmark_list` | sdr_device | 一类·真跑 | OK（4598 字符，data=无） |  | — |
 | `sdr_disconnect` | sdr_device | 一类·真跑 | OK（8 字符，data=无） |  | — |
 | `sdr_fm_preset` | sdr_device | 一类·真跑 | OK（83 字符，data=有） |  | — |
 | `sdr_list_devices` | sdr_device | 一类·真跑 | OK（2 字符，data=无） |  | — |
@@ -467,7 +468,6 @@
 | `vfo_list` | sdr_frequency | 一类·真跑 | OK（138 字符，data=无） |  | — |
 | `vfo_remove` | sdr_frequency | 一类·真跑 | OK（14 字符，data=无） |  | — |
 | `vfo_select` | sdr_frequency | 一类·真跑 | OK（63 字符，data=无） |  | — |
-| `sdr_get_gps` | sdr_location | 一类·真跑 | OK（29 字符，data=无） |  | — |
 | `sdr_aprs_decode` | sdr_network | 一类·真跑 | OK（114 字符，data=有） |  | — |
 | `sdr_aprs_encode` | sdr_network | 一类·真跑 | OK（224 字符，data=有） |  | — |
 | `sdr_aprs_send_position` | sdr_network | 一类·真跑 | OK（353 字符，data=无） |  | — |
@@ -486,7 +486,7 @@
 | `sdr_record_stop` | sdr_record | 一类·真跑 | OK（9 字符，data=无） |  | — |
 | `sdr_recordings_list` | sdr_record | 一类·真跑 | OK（202 字符，data=有） |  | — |
 | `sdr_satellite_doppler` | sdr_satellite | 一类·真跑 | OK（201 字符，data=有） |  | — |
-| `sdr_satellite_passes` | sdr_satellite | 一类·真跑 | OK（2760 字符，data=无） |  | — |
+| `sdr_satellite_passes` | sdr_satellite | 一类·真跑 | OK（1891 字符，data=无） |  | — |
 | `sdr_satellite_sky_view` | sdr_satellite | 一类·真跑 | OK（205 字符，data=无） |  | — |
 | `inspectrum_measure_bandwidth` | sdr_spectrum | 一类·真跑 | OK（153 字符，data=有） |  | — |
 | `inspectrum_measure_duty_cycle` | sdr_spectrum | 一类·真跑 | OK（129 字符，data=有） |  | — |
@@ -512,11 +512,11 @@
 | `jammer_generate` | signal_analysis | 一类·真跑 | OK（210 字符，data=有） |  | — |
 | `modulation_classify` | signal_analysis | 一类·真跑 | OK（422 字符，data=有） |  | — |
 | `symbol_rate_estimate` | signal_analysis | 一类·真跑 | OK（65 字符，data=有） |  | — |
-| `skill_list` | skill | 一类·真跑 | OK（859 字符，data=有） |  | — |
+| `skill_list` | skill | 一类·真跑 | OK（1172 字符，data=有） |  | — |
 | `skill_load` | skill | 一类·真跑 | OK（600 字符，data=无） |  | — |
 | `sky_calibration_save` | sky | 一类·真跑 | OK（386 字符，data=有） |  | — |
 | `sky_capability_report` | sky | 一类·真跑 | OK（651 字符，data=有） |  | — |
-| `sky_capability_state` | sky | 一类·真跑 | OK（866 字符，data=有） |  | — |
+| `sky_capability_state` | sky | 一类·真跑 | OK（906 字符，data=有） |  | — |
 | `sky_dso_lookup` | sky | 一类·真跑 | OK（119 字符，data=有） |  | — |
 | `sky_health` | sky | 一类·真跑 | OK（636 字符，data=有） |  | — |
 | `sky_identify_at` | sky | 一类·真跑 | OK（920 字符，data=有） |  | — |
@@ -524,7 +524,7 @@
 | `sky_observing_sites` | sky | 一类·真跑 | OK（545 字符，data=有） |  | — |
 | `sky_pose_fuse` | sky | 一类·真跑 | OK（448 字符，data=有） |  | — |
 | `sky_solve_status` | sky | 一类·真跑 | OK（224 字符，data=有） |  | — |
-| `sky_tonight` | sky | 一类·真跑 | OK（1434 字符，data=有） |  | — |
+| `sky_tonight` | sky | 一类·真跑 | OK（1444 字符，data=有） |  | — |
 | `sky_whats_here` | sky | 一类·真跑 | OK（546 字符，data=有） |  | — |
 | `constellation_evm` | spectrum | 一类·真跑 | OK（105 字符，data=有） |  | — |
 | `sdr_anr_denoise` | spectrum | 一类·真跑 | OK（8185 字符，data=有） |  | — |
@@ -535,7 +535,7 @@
 | `signal_quality_stats` | spectrum | 一类·真跑 | OK（162 字符，data=有） |  | — |
 | `spectrum_analyze_iq` | spectrum | 一类·真跑 | OK（225 字符，data=有） |  | — |
 | `subagent_create` | subagent | 一类·真跑 | OK（49 字符，data=无） |  | — |
-| `subagent_list` | subagent | 一类·真跑 | OK（666 字符，data=有） |  | — |
+| `subagent_list` | subagent | 一类·真跑 | OK（668 字符，data=有） |  | — |
 | `subagent_stats` | subagent | 一类·真跑 | OK（266 字符，data=有） |  | — |
 | `costas_track` | sync | 一类·真跑 | OK（126 字符，data=有） |  | — |
 | `fll_track` | sync | 一类·真跑 | OK（44 字符，data=有） |  | — |
@@ -552,7 +552,7 @@
 | `workflow_execute` | workflow | 一类·真跑 | OK（272 字符，data=有） |  | — |
 | `workflow_list` | workflow | 一类·真跑 | OK（2 字符，data=无） |  | — |
 | `workflow_record_start` | workflow_recorder | 一类·真跑 | OK（38 字符，data=无） |  | — |
-| `workflow_record_stop` | workflow_recorder | 一类·真跑 | OK（258 字符，data=有） |  | — |
+| `workflow_record_stop` | workflow_recorder | 一类·真跑 | OK（257 字符，data=有） |  | — |
 | `workflow_recorder_status` | workflow_recorder | 一类·真跑 | OK（226 字符，data=有） |  | — |
 | `workflow_template_create` | workflow_recorder | 一类·真跑 | OK（230 字符，data=有） |  | — |
 | `workflow_template_list` | workflow_recorder | 一类·真跑 | OK（8194 字符，data=有） |  | — |
