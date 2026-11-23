@@ -118,10 +118,16 @@ class RtlTcpClient(
     }
 
     /** 读一段 I/Q 原始字节；允许短读，EOF 抛错（调用方不用猜长度）。 */
-    fun readIq(buffer: ByteArray): Int {
+    fun readIq(buffer: ByteArray): Int = readIq(buffer, 0, buffer.size)
+
+    /** 从 [offset] 起最多读 [length] 字节；用于把短读拼满一帧。 */
+    fun readIq(buffer: ByteArray, offset: Int, length: Int): Int {
+        require(offset >= 0 && length >= 0 && offset + length <= buffer.size) {
+            "读取范围越界：offset=$offset length=$length size=${buffer.size}"
+        }
         val conn = connection ?: throw RtlTcpException("尚未连接 rtl_tcp")
         val n = try {
-            conn.read(buffer, 0, buffer.size)
+            conn.read(buffer, offset, length)
         } catch (e: Exception) {
             throw RtlTcpException("读取 I/Q 失败：${e.message}", e)
         }

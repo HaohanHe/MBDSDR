@@ -2941,6 +2941,21 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `.trae/specs/mbdsdr-system-lifecycle/checklist.md` | 多机线/42（§280 Task 235） | 2026-11-24 00:00 | 本笔 |
 | `docs/PRD-现状对照.md` | 多机线/42（§280 P1-11 补会话编排） | 2026-11-24 00:00 | 本笔 |
 | `docs/COORDINATION.md` | 多机线/42（§280 记录 + §6.1） | 2026-11-24 00:00 | 本笔 |
+| `spatial/app/src/main/java/com/mbdsdr/spatial/sdr/SdrFormat.kt` | 多机线/42（§281 MHz 解析/归一化/跨度） | 2026-11-24 00:05 | 本笔 |
+| `spatial/app/src/main/java/com/mbdsdr/spatial/ui/SdrPanel.kt` | 多机线/42（§281 头显 SDR 面板与读取循环） | 2026-11-24 00:05 | 本笔 |
+| `spatial/app/src/main/java/com/mbdsdr/spatial/ui/LiveSpectrumCanvas.kt` | 多机线/42（§281 实时相对幅度谱画布） | 2026-11-24 00:05 | 本笔 |
+| `spatial/app/src/main/java/com/mbdsdr/spatial/Main.kt` | 多机线/42（§281 主窗接入 SdrPanel） | 2026-11-24 00:05 | 本笔 |
+| `spatial/app/src/main/java/com/mbdsdr/spatial/net/RtlTcpClient.kt` | 多机线/42（§281 readIq 偏移读） | 2026-11-24 00:05 | 本笔 |
+| `spatial/app/src/main/java/com/mbdsdr/spatial/sdr/SdrSession.kt` | 多机线/42（§281 readIq 偏移读） | 2026-11-24 00:05 | 本笔 |
+| `spatial/app/src/test/java/com/mbdsdr/spatial/SdrFormatTest.kt` | 多机线/42（§281 格式纯函数 5 条用例） | 2026-11-24 00:05 | 本笔 |
+| `spatial/app/src/test/java/com/mbdsdr/spatial/RtlTcpClientTest.kt` | 多机线/42（§281 偏移读 1 条用例） | 2026-11-24 00:05 | 本笔 |
+| `spatial/README.md` | 多机线/42（§281 面板与边界） | 2026-11-24 00:05 | 本笔 |
+| `.trae/specs/multi-device-interconnect/tasks.md` | 多机线/42（§281 M4.2 面板状态） | 2026-11-24 00:05 | 本笔 |
+| `.trae/specs/multi-device-interconnect/checklist.md` | 多机线/42（§281 面板项） | 2026-11-24 00:05 | 本笔 |
+| `.trae/specs/mbdsdr-system-lifecycle/tasks.md` | 多机线/42（§281 Task 236） | 2026-11-24 00:05 | 本笔 |
+| `.trae/specs/mbdsdr-system-lifecycle/checklist.md` | 多机线/42（§281 Task 236） | 2026-11-24 00:05 | 本笔 |
+| `docs/PRD-现状对照.md` | 多机线/42（§281 P1-11 补面板） | 2026-11-24 00:05 | 本笔 |
+| `docs/COORDINATION.md` | 多机线/42（§281 记录 + §6.1） | 2026-11-24 00:05 | 本笔 |
 
 > 上表各行均由 `claim` 台账推导：owner 原文与 `acquired_at` 直接取自台账，
 > 目的优先用台账里的 `claim_reason`，没有就如实写「未声明」，不补编。时间列只是
@@ -13511,6 +13526,39 @@ spec 的 M4.3 要求「未联网时显示上次结果/包内内容，不伪造�
 - 仍没有 UI 按钮与读取循环；不能对用户宣称「头显已能收频谱」。
 - 释放租约是 best-effort（失败被吞掉），没有重试/告警通道。
 - 未与真实 rtl_tcp 联调；`close` 与租约到期的竞态未实测。
+
+## 281. M4.2 头显 SDR 面板：授权→连接→频谱（2026-11-24）
+
+**依据**：§271–§280 的每一层都有用例，但用户在头显里仍没有入口。
+「头显可以带动 SDR」要成立，至少要有：填频率 → 点开始 → 出谱 → 能停。
+
+**做了什么**
+- 新 `ui/SdrPanel.kt`（接进「头顶」主窗，位于网关面板下方）：
+  - 输入 MHz + 「开始接收 / 停止」；未配对、非 headset、端口/频率不合法
+    都在本地写明原因，不发请求。
+  - 开始：`SdrSession.start` 申请授权并连接调谐；成功后起后台循环，
+    每帧读满 1024 点 I/Q（短读循环补齐）→ `RtlTcpProtocol.decodeIq8`
+    → `SpectrumAnalyzer` → 主线程更新谱。
+  - 停止 / 离开窗口：取消循环、关连接、释放授权；无后台服务、不自动重连。
+  - 状态行给出 endpoint/tuner/中心/跨度；谱上方明说「相对幅度，不是 dBm」。
+- 新 `ui/LiveSpectrumCanvas.kt`：按峰值归一化画柱 + 中心线；空数据明说。
+- 新 `sdr/SdrFormat.kt`：MHz→Hz 解析（24–1766、非法不猜）、Hz 格式化、
+  峰值归一化（NaN/Inf/负值归零）、±跨度文案。
+- `RtlTcpClient`/`SdrSession` 增 `readIq(buffer, offset, length)` 供拼帧；
+  原 `readIq(buffer)` 行为不变。
+
+**验证**
+- `SdrFormatTest` 5 条：合法/边界/非法输入、格式化、归一化、零/负/非有限。
+- `RtlTcpClientTest` +1：偏移读写到指定位置（短读拼帧基础）。
+- `./gradlew.bat testDebugUnitTest --rerun-tasks --no-daemon --offline`：
+  **23 suite / 203 用例 / 0 失败 / 1 跳过**；`Main`/面板编译通过。
+- 未改 Python/手机；未连真实 rtl_tcp（dongle 仍由模拟器会话占用）。
+
+**诚实边界**
+- 面板只在编译与纯函数层面验证；**未在 PICO 真机跑过**，刷新率/手势布局未知。
+- 谱是相对幅度，没有 dBm/天线/滤波校准；没有峰值标记、瀑布、频率轴刻度。
+- 读取循环遇到网络错误会停止并显示原因，但不自动重连。
+- 频率与增益固定（自动增益），没有 VFO/带宽/解调设置。
 
 
 

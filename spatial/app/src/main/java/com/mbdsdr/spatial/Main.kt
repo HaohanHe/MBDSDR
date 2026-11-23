@@ -46,6 +46,7 @@ import com.mbdsdr.spatial.ui.ArchivePanel
 import com.mbdsdr.spatial.ui.GatewayPanel
 import com.mbdsdr.spatial.ui.LayoutOpKind
 import com.mbdsdr.spatial.ui.PassesPanel
+import com.mbdsdr.spatial.ui.SdrPanel
 import com.mbdsdr.spatial.ui.StationPanel
 import com.mbdsdr.spatial.ui.WindowLayout
 import com.pico.spatial.ui.design.Button
@@ -272,6 +273,7 @@ private fun SkyWindow(state: ObservationState, modifier: Modifier = Modifier) {
             controller = state.gateway,
             onChanged = { state.gatewaySnapshot = it },
         )
+        SdrPanel(state.gateway)
         Row(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(16.dp),

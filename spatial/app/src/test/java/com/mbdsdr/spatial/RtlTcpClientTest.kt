@@ -214,6 +214,17 @@ class RtlTcpClientTest {
     }
 
     @Test
+    fun readIqOffsetWritesAtRequestedPosition() {
+        val conn = FakeConnection(listOf(goodHeader, bytes(11, 22)))
+        val client = client(conn)
+        client.connect("127.0.0.1", 1234)
+
+        val buffer = ByteArray(4) { 9 }
+        assertEquals(2, client.readIq(buffer, 2, 2))
+        assertArrayEquals(bytes(9, 9, 11, 22), buffer)
+    }
+
+    @Test
     fun closeIsIdempotentAndRejectsFurtherReads() {
         val conn = FakeConnection(listOf(goodHeader))
         val client = client(conn)

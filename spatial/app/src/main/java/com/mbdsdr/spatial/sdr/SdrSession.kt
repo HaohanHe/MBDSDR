@@ -122,9 +122,12 @@ class SdrSession(
     }
 
     /** 读一段原始 I/Q（短读允许）；未启动或已断开都会抛 [RtlTcpException]。 */
-    fun readIq(buffer: ByteArray): Int {
+    fun readIq(buffer: ByteArray): Int = readIq(buffer, 0, buffer.size)
+
+    /** 从 [offset] 起最多读 [length] 字节（拼帧用）。 */
+    fun readIq(buffer: ByteArray, offset: Int, length: Int): Int {
         val rtl = client ?: throw RtlTcpException("SDR 会话未启动")
-        return rtl.readIq(buffer)
+        return rtl.readIq(buffer, offset, length)
     }
 
     /** 关闭连接并释放授权；幂等，释放失败不掩盖关闭动作。 */
