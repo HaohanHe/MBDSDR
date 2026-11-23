@@ -104,6 +104,53 @@ def main_window(qapp, isolated_profile, isolated_persisted_state):
 
 
 # ---------------------------------------------------------------------------
+class TestSpatialExportEntry:
+    """文件 → 导出头显观测包：菜单项存在，且真的交给共用壳模块。"""
+
+    @staticmethod
+    def _file_menu(window):
+        for act in window.menuBar().actions():
+            if act.text().startswith("文件"):
+                return act.menu()
+        return None
+
+    def test_file_menu_has_export_spatial_action(self, main_window):
+        menu = self._file_menu(main_window)
+        assert menu is not None, "没有文件菜单"
+        texts = [a.text() for a in menu.actions()]
+        assert "导出头显观测包..." in texts
+
+    def test_action_delegates_to_shared_shell(self, main_window, monkeypatch):
+        """点菜单项必须调 desktop.spatial_export（CLI 同一份实现），
+        而不是在窗口里另写一套导出。"""
+        import desktop.spatial_export as shell
+        from PySide6.QtWidgets import QFileDialog, QMessageBox
+
+        calls = []
+
+        def _fake_export(archive, out_dir, **kwargs):
+            calls.append((archive, out_dir))
+            return True, "已导出：/tmp/bundle.json"
+
+        monkeypatch.setattr(shell, "export_spatial_bundle", _fake_export)
+        monkeypatch.setattr(
+            QFileDialog, "getOpenFileName",
+            staticmethod(lambda *a, **k: ("/tmp/obs.observation.json", "")))
+        monkeypatch.setattr(
+            QFileDialog, "getExistingDirectory",
+            staticmethod(lambda *a, **k: "/tmp/out"))
+        monkeypatch.setattr(
+            QMessageBox, "information",
+            staticmethod(lambda *a, **k: QMessageBox.Ok))
+
+        action = next(a for a in self._file_menu(main_window).actions()
+                      if a.text() == "导出头显观测包...")
+        action.trigger()
+
+        assert calls == [("/tmp/obs.observation.json", "/tmp/out")]
+
+
+# ---------------------------------------------------------------------------
 class TestThreeColumnSplitter:
     """三栏 QSplitter 骨架。"""
 

@@ -49,6 +49,16 @@ python main.py --import-probe desktop.main_window  # 只做导入自检，不建
 
 打包产物输出在 `dist/MBDSDR/`，其中 `MBDSDR.exe`（Windows）或 `MBDSDR`（Linux）即为可执行程序。
 
+## 导出头显观测包
+
+「文件 → 导出头显观测包...」把一份 `*.observation.json` 导出成 PICO 头显可读的
+`mbdsdr.spatial/1` 离线包（`bundle.json`；可选音频由 CLI 的 `--audio-out` 生成）。
+
+- 实现与 `scripts/export_spatial_bundle.py` **同一份**：桌面只做壳（选档案/输出目录），
+  不重写星表、频谱与解调逻辑。
+- 口径：头显只读离线包，**不含实时接收**；失败时弹 CLI 的原始报错，不谎报已导出。
+- 默认输出到档案同级 `<档案名>_spatial/`。
+
 ## 快捷键
 
 - `Ctrl+C` 连接设备 / `Ctrl+D` 断开 / `Ctrl+M` 模拟模式

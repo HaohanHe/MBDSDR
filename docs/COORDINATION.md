@@ -2645,6 +2645,12 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `mobile/test/sky_layout_small_screen_test.dart` | 移动端走查线/22（雷达最小高回归测试） | 2026-11-23 20:05 | 本笔 |
 | `mobile/test/help_and_onboarding_test.dart` | 移动端走查线/22（pumpAndSettle 改有界 pump，修既有脆弱） | 2026-11-23 20:05 | 本笔 |
 | `docs/COORDINATION.md` | 移动端走查线/22（§247 缺陷复现与修复 + 切分组装机复验） | 2026-11-23 20:06 | 本笔 |
+| `desktop/spatial_export.py` | 桌面联动线/31（§248 新增导出壳，复用 CLI 单一来源） | 2026-11-23 20:26 | 本笔 |
+| `desktop/main_window.py` | 桌面联动线/31（§248 文件菜单加「导出头显观测包...」） | 2026-11-23 20:26 | 本笔 |
+| `tests/test_desktop_spatial_export.py` | 桌面联动线/31（导出壳四态行为测试） | 2026-11-23 20:28 | 本笔 |
+| `tests/test_main_window.py` | 桌面联动线/31（菜单项存在 + 点击委托断言） | 2026-11-23 20:28 | 本笔 |
+| `docs/COORDINATION.md` | 桌面联动线/31（§248 三端同轮推进记录） | 2026-11-23 20:30 | 本笔 |
+| `desktop/README.md` | 桌面联动线/31（补「导出头显观测包」用法与口径） | 2026-11-23 20:32 | 本笔 |
 
 > 上表各行均由 `claim` 台账推导：owner 原文与 `acquired_at` 直接取自台账，
 > 目的优先用台账里的 `claim_reason`，没有就如实写「未声明」，不补编。时间列只是
@@ -12112,3 +12118,39 @@ rtl_tcp 接进手机端。
   后续可考虑首跑横幅改可折叠，或雷达与列表共享剩余高度。
 
 **诚实边界**：全部结论来自 API35 模拟器（虚拟罗盘 ±0°、虚拟位置），不是物理手机。
+
+## 248. 三端同轮推进：头显 JVM 单测实测、桌面新增「导出头显观测包」入口（2026-11-23）
+
+**背景**：用户指出不能只推手机端，桌面/头显同样要推进。本轮三端各落一件事。
+
+**头显端（`spatial/`）**
+- 代码结构已完整（四窗 panel / 投影 / 选星 / 音频 / bundle 解析），但缺本轮新鲜的单测证据。
+- 实测：`JAVA_HOME=C:\Program Files\Android\Android Studio\jbr`、
+  `GRADLE_USER_HOME=D:\mbdsdr\toolchain\gradle-home`、`ANDROID_HOME=D:\mbdsdr\toolchain\android-sdk`，
+  `.\gradlew.bat testDebugUnitTest --rerun-tasks --no-daemon` → `BUILD SUCCESSFUL`
+  （22 tasks executed，非 UP-TO-DATE）：16 个 suite、0 失败、1 跳过
+  （`RealBundleExternalTest` 需外部 bundle，诚实跳过）。
+- Python 侧契约：`tests/test_spatial_bundle.py`（38 passed）与
+  `tests/test_spatial_consistency.py`（档案 ↔ 包 ↔ 回放 CLI 三端对读，7 passed）全绿。
+- **四窗实际显示/手势/空间音频仍不能验证**：PICO 模拟器在宿主首帧崩溃
+  （spatial tasks S2.3 2026-11-23 复验），真机未到手。**不据此宣称四窗可用。**
+
+**桌面端（`desktop/`）**
+- 发现的断点：`scripts/export_spatial_bundle.py` 只有 CLI，桌面没有任何入口——用户在桌面
+  录完一次观测，没法生成头显要读的包。
+- 新增 [spatial_export.py](file:///d:/mbdsdr/MBDSDR/desktop/spatial_export.py)：只做壳
+  （选路径、把 CLI 的 stdout/stderr 原样带回），**不重实现**星表/频谱/解调，直接调 CLI 的
+  `main()`——与 CLI、一致性测试同一份实现。失败不谎报；命令成功但没落地 `bundle.json` 也判失败。
+- [main_window.py](file:///d:/mbdsdr/MBDSDR/desktop/main_window.py) 文件菜单新增
+  「导出头显观测包...」，默认输出目录为档案同级 `<档案名>_spatial/`。
+- 测试：`tests/test_desktop_spatial_export.py`（真实小 SigMF 档案跑通、坏档案不谎报、
+  缺档案报原因、默认目录四态）+ `test_main_window.py` 新增「菜单项存在」「点击真的交给壳模块」两条。
+  回归 `test_main_window.py + test_desktop_spatial_export.py + test_spatial_consistency.py +
+  test_spatial_bundle.py` 全绿。
+
+**未验证（不写成已验证）**
+- 桌面该菜单**没有在真显示器上手动点过**：测试用 monkeypatch 替换文件对话框后触发 QAction，
+  壳函数本身用真实档案跑通 CLI。GUI 视觉与交互仍属注入式验证。
+- 头显四窗、手势、空间音频、真机端到端仍未验证。
+
+**诚实边界**：头显侧证据是 JVM 单测与 Python 契约测试，不是设备运行结果。

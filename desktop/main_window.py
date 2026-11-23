@@ -1602,6 +1602,13 @@ class MainWindow(QMainWindow):
 
         file_menu.addSeparator()
 
+        # 头显观测包走 CLI 的同一份导出实现（desktop/spatial_export.py 只做壳）。
+        export_spatial_action = QAction("导出头显观测包...", self)
+        export_spatial_action.triggered.connect(self._export_spatial_bundle_dialog)
+        file_menu.addAction(export_spatial_action)
+
+        file_menu.addSeparator()
+
         exit_action = QAction("退出", self)
         self._bind_shortcut(exit_action, "file.quit")
         exit_action.triggered.connect(self.close)
@@ -7282,6 +7289,37 @@ class MainWindow(QMainWindow):
         self._hold_status(
             f"切换失败（{reason}），已恢复原设备 {name}")
         return True
+
+    def _export_spatial_bundle_dialog(self):
+        """文件 → 导出头显观测包：选档案与输出目录，调 CLI 同一份实现。
+
+        导出本身在 ``desktop/spatial_export.py``，它只做壳，不重写星表/频谱/
+        解调逻辑；失败时把 CLI 的 stderr 原文弹给用户，不谎报成功。
+        """
+        try:
+            from desktop.spatial_export import (
+                default_out_dir, export_spatial_bundle)
+        except ImportError:  # 脚本上下文（python desktop/main.py）
+            from spatial_export import (  # type: ignore[no-redef]
+                default_out_dir, export_spatial_bundle)
+
+        archive, _ = QFileDialog.getOpenFileName(
+            self, "选择观测档案", "",
+            "观测档案 (*.observation.json);;JSON (*.json);;所有文件 (*.*)")
+        if not archive:
+            return
+
+        out_dir = QFileDialog.getExistingDirectory(
+            self, "选择输出目录（头显观测包）", default_out_dir(archive))
+        if not out_dir:
+            return
+
+        self._hold_status("正在导出头显观测包...", MSG_IMPORTANT)
+        ok, message = export_spatial_bundle(archive, out_dir)
+        if ok:
+            QMessageBox.information(self, "导出完成", message)
+        else:
+            QMessageBox.warning(self, "导出失败", message)
 
     def _connect_dialog(self):
         """弹出设备选择对话框：动态枚举真实 SDR 设备，选中后真实 connect。
