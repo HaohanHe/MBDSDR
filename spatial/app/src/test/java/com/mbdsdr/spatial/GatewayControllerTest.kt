@@ -399,4 +399,56 @@ class GatewayControllerTest {
         assertEquals("SDR 授权：空闲（可签发，有效期 300s）", c.state.sdrText)
         assertEquals("SDR 授权已更新", c.state.status)
     }
+
+    // ---- M3.2 消费端：融合位姿一行 ----
+
+    @Test
+    fun fuseSummaryValidAndInvalid() {
+        val valid = JsonParser.parseString(
+            """{"schema":"mbdsdr.pose-fusion/1","valid":true,"level":"fused",
+               "observations":2,"az_deg":108.75,"alt_deg":43.2,
+               "accuracy_deg":0.87,"sources":["dev-lens","dev-eye"]}""").asJsonObject
+        assertEquals(
+            "融合位姿：方位 108.8° 高度 43.2° · 精度 0.87° · 2 条（dev-lens, dev-eye）",
+            GatewayFormat.fuseSummary(valid),
+        )
+
+        val invalid = JsonParser.parseString(
+            """{"valid":false,"reason":"observations 为空","az_deg":null}""").asJsonObject
+        assertEquals("融合位姿：不可用（observations 为空）",
+            GatewayFormat.fuseSummary(invalid))
+
+        val broken = JsonParser.parseString("""{"observations":0}""").asJsonObject
+        assertEquals("融合位姿：回执缺 valid 字段",
+            GatewayFormat.fuseSummary(broken))
+    }
+
+    @Test
+    fun refreshFuseSurfacesReasonAndValue() {
+        var fused = """{"valid":false,"reason":"observations 为空"}"""
+        val fake = FakeGateway { call ->
+            when (call.path) {
+                "/pair" -> GatewayResponse(200, """{"token":"tok-h"}""")
+                "/fuse" -> {
+                    assertEquals("Bearer tok-h", call.headers["Authorization"])
+                    GatewayResponse(200, fused)
+                }
+                else -> GatewayResponse(404, "{}")
+            }
+        }
+        val c = controller(fake)
+        c.updateCode("123456")
+        c.pair()
+
+        c.refreshFuse()
+        assertEquals("融合位姿：不可用（observations 为空）", c.state.fuseText)
+        assertEquals("融合位姿已更新", c.state.status)
+
+        fused = """{"valid":true,"observations":2,"az_deg":110.0,"alt_deg":44.0,
+                    "accuracy_deg":1.5,"sources":["dev-lens","dev-eye"]}"""
+        c.refreshFuse()
+        assertTrue(c.state.fuseText.startsWith("融合位姿：方位 110.0°"))
+        assertTrue(c.state.fuseText.contains("2 条"))
+        assertFalse(c.state.busy)
+    }
 }

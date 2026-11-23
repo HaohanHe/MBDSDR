@@ -112,6 +112,12 @@ fun GatewayPanel(
                 Text(text = "刷新过境", style = PicoTheme.typography.bodySmall)
             }
             Button(
+                onClick = { run { controller.refreshFuse() } },
+                enabled = state.paired && !state.busy,
+            ) {
+                Text(text = "刷新融合", style = PicoTheme.typography.bodySmall)
+            }
+            Button(
                 onClick = { run { controller.refreshSdrStatus() } },
                 enabled = state.paired && !state.busy,
             ) {
@@ -145,6 +151,13 @@ fun GatewayPanel(
         if (state.passesText.isNotBlank()) {
             Text(
                 text = staleTag(state.passesStale) + state.passesText,
+                style = PicoTheme.typography.bodySmall,
+                color = PicoTheme.colorTokens.LabelSecondaryAlpha,
+            )
+        }
+        if (state.fuseText.isNotBlank()) {
+            Text(
+                text = state.fuseText,
                 style = PicoTheme.typography.bodySmall,
                 color = PicoTheme.colorTokens.LabelSecondaryAlpha,
             )

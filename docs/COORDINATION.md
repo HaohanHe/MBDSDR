@@ -2893,6 +2893,16 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `docs/COORDINATION.md` | 多机线/42（§273 记录 + §6.1） | 2026-11-23 23:34 | 本笔 |
 | `.trae/specs/multi-device-interconnect/checklist.md` | 多机线/42（§274 真实 HTTP 联调项） | 2026-11-23 23:37 | 本笔 |
 | `docs/COORDINATION.md` | 多机线/42（§274 联调记录 + §6.1） | 2026-11-23 23:37 | 本笔 |
+| `spatial/app/src/main/java/com/mbdsdr/spatial/net/GatewayController.kt` | 多机线/42（§275 fuseSummary + refreshFuse） | 2026-11-23 23:42 | 本笔 |
+| `spatial/app/src/main/java/com/mbdsdr/spatial/ui/GatewayPanel.kt` | 多机线/42（§275 刷新融合按钮与状态行） | 2026-11-23 23:42 | 本笔 |
+| `spatial/app/src/test/java/com/mbdsdr/spatial/GatewayControllerTest.kt` | 多机线/42（§275 融合摘要/刷新 2 条用例） | 2026-11-23 23:42 | 本笔 |
+| `spatial/README.md` | 多机线/42（§275 融合消费端说明） | 2026-11-23 23:42 | 本笔 |
+| `.trae/specs/multi-device-interconnect/tasks.md` | 多机线/42（§275 M3.2 头显消费端） | 2026-11-23 23:42 | 本笔 |
+| `.trae/specs/multi-device-interconnect/checklist.md` | 多机线/42（§275 融合消费项） | 2026-11-23 23:42 | 本笔 |
+| `.trae/specs/mbdsdr-system-lifecycle/tasks.md` | 多机线/42（§275 Task 231） | 2026-11-23 23:42 | 本笔 |
+| `.trae/specs/mbdsdr-system-lifecycle/checklist.md` | 多机线/42（§275 Task 231） | 2026-11-23 23:42 | 本笔 |
+| `docs/PRD-现状对照.md` | 多机线/42（§275 P1-11 补融合消费） | 2026-11-23 23:42 | 本笔 |
+| `docs/COORDINATION.md` | 多机线/42（§275 记录 + §6.1） | 2026-11-23 23:42 | 本笔 |
 
 > 上表各行均由 `claim` 台账推导：owner 原文与 `acquired_at` 直接取自台账，
 > 目的优先用台账里的 `claim_reason`，没有就如实写「未声明」，不补编。时间列只是
@@ -13289,6 +13299,32 @@ spec 的 M4.3 要求「未联网时显示上次结果/包内内容，不伪造�
 **诚实边界**
 - 只验证授权协议在真实 HTTP 上成立；头显端 rtl_tcp I/Q 链路仍未实现。
 - P0-06 调谐语义真机回归仍因 dongle 被占用而未跑（不抢占用户会话）。
+
+## 275. 头显只读消费两机融合位姿（M3.2 消费端，2026-11-23）
+
+**依据**：§261 的 `/fuse` 只有桌面对话框显示；头显面板能配对、看全景/过境，
+却看不到「两台手机现在把望远镜指向哪」。同步完整链路（手机上报 → 桌面融合 →
+头显可见）才算三端互联闭环，而这一步不需要新协议。
+
+**做了什么**
+- `GatewayFormat.fuseSummary`：
+  - 有效 → 「方位 x.x° 高度 y.y° · 精度 z.z° · N 条（来源列表）」；
+  - 无效 → 只转述权威端 `reason`（如「observations 为空」「陈旧」），不猜朝向；
+  - 缺 `valid` 字段 → 明说「回执缺 valid 字段」，不把坏回执当成功。
+- `GatewayController.refreshFuse()`：Bearer 认证、busy/失败状态可见。
+- `GatewayPanel`：「刷新融合」按钮 + 结果行（放在 SDR 行之前）。
+
+**验证**
+- `GatewayControllerTest` +2：融合摘要三类口径（有效/无效/缺字段）；
+  刷新路径（先无效后有效，Bearer 断言）。
+- `./gradlew.bat testDebugUnitTest --rerun-tasks --no-daemon --offline`：
+  **18 suite / 162 用例 / 0 失败 / 1 跳过**。
+- 未改 Python/手机；既有基线不受影响。
+
+**诚实边界**
+- 只是只读展示：不写回 `ObservationState`，不参与星图/回看/音频。
+- 没有自动轮询；需用户点「刷新融合」。未在 PICO 真机验证。
+- 融合结果依赖手机位姿新鲜度（2 s 阈值），陈旧时头显应看到「不可用」而非旧值。
 
 
 

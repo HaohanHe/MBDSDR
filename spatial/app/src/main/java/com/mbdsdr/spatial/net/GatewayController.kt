@@ -30,6 +30,8 @@ data class GatewayUiState(
     /** SDR 授权一行（M4.2 客户端）；未取到时为空。 */
     val sdrText: String = "",
     val sdrHeld: Boolean = false,
+    /** 两机融合位姿一行（M3.2 消费端）；未取到时为空。 */
+    val fuseText: String = "",
 )
 
 /** 把网关 JSON 压成一行摘要；缺字段写「—」，不猜值。 */
@@ -126,6 +128,32 @@ object GatewayFormat {
             return "SDR 授权：本机持有到 $until（rtl_tcp $host:$port）"
         }
         return "SDR 授权：$role「$name」占用到 $until"
+    }
+
+    /**
+     * 融合位姿（`mbdsdr.pose-fusion/1`）压成一行：
+     * 有效时给方位/高度/精度/来源；无效时只转述权威端给的原因，绝不猜朝向。
+     */
+    fun fuseSummary(json: JsonObject): String {
+        val validEl = json.get("valid") ?: return "融合位姿：回执缺 valid 字段"
+        if (!validEl.isJsonPrimitive || !validEl.asJsonPrimitive.isBoolean) {
+            return "融合位姿：valid 不是布尔值"
+        }
+        if (!validEl.asBoolean) {
+            val reason = json.get("reason")?.takeIf { it.isJsonPrimitive }?.asString
+            return "融合位姿：不可用（${reason?.takeIf { it.isNotBlank() } ?: "未知原因"}）"
+        }
+        val az = num(json, "az_deg")
+        val alt = num(json, "alt_deg")
+        val acc = num(json, "accuracy_deg")
+        fun deg(v: Double?, digits: Int): String =
+            v?.let { String.format(java.util.Locale.US, "%.${digits}f°", it) } ?: "—"
+        val sources = strings(json.getAsJsonArray("sources"))
+        val n = num(json, "observations")?.toInt()
+        val countText = n?.toString() ?: "—"
+        val sourceText = if (sources.isEmpty()) "—" else sources.joinToString(", ")
+        return ("融合位姿：方位 ${deg(az, 1)} 高度 ${deg(alt, 1)}"
+            + " · 精度 ${deg(acc, 2)} · $countText 条（$sourceText）")
     }
 }
 
@@ -258,6 +286,21 @@ class GatewayController(
     }
 
     // ------------------------------------------------------------ SDR 授权
+
+    /** 拉一次两机融合位姿（M3.2 的只读消费端）；不可用时只显示权威端原因。 */
+    fun refreshFuse() {
+        val client = readyClient() ?: return
+        state = state.copy(busy = true, status = "读取融合位姿中…")
+        try {
+            val data = client.fusedPose(state.token)
+            state = state.copy(
+                busy = false,
+                fuseText = GatewayFormat.fuseSummary(data),
+                status = "融合位姿已更新")
+        } catch (e: DeviceGatewayException) {
+            fail("融合位姿失败：${e.message}")
+        }
+    }
 
     fun refreshSdrStatus() {
         val client = readyClient() ?: return
