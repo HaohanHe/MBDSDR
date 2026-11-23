@@ -3135,6 +3135,7 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `spatial/app/src/main/java/com/mbdsdr/spatial/ui/GatewayPanel.kt` | 多机线/42（§308 头显名册（提交后释放）） | 2026-11-24 02:07 | 本笔 |
 | `spatial/app/src/test/java/com/mbdsdr/spatial/GatewayControllerTest.kt` | 多机线/42（§308 头显名册（提交后释放）） | 2026-11-24 02:07 | 本笔 |
 | `docs/COORDINATION.md` | 多机线/42（§308 头显名册（提交后释放）） | 2026-11-24 02:07 | 本笔 |
+| `docs/COORDINATION.md` | 多机线/42（§309 第二轮对账（提交后释放）） | 2026-11-24 02:09 | 本笔 |
 
 > 上表各行均由 `claim` 台账推导：owner 原文与 `acquired_at` 直接取自台账，
 > 目的优先用台账里的 `claim_reason`，没有就如实写「未声明」，不补编。时间列只是
@@ -14385,3 +14386,30 @@ widget 用例与 Python 端到端，没有真实 Android 运行时 + 真实网�
 - `gradlew :app:assembleDebug --offline` BUILD SUCCESSFUL（16 s）
 
 **边界**：未在 PICO 真机验证；角色标签只做展示映射，不改变权限。
+
+## 309. 现状对账（2026-11-24，第二轮）
+
+**依据**：§297 之后又落了手机 `/spectrum`、`/fuse`、`/poses`、全景天气/空间天气、
+头显名册与多轮模拟器实测；本轮按 spec §6 重新取证，避免 docs 与现状脱节。
+
+**软件证据（本轮复跑）**
+- `pytest tests/test_device_gateway.py tests/test_desktop_device_gateway_dialog.py
+  tests/test_sky_panorama.py tests/test_ai_tool_selection_semantics.py
+  tests/test_spectrum_frame_meta.py` → **88 passed**（50+17+10+4+7）
+- `mobile flutter test` → **613 passed**；`flutter build apk --debug` 41.3 s
+- `spatial :app:testDebugUnitTest --offline` → **25 suite / 222 用例 / 0 失败 / 1 跳过**；
+  `:app:assembleDebug --offline` 16 s
+
+**真机（模拟器）证据**
+- 手机 ↔ 真实 CLI 网关：配对、名册、状态、真实 TLE 过境（44 次，前 3 条与 host 一致）、
+  `/spectrum` 503、`/fuse` 有效与陈旧两路、`/poses` 两条含识别、1 Hz 自动上报、
+  全景 `--allow-live`（云量 25% + 部分空间天气 + 缺 Kp）
+- 一次误判更正：uiautomator 旧 dump 导致的「天空无响应」已撤回（§303）
+
+**仍未完成（外部阻塞）**
+- PICO 真机（四窗/手势/空间音频/M4.2 联调）
+- rtl_tcp 被 emulator/adb 持有 → P0-06 真机调谐与 `/spectrum` 真帧
+- 真模型 API Key → §6.7 未回归
+- 物理手机（模拟器 ≠ 真机）
+
+**结论**：软件可达项均有可复跑证据；spec §6.3/§6.4/§6.5 现状已按本轮结果更新。
