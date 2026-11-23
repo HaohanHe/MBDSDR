@@ -127,6 +127,7 @@ class PointingPage extends StatefulWidget {
     this.minFrame = const Duration(milliseconds: 70),
     this.sensorTimeout = const Duration(milliseconds: 1500),
     this.poseReporter,
+    this.autoReportPeriod = const Duration(seconds: 1),
   });
 
   final SkySite? site;
@@ -145,6 +146,9 @@ class PointingPage extends StatefulWidget {
 
   /// 已配对时的位姿上报器（lens/eyepiece）。null = 不显示上报控件。
   final PoseReporter? poseReporter;
+
+  /// 自动连续上报的周期（默认 1 Hz；测试可缩短）。
+  final Duration autoReportPeriod;
 
   @override
   State<PointingPage> createState() => _PointingPageState();
@@ -234,6 +238,14 @@ class _PointingPageState extends State<PointingPage> {
   bool _poseBusy = false;
   String? _poseNote;
 
+  /// 自动连续上报（M3.1 后续）：显式开关，默认关闭；只复用 [PoseReporter]，
+  /// 不引入后台服务。传感器读不到时跳过该拍，不补 0°；条件失效则自动停。
+  bool _autoReporting = false;
+  bool _autoInFlight = false;
+  int _autoSent = 0;
+  Timer? _autoTimer;
+  String? _autoNote;
+
   /// 最近一帧的准星识别结果缓存（供「上报位姿」附带给目镜角色用）。
   ///
   /// 在 `_buildSky` 里直接赋值、不 setState：它只服务用户点击上报，
@@ -296,6 +308,85 @@ class _PointingPageState extends State<PointingPage> {
 
   void _resetManualOffset() => setState(() => _manualOffsetDeg = 0);
 
+  /// 开关自动上报：开启时立刻发一条，再按 [PointingPage.autoReportPeriod] 周期发。
+  void _toggleAutoReport() {
+    if (_autoReporting) {
+      _stopAutoReport(note: '自动上报已停止（本次共发送 $_autoSent 条）');
+      return;
+    }
+    final PoseReporter? reporter = widget.poseReporter;
+    if (reporter == null) return;
+    final String? why = reporter.unavailableReason;
+    if (why != null) {
+      setState(() => _autoNote = '不能自动上报：$why');
+      return;
+    }
+    setState(() {
+      _autoReporting = true;
+      _autoSent = 0;
+      _autoNote = '自动上报已开启（${widget.autoReportPeriod.inMilliseconds} ms 一条）';
+    });
+    _autoTimer?.cancel();
+    _autoTimer = Timer.periodic(widget.autoReportPeriod, (_) => _autoTick());
+    _autoTick();
+  }
+
+  /// 一拍自动上报：上一条还没回来就跳过这一拍，不堆请求。
+  ///
+  /// 传感器缺航向/俯仰时只记一行「跳过」，绝不补 0°；配对失效/缺主机
+  /// 则停止自动上报并说明原因（继续发只会一直失败）。
+  Future<void> _autoTick() async {
+    if (!_autoReporting || _autoInFlight) return;
+    final PoseReporter? reporter = widget.poseReporter;
+    if (reporter == null) {
+      _stopAutoReport(note: '自动上报已停止：没有上报器');
+      return;
+    }
+    final String? why = reporter.unavailableReason;
+    if (why != null) {
+      _stopAutoReport(note: '自动上报已停止：$why');
+      return;
+    }
+    final double? heading = _orientation.heading;
+    final double? pitch = _orientation.pitch;
+    if (heading == null || pitch == null) {
+      if (!mounted) return;
+      setState(() => _autoNote =
+          '自动上报跳过：缺少${heading == null ? '罗盘航向' : 'IMU 俯仰角'}');
+      return;
+    }
+    _autoInFlight = true;
+    final double az = _effectiveHeading(heading);
+    try {
+      await reporter.report(
+        headingDeg: az,
+        pitchDeg: pitch,
+        rollDeg: _orientation.roll,
+        accuracyDeg: headingSpreadDeg(_recentHeadings),
+        identification: _currentIdentification(reporter),
+      );
+      if (!mounted || !_autoReporting) return;
+      _autoSent++;
+      setState(() => _autoNote = '自动上报中：已发送 $_autoSent 条'
+          '（最近方位 ${az.toStringAsFixed(0)}° 高度 ${pitch.toStringAsFixed(0)}°）');
+    } on DeviceGatewayException catch (e) {
+      if (!mounted || !_autoReporting) return;
+      setState(() => _autoNote = '自动上报失败：${e.message}');
+    } finally {
+      _autoInFlight = false;
+    }
+  }
+
+  /// 停止自动上报并取消定时器；[note] 为界面上的最终说明。
+  void _stopAutoReport({String? note}) {
+    _autoTimer?.cancel();
+    _autoTimer = null;
+    _autoReporting = false;
+    _autoInFlight = false;
+    if (!mounted) return;
+    setState(() => _autoNote = note ?? '自动上报已停止');
+  }
+
   Future<void> _loadAssets() async {
     try {
       final SkyAssets assets =
@@ -317,6 +408,7 @@ class _PointingPageState extends State<PointingPage> {
 
   @override
   void dispose() {
+    _autoTimer?.cancel();
     _sensorTimer?.cancel();
     _sub?.cancel();
     _ownedService?.dispose();
@@ -538,6 +630,9 @@ class _PointingPageState extends State<PointingPage> {
                       busy: _poseBusy,
                       note: _poseNote,
                       onReport: _reportPose,
+                      autoRunning: _autoReporting,
+                      autoNote: _autoNote,
+                      onToggleAuto: _toggleAutoReport,
                     ),
                   ],
                 ],
@@ -754,10 +849,10 @@ class _AlignControls extends StatelessWidget {
   }
 }
 
-/// 位姿上报条：按钮 + 不可用原因 + 最近一次结果。
+/// 位姿上报条：手动按钮 + 自动开关 + 不可用原因 + 最近一次结果。
 ///
 /// 不可用时按钮禁用并显示具体原因（未配对/角色只读/缺设备 id/缺主机），
-/// 不用一句笼统的「不可用」糊过去。
+/// 不用一句笼统的「不可用」糊过去。自动上报默认关闭，必须用户显式打开。
 class _PoseReportBar extends StatelessWidget {
   const _PoseReportBar({
     required this.available,
@@ -765,6 +860,9 @@ class _PoseReportBar extends StatelessWidget {
     required this.busy,
     required this.note,
     required this.onReport,
+    required this.autoRunning,
+    required this.autoNote,
+    required this.onToggleAuto,
   });
 
   final bool available;
@@ -772,6 +870,9 @@ class _PoseReportBar extends StatelessWidget {
   final bool busy;
   final String? note;
   final VoidCallback onReport;
+  final bool autoRunning;
+  final String? autoNote;
+  final VoidCallback onToggleAuto;
 
   @override
   Widget build(BuildContext context) {
@@ -803,6 +904,21 @@ class _PoseReportBar extends StatelessWidget {
               label: Text(busy ? '上报中…' : '上报位姿到电脑'),
             ),
           ),
+          const SizedBox(height: AppTokens.spacingS),
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton.icon(
+              key: const Key('pointing-auto-pose'),
+              onPressed: (autoRunning || (available && !busy))
+                  ? onToggleAuto
+                  : null,
+              icon: Icon(
+                autoRunning ? Icons.stop_circle_outlined : Icons.timer_outlined,
+                size: 18,
+              ),
+              label: Text(autoRunning ? '停止自动上报（1 Hz）' : '自动上报 1 Hz'),
+            ),
+          ),
           if (!available && reason != null)
             Padding(
               padding: const EdgeInsets.only(top: AppTokens.spacingS),
@@ -820,6 +936,23 @@ class _PoseReportBar extends StatelessWidget {
                 textAlign: TextAlign.center,
                 style: AppTokens.auxiliary.copyWith(
                   color: note!.startsWith('上报失败')
+                      ? AppTokens.warning
+                      : AppTokens.textPrimary,
+                ),
+              ),
+            ),
+          if (autoNote != null)
+            Padding(
+              padding: const EdgeInsets.only(top: AppTokens.spacingS),
+              child: Text(
+                autoNote!,
+                key: const Key('pointing-auto-note'),
+                textAlign: TextAlign.center,
+                style: AppTokens.auxiliary.copyWith(
+                  color: autoNote!.startsWith('自动上报失败') ||
+                          autoNote!.startsWith('自动上报跳过') ||
+                          autoNote!.startsWith('不能自动上报') ||
+                          autoNote!.startsWith('自动上报已停止：')
                       ? AppTokens.warning
                       : AppTokens.textPrimary,
                 ),

@@ -2851,6 +2851,15 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `.trae/specs/mbdsdr-system-lifecycle/checklist.md` | 多机线/42（§269 Task 226） | 2026-11-23 23:13 | 本笔 |
 | `docs/PRD-现状对照.md` | 多机线/42（§269 P1-11 补此刻网关行） | 2026-11-23 23:13 | 本笔 |
 | `docs/COORDINATION.md` | 多机线/42（§269 记录 + §6.1） | 2026-11-23 23:13 | 本笔 |
+| `mobile/lib/pages/pointing_page.dart` | 多机线/42（§270 可选 1 Hz 自动上报） | 2026-11-23 23:19 | 本笔 |
+| `mobile/test/pose_reporter_test.dart` | 多机线/42（§270 自动上报 3 条 widget 用例） | 2026-11-23 23:19 | 本笔 |
+| `mobile/README.md` | 多机线/42（§270 上报/自动上报说明 + 604 锚点） | 2026-11-23 23:19 | 本笔 |
+| `.trae/specs/multi-device-interconnect/tasks.md` | 多机线/42（§270 M3.1 补自动上报） | 2026-11-23 23:19 | 本笔 |
+| `.trae/specs/multi-device-interconnect/checklist.md` | 多机线/42（§270 自动上报项） | 2026-11-23 23:19 | 本笔 |
+| `.trae/specs/mbdsdr-system-lifecycle/tasks.md` | 多机线/42（§270 Task 227） | 2026-11-23 23:19 | 本笔 |
+| `.trae/specs/mbdsdr-system-lifecycle/checklist.md` | 多机线/42（§270 Task 227） | 2026-11-23 23:19 | 本笔 |
+| `docs/PRD-现状对照.md` | 多机线/42（§270 P1-11 补自动上报） | 2026-11-23 23:19 | 本笔 |
+| `docs/COORDINATION.md` | 多机线/42（§270 记录 + §6.1） | 2026-11-23 23:19 | 本笔 |
 
 > 上表各行均由 `claim` 台账推导：owner 原文与 `acquired_at` 直接取自台账，
 > 目的优先用台账里的 `claim_reason`，没有就如实写「未声明」，不补编。时间列只是
@@ -13101,6 +13110,36 @@ spec 的 M4.3 要求「未联网时显示上次结果/包内内容，不伪造�
 - 仍是 UI 转述，没有把增量数据合成进 bundle，四窗星图不会因网关刷新而更新。
 - 跨窗口同步依赖进程内 Compose 状态；窗口若在刷新前已组合也能重组，但未在
   PICO 真机验证。token 仍不持久化。
+
+## 270. 手机可选 1 Hz 自动连续上报（2026-11-23）
+
+**依据**：§263 只做了单次「上报位姿到电脑」；用户要两台手机挂望远镜持续喂
+位姿，每次手点不现实。spec 要求位姿实时可见，但不能偷偷连续上报、也不能在
+传感器缺失时拿 0° 顶上。
+
+**做了什么**
+- `PointingPage` 新增 `autoReportPeriod`（默认 1 s）与「自动上报 1 Hz」显式开关；
+  **默认关闭**，开启时立刻发第一条，再 `Timer.periodic` 复用同一 `PoseReporter`。
+- 跳拍不堆请求：`_autoInFlight` 为真时本拍直接跳过。
+- 传感器缺航向/俯仰：本拍跳过并写「自动上报跳过：缺少…」，绝不补 0°。
+- 可用性失效（未配对/只读/缺 device id/缺主机）：下一拍自动停止并写明原因，
+  不继续发注定失败的请求。
+- 退出页面 `dispose` 取消定时器；没有后台服务、不落盘、不改 settings。
+- 自动结果单独一行（`pointing-auto-note`），与手动上报结果分开，避免混淆。
+
+**验证**
+- `test/pose_reporter_test.dart` 新增 3 条 widget 用例：
+  1) 默认不发、开启立即 1 条 → 周期再 1 条 → 停止后不再发；
+  2) 航向掉线只跳过，请求数不增；
+  3) 清 token 后下一拍自动停并显示「自动上报已停止：未配对…」。
+- `flutter test`：**604 passed / 0 failed**（原 601 + 3）；
+  `flutter analyze` 两个改动文件仅既有 `deprecated_member_use` info，无新告警。
+- 未改 Python/头显，既有基线不受影响。
+
+**诚实边界**
+- 真机长时间连续上报、蜂窝/局域网抖动、后台切页行为都未验证；只在测试里
+  用缩短周期（40 ms）验证节拍与停止逻辑。
+- 精度仍是观测波动估计或保守 10°，不是标定结果；融合权重会反映这一点。
 
 
 

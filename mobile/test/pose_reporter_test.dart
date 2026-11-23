@@ -320,6 +320,130 @@ void main() {
       expect(fake.calls, isEmpty);
     });
   });
+
+  group('指天视图自动上报', () {
+    Future<void> pumpPage(
+      WidgetTester tester,
+      PoseReporter reporter,
+      StreamController<DeviceOrientation> stream,
+    ) async {
+      await tester.pumpWidget(MaterialApp(
+        home: PointingPage(
+          site: const SkySite(latDeg: 45, lonDeg: 120),
+          orientationStream: stream.stream,
+          assetSource: _FakeAssetSource(_tinyAssets()),
+          clock: () => DateTime.utc(2026, 11, 18, 12),
+          minFrame: Duration.zero,
+          sensorTimeout: const Duration(seconds: 10),
+          poseReporter: reporter,
+          autoReportPeriod: const Duration(milliseconds: 40),
+        ),
+      ));
+      stream.add(const DeviceOrientation(
+        heading: 100,
+        pitch: 40,
+        roll: 0,
+        hasCompass: true,
+        hasImu: true,
+      ));
+      await tester.pump();
+      await tester.pump();
+    }
+
+    testWidgets('默认关闭；显式开启后立即一条、按周期发送，停止后不再发',
+        (tester) async {
+      final _FakeGateway fake =
+          _FakeGateway((_) => const GatewayHttpResponse(200, '{"ok":true}'));
+      final PoseReporter reporter = _reporter(_pairedSettings(), fake);
+      final StreamController<DeviceOrientation> stream =
+          StreamController<DeviceOrientation>.broadcast();
+      addTearDown(stream.close);
+      await pumpPage(tester, reporter, stream);
+
+      expect(fake.calls, isEmpty);
+      expect(find.text('自动上报 1 Hz'), findsOneWidget);
+
+      await tester.tap(find.byKey(const Key('pointing-auto-pose')));
+      await tester.pump();
+      await tester.pump();
+      expect(fake.calls, hasLength(1));
+      expect(find.textContaining('自动上报中：已发送 1 条'), findsOneWidget);
+      expect(find.text('停止自动上报（1 Hz）'), findsOneWidget);
+
+      await tester.pump(const Duration(milliseconds: 40));
+      await tester.pump();
+      expect(fake.calls, hasLength(2));
+
+      await tester.tap(find.byKey(const Key('pointing-auto-pose')));
+      await tester.pump();
+      expect(find.textContaining('自动上报已停止（本次共发送 2 条）'), findsOneWidget);
+
+      await tester.pump(const Duration(milliseconds: 160));
+      await tester.pump();
+      expect(fake.calls, hasLength(2));
+    });
+
+    testWidgets('缺航向时只跳过并标注，绝不发 0°', (tester) async {
+      final _FakeGateway fake =
+          _FakeGateway((_) => const GatewayHttpResponse(200, '{"ok":true}'));
+      final PoseReporter reporter = _reporter(_pairedSettings(), fake);
+      final StreamController<DeviceOrientation> stream =
+          StreamController<DeviceOrientation>.broadcast();
+      addTearDown(stream.close);
+      await pumpPage(tester, reporter, stream);
+
+      await tester.tap(find.byKey(const Key('pointing-auto-pose')));
+      await tester.pump();
+      await tester.pump();
+      expect(fake.calls, hasLength(1));
+
+      // 罗盘掉线：页面切到「罗盘不可用」，定时器仍在；这一拍必须跳过。
+      stream.add(const DeviceOrientation(
+        heading: null,
+        pitch: 40,
+        roll: 0,
+        hasCompass: true,
+        hasImu: true,
+      ));
+      await tester.pump();
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 120));
+      await tester.pump();
+
+      expect(fake.calls, hasLength(1));
+      expect(fake.calls.every((_Call c) => c.method == 'POST'), isTrue);
+      // 结束时卸载页面，让定时器随 dispose 取消。
+      await tester.pumpWidget(const SizedBox());
+      await tester.pump();
+    });
+
+    testWidgets('配对失效：下一拍自动停止并说明原因', (tester) async {
+      final _FakeGateway fake =
+          _FakeGateway((_) => const GatewayHttpResponse(200, '{"ok":true}'));
+      final SettingsService settings = _pairedSettings();
+      final PoseReporter reporter = _reporter(settings, fake);
+      final StreamController<DeviceOrientation> stream =
+          StreamController<DeviceOrientation>.broadcast();
+      addTearDown(stream.close);
+      await pumpPage(tester, reporter, stream);
+
+      await tester.tap(find.byKey(const Key('pointing-auto-pose')));
+      await tester.pump();
+      await tester.pump();
+      expect(fake.calls, hasLength(1));
+
+      settings.deviceGatewayToken = '';
+      await tester.pump(const Duration(milliseconds: 40));
+      await tester.pump();
+
+      expect(find.textContaining('自动上报已停止：未配对'), findsOneWidget);
+      expect(find.text('自动上报 1 Hz'), findsOneWidget);
+      final int callsAfterStop = fake.calls.length;
+      await tester.pump(const Duration(milliseconds: 160));
+      await tester.pump();
+      expect(fake.calls, hasLength(callsAfterStop));
+    });
+  });
 }
 
 // ---------------------------------------------------------------- 测试资产
