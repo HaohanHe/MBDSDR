@@ -206,7 +206,7 @@ python -m pytest tests/test_sample_rate_changes.py -q     # 3 passed（S4）
 |---|---|---|
 | 激光笔式指星即认 | 软件链全绿（sky-ar-pointing-lifecycle：AR 142 + 工具面 59 测试通过；手机指哪认哪 567 passed） | 真实夜空端到端 not_verified |
 | 手机架望远镜，AI 教怎么架 | provider 契约 + 两星校准 + `2.3°` 窄视场参数在位 | 引导叙事未成型；目镜后 `~1°` 视场物理不可靠（spec 已如实写明） |
-| 当天云量气象（天文通式） | openapi_weather 工具 + tonight.py 云量阈值 + 空间天气在位 | 综合观星指数（云+视宁度+月相）未做；反编译参照在仓库外 scratch/twt-apk/FUNCTIONS.md |
+| 当天云量气象（天文通式） | openapi_weather 工具 + tonight.py 云量阈值 + 空间天气在位；**综合观星指数（云量×月光，`stargazing_index`）已落内核并进 AI 讲解**（`TONIGHT_SCHEMA=3`，缺云量不给分、缺月光显式标注） | 视宁度/透明度无可信数据源未做；指数尚未显示在桌面面板（只在 AI 工具与人话输出）；反编译参照在仓库外 scratch/twt-apk/FUNCTIONS.md |
 | Stellarium 全包含 | 星表 + 星官 + 时间引擎 + 投影互逆钉扎 | 银河无数据（P2-01）、DSO 表未接；按浪漫主线分批补，不宣称全包含 |
 | SDR++/OnAir 几乎全功能 + 全工具化 | 520 工具（§6）；SSTV/气象星全链/FT8 族/ADS-B 族/数字语音外挂/GPS-RTK/VNA 在位 | QO-100 全仓零命中；数字电视/TETRA/IoT/蜂窝/军用 HF 缺（OnAir MODES 表为参照，非照单全收） |
 | GNSS 方位推姿态 | gnss_sky_fit 接实时 GSV，拟合结论「全向天线无角分辨力」→ 如实拒绝 | 单天线 GNSS 物理上无航向；正确路径 = GNSS 位置时间 + 星历算方位 + 罗盘航向（已在走） |

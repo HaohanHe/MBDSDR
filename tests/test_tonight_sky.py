@@ -295,7 +295,78 @@ class TestShowers:
         assert r["meteor_showers"]["known"] is True
 
     def test_schema_bumped_for_new_field(self):
-        assert tn.TONIGHT_SCHEMA == 2
+        # v3：新增 index（云量 + 月光的综合观星指数）。
+        assert tn.TONIGHT_SCHEMA == 3
+
+
+class TestStargazingIndex:
+    """综合观星指数：经验权重、缺项不编造、只代表采样时刻。"""
+
+    def test_clear_moonless_is_top(self):
+        r = tn.assess_tonight(_snap(cloud=0.0),
+                              moon={"illumination": 0.0, "alt_deg": 40.0})
+        idx = r["index"]
+        assert idx["known"] is True
+        assert idx["score"] == 100.0
+        assert idx["level"] == "excellent"
+        assert idx["level_zh"] == "极佳"
+
+    def test_overcast_is_bottom(self):
+        r = tn.assess_tonight(_snap(cloud=100.0),
+                              moon={"illumination": 0.0, "alt_deg": 40.0})
+        assert r["index"]["score"] == 0.0
+        assert r["index"]["level"] == "bad"
+
+    def test_high_full_moon_costs_a_fifth(self):
+        """云量 0 + 满月 ≥60°：100 × (0.65 + 0.35×0.4) = 79。"""
+        r = tn.assess_tonight(_snap(cloud=0.0),
+                              moon={"illumination": 1.0, "alt_deg": 70.0})
+        idx = r["index"]
+        assert idx["moon_score"] == 40.0
+        assert idx["score"] == 79.0
+        assert idx["level"] == "good"
+
+    def test_overcast_kills_score_even_with_moon_down(self):
+        """云是乘法门：云量 100% 时月光再好也是 0（不能给出「较差但能看」）。"""
+        r = tn.assess_tonight(_snap(cloud=100.0),
+                              moon={"illumination": 0.0, "alt_deg": 40.0})
+        assert r["index"]["score"] == 0.0
+
+    def test_moon_below_horizon_counts_as_no_moonlight(self):
+        r = tn.assess_tonight(_snap(cloud=10.0),
+                              moon={"illumination": 1.0, "alt_deg": -5.0})
+        idx = r["index"]
+        assert idx["moon_score"] == 100.0
+        # 云量分 90 × (0.65 + 0.35×1.0) = 90
+        assert idx["score"] == 90.0
+
+    def test_missing_cloud_gives_unknown_not_optimistic(self):
+        r = tn.assess_tonight(_snap(cloud=None))
+        idx = r["index"]
+        assert idx["known"] is False
+        assert idx["score"] is None
+        assert "云量" in idx["reason"]
+
+    def test_missing_moon_uses_cloud_only_and_says_so(self):
+        r = tn.assess_tonight(_snap(cloud=0.0))
+        idx = r["index"]
+        assert idx["known"] is True
+        assert idx["moon_counted"] is False
+        assert idx["score"] == 100.0
+        assert "未计入月光" in idx["text"]
+
+    def test_pure_function_is_deterministic(self):
+        snap = _snap(cloud=30.0)
+        moon = {"illumination": 0.5, "alt_deg": 30.0}
+        assert (tn.assess_tonight(snap, moon=moon)["index"]
+                == tn.assess_tonight(snap, moon=moon)["index"])
+
+    def test_format_line_says_empirical_weights(self):
+        r = tn.assess_tonight(_snap(cloud=0.0),
+                              moon={"illumination": 0.0, "alt_deg": 40.0})
+        text = tn.format_tonight_section(r)
+        assert "观星指数" in text
+        assert "经验权重" in text
 
     def test_format_names_shower_and_never_per_hour(self):
         import re

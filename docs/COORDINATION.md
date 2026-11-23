@@ -2663,6 +2663,10 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `mobile/test/sky_page_test.dart` | 移动端走查线/24（捕获用例改 ISS 并断言 145.8 MHz） | 2026-11-23 20:56 | 本笔 |
 | `mobile/README.md` | 移动端走查线/24（§250 捕获闭环验证状态） | 2026-11-23 20:58 | 本笔 |
 | `docs/COORDINATION.md` | 移动端走查线/24（§250 闭环打通记录） | 2026-11-23 20:58 | 本笔 |
+| `mbdsdr_ai/astronomy/tonight.py` | 观星指数线/41（§251 新增 stargazing_index，TONIGHT_SCHEMA=3） | 2026-11-23 21:00 | 本笔 |
+| `tests/test_tonight_sky.py` | 观星指数线/41（§251 schema=3 + 观星指数 8 条用例） | 2026-11-23 21:00 | 本笔 |
+| `docs/PRD-现状对照.md` | 观星指数线/41（§251 第 209 行改「内核已落、桌面未显示」） | 2026-11-23 21:00 | 本笔 |
+| `docs/COORDINATION.md` | 观星指数线/41（§251 观星指数记录 + §6.1 登记） | 2026-11-23 21:00 | 本笔 |
 
 > 上表各行均由 `claim` 台账推导：owner 原文与 `acquired_at` 直接取自台账，
 > 目的优先用台账里的 `claim_reason`，没有就如实写「未声明」，不补编。时间列只是
@@ -12240,3 +12244,36 @@ rtl_tcp 接进手机端。
 - 多普勒是捕获时刻的一次性预测，不是实时跟踪（界面已标注）。
 - 换掉 NOAA 是因为它们退役了，不是「为了测试通过」放宽目录；
   未来要加新卫星（如 Meteor LRPT 137.1 MHz）仍需逐颗核实 NORAD 编号与在轨状态。
+
+## 251. P1 浪漫主线：综合观星指数（云量 + 月光）内核落地（2026-11-23）
+
+**依据**：`PRD-现状对照.md` 第 209 行「综合观星指数（云+视宁度+月相）未做」；
+PRD §8 冲刺序列 P1「天文通式观星指数」。本轮只做**有可信数据源的两项**，不编视宁度。
+
+**做了什么（内核 + AI 讲解链路）**
+- [tonight.py](file:///d:/mbdsdr/MBDSDR/mbdsdr_ai/astronomy/tonight.py) 新增纯函数
+  `stargazing_index(sky, moon)`：`分数 = 云量分 × (0.65 + 0.35 × 月光分/100)`。
+  云量是完全遮挡时直接归零；月光按照亮比例与高度（60° 封顶）折损，最多扣 35%。
+- `TONIGHT_SCHEMA` 2 → 3；`assess_tonight` 两个返回分支都带 `index`；
+  `format_tonight_section` 输出「观星指数 N/100（档位）：云量 X%；月光 …（经验权重，
+  非权威评分，只代表采样时刻）」。
+- `sky_tonight` AI 工具返回 `dict(report)`，所以 AI 讲解「今晚能不能看」时会自动带上指数。
+
+**诚实口径（写进代码与输出，不只写文档）**
+- 没云量 → 不给分（`known=False` + 原因），绝不按晴天假设。
+- 月光缺失 → 只按云量给分，显式标注「未计入月光」，不假装月黑。
+- 0.65/0.35 是本项目经验值，**不对应任何外部产品算法**，不作科学依据。
+- 视宁度/透明度没有可信数据源 → 不做；PRD 该项保持「部分完成」。
+
+**验证**
+- `pytest tests/test_tonight_sky.py` 47 passed（新增 8 条指数用例：晴 / 全阴归零 /
+  满月 ≥60° = 79 / 月落地平线下 / 缺云量 / 缺月光 / 幂等 / 文案含「经验权重」）。
+- 相关回归 `test_tonight_sky + test_sky_tools + test_agent_guidance_policy +
+  test_ui_gap_fill` → 164 passed。
+- 真实快照试跑（示例站点）：网络 SSL 握手超时 → 输出
+  「观星指数：未知（缺少云量实况，不给观星指数（不按晴天假设））」，
+  同时月光（62%/25°）与流星雨（北金牛、狮子）照常给出——诚实分支在真实环境成立。
+
+**未做（下一步）**
+- 桌面 UI 没有专门「今夜」面板：指数目前只在 AI 工具输出与 `format_tonight_section`
+  的人话里。要显示在天气/星图面板上，需动 `weather_panel`/`main_window`，下轮再做。

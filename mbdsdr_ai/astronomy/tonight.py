@@ -44,12 +44,14 @@ __all__ = [
     "geomagnetic_latitude",
     "kp_needed_for_mlat",
     "assess_tonight",
+    "stargazing_index",
     "format_tonight_section",
 ]
 
 #: 判定结果 schema。快照契约改字段时同步加一。
 #: v2：新增 ``meteor_showers``（观测日期 → 处于活动期的流星雨）。
-TONIGHT_SCHEMA = 2
+#: v3：新增 ``index``（云量 + 月光的综合观星指数，见 :func:`stargazing_index`）。
+TONIGHT_SCHEMA = 3
 
 #: 云量分档上限（百分比）。以下两档为「大体可用 / 有云缝」。
 CLOUD_GOOD_MAX_PCT = 20.0
@@ -271,6 +273,118 @@ def _assess_showers(at: Optional[datetime]) -> Dict[str, Any]:
     return base
 
 
+#: 综合观星指数的经验结构：云量是「能不能看见」的乘法门，月光最多扣 35%。
+#: **不是任何外部产品的算法**，是本项目按「云挡不挡得住」>「月光冲不冲淡
+#: 暗弱天体」的常识定的。
+_STARGAZING_WEIGHTS = {"cloud_gate": 0.65, "moon_penalty": 0.35}
+
+#: 指数分档（下限, 机器档, 中文档），从高到低匹配。
+_INDEX_LEVELS = (
+    (80.0, "excellent", "极佳"),
+    (60.0, "good", "良好"),
+    (40.0, "fair", "一般"),
+    (20.0, "poor", "较差"),
+    (0.0, "bad", "不适合"),
+)
+
+
+def stargazing_index(sky: Dict[str, Any],
+                     moon: Dict[str, Any]) -> Dict[str, Any]:
+    """云量 + 月光 → 0–100 综合观星指数（纯函数，经验权重）。
+
+    诚实性约束：
+
+    * **没有云量就不给分数**——不按晴天假设，返回 ``known=False`` 与原因。
+    * 月光缺失时只按云量给分，``moon_counted=False`` 并在文本里写明
+      「未计入月光」，不假装月黑。
+    * 结构：``分数 = 云量分 × (0.65 + 0.35 × 月光分/100)``——云是完全遮挡时
+      直接归零，月光最多扣 35%。0.65/0.35 是本项目的经验值，不对应任何
+      外部产品算法，也不作科学依据；只代表**采样时刻**，不外推整夜。
+    """
+    base: Dict[str, Any] = {
+        "schema": "mbdsdr.stargazing-index/1",
+        "known": False,
+        "score": None,
+        "level": "unknown",
+        "level_zh": "未知",
+        "cloud_score": None,
+        "moon_score": None,
+        "moon_counted": False,
+        "weights": dict(_STARGAZING_WEIGHTS),
+        "at": "",
+        "text": "",
+        "reason": "",
+    }
+
+    cloud_pct = None
+    if isinstance(sky, dict) and sky.get("known"):
+        cloud_pct = sky.get("cloud_cover_pct")
+    if cloud_pct is None:
+        base["reason"] = "缺少云量实况，不给观星指数（不按晴天假设）"
+        return base
+    try:
+        cloud_pct = float(cloud_pct)
+    except (TypeError, ValueError):
+        base["reason"] = "云量不是数值，不给观星指数"
+        return base
+    if not math.isfinite(cloud_pct):
+        base["reason"] = "云量不是有限数，不给观星指数"
+        return base
+
+    cloud_pct = min(max(cloud_pct, 0.0), 100.0)
+    cloud_score = 100.0 - cloud_pct
+    gate = _STARGAZING_WEIGHTS["cloud_gate"]
+    penalty = _STARGAZING_WEIGHTS["moon_penalty"]
+
+    parts = [f"云量 {cloud_pct:.0f}%"]
+    illuminated = altitude = None
+    if isinstance(moon, dict) and moon.get("known"):
+        try:
+            illuminated = float(moon.get("illumination"))
+            altitude = float(moon.get("alt_deg"))
+        except (TypeError, ValueError):
+            illuminated = altitude = None
+    if illuminated is not None and altitude is not None and \
+            math.isfinite(illuminated) and math.isfinite(altitude):
+        if altitude < 0.0:
+            moon_score = 100.0
+            parts.append("月亮在地平线下")
+        else:
+            # 高度越高、照亮越大，冲淡暗弱天体越明显；60° 以上按 60° 计。
+            alt_weight = min(max(altitude, 0.0), 60.0) / 60.0
+            moon_score = 100.0 - 60.0 * illuminated * alt_weight
+            parts.append(f"月光 照亮 {illuminated * 100:.0f}% / 高度 {altitude:.0f}°")
+        score = cloud_score * (gate + penalty * (moon_score / 100.0))
+        moon_counted = True
+    else:
+        moon_score = None
+        score = cloud_score
+        moon_counted = False
+        parts.append("未计入月光（缺月球采样）")
+
+    score = round(min(max(score, 0.0), 100.0), 1)
+    level, level_zh = "bad", "不适合"
+    for floor, machine, zh in _INDEX_LEVELS:
+        if score >= floor:
+            level, level_zh = machine, zh
+            break
+
+    base.update({
+        "known": True,
+        "score": score,
+        "level": level,
+        "level_zh": level_zh,
+        "cloud_score": round(cloud_score, 1),
+        "moon_score": None if moon_score is None else round(moon_score, 1),
+        "moon_counted": moon_counted,
+        "at": str(sky.get("observed_at") or ""),
+        "text": "；".join(parts),
+    })
+    if not moon_counted:
+        base["reason"] = "月光未计入，分数只反映云量"
+    return base
+
+
 def assess_tonight(snapshot: Optional[Dict[str, Any]],
                    lat_deg: Optional[float] = None,
                    lon_deg: Optional[float] = None,
@@ -292,6 +406,7 @@ def assess_tonight(snapshot: Optional[Dict[str, Any]],
     ]
     if not snapshot:
         sky = _assess_sky({})
+        moon_assessed = _assess_moon(moon)
         return {
             "schema": TONIGHT_SCHEMA,
             "known": False,
@@ -299,7 +414,8 @@ def assess_tonight(snapshot: Optional[Dict[str, Any]],
             "sky": sky,
             "aurora": {"known": False, "chance": "unknown", "kp": None,
                        "reason": "没有环境快照，不猜极光"},
-            "moon": _assess_moon(moon),
+            "moon": moon_assessed,
+            "index": stargazing_index(sky, moon_assessed),
             "meteor_showers": _assess_showers(at),
             "notes": notes,
         }
@@ -310,6 +426,7 @@ def assess_tonight(snapshot: Optional[Dict[str, Any]],
 
     sky = _assess_sky(_sample(snapshot, "weather"))
     aurora = _assess_aurora(_sample(snapshot, "kp"), lat, lon)
+    moon_assessed = _assess_moon(moon)
 
     if sky["known"]:
         verdict = sky["text"]
@@ -323,7 +440,8 @@ def assess_tonight(snapshot: Optional[Dict[str, Any]],
         "verdict": verdict,
         "sky": sky,
         "aurora": aurora,
-        "moon": _assess_moon(moon),
+        "moon": moon_assessed,
+        "index": stargazing_index(sky, moon_assessed),
         "meteor_showers": _assess_showers(at),
         "notes": notes,
     }
@@ -341,6 +459,13 @@ _CHANCE_ZH = {
 def format_tonight_section(report: Dict[str, Any]) -> str:
     """把判定渲染成多行文本（含时刻与来源，缺测时写明缺什么）。"""
     lines = ["今夜可看性：" + str(report.get("verdict", ""))]
+    index = report.get("index") or {}
+    if index.get("known"):
+        lines.append(f"- 观星指数 {index.get('score'):g}/100"
+                     f"（{index.get('level_zh')}）：{index.get('text')}"
+                     "（经验权重，非权威评分，只代表采样时刻）")
+    elif index.get("reason"):
+        lines.append("- 观星指数：未知（" + str(index["reason"]) + "）")
     sky = report.get("sky") or {}
     if sky.get("known"):
         when = sky.get("observed_at") or "时刻缺失"
