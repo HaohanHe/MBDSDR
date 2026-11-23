@@ -10,10 +10,10 @@
 - 工具链：**Flutter 3.50.0 / Dart 3.14.0**（仓库外 `D:\mbdsdr\toolchain\flutter`），
   Android SDK / Gradle 缓存同在 D 盘，均不随仓库分发。
 - `flutter pub get`：**成功**（依赖从 pub 缓存/镜像解析，未离线失败；24 个包有更新但受约束锁定）。
-- `flutter analyze`（2026-11-22 复跑，156 个源码 Dart 文件 = lib 83 + test 73）：
-  **0 error / 0 warning / 65 info**。info 为 `deprecated_member_use`
-  （Flutter 3.50 起 `package:flutter/material.dart` 提示改用 `material_ui`）与 2 条测试内
-  `avoid_dynamic_calls`，不影响编译，未批量改。原始输出：`D:\mbdsdr\output\mobile_walk\flutter_analyze.log`。
+- `flutter analyze`（2026-11-24 复跑）：**0 error / 0 warning / 67 info**。
+  info 全部为 `deprecated_member_use`（`package:flutter/material.dart` 提示改用
+  `material_ui`，SDK 标注 deprecated after v3.47.0-0.0.pre）；不影响编译，
+  未批量改。原始输出仍在 `D:\mbdsdr\output\mobile_walk\flutter_analyze.log`。
 - `flutter test`（2026-11-24 复跑）：**613 passed / 0 failed**
   （11-22 的覆盖明细：天空投影对拍 84 点、反投影往返、四态裁剪、投影有效性域/跨域裁剪 4 条、
   指天视图 26 条、星名目录与中心识别 12 条、星表资产 4 条、asterism overlay 行为 11 条、
