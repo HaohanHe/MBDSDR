@@ -3147,6 +3147,8 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `docs/COORDINATION.md` | 多机线/42（§313 GNSS 复验（提交后释放）） | 2026-11-24 02:18 | 本笔 |
 | `docs/COORDINATION.md` | 多机线/42（§314 M4.3 对账（提交后释放）） | 2026-11-24 02:19 | 本笔 |
 | `docs/COORDINATION.md` | 多机线/42（§315 回归口径（提交后释放）） | 2026-11-24 02:33 | 本笔 |
+| `mobile/README.md` | 多机线/42（analyze 复跑（提交后释放）） | 2026-11-24 02:34 | 本笔 |
+| `docs/COORDINATION.md` | 多机线/42（§316 收尾：补登 mobile README 行（提交后释放）） | 2026-11-24 02:35 | 本笔 |
 
 > 上表各行均由 `claim` 台账推导：owner 原文与 `acquired_at` 直接取自台账，
 > 目的优先用台账里的 `claim_reason`，没有就如实写「未声明」，不补编。时间列只是
