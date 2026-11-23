@@ -75,6 +75,21 @@ object GatewayFormat {
         val more = if (passes.size() > limit) " …" else ""
         return "过境 $count 条：" + rows.joinToString(" / ") + more
     }
+
+    /**
+     * 「此刻」窗口的网关一行（M4.1 收尾）：
+     * 只转述权威端给的全景站址/太阳/缺项，不合成、不覆盖 bundle 的站址；
+     * 从未取到过就返回一句提示，让人知道去哪取。
+     */
+    fun stationLine(state: GatewayUiState): String {
+        val host = state.host.ifBlank { "—" }
+        val port = state.portText.ifBlank { "—" }
+        if (state.panoramaText.isBlank()) {
+            return "未取（在「头顶」配对后刷新全景）· $host:$port"
+        }
+        val suffix = if (state.panoramaStale) "（未联网·上次结果）" else ""
+        return "$host:$port · ${state.panoramaText}$suffix"
+    }
 }
 
 class GatewayController(

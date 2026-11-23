@@ -89,6 +89,11 @@ python scripts/export_spatial_bundle.py <档案>.observation.json -o <输出目�
 **诚实边界**：token 只在进程内存；四窗星图/回看仍只读 bundle，未用增量数据替换；
 未在 PICO 真机验证。
 
+「此刻」窗口多一行「网关」：只转述 `/panorama` 的站址/太阳高度/缺项（外加
+`host:port` 与断网标记），**不覆盖**包内站址/时刻；从未取到时写「未取（在
+「头顶」配对后刷新全景）」，不拿包内数据冒充当面数据。网关控制器与快照放在
+进程级，窗口间共享；刷新仍由用户在「头顶」手动触发。
+
 ## 与官方样本的关系
 
 参照了 `PICO-Spatial-SDK-Sample-SpatialUI` / `SpatialAudio` / `WelcomeSpace` 的**调用方式**（`launch(::mainApp)`、`DefaultWindowContainer`、`WindowContainer` + `Placement`、`PicoTheme`、manifest 的 `pico.spatial.windowcontainer.*`）。样本为 Apache-2.0；本工程**未复制**其图片、3D 图标、模型或页面代码，也未引入 Coil/导航/Spotless 等示例模块。

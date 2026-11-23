@@ -15,9 +15,15 @@ import com.pico.spatial.ui.design.Text
  * 此刻面板：站址 / 时间 / 证据 / 阻塞。
  *
  * 阻塞为空时不显示该行；站址未知时由 [StationLines.site] 直接给出人话。
+ * [gatewayLine] 是桌面网关的全景转述（M4.1 收尾）：只多一行、不改 bundle 的
+ * 站址/时刻，明确标「网关」，避免与包内数据混成一份。
  */
 @Composable
-fun StationPanel(lines: StationLines, modifier: Modifier = Modifier) {
+fun StationPanel(
+    lines: StationLines,
+    modifier: Modifier = Modifier,
+    gatewayLine: String? = null,
+) {
     Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Text(text = "此刻", style = PicoTheme.typography.bodyLarge)
         StationLine("站址", lines.site)
@@ -25,6 +31,9 @@ fun StationPanel(lines: StationLines, modifier: Modifier = Modifier) {
         StationLine("证据", lines.evidence)
         if (lines.blockers.isNotEmpty()) {
             StationLine("阻塞", lines.blockers.joinToString("；"))
+        }
+        if (!gatewayLine.isNullOrBlank()) {
+            StationLine("网关", gatewayLine)
         }
     }
 }

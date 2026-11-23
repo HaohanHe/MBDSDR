@@ -2839,6 +2839,18 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `.trae/specs/mbdsdr-system-lifecycle/checklist.md` | 多机线/42（§268 Task 225） | 2026-11-23 23:10 | 本笔 |
 | `docs/PRD-现状对照.md` | 多机线/42（§268 P1-11 补离线回退） | 2026-11-23 23:10 | 本笔 |
 | `docs/COORDINATION.md` | 多机线/42（§268 记录 + §6.1） | 2026-11-23 23:10 | 本笔 |
+| `spatial/app/src/main/java/com/mbdsdr/spatial/net/GatewayController.kt` | 多机线/42（§269 stationLine 转述） | 2026-11-23 23:13 | 本笔 |
+| `spatial/app/src/main/java/com/mbdsdr/spatial/ui/GatewayPanel.kt` | 多机线/42（§269 onChanged 回写快照） | 2026-11-23 23:13 | 本笔 |
+| `spatial/app/src/main/java/com/mbdsdr/spatial/ui/StationPanel.kt` | 多机线/42（§269 网关一行） | 2026-11-23 23:13 | 本笔 |
+| `spatial/app/src/main/java/com/mbdsdr/spatial/Main.kt` | 多机线/42（§269 控制器上提进程级 + 此刻接线） | 2026-11-23 23:13 | 本笔 |
+| `spatial/app/src/test/java/com/mbdsdr/spatial/GatewayControllerTest.kt` | 多机线/42（§269 stationLine 2 条用例） | 2026-11-23 23:13 | 本笔 |
+| `spatial/README.md` | 多机线/42（§269 此刻网关行说明） | 2026-11-23 23:13 | 本笔 |
+| `.trae/specs/multi-device-interconnect/tasks.md` | 多机线/42（§269 M4.1 收尾状态） | 2026-11-23 23:13 | 本笔 |
+| `.trae/specs/multi-device-interconnect/checklist.md` | 多机线/42（§269 此刻网关行项） | 2026-11-23 23:13 | 本笔 |
+| `.trae/specs/mbdsdr-system-lifecycle/tasks.md` | 多机线/42（§269 Task 226） | 2026-11-23 23:13 | 本笔 |
+| `.trae/specs/mbdsdr-system-lifecycle/checklist.md` | 多机线/42（§269 Task 226） | 2026-11-23 23:13 | 本笔 |
+| `docs/PRD-现状对照.md` | 多机线/42（§269 P1-11 补此刻网关行） | 2026-11-23 23:13 | 本笔 |
+| `docs/COORDINATION.md` | 多机线/42（§269 记录 + §6.1） | 2026-11-23 23:13 | 本笔 |
 
 > 上表各行均由 `claim` 台账推导：owner 原文与 `acquired_at` 直接取自台账，
 > 目的优先用台账里的 `claim_reason`，没有就如实写「未声明」，不补编。时间列只是
@@ -13060,6 +13072,35 @@ spec 的 M4.3 要求「未联网时显示上次结果/包内内容，不伪造�
 - 仍只保证 JVM 单测与编译；PICO 真机、真实断网切换未验证。
 - 面板只在用户手动刷新时感知失败；没有自动轮询/自动重连。
 - 四窗星图仍只读 bundle，断网回退只在面板摘要层面，不是全窗口离线模式。
+
+## 269. M4.1 收尾：「此刻」窗口转述网关全景（2026-11-23）
+
+**依据**：§267/§268 的全景/过境摘要只在「头顶」主窗的面板里；用户切到
+「此刻」看站址时，看不到权威端（桌面）当前站址与缺项。spec 要求全景成为
+判定输入，但头显不得合成、也不得用网关值覆盖 bundle。
+
+**做了什么**
+- `Main.kt`：网关控制器从 SkyWindow 的 `remember` 上提到进程级
+  `ObservationState.gateway`，并新增 `gatewaySnapshot: GatewayUiState`
+  （Compose 状态，跨窗口可重组）；`GatewayPanel` 增加 `onChanged`，
+  配对/刷新/改地址后回写快照。
+- `StationPanel.kt`：新增可选 `gatewayLine`，空则整行不显示；
+  「此刻」窗口写入 `GatewayFormat.stationLine(snapshot)`：
+  `host:port · 站址 x, y · 太阳高度 z° · 缺项 …`，断网追加「（未联网·上次结果）」；
+  从未取到过则写「未取（在「头顶」配对后刷新全景）· host:port」。
+- 明确边界：**不覆盖** bundle 的站址/时刻/证据，星图仍只用包内数据；
+  网关行标签固定「网关」，避免两份数据被读成一份。
+
+**验证**
+- `GatewayControllerTest` 新增 2 条：未取时的提示行、已取时的转述与断网标记。
+- `./gradlew.bat testDebugUnitTest --rerun-tasks --no-daemon --offline`：
+  **18 suite / 154 用例 / 0 失败 / 1 跳过**；本次一次编译通过。
+- 未改 Python/Flutter，既有基线不受影响。
+
+**诚实边界**
+- 仍是 UI 转述，没有把增量数据合成进 bundle，四窗星图不会因网关刷新而更新。
+- 跨窗口同步依赖进程内 Compose 状态；窗口若在刷新前已组合也能重组，但未在
+  PICO 真机验证。token 仍不持久化。
 
 
 

@@ -6,6 +6,7 @@ import com.mbdsdr.spatial.net.GatewayController
 import com.mbdsdr.spatial.net.GatewayFormat
 import com.mbdsdr.spatial.net.GatewayResponse
 import com.mbdsdr.spatial.net.GatewayTransport
+import com.mbdsdr.spatial.net.GatewayUiState
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -269,5 +270,29 @@ class GatewayControllerTest {
         assertTrue(c.state.passesStale)
         assertFalse(c.state.panoramaStale)
         assertTrue(c.state.status.startsWith("未联网"))
+    }
+
+    // ---- M4.1 收尾：「此刻」窗口的网关一行 ----
+
+    @Test
+    fun stationLineBeforeAnyRefreshPointsToPanel() {
+        val line = GatewayFormat.stationLine(
+            GatewayUiState(host = "192.168.1.20", portText = "8771"))
+        assertEquals("未取（在「头顶」配对后刷新全景）· 192.168.1.20:8771", line)
+    }
+
+    @Test
+    fun stationLineRelaysPanoramaAndStaleTag() {
+        val fresh = GatewayUiState(
+            host = "192.168.1.20",
+            portText = "8771",
+            panoramaText = "站址 40.50, -100.25 · 太阳高度 -18.4° · 缺项 cloud_cover",
+        )
+        assertEquals(
+            "192.168.1.20:8771 · 站址 40.50, -100.25 · 太阳高度 -18.4° · 缺项 cloud_cover",
+            GatewayFormat.stationLine(fresh),
+        )
+        val stale = fresh.copy(panoramaStale = true)
+        assertTrue(GatewayFormat.stationLine(stale).endsWith("（未联网·上次结果）"))
     }
 }

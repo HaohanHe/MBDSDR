@@ -15,6 +15,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.mbdsdr.spatial.net.GatewayController
+import com.mbdsdr.spatial.net.GatewayUiState
 import com.pico.spatial.ui.design.Button
 import com.pico.spatial.ui.design.PicoTheme
 import com.pico.spatial.ui.design.Text
@@ -28,17 +29,27 @@ import kotlinx.coroutines.withContext
  *
  * 只在用户点按钮时发请求（后台线程），不自动轮询；未配对/未接线时
  * 状态行显示具体原因，不冒充已连接。token 只在本进程内存里。
+ * [onChanged] 把最新状态交给进程级共享，供「此刻」窗口只读转述（M4.1 收尾）。
  */
 @Composable
-fun GatewayPanel(controller: GatewayController, modifier: Modifier = Modifier) {
+fun GatewayPanel(
+    controller: GatewayController,
+    modifier: Modifier = Modifier,
+    onChanged: (GatewayUiState) -> Unit = {},
+) {
     var state by remember { mutableStateOf(controller.state) }
     val scope = rememberCoroutineScope()
+
+    fun publish() {
+        state = controller.state
+        onChanged(controller.state)
+    }
 
     fun run(block: () -> Unit) {
         if (state.busy) return
         scope.launch {
             withContext(Dispatchers.IO) { block() }
-            state = controller.state
+            publish()
         }
     }
 
@@ -59,7 +70,7 @@ fun GatewayPanel(controller: GatewayController, modifier: Modifier = Modifier) {
                 value = state.host,
                 onValueChange = {
                     controller.updateHost(it)
-                    state = controller.state
+                    publish()
                 },
                 modifier = Modifier.width(170.dp),
             )
@@ -67,7 +78,7 @@ fun GatewayPanel(controller: GatewayController, modifier: Modifier = Modifier) {
                 value = state.portText,
                 onValueChange = {
                     controller.updatePortText(it)
-                    state = controller.state
+                    publish()
                 },
                 modifier = Modifier.width(80.dp),
             )
@@ -75,7 +86,7 @@ fun GatewayPanel(controller: GatewayController, modifier: Modifier = Modifier) {
                 value = state.code,
                 onValueChange = {
                     controller.updateCode(it)
-                    state = controller.state
+                    publish()
                 },
                 modifier = Modifier.width(120.dp),
             )

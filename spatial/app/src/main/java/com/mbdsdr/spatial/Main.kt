@@ -36,6 +36,8 @@ import com.mbdsdr.spatial.data.Star
 import com.mbdsdr.spatial.data.TimelineFormat
 import com.mbdsdr.spatial.data.visibleStars
 import com.mbdsdr.spatial.net.GatewayController
+import com.mbdsdr.spatial.net.GatewayFormat
+import com.mbdsdr.spatial.net.GatewayUiState
 import com.mbdsdr.spatial.sky.Selection
 import com.mbdsdr.spatial.sky.SkyCanvas
 import com.mbdsdr.spatial.sky.SkyRender
@@ -84,6 +86,12 @@ private class ObservationState {
     var jumpNote by mutableStateOf<String?>(null)
     /** 头顶选中的星；回看只据此高亮 detail 里确有同名目标的事件。 */
     var selectedStar by mutableStateOf<Star?>(null)
+    /**
+     * 多设备网关（M4.1）：控制器与快照放进程级，跨窗口共享。
+     * token 仍只在本进程内存；「此刻」只读转述全景，不覆盖 bundle 的站址/时刻。
+     */
+    val gateway = GatewayController()
+    var gatewaySnapshot by mutableStateOf(GatewayUiState())
     val player = MediaPlayerAudioPlayback()
 }
 
@@ -230,8 +238,6 @@ private fun SkyWindow(state: ObservationState, modifier: Modifier = Modifier) {
     val bundle = state.bundle
     val audio = AudioFormat.first(bundle?.audio ?: emptyList())
     val skyStars = bundle?.visibleStars() ?: emptyList()
-    // 网关控制器只在本窗口存活；token 只存在进程内，不落盘。
-    val gateway = remember { GatewayController() }
 
     Column(
         modifier = modifier.fillMaxSize().padding(24.dp),
@@ -262,7 +268,10 @@ private fun SkyWindow(state: ObservationState, modifier: Modifier = Modifier) {
                 color = PicoTheme.colorScheme.error,
             )
         }
-        GatewayPanel(gateway)
+        GatewayPanel(
+            controller = state.gateway,
+            onChanged = { state.gatewaySnapshot = it },
+        )
         Row(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(16.dp),
@@ -454,11 +463,12 @@ private fun ArchiveWindow(state: ObservationState, modifier: Modifier = Modifier
     )
 }
 
-/** 子窗口「此刻」：站址 / 时间 / 证据 / 阻塞。 */
+/** 子窗口「此刻」：站址 / 时间 / 证据 / 阻塞；网关全景只占一行转述。 */
 @Composable
 private fun StationWindow(state: ObservationState, modifier: Modifier = Modifier) {
     StationPanel(
         lines = StationFormat.lines(state.bundle),
+        gatewayLine = GatewayFormat.stationLine(state.gatewaySnapshot),
         modifier = modifier.fillMaxSize().padding(24.dp),
     )
 }
