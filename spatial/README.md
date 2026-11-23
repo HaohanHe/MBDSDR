@@ -1,6 +1,6 @@
 # MBDSDR Spatial（PICO 空间观测台）
 
-MBDSDR 的 PICO Spatial（Android/Kotlin）入口。它不是另一个产品：四块内容与桌面、手机共用同一套语义，数据只来自导出的 **spatial bundle**，不联网、不接 SDR、不伪造星空。M4 的只读网关客户端已在 `net/DeviceGatewayClient.kt` 就绪，但四窗 UI 尚未接线（见下文「多设备网关」）。
+MBDSDR 的 PICO Spatial（Android/Kotlin）入口。它不是另一个产品：四块内容与桌面、手机共用同一套语义，数据默认来自导出的 **spatial bundle**，不联网、不接 SDR、不伪造星空。M4 的只读网关客户端与主窗网关面板已就绪，可在用户操作下读取权威端 `/panorama`、`/passes`（见下文「多设备网关」）；四窗未用增量数据替换 bundle。
 
 ```
 头顶  —— 真实星表 + 站址/时刻算出的 alt/az
@@ -82,9 +82,10 @@ python scripts/export_spatial_bundle.py <档案>.observation.json -o <输出目�
 未启用时回 503，不拿假过境顶替。
 
 传输可注入（`GatewayTransport`），JVM 单测完全离线；默认实现是
-`HttpURLConnection`（6 s 超时）。**诚实边界**：目前只到数据层——四窗 UI 尚未
-接网关、`/passes` 尚未被 UI 消费、也未在 PICO 真机上验证；应用默认仍是
-「只读 bundle、不联网」。
+`HttpURLConnection`（6 s 超时）。主窗口「头顶」已接一个只读网关面板：
+填主机/端口/6 位配对码 →「配对」→「刷新全景」「刷新过境」，结果显示为
+一行摘要（缺项如实列 `—`/`missing`）。**诚实边界**：token 只在进程内存；
+四窗星图/回看仍只读 bundle，未用增量数据替换；未在 PICO 真机验证。
 
 ## 与官方样本的关系
 

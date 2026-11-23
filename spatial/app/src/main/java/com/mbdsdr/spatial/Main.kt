@@ -35,11 +35,13 @@ import com.mbdsdr.spatial.data.StationFormat
 import com.mbdsdr.spatial.data.Star
 import com.mbdsdr.spatial.data.TimelineFormat
 import com.mbdsdr.spatial.data.visibleStars
+import com.mbdsdr.spatial.net.GatewayController
 import com.mbdsdr.spatial.sky.Selection
 import com.mbdsdr.spatial.sky.SkyCanvas
 import com.mbdsdr.spatial.sky.SkyRender
 import com.mbdsdr.spatial.sky.SpectrumCanvas
 import com.mbdsdr.spatial.ui.ArchivePanel
+import com.mbdsdr.spatial.ui.GatewayPanel
 import com.mbdsdr.spatial.ui.LayoutOpKind
 import com.mbdsdr.spatial.ui.PassesPanel
 import com.mbdsdr.spatial.ui.StationPanel
@@ -228,6 +230,8 @@ private fun SkyWindow(state: ObservationState, modifier: Modifier = Modifier) {
     val bundle = state.bundle
     val audio = AudioFormat.first(bundle?.audio ?: emptyList())
     val skyStars = bundle?.visibleStars() ?: emptyList()
+    // 网关控制器只在本窗口存活；token 只存在进程内，不落盘。
+    val gateway = remember { GatewayController() }
 
     Column(
         modifier = modifier.fillMaxSize().padding(24.dp),
@@ -258,6 +262,7 @@ private fun SkyWindow(state: ObservationState, modifier: Modifier = Modifier) {
                 color = PicoTheme.colorScheme.error,
             )
         }
+        GatewayPanel(gateway)
         Row(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(16.dp),

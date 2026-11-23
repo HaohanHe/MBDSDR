@@ -2818,6 +2818,17 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `.trae/specs/mbdsdr-system-lifecycle/checklist.md` | 多机线/42（§266 Task 223） | 2026-11-24 02:45 | 本笔 |
 | `docs/PRD-现状对照.md` | 多机线/42（§266 P1-11 补桌面 TLE） | 2026-11-24 02:45 | 本笔 |
 | `docs/COORDINATION.md` | 多机线/42（§266 记录 + §6.1） | 2026-11-24 02:45 | 本笔 |
+| `spatial/app/src/main/java/com/mbdsdr/spatial/net/GatewayController.kt` | 多机线/42（§267 头显网关状态机 + 摘要格式） | 2026-11-24 03:15 | 本笔 |
+| `spatial/app/src/main/java/com/mbdsdr/spatial/ui/GatewayPanel.kt` | 多机线/42（§267 头显网关面板） | 2026-11-24 03:15 | 本笔 |
+| `spatial/app/src/main/java/com/mbdsdr/spatial/Main.kt` | 多机线/42（§267 主窗接网关面板） | 2026-11-24 03:15 | 本笔 |
+| `spatial/app/src/test/java/com/mbdsdr/spatial/GatewayControllerTest.kt` | 多机线/42（§267 状态机 10 条用例） | 2026-11-24 03:15 | 本笔 |
+| `spatial/README.md` | 多机线/42（§267 面板入口与边界） | 2026-11-24 03:15 | 本笔 |
+| `.trae/specs/multi-device-interconnect/tasks.md` | 多机线/42（§267 M4.1 状态） | 2026-11-24 03:15 | 本笔 |
+| `.trae/specs/multi-device-interconnect/checklist.md` | 多机线/42（§267 面板项） | 2026-11-24 03:15 | 本笔 |
+| `.trae/specs/mbdsdr-system-lifecycle/tasks.md` | 多机线/42（§267 Task 224） | 2026-11-24 03:15 | 本笔 |
+| `.trae/specs/mbdsdr-system-lifecycle/checklist.md` | 多机线/42（§267 Task 224） | 2026-11-24 03:15 | 本笔 |
+| `docs/PRD-现状对照.md` | 多机线/42（§267 P1-11 补头显面板） | 2026-11-24 03:15 | 本笔 |
+| `docs/COORDINATION.md` | 多机线/42（§267 记录 + §6.1） | 2026-11-24 03:15 | 本笔 |
 
 > 上表各行均由 `claim` 台账推导：owner 原文与 `acquired_at` 直接取自台账，
 > 目的优先用台账里的 `claim_reason`，没有就如实写「未声明」，不补编。时间列只是
@@ -12974,6 +12985,39 @@ lens/eyepiece 必须能各自把「我现在指着哪」发出去。
 - 只读本地 TLE 文件，不自动下载/校验新鲜度；旧 TLE 仍会算出「数学上成立」
   但已不反映真实轨道的过境。
 - 头显四窗 UI 仍未消费 `/passes`；选文件依赖桌面文件对话框。
+
+## 267. M4.1 UI：头显主窗只读网关面板（2026-11-23）
+
+**依据**：§262/§264 已让头显有客户端与 `/passes`，但头显界面上没有任何入口；
+用户无法在头显里配对桌面、看全景/过境。
+
+**做了什么**
+- 新 `spatial/.../net/GatewayController.kt`：
+  - `GatewayUiState`（host/portText/code/deviceName/role/token/paired/busy/
+    status/panoramaText/passesText）与状态机；
+  - 本地校验：主机非空、端口 1–65535、配对码 6 位；未配对时刷新直接拒绝；
+  - `pair()` 存 token（**仅进程内存**）、`refreshPanorama()`/`refreshPasses()`
+    把 JSON 压成一行摘要；任何失败写进 status，不伪造成功。
+  - `GatewayFormat`：全景「站址 x, y · 太阳高度 z° · 缺项 …」；
+    过境「过境 N 条：名称 HH:mm 最高 xx° / …」，缺字段一律「—」，
+    0 条明说「检查 TLE 与站址」。
+- 新 `spatial/.../ui/GatewayPanel.kt`：PICO `TextField`（主机/端口/配对码）+
+  「配对」「刷新全景」「刷新过境」；请求在 IO 线程执行，返回后回主线程刷新状态；
+  未配对/忙时按钮禁用。接进「头顶」主窗（`Main.kt` 的 SkyWindow）。
+- `spatial/README.md` 更新：说明面板入口与诚实边界（token 不落盘、四窗星图
+  仍只用 bundle、未真机验证）。
+
+**验证**
+- `./gradlew.bat testDebugUnitTest --rerun-tasks --no-daemon --offline`：
+  **18 suite / 149 用例 / 0 失败 / 1 跳过**（新增 `GatewayControllerTest` 10 条：
+  配对存 token、非法码本地拒、错码透传、未配对拒刷新、全景/过境摘要格式、
+  Bearer 头、503 文案、网络失败可见）。UI 与 Main 编译通过。
+- 未改 Python/Flutter 代码，既有基线不受影响。
+
+**诚实边界**
+- 未在 PICO 真机跑过（只保证编译 + JVM 单测）；token 不持久化，重启需重配。
+- 四窗星图/回看仍只读 bundle，面板摘要没有写回 `ObservationState`。
+- 无自动轮询；刷新是用户手动动作。
 
 
 
