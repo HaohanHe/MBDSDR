@@ -3149,6 +3149,7 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `docs/COORDINATION.md` | 多机线/42（§315 回归口径（提交后释放）） | 2026-11-24 02:33 | 本笔 |
 | `mobile/README.md` | 多机线/42（analyze 复跑（提交后释放）） | 2026-11-24 02:34 | 本笔 |
 | `docs/COORDINATION.md` | 多机线/42（§316 收尾：补登 mobile README 行（提交后释放）） | 2026-11-24 02:35 | 本笔 |
+| `docs/COORDINATION.md` | 多机线/42（§316 内核基线（提交后释放）） | 2026-11-24 02:40 | 本笔 |
 
 > 上表各行均由 `claim` 台账推导：owner 原文与 `acquired_at` 直接取自台账，
 > 目的优先用台账里的 `claim_reason`，没有就如实写「未声明」，不补编。时间列只是
@@ -14527,3 +14528,12 @@ M4.3 此前保持未勾选，但它的软件要求都有可复跑证据：
   → **89 passed**；移动端 613、头显 225 见 §309/§310
 
 **结论**：以后先跑目标套件；要全量就按 A/B 脚本分组跑，并接受长时间。
+
+## 316. 内核基线全绿（2026-11-24）
+
+**命令**：`python -m pytest mbdsdr_ai/tests -q`（AGENTS.md 的内核基线）
+**结果**：**3024 passed, 4 skipped, 202 subtests passed**，exit 0，耗时 210.8 s
+**说明**：4 个 skip 是无 env/无硬件的诚实跳过（SatDump 目录、reedsolo、RTL_TCP、
+无网络 TLE 等，随环境浮动）；不把数字当能力宣传。
+**边界**：这只是内核基线；根 `tests/` 套件仍需按 `scripts/ci_pytest_groups.py`
+A/B 分组跑（§315），不要整包直跑。
