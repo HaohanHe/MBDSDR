@@ -2746,6 +2746,17 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `.trae/specs/mbdsdr-system-lifecycle/checklist.md` | 多机线/42（§260 Task 217） | 2026-11-23 23:55 | 本笔 |
 | `docs/PRD-现状对照.md` | 多机线/42（§260 P1-11 补融合） | 2026-11-23 23:55 | 本笔 |
 | `docs/COORDINATION.md` | 多机线/42（§260 记录 + §6.1） | 2026-11-23 23:55 | 本笔 |
+| `mobile/lib/pages/settings_page.dart` | 多机线/42（§261 刷新名册 + 摘要行） | 2026-11-24 00:15 | 本笔 |
+| `mobile/lib/l10n/app_zh.arb` | 多机线/42（§261 名册文案 zh） | 2026-11-24 00:15 | 本笔 |
+| `mobile/lib/l10n/app_en.arb` | 多机线/42（§261 名册文案 en） | 2026-11-24 00:15 | 本笔 |
+| `mobile/lib/l10n/app_ja.arb` | 多机线/42（§261 名册文案 ja） | 2026-11-24 00:15 | 本笔 |
+| `mobile/test/settings_page_gateway_test.dart` | 多机线/42（§261 名册全链路用例） | 2026-11-24 00:15 | 本笔 |
+| `.trae/specs/multi-device-interconnect/tasks.md` | 多机线/42（§261 M2.4 勾选） | 2026-11-24 00:15 | 本笔 |
+| `.trae/specs/multi-device-interconnect/checklist.md` | 多机线/42（§261 名册项勾选） | 2026-11-24 00:15 | 本笔 |
+| `.trae/specs/mbdsdr-system-lifecycle/tasks.md` | 多机线/42（§261 Task 218） | 2026-11-24 00:15 | 本笔 |
+| `.trae/specs/mbdsdr-system-lifecycle/checklist.md` | 多机线/42（§261 Task 218） | 2026-11-24 00:15 | 本笔 |
+| `docs/PRD-现状对照.md` | 多机线/42（§261 P1-11 补名册） | 2026-11-24 00:15 | 本笔 |
+| `docs/COORDINATION.md` | 多机线/42（§261 记录 + §6.1） | 2026-11-24 00:15 | 本笔 |
 
 > 上表各行均由 `claim` 台账推导：owner 原文与 `acquired_at` 直接取自台账，
 > 目的优先用台账里的 `claim_reason`，没有就如实写「未声明」，不补编。时间列只是
@@ -12717,6 +12728,30 @@ PRD §8 冲刺序列 P1「天文通式观星指数」。本轮只做**有可信�
 - 融合陈旧阈值沿用 `fuse_poses` 默认 2 s；两机时钟仍由设备自己对齐。
 - 手机端还没有真实传感器采集/上报 UI（`postPose` 数据层已备）。
 - 目镜识别结果（星名/HIP/角距残差）尚未单列，仍待 M3.3。
+
+## 261. M2.4：手机读取并展示设备名册（2026-11-23）
+
+**依据**：`multi-device-interconnect` M2.4；配对后用户需要看到「这台望远镜上
+现在有哪些设备、各是什么角色」，而不是只有本机 token。
+
+**做了什么**
+- `mobile/lib/pages/settings_page.dart`：已配对分支新增「刷新名册」按钮与
+  名册摘要行——按 `device-roster/1` 的 devices 列表显示「角色 · 设备名」，
+  条数与空名册都如实给出；未知角色原样显示（不再硬塞成「手持」）；
+  解除配对时一并清空名册/全景摘要。
+- l10n：zh/en/ja 新增 `settingsGatewayRoster` / `RosterEmpty` /
+  `RosterSummary`（含条数与条目占位符）。
+- 名册只渲染角色/名称，**不回显 token**（端到端断言 `tok-1` 不出现在界面）。
+
+**验证**
+- `flutter test test/settings_page_gateway_test.dart` → **3 passed**，其中主链路
+  用例在配对数 → 全景 → **刷新名册** → 解除配对全程断言请求路径与文案；
+  假传输的 `/roster` 回 `mbdsdr.device-roster/1` 两行（lens/eyepiece）。
+- 全量 `flutter test` → **591 passed / 0 failed**。
+
+**诚实边界**
+- 未真机验证；名册刷新是手动按钮，没有自动轮询（避免手机上无谓的 2 s 请求）。
+- 头显侧名册展示仍未做，并入 M4。
 
 
 

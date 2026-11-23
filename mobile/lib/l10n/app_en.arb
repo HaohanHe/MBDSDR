@@ -70,6 +70,15 @@
   },
   "settingsGatewayNotPaired": "Not paired",
   "settingsGatewayPanorama": "Read panorama",
+  "settingsGatewayRoster": "Refresh roster",
+  "settingsGatewayRosterEmpty": "Roster is empty",
+  "settingsGatewayRosterSummary": "Roster ({count} devices): {items}",
+  "@settingsGatewayRosterSummary": {
+    "placeholders": {
+      "count": {"type": "String"},
+      "items": {"type": "String"}
+    }
+  },
   "settingsGatewayPanoramaSummary": "Site {site} · Sun altitude {sunAlt}° · Missing {missing}",
   "@settingsGatewayPanoramaSummary": {
     "placeholders": {

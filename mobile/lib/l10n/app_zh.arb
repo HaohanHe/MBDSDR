@@ -70,6 +70,15 @@
   },
   "settingsGatewayNotPaired": "未配对",
   "settingsGatewayPanorama": "读取全景",
+  "settingsGatewayRoster": "刷新名册",
+  "settingsGatewayRosterEmpty": "名册为空",
+  "settingsGatewayRosterSummary": "名册（{count} 台）：{items}",
+  "@settingsGatewayRosterSummary": {
+    "placeholders": {
+      "count": {"type": "String"},
+      "items": {"type": "String"}
+    }
+  },
   "settingsGatewayPanoramaSummary": "站址 {site} · 太阳高度 {sunAlt}° · 缺项 {missing}",
   "@settingsGatewayPanoramaSummary": {
     "placeholders": {

@@ -70,6 +70,15 @@
   },
   "settingsGatewayNotPaired": "未ペアリング",
   "settingsGatewayPanorama": "パノラマを取得",
+  "settingsGatewayRoster": "名簿を更新",
+  "settingsGatewayRosterEmpty": "名簿は空です",
+  "settingsGatewayRosterSummary": "名簿（{count} 台）：{items}",
+  "@settingsGatewayRosterSummary": {
+    "placeholders": {
+      "count": {"type": "String"},
+      "items": {"type": "String"}
+    }
+  },
   "settingsGatewayPanoramaSummary": "観測地点 {site} · 太陽高度 {sunAlt}° · 欠落 {missing}",
   "@settingsGatewayPanoramaSummary": {
     "placeholders": {

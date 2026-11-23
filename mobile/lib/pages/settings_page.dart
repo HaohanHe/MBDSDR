@@ -62,6 +62,9 @@ class _SettingsPageState extends State<SettingsPage> {
   /// 最近一次取回的全景摘要（null = 还没取过）。
   String? _gwPanoramaText;
 
+  /// 最近一次取回的名册摘要（null = 还没取过）。
+  String? _gwRosterText;
+
   String get _apiKey => widget.settings.apiKey;
 
   static String _masked(String key) {
@@ -194,13 +197,14 @@ class _SettingsPageState extends State<SettingsPage> {
   }
 
   // ------------------------------------------------------------ 多设备网关
-  /// 角色短标签（页面内文案，全部走 l10n）。
+  /// 角色短标签（页面内文案，全部走 l10n）；未知角色原样显示，不硬塞成手持。
   String _roleLabel(AppLocalizations l10n, String role) {
     return switch (role) {
       'lens' => l10n.settingsGatewayRoleLens,
       'eyepiece' => l10n.settingsGatewayRoleEyepiece,
+      'handheld' => l10n.settingsGatewayRoleHandheld,
       'headset' => l10n.settingsGatewayRoleHeadset,
-      _ => l10n.settingsGatewayRoleHandheld,
+      _ => role,
     };
   }
 
@@ -282,8 +286,51 @@ class _SettingsPageState extends State<SettingsPage> {
   void _unpairGateway() {
     final AppLocalizations l10n = AppLocalizations.of(context)!;
     widget.settings.deviceGatewayToken = '';
-    setState(() => _gwPanoramaText = null);
+    setState(() {
+      _gwPanoramaText = null;
+      _gwRosterText = null;
+    });
     _toast(l10n.toastGatewayUnpaired);
+  }
+
+  /// 取回权威端名册：只显示角色/设备名，不展示任何凭据。
+  Future<void> _fetchRoster() async {
+    final AppLocalizations l10n = AppLocalizations.of(context)!;
+    if (_gwBusy) return;
+    final SettingsService s = widget.settings;
+    if (s.controlHubHost.trim().isEmpty) {
+      _toast(l10n.settingsGatewayHostMissing, error: true);
+      return;
+    }
+    setState(() => _gwBusy = true);
+    try {
+      final Map<String, dynamic> data =
+          await _gatewayClient().roster(s.deviceGatewayToken);
+      final Object? rawDevices = data['devices'];
+      final List<Object?> devices =
+          rawDevices is List ? rawDevices : const <Object?>[];
+      String text;
+      if (devices.isEmpty) {
+        text = l10n.settingsGatewayRosterEmpty;
+      } else {
+        final List<String> items = <String>[];
+        for (final Object? raw in devices) {
+          if (raw is! Map) continue;
+          final String role = _roleLabel(l10n, '${raw['role'] ?? ''}');
+          final String name = '${raw['name'] ?? ''}'.trim();
+          items.add(name.isEmpty ? role : '$role · $name');
+        }
+        text = l10n.settingsGatewayRosterSummary(
+            '${devices.length}', items.join('，'));
+      }
+      if (!mounted) return;
+      setState(() => _gwRosterText = text);
+    } on DeviceGatewayException catch (e) {
+      if (!mounted) return;
+      _toast(l10n.toastGatewayPairFailed(e.message), error: true);
+    } finally {
+      if (mounted) setState(() => _gwBusy = false);
+    }
   }
 
   /// 取回全景摘要：站址 / 太阳高度 / 缺项如实展示，缺项不猜。
@@ -722,12 +769,21 @@ class _SettingsPageState extends State<SettingsPage> {
                     onPressed: _gwBusy ? null : _fetchPanorama,
                     child: Text(l10n.settingsGatewayPanorama),
                   ),
+                  OutlinedButton(
+                    onPressed: _gwBusy ? null : _fetchRoster,
+                    child: Text(l10n.settingsGatewayRoster),
+                  ),
                 ],
               ),
               if (_gwPanoramaText != null)
                 Padding(
                   padding: const EdgeInsets.only(top: AppTokens.spacingS),
                   child: Text(_gwPanoramaText!, style: AppTokens.auxiliary),
+                ),
+              if (_gwRosterText != null)
+                Padding(
+                  padding: const EdgeInsets.only(top: AppTokens.spacingS),
+                  child: Text(_gwRosterText!, style: AppTokens.auxiliary),
                 ),
             ] else
               Text(

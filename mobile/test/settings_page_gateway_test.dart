@@ -78,6 +78,8 @@ class _FakeGateway {
             200, '{"token":"tok-1","device":{"name":"手机A","role":"lens"}}');
       case '/panorama':
         return const GatewayHttpResponse(200, jsonEncoder);
+      case '/roster':
+        return const GatewayHttpResponse(200, _rosterJson);
       default:
         return const GatewayHttpResponse(404, '{"reason":"not found"}');
     }
@@ -86,6 +88,11 @@ class _FakeGateway {
   static const String jsonEncoder =
       '{"schema":"mbdsdr.sky-panorama/1","site":{"lat_deg":40.5,"lon_deg":-100.25},'
       '"sun":{"alt_deg":-18.4},"missing":["cloud_cover","kp_index"]}';
+
+  static const String _rosterJson =
+      '{"schema":"mbdsdr.device-roster/1","authority":"desktop",'
+      '"devices":[{"id":"d1","role":"lens","name":"手机A"},'
+      '{"id":"d2","role":"eyepiece","name":"手机B"}]}';
 }
 
 Widget _wrap(Widget home) => MaterialApp(
@@ -161,6 +168,16 @@ void main() {
     expect(
         find.text('站址 40.50, -100.25 · 太阳高度 -18.4° · 缺项 cloud_cover, kp_index'),
         findsOneWidget);
+
+    // 刷新名册：只显示角色/名字，不显示任何凭据。
+    await tester.tap(find.widgetWithText(OutlinedButton, '刷新名册'));
+    await tester.pumpAndSettle();
+    expect(fake.paths.map((Uri u) => u.path),
+        <String>['/pair', '/panorama', '/roster']);
+    expect(
+        find.text('名册（2 台）：镜头（视觉初指向） · 手机A，目镜（认星） · 手机B'),
+        findsOneWidget);
+    expect(find.textContaining('tok-1'), findsNothing);
 
     // 解除配对：token 清空，回到未配对态。
     await tester.tap(find.widgetWithText(TextButton, '解除配对'));
