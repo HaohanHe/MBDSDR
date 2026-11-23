@@ -458,6 +458,29 @@ class TestPlanetariumSkyVisibility:
             _pump(qapp, 50)
 
 
+class TestDeviceGatewaySpectrumFrame:
+    """网关 `/spectrum` 的唯一来源：主窗真实帧；没有帧必须是 None。"""
+
+    def test_none_until_live_then_clears(self, main_window):
+        import numpy as np
+
+        gen = main_window.spectrum.generator
+        gen.clear_data()
+        assert main_window._device_spectrum_frame() is None
+
+        gen.push_iq(np.ones(1024, dtype=np.complex64), 100e6, 2.4e6)
+        frame = main_window._device_spectrum_frame()
+        assert frame is not None
+        assert frame["center_freq_hz"] == 100e6
+        assert frame["sample_rate_hz"] == 2.4e6
+        assert frame["source"] == "live"
+        assert frame["captured_monotonic"] == gen.last_frame_monotonic
+        assert len(frame["powers_db"]) == gen.num_bins
+
+        gen.clear_data()
+        assert main_window._device_spectrum_frame() is None
+
+
 if __name__ == "__main__":
     import unittest
     unittest.main(verbosity=2)

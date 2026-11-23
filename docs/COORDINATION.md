@@ -2982,6 +2982,7 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `tests/test_device_gateway.py` | 多机线/42（§284 /spectrum 4 条用例） | 2026-11-24 00:40 | 本笔 |
 | `tests/test_desktop_device_gateway_dialog.py` | 多机线/42（§284 对话框 /spectrum 用例） | 2026-11-24 00:40 | 本笔 |
 | `tests/test_spectrum_frame_meta.py` | 多机线/42（§284 帧时钟用例） | 2026-11-24 00:40 | 本笔 |
+| `tests/test_main_window.py` | 多机线/42（§284 主窗频谱帧来源用例） | 2026-11-24 01:05 | 本笔 |
 | `spatial/app/src/main/java/com/mbdsdr/spatial/net/DeviceGatewayClient.kt` | 多机线/42（§284 spectrum 只读客户端） | 2026-11-24 00:40 | 本笔 |
 | `spatial/app/src/main/java/com/mbdsdr/spatial/net/GatewayController.kt` | 多机线/42（§284 频谱摘要与刷新） | 2026-11-24 00:40 | 本笔 |
 | `spatial/app/src/main/java/com/mbdsdr/spatial/ui/GatewayPanel.kt` | 多机线/42（§284 频谱快照按钮/一行） | 2026-11-24 00:40 | 本笔 |
@@ -13689,6 +13690,8 @@ spec 的 M4.3 要求「未联网时显示上次结果/包内内容，不伪造�
   None→503/抛错 500/形状 500、NaN 与 stale 口径、全 NaN 不算帧。
 - 对话框 +1：无帧 503 → 有帧 200（schema/readonly/realtime/bins/峰值/功率轴）。
 - `test_spectrum_frame_meta.py` +1：帧时钟只在真实帧置位、清空复位。
+- `test_main_window.py` +1：主窗 `_device_spectrum_frame` 未出帧为 None，
+  push_iq 后给真实帧，`clear_data` 复位（网关取数只走这一处）。
 - `pytest tests/test_device_gateway.py tests/test_desktop_device_gateway_dialog.py`
   → **64 passed**。
 - headset JVM：24 suite / **207 用例** / 0 失败 / 1 跳过（+3：客户端频谱/503、
