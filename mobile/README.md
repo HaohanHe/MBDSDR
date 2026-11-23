@@ -14,7 +14,7 @@
   **0 error / 0 warning / 65 info**。info 为 `deprecated_member_use`
   （Flutter 3.50 起 `package:flutter/material.dart` 提示改用 `material_ui`）与 2 条测试内
   `avoid_dynamic_calls`，不影响编译，未批量改。原始输出：`D:\mbdsdr\output\mobile_walk\flutter_analyze.log`。
-- `flutter test`（2026-11-24 复跑）：**608 passed / 0 failed**
+- `flutter test`（2026-11-24 复跑）：**609 passed / 0 failed**
   （11-22 的覆盖明细：天空投影对拍 84 点、反投影往返、四态裁剪、投影有效性域/跨域裁剪 4 条、
   指天视图 26 条、星名目录与中心识别 12 条、星表资产 4 条、asterism overlay 行为 11 条、
   首次成功端到端 5 条、小屏布局 + 标签避让 4 条；此后新增 M2 配对/名册、
@@ -26,7 +26,7 @@
   指天页中心识别 4 条）→ 563（捕获→指向闭环 2 条）→ 567（小屏无溢出 +
   状态条不省略 1 条、标签避让 3 条）→ 601（多设备网关 M2/M3）→
   604（指天页自动上报 3 条）→ 608（手机只读 `/spectrum` 快照 2 条：
-  客户端 503 不伪造 + 设置页 503 不编摘要）。
+  客户端 503 不伪造 + 设置页 503 不编摘要）→ 609（回环 HTTP 定长请求体回归 1 条）。
 - `flutter build apk --debug`（2026-11-24 复跑）：**成功**（43.1 s）；
   同日 `spatial` 的 `gradlew :app:assembleDebug --offline` 也是
   **BUILD SUCCESSFUL**（20 s），三端打包层无遗漏。
@@ -51,6 +51,22 @@
   （约 114 MB）** 后由我们主动停止；App 页头显示 **`rtl_tcp 已连接`**，状态行
   `144.000000 MHz（设定值） NFM · RSSI -31.1 dBFS（实测峰值） · 2.048 MS/s（设备报告） ·
   自动增益 · S2`。这是**模拟器内 App 经真实 rtl_tcp 拿到真实硬件数据**，不是宿主 Dart VM。
+- **模拟器 ↔ 真实网关配对（2026-11-24 首次打通）**：宿主
+  `python -u -m mbdsdr_ai.device_gateway --port 8771 --lat 45 --lon 120`（CLI，
+  未接 TLE/SDR/频谱帧来源），模拟器内设置 ControlHub 主机 `10.0.2.2`、网关端口
+  `8771`、角色「手持（只读）」、设备名 `PhoneC`、配对码 → **配对成功**；
+  「刷新名册」显示 `名册（1 台）：手持（只读） · PhoneC`；「读取桌面状态」显示
+  `站址 45.00, 120.00 · SDR — · 缺项 sdr`；「读取过境」如实报
+  `读取过境失败：权威端尚未接入过境数据提供者`；「读取频谱快照」如实报
+  `读取频谱失败：权威端尚未接入频谱快照提供者`。全程真实 TCP（Bearer token），
+  不是注入 fake 传输；CLI 无帧来源时不编造快照/过境。
+- **同轮发现并修复真实链路缺陷（2026-11-24）**：首轮模拟器配对失败，网关回
+  `角色必须是 lens/eyepiece/handheld/headset 之一，收到 ''`。根因是 Dart
+  `HttpClientRequest.write()` 未设 `contentLength` 时走 **chunked** 传输，而桌面
+  网关（Python `http.server`）只按 `Content-Length` 读 body，于是 role/code 全空。
+  修复：`_defaultTransport` 显式 `contentLength = utf8.encode(body).length` 再
+  `add(bytes)`；新增回环 HTTP 回归用例（先复现红：`contentLength == -1`，修后绿），
+  注入 fake 传输的既有用例抓不到这一类问题。
 - 仍未验证：**物理手机安装与运行**（本机无 Android 真机）；真机罗盘/IMU 在户外的实际指向
   精度、星表在真机上的渲染帧率、扬声器出声与音频路由均未实测。不得据此宣称真机可运行或已验收。
 - **上一轮发现的两个小缺陷已修并复验（2026-11-22）**：

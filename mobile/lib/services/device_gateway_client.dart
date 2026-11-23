@@ -196,7 +196,15 @@ class DeviceGatewayClient {
     try {
       final HttpClientRequest req = await client.openUrl(method, url);
       headers.forEach(req.headers.set);
-      if (body != null) req.write(body);
+      if (body != null) {
+        // 必须显式定长：Dart 的 write() 不设 content-length 时走 chunked 传输，
+        // 而桌面网关（Python http.server）只按 Content-Length 读请求体。
+        // 实测症状：真假 HTTP 配对时网关把 role/code 读成空串并回
+        // 「角色必须是 …，收到 ''」；注入 fake 传输的用例抓不到。
+        final List<int> bytes = utf8.encode(body);
+        req.contentLength = bytes.length;
+        req.add(bytes);
+      }
       final HttpClientResponse resp = await req.close();
       final String text = await resp.transform(utf8.decoder).join();
       return GatewayHttpResponse(resp.statusCode, text);

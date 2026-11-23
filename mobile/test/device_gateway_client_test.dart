@@ -264,4 +264,44 @@ void main() {
           .having((e) => e.message, 'message', contains('192.168.1.20:8771'))),
     );
   });
+
+  // 真实回环 HTTP：默认传输必须发定长请求体。桌面网关只按 Content-Length
+  // 读 body；若这里退化成 chunked，网关会把 role/code 读成空串，
+  // 而注入 fake 传输的用例永远发现不了（2026-11-24 模拟器实测缺陷）。
+  test('默认传输：回环 HTTP 定长请求体，role/code 不丢', () async {
+    final HttpServer server =
+        await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    addTearDown(() => server.close(force: true));
+    String? rawBody;
+    String? contentType;
+    int? contentLength;
+    server.listen((HttpRequest request) async {
+      rawBody = await utf8.decoder.bind(request).join();
+      contentType = request.headers.contentType?.mimeType;
+      contentLength = request.headers.contentLength;
+      request.response
+        ..statusCode = 200
+        ..headers.contentType = ContentType.json
+        ..write('{"token":"tok-real","device":{"id":"dev-9","role":"handheld"}}');
+      await request.response.close();
+    });
+
+    final DeviceGatewayClient c =
+        DeviceGatewayClient(host: '127.0.0.1', port: server.port);
+    final Map<String, dynamic> out = await c.pair(
+      code: '654321',
+      deviceName: '手机C',
+      role: 'handheld',
+    );
+
+    expect(out['token'], 'tok-real');
+    expect(rawBody, isNotNull);
+    expect(contentLength, utf8.encode(rawBody!).length);
+    expect(contentType, 'application/json');
+    final Map<String, dynamic> sent =
+        jsonDecode(rawBody!) as Map<String, dynamic>;
+    expect(sent['code'], '654321');
+    expect(sent['device_name'], '手机C');
+    expect(sent['role'], 'handheld');
+  });
 }

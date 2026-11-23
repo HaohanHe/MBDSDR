@@ -3095,6 +3095,10 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `mobile/test/settings_page_gateway_test.dart` | 多机线/42（§298 手机只读 /spectrum 快照（提交后释放）） | 2026-11-24 01:17 | 本笔 |
 | `mobile/README.md` | 多机线/42（§298 手机只读 /spectrum 快照（提交后释放）） | 2026-11-24 01:17 | 本笔 |
 | `docs/COORDINATION.md` | 多机线/42（§298 手机只读 /spectrum 快照（提交后释放）） | 2026-11-24 01:17 | 本笔 |
+| `mobile/lib/services/device_gateway_client.dart` | 多机线/42（§299 定长请求体修复 + 模拟器真实配对（提交后释放）） | 2026-11-24 01:28 | 本笔 |
+| `mobile/test/device_gateway_client_test.dart` | 多机线/42（§299 定长请求体修复 + 模拟器真实配对（提交后释放）） | 2026-11-24 01:28 | 本笔 |
+| `mobile/README.md` | 多机线/42（§299 定长请求体修复 + 模拟器真实配对（提交后释放）） | 2026-11-24 01:28 | 本笔 |
+| `docs/COORDINATION.md` | 多机线/42（§299 定长请求体修复 + 模拟器真实配对（提交后释放）） | 2026-11-24 01:28 | 本笔 |
 
 > 上表各行均由 `claim` 台账推导：owner 原文与 `acquired_at` 直接取自台账，
 > 目的优先用台账里的 `claim_reason`，没有就如实写「未声明」，不补编。时间列只是
@@ -14124,3 +14128,38 @@ NaN 会变成 `null`、真实 socket 上无帧会 503。契约要求消费端不
 - 手机只显示摘要，不画谱/瀑布；功率是相对幅度（非 dBm）。
 - `/spectrum` 仍是桌面某一帧的快照，不是流；未真机配对验证。
 - 外部阻塞不变：PICO 真机、rtl_tcp 被 emulator 占用、真模型 API Key 缺失。
+
+## 299. 手机真实链路配对打通 + 定长请求体修复（2026-11-24）
+
+**动机**：§298 的 `/spectrum` 只在注入 fake 传输的用例里验证过；真实 Android 运行时
+与真实网关之间的 POST 从未跑过。本轮用模拟器对真实 CLI 网关验证，抓到一个协议级缺陷。
+
+**现象**：模拟器（emulator-5554）内 App 填 `10.0.2.2:8771`、角色 handheld、设备名
+`PhoneC`，点配对 → 网关回「角色必须是 lens/eyepiece/handheld/headset 之一，收到 ''」。
+
+**根因**：`DeviceGatewayClient._defaultTransport` 用 `HttpClientRequest.write(body)`，
+未设 `contentLength` 时 Dart 走 **chunked** 传输；`device_gateway.py` 的
+`BaseHTTPRequestHandler` 只按 `Content-Length` 读 body → role/code 全空。
+注入 fake 传输的用例永远不会经过这段代码，所以 600+ 用例全绿也发现不了。
+
+**修复**：显式 `req.contentLength = utf8.encode(body).length; req.add(bytes);`。
+新增回环 `HttpServer` 回归用例；先临时退回 `write()` 复现红（`contentLength == -1`），
+修后绿。
+
+**真机（模拟器）证据**
+- 配对：成功（真实 TCP + Bearer，非 fake 传输）
+- 名册：`名册（1 台）：手持（只读） · PhoneC`
+- `/status`：`站址 45.00, 120.00 · SDR — · 缺项 sdr`
+- `/passes`：`读取过境失败：权威端尚未接入过境数据提供者`
+- `/spectrum`：`读取频谱失败：权威端尚未接入频谱快照提供者`
+
+**测试**
+- `device_gateway_client_test` 12 passed（+1 回环 HTTP 定长）
+- 全量 `flutter test` 609 passed / 0 failed
+- 打包：`flutter build apk --debug` 成功（36.7 s，修复版已装模拟器）
+
+**边界**
+- Android 模拟器 ≠ 物理手机；真机仍未验收。
+- CLI 网关不接 TLE/SDR/频谱帧来源，所以 503 是预期诚实空态，不是缺陷。
+- `ai_client.dart` 的默认传输也用过 `write()`，但目标端点固定为云端
+  OpenAI 兼容服务；本轮未改（无本地端点可回归），不据此宣称已覆盖。
