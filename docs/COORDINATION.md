@@ -3051,6 +3051,16 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `.trae/specs/multi-device-interconnect/checklist.md` | 多机线/42（§291 手机过境项） | 2026-11-24 02:45 | 本笔 |
 | `docs/PRD-现状对照.md` | 多机线/42（§291 P1-11 手机过境） | 2026-11-24 02:45 | 本笔 |
 | `docs/COORDINATION.md` | 多机线/42（§291 记录 + §6.1） | 2026-11-24 02:45 | 本笔 |
+| `spatial/app/src/main/java/com/mbdsdr/spatial/net/DeviceGatewayClient.kt` | 多机线/42（§292 status 只读） | 2026-11-24 03:05 | 本笔 |
+| `spatial/app/src/main/java/com/mbdsdr/spatial/net/GatewayController.kt` | 多机线/42（§292 状态摘要/刷新） | 2026-11-24 03:05 | 本笔 |
+| `spatial/app/src/main/java/com/mbdsdr/spatial/ui/GatewayPanel.kt` | 多机线/42（§292 桌面状态按钮/两行按钮） | 2026-11-24 03:05 | 本笔 |
+| `spatial/app/src/test/java/com/mbdsdr/spatial/DeviceGatewayClientTest.kt` | 多机线/42（§292 status 客户端用例） | 2026-11-24 03:05 | 本笔 |
+| `spatial/app/src/test/java/com/mbdsdr/spatial/GatewayControllerTest.kt` | 多机线/42（§292 摘要/刷新用例） | 2026-11-24 03:05 | 本笔 |
+| `spatial/README.md` | 多机线/42（§292 桌面状态说明） | 2026-11-24 03:05 | 本笔 |
+| `.trae/specs/multi-device-interconnect/tasks.md` | 多机线/42（§292 M2.5 头显侧） | 2026-11-24 03:05 | 本笔 |
+| `.trae/specs/multi-device-interconnect/checklist.md` | 多机线/42（§292 头显 /status 项） | 2026-11-24 03:05 | 本笔 |
+| `docs/PRD-现状对照.md` | 多机线/42（§292 P1-11 头显 /status） | 2026-11-24 03:05 | 本笔 |
+| `docs/COORDINATION.md` | 多机线/42（§292 记录 + §6.1） | 2026-11-24 03:05 | 本笔 |
 
 > 上表各行均由 `claim` 台账推导：owner 原文与 `acquired_at` 直接取自台账，
 > 目的优先用台账里的 `claim_reason`，没有就如实写「未声明」，不补编。时间列只是
@@ -13906,6 +13916,30 @@ NaN 会变成 `null`、真实 socket 上无帧会 503。契约要求消费端不
 **诚实边界**
 - 只列前 3 条，不展示方位/日照/时长；时间固定 UTC，不按本机时区改写。
 - 未真机配对验证；只读，无任何调谐/录音端点。
+
+## 292. 头显只读 `/status`（2026-11-24）
+
+**依据**：手机与桌面都已消费 `/status`，头显只有 SDR 租约与全景；三端只读口径
+还差这一格。`/status` 里的 `dongle_probed=false` 正是「配置≠在收」的诚实标记。
+
+**做了什么**
+- `DeviceGatewayClient.status`：`GET /status`，Bearer 与契约同桌面。
+- `GatewayFormat.statusSummary`：站址 / SDR `rtl_tcp` 配置 / 缺项一行；
+  `dongle_probed=false` 明确追加「（未探测 dongle）」；`station`/`sdr` 为
+  JSON null 时不抛异常（安全取值）。
+- `GatewayController.refreshStatus`：成功更新摘要，失败只改状态行、保留上次摘要。
+- 面板按钮拆成两行（配对/输入一行，只读动作一行），新增「桌面状态」按钮与
+  摘要行，避免单行 9 个按钮在小窗里挤爆。
+
+**验证**
+- `DeviceGatewayClientTest` +1：`/status` 方法/Bearer/JSON。
+- `GatewayControllerTest` +2：摘要三种口径（站址+地址+未探测/全缺）、
+  刷新成功与 503 不改写。
+- headset JVM：25 suite / **219 用例** / 0 失败 / 1 跳过。
+
+**诚实边界**
+- 只报配置/租约，不探测 dongle；未在 PICO 真机验证按钮布局换行。
+- 仍无写端点；桌面状态与头显自己的 SDR 租约是两回事。
 
 
 

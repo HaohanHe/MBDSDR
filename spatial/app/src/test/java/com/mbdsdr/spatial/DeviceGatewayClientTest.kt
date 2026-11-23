@@ -253,6 +253,21 @@ class DeviceGatewayClientTest {
     }
 
     @Test
+    fun statusUsesBearerAndParses() {
+        val fake = FakeGateway { call ->
+            assertEquals("/status", call.url.substringAfter(":8771"))
+            assertEquals("GET", call.method)
+            assertEquals("Bearer tok-h", call.headers["Authorization"])
+            GatewayResponse(200,
+                """{"schema":"mbdsdr.desktop-status/1","station":null,
+                   "sdr":null,"missing":["station","sdr"]}""")
+        }
+        val out = client(fake).status("tok-h")
+        assertEquals("mbdsdr.desktop-status/1", out.get("schema").asString)
+        assertEquals(2, out.getAsJsonArray("missing").size())
+    }
+
+    @Test
     fun nonJsonSuccessIsProtocolError() {
         val fake = FakeGateway { GatewayResponse(200, "OK") }
         try {

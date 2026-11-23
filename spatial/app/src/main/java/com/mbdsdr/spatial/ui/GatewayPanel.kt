@@ -100,6 +100,11 @@ fun GatewayPanel(
                     style = PicoTheme.typography.bodySmall,
                 )
             }
+        }
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
             Button(
                 onClick = { run { controller.refreshPanorama() } },
                 enabled = state.paired && !state.busy,
@@ -129,6 +134,12 @@ fun GatewayPanel(
                 enabled = state.paired && !state.busy,
             ) {
                 Text(text = "频谱快照", style = PicoTheme.typography.bodySmall)
+            }
+            Button(
+                onClick = { run { controller.refreshStatus() } },
+                enabled = state.paired && !state.busy,
+            ) {
+                Text(text = "桌面状态", style = PicoTheme.typography.bodySmall)
             }
             Button(
                 onClick = { run { controller.requestSdrLease() } },
@@ -165,6 +176,13 @@ fun GatewayPanel(
         if (state.fuseText.isNotBlank()) {
             Text(
                 text = state.fuseText,
+                style = PicoTheme.typography.bodySmall,
+                color = PicoTheme.colorTokens.LabelSecondaryAlpha,
+            )
+        }
+        if (state.statusText.isNotBlank()) {
+            Text(
+                text = state.statusText,
                 style = PicoTheme.typography.bodySmall,
                 color = PicoTheme.colorTokens.LabelSecondaryAlpha,
             )

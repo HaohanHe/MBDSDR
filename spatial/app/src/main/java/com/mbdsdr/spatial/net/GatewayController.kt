@@ -35,6 +35,8 @@ data class GatewayUiState(
     val spectrumText: String = "",
     /** 快照功率轴映射成画柱高度 [0,1]；空 = 没取到/没有帧。 */
     val spectrumLevels: List<Float> = emptyList(),
+    /** 桌面状态一行（站址/SDR 配置/缺项）；未取到时为空。 */
+    val statusText: String = "",
     /** 两机融合位姿一行（M3.2 消费端）；未取到时为空。 */
     val fuseText: String = "",
 )
@@ -194,6 +196,43 @@ object GatewayFormat {
             + " · 峰值 ${mhz(num(json, "peak_freq_hz"))} ${db(num(json, "peak_power_db"))}"
             + " · 噪声底 ${db(num(json, "noise_floor_db"))}"
             + " · 帧龄 $ageText$staleText")
+    }
+
+    /**
+     * 桌面状态（`mbdsdr.desktop-status/1`）压成一行：站址 / SDR 配置 / 缺项。
+     *
+     * `dongle_probed=false` 时明确写「未探测 dongle」——配置了 rtl_tcp 地址
+     * 不等于 dongle 在收；缺字段写「—」，不猜。
+     */
+    fun statusSummary(json: JsonObject): String {
+        val station = json.get("station")
+            ?.takeIf { it.isJsonObject }?.asJsonObject
+        val lat = num(station, "lat_deg")
+        val lon = num(station, "lon_deg")
+        val stationText = if (lat != null && lon != null) {
+            String.format(java.util.Locale.US, "%.2f, %.2f", lat, lon)
+        } else {
+            "—"
+        }
+        var sdrText = "—"
+        val sdr = json.get("sdr")?.takeIf { it.isJsonObject }?.asJsonObject
+        if (sdr != null) {
+            val ep = sdr.get("rtl_tcp")
+                ?.takeIf { it.isJsonObject }?.asJsonObject
+            val host = ep?.get("host")
+                ?.takeIf { it.isJsonPrimitive }?.asString
+            val port = num(ep, "port")?.toInt()
+            if (!host.isNullOrBlank() && port != null) {
+                sdrText = "rtl_tcp $host:$port"
+            }
+            val probed = sdr.get("dongle_probed")
+                ?.takeIf { it.isJsonPrimitive && it.asJsonPrimitive.isBoolean }
+                ?.asBoolean
+            if (probed == false) sdrText += "（未探测 dongle）"
+        }
+        val missing = strings(json.getAsJsonArray("missing"))
+        val missingText = if (missing.isEmpty()) "—" else missing.joinToString(", ")
+        return "桌面状态：站址 $stationText · SDR $sdrText · 缺项 $missingText"
     }
 
     /**
@@ -371,6 +410,21 @@ class GatewayController(
                 status = "频谱快照已更新")
         } catch (e: DeviceGatewayException) {
             fail("频谱快照失败：${e.message}")
+        }
+    }
+
+    /** 拉一次桌面状态（站址/SDR 配置/缺项）；失败如实报原因。 */
+    fun refreshStatus() {
+        val client = readyClient() ?: return
+        state = state.copy(busy = true, status = "读取桌面状态中…")
+        try {
+            val data = client.status(state.token)
+            state = state.copy(
+                busy = false,
+                statusText = GatewayFormat.statusSummary(data),
+                status = "桌面状态已更新")
+        } catch (e: DeviceGatewayException) {
+            fail("桌面状态失败：${e.message}")
         }
     }
 

@@ -79,6 +79,9 @@ class DeviceGatewayClient(
     /** 权威端过境预报（`mbdsdr.sat-passes/1`）。 */
     fun passes(token: String): JsonObject = decode(send("GET", "/passes", token, null))
 
+    /** 权威端状态（`mbdsdr.desktop-status/1`）：站址 + SDR 段 + `missing`。 */
+    fun status(token: String): JsonObject = decode(send("GET", "/status", token, null))
+
     /** 权威端只读频谱快照（`mbdsdr.spectrum-snapshot/1`）；没有可读帧时桌面回 503。 */
     fun spectrum(token: String): JsonObject =
         decode(send("GET", "/spectrum", token, null))

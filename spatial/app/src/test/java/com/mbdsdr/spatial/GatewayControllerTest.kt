@@ -520,4 +520,63 @@ class GatewayControllerTest {
         assertTrue(c.state.status.contains("没有可读"))
         assertFalse(c.state.busy)
     }
+
+    // ---- M2.5 消费端：桌面状态 ----
+
+    @Test
+    fun statusSummaryIsHonestAboutProbeAndMissing() {
+        val full = JsonParser.parseString(
+            """{"schema":"mbdsdr.desktop-status/1",
+               "station":{"lat_deg":45.0,"lon_deg":120.0,"alt_m":10.0},
+               "sdr":{"rtl_tcp":{"host":"127.0.0.1","port":1234},
+                      "dongle_probed":false},"missing":[]}""").asJsonObject
+        assertEquals(
+            "桌面状态：站址 45.00, 120.00 · SDR rtl_tcp 127.0.0.1:1234"
+                + "（未探测 dongle） · 缺项 —",
+            GatewayFormat.statusSummary(full),
+        )
+
+        val empty = JsonParser.parseString(
+            """{"station":null,"sdr":null,"missing":["station","sdr"]}""")
+            .asJsonObject
+        assertEquals(
+            "桌面状态：站址 — · SDR — · 缺项 station, sdr",
+            GatewayFormat.statusSummary(empty),
+        )
+    }
+
+    @Test
+    fun refreshStatusShowsSummaryOrHonestFailure() {
+        var status = 200
+        var body = """{"station":{"lat_deg":45.0,"lon_deg":120.0},
+                       "sdr":null,"missing":["sdr"]}"""
+        val fake = FakeGateway { call ->
+            when (call.path) {
+                "/pair" -> GatewayResponse(200, """{"token":"tok-h"}""")
+                "/status" -> {
+                    assertEquals("Bearer tok-h", call.headers["Authorization"])
+                    if (status == 200) GatewayResponse(200, body)
+                    else GatewayResponse(503,
+                        """{"error":"status_unavailable","reason":"权威端尚未接入状态提供者"}""")
+                }
+                else -> GatewayResponse(404, "{}")
+            }
+        }
+        val c = controller(fake)
+        c.updateCode("123456")
+        c.pair()
+
+        c.refreshStatus()
+        assertEquals("桌面状态：站址 45.00, 120.00 · SDR — · 缺项 sdr",
+            c.state.statusText)
+        assertEquals("桌面状态已更新", c.state.status)
+
+        status = 503
+        val before = c.state.statusText
+        c.refreshStatus()
+        assertEquals(before, c.state.statusText)   // 失败不改写成假状态
+        assertTrue(c.state.status.contains("桌面状态失败"))
+        assertTrue(c.state.status.contains("尚未接入"))
+        assertFalse(c.state.busy)
+    }
 }
