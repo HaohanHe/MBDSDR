@@ -22,6 +22,9 @@ data class GatewayUiState(
     val status: String = "未配对：输入桌面地址与配对码",
     val panoramaText: String = "",
     val passesText: String = "",
+    /** 上次刷新失败但留有旧摘要：面板据此标注「未联网·上次结果」。 */
+    val panoramaStale: Boolean = false,
+    val passesStale: Boolean = false,
 )
 
 /** 把网关 JSON 压成一行摘要；缺字段写「—」，不猜值。 */
@@ -148,9 +151,12 @@ class GatewayController(
             state = state.copy(
                 busy = false,
                 panoramaText = GatewayFormat.panoramaSummary(data),
+                panoramaStale = false,
                 status = "全景已更新")
         } catch (e: DeviceGatewayException) {
-            fail("全景失败：${e.message}")
+            state = staleOrFail(stale = state.panoramaStale,
+                hasLast = state.panoramaText.isNotBlank(),
+                kind = "全景", reason = e.message ?: "未知错误")
         }
     }
 
@@ -162,9 +168,36 @@ class GatewayController(
             state = state.copy(
                 busy = false,
                 passesText = GatewayFormat.passesSummary(data),
+                passesStale = false,
                 status = "过境已更新")
         } catch (e: DeviceGatewayException) {
-            fail("过境失败：${e.message}")
+            state = staleOrFail(stale = state.passesStale,
+                hasLast = state.passesText.isNotBlank(),
+                kind = "过境", reason = e.message ?: "未知错误")
         }
+    }
+
+    /**
+     * 失败时的两种诚实结局（M4.3）：
+     * - 有上次结果：保留旧摘要并标记 stale，状态行说明「未联网·上次结果」；
+     * - 没有：明确说无上次结果，让用户回看包内内容（不凭空造摘要）。
+     */
+    private fun staleOrFail(
+        stale: Boolean,
+        hasLast: Boolean,
+        kind: String,
+        reason: String,
+    ): GatewayUiState {
+        if (!hasLast) {
+            return state.copy(
+                busy = false,
+                status = "${kind}失败：$reason（无上次结果，请回看包内内容）")
+        }
+        val prefix = if (stale) "仍未联网" else "未联网"
+        val next = state.copy(
+            busy = false,
+            status = "$prefix：${kind}显示上次结果（$reason）")
+        return if (kind == "全景") next.copy(panoramaStale = true)
+        else next.copy(passesStale = true)
     }
 }

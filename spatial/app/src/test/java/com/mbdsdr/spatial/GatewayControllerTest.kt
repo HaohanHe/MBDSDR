@@ -185,4 +185,89 @@ class GatewayControllerTest {
         assertTrue(c.state.status.contains("全景失败"))
         assertTrue(c.state.status.contains("127.0.0.1"))
     }
+
+    // ---- M4.3 断网回退：旧摘要保留且如实标注 ----
+
+    private fun pairThen(
+        responder: (Call) -> GatewayResponse,
+    ): Pair<GatewayController, MutableList<String>> {
+        val paths = mutableListOf<String>()
+        val fake = FakeGateway { call ->
+            paths.add(call.path)
+            if (call.path == "/pair") GatewayResponse(200, """{"token":"tok-h"}""")
+            else responder(call)
+        }
+        val c = controller(fake)
+        c.updateCode("123456")
+        c.pair()
+        return c to paths
+    }
+
+    @Test
+    fun panoramaFailureKeepsLastGoodAndMarksStale() {
+        var offline = false
+        val (c, _) = pairThen {
+            if (offline) throw IOException("Connection refused")
+            GatewayResponse(200,
+                """{"site":{"lat_deg":30.0,"lon_deg":120.0},
+                   "sun":{"alt_deg":-10.0},"missing":[]}""")
+        }
+        c.refreshPanorama()
+        val before = c.state.panoramaText
+        assertTrue(before.startsWith("站址 30.00, 120.00"))
+        assertFalse(c.state.panoramaStale)
+
+        offline = true
+        c.refreshPanorama()
+        assertEquals(before, c.state.panoramaText)
+        assertTrue(c.state.panoramaStale)
+        assertTrue(c.state.status.startsWith("未联网"))
+        assertTrue(c.state.status.contains("上次结果"))
+        assertFalse(c.state.busy)
+
+        // 再次失败不重复「未联网」，改说「仍未联网」。
+        c.refreshPanorama()
+        assertTrue(c.state.status.startsWith("仍未联网"))
+        assertEquals(before, c.state.panoramaText)
+
+        // 恢复后清掉 stale 标记。
+        offline = false
+        c.refreshPanorama()
+        assertFalse(c.state.panoramaStale)
+        assertEquals("全景已更新", c.state.status)
+    }
+
+    @Test
+    fun panoramaFailureWithoutHistorySaysSo() {
+        val (c, _) = pairThen { throw IOException("Connection refused") }
+        c.refreshPanorama()
+        assertEquals("", c.state.panoramaText)
+        assertFalse(c.state.panoramaStale)
+        assertTrue(c.state.status.contains("全景失败"))
+        assertTrue(c.state.status.contains("无上次结果"))
+        assertTrue(c.state.status.contains("包内内容"))
+    }
+
+    @Test
+    fun passesFailureFallsBackToLastGood() {
+        var offline = false
+        val (c, _) = pairThen {
+            if (offline) throw IOException("Connection refused")
+            GatewayResponse(200,
+                """{"schema":"mbdsdr.sat-passes/1","count":1,
+                   "passes":[{"name":"ISS (ZARYA)",
+                              "rise_utc":"2026-11-23T12:31:00+00:00",
+                              "max_alt_deg":62.4}]}""")
+        }
+        c.refreshPasses()
+        val before = c.state.passesText
+        assertTrue(before.startsWith("过境 1 条："))
+
+        offline = true
+        c.refreshPasses()
+        assertEquals(before, c.state.passesText)
+        assertTrue(c.state.passesStale)
+        assertFalse(c.state.panoramaStale)
+        assertTrue(c.state.status.startsWith("未联网"))
+    }
 }

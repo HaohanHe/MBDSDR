@@ -84,8 +84,10 @@ python scripts/export_spatial_bundle.py <档案>.observation.json -o <输出目�
 传输可注入（`GatewayTransport`），JVM 单测完全离线；默认实现是
 `HttpURLConnection`（6 s 超时）。主窗口「头顶」已接一个只读网关面板：
 填主机/端口/6 位配对码 →「配对」→「刷新全景」「刷新过境」，结果显示为
-一行摘要（缺项如实列 `—`/`missing`）。**诚实边界**：token 只在进程内存；
-四窗星图/回看仍只读 bundle，未用增量数据替换；未在 PICO 真机验证。
+一行摘要（缺项如实列 `—`/`missing`）。断网时保留上次摘要并加前缀
+「（未联网·上次结果）」；从未成功过则明说「无上次结果，请回看包内内容」。
+**诚实边界**：token 只在进程内存；四窗星图/回看仍只读 bundle，未用增量数据替换；
+未在 PICO 真机验证。
 
 ## 与官方样本的关系
 

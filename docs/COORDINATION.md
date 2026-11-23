@@ -2829,6 +2829,16 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `.trae/specs/mbdsdr-system-lifecycle/checklist.md` | 多机线/42（§267 Task 224） | 2026-11-24 03:15 | 本笔 |
 | `docs/PRD-现状对照.md` | 多机线/42（§267 P1-11 补头显面板） | 2026-11-24 03:15 | 本笔 |
 | `docs/COORDINATION.md` | 多机线/42（§267 记录 + §6.1） | 2026-11-24 03:15 | 本笔 |
+| `spatial/app/src/main/java/com/mbdsdr/spatial/net/GatewayController.kt` | 多机线/42（§268 断网保留上次摘要 + stale 标记） | 2026-11-23 23:10 | 本笔 |
+| `spatial/app/src/main/java/com/mbdsdr/spatial/ui/GatewayPanel.kt` | 多机线/42（§268 旧摘要「未联网·上次结果」前缀） | 2026-11-23 23:10 | 本笔 |
+| `spatial/app/src/test/java/com/mbdsdr/spatial/GatewayControllerTest.kt` | 多机线/42（§268 断网回退 3 条用例） | 2026-11-23 23:10 | 本笔 |
+| `spatial/README.md` | 多机线/42（§268 断网回退说明） | 2026-11-23 23:10 | 本笔 |
+| `.trae/specs/multi-device-interconnect/tasks.md` | 多机线/42（§268 M4.3 状态） | 2026-11-23 23:10 | 本笔 |
+| `.trae/specs/multi-device-interconnect/checklist.md` | 多机线/42（§268 离线回退项） | 2026-11-23 23:10 | 本笔 |
+| `.trae/specs/mbdsdr-system-lifecycle/tasks.md` | 多机线/42（§268 Task 225） | 2026-11-23 23:10 | 本笔 |
+| `.trae/specs/mbdsdr-system-lifecycle/checklist.md` | 多机线/42（§268 Task 225） | 2026-11-23 23:10 | 本笔 |
+| `docs/PRD-现状对照.md` | 多机线/42（§268 P1-11 补离线回退） | 2026-11-23 23:10 | 本笔 |
+| `docs/COORDINATION.md` | 多机线/42（§268 记录 + §6.1） | 2026-11-23 23:10 | 本笔 |
 
 > 上表各行均由 `claim` 台账推导：owner 原文与 `acquired_at` 直接取自台账，
 > 目的优先用台账里的 `claim_reason`，没有就如实写「未声明」，不补编。时间列只是
@@ -13018,6 +13028,38 @@ lens/eyepiece 必须能各自把「我现在指着哪」发出去。
 - 未在 PICO 真机跑过（只保证编译 + JVM 单测）；token 不持久化，重启需重配。
 - 四窗星图/回看仍只读 bundle，面板摘要没有写回 `ObservationState`。
 - 无自动轮询；刷新是用户手动动作。
+
+## 268. M4.3：头显断网回退——保留上次摘要并如实标注（2026-11-23）
+
+**依据**：§267 的刷新失败只写一行 status，把 `panoramaText`/`passesText`
+原地留着却没有任何「这是旧的」标记；用户断网后看到旧摘要会误以为是刚取的。
+spec 的 M4.3 要求「未联网时显示上次结果/包内内容，不伪造」。
+
+**做了什么**
+- `GatewayController.kt`：
+  - `GatewayUiState` 新增 `panoramaStale`/`passesStale`（默认 false）。
+  - 刷新成功清掉对应 stale；
+  - 刷新失败统一走 `staleOrFail()`：
+    - 有上次摘要 → 保留原文，置 stale，status「未联网：全景显示上次结果
+      （<原因>）」；再次失败改说「仍未联网：…」；
+    - 无上次摘要 → 清空不造值，status「全景失败：<原因>（无上次结果，
+      请回看包内内容）」。
+- `GatewayPanel.kt`：旧摘要在前面加「（未联网·上次结果）」，与 status 双保险。
+- `spatial/README.md` 补断网回退口径。
+- 没动 HTTP 契约、桌面、手机；没有新增端点或写权限。
+
+**验证**
+- `./gradlew.bat testDebugUnitTest --rerun-tasks --no-daemon --offline`：
+  **18 suite / 152 用例 / 0 失败 / 1 跳过**（`GatewayControllerTest` 13 条，
+  新增 3 条：成功后断网保留旧摘要且标 stale→再失败改「仍未联网」→恢复清标记；
+  从未成功时明说无上次结果；过境独立回退不串到全景）。
+- 首次编译报 Kotlin 模板 `$kind失败` 未解析，改成 `${kind}失败` 后通过；
+  这是本轮唯一一次返工。
+
+**诚实边界**
+- 仍只保证 JVM 单测与编译；PICO 真机、真实断网切换未验证。
+- 面板只在用户手动刷新时感知失败；没有自动轮询/自动重连。
+- 四窗星图仍只读 bundle，断网回退只在面板摘要层面，不是全窗口离线模式。
 
 
 

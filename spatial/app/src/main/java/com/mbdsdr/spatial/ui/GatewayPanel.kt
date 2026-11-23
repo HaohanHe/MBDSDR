@@ -108,17 +108,21 @@ fun GatewayPanel(controller: GatewayController, modifier: Modifier = Modifier) {
         )
         if (state.panoramaText.isNotBlank()) {
             Text(
-                text = state.panoramaText,
+                text = staleTag(state.panoramaStale) + state.panoramaText,
                 style = PicoTheme.typography.bodySmall,
                 color = PicoTheme.colorTokens.LabelSecondaryAlpha,
             )
         }
         if (state.passesText.isNotBlank()) {
             Text(
-                text = state.passesText,
+                text = staleTag(state.passesStale) + state.passesText,
                 style = PicoTheme.typography.bodySmall,
                 color = PicoTheme.colorTokens.LabelSecondaryAlpha,
             )
         }
     }
 }
+
+/** 旧摘要前缀：断网时如实标注，不让人误以为是刚取的。 */
+private fun staleTag(stale: Boolean): String =
+    if (stale) "（未联网·上次结果）" else ""
