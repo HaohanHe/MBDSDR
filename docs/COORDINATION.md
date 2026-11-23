@@ -3013,6 +3013,14 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `.trae/specs/multi-device-interconnect/checklist.md` | 多机线/42（§286 四窗设计口径 + 手机 reason） | 2026-11-24 01:20 | 本笔 |
 | `tests/test_device_gateway.py` | 多机线/42（§287 /spectrum 真实 HTTP 冒烟） | 2026-11-24 01:32 | 本笔 |
 | `docs/COORDINATION.md` | 多机线/42（§286 记录 + §6.1） | 2026-11-24 01:20 | 本笔 |
+| `spatial/app/src/main/java/com/mbdsdr/spatial/sdr/SdrFormat.kt` | 多机线/42（§288 峰值检测/峰值频率） | 2026-11-24 01:48 | 本笔 |
+| `spatial/app/src/main/java/com/mbdsdr/spatial/ui/LiveSpectrumCanvas.kt` | 多机线/42（§288 峰值标记线） | 2026-11-24 01:48 | 本笔 |
+| `spatial/app/src/main/java/com/mbdsdr/spatial/ui/SdrPanel.kt` | 多机线/42（§288 估算峰值一行） | 2026-11-24 01:48 | 本笔 |
+| `spatial/app/src/test/java/com/mbdsdr/spatial/SdrFormatTest.kt` | 多机线/42（§288 峰值 2 条用例） | 2026-11-24 01:48 | 本笔 |
+| `spatial/README.md` | 多机线/42（§288 峰值标记说明） | 2026-11-24 01:48 | 本笔 |
+| `.trae/specs/multi-device-interconnect/tasks.md` | 多机线/42（§288 M4.2 峰值标记） | 2026-11-24 01:48 | 本笔 |
+| `.trae/specs/multi-device-interconnect/checklist.md` | 多机线/42（§288 峰值项拆分） | 2026-11-24 01:48 | 本笔 |
+| `docs/COORDINATION.md` | 多机线/42（§288 记录 + §6.1） | 2026-11-24 01:48 | 本笔 |
 
 > 上表各行均由 `claim` 台账推导：owner 原文与 `acquired_at` 直接取自台账，
 > 目的优先用台账里的 `claim_reason`，没有就如实写「未声明」，不补编。时间列只是
@@ -13778,6 +13786,27 @@ NaN 会变成 `null`、真实 socket 上无帧会 503。契约要求消费端不
 
 **诚实边界**
 - 假帧只含 3 个 bin，不模拟真实 512 bin 的序列化体积/耗时；未碰 dongle。
+
+## 288. 头显实时谱峰值标记（2026-11-24）
+
+**依据**：checklist 的 SDR 真机项把「峰值标记与瀑布图」并在一起，瀑布图要真机
+联调；峰值标记是纯数值 + 画布，可以先做，让相对幅度谱能看出「哪个峰最强」。
+
+**做了什么**
+- `SdrFormat.peakBins`：严格高于左右邻居、且 ≥ 全局峰 × 50% 的局部峰，
+  最多取幅度最高的 3 个、按频率升序返回；空/过短/全零/非有限 → 空列表。
+- `SdrFormat.peakFrequencyHz`：按 bin 中心口径换算最强峰频率
+  （`f0 = center − sr/2`，bin i 中心 = `f0 + (i+0.5)·sr/N`）；参数非法/无信号 → null。
+- 画布在峰柱顶画黄色短标线；面板加一行「估算峰值 x.xxx MHz（按相对幅度，
+  非校准）」，并说明黄线含义。停止接收时清掉调谐中心，避免旧峰值残留。
+
+**验证**
+- `SdrFormatTest` +2：局部峰/阈值/空数组/NaN 邻居；bin 中心频率与非法参数。
+- headset JVM：24 suite / **209 用例** / 0 失败 / 1 跳过。
+
+**诚实边界**
+- 峰值只是相对幅度谱的局部极大，不是校准载波功率；不做平滑/门限自适应。
+- 未在 PICO 真机联调；瀑布图仍未做。
 
 
 

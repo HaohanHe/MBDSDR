@@ -20,6 +20,7 @@ import com.pico.spatial.ui.design.Text
 private val BarTop = Color(0xFF7CF6FF)
 private val BarBottom = Color(0xFF0B2A6F)
 private val CenterLine = Color(0x66FFFFFF)
+private val PeakMarker = Color(0xFFFFC857)
 
 /**
  * 实时 SDR 幅度谱（PICO 主窗内的小画布）。
@@ -38,6 +39,7 @@ fun LiveSpectrumCanvas(spectrum: FloatArray, modifier: Modifier = Modifier) {
             )
         } else {
             val bars = remember(spectrum) { SdrFormat.normalizedBars(spectrum) }
+            val peaks = remember(spectrum) { SdrFormat.peakBins(spectrum) }
             Canvas(modifier = Modifier.fillMaxSize().padding(8.dp)) {
                 val plotWidth = size.width
                 val plotHeight = size.height
@@ -58,6 +60,20 @@ fun LiveSpectrumCanvas(spectrum: FloatArray, modifier: Modifier = Modifier) {
                         ),
                         topLeft = Offset(x, y),
                         size = Size(barWidth, h),
+                    )
+                }
+                // 峰值标记：短竖线在柱顶上方；只是视觉提示，不写频率/功率数字。
+                for (i in peaks) {
+                    if (i !in bars.indices) continue
+                    val level = bars[i].coerceIn(0f, 1f)
+                    if (level <= 0f) continue
+                    val y = plotHeight * (1f - level)
+                    val cx = slot * i + barWidth / 2f
+                    drawLine(
+                        color = PeakMarker,
+                        start = Offset(cx, (y - 2f).coerceAtLeast(0f)),
+                        end = Offset(cx, (y - 14f).coerceAtLeast(0f)),
+                        strokeWidth = 2f,
                     )
                 }
                 drawLine(

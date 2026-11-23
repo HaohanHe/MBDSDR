@@ -57,4 +57,41 @@ class SdrFormatTest {
         assertEquals(0f, mixed[1], 0f)
         assertEquals(0f, mixed[2], 0f)
     }
+
+    @Test
+    fun peakBinsFindLocalMaximaAboveThreshold() {
+        val spectrum = floatArrayOf(0f, 100f, 0f, 90f, 80f, 0f, 70f, 0f)
+        assertEquals(listOf(1, 3, 6), SdrFormat.peakBins(spectrum))
+        assertEquals(listOf(1, 3), SdrFormat.peakBins(spectrum, maxCount = 2))
+        // 低于峰值的 50% 的局部隆起不算峰。
+        assertEquals(emptyList<Int>(),
+            SdrFormat.peakBins(floatArrayOf(100f, 40f, 0f)))
+        // 空/过短/全零/全非有限 → 不造峰。
+        assertEquals(emptyList<Int>(), SdrFormat.peakBins(FloatArray(0)))
+        assertEquals(emptyList<Int>(), SdrFormat.peakBins(FloatArray(2)))
+        assertEquals(emptyList<Int>(), SdrFormat.peakBins(FloatArray(8)))
+        // NaN 邻居按 0 处理，不吞掉真实峰。
+        assertEquals(listOf(1),
+            SdrFormat.peakBins(floatArrayOf(Float.NaN, 1f, Float.NaN)))
+        assertEquals(listOf(1),
+            SdrFormat.peakBins(floatArrayOf(Float.NaN, 10f, Float.NaN)))
+    }
+
+    @Test
+    fun peakFrequencyUsesBinCenterConvention() {
+        val spectrum = floatArrayOf(0f, 10f, 20f, 30f)
+        // bin 3 中心：100 MHz + ((3.5/4)-0.5)*1 MHz = 100.375 MHz
+        assertEquals(100_375_000.0,
+            SdrFormat.peakFrequencyHz(spectrum, 100_000_000L, 1_000_000)!!,
+            1.0)
+        // bin 0 中心：100 MHz - 0.375 MHz
+        assertEquals(99_625_000.0,
+            SdrFormat.peakFrequencyHz(
+                floatArrayOf(30f, 0f, 0f, 0f), 100_000_000L, 1_000_000)!!,
+            1.0)
+        assertNull(SdrFormat.peakFrequencyHz(FloatArray(0), 100_000_000L, 1_000_000))
+        assertNull(SdrFormat.peakFrequencyHz(spectrum, 0L, 1_000_000))
+        assertNull(SdrFormat.peakFrequencyHz(spectrum, 100_000_000L, 0))
+        assertNull(SdrFormat.peakFrequencyHz(FloatArray(4), 100_000_000L, 1_000_000))
+    }
 }

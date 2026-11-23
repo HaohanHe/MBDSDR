@@ -52,6 +52,10 @@ fun SdrPanel(gateway: GatewayController, modifier: Modifier = Modifier) {
         mutableStateOf("未连接：先在网关面板配对；点「开始接收」会申请 SDR 授权")
     }
     var spectrum by remember { mutableStateOf(FloatArray(0)) }
+    var tunedCenterHz by remember { mutableStateOf(0L) }
+    var tunedSampleRateHz by remember {
+        mutableStateOf(SdrSession.DEFAULT_SAMPLE_RATE_HZ)
+    }
     var session by remember { mutableStateOf<SdrSession?>(null) }
     var job by remember { mutableStateOf<Job?>(null) }
     val scope = rememberCoroutineScope()
@@ -63,6 +67,7 @@ fun SdrPanel(gateway: GatewayController, modifier: Modifier = Modifier) {
         session = null
         running = false
         spectrum = FloatArray(0)
+        tunedCenterHz = 0L
         status = "已停止：连接已关闭，授权已释放"
     }
 
@@ -89,8 +94,7 @@ fun SdrPanel(gateway: GatewayController, modifier: Modifier = Modifier) {
             status = "网关端口不合法：先在上面填 1–65535"
             return
         }
-        val centerHz = SdrFormat.parseCenterHz(freqText)
-        if (centerHz == null) {
+        val requestedHz = SdrFormat.parseCenterHz(freqText) ?: run {
             status = "频率需为 MHz 数值（24–1766），例如 145.800"
             return
         }
@@ -105,11 +109,13 @@ fun SdrPanel(gateway: GatewayController, modifier: Modifier = Modifier) {
                     sdr.start(
                         token = st.token,
                         role = st.role,
-                        centerHz = centerHz,
+                        centerHz = requestedHz,
                         sampleRateHz = SdrSession.DEFAULT_SAMPLE_RATE_HZ,
                     )
                 }
                 session = sdr
+                tunedCenterHz = info.centerHz
+                tunedSampleRateHz = info.sampleRateHz
                 status = "已连接 ${info.endpointHost}:${info.endpointPort}" +
                     " · tuner ${info.tunerType}" +
                     " · 中心 ${SdrFormat.formatCenterMhz(info.centerHz)}" +
@@ -175,10 +181,24 @@ fun SdrPanel(gateway: GatewayController, modifier: Modifier = Modifier) {
         )
         if (spectrum.isNotEmpty()) {
             Text(
-                text = "相对幅度谱（按峰值归一化，不是 dBm）",
+                text = "相对幅度谱（按峰值归一化，不是 dBm；黄线≈局部峰值）",
                 style = PicoTheme.typography.bodySmall,
                 color = PicoTheme.colorTokens.LabelTertiaryAlpha,
             )
+            val peakHz = if (tunedCenterHz > 0L) {
+                SdrFormat.peakFrequencyHz(
+                    spectrum, tunedCenterHz, tunedSampleRateHz)
+            } else {
+                null
+            }
+            if (peakHz != null) {
+                Text(
+                    text = "估算峰值 ${SdrFormat.formatCenterMhz(Math.round(peakHz))}" +
+                        "（按相对幅度，非校准）",
+                    style = PicoTheme.typography.bodySmall,
+                    color = PicoTheme.colorTokens.LabelTertiaryAlpha,
+                )
+            }
         }
         LiveSpectrumCanvas(
             spectrum = spectrum,
