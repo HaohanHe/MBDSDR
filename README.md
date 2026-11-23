@@ -5,7 +5,7 @@
 > 测天线、收信号、解调、解码、抓星历。**没有 mock、没有假数据**：没插硬件
 > 就报空，未校准就标口径。本页「快速开始」的离线命令在隔离环境实测过，
 > 实测口径与自动化契约见 [§4 离线复验](#4-离线复验本页命令的实测口径) 与 [`scripts/verify_readme.py`](scripts/verify_readme.py)。
->
+>https://bi4mib.cn/mbdsdr/
 > **真机实证（2026-10）**：NanoVNA-H 实测自制天线谐振与馈线时延、
 > RTL-SDR 实抄 435MHz 业余频段载波、外部 agent 经 MCP 遥控收发全链路、
 > 设备屏幕截图回传——全部见 [`docs/learn/agent-onboarding-runbook.md`](docs/learn/agent-onboarding-runbook.md)。
