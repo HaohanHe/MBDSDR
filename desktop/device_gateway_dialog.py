@@ -24,13 +24,14 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from PySide6.QtCore import Qt, QTimer  # noqa: E402
 from PySide6.QtGui import QGuiApplication  # noqa: E402
 from PySide6.QtWidgets import (  # noqa: E402
-    QCheckBox, QComboBox, QDialog, QFormLayout, QHBoxLayout, QLabel,
-    QMessageBox, QPushButton, QSpinBox, QTableWidget, QTableWidgetItem,
-    QVBoxLayout,
+    QCheckBox, QComboBox, QDialog, QFileDialog, QFormLayout, QHBoxLayout,
+    QLabel, QLineEdit, QMessageBox, QPushButton, QSpinBox, QTableWidget,
+    QTableWidgetItem, QVBoxLayout,
 )
 
 from mbdsdr_ai.device_gateway import (  # noqa: E402
     DeviceGateway, build_station_panorama_provider,
+    build_station_passes_provider,
 )
 
 
@@ -79,7 +80,8 @@ class DeviceGatewayDialog(QDialog):
 
         tip = QLabel(
             "给第二台手机（镜头/目镜/手持）或头显配对用。网关只有只读端点，"
-            "不改站址、不调谐、不发射；关闭本窗口会停止网关。")
+            "不改站址、不调谐、不发射；选本地 TLE 文件后额外启用离线 /passes。"
+            "关闭本窗口会停止网关。")
         tip.setWordWrap(True)
         tip.setStyleSheet("color:#5B7B8C;")
         outer.addWidget(tip)
@@ -102,6 +104,16 @@ class DeviceGatewayDialog(QDialog):
         self.allow_live_check = QCheckBox(
             "允许 /panorama 现采网络数据（默认只读 15 分钟内缓存）")
         form.addRow("", self.allow_live_check)
+
+        tle_row = QHBoxLayout()
+        self.tle_edit = QLineEdit()
+        self.tle_edit.setPlaceholderText(
+            "可选：本地 TLE 文件，提供则启用 /passes（离线 SGP4）")
+        tle_row.addWidget(self.tle_edit)
+        self.tle_browse_btn = QPushButton("浏览…")
+        self.tle_browse_btn.clicked.connect(self.browse_tle)
+        tle_row.addWidget(self.tle_browse_btn)
+        form.addRow("TLE 文件", tle_row)
         outer.addLayout(form)
 
         row = QHBoxLayout()
@@ -175,6 +187,8 @@ class DeviceGatewayDialog(QDialog):
         self.host_combo.setEnabled(not running)
         self.port_spin.setEnabled(not running)
         self.allow_live_check.setEnabled(not running)
+        self.tle_edit.setEnabled(not running)
+        self.tle_browse_btn.setEnabled(not running)
         if not running:
             self.code_label.setText("—")
             self.url_label.setText("网关未启动")
@@ -192,11 +206,13 @@ class DeviceGatewayDialog(QDialog):
             self._station_provider,
             allow_live=self.allow_live_check.isChecked(),
             site_note="桌面权威端")
+        passes_provider = self._build_passes_provider()
         try:
             gw = DeviceGateway(host=host, port=self.port_spin.value(),
                                allow_lan=allow_lan,
                                registry=self._registry,
-                               panorama_provider=provider)
+                               panorama_provider=provider,
+                               passes_provider=passes_provider)
             url = gw.start()
         except Exception as exc:  # noqa: BLE001 - 启动失败必须可见
             QMessageBox.warning(self, "网关启动失败",
@@ -204,6 +220,7 @@ class DeviceGatewayDialog(QDialog):
             self.status.setText(f"启动失败：{exc}")
             return
         self._gateway = gw
+        self._passes_enabled = passes_provider is not None
         self.port_spin.setValue(gw.port)
         self.url_label.setText(f"服务地址：{url}")
         self.code_label.setText(gw.registry.code)
@@ -214,14 +231,17 @@ class DeviceGatewayDialog(QDialog):
         self.copy_btn.setEnabled(True)
         la, lo, _ = self._safe_station()
         self._station_missing = la is None or lo is None
+        passes_note = ("；/passes 已启用（本地 TLE 离线 SGP4）"
+                       if passes_provider is not None
+                       else "；/passes 未启用（TLE 文件留空）")
         if self._station_missing:
             self.status.setText(
                 "网关已启动，但当前未设置站址：/panorama 会回 500，"
-                "请先设置观测位置（GNSS/手填）。")
+                "请先设置观测位置（GNSS/手填）。" + passes_note)
         else:
             self.status.setText(
                 "网关已启动。手机/头显用配对码换 token 后即可读 /panorama、"
-                "/roster；没有写硬件端点。")
+                "/roster；没有写硬件端点。" + passes_note)
         self._refresh_roster()
 
     def _safe_station(self):
@@ -230,10 +250,25 @@ class DeviceGatewayDialog(QDialog):
         except Exception:
             return None, None, None
 
+    def browse_tle(self) -> None:
+        """选择本地 TLE 文件；留空 = 不启用 /passes。"""
+        path, _ = QFileDialog.getOpenFileName(
+            self, "选择 TLE 文件", "",
+            "TLE/文本 (*.txt *.tle *.tle3);;所有文件 (*)")
+        if path:
+            self.tle_edit.setText(path)
+
+    def _build_passes_provider(self):
+        path = self.tle_edit.text().strip()
+        if not path:
+            return None
+        return build_station_passes_provider(path, self._safe_station)
+
     def stop_gateway(self) -> None:
         gw = self._gateway
         self._gateway = None
         self._station_missing = False
+        self._passes_enabled = False
         if gw is not None:
             try:
                 gw.stop()
@@ -274,15 +309,20 @@ class DeviceGatewayDialog(QDialog):
         poses = gw.recent_poses()
         self._update_fuse_label(gw)
         self._update_eyepiece_id_label(poses)
+        passes_note = ("；/passes 已启用（本地 TLE 离线 SGP4）"
+                       if getattr(self, "_passes_enabled", False)
+                       else "；/passes 未启用（TLE 文件留空）")
         if getattr(self, "_station_missing", False):
             self.status.setText(
                 f"已配对 {len(devices)} 台；当前未设置站址：/panorama 会回 500"
-                "（先设置观测位置）。")
+                "（先设置观测位置）。" + passes_note)
         elif poses:
             self.status.setText(
-                f"已配对 {len(devices)} 台；收到 {len(poses)} 个设备的位姿。")
+                f"已配对 {len(devices)} 台；收到 {len(poses)} 个设备的位姿。"
+                + passes_note)
         else:
-            self.status.setText(f"已配对 {len(devices)} 台；暂无位姿上报。")
+            self.status.setText(
+                f"已配对 {len(devices)} 台；暂无位姿上报。" + passes_note)
 
     def _update_fuse_label(self, gw: DeviceGateway) -> None:
         """把 lens+eyepiece 的融合结果如实显示；不可用时给原因，不猜朝向。"""

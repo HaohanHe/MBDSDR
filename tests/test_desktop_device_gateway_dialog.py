@@ -124,6 +124,63 @@ def test_private_host_requires_allow_lan_path(qapp, monkeypatch):
         assert ip != "0.0.0.0"
 
 
+def test_tle_file_enables_offline_passes(qapp, tmp_path):
+    """选本地 TLE 后 /passes 可用；停网关再把 TLE 输入解锁。"""
+    import json
+
+    from device_gateway_dialog import DeviceGatewayDialog
+
+    tle = tmp_path / "tle.txt"
+    tle.write_text("\n".join([
+        "ISS (ZARYA)",
+        "1 25544U 98067A   24001.50000000  .00016717  00000-0  30303-3 0  9993",
+        "2 25544  51.6416 247.4627 0006703 130.5360 325.0288 15.49309023 42596",
+    ]), encoding="utf-8")
+    dlg = DeviceGatewayDialog(_station(), port=0, hosts=["127.0.0.1"],
+                              registry=_registry())
+    try:
+        dlg.tle_edit.setText(str(tle))
+        dlg.start_gateway()
+        assert "passes 已启用" in dlg.status.text()
+        assert dlg.tle_edit.isEnabled() is False
+        assert dlg.tle_browse_btn.isEnabled() is False
+
+        paired = dlg._gateway.registry.pair("111111", "头显", "headset")
+        status, raw, _ = dlg._gateway.dispatch(
+            "GET", "/passes", b"",
+            {"Authorization": "Bearer " + paired["token"]})
+        assert status == 200
+        data = json.loads(raw)
+        assert data["schema"] == "mbdsdr.sat-passes/1"
+        assert data["count"] == len(data["passes"])
+        assert data["count"] >= 1
+        assert data["station"]["lat_deg"] == 45.0
+
+        dlg.stop_gateway()
+        assert dlg.tle_edit.isEnabled() is True
+    finally:
+        dlg.close()
+
+
+def test_without_tle_file_passes_is_503(qapp):
+    """TLE 留空时 /passes 明确 503，不拿假过境顶替。"""
+    from device_gateway_dialog import DeviceGatewayDialog
+
+    dlg = DeviceGatewayDialog(_station(), port=0, hosts=["127.0.0.1"],
+                              registry=_registry())
+    try:
+        dlg.start_gateway()
+        assert "passes 未启用" in dlg.status.text()
+        paired = dlg._gateway.registry.pair("111111", "手机", "handheld")
+        status, raw, _ = dlg._gateway.dispatch(
+            "GET", "/passes", b"",
+            {"Authorization": "Bearer " + paired["token"]})
+        assert status == 503
+        assert '"passes_unavailable"' in raw.decode("utf-8")
+    finally:
+        dlg.close()
+
+
 def test_main_window_wires_gateway_action():
     from main_window import MainWindow
     import inspect

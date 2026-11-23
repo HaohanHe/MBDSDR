@@ -21,7 +21,8 @@ if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
 from mbdsdr_ai.device_gateway import (  # noqa: E402
-    DeviceGateway, PairingRegistry, build_tle_passes_provider, parse_tle_groups,
+    DeviceGateway, PairingRegistry, build_station_passes_provider,
+    build_tle_passes_provider, parse_tle_groups,
 )
 
 
@@ -527,6 +528,32 @@ def test_tle_passes_provider_rejects_bad_args_and_empty_file(tmp_path):
         str(tmp_path / "missing.txt"), lat=1, lon=2)
     with pytest.raises(FileNotFoundError):
         missing()
+
+
+def test_station_passes_provider_reorders_station_each_call(tmp_path):
+    path = tmp_path / "tle.txt"
+    path.write_text("\n".join(_ISS_TLE), encoding="utf-8")
+    station = {"value": (40.0, -100.0, 0.0)}
+    provider = build_station_passes_provider(
+        str(path), lambda: station["value"], hours=12.0)
+
+    first = provider()
+    assert first["station"] == {"lat_deg": 40.0, "lon_deg": -100.0,
+                                "alt_m": 0.0}
+    # 换站后下一次请求立即用新坐标（不缓存旧站）。
+    station["value"] = (41.5, -99.0, 123.0)
+    second = provider()
+    assert second["station"] == {"lat_deg": 41.5, "lon_deg": -99.0,
+                                 "alt_m": 123.0}
+
+
+def test_station_passes_provider_missing_station_raises(tmp_path):
+    path = tmp_path / "tle.txt"
+    path.write_text("\n".join(_ISS_TLE), encoding="utf-8")
+    provider = build_station_passes_provider(
+        str(path), lambda: (None, None, None))
+    with pytest.raises(RuntimeError):
+        provider()
 
 
 # ---------------------------------------------------------------- socket 冒烟

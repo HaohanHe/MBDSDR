@@ -2807,6 +2807,17 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `.trae/specs/mbdsdr-system-lifecycle/checklist.md` | 多机线/42（§265 Task 222） | 2026-11-24 02:15 | 本笔 |
 | `docs/PRD-现状对照.md` | 多机线/42（§265 P1-11 补识别单列） | 2026-11-24 02:15 | 本笔 |
 | `docs/COORDINATION.md` | 多机线/42（§265 记录 + §6.1） | 2026-11-24 02:15 | 本笔 |
+| `mbdsdr_ai/device_gateway.py` | 多机线/42（§266 build_station_passes_provider 抽公共实现） | 2026-11-24 02:45 | 本笔 |
+| `desktop/device_gateway_dialog.py` | 多机线/42（§266 TLE 文件输入 + /passes 注入） | 2026-11-24 02:45 | 本笔 |
+| `tests/test_device_gateway.py` | 多机线/42（§266 站址即时重取/缺站址用例） | 2026-11-24 02:45 | 本笔 |
+| `tests/test_desktop_device_gateway_dialog.py` | 多机线/42（§266 TLE 启用/503/锁定用例） | 2026-11-24 02:45 | 本笔 |
+| `desktop/README.md` | 多机线/42（§266 TLE//passes/融合/识别说明） | 2026-11-24 02:45 | 本笔 |
+| `.trae/specs/multi-device-interconnect/tasks.md` | 多机线/42（§266 M4.1 桌面侧状态） | 2026-11-24 02:45 | 本笔 |
+| `.trae/specs/multi-device-interconnect/checklist.md` | 多机线/42（§266 桌面 TLE 项） | 2026-11-24 02:45 | 本笔 |
+| `.trae/specs/mbdsdr-system-lifecycle/tasks.md` | 多机线/42（§266 Task 223） | 2026-11-24 02:45 | 本笔 |
+| `.trae/specs/mbdsdr-system-lifecycle/checklist.md` | 多机线/42（§266 Task 223） | 2026-11-24 02:45 | 本笔 |
+| `docs/PRD-现状对照.md` | 多机线/42（§266 P1-11 补桌面 TLE） | 2026-11-24 02:45 | 本笔 |
+| `docs/COORDINATION.md` | 多机线/42（§266 记录 + §6.1） | 2026-11-24 02:45 | 本笔 |
 
 > 上表各行均由 `claim` 台账推导：owner 原文与 `acquired_at` 直接取自台账，
 > 目的优先用台账里的 `claim_reason`，没有就如实写「未声明」，不补编。时间列只是
@@ -12929,6 +12940,40 @@ lens/eyepiece 必须能各自把「我现在指着哪」发出去。
 - 识别只是「准星附近亮星」，不是完整视场解算；星名命中依赖目录覆盖。
 - 识别结果不参与融合权重，也不改变目镜的 az/alt。
 - 未真机验证手机目镜识别上报链路。
+
+## 266. M4.1 桌面侧：对话框接 `/passes`（选本地 TLE）（2026-11-23）
+
+**依据**：§264 的 `/passes` 只有 CLI 能启用；桌面用户从「文件 → 多设备网关」
+启动时无法给出 TLE，导致 GUI 用户实际拿不到过境数据。
+
+**做了什么**
+- `mbdsdr_ai/device_gateway.py`：
+  - 抽出 `_compute_passes_payload`（读 TLE、现算、序列化、排序的单一实现）；
+  - 新增 `build_station_passes_provider(tle_file, station_provider, ...)`：
+    **每次请求重取站址**，桌面换站/GNSS fix 后 `/passes` 立即用新坐标；
+    缺站址 RuntimeError（网关 500 带原因），不拿旧站或示例站顶替；
+  - `build_tle_passes_provider` 改为复用同一实现，参数校验也收口到
+    `_validate_passes_args`。
+- `desktop/device_gateway_dialog.py`：
+  - 表单新增「TLE 文件」+「浏览…」；启动时若有路径则注入
+    `build_station_passes_provider`，否则 `/passes` 保持 503；
+  - 运行中锁定 TLE 输入/浏览，停止后解锁；
+  - 状态栏常驻「/passes 已启用（本地 TLE 离线 SGP4）」或「未启用（TLE 文件留空）」，
+    2 s 名册刷新不会把它冲掉；
+  - 提示文案同步说明「选 TLE 后额外启用离线 /passes」。
+
+**验证**
+- `pytest tests/test_device_gateway.py` → **35 passed**（新增站址即时重取、
+  缺站址 RuntimeError；原 24 h ISS 序列化/排序仍绿）。
+- `pytest tests/test_desktop_device_gateway_dialog.py` → **10 passed**（新增：
+  选 TLE 后配对 → `GET /passes` 200 且 count≥1、station=45.0；TLE 留空 503；
+  运行中 TLE 输入锁定、停止解锁）。
+- 未改手机/头显代码，上一轮 601 passed 不受影响。
+
+**诚实边界**
+- 只读本地 TLE 文件，不自动下载/校验新鲜度；旧 TLE 仍会算出「数学上成立」
+  但已不反映真实轨道的过境。
+- 头显四窗 UI 仍未消费 `/passes`；选文件依赖桌面文件对话框。
 
 
 

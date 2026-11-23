@@ -54,6 +54,7 @@ __all__ = [
     "build_station_panorama_provider",
     "parse_tle_groups",
     "build_tle_passes_provider",
+    "build_station_passes_provider",
 ]
 
 #: 可配对角色：桌面是权威端，不通过本网关配对。
@@ -673,46 +674,88 @@ def _pass_to_dict(p) -> Dict[str, Any]:
     }
 
 
-def build_tle_passes_provider(
-        tle_file: str, *, lat: float, lon: float, alt_m: float = 0.0,
-        hours: float = 24.0, min_alt: float = 10.0,
-        max_sats: Optional[int] = None,
-) -> Callable[[], Dict[str, Any]]:
-    """用本地 TLE 文件构造 `/passes` provider（不联网）。
+def _compute_passes_payload(
+        tle_file: str, *, lat: float, lon: float, alt_m: float,
+        hours_v: float, min_alt_v: float,
+        max_sats: Optional[int]) -> Dict[str, Any]:
+    """读本地 TLE 现算 SGP4 并序列化（`/passes` 的单一实现）。"""
+    with open(tle_file, "r", encoding="utf-8", errors="replace") as fh:
+        groups = parse_tle_groups(fh.read())
+    if not groups:
+        raise ValueError(f"TLE 文件里没有可解析的 TLE：{tle_file}")
+    from .sat_passes import GroundStation, predict_upcoming_passes
 
-    每次请求重新读文件并现算：用户换了 TLE 文件内容，下一次请求即生效。
-    文件缺失/无有效 TLE 都抛错（网关回 500 带原因），返回空列表也不伪造。
-    """
+    station = GroundStation(float(lat), float(lon), float(alt_m))
+    entries = predict_upcoming_passes(
+        groups, station, hours=hours_v, min_alt=min_alt_v,
+        max_sats=max_sats)
+    passes = [_pass_to_dict(item["pass"]) for item in entries]
+    passes.sort(key=lambda item: item["rise_unix"])
+    return {
+        "schema": PASSES_SCHEMA,
+        "source": "sgp4",
+        "count": len(passes),
+        "hours": hours_v,
+        "min_alt_deg": min_alt_v,
+        "station": {"lat_deg": float(lat), "lon_deg": float(lon),
+                    "alt_m": float(alt_m)},
+        "passes": passes,
+    }
+
+
+def _validate_passes_args(hours: float, min_alt: float) -> Tuple[float, float]:
     hours_v = float(hours)
     min_alt_v = float(min_alt)
     if not math.isfinite(hours_v) or hours_v <= 0.0:
         raise ValueError(f"hours 必须是 > 0 的有限数，收到 {hours!r}")
     if not math.isfinite(min_alt_v) or not (0.0 <= min_alt_v < 90.0):
         raise ValueError(f"min_alt 必须在 [0, 90) 度，收到 {min_alt!r}")
+    return hours_v, min_alt_v
+
+
+def build_tle_passes_provider(
+        tle_file: str, *, lat: float, lon: float, alt_m: float = 0.0,
+        hours: float = 24.0, min_alt: float = 10.0,
+        max_sats: Optional[int] = None,
+) -> Callable[[], Dict[str, Any]]:
+    """用本地 TLE 文件构造 `/passes` provider（不联网，站址固定）。
+
+    每次请求重新读文件并现算：用户换了 TLE 文件内容，下一次请求即生效。
+    文件缺失/无有效 TLE 都抛错（网关回 500 带原因），返回空列表也不伪造。
+    """
+    hours_v, min_alt_v = _validate_passes_args(hours, min_alt)
 
     def provider() -> Dict[str, Any]:
-        with open(tle_file, "r", encoding="utf-8", errors="replace") as fh:
-            groups = parse_tle_groups(fh.read())
-        if not groups:
-            raise ValueError(f"TLE 文件里没有可解析的 TLE：{tle_file}")
-        from .sat_passes import GroundStation, predict_upcoming_passes
+        return _compute_passes_payload(
+            tle_file, lat=lat, lon=lon, alt_m=alt_m,
+            hours_v=hours_v, min_alt_v=min_alt_v, max_sats=max_sats)
 
-        station = GroundStation(float(lat), float(lon), float(alt_m))
-        entries = predict_upcoming_passes(
-            groups, station, hours=hours_v, min_alt=min_alt_v,
-            max_sats=max_sats)
-        passes = [_pass_to_dict(item["pass"]) for item in entries]
-        passes.sort(key=lambda item: item["rise_unix"])
-        return {
-            "schema": PASSES_SCHEMA,
-            "source": "sgp4",
-            "count": len(passes),
-            "hours": hours_v,
-            "min_alt_deg": min_alt_v,
-            "station": {"lat_deg": float(lat), "lon_deg": float(lon),
-                        "alt_m": float(alt_m)},
-            "passes": passes,
-        }
+    return provider
+
+
+def build_station_passes_provider(
+        tle_file: str,
+        station_provider: Callable[[], Tuple[Optional[float], Optional[float],
+                                             Optional[float]]],
+        *, hours: float = 24.0, min_alt: float = 10.0,
+        max_sats: Optional[int] = None,
+) -> Callable[[], Dict[str, Any]]:
+    """同 [build_tle_passes_provider]，但**每次调用重取站址**（桌面权威端用）。
+
+    桌面换站/GNSS fix 后 `/passes` 立刻用新坐标；缺站址抛 RuntimeError
+    （网关回 500 带原因），不拿示例站或旧坐标顶替。
+    """
+    hours_v, min_alt_v = _validate_passes_args(hours, min_alt)
+
+    def provider() -> Dict[str, Any]:
+        la, lo, alt = station_provider()
+        if la is None or lo is None:
+            raise RuntimeError(
+                "权威端未配置站址：先设置观测位置（GNSS/手填）后再取过境")
+        return _compute_passes_payload(
+            tle_file, lat=float(la), lon=float(lo),
+            alt_m=float(alt or 0.0), hours_v=hours_v,
+            min_alt_v=min_alt_v, max_sats=max_sats)
 
     return provider
 
