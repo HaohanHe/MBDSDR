@@ -79,12 +79,51 @@
       "items": {"type": "String"}
     }
   },
-  "settingsGatewayPanoramaSummary": "観測地点 {site} · 太陽高度 {sunAlt}° · 欠落 {missing}",
+  "settingsGatewayPanoramaSummary": "観測地点 {site} · 太陽高度 {sunAlt}° · 天気 {weather} · 宇宙天気 {space} · 欠落 {missing}",
   "@settingsGatewayPanoramaSummary": {
     "placeholders": {
       "site": {"type": "String"},
       "sunAlt": {"type": "String"},
+      "weather": {"type": "String"},
+      "space": {"type": "String"},
       "missing": {"type": "String"}
+    }
+  },
+  "settingsGatewayUnknown": "不明",
+  "settingsGatewayWeatherCloud": "雲量 {cloud}%",
+  "@settingsGatewayWeatherCloud": {
+    "placeholders": {
+      "cloud": {"type": "String"}
+    }
+  },
+  "settingsGatewaySpaceKp": "Kp {kp}",
+  "@settingsGatewaySpaceKp": {
+    "placeholders": {
+      "kp": {"type": "String"}
+    }
+  },
+  "settingsGatewaySpaceF107": "F10.7 {f107}",
+  "@settingsGatewaySpaceF107": {
+    "placeholders": {
+      "f107": {"type": "String"}
+    }
+  },
+  "settingsGatewaySpaceSsn": "SSN {ssn}",
+  "@settingsGatewaySpaceSsn": {
+    "placeholders": {
+      "ssn": {"type": "String"}
+    }
+  },
+  "settingsGatewaySpaceXray": "X線 {xray}",
+  "@settingsGatewaySpaceXray": {
+    "placeholders": {
+      "xray": {"type": "String"}
+    }
+  },
+  "settingsGatewaySpacePartial": "不完全（{items}）",
+  "@settingsGatewaySpacePartial": {
+    "placeholders": {
+      "items": {"type": "String"}
     }
   },
   "settingsGatewayStatus": "デスクトップ状態を取得",

@@ -79,12 +79,51 @@
       "items": {"type": "String"}
     }
   },
-  "settingsGatewayPanoramaSummary": "Site {site} · Sun altitude {sunAlt}° · Missing {missing}",
+  "settingsGatewayPanoramaSummary": "Site {site} · Sun altitude {sunAlt}° · Weather {weather} · Space weather {space} · Missing {missing}",
   "@settingsGatewayPanoramaSummary": {
     "placeholders": {
       "site": {"type": "String"},
       "sunAlt": {"type": "String"},
+      "weather": {"type": "String"},
+      "space": {"type": "String"},
       "missing": {"type": "String"}
+    }
+  },
+  "settingsGatewayUnknown": "unknown",
+  "settingsGatewayWeatherCloud": "cloud {cloud}%",
+  "@settingsGatewayWeatherCloud": {
+    "placeholders": {
+      "cloud": {"type": "String"}
+    }
+  },
+  "settingsGatewaySpaceKp": "Kp {kp}",
+  "@settingsGatewaySpaceKp": {
+    "placeholders": {
+      "kp": {"type": "String"}
+    }
+  },
+  "settingsGatewaySpaceF107": "F10.7 {f107}",
+  "@settingsGatewaySpaceF107": {
+    "placeholders": {
+      "f107": {"type": "String"}
+    }
+  },
+  "settingsGatewaySpaceSsn": "SSN {ssn}",
+  "@settingsGatewaySpaceSsn": {
+    "placeholders": {
+      "ssn": {"type": "String"}
+    }
+  },
+  "settingsGatewaySpaceXray": "X-ray {xray}",
+  "@settingsGatewaySpaceXray": {
+    "placeholders": {
+      "xray": {"type": "String"}
+    }
+  },
+  "settingsGatewaySpacePartial": "partial ({items})",
+  "@settingsGatewaySpacePartial": {
+    "placeholders": {
+      "items": {"type": "String"}
     }
   },
   "settingsGatewayStatus": "Read desktop status",

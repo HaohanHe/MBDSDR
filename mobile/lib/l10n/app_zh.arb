@@ -79,12 +79,51 @@
       "items": {"type": "String"}
     }
   },
-  "settingsGatewayPanoramaSummary": "站址 {site} · 太阳高度 {sunAlt}° · 缺项 {missing}",
+  "settingsGatewayPanoramaSummary": "站址 {site} · 太阳高度 {sunAlt}° · 天气 {weather} · 空间天气 {space} · 缺项 {missing}",
   "@settingsGatewayPanoramaSummary": {
     "placeholders": {
       "site": {"type": "String"},
       "sunAlt": {"type": "String"},
+      "weather": {"type": "String"},
+      "space": {"type": "String"},
       "missing": {"type": "String"}
+    }
+  },
+  "settingsGatewayUnknown": "未知",
+  "settingsGatewayWeatherCloud": "云量 {cloud}%",
+  "@settingsGatewayWeatherCloud": {
+    "placeholders": {
+      "cloud": {"type": "String"}
+    }
+  },
+  "settingsGatewaySpaceKp": "Kp {kp}",
+  "@settingsGatewaySpaceKp": {
+    "placeholders": {
+      "kp": {"type": "String"}
+    }
+  },
+  "settingsGatewaySpaceF107": "F10.7 {f107}",
+  "@settingsGatewaySpaceF107": {
+    "placeholders": {
+      "f107": {"type": "String"}
+    }
+  },
+  "settingsGatewaySpaceSsn": "SSN {ssn}",
+  "@settingsGatewaySpaceSsn": {
+    "placeholders": {
+      "ssn": {"type": "String"}
+    }
+  },
+  "settingsGatewaySpaceXray": "X 射线 {xray}",
+  "@settingsGatewaySpaceXray": {
+    "placeholders": {
+      "xray": {"type": "String"}
+    }
+  },
+  "settingsGatewaySpacePartial": "不完整（{items}）",
+  "@settingsGatewaySpacePartial": {
+    "placeholders": {
+      "items": {"type": "String"}
     }
   },
   "settingsGatewayStatus": "读取桌面状态",

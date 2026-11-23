@@ -381,6 +381,42 @@ class _SettingsPageState extends State<SettingsPage> {
       if (sun is Map && sun['alt_deg'] is num) {
         sunAlt = (sun['alt_deg'] as num).toStringAsFixed(1);
       }
+      // 天气：已知就报云量；缺测就写「未知」，不拿晴/多云当默认值。
+      final Object? weather = data['weather'];
+      String weatherText = l10n.settingsGatewayUnknown;
+      if (weather is Map &&
+          weather['known'] == true &&
+          weather['cloud_cover_pct'] is num) {
+        weatherText = l10n.settingsGatewayWeatherCloud(
+            (weather['cloud_cover_pct'] as num).toStringAsFixed(0));
+      }
+      // 空间天气：known=false 时仍可能有部分数值（F10.7/SSN/X 射线），
+      // 有就列出来并标「不完整」，一项都没有才写「未知」。
+      final Object? sw = data['space_weather'];
+      String spaceText = l10n.settingsGatewayUnknown;
+      if (sw is Map) {
+        final List<String> parts = <String>[];
+        if (sw['kp'] is num) {
+          parts.add(l10n.settingsGatewaySpaceKp('${sw['kp']}'));
+        }
+        if (sw['f107'] is num) {
+          parts.add(l10n.settingsGatewaySpaceF107(
+              (sw['f107'] as num).toStringAsFixed(1)));
+        }
+        if (sw['ssn'] is num) {
+          parts.add(l10n.settingsGatewaySpaceSsn(
+              (sw['ssn'] as num).toStringAsFixed(1)));
+        }
+        final Object? xray = sw['xray_class'];
+        if (xray is String && xray.trim().isNotEmpty) {
+          parts.add(l10n.settingsGatewaySpaceXray(xray.trim()));
+        }
+        if (parts.isNotEmpty) {
+          spaceText = sw['known'] == true
+              ? parts.join(' · ')
+              : l10n.settingsGatewaySpacePartial(parts.join(' · '));
+        }
+      }
       final Object? missingRaw = data['missing'];
       final List<String> missing = missingRaw is List
           ? missingRaw.map((Object? e) => e.toString()).toList()
@@ -388,6 +424,8 @@ class _SettingsPageState extends State<SettingsPage> {
       final String summary = l10n.settingsGatewayPanoramaSummary(
         siteText,
         sunAlt,
+        weatherText,
+        spaceText,
         missing.isEmpty ? '—' : missing.join(', '),
       );
       if (!mounted) return;

@@ -14,7 +14,7 @@
   **0 error / 0 warning / 65 info**。info 为 `deprecated_member_use`
   （Flutter 3.50 起 `package:flutter/material.dart` 提示改用 `material_ui`）与 2 条测试内
   `avoid_dynamic_calls`，不影响编译，未批量改。原始输出：`D:\mbdsdr\output\mobile_walk\flutter_analyze.log`。
-- `flutter test`（2026-11-24 复跑）：**610 passed / 0 failed**
+- `flutter test`（2026-11-24 复跑）：**611 passed / 0 failed**
   （11-22 的覆盖明细：天空投影对拍 84 点、反投影往返、四态裁剪、投影有效性域/跨域裁剪 4 条、
   指天视图 26 条、星名目录与中心识别 12 条、星表资产 4 条、asterism overlay 行为 11 条、
   首次成功端到端 5 条、小屏布局 + 标签避让 4 条；此后新增 M2 配对/名册、
@@ -27,9 +27,10 @@
   状态条不省略 1 条、标签避让 3 条）→ 601（多设备网关 M2/M3）→
   604（指天页自动上报 3 条）→ 608（手机只读 `/spectrum` 快照 2 条：
   客户端 503 不伪造 + 设置页 503 不编摘要）→ 609（回环 HTTP 定长请求体回归 1 条）→
-  610（手机只读 `/fuse`：不可用路径 1 条 + 全链路合法摘要）。
+  610（手机只读 `/fuse`：不可用路径 1 条 + 全链路合法摘要）→
+  611（全景天气/空间天气已知与部分两组断言）。
 - `flutter build apk --debug`（2026-11-24 复跑）：**成功**（43.1 s；补手机
-  `/fuse` 后再次出包 39.9 s）；
+  `/fuse` 后 39.9 s；补全景天气/空间天气后 39.6 s）；
   同日 `spatial` 的 `gradlew :app:assembleDebug --offline` 也是
   **BUILD SUCCESSFUL**（20 s），三端打包层无遗漏。
   历史：2026-11-22 出包 36.6 s，产物 `build/app/outputs/flutter-apk/app-debug.apk`
@@ -80,6 +81,9 @@
   真实 TLE 过境也跑通：`~/.mbdsdr/tle_cache` 的 Celestrak 缓存启动网关 →
   手机显示「过境（44 次）：METEOR-M2 4 17:53Z 峰值 10°，NOAA 21 (JPSS-2)
   18:36Z 峰值 45°，METEOR-M2 4 19:29Z 峰值 88°」，与 host `/passes` 前三条一致。
+  全景摘要也扩到天气/空间天气：`--allow-live` 实测显示「天气 云量 25% ·
+  空间天气 不完整（F10.7 124.0 · SSN 45.7 · X 射线 B） · 缺项 space_weather.kp」，
+  缺 Kp 就只列缺项，不写「平静」。
   说明虚拟传感器 ≠ 真机罗盘/IMU，不承诺户外精度。
 - **同轮发现并修复真实链路缺陷（2026-11-24）**：首轮模拟器配对失败，网关回
   `角色必须是 lens/eyepiece/handheld/headset 之一，收到 ''`。根因是 Dart

@@ -125,7 +125,12 @@ class _FakeGateway {
       '"missing":[]}';
   static const String jsonEncoder =
       '{"schema":"mbdsdr.sky-panorama/1","site":{"lat_deg":40.5,"lon_deg":-100.25},'
-      '"sun":{"alt_deg":-18.4},"missing":["cloud_cover","kp_index"]}';
+      '"sun":{"alt_deg":-18.4},'
+      '"weather":{"known":false,"cloud_cover_pct":null,'
+      '"reason":"URLError: handshake timed out"},'
+      '"space_weather":{"known":false,"kp":null,"f107":124.0,"ssn":45.7,'
+      '"xray_class":"B"},'
+      '"missing":["weather.cloud_cover_pct","space_weather.kp"]}';
 
   static const String _rosterJson =
       '{"schema":"mbdsdr.device-roster/1","authority":"desktop",'
@@ -205,7 +210,9 @@ void main() {
     expect(fake.paths.map((Uri u) => u.path),
         <String>['/pair', '/panorama']);
     expect(
-        find.text('站址 40.50, -100.25 · 太阳高度 -18.4° · 缺项 cloud_cover, kp_index'),
+        find.text('站址 40.50, -100.25 · 太阳高度 -18.4° · 天气 未知 · '
+            '空间天气 不完整（F10.7 124.0 · SSN 45.7 · X 射线 B） · '
+            '缺项 weather.cloud_cover_pct, space_weather.kp'),
         findsOneWidget);
 
     // 刷新名册：只显示角色/名字，不显示任何凭据。
@@ -396,6 +403,47 @@ void main() {
     await tester.pumpAndSettle();
     expect(
         find.text('站址 — · SDR rtl_tcp 127.0.0.1:1234 · 租约：头显 占用 · 缺项 station'),
+        findsOneWidget);
+  });
+
+  testWidgets('全景已知天气/空间天气：按数值显示，不用缺省值', (tester) async {
+    tester.view.physicalSize = const Size(420, 5200);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
+
+    final SettingsService settings =
+        SettingsService(kv: _MemKv(), secure: _MemSecure());
+    await settings.load();
+    settings.deviceGatewayToken = 'tok-1';
+    settings.deviceGatewayRole = 'handheld';
+
+    await tester.pumpWidget(_wrap(Scaffold(
+      body: SettingsPage(
+        settings: settings,
+        radio: RadioController(),
+        gatewayClientBuilder: (String host, int port) => DeviceGatewayClient(
+          host: host,
+          port: port,
+          transport: (Uri url, String method, Map<String, String> headers,
+              String? payload) async {
+            return const GatewayHttpResponse(200,
+                '{"schema":"mbdsdr.sky-panorama/1",'
+                '"site":{"lat_deg":39.9,"lon_deg":116.4},'
+                '"sun":{"alt_deg":-20.1},'
+                '"weather":{"known":true,"cloud_cover_pct":12.0},'
+                '"space_weather":{"known":true,"kp":2,"f107":130.5,'
+                '"ssn":60.2,"xray_class":"C"},"missing":[]}');
+          },
+        ),
+      ),
+    )));
+    await tester.pump();
+
+    await tester.tap(find.widgetWithText(OutlinedButton, '读取全景'));
+    await tester.pumpAndSettle();
+    expect(
+        find.text('站址 39.90, 116.40 · 太阳高度 -20.1° · 天气 云量 12% · '
+            '空间天气 Kp 2 · F10.7 130.5 · SSN 60.2 · X 射线 C · 缺项 —'),
         findsOneWidget);
   });
 
