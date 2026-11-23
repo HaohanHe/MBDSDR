@@ -43,7 +43,7 @@
   "settingsChPortHint": "Default 50732",
   "settingsChHelp": "Read-only fetch of /status, /pocsag_messages, /m17_calls and /vor_radial; decoding runs in the desktop engine, mobile is a viewer.",
   "settingsSectionDeviceGateway": "Multi-device gateway (pairing)",
-  "settingsGatewayHelp": "After starting the desktop gateway, bind this device to a role with the pairing code. Only paired devices can read the roster and panorama; this device never sends tuning, recording or site changes.",
+  "settingsGatewayHelp": "After starting the desktop gateway, bind this device to a role with the pairing code. Only paired devices can read the roster, panorama, status, passes and spectrum snapshot; this device never sends tuning, recording or site changes.",
   "settingsGatewayEndpoint": "Desktop gateway: {endpoint} (host comes from the ControlHub section)",
   "@settingsGatewayEndpoint": {
     "placeholders": {
@@ -117,6 +117,49 @@
       "name": {"type": "String"},
       "time": {"type": "String"},
       "alt": {"type": "String"}
+    }
+  },
+  "settingsGatewaySpectrum": "Read spectrum snapshot",
+  "settingsGatewaySpectrumModeSnapshot": "read-only, not live",
+  "settingsGatewaySpectrumModeRealtime": "live",
+  "settingsGatewaySpectrumSummary": "Spectrum ({mode}): center {center} MHz · rate {rate} MHz · {bins} bins · peak {peak} · noise floor {noise} dB · frame age {age}",
+  "@settingsGatewaySpectrumSummary": {
+    "placeholders": {
+      "mode": {"type": "String"},
+      "center": {"type": "String"},
+      "rate": {"type": "String"},
+      "bins": {"type": "String"},
+      "peak": {"type": "String"},
+      "noise": {"type": "String"},
+      "age": {"type": "String"}
+    }
+  },
+  "settingsGatewaySpectrumPeak": "{freq} MHz / {power} dB",
+  "@settingsGatewaySpectrumPeak": {
+    "placeholders": {
+      "freq": {"type": "String"},
+      "power": {"type": "String"}
+    }
+  },
+  "settingsGatewaySpectrumNoPeak": "no finite bins",
+  "settingsGatewaySpectrumAge": "{age} s",
+  "@settingsGatewaySpectrumAge": {
+    "placeholders": {
+      "age": {"type": "String"}
+    }
+  },
+  "settingsGatewaySpectrumAgeUnknown": "unknown",
+  "settingsGatewaySpectrumStale": "frame older than 5 s",
+  "settingsGatewaySpectrumNullBins": "{count} bins non-finite",
+  "@settingsGatewaySpectrumNullBins": {
+    "placeholders": {
+      "count": {"type": "String"}
+    }
+  },
+  "toastGatewaySpectrumFailed": "Spectrum failed: {reason}",
+  "@toastGatewaySpectrumFailed": {
+    "placeholders": {
+      "reason": {"type": "String"}
     }
   },
   "settingsGatewayLeaseFree": "Lease: idle",

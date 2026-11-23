@@ -3086,6 +3086,15 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `docs/COORDINATION.md` | 多机线/42（§296 记录 + §6.1） | 2026-11-24 04:20 | 本笔 |
 | `.trae/specs/multi-device-interconnect/checklist.md` | 多机线/42（§297 持续约束不勾选） | 2026-11-24 04:40 | 本笔 |
 | `docs/COORDINATION.md` | 多机线/42（§297 验收对账 + §6.1） | 2026-11-24 04:40 | 本笔 |
+| `mobile/lib/services/device_gateway_client.dart` | 多机线/42（§298 手机只读 /spectrum 快照（提交后释放）） | 2026-11-24 01:17 | 本笔 |
+| `mobile/lib/pages/settings_page.dart` | 多机线/42（§298 手机只读 /spectrum 快照（提交后释放）） | 2026-11-24 01:17 | 本笔 |
+| `mobile/lib/l10n/app_zh.arb` | 多机线/42（§298 手机只读 /spectrum 快照（提交后释放）） | 2026-11-24 01:17 | 本笔 |
+| `mobile/lib/l10n/app_en.arb` | 多机线/42（§298 手机只读 /spectrum 快照（提交后释放）） | 2026-11-24 01:17 | 本笔 |
+| `mobile/lib/l10n/app_ja.arb` | 多机线/42（§298 手机只读 /spectrum 快照（提交后释放）） | 2026-11-24 01:17 | 本笔 |
+| `mobile/test/device_gateway_client_test.dart` | 多机线/42（§298 手机只读 /spectrum 快照（提交后释放）） | 2026-11-24 01:17 | 本笔 |
+| `mobile/test/settings_page_gateway_test.dart` | 多机线/42（§298 手机只读 /spectrum 快照（提交后释放）） | 2026-11-24 01:17 | 本笔 |
+| `mobile/README.md` | 多机线/42（§298 手机只读 /spectrum 快照（提交后释放）） | 2026-11-24 01:17 | 本笔 |
+| `docs/COORDINATION.md` | 多机线/42（§298 手机只读 /spectrum 快照（提交后释放）） | 2026-11-24 01:17 | 本笔 |
 
 > 上表各行均由 `claim` 台账推导：owner 原文与 `acquired_at` 直接取自台账，
 > 目的优先用台账里的 `claim_reason`，没有就如实写「未声明」，不补编。时间列只是
@@ -14087,3 +14096,31 @@ NaN 会变成 `null`、真实 socket 上无帧会 503。契约要求消费端不
 
 
 
+
+## 298. 手机只读 `/spectrum` 快照 + 三端出包复验（2026-11-24）
+
+**依据**：spec §6.3 要求配对设备可读 `/spectrum`。桌面与头显已消费，手机仍缺，
+三端只读面不对称；本轮补齐手机侧，并把打包层复验一次。
+
+**改动**
+- `DeviceGatewayClient.spectrum()`：`GET /spectrum`，503 原样抛服务端 reason，
+  不伪造快照。
+- 设置页「读取频谱快照」：显示模式（按服务端 `realtime` 取名，默认「只读·非实时」）、
+  中心/采样/bin/峰值/噪声底/帧龄；`stale=true` 标「帧超 5 s 未更新」，
+  `powers_db` 里的 `null` 计「N 个 bin 非有限」；无帧 503 只报「没有可读的频谱帧」。
+- l10n 三语（zh/en/ja）新增 12 个 key；`settingsGatewayHelp` 同步到
+  名册/全景/状态/过境/频谱。
+- 打包复验：`mobile` `flutter build apk --debug` 43.1 s 成功；
+  `spatial` `gradlew :app:assembleDebug --offline` 20 s **BUILD SUCCESSFUL**。
+
+**验证**
+- `device_gateway_client_test` 11 passed（+1：spectrum 503 不伪造，
+  路径清单含 `/spectrum`）
+- `settings_page_gateway_test` 6 passed（+1：503 不编摘要；全链路扩到 `/spectrum`
+  并断言摘要文本，含 `1 个 bin 非有限`）
+- 全量 `flutter test` **608 passed / 0 failed**
+
+**诚实边界**
+- 手机只显示摘要，不画谱/瀑布；功率是相对幅度（非 dBm）。
+- `/spectrum` 仍是桌面某一帧的快照，不是流；未真机配对验证。
+- 外部阻塞不变：PICO 真机、rtl_tcp 被 emulator 占用、真模型 API Key 缺失。

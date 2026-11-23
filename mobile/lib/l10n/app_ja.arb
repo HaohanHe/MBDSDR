@@ -43,7 +43,7 @@
   "settingsChPortHint": "既定 50732",
   "settingsChHelp": "/status、/pocsag_messages、/m17_calls、/vor_radial を読み取り専用で取得。デコードはデスクトップエンジンで行われ、モバイルはビューアです。",
   "settingsSectionDeviceGateway": "マルチデバイスゲートウェイ（ペアリング）",
-  "settingsGatewayHelp": "デスクトップのゲートウェイを起動したら、ペアリングコードで本機を役割に紐付けます。ペアリング後のみ名簿とパノラマを読めます。本機は同調・録音・観測地点の変更を送りません。",
+  "settingsGatewayHelp": "デスクトップのゲートウェイを起動したら、ペアリングコードで本機を役割に紐付けます。ペアリング後のみ名簿・パノラマ・状態・パス・スペクトルスナップショットを読めます。本機は同調・録音・観測地点の変更を送りません。",
   "settingsGatewayEndpoint": "デスクトップゲートウェイ：{endpoint}（ホストは ControlHub セクション由来）",
   "@settingsGatewayEndpoint": {
     "placeholders": {
@@ -117,6 +117,49 @@
       "name": {"type": "String"},
       "time": {"type": "String"},
       "alt": {"type": "String"}
+    }
+  },
+  "settingsGatewaySpectrum": "スペクトルスナップショットを取得",
+  "settingsGatewaySpectrumModeSnapshot": "読み取り専用・非リアルタイム",
+  "settingsGatewaySpectrumModeRealtime": "リアルタイム",
+  "settingsGatewaySpectrumSummary": "スペクトル（{mode}）：中心 {center} MHz · サンプル {rate} MHz · {bins} bin · ピーク {peak} · ノイズフロア {noise} dB · フレーム経過 {age}",
+  "@settingsGatewaySpectrumSummary": {
+    "placeholders": {
+      "mode": {"type": "String"},
+      "center": {"type": "String"},
+      "rate": {"type": "String"},
+      "bins": {"type": "String"},
+      "peak": {"type": "String"},
+      "noise": {"type": "String"},
+      "age": {"type": "String"}
+    }
+  },
+  "settingsGatewaySpectrumPeak": "{freq} MHz / {power} dB",
+  "@settingsGatewaySpectrumPeak": {
+    "placeholders": {
+      "freq": {"type": "String"},
+      "power": {"type": "String"}
+    }
+  },
+  "settingsGatewaySpectrumNoPeak": "有限 bin なし",
+  "settingsGatewaySpectrumAge": "{age} 秒",
+  "@settingsGatewaySpectrumAge": {
+    "placeholders": {
+      "age": {"type": "String"}
+    }
+  },
+  "settingsGatewaySpectrumAgeUnknown": "不明",
+  "settingsGatewaySpectrumStale": "フレームが 5 秒以上未更新",
+  "settingsGatewaySpectrumNullBins": "{count} 個の bin が非有限",
+  "@settingsGatewaySpectrumNullBins": {
+    "placeholders": {
+      "count": {"type": "String"}
+    }
+  },
+  "toastGatewaySpectrumFailed": "スペクトル取得に失敗：{reason}",
+  "@toastGatewaySpectrumFailed": {
+    "placeholders": {
+      "reason": {"type": "String"}
     }
   },
   "settingsGatewayLeaseFree": "リース：空き",

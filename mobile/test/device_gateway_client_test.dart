@@ -152,6 +152,11 @@ void main() {
           return const GatewayHttpResponse(
               200, '{"schema":"mbdsdr.desktop-status/1","station":null,'
                   '"sdr":null,"missing":["station","sdr"]}');
+        case '/spectrum':
+          return const GatewayHttpResponse(
+              200, '{"schema":"mbdsdr.spectrum-snapshot/1","readonly":true,'
+                  '"realtime":false,"bins":4,"powers_db":[-80.0,null,-70.0],'
+                  '"peak_freq_hz":100000000.0,"peak_power_db":-70.0}');
       }
       fail('unexpected path ${url.path}');
     });
@@ -162,8 +167,24 @@ void main() {
     expect((await c.poses('tok-abc'))['poses'], isEmpty);
     expect((await c.passes('tok-abc'))['schema'], 'mbdsdr.sat-passes/1');
     expect((await c.status('tok-abc'))['schema'], 'mbdsdr.desktop-status/1');
+    expect((await c.spectrum('tok-abc'))['schema'],
+        'mbdsdr.spectrum-snapshot/1');
     expect(t.calls.map((e) => e.url.path), <String>[
-      '/roster', '/panorama', '/poses', '/passes', '/status']);
+      '/roster', '/panorama', '/poses', '/passes', '/status', '/spectrum']);
+  });
+
+  test('spectrum 无帧 503：透出服务端 reason，不伪造快照', () async {
+    final _FakeTransport t = _FakeTransport(
+        (_, _, _, _) => const GatewayHttpResponse(
+            503, '{"error":"spectrum_unavailable","reason":"没有可读的频谱帧"}'));
+    final DeviceGatewayClient c = _client(t);
+
+    await expectLater(
+      c.spectrum('tok-abc'),
+      throwsA(isA<DeviceGatewayException>()
+          .having((e) => e.status, 'status', 503)
+          .having((e) => e.message, 'message', contains('没有可读的频谱帧'))),
+    );
   });
 
   test('只读角色上报位姿：本地拒绝，不发请求', () async {

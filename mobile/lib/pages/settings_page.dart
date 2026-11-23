@@ -71,6 +71,9 @@ class _SettingsPageState extends State<SettingsPage> {
   /// 最近一次取回的过境摘要（null = 还没取过）。
   String? _gwPassesText;
 
+  /// 最近一次取回的频谱快照摘要（null = 还没取过）。
+  String? _gwSpectrumText;
+
   String get _apiKey => widget.settings.apiKey;
 
   static String _masked(String key) {
@@ -301,6 +304,7 @@ class _SettingsPageState extends State<SettingsPage> {
       _gwRosterText = null;
       _gwStatusText = null;
       _gwPassesText = null;
+      _gwSpectrumText = null;
     });
     _toast(l10n.toastGatewayUnpaired);
   }
@@ -514,6 +518,66 @@ class _SettingsPageState extends State<SettingsPage> {
       if (mounted) setState(() => _gwBusy = false);
     }
   }
+
+  /// 取回权威端频谱快照：单帧只读、不是流；没有可读帧时服务端 503，这里如实报。
+  ///
+  /// 功率是相对幅度（非 dBm）；非有限 bin 在服务端就是 null，不按 0 dB 重算峰值。
+  Future<void> _fetchSpectrum() async {
+    final AppLocalizations l10n = AppLocalizations.of(context)!;
+    if (_gwBusy) return;
+    final SettingsService s = widget.settings;
+    if (s.controlHubHost.trim().isEmpty) {
+      _toast(l10n.settingsGatewayHostMissing, error: true);
+      return;
+    }
+    setState(() => _gwBusy = true);
+    try {
+      final Map<String, dynamic> data =
+          await _gatewayClient().spectrum(s.deviceGatewayToken);
+      final String mode = data['realtime'] == true
+          ? l10n.settingsGatewaySpectrumModeRealtime
+          : l10n.settingsGatewaySpectrumModeSnapshot;
+      final String center = _mhz(data['center_freq_hz'], 3);
+      final String rate = _mhz(data['sample_rate_hz'], 2);
+      final Object? binsRaw = data['bins'];
+      final String bins = binsRaw is num ? binsRaw.toInt().toString() : '—';
+      final Object? peakFreq = data['peak_freq_hz'];
+      final Object? peakPower = data['peak_power_db'];
+      final String peak = peakFreq is num && peakPower is num
+          ? l10n.settingsGatewaySpectrumPeak(
+              _mhz(peakFreq, 3), peakPower.toStringAsFixed(1))
+          : l10n.settingsGatewaySpectrumNoPeak;
+      final Object? noise = data['noise_floor_db'];
+      final String noiseText = noise is num ? noise.toStringAsFixed(1) : '—';
+      final Object? age = data['age_s'];
+      final String ageText = age is num
+          ? l10n.settingsGatewaySpectrumAge(age.toStringAsFixed(1))
+          : l10n.settingsGatewaySpectrumAgeUnknown;
+      final List<String> notes = <String>[];
+      if (data['stale'] == true) notes.add(l10n.settingsGatewaySpectrumStale);
+      final Object? powers = data['powers_db'];
+      if (powers is List) {
+        final int nullBins = powers.where((Object? e) => e == null).length;
+        if (nullBins > 0) {
+          notes.add(l10n.settingsGatewaySpectrumNullBins('$nullBins'));
+        }
+      }
+      String summary = l10n.settingsGatewaySpectrumSummary(
+          mode, center, rate, bins, peak, noiseText, ageText);
+      if (notes.isNotEmpty) summary = '$summary · ${notes.join(' · ')}';
+      if (!mounted) return;
+      setState(() => _gwSpectrumText = summary);
+    } on DeviceGatewayException catch (e) {
+      if (!mounted) return;
+      _toast(l10n.toastGatewaySpectrumFailed(e.message), error: true);
+    } finally {
+      if (mounted) setState(() => _gwBusy = false);
+    }
+  }
+
+  /// Hz → MHz 定点；缺失/非数字回 `—`，不拿 0 顶替。
+  static String _mhz(Object? raw, int digits) =>
+      raw is num ? (raw / 1000000).toStringAsFixed(digits) : '—';
 
   /// ISO UTC → `HH:mmZ`；解析不了就原样回显，不猜时区。
   static String _shortUtc(Object? raw) {
@@ -926,6 +990,10 @@ class _SettingsPageState extends State<SettingsPage> {
                     onPressed: _gwBusy ? null : _fetchPasses,
                     child: Text(l10n.settingsGatewayPasses),
                   ),
+                  OutlinedButton(
+                    onPressed: _gwBusy ? null : _fetchSpectrum,
+                    child: Text(l10n.settingsGatewaySpectrum),
+                  ),
                 ],
               ),
               if (_gwPanoramaText != null)
@@ -947,6 +1015,11 @@ class _SettingsPageState extends State<SettingsPage> {
                 Padding(
                   padding: const EdgeInsets.only(top: AppTokens.spacingS),
                   child: Text(_gwPassesText!, style: AppTokens.auxiliary),
+                ),
+              if (_gwSpectrumText != null)
+                Padding(
+                  padding: const EdgeInsets.only(top: AppTokens.spacingS),
+                  child: Text(_gwSpectrumText!, style: AppTokens.auxiliary),
                 ),
             ] else
               Text(

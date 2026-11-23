@@ -14,7 +14,7 @@
   **0 error / 0 warning / 65 info**。info 为 `deprecated_member_use`
   （Flutter 3.50 起 `package:flutter/material.dart` 提示改用 `material_ui`）与 2 条测试内
   `avoid_dynamic_calls`，不影响编译，未批量改。原始输出：`D:\mbdsdr\output\mobile_walk\flutter_analyze.log`。
-- `flutter test`（2026-11-23 复跑）：**604 passed / 0 failed**
+- `flutter test`（2026-11-24 复跑）：**608 passed / 0 failed**
   （11-22 的覆盖明细：天空投影对拍 84 点、反投影往返、四态裁剪、投影有效性域/跨域裁剪 4 条、
   指天视图 26 条、星名目录与中心识别 12 条、星表资产 4 条、asterism overlay 行为 11 条、
   首次成功端到端 5 条、小屏布局 + 标签避让 4 条；此后新增 M2 配对/名册、
@@ -25,9 +25,12 @@
   offset=0 跳过混频 1 条）→ 561（星名目录解析/中心识别文案 12 条 +
   指天页中心识别 4 条）→ 563（捕获→指向闭环 2 条）→ 567（小屏无溢出 +
   状态条不省略 1 条、标签避让 3 条）→ 601（多设备网关 M2/M3）→
-  604（指天页自动上报 3 条）。
-- `flutter build apk --debug`（2026-11-22 复跑）：**成功**；Gradle
-  `assembleDebug` 36.6 s，产物 `build/app/outputs/flutter-apk/app-debug.apk`
+  604（指天页自动上报 3 条）→ 608（手机只读 `/spectrum` 快照 2 条：
+  客户端 503 不伪造 + 设置页 503 不编摘要）。
+- `flutter build apk --debug`（2026-11-24 复跑）：**成功**（43.1 s）；
+  同日 `spatial` 的 `gradlew :app:assembleDebug --offline` 也是
+  **BUILD SUCCESSFUL**（20 s），三端打包层无遗漏。
+  历史：2026-11-22 出包 36.6 s，产物 `build/app/outputs/flutter-apk/app-debug.apk`
   （190,135,569 B；历史：190,120,531 B / 190,119,009 B / 190,118,996 B /
   190,116,539 B / 首次 190,110,524 B）；
   `flutter build apk --profile` 也可出包（`app-profile.apk` 74.8 MB）。

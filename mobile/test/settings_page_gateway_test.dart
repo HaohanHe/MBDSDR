@@ -85,10 +85,22 @@ class _FakeGateway {
         return const GatewayHttpResponse(200, _statusJson);
       case '/passes':
         return const GatewayHttpResponse(200, _passesJson);
+      case '/spectrum':
+        return const GatewayHttpResponse(200, _spectrumJson);
       default:
         return const GatewayHttpResponse(404, '{"reason":"not found"}');
     }
   }
+
+  static const String _spectrumJson =
+      '{"schema":"mbdsdr.spectrum-snapshot/1","authority":"desktop",'
+      '"readonly":true,"realtime":false,"source":"live",'
+      '"center_freq_hz":100000000.0,"sample_rate_hz":2400000.0,'
+      '"span_hz":2400000.0,"fft_size":2048,"bins":512,'
+      '"freq_start_hz":98800000.0,"freq_step_hz":4687.5,'
+      '"powers_db":[-90.0,-88.5,null],"finite_bins":2,'
+      '"peak_freq_hz":100125000.0,"peak_power_db":-20.5,'
+      '"noise_floor_db":-70.0,"age_s":0.4,"stale":false}';
 
   static const String _passesJson =
       '{"schema":"mbdsdr.sat-passes/1","count":2,"passes":['
@@ -216,6 +228,18 @@ void main() {
         <String>['/pair', '/panorama', '/roster', '/status', '/passes']);
     expect(
         find.text('过境（2 次）：NOAA 19 12:34Z 峰值 48°，ISS 13:02Z 峰值 23°'),
+        findsOneWidget);
+
+    // 读取频谱快照：单帧只读、非实时；功率是相对量，非有限 bin 如实标出。
+    await tester.tap(find.widgetWithText(OutlinedButton, '读取频谱快照'));
+    await tester.pumpAndSettle();
+    expect(fake.paths.map((Uri u) => u.path), <String>[
+      '/pair', '/panorama', '/roster', '/status', '/passes', '/spectrum'
+    ]);
+    expect(
+        find.text('频谱（只读·非实时）：中心 100.000 MHz · 采样 2.40 MHz · '
+            '512 bin · 峰值 100.125 MHz / -20.5 dB · 噪声底 -70.0 dB · '
+            '帧龄 0.4 s · 1 个 bin 非有限'),
         findsOneWidget);
 
     // 解除配对：token 清空，回到未配对态。
@@ -354,6 +378,40 @@ void main() {
     expect(
         find.text('站址 — · SDR rtl_tcp 127.0.0.1:1234 · 租约：头显 占用 · 缺项 station'),
         findsOneWidget);
+  });
+
+  testWidgets('频谱无帧 503：如实报原因，不编快照', (tester) async {
+    tester.view.physicalSize = const Size(420, 5200);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
+
+    final SettingsService settings =
+        SettingsService(kv: _MemKv(), secure: _MemSecure());
+    await settings.load();
+    settings.deviceGatewayToken = 'tok-1';
+    settings.deviceGatewayRole = 'handheld';
+
+    await tester.pumpWidget(_wrap(Scaffold(
+      body: SettingsPage(
+        settings: settings,
+        radio: RadioController(),
+        gatewayClientBuilder: (String host, int port) => DeviceGatewayClient(
+          host: host,
+          port: port,
+          transport: (Uri url, String method, Map<String, String> headers,
+              String? payload) async {
+            return const GatewayHttpResponse(503,
+                '{"error":"spectrum_unavailable","reason":"没有可读的频谱帧"}');
+          },
+        ),
+      ),
+    )));
+    await tester.pump();
+
+    await tester.tap(find.widgetWithText(OutlinedButton, '读取频谱快照'));
+    await tester.pumpAndSettle();
+    expect(find.text('读取频谱失败：没有可读的频谱帧'), findsOneWidget);
+    expect(find.textContaining('频谱（'), findsNothing);
   });
 
   testWidgets('角色切到目镜后，配对请求带 eyepiece', (tester) async {

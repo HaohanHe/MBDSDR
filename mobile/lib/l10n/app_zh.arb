@@ -43,7 +43,7 @@
   "settingsChPortHint": "默认 50732",
   "settingsChHelp": "仅只读拉取 /status、/pocsag_messages、/m17_calls、/vor_radial；解码在桌面引擎进行，移动端为查看器。",
   "settingsSectionDeviceGateway": "多设备网关（配对）",
-  "settingsGatewayHelp": "桌面「多设备网关」启动后，用配对码把本机绑定为某个角色。配对成功才可读名册与全景；本机不发调谐/录音/改站址指令。",
+  "settingsGatewayHelp": "桌面「多设备网关」启动后，用配对码把本机绑定为某个角色。配对成功才可读名册、全景、状态、过境与频谱快照；本机不发调谐/录音/改站址指令。",
   "settingsGatewayEndpoint": "桌面网关：{endpoint}（主机取自 ControlHub 分区）",
   "@settingsGatewayEndpoint": {
     "placeholders": {
@@ -117,6 +117,49 @@
       "name": {"type": "String"},
       "time": {"type": "String"},
       "alt": {"type": "String"}
+    }
+  },
+  "settingsGatewaySpectrum": "读取频谱快照",
+  "settingsGatewaySpectrumModeSnapshot": "只读·非实时",
+  "settingsGatewaySpectrumModeRealtime": "实时",
+  "settingsGatewaySpectrumSummary": "频谱（{mode}）：中心 {center} MHz · 采样 {rate} MHz · {bins} bin · 峰值 {peak} · 噪声底 {noise} dB · 帧龄 {age}",
+  "@settingsGatewaySpectrumSummary": {
+    "placeholders": {
+      "mode": {"type": "String"},
+      "center": {"type": "String"},
+      "rate": {"type": "String"},
+      "bins": {"type": "String"},
+      "peak": {"type": "String"},
+      "noise": {"type": "String"},
+      "age": {"type": "String"}
+    }
+  },
+  "settingsGatewaySpectrumPeak": "{freq} MHz / {power} dB",
+  "@settingsGatewaySpectrumPeak": {
+    "placeholders": {
+      "freq": {"type": "String"},
+      "power": {"type": "String"}
+    }
+  },
+  "settingsGatewaySpectrumNoPeak": "无有限 bin",
+  "settingsGatewaySpectrumAge": "{age} s",
+  "@settingsGatewaySpectrumAge": {
+    "placeholders": {
+      "age": {"type": "String"}
+    }
+  },
+  "settingsGatewaySpectrumAgeUnknown": "未知",
+  "settingsGatewaySpectrumStale": "帧超 5 s 未更新",
+  "settingsGatewaySpectrumNullBins": "{count} 个 bin 非有限",
+  "@settingsGatewaySpectrumNullBins": {
+    "placeholders": {
+      "count": {"type": "String"}
+    }
+  },
+  "toastGatewaySpectrumFailed": "读取频谱失败：{reason}",
+  "@toastGatewaySpectrumFailed": {
+    "placeholders": {
+      "reason": {"type": "String"}
     }
   },
   "settingsGatewayLeaseFree": "租约：空闲",
