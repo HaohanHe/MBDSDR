@@ -202,6 +202,19 @@ class _SettingsPageState extends State<SettingsPage> {
     _toast(l10n.toastCoordSaved);
   }
 
+  /// 输入即静默落盘：不按键盘「完成」、直接切走也不丢坐标。
+  ///
+  /// 空串/半截输入（如「-」「40.」）先不写，也不弹 toast；等用户输入完整
+  /// 数字后再落盘。清空仍走 [_saveCoordinate]（提交时空值 = 清除坐标）。
+  void _saveCoordinateSilent(
+      TextEditingController ctrl, void Function(double?) set) {
+    final String raw = ctrl.text.trim();
+    if (raw.isEmpty) return;
+    final double? v = double.tryParse(raw);
+    if (v == null) return;
+    set(v);
+  }
+
   // ------------------------------------------------------------ 自动定位
   Future<void> _locate() async {
     // 文案在异步间隙之前取定（use_build_context_synchronously 口径）。
@@ -593,6 +606,10 @@ class _SettingsPageState extends State<SettingsPage> {
               controller: _latCtrl,
               decoration: InputDecoration(labelText: l10n.settingsLatLabel),
               keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              // 失焦/返回键收起键盘不触发提交：输入即静默落盘兜底。
+              onChanged: (_) => _saveCoordinateSilent(
+                  _latCtrl, (double? v) => widget.settings.stationLat = v),
+              onTapOutside: (_) => FocusManager.instance.primaryFocus?.unfocus(),
               onEditingComplete: () => _saveCoordinate(_latCtrl, (double? v) => widget.settings.stationLat = v),
               onSubmitted: (_) => _saveCoordinate(_latCtrl, (double? v) => widget.settings.stationLat = v),
             ),
@@ -601,6 +618,9 @@ class _SettingsPageState extends State<SettingsPage> {
               controller: _lonCtrl,
               decoration: InputDecoration(labelText: l10n.settingsLonLabel),
               keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              onChanged: (_) => _saveCoordinateSilent(
+                  _lonCtrl, (double? v) => widget.settings.stationLon = v),
+              onTapOutside: (_) => FocusManager.instance.primaryFocus?.unfocus(),
               onEditingComplete: () => _saveCoordinate(_lonCtrl, (double? v) => widget.settings.stationLon = v),
               onSubmitted: (_) => _saveCoordinate(_lonCtrl, (double? v) => widget.settings.stationLon = v),
             ),
@@ -609,6 +629,9 @@ class _SettingsPageState extends State<SettingsPage> {
               controller: _altCtrl,
               decoration: InputDecoration(labelText: l10n.settingsAltLabel),
               keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              onChanged: (_) => _saveCoordinateSilent(
+                  _altCtrl, (double? v) => widget.settings.stationAlt = v),
+              onTapOutside: (_) => FocusManager.instance.primaryFocus?.unfocus(),
               onEditingComplete: () => _saveCoordinate(_altCtrl, (double? v) => widget.settings.stationAlt = v),
               onSubmitted: (_) => _saveCoordinate(_altCtrl, (double? v) => widget.settings.stationAlt = v),
             ),

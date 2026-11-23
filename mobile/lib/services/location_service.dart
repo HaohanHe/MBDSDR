@@ -6,6 +6,9 @@ import 'package:mbdsdr_mobile/models/satellite.dart';
 
 /// 定位服务状态。
 enum LocationStatus {
+  /// 正在取第一次定位（尚不知道服务/权限状态，不得说成「未开启」）。
+  locating,
+
   /// 系统定位服务关闭。
   disabled,
 
@@ -14,6 +17,9 @@ enum LocationStatus {
 
   /// 权限被永久拒绝（只能引导用户去系统设置）。
   deniedForever,
+
+  /// 服务与权限都正常，但这一次拿不到位置（超时/无可用 fix）。
+  unavailable,
 
   /// 可用。
   available,
@@ -52,8 +58,12 @@ class GeolocatorLocationService implements LocationService {
   StreamSubscription<Position>? _sub;
   final _controller = StreamController<Station>.broadcast();
 
-  LocationStatus _status = LocationStatus.disabled;
+  LocationStatus _status = LocationStatus.locating;
   Station? _station;
+
+  /// 单次取点超时。室内/模拟器可能长时间没有 fix；超时后回退到上次已知
+  /// 位置，两者都没有就如实报「暂时拿不到位置」，不把超时说成没权限。
+  static const Duration _fixTimeout = Duration(seconds: 20);
 
   @override
   LocationStatus get status => _status;
@@ -86,9 +96,22 @@ class GeolocatorLocationService implements LocationService {
     }
 
     try {
-      final pos = await Geolocator.getCurrentPosition(
-        locationSettings: LocationSettings(accuracy: desiredAccuracy),
-      );
+      Position? pos;
+      try {
+        pos = await Geolocator.getCurrentPosition(
+          locationSettings: LocationSettings(
+            accuracy: desiredAccuracy,
+            timeLimit: _fixTimeout,
+          ),
+        );
+      } on TimeoutException {
+        // 超时不算没权限：先试上次已知位置，再决定状态。
+        pos = await Geolocator.getLastKnownPosition();
+      }
+      if (pos == null) {
+        _status = LocationStatus.unavailable;
+        return _status;
+      }
       _station = _toStation(pos);
       _status = LocationStatus.available;
       _controller.add(_station!);
@@ -99,7 +122,7 @@ class GeolocatorLocationService implements LocationService {
         _controller.add(_station!);
       });
     } catch (_) {
-      _status = LocationStatus.denied;
+      _status = LocationStatus.unavailable;
     }
     return _status;
   }

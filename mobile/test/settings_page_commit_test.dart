@@ -118,4 +118,45 @@ void main() {
     await tester.pump();
     expect(settings.controlHubPort, 8081);
   });
+
+  testWidgets('本站经纬度：只输入不按「完成」也落盘（失焦/返回键不丢）',
+      (tester) async {
+    tester.view.physicalSize = const Size(400, 3600);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
+
+    final _MemKv kv = _MemKv();
+    final SettingsService settings =
+        SettingsService(kv: kv, secure: _MemSecure());
+    await settings.load();
+
+    await tester.pumpWidget(_wrap(Scaffold(
+      body: SettingsPage(settings: settings, radio: RadioController()),
+    )));
+    await tester.pump();
+
+    final Finder lat = find.ancestor(
+      of: find.text('纬度（度，-90 ~ 90）'),
+      matching: find.byType(TextField),
+    );
+    final Finder lon = find.ancestor(
+      of: find.text('经度（度，-180 ~ 180）'),
+      matching: find.byType(TextField),
+    );
+    expect(lat, findsOneWidget);
+    expect(lon, findsOneWidget);
+
+    // 模拟器实测现场：输入后按返回键收起键盘，未触发 onSubmitted。
+    await tester.enterText(lat, '40');
+    await tester.pump();
+    expect(settings.stationLat, 40);
+    await tester.enterText(lon, '-100');
+    await tester.pump();
+    expect(settings.stationLon, -100);
+
+    FocusManager.instance.primaryFocus?.unfocus();
+    await tester.pump();
+    expect(settings.stationLat, 40);
+    expect(settings.stationLon, -100);
+  });
 }

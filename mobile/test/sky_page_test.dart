@@ -69,6 +69,82 @@ class _FakeTleClient extends TleClient {
   DateTime? lastUpdated(TleGroup group) => DateTime.utc(2024);
 }
 
+/// 记录 resolve 次数：切 TLE 分组不应重复解析定位。
+class _CountingLocation implements LocationService {
+  int resolves = 0;
+
+  @override
+  LocationStatus get status => LocationStatus.available;
+  @override
+  Station? get station => const Station(lat: 31.25, lon: 121.5);
+  @override
+  Stream<Station> get stationStream => const Stream.empty();
+  @override
+  Future<LocationStatus> resolve() async {
+    resolves += 1;
+    return LocationStatus.available;
+  }
+
+  @override
+  Future<void> openSettings() async {}
+  @override
+  void dispose() {}
+}
+
+/// 首次定位永不返回：页面必须说「正在获取位置…」，不得谎称未开启。
+class _HangingLocation implements LocationService {
+  @override
+  LocationStatus get status => LocationStatus.locating;
+  @override
+  Station? get station => null;
+  @override
+  Stream<Station> get stationStream => const Stream.empty();
+  @override
+  Future<LocationStatus> resolve() => Completer<LocationStatus>().future;
+  @override
+  Future<void> openSettings() async {}
+  @override
+  void dispose() {}
+}
+
+/// 服务/权限正常但这次拿不到位置：应给「重试定位」而不是系统设置。
+class _UnavailableLocation implements LocationService {
+  int resolves = 0;
+
+  @override
+  LocationStatus get status => LocationStatus.unavailable;
+  @override
+  Station? get station => null;
+  @override
+  Stream<Station> get stationStream => const Stream.empty();
+  @override
+  Future<LocationStatus> resolve() async {
+    resolves += 1;
+    return LocationStatus.unavailable;
+  }
+
+  @override
+  Future<void> openSettings() async {}
+  @override
+  void dispose() {}
+}
+
+/// 只有 stations 组给 TLE；其余组为空（模拟空分组/无星历）。
+class _GroupedTleClient extends TleClient {
+  @override
+  Future<List<Tle>> fetch(TleGroup group) async {
+    if (group != TleGroup.stations) return const <Tle>[];
+    const l1 =
+        '1 25544U 98067A   26300.50000000  .00016717  00000-0  10270-3 0  0864';
+    const l2 =
+        '2 25544  51.6400 247.4627 0006703 130.5360 325.0288 15.72125391563537';
+    return <Tle>[Tle.fromLines(l1, l2)];
+  }
+
+  @override
+  DateTime? lastUpdated(TleGroup group) => DateTime.utc(2026, 10, 27);
+}
+
 /// NOAA 19（编目号 33591，命中真实下行目录）的 fake TLE；历元即测试时钟。
 class _NoaaTleClient extends TleClient {
   static const String l1 =
@@ -189,6 +265,37 @@ void main() {
     expect(find.text('开启定位'), findsOneWidget);
   });
 
+  testWidgets('首次定位未返回：说「正在获取位置…」，不谎称服务未开启',
+      (tester) async {
+    await tester.pumpWidget(_wrap(SkyPage(
+      locationService: _HangingLocation(),
+      orientationService: _UnavailableOrientation(),
+      tleClient: _FakeTleClient(),
+    )));
+    await tester.pump();
+    expect(find.text('正在获取位置…'), findsOneWidget);
+    expect(find.textContaining('定位服务未开启'), findsNothing);
+  });
+
+  testWidgets('服务开但拿不到位置：如实说明并给「重试定位」', (tester) async {
+    final loc = _UnavailableLocation();
+    await tester.pumpWidget(_wrap(SkyPage(
+      locationService: loc,
+      orientationService: _UnavailableOrientation(),
+      tleClient: _FakeTleClient(),
+    )));
+    await tester.pump();
+    await tester.pump(const Duration(seconds: 1));
+
+    expect(find.textContaining('定位服务已开启，但这一次拿不到位置'), findsOneWidget);
+    expect(find.text('重试定位'), findsOneWidget);
+    expect(find.text('开启定位'), findsNothing);
+
+    await tester.tap(find.text('重试定位'));
+    await tester.pump();
+    expect(loc.resolves, 2, reason: '重试要再次真正取点');
+  });
+
   testWidgets('手填站 + fake TLE：页面渲染过境列表', (tester) async {
     // 选中过境会展开引导卡；给足纵向空间避免矮视口下的既有布局溢出干扰。
     tester.view.physicalSize = const Size(800, 2400);
@@ -300,5 +407,29 @@ void main() {
         reason: '算不出当前 az/el 就绝不打开指天视图');
     expect(find.textContaining('未打开指天视图'), findsOneWidget);
     expect(find.textContaining('缺少该卫星 TLE'), findsOneWidget);
+  });
+
+  test('切换 TLE 分组：不重复解析定位，空分组清空上一组过境', () async {
+    final loc = _CountingLocation();
+    final controller = SkyController(
+      tleClient: _GroupedTleClient(),
+      locationService: loc,
+      orientationService: _UnavailableOrientation(),
+    );
+    addTearDown(controller.dispose);
+    controller.start();
+
+    await controller.refresh();
+    expect(loc.resolves, 1);
+    expect(controller.passes, isNotEmpty, reason: 'stations 组应有 ISS 过境');
+
+    controller.setGroup(TleGroup.noaa);
+    // setGroup 内部 refresh() 异步执行；让微任务跑完。
+    await Future<void>.delayed(Duration.zero);
+    await Future<void>.delayed(Duration.zero);
+
+    expect(loc.resolves, 1, reason: '已有站址时切分组不得再次解析定位');
+    expect(controller.passes, isEmpty,
+        reason: '空分组必须清空上一组过境，不能继续挂 stations 的 ISS');
   });
 }

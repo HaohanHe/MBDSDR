@@ -60,7 +60,7 @@ class SkyController extends ChangeNotifier {
 
   TleGroup _group = TleGroup.stations;
   Station? _station;
-  LocationStatus _locStatus = LocationStatus.disabled;
+  LocationStatus _locStatus = LocationStatus.locating;
   List<Tle> _tles = const [];
   List<SatVisibility> _visible = const [];
   List<Pass> _passes = const [];
@@ -337,7 +337,9 @@ class SkyController extends ChangeNotifier {
       if (manualStation != null) {
         _station = manualStation;
         _locStatus = LocationStatus.available;
-      } else {
+      } else if (_station == null) {
+        // 已有站址时不再每次解析定位：切换 TLE 分组只需要换星历。
+        // 位置更新由 _loc.stationStream 持续回灌（start() 已订阅）。
         _locStatus = await _loc.resolve();
         if (_locStatus != LocationStatus.available || _loc.station == null) {
           _refreshing = false;
@@ -369,7 +371,15 @@ class SkyController extends ChangeNotifier {
 
   void _recomputeGeometry() {
     final st = _station;
-    if (st == null || _tles.isEmpty) return;
+    if (st == null) return;
+    if (_tles.isEmpty) {
+      // 该分组没有可用 TLE：清空星点/过境/选中，绝不把上一组的列表
+      // 继续挂在新的分组名下（实机切到 noaa 时曾继续显示 stations 的 ISS）。
+      _visible = const [];
+      _passes = const [];
+      _selectedName = null;
+      return;
+    }
     final now = _clock().toUtc();
     _geometryTime = now;
     _visible = visibleAt(now, _tles, st);
@@ -573,9 +583,23 @@ class _SkyPageState extends State<SkyPage> {
   }
 
   Widget _buildBody() {
-    if (_c.locStatus != LocationStatus.available &&
-        widget.manualStation == null) {
-      return _LocationEmpty(status: _c.locStatus, onEnable: _c.openLocationSettings);
+    if (widget.manualStation == null) {
+      if (_c.locStatus == LocationStatus.locating) {
+        return const Center(
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            CircularProgressIndicator(),
+            SizedBox(height: AppTokens.spacingL),
+            Text('正在获取位置…', style: AppTokens.auxiliary),
+          ]),
+        );
+      }
+      if (_c.locStatus != LocationStatus.available) {
+        return _LocationEmpty(
+          status: _c.locStatus,
+          onEnable: _c.openLocationSettings,
+          onRetry: _c.refresh,
+        );
+      }
     }
     return _buildMain();
   }
@@ -1053,18 +1077,28 @@ class _ErrorBanner extends StatelessWidget {
 }
 
 class _LocationEmpty extends StatelessWidget {
-  const _LocationEmpty({required this.status, required this.onEnable});
+  const _LocationEmpty({
+    required this.status,
+    required this.onEnable,
+    required this.onRetry,
+  });
   final LocationStatus status;
   final VoidCallback onEnable;
+  final VoidCallback onRetry;
 
   @override
   Widget build(BuildContext context) {
     final msg = switch (status) {
+      LocationStatus.locating => '正在获取位置…',
       LocationStatus.disabled => '定位服务未开启。过境预测需要您的位置。',
       LocationStatus.denied => '定位权限被拒绝，无法计算可见过境。',
       LocationStatus.deniedForever => '定位权限被永久拒绝，请在系统设置中开启。',
+      LocationStatus.unavailable =>
+        '定位服务已开启，但这一次拿不到位置（可能室内或卫星信号不足）。',
       LocationStatus.available => '',
     };
+    // 「拿不到位置」不是权限问题，给「重试」而不是把用户丢进系统设置。
+    final bool retryable = status == LocationStatus.unavailable;
     return Center(
       child: Padding(
         padding: const EdgeInsets.all(AppTokens.spacingL),
@@ -1075,9 +1109,9 @@ class _LocationEmpty extends StatelessWidget {
           Text(msg, style: AppTokens.body, textAlign: TextAlign.center),
           const SizedBox(height: AppTokens.spacingL),
           FilledButton.icon(
-            onPressed: onEnable,
-            icon: const Icon(Icons.settings),
-            label: const Text('开启定位'),
+            onPressed: retryable ? onRetry : onEnable,
+            icon: Icon(retryable ? Icons.refresh : Icons.settings),
+            label: Text(retryable ? '重试定位' : '开启定位'),
           ),
         ]),
       ),
