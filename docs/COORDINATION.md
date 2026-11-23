@@ -2891,6 +2891,8 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `.trae/specs/mbdsdr-system-lifecycle/checklist.md` | 多机线/42（§273 Task 230） | 2026-11-23 23:34 | 本笔 |
 | `docs/PRD-现状对照.md` | 多机线/42（§273 P1-11 补头显授权客户端） | 2026-11-23 23:34 | 本笔 |
 | `docs/COORDINATION.md` | 多机线/42（§273 记录 + §6.1） | 2026-11-23 23:34 | 本笔 |
+| `.trae/specs/multi-device-interconnect/checklist.md` | 多机线/42（§274 真实 HTTP 联调项） | 2026-11-23 23:37 | 本笔 |
+| `docs/COORDINATION.md` | 多机线/42（§274 联调记录 + §6.1） | 2026-11-23 23:37 | 本笔 |
 
 > 上表各行均由 `claim` 台账推导：owner 原文与 `acquired_at` 直接取自台账，
 > 目的优先用台账里的 `claim_reason`，没有就如实写「未声明」，不补编。时间列只是
@@ -13265,6 +13267,28 @@ spec 的 M4.3 要求「未联网时显示上次结果/包内内容，不伪造�
 - 没有真实 rtl_tcp 连接与 I/Q 消费；「申请 SDR」只拿到授权与地址。
 - 未在 PICO 真机验证；租约不会自动续期（需用户再点「申请 SDR」）。
 - 没有后台轮询；状态要手动刷新。
+
+## 274. SDR 授权真实 HTTP 联调（2026-11-23）
+
+**依据**：§271–§273 全部走 `dispatch()` 单测；真实 socket/HTTP 头/Bearer
+解析尚未联调。真机 rtl_tcp（PID 28392，127.0.0.1:1234）仍被模拟器会话
+占用，不能碰 dongle，但可以在**不抢占**的前提下走一遍网关 HTTP 协议。
+
+**做了什么 / 结果**
+- 本机临时脚本（不落仓）：`DeviceGateway(port=0, rtl_tcp_provider=127.0.0.1:1234)`
+  启动真实监听，全部用 `urllib` 走 HTTP：
+  - `GET /health` → 200，`sdr_lease=True`；
+  - `POST /pair`（headset）→ 200，拿到 device_id；
+  - `POST /sdr/lease` → 200，`exclusive=true`，`rtl_tcp={127.0.0.1,1234}`；
+  - `GET /sdr/lease` → 200，`active=true` 且持有者是本机；
+  - 第二台 headset `POST /sdr/lease` → **409 sdr_leased**；
+  - 第二台 `POST /sdr/release` → **403 not_holder**；
+  - 持有者 `POST /sdr/release` → 200，`released=true`。
+- 全程未连接、未调谐、未占用 RTL2832U；rtl_tcp 与模拟器会话保持原状。
+
+**诚实边界**
+- 只验证授权协议在真实 HTTP 上成立；头显端 rtl_tcp I/Q 链路仍未实现。
+- P0-06 调谐语义真机回归仍因 dongle 被占用而未跑（不抢占用户会话）。
 
 
 
