@@ -475,6 +475,57 @@ def _night_observation_time(lat_deg: float, lon_deg: float, local_time=None):
     return None
 
 
+def _stargazing_chip_text(payload) -> "tuple[str, str]":
+    """观星指数按钮 (文案, tooltip)；纯函数，不联网，便于单测。
+
+    payload 由 ``_TonightIndexWorker`` 给出：
+      ``{"ok": True, "index": stargazing_index(...), "note": 取数来源,
+         "station": {"lat","lon"}, "taken_at": 快照时刻, "snapshot_path": path}``
+      或 ``{"ok": False, "reason": "..."}``。
+
+    口径：**没分就说没分**——不把缺测渲染成「尚可」，也不拿别站云量顶替。
+    """
+    if not payload:
+        return ("观星指数 —",
+                "点一下取本机当前站址的云量与月光，算综合观星指数。")
+    if not payload.get("ok"):
+        reason = str(payload.get("reason") or "取数失败")
+        return ("观星指数 未知", f"未给指数：{reason}")
+    index = payload.get("index") or {}
+    note = str(payload.get("note") or "")
+    taken = str(payload.get("taken_at") or "")
+    station = payload.get("station") or {}
+    site_txt = ""
+    try:
+        site_txt = f"{float(station.get('lat')):.2f}, {float(station.get('lon')):.2f}"
+    except (TypeError, ValueError):
+        site_txt = ""
+    footer = []
+    if note:
+        footer.append(f"取数：{note}")
+    if taken:
+        footer.append(f"快照 {taken}")
+    if site_txt:
+        footer.append(f"站址 {site_txt}")
+    footer.append("经验权重（云量为主、月光最多扣 35%），非权威评分，"
+                  "只代表采样时刻；点一下重新取数。")
+    if not index.get("known"):
+        reason = str(index.get("reason") or "缺少云量实况")
+        text = f"观星指数 未知\n原因：{reason}"
+        if footer:
+            text += "\n" + " · ".join(footer)
+        return ("观星指数 未知", text)
+    score = index.get("score")
+    level = str(index.get("level_zh") or "未知")
+    detail = str(index.get("text") or "")
+    text = f"观星指数 {score:g}/100（{level}）"
+    if detail:
+        text += f"\n{detail}"
+    if footer:
+        text += "\n" + " · ".join(footer)
+    return (f"观星指数 {score:g}/100 {level}", text)
+
+
 def format_tx_doppler(note, *, failed_reason=None, replay: bool = False) -> str:
     """把 resolve_tx_doppler 的 note 渲染成发射频点读数（纯展示，零 Δ 计算）。
 
@@ -751,6 +802,93 @@ try:
     from mbdsdr_ai.squelch import DEFAULT_SQUELCH_DBFS
 except Exception:  # pragma: no cover
     DEFAULT_SQUELCH_DBFS = None  # type: ignore
+
+
+class _TonightIndexWorker(QThread):
+    """后台算「今夜观星指数」：取云量快照 + 本地历表月光，不阻塞 UI。
+
+    诚实口径（与 ``mbdsdr_ai/astronomy/tonight.py`` 一致）：
+
+    * 快照里的站址必须与本次站址匹配（``snapshot_station_matches``），
+      别站的云量不拿来判你头顶的天；
+    * 无云量 → ``stargazing_index`` 自会返回 ``known=False``，不按晴天假设；
+    * 离线且无匹配快照 → 不现采，交给判定层说「未联网，不猜」。
+
+    网络只在工作线程里碰；主线程只收 dict。
+    """
+
+    finished_payload = Signal(dict)
+
+    def __init__(self, lat: float, lon: float, parent=None):
+        super().__init__(parent)
+        self._lat = float(lat)
+        self._lon = float(lon)
+
+    def run(self):
+        try:
+            from datetime import datetime, timezone
+
+            from mbdsdr_ai import space_weather as sw
+            from mbdsdr_ai.astronomy import tonight as tn
+
+            snap = None
+            path = ""
+            note = ""
+            cached = sw.latest_snapshot(max_age_h=0.25)
+            if cached is not None and sw.snapshot_station_matches(
+                    cached[0], self._lat, self._lon):
+                snap, path = cached
+                note = "新鲜快照（15 分钟内，站址匹配）"
+            elif os.environ.get(sw.OFFLINE_ENV) == "1":
+                note = "没有与本站址匹配的新鲜快照，且已禁用联网采集"
+            else:
+                stale = cached is not None
+                snap = sw.collect_snapshot(lat=self._lat, lon=self._lon)
+                note = "现采" if not stale else "现采（旧快照站址不符，未采用）"
+                try:
+                    path = sw.save_snapshot(snap)
+                except Exception:
+                    path = ""
+            moon = _moon_sample_at(self._lat, self._lon)
+            report = tn.assess_tonight(
+                snap, self._lat, self._lon, moon=moon,
+                at=datetime.now(timezone.utc))
+            self.finished_payload.emit({
+                "ok": True,
+                "index": report.get("index") or {},
+                "note": note,
+                "station": {"lat": self._lat, "lon": self._lon},
+                "taken_at": (snap or {}).get("taken_at", ""),
+                "snapshot_path": path,
+            })
+        except Exception as e:  # noqa: BLE001 - 失败必须可见，不许静默
+            self.finished_payload.emit(
+                {"ok": False, "reason": f"{type(e).__name__}: {e}"})
+
+
+def _moon_sample_at(lat: float, lon: float):
+    """本地历表算单时刻月球照亮比例/高度；算不出返回 None（不猜）。
+
+    与 ``sky_tools`` 的月光采样同口径，但不联网下载历表。
+    """
+    try:
+        from datetime import datetime, timezone
+
+        from mbdsdr_ai.solar_system import GroundStation as _Station
+        from mbdsdr_ai.solar_system import get_moon_position
+
+        when = datetime.now(timezone.utc)
+        pos = get_moon_position(when, _Station(float(lat), float(lon), 0.0))
+        if pos is None or pos.illumination is None:
+            return None
+        return {
+            "illumination": float(pos.illumination),
+            "alt_deg": float(pos.alt_deg),
+            "at": when.strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "source": f"local_ephemeris:{pos.backend}",
+        }
+    except Exception:
+        return None
 
 
 class _SweepWorker(QThread):
@@ -3085,6 +3223,21 @@ class MainWindow(QMainWindow):
         self._planetarium_tonight_btn.setStyleSheet(_act_css)
         self._planetarium_tonight_btn.clicked.connect(self._jump_to_tonight)
         strip_lay.addWidget(self._planetarium_tonight_btn, 0, Qt.AlignHCenter)
+        # 「观星指数」：把 P1 的「今夜能不能看」抬到画面上，而不是只藏在
+        # AI 工具输出里。点一下按当前站址取云量 + 本地月光算一次；缺测就说
+        # 缺测，不按晴天假设，也不拿别站云量顶替。
+        self._planetarium_index_btn = QPushButton("观星指数 —", strip)
+        self._planetarium_index_btn.setObjectName("planetariumStargazingIndex")
+        self._planetarium_index_btn.setMinimumHeight(30)
+        self._planetarium_index_btn.setStyleSheet(_act_css)
+        self._planetarium_index_btn.setToolTip(
+            "点一下取本机当前站址的云量与月光，算综合观星指数。")
+        self._planetarium_index_btn.clicked.connect(
+            self._refresh_stargazing_index)
+        strip_lay.addWidget(self._planetarium_index_btn, 0, Qt.AlignHCenter)
+        #: 最近一次指数结果（测试与状态栏复用）与后台线程句柄。
+        self._stargazing_last = None
+        self._stargazing_worker = None
         # 时间流速（原型第 9 颗 ⏱）：1× → 60× → 600× → 停 → 1×。
         # 直接驱动 new_spacetime 时间引擎，天空按同一份 JD 走；不是另起动画。
         self._planetarium_time_btn = QPushButton("时间流速", strip)
@@ -3430,6 +3583,72 @@ class MainWindow(QMainWindow):
                 "非实时、非观测数据）· 时间→回到现在", MSG_NORMAL)
         except Exception:
             pass
+
+    # ------------------------------------------------------------------
+    # 观星指数（P1）：云量 + 月光 → 0..100，缺测不给分
+    # ------------------------------------------------------------------
+    def _current_observer_latlon(self):
+        """当前站址（唯一事实源：sky_view 的 get_observer）；未设置返回 (None, None)。"""
+        try:
+            obs = self.sky_view.get_observer()
+        except Exception:
+            obs = None
+        if not obs:
+            return None, None
+        lat, lon = obs.get("lat"), obs.get("lon")
+        if lat is None or lon is None:
+            return None, None
+        return float(lat), float(lon)
+
+    def _apply_stargazing_chip(self, payload) -> None:
+        """把 payload 渲染进按钮（纯展示，不联网）。"""
+        btn = getattr(self, "_planetarium_index_btn", None)
+        if btn is None:
+            return
+        text, tip = _stargazing_chip_text(payload)
+        btn.setText(text)
+        btn.setToolTip(tip)
+
+    def _invalidate_stargazing_index(self) -> None:
+        """站址变了：旧指数不再代表你头顶的天，立刻作废。"""
+        if getattr(self, "_planetarium_index_btn", None) is None:
+            return
+        self._stargazing_last = None
+        btn = self._planetarium_index_btn
+        btn.setEnabled(True)
+        btn.setText("观星指数 —")
+        btn.setToolTip("站址已改变：点一下按新站址重新取云量与月光。")
+
+    def _refresh_stargazing_index(self) -> None:
+        """按当前站址后台取数算指数；未设站址时不给分（不猜别处天气）。"""
+        btn = getattr(self, "_planetarium_index_btn", None)
+        if btn is None:
+            return
+        worker = getattr(self, "_stargazing_worker", None)
+        if worker is not None and worker.isRunning():
+            return
+        lat, lon = self._current_observer_latlon()
+        if lat is None or lon is None:
+            payload = {"ok": False, "reason": "未设置站址，不按别处云量给分"}
+            self._stargazing_last = payload
+            self._apply_stargazing_chip(payload)
+            return
+        btn.setEnabled(False)
+        btn.setText("观星指数 取数中…")
+        btn.setToolTip("正在按当前站址取云量与月光（网络只在这时用）。")
+        worker = _TonightIndexWorker(lat, lon, self)
+        worker.finished_payload.connect(self._on_stargazing_payload)
+        worker.finished.connect(worker.deleteLater)
+        self._stargazing_worker = worker
+        worker.start()
+
+    def _on_stargazing_payload(self, payload) -> None:
+        self._stargazing_worker = None
+        self._stargazing_last = payload
+        btn = getattr(self, "_planetarium_index_btn", None)
+        if btn is not None:
+            btn.setEnabled(True)
+        self._apply_stargazing_chip(payload)
 
     def _cycle_time_rate(self) -> None:
         """时间流速循环：1× → 60× → 600× → 停 → 1×（原型同一套档位）。"""
@@ -14833,6 +15052,8 @@ class MainWindow(QMainWindow):
         if _site != getattr(self, "_sat_passes_site", None):
             self._sat_passes_site = _site
             self.sat_track_panel.invalidate_passes()
+            # 站址变了，旧的观星指数就代表别人头顶的天：立刻作废重取。
+            self._invalidate_stargazing_index()
         if lat is None or lon is None:
             # 未设置观测站位置（GNSS 未连接或未手动配置）
             if self.sat_tracker is not None:

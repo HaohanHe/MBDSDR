@@ -819,6 +819,120 @@ def test_legacy_zero_arg_night_resolver_button_remains_supported(qapp):
         dlg.close()
 
 
+# ---------------------------------------------------------------------- #
+# 观星指数：把「今夜能不能看」抬到星象仪，缺测不给分
+# ---------------------------------------------------------------------- #
+def test_stargazing_chip_text_honesty():
+    from main_window import _stargazing_chip_text
+
+    text, tip = _stargazing_chip_text({
+        "ok": True,
+        "index": {"known": False,
+                  "reason": "缺少云量实况，不给观星指数（不按晴天假设）"},
+        "note": "现采", "station": {"lat": 39.9, "lon": 116.4},
+    })
+    assert text == "观星指数 未知"
+    assert "不按晴天假设" in tip
+    assert "现采" in tip
+
+
+def test_stargazing_chip_text_score_and_disclaimer():
+    from main_window import _stargazing_chip_text
+
+    text, tip = _stargazing_chip_text({
+        "ok": True,
+        "index": {"known": True, "score": 78.0, "level_zh": "良好",
+                  "text": "云量 22%；月光 照亮 45% / 高度 30°"},
+        "note": "新鲜快照（15 分钟内，站址匹配）",
+        "taken_at": "2026-11-23T12:00:00Z",
+        "station": {"lat": 39.9, "lon": 116.4},
+    })
+    assert text == "观星指数 78/100 良好"
+    assert "云量 22%" in tip
+    assert "经验权重" in tip
+    assert "非权威评分" in tip
+
+
+def test_stargazing_chip_unknown_without_station(win):
+    """未设置站址：不给分、不联网、不拿别处天气顶替。"""
+    win.set_observer_site(None, None, persist=False)
+    win._refresh_stargazing_index()
+    assert win._planetarium_index_btn.text() == "观星指数 未知"
+    assert "未设置站址" in win._planetarium_index_btn.toolTip()
+
+
+def test_stargazing_index_invalidated_on_site_change(win):
+    win._stargazing_last = {"ok": True,
+                            "index": {"known": True, "score": 90.0,
+                                      "level_zh": "极佳"}}
+    win._planetarium_index_btn.setText("观星指数 90/100 极佳")
+    win.set_observer_site(12.5, 45.5, persist=False)
+    assert win._stargazing_last is None
+    assert win._planetarium_index_btn.text() == "观星指数 —"
+
+
+def _weather_snap(lat, lon, cloud=25.0):
+    return {
+        "schema": 1,
+        "taken_at": "2026-11-23T12:00:00Z",
+        "station": {"lat": lat, "lon": lon},
+        "samples": {
+            "weather": {"value": 0.0, "error": "", "observed_at": "t",
+                        "source": "test", "url": "u",
+                        "measurements": {"cloud_cover_pct": cloud}},
+            "kp": {"value": 1.0, "error": "", "observed_at": "t"},
+        },
+    }
+
+
+def test_tonight_index_worker_uses_matching_snapshot(qapp, monkeypatch):
+    """站址匹配的快照直接用，绝不联网；同步跑 run() 避免线程时序。"""
+    from mbdsdr_ai import space_weather as sw
+    from main_window import _TonightIndexWorker
+
+    monkeypatch.setattr(sw, "latest_snapshot",
+                        lambda **kw: (_weather_snap(45.0, 120.0), "s.json"))
+
+    def _no_network(**kw):
+        raise AssertionError("站址匹配的快照却去联网了")
+
+    monkeypatch.setattr(sw, "collect_snapshot", _no_network)
+    got = []
+    worker = _TonightIndexWorker(45.0, 120.0)
+    worker.finished_payload.connect(got.append)
+    worker.run()
+    assert got and got[0]["ok"] is True
+    assert got[0]["index"]["known"] is True
+    assert got[0]["note"].startswith("新鲜快照")
+
+
+def test_tonight_index_worker_refetches_when_snapshot_is_foreign(qapp, monkeypatch):
+    """别站快照不采用：按本站址现采，并在 note 里说清为什么重取。"""
+    from mbdsdr_ai import space_weather as sw
+    from main_window import _TonightIndexWorker
+
+    monkeypatch.setattr(sw, "latest_snapshot",
+                        lambda **kw: (_weather_snap(39.9, 116.4, cloud=95.0),
+                                      "s.json"))
+    seen = {}
+
+    def _collect(**kw):
+        seen.update(kw)
+        return _weather_snap(kw.get("lat"), kw.get("lon"), cloud=10.0)
+
+    monkeypatch.setattr(sw, "collect_snapshot", _collect)
+    monkeypatch.setattr(sw, "save_snapshot", lambda snap, **kw: "fresh.json")
+    got = []
+    worker = _TonightIndexWorker(45.0, 120.0)
+    worker.finished_payload.connect(got.append)
+    worker.run()
+    assert seen.get("lat") == 45.0 and seen.get("lon") == 120.0
+    assert got and got[0]["ok"] is True
+    assert "站址不符" in got[0]["note"]
+    # 用的是现采的 10% 云量，不是快照里的 95%
+    assert got[0]["index"]["cloud_score"] == 90.0
+
+
 def test_time_panel_keeps_local_time_degradation_note(qapp, monkeypatch):
     from PySide6.QtWidgets import QLabel
     import time_machine

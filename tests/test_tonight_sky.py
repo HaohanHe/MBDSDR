@@ -388,6 +388,40 @@ class TestStargazingIndex:
         assert "未判断" in text or "不判断" in text
 
 
+class TestSnapshotStationMatch:
+    """跨站点复用快照必须先验站址：云的「真」不能变成别人的「真」。"""
+
+    @staticmethod
+    def _snap(lat, lon):
+        return {"schema": 1, "station": {"lat": lat, "lon": lon}}
+
+    def test_same_site_matches(self):
+        from mbdsdr_ai import space_weather as sw
+        assert sw.snapshot_station_matches(self._snap(39.9, 116.4), 39.9, 116.4)
+
+    def test_nearby_site_within_half_degree(self):
+        from mbdsdr_ai import space_weather as sw
+        assert sw.snapshot_station_matches(self._snap(39.9, 116.4), 40.2, 116.6)
+
+    def test_far_site_is_rejected(self):
+        from mbdsdr_ai import space_weather as sw
+        assert not sw.snapshot_station_matches(self._snap(39.9, 116.4), 53.5, 122.5)
+
+    def test_missing_station_is_not_guessed(self):
+        from mbdsdr_ai import space_weather as sw
+        assert not sw.snapshot_station_matches({}, 39.9, 116.4)
+        assert not sw.snapshot_station_matches(None, 39.9, 116.4)
+
+    def test_longitude_wraps_at_antimeridian(self):
+        from mbdsdr_ai import space_weather as sw
+        assert sw.snapshot_station_matches(self._snap(0.0, 179.9), 0.0, -179.9)
+
+    def test_high_latitude_longitude_is_weighted(self):
+        """高纬处 1° 经度对应的地面距离小得多，不能按等距判成两个站。"""
+        from mbdsdr_ai import space_weather as sw
+        assert sw.snapshot_station_matches(self._snap(80.0, 0.0), 80.0, 1.5)
+
+
 class TestSpaceWeatherWiring:
     def test_weather_collection_asks_for_cloud_cover(self):
         """采集 URL 必须带 cloud_cover，并把结果落进 measurements。

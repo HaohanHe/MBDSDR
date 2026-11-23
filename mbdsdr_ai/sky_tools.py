@@ -926,16 +926,25 @@ def register_sky_tools(agent) -> None:
 
         allow_live = bool(args.get("allow_live", True))
         cached = _sw.latest_snapshot(max_age_h=0.25)
+        stale_site = ""
+        if cached is not None and not _sw.snapshot_station_matches(
+                cached[0], lat, lon):
+            # 云量是站点量：别站的快照不能拿来判当前站址的天空。
+            st = (cached[0].get("station") or {})
+            stale_site = (f"站址不符（快照 {st.get('lat')}, {st.get('lon')}）")
+            cached = None
         if cached is not None:
             snap, path = cached
-            source_note = f"新鲜快照（15 分钟内）：{path}"
+            source_note = f"新鲜快照（15 分钟内，站址匹配）：{path}"
         elif allow_live:
             # 不落盘：工具调用不应留下用户没要求的文件。
             snap = _sw.collect_snapshot(lat=lat, lon=lon)
-            source_note = "现采（未落盘）"
+            source_note = ("现采（未落盘）" if not stale_site else
+                           f"现采（未落盘）；{stale_site}，不拿别站云量顶替")
         else:
             snap = None
-            source_note = "没有新鲜快照，且 allow_live=false"
+            source_note = ("没有新鲜快照，且 allow_live=false" if not stale_site
+                           else f"{stale_site}且 allow_live=false，不拿别站云量顶替")
 
         report = _tn.assess_tonight(snap, lat, lon,
                                     moon=_moon_sample(float(lat), float(lon)),

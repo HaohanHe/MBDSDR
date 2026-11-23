@@ -20,6 +20,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 import urllib.error
 import urllib.request
@@ -38,6 +39,7 @@ __all__ = [
     "save_snapshot",
     "load_snapshot",
     "latest_snapshot",
+    "snapshot_station_matches",
     "snapshot_for_diagnosis",
     "assess",
     "format_propagation_section",
@@ -333,6 +335,35 @@ def latest_snapshot(save_dir: Optional[str] = None,
         return load_snapshot(path), path
     except Exception:
         return None
+
+
+def snapshot_station_matches(snapshot: Optional[Dict[str, Any]],
+                             lat: Optional[float],
+                             lon: Optional[float],
+                             tolerance_deg: float = 0.5) -> bool:
+    """快照里的站址是否就是本次要判的站址（默认 0.5°，约 55 km）。
+
+    云量与气温都是**站点量**：拿 A 站的快照去判 B 站的天空，数字是真的，
+    结论是假的。所以跨站点复用快照必须显式检查。
+
+    快照缺 ``station`` / 坐标或数值非法 → 一律 ``False``（不猜）。
+    经度差按 360° 回绕，并按纬度余弦折算成地面角距，避免高纬处把
+    「同一片天」判成两个站。
+    """
+    station = (snapshot or {}).get("station") or {}
+    try:
+        s_lat = float(station.get("lat"))
+        s_lon = float(station.get("lon"))
+        t_lat = float(lat)
+        t_lon = float(lon)
+    except (TypeError, ValueError):
+        return False
+    if not all(math.isfinite(v) for v in (s_lat, s_lon, t_lat, t_lon)):
+        return False
+    dlat = s_lat - t_lat
+    dlon = ((s_lon - t_lon + 180.0) % 360.0) - 180.0
+    separation = math.hypot(dlat, dlon * math.cos(math.radians(t_lat)))
+    return separation <= float(tolerance_deg)
 
 
 def snapshot_for_diagnosis(max_age_min: float = 15.0,

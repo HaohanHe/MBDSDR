@@ -429,11 +429,11 @@ class TestTonight:
     """`sky_tonight`：云量 + 极光粗判，缺测不猜。"""
 
     @staticmethod
-    def _snap(cloud=10.0, kp=2.0):
+    def _snap(cloud=10.0, kp=2.0, lat=45.0, lon=120.0):
         return {
             "schema": 1,
             "taken_at": "2026-11-17T12:00:00Z",
-            "station": {"lat": 45.0, "lon": 120.0},
+            "station": {"lat": lat, "lon": lon},
             "samples": {
                 "weather": {
                     "value": 0.0, "error": "", "observed_at": "t",
@@ -494,11 +494,30 @@ class TestTonight:
         from mbdsdr_ai import space_weather as sw
 
         monkeypatch.setattr(sw, "latest_snapshot",
-                            lambda **kw: (self._snap(cloud=0.0, kp=2.0), "s.json"))
+                            lambda **kw: (self._snap(cloud=0.0, kp=2.0,
+                                                     lat=69.6, lon=18.9), "s.json"))
         d = _call(agent, "sky_tonight", {
             "lat_deg": 69.6, "lon_deg": 18.9, "allow_live": False})
         assert d["site"]["note"] == "由调用参数给出"
         assert d["aurora"]["chance"] == "likely"
+
+    def test_foreign_station_snapshot_is_not_reused(self, agent, monkeypatch):
+        """别站的快照不能拿来判当前站址的云量（云是站点量）。"""
+        from mbdsdr_ai import space_weather as sw
+
+        monkeypatch.setattr(sw, "latest_snapshot",
+                            lambda **kw: (self._snap(cloud=0.0, kp=2.0), "s.json"))
+
+        def _no_network(**kw):
+            raise AssertionError("allow_live=false 却去联网了")
+
+        monkeypatch.setattr(sw, "collect_snapshot", _no_network)
+        d = _call(agent, "sky_tonight", {
+            "lat_deg": 69.6, "lon_deg": 18.9, "allow_live": False})
+        assert d["known"] is False
+        assert "不猜" in d["verdict"]
+        assert "站址不符" in d["source_note"]
+        assert "不拿别站云量顶替" in d["source_note"]
 
     def test_moon_sample_uses_site_and_local_ephemeris(self, agent, monkeypatch):
         """月光采样必须用本次站址，且来源标明本地历表（不是在线预报）。"""
