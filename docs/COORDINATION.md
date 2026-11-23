@@ -2676,6 +2676,12 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `docs/PRD-现状对照.md` | 观星指数线/41（§252 第 209 行改「星象仪已接线」） | 2026-11-23 21:10 | 本笔 |
 | `docs/COORDINATION.md` | 观星指数线/41（§252 记录 + §6.1 登记） | 2026-11-23 21:10 | 本笔 |
 | `desktop/README.md` | 观星指数线/41（§252 星象仪观星指数用法与口径） | 2026-11-23 21:10 | 本笔 |
+| `desktop/recording_observation.py` | 观星指数线/41（§253 M5 find_incomplete_recordings：只读扫描） | 2026-11-23 21:25 | 本笔 |
+| `tests/test_desktop_incomplete_recordings.py` | 观星指数线/41（§253 M5 扫描 10 条用例） | 2026-11-23 21:25 | 本笔 |
+| `desktop/main_window.py` | 观星指数线/41（§253 未完成录音按钮 + 启动扫描） | 2026-11-23 21:25 | 本笔 |
+| `desktop/README.md` | 观星指数线/41（§253 未完成录音提示说明） | 2026-11-23 21:25 | 本笔 |
+| `docs/PRD-现状对照.md` | 观星指数线/41（§253 M5 行改「修复在位」+ P0-07 缺口收窄） | 2026-11-23 21:25 | 本笔 |
+| `docs/COORDINATION.md` | 观星指数线/41（§253 记录 + §6.1 登记） | 2026-11-23 21:25 | 本笔 |
 
 > 上表各行均由 `claim` 台账推导：owner 原文与 `acquired_at` 直接取自台账，
 > 目的优先用台账里的 `claim_reason`，没有就如实写「未声明」，不补编。时间列只是
@@ -12327,4 +12333,38 @@ PRD §8 冲刺序列 P1「天文通式观星指数」。本轮只做**有可信�
   tooltip「云量 0%；月光 照亮 98% / 高度 60°」，`note=现采`，
   快照 `2026-11-23T13:06:01Z`；后台线程与 UI 回贴链路成立。
 - 未验：真机长期挂机下的网络失败重试节奏、手机/头显端指数显示。
+
+## 253. M5 收口：崩溃残留启动扫描 + 工具栏提示（2026-11-23）
+
+**依据**：`PRD-现状对照.md` §2 第 20 行（M5 仍待修）与 P0-07 半有缺口。
+
+**做了什么**
+- `desktop/recording_observation.py` 新增 `find_incomplete_recordings(directory)`：
+  只扫**当前目录**（不递归、不跟随符号链接），两类线索——
+  `*.json` sidecar 里显式 `complete: false`（带 `aborted_reason`）、
+  `*.part/*.partial/*.tmp` 残片；坏 JSON 不算线索（可能是别的配置）。
+  **只读**：不改、不删、不移动任何文件；`size_bytes` 报数据文件大小。
+- `desktop/main_window.py`：
+  - 工具栏「回放」右侧新增默认隐藏的「未完成录音」按钮；`showEvent` 首次显示后
+    延迟 1.5 s 扫一次（不阻塞首帧、不联网），有线索才点亮 + 状态栏提示。
+  - 点击弹只读详情（最多 10 条 + 其余计数），按钮「打开录音目录」调
+    `QDesktopServices.openUrl`；正文明确「不自动删除/修改；中止的录音仍可回放」。
+  - 扫描失败/目录不可读 → 保持隐藏，不把「扫不到」说成「没有残留」。
+
+**诚实口径**
+- 不提供应用内删除按钮：删除是不可逆动作，交给用户在文件管理器里确认。
+- 「可恢复」= 半成品仍可回放（回放前的 `replay_source_notice` 会提示
+  `complete=false` 与中止原因），不是声称能补全缺失样本。
+
+**验证**
+- `pytest tests/test_desktop_incomplete_recordings.py` → **10 passed**
+  （中止/完整/坏 JSON/残片/数据缺失/不改文件/目录不存在/max_entries + 两个 UI 桩）。
+- `pytest tests/test_ui_gap_fill.py` → **51 passed**（无回归）。
+- 离屏真跑 `MainWindow` 探针（临时目录，1 个中止 sidecar + 1 个 `.part`）：
+  按钮由隐藏变 `未完成录音 2`，状态栏
+  「发现 2 个未完成录音（未自动删除）：点工具栏「未完成录音」查看」，
+  findings 为 `residual/leftover.part` 与 `aborted/probe.iq`（原因原样）。
+- 未验：真实崩溃后残留的真实目录（本轮用临时目录模拟）、Windows 下
+  「打开目录」在未安装默认文件管理器时的行为。
+
 

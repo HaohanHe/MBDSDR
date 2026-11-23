@@ -670,11 +670,11 @@ import numpy as np
 
 from PySide6.QtCore import (
     QEvent, Qt, QTimer, Slot, QDateTime, QTimeZone, QThread, Signal, QSettings,
-    QRect, QPoint, QRectF, QEventLoop, QObject,
+    QRect, QPoint, QRectF, QEventLoop, QObject, QUrl,
 )
 from PySide6.QtGui import (
     QAction, QActionGroup, QKeySequence, QFont, QShortcut, QGuiApplication,
-    QColor, QPainter,
+    QColor, QPainter, QDesktopServices,
 )
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QSplitter,
@@ -2132,6 +2132,18 @@ class MainWindow(QMainWindow):
         self.replay_btn.setToolTip("选择已录制的 .iq 文件进行离线回放")
         self.replay_btn.clicked.connect(self._replay_recording)
         toolbar.addWidget(self.replay_btn)
+
+        # M5：未完成录音提示。默认隐藏，启动扫描发现 sidecar complete=false
+        # 或 *.part/*.tmp 残片才亮起；点击只看详情，不自动删、不改任何文件。
+        self.incomplete_rec_btn = QPushButton("未完成录音")
+        self.incomplete_rec_btn.setObjectName("incompleteRecordings")
+        self.incomplete_rec_btn.setMinimumHeight(28)
+        self.incomplete_rec_btn.setToolTip(
+            "启动扫描发现未完成的录音时亮起；点击查看（不自动删除）")
+        self.incomplete_rec_btn.setVisible(False)
+        self.incomplete_rec_btn.clicked.connect(self._show_incomplete_recordings)
+        toolbar.addWidget(self.incomplete_rec_btn)
+        self._incomplete_findings: list[dict] = []
 
     def _setup_tab_order(self) -> None:
         """把主界面焦点链串成视觉顺序：工具栏 → 顶栏 → 左栏 → 右栏 → 底坞。
@@ -6523,6 +6535,10 @@ class MainWindow(QMainWindow):
         if not getattr(self, "_fit_on_show_done", False):
             self._fit_on_show_done = True
             QTimer.singleShot(0, self._fit_window_to_screen)
+        # M5：启动后延迟扫一次录音目录（不阻塞首帧、不联网、不改文件）。
+        if not getattr(self, "_incomplete_scan_scheduled", False):
+            self._incomplete_scan_scheduled = True
+            QTimer.singleShot(1500, self._scan_incomplete_recordings)
         # 启动恢复成星象仪：主窗口 show 之后才把独立天空窗提到最前，
         # 否则随后 show 的主窗口会盖在真全屏的天空窗上面。
         if getattr(self, "_app_mode", "ide") == "planetarium":
@@ -14113,6 +14129,91 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------
     # baseband 离线回放（任务 4）
     # ------------------------------------------------------------------
+    def _scan_incomplete_recordings(self) -> None:
+        """M5：启动扫描未完成录音（sidecar complete=false / *.part 残片）。
+
+        只提示、不删、不改：中止的录音仍可回放（回放前会提示是半成品），
+        是否删除由用户自己在录音目录里决定。目录不可读时静默保持隐藏，
+        不把「扫不到」说成「没有残留」。
+        """
+        directory = ""
+        try:
+            directory = str(self.settings.record_dir or "")
+        except Exception:
+            directory = ""
+        if not directory:
+            return
+        try:
+            from recording_observation import find_incomplete_recordings
+        except ImportError:
+            try:
+                from desktop.recording_observation import find_incomplete_recordings
+            except ImportError:
+                return
+        try:
+            findings = find_incomplete_recordings(directory)
+        except Exception:
+            findings = []
+        self._incomplete_findings = findings
+        btn = getattr(self, "incomplete_rec_btn", None)
+        if btn is None:
+            return
+        if not findings:
+            btn.setVisible(False)
+            btn.setToolTip("启动扫描未发现未完成的录音")
+            return
+        names = "、".join(os.path.basename(str(f.get("path") or "?"))
+                          for f in findings[:3])
+        btn.setText(f"未完成录音 {len(findings)}")
+        btn.setToolTip(
+            f"启动扫描发现 {len(findings)} 个未完成录音：{names}"
+            + ("…" if len(findings) > 3 else "")
+            + "\n点击查看详情；不会自动删除或修改")
+        btn.setVisible(True)
+        try:
+            self.statusBar().showMessage(
+                f"发现 {len(findings)} 个未完成录音（未自动删除）："
+                "点工具栏「未完成录音」查看", MSG_IMPORTANT)
+        except RuntimeError:
+            pass
+
+    def _show_incomplete_recordings(self) -> None:
+        """列出未完成录音线索；只读展示，删除交给用户在文件管理器里做。"""
+        findings = list(getattr(self, "_incomplete_findings", []) or [])
+        if not findings:
+            try:
+                self.statusBar().showMessage("没有未完成的录音", MSG_NORMAL)
+            except RuntimeError:
+                pass
+            return
+        lines = []
+        for item in findings[:10]:
+            kind = "中止" if item.get("kind") == "aborted" else "残片"
+            name = os.path.basename(str(item.get("path") or "?"))
+            missing = "（数据文件已不存在）" if item.get("data_missing") else ""
+            lines.append(f"{kind}：{name}{missing} —— {item.get('reason') or '原因未给出'}")
+        if len(findings) > 10:
+            lines.append(f"……另有 {len(findings) - 10} 项未列出")
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Warning)
+        box.setWindowTitle("未完成的录音")
+        box.setText(f"发现 {len(findings)} 个未完成的录音线索")
+        box.setInformativeText(
+            "这些文件不会被自动删除或修改。中止的录音仍可回放"
+            "（回放前会提示是半成品）；确认不要的可在录音目录里自行删除。")
+        box.setDetailedText("\n".join(lines))
+        open_btn = box.addButton("打开录音目录", QMessageBox.ActionRole)
+        box.addButton("知道了", QMessageBox.AcceptRole)
+        box.exec()
+        if box.clickedButton() is open_btn:
+            directory = ""
+            try:
+                directory = str(self.settings.record_dir or "")
+            except Exception:
+                directory = ""
+            if directory:
+                QDesktopServices.openUrl(QUrl.fromLocalFile(directory))
+
     def _replay_recording(self):
         """回放已录制的 .iq/.cf32/.wav baseband 文件。
 

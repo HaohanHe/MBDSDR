@@ -21,10 +21,12 @@ from uuid import uuid4
 
 from mbdsdr_ai.observation_record import MAX_TIMELINE_EVENTS, ObservationRecord
 
-__all__ = ["export_desktop_observations"]
+__all__ = ["export_desktop_observations", "find_incomplete_recordings"]
 
 _MAX_SIDECAR_BYTES = 1 << 20
 _SOURCE = "desktop_sidecar"
+#: 录制中断后可能留下的残片后缀（不猜内容，只报告存在）。
+_RESIDUAL_SUFFIXES = (".part", ".partial", ".tmp")
 
 
 def _number(value: Any, field: str, *, positive: bool = False) -> float:
@@ -330,3 +332,77 @@ def export_desktop_observations(
         except (OSError, TypeError, ValueError, OverflowError, RecursionError) as exc:
             result["errors"].append(f"{label}：{type(exc).__name__}: {exc}")
     return result
+
+
+def find_incomplete_recordings(directory: str, *,
+                               max_entries: int = 200) -> list[dict]:
+    """列出目录下「未完成」的录音线索；**只看，不改，不删**。
+
+    两类线索：
+
+    * ``aborted``：``<data>.json`` sidecar 里显式 ``complete: false``——
+      录制中止的半成品（``aborted_reason`` 原样带出）；
+    * ``residual``：``*.part`` / ``*.partial`` / ``*.tmp`` 残片。
+
+    返回按修改时间倒序的字典列表（``kind/path/sidecar/reason/size_bytes/
+    mtime``；sidecar 对应的数据文件不存在时加 ``data_missing: true``）。
+    读不出/不是 JSON 对象的 ``.json`` 不算线索（可能是别的配置），不报。
+    本函数不递归子目录、不改任何文件——删除与否由用户决定。
+    """
+    root = Path(directory)
+    if not root.is_dir():
+        return []
+    findings: list[dict] = []
+    try:
+        entries = list(os.scandir(root))
+    except OSError:
+        return []
+    for entry in entries:
+        try:
+            if not entry.is_file(follow_symlinks=False):
+                continue
+        except OSError:
+            continue
+        name = entry.name
+        lower = name.lower()
+        try:
+            st = entry.stat(follow_symlinks=False)
+        except OSError:
+            continue
+        if lower.endswith(_RESIDUAL_SUFFIXES):
+            findings.append({
+                "kind": "residual",
+                "path": entry.path,
+                "sidecar": "",
+                "reason": "录制中断残留的临时文件",
+                "size_bytes": int(st.st_size),
+                "mtime": float(st.st_mtime),
+            })
+            continue
+        if not lower.endswith(".json") or st.st_size > _MAX_SIDECAR_BYTES:
+            continue
+        try:
+            with open(entry.path, "r", encoding="utf-8") as stream:
+                meta = json.loads(stream.read(_MAX_SIDECAR_BYTES + 1))
+        except (OSError, ValueError, UnicodeDecodeError):
+            continue
+        if not isinstance(meta, dict) or meta.get("complete") is not False:
+            continue
+        data_path = entry.path[:-len(".json")]
+        data_missing = not os.path.exists(data_path)
+        try:
+            data_size = 0 if data_missing else int(os.stat(data_path).st_size)
+        except OSError:
+            data_size = 0
+        findings.append({
+            "kind": "aborted",
+            "path": data_path,
+            "sidecar": entry.path,
+            "reason": str(meta.get("aborted_reason") or "").strip()
+                      or "录制未写完（sidecar complete=false）",
+            "size_bytes": data_size,
+            "mtime": float(st.st_mtime),
+            "data_missing": data_missing,
+        })
+    findings.sort(key=lambda item: item["mtime"], reverse=True)
+    return findings[:max(0, int(max_entries))]
