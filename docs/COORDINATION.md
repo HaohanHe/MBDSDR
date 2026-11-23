@@ -3074,6 +3074,12 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `.trae/specs/multi-device-interconnect/checklist.md` | 多机线/42（§294 手机租约项） | 2026-11-24 03:40 | 本笔 |
 | `docs/PRD-现状对照.md` | 多机线/42（§294 P1-11 手机租约） | 2026-11-24 03:40 | 本笔 |
 | `docs/COORDINATION.md` | 多机线/42（§294 记录 + §6.1） | 2026-11-24 03:40 | 本笔 |
+| `desktop/device_gateway_dialog.py` | 多机线/42（§295 频谱快照状态行） | 2026-11-24 04:00 | 本笔 |
+| `tests/test_desktop_device_gateway_dialog.py` | 多机线/42（§295 帧状态 2 条用例） | 2026-11-24 04:00 | 本笔 |
+| `desktop/README.md` | 多机线/42（§295 状态行说明） | 2026-11-24 04:00 | 本笔 |
+| `.trae/specs/multi-device-interconnect/tasks.md` | 多机线/42（§295 M2.6 桌面状态行） | 2026-11-24 04:00 | 本笔 |
+| `.trae/specs/multi-device-interconnect/checklist.md` | 多机线/42（§295 对话框 3 条用例） | 2026-11-24 04:00 | 本笔 |
+| `docs/COORDINATION.md` | 多机线/42（§295 记录 + §6.1） | 2026-11-24 04:00 | 本笔 |
 
 > 上表各行均由 `claim` 台账推导：owner 原文与 `acquired_at` 直接取自台账，
 > 目的优先用台账里的 `claim_reason`，没有就如实写「未声明」，不补编。时间列只是
@@ -13997,6 +14003,27 @@ NaN 会变成 `null`、真实 socket 上无帧会 503。契约要求消费端不
 **诚实边界**
 - 租约只反映权威端台账；未探测 dongle，也不代表头显真的在收。
 - 未真机配对；手动刷新，无轮询。
+
+## 295. 桌面对话框显示 `/spectrum` 帧状态（2026-11-24）
+
+**依据**：`/spectrum` 已实现，但桌面自己看不到「现在到底有没有帧可给」；排障时
+只能等头显回 503 才知道。
+
+**做了什么**
+- 对话框新增「频谱快照」一行，2 s 定时随 `_refresh_state` 刷新：
+  - 实质帧 →「SDR 在收（帧龄 x.x s，N bin）→ /spectrum 可读」；
+  - `None` →「无帧（SDR 未连接/已停止）→ /spectrum 回 503」；
+  - provider 未注入 →「未接入」；provider 抛错 →「读取失败（类型: 原因）」。
+- 未启动网关时仍显示「—」；`powers_db` 为 numpy 数组时安全取长度，不用真值判断。
+
+**验证**
+- 对话框新增 2 条：无帧→有帧（2 bin、帧龄未知）、未注入 provider。
+- `pytest tests/test_desktop_device_gateway_dialog.py tests/test_device_gateway.py`
+  → **67 passed**（对话框 17 + 网关 50）。
+
+**诚实边界**
+- 只读当前帧，不探测 dongle、不启动 SDR；帧龄缺失写「未知」。
+- 未在真实桌面上肉眼验收字体/换行（offscreen 用例）。
 
 
 

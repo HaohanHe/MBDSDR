@@ -427,6 +427,45 @@ def test_spectrum_endpoint_from_dialog(qapp):
         dlg.close()
 
 
+def test_spectrum_label_reflects_frame_source(qapp):
+    """桌面状态行如实反映 /spectrum 有没有帧，不造假帧。"""
+    from device_gateway_dialog import DeviceGatewayDialog
+
+    live = {"frame": None}
+    dlg = DeviceGatewayDialog(_station(), port=0, hosts=["127.0.0.1"],
+                              registry=_registry(),
+                              spectrum_frame_provider=lambda: live["frame"])
+    try:
+        dlg._refresh_spectrum_label()
+        assert "无帧" in dlg.spectrum_label.text()
+
+        live["frame"] = {
+            "center_freq_hz": 100e6,
+            "sample_rate_hz": 1e6,
+            "fft_size": 2,
+            "powers_db": [-90.0, -20.0],
+        }
+        dlg._refresh_spectrum_label()
+        text = dlg.spectrum_label.text()
+        assert "SDR 在收" in text
+        assert "2 bin" in text
+        assert "帧龄 未知" in text
+    finally:
+        dlg.close()
+
+
+def test_spectrum_label_without_provider(qapp):
+    from device_gateway_dialog import DeviceGatewayDialog
+
+    dlg = DeviceGatewayDialog(_station(), port=0, hosts=["127.0.0.1"],
+                              registry=_registry())
+    try:
+        dlg._refresh_spectrum_label()
+        assert "未接入" in dlg.spectrum_label.text()
+    finally:
+        dlg.close()
+
+
 def test_status_without_station_marks_missing(qapp):
     import json
 

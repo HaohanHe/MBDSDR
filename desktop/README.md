@@ -111,6 +111,7 @@ python main.py --import-probe desktop.main_window  # 只做导入自检，不建
   只读幅度谱快照（中心/采样率/bin/峰值/噪声底/帧龄）；`readonly=true`、
   `realtime=false`，不是流；未连接/已停止时 503「没有可读的频谱帧」，
   不拿示例谱或旧谱冒充。断开即清空，头显只能看快照、不能调谐。
+  对话框「频谱快照」一行同步显示「SDR 在收（帧龄/bbin）／无帧→503／未接入」。
 - SDR 一次性授权（M4.2 协议层）：CLI 以 `--rtl-tcp HOST:PORT` 启动网关后，
   头显可 `POST /sdr/lease` 申请**独占**租约（默认 300 s，可续租），
   `GET /sdr/lease` 查「谁占着/到何时」，`POST /sdr/release` 由持有者释放。

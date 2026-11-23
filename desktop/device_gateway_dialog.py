@@ -189,6 +189,12 @@ class DeviceGatewayDialog(QDialog):
             Qt.TextInteractionFlag.TextSelectableByMouse)
         outer.addWidget(self.sdr_label)
 
+        self.spectrum_label = QLabel("频谱快照：—")
+        self.spectrum_label.setWordWrap(True)
+        self.spectrum_label.setTextInteractionFlags(
+            Qt.TextInteractionFlag.TextSelectableByMouse)
+        outer.addWidget(self.spectrum_label)
+
         self.table = QTableWidget(0, 3)
         self.table.setHorizontalHeaderLabels(["角色", "设备名", "最近心跳"])
         self.table.verticalHeader().setVisible(False)
@@ -203,6 +209,7 @@ class DeviceGatewayDialog(QDialog):
     # ------------------------------------------------------------------
     def _refresh_state(self) -> None:
         running = self._gateway is not None
+        self._refresh_spectrum_label()
         self.start_btn.setEnabled(not running)
         self.stop_btn.setEnabled(running)
         self.rotate_btn.setEnabled(running)
@@ -220,8 +227,41 @@ class DeviceGatewayDialog(QDialog):
             self.fuse_label.setText("融合位姿：—")
             self.eye_id_label.setText("目镜识别：—")
             self.sdr_label.setText("SDR 授权：—")
+            self.spectrum_label.setText("频谱快照：—")
             self.table.setRowCount(0)
             self.status.setText("未启动。选地址后点「启动网关」。")
+
+    def _refresh_spectrum_label(self) -> None:
+        """频谱快照状态：只读当前帧，不造帧；与 `/spectrum` 的 503 口径一致。"""
+        provider = self._spectrum_frame_provider
+        if provider is None:
+            self.spectrum_label.setText("频谱快照：未接入（对话框未提供帧来源）")
+            return
+        try:
+            frame = provider()
+        except Exception as exc:  # noqa: BLE001 - 失败要可见
+            self.spectrum_label.setText(
+                f"频谱快照：读取失败（{type(exc).__name__}: {exc}）")
+            return
+        if not isinstance(frame, dict):
+            self.spectrum_label.setText(
+                "频谱快照：无帧（SDR 未连接/已停止）→ /spectrum 回 503")
+            return
+        raw = frame.get("powers_db")
+        try:
+            bins = 0 if raw is None else len(raw)
+        except TypeError:
+            bins = 0
+        age = None
+        captured = frame.get("captured_monotonic")
+        if captured is not None:
+            try:
+                age = max(0.0, time.monotonic() - float(captured))
+            except (TypeError, ValueError):
+                age = None
+        age_text = "未知" if age is None else f"{age:.1f} s"
+        self.spectrum_label.setText(
+            f"频谱快照：SDR 在收（帧龄 {age_text}，{bins} bin）→ /spectrum 可读")
 
     def start_gateway(self) -> None:
         if self._gateway is not None:
