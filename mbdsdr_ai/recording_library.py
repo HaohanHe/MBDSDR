@@ -405,6 +405,11 @@ class RecordingLibrary:
             return os.path.normpath(value)
         return os.path.normpath(os.path.join(self.root, value))
 
+    def entry_path(self, entry: Dict[str, Any]) -> str:
+        """条目字典 → 绝对路径（对外入口，避免调用方自己拼相对路径）。"""
+        stored = entry.get("path") if isinstance(entry, dict) else None
+        return self._resolve_path(stored if isinstance(stored, dict) else {})
+
     # ── 文档读写 ─────────────────────────────────────────────────────────
     def _empty_doc(self) -> Dict[str, Any]:
         return {
@@ -1375,6 +1380,105 @@ class RecordingLibrary:
         except OSError as exc:
             logger.error("保留策略执行失败: %s", exc)
             return LibraryResult(False, "io_error", f"清理执行失败: {exc}")
+
+    # ── 单条回收（用户显式点选）────────────────────────────────────────────
+    def trash_entry(self, entry_id: str, *, confirm: bool = False,
+                    trash_subdir: Optional[str] = None,
+                    now: Optional[datetime] = None) -> LibraryResult:
+        """把**单条**录音移入回收站（不物理删除），必须 ``confirm=True``。
+
+        与 :meth:`apply_retention` 的分工：保留策略按规则批量清理；本方法
+        处理用户显式点选的一条。文件不存在时只把索引标记为已回收，
+        ``trash_path`` 为空——绝不假装文件已移动。
+        """
+        if confirm is not True:
+            return LibraryResult(
+                False, "confirmation_required",
+                "删除会把文件移入回收站，必须 confirm=True 显式确认后才执行")
+        now_dt = now or datetime.now(timezone.utc)
+        try:
+            with self._lock():
+                doc, code, message = self._read_unlocked()
+                if doc is None:
+                    return LibraryResult(False, code, message)
+                entries = self._entries_of(doc)
+                entry = next((e for e in entries if e.entry_id == entry_id),
+                             None)
+                if entry is None:
+                    return LibraryResult(False, "not_found",
+                                         f"录音库中没有条目 {entry_id}")
+                if entry.state == "trashed":
+                    return LibraryResult(False, "already_trashed",
+                                         "该条已经在回收站里")
+                orig = self._resolve_path(entry.path)
+                dest = ""
+                rollback: List[Tuple[str, str]] = []
+                if os.path.exists(orig):
+                    stamp = now_dt.strftime("%Y%m%dT%H%M%SZ")
+                    trash_dir = os.path.join(
+                        self.trash_root, trash_subdir or f"manual-{stamp}")
+                    os.makedirs(trash_dir, exist_ok=True)
+                    dest = self._unique_trash_dest(
+                        trash_dir, os.path.basename(orig), entry.entry_id)
+                    try:
+                        shutil.move(orig, dest)
+                    except OSError as exc:
+                        return LibraryResult(
+                            False, "io_error", f"移入回收站失败：{exc}")
+                    rollback.append((dest, orig))
+                    if entry.kind == "iq":
+                        meta_orig = sigmf_meta_path(orig)
+                        meta_dest = os.path.splitext(dest)[0] + ".sigmf-meta"
+                        if os.path.exists(meta_orig):
+                            try:
+                                shutil.move(meta_orig, meta_dest)
+                                rollback.append((meta_dest, meta_orig))
+                            except OSError:
+                                # 数据已移走；meta 留着不影响，不删用户数据
+                                pass
+                entry.state = "trashed"
+                entry.trash_path = dest or None
+                entry.revision += 1
+                entry.updated_at = _now_iso()
+                doc["entries"] = [e.to_dict() for e in entries]
+                try:
+                    self._write_doc_unlocked(doc)
+                except OSError as exc:
+                    # 索引没落盘：把文件搬回原位，避免「文件在回收站、索引不知道」
+                    for moved_to, moved_from in reversed(rollback):
+                        try:
+                            shutil.move(moved_to, moved_from)
+                        except OSError:
+                            pass
+                    return LibraryResult(
+                        False, "io_error",
+                        user_message(
+                            "io_error",
+                            detail=f"索引落盘失败，已回滚移动"
+                                   f"（{type(exc).__name__}: {exc}）"))
+                payload = {"entry_id": entry.entry_id, "from": orig,
+                           "to": dest, "trash": True}
+                try:
+                    self._append_journal_unlocked(
+                        "trash_entry", entry_id=entry.entry_id,
+                        detail={"from": orig, "to": dest, "trash": True})
+                except OSError as exc:
+                    # 动作已成功（文件已移、索引已写）：不能报失败骗用户重试。
+                    return LibraryResult(
+                        True, "applied_journal_failed",
+                        f"已移入回收站，但留痕写入失败：{exc}", payload)
+                return LibraryResult(
+                    True, "applied",
+                    (f"已移入回收站：{os.path.basename(orig)}（未删除）"
+                     if dest else
+                     f"文件已不存在，仅把索引标记为已回收："
+                     f"{os.path.basename(orig)}"),
+                    payload)
+        except LibraryBusyError as exc:
+            return LibraryResult(False, exc.code, str(exc))
+        except OSError as exc:
+            logger.error("移入回收站失败: %s", exc)
+            return LibraryResult(False, "io_error", f"移入回收站失败: {exc}")
 
     # ── 迁移、导出与格式版本 ─────────────────────────────────────────────
     @staticmethod

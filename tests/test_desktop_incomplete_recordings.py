@@ -164,3 +164,21 @@ def test_window_scan_hides_button_when_clean(tmp_path):
     MainWindow._scan_incomplete_recordings(stub)
     assert stub.incomplete_rec_btn.visible is False
     assert stub._incomplete_findings == []
+
+
+# ── M4 录音库入口 ───────────────────────────────────────────────────────
+
+def test_recording_library_entry_point_is_wired():
+    """工具栏「录音库」按钮存在，且委托到可测试的打开方法。"""
+    from main_window import MainWindow
+
+    assert hasattr(MainWindow, "_open_recording_library")
+    # 方法内部只做三件事：拿 record_dir、建/复用对话框、把回放信号接到
+    # 主窗口统一回放入口（代码级断言，避免在桩对象上拉起真 QDialog）。
+    import inspect
+    src = inspect.getsource(MainWindow._open_recording_library)
+    assert "RecordingLibraryDialog" in src
+    assert "replay_requested.connect(self._replay_selected_path)" in src
+    assert "self.settings.record_dir" in src
+    # 回放入口本身存在，录音库与文件框共用
+    assert hasattr(MainWindow, "_replay_selected_path")

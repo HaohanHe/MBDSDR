@@ -2682,6 +2682,16 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `desktop/README.md` | 观星指数线/41（§253 未完成录音提示说明） | 2026-11-23 21:25 | 本笔 |
 | `docs/PRD-现状对照.md` | 观星指数线/41（§253 M5 行改「修复在位」+ P0-07 缺口收窄） | 2026-11-23 21:25 | 本笔 |
 | `docs/COORDINATION.md` | 观星指数线/41（§253 记录 + §6.1 登记） | 2026-11-23 21:25 | 本笔 |
+| `mbdsdr_ai/recording_library.py` | 观星指数线/41（§254 trash_entry 单条回收 + entry_path） | 2026-11-23 21:40 | 本笔 |
+| `desktop/recording_library_dialog.py` | 观星指数线/41（§254 录音库对话框：列出/回放/回收站） | 2026-11-23 21:40 | 本笔 |
+| `desktop/main_window.py` | 观星指数线/41（§254 录音库按钮 + _replay_selected_path 统一回放入口） | 2026-11-23 21:40 | 本笔 |
+| `desktop/error_remedy.py` | 观星指数线/41（§254 修正「无桌面调用方」失真文案） | 2026-11-23 21:40 | 本笔 |
+| `tests/test_recording_library_retention.py` | 观星指数线/41（§254 单条回收 4 条用例） | 2026-11-23 21:40 | 本笔 |
+| `tests/test_desktop_recording_library_dialog.py` | 观星指数线/41（§254 对话框 7 条用例） | 2026-11-23 21:40 | 本笔 |
+| `tests/test_desktop_incomplete_recordings.py` | 观星指数线/41（§254 录音库入口接线用例） | 2026-11-23 21:40 | 本笔 |
+| `docs/PRD-现状对照.md` | 观星指数线/41（§254 M4 改修复在位，P0-07 升「有」） | 2026-11-23 21:40 | 本笔 |
+| `docs/COORDINATION.md` | 观星指数线/41（§254 记录 + §6.1 登记） | 2026-11-23 21:40 | 本笔 |
+| `desktop/README.md` | 观星指数线/41（§254 录音库用法与删除边界） | 2026-11-23 21:40 | 本笔 |
 
 > 上表各行均由 `claim` 台账推导：owner 原文与 `acquired_at` 直接取自台账，
 > 目的优先用台账里的 `claim_reason`，没有就如实写「未声明」，不补编。时间列只是
@@ -12366,5 +12376,50 @@ PRD §8 冲刺序列 P1「天文通式观星指数」。本轮只做**有可信�
   findings 为 `residual/leftover.part` 与 `aborted/probe.iq`（原因原样）。
 - 未验：真实崩溃后残留的真实目录（本轮用临时目录模拟）、Windows 下
   「打开目录」在未安装默认文件管理器时的行为。
+
+## 254. M4 收口：录音库对话框（列出 / 回放 / 移入回收站）（2026-11-23）
+
+**依据**：`PRD-现状对照.md` §2 第 19 行（M4 仍待修、§0 里 P0-07 因它保持半有）。
+
+**做了什么**
+- `mbdsdr_ai/recording_library.py`
+  - 新增 `trash_entry(entry_id, confirm=True, trash_subdir=..., now=...)`：
+    **单条**移入 `_trash/`，不物理删除；索引写盘失败就回滚移动；
+    文件已不存在时只把索引标 `trashed`（`trash_path` 空），不假装移动过；
+    留痕写失败返回 `ok=True` + `applied_journal_failed`（动作已生效，不骗用户重试）。
+  - 新增公开 `entry_path(entry)`：调用方不再自己拼相对路径。
+- `desktop/recording_library_dialog.py`（新）：列出（文件/开始时间/时长/大小/状态/说明）、
+  回放选中、移入回收站、刷新/核对磁盘、打开目录；空目录与目录不存在都给
+  人话并置灰按钮；`missing` 条目回放置灰并说明。
+  - 每次打开/刷新 `reconcile(apply=True, scan=True)`：新文件纳入、丢文件标出；
+    只写索引与留痕，不移动/不删除录音；指纹只读首尾 64 KiB。
+  - 回放只发 `replay_requested(path)`，由主窗口执行。
+- `desktop/main_window.py`
+  - 工具栏「回放」右侧新增「录音库」按钮；`_open_recording_library` 懒建/复用对话框。
+  - 回放核心抽出 `_replay_selected_path(path)`：文件框与录音库**共用同一入口**
+    （档案 → `_open_observation_archive`；普通 IQ → `_start_replay_load`），
+    回放前统一 `_stop_tx`。
+- `desktop/error_remedy.py`：原豁免文案「该模块无桌面调用方」已失真，
+  改为「对话框只渲染人话 message，不原样显示 code」。
+
+**验证**
+- `pytest tests/test_recording_library_retention.py tests/test_recording_library.py`
+  → **24 passed**（新增单条回收 4 条：需确认 / 移动+索引+列表隐藏 / 幂等与 not_found /
+  文件缺失只改索引）。
+- `pytest tests/test_desktop_recording_library_dialog.py` → **7 passed**
+  （格式化、真实录音列出与按钮、回放信号、回收站移动、空目录、目录不存在、
+  文件丢失不可回放）。
+- 回放相关回归 `test_desktop_observation_ui / test_record_replay_config /
+  test_replay_archive_ui / test_destructive_confirm_guards / test_replay_load_async /
+  test_record_dir_consumption` → **90 passed**（抽出 `_replay_selected_path` 未破旧行为）。
+- 错误目录门禁 `test_error_remedy_links + test_error_catalog_guard` → **24 passed**。
+- 离屏真跑 MainWindow（临时录音目录，1 条真实 IQRecorder 录音）：
+  对话框 1 行 `probe.sigmf-data · 32.0 KB · 正常`，状态「共 1 条 · 已核对磁盘：1 项变化」，
+  选中后回放/回收站按钮均可用，回收站 tooltip 明写「不是物理删除」。
+
+**诚实边界**
+- 仍在设备/真机上未做：长录音（GB 级）下核对磁盘的耗时、真实崩溃后的索引恢复。
+- 「删除」= 移入 `_trash/`；应用内不提供物理删除，恢复靠用户手动搬回。
+
 
 

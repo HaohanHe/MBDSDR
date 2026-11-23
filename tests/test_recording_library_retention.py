@@ -184,6 +184,63 @@ def test_negative_policy_rejected(tmp_path):
     assert not res.ok and res.code == "bad_param"
 
 
+# ── 单条回收（M4 桌面「删除」入口的内核）────────────────────────────────
+
+def test_trash_entry_requires_confirmation(tmp_path):
+    data = make_recording(tmp_path, "one")
+    lib = RecordingLibrary(str(tmp_path))
+    entry_id = lib.add_recording(data).data["entry_id"]
+    res = lib.trash_entry(entry_id)
+    assert not res.ok and res.code == "confirmation_required"
+    assert os.path.exists(data)
+
+
+def test_trash_entry_moves_file_to_trash_and_marks_entry(tmp_path):
+    data = make_recording(tmp_path, "two")
+    lib = RecordingLibrary(str(tmp_path))
+    entry_id = lib.add_recording(data).data["entry_id"]
+    res = lib.trash_entry(entry_id, confirm=True, now=NOW,
+                          trash_subdir="manual-test")
+    assert res.ok and res.code == "applied"
+    assert not os.path.exists(data)
+    assert os.path.exists(res.data["to"])
+    assert os.path.dirname(res.data["to"]).replace("\\", "/").endswith(
+        "_trash/manual-test")
+    entry = next(e for e in lib.load().data["entries"]
+                 if e["entry_id"] == entry_id)
+    assert entry["state"] == "trashed"
+    assert entry["trash_path"] == res.data["to"]
+    # 默认列表不再显示回收站条目
+    listed = lib.list_entries()
+    assert all(e["entry_id"] != entry_id for e in listed.data["entries"])
+
+
+def test_trash_entry_is_idempotent_and_not_found(tmp_path):
+    data = make_recording(tmp_path, "three")
+    lib = RecordingLibrary(str(tmp_path))
+    entry_id = lib.add_recording(data).data["entry_id"]
+    assert lib.trash_entry(entry_id, confirm=True, now=NOW).ok
+    again = lib.trash_entry(entry_id, confirm=True, now=NOW)
+    assert not again.ok and again.code == "already_trashed"
+    missing = lib.trash_entry("no-such-id", confirm=True, now=NOW)
+    assert not missing.ok and missing.code == "not_found"
+
+
+def test_trash_entry_missing_file_only_marks_index(tmp_path):
+    """文件已不在：只标记已回收，trash_path 为空，不假装移动过。"""
+    data = make_recording(tmp_path, "four")
+    lib = RecordingLibrary(str(tmp_path))
+    entry_id = lib.add_recording(data).data["entry_id"]
+    os.remove(data)
+    os.remove(os.path.splitext(data)[0] + ".sigmf-meta")
+    res = lib.trash_entry(entry_id, confirm=True, now=NOW)
+    assert res.ok and res.data["to"] == ""
+    entry = next(e for e in lib.load().data["entries"]
+                 if e["entry_id"] == entry_id)
+    assert entry["state"] == "trashed"
+    assert entry["trash_path"] in (None, "")
+
+
 def _days(value):
     from datetime import timedelta
     return timedelta(days=value)

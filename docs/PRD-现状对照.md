@@ -18,12 +18,12 @@
 | | 仅自测 | 只有本仓合成 fixture、假后端或单测自洽 |
 | | 未验证 | 本轮环境物理上做不到（无硬件/无过境/无 key/无网络） |
 
-统计：**P0 共 11 条 —— 有 8、半有 3、无 0。**
+统计：**P0 共 11 条 —— 有 9、半有 2、无 0。**
 
 | 实现状态 | 条目 |
 |---|---|
-| 有（8） | P0-01 双形态、P0-02 全星表天空、P0-03 时间引擎、P0-04 双环锁定、P0-05 站址单一来源、P0-09 收星闭环、P0-10 诚实性（H-3 未逐条复核，带星号）、P0-11 动态 UI 边界 |
-| 半有（3） | P0-06 SDR 基本功（S1/S9 修复在位，调谐语义待真机）、P0-07 录音/回放/库（M4 录音库未接线、M5 启动残留扫描缺）、P0-08 AI 协商真模型（真 provider 未联调） |
+| 有（9） | P0-01 双形态、P0-02 全星表天空、P0-03 时间引擎、P0-04 双环锁定、P0-05 站址单一来源、P0-07 录音/回放/录音库、P0-09 收星闭环、P0-10 诚实性（H-3 未逐条复核，带星号）、P0-11 动态 UI 边界 |
+| 半有（2） | P0-06 SDR 基本功（S1/S9 修复在位，调谐语义待真机）、P0-08 AI 协商真模型（真 provider 未联调） |
 | 无（0） | — |
 
 **与 2026-11-04 版的判定变化**
@@ -34,7 +34,8 @@
 | P0-09 | 半有 → **有** | S10 忙锁统一、S11 两链均成功后同步、S12 缺参拒绝、S13 真人门 + 审计全在位（§2 对应行四元组） |
 | P0-10 | 半有 → **有\*** | S2 原子写 + 损坏备份拒写、S12 收口；H-3 未逐条复核，保留星号 |
 | P0-11 | 半有 → **有** | 比例校验与 `parse_layout_ratio` 共用解析（旧 `int()` 直转路径不再存在）；撤销栈 + `ui_layout_undo` 工具在位（桌面无 Ctrl+Z，见 M10） |
-| P0-06/07/08 | 仍半有，缺口收窄 | P0-07 的 S4/S6/S7/L3 收口，仅剩 M4/M5；P0-06 的 B1/S8/S9 在位 |
+| P0-07 | 半有 → **有** | M4 录音库对话框（列出/回放/移入回收站）与 M5 启动残留扫描都在位；S4/S6/S7/L3 早已收口（§2 第 19/20 行） |
+| P0-06/08 | 仍半有，缺口收窄 | P0-06 的 B1/S8/S9 在位，调谐语义待真机；P0-08 真 provider 未联调 |
 
 ---
 
@@ -48,7 +49,7 @@
 | P0-04 | 双环锁定 | 有 | 仅自测 | 四组合文案 [rf_sky_view.py:2807](file:///D:/mbdsdr/MBDSDR/desktop/rf_sky_view.py#L2807) `loop_state_lines`；站址失效:3338；断连先停跟踪 [main_window.py:7853](file:///D:/mbdsdr/MBDSDR/desktop/main_window.py#L7853) | 补断连探针回归 |
 | P0-05 | 观测站单一来源 | **有** | 仅自测（无真 GNSS） | 唯一写入口 [main_window.py:14706](file:///D:/mbdsdr/MBDSDR/desktop/main_window.py#L14706) `set_observer_site`；AI 同步 `_sync_observer_to_agent`:14849；面板只读 [new_spacetime_panel.py:490](file:///D:/mbdsdr/MBDSDR/desktop/new_spacetime_panel.py#L490) | S14 收口 — `686661cc` — desktop/main_window.py:14706 — `set_observer_site`（基准 `686661cc`）；清空写 None 不填 (0,0) |
 | P0-06 | SDR 工作台基本功 | **半有** | 仅自测（无真机） | 调谐语义 [spectrum_widget.py:968](file:///D:/mbdsdr/MBDSDR/desktop/spectrum_widget.py#L968) `_view_center_hz`、`_tune_click`:4167、`_tune_peak`:4193；断源上报 [main_window.py:9922](file:///D:/mbdsdr/MBDSDR/desktop/main_window.py#L9922) `_on_pipeline_read_failed` | B1/S8/S9 修复在位；调谐/刻度待真机回归 |
-| P0-07 | 录音、回放、录音库 | **半有** | 仅自测 | 录音 [main_window.py:11296](file:///D:/mbdsdr/MBDSDR/desktop/main_window.py#L11296) `_start_recording`；回放 `_replay_recording`:13859；`load_iq` [baseband_io.py:397](file:///D:/mbdsdr/MBDSDR/mbdsdr_ai/baseband_io.py#L397) numpy 直返；M5 启动扫描 `find_incomplete_recordings`（2026-11-23） | S4/S6/S7/L3 收口，M5 已在位；**M4 录音库桌面零引用**（§2） |
+| P0-07 | 录音、回放、录音库 | **有** | 仅自测 | 录音 [main_window.py:11296](file:///D:/mbdsdr/MBDSDR/desktop/main_window.py#L11296) `_start_recording`；回放 `_replay_selected_path`；`load_iq` [baseband_io.py:397](file:///D:/mbdsdr/MBDSDR/mbdsdr_ai/baseband_io.py#L397) numpy 直返；录音库 [recording_library_dialog.py](file:///D:/mbdsdr/MBDSDR/desktop/recording_library_dialog.py)（列出/回放/移入回收站）+ `trash_entry`；M5 启动扫描 | S4/S6/S7/L3/M4/M5 全部在位（§2）；真机长时间录制/崩溃恢复回归未做 |
 | P0-08 | AI 能力协商 | **半有** | 仅自测（假模型/规则替身） | 账本 [sky_negotiation.py:37](file:///D:/mbdsdr/MBDSDR/mbdsdr_ai/sky_negotiation.py#L37) `CAPABILITY_SLOTS`、`CapabilityLedger`:199；防问卷文案:383/402（「不是问卷、不是固定流程」「不要生成表单」） | 真 provider 未联调；AC-08.5 阈值待拍板 |
 | P0-09 | 一句话收星闭环 | **有** | 仅自测 | 双总线 [main_window.py:2552](file:///D:/mbdsdr/MBDSDR/desktop/main_window.py#L2552)/2629；真人门 `_request_human_approval`:9343；GATE_PARAM 剥离:9383/9477；S12 缺参拒绝:9384 | S10/S11/S12/S13 修复在位（§2 四元组）；真机闭环演练未做 |
 | P0-10 | 真实性与诚实性基线 | **有\*** | 部分真机 + 部分仅自测 | 错误目录 [error-catalog.md](file:///D:/mbdsdr/MBDSDR/docs/error-catalog.md)；离线 A/B [offline-behavior.md](file:///D:/mbdsdr/MBDSDR/docs/offline-behavior.md)；原子写 [main_window.py:16295](file:///D:/mbdsdr/MBDSDR/desktop/main_window.py#L16295) `_save_gui_config` | S2/S12 收口；H-3 未逐条复核（星号）；H-8 时间基准已统一（§5 P1-02） |
@@ -61,7 +62,7 @@
 ## 2. 23 条流程缺陷 → P0 → 专线 → 完成判据（无孤儿）
 
 > 专线取值：**接入层**、**UI频谱**、**操作逻辑**、**天空**、**工具审计**、**数据**。
-> 23 = B1/B2 + S1–S15 + M2/M4/M5/M10 + L1/L3。本轮复核：**修复在位 21 / 仍待修 1（M4）/ 部分 1（M10）**。
+> 23 = B1/B2 + S1–S15 + M2/M4/M5/M10 + L1/L3。本轮复核：**修复在位 22 / 仍待修 0 / 部分 1（M10）**。
 > 「修复在位」= 当前代码含该修复实现（四元组可点开），**不等于真机回归通过**；回归口径见 §6。
 
 | # | P0 | 缺陷 | 专线 | 完成判据（DoD） | 现状 | 证据（四元组，基准取 blame） |
@@ -84,7 +85,7 @@
 | 16 | P0-05 | S14 站址两套来源 | 天空 | 面板输入回写唯一事实源并落盘；天空/过境/AI 同刻 az/el 一致 | 修复在位 | 修复在位 — `686661cc` — desktop/main_window.py:14706 — `set_observer_site`（基准 `686661cc`）；AI Observer 同步 `b263f3be` |
 | 17 | P0-04 | S15 断连不停跟踪 | 天空 | 断开/切换设备前先停跟踪；frequency_hz 不再被多普勒改写 | 修复在位 | 修复在位 — `7f518fe6` — desktop/main_window.py:7853 — `self._stop_satellite_tracking()`（基准 `7f518fe6`） |
 | 18 | P0-01 | M2 星象仪恢复成窗口化 | 操作逻辑 | 启动恢复星象仪即全屏；退出后下次启动仍全屏 | 修复在位 | 修复在位 — `a2be554a` — desktop/main_window.py:3856 — `win.showFullScreen()`（基准 `a2be554a`） |
-| 19 | P0-07 | M4 无录音库列表 | 数据 | 录音库可列出/回放/删除；无文件时按钮置灰并说明 | **仍待修** | desktop/ 对 `recording_library` 零引用（本轮 grep 确认）；豁免登记 [error_remedy.py:75](file:///D:/mbdsdr/MBDSDR/desktop/error_remedy.py#L75)「该模块无桌面调用方」；回放仅文件框 `_replay_recording`:13859 |
+| 19 | P0-07 | M4 无录音库列表 | 数据 | 录音库可列出/回放/删除；无文件时按钮置灰并说明 | 修复在位 | 新增工具栏「录音库」→ `RecordingLibraryDialog`（列出/回放/移入回收站）；删除走 `RecordingLibrary.trash_entry(confirm=True)` 只移 `_trash/`；空目录/目录不存在/文件丢失均置灰并写明原因（`desktop/recording_library_dialog.py`，`tests/test_desktop_recording_library_dialog.py` 7 passed，2026-11-23） |
 | 20 | P0-07 | M5 崩溃残留无提示 | 数据 | 启动扫描未完成 sidecar/残留文件并在 UI 提示（可恢复/可删除） | 修复在位 | 启动扫描 `find_incomplete_recordings`（sidecar `complete=false` + `*.part/*.partial/*.tmp`）→ 工具栏「未完成录音 N」+ 状态栏提示；点击看详情并可「打开录音目录」，**不自动删/改**（`desktop/recording_observation.py`，`tests/test_desktop_incomplete_recordings.py` 10 passed，2026-11-23） |
 | 21 | P0-11 | M10 无撤销栈/Ctrl+Z | UI频谱 | 有撤销栈并支持 Ctrl+Z；或移除一切可撤销暗示；两者择一且文档一致 | **部分** | 撤销栈 [ui_actions.py:60](file:///D:/mbdsdr/MBDSDR/mbdsdr_ai/ui_actions.py#L60) `_undo_stack` + `undo`:113 + 工具 `ui_layout_undo`（agent.py:2806）在位；`desktop/shortcuts.py` 无 undo（本轮 grep 0 命中）→ 缺 Ctrl+Z |
 | 22 | P0-01 | L1 退出丢最大化 | 操作逻辑 | 退出星象仪恢复进入前的最大化/普通状态 | 修复在位 | 修复在位 — `a2be554a` — desktop/main_window.py:3944 — `showNormal`（基准 `a2be554a`；形态改独立窗，主窗最大化态不被触碰） |

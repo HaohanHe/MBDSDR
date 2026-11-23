@@ -72,7 +72,8 @@ _NO_ENTRY_BY_REASON: Dict[str, tuple] = {
     "解码层细项：code 只出现在解码器/服务端返回值，桌面解码卡不渲染该码": (
         "missing_iq", "unknown_device_type", "empty_input",
     ),
-    "录音库/回放细项：桌面录制走硬件 MCP、回放直接读 IQ 文件；该模块无桌面调用方，code 不进入 UI": (
+    "录音库/回放细项：桌面录音库对话框只渲染人话 message（io_error 已走 "
+    "user_message），不把 code 原样显示；回放仍直接读 IQ 文件": (
         "file_missing", "bad_field", "bad_param", "entry_not_found",
         "dest_missing", "not_found", "library_not_found", "library_busy",
         "unsupported_kind", "io", "io_error", "wav_error", "missing",

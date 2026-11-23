@@ -2145,6 +2145,17 @@ class MainWindow(QMainWindow):
         toolbar.addWidget(self.incomplete_rec_btn)
         self._incomplete_findings: list[dict] = []
 
+        # M4：录音库——列出/回放/移入回收站。索引与回收站逻辑都在
+        # mbdsdr_ai/recording_library.py，桌面只做壳，不另写一套判定。
+        self.library_btn = QPushButton("录音库")
+        self.library_btn.setObjectName("recordingLibrary")
+        self.library_btn.setMinimumHeight(28)
+        self.library_btn.setToolTip(
+            "列出录音目录里的录音：可回放、可移入回收站（不物理删除）")
+        self.library_btn.clicked.connect(self._open_recording_library)
+        toolbar.addWidget(self.library_btn)
+        self._recording_library_dialog = None
+
     def _setup_tab_order(self) -> None:
         """把主界面焦点链串成视觉顺序：工具栏 → 顶栏 → 左栏 → 右栏 → 底坞。
 
@@ -14129,6 +14140,40 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------
     # baseband 离线回放（任务 4）
     # ------------------------------------------------------------------
+    def _open_recording_library(self) -> None:
+        """打开录音库对话框（M4）：列出 / 回放 / 移入回收站。
+
+        回放复用主窗口既有的 ``_replay_selected_path``；删除只进
+        ``_trash/``，不物理删除。首次打开由库自己把磁盘文件纳入索引。
+        """
+        try:
+            from recording_library_dialog import RecordingLibraryDialog
+        except ImportError:
+            try:
+                from desktop.recording_library_dialog import (
+                    RecordingLibraryDialog)
+            except ImportError as exc:
+                QMessageBox.warning(
+                    self, "录音库不可用",
+                    f"录音库对话框加载失败：{exc}")
+                return
+        root = ""
+        try:
+            root = str(self.settings.record_dir or "")
+        except Exception:
+            root = ""
+        dlg = getattr(self, "_recording_library_dialog", None)
+        if dlg is None:
+            dlg = RecordingLibraryDialog(root, self)
+            dlg.replay_requested.connect(self._replay_selected_path)
+            self._recording_library_dialog = dlg
+        else:
+            dlg.set_root(root)
+            dlg.refresh()
+        dlg.show()
+        dlg.raise_()
+        dlg.activateWindow()
+
     def _scan_incomplete_recordings(self) -> None:
         """M5：启动扫描未完成录音（sidecar complete=false / *.part 残片）。
 
@@ -14246,13 +14291,31 @@ class MainWindow(QMainWindow):
         if not path:
             self.statusBar().showMessage("未选择录音文件", MSG_NORMAL)
             return
+        self._replay_selected_path(path)
+
+    def _replay_selected_path(self, path: str) -> None:
+        """回放一个已确定的文件路径（「回放」文件框与录音库共用）。
+
+        防止两条入口各写一份判定：档案走 :meth:`_open_observation_archive`，
+        普通 IQ 清掉旧档案计划后再交给 :meth:`_start_replay_load`。
+        """
+        if not path:
+            return
+        if self._replay_load_thread is not None:
+            # 读盘线程还在：不能另起一路抢同一个播放器。
+            self.statusBar().showMessage(
+                "正在读取录音，请稍后再从录音库回放", MSG_NORMAL)
+            return
+        if self._replay_timer is not None:
+            self._stop_replay()
+        self._stop_tx("回放开始", wait=True)  # 安全：回放前必须停波（空闲时无动作）
         if path.lower().endswith(".observation.json"):
             # 档案是 JSON，不是 IQ：必须先解析出 replay_plan 和数据文件，
             # 绝不能把 JSON 字节当基带样本交给 load_iq。
             self._open_observation_archive(path)
             return
         try:
-            from mbdsdr_ai import baseband_io
+            from mbdsdr_ai import baseband_io  # noqa: F401
         except Exception as e:  # noqa: BLE001
             self._clear_replay_plan_view()
             QMessageBox.warning(self, "回放失败", f"baseband_io 不可用：\n{e}")
