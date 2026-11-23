@@ -2757,6 +2757,15 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `.trae/specs/mbdsdr-system-lifecycle/checklist.md` | 多机线/42（§261 Task 218） | 2026-11-24 00:15 | 本笔 |
 | `docs/PRD-现状对照.md` | 多机线/42（§261 P1-11 补名册） | 2026-11-24 00:15 | 本笔 |
 | `docs/COORDINATION.md` | 多机线/42（§261 记录 + §6.1） | 2026-11-24 00:15 | 本笔 |
+| `spatial/app/src/main/java/com/mbdsdr/spatial/net/DeviceGatewayClient.kt` | 多机线/42（§262 头显只读网关客户端） | 2026-11-24 00:40 | 本笔 |
+| `spatial/app/src/test/java/com/mbdsdr/spatial/DeviceGatewayClientTest.kt` | 多机线/42（§262 客户端 10 条 JVM 用例） | 2026-11-24 00:40 | 本笔 |
+| `spatial/README.md` | 多机线/42（§262 客户端章节与边界） | 2026-11-24 00:40 | 本笔 |
+| `.trae/specs/multi-device-interconnect/tasks.md` | 多机线/42（§262 M4.1 状态） | 2026-11-24 00:40 | 本笔 |
+| `.trae/specs/multi-device-interconnect/checklist.md` | 多机线/42（§262 头显客户端项） | 2026-11-24 00:40 | 本笔 |
+| `.trae/specs/mbdsdr-system-lifecycle/tasks.md` | 多机线/42（§262 Task 219） | 2026-11-24 00:40 | 本笔 |
+| `.trae/specs/mbdsdr-system-lifecycle/checklist.md` | 多机线/42（§262 Task 219） | 2026-11-24 00:40 | 本笔 |
+| `docs/PRD-现状对照.md` | 多机线/42（§262 P1-11 补头显客户端） | 2026-11-24 00:40 | 本笔 |
+| `docs/COORDINATION.md` | 多机线/42（§262 记录 + §6.1） | 2026-11-24 00:40 | 本笔 |
 
 > 上表各行均由 `claim` 台账推导：owner 原文与 `acquired_at` 直接取自台账，
 > 目的优先用台账里的 `claim_reason`，没有就如实写「未声明」，不补编。时间列只是
@@ -12752,6 +12761,35 @@ PRD §8 冲刺序列 P1「天文通式观星指数」。本轮只做**有可信�
 **诚实边界**
 - 未真机验证；名册刷新是手动按钮，没有自动轮询（避免手机上无谓的 2 s 请求）。
 - 头显侧名册展示仍未做，并入 M4。
+
+## 262. M4 数据层：头显只读网关客户端（2026-11-23）
+
+**依据**：`multi-device-interconnect` M4——头显要能读权威端的全景/名册/位姿，
+再逐步替换包内快照；先把 HTTP 契约与错误语义做成可测内核。
+
+**做了什么**
+- 新 `spatial/app/src/main/java/com/mbdsdr/spatial/net/DeviceGatewayClient.kt`：
+  - `GatewayTransport` 可注入（JVM 单测完全离线），默认 `HttpGatewayTransport`
+    走 `HttpURLConnection`，连接/读取各 6 s；
+  - `health()`（免 token）、`pair()`（角色白名单，回执缺 token 即失败）、
+    `roster()`、`panorama()`、`poses()`、`fusedPose()`（`/fuse`）；
+  - `postPose()` 只允许 lens/eyepiece，handheld/headset **本地即拒**；
+  - 失败统一 `DeviceGatewayException(status)`：优先取服务端 `reason/error`，
+    200 但非 JSON 判协议错；不可达文案带 `host:port`，不静默当成功。
+- `spatial/README.md`：新增「多设备网关（只读客户端）」章节，写明端点与
+  **诚实边界**（UI 未接、`/passes` 未实现、未真机验证、应用默认仍不联网）。
+
+**验证**
+- `./gradlew.bat testDebugUnitTest --rerun-tasks --no-daemon --offline` 全绿：
+  **17 suite / 139 用例 / 0 失败 / 1 跳过**（基线 16 / 129；新增
+  `DeviceGatewayClientTest` 10 条：配对成功/错码 403/缺 token/非法角色本地拒/
+  只读角色拒发位姿/lens 载荷 sky-pose/1/Bearer 读三路/health 免 token/
+  非 JSON/不可达）。
+
+**诚实边界**
+- 四窗 UI 尚未接网关；`/passes` 增量端点未实现；未在 PICO 真机上验证。
+- README 仍把默认行为写成「只读 bundle、不联网」——客户端只是数据层，
+  不改变当前默认联网策略。
 
 
 

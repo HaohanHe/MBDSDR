@@ -1,6 +1,6 @@
 # MBDSDR Spatial（PICO 空间观测台）
 
-MBDSDR 的 PICO Spatial（Android/Kotlin）入口。它不是另一个产品：四块内容与桌面、手机共用同一套语义，数据只来自导出的 **spatial bundle**，不联网、不接 SDR、不伪造星空。
+MBDSDR 的 PICO Spatial（Android/Kotlin）入口。它不是另一个产品：四块内容与桌面、手机共用同一套语义，数据只来自导出的 **spatial bundle**，不联网、不接 SDR、不伪造星空。M4 的只读网关客户端已在 `net/DeviceGatewayClient.kt` 就绪，但四窗 UI 尚未接线（见下文「多设备网关」）。
 
 ```
 头顶  —— 真实星表 + 站址/时刻算出的 alt/az
@@ -67,6 +67,20 @@ python scripts/export_spatial_bundle.py <档案>.observation.json -o <输出目�
 5. **2:00** 点「播放录音」：播放从这次观测 IQ 解调出的 WAV；标签显示录音时间与来源。
 6. **2:30** 打开回看：指出 `调谐 / 解码命中 / 读空 / 数据间断`，说明「时间轴里的事件和录音文件、SigMF annotations 是同一份」；点一条 `调谐`，「听见」会跳到该时刻（秒数由 `samples / sample_rate` 换算，和 CLI 的 `replay_plan` 同口径）。事件中文名与桌面 `replay_timeline` 同一份词表（跨语言钉扎测试锁死）。
 7. **2:50** 收尾：说明边界——离线、只读包、不接 SDR、Mesh/ML 未验证。
+
+## 多设备网关（只读客户端，M4 数据层）
+
+`app/src/main/java/com/mbdsdr/spatial/net/DeviceGatewayClient.kt` 是头显侧的
+只读网关客户端，与手机/桌面共用同一 HTTP 契约：
+
+- `GET /health`（免 token）、`POST /pair`（配对码换 token）
+- `GET /roster`、`GET /panorama`、`GET /poses`、`GET /fuse`
+- `POST /pose` 仅 `lens/eyepiece`；`handheld/headset` 在**本地即拒绝**，不发请求
+
+传输可注入（`GatewayTransport`），JVM 单测完全离线；默认实现是
+`HttpURLConnection`（6 s 超时）。**诚实边界**：目前只到数据层——四窗 UI 尚未
+接网关、`/passes` 增量端点未实现、也未在 PICO 真机上验证；应用默认仍是
+「只读 bundle、不联网」。
 
 ## 与官方样本的关系
 
