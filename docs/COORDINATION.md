@@ -2793,6 +2793,20 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `.trae/specs/mbdsdr-system-lifecycle/checklist.md` | 多机线/42（§264 Task 221） | 2026-11-24 01:45 | 本笔 |
 | `docs/PRD-现状对照.md` | 多机线/42（§264 P1-11 补 /passes） | 2026-11-24 01:45 | 本笔 |
 | `docs/COORDINATION.md` | 多机线/42（§264 记录 + §6.1） | 2026-11-24 01:45 | 本笔 |
+| `mbdsdr_ai/device_gateway.py` | 多机线/42（§265 identification 校验，只存不融合） | 2026-11-24 02:15 | 本笔 |
+| `tests/test_device_gateway.py` | 多机线/42（§265 目镜识别用例） | 2026-11-24 02:15 | 本笔 |
+| `desktop/device_gateway_dialog.py` | 多机线/42（§265 目镜识别单行） | 2026-11-24 02:15 | 本笔 |
+| `tests/test_desktop_device_gateway_dialog.py` | 多机线/42（§265 识别行用例） | 2026-11-24 02:15 | 本笔 |
+| `mobile/lib/services/pose_reporter.dart` | 多机线/42（§265 PoseIdentification） | 2026-11-24 02:15 | 本笔 |
+| `mobile/lib/services/device_gateway_client.dart` | 多机线/42（§265 postPose identification） | 2026-11-24 02:15 | 本笔 |
+| `mobile/lib/pages/pointing_page.dart` | 多机线/42（§265 目镜附带准星识别） | 2026-11-24 02:15 | 本笔 |
+| `mobile/test/pose_reporter_test.dart` | 多机线/42（§265 识别载荷/拒绝用例） | 2026-11-24 02:15 | 本笔 |
+| `.trae/specs/multi-device-interconnect/tasks.md` | 多机线/42（§265 M3.3 勾选） | 2026-11-24 02:15 | 本笔 |
+| `.trae/specs/multi-device-interconnect/checklist.md` | 多机线/42（§265 识别单列项） | 2026-11-24 02:15 | 本笔 |
+| `.trae/specs/mbdsdr-system-lifecycle/tasks.md` | 多机线/42（§265 Task 222） | 2026-11-24 02:15 | 本笔 |
+| `.trae/specs/mbdsdr-system-lifecycle/checklist.md` | 多机线/42（§265 Task 222） | 2026-11-24 02:15 | 本笔 |
+| `docs/PRD-现状对照.md` | 多机线/42（§265 P1-11 补识别单列） | 2026-11-24 02:15 | 本笔 |
+| `docs/COORDINATION.md` | 多机线/42（§265 记录 + §6.1） | 2026-11-24 02:15 | 本笔 |
 
 > 上表各行均由 `claim` 台账推导：owner 原文与 `acquired_at` 直接取自台账，
 > 目的优先用台账里的 `claim_reason`，没有就如实写「未声明」，不补编。时间列只是
@@ -12884,6 +12898,37 @@ lens/eyepiece 必须能各自把「我现在指着哪」发出去。
 **诚实边界**
 - 预报精度取决于 TLE 新鲜度（旧 TLE 仍能算，但不代表真实轨道）。
 - 只支持本地文件，未做自动下载/缓存刷新；四窗 UI 尚未消费 `/passes`。
+
+## 265. M3.3：目镜识别结果单列（2026-11-23）
+
+**依据**：`multi-device-interconnect` M3.3——目镜机的价值是「认出视场里是哪颗星」，
+这份识别结果不该混进粗指向/融合位姿，应作为独立字段展示与追溯。
+
+**做了什么**
+- `sky-pose/1` 增加可选 `identification`：`{name, hip, separation_deg}`。
+  - 网关只在 `role == eyepiece` 时接受，镜头机携带即 403（不冒充认星）；
+  - 字段逐项校验：name 非空 ≤64 字符、hip 正整数、角距 [0,180]，
+    空对象或全缺 400；**只存不融合**，`fuse_now` 仍只看 az/alt/精度。
+  - `/poses` 原样读回 `identification`，方便复查。
+- 手机 `PoseReporter` / `DeviceGatewayClient`：`report()` 新增可选
+  `PoseIdentification`，仅目镜角色允许；空识别块本地拒绝。指天页把最近一帧
+  准星识别（星名优先中文名、其次西名、HIP、角距）附带在目镜上报里；
+  镜头角色自动不带，不伪造。
+- 桌面对话框：新增「目镜识别」单行——显示「织女一 · HIP 91262 · 角距 0.35°」，
+  没有识别就如实显示「—」；与「融合位姿」并列但互不混合。
+
+**验证**
+- `pytest tests/test_device_gateway.py tests/test_desktop_device_gateway_dialog.py`
+  → **41 passed**：镜头机携带 403、合法识别 `/poses` 原样读回、hip 非整数/
+  角距越界/空对象 400、单条目镜仍 `level=single`；对话框识别行有/无两种状态。
+- `flutter test test/pose_reporter_test.dart` → **10 passed**（识别随载荷发出、
+  镜头机与空识别本地拒绝）。
+- 全量 `flutter test` → **601 passed / 0 failed**；改动文件 analyze 无新增告警。
+
+**诚实边界**
+- 识别只是「准星附近亮星」，不是完整视场解算；星名命中依赖目录覆盖。
+- 识别结果不参与融合权重，也不改变目镜的 az/alt。
+- 未真机验证手机目镜识别上报链路。
 
 
 

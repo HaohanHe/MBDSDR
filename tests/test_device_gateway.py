@@ -379,6 +379,48 @@ def test_fuse_rejects_non_get():
     assert json.loads(raw)["error"] == "method_not_allowed"
 
 
+# ---------------------------------------------------------------- 目镜识别（M3.3）
+def test_pose_identification_only_for_eyepiece_and_validated():
+    gw = DeviceGateway(registry=_registry())
+    _, lens = _pair(gw, name="镜头", role="lens")
+    _, eye = _pair(gw, name="目镜", role="eyepiece")
+
+    # 镜头机携带识别结果 → 403（不冒充认星）。
+    status, d = _pose(
+        gw, lens["token"], lens["device"]["id"], role="lens",
+        identification={"name": "Vega", "hip": 91262, "separation_deg": 0.2})
+    assert status == 403
+    assert "eyepiece" in d["reason"]
+
+    # 目镜机合法识别 → 200，/poses 原样读回。
+    status, d = _pose(
+        gw, eye["token"], eye["device"]["id"], role="eyepiece",
+        identification={"name": "织女一", "hip": 91262,
+                        "separation_deg": 0.35})
+    assert status == 200
+    status, poses = _get(gw, "/poses", eye["token"])
+    row = poses["poses"][0]
+    assert row["identification"] == {
+        "name": "织女一", "hip": 91262, "separation_deg": 0.35}
+
+    # 非法识别字段逐条拒绝（不静默截断/补值）。
+    cases = [
+        {"hip": "91262"},          # 非整数
+        {"separation_deg": 181},   # 角距越界
+        {},                        # 空对象
+    ]
+    for bad in cases:
+        status, d = _pose(
+            gw, eye["token"], eye["device"]["id"], role="eyepiece",
+            identification=bad)
+        assert status == 400, (bad, status, d)
+
+    # 融合只看朝向：单条目镜观测仍 valid，并保留识别字段在 /poses。
+    status, fused = _get(gw, "/fuse", eye["token"])
+    assert status == 200
+    assert fused["valid"] is True and fused["level"] == "single"
+
+
 # ---------------------------------------------------------------- 过境预报（M4.1）
 _ISS_TLE = (
     "ISS (ZARYA)",

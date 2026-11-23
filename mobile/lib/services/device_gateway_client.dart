@@ -94,6 +94,8 @@ class DeviceGatewayClient {
       _get('/passes', token);
 
   /// 上报一条 `sky-pose/1`。桌面会校验 source/role/时钟/边界，失败如实抛。
+  ///
+  /// [identification] 仅目镜角色可带（星名/HIP/角距残差），桌面按独立字段存。
   Future<Map<String, dynamic>> postPose(String token, {
     required String deviceId,
     required String role,
@@ -103,6 +105,7 @@ class DeviceGatewayClient {
     required double accuracyDeg,
     double rollDeg = 0.0,
     double? fovDeg,
+    Map<String, dynamic>? identification,
   }) async {
     if (!kPoseRoles.contains(role)) {
       throw DeviceGatewayException('角色 $role 只读，不能上报位姿');
@@ -117,6 +120,7 @@ class DeviceGatewayClient {
       'accuracy_deg': accuracyDeg,
       'roll_deg': rollDeg,
       'fov_deg': ?fovDeg,
+      'identification': ?identification,
     }, token: token);
   }
 

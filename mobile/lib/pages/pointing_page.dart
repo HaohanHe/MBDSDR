@@ -234,6 +234,12 @@ class _PointingPageState extends State<PointingPage> {
   bool _poseBusy = false;
   String? _poseNote;
 
+  /// 最近一帧的准星识别结果缓存（供「上报位姿」附带给目镜角色用）。
+  ///
+  /// 在 `_buildSky` 里直接赋值、不 setState：它只服务用户点击上报，
+  /// 不参与本帧渲染，下一帧重算也无妨。
+  CenterStarIdentification? _lastCenterId;
+
   Future<void> _reportPose() async {
     final PoseReporter? reporter = widget.poseReporter;
     if (reporter == null || _poseBusy) return;
@@ -257,6 +263,7 @@ class _PointingPageState extends State<PointingPage> {
         pitchDeg: pitch,
         rollDeg: _orientation.roll,
         accuracyDeg: spread,
+        identification: _currentIdentification(reporter),
       );
       if (!mounted) return;
       setState(() => _poseNote =
@@ -267,6 +274,24 @@ class _PointingPageState extends State<PointingPage> {
     } finally {
       if (mounted) setState(() => _poseBusy = false);
     }
+  }
+
+  /// 目镜角色才附带准星识别；镜头机不冒充认星结果。
+  PoseIdentification? _currentIdentification(PoseReporter reporter) {
+    if (reporter.settings.deviceGatewayRole != 'eyepiece') return null;
+    final CenterStarIdentification? id = _lastCenterId;
+    if (id == null) return null;
+    final StarNameEntry? entry = id.name;
+    final String? name = entry == null
+        ? null
+        : (entry.zh.isNotEmpty
+            ? entry.zh
+            : (entry.en.isNotEmpty ? entry.en : null));
+    return PoseIdentification(
+      name: name,
+      hip: id.hip > 0 ? id.hip : null,
+      separationDeg: id.separationDeg,
+    );
   }
 
   void _resetManualOffset() => setState(() => _manualOffsetDeg = 0);
@@ -425,6 +450,8 @@ class _PointingPageState extends State<PointingPage> {
             );
           }
         }
+        // 缓存给「上报位姿」用（不 setState；只服务用户动作）。
+        _lastCenterId = centerId;
         final String centerText = centerStarText(
           namesAvailable: assets.hasStarNames,
           identification: centerId,

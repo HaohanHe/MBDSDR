@@ -15,6 +15,35 @@ import 'settings_service.dart';
 /// 上报时未提供精度时的保守估计（度）。不是标定值，只用于让融合权重可算。
 const double kDefaultPoseAccuracyDeg = 10.0;
 
+/// 目镜识别结果（只随 eyepiece 角色的位姿上报；不参与粗指向融合）。
+class PoseIdentification {
+  const PoseIdentification({
+    this.name,
+    this.hip,
+    this.separationDeg,
+  });
+
+  /// 星名（可为空；与 [hip] 至少给一个）。
+  final String? name;
+
+  /// HIP 编号。
+  final int? hip;
+
+  /// 与视场中心的角距（度）。
+  final double? separationDeg;
+
+  bool get isEmpty =>
+      (name == null || name!.trim().isEmpty) &&
+      hip == null &&
+      separationDeg == null;
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+        if (name != null && name!.trim().isNotEmpty) 'name': name!.trim(),
+        if (hip != null) 'hip': hip,
+        if (separationDeg != null) 'separation_deg': separationDeg,
+      };
+}
+
 class PoseReporter {
   PoseReporter({
     required SettingsService settings,
@@ -48,11 +77,15 @@ class PoseReporter {
   }
 
   /// 上报一条位姿。参数为 null 表示对应传感器缺失——直接抛错，不补 0。
+  ///
+  /// [identification] 仅在角色为 eyepiece 时允许（镜头机不冒充认星结果）；
+  /// 内容为空对象也视为非法输入，不发送空识别块。
   Future<Map<String, dynamic>> report({
     required double? headingDeg,
     required double? pitchDeg,
     double? rollDeg,
     double? accuracyDeg,
+    PoseIdentification? identification,
   }) async {
     final String? why = unavailableReason;
     if (why != null) throw DeviceGatewayException(why);
@@ -64,6 +97,14 @@ class PoseReporter {
     }
     if (pitchDeg < -90.0 || pitchDeg > 90.0) {
       throw DeviceGatewayException('俯仰角越界（$pitchDeg°），拒绝上报');
+    }
+    if (identification != null) {
+      if (_settings.deviceGatewayRole != 'eyepiece') {
+        throw DeviceGatewayException('只有目镜角色可以携带识别结果');
+      }
+      if (identification.isEmpty) {
+        throw DeviceGatewayException('识别结果为空，拒绝上报空识别块');
+      }
     }
     final double az = ((headingDeg % 360.0) + 360.0) % 360.0;
     final double roll = (rollDeg != null && rollDeg.isFinite) ? rollDeg : 0.0;
@@ -87,6 +128,7 @@ class PoseReporter {
       altDeg: pitchDeg,
       accuracyDeg: acc,
       rollDeg: roll,
+      identification: identification?.toJson(),
     );
   }
 }

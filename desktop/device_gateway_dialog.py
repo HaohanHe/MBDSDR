@@ -148,6 +148,12 @@ class DeviceGatewayDialog(QDialog):
             Qt.TextInteractionFlag.TextSelectableByMouse)
         outer.addWidget(self.fuse_label)
 
+        self.eye_id_label = QLabel("目镜识别：—")
+        self.eye_id_label.setWordWrap(True)
+        self.eye_id_label.setTextInteractionFlags(
+            Qt.TextInteractionFlag.TextSelectableByMouse)
+        outer.addWidget(self.eye_id_label)
+
         self.table = QTableWidget(0, 3)
         self.table.setHorizontalHeaderLabels(["角色", "设备名", "最近心跳"])
         self.table.verticalHeader().setVisible(False)
@@ -173,6 +179,7 @@ class DeviceGatewayDialog(QDialog):
             self.code_label.setText("—")
             self.url_label.setText("网关未启动")
             self.fuse_label.setText("融合位姿：—")
+            self.eye_id_label.setText("目镜识别：—")
             self.table.setRowCount(0)
             self.status.setText("未启动。选地址后点「启动网关」。")
 
@@ -266,6 +273,7 @@ class DeviceGatewayDialog(QDialog):
                 self.table.setItem(row, col, QTableWidgetItem(text))
         poses = gw.recent_poses()
         self._update_fuse_label(gw)
+        self._update_eyepiece_id_label(poses)
         if getattr(self, "_station_missing", False):
             self.status.setText(
                 f"已配对 {len(devices)} 台；当前未设置站址：/panorama 会回 500"
@@ -296,6 +304,24 @@ class DeviceGatewayDialog(QDialog):
                 acc=float(fused["accuracy_deg"]), level=level,
                 n=fused.get("observations", 0),
                 src=", ".join(str(s) for s in fused.get("sources") or [])))
+
+    def _update_eyepiece_id_label(self, poses) -> None:
+        """目镜识别结果单独一行，不并进粗指向/融合位姿。"""
+        eyepiece = next(
+            (p for p in poses if str(p.get("role") or "") == "eyepiece"), None)
+        ident = (eyepiece or {}).get("identification")
+        if not isinstance(ident, dict) or not ident:
+            self.eye_id_label.setText("目镜识别：—")
+            return
+        parts = []
+        if ident.get("name"):
+            parts.append(str(ident["name"]))
+        if ident.get("hip"):
+            parts.append(f"HIP {int(ident['hip'])}")
+        if ident.get("separation_deg") is not None:
+            parts.append(f"角距 {float(ident['separation_deg']):.2f}°")
+        self.eye_id_label.setText(
+            "目镜识别：" + (" · ".join(parts) if parts else "—"))
 
     # ------------------------------------------------------------------
     def closeEvent(self, event) -> None:  # noqa: N802

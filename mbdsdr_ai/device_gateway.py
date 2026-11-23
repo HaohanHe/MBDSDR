@@ -15,6 +15,8 @@
    那些仍归桌面权威端。
 4. **多机融合**：`/fuse` 把两条位姿喂给 `sky_pointing.fuse_poses`（与
    `sky_pose_fuse` 工具同一内核）；不可用时 `valid=false` + 原因，不猜朝向。
+   目镜可选带 `identification`（星名/HIP/角距），**只存不融合**，
+   镜头机携带即拒绝。
 
 安全边界（与 `web_bridge_host.py` 的本地桥分开）
 ================================================
@@ -267,6 +269,37 @@ def _validate_pose(payload: Any, device: Device,
     fov_v = None if fov is None else _finite(fov)
     if fov is not None and (fov_v is None or not (0.0 < fov_v <= 180.0)):
         return None, "fov_deg 必须在 (0, 180]（或省略）"
+
+    ident = payload.get("identification")
+    ident_v = None
+    if ident is not None:
+        if device.role != "eyepiece":
+            return None, "只有 eyepiece 角色可以携带识别结果"
+        if not isinstance(ident, dict):
+            return None, "identification 必须是对象（或省略）"
+        name_raw = ident.get("name")
+        name = None if name_raw is None else str(name_raw).strip()
+        if name is not None and (not name or len(name) > 64):
+            return None, "identification.name 必须非空且 ≤64 字符（或省略）"
+        hip_raw = ident.get("hip")
+        hip = None
+        if hip_raw is not None:
+            if (isinstance(hip_raw, bool) or not isinstance(hip_raw, int)
+                    or not (1 <= hip_raw <= 10_000_000)):
+                return None, "identification.hip 必须是正整数（或省略）"
+            hip = int(hip_raw)
+        sep_raw = ident.get("separation_deg")
+        sep = None if sep_raw is None else _finite(sep_raw)
+        if sep_raw is not None and (sep is None or not (0.0 <= sep <= 180.0)):
+            return None, "identification.separation_deg 必须在 [0, 180]"
+        if name is None and hip is None and sep is None:
+            return None, "identification 至少要有 name/hip/separation_deg 之一"
+        ident_v = {
+            "name": name,
+            "hip": hip,
+            "separation_deg": None if sep is None else float(sep),
+        }
+
     return {
         "schema": "sky-pose/1",
         "source": source,
@@ -277,6 +310,7 @@ def _validate_pose(payload: Any, device: Device,
         "accuracy_deg": float(acc),
         "roll_deg": float(roll),
         "fov_deg": fov_v,
+        "identification": ident_v,
     }, ""
 
 

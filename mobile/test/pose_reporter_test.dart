@@ -209,6 +209,35 @@ void main() {
               .having((e) => e.status, 'status', 403)
               .having((e) => e.message, 'message', contains('角色只读'))));
     });
+
+    test('目镜识别随载荷发出；镜头机/空识别本地拒绝', () async {
+      final _FakeGateway fake =
+          _FakeGateway((_) => const GatewayHttpResponse(200, '{"ok":true}'));
+      const PoseIdentification id = PoseIdentification(
+          name: '织女一', hip: 91262, separationDeg: 0.35);
+
+      final PoseReporter eye = _reporter(_pairedSettings(role: 'eyepiece'), fake);
+      await eye.report(headingDeg: 10, pitchDeg: 20, identification: id);
+      expect(fake.calls.single.json['identification'], <String, dynamic>{
+        'name': '织女一',
+        'hip': 91262,
+        'separation_deg': 0.35,
+      });
+
+      final PoseReporter lens = _reporter(_pairedSettings(), fake);
+      await expectLater(
+          lens.report(headingDeg: 10, pitchDeg: 20, identification: id),
+          throwsA(isA<DeviceGatewayException>()
+              .having((e) => e.message, 'message', contains('目镜'))));
+      await expectLater(
+          eye.report(
+              headingDeg: 10,
+              pitchDeg: 20,
+              identification: const PoseIdentification()),
+          throwsA(isA<DeviceGatewayException>()
+              .having((e) => e.message, 'message', contains('空识别'))));
+      expect(fake.calls, hasLength(1));
+    });
   });
 
   group('指天视图上报条', () {

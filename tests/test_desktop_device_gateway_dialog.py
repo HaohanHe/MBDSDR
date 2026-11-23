@@ -134,6 +134,55 @@ def test_main_window_wires_gateway_action():
     assert hasattr(MainWindow, "_device_station_triplet")
 
 
+def test_eyepiece_identification_line(qapp):
+    """目镜识别结果单独一行显示，不并进融合位姿。"""
+    import json
+    import time
+
+    from device_gateway_dialog import DeviceGatewayDialog
+
+    dlg = DeviceGatewayDialog(_station(), port=0, hosts=["127.0.0.1"],
+                              registry=_registry())
+    try:
+        dlg.start_gateway()
+        gw = dlg._gateway
+        lens = gw.registry.pair("111111", "镜头手机", "lens")
+        eye = gw.registry.pair("111111", "目镜手机", "eyepiece")
+        dlg._refresh_roster()
+        assert dlg.eye_id_label.text() == "目镜识别：—"
+
+        now = time.time()
+        for paired, role, extra in [
+            (lens, "lens", {}),
+            (eye, "eyepiece", {"identification": {
+                "name": "织女一", "hip": 91262, "separation_deg": 0.35}}),
+        ]:
+            body = {
+                "schema": "sky-pose/1",
+                "source": paired["device"]["id"],
+                "role": role,
+                "t_utc": now,
+                "az_deg": 100.0,
+                "alt_deg": 40.0,
+                "accuracy_deg": 2.0,
+                "roll_deg": 0.0,
+                **extra,
+            }
+            status, raw, _ = gw.dispatch(
+                "POST", "/pose", json.dumps(body).encode(),
+                {"Authorization": "Bearer " + paired["token"]})
+            assert status == 200, raw
+
+        dlg._refresh_roster()
+        text = dlg.eye_id_label.text()
+        assert text.startswith("目镜识别：")
+        assert "织女一" in text
+        assert "HIP 91262" in text
+        assert "角距 0.35°" in text
+    finally:
+        dlg.close()
+
+
 def test_fuse_label_shows_weighted_pose_and_reason(qapp):
     """对话框把 lens+eyepiece 两条真实上报喂 fuse，显示加权结果与不可用原因。"""
     import json
