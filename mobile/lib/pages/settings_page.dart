@@ -77,6 +77,9 @@ class _SettingsPageState extends State<SettingsPage> {
   /// 最近一次取回的融合位姿摘要（null = 还没取过）。
   String? _gwFuseText;
 
+  /// 最近一次取回的逐设备位姿摘要（null = 还没取过）。
+  String? _gwPosesText;
+
   String get _apiKey => widget.settings.apiKey;
 
   static String _masked(String key) {
@@ -309,6 +312,7 @@ class _SettingsPageState extends State<SettingsPage> {
       _gwPassesText = null;
       _gwSpectrumText = null;
       _gwFuseText = null;
+      _gwPosesText = null;
     });
     _toast(l10n.toastGatewayUnpaired);
   }
@@ -657,6 +661,63 @@ class _SettingsPageState extends State<SettingsPage> {
     } on DeviceGatewayException catch (e) {
       if (!mounted) return;
       _toast(l10n.toastGatewayFuseFailed(e.message), error: true);
+    } finally {
+      if (mounted) setState(() => _gwBusy = false);
+    }
+  }
+
+  /// 取回逐设备位姿：一条设备一行；目镜的识别结果跟在同行末尾（单列、不融合）。
+  Future<void> _fetchPoses() async {
+    final AppLocalizations l10n = AppLocalizations.of(context)!;
+    if (_gwBusy) return;
+    final SettingsService s = widget.settings;
+    if (s.controlHubHost.trim().isEmpty) {
+      _toast(l10n.settingsGatewayHostMissing, error: true);
+      return;
+    }
+    setState(() => _gwBusy = true);
+    try {
+      final Map<String, dynamic> data =
+          await _gatewayClient().poses(s.deviceGatewayToken);
+      final Object? raw = data['poses'];
+      final List<Object?> poses = raw is List ? raw : const <Object?>[];
+      String text;
+      if (poses.isEmpty) {
+        text = l10n.settingsGatewayPosesEmpty;
+      } else {
+        final List<String> items = <String>[];
+        for (final Object? entry in poses) {
+          if (entry is! Map) continue;
+          final String role = _roleLabel(l10n, '${entry['role'] ?? ''}');
+          String numText(Object? v, int digits) =>
+              v is num ? v.toStringAsFixed(digits) : '—';
+          String item = l10n.settingsGatewayPoseItem(
+            role,
+            numText(entry['az_deg'], 1),
+            numText(entry['alt_deg'], 1),
+            numText(entry['accuracy_deg'], 1),
+          );
+          final Object? id = entry['identification'];
+          if (id is Map) {
+            final String name = '${id['name'] ?? ''}'.trim();
+            if (name.isNotEmpty) {
+              item += l10n.settingsGatewayPoseIdentification(
+                name,
+                id['hip'] is num ? '${id['hip']}' : '—',
+                numText(id['separation_deg'], 2),
+              );
+            }
+          }
+          items.add(item);
+        }
+        text = l10n.settingsGatewayPosesSummary(
+            '${items.length}', items.join('；'));
+      }
+      if (!mounted) return;
+      setState(() => _gwPosesText = text);
+    } on DeviceGatewayException catch (e) {
+      if (!mounted) return;
+      _toast(l10n.toastGatewayPosesFailed(e.message), error: true);
     } finally {
       if (mounted) setState(() => _gwBusy = false);
     }
@@ -1085,6 +1146,10 @@ class _SettingsPageState extends State<SettingsPage> {
                     onPressed: _gwBusy ? null : _fetchFuse,
                     child: Text(l10n.settingsGatewayFuse),
                   ),
+                  OutlinedButton(
+                    onPressed: _gwBusy ? null : _fetchPoses,
+                    child: Text(l10n.settingsGatewayPoses),
+                  ),
                 ],
               ),
               if (_gwPanoramaText != null)
@@ -1116,6 +1181,11 @@ class _SettingsPageState extends State<SettingsPage> {
                 Padding(
                   padding: const EdgeInsets.only(top: AppTokens.spacingS),
                   child: Text(_gwFuseText!, style: AppTokens.auxiliary),
+                ),
+              if (_gwPosesText != null)
+                Padding(
+                  padding: const EdgeInsets.only(top: AppTokens.spacingS),
+                  child: Text(_gwPosesText!, style: AppTokens.auxiliary),
                 ),
             ] else
               Text(

@@ -226,6 +226,38 @@
       "reason": {"type": "String"}
     }
   },
+  "settingsGatewayPoses": "读取位姿",
+  "settingsGatewayPosesEmpty": "位姿：还没有设备上报",
+  "settingsGatewayPosesSummary": "位姿（{count} 条）：{items}",
+  "@settingsGatewayPosesSummary": {
+    "placeholders": {
+      "count": {"type": "String"},
+      "items": {"type": "String"}
+    }
+  },
+  "settingsGatewayPoseItem": "{role} · 方位 {az}° 高度 {alt}° ±{acc}°",
+  "@settingsGatewayPoseItem": {
+    "placeholders": {
+      "role": {"type": "String"},
+      "az": {"type": "String"},
+      "alt": {"type": "String"},
+      "acc": {"type": "String"}
+    }
+  },
+  "settingsGatewayPoseIdentification": " · {name} HIP {hip} 角距 {sep}°",
+  "@settingsGatewayPoseIdentification": {
+    "placeholders": {
+      "name": {"type": "String"},
+      "hip": {"type": "String"},
+      "sep": {"type": "String"}
+    }
+  },
+  "toastGatewayPosesFailed": "读取位姿失败：{reason}",
+  "@toastGatewayPosesFailed": {
+    "placeholders": {
+      "reason": {"type": "String"}
+    }
+  },
   "settingsGatewayLeaseFree": "租约：空闲",
   "settingsGatewayLeaseHeld": "租约：{holder} 占用",
   "@settingsGatewayLeaseHeld": {

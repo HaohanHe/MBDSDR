@@ -226,6 +226,38 @@
       "reason": {"type": "String"}
     }
   },
+  "settingsGatewayPoses": "Read poses",
+  "settingsGatewayPosesEmpty": "Poses: no device has reported",
+  "settingsGatewayPosesSummary": "Poses ({count}): {items}",
+  "@settingsGatewayPosesSummary": {
+    "placeholders": {
+      "count": {"type": "String"},
+      "items": {"type": "String"}
+    }
+  },
+  "settingsGatewayPoseItem": "{role} · az {az}° alt {alt}° ±{acc}°",
+  "@settingsGatewayPoseItem": {
+    "placeholders": {
+      "role": {"type": "String"},
+      "az": {"type": "String"},
+      "alt": {"type": "String"},
+      "acc": {"type": "String"}
+    }
+  },
+  "settingsGatewayPoseIdentification": " · {name} HIP {hip} separation {sep}°",
+  "@settingsGatewayPoseIdentification": {
+    "placeholders": {
+      "name": {"type": "String"},
+      "hip": {"type": "String"},
+      "sep": {"type": "String"}
+    }
+  },
+  "toastGatewayPosesFailed": "Poses failed: {reason}",
+  "@toastGatewayPosesFailed": {
+    "placeholders": {
+      "reason": {"type": "String"}
+    }
+  },
   "settingsGatewayLeaseFree": "Lease: idle",
   "settingsGatewayLeaseHeld": "Lease: held by {holder}",
   "@settingsGatewayLeaseHeld": {

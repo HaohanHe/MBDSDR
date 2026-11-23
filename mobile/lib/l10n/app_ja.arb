@@ -226,6 +226,38 @@
       "reason": {"type": "String"}
     }
   },
+  "settingsGatewayPoses": "姿勢を取得",
+  "settingsGatewayPosesEmpty": "姿勢：まだ報告がありません",
+  "settingsGatewayPosesSummary": "姿勢（{count} 件）：{items}",
+  "@settingsGatewayPosesSummary": {
+    "placeholders": {
+      "count": {"type": "String"},
+      "items": {"type": "String"}
+    }
+  },
+  "settingsGatewayPoseItem": "{role}・方位 {az}° 高度 {alt}° ±{acc}°",
+  "@settingsGatewayPoseItem": {
+    "placeholders": {
+      "role": {"type": "String"},
+      "az": {"type": "String"},
+      "alt": {"type": "String"},
+      "acc": {"type": "String"}
+    }
+  },
+  "settingsGatewayPoseIdentification": "・{name} HIP {hip} 角距離 {sep}°",
+  "@settingsGatewayPoseIdentification": {
+    "placeholders": {
+      "name": {"type": "String"},
+      "hip": {"type": "String"},
+      "sep": {"type": "String"}
+    }
+  },
+  "toastGatewayPosesFailed": "姿勢の取得に失敗：{reason}",
+  "@toastGatewayPosesFailed": {
+    "placeholders": {
+      "reason": {"type": "String"}
+    }
+  },
   "settingsGatewayLeaseFree": "リース：空き",
   "settingsGatewayLeaseHeld": "リース：{holder} が使用中",
   "@settingsGatewayLeaseHeld": {

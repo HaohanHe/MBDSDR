@@ -89,10 +89,20 @@ class _FakeGateway {
         return const GatewayHttpResponse(200, _spectrumJson);
       case '/fuse':
         return const GatewayHttpResponse(200, _fuseJson);
+      case '/poses':
+        return const GatewayHttpResponse(200, _posesJson);
       default:
         return const GatewayHttpResponse(404, '{"reason":"not found"}');
     }
   }
+
+  static const String _posesJson =
+      '{"schema":"mbdsdr.sky-poses/1","poses":['
+      '{"schema":"sky-pose/1","source":"d1","role":"lens","t_utc":1.0,'
+      '"az_deg":76.9,"alt_deg":0.0,"accuracy_deg":1.0},'
+      '{"schema":"sky-pose/1","source":"d2","role":"eyepiece","t_utc":1.0,'
+      '"az_deg":78.0,"alt_deg":1.5,"accuracy_deg":0.8,'
+      '"identification":{"name":"织女一","hip":91262,"separation_deg":0.35}}]}';
 
   static const String _fuseJson =
       '{"schema":"mbdsdr.pose-fusion/1","observations":2,"valid":true,'
@@ -516,6 +526,74 @@ void main() {
     expect(find.text('融合不可用：没有可用观测：2 条全部被丢弃（陈旧）'),
         findsOneWidget);
     expect(find.textContaining('方位 '), findsNothing);
+  });
+
+  testWidgets('读取位姿：逐设备一行，目镜识别单列', (tester) async {
+    tester.view.physicalSize = const Size(420, 5200);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
+
+    final SettingsService settings =
+        SettingsService(kv: _MemKv(), secure: _MemSecure());
+    await settings.load();
+    settings.deviceGatewayToken = 'tok-1';
+    settings.deviceGatewayRole = 'handheld';
+    final _FakeGateway fake = _FakeGateway();
+
+    await tester.pumpWidget(_wrap(Scaffold(
+      body: SettingsPage(
+        settings: settings,
+        radio: RadioController(),
+        gatewayClientBuilder: (String host, int port) => DeviceGatewayClient(
+          host: host,
+          port: port,
+          transport: fake.call,
+        ),
+      ),
+    )));
+    await tester.pump();
+
+    await tester.tap(find.widgetWithText(OutlinedButton, '读取位姿'));
+    await tester.pumpAndSettle();
+    expect(fake.paths.map((Uri u) => u.path), <String>['/poses']);
+    expect(
+        find.text('位姿（2 条）：镜头（视觉初指向） · 方位 76.9° 高度 0.0° ±1.0°；'
+            '目镜（认星） · 方位 78.0° 高度 1.5° ±0.8° · '
+            '织女一 HIP 91262 角距 0.35°'),
+        findsOneWidget);
+  });
+
+  testWidgets('读取位姿：没有上报时如实说空', (tester) async {
+    tester.view.physicalSize = const Size(420, 5200);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
+
+    final SettingsService settings =
+        SettingsService(kv: _MemKv(), secure: _MemSecure());
+    await settings.load();
+    settings.deviceGatewayToken = 'tok-1';
+    settings.deviceGatewayRole = 'handheld';
+
+    await tester.pumpWidget(_wrap(Scaffold(
+      body: SettingsPage(
+        settings: settings,
+        radio: RadioController(),
+        gatewayClientBuilder: (String host, int port) => DeviceGatewayClient(
+          host: host,
+          port: port,
+          transport: (Uri url, String method, Map<String, String> headers,
+              String? payload) async {
+            return const GatewayHttpResponse(
+                200, '{"schema":"mbdsdr.sky-poses/1","poses":[]}');
+          },
+        ),
+      ),
+    )));
+    await tester.pump();
+
+    await tester.tap(find.widgetWithText(OutlinedButton, '读取位姿'));
+    await tester.pumpAndSettle();
+    expect(find.text('位姿：还没有设备上报'), findsOneWidget);
   });
 
   testWidgets('角色切到目镜后，配对请求带 eyepiece', (tester) async {
