@@ -2932,6 +2932,15 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `.trae/specs/mbdsdr-system-lifecycle/checklist.md` | 多机线/42（§279 Task 234） | 2026-11-23 23:56 | 本笔 |
 | `docs/PRD-现状对照.md` | 多机线/42（§279 P1-11 补谱分析） | 2026-11-23 23:56 | 本笔 |
 | `docs/COORDINATION.md` | 多机线/42（§279 记录 + §6.1） | 2026-11-23 23:56 | 本笔 |
+| `spatial/app/src/main/java/com/mbdsdr/spatial/sdr/SdrSession.kt` | 多机线/42（§280 授权→连接→调谐→释放编排） | 2026-11-24 00:00 | 本笔 |
+| `spatial/app/src/test/java/com/mbdsdr/spatial/SdrSessionTest.kt` | 多机线/42（§280 会话 9 条用例） | 2026-11-24 00:00 | 本笔 |
+| `spatial/README.md` | 多机线/42（§280 会话边界） | 2026-11-24 00:00 | 本笔 |
+| `.trae/specs/multi-device-interconnect/tasks.md` | 多机线/42（§280 M4.2 会话状态） | 2026-11-24 00:00 | 本笔 |
+| `.trae/specs/multi-device-interconnect/checklist.md` | 多机线/42（§280 会话项） | 2026-11-24 00:00 | 本笔 |
+| `.trae/specs/mbdsdr-system-lifecycle/tasks.md` | 多机线/42（§280 Task 235） | 2026-11-24 00:00 | 本笔 |
+| `.trae/specs/mbdsdr-system-lifecycle/checklist.md` | 多机线/42（§280 Task 235） | 2026-11-24 00:00 | 本笔 |
+| `docs/PRD-现状对照.md` | 多机线/42（§280 P1-11 补会话编排） | 2026-11-24 00:00 | 本笔 |
+| `docs/COORDINATION.md` | 多机线/42（§280 记录 + §6.1） | 2026-11-24 00:00 | 本笔 |
 
 > 上表各行均由 `claim` 台账推导：owner 原文与 `acquired_at` 直接取自台账，
 > 目的优先用台账里的 `claim_reason`，没有就如实写「未声明」，不补编。时间列只是
@@ -13472,6 +13481,36 @@ spec 的 M4.3 要求「未联网时显示上次结果/包内内容，不伪造�
 - 只有纯幅度，没有 dBm 标定/天线增益/滤波补偿；不能拿数值当绝对功率。
 - 未接 rtl_tcp 读取循环与 UI；没有帧率/实时性验证。
 - 测试音是合成复数指数，不等于真实信号环境。
+
+## 280. M4.2 SDR 会话编排：授权→连接→调谐→释放（2026-11-24）
+
+**依据**：§271–§279 各层都在，但没有一处把它们按正确顺序串起来；一旦
+连接失败或参数越界，最容易留下「租约占着、连接半开」的脏状态。
+
+**做了什么**
+- 新 `spatial/.../sdr/SdrSession.kt`：
+  - `SdrGatewayPort` 窄接口（`acquire`/`release`）+ `DeviceGatewaySdrPort`
+    适配现有 `DeviceGatewayClient`；单测用假端口。
+  - `start()`：申请租约 → 校验 `rtl_tcp.host/port` → 连接 → 调谐；
+    任一步失败**关闭连接并尝试释放租约**，再抛出原错误。
+    `rtl_tcp` 缺失/非法时释放并抛 `RtlTcpException`。
+  - `readIq()` 单次读取（短读允许）；`close()` 关闭+释放、幂等；
+    重复 `start()` 抛 `IllegalStateException`，不重复占租约。
+  - 不自己起读取循环、不做 FFT、不碰 UI。
+- 常量：`DEFAULT_SAMPLE_RATE_HZ=2_400_000`、`DEFAULT_FFT_SIZE=1024`（2 的幂）。
+
+**验证**
+- 新 `SdrSessionTest` 9 条：成功链路（调谐 5 命令 + 读 I/Q + close 释放）、
+  缺/非法 rtl_tcp、连接失败、坏问候头、越界调谐、授权失败不释放、
+  重复 start、未启动读取。
+- `./gradlew.bat testDebugUnitTest --rerun-tasks --no-daemon --offline`：
+  **22 suite / 197 用例 / 0 失败 / 1 跳过**。
+- 未改 Python/手机；未碰真实 dongle（仍由模拟器会话占用）。
+
+**诚实边界**
+- 仍没有 UI 按钮与读取循环；不能对用户宣称「头显已能收频谱」。
+- 释放租约是 best-effort（失败被吞掉），没有重试/告警通道。
+- 未与真实 rtl_tcp 联调；`close` 与租约到期的竞态未实测。
 
 
 
