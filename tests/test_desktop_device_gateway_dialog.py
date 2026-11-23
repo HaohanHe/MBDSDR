@@ -132,3 +132,55 @@ def test_main_window_wires_gateway_action():
     assert "DeviceGatewayDialog" in src
     assert "self._device_station_triplet" in src
     assert hasattr(MainWindow, "_device_station_triplet")
+
+
+def test_fuse_label_shows_weighted_pose_and_reason(qapp):
+    """对话框把 lens+eyepiece 两条真实上报喂 fuse，显示加权结果与不可用原因。"""
+    import json
+    import time
+
+    from device_gateway_dialog import DeviceGatewayDialog
+
+    dlg = DeviceGatewayDialog(_station(), port=0, hosts=["127.0.0.1"],
+                              registry=_registry())
+    try:
+        dlg.start_gateway()
+        gw = dlg._gateway
+        lens = gw.registry.pair("111111", "镜头手机", "lens")
+        eye = gw.registry.pair("111111", "目镜手机", "eyepiece")
+        dlg._refresh_roster()
+        # 还没位姿：如实说不可用，并带原因，不显示猜测朝向。
+        assert "不可用" in dlg.fuse_label.text()
+        assert "observations 为空" in dlg.fuse_label.text()
+
+        now = time.time()
+        rows = [
+            (lens, "lens", 100.0, 40.0, 4.0),
+            (eye, "eyepiece", 110.0, 44.0, 1.0),
+        ]
+        for paired, role, az, alt, acc in rows:
+            body = {
+                "schema": "sky-pose/1",
+                "source": paired["device"]["id"],
+                "role": role,
+                "t_utc": now,
+                "az_deg": az,
+                "alt_deg": alt,
+                "accuracy_deg": acc,
+                "roll_deg": 0.0,
+            }
+            status, raw, _ = gw.dispatch(
+                "POST", "/pose", json.dumps(body).encode(),
+                {"Authorization": "Bearer " + paired["token"]})
+            assert status == 200, raw
+
+        dlg._refresh_roster()
+        text = dlg.fuse_label.text()
+        assert text.startswith("融合位姿：方位")
+        assert "多机融合" in text
+        assert "2 条观测" in text
+        # 精度加权：目镜 1° 权重大，融合方位更靠近 110°。
+        az_text = text.split("方位 ")[1].split("°")[0]
+        assert 105.0 < float(az_text) < 110.0
+    finally:
+        dlg.close()

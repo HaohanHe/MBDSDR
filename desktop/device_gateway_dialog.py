@@ -142,6 +142,12 @@ class DeviceGatewayDialog(QDialog):
             Qt.TextInteractionFlag.TextSelectableByMouse)
         outer.addWidget(self.url_label)
 
+        self.fuse_label = QLabel("融合位姿：—")
+        self.fuse_label.setWordWrap(True)
+        self.fuse_label.setTextInteractionFlags(
+            Qt.TextInteractionFlag.TextSelectableByMouse)
+        outer.addWidget(self.fuse_label)
+
         self.table = QTableWidget(0, 3)
         self.table.setHorizontalHeaderLabels(["角色", "设备名", "最近心跳"])
         self.table.verticalHeader().setVisible(False)
@@ -166,6 +172,7 @@ class DeviceGatewayDialog(QDialog):
         if not running:
             self.code_label.setText("—")
             self.url_label.setText("网关未启动")
+            self.fuse_label.setText("融合位姿：—")
             self.table.setRowCount(0)
             self.status.setText("未启动。选地址后点「启动网关」。")
 
@@ -258,6 +265,7 @@ class DeviceGatewayDialog(QDialog):
             for col, text in enumerate(values):
                 self.table.setItem(row, col, QTableWidgetItem(text))
         poses = gw.recent_poses()
+        self._update_fuse_label(gw)
         if getattr(self, "_station_missing", False):
             self.status.setText(
                 f"已配对 {len(devices)} 台；当前未设置站址：/panorama 会回 500"
@@ -267,6 +275,27 @@ class DeviceGatewayDialog(QDialog):
                 f"已配对 {len(devices)} 台；收到 {len(poses)} 个设备的位姿。")
         else:
             self.status.setText(f"已配对 {len(devices)} 台；暂无位姿上报。")
+
+    def _update_fuse_label(self, gw: DeviceGateway) -> None:
+        """把 lens+eyepiece 的融合结果如实显示；不可用时给原因，不猜朝向。"""
+        try:
+            fused = gw.fuse_now()
+        except Exception as exc:  # noqa: BLE001 - 失败要可见
+            self.fuse_label.setText(f"融合位姿：计算失败（{exc}）")
+            return
+        if not fused.get("valid"):
+            reason = str(fused.get("reason") or "未知原因")
+            self.fuse_label.setText(f"融合位姿：不可用（{reason}）")
+            return
+        level = {"single": "单条", "fused": "多机融合"}.get(
+            str(fused.get("level")), str(fused.get("level")))
+        self.fuse_label.setText(
+            "融合位姿：方位 {az:.1f}° 高度 {alt:.1f}° · 精度 {acc:.2f}°"
+            " · {level}（{n} 条观测：{src}）".format(
+                az=float(fused["az_deg"]), alt=float(fused["alt_deg"]),
+                acc=float(fused["accuracy_deg"]), level=level,
+                n=fused.get("observations", 0),
+                src=", ".join(str(s) for s in fused.get("sources") or [])))
 
     # ------------------------------------------------------------------
     def closeEvent(self, event) -> None:  # noqa: N802

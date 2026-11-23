@@ -2736,6 +2736,16 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `.trae/specs/multi-device-interconnect/checklist.md` | 多机线/42（§259 手机配对项勾选） | 2026-11-23 23:30 | 本笔 |
 | `docs/PRD-现状对照.md` | 多机线/42（§259 P1-11 补手机配对） | 2026-11-23 23:30 | 本笔 |
 | `docs/COORDINATION.md` | 多机线/42（§259 记录 + §6.1） | 2026-11-23 23:30 | 本笔 |
+| `mbdsdr_ai/device_gateway.py` | 多机线/42（§260 fuse_now + GET /fuse） | 2026-11-23 23:55 | 本笔 |
+| `tests/test_device_gateway.py` | 多机线/42（§260 融合 6 条用例） | 2026-11-23 23:55 | 本笔 |
+| `desktop/device_gateway_dialog.py` | 多机线/42（§260 融合位姿行） | 2026-11-23 23:55 | 本笔 |
+| `tests/test_desktop_device_gateway_dialog.py` | 多机线/42（§260 对话框融合用例） | 2026-11-23 23:55 | 本笔 |
+| `.trae/specs/multi-device-interconnect/tasks.md` | 多机线/42（§260 M3.2 勾选） | 2026-11-23 23:55 | 本笔 |
+| `.trae/specs/multi-device-interconnect/checklist.md` | 多机线/42（§260 融合项勾选） | 2026-11-23 23:55 | 本笔 |
+| `.trae/specs/mbdsdr-system-lifecycle/tasks.md` | 多机线/42（§260 Task 217） | 2026-11-23 23:55 | 本笔 |
+| `.trae/specs/mbdsdr-system-lifecycle/checklist.md` | 多机线/42（§260 Task 217） | 2026-11-23 23:55 | 本笔 |
+| `docs/PRD-现状对照.md` | 多机线/42（§260 P1-11 补融合） | 2026-11-23 23:55 | 本笔 |
+| `docs/COORDINATION.md` | 多机线/42（§260 记录 + §6.1） | 2026-11-23 23:55 | 本笔 |
 
 > 上表各行均由 `claim` 台账推导：owner 原文与 `acquired_at` 直接取自台账，
 > 目的优先用台账里的 `claim_reason`，没有就如实写「未声明」，不补编。时间列只是
@@ -12674,7 +12684,39 @@ PRD §8 冲刺序列 P1「天文通式观星指数」。本轮只做**有可信�
 **诚实边界**
 - 未在真机上跑手机↔桌面配对；本轮验证是注入传输的离线回归。
 - 主机直接复用 ControlHub 的 host；手机侧没有局域网自动发现，也未做 TLS。
-- 名册列表尚未在手机展示（M2.4）；两条位姿尚未喂 `sky_pose_fuse`（M3）。
+- 名册列表尚未在手机展示（M2.4）；两条位姿融合见 §260（M3.2）。
+
+## 260. M3.2：两条位姿喂融合内核 + 桌面对话框显示（2026-11-23）
+
+**依据**：`multi-device-interconnect` M3.2——两台手机（镜头/目镜）各自上报后，
+权威端需要把它们喂 `sky_pose_fuse` 的同一内核，成功给加权位姿、失败给原因。
+
+**做了什么**
+- `mbdsdr_ai/device_gateway.py`：
+  - 新增 `DeviceGateway.fuse_now(now_utc=None)`：把 `recent_poses()` 里
+    lens/eyepiece 的最新一条转成 `PoseObservation`，调用
+    `sky_pointing.fuse_poses`（与 `sky_pose_fuse` 工具同一纯数值内核）；
+    返回 `mbdsdr.pose-fusion/1`（valid/az/alt/roll/fov/accuracy/sources/
+    dropped/level/reason/observations）。
+  - 新增 `GET /fuse`：任意已配对角色可读（只读聚合，不新增写面）；
+    未配对 401、非 GET 405。
+  - 模块 docstring 与 CLI 端点清单同步。
+- `desktop/device_gateway_dialog.py`：新增「融合位姿」行，2 s 名册刷新时同步
+  更新——有效显示「方位/高度/精度/多机融合（N 条观测：来源）」；
+  不可用显示 reason（例如「observations 为空」「陈旧（age …）」），
+  停止/关闭即还原为「—」。
+
+**验证**
+- `pytest tests/test_device_gateway.py` → **26 passed**：空观测不可用、
+  双条精度加权（1° 目镜 + 4° 镜头 → 方位落在 105–110°）、陈旧 10 s 被
+  dropped 且 reason 含「陈旧」、handheld 可读 /fuse、未配对 401、POST 405。
+- `pytest tests/test_desktop_device_gateway_dialog.py` → **7 passed**：真实两次
+  `POST /pose` 后 `_refresh_roster()` 显示加权位姿（方位 105–110°、2 条观测）。
+
+**诚实边界**
+- 融合陈旧阈值沿用 `fuse_poses` 默认 2 s；两机时钟仍由设备自己对齐。
+- 手机端还没有真实传感器采集/上报 UI（`postPose` 数据层已备）。
+- 目镜识别结果（星名/HIP/角距残差）尚未单列，仍待 M3.3。
 
 
 

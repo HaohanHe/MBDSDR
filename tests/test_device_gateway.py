@@ -298,6 +298,87 @@ def test_station_provider_reorders_each_call(monkeypatch):
         provider()
 
 
+# ---------------------------------------------------------------- 多机融合
+def _pair_two(gw):
+    """配对 lens + eyepiece，返回 (lens 配对回执, eyepiece 配对回执)。"""
+    _, lens = _pair(gw, name="手机A（镜头）", role="lens")
+    _, eye = _pair(gw, name="手机B（目镜）", role="eyepiece")
+    return lens, eye
+
+
+def test_fuse_without_poses_is_invalid_and_says_so():
+    gw = DeviceGateway(registry=_registry())
+    lens, _ = _pair_two(gw)
+    status, d = _get(gw, "/fuse", lens["token"])
+    assert status == 200
+    assert d["schema"] == "mbdsdr.pose-fusion/1"
+    assert d["observations"] == 0
+    assert d["valid"] is False
+    assert d["az_deg"] is None and d["alt_deg"] is None
+    assert "observations 为空" in d["reason"]
+
+
+def test_fuse_two_fresh_poses_weights_by_accuracy():
+    gw = DeviceGateway(registry=_registry())
+    lens, eye = _pair_two(gw)
+    now = time.time()
+    assert _pose(gw, lens["token"], lens["device"]["id"], role="lens",
+                 t_utc=now, az_deg=100.0, alt_deg=40.0, accuracy_deg=4.0,
+                 fov_deg=40.0)[0] == 200
+    assert _pose(gw, eye["token"], eye["device"]["id"], role="eyepiece",
+                 t_utc=now, az_deg=110.0, alt_deg=44.0, accuracy_deg=1.0,
+                 fov_deg=8.0)[0] == 200
+
+    status, d = _get(gw, "/fuse", lens["token"])
+    assert status == 200
+    assert d["valid"] is True
+    assert d["level"] == "fused"
+    assert d["observations"] == 2
+    assert len(d["sources"]) == 2
+    # 权重 1/acc²：目镜(1°) 权 1.0，镜头(4°) 权 0.0625 → 方位靠近 110°。
+    assert 100.0 < d["az_deg"] < 110.0
+    assert d["az_deg"] > 105.0
+    assert 40.0 < d["alt_deg"] < 44.0
+    assert d["accuracy_deg"] < 1.0
+    assert d["reason"] == ""
+
+
+def test_fuse_stale_pose_is_dropped_with_reason():
+    gw = DeviceGateway(registry=_registry())
+    lens, _ = _pair_two(gw)
+    # /pose 的时钟窗是 ±300 s，但融合的陈旧阈值是 2 s：这里放一条 10 s 前的。
+    assert _pose(gw, lens["token"], lens["device"]["id"], role="lens",
+                 t_utc=time.time() - 10.0)[0] == 200
+    status, d = _get(gw, "/fuse", lens["token"])
+    assert status == 200
+    assert d["valid"] is False
+    assert d["az_deg"] is None
+    assert len(d["dropped"]) == 1
+    assert "陈旧" in d["dropped"][0]["reason"]
+    assert "没有可用观测" in d["reason"]
+
+
+def test_fuse_is_read_only_for_handheld_and_requires_token():
+    gw = DeviceGateway(registry=_registry())
+    _, hand = _pair(gw, name="手持机", role="handheld")
+    status, d = _get(gw, "/fuse", hand["token"])
+    assert status == 200
+    assert d["valid"] is False
+
+    status, d = _get(gw, "/fuse")
+    assert status == 401
+    assert d["error"] == "unauthorized"
+
+
+def test_fuse_rejects_non_get():
+    gw = DeviceGateway(registry=_registry())
+    lens, _ = _pair_two(gw)
+    status, raw, _ = gw.dispatch(
+        "POST", "/fuse", b"{}", {"Authorization": f"Bearer {lens['token']}"})
+    assert status == 405
+    assert json.loads(raw)["error"] == "method_not_allowed"
+
+
 # ---------------------------------------------------------------- socket 冒烟
 def test_socket_smoke_health_and_pair():
     gw = DeviceGateway(registry=_registry(),

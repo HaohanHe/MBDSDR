@@ -10,8 +10,11 @@
    token 只在内存里，带 TTL，可吊销。
 2. **角色**：`lens`（镜头粗指向）/ `eyepiece`（目镜认星）/ `handheld`（手持只读）
    / `headset`（空间化只读）。角色不符就拒绝对应动作。
-3. **只读 + 位姿**：`/panorama`、`/roster`、`/poses` 是读；只有 `lens/eyepiece`
-   能 `POST /pose`。**没有任何写硬件/改站址/调谐端点**——那些仍归桌面权威端。
+3. **只读 + 位姿**：`/panorama`、`/roster`、`/poses`、`/fuse` 是读；只有
+   `lens/eyepiece` 能 `POST /pose`。**没有任何写硬件/改站址/调谐端点**——
+   那些仍归桌面权威端。
+4. **多机融合**：`/fuse` 把两条位姿喂给 `sky_pointing.fuse_poses`（与
+   `sky_pose_fuse` 工具同一内核）；不可用时 `valid=false` + 原因，不猜朝向。
 
 安全边界（与 `web_bridge_host.py` 的本地桥分开）
 ================================================
@@ -297,6 +300,38 @@ class DeviceGateway:
         rows.sort(key=lambda r: (r["role"], r["source"]))
         return [dict(r) for r in rows]
 
+    def fuse_now(self, now_utc: Optional[float] = None) -> Dict[str, Any]:
+        """把 lens/eyepiece 的最近位姿喂给 `fuse_poses`，输出融合信封。
+
+        与 `sky_pose_fuse` 工具共用同一份纯数值融合内核：精度加权、逐条
+        报告丢弃原因；不可用时 `valid=False` 且朝向字段全为 None，
+        绝不返回猜测朝向。默认陈旧阈值沿用 `fuse_poses` 的 2 s。
+        """
+        from .sky_pointing import PoseObservation, fuse_poses
+
+        now = time.time() if now_utc is None else float(now_utc)
+        observations = []
+        for row in self.recent_poses():
+            if row.get("role") not in POSE_ROLES:
+                continue
+            fov = row.get("fov_deg")
+            observations.append(PoseObservation(
+                source=str(row.get("source") or ""),
+                t_utc=float(row.get("t_utc") or 0.0),
+                az_deg=float(row.get("az_deg") or 0.0),
+                alt_deg=float(row.get("alt_deg") or 0.0),
+                accuracy_deg=float(row.get("accuracy_deg") or 0.0),
+                roll_deg=float(row.get("roll_deg") or 0.0),
+                fov_deg=None if fov is None else float(fov),
+            ))
+        fused = fuse_poses(observations, now)
+        return {
+            "schema": "mbdsdr.pose-fusion/1",
+            "now_utc": now,
+            "observations": len(observations),
+            **fused,
+        }
+
     # ------------------------------------------------------------------ 路由
     def dispatch(self, method: str, path: str, body: bytes = b"",
                  headers: Optional[Dict[str, str]] = None
@@ -397,6 +432,11 @@ class DeviceGateway:
                 "schema": "mbdsdr.sky-poses/1",
                 "poses": self.recent_poses(),
             }), "application/json"
+
+        if route == "/fuse":
+            if method != "GET":
+                return 405, self._json({"ok": False, "error": "method_not_allowed"}), "application/json"
+            return 200, self._json(self.fuse_now()), "application/json"
 
         return 404, self._json({"ok": False, "error": "not_found"}), "application/json"
 
@@ -541,7 +581,7 @@ def _main(argv: Optional[List[str]] = None) -> int:
     print(f"设备网关已启动：{url}")
     print(f"配对码：{gw.registry.code}（只给权威端看，不进 API 回执）")
     print("可用端点：GET /health、POST /pair、GET /roster、GET /panorama、"
-          "POST /pose、GET /poses；没有写硬件端点。")
+          "POST /pose、GET /poses、GET /fuse；没有写硬件端点。")
     print("全景数据：" + ("允许联网现采" if args.allow_live
                         else "只读 15 分钟内缓存快照（--allow-live 可现采）"))
     print("Ctrl+C 结束。")
