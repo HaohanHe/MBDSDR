@@ -423,7 +423,7 @@ void main() {
     expect(loc.resolves, 1);
     expect(controller.passes, isNotEmpty, reason: 'stations 组应有 ISS 过境');
 
-    controller.setGroup(TleGroup.noaa);
+    controller.setGroup(TleGroup.weather);
     // setGroup 内部 refresh() 异步执行；让微任务跑完。
     await Future<void>.delayed(Duration.zero);
     await Future<void>.delayed(Duration.zero);

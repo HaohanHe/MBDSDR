@@ -74,13 +74,14 @@ class PredictedPass {
 class SatPassesService {
   SatPassesService({
     TleClient? tleClient,
-    this.group = TleGroup.noaa,
+    this.group = TleGroup.weather,
     this.now,
   }) : _tle = tleClient ?? TleClient();
 
   final TleClient _tle;
 
-  /// 默认拉取的 Celestrak 分组（NOAA 极轨气象星 = 本 app 的 SDR 卫星对象）。
+  /// 默认拉取的 Celestrak 分组（NOAA 极轨气象星在本组的 `weather` 里；
+  /// Celestrak 没有单独的 `noaa` 分组）。
   final TleGroup group;
 
   /// 时钟缝（返回 UTC）；默认 [DateTime.now]。测试注入固定时刻。

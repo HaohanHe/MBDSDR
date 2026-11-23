@@ -2651,6 +2651,13 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `tests/test_main_window.py` | 桌面联动线/31（菜单项存在 + 点击委托断言） | 2026-11-23 20:28 | 本笔 |
 | `docs/COORDINATION.md` | 桌面联动线/31（§248 三端同轮推进记录） | 2026-11-23 20:30 | 本笔 |
 | `desktop/README.md` | 桌面联动线/31（补「导出头显观测包」用法与口径） | 2026-11-23 20:32 | 本笔 |
+| `mobile/lib/pages/sky_page.dart` | 移动端走查线/23（§249 竖屏单一滚动 + 切组清空 + 错误中文化） | 2026-11-23 20:45 | 本笔 |
+| `mobile/lib/services/tle_client.dart` | 移动端走查线/23（删除 Celestrak 不存在的 noaa 分组） | 2026-11-23 20:45 | 本笔 |
+| `mobile/lib/services/sat_passes_provider.dart` | 移动端走查线/23（默认分组改 weather） | 2026-11-23 20:45 | 本笔 |
+| `mobile/test/sky_page_test.dart` | 移动端走查线/23（切组测试改用 weather） | 2026-11-23 20:45 | 本笔 |
+| `mobile/test/sky_layout_small_screen_test.dart` | 移动端走查线/23（列表不自滚回归 + 雷达最小高） | 2026-11-23 20:45 | 本笔 |
+| `mobile/README.md` | 移动端走查线/23（§249 验证状态与 adb reverse 通路） | 2026-11-23 20:47 | 本笔 |
+| `docs/COORDINATION.md` | 移动端走查线/23（§249 记录） | 2026-11-23 20:47 | 本笔 |
 
 > 上表各行均由 `claim` 台账推导：owner 原文与 `acquired_at` 直接取自台账，
 > 目的优先用台账里的 `claim_reason`，没有就如实写「未声明」，不补编。时间列只是
@@ -12154,3 +12161,45 @@ rtl_tcp 接进手机端。
 - 头显四窗、手势、空间音频、真机端到端仍未验证。
 
 **诚实边界**：头显侧证据是 JVM 单测与 Python 契约测试，不是设备运行结果。
+
+## 249. 竖屏列表改单一滚动 + 移除无效 noaa 分组 + 切组不再挂旧数据（2026-11-23）
+
+**背景**：继续三端推进时回到手机端，把 §247「未验证」里那条手感问题查清并修掉。
+
+**缺陷一：竖屏过境列表自带滚动，吃掉整页手势**
+- 现象（`mw_80/81`）：过境行被底部导航遮住半条；在列表区下滑回不到上面的雷达。
+- 修复（[sky_page.dart](file:///d:/mbdsdr/MBDSDR/mobile/lib/pages/sky_page.dart)）：竖屏
+  `_PassList` 加 `embedded`，`shrinkWrap: true` + `NeverScrollableScrollPhysics`，整块展开，
+  由外层 `SingleChildScrollView` 统一滚动；滚动区底部留 24 dp 空白。
+- 装机复验（`mw_83`→`mw_85`）：从列表区上滑能带动整页，ISS 整条完整可见，不再被导航栏裁半。
+- 回归测试：`sky_layout_small_screen_test` 新增「竖屏过境列表必须不自带滚动」。
+
+**缺陷二：`noaa` 分组在 Celestrak 不存在，点一下就把英文报错糊到脸上**
+- 现象（`mw_107`）：红色横幅 `GROUP=noaa not found`；且横幅下面还列着 weather 组的 DMSP，
+  看起来像「noaa 组有数据」。
+- 修复：
+  1. [tle_client.dart](file:///d:/mbdsdr/MBDSDR/mobile/lib/services/tle_client.dart) 删除
+     `TleGroup.noaa`（NOAA 极轨星本来就在 `weather` 组）；
+     [sat_passes_provider.dart](file:///d:/mbdsdr/MBDSDR/mobile/lib/services/sat_passes_provider.dart)
+     默认分组改 `weather`。
+  2. `SkyController.setGroup` 先清空 `_tles/_visible/_passes/_selectedName` 再 `refresh()`——
+     拉取失败也绝不把上一组数据挂在新组名下。
+  3. 错误横幅改显示 `TleFetchException.message`（中文原因），不再把异常类名糊给用户。
+- 装机复验（`mw_108`）：分组行只剩 `stations / amateur / weather / gnss`，`noaa` 已消失。
+
+**顺带解决：模拟器连宿主 rtl_tcp 的通路**
+- `10.0.2.2:1234` 这次连不上（App 停在「设备断开，等待重插」）；改
+  `adb reverse tcp:1234 tcp:1234` + App 填 `127.0.0.1:1234` 后立刻连上（`mw_102`）：
+  「rtl_tcp 已连接」、RSSI −30.4 dBFS（实测峰值）、2.048 MS/s（设备报告）、
+  PK 143.641 MHz / SNR 12 dB、瀑布图真实绘制。
+- 与 §245 记录的 `10.0.2.2` 路径不一致，**本次 10.0.2.2 失败原因未查明**；
+  下次优先用 `adb reverse`（不依赖 qemu 的 10.0.2.2 转发）。
+
+**仍未验证（不写成已验证）**
+- 「捕获 → 指向」闭环**还是没点通**，原因已查明不是 UI：当前 weather 组返回的过境全是
+  DMSP（`mw_109/110/111`），一律「无下行频率数据」；下行频率目录里的 NOAA 15/18/19
+  在 2026 年的 weather 组已不返回。**要不要补 Meteor M2-3/M2-4 等真实下行频率，
+  需先核实频率与在轨状态再动，不猜。**
+- 竖屏「下滑回顶」在 `adb input swipe` 注入下始终无效（上滑有效），无法判定是注入问题
+  还是真机手感问题；widget 层已证实是单一滚动容器。
+- 全部结论来自 API35 模拟器 + 宿主 RTL2832U，不是物理手机。

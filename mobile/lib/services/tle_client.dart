@@ -4,11 +4,14 @@ import 'dart:io';
 import 'package:mbdsdr_mobile/astro/tle.dart';
 
 /// Celestrak 卫星分组（与 gp.php?GROUP= 对应）。
+///
+/// 不含 `noaa`：Celestrak 的 gp.php 没有这个分组名（实测会回
+/// `GROUP=noaa not found`）。NOAA 极轨气象星本来就在 `weather` 组里，
+/// 再挂一个注定失败的分组只会把英文报错糊到用户脸上。
 enum TleGroup {
   stations,
   amateur,
   weather,
-  noaa,
   gnss;
 
   /// Celestrak 分组名。
@@ -16,7 +19,6 @@ enum TleGroup {
         TleGroup.stations => 'stations',
         TleGroup.amateur => 'amateur',
         TleGroup.weather => 'weather',
-        TleGroup.noaa => 'noaa',
         // GNSS 导航星座合集（GPS/GLONASS/Galileo/BeiDou），供在视导航星预测。
         TleGroup.gnss => 'gnss',
       };

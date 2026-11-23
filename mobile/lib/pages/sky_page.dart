@@ -324,7 +324,15 @@ class SkyController extends ChangeNotifier {
   }
 
   void setGroup(TleGroup g) {
+    if (g == _group) return;
     _group = g;
+    // 切组先摘掉上一组的星点/过境/选中：拉取失败时也不能把旧组数据
+    // 继续挂在新组名下（2026-11-23 模拟器实测：noaa 组报错后仍列出
+    // weather 组的 DMSP，像是「noaa 有数据」）。
+    _tles = const [];
+    _visible = const [];
+    _passes = const [];
+    _selectedName = null;
     refresh();
   }
 
@@ -361,7 +369,8 @@ class SkyController extends ChangeNotifier {
         _navTles = const [];
       }
     } on TleFetchException catch (e) {
-      _error = '$e';
+      // 只给中文原因，不把异常类名糊到用户脸上。
+      _error = e.message;
     } catch (e) {
       _error = '刷新失败：$e';
     }
@@ -634,6 +643,11 @@ class _SkyPageState extends State<SkyPage> {
           scrollable
               ? SizedBox(height: height, child: child)
               : Expanded(flex: flex, child: child);
+      // 竖屏：过境列表整体展开交给外层整页滚动。若列表自带滚动，手势会被
+      // 内层吃掉、用户回不到上面的雷达，行尾「捕获」按钮也常被底部导航压住
+      //（2026-11-23 模拟器实测：mw_80/81 只能滚到半条）。
+      Widget passSlot(Widget child, {int flex = 2}) =>
+          scrollable ? child : Expanded(flex: flex, child: child);
       return Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -669,14 +683,13 @@ class _SkyPageState extends State<SkyPage> {
           ),
           if (_c.selectedVisibility != null)
             slot(_GuidanceCard(controller: _c), height: 104),
-          slot(
+          passSlot(
             _PassList(
               passes: _c.passes,
               controller: _c,
               clock: widget._clock,
+              embedded: scrollable,
             ),
-            flex: 2,
-            height: 168,
           ),
           slot(_NavSatList(controller: _c), flex: 2, height: 168),
         ],
@@ -704,6 +717,8 @@ class _SkyPageState extends State<SkyPage> {
               );
               return SingleChildScrollView(
                 key: const Key('sky-portrait-scroll'),
+                // 底部留白：竖屏最后一项别贴着底部导航，滚动到底也看得全。
+                padding: const EdgeInsets.only(bottom: AppTokens.spacingXL),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
@@ -1187,6 +1202,7 @@ class _PassList extends StatelessWidget {
     required this.passes,
     required this.controller,
     this.clock,
+    this.embedded = false,
   });
   final List<Pass> passes;
   final SkyController controller;
@@ -1194,14 +1210,25 @@ class _PassList extends StatelessWidget {
   /// 指天视图的时间源；与天空页共用，测试可注入。
   final DateTime Function()? clock;
 
+  /// 嵌在外层整页滚动里时为 true：列表不自带滚动，整块展开。
+  /// 否则内层 ListView 会吃掉竖屏下滑手势（用户回不到上面的雷达）。
+  final bool embedded;
+
   @override
   Widget build(BuildContext context) {
     if (passes.isEmpty) {
-      return const Center(
-        child: Text('未来 24h 无可见过境', style: AppTokens.auxiliary),
-      );
+      const Widget empty =
+          Text('未来 24h 无可见过境', style: AppTokens.auxiliary);
+      return embedded
+          ? const Padding(
+              padding: EdgeInsets.all(AppTokens.spacingS),
+              child: Center(child: empty),
+            )
+          : const Center(child: empty);
     }
     return ListView.builder(
+      shrinkWrap: embedded,
+      physics: embedded ? const NeverScrollableScrollPhysics() : null,
       itemCount: passes.length,
       itemBuilder: (context, i) {
         final p = passes[i];

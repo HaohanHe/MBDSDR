@@ -84,6 +84,36 @@ void main() {
     expect(find.text('本站 31.25, 121.5（系统定位）'), findsOneWidget);
   });
 
+  testWidgets('竖屏：过境列表不自带滚动，交给整页滚动（否则回不到雷达）',
+      (WidgetTester tester) async {
+    tester.view.physicalSize = const Size(720, 1280);
+    tester.view.devicePixelRatio = 2.0;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    await tester.pumpWidget(MaterialApp(
+      home: SkyPage(
+        tleClient: _FakeTleClient(),
+        locationService: _AvailableLocation(),
+        orientationService: _NoOrientation(),
+        clock: () => DateTime.utc(2026, 10, 27, 12),
+      ),
+    ));
+    await tester.pump();
+    await tester.pump(const Duration(seconds: 1));
+
+    expect(tester.takeException(), isNull);
+
+    // 2026-11-23 模拟器实测：过境列表自带 ListView 时，下滑手势被内层吃掉，
+    // 用户再也回不到上面的雷达，行尾「捕获」也被底部导航压住。
+    // 竖屏（embedded）必须把列表铺开、由外层 SingleChildScrollView 统一滚动。
+    final Finder nonScrollingLists = find.byWidgetPredicate(
+      (Widget w) => w is ListView && w.physics is NeverScrollableScrollPhysics,
+    );
+    expect(nonScrollingLists, findsAtLeastNWidgets(1),
+        reason: '竖屏过境列表必须不自带滚动');
+  });
+
   testWidgets('顶部被首跑引导横幅占掉高度时，雷达不被压成点（最小高 220 dp）',
       (WidgetTester tester) async {
     tester.view.physicalSize = const Size(720, 1280);
