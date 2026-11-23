@@ -3099,6 +3099,8 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `mobile/test/device_gateway_client_test.dart` | 多机线/42（§299 定长请求体修复 + 模拟器真实配对（提交后释放）） | 2026-11-24 01:28 | 本笔 |
 | `mobile/README.md` | 多机线/42（§299 定长请求体修复 + 模拟器真实配对（提交后释放）） | 2026-11-24 01:28 | 本笔 |
 | `docs/COORDINATION.md` | 多机线/42（§299 定长请求体修复 + 模拟器真实配对（提交后释放）） | 2026-11-24 01:28 | 本笔 |
+| `mobile/README.md` | 多机线/42（§300 补录模拟器全景实测（提交后释放）） | 2026-11-24 01:29 | 本笔 |
+| `docs/COORDINATION.md` | 多机线/42（§300 补录模拟器全景实测（提交后释放）） | 2026-11-24 01:29 | 本笔 |
 
 > 上表各行均由 `claim` 台账推导：owner 原文与 `acquired_at` 直接取自台账，
 > 目的优先用台账里的 `claim_reason`，没有就如实写「未声明」，不补编。时间列只是
@@ -14163,3 +14165,16 @@ NaN 会变成 `null`、真实 socket 上无帧会 503。契约要求消费端不
 - CLI 网关不接 TLE/SDR/频谱帧来源，所以 503 是预期诚实空态，不是缺陷。
 - `ai_client.dart` 的默认传输也用过 `write()`，但目标端点固定为云端
   OpenAI 兼容服务；本轮未改（无本地端点可回归），不据此宣称已覆盖。
+
+## 300. 补录：模拟器读真实 `/panorama`（2026-11-24）
+
+§299 的配对会话里还验证了阶段 1 的全景只读路径（同一次真实 TCP 会话）：
+
+- 请求：手机设置页「读取全景」→ `GET /panorama`（Bearer token）
+- 回显：`站址 45.00, 120.00 · 太阳高度 -57.6° · 缺项 weather,
+  space_weather.kp, space_weather.f107, space_weather.ssn, space_weather.snapshot`
+- 口径：站址来自 CLI 的 `--lat/--lon`；太阳高度由权威端计算；天气与空间天气没有
+  快照就列进 `missing`，**没有用「晴/平静」顶替**（与 §6.1/§6.2 判据一致）。
+
+这条只证明「模拟器 App → 真实网关 → 真实 provider」的链路与缺项口径；
+物理手机、真模型调用仍未验收。

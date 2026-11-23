@@ -55,7 +55,10 @@
   `python -u -m mbdsdr_ai.device_gateway --port 8771 --lat 45 --lon 120`（CLI，
   未接 TLE/SDR/频谱帧来源），模拟器内设置 ControlHub 主机 `10.0.2.2`、网关端口
   `8771`、角色「手持（只读）」、设备名 `PhoneC`、配对码 → **配对成功**；
-  「刷新名册」显示 `名册（1 台）：手持（只读） · PhoneC`；「读取桌面状态」显示
+  「刷新名册」显示 `名册（1 台）：手持（只读） · PhoneC`；「读取全景」显示
+  `站址 45.00, 120.00 · 太阳高度 -57.6° · 缺项 weather, space_weather.kp,
+  space_weather.f107, space_weather.ssn, space_weather.snapshot`；
+  「读取桌面状态」显示
   `站址 45.00, 120.00 · SDR — · 缺项 sdr`；「读取过境」如实报
   `读取过境失败：权威端尚未接入过境数据提供者`；「读取频谱快照」如实报
   `读取频谱失败：权威端尚未接入频谱快照提供者`。全程真实 TCP（Bearer token），
