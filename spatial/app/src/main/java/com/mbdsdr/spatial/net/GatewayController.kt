@@ -41,6 +41,8 @@ data class GatewayUiState(
     val fuseText: String = "",
     /** 权威端名册一行（角色·名称）；未取到时为空。 */
     val rosterText: String = "",
+    /** 逐设备位姿一行（M3 消费端）；未取到时为空。 */
+    val posesText: String = "",
 )
 
 /** 把网关 JSON 压成一行摘要；缺字段写「—」，不猜值。 */
@@ -93,6 +95,43 @@ object GatewayFormat {
         "handheld" -> "手持"
         "headset" -> "头显"
         else -> if (role.isBlank()) "未知角色" else role
+    }
+
+    /**
+     * 逐设备位姿一行：`镜头·方位 76.9° 高度 0.0° ±1.0°`；
+     * 目镜带识别时追加 `·星名 HIP 91262 0.35°`。空列表如实说没有上报。
+     */
+    fun posesSummary(json: JsonObject): String {
+        val arr = json.getAsJsonArray("poses") ?: return "位姿：回执缺 poses"
+        if (arr.size() == 0) return "位姿：没有上报"
+        val rows = mutableListOf<String>()
+        for (el in arr) {
+            if (!el.isJsonObject) continue
+            val p = el.asJsonObject
+            val role = p.get("role")?.takeIf { it.isJsonPrimitive }?.asString.orEmpty()
+            fun fmt(v: Double?): String =
+                v?.let { String.format(java.util.Locale.US, "%.1f°", it) } ?: "—"
+            val row = StringBuilder()
+            row.append(roleLabel(role)).append("·方位 ").append(fmt(num(p, "az_deg")))
+                .append(" 高度 ").append(fmt(num(p, "alt_deg")))
+                .append(" ±").append(fmt(num(p, "accuracy_deg")))
+            val id = p.get("identification")?.takeIf { it.isJsonObject }?.asJsonObject
+            val name = id?.get("name")?.takeIf { it.isJsonPrimitive }?.asString
+                ?.takeIf { it.isNotBlank() }
+            if (name != null && id != null) {
+                val hip = id.get("hip")?.takeIf {
+                    it.isJsonPrimitive && it.asJsonPrimitive.isNumber
+                }?.asInt
+                row.append("·").append(name)
+                if (hip != null) row.append(" HIP ").append(hip)
+                num(id, "separation_deg")?.let {
+                    row.append(" ").append(
+                        String.format(java.util.Locale.US, "%.2f°", it))
+                }
+            }
+            rows.add(row.toString())
+        }
+        return "位姿 ${rows.size} 条：" + rows.joinToString(" / ")
     }
 
     fun passesSummary(json: JsonObject, limit: Int = 3): String {
@@ -380,6 +419,24 @@ class GatewayController(
                 busy = false,
                 rosterText = "",
                 status = "名册读取失败：${e.message ?: "未知错误"}")
+        }
+    }
+
+    fun refreshPoses() {
+        val client = readyClient() ?: return
+        state = state.copy(busy = true, status = "读取位姿中…")
+        try {
+            val data = client.poses(state.token)
+            state = state.copy(
+                busy = false,
+                posesText = GatewayFormat.posesSummary(data),
+                status = "位姿已更新")
+        } catch (e: DeviceGatewayException) {
+            // 与名册同理：失败清空，不把旧位姿当现状。
+            state = state.copy(
+                busy = false,
+                posesText = "",
+                status = "位姿读取失败：${e.message ?: "未知错误"}")
         }
     }
 

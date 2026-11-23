@@ -124,6 +124,12 @@ fun GatewayPanel(
                 Text(text = "刷新名册", style = PicoTheme.typography.bodySmall)
             }
             Button(
+                onClick = { run { controller.refreshPoses() } },
+                enabled = state.paired && !state.busy,
+            ) {
+                Text(text = "刷新位姿", style = PicoTheme.typography.bodySmall)
+            }
+            Button(
                 onClick = { run { controller.refreshFuse() } },
                 enabled = state.paired && !state.busy,
             ) {
@@ -182,6 +188,13 @@ fun GatewayPanel(
         if (state.rosterText.isNotBlank()) {
             Text(
                 text = state.rosterText,
+                style = PicoTheme.typography.bodySmall,
+                color = PicoTheme.colorTokens.LabelSecondaryAlpha,
+            )
+        }
+        if (state.posesText.isNotBlank()) {
+            Text(
+                text = state.posesText,
                 style = PicoTheme.typography.bodySmall,
                 color = PicoTheme.colorTokens.LabelSecondaryAlpha,
             )

@@ -181,6 +181,78 @@ class GatewayControllerTest {
     }
 
     @Test
+    fun posesSummaryListsDevicesAndIdentification() {
+        val json = JsonParser.parseString(
+            """{"schema":"mbdsdr.sky-poses/1","poses":[
+                 {"role":"lens","az_deg":76.94,"alt_deg":0.0,"accuracy_deg":1.0},
+                 {"role":"eyepiece","az_deg":78.0,"alt_deg":1.5,"accuracy_deg":0.8,
+                  "identification":{"name":"织女一","hip":91262,"separation_deg":0.35}}
+               ]}""").asJsonObject
+        assertEquals(
+            "位姿 2 条：镜头·方位 76.9° 高度 0.0° ±1.0° / " +
+                "目镜·方位 78.0° 高度 1.5° ±0.8°·织女一 HIP 91262 0.35°",
+            GatewayFormat.posesSummary(json),
+        )
+        val empty = JsonParser.parseString("""{"poses":[]}""").asJsonObject
+        assertEquals("位姿：没有上报", GatewayFormat.posesSummary(empty))
+        val bad = JsonParser.parseString("""{}""").asJsonObject
+        assertEquals("位姿：回执缺 poses", GatewayFormat.posesSummary(bad))
+    }
+
+    @Test
+    fun refreshPosesStoresSummaryAndBearer() {
+        val fake = FakeGateway { call ->
+            when (call.path) {
+                "/pair" -> GatewayResponse(200, """{"token":"tok-h"}""")
+                "/poses" -> {
+                    assertEquals("Bearer tok-h", call.headers["Authorization"])
+                    GatewayResponse(200,
+                        """{"poses":[{"role":"lens","az_deg":65.0,
+                           "alt_deg":12.0,"accuracy_deg":1.0}]}""")
+                }
+                else -> GatewayResponse(404, "{}")
+            }
+        }
+        val c = controller(fake)
+        c.updateCode("123456")
+        c.pair()
+        c.refreshPoses()
+
+        assertEquals("位姿 1 条：镜头·方位 65.0° 高度 12.0° ±1.0°", c.state.posesText)
+        assertEquals("位姿已更新", c.state.status)
+        assertFalse(c.state.busy)
+    }
+
+    @Test
+    fun refreshPosesFailureClearsOldList() {
+        var failPoses = false
+        val fake = FakeGateway { call ->
+            when (call.path) {
+                "/pair" -> GatewayResponse(200, """{"token":"tok-h"}""")
+                "/poses" -> if (failPoses) {
+                    GatewayResponse(500, """{"reason":"位姿状态不可用"}""")
+                } else {
+                    GatewayResponse(200,
+                        """{"poses":[{"role":"lens","az_deg":10.0,
+                           "alt_deg":1.0,"accuracy_deg":2.0}]}""")
+                }
+                else -> GatewayResponse(404, "{}")
+            }
+        }
+        val c = controller(fake)
+        c.updateCode("123456")
+        c.pair()
+        c.refreshPoses()
+        assertTrue(c.state.posesText.isNotBlank())
+
+        failPoses = true
+        c.refreshPoses()
+        assertEquals("", c.state.posesText)
+        assertTrue(c.state.status.contains("位姿读取失败"))
+        assertTrue(c.state.status.contains("位姿状态不可用"))
+    }
+
+    @Test
     fun passesSummaryListsFirstRowsAndCount() {
         val json = JsonParser.parseString(
             """{"schema":"mbdsdr.sat-passes/1","count":2,

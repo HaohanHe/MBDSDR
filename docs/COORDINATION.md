@@ -3136,6 +3136,10 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `spatial/app/src/test/java/com/mbdsdr/spatial/GatewayControllerTest.kt` | 多机线/42（§308 头显名册（提交后释放）） | 2026-11-24 02:07 | 本笔 |
 | `docs/COORDINATION.md` | 多机线/42（§308 头显名册（提交后释放）） | 2026-11-24 02:07 | 本笔 |
 | `docs/COORDINATION.md` | 多机线/42（§309 第二轮对账（提交后释放）） | 2026-11-24 02:09 | 本笔 |
+| `spatial/app/src/main/java/com/mbdsdr/spatial/net/GatewayController.kt` | 多机线/42（§310 头显位姿列表（提交后释放）） | 2026-11-24 02:11 | 本笔 |
+| `spatial/app/src/main/java/com/mbdsdr/spatial/ui/GatewayPanel.kt` | 多机线/42（§310 头显位姿列表（提交后释放）） | 2026-11-24 02:11 | 本笔 |
+| `spatial/app/src/test/java/com/mbdsdr/spatial/GatewayControllerTest.kt` | 多机线/42（§310 头显位姿列表（提交后释放）） | 2026-11-24 02:11 | 本笔 |
+| `docs/COORDINATION.md` | 多机线/42（§310 头显位姿列表（提交后释放）） | 2026-11-24 02:11 | 本笔 |
 
 > 上表各行均由 `claim` 台账推导：owner 原文与 `acquired_at` 直接取自台账，
 > 目的优先用台账里的 `claim_reason`，没有就如实写「未声明」，不补编。时间列只是
@@ -14413,3 +14417,22 @@ widget 用例与 Python 端到端，没有真实 Android 运行时 + 真实网�
 - 物理手机（模拟器 ≠ 真机）
 
 **结论**：软件可达项均有可复跑证据；spec §6.3/§6.4/§6.5 现状已按本轮结果更新。
+
+## 310. 头显逐设备位姿列表 `/poses`（2026-11-24）
+
+**动机**：头显能看名册与融合，但看不到每台设备各自的观测。补只读列表，
+与手机「读取位姿」同口径。
+
+**改动**
+- `GatewayUiState.posesText` + `GatewayFormat.posesSummary`：
+  `位姿 2 条：镜头·方位 76.9° 高度 0.0° ±1.0° / 目镜·…·织女一 HIP 91262 0.35°`；
+  空列表「位姿：没有上报」，缺字段「回执缺 poses」。
+- `refreshPoses()` 带 Bearer；失败清空并报原因（不把旧位姿当现状）。
+- 面板「刷新位姿」按钮与摘要行。
+
+**验证**
+- headset JVM：25 suite / **225 用例** / 0 失败 / 1 跳过（+3：格式含识别、
+  成功带 Bearer、失败清空）
+- `:app:assembleDebug --offline` BUILD SUCCESSFUL（16 s）
+
+**边界**：未在 PICO 真机验证；只读展示，不做排序/筛选。
