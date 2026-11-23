@@ -93,8 +93,13 @@ SDR 授权（M4.2 客户端）：面板「SDR 状态 / 申请 SDR / 释放 SDR�
 
 rtl_tcp 线协议（M4.2 基础层）：`net/RtlTcpProtocol.kt` 只做纯字节编解码——
 解析 12 字节 `RTL0` 头、生成 5 字节命令（中心频率/采样率/增益模式/增益/
-ppm/AGC），并把 8-bit 无符号 I/Q 归一化到 [-1, 1)。越界值本地即拒；
-**尚未建立 socket、未消费 I/Q、未接 UI**。
+ppm/AGC），并把 8-bit 无符号 I/Q 归一化到 [-1, 1)。越界值本地即拒。
+
+`net/RtlTcpClient.kt` 在其上做连接生命周期：`connect` 循环补读问候头
+（短读安全，坏魔数/EOF 关闭并报原因）、`tune` 按「采样率→频率→增益→ppm」
+下发（先构造全部命令再写，参数越界时一个字节都不发）、`readIq` 允许短读、
+`close` 幂等。传输可注入（`RtlTcpTransport`），JVM 单测完全离线；
+**尚未接授权流程/面板 UI，也没有频谱显示**。
 
 传输可注入（`GatewayTransport`），JVM 单测完全离线；默认实现是
 `HttpURLConnection`（6 s 超时）。主窗口「头顶」已接一个只读网关面板：

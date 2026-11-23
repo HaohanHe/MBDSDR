@@ -2914,6 +2914,15 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `.trae/specs/mbdsdr-system-lifecycle/checklist.md` | 多机线/42（§277 Task 232） | 2026-11-23 23:48 | 本笔 |
 | `docs/PRD-现状对照.md` | 多机线/42（§277 P1-11 补协议层） | 2026-11-23 23:48 | 本笔 |
 | `docs/COORDINATION.md` | 多机线/42（§277 记录 + §6.1） | 2026-11-23 23:48 | 本笔 |
+| `spatial/app/src/main/java/com/mbdsdr/spatial/net/RtlTcpClient.kt` | 多机线/42（§278 连接/调谐/读 I/Q/关闭） | 2026-11-23 23:52 | 本笔 |
+| `spatial/app/src/test/java/com/mbdsdr/spatial/RtlTcpClientTest.kt` | 多机线/42（§278 客户端 12 条用例） | 2026-11-23 23:52 | 本笔 |
+| `spatial/README.md` | 多机线/42（§278 客户端边界） | 2026-11-23 23:52 | 本笔 |
+| `.trae/specs/multi-device-interconnect/tasks.md` | 多机线/42（§278 M4.2 客户端状态） | 2026-11-23 23:52 | 本笔 |
+| `.trae/specs/multi-device-interconnect/checklist.md` | 多机线/42（§278 客户端项） | 2026-11-23 23:52 | 本笔 |
+| `.trae/specs/mbdsdr-system-lifecycle/tasks.md` | 多机线/42（§278 Task 233） | 2026-11-23 23:52 | 本笔 |
+| `.trae/specs/mbdsdr-system-lifecycle/checklist.md` | 多机线/42（§278 Task 233） | 2026-11-23 23:52 | 本笔 |
+| `docs/PRD-现状对照.md` | 多机线/42（§278 P1-11 补客户端） | 2026-11-23 23:52 | 本笔 |
+| `docs/COORDINATION.md` | 多机线/42（§278 记录 + §6.1） | 2026-11-23 23:52 | 本笔 |
 
 > 上表各行均由 `claim` 台账推导：owner 原文与 `acquired_at` 直接取自台账，
 > 目的优先用台账里的 `claim_reason`，没有就如实写「未声明」，不补编。时间列只是
@@ -13393,6 +13402,39 @@ spec 的 M4.3 要求「未联网时显示上次结果/包内内容，不伪造�
 - 这层没有 socket、没有定时器、没接 UI：**不能**据此声称头显能直连收频谱。
 - 「RTL0」头字段语义按 rtl_tcp 公开实现；不同 tuner 的增益档数只透传，不解释。
 - 真机联调与频谱显示仍是后续任务。
+
+## 278. M4.2 头显 rtl_tcp 客户端（2026-11-23）
+
+**依据**：§277 只有纯字节层；要真正连 SDR，还需要「连接生命周期」：
+问候头可能短读、对端可能不是 rtl_tcp、调谐命令必须整组下发，且参数错误
+不能把 dongle 留在半配置状态。
+
+**做了什么**
+- 新 `spatial/.../net/RtlTcpClient.kt`：
+  - `RtlTcpTransport`/`RtlTcpConnection` 可注入（单测零网络）；
+    `SocketRtlTcpTransport` 用真实 TCP，连接/读超时 6 s。
+  - `connect()`：循环补读 12 字节头；EOF、0 字节、坏魔数都关闭连接并抛
+    `RtlTcpException`（带地址/已读字节数）。
+  - `tune()`：**先构造全部命令再写**（采样率 → 中心频率 → 增益模式 →
+    手动增益或 AGC → ppm）；任一参数越界在写第一个字节前抛
+    `IllegalArgumentException`，连接保持不断。
+  - `readIq()`：允许短读，EOF 明确报「rtl_tcp 已断开」；`close()` 幂等。
+- 不自动重连、不轮询、不做 FFT：这些都是上层策略。
+
+**验证**
+- 新 `RtlTcpClientTest` 12 条：3+2+7 短读拼头、坏魔数（关闭+报 RTL0）、
+  EOF 半头、传输层拒连、调谐 5 条命令逐字节与顺序、AGC 仅 3 条、
+  越界零写入且不断线、未连接拒调谐、写失败包装、IQ 短读后 EOF、
+  close 幂等与关闭后读拒绝、协议常量。
+- `./gradlew.bat testDebugUnitTest --rerun-tasks --no-daemon --offline`：
+  **20 suite / 180 用例 / 0 失败 / 1 跳过**。
+- 未改 Python/手机；未连接真实 rtl_tcp（dongle 仍由模拟器会话占用）。
+
+**诚实边界**
+- 与 `/sdr/lease` 的串接、面板入口、FFT/频谱显示都未做；
+  现在仍不能对用户说「头显能直接收频谱」。
+- 未在 PICO/Android 真机建过真实 TCP；真实 rtl_tcp 的短读行为只按协议假设。
+- 授权到期后本客户端不会自动断开——上层需要在租约释放时调用 `close()`。
 
 
 
