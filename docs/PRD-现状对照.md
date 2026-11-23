@@ -134,10 +134,12 @@
 | P1-01 受晒接通 | **收口**：快照带受晒三态 [orbit.py:528](file:///D:/mbdsdr/MBDSDR/mbdsdr_ai/orbit.py#L528) `sunlit/sunlit_status`，UI 渲染 [rf_sky_view.py:545](file:///D:/mbdsdr/MBDSDR/desktop/rf_sky_view.py#L545) `sunlit_state_label`，有 test_orbit_sunlit_snapshot 对拍 |
 | P1-02 时间基准 | **收口**：[sdr_tools.py:129](file:///D:/mbdsdr/MBDSDR/mbdsdr_ai/sdr_tools.py#L129) `_physics_now`「显式 timestamp > TimeEngine，不退回墙钟」，`_satellite_sky_view`:4737 同口径 |
 | P1-04 dB 自动量程 | **收口**：[spectrum_widget.py:1726](file:///D:/mbdsdr/MBDSDR/desktop/spectrum_widget.py#L1726) `_auto_db_range` + 自动量程勾选:2840 + 手动让位:3040（代码参数定义：底噪锚 `10%`、跨度 `40–80 dB`、滞回 `3 dB`，非测量值） |
-| P1-05 真实录音库 | 迁移/回收站/损坏索引仍合成库自测；**桌面未接线（M4）** |
+| P1-05 真实录音库 | **桌面已接线（M4，2026-11-23）**：工具栏「录音库」列出/回放/移入回收站（`_trash/`，不物理删除）；迁移/损坏索引仍走库内自测 |
 | P1-06 真模型回归 | 仍仅自测（W-08） |
-| P1-07 MCP 面 | 工具总数 520（§6 复跑）；MCP 控制器面与 AI 工具面的取舍仍待拍板（L21） |
+| P1-07 MCP 面 | 工具总数 521（`tool_surface_audit` registry=521，2026-11-23）；MCP 控制器面与 AI 工具面的取舍仍待拍板（L21） |
 | P1-09 DPI/触屏 | 本轮未复核，保留旧状（布局四档基线未跑） |
+| P1-11 多机互联 | **仅 spec 草案**（[spec.md](file:///D:/mbdsdr/.trae/specs/multi-device-interconnect/spec.md)）：手机（镜头/目镜/手持）、桌面权威端、头显的角色与契约已写；现状只有模拟器 `adb reverse` + `rtl_tcp` 开发通路，手机↔桌面/手机↔头显/头显↔SDR 均未实现 |
+| P1-12 模型全景信息 | **软件收口**：只读工具 `sky_panorama`（`mbdsdr.sky-panorama/1`）一次返回站址/时刻/太阳/月球/天气/空间天气（Kp/F10.7/SSN/X 射线）/传播/今夜 + `missing`；真实快照探针 1752 字符，缺云量/Kp 时如实列缺；真模型调用回归未做 |
 | P2-01 银河 | 仍无数据不画（[rf_sky_view.py:689](file:///D:/mbdsdr/MBDSDR/desktop/rf_sky_view.py#L689)「无数据·不提供」，状态卡如实标注，不给假按钮） |
 | P2-05 打包许可 | 星表在包内（[pyproject.toml:83](file:///D:/mbdsdr/MBDSDR/pyproject.toml#L83) `data/*.npz`，走 setuptools package-data）；第三方许可清单待补 |
 
@@ -209,7 +211,7 @@ python -m pytest tests/test_sample_rate_changes.py -q     # 3 passed（S4）
 | 手机架望远镜，AI 教怎么架 | provider 契约 + 两星校准 + `2.3°` 窄视场参数在位 | 引导叙事未成型；目镜后 `~1°` 视场物理不可靠（spec 已如实写明） |
 | 当天云量气象（天文通式） | openapi_weather 工具 + tonight.py 云量阈值 + 空间天气在位；**综合观星指数（云量×月光，`stargazing_index`）已落内核并进 AI 讲解**（`TONIGHT_SCHEMA=3`，缺云量不给分、缺月光显式标注）；**星象仪顶部「观星指数」按钮已接线**（点一下按当前站址后台取数，未设站址/缺测都给「未知」并写明原因，站址变更即作废） | 视宁度/透明度无可信数据源未做；指数只在桌面星象仪、AI 工具与人话输出，手机/头显尚未显示；反编译参照在仓库外 scratch/twt-apk/FUNCTIONS.md |
 | Stellarium 全包含 | 星表 + 星官 + 时间引擎 + 投影互逆钉扎 | 银河无数据（P2-01）、DSO 表未接；按浪漫主线分批补，不宣称全包含 |
-| SDR++/OnAir 几乎全功能 + 全工具化 | 520 工具（§6）；SSTV/气象星全链/FT8 族/ADS-B 族/数字语音外挂/GPS-RTK/VNA 在位 | QO-100 全仓零命中；数字电视/TETRA/IoT/蜂窝/军用 HF 缺（OnAir MODES 表为参照，非照单全收） |
+| SDR++/OnAir 几乎全功能 + 全工具化 | 521 工具（`tool_surface_audit`，2026-11-23）；SSTV/气象星全链/FT8 族/ADS-B 族/数字语音外挂/GPS-RTK/VNA 在位 | QO-100 全仓零命中；数字电视/TETRA/IoT/蜂窝/军用 HF 缺（OnAir MODES 表为参照，非照单全收） |
 | GNSS 方位推姿态 | gnss_sky_fit 接实时 GSV，拟合结论「全向天线无角分辨力」→ 如实拒绝 | 单天线 GNSS 物理上无航向；正确路径 = GNSS 位置时间 + 星历算方位 + 罗盘航向（已在走） |
 | 云台/抛物面/射电望远镜指向工具化 | rotctld + Alpaca 赤道仪工具在位，三级承诺 + 一次性 token + Abort | 真机指向闭环 not_verified；射电望远镜走同一 rotctld 接缝 |
 | 点卫星→AI→指→收→解调→档案 | 每块积木在位（§1 P0-09 收口） | 端到端真机闭环未完整演练；HANDOFF §8 P1 共享环形缓冲真缺陷未修 |

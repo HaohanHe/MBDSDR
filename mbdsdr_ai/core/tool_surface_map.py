@@ -572,6 +572,7 @@ sky_pose_fuse
 sky_dso_lookup
 sky_object_lookup
 sky_observing_sites
+sky_panorama
 sky_solve_status
 sky_tonight
 sky_track_satellite

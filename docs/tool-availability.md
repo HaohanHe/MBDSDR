@@ -1,8 +1,8 @@
 # 工具可用性总账（P13 逐项审计）
 
-- 工具总数：**520**（分类 78 个）
+- 工具总数：**521**（分类 78 个）
 - 审计环境：`QT_QPA_PLATFORM=offscreen` + `MBDSDR_NO_HW=1` + `MBDSDR_NULL_AUDIO=1` + `MBDSDR_OFFLINE=1`，**无真机；输入为合成替身**
-- 结论：一类 412 / 二类 108 / 三类 0 / 四类 0
+- 结论：一类 413 / 二类 108 / 三类 0 / 四类 0
 
 复跑：`python scripts/tool_availability_audit.py`（`--only <工具名>` 单跑）。
 证据列：`OK` = 当次调用成功且非空；`断言:`= 往返/还原断言；`降级:`= 诚实不可用原因；`坏:`= 真坏原因。
@@ -522,6 +522,7 @@
 | `sky_identify_at` | sky | 一类·真跑 | OK（920 字符，data=有） |  | — |
 | `sky_meteor_showers` | sky | 一类·真跑 | OK（329 字符，data=有） |  | — |
 | `sky_observing_sites` | sky | 一类·真跑 | OK（545 字符，data=有） |  | — |
+| `sky_panorama` | sky | 一类·真跑 | OK（1752 字符，data=有） |  | — |
 | `sky_pose_fuse` | sky | 一类·真跑 | OK（448 字符，data=有） |  | — |
 | `sky_solve_status` | sky | 一类·真跑 | OK（224 字符，data=有） |  | — |
 | `sky_tonight` | sky | 一类·真跑 | OK（1444 字符，data=有） |  | — |

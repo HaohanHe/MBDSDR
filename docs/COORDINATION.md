@@ -2696,6 +2696,13 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `tests/test_serial_gnss_probe_script.py` | 观星指数线/41（§255 自检脚本 --list-ports 回归） | 2026-11-23 21:55 | 本笔 |
 | `docs/PRD-现状对照.md` | 观星指数线/41（§255 P0-05 证据升真机真验） | 2026-11-23 21:55 | 本笔 |
 | `docs/COORDINATION.md` | 观星指数线/41（§255 GNSS 真机复核记录 + §6.1） | 2026-11-23 21:55 | 本笔 |
+| `mbdsdr_ai/sky_tools.py` | 观星指数线/41（§256 sky_panorama 只读全景工具） | 2026-11-23 22:15 | 本笔 |
+| `mbdsdr_ai/tool_budget.py` | 观星指数线/41（§256 传播/空间天气词表，全景工具可被选中） | 2026-11-23 22:15 | 本笔 |
+| `mbdsdr_ai/core/tool_surface_map.py` | 观星指数线/41（§256 registry-only 白名单补 sky_panorama） | 2026-11-23 22:15 | 本笔 |
+| `tests/test_sky_panorama.py` | 观星指数线/41（§256 全景工具 10 条用例） | 2026-11-23 22:15 | 本笔 |
+| `docs/tool-availability.md` | 观星指数线/41（§256 工具总账补 sky_panorama，521） | 2026-11-23 22:15 | 本笔 |
+| `docs/PRD-现状对照.md` | 观星指数线/41（§256 P1-11/P1-12 + P1-05/P1-07 现状刷新） | 2026-11-23 22:15 | 本笔 |
+| `docs/COORDINATION.md` | 观星指数线/41（§256 多机 spec + 全景工具记录 + §6.1） | 2026-11-23 22:15 | 本笔 |
 
 > 上表各行均由 `claim` 台账推导：owner 原文与 `acquired_at` 直接取自台账，
 > 目的优先用台账里的 `claim_reason`，没有就如实写「未声明」，不补编。时间列只是
@@ -12460,6 +12467,55 @@ PRD §8 冲刺序列 P1「天文通式观星指数」。本轮只做**有可信�
   不是权限问题）。不抢占用户会话，P0-06 调谐语义真机回归仍待空闲窗口。
 - GNSS 只验「定位 → 站址 → 天空同址」；`agent` 坐标同步与过境列表的真机
   对拍仍未验。
+
+## 256. 多机互联 spec + 模型全景工具 `sky_panorama`（2026-11-23）
+
+**依据**：用户要求两台手机挂望远镜（一台看镜头做视觉初指向、一台贴目镜认星），
+手机/电脑/头显三端可同时互联，头显也可以直接带动 SDR；同时「模型要啥就给啥
+信息」——天气、太阳粒子活动、传播等全景信息要一次给到模型。
+
+**做了什么（本轮可验证的一半）**
+1. 新 spec：`.trae/specs/multi-device-interconnect/{spec.md,tasks.md,checklist.md}`
+   - 角色：`lens`（镜头视觉初指向）/ `eyepiece`（目镜认星）/ `handheld`（手持遥控）/
+     `desktop`（权威端）/ `headset`（空间化只读）；
+   - 不变量：一个观测站只有一份站址与时刻；手机/头显默认只读，写操作由权威端
+     执行或人工确认；多机位姿是各自一条观测，由 `sky_pose_fuse` 融合并给残差；
+   - 契约草案：`mbdsdr.device-roster/1`、`sky-pose/1`；
+   - 分期：M2 局域网权威端（显式开启 + 配对码）→ M3 多机位姿融合 →
+     M4 头显接入（只读包 + 增量快照，直连 SDR 走 rtl_tcp 一次性授权）。
+2. 新只读工具 **`sky_panorama`**（`mbdsdr.sky-panorama/1`）：
+   - 一次返回：站址/时刻（time_engine 或 wall_clock）、太阳高度与阶段、
+     月球照亮/高度、本地天气（云量/气温/湿度/降水，带观测时刻与来源）、
+     空间天气（Kp/F10.7/SSN/GOES X 射线 + 传播结论与建议）、
+     今夜 verdict + 观星指数 + 极光 + 流星雨；缺项全部列在 `missing`。
+   - 快照优先复用 15 分钟内且**站址匹配**的数据；`allow_live=false` 不联网；
+     不写盘、不读 IQ。
+3. 工具可见性：`tool_budget` 新增「传播/空间天气/太阳活动/地磁/电离层/太阳黑子」词表，
+   问这类问题时 `sky_panorama` 与 `acquisition` 链路工具都能进候选。
+4. 工具面台账同步：`tool_surface_map` registry-only 白名单、
+   `docs/tool-availability.md` 逐行表与总数（521）。
+
+**验证**
+- `pytest tests/test_sky_panorama.py` → **10 passed**（匹配快照不联网、缺云量
+  不是晴天、缺 Kp/F10.7/SSN 不是平静、别站快照不顶替、现采路径、
+  太阳阶段边界、4 种问法都能选中该工具）。
+- `pytest tests/test_ai_tool_budget.py tests/test_sky_tools.py tests/test_tonight_sky.py`
+  → **118 passed**（含 panorama）。
+- `pytest tests/test_tool_surface_audit.py tests/test_tool_availability_ledger.py
+  tests/test_discoverability_help.py` → **57 passed**；
+  `python scripts/tool_surface_audit.py` → `registry=521 能力目录=521 文档=521 MCP=83`，结论一致。
+- 真实快照探针（示例站址，真实联网）：输出 **1752 字符**（在 4000 上限内），
+  `time_source=time_engine`、太阳「天文夜」；本轮上游缺云量与 Kp，
+  输出 `missing=["weather.cloud_cover_pct","space_weather.kp"]`，
+  观星指数与传播结论都如实显示「未知」，未按晴天/平静假设。
+
+**诚实边界**
+- 多机互联**尚未实现**：手机↔桌面目前只有模拟器 `adb reverse` + `rtl_tcp` 的
+  开发通路；手机↔头显、头显↔SDR、设备名册/配对/位姿上报均无代码。
+- 桌面 Web 桥仍只绑 127.0.0.1；在配对与鉴权落地前不得改 0.0.0.0。
+- `sky_panorama` 只覆盖「环境全景」；设备名册与多机位姿要等 M2/M3。
+- 真模型是否会在问传播时主动调 `sky_panorama` 仍未回归（无 API Key）。
+
 
 
 

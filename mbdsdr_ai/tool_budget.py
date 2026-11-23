@@ -89,6 +89,14 @@ _TERM_RULES: Tuple[Tuple[Tuple[str, ...], Tuple[str, ...], Tuple[str, ...]], ...
      ("sky", "astronomy", "star", "stargazing", "meteor", "aurora", "moon", "cloud",
       "weather", "planet", "constellation", "telescope"),
      ("sky", "astronomy", "camera", "capture", "weather")),
+    # 传播/空间天气：用户问「今天传播怎么样」「太阳活动强不强」「有没有地磁暴」时，
+    # 既要 sky_panorama（一次给全景），也要 acquisition 里的链路诊断工具。
+    (("传播", "空间天气", "太阳活动", "太阳粒子", "地磁", "电离层", "太阳黑子",
+      "短波吸收", "space weather", "propagation", "solar", "kp", "f10.7",
+      "x-ray", "xray"),
+     ("传播", "空间天气", "太阳活动", "太阳粒子", "地磁", "电离层", "太阳黑子",
+      "space_weather", "propagation", "solar", "kp", "f107", "f10.7", "xray"),
+     ("sky", "acquisition", "weather")),
     (("工作流", "任务", "定时", "自动化", "调度", "workflow", "schedule", "subagent"),
      ("workflow", "task", "schedule", "cron", "工作流", "任务", "定时", "自动化", "子代理", "调度"),
      ("workflow", "workflow_recorder", "scheduler", "subagent")),
