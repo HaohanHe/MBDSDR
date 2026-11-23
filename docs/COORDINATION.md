@@ -3021,6 +3021,15 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `.trae/specs/multi-device-interconnect/tasks.md` | 多机线/42（§288 M4.2 峰值标记） | 2026-11-24 01:48 | 本笔 |
 | `.trae/specs/multi-device-interconnect/checklist.md` | 多机线/42（§288 峰值项拆分） | 2026-11-24 01:48 | 本笔 |
 | `docs/COORDINATION.md` | 多机线/42（§288 记录 + §6.1） | 2026-11-24 01:48 | 本笔 |
+| `spatial/app/src/main/java/com/mbdsdr/spatial/sdr/SdrFormat.kt` | 多机线/42（§289 dB→画柱映射） | 2026-11-24 02:05 | 本笔 |
+| `spatial/app/src/main/java/com/mbdsdr/spatial/net/GatewayController.kt` | 多机线/42（§289 快照 levels） | 2026-11-24 02:05 | 本笔 |
+| `spatial/app/src/main/java/com/mbdsdr/spatial/ui/GatewayPanel.kt` | 多机线/42（§289 快照静态画布） | 2026-11-24 02:05 | 本笔 |
+| `spatial/app/src/test/java/com/mbdsdr/spatial/SdrFormatTest.kt` | 多机线/42（§289 dB 映射用例） | 2026-11-24 02:05 | 本笔 |
+| `spatial/app/src/test/java/com/mbdsdr/spatial/GatewayControllerTest.kt` | 多机线/42（§289 levels 断言） | 2026-11-24 02:05 | 本笔 |
+| `spatial/README.md` | 多机线/42（§289 快照画布说明） | 2026-11-24 02:05 | 本笔 |
+| `.trae/specs/multi-device-interconnect/tasks.md` | 多机线/42（§289 M2.6 头显快照画布） | 2026-11-24 02:05 | 本笔 |
+| `.trae/specs/multi-device-interconnect/checklist.md` | 多机线/42（§289 快照画布项） | 2026-11-24 02:05 | 本笔 |
+| `docs/COORDINATION.md` | 多机线/42（§289 记录 + §6.1） | 2026-11-24 02:05 | 本笔 |
 
 > 上表各行均由 `claim` 台账推导：owner 原文与 `acquired_at` 直接取自台账，
 > 目的优先用台账里的 `claim_reason`，没有就如实写「未声明」，不补编。时间列只是
@@ -13807,6 +13816,30 @@ NaN 会变成 `null`、真实 socket 上无帧会 503。契约要求消费端不
 **诚实边界**
 - 峰值只是相对幅度谱的局部极大，不是校准载波功率；不做平滑/门限自适应。
 - 未在 PICO 真机联调；瀑布图仍未做。
+
+## 289. 头显把 `/spectrum` 快照画出来（2026-11-24）
+
+**依据**：`/spectrum` 在头显上只有一行文字摘要，看不出「桌面此刻的谱长什么样」。
+`powers_db` 是相对 dBFS，直接交给按峰值归一化的实时谱画布会几乎全灭。
+
+**做了什么**
+- `SdrFormat.decibelsToLevels`：把 `[floorDb, ceilDb]`（默认 -100…0 dB）线性映射到
+  [0,1] 画柱；`null`/非有限 bin → 0（不画），范围非法 → 全 0；明确这是显示映射，
+  不是功率标定。
+- `GatewayFormat.spectrumLevels`：解析 `powers_db`（含 `null`），非数组/缺字段
+  → 空列表，不猜。
+- `GatewayUiState.spectrumLevels`：随快照刷新；失败时保留上次画面/摘要。
+- 网关面板在摘要下复用 `LiveSpectrumCanvas` 画一帧静态快照（黄线为局部峰），
+  仍是「只读·非实时」，停止/失败不伪造新帧。
+
+**验证**
+- `SdrFormatTest` +1：dB→画柱映射（含 null/越界/NaN/非法范围）。
+- `GatewayControllerTest`：刷新用例补 `powers_db` 与 levels 断言，失败后 levels 不变。
+- headset JVM：24 suite / **210 用例** / 0 失败 / 1 跳过。
+
+**诚实边界**
+- 映射阈值固定 -100…0 dB，不随噪声底自适应；未在 PICO 真机看渲染效果。
+- 快照是一帧静态图，不滚动、不刷新；不是瀑布。
 
 
 

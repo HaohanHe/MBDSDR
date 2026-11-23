@@ -51,6 +51,26 @@ object SdrFormat {
         String.format(java.util.Locale.US, "±%.3f MHz", abs(spanHz) / 1_000_000.0)
 
     /**
+     * 相对 dB → 画柱高度 [0,1]：把 [floorDb, ceilDb] 线性映射到 [0,1]。
+     *
+     * null/非有限一律 0（空 bin 不画）；范围非法（ceil<=floor）时全 0。
+     * 这是**显示映射**：不是功率标定，也不改变「相对幅度非 dBm」的口径。
+     */
+    fun decibelsToLevels(
+        powersDb: List<Float?>,
+        floorDb: Float = -100f,
+        ceilDb: Float = 0f,
+    ): FloatArray {
+        if (ceilDb <= floorDb) return FloatArray(powersDb.size)
+        val span = ceilDb - floorDb
+        return FloatArray(powersDb.size) { i ->
+            val v = powersDb[i]
+            if (v == null || !v.isFinite()) 0f
+            else ((v - floorDb) / span).coerceIn(0f, 1f)
+        }
+    }
+
+    /**
      * 找局部峰值 bin：严格高于左右邻居，且不低于全局峰值的 [minRel] 倍。
      *
      * 返回按频率升序的 bin 索引（最多 [maxCount] 个，优先取幅度最高的）。

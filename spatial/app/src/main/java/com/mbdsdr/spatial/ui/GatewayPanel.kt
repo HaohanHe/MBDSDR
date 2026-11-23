@@ -4,6 +4,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.width
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -173,6 +174,13 @@ fun GatewayPanel(
                 text = state.spectrumText,
                 style = PicoTheme.typography.bodySmall,
                 color = PicoTheme.colorTokens.LabelSecondaryAlpha,
+            )
+        }
+        if (state.spectrumLevels.isNotEmpty()) {
+            // 复用实时谱画布：只画桌面快照一帧，不随时间滚动/刷新。
+            LiveSpectrumCanvas(
+                spectrum = state.spectrumLevels.toFloatArray(),
+                modifier = Modifier.fillMaxWidth().height(96.dp),
             )
         }
         if (state.sdrText.isNotBlank()) {

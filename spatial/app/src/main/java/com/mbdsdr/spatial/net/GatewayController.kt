@@ -3,6 +3,7 @@ package com.mbdsdr.spatial.net
 import com.google.gson.JsonArray
 import com.google.gson.JsonElement
 import com.google.gson.JsonObject
+import com.mbdsdr.spatial.sdr.SdrFormat
 
 /**
  * 头显侧「多设备网关」状态机（M4.1 UI 数据层）。
@@ -32,6 +33,8 @@ data class GatewayUiState(
     val sdrHeld: Boolean = false,
     /** 桌面只读频谱快照一行（M2.6）；未取到时为空。 */
     val spectrumText: String = "",
+    /** 快照功率轴映射成画柱高度 [0,1]；空 = 没取到/没有帧。 */
+    val spectrumLevels: List<Float> = emptyList(),
     /** 两机融合位姿一行（M3.2 消费端）；未取到时为空。 */
     val fuseText: String = "",
 )
@@ -192,6 +195,22 @@ object GatewayFormat {
             + " · 噪声底 ${db(num(json, "noise_floor_db"))}"
             + " · 帧龄 $ageText$staleText")
     }
+
+    /**
+     * 快照 `powers_db` → 画柱高度 [0,1]；null/非数字/非有限 bin 保持 0（不画）。
+     *
+     * 映射只是显示口径（-100…0 dB 线性到 0…1），不是功率标定。
+     */
+    fun spectrumLevels(json: JsonObject): List<Float> {
+        val arr: JsonArray = json.get("powers_db")
+            ?.takeIf { it.isJsonArray }?.asJsonArray ?: return emptyList()
+        val db = arr.map { el: JsonElement ->
+            if (el.isJsonNull) null
+            else if (el.isJsonPrimitive && el.asJsonPrimitive.isNumber) el.asFloat
+            else null
+        }
+        return SdrFormat.decibelsToLevels(db).toList()
+    }
 }
 
 class GatewayController(
@@ -348,6 +367,7 @@ class GatewayController(
             state = state.copy(
                 busy = false,
                 spectrumText = GatewayFormat.spectrumSummary(data),
+                spectrumLevels = GatewayFormat.spectrumLevels(data),
                 status = "频谱快照已更新")
         } catch (e: DeviceGatewayException) {
             fail("频谱快照失败：${e.message}")

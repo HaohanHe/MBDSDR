@@ -485,7 +485,8 @@ class GatewayControllerTest {
     fun refreshSpectrumShowsSnapshotOrHonest503() {
         var payload = """{"schema":"mbdsdr.spectrum-snapshot/1","readonly":true,
                           "realtime":false,"center_freq_hz":100000000.0,
-                          "sample_rate_hz":1000000.0,"bins":3,
+                          "sample_rate_hz":1000000.0,"bins":4,
+                          "powers_db":[-20.0,null,-60.0,10.0],
                           "peak_freq_hz":100250000.0,"peak_power_db":-30.0,
                           "noise_floor_db":-90.0,"age_s":0.2,"stale":false}"""
         val fake = FakeGateway { call ->
@@ -507,12 +508,14 @@ class GatewayControllerTest {
         c.refreshSpectrum()
         assertTrue(c.state.spectrumText.startsWith("频谱快照（只读·非实时）：100.000 MHz"))
         assertTrue(c.state.spectrumText.contains("100.250 MHz -30.0 dB"))
+        assertEquals(listOf(0.8f, 0f, 0.4f, 1f), c.state.spectrumLevels)
         assertEquals("频谱快照已更新", c.state.status)
 
         payload = "missing"
         val before = c.state.spectrumText
         c.refreshSpectrum()
         assertEquals(before, c.state.spectrumText)  // 失败不改写成假快照
+        assertEquals(listOf(0.8f, 0f, 0.4f, 1f), c.state.spectrumLevels)
         assertTrue(c.state.status.contains("频谱快照失败"))
         assertTrue(c.state.status.contains("没有可读"))
         assertFalse(c.state.busy)

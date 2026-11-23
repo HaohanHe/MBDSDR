@@ -59,6 +59,21 @@ class SdrFormatTest {
     }
 
     @Test
+    fun decibelsMapToDisplayLevels() {
+        val levels = SdrFormat.decibelsToLevels(
+            listOf(-20f, -60f, null, -120f, 10f, Float.NaN))
+        assertEquals(0.8f, levels[0], 1e-6f)
+        assertEquals(0.4f, levels[1], 1e-6f)
+        assertEquals(0f, levels[2], 0f)    // 空 bin 不画
+        assertEquals(0f, levels[3], 0f)    // 低于 floor
+        assertEquals(1f, levels[4], 0f)    // 高于 ceil 夹到 1
+        assertEquals(0f, levels[5], 0f)    // 非有限
+        // 非法范围 → 全 0，不抛。
+        val zero = SdrFormat.decibelsToLevels(listOf(-20f), 0f, -10f)
+        assertEquals(0f, zero[0], 0f)
+    }
+
+    @Test
     fun peakBinsFindLocalMaximaAboveThreshold() {
         val spectrum = floatArrayOf(0f, 100f, 0f, 90f, 80f, 0f, 70f, 0f)
         assertEquals(listOf(1, 3, 6), SdrFormat.peakBins(spectrum))
