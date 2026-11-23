@@ -42,33 +42,35 @@ Pass _passOf(int catalog, String name) => Pass(
 
 void main() {
   group('下行频率目录', () {
-    test('NOAA 编目号命中真实下行，未知星返回 null', () {
-      expect(satelliteDownlink(33591)!.downlinkHz, 137.1000e6);
-      expect(satelliteDownlink(33591)!.mode, DemodMode.wfm);
-      expect(satelliteDownlink(25544), isNull, reason: 'ISS 不在目录 -> 诚实禁用');
+    test('ISS 编目号命中真实下行，退役 NOAA 与未知星返回 null', () {
+      expect(satelliteDownlink(25544)!.downlinkHz, 145.8000e6);
+      expect(satelliteDownlink(25544)!.mode, DemodMode.nfm);
+      // NOAA POES 星座 2025 年全部退役：目录里不能再留它们的 APT 频率。
+      expect(satelliteDownlink(33591), isNull, reason: 'NOAA 19 已退役（2025-08-13）');
+      expect(satelliteDownlink(99999), isNull, reason: '目录外 -> 诚实禁用');
     });
   });
 
   group('capturePass', () {
-    test('目录内卫星：真实 setFrequencyHz + setMode(wfm)', () async {
+    test('目录内卫星：真实 setFrequencyHz + setMode(nfm)', () async {
       final radio = _FakeRadio();
       final out = await capturePass(
         radio: radio,
-        pass: _passOf(33591, 'NOAA 19'),
+        pass: _passOf(25544, 'ISS (ZARYA)'),
         tle: null, // 无 TLE -> 多普勒偏置 0，按标称频率
         station: null,
         now: DateTime.utc(2024),
       );
       expect(out, isA<CaptureApplied>());
-      expect(radio.tunedHz, 137100000, reason: '标称 137.1000 MHz');
-      expect(radio.tunedMode, DemodMode.wfm);
+      expect(radio.tunedHz, 145800000, reason: '标称 145.8000 MHz');
+      expect(radio.tunedMode, DemodMode.nfm);
     });
 
     test('目录外卫星：诚实「无下行频率数据」，不碰接收机', () async {
       final radio = _FakeRadio();
       final out = await capturePass(
         radio: radio,
-        pass: _passOf(25544, 'ISS'),
+        pass: _passOf(99999, 'UNKNOWN SAT'),
         tle: null,
         station: null,
         now: DateTime.utc(2024),
@@ -80,7 +82,7 @@ void main() {
     });
 
     test('有 TLE + 站：多普勒偏置有限且把中心频率拉到下行附近', () async {
-      // ISS TLE（目录外，仅用于验证 range-rate 路径不崩）。
+      // ISS TLE（目录内，25544 = 145.800 MHz）。
       const l1 =
           '1 25544U 98067A   08264.51782472  .00016717  00000-0  10270-3 0  0864';
       const l2 =
@@ -88,21 +90,20 @@ void main() {
       final iss = Tle.fromLines(l1, l2);
       const station = Station(lat: 40, lon: -100);
       final radio = _FakeRadio();
-      // 目录内星但喂一个 ISS 的 TLE（仅测多普勒数值路径；真实场景 TLE 与星一致）。
       final out = await capturePass(
         radio: radio,
-        pass: _passOf(33591, 'NOAA 19'),
+        pass: _passOf(25544, 'ISS (ZARYA)'),
         tle: iss,
         station: station,
         now: iss.epoch.add(const Duration(minutes: 30)),
       );
       expect(out, isA<CaptureApplied>());
       final applied = out as CaptureApplied;
-      // LEO 径向速度量级 ~±7 km/s -> 137MHz 多普勒 ~±32 kHz，量级合理。
-      expect(applied.dopplerHz.abs(), lessThan(50e3),
-          reason: '多普勒偏置应在几十 kHz 量级，实得 ${applied.dopplerHz} Hz');
-      // 中心频率仍在 137 MHz 下行附近。
-      expect((applied.centerHz / 1e6), inInclusiveRange(136.9, 137.3));
+      // LEO 径向速度量级 ~±7 km/s -> 145.8 MHz 多普勒 ~±3.4 kHz。
+      expect(applied.dopplerHz.abs(), lessThan(5e3),
+          reason: '多普勒偏置应在 kHz 量级，实得 ${applied.dopplerHz} Hz');
+      // 中心频率仍在 145.8 MHz 下行附近。
+      expect((applied.centerHz / 1e6), inInclusiveRange(145.7, 145.9));
     });
   });
 }

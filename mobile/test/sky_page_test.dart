@@ -145,12 +145,13 @@ class _GroupedTleClient extends TleClient {
   DateTime? lastUpdated(TleGroup group) => DateTime.utc(2026, 10, 27);
 }
 
-/// NOAA 19（编目号 33591，命中真实下行目录）的 fake TLE；历元即测试时钟。
-class _NoaaTleClient extends TleClient {
+/// ISS（ZARYA，编目号 25544，命中真实下行目录 145.800 MHz）的 fake TLE；
+/// 历元即测试时钟。（NOAA POES 星座已于 2025 年全部退役，目录已改收录 ISS。）
+class _IssTleClient extends TleClient {
   static const String l1 =
-      '1 33591U 98067A   26300.50000000  .00016717  00000-0  10270-3 0  0864';
+      '1 25544U 98067A   26300.50000000  .00016717  00000-0  10270-3 0  0864';
   static const String l2 =
-      '2 33591  51.6400 247.4627 0006703 130.5360 325.0288 15.72125391563537';
+      '2 25544  51.6400 247.4627 0006703 130.5360 325.0288 15.72125391563537';
 
   @override
   Future<List<Tle>> fetch(TleGroup group) async =>
@@ -190,7 +191,7 @@ class _FakeRadio implements RadioApi {
 class _FakeSkyController extends SkyController {
   _FakeSkyController(this._pass)
       : super(
-          tleClient: _NoaaTleClient(),
+          tleClient: _IssTleClient(),
           locationService: _DeniedLocation(),
           orientationService: _UnavailableOrientation(),
         );
@@ -223,11 +224,11 @@ class _FakeSkyController extends SkyController {
   Future<CaptureOutcome> capture(Pass p) async {
     captureCalls += 1;
     return const CaptureApplied(
-      label: 'NOAA 19 APT',
-      downlinkHz: 137.1e6,
-      centerHz: 137100000,
+      label: 'ISS 语音/SSTV',
+      downlinkHz: 145.8e6,
+      centerHz: 145800000,
       dopplerHz: 0,
-      mode: DemodMode.wfm,
+      mode: DemodMode.nfm,
     );
   }
 
@@ -240,8 +241,8 @@ const Station _station = Station(lat: 40, lon: -100);
 final DateTime _captureTime = DateTime.utc(2026, 10, 27, 12);
 
 Pass _fakePass() => Pass(
-      name: 'NORAD 33591',
-      catalogNumber: 33591,
+      name: 'NORAD 25544',
+      catalogNumber: 25544,
       riseTime: _captureTime,
       riseAz: 20,
       setTime: _captureTime.add(const Duration(minutes: 10)),
@@ -352,7 +353,7 @@ void main() {
     await tester.pumpWidget(_wrap(SkyPage(
       manualStation: _station,
       orientationService: _UnavailableOrientation(),
-      tleClient: _NoaaTleClient(),
+      tleClient: _IssTleClient(),
       locationService: _DeniedLocation(),
       radio: radio,
       clock: () => _captureTime,
@@ -367,15 +368,15 @@ void main() {
     await tester.pump(); // 路由首帧
     await tester.pump(const Duration(milliseconds: 500)); // 转场
 
-    expect(radio.tunedHz, isNotNull, reason: '真实下发 NOAA 19 下行频率');
-    expect((radio.tunedHz! - 137100000).abs(), lessThan(50e3),
+    expect(radio.tunedHz, isNotNull, reason: '真实下发 ISS 下行频率');
+    expect((radio.tunedHz! - 145800000).abs(), lessThan(10e3),
         reason: '中心频率落在一次性多普勒偏置范围内');
     final PointingPage page =
         tester.widget<PointingPage>(find.byType(PointingPage));
-    expect(page.targetLabel, 'NORAD 33591');
+    expect(page.targetLabel, 'NORAD 25544');
 
     final AzEl expected = azElAt(
-      Sgp4(Tle.fromLines(_NoaaTleClient.l1, _NoaaTleClient.l2)),
+      Sgp4(Tle.fromLines(_IssTleClient.l1, _IssTleClient.l2)),
       _captureTime,
       _station,
     );

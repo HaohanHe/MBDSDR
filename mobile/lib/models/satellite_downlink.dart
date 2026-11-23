@@ -1,11 +1,14 @@
 /// 卫星下行频率目录（按 NORAD 编目号索引）。
 ///
 /// 诚实性说明：
-///   * 这里只收录「公开、长期稳定、可用 RTL-SDR 直接接收」的下行中心频率——
-///     即 NOAA 极轨气象卫星的 137 MHz APT 自动图像传输。这些频率是卫星载荷
-///     的事实性广播参数（与台呼/位置无关），不是为了凑数而编造的假台名。
-///   * 目录外的卫星（包括 amateur/stations 分组里的大多数）一律返回 null，
-///     由 UI 诚实禁用并提示「无下行频率数据」，绝不猜测频率。
+///   * 这里只收录「公开、长期稳定、可用 RTL-SDR 直接接收」的下行中心频率。
+///   * **2026-11-23 核实：NOAA POES 星座已全部退役**——NOAA-18（2025-06-06）、
+///     NOAA-19（2025-08-13）、NOAA-15（2025-08-19）。原来的 137 MHz APT 三条
+///     已删除：留着只会把接收机调到没有广播的频率上。
+///   * 现收录 ISS（ZARYA, 25544）业余无线电下行 **145.800 MHz**（FM 语音/SSTV，
+///     全球统一；仅当 ISS 正在发射时可听到，不是常态信标）。
+///   * 目录外的卫星一律返回 null，由 UI 诚实禁用并提示「无下行频率数据」，
+///     绝不猜测频率。
 ///   * 不内置 FM 广播频点；本目录只用于把接收机对准真实的卫星下行。
 library;
 
@@ -23,41 +26,28 @@ class SatDownlink {
   /// NORAD 编目号（与 Tle.catalogNumber 对齐）。
   final int catalogNumber;
 
-  /// 面向 UI 的事实性名称（如 NOAA 19）。
+  /// 面向 UI 的事实性名称（如 ISS 语音/SSTV）。
   final String label;
 
   /// 下行中心频率（Hz）。
   final double downlinkHz;
 
-  /// 推荐解调模式：APT 为宽带调频（WFM）。
+  /// 推荐解调模式：ISS 业余语音/SSTV 为窄带调频（NFM）。
   final DemodMode mode;
 }
 
-/// 公开 APT 下行频率表（NOAA 极轨气象卫星，137 MHz 频段）。
+/// 公开下行频率表。
 ///
-/// 数值来源：NOAA POES APT 广播频率的公开工程资料（长期稳定）。仅收录
-/// RTL-SDR 可直接接收的主流在轨卫星；失效/退役星不收录。
+/// 数值来源：AMSAT / JAXA 公开的 ISS 业余无线电频率资料（全球统一 145.800 MHz）。
+/// 只收录当前在轨且有真实广播的条目；退役卫星不收录。
 const Map<int, SatDownlink> kSatDownlinks = <int, SatDownlink>{
-  // NOAA-19 (POES)
-  33591: SatDownlink(
-    catalogNumber: 33591,
-    label: 'NOAA 19 APT',
-    downlinkHz: 137.1000e6,
-    mode: DemodMode.wfm,
-  ),
-  // NOAA-18 (POES)
-  28654: SatDownlink(
-    catalogNumber: 28654,
-    label: 'NOAA 18 APT',
-    downlinkHz: 137.9125e6,
-    mode: DemodMode.wfm,
-  ),
-  // NOAA-15 (POES)
-  25338: SatDownlink(
-    catalogNumber: 25338,
-    label: 'NOAA 15 APT',
-    downlinkHz: 137.6200e6,
-    mode: DemodMode.wfm,
+  // ISS（ZARYA）业余无线电：语音/SSTV 下行 145.800 MHz（FM，全球统一）。
+  // 仅当 ISS 正在发射时才有信号；APRS 数字中继在 145.825 MHz（未收录）。
+  25544: SatDownlink(
+    catalogNumber: 25544,
+    label: 'ISS 语音/SSTV',
+    downlinkHz: 145.8000e6,
+    mode: DemodMode.nfm,
   ),
 };
 

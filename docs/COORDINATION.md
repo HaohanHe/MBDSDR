@@ -2658,6 +2658,11 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `mobile/test/sky_layout_small_screen_test.dart` | 移动端走查线/23（列表不自滚回归 + 雷达最小高） | 2026-11-23 20:45 | 本笔 |
 | `mobile/README.md` | 移动端走查线/23（§249 验证状态与 adb reverse 通路） | 2026-11-23 20:47 | 本笔 |
 | `docs/COORDINATION.md` | 移动端走查线/23（§249 记录） | 2026-11-23 20:47 | 本笔 |
+| `mobile/lib/models/satellite_downlink.dart` | 移动端走查线/24（§250 NOAA 全退役 → 改 ISS 145.800） | 2026-11-23 20:56 | 本笔 |
+| `mobile/test/satellite_capture_test.dart` | 移动端走查线/24（目录改 ISS 后测试同步） | 2026-11-23 20:56 | 本笔 |
+| `mobile/test/sky_page_test.dart` | 移动端走查线/24（捕获用例改 ISS 并断言 145.8 MHz） | 2026-11-23 20:56 | 本笔 |
+| `mobile/README.md` | 移动端走查线/24（§250 捕获闭环验证状态） | 2026-11-23 20:58 | 本笔 |
+| `docs/COORDINATION.md` | 移动端走查线/24（§250 闭环打通记录） | 2026-11-23 20:58 | 本笔 |
 
 > 上表各行均由 `claim` 台账推导：owner 原文与 `acquired_at` 直接取自台账，
 > 目的优先用台账里的 `claim_reason`，没有就如实写「未声明」，不补编。时间列只是
@@ -12203,3 +12208,35 @@ rtl_tcp 接进手机端。
 - 竖屏「下滑回顶」在 `adb input swipe` 注入下始终无效（上滑有效），无法判定是注入问题
   还是真机手感问题；widget 层已证实是单一滚动容器。
 - 全部结论来自 API35 模拟器 + 宿主 RTL2832U，不是物理手机。
+
+## 250. 「捕获 → 指向」闭环打通：NOAA 全退役 → 目录改 ISS 145.800（2026-11-23）
+
+**先核实再改（联网查证，不凭记忆写频率）**
+- NOAA POES 星座**全部退役**：NOAA-18（2025-06-06）、NOAA-19（2025-08-13）、
+  NOAA-15（2025-08-19）——来源 NESDIS / OSPO / CLASS 公告。原目录三条 137 MHz APT
+  已失效，留着等于把接收机调到没有广播的频率上。
+- ISS 业余无线电下行 **145.800 MHz**（FM 语音/SSTV，全球统一）——AMSAT / JAXA 公开资料。
+
+**改动**
+- [satellite_downlink.dart](file:///d:/mbdsdr/MBDSDR/mobile/lib/models/satellite_downlink.dart)：
+  删除三条退役 NOAA，改收录 ISS（ZARYA, 25544）→ `145.800 MHz` / `NFM`；
+  注释写明退役日期与「仅当 ISS 正在发射时可听，不是常态信标」。
+- 测试同步：`satellite_capture_test`（ISS 命中 145.8/nfm；NOAA 19 与未知星返回 null；
+  多普勒量级由几十 kHz 改为 kHz 级、中心频率范围 145.7–145.9）；
+  `sky_page_test` 捕获用例改用 ISS TLE，断言 `targetLabel 'NORAD 25544'`、调到 145.8 MHz。
+
+**装机闭环证据（真实硬件：API35 模拟器 + 宿主 RTL2832U，非物理手机）**
+1. `mw_113/114`：stations 组 ISS (ZARYA) 过境行出现「捕获」按钮
+   （此前整组都是「无下行频率数据」）。
+2. `mw_115`：点「捕获」→ 跳「指天视图」，底部条：
+   「已捕获 ISS 语音/SSTV：145803.028 kHz · NFM（多普勒偏置 3.03 kHz，仅一次性预测，未实时跟踪）」。
+3. `mw_116`：回频谱页，设定值 **145.803028 MHz · NFM**、RSSI −29.2 dBFS（实测峰值）、
+   2.048 MS/s（设备报告）、瀑布图实时绘制——接收机确实被调过去了。
+
+**诚实边界**
+- ISS 平时不一定在发射：这只证明「能调到正确频率并打开指天视图」，
+  **不代表收到语音/SSTV**。
+- 指天视图的方位/仰角来自模拟器虚拟传感器（罗盘 ±0°、仰角 −0°），真机未验。
+- 多普勒是捕获时刻的一次性预测，不是实时跟踪（界面已标注）。
+- 换掉 NOAA 是因为它们退役了，不是「为了测试通过」放宽目录；
+  未来要加新卫星（如 Meteor LRPT 137.1 MHz）仍需逐颗核实 NORAD 编号与在轨状态。
