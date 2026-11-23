@@ -49,6 +49,27 @@ def _iq(n: int = _FFT, seed: int = 3) -> np.ndarray:
 # ---------------------------------------------------------------------------
 # 1. 单帧谱的元数据
 # ---------------------------------------------------------------------------
+def test_generator_last_frame_clock():
+    """/spectrum 快照要算年龄：只有真实帧才置时钟，清空即复位。"""
+    import time as _time
+
+    from spectrum_widget import SpectrumDataGenerator
+
+    gen = SpectrumDataGenerator(num_bins=16)
+    assert gen.last_frame_monotonic is None
+    assert gen.has_live_data is False
+
+    before = _time.monotonic()
+    gen.push_iq(_iq(64), _CF, _SR)
+    after = _time.monotonic()
+    assert gen.has_live_data is True
+    assert before <= gen.last_frame_monotonic <= after
+
+    gen.clear_data()
+    assert gen.last_frame_monotonic is None
+    assert gen.has_live_data is False
+
+
 def test_single_frame_meta():
     from spectrum_processor import SpectrumProcessor
 

@@ -224,6 +224,35 @@ class DeviceGatewayClientTest {
     }
 
     @Test
+    fun spectrumUsesBearerAndSurfaces503() {
+        val fake = FakeGateway { call ->
+            assertEquals("/spectrum", call.url.substringAfter(":8771"))
+            assertEquals("GET", call.method)
+            assertEquals("Bearer tok-h", call.headers["Authorization"])
+            GatewayResponse(200,
+                """{"schema":"mbdsdr.spectrum-snapshot/1","readonly":true,
+                   "realtime":false,"center_freq_hz":100000000.0,
+                   "bins":3,"powers_db":[-90.0,null,-70.0]}""")
+        }
+        val out = client(fake).spectrum("tok-h")
+        assertEquals("mbdsdr.spectrum-snapshot/1", out.get("schema").asString)
+        assertTrue(out.get("readonly").asBoolean)
+        assertFalse(out.get("realtime").asBoolean)
+
+        val missing = FakeGateway {
+            GatewayResponse(503,
+                """{"error":"spectrum_unavailable","reason":"桌面当前没有可读的频谱帧"}""")
+        }
+        try {
+            client(missing).spectrum("tok-h")
+            fail("应当抛 DeviceGatewayException")
+        } catch (e: DeviceGatewayException) {
+            assertEquals(503, e.status ?: -1)
+            assertTrue(e.message!!.contains("没有可读"))
+        }
+    }
+
+    @Test
     fun nonJsonSuccessIsProtocolError() {
         val fake = FakeGateway { GatewayResponse(200, "OK") }
         try {

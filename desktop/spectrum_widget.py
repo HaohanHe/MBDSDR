@@ -293,6 +293,8 @@ class SpectrumDataGenerator:
         self._wf_rate_n0: int = 0
         self._wf_row_rate_hz: float = 0.0
         self._has_real_data = False
+        # 最近一帧真实谱线的进程内单调时刻（供 /spectrum 只读快照算年龄）。
+        self._last_frame_time: Optional[float] = None
         # ---- 跨帧峰跟踪（C++ rescanPeaks 同款语义）----
         # 每数据帧推进一次（push_iq 内），不随瀑布行号节流。
         self.peak_rel_db = _PEAK_REL_DB_DEFAULT   # 跟踪用相对门（面板随滑杆同步）
@@ -493,9 +495,15 @@ class SpectrumDataGenerator:
         """兼容旧调用名；语义与 ``has_live_data`` 相同。"""
         return self.has_live_data
 
+    @property
+    def last_frame_monotonic(self) -> Optional[float]:
+        """最近一帧真实谱线的单调时刻；无数据为 None（只读，供 `/spectrum`）。"""
+        return self._last_frame_time
+
     def clear_data(self):
         """断开/清空：回到"未连接"，不保留旧谱线。"""
         self._has_real_data = False
+        self._last_frame_time = None
         self.spectrum = np.full(self.num_bins, np.nan, dtype=np.float32)
         self._wf_buf.fill(np.nan)
         self._wf_head = 0
@@ -606,6 +614,7 @@ class SpectrumDataGenerator:
         # 重采样到 num_bins（max 抽取，窄脉冲不被平均抹平）
         self.spectrum = self._resample_max(power_db)
         self._has_real_data = True
+        self._last_frame_time = time.monotonic()
         self._update_hold()
         # 峰跟踪随每个数据帧推进（不挂在瀑布行号上，避免 10 帧绘制缓存）。
         self.advance_peak_tracks()

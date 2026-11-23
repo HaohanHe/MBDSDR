@@ -30,6 +30,8 @@ data class GatewayUiState(
     /** SDR 授权一行（M4.2 客户端）；未取到时为空。 */
     val sdrText: String = "",
     val sdrHeld: Boolean = false,
+    /** 桌面只读频谱快照一行（M2.6）；未取到时为空。 */
+    val spectrumText: String = "",
     /** 两机融合位姿一行（M3.2 消费端）；未取到时为空。 */
     val fuseText: String = "",
 )
@@ -154,6 +156,41 @@ object GatewayFormat {
         val sourceText = if (sources.isEmpty()) "—" else sources.joinToString(", ")
         return ("融合位姿：方位 ${deg(az, 1)} 高度 ${deg(alt, 1)}"
             + " · 精度 ${deg(acc, 2)} · $countText 条（$sourceText）")
+    }
+
+    /**
+     * 桌面只读频谱快照（`mbdsdr.spectrum-snapshot/1`）压成一行。
+     *
+     * 明确写「只读·非实时」：这是权威端某一帧，不是头显在收流。
+     * 非有限 bin 在回执里是 null，这里不参与峰值/噪声底；缺字段写「—」，
+     * 不拿 0 dB 或默认频率顶替。
+     */
+    fun spectrumSummary(json: JsonObject): String {
+        fun mhz(v: Double?): String = v?.let {
+            String.format(java.util.Locale.US, "%.3f MHz", it / 1e6)
+        } ?: "—"
+        fun db(v: Double?): String = v?.let {
+            String.format(java.util.Locale.US, "%.1f dB", it)
+        } ?: "—"
+        val rate = num(json, "sample_rate_hz")
+        val rateText = rate?.let {
+            String.format(java.util.Locale.US, "%.2f MS/s", it / 1e6)
+        } ?: "—"
+        val bins = num(json, "bins")?.toInt()?.toString() ?: "—"
+        val age = num(json, "age_s")
+        val ageText = age?.let {
+            String.format(java.util.Locale.US, "%.1f s", it)
+        } ?: "未知"
+        val staleEl = json.get("stale")
+        val stale = staleEl?.takeIf {
+            it.isJsonPrimitive && it.asJsonPrimitive.isBoolean
+        }?.asBoolean
+        val staleText = if (stale == true) "（帧已过期）" else ""
+        return ("频谱快照（只读·非实时）：${mhz(num(json, "center_freq_hz"))}"
+            + " · $rateText · $bins bin"
+            + " · 峰值 ${mhz(num(json, "peak_freq_hz"))} ${db(num(json, "peak_power_db"))}"
+            + " · 噪声底 ${db(num(json, "noise_floor_db"))}"
+            + " · 帧龄 $ageText$staleText")
     }
 }
 
@@ -299,6 +336,21 @@ class GatewayController(
                 status = "融合位姿已更新")
         } catch (e: DeviceGatewayException) {
             fail("融合位姿失败：${e.message}")
+        }
+    }
+
+    /** 拉一次桌面只读频谱快照（M2.6）；没有可读帧时如实报 503 原因。 */
+    fun refreshSpectrum() {
+        val client = readyClient() ?: return
+        state = state.copy(busy = true, status = "读取频谱快照中…")
+        try {
+            val data = client.spectrum(state.token)
+            state = state.copy(
+                busy = false,
+                spectrumText = GatewayFormat.spectrumSummary(data),
+                status = "频谱快照已更新")
+        } catch (e: DeviceGatewayException) {
+            fail("频谱快照失败：${e.message}")
         }
     }
 

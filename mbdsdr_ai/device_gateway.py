@@ -10,8 +10,8 @@
    token 只在内存里，带 TTL，可吊销。
 2. **角色**：`lens`（镜头粗指向）/ `eyepiece`（目镜认星）/ `handheld`（手持只读）
    / `headset`（空间化只读）。角色不符就拒绝对应动作。
-3. **只读 + 位姿**：`/panorama`、`/passes`、`/status`、`/roster`、`/poses`、
-   `/fuse` 是读；
+3. **只读 + 位姿**：`/panorama`、`/passes`、`/status`、`/spectrum`、`/roster`、
+   `/poses`、`/fuse` 是读；
    只有 `lens/eyepiece` 能 `POST /pose`。**没有任何写硬件/改站址/调谐端点**——
    那些仍归桌面权威端。
 4. **多机融合**：`/fuse` 把两条位姿喂给 `sky_pointing.fuse_poses`（与
@@ -54,11 +54,13 @@ __all__ = [
     "POSE_ROLES",
     "SDR_LEASE_SCHEMA",
     "SDR_LEASE_ROLES",
+    "SPECTRUM_SCHEMA",
     "Device",
     "PairingRegistry",
     "SdrLeaseRegistry",
     "DeviceGateway",
     "build_default_panorama_provider",
+    "build_desktop_spectrum_provider",
     "build_station_panorama_provider",
     "parse_tle_groups",
     "build_tle_passes_provider",
@@ -81,6 +83,8 @@ DEFAULT_TOKEN_TTL_S = 12 * 3600.0
 PASSES_SCHEMA = "mbdsdr.sat-passes/1"
 #: 权威端状态信封 schema（只读 /status）。
 STATUS_SCHEMA = "mbdsdr.desktop-status/1"
+#: 权威端频谱只读快照 schema（`mbdsdr.spectrum-snapshot/1`）。
+SPECTRUM_SCHEMA = "mbdsdr.spectrum-snapshot/1"
 #: SDR 一次性授权信封 schema。
 SDR_LEASE_SCHEMA = "mbdsdr.sdr-lease/1"
 #: 默认租约时长：到期自动失效，持有者可续租。
@@ -466,6 +470,8 @@ class DeviceGateway:
                  panorama_provider: Optional[Callable[[], Dict[str, Any]]] = None,
                  passes_provider: Optional[Callable[[], Dict[str, Any]]] = None,
                  status_provider: Optional[Callable[[], Dict[str, Any]]] = None,
+                 spectrum_provider: Optional[
+                     Callable[[], Optional[Dict[str, Any]]]] = None,
                  sdr_lease: Optional[SdrLeaseRegistry] = None,
                  rtl_tcp_provider: Optional[Callable[[], Tuple[str, int]]] = None,
                  desktop_sdr_busy: Optional[Callable[[], bool]] = None,
@@ -477,6 +483,8 @@ class DeviceGateway:
         self._panorama_provider = panorama_provider
         self._passes_provider = passes_provider
         self._status_provider = status_provider
+        #: 只读频谱快照（M2.6）：返回 None 表示桌面当前没有可读帧 → 503。
+        self._spectrum_provider = spectrum_provider
         #: SDR 租约（M4.2）：只发「谁可以用」，不碰硬件；未配置 rtl_tcp 时 503。
         self.sdr_leases = sdr_lease or SdrLeaseRegistry()
         self._rtl_tcp_provider = rtl_tcp_provider
@@ -679,6 +687,33 @@ class DeviceGateway:
                 return 500, self._json({
                     "ok": False, "error": "status_bad_shape",
                     "reason": "provider 必须返回对象",
+                }), "application/json"
+            return 200, self._json(data), "application/json"
+
+        if route == "/spectrum":
+            if method != "GET":
+                return 405, self._json({"ok": False, "error": "method_not_allowed"}), "application/json"
+            if self._spectrum_provider is None:
+                return 503, self._json({
+                    "ok": False, "error": "spectrum_unavailable",
+                    "reason": "权威端尚未接入频谱快照提供者",
+                }), "application/json"
+            try:
+                data = self._spectrum_provider()
+            except Exception as exc:  # noqa: BLE001 - 失败要可见
+                return 500, self._json({
+                    "ok": False, "error": "spectrum_failed",
+                    "reason": f"{type(exc).__name__}: {exc}",
+                }), "application/json"
+            if data is None:
+                return 503, self._json({
+                    "ok": False, "error": "spectrum_unavailable",
+                    "reason": "桌面当前没有可读的频谱帧（未连接 SDR 或已停止）",
+                }), "application/json"
+            if not isinstance(data, dict):
+                return 500, self._json({
+                    "ok": False, "error": "spectrum_bad_shape",
+                    "reason": "provider 必须返回对象或 None",
                 }), "application/json"
             return 200, self._json(data), "application/json"
 
@@ -1088,6 +1123,101 @@ def build_desktop_status_provider(
     return provider
 
 
+def build_desktop_spectrum_provider(
+        frame_provider: Callable[[], Optional[Dict[str, Any]]],
+        *, max_age_s: float = 5.0,
+) -> Callable[[], Optional[Dict[str, Any]]]:
+    """`/spectrum` 的默认实现：把桌面「当前一帧」幅度谱转成只读快照。
+
+    ``frame_provider`` 返回 ``None``（未连接/已停止）或一个帧对象：
+
+    ``center_freq_hz``、``sample_rate_hz``、``powers_db``（必填）；
+    ``fft_size``、``source``、``captured_monotonic``（可选，最后一项目的是
+    进程内单调时钟，用于算 ``age_s``/``stale``）。
+
+    这里**不造数据**：没有帧就返回 ``None``（网关回 503），全为 NaN/非有限值
+    也按没有帧处理；绝不把旧谱线说成实时。非有限 bin 输出 ``null``，
+    消费端不得当 0 dB 处理。
+    """
+    import statistics
+
+    def provider() -> Optional[Dict[str, Any]]:
+        frame = frame_provider()
+        if frame is None:
+            return None
+        if not isinstance(frame, dict):
+            raise RuntimeError("频谱帧必须是对象或 None")
+        try:
+            center_hz = float(frame["center_freq_hz"])
+            sample_hz = float(frame["sample_rate_hz"])
+            raw_obj = frame.get("powers_db")
+            # 不用 `raw_obj or []`：numpy 数组的真值判断会抛异常。
+            raw = [] if raw_obj is None else list(raw_obj)
+        except (KeyError, TypeError, ValueError) as exc:
+            raise RuntimeError(f"频谱帧字段非法：{exc}") from exc
+        if not (math.isfinite(center_hz) and math.isfinite(sample_hz)
+                and sample_hz > 0.0):
+            raise RuntimeError("频谱帧的中心频率/采样率非法")
+
+        powers: List[Optional[float]] = []
+        finite: List[Tuple[int, float]] = []
+        for idx, value in enumerate(raw):
+            try:
+                val = float(value)
+            except (TypeError, ValueError):
+                powers.append(None)
+                continue
+            if not math.isfinite(val):
+                powers.append(None)
+                continue
+            powers.append(round(val, 2))
+            finite.append((idx, val))
+        if not finite:
+            return None
+
+        bins = len(powers)
+        peak_idx, peak_db = max(finite, key=lambda pair: pair[1])
+        span = sample_hz
+        step = span / bins
+        freq_start = center_hz - span / 2.0
+        age_s: Optional[float] = None
+        stale: Optional[bool] = None
+        captured = frame.get("captured_monotonic")
+        if captured is not None:
+            try:
+                age_s = max(0.0, time.monotonic() - float(captured))
+                stale = age_s > float(max_age_s)
+            except (TypeError, ValueError):
+                age_s = None
+        return {
+            "schema": SPECTRUM_SCHEMA,
+            "at_utc": _iso(_utc_now()),
+            "authority": "desktop",
+            "readonly": True,
+            "realtime": False,
+            "source": str(frame.get("source") or "unknown"),
+            "center_freq_hz": center_hz,
+            "sample_rate_hz": sample_hz,
+            "span_hz": span,
+            "fft_size": int(frame.get("fft_size") or bins),
+            "bins": bins,
+            "freq_start_hz": freq_start,
+            "freq_step_hz": step,
+            "powers_db": powers,
+            "finite_bins": len(finite),
+            "peak_freq_hz": freq_start + (peak_idx + 0.5) * step,
+            "peak_power_db": round(peak_db, 2),
+            "noise_floor_db": round(statistics.median(
+                [v for _, v in finite]), 2),
+            "age_s": None if age_s is None else round(age_s, 3),
+            "stale": stale,
+            "note": ("只读快照：桌面某一帧的幅度谱（相对 dBFS），"
+                     "不是实时流；不调谐、不写回。"),
+        }
+
+    return provider
+
+
 def _main(argv: Optional[List[str]] = None) -> int:
     import argparse
 
@@ -1173,8 +1303,10 @@ def _main(argv: Optional[List[str]] = None) -> int:
     print(f"设备网关已启动：{url}")
     print(f"配对码：{gw.registry.code}（只给权威端看，不进 API 回执）")
     print("可用端点：GET /health、POST /pair、GET /roster、GET /panorama、"
-          "GET /passes、GET /status、POST /pose、GET /poses、GET /fuse、"
-          "GET/POST /sdr/lease、POST /sdr/release；没有写硬件端点。")
+          "GET /passes、GET /status、GET /spectrum、POST /pose、GET /poses、"
+          "GET /fuse、GET/POST /sdr/lease、POST /sdr/release；没有写硬件端点。")
+    print("频谱快照：CLI 无实时频谱帧，/spectrum 回 503；"
+          "桌面 UI 启动网关且 SDR 在收时可读。")
     print("全景数据：" + ("允许联网现采" if args.allow_live
                         else "只读 15 分钟内缓存快照（--allow-live 可现采）"))
     print("过境数据：" + (f"本地 TLE 离线 SGP4（{args.tle_file}）"

@@ -74,7 +74,8 @@ python scripts/export_spatial_bundle.py <档案>.observation.json -o <输出目�
 只读网关客户端，与手机/桌面共用同一 HTTP 契约：
 
 - `GET /health`（免 token）、`POST /pair`（配对码换 token）
-- `GET /roster`、`GET /panorama`、`GET /passes`、`GET /poses`、`GET /fuse`
+- `GET /roster`、`GET /panorama`、`GET /passes`、`GET /status`、`GET /spectrum`、
+  `GET /poses`、`GET /fuse`
 - `POST /pose` 仅 `lens/eyepiece`；`handheld/headset` 在**本地即拒绝**，不发请求
 
 `/passes` 由桌面权威端用本地 TLE 文件做离线 SGP4 预报（`--tle-file`），
@@ -90,6 +91,11 @@ SDR 授权（M4.2 客户端）：面板「SDR 状态 / 申请 SDR / 释放 SDR�
 融合位姿（M3.2 消费端）：面板「刷新融合」调用 `GET /fuse`，显示
 「方位/高度/精度/观测条数/来源」；不可用时只转述权威端原因
 （如「observations 为空」「陈旧」），不猜朝向。它只是读，不参与四窗星图。
+
+频谱快照（M2.6 消费端）：面板「频谱快照」调用 `GET /spectrum`，显示
+「中心/采样率/bin/峰值/噪声底/帧龄」，并明确标「只读·非实时」。
+桌面只有 SDR 正在出帧时才给数据；否则 503「没有可读的频谱帧」，面板如实
+转述、不改写成假快照。它不调谐、不写回，也不替换「听见」窗口的包内回放。
 
 rtl_tcp 线协议（M4.2 基础层）：`net/RtlTcpProtocol.kt` 只做纯字节编解码——
 解析 12 字节 `RTL0` 头、生成 5 字节命令（中心频率/采样率/增益模式/增益/

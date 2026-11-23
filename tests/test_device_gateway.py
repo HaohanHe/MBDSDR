@@ -22,7 +22,8 @@ if _ROOT not in sys.path:
 
 from mbdsdr_ai.device_gateway import (  # noqa: E402
     DeviceGateway, PairingRegistry, SdrLeaseRegistry,
-    build_desktop_status_provider, build_station_passes_provider,
+    build_desktop_spectrum_provider, build_desktop_status_provider,
+    build_station_passes_provider,
     build_tle_passes_provider, parse_tle_groups,
 )
 
@@ -807,4 +808,98 @@ def test_status_provider_builder_marks_missing_and_errors():
     shape = build_desktop_status_provider(
         lambda: (45.0, 120.0, None), sdr_status_provider=lambda: "x")()
     assert any("必须返回对象" in m for m in shape["missing"])
+
+
+# ---------------------------------------------------------------- /spectrum
+
+def _frame(**over):
+    frame = {
+        "center_freq_hz": 100e6,
+        "sample_rate_hz": 1e6,
+        "fft_size": 3,
+        "powers_db": [-90.0, -20.0, -70.0],
+        "source": "live",
+    }
+    frame.update(over)
+    return frame
+
+
+def test_spectrum_requires_provider_and_token():
+    gw = DeviceGateway(registry=_registry())
+    status, d = _get(gw, "/spectrum")
+    assert status == 401
+    _pair(gw)
+    status, d = _get(gw, "/spectrum", "tok-lens-1")
+    assert status == 503 and d["error"] == "spectrum_unavailable"
+    assert "频谱快照" in d["reason"]
+
+
+def test_spectrum_returns_readonly_snapshot():
+    provider = build_desktop_spectrum_provider(lambda: _frame())
+    gw = DeviceGateway(registry=_registry(), spectrum_provider=provider)
+    _pair(gw)
+    status, d = _get(gw, "/spectrum", "tok-lens-1")
+    assert status == 200
+    assert d["schema"] == "mbdsdr.spectrum-snapshot/1"
+    assert d["authority"] == "desktop"
+    assert d["readonly"] is True and d["realtime"] is False
+    assert d["bins"] == 3 and d["fft_size"] == 3
+    assert d["freq_start_hz"] == 99.5e6
+    assert d["freq_step_hz"] == pytest.approx(1e6 / 3)
+    assert d["peak_freq_hz"] == pytest.approx(100e6)
+    assert d["peak_power_db"] == -20.0
+    assert d["noise_floor_db"] == -70.0
+    assert d["age_s"] is None and d["stale"] is None
+    assert "不是实时流" in d["note"]
+
+    status, raw, _ = gw.dispatch(
+        "POST", "/spectrum", b"", {"Authorization": "Bearer tok-lens-1"})
+    assert status == 405
+
+
+def test_spectrum_none_is_503_and_failures_visible():
+    gw = DeviceGateway(registry=_registry(), spectrum_provider=lambda: None)
+    _pair(gw)
+    status, d = _get(gw, "/spectrum", "tok-lens-1")
+    assert status == 503 and d["error"] == "spectrum_unavailable"
+    assert "没有可读的频谱帧" in d["reason"]
+
+    def boom():
+        raise RuntimeError("读谱失败")
+
+    gw2 = DeviceGateway(registry=_registry(), spectrum_provider=boom)
+    _pair(gw2)
+    status, d2 = _get(gw2, "/spectrum", "tok-lens-1")
+    assert status == 500 and d2["error"] == "spectrum_failed"
+    assert "读谱失败" in d2["reason"]
+
+    gw3 = DeviceGateway(registry=_registry(),
+                        spectrum_provider=lambda: ["不是对象"])
+    _pair(gw3)
+    status, d3 = _get(gw3, "/spectrum", "tok-lens-1")
+    assert status == 500 and d3["error"] == "spectrum_bad_shape"
+
+
+def test_spectrum_builder_marks_nan_and_stale():
+    provider = build_desktop_spectrum_provider(
+        lambda: _frame(powers_db=[-90.0, float("nan"), float("inf"), -60.0],
+                       captured_monotonic=time.monotonic() - 10.0,
+                       fft_size=4),
+        max_age_s=5.0)
+    d = provider()
+    assert d["powers_db"] == [-90.0, None, None, -60.0]
+    assert d["finite_bins"] == 2
+    assert d["stale"] is True
+    assert d["age_s"] >= 9.0
+
+    # 全 NaN = 没有有效帧，不能当 0 dB 送出去。
+    assert build_desktop_spectrum_provider(
+        lambda: _frame(powers_db=[float("nan"), float("nan")]))() is None
+    assert build_desktop_spectrum_provider(lambda: None)() is None
+
+    with pytest.raises(RuntimeError):
+        build_desktop_spectrum_provider(
+            lambda: {"center_freq_hz": 100e6, "sample_rate_hz": 0.0,
+                     "powers_db": [-90.0]})()
+
 

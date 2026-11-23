@@ -451,4 +451,70 @@ class GatewayControllerTest {
         assertTrue(c.state.fuseText.contains("2 条"))
         assertFalse(c.state.busy)
     }
+
+    // ---- M2.6 消费端：桌面只读频谱快照 ----
+
+    @Test
+    fun spectrumSummarySaysReadonlyAndMarksStale() {
+        val full = JsonParser.parseString(
+            """{"schema":"mbdsdr.spectrum-snapshot/1","readonly":true,
+               "realtime":false,"center_freq_hz":100000000.0,
+               "sample_rate_hz":2400000.0,"bins":512,
+               "peak_freq_hz":100125000.0,"peak_power_db":-20.5,
+               "noise_floor_db":-70.0,"age_s":0.4,"stale":false}""").asJsonObject
+        assertEquals(
+            "频谱快照（只读·非实时）：100.000 MHz · 2.40 MS/s · 512 bin"
+                + " · 峰值 100.125 MHz -20.5 dB · 噪声底 -70.0 dB · 帧龄 0.4 s",
+            GatewayFormat.spectrumSummary(full),
+        )
+
+        val stale = JsonParser.parseString(
+            """{"center_freq_hz":100000000.0,"age_s":9.5,"stale":true}""").asJsonObject
+        assertTrue(GatewayFormat.spectrumSummary(stale).endsWith("（帧已过期）"))
+
+        val minimal = JsonParser.parseString(
+            """{"schema":"mbdsdr.spectrum-snapshot/1"}""").asJsonObject
+        assertEquals(
+            "频谱快照（只读·非实时）：— · — · — bin · 峰值 — —"
+                + " · 噪声底 — · 帧龄 未知",
+            GatewayFormat.spectrumSummary(minimal),
+        )
+    }
+
+    @Test
+    fun refreshSpectrumShowsSnapshotOrHonest503() {
+        var payload = """{"schema":"mbdsdr.spectrum-snapshot/1","readonly":true,
+                          "realtime":false,"center_freq_hz":100000000.0,
+                          "sample_rate_hz":1000000.0,"bins":3,
+                          "peak_freq_hz":100250000.0,"peak_power_db":-30.0,
+                          "noise_floor_db":-90.0,"age_s":0.2,"stale":false}"""
+        val fake = FakeGateway { call ->
+            when (call.path) {
+                "/pair" -> GatewayResponse(200, """{"token":"tok-h"}""")
+                "/spectrum" -> {
+                    assertEquals("Bearer tok-h", call.headers["Authorization"])
+                    if (payload.startsWith("{")) GatewayResponse(200, payload)
+                    else GatewayResponse(503,
+                        """{"error":"spectrum_unavailable","reason":"桌面当前没有可读的频谱帧"}""")
+                }
+                else -> GatewayResponse(404, "{}")
+            }
+        }
+        val c = controller(fake)
+        c.updateCode("123456")
+        c.pair()
+
+        c.refreshSpectrum()
+        assertTrue(c.state.spectrumText.startsWith("频谱快照（只读·非实时）：100.000 MHz"))
+        assertTrue(c.state.spectrumText.contains("100.250 MHz -30.0 dB"))
+        assertEquals("频谱快照已更新", c.state.status)
+
+        payload = "missing"
+        val before = c.state.spectrumText
+        c.refreshSpectrum()
+        assertEquals(before, c.state.spectrumText)  // 失败不改写成假快照
+        assertTrue(c.state.status.contains("频谱快照失败"))
+        assertTrue(c.state.status.contains("没有可读"))
+        assertFalse(c.state.busy)
+    }
 }

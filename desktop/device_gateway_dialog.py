@@ -31,7 +31,8 @@ from PySide6.QtWidgets import (  # noqa: E402
 )
 
 from mbdsdr_ai.device_gateway import (  # noqa: E402
-    DeviceGateway, build_desktop_status_provider,
+    DeviceGateway, build_desktop_spectrum_provider,
+    build_desktop_status_provider,
     build_station_panorama_provider, build_station_passes_provider,
 )
 
@@ -59,10 +60,14 @@ class DeviceGatewayDialog(QDialog):
                      Optional[float], Optional[float], Optional[float]]],
                  parent=None, *, port: int = 8771,
                  hosts: Optional[List[str]] = None,
-                 registry=None):
+                 registry=None,
+                 spectrum_frame_provider: Optional[
+                     Callable[[], Optional[dict]]] = None):
         super().__init__(parent)
         self._station_provider = station_provider
         self._registry = registry
+        #: 桌面当前频谱帧（None = 未连接/已停止）；只转成只读快照，不造数据。
+        self._spectrum_frame_provider = spectrum_frame_provider
         self._gateway: Optional[DeviceGateway] = None
         self.setWindowTitle("多设备网关（手机/头显配对）")
         self.resize(640, 460)
@@ -82,7 +87,8 @@ class DeviceGatewayDialog(QDialog):
         tip = QLabel(
             "给第二台手机（镜头/目镜/手持）或头显配对用。网关只有只读端点，"
             "不改站址、不调谐、不发射；选本地 TLE 文件后额外启用离线 /passes；"
-            "填 rtl_tcp 地址后可给头显签发 SDR 独占授权（网关不碰 dongle）。"
+            "填 rtl_tcp 地址后可给头显签发 SDR 独占授权（网关不碰 dongle）；"
+            "SDR 在收时 /spectrum 提供只读幅度谱快照（不是实时流）。"
             "关闭本窗口会停止网关。")
         tip.setWordWrap(True)
         tip.setStyleSheet("color:#5B7B8C;")
@@ -234,6 +240,9 @@ class DeviceGatewayDialog(QDialog):
         status_provider = build_desktop_status_provider(
             self._safe_station,
             sdr_status_provider=self._sdr_status_for_status)
+        spectrum_provider = (None if self._spectrum_frame_provider is None
+                             else build_desktop_spectrum_provider(
+                                 self._spectrum_frame_provider))
         try:
             gw = DeviceGateway(host=host, port=self.port_spin.value(),
                                allow_lan=allow_lan,
@@ -241,6 +250,7 @@ class DeviceGatewayDialog(QDialog):
                                panorama_provider=provider,
                                passes_provider=passes_provider,
                                status_provider=status_provider,
+                               spectrum_provider=spectrum_provider,
                                rtl_tcp_provider=rtl_provider,
                                desktop_sdr_busy=(
                                    lambda: self.desktop_busy_check.isChecked()))

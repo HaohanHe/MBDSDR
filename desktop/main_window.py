@@ -7578,6 +7578,24 @@ class MainWindow(QMainWindow):
         return (self._observer_lat, self._observer_lon,
                 self._observer_alt_m)
 
+    def _device_spectrum_frame(self):
+        """网关 /spectrum 的唯一来源：主窗当前一帧真实幅度谱。
+
+        未连接/已停止时 `has_live_data` 为 False（断开即清空），这里返回 None，
+        网关回 503；不取示例谱、不补零。
+        """
+        gen = getattr(getattr(self, "spectrum", None), "generator", None)
+        if gen is None or not getattr(gen, "has_live_data", False):
+            return None
+        return {
+            "center_freq_hz": float(gen.center_freq_hz),
+            "sample_rate_hz": float(gen.sample_rate_hz),
+            "fft_size": int(gen.fft_size),
+            "powers_db": gen.spectrum,
+            "source": "live",
+            "captured_monotonic": getattr(gen, "last_frame_monotonic", None),
+        }
+
     def _open_device_gateway(self):
         """文件 → 多设备网关：显式开启/停止 + 配对码 + 名册（M2.1b）。"""
         try:
@@ -7591,7 +7609,9 @@ class MainWindow(QMainWindow):
                 return
         dlg = getattr(self, "_device_gateway_dialog", None)
         if dlg is None:
-            dlg = DeviceGatewayDialog(self._device_station_triplet, self)
+            dlg = DeviceGatewayDialog(
+                self._device_station_triplet, self,
+                spectrum_frame_provider=self._device_spectrum_frame)
             self._device_gateway_dialog = dlg
         dlg.show()
         dlg.raise_()

@@ -2975,6 +2975,25 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `.trae/specs/mbdsdr-system-lifecycle/checklist.md` | 多机线/42（§283 Task 237） | 2026-11-24 00:13 | 本笔 |
 | `docs/PRD-现状对照.md` | 多机线/42（§283 P1-11 补 /status） | 2026-11-24 00:13 | 本笔 |
 | `docs/COORDINATION.md` | 多机线/42（§283 记录 + §6.1） | 2026-11-24 00:13 | 本笔 |
+| `mbdsdr_ai/device_gateway.py` | 多机线/42（§284 /spectrum + build_desktop_spectrum_provider + CLI） | 2026-11-24 00:40 | 本笔 |
+| `desktop/device_gateway_dialog.py` | 多机线/42（§284 对话框频谱帧接线） | 2026-11-24 00:40 | 本笔 |
+| `desktop/main_window.py` | 多机线/42（§284 主窗频谱帧提供者） | 2026-11-24 00:40 | 本笔 |
+| `desktop/spectrum_widget.py` | 多机线/42（§284 帧时钟 last_frame_monotonic） | 2026-11-24 00:40 | 本笔 |
+| `tests/test_device_gateway.py` | 多机线/42（§284 /spectrum 4 条用例） | 2026-11-24 00:40 | 本笔 |
+| `tests/test_desktop_device_gateway_dialog.py` | 多机线/42（§284 对话框 /spectrum 用例） | 2026-11-24 00:40 | 本笔 |
+| `tests/test_spectrum_frame_meta.py` | 多机线/42（§284 帧时钟用例） | 2026-11-24 00:40 | 本笔 |
+| `spatial/app/src/main/java/com/mbdsdr/spatial/net/DeviceGatewayClient.kt` | 多机线/42（§284 spectrum 只读客户端） | 2026-11-24 00:40 | 本笔 |
+| `spatial/app/src/main/java/com/mbdsdr/spatial/net/GatewayController.kt` | 多机线/42（§284 频谱摘要与刷新） | 2026-11-24 00:40 | 本笔 |
+| `spatial/app/src/main/java/com/mbdsdr/spatial/ui/GatewayPanel.kt` | 多机线/42（§284 频谱快照按钮/一行） | 2026-11-24 00:40 | 本笔 |
+| `spatial/app/src/test/java/com/mbdsdr/spatial/DeviceGatewayClientTest.kt` | 多机线/42（§284 spectrum 客户端用例） | 2026-11-24 00:40 | 本笔 |
+| `spatial/app/src/test/java/com/mbdsdr/spatial/GatewayControllerTest.kt` | 多机线/42（§284 摘要/刷新/503 用例） | 2026-11-24 00:40 | 本笔 |
+| `spatial/README.md` | 多机线/42（§284 频谱快照消费说明） | 2026-11-24 00:40 | 本笔 |
+| `desktop/README.md` | 多机线/42（§284 /spectrum 说明） | 2026-11-24 00:40 | 本笔 |
+| `.trae/specs/multi-device-interconnect/spec.md` | 多机线/42（§284 契约 5.6 + 验收现状） | 2026-11-24 00:40 | 本笔 |
+| `.trae/specs/multi-device-interconnect/tasks.md` | 多机线/42（§284 Task M2.6） | 2026-11-24 00:40 | 本笔 |
+| `.trae/specs/multi-device-interconnect/checklist.md` | 多机线/42（§284 /spectrum 与头显消费项） | 2026-11-24 00:40 | 本笔 |
+| `docs/PRD-现状对照.md` | 多机线/42（§284 P1-11 补 /spectrum） | 2026-11-24 00:40 | 本笔 |
+| `docs/COORDINATION.md` | 多机线/42（§284 记录 + §6.1） | 2026-11-24 00:40 | 本笔 |
 
 > 上表各行均由 `claim` 台账推导：owner 原文与 `acquired_at` 直接取自台账，
 > 目的优先用台账里的 `claim_reason`，没有就如实写「未声明」，不补编。时间列只是
@@ -13631,6 +13650,43 @@ spec 的 M4.3 要求「未联网时显示上次结果/包内内容，不伪造�
 **诚实边界**
 - 不探测 dongle，也不知道桌面是否真在收；`sdr` 段只是配置/租约快照。
 - `/spectrum` 只读快照未做；没有自动发现/推送，设备仍需手动 GET。
+
+## 284. 权威端只读 `/spectrum` 快照（2026-11-24）
+
+**依据**：spec 阶段 1 的只读端点里，`/spectrum` 长期是唯一缺口；手机/头显能问
+站址/过境/授权，却拿不到「桌面此刻看到的谱」。用户要求三端都推进，且不许把
+设计写成已实现，所以先做**单帧只读快照**，不做流式。
+
+**做了什么**
+- 新 `build_desktop_spectrum_provider(frame_provider)`：`mbdsdr.spectrum-snapshot/1`
+  - 输入是桌面当前一帧：中心/采样率/FFT/`powers_db`（可含 NaN）/来源/帧时钟；
+  - 输出频率轴（`freq_start_hz`/`freq_step_hz`）、峰值、噪声底（中位数）、
+    `finite_bins`、`age_s`/`stale`；非有限 bin 一律 `null`；
+  - 没有帧或全 NaN → 返回 `None`，网关回 503，**不造示例谱、不延用旧谱冒充实时**。
+- `GET /spectrum`：需设备 token；未接 provider 503 `spectrum_unavailable`、
+  无帧 503、抛错 500 `spectrum_failed`、非对象 500 `spectrum_bad_shape`、POST 405。
+- 桌面接线：`SpectrumDataGenerator` 记录最近真实帧的单调时钟
+  （`last_frame_monotonic`，断开 `clear_data` 即复位）；主窗把当前帧交给对话框，
+  对话框包装成 provider 注入网关。SDR 断开后立刻 503。
+- 头显消费：`DeviceGatewayClient.spectrum()` + 主窗面板「频谱快照」按钮；
+  摘要明确「只读·非实时」，给中心/采样率/bin/峰值/噪声底/帧龄，`stale` 标
+  「帧已过期」；503 如实转述且不改写上次摘要。
+- spec 新增契约 **5.6**，更新阶段 1 现状与诚实边界。
+
+**验证**
+- `test_device_gateway.py` +4：token/未接 provider、快照字段与 405、
+  None→503/抛错 500/形状 500、NaN 与 stale 口径、全 NaN 不算帧。
+- 对话框 +1：无帧 503 → 有帧 200（schema/readonly/realtime/bins/峰值/功率轴）。
+- `test_spectrum_frame_meta.py` +1：帧时钟只在真实帧置位、清空复位。
+- `pytest tests/test_device_gateway.py tests/test_desktop_device_gateway_dialog.py`
+  → **64 passed**。
+- headset JVM：24 suite / **207 用例** / 0 失败 / 1 跳过（+3：客户端频谱/503、
+  摘要口径、刷新与失败保留）。
+
+**诚实边界**
+- 一条 GET 一个快照，不是流；没有瀑布/峰值标记/刷新率承诺。
+- 相对 dBFS 非绝对 dBm；`age_s` 来自桌面进程内单调时钟，缺失写 null（年龄未知）。
+- 未在 PICO 真机跑；头显仍不能调谐或写任何 SDR 参数。
 
 
 

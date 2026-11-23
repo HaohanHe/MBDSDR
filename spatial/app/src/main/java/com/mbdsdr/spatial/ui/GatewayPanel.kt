@@ -124,6 +124,12 @@ fun GatewayPanel(
                 Text(text = "SDR 状态", style = PicoTheme.typography.bodySmall)
             }
             Button(
+                onClick = { run { controller.refreshSpectrum() } },
+                enabled = state.paired && !state.busy,
+            ) {
+                Text(text = "频谱快照", style = PicoTheme.typography.bodySmall)
+            }
+            Button(
                 onClick = { run { controller.requestSdrLease() } },
                 enabled = state.paired && !state.busy && state.role == "headset",
             ) {
@@ -158,6 +164,13 @@ fun GatewayPanel(
         if (state.fuseText.isNotBlank()) {
             Text(
                 text = state.fuseText,
+                style = PicoTheme.typography.bodySmall,
+                color = PicoTheme.colorTokens.LabelSecondaryAlpha,
+            )
+        }
+        if (state.spectrumText.isNotBlank()) {
+            Text(
+                text = state.spectrumText,
                 style = PicoTheme.typography.bodySmall,
                 color = PicoTheme.colorTokens.LabelSecondaryAlpha,
             )

@@ -388,6 +388,45 @@ def test_status_endpoint_from_dialog(qapp):
         dlg.close()
 
 
+def test_spectrum_endpoint_from_dialog(qapp):
+    """/spectrum 只转桌面当前帧：没帧 503，有帧给只读快照。"""
+    import json
+
+    from device_gateway_dialog import DeviceGatewayDialog
+
+    live = {"frame": None}
+    dlg = DeviceGatewayDialog(_station(), port=0, hosts=["127.0.0.1"],
+                              registry=_registry(),
+                              spectrum_frame_provider=lambda: live["frame"])
+    try:
+        dlg.start_gateway()
+        gw = dlg._gateway
+        paired = gw.registry.pair("111111", "头显", "headset")
+        headers = {"Authorization": "Bearer " + paired["token"]}
+
+        status, raw, _ = gw.dispatch("GET", "/spectrum", b"", headers)
+        assert status == 503
+        assert json.loads(raw)["error"] == "spectrum_unavailable"
+
+        live["frame"] = {
+            "center_freq_hz": 100e6,
+            "sample_rate_hz": 1e6,
+            "fft_size": 2,
+            "powers_db": [-90.0, -30.0],
+            "source": "live",
+        }
+        status, raw, _ = gw.dispatch("GET", "/spectrum", b"", headers)
+        assert status == 200
+        data = json.loads(raw)
+        assert data["schema"] == "mbdsdr.spectrum-snapshot/1"
+        assert data["readonly"] is True and data["realtime"] is False
+        assert data["bins"] == 2
+        assert data["peak_freq_hz"] == 100.25e6
+        assert data["powers_db"] == [-90.0, -30.0]
+    finally:
+        dlg.close()
+
+
 def test_status_without_station_marks_missing(qapp):
     import json
 
