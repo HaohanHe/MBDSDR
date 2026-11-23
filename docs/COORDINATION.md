@@ -3065,6 +3065,15 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `.trae/specs/multi-device-interconnect/tasks.md` | 多机线/42（§293 M2/M4.2/M4.3 口径） | 2026-11-24 03:20 | 本笔 |
 | `.trae/specs/multi-device-interconnect/checklist.md` | 多机线/42（§293 头显客户端/画布项） | 2026-11-24 03:20 | 本笔 |
 | `docs/COORDINATION.md` | 多机线/42（§293 记录 + §6.1） | 2026-11-24 03:20 | 本笔 |
+| `mobile/lib/pages/settings_page.dart` | 多机线/42（§294 手机显示 SDR 租约） | 2026-11-24 03:40 | 本笔 |
+| `mobile/lib/l10n/app_zh.arb` | 多机线/42（§294 租约文案） | 2026-11-24 03:40 | 本笔 |
+| `mobile/lib/l10n/app_en.arb` | 多机线/42（§294 租约文案） | 2026-11-24 03:40 | 本笔 |
+| `mobile/lib/l10n/app_ja.arb` | 多机线/42（§294 租约文案） | 2026-11-24 03:40 | 本笔 |
+| `mobile/test/settings_page_gateway_test.dart` | 多机线/42（§294 租约用例） | 2026-11-24 03:40 | 本笔 |
+| `.trae/specs/multi-device-interconnect/tasks.md` | 多机线/42（§294 M2.5 手机租约） | 2026-11-24 03:40 | 本笔 |
+| `.trae/specs/multi-device-interconnect/checklist.md` | 多机线/42（§294 手机租约项） | 2026-11-24 03:40 | 本笔 |
+| `docs/PRD-现状对照.md` | 多机线/42（§294 P1-11 手机租约） | 2026-11-24 03:40 | 本笔 |
+| `docs/COORDINATION.md` | 多机线/42（§294 记录 + §6.1） | 2026-11-24 03:40 | 本笔 |
 
 > 上表各行均由 `claim` 台账推导：owner 原文与 `acquired_at` 直接取自台账，
 > 目的优先用台账里的 `claim_reason`，没有就如实写「未声明」，不补编。时间列只是
@@ -13969,6 +13978,25 @@ NaN 会变成 `null`、真实 socket 上无帧会 503。契约要求消费端不
 **诚实边界**
 - NMEA 只读短窗、不落盘、不改站址；只证明「GNSS 在线且当前有有效定位」。
 - 文档校正不改变任何运行时行为；真机项仍未完成。
+
+## 294. 手机 `/status` 显示 SDR 租约（2026-11-24）
+
+**依据**：`/status` 已带 `lease_active`/`lease`，手机只显示 rtl_tcp 与「未探测」；
+手持用户看不到「dongle 是不是正被头显占着」，现场容易误判能不能开收。
+
+**做了什么**
+- 手机状态摘要的 SDR 段追加租约：`lease_active=true` →「租约：<名称或角色> 占用」，
+  `false` →「租约：空闲」，字段缺失 → `—`（不猜空闲）。
+- 中/英/日新增 2 条文案并重新生成 l10n。
+- 新增 widget 用例：他人持有租约时显示「租约：头显 占用」。
+
+**验证**
+- `settings_page_gateway_test` 5 条全绿（含全链路新断言）；
+- 全量 `flutter test` → **606 passed**。
+
+**诚实边界**
+- 租约只反映权威端台账；未探测 dongle，也不代表头显真的在收。
+- 未真机配对；手动刷新，无轮询。
 
 
 

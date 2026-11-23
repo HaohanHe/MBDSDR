@@ -104,7 +104,6 @@ class _FakeGateway {
       '"lease_active":false,"dongle_probed":false,'
       '"reason":"仅配置了 rtl_tcp 地址与租约状态，未探测 dongle"},'
       '"missing":[]}';
-
   static const String jsonEncoder =
       '{"schema":"mbdsdr.sky-panorama/1","site":{"lat_deg":40.5,"lon_deg":-100.25},'
       '"sun":{"alt_deg":-18.4},"missing":["cloud_cover","kp_index"]}';
@@ -207,7 +206,7 @@ void main() {
         <String>['/pair', '/panorama', '/roster', '/status']);
     expect(
         find.text('站址 45.00, 120.00 · SDR rtl_tcp 127.0.0.1:1234'
-            '（仅配置了 rtl_tcp 地址与租约状态，未探测 dongle） · 缺项 —'),
+            '（仅配置了 rtl_tcp 地址与租约状态，未探测 dongle） · 租约：空闲 · 缺项 —'),
         findsOneWidget);
 
     // 读取过境：只列前 3 条，时间按 UTC，仰角取整。
@@ -317,6 +316,44 @@ void main() {
     await tester.tap(find.widgetWithText(OutlinedButton, '读取桌面状态'));
     await tester.pumpAndSettle();
     expect(find.text('读取桌面状态失败：权威端尚未接入状态提供者'), findsOneWidget);
+  });
+
+  testWidgets('桌面状态显示他人持有 SDR 租约', (tester) async {
+    tester.view.physicalSize = const Size(420, 5200);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
+
+    final SettingsService settings =
+        SettingsService(kv: _MemKv(), secure: _MemSecure());
+    await settings.load();
+    settings.deviceGatewayToken = 'tok-1';
+    settings.deviceGatewayRole = 'handheld';
+
+    await tester.pumpWidget(_wrap(Scaffold(
+      body: SettingsPage(
+        settings: settings,
+        radio: RadioController(),
+        gatewayClientBuilder: (String host, int port) => DeviceGatewayClient(
+          host: host,
+          port: port,
+          transport: (Uri url, String method, Map<String, String> headers,
+              String? payload) async {
+            return const GatewayHttpResponse(200,
+                '{"schema":"mbdsdr.desktop-status/1","station":null,'
+                '"sdr":{"rtl_tcp":{"host":"127.0.0.1","port":1234},'
+                '"lease_active":true,"lease":{"name":"头显","role":"headset"}},'
+                '"missing":["station"]}');
+          },
+        ),
+      ),
+    )));
+    await tester.pump();
+
+    await tester.tap(find.widgetWithText(OutlinedButton, '读取桌面状态'));
+    await tester.pumpAndSettle();
+    expect(
+        find.text('站址 — · SDR rtl_tcp 127.0.0.1:1234 · 租约：头显 占用 · 缺项 station'),
+        findsOneWidget);
   });
 
   testWidgets('角色切到目镜后，配对请求带 eyepiece', (tester) async {

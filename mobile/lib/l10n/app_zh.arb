@@ -119,6 +119,13 @@
       "alt": {"type": "String"}
     }
   },
+  "settingsGatewayLeaseFree": "租约：空闲",
+  "settingsGatewayLeaseHeld": "租约：{holder} 占用",
+  "@settingsGatewayLeaseHeld": {
+    "placeholders": {
+      "holder": {"type": "String"}
+    }
+  },
   "toastGatewayPassesFailed": "读取过境失败：{reason}",
   "@toastGatewayPassesFailed": {
     "placeholders": {

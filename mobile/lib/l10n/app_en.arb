@@ -119,6 +119,13 @@
       "alt": {"type": "String"}
     }
   },
+  "settingsGatewayLeaseFree": "Lease: idle",
+  "settingsGatewayLeaseHeld": "Lease: held by {holder}",
+  "@settingsGatewayLeaseHeld": {
+    "placeholders": {
+      "holder": {"type": "String"}
+    }
+  },
   "toastGatewayPassesFailed": "Passes failed: {reason}",
   "@toastGatewayPassesFailed": {
     "placeholders": {

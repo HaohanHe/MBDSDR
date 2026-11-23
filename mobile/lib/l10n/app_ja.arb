@@ -119,6 +119,13 @@
       "alt": {"type": "String"}
     }
   },
+  "settingsGatewayLeaseFree": "リース：空き",
+  "settingsGatewayLeaseHeld": "リース：{holder} が使用中",
+  "@settingsGatewayLeaseHeld": {
+    "placeholders": {
+      "holder": {"type": "String"}
+    }
+  },
   "toastGatewayPassesFailed": "パスの取得に失敗：{reason}",
   "@toastGatewayPassesFailed": {
     "placeholders": {

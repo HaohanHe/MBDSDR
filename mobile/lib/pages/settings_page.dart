@@ -430,6 +430,24 @@ class _SettingsPageState extends State<SettingsPage> {
             && reason.trim().isNotEmpty) {
           sdrText = '$sdrText（${reason.trim()}）';
         }
+        // SDR 租约：谁占着 dongle 对多机现场很关键；未知就写 —，不猜空闲。
+        final Object? active = sdr['lease_active'];
+        String leaseText;
+        if (active == true) {
+          final Object? lease = sdr['lease'];
+          final String holder = lease is Map
+              ? ('${lease['name'] ?? ''}'.trim().isNotEmpty
+                  ? '${lease['name']}'.trim()
+                  : '${lease['role'] ?? ''}'.trim())
+              : '';
+          leaseText = l10n.settingsGatewayLeaseHeld(
+              holder.isEmpty ? '—' : holder);
+        } else if (active == false) {
+          leaseText = l10n.settingsGatewayLeaseFree;
+        } else {
+          leaseText = '—';
+        }
+        sdrText = '$sdrText · $leaseText';
       }
       final Object? missingRaw = data['missing'];
       final List<String> missing = missingRaw is List
