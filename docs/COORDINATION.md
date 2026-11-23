@@ -3144,6 +3144,7 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `desktop/device_gateway_dialog.py` | 多机线/42（§312 桌面位姿行（提交后释放）） | 2026-11-24 02:17 | 本笔 |
 | `tests/test_desktop_device_gateway_dialog.py` | 多机线/42（§312 桌面位姿行（提交后释放）） | 2026-11-24 02:17 | 本笔 |
 | `docs/COORDINATION.md` | 多机线/42（§312 桌面位姿行（提交后释放）） | 2026-11-24 02:17 | 本笔 |
+| `docs/COORDINATION.md` | 多机线/42（§313 GNSS 复验（提交后释放）） | 2026-11-24 02:18 | 本笔 |
 
 > 上表各行均由 `claim` 台账推导：owner 原文与 `acquired_at` 直接取自台账，
 > 目的优先用台账里的 `claim_reason`，没有就如实写「未声明」，不补编。时间列只是
@@ -14482,3 +14483,18 @@ widget 用例与 Python 端到端，没有真实 Android 运行时 + 真实网�
 
 **边界**：只读展示；`recent_poses` 按 role 排序，不按时间；陈旧观测仍列出，
 能否融合由 `/fuse` 的 `valid` 判断。
+
+## 313. GNSS 五段自诊断复验（2026-11-24）
+
+**动机**：目标是「SDR 与 GNSS 时刻插着」；本轮再跑 `scripts/gnss_diag.py`
+（端口→NMEA→定位→UTC→天线 五段），确认硬件仍在位且数据完整。
+
+**证据**（`python scripts/gnss_diag.py --port COM10 --json`，verdict=ok，exit 0）
+- fix：`43.786919, 126.629047`，14 星，`fix_quality=1`，`hdop=1.3`，海拔 220.6 m
+- UTC：`2026-11-23T18:18:09Z`（date=231126），时间完整
+- 天线：GPTXT `01,01,01,ANTENNA OPEN`（开路告警）——**如实保留告警**，
+  不因为定位有效就抹掉
+- 段耗时：UTC 0.7 s、天线 0.1 s；整体 exit_code 0
+
+**边界**：天线开路告警意味着接收条件不理想（可能未接天线/室内），本次定位
+仍有效但不据此宣称户外精度；站址仍由桌面单源接管。
