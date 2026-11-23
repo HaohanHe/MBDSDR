@@ -295,4 +295,108 @@ class GatewayControllerTest {
         val stale = fresh.copy(panoramaStale = true)
         assertTrue(GatewayFormat.stationLine(stale).endsWith("（未联网·上次结果）"))
     }
+
+    // ---- M4.2 客户端：SDR 授权 ----
+
+    @Test
+    fun sdrSummaryIsHonestAboutHolderAndEndpoint() {
+        val idle = JsonParser.parseString(
+            """{"active":false,"ttl_s":300}""").asJsonObject
+        assertEquals("SDR 授权：空闲（可签发，有效期 300s）",
+            GatewayFormat.sdrSummary(idle, "dev-h"))
+
+        val other = JsonParser.parseString(
+            """{"active":true,"lease":{"device_id":"dev-2","role":"headset",
+               "name":"头显2","expires_utc":"2026-11-23T15:40:00Z"}}""").asJsonObject
+        assertEquals("SDR 授权：headset「头显2」占用到 15:40:00",
+            GatewayFormat.sdrSummary(other, "dev-h"))
+
+        val mine = JsonParser.parseString(
+            """{"active":true,
+                "lease":{"device_id":"dev-h","role":"headset","name":"头显",
+                         "expires_utc":"2026-11-23T15:40:00Z"},
+                "rtl_tcp":{"host":"127.0.0.1","port":1234}}""").asJsonObject
+        assertEquals("SDR 授权：本机持有到 15:40:00（rtl_tcp 127.0.0.1:1234）",
+            GatewayFormat.sdrSummary(mine, "dev-h"))
+
+        val broken = JsonParser.parseString("""{"ok":true}""").asJsonObject
+        assertEquals("SDR 授权：回执缺 active 字段",
+            GatewayFormat.sdrSummary(broken, "dev-h"))
+    }
+
+    @Test
+    fun sdrLeaseFlowUsesPairDeviceIdAndRelease() {
+        val fake = FakeGateway { call ->
+            when (call.path) {
+                "/pair" -> GatewayResponse(200,
+                    """{"token":"tok-h","device":{"id":"dev-h","role":"headset"}}""")
+                "/sdr/lease" -> {
+                    assertEquals("Bearer tok-h", call.headers["Authorization"])
+                    GatewayResponse(200,
+                        """{"ok":true,"renewed":false,"exclusive":true,
+                           "lease":{"lease_id":"sdr-1","device_id":"dev-h",
+                                    "role":"headset","name":"头显",
+                                    "expires_utc":"2026-11-23T15:40:00Z"},
+                           "rtl_tcp":{"host":"127.0.0.1","port":1234}}""")
+                }
+                "/sdr/release" -> GatewayResponse(
+                    200, """{"ok":true,"released":true,"lease_id":"sdr-1"}""")
+                else -> GatewayResponse(404, """{"reason":"not found"}""")
+            }
+        }
+        val c = controller(fake)
+        c.updateCode("123456")
+        c.pair()
+        assertEquals("dev-h", c.state.deviceId)
+
+        c.requestSdrLease()
+        assertTrue(c.state.sdrHeld)
+        assertTrue(c.state.sdrText.startsWith("SDR 授权：本机持有到 15:40:00"))
+        assertTrue(c.state.sdrText.contains("rtl_tcp 127.0.0.1:1234"))
+        assertEquals("SDR 授权已签发", c.state.status)
+
+        c.releaseSdrLease()
+        assertFalse(c.state.sdrHeld)
+        assertEquals("SDR 授权：本机已释放", c.state.sdrText)
+        assertEquals("SDR 授权已释放", c.state.status)
+    }
+
+    @Test
+    fun sdrLeaseConflictSurfacesReasonAndKeepsNotHeld() {
+        val fake = FakeGateway { call ->
+            when (call.path) {
+                "/pair" -> GatewayResponse(200,
+                    """{"token":"tok-h","device":{"id":"dev-h"}}""")
+                "/sdr/lease" -> GatewayResponse(409,
+                    """{"error":"sdr_leased","reason":"SDR 已被 headset（dev-2）占用到 15:40:00"}""")
+                else -> GatewayResponse(404, "{}")
+            }
+        }
+        val c = controller(fake)
+        c.updateCode("123456")
+        c.pair()
+        c.requestSdrLease()
+        assertFalse(c.state.sdrHeld)
+        assertTrue(c.state.status.contains("SDR 授权失败"))
+        assertTrue(c.state.status.contains("已被"))
+    }
+
+    @Test
+    fun sdrStatusRefreshesSummary() {
+        val fake = FakeGateway { call ->
+            when (call.path) {
+                "/pair" -> GatewayResponse(200,
+                    """{"token":"tok-h","device":{"id":"dev-h"}}""")
+                "/sdr/lease" -> GatewayResponse(200,
+                    """{"active":false,"ttl_s":300}""")
+                else -> GatewayResponse(404, "{}")
+            }
+        }
+        val c = controller(fake)
+        c.updateCode("123456")
+        c.pair()
+        c.refreshSdrStatus()
+        assertEquals("SDR 授权：空闲（可签发，有效期 300s）", c.state.sdrText)
+        assertEquals("SDR 授权已更新", c.state.status)
+    }
 }

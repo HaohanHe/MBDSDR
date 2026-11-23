@@ -81,6 +81,12 @@ python scripts/export_spatial_bundle.py <档案>.observation.json -o <输出目�
 返回 `mbdsdr.sat-passes/1`（AOS/中天/LOS、方位、峰值仰角、时长、日照）；
 未启用时回 503，不拿假过境顶替。
 
+SDR 授权（M4.2 客户端）：面板「SDR 状态 / 申请 SDR / 释放 SDR」调用
+`GET /sdr/lease`、`POST /sdr/lease`、`POST /sdr/release`。只有 `headset`
+能申请（其它角色本地即拒）；显示「空闲 / 谁占用到何时 / 本机持有 + rtl_tcp
+地址」。**边界**：这里只走授权协议，头显尚未建立 rtl_tcp I/Q 连接，
+也不宣称能直接收频谱。
+
 传输可注入（`GatewayTransport`），JVM 单测完全离线；默认实现是
 `HttpURLConnection`（6 s 超时）。主窗口「头顶」已接一个只读网关面板：
 填主机/端口/6 位配对码 →「配对」→「刷新全景」「刷新过境」，结果显示为

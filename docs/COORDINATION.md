@@ -2879,6 +2879,18 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `.trae/specs/mbdsdr-system-lifecycle/checklist.md` | 多机线/42（§272 Task 229） | 2026-11-23 23:29 | 本笔 |
 | `docs/PRD-现状对照.md` | 多机线/42（§272 P1-11 补桌面接线） | 2026-11-23 23:29 | 本笔 |
 | `docs/COORDINATION.md` | 多机线/42（§272 记录 + §6.1） | 2026-11-23 23:29 | 本笔 |
+| `spatial/app/src/main/java/com/mbdsdr/spatial/net/DeviceGatewayClient.kt` | 多机线/42（§273 sdrStatus/sdrLease/sdrRelease） | 2026-11-23 23:34 | 本笔 |
+| `spatial/app/src/main/java/com/mbdsdr/spatial/net/GatewayController.kt` | 多机线/42（§273 deviceId + SDR 状态/申请/释放 + sdrSummary） | 2026-11-23 23:34 | 本笔 |
+| `spatial/app/src/main/java/com/mbdsdr/spatial/ui/GatewayPanel.kt` | 多机线/42（§273 SDR 三按钮与状态行） | 2026-11-23 23:34 | 本笔 |
+| `spatial/app/src/test/java/com/mbdsdr/spatial/DeviceGatewayClientTest.kt` | 多机线/42（§273 SDR 客户端 2 条用例） | 2026-11-23 23:34 | 本笔 |
+| `spatial/app/src/test/java/com/mbdsdr/spatial/GatewayControllerTest.kt` | 多机线/42（§273 SDR 控制器 4 条用例） | 2026-11-23 23:34 | 本笔 |
+| `spatial/README.md` | 多机线/42（§273 SDR 授权客户端边界） | 2026-11-23 23:34 | 本笔 |
+| `.trae/specs/multi-device-interconnect/tasks.md` | 多机线/42（§273 M4.2 客户端状态） | 2026-11-23 23:34 | 本笔 |
+| `.trae/specs/multi-device-interconnect/checklist.md` | 多机线/42（§273 头显客户端项） | 2026-11-23 23:34 | 本笔 |
+| `.trae/specs/mbdsdr-system-lifecycle/tasks.md` | 多机线/42（§273 Task 230） | 2026-11-23 23:34 | 本笔 |
+| `.trae/specs/mbdsdr-system-lifecycle/checklist.md` | 多机线/42（§273 Task 230） | 2026-11-23 23:34 | 本笔 |
+| `docs/PRD-现状对照.md` | 多机线/42（§273 P1-11 补头显授权客户端） | 2026-11-23 23:34 | 本笔 |
+| `docs/COORDINATION.md` | 多机线/42（§273 记录 + §6.1） | 2026-11-23 23:34 | 本笔 |
 
 > 上表各行均由 `claim` 台账推导：owner 原文与 `acquired_at` 直接取自台账，
 > 目的优先用台账里的 `claim_reason`，没有就如实写「未声明」，不补编。时间列只是
@@ -13222,6 +13234,37 @@ spec 的 M4.3 要求「未联网时显示上次结果/包内内容，不伪造�
 - 头显端 rtl_tcp 客户端、真实 I/Q 消费与真机联调均未做。
 - 真机上 rtl_tcp 当前由模拟器会话占用（127.0.0.1:1234 ESTABLISHED），
   本轮未抢占；P0-06 调谐语义真机回归仍待空闲窗口。
+
+## 273. M4.2 头显侧：SDR 授权客户端与面板（2026-11-23）
+
+**依据**：§271/§272 让桌面能签授权，但头显没有任何入口；头显要「直连 SDR」
+必须先能申请/查看/释放租约，否则协议只存在于文档和测试里。
+
+**做了什么**
+- `DeviceGatewayClient` 增 `sdrStatus` / `sdrLease` / `sdrRelease`；
+  `sdrLease` 对非 `headset` 角色**本地即拒**（一个字节都不发）。
+- `GatewayController`：
+  - 配对回执里记录 `device_id`（判断租约是否本机持有）；
+  - `refreshSdrStatus` / `requestSdrLease` / `releaseSdrLease`；
+  - `GatewayFormat.sdrSummary` 四种口径：空闲（带 TTL）/他人占用到何时/
+    本机持有 + rtl_tcp 地址/坏回执（缺 `active` 直接说读不到）。
+- `GatewayPanel` 增「SDR 状态 / 申请 SDR / 释放 SDR」三按钮与状态行；
+  申请按钮只在 headset + 已配对 + 空闲 UI 时可用，释放只在 `sdrHeld` 时可用。
+- 明确边界：只走授权协议，头显尚未建立 rtl_tcp 连接、不消费 I/Q。
+
+**验证**
+- `GatewayControllerTest` +4：摘要四种口径、签发→释放全链路（用配对设备 id
+  判断「本机持有」）、409 冲突保持未持有、状态刷新。
+- `DeviceGatewayClientTest` +2：授权/释放/Bearer/purpose、非 headset 本地拒、
+  409 reason 透传。
+- `./gradlew.bat testDebugUnitTest --rerun-tasks --no-daemon --offline`：
+  **18 suite / 160 用例 / 0 失败 / 1 跳过**。
+- 未改 Python/手机，既有基线不受影响。
+
+**诚实边界**
+- 没有真实 rtl_tcp 连接与 I/Q 消费；「申请 SDR」只拿到授权与地址。
+- 未在 PICO 真机验证；租约不会自动续期（需用户再点「申请 SDR」）。
+- 没有后台轮询；状态要手动刷新。
 
 
 

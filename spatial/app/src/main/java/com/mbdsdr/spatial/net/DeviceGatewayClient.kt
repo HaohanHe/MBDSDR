@@ -79,6 +79,25 @@ class DeviceGatewayClient(
     /** 权威端过境预报（`mbdsdr.sat-passes/1`）。 */
     fun passes(token: String): JsonObject = decode(send("GET", "/passes", token, null))
 
+    /** SDR 授权状态（`mbdsdr.sdr-lease/1`）；rtl_tcp 地址只回当前持有者。 */
+    fun sdrStatus(token: String): JsonObject =
+        decode(send("GET", "/sdr/lease", token, null))
+
+    /** 申请/续租 SDR 独占授权；只有 headset 角色可用（其它角色本地即拒）。 */
+    fun sdrLease(token: String, role: String, purpose: String? = null): JsonObject {
+        if (role != "headset") {
+            throw DeviceGatewayException("角色 $role 不能直连 SDR；只有 headset 可申请授权")
+        }
+        val payload = JsonObject().apply {
+            if (!purpose.isNullOrBlank()) addProperty("purpose", purpose.trim())
+        }
+        return decode(send("POST", "/sdr/lease", token, gson.toJson(payload)))
+    }
+
+    /** 释放本机持有的 SDR 授权；非持有者会被权威端拒绝（403）。 */
+    fun sdrRelease(token: String): JsonObject =
+        decode(send("POST", "/sdr/release", token, null))
+
     /** lens+eyepiece 的融合位姿（`mbdsdr.pose-fusion/1`）。 */
     fun fusedPose(token: String): JsonObject =
         decode(send("GET", "/fuse", token, null))

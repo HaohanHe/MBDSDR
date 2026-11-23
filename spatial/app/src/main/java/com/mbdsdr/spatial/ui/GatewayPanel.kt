@@ -111,6 +111,24 @@ fun GatewayPanel(
             ) {
                 Text(text = "刷新过境", style = PicoTheme.typography.bodySmall)
             }
+            Button(
+                onClick = { run { controller.refreshSdrStatus() } },
+                enabled = state.paired && !state.busy,
+            ) {
+                Text(text = "SDR 状态", style = PicoTheme.typography.bodySmall)
+            }
+            Button(
+                onClick = { run { controller.requestSdrLease() } },
+                enabled = state.paired && !state.busy && state.role == "headset",
+            ) {
+                Text(text = "申请 SDR", style = PicoTheme.typography.bodySmall)
+            }
+            Button(
+                onClick = { run { controller.releaseSdrLease() } },
+                enabled = state.paired && !state.busy && state.sdrHeld,
+            ) {
+                Text(text = "释放 SDR", style = PicoTheme.typography.bodySmall)
+            }
         }
         Text(
             text = state.status,
@@ -127,6 +145,13 @@ fun GatewayPanel(
         if (state.passesText.isNotBlank()) {
             Text(
                 text = staleTag(state.passesStale) + state.passesText,
+                style = PicoTheme.typography.bodySmall,
+                color = PicoTheme.colorTokens.LabelSecondaryAlpha,
+            )
+        }
+        if (state.sdrText.isNotBlank()) {
+            Text(
+                text = state.sdrText,
                 style = PicoTheme.typography.bodySmall,
                 color = PicoTheme.colorTokens.LabelSecondaryAlpha,
             )

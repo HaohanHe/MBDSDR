@@ -176,6 +176,54 @@ class DeviceGatewayClientTest {
     }
 
     @Test
+    fun sdrLeaseOnlyForHeadsetAndCarriesBearer() {
+        val fake = FakeGateway { call ->
+            when (call.url.substringAfter(":8771")) {
+                "/sdr/lease" -> GatewayResponse(
+                    200, """{"ok":true,"renewed":false,"exclusive":true,
+                            "lease":{"lease_id":"sdr-1","device_id":"dev-h",
+                                     "role":"headset","name":"头显"},
+                            "rtl_tcp":{"host":"127.0.0.1","port":1234}}""")
+                "/sdr/release" -> GatewayResponse(
+                    200, """{"ok":true,"released":true,"lease_id":"sdr-1"}""")
+                else -> GatewayResponse(404, """{"reason":"not found"}""")
+            }
+        }
+        val c = client(fake)
+        val out = c.sdrLease("tok-h", "headset", "直连频谱")
+        assertEquals("sdr-1", out.getAsJsonObject("lease").get("lease_id").asString)
+        assertEquals("Bearer tok-h", fake.last.headers["Authorization"])
+        val sent = JsonParser.parseString(fake.last.body!!).asJsonObject
+        assertEquals("直连频谱", sent.get("purpose").asString)
+        assertTrue(c.sdrRelease("tok-h").get("released").asBoolean)
+
+        // 非 headset 本地拒绝，不发请求。
+        val before = fake.calls.size
+        try {
+            c.sdrLease("tok-l", "lens")
+            fail("应当抛 DeviceGatewayException")
+        } catch (e: DeviceGatewayException) {
+            assertTrue(e.message!!.contains("headset"))
+        }
+        assertEquals(before, fake.calls.size)
+    }
+
+    @Test
+    fun sdrStatusConflictSurfacesReason() {
+        val fake = FakeGateway {
+            GatewayResponse(409, """{"error":"sdr_leased",
+                                    "reason":"SDR 已被 headset（dev-2）占用到 2026-11-23T15:40:00Z"}""")
+        }
+        try {
+            client(fake).sdrLease("tok-h", "headset")
+            fail("应当抛 DeviceGatewayException")
+        } catch (e: DeviceGatewayException) {
+            assertEquals(409, e.status ?: -1)
+            assertTrue(e.message!!.contains("已被"))
+        }
+    }
+
+    @Test
     fun nonJsonSuccessIsProtocolError() {
         val fake = FakeGateway { GatewayResponse(200, "OK") }
         try {

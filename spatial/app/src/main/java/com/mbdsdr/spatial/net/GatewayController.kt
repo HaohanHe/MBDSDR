@@ -25,6 +25,11 @@ data class GatewayUiState(
     /** 上次刷新失败但留有旧摘要：面板据此标注「未联网·上次结果」。 */
     val panoramaStale: Boolean = false,
     val passesStale: Boolean = false,
+    /** 配对回执里的设备 id（判断 SDR 租约是不是本机持有）。 */
+    val deviceId: String = "",
+    /** SDR 授权一行（M4.2 客户端）；未取到时为空。 */
+    val sdrText: String = "",
+    val sdrHeld: Boolean = false,
 )
 
 /** 把网关 JSON 压成一行摘要；缺字段写「—」，不猜值。 */
@@ -90,6 +95,38 @@ object GatewayFormat {
         val suffix = if (state.panoramaStale) "（未联网·上次结果）" else ""
         return "$host:$port · ${state.panoramaText}$suffix"
     }
+
+    /**
+     * SDR 授权（M4.2）压缩成一行：空闲 / 谁占用 / 本机持有时的 rtl_tcp 地址。
+     * 缺字段一律「—」，不猜持有者；无 `active` 字段视为坏回执，明说读不到。
+     */
+    fun sdrSummary(json: JsonObject, myDeviceId: String): String {
+        val activeEl = json.get("active") ?: return "SDR 授权：回执缺 active 字段"
+        if (!activeEl.isJsonPrimitive || !activeEl.asJsonPrimitive.isBoolean) {
+            return "SDR 授权：active 不是布尔值"
+        }
+        if (!activeEl.asBoolean) {
+            val ttl = num(json, "ttl_s")
+            return if (ttl != null) {
+                "SDR 授权：空闲（可签发，有效期 ${ttl.toInt()}s）"
+            } else "SDR 授权：空闲"
+        }
+        val lease = json.getAsJsonObject("lease")
+            ?: return "SDR 授权：占用中（回执缺 lease 明细）"
+        val holderId = lease.get("device_id")?.takeIf { it.isJsonPrimitive }?.asString
+            ?: ""
+        val role = lease.get("role")?.takeIf { it.isJsonPrimitive }?.asString ?: "—"
+        val name = lease.get("name")?.takeIf { it.isJsonPrimitive }?.asString ?: "—"
+        val until = lease.get("expires_utc")?.takeIf { it.isJsonPrimitive }?.asString
+            ?.substringAfter('T', "")?.take(8)?.takeIf { it.length == 8 } ?: "—"
+        if (holderId.isNotEmpty() && holderId == myDeviceId) {
+            val ep = json.getAsJsonObject("rtl_tcp")
+            val host = ep?.get("host")?.takeIf { it.isJsonPrimitive }?.asString ?: "—"
+            val port = num(ep, "port")?.toInt()?.toString() ?: "—"
+            return "SDR 授权：本机持有到 $until（rtl_tcp $host:$port）"
+        }
+        return "SDR 授权：$role「$name」占用到 $until"
+    }
 }
 
 class GatewayController(
@@ -137,8 +174,12 @@ class GatewayController(
                 fail("配对失败：回执缺少 token")
                 return
             }
+            val deviceId = response.get("device")
+                ?.takeIf { it.isJsonObject }?.asJsonObject
+                ?.get("id")?.takeIf { it.isJsonPrimitive }?.asString.orEmpty()
             state = state.copy(
                 busy = false, token = token, paired = true,
+                deviceId = deviceId,
                 status = "已配对 · ${state.role} · $host:$port")
         } catch (e: DeviceGatewayException) {
             fail("配对失败：${e.message}")
@@ -214,5 +255,67 @@ class GatewayController(
             status = "$prefix：${kind}显示上次结果（$reason）")
         return if (kind == "全景") next.copy(panoramaStale = true)
         else next.copy(passesStale = true)
+    }
+
+    // ------------------------------------------------------------ SDR 授权
+
+    fun refreshSdrStatus() {
+        val client = readyClient() ?: return
+        state = state.copy(busy = true, status = "读取 SDR 授权中…")
+        try {
+            val data = client.sdrStatus(state.token)
+            state = state.copy(
+                busy = false,
+                sdrText = GatewayFormat.sdrSummary(data, state.deviceId),
+                status = "SDR 授权已更新")
+        } catch (e: DeviceGatewayException) {
+            fail("SDR 状态失败：${e.message}")
+        }
+    }
+
+    /** 申请/续租 SDR 独占授权；非 headset 在本地即拒，一个字节都不发。 */
+    fun requestSdrLease(purpose: String? = null) {
+        if (state.role != "headset") {
+            fail("当前角色 ${state.role} 不能申请 SDR 授权（仅 headset）")
+            return
+        }
+        val client = readyClient() ?: return
+        state = state.copy(busy = true, status = "申请 SDR 授权中…")
+        try {
+            val data = client.sdrLease(state.token, state.role, purpose)
+            val renewed = data.get("renewed")?.takeIf { it.isJsonPrimitive }
+                ?.asBoolean ?: false
+            state = state.copy(
+                busy = false,
+                sdrHeld = true,
+                sdrText = GatewayFormat.sdrSummary(
+                    wrapLeaseAsStatus(data), state.deviceId),
+                status = if (renewed) "SDR 授权已续租" else "SDR 授权已签发")
+        } catch (e: DeviceGatewayException) {
+            fail("SDR 授权失败：${e.message}")
+        }
+    }
+
+    fun releaseSdrLease() {
+        val client = readyClient() ?: return
+        state = state.copy(busy = true, status = "释放 SDR 授权中…")
+        try {
+            client.sdrRelease(state.token)
+            state = state.copy(
+                busy = false, sdrHeld = false,
+                sdrText = "SDR 授权：本机已释放",
+                status = "SDR 授权已释放")
+        } catch (e: DeviceGatewayException) {
+            fail("SDR 释放失败：${e.message}")
+        }
+    }
+
+    /** 把 `/sdr/lease` 的签发回执（lease/rtl_tcp 平铺）套成状态信封，复用同一摘要。 */
+    private fun wrapLeaseAsStatus(leaseResponse: JsonObject): JsonObject {
+        val out = JsonObject()
+        out.addProperty("active", true)
+        leaseResponse.get("lease")?.let { out.add("lease", it) }
+        leaseResponse.get("rtl_tcp")?.let { out.add("rtl_tcp", it) }
+        return out
     }
 }
