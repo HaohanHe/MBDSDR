@@ -3140,6 +3140,7 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `spatial/app/src/main/java/com/mbdsdr/spatial/ui/GatewayPanel.kt` | 多机线/42（§310 头显位姿列表（提交后释放）） | 2026-11-24 02:11 | 本笔 |
 | `spatial/app/src/test/java/com/mbdsdr/spatial/GatewayControllerTest.kt` | 多机线/42（§310 头显位姿列表（提交后释放）） | 2026-11-24 02:11 | 本笔 |
 | `docs/COORDINATION.md` | 多机线/42（§310 头显位姿列表（提交后释放）） | 2026-11-24 02:11 | 本笔 |
+| `docs/COORDINATION.md` | 多机线/42（§311 局域网实测（提交后释放）） | 2026-11-24 02:15 | 本笔 |
 
 > 上表各行均由 `claim` 台账推导：owner 原文与 `acquired_at` 直接取自台账，
 > 目的优先用台账里的 `claim_reason`，没有就如实写「未声明」，不补编。时间列只是
@@ -14436,3 +14437,25 @@ widget 用例与 Python 端到端，没有真实 Android 运行时 + 真实网�
 - `:app:assembleDebug --offline` BUILD SUCCESSFUL（16 s）
 
 **边界**：未在 PICO 真机验证；只读展示，不做排序/筛选。
+
+## 311. 局域网权威端实测（`--allow-lan`，2026-11-24）
+
+**动机**：阶段 1 要求「默认只绑回环；显式 `allow_lan` 才能绑私有网段」，此前只有
+绑定拒绝/回环用例，没有在真实局域网地址上跑过三端链路。
+
+**做法**：宿主 WLAN `10.42.229.87` 启动
+`device_gateway --host 10.42.229.87 --allow-lan --port 8771 --lat 39.9042 --lon 116.4074`，
+模拟器（emulator-5554）直连该地址。
+
+**证据**
+- 宿主 `/health`：`lan=true`、`pairing_required=true`
+- 模拟器 `ping 10.42.229.87` 2/2 通（1.1–4.2 ms）
+- 手机设置页把 ControlHub 主机改为 `10.42.229.87`，配对码 071944 → **配对成功**
+- 读取全景：`站址 39.90, 116.41 · 太阳高度 -55.6° · 天气 未知 · 空间天气 未知 ·
+  缺项 weather, space_weather.kp, space_weather.f107, space_weather.ssn,
+  space_weather.snapshot`
+- 读取桌面状态：`站址 39.90, 116.41 · SDR — · 缺项 sdr`
+- 验证后已把手机主机改回 `10.0.2.2`（模拟器专用别名，避免宿主 IP 变化导致失效）
+
+**边界**：私网 + Bearer token，**无 TLS**；仅限可信局域网。公网/通配仍应拒绝。
+未在物理手机验证。
