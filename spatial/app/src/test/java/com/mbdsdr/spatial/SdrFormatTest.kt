@@ -74,6 +74,34 @@ class SdrFormatTest {
     }
 
     @Test
+    fun downsampleKeepsMaxAndHandlesEdges() {
+        val out = SdrFormat.downsampleMax(
+            floatArrayOf(0f, 1f, 0.5f, 0.9f), 2)
+        assertEquals(1f, out[0], 0f)
+        assertEquals(0.9f, out[1], 1e-6f)
+
+        val up = SdrFormat.downsampleMax(floatArrayOf(0.2f, 0.8f), 4)
+        assertEquals(4, up.size)
+        assertEquals(0.2f, up[0], 1e-6f)
+        assertEquals(0.8f, up[3], 1e-6f)
+
+        assertEquals(0, SdrFormat.downsampleMax(floatArrayOf(1f), 0).size)
+        val empty = SdrFormat.downsampleMax(FloatArray(0), 3)
+        assertEquals(3, empty.size)
+        for (v in empty) assertEquals(0f, v, 0f)
+    }
+
+    @Test
+    fun waterfallColorEndpointsAndNaN() {
+        assertEquals(0xFF000814.toInt(), SdrFormat.waterfallColor(0f))
+        assertEquals(0xFFFFFFFF.toInt(), SdrFormat.waterfallColor(1f))
+        assertEquals(0xFF00C8DC.toInt(), SdrFormat.waterfallColor(0.65f))
+        assertEquals(SdrFormat.waterfallColor(0f),
+            SdrFormat.waterfallColor(Float.NaN))
+        assertEquals(0xFFFFFFFF.toInt(), SdrFormat.waterfallColor(2f))
+    }
+
+    @Test
     fun peakBinsFindLocalMaximaAboveThreshold() {
         val spectrum = floatArrayOf(0f, 100f, 0f, 90f, 80f, 0f, 70f, 0f)
         assertEquals(listOf(1, 3, 6), SdrFormat.peakBins(spectrum))

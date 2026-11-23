@@ -2,6 +2,7 @@ package com.mbdsdr.spatial.sdr
 
 import com.mbdsdr.spatial.net.RtlTcpProtocol
 import kotlin.math.abs
+import kotlin.math.roundToInt
 
 /**
  * SDR 面板的纯展示/输入逻辑（不碰 Compose/网络），便于 JVM 单测。
@@ -49,6 +50,53 @@ object SdrFormat {
     /** 跨度（±Hz）→「±1.200 MHz」；用于状态行说明频谱覆盖范围。 */
     fun formatSpanMhz(spanHz: Double): String =
         String.format(java.util.Locale.US, "±%.3f MHz", abs(spanHz) / 1_000_000.0)
+
+    /**
+     * 把任意长度 [values] 按列数做 max 抽取（窄峰不被抹平）；上采样时重复最近 bin。
+     * [columns] <= 0 → 空数组；空输入 → 全 0（不画假数据）。
+     */
+    fun downsampleMax(values: FloatArray, columns: Int): FloatArray {
+        if (columns <= 0) return FloatArray(0)
+        if (values.isEmpty()) return FloatArray(columns)
+        val n = values.size
+        return FloatArray(columns) { i ->
+            val start = (i.toLong() * n / columns).toInt()
+            var end = ((i + 1).toLong() * n / columns).toInt()
+            if (end <= start) end = start + 1
+            var best = 0f
+            for (j in start until minOf(end, n)) {
+                val v = values[j]
+                if (v.isFinite() && v > best) best = v
+            }
+            best
+        }
+    }
+
+    /**
+     * 瀑布配色：0 → 近黑蓝，0.35 → 深蓝，0.65 → 青，0.85 → 黄，1 → 白。
+     * 非有限按 0；返回 ARGB。只是显示色阶，不是功率标定。
+     */
+    fun waterfallColor(level: Float): Int {
+        val t = (if (level.isFinite()) level else 0f).coerceIn(0f, 1f)
+        return when {
+            t < 0.35f -> packLerp(0, 8, 20, 0, 64, 140, t / 0.35f)
+            t < 0.65f -> packLerp(0, 64, 140, 0, 200, 220, (t - 0.35f) / 0.30f)
+            t < 0.85f -> packLerp(0, 200, 220, 255, 220, 60, (t - 0.65f) / 0.20f)
+            else -> packLerp(255, 220, 60, 255, 255, 255, (t - 0.85f) / 0.15f)
+        }
+    }
+
+    private fun packLerp(
+        r0: Int, g0: Int, b0: Int,
+        r1: Int, g1: Int, b1: Int,
+        f: Float,
+    ): Int {
+        val t = f.coerceIn(0f, 1f)
+        val r = (r0 + (r1 - r0) * t).roundToInt().coerceIn(0, 255)
+        val g = (g0 + (g1 - g0) * t).roundToInt().coerceIn(0, 255)
+        val b = (b0 + (b1 - b0) * t).roundToInt().coerceIn(0, 255)
+        return (0xFF shl 24) or (r shl 16) or (g shl 8) or b
+    }
 
     /**
      * 相对 dB → 画柱高度 [0,1]：把 [floorDb, ceilDb] 线性映射到 [0,1]。

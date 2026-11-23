@@ -24,6 +24,7 @@ import com.mbdsdr.spatial.net.RtlTcpProtocol
 import com.mbdsdr.spatial.sdr.DeviceGatewaySdrPort
 import com.mbdsdr.spatial.sdr.SdrFormat
 import com.mbdsdr.spatial.sdr.SdrSession
+import com.mbdsdr.spatial.sdr.WaterfallBuffer
 import com.pico.spatial.ui.design.Button
 import com.pico.spatial.ui.design.PicoTheme
 import com.pico.spatial.ui.design.Text
@@ -58,6 +59,9 @@ fun SdrPanel(gateway: GatewayController, modifier: Modifier = Modifier) {
     }
     var session by remember { mutableStateOf<SdrSession?>(null) }
     var job by remember { mutableStateOf<Job?>(null) }
+    // 瀑布：256 列 × 48 行，够看清滚动趋势又不至于每帧画几万个矩形。
+    val waterfall = remember { WaterfallBuffer(columns = 256, rows = 48) }
+    var waterfallTick by remember { mutableStateOf(0) }
     val scope = rememberCoroutineScope()
 
     fun stop() {
@@ -68,6 +72,8 @@ fun SdrPanel(gateway: GatewayController, modifier: Modifier = Modifier) {
         running = false
         spectrum = FloatArray(0)
         tunedCenterHz = 0L
+        waterfall.clear()
+        waterfallTick++
         status = "已停止：连接已关闭，授权已释放"
     }
 
@@ -122,7 +128,13 @@ fun SdrPanel(gateway: GatewayController, modifier: Modifier = Modifier) {
                     " · 跨度 ${SdrFormat.formatSpanMhz(info.sampleRateHz / 2.0)}"
                 job = scope.launch(Dispatchers.IO) {
                     try {
-                        readSpectrumLoop(sdr) { frame -> spectrum = frame }
+                        readSpectrumLoop(sdr) { frame ->
+                            spectrum = frame
+                            val bars = SdrFormat.normalizedBars(frame)
+                            waterfall.push(SdrFormat.downsampleMax(
+                                bars, waterfall.columns))
+                            waterfallTick++
+                        }
                     } catch (e: Exception) {
                         withContext(Dispatchers.Main) {
                             status = "接收中断：${e.message}"
@@ -204,6 +216,18 @@ fun SdrPanel(gateway: GatewayController, modifier: Modifier = Modifier) {
             spectrum = spectrum,
             modifier = Modifier.fillMaxWidth().height(140.dp),
         )
+        if (waterfallTick > 0 && waterfall.count > 0) {
+            Text(
+                text = "瀑布（相对幅度，最近 ${waterfall.rows} 帧；不是 dBm）",
+                style = PicoTheme.typography.bodySmall,
+                color = PicoTheme.colorTokens.LabelTertiaryAlpha,
+            )
+            WaterfallCanvas(
+                buffer = waterfall,
+                version = waterfallTick,
+                modifier = Modifier.fillMaxWidth().height(120.dp),
+            )
+        }
     }
 }
 

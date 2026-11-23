@@ -3030,6 +3030,18 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `.trae/specs/multi-device-interconnect/tasks.md` | 多机线/42（§289 M2.6 头显快照画布） | 2026-11-24 02:05 | 本笔 |
 | `.trae/specs/multi-device-interconnect/checklist.md` | 多机线/42（§289 快照画布项） | 2026-11-24 02:05 | 本笔 |
 | `docs/COORDINATION.md` | 多机线/42（§289 记录 + §6.1） | 2026-11-24 02:05 | 本笔 |
+| `spatial/app/src/main/java/com/mbdsdr/spatial/sdr/WaterfallBuffer.kt` | 多机线/42（§290 瀑布环形缓冲） | 2026-11-24 02:25 | 本笔 |
+| `spatial/app/src/main/java/com/mbdsdr/spatial/sdr/SdrFormat.kt` | 多机线/42（§290 抽取/色阶） | 2026-11-24 02:25 | 本笔 |
+| `spatial/app/src/main/java/com/mbdsdr/spatial/ui/WaterfallCanvas.kt` | 多机线/42（§290 瀑布位图绘制） | 2026-11-24 02:25 | 本笔 |
+| `spatial/app/src/main/java/com/mbdsdr/spatial/ui/SdrPanel.kt` | 多机线/42（§290 每帧写瀑布） | 2026-11-24 02:25 | 本笔 |
+| `spatial/app/src/test/java/com/mbdsdr/spatial/WaterfallBufferTest.kt` | 多机线/42（§290 4 条缓冲用例） | 2026-11-24 02:25 | 本笔 |
+| `spatial/app/src/test/java/com/mbdsdr/spatial/SdrFormatTest.kt` | 多机线/42（§290 抽取/色阶用例） | 2026-11-24 02:25 | 本笔 |
+| `spatial/README.md` | 多机线/42（§290 瀑布说明） | 2026-11-24 02:25 | 本笔 |
+| `.trae/specs/multi-device-interconnect/spec.md` | 多机线/42（§290 面板含瀑布现状） | 2026-11-24 02:25 | 本笔 |
+| `.trae/specs/multi-device-interconnect/tasks.md` | 多机线/42（§290 M4.2 瀑布） | 2026-11-24 02:25 | 本笔 |
+| `.trae/specs/multi-device-interconnect/checklist.md` | 多机线/42（§290 瀑布项） | 2026-11-24 02:25 | 本笔 |
+| `docs/PRD-现状对照.md` | 多机线/42（§290 P1-11 含瀑布） | 2026-11-24 02:25 | 本笔 |
+| `docs/COORDINATION.md` | 多机线/42（§290 记录 + §6.1） | 2026-11-24 02:25 | 本笔 |
 
 > 上表各行均由 `claim` 台账推导：owner 原文与 `acquired_at` 直接取自台账，
 > 目的优先用台账里的 `claim_reason`，没有就如实写「未声明」，不补编。时间列只是
@@ -13840,6 +13852,30 @@ NaN 会变成 `null`、真实 socket 上无帧会 503。契约要求消费端不
 **诚实边界**
 - 映射阈值固定 -100…0 dB，不随噪声底自适应；未在 PICO 真机看渲染效果。
 - 快照是一帧静态图，不滚动、不刷新；不是瀑布。
+
+## 290. 头显实时谱瀑布图（2026-11-24）
+
+**依据**：checklist 里瀑布图一直挂在「真机联调」项下；它本身是纯数据 + 位图绘制，
+可以先做成可测内核，把真机项缩到「刷新率/滚动观感」。
+
+**做了什么**
+- `WaterfallBuffer`（256 列 × 48 行）：环形缓冲只存 [0,1] 画柱；
+  `row(0)` = 最新，越界/未填充返回 null；尺寸不符 push 返回 false；`clear()` 复位。
+- `SdrFormat.downsampleMax`：1024→256 按 max 抽取，窄峰不被平均抹掉；
+  上采样重复最近 bin；空输入全 0，不画假数据。
+- `SdrFormat.waterfallColor`：5 段色阶（近黑蓝→深蓝→青→黄→白），
+  非有限按 0，ARGB 打包；用 `roundToInt` 保证 1.0 正好是纯白。
+- `WaterfallCanvas`：把缓冲写成 `Bitmap` 再 `drawImage` 缩放，新行在底部；
+  `SdrPanel` 每帧 push 抽取后的画柱并递增 version，停止/离开即清空。
+
+**验证**
+- `WaterfallBufferTest` 4 条：新行=age0、环形覆盖丢最旧、尺寸不符不改动、清空/非法尺寸。
+- `SdrFormatTest` +2：抽取（4→2、2→4、空/0 列）与色阶端点/NaN/越界。
+- headset JVM：25 suite / **216 用例** / 0 失败 / 1 跳过。
+
+**诚实边界**
+- 色阶与高度都是相对量，不是 dBm；固定 48 行，不按屏幕高度/帧率自适应。
+- 未在 PICO 真机看滚动与刷新率；位图每帧重建，真机性能待测。
 
 
 
