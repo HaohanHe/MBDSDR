@@ -102,6 +102,29 @@
       "reason": {"type": "String"}
     }
   },
+  "settingsGatewayPasses": "パスを取得",
+  "settingsGatewayPassesEmpty": "パス：表示できるパスはありません",
+  "settingsGatewayPassesSummary": "パス（{count} 回）：{items}",
+  "@settingsGatewayPassesSummary": {
+    "placeholders": {
+      "count": {"type": "String"},
+      "items": {"type": "String"}
+    }
+  },
+  "settingsGatewayPassesItem": "{name} {time} 最大仰角 {alt}°",
+  "@settingsGatewayPassesItem": {
+    "placeholders": {
+      "name": {"type": "String"},
+      "time": {"type": "String"},
+      "alt": {"type": "String"}
+    }
+  },
+  "toastGatewayPassesFailed": "パスの取得に失敗：{reason}",
+  "@toastGatewayPassesFailed": {
+    "placeholders": {
+      "reason": {"type": "String"}
+    }
+  },
   "toastGatewayNameRequired": "先にデバイス名を入力してください",
   "toastGatewayCodeInvalid": "ペアリングコードは 6 桁の数字です",
   "toastGatewayPaired": "ペアリングしました",

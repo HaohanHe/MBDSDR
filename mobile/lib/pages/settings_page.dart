@@ -68,6 +68,9 @@ class _SettingsPageState extends State<SettingsPage> {
   /// 最近一次取回的桌面状态摘要（null = 还没取过）。
   String? _gwStatusText;
 
+  /// 最近一次取回的过境摘要（null = 还没取过）。
+  String? _gwPassesText;
+
   String get _apiKey => widget.settings.apiKey;
 
   static String _masked(String key) {
@@ -297,6 +300,7 @@ class _SettingsPageState extends State<SettingsPage> {
       _gwPanoramaText = null;
       _gwRosterText = null;
       _gwStatusText = null;
+      _gwPassesText = null;
     });
     _toast(l10n.toastGatewayUnpaired);
   }
@@ -444,6 +448,63 @@ class _SettingsPageState extends State<SettingsPage> {
     } finally {
       if (mounted) setState(() => _gwBusy = false);
     }
+  }
+
+  /// 取回权威端过境预报（本地 TLE 离线 SGP4）；只列前 3 条，不补假过境。
+  Future<void> _fetchPasses() async {
+    final AppLocalizations l10n = AppLocalizations.of(context)!;
+    if (_gwBusy) return;
+    final SettingsService s = widget.settings;
+    if (s.controlHubHost.trim().isEmpty) {
+      _toast(l10n.settingsGatewayHostMissing, error: true);
+      return;
+    }
+    setState(() => _gwBusy = true);
+    try {
+      final Map<String, dynamic> data =
+          await _gatewayClient().passes(s.deviceGatewayToken);
+      final Object? raw = data['passes'];
+      final List<Object?> passes = raw is List ? raw : const <Object?>[];
+      String text;
+      if (passes.isEmpty) {
+        text = l10n.settingsGatewayPassesEmpty;
+      } else {
+        final List<String> items = <String>[];
+        for (final Object? entry in passes.take(3)) {
+          if (entry is! Map) continue;
+          final String name = '${entry['name'] ?? ''}'.trim();
+          final String alt = entry['max_alt_deg'] is num
+              ? (entry['max_alt_deg'] as num).toStringAsFixed(0)
+              : '—';
+          items.add(l10n.settingsGatewayPassesItem(
+            name.isEmpty ? '—' : name,
+            _shortUtc(entry['rise_utc']),
+            alt,
+          ));
+        }
+        final Object? countRaw = data['count'];
+        final int count =
+            countRaw is num ? countRaw.toInt() : passes.length;
+        text = l10n.settingsGatewayPassesSummary('$count', items.join('，'));
+      }
+      if (!mounted) return;
+      setState(() => _gwPassesText = text);
+    } on DeviceGatewayException catch (e) {
+      if (!mounted) return;
+      _toast(l10n.toastGatewayPassesFailed(e.message), error: true);
+    } finally {
+      if (mounted) setState(() => _gwBusy = false);
+    }
+  }
+
+  /// ISO UTC → `HH:mmZ`；解析不了就原样回显，不猜时区。
+  static String _shortUtc(Object? raw) {
+    if (raw is! String || raw.trim().isEmpty) return '—';
+    final DateTime? dt = DateTime.tryParse(raw);
+    if (dt == null) return raw;
+    final DateTime utc = dt.toUtc();
+    String two(int v) => v.toString().padLeft(2, '0');
+    return '${two(utc.hour)}:${two(utc.minute)}Z';
   }
 
   void _saveApiKey() {
@@ -843,6 +904,10 @@ class _SettingsPageState extends State<SettingsPage> {
                     onPressed: _gwBusy ? null : _fetchStatus,
                     child: Text(l10n.settingsGatewayStatus),
                   ),
+                  OutlinedButton(
+                    onPressed: _gwBusy ? null : _fetchPasses,
+                    child: Text(l10n.settingsGatewayPasses),
+                  ),
                 ],
               ),
               if (_gwPanoramaText != null)
@@ -859,6 +924,11 @@ class _SettingsPageState extends State<SettingsPage> {
                 Padding(
                   padding: const EdgeInsets.only(top: AppTokens.spacingS),
                   child: Text(_gwStatusText!, style: AppTokens.auxiliary),
+                ),
+              if (_gwPassesText != null)
+                Padding(
+                  padding: const EdgeInsets.only(top: AppTokens.spacingS),
+                  child: Text(_gwPassesText!, style: AppTokens.auxiliary),
                 ),
             ] else
               Text(

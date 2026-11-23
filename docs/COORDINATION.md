@@ -3042,6 +3042,15 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `.trae/specs/multi-device-interconnect/checklist.md` | 多机线/42（§290 瀑布项） | 2026-11-24 02:25 | 本笔 |
 | `docs/PRD-现状对照.md` | 多机线/42（§290 P1-11 含瀑布） | 2026-11-24 02:25 | 本笔 |
 | `docs/COORDINATION.md` | 多机线/42（§290 记录 + §6.1） | 2026-11-24 02:25 | 本笔 |
+| `mobile/lib/pages/settings_page.dart` | 多机线/42（§291 手机读取过境） | 2026-11-24 02:45 | 本笔 |
+| `mobile/lib/l10n/app_zh.arb` | 多机线/42（§291 过境文案） | 2026-11-24 02:45 | 本笔 |
+| `mobile/lib/l10n/app_en.arb` | 多机线/42（§291 过境文案） | 2026-11-24 02:45 | 本笔 |
+| `mobile/lib/l10n/app_ja.arb` | 多机线/42（§291 过境文案） | 2026-11-24 02:45 | 本笔 |
+| `mobile/test/settings_page_gateway_test.dart` | 多机线/42（§291 过境用例） | 2026-11-24 02:45 | 本笔 |
+| `.trae/specs/multi-device-interconnect/tasks.md` | 多机线/42（§291 M2.7） | 2026-11-24 02:45 | 本笔 |
+| `.trae/specs/multi-device-interconnect/checklist.md` | 多机线/42（§291 手机过境项） | 2026-11-24 02:45 | 本笔 |
+| `docs/PRD-现状对照.md` | 多机线/42（§291 P1-11 手机过境） | 2026-11-24 02:45 | 本笔 |
+| `docs/COORDINATION.md` | 多机线/42（§291 记录 + §6.1） | 2026-11-24 02:45 | 本笔 |
 
 > 上表各行均由 `claim` 台账推导：owner 原文与 `acquired_at` 直接取自台账，
 > 目的优先用台账里的 `claim_reason`，没有就如实写「未声明」，不补编。时间列只是
@@ -13876,6 +13885,27 @@ NaN 会变成 `null`、真实 socket 上无帧会 503。契约要求消费端不
 **诚实边界**
 - 色阶与高度都是相对量，不是 dBm；固定 48 行，不按屏幕高度/帧率自适应。
 - 未在 PICO 真机看滚动与刷新率；位图每帧重建，真机性能待测。
+
+## 291. 手机只读 `/passes`（2026-11-24）
+
+**依据**：spec 阶段 1 允许已配对角色读 `/passes`，桌面与头显都已消费，手机只有
+全景/名册/状态，缺「何时有过境」这一条。
+
+**做了什么**
+- 设置页网关分区新增「读取过境」：调用已有 `DeviceGatewayClient.passes`，
+  列前 3 条「名称 + UTC `HH:mmZ` 起飞 + 峰值仰角」；空列表明说没有；
+  没有 `count` 时按实际列表长度，不编总数。
+- 失败用独立文案「读取过境失败：…」；未配对/缺主机不请求。
+- 中/英/日新增 5 条文案并重新生成 l10n。
+
+**验证**
+- `settings_page_gateway_test` 全链路新增 `/passes`（路径顺序 + 文本断言）：
+  `过境（2 次）：NOAA 19 12:34Z 峰值 48°，ISS 13:02Z 峰值 23°`。
+- 全量 `flutter test` → **605 passed**。
+
+**诚实边界**
+- 只列前 3 条，不展示方位/日照/时长；时间固定 UTC，不按本机时区改写。
+- 未真机配对验证；只读，无任何调谐/录音端点。
 
 
 

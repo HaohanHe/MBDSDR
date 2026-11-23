@@ -102,6 +102,29 @@
       "reason": {"type": "String"}
     }
   },
+  "settingsGatewayPasses": "读取过境",
+  "settingsGatewayPassesEmpty": "过境：没有可列出的过境",
+  "settingsGatewayPassesSummary": "过境（{count} 次）：{items}",
+  "@settingsGatewayPassesSummary": {
+    "placeholders": {
+      "count": {"type": "String"},
+      "items": {"type": "String"}
+    }
+  },
+  "settingsGatewayPassesItem": "{name} {time} 峰值 {alt}°",
+  "@settingsGatewayPassesItem": {
+    "placeholders": {
+      "name": {"type": "String"},
+      "time": {"type": "String"},
+      "alt": {"type": "String"}
+    }
+  },
+  "toastGatewayPassesFailed": "读取过境失败：{reason}",
+  "@toastGatewayPassesFailed": {
+    "placeholders": {
+      "reason": {"type": "String"}
+    }
+  },
   "toastGatewayNameRequired": "请先填写设备名",
   "toastGatewayCodeInvalid": "配对码应为 6 位数字",
   "toastGatewayPaired": "配对成功",

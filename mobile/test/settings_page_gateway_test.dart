@@ -83,10 +83,19 @@ class _FakeGateway {
         return const GatewayHttpResponse(200, _rosterJson);
       case '/status':
         return const GatewayHttpResponse(200, _statusJson);
+      case '/passes':
+        return const GatewayHttpResponse(200, _passesJson);
       default:
         return const GatewayHttpResponse(404, '{"reason":"not found"}');
     }
   }
+
+  static const String _passesJson =
+      '{"schema":"mbdsdr.sat-passes/1","count":2,"passes":['
+      '{"name":"NOAA 19","rise_utc":"2026-11-24T12:34:00Z",'
+      '"set_utc":"2026-11-24T12:45:00Z","max_alt_deg":48.2,"duration_s":660},'
+      '{"name":"ISS","rise_utc":"2026-11-24T13:02:00Z",'
+      '"set_utc":"2026-11-24T13:08:00Z","max_alt_deg":22.7,"duration_s":360}]}';
 
   static const String _statusJson =
       '{"schema":"mbdsdr.desktop-status/1","authority":"desktop",'
@@ -199,6 +208,15 @@ void main() {
     expect(
         find.text('站址 45.00, 120.00 · SDR rtl_tcp 127.0.0.1:1234'
             '（仅配置了 rtl_tcp 地址与租约状态，未探测 dongle） · 缺项 —'),
+        findsOneWidget);
+
+    // 读取过境：只列前 3 条，时间按 UTC，仰角取整。
+    await tester.tap(find.widgetWithText(OutlinedButton, '读取过境'));
+    await tester.pumpAndSettle();
+    expect(fake.paths.map((Uri u) => u.path),
+        <String>['/pair', '/panorama', '/roster', '/status', '/passes']);
+    expect(
+        find.text('过境（2 次）：NOAA 19 12:34Z 峰值 48°，ISS 13:02Z 峰值 23°'),
         findsOneWidget);
 
     // 解除配对：token 清空，回到未配对态。

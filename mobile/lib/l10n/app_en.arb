@@ -102,6 +102,29 @@
       "reason": {"type": "String"}
     }
   },
+  "settingsGatewayPasses": "Read passes",
+  "settingsGatewayPassesEmpty": "Passes: none to list",
+  "settingsGatewayPassesSummary": "Passes ({count}): {items}",
+  "@settingsGatewayPassesSummary": {
+    "placeholders": {
+      "count": {"type": "String"},
+      "items": {"type": "String"}
+    }
+  },
+  "settingsGatewayPassesItem": "{name} {time} peak {alt}°",
+  "@settingsGatewayPassesItem": {
+    "placeholders": {
+      "name": {"type": "String"},
+      "time": {"type": "String"},
+      "alt": {"type": "String"}
+    }
+  },
+  "toastGatewayPassesFailed": "Passes failed: {reason}",
+  "@toastGatewayPassesFailed": {
+    "placeholders": {
+      "reason": {"type": "String"}
+    }
+  },
   "toastGatewayNameRequired": "Enter a device name first",
   "toastGatewayCodeInvalid": "Pairing code must be 6 digits",
   "toastGatewayPaired": "Paired",
