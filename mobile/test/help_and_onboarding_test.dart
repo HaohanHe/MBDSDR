@@ -120,7 +120,12 @@ void main() {
     // 返回后外壳仍在（zh locale 下 Material 返回按钮 tooltip 为「返回」，
     // tester.pageBack 找 tooltip 'Back' 会 miss，直接点 BackButton 控件）。
     await tester.tap(find.byType(BackButton));
-    await tester.pumpAndSettle();
+    // 这里不能用 pumpAndSettle：HomeShell 的 IndexedStack 保活了天空页，
+    // 它的 1 Hz 真时钟 ticker（sky_page.dart `_clockTicker`）每秒 setState，
+    // 假时钟下永远等不到静止——2026-11-23 实测直接吃满 10 分钟假时间后超时。
+    // 改成有界推进，断言不变。
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
     expect(find.byType(HomeShell), findsOneWidget);
   });
 

@@ -84,6 +84,40 @@ void main() {
     expect(find.text('本站 31.25, 121.5（系统定位）'), findsOneWidget);
   });
 
+  testWidgets('顶部被首跑引导横幅占掉高度时，雷达不被压成点（最小高 220 dp）',
+      (WidgetTester tester) async {
+    tester.view.physicalSize = const Size(720, 1280);
+    tester.view.devicePixelRatio = 2.0;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    // 380 dp 高的横幅带 ≈ 模拟 firstRunGuide 占位后的可用区：
+    // 不含下限时 radarH = 0.55×剩余 ≈ 165 dp，星图几乎不可见。
+    await tester.pumpWidget(MaterialApp(
+      home: Column(
+        children: <Widget>[
+          const SizedBox(height: 380),
+          Expanded(
+            child: SkyPage(
+              tleClient: _FakeTleClient(),
+              locationService: _AvailableLocation(),
+              orientationService: _NoOrientation(),
+              clock: () => DateTime.utc(2026, 10, 27, 12),
+            ),
+          ),
+        ],
+      ),
+    ));
+    await tester.pump();
+    await tester.pump(const Duration(seconds: 1));
+
+    expect(tester.takeException(), isNull);
+
+    final Size radar = tester.getSize(find.byType(SkyRadar));
+    expect(radar.height, greaterThanOrEqualTo(219.5));
+    expect(radar.height, lessThanOrEqualTo(331.0));
+  });
+
   group('placeLabelAvoiding（导航星「预:」标签避让）', () {
     test('同一点第二个标签换方向而不是叠字', () {
       const size = Size(300, 300);

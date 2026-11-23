@@ -694,9 +694,13 @@ class _SkyPageState extends State<SkyPage> {
         : LayoutBuilder(
             builder: (BuildContext context, BoxConstraints constraints) {
               // 雷达高度取屏宽九成、但不超过可视高的 55%，保证下方内容露头。
+              // 下限 220 dp：首跑引导横幅占掉约 180–200 dp 时，可用高只剩
+              // ~80 dp，0.55×80≈44 dp 的雷达会缩成一个点——2026-11-23 模拟器
+              // 实测整块星图看不见（mw_56），而关掉横幅（mw_58）即恢复。
+              // 整页本来就可滚，宁可让用户滚一屏，也不要把天空压没。
               final double radarH = math.min(
                 constraints.maxWidth * 0.92,
-                constraints.maxHeight * 0.55,
+                math.max(constraints.maxHeight * 0.55, 220.0),
               );
               return SingleChildScrollView(
                 key: const Key('sky-portrait-scroll'),
