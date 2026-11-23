@@ -87,6 +87,21 @@
       "missing": {"type": "String"}
     }
   },
+  "settingsGatewayStatus": "读取桌面状态",
+  "settingsGatewayStatusSummary": "站址 {station} · SDR {sdr} · 缺项 {missing}",
+  "@settingsGatewayStatusSummary": {
+    "placeholders": {
+      "station": {"type": "String"},
+      "sdr": {"type": "String"},
+      "missing": {"type": "String"}
+    }
+  },
+  "toastGatewayStatusFailed": "读取桌面状态失败：{reason}",
+  "@toastGatewayStatusFailed": {
+    "placeholders": {
+      "reason": {"type": "String"}
+    }
+  },
   "toastGatewayNameRequired": "请先填写设备名",
   "toastGatewayCodeInvalid": "配对码应为 6 位数字",
   "toastGatewayPaired": "配对成功",

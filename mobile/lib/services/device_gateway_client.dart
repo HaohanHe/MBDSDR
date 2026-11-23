@@ -2,7 +2,8 @@
 // DeviceGatewayClient —— 桌面「多设备网关」的只读客户端（M2.2 数据层）。
 // ----------------------------------------------------------------------------
 // * 端点与桌面 mbdsdr_ai/device_gateway.py 一一对应：
-//     POST /pair  GET /roster  GET /panorama  GET /passes  POST /pose  GET /poses
+//     POST /pair  GET /roster  GET /panorama  GET /passes  GET /status
+//     POST /pose  GET /poses
 // * 只读：唯一写动作是 /pair（换 token）与 /pose（自己的位姿）。
 //   没有调谐/录音/改站址端点——那些仍归桌面权威端。
 // * 传输缝可注入（与 ControlHubClient / AiClient 同范式），测试完全离线。
@@ -92,6 +93,12 @@ class DeviceGatewayClient {
   /// 权威端过境预报（`mbdsdr.sat-passes/1`）。
   Future<Map<String, dynamic>> passes(String token) =>
       _get('/passes', token);
+
+  /// 权威端状态快照（`mbdsdr.desktop-status/1`）：站址 + SDR 段 + 缺项。
+  ///
+  /// `sdr.dongle_probed=false` 表示桌面只知道配置/租约，不知道 dongle 是否在收。
+  Future<Map<String, dynamic>> status(String token) =>
+      _get('/status', token);
 
   /// 上报一条 `sky-pose/1`。桌面会校验 source/role/时钟/边界，失败如实抛。
   ///

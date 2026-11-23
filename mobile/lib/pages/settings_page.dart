@@ -65,6 +65,9 @@ class _SettingsPageState extends State<SettingsPage> {
   /// 最近一次取回的名册摘要（null = 还没取过）。
   String? _gwRosterText;
 
+  /// 最近一次取回的桌面状态摘要（null = 还没取过）。
+  String? _gwStatusText;
+
   String get _apiKey => widget.settings.apiKey;
 
   static String _masked(String key) {
@@ -293,6 +296,7 @@ class _SettingsPageState extends State<SettingsPage> {
     setState(() {
       _gwPanoramaText = null;
       _gwRosterText = null;
+      _gwStatusText = null;
     });
     _toast(l10n.toastGatewayUnpaired);
   }
@@ -379,6 +383,57 @@ class _SettingsPageState extends State<SettingsPage> {
     } on DeviceGatewayException catch (e) {
       if (!mounted) return;
       _toast(l10n.toastGatewayPairFailed(e.message), error: true);
+    } finally {
+      if (mounted) setState(() => _gwBusy = false);
+    }
+  }
+
+  /// 取回桌面状态：站址 / SDR 配置 / 缺项；缺项不猜，`dongle_probed=false`
+  /// 只代表配置，不代表 dongle 在收。
+  Future<void> _fetchStatus() async {
+    final AppLocalizations l10n = AppLocalizations.of(context)!;
+    if (_gwBusy) return;
+    final SettingsService s = widget.settings;
+    if (s.controlHubHost.trim().isEmpty) {
+      _toast(l10n.settingsGatewayHostMissing, error: true);
+      return;
+    }
+    setState(() => _gwBusy = true);
+    try {
+      final Map<String, dynamic> data =
+          await _gatewayClient().status(s.deviceGatewayToken);
+      String stationText = '—';
+      final Object? station = data['station'];
+      if (station is Map && station['lat_deg'] is num
+          && station['lon_deg'] is num) {
+        stationText =
+            '${(station['lat_deg'] as num).toStringAsFixed(2)}, '
+            '${(station['lon_deg'] as num).toStringAsFixed(2)}';
+      }
+      String sdrText = '—';
+      final Object? sdr = data['sdr'];
+      if (sdr is Map) {
+        final Object? endpoint = sdr['rtl_tcp'];
+        if (endpoint is Map
+            && endpoint['host'] is String
+            && endpoint['port'] is num) {
+          sdrText = 'rtl_tcp ${endpoint['host']}:${endpoint['port']}';
+        }
+      }
+      final Object? missingRaw = data['missing'];
+      final List<String> missing = missingRaw is List
+          ? missingRaw.map((Object? e) => e.toString()).toList()
+          : const <String>[];
+      final String summary = l10n.settingsGatewayStatusSummary(
+        stationText,
+        sdrText,
+        missing.isEmpty ? '—' : missing.join(', '),
+      );
+      if (!mounted) return;
+      setState(() => _gwStatusText = summary);
+    } on DeviceGatewayException catch (e) {
+      if (!mounted) return;
+      _toast(l10n.toastGatewayStatusFailed(e.message), error: true);
     } finally {
       if (mounted) setState(() => _gwBusy = false);
     }
@@ -777,6 +832,10 @@ class _SettingsPageState extends State<SettingsPage> {
                     onPressed: _gwBusy ? null : _fetchRoster,
                     child: Text(l10n.settingsGatewayRoster),
                   ),
+                  OutlinedButton(
+                    onPressed: _gwBusy ? null : _fetchStatus,
+                    child: Text(l10n.settingsGatewayStatus),
+                  ),
                 ],
               ),
               if (_gwPanoramaText != null)
@@ -788,6 +847,11 @@ class _SettingsPageState extends State<SettingsPage> {
                 Padding(
                   padding: const EdgeInsets.only(top: AppTokens.spacingS),
                   child: Text(_gwRosterText!, style: AppTokens.auxiliary),
+                ),
+              if (_gwStatusText != null)
+                Padding(
+                  padding: const EdgeInsets.only(top: AppTokens.spacingS),
+                  child: Text(_gwStatusText!, style: AppTokens.auxiliary),
                 ),
             ] else
               Text(

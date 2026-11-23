@@ -87,6 +87,21 @@
       "missing": {"type": "String"}
     }
   },
+  "settingsGatewayStatus": "デスクトップ状態を取得",
+  "settingsGatewayStatusSummary": "観測地点 {station} · SDR {sdr} · 欠落 {missing}",
+  "@settingsGatewayStatusSummary": {
+    "placeholders": {
+      "station": {"type": "String"},
+      "sdr": {"type": "String"},
+      "missing": {"type": "String"}
+    }
+  },
+  "toastGatewayStatusFailed": "デスクトップ状態の取得に失敗：{reason}",
+  "@toastGatewayStatusFailed": {
+    "placeholders": {
+      "reason": {"type": "String"}
+    }
+  },
   "toastGatewayNameRequired": "先にデバイス名を入力してください",
   "toastGatewayCodeInvalid": "ペアリングコードは 6 桁の数字です",
   "toastGatewayPaired": "ペアリングしました",

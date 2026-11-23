@@ -2994,6 +2994,17 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `.trae/specs/multi-device-interconnect/checklist.md` | 多机线/42（§284 /spectrum 与头显消费项） | 2026-11-24 00:40 | 本笔 |
 | `docs/PRD-现状对照.md` | 多机线/42（§284 P1-11 补 /spectrum） | 2026-11-24 00:40 | 本笔 |
 | `docs/COORDINATION.md` | 多机线/42（§284 记录 + §6.1） | 2026-11-24 00:40 | 本笔 |
+| `mobile/lib/services/device_gateway_client.dart` | 多机线/42（§285 手机 status 只读） | 2026-11-24 00:58 | 本笔 |
+| `mobile/lib/pages/settings_page.dart` | 多机线/42（§285 桌面状态按钮/摘要） | 2026-11-24 00:58 | 本笔 |
+| `mobile/lib/l10n/app_zh.arb` | 多机线/42（§285 状态文案） | 2026-11-24 00:58 | 本笔 |
+| `mobile/lib/l10n/app_en.arb` | 多机线/42（§285 状态文案） | 2026-11-24 00:58 | 本笔 |
+| `mobile/lib/l10n/app_ja.arb` | 多机线/42（§285 状态文案） | 2026-11-24 00:58 | 本笔 |
+| `mobile/test/settings_page_gateway_test.dart` | 多机线/42（§285 状态缺项/503 用例） | 2026-11-24 00:58 | 本笔 |
+| `mobile/test/device_gateway_client_test.dart` | 多机线/42（§285 status 客户端用例） | 2026-11-24 00:58 | 本笔 |
+| `.trae/specs/multi-device-interconnect/tasks.md` | 多机线/42（§285 M2.5 手机侧） | 2026-11-24 00:58 | 本笔 |
+| `.trae/specs/multi-device-interconnect/checklist.md` | 多机线/42（§285 手机 /status 项） | 2026-11-24 00:58 | 本笔 |
+| `docs/PRD-现状对照.md` | 多机线/42（§285 P1-11 补手机 /status） | 2026-11-24 00:58 | 本笔 |
+| `docs/COORDINATION.md` | 多机线/42（§285 记录 + §6.1） | 2026-11-24 00:58 | 本笔 |
 
 > 上表各行均由 `claim` 台账推导：owner 原文与 `acquired_at` 直接取自台账，
 > 目的优先用台账里的 `claim_reason`，没有就如实写「未声明」，不补编。时间列只是
@@ -13687,6 +13698,31 @@ spec 的 M4.3 要求「未联网时显示上次结果/包内内容，不伪造�
 - 一条 GET 一个快照，不是流；没有瀑布/峰值标记/刷新率承诺。
 - 相对 dBFS 非绝对 dBm；`age_s` 来自桌面进程内单调时钟，缺失写 null（年龄未知）。
 - 未在 PICO 真机跑；头显仍不能调谐或写任何 SDR 参数。
+
+## 285. 手机设置页只读 `/status`（2026-11-24）
+
+**依据**：桌面已提供 `mbdsdr.desktop-status/1`，但手机只能读全景/名册，看不到
+「权威端站址 + SDR 配置 + 缺项」的统一口径。用户要求三端同步推进。
+
+**做了什么**
+- `DeviceGatewayClient.status(token)`：`GET /status`，与桌面同一契约。
+- 设置页网关分区新增「读取桌面状态」按钮与摘要行：站址 → 经纬度（缺则 `—`），
+  SDR → `rtl_tcp host:port`（缺则 `—`），缺项照原样列出；不把
+  `dongle_probed=false` 说成「已连接」。
+- 失败（如 503 `status_unavailable`）用独立文案「读取桌面状态失败：…」如实提示，
+  不把旧摘要标成刚取到的结果。
+- 新增中/英/日三条文案并重新生成 l10n。
+
+**验证**
+- `settings_page_gateway_test` +1：无站址/无 SDR 时摘要为「站址 — · SDR — ·
+  缺项 station, sdr」，随后 503 显示「读取桌面状态失败：权威端尚未接入状态提供者」。
+- 全链路用例扩展：配对→全景→名册→`/status`（路径顺序与摘要文本断言）。
+- `device_gateway_client_test` 扩展 `/status` 解析；全量 `flutter test`
+  → **605 passed**。
+
+**诚实边界**
+- 未真机配对/局域网验证；摘要只在手动点按后刷新，无轮询。
+- SDR 段只显示配置地址，不探测 dongle；租约明细仍看桌面/头显面板。
 
 
 

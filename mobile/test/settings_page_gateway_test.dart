@@ -81,10 +81,19 @@ class _FakeGateway {
         return const GatewayHttpResponse(200, jsonEncoder);
       case '/roster':
         return const GatewayHttpResponse(200, _rosterJson);
+      case '/status':
+        return const GatewayHttpResponse(200, _statusJson);
       default:
         return const GatewayHttpResponse(404, '{"reason":"not found"}');
     }
   }
+
+  static const String _statusJson =
+      '{"schema":"mbdsdr.desktop-status/1","authority":"desktop",'
+      '"station":{"lat_deg":45.0,"lon_deg":120.0,"alt_m":10.0},'
+      '"sdr":{"rtl_tcp":{"host":"127.0.0.1","port":1234},'
+      '"lease_active":false,"dongle_probed":false},'
+      '"missing":[]}';
 
   static const String jsonEncoder =
       '{"schema":"mbdsdr.sky-panorama/1","site":{"lat_deg":40.5,"lon_deg":-100.25},'
@@ -181,6 +190,15 @@ void main() {
         findsOneWidget);
     expect(find.textContaining('tok-1'), findsNothing);
 
+    // 读取桌面状态：站址/SDR 配置/缺项如实展示（不缺就不编）。
+    await tester.tap(find.widgetWithText(OutlinedButton, '读取桌面状态'));
+    await tester.pumpAndSettle();
+    expect(fake.paths.map((Uri u) => u.path),
+        <String>['/pair', '/panorama', '/roster', '/status']);
+    expect(
+        find.text('站址 45.00, 120.00 · SDR rtl_tcp 127.0.0.1:1234 · 缺项 —'),
+        findsOneWidget);
+
     // 解除配对：token 清空，回到未配对态。
     await tester.tap(find.widgetWithText(TextButton, '解除配对'));
     await tester.pumpAndSettle();
@@ -232,6 +250,53 @@ void main() {
     expect(find.text('配对码应为 6 位数字'), findsOneWidget);
     expect(fake.paths, isEmpty);
     expect(settings.deviceGatewayPaired, isFalse);
+  });
+
+  testWidgets('桌面状态缺项如实展示；503 报错不编摘要', (tester) async {
+    tester.view.physicalSize = const Size(420, 5200);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
+
+    final SettingsService settings =
+        SettingsService(kv: _MemKv(), secure: _MemSecure());
+    await settings.load();
+    settings.deviceGatewayToken = 'tok-1';
+    settings.deviceGatewayRole = 'handheld';
+
+    final List<String> paths = <String>[];
+    int status = 200;
+    String body =
+        '{"schema":"mbdsdr.desktop-status/1","station":null,"sdr":null,'
+        '"missing":["station","sdr"]}';
+
+    await tester.pumpWidget(_wrap(Scaffold(
+      body: SettingsPage(
+        settings: settings,
+        radio: RadioController(),
+        gatewayClientBuilder: (String host, int port) => DeviceGatewayClient(
+          host: host,
+          port: port,
+          transport: (Uri url, String method, Map<String, String> headers,
+              String? payload) async {
+            paths.add(url.path);
+            return GatewayHttpResponse(status, body);
+          },
+        ),
+      ),
+    )));
+    await tester.pump();
+
+    await tester.tap(find.widgetWithText(OutlinedButton, '读取桌面状态'));
+    await tester.pumpAndSettle();
+    expect(paths, <String>['/status']);
+    expect(find.text('站址 — · SDR — · 缺项 station, sdr'), findsOneWidget);
+
+    // 权威端没接状态提供者：如实报原因，不把旧摘要当新结果。
+    status = 503;
+    body = '{"error":"status_unavailable","reason":"权威端尚未接入状态提供者"}';
+    await tester.tap(find.widgetWithText(OutlinedButton, '读取桌面状态'));
+    await tester.pumpAndSettle();
+    expect(find.text('读取桌面状态失败：权威端尚未接入状态提供者'), findsOneWidget);
   });
 
   testWidgets('角色切到目镜后，配对请求带 eyepiece', (tester) async {

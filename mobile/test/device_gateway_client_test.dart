@@ -148,6 +148,10 @@ void main() {
         case '/passes':
           return const GatewayHttpResponse(
               200, '{"schema":"mbdsdr.sat-passes/1","count":0,"passes":[]}');
+        case '/status':
+          return const GatewayHttpResponse(
+              200, '{"schema":"mbdsdr.desktop-status/1","station":null,'
+                  '"sdr":null,"missing":["station","sdr"]}');
       }
       fail('unexpected path ${url.path}');
     });
@@ -157,8 +161,9 @@ void main() {
     expect((await c.panorama('tok-abc'))['schema'], 'mbdsdr.sky-panorama/1');
     expect((await c.poses('tok-abc'))['poses'], isEmpty);
     expect((await c.passes('tok-abc'))['schema'], 'mbdsdr.sat-passes/1');
-    expect(t.calls.map((e) => e.url.path),
-        <String>['/roster', '/panorama', '/poses', '/passes']);
+    expect((await c.status('tok-abc'))['schema'], 'mbdsdr.desktop-status/1');
+    expect(t.calls.map((e) => e.url.path), <String>[
+      '/roster', '/panorama', '/poses', '/passes', '/status']);
   });
 
   test('只读角色上报位姿：本地拒绝，不发请求', () async {
