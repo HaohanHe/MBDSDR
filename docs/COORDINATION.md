@@ -2703,6 +2703,10 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `docs/tool-availability.md` | 观星指数线/41（§256 工具总账补 sky_panorama，521） | 2026-11-23 22:15 | 本笔 |
 | `docs/PRD-现状对照.md` | 观星指数线/41（§256 P1-11/P1-12 + P1-05/P1-07 现状刷新） | 2026-11-23 22:15 | 本笔 |
 | `docs/COORDINATION.md` | 观星指数线/41（§256 多机 spec + 全景工具记录 + §6.1） | 2026-11-23 22:15 | 本笔 |
+| `mbdsdr_ai/device_gateway.py` | 观星指数线/41（§257 配对/角色/只读/位姿网关内核） | 2026-11-23 22:35 | 本笔 |
+| `tests/test_device_gateway.py` | 观星指数线/41（§257 网关 18 条安全/行为用例） | 2026-11-23 22:35 | 本笔 |
+| `docs/PRD-现状对照.md` | 观星指数线/41（§257 P1-11 更新为 spec + M2 内核） | 2026-11-23 22:35 | 本笔 |
+| `docs/COORDINATION.md` | 观星指数线/41（§257 M2 网关记录 + §6.1） | 2026-11-23 22:35 | 本笔 |
 
 > 上表各行均由 `claim` 台账推导：owner 原文与 `acquired_at` 直接取自台账，
 > 目的优先用台账里的 `claim_reason`，没有就如实写「未声明」，不补编。时间列只是
@@ -12515,6 +12519,44 @@ PRD §8 冲刺序列 P1「天文通式观星指数」。本轮只做**有可信�
 - 桌面 Web 桥仍只绑 127.0.0.1；在配对与鉴权落地前不得改 0.0.0.0。
 - `sky_panorama` 只覆盖「环境全景」；设备名册与多机位姿要等 M2/M3。
 - 真模型是否会在问传播时主动调 `sky_panorama` 仍未回归（无 API Key）。
+
+## 257. M2 内核：多设备网关（配对 + 角色只读 + 位姿）（2026-11-23）
+
+**依据**：`multi-device-interconnect/spec.md` M2；用户要求两台手机挂望远镜、
+手机/电脑/头显同时互联。
+
+**做了什么**
+- 新模块 `mbdsdr_ai/device_gateway.py`（不动既有回环 Web 桥）：
+  - `PairingRegistry`：6 位配对码 + 设备 token（内存、12 h TTL、可吊销）；
+    角色白名单 `lens/eyepiece/handheld/headset`；失败 5 次/60 s 锁 60 s。
+  - `DeviceGateway`：
+    - `GET /health`（免 token，明说需配对）；`POST /pair`（码换 token）；
+    - `GET /roster`（`mbdsdr.device-roster/1`，authority 固定 desktop，
+      **不回传 token**）；
+    - `GET /panorama`（需注入 provider；未接线回 503，不造假数据）；
+    - `POST /pose`（仅 lens/eyepiece）：校验 `sky-pose/1`、source 必须等于
+      本设备 id（不能替别人报）、t_utc ±300 s、az/alt/accuracy/fov 边界；
+      每设备只留最新一条；`GET /poses` 读回。
+    - **没有任何写硬件/改站址端点**；`/bridge/*` 一律 404。
+  - 绑定安全：默认 127.0.0.1；非回环必须显式 `allow_lan=True`，且只收私有
+    网段；`0.0.0.0`/`::`/公网/域名一律 ValueError。
+  - 无 CORS 头、无 cookie、日志不打印 token/查询串。
+- 手机/桌面都**未接线**：`ControlHubClient` 仍是旧四端点只读；桌面没有启动
+  网关的入口。M2 只完成可测内核。
+
+**验证**
+- `pytest tests/test_device_gateway.py` → **18 passed**：绑定拒绝（通配/公网/域名）、
+  私有网段需显式 allow_lan、错误码与锁定、配对/名册不含 token、未配对 401、
+  过期与吊销、provider 缺失 503、provider 异常 500 带原因、无写端点 404、
+  handheld 不能报位姿、替报/陈旧/越界全拒、lens+eyepiece 各一条且同设备只留最新、
+  真实 socket 冒烟（health→pair→panorama→未授权 401）。
+
+**诚实边界**
+- 无 TLS：局域网内明文；本轮只做到「配对 + 只读 + 无写端点」，不等于可上公网。
+- 配对锁定是全局的：LAN 内恶意者可用错误码打断他人配对（v1 接受，后续按 IP 限流）。
+- `/panorama` 未接线时回 503；桌面 provider 与手机配对 UI 待 M2.1/M2.2。
+- 两条位姿尚未喂 `sky_pose_fuse`，多机融合仍待 M3。
+
 
 
 
