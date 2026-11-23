@@ -92,7 +92,8 @@ class _FakeGateway {
       '{"schema":"mbdsdr.desktop-status/1","authority":"desktop",'
       '"station":{"lat_deg":45.0,"lon_deg":120.0,"alt_m":10.0},'
       '"sdr":{"rtl_tcp":{"host":"127.0.0.1","port":1234},'
-      '"lease_active":false,"dongle_probed":false},'
+      '"lease_active":false,"dongle_probed":false,'
+      '"reason":"仅配置了 rtl_tcp 地址与租约状态，未探测 dongle"},'
       '"missing":[]}';
 
   static const String jsonEncoder =
@@ -196,7 +197,8 @@ void main() {
     expect(fake.paths.map((Uri u) => u.path),
         <String>['/pair', '/panorama', '/roster', '/status']);
     expect(
-        find.text('站址 45.00, 120.00 · SDR rtl_tcp 127.0.0.1:1234 · 缺项 —'),
+        find.text('站址 45.00, 120.00 · SDR rtl_tcp 127.0.0.1:1234'
+            '（仅配置了 rtl_tcp 地址与租约状态，未探测 dongle） · 缺项 —'),
         findsOneWidget);
 
     // 解除配对：token 清空，回到未配对态。

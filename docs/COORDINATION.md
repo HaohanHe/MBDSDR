@@ -3006,6 +3006,12 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `.trae/specs/multi-device-interconnect/checklist.md` | 多机线/42（§285 手机 /status 项） | 2026-11-24 00:58 | 本笔 |
 | `docs/PRD-现状对照.md` | 多机线/42（§285 P1-11 补手机 /status） | 2026-11-24 00:58 | 本笔 |
 | `docs/COORDINATION.md` | 多机线/42（§285 记录 + §6.1） | 2026-11-24 00:58 | 本笔 |
+| `mobile/lib/pages/settings_page.dart` | 多机线/42（§286 /status 未探测标注） | 2026-11-24 01:20 | 本笔 |
+| `mobile/test/settings_page_gateway_test.dart` | 多机线/42（§286 未探测标注用例） | 2026-11-24 01:20 | 本笔 |
+| `.trae/specs/multi-device-interconnect/spec.md` | 多机线/42（§286 头显 rtl_tcp/四窗口径校正） | 2026-11-24 01:20 | 本笔 |
+| `.trae/specs/multi-device-interconnect/tasks.md` | 多机线/42（§286 M4.1 收口 + 手机 reason） | 2026-11-24 01:20 | 本笔 |
+| `.trae/specs/multi-device-interconnect/checklist.md` | 多机线/42（§286 四窗设计口径 + 手机 reason） | 2026-11-24 01:20 | 本笔 |
+| `docs/COORDINATION.md` | 多机线/42（§286 记录 + §6.1） | 2026-11-24 01:20 | 本笔 |
 
 > 上表各行均由 `claim` 台账推导：owner 原文与 `acquired_at` 直接取自台账，
 > 目的优先用台账里的 `claim_reason`，没有就如实写「未声明」，不补编。时间列只是
@@ -13726,6 +13732,33 @@ spec 的 M4.3 要求「未联网时显示上次结果/包内内容，不伪造�
 **诚实边界**
 - 未真机配对/局域网验证；摘要只在手动点按后刷新，无轮询。
 - SDR 段只显示配置地址，不探测 dongle；租约明细仍看桌面/头显面板。
+
+## 286. 手机 `/status` 未探测标注 + spec 现状校正（2026-11-24）
+
+**依据**：`/status` 契约里 `dongle_probed=false` 明确表示「只知道配置/租约」。
+手机此前只显示 `rtl_tcp host:port`，容易让人误以为 dongle 已在收；同时 spec 的
+阶段 3/诚实边界仍写着「头显 rtl_tcp I/Q 链未实现」「四窗断网标未联网」，
+与当前仓库事实不符。
+
+**做了什么**
+- 手机设置页：当 `sdr.dongle_probed == false` 且权威端给了 `reason` 时，
+  在 SDR 段后原样附上该说明（如「仅配置了 rtl_tcp 地址与租约状态，未探测 dongle」），
+  不自行改写、不推测在收。
+- spec 校正：
+  - 阶段 3 现状改为「授权协议 + 头显 rtl_tcp 客户端/会话/面板均已实现，有离线与
+    回环 TCP 用例；未在 PICO 真机联调」；
+  - 四窗口径写清：四窗星图/回看**按设计只用本地 bundle、不依赖网络**，因此不标
+    「未联网」、也不做增量替换；网络增量只出现在网关面板；
+  - M4.1 据此收口（`[x]`），避免把「设计如此」当成未完成任务。
+
+**验证**
+- `settings_page_gateway_test` 4 条全绿（摘要含 reason 的新断言）；
+- 全量 `flutter test` → **605 passed**。
+- 本轮未改 Python/Android 代码；既有 71 passed 与 headset 207 用例基线不变。
+
+**诚实边界**
+- 手机仍只在手动点按时刷新，无轮询；未真机配对验证。
+- `reason` 使用权威端原文（当前为中文），多语言界面下会混排，但保证不篡改事实。
 
 
 

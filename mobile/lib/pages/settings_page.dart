@@ -419,6 +419,13 @@ class _SettingsPageState extends State<SettingsPage> {
             && endpoint['port'] is num) {
           sdrText = 'rtl_tcp ${endpoint['host']}:${endpoint['port']}';
         }
+        // dongle_probed=false 时把权威端自己的说明带上：配置了地址不等于在收。
+        final Object? reason = sdr['reason'];
+        if (sdr['dongle_probed'] == false
+            && reason is String
+            && reason.trim().isNotEmpty) {
+          sdrText = '$sdrText（${reason.trim()}）';
+        }
       }
       final Object? missingRaw = data['missing'];
       final List<String> missing = missingRaw is List
