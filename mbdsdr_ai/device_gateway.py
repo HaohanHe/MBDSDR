@@ -17,6 +17,10 @@
    `sky_pose_fuse` 工具同一内核）；不可用时 `valid=false` + 原因，不猜朝向。
    目镜可选带 `identification`（星名/HIP/角距），**只存不融合**，
    镜头机携带即拒绝。
+5. **SDR 一次性授权（M4.2）**：`POST /sdr/lease` 只给 `headset` 签发独占租约
+   （谁占用、多久、何时释放），`POST /sdr/release` 由持有者释放，
+   `GET /sdr/lease` 查状态。桌面自报占用或已有他人租约时**拒绝**；
+   本网关不启动 rtl_tcp、不碰 dongle，只维护授权。rtl_tcp 地址只回给持有者。
 
 安全边界（与 `web_bridge_host.py` 的本地桥分开）
 ================================================
@@ -47,8 +51,11 @@ from urllib.parse import urlparse
 __all__ = [
     "ROLES",
     "POSE_ROLES",
+    "SDR_LEASE_SCHEMA",
+    "SDR_LEASE_ROLES",
     "Device",
     "PairingRegistry",
+    "SdrLeaseRegistry",
     "DeviceGateway",
     "build_default_panorama_provider",
     "build_station_panorama_provider",
@@ -61,6 +68,8 @@ __all__ = [
 ROLES = ("lens", "eyepiece", "handheld", "headset")
 #: 允许上报位姿的角色。
 POSE_ROLES = ("lens", "eyepiece")
+#: 允许申请直连 SDR 租约的角色（头显；手机不直连 dongle）。
+SDR_LEASE_ROLES = ("headset",)
 
 PAIR_FAIL_WINDOW_S = 60.0
 PAIR_FAIL_LIMIT = 5
@@ -69,6 +78,10 @@ DEFAULT_TOKEN_TTL_S = 12 * 3600.0
 
 #: 过境预报信封 schema（头显/手机增量拉取用）。
 PASSES_SCHEMA = "mbdsdr.sat-passes/1"
+#: SDR 一次性授权信封 schema。
+SDR_LEASE_SCHEMA = "mbdsdr.sdr-lease/1"
+#: 默认租约时长：到期自动失效，持有者可续租。
+DEFAULT_SDR_LEASE_TTL_S = 300.0
 POSE_MAX_AGE_S = 300.0
 _POSES_LIMIT = 64
 
@@ -219,6 +232,132 @@ class PairingRegistry:
         }
 
 
+class SdrLeaseRegistry:
+    """SDR 独占租约（一次性授权）：谁占用 dongle、占多久、何时释放。
+
+    只在内存里；到期自动失效；**同一**持有者可续租（延长到期时刻），
+    其它设备一律拒绝。桌面自身占用由调用方通过 ``desktop_busy`` 声明，
+    这里不碰硬件、不启动 rtl_tcp，只维护「谁被允许用」。
+    """
+
+    def __init__(self, *, ttl_s: float = DEFAULT_SDR_LEASE_TTL_S,
+                 now: Callable[[], float] = time.time,
+                 lease_factory: Optional[Callable[[], str]] = None):
+        self._lock = threading.Lock()
+        self._now = now
+        self._ttl_s = float(ttl_s)
+        self._lease_factory = lease_factory or (
+            lambda: f"sdr-{secrets.token_hex(4)}")
+        self._lease: Optional[Dict[str, Any]] = None
+
+    @property
+    def ttl_s(self) -> float:
+        return self._ttl_s
+
+    @staticmethod
+    def _public(lease: Dict[str, Any]) -> Dict[str, Any]:
+        return {
+            "lease_id": lease["lease_id"],
+            "device_id": lease["device_id"],
+            "name": lease["name"],
+            "role": lease["role"],
+            "purpose": lease.get("purpose"),
+            "granted_utc": _iso(datetime.fromtimestamp(
+                lease["granted_unix"], timezone.utc)),
+            "expires_utc": _iso(datetime.fromtimestamp(
+                lease["expires_unix"], timezone.utc)),
+            "expires_unix": float(lease["expires_unix"]),
+        }
+
+    def _current_locked(self, now: float) -> Optional[Dict[str, Any]]:
+        lease = self._lease
+        if lease is not None and now >= lease["expires_unix"]:
+            self._lease = lease = None
+        return lease
+
+    def status(self) -> Dict[str, Any]:
+        with self._lock:
+            now = float(self._now())
+            lease = self._current_locked(now)
+            return {
+                "schema": SDR_LEASE_SCHEMA,
+                "now_utc": _iso(datetime.fromtimestamp(now, timezone.utc)),
+                "active": lease is not None,
+                "lease": None if lease is None else self._public(lease),
+                "ttl_s": self._ttl_s,
+            }
+
+    def acquire(self, device: Device, *, rtl_tcp_host: str, rtl_tcp_port: int,
+                desktop_busy: bool = False,
+                purpose: Optional[str] = None) -> Tuple[int, Dict[str, Any]]:
+        """申请/续租；返回 (HTTP 状态, 回执)。拒绝路径都带稳定 error/reason。"""
+        with self._lock:
+            now = float(self._now())
+            lease = self._current_locked(now)
+            if desktop_busy:
+                return 503, {
+                    "ok": False, "error": "sdr_busy_desktop",
+                    "reason": "桌面权威端正在占用 SDR；先释放桌面占用再授权头显",
+                }
+            if lease is not None and lease["device_id"] != device.device_id:
+                return 409, {
+                    "ok": False, "error": "sdr_leased",
+                    "reason": (f"SDR 已被 {lease['role']}（{lease['device_id']}）"
+                               f"占用到 {_iso(datetime.fromtimestamp(lease['expires_unix'], timezone.utc))}"),
+                    "lease": self._public(lease),
+                }
+            renewed = lease is not None
+            expires = now + self._ttl_s
+            if lease is None:
+                lease = {
+                    "lease_id": self._lease_factory(),
+                    "device_id": device.device_id,
+                    "name": device.name,
+                    "role": device.role,
+                    "purpose": purpose,
+                    "granted_unix": now,
+                    "expires_unix": expires,
+                }
+            else:
+                lease["expires_unix"] = expires
+                if purpose:
+                    lease["purpose"] = purpose
+            self._lease = lease
+            return 200, {
+                "schema": SDR_LEASE_SCHEMA,
+                "ok": True,
+                "renewed": renewed,
+                "exclusive": True,
+                "lease": self._public(lease),
+                "rtl_tcp": {"host": str(rtl_tcp_host),
+                            "port": int(rtl_tcp_port)},
+                "note": "一次性授权：仅本设备可用；到期或释放后自动失效",
+            }
+
+    def release(self, device: Device) -> Tuple[int, Dict[str, Any]]:
+        with self._lock:
+            now = float(self._now())
+            lease = self._current_locked(now)
+            if lease is None:
+                return 409, {
+                    "ok": False, "error": "no_lease",
+                    "reason": "当前没有生效的 SDR 授权",
+                }
+            if lease["device_id"] != device.device_id:
+                return 403, {
+                    "ok": False, "error": "not_holder",
+                    "reason": "只有当前持有者可以释放 SDR 授权",
+                    "lease": self._public(lease),
+                }
+            self._lease = None
+            return 200, {
+                "schema": SDR_LEASE_SCHEMA,
+                "ok": True,
+                "released": True,
+                "lease_id": lease["lease_id"],
+            }
+
+
 def _bearer(headers: Dict[str, str]) -> str:
     hs = {k.lower(): v for k, v in (headers or {}).items()}
     raw = hs.get("authorization", "")
@@ -323,6 +462,9 @@ class DeviceGateway:
                  registry: Optional[PairingRegistry] = None,
                  panorama_provider: Optional[Callable[[], Dict[str, Any]]] = None,
                  passes_provider: Optional[Callable[[], Dict[str, Any]]] = None,
+                 sdr_lease: Optional[SdrLeaseRegistry] = None,
+                 rtl_tcp_provider: Optional[Callable[[], Tuple[str, int]]] = None,
+                 desktop_sdr_busy: Optional[Callable[[], bool]] = None,
                  allow_live: bool = False):
         self.host = _validate_bind(host, allow_lan)
         self.port = int(port)
@@ -330,6 +472,10 @@ class DeviceGateway:
         self.registry = registry or PairingRegistry()
         self._panorama_provider = panorama_provider
         self._passes_provider = passes_provider
+        #: SDR 租约（M4.2）：只发「谁可以用」，不碰硬件；未配置 rtl_tcp 时 503。
+        self.sdr_leases = sdr_lease or SdrLeaseRegistry()
+        self._rtl_tcp_provider = rtl_tcp_provider
+        self._desktop_sdr_busy = desktop_sdr_busy
         self._allow_live = bool(allow_live)
         self._poses: Dict[str, Dict[str, Any]] = {}
         self._poses_lock = threading.Lock()
@@ -393,6 +539,7 @@ class DeviceGateway:
                 "pairing_required": True,
                 "roles": list(ROLES),
                 "lan": self.allow_lan,
+                "sdr_lease": self._rtl_tcp_provider is not None,
             }), "application/json"
 
         if route == "/pair":
@@ -503,7 +650,94 @@ class DeviceGateway:
                 return 405, self._json({"ok": False, "error": "method_not_allowed"}), "application/json"
             return 200, self._json(self.fuse_now()), "application/json"
 
+        # ------------------------------------------------------------ SDR 租约
+        if route == "/sdr/lease":
+            if method == "GET":
+                return 200, self._json(self._sdr_status(device)), "application/json"
+            if method != "POST":
+                return 405, self._json({"ok": False, "error": "method_not_allowed"}), "application/json"
+            if device.role not in SDR_LEASE_ROLES:
+                return 403, self._json({
+                    "ok": False, "error": "sdr_lease_role_denied",
+                    "reason": (f"角色 {device.role} 不能直连 SDR；只有 "
+                               f"{'/'.join(SDR_LEASE_ROLES)} 可申请一次性授权"),
+                }), "application/json"
+            purpose = None
+            if body:
+                try:
+                    payload = json.loads(body.decode("utf-8") or "{}")
+                except (ValueError, UnicodeDecodeError):
+                    return 400, self._json({
+                        "ok": False, "error": "bad_json"}), "application/json"
+                if not isinstance(payload, dict):
+                    return 400, self._json({
+                        "ok": False, "error": "bad_json"}), "application/json"
+                raw_purpose = payload.get("purpose")
+                if raw_purpose is not None:
+                    purpose = str(raw_purpose).strip()
+                    if not purpose or len(purpose) > 128:
+                        return 400, self._json({
+                            "ok": False, "error": "bad_purpose",
+                            "reason": "purpose 必须非空且 ≤128 字符（或省略）",
+                        }), "application/json"
+            endpoint = self._rtl_tcp_endpoint()
+            if endpoint is None:
+                return 503, self._json({
+                    "ok": False, "error": "sdr_not_configured",
+                    "reason": "权威端未配置 rtl_tcp 地址；不能签发 SDR 授权",
+                }), "application/json"
+            host, port = endpoint
+            desktop_busy = False
+            if self._desktop_sdr_busy is not None:
+                try:
+                    desktop_busy = bool(self._desktop_sdr_busy())
+                except Exception as exc:  # noqa: BLE001 - 状态未知就不授权
+                    return 503, self._json({
+                        "ok": False, "error": "sdr_busy_unknown",
+                        "reason": f"无法确认桌面是否占用 SDR：{type(exc).__name__}: {exc}",
+                    }), "application/json"
+            code, data = self.sdr_leases.acquire(
+                device, rtl_tcp_host=host, rtl_tcp_port=port,
+                desktop_busy=desktop_busy, purpose=purpose)
+            return code, self._json(data), "application/json"
+
+        if route == "/sdr/release":
+            if method != "POST":
+                return 405, self._json({"ok": False, "error": "method_not_allowed"}), "application/json"
+            code, data = self.sdr_leases.release(device)
+            return code, self._json(data), "application/json"
+
         return 404, self._json({"ok": False, "error": "not_found"}), "application/json"
+
+    def _rtl_tcp_endpoint(self) -> Optional[Tuple[str, int]]:
+        """取 rtl_tcp 地址；未配置/非法都返回 None（不外抛、不猜端口）。"""
+        if self._rtl_tcp_provider is None:
+            return None
+        try:
+            host, port = self._rtl_tcp_provider()
+        except Exception:  # noqa: BLE001 - 配置失败按「未配置」处理
+            return None
+        host_s = str(host or "").strip()
+        try:
+            port_i = int(port)
+        except (TypeError, ValueError):
+            return None
+        if not host_s or not (1 <= port_i <= 65535):
+            return None
+        return host_s, port_i
+
+    def _sdr_status(self, device: Device) -> Dict[str, Any]:
+        """租约状态：所有人可见「谁占着」；rtl_tcp 地址只回给当前持有者。"""
+        data = self.sdr_leases.status()
+        lease = data.get("lease")
+        if lease is not None and lease.get("device_id") == device.device_id:
+            endpoint = self._rtl_tcp_endpoint()
+            if endpoint is not None:
+                data["rtl_tcp"] = {"host": endpoint[0], "port": endpoint[1]}
+            else:
+                data["rtl_tcp"] = None
+                data["note"] = "权威端未配置 rtl_tcp 地址"
+        return data
 
     @staticmethod
     def _json(payload: Dict[str, Any]) -> bytes:
@@ -776,6 +1010,8 @@ def _main(argv: Optional[List[str]] = None) -> int:
                     help="允许 /panorama 现采网络数据（默认只读缓存快照）")
     ap.add_argument("--tle-file", default=None,
                     help="可选：本地 TLE 文件；提供则启用 GET /passes（离线 SGP4）")
+    ap.add_argument("--rtl-tcp", default=None, metavar="HOST:PORT",
+                    help="可选：rtl_tcp 地址；提供则允许头显申请 SDR 一次性授权")
     args = ap.parse_args(argv)
     provider = build_default_panorama_provider(
         lat=args.lat, lon=args.lon, allow_live=args.allow_live)
@@ -791,11 +1027,30 @@ def _main(argv: Optional[List[str]] = None) -> int:
             return 2
         passes_provider = build_tle_passes_provider(
             args.tle_file, lat=la, lon=lo)
+    rtl_tcp_provider = None
+    if args.rtl_tcp:
+        raw_host, _, raw_port = str(args.rtl_tcp).rpartition(":")
+        try:
+            rtl_port = int(raw_port)
+        except ValueError:
+            rtl_port = 0
+        rtl_host = raw_host.strip()
+        if not rtl_host or not (1 <= rtl_port <= 65535):
+            print(f"--rtl-tcp 必须是 HOST:PORT（1–65535），收到 {args.rtl_tcp!r}")
+            return 2
+
+        def _rtl_provider(host_fixed: str = rtl_host,
+                          port_fixed: int = rtl_port
+                          ) -> Tuple[str, int]:
+            return host_fixed, port_fixed
+
+        rtl_tcp_provider = _rtl_provider
     try:
         gw = DeviceGateway(host=args.host, port=args.port,
                            allow_lan=args.allow_lan,
                            panorama_provider=provider,
-                           passes_provider=passes_provider)
+                           passes_provider=passes_provider,
+                           rtl_tcp_provider=rtl_tcp_provider)
     except ValueError as exc:
         print(f"绑定被拒绝：{exc}")
         return 2
@@ -803,11 +1058,16 @@ def _main(argv: Optional[List[str]] = None) -> int:
     print(f"设备网关已启动：{url}")
     print(f"配对码：{gw.registry.code}（只给权威端看，不进 API 回执）")
     print("可用端点：GET /health、POST /pair、GET /roster、GET /panorama、"
-          "GET /passes、POST /pose、GET /poses、GET /fuse；没有写硬件端点。")
+          "GET /passes、POST /pose、GET /poses、GET /fuse、"
+          "GET/POST /sdr/lease、POST /sdr/release；没有写硬件端点。")
     print("全景数据：" + ("允许联网现采" if args.allow_live
                         else "只读 15 分钟内缓存快照（--allow-live 可现采）"))
     print("过境数据：" + (f"本地 TLE 离线 SGP4（{args.tle_file}）"
                         if args.tle_file else "未启用（给 --tle-file 开启 /passes）"))
+    print("SDR 授权：" + (f"可签发给 headset（rtl_tcp {args.rtl_tcp}，"
+                          f"独占 {DEFAULT_SDR_LEASE_TTL_S:g}s）"
+                        if args.rtl_tcp
+                        else "未启用（给 --rtl-tcp HOST:PORT 开启 /sdr/lease）"))
     print("Ctrl+C 结束。")
     try:
         while True:

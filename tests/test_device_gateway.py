@@ -21,14 +21,15 @@ if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
 from mbdsdr_ai.device_gateway import (  # noqa: E402
-    DeviceGateway, PairingRegistry, build_station_passes_provider,
-    build_tle_passes_provider, parse_tle_groups,
+    DeviceGateway, PairingRegistry, SdrLeaseRegistry,
+    build_station_passes_provider, build_tle_passes_provider, parse_tle_groups,
 )
 
 
 def _registry(**kw):
     kw.setdefault("code_factory", lambda: "123456")
-    tokens = iter(["tok-lens-1", "tok-eye-1", "tok-hand-1", "tok-head-1"])
+    tokens = iter(["tok-lens-1", "tok-eye-1", "tok-hand-1", "tok-head-1",
+                   "tok-head-2"])
     kw.setdefault("token_factory", lambda: next(tokens))
     return PairingRegistry(**kw)
 
@@ -588,3 +589,143 @@ def test_socket_smoke_health_and_pair():
         assert exc.value.code == 401
     finally:
         gw.stop()
+
+
+# ---------------------------------------------------------------- SDR 租约（M4.2）
+
+def _post(gw, path, token, payload=None):
+    body = b"" if payload is None else json.dumps(payload).encode()
+    status, raw, _ = gw.dispatch(
+        "POST", path, body, {"Authorization": f"Bearer {token}"})
+    return status, json.loads(raw)
+
+
+def _headset_setup(*, ttl_s=120.0, desktop_busy=None,
+                   rtl_tcp=("127.0.0.1", 1234)):
+    """配好 lens/eyepiece/handheld/headset，返回 (gw, tokens, clock)。
+
+    tokens 按配对顺序给出；时钟是可变字典，测试可推进过期。
+    """
+    clock = {"now": 1_000_000.0}
+    lease_ids = iter([f"lease-{i}" for i in range(1, 20)])
+    reg = SdrLeaseRegistry(ttl_s=ttl_s, now=lambda: clock["now"],
+                           lease_factory=lambda: next(lease_ids))
+    gw = DeviceGateway(
+        registry=_registry(), sdr_lease=reg,
+        rtl_tcp_provider=(lambda: rtl_tcp) if rtl_tcp is not None else None,
+        desktop_sdr_busy=desktop_busy,
+    )
+    tokens = {}
+    for name, role in (("手机A", "lens"), ("手机B", "eyepiece"),
+                       ("手持", "handheld"), ("头显", "headset")):
+        status, d = _pair(gw, name=name, role=role)
+        assert status == 200 and d["ok"] is True
+        tokens[role] = d["token"]
+        tokens[f"{role}_id"] = d["device"]["id"]
+    return gw, tokens, clock
+
+
+def test_sdr_lease_not_advertised_without_rtl_tcp():
+    gw, tokens, _ = _headset_setup(rtl_tcp=None)
+    status, health = _get(gw, "/health")
+    assert status == 200 and health["sdr_lease"] is False
+    status, d = _post(gw, "/sdr/lease", tokens["headset"])
+    assert status == 503 and d["error"] == "sdr_not_configured"
+    assert "rtl_tcp" in d["reason"]
+
+
+def test_sdr_lease_denied_for_non_headset_roles():
+    gw, tokens, _ = _headset_setup()
+    for role in ("lens", "eyepiece", "handheld"):
+        status, d = _post(gw, "/sdr/lease", tokens[role])
+        assert status == 403 and d["error"] == "sdr_lease_role_denied"
+        assert "headset" in d["reason"]
+    # 只读查询对任意角色开放，且此时没有租约。
+    status, d = _get(gw, "/sdr/lease", tokens["lens"])
+    assert status == 200 and d["active"] is False and d["lease"] is None
+
+
+def test_sdr_lease_grant_conflict_and_release():
+    gw, tokens, _ = _headset_setup()
+    status, d = _post(gw, "/sdr/lease", tokens["headset"],
+                      {"purpose": "头显直连频谱"})
+    assert status == 200 and d["ok"] is True and d["exclusive"] is True
+    assert d["renewed"] is False
+    assert d["rtl_tcp"] == {"host": "127.0.0.1", "port": 1234}
+    assert d["lease"]["device_id"] == tokens["headset_id"]
+    assert d["lease"]["role"] == "headset"
+    assert d["lease"]["purpose"] == "头显直连频谱"
+    assert d["lease"]["expires_unix"] == 1_000_000.0 + 120.0
+    lease_id = d["lease"]["lease_id"]
+
+    # 持有者可见 rtl_tcp；其它角色只知道「谁占着」。
+    status, mine = _get(gw, "/sdr/lease", tokens["headset"])
+    assert status == 200 and mine["active"] is True
+    assert mine["rtl_tcp"] == {"host": "127.0.0.1", "port": 1234}
+    status, other = _get(gw, "/sdr/lease", tokens["lens"])
+    assert status == 200 and other["active"] is True
+    assert "rtl_tcp" not in other
+    assert other["lease"]["device_id"] == tokens["headset_id"]
+
+    # 第二台头显：409 冲突；非持有者不能释放。
+    status, d2 = _pair(gw, name="头显2", role="headset")
+    assert status == 200
+    token2 = d2["token"]
+    status, conflict = _post(gw, "/sdr/lease", token2)
+    assert status == 409 and conflict["error"] == "sdr_leased"
+    assert conflict["lease"]["lease_id"] == lease_id
+    status, denied = _post(gw, "/sdr/release", token2)
+    assert status == 403 and denied["error"] == "not_holder"
+
+    status, released = _post(gw, "/sdr/release", tokens["headset"])
+    assert status == 200 and released["released"] is True
+    assert released["lease_id"] == lease_id
+    status, again = _post(gw, "/sdr/release", tokens["headset"])
+    assert status == 409 and again["error"] == "no_lease"
+    status, empty = _get(gw, "/sdr/lease", tokens["headset"])
+    assert empty["active"] is False and empty["lease"] is None
+
+
+def test_sdr_lease_renews_for_holder_and_expires():
+    gw, tokens, clock = _headset_setup(ttl_s=120.0)
+    status, first = _post(gw, "/sdr/lease", tokens["headset"])
+    assert status == 200 and first["renewed"] is False
+    first_id = first["lease"]["lease_id"]
+    first_expiry = first["lease"]["expires_unix"]
+
+    clock["now"] += 60.0
+    status, renewed = _post(gw, "/sdr/lease", tokens["headset"])
+    assert status == 200 and renewed["renewed"] is True
+    assert renewed["lease"]["lease_id"] == first_id
+    assert renewed["lease"]["expires_unix"] > first_expiry
+
+    # 超过 TTL 未续：自动失效，下一位可申请新租约。
+    clock["now"] += 121.0
+    status, gone = _get(gw, "/sdr/lease", tokens["headset"])
+    assert status == 200 and gone["active"] is False
+    status, again = _post(gw, "/sdr/lease", tokens["headset"])
+    assert status == 200 and again["renewed"] is False
+    assert again["lease"]["lease_id"] != first_id
+
+
+def test_sdr_lease_refuses_when_desktop_busy():
+    gw, tokens, _ = _headset_setup(desktop_busy=lambda: True)
+    status, d = _post(gw, "/sdr/lease", tokens["headset"])
+    assert status == 503 and d["error"] == "sdr_busy_desktop"
+    assert "桌面" in d["reason"]
+
+    def broken():
+        raise RuntimeError("状态总线不可读")
+
+    gw2, tokens2, _ = _headset_setup(desktop_busy=broken)
+    status, d2 = _post(gw2, "/sdr/lease", tokens2["headset"])
+    assert status == 503 and d2["error"] == "sdr_busy_unknown"
+    assert "状态总线不可读" in d2["reason"]
+
+
+def test_sdr_lease_has_no_tuning_or_write_endpoints():
+    gw, tokens, _ = _headset_setup()
+    for path in ("/sdr/tune", "/sdr/gain", "/sdr/start", "/bridge/tune"):
+        status, d = _get(gw, path, tokens["headset"])
+        assert status == 404 and d["error"] == "not_found"
+

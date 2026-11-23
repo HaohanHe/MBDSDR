@@ -2860,6 +2860,15 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `.trae/specs/mbdsdr-system-lifecycle/checklist.md` | 多机线/42（§270 Task 227） | 2026-11-23 23:19 | 本笔 |
 | `docs/PRD-现状对照.md` | 多机线/42（§270 P1-11 补自动上报） | 2026-11-23 23:19 | 本笔 |
 | `docs/COORDINATION.md` | 多机线/42（§270 记录 + §6.1） | 2026-11-23 23:19 | 本笔 |
+| `mbdsdr_ai/device_gateway.py` | 多机线/42（§271 SdrLeaseRegistry + /sdr/lease 端点 + CLI --rtl-tcp） | 2026-11-23 23:24 | 本笔 |
+| `tests/test_device_gateway.py` | 多机线/42（§271 SDR 授权 6 条用例） | 2026-11-23 23:24 | 本笔 |
+| `desktop/README.md` | 多机线/42（§271 SDR 授权端点说明） | 2026-11-23 23:24 | 本笔 |
+| `.trae/specs/multi-device-interconnect/tasks.md` | 多机线/42（§271 M4.2 协议层状态） | 2026-11-23 23:24 | 本笔 |
+| `.trae/specs/multi-device-interconnect/checklist.md` | 多机线/42（§271 授权协议项） | 2026-11-23 23:24 | 本笔 |
+| `.trae/specs/mbdsdr-system-lifecycle/tasks.md` | 多机线/42（§271 Task 228） | 2026-11-23 23:24 | 本笔 |
+| `.trae/specs/mbdsdr-system-lifecycle/checklist.md` | 多机线/42（§271 Task 228） | 2026-11-23 23:24 | 本笔 |
+| `docs/PRD-现状对照.md` | 多机线/42（§271 P1-11 补 SDR 授权） | 2026-11-23 23:24 | 本笔 |
+| `docs/COORDINATION.md` | 多机线/42（§271 记录 + §6.1） | 2026-11-23 23:24 | 本笔 |
 
 > 上表各行均由 `claim` 台账推导：owner 原文与 `acquired_at` 直接取自台账，
 > 目的优先用台账里的 `claim_reason`，没有就如实写「未声明」，不补编。时间列只是
@@ -13140,6 +13149,40 @@ spec 的 M4.3 要求「未联网时显示上次结果/包内内容，不伪造�
 - 真机长时间连续上报、蜂窝/局域网抖动、后台切页行为都未验证；只在测试里
   用缩短周期（40 ms）验证节拍与停止逻辑。
 - 精度仍是观测波动估计或保守 10°，不是标定结果；融合权重会反映这一点。
+
+## 271. M4.2 协议层：头显直连 SDR 的权威端一次性授权（2026-11-23）
+
+**依据**：spec 阶段 3 要求「头显直连 SDR 走 rtl_tcp，由权威端签发一次性授权
+（谁占用、多久、何时释放），默认不允许头显与桌面同时占用」。此前的网关
+只有只读端点，没有任何授权机制；直接让头显去连 rtl_tcp 会造成双占用。
+
+**做了什么**
+- `mbdsdr_ai/device_gateway.py` 新增 `SdrLeaseRegistry`：
+  - 内存态、默认 300 s、可续租（同一持有者）、到期自动清；
+  - 同一时刻只允许一个持有者；`desktop_busy` 由调用方声明，不碰硬件。
+- 端点（均需设备 token）：
+  - `POST /sdr/lease`：仅 `headset`（其它角色 403 `sdr_lease_role_denied`）；
+    未配置 rtl_tcp 503 `sdr_not_configured`；桌面占用 503 `sdr_busy_desktop`；
+    桌面状态读取失败 503 `sdr_busy_unknown`；已被他人持有 409 `sdr_leased`；
+    成功回 `rtl_tcp{host,port}`、`lease_id`、到期时刻，明确 `exclusive=true`。
+  - `GET /sdr/lease`：任何已配对角色可查「谁占着/到何时」；rtl_tcp 地址
+    **只回当前持有者**。
+  - `POST /sdr/release`：仅持有者（否则 403 `not_holder`；无租约 409 `no_lease`）。
+- `/health` 增 `sdr_lease`（是否已配置 rtl_tcp）；CLI 新增
+  `--rtl-tcp HOST:PORT` 开启该能力，启动横幅写明租约时长。
+- 明确没有 `/sdr/tune|gain|start` 之类写端点（仍 404），网关只发授权。
+
+**验证**
+- `tests/test_device_gateway.py`：**41 passed**（新增 6 条：未配置 503/health、
+  非 headset 403、授权→冲突 409→非持有者 403→释放→再释放 409、
+  续租与过期、桌面忙 503 与状态读取失败 503、无调谐端点 404）。
+- 未改手机/头显代码；头显/手机基线不受影响。
+
+**诚实边界**
+- 只是授权台账：网关不启动 rtl_tcp、不打开 dongle，也不消费 I/Q；
+  真正「头显直连 SDR」的头显端客户端与频谱链路仍未实现。
+- 桌面对话框还没有 rtl_tcp 输入；当前需用 CLI `--rtl-tcp` 开启。
+- 未与真实 RTL2832U/rtl_tcp 联调，租约时长与双占用规则尚未在真机验证。
 
 
 

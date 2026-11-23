@@ -103,6 +103,12 @@ python main.py --import-probe desktop.main_window  # 只做导入自检，不建
 - 名册每 2 s 刷新（角色/设备名/最近心跳）；关闭窗口会停止网关。
 - 端点：`/health`、`/pair`、`/roster`、`/panorama`、`/passes`、`/poses`、
   `/fuse`，以及仅镜头/目镜可用的 `POST /pose`。**没有任何写硬件/改站址端点**。
+- SDR 一次性授权（M4.2 协议层）：CLI 以 `--rtl-tcp HOST:PORT` 启动网关后，
+  头显可 `POST /sdr/lease` 申请**独占**租约（默认 300 s，可续租），
+  `GET /sdr/lease` 查「谁占着/到何时」，`POST /sdr/release` 由持有者释放。
+  非 `headset` 角色 403；已有他人租约 409；桌面自报占用（或状态读不到）503。
+  网关**不启动 rtl_tcp、不碰 dongle**，只维护授权；桌面/头显同时占用被拒。
+  桌面对话框暂未提供 rtl_tcp 输入，当前需用 CLI 开启该能力。
 - `/panorama` 复用与 AI 工具同一份 `build_panorama`，每次都取主窗当前站址
   （GNSS/手填都生效）；缺测列在 `missing`，不按晴天/平静假设。
   默认只读 15 分钟内缓存，"允许现采"需手动勾选。
