@@ -2692,6 +2692,10 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `docs/PRD-现状对照.md` | 观星指数线/41（§254 M4 改修复在位，P0-07 升「有」） | 2026-11-23 21:40 | 本笔 |
 | `docs/COORDINATION.md` | 观星指数线/41（§254 记录 + §6.1 登记） | 2026-11-23 21:40 | 本笔 |
 | `desktop/README.md` | 观星指数线/41（§254 录音库用法与删除边界） | 2026-11-23 21:40 | 本笔 |
+| `scripts/serial_gnss_probe.py` | 观星指数线/41（§255 修 Windows 路径切分导致无法导入） | 2026-11-23 21:55 | 本笔 |
+| `tests/test_serial_gnss_probe_script.py` | 观星指数线/41（§255 自检脚本 --list-ports 回归） | 2026-11-23 21:55 | 本笔 |
+| `docs/PRD-现状对照.md` | 观星指数线/41（§255 P0-05 证据升真机真验） | 2026-11-23 21:55 | 本笔 |
+| `docs/COORDINATION.md` | 观星指数线/41（§255 GNSS 真机复核记录 + §6.1） | 2026-11-23 21:55 | 本笔 |
 
 > 上表各行均由 `claim` 台账推导：owner 原文与 `acquired_at` 直接取自台账，
 > 目的优先用台账里的 `claim_reason`，没有就如实写「未声明」，不补编。时间列只是
@@ -12420,6 +12424,43 @@ PRD §8 冲刺序列 P1「天文通式观星指数」。本轮只做**有可信�
 **诚实边界**
 - 仍在设备/真机上未做：长录音（GB 级）下核对磁盘的耗时、真实崩溃后的索引恢复。
 - 「删除」= 移入 `_trash/`；应用内不提供物理删除，恢复靠用户手动搬回。
+
+## 255. GNSS 真机复核（COM10）+ 自检脚本 Windows 路径修复（2026-11-23）
+
+**依据**：用户要求「SDR 和 GNSS 时刻都插着」；`PRD-现状对照.md` P0-05 证据强度
+此前只有「仅自测（无真 GNSS）」。
+
+**做了什么**
+1. 真机复核（不改产品代码，只取证据）：
+   - 原始 NMEA：COM10 `USB-SERIAL CH340` @9600，sentence 含
+     `GGA/GLL/GSA/GSV/RMC/TXT/VTG/ZDA`，GGA fix≠0、18 星。
+   - `SerialGNSSReader("COM10", 9600)` 直接读：第 1 秒即 `source=real`、
+     17–19 星、`ts_age≈0.1s`；GSV talker `BD/GP`、GSA talker `GN`。
+   - 桌面 `MainWindow`（离屏）真实 GNSS 轮询链：`is_connected=True`、
+     `_observer_source="gnss"`、`_observer_lat/lon` 非空、状态栏不以
+     「未连接」结尾、`sky_view.get_observer()` 与主窗同一坐标（<1e-6）。
+     `_stargazing_last` 被站址变更作废（§252 失效逻辑在真 fix 下生效）。
+   - AI `agent.observer` 未比对：未配置 API Key，agent 未创建（如实记 not_verified）。
+2. 修一个真缺陷：`scripts/serial_gnss_probe.py` 用
+   `__file__.rsplit("/", 2)[0]` 求仓库根，Windows 反斜杠路径切不出来，
+   实测直接 `No module named 'mbdsdr_ai'`；改为 `os.path.dirname` 组合。
+   新增 `tests/test_serial_gnss_probe_script.py`（`--list-ports` 跑通、
+   断言无导入失败），防下次再退回。
+
+**验证**
+- `python scripts/serial_gnss_probe.py --list-ports` → 发现 1 个串口（COM10）。
+- `pytest tests/test_serial_gnss_probe_script.py` → **1 passed**。
+- 探针输出只报 source/星数/talker 与布尔一致性，**不打印真实坐标**；
+  坐标未写入任何 tracked 文件。
+
+**诚实边界**
+- SDR 本轮未能直连：`rtl_tcp`（PID 28392）已占用 RTL-SDR（与 GNSS 的 COM10
+  是两颗独立设备），且客户端 `127.0.0.1:1234` 处于 ESTABLISHED——模拟器会话
+  正在用它。直接 `RtlSdr()` 得 `LIBUSB_ERROR_ACCESS (-3)`（设备被占用，
+  不是权限问题）。不抢占用户会话，P0-06 调谐语义真机回归仍待空闲窗口。
+- GNSS 只验「定位 → 站址 → 天空同址」；`agent` 坐标同步与过境列表的真机
+  对拍仍未验。
+
 
 
 

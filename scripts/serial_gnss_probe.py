@@ -22,12 +22,15 @@ MBDSDR - 串口 GNSS 自检脚本
 退出码：正常 0；仅在参数错误时非 0。
 """
 
+import os
 import sys
 import time
 import argparse
 
-# 允许从仓库根直接运行
-sys.path.insert(0, __file__.rsplit("/", 2)[0])
+# 允许从仓库根直接运行。
+# 旧写法 __file__.rsplit("/", 2)[0] 在 Windows（反斜杠路径）上切不出来，
+# 脚本会以「No module named 'mbdsdr_ai'」失败——2026-11-23 真机自检实测。
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 try:
     import serial  # pyserial
