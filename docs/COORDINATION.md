@@ -2956,6 +2956,13 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `.trae/specs/mbdsdr-system-lifecycle/checklist.md` | 多机线/42（§281 Task 236） | 2026-11-24 00:05 | 本笔 |
 | `docs/PRD-现状对照.md` | 多机线/42（§281 P1-11 补面板） | 2026-11-24 00:05 | 本笔 |
 | `docs/COORDINATION.md` | 多机线/42（§281 记录 + §6.1） | 2026-11-24 00:05 | 本笔 |
+| `spatial/app/src/test/java/com/mbdsdr/spatial/RtlTcpSocketTransportTest.kt` | 多机线/42（§282 真实回环 TCP 用例） | 2026-11-24 00:09 | 本笔 |
+| `spatial/README.md` | 多机线/42（§282 回环 TCP 说明） | 2026-11-24 00:09 | 本笔 |
+| `.trae/specs/multi-device-interconnect/checklist.md` | 多机线/42（§282 回环 TCP 项） | 2026-11-24 00:09 | 本笔 |
+| `.trae/specs/mbdsdr-system-lifecycle/tasks.md` | 多机线/42（§282 Task 236 补验证） | 2026-11-24 00:09 | 本笔 |
+| `.trae/specs/mbdsdr-system-lifecycle/checklist.md` | 多机线/42（§282 回环 TCP） | 2026-11-24 00:09 | 本笔 |
+| `docs/PRD-现状对照.md` | 多机线/42（§282 P1-11 补回环 TCP） | 2026-11-24 00:09 | 本笔 |
+| `docs/COORDINATION.md` | 多机线/42（§282 记录 + §6.1） | 2026-11-24 00:09 | 本笔 |
 
 > 上表各行均由 `claim` 台账推导：owner 原文与 `acquired_at` 直接取自台账，
 > 目的优先用台账里的 `claim_reason`，没有就如实写「未声明」，不补编。时间列只是
@@ -13559,6 +13566,29 @@ spec 的 M4.3 要求「未联网时显示上次结果/包内内容，不伪造�
 - 谱是相对幅度，没有 dBm/天线/滤波校准；没有峰值标记、瀑布、频率轴刻度。
 - 读取循环遇到网络错误会停止并显示原因，但不自动重连。
 - 频率与增益固定（自动增益），没有 VFO/带宽/解调设置。
+
+## 282. rtl_tcp 真实回环 TCP 联调（2026-11-24）
+
+**依据**：§278–§281 的 socket 路径一直用假 `RtlTcpConnection` 验证；
+真实 `SocketRtlTcpTransport`（连接/flush/短读/超时）没有证据。
+
+**做了什么**
+- 新 `RtlTcpSocketTransportTest`：JVM 里起 `ServerSocket(127.0.0.1:0)`
+  扮 rtl_tcp：发 12 字节 `RTL0` 头 → 收 3 条调谐命令（自动增益）→ 回 4 字节 I/Q；
+  客户端用真实 `SocketRtlTcpTransport` 走完 `connect → tune → readIq → close`。
+- 逐字节断言：采样率 `02 00 9F 24 00`、145.8 MHz `01 40 BB B0 08`、
+  自动增益 `03 00 00 00 00`；IQ 读回 `01 02 03 04`。
+- 全程回环，不连真实 rtl_tcp、不碰 dongle。
+
+**验证**
+- `./gradlew.bat testDebugUnitTest --rerun-tasks --no-daemon --offline`：
+  **24 suite / 204 用例 / 0 失败 / 1 跳过**。
+- 未改 Python/手机；未在 PICO/Android 真机建过 TCP。
+
+**诚实边界**
+- 假服务器只讲协议，不模拟 tuner 行为/丢包/半包边界；真实 rtl_tcp 的
+  短读与延迟仍未实测。
+- 面板的读取循环与 UI 仍只编译验证，未真机跑。
 
 
 
