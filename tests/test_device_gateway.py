@@ -184,15 +184,27 @@ def test_provider_exception_is_visible_not_swallowed():
 
 
 def test_no_write_endpoints_exist():
+    """配对设备对所有写硬件/改站址路径一律 404——不是逐条鉴权，是根本没端点。"""
     gw = DeviceGateway(registry=_registry())
     _, d = _pair(gw)
-    token = d["token"]
-    status, body, _ = gw.dispatch(
-        "POST", "/bridge/invokeTool",
-        json.dumps({"name": "set_frequency", "args": {}}).encode(),
-        {"Authorization": f"Bearer {token}"})
-    assert status == 404
-    assert json.loads(body)["error"] == "not_found"
+    headers = {"Authorization": f"Bearer {d['token']}"}
+    attempts = [
+        ("POST", "/bridge/invokeTool"),
+        ("POST", "/tune"),
+        ("POST", "/set_frequency"),
+        ("POST", "/gain"),
+        ("POST", "/record/start"),
+        ("PUT", "/station"),
+        ("POST", "/transmit"),
+        ("POST", "/sdr/tune"),
+        ("POST", "/sdr/gain"),
+        ("POST", "/sdr/start"),
+        ("POST", "/sdr/stop"),
+    ]
+    for method, path in attempts:
+        status, body, _ = gw.dispatch(method, path, b"{}", headers)
+        assert status == 404, f"{method} {path} 不应存在（收到 {status}）"
+        assert json.loads(body)["error"] == "not_found"
 
 
 # ---------------------------------------------------------------- 位姿

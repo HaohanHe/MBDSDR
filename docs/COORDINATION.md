@@ -3080,6 +3080,10 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `.trae/specs/multi-device-interconnect/tasks.md` | 多机线/42（§295 M2.6 桌面状态行） | 2026-11-24 04:00 | 本笔 |
 | `.trae/specs/multi-device-interconnect/checklist.md` | 多机线/42（§295 对话框 3 条用例） | 2026-11-24 04:00 | 本笔 |
 | `docs/COORDINATION.md` | 多机线/42（§295 记录 + §6.1） | 2026-11-24 04:00 | 本笔 |
+| `tests/test_device_gateway.py` | 多机线/42（§296 写端点 404 扩到 11 条） | 2026-11-24 04:20 | 本笔 |
+| `.trae/specs/multi-device-interconnect/tasks.md` | 多机线/42（§296 M2.3 路径清单） | 2026-11-24 04:20 | 本笔 |
+| `.trae/specs/multi-device-interconnect/checklist.md` | 多机线/42（§296 写端点清单） | 2026-11-24 04:20 | 本笔 |
+| `docs/COORDINATION.md` | 多机线/42（§296 记录 + §6.1） | 2026-11-24 04:20 | 本笔 |
 
 > 上表各行均由 `claim` 台账推导：owner 原文与 `acquired_at` 直接取自台账，
 > 目的优先用台账里的 `claim_reason`，没有就如实写「未声明」，不补编。时间列只是
@@ -14024,6 +14028,25 @@ NaN 会变成 `null`、真实 socket 上无帧会 503。契约要求消费端不
 **诚实边界**
 - 只读当前帧，不探测 dongle、不启动 SDR；帧龄缺失写「未知」。
 - 未在真实桌面上肉眼验收字体/换行（offscreen 用例）。
+
+## 296. 写端点 404 守卫扩到 11 条路径（2026-11-24）
+
+**依据**：spec 验收要求「写端点对手机恒 401/403/404」，但此前只测了
+`/bridge/invokeTool` 一条；新增的 `/sdr/lease` 家族不能掩盖「没有任何写端点」
+这条不变量。
+
+**做了什么**
+- `test_no_write_endpoints_exist` 改为配对设备逐条打 11 条写路径：
+  `/bridge/invokeTool`、`/tune`、`/set_frequency`、`/gain`、`/record/start`、
+  `PUT /station`、`/transmit`、`/sdr/tune|gain|start|stop`，全部断言 404
+  `not_found`；合法只读路径不在列表内。
+
+**验证**
+- `pytest tests/test_device_gateway.py` → **50 passed**（用例数不变，覆盖扩大）。
+
+**诚实边界**
+- 这是「端点不存在」的证据，不是逐路径角色鉴权；将来若加写端点必须补角色门。
+- 不含 `/sdr/lease|release`（它们是已定义的授权端点）。
 
 
 
