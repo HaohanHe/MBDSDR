@@ -70,6 +70,8 @@
   eyepiece 上报一条（带 `identification` 织女一/HIP 91262/0.35°）→ `GET /fuse`
   回 `observations=2, valid=true, az=77.57, accuracy=0.62`；3 s 后
   `valid=false, az=null`，reason 明写两条均 `age > 2.0s` 被丢弃。
+  自动上报 1 Hz 也实测：界面「已发送 12 条」，间隔 3 s 两次 `/poses` 的 `t_utc`
+  前进 3 s；停止后报「共发送 18 条」，不是堆积或一次性。
   说明虚拟传感器 ≠ 真机罗盘/IMU，不承诺户外精度。
 - **同轮发现并修复真实链路缺陷（2026-11-24）**：首轮模拟器配对失败，网关回
   `角色必须是 lens/eyepiece/handheld/headset 之一，收到 ''`。根因是 Dart
