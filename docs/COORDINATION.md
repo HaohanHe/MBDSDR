@@ -3061,6 +3061,10 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `.trae/specs/multi-device-interconnect/checklist.md` | 多机线/42（§292 头显 /status 项） | 2026-11-24 03:05 | 本笔 |
 | `docs/PRD-现状对照.md` | 多机线/42（§292 P1-11 头显 /status） | 2026-11-24 03:05 | 本笔 |
 | `docs/COORDINATION.md` | 多机线/42（§292 记录 + §6.1） | 2026-11-24 03:05 | 本笔 |
+| `.trae/specs/multi-device-interconnect/spec.md` | 多机线/42（§293 阶段 3/§7 现状校正） | 2026-11-24 03:20 | 本笔 |
+| `.trae/specs/multi-device-interconnect/tasks.md` | 多机线/42（§293 M2/M4.2/M4.3 口径） | 2026-11-24 03:20 | 本笔 |
+| `.trae/specs/multi-device-interconnect/checklist.md` | 多机线/42（§293 头显客户端/画布项） | 2026-11-24 03:20 | 本笔 |
+| `docs/COORDINATION.md` | 多机线/42（§293 记录 + §6.1） | 2026-11-24 03:20 | 本笔 |
 
 > 上表各行均由 `claim` 台账推导：owner 原文与 `acquired_at` 直接取自台账，
 > 目的优先用台账里的 `claim_reason`，没有就如实写「未声明」，不补编。时间列只是
@@ -13940,6 +13944,31 @@ NaN 会变成 `null`、真实 socket 上无帧会 503。契约要求消费端不
 **诚实边界**
 - 只报配置/租约，不探测 dongle；未在 PICO 真机验证按钮布局换行。
 - 仍无写端点；桌面状态与头显自己的 SDR 租约是两回事。
+
+## 293. spec 联动校正 + GNSS 实时 NMEA 复核（2026-11-24）
+
+**依据**：三端只读打通后，spec/tasks/checklist 仍留着「头显尚未建立 rtl_tcp
+连接」「M2 接线未做」「未接 UI」等旧口径，会让「设计 vs 实现」失真；同时用户
+要求 SDR/GNSS 时刻插着，需要给出实时证据而不是只看 PnP 状态。
+
+**做了什么（仅文档，无代码改动）**
+- spec 阶段 3：头显直连 SDR 现状改为「授权 + rtl_tcp 客户端/会话/面板
+  （含峰值、瀑布）均已实现，有离线与回环用例；未 PICO 真机联调」。
+- spec §7 / tasks M4.2：剩余项收敛为「真机配对/上报、PICO 联调、真模型回归」；
+  四窗增量替换标注「设计不采用」，不再当未完成任务。
+- tasks M2 标题去掉「接线未做」；M4.3 四窗口径改为「无网络离线态（设计如此）」。
+- checklist：头显客户端补 status/spectrum 且改为「已接主窗面板」；幅度谱标
+  「已接 SdrPanel 画布」。
+
+**GNSS 实时证据**
+- 直接打开 COM10（9600，只读 8 s）读到 `$GNRMC,170055.000,A,4347.21547,N,
+  12637.73831,E,0.00,31.75,231126,,,A,V*37`：定位有效（A），UTC 17:00:55。
+- RTL2832U `Status=OK`；rtl_tcp 仍由 PID 28392 持有（Established+Listen），
+  未抢占，P0-06 继续等空闲。
+
+**诚实边界**
+- NMEA 只读短窗、不落盘、不改站址；只证明「GNSS 在线且当前有有效定位」。
+- 文档校正不改变任何运行时行为；真机项仍未完成。
 
 
 
