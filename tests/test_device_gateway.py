@@ -21,7 +21,7 @@ if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
 from mbdsdr_ai.device_gateway import (  # noqa: E402
-    DeviceGateway, PairingRegistry,
+    DeviceGateway, PairingRegistry, build_tle_passes_provider, parse_tle_groups,
 )
 
 
@@ -377,6 +377,114 @@ def test_fuse_rejects_non_get():
         "POST", "/fuse", b"{}", {"Authorization": f"Bearer {lens['token']}"})
     assert status == 405
     assert json.loads(raw)["error"] == "method_not_allowed"
+
+
+# ---------------------------------------------------------------- 过境预报（M4.1）
+_ISS_TLE = (
+    "ISS (ZARYA)",
+    "1 25544U 98067A   24001.50000000  .00016717  00000-0  30303-3 0  9993",
+    "2 25544  51.6416 247.4627 0006703 130.5360 325.0288 15.49309023 42596",
+)
+
+
+def test_passes_unwired_is_503():
+    gw = DeviceGateway(registry=_registry())
+    _, lens = _pair(gw)
+    status, d = _get(gw, "/passes", lens["token"])
+    assert status == 503
+    assert d["error"] == "passes_unavailable"
+
+
+def test_passes_provider_error_and_bad_shape():
+    def boom():
+        raise RuntimeError("TLE 缺失")
+
+    gw = DeviceGateway(registry=_registry(), passes_provider=boom)
+    _, lens = _pair(gw)
+    status, d = _get(gw, "/passes", lens["token"])
+    assert status == 500 and d["error"] == "passes_failed"
+    assert "TLE 缺失" in d["reason"]
+
+    gw2 = DeviceGateway(registry=_registry(), passes_provider=lambda: [])
+    _, lens2 = _pair(gw2)
+    status, d = _get(gw2, "/passes", lens2["token"])
+    assert status == 500 and d["error"] == "passes_bad_shape"
+
+
+def test_passes_requires_token_and_rejects_post():
+    gw = DeviceGateway(
+        registry=_registry(),
+        passes_provider=lambda: {"schema": "mbdsdr.sat-passes/1", "passes": []})
+    status, d = _get(gw, "/passes")
+    assert status == 401 and d["error"] == "unauthorized"
+
+    _, lens = _pair(gw)
+    status, raw, _ = gw.dispatch(
+        "POST", "/passes", b"{}", {"Authorization": f"Bearer {lens['token']}"})
+    assert status == 405
+    assert json.loads(raw)["error"] == "method_not_allowed"
+
+
+def test_parse_tle_groups_three_and_two_line():
+    text = "\n".join([
+        "# 注释行忽略",
+        "ISS (ZARYA)", _ISS_TLE[1], _ISS_TLE[2],
+        "",
+        _ISS_TLE[1], _ISS_TLE[2],          # 无标题的两行组
+        "junk line",
+    ])
+    groups = parse_tle_groups(text)
+    assert len(groups) == 2
+    assert groups[0] == list(_ISS_TLE)
+    assert groups[1] == [_ISS_TLE[1], _ISS_TLE[2]]
+    assert parse_tle_groups("nothing here") == []
+
+
+def test_tle_passes_provider_serializes_real_passes(tmp_path):
+    path = tmp_path / "tle.txt"
+    path.write_text("\n".join(_ISS_TLE), encoding="utf-8")
+    provider = build_tle_passes_provider(
+        str(path), lat=40.0, lon=-100.0, hours=24.0, min_alt=10.0)
+    data = provider()
+
+    assert data["schema"] == "mbdsdr.sat-passes/1"
+    assert data["source"] == "sgp4"
+    assert data["hours"] == 24.0
+    assert data["station"] == {"lat_deg": 40.0, "lon_deg": -100.0,
+                               "alt_m": 0.0}
+    passes = data["passes"]
+    assert data["count"] == len(passes)
+    # 24h 内 ISS 在该站至少有一次 >=10° 过境。
+    assert len(passes) >= 1
+    rises = [p["rise_unix"] for p in passes]
+    assert rises == sorted(rises)
+    keys = {"name", "rise_utc", "set_utc", "peak_utc", "rise_unix",
+            "set_unix", "peak_unix", "max_alt_deg", "rise_az_deg",
+            "set_az_deg", "duration_s", "sunlit"}
+    for p in passes:
+        assert set(p) == keys
+        assert p["name"] == "ISS (ZARYA)"
+        assert p["rise_unix"] <= p["peak_unix"] <= p["set_unix"]
+        assert 10.0 <= p["max_alt_deg"] <= 90.0
+        assert 0.0 <= p["rise_az_deg"] < 360.0
+        assert 0.0 <= p["set_az_deg"] < 360.0
+        assert p["duration_s"] > 0.0
+
+
+def test_tle_passes_provider_rejects_bad_args_and_empty_file(tmp_path):
+    with pytest.raises(ValueError):
+        build_tle_passes_provider("x", lat=1, lon=2, hours=0)
+    with pytest.raises(ValueError):
+        build_tle_passes_provider("x", lat=1, lon=2, min_alt=90)
+    empty = tmp_path / "empty.txt"
+    empty.write_text("# 只有注释\n", encoding="utf-8")
+    provider = build_tle_passes_provider(str(empty), lat=1, lon=2)
+    with pytest.raises(ValueError):
+        provider()
+    missing = build_tle_passes_provider(
+        str(tmp_path / "missing.txt"), lat=1, lon=2)
+    with pytest.raises(FileNotFoundError):
+        missing()
 
 
 # ---------------------------------------------------------------- socket 冒烟

@@ -10,8 +10,8 @@
    token 只在内存里，带 TTL，可吊销。
 2. **角色**：`lens`（镜头粗指向）/ `eyepiece`（目镜认星）/ `handheld`（手持只读）
    / `headset`（空间化只读）。角色不符就拒绝对应动作。
-3. **只读 + 位姿**：`/panorama`、`/roster`、`/poses`、`/fuse` 是读；只有
-   `lens/eyepiece` 能 `POST /pose`。**没有任何写硬件/改站址/调谐端点**——
+3. **只读 + 位姿**：`/panorama`、`/passes`、`/roster`、`/poses`、`/fuse` 是读；
+   只有 `lens/eyepiece` 能 `POST /pose`。**没有任何写硬件/改站址/调谐端点**——
    那些仍归桌面权威端。
 4. **多机融合**：`/fuse` 把两条位姿喂给 `sky_pointing.fuse_poses`（与
    `sky_pose_fuse` 工具同一内核）；不可用时 `valid=false` + 原因，不猜朝向。
@@ -32,6 +32,7 @@ from __future__ import annotations
 import hmac
 import ipaddress
 import json
+import math
 import secrets
 import threading
 import time
@@ -49,6 +50,8 @@ __all__ = [
     "DeviceGateway",
     "build_default_panorama_provider",
     "build_station_panorama_provider",
+    "parse_tle_groups",
+    "build_tle_passes_provider",
 ]
 
 #: 可配对角色：桌面是权威端，不通过本网关配对。
@@ -60,6 +63,9 @@ PAIR_FAIL_WINDOW_S = 60.0
 PAIR_FAIL_LIMIT = 5
 PAIR_LOCK_S = 60.0
 DEFAULT_TOKEN_TTL_S = 12 * 3600.0
+
+#: 过境预报信封 schema（头显/手机增量拉取用）。
+PASSES_SCHEMA = "mbdsdr.sat-passes/1"
 POSE_MAX_AGE_S = 300.0
 _POSES_LIMIT = 64
 
@@ -281,12 +287,14 @@ class DeviceGateway:
                  allow_lan: bool = False,
                  registry: Optional[PairingRegistry] = None,
                  panorama_provider: Optional[Callable[[], Dict[str, Any]]] = None,
+                 passes_provider: Optional[Callable[[], Dict[str, Any]]] = None,
                  allow_live: bool = False):
         self.host = _validate_bind(host, allow_lan)
         self.port = int(port)
         self.allow_lan = bool(allow_lan)
         self.registry = registry or PairingRegistry()
         self._panorama_provider = panorama_provider
+        self._passes_provider = passes_provider
         self._allow_live = bool(allow_live)
         self._poses: Dict[str, Dict[str, Any]] = {}
         self._poses_lock = threading.Lock()
@@ -433,6 +441,28 @@ class DeviceGateway:
                 "poses": self.recent_poses(),
             }), "application/json"
 
+        if route == "/passes":
+            if method != "GET":
+                return 405, self._json({"ok": False, "error": "method_not_allowed"}), "application/json"
+            if self._passes_provider is None:
+                return 503, self._json({
+                    "ok": False, "error": "passes_unavailable",
+                    "reason": "权威端尚未接入过境数据提供者",
+                }), "application/json"
+            try:
+                data = self._passes_provider()
+            except Exception as exc:  # noqa: BLE001 - 失败要可见
+                return 500, self._json({
+                    "ok": False, "error": "passes_failed",
+                    "reason": f"{type(exc).__name__}: {exc}",
+                }), "application/json"
+            if not isinstance(data, dict):
+                return 500, self._json({
+                    "ok": False, "error": "passes_bad_shape",
+                    "reason": "provider 必须返回对象",
+                }), "application/json"
+            return 200, self._json(data), "application/json"
+
         if route == "/fuse":
             if method != "GET":
                 return 405, self._json({"ok": False, "error": "method_not_allowed"}), "application/json"
@@ -553,6 +583,106 @@ def build_default_panorama_provider(
     return build_station_panorama_provider(station, allow_live=allow_live)
 
 
+def parse_tle_groups(text: str) -> List[List[str]]:
+    """把 TLE 文本切成「可交给 SGP4 的组」：3 行（标题+1+2）或 2 行（1+2）。
+
+    空行与注释（``#``/``//`` 开头）忽略；不完整/无法识别的行跳过而不是
+    硬凑——凑出来的 TLE 只会让预报出错且看不出原因。保持文件内原始顺序。
+    """
+    groups: List[List[str]] = []
+    lines: List[str] = []
+    for raw in str(text or "").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#") or line.startswith("//"):
+            continue
+        lines.append(line)
+    i = 0
+    while i < len(lines):
+        cur = lines[i]
+        nxt = lines[i + 1] if i + 1 < len(lines) else ""
+        nxt2 = lines[i + 2] if i + 2 < len(lines) else ""
+        if cur.startswith("1 ") and nxt.startswith("2 "):
+            groups.append([cur, nxt])
+            i += 2
+        elif nxt.startswith("1 ") and nxt2.startswith("2 "):
+            groups.append([cur, nxt, nxt2])
+            i += 3
+        else:
+            i += 1
+    return groups
+
+
+def _pass_to_dict(p) -> Dict[str, Any]:
+    """`SatellitePass` → JSON 友好字典（ISO 与 Unix 秒都给，消费端自选）。"""
+    def _stamp(t) -> Tuple[str, float]:
+        dt = t.utc_datetime()
+        if dt.tzinfo is None:      # 兜底：视为 UTC，不按本机时区解释
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.isoformat(), float(dt.timestamp())
+
+    rise_iso, rise_unix = _stamp(p.rise_time)
+    set_iso, set_unix = _stamp(p.set_time)
+    peak_iso, peak_unix = _stamp(p.max_alt_time)
+    return {
+        "name": p.sat_name,
+        "rise_utc": rise_iso,
+        "set_utc": set_iso,
+        "peak_utc": peak_iso,
+        "rise_unix": rise_unix,
+        "set_unix": set_unix,
+        "peak_unix": peak_unix,
+        "max_alt_deg": float(p.max_alt),
+        "rise_az_deg": float(p.rise_az),
+        "set_az_deg": float(p.set_az),
+        "duration_s": float(p.duration),
+        "sunlit": p.sunlit,
+    }
+
+
+def build_tle_passes_provider(
+        tle_file: str, *, lat: float, lon: float, alt_m: float = 0.0,
+        hours: float = 24.0, min_alt: float = 10.0,
+        max_sats: Optional[int] = None,
+) -> Callable[[], Dict[str, Any]]:
+    """用本地 TLE 文件构造 `/passes` provider（不联网）。
+
+    每次请求重新读文件并现算：用户换了 TLE 文件内容，下一次请求即生效。
+    文件缺失/无有效 TLE 都抛错（网关回 500 带原因），返回空列表也不伪造。
+    """
+    hours_v = float(hours)
+    min_alt_v = float(min_alt)
+    if not math.isfinite(hours_v) or hours_v <= 0.0:
+        raise ValueError(f"hours 必须是 > 0 的有限数，收到 {hours!r}")
+    if not math.isfinite(min_alt_v) or not (0.0 <= min_alt_v < 90.0):
+        raise ValueError(f"min_alt 必须在 [0, 90) 度，收到 {min_alt!r}")
+
+    def provider() -> Dict[str, Any]:
+        with open(tle_file, "r", encoding="utf-8", errors="replace") as fh:
+            groups = parse_tle_groups(fh.read())
+        if not groups:
+            raise ValueError(f"TLE 文件里没有可解析的 TLE：{tle_file}")
+        from .sat_passes import GroundStation, predict_upcoming_passes
+
+        station = GroundStation(float(lat), float(lon), float(alt_m))
+        entries = predict_upcoming_passes(
+            groups, station, hours=hours_v, min_alt=min_alt_v,
+            max_sats=max_sats)
+        passes = [_pass_to_dict(item["pass"]) for item in entries]
+        passes.sort(key=lambda item: item["rise_unix"])
+        return {
+            "schema": PASSES_SCHEMA,
+            "source": "sgp4",
+            "count": len(passes),
+            "hours": hours_v,
+            "min_alt_deg": min_alt_v,
+            "station": {"lat_deg": float(lat), "lon_deg": float(lon),
+                        "alt_m": float(alt_m)},
+            "passes": passes,
+        }
+
+    return provider
+
+
 def _main(argv: Optional[List[str]] = None) -> int:
     import argparse
 
@@ -567,13 +697,28 @@ def _main(argv: Optional[List[str]] = None) -> int:
                     help="可选：权威端经度")
     ap.add_argument("--allow-live", action="store_true",
                     help="允许 /panorama 现采网络数据（默认只读缓存快照）")
+    ap.add_argument("--tle-file", default=None,
+                    help="可选：本地 TLE 文件；提供则启用 GET /passes（离线 SGP4）")
     args = ap.parse_args(argv)
     provider = build_default_panorama_provider(
         lat=args.lat, lon=args.lon, allow_live=args.allow_live)
+    passes_provider = None
+    if args.tle_file:
+        la, lo = args.lat, args.lon
+        if la is None or lo is None:
+            from . import space_weather as sw
+            la, lo = sw.default_station()
+        if la is None or lo is None:
+            print("启用 /passes 需要站址：请给 --lat/--lon 或配置 "
+                  "~/.mbdsdr/config.json")
+            return 2
+        passes_provider = build_tle_passes_provider(
+            args.tle_file, lat=la, lon=lo)
     try:
         gw = DeviceGateway(host=args.host, port=args.port,
                            allow_lan=args.allow_lan,
-                           panorama_provider=provider)
+                           panorama_provider=provider,
+                           passes_provider=passes_provider)
     except ValueError as exc:
         print(f"绑定被拒绝：{exc}")
         return 2
@@ -581,9 +726,11 @@ def _main(argv: Optional[List[str]] = None) -> int:
     print(f"设备网关已启动：{url}")
     print(f"配对码：{gw.registry.code}（只给权威端看，不进 API 回执）")
     print("可用端点：GET /health、POST /pair、GET /roster、GET /panorama、"
-          "POST /pose、GET /poses、GET /fuse；没有写硬件端点。")
+          "GET /passes、POST /pose、GET /poses、GET /fuse；没有写硬件端点。")
     print("全景数据：" + ("允许联网现采" if args.allow_live
                         else "只读 15 分钟内缓存快照（--allow-live 可现采）"))
+    print("过境数据：" + (f"本地 TLE 离线 SGP4（{args.tle_file}）"
+                        if args.tle_file else "未启用（给 --tle-file 开启 /passes）"))
     print("Ctrl+C 结束。")
     try:
         while True:

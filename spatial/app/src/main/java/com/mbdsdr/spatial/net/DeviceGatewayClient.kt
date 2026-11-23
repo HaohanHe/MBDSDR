@@ -11,8 +11,8 @@ import java.net.URL
  * 头显侧「多设备网关」只读客户端（M4 数据层）。
  *
  * 与手机 `DeviceGatewayClient` / 桌面 `device_gateway.py` 共用同一 HTTP 契约：
- * `GET /health`、`POST /pair`、`GET /roster`、`GET /panorama`、`GET /poses`、
- * `GET /fuse`；`POST /pose` 只允许 lens/eyepiece。没有任何写硬件/改站址端点。
+ * `GET /health`、`POST /pair`、`GET /roster`、`GET /panorama`、`GET /passes`、
+ * `GET /poses`、`GET /fuse`；`POST /pose` 只允许 lens/eyepiece。没有任何写硬件/改站址端点。
  *
  * 传输可注入：单测用假传输完全离线，不碰真实网络。
  */
@@ -75,6 +75,9 @@ class DeviceGatewayClient(
         decode(send("GET", "/panorama", token, null))
 
     fun poses(token: String): JsonObject = decode(send("GET", "/poses", token, null))
+
+    /** 权威端过境预报（`mbdsdr.sat-passes/1`）。 */
+    fun passes(token: String): JsonObject = decode(send("GET", "/passes", token, null))
 
     /** lens+eyepiece 的融合位姿（`mbdsdr.pose-fusion/1`）。 */
     fun fusedPose(token: String): JsonObject =

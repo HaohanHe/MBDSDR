@@ -74,12 +74,16 @@ python scripts/export_spatial_bundle.py <档案>.observation.json -o <输出目�
 只读网关客户端，与手机/桌面共用同一 HTTP 契约：
 
 - `GET /health`（免 token）、`POST /pair`（配对码换 token）
-- `GET /roster`、`GET /panorama`、`GET /poses`、`GET /fuse`
+- `GET /roster`、`GET /panorama`、`GET /passes`、`GET /poses`、`GET /fuse`
 - `POST /pose` 仅 `lens/eyepiece`；`handheld/headset` 在**本地即拒绝**，不发请求
+
+`/passes` 由桌面权威端用本地 TLE 文件做离线 SGP4 预报（`--tle-file`），
+返回 `mbdsdr.sat-passes/1`（AOS/中天/LOS、方位、峰值仰角、时长、日照）；
+未启用时回 503，不拿假过境顶替。
 
 传输可注入（`GatewayTransport`），JVM 单测完全离线；默认实现是
 `HttpURLConnection`（6 s 超时）。**诚实边界**：目前只到数据层——四窗 UI 尚未
-接网关、`/passes` 增量端点未实现、也未在 PICO 真机上验证；应用默认仍是
+接网关、`/passes` 尚未被 UI 消费、也未在 PICO 真机上验证；应用默认仍是
 「只读 bundle、不联网」。
 
 ## 与官方样本的关系

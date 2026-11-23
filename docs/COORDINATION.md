@@ -2780,6 +2780,19 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `.trae/specs/mbdsdr-system-lifecycle/checklist.md` | 多机线/42（§263 Task 220） | 2026-11-24 01:10 | 本笔 |
 | `docs/PRD-现状对照.md` | 多机线/42（§263 P1-11 补手机上报） | 2026-11-24 01:10 | 本笔 |
 | `docs/COORDINATION.md` | 多机线/42（§263 记录 + §6.1） | 2026-11-24 01:10 | 本笔 |
+| `mbdsdr_ai/device_gateway.py` | 多机线/42（§264 /passes + TLE provider + CLI --tle-file） | 2026-11-24 01:45 | 本笔 |
+| `tests/test_device_gateway.py` | 多机线/42（§264 过境端点/TLE 6 条用例） | 2026-11-24 01:45 | 本笔 |
+| `spatial/app/src/main/java/com/mbdsdr/spatial/net/DeviceGatewayClient.kt` | 多机线/42（§264 passes()） | 2026-11-24 01:45 | 本笔 |
+| `spatial/app/src/test/java/com/mbdsdr/spatial/DeviceGatewayClientTest.kt` | 多机线/42（§264 passes 断言） | 2026-11-24 01:45 | 本笔 |
+| `spatial/README.md` | 多机线/42（§264 /passes 说明） | 2026-11-24 01:45 | 本笔 |
+| `mobile/lib/services/device_gateway_client.dart` | 多机线/42（§264 passes()） | 2026-11-24 01:45 | 本笔 |
+| `mobile/test/device_gateway_client_test.dart` | 多机线/42（§264 passes 断言） | 2026-11-24 01:45 | 本笔 |
+| `.trae/specs/multi-device-interconnect/tasks.md` | 多机线/42（§264 M4.1 状态） | 2026-11-24 01:45 | 本笔 |
+| `.trae/specs/multi-device-interconnect/checklist.md` | 多机线/42（§264 /passes 项） | 2026-11-24 01:45 | 本笔 |
+| `.trae/specs/mbdsdr-system-lifecycle/tasks.md` | 多机线/42（§264 Task 221） | 2026-11-24 01:45 | 本笔 |
+| `.trae/specs/mbdsdr-system-lifecycle/checklist.md` | 多机线/42（§264 Task 221） | 2026-11-24 01:45 | 本笔 |
+| `docs/PRD-现状对照.md` | 多机线/42（§264 P1-11 补 /passes） | 2026-11-24 01:45 | 本笔 |
+| `docs/COORDINATION.md` | 多机线/42（§264 记录 + §6.1） | 2026-11-24 01:45 | 本笔 |
 
 > 上表各行均由 `claim` 台账推导：owner 原文与 `acquired_at` 直接取自台账，
 > 目的优先用台账里的 `claim_reason`，没有就如实写「未声明」，不补编。时间列只是
@@ -12840,6 +12853,37 @@ lens/eyepiece 必须能各自把「我现在指着哪」发出去。
 - 精度为「观测波动估计」或保守 10°，不是标定后的 1σ；罗盘需手机端现场校准。
 - 只有手动单次上报，未做自动连续上报；真机配对/上报尚未验证。
 - 目镜识别结果单列（M3.3）与头显四窗接线（M4.1）仍未做。
+
+## 264. M4.1 数据层：权威端 `/passes` 过境预报（2026-11-23）
+
+**依据**：`multi-device-interconnect` M4.1——头显要增量拉 `/panorama` 与
+`/passes`；后者此前完全不存在，头显只能看包里冻结的过境。
+
+**做了什么**
+- `mbdsdr_ai/device_gateway.py`：
+  - 新增 `GET /passes`（任意已配对角色可读）：provider 未接线回 503；
+    provider 异常 500 带原因；非对象 500；非 GET 405；未配对 401。
+  - `parse_tle_groups(text)`：支持 Celestrak 3 行（标题+1+2）与无标题 2 行；
+    忽略空行/`#`/`//` 注释，不完整行跳过而不是硬凑。
+  - `build_tle_passes_provider(tle_file, lat, lon, ...)`：每次请求重读文件、
+    现算 SGP4（`sat_passes.predict_upcoming_passes`），返回
+    `mbdsdr.sat-passes/1`（AOS/中天/LOS 的 ISO 与 Unix 秒、方位、峰值仰角、
+    时长、日照）；空 TLE/文件缺失/参数非法都抛错，不伪造过境。
+  - CLI 新增 `--tle-file`：站址取 `--lat/--lon` 或 `~/.mbdsdr/config.json`，
+    缺站址拒绝启动；启动横幅列出 `/passes` 与 TLE 状态。
+- 客户端：头显 Kotlin 与手机 Dart 的 `DeviceGatewayClient` 均新增 `passes()`，
+  同契约、带 Bearer。
+
+**验证**
+- `pytest tests/test_device_gateway.py` → **32 passed**：503/500（异常/非对象）/
+  401/405、3 行与 2 行 TLE 解析、真实 ISS 24 h 过境序列化（字段齐全、
+  按 AOS 升序、AOS≤中天≤LOS、方位/仰角/时长为合理值）、空文件/缺文件/坏参数。
+- 头显 `testDebugUnitTest` → **17 suite / 139 用例 / 0 失败 / 1 跳过**；
+  手机 `device_gateway_client_test` 10 passed。
+
+**诚实边界**
+- 预报精度取决于 TLE 新鲜度（旧 TLE 仍能算，但不代表真实轨道）。
+- 只支持本地文件，未做自动下载/缓存刷新；四窗 UI 尚未消费 `/passes`。
 
 
 

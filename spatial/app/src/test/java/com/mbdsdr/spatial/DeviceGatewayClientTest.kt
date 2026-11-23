@@ -151,6 +151,8 @@ class DeviceGatewayClientTest {
                     200, """{"schema":"mbdsdr.device-roster/1","devices":[]}""")
                 "/panorama" -> GatewayResponse(
                     200, """{"schema":"mbdsdr.sky-panorama/1","missing":["cloud"]}""")
+                "/passes" -> GatewayResponse(
+                    200, """{"schema":"mbdsdr.sat-passes/1","count":0,"passes":[]}""")
                 "/fuse" -> GatewayResponse(
                     200, """{"schema":"mbdsdr.pose-fusion/1","valid":false}""")
                 else -> GatewayResponse(404, """{"reason":"not found"}""")
@@ -159,6 +161,7 @@ class DeviceGatewayClientTest {
         val c = client(fake)
         assertEquals("mbdsdr.device-roster/1", c.roster("tok-abc").get("schema").asString)
         assertEquals("mbdsdr.sky-panorama/1", c.panorama("tok-abc").get("schema").asString)
+        assertEquals("mbdsdr.sat-passes/1", c.passes("tok-abc").get("schema").asString)
         assertEquals("mbdsdr.pose-fusion/1", c.fusedPose("tok-abc").get("schema").asString)
     }
 
