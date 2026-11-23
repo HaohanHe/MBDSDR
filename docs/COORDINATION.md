@@ -3084,6 +3084,8 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `.trae/specs/multi-device-interconnect/tasks.md` | 多机线/42（§296 M2.3 路径清单） | 2026-11-24 04:20 | 本笔 |
 | `.trae/specs/multi-device-interconnect/checklist.md` | 多机线/42（§296 写端点清单） | 2026-11-24 04:20 | 本笔 |
 | `docs/COORDINATION.md` | 多机线/42（§296 记录 + §6.1） | 2026-11-24 04:20 | 本笔 |
+| `.trae/specs/multi-device-interconnect/checklist.md` | 多机线/42（§297 持续约束不勾选） | 2026-11-24 04:40 | 本笔 |
+| `docs/COORDINATION.md` | 多机线/42（§297 验收对账 + §6.1） | 2026-11-24 04:40 | 本笔 |
 
 > 上表各行均由 `claim` 台账推导：owner 原文与 `acquired_at` 直接取自台账，
 > 目的优先用台账里的 `claim_reason`，没有就如实写「未声明」，不补编。时间列只是
@@ -14047,6 +14049,36 @@ NaN 会变成 `null`、真实 socket 上无帧会 503。契约要求消费端不
 **诚实边界**
 - 这是「端点不存在」的证据，不是逐路径角色鉴权；将来若加写端点必须补角色门。
 - 不含 `/sdr/lease|release`（它们是已定义的授权端点）。
+
+## 297. 多机互联 spec 验收对账（2026-11-24）
+
+**依据**：软件可达项已收口，必须逐条核对 spec §6/checklist，避免把「已实现」
+和「真机未验」混在一起，也避免把「设计不采用」的项当成欠账。
+
+**逐条对账（权威证据）**
+
+| spec §6 判据 | 证据 | 状态 |
+|---|---|---|
+| 1 `sky_panorama` 缺测/不顶替 | `test_sky_panorama.py` 10 passed | 软件绿 |
+| 2 工具可见性 | `tool_selection_surfaces_panorama` 4 passed | 软件绿 |
+| 3 阶段 1 只读端点/写端点拒绝 | 网关 50 passed（含真实 HTTP `/spectrum`、11 条写路径 404）+ 对话框 17 | 软件绿 |
+| 4 阶段 2 两机融合 | `test_device_gateway.py` 融合用例 + 对话框融合行 | 软件绿 |
+| 5 阶段 3 头显只读 + 断网回退 | headset 25 suite / 219 用例 / 0 失败 / 1 跳过 | 软件绿 |
+| 6 阶段 3 SDR 授权 / rtl_tcp | 网关授权用例 + 回环 TCP + `SdrSession`/`SdrPanel`（峰值/瀑布） | 软件绿，真机未验 |
+| 7 阶段 4 真模型调用 | 未做（无 API Key） | 外部阻塞 |
+
+手机侧：`flutter test` 606 passed（配对/全景/名册/状态/过境/位姿）；
+桌面主窗：`test_main_window.py` 24 passed；频谱帧时钟 7 passed。
+
+**外部阻塞（不标 complete 的原因）**
+- PICO 真机 → 四窗/手势/空间音频与 M4.2 真机联调。
+- `rtl_tcp` PID 28392 被 `emulator-5554`/adb 持有 → P0-06 真机调谐无法进行；
+  按硬规则不抢占。
+- 真模型 API Key 缺失 → §6.7 无法回归。
+
+**结论**
+- 软件可达项全部有可复跑证据；三条外部项保持未完成。
+- 目标保持 active，不调用完成标记。
 
 
 
