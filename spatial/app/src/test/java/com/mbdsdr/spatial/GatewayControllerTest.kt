@@ -110,6 +110,77 @@ class GatewayControllerTest {
     }
 
     @Test
+    fun rosterSummaryListsRolesAndKeepsUnknownRole() {
+        val json = JsonParser.parseString(
+            """{"schema":"mbdsdr.device-roster/1","authority":"desktop",
+               "devices":[
+                 {"id":"d1","role":"lens","name":"手机A"},
+                 {"id":"d2","role":"eyepiece","name":"手机B"},
+                 {"id":"d3","role":"camera","name":"外设"}
+               ]}""").asJsonObject
+        assertEquals(
+            "名册 3 台：镜头·手机A / 目镜·手机B / camera·外设",
+            GatewayFormat.rosterSummary(json),
+        )
+        val empty = JsonParser.parseString(
+            """{"devices":[]}""").asJsonObject
+        assertEquals("名册为空", GatewayFormat.rosterSummary(empty))
+        val bad = JsonParser.parseString("""{}""").asJsonObject
+        assertEquals("名册：回执缺 devices", GatewayFormat.rosterSummary(bad))
+    }
+
+    @Test
+    fun refreshRosterStoresSummaryAndBearer() {
+        val fake = FakeGateway { call ->
+            when (call.path) {
+                "/pair" -> GatewayResponse(200, """{"token":"tok-h"}""")
+                "/roster" -> {
+                    assertEquals("Bearer tok-h", call.headers["Authorization"])
+                    GatewayResponse(200,
+                        """{"devices":[{"role":"lens","name":"手机A"}]}""")
+                }
+                else -> GatewayResponse(404, "{}")
+            }
+        }
+        val c = controller(fake)
+        c.updateCode("123456")
+        c.pair()
+        c.refreshRoster()
+
+        assertEquals("名册 1 台：镜头·手机A", c.state.rosterText)
+        assertEquals("名册已更新", c.state.status)
+        assertFalse(c.state.busy)
+    }
+
+    @Test
+    fun refreshRosterFailureClearsOldList() {
+        var failRoster = false
+        val fake = FakeGateway { call ->
+            when (call.path) {
+                "/pair" -> GatewayResponse(200, """{"token":"tok-h"}""")
+                "/roster" -> if (failRoster) {
+                    GatewayResponse(503, """{"reason":"名册暂不可用"}""")
+                } else {
+                    GatewayResponse(200,
+                        """{"devices":[{"role":"lens","name":"手机A"}]}""")
+                }
+                else -> GatewayResponse(404, "{}")
+            }
+        }
+        val c = controller(fake)
+        c.updateCode("123456")
+        c.pair()
+        c.refreshRoster()
+        assertTrue(c.state.rosterText.isNotBlank())
+
+        failRoster = true
+        c.refreshRoster()
+        assertEquals("", c.state.rosterText)
+        assertTrue(c.state.status.contains("名册读取失败"))
+        assertTrue(c.state.status.contains("名册暂不可用"))
+    }
+
+    @Test
     fun passesSummaryListsFirstRowsAndCount() {
         val json = JsonParser.parseString(
             """{"schema":"mbdsdr.sat-passes/1","count":2,

@@ -3131,6 +3131,10 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `mobile/test/settings_page_gateway_test.dart` | 多机线/42（§307 手机位姿列表（提交后释放）） | 2026-11-24 02:04 | 本笔 |
 | `mobile/README.md` | 多机线/42（§307 手机位姿列表（提交后释放）） | 2026-11-24 02:04 | 本笔 |
 | `docs/COORDINATION.md` | 多机线/42（§307 手机位姿列表（提交后释放）） | 2026-11-24 02:04 | 本笔 |
+| `spatial/app/src/main/java/com/mbdsdr/spatial/net/GatewayController.kt` | 多机线/42（§308 头显名册（提交后释放）） | 2026-11-24 02:07 | 本笔 |
+| `spatial/app/src/main/java/com/mbdsdr/spatial/ui/GatewayPanel.kt` | 多机线/42（§308 头显名册（提交后释放）） | 2026-11-24 02:07 | 本笔 |
+| `spatial/app/src/test/java/com/mbdsdr/spatial/GatewayControllerTest.kt` | 多机线/42（§308 头显名册（提交后释放）） | 2026-11-24 02:07 | 本笔 |
+| `docs/COORDINATION.md` | 多机线/42（§308 头显名册（提交后释放）） | 2026-11-24 02:07 | 本笔 |
 
 > 上表各行均由 `claim` 台账推导：owner 原文与 `acquired_at` 直接取自台账，
 > 目的优先用台账里的 `claim_reason`，没有就如实写「未声明」，不补编。时间列只是
@@ -14361,3 +14365,23 @@ widget 用例与 Python 端到端，没有真实 Android 运行时 + 真实网�
 
 **边界**：只读展示；不作排序/筛选；陈旧观测仍列出（与 `/poses` 语义一致，
 能否用于融合由 `/fuse` 的 `valid` 判断）。
+
+## 308. 头显只读名册（`/roster`）+ JVM 用例（2026-11-24）
+
+**动机**：手机能看名册，头显面板此前只有全景/过境/融合/状态/频谱/租约；空间里
+「谁挂在望远镜上」是同一份权威端事实，按「举一反三」补上只读名册。
+
+**改动**
+- `GatewayUiState.rosterText` + `GatewayFormat.rosterSummary`：
+  `名册 N 台：镜头·手机A / 目镜·手机B`；未知角色原样保留（不猜），
+  缺 `devices` 字段时明说「回执缺 devices」。
+- `GatewayController.refreshRoster()`：带 Bearer 读 `/roster`；失败**清空**旧名单
+  并在状态行写「名册读取失败：原因」——名册没有「上次结果」语义，不把旧名单当现状。
+- `GatewayPanel` 新增「刷新名册」按钮与摘要行。
+
+**验证**
+- headset JVM：**25 suite / 222 用例 / 0 失败 / 1 跳过**（+3：格式含未知角色、
+  成功带 Bearer、失败清空旧名单）
+- `gradlew :app:assembleDebug --offline` BUILD SUCCESSFUL（16 s）
+
+**边界**：未在 PICO 真机验证；角色标签只做展示映射，不改变权限。

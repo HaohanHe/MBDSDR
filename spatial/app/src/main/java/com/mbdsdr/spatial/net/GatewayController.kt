@@ -39,6 +39,8 @@ data class GatewayUiState(
     val statusText: String = "",
     /** 两机融合位姿一行（M3.2 消费端）；未取到时为空。 */
     val fuseText: String = "",
+    /** 权威端名册一行（角色·名称）；未取到时为空。 */
+    val rosterText: String = "",
 )
 
 /** 把网关 JSON 压成一行摘要；缺字段写「—」，不猜值。 */
@@ -67,6 +69,30 @@ object GatewayFormat {
         val missing = strings(json.getAsJsonArray("missing"))
         val missingText = if (missing.isEmpty()) "—" else missing.joinToString(", ")
         return "站址 $siteText · 太阳高度 $sunText · 缺项 $missingText"
+    }
+
+    fun rosterSummary(json: JsonObject): String {
+        val arr = json.getAsJsonArray("devices") ?: return "名册：回执缺 devices"
+        if (arr.size() == 0) return "名册为空"
+        val rows = mutableListOf<String>()
+        for (el in arr) {
+            if (!el.isJsonObject) continue
+            val d = el.asJsonObject
+            val role = d.get("role")?.takeIf { it.isJsonPrimitive }?.asString.orEmpty()
+            val name = d.get("name")?.takeIf { it.isJsonPrimitive }?.asString
+                ?.takeIf { it.isNotBlank() } ?: "未命名"
+            rows.add("${roleLabel(role)}·$name")
+        }
+        return "名册 ${arr.size()} 台：" + rows.joinToString(" / ")
+    }
+
+    /** 网关角色 → 中文短标签；未知角色原样保留（不猜）。 */
+    private fun roleLabel(role: String): String = when (role) {
+        "lens" -> "镜头"
+        "eyepiece" -> "目镜"
+        "handheld" -> "手持"
+        "headset" -> "头显"
+        else -> if (role.isBlank()) "未知角色" else role
     }
 
     fun passesSummary(json: JsonObject, limit: Int = 3): String {
@@ -336,6 +362,24 @@ class GatewayController(
             state = staleOrFail(stale = state.panoramaStale,
                 hasLast = state.panoramaText.isNotBlank(),
                 kind = "全景", reason = e.message ?: "未知错误")
+        }
+    }
+
+    fun refreshRoster() {
+        val client = readyClient() ?: return
+        state = state.copy(busy = true, status = "读取名册中…")
+        try {
+            val data = client.roster(state.token)
+            state = state.copy(
+                busy = false,
+                rosterText = GatewayFormat.rosterSummary(data),
+                status = "名册已更新")
+        } catch (e: DeviceGatewayException) {
+            // 名册没有「上次结果」语义：失败就清空，避免把旧名单当现状。
+            state = state.copy(
+                busy = false,
+                rosterText = "",
+                status = "名册读取失败：${e.message ?: "未知错误"}")
         }
     }
 
