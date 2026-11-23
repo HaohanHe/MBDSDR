@@ -3115,6 +3115,8 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `mobile/test/settings_page_gateway_test.dart` | 多机线/42（§304 手机只读 /fuse（提交后释放）） | 2026-11-24 01:51 | 本笔 |
 | `mobile/README.md` | 多机线/42（§304 手机只读 /fuse（提交后释放）） | 2026-11-24 01:51 | 本笔 |
 | `docs/COORDINATION.md` | 多机线/42（§304 手机只读 /fuse（提交后释放）） | 2026-11-24 01:51 | 本笔 |
+| `docs/COORDINATION.md` | 多机线/42（§305 真实 TLE 过境实测（提交后释放）） | 2026-11-24 01:54 | 本笔 |
+| `mobile/README.md` | 多机线/42（§305 真实 TLE 过境实测（提交后释放）） | 2026-11-24 01:54 | 本笔 |
 
 > 上表各行均由 `claim` 台账推导：owner 原文与 `acquired_at` 直接取自台账，
 > 目的优先用台账里的 `claim_reason`，没有就如实写「未声明」，不补编。时间列只是
@@ -14282,3 +14284,22 @@ widget 用例与 Python 端到端，没有真实 Android 运行时 + 真实网�
   （age 21.466s > 2.0s））`，不显示方位/高度
 
 **边界**：手机只显示摘要；融合内核与桌面同源（`fuse_poses`），手机不自行加权。
+
+## 305. 手机读真实 TLE 的 `/passes`（2026-11-24）
+
+**动机**：手机「读取过境」此前只有注入 fake 传输的 widget 用例；`/passes` 的
+真实数据源（本地 TLE + 离线 SGP4）没有在手机上跑过。
+
+**数据源**：`~/.mbdsdr/tle_cache/*.tle`（Celestrak 缓存，2026-11-23 18:18 更新，
+历元 26326/26327 ≈ 2026-11-22/23），拼成单个 TLE 文件后
+`device_gateway --tle-file ... --lat 39.9042 --lon 116.4074` 启动。
+
+**证据**
+- host `GET /passes`：`count=44`，前三条 `METEOR-M2 4 17:53Z` /
+  `NOAA 21 (JPSS-2) 18:36Z` / `METEOR-M2 4 19:29Z`
+- 手机设置页「读取过境」截图：`过境（44 次）：METEOR-M2 4 17:53Z 峰值 10°，
+  NOAA 21 (JPSS-2) 18:36Z 峰值 45°，METEOR-M2 4 19:29Z 峰值 88°`
+- 两端一致：手机只列前 3 条、时间为 UTC、峰值取整，与 host 原始回执吻合。
+
+**边界**：TLE 是前一天缓存（历元 26326/26327），预报精度随时间下降；
+站点用手机手填 39.9042/116.4074；未在物理手机上验证。
