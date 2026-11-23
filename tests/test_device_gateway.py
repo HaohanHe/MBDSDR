@@ -593,6 +593,56 @@ def test_socket_smoke_health_and_pair():
         gw.stop()
 
 
+def test_socket_spectrum_snapshot_and_503():
+    """`/spectrum` 走真实 HTTP：null bin 原样过线；没有帧时 503。"""
+    frame = {"center_freq_hz": 100e6, "sample_rate_hz": 1e6,
+             "fft_size": 3, "powers_db": [-90.0, float("nan"), -70.0],
+             "source": "live"}
+    gw = DeviceGateway(
+        registry=_registry(),
+        spectrum_provider=build_desktop_spectrum_provider(lambda: frame))
+    base = gw.start()
+    try:
+        req = urllib.request.Request(
+            base + "pair",
+            data=json.dumps({"code": "123456", "device_name": "头显",
+                             "role": "headset"}).encode(),
+            headers={"Content-Type": "application/json"}, method="POST")
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            paired = json.loads(resp.read())
+
+        auth = urllib.request.Request(
+            base + "spectrum",
+            headers={"Authorization": "Bearer " + paired["token"]})
+        with urllib.request.urlopen(auth, timeout=5) as resp:
+            snap = json.loads(resp.read())
+        assert snap["schema"] == "mbdsdr.spectrum-snapshot/1"
+        assert snap["readonly"] is True and snap["realtime"] is False
+        assert snap["powers_db"] == [-90.0, None, -70.0]
+        assert snap["finite_bins"] == 2
+    finally:
+        gw.stop()
+
+    empty = DeviceGateway(registry=_registry(), spectrum_provider=lambda: None)
+    base2 = empty.start()
+    try:
+        req = urllib.request.Request(
+            base2 + "pair",
+            data=json.dumps({"code": "123456", "device_name": "头显",
+                             "role": "headset"}).encode(),
+            headers={"Content-Type": "application/json"}, method="POST")
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            paired2 = json.loads(resp.read())
+        auth2 = urllib.request.Request(
+            base2 + "spectrum",
+            headers={"Authorization": "Bearer " + paired2["token"]})
+        with pytest.raises(urllib.error.HTTPError) as exc:
+            urllib.request.urlopen(auth2, timeout=5)
+        assert exc.value.code == 503
+    finally:
+        empty.stop()
+
+
 # ---------------------------------------------------------------- SDR 租约（M4.2）
 
 def _post(gw, path, token, payload=None):

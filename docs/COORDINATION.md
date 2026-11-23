@@ -3011,6 +3011,7 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `.trae/specs/multi-device-interconnect/spec.md` | 多机线/42（§286 头显 rtl_tcp/四窗口径校正） | 2026-11-24 01:20 | 本笔 |
 | `.trae/specs/multi-device-interconnect/tasks.md` | 多机线/42（§286 M4.1 收口 + 手机 reason） | 2026-11-24 01:20 | 本笔 |
 | `.trae/specs/multi-device-interconnect/checklist.md` | 多机线/42（§286 四窗设计口径 + 手机 reason） | 2026-11-24 01:20 | 本笔 |
+| `tests/test_device_gateway.py` | 多机线/42（§287 /spectrum 真实 HTTP 冒烟） | 2026-11-24 01:32 | 本笔 |
 | `docs/COORDINATION.md` | 多机线/42（§286 记录 + §6.1） | 2026-11-24 01:20 | 本笔 |
 
 > 上表各行均由 `claim` 台账推导：owner 原文与 `acquired_at` 直接取自台账，
@@ -13698,6 +13699,8 @@ spec 的 M4.3 要求「未联网时显示上次结果/包内内容，不伪造�
 - `test_spectrum_frame_meta.py` +1：帧时钟只在真实帧置位、清空复位。
 - `test_main_window.py` +1：主窗 `_device_spectrum_frame` 未出帧为 None，
   push_iq 后给真实帧，`clear_data` 复位（网关取数只走这一处）。
+- `test_device_gateway.py` +1 真实 HTTP：`/spectrum` 的 NaN bin 过线为 `null`，
+  无帧时 503（网关套件 50 passed）。
 - `pytest tests/test_device_gateway.py tests/test_desktop_device_gateway_dialog.py`
   → **64 passed**。
 - headset JVM：24 suite / **207 用例** / 0 失败 / 1 跳过（+3：客户端频谱/503、
@@ -13759,6 +13762,22 @@ spec 的 M4.3 要求「未联网时显示上次结果/包内内容，不伪造�
 **诚实边界**
 - 手机仍只在手动点按时刷新，无轮询；未真机配对验证。
 - `reason` 使用权威端原文（当前为中文），多语言界面下会混排，但保证不篡改事实。
+
+## 287. `/spectrum` 真实 HTTP 冒烟（2026-11-24）
+
+**依据**：`/spectrum` 此前只在 `dispatch()` 层验证，没有证明 JSON 序列化后
+NaN 会变成 `null`、真实 socket 上无帧会 503。契约要求消费端不得把 null 当 0 dB。
+
+**做了什么**
+- `test_socket_spectrum_snapshot_and_503`：起真实 `DeviceGateway`，配对后
+  `GET /spectrum` 断言 `powers_db == [-90.0, null, -70.0]`、`finite_bins=2`、
+  `readonly/realtime` 口径；再起无帧网关，同一路径 503。
+
+**验证**
+- `pytest tests/test_device_gateway.py` → **50 passed**（新增 1 条真实 HTTP）。
+
+**诚实边界**
+- 假帧只含 3 个 bin，不模拟真实 512 bin 的序列化体积/耗时；未碰 dongle。
 
 
 
