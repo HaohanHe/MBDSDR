@@ -432,6 +432,152 @@ def _hips_payload(hips: List[int]) -> Dict[str, Any]:
     }
 
 
+def build_panorama(lat: float, lon: float, *, jd: float,
+                   allow_live: bool = True, at=None,
+                   time_source: str = "wall_clock",
+                   site_note: str = "", site_warning: str = "",
+                   alt_m: Optional[float] = None) -> Dict[str, Any]:
+    """构造「此刻全景」（纯数据，不依赖 agent/Qt）。
+
+    ``sky_panorama`` 工具与多设备网关的 ``/panorama`` 共用这一份：
+    同一套缺测口径、同一套站址匹配规则，避免两边各写一份。
+
+    返回 ``mbdsdr.sky-panorama/1``；缺项都列在 ``missing``。
+    """
+    from datetime import datetime, timezone
+
+    from . import space_weather as _sw
+    from .astronomy import tonight as _tn
+    from .atmosphere import is_night, sun_altitude_deg
+    from .new_spacetime import jd_to_utc
+
+    when = at or datetime.now(timezone.utc)
+    cached = _sw.latest_snapshot(max_age_h=0.25)
+    stale_site = ""
+    if cached is not None and not _sw.snapshot_station_matches(
+            cached[0], lat, lon):
+        st = (cached[0].get("station") or {})
+        stale_site = f"站址不符（快照 {st.get('lat')}, {st.get('lon')}）"
+        cached = None
+    if cached is not None:
+        snap, path = cached
+        source_note = f"新鲜快照（15 分钟内，站址匹配）：{path}"
+    elif allow_live:
+        snap = _sw.collect_snapshot(lat=lat, lon=lon)
+        source_note = ("现采（未落盘）" if not stale_site else
+                       f"现采（未落盘）；{stale_site}，不拿别站数据顶替")
+    else:
+        snap = None
+        source_note = ("没有新鲜快照，且 allow_live=false" if not stale_site
+                       else f"{stale_site}且 allow_live=false，不拿别站数据顶替")
+
+    assessment = _sw.assess(snap)
+    moon = _moon_sample_at(float(lat), float(lon), jd)
+    report = _tn.assess_tonight(snap, lat, lon, moon=moon, at=when)
+    samples = (snap or {}).get("samples") or {}
+
+    def _sample_value(key: str):
+        return _finite_number((samples.get(key) or {}).get("value"))
+
+    weather = samples.get("weather") or {}
+    measurements = weather.get("measurements") or {}
+    cloud = _finite_number(measurements.get("cloud_cover_pct"))
+    missing: List[str] = []
+    if weather and cloud is None:
+        missing.append("weather.cloud_cover_pct")
+    if not weather:
+        missing.append("weather")
+    for key in ("kp", "f107", "ssn"):
+        if _sample_value(key) is None:
+            missing.append("space_weather." + key)
+    if moon is None:
+        missing.append("moon")
+    if snap is None:
+        missing.append("space_weather.snapshot")
+
+    sun_alt = float(sun_altitude_deg(jd, float(lat), float(lon)))
+    xray = _sample_value("xray")
+    moon_block = report.get("moon") or {}
+    index = report.get("index") or {}
+    aurora = report.get("aurora") or {}
+    showers = report.get("meteor_showers") or {}
+    try:
+        at_utc = jd_to_utc(jd).strftime("%Y-%m-%dT%H:%M:%SZ")
+    except Exception:
+        at_utc = ""
+
+    return {
+        "ok": True,
+        "schema": "mbdsdr.sky-panorama/1",
+        "at_utc": at_utc,
+        "time_source": time_source,
+        "site": {"lat_deg": lat, "lon_deg": lon, "alt_m": alt_m,
+                 "note": site_note, "site_warning": site_warning},
+        "sun": {"alt_deg": round(sun_alt, 3),
+                "phase": _sun_phase(sun_alt),
+                "is_night": bool(is_night(sun_alt))},
+        "moon": moon_block if moon_block else {
+            "known": False,
+            "reason": "本地历表不可用，未计入月光（不猜）",
+        },
+        "weather": {
+            "known": cloud is not None,
+            "cloud_cover_pct": cloud,
+            "temperature_c": _finite_number(
+                measurements.get("temperature_c")),
+            "humidity_pct": _finite_number(
+                measurements.get("relative_humidity_pct")),
+            "precipitation_mm": _sample_value("weather"),
+            "observed_at": str(weather.get("observed_at") or ""),
+            "source": str(weather.get("source") or ""),
+            "reason": "" if cloud is not None else str(
+                weather.get("error") or "快照里没有 cloud_cover"),
+        },
+        "space_weather": {
+            "known": bool(assessment.get("known")),
+            "kp": _sample_value("kp"),
+            "f107": _sample_value("f107"),
+            "ssn": _sample_value("ssn"),
+            "xray_flux": xray,
+            "xray_class": (_xray_class_of(xray)
+                           if xray is not None else None),
+            "conclusion": str(assessment.get("conclusion") or ""),
+            "advice": list(assessment.get("advice") or [])[:4],
+            "unknown_reasons": list(assessment.get("unknown_reasons") or []),
+            "taken_at": str((snap or {}).get("taken_at") or ""),
+            "source_note": source_note,
+        },
+        "tonight": {
+            "verdict": str(report.get("verdict") or ""),
+            "index": {
+                "known": bool(index.get("known")),
+                "score": index.get("score"),
+                "level_zh": index.get("level_zh"),
+                "text": index.get("text"),
+                "reason": index.get("reason"),
+            },
+            "aurora": {
+                "known": bool(aurora.get("known")),
+                "chance": aurora.get("chance"),
+                "kp_needed": aurora.get("kp_needed"),
+                "reason": aurora.get("reason"),
+            },
+            "meteor_showers": {
+                "known": bool(showers.get("known")),
+                "text": showers.get("text"),
+                "reason": showers.get("reason"),
+            },
+        },
+        "missing": missing,
+        "notes": [
+            "天气与空间天气都是采样时刻实况，不是整夜预报。",
+            "太阳活动（Kp/F10.7/SSN/X 射线）来自 NOAA SWPC；"
+            "本地天气来自 Open-Meteo。",
+            "观星指数是经验权重，不是权威评分。",
+        ],
+    }
+
+
 def register_sky_tools(agent) -> None:
     """把星空工具注册到 agent（只读，不触发任何确认门）。"""
     reg = agent.tool_registry
@@ -1031,11 +1177,6 @@ def register_sky_tools(agent) -> None:
         """
         from datetime import datetime, timezone
 
-        from . import space_weather as _sw
-        from .astronomy import tonight as _tn
-        from .atmosphere import is_night, sun_altitude_deg
-        from .new_spacetime import jd_to_utc
-
         site = _site_from_observer(agent)
         lat = args.get("lat_deg")
         lon = args.get("lon_deg")
@@ -1048,7 +1189,6 @@ def register_sky_tools(agent) -> None:
             site_note = "由调用参数给出"
             site_warning = ""
 
-        allow_live = bool(args.get("allow_live", True))
         jd = _current_jd(agent)
         try:
             from .new_spacetime import get_time_engine
@@ -1056,133 +1196,12 @@ def register_sky_tools(agent) -> None:
             time_source = "time_engine"
         except Exception:
             time_source = "wall_clock"
-
-        cached = _sw.latest_snapshot(max_age_h=0.25)
-        stale_site = ""
-        if cached is not None and not _sw.snapshot_station_matches(
-                cached[0], lat, lon):
-            st = (cached[0].get("station") or {})
-            stale_site = f"站址不符（快照 {st.get('lat')}, {st.get('lon')}）"
-            cached = None
-        if cached is not None:
-            snap, path = cached
-            source_note = f"新鲜快照（15 分钟内，站址匹配）：{path}"
-        elif allow_live:
-            snap = _sw.collect_snapshot(lat=lat, lon=lon)
-            source_note = ("现采（未落盘）" if not stale_site else
-                           f"现采（未落盘）；{stale_site}，不拿别站数据顶替")
-        else:
-            snap = None
-            source_note = ("没有新鲜快照，且 allow_live=false" if not stale_site
-                           else f"{stale_site}且 allow_live=false，不拿别站数据顶替")
-
-        assessment = _sw.assess(snap)
-        moon = _moon_sample_at(float(lat), float(lon), jd)
-        report = _tn.assess_tonight(snap, lat, lon, moon=moon,
-                                    at=datetime.now(timezone.utc))
-        samples = (snap or {}).get("samples") or {}
-
-        def _sample_value(key: str):
-            return _finite_number((samples.get(key) or {}).get("value"))
-
-        weather = samples.get("weather") or {}
-        measurements = weather.get("measurements") or {}
-        cloud = _finite_number(measurements.get("cloud_cover_pct"))
-        missing: List[str] = []
-        if weather and cloud is None:
-            missing.append("weather.cloud_cover_pct")
-        if not weather:
-            missing.append("weather")
-        for key in ("kp", "f107", "ssn"):
-            if _sample_value(key) is None:
-                missing.append("space_weather." + key)
-        if moon is None:
-            missing.append("moon")
-        if snap is None:
-            missing.append("space_weather.snapshot")
-
-        sun_alt = float(sun_altitude_deg(jd, float(lat), float(lon)))
-        xray = _sample_value("xray")
-        moon_block = report.get("moon") or {}
-        index = report.get("index") or {}
-        aurora = report.get("aurora") or {}
-        showers = report.get("meteor_showers") or {}
-        try:
-            at_utc = jd_to_utc(jd).strftime("%Y-%m-%dT%H:%M:%SZ")
-        except Exception:
-            at_utc = ""
-
-        return {
-            "ok": True,
-            "schema": "mbdsdr.sky-panorama/1",
-            "at_utc": at_utc,
-            "time_source": time_source,
-            "site": {"lat_deg": lat, "lon_deg": lon, "alt_m": site.get("alt_m"),
-                     "note": site_note, "site_warning": site_warning},
-            "sun": {"alt_deg": round(sun_alt, 3),
-                    "phase": _sun_phase(sun_alt),
-                    "is_night": bool(is_night(sun_alt))},
-            "moon": moon_block if moon_block else {
-                "known": False,
-                "reason": "本地历表不可用，未计入月光（不猜）",
-            },
-            "weather": {
-                "known": cloud is not None,
-                "cloud_cover_pct": cloud,
-                "temperature_c": _finite_number(
-                    measurements.get("temperature_c")),
-                "humidity_pct": _finite_number(
-                    measurements.get("relative_humidity_pct")),
-                "precipitation_mm": _sample_value("weather"),
-                "observed_at": str(weather.get("observed_at") or ""),
-                "source": str(weather.get("source") or ""),
-                "reason": "" if cloud is not None else str(
-                    weather.get("error") or "快照里没有 cloud_cover"),
-            },
-            "space_weather": {
-                "known": bool(assessment.get("known")),
-                "kp": _sample_value("kp"),
-                "f107": _sample_value("f107"),
-                "ssn": _sample_value("ssn"),
-                "xray_flux": xray,
-                "xray_class": (_xray_class_of(xray)
-                               if xray is not None else None),
-                "conclusion": str(assessment.get("conclusion") or ""),
-                "advice": list(assessment.get("advice") or [])[:4],
-                "unknown_reasons": list(
-                    assessment.get("unknown_reasons") or []),
-                "taken_at": str((snap or {}).get("taken_at") or ""),
-                "source_note": source_note,
-            },
-            "tonight": {
-                "verdict": str(report.get("verdict") or ""),
-                "index": {
-                    "known": bool(index.get("known")),
-                    "score": index.get("score"),
-                    "level_zh": index.get("level_zh"),
-                    "text": index.get("text"),
-                    "reason": index.get("reason"),
-                },
-                "aurora": {
-                    "known": bool(aurora.get("known")),
-                    "chance": aurora.get("chance"),
-                    "kp_needed": aurora.get("kp_needed"),
-                    "reason": aurora.get("reason"),
-                },
-                "meteor_showers": {
-                    "known": bool(showers.get("known")),
-                    "text": showers.get("text"),
-                    "reason": showers.get("reason"),
-                },
-            },
-            "missing": missing,
-            "notes": [
-                "天气与空间天气都是采样时刻实况，不是整夜预报。",
-                "太阳活动（Kp/F10.7/SSN/X 射线）来自 NOAA SWPC；"
-                "本地天气来自 Open-Meteo。",
-                "观星指数是经验权重，不是权威评分。",
-            ],
-        }
+        return build_panorama(
+            float(lat), float(lon), jd=jd,
+            allow_live=bool(args.get("allow_live", True)),
+            at=datetime.now(timezone.utc), time_source=time_source,
+            site_note=site_note, site_warning=site_warning,
+            alt_m=site.get("alt_m"))
 
     reg.register(
         name="sky_panorama",

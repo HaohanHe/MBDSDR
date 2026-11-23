@@ -2707,6 +2707,11 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `tests/test_device_gateway.py` | 观星指数线/41（§257 网关 18 条安全/行为用例） | 2026-11-23 22:35 | 本笔 |
 | `docs/PRD-现状对照.md` | 观星指数线/41（§257 P1-11 更新为 spec + M2 内核） | 2026-11-23 22:35 | 本笔 |
 | `docs/COORDINATION.md` | 观星指数线/41（§257 M2 网关记录 + §6.1） | 2026-11-23 22:35 | 本笔 |
+| `mbdsdr_ai/sky_tools.py` | 观星指数线/41（§257b 抽出 build_panorama，工具与网关共用） | 2026-11-23 22:50 | 本笔 |
+| `mbdsdr_ai/device_gateway.py` | 观星指数线/41（§257b CLI + 默认全景 provider） | 2026-11-23 22:50 | 本笔 |
+| `tests/test_device_gateway.py` | 观星指数线/41（§257b 默认 provider 2 条用例） | 2026-11-23 22:50 | 本笔 |
+| `docs/PRD-现状对照.md` | 观星指数线/41（§257b P1-11 补 CLI/provider） | 2026-11-23 22:50 | 本笔 |
+| `docs/COORDINATION.md` | 观星指数线/41（§257b 追加记录 + §6.1） | 2026-11-23 22:50 | 本笔 |
 
 > 上表各行均由 `claim` 台账推导：owner 原文与 `acquired_at` 直接取自台账，
 > 目的优先用台账里的 `claim_reason`，没有就如实写「未声明」，不补编。时间列只是
@@ -12556,6 +12561,20 @@ PRD §8 冲刺序列 P1「天文通式观星指数」。本轮只做**有可信�
 - 配对锁定是全局的：LAN 内恶意者可用错误码打断他人配对（v1 接受，后续按 IP 限流）。
 - `/panorama` 未接线时回 503；桌面 provider 与手机配对 UI 待 M2.1/M2.2。
 - 两条位姿尚未喂 `sky_pose_fuse`，多机融合仍待 M3。
+
+**追加（同轮）：CLI 入口 + 默认全景 provider**
+- `sky_tools` 抽出模块级 `build_panorama(lat, lon, ...)`：`sky_panorama` 工具与
+  网关 `/panorama` 共用同一份缺测/站址匹配口径；工具函数只做站址与时刻解析后委托。
+- `device_gateway.build_default_panorama_provider`：站址取显式 `--lat/--lon`，
+  否则读 `~/.mbdsdr/config.json`；都缺则网关回 500 带原因，不拿示例站顶替。
+  默认 `allow_live=False`（只读 15 分钟内缓存），显式 `--allow-live` 才现采。
+- CLI：`python -m mbdsdr_ai.device_gateway [--host ...] [--port ...] [--allow-lan]
+  [--lat --lon] [--allow-live]`，启动后打印 URL 与配对码（配对码不进 API 回执）。
+- 真实 socket 探针：配对 `handheld` → `GET /panorama` 返回
+  `mbdsdr.sky-panorama/1`；该站址本轮无 15 分钟内快照 → `missing` 列出
+  `weather / kp / f107 / ssn / snapshot`，`weather_known=false`、
+  传播结论含「未知」——没有现采、没有造数据。
+- 回归：`device_gateway + sky_panorama + sky_tools` → **79 passed**。
 
 
 

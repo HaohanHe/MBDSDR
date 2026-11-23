@@ -240,8 +240,41 @@ def test_pose_accepts_and_latest_per_device_replaces():
     assert rows[eye["device"]["id"]]["role"] == "eyepiece"
 
 
-# ---------------------------------------------------------------- socket 冒烟
+# ---------------------------------------------------------------- 默认全景 provider
 
+def test_default_provider_uses_build_panorama_and_reports_station(monkeypatch):
+    from mbdsdr_ai import sky_tools, space_weather
+    from mbdsdr_ai.device_gateway import build_default_panorama_provider
+
+    monkeypatch.setattr(space_weather, "default_station",
+                        lambda: (45.0, 120.0))
+    seen = {}
+
+    def fake_build(lat, lon, **kw):
+        seen.update({"lat": lat, "lon": lon, **kw})
+        return {"ok": True, "schema": "mbdsdr.sky-panorama/1"}
+
+    monkeypatch.setattr(sky_tools, "build_panorama", fake_build)
+    provider = build_default_panorama_provider(allow_live=False)
+    out = provider()
+    assert out["schema"] == "mbdsdr.sky-panorama/1"
+    assert seen["lat"] == 45.0 and seen["lon"] == 120.0
+    assert seen["allow_live"] is False
+    assert seen["time_source"] in ("time_engine", "wall_clock")
+    assert "设备网关" in seen["site_note"]
+
+
+def test_default_provider_without_station_raises(monkeypatch):
+    from mbdsdr_ai import space_weather
+    from mbdsdr_ai.device_gateway import build_default_panorama_provider
+
+    monkeypatch.setattr(space_weather, "default_station", lambda: (None, None))
+    provider = build_default_panorama_provider()
+    with pytest.raises(RuntimeError):
+        provider()
+
+
+# ---------------------------------------------------------------- socket 冒烟
 def test_socket_smoke_health_and_pair():
     gw = DeviceGateway(registry=_registry(),
                        panorama_provider=lambda: {"ok": True,

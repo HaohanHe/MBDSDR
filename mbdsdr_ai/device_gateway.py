@@ -44,6 +44,7 @@ __all__ = [
     "Device",
     "PairingRegistry",
     "DeviceGateway",
+    "build_default_panorama_provider",
 ]
 
 #: 可配对角色：桌面是权威端，不通过本网关配对。
@@ -449,6 +450,43 @@ class DeviceGateway:
             self._thread = None
 
 
+def build_default_panorama_provider(
+        *, lat: Optional[float] = None, lon: Optional[float] = None,
+        allow_live: bool = False) -> Callable[[], Dict[str, Any]]:
+    """构造 `/panorama` 的默认 provider：复用 `build_panorama` 单一实现。
+
+    站址优先用显式参数；没有则读 ``~/.mbdsdr/config.json`` 的地面站坐标。
+    都拿不到就抛错（网关回 500 并带原因），绝不拿示例站顶替。
+    ``allow_live=False`` 时只读 15 分钟内缓存快照，不联网。
+    """
+
+    def provider() -> Dict[str, Any]:
+        from datetime import datetime, timezone
+
+        from . import space_weather as sw
+        from .new_spacetime import get_time_engine, utc_to_jd
+        from .sky_tools import build_panorama
+
+        la, lo = lat, lon
+        if la is None or lo is None:
+            la, lo = sw.default_station()
+        if la is None or lo is None:
+            raise RuntimeError(
+                "权威端未配置站址：请设置 ground_station_lat/lon 或传 --lat/--lon")
+        try:
+            jd = float(get_time_engine().tick())
+            time_source = "time_engine"
+        except Exception:
+            jd = utc_to_jd(datetime.now(timezone.utc))
+            time_source = "wall_clock"
+        return build_panorama(
+            float(la), float(lo), jd=jd, allow_live=allow_live,
+            time_source=time_source, site_note="设备网关（权威端）",
+            alt_m=None)
+
+    return provider
+
+
 def _main(argv: Optional[List[str]] = None) -> int:
     import argparse
 
@@ -457,10 +495,19 @@ def _main(argv: Optional[List[str]] = None) -> int:
     ap.add_argument("--port", type=int, default=8771)
     ap.add_argument("--allow-lan", action="store_true",
                     help="允许绑私有网段地址（默认只绑回环）")
+    ap.add_argument("--lat", type=float, default=None,
+                    help="可选：权威端纬度（缺省读 ~/.mbdsdr/config.json）")
+    ap.add_argument("--lon", type=float, default=None,
+                    help="可选：权威端经度")
+    ap.add_argument("--allow-live", action="store_true",
+                    help="允许 /panorama 现采网络数据（默认只读缓存快照）")
     args = ap.parse_args(argv)
+    provider = build_default_panorama_provider(
+        lat=args.lat, lon=args.lon, allow_live=args.allow_live)
     try:
         gw = DeviceGateway(host=args.host, port=args.port,
-                           allow_lan=args.allow_lan)
+                           allow_lan=args.allow_lan,
+                           panorama_provider=provider)
     except ValueError as exc:
         print(f"绑定被拒绝：{exc}")
         return 2
@@ -469,7 +516,9 @@ def _main(argv: Optional[List[str]] = None) -> int:
     print(f"配对码：{gw.registry.code}（只给权威端看，不进 API 回执）")
     print("可用端点：GET /health、POST /pair、GET /roster、GET /panorama、"
           "POST /pose、GET /poses；没有写硬件端点。")
-    print("全景数据提供者尚未接线：/panorama 会回 503。Ctrl+C 结束。")
+    print("全景数据：" + ("允许联网现采" if args.allow_live
+                        else "只读 15 分钟内缓存快照（--allow-live 可现采）"))
+    print("Ctrl+C 结束。")
     try:
         while True:
             time.sleep(1.0)
