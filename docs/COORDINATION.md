@@ -3101,6 +3101,8 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `docs/COORDINATION.md` | 多机线/42（§299 定长请求体修复 + 模拟器真实配对（提交后释放）） | 2026-11-24 01:28 | 本笔 |
 | `mobile/README.md` | 多机线/42（§300 补录模拟器全景实测（提交后释放）） | 2026-11-24 01:29 | 本笔 |
 | `docs/COORDINATION.md` | 多机线/42（§300 补录模拟器全景实测（提交后释放）） | 2026-11-24 01:29 | 本笔 |
+| `docs/COORDINATION.md` | 多机线/42（§301 姿态端到端实测（提交后释放）） | 2026-11-24 01:39 | 本笔 |
+| `mobile/README.md` | 多机线/42（§301 姿态端到端实测（提交后释放）） | 2026-11-24 01:39 | 本笔 |
 
 > 上表各行均由 `claim` 台账推导：owner 原文与 `acquired_at` 直接取自台账，
 > 目的优先用台账里的 `claim_reason`，没有就如实写「未声明」，不补编。时间列只是
@@ -14178,3 +14180,34 @@ NaN 会变成 `null`、真实 socket 上无帧会 503。契约要求消费端不
 
 这条只证明「模拟器 App → 真实网关 → 真实 provider」的链路与缺项口径；
 物理手机、真模型调用仍未验收。
+
+## 301. 模拟器真机姿态上报 → `/poses` → `/fuse`（2026-11-24）
+
+**动机**：§299 只验证了手机「读」；阶段 2（多机位姿融合）此前只有注入传感器的
+widget 用例与 Python 端到端，没有真实 Android 运行时 + 真实网关的上报。
+
+**做法**：宿主 `device_gateway --port 8771 --lat 45 --lon 120`；模拟器内手机配对为
+`lens`，host 另配 handheld 读端；`adb emu sensor set magnetic-field 10:5:-45`、
+`acceleration 0:9.4:-2.0`、`gyroscope 0:0:0` 注入虚拟传感器；指天视图点
+「上报位姿到电脑」。
+
+**证据**
+- 手机界面：`方位 77°（罗盘观测）`、`仰角 -0°（姿态观测）`、`罗盘 ±0°`；
+  点后显示 `已上报位姿：方位 76.9° 高度 -0.0°`。
+- `GET /poses`（host handheld token）：`lens dev-a57259d4 az=76.90 alt=0.00
+  accuracy=1.0 roll≈102`，`t_utc=1795455486.0` 与 `received_at` 同一秒。
+- 再以 `eyepiece` 从 host 上报一条（az=78.0 alt=1.5 accuracy=0.8，
+  identification 织女一/HIP 91262/0.35°）后 `GET /fuse`：
+  `observations=2, valid=true, az=77.57, alt=0.91, accuracy=0.62,
+  sources=[dev-44c278e5, dev-a57259d4]`。
+- 3 s 后再取 `/fuse`：`valid=false, observations=2, az=null`，reason 明写
+  「2 条全部被丢弃（陈旧 age 9.66s / 10.72s > 2.0s）」——不取旧值、不静默平均。
+- `GET /poses` 中 eyepiece 的 `identification` 单列（hip=91262, sep=0.35），
+  lens 条目没有识别字段值——细指向证据不混进粗指向。
+
+**未解观察**
+- 设置页完成配对后，本轮 adb 自动化点「天空」标签连续无响应（频谱/AI/录音/设置
+  都能切）；`am force-stop` 重启应用后同一坐标可进入天空页。未定位根因，
+  记为待查，**不作为已修复宣称**。
+
+**边界**：模拟器虚拟传感器 ≠ 真机罗盘/IMU；方位来自注入值，不承诺户外精度。

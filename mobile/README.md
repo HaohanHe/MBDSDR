@@ -63,6 +63,14 @@
   `读取过境失败：权威端尚未接入过境数据提供者`；「读取频谱快照」如实报
   `读取频谱失败：权威端尚未接入频谱快照提供者`。全程真实 TCP（Bearer token），
   不是注入 fake 传输；CLI 无帧来源时不编造快照/过境。
+- **模拟器真机姿态回路（2026-11-24）**：`adb emu sensor set magnetic-field/acceleration`
+  注入虚拟传感器后，指天视图显示 `方位 77°（罗盘观测） · 仰角 -0°（姿态观测）`；
+  点「上报位姿到电脑」→ `已上报位姿：方位 76.9° 高度 -0.0°`，host 侧
+  `GET /poses` 读到 `role=lens az=76.90 alt=0.00 accuracy=1.0`。再从 host 以
+  eyepiece 上报一条（带 `identification` 织女一/HIP 91262/0.35°）→ `GET /fuse`
+  回 `observations=2, valid=true, az=77.57, accuracy=0.62`；3 s 后
+  `valid=false, az=null`，reason 明写两条均 `age > 2.0s` 被丢弃。
+  说明虚拟传感器 ≠ 真机罗盘/IMU，不承诺户外精度。
 - **同轮发现并修复真实链路缺陷（2026-11-24）**：首轮模拟器配对失败，网关回
   `角色必须是 lens/eyepiece/handheld/headset 之一，收到 ''`。根因是 Dart
   `HttpClientRequest.write()` 未设 `contentLength` 时走 **chunked** 传输，而桌面
