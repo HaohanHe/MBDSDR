@@ -2903,6 +2903,8 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `.trae/specs/mbdsdr-system-lifecycle/checklist.md` | 多机线/42（§275 Task 231） | 2026-11-23 23:42 | 本笔 |
 | `docs/PRD-现状对照.md` | 多机线/42（§275 P1-11 补融合消费） | 2026-11-23 23:42 | 本笔 |
 | `docs/COORDINATION.md` | 多机线/42（§275 记录 + §6.1） | 2026-11-23 23:42 | 本笔 |
+| `.trae/specs/multi-device-interconnect/spec.md` | 多机线/42（§276 契约 5.3/5.4 + 验收现状 + 诚实边界） | 2026-11-23 23:44 | 本笔 |
+| `docs/COORDINATION.md` | 多机线/42（§276 记录 + §6.1） | 2026-11-23 23:44 | 本笔 |
 
 > 上表各行均由 `claim` 台账推导：owner 原文与 `acquired_at` 直接取自台账，
 > 目的优先用台账里的 `claim_reason`，没有就如实写「未声明」，不补编。时间列只是
@@ -13325,6 +13327,34 @@ spec 的 M4.3 要求「未联网时显示上次结果/包内内容，不伪造�
 - 只是只读展示：不写回 `ObservationState`，不参与星图/回看/音频。
 - 没有自动轮询；需用户点「刷新融合」。未在 PICO 真机验证。
 - 融合结果依赖手机位姿新鲜度（2 s 阈值），陈旧时头显应看到「不可用」而非旧值。
+
+## 276. spec 推进：SDR 授权与融合契约、验收现状、诚实边界（2026-11-23）
+
+**依据**：用户要求「根据现状不断推进 spec」。§271–§275 已落地 SDR 授权与
+头显融合消费，但 `spec.md` 仍写着「头显无网络层」「头显↔SDR 无代码」，
+契约也缺 SDR 授权与融合信封；照旧文档开发会误判现状。
+
+**做了什么**（`.trae/specs/multi-device-interconnect/spec.md`）
+- 现状清单：头显改为「默认只读离线包 + 只读 HTTP 客户端；无 rtl_tcp I/Q」。
+- 阶段 3：分别标注「四窗仍只用 bundle、面板可手动刷新」「授权协议已实现、
+  I/Q 未实现」。
+- 新增契约：
+  - **5.3 `mbdsdr.sdr-lease/1`**：申请/查询/释放形状，`exclusive`、`renewed`、
+    TTL 300 s，`rtl_tcp` 只回持有者；7 条稳定拒绝 `error`（403/409/503）。
+  - **5.4 `mbdsdr.pose-fusion/1`**：`valid=false` 时朝向必须为 null 并给
+    reason；消费端不得补位。
+- 验收判据补「现状」：阶段 1/2 已实现；阶段 3 增量只到面板、四窗未替换；
+  SDR 授权协议已实现（含真实 HTTP 联调），I/Q 未实现。
+- 诚实边界改写为「已打通手机/头显→桌面只读」，并明确未做项与
+  「Bearer 无 TLS、不得开公网」。
+
+**验证**
+- 本次只改 spec 文档（非 git 仓），未改代码；引用的事实均有 §271–§275
+  的提交与用例支撑（网关 41、对话框 12、headset 162、flutter 604）。
+
+**诚实边界**
+- spec 里的 `mbdsdr.sdr-lease/1` 样例时间/lease id 是示意，不是实测回执。
+- 「四窗增量替换」仍是未实现项，文档已如实标注。
 
 
 
