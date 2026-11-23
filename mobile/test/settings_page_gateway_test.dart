@@ -87,10 +87,17 @@ class _FakeGateway {
         return const GatewayHttpResponse(200, _passesJson);
       case '/spectrum':
         return const GatewayHttpResponse(200, _spectrumJson);
+      case '/fuse':
+        return const GatewayHttpResponse(200, _fuseJson);
       default:
         return const GatewayHttpResponse(404, '{"reason":"not found"}');
     }
   }
+
+  static const String _fuseJson =
+      '{"schema":"mbdsdr.pose-fusion/1","observations":2,"valid":true,'
+      '"level":"fused","az_deg":77.57,"alt_deg":0.91,"accuracy_deg":0.62,'
+      '"sources":["dev-a","dev-b"],"reason":""}';
 
   static const String _spectrumJson =
       '{"schema":"mbdsdr.spectrum-snapshot/1","authority":"desktop",'
@@ -240,6 +247,18 @@ void main() {
         find.text('频谱（只读·非实时）：中心 100.000 MHz · 采样 2.40 MHz · '
             '512 bin · 峰值 100.125 MHz / -20.5 dB · 噪声底 -70.0 dB · '
             '帧龄 0.4 s · 1 个 bin 非有限'),
+        findsOneWidget);
+
+    // 读取融合：有效时显示加权位姿/精度/来源；不可用时只转述原因。
+    await tester.tap(find.widgetWithText(OutlinedButton, '读取融合'));
+    await tester.pumpAndSettle();
+    expect(fake.paths.map((Uri u) => u.path), <String>[
+      '/pair', '/panorama', '/roster', '/status', '/passes', '/spectrum',
+      '/fuse'
+    ]);
+    expect(
+        find.text('融合（2 条 · fused）：方位 77.6° · 高度 0.9° · '
+            '精度 ±0.62° · 来源 dev-a, dev-b'),
         findsOneWidget);
 
     // 解除配对：token 清空，回到未配对态。
@@ -412,6 +431,43 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('读取频谱失败：没有可读的频谱帧'), findsOneWidget);
     expect(find.textContaining('频谱（'), findsNothing);
+  });
+
+  testWidgets('融合不可用：只转述原因，不显示方位/高度', (tester) async {
+    tester.view.physicalSize = const Size(420, 5200);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
+
+    final SettingsService settings =
+        SettingsService(kv: _MemKv(), secure: _MemSecure());
+    await settings.load();
+    settings.deviceGatewayToken = 'tok-1';
+    settings.deviceGatewayRole = 'handheld';
+
+    await tester.pumpWidget(_wrap(Scaffold(
+      body: SettingsPage(
+        settings: settings,
+        radio: RadioController(),
+        gatewayClientBuilder: (String host, int port) => DeviceGatewayClient(
+          host: host,
+          port: port,
+          transport: (Uri url, String method, Map<String, String> headers,
+              String? payload) async {
+            return const GatewayHttpResponse(200,
+                '{"schema":"mbdsdr.pose-fusion/1","observations":2,'
+                '"valid":false,"az_deg":null,"alt_deg":null,'
+                '"reason":"没有可用观测：2 条全部被丢弃（陈旧）"}');
+          },
+        ),
+      ),
+    )));
+    await tester.pump();
+
+    await tester.tap(find.widgetWithText(OutlinedButton, '读取融合'));
+    await tester.pumpAndSettle();
+    expect(find.text('融合不可用：没有可用观测：2 条全部被丢弃（陈旧）'),
+        findsOneWidget);
+    expect(find.textContaining('方位 '), findsNothing);
   });
 
   testWidgets('角色切到目镜后，配对请求带 eyepiece', (tester) async {

@@ -74,6 +74,9 @@ class _SettingsPageState extends State<SettingsPage> {
   /// 最近一次取回的频谱快照摘要（null = 还没取过）。
   String? _gwSpectrumText;
 
+  /// 最近一次取回的融合位姿摘要（null = 还没取过）。
+  String? _gwFuseText;
+
   String get _apiKey => widget.settings.apiKey;
 
   static String _masked(String key) {
@@ -305,6 +308,7 @@ class _SettingsPageState extends State<SettingsPage> {
       _gwStatusText = null;
       _gwPassesText = null;
       _gwSpectrumText = null;
+      _gwFuseText = null;
     });
     _toast(l10n.toastGatewayUnpaired);
   }
@@ -570,6 +574,51 @@ class _SettingsPageState extends State<SettingsPage> {
     } on DeviceGatewayException catch (e) {
       if (!mounted) return;
       _toast(l10n.toastGatewaySpectrumFailed(e.message), error: true);
+    } finally {
+      if (mounted) setState(() => _gwBusy = false);
+    }
+  }
+
+  /// 取回权威端融合位姿：不可用时只转述 reason，绝不用旧值或猜测补位。
+  Future<void> _fetchFuse() async {
+    final AppLocalizations l10n = AppLocalizations.of(context)!;
+    if (_gwBusy) return;
+    final SettingsService s = widget.settings;
+    if (s.controlHubHost.trim().isEmpty) {
+      _toast(l10n.settingsGatewayHostMissing, error: true);
+      return;
+    }
+    setState(() => _gwBusy = true);
+    try {
+      final Map<String, dynamic> data =
+          await _gatewayClient().fuse(s.deviceGatewayToken);
+      String text;
+      if (data['valid'] == true) {
+        final Object? obs = data['observations'];
+        final Object? az = data['az_deg'];
+        final Object? alt = data['alt_deg'];
+        final Object? acc = data['accuracy_deg'];
+        final Object? sources = data['sources'];
+        text = l10n.settingsGatewayFuseSummary(
+          obs is num ? obs.toInt().toString() : '—',
+          '${data['level'] ?? '—'}',
+          az is num ? az.toStringAsFixed(1) : '—',
+          alt is num ? alt.toStringAsFixed(1) : '—',
+          acc is num ? acc.toStringAsFixed(2) : '—',
+          sources is List && sources.isNotEmpty
+              ? sources.map((Object? e) => '$e').join(', ')
+              : '—',
+        );
+      } else {
+        final String reason = '${data['reason'] ?? ''}'.trim();
+        text = l10n.settingsGatewayFuseUnavailable(
+            reason.isEmpty ? l10n.settingsGatewayFuseNoReason : reason);
+      }
+      if (!mounted) return;
+      setState(() => _gwFuseText = text);
+    } on DeviceGatewayException catch (e) {
+      if (!mounted) return;
+      _toast(l10n.toastGatewayFuseFailed(e.message), error: true);
     } finally {
       if (mounted) setState(() => _gwBusy = false);
     }
@@ -994,6 +1043,10 @@ class _SettingsPageState extends State<SettingsPage> {
                     onPressed: _gwBusy ? null : _fetchSpectrum,
                     child: Text(l10n.settingsGatewaySpectrum),
                   ),
+                  OutlinedButton(
+                    onPressed: _gwBusy ? null : _fetchFuse,
+                    child: Text(l10n.settingsGatewayFuse),
+                  ),
                 ],
               ),
               if (_gwPanoramaText != null)
@@ -1020,6 +1073,11 @@ class _SettingsPageState extends State<SettingsPage> {
                 Padding(
                   padding: const EdgeInsets.only(top: AppTokens.spacingS),
                   child: Text(_gwSpectrumText!, style: AppTokens.auxiliary),
+                ),
+              if (_gwFuseText != null)
+                Padding(
+                  padding: const EdgeInsets.only(top: AppTokens.spacingS),
+                  child: Text(_gwFuseText!, style: AppTokens.auxiliary),
                 ),
             ] else
               Text(

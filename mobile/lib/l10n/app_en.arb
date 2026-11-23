@@ -43,7 +43,7 @@
   "settingsChPortHint": "Default 50732",
   "settingsChHelp": "Read-only fetch of /status, /pocsag_messages, /m17_calls and /vor_radial; decoding runs in the desktop engine, mobile is a viewer.",
   "settingsSectionDeviceGateway": "Multi-device gateway (pairing)",
-  "settingsGatewayHelp": "After starting the desktop gateway, bind this device to a role with the pairing code. Only paired devices can read the roster, panorama, status, passes and spectrum snapshot; this device never sends tuning, recording or site changes.",
+  "settingsGatewayHelp": "After starting the desktop gateway, bind this device to a role with the pairing code. Only paired devices can read the roster, panorama, status, passes, spectrum snapshot and fused pose; this device never sends tuning, recording or site changes.",
   "settingsGatewayEndpoint": "Desktop gateway: {endpoint} (host comes from the ControlHub section)",
   "@settingsGatewayEndpoint": {
     "placeholders": {
@@ -158,6 +158,31 @@
   },
   "toastGatewaySpectrumFailed": "Spectrum failed: {reason}",
   "@toastGatewaySpectrumFailed": {
+    "placeholders": {
+      "reason": {"type": "String"}
+    }
+  },
+  "settingsGatewayFuse": "Read fusion",
+  "settingsGatewayFuseSummary": "Fusion ({count} obs · {level}): az {az}° · alt {alt}° · accuracy ±{acc}° · sources {sources}",
+  "@settingsGatewayFuseSummary": {
+    "placeholders": {
+      "count": {"type": "String"},
+      "level": {"type": "String"},
+      "az": {"type": "String"},
+      "alt": {"type": "String"},
+      "acc": {"type": "String"},
+      "sources": {"type": "String"}
+    }
+  },
+  "settingsGatewayFuseUnavailable": "Fusion unavailable: {reason}",
+  "@settingsGatewayFuseUnavailable": {
+    "placeholders": {
+      "reason": {"type": "String"}
+    }
+  },
+  "settingsGatewayFuseNoReason": "no reason from the authority",
+  "toastGatewayFuseFailed": "Fusion failed: {reason}",
+  "@toastGatewayFuseFailed": {
     "placeholders": {
       "reason": {"type": "String"}
     }

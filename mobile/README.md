@@ -14,7 +14,7 @@
   **0 error / 0 warning / 65 info**。info 为 `deprecated_member_use`
   （Flutter 3.50 起 `package:flutter/material.dart` 提示改用 `material_ui`）与 2 条测试内
   `avoid_dynamic_calls`，不影响编译，未批量改。原始输出：`D:\mbdsdr\output\mobile_walk\flutter_analyze.log`。
-- `flutter test`（2026-11-24 复跑）：**609 passed / 0 failed**
+- `flutter test`（2026-11-24 复跑）：**610 passed / 0 failed**
   （11-22 的覆盖明细：天空投影对拍 84 点、反投影往返、四态裁剪、投影有效性域/跨域裁剪 4 条、
   指天视图 26 条、星名目录与中心识别 12 条、星表资产 4 条、asterism overlay 行为 11 条、
   首次成功端到端 5 条、小屏布局 + 标签避让 4 条；此后新增 M2 配对/名册、
@@ -26,8 +26,10 @@
   指天页中心识别 4 条）→ 563（捕获→指向闭环 2 条）→ 567（小屏无溢出 +
   状态条不省略 1 条、标签避让 3 条）→ 601（多设备网关 M2/M3）→
   604（指天页自动上报 3 条）→ 608（手机只读 `/spectrum` 快照 2 条：
-  客户端 503 不伪造 + 设置页 503 不编摘要）→ 609（回环 HTTP 定长请求体回归 1 条）。
-- `flutter build apk --debug`（2026-11-24 复跑）：**成功**（43.1 s）；
+  客户端 503 不伪造 + 设置页 503 不编摘要）→ 609（回环 HTTP 定长请求体回归 1 条）→
+  610（手机只读 `/fuse`：不可用路径 1 条 + 全链路合法摘要）。
+- `flutter build apk --debug`（2026-11-24 复跑）：**成功**（43.1 s；补手机
+  `/fuse` 后再次出包 39.9 s）；
   同日 `spatial` 的 `gradlew :app:assembleDebug --offline` 也是
   **BUILD SUCCESSFUL**（20 s），三端打包层无遗漏。
   历史：2026-11-22 出包 36.6 s，产物 `build/app/outputs/flutter-apk/app-debug.apk`
@@ -72,6 +74,9 @@
   `valid=false, az=null`，reason 明写两条均 `age > 2.0s` 被丢弃。
   自动上报 1 Hz 也实测：界面「已发送 12 条」，间隔 3 s 两次 `/poses` 的 `t_utc`
   前进 3 s；停止后报「共发送 18 条」，不是堆积或一次性。
+  手机设置页「读取融合」同样在真实网关上验证：host 以 lens/eyepiece 各报一条后
+  显示「融合（2 条 · fused）：方位 70.8° · 高度 5.4° · 精度 ±0.45° · 来源 …」；
+  3 s 后再读显示「融合不可用：…陈旧（age 21.466s > 2.0s）」，不显示旧方位/高度。
   说明虚拟传感器 ≠ 真机罗盘/IMU，不承诺户外精度。
 - **同轮发现并修复真实链路缺陷（2026-11-24）**：首轮模拟器配对失败，网关回
   `角色必须是 lens/eyepiece/handheld/headset 之一，收到 ''`。根因是 Dart

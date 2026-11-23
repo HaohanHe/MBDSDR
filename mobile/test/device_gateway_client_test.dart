@@ -157,6 +157,11 @@ void main() {
               200, '{"schema":"mbdsdr.spectrum-snapshot/1","readonly":true,'
                   '"realtime":false,"bins":4,"powers_db":[-80.0,null,-70.0],'
                   '"peak_freq_hz":100000000.0,"peak_power_db":-70.0}');
+        case '/fuse':
+          return const GatewayHttpResponse(
+              200, '{"schema":"mbdsdr.pose-fusion/1","observations":2,'
+                  '"valid":true,"az_deg":77.57,"alt_deg":0.91,'
+                  '"accuracy_deg":0.62,"sources":["dev-a","dev-b"]}');
       }
       fail('unexpected path ${url.path}');
     });
@@ -169,8 +174,10 @@ void main() {
     expect((await c.status('tok-abc'))['schema'], 'mbdsdr.desktop-status/1');
     expect((await c.spectrum('tok-abc'))['schema'],
         'mbdsdr.spectrum-snapshot/1');
+    expect((await c.fuse('tok-abc'))['schema'], 'mbdsdr.pose-fusion/1');
     expect(t.calls.map((e) => e.url.path), <String>[
-      '/roster', '/panorama', '/poses', '/passes', '/status', '/spectrum']);
+      '/roster', '/panorama', '/poses', '/passes', '/status', '/spectrum',
+      '/fuse']);
   });
 
   test('spectrum 无帧 503：透出服务端 reason，不伪造快照', () async {

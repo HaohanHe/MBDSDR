@@ -43,7 +43,7 @@
   "settingsChPortHint": "默认 50732",
   "settingsChHelp": "仅只读拉取 /status、/pocsag_messages、/m17_calls、/vor_radial；解码在桌面引擎进行，移动端为查看器。",
   "settingsSectionDeviceGateway": "多设备网关（配对）",
-  "settingsGatewayHelp": "桌面「多设备网关」启动后，用配对码把本机绑定为某个角色。配对成功才可读名册、全景、状态、过境与频谱快照；本机不发调谐/录音/改站址指令。",
+  "settingsGatewayHelp": "桌面「多设备网关」启动后，用配对码把本机绑定为某个角色。配对成功才可读名册、全景、状态、过境、频谱快照与融合位姿；本机不发调谐/录音/改站址指令。",
   "settingsGatewayEndpoint": "桌面网关：{endpoint}（主机取自 ControlHub 分区）",
   "@settingsGatewayEndpoint": {
     "placeholders": {
@@ -158,6 +158,31 @@
   },
   "toastGatewaySpectrumFailed": "读取频谱失败：{reason}",
   "@toastGatewaySpectrumFailed": {
+    "placeholders": {
+      "reason": {"type": "String"}
+    }
+  },
+  "settingsGatewayFuse": "读取融合",
+  "settingsGatewayFuseSummary": "融合（{count} 条 · {level}）：方位 {az}° · 高度 {alt}° · 精度 ±{acc}° · 来源 {sources}",
+  "@settingsGatewayFuseSummary": {
+    "placeholders": {
+      "count": {"type": "String"},
+      "level": {"type": "String"},
+      "az": {"type": "String"},
+      "alt": {"type": "String"},
+      "acc": {"type": "String"},
+      "sources": {"type": "String"}
+    }
+  },
+  "settingsGatewayFuseUnavailable": "融合不可用：{reason}",
+  "@settingsGatewayFuseUnavailable": {
+    "placeholders": {
+      "reason": {"type": "String"}
+    }
+  },
+  "settingsGatewayFuseNoReason": "权威端未给原因",
+  "toastGatewayFuseFailed": "读取融合失败：{reason}",
+  "@toastGatewayFuseFailed": {
     "placeholders": {
       "reason": {"type": "String"}
     }

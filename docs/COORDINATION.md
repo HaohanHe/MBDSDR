@@ -3106,6 +3106,15 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `docs/COORDINATION.md` | 多机线/42（§302 自动上报实测（提交后释放）） | 2026-11-24 01:42 | 本笔 |
 | `mobile/README.md` | 多机线/42（§302 自动上报实测（提交后释放）） | 2026-11-24 01:42 | 本笔 |
 | `docs/COORDINATION.md` | 多机线/42（§303 误判更正（提交后释放）） | 2026-11-24 01:46 | 本笔 |
+| `mobile/lib/services/device_gateway_client.dart` | 多机线/42（§304 手机只读 /fuse（提交后释放）） | 2026-11-24 01:51 | 本笔 |
+| `mobile/lib/pages/settings_page.dart` | 多机线/42（§304 手机只读 /fuse（提交后释放）） | 2026-11-24 01:51 | 本笔 |
+| `mobile/lib/l10n/app_zh.arb` | 多机线/42（§304 手机只读 /fuse（提交后释放）） | 2026-11-24 01:51 | 本笔 |
+| `mobile/lib/l10n/app_en.arb` | 多机线/42（§304 手机只读 /fuse（提交后释放）） | 2026-11-24 01:51 | 本笔 |
+| `mobile/lib/l10n/app_ja.arb` | 多机线/42（§304 手机只读 /fuse（提交后释放）） | 2026-11-24 01:51 | 本笔 |
+| `mobile/test/device_gateway_client_test.dart` | 多机线/42（§304 手机只读 /fuse（提交后释放）） | 2026-11-24 01:51 | 本笔 |
+| `mobile/test/settings_page_gateway_test.dart` | 多机线/42（§304 手机只读 /fuse（提交后释放）） | 2026-11-24 01:51 | 本笔 |
+| `mobile/README.md` | 多机线/42（§304 手机只读 /fuse（提交后释放）） | 2026-11-24 01:51 | 本笔 |
+| `docs/COORDINATION.md` | 多机线/42（§304 手机只读 /fuse（提交后释放）） | 2026-11-24 01:51 | 本笔 |
 
 > 上表各行均由 `claim` 台账推导：owner 原文与 `acquired_at` 直接取自台账，
 > 目的优先用台账里的 `claim_reason`，没有就如实写「未声明」，不补编。时间列只是
@@ -14247,3 +14256,29 @@ widget 用例与 Python 端到端，没有真实 Android 运行时 + 真实网�
 也不记入 spec 欠账。
 **方法教训**：dump 报错时不得把 `cat` 结果当现状；地面真值用 `screencap`，
 或先删除 `/sdcard/ui.xml` 再 dump（失败即无文件，不会读到旧内容）。
+
+## 304. 手机只读 `/fuse`（三端融合消费齐）+ 模拟器实测（2026-11-24）
+
+**动机**：融合信封此前只有桌面与头显消费；手机（手持观察者）看不到同一台望远镜的
+融合指向。按「举一反三」补齐手机只读消费，UI 放在已有网关分区，不新增页面。
+
+**改动**
+- `DeviceGatewayClient.fuse()`：`GET /fuse`，任意已配对角色可读。
+- 设置页「读取融合」：`valid=true` 显示条数/level/方位/高度/精度/来源；
+  `valid=false` 只显示 `reason`（含陈旧丢弃明细），**不显示旧方位/高度**。
+- l10n 三语新增 5 个 key，help 同步到「…频谱快照与融合位姿」。
+
+**验证**
+- `device_gateway_client_test` 12 passed（路径清单含 `/fuse`、schema 断言）
+- `settings_page_gateway_test` 7 passed（全链路合法摘要 + 不可用只转述原因）
+- 全量 `flutter test` **610 passed / 0 failed**
+- 打包：`flutter build apk --debug` 39.9 s 成功，已装模拟器
+
+**模拟器实测（真实网关 + 截图）**
+- 合法：host 以 lens(70.0/5.0/1.0) 与 eyepiece(71.0/5.5/0.5) 各报一条后点
+  「读取融合」→ `融合（2 条 · fused）：方位 70.8° · 高度 5.4° · 精度 ±0.45° ·
+  来源 dev-be98fd60, dev-78497802`
+- 陈旧：3 s 后再点 → `融合不可用：没有可用观测：2 条全部被丢弃（陈旧
+  （age 21.466s > 2.0s））`，不显示方位/高度
+
+**边界**：手机只显示摘要；融合内核与桌面同源（`fuse_poses`），手机不自行加权。

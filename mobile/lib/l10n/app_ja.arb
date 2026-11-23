@@ -43,7 +43,7 @@
   "settingsChPortHint": "既定 50732",
   "settingsChHelp": "/status、/pocsag_messages、/m17_calls、/vor_radial を読み取り専用で取得。デコードはデスクトップエンジンで行われ、モバイルはビューアです。",
   "settingsSectionDeviceGateway": "マルチデバイスゲートウェイ（ペアリング）",
-  "settingsGatewayHelp": "デスクトップのゲートウェイを起動したら、ペアリングコードで本機を役割に紐付けます。ペアリング後のみ名簿・パノラマ・状態・パス・スペクトルスナップショットを読めます。本機は同調・録音・観測地点の変更を送りません。",
+  "settingsGatewayHelp": "デスクトップのゲートウェイを起動したら、ペアリングコードで本機を役割に紐付けます。ペアリング後のみ名簿・パノラマ・状態・パス・スペクトルスナップショット・融合姿勢を読めます。本機は同調・録音・観測地点の変更を送りません。",
   "settingsGatewayEndpoint": "デスクトップゲートウェイ：{endpoint}（ホストは ControlHub セクション由来）",
   "@settingsGatewayEndpoint": {
     "placeholders": {
@@ -158,6 +158,31 @@
   },
   "toastGatewaySpectrumFailed": "スペクトル取得に失敗：{reason}",
   "@toastGatewaySpectrumFailed": {
+    "placeholders": {
+      "reason": {"type": "String"}
+    }
+  },
+  "settingsGatewayFuse": "融合を取得",
+  "settingsGatewayFuseSummary": "融合（{count} 件・{level}）：方位 {az}°・高度 {alt}°・精度 ±{acc}°・取得元 {sources}",
+  "@settingsGatewayFuseSummary": {
+    "placeholders": {
+      "count": {"type": "String"},
+      "level": {"type": "String"},
+      "az": {"type": "String"},
+      "alt": {"type": "String"},
+      "acc": {"type": "String"},
+      "sources": {"type": "String"}
+    }
+  },
+  "settingsGatewayFuseUnavailable": "融合は利用できません：{reason}",
+  "@settingsGatewayFuseUnavailable": {
+    "placeholders": {
+      "reason": {"type": "String"}
+    }
+  },
+  "settingsGatewayFuseNoReason": "権威端から理由がありません",
+  "toastGatewayFuseFailed": "融合の取得に失敗：{reason}",
+  "@toastGatewayFuseFailed": {
     "placeholders": {
       "reason": {"type": "String"}
     }

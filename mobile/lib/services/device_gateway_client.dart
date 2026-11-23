@@ -3,7 +3,7 @@
 // ----------------------------------------------------------------------------
 // * 端点与桌面 mbdsdr_ai/device_gateway.py 一一对应：
 //     POST /pair  GET /roster  GET /panorama  GET /passes  GET /status
-//     GET /spectrum  POST /pose  GET /poses
+//     GET /spectrum  GET /fuse  POST /pose  GET /poses
 // * 只读：唯一写动作是 /pair（换 token）与 /pose（自己的位姿）。
 //   没有调谐/录音/改站址端点——那些仍归桌面权威端。
 // * 传输缝可注入（与 ControlHubClient / AiClient 同范式），测试完全离线。
@@ -106,6 +106,13 @@ class DeviceGatewayClient {
   /// 不拿示例谱/旧谱补位。`powers_db` 是相对幅度（非 dBm），非有限 bin 为 null。
   Future<Map<String, dynamic>> spectrum(String token) =>
       _get('/spectrum', token);
+
+  /// 权威端融合位姿（`mbdsdr.pose-fusion/1`）：任意已配对角色可读。
+  ///
+  /// `valid=false` 时 `az_deg`/`alt_deg` 为 null，必须按不可用处理——
+  /// 消费端不得用旧值或猜测补位（本方法只原样返回信封）。
+  Future<Map<String, dynamic>> fuse(String token) =>
+      _get('/fuse', token);
 
   /// 上报一条 `sky-pose/1`。桌面会校验 source/role/时钟/边界，失败如实抛。
   ///
