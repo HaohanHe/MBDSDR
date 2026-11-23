@@ -2712,6 +2712,15 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `tests/test_device_gateway.py` | 观星指数线/41（§257b 默认 provider 2 条用例） | 2026-11-23 22:50 | 本笔 |
 | `docs/PRD-现状对照.md` | 观星指数线/41（§257b P1-11 补 CLI/provider） | 2026-11-23 22:50 | 本笔 |
 | `docs/COORDINATION.md` | 观星指数线/41（§257b 追加记录 + §6.1） | 2026-11-23 22:50 | 本笔 |
+| `desktop/device_gateway_dialog.py` | 观星指数线/41（§258 桌面网关对话框） | 2026-11-23 23:05 | 本笔 |
+| `desktop/main_window.py` | 观星指数线/41（§258 文件菜单接线 + 站址三元组） | 2026-11-23 23:05 | 本笔 |
+| `mbdsdr_ai/device_gateway.py` | 观星指数线/41（§258 build_station_panorama_provider 即时站址） | 2026-11-23 23:05 | 本笔 |
+| `tests/test_device_gateway.py` | 观星指数线/41（§258 站址即时生效用例） | 2026-11-23 23:05 | 本笔 |
+| `tests/test_desktop_device_gateway_dialog.py` | 观星指数线/41（§258 对话框 6 条用例） | 2026-11-23 23:05 | 本笔 |
+| `tests/test_ui_gap_fill.py` | 观星指数线/41（§258 菜单入口用例） | 2026-11-23 23:05 | 本笔 |
+| `docs/PRD-现状对照.md` | 观星指数线/41（§258 P1-11 补桌面 UI） | 2026-11-23 23:05 | 本笔 |
+| `docs/COORDINATION.md` | 观星指数线/41（§258 记录 + §6.1） | 2026-11-23 23:05 | 本笔 |
+| `desktop/README.md` | 观星指数线/41（§258 多设备网关用法） | 2026-11-23 23:05 | 本笔 |
 
 > 上表各行均由 `claim` 台账推导：owner 原文与 `acquired_at` 直接取自台账，
 > 目的优先用台账里的 `claim_reason`，没有就如实写「未声明」，不补编。时间列只是
@@ -12575,6 +12584,41 @@ PRD §8 冲刺序列 P1「天文通式观星指数」。本轮只做**有可信�
   `weather / kp / f107 / ssn / snapshot`，`weather_known=false`、
   传播结论含「未知」——没有现采、没有造数据。
 - 回归：`device_gateway + sky_panorama + sky_tools` → **79 passed**。
+
+## 258. M2.1b：桌面「多设备网关」对话框 + 站址即时 provider（2026-11-23）
+
+**依据**：§257 的网关只有 CLI；桌面用户需要显式开关、看到配对码与名册。
+
+**做了什么**
+- 新 `desktop/device_gateway_dialog.py`：
+  - 「文件 → 多设备网关（配对）...」打开；监听地址下拉**只有回环 + 本机私有
+    IPv4**（公网/通配不会出现），端口可改（0=随机）；
+  - 启动/停止/轮换配对码/复制配对码；2 s 刷新已配对设备表（角色/名称/心跳）；
+  - 关闭或停止都会真正 `gateway.stop()`，不留无人看管的监听；
+  - 未设站址仍可启动，但状态栏持续提示「/panorama 会回 500，先设置观测位置」。
+- `mbdsdr_ai/device_gateway.py`：
+  - 新增 `build_station_panorama_provider(station_provider, allow_live=...)`：
+    **每次调用重新取站址**，桌面换站/GNSS fix 后 `/panorama` 立即用新坐标；
+    缺站址抛错（500 带原因），不拿示例站或旧坐标顶替。
+  - `build_default_panorama_provider` 改为复用同一实现，时间/时基只写一处。
+- `desktop/main_window.py`：
+  - 文件菜单接线；站址唯一来源是主窗 `_observer_lat/lon/alt`（GNSS/手填都写这里）。
+
+**验证**
+- `pytest tests/test_desktop_device_gateway_dialog.py` → **6 passed**
+  （启动/停止/关闭真停监听、配对码轮换、名册、未设站址 500、私有地址约束、主窗接线）。
+- `pytest tests/test_device_gateway.py`（新增站址即时生效用例）→ **21 passed**。
+- `pytest tests/test_ui_gap_fill.py` 菜单入口用例 → 5 passed（含既有指数用例）。
+- 离屏真跑 `MainWindow`：设站址 → 打开对话框 → 启动（127.0.0.1 随机端口）→
+  配对 `handheld` → 名册 1 行 → `GET /panorama` 200 / `sky-panorama/1`；
+  本轮该站址无 15 分钟内快照，`missing` 如实列出、`weather_known=false`；
+  关闭对话框后网关 `None`（监听已停）。
+
+**诚实边界**
+- 仍无 TLS；配对锁定全局；`/panorama` 默认只读缓存，需手动勾选才现采。
+- 手机端还没有配对界面（M2.2）；两条位姿还没喂 `sky_pose_fuse`（M3）；
+  头显接入未做。
+
 
 
 

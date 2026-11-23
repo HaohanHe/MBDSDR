@@ -1745,6 +1745,12 @@ class MainWindow(QMainWindow):
         export_spatial_action.triggered.connect(self._export_spatial_bundle_dialog)
         file_menu.addAction(export_spatial_action)
 
+        # M2.1b：多设备网关（手机镜头/目镜/手持 + 头显配对）。只读端点，
+        # 不提供写硬件；默认回环，局域网地址需用户显式选择。
+        device_gateway_action = QAction("多设备网关（配对）...", self)
+        device_gateway_action.triggered.connect(self._open_device_gateway)
+        file_menu.addAction(device_gateway_action)
+
         file_menu.addSeparator()
 
         exit_action = QAction("退出", self)
@@ -7566,6 +7572,30 @@ class MainWindow(QMainWindow):
             QMessageBox.information(self, "导出完成", message)
         else:
             QMessageBox.warning(self, "导出失败", message)
+
+    def _device_station_triplet(self):
+        """网关取站址的唯一来源：主窗当前站址（GNSS/手填都写这里）。"""
+        return (self._observer_lat, self._observer_lon,
+                self._observer_alt_m)
+
+    def _open_device_gateway(self):
+        """文件 → 多设备网关：显式开启/停止 + 配对码 + 名册（M2.1b）。"""
+        try:
+            from device_gateway_dialog import DeviceGatewayDialog
+        except ImportError:
+            try:
+                from desktop.device_gateway_dialog import DeviceGatewayDialog
+            except ImportError as exc:
+                QMessageBox.warning(
+                    self, "多设备网关不可用", f"对话框加载失败：{exc}")
+                return
+        dlg = getattr(self, "_device_gateway_dialog", None)
+        if dlg is None:
+            dlg = DeviceGatewayDialog(self._device_station_triplet, self)
+            self._device_gateway_dialog = dlg
+        dlg.show()
+        dlg.raise_()
+        dlg.activateWindow()
 
     def _connect_dialog(self):
         """弹出设备选择对话框：动态枚举真实 SDR 设备，选中后真实 connect。

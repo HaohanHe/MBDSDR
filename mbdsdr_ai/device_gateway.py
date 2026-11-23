@@ -45,6 +45,7 @@ __all__ = [
     "PairingRegistry",
     "DeviceGateway",
     "build_default_panorama_provider",
+    "build_station_panorama_provider",
 ]
 
 #: 可配对角色：桌面是权威端，不通过本网关配对。
@@ -450,6 +451,47 @@ class DeviceGateway:
             self._thread = None
 
 
+def _panorama_now(lat: float, lon: float, alt_m: Optional[float],
+                  allow_live: bool, *, site_note: str) -> Dict[str, Any]:
+    """按给定站址构造一次全景（时钟/时基在这里统一处理）。"""
+    from datetime import datetime, timezone
+
+    from .new_spacetime import get_time_engine, utc_to_jd
+    from .sky_tools import build_panorama
+
+    try:
+        jd = float(get_time_engine().tick())
+        time_source = "time_engine"
+    except Exception:
+        jd = utc_to_jd(datetime.now(timezone.utc))
+        time_source = "wall_clock"
+    return build_panorama(
+        float(lat), float(lon), jd=jd, allow_live=allow_live,
+        time_source=time_source, site_note=site_note, alt_m=alt_m)
+
+
+def build_station_panorama_provider(
+        station_provider: Callable[[], Tuple[Optional[float], Optional[float],
+                                             Optional[float]]],
+        *, allow_live: bool = False,
+        site_note: str = "设备网关（权威端）"
+) -> Callable[[], Dict[str, Any]]:
+    """每次调用都重新取站址：桌面换站/GNSS fix 后立刻反映到 `/panorama`。
+
+    ``station_provider`` 返回 ``(lat, lon, alt_m)``；缺经纬度即抛错（500 带原因），
+    不拿示例站或上一次的坐标顶替。
+    """
+
+    def provider() -> Dict[str, Any]:
+        la, lo, alt = station_provider()
+        if la is None or lo is None:
+            raise RuntimeError(
+                "权威端未配置站址：先设置观测位置（GNSS/手填）后再取全景")
+        return _panorama_now(la, lo, alt, allow_live, site_note=site_note)
+
+    return provider
+
+
 def build_default_panorama_provider(
         *, lat: Optional[float] = None, lon: Optional[float] = None,
         allow_live: bool = False) -> Callable[[], Dict[str, Any]]:
@@ -460,31 +502,15 @@ def build_default_panorama_provider(
     ``allow_live=False`` 时只读 15 分钟内缓存快照，不联网。
     """
 
-    def provider() -> Dict[str, Any]:
-        from datetime import datetime, timezone
-
+    def station():
         from . import space_weather as sw
-        from .new_spacetime import get_time_engine, utc_to_jd
-        from .sky_tools import build_panorama
 
         la, lo = lat, lon
         if la is None or lo is None:
             la, lo = sw.default_station()
-        if la is None or lo is None:
-            raise RuntimeError(
-                "权威端未配置站址：请设置 ground_station_lat/lon 或传 --lat/--lon")
-        try:
-            jd = float(get_time_engine().tick())
-            time_source = "time_engine"
-        except Exception:
-            jd = utc_to_jd(datetime.now(timezone.utc))
-            time_source = "wall_clock"
-        return build_panorama(
-            float(la), float(lo), jd=jd, allow_live=allow_live,
-            time_source=time_source, site_note="设备网关（权威端）",
-            alt_m=None)
+        return la, lo, None
 
-    return provider
+    return build_station_panorama_provider(station, allow_live=allow_live)
 
 
 def _main(argv: Optional[List[str]] = None) -> int:

@@ -274,6 +274,30 @@ def test_default_provider_without_station_raises(monkeypatch):
         provider()
 
 
+def test_station_provider_reorders_each_call(monkeypatch):
+    """桌面换站/GNSS fix 后，/panorama 必须用新站址（不缓存旧坐标）。"""
+    from mbdsdr_ai import sky_tools
+    from mbdsdr_ai.device_gateway import build_station_panorama_provider
+
+    seen = []
+
+    def fake_build(lat, lon, **kw):
+        seen.append((lat, lon, kw.get("alt_m")))
+        return {"ok": True}
+
+    monkeypatch.setattr(sky_tools, "build_panorama", fake_build)
+    station = {"v": (45.0, 120.0, 10.0)}
+    provider = build_station_panorama_provider(
+        lambda: station["v"], allow_live=False)
+    provider()
+    station["v"] = (46.0, 121.0, 20.0)
+    provider()
+    assert seen == [(45.0, 120.0, 10.0), (46.0, 121.0, 20.0)]
+    station["v"] = (None, None, None)
+    with pytest.raises(RuntimeError):
+        provider()
+
+
 # ---------------------------------------------------------------- socket 冒烟
 def test_socket_smoke_health_and_pair():
     gw = DeviceGateway(registry=_registry(),

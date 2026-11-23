@@ -822,6 +822,16 @@ def test_legacy_zero_arg_night_resolver_button_remains_supported(qapp):
 # ---------------------------------------------------------------------- #
 # 观星指数：把「今夜能不能看」抬到星象仪，缺测不给分
 # ---------------------------------------------------------------------- #
+def test_device_gateway_menu_action_exists(win):
+    """文件菜单里必须有「多设备网关（配对）」入口（M2.1b）。"""
+    texts = []
+    for act in win.menuBar().actions():
+        menu = act.menu()
+        if menu is not None:
+            texts.extend(a.text() for a in menu.actions())
+    assert any("多设备网关" in t for t in texts), texts
+
+
 def test_stargazing_chip_text_honesty():
     from main_window import _stargazing_chip_text
 
