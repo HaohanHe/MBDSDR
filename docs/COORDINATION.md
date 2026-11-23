@@ -2639,6 +2639,8 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `docs/PRD-现状对照.md` | 文档刷新线/prd-1123（刷新至2026-11-23代码事实（HEAD 3d26432e）+方向评估节；21条四元组独立复核全过） | 2026-11-23 17:22 | 本笔 |
 | `docs/tool-availability.md` | 文档刷新线/prd-1123（审计脚本复跑同步刷新：520=412+108（sdr_get_gps归①SDR组）） | 2026-11-23 17:22 | 本笔 |
 | `docs/PRD-现状对照.md` | 文档刷新线/prd-1123（§8措辞修正：三条硬约束无条件成立，不挂靠为浪漫底线（用户纠偏）） | 2026-11-23 17:40 | 本笔 |
+| `docs/COORDINATION.md` | 移动端走查线/22（§246 定位诚实态复验 + 模拟器 prefs 编码坑） | 2026-11-23 19:31 | 本笔 |
+| `mobile/README.md` | 移动端走查线/22（模拟器复验诚实空态 + 不手改 prefs 的已知限制） | 2026-11-23 19:31 | 本笔 |
 
 > 上表各行均由 `claim` 台账推导：owner 原文与 `acquired_at` 直接取自台账，
 > 目的优先用台账里的 `claim_reason`，没有就如实写「未声明」，不补编。时间列只是
@@ -12030,3 +12032,41 @@ rtl_tcp 接进手机端。
   闭环（该闭环仍只有 widget 测试）。
 - 模拟器两次宿主 `0xC0000005` 分别出现在「SwiftShader + 天空页」与「构建
   APK 同时开指天页」；换 `-gpu off` 且不与构建并发后稳定，未归因为 App 缺陷。
+
+## 246. 定位诚实态复验 + 模拟器 prefs 编码坑（2026-11-23）
+
+**动机**：`14fe8bd7` 改了三处（定位三态 `locating/unavailable`、站址输入即落盘、
+切 TLE 分组清空旧过境），只有 widget 测试，没有装机复验。
+
+**启动纪律（本轮更正上轮做法）**：本机是轻薄本，模拟器冷启动慢。
+本条明确：**单次启动、给足时间、boot 前不 kill 不重启**；不许用几十秒超时判失败。
+- `-avd mbdsdr35 -no-window -no-audio -no-boot-anim -no-snapshot-load -gpu off`
+- 实测：约 60 s 出现 `emulator-5554  device`，约 75 s `sys.boot_completed=1`。
+  两次短超时误判并在 boot 中 kill 重启，反而更慢——记在这里免得再犯。
+
+**复验结果（截图对照，全部诚实空态）**
+1. 频谱首开（`mw_30`）：「未连接 rtl_tcp」「当前无实时 IQ，不显示模拟数据。」——
+   没有假瀑布、假读数。
+2. 天空页（`mw_32`）：定位走完 `locating` → `unavailable`，文案为
+   「定位服务已开启，但这一次拿不到位置（可能室内或卫星信号不足）。」，
+   给的是「重试定位」而非「开启定位」——不再把「取不到位置」谎报成「定位未开启」。
+3. 指天视图（`mw_33`）：「未设置本站坐标」+ 指路文案，**不画假罗盘、不给假姿态**。
+4. 删掉 `FlutterSharedPreferences.xml` 让 App 重建后（`mw_48`→`mw_49`），
+   上面三态与首开引导一致，未出现状态残留。
+
+**新增坑（值得记住）**
+- Flutter 在 Android 上把 `double` 存成
+  `VGhpcyBpcyB0aGUgcHJlZml4IGZvciBEb3VibGUu` + 数值（即 base64
+  `This is the prefix for Double.`）。手工把该值改成纯数字后，App 首帧卡在
+  闪屏不再进主界面；删掉整个 prefs 文件让它重建即恢复。
+  结论：**模拟器上改站址坐标走设置页输入框/自动定位，不要手改 prefs**。
+- `adb shell input text` 灌进 Flutter `TextField` 是**追加**而非替换，
+  框里已有内容会拼成 `4039.9042…` 这种脏值；要改值得先在框内删干净。
+  这也正是上面那个 prefs 坑的来路（先拼脏、再去手改、然后卡死）。
+
+**诚实边界**
+- 仍是 API 35 模拟器，**不是物理手机**；真机 GPS 户外精度、真机罗盘/IMU 仍未验。
+- `unavailable` 在模拟器里是预期的（无 GNSS 直通、无网络定位），
+  **不能**据此说真机上一定取不到位置。
+- 「捕获 → 指向」闭环仍未点击；手机端 USB GNSS 未验；PICO 四窗/手势仍未验。
+- 本轮无代码改动，只补台账与 README。

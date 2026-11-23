@@ -100,6 +100,13 @@
   16,072–20,609（有节目动态，不是恒定噪声）。录音页签同步列出 `88.1000 MHz · WFM · 17s`。
   证据：`D:\mbdsdr\output\_shots\mobile_wfm_881.wav` / `.json`。
   仍未验证：真的听到声音（本机无音频路由/真机）、立体声导频与 RDS、音频延迟。
+- **定位诚实态复验（2026-11-23 模拟器）**：`14fe8bd7` 的定位三态与站址落盘改动装机复验。
+  频谱首开不给假瀑布（「未连接 rtl_tcp / 当前无实时 IQ，不显示模拟数据。」）；
+  天空页走完 `locating → unavailable`，文案「定位服务已开启，但这一次拿不到位置
+  （可能室内或卫星信号不足）。」并给「重试定位」；指天视图报「未设置本站坐标」，
+  不画假罗盘。清空偏好让 App 重建后三态一致。证据
+  `D:\mbdsdr\output\mobile_walk\mw_3{0,2,3}*.png`、`mw_48/49*.png`。
+  模拟器里 `unavailable` 是预期（无 GNSS 直通、无网络定位），不代表真机取不到位置。
 - 真机数据通路（2026-11-22，**宿主 Dart VM**）：本机 `rtl_tcp` + 真实 RTL-SDR，
   移动端 `RtlTcpClient` 连 127.0.0.1:1237、下发 100.100 MHz / 2.400 MS/s / 自动增益，
   收到 **183 个 IQ 块 / 7,208,960 样本（3 s）**。这验证的是移动端协议与解码代码
@@ -220,6 +227,12 @@ flutter build apk --debug
   （`placeLabelAvoiding`，真实卫星标签优先、放不下不画）。守卫见
   `test/sky_layout_small_screen_test.dart`。
 - 不内置任何 FM 电台频率、地理位置或密钥；所有连接参数与 key 都由用户自己填写。
+- **模拟器调试别手改偏好文件（2026-11-23 踩坑）**：Flutter 在 Android 上把 `double`
+  存成 `VGhpcyBpcyB0aGUgcHJlZml4IGZvciBEb3VibGUu` + 数值（base64
+  `This is the prefix for Double.`）。手工改成纯数字会让 App 卡在闪屏；
+  删掉 `FlutterSharedPreferences.xml` 让其重建即可恢复。要改站址坐标就走设置页
+  输入框/自动定位。另：`adb shell input text` 对 Flutter `TextField` 是追加而非替换，
+  框内已有内容会拼成脏值，需先删干净。
 - 手机读数的来源标注覆盖 sky / spectrum；真机上的 GNSS/罗盘来源仍未实测。
 
 许可证见根目录 LICENSE（MIT），第三方归属见 NOTICE.md。
