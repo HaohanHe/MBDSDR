@@ -292,6 +292,57 @@ def test_fuse_label_shows_weighted_pose_and_reason(qapp):
         dlg.close()
 
 
+def test_poses_label_lists_each_device(qapp):
+    """对话框逐设备列出位姿；目镜识别跟在行尾，不并入粗指向。"""
+    import json
+    import time
+
+    from device_gateway_dialog import DeviceGatewayDialog
+
+    dlg = DeviceGatewayDialog(_station(), port=0, hosts=["127.0.0.1"],
+                              registry=_registry())
+    try:
+        dlg.start_gateway()
+        gw = dlg._gateway
+        lens = gw.registry.pair("111111", "镜头手机", "lens")
+        eye = gw.registry.pair("111111", "目镜手机", "eyepiece")
+        dlg._refresh_roster()
+        assert dlg.poses_label.text() == "逐设备位姿：—"
+
+        now = time.time()
+        lens_body = {
+            "schema": "sky-pose/1", "source": lens["device"]["id"],
+            "role": "lens", "t_utc": now, "az_deg": 100.0,
+            "alt_deg": 40.0, "accuracy_deg": 4.0, "roll_deg": 0.0,
+        }
+        eye_body = {
+            "schema": "sky-pose/1", "source": eye["device"]["id"],
+            "role": "eyepiece", "t_utc": now, "az_deg": 110.0,
+            "alt_deg": 44.0, "accuracy_deg": 1.0, "roll_deg": 0.0,
+            "identification": {"name": "织女一", "hip": 91262,
+                               "separation_deg": 0.35},
+        }
+        for paired, body in ((lens, lens_body), (eye, eye_body)):
+            status, raw, _ = gw.dispatch(
+                "POST", "/pose", json.dumps(body).encode(),
+                {"Authorization": "Bearer " + paired["token"]})
+            assert status == 200, raw
+
+        dlg._refresh_roster()
+        text = dlg.poses_label.text()
+        assert text.startswith("逐设备位姿：")
+        lines = text.split("\n")
+        assert len(lines) == 2, text
+        # recent_poses 按 role 排序：eyepiece 在 lens 之前。
+        assert "目镜·方位 110.0° 高度 44.0° ±1.0°" in lines[0]
+        assert "织女一 HIP 91262 0.35°" in lines[0]
+        assert "镜头·方位 100.0° 高度 40.0° ±4.0°" in lines[1]
+        # 识别只跟在目镜一行，不混进镜头行。
+        assert "织女一" not in lines[1]
+    finally:
+        dlg.close()
+
+
 def test_invalid_rtl_tcp_blocks_start(qapp):
     """rtl_tcp 写法非法时不启动网关，状态栏给具体原因。"""
     from device_gateway_dialog import DeviceGatewayDialog

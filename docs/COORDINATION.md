@@ -3141,6 +3141,9 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `spatial/app/src/test/java/com/mbdsdr/spatial/GatewayControllerTest.kt` | 多机线/42（§310 头显位姿列表（提交后释放）） | 2026-11-24 02:11 | 本笔 |
 | `docs/COORDINATION.md` | 多机线/42（§310 头显位姿列表（提交后释放）） | 2026-11-24 02:11 | 本笔 |
 | `docs/COORDINATION.md` | 多机线/42（§311 局域网实测（提交后释放）） | 2026-11-24 02:15 | 本笔 |
+| `desktop/device_gateway_dialog.py` | 多机线/42（§312 桌面位姿行（提交后释放）） | 2026-11-24 02:17 | 本笔 |
+| `tests/test_desktop_device_gateway_dialog.py` | 多机线/42（§312 桌面位姿行（提交后释放）） | 2026-11-24 02:17 | 本笔 |
+| `docs/COORDINATION.md` | 多机线/42（§312 桌面位姿行（提交后释放）） | 2026-11-24 02:17 | 本笔 |
 
 > 上表各行均由 `claim` 台账推导：owner 原文与 `acquired_at` 直接取自台账，
 > 目的优先用台账里的 `claim_reason`，没有就如实写「未声明」，不补编。时间列只是
@@ -14459,3 +14462,23 @@ widget 用例与 Python 端到端，没有真实 Android 运行时 + 真实网�
 
 **边界**：私网 + Bearer token，**无 TLS**；仅限可信局域网。公网/通配仍应拒绝。
 未在物理手机验证。
+
+## 312. 桌面网关对话框逐设备位姿行（2026-11-24）
+
+**动机**：对话框已有融合位姿与目镜识别单行，但看不到每台设备的最新观测；
+教学/排障需要「谁报了、多少、识别了什么」。补一行只读列表，与手机/头显同口径。
+
+**改动**
+- `device_gateway_dialog.py` 新增 `poses_label`；`_refresh_roster` 里调用
+  `_update_poses_label(recent_poses())`：每设备一行
+  `角色·方位 az° 高度 alt° ±acc°`，目镜识别追加 `·星名 HIP xxxx n.nn°`；
+  无上报写「—」；停止网关时复位。
+- 识别仍只跟在目镜行，不混进镜头行。
+
+**验证**
+- `pytest tests/test_desktop_device_gateway_dialog.py` **18 passed**（+1：
+  两条上报、目镜识别只在目镜行、空态「—」）
+- 连同网关/全景/工具选择/帧元：**89 passed**（50+18+10+4+7）
+
+**边界**：只读展示；`recent_poses` 按 role 排序，不按时间；陈旧观测仍列出，
+能否融合由 `/fuse` 的 `valid` 判断。

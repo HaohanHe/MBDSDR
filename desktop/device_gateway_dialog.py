@@ -177,6 +177,12 @@ class DeviceGatewayDialog(QDialog):
             Qt.TextInteractionFlag.TextSelectableByMouse)
         outer.addWidget(self.fuse_label)
 
+        self.poses_label = QLabel("逐设备位姿：—")
+        self.poses_label.setWordWrap(True)
+        self.poses_label.setTextInteractionFlags(
+            Qt.TextInteractionFlag.TextSelectableByMouse)
+        outer.addWidget(self.poses_label)
+
         self.eye_id_label = QLabel("目镜识别：—")
         self.eye_id_label.setWordWrap(True)
         self.eye_id_label.setTextInteractionFlags(
@@ -225,6 +231,7 @@ class DeviceGatewayDialog(QDialog):
             self.code_label.setText("—")
             self.url_label.setText("网关未启动")
             self.fuse_label.setText("融合位姿：—")
+            self.poses_label.setText("逐设备位姿：—")
             self.eye_id_label.setText("目镜识别：—")
             self.sdr_label.setText("SDR 授权：—")
             self.spectrum_label.setText("频谱快照：—")
@@ -423,6 +430,7 @@ class DeviceGatewayDialog(QDialog):
                 self.table.setItem(row, col, QTableWidgetItem(text))
         poses = gw.recent_poses()
         self._update_fuse_label(gw)
+        self._update_poses_label(poses)
         self._update_eyepiece_id_label(poses)
         self._update_sdr_label(gw)
         passes_note = ("；/passes 已启用（本地 TLE 离线 SGP4）"
@@ -443,6 +451,44 @@ class DeviceGatewayDialog(QDialog):
             self.status.setText(
                 f"已配对 {len(devices)} 台；暂无位姿上报。"
                 + passes_note + sdr_note)
+
+    def _update_poses_label(self, poses) -> None:
+        """逐设备位姿如实列出；目镜识别跟在行尾，不并入粗指向。
+
+        一台设备一行（`recent_poses` 已每设备只留最新一条）；没有上报时
+        写「—」，不拿融合结果反推或补 0°。
+        """
+        if not poses:
+            self.poses_label.setText("逐设备位姿：—")
+            return
+        role_text = {"lens": "镜头", "eyepiece": "目镜",
+                     "handheld": "手持", "headset": "头显"}
+        rows = []
+        for pose in poses:
+            role = str(pose.get("role") or "")
+            role = role_text.get(role, role)
+
+            def fmt(key: str, digits: int = 1) -> str:
+                value = pose.get(key)
+                if isinstance(value, (int, float)):
+                    return f"{float(value):.{digits}f}°"
+                return "—"
+
+            row = (f"{role}·方位 {fmt('az_deg')} 高度 {fmt('alt_deg')} "
+                   f"±{fmt('accuracy_deg')}")
+            ident = pose.get("identification")
+            if isinstance(ident, dict):
+                name = str(ident.get("name") or "").strip()
+                if name:
+                    row += f"·{name}"
+                    hip = ident.get("hip")
+                    if isinstance(hip, int):
+                        row += f" HIP {hip}"
+                    sep = ident.get("separation_deg")
+                    if isinstance(sep, (int, float)):
+                        row += f" {float(sep):.2f}°"
+            rows.append(row)
+        self.poses_label.setText("逐设备位姿：" + "\n".join(rows))
 
     def _update_fuse_label(self, gw: DeviceGateway) -> None:
         """把 lens+eyepiece 的融合结果如实显示；不可用时给原因，不猜朝向。"""
