@@ -290,3 +290,69 @@ def test_fuse_label_shows_weighted_pose_and_reason(qapp):
         assert 105.0 < float(az_text) < 110.0
     finally:
         dlg.close()
+
+
+def test_invalid_rtl_tcp_blocks_start(qapp):
+    """rtl_tcp 写法非法时不启动网关，状态栏给具体原因。"""
+    from device_gateway_dialog import DeviceGatewayDialog
+
+    dlg = DeviceGatewayDialog(_station(), port=0, hosts=["127.0.0.1"],
+                              registry=_registry())
+    try:
+        dlg.sdr_edit.setText("127.0.0.1")
+        dlg.start_gateway()
+        assert dlg._gateway is None
+        assert "rtl_tcp 地址必须是 HOST:PORT" in dlg.status.text()
+        assert "网关未启动" in dlg.status.text()
+    finally:
+        dlg.close()
+
+
+def test_sdr_lease_label_and_desktop_busy_refusal(qapp):
+    """填 rtl_tcp 后：状态行/标签显示空闲与占用；桌面自报占用拒绝新授权。"""
+    import json
+
+    from device_gateway_dialog import DeviceGatewayDialog
+
+    dlg = DeviceGatewayDialog(_station(), port=0, hosts=["127.0.0.1"],
+                              registry=_registry())
+    try:
+        dlg.sdr_edit.setText("127.0.0.1:1234")
+        dlg.start_gateway()
+        gw = dlg._gateway
+        assert gw is not None
+        assert "SDR 授权已启用" in dlg.status.text()
+        assert dlg.sdr_edit.isEnabled() is False
+        assert dlg.desktop_busy_check.isEnabled() is False
+        assert dlg.sdr_label.text().startswith("SDR 授权：空闲")
+        assert "127.0.0.1:1234" in dlg.sdr_label.text()
+
+        status, raw, _ = gw.dispatch("GET", "/health", b"", {})
+        assert status == 200
+        assert json.loads(raw)["sdr_lease"] is True
+
+        headset = gw.registry.pair("111111", "头显", "headset")
+        status, raw, _ = gw.dispatch(
+            "POST", "/sdr/lease", json.dumps({"purpose": "直连频谱"}).encode(),
+            {"Authorization": "Bearer " + headset["token"]})
+        assert status == 200, raw
+        dlg._refresh_roster()
+        text = dlg.sdr_label.text()
+        assert "头显" in text and "占用中" in text
+
+        # 桌面自报占用后，另一台头显申请被拒（503），标签也标注暂停签发。
+        dlg.desktop_busy_check.setChecked(True)
+        second = gw.registry.pair("111111", "头显2", "headset")
+        status, raw, _ = gw.dispatch(
+            "POST", "/sdr/lease", b"",
+            {"Authorization": "Bearer " + second["token"]})
+        assert status == 503
+        assert json.loads(raw)["error"] == "sdr_busy_desktop"
+        dlg._refresh_roster()
+        assert "暂停签发" in dlg.sdr_label.text()
+
+        dlg.stop_gateway()
+        assert dlg.sdr_edit.isEnabled() is True
+        assert dlg.sdr_label.text() == "SDR 授权：—"
+    finally:
+        dlg.close()

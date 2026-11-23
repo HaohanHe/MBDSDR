@@ -108,7 +108,8 @@ python main.py --import-probe desktop.main_window  # 只做导入自检，不建
   `GET /sdr/lease` 查「谁占着/到何时」，`POST /sdr/release` 由持有者释放。
   非 `headset` 角色 403；已有他人租约 409；桌面自报占用（或状态读不到）503。
   网关**不启动 rtl_tcp、不碰 dongle**，只维护授权；桌面/头显同时占用被拒。
-  桌面对话框暂未提供 rtl_tcp 输入，当前需用 CLI 开启该能力。
+  对话框已提供「rtl_tcp」输入与「桌面自报占用 SDR」勾选，状态行实时显示
+  空闲/谁占用/剩余秒数；CLI 也可用 `--rtl-tcp HOST:PORT` 开启。
 - `/panorama` 复用与 AI 工具同一份 `build_panorama`，每次都取主窗当前站址
   （GNSS/手填都生效）；缺测列在 `missing`，不按晴天/平静假设。
   默认只读 15 分钟内缓存，"允许现采"需手动勾选。

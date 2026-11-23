@@ -2869,6 +2869,16 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `.trae/specs/mbdsdr-system-lifecycle/checklist.md` | 多机线/42（§271 Task 228） | 2026-11-23 23:24 | 本笔 |
 | `docs/PRD-现状对照.md` | 多机线/42（§271 P1-11 补 SDR 授权） | 2026-11-23 23:24 | 本笔 |
 | `docs/COORDINATION.md` | 多机线/42（§271 记录 + §6.1） | 2026-11-23 23:24 | 本笔 |
+| `mbdsdr_ai/device_gateway.py` | 多机线/42（§272 sdr_lease_enabled/endpoint 公开属性） | 2026-11-23 23:29 | 本笔 |
+| `desktop/device_gateway_dialog.py` | 多机线/42（§272 rtl_tcp 输入 + 自报占用 + 租约状态行） | 2026-11-23 23:29 | 本笔 |
+| `tests/test_desktop_device_gateway_dialog.py` | 多机线/42（§272 SDR 桌面接线 2 条用例） | 2026-11-23 23:29 | 本笔 |
+| `desktop/README.md` | 多机线/42（§272 对话框接线说明） | 2026-11-23 23:29 | 本笔 |
+| `.trae/specs/multi-device-interconnect/tasks.md` | 多机线/42（§272 M4.2 桌面侧） | 2026-11-23 23:29 | 本笔 |
+| `.trae/specs/multi-device-interconnect/checklist.md` | 多机线/42（§272 桌面接线项） | 2026-11-23 23:29 | 本笔 |
+| `.trae/specs/mbdsdr-system-lifecycle/tasks.md` | 多机线/42（§272 Task 229） | 2026-11-23 23:29 | 本笔 |
+| `.trae/specs/mbdsdr-system-lifecycle/checklist.md` | 多机线/42（§272 Task 229） | 2026-11-23 23:29 | 本笔 |
+| `docs/PRD-现状对照.md` | 多机线/42（§272 P1-11 补桌面接线） | 2026-11-23 23:29 | 本笔 |
+| `docs/COORDINATION.md` | 多机线/42（§272 记录 + §6.1） | 2026-11-23 23:29 | 本笔 |
 
 > 上表各行均由 `claim` 台账推导：owner 原文与 `acquired_at` 直接取自台账，
 > 目的优先用台账里的 `claim_reason`，没有就如实写「未声明」，不补编。时间列只是
@@ -13183,6 +13193,35 @@ spec 的 M4.3 要求「未联网时显示上次结果/包内内容，不伪造�
   真正「头显直连 SDR」的头显端客户端与频谱链路仍未实现。
 - 桌面对话框还没有 rtl_tcp 输入；当前需用 CLI `--rtl-tcp` 开启。
 - 未与真实 RTL2832U/rtl_tcp 联调，租约时长与双占用规则尚未在真机验证。
+
+## 272. M4.2 桌面侧：对话框接 rtl_tcp 与自报占用（2026-11-23）
+
+**依据**：§271 的授权端点只有 CLI 能启用；桌面用户看不到「谁占着 SDR」，
+也没法声明「桌面自己正在用」。把入口补到「文件 → 多设备网关」，协议才可用。
+
+**做了什么**
+- `desktop/device_gateway_dialog.py`：
+  - 新增「rtl_tcp」输入（`HOST:PORT`，空=不启用）；非法写法**不启动**网关，
+    状态栏给具体原因（不弹模态，便于自动化验证）。
+  - 新增「桌面自报占用 SDR」勾选，作为 `desktop_sdr_busy` 实时读取；
+    勾选后新租约被拒（503），标签追加「暂停签发」。
+  - 新增「SDR 授权」一行：未启用 / 空闲（rtl_tcp 地址）/ 占用者与剩余秒数；
+    运行中锁定两个输入，停止后解锁并复位。
+  - 启动状态行追加「SDR 授权已启用/未启用」。
+- `DeviceGateway` 新增公开只读属性 `sdr_lease_enabled` / `sdr_lease_endpoint`，
+  对话框不再摸私有字段；`/health` 复用同一属性。
+
+**验证**
+- `pytest tests/test_desktop_device_gateway_dialog.py tests/test_device_gateway.py`
+  → **53 passed**（对话框 12，其中新增 2：非法 rtl_tcp 拒启动；
+  空闲→headset 占用标签→桌面自报占用 503→停止解锁）。
+- 未改手机/头显代码；既有基线不受影响。
+
+**诚实边界**
+- 「桌面占用」是操作者自报，不是自动探测 dongle；网关仍不碰硬件。
+- 头显端 rtl_tcp 客户端、真实 I/Q 消费与真机联调均未做。
+- 真机上 rtl_tcp 当前由模拟器会话占用（127.0.0.1:1234 ESTABLISHED），
+  本轮未抢占；P0-06 调谐语义真机回归仍待空闲窗口。
 
 
 

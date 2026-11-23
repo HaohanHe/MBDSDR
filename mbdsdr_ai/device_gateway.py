@@ -483,6 +483,16 @@ class DeviceGateway:
         self._thread: Optional[threading.Thread] = None
 
     # ------------------------------------------------------------------ 位姿
+    @property
+    def sdr_lease_enabled(self) -> bool:
+        """是否已配置 rtl_tcp（决定能否签发 SDR 授权）。"""
+        return self._rtl_tcp_provider is not None
+
+    @property
+    def sdr_lease_endpoint(self) -> Optional[Tuple[str, int]]:
+        """当前 rtl_tcp 地址（未配置/非法为 None）。"""
+        return self._rtl_tcp_endpoint()
+
     def recent_poses(self) -> List[Dict[str, Any]]:
         with self._poses_lock:
             rows = list(self._poses.values())
@@ -539,7 +549,7 @@ class DeviceGateway:
                 "pairing_required": True,
                 "roles": list(ROLES),
                 "lan": self.allow_lan,
-                "sdr_lease": self._rtl_tcp_provider is not None,
+                "sdr_lease": self.sdr_lease_enabled,
             }), "application/json"
 
         if route == "/pair":

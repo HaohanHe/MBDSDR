@@ -16,6 +16,7 @@ import ipaddress
 import os
 import socket
 import sys
+import time
 from typing import Callable, List, Optional, Tuple
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -80,7 +81,8 @@ class DeviceGatewayDialog(QDialog):
 
         tip = QLabel(
             "给第二台手机（镜头/目镜/手持）或头显配对用。网关只有只读端点，"
-            "不改站址、不调谐、不发射；选本地 TLE 文件后额外启用离线 /passes。"
+            "不改站址、不调谐、不发射；选本地 TLE 文件后额外启用离线 /passes；"
+            "填 rtl_tcp 地址后可给头显签发 SDR 独占授权（网关不碰 dongle）。"
             "关闭本窗口会停止网关。")
         tip.setWordWrap(True)
         tip.setStyleSheet("color:#5B7B8C;")
@@ -114,6 +116,15 @@ class DeviceGatewayDialog(QDialog):
         self.tle_browse_btn.clicked.connect(self.browse_tle)
         tle_row.addWidget(self.tle_browse_btn)
         form.addRow("TLE 文件", tle_row)
+
+        self.sdr_edit = QLineEdit()
+        self.sdr_edit.setPlaceholderText(
+            "可选：rtl_tcp 地址 HOST:PORT（如 127.0.0.1:1234）；"
+            "提供则允许头显申请 SDR 一次性授权")
+        form.addRow("rtl_tcp", self.sdr_edit)
+        self.desktop_busy_check = QCheckBox(
+            "桌面自报正在占用 SDR（勾选后拒绝签发头显授权）")
+        form.addRow("", self.desktop_busy_check)
         outer.addLayout(form)
 
         row = QHBoxLayout()
@@ -166,6 +177,12 @@ class DeviceGatewayDialog(QDialog):
             Qt.TextInteractionFlag.TextSelectableByMouse)
         outer.addWidget(self.eye_id_label)
 
+        self.sdr_label = QLabel("SDR 授权：—")
+        self.sdr_label.setWordWrap(True)
+        self.sdr_label.setTextInteractionFlags(
+            Qt.TextInteractionFlag.TextSelectableByMouse)
+        outer.addWidget(self.sdr_label)
+
         self.table = QTableWidget(0, 3)
         self.table.setHorizontalHeaderLabels(["角色", "设备名", "最近心跳"])
         self.table.verticalHeader().setVisible(False)
@@ -189,11 +206,14 @@ class DeviceGatewayDialog(QDialog):
         self.allow_live_check.setEnabled(not running)
         self.tle_edit.setEnabled(not running)
         self.tle_browse_btn.setEnabled(not running)
+        self.sdr_edit.setEnabled(not running)
+        self.desktop_busy_check.setEnabled(not running)
         if not running:
             self.code_label.setText("—")
             self.url_label.setText("网关未启动")
             self.fuse_label.setText("融合位姿：—")
             self.eye_id_label.setText("目镜识别：—")
+            self.sdr_label.setText("SDR 授权：—")
             self.table.setRowCount(0)
             self.status.setText("未启动。选地址后点「启动网关」。")
 
@@ -202,6 +222,10 @@ class DeviceGatewayDialog(QDialog):
             return
         host = self.host_combo.currentText().strip() or "127.0.0.1"
         allow_lan = host != "127.0.0.1"
+        rtl_provider, rtl_error = self._parse_rtl_tcp()
+        if rtl_error is not None:
+            self.status.setText(f"{rtl_error}；网关未启动")
+            return
         provider = build_station_panorama_provider(
             self._station_provider,
             allow_live=self.allow_live_check.isChecked(),
@@ -212,7 +236,10 @@ class DeviceGatewayDialog(QDialog):
                                allow_lan=allow_lan,
                                registry=self._registry,
                                panorama_provider=provider,
-                               passes_provider=passes_provider)
+                               passes_provider=passes_provider,
+                               rtl_tcp_provider=rtl_provider,
+                               desktop_sdr_busy=(
+                                   lambda: self.desktop_busy_check.isChecked()))
             url = gw.start()
         except Exception as exc:  # noqa: BLE001 - 启动失败必须可见
             QMessageBox.warning(self, "网关启动失败",
@@ -234,15 +261,33 @@ class DeviceGatewayDialog(QDialog):
         passes_note = ("；/passes 已启用（本地 TLE 离线 SGP4）"
                        if passes_provider is not None
                        else "；/passes 未启用（TLE 文件留空）")
+        sdr_note = ("；SDR 授权已启用（可签发给 headset）"
+                    if rtl_provider is not None
+                    else "；SDR 授权未启用（rtl_tcp 留空）")
         if self._station_missing:
             self.status.setText(
                 "网关已启动，但当前未设置站址：/panorama 会回 500，"
-                "请先设置观测位置（GNSS/手填）。" + passes_note)
+                "请先设置观测位置（GNSS/手填）。" + passes_note + sdr_note)
         else:
             self.status.setText(
                 "网关已启动。手机/头显用配对码换 token 后即可读 /panorama、"
-                "/roster；没有写硬件端点。" + passes_note)
+                "/roster；没有写硬件端点。" + passes_note + sdr_note)
         self._refresh_roster()
+
+    def _parse_rtl_tcp(self):
+        """解析「rtl_tcp」输入：空 = 不启用；非法 = 返回 (None, 原因)。"""
+        raw = self.sdr_edit.text().strip()
+        if not raw:
+            return None, None
+        host, _, port_text = raw.rpartition(":")
+        try:
+            port = int(port_text)
+        except ValueError:
+            port = 0
+        host = host.strip()
+        if not host or not (1 <= port <= 65535):
+            return None, f"rtl_tcp 地址必须是 HOST:PORT（1–65535），当前是 {raw!r}"
+        return (lambda h=host, p=port: (h, p)), None
 
     def _safe_station(self):
         try:
@@ -309,20 +354,25 @@ class DeviceGatewayDialog(QDialog):
         poses = gw.recent_poses()
         self._update_fuse_label(gw)
         self._update_eyepiece_id_label(poses)
+        self._update_sdr_label(gw)
         passes_note = ("；/passes 已启用（本地 TLE 离线 SGP4）"
                        if getattr(self, "_passes_enabled", False)
                        else "；/passes 未启用（TLE 文件留空）")
+        sdr_note = ("；SDR 授权已启用"
+                    if gw.sdr_lease_enabled
+                    else "；SDR 授权未启用")
         if getattr(self, "_station_missing", False):
             self.status.setText(
                 f"已配对 {len(devices)} 台；当前未设置站址：/panorama 会回 500"
-                "（先设置观测位置）。" + passes_note)
+                "（先设置观测位置）。" + passes_note + sdr_note)
         elif poses:
             self.status.setText(
                 f"已配对 {len(devices)} 台；收到 {len(poses)} 个设备的位姿。"
-                + passes_note)
+                + passes_note + sdr_note)
         else:
             self.status.setText(
-                f"已配对 {len(devices)} 台；暂无位姿上报。" + passes_note)
+                f"已配对 {len(devices)} 台；暂无位姿上报。"
+                + passes_note + sdr_note)
 
     def _update_fuse_label(self, gw: DeviceGateway) -> None:
         """把 lens+eyepiece 的融合结果如实显示；不可用时给原因，不猜朝向。"""
@@ -344,6 +394,31 @@ class DeviceGatewayDialog(QDialog):
                 acc=float(fused["accuracy_deg"]), level=level,
                 n=fused.get("observations", 0),
                 src=", ".join(str(s) for s in fused.get("sources") or [])))
+
+    def _update_sdr_label(self, gw: DeviceGateway) -> None:
+        """SDR 授权状态：空闲/谁占用/剩余秒数；未配置 rtl_tcp 时明说未启用。"""
+        if not gw.sdr_lease_enabled:
+            self.sdr_label.setText("SDR 授权：未启用（rtl_tcp 留空）")
+            return
+        endpoint = gw.sdr_lease_endpoint
+        endpoint_text = (f"{endpoint[0]}:{endpoint[1]}"
+                         if endpoint is not None else "配置无效")
+        try:
+            data = gw.sdr_leases.status()
+        except Exception as exc:  # noqa: BLE001 - 失败要可见
+            self.sdr_label.setText(f"SDR 授权：状态读取失败（{exc}）")
+            return
+        lease = data.get("lease")
+        if not lease:
+            self.sdr_label.setText(
+                f"SDR 授权：空闲（rtl_tcp {endpoint_text}，可签发给头显）")
+            return
+        remaining = max(0, int(float(lease["expires_unix"]) - time.time()))
+        suffix = "（桌面自报占用，暂停签发）" if (
+            self.desktop_busy_check.isChecked()) else ""
+        self.sdr_label.setText(
+            f"SDR 授权：{lease['role']}「{lease['name']}」占用中，"
+            f"剩 {remaining}s（rtl_tcp {endpoint_text}）{suffix}")
 
     def _update_eyepiece_id_label(self, poses) -> None:
         """目镜识别结果单独一行，不并进粗指向/融合位姿。"""
