@@ -356,3 +356,56 @@ def test_sdr_lease_label_and_desktop_busy_refusal(qapp):
         assert dlg.sdr_label.text() == "SDR 授权：—"
     finally:
         dlg.close()
+
+
+def test_status_endpoint_from_dialog(qapp):
+    """/status 走对话框的站址与 SDR 段；未探测 dongle 要如实标注。"""
+    import json
+
+    from device_gateway_dialog import DeviceGatewayDialog
+
+    dlg = DeviceGatewayDialog(_station(), port=0, hosts=["127.0.0.1"],
+                              registry=_registry())
+    try:
+        dlg.sdr_edit.setText("127.0.0.1:1234")
+        dlg.start_gateway()
+        gw = dlg._gateway
+        paired = gw.registry.pair("111111", "手机", "handheld")
+        status, raw, _ = gw.dispatch(
+            "GET", "/status", b"",
+            {"Authorization": "Bearer " + paired["token"]})
+        assert status == 200
+        data = json.loads(raw)
+        assert data["schema"] == "mbdsdr.desktop-status/1"
+        assert data["authority"] == "desktop"
+        assert data["station"] == {
+            "lat_deg": 45.0, "lon_deg": 120.0, "alt_m": 10.0}
+        assert data["sdr"]["rtl_tcp"] == {"host": "127.0.0.1", "port": 1234}
+        assert data["sdr"]["lease_active"] is False
+        assert data["sdr"]["dongle_probed"] is False
+        assert data["missing"] == []
+    finally:
+        dlg.close()
+
+
+def test_status_without_station_marks_missing(qapp):
+    import json
+
+    from device_gateway_dialog import DeviceGatewayDialog
+
+    dlg = DeviceGatewayDialog(lambda: (None, None, None), port=0,
+                              hosts=["127.0.0.1"], registry=_registry())
+    try:
+        dlg.start_gateway()
+        gw = dlg._gateway
+        paired = gw.registry.pair("111111", "手机", "handheld")
+        status, raw, _ = gw.dispatch(
+            "GET", "/status", b"",
+            {"Authorization": "Bearer " + paired["token"]})
+        assert status == 200
+        data = json.loads(raw)
+        assert data["station"] is None
+        assert "station" in data["missing"]
+        assert "sdr" in data["missing"]  # rtl_tcp 留空
+    finally:
+        dlg.close()

@@ -10,7 +10,8 @@
    token 只在内存里，带 TTL，可吊销。
 2. **角色**：`lens`（镜头粗指向）/ `eyepiece`（目镜认星）/ `handheld`（手持只读）
    / `headset`（空间化只读）。角色不符就拒绝对应动作。
-3. **只读 + 位姿**：`/panorama`、`/passes`、`/roster`、`/poses`、`/fuse` 是读；
+3. **只读 + 位姿**：`/panorama`、`/passes`、`/status`、`/roster`、`/poses`、
+   `/fuse` 是读；
    只有 `lens/eyepiece` 能 `POST /pose`。**没有任何写硬件/改站址/调谐端点**——
    那些仍归桌面权威端。
 4. **多机融合**：`/fuse` 把两条位姿喂给 `sky_pointing.fuse_poses`（与
@@ -78,6 +79,8 @@ DEFAULT_TOKEN_TTL_S = 12 * 3600.0
 
 #: 过境预报信封 schema（头显/手机增量拉取用）。
 PASSES_SCHEMA = "mbdsdr.sat-passes/1"
+#: 权威端状态信封 schema（只读 /status）。
+STATUS_SCHEMA = "mbdsdr.desktop-status/1"
 #: SDR 一次性授权信封 schema。
 SDR_LEASE_SCHEMA = "mbdsdr.sdr-lease/1"
 #: 默认租约时长：到期自动失效，持有者可续租。
@@ -462,6 +465,7 @@ class DeviceGateway:
                  registry: Optional[PairingRegistry] = None,
                  panorama_provider: Optional[Callable[[], Dict[str, Any]]] = None,
                  passes_provider: Optional[Callable[[], Dict[str, Any]]] = None,
+                 status_provider: Optional[Callable[[], Dict[str, Any]]] = None,
                  sdr_lease: Optional[SdrLeaseRegistry] = None,
                  rtl_tcp_provider: Optional[Callable[[], Tuple[str, int]]] = None,
                  desktop_sdr_busy: Optional[Callable[[], bool]] = None,
@@ -472,6 +476,7 @@ class DeviceGateway:
         self.registry = registry or PairingRegistry()
         self._panorama_provider = panorama_provider
         self._passes_provider = passes_provider
+        self._status_provider = status_provider
         #: SDR 租约（M4.2）：只发「谁可以用」，不碰硬件；未配置 rtl_tcp 时 503。
         self.sdr_leases = sdr_lease or SdrLeaseRegistry()
         self._rtl_tcp_provider = rtl_tcp_provider
@@ -651,6 +656,28 @@ class DeviceGateway:
             if not isinstance(data, dict):
                 return 500, self._json({
                     "ok": False, "error": "passes_bad_shape",
+                    "reason": "provider 必须返回对象",
+                }), "application/json"
+            return 200, self._json(data), "application/json"
+
+        if route == "/status":
+            if method != "GET":
+                return 405, self._json({"ok": False, "error": "method_not_allowed"}), "application/json"
+            if self._status_provider is None:
+                return 503, self._json({
+                    "ok": False, "error": "status_unavailable",
+                    "reason": "权威端尚未接入状态提供者",
+                }), "application/json"
+            try:
+                data = self._status_provider()
+            except Exception as exc:  # noqa: BLE001 - 失败要可见
+                return 500, self._json({
+                    "ok": False, "error": "status_failed",
+                    "reason": f"{type(exc).__name__}: {exc}",
+                }), "application/json"
+            if not isinstance(data, dict):
+                return 500, self._json({
+                    "ok": False, "error": "status_bad_shape",
                     "reason": "provider 必须返回对象",
                 }), "application/json"
             return 200, self._json(data), "application/json"
@@ -1004,6 +1031,63 @@ def build_station_passes_provider(
     return provider
 
 
+def build_desktop_status_provider(
+        station_provider: Callable[[], Tuple[Optional[float], Optional[float],
+                                             Optional[float]]],
+        *, sdr_status_provider: Optional[Callable[[], Dict[str, Any]]] = None,
+) -> Callable[[], Dict[str, Any]]:
+    """`/status` 的默认实现：站址 + SDR 状态，缺什么就写进 `missing`。
+
+    不把「配置了 rtl_tcp 地址」当成「dongle 已连接」；SDR 连接/调谐状态必须
+    由调用方提供，否则该项为 null 且 `missing` 包含 `sdr`。
+    """
+
+    def provider() -> Dict[str, Any]:
+        missing: List[str] = []
+        station = None
+        try:
+            lat, lon, alt = station_provider()
+        except Exception as exc:  # noqa: BLE001 - 状态失败要可见
+            lat = lon = alt = None
+            missing.append(f"station: {type(exc).__name__}: {exc}")
+        if lat is None or lon is None:
+            if not missing:
+                missing.append("station")
+        else:
+            station = {
+                "lat_deg": float(lat),
+                "lon_deg": float(lon),
+                "alt_m": None if alt is None else float(alt),
+            }
+
+        sdr = None
+        if sdr_status_provider is None:
+            missing.append("sdr")
+        else:
+            try:
+                raw = sdr_status_provider()
+            except Exception as exc:  # noqa: BLE001
+                missing.append(f"sdr: {type(exc).__name__}: {exc}")
+            else:
+                if raw is None:
+                    missing.append("sdr")
+                elif isinstance(raw, dict):
+                    sdr = raw
+                else:
+                    missing.append("sdr: provider 必须返回对象")
+
+        return {
+            "schema": STATUS_SCHEMA,
+            "at_utc": _iso(_utc_now()),
+            "authority": "desktop",
+            "station": station,
+            "sdr": sdr,
+            "missing": missing,
+        }
+
+    return provider
+
+
 def _main(argv: Optional[List[str]] = None) -> int:
     import argparse
 
@@ -1055,11 +1139,32 @@ def _main(argv: Optional[List[str]] = None) -> int:
             return host_fixed, port_fixed
 
         rtl_tcp_provider = _rtl_provider
+
+    def _status_station():
+        la, lo = args.lat, args.lon
+        if la is None or lo is None:
+            from . import space_weather as sw
+            la, lo = sw.default_station()
+        return la, lo, None
+
+    sdr_status_provider = None
+    if rtl_tcp_provider is not None:
+        def sdr_status_provider() -> Dict[str, Any]:
+            host_v, port_v = rtl_tcp_provider()
+            return {
+                "rtl_tcp": {"host": host_v, "port": port_v},
+                "dongle_probed": False,
+                "reason": "仅配置了 rtl_tcp 地址，未探测 dongle",
+            }
+
+    status_provider = build_desktop_status_provider(
+        _status_station, sdr_status_provider=sdr_status_provider)
     try:
         gw = DeviceGateway(host=args.host, port=args.port,
                            allow_lan=args.allow_lan,
                            panorama_provider=provider,
                            passes_provider=passes_provider,
+                           status_provider=status_provider,
                            rtl_tcp_provider=rtl_tcp_provider)
     except ValueError as exc:
         print(f"绑定被拒绝：{exc}")
@@ -1068,7 +1173,7 @@ def _main(argv: Optional[List[str]] = None) -> int:
     print(f"设备网关已启动：{url}")
     print(f"配对码：{gw.registry.code}（只给权威端看，不进 API 回执）")
     print("可用端点：GET /health、POST /pair、GET /roster、GET /panorama、"
-          "GET /passes、POST /pose、GET /poses、GET /fuse、"
+          "GET /passes、GET /status、POST /pose、GET /poses、GET /fuse、"
           "GET/POST /sdr/lease、POST /sdr/release；没有写硬件端点。")
     print("全景数据：" + ("允许联网现采" if args.allow_live
                         else "只读 15 分钟内缓存快照（--allow-live 可现采）"))

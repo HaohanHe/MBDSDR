@@ -101,8 +101,12 @@ python main.py --import-probe desktop.main_window  # 只做导入自检，不建
 - 启动后显示 6 位配对码：第二台手机（镜头/目镜/手持）或头显用它换 token。
   可轮换配对码（旧码立即失效，已配对设备不受影响）或复制。
 - 名册每 2 s 刷新（角色/设备名/最近心跳）；关闭窗口会停止网关。
-- 端点：`/health`、`/pair`、`/roster`、`/panorama`、`/passes`、`/poses`、
-  `/fuse`，以及仅镜头/目镜可用的 `POST /pose`。**没有任何写硬件/改站址端点**。
+- 端点：`/health`、`/pair`、`/roster`、`/panorama`、`/passes`、`/status`、
+  `/poses`、`/fuse`，以及仅镜头/目镜可用的 `POST /pose`。
+  **没有任何写硬件/改站址端点**。
+- `/status`（`mbdsdr.desktop-status/1`）：站址 + SDR 段 + `missing`；
+  SDR 段明确 `dongle_probed=false`——只报「配置了 rtl_tcp 地址/租约状态」，
+  不假装知道 dongle 正在收；未接入 provider 时 503，provider 失败 500。
 - SDR 一次性授权（M4.2 协议层）：CLI 以 `--rtl-tcp HOST:PORT` 启动网关后，
   头显可 `POST /sdr/lease` 申请**独占**租约（默认 300 s，可续租），
   `GET /sdr/lease` 查「谁占着/到何时」，`POST /sdr/release` 由持有者释放。

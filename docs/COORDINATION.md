@@ -2963,6 +2963,18 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `.trae/specs/mbdsdr-system-lifecycle/checklist.md` | 多机线/42（§282 回环 TCP） | 2026-11-24 00:09 | 本笔 |
 | `docs/PRD-现状对照.md` | 多机线/42（§282 P1-11 补回环 TCP） | 2026-11-24 00:09 | 本笔 |
 | `docs/COORDINATION.md` | 多机线/42（§282 记录 + §6.1） | 2026-11-24 00:09 | 本笔 |
+| `mbdsdr_ai/device_gateway.py` | 多机线/42（§283 /status + build_desktop_status_provider + CLI） | 2026-11-24 00:13 | 本笔 |
+| `desktop/device_gateway_dialog.py` | 多机线/42（§283 对话框 /status 接线） | 2026-11-24 00:13 | 本笔 |
+| `tests/test_device_gateway.py` | 多机线/42（§283 /status 4 条用例） | 2026-11-24 00:13 | 本笔 |
+| `tests/test_desktop_device_gateway_dialog.py` | 多机线/42（§283 /status 2 条用例） | 2026-11-24 00:13 | 本笔 |
+| `desktop/README.md` | 多机线/42（§283 /status 说明） | 2026-11-24 00:13 | 本笔 |
+| `.trae/specs/multi-device-interconnect/spec.md` | 多机线/42（§283 契约 5.5 + 验收现状） | 2026-11-24 00:13 | 本笔 |
+| `.trae/specs/multi-device-interconnect/tasks.md` | 多机线/42（§283 Task M2.5） | 2026-11-24 00:13 | 本笔 |
+| `.trae/specs/multi-device-interconnect/checklist.md` | 多机线/42（§283 /status 项） | 2026-11-24 00:13 | 本笔 |
+| `.trae/specs/mbdsdr-system-lifecycle/tasks.md` | 多机线/42（§283 Task 237） | 2026-11-24 00:13 | 本笔 |
+| `.trae/specs/mbdsdr-system-lifecycle/checklist.md` | 多机线/42（§283 Task 237） | 2026-11-24 00:13 | 本笔 |
+| `docs/PRD-现状对照.md` | 多机线/42（§283 P1-11 补 /status） | 2026-11-24 00:13 | 本笔 |
+| `docs/COORDINATION.md` | 多机线/42（§283 记录 + §6.1） | 2026-11-24 00:13 | 本笔 |
 
 > 上表各行均由 `claim` 台账推导：owner 原文与 `acquired_at` 直接取自台账，
 > 目的优先用台账里的 `claim_reason`，没有就如实写「未声明」，不补编。时间列只是
@@ -13589,6 +13601,36 @@ spec 的 M4.3 要求「未联网时显示上次结果/包内内容，不伪造�
 - 假服务器只讲协议，不模拟 tuner 行为/丢包/半包边界；真实 rtl_tcp 的
   短读与延迟仍未实测。
 - 面板的读取循环与 UI 仍只编译验证，未真机跑。
+
+## 283. 权威端只读 `/status`（2026-11-24）
+
+**依据**：spec 阶段 1 列了 `/status`，但网关此前只有 `/panorama` `/passes`；
+手机/头显拿不到「权威端站址 + SDR 配置/租约」的统一快照，只能各自拼。
+
+**做了什么**
+- 新 `build_desktop_status_provider`：`mbdsdr.desktop-status/1`
+  - `station`：经纬度/海拔；缺站址 → null + `missing: ["station"]`；
+  - `sdr`：由调用方提供；未提供/返回 None → null + `missing: ["sdr"]`；
+    provider 抛错或返回非对象 → 写进 `missing`，接口仍 200 不谎报；
+  - **`dongle_probed=false`**：明确只报配置与租约，不假装知道 dongle 在收。
+- `GET /status`：需设备 token；未接 provider 503 `status_unavailable`、
+  抛错 500 `status_failed`、非对象 500 `status_bad_shape`、POST 405。
+- CLI：始终接入（站址每次读取、rtl_tcp 段只报配置）；桌面对话框：站址取
+  主窗当前值，SDR 段取租约状态与 rtl_tcp 配置。
+- spec 新增契约 **5.5** 并更新阶段 1 现状；`/spectrum` 仍未实现。
+
+**验证**
+- `test_device_gateway.py` +4：token/未接 provider、payload/405、
+  provider 失败与形状、builder 的 missing/错误/正常路径。
+- 对话框 +2：有站址 + rtl_tcp 的 `/status`（station/sdr/lease_active/
+  dongle_probed/missing 全断言）；无站址 + 无 rtl 时 `missing` 含 station/sdr。
+- `pytest tests/test_device_gateway.py tests/test_desktop_device_gateway_dialog.py`
+  → **59 passed**。
+- 未改手机/头显；既有基线不受影响。
+
+**诚实边界**
+- 不探测 dongle，也不知道桌面是否真在收；`sdr` 段只是配置/租约快照。
+- `/spectrum` 只读快照未做；没有自动发现/推送，设备仍需手动 GET。
 
 
 

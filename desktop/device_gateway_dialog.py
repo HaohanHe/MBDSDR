@@ -31,8 +31,8 @@ from PySide6.QtWidgets import (  # noqa: E402
 )
 
 from mbdsdr_ai.device_gateway import (  # noqa: E402
-    DeviceGateway, build_station_panorama_provider,
-    build_station_passes_provider,
+    DeviceGateway, build_desktop_status_provider,
+    build_station_panorama_provider, build_station_passes_provider,
 )
 
 
@@ -231,12 +231,16 @@ class DeviceGatewayDialog(QDialog):
             allow_live=self.allow_live_check.isChecked(),
             site_note="桌面权威端")
         passes_provider = self._build_passes_provider()
+        status_provider = build_desktop_status_provider(
+            self._safe_station,
+            sdr_status_provider=self._sdr_status_for_status)
         try:
             gw = DeviceGateway(host=host, port=self.port_spin.value(),
                                allow_lan=allow_lan,
                                registry=self._registry,
                                panorama_provider=provider,
                                passes_provider=passes_provider,
+                               status_provider=status_provider,
                                rtl_tcp_provider=rtl_provider,
                                desktop_sdr_busy=(
                                    lambda: self.desktop_busy_check.isChecked()))
@@ -294,6 +298,22 @@ class DeviceGatewayDialog(QDialog):
             return self._station_provider()
         except Exception:
             return None, None, None
+
+    def _sdr_status_for_status(self):
+        """给 `/status` 的 SDR 段：只报配置/租约，明确「未探测 dongle」。"""
+        gw = self._gateway
+        if gw is None or not gw.sdr_lease_enabled:
+            return None
+        endpoint = gw.sdr_lease_endpoint
+        data = gw.sdr_leases.status()
+        return {
+            "rtl_tcp": (None if endpoint is None
+                        else {"host": endpoint[0], "port": endpoint[1]}),
+            "lease_active": bool(data.get("active")),
+            "lease": data.get("lease"),
+            "dongle_probed": False,
+            "reason": "仅配置了 rtl_tcp 地址与租约状态，未探测 dongle",
+        }
 
     def browse_tle(self) -> None:
         """选择本地 TLE 文件；留空 = 不启用 /passes。"""

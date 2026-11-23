@@ -22,7 +22,8 @@ if _ROOT not in sys.path:
 
 from mbdsdr_ai.device_gateway import (  # noqa: E402
     DeviceGateway, PairingRegistry, SdrLeaseRegistry,
-    build_station_passes_provider, build_tle_passes_provider, parse_tle_groups,
+    build_desktop_status_provider, build_station_passes_provider,
+    build_tle_passes_provider, parse_tle_groups,
 )
 
 
@@ -728,4 +729,82 @@ def test_sdr_lease_has_no_tuning_or_write_endpoints():
     for path in ("/sdr/tune", "/sdr/gain", "/sdr/start", "/bridge/tune"):
         status, d = _get(gw, path, tokens["headset"])
         assert status == 404 and d["error"] == "not_found"
+
+
+# ---------------------------------------------------------------- /status
+
+def test_status_requires_provider_and_token():
+    gw = DeviceGateway(registry=_registry())
+    status, d = _get(gw, "/status")
+    assert status == 401
+    _pair(gw)
+    status, d = _get(gw, "/status", "tok-lens-1")
+    assert status == 503 and d["error"] == "status_unavailable"
+    assert "状态提供者" in d["reason"]
+
+
+def test_status_returns_provider_payload_and_rejects_post():
+    payload = {
+        "schema": "mbdsdr.desktop-status/1",
+        "authority": "desktop",
+        "station": None,
+        "sdr": None,
+        "missing": ["station", "sdr"],
+    }
+    gw = DeviceGateway(registry=_registry(), status_provider=lambda: payload)
+    _pair(gw)
+    status, d = _get(gw, "/status", "tok-lens-1")
+    assert status == 200
+    assert d["schema"] == "mbdsdr.desktop-status/1"
+    assert d["missing"] == ["station", "sdr"]
+
+    status, raw, _ = gw.dispatch(
+        "POST", "/status", b"", {"Authorization": "Bearer tok-lens-1"})
+    assert status == 405
+
+
+def test_status_provider_failure_and_shape_are_visible():
+    def boom():
+        raise RuntimeError("状态板掉线")
+
+    gw = DeviceGateway(registry=_registry(), status_provider=boom)
+    _pair(gw)
+    status, d = _get(gw, "/status", "tok-lens-1")
+    assert status == 500 and d["error"] == "status_failed"
+    assert "状态板掉线" in d["reason"]
+
+    gw2 = DeviceGateway(registry=_registry(), status_provider=lambda: ["不是对象"])
+    _pair(gw2)
+    status, d2 = _get(gw2, "/status", "tok-lens-1")
+    assert status == 500 and d2["error"] == "status_bad_shape"
+
+
+def test_status_provider_builder_marks_missing_and_errors():
+    empty = build_desktop_status_provider(lambda: (None, None, None))()
+    assert empty["station"] is None and empty["sdr"] is None
+    assert "station" in empty["missing"] and "sdr" in empty["missing"]
+    assert empty["authority"] == "desktop"
+
+    full = build_desktop_status_provider(
+        lambda: (45.0, 120.0, 10.0),
+        sdr_status_provider=lambda: {
+            "rtl_tcp": {"host": "127.0.0.1", "port": 1234},
+            "dongle_probed": False,
+        })()
+    assert full["station"] == {
+        "lat_deg": 45.0, "lon_deg": 120.0, "alt_m": 10.0}
+    assert full["missing"] == []
+    assert full["sdr"]["rtl_tcp"]["port"] == 1234
+
+    def boom_sdr():
+        raise RuntimeError("读不到")
+
+    broken = build_desktop_status_provider(
+        lambda: (45.0, 120.0, None), sdr_status_provider=boom_sdr)()
+    assert broken["sdr"] is None
+    assert any("sdr: RuntimeError: 读不到" in m for m in broken["missing"])
+
+    shape = build_desktop_status_provider(
+        lambda: (45.0, 120.0, None), sdr_status_provider=lambda: "x")()
+    assert any("必须返回对象" in m for m in shape["missing"])
 
