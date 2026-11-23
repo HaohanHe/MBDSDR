@@ -101,6 +101,10 @@ ppm/AGC），并把 8-bit 无符号 I/Q 归一化到 [-1, 1)。越界值本地�
 `close` 幂等。传输可注入（`RtlTcpTransport`），JVM 单测完全离线；
 **尚未接授权流程/面板 UI，也没有频谱显示**。
 
+`dsp/SpectrumAnalyzer.kt` 是显示前最后一块纯数值：Hamming 窗 + radix-2 FFT，
+输出**已搬移**的 N 点幅度谱（`N/2` 是中心频率，右正左负），并给逐点频率。
+它不依赖 Android、不做 dB/平滑；同样**未接 UI**。
+
 传输可注入（`GatewayTransport`），JVM 单测完全离线；默认实现是
 `HttpURLConnection`（6 s 超时）。主窗口「头顶」已接一个只读网关面板：
 填主机/端口/6 位配对码 →「配对」→「刷新全景」「刷新过境」，结果显示为

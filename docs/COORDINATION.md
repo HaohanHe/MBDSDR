@@ -2923,6 +2923,15 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `.trae/specs/mbdsdr-system-lifecycle/checklist.md` | 多机线/42（§278 Task 233） | 2026-11-23 23:52 | 本笔 |
 | `docs/PRD-现状对照.md` | 多机线/42（§278 P1-11 补客户端） | 2026-11-23 23:52 | 本笔 |
 | `docs/COORDINATION.md` | 多机线/42（§278 记录 + §6.1） | 2026-11-23 23:52 | 本笔 |
+| `spatial/app/src/main/java/com/mbdsdr/spatial/dsp/SpectrumAnalyzer.kt` | 多机线/42（§279 Hamming + FFT 搬移谱） | 2026-11-23 23:56 | 本笔 |
+| `spatial/app/src/test/java/com/mbdsdr/spatial/SpectrumAnalyzerTest.kt` | 多机线/42（§279 幅度谱 8 条用例） | 2026-11-23 23:56 | 本笔 |
+| `spatial/README.md` | 多机线/42（§279 谱分析边界） | 2026-11-23 23:56 | 本笔 |
+| `.trae/specs/multi-device-interconnect/tasks.md` | 多机线/42（§279 M4.2 谱状态） | 2026-11-23 23:56 | 本笔 |
+| `.trae/specs/multi-device-interconnect/checklist.md` | 多机线/42（§279 谱分析项） | 2026-11-23 23:56 | 本笔 |
+| `.trae/specs/mbdsdr-system-lifecycle/tasks.md` | 多机线/42（§279 Task 234） | 2026-11-23 23:56 | 本笔 |
+| `.trae/specs/mbdsdr-system-lifecycle/checklist.md` | 多机线/42（§279 Task 234） | 2026-11-23 23:56 | 本笔 |
+| `docs/PRD-现状对照.md` | 多机线/42（§279 P1-11 补谱分析） | 2026-11-23 23:56 | 本笔 |
+| `docs/COORDINATION.md` | 多机线/42（§279 记录 + §6.1） | 2026-11-23 23:56 | 本笔 |
 
 > 上表各行均由 `claim` 台账推导：owner 原文与 `acquired_at` 直接取自台账，
 > 目的优先用台账里的 `claim_reason`，没有就如实写「未声明」，不补编。时间列只是
@@ -13435,6 +13444,34 @@ spec 的 M4.3 要求「未联网时显示上次结果/包内内容，不伪造�
   现在仍不能对用户说「头显能直接收频谱」。
 - 未在 PICO/Android 真机建过真实 TCP；真实 rtl_tcp 的短读行为只按协议假设。
 - 授权到期后本客户端不会自动断开——上层需要在租约释放时调用 `close()`。
+
+## 279. M4.2 幅度谱：Hamming + radix-2 FFT（2026-11-23）
+
+**依据**：§278 能拿到 I/Q 字节，但屏幕上要画频谱还差「字节 → 频点幅度」。
+这层口径（中心在哪、左右正负）一旦画反，用户会按反方向找信号，所以先锁死
+纯数值与单测，再接 UI。
+
+**做了什么**
+- 新 `spatial/.../dsp/SpectrumAnalyzer.kt`（纯 Kotlin，无 Android 依赖）：
+  - `magnitudeSpectrum(iq, fftSize)`：Hamming 窗 + 迭代 radix-2 FFT；
+    输出长度 N 的幅度谱，并**搬移**到「索引 N/2 = 中心频率、右正左负」。
+  - `binFrequencies(center, sampleRate, fftSize)`：逐点 Hz，索引与谱一一对应。
+  - 非 2 的幂/太小/输入不足/采样率非正 → `IllegalArgumentException`；
+    多余输入只取前 N 点。
+- 不做 dB、平滑、峰值标记：留给 UI/策略层。
+
+**验证**
+- 新 `SpectrumAnalyzerTest` 8 条：DC → 峰值在 N/2；正频 k=8 → N/2+8；
+  负频 → N/2-8；静音全零；坏尺寸 3 组；多余输入忽略；频率数组中心/首末/单调；
+  非法采样率与奇尺寸。
+- `./gradlew.bat testDebugUnitTest --rerun-tasks --no-daemon --offline`：
+  **21 suite / 188 用例 / 0 失败 / 1 跳过**。
+- 未改 Python/手机；未用真实 I/Q 对拍（dongle 仍被模拟器会话占用）。
+
+**诚实边界**
+- 只有纯幅度，没有 dBm 标定/天线增益/滤波补偿；不能拿数值当绝对功率。
+- 未接 rtl_tcp 读取循环与 UI；没有帧率/实时性验证。
+- 测试音是合成复数指数，不等于真实信号环境。
 
 
 
