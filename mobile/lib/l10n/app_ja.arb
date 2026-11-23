@@ -42,6 +42,52 @@
   "settingsChHostHint": "既定 127.0.0.1；空欄 = 無効、例：192.168.1.20",
   "settingsChPortHint": "既定 50732",
   "settingsChHelp": "/status、/pocsag_messages、/m17_calls、/vor_radial を読み取り専用で取得。デコードはデスクトップエンジンで行われ、モバイルはビューアです。",
+  "settingsSectionDeviceGateway": "マルチデバイスゲートウェイ（ペアリング）",
+  "settingsGatewayHelp": "デスクトップのゲートウェイを起動したら、ペアリングコードで本機を役割に紐付けます。ペアリング後のみ名簿とパノラマを読めます。本機は同調・録音・観測地点の変更を送りません。",
+  "settingsGatewayEndpoint": "デスクトップゲートウェイ：{endpoint}（ホストは ControlHub セクション由来）",
+  "@settingsGatewayEndpoint": {
+    "placeholders": {
+      "endpoint": {"type": "String"}
+    }
+  },
+  "settingsGatewayPortHint": "既定 8771",
+  "settingsGatewayHostMissing": "先に ControlHub セクションでデスクトップのホストを入力してください",
+  "settingsGatewayDeviceName": "デバイス名",
+  "settingsGatewayDeviceNameHint": "例：Phone A（レンズ）",
+  "settingsGatewayRole": "役割",
+  "settingsGatewayRoleLens": "レンズ（粗い視覚照準）",
+  "settingsGatewayRoleEyepiece": "接眼（星の同定）",
+  "settingsGatewayRoleHandheld": "ハンドヘルド（読み取り専用）",
+  "settingsGatewayRoleHeadset": "ヘッドセット（読み取り専用）",
+  "settingsGatewayCode": "ペアリングコード",
+  "settingsGatewayPair": "ペアリング",
+  "settingsGatewayUnpair": "ペアリング解除",
+  "settingsGatewayPaired": "ペアリング済み · {role}",
+  "@settingsGatewayPaired": {
+    "placeholders": {
+      "role": {"type": "String"}
+    }
+  },
+  "settingsGatewayNotPaired": "未ペアリング",
+  "settingsGatewayPanorama": "パノラマを取得",
+  "settingsGatewayPanoramaSummary": "観測地点 {site} · 太陽高度 {sunAlt}° · 欠落 {missing}",
+  "@settingsGatewayPanoramaSummary": {
+    "placeholders": {
+      "site": {"type": "String"},
+      "sunAlt": {"type": "String"},
+      "missing": {"type": "String"}
+    }
+  },
+  "toastGatewayNameRequired": "先にデバイス名を入力してください",
+  "toastGatewayCodeInvalid": "ペアリングコードは 6 桁の数字です",
+  "toastGatewayPaired": "ペアリングしました",
+  "toastGatewayPairFailed": "ペアリング失敗：{reason}",
+  "@toastGatewayPairFailed": {
+    "placeholders": {
+      "reason": {"type": "String"}
+    }
+  },
+  "toastGatewayUnpaired": "ペアリングを解除しました",
   "settingsSectionDeviceInfo": "デバイス情報",
   "settingsSectionTiming": "時刻と同期",
   "settingsTimingHelp": "システム時計は常に端末の実時刻です。GNSS の fix が無い場合は「GNSS 時刻なし」と表示し、fix を偽装しません。",

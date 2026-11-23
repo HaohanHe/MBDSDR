@@ -9,6 +9,7 @@ import '../models/activity_log.dart';
 import '../models/bookmark.dart';
 import '../models/radio_state.dart';
 import '../models/recording.dart';
+import 'device_gateway_client.dart';
 
 // ============================================================================
 // 设置持久化
@@ -136,6 +137,15 @@ const String kDefaultControlHubHost = '127.0.0.1';
 
 /// 桌面 ControlHub HTTP 默认端口（对齐 tokens::kControlHttpDefaultPort = 50732）。
 const int kDefaultControlHubPort = 50732;
+
+/// 多设备网关（M2）：默认端口与桌面 `device_gateway.py` 一致。
+const int kDefaultDeviceGatewayPort = 8771;
+/// 默认角色：手持只读（镜头/目镜由用户按用途选）。
+const String kDefaultDeviceGatewayRole = 'handheld';
+const String _kDeviceGatewayPort = 'deviceGatewayPort';
+const String _kDeviceGatewayRole = 'deviceGatewayRole';
+const String _kDeviceGatewayName = 'deviceGatewayName';
+const String _kDeviceGatewayToken = 'deviceGatewayToken';
 const String _kApiKey = 'apiKey';
 const String _kApiModel = 'apiModel';
 const String _kStationLat = 'stationLat';
@@ -217,6 +227,10 @@ class SettingsService extends ChangeNotifier {
   int _rtlPort = 1234;
   String _controlHubHost = kDefaultControlHubHost;
   int _controlHubPort = kDefaultControlHubPort;
+  int _deviceGatewayPort = kDefaultDeviceGatewayPort;
+  String _deviceGatewayRole = kDefaultDeviceGatewayRole;
+  String _deviceGatewayName = '';
+  String _deviceGatewayToken = '';
   String _apiKey = '';
   String _apiModel = kDefaultApiModel;
   double? _stationLat;
@@ -270,6 +284,51 @@ class SettingsService extends ChangeNotifier {
     unawaited(_kv.setInt(_kControlHubPort, _controlHubPort));
     notifyListeners();
   }
+
+  /// 多设备网关端口（默认 8771，与桌面 device_gateway 一致）。
+  int get deviceGatewayPort => _deviceGatewayPort;
+  set deviceGatewayPort(int value) {
+    if (value < 1 || value > 65535) {
+      throw FormatException('端口必须在 1–65535 之间，收到: $value');
+    }
+    _deviceGatewayPort = value;
+    unawaited(_kv.setInt(_kDeviceGatewayPort, _deviceGatewayPort));
+    notifyListeners();
+  }
+
+  /// 本机在网关里的角色（lens/eyepiece/handheld/headset）。
+  String get deviceGatewayRole => _deviceGatewayRole;
+  set deviceGatewayRole(String value) {
+    final String role = value.trim();
+    if (!kDeviceRoles.contains(role)) {
+      throw FormatException('角色必须是 ${kDeviceRoles.join('/')}，收到: $value');
+    }
+    _deviceGatewayRole = role;
+    unawaited(_kv.setString(_kDeviceGatewayRole, _deviceGatewayRole));
+    notifyListeners();
+  }
+
+  /// 配对时显示的设备名（空 = 未填，配对前要求用户填）。
+  String get deviceGatewayName => _deviceGatewayName;
+  set deviceGatewayName(String value) {
+    _deviceGatewayName = value.trim();
+    unawaited(_kv.setString(_kDeviceGatewayName, _deviceGatewayName));
+    notifyListeners();
+  }
+
+  /// 网关设备 token：只写安全存储，绝不进普通 KV；空 = 未配对。
+  String get deviceGatewayToken => _deviceGatewayToken;
+  set deviceGatewayToken(String value) {
+    _deviceGatewayToken = value.trim();
+    if (_deviceGatewayToken.isEmpty) {
+      unawaited(_secure.delete(_kDeviceGatewayToken));
+    } else {
+      unawaited(_secure.set(_kDeviceGatewayToken, _deviceGatewayToken));
+    }
+    notifyListeners();
+  }
+
+  bool get deviceGatewayPaired => _deviceGatewayToken.isNotEmpty;
 
   /// AI API key：只写安全存储，绝不进普通 KV。
   String get apiKey => _apiKey;
@@ -608,6 +667,18 @@ class SettingsService extends ChangeNotifier {
     _controlHubPort = (chPort == null || chPort < 1 || chPort > 65535)
         ? kDefaultControlHubPort
         : chPort;
+    // 多设备网关：端口缺失/越界回退 8771；角色未知写法回退 handheld；
+    // token 只从安全存储读（缺失 = 未配对）。
+    final int? gwPort = _kv.getInt(_kDeviceGatewayPort);
+    _deviceGatewayPort = (gwPort == null || gwPort < 1 || gwPort > 65535)
+        ? kDefaultDeviceGatewayPort
+        : gwPort;
+    final String? gwRole = _kv.getString(_kDeviceGatewayRole);
+    _deviceGatewayRole = kDeviceRoles.contains(gwRole)
+        ? gwRole!
+        : kDefaultDeviceGatewayRole;
+    _deviceGatewayName = _kv.getString(_kDeviceGatewayName) ?? '';
+    _deviceGatewayToken = await _secure.get(_kDeviceGatewayToken) ?? '';
     _apiModel = _kv.getString(_kApiModel) ?? kDefaultApiModel;
     _stationLat = _kv.getDouble(_kStationLat);
     _stationLon = _kv.getDouble(_kStationLon);

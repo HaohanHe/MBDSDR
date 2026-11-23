@@ -223,6 +223,12 @@ void main() {
     // 落盘 + 设置生效 + locale 跟随重建（分区标题已换英文）。
     expect(settings.uiLocaleCode, 'en');
     expect(kv.d['uiLocale'], 'en');
+    // 英文文案更长、页面更高，标题可能滑出懒构建窗口，重新滚到可见。
+    await tester.scrollUntilVisible(
+      find.text('Language'),
+      200,
+      scrollable: find.byType(Scrollable).first,
+    );
     expect(find.text('Language'), findsOneWidget);
     expect(find.text('语言'), findsNothing);
   });

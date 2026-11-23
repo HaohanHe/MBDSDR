@@ -42,6 +42,52 @@
   "settingsChHostHint": "Default 127.0.0.1; empty = disabled, e.g. 192.168.1.20",
   "settingsChPortHint": "Default 50732",
   "settingsChHelp": "Read-only fetch of /status, /pocsag_messages, /m17_calls and /vor_radial; decoding runs in the desktop engine, mobile is a viewer.",
+  "settingsSectionDeviceGateway": "Multi-device gateway (pairing)",
+  "settingsGatewayHelp": "After starting the desktop gateway, bind this device to a role with the pairing code. Only paired devices can read the roster and panorama; this device never sends tuning, recording or site changes.",
+  "settingsGatewayEndpoint": "Desktop gateway: {endpoint} (host comes from the ControlHub section)",
+  "@settingsGatewayEndpoint": {
+    "placeholders": {
+      "endpoint": {"type": "String"}
+    }
+  },
+  "settingsGatewayPortHint": "Default 8771",
+  "settingsGatewayHostMissing": "Enter the desktop host in the ControlHub section first",
+  "settingsGatewayDeviceName": "Device name",
+  "settingsGatewayDeviceNameHint": "e.g. Phone A (lens)",
+  "settingsGatewayRole": "Role",
+  "settingsGatewayRoleLens": "Lens (coarse visual aim)",
+  "settingsGatewayRoleEyepiece": "Eyepiece (star identification)",
+  "settingsGatewayRoleHandheld": "Handheld (read-only)",
+  "settingsGatewayRoleHeadset": "Headset (read-only)",
+  "settingsGatewayCode": "Pairing code",
+  "settingsGatewayPair": "Pair",
+  "settingsGatewayUnpair": "Unpair",
+  "settingsGatewayPaired": "Paired · {role}",
+  "@settingsGatewayPaired": {
+    "placeholders": {
+      "role": {"type": "String"}
+    }
+  },
+  "settingsGatewayNotPaired": "Not paired",
+  "settingsGatewayPanorama": "Read panorama",
+  "settingsGatewayPanoramaSummary": "Site {site} · Sun altitude {sunAlt}° · Missing {missing}",
+  "@settingsGatewayPanoramaSummary": {
+    "placeholders": {
+      "site": {"type": "String"},
+      "sunAlt": {"type": "String"},
+      "missing": {"type": "String"}
+    }
+  },
+  "toastGatewayNameRequired": "Enter a device name first",
+  "toastGatewayCodeInvalid": "Pairing code must be 6 digits",
+  "toastGatewayPaired": "Paired",
+  "toastGatewayPairFailed": "Pairing failed: {reason}",
+  "@toastGatewayPairFailed": {
+    "placeholders": {
+      "reason": {"type": "String"}
+    }
+  },
+  "toastGatewayUnpaired": "Unpaired",
   "settingsSectionDeviceInfo": "Device info",
   "settingsSectionTiming": "Time & timing",
   "settingsTimingHelp": "The system clock is always the device's real time. Without a GNSS fix it says \"no GNSS timing\" rather than faking one.",

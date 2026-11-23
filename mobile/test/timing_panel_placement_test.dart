@@ -150,6 +150,10 @@ void main() {
       300,
       scrollable: find.byType(Scrollable).first,
     );
+    // 小屏下 scrollUntilVisible 可能停在「已构建但底边出屏」的位置，
+    // 再 ensureVisible 把标题完整收进视口，避免 tap 落在屏外。
+    await tester.ensureVisible(find.text('时间与授时'));
+    await tester.pumpAndSettle();
     await tester.tap(find.text('时间与授时'));
     await tester.pumpAndSettle();
 

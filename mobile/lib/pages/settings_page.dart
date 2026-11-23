@@ -3,6 +3,7 @@ import 'package:geolocator/geolocator.dart';
 
 import '../app/tokens.dart';
 import '../l10n/gen/app_localizations.dart';
+import '../services/device_gateway_client.dart';
 import '../services/radio_controller.dart';
 import '../services/settings_service.dart';
 import '../widgets/device_info_card.dart';
@@ -16,12 +17,22 @@ import '../widgets/timing_panel.dart';
 // ============================================================================
 
 class SettingsPage extends StatefulWidget {
-  const SettingsPage({required this.settings, required this.radio, super.key});
+  const SettingsPage({
+    required this.settings,
+    required this.radio,
+    this.gatewayClientBuilder,
+    super.key,
+  });
 
   final SettingsService settings;
 
   /// 收音机接口：用于「设备信息」分区真实回读连接态/采样率/频率。
   final RadioApi radio;
+
+  /// 多设备网关客户端工厂（host, port）→ 客户端。
+  ///
+  /// 默认指向真实桌面网关；测试注入 fake 传输即可离线验证配对/全景路径。
+  final DeviceGatewayClient Function(String host, int port)? gatewayClientBuilder;
 
   @override
   State<SettingsPage> createState() => _SettingsPageState();
@@ -37,10 +48,19 @@ class _SettingsPageState extends State<SettingsPage> {
   late final TextEditingController _latCtrl;
   late final TextEditingController _lonCtrl;
   late final TextEditingController _altCtrl;
+  late final TextEditingController _gwPortCtrl;
+  late final TextEditingController _gwNameCtrl;
+  late final TextEditingController _gwCodeCtrl;
 
   bool _obscureKey = true;
   bool _keyMasked = true;
   bool _locating = false;
+
+  /// 网关配对/全景请求在途：禁用按钮，避免重复点击打爆失败锁定计数。
+  bool _gwBusy = false;
+
+  /// 最近一次取回的全景摘要（null = 还没取过）。
+  String? _gwPanoramaText;
 
   String get _apiKey => widget.settings.apiKey;
 
@@ -63,6 +83,9 @@ class _SettingsPageState extends State<SettingsPage> {
     _latCtrl = TextEditingController(text: _d2s(s.stationLat));
     _lonCtrl = TextEditingController(text: _d2s(s.stationLon));
     _altCtrl = TextEditingController(text: _d2s(s.stationAlt));
+    _gwPortCtrl = TextEditingController(text: '${s.deviceGatewayPort}');
+    _gwNameCtrl = TextEditingController(text: s.deviceGatewayName);
+    _gwCodeCtrl = TextEditingController();
   }
 
   @override
@@ -76,6 +99,9 @@ class _SettingsPageState extends State<SettingsPage> {
     _latCtrl.dispose();
     _lonCtrl.dispose();
     _altCtrl.dispose();
+    _gwPortCtrl.dispose();
+    _gwNameCtrl.dispose();
+    _gwCodeCtrl.dispose();
     super.dispose();
   }
 
@@ -165,6 +191,146 @@ class _SettingsPageState extends State<SettingsPage> {
     final int? port = int.tryParse(_chPortCtrl.text.trim());
     if (port == null || port < 1 || port > 65535) return;
     if (port != widget.settings.controlHubPort) widget.settings.controlHubPort = port;
+  }
+
+  // ------------------------------------------------------------ 多设备网关
+  /// 角色短标签（页面内文案，全部走 l10n）。
+  String _roleLabel(AppLocalizations l10n, String role) {
+    return switch (role) {
+      'lens' => l10n.settingsGatewayRoleLens,
+      'eyepiece' => l10n.settingsGatewayRoleEyepiece,
+      'headset' => l10n.settingsGatewayRoleHeadset,
+      _ => l10n.settingsGatewayRoleHandheld,
+    };
+  }
+
+  /// 端口即输即存；越界/半截先不落盘。
+  void _commitGatewayPort() {
+    final int? port = int.tryParse(_gwPortCtrl.text.trim());
+    if (port == null || port < 1 || port > 65535) return;
+    if (port != widget.settings.deviceGatewayPort) {
+      widget.settings.deviceGatewayPort = port;
+    }
+  }
+
+  void _saveGatewayPort() {
+    final AppLocalizations l10n = AppLocalizations.of(context)!;
+    final int? port = int.tryParse(_gwPortCtrl.text.trim());
+    if (port == null) {
+      _toast(l10n.toastPortInvalid, error: true);
+      return;
+    }
+    try {
+      widget.settings.deviceGatewayPort = port;
+      _toast(l10n.toastPortSaved);
+    } on FormatException catch (e) {
+      _toast(e.message, error: true);
+    }
+  }
+
+  DeviceGatewayClient _gatewayClient() {
+    final String host = widget.settings.controlHubHost.trim();
+    final SettingsService s = widget.settings;
+    final DeviceGatewayClient Function(String, int)? builder =
+        widget.gatewayClientBuilder;
+    return builder != null
+        ? builder(host, s.deviceGatewayPort)
+        : DeviceGatewayClient(host: host, port: s.deviceGatewayPort);
+  }
+
+  /// 用配对码把本机绑定为所选角色；成功即把 token 落安全存储。
+  Future<void> _pairGateway() async {
+    final AppLocalizations l10n = AppLocalizations.of(context)!;
+    if (_gwBusy) return;
+    final SettingsService s = widget.settings;
+    if (s.controlHubHost.trim().isEmpty) {
+      _toast(l10n.settingsGatewayHostMissing, error: true);
+      return;
+    }
+    final String name = _gwNameCtrl.text.trim();
+    if (name.isEmpty) {
+      _toast(l10n.toastGatewayNameRequired, error: true);
+      return;
+    }
+    final String code = _gwCodeCtrl.text.trim();
+    if (!RegExp(r'^\d{6}$').hasMatch(code)) {
+      _toast(l10n.toastGatewayCodeInvalid, error: true);
+      return;
+    }
+    setState(() => _gwBusy = true);
+    try {
+      final Map<String, dynamic> out = await _gatewayClient().pair(
+        code: code,
+        deviceName: name,
+        role: s.deviceGatewayRole,
+      );
+      final Object? token = out['token'];
+      s.deviceGatewayName = name;
+      s.deviceGatewayToken = token is String ? token : '';
+      _gwCodeCtrl.clear();
+      if (!mounted) return;
+      _toast(l10n.toastGatewayPaired);
+    } on DeviceGatewayException catch (e) {
+      if (!mounted) return;
+      _toast(l10n.toastGatewayPairFailed(e.message), error: true);
+    } finally {
+      if (mounted) setState(() => _gwBusy = false);
+    }
+  }
+
+  /// 解除配对：清掉本机 token（桌面名册侧由权威端自行清理）。
+  void _unpairGateway() {
+    final AppLocalizations l10n = AppLocalizations.of(context)!;
+    widget.settings.deviceGatewayToken = '';
+    setState(() => _gwPanoramaText = null);
+    _toast(l10n.toastGatewayUnpaired);
+  }
+
+  /// 取回全景摘要：站址 / 太阳高度 / 缺项如实展示，缺项不猜。
+  Future<void> _fetchPanorama() async {
+    final AppLocalizations l10n = AppLocalizations.of(context)!;
+    if (_gwBusy) return;
+    final SettingsService s = widget.settings;
+    if (s.controlHubHost.trim().isEmpty) {
+      _toast(l10n.settingsGatewayHostMissing, error: true);
+      return;
+    }
+    setState(() => _gwBusy = true);
+    try {
+      final Map<String, dynamic> data =
+          await _gatewayClient().panorama(s.deviceGatewayToken);
+      String siteText = '—';
+      final Object? site = data['site'];
+      if (site is Map) {
+        final Object? lat = site['lat_deg'];
+        final Object? lon = site['lon_deg'];
+        if (lat is num && lon is num) {
+          siteText =
+              '${lat.toStringAsFixed(2)}, ${lon.toStringAsFixed(2)}';
+        }
+      }
+      String sunAlt = '—';
+      final Object? sun = data['sun'];
+      if (sun is Map && sun['alt_deg'] is num) {
+        sunAlt = (sun['alt_deg'] as num).toStringAsFixed(1);
+      }
+      final Object? missingRaw = data['missing'];
+      final List<String> missing = missingRaw is List
+          ? missingRaw.map((Object? e) => e.toString()).toList()
+          : const <String>[];
+      final String summary = l10n.settingsGatewayPanoramaSummary(
+        siteText,
+        sunAlt,
+        missing.isEmpty ? '—' : missing.join(', '),
+      );
+      if (!mounted) return;
+      setState(() => _gwPanoramaText = summary);
+    } on DeviceGatewayException catch (e) {
+      if (!mounted) return;
+      _toast(l10n.toastGatewayPairFailed(e.message), error: true);
+    } finally {
+      if (mounted) setState(() => _gwBusy = false);
+    }
   }
 
   void _saveApiKey() {
@@ -438,6 +604,139 @@ class _SettingsPageState extends State<SettingsPage> {
             const SizedBox(height: AppTokens.spacingS),
             Text(
               l10n.settingsChHelp,
+              style: AppTokens.auxiliary,
+            ),
+          ],
+        ),
+
+        // ---------------------------------------------------- 多设备网关（配对）
+        // 桌面「多设备网关」的客户端：只读名册/全景，配对后按角色授权。
+        // 主机与 ControlHub 分区共用（同一台桌面机），本机不发调谐/录音/改站址。
+        _section(
+          title: l10n.settingsSectionDeviceGateway,
+          children: <Widget>[
+            Text(
+              widget.settings.controlHubHost.trim().isEmpty
+                  ? l10n.settingsGatewayHostMissing
+                  : l10n.settingsGatewayEndpoint(
+                      '${widget.settings.controlHubHost.trim()}:'
+                      '${widget.settings.deviceGatewayPort}'),
+              style: AppTokens.auxiliary,
+            ),
+            const SizedBox(height: AppTokens.spacingM),
+            TextField(
+              controller: _gwPortCtrl,
+              decoration: InputDecoration(
+                labelText: l10n.settingsPortLabel,
+                hintText: l10n.settingsGatewayPortHint,
+                prefixIcon: const Icon(Icons.settings_ethernet),
+              ),
+              keyboardType: TextInputType.number,
+              onChanged: (_) => _commitGatewayPort(),
+              onTapOutside: (_) =>
+                  FocusManager.instance.primaryFocus?.unfocus(),
+              onEditingComplete: _saveGatewayPort,
+              onSubmitted: (_) => _saveGatewayPort(),
+            ),
+            const SizedBox(height: AppTokens.spacingM),
+            TextField(
+              controller: _gwNameCtrl,
+              decoration: InputDecoration(
+                labelText: l10n.settingsGatewayDeviceName,
+                hintText: l10n.settingsGatewayDeviceNameHint,
+                prefixIcon: const Icon(Icons.badge_outlined),
+              ),
+              onChanged: (String v) {
+                if (v.trim() != widget.settings.deviceGatewayName) {
+                  widget.settings.deviceGatewayName = v;
+                }
+              },
+              onTapOutside: (_) =>
+                  FocusManager.instance.primaryFocus?.unfocus(),
+            ),
+            const SizedBox(height: AppTokens.spacingM),
+            InputDecorator(
+              decoration: InputDecoration(
+                labelText: l10n.settingsGatewayRole,
+                prefixIcon: const Icon(Icons.assignment_ind_outlined),
+              ),
+              child: DropdownButtonHideUnderline(
+                child: DropdownButton<String>(
+                  isExpanded: true,
+                  value: widget.settings.deviceGatewayRole,
+                  items: kDeviceRoles
+                      .map((String role) => DropdownMenuItem<String>(
+                            value: role,
+                            child: Text(_roleLabel(l10n, role)),
+                          ))
+                      .toList(),
+                  onChanged: (String? v) {
+                    if (v == null) return;
+                    setState(() => widget.settings.deviceGatewayRole = v);
+                  },
+                ),
+              ),
+            ),
+            const SizedBox(height: AppTokens.spacingM),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Expanded(
+                  child: TextField(
+                    controller: _gwCodeCtrl,
+                    decoration: InputDecoration(
+                      labelText: l10n.settingsGatewayCode,
+                      prefixIcon: const Icon(Icons.pin_outlined),
+                    ),
+                    keyboardType: TextInputType.number,
+                    maxLength: 6,
+                    onTapOutside: (_) =>
+                        FocusManager.instance.primaryFocus?.unfocus(),
+                  ),
+                ),
+                const SizedBox(width: AppTokens.spacingS),
+                Padding(
+                  padding: const EdgeInsets.only(top: 6),
+                  child: FilledButton(
+                    onPressed: _gwBusy ? null : _pairGateway,
+                    child: Text(l10n.settingsGatewayPair),
+                  ),
+                ),
+              ],
+            ),
+            if (widget.settings.deviceGatewayPaired) ...<Widget>[
+              Wrap(
+                spacing: AppTokens.spacingS,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                children: <Widget>[
+                  Text(
+                    l10n.settingsGatewayPaired(
+                        _roleLabel(l10n, widget.settings.deviceGatewayRole)),
+                    style: AppTokens.auxiliary,
+                  ),
+                  TextButton(
+                    onPressed: _gwBusy ? null : _unpairGateway,
+                    child: Text(l10n.settingsGatewayUnpair),
+                  ),
+                  OutlinedButton(
+                    onPressed: _gwBusy ? null : _fetchPanorama,
+                    child: Text(l10n.settingsGatewayPanorama),
+                  ),
+                ],
+              ),
+              if (_gwPanoramaText != null)
+                Padding(
+                  padding: const EdgeInsets.only(top: AppTokens.spacingS),
+                  child: Text(_gwPanoramaText!, style: AppTokens.auxiliary),
+                ),
+            ] else
+              Text(
+                l10n.settingsGatewayNotPaired,
+                style: AppTokens.auxiliary,
+              ),
+            const SizedBox(height: AppTokens.spacingS),
+            Text(
+              l10n.settingsGatewayHelp,
               style: AppTokens.auxiliary,
             ),
           ],

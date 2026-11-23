@@ -2721,6 +2721,21 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `docs/PRD-现状对照.md` | 观星指数线/41（§258 P1-11 补桌面 UI） | 2026-11-23 23:05 | 本笔 |
 | `docs/COORDINATION.md` | 观星指数线/41（§258 记录 + §6.1） | 2026-11-23 23:05 | 本笔 |
 | `desktop/README.md` | 观星指数线/41（§258 多设备网关用法） | 2026-11-23 23:05 | 本笔 |
+| `mobile/lib/services/device_gateway_client.dart` | 多机线/42（§259 手机网关客户端） | 2026-11-23 23:30 | 本笔 |
+| `mobile/lib/services/settings_service.dart` | 多机线/42（§259 网关端口/角色/名字/令牌持久化） | 2026-11-23 23:30 | 本笔 |
+| `mobile/lib/pages/settings_page.dart` | 多机线/42（§259 设置页配对区域） | 2026-11-23 23:30 | 本笔 |
+| `mobile/lib/l10n/app_zh.arb` | 多机线/42（§259 网关文案 zh） | 2026-11-23 23:30 | 本笔 |
+| `mobile/lib/l10n/app_en.arb` | 多机线/42（§259 网关文案 en） | 2026-11-23 23:30 | 本笔 |
+| `mobile/lib/l10n/app_ja.arb` | 多机线/42（§259 网关文案 ja） | 2026-11-23 23:30 | 本笔 |
+| `mobile/test/device_gateway_client_test.dart` | 多机线/42（§259 客户端 10 条离线用例） | 2026-11-23 23:30 | 本笔 |
+| `mobile/test/settings_service_test.dart` | 多机线/42（§259 网关持久化 5 条用例） | 2026-11-23 23:30 | 本笔 |
+| `mobile/test/settings_page_gateway_test.dart` | 多机线/42（§259 设置页配对 3 条 UI 用例） | 2026-11-23 23:30 | 本笔 |
+| `mobile/test/timing_panel_placement_test.dart` | 多机线/42（§259 小屏 ensureVisible 适配） | 2026-11-23 23:30 | 本笔 |
+| `mobile/test/l10n_locale_test.dart` | 多机线/42（§259 英文重建后重滚） | 2026-11-23 23:30 | 本笔 |
+| `.trae/specs/multi-device-interconnect/tasks.md` | 多机线/42（§259 M2.2 勾选） | 2026-11-23 23:30 | 本笔 |
+| `.trae/specs/multi-device-interconnect/checklist.md` | 多机线/42（§259 手机配对项勾选） | 2026-11-23 23:30 | 本笔 |
+| `docs/PRD-现状对照.md` | 多机线/42（§259 P1-11 补手机配对） | 2026-11-23 23:30 | 本笔 |
+| `docs/COORDINATION.md` | 多机线/42（§259 记录 + §6.1） | 2026-11-23 23:30 | 本笔 |
 
 > 上表各行均由 `claim` 台账推导：owner 原文与 `acquired_at` 直接取自台账，
 > 目的优先用台账里的 `claim_reason`，没有就如实写「未声明」，不补编。时间列只是
@@ -12618,6 +12633,49 @@ PRD §8 冲刺序列 P1「天文通式观星指数」。本轮只做**有可信�
 - 仍无 TLS；配对锁定全局；`/panorama` 默认只读缓存，需手动勾选才现采。
 - 手机端还没有配对界面（M2.2）；两条位姿还没喂 `sky_pose_fuse`（M3）；
   头显接入未做。
+
+## 259. M2.2：手机配对数据层 + 设置页配对区域（2026-11-23）
+
+**依据**：§258 桌面网关已可启停/配对，但手机端还没有任何客户端；`ControlHubClient`
+只认旧四端点，无法配对、选角色、读名册/全景。
+
+**做了什么**
+- 新 `mobile/lib/services/device_gateway_client.dart`：
+  - 端点与桌面一一对应：`POST /pair`、`GET /roster`、`GET /panorama`、
+    `GET /poses`、`POST /pose`；角色白名单与桌面一致（`lens/eyepiece/handheld/headset`）；
+  - `postPose` 只允许 lens/eyepiece，**本地即拒**只读角色（一个字节都不发）；
+  - 传输缝可注入（与 ControlHubClient 同范式），默认 dart:io HttpClient；
+  - 失败一律 `DeviceGatewayException`：优先取服务端 `reason`，200 但非 JSON
+    也判协议错；token 只在配对回执里读，缺 token 不当成功。
+- `mobile/lib/services/settings_service.dart`：
+  - 新增 `deviceGatewayPort`（默认 8771，越界回退）、`deviceGatewayRole`
+    （默认 handheld，未知回退）、`deviceGatewayName`；
+  - `deviceGatewayToken` **只写 SecureStore**（空串 = 删除条目 = 解除配对），
+    普通 KV 中不出现令牌键；`load()` 读回四项，非法值静默回退。
+- `mobile/lib/pages/settings_page.dart`：新增「多设备网关（配对）」分区——
+  端口/设备名/角色下拉/6 位配对码/配对/解除配对/读取全景；主机与 ControlHub
+  分区共用（同一台桌面机），未填主机时明确提示先去 ControlHub 分区；
+  角色文案、帮助、结果/失败全部走 gen-l10n（zh/en/ja 三档同步）。
+- 配对成功把 token 落安全存储；全景摘要只展示站址/太阳高度/缺项，
+  缺项如实列出，不补值、不按晴天假设。
+
+**验证**
+- `flutter test test/device_gateway_client_test.dart` → **10 passed**
+  （配对成功/错码 403/锁定 429/缺 token/非法角色本地拒绝/Bearer 只读三路/
+  只读角色不发位姿/lens 载荷 sky-pose/1/非 JSON/不可达）。
+- `flutter test test/settings_service_test.dart` → **37 passed**（含新增 5 条
+  网关持久化：默认值、安全存储、非法值、解除配对、坏存量回退）。
+- `flutter test test/settings_page_gateway_test.dart` → **3 passed**
+  （配对→全景→解除全链路、错码/缺名本地拦截、角色切目镜后请求带 eyepiece），
+  全部离线，fake transport 不出网。
+- 全量 `flutter test` → **591 passed / 0 failed**（设置页增高导致的两条旧
+  滚动用例改用 `ensureVisible`/重滚，断言未放宽）。
+
+**诚实边界**
+- 未在真机上跑手机↔桌面配对；本轮验证是注入传输的离线回归。
+- 主机直接复用 ControlHub 的 host；手机侧没有局域网自动发现，也未做 TLS。
+- 名册列表尚未在手机展示（M2.4）；两条位姿尚未喂 `sky_pose_fuse`（M3）。
+
 
 
 

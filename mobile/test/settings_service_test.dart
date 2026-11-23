@@ -491,4 +491,88 @@ void main() {
       expect(kDefaultUiLocale, 'zh');
     });
   });
+
+  group('多设备网关（M2.2 配对持久化）', () {
+    test('空存储下默认：8771 / handheld / 未配对', () async {
+      final SettingsService s = SettingsService(
+        kv: InMemoryKvStore(),
+        secure: InMemorySecureStore(),
+      );
+      await s.load();
+      expect(s.deviceGatewayPort, kDefaultDeviceGatewayPort);
+      expect(s.deviceGatewayPort, 8771);
+      expect(s.deviceGatewayRole, 'handheld');
+      expect(s.deviceGatewayName, '');
+      expect(s.deviceGatewayToken, '');
+      expect(s.deviceGatewayPaired, isFalse);
+    });
+
+    test('端口/角色/名字/令牌保存后可 load 读回，token 只进安全存储', () async {
+      final InMemoryKvStore kv = InMemoryKvStore();
+      final InMemorySecureStore secure = InMemorySecureStore();
+      final SettingsService s = SettingsService(kv: kv, secure: secure);
+      await s.load();
+
+      s.deviceGatewayPort = 9000;
+      s.deviceGatewayRole = 'eyepiece';
+      s.deviceGatewayName = ' 目镜机 ';
+      s.deviceGatewayToken = 'tok-secret';
+
+      expect(kv.data['deviceGatewayPort'], 9000);
+      expect(kv.data['deviceGatewayRole'], 'eyepiece');
+      expect(kv.data['deviceGatewayName'], '目镜机');
+      expect(kv.data.containsKey('deviceGatewayToken'), isFalse,
+          reason: '令牌绝不进普通 KV');
+      expect(secure.data['deviceGatewayToken'], 'tok-secret');
+
+      final SettingsService s2 = SettingsService(kv: kv, secure: secure);
+      await s2.load();
+      expect(s2.deviceGatewayPort, 9000);
+      expect(s2.deviceGatewayRole, 'eyepiece');
+      expect(s2.deviceGatewayName, '目镜机');
+      expect(s2.deviceGatewayToken, 'tok-secret');
+      expect(s2.deviceGatewayPaired, isTrue);
+    });
+
+    test('非法端口/角色抛 FormatException，且不覆盖原值', () async {
+      final SettingsService s = SettingsService(
+        kv: InMemoryKvStore(),
+        secure: InMemorySecureStore(),
+      );
+      await s.load();
+      expect(() => s.deviceGatewayPort = 0, throwsFormatException);
+      expect(() => s.deviceGatewayPort = 65536, throwsFormatException);
+      expect(s.deviceGatewayPort, kDefaultDeviceGatewayPort);
+      expect(() => s.deviceGatewayRole = 'camera', throwsFormatException);
+      expect(s.deviceGatewayRole, 'handheld');
+    });
+
+    test('清空 token = 解除配对，安全存储条目一并删除', () async {
+      final InMemoryKvStore kv = InMemoryKvStore();
+      final InMemorySecureStore secure = InMemorySecureStore();
+      final SettingsService s = SettingsService(kv: kv, secure: secure);
+      await s.load();
+      s.deviceGatewayToken = 'tok-secret';
+      expect(secure.data['deviceGatewayToken'], 'tok-secret');
+
+      s.deviceGatewayToken = '';
+      expect(s.deviceGatewayPaired, isFalse);
+      expect(secure.data.containsKey('deviceGatewayToken'), isFalse);
+
+      final SettingsService s2 = SettingsService(kv: kv, secure: secure);
+      await s2.load();
+      expect(s2.deviceGatewayToken, '');
+    });
+
+    test('load 时越界端口/未知角色静默回退默认，不抛异常', () async {
+      final InMemoryKvStore kv = InMemoryKvStore()
+        ..data['deviceGatewayPort'] = 70000
+        ..data['deviceGatewayRole'] = 'klingon';
+      final SettingsService s =
+          SettingsService(kv: kv, secure: InMemorySecureStore());
+      await s.load();
+      expect(s.deviceGatewayPort, kDefaultDeviceGatewayPort);
+      expect(s.deviceGatewayRole, kDefaultDeviceGatewayRole);
+    });
+  });
 }

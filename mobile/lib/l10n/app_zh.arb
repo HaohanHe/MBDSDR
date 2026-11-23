@@ -42,6 +42,52 @@
   "settingsChHostHint": "默认 127.0.0.1；留空 = 不启用，如 192.168.1.20",
   "settingsChPortHint": "默认 50732",
   "settingsChHelp": "仅只读拉取 /status、/pocsag_messages、/m17_calls、/vor_radial；解码在桌面引擎进行，移动端为查看器。",
+  "settingsSectionDeviceGateway": "多设备网关（配对）",
+  "settingsGatewayHelp": "桌面「多设备网关」启动后，用配对码把本机绑定为某个角色。配对成功才可读名册与全景；本机不发调谐/录音/改站址指令。",
+  "settingsGatewayEndpoint": "桌面网关：{endpoint}（主机取自 ControlHub 分区）",
+  "@settingsGatewayEndpoint": {
+    "placeholders": {
+      "endpoint": {"type": "String"}
+    }
+  },
+  "settingsGatewayPortHint": "默认 8771",
+  "settingsGatewayHostMissing": "请先在 ControlHub 分区填写桌面主机地址",
+  "settingsGatewayDeviceName": "设备名",
+  "settingsGatewayDeviceNameHint": "如 手机A（镜头）",
+  "settingsGatewayRole": "角色",
+  "settingsGatewayRoleLens": "镜头（视觉初指向）",
+  "settingsGatewayRoleEyepiece": "目镜（认星）",
+  "settingsGatewayRoleHandheld": "手持（只读）",
+  "settingsGatewayRoleHeadset": "头显（只读）",
+  "settingsGatewayCode": "配对码",
+  "settingsGatewayPair": "配对",
+  "settingsGatewayUnpair": "解除配对",
+  "settingsGatewayPaired": "已配对 · {role}",
+  "@settingsGatewayPaired": {
+    "placeholders": {
+      "role": {"type": "String"}
+    }
+  },
+  "settingsGatewayNotPaired": "未配对",
+  "settingsGatewayPanorama": "读取全景",
+  "settingsGatewayPanoramaSummary": "站址 {site} · 太阳高度 {sunAlt}° · 缺项 {missing}",
+  "@settingsGatewayPanoramaSummary": {
+    "placeholders": {
+      "site": {"type": "String"},
+      "sunAlt": {"type": "String"},
+      "missing": {"type": "String"}
+    }
+  },
+  "toastGatewayNameRequired": "请先填写设备名",
+  "toastGatewayCodeInvalid": "配对码应为 6 位数字",
+  "toastGatewayPaired": "配对成功",
+  "toastGatewayPairFailed": "配对失败：{reason}",
+  "@toastGatewayPairFailed": {
+    "placeholders": {
+      "reason": {"type": "String"}
+    }
+  },
+  "toastGatewayUnpaired": "已解除配对",
   "settingsSectionDeviceInfo": "设备信息",
   "settingsSectionTiming": "时间与授时",
   "settingsTimingHelp": "系统钟恒为设备真实时间；没有 GNSS 固定时如实显示「无 GNSS 授时」，不伪造 fix。",
