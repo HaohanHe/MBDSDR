@@ -3146,6 +3146,7 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `docs/COORDINATION.md` | 多机线/42（§312 桌面位姿行（提交后释放）） | 2026-11-24 02:17 | 本笔 |
 | `docs/COORDINATION.md` | 多机线/42（§313 GNSS 复验（提交后释放）） | 2026-11-24 02:18 | 本笔 |
 | `docs/COORDINATION.md` | 多机线/42（§314 M4.3 对账（提交后释放）） | 2026-11-24 02:19 | 本笔 |
+| `docs/COORDINATION.md` | 多机线/42（§315 回归口径（提交后释放）） | 2026-11-24 02:33 | 本笔 |
 
 > 上表各行均由 `claim` 台账推导：owner 原文与 `acquired_at` 直接取自台账，
 > 目的优先用台账里的 `claim_reason`，没有就如实写「未声明」，不补编。时间列只是
@@ -14509,3 +14510,18 @@ M4.3 此前保持未勾选，但它的软件要求都有可复跑证据：
 
 因此把 tasks.md 的 M4.3 改为已勾选；「手动刷新才感知失败、无自动轮询」作为
 已知边界保留，不当作缺陷。M4.2 仍保持未勾选（等 PICO 真机）。
+
+## 315. 回归口径校正：别直接整包跑根 `tests/`（2026-11-24）
+
+**现状**：本轮尝试 `python -m pytest -q` 直接跑根 `tests/`，20+ 分钟仍未结束，已停止；
+这既不是失败也不是通过，不能据此宣称全绿。
+
+**仓库既有口径**（AGENTS.md）：
+- 内核基线：`python -m pytest mbdsdr_ai/tests -q`（约 1168 项，含诚实 skip）
+- 根套件：`scripts/ci_pytest_groups.py` 按 A/B 两组跑，不要直接整包喂 pytest
+- 本次改动的目标套件：`tests/test_device_gateway.py`（50）+
+  `tests/test_desktop_device_gateway_dialog.py`（18）+ `test_sky_panorama`（10）+
+  `test_ai_tool_selection_semantics`（4）+ `test_spectrum_frame_meta`（7）
+  → **89 passed**；移动端 613、头显 225 见 §309/§310
+
+**结论**：以后先跑目标套件；要全量就按 A/B 脚本分组跑，并接受长时间。
