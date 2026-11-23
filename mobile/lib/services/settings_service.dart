@@ -146,6 +146,7 @@ const String _kDeviceGatewayPort = 'deviceGatewayPort';
 const String _kDeviceGatewayRole = 'deviceGatewayRole';
 const String _kDeviceGatewayName = 'deviceGatewayName';
 const String _kDeviceGatewayToken = 'deviceGatewayToken';
+const String _kDeviceGatewayDeviceId = 'deviceGatewayDeviceId';
 const String _kApiKey = 'apiKey';
 const String _kApiModel = 'apiModel';
 const String _kStationLat = 'stationLat';
@@ -231,6 +232,7 @@ class SettingsService extends ChangeNotifier {
   String _deviceGatewayRole = kDefaultDeviceGatewayRole;
   String _deviceGatewayName = '';
   String _deviceGatewayToken = '';
+  String _deviceGatewayDeviceId = '';
   String _apiKey = '';
   String _apiModel = kDefaultApiModel;
   double? _stationLat;
@@ -322,8 +324,23 @@ class SettingsService extends ChangeNotifier {
     _deviceGatewayToken = value.trim();
     if (_deviceGatewayToken.isEmpty) {
       unawaited(_secure.delete(_kDeviceGatewayToken));
+      // 解除配对时一并清掉设备 id，避免用旧 id 上报位姿。
+      _deviceGatewayDeviceId = '';
+      unawaited(_kv.remove(_kDeviceGatewayDeviceId));
     } else {
       unawaited(_secure.set(_kDeviceGatewayToken, _deviceGatewayToken));
+    }
+    notifyListeners();
+  }
+
+  /// 配对回执里的设备 id（`POST /pose` 的 `source` 必须等于它）。
+  String get deviceGatewayDeviceId => _deviceGatewayDeviceId;
+  set deviceGatewayDeviceId(String value) {
+    _deviceGatewayDeviceId = value.trim();
+    if (_deviceGatewayDeviceId.isEmpty) {
+      unawaited(_kv.remove(_kDeviceGatewayDeviceId));
+    } else {
+      unawaited(_kv.setString(_kDeviceGatewayDeviceId, _deviceGatewayDeviceId));
     }
     notifyListeners();
   }
@@ -679,6 +696,7 @@ class SettingsService extends ChangeNotifier {
         : kDefaultDeviceGatewayRole;
     _deviceGatewayName = _kv.getString(_kDeviceGatewayName) ?? '';
     _deviceGatewayToken = await _secure.get(_kDeviceGatewayToken) ?? '';
+    _deviceGatewayDeviceId = _kv.getString(_kDeviceGatewayDeviceId) ?? '';
     _apiModel = _kv.getString(_kApiModel) ?? kDefaultApiModel;
     _stationLat = _kv.getDouble(_kStationLat);
     _stationLon = _kv.getDouble(_kStationLon);

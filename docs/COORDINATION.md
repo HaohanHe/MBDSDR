@@ -2766,6 +2766,20 @@ python scripts/audit_unclaimed_changes.py --all  # 连有 claim 的也列出（�
 | `.trae/specs/mbdsdr-system-lifecycle/checklist.md` | 多机线/42（§262 Task 219） | 2026-11-24 00:40 | 本笔 |
 | `docs/PRD-现状对照.md` | 多机线/42（§262 P1-11 补头显客户端） | 2026-11-24 00:40 | 本笔 |
 | `docs/COORDINATION.md` | 多机线/42（§262 记录 + §6.1） | 2026-11-24 00:40 | 本笔 |
+| `mobile/lib/services/pose_reporter.dart` | 多机线/42（§263 手机位姿上报器） | 2026-11-24 01:10 | 本笔 |
+| `mobile/lib/services/settings_service.dart` | 多机线/42（§263 device id 持久化/解除即清） | 2026-11-24 01:10 | 本笔 |
+| `mobile/lib/pages/pointing_page.dart` | 多机线/42（§263 上报位姿条） | 2026-11-24 01:10 | 本笔 |
+| `mobile/lib/pages/sky_page.dart` | 多机线/42（§263 reporter 透传两处指天入口） | 2026-11-24 01:10 | 本笔 |
+| `mobile/lib/app/home_shell.dart` | 多机线/42（§263 生产路径注入 reporter） | 2026-11-24 01:10 | 本笔 |
+| `mobile/test/pose_reporter_test.dart` | 多机线/42（§263 上报器 9 条用例） | 2026-11-24 01:10 | 本笔 |
+| `mobile/test/settings_service_test.dart` | 多机线/42（§263 device id 往返/清除） | 2026-11-24 01:10 | 本笔 |
+| `mobile/test/settings_page_gateway_test.dart` | 多机线/42（§263 配对回执 id 落盘） | 2026-11-24 01:10 | 本笔 |
+| `.trae/specs/multi-device-interconnect/tasks.md` | 多机线/42（§263 M3.1 勾选） | 2026-11-24 01:10 | 本笔 |
+| `.trae/specs/multi-device-interconnect/checklist.md` | 多机线/42（§263 上报项勾选） | 2026-11-24 01:10 | 本笔 |
+| `.trae/specs/mbdsdr-system-lifecycle/tasks.md` | 多机线/42（§263 Task 220） | 2026-11-24 01:10 | 本笔 |
+| `.trae/specs/mbdsdr-system-lifecycle/checklist.md` | 多机线/42（§263 Task 220） | 2026-11-24 01:10 | 本笔 |
+| `docs/PRD-现状对照.md` | 多机线/42（§263 P1-11 补手机上报） | 2026-11-24 01:10 | 本笔 |
+| `docs/COORDINATION.md` | 多机线/42（§263 记录 + §6.1） | 2026-11-24 01:10 | 本笔 |
 
 > 上表各行均由 `claim` 台账推导：owner 原文与 `acquired_at` 直接取自台账，
 > 目的优先用台账里的 `claim_reason`，没有就如实写「未声明」，不补编。时间列只是
@@ -12790,6 +12804,42 @@ PRD §8 冲刺序列 P1「天文通式观星指数」。本轮只做**有可信�
 - 四窗 UI 尚未接网关；`/passes` 增量端点未实现；未在 PICO 真机上验证。
 - README 仍把默认行为写成「只读 bundle、不联网」——客户端只是数据层，
   不改变当前默认联网策略。
+
+## 263. M3.1：手机指天视图真实上报位姿（2026-11-23）
+
+**依据**：`multi-device-interconnect` M3.1——网关与客户端都已备，但手机端
+还没有把真实传感器朝向变成 `sky-pose/1` 的入口；两台手机挂望远镜时，
+lens/eyepiece 必须能各自把「我现在指着哪」发出去。
+
+**做了什么**
+- 新 `mobile/lib/services/pose_reporter.dart`：
+  - 可用性门槛 = 已配对 + 角色为 lens/eyepiece + 配对拿到 device id + 有桌面主机；
+    每一条不满足都给具体原因（未配对/角色只读/缺设备 id/缺主机）。
+  - `report()` 校验航向与俯仰非空、俯仰在 ±90°；方位归一 [0,360)；
+    精度参数夹到 [1,30]（缺省 10°，明确是保守估计而非标定值）；
+    `source` 用配对回执里的 device id，token 走 Bearer。
+  - 客户端工厂可注入，单测完全离线。
+- `SettingsService`：新增 `deviceGatewayDeviceId`（普通 KV，非敏感）；
+  配对成功时从 `/pair` 回执的 `device.id` 写入；清空 token 时一并清除，
+  避免用旧 id 上报。
+- `PointingPage`：底部新增「上报位姿到电脑」条——不可用时按钮禁用并显示
+  具体原因；点击把「原始航向 + 手动对齐」的有效方位、俯仰、横滚、观测波动
+  （样本不足时缺省 10°）发出，成功/失败都写在同一行。
+- `SkyPage` / `HomeShell`：把 `PoseReporter` 透传给主指天视图和「捕获后」
+  打开的指天视图；未配对时 `HomeShell` 仍会构造 reporter，但按钮会禁用并
+  说明原因（不会把普通手持机当镜头用）。
+
+**验证**
+- `flutter test test/pose_reporter_test.dart` → **9 passed**（可用性四类原因、
+  解除配对清 id、载荷 az 归一/alt/roll/精度/时刻/来源、缺航向/缺俯仰/越界
+  本地拒发、精度夹取、403 透传、指天视图按钮成功上报与只读禁用）。
+- `flutter test` 全量 → **600 passed / 0 failed**。
+- `flutter analyze` 改动文件：无新增 warning/info（其余为仓库既有 material 弃用提示）。
+
+**诚实边界**
+- 精度为「观测波动估计」或保守 10°，不是标定后的 1σ；罗盘需手机端现场校准。
+- 只有手动单次上报，未做自动连续上报；真机配对/上报尚未验证。
+- 目镜识别结果单列（M3.3）与头显四窗接线（M4.1）仍未做。
 
 
 

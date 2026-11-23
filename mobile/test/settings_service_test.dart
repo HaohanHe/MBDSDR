@@ -517,10 +517,12 @@ void main() {
       s.deviceGatewayRole = 'eyepiece';
       s.deviceGatewayName = ' 目镜机 ';
       s.deviceGatewayToken = 'tok-secret';
+      s.deviceGatewayDeviceId = 'dev-eye-1';
 
       expect(kv.data['deviceGatewayPort'], 9000);
       expect(kv.data['deviceGatewayRole'], 'eyepiece');
       expect(kv.data['deviceGatewayName'], '目镜机');
+      expect(kv.data['deviceGatewayDeviceId'], 'dev-eye-1');
       expect(kv.data.containsKey('deviceGatewayToken'), isFalse,
           reason: '令牌绝不进普通 KV');
       expect(secure.data['deviceGatewayToken'], 'tok-secret');
@@ -531,6 +533,7 @@ void main() {
       expect(s2.deviceGatewayRole, 'eyepiece');
       expect(s2.deviceGatewayName, '目镜机');
       expect(s2.deviceGatewayToken, 'tok-secret');
+      expect(s2.deviceGatewayDeviceId, 'dev-eye-1');
       expect(s2.deviceGatewayPaired, isTrue);
     });
 
@@ -553,11 +556,16 @@ void main() {
       final SettingsService s = SettingsService(kv: kv, secure: secure);
       await s.load();
       s.deviceGatewayToken = 'tok-secret';
+      s.deviceGatewayDeviceId = 'dev-1';
       expect(secure.data['deviceGatewayToken'], 'tok-secret');
+      expect(kv.data['deviceGatewayDeviceId'], 'dev-1');
 
       s.deviceGatewayToken = '';
       expect(s.deviceGatewayPaired, isFalse);
       expect(secure.data.containsKey('deviceGatewayToken'), isFalse);
+      // 解除配对同时清设备 id，避免用旧 id 上报位姿。
+      expect(s.deviceGatewayDeviceId, '');
+      expect(kv.data.containsKey('deviceGatewayDeviceId'), isFalse);
 
       final SettingsService s2 = SettingsService(kv: kv, secure: secure);
       await s2.load();

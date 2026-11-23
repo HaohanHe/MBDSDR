@@ -16,6 +16,7 @@ import '../pages/sky_page.dart';
 import '../pages/spectrum_page.dart';
 import '../services/ai_client.dart';
 import '../services/chat_session_store.dart';
+import '../services/pose_reporter.dart';
 import '../services/radio_controller.dart';
 import '../services/recording_store.dart';
 import '../services/sat_passes_provider.dart';
@@ -266,7 +267,11 @@ class _HomeShellState extends State<HomeShell> {
               onOpenSettings: _openSettings,
             ),
             widget.skyPageBuilder?.call(station, radio) ??
-                SkyPage(manualStation: station, radio: radio),
+                SkyPage(
+                  manualStation: station,
+                  radio: radio,
+                  poseReporter: PoseReporter(settings: settings),
+                ),
             ChatPage(
               isConfigured: settings.apiKey.isNotEmpty,
               // 每次发送时新建 client：闭包实时读取当前 aiManualMode，

@@ -269,8 +269,12 @@ class _SettingsPageState extends State<SettingsPage> {
         role: s.deviceGatewayRole,
       );
       final Object? token = out['token'];
+      final Object? device = out['device'];
+      final String deviceId =
+          device is Map ? '${device['id'] ?? ''}'.trim() : '';
       s.deviceGatewayName = name;
       s.deviceGatewayToken = token is String ? token : '';
+      s.deviceGatewayDeviceId = deviceId;
       _gwCodeCtrl.clear();
       if (!mounted) return;
       _toast(l10n.toastGatewayPaired);

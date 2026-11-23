@@ -34,7 +34,9 @@ import '../astro/sky_assets.dart';
 import '../astro/sky_projection.dart';
 import '../astro/sky_transform.dart';
 import '../astro/star_names.dart';
+import '../services/device_gateway_client.dart';
 import '../services/orientation_service.dart';
+import '../services/pose_reporter.dart';
 import '../widgets/empty_state.dart';
 
 /// 三档视场（度，按短边）：广角找星 / 常规 / 望远镜视场。
@@ -124,6 +126,7 @@ class PointingPage extends StatefulWidget {
     this.clock,
     this.minFrame = const Duration(milliseconds: 70),
     this.sensorTimeout = const Duration(milliseconds: 1500),
+    this.poseReporter,
   });
 
   final SkySite? site;
@@ -139,6 +142,9 @@ class PointingPage extends StatefulWidget {
 
   /// 多久没收到任何姿态事件就判定「传感器不可用」并显示真实原因。
   final Duration sensorTimeout;
+
+  /// 已配对时的位姿上报器（lens/eyepiece）。null = 不显示上报控件。
+  final PoseReporter? poseReporter;
 
   @override
   State<PointingPage> createState() => _PointingPageState();
@@ -222,6 +228,45 @@ class _PointingPageState extends State<PointingPage> {
       if (next < -180.0) next += 360.0;
       _manualOffsetDeg = next;
     });
+  }
+
+  /// 上报中标志与最近一次结果（成功/失败都如实写在这一行，不弹假成功）。
+  bool _poseBusy = false;
+  String? _poseNote;
+
+  Future<void> _reportPose() async {
+    final PoseReporter? reporter = widget.poseReporter;
+    if (reporter == null || _poseBusy) return;
+    final double? heading = _orientation.heading;
+    final double? pitch = _orientation.pitch;
+    if (heading == null || pitch == null) {
+      setState(() => _poseNote =
+          '上报失败：缺少${heading == null ? '罗盘航向' : 'IMU 俯仰角'}，不用 0° 顶替');
+      return;
+    }
+    setState(() {
+      _poseBusy = true;
+      _poseNote = null;
+    });
+    try {
+      // 用「原始航向 + 手动对齐」后的有效朝向，和屏幕上看到的一致。
+      final double az = _effectiveHeading(heading);
+      final double? spread = headingSpreadDeg(_recentHeadings);
+      await reporter.report(
+        headingDeg: az,
+        pitchDeg: pitch,
+        rollDeg: _orientation.roll,
+        accuracyDeg: spread,
+      );
+      if (!mounted) return;
+      setState(() => _poseNote =
+          '已上报位姿：方位 ${az.toStringAsFixed(1)}° 高度 ${pitch.toStringAsFixed(1)}°');
+    } on DeviceGatewayException catch (e) {
+      if (!mounted) return;
+      setState(() => _poseNote = '上报失败：${e.message}');
+    } finally {
+      if (mounted) setState(() => _poseBusy = false);
+    }
   }
 
   void _resetManualOffset() => setState(() => _manualOffsetDeg = 0);
@@ -458,6 +503,16 @@ class _PointingPageState extends State<PointingPage> {
                     onNudge: _nudgeHeading,
                     onReset: _resetManualOffset,
                   ),
+                  if (widget.poseReporter != null) ...<Widget>[
+                    const SizedBox(height: AppTokens.spacingS),
+                    _PoseReportBar(
+                      available: widget.poseReporter!.available,
+                      reason: widget.poseReporter!.unavailableReason,
+                      busy: _poseBusy,
+                      note: _poseNote,
+                      onReport: _reportPose,
+                    ),
+                  ],
                 ],
               ),
             ),
@@ -666,6 +721,83 @@ class _AlignControls extends StatelessWidget {
             onPressed: onReset,
             child: const Text('复位', style: AppTokens.auxiliary),
           ),
+        ],
+      ),
+    );
+  }
+}
+
+/// 位姿上报条：按钮 + 不可用原因 + 最近一次结果。
+///
+/// 不可用时按钮禁用并显示具体原因（未配对/角色只读/缺设备 id/缺主机），
+/// 不用一句笼统的「不可用」糊过去。
+class _PoseReportBar extends StatelessWidget {
+  const _PoseReportBar({
+    required this.available,
+    required this.reason,
+    required this.busy,
+    required this.note,
+    required this.onReport,
+  });
+
+  final bool available;
+  final String? reason;
+  final bool busy;
+  final String? note;
+  final VoidCallback onReport;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(
+        horizontal: AppTokens.spacingM,
+        vertical: AppTokens.spacingS,
+      ),
+      decoration: BoxDecoration(
+        color: AppTokens.card3,
+        borderRadius: BorderRadius.circular(AppTokens.radiusCard),
+        border: Border.all(color: AppTokens.cardEdge),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: <Widget>[
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton.icon(
+              key: const Key('pointing-report-pose'),
+              onPressed: (available && !busy) ? onReport : null,
+              icon: busy
+                  ? const SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.upload_outlined, size: 18),
+              label: Text(busy ? '上报中…' : '上报位姿到电脑'),
+            ),
+          ),
+          if (!available && reason != null)
+            Padding(
+              padding: const EdgeInsets.only(top: AppTokens.spacingS),
+              child: Text(
+                reason!,
+                textAlign: TextAlign.center,
+                style: AppTokens.auxiliary.copyWith(color: AppTokens.warning),
+              ),
+            ),
+          if (note != null)
+            Padding(
+              padding: const EdgeInsets.only(top: AppTokens.spacingS),
+              child: Text(
+                note!,
+                textAlign: TextAlign.center,
+                style: AppTokens.auxiliary.copyWith(
+                  color: note!.startsWith('上报失败')
+                      ? AppTokens.warning
+                      : AppTokens.textPrimary,
+                ),
+              ),
+            ),
         ],
       ),
     );

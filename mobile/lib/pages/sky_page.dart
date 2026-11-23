@@ -20,6 +20,7 @@ import 'package:mbdsdr_mobile/pages/spacetime_status.dart';
 import 'package:mbdsdr_mobile/services/doppler_step_limiter.dart';
 import 'package:mbdsdr_mobile/services/location_service.dart';
 import 'package:mbdsdr_mobile/services/orientation_service.dart';
+import 'package:mbdsdr_mobile/services/pose_reporter.dart';
 import 'package:mbdsdr_mobile/services/radio_controller.dart';
 import 'package:mbdsdr_mobile/services/satellite_capture.dart';
 import 'package:mbdsdr_mobile/services/tle_client.dart';
@@ -476,6 +477,7 @@ class SkyPage extends StatefulWidget {
     @visibleForTesting SkyController? controller,
     this.radio,
     @visibleForTesting DateTime Function()? clock,
+    this.poseReporter,
   })  : _tleClient = tleClient,
         _locationService = locationService,
         _orientationService = orientationService,
@@ -493,6 +495,9 @@ class SkyPage extends StatefulWidget {
   /// 真实/测试注入的射频接口：用于过境「捕获」。生产由外壳传入。
   final RadioApi? radio;
   final DateTime Function()? _clock;
+
+  /// 已配对手机的位姿上报器；透传给指天视图。null = 不显示上报控件。
+  final PoseReporter? poseReporter;
 
   @override
   State<SkyPage> createState() => _SkyPageState();
@@ -586,6 +591,7 @@ class _SkyPageState extends State<SkyPage> {
           targetElDeg: v?.el,
           targetLabel: v?.name,
           clock: widget._clock,
+          poseReporter: widget.poseReporter,
         ),
       ),
     );
@@ -688,6 +694,7 @@ class _SkyPageState extends State<SkyPage> {
               passes: _c.passes,
               controller: _c,
               clock: widget._clock,
+              poseReporter: widget.poseReporter,
               embedded: scrollable,
             ),
           ),
@@ -1202,6 +1209,7 @@ class _PassList extends StatelessWidget {
     required this.passes,
     required this.controller,
     this.clock,
+    this.poseReporter,
     this.embedded = false,
   });
   final List<Pass> passes;
@@ -1209,6 +1217,9 @@ class _PassList extends StatelessWidget {
 
   /// 指天视图的时间源；与天空页共用，测试可注入。
   final DateTime Function()? clock;
+
+  /// 位姿上报器；捕获后打开的指天视图同样能上报。
+  final PoseReporter? poseReporter;
 
   /// 嵌在外层整页滚动里时为 true：列表不自带滚动，整块展开。
   /// 否则内层 ListView 会吃掉竖屏下滑手势（用户回不到上面的雷达）。
@@ -1310,6 +1321,7 @@ class _PassList extends StatelessWidget {
           targetElDeg: target.el,
           targetLabel: p.name,
           clock: clock,
+          poseReporter: poseReporter,
         ),
       ),
     );

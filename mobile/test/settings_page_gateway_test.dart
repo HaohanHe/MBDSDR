@@ -75,7 +75,8 @@ class _FakeGateway {
     switch (url.path) {
       case '/pair':
         return const GatewayHttpResponse(
-            200, '{"token":"tok-1","device":{"name":"手机A","role":"lens"}}');
+            200,
+            '{"token":"tok-1","device":{"id":"dev-lens","name":"手机A","role":"lens"}}');
       case '/panorama':
         return const GatewayHttpResponse(200, jsonEncoder);
       case '/roster':
@@ -157,6 +158,7 @@ void main() {
     // token 只进安全存储；UI 变成已配对 + 角色标签。
     expect(secure.d['deviceGatewayToken'], 'tok-1');
     expect(kv.d.containsKey('deviceGatewayToken'), isFalse);
+    expect(settings.deviceGatewayDeviceId, 'dev-lens');
     expect(find.text('未配对'), findsNothing);
     expect(find.text('已配对 · 手持（只读）'), findsOneWidget);
 
